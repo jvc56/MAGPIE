@@ -101,6 +101,7 @@
             <div class="move-actions">
               <button id="play-move" class="primary">
                 Play move <kbd aria-label="Enter">↵</kbd></button
+              ><button id="analyze-move" hidden>Analyze Move</button
               ><button id="recall-tiles">Recall tiles</button
               ><button id="pass-move">Pass</button
               ><button id="exchange-move">Exchange</button
@@ -264,7 +265,6 @@
           </button>
           <div class="toolbar">
             <button id="continue-selected" hidden>Continue selected</button>
-            <button id="add-sim" hidden>Add to sim</button>
             <button id="fresh-analysis" hidden>Start fresh</button>
           </div>
           <p id="analysis-storage-warning" class="hint" role="status" hidden>Results are kept for this tab only; browser storage is unavailable.</p>
@@ -672,7 +672,7 @@
             <summary>Game options</summary>
             <div class="advanced-game-options">
               <label
-                >You play<select id="human-side">
+                >You control<select id="human-side">
                   <option value="0">Player 1</option>
                   <option value="1">Player 2</option>
                 </select></label
@@ -700,14 +700,20 @@
                 </select></label
               >
               <label
-                >Challenge rule<select id="challenge-rule">
-                  <option value="void">Void</option>
-                  <option value="single">Single</option>
-                  <option value="double">Double</option>
-                  <option value="five">5 points</option>
-                  <option value="ten">10 points</option>
+                >Challenge mode<select id="challenge-rule">
+                  <option value="void">VOID</option>
+                  <option value="penalty">PENALTY</option>
+                  <option value="single">SINGLE</option>
+                  <option value="double">DOUBLE</option>
                 </select></label
               >
+              <label id="challenge-points-label" hidden>Penalty<select id="challenge-points">
+                <option value="5">5 points</option><option value="10">10 points</option>
+              </select></label>
+              <label id="challenge-unit-label" hidden>Apply penalty<select id="challenge-unit">
+                <option value="play">Per play</option><option value="word">Per word</option>
+              </select></label>
+              <p id="challenge-help" class="muted"></p>
               <label
                 >Computer analysis<select id="bot-analysis">
                   <option value="auto">Sim / solve</option>

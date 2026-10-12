@@ -463,7 +463,7 @@ async function newGame(page, rack = "AEINRST") {
 async function playTyped(page, word, row = 7, col = 7) {
   await page.locator(`[data-row="${row}"][data-col="${col}"]`).click();
   await page.keyboard.type(word);
-  await expect(page.locator("#move-feedback")).toContainText("points", {
+  await expect(page.locator(".move-score")).toBeVisible({
     timeout: 10000,
   });
   await page.keyboard.press("Enter");
@@ -700,7 +700,7 @@ test("live preview stays separate and direct keyboard blanks survive saving", as
   await page.locator('[data-row="7"][data-col="7"]').click();
   await page.keyboard.press("Shift+O");
   await page.keyboard.type("at");
-  await expect(page.locator("#move-feedback")).toContainText("4 points");
+  await expect(page.locator(".move-score")).toHaveText("4");
   await expect(page.locator("#history-position option")).toHaveCount(1);
   await page.keyboard.press("Enter");
   await expect(page.locator("#history-position option")).toHaveCount(2);
@@ -709,7 +709,7 @@ test("live preview stays separate and direct keyboard blanks survive saving", as
   await page.locator("#rack").dispatchEvent("change");
   await page.locator('[data-row="8"][data-col="7"]').click();
   await page.keyboard.type("at");
-  await expect(page.locator("#move-feedback")).toContainText("points");
+  await expect(page.locator(".move-score")).toBeVisible();
   await page.screenshot({
     path: test.info().outputPath("move-entry-desktop.png"),
     fullPage: true,
@@ -750,7 +750,7 @@ test("desktop context hints follow hover, focus and board mode; mobile keeps con
   await page.locator('[data-row="7"][data-col="7"]').click();
   await page.keyboard.type("at");
   await expect(hint).toContainText("Enter: play");
-  await expect(page.locator("#move-feedback")).toContainText("points");
+  await expect(page.locator(".move-score")).toBeVisible();
   await page.screenshot({
     path: test.info().outputPath("context-hints-desktop.png"),
   });

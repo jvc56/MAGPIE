@@ -143,7 +143,48 @@ static void test_finished_cgp_import(void) {
   }
 }
 
+static void test_live_challenge_rules(void) {
+  if (BOARD_DIM != 15) {
+    return;
+  }
+  const char *before = "15/15/15/15/15/15/15/7AT6/15/15/15/15/15/15/15";
+  const char *after = "15/15/15/15/15/15/15/7AT6/7TE6/15/15/15/15/15/15";
+  char *record = get_formatted_string(
+      "%s#cgp %s AEINRTT/BCDFGHJ 0/0 0\n>A: AEINRTT 9H TE +8 8\n", EMPTY_GAME,
+      before);
+  char *cgp = get_formatted_string("%s AINRTXY/BCDFGHJ 8/0 0", after);
+  const int bonuses[] = {0, 0, 5, 10, 15, 30};
+  for (int rule = BROWSER_CHALLENGE_SINGLE;
+       rule <= BROWSER_CHALLENGE_TEN_PER_WORD; rule++) {
+    char *result =
+        browser_game_action(record, "CSW24", 1, "", "", "",
+                            BROWSER_GAME_LIVE_CHALLENGE, cgp, 42, 1, rule);
+    const int bonus = bonuses[rule - BROWSER_CHALLENGE_SINGLE];
+    char *expected =
+        get_formatted_string("(challenge) +%d %d", bonus, 8 + bonus);
+    assert(has_substring(result, expected));
+    free(expected);
+    if (rule == BROWSER_CHALLENGE_DOUBLE) {
+      assert(has_substring(result, ">B: BCDFGHJ - +0 0"));
+      assert(has_substring(result, " AINRTXY/BCDFGHJ 8/0 1"));
+    } else {
+      expected = get_formatted_string(" BCDFGHJ/AINRTXY 0/%d 0", 8 + bonus);
+      assert(has_substring(result, expected));
+      free(expected);
+    }
+    assert_success(result);
+  }
+  char *rejected = browser_game_action(record, "CSW24", 1, "", "", "",
+                                       BROWSER_GAME_LIVE_CHALLENGE, cgp, 42, 1,
+                                       BROWSER_CHALLENGE_VOID);
+  assert(has_substring(rejected, "No play is available"));
+  free(rejected);
+  free(cgp);
+  free(record);
+}
+
 void test_browser_game(void) {
+  test_live_challenge_rules();
   test_finished_cgp_import();
   test_cgp_start();
   test_cgp_endgame_rack_retention();

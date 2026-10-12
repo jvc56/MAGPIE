@@ -19,7 +19,7 @@ async function complete(page) {
   await expect(page.locator('#error')).toBeEmpty();
 }
 async function rows(page) {
-  return page.locator('#results tbody tr:not(.endgame-details)').evaluateAll(rows => rows.map(row => ({move:row.querySelector('button').textContent, iters:Number(row.cells[7]?.textContent)})));
+  return page.locator('#results tbody tr:not(.endgame-details)').evaluateAll(rows => rows.map(row => ({move:row.querySelector('button').textContent, iters:Number(row.querySelector('[data-column=iterations]')?.textContent)})));
 }
 
 test('explicit candidate commands do not regenerate or silently add unselected plays', () => {
@@ -55,7 +55,7 @@ test('sims survive reload, accept a board play, and continue selected or all can
   expect(original.length).toBe(3);
   await page.locator('#board [data-row="7"][data-col="7"]').click();
   await page.keyboard.type('at');
-  await page.locator('#add-sim').click();
+  await page.locator('#analyze-move').click();
   await complete(page);
   await expect(page.locator('#status')).toHaveText('Play added');
   const added = await rows(page);
@@ -68,9 +68,9 @@ test('sims survive reload, accept a board play, and continue selected or all can
   await page.locator('[data-mode=sim]').click(); await complete(page);
   let all = await rows(page);
   for (const old of selected) expect(all.find(row => row.move === old.move).iters).toBeGreaterThan(old.iters);
-  await page.locator('#results tbody input[type=checkbox]:checked').uncheck();
-  const subset = all.slice(0, 2).map(row => row.move);
-  for (const move of subset) await page.getByRole('checkbox',{name:`Continue ${move}`,exact:true}).check();
+  await expect(page.locator('#results input[type=checkbox]')).toHaveCount(0);
+  const subset = [all[0].move];
+  await page.locator('#results tbody [data-column=move] button').first().click();
   await page.locator('#continue-selected').click(); await complete(page);
   const subsetResults = await rows(page);
   for (const old of all) {

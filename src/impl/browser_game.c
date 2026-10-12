@@ -14,6 +14,7 @@
 #include "../ent/player.h"
 #include "../ent/rack.h"
 #include "../ent/validated_move.h"
+#include "../ent/words.h"
 #include "../impl/cgp.h"
 #include "../impl/config.h"
 #include "../impl/exec.h"
@@ -285,13 +286,86 @@ static char *normalize_note(const char *note) {
   return text;
 }
 
+static Game *live_challenge(Config *config, const char *cgp, int on_turn,
+                            int rule, ErrorStack *errors,
+                            StringBuilder *warnings) {
+  GameHistory *history = config_get_game_history(config);
+  const int count = game_history_get_num_played_events(history);
+  if (!count || count != game_history_get_num_events(history) ||
+      rule == BROWSER_CHALLENGE_VOID || !*cgp) {
+    error_stack_push(errors, ERROR_STATUS_CHALLENGE_NO_PREVIOUS_MOVE,
+                     string_duplicate("No play is available to challenge."));
+    return NULL;
+  }
+  const GameEvent *event = game_history_get_event(history, count - 1);
+  if (game_event_get_type(event) != GAME_EVENT_TILE_PLACEMENT_MOVE ||
+      game_event_get_player_index(event) == on_turn) {
+    error_stack_push(
+        errors, ERROR_STATUS_CHALLENGE_NO_PREVIOUS_MOVE,
+        string_duplicate("Only the opponent's last play can be challenged."));
+    return NULL;
+  }
+  const ValidatedMoves *moves = game_event_get_vms(event);
+  const bool phony = validated_moves_is_phony(moves, 0);
+  const int words =
+      formed_words_get_num_words(validated_moves_get_formed_words(moves, 0));
+  Game *game = config_get_game(config);
+  game_load_cgp(game, cgp, errors);
+  if (!error_stack_is_empty(errors)) {
+    return NULL;
+  }
+  game_set_player_on_turn_index(game, on_turn);
+  Game *live = game_duplicate(game);
+  for (int player_idx = 0; player_idx < 2; player_idx++) {
+    const Rack *actual = player_get_rack(game_get_player(live, player_idx));
+    rack_copy(game_history_player_get_last_rack(history, player_idx), actual);
+    rack_copy(game_history_player_get_rack_to_draw_before_pass_out_game_end(
+                  history, player_idx),
+              actual);
+  }
+  int bonus = 0;
+  if (rule == BROWSER_CHALLENGE_FIVE_PER_PLAY ||
+      rule == BROWSER_CHALLENGE_FIVE_PER_WORD) {
+    bonus = 5;
+  } else if (rule == BROWSER_CHALLENGE_TEN_PER_PLAY ||
+             rule == BROWSER_CHALLENGE_TEN_PER_WORD) {
+    bonus = 10;
+  }
+  if (rule == BROWSER_CHALLENGE_FIVE_PER_WORD ||
+      rule == BROWSER_CHALLENGE_TEN_PER_WORD) {
+    bonus *= words;
+  }
+  char *command = get_formatted_string("challenge %d", bonus);
+  run_game_command(config, errors, command, warnings);
+  free(command);
+  if (!phony && rule == BROWSER_CHALLENGE_DOUBLE &&
+      error_stack_is_empty(errors)) {
+    Move pass;
+    move_set_as_pass(&pass);
+    play_move(&pass, live, NULL);
+    char *warning = config_commit_move(config, "pass", NULL, errors);
+    free(warning);
+  }
+  if (phony) {
+    game_destroy(live);
+    live = game_duplicate(config_get_game(config));
+  } else {
+    for (int player_idx = 0; player_idx < 2; player_idx++) {
+      player_set_score(game_get_player(live, player_idx),
+                       player_get_score(game_get_player(config_get_game(config),
+                                                        player_idx)));
+    }
+  }
+  return live;
+}
+
 // Each edit is transactional: adopt only after validation/confirmation.
 char *browser_game_action(const char *text, const char *lexicon,
                           const int event_index, const char *rack,
                           const char *move, const char *note,
                           const BrowserGameAction action,
                           const char *current_cgp, const unsigned int seed,
-                          const int current_player, const int allow_phonies) {
+                          const int current_player, const int challenge_rule) {
   int event_count = 0;
   for (const char *cursor = text; *cursor; cursor++) {
     if (*cursor == '>' && (cursor == text || cursor[-1] == '\n')) {
@@ -299,7 +373,11 @@ char *browser_game_action(const char *text, const char *lexicon,
     }
   }
   if (strlen(text) > 1024UL * 1024 || event_count > 1000 ||
-      action < BROWSER_GAME_IMPORT || action > BROWSER_GAME_LIVE_MOVE ||
+      action < BROWSER_GAME_IMPORT || action > BROWSER_GAME_LIVE_CHALLENGE ||
+      (action == BROWSER_GAME_LIVE_CHALLENGE &&
+       (current_player < 0 || current_player > 1)) ||
+      challenge_rule < BROWSER_CHALLENGE_VOID ||
+      challenge_rule > BROWSER_CHALLENGE_TEN_PER_WORD ||
       !(strings_equal(lexicon, "CSW24") || strings_equal(lexicon, "NWL23")) ||
       ((action == BROWSER_GAME_COMMIT || action == BROWSER_GAME_LIVE_MOVE) &&
        !valid_rack(rack))) {
@@ -384,10 +462,11 @@ char *browser_game_action(const char *text, const char *lexicon,
           // opponent tiles. Sampled opponent tiles never enter the record.
           draw_to_full_rack(live_game, 1 - on_turn);
         }
-        ValidatedMoves *moves = validated_moves_create(
-            live_game, on_turn, move,
-            action == BROWSER_GAME_COMMIT || allow_phonies != 0, true,
-            error_stack);
+        ValidatedMoves *moves =
+            validated_moves_create(live_game, on_turn, move,
+                                   action == BROWSER_GAME_COMMIT ||
+                                       challenge_rule != BROWSER_CHALLENGE_VOID,
+                                   true, error_stack);
         if (error_stack_is_empty(error_stack)) {
           live_phony = validated_moves_is_phony(moves, 0);
           if (live_phony && action == BROWSER_GAME_LIVE_MOVE) {
@@ -433,9 +512,11 @@ char *browser_game_action(const char *text, const char *lexicon,
           for (int player_index = 0; player_index < 2; player_index++) {
             game_history_player_reset_last_rack(config_get_game_history(config),
                                                 player_index);
-            rack_reset(
+            // A zero distribution size marks this override as absent.
+            memset(
                 game_history_player_get_rack_to_draw_before_pass_out_game_end(
-                    config_get_game_history(config), player_index));
+                    config_get_game_history(config), player_index),
+                0, sizeof(Rack));
           }
         }
         // Replay must use the actual ending racks, not a random draw from
@@ -480,6 +561,10 @@ char *browser_game_action(const char *text, const char *lexicon,
       }
     } else if (action == BROWSER_GAME_CHALLENGE) {
       run_game_command(config, error_stack, "challenge", warnings);
+    } else if (action == BROWSER_GAME_LIVE_CHALLENGE &&
+               error_stack_is_empty(error_stack)) {
+      live_game = live_challenge(config, current_cgp, current_player,
+                                 challenge_rule, error_stack, warnings);
     }
     if ((action == BROWSER_GAME_COMMIT || action == BROWSER_GAME_NOTE) &&
         error_stack_is_empty(error_stack) &&

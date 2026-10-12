@@ -138,9 +138,15 @@ test("final adjustments stay in the last turn and scores align in both player co
   await expect(finalRow.locator(`button[data-event-index="${events - 1}"] .history-cumulative`)).toHaveText('358');
   await expect(finalRow.locator('button')).toHaveCount(4);
   const count = await rows.count();
+  let turn = 1;
   for (let index = 0; index < events - 2; index++) {
     const label = await page.locator(`#history-position option[value="${index}"]`).textContent();
-    expect(label.startsWith(`${index + 1}. `)).toBe(true);
+    if (label.startsWith("Challenge result")) {
+      expect(label).toContain(` · ${turn - 1}. `);
+    } else {
+      expect(label.startsWith(`${turn}. `)).toBe(true);
+      turn++;
+    }
   }
   await expect(page.locator(`#history-position option[value="${events - 2}"]`)).toContainText('Final scoring');
   await expect(page.locator('#history-position option').last()).toHaveText('Game over');

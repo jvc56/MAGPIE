@@ -1,3 +1,4 @@
+import { moveTiles } from "./move-tiles.mjs";
 import { computerSearchPlan } from "./computer-time.mjs";
 import { TILE_ORDERS, DEFAULT_TILE_ORDER, tileAlphabet, sortTiles, formatTileGroups } from "./tile-order.mjs";
 import { GameAction } from "./game-actions.mjs";
@@ -60,6 +61,7 @@ let hoveredEntry = null, hoverEntryReady = false;
 let draftTiles = [],
   rackChoice = null,
   gameUndo = [];
+let draftScore = null;
 let previewTimer,
   previewGeneration = 0,
   previewPromise = Promise.resolve();
@@ -109,7 +111,6 @@ function sortCurrentRack(index = 0) {
   rackChoice = null;
 }
 
-let simSelection = new Set();
 let cacheWrites = Promise.resolve();
 const privateAnalysisKeys = new Set();
 function analysisPosition() {
@@ -157,6 +158,8 @@ function liveAction(action, move = "") {
     move,
     action,
     challenge: session?.challenge || "void",
+    challengePoints: session?.challengePoints ?? 5,
+    challengeUnit: session?.challengeUnit || "play",
     cgp: physicalCGP(),
     seed: randomSeed(),
     onTurn: position.onTurn,
@@ -215,7 +218,14 @@ function message(text) {
 function error(text) {
   if (/\(error 149\).*phony/i.test(text)) text = `This play contains a word outside ${position.lexicon}.`;
   $("error").hidden = !text;
-  $("error").textContent = text;
+  const match = text.match(/^(Play )([A-O]\d+|\d+[A-O]) ([A-Za-z().?]+)( contains at least one phony word)$/);
+  if (match) {
+    const gap = document.createElement("span");
+    gap.className = "move-message-gap";
+    gap.textContent = " ";
+    $("error").replaceChildren(match[1], moveTiles(`${match[2]} ${match[3]}`, position.onTurn, position), gap, match[4].trimStart());
+  }
+  else $("error").textContent = text;
 }
 function readSettings() {
   const settings = {};
@@ -377,7 +387,6 @@ function setRawAnalysis(text) {
   $("raw").textContent = concealComputerAnalysis() ? "" : text;
 }
 function clearResults() {
-  simSelection.clear();
   pegProgress = null;
   continuationPosition = null;
   analysisMeta = "";
@@ -418,6 +427,31 @@ function setPosition(next, fromHistory = false) {
   restoreAnalysis();
   renderSession();
 }
+function renderMoveScore() {
+  document.querySelectorAll(".move-score").forEach(node => node.remove());
+  document.querySelectorAll(".has-move-score").forEach(node => node.classList.remove("has-move-score"));
+  const candidate = !draftTiles.length && results.find(row => row.move === selectedMove);
+  const score = draftTiles.length ? draftScore : candidate?.score;
+  if (!Number.isFinite(score) || continuationPosition) return;
+  const tiles = draftTiles.length ? draftTiles : previewMove(position, selectedMove);
+  if (!tiles.length) return;
+  const down = draftTiles.length ? vertical : /^[A-O]/.test(selectedMove);
+  const ordered = [...tiles].sort((a, b) => down ? a.row - b.row : a.col - b.col);
+  const first = ordered[0];
+  // Anchor before the word, including any leading playthrough. The label
+  // gutter supplies a square even when the word starts at the board edge.
+  let row = first.row - (down ? 1 : 0), col = first.col - (down ? 0 : 1);
+  while (position.board[row]?.[col]) { row -= down ? 1 : 0; col -= down ? 0 : 1; }
+  const spot = {row, col};
+  const square = document.querySelector(`#board [data-row="${spot.row}"][data-col="${spot.col}"]`);
+  if (!square) return;
+  square.classList.add("has-move-score");
+  const badge = document.createElement("span");
+  badge.className = `move-score${String(score).length >= 3 ? " move-score-wide" : ""}`;
+  badge.textContent = score;
+  badge.setAttribute("aria-label", `${score} points`);
+  square.append(badge);
+}
 function renderBoard() {
   tileDrag?.cancel();
   const drawPosition = continuationPosition || position;
@@ -445,6 +479,8 @@ function renderBoard() {
       if (row === -1 || col === -1) {
         const label = document.createElement("span");
         label.className = "coordinate";
+        label.dataset.row = row;
+        label.dataset.col = col;
         label.textContent =
           row === -1
             ? col === -1
@@ -514,6 +550,7 @@ function renderBoard() {
     fragment.append(rowElement);
   }
   board.replaceChildren(fragment);
+  renderMoveScore();
   renderContextHint();
 }
 function terminalPosition() {
@@ -620,18 +657,9 @@ function renderPosition() {
 const format = (n, decimals = 2) =>
   Number.isFinite(n) ? n.toFixed(decimals) : "—";
 function updateSimSelection() {
-  const count = results.filter(row => simSelection.has(moveIdentity(row.move))).length;
-  $("continue-selected").hidden = mode !== "sim" || !count;
-  $("continue-selected").textContent = `Continue selected (${count})`;
+  $("continue-selected").hidden = mode !== "sim" || !selectedMove;
+  $("continue-selected").textContent = "Continue selected play";
   $("continue-selected").disabled = busy;
-  const all = $("select-sim-all");
-  if (all) {
-    all.checked = count === results.length;
-    all.indeterminate = count > 0 && count < results.length;
-  }
-  document.querySelectorAll("[data-sim-move]").forEach(checkbox => {
-    checkbox.checked = simSelection.has(checkbox.dataset.simMove);
-  });
 }
 function concealComputerAnalysis() {
   return hiddenLiveGame() && position.onTurn !== session.human && !$("show-live-analysis").checked;
@@ -658,7 +686,6 @@ function renderResults() {
     ["rank", "#"],
     ["move", "Play"],
   ];
-  if (mode === "sim" && results.length) columns.unshift(["simulate", ""]);
   if (mode === "kibitz")
     columns.push(
       ["leave", "Leave"],
@@ -706,30 +733,15 @@ function renderResults() {
     : simButton.title;
   $("fresh-analysis").hidden = !results.length || mode === "kibitz";
   $("fresh-analysis").disabled = busy;
-  const checkedMoves = results.filter(row => simSelection.has(moveIdentity(row.move)));
   updateSimSelection();
-  $("add-sim").hidden = searchMode() !== "sim" || (!draftTiles.length && !selectedMove) || botRunning;
-  $("add-sim").disabled = busy || (isLive() && (!humanTurn() || session.paused));
+  $("analyze-move").hidden = !recordedGame || !!isLive();
+  $("analyze-move").disabled = busy || (!draftTiles.length && !selectedMove);
   const header = document.createElement("tr");
   for (const [key, label] of columns) {
     const th = document.createElement("th");
     th.dataset.column = key;
     th.scope = "col";
     th.textContent = label;
-    if (key === "simulate") {
-      const checkbox = document.createElement("input");
-      checkbox.type = "checkbox";
-      checkbox.id = "select-sim-all";
-      checkbox.setAttribute("aria-label", "Select all simulation plays");
-      checkbox.checked = checkedMoves.length === results.length;
-      checkbox.indeterminate = checkedMoves.length > 0 && checkedMoves.length < results.length;
-      checkbox.disabled = busy;
-      checkbox.addEventListener("change", () => {
-        simSelection = new Set(checkbox.checked ? results.map(row => moveIdentity(row.move)) : []);
-        updateSimSelection();
-      });
-      th.append(checkbox);
-    }
     header.append(th);
   }
   $("results").tHead.replaceChildren(header);
@@ -753,23 +765,9 @@ function renderResults() {
     for (const [key] of columns) {
       const td = document.createElement("td");
       td.dataset.column = key;
-      if (key === "simulate") {
-        const checkbox = document.createElement("input");
-        checkbox.type = "checkbox";
-        checkbox.dataset.simMove = moveIdentity(row.move);
-        checkbox.setAttribute("aria-label", `Continue ${displayMove(row.move)}`);
-        checkbox.checked = simSelection.has(moveIdentity(row.move));
-        checkbox.disabled = busy;
-        checkbox.addEventListener("change", () => {
-          const identity = moveIdentity(row.move);
-          if (checkbox.checked) simSelection.add(identity);
-          else simSelection.delete(identity);
-          updateSimSelection();
-        });
-        td.append(checkbox);
-      } else if (key === "move") {
+      if (key === "move") {
         const button = document.createElement("button");
-        button.textContent = displayMove(row.move);
+        button.append(moveTiles(displayMove(row.move), position.onTurn, position));
         button.type = "button";
         button.setAttribute(
           "aria-pressed",
@@ -838,7 +836,7 @@ function renderResults() {
         button.className = `pv-player-${player}`;
         button.dataset.pvStep = index + 1;
         button.setAttribute("aria-pressed", String(continuationSteps === index + 1));
-        button.textContent = `${index + 1}. ${displayMove(step.move)}${step.score === null ? "" : ` · ${step.score}`}`;
+        button.append(`${index + 1}. `, moveTiles(displayMove(step.move), player), step.score === null ? "" : ` · ${step.score}`);
         button.setAttribute("aria-label", `${recordedGame?.players[player] || `Player ${player + 1}`}: ${displayMove(step.move)}${step.score === null ? "" : `, ${step.score} points`}`);
         button.dataset.contextHint = "Preview the principal variation through this move.";
         button.addEventListener("click", () => previewContinuation(steps.slice(0, index + 1).map(step => step.move)));
@@ -870,7 +868,7 @@ function renderResults() {
   $("selection").replaceChildren();
   if (row) {
     const title = document.createElement("strong");
-    title.textContent = displayMove(row.move);
+    title.append(moveTiles(displayMove(row.move), position.onTurn, position));
     $("selection").append(
       title,
       ` · ${row.leave ? `Leave ${displayTiles(row.leave)}` : "Board preview"}`,
@@ -898,7 +896,7 @@ function renderResults() {
       ];
       steps.forEach((move, index) => {
         const button = document.createElement("button");
-        button.textContent = `${index + 1}. ${displayMove(move)}`;
+        button.append(`${index + 1}. `, moveTiles(displayMove(move), (position.onTurn + index) % 2));
         button.dataset.contextHint =
           "Preview the continuation through this move.";
         button.addEventListener("click", () =>
@@ -956,13 +954,19 @@ function acceptOutput(text, command) {
   // Preparatory set/CGP/generate output must not masquerade as sim results.
   const relevant =
     mode === "kibitz"
-      ? /^generate/.test(command)
+      ? /^(generate|shmoves)/.test(command)
       : mode === "sim"
         ? /^(sim|snoprune)(?: |$)/.test(command)
         : command.startsWith(mode);
   if (!relevant) return;
   setRawAnalysis(text);
   let next = parseResults(text, mode);
+  if (mode === "kibitz") {
+    const manual = analysisCache.get(cacheKey("kibitz"))?.results.filter(row => row.manual) || [];
+    const unique = new Map([...manual, ...next].map(row => [moveIdentity(row.move), row]));
+    for (const row of manual) unique.get(moveIdentity(row.move)).manual = true;
+    next = [...unique.values()].sort((a, b) => b.equity - a.equity).map((row, index) => ({...row, rank:index + 1}));
+  }
   if (mode === "peg") {
     pegProgress = parsePegProgress(text);
     next = mergePegRows(results, next, pegProgress);
@@ -1024,6 +1028,13 @@ async function analyze(nextMode, options = {}) {
       }
     }
     let commands = analysisCommands(analyzed, nextMode, settings);
+    const manual = analysisCache.get(cacheKey("kibitz"))?.results.filter(row => row.manual) || [];
+    if (manual.length && ["kibitz", "sim"].includes(nextMode) && !settings.moves) {
+      const generate = commands.indexOf("generate");
+      if (generate >= 0) commands.splice(generate + 1, 0,
+        `addmoves ${manual.map(row => normalizeMove(row.move)).join(",")}`,
+        ...(nextMode === "kibitz" ? ["shmoves"] : []));
+    }
     commands[0] += ` -seed ${randomSeed()}`;
     const keepSelection = mode === nextMode && analysisBase?.some(row => row.move === selectedMove);
     mode = nextMode;
@@ -1328,7 +1339,8 @@ function canExportGame() {
   return !!recordedGame && (engine?.fatalError || (!busy && !hiddenLiveGame()));
 }
 function challengeTarget() {
-  if (!recordedGame || !historyIndex || session) return "";
+  if (!recordedGame || !historyIndex) return "";
+  if (session && (!isLive() || session.challenge === "void" || !humanTurn() || session.paused)) return "";
   const line = recordedGame.gcg.split(/\r?\n/)
     .filter(line => line.startsWith(">"))[historyIndex - 1];
   if (!line) return "";
@@ -1339,7 +1351,8 @@ function renderHistory() {
   const target = challengeTarget();
   $("challenge-move").hidden = !target;
   $("challenge-move").disabled = busy || !target;
-  $("challenge-move").textContent = target ? `Challenge ${target}` : "Challenge";
+  $("challenge-move").replaceChildren("Challenge");
+  if (target) $("challenge-move").append(" ", moveTiles(target, 1 - position.onTurn, restorePosition(recordedGame.positions[historyIndex - 1])));
   $("game-history").hidden = !recordedGame;
   $("copy").disabled = busy || hiddenLiveGame();
   $("save-gcg").disabled = !canExportGame();
@@ -1642,7 +1655,7 @@ function renderHistoryOptions() {
         !($("hide-spoilers").checked && index > historyIndex);
       const turn = entries[index]?.turn ?? (entries.at(-1)?.turn ?? 0) + 1;
       const rack = historyRackLabel(next.onTurn, next.racks[0], index, entries[index]?.bingo);
-      const prefix = entries[index]?.parts.adjustment ? "Final scoring" : `${turn}.`;
+      const prefix = entries[index]?.parts.challenge ? `Challenge result · ${turn}.` : entries[index]?.parts.adjustment ? "Final scoring" : `${turn}.`;
       const label = finished ? "Game over" : `${prefix} ${recordedGame.players[next.onTurn]} · ${rack}`;
       return new Option(label, String(index));
     }),
@@ -1711,6 +1724,8 @@ function recallTiles(render = true) {
 function cancelDraftCheck() {
   clearTimeout(previewTimer);
   previewGeneration++;
+  draftScore = null;
+  renderMoveScore();
 }
 function moveErrorMessage(text) {
   const formatted = text.replace(/(\bplay:\s*)([A-O]\d+ [A-Za-z.]+|\d+[A-O] [A-Za-z.]+)/g,
@@ -1742,8 +1757,9 @@ function scheduleDraftCheck() {
       })
       .then(({ game }) => {
         if (generation !== previewGeneration || busy) return;
-        $("move-feedback").textContent =
-          `${game.score} points${game.warning.trim() && (!isLive() || session.challenge === "void") ? " · Word not in lexicon" : ""}`;
+        draftScore = game.score;
+        $("move-feedback").textContent = "";
+        renderMoveScore();
       })
       .catch((failure) => {
         if (generation === previewGeneration && !busy)
@@ -1757,9 +1773,7 @@ function renderDraft() {
   error("");
   try {
     moveNotation(position, draftTiles, vertical);
-    $("move-feedback").textContent = draftTiles.length
-      ? `${draftTiles.length} tile${draftTiles.length === 1 ? "" : "s"} placed`
-      : "";
+    $("move-feedback").textContent = "";
   } catch (failure) {
     $("move-feedback").textContent = failure.message;
   }
@@ -1896,8 +1910,23 @@ function entryKey(event) {
   }
   if (event.key === "Backspace" || event.key === "Delete") {
     event.preventDefault();
-    const last = draftTiles.pop();
-    if (last) cursor = { row: last.row, col: last.col };
+    if (event.key === "Delete") {
+      const last = draftTiles.pop();
+      if (last) cursor = {row:last.row, col:last.col};
+    } else {
+      const last = draftTiles.at(-1);
+      let previous = cursor
+        ? {row:cursor.row - (vertical ? 1 : 0), col:cursor.col - (vertical ? 0 : 1)}
+        : last && {row:last.row, col:last.col};
+      while (previous && previous.row >= 0 && previous.col >= 0 && position.board[previous.row][previous.col]) {
+        previous.row -= vertical ? 1 : 0;
+        previous.col -= vertical ? 0 : 1;
+      }
+      if (previous && previous.row >= 0 && previous.col >= 0) {
+        cursor = previous;
+        draftTiles = draftTiles.filter(tile => tile.row !== cursor.row || tile.col !== cursor.col);
+      }
+    }
     renderDraft();
     focusCursor();
     return;
@@ -1975,7 +2004,7 @@ async function submitMove(value = null, computer = false) {
       throw new Error(
         "Return to a recorded board before committing a move. Rack changes are allowed.",
       );
-    const pendingMove = value || moveNotation(position, draftTiles, vertical);
+    const pendingMove = value || (draftTiles.length ? moveNotation(position, draftTiles, vertical) : selectedMove);
     if (!pendingMove) throw new Error("Place tiles on the board first.");
     const move = normalizeMove(pendingMove);
     if (move === "pass" && !computer && !(await confirmGame(
@@ -2116,6 +2145,7 @@ $("sort-rack").addEventListener("click", () => {
   renderPosition();
 });
 $("new-game").addEventListener("click", () => {
+  restoreGameTime();
   if (isLive()) {
     chargeClock();
     session.paused = true;
@@ -2199,6 +2229,9 @@ $("new-game-form").addEventListener("submit", async (event) => {
     }
     saveGameUndo();
     session = nextSession;
+    if (nextSession) {
+      try { localStorage.setItem("magpie-game-time", $("game-time").value); } catch {}
+    }
     game.filename = "magpie-game.gcg";
     adoptGame(game, lexicon, 0);
     message(session || startingPosition?.racks[0] ? "Game ready" : "Game ready · enter the first rack");
@@ -2288,22 +2321,33 @@ async function changeRecordedEvent(action) {
     error("");
     await previewPromise;
     await engine.prepare(position.lexicon);
-    const { game } = await engine.gameAction({
+    const liveChallenge = isLive() && action === GameAction.CHALLENGE;
+    const { game } = await engine.gameAction(liveChallenge ? liveAction(GameAction.LIVE_CHALLENGE) : {
       text: recordedGame.gcg,
       lexicon: restorePosition(recordedGame.positions[0]).lexicon,
       index: historyIndex,
       note,
       action,
     });
+    if (liveChallenge) {
+      chargeClock();
+      game.positions.at(-1).clocks = [...session.remaining];
+      for (let index = 0; index <= historyIndex; index++)
+        game.positions[index] = structuredClone(recordedGame.positions[index]);
+      session.started = performance.now();
+    }
     saveGameUndo();
     game.filename = recordedGame.filename;
-    if (action === GameAction.CHALLENGE) clearFinishedGameResult(game);
+    if (action === GameAction.CHALLENGE && !liveChallenge) clearFinishedGameResult(game);
     adoptGame(game, restorePosition(recordedGame.positions[0]).lexicon);
+    if (liveChallenge && game.ended) finishSession("Game over");
     message(action === GameAction.NOTE ? "Note saved" : "Challenge recorded");
   } catch (failure) {
     error(failure.message);
   } finally {
     setBusy(false);
+    renderSession();
+    scheduleComputer();
   }
 }
 $("save-note").addEventListener("click", () => changeRecordedEvent(GameAction.NOTE));
@@ -2435,6 +2479,8 @@ function sessionOptions(kind) {
     overtime: $("overtime").value,
     penalty: $("time-penalty").value,
     challenge: $("challenge-rule").value,
+    challengePoints: +$("challenge-points").value,
+    challengeUnit: $("challenge-unit").value,
     strategy: $("bot-analysis").value,
     seconds: Math.max(1, Math.min(120, +$("bot-seconds").value || 5)),
     manageTime: $("bot-auto-time").checked,
@@ -2731,6 +2777,15 @@ $("new-game-cgp").addEventListener("input", () => {
 });
 function updateGameSetup() {
   const kind = $("game-kind").value;
+  const penalty = $("challenge-rule").value === "penalty";
+  $("challenge-points-label").hidden = !penalty;
+  $("challenge-unit-label").hidden = !penalty;
+  $("challenge-help").textContent = {
+    void: "Phony plays cannot be played.",
+    single: "A failed challenge has no penalty.",
+    double: "A failed challenge loses your turn.",
+    penalty: "A failed challenge awards the bonus to the player who made the play. Per word counts every word formed; Challenge checks all of them.",
+  }[$("challenge-rule").value];
   $("computer-setup").hidden = kind === "record";
   $("human-side").closest("label").hidden = kind !== "play";
   $("watch-delay").closest("label").hidden = kind !== "watch";
@@ -2758,14 +2813,17 @@ function updateGameSetup() {
   ].entries()) {
     const input = $(id);
     if (!input.dataset.custom) input.value = defaults[index];
+    for (const selector of ["first-player", "human-side"])
+      $(selector).options[index].textContent = input.value.trim() || `Player ${index + 1}`;
   }
 }
 for (const id of ["player-one-name", "player-two-name"]) {
   $(id).addEventListener("input", () => {
     $(id).dataset.custom = "true";
+    updateGameSetup();
   });
 }
-for (const id of ["game-time", "bot-analysis", "bot-auto-time"])
+for (const id of ["game-time", "bot-analysis", "bot-auto-time", "challenge-rule"])
   $(id).addEventListener("change", updateGameSetup);
 $("game-kind").addEventListener("change", updateGameSetup);
 $("human-side").addEventListener("change", updateGameSetup);
@@ -2775,6 +2833,13 @@ document.querySelectorAll("[data-game-kind]").forEach((button) => {
     updateGameSetup();
   });
 });
+function restoreGameTime() {
+  try {
+    const time = localStorage.getItem("magpie-game-time");
+    if ([...$("game-time").options].some(option => option.value === time)) $("game-time").value = time;
+  } catch {}
+}
+restoreGameTime();
 updateGameSetup();
 $("analysis-details").addEventListener("click", () =>
   $("analysis-details-dialog").showModal(),
@@ -2950,6 +3015,11 @@ function historyEntries() {
     const before = restorePosition(recordedGame.positions[index]);
     const parts = historyPlayParts(privateHistoryLine(line), before);
     const bingo = previewMove(before, parts.move).length === 7;
+    if (parts.move === "--" || parts.move === "(challenge)") {
+      parts.adjustment = true;
+      parts.challenge = true;
+      parts.move = parts.move === "--" ? "Withdrawn after challenge" : "Challenge bonus";
+    }
     if (!rowNumber || (!parts.adjustment && player <= previousPlayer)) rowNumber++;
     if (!turn || !parts.adjustment) turn++;
     if (!parts.adjustment) previousPlayer = player;
@@ -2987,7 +3057,10 @@ function renderReviewTable() {
       for (const [key, value] of [["play", `${parts.adjustment ? "" : `${turn}. `}${displayMove(parts.move)}`], ["score", parts.score], ["cumulative", parts.cumulative]]) {
         const span = document.createElement("span");
         span.className = `history-${key}`;
-        span.textContent = value;
+        if (key === "play") {
+          if (!parts.adjustment) span.append(`${turn}. `);
+          span.append(moveTiles(displayMove(parts.move), player, restorePosition(recordedGame.positions[index])));
+        } else span.textContent = value;
         if (button.childNodes.length) button.append(" ");
         button.append(span);
       }
@@ -3051,16 +3124,17 @@ function restoreAnalysis() {
   setRawAnalysis(saved.raw);
   renderResults();
 }
-async function addSimCandidate() {
-  if (busy || searchMode() !== "sim" || (isLive() && (!humanTurn() || session.paused))) return;
+async function analyzeDraft() {
+  if (busy || isLive() || !recordedGame) return;
   const generation = positionGeneration;
   let listener;
   try {
     const move = normalizeMove(draftTiles.length ? moveNotation(position, draftTiles, vertical) : selectedMove);
-    const key = cacheKey("sim");
+    const targetMode = mode === "sim" ? "sim" : "kibitz";
+    const key = cacheKey(targetMode);
     const saved = analysisCache.get(key);
     if (saved?.results.some(row => moveIdentity(row.move) === moveIdentity(move))) {
-      message("That play is already in the simulation");
+      message("That play is already in the analysis");
       return;
     }
     cancelDraftCheck();
@@ -3087,15 +3161,15 @@ async function addSimCandidate() {
     await engine.run([...commands, `addmoves ${move}`, "shmoves"]);
     if (generation !== positionGeneration) return;
     const candidate = parseResults(text, "kibitz")[0];
-    if (!candidate) throw new Error("Could not add this play to the simulation.");
-    mode = "sim";
+    if (!candidate) throw new Error("Could not analyze this play.");
+    mode = targetMode;
     results = structuredClone(saved?.results || []);
-    results.push({...candidate, rank:results.length + 1, iterations:0, win:NaN, winSE:NaN, equity:NaN, equitySE:NaN, plyAverages:[]});
+    results.push({...candidate, manual:true, rank:results.length + 1,
+      ...(mode === "sim" ? {iterations:0, win:NaN, winSE:NaN, equity:NaN, equitySE:NaN, plyAverages:[]} : {})});
     analysisIterations = saved?.iterations || 0;
-    analysisMeta = analysisSummary("", "sim");
+    analysisMeta = mode === "sim" ? analysisSummary("", "sim") : "Static equity";
     setRawAnalysis(saved?.raw || "");
     pegProgress = null;
-    simSelection.add(moveIdentity(candidate.move));
     recallTiles(false);
     selectedMove = candidate.move;
     retainAnalysis(key);
@@ -3109,9 +3183,9 @@ async function addSimCandidate() {
     renderPosition();
   }
 }
-$("add-sim").addEventListener("click", addSimCandidate);
+$("analyze-move").addEventListener("click", analyzeDraft);
 $("continue-selected").addEventListener("click", () => {
-  const moves = results.filter(row => simSelection.has(moveIdentity(row.move))).map(row => row.move);
+  const moves = selectedMove ? [selectedMove] : [];
   if (moves.length) analyze("sim", {resume:true, moves});
 });
 $("fresh-analysis").addEventListener("click", () => analyze(mode, {resume:false}));
@@ -3178,8 +3252,8 @@ const controlHints = {
   "stop-review": "Stop the review and keep completed analysis.",
   "fresh-analysis":
     "Discard this position’s previous results and start a new search.",
-  "add-sim": "Add the board play or selected candidate to this position’s simulation without changing the game.",
-  "continue-selected": "Add iterations only to the checked plays; keep the other results.",
+  "analyze-move": "Add this move to the kibitz list or simulation without recording a turn.",
+  "continue-selected": "Add iterations only to the selected play; keep the other results.",
   "auto-analyze": "Analyze automatically when you select a turn in history.",
   "new-game":
     "Start a game with named players and enter each rack as you go.",

@@ -240,7 +240,7 @@ onmessage = async ({ data: { type, data = {}, requestId: incomingId } }) => {
                 strings[5],
                 data.seed || 0,
                 data.onTurn || 0,
-                data.challenge === "void" ? 0 : 1,
+                data.challengeRule ?? 0,
               ),
             ),
           );

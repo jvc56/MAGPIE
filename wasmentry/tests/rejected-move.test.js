@@ -23,6 +23,15 @@ for (const submit of ['Enter', 'button']) {
       else await page.locator('#play-move').click();
       const phonyMessage = `Play 8H ${col === 8 ? '(A)' : ''}TSRAINE contains at least one phony word`;
       await expect(page.locator('#error')).toHaveText(phonyMessage);
+      await expect(page.locator('#error .move-tile')).toHaveCount(col === 8 ? 8 : 7);
+      await expect(page.locator('#error .move-coordinate')).toHaveText('8H');
+      const gaps = await page.locator('#error').evaluate(error => {
+        const coordinate=error.querySelector('.move-coordinate').getBoundingClientRect();
+        const tiles=error.querySelector('.move-word').getBoundingClientRect();
+        const trailing=error.querySelector('.move-message-gap').getBoundingClientRect();
+        return [tiles.left-coordinate.right,trailing.width];
+      });
+      expect(Math.abs(gaps[0]-gaps[1])).toBeLessThan(1);
       await expect(page.locator('#play-move')).toBeEnabled();
       await page.keyboard.press('Backspace');
       await expect(page.locator('.square.pending')).toHaveCount(6);
@@ -42,3 +51,23 @@ for (const submit of ['Enter', 'button']) {
     });
   }
 }
+
+for (const down of [false,true]) test(`Backspace continues ${down?'up':'left'} past the initial typing square`, async ({page}) => {
+  await page.goto('/wasmentry/');
+  await expect(page.locator('#start-game')).toBeEnabled({timeout:30000});
+  await page.locator('[data-game-kind=record]').click();
+  await page.locator('#start-game').click();
+  await page.locator('#rack').fill('AEINRST'); await page.locator('#rack').dispatchEvent('change');
+  await page.locator('#board [data-row="7"][data-col="7"]').click();
+  if (down) await page.keyboard.press('Space');
+  await page.keyboard.type('a');
+  await page.keyboard.press('Backspace');
+  await expect(page.locator('.square.pending')).toHaveCount(0);
+  await page.keyboard.press('Backspace');
+  await expect(page.locator('.square.cursor')).toHaveAttribute(down?'data-row':'data-col','6');
+  await page.keyboard.type('a');
+  await expect(page.locator('.square.pending')).toHaveAttribute(down?'data-row':'data-col','6');
+  await page.keyboard.press('Backspace');
+  for (let index=0;index<8;index++) await page.keyboard.press('Backspace');
+  await expect(page.locator('.square.cursor')).toHaveAttribute(down?'data-row':'data-col','0');
+});

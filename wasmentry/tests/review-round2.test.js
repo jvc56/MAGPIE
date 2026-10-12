@@ -117,7 +117,7 @@ test('adding a play never starts a word-map build', async ({page}) => {
   await page.locator('#back-to-game').click();
   await page.locator('#board [data-row="7"][data-col="7"]').click();
   await page.keyboard.type('at');
-  await page.locator('#add-sim').click();
+  await page.locator('#analyze-move').click();
   await expect(page.locator('#status')).toHaveText('Play added');
   expect(await page.evaluate(() => window.buildRequests)).toBe(0);
 });

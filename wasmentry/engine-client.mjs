@@ -1,3 +1,4 @@
+import { challengeRuleCode } from "./game-actions.mjs";
 export class EngineClient extends EventTarget {
   constructor() {
     super();
@@ -156,7 +157,7 @@ export class EngineClient extends EventTarget {
     return this.request("wmp_cache", { remove }, "wmp_cache_updated");
   }
   gameAction(data) {
-    return this.request("game_action", data, "game_updated");
+    return this.request("game_action", {...data, challengeRule: challengeRuleCode(data.challenge, data.challengePoints, data.challengeUnit)}, "game_updated");
   }
   importGCG(text, lexicon) {
     return this.request("import_gcg", { text, lexicon }, "gcg_loaded");

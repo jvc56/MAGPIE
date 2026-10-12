@@ -250,6 +250,7 @@ main {
   font-size: 11px;
 }
 #board {
+  container-type: inline-size;
   display: grid;
   grid-template-columns: 18px repeat(15, minmax(0, 1fr));
   gap: 2px;
@@ -1878,3 +1879,37 @@ body.tile-dragging, body.tile-dragging * { cursor: grabbing !important; }
 #new-game-cgp-status:empty { display: none; }
 #new-game-cgp-status.invalid { color: var(--danger); }
 #new-game-cgp[aria-invalid="true"] { border-color: var(--danger); }
+
+/* Compact move tiles preserve blank identity without lowercase notation. */
+.move-tiles { display: inline-flex; align-items: baseline; gap: 0; max-width: 100%; vertical-align: baseline; }
+.move-coordinate { flex: none; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; margin-right: 1ch; text-align: left; }
+.move-word { display: inline-flex; align-items: baseline; flex-wrap: wrap; gap: 1px; }
+.move-tile { display: inline-flex; align-items: center; justify-content: center; flex: none;
+  width: 1.65em; height: 1.65em; border-radius: 3px; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: var(--tile-ink);
+  background: var(--tile); font-weight: 650; line-height: 1; box-shadow: inset 0 0 0 1px var(--tile-edge); }
+.move-tile.owner-1 { background: var(--green); }
+.move-tile.playthrough { background: #b9bdc6; }
+:root[data-theme="light"] .move-tile.playthrough { background: #c1c0b9; }
+.move-tile.blank .tile-letter { border: 1px solid currentColor; width: 78%; aspect-ratio: 1; display: grid; place-items: center; font-size: 0.85em; }
+.visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+#history-table .history-play { min-width: 0; }
+#history-table .move-tiles { font-size: 12px; }
+#challenge-help { grid-column: 1 / -1; margin: 0; }
+.move-score { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+  width: calc(100cqw - 6px); height: calc(100cqw - 6px);
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 50%; background: var(--raised); color: var(--text);
+  font: bold min(12px, calc((100cqw - 6px) * 0.4))/1 system-ui; font-variant-numeric: tabular-nums;
+  box-shadow: 0 0 0 1px var(--accent); pointer-events: none; z-index: 2; }
+.move-score-wide { font-size: min(10px, calc((100cqw - 6px) * 0.3)); }
+.coordinate .move-score {
+  width: calc((100cqw - 48px) / 15 - 6px); height: calc((100cqw - 48px) / 15 - 6px);
+  font-size: min(12px, calc(((100cqw - 48px) / 15 - 6px) * 0.4));
+}
+.coordinate .move-score-wide { font-size: min(10px, calc(((100cqw - 48px) / 15 - 6px) * 0.3)); }
+#board .has-move-score > :not(.move-score) { visibility: hidden; }
+#board .has-move-score::after { content: none !important; }
+
+#board .coordinate { position: relative; }
+
+.move-message-gap { display: inline-block; width: 1ch; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
