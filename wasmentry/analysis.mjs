@@ -58,11 +58,12 @@ let cursor = null,
   timer;
 let tileDrag = null;
 let hoveredEntry = null, hoverEntryReady = false;
-let entryAnchored = false, lastRackTap = null;
+let entryAnchored = false;
 let draftTiles = [],
   rackChoice = null,
   gameUndo = [];
 let draftScore = null;
+let deferredDraftFeedback = null;
 let previewTimer,
   previewGeneration = 0,
   previewPromise = Promise.resolve();
@@ -76,6 +77,29 @@ let session = null,
   botRunning = false,
   botTimer,
   reviewRunning = false;
+let computerMoveTimer;
+function clearComputerMove() {
+  clearTimeout(computerMoveTimer);
+  $("computer-move").hidden = true;
+  $("computer-move").replaceChildren();
+}
+function showComputerMove(index, before) {
+  if (session?.kind !== "play" || before.onTurn === session.human) return;
+  // Only the number of exchanged tiles is public, even if this move ends the game.
+  const line = gameEvents()[index]?.replace(/(\s)-([A-Z?]+)(?=\s)/, (_, space, tiles) => `${space}-${tiles.length}`);
+  if (!line) return;
+  const {move, score} = historyPlayParts(line, before);
+  const toast = $("computer-move");
+  clearComputerMove();
+  const name = recordedGame.players[before.onTurn];
+  if (move === "-") toast.append(`${name} passed`);
+  else if (/^-\d+$/.test(move)) {
+    const count = Number(move.slice(1));
+    toast.append(`${name} exchanged ${count} tile${count === 1 ? "" : "s"}`);
+  } else toast.append(`${name} played`, moveTiles(displayMove(move), before.onTurn, before), score);
+  toast.hidden = false;
+  computerMoveTimer = setTimeout(clearComputerMove, 12000);
+}
 let analysisCache = new Map(),
   analysisBase = null,
   analysisBaseIterations = 0,
@@ -399,9 +423,9 @@ function clearResults() {
   renderResults();
 }
 function setPosition(next, fromHistory = false) {
+  clearComputerMove();
   tileDrag?.cancel();
   entryAnchored = false;
-  lastRackTap = null;
   hoveredEntry = null;
   hoverEntryReady = false;
   positionGeneration++;
@@ -599,6 +623,16 @@ function fitGamePanels() {
     const viewportHeight = innerHeight - document.querySelector(".app-header").getBoundingClientRect().height - 60;
     const height = narrow || !analysisHeight ? viewportHeight : analysisHeight;
     const style = getComputedStyle(panel);
+    const availableWidth = panel.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+    if (narrow && mobileBoard.matches) {
+      // Touch screens use their width for legible tiles; the page can scroll
+      // vertically instead of squeezing the board below the header and controls.
+      panel.style.removeProperty("--analysis-panel-height");
+      panel.style.setProperty("--fitted-board-width", `${availableWidth}px`);
+      panel.style.setProperty("--zoom-base-width", `${availableWidth}px`);
+      liveBoardFit = null;
+      return;
+    }
     let occupied = parseFloat(style.paddingTop) + parseFloat(style.paddingBottom) + 2;
     for (const child of panel.children) {
       if (["board-viewport", "unseen-home"].includes(child.id) || !child.getBoundingClientRect().height) continue;
@@ -622,7 +656,6 @@ function fitGamePanels() {
       liveBoardFit = {session, layout, width: boardWidth};
     } else liveBoardFit = null;
     panel.style.setProperty("--fitted-board-width", `${boardWidth}px`);
-    const availableWidth = panel.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
     panel.style.setProperty("--zoom-base-width", `${Math.min(availableWidth, boardWidth)}px`);
   });
 }
@@ -637,7 +670,8 @@ const mobileBoard = matchMedia("(pointer: coarse)");
 function setBoardZoom(zoomed) {
   $("board-viewport").classList.toggle("zoomed", zoomed);
   $("board-zoom").setAttribute("aria-pressed", String(zoomed));
-  $("board-zoom").textContent = zoomed ? "Fit board" : "Zoom board";
+  $("board-zoom").setAttribute("aria-label", zoomed ? "Fit board" : "Zoom board");
+  $("board-zoom").title = zoomed ? "Fit board" : "Zoom board";
   if (zoomed) {
     requestAnimationFrame(() => focusCursor());
   } else {
@@ -649,9 +683,7 @@ $("board-zoom").addEventListener("click", () => {
 });
 mobileBoard.addEventListener("change", () => {
   if (!mobileBoard.matches) setBoardZoom(false);
-});
-document.addEventListener("pointerdown", event => {
-  if (!event.target.closest("#rack-tiles")) lastRackTap = null;
+  fitGamePanels();
 });
 $("game-overflow").addEventListener("click", () => {
   const button = $("game-overflow");
@@ -1856,6 +1888,7 @@ function recallTiles(render = true) {
 }
 function cancelDraftCheck() {
   clearTimeout(previewTimer);
+  deferredDraftFeedback = null;
   previewGeneration++;
   draftScore = null;
   renderMoveScore();
@@ -1865,6 +1898,20 @@ function moveErrorMessage(text) {
     (_, prefix, play) => prefix + formatBoardPlay(play, position));
   const phony = formatted.trim().match(/expected valid play but detected at least one phony for play:\s*(.+)$/i);
   return phony ? `Play ${phony[1]} contains at least one phony word` : formatted;
+}
+function applyDraftFeedback(generation, text, score = null) {
+  if (generation !== previewGeneration || busy) {
+    return;
+  }
+  if (tileDrag?.active) {
+    // Even with fitting suspended, adding a toolbar row shifts every square.
+    // Keep asynchronous feedback out of layout until the drop is committed.
+    deferredDraftFeedback = {generation, text, score};
+    return;
+  }
+  draftScore = score;
+  $("move-feedback").textContent = text;
+  renderMoveScore();
 }
 function scheduleDraftCheck() {
   cancelDraftCheck();
@@ -1889,14 +1936,10 @@ function scheduleDraftCheck() {
         action: GameAction.COMMIT,
       })
       .then(({ game }) => {
-        if (generation !== previewGeneration || busy) return;
-        draftScore = game.score;
-        $("move-feedback").textContent = "";
-        renderMoveScore();
+        applyDraftFeedback(generation, "", game.score);
       })
       .catch((failure) => {
-        if (generation === previewGeneration && !busy)
-          $("move-feedback").textContent = moveErrorMessage(failure.message);
+        applyDraftFeedback(generation, moveErrorMessage(failure.message));
       });
   }, 220);
 }
@@ -1922,7 +1965,8 @@ function advanceCursor() {
   } while (
     cursor.row < 15 &&
     cursor.col < 15 &&
-    position.board[cursor.row][cursor.col]
+    (position.board[cursor.row][cursor.col] ||
+      draftTiles.some(tile => tile.row === cursor.row && tile.col === cursor.col))
   );
   if (cursor.row >= 15 || cursor.col >= 15) cursor = null;
 }
@@ -1934,6 +1978,11 @@ function addEntryTile(row, col, letter, blank = false, source = null, rackIndex 
         )
       : draftTiles;
     draftTiles = placeTile(position, rest, row, col, letter, blank, rackIndex);
+    if (draftTiles.length > 1) {
+      if (draftTiles.every(tile => tile.col === col)) vertical = true;
+      else if (draftTiles.every(tile => tile.row === row)) vertical = false;
+    }
+    if (rackIndex !== null) entryAnchored = true;
     cursor = { row, col };
     advanceCursor();
     rackChoice = null;
@@ -1974,7 +2023,6 @@ function entryClick(event) {
   const row = +cell.dataset.row,
     col = +cell.dataset.col;
   entryAnchored = true;
-  lastRackTap = null;
   if (rackChoice) {
     if (rackChoice.letter === "?") chooseBlank(row, col, null, rackChoice.index);
     else addEntryTile(row, col, rackChoice.letter, false, null, rackChoice.index);
@@ -2133,6 +2181,8 @@ async function submitMove(value = null, computer = false) {
   if (busy || (isLive() && !computer && (!humanTurn() || session.paused)))
     return;
   const generation = positionGeneration;
+  const before = position;
+  const moveIndex = historyIndex;
   try {
     if (!recordedGame) throw new Error("Start or load a game first.");
     if (!recordedBoardMatches())
@@ -2209,6 +2259,7 @@ async function submitMove(value = null, computer = false) {
       if (game.ended) finishSession("Game over");
     }
     message("Move recorded");
+    if (computer) showComputerMove(moveIndex, before);
   } catch (failure) {
     if (generation !== positionGeneration) return;
     error(moveErrorMessage(failure.message));
@@ -2229,7 +2280,6 @@ async function submitMove(value = null, computer = false) {
 }
 $("play-move").addEventListener("click", () => submitMove());
 $("pass-move").addEventListener("click", () => submitMove("pass"));
-$("recall-tiles").addEventListener("click", () => recallTiles());
 function openExchange(selected = "") {
   if (busy || terminalPosition() || (isLive() && (!humanTurn() || session.paused))) return;
   recallTiles();
@@ -2276,7 +2326,9 @@ $("shuffle-rack").addEventListener("click", () => {
 });
 $("sort-rack").addEventListener("click", () => {
   if (!canArrangeRack()) return;
-  sortCurrentRack(displayedRackIndex());
+  const index = displayedRackIndex();
+  if (!index) recallTiles(false);
+  sortCurrentRack(index);
   renderPosition();
 });
 $("new-game").addEventListener("click", () => {
@@ -2502,7 +2554,17 @@ function rackDrop(source, gap) {
   else renderPosition();
 }
 tileDrag = installTileDrag({
-  onFinish: fitGamePanels,
+  onFinish() {
+    // cleanup runs before onDrop; a valid drop invalidates the old preview.
+    queueMicrotask(() => {
+      const feedback = deferredDraftFeedback;
+      deferredDraftFeedback = null;
+      if (feedback) {
+        applyDraftFeedback(feedback.generation, feedback.text, feedback.score);
+      }
+      fitGamePanels();
+    });
+  },
   board:$("board"), rack:$("rack-tiles"),
   sourceFor(target) {
     const rackTile = target.closest("#rack-tiles .rack-tile");
@@ -2539,15 +2601,9 @@ tileDrag = installTileDrag({
     if (position.board[row][col] || draftTiles.some(tile => tile.row === row && tile.col === col)) return null;
     return {square, row, col};
   },
-  onTap(source, pointerType) {
+  onTap(source) {
     if (!canDragTiles() || source.playerRack || source.square || $("edit").checked || !recordedGame) return;
-    const now = performance.now();
-    const doubleTap = pointerType === "touch" && lastRackTap?.index === source.rackIndex &&
-      lastRackTap.letter === source.letter && lastRackTap.generation === positionGeneration &&
-      now - lastRackTap.time < 400;
-    lastRackTap = pointerType === "touch" && !doubleTap
-      ? {index:source.rackIndex, letter:source.letter, generation:positionGeneration, time:now} : null;
-    if (doubleTap && entryAnchored && cursor) {
+    if (entryAnchored && cursor) {
       const {row, col} = cursor;
       rackChoice = null;
       if (source.letter === "?") chooseBlank(row, col, null, source.rackIndex);
@@ -2558,7 +2614,6 @@ tileDrag = installTileDrag({
     renderPosition();
   },
   onDrop(source, target) {
-    lastRackTap = null;
     if (!source.square && target.rack) {
       if (canArrangeRack() && source.playerRack === displayedRackIndex()) rackDrop(source, target.gap);
       return;
@@ -2666,7 +2721,7 @@ function renderSession() {
   ]) $(id).disabled = busy || !!live;
   const entryLocked = busy || terminalPosition() ||
     (live && (session.paused || !humanTurn()));
-  for (const id of ["play-move", "pass-move", "exchange-move", "recall-tiles"])
+  for (const id of ["play-move", "pass-move", "exchange-move"])
     $(id).disabled = !!entryLocked;
   for (const element of document.querySelectorAll("#shuffle-rack, #sort-rack, #rack-tiles .rack-tile"))
     element.disabled = !canArrangeRack();
@@ -2678,16 +2733,19 @@ function renderSession() {
   $("play-session").hidden = !session;
   $("session-result").classList.toggle("thinking", !!(live && botRunning && !session.paused));
   $("session-controls").hidden = !live;
-  $("session-result").hidden = !!session?.finished &&
-    $("hide-spoilers").checked && !terminalPosition();
+  const headerTurnStatus = !!(live && !session.paused && !session.result);
+  $("session-result").hidden = headerTurnStatus || (!!session?.finished &&
+    $("hide-spoilers").checked && !terminalPosition());
   $("position-editor").hidden = !!live;
   for (const [index, suffix] of ["one", "two"].entries()) {
     const playerName = recordedGame?.players[index] || `Player ${index + 1}`;
     const thinking = !!(live && botRunning && !session.paused && index === position.onTurn);
+    const yourTurn = headerTurnStatus && humanTurn() && index === position.onTurn;
     const name = $("name-" + suffix);
-    const label = thinking ? `${playerName} is thinking…` : playerName;
+    const label = thinking ? `${playerName} is thinking…` : yourTurn ? `${playerName} · Your turn` : playerName;
     if (name.textContent !== label) name.textContent = label;
     name.classList.toggle("thinking", thinking);
+    name.classList.toggle("your-turn", yourTurn);
     name.title = label;
     $("points-" + suffix).textContent =
       position.scores[index === position.onTurn ? 0 : 1];
@@ -3432,11 +3490,10 @@ const controlHints = {
   "save-note": "Save this note without changing later moves.",
   "challenge-move": "Challenge the last play using the current lexicon.",
   "play-move": "Enter: play the pending move.",
-  "recall-tiles": "Esc: return unplayed tiles to the rack.",
   "pass-move": "Pass the turn without playing tiles.",
   "exchange-move": "Choose rack tiles to exchange.",
   "shuffle-rack": "Shuffle the tiles in your rack.",
-  "sort-rack": "Sort your rack using the tile order chosen in Appearance settings.",
+  "sort-rack": "Recall unplayed tiles and sort your rack using the order chosen in Appearance settings.",
   edit: "Edit board tiles directly. Shift + letter: blank · Space: direction · Delete: remove",
   undo: "Undo the last board edit.",
   clear: "Clear the board.",
@@ -3497,8 +3554,8 @@ function renderContextHint() {
       ? "Drag to arrange tiles."
       : recordedGame
         ? mobileBoard.matches
-          ? "Tap a starting square, then double-tap rack tiles to place them · Drag to arrange tiles"
-          : "Drag to arrange tiles or place them on the board."
+          ? "Tap a starting square, then tap rack tiles to place them · Drag to arrange tiles"
+          : "Click a starting square, then click rack tiles to place them · Drag to arrange tiles"
         : "Drag to arrange tiles · Edit the Rack field to change tiles";
   } else if (target?.id === "results") {
     hint =

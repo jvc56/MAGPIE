@@ -131,10 +131,12 @@ Move entry follows the Qt and TUI workflows:
   Touch drags scroll near the screen edge. Alt + Left/Right reorders a focused
   rack tile; shuffle and sort remain available. Committed tiles stay fixed
   during play; **Edit board** allows moving them, preserving ownership and undo.
-- On touch devices, choose a starting square, then double-tap a rack tile to
+- Choose a starting square, then tap (or click) a rack tile to
   place it at the cursor and advance. Blanks open the letter picker. Without a
-  starting square (or after reaching the board edge), double-tapping does not
-  place tiles. **Zoom board** enlarges the board inside a pannable viewport;
+  starting square, a rack tap selects a tile for placement on the next square
+  you tap. Two aligned placed tiles establish the direction, and the cursor
+  skips occupied squares. Reaching the board edge stops automatic placement.
+  On touch devices, **Zoom board** enlarges the board inside a pannable viewport;
   the rack stays outside it. **Fit board** restores the full board.
 - The Move field accepts `8H TRAIN`, `H8 TRAIN`, `ex AE`, and `pass`. The engine
   previews the score and validates/scores commits. A phony requires explicit
@@ -415,3 +417,5 @@ and score belong to Player 1, who is on turn. Missing live-game rack tiles are
 drawn from the remaining bag. History begins at the supplied position; existing
 tiles have unknown ownership. Saved games retain the position in a MAGPIE
 `#cgp` GCG extension (other GCG readers need support for that extension).
+
+Shuffle, recall/sort, and mobile board zoom use labeled icon buttons. Recall/sort returns all unplayed tiles before sorting; Escape still recalls without sorting.

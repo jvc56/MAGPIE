@@ -120,7 +120,8 @@ test("changing alphagram order keeps pending tiles and preserves subsequent manu
   await page.locator("#back-to-game").click();
   expect(await rackLetters(page)).toBe("?AEB");
   await expect(page.locator("#board .pending .tile-letter")).toHaveText(["B", "A", "Z"]);
-  await page.locator("#recall-tiles").click();
+  await page.getByRole("button", {name:"Recall and sort rack",exact:true}).click();
+  await expect(page.locator("#board .pending")).toHaveCount(0);
   expect(await rackLetters(page)).toBe("??AAEBB");
   const lastTile = page.locator("#rack-tiles .rack-tile").last();
   await lastTile.focus();
@@ -157,7 +158,7 @@ test('shuffle preserves staged duplicate and blank slots when changing direction
     await expect(page.locator(`#board [data-row="${row}"][data-col="7"] .tile-letter`)).toHaveText(letter);
   await expect(page.locator('#error')).toBeHidden();
   expect([...(await rackLetters(page))].sort().join('')).toBe('AACD');
-  await page.locator('#recall-tiles').click();
+  await page.locator('#sort-rack').click();
   expect([...(await rackLetters(page))].sort().join('')).toBe('?AABCDE');
   await page.getByRole('button',{name:'Tile B',exact:true}).click();
   await page.locator('#shuffle-rack').click();
@@ -180,6 +181,6 @@ test('a direction change past the board edge keeps the move and explains the fai
   await expect(page.locator('#error')).toBeVisible();
   await expect(page.locator('#error')).toHaveText('The move runs past the board edge.');
   await expect(page.locator('#board .pending .tile-letter')).toHaveText(['A','T']);
-  await page.locator('#recall-tiles').click();
+  await page.locator('#sort-rack').click();
   expect(await rackLetters(page)).toBe('AEINRST');
 });

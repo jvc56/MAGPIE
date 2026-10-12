@@ -56,6 +56,23 @@ test('rack insertion works before starting a game, with keyboard reordering too'
 
 test('duplicate tiles retain rack order through all four drag paths; invalid drops are harmless', async ({page}) => {
   await ready(page, 'ABAC?');
+  // Deliver the real engine preview while the next tile is held, independent
+  // of machine speed. The off-center A should produce validation feedback.
+  await page.evaluate(async () => {
+    const {EngineClient} = await import('/wasmentry/engine-client.mjs');
+    const action = EngineClient.prototype.gameAction;
+    window.heldPreviews = [];
+    window.releasePreviews = () => {
+      EngineClient.prototype.gameAction = action;
+      for (const preview of window.heldPreviews) preview.resolve();
+    };
+    EngineClient.prototype.gameAction = async function (request) {
+      try { return await action.call(this, request); }
+      finally {
+        await new Promise(resolve => window.heldPreviews.push({move:request.move, resolve}));
+      }
+    };
+  });
   await drag(page, rackTile(page, 2), cell(page, 7, 7));
   expect(await rackLetters(page)).toBe('ABC?');
   await expect(cell(page, 7, 7)).toHaveClass(/pending/);
@@ -66,8 +83,16 @@ test('duplicate tiles retain rack order through all four drag paths; invalid dro
   await drag(page, rackTile(page, 1), cell(page, 7, 8), 'center', false);
   // Invalid-move feedback arrives asynchronously while the pointer is held.
   // It must not resize the board and turn an occupied-square drop into a play.
-  await expect(page.locator('#move-feedback')).not.toBeEmpty();
+  await expect.poll(() => page.evaluate(() => window.heldPreviews.some(preview => preview.move === '8I A'))).toBe(true);
+  const heldSquare = await cell(page, 7, 8).boundingBox();
+  await page.evaluate(async () => {
+    window.releasePreviews();
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  });
+  expect(await cell(page, 7, 8).boundingBox()).toEqual(heldSquare);
+  await expect(page.locator('#move-feedback')).toBeEmpty();
   await page.mouse.up();
+  await expect(page.locator('#move-feedback')).not.toBeEmpty();
   expect(await rackLetters(page)).toBe('ABC?');
   await expect(page.locator('#board .pending')).toHaveCount(1);
   await drag(page, cell(page, 7, 8), page.locator('#rack-tiles'), 'after');
@@ -453,33 +478,73 @@ test('passing requires confirmation and Cancel or Escape preserve tentative tile
 });
 
 
+test('single clicks continue tile-first and board-first entry, including blanks', async ({page}) => {
+  await ready(page, 'AT?');
+  await rackTile(page, 0).click();
+  await expect(page.locator('#board .pending')).toHaveCount(0);
+  await cell(page, 7, 7).click();
+  await expect(cell(page, 7, 7).locator('.tile-letter')).toHaveText('A');
+  await rackTile(page, 0).click();
+  await expect(cell(page, 7, 8).locator('.tile-letter')).toHaveText('T');
+  await rackTile(page, 0).click();
+  await expect(page.locator('#blank-dialog')).toBeVisible();
+  await page.getByRole('button', {name:'Blank as E',exact:true}).click();
+  await expect(cell(page, 7, 9)).toHaveClass(/blank/);
+  await expect(cell(page, 7, 10)).toHaveClass(/cursor/);
+  await page.locator('#sort-rack').click();
+  await cell(page, 5, 5).click();
+  await rackTile(page, 0).click();
+  await rackTile(page, 0).click();
+  await expect(cell(page, 5, 6).locator('.tile-letter')).toHaveText('T');
+  await expect(cell(page, 5, 7)).toHaveClass(/cursor/);
+});
+
+test('two dragged tiles infer direction and continuation skips already placed tiles', async ({page}) => {
+  await ready(page, 'ATE');
+  // Place the lower tile first, then fill above it. The cursor must skip it.
+  await drag(page, rackTile(page, 1), cell(page, 8, 7));
+  await drag(page, rackTile(page, 0), cell(page, 7, 7));
+  await expect(page.locator('#board')).toHaveAttribute('data-direction', 'down');
+  await expect(cell(page, 9, 7)).toHaveClass(/cursor/);
+  await rackTile(page, 0).click();
+  await expect(cell(page, 9, 7).locator('.tile-letter')).toHaveText('E');
+  await expect(cell(page, 10, 7)).toHaveClass(/cursor/);
+  await expect(page.locator('#board .pending')).toHaveCount(3);
+  await page.locator('#sort-rack').click();
+  await drag(page, rackTile(page, 0), cell(page, 7, 7));
+  await drag(page, rackTile(page, 0), cell(page, 7, 8));
+  await expect(page.locator('#board')).toHaveAttribute('data-direction', 'right');
+  await rackTile(page, 0).click();
+  await expect(cell(page, 7, 9).locator('.tile-letter')).toHaveText('T');
+});
+
 test.describe('mobile board entry', () => {
   test.use({hasTouch:true});
 
-  test('double-tap requires a chosen start and advances through letters and a blank', async ({page}) => {
+  test('single tap requires a chosen start and advances through letters and a blank', async ({page}) => {
     await ready(page, 'AT?');
     await page.setViewportSize({width:390, height:844});
-    const tapTwice = async tile => { await tile.tap(); await tile.tap(); };
-    await tapTwice(rackTile(page, 0));
+    await rackTile(page, 0).tap();
+    await rackTile(page, 0).tap();
     await expect(page.locator('#board .pending')).toHaveCount(0);
     await cell(page, 7, 7).tap();
-    await tapTwice(rackTile(page, 0));
+    await rackTile(page, 0).tap();
     await expect(cell(page, 7, 7).locator('.tile-letter')).toHaveText('A');
     await expect(cell(page, 7, 8)).toHaveClass(/cursor/);
-    await tapTwice(rackTile(page, 0));
+    await rackTile(page, 0).tap();
     await expect(cell(page, 7, 8).locator('.tile-letter')).toHaveText('T');
-    await tapTwice(rackTile(page, 0));
+    await rackTile(page, 0).tap();
     await expect(page.locator('#blank-dialog')).toBeVisible();
     await page.getByRole('button', {name:'Blank as E',exact:true}).tap();
     await expect(cell(page, 7, 9)).toHaveClass(/blank/);
     await expect(cell(page, 7, 10)).toHaveClass(/cursor/);
     expect(await rackLetters(page)).toBe('');
-    await page.locator('#recall-tiles').tap();
+    await page.locator('#sort-rack').tap();
     await cell(page, 14, 14).tap(); await cell(page, 14, 14).tap();
-    await tapTwice(rackTile(page, 0));
+    await rackTile(page, 0).tap();
     await expect(cell(page, 14, 14)).toHaveClass(/pending/);
     await expect(page.locator('#board .edge-cursor')).toBeVisible();
-    await tapTwice(rackTile(page, 0));
+    await rackTile(page, 0).tap();
     await expect(page.locator('#board .pending')).toHaveCount(1);
     expect(await rackLetters(page)).toBe('T?');
   });
@@ -489,6 +554,11 @@ test.describe('mobile board entry', () => {
     await page.setViewportSize({width:390,height:844});
     const zoom = page.locator('#board-zoom'), viewport = page.locator('#board-viewport');
     await expect(zoom).toBeVisible();
+    await expect.poll(() => page.locator('#board').evaluate(el => el.getBoundingClientRect().width)).toBeGreaterThan(360);
+    const boardWidth = (await page.locator('#board').boundingBox()).width;
+    await page.setViewportSize({width:390,height:600});
+    await expect.poll(() => page.locator('#board').evaluate(el => el.getBoundingClientRect().width)).toBeCloseTo(boardWidth, 0);
+    await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBe(390);
     await cell(page, 7, 7).tap();
     const before = await cell(page, 7, 7).boundingBox();
     await zoom.tap();
@@ -497,6 +567,7 @@ test.describe('mobile board entry', () => {
     expect(after.width).toBeGreaterThan(before.width * 1.8);
     expect(await viewport.evaluate(el => el.scrollWidth > el.clientWidth && el.scrollHeight > el.clientHeight)).toBe(true);
     if (browserName === 'chromium') {
+      await viewport.scrollIntoViewIfNeeded();
       const cdp = await page.context().newCDPSession(page);
       const bounds = await viewport.boundingBox();
       const beforeScroll = await viewport.evaluate(el => el.scrollLeft);
@@ -510,11 +581,10 @@ test.describe('mobile board entry', () => {
       await expect.poll(() => viewport.evaluate(el => el.scrollLeft)).toBeGreaterThan(beforeScroll + 20);
       await cdp.detach();
     }
-    await rackTile(page, 0).tap(); await rackTile(page, 0).tap();
+    await rackTile(page, 0).tap();
     await expect(cell(page, 7, 7)).toHaveClass(/pending/);
     await page.screenshot({path:test.info().outputPath('mobile-zoom.png')});
-    const rack = await page.locator('#rack-tiles').boundingBox();
-    expect(rack.y + rack.height).toBeLessThan(844);
+    expect(await page.locator('#rack-tiles').evaluate(el => el.closest('#board-viewport') === null)).toBe(true);
     await zoom.tap();
     await expect(zoom).toHaveAttribute('aria-pressed', 'false');
     expect(await viewport.evaluate(el => el.scrollLeft)).toBe(0);
