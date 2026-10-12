@@ -2086,7 +2086,7 @@ static int32_t negamax_greedy_leaf_playout(EndgameCtxWorker *worker,
   bool playout_interrupted = false;
   while (game_get_game_end_reason(worker->game_copy) == GAME_END_REASON_NONE &&
          playout_depth < max_playout) {
-    if (thread_control_get_status(worker->solver->thread_control) ==
+    if (thread_control_search_checkpoint(worker->solver->thread_control) ==
         THREAD_CONTROL_STATUS_USER_INTERRUPT) {
       playout_interrupted = true;
       break;
@@ -3385,7 +3385,7 @@ static void root_greedy_sweep(EndgameCtxWorker *worker, uint64_t root_key,
 
 static bool iterative_deepening_should_stop(EndgameCtx *solver) {
   return atomic_load(&solver->search_complete) != 0 ||
-         thread_control_get_status(solver->thread_control) ==
+         thread_control_search_checkpoint(solver->thread_control) ==
              THREAD_CONTROL_STATUS_USER_INTERRUPT;
 }
 

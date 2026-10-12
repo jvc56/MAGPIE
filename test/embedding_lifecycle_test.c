@@ -1,6 +1,7 @@
 #include "embedding_lifecycle_test.h"
 
 #include "../src/compat/cpthread.h"
+#include "../src/compat/ctime.h"
 #include "../src/def/cpthread_defs.h"
 #include "../src/def/thread_control_defs.h"
 #include "../src/ent/thread_control.h"
@@ -8,6 +9,8 @@
 #include "../src/util/io_util.h"
 #include "../src/util/string_util.h"
 #include <assert.h>
+#include <stdatomic.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -27,7 +30,64 @@ static void *read_cached_files(void *unused) {
   return NULL;
 }
 
+typedef struct PausedSearchTest {
+  ThreadControl *control;
+  atomic_bool entered;
+  atomic_bool returned;
+  thread_control_status_t result;
+} PausedSearchTest;
+
+static void *paused_search_worker(void *data) {
+  PausedSearchTest *search = data;
+  atomic_store(&search->entered, true);
+  search->result = thread_control_search_checkpoint(search->control);
+  atomic_store(&search->returned, true);
+  return NULL;
+}
+
+static void test_search_pause(void) {
+  ThreadControl *control = thread_control_create();
+  assert(!thread_control_set_paused(control, true));
+  for (int action = 0; action < 3; action++) {
+    thread_control_set_status(control, THREAD_CONTROL_STATUS_STARTED);
+    assert(thread_control_set_paused(control, true));
+    PausedSearchTest search = {.control = control};
+    atomic_init(&search.entered, false);
+    atomic_init(&search.returned, false);
+    cpthread_t worker;
+    cpthread_create(&worker, paused_search_worker, &search);
+    while (!atomic_load(&search.entered)) {
+      ctime_nap(0.001);
+    }
+    ctime_nap(0.02);
+    assert(!atomic_load(&search.returned));
+    // Main-thread polling must not block behind a paused search.
+    assert(thread_control_get_status(control) == THREAD_CONTROL_STATUS_STARTED);
+    thread_control_status_t expected = THREAD_CONTROL_STATUS_STARTED;
+    if (action == 0) {
+      assert(thread_control_set_paused(control, false));
+    } else if (action == 1) {
+      thread_control_stop(control);
+      expected = THREAD_CONTROL_STATUS_USER_INTERRUPT;
+      assert(!thread_control_set_paused(control, false));
+    } else {
+      thread_control_set_status(control, THREAD_CONTROL_STATUS_FINISHED);
+      expected = THREAD_CONTROL_STATUS_FINISHED;
+    }
+    cpthread_join(worker);
+    assert(atomic_load(&search.returned));
+    assert(search.result == expected);
+    thread_control_set_status(control, THREAD_CONTROL_STATUS_FINISHED);
+  }
+  // A new command never inherits a previous pause.
+  thread_control_set_status(control, THREAD_CONTROL_STATUS_STARTED);
+  assert(thread_control_search_checkpoint(control) ==
+         THREAD_CONTROL_STATUS_STARTED);
+  thread_control_destroy(control);
+}
+
 void test_embedding_lifecycle(void) {
+  test_search_pause();
   ThreadControl *thread_control = thread_control_create();
   const thread_control_status_t idle[] = {THREAD_CONTROL_STATUS_UNINITIALIZED,
                                           THREAD_CONTROL_STATUS_FINISHED};

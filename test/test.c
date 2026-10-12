@@ -174,6 +174,7 @@ static TestEntry test_table[] = {
     {"winpctstate", test_win_pct_state},
     {"winpctrecord", test_win_pct_record},
     {"endgame", test_endgame},
+    {"endgamepause", test_endgame_pause},
     {"endgameoutplay", test_endgame_outplay_zobrist_overflow},
     {"endgamefirstwin", test_endgame_first_win_sign},
     {"eldar_v", test_eldar_v_stick},

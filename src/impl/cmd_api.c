@@ -236,6 +236,21 @@ void magpie_stop_current_command(Magpie *mp) {
   thread_control_stop(tc);
 }
 
+// The command name is immutable until this command has been joined.
+// cppcheck-suppress constParameterPointer
+bool magpie_set_search_paused(Magpie *mp, bool paused) {
+  if (!mp || !mp->config) {
+    return false;
+  }
+  const char *command = config_get_current_exec_name(mp->config);
+  if (!command ||
+      (!strings_equal(command, "peg") && !strings_equal(command, "endgame"))) {
+    return false;
+  }
+  return thread_control_set_paused(config_get_thread_control(mp->config),
+                                   paused);
+}
+
 magpie_thread_status magpie_get_thread_status(const Magpie *mp) {
   if (!mp->config) {
     return MAGPIE_THREAD_STATUS_UNINITIALIZED;
