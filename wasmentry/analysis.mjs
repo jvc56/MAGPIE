@@ -599,6 +599,16 @@ function fitGamePanels() {
     const viewportHeight = innerHeight - document.querySelector(".app-header").getBoundingClientRect().height - 60;
     const height = narrow || !analysisHeight ? viewportHeight : analysisHeight;
     const style = getComputedStyle(panel);
+    const availableWidth = panel.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+    if (narrow && mobileBoard.matches) {
+      // Touch screens use their width for legible tiles; the page can scroll
+      // vertically instead of squeezing the board below the header and controls.
+      panel.style.removeProperty("--analysis-panel-height");
+      panel.style.setProperty("--fitted-board-width", `${availableWidth}px`);
+      panel.style.setProperty("--zoom-base-width", `${availableWidth}px`);
+      liveBoardFit = null;
+      return;
+    }
     let occupied = parseFloat(style.paddingTop) + parseFloat(style.paddingBottom) + 2;
     for (const child of panel.children) {
       if (["board-viewport", "unseen-home"].includes(child.id) || !child.getBoundingClientRect().height) continue;
@@ -622,7 +632,6 @@ function fitGamePanels() {
       liveBoardFit = {session, layout, width: boardWidth};
     } else liveBoardFit = null;
     panel.style.setProperty("--fitted-board-width", `${boardWidth}px`);
-    const availableWidth = panel.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
     panel.style.setProperty("--zoom-base-width", `${Math.min(availableWidth, boardWidth)}px`);
   });
 }
@@ -649,6 +658,7 @@ $("board-zoom").addEventListener("click", () => {
 });
 mobileBoard.addEventListener("change", () => {
   if (!mobileBoard.matches) setBoardZoom(false);
+  fitGamePanels();
 });
 document.addEventListener("pointerdown", event => {
   if (!event.target.closest("#rack-tiles")) lastRackTap = null;

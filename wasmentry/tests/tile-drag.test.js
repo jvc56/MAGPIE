@@ -489,6 +489,11 @@ test.describe('mobile board entry', () => {
     await page.setViewportSize({width:390,height:844});
     const zoom = page.locator('#board-zoom'), viewport = page.locator('#board-viewport');
     await expect(zoom).toBeVisible();
+    await expect.poll(() => page.locator('#board').evaluate(el => el.getBoundingClientRect().width)).toBeGreaterThan(360);
+    const boardWidth = (await page.locator('#board').boundingBox()).width;
+    await page.setViewportSize({width:390,height:600});
+    await expect.poll(() => page.locator('#board').evaluate(el => el.getBoundingClientRect().width)).toBeCloseTo(boardWidth, 0);
+    await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBe(390);
     await cell(page, 7, 7).tap();
     const before = await cell(page, 7, 7).boundingBox();
     await zoom.tap();
@@ -513,8 +518,7 @@ test.describe('mobile board entry', () => {
     await rackTile(page, 0).tap(); await rackTile(page, 0).tap();
     await expect(cell(page, 7, 7)).toHaveClass(/pending/);
     await page.screenshot({path:test.info().outputPath('mobile-zoom.png')});
-    const rack = await page.locator('#rack-tiles').boundingBox();
-    expect(rack.y + rack.height).toBeLessThan(844);
+    expect(await page.locator('#rack-tiles').evaluate(el => el.closest('#board-viewport') === null)).toBe(true);
     await zoom.tap();
     await expect(zoom).toHaveAttribute('aria-pressed', 'false');
     expect(await viewport.evaluate(el => el.scrollLeft)).toBe(0);

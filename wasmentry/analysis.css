@@ -1952,7 +1952,7 @@ body.tile-dragging, body.tile-dragging * { cursor: grabbing !important; }
   body:not(.playing) #board, .show-analysis #board { width: min(100%, var(--fitted-board-width, 100%)); }
 }
 
-/* Keep the board, rack, and move controls together in the available viewport. */
+/* Desktop fits the playing area vertically; touch layouts prioritize board width. */
 #game-view #board { width: min(100%, var(--fitted-board-width, 100%)); margin-inline: auto; }
 @media (max-width: 1359px) {
   #unseen-tiles { display: flex; flex-wrap: wrap; gap: 3px 1ch; }
@@ -1974,6 +1974,10 @@ body.tile-dragging, body.tile-dragging * { cursor: grabbing !important; }
 /* Touch zoom enlarges only the board; the rack and controls stay in reach. */
 #board-viewport { min-width: 0; }
 #board-zoom { display: none; }
+@media (pointer: coarse) and (max-width: 1000px) {
+  #game-view { max-width: none; padding-inline: 4px; }
+  #game-view .position { padding-inline: 6px; }
+}
 @media (pointer: coarse) {
   #board-zoom { display: inline-block; }
   #board, #rack-tiles { touch-action: manipulation; }
