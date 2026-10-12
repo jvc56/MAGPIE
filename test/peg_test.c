@@ -658,6 +658,20 @@ static void test_peg_main_pnoprune(void) {
   assert(peg_top_cands_contains(&protected_result, board, ld, weak_text));
   printf("[peg_pnoprune] protected '%s' carried: plain n=%d, protected n=%d\n",
          weak_text, plain.n_top_cands, protected_result.n_top_cands);
+  assert(protected_result.n_top_cands == stage_top_k[0] + 1);
+
+  // A protected move that already ranks in the top-K must not take one of the
+  // K slots: protecting the plain leader still carries K unprotected moves.
+  const Move *protect_leader[1] = {&plain.top_cands[0].move};
+  PegArgs leader_args = base;
+  leader_args.protect_moves = protect_leader;
+  leader_args.n_protect_moves = 1;
+  PegResult leader_result;
+  memset(&leader_result, 0, sizeof(leader_result));
+  peg_solve(&leader_args, &leader_result, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  assert(leader_result.n_top_cands == stage_top_k[0] + 1);
+  peg_result_destroy(&leader_result);
 
   // With two stages the protected move can rank below the second cut by more
   // than one place. Every candidate that reached the second stage must then be

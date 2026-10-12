@@ -244,8 +244,10 @@ typedef struct PegArgs {
 
   // Optional "protect from pruning" set (like the simmer's snoprune): moves
   // that must survive every stage's top-K cut even when their win% rank falls
-  // below it. Each stage advances its top-K plus any of these protected moves
-  // not already in the top-K, carrying them to the deepest fidelity. Matched
+  // below it. Each stage advances its top-K unprotected moves plus every
+  // protected move, carrying them to the deepest fidelity. A protected move
+  // never takes one of the K slots, so protecting a move that already ranks in
+  // the top-K still carries K unprotected moves alongside it. Matched
   // against the candidate set by move-similarity key. The pointed-to Move
   // objects must outlive the solve. NULL / 0 = no protection (default).
   const Move *const *protect_moves;
