@@ -3,7 +3,7 @@
   "job_id": "9c2f1a48-5f3b-4c2a-8a7d-1b0e3f7c9d20",
   "job_name": "NWL23 leaves",
   "max_task_seconds": 3600,
-  "min_magpie_version": "0.1.1",
+  "min_magpie_version": "0.1.2",
   "expected_data": {
     "algorithm": "sha256",
     "files": [

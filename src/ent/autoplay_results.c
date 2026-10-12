@@ -1573,6 +1573,9 @@ typedef struct CapturedPosition {
   int game_number;
   int pair_game_number;
   int turn_number;
+  // The seat that moved from this position: 0 for player 1's config, 1 for
+  // player 2's, whichever of them started the game.
+  int player_index;
   position_analysis_t analysis;
   // How many plays were ranked, before the report cap.
   int num_moves;
@@ -1846,6 +1849,7 @@ void positions_data_add_move(Recorder *recorder, const RecorderArgs *args) {
   position->game_number = args->game_number;
   position->pair_game_number = args->pair_game_number;
   position->turn_number = args->turn_number;
+  position->player_index = game_get_player_on_turn_index(game);
   position->has_inference = false;
 
   const int play_cap = args->play_cap > 0 ? args->play_cap : 0;
@@ -2020,6 +2024,8 @@ static void write_captured_position(StringBuilder *sb,
                        &position_first);
   json_write_int_field(sb, CONTRIBUTE_KEY_TURN_NUMBER, position->turn_number,
                        &position_first);
+  json_write_int_field(sb, CONTRIBUTE_KEY_POSITION_PLAYER,
+                       position->player_index + 1, &position_first);
   json_write_string_field(sb, CONTRIBUTE_KEY_RACK, position->rack,
                           &position_first);
   json_write_string_field(sb, CONTRIBUTE_KEY_POSITION, position->cgp,

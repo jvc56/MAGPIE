@@ -169,7 +169,24 @@ typedef struct RackInfoTable {
   bool is_mmapped;
   void *mmap_base;
   size_t mmap_size;
+  // Which load this is: unique for the life of the process, never 0 (see
+  // rack_info_table_next_instance_id).
+  uint64_t instance_id;
 } RackInfoTable;
+
+// A number no other table this process creates or loads will have, never 0.
+// MoveGen caches pointers into a table's entries across move generations, and
+// its per-thread instances outlive the Config that owned the table, so it has
+// to tell a replaced table from the one it cached. Neither the struct's address
+// nor its data's can: a freed table's struct address goes to the next one the
+// allocator hands out, and an unmapped table's region is where the kernel often
+// maps the next one of the same size.
+uint64_t rack_info_table_next_instance_id(void);
+
+static inline uint64_t
+rack_info_table_get_instance_id(const RackInfoTable *rit) {
+  return rit->instance_id;
+}
 
 // Unpack all 128 packed 24-bit leave values to 32-bit Equity in a batch.
 // Sign-extends from bit 23. Designed to be auto-vectorized.
@@ -777,6 +794,7 @@ static inline RackInfoTable *rack_info_table_create(const char *data_paths,
   RackInfoTable *rit = NULL;
   if (error_stack_is_empty(error_stack)) {
     rit = (RackInfoTable *)calloc_or_die(1, sizeof(RackInfoTable));
+    rit->instance_id = rack_info_table_next_instance_id();
     if (use_mmap) {
       rack_info_table_load_mmap(rit, rit_name, rit_filename, error_stack);
     } else {

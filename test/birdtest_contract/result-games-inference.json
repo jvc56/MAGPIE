@@ -16,6 +16,7 @@
       {
         "game_index": 0,
         "turn_number": 0,
+        "player": 1,
         "rack": "AHHMRUU",
         "position": "15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 AHHMRUU/AFIMORR 0/0 0",
         "analysis": "sim",
@@ -68,6 +69,7 @@
       {
         "game_index": 0,
         "turn_number": 3,
+        "player": 1,
         "rack": "BEGLSTX",
         "position": "15/15/15/15/15/15/15/6HUH6/4FAM1MURR3/15/15/15/15/15/15 AIORRVY/BEGLSTX 37/21 0",
         "analysis": "sim",

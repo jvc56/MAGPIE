@@ -11,6 +11,7 @@
 #include "../ent/inference_results.h"
 #include "../ent/letter_distribution.h"
 #include "../ent/move.h"
+#include "../ent/player.h"
 #include "../ent/rack.h"
 #include "../ent/sim_args.h"
 #include "../ent/sim_results.h"
@@ -203,11 +204,15 @@ const Move *get_top_simming_move(Game *game, MoveList *move_list,
                                  SimResults *sim_results, bool *simulated,
                                  ErrorStack *error_stack) {
   *simulated = false;
+  // The candidates are the player's best plays by its own sort type, as a
+  // static player's move is: a player sorted by score simulates the top plays
+  // by score. Equity unless a player asks otherwise.
   const MoveGenArgs gen_args = {
       .game = game,
       .move_list = move_list,
       .move_record_type = MOVE_RECORD_ALL,
-      .move_sort_type = MOVE_SORT_EQUITY,
+      .move_sort_type = player_get_move_sort_type(
+          game_get_player(game, game_get_player_on_turn_index(game))),
       .override_kwg = NULL,
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,

@@ -1,6 +1,6 @@
 {
-  "claim_token": "a89471ba-364c-45c6-b7ec-6c700969e985",
-  "job_id": "06d49062-c563-4661-86e6-fdd1843c2eaa",
+  "claim_token": "0c8fb94c-7dcb-4468-935c-58e2edd01eb0",
+  "job_id": "99669d2d-9b43-4a1e-b764-b195bf2ecd60",
   "job_name": "tier 6 game pairs: e2e-wordmap-equity vs e2e-wordmap-score",
   "max_task_seconds": 3600,
   "task_request": {
@@ -92,7 +92,7 @@
       "peg_nested_strides": null
     }
   },
-  "min_magpie_version": "0.1.1",
+  "min_magpie_version": "0.1.2",
   "expected_data": {
     "algorithm": "sha256",
     "files": [

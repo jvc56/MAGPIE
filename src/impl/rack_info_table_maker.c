@@ -841,6 +841,7 @@ RackInfoTable *make_rack_info_table(const KLV *klv, const WMP *wmp,
   if (total_racks == 0) {
     RackInfoTable *rit =
         (RackInfoTable *)calloc_or_die(1, sizeof(RackInfoTable));
+    rit->instance_id = rack_info_table_next_instance_id();
     rit->version = RIT_VERSION;
     rit->rack_size = (uint8_t)RACK_SIZE;
     rit->playthrough_min_played_size = effective_min;
@@ -958,6 +959,7 @@ RackInfoTable *make_rack_info_table(const KLV *klv, const WMP *wmp,
 
   // 7. Build the RackInfoTable
   RackInfoTable *rit = (RackInfoTable *)calloc_or_die(1, sizeof(RackInfoTable));
+  rit->instance_id = rack_info_table_next_instance_id();
   rit->version = RIT_VERSION;
   rit->rack_size = (uint8_t)RACK_SIZE;
   rit->playthrough_min_played_size = effective_min;

@@ -1,6 +1,6 @@
 {
-  "claim_token": "11cf9800-08c1-43ab-aa33-a41e6a2efc9c",
-  "job_id": "d797f1a3-a00f-4e57-a7f8-153ef3f2f430",
+  "claim_token": "299b0bcd-3c8c-4e6d-9055-9d6927e3b912",
+  "job_id": "0a962d9d-ffb7-40ed-9553-2b91d6e2038f",
   "job_name": "tier 6 games: e2e-solving vs e2e-solving",
   "max_task_seconds": 3600,
   "task_request": {
@@ -96,7 +96,7 @@
       "peg_nested_strides": null
     }
   },
-  "min_magpie_version": "0.1.1",
+  "min_magpie_version": "0.1.2",
   "expected_data": {
     "algorithm": "sha256",
     "files": [
@@ -131,5 +131,5 @@
     ],
     "derived": []
   },
-  "worker_uuid": "5442f856-4759-4692-a79a-f2bf4bf2b456"
+  "worker_uuid": "2581298a-6d2f-4053-9441-1ec34d17e666"
 }

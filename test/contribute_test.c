@@ -1958,6 +1958,65 @@ static void test_a_pairs_first_divergence_is_both_games_at_one_turn(void) {
   config_destroy(config);
 }
 
+// A static CSW21 player that reports `plays` ranked plays per position.
+static char *static_player_recording(int plays) {
+  return get_formatted_string(
+      "{\"lexicon\": \"CSW21\", \"leaves\": \"CSW21\", "
+      "\"recorder_type\": \"best\", \"sort_strategy\": \"equity\", "
+      "\"num_plies\": 0, \"num_plays\": 100, \"num_plies_recorded\": 2, "
+      "\"num_plays_recorded\": %d, \"movegens_per_move\": null, "
+      "\"movegen_margin\": 5.0, "
+      "\"use_wordmap\": false, \"use_rit\": false, \"use_wit\": false, "
+      "\"endgame_plies\": 0, \"peg_max_bag\": 0}",
+      plays);
+}
+
+// Each captured position says which player moved from it and keeps that
+// player's own num_plays_recorded. The case this pins: a games task kept
+// player 1's count for both seats, so birdtest refused every capture job whose
+// players recorded different numbers.
+static void test_each_players_positions_keep_its_own_play_count(void) {
+  char *player1 = static_player_recording(3);
+  char *player2 = static_player_recording(5);
+  char *request = get_formatted_string(
+      "{\"job_type\": \"games\", \"variant\": \"classic\", "
+      "\"letter_distribution\": \"english\", "
+      "\"board_layout\": \"standard15\", \"seed\": \"43\", "
+      "\"num_games\": 2, \"capture_positions\": true, "
+      "\"capture_first_divergence\": false, \"bingo_bonus\": 50, "
+      "\"sim_cutoff\": 0.005, \"player1\": %s, \"player2\": %s}",
+      player1, player2);
+  uint64_t movegens = 0;
+  char *result = execute_task("games", request, 1, &movegens);
+  ErrorStack *error_stack = error_stack_create();
+  const JsonValue *parsed = json_parse(result, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  const JsonValue *positions = json_object_get(parsed, "positions");
+  const int caps[] = {0, 3, 5};
+  int most[] = {0, 0, 0};
+  assert(json_array_length(positions) > 0);
+  for (int i = 0; i < json_array_length(positions); i++) {
+    const JsonValue *position = json_array_get(positions, i);
+    const int player = (int)json_get_int(position, "player", error_stack);
+    assert(error_stack_is_empty(error_stack));
+    assert(player == 1 || player == 2);
+    const int kept = json_array_length(json_object_get(position, "moves"));
+    assert(kept <= caps[player]);
+    if (kept > most[player]) {
+      most[player] = kept;
+    }
+  }
+  assert(most[1] == 3);
+  assert(most[2] == 5);
+
+  json_destroy((JsonValue *)parsed);
+  error_stack_destroy(error_stack);
+  free(result);
+  free(request);
+  free(player2);
+  free(player1);
+}
+
 // Capturing positions decides what a games task reports, never what it plays.
 // The case this pins: with capture on, a static player read the first element
 // of its move list as the move to play, and recording every move leaves that
@@ -2725,9 +2784,9 @@ static void test_a_set_aside_job_is_left_out_of_claims_for_a_while(void) {
       contribute_state_create(path, thread_control, error_stack);
   assert(error_stack_is_empty(error_stack));
 
-  char *body = contribute_claim_body(state, "0.1.1");
+  char *body = contribute_claim_body(state, "0.1.2");
   char *expected_body = get_formatted_string(
-      "{\"magpie_version\":\"0.1.1\",\"board_dim\":%d,\"rack_size\":%d,"
+      "{\"magpie_version\":\"0.1.2\",\"board_dim\":%d,\"rack_size\":%d,"
       "\"unsupported_jobs\":[]}",
       BOARD_DIM, RACK_SIZE);
   assert_strings_equal(body, expected_body);
@@ -2736,7 +2795,7 @@ static void test_a_set_aside_job_is_left_out_of_claims_for_a_while(void) {
 
   assert(contribute_defer_job(state, "job-a") == 3);
   assert(contribute_defer_job(state, "job-a") == 6);
-  body = contribute_claim_body(state, "0.1.1");
+  body = contribute_claim_body(state, "0.1.2");
   assert(strstr(body, "\"unsupported_jobs\":[\"job-a\"]"));
   free(body);
   for (int i = 0; i < 20; i++) {
@@ -2744,7 +2803,7 @@ static void test_a_set_aside_job_is_left_out_of_claims_for_a_while(void) {
   }
   assert(contribute_defer_job(state, "job-b") ==
          CONTRIBUTE_BAD_ARTIFACT_MAX_WAIT_SECONDS);
-  body = contribute_claim_body(state, "0.1.1");
+  body = contribute_claim_body(state, "0.1.2");
   assert(strstr(body, "\"job-a\",\"job-b\"") ||
          strstr(body, "\"job-b\",\"job-a\""));
   free(body);
@@ -3620,6 +3679,7 @@ void test_contribute(void) {
   test_contract_fixtures_carry_every_key_contribute_reads();
   test_results_carry_every_key_the_server_reads();
   test_capturing_positions_does_not_change_the_games();
+  test_each_players_positions_keep_its_own_play_count();
   test_inferring_players_report_their_inference();
   test_a_forced_turn_is_not_simulated();
   test_a_pairs_first_divergence_is_both_games_at_one_turn();

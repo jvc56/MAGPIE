@@ -4,6 +4,7 @@
 #include "../src/def/board_defs.h"
 #include "../src/def/kwg_defs.h"
 #include "../src/def/letter_distribution_defs.h"
+#include "../src/def/players_data_defs.h"
 #include "../src/def/rack_defs.h"
 #include "../src/ent/bit_rack.h"
 #include "../src/ent/data_filepaths.h"
@@ -12,11 +13,15 @@
 #include "../src/ent/klv.h"
 #include "../src/ent/leave_map.h"
 #include "../src/ent/letter_distribution.h"
+#include "../src/ent/move.h"
 #include "../src/ent/player.h"
+#include "../src/ent/players_data.h"
 #include "../src/ent/rack.h"
 #include "../src/ent/rack_info_table.h"
 #include "../src/ent/wmp.h"
 #include "../src/impl/config.h"
+#include "../src/impl/gameplay.h"
+#include "../src/impl/rack_draw.h"
 #include "../src/impl/rack_info_table_maker.h"
 #include "../src/util/io_util.h"
 #include "test_util.h"
@@ -244,6 +249,91 @@ static void verify_unions_against_wmp(const RackInfoTable *rit, const WMP *wmp,
   }
 }
 
+// The best opening play's equity for `rack` when both players use `rit`, in a
+// game made for the purpose. The table stays the caller's.
+static Equity top_equity_with_table(const Config *config, RackInfoTable *rit,
+                                    const char *rack) {
+  PlayersData *players_data = config_get_players_data(config);
+  players_data_set_data(players_data, PLAYERS_DATA_TYPE_RIT, 0, rit);
+  players_data_set_data(players_data, PLAYERS_DATA_TYPE_RIT, 1, rit);
+  Game *game = config_game_create(config);
+  assert(draw_rack_string_from_bag(game, 0, rack) == RACK_SIZE);
+  MoveList *move_list = move_list_create(1);
+  const Equity equity = move_get_equity(get_top_equity_move(game, move_list));
+  move_list_destroy(move_list);
+  game_destroy(game);
+  players_data_set_data(players_data, PLAYERS_DATA_TYPE_RIT, 0, NULL);
+  players_data_set_data(players_data, PLAYERS_DATA_TYPE_RIT, 1, NULL);
+  return equity;
+}
+
+// MoveGen caches lookups into a rack info table per thread, and its threads
+// outlive the table: a contributor's next task loads its own, which the
+// allocator can put at the freed table's struct address (and the kernel, for
+// a mapped one, at its region). The case this pins: tasks on two lexicons in
+// one process, the second's racks the first's, crashed in generate_moves on
+// the first table's unmapped entries. Here a second table, built from other
+// leaves, takes the first's struct outright, as a reload can; the generation
+// after it must use the new table's leaves, not the entries cached from the
+// old one.
+static void
+test_move_gen_reads_a_table_loaded_at_a_replaced_tables_address(void) {
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -ld english_ab -k1 CSW21 -k2 CSW21 -s1 equity -s2 "
+      "equity -r1 best -r2 best -numplays 1 -threads 1");
+  Game *game = config_game_create(config);
+  const Player *player = game_get_player(game, 0);
+  const LetterDistribution *ld = config_get_ld(config);
+  ErrorStack *error_stack = error_stack_create();
+  // Another copy of the same leaves, with the leaves of the rack below worth
+  // 40 points: the two tables then rank its plays differently. Up to two Bs:
+  // CSW21's leaves are english's, which has two, so it has no leave with three.
+  KLV *other_leaves =
+      klv_create(config_get_data_paths(config), "CSW21", error_stack);
+  assert(error_stack_is_empty(error_stack));
+  for (int num_a = 0; num_a <= 4; num_a++) {
+    for (int num_b = 0; num_b <= 2; num_b++) {
+      const int size = num_a + num_b;
+      if (size == 0 || size == RACK_SIZE) {
+        continue;
+      }
+      char leave[RACK_SIZE + 1];
+      for (int i = 0; i < size; i++) {
+        leave[i] = i < num_a ? 'A' : 'B';
+      }
+      leave[size] = '\0';
+      set_klv_leave_value(other_leaves, ld, leave, int_to_equity(40));
+    }
+  }
+  RackInfoTable *first = make_rack_info_table(player_get_klv(player),
+                                              player_get_wmp(player), ld, 1, 1);
+  RackInfoTable *second =
+      make_rack_info_table(other_leaves, player_get_wmp(player), ld, 1, 1);
+  assert(rack_info_table_get_instance_id(first) != 0);
+  assert(rack_info_table_get_instance_id(second) !=
+         rack_info_table_get_instance_id(first));
+
+  const char *rack = "AAAABBB";
+  const Equity with_second = top_equity_with_table(config, second, rack);
+  const Equity with_first = top_equity_with_table(config, first, rack);
+  // Otherwise the generation below could not tell the two apart.
+  assert(with_first != with_second);
+
+  // The second table in the first's struct, the first's entries still
+  // allocated, as when a freed table's address is reused before its memory.
+  const RackInfoTable first_contents = *first;
+  *first = *second;
+  assert(top_equity_with_table(config, first, rack) == with_second);
+  *first = first_contents;
+
+  rack_info_table_destroy(second);
+  rack_info_table_destroy(first);
+  klv_destroy(other_leaves);
+  error_stack_destroy(error_stack);
+  game_destroy(game);
+  config_destroy(config);
+}
+
 void test_rack_info_table(void) {
   // Use CSW21 with the english_ab distribution (50 A, 50 B, 0 blank).
   // This keeps the number of full racks small (8, for 0A+7B through 7A+0B)
@@ -348,4 +438,6 @@ void test_rack_info_table(void) {
   error_stack_destroy(error_stack);
   game_destroy(game);
   config_destroy(config);
+
+  test_move_gen_reads_a_table_loaded_at_a_replaced_tables_address();
 }

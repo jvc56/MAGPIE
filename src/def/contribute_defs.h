@@ -174,6 +174,9 @@ enum { CONTRIBUTE_MAX_THREADS = (MAX_THREADS - 1) / 2 };
 #define CONTRIBUTE_KEY_POSITIONS "positions"
 #define CONTRIBUTE_KEY_GAME_INDEX "game_index"
 #define CONTRIBUTE_KEY_TURN_NUMBER "turn_number"
+// Which player moved from a captured position: 1 or 2, as the request's
+// player1 and player2.
+#define CONTRIBUTE_KEY_POSITION_PLAYER "player"
 #define CONTRIBUTE_KEY_RACK "rack"
 #define CONTRIBUTE_KEY_RACKS "racks"
 #define CONTRIBUTE_KEY_POSITION "position"
