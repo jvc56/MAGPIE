@@ -87,9 +87,12 @@ human side, thinking time, overtime and challenge rules. Watch delay appears
 only for computer-vs-computer games. **Automatically manage time using the full
 clock** is on by default for timed games: the computer allocates its remaining
 time across estimated remaining plays, with a reserve for committing moves.
-Simulation uses its allocated time without confidence-based early stopping;
-solvers may finish sooner. Uncheck it to use **Seconds per computer move**.
-Untimed games use that per-move cap, and static equity needs neither option.
+Ordinary simulations take at most 10 seconds and may stop earlier when the
+best move is clear. Preendgame can use the remaining clock while reserving up
+to 10 seconds for each estimated later turn; endgame can use the remaining
+clock. Both keep a small reserve for committing the move. Uncheck it to use **Seconds per computer move**.
+Untimed games use that per-move cap; ordinary simulations still have the
+10-second ceiling. Static equity needs neither option.
 The scoreboard keeps each player’s name,
 score, clock and turn indicator in a fixed place.
 Record mode uses manual racks. Play and Watch draw/refill both racks using the
