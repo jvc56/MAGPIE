@@ -34,6 +34,8 @@ try {
   await page.locator("#threads").fill("2");
   await page.locator("#back-to-game").click();
   for (const [sample, mode] of [["opening", "kibitz"], ["midgame", "sim"], ["peg", "peg"], ["endgame", "endgame"]]) {
+    const menu = page.locator("#game-overflow");
+    if (await menu.isVisible() && await menu.getAttribute("aria-expanded") !== "true") await menu.click();
     await page.locator("#import").click();
     await page.locator("#cgp").fill(SAMPLES[sample]);
     await page.locator('#import-form button[type="submit"]').click();
