@@ -483,6 +483,7 @@ test("game entry: typing, live rack, scoring, pass, exchange, notes and saved hi
   await page.locator("#rack").fill("ABCDEFS");
   await page.locator("#rack").dispatchEvent("change");
   await page.locator("#pass-move").click();
+  await page.locator("#confirm-yes").click();
   await expect(page.locator("#history-position option")).toHaveCount(3);
   await page.locator("#rack").fill("AEINRST");
   await page.locator("#rack").dispatchEvent("change");
@@ -566,6 +567,7 @@ test("history replacement confirms, cancels and undoes without losing later move
   await page.locator("#rack").fill("ABCDEFS");
   await page.locator("#rack").dispatchEvent("change");
   await page.locator("#pass-move").click();
+  await page.locator("#confirm-yes").click();
   await expect(page.locator("#history-position option")).toHaveCount(3);
   await page.selectOption("#history-position", "1");
   await page.locator("#edit-history-move").click();
@@ -820,6 +822,7 @@ test("game setup, stable scoreboard and responsive tracking", async ({
       ),
   ).toBe(true);
   await page.locator("#pass-move").click();
+  await page.locator("#confirm-yes").click();
   await expect(page.locator("#history-position option")).toHaveCount(
     3,
     { timeout: 30000 },

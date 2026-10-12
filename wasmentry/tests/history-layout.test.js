@@ -93,6 +93,7 @@ test("computer game history occupies the right panel without overlapping the boa
   await page.selectOption("#bot-analysis", "kibitz");
   await page.locator("#new-game-form button.primary").click();
   await page.locator("#pass-move").click();
+  await page.locator("#confirm-yes").click();
   await expect(page.locator("#history-position option")).toHaveCount(3);
   await page.locator("#pause-game").click();
   for (const width of [1936, 1536, 1280]) {

@@ -45,6 +45,7 @@ test('ending an idle game unlocks review controls without another engine command
   for (const id of ['rack', 'opponent-rack', 'score', 'opponent-score', 'edit', 'clear', 'on-turn-player', 'play-move', 'shuffle-rack', 'sort-rack'])
     await expect(page.locator(`#${id}`)).toBeEnabled();
   await page.locator('#pass-move').click();
+  await page.locator('#confirm-yes').click();
   await page.locator('#confirm-no').click();
   await expect(page.locator('#session-result')).toContainText('Game ended');
   await expect(page.locator('#history-position option')).toHaveCount(2);
@@ -58,6 +59,7 @@ test('a postmortem branch clears the old result in the UI and GCG; undo restores
   expect(original).toContain('#description Magpie finished:');
   await page.locator('#history-first').click();
   await page.locator('#pass-move').click();
+  await page.locator('#confirm-yes').click();
   await page.locator('#confirm-yes').click();
   await expect(page.locator('#status')).toHaveText('Move recorded');
   await expect(page.locator('#play-session')).toBeHidden();

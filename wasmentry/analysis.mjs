@@ -1672,6 +1672,7 @@ function confirmGame(title, text, label = "Continue") {
   if (resolveGameConfirmation) return Promise.resolve(false);
   $("confirm-title").textContent = title;
   $("confirm-message").textContent = text;
+  $("confirm-message").hidden = !text;
   $("confirm-yes").textContent = label;
   return new Promise((resolve) => {
     resolveGameConfirmation = resolve;
@@ -1921,6 +1922,11 @@ async function submitMove(value = null, computer = false) {
     const pendingMove = value || moveNotation(position, draftTiles, vertical);
     if (!pendingMove) throw new Error("Place tiles on the board first.");
     const move = normalizeMove(pendingMove);
+    if (move === "pass" && !computer && !(await confirmGame(
+      "Are you sure you wish to pass?",
+      "",
+      "Pass",
+    ))) return;
     if (
       historyIndex < recordedGame.positions.length - 1 &&
       !(await confirmGame(

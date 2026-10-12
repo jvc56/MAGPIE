@@ -122,6 +122,7 @@ test("late move submission cannot undo a loss on time", async ({page})=>{
   await page.locator('.game-options > summary').click();await page.selectOption('#game-time','300');await page.selectOption('#overtime','0');await page.selectOption('#first-player','0');
   await page.locator('#new-game-form button.primary').click();await expect(page.locator('#play-session')).toBeVisible();
   await page.evaluate(()=>{window.holdGameReply=true});await page.locator('#pass-move').click();
+  await page.locator('#confirm-yes').click();
   await page.waitForFunction(()=>Boolean(window.releaseGameReply));
   await page.clock.fastForward(301000);
   await expect(page.locator('#session-result')).toContainText('lost on time');

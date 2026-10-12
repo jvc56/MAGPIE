@@ -103,7 +103,10 @@ for (const kind of ['play','watch']) test(`${kind} computer sims reappear in rev
   await page.locator('#bot-seconds').fill('1');
   if (kind === 'watch') await page.locator('#watch-delay').fill('2');
   await page.locator('#new-game-form button.primary').click();
-  if (kind === 'play') await page.locator('#pass-move').click();
+  if (kind === 'play') {
+    await page.locator('#pass-move').click();
+    await page.locator('#confirm-yes').click();
+  }
   await expect(page.locator('#history-position option')).toHaveCount(kind === 'play' ? 3 : 2,{timeout:60000});
   await complete(page);
   if (kind === 'watch') await page.locator('#pause-game').click();

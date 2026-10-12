@@ -48,6 +48,7 @@ test("native play deals racks, keeps the human rack visible, and computer commit
   await expect(page.locator("#rack-tiles .rack-tile")).toHaveCount(7);
   const rack = await page.locator("#rack-tiles").textContent();
   await page.locator("#pass-move").click();
+  await page.locator("#confirm-yes").click();
   await expect(page.locator("#play-move")).toBeEnabled();
   expect(await page.locator("#error").textContent()).toBe("");
   await expect(page.locator("#history-position option")).toHaveCount(3, {
@@ -292,6 +293,7 @@ test("overtime penalties agree in the displayed score and saved GCG", async ({
   await ready(page);
   await setup(page, "play", "0", "300", "60");
   await page.locator("#pass-move").click();
+  await page.locator("#confirm-yes").click();
   await expect(page.locator("#history-position option")).toHaveCount(3, {
     timeout: 30000,
   });

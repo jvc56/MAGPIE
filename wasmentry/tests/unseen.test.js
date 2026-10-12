@@ -87,6 +87,7 @@ test("pool stays with the human while the computer thinks", async ({
   await expect(page.locator("#pass-move")).toBeEnabled();
   const before = await readPool(page);
   await page.locator("#pass-move").click();
+  await page.locator("#confirm-yes").click();
   await expect(page.locator("#session-result")).toContainText("thinking");
   expect(await readPool(page)).toEqual(before);
   await expect(page.locator("#opponent-rack")).toBeHidden();

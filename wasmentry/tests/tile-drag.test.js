@@ -328,3 +328,28 @@ for (const kind of ['watch', 'play']) test(`${kind}: visible rack can be arrange
   await expect(page.locator('#history-position option')).toHaveCount(1);
   await expect(page.locator('#error')).toBeHidden();
 });
+
+test('passing requires confirmation and Cancel or Escape preserve tentative tiles', async ({page}) => {
+  await ready(page, 'AEINRST');
+  await cell(page,7,7).click();
+  await page.keyboard.type('at');
+  const rack = await rackLetters(page);
+  for (const cancel of ['button', 'escape']) {
+    await page.locator('#pass-move').click();
+    await expect(page.locator('#confirm-title')).toHaveText('Are you sure you wish to pass?');
+    await expect(page.locator('#confirm-yes')).toHaveText('Pass');
+    await expect(page.locator('#history-position option')).toHaveCount(1);
+    if (cancel === 'button') await page.locator('#confirm-no').click();
+    else await page.keyboard.press('Escape');
+    await expect(page.locator('#game-confirm')).toBeHidden();
+    await expect(page.locator('#board .pending')).toHaveCount(2);
+    expect(await rackLetters(page)).toBe(rack);
+    await expect(page.locator('#history-position option')).toHaveCount(1);
+  }
+  await page.locator('#pass-move').click();
+  await page.locator('#confirm-yes').click();
+  await expect(page.locator('#history-position option')).toHaveCount(2);
+  await expect(page.locator('#history-position option').last()).toContainText('- +0 0');
+  await expect(page.locator('#board .pending')).toHaveCount(0);
+  await expect(page.locator('#error')).toBeHidden();
+});
