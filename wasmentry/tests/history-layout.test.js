@@ -287,6 +287,8 @@ test("board size stays stable through human and computer turn transitions", asyn
   await page.locator('#new-game').click();
   await page.locator('.game-options > summary').click();
   await page.selectOption('#bot-analysis', 'kibitz');
+  await page.locator('#new-game-position > summary').click();
+  await page.locator('#new-game-cgp').fill('15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 BCDFGHJ/AEINRST 0/0 0');
   await page.locator('#new-game-form button.primary').click();
   // Starting a game loads the rack asynchronously; measure turn transitions
   // only after the initial human turn has rendered.
@@ -318,8 +320,21 @@ test("board size stays stable through human and computer turn transitions", asyn
     await page.locator('#confirm-yes').click();
     await expect(page.locator('#history-position option')).toHaveCount(count + 2);
     await expect(page.locator('#pass-move')).toBeEnabled();
+    const toast = page.locator('#computer-move');
+    await expect(toast).toBeVisible();
+    await expect(toast).toContainText('Magpie');
+    const toastBox = await toast.boundingBox();
+    const controlsBox = await page.locator('#session-controls').boundingBox();
+    if (width === 900) {
+      await expect(toast).toContainText('Magpie played');
+      await expect(toast.locator('.move-tile').first()).toBeVisible();
+      expect(toastBox.x).toBeGreaterThanOrEqual(controlsBox.x + controlsBox.width);
+      expect(Math.abs(toastBox.y + toastBox.height / 2 - controlsBox.y - controlsBox.height / 2)).toBeLessThan(2);
+      await page.screenshot({path:test.info().outputPath('computer-move-toast.png')});
+    }
     const sizes = await page.evaluate(() => {window.boardSizeObserver.disconnect(); return window.boardSizes;});
     expect(sizes.length).toBeGreaterThan(0);
     expect(Math.max(...sizes) - Math.min(...sizes)).toBeLessThan(1);
   }
+  await expect(page.locator('#computer-move')).toBeHidden({timeout:15000});
 });

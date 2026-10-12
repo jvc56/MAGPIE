@@ -1628,6 +1628,7 @@ body.tile-dragging, body.tile-dragging * { cursor: grabbing !important; }
 #play-session { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; }
 #session-controls { flex: none; margin: 0; }
 .position-toolbar #session-result { margin: 0; }
+#computer-move { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 4px 8px; border-radius: 4px; background: var(--raised); }
 .position-toolbar #error, .position-toolbar #move-feedback { flex: 1 1 12ch; min-width: 0; margin: 0; padding: 4px 6px; overflow-wrap: anywhere; }
 .position-toolbar #move-feedback { color: var(--danger); }
 .player-name { position: relative; padding-bottom: 7px; }

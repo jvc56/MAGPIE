@@ -76,6 +76,29 @@ let session = null,
   botRunning = false,
   botTimer,
   reviewRunning = false;
+let computerMoveTimer;
+function clearComputerMove() {
+  clearTimeout(computerMoveTimer);
+  $("computer-move").hidden = true;
+  $("computer-move").replaceChildren();
+}
+function showComputerMove(index, before) {
+  if (session?.kind !== "play" || before.onTurn === session.human) return;
+  // Only the number of exchanged tiles is public, even if this move ends the game.
+  const line = gameEvents()[index]?.replace(/(\s)-([A-Z?]+)(?=\s)/, (_, space, tiles) => `${space}-${tiles.length}`);
+  if (!line) return;
+  const {move, score} = historyPlayParts(line, before);
+  const toast = $("computer-move");
+  clearComputerMove();
+  const name = recordedGame.players[before.onTurn];
+  if (move === "-") toast.append(`${name} passed`);
+  else if (/^-\d+$/.test(move)) {
+    const count = Number(move.slice(1));
+    toast.append(`${name} exchanged ${count} tile${count === 1 ? "" : "s"}`);
+  } else toast.append(`${name} played`, moveTiles(displayMove(move), before.onTurn, before), score);
+  toast.hidden = false;
+  computerMoveTimer = setTimeout(clearComputerMove, 12000);
+}
 let analysisCache = new Map(),
   analysisBase = null,
   analysisBaseIterations = 0,
@@ -399,6 +422,7 @@ function clearResults() {
   renderResults();
 }
 function setPosition(next, fromHistory = false) {
+  clearComputerMove();
   tileDrag?.cancel();
   entryAnchored = false;
   lastRackTap = null;
@@ -2143,6 +2167,8 @@ async function submitMove(value = null, computer = false) {
   if (busy || (isLive() && !computer && (!humanTurn() || session.paused)))
     return;
   const generation = positionGeneration;
+  const before = position;
+  const moveIndex = historyIndex;
   try {
     if (!recordedGame) throw new Error("Start or load a game first.");
     if (!recordedBoardMatches())
@@ -2219,6 +2245,7 @@ async function submitMove(value = null, computer = false) {
       if (game.ended) finishSession("Game over");
     }
     message("Move recorded");
+    if (computer) showComputerMove(moveIndex, before);
   } catch (failure) {
     if (generation !== positionGeneration) return;
     error(moveErrorMessage(failure.message));
