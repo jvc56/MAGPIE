@@ -61,6 +61,17 @@ void update_cross_sets_after_unplay(const Move *move, const Game *game);
 // parallel WIT block caches; unplay invalidates those derived entries.
 void update_cross_set_for_move_from_undo(MoveUndo *undo, const Game *game);
 
+// Called at the initial position and after each event. Borrowed game/history
+// are valid only during the callback. Return false to stop normally; errors
+// from replay itself are reported through error_stack.
+// Callback snapshots include tile ownership for recorded placements.
+typedef bool (*GameHistoryCallback)(const GameHistory *game_history,
+                                    const Game *game, int event_index,
+                                    void *user_data);
+void game_replay_history(GameHistory *game_history, Game *game,
+                         GameHistoryCallback callback, void *user_data,
+                         ErrorStack *error_stack);
+// Event index 0 selects the start; N selects the position after event N.
 void game_play_n_events(GameHistory *game_history, Game *game,
                         int num_events_to_play, bool validate,
                         ErrorStack *error_stack);

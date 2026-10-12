@@ -33,6 +33,7 @@
 #include "gameplay_test.h"
 #include "gcg_test.h"
 #include "heat_map_test.h"
+#include "history_replay_test.h"
 #include "infer_cmp_test.h"
 #include "infer_test.h"
 #include "klv_test.h"
@@ -139,6 +140,7 @@ static TestEntry test_table[] = {
     {"command", test_command},
     {"embedding", test_embedding_lifecycle},
     {"fileproxy", test_fileproxy_cache},
+    {"historyreplay", test_history_replay},
     {"cmdapi", test_cmd_api},
     {"gcg", test_gcg},
     {"analyze", test_analyze},
