@@ -32,12 +32,11 @@ static int xs_word_order(const void *left, const void *right) {
   return strcmp(first->word, second->word);
 }
 static bool xs_codebook_index(XSCodebook *book) {
-  book->ordered = malloc_or_die(sizeof(*book->ordered) * (size_t)book->count);
+  book->ordered = malloc_or_die(sizeof(XSWord *) * (size_t)book->count);
   for (int index = 0; index < book->count; index++) {
     book->ordered[index] = &book->words[index];
   }
-  qsort(book->ordered, (size_t)book->count, sizeof(*book->ordered),
-        xs_word_order);
+  qsort(book->ordered, (size_t)book->count, sizeof(XSWord *), xs_word_order);
   uint64_t code = 0;
   unsigned previous = 0;
   for (int index = 0; index < book->count; index++) {
@@ -274,7 +273,7 @@ bool xs_codebook_build(const char *input, const char *output,
             !errno && end && !*end && weight > 0 &&
             weight <= UINT64_MAX - total;
     if (valid) {
-      strcpy(nodes[index].word, word);
+      memcpy(nodes[index].word, word, strlen(word) + 1);
       nodes[index].count = weight;
       nodes[index].parent = -1;
       total += weight;

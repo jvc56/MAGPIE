@@ -29,25 +29,28 @@ char xs_upper(char letter) {
 }
 static void xs_meta_literal(XSBuffer *bits, const char *text, size_t limit) {
   size_t length = strlen(text);
-  if (!length || length > limit || !xs_utf8(text)) {
+  if ((!length && limit != 255) || length > limit || !xs_utf8(text)) {
     bits->valid = false;
     return;
   }
   xs_put(bits, (uint32_t)length, 8);
   for (size_t index = 0; index < length; index++) {
+    if ((unsigned char)text[index] <= 32 || (unsigned char)text[index] == 127) {
+      bits->valid = false;
+    }
     xs_put(bits, (unsigned char)text[index], 8);
   }
 }
 static void xs_meta_read(XSBuffer *bits, char *text, unsigned limit) {
   unsigned length = xs_get(bits, 8);
-  if (!length || length > limit) {
+  if ((!length && limit != 255) || length > limit) {
     bits->valid = false;
     text[0] = '\0';
     return;
   }
   for (unsigned index = 0; index < length; index++) {
     text[index] = (char)xs_get(bits, 8);
-    if ((unsigned char)text[index] <= 32) {
+    if ((unsigned char)text[index] <= 32 || (unsigned char)text[index] == 127) {
       bits->valid = false;
     }
   }
@@ -90,7 +93,7 @@ void xs_read_metadata(XSBuffer *bits, char language[64], char lexicon[256]) {
     return;
   }
   if (lang) {
-    strcpy(language, xs_languages[lang]);
+    memcpy(language, xs_languages[lang], strlen(xs_languages[lang]) + 1);
   } else {
     xs_meta_read(bits, language, 63);
   }
@@ -107,7 +110,8 @@ void xs_read_metadata(XSBuffer *bits, char language[64], char lexicon[256]) {
       bits->valid = false;
       return;
     }
-    strcpy(lexicon, xs_lexica[lang][lex - 1]);
+    memcpy(lexicon, xs_lexica[lang][lex - 1],
+           strlen(xs_lexica[lang][lex - 1]) + 1);
   } else {
     xs_meta_read(bits, lexicon, 255);
   }
@@ -143,9 +147,15 @@ static bool xs_inventory(const XSPosition *position) {
 }
 bool xs_parse_cgp(const char *text, XSPosition *position) {
   *position = (XSPosition){0};
-  strcpy(position->language, "en");
-  strcpy(position->lexicon, "CSW24");
-  StringSplitter *parts = split_string_by_whitespace(text, true);
+  memcpy(position->language, "en", strlen("en") + 1);
+  char *normalized = string_duplicate(text);
+  for (char *cursor = normalized; *cursor; cursor++) {
+    if (*cursor == ';') {
+      *cursor = ' ';
+    }
+  }
+  StringSplitter *parts = split_string_by_whitespace(normalized, true);
+  free(normalized);
   int count = string_splitter_get_number_of_items(parts);
   bool valid = count >= 4 && count % 2 == 0;
   if (valid) {
@@ -184,7 +194,7 @@ bool xs_parse_cgp(const char *text, XSPosition *position) {
               xs_int32(string_splitter_get_item(scores, player),
                        &position->scores[player]);
       if (valid) {
-        strcpy(position->racks[player], rack);
+        memcpy(position->racks[player], rack, strlen(rack) + 1);
       }
     }
     int32_t zeros = 0;
@@ -195,13 +205,25 @@ bool xs_parse_cgp(const char *text, XSPosition *position) {
     string_splitter_destroy(scores);
     for (int index = 4; valid && index < count; index += 2) {
       const char *option = string_splitter_get_item(parts, index);
+      if (*option == '-') {
+        option++;
+      }
       const char *value = string_splitter_get_item(parts, index + 1);
-      if (strings_equal(option, "-lex") &&
+      if (strings_equal(option, "lex") &&
           strlen(value) < sizeof(position->lexicon)) {
-        strcpy(position->lexicon, value);
-      } else if (strings_equal(option, "-lang") &&
+        memcpy(position->lexicon, value, strlen(value) + 1);
+      } else if (strings_equal(option, "lang") &&
                  strlen(value) < sizeof(position->language)) {
-        strcpy(position->language, value);
+        memcpy(position->language, value, strlen(value) + 1);
+      } else if (strings_equal(option, "ld")) {
+        valid = strings_equal(value, "english");
+      } else if (strings_equal(option, "bdn")) {
+        valid = strings_equal(value, "standard15") ||
+                strings_equal(value, "CrosswordGame");
+      } else if (strings_equal(option, "bb")) {
+        valid = strings_equal(value, "50");
+      } else if (strings_equal(option, "var")) {
+        valid = strings_equal(value, "classic");
       } else {
         valid = false;
       }
@@ -233,10 +255,12 @@ char *xs_format_cgp(const XSPosition *position) {
       string_builder_add_int(text, empty);
     }
   }
-  string_builder_add_formatted_string(text, " %s/%s %d/%d %u -lex %s",
-                                      position->racks[0], position->racks[1],
-                                      position->scores[0], position->scores[1],
-                                      position->zeros, position->lexicon);
+  string_builder_add_formatted_string(
+      text, " %s/%s %d/%d %u", position->racks[0], position->racks[1],
+      position->scores[0], position->scores[1], position->zeros);
+  if (*position->lexicon) {
+    string_builder_add_formatted_string(text, " -lex %s", position->lexicon);
+  }
   return string_builder_dump_and_destroy(text, NULL);
 }
 typedef struct XSCandidate {
@@ -472,6 +496,9 @@ char *xs_position_encode(const char *cgp, const char *data_paths,
     }
   }
   char *token = xs_token(&bits, "XSP");
+  if (!token) {
+    xs_error(errors, "invalid position metadata or XSP payload");
+  }
   xs_buffer_destroy(&bits);
   xs_buffer_destroy(&packed);
   xs_buffer_destroy(&words);

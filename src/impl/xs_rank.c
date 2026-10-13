@@ -151,7 +151,7 @@ XSMove *xs_rank_moves(XSRanker *ranker, const char board[225], const char *rack,
   if (!*rack || strlen(rack) > 7) {
     return NULL;
   }
-  strcpy(position.racks[0], rack);
+  memcpy(position.racks[0], rack, strlen(rack) + 1);
   char *cgp = xs_format_cgp(&position);
   XSPosition checked;
   if (!xs_parse_cgp(cgp, &checked)) {
@@ -175,7 +175,8 @@ XSMove *xs_rank_moves(XSRanker *ranker, const char board[225], const char *rack,
   int generated = move_list_get_count(moves);
   if (generated == XS_RANK_CAPACITY) {
     move_list_destroy(moves);
-    xs_error(errors, "rank candidate limit reached");
+    // An incomplete score-sorted candidate set cannot define equity ranks.
+    // Encoder falls back to an explicit move; decoder rejects any rank.
     return NULL;
   }
   XSMove *result = calloc_or_die((size_t)generated + 1, sizeof(*result));

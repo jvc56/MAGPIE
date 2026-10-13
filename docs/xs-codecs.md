@@ -12,8 +12,12 @@ an error; they are never guessed or decoded using the current model.
 
 ## Build and commands
 
-Native builds need zlib development headers (`zlib1g-dev` on Debian/Ubuntu;
-the macOS SDK provides zlib). Emscripten uses its zlib port.
+No additional libraries, Python, or environment variables are required.
+CRC32 and bounded gzip/DEFLATE reading are implemented in C. The codebook
+writer emits deterministic stored DEFLATE blocks: the canonical JSON and
+Huffman lengths reproduce the published model, but the larger gzip wrapper
+differs from the original compressed assets. Keep using the published assets
+for registered profiles; their full file hashes remain pinned.
 
 ```sh
 make magpie BUILD=no_pgo_release
@@ -53,7 +57,7 @@ The builder can generate candidate models from arbitrary counts; naming one
 accept only the registered asset checksums. New published models need new
 immutable paths and new codec IDs; never replace the registered v1 data.
 
-## Data contract and installation before #17 merges
+## Data contract and installation
 
 The only added codec data are the six assets in
 [MAGPIE-DATA #17](https://github.com/jvc56/MAGPIE-DATA/pull/17):
@@ -72,17 +76,16 @@ and English distribution in the core codec.
 Until a data release includes XS, use a MAGPIE-DATA checkout explicitly:
 
 ```sh
-git clone --branch codex/xs-stable-lexicon-data \
-  https://github.com/jvc56/MAGPIE-DATA.git /tmp/magpie-xs-data
+git clone https://github.com/jvc56/MAGPIE-DATA.git /tmp/magpie-xs-data
+git -C /tmp/magpie-xs-data checkout c4216b80098e8c7e88262cb5d04d0bc033bc4d46
 ./bin/magpie conv cgp2xsp position.cgp position.xsp \
   -path /tmp/magpie-xs-data/data:data
-MAGPIE_XS_DATA=/tmp/magpie-xs-data/data ./bin/magpie_test xsdata
+./bin/magpie_test xsdata:/tmp/magpie-xs-data/data
 ```
 
-After #17 merges, `main` can be checked out instead. **Do not expect
-`download_data.sh`'s existing versioned archives to contain XS.** The dedicated
-CI job checks out the exact six-asset commit directly and validates the
-manifest; it works before and after the data PR merges.
+**Do not expect `download_data.sh`'s existing versioned archives to contain
+XS.** The dedicated CI job checks out the merged commit directly. Native tests
+load and verify all six pinned assets without an external validation script.
 
 ## Common wire primitives
 
@@ -115,7 +118,9 @@ that language. Zero in either field escapes to a length byte and UTF-8 text
 The metadata registry is language-aware, but the current board/rack payload
 supports **standard 15×15 English games only**. Other languages and board
 variants must be rejected until a defined payload/profile supports them.
-Unknown English lexicon names are retained literally.
+Unknown English lexicon names are retained literally. An empty lexicon literal
+means no lexicon was specified; decoding does not invent one. Metadata strings
+reject whitespace, ASCII control bytes, and invalid UTF-8.
 
 ## XSP body version 5
 
@@ -139,8 +144,10 @@ Unknown English lexicon names are retained literally.
 
 The board and racks must fit the physical English tile inventory. Blanks keep
 their assigned letters; phonies are allowed. CGP whitespace and empty-run
-spelling are normalized. Only `-lex` and `-lang` options are supported; other
-options return an error rather than being silently dropped.
+spelling are normalized. Both `-lex CSW24` and CGP-spec `lex CSW24;` forms
+are accepted (also `lang`). Standard `ld english`, `bdn standard15` or
+`bdn CrosswordGame`, `bb 50`, and `var classic` options are validated and
+omitted. Unsupported variants or unknown options return an error.
 
 ## XSG body version 2
 
@@ -150,7 +157,7 @@ bytes), one bit saying whether full name equals nickname, and a full-name
 string if different. Names are retained, including internal spaces. Nicknames
 must be distinct and cannot contain whitespace or `:`.
 
-Event count is an unsigned varint. Each event contains a player bit and a
+Event count is an unsigned varint; zero events is valid. Each event contains a player bit and a
 3-bit type: 0 placement, 1 pass, 2 known-tile exchange, 3 count-only exchange,
 4 withdrawn play, 5 other scored action. Types 6–7 are reserved.
 
@@ -186,11 +193,17 @@ int64 and decoded totals must fit int32. Withdrawals restore the preceding
 placement's board and require the same player. After all events, each player
 has a final-rack-present bit and optional sorted rack string.
 
-GCG notes, arbitrary headers, and rack ordering are omitted. Missing rack tiles
+GCG notes, arbitrary headers, and rack ordering are omitted. Standard GCG
+output omits the nonstandard `#language` header; English remains explicit
+in the XSG metadata. Missing rack tiles
 proved by a placement/exchange are retained. Passes, challenge withdrawals,
 scored annotations, known/count-only exchanges, final racks, player names,
 score deltas, and score totals survive normalization. Nonstandard game/board
-headers are rejected. Input must be UTF-8; convert legacy encodings first.
+headers are rejected; `CrosswordGame` is accepted as the standard board alias,
+and explicit tile distributions must be `english`. This codec preserves
+imperfect records rather than enforcing all game legality: turn order, score
+correctness, and physical inventory in a GCG are not guaranteed. Input must
+be UTF-8; convert legacy encodings first.
 
 ### Frozen ranking contract
 
@@ -204,6 +217,8 @@ play-throughs to `.`, and sort by:
 2. Ascending row-major start square, then direction (across before down).
 3. ASCII spelling with `.` play-throughs and lowercase designated blanks.
 
+If enumeration reaches the 100,000-candidate limit (possible with two blanks),
+the turn is encoded explicitly; a truncated list never defines ranks.
 Identical candidates are deduplicated; ranks 0–1023 are available. There is no
 PAT, opening adjustment, endgame adjustment, win percentage, WMP, WIT, or RIT
 term in this profile. Engine move generation is used to enumerate candidates,
@@ -217,7 +232,7 @@ profile/format version; do not silently change ranks under these IDs.
 ```sh
 make magpie_test
 ./bin/magpie_test xs
-MAGPIE_XS_DATA=/tmp/magpie-xs-data/data ./bin/magpie_test xsdata
+./bin/magpie_test xsdata:/tmp/magpie-xs-data/data
 ```
 
 `xs` checks standalone formats, codebook construction through `conv`, signed
@@ -228,3 +243,44 @@ letters to disrupt words while preserving physical inventory. Published
 codebooks must reproduce the exact frozen canonical lengths from the original
 training counts; the native implementation has been compared against both
 million-game inputs.
+
+## Reproduce the played-word frequencies in C
+
+`tools/word_frequencies.c` contains the native trainer used for the original
+million-game CSW24 and NWL23 corpora. `src/impl/word_counts.c` counts each newly
+formed maximal word of length 2–15 in both directions, including crosswords.
+Existing unchanged words are not counted again; designated blanks normalize
+to uppercase. These are static-selfplay frequencies, not human frequencies.
+Both players use static equity through game end, with WMP on and WIT/RIT off.
+The tool requires a standard 15x15 / seven-tile build and KWG, KLV2 and WMP data.
+
+```sh
+make word_frequencies magpie BUILD=no_pgo_release
+./bin/word_frequencies 0      250000 /tmp/train-0.tsv /tmp/train-0.cgp CSW24
+./bin/word_frequencies 250000 250000 /tmp/train-1.tsv /tmp/train-1.cgp CSW24
+./bin/word_frequencies 500000 250000 /tmp/train-2.tsv /tmp/train-2.cgp CSW24
+./bin/word_frequencies 750000 250000 /tmp/train-3.tsv /tmp/train-3.cgp CSW24
+./bin/word_frequencies merge /tmp/csw24-counts.tsv /tmp/train-0.tsv /tmp/train-1.tsv /tmp/train-2.tsv /tmp/train-3.tsv
+./bin/magpie conv counts2xsw /tmp/csw24-counts.tsv /tmp/CSW24.generated.json.gz CSW24
+```
+
+Repeat with `NWL23` and distinct output paths for the NWL corpus. The optional
+argument after the lexicon supplies the engine data search path; default is
+`data`. Use frozen KWG/KLV2 bytes, matching WMP, and the original engine behavior
+at `dab7e7f2` to reproduce the historical model. Changes to evaluation or move
+generation may change future training counts; never replace a registered book.
+Game index `i` uses seed `0x5eed + i * 0x9e3779b9` and starts player `i % 2`.
+Sharding changes neither games nor counts. The C `merge` command sums counts
+with overflow checks and writes alphabetically sorted `WORD<TAB>COUNT<LF>`.
+It accepts plain TSV shards; no shell sort or Python aggregation is needed.
+The extra CGP file samples every hundredth local game at turns 8, 16, 24 and
+game end (once when checkpoints coincide); samples do not affect counts.
+
+The original aggregate CSW24 TSV SHA256 is
+`73bab4fa5ba8ffba6ce6b6d3381f1329e6f6e5368eb7a00b54539430171699d2`:
+1,000,000 games, 48,537,742 occurrences, 172,959 distinct words.
+The original NWL23 TSV SHA256 is
+`6ec046adb58d73939fbae20be91eefad46c6acf21d5c13084367b4680b805218`:
+1,000,000 games, 46,850,830 occurrences, 129,591 distinct words.
+The exact aggregate TSV hashes are also embedded as `source_counts_sha256`
+in the published codebooks. Training inputs are unnecessary at runtime.

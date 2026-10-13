@@ -1,8 +1,13 @@
 #include "xs_test.h"
 
 #include "../src/compat/xs_compress.h"
+#include "../src/ent/board.h"
 #include "../src/ent/conversion_results.h"
+#include "../src/ent/game_history.h"
+#include "../src/ent/letter_distribution.h"
+#include "../src/impl/config.h"
 #include "../src/impl/convert.h"
+#include "../src/impl/word_counts.h"
 #include "../src/impl/xs_codebook.h"
 #include "../src/impl/xs_game.h"
 #include "../src/impl/xs_position.h"
@@ -11,6 +16,7 @@
 #include "../src/util/io_util.h"
 #include "../src/util/string_util.h"
 #include "../src/util/xs_bits.h"
+#include "test_util.h"
 #include <assert.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -169,8 +175,9 @@ static void xs_assert_golden_game(const char *paths, unsigned profile) {
   char *decoded = xs_game_decode(tokens[profile], paths, errors);
   xs_assert_ok(errors);
   const char *expected =
-      "#character-encoding UTF-8\n#language en\n#lexicon CSW24\n"
-      "#player1 alice Alice  Example\n#player2 bob Bób Test\n"
+      "#character-encoding UTF-8\n#player1 alice Alice  Example\n#player2 bob "
+      "Bób Test\n"
+      "#lexicon CSW24\n"
       ">alice: AEINRST 8D RETAINS +66 66\n>bob: AA 7D AA +8 8\n"
       ">alice: ?Z 9D zZ +20 86\n>alice: ? -- -20 66\n"
       ">bob: A -1 +0 8\n>alice: ? -? +0 66\n>bob:  - +0 8\n"
@@ -203,6 +210,15 @@ static void xs_mutate_payload(const char *token, bool game) {
       if (!game) {
         XSPosition position;
         assert(xs_parse_cgp(decoded, &position));
+      } else {
+        char *canonical = xs_game_encode(decoded, "/missing", 0, NULL, errors);
+        xs_assert_ok(errors);
+        assert(canonical);
+        char *again = xs_game_decode(canonical, "/missing", errors);
+        xs_assert_ok(errors);
+        assert(again && !strcmp(again, decoded));
+        free(again);
+        free(canonical);
       }
       free(decoded);
     } else {
@@ -215,7 +231,198 @@ static void xs_mutate_payload(const char *token, bool game) {
   error_stack_destroy(errors);
 }
 
+static void xs_test_frequencies(void) {
+  WordCounts *counts = word_counts_create();
+  Board *board = calloc_or_die(1, sizeof(*board));
+  unsigned char before[225] = {0};
+  // Existing AT; adding blank S makes ATS and vertical AS. Count each new
+  // maximal word once, omit old AT, and normalize the blank to uppercase.
+  board_set_letter(board, 7, 6, 1);
+  board_set_letter(board, 7, 7, 20);
+  board_set_letter(board, 6, 8, 1);
+  before[(7 * 15) + 6] = 1;
+  before[(7 * 15) + 7] = 20;
+  before[(6 * 15) + 8] = 1;
+  board_set_letter(board, 7, 8, get_blanked_machine_letter(19));
+  assert(word_counts_record(counts, board, before));
+  before[(7 * 15) + 8] = 19;
+  assert(word_counts_record(counts, board, before)); // pass: no new words
+  assert(counts->size == 2);
+  ErrorStack *errors = error_stack_create();
+  char path[] = "/tmp/magpie-count-test-XXXXXX";
+  int fd = mkstemp(path);
+  assert(fd >= 0);
+  close(fd);
+  assert(word_counts_write(counts, path, errors));
+  size_t length;
+  char *text = xs_read_file(path, &length, errors);
+  assert(!strcmp(text, "AS\t1\nATS\t1\n"));
+  free(text);
+  assert(word_counts_merge(counts, path, errors));
+  assert(word_counts_write(counts, path, errors));
+  text = xs_read_file(path, &length, errors);
+  assert(!strcmp(text, "AS\t2\nATS\t2\n"));
+  free(text);
+  assert(!word_counts_add(counts, "AS", UINT64_MAX));
+  assert(!word_counts_add(counts, "aS", 1));
+  assert(!word_counts_add(counts, "A", 1));
+  assert(!word_counts_add(counts, "AA", 0));
+  xs_assert_ok(errors);
+  int removed = remove(path);
+  assert(!removed);
+  word_counts_destroy(counts);
+  error_stack_destroy(errors);
+  free(board);
+}
+static void xs_test_gzip(void) {
+  assert(xs_crc32("123456789", 9) == UINT32_C(0xcbf43926));
+  // Independently generated RFC1952 streams: fixed and dynamic Huffman blocks.
+  static const unsigned char fixed[] = {31, 139, 8,   0,   0,   0,  0,  0,  2,
+                                        19, 115, 116, 114, 118, 28, 69, 48, 4,
+                                        0,  152, 236, 152, 235, 14, 1,  0,  0};
+  size_t fixed_length = 0;
+  char *fixed_text = xs_gunzip(fixed, sizeof(fixed), &fixed_length);
+  assert(fixed_text && fixed_length == 270);
+  assert(xs_crc32(fixed_text, fixed_length) == UINT32_C(3952667800));
+  free(fixed_text);
+  for (size_t index = 0; index < sizeof(fixed); index++) {
+    assert(!xs_gunzip(fixed, index, &fixed_length));
+  }
+  static const unsigned char dynamic[] = {
+      31,  139, 8,   0,   0,   0,   0,   0,   2,   19,  237, 199, 177,
+      13,  128, 32,  0,   0,   176, 25,  191, 1,   228, 0,   6,   66,
+      24,  48,  70,  253, 255, 22,  46,  32,  241, 128, 110, 237, 172,
+      253, 30,  45,  196, 148, 207, 114, 76,  17,  17,  17,  17,  17,
+      17,  17,  17,  17,  17,  17,  17,  249, 147, 167, 125, 117, 92,
+      111, 72,  68,  68,  68,  68,  68,  68,  68,  68,  68,  68,  68,
+      68,  68,  180, 213, 2,   20,  201, 60,  229, 188, 52,  0,   0};
+  size_t dynamic_length = 0;
+  char *dynamic_text = xs_gunzip(dynamic, sizeof(dynamic), &dynamic_length);
+  assert(dynamic_text && dynamic_length == 13500);
+  assert(xs_crc32(dynamic_text, dynamic_length) == UINT32_C(3845966100));
+  free(dynamic_text);
+  for (size_t index = 0; index < sizeof(dynamic); index++) {
+    assert(!xs_gunzip(dynamic, index, &dynamic_length));
+  }
+  // Exercise damaged DEFLATE trees, repeats, distances, headers and trailers.
+  // Valid mutations (e.g. timestamps/padding) must still yield the same text.
+  for (unsigned trial = 0; trial < 192; trial++) {
+    unsigned char mutated[sizeof(dynamic)];
+    memcpy(mutated, dynamic, sizeof(mutated));
+    mutated[((size_t)trial * 31U) % sizeof(mutated)] ^=
+        (unsigned char)(1U << (trial % 8));
+    char *value = xs_gunzip(mutated, sizeof(mutated), &dynamic_length);
+    if (value) {
+      assert(dynamic_length == 13500 &&
+             xs_crc32(value, dynamic_length) == UINT32_C(3845966100));
+      free(value);
+    }
+  }
+  size_t length = 70000;
+  char *original = malloc_or_die(length);
+  memset(original, 'X', length);
+  size_t encoded_length = 0;
+  char *encoded = xs_gzip(original, length, &encoded_length);
+  size_t decoded_length = 0;
+  char *decoded = xs_gunzip(encoded, encoded_length, &decoded_length);
+  assert(decoded && decoded_length == length &&
+         !memcmp(original, decoded, length));
+  free(decoded);
+  encoded[encoded_length - 8] ^= 1; // CRC
+  assert(!xs_gunzip(encoded, encoded_length, &decoded_length));
+  free(encoded);
+  free(original);
+  encoded = xs_gzip("", 0, &encoded_length);
+  decoded = xs_gunzip(encoded, encoded_length, &decoded_length);
+  assert(decoded && !decoded_length);
+  free(decoded);
+  free(encoded);
+}
+static void xs_test_review_inputs(void) {
+  ErrorStack *errors = error_stack_create();
+  char *standard = string_duplicate(xs_fixture);
+  char *option = strstr(standard, "-lex");
+  *option = '\0';
+  char *input = get_formatted_string(
+      "%slex CSW24; ld english; bdn CrosswordGame; bb 50;", standard);
+  XSPosition position;
+  assert(xs_parse_cgp(input, &position));
+  char *canonical = xs_format_cgp(&position);
+  assert(!strcmp(canonical, xs_fixture));
+  free(canonical);
+  free(input);
+  char *token = xs_position_encode(standard, "", 0, 0, errors);
+  xs_assert_ok(errors);
+  char *decoded = xs_position_decode(token, "", errors);
+  assert(decoded && !strstr(decoded, "-lex"));
+  free(decoded);
+  free(token);
+  const char *invalid[] = {"-ld english_super", "bb 51;", "bdn super21;",
+                           "-lex CS\xffW", "-lex CS\x01W"};
+  for (unsigned index = 0; index < sizeof(invalid) / sizeof(invalid[0]);
+       index++) {
+    input = get_formatted_string("%s%s", standard, invalid[index]);
+    assert(!xs_position_encode(input, "", 0, 0, errors));
+    assert(!error_stack_is_empty(errors));
+    error_stack_reset(errors);
+    free(input);
+  }
+  free(standard);
+  const char *empty =
+      "#player1 a Alice\n#player2 b Bob\n#rack1 DIIIILU\n"
+      "#board-layout CrosswordGame\n#tile-distribution english\n";
+  token = xs_game_encode(empty, "", 0, NULL, errors);
+  xs_assert_ok(errors);
+  decoded = xs_game_decode(token, "", errors);
+  xs_assert_ok(errors);
+  assert(decoded && strstr(decoded, "#rack1 DIIIILU\n") &&
+         !strstr(decoded, "#lexicon"));
+  char *again = xs_game_encode(decoded, "", 0, NULL, errors);
+  assert(again && !strcmp(again, token));
+  free(again);
+  free(decoded);
+  free(token);
+  input = get_formatted_string("%s#tile-distribution english_super\n", empty);
+  assert(!xs_game_encode(input, "", 0, NULL, errors));
+  error_stack_reset(errors);
+  free(input);
+  // Crafted CRC-valid OTHER events must not bypass typed event validation.
+  const char *actions[] = {"8D QQQQQQQ",  "--",   "-",
+                           "-ABC",        "-3",   " challenge)",
+                           "challenge) ", "a  b", "ABC challenge)"};
+  for (unsigned index = 0; index < sizeof(actions) / sizeof(actions[0]);
+       index++) {
+    XSBuffer bits;
+    xs_buffer_init(&bits);
+    xs_put(&bits, 2, 4);
+    xs_write_metadata(&bits, "en", "CSW24");
+    xs_put(&bits, 0, 2);
+    xs_put_text(&bits, "a");
+    xs_put(&bits, 1, 1);
+    xs_put_text(&bits, "b");
+    xs_put(&bits, 1, 1);
+    xs_put_var(&bits, 1);
+    xs_put(&bits, 0, 1);
+    xs_put(&bits, 5, 3);
+    xs_put_text(&bits, actions[index]);
+    xs_put(&bits, 0, 1);
+    xs_put(&bits, 0, 3);
+    xs_put_signed(&bits, 0);
+    xs_put(&bits, 0, 1);
+    xs_put(&bits, 0, 2);
+    token = xs_token(&bits, "XSG");
+    assert(!xs_game_decode(token, "", errors));
+    assert(!error_stack_is_empty(errors));
+    error_stack_reset(errors);
+    free(token);
+    xs_buffer_destroy(&bits);
+  }
+  error_stack_destroy(errors);
+}
 void test_xs(void) {
+  xs_test_review_inputs();
+  xs_test_gzip();
+  xs_test_frequencies();
   ErrorStack *errors = error_stack_create();
   XSBuffer bits;
   xs_buffer_init(&bits);
@@ -337,9 +544,23 @@ void test_xs(void) {
   free(output);
   error_stack_destroy(errors);
 }
-void test_xs_data(void) {
-  const char *paths = getenv("MAGPIE_XS_DATA");
-  assert(paths && "Set MAGPIE_XS_DATA to the MAGPIE-DATA #17 data directory");
+void test_xs_data_paths(const char *paths) {
+  ErrorStack *errors = error_stack_create();
+  const char *double_blank =
+      "#lexicon CSW24\n#player1 alice Alice\n#player2 bob Bob\n"
+      ">alice: ADEINRT 8C DETRAIN +70 70\n>bob: S 8C DETRAINS +10 10\n"
+      ">alice: ??AEIST 9D AE +12 82\n";
+  XSGameStats stats;
+  char *token = xs_game_encode(double_blank, paths, 1, &stats, errors);
+  xs_assert_ok(errors);
+  assert(token && stats.explicit_moves > 0);
+  char *decoded = xs_game_decode(token, paths, errors);
+  xs_assert_ok(errors);
+  assert(decoded && strstr(decoded, "??AEIST 9D AE"));
+  free(decoded);
+  free(token);
+  error_stack_destroy(errors);
+
   xs_assert_position(xs_fixture, paths, 1);
   xs_assert_position(xs_fixture, paths, 2);
   // Cyclically permute ceil(10% of occupied squares), preserving the physical
@@ -373,5 +594,51 @@ void test_xs_data(void) {
     xs_assert_rank_profile(paths, profile);
     xs_assert_golden_game(paths, profile);
     xs_assert_golden_position(paths, profile);
+  }
+}
+
+void test_xs_data(void) { test_xs_data_paths("data"); }
+
+void test_xs_interop(void) {
+  const char *fixtures[] = {"testdata/gcgs/success_long_game.gcg",
+                            "testdata/gcgs/success_just_last_rack.gcg"};
+  for (unsigned fixture = 0; fixture < sizeof(fixtures) / sizeof(fixtures[0]);
+       fixture++) {
+    ErrorStack *errors = error_stack_create();
+    size_t length;
+    char *source = xs_read_file(fixtures[fixture], &length, errors);
+    xs_assert_ok(errors);
+    char *token = xs_game_encode(source, "", 0, NULL, errors);
+    xs_assert_ok(errors);
+    char *decoded = xs_game_decode(token, "", errors);
+    xs_assert_ok(errors);
+    Config *config = config_create_or_die("set -lex CSW21 -wmp false");
+    GameHistory *original = game_history_create();
+    GameHistory *restored = game_history_create();
+    config_parse_gcg_string(config, source, original, errors);
+    xs_assert_ok(errors);
+    config_parse_gcg_string(config, decoded, restored, errors);
+    xs_assert_ok(errors);
+    assert(game_history_get_num_events(original) ==
+           game_history_get_num_events(restored));
+    for (int index = 0; index < game_history_get_num_events(original);
+         index++) {
+      const GameEvent *before = game_history_get_event(original, index);
+      const GameEvent *after = game_history_get_event(restored, index);
+      assert(game_event_get_type(before) == game_event_get_type(after));
+      assert(game_event_get_player_index(before) ==
+             game_event_get_player_index(after));
+      assert(game_event_get_cumulative_score(before) ==
+             game_event_get_cumulative_score(after));
+      assert(game_event_get_move_score(before) ==
+             game_event_get_move_score(after));
+    }
+    game_history_destroy(original);
+    game_history_destroy(restored);
+    config_destroy(config);
+    free(source);
+    free(token);
+    free(decoded);
+    error_stack_destroy(errors);
   }
 }

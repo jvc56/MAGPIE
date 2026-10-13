@@ -11,12 +11,11 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
-      # This commit is the six frozen assets in MAGPIE-DATA #17. It remains
-      # valid after that PR merges; no unmerged download_data.sh release needed.
+      # Merged MAGPIE-DATA #17, pinned independently of data release archives.
       - uses: actions/checkout@v4
         with:
           repository: jvc56/MAGPIE-DATA
-          ref: 756635970945ff99fd4b11551476622c48c29b7f
+          ref: c4216b80098e8c7e88262cb5d04d0bc033bc4d46
           path: xs-data
           sparse-checkout-cone-mode: false
           sparse-checkout: |
@@ -25,15 +24,9 @@ jobs:
             /data/lexica/CSW24.klv2
             /data/lexica/NWL23.kwg
             /data/lexica/NWL23.klv2
-            /data/validate_xs_data.py
-            /data/xs_codebook.py
       - name: Install build dependencies
-        run: sudo apt-get update && sudo apt-get install -y clang zlib1g-dev
-      - name: Verify immutable asset manifest
-        run: python3 xs-data/data/validate_xs_data.py
+        run: sudo apt-get update && sudo apt-get install -y clang
       - name: Build with address and undefined-behavior sanitizers
-        run: make magpie_test CC=clang
+        run: make magpie_test word_frequencies CC=clang
       - name: Test wire formats and both frozen English profiles
-        env:
-          MAGPIE_XS_DATA: ${{ github.workspace }}/xs-data/data
-        run: ./bin/magpie_test xs xsdata
+        run: ./bin/magpie_test xs xsdata:xs-data/data

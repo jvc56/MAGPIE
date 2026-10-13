@@ -717,7 +717,8 @@ generation's KLV.
 
 ### Compact position and game codecs
 
-Native builds require zlib development headers (`zlib1g-dev` on Debian/Ubuntu).
+The codecs and word-frequency trainer are C-only and add no build dependencies.
+Use `make word_frequencies BUILD=no_pgo_release` to build the training tool.
 Use `conv counts2xsw` to create word codebooks, `conv cgp2xsp` / `xsp2cgp` for
 positions, and `conv gcg2xsg` / `xsg2gcg` for games. See
 [XS codecs](docs/xs-codecs.md) for commands, immutable data installation, wire

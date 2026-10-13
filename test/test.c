@@ -109,6 +109,7 @@ typedef struct {
 
 static TestEntry test_table[] = {
     {"xs", test_xs},
+    {"xsinterop", test_xs_interop},
     {"config", test_config},
     {"movebudget", test_movegen_budget},
     {"players", test_players_data},
@@ -288,6 +289,10 @@ void run_all(void) {
 }
 
 void run_test(const char *subtest) {
+  if (has_prefix("xsdata:", subtest)) {
+    test_xs_data_paths(subtest + strlen("xsdata:"));
+    return;
+  }
   for (int i = 0; test_table[i].name != NULL; ++i) {
     if (strcmp(subtest, test_table[i].name) == 0) {
       test_table[i].func();

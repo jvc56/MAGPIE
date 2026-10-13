@@ -192,6 +192,50 @@ static bool xs_location(const char *text, XSMove *move) {
   move->start = (unsigned)(row - 1) * 15 + (unsigned)(col - 'A');
   return true;
 }
+static unsigned xs_action_kind(const StringSplitter *parts, int start,
+                               int count) {
+  const char *action = string_splitter_get_item(parts, start);
+  XSMove location;
+  if (count == 2 && xs_location(action, &location)) {
+    return XS_PLAY;
+  }
+  if (count == 1) {
+    int tiles[27];
+    if (!strcmp(action, "-")) {
+      return XS_PASS;
+    }
+    if (!strcmp(action, "--")) {
+      return XS_WITHDRAW;
+    }
+    if (*action == '-' && action[1] && xs_rack_counts(action + 1, tiles)) {
+      return XS_EXCHANGE;
+    }
+    if (*action == '-' && action[1] >= '1' && action[1] <= '7' && !action[2]) {
+      return XS_COUNT;
+    }
+  }
+  return XS_OTHER;
+}
+static bool xs_other_action(const char *text) {
+  if (!xs_line_text(text, false)) {
+    return false;
+  }
+  StringSplitter *parts = split_string_by_whitespace(text, true);
+  int count = string_splitter_get_number_of_items(parts);
+  bool valid = count > 0 && xs_action_kind(parts, 0, count) == XS_OTHER;
+  int rack[27];
+  if (count >= 2 && xs_rack_counts(string_splitter_get_item(parts, 0), rack)) {
+    valid = false; // Otherwise an omitted rack would consume this token.
+  }
+  size_t normalized = count > 0 ? (size_t)count - 1 : 0;
+  for (int index = 0; index < count; index++) {
+    normalized += strlen(string_splitter_get_item(parts, index));
+  }
+  valid = valid && normalized == strlen(text);
+  // xs_line_text already rejects tabs/newlines/control characters.
+  string_splitter_destroy(parts);
+  return valid;
+}
 static bool xs_parse_event(XSGame *game, XSState *state, const char *line) {
   const char *colon = strchr(line, ':');
   if (!colon || game->count == XS_GAME_MAX_EVENTS) {
@@ -226,8 +270,9 @@ static bool xs_parse_event(XSGame *game, XSState *state, const char *line) {
     }
     const char *action = string_splitter_get_item(parts, start);
     int action_count = count - start - 2;
-    if (action_count == 2 && xs_location(action, &event->move)) {
-      event->kind = XS_PLAY;
+    event->kind = xs_action_kind(parts, start, action_count);
+    if (event->kind == XS_PLAY) {
+      xs_location(action, &event->move);
       const char *word = string_splitter_get_item(parts, start + 1);
       unsigned length = 0;
       for (const char *letter = word; *letter; letter++) {
@@ -241,18 +286,15 @@ static bool xs_parse_event(XSGame *game, XSState *state, const char *line) {
         event->move.word[length++] = *letter;
       }
       valid = valid && xs_move_valid(state->board, &event->move);
-    } else if (action_count == 1 && !strcmp(action, "-")) {
-      event->kind = XS_PASS;
-    } else if (action_count == 1 && !strcmp(action, "--")) {
-      event->kind = XS_WITHDRAW;
-    } else if (action_count == 1 && action[0] == '-' &&
-               xs_rack_counts(action + 1, counts) && action[1]) {
+    } else if (event->kind == XS_PASS || event->kind == XS_WITHDRAW) {
+      // No action payload.
+    } else if (event->kind == XS_EXCHANGE) {
+      xs_rack_counts(action + 1, counts);
       event->kind = XS_EXCHANGE;
       char tiles[8];
       xs_rack_string(counts, tiles);
       event->action = string_duplicate(tiles);
-    } else if (action_count == 1 && action[0] == '-' && action[1] >= '1' &&
-               action[1] <= '7' && !action[2]) {
+    } else if (event->kind == XS_COUNT) {
       event->kind = XS_COUNT;
       event->action = string_duplicate(action + 1);
     } else if (action_count > 0) {
@@ -267,7 +309,7 @@ static bool xs_parse_event(XSGame *game, XSState *state, const char *line) {
       }
       event->action = string_builder_dump(builder, NULL);
       string_builder_destroy(builder);
-      valid = valid && xs_line_text(event->action, false);
+      valid = valid && xs_other_action(event->action);
     } else {
       valid = false;
     }
@@ -291,8 +333,7 @@ static XSGame *xs_parse_game(const char *text) {
     return NULL;
   }
   XSGame *game = calloc_or_die(1, sizeof(*game));
-  strcpy(game->language, "en");
-  strcpy(game->lexicon, "NWL23");
+  memcpy(game->language, "en", strlen("en") + 1);
   game->events = calloc_or_die(XS_GAME_MAX_EVENTS, sizeof(*game->events));
   XSState state = {.last = -1};
   StringSplitter *lines = split_string_by_newline(text, true);
@@ -338,7 +379,7 @@ static XSGame *xs_parse_game(const char *text) {
           const char *value = string_splitter_get_item(parts, 1);
           valid = strlen(value) < limit && xs_line_text(value, true);
           if (valid) {
-            strcpy(target, value);
+            memcpy(target, value, strlen(value) + 1);
           }
         }
       } else if (!strcmp(key, "#rack1") || !strcmp(key, "#rack2")) {
@@ -355,13 +396,17 @@ static XSGame *xs_parse_game(const char *text) {
                 !strcmp(string_splitter_get_item(parts, 1), "classic");
       } else if (!strcmp(key, "#board-layout")) {
         valid = count == 2 &&
-                !strcmp(string_splitter_get_item(parts, 1), "standard15");
+                (!strcmp(string_splitter_get_item(parts, 1), "standard15") ||
+                 !strcmp(string_splitter_get_item(parts, 1), "CrosswordGame"));
+      } else if (!strcmp(key, "#tile-distribution")) {
+        valid = count == 2 &&
+                !strcmp(string_splitter_get_item(parts, 1), "english");
       }
     }
     string_splitter_destroy(parts);
   }
   string_splitter_destroy(lines);
-  valid = valid && game->count && game->nick[0] && game->nick[1] &&
+  valid = valid && game->nick[0] && game->nick[1] &&
           strcmp(game->nick[0], game->nick[1]) != 0 &&
           !strcmp(game->language, "en");
   if (!valid) {
@@ -372,12 +417,14 @@ static XSGame *xs_parse_game(const char *text) {
 }
 static char *xs_game_gcg(const XSGame *game) {
   StringBuilder *out = string_builder_create();
-  string_builder_add_formatted_string(
-      out, "#character-encoding UTF-8\n#language %s\n#lexicon %s\n",
-      game->language, game->lexicon);
+  string_builder_add_string(out, "#character-encoding UTF-8\n");
   for (int player = 0; player < 2; player++) {
     string_builder_add_formatted_string(out, "#player%d %s %s\n", player + 1,
                                         game->nick[player], game->name[player]);
+  }
+  // Standard GCG has no #language header. English is implicit for this codec.
+  if (*game->lexicon) {
+    string_builder_add_formatted_string(out, "#lexicon %s\n", game->lexicon);
   }
   for (unsigned index = 0; index < game->count; index++) {
     const XSEvent *event = &game->events[index];
@@ -571,7 +618,7 @@ static void xs_read_rack(XSBuffer *in, const XSState *state, XSEvent *event,
       if (rank >= size) {
         in->valid = false;
       } else {
-        strcpy(extra, draws[rank].tiles);
+        memcpy(extra, draws[rank].tiles, strlen(draws[rank].tiles) + 1);
       }
       free(draws);
     } else {
@@ -828,7 +875,7 @@ static void xs_read_event(XSBuffer *in, XSState *state, XSEvent *event,
     }
   } else if (event->kind == XS_OTHER) {
     event->action = xs_get_text(in);
-    if (!xs_line_text(event->action, false)) {
+    if (!xs_other_action(event->action)) {
       in->valid = false;
     }
   }
@@ -885,10 +932,11 @@ char *xs_game_decode(const char *token, const char *paths, ErrorStack *errors) {
     in.valid = false;
   }
   unsigned count = xs_get_var(&in);
-  if (!count || count > XS_GAME_MAX_EVENTS) {
+  if (count > XS_GAME_MAX_EVENTS) {
     in.valid = false;
   }
-  game->events = calloc_or_die(in.valid ? count : 1, sizeof(*game->events));
+  game->events =
+      calloc_or_die(in.valid && count ? count : 1, sizeof(*game->events));
   XSState state = {.last = -1};
   for (unsigned index = 0;
        index < count && in.valid && error_stack_is_empty(errors); index++) {
