@@ -30,6 +30,7 @@ export class EngineClient extends EventTarget {
       if (data.type === "wmp_ready" || (data.type === "error" && this.pending?.response === "wmp_ready")) {
         try { sessionStorage.removeItem("magpie-wmp-building"); } catch {}
       }
+      if (data.type === "memory_status") this.memory = data;
       if (data.type === "log") {
         this.lastLog = data.text;
         if (/FATAL/.test(data.text)) this.lastFatalLog = data.text.replace(/^.*?FATAL\s+[^:]+:\d+:\s*/, "");
