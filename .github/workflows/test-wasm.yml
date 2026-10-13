@@ -132,8 +132,9 @@ jobs:
           total=3
           case "$PROJECT" in unit|edge|static-host) total=1 ;; esac
           npm test -- --project="$PROJECT" --shard="$SHARD/$total"
-      - name: Upload failure report
-        if: failure()
+      # Keep WebKit's first-attempt traces even when its bounded retry passes.
+      - name: Upload browser report
+        if: ${{ !cancelled() && (failure() || matrix.project == 'webkit') }}
         uses: actions/upload-artifact@v4
         with:
           name: playwright-${{ matrix.project }}-${{ matrix.shard }}

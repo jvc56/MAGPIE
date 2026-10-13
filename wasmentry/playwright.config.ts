@@ -37,6 +37,10 @@ export default defineConfig({
     }] : []),
     {
       name: "webkit",
+      // Linux WebKit occasionally stalls before page/worker startup completes.
+      // A failed CI attempt is retained in the report; Playwright retries once
+      // in a new worker/browser process, with the same timeouts and assertions.
+      retries: process.env.CI ? 1 : 0,
       grepInvert: /@unit/,
       use: { ...devices["Desktop Safari"] },
     },
