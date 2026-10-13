@@ -37,6 +37,7 @@
             <div class="game-action-group" role="group" aria-label="CGP">
               <button id="import">Paste CGP…</button>
               <button id="copy">Copy CGP</button>
+              <button id="copy-position-link">Copy position link</button>
             </div>
 
               </div>
@@ -767,6 +768,15 @@
           <pre id="gcg-diagnostics-log" tabindex="0"></pre>
         </details>
       </form>
+    </dialog>
+    <dialog id="position-link-dialog" aria-labelledby="position-link-heading">
+      <div class="panel-header">
+        <h2 id="position-link-heading">Position link</h2>
+        <button type="button" id="close-position-link" aria-label="Close">×</button>
+      </div>
+      <label for="position-link-text">Copy this link</label>
+      <input id="position-link-text" type="text" readonly />
+      <p class="hint">Includes the board, racks, scores, and lexicon. Game history and clocks are not included.</p>
     </dialog>
     <dialog id="import-dialog">
       <form id="import-form">

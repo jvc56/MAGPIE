@@ -1,3 +1,4 @@
+import { positionLink, positionFromURL } from "./position-link.mjs";
 import { moveTiles } from "./move-tiles.mjs";
 import { computerSearchPlan } from "./computer-time.mjs";
 import { TILE_ORDERS, DEFAULT_TILE_ORDER, tileAlphabet, sortTiles, formatTileGroups } from "./tile-order.mjs";
@@ -1556,6 +1557,21 @@ $("copy").addEventListener("click", async () => {
     $("import-error").textContent = "Copy the selected CGP.";
   }
 });
+$("copy-position-link").addEventListener("click", async () => {
+  if (busy || hiddenLiveGame()) return;
+  try {
+    const link = positionLink(position, location.href);
+    try {
+      await navigator.clipboard.writeText(link);
+      message("Position link copied");
+    } catch {
+      $("position-link-text").value = link;
+      $("position-link-dialog").showModal();
+      $("position-link-text").select();
+    }
+  } catch (failure) { error(failure.message); }
+});
+$("close-position-link").addEventListener("click", () => $("position-link-dialog").close());
 function canExportGame() {
   return !!recordedGame && (engine?.fatalError || (!busy && !hiddenLiveGame()));
 }
@@ -1576,6 +1592,7 @@ function renderHistory() {
   if (target) $("challenge-move").append(" ", moveTiles(target, 1 - position.onTurn, restorePosition(recordedGame.positions[historyIndex - 1])));
   $("game-history").hidden = !recordedGame;
   $("copy").disabled = busy || hiddenLiveGame();
+  $("copy-position-link").disabled = busy || hiddenLiveGame();
   $("save-gcg").disabled = !canExportGame();
   $("copy-gcg").disabled = !canExportGame() || hiddenLiveGame();
   $("save-gcg").title = hiddenLiveGame() ? "Finish the game before exporting hidden racks" : recordedGame
@@ -3545,6 +3562,7 @@ const controlHints = {
   "save-gcg": "Save the complete game, including moves and notes.",
   import: "Paste a CGP position. Lowercase letters are blanks.",
   copy: "Copy this position as CGP. Tile ownership is not included.",
+  "copy-position-link": "Copy a link to this position, including racks, scores, and lexicon. History and clocks are not included.",
   "history-position": "Choose a position in the game history.",
   "history-previous": "Go back one event.",
   "history-next": "Go forward one event.",
@@ -3686,7 +3704,15 @@ try {
 let wmpWarning = "";
 renderPosition();
 renderResults();
-$("new-game-dialog").showModal();
+try {
+  const linkedPosition = positionFromURL(location.href);
+  if (linkedPosition) setPosition(linkedPosition);
+  else $("new-game-dialog").showModal();
+} catch (failure) {
+  $("import-error").textContent = failure.message;
+  $("import-dialog").showModal();
+}
+
 async function startEngine() {
   setBusy(true);
   $("stop").disabled = true;
