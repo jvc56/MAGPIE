@@ -9,7 +9,7 @@ for (const submit of ['Enter', 'button']) {
       const rows = Array(15).fill('15');
       if (col === 8) rows[7] = '7A7';
       await page.locator('#new-game-cgp').fill(
-        `${rows.join('/')} AEINRST/BCDFGHJ 0/0 0 -lex CSW24`,
+        `${rows.join('/')} ${col === 7 ? '?AEINRS' : 'AEINRST'}/BCDFGHJ 0/0 0 -lex CSW24`,
       );
       await page.locator('.game-options > summary').click();
       await page.locator('#game-time').selectOption('0');
@@ -17,7 +17,9 @@ for (const submit of ['Enter', 'button']) {
       await page.locator('#start-game').click();
       await expect(page.locator('#new-game-dialog')).toBeHidden();
       await page.locator(`[data-row="7"][data-col="${col}"]`).click();
-      await page.keyboard.type('tsraine');
+      if (col === 7) await page.keyboard.press('Shift+T');
+      else await page.keyboard.type('t');
+      await page.keyboard.type('sraine');
       await expect(page.locator('.square.pending')).toHaveCount(7);
       if (submit === 'Enter') await page.keyboard.press('Enter');
       else await page.locator('#play-move').click();
@@ -25,6 +27,12 @@ for (const submit of ['Enter', 'button']) {
       await expect(page.locator('#error')).toHaveText(phonyMessage);
       await expect(page.locator('#error .move-tile')).toHaveCount(col === 8 ? 8 : 7);
       await expect(page.locator('#error .move-coordinate')).toHaveText('8H');
+      if (col === 7) {
+        await expect(page.locator('#error .move-tile.blank')).toHaveText('T');
+        const tops = await page.locator('#error .move-tile').evaluateAll(tiles =>
+          tiles.map(tile => tile.getBoundingClientRect().top));
+        expect(Math.max(...tops) - Math.min(...tops)).toBeLessThan(0.1);
+      }
       const gaps = await page.locator('#error').evaluate(error => {
         const coordinate=error.querySelector('.move-coordinate').getBoundingClientRect();
         const tiles=error.querySelector('.move-word').getBoundingClientRect();

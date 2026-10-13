@@ -388,12 +388,6 @@
             Lexicon
           </button>
           <button
-            data-settings-section="board"
-            aria-controls="board-settings"
-          >
-            Board
-          </button>
-          <button
             data-settings-section="analysis"
             aria-controls="analysis-settings"
           >
@@ -430,6 +424,15 @@
                 <option value="alphabetical">Alphabetical</option>
               </select>
             </label>
+            <label class="setting-row" for="premium-labels">
+              <span class="setting-name">Premium labels</span>
+              <input
+                id="premium-labels"
+                class="setting-switch"
+                type="checkbox"
+                role="switch"
+              />
+            </label>
           </section>
           <section
             id="lexicon-settings"
@@ -446,23 +449,6 @@
                 <option value="CSW24">CSW24 · Collins</option>
                 <option value="NWL23">NWL23 · North America</option>
               </select>
-            </label>
-          </section>
-          <section
-            hidden
-            id="board-settings"
-            aria-labelledby="board-settings-heading"
-          >
-            <h3 id="board-settings-heading">Board</h3>
-
-            <label class="setting-row" for="premium-labels">
-              <span class="setting-name">Premium labels</span>
-              <input
-                id="premium-labels"
-                class="setting-switch"
-                type="checkbox"
-                role="switch"
-              />
             </label>
           </section>
           <section

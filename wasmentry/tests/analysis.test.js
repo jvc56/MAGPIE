@@ -157,7 +157,7 @@ test("settings replaces the game, preserves results, and saves board preferences
   await expect(page.locator("#settings-view")).toBeVisible();
   await expect(page.locator("#settings-heading")).toBeFocused();
   await expect(page.locator("#premium-labels")).not.toBeChecked();
-  await page.locator('[data-settings-section="board"]').click();
+  await expect(page.locator("#appearance-settings #premium-labels")).toBeVisible();
   await page.locator("#premium-labels").check();
   await page.locator('[data-settings-section="analysis"]').click();
   await expect(page.locator("#analysis-settings")).toBeVisible();

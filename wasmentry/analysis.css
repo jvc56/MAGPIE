@@ -1907,7 +1907,7 @@ body.tile-dragging, body.tile-dragging * { cursor: grabbing !important; }
 /* Compact move tiles preserve blank identity without lowercase notation. */
 .move-tiles { position: relative; display: inline-flex; align-items: baseline; gap: 0; max-width: 100%; vertical-align: baseline; }
 .move-coordinate { flex: none; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; margin-right: 1ch; text-align: left; }
-.move-word { display: inline-flex; align-items: baseline; flex-wrap: wrap; gap: 1px; }
+.move-word { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 1px; }
 .move-tile { display: inline-flex; align-items: center; justify-content: center; flex: none;
   width: 1.65em; height: 1.65em; border-radius: 3px; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: var(--tile-ink);
   background: var(--tile); font-weight: 650; line-height: 1; box-shadow: inset 0 0 0 1px var(--tile-edge); }
