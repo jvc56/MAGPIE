@@ -117,8 +117,41 @@ a known greedy counterexample, deterministic timeout/invalid-budget checks,
 and actual mixed-axis/literal bitstream round trips. Run:
 
 ```sh
-python3 -m unittest discover -s wasmentry/qa -p test_word_codec_pilot.py -v
+python3 -m unittest discover -s wasmentry/qa -p 'test_word_codec*.py' -v
 ```
+
+## Phony mutation regression
+
+The native test generates 1,000 new CSW24 games from seed range 1,020,000 onward
+and samples their positions with the existing pilot. For each position it
+selects `ceil(occupied squares / 10)` distinct squares using a fixed random
+seed, then cyclically permutes their tiles by one place. This preserves empty
+squares, the full tile inventory, and lowercase blank designations. Duplicate
+letters may remain visually unchanged; a one-letter cycle is a no-op. Separate
+small tests cover rounding boundaries and these edge cases.
+
+A codebook is frozen from the **unmodified** generated games. Every mutated
+board is encoded and decoded in both layouts, with greedy and budgeted search.
+The test verifies exact letter recovery and restores separately carried blank
+markers. It checks the original and mutated words against the **full CSW24
+lexicon**, so absent frequency-model entries are not mistaken for phonies.
+
+The recorded run produced 31 positions: all 31 contained phonies and exercised
+literal fallback, and 27 included blanks. All 124 board round trips passed.
+This is a correctness regression using a small independently generated model;
+it is not a new compression benchmark for the million-game codebook.
+
+To enable the native regression before running the tests above:
+
+```sh
+make -f wasmentry/qa/word-frequency-pilot.mk word-frequency-pilot BUILD=no_pgo_release
+make magpie BUILD=no_pgo_release
+./bin/magpie convert dawg2text CSW24
+```
+
+Without the native pilot binary or exported `data/lexica/CSW24.txt`, that one
+integration test reports an explicit skip; mutation and optimizer unit tests
+still run. The mutation test does not modify the production codec or data.
 
 ## Next decision
 
