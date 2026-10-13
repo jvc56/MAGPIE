@@ -14,6 +14,7 @@ import { readGCG } from "./gcg-loader.mjs?v=2";
 import { logGCG, gcgLogText } from "./gcg-diagnostics.mjs";
 import {
   emptyPosition,
+  LEXICA,
   VALUES,
   parseCGP,
   toCGP,
@@ -3706,7 +3707,12 @@ renderPosition();
 renderResults();
 try {
   const linkedPosition = positionFromURL(location.href);
-  if (linkedPosition) setPosition(linkedPosition);
+  if (linkedPosition) {
+    if (!LEXICA.includes(linkedPosition.lexicon)) {
+      throw new Error(`This position uses lexicon “${linkedPosition.lexicon}”, which this browser preview cannot load. It supports CSW24 and NWL23.`);
+    }
+    setPosition(linkedPosition);
+  }
   else $("new-game-dialog").showModal();
 } catch (failure) {
   $("import-error").textContent = failure.message;

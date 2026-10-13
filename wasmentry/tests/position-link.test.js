@@ -30,12 +30,28 @@ test('compact position encoding preserves CGP fields, blanks, phonies and all 10
   for (const position of cases) {
     const encoded = encodePosition(position);
     expect(encoded).toMatch(/^[A-Za-z0-9_-]+$/);
-    expect(encoded.length).toBeLessThanOrEqual(135);
+    expect(encoded.length).toBeLessThanOrEqual(136);
     expect(toCGP(decodePosition(encoded))).toBe(toCGP(position));
   }
-  expect(encodePosition(full)).toHaveLength(135);
+  expect(encodePosition(full)).toHaveLength(136);
   // Fixed wire-format vector, not just encoder/decoder agreement.
-  expect(encodePosition(emptyPosition())).toBe("EnEE4gAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAANW3");
+  expect(encodePosition(emptyPosition())).toBe("MQpxBOIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABBlg");
+});
+
+test('legacy links retain English semantics and literal lexicons round-trip without URL escaping', {tag:'@unit'}, () => {
+  const legacy = decodePosition('EnEE4gAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAANW3');
+  expect(legacy.language).toBe('en');
+  expect(toCGP(legacy)).toBe(toCGP(emptyPosition()));
+  for (const lexicon of ['TWL98', 'Custom / + ? &= é漢字', 'x'.repeat(255)]) {
+    const position = {...emptyPosition(),language:'en',lexicon};
+    const url = positionLink(position,'https://example.com/');
+    expect(url).not.toContain('%');
+    const decoded = positionFromURL(url);
+    expect(decoded.lexicon).toBe(lexicon);
+    expect(decoded.language).toBe('en');
+    expect(decoded.board).toEqual(position.board);
+  }
+  expect(()=>encodePosition({...emptyPosition(),language:'pl',lexicon:'OSPS49'})).toThrow(/English tiles only/);
 });
 
 test('position links reject damaged, unsupported and noncanonical data', {tag:'@unit'}, () => {
@@ -52,10 +68,10 @@ test('position links reject damaged, unsupported and noncanonical data', {tag:'@
   expect(()=>decodePosition(rewrite(encoded,bytes=>{bytes[0] = (bytes[0]&15)|32;}))).toThrow(/unsupported format/);
   const empty = encodePosition(emptyPosition());
   // Scoreless-turns=7, invalid board letter=31, and nonzero trailing padding.
-  expect(()=>decodePosition(rewrite(empty,bytes=>{bytes[4] |= 0x1c;}))).toThrow();
+  expect(()=>decodePosition(rewrite(empty,bytes=>{bytes[5] |= 0x1c;}))).toThrow();
   expect(()=>decodePosition(rewrite(empty,bytes=>{bytes[bytes.length-3] |= 1;}))).toThrow();
   const one = emptyPosition(); one.board[0][0] = 'A';
-  expect(()=>decodePosition(rewrite(encodePosition(one),bytes=>{bytes[33] |= 7;bytes[34] |= 0xc0;}))).toThrow();
+  expect(()=>decodePosition(rewrite(encodePosition(one),bytes=>{bytes[34] |= 7;bytes[35] |= 0xc0;}))).toThrow();
   expect(()=>positionFromURL('https://example.com/?p='+encoded+'&p='+encoded)).toThrow();
   expect(positionFromURL('https://example.com/?other=1')).toBeNull();
   expect(()=>positionFromURL('https://example.com/?p=')).toThrow();
@@ -121,4 +137,17 @@ test('copy succeeds for analysis and cannot export hidden live racks', async ({p
   // Guard the handler too, rather than relying solely on button state.
   await page.locator('#copy-position-link').dispatchEvent('click');
   expect(await page.evaluate(()=>window.copiedLinks.length)).toBe(1);
+});
+
+test('unsupported lexicon names are displayed as text and CGP import remains available', async ({page}) => {
+  const lexicon = '<img src=x onerror=alert(1)> & 私';
+  await page.goto('/wasmentry/?p='+encodePosition({...emptyPosition(),language:'en',lexicon}));
+  await expect(page.locator('#import-dialog')).toBeVisible();
+  await expect(page.locator('#import-error')).toContainText(lexicon);
+  await expect(page.locator('#import-error img')).toHaveCount(0);
+  await expect(page.locator('#status')).toHaveText('Engine ready',{timeout:30000});
+  await page.locator('#cgp').fill(SAMPLES.opening);
+  await page.locator('#import-form button[type="submit"]').click();
+  await expect(page.locator('#import-dialog')).toBeHidden();
+  await expect(page.locator('#rack')).toHaveValue('AEINRST');
 });

@@ -1,11 +1,14 @@
 import { parseCGP, toCGP } from "./analysis-model.mjs";
+import { writeLanguageLexicon, readLanguageLexicon, languageForLexicon } from "./lexicon-name.mjs";
 
-// v1: MSB-first fields, described in docs/position-links.md. CRC-16/CCITT-FALSE
+// v1/v3: MSB-first fields, described in docs/position-links.md. CRC-16/CCITT-FALSE
 // detects accidental damage; it is not authentication. No dictionary required.
-const VERSION = 1;
+// Version 2 was used for the offline word-codec example; do not reinterpret it.
+const VERSION = 3;
 // Wire IDs are fixed independently of the settings menu ordering.
-const LEXICA = ["CSW24", "NWL23"];
-const MAX_LENGTH = 135;
+const LEGACY_LEXICA = ["CSW24", "NWL23"];
+// 136 for a registered pair; bounded literal tags/names allow future codecs.
+const MAX_LENGTH = 563;
 const invalid = () => new Error("This position link is damaged or incomplete. Ask for a new link or paste its CGP.");
 
 function checksum(bytes) {
@@ -22,8 +25,12 @@ function base64(bytes) {
   return btoa(String.fromCharCode(...bytes)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 export function encodePosition(position) {
-  // Use the same limits and tile-inventory validation as CGP import.
-  const checked = parseCGP(toCGP(position));
+  // Existing CGP callers have no language field; this board codec is English.
+  const language = position.language ?? languageForLexicon(position.lexicon) ?? 'en';
+  if (language !== 'en') throw new Error('This position codec supports English tiles only.');
+  // Validate the English board/racks independently of the browser’s installed
+  // lexicons. Unknown names are data and must never reach an engine command.
+  const checked = parseCGP(toCGP({...position, lexicon:"CSW24"}));
   const bytes = [];
   let offset = 0;
   const write = (value, bits) => {
@@ -33,7 +40,7 @@ export function encodePosition(position) {
     }
   };
   write(VERSION, 4);
-  write(LEXICA.indexOf(checked.lexicon), 1);
+  writeLanguageLexicon({language, lexicon:position.lexicon}, write);
   for (const score of checked.scores) write(score + 10000, 15);
   write(checked.zeros, 3);
   for (const rack of checked.racks) write(rack.length, 3);
@@ -71,8 +78,13 @@ export function decodePosition(text) {
     }
     return value;
   };
-  if (read(4) !== VERSION) throw new Error("This position link uses an unsupported format. Try opening it in a newer Magpie release.");
-  const lexicon = LEXICA[read(1)];
+  const version = read(4);
+  if (version !== 1 && version !== VERSION) throw new Error("This position link uses an unsupported format. Try opening it in a newer Magpie release.");
+  let metadata;
+  try {
+    metadata = version === 1 ? {language:'en', lexicon:LEGACY_LEXICA[read(1)]} : readLanguageLexicon(read);
+  } catch { throw invalid(); }
+  if (metadata.language !== 'en') throw new Error('This position link uses a language this browser preview cannot load. It supports English tiles only.');
   const scores = [read(15) - 10000, read(15) - 10000];
   const zeros = read(3);
   const lengths = [read(3), read(3)];
@@ -100,10 +112,12 @@ export function decodePosition(text) {
   const cells = occupied.map(present => present ? tiles[tileIndex++] : "");
   const board = Array.from({length:15}, (_, row) => cells.slice(row * 15, row * 15 + 15));
   try {
-    const position = parseCGP(toCGP({board, racks, scores, zeros, lexicon}));
-    // Reject trailing bytes and nonzero padding as well as noncanonical data.
-    if (encodePosition(position) !== text) throw invalid();
-    return position;
+    const position = parseCGP(toCGP({board, racks, scores, zeros, lexicon:"CSW24"}));
+    // Exact field lengths and zero padding reject trailing data, without
+    // re-encoding an escaped name that may acquire a registry ID in the future.
+    const padding = payload.length * 8 - offset;
+    if (padding >= 8 || read(padding) !== 0) throw invalid();
+    return {...position, ...metadata};
   } catch { throw invalid(); }
 }
 
