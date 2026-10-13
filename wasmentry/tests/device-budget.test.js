@@ -48,10 +48,24 @@ test('mobile settings default conservatively, persist memory choice, and keep WM
 
 for (const mode of ['peg', 'endgame']) {
   test(`${mode} completes with the 16 MiB search budget`, async ({page}) => {
-    test.setTimeout(180000);
+    test.setTimeout(60000);
+    // Postmortem searches intentionally ignore the simulation time setting.
+    // Bound this real-engine memory smoke test at the worker boundary instead.
+    await page.addInitScript(() => {
+      window.budgetCommands = [];
+      const post = Worker.prototype.postMessage;
+      Worker.prototype.postMessage = function(message, ...args) {
+        if (message.type === 'run') {
+          message.data.commands = message.data.commands.map(command =>
+            command.replace(/-(pegtlim|etlim) \S+/g, '-$1 2'));
+          window.budgetCommands.push(...message.data.commands);
+        }
+        return post.call(this, message, ...args);
+      };
+    });
     await page.goto('/wasmentry/');
     await expect(page.locator('#status')).toHaveText('Engine ready',{timeout:30000});
-  await openSample(page);
+    await openSample(page);
     await page.locator('#open-analysis-settings').click();
     await page.locator('#tt-memory').selectOption('16');
     await page.locator('#seconds').fill('2');
@@ -60,7 +74,10 @@ for (const mode of ['peg', 'endgame']) {
     await page.locator('#position-editor > summary').click();
     await loadSample(page, mode);
     await page.locator(`[data-mode=${mode}]`).click();
-    await expect(page.locator('#status')).toHaveText('Complete',{timeout:150000});
+    await expect(page.locator('#status')).toHaveText('Complete',{timeout:30000});
+    const commands = await page.evaluate(() => window.budgetCommands.join('\n'));
+    expect(commands).toContain('-ttfraction 0.0625');
+    expect(commands).toContain(mode === 'peg' ? '-pegtlim 2' : '-etlim 2');
     await expect(page.locator('#error')).toBeHidden();
     await expect(page.locator('#results tbody tr').first()).toBeVisible();
   });
