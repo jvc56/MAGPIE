@@ -1608,8 +1608,10 @@ function showHistory(index, {auto = true} = {}) {
     restorePosition(recordedGame.positions[historyIndex]),
     true,
   );
-  if (auto && !concealComputerAnalysis() && $("auto-analyze").value !== "off" && !reviewRunning)
-    analyze($("auto-analyze").value === "kibitz" ? "kibitz" : searchMode());
+  if (auto && !terminalPosition() && !concealComputerAnalysis() && $("auto-analyze").value !== "off" && !reviewRunning) {
+    const requestedMode = $("auto-analyze").value === "kibitz" ? "kibitz" : searchMode();
+    if (!hasReusableAnalysis(requestedMode)) analyze(requestedMode);
+  }
 }
 $("history-previous").addEventListener("click", () =>
   showHistory(historyIndex - 1),
@@ -3384,6 +3386,12 @@ function restoreAnalysis() {
   setRawAnalysis(saved.raw);
   renderResults();
 }
+function hasReusableAnalysis(requestedMode) {
+  if (mode !== requestedMode || !results.length) return false;
+  const played = $("hide-spoilers").checked ? "" : playedMove();
+  return results.some(row => (!played || moveIdentity(row.move) === moveIdentity(played)) &&
+    (mode !== "sim" || row.iterations > 0));
+}
 async function analyzeDraft() {
   if (busy || isLive() || !recordedGame) return;
   const generation = positionGeneration;
@@ -3481,7 +3489,8 @@ $("review-game").addEventListener("click", async () => {
     showHistory(index);
     $("review-progress").textContent =
       `Analyzing turn ${index + 1} of ${game.positions.length - 1}`;
-    if (position.racks[0] && !(await analyze(searchMode())) && reviewRunning)
+    if (position.racks[0] && !hasReusableAnalysis(searchMode()) &&
+        !(await analyze(searchMode())) && reviewRunning)
       failed++;
   }
   const completed = reviewRunning;
@@ -3522,13 +3531,13 @@ const controlHints = {
   "play-from":
     "Take over the player on turn; keep the original game in Undo.",
   "watch-from": "Let the computer continue from this position.",
-  "review-game": "Analyze each turn and keep its results for review.",
+  "review-game": "Analyze turns without saved results and keep them for review.",
   "stop-review": "Stop the review and keep completed analysis.",
   "fresh-analysis":
     "Discard this position’s previous results and start a new search.",
   "analyze-move": "Add this move to the kibitz list or simulation without recording a turn.",
   "continue-selected": "Add iterations only to the selected play; keep the other results.",
-  "auto-analyze": "Analyze automatically when you select a turn in history.",
+  "auto-analyze": "Analyze automatically when a selected turn has no saved results.",
   "new-game":
     "Start a game with named players and enter each rack as you go.",
   "load-gcg": "Open a GCG game record.",
