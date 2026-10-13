@@ -1,0 +1,197 @@
+{
+  "format": "experimental-XSG-v1",
+  "engine_fingerprint": "1af4330d5741b13fe6c6bf909ddbb3ca",
+  "rank_lexicon": "CSW24",
+  "draw_order": 4,
+  "move_order": 2,
+  "training_rank_costs": {
+    "draw": [
+      133012,
+      123644,
+      116274,
+      111418,
+      109316,
+      110344,
+      114194
+    ],
+    "move": [
+      67754,
+      64774,
+      64290,
+      66546,
+      71154,
+      77914,
+      86742
+    ]
+  },
+  "corpora": {
+    "woogles": {
+      "available": 436039,
+      "selected": 1000,
+      "skips": {
+        "Nonstandard game type": 6,
+        "Invalid played letter": 3,
+        "Incomplete or oversized game": 1
+      },
+      "training_games": 498,
+      "summary": {
+        "games": 502,
+        "original_chars": {
+          "mean": 1083.89,
+          "median": 1101.5,
+          "p95": 1528
+        },
+        "normalized_chars": {
+          "mean": 1005.77,
+          "median": 1023.5,
+          "p95": 1450
+        },
+        "zlib_chars": {
+          "mean": 693.72,
+          "median": 723.0,
+          "p95": 903
+        },
+        "explicit_chars": {
+          "mean": 360.33,
+          "median": 366.5,
+          "p95": 514
+        },
+        "carry_chars": {
+          "mean": 327.83,
+          "median": 338.0,
+          "p95": 438
+        },
+        "draw_chars": {
+          "mean": 321.61,
+          "median": 331.0,
+          "p95": 431
+        },
+        "hybrid_chars": {
+          "mean": 267.3,
+          "median": 270.0,
+          "p95": 364
+        },
+        "ranked": {
+          "mean": 22.9,
+          "median": 25.0,
+          "p95": 34
+        },
+        "plays": {
+          "mean": 23.92,
+          "median": 25.0,
+          "p95": 35
+        }
+      },
+      "by_category": {
+        "bot-present": {
+          "games": 343,
+          "original_chars": {
+            "mean": 1034.87,
+            "median": 1075,
+            "p95": 1425
+          },
+          "normalized_chars": {
+            "mean": 956.9,
+            "median": 998,
+            "p95": 1347
+          },
+          "zlib_chars": {
+            "mean": 670.15,
+            "median": 711,
+            "p95": 863
+          },
+          "explicit_chars": {
+            "mean": 337.72,
+            "median": 352,
+            "p95": 474
+          },
+          "carry_chars": {
+            "mean": 310.22,
+            "median": 331,
+            "p95": 404
+          },
+          "draw_chars": {
+            "mean": 304.2,
+            "median": 323,
+            "p95": 399
+          },
+          "hybrid_chars": {
+            "mean": 251.36,
+            "median": 263,
+            "p95": 324
+          },
+          "ranked": {
+            "mean": 22.15,
+            "median": 24,
+            "p95": 33
+          },
+          "plays": {
+            "mean": 22.92,
+            "median": 24,
+            "p95": 34
+          }
+        },
+        "human-only": {
+          "games": 159,
+          "original_chars": {
+            "mean": 1189.65,
+            "median": 1184,
+            "p95": 1818
+          },
+          "normalized_chars": {
+            "mean": 1111.19,
+            "median": 1104,
+            "p95": 1739
+          },
+          "zlib_chars": {
+            "mean": 744.57,
+            "median": 775,
+            "p95": 959
+          },
+          "explicit_chars": {
+            "mean": 409.12,
+            "median": 410,
+            "p95": 596
+          },
+          "carry_chars": {
+            "mean": 365.83,
+            "median": 374,
+            "p95": 492
+          },
+          "draw_chars": {
+            "mean": 359.18,
+            "median": 366,
+            "p95": 482
+          },
+          "hybrid_chars": {
+            "mean": 301.7,
+            "median": 302,
+            "p95": 402
+          },
+          "ranked": {
+            "mean": 24.52,
+            "median": 26,
+            "p95": 34
+          },
+          "plays": {
+            "mean": 26.09,
+            "median": 27,
+            "p95": 37
+          }
+        }
+      },
+      "placement_totals": {
+        "ranked": 11494,
+        "plays": 12010,
+        "native_errors": 0,
+        "top1": 3268,
+        "top10": 7767,
+        "matched_ranks": 11791
+      },
+      "games_using_both_move_modes": 182
+    }
+  },
+  "elapsed_seconds": 117.79,
+  "source_commit": "7c347fd3",
+  "sample_method": "Filename SHA256 order; normalized-content deduplication; whole-game hash split"
+}
