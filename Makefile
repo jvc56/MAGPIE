@@ -226,7 +226,7 @@ endif
 
 LFLAGS := ${lflags.${BUILD}}
 LDFLAGS  := ${ldflags.${BUILD}}
-LDLIBS   := -lm
+LDLIBS   := -lm -lz
 
 # The HTTP compat layer resolves libcurl with dlopen at runtime rather than
 # linking it, so a machine without libcurl still runs every offline command.

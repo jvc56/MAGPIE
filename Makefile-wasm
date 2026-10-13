@@ -20,8 +20,8 @@ OBJ_SRC := $(SRC:$(SRC_DIR)/%.c=$(OBJ_DIR)/$(SRC_DIR)/%.o)
 OBJ_CMD := $(CMD:$(CMD_DIR)/%.c=$(OBJ_DIR)/$(CMD_DIR)/%.o)
 OBJ_TEST := $(TEST:$(TEST_DIR)/%.c=$(OBJ_DIR)/$(TEST_DIR)/%.o)
 
-cflags.release := -O3 -Wall -Wextra -Wno-trigraphs -pthread
-ldflags.release := -Llib -pthread
+cflags.release := -sUSE_ZLIB=1 -O3 -Wall -Wextra -Wno-trigraphs -pthread
+ldflags.release := -sUSE_ZLIB=1 -Llib -pthread
 
 # $\ trick to turn backslash-newline-whitespace into an empty string
 

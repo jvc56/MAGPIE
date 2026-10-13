@@ -1509,7 +1509,15 @@ static const char *convert_help(const char **usages, const char **examples) {
          "recorded win percentage table (autoplay winpct) and an output table "
          "name in place of the letter distribution, chooses smoothing by "
          "cross-validating the record's two independent samples, and writes "
-         "the smoothed table.";
+         "the smoothed table. XS conversions use explicit file paths: "
+         "conv counts2xsw counts.tsv[.gz] book.xsw.json.gz CSW24|NWL23; "
+         "conv cgp2xsp position.cgp position.xsp [CSW24|NWL23|none] "
+         "[search_ms]; "
+         "conv xsp2cgp position.xsp position.cgp; "
+         "conv gcg2xsg game.gcg[.gz] game.xsg [CSW24|NWL23|none]; "
+         "conv xsg2gcg game.xsg game.gcg. Encoding defaults to CSW24 and "
+         "20 ms of position optimization. XS assets are resolved under "
+         "xs/english-v1 in the configured data paths.";
 }
 
 void add_help_arg_to_string_builder(const Config *config, int token,
