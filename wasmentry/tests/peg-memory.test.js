@@ -16,9 +16,10 @@ test('PEG uses current memory headroom and preserves the requested count when it
 });
 
 for (const scenario of [
-  {name:'desktop with a 256 MiB ceiling', ceiling:256, mobile:false, expected:2},
-  {name:'mobile with a 512 MiB ceiling', ceiling:512, mobile:true, expected:4},
-  {name:'desktop with 256 MiB already allocated in a 512 MiB heap', ceiling:512, mobile:false, heldMiB:256, expected:2},
+  {name:'desktop with a 256 MiB ceiling', ceiling:256, mobile:false, expected:1},
+  {name:'mobile with a 512 MiB ceiling', ceiling:512, mobile:true, expected:2},
+  {name:'mobile with a 1 GiB ceiling', ceiling:1024, mobile:true, expected:4},
+  {name:'desktop with 256 MiB already allocated in a 512 MiB heap', ceiling:512, mobile:false, heldMiB:256, expected:1},
 ]) {
   test(`PEG chooses workers by allocatable memory on ${scenario.name}`, async ({page}) => {
     test.setTimeout(90000);
