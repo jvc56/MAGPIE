@@ -4,6 +4,7 @@ import {
   placeTile,
   remainingRack,
   moveNotation,
+  placementConnected,
   normalizeMove,
   rackSlots,
   reorderRack,
@@ -26,6 +27,12 @@ test("notation absorbs existing prefixes and suffixes and rejects gaps and bends
   const position = parseCGP(SAMPLES.opening);
   position.board[7][7] = "C";
   position.board[7][9] = "T";
+  expect(placementConnected(position, [{ row: 7, col: 8, letter: "A" }])).toBe(true);
+  expect(placementConnected(position, [{ row: 6, col: 7, letter: "A" }])).toBe(true);
+  expect(placementConnected(position, [{ row: 6, col: 6, letter: "A" }])).toBe(false);
+  expect(placementConnected(position, [
+    { row: 7, col: 8, letter: "A" }, { row: 7, col: 11, letter: "S" },
+  ])).toBe(false);
   expect(moveNotation(position, [{ row: 7, col: 8, letter: "A" }])).toBe(
     "8H .A.",
   );

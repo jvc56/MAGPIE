@@ -167,14 +167,18 @@ test("branching rejects an edited recorded board", async ({page})=>{
   await expect(page.locator('#history-position option')).toHaveCount(count);
 });
 
-test("automatic review keeps pooled sims and spoiler hiding omits played-move injection", async ({page})=>{
+test("automatic review reuses pooled sims and spoiler hiding omits played-move injection", async ({page})=>{
   await page.addInitScript(()=>{window.commands=[];const post=Worker.prototype.postMessage;Worker.prototype.postMessage=function(message,...args){if(message.type==='run')window.commands.push(...message.data.commands);return post.call(this,message,...args)}});
   await ready(page);await page.locator('#gcg-file').setInputFiles('tests/fixtures/standard.gcg');await expect(page.locator('#game-history')).toBeVisible();
   await page.locator('#open-analysis-settings').click();await page.locator('#seconds').fill('1');await page.locator('#candidates').fill('3');await page.selectOption('#auto-analyze','auto');await page.locator('#back-to-game').click();
   await page.locator('[data-mode=sim]').click();await expect(page.locator('#status')).toHaveText('Complete');
   const total=()=>page.locator('#analysis-meta').textContent().then(s=>Number(s.match(/([\d,]+) total iterations/)[1].replaceAll(',','')));
   const before=await total();await page.locator('#history-next').click();await expect(page.locator('#stop')).toBeDisabled();
-  await page.locator('#history-previous').click();await expect(page.locator('#stop')).toBeDisabled();expect(await total()).toBeGreaterThan(before);
+  await page.evaluate(()=>{window.commands=[]});
+  await page.locator('#history-previous').click();await expect(page.locator('#stop')).toBeDisabled();
+  expect(await total()).toBe(before);
+  const restoredCommands=await page.evaluate(()=>window.commands);
+  expect(restoredCommands.some(command=>/^(sim|snoprune)(?: |$)/.test(command))).toBe(false);
   await page.locator('#hide-spoilers').check();await page.evaluate(()=>{window.commands=[]});
   await page.locator('[data-mode=sim]').click();await expect(page.locator('#stop')).toBeDisabled();
   const commands=await page.evaluate(()=>window.commands);

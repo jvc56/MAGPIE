@@ -91,6 +91,21 @@ export function normalizeMove(value) {
   return `${play[1].toUpperCase()} ${play[2]}`;
 }
 
+// Incomplete arrangements are normal during entry, not errors to announce.
+export function placementConnected(position, tiles, vertical = false) {
+  if (!tiles.length) return false;
+  try {
+    moveNotation(position, tiles, vertical);
+  } catch {
+    return false;
+  }
+  if (!position.board.some(row => row.some(Boolean)))
+    return tiles.some(tile => tile.row === 7 && tile.col === 7);
+  return tiles.some(({row, col}) =>
+    [[row - 1, col], [row + 1, col], [row, col - 1], [row, col + 1]]
+      .some(([neighborRow, neighborCol]) => position.board[neighborRow]?.[neighborCol]));
+}
+
 // Keep the identity of duplicate letters while pending tiles reserve rack slots.
 // Imported/preview moves have no slot yet; assign those deterministically.
 export function rackSlots(rack, tiles = []) {
