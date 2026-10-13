@@ -6,8 +6,10 @@
 #include "../src/def/game_history_defs.h"
 #include "../src/def/letter_distribution_defs.h"
 #include "../src/ent/board.h"
+#include "../src/ent/equity.h"
 #include "../src/ent/game.h"
 #include "../src/ent/letter_distribution.h"
+#include "../src/ent/move.h"
 #include "../src/impl/config.h"
 #include "../src/impl/peg.h"
 #include "../src/str/move_string.h"
@@ -132,6 +134,10 @@ void test_peg_poll(void) {
   assert(has_substring(json, "\"done\":true"));
   assert(has_substring(json, "\"stages\":[{"));
   assert(has_substring(json, "\"entries\":[{"));
+  char *expected_score = get_formatted_string(
+      "\"score\":%d", equity_to_int(move_get_score(&final.entries[0].move)));
+  assert(has_substring(json, expected_score));
+  free(expected_score);
   assert(!has_substring(json, "nan"));
   assert(!has_substring(json, "inf"));
   assert(!has_substring(json, "\"seconds\":-"));
