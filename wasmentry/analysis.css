@@ -1634,7 +1634,7 @@ body.tile-dragging, body.tile-dragging * { cursor: grabbing !important; }
 .position-toolbar #error, .position-toolbar #move-feedback { flex: 1 1 12ch; min-width: 0; margin: 0; padding: 4px 6px; overflow-wrap: anywhere; }
 .position-toolbar #move-feedback { color: var(--danger); }
 .player-name { position: relative; padding-bottom: 7px; }
-.player-name.thinking, .player-name.your-turn { color: var(--green); }
+.player-name.thinking, .player-name.your-turn { color: var(--positive); }
 .player-name.thinking::after {
   content: "";
   width: 48px;
