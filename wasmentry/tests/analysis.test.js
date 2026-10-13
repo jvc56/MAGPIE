@@ -556,7 +556,8 @@ test("move entry: drag, tap, blank, recall, direction, playthrough and validatio
   await page.keyboard.press("Space");
   await expect(page.locator('.square.pending[data-col="0"]')).toHaveCount(3);
   await page.keyboard.press("Enter");
-  await expect(page.locator("#error")).toBeVisible();
+  await expect(page.locator("#error")).toBeHidden();
+  await expect(page.locator("#play-move")).toBeDisabled();
   await expect(page.locator(".square.pending")).toHaveCount(3);
   await expect(page.locator("#history-position option")).toHaveCount(3);
   await page.locator("#sort-rack").click();
