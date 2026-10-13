@@ -30,18 +30,25 @@ test('compact position encoding preserves CGP fields, blanks, phonies and all 10
   for (const position of cases) {
     const encoded = encodePosition(position);
     expect(encoded).toMatch(/^[A-Za-z0-9_-]+$/);
-    expect(encoded.length).toBeLessThanOrEqual(136);
+    expect(encoded.length).toBeLessThanOrEqual(147);
     expect(toCGP(decodePosition(encoded))).toBe(toCGP(position));
   }
-  expect(encodePosition(full)).toHaveLength(136);
+  expect(encodePosition(full)).toHaveLength(142);
+  full.scores = [0,1022];
+  expect(encodePosition(full)).toHaveLength(134);
+  full.scores = [-2147483648,2147483647];
+  expect(encodePosition(full)).toHaveLength(147);
+  expect(decodePosition(encodePosition(full)).scores).toEqual(full.scores);
   // Fixed wire-format vector, not just encoder/decoder agreement.
-  expect(encodePosition(emptyPosition())).toBe("MQpxBOIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABBlg");
+  expect(encodePosition(emptyPosition())).toBe("QQgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEY8");
 });
 
 test('legacy links retain English semantics and literal lexicons round-trip without URL escaping', {tag:'@unit'}, () => {
-  const legacy = decodePosition('EnEE4gAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAANW3');
-  expect(legacy.language).toBe('en');
-  expect(toCGP(legacy)).toBe(toCGP(emptyPosition()));
+  for (const token of ['EnEE4gAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAANW3', 'MQpxBOIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABBlg']) {
+    const legacy = decodePosition(token);
+    expect(legacy.language).toBe('en');
+    expect(toCGP(legacy)).toBe(toCGP(emptyPosition()));
+  }
   for (const lexicon of ['TWL98', 'Custom / + ? &= é漢字', 'x'.repeat(255)]) {
     const position = {...emptyPosition(),language:'en',lexicon};
     const url = positionLink(position,'https://example.com/');
@@ -68,10 +75,10 @@ test('position links reject damaged, unsupported and noncanonical data', {tag:'@
   expect(()=>decodePosition(rewrite(encoded,bytes=>{bytes[0] = (bytes[0]&15)|32;}))).toThrow(/unsupported format/);
   const empty = encodePosition(emptyPosition());
   // Scoreless-turns=7, invalid board letter=31, and nonzero trailing padding.
-  expect(()=>decodePosition(rewrite(empty,bytes=>{bytes[5] |= 0x1c;}))).toThrow();
+  expect(()=>decodePosition(rewrite(empty,bytes=>{bytes[4] |= 0x70;}))).toThrow();
   expect(()=>decodePosition(rewrite(empty,bytes=>{bytes[bytes.length-3] |= 1;}))).toThrow();
   const one = emptyPosition(); one.board[0][0] = 'A';
-  expect(()=>decodePosition(rewrite(encodePosition(one),bytes=>{bytes[34] |= 7;bytes[35] |= 0xc0;}))).toThrow();
+  expect(()=>decodePosition(rewrite(encodePosition(one),bytes=>{bytes[33] |= 0x1f;}))).toThrow();
   expect(()=>positionFromURL('https://example.com/?p='+encoded+'&p='+encoded)).toThrow();
   expect(positionFromURL('https://example.com/?other=1')).toBeNull();
   expect(()=>positionFromURL('https://example.com/?p=')).toThrow();
@@ -150,4 +157,16 @@ test('unsupported lexicon names are displayed as text and CGP import remains ava
   await page.locator('#import-form button[type="submit"]').click();
   await expect(page.locator('#import-dialog')).toBeHidden();
   await expect(page.locator('#rack')).toHaveValue('AEINRST');
+});
+
+test('large escaped scores show a recoverable browser import error', async ({page}) => {
+  const token = encodePosition({...emptyPosition(),scores:[100000,1023]});
+  expect(decodePosition(token).scores).toEqual([100000,1023]);
+  await page.goto('/wasmentry/?p='+token);
+  await expect(page.locator('#import-dialog')).toBeVisible();
+  await expect(page.locator('#import-error')).toHaveText('Scores must be between -10000 and 10000.');
+  await expect(page.locator('#status')).toHaveText('Engine ready',{timeout:30000});
+  await page.locator('#cgp').fill(SAMPLES.opening);
+  await page.locator('#import-form button[type="submit"]').click();
+  await expect(page.locator('#import-dialog')).toBeHidden();
 });

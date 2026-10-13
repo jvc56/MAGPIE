@@ -3711,6 +3711,8 @@ try {
     if (!LEXICA.includes(linkedPosition.lexicon)) {
       throw new Error(`This position uses lexicon “${linkedPosition.lexicon}”, which this browser preview cannot load. It supports CSW24 and NWL23.`);
     }
+    // Keep the browser/engine CGP limits even when the transport supports more.
+    parseCGP(toCGP({...linkedPosition, lexicon:"CSW24"}));
     setPosition(linkedPosition);
   }
   else $("new-game-dialog").showModal();

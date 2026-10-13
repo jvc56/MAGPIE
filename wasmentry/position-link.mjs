@@ -1,14 +1,15 @@
+import { writeCompactScore, readCompactScore } from "./compact-score.mjs";
 import { parseCGP, toCGP } from "./analysis-model.mjs";
 import { writeLanguageLexicon, readLanguageLexicon, languageForLexicon } from "./lexicon-name.mjs";
 
-// v1/v3: MSB-first fields, described in docs/position-links.md. CRC-16/CCITT-FALSE
+// v1/v3/v4: MSB-first fields, described in docs/position-links.md. CRC-16/CCITT-FALSE
 // detects accidental damage; it is not authentication. No dictionary required.
 // Version 2 was used for the offline word-codec example; do not reinterpret it.
-const VERSION = 3;
+const VERSION = 4;
 // Wire IDs are fixed independently of the settings menu ordering.
 const LEGACY_LEXICA = ["CSW24", "NWL23"];
-// 136 for a registered pair; bounded literal tags/names allow future codecs.
-const MAX_LENGTH = 563;
+// Up to 147 for registered metadata and int32 scores; literals remain bounded.
+const MAX_LENGTH = 574;
 const invalid = () => new Error("This position link is damaged or incomplete. Ask for a new link or paste its CGP.");
 
 function checksum(bytes) {
@@ -30,7 +31,8 @@ export function encodePosition(position) {
   if (language !== 'en') throw new Error('This position codec supports English tiles only.');
   // Validate the English board/racks independently of the browser’s installed
   // lexicons. Unknown names are data and must never reach an engine command.
-  const checked = parseCGP(toCGP({...position, lexicon:"CSW24"}));
+  if (!Array.isArray(position.scores) || position.scores.length !== 2) throw new Error('Two scores are required.');
+  const checked = parseCGP(toCGP({...position, scores:[0,0], lexicon:"CSW24"}));
   const bytes = [];
   let offset = 0;
   const write = (value, bits) => {
@@ -41,7 +43,7 @@ export function encodePosition(position) {
   };
   write(VERSION, 4);
   writeLanguageLexicon({language, lexicon:position.lexicon}, write);
-  for (const score of checked.scores) write(score + 10000, 15);
+  for (const score of position.scores) writeCompactScore(score, write);
   write(checked.zeros, 3);
   for (const rack of checked.racks) write(rack.length, 3);
   const cells = checked.board.flat();
@@ -79,13 +81,17 @@ export function decodePosition(text) {
     return value;
   };
   const version = read(4);
-  if (version !== 1 && version !== VERSION) throw new Error("This position link uses an unsupported format. Try opening it in a newer Magpie release.");
+  if (version !== 1 && version !== 3 && version !== VERSION) throw new Error("This position link uses an unsupported format. Try opening it in a newer Magpie release.");
   let metadata;
   try {
     metadata = version === 1 ? {language:'en', lexicon:LEGACY_LEXICA[read(1)]} : readLanguageLexicon(read);
   } catch { throw invalid(); }
   if (metadata.language !== 'en') throw new Error('This position link uses a language this browser preview cannot load. It supports English tiles only.');
-  const scores = [read(15) - 10000, read(15) - 10000];
+  let scores;
+  try {
+    scores = version === VERSION ? [readCompactScore(read), readCompactScore(read)] : [read(15) - 10000, read(15) - 10000];
+    if (version !== VERSION && scores.some(score => Math.abs(score) > 10000)) throw invalid();
+  } catch { throw invalid(); }
   const zeros = read(3);
   const lengths = [read(3), read(3)];
   const occupied = Array.from({length:225}, () => read(1));
@@ -112,12 +118,12 @@ export function decodePosition(text) {
   const cells = occupied.map(present => present ? tiles[tileIndex++] : "");
   const board = Array.from({length:15}, (_, row) => cells.slice(row * 15, row * 15 + 15));
   try {
-    const position = parseCGP(toCGP({board, racks, scores, zeros, lexicon:"CSW24"}));
+    const position = parseCGP(toCGP({board, racks, scores:[0,0], zeros, lexicon:"CSW24"}));
     // Exact field lengths and zero padding reject trailing data, without
     // re-encoding an escaped name that may acquire a registry ID in the future.
     const padding = payload.length * 8 - offset;
     if (padding >= 8 || read(padding) !== 0) throw invalid();
-    return {...position, ...metadata};
+    return {...position, scores, ...metadata};
   } catch { throw invalid(); }
 }
 

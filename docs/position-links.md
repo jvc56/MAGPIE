@@ -13,15 +13,15 @@ Like Copy CGP, sharing is disabled during a live human game to protect hidden
 racks. Malformed links open the CGP import dialog with a recoverable message;
 the user can paste a valid position or close the dialog and start a game.
 
-## Version 3 wire format
+## Version 4 wire format
 
 Unsigned fields are written most-significant bit first, in this order:
 
 | Field | Bits | Meaning |
 |---|---:|---|
-| Version | 4 | 3 |
+| Version | 4 | 4 |
 | Language / lexicon | 9 or more | Shared header below; language first, then language-local lexicon ID |
-| Scores | 2 × 15 | Each score plus 10,000; range −10,000…10,000 |
+| Scores | 10 each, plus optional varint | 0–1022 directly; 1023 escapes to a ZigZag int32 varint (below) |
 | Scoreless turns | 3 | 0…6 |
 | Rack lengths | 2 × 3 | 0…7 each |
 | Occupancy | 225 | Row-major 15 × 15, 1 for occupied |
@@ -34,10 +34,12 @@ Unsigned fields are written most-significant bit first, in this order:
 
 CRC polynomial 0x1021, initial value 0xffff, no reflection or final XOR.
 Encode bytes using unpadded base64url. This is a corruption check, not a signature.
-At most 100 physical English tiles and a registered language/lexicon pair yield
-at most 793 payload bits, 100 payload bytes, plus two checksum bytes:
-**136 URL characters maximum**. Escaped metadata is bounded by 563 characters
-including both maximum-length literal fields. No extra percent-escaping is
+At most 100 physical English tiles, a registered language/lexicon pair, and
+scores in 0–1022 yield at most 783 payload bits, 98 payload bytes, plus two
+checksum bytes: **134 URL characters maximum for ordinary scores**. With both
+scores requiring five-byte varints, the bound is 863 payload bits and **147 URL
+characters**. Escaped metadata is bounded by 574 characters including both
+maximum-length literal fields and scores. No extra percent-escaping is
 needed: base64url uses only letters, digits, `-`, and `_`, without `=` padding.
 
 Unknown versions, duplicate `p` parameters, bad base64/checksums, truncation,
@@ -49,13 +51,16 @@ version; do not reinterpret existing IDs.
 
 Version 1 remains readable: its one-bit lexicon field means CSW24 (0) or NWL23
 (1), and its language is implicitly English. Version 2 was used only by the
-offline word-codec example; it is not accepted by this browser decoder. The
-new language header uses version 3 rather than silently changing either format.
+offline word-codec example; it is not accepted by this browser decoder.
+Version 3 remains readable too, with the explicit language header and two
+15-bit offset scores. Both legacy versions enforce their original ±10,000
+score bounds. Version 4 introduces the compact score fields; neither older
+format is silently reinterpreted.
 
 Fixed empty CSW24 position (both racks empty, scores 0/0, zero scoreless turns):
 
 ```
-MQpxBOIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABBlg
+QQgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEY8
 ```
 
 
@@ -109,7 +114,7 @@ not have the decoder dynamically choose whichever lexicon is largest today:
 new dictionaries and retrained frequencies must never change old links. A
 future format may omit duplicate fields with a defined “same as game lexicon”
 flag, but the codebook identity must still be unambiguous. The dictionary-free
-version-3 position codec has no codebook field because it uses none.
+version-4 position codec has no codebook field because it uses none.
 
 The header codec supports all listed languages; the current **position body
 codec remains English-only** (A–Z, two blanks, English inventory, 15×15).
@@ -124,3 +129,31 @@ XSG is not yet implemented. Its planned envelope uses this same shared header;
 there is no XSG encoder/decoder or multilingual board support implied by these
 metadata changes. The offline word-codec study and its old example sizes have
 not been retroactively changed to this header.
+
+
+## Compact score field
+
+`wasmentry/compact-score.mjs` is shared-format code suitable for XSP and XSG.
+Each score starts with ten bits. Values 0–1022 are literal scores; value 1023
+is followed immediately (without alignment padding) by an unsigned LEB128
+varint containing the signed score's ZigZag representation:
+
+- Nonnegative score: `2 * score`.
+- Negative score: `-2 * score - 1`.
+- Varint bytes carry seven value bits each, least-significant group first,
+  with the high bit indicating another byte. Each byte is written MSB-first
+  into the containing bitstream.
+
+Examples: −1 escapes to byte `01`; 1023 escapes to `FE 0F`; 8192 escapes to
+`80 80 01`. Each common score takes 10 bits rather than 15, saving 10 bits
+for two common scores. A negative score such as −1 takes 18 bits.
+
+The transport supports **−2,147,483,648 through +2,147,483,647**. Reads stop
+within five varint bytes and reject overflow, truncation, nonminimal varints,
+and escaped values that could have used the direct 10-bit field. Arithmetic
+ZigZag conversion avoids JavaScript bitwise sign-extension errors.
+
+The current browser CGP importer still limits scores to ±10,000 before handing
+a position to the engine. The standalone codec round-trips the wider range;
+opening a link outside the UI range shows the recoverable import dialog rather
+than bypassing that limit. This changes no core engine score arithmetic.
