@@ -1629,6 +1629,8 @@ body.tile-dragging, body.tile-dragging * { cursor: grabbing !important; }
 #session-controls { flex: none; margin: 0; }
 .position-toolbar #session-result { margin: 0; }
 #computer-move { font-size: 12px; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 4px 8px; border-radius: 4px; background: var(--raised); }
+/* Blank outlines must not change the toast height or resize the board. */
+#computer-move .move-tiles, #computer-move .move-word { align-items: center; }
 .position-toolbar #error, .position-toolbar #move-feedback { flex: 1 1 12ch; min-width: 0; margin: 0; padding: 4px 6px; overflow-wrap: anywhere; }
 .position-toolbar #move-feedback { color: var(--danger); }
 .player-name { position: relative; padding-bottom: 7px; }

@@ -4,7 +4,7 @@ import { TILE_ORDERS, DEFAULT_TILE_ORDER, tileAlphabet, sortTiles, formatTileGro
 import { GameAction } from "./game-actions.mjs";
 import { installTileDrag } from "./tile-drag.mjs";
 import { loadAnalyses, saveAnalysis } from "./analysis-cache.mjs";
-import { deviceBudget } from "./device-budget.mjs";
+import { deviceBudget, searchWordMapSource } from "./device-budget.mjs";
 import { listWMPs } from "./wmp-cache.mjs";
 import { renderPegOutcomes, parsePegProgress, mergePegRows } from "./peg-review.mjs";
 import { ensureIsolation } from "./isolation.mjs";
@@ -38,6 +38,7 @@ import {
   shuffleRack,
   placeTile,
   moveNotation,
+  placementConnected,
   normalizeMove,
 } from "./move-entry.mjs";
 let cachedWMPFiles = [];
@@ -268,7 +269,7 @@ function readSettings() {
     settings[id] = n;
   }
   settings.ttMiB = Number($("tt-memory").value);
-  settings.wmpSource = $("wmp-source").value;
+  settings.wmpSource = searchWordMapSource($("wmp-source").value, inventory(position).bagCount, budget);
   settings.wmp = settings.wmpSource !== "off";
   return settings;
 }
@@ -862,6 +863,7 @@ function renderResults() {
     );
   if (mode === "peg")
     columns.push(
+      ["score", "Score"],
       ["state", "Status"],
       ["win", "Win %"],
       ["spread", "Spread"],
@@ -1607,8 +1609,10 @@ function showHistory(index, {auto = true} = {}) {
     restorePosition(recordedGame.positions[historyIndex]),
     true,
   );
-  if (auto && !concealComputerAnalysis() && $("auto-analyze").value !== "off" && !reviewRunning)
-    analyze($("auto-analyze").value === "kibitz" ? "kibitz" : searchMode());
+  if (auto && !terminalPosition() && !concealComputerAnalysis() && $("auto-analyze").value !== "off" && !reviewRunning) {
+    const requestedMode = $("auto-analyze").value === "kibitz" ? "kibitz" : searchMode();
+    if (!hasReusableAnalysis(requestedMode)) analyze(requestedMode);
+  }
 }
 $("history-previous").addEventListener("click", () =>
   showHistory(historyIndex - 1),
@@ -1971,6 +1975,7 @@ function applyDraftFeedback(generation, text, score = null) {
 function scheduleDraftCheck() {
   cancelDraftCheck();
   if (!recordedGame || !recordedBoardMatches()) return;
+  if (!placementConnected(position, draftTiles, vertical)) return;
   let move;
   try {
     move = moveNotation(position, draftTiles, vertical);
@@ -2002,12 +2007,7 @@ function renderDraft() {
   continuationPosition = null;
   selectedMove = "";
   error("");
-  try {
-    moveNotation(position, draftTiles, vertical);
-    $("move-feedback").textContent = "";
-  } catch (failure) {
-    $("move-feedback").textContent = failure.message;
-  }
+  $("move-feedback").textContent = "";
   renderResults();
   renderPosition();
   scheduleDraftCheck();
@@ -2235,6 +2235,7 @@ async function submitMove(value = null, computer = false) {
   if (terminalPosition()) return;
   if (busy || (isLive() && !computer && (!humanTurn() || session.paused)))
     return;
+  if (!value && draftTiles.length && !placementConnected(position, draftTiles, vertical)) return;
   const generation = positionGeneration;
   const before = position;
   const moveIndex = historyIndex;
@@ -2778,6 +2779,8 @@ function renderSession() {
     (live && (session.paused || !humanTurn()));
   for (const id of ["play-move", "pass-move", "exchange-move"])
     $(id).disabled = !!entryLocked;
+  if (draftTiles.length && !placementConnected(position, draftTiles, vertical))
+    $("play-move").disabled = true;
   for (const element of document.querySelectorAll("#shuffle-rack, #sort-rack, #rack-tiles .rack-tile"))
     element.disabled = !canArrangeRack();
   document.body.classList.toggle("playing", !!live);
@@ -3384,6 +3387,12 @@ function restoreAnalysis() {
   setRawAnalysis(saved.raw);
   renderResults();
 }
+function hasReusableAnalysis(requestedMode) {
+  if (mode !== requestedMode || !results.length) return false;
+  const played = $("hide-spoilers").checked ? "" : playedMove();
+  return results.some(row => (!played || moveIdentity(row.move) === moveIdentity(played)) &&
+    (mode !== "sim" || row.iterations > 0));
+}
 async function analyzeDraft() {
   if (busy || isLive() || !recordedGame) return;
   const generation = positionGeneration;
@@ -3481,7 +3490,8 @@ $("review-game").addEventListener("click", async () => {
     showHistory(index);
     $("review-progress").textContent =
       `Analyzing turn ${index + 1} of ${game.positions.length - 1}`;
-    if (position.racks[0] && !(await analyze(searchMode())) && reviewRunning)
+    if (position.racks[0] && !hasReusableAnalysis(searchMode()) &&
+        !(await analyze(searchMode())) && reviewRunning)
       failed++;
   }
   const completed = reviewRunning;
@@ -3522,13 +3532,13 @@ const controlHints = {
   "play-from":
     "Take over the player on turn; keep the original game in Undo.",
   "watch-from": "Let the computer continue from this position.",
-  "review-game": "Analyze each turn and keep its results for review.",
+  "review-game": "Analyze turns without saved results and keep them for review.",
   "stop-review": "Stop the review and keep completed analysis.",
   "fresh-analysis":
     "Discard this position’s previous results and start a new search.",
   "analyze-move": "Add this move to the kibitz list or simulation without recording a turn.",
   "continue-selected": "Add iterations only to the selected play; keep the other results.",
-  "auto-analyze": "Analyze automatically when you select a turn in history.",
+  "auto-analyze": "Analyze automatically when a selected turn has no saved results.",
   "new-game":
     "Start a game with named players and enter each rack as you go.",
   "load-gcg": "Open a GCG game record.",
@@ -3691,6 +3701,16 @@ async function startEngine() {
       $("analysis-storage-warning").hidden = false;
     }
     engine.addEventListener("message", ({ detail }) => {
+      if (detail.type === "peg_memory_budget") {
+        $("settings-summary").textContent = $("settings-summary").textContent
+          .replace(/\d+ threads(?: \(memory limited\))?/, `${detail.threads} threads${detail.threads < detail.requested ? " (memory limited)" : ""}`);
+        return;
+      }
+      if (detail.type === "memory_status") {
+        const mib = bytes => (bytes / (1024 * 1024)).toFixed(1);
+        $("engine-memory").textContent = `WASM memory (last idle snapshot): ${mib(detail.allocatedBytes)} MiB allocated; ${mib(detail.freeBytes)} MiB reusable within a ${mib(detail.heapBytes)} MiB heap. Configured ceiling: ${mib(detail.limitBytes)} MiB. Additional growth depends on the browser; this is not available device RAM.`;
+        return;
+      }
       if (detail.type === "peg_outcomes") {
         const key = `${detail.key}:${detail.move}`;
         if (detail.key !== pegSessionKey || detail.sessionId !== pegSessionId) return;

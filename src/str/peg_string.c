@@ -3,6 +3,7 @@
 #include "../compat/ctime.h"
 #include "../def/peg_defs.h"
 #include "../ent/board.h"
+#include "../ent/equity.h"
 #include "../ent/game.h"
 #include "../ent/letter_distribution.h"
 #include "../ent/move.h"
@@ -1369,6 +1370,8 @@ static void peg_json_candidates(StringBuilder *sb, const PegRankedCand *rows,
     const PegRankedCand *row = &rows[entry_idx];
     string_builder_add_string(sb, entry_idx > 0 ? ",{\"move\":" : "{\"move\":");
     peg_json_move(sb, &row->move, game);
+    string_builder_add_formatted_string(
+        sb, ",\"score\":%d", equity_to_int(move_get_score(&row->move)));
     string_builder_add_string(sb, ",\"win\":");
     if (row->weight_sum > 0 && isfinite(row->win_pct) && row->win_pct >= 0) {
       peg_json_decimal(sb, 100.0 * row->win_pct, 6);

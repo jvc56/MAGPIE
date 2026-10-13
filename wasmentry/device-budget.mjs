@@ -13,3 +13,9 @@ export function deviceBudget(device = navigator) {
     ttMiB: constrained ? 16 : 32,
   };
 }
+
+// Preserve the saved preference; release installed maps only for late-game
+// searches on mobile. Earlier positions can load them again from disk cache.
+export function searchWordMapSource(source, bagCount, budget) {
+  return budget.mobile && bagCount <= 4 ? "off" : source;
+}

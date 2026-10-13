@@ -328,6 +328,16 @@ test("board size stays stable through human and computer turn transitions", asyn
     if (width === 900) {
       await expect(toast).toContainText('Magpie played');
       await expect(toast.locator('.move-tile').first()).toBeVisible();
+      // Exercise the outlined blank's different baseline deterministically,
+      // rather than relying on the computer's next randomly drawn rack.
+      const blankHeight = await toast.evaluate(element => {
+        const tile = element.querySelector('.move-tile');
+        tile.classList.add('blank');
+        const height = element.getBoundingClientRect().height;
+        tile.classList.remove('blank');
+        return height;
+      });
+      expect(Math.abs(blankHeight - toastBox.height)).toBeLessThan(0.1);
       expect(toastBox.x).toBeGreaterThanOrEqual(controlsBox.x + controlsBox.width);
       expect(Math.abs(toastBox.y + toastBox.height / 2 - controlsBox.y - controlsBox.height / 2)).toBeLessThan(2);
       await page.screenshot({path:test.info().outputPath('computer-move-toast.png')});

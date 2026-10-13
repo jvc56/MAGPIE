@@ -96,3 +96,30 @@ for (const down of [false, true]) test(`typing to the ${down?'bottom':'right'} e
   await expect(page.locator('.square.pending')).toHaveCount(0);
   await expect(page.locator('.square.cursor')).toHaveAttribute(down?'data-row':'data-col','14');
 });
+
+test('incomplete placements stay quiet and cannot be submitted until connected', async ({page}) => {
+  await page.goto('/wasmentry/');
+  await expect(page.locator('#start-game')).toBeEnabled({timeout:30000});
+  await page.locator('[data-game-kind=record]').click();
+  await page.locator('#start-game').click();
+  await page.locator('#rack').fill('AEINRST');
+  await page.locator('#rack').dispatchEvent('change');
+  for (const [col, letter] of [[5, 'a'], [7, 't']]) {
+    await page.locator(`#board [data-row="7"][data-col="${col}"]`).click();
+    await page.keyboard.type(letter);
+    await expect(page.locator('#play-move')).toBeDisabled();
+    await page.keyboard.press('Enter');
+    // Let the asynchronous preview run: it must not announce draft errors.
+    await page.waitForTimeout(400);
+    await expect(page.locator('#move-feedback')).toBeEmpty();
+    await expect(page.locator('#error')).toBeHidden();
+    await expect(page.locator('#history-position option')).toHaveCount(1);
+  }
+  await page.locator('#board [data-row="7"][data-col="6"]').click();
+  await page.keyboard.type('r');
+  await expect(page.locator('#play-move')).toBeEnabled();
+  await expect(page.locator('.move-score')).toHaveText('6');
+  await page.locator('#play-move').click();
+  await expect(page.locator('.square.pending')).toHaveCount(0);
+  await expect(page.locator('#history-position option')).toHaveCount(2);
+});
