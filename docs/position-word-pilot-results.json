@@ -398,5 +398,179 @@
       "JA",
       205006
     ]
-  ]
+  ],
+  "budgeted_search": {
+    "CSW24": {
+      "20": {
+        "search_ms_per_position": 20.0,
+        "search": {
+          "completed_layouts": 603,
+          "layouts": 618,
+          "nodes": 171398,
+          "saved_board_bits": 368,
+          "elapsed_ms": 645.54
+        },
+        "sizes": {
+          "packed": {
+            "mean": 117.53,
+            "median": 124,
+            "p95": 135,
+            "max": 135
+          },
+          "deflate": {
+            "mean": 174.36,
+            "median": 183,
+            "p95": 200,
+            "max": 208
+          },
+          "bitmap_words": {
+            "mean": 108.07,
+            "median": 114,
+            "p95": 126,
+            "max": 127
+          },
+          "geometry_words": {
+            "mean": 87.96,
+            "median": 95,
+            "p95": 115,
+            "max": 120
+          },
+          "best_with_fallback": {
+            "mean": 88.33,
+            "median": 95,
+            "p95": 115,
+            "max": 120
+          }
+        }
+      },
+      "200": {
+        "search_ms_per_position": 200.0,
+        "search": {
+          "completed_layouts": 618,
+          "layouts": 618,
+          "nodes": 200392,
+          "saved_board_bits": 392,
+          "elapsed_ms": 772.198
+        },
+        "sizes": {
+          "packed": {
+            "mean": 117.53,
+            "median": 124,
+            "p95": 135,
+            "max": 135
+          },
+          "deflate": {
+            "mean": 174.36,
+            "median": 183,
+            "p95": 200,
+            "max": 208
+          },
+          "bitmap_words": {
+            "mean": 108.07,
+            "median": 114,
+            "p95": 126,
+            "max": 127
+          },
+          "geometry_words": {
+            "mean": 87.95,
+            "median": 95,
+            "p95": 115,
+            "max": 119
+          },
+          "best_with_fallback": {
+            "mean": 88.32,
+            "median": 95,
+            "p95": 115,
+            "max": 119
+          }
+        }
+      }
+    },
+    "NWL23": {
+      "20": {
+        "search_ms_per_position": 20.0,
+        "search": {
+          "completed_layouts": 611,
+          "layouts": 638,
+          "nodes": 194992,
+          "saved_board_bits": 543,
+          "elapsed_ms": 723.841
+        },
+        "sizes": {
+          "packed": {
+            "mean": 117.03,
+            "median": 123,
+            "p95": 135,
+            "max": 135
+          },
+          "deflate": {
+            "mean": 173.83,
+            "median": 183,
+            "p95": 200,
+            "max": 207
+          },
+          "bitmap_words": {
+            "mean": 108.26,
+            "median": 112,
+            "p95": 126,
+            "max": 128
+          },
+          "geometry_words": {
+            "mean": 89.63,
+            "median": 94,
+            "p95": 118,
+            "max": 123
+          },
+          "best_with_fallback": {
+            "mean": 89.97,
+            "median": 94,
+            "p95": 118,
+            "max": 122
+          }
+        }
+      },
+      "200": {
+        "search_ms_per_position": 200.0,
+        "search": {
+          "completed_layouts": 638,
+          "layouts": 638,
+          "nodes": 240946,
+          "saved_board_bits": 543,
+          "elapsed_ms": 957.466
+        },
+        "sizes": {
+          "packed": {
+            "mean": 117.03,
+            "median": 123,
+            "p95": 135,
+            "max": 135
+          },
+          "deflate": {
+            "mean": 173.83,
+            "median": 183,
+            "p95": 200,
+            "max": 207
+          },
+          "bitmap_words": {
+            "mean": 108.26,
+            "median": 112,
+            "p95": 126,
+            "max": 128
+          },
+          "geometry_words": {
+            "mean": 89.63,
+            "median": 94,
+            "p95": 118,
+            "max": 123
+          },
+          "best_with_fallback": {
+            "mean": 89.97,
+            "median": 94,
+            "p95": 118,
+            "max": 122
+          }
+        }
+      }
+    }
+  }
 }

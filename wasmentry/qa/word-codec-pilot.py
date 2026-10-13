@@ -14,6 +14,7 @@ import json
 import math
 from pathlib import Path
 import statistics
+import time
 import zlib
 
 
@@ -100,24 +101,75 @@ def runs(cells):
     return result
 
 
-def cover(cells, codes, bitmap):
-    candidates = runs(cells)
-    index_bits = math.ceil(math.log2(max(1, len(candidates))))
-    # Bitmap mode: stop bit + deterministic occupied-run index. Geometry mode:
-    # word/literal bit + absolute start square + direction. Literals need their
-    # square only in geometry mode; overlaps can make either axis worthwhile.
-    overhead = 1+index_bits if bitmap else 10
-    remaining = {index for index, letter in enumerate(cells) if letter}
+def optimize_cover(masks, costs, occupied, literal_bits, search_ms, clock=time.monotonic):
+    """Anytime branch-and-bound set cover, seeded with the original greedy cover.
+
+    Word costs include placement; uncovered squares cost literal_bits each.
+    Overlap never saves twice. Ignoring overlaps gives an optimistic bound on
+    remaining savings. The deterministic traversal retains its best complete
+    cover on timeout; it need not exhaust the search to produce valid output.
+    """
+    if not math.isfinite(search_ms) or search_ms < 0:
+        raise ValueError('search_ms must be finite and nonnegative')
+    remaining = occupied
     chosen = []
     while True:
-        options = []
-        for index, (indices, word) in enumerate(candidates):
-            if word not in codes: continue
-            gain = (5 if bitmap else 14)*len(remaining.intersection(indices)) - overhead - codes[word][1]
-            if gain > 0: options.append((gain, -index, index))
-        if not options: break
-        index = max(options)[2]
+        options = [(literal_bits*(mask & remaining).bit_count()-costs[index], -index)
+                   for index, mask in enumerate(masks)]
+        gain, negative_index = max(options, default=(0, 0))
+        if gain <= 0:
+            break
+        index = -negative_index
         chosen.append(index)
+        remaining &= ~masks[index]
+    best = tuple(chosen)
+    best_cost = sum(costs[index] for index in best) + literal_bits*remaining.bit_count()
+    baseline_cost = best_cost
+    started = clock()
+    deadline = started + search_ms/1000
+    nodes = 0
+    # DFS bounds memory to the number of candidates; no unbounded search queue.
+    stack = [(occupied, 0, (), tuple(range(len(masks))))]
+    while stack and search_ms > 0:
+        if clock() >= deadline:
+            break
+        uncovered, paid, selected, available = stack.pop()
+        nodes += 1
+        complete_cost = paid + literal_bits*uncovered.bit_count()
+        if complete_cost < best_cost:
+            best, best_cost = selected, complete_cost
+        options = []
+        for index in available:
+            gain = literal_bits*(masks[index] & uncovered).bit_count()-costs[index]
+            if gain > 0:
+                options.append((gain, -index))
+        # Every remaining word can save no more than its current marginal gain.
+        # Nonpositive words cannot become useful as more squares are covered.
+        if complete_cost - sum(gain for gain, _ in options) >= best_cost:
+            continue
+        index = -max(options)[1]
+        rest = tuple(-negative_index for _, negative_index in options if -negative_index != index)
+        stack.append((uncovered, paid, selected, rest))
+        stack.append((uncovered & ~masks[index], paid+costs[index], selected+(index,), rest))
+    return best, {'nodes':nodes, 'complete':not stack,
+                  'elapsed_ms':round((clock()-started)*1000, 3),
+                  'saved_bits':baseline_cost-best_cost}
+
+
+def cover(cells, codes, bitmap, search_ms=0, stats=None):
+    candidates = runs(cells)
+    index_bits = math.ceil(math.log2(max(1, len(candidates))))
+    overhead = 1+index_bits if bitmap else 10
+    eligible = [index for index, (_, word) in enumerate(candidates) if word in codes]
+    masks = [sum(1 << cell for cell in candidates[index][0]) for index in eligible]
+    costs = [overhead+codes[candidates[index][1]][1] for index in eligible]
+    occupied = sum(1 << index for index, letter in enumerate(cells) if letter)
+    selected, search = optimize_cover(masks, costs, occupied, 5 if bitmap else 14, search_ms)
+    if stats is not None:
+        stats.update(search)
+    chosen = [eligible[index] for index in selected]
+    remaining = {index for index, letter in enumerate(cells) if letter}
+    for index in chosen:
         remaining.difference_update(candidates[index][0])
     bits = Bits()
     if bitmap:
@@ -184,7 +236,11 @@ def main():
     parser.add_argument('--positions', required=True)
     parser.add_argument('--output', required=True)
     parser.add_argument('--limit', type=int, help='Retain only this many most frequent words')
+    parser.add_argument('--search-ms', type=float, default=20,
+                        help='Extra optimization milliseconds per position, split equally across board codecs (default: 20; 0: greedy only)')
     args = parser.parse_args()
+    if not math.isfinite(args.search_ms) or args.search_ms < 0:
+        parser.error('--search-ms must be finite and nonnegative')
     counts = collections.Counter()
     for filename in args.counts:
         for line in Path(filename).read_text().splitlines():
@@ -193,7 +249,7 @@ def main():
     if args.limit: counts = collections.Counter(dict(sorted(counts.items(),key=lambda item:(-item[1],item[0]))[:args.limit]))
     codes, tree = codebook(counts)
     paths = {'packed':[], 'deflate':[], 'bitmap_words':[], 'geometry_words':[], 'best_with_fallback':[]}
-    leftovers = []; chosen_words = []
+    leftovers = []; chosen_words = []; searches = []
     for cgp in Path(args.positions).read_text().splitlines():
         cells, racks, _, _ = parse(cgp)
         tiles = [letter for letter in cells if letter]
@@ -206,7 +262,9 @@ def main():
         paths['deflate'].append(len(base64.urlsafe_b64encode(compressor.compress(cgp.encode())+compressor.flush()).rstrip(b'=')))
         sizes = [packed_bits]
         for bitmap, name in [(True,'bitmap_words'),(False,'geometry_words')]:
-            data, chosen, leftover = cover(cells,codes,bitmap)
+            search = {}
+            data, chosen, leftover = cover(cells,codes,bitmap,args.search_ms/2,search)
+            searches.append(search)
             assert uncover(data,tree,bitmap) == [letter.upper() for letter in cells]
             sizes.append(common+len(data))
             paths[name].append(url_size(sizes[-1]))
@@ -219,7 +277,12 @@ def main():
         data, _, _ = cover(arbitrary,codes,bitmap)
         assert uncover(data,tree,bitmap) == arbitrary
     book = json.dumps(sorted((word,length) for word,(_,length) in codes.items()),separators=(',',':')).encode()
-    result = {'training_word_occurrences':total_occurrences, 'codebook_words':len(codes),
+    result = {'search_ms_per_position':args.search_ms,
+              'search':{'completed_layouts':sum(item['complete'] for item in searches),
+                        'layouts':len(searches), 'nodes':sum(item['nodes'] for item in searches),
+                        'saved_board_bits':sum(item['saved_bits'] for item in searches),
+                        'elapsed_ms':round(sum(item['elapsed_ms'] for item in searches),3)},
+              'training_word_occurrences':total_occurrences, 'codebook_words':len(codes),
               'codebook_json_bytes':len(book), 'codebook_gzip_bytes':len(gzip.compress(book,mtime=0)),
               'heldout_positions':len(paths['packed']), 'sizes':{name:summarize(values) for name,values in paths.items()},
               'bitmap_mean_word_tokens':round(statistics.mean(chosen_words),2),

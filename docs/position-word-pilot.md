@@ -76,6 +76,50 @@ The table uses the shortest of these and the packed board, plus a two-bit mode
 selector. Common short words dominate raw play counts, but their placement
 overhead explains why small codebooks save relatively little.
 
+## Configurable optimization budget
+
+`--search-ms 20` (the default) allows up to 20 milliseconds of extra cover
+search per position, divided equally between the bitmap and coordinate codecs.
+Use `--search-ms 0` to reproduce the original greedy results above, or a larger
+budget for a more thorough search. This is a soft wall-clock budget for search
+only: codebook loading, baseline construction, encoding, and validation happen
+outside it. Deadline checks occur between search nodes, so one node and process
+scheduling can overrun the deadline slightly. Decoding requires no search.
+
+A deterministic depth-first branch-and-bound search starts with the greedy
+encoding as its incumbent. Each branch either includes or excludes a candidate
+word, so horizontal-only, vertical-only, and mixed-orientation covers compete
+on actual bit cost including placement and literals. Overlapping squares earn
+literal savings only once. An optimistic bound sums the remaining positive
+marginal savings while ignoring overlaps; branches that cannot improve the
+incumbent are pruned. On timeout, the smallest complete cover found is returned,
+never a partial search state or something larger than the greedy baseline.
+
+Mean full-codebook hybrid token lengths on the same held-out positions:
+
+| Extra search budget per position | CSW24 | NWL23 |
+|---|---:|---:|
+| 0 ms (greedy) | 88.49 | 90.21 |
+| 20 ms | 88.33 | 89.97 |
+| 200 ms | 88.32 | 89.97 |
+
+At 200 ms every sampled layout finished searching: 618/618 CSW24 and 638/638
+NWL23. Actual extra search averaged about 2.5 and 3.0 milliseconds per position
+on this machine, because completed searches stop early. The greedy cover was
+already close to optimal on this sample, but the search removes the assumption
+that the locally best word is globally best. These are optima **within the
+current candidate set and layouts** (maximal board words present in the
+codebook), not across all possible compression schemes or dictionary subwords.
+Timing and timeout completion counts depend on the machine.
+
+Validation includes exhaustive enumeration of small synthetic cover problems,
+a known greedy counterexample, deterministic timeout/invalid-budget checks,
+and actual mixed-axis/literal bitstream round trips. Run:
+
+```sh
+python3 -m unittest discover -s wasmentry/qa -p test_word_codec_pilot.py -v
+```
+
 ## Next decision
 
 The full codebook buys about 29 characters per link at a 604 KB gzip download.
@@ -88,7 +132,7 @@ lengths; the research decoder is not hardened for untrusted URLs.
 
 Further experiments could optimize dictionary entries for net bits saved,
 train frequencies on selected covers rather than all played words, encode
-coordinate deltas, or search for a better cover than the greedy heuristic.
+coordinate deltas, or extend the candidate set to dictionary subwords.
 Larger and more diverse held-out games are needed before choosing a final
 codec. The single CSW24 model already works for NWL23 without assuming that
 every NWL23 word appeared in training.
@@ -110,6 +154,7 @@ done
 python3 wasmentry/qa/word-codec-pilot.py \
   --counts /tmp/magpie-word-corpus/train-*.tsv \
   --positions /tmp/magpie-word-corpus/heldout.cgp \
+  --search-ms 0 \
   --output /tmp/magpie-word-corpus/csw-results.json
 ```
 
