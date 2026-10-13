@@ -28,6 +28,11 @@ enum {
   WASM_PEG_SHARED_RESERVE_BYTES = 64 * 1024 * 1024,
   WASM_PEG_WORKER_SCRATCH_BYTES = 64 * 1024 * 1024,
   WASM_MAX_SEARCH_THREADS = 32,
+  WASM_PEG_SCRATCH_PROBE_BYTES = 8 * 1024 * 1024,
+  WASM_PEG_MAX_RESERVATIONS =
+      WASM_PEG_SHARED_RESERVE_BYTES / WASM_PEG_SCRATCH_PROBE_BYTES +
+      WASM_MAX_SEARCH_THREADS *
+          (WASM_PEG_WORKER_SCRATCH_BYTES / WASM_PEG_SCRATCH_PROBE_BYTES + 1),
 };
 
 int wasm_peg_memory_fits(int workers) {
@@ -45,15 +50,30 @@ int wasm_peg_memory_fits(int workers) {
   if (required > available) {
     return 0;
   }
-  // ABORTING_MALLOC=0 lets a refused growth return NULL. Free the probe before
-  // the solver starts so its real allocations can reuse the space. This is a
-  // conservative estimate, not a guarantee against later memory pressure.
-  void *volatile reservation = malloc(required);
-  if (!reservation) {
-    return 0;
+  // Probe separate, simultaneously held blocks like the solver's per-worker
+  // stacks and scratch allocations. A single combined allocation can reject
+  // ample reusable memory fragmented by earlier simulations or map builds.
+  // ABORTING_MALLOC=0 lets refused growth return NULL. Release every block,
+  // including after a failed probe, before trying a smaller worker count.
+  // Scratch is many smaller allocations (including ~5 MiB move lists), not
+  // one 64 MiB buffer per worker. Keep the full reserve but probe it in chunks.
+  void *reservations[WASM_PEG_MAX_RESERVATIONS];
+  const int stack_count = workers > 1 ? workers : 0;
+  const int count =
+      stack_count + (int)((required - stacks) / WASM_PEG_SCRATCH_PROBE_BYTES);
+  int reserved = 0;
+  for (; reserved < count; reserved++) {
+    const size_t bytes = reserved < stack_count ? PEG_POOL_WORKER_STACK_BYTES
+                                                : WASM_PEG_SCRATCH_PROBE_BYTES;
+    reservations[reserved] = malloc(bytes);
+    if (!reservations[reserved]) {
+      break;
+    }
   }
-  free(reservation);
-  return 1;
+  const int fits = reserved == count;
+  for (int index = 0; index < reserved; index++) {
+    free(reservations[index]);
+  }
+  return fits;
 }
-
 #endif

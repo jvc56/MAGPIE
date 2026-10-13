@@ -18,6 +18,8 @@ test('PEG uses current memory headroom and preserves the requested count when it
 for (const scenario of [
   {name:'desktop with a 256 MiB ceiling', ceiling:256, mobile:false, expected:1},
   {name:'mobile with a 512 MiB ceiling', ceiling:512, mobile:true, expected:2},
+  {name:'desktop after building maps and simulating', ceiling:1024, mobile:false, warm:true, expected:4},
+  {name:'desktop retaining maps after simulation', ceiling:1024, mobile:false, warm:true, maps:true, expected:4},
   {name:'mobile with a 1 GiB ceiling', ceiling:1024, mobile:true, expected:4},
   {name:'desktop with 256 MiB already allocated in a 512 MiB heap', ceiling:512, mobile:false, heldMiB:256, expected:1},
 ]) {
@@ -44,9 +46,9 @@ for (const scenario of [
       await route.fulfill({response,body:setup + await response.text()});
     });
     await page.goto('/');
-    const report = await page.evaluate(async () => {
+    const report = await page.evaluate(async ({warm,maps}) => {
       const {EngineClient} = await import('/wasmentry/engine-client.mjs');
-      const {analysisCommands,parseCGP} = await import('/wasmentry/analysis-model.mjs');
+      const {analysisCommands,parseCGP,SAMPLES} = await import('/wasmentry/analysis-model.mjs');
       const engine = new EngineClient();
       const budgets = [];
       const started = [];
@@ -56,21 +58,28 @@ for (const scenario of [
       });
       try {
         await engine.prepare('CSW24');
-        await engine.prepareWMP('CSW24','off',4);
+        await engine.prepareWMP('CSW24',warm ? 'build' : 'off',4);
+        const snapshots = [{phase:'prepared',...engine.memory}];
+        if (warm) {
+          if (engine.wmpUnavailable) throw new Error("Maps were not installed");
+          await engine.run(analysisCommands(parseCGP(SAMPLES.opening),'sim', {threads:4,ttMiB:32,seconds:1,plies:2,candidates:10,wmp:true}));
+          snapshots.push({phase:'simulated',...engine.memory});
+        }
         const board = '3J1OBE7/1DEAIRING6/1I1V11/MA1E11/IT1L11/nO8L4/UM3WAUK1O4/ES1R3PENNY3/T2E1YOOF1G4/EARLIES2ASH3/D2I3Z1AHA3/3C3O2iN3/3T3O2P4/AXE1REGIFTS4/WINCER1D7';
         const position = parseCGP(`${board} EIOQRUU/ADLNTTV 406/421 0 -lex CSW24`);
-        const settings = {threads:4,ttMiB:16,seconds:1,plies:2,candidates:10,wmp:false,capturePegOutcomes:false};
+        const settings = {threads:4,ttMiB:16,seconds:1,plies:2,candidates:10,wmp:!!maps,capturePegOutcomes:false};
         await engine.run(analysisCommands(position,'peg',settings));
         // Both fresh and resumed searches pass through the same launch guard.
         await engine.run(analysisCommands(position,'peg',{...settings,resumePeg:true}));
         await engine.run(['generate']);
-        return {budgets,started,memory:engine.memory,fatal:engine.fatalError?.message};
+        return {snapshots,budgets,started,memory:engine.memory,fatal:engine.fatalError?.message};
       } finally {engine.worker.terminate();}
-    });
+    }, {warm:scenario.warm,maps:scenario.maps});
+    await test.info().attach("memory-budget", {body:JSON.stringify(report,null,2), contentType:"application/json"});
     expect(report.fatal).toBeUndefined();
     expect(report.budgets).toHaveLength(2);
     expect(report.budgets[0]).toMatchObject({requested:4,threads:scenario.expected});
-    expect(report.budgets[1].threads).toBeLessThanOrEqual(scenario.expected);
+    expect(report.budgets[1].threads).toBe(scenario.expected);
     expect(report.started.some(command => command.startsWith('peg resume '))).toBe(true);
     expect(report.memory.heapBytes).toBeLessThanOrEqual(scenario.ceiling * 1024 * 1024);
   });
