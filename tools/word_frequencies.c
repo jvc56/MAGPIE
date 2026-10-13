@@ -17,6 +17,7 @@
 #include <errno.h>
 #include <limits.h>
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -97,11 +98,16 @@ int main(int argc, char **argv) {
   thread_control_set_status(config_get_thread_control(config),
                             THREAD_CONTROL_STATUS_STARTED);
   char command[256];
-  snprintf(command, sizeof(command),
-           "set -lex %s -wmp true -wit false -rit false -s1 equity -s2 equity "
-           "-r1 best -r2 best -numplays 1 -threads 1 -savesettings false "
-           "-autosavegcg false",
-           lexicon);
+  const int command_length = snprintf(
+      command, sizeof(command),
+      "set -lex %s -wmp true -wit false -rit false -s1 equity -s2 equity "
+      "-r1 best -r2 best -numplays 1 -threads 1 -savesettings false "
+      "-autosavegcg false",
+      lexicon);
+  if (command_length < 0 || (size_t)command_length >= sizeof(command)) {
+    xs_error(errors, "cannot format word-frequency training command");
+    check(errors);
+  }
   config_load_command(config, command, errors);
   check(errors);
   config_execute_command(config, errors);
