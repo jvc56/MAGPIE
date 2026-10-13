@@ -11,6 +11,7 @@ let wmpAbort;
 let requestId;
 let fatal = false;
 let memoryLimitMB = 1024;
+let pegThreadsForMemory;
 const cachedFiles = new Set();
 const kwgHashes = new Map();
 const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -65,6 +66,7 @@ function readString(fn) {
     const { default: createMagpie } = await import("./magpie_wasm.mjs");
     const { deviceBudget } = await import("./device-budget.mjs");
     const budget = deviceBudget();
+    ({ pegThreadsForMemory } = await import("./peg-memory.mjs"));
     Module = await createMagpie({
       initialThreadPoolSize: budget.threads + 3,
       wasmMemory: browserMemory(),
@@ -76,6 +78,7 @@ function readString(fn) {
     const wrap = (name, result, args = []) =>
       Module.cwrap(name, result, args);
     api = {
+      pegMemoryFits: wrap("wasm_peg_memory_fits", "number", ["number"]),
       memoryAllocated: wrap("wasm_memory_allocated_bytes", "number"),
       memoryFree: wrap("wasm_memory_free_bytes", "number"),
       prepareWMP: wrap("wasm_prepare_wmp", "number", ["number", "number", "number", "number", "number", "number", "number"]),
@@ -129,11 +132,23 @@ async function run(commands) {
   stopping = false;
   try {
     // Warm the chosen pool before a timed native search starts.
-    const counts = commands.flatMap(command => [...command.matchAll(/-threads\s+(\d+)/g)].map(match => Number(match[1])));
+    const counts = commands.filter(command => !/^peg(?: |$)/.test(command)).flatMap(command => [...command.matchAll(/-threads\s+(\d+)/g)].map(match => Number(match[1])));
     if (counts.length) await Module.warmThreads(Math.min(32, Math.max(...counts)) + 3);
-    for (const command of commands) {
+    for (let command of commands) {
       checkEngine();
       if (stopping) break;
+      if (/^peg(?: |$)/.test(command)) {
+        const match = command.match(/-threads\s+(\d+)/);
+        // Browser-generated PEG commands always specify a worker count.
+        const requested = match ? Number(match[1]) : 2;
+        const threads = pegThreadsForMemory(requested, api.pegMemoryFits);
+        command = match ? command.replace(/-threads\s+\d+/, `-threads ${threads}`)
+          : `${command} -threads ${threads}`;
+        await Module.warmThreads(threads + 3);
+        if (stopping) break;
+        reportMemory();
+        send("peg_memory_budget", {requested, threads});
+      }
       activeCommand = command;
       if (/^peg(?: |$)/.test(command)) pegReadable = false;
       send("command_started", { command });

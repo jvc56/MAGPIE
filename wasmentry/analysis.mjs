@@ -3691,6 +3691,11 @@ async function startEngine() {
       $("analysis-storage-warning").hidden = false;
     }
     engine.addEventListener("message", ({ detail }) => {
+      if (detail.type === "peg_memory_budget") {
+        $("settings-summary").textContent = $("settings-summary").textContent
+          .replace(/\d+ threads(?: \(memory limited\))?/, `${detail.threads} threads${detail.threads < detail.requested ? " (memory limited)" : ""}`);
+        return;
+      }
       if (detail.type === "memory_status") {
         const mib = bytes => (bytes / (1024 * 1024)).toFixed(1);
         $("engine-memory").textContent = `WASM memory (last idle snapshot): ${mib(detail.allocatedBytes)} MiB allocated; ${mib(detail.freeBytes)} MiB reusable within a ${mib(detail.heapBytes)} MiB heap. Configured ceiling: ${mib(detail.limitBytes)} MiB. Additional growth depends on the browser; this is not available device RAM.`;
