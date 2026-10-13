@@ -36,6 +36,14 @@ function browserMemory() {
     }
   }
 }
+function reportMemory() {
+  send("memory_status", {
+    allocatedBytes: api.memoryAllocated(),
+    freeBytes: api.memoryFree(),
+    heapBytes: Module.HEAPU8.byteLength,
+    limitBytes: memoryLimitMB * 1024 * 1024,
+  });
+}
 function readString(fn) {
   checkEngine();
   const ptr = fn();
@@ -68,6 +76,8 @@ function readString(fn) {
     const wrap = (name, result, args = []) =>
       Module.cwrap(name, result, args);
     api = {
+      memoryAllocated: wrap("wasm_memory_allocated_bytes", "number"),
+      memoryFree: wrap("wasm_memory_free_bytes", "number"),
       prepareWMP: wrap("wasm_prepare_wmp", "number", ["number", "number", "number", "number", "number", "number", "number"]),
       witData: wrap("wasm_wit_data", "number"),
       witDataSize: wrap("wasm_wit_data_size", "number"),
@@ -162,6 +172,7 @@ async function run(commands) {
       if (error.trim()) throw new Error(error);
       if (text.trim()) send("output", { text, command });
     }
+    reportMemory();
     send("complete", { stopped: stopping });
   } finally {
     running = false;
@@ -219,6 +230,7 @@ onmessage = async ({ data: { type, data = {}, requestId: incomingId } }) => {
         if (result !== 0 || error.trim())
           throw new Error(error || "Could not initialize MAGPIE.");
         initialized = true;
+        reportMemory();
         send("init_complete");
         break;
       }
@@ -451,7 +463,10 @@ async function prepareWMP({ source, lexicon, threads, manifestURL, cache = false
       }
       catch (error) { warning(error); }
     }
-    if (!retryBuild) send("wmp_ready", { stopped: stopping, fromCache, witFromCache, cached });
+    if (!retryBuild) {
+      reportMemory();
+      send("wmp_ready", { stopped: stopping, fromCache, witFromCache, cached });
+    }
   } catch (error) {
     if (stopping && error.name === "AbortError") send("wmp_ready", { stopped: true });
     else if (!fatal && error.code === "WMP_MEMORY") unavailable = true;

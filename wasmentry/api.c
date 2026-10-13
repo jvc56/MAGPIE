@@ -11,13 +11,25 @@
 #include "../src/impl/wmp_maker.h"
 #include "../src/util/io_util.h"
 #include "../src/util/string_util.h"
+#include <emscripten/heap.h>
+#include <malloc.h>
 #include <stdatomic.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <unistd.h>
 
 static Magpie *wasm_magpie = NULL;
+
+// Sample only while the engine is idle. These describe this WASM allocator,
+// not available system RAM or a guarantee that one contiguous block fits.
+size_t wasm_memory_allocated_bytes(void) { return mallinfo().uordblks; }
+
+size_t wasm_memory_free_bytes(void) {
+  const struct mallinfo info = mallinfo();
+  return emscripten_get_heap_size() - (size_t)sbrk(0) + info.fordblks;
+}
 
 int wasm_magpie_init(const char *data_paths) {
   if (wasm_magpie) {

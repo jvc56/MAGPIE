@@ -4,7 +4,7 @@ import { TILE_ORDERS, DEFAULT_TILE_ORDER, tileAlphabet, sortTiles, formatTileGro
 import { GameAction } from "./game-actions.mjs";
 import { installTileDrag } from "./tile-drag.mjs";
 import { loadAnalyses, saveAnalysis } from "./analysis-cache.mjs";
-import { deviceBudget } from "./device-budget.mjs";
+import { deviceBudget, searchWordMapSource } from "./device-budget.mjs";
 import { listWMPs } from "./wmp-cache.mjs";
 import { renderPegOutcomes, parsePegProgress, mergePegRows } from "./peg-review.mjs";
 import { ensureIsolation } from "./isolation.mjs";
@@ -268,7 +268,7 @@ function readSettings() {
     settings[id] = n;
   }
   settings.ttMiB = Number($("tt-memory").value);
-  settings.wmpSource = $("wmp-source").value;
+  settings.wmpSource = searchWordMapSource($("wmp-source").value, inventory(position).bagCount, budget);
   settings.wmp = settings.wmpSource !== "off";
   return settings;
 }
@@ -3691,6 +3691,11 @@ async function startEngine() {
       $("analysis-storage-warning").hidden = false;
     }
     engine.addEventListener("message", ({ detail }) => {
+      if (detail.type === "memory_status") {
+        const mib = bytes => (bytes / (1024 * 1024)).toFixed(1);
+        $("engine-memory").textContent = `WASM memory (last idle snapshot): ${mib(detail.allocatedBytes)} MiB allocated; ${mib(detail.freeBytes)} MiB reusable within a ${mib(detail.heapBytes)} MiB heap. Configured ceiling: ${mib(detail.limitBytes)} MiB. Additional growth depends on the browser; this is not available device RAM.`;
+        return;
+      }
       if (detail.type === "peg_outcomes") {
         const key = `${detail.key}:${detail.move}`;
         if (detail.key !== pegSessionKey || detail.sessionId !== pegSessionId) return;
