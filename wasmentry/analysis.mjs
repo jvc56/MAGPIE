@@ -38,6 +38,7 @@ import {
   shuffleRack,
   placeTile,
   moveNotation,
+  placementConnected,
   normalizeMove,
 } from "./move-entry.mjs";
 let cachedWMPFiles = [];
@@ -1971,6 +1972,7 @@ function applyDraftFeedback(generation, text, score = null) {
 function scheduleDraftCheck() {
   cancelDraftCheck();
   if (!recordedGame || !recordedBoardMatches()) return;
+  if (!placementConnected(position, draftTiles, vertical)) return;
   let move;
   try {
     move = moveNotation(position, draftTiles, vertical);
@@ -2002,12 +2004,7 @@ function renderDraft() {
   continuationPosition = null;
   selectedMove = "";
   error("");
-  try {
-    moveNotation(position, draftTiles, vertical);
-    $("move-feedback").textContent = "";
-  } catch (failure) {
-    $("move-feedback").textContent = failure.message;
-  }
+  $("move-feedback").textContent = "";
   renderResults();
   renderPosition();
   scheduleDraftCheck();
@@ -2235,6 +2232,7 @@ async function submitMove(value = null, computer = false) {
   if (terminalPosition()) return;
   if (busy || (isLive() && !computer && (!humanTurn() || session.paused)))
     return;
+  if (!value && draftTiles.length && !placementConnected(position, draftTiles, vertical)) return;
   const generation = positionGeneration;
   const before = position;
   const moveIndex = historyIndex;
@@ -2778,6 +2776,8 @@ function renderSession() {
     (live && (session.paused || !humanTurn()));
   for (const id of ["play-move", "pass-move", "exchange-move"])
     $(id).disabled = !!entryLocked;
+  if (draftTiles.length && !placementConnected(position, draftTiles, vertical))
+    $("play-move").disabled = true;
   for (const element of document.querySelectorAll("#shuffle-rack, #sort-rack, #rack-tiles .rack-tile"))
     element.disabled = !canArrangeRack();
   document.body.classList.toggle("playing", !!live);
