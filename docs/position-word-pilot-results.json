@@ -1,0 +1,402 @@
+{
+  "engine_commit": "dab7e7f26dd326080373fb4cd7c110005dae29c7",
+  "training_games": 1000000,
+  "training_lexicon": "CSW24",
+  "word_counts_sha256": "73bab4fa5ba8ffba6ce6b6d3381f1329e6f6e5368eb7a00b54539430171699d2",
+  "word_occurrences": 48537742,
+  "distinct_words": 172959,
+  "inputs": {
+    "data/lexica/CSW24.kwg": "62ca7a84f07429a9976f77a4f74b94911aca5d49cce050dce72dd0e032c0566f",
+    "data/lexica/CSW24.klv2": "b0ef5f6637cca0cd8e0962d6fb7d35b2d22f9bf648015f48fa8f80e24a60610b",
+    "data/lexica/CSW24.wmp": "183096e751f5464b43205658c7bcd092575fda1ea13e605ce56198b338292f91",
+    "data/lexica/NWL23.kwg": "3e74af981fdd974e107283f686da0fe4b7ec84ad0d825d444330c338c33b91ba",
+    "data/lexica/NWL23.klv2": "37dea945c29c3773eb4cd5a4117f3d3256c8b548cd3bf3b5ce8a219cb5e0a3fa",
+    "data/lexica/NWL23.wmp": "214a46d74fb6540fec309c4181b14ebd8f1c019cec76d7373d3c412cb08fc187",
+    "heldout.cgp": "c06b123a6e68618f8772a1f4da4937d7910eecddcb4f44698ae2d29fdc890c3a",
+    "nwl-heldout.cgp": "12de3c0a8b3cfb7f5902f7ee577ca56fececc84186e41063641da87362d22814"
+  },
+  "results": {
+    "CSW24": {
+      "4096": {
+        "codebook_words": 4096,
+        "codebook_gzip_bytes": 12297,
+        "heldout_positions": 309,
+        "sizes": {
+          "packed": {
+            "mean": 117.53,
+            "median": 124,
+            "p95": 135,
+            "max": 135
+          },
+          "deflate": {
+            "mean": 174.36,
+            "median": 183,
+            "p95": 200,
+            "max": 208
+          },
+          "bitmap_words": {
+            "mean": 116.5,
+            "median": 123,
+            "p95": 135,
+            "max": 135
+          },
+          "geometry_words": {
+            "mean": 149.77,
+            "median": 162,
+            "p95": 200,
+            "max": 215
+          },
+          "best_with_fallback": {
+            "mean": 116.02,
+            "median": 123,
+            "p95": 135,
+            "max": 135
+          }
+        }
+      },
+      "16384": {
+        "codebook_words": 16384,
+        "codebook_gzip_bytes": 50957,
+        "heldout_positions": 309,
+        "sizes": {
+          "packed": {
+            "mean": 117.53,
+            "median": 124,
+            "p95": 135,
+            "max": 135
+          },
+          "deflate": {
+            "mean": 174.36,
+            "median": 183,
+            "p95": 200,
+            "max": 208
+          },
+          "bitmap_words": {
+            "mean": 114.01,
+            "median": 120,
+            "p95": 132,
+            "max": 134
+          },
+          "geometry_words": {
+            "mean": 129.26,
+            "median": 139,
+            "p95": 178,
+            "max": 199
+          },
+          "best_with_fallback": {
+            "mean": 111.86,
+            "median": 120,
+            "p95": 132,
+            "max": 135
+          }
+        }
+      },
+      "65536": {
+        "codebook_words": 65536,
+        "codebook_gzip_bytes": 207355,
+        "heldout_positions": 309,
+        "sizes": {
+          "packed": {
+            "mean": 117.53,
+            "median": 124,
+            "p95": 135,
+            "max": 135
+          },
+          "deflate": {
+            "mean": 174.36,
+            "median": 183,
+            "p95": 200,
+            "max": 208
+          },
+          "bitmap_words": {
+            "mean": 109.4,
+            "median": 116,
+            "p95": 127,
+            "max": 128
+          },
+          "geometry_words": {
+            "mean": 98.09,
+            "median": 103,
+            "p95": 135,
+            "max": 148
+          },
+          "best_with_fallback": {
+            "mean": 97.22,
+            "median": 104,
+            "p95": 127,
+            "max": 128
+          }
+        }
+      },
+      "all": {
+        "codebook_words": 172959,
+        "codebook_gzip_bytes": 604406,
+        "heldout_positions": 309,
+        "sizes": {
+          "packed": {
+            "mean": 117.53,
+            "median": 124,
+            "p95": 135,
+            "max": 135
+          },
+          "deflate": {
+            "mean": 174.36,
+            "median": 183,
+            "p95": 200,
+            "max": 208
+          },
+          "bitmap_words": {
+            "mean": 108.13,
+            "median": 114,
+            "p95": 126,
+            "max": 127
+          },
+          "geometry_words": {
+            "mean": 88.1,
+            "median": 95,
+            "p95": 115,
+            "max": 122
+          },
+          "best_with_fallback": {
+            "mean": 88.49,
+            "median": 95,
+            "p95": 116,
+            "max": 122
+          }
+        }
+      }
+    },
+    "NWL23": {
+      "4096": {
+        "codebook_words": 4096,
+        "codebook_gzip_bytes": 12297,
+        "heldout_positions": 319,
+        "sizes": {
+          "packed": {
+            "mean": 117.03,
+            "median": 123,
+            "p95": 135,
+            "max": 135
+          },
+          "deflate": {
+            "mean": 173.83,
+            "median": 183,
+            "p95": 200,
+            "max": 207
+          },
+          "bitmap_words": {
+            "mean": 115.87,
+            "median": 122,
+            "p95": 135,
+            "max": 135
+          },
+          "geometry_words": {
+            "mean": 148.29,
+            "median": 158,
+            "p95": 202,
+            "max": 214
+          },
+          "best_with_fallback": {
+            "mean": 115.33,
+            "median": 122,
+            "p95": 135,
+            "max": 135
+          }
+        }
+      },
+      "16384": {
+        "codebook_words": 16384,
+        "codebook_gzip_bytes": 50957,
+        "heldout_positions": 319,
+        "sizes": {
+          "packed": {
+            "mean": 117.03,
+            "median": 123,
+            "p95": 135,
+            "max": 135
+          },
+          "deflate": {
+            "mean": 173.83,
+            "median": 183,
+            "p95": 200,
+            "max": 207
+          },
+          "bitmap_words": {
+            "mean": 113.53,
+            "median": 119,
+            "p95": 132,
+            "max": 134
+          },
+          "geometry_words": {
+            "mean": 128.25,
+            "median": 136,
+            "p95": 178,
+            "max": 200
+          },
+          "best_with_fallback": {
+            "mean": 110.66,
+            "median": 119,
+            "p95": 134,
+            "max": 135
+          }
+        }
+      },
+      "65536": {
+        "codebook_words": 65536,
+        "codebook_gzip_bytes": 207355,
+        "heldout_positions": 319,
+        "sizes": {
+          "packed": {
+            "mean": 117.03,
+            "median": 123,
+            "p95": 135,
+            "max": 135
+          },
+          "deflate": {
+            "mean": 173.83,
+            "median": 183,
+            "p95": 200,
+            "max": 207
+          },
+          "bitmap_words": {
+            "mean": 109.44,
+            "median": 114,
+            "p95": 127,
+            "max": 131
+          },
+          "geometry_words": {
+            "mean": 99.2,
+            "median": 106,
+            "p95": 135,
+            "max": 155
+          },
+          "best_with_fallback": {
+            "mean": 98.19,
+            "median": 106,
+            "p95": 127,
+            "max": 130
+          }
+        }
+      },
+      "all": {
+        "codebook_words": 172959,
+        "codebook_gzip_bytes": 604406,
+        "heldout_positions": 319,
+        "sizes": {
+          "packed": {
+            "mean": 117.03,
+            "median": 123,
+            "p95": 135,
+            "max": 135
+          },
+          "deflate": {
+            "mean": 173.83,
+            "median": 183,
+            "p95": 200,
+            "max": 207
+          },
+          "bitmap_words": {
+            "mean": 108.28,
+            "median": 112,
+            "p95": 126,
+            "max": 128
+          },
+          "geometry_words": {
+            "mean": 89.87,
+            "median": 94,
+            "p95": 118,
+            "max": 124
+          },
+          "best_with_fallback": {
+            "mean": 90.21,
+            "median": 95,
+            "p95": 118,
+            "max": 124
+          }
+        }
+      }
+    }
+  },
+  "top_words": [
+    [
+      "QI",
+      509949
+    ],
+    [
+      "RE",
+      349065
+    ],
+    [
+      "IN",
+      292892
+    ],
+    [
+      "ER",
+      279226
+    ],
+    [
+      "IT",
+      274144
+    ],
+    [
+      "ID",
+      254808
+    ],
+    [
+      "ET",
+      249214
+    ],
+    [
+      "EN",
+      245464
+    ],
+    [
+      "ZE",
+      239484
+    ],
+    [
+      "TE",
+      237902
+    ],
+    [
+      "NE",
+      237406
+    ],
+    [
+      "OR",
+      230122
+    ],
+    [
+      "WE",
+      226507
+    ],
+    [
+      "AR",
+      226183
+    ],
+    [
+      "IF",
+      224038
+    ],
+    [
+      "ED",
+      222640
+    ],
+    [
+      "EL",
+      218733
+    ],
+    [
+      "EW",
+      216781
+    ],
+    [
+      "TI",
+      214487
+    ],
+    [
+      "JA",
+      205006
+    ]
+  ]
+}
