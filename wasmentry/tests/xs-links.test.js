@@ -1,9 +1,11 @@
 import {test, expect} from "@playwright/test";
 import {readFile} from "node:fs/promises";
-import {readSharedLink, sharedLink, MAX_LINK_TOKEN} from "../xs-links.mjs";
 import {openGameActions, openSample} from "./helpers/startup.js";
 
-test("@unit shared links reject ambiguous and malformed parameters", () => {
+test("@unit shared links reject ambiguous and malformed parameters", async () => {
+  // Keep EngineClient's dependency in native ESM too; Playwright's CommonJS
+  // transform breaks its named exports when Node 22.23 loads both test files.
+  const {readSharedLink, sharedLink, MAX_LINK_TOKEN} = await import("../xs-links.mjs");
   const base = "https://magpie.birdtest.org/releases/wasm-preview-v0.1.3/wasmentry/?old=value#private";
   const token = "WFNQabcdefgh_-012345";
   expect(sharedLink(base, "xsp", token)).toBe(base.split("?")[0] + "?xsp=" + token);
