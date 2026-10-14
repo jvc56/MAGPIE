@@ -24,6 +24,8 @@ make magpie BUILD=profile      # profiling build
 make magpie BUILD=thread       # thread sanitizer build
 make leavegen_pgo_release      # leavegen-trained PGO build
 make libmagpie                 # shared library; API is src/impl/cmd_api.h
+make windows                   # bin/magpie.exe via Docker (llvm-mingw); WINDOWS_ARCH=aarch64 for arm64
+make windows_test              # bin/magpie_test.exe; make windows_wine_test TESTS=compat runs it under Wine
 make clean                     # remove build artifacts
 ```
 

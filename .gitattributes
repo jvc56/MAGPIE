@@ -15,3 +15,4 @@
 *.tgz binary
 *.zip binary
 *.wasm binary
+*.ico binary
