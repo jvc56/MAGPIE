@@ -24,6 +24,7 @@
 #include "cmd_api_test.h"
 #include "command_test.h"
 #include "config_test.h"
+#include "contribute_tables_test.h"
 #include "contribute_test.h"
 #include "convert_test.h"
 #include "create_data_test.h"
@@ -262,6 +263,7 @@ static TestEntry on_demand_test_table[] = {
     {"pcbench", test_play_chooser_benchmark},
     {"ap_rit", test_autoplay_rit_correctness},
     {"tablebench", test_table_bench},
+    {"contributetables", test_contribute_tables},
     // Pre-endgame (PEG) solver
     {"peg1pb", test_peg_1bag_pass_best},
     {"peg1onyx", test_peg_1bag_onyx},

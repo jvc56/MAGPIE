@@ -18,6 +18,7 @@
 #include "../util/io_util.h"
 #include "../util/json.h"
 #include "../util/string_util.h"
+#include "contribute_tables.h"
 #include <inttypes.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -299,6 +300,10 @@ struct ContributeState {
   // Whether one of them is the server's own artifact (the leave KLV) rather
   // than a file built here; see contribute_decline_derived_mismatch.
   bool server_artifact_mismatch;
+  // The derived tables the claimed task's players asked for and this worker
+  // skipped for lack of space, as a set of 1 << contribute_table_role_t:
+  // sent with its result as `derived_skipped`. Cleared with each claim.
+  unsigned int derived_skipped;
   // Jobs set aside for a while because the server's leave KLV for them was
   // missing or wrong: sent as unsupported until `until_ns`, then claimable
   // again -- and the KLV fetched afresh, so an admin's repair is noticed.
@@ -647,9 +652,55 @@ bool contribute_find_derived(const ContributeState *state, const char *role,
     out->sha256 = sha256;
     out->builder = json_get_string_or_null(entry, "builder");
     out->build_target = json_get_string_or_null(entry, "build_target");
+    // A size that is not a whole number of bytes is none: the build is tried,
+    // and finds out.
+    out->bytes = -1;
+    double bytes = 0;
+    if (json_number(json_object_get(entry, "bytes"), &bytes) && bytes >= 0 &&
+        bytes <= (double)INT64_MAX / 2 && bytes == (double)(int64_t)bytes) {
+      out->bytes = (int64_t)bytes;
+    }
     return true;
   }
   return false;
+}
+
+void contribute_record_derived_skipped(ContributeState *state,
+                                       contribute_table_role_t role) {
+  if (state && role < NUMBER_OF_CONTRIBUTE_TABLE_ROLES) {
+    state->derived_skipped |= 1U << role;
+  }
+}
+
+unsigned int contribute_get_derived_skipped(const ContributeState *state) {
+  return state ? state->derived_skipped : 0;
+}
+
+int64_t contribute_get_disk_reserve_bytes(const ContributeState *state) {
+  if (!state) {
+    return (int64_t)CONTRIBUTE_DEFAULT_DISK_RESERVE_GB *
+           CONTRIBUTE_BYTES_PER_GB;
+  }
+  return state->client_state->disk_reserve_bytes;
+}
+
+int64_t contribute_get_memory_reserve_bytes(const ContributeState *state) {
+  if (!state) {
+    return (int64_t)CONTRIBUTE_DEFAULT_MEMORY_RESERVE_GB *
+           CONTRIBUTE_BYTES_PER_GB;
+  }
+  return state->client_state->memory_reserve_bytes;
+}
+
+bool contribute_first_mention(ContributeState *state, const char *key) {
+  return !state || !already_logged(state, key);
+}
+
+void contribute_state_set_assignment(ContributeState *state,
+                                     JsonValue *assignment) {
+  json_destroy(state->assignment);
+  state->assignment = assignment;
+  state->derived_skipped = 0;
 }
 
 char *contribute_missing_file_json(const char *role, const char *name,
@@ -858,6 +909,7 @@ ContributeState *contribute_state_create(const char *settings_path,
   state->logged_gaps = string_list_create();
   state->digest_cache = string_list_create();
   state->derived_mismatches = string_list_create();
+  state->derived_skipped = 0;
   state->shutdown_requested = false;
   state->reached_server = false;
   // Nothing is said while a request waits for the server, however long: a
@@ -959,6 +1011,7 @@ static void release_claim(ContributeState *state) {
   state->job_name = NULL;
   json_destroy(state->assignment);
   state->assignment = NULL;
+  state->derived_skipped = 0;
 }
 
 // A job name from the server, as printed: control characters (a terminal
@@ -1195,6 +1248,7 @@ claim_task_over_http(ContributeState *state, const char *this_magpie_version,
   }
 
   state->assignment = json_parse(response.body, error_stack);
+  state->derived_skipped = 0;
   chttp_response_destroy(&response);
   return error_stack_is_empty(error_stack) ? CONTRIBUTE_CLAIM_GOT_TASK
                                            : CONTRIBUTE_CLAIM_FAILED;
@@ -1431,7 +1485,7 @@ void contribute_decline_derived_mismatch(ContributeState *state,
 }
 
 char *contribute_result_body(const char *claim_token, const char *result_json,
-                             uint64_t movegens) {
+                             uint64_t movegens, unsigned int derived_skipped) {
   StringBuilder *sb = string_builder_create();
   bool first = true;
   json_write_object_start(sb);
@@ -1442,6 +1496,25 @@ char *contribute_result_body(const char *claim_token, const char *result_json,
   // credited to the contributor, not part of what the task computed.
   json_write_raw_key(sb, "movegens", &first);
   string_builder_add_formatted_string(sb, "%" PRIu64, movegens);
+  // Beside it too, and always there, empty when nothing was skipped: the
+  // tables the task's players asked for that this machine had no room for,
+  // which the task ran without -- slower, with the same moves. Sorted, so
+  // the same skips always read the same.
+  json_write_array_start(sb, "derived_skipped", &first);
+  static const contribute_table_role_t sorted_roles[] = {
+      CONTRIBUTE_TABLE_RIT, CONTRIBUTE_TABLE_WIT, CONTRIBUTE_TABLE_WMP};
+  bool first_role = true;
+  for (size_t role_idx = 0;
+       role_idx < sizeof(sorted_roles) / sizeof(sorted_roles[0]); role_idx++) {
+    if (derived_skipped & (1U << sorted_roles[role_idx])) {
+      if (!first_role) {
+        string_builder_add_string(sb, ",");
+      }
+      first_role = false;
+      json_write_quoted(sb, contribute_table_role_name(sorted_roles[role_idx]));
+    }
+  }
+  json_write_array_end(sb);
   json_write_object_end(sb);
   return string_builder_dump_and_destroy(sb, NULL);
 }
@@ -1464,8 +1537,10 @@ typedef enum {
 static contribute_submit_outcome_t
 submit_result_over_http(HttpClient *client, const char *claim_token,
                         const char *result_json, uint64_t movegens,
-                        char **rejection, ErrorStack *error_stack) {
-  char *body = contribute_result_body(claim_token, result_json, movegens);
+                        unsigned int derived_skipped, char **rejection,
+                        ErrorStack *error_stack) {
+  char *body = contribute_result_body(claim_token, result_json, movegens,
+                                      derived_skipped);
 
   ChttpResponse response;
   http_client_post_json(client, "/api/worker/result", body, &response,
@@ -1553,9 +1628,9 @@ void contribute_submit_result(ContributeState *state,
 
   if (result_json) {
     char *rejection = NULL;
-    const contribute_submit_outcome_t outcome =
-        submit_result_over_http(state->http_client, state->claim_token,
-                                result_json, movegens, &rejection, error_stack);
+    const contribute_submit_outcome_t outcome = submit_result_over_http(
+        state->http_client, state->claim_token, result_json, movegens,
+        state->derived_skipped, &rejection, error_stack);
     heartbeat_stop(&state->heartbeat);
     if (error_stack_is_empty(error_stack)) {
       if (outcome == CONTRIBUTE_SUBMIT_ACCEPTED) {

@@ -41,6 +41,7 @@
 #include "../src/util/io_util.h"
 #include "../src/util/json.h"
 #include "../src/util/string_util.h"
+#include "contribute_tables_test.h"
 #include "test_constants.h"
 #include "test_util.h"
 #include <assert.h>
@@ -688,6 +689,12 @@ static void assert_expected_data_pins_derived_files(const JsonValue *expected) {
     // name the builder would be unactionable.
     assert(json_get_string_or_null(entry, "builder"));
     assert(json_get_string_or_null(entry, "build_target"));
+    // The size of the server's build, a whole number of bytes: what a worker
+    // weighs against its disk and memory before it builds anything
+    // (contribute_choose_tables). A worker reads its absence as "unknown".
+    double bytes = -1;
+    assert(json_number(json_object_get(entry, "bytes"), &bytes));
+    assert(bytes >= 0 && bytes == (double)(int64_t)bytes);
   }
 }
 
@@ -1009,7 +1016,7 @@ static void assert_produces_every_fixture_key(const JsonValue *fixture,
 // writes around it: every key of the fixture's envelope is one that body
 // has. (A fixture captured before results carried `movegens` has none.)
 static const JsonValue *fixture_result(const JsonValue *fixture) {
-  char *body = contribute_result_body("token", "{}", 1);
+  char *body = contribute_result_body("token", "{}", 1, 0);
   ErrorStack *error_stack = error_stack_create();
   const JsonValue *envelope = json_parse(body, error_stack);
   assert(error_stack_is_empty(error_stack));
@@ -1027,6 +1034,20 @@ static const JsonValue *fixture_result(const JsonValue *fixture) {
   if (json_object_get(fixture, "movegens")) {
     assert(json_get_int(fixture, "movegens", error_stack) >= 0);
     assert(error_stack_is_empty(error_stack));
+  }
+  // The roles of the tables skipped for lack of room, sorted, each once.
+  const JsonValue *skipped = json_object_get(fixture, "derived_skipped");
+  if (skipped) {
+    assert(json_is_array(skipped));
+    const char *previous = "";
+    for (int i = 0; i < json_array_length(skipped); i++) {
+      const char *role = json_array_get_string(skipped, i);
+      assert(role &&
+             (strings_equal(role, "wmp") || strings_equal(role, "wit") ||
+              strings_equal(role, "rit")));
+      assert(strcmp(previous, role) < 0);
+      previous = role;
+    }
   }
   error_stack_destroy(error_stack);
   const JsonValue *result = json_object_get(fixture, "result");
@@ -1129,16 +1150,19 @@ static void test_results_carry_every_key_the_server_reads(void) {
 
 // A submission is the claim token, the task's result as it was computed, and
 // beside it the move generations the task took -- what the contributor is
-// credited with, a whole number however large.
+// credited with, a whole number however large -- and the tables its players
+// asked for that this machine skipped for space, always there.
 static void test_the_result_body_carries_movegens(void) {
   const char *result_json = "{\"racks\":[{\"rack\":\"AEINRST\"}]}";
-  char *body = contribute_result_body("2b1c4e7a", result_json, 12345);
+  char *body = contribute_result_body("2b1c4e7a", result_json, 12345, 0);
   ErrorStack *error_stack = error_stack_create();
   const JsonValue *parsed = json_parse(body, error_stack);
   assert(error_stack_is_empty(error_stack));
-  assert(json_object_size(parsed) == 3);
+  assert(json_object_size(parsed) == 4);
   assert_strings_equal(json_get_string(parsed, "claim_token", error_stack),
                        "2b1c4e7a");
+  const JsonValue *skipped = json_object_get(parsed, "derived_skipped");
+  assert(json_is_array(skipped) && json_array_length(skipped) == 0);
   const JsonValue *result = json_object_get(parsed, "result");
   assert(json_is_object(result));
   assert_strings_equal(
@@ -1151,14 +1175,31 @@ static void test_the_result_body_carries_movegens(void) {
   free(body);
 
   // Written in full, not as a double: a count past 2^53 keeps its last digit.
-  body = contribute_result_body("t", "{}", UINT64_MAX);
-  assert(strstr(body, "\"movegens\":18446744073709551615}"));
+  body = contribute_result_body("t", "{}", UINT64_MAX, 0);
+  assert(strstr(body, "\"movegens\":18446744073709551615,"));
   parsed = json_parse(body, error_stack);
   assert(error_stack_is_empty(error_stack));
   json_destroy(parsed);
   free(body);
-  body = contribute_result_body("t", "{}", 0);
-  assert(strstr(body, "\"movegens\":0}"));
+  body = contribute_result_body("t", "{}", 0, 0);
+  assert(strstr(body, "\"movegens\":0,\"derived_skipped\":[]}"));
+  free(body);
+
+  // The skipped roles by name, sorted, whatever order they were skipped in.
+  body = contribute_result_body("t", "{}", 0,
+                                (1U << CONTRIBUTE_TABLE_WMP) |
+                                    (1U << CONTRIBUTE_TABLE_RIT));
+  assert(strstr(body, "\"derived_skipped\":[\"rit\",\"wmp\"]}"));
+  free(body);
+  body = contribute_result_body("t", "{}", 0,
+                                (1U << CONTRIBUTE_TABLE_WIT) |
+                                    (1U << CONTRIBUTE_TABLE_RIT) |
+                                    (1U << CONTRIBUTE_TABLE_WMP));
+  assert(strstr(body, "\"derived_skipped\":[\"rit\",\"wit\",\"wmp\"]}"));
+  parsed = json_parse(body, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  assert(json_array_length(json_object_get(parsed, "derived_skipped")) == 3);
+  json_destroy(parsed);
   free(body);
   error_stack_destroy(error_stack);
 }
@@ -3654,6 +3695,50 @@ static void test_inferring_players_report_their_inference(void) {
   config_destroy(config);
 }
 
+// A claim states each derived file's size, which the worker reads before
+// building anything; a size that is not a whole number of bytes, or none at
+// all (a server before the 0.1.3 contract), is unknown.
+static void test_a_derived_files_size_is_read_from_the_claim(void) {
+  const char *settings_path = "contribute_test_sizes.txt";
+  write_settings_file(settings_path, "server https://birdtest.example\n");
+  ErrorStack *error_stack = error_stack_create();
+  ThreadControl *thread_control = thread_control_create();
+  ContributeState *state =
+      contribute_state_create(settings_path, thread_control, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  contribute_state_set_assignment(state, load_fixture(BIRDTEST_GAMES_FIXTURE));
+  ContributeDerived derived;
+  assert(contribute_find_derived(state, "wmp", "NWL23", &derived));
+  assert(derived.bytes == 128361169);
+  assert(contribute_find_derived(state, "rit", "NWL23.NWL23", &derived));
+  assert(derived.bytes == 1885416048);
+  assert(contribute_find_derived(state, "wit", "NWL23", &derived));
+  assert(derived.bytes == 92123868);
+
+  const char *sizes[] = {"", ", \"bytes\": -1", ", \"bytes\": 1.5",
+                         ", \"bytes\": \"7\"", ", \"bytes\": null"};
+  for (size_t i = 0; i < sizeof(sizes) / sizeof(sizes[0]); i++) {
+    char *assignment = get_formatted_string(
+        "{\"expected_data\": {\"derived\": [{\"role\": \"wmp\", "
+        "\"name\": \"X\", \"sha256\": \"ab\"%s}]}}",
+        sizes[i]);
+    contribute_state_set_assignment(state, json_parse(assignment, error_stack));
+    assert(error_stack_is_empty(error_stack));
+    free(assignment);
+    assert(contribute_find_derived(state, "wmp", "X", &derived));
+    assert(derived.bytes == -1);
+  }
+  // Recorded skips belong to the claim, and a new one starts with none.
+  contribute_record_derived_skipped(state, CONTRIBUTE_TABLE_RIT);
+  assert(contribute_get_derived_skipped(state) == 1U << CONTRIBUTE_TABLE_RIT);
+  contribute_state_set_assignment(state, json_parse("{}", error_stack));
+  assert(contribute_get_derived_skipped(state) == 0);
+  contribute_state_destroy(state);
+  thread_control_destroy(thread_control);
+  error_stack_destroy(error_stack);
+  (void)remove(settings_path);
+}
+
 void test_contribute(void) {
   test_static_games_are_identical_across_thread_counts();
   test_a_player_states_its_solving();
@@ -3703,4 +3788,6 @@ void test_contribute(void) {
   test_a_task_line_says_how_long_it_took();
   test_a_task_is_stopped_at_its_time_limit();
   test_an_unverifiable_assignment_is_refused();
+  test_a_derived_files_size_is_read_from_the_claim();
+  test_contribute_tables();
 }

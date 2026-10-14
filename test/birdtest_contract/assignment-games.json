@@ -49,21 +49,24 @@
         "name": "NWL23",
         "sha256": "214a46d74fb6540fec309c4181b14ebd8f1c019cec76d7373d3c412cb08fc187",
         "builder": "wmp-1",
-        "build_target": "nehalem"
+        "build_target": "nehalem",
+        "bytes": 128361169
       },
       {
         "role": "rit",
         "name": "NWL23.NWL23",
         "sha256": "157b72d3920d74b7b7e808d68251cf82033b516ad8f4c0746d8b4405cb306f8a",
         "builder": "rit-1",
-        "build_target": "nehalem"
+        "build_target": "nehalem",
+        "bytes": 1885416048
       },
       {
         "role": "wit",
         "name": "NWL23",
         "sha256": "2547e017e64a5f4f91b75736fd7a4666faa20961ce92abfe6a813e4f85f55475",
         "builder": "wit-1",
-        "build_target": "nehalem"
+        "build_target": "nehalem",
+        "bytes": 92123868
       }
     ]
   },
