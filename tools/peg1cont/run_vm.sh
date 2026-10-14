@@ -10,7 +10,8 @@
 # PROCS single-threaded processes. Process p on VM v scores the boards whose
 # index % (NUM_VMS * PROCS) == v * PROCS + p. Extra PEG1C_* variables in the
 # environment pass through. Every PUSH_EVERY seconds (default 600) and at the
-# end, results/ is committed and pushed to claude/peg1cont-results-vm<VM_IDX>.
+# end, results/ is committed and pushed to $RESULTS_BRANCH (default
+# claude/peg1cont-results-vm<VM_IDX>).
 set -euo pipefail
 VM=$1
 NVM=$2
@@ -33,7 +34,7 @@ if [ ! -f data/lexica/NWL23.wmp ]; then
 fi
 make magpie_test BUILD=no_pgo_release BOARD_DIM=15 > /dev/null
 
-BRANCH="claude/peg1cont-results-vm$VM"
+BRANCH=${RESULTS_BRANCH:-claude/peg1cont-results-vm$VM}
 git config user.email > /dev/null || git config user.email noreply@anthropic.com
 git config user.name > /dev/null || git config user.name "peg1cont"
 push_results() {
