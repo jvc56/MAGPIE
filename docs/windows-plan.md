@@ -35,11 +35,11 @@ yet. The maintainer decisions are settled; section 9 records them.
 - **For users.** They get one `.exe`. Double-clicking it opens a console that:
   - finds its data, or downloads it with a built-in command;
   - stays open long enough for any error to be read;
-  - runs the existing REPL, including `contribute`.
+  - runs the same REPL as on Linux and macOS.
 
-  `contribute` (the birdtest worker) is probably the main reason Windows users
-  will download it, but it runs only when the user types `contribute`. People who only want to play or analyze can already use the
-  browser build.
+  Windows users use MAGPIE for the same things Linux and macOS users do:
+  analysis, simulation, inference, endgames, autoplay, and `contribute` if they
+  choose to. There is no Windows-specific mode or feature set.
 
 ## 1. Constraints this plan is built around
 
@@ -49,7 +49,11 @@ yet. The maintainer decisions are settled; section 9 records them.
    status 0, and its window closes at once.
 2. **MAGPIE's developers do not have Windows machines.** Every Windows check
    must run in CI or on Linux/macOS, and real Windows runs must be automated.
-3. **`src/` outside `src/compat` stays platform-agnostic.** Anything that does
+3. **Windows is a full platform, not a special case.** Every command behaves
+   on Windows as it does on Linux and macOS, and the release gates (section 5)
+   cover ordinary use first: loading a lexicon, generating moves, simulating,
+   solving an endgame. `contribute` is one command among many.
+4. **`src/` outside `src/compat` stays platform-agnostic.** Anything that does
    not work on Windows goes behind a compat wrapper. Section 3.4 covers the one
    deliberate exception, the GCG regex, and the reason for it.
 
@@ -271,7 +275,7 @@ where Windows runners are free for public repositories.
 | **L2** Compat contract tests (`test/compat_test.c`), using fixtures with `\r\n` and `0x1A` bytes | Every OS that runs tests | That each compat function behaves the same everywhere; listed below | Seconds |
 | **L3** x64 `magpie_test.exe` under Wine | Linux (`wine64` from Ubuntu 24.04) | Most runtime issues: text mode, path parsing, threads, WinHTTP plumbing. Reproducible locally with `make windows_test && wine bin/magpie_test.exe <test>`. | Like a dev shard |
 | **L4** Native Windows: download the L1 `.exe` artifacts, restore the data cache, run the test suite (no-PGO shards): x64 on `windows-latest`, arm64 on `windows-11-arm` | Real Windows Server 2022/2025 and Windows 11 on ARM | What Wine gets wrong: file-sharing and delete semantics on open or mapped files, Defender interference, real WinHTTP/Schannel TLS, stack commit, console behaviour | Like the no-PGO release job |
-| **L5** Release smoke test: run each release `.exe` in an empty directory on its native runner | Real Windows | The first-run path: data download or discovery, `contribute` against a birdtest staging or stub server, `builders` hashes | About 1 minute |
+| **L5** Release smoke test: run each release `.exe` in an empty directory on its native runner | Real Windows | The first-run path: `data fetch` into an empty directory, a WMP built on first use, then a scripted session of ordinary commands (set a lexicon, generate moves, sim, infer, endgame), plus `contribute` against a birdtest staging or stub server and `builders` hashes | About 1 minute |
 
 **Contract tests in L2:**
 - binary round-trip;
@@ -307,8 +311,8 @@ Planned replacements:
 - double-click behaviour in Explorer;
 - how the console looks on Windows 10 conhost compared with Windows Terminal.
 
-Before the first public release, ask one or two volunteers (for example
-birdtest contributors) to run a checklist. A Windows 11 VM image from Microsoft
+Before the first public release, ask one or two Windows-using volunteers to
+run a checklist covering everyday use. A Windows 11 VM image from Microsoft
 works too, if anyone has an x86 machine with virtualization.
 
 ## 6. What the user gets
@@ -321,8 +325,7 @@ Double-clicking `magpie.exe`:
    console (it was double-clicked, not run from a terminal), it prints a
    welcome banner. It also waits for Enter before closing after a fatal error or
    `exit`, so the window doesn't vanish. Otherwise a no-argument launch opens the
-   normal REPL, as on Linux. It does not prompt about contributing; the user
-   types `contribute` to start.
+   normal REPL, exactly as on Linux and macOS.
 2. **Data.** MAGPIE looks for `data/` next to the executable, then in the
    working directory, then in `%LOCALAPPDATA%\MAGPIE\data`. The first location
    is new; it comes from `cpath_executable_dir`. When launched from Explorer,
@@ -448,8 +451,9 @@ Settled by the maintainer in October 2026:
    differential test (section 3.4).
 4. **Code signing:** none. The README explains the SmartScreen step (section
    6.3).
-5. **Double-click:** opens the normal REPL. Contributing starts only when the
-   user types `contribute`.
+5. **Use case and double-click:** Windows users use MAGPIE the same way Linux
+   and macOS users do. A double-click opens the normal REPL, and `contribute`
+   is an ordinary opt-in command, not a Windows focus.
 6. **Windows on ARM:** arm64 ships alongside x64 from the first release.
 
 ## Appendix A: call sites outside `src/compat`
