@@ -46,7 +46,7 @@ source changes and on each target architecture. Override `PGO_CC`,
 
 ## CI Checks (the hard part)
 
-CI runs on every push. Six jobs must all pass: **cppcheck**, **clang-tidy**, **clang-format**, **circular-dependencies**, **unit-tests**, **wasm-tests**.
+CI runs on every push. These must all pass: **cppcheck**, **clang-tidy**, **clang-format**, **circular-dependencies**, **portability**, **windows-cross-compile**, **unit-tests**, **wasm-tests**.
 
 CI uses **cppcheck 2.17.1**, **clang-tidy-18**, **clang-format-20** (Ubuntu 24.04). Local versions will differ.
 
@@ -55,7 +55,18 @@ python3 format.py --write      # ALWAYS run before pushing
 ./cppcheck.sh                  # builds cppcheck 2.17.1 on first run, cached after
 ./tidy.sh                      # clang-tidy (or: ./tidy.sh clang-tidy-18)
 python3 find_circ_deps.py      # circular dependencies (requires: pip install networkx)
+python3 check_portability.py   # platform-specific code stays in src/compat
+python3 check_windows_compile.py # every file compiles for Windows (needs llvm-mingw on PATH)
 ```
+
+**Platform code lives in `src/compat`.** Outside it, include only ISO C headers
+(plus `<stdatomic.h>`) and project headers, test no platform macros, and call
+no POSIX function compat wraps. `check_portability.py` enforces this against
+`portability_allowlist.txt`, and `check_windows_compile.py` cross-compiles every
+file against `windows_compile_allowlist.txt`. Both lists only shrink: never add
+an entry. The Windows compiler is the pinned llvm-mingw release (see the
+`windows-cross-compile` job), also available as the
+`mstorsjo/llvm-mingw:20261006` Docker image.
 
 **format.py is NOT just clang-format** — it reorders includes (self-header first, blank line, then all others contiguous) before running `clang-format-20`. No config files.
 
