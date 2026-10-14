@@ -33,10 +33,12 @@
               <button id="load-gcg">Open GCG…</button>
               <button id="save-gcg" disabled>Save GCG</button>
               <button id="copy-gcg" disabled>Copy GCG</button>
+              <button id="copy-game-link" disabled>Copy game link</button>
             </div>
             <div class="game-action-group" role="group" aria-label="CGP">
               <button id="import">Paste CGP…</button>
               <button id="copy">Copy CGP</button>
+              <button id="copy-position-link" disabled>Copy position link</button>
             </div>
 
               </div>
@@ -789,6 +791,15 @@
         </p>
         <p id="import-error" role="alert"></p>
         <button class="primary" type="submit">Load position</button>
+      </form>
+    </dialog>
+    <dialog id="share-link-dialog" aria-labelledby="share-link-title">
+      <form method="dialog">
+        <h2 id="share-link-title">Copy link</h2>
+        <p>Select and copy the link below.</p>
+        <label for="share-link-text">Link</label>
+        <textarea id="share-link-text" rows="4" readonly></textarea>
+        <button>Close</button>
       </form>
     </dialog>
   </body>

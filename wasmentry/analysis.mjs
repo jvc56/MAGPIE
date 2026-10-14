@@ -10,6 +10,7 @@ import { renderPegOutcomes, parsePegProgress, mergePegRows } from "./peg-review.
 import { ensureIsolation } from "./isolation.mjs";
 import { EngineClient } from "./engine-client.mjs";
 import { readGCG } from "./gcg-loader.mjs?v=2";
+import { readSharedLink, sharedLink } from "./xs-links.mjs";
 import { logGCG, gcgLogText } from "./gcg-diagnostics.mjs";
 import {
   emptyPosition,
@@ -1559,6 +1560,37 @@ $("copy").addEventListener("click", async () => {
 function canExportGame() {
   return !!recordedGame && (engine?.fatalError || (!busy && !hiddenLiveGame()));
 }
+async function copySharedLink(kind) {
+  if (busy || !engineInitialized || hiddenLiveGame() || (kind === "xsg" && !recordedGame)) return;
+  const text = kind === "xsp" ? toCGP(position) : recordedGame.gcg;
+  const lexicon = position.lexicon;
+  // Capture the current position before awaiting the draft-preview request.
+  setBusy(true);
+  $("stop").disabled = true;
+  error("");
+  message("Creating link…");
+  try {
+    await previewPromise;
+    const token = await engine.convertXS(kind === "xsp" ? "encodePosition" : "encodeGame", text, lexicon);
+    const url = sharedLink(location.href, kind, token);
+    try {
+      await navigator.clipboard.writeText(url);
+      message(kind === "xsp" ? "Position link copied" : "Game link copied");
+    } catch {
+      $("share-link-text").value = url;
+      $("share-link-dialog").showModal();
+      $("share-link-text").select();
+      message("Link ready to copy");
+    }
+  } catch (failure) {
+    error(failure.message);
+    message("Could not create link");
+  } finally {
+    setBusy(false);
+  }
+}
+$("copy-position-link").addEventListener("click", () => copySharedLink("xsp"));
+$("copy-game-link").addEventListener("click", () => copySharedLink("xsg"));
 function challengeTarget() {
   if (!recordedGame || !historyIndex) return "";
   if (session && (!isLive() || session.challenge === "void" || !humanTurn() || session.paused)) return "";
@@ -1578,6 +1610,8 @@ function renderHistory() {
   $("copy").disabled = busy || hiddenLiveGame();
   $("save-gcg").disabled = !canExportGame();
   $("copy-gcg").disabled = !canExportGame() || hiddenLiveGame();
+  $("copy-position-link").disabled = !engineInitialized || busy || hiddenLiveGame();
+  $("copy-game-link").disabled = !engineInitialized || busy || !recordedGame || hiddenLiveGame();
   $("save-gcg").title = hiddenLiveGame() ? "Finish the game before exporting hidden racks" : recordedGame
     ? "Save the complete recorded game"
     : "Load a game record first";
@@ -3521,6 +3555,8 @@ function analysisSummary(text, kind) {
 }
 
 const controlHints = {
+  "copy-position-link": "Copy a link to this position, including racks, scores and lexicon.",
+  "copy-game-link": "Copy a link to the recorded game, including player names and moves. Notes are omitted.",
   "copy-gcg": "Copy the complete game as GCG.",
   "pause-game": "Pause the game clock and computer; resume when ready.",
   "finish-game": "End the game and keep its history for review.",
@@ -3686,7 +3722,36 @@ try {
 let wmpWarning = "";
 renderPosition();
 renderResults();
-$("new-game-dialog").showModal();
+const hasSharedLink = new URLSearchParams(location.search).has("xsp") || new URLSearchParams(location.search).has("xsg");
+if (!hasSharedLink) $("new-game-dialog").showModal();
+async function loadSharedLink() {
+  try {
+    const link = readSharedLink(location.href);
+    if (!link) return;
+    setBusy(true);
+    $("stop").disabled = true;
+    message("Opening shared link…");
+    const text = await engine.convertXS(link.kind === "xsp" ? "decodePosition" : "decodeGame", link.token);
+    if (link.kind === "xsp") {
+      const next = parseCGP(text, "CSW24");
+      if (!["CSW24", "NWL23"].includes(next.lexicon)) throw new Error(`This preview does not support ${next.lexicon}.`);
+      setPosition(next);
+    } else {
+      const {text: gameText, lexicon} = await readGCG(null, text, "CSW24");
+      await engine.prepare(lexicon);
+      const {game} = await engine.importGCG(gameText, lexicon);
+      for (const saved of game.positions) parseCGP(saved.cgp, lexicon);
+      game.filename = "shared-game.gcg";
+      adoptGame(game, lexicon, 0);
+    }
+    message(link.kind === "xsp" ? "Shared position loaded" : "Shared game loaded");
+  } catch (failure) {
+    error(`Could not open shared link: ${failure.message}`);
+    message("Link could not be loaded. Start a new game or import a position.");
+  } finally {
+    setBusy(false);
+  }
+}
 async function startEngine() {
   setBusy(true);
   $("stop").disabled = true;
@@ -3776,6 +3841,7 @@ async function startEngine() {
     setBusy(false);
     message("Engine ready");
     refreshWMPCache();
+    if (hasSharedLink) await loadSharedLink();
   } catch (failure) {
     error(failure.message);
     message("Engine unavailable");
