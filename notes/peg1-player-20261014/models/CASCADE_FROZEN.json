@@ -1,0 +1,39 @@
+{
+ "created": 1791990547.455146,
+ "rule": "stage1: fast model scores static top-32 placements (opponent-reply features); shortlist = top-4 by stage-1 score (ties -> lower static rank); stage2: strong model (opponent + mover features) scores the shortlist; choose max stage-2 score (ties -> lower static rank); no placement -> pass",
+ "shortlist": 4,
+ "stage1": {
+  "groups": [
+   "opp"
+  ],
+  "top_k": 32,
+  "mover_max_leave": 7,
+  "inputs": 87,
+  "file": "peg1-fast.bin",
+  "sha256": "7a8c2257cbfe8b1a7603aa5d95fc418fda7e37099822c9c9d5c9e130c9dbf604",
+  "bytes": 45596,
+  "fold_error": 2.6464462280273438e-05,
+  "train_fit": {
+   "margin_regret": 1.734419345855713,
+   "win_regret": 0.021573153409090908
+  }
+ },
+ "stage2": {
+  "groups": [
+   "opp",
+   "mover_now"
+  ],
+  "top_k": 64,
+  "mover_max_leave": 7,
+  "inputs": 95,
+  "file": "peg1-strong.bin",
+  "sha256": "5a2c7117c541efa5ab4ab879a4e99318bea8b18d15d16fb33e84ca49c73a4106",
+  "bytes": 49692,
+  "fold_error": 2.288818359375e-05,
+  "train_fit": {
+   "margin_regret": 1.010697841644287,
+   "win_regret": 0.018266157670454544
+  }
+ },
+ "selected_by": "4-fold CV on the 2816 stored roots only (M=4: margin regret 1.888, win regret 0.0214); no fresh-board outcomes consulted for this rule"
+}

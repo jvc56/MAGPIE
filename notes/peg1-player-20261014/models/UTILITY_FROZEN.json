@@ -1,0 +1,51 @@
+{
+ "created": 1791992584.306357,
+ "hyper": {
+  "epochs": 25,
+  "width": 128,
+  "seed": 20261014,
+  "lr": 0.001,
+  "wd": 0.001,
+  "win_w": 1.0,
+  "abs_w": 0.5,
+  "rank_w": 1.0,
+  "temp": 4.0
+ },
+ "training_roots": 2816,
+ "outputs": "win logit (BCE vs aggregate depth2 win fraction over public worlds); absolute spread residual (spread = one-ply estimate + 20 r; Huber/20, weight 0.5); ranking score (root-demeaned Huber + listwise CE, as margin mode)",
+ "default_selection": {
+  "mode": "utility",
+  "w_win": 1.0,
+  "w_spread": 0.5,
+  "spread_scale": 100.0,
+  "formula": "sim_utility_blend(sigmoid(z), spread, w_win, w_spread, scale)"
+ },
+ "margin_mode": "w_spread < 0 selects the ranking score",
+ "cascade": "fast-u utility shortlist of 4 from static top-32, strong-u utility rescoring",
+ "selected_by": "MAGPIE default blend weights chosen a priori; stored-data OOF games: utility mode traded ~0.4-0.7 points for +0.2-0.6% wins per decision vs margin mode",
+ "tiers": {
+  "fast-u": {
+   "groups": [
+    "opp"
+   ],
+   "top_k": 32,
+   "inputs": 100,
+   "file": "peg1-fast-u.bin",
+   "sha256": "a7f1e23c95202f0afbd33a4b525921dea4d2e30d25d9577bc9a28780ed1218ad",
+   "bytes": 53288,
+   "fold_win_error": 9.5367431640625e-07
+  },
+  "strong-u": {
+   "groups": [
+    "opp",
+    "mover_now"
+   ],
+   "top_k": 64,
+   "inputs": 121,
+   "file": "peg1-strong-u.bin",
+   "sha256": "484b8ea681de3676d3000ae53ca20f1ecb1f45f6fe9b8fb85d91c377543c5541",
+   "bytes": 64040,
+   "fold_win_error": 1.2516975402832031e-06
+  }
+ }
+}

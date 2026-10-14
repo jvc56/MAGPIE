@@ -1,0 +1,58 @@
+{
+ "created": 1791989463.5076969,
+ "hyper": {
+  "epochs": 25,
+  "width": 128,
+  "depth": 1,
+  "lr": 0.001,
+  "wd": 0.001,
+  "temp": 4.0,
+  "mse_weight": 1.0,
+  "list_weight": 1.0,
+  "seed": 20261014,
+  "batch": 32
+ },
+ "training_roots": 2816,
+ "data": {
+  "cache": "8d4203eaeb58774d253c7a81451d2074dda615d53662269d084d63d004558f9a",
+  "reply_v2": "4f08bf5539f04fe6b63289ae949c81d82fe78af50fe4b4ac19052cb6d8c3e69f"
+ },
+ "target": "root-demeaned mean depth2 margin over public hypothetical last tiles (Huber/10) + listwise softmax CE (temperature 4); ranking only",
+ "selection": "argmax score over static top-K placements; ties -> lower static rank; no placement -> pass",
+ "information": "inputs use only the mover rack and public unseen pool; every possible last tile enumerated with multiplicity weights",
+ "tiers": {
+  "fast": {
+   "groups": [
+    "opp"
+   ],
+   "top_k": 32,
+   "mover_max_leave": 7,
+   "inputs": 87,
+   "file": "peg1-fast.bin",
+   "sha256": "7a8c2257cbfe8b1a7603aa5d95fc418fda7e37099822c9c9d5c9e130c9dbf604",
+   "bytes": 45596,
+   "fold_error": 2.6464462280273438e-05,
+   "train_fit": {
+    "margin_regret": 1.734419345855713,
+    "win_regret": 0.021573153409090908
+   }
+  },
+  "strong": {
+   "groups": [
+    "opp",
+    "mover_now"
+   ],
+   "top_k": 64,
+   "mover_max_leave": 7,
+   "inputs": 95,
+   "file": "peg1-strong.bin",
+   "sha256": "5a2c7117c541efa5ab4ab879a4e99318bea8b18d15d16fb33e84ca49c73a4106",
+   "bytes": 49692,
+   "fold_error": 2.288818359375e-05,
+   "train_fit": {
+    "margin_regret": 1.010697841644287,
+    "win_regret": 0.018266157670454544
+   }
+  }
+ }
+}

@@ -1,0 +1,54 @@
+{
+ "experiment": "1PEG reply-feature player (peg1-player-20261014)",
+ "previous_experiment": "../one-tile-full64-aggregate-20261013 (read-only; cache.npz, shards, labels reused)",
+ "information_rule": "Each candidate is ranked from the mover rack and public information only: every possible last tile is enumerated from the public unseen pool (distribution minus board minus own rack) and weighted by multiplicity; per-world reply features are aggregated before the single forward pass; the actual last tile is consumed only when the chosen move is played. Every fresh decision re-ran the policy with the actual last tile swapped for an opponent-rack tile and required bitwise-identical inputs and the same choice.",
+ "training_data": {
+  "roots": 2816,
+  "candidates": 179803,
+  "scenarios": 1226998,
+  "labels": "depth2 endgame search per candidate per public hypothetical last tile (previous study); per-tile margin and W/T/L with multiplicity retained in scenarios.csv"
+ },
+ "features": {
+  "v1": "opp greedy reply, mover greedy follow-up, full greedy playout (BEST_SMALL) per world",
+  "v2": "opp best-scoring reply via exact lane-incremental WMP search (+2x mover rack if out), out flag, tiles, pass flag; mover BEST_SMALL greedy follow-up (score+2x opp rack if out), out flag; aggregated mean/std/min/max over worlds; plus one-ply value (after - mean opp value); 68 public candidate scalars (value-net scalars minus 4 history entries), static equity, spread after"
+ },
+ "model": "MLP 1x128 ReLU -> scalar; within-root loss: root-demeaned Huber(margin/10) + listwise softmax CE (T=4); AdamW 1e-3, wd 1e-3, 25 epochs, batch 32 roots; seed 20261014",
+ "selection_on_stored_data": "4-fold grouped CV over all 2816 stored roots (whole roots per fold) plus out-of-fold completed games; old 512 test roots used diagnostically only",
+ "frozen": {
+  "models": "final/FROZEN.json",
+  "cascade": "final/CASCADE_FROZEN.json"
+ },
+ "fresh_sets": {
+  "labeled": {
+   "seed": 202610141501,
+   "roots": 512,
+   "labels": "peg1data depth2, same procedure, PGO build",
+   "binary_sha256": "964fee84573b60478fde0de2e3c6e3010cbbf290e18d14f8762ec6eb1ad2ee73  fresh/magpie_test-label-pgo\nbc5c4787fd5df138d56d1de747ad8ceb20f7ffce6a7aa510a563d483d122bae6  source/test/value_net_test.c\n"
+  },
+  "unlabeled": {
+   "seed": 202610141502,
+   "roots": 7680,
+   "mode": "peg1pos"
+  },
+  "full_games": {
+   "seed": 202610141503,
+   "games": 20000,
+   "mode": "peg1games",
+   "note": "seat-swapped pair per game id; static play outside the 1PEG; continuation static (0) or fixed two-ply endgame (2)"
+  },
+  "overlap": "no fresh board equals any stored (2816) or prior (896) 1PEG board; all fresh boards distinct"
+ },
+ "evaluation": {
+  "paired": "per root: policy choice vs static top-1, same actual last tile, common continuation; pair win score (W_p+1-W_s)/2, pair spread (M_p-M_s)/2; 10,000 bootstrap resamples of roots",
+  "timing": "single process, warm page cache, policy PGO build, 512 fresh roots, no other compute jobs"
+ },
+ "production_changed": false,
+ "main_repository_changed": false,
+ "hashes": {
+  "models": {
+   "peg1-fast.bin": "7a8c2257cbfe8b1a7603aa5d95fc418fda7e37099822c9c9d5c9e130c9dbf604",
+   "peg1-strong.bin": "5a2c7117c541efa5ab4ab879a4e99318bea8b18d15d16fb33e84ca49c73a4106"
+  },
+  "source_value_net_test_c": "cec2fd6730d283660614cd6f7c5d8166e4faaf3f712072ce6cfcb329c8f54feb"
+ }
+}
