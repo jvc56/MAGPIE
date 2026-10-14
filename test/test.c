@@ -81,6 +81,7 @@
 #include "sim_test.h"
 #include "stats_test.h"
 #include "string_util_test.h"
+#include "table_bench_test.h"
 #include "transposition_table_test.h"
 #include "validated_move_test.h"
 #include "win_pct_test.h"
@@ -260,6 +261,7 @@ static TestEntry on_demand_test_table[] = {
     {"simregret", test_sim_regret},
     {"pcbench", test_play_chooser_benchmark},
     {"ap_rit", test_autoplay_rit_correctness},
+    {"tablebench", test_table_bench},
     // Pre-endgame (PEG) solver
     {"peg1pb", test_peg_1bag_pass_best},
     {"peg1onyx", test_peg_1bag_onyx},
