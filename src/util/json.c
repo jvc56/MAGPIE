@@ -91,6 +91,17 @@ const char *json_array_get_string(const JsonValue *array, int index) {
   return as_cjson(element)->valuestring;
 }
 
+const JsonValue *json_next(const JsonValue *value) {
+  return value ? (const JsonValue *)as_cjson(value)->next : NULL;
+}
+bool json_number(const JsonValue *value, double *number) {
+  if (!value || !cJSON_IsNumber(as_cjson(value))) {
+    return false;
+  }
+  *number = as_cjson(value)->valuedouble;
+  return true;
+}
+
 int64_t json_array_get_int_or(const JsonValue *array, int index,
                               int64_t fallback) {
   const JsonValue *element = json_array_get(array, index);

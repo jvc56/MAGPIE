@@ -16,6 +16,8 @@ JsonValue *json_parse(const char *text, ErrorStack *error_stack);
 void json_destroy(const JsonValue *value);
 
 const JsonValue *json_object_get(const JsonValue *object, const char *key);
+const JsonValue *json_next(const JsonValue *value);
+bool json_number(const JsonValue *value, double *number);
 bool json_is_null(const JsonValue *value);
 bool json_is_array(const JsonValue *value);
 bool json_is_object(const JsonValue *value);

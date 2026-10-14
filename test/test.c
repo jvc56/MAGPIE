@@ -94,6 +94,7 @@
 #include "word_plus_floater_maker_test.h"
 #include "word_prune_test.h"
 #include "word_test.h"
+#include "xs_test.h"
 #include "zobrist_test.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -107,6 +108,8 @@ typedef struct {
 } TestEntry;
 
 static TestEntry test_table[] = {
+    {"xs", test_xs},
+    {"xsinterop", test_xs_interop},
     {"config", test_config},
     {"movebudget", test_movegen_budget},
     {"players", test_players_data},
@@ -201,6 +204,7 @@ static TestEntry test_table[] = {
 
 // Tests that only run when explicitly requested (not included in run_all)
 static TestEntry on_demand_test_table[] = {
+    {"xsdata", test_xs_data},
     {"pathmovelists", test_path_move_lists},
     {"egincremental", test_incremental_movegen_identical},
     {"pegspeedbench1", test_peg_speed_bench_1},
@@ -285,6 +289,10 @@ void run_all(void) {
 }
 
 void run_test(const char *subtest) {
+  if (has_prefix("xsdata:", subtest)) {
+    test_xs_data_paths(subtest + strlen("xsdata:"));
+    return;
+  }
   for (int i = 0; test_table[i].name != NULL; ++i) {
     if (strcmp(subtest, test_table[i].name) == 0) {
       test_table[i].func();

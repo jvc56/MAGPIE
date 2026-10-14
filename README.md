@@ -714,3 +714,12 @@ drawn, and contributes a mean of zero at full draw weight, exactly as it does
 inside a `leavegen` run — so a file that omits one is refused rather than having
 its gaps valued at zero. This is what birdtest's server uses to build each
 generation's KLV.
+
+### Compact position and game codecs
+
+The codecs and word-frequency trainer are C-only and add no build dependencies.
+Use `make word_frequencies BUILD=no_pgo_release` to build the training tool.
+Use `conv counts2xsw` to create word codebooks, `conv cgp2xsp` / `xsp2cgp` for
+positions, and `conv gcg2xsg` / `xsg2gcg` for games. See
+[XS codecs](docs/xs-codecs.md) for commands, immutable data installation, wire
+formats, and compatibility tests.

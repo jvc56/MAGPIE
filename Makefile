@@ -236,7 +236,7 @@ ifeq ($(shell uname -s),Linux)
   LDLIBS += -ldl
 endif
 
-.PHONY: all clean iwyu release leavegen_pgo_release pgo pgo_sim pgo_peg \
+.PHONY: all clean iwyu release leavegen_pgo_release pgo pgo_sim pgo_peg word_frequencies \
 	pgo_toolchain_check \
 	pgo_eg peg_eg pgo_workload prepare_data libmagpie examples
 
@@ -289,6 +289,9 @@ magpie_test: $(OBJ_SRC) $(OBJ_TEST) | $(BIN_DIR)
 magpie_pgo_train: $(OBJ_SRC) $(PGO_TRAIN_OBJ) | $(BIN_DIR)
 	$(CC) $(LDFLAGS) $(LFLAGS) $^ $(LDLIBS) -o $(BIN_DIR)/$@
 
+word_frequencies: $(OBJ_SRC) $(OBJ_DIR)/$(TOOLS_DIR)/word_frequencies.o | $(BIN_DIR)
+	$(CC) $(CFLAGS) $(LDFLAGS) $(LFLAGS) $^ $(LDLIBS) -o $(BIN_DIR)/word_frequencies
+
 magpie_convert: $(OBJ_SRC) $(CONVERT_OBJ) | $(BIN_DIR)
 	$(CC) $(LDFLAGS) $(LFLAGS) $^ $(LDLIBS) -o $(BIN_DIR)/$@
 
@@ -305,7 +308,7 @@ $(OBJ_DIR)/$(TOOLS_DIR)/%.o: $(TOOLS_DIR)/%.c | $(OBJ_DIR) $(OBJ_DIR)/$(TOOLS_DI
 	$(CC) $(CFLAGS) $(DEPFLAGS) -c $< -o $@
 
 # Compiler and linker flag changes in this file invalidate every object.
-$(OBJ_SRC) $(OBJ_CMD) $(OBJ_TEST) $(PGO_TRAIN_OBJ) $(CONVERT_OBJ): Makefile
+$(OBJ_SRC) $(OBJ_CMD) $(OBJ_TEST) $(PGO_TRAIN_OBJ) $(CONVERT_OBJ) $(OBJ_DIR)/$(TOOLS_DIR)/word_frequencies.o: Makefile
 
 # A newly merged profile must rebuild every profile-use object. Without this
 # dependency, make would reuse objects optimized against an older corpus.
@@ -432,3 +435,5 @@ pgo_workload: pgo_toolchain_check
 -include $(OBJ_TEST:.o=.d)
 -include $(PGO_TRAIN_OBJ:.o=.d)
 -include $(CONVERT_OBJ:.o=.d)
+
+-include $(OBJ_DIR)/$(TOOLS_DIR)/word_frequencies.d

@@ -28,6 +28,7 @@
 #include "wmp_maker.h"
 #include "word_info_table_maker.h"
 #include "word_plus_floater_maker.h"
+#include "xs_convert.h"
 #include <errno.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -726,6 +727,17 @@ get_conversion_type_from_string(const char *conversion_type_string) {
   } else if (strings_equal(conversion_type_string, "winpct")) {
     conversion_type = CONVERT_WINPCT;
   }
+  if (strings_equal(conversion_type_string, "counts2xsw")) {
+    conversion_type = CONVERT_COUNTS2XSW;
+  } else if (strings_equal(conversion_type_string, "cgp2xsp")) {
+    conversion_type = CONVERT_CGP2XSP;
+  } else if (strings_equal(conversion_type_string, "xsp2cgp")) {
+    conversion_type = CONVERT_XSP2CGP;
+  } else if (strings_equal(conversion_type_string, "gcg2xsg")) {
+    conversion_type = CONVERT_GCG2XSG;
+  } else if (strings_equal(conversion_type_string, "xsg2gcg")) {
+    conversion_type = CONVERT_XSG2GCG;
+  }
   return conversion_type;
 }
 
@@ -749,6 +761,13 @@ void convert(const ConversionArgs *args, ConversionResults *conversion_results,
     return;
   }
 
+  if (conversion_type >= CONVERT_COUNTS2XSW &&
+      conversion_type <= CONVERT_XSG2GCG) {
+    xs_convert(args->input_and_output_name, args->ld_name, args->klv_name,
+               args->wmp_name, args->data_paths, conversion_type,
+               conversion_results, error_stack);
+    return;
+  }
   if (conversion_type == CONVERT_WINPCT) {
     // The third argument, a letter distribution for the other conversions,
     // names the output table.
