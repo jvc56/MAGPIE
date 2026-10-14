@@ -27,3 +27,7 @@ seed: 1792001632
 peg1cont board 3 seed 202610141714 191.6s
 peg1cont board 35 seed 202610141841 293.2s
 peg1cont board 67 seed 202610141958 49.2s
+peg1cont board 99 seed 202610142125 325.2s
+peg1cont board 131 seed 202610142249 17.7s
+(error 196) bag must be empty to solve an endgame, but have 1 letters in the bag
+[2026-10-14 18:28:49] FATAL test/peg1_continuation_test.c:256: peg1cont: endgame_solve failed
