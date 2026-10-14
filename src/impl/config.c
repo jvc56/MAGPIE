@@ -336,6 +336,8 @@ typedef struct ParsedArg {
 
 struct Config {
   char *data_paths;
+  // See ConfigArgs.
+  bool build_missing_wordmaps;
   // PEG "never prune" move list (space-free UCGI, comma-separated), persisted
   // across commands since pargs reset each parse. NULL = no protected moves.
   // The "only solve" restriction is instead a per-invocation positional
@@ -7598,6 +7600,108 @@ char *get_default_klv_name(const char *lexicon_name) {
   return string_duplicate(lexicon_name);
 }
 
+// Whether a wordmap can be built for `lexicon`: not for the 21x21 board, not
+// for a lexicon made for it (_super), and not for Polish, as
+// convert_lexica.sh skips them; and returns why not, or NULL.
+static const char *config_wordmap_unsupported_reason(const char *lexicon) {
+  // NOLINTNEXTLINE(misc-redundant-expression)
+  if (BOARD_DIM != DEFAULT_BOARD_DIM || strstr(lexicon, "_super") != NULL) {
+    return "wordmaps do not support this board size";
+  }
+  if (has_iprefix("OSPS", lexicon)) {
+    return "wordmaps do not support this lexicon";
+  }
+  return NULL;
+}
+
+// Makes the wordmap for player `player_index`'s lexicon `lexicon` available
+// to load, building it from the lexicon's .kwg if it is not on disk: wordmaps
+// are not downloaded (one is about thirty times the size of its lexicon), so
+// the first use of a lexicon builds its wordmap, once. Returns `lexicon` when
+// the wordmap is there to load, or NULL when the player plays without one --
+// the lexicon has no wordmap support, the data directory cannot be written,
+// there is not room for it, or the build failed -- having said why in one
+// line. A NULL `lexicon` (no wordmap wanted) is returned as is.
+static const char *config_wordmap_for_first_use(Config *config,
+                                                int player_index,
+                                                const char *lexicon) {
+  if (!lexicon) {
+    return NULL;
+  }
+  const char *loaded = players_data_get_data_name(
+      config->players_data, PLAYERS_DATA_TYPE_WMP, player_index);
+  ErrorStack *errors = error_stack_create();
+  char *existing = data_filepaths_get_readable_filename(
+      config->data_paths, lexicon, DATA_FILEPATH_TYPE_WORDMAP, errors);
+  const bool on_disk = error_stack_is_empty(errors);
+  free(existing);
+  error_stack_reset(errors);
+  if (on_disk || (loaded && strings_equal(loaded, lexicon))) {
+    error_stack_destroy(errors);
+    return lexicon;
+  }
+  const char *why_not = config_wordmap_unsupported_reason(lexicon);
+  char *built_path = NULL;
+  char *kwg_path = NULL;
+  if (!why_not) {
+    built_path = data_filepaths_get_writable_filename(
+        config->data_paths, lexicon, DATA_FILEPATH_TYPE_WORDMAP, errors);
+    if (!error_stack_is_empty(errors)) {
+      why_not = "its data directory cannot be written";
+    }
+    error_stack_reset(errors);
+  }
+  if (!why_not) {
+    kwg_path = data_filepaths_get_readable_filename(
+        config->data_paths, lexicon, DATA_FILEPATH_TYPE_KWG, errors);
+    CFileIdentity kwg_identity;
+    int64_t free_bytes = 0;
+    char *directory = get_dirpath_from_filepath(built_path);
+    // A wordmap runs to about thirty times its lexicon's .kwg; ask for forty.
+    if (error_stack_is_empty(errors) &&
+        cfile_identity(kwg_path, &kwg_identity) &&
+        cfile_free_bytes(directory, &free_bytes) &&
+        free_bytes < kwg_identity.size * 40) {
+      why_not = "there is not enough disk space for it";
+    }
+    free(directory);
+    error_stack_reset(errors);
+  }
+  if (!why_not) {
+    thread_control_print_formatted(
+        config->thread_control,
+        "building the wordmap for %s, which makes move generation faster "
+        "(once; this can take a minute)\n",
+        lexicon);
+    char *ld_name = ld_get_default_name_from_lexicon_name(lexicon, errors);
+    if (error_stack_is_empty(errors)) {
+      const ConversionArgs args = {
+          .conversion_type_string = "dawg2wordmap",
+          .data_paths = config->data_paths,
+          .input_and_output_name = lexicon,
+          .ld_name = ld_name,
+          .num_threads = config_get_num_threads(config),
+      };
+      convert(&args, config->conversion_results, errors);
+    }
+    free(ld_name);
+    if (!error_stack_is_empty(errors)) {
+      why_not = "it could not be built";
+      error_stack_print_and_reset(errors);
+    }
+  }
+  free(kwg_path);
+  free(built_path);
+  error_stack_destroy(errors);
+  if (why_not) {
+    thread_control_print_formatted(config->thread_control,
+                                   "playing %s without a wordmap: %s\n",
+                                   lexicon, why_not);
+    return NULL;
+  }
+  return lexicon;
+}
+
 void config_load_lexicon_dependent_data(
     Config *config, const char *new_lexicon_name,
     const char *new_p1_lexicon_name, const char *new_p2_lexicon_name,
@@ -7856,6 +7960,11 @@ void config_load_lexicon_dependent_data(
   const char *p2_wmp_name = NULL;
   if (p2_wmp_use_when_available) {
     p2_wmp_name = updated_p2_lexicon_name;
+  }
+
+  if (config->build_missing_wordmaps) {
+    p1_wmp_name = config_wordmap_for_first_use(config, 0, p1_wmp_name);
+    p2_wmp_name = config_wordmap_for_first_use(config, 1, p2_wmp_name);
   }
 
   players_data_set(config->players_data, PLAYERS_DATA_TYPE_WMP,
@@ -13971,6 +14080,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   bool default_use_wmp = true;
   if (config_args) {
     default_use_wmp = config_args->use_wmp;
+    config->build_missing_wordmaps = config_args->build_missing_wordmaps;
   }
   // Attempt to load fields that might fail first
   config->board_layout =

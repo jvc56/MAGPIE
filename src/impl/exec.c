@@ -479,7 +479,8 @@ void process_command_default(int argc, char *argv[]) {
   if (!data_fetch_is_data_present(data_path)) {
     ran_data_fetch = get_missing_data(data_path, argc, argv);
   }
-  const ConfigArgs config_args = {.data_paths = data_path, .use_wmp = true};
+  const ConfigArgs config_args = {
+      .data_paths = data_path, .use_wmp = true, .build_missing_wordmaps = true};
   // A data fetch already done is not repeated as the first command.
   if (!process_command_internal(ran_data_fetch ? 1 : argc, argv,
                                 &config_args)) {

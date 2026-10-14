@@ -192,6 +192,11 @@ jobs:
           test ! -L data/lexica/CSW24_super21.klv2
           cmp data/lexica/CSW24_super21.klv2 ../../data/lexica/CSW21_super21.klv2
           echo "version" | ../../bin/magpie
+          # The fetched lexicon has no wordmap: its first use builds one.
+          printf 'set -lex CSW21\ncgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 ABCDEFG/ 0/0 0\ngen -numplays 1\n' \
+            | ../../bin/magpie | tee first-use.txt
+          grep -q "building the wordmap for CSW21" first-use.txt
+          test -s data/lexica/CSW21.wmp
 
       - name: Build dev test binary
         run: make magpie_test
