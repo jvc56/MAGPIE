@@ -40,6 +40,7 @@ static void xs_assert_ok(ErrorStack *errors) {
     assert(0);
   }
 }
+
 static void xs_assert_position(const char *cgp, const char *paths,
                                unsigned book) {
   ErrorStack *errors = error_stack_create();
@@ -62,6 +63,7 @@ static void xs_assert_position(const char *cgp, const char *paths,
   free(again);
   error_stack_destroy(errors);
 }
+
 static void xs_assert_game(const char *gcg, const char *paths, unsigned profile,
                            bool mixed) {
   ErrorStack *errors = error_stack_create();
@@ -100,6 +102,7 @@ static void xs_assert_game(const char *gcg, const char *paths, unsigned profile,
   free(again);
   error_stack_destroy(errors);
 }
+
 // Freeze complete top-1024 candidate lists, including tie ordering and blank
 // designations, independently of round trips through the current
 // implementation.
@@ -142,6 +145,7 @@ static void xs_assert_rank_profile(const char *paths, unsigned profile) {
   xs_ranker_destroy(ranker);
   error_stack_destroy(errors);
 }
+
 static void xs_assert_golden_position(const char *paths, unsigned book) {
   static const char *const tokens[] = {
       "WFNQUQpkzo4AeABAAf59Hh_kFBgIEDgk-"
@@ -274,6 +278,7 @@ static void xs_test_frequencies(void) {
   error_stack_destroy(errors);
   free(board);
 }
+
 static void xs_test_gzip(void) {
   assert(xs_crc32("123456789", 9) == UINT32_C(0xcbf43926));
   // Independently generated RFC1952 streams: fixed and dynamic Huffman blocks.
@@ -338,6 +343,7 @@ static void xs_test_gzip(void) {
   free(decoded);
   free(encoded);
 }
+
 static void xs_test_review_inputs(void) {
   ErrorStack *errors = error_stack_create();
   char *standard = string_duplicate(xs_fixture);
@@ -419,6 +425,7 @@ static void xs_test_review_inputs(void) {
   }
   error_stack_destroy(errors);
 }
+
 void test_xs(void) {
   xs_test_review_inputs();
   xs_test_gzip();
@@ -544,6 +551,7 @@ void test_xs(void) {
   free(output);
   error_stack_destroy(errors);
 }
+
 void test_xs_data_paths(const char *paths) {
   ErrorStack *errors = error_stack_create();
   const char *double_blank =

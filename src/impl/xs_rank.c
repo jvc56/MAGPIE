@@ -27,6 +27,7 @@
 #include <string.h>
 
 enum { XS_RANK_CAPACITY = 100000, XS_RANK_LIMIT = 1024 };
+
 // Profile 1/2 freezes the standard English rules, not the user's settings.
 static const char xs_layout[] =
     "7, 7\n=  '   =   '  =\n -   \"   \"   - \n  -   ' '   -  \n'  -   '   -  "
@@ -39,6 +40,7 @@ static const char xs_distribution[] =
     "m,2,3,0\nN,n,6,1,0\nO,o,8,1,1\nP,p,2,3,0\nQ,q,1,10,0\nR,r,6,1,0\nS,s,4,1,"
     "0\nT,t,6,1,0\nU,u,4,1,1\nV,v,2,4,0\nW,w,2,4,0\nX,x,1,8,0\nY,y,2,4,0\nZ,z,"
     "1,10,0\n";
+
 void xs_ranker_destroy(XSRanker *ranker) {
   if (!ranker) {
     return;
@@ -55,6 +57,7 @@ void xs_ranker_destroy(XSRanker *ranker) {
   ld_destroy(ranker->distribution);
   free(ranker);
 }
+
 XSRanker *xs_ranker_create(const char *paths, unsigned profile,
                            ErrorStack *errors) {
   static const char *const names[2][2] = {{"CSW24.kwg", "CSW24.klv2"},
@@ -129,6 +132,7 @@ XSRanker *xs_ranker_create(const char *paths, unsigned profile,
   }
   return ranker;
 }
+
 static int xs_move_order(const void *left, const void *right) {
   const XSMove *first = left;
   const XSMove *second = right;
@@ -143,6 +147,7 @@ static int xs_move_order(const void *left, const void *right) {
   }
   return strcmp(first->word, second->word);
 }
+
 XSMove *xs_rank_moves(XSRanker *ranker, const char board[225], const char *rack,
                       int *count, ErrorStack *errors) {
   *count = 0;

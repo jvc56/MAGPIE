@@ -14,11 +14,14 @@ void xs_error(ErrorStack *errors, const char *message) {
   error_stack_push(errors, ERROR_STATUS_CONVERT_INPUT_FILE_ERROR,
                    get_formatted_string("XS: %s", message));
 }
+
 void xs_buffer_init(XSBuffer *buffer) { *buffer = (XSBuffer){.valid = true}; }
+
 void xs_buffer_destroy(XSBuffer *buffer) {
   free(buffer->bytes);
   *buffer = (XSBuffer){0};
 }
+
 void xs_put(XSBuffer *buffer, uint32_t value, unsigned width) {
   if (!buffer->valid) {
     return;
@@ -41,6 +44,7 @@ void xs_put(XSBuffer *buffer, uint32_t value, unsigned width) {
     buffer->bits++;
   }
 }
+
 uint32_t xs_get(XSBuffer *buffer, unsigned width) {
   if (!buffer->valid || width > 32 || buffer->cursor + width > buffer->bits) {
     buffer->valid = false;
@@ -55,6 +59,7 @@ uint32_t xs_get(XSBuffer *buffer, unsigned width) {
   }
   return value;
 }
+
 void xs_append(XSBuffer *target, const XSBuffer *source) {
   if (!source->valid) {
     target->valid = false;
@@ -64,6 +69,7 @@ void xs_append(XSBuffer *target, const XSBuffer *source) {
     xs_put(target, (source->bytes[bit / 8] >> (7 - bit % 8)) & 1, 1);
   }
 }
+
 void xs_put_var(XSBuffer *buffer, uint32_t value) {
   while (value >= 128) {
     xs_put(buffer, (value & 127) | 128, 8);
@@ -71,6 +77,7 @@ void xs_put_var(XSBuffer *buffer, uint32_t value) {
   }
   xs_put(buffer, value, 8);
 }
+
 uint32_t xs_get_var(XSBuffer *buffer) {
   uint32_t value = 0;
   for (unsigned index = 0; index < 5; index++) {
@@ -90,15 +97,18 @@ uint32_t xs_get_var(XSBuffer *buffer) {
   buffer->valid = false;
   return 0;
 }
+
 void xs_put_signed(XSBuffer *buffer, int32_t value) {
   xs_put_var(buffer, value >= 0 ? (uint32_t)value * 2
                                 : (uint32_t)((-(int64_t)value * 2) - 1));
 }
+
 int32_t xs_get_signed(XSBuffer *buffer) {
   uint32_t value = xs_get_var(buffer);
   return value & 1 ? (int32_t)(-((int64_t)(value / 2)) - 1)
                    : (int32_t)(value / 2);
 }
+
 void xs_put_text(XSBuffer *buffer, const char *text) {
   size_t length = strlen(text);
   if (length > XS_MAX_TEXT) {
@@ -110,6 +120,7 @@ void xs_put_text(XSBuffer *buffer, const char *text) {
     xs_put(buffer, (unsigned char)text[index], 8);
   }
 }
+
 char *xs_get_text(XSBuffer *buffer) {
   uint32_t length = xs_get_var(buffer);
   if (!buffer->valid || length > XS_MAX_TEXT ||
@@ -130,6 +141,7 @@ char *xs_get_text(XSBuffer *buffer) {
   }
   return text;
 }
+
 void xs_put_rank(XSBuffer *buffer, unsigned order, uint32_t rank) {
   if (order > 6 || (rank >> order) >= (1U << 20)) {
     buffer->valid = false;
@@ -144,6 +156,7 @@ void xs_put_rank(XSBuffer *buffer, unsigned order, uint32_t rank) {
   xs_put(buffer, prefix, width);
   xs_put(buffer, rank & ((1U << order) - 1), order);
 }
+
 uint32_t xs_get_rank(XSBuffer *buffer, unsigned order) {
   if (order > 6) {
     buffer->valid = false;
@@ -158,6 +171,7 @@ uint32_t xs_get_rank(XSBuffer *buffer, unsigned order) {
   uint32_t prefix = (1U << zeros) | xs_get(buffer, zeros);
   return ((prefix - 1) << order) | xs_get(buffer, order);
 }
+
 bool xs_finish(XSBuffer *buffer) {
   size_t remain = buffer->bits - buffer->cursor;
   if (!buffer->valid || remain >= 8) {
@@ -165,8 +179,10 @@ bool xs_finish(XSBuffer *buffer) {
   }
   return xs_get(buffer, (unsigned)remain) == 0 && buffer->valid;
 }
+
 static const char xs_base64[] =
     "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+
 char *xs_token(const XSBuffer *buffer, const char *magic) {
   if (!buffer->valid) {
     return NULL;
@@ -191,6 +207,7 @@ char *xs_token(const XSBuffer *buffer, const char *magic) {
   xs_buffer_destroy(&packet);
   return text;
 }
+
 bool xs_untoken(XSBuffer *buffer, const char *token, const char *magic) {
   size_t length = strlen(token);
   if (length < 10 || length > XS_MAX_BYTES || length % 4 == 1) {
@@ -223,6 +240,7 @@ bool xs_untoken(XSBuffer *buffer, const char *token, const char *magic) {
   xs_buffer_destroy(&packet);
   return valid;
 }
+
 char *xs_read_file(const char *path, size_t *length, ErrorStack *errors) {
   // Portable C mode; no spawned child owns this stream.
   // NOLINTNEXTLINE(android-cloexec-fopen)
@@ -248,6 +266,7 @@ char *xs_read_file(const char *path, size_t *length, ErrorStack *errors) {
   bytes[*length] = '\0';
   return bytes;
 }
+
 bool xs_write_file(const char *path, const void *bytes, size_t length,
                    ErrorStack *errors) {
   // NOLINTNEXTLINE(android-cloexec-fopen): portable C mode.
@@ -265,6 +284,7 @@ bool xs_write_file(const char *path, const void *bytes, size_t length,
   }
   return valid;
 }
+
 char *xs_asset_path(const char *data_paths, const char *name,
                     ErrorStack *errors) {
   StringSplitter *paths =
@@ -293,6 +313,7 @@ char *xs_asset_path(const char *data_paths, const char *name,
   }
   return found;
 }
+
 bool xs_int32(const char *text, int32_t *value) {
   if (!text || !*text) {
     return false;

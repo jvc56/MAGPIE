@@ -12,6 +12,7 @@
 #include <string.h>
 
 enum { XS_BOOK_MAX_WORDS = 300000 };
+
 static bool xs_word_valid(const char *word) {
   if (!word || strlen(word) < 2 || strlen(word) > 15) {
     return false;
@@ -23,6 +24,7 @@ static bool xs_word_valid(const char *word) {
   }
   return true;
 }
+
 static int xs_word_order(const void *left, const void *right) {
   const XSWord *first = *(XSWord *const *)left;
   const XSWord *second = *(XSWord *const *)right;
@@ -31,6 +33,7 @@ static int xs_word_order(const void *left, const void *right) {
   }
   return strcmp(first->word, second->word);
 }
+
 static bool xs_codebook_index(XSCodebook *book) {
   book->ordered = malloc_or_die(sizeof(XSWord *) * (size_t)book->count);
   for (int index = 0; index < book->count; index++) {
@@ -56,6 +59,7 @@ static bool xs_codebook_index(XSCodebook *book) {
   }
   return book->count == 1 || code == (UINT64_C(1) << previous);
 }
+
 void xs_codebook_destroy(XSCodebook *book) {
   if (book) {
     free(book->words);
@@ -63,6 +67,7 @@ void xs_codebook_destroy(XSCodebook *book) {
     free(book);
   }
 }
+
 XSCodebook *xs_codebook_parse(const char *text, ErrorStack *errors) {
   const JsonValue *json = json_parse(text, errors);
   if (!json) {
@@ -112,6 +117,7 @@ XSCodebook *xs_codebook_parse(const char *text, ErrorStack *errors) {
   }
   return book;
 }
+
 XSCodebook *xs_codebook_load(const char *data_paths, unsigned id,
                              ErrorStack *errors) {
   static const char *const names[] = {"", "CSW24.xsw.json.gz",
@@ -148,6 +154,7 @@ XSCodebook *xs_codebook_load(const char *data_paths, unsigned id,
   free(text);
   return book;
 }
+
 const XSWord *xs_codebook_find(const XSCodebook *book, const char *word) {
   if (!book) {
     return NULL;
@@ -168,6 +175,7 @@ const XSWord *xs_codebook_find(const XSCodebook *book, const char *word) {
   }
   return NULL;
 }
+
 const char *xs_codebook_read(const XSCodebook *book, XSBuffer *bits) {
   uint32_t code = 0;
   for (unsigned length = 1; bits->valid && length <= 32; length++) {
@@ -188,15 +196,18 @@ typedef struct XSWeight {
   int parent;
   int minimum;
 } XSWeight;
+
 static int xs_weight_alpha(const void *left, const void *right) {
   return strcmp(((const XSWeight *)left)->word,
                 ((const XSWeight *)right)->word);
 }
+
 static bool xs_weight_less(const XSWeight *nodes, int first, int second) {
   return nodes[first].count < nodes[second].count ||
          (nodes[first].count == nodes[second].count &&
           nodes[first].minimum < nodes[second].minimum);
 }
+
 static void xs_heap_push(int *heap, int *size, const XSWeight *nodes,
                          int node) {
   int index = (*size)++;
@@ -206,6 +217,7 @@ static void xs_heap_push(int *heap, int *size, const XSWeight *nodes,
   }
   heap[index] = node;
 }
+
 static int xs_heap_pop(int *heap, int *size, const XSWeight *nodes) {
   int result = heap[0];
   int last = heap[--(*size)];
@@ -227,6 +239,7 @@ static int xs_heap_pop(int *heap, int *size, const XSWeight *nodes) {
   }
   return result;
 }
+
 bool xs_codebook_build(const char *input, const char *output,
                        const char *lexicon, ErrorStack *errors) {
   if (!strings_equal(lexicon, "CSW24") && !strings_equal(lexicon, "NWL23")) {

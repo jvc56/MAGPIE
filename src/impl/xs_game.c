@@ -13,7 +13,9 @@
 #include <string.h>
 
 enum { XS_GAME_MAX_EVENTS = 1000, XS_DRAW_CAPACITY = 3654 };
+
 enum { XS_PLAY, XS_PASS, XS_EXCHANGE, XS_COUNT, XS_WITHDRAW, XS_OTHER };
+
 // Wire event IDs must start at zero, independently of allocation limits.
 static const unsigned xs_kinds[] = {XS_PLAY,  XS_PASS,     XS_EXCHANGE,
                                     XS_COUNT, XS_WITHDRAW, XS_OTHER};
@@ -21,6 +23,7 @@ static const char xs_alphabet[] = "?ABCDEFGHIJKLMNOPQRSTUVWXYZ";
 static const int xs_distribution_counts[27] = {2, 9, 2, 2, 4, 12, 2, 3, 2,
                                                9, 1, 1, 4, 2, 6,  8, 2, 1,
                                                6, 4, 6, 4, 2, 2,  1, 2, 1};
+
 typedef struct XSEvent {
   unsigned player, kind;
   char rack[8];
@@ -28,6 +31,7 @@ typedef struct XSEvent {
   char *action;
   int32_t delta, total;
 } XSEvent;
+
 typedef struct XSGame {
   char language[64], lexicon[256];
   char *nick[2], *name[2];
@@ -36,12 +40,14 @@ typedef struct XSGame {
   char final_racks[2][8];
   bool has_final_rack[2];
 } XSGame;
+
 typedef struct XSState {
   char board[225], before[225];
   int carry[2][27];
   int32_t scores[2];
   int last;
 } XSState;
+
 typedef struct XSDraw {
   uint32_t weight;
   char tiles[4];
@@ -61,6 +67,7 @@ static void xs_game_destroy(XSGame *game) {
   free(game->events);
   free(game);
 }
+
 static bool xs_line_text(const char *text, bool token) {
   if (!text || !*text || strlen(text) > XS_MAX_TEXT || !xs_utf8(text)) {
     return false;
@@ -73,6 +80,7 @@ static bool xs_line_text(const char *text, bool token) {
   }
   return true;
 }
+
 static bool xs_rack_counts(const char *rack, int counts[27]) {
   memset(counts, 0, sizeof(int) * 27);
   if (strlen(rack) > 7) {
@@ -87,6 +95,7 @@ static bool xs_rack_counts(const char *rack, int counts[27]) {
   }
   return true;
 }
+
 static bool xs_rack_string(const int counts[27], char result[8]) {
   unsigned size = 0;
   for (int letter = 0; letter < 27; letter++) {
@@ -101,6 +110,7 @@ static bool xs_rack_string(const int counts[27], char result[8]) {
   result[size] = '\0';
   return true;
 }
+
 static void xs_implied(const XSEvent *event, int result[27]) {
   memset(result, 0, sizeof(int) * 27);
   if (event->kind == XS_PLAY) {
@@ -113,6 +123,7 @@ static void xs_implied(const XSEvent *event, int result[27]) {
     xs_rack_counts(event->action, result);
   }
 }
+
 static bool xs_move_valid(const char board[225], XSMove *move) {
   size_t length = strlen(move->word);
   unsigned placed = 0;
@@ -139,6 +150,7 @@ static bool xs_move_valid(const char board[225], XSMove *move) {
   }
   return placed > 0 && placed <= 7;
 }
+
 static bool xs_apply(XSState *state, const XSEvent *event) {
   int rack[27];
   int implied[27];
@@ -175,6 +187,7 @@ static bool xs_apply(XSState *state, const XSEvent *event) {
   state->scores[event->player] = event->total;
   return true;
 }
+
 static bool xs_location(const char *text, XSMove *move) {
   size_t length = strlen(text);
   if (length < 2 || length > 3) {
@@ -192,6 +205,7 @@ static bool xs_location(const char *text, XSMove *move) {
   move->start = (unsigned)(row - 1) * 15 + (unsigned)(col - 'A');
   return true;
 }
+
 static unsigned xs_action_kind(const StringSplitter *parts, int start,
                                int count) {
   const char *action = string_splitter_get_item(parts, start);
@@ -216,6 +230,7 @@ static unsigned xs_action_kind(const StringSplitter *parts, int start,
   }
   return XS_OTHER;
 }
+
 static bool xs_other_action(const char *text) {
   if (!xs_line_text(text, false)) {
     return false;
@@ -236,6 +251,7 @@ static bool xs_other_action(const char *text) {
   string_splitter_destroy(parts);
   return valid;
 }
+
 static bool xs_parse_event(XSGame *game, XSState *state, const char *line) {
   const char *colon = strchr(line, ':');
   if (!colon || game->count == XS_GAME_MAX_EVENTS) {
@@ -328,6 +344,7 @@ static bool xs_parse_event(XSGame *game, XSState *state, const char *line) {
   string_splitter_destroy(parts);
   return valid;
 }
+
 static XSGame *xs_parse_game(const char *text) {
   if (strlen(text) > XS_MAX_BYTES || !xs_utf8(text)) {
     return NULL;
@@ -415,6 +432,7 @@ static XSGame *xs_parse_game(const char *text) {
   }
   return game;
 }
+
 static char *xs_game_gcg(const XSGame *game) {
   StringBuilder *out = string_builder_create();
   string_builder_add_string(out, "#character-encoding UTF-8\n");
@@ -464,6 +482,7 @@ static char *xs_game_gcg(const XSGame *game) {
   string_builder_destroy(out);
   return result;
 }
+
 static int xs_draw_order(const void *left, const void *right) {
   const XSDraw *first = left;
   const XSDraw *second = right;
@@ -472,6 +491,7 @@ static int xs_draw_order(const void *left, const void *right) {
   }
   return strcmp(first->tiles, second->tiles);
 }
+
 static unsigned xs_draws(const XSState *state, const int base[27],
                          unsigned count, XSDraw *draws) {
   if (count < 1 || count > 3) {
@@ -532,6 +552,7 @@ static unsigned xs_draws(const XSState *state, const int base[27],
   qsort(draws, size, sizeof(*draws), xs_draw_order);
   return size;
 }
+
 static unsigned xs_rank_bits(unsigned rank, unsigned order) {
   unsigned prefix = (rank >> order) + 1;
   unsigned width = 0;
@@ -541,6 +562,7 @@ static unsigned xs_rank_bits(unsigned rank, unsigned order) {
   }
   return (width * 2) - 1 + order;
 }
+
 static void xs_rack_base(const XSState *state, unsigned player,
                          const int implied[27], bool reset, int base[27]) {
   for (int letter = 0; letter < 27; letter++) {
@@ -550,6 +572,7 @@ static void xs_rack_base(const XSState *state, unsigned player,
     }
   }
 }
+
 static void xs_write_rack(XSBuffer *out, const XSState *state,
                           const XSEvent *event, const int implied[27],
                           XSGameStats *stats) {
@@ -603,6 +626,7 @@ static void xs_write_rack(XSBuffer *out, const XSState *state,
   }
   free(draws);
 }
+
 static void xs_read_rack(XSBuffer *in, const XSState *state, XSEvent *event,
                          const int implied[27]) {
   int base[27];
@@ -643,6 +667,7 @@ static void xs_read_rack(XSBuffer *in, const XSState *state, XSEvent *event,
     in->valid = false;
   }
 }
+
 static void xs_write_move(XSBuffer *out, const XSState *state,
                           const XSMove *move) {
   xs_put(out, move->start, 8);
@@ -656,6 +681,7 @@ static void xs_write_move(XSBuffer *out, const XSState *state,
     }
   }
 }
+
 static void xs_read_move(XSBuffer *in, const XSState *state, XSMove *move) {
   move->start = xs_get(in, 8);
   move->down = xs_get(in, 1);
@@ -685,6 +711,7 @@ static void xs_read_move(XSBuffer *in, const XSState *state, XSMove *move) {
     in->valid = false;
   }
 }
+
 static void xs_write_event(XSBuffer *out, XSState *state, const XSEvent *event,
                            XSRanker *ranker, XSGameStats *stats,
                            ErrorStack *errors) {
@@ -759,6 +786,7 @@ static void xs_write_event(XSBuffer *out, XSState *state, const XSEvent *event,
     out->valid = false;
   }
 }
+
 char *xs_game_encode(const char *gcg, const char *paths, unsigned profile,
                      XSGameStats *stats, ErrorStack *errors) {
   if (stats) {
@@ -811,6 +839,7 @@ char *xs_game_encode(const char *gcg, const char *paths, unsigned profile,
   }
   return result;
 }
+
 static void xs_read_event(XSBuffer *in, XSState *state, XSEvent *event,
                           XSRanker *ranker, ErrorStack *errors) {
   event->player = xs_get(in, 1);
@@ -899,6 +928,7 @@ static void xs_read_event(XSBuffer *in, XSState *state, XSEvent *event,
     in->valid = false;
   }
 }
+
 char *xs_game_decode(const char *token, const char *paths, ErrorStack *errors) {
   XSBuffer in;
   xs_buffer_init(&in);

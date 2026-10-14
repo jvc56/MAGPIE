@@ -1,4 +1,5 @@
 #include "xs_compress.h"
+
 #include "../util/io_util.h"
 #include <stdbool.h>
 #include <stdint.h>
@@ -8,12 +9,14 @@
 // Bounded RFC 1951/1952 reader. The writer uses stored DEFLATE blocks: model
 // construction needs portability and canonical JSON, not a compression library.
 enum { XS_MAX_BYTES = 8 * 1024 * 1024, XS_DEFLATE_BITS = 15 };
+
 typedef struct {
   const unsigned char *bytes;
   size_t size;
   size_t bit;
   bool valid;
 } XSInflate;
+
 typedef struct {
   unsigned count[16];
   unsigned symbol[288];

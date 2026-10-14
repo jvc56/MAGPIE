@@ -10,6 +10,7 @@
 #include <string.h>
 
 enum { XS_SQUARES = 225, XS_CANDIDATES = 450, XS_POSITION_VERSION = 5 };
+
 static const char *const xs_languages[] = {"",   "en", "ca", "nl",
                                            "fr", "de", "pl"};
 static const char *const xs_lexica[7][16] = {
@@ -21,12 +22,15 @@ static const char *const xs_lexica[7][16] = {
     {"FRA20", NULL},
     {"RD29", NULL},
     {"OSPS49", NULL}};
+
 bool xs_letter(char letter) {
   return (letter >= 'A' && letter <= 'Z') || (letter >= 'a' && letter <= 'z');
 }
+
 char xs_upper(char letter) {
   return (char)(letter >= 'a' && letter <= 'z' ? letter - 'a' + 'A' : letter);
 }
+
 static void xs_meta_literal(XSBuffer *bits, const char *text, size_t limit) {
   size_t length = strlen(text);
   if ((!length && limit != 255) || length > limit || !xs_utf8(text)) {
@@ -41,6 +45,7 @@ static void xs_meta_literal(XSBuffer *bits, const char *text, size_t limit) {
     xs_put(bits, (unsigned char)text[index], 8);
   }
 }
+
 static void xs_meta_read(XSBuffer *bits, char *text, unsigned limit) {
   unsigned length = xs_get(bits, 8);
   if ((!length && limit != 255) || length > limit) {
@@ -59,6 +64,7 @@ static void xs_meta_read(XSBuffer *bits, char *text, unsigned limit) {
     bits->valid = false;
   }
 }
+
 void xs_write_metadata(XSBuffer *bits, const char *language,
                        const char *lexicon) {
   unsigned lang = 0;
@@ -84,6 +90,7 @@ void xs_write_metadata(XSBuffer *bits, const char *language,
     xs_meta_literal(bits, lexicon, 255);
   }
 }
+
 void xs_read_metadata(XSBuffer *bits, char language[64], char lexicon[256]) {
   unsigned lang = xs_get(bits, 4);
   language[0] = '\0';
@@ -116,6 +123,7 @@ void xs_read_metadata(XSBuffer *bits, char language[64], char lexicon[256]) {
     xs_meta_read(bits, lexicon, 255);
   }
 }
+
 static bool xs_inventory(const XSPosition *position) {
   static const unsigned available[27] = {2, 9, 2, 2, 4, 12, 2, 3, 2,
                                          9, 1, 1, 4, 2, 6,  8, 2, 1,
@@ -145,6 +153,7 @@ static bool xs_inventory(const XSPosition *position) {
   }
   return position->zeros <= 7 && strings_equal(position->language, "en");
 }
+
 bool xs_parse_cgp(const char *text, XSPosition *position) {
   *position = (XSPosition){0};
   memcpy(position->language, "en", strlen("en") + 1);
@@ -232,6 +241,7 @@ bool xs_parse_cgp(const char *text, XSPosition *position) {
   string_splitter_destroy(parts);
   return valid && xs_inventory(position);
 }
+
 char *xs_format_cgp(const XSPosition *position) {
   StringBuilder *text = string_builder_create();
   for (int row = 0; row < 15; row++) {
@@ -263,11 +273,13 @@ char *xs_format_cgp(const XSPosition *position) {
   }
   return string_builder_dump_and_destroy(text, NULL);
 }
+
 typedef struct XSCandidate {
   int start;
   int step;
   const XSWord *word;
 } XSCandidate;
+
 typedef struct XSCover {
   XSCandidate candidates[XS_CANDIDATES];
   int count;
@@ -276,6 +288,7 @@ typedef struct XSCover {
   int64_t deadline;
   unsigned visits;
 } XSCover;
+
 static int xs_cover_gain(const XSCandidate *candidate, const bool *remaining) {
   int count = 0;
   for (size_t index = 0; index < strlen(candidate->word->word); index++) {
@@ -283,6 +296,7 @@ static int xs_cover_gain(const XSCandidate *candidate, const bool *remaining) {
   }
   return (count * 14) - (int)candidate->word->length - 10;
 }
+
 static void xs_cover_search(XSCover *cover, const bool *remaining,
                             bool *selected, bool *excluded, int cost) {
   if ((cover->visits++ & 63) == 0 && ctimer_monotonic_ns() >= cover->deadline) {
@@ -325,6 +339,7 @@ static void xs_cover_search(XSCover *cover, const bool *remaining,
     excluded[choice] = false;
   }
 }
+
 static void xs_word_board(const XSPosition *position, const XSCodebook *book,
                           unsigned search_ms, XSBuffer *out) {
   XSCover *cover = calloc_or_die(1, sizeof(*cover));
@@ -418,6 +433,7 @@ static void xs_word_board(const XSPosition *position, const XSCodebook *book,
   }
   free(cover);
 }
+
 static void xs_put_score(XSBuffer *bits, int32_t score) {
   if (score >= 0 && score <= 1022) {
     xs_put(bits, (uint32_t)score, 10);
@@ -426,10 +442,12 @@ static void xs_put_score(XSBuffer *bits, int32_t score) {
     xs_put_signed(bits, score);
   }
 }
+
 static int32_t xs_get_score(XSBuffer *bits) {
   uint32_t score = xs_get(bits, 10);
   return score == 1023 ? xs_get_signed(bits) : (int32_t)score;
 }
+
 char *xs_position_encode(const char *cgp, const char *data_paths,
                          unsigned codebook, unsigned search_ms,
                          ErrorStack *errors) {
@@ -505,6 +523,7 @@ char *xs_position_encode(const char *cgp, const char *data_paths,
   xs_codebook_destroy(book);
   return token;
 }
+
 char *xs_position_decode(const char *token, const char *data_paths,
                          ErrorStack *errors) {
   XSBuffer bits;

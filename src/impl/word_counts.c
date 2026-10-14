@@ -13,17 +13,20 @@
 #include <string.h>
 
 enum { WORD_COUNTS_CAPACITY = 1 << 20, WORD_COUNTS_LIMIT = 300000 };
+
 WordCounts *word_counts_create(void) {
   WordCounts *counts = calloc_or_die(1, sizeof(*counts));
   counts->entries = calloc_or_die(WORD_COUNTS_CAPACITY, sizeof(WordCount));
   return counts;
 }
+
 void word_counts_destroy(WordCounts *counts) {
   if (counts) {
     free(counts->entries);
     free(counts);
   }
 }
+
 bool word_counts_add(WordCounts *counts, const char *word, uint64_t count) {
   size_t length = strlen(word);
   if (length < 2 || length > 15 || !count) {
@@ -53,6 +56,7 @@ bool word_counts_add(WordCounts *counts, const char *word, uint64_t count) {
   entry->count += count;
   return true;
 }
+
 bool word_counts_record(WordCounts *counts, const Board *board,
                         const unsigned char before[225]) {
   for (int direction = 0; direction < 2; direction++) {
@@ -84,6 +88,7 @@ bool word_counts_record(WordCounts *counts, const Board *board,
   }
   return true;
 }
+
 bool word_counts_merge(WordCounts *counts, const char *filename,
                        ErrorStack *errors) {
   size_t length;
@@ -116,10 +121,12 @@ bool word_counts_merge(WordCounts *counts, const char *filename,
   }
   return valid;
 }
+
 static int word_counts_compare(const void *left, const void *right) {
   return strcmp(((const WordCount *)left)->word,
                 ((const WordCount *)right)->word);
 }
+
 bool word_counts_write(const WordCounts *counts, const char *filename,
                        ErrorStack *errors) {
   WordCount *sorted = malloc_or_die((counts->size + 1) * sizeof(WordCount));

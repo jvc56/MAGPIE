@@ -13,6 +13,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+
 void xs_convert(const char *input, const char *output, const char *book_name,
                 const char *budget, const char *paths, conversion_type_t type,
                 ConversionResults *results, ErrorStack *errors) {

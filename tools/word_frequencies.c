@@ -29,6 +29,7 @@ static void check(ErrorStack *errors) {
     exit(EXIT_FAILURE);
   }
 }
+
 static int parse_count(const char *text) {
   char *end;
   errno = 0;
@@ -38,6 +39,7 @@ static int parse_count(const char *text) {
   }
   return (int)value;
 }
+
 static int merge_counts(int argc, char **argv) {
   if (argc < 4) {
     return EXIT_FAILURE;
@@ -57,6 +59,7 @@ static int merge_counts(int argc, char **argv) {
   word_counts_destroy(counts);
   return valid ? EXIT_SUCCESS : EXIT_FAILURE;
 }
+
 int main(int argc, char **argv) {
   if (argc > 1 && !strcmp(argv[1], "merge")) {
     return merge_counts(argc, argv);

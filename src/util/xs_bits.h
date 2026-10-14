@@ -1,11 +1,13 @@
 #ifndef XS_BITS_H
 #define XS_BITS_H
+
 #include "io_util.h"
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
 enum { XS_MAX_BYTES = 8 * 1024 * 1024, XS_MAX_TEXT = 4096 };
+
 typedef struct XSBuffer {
   uint8_t *bytes;
   size_t bits;
@@ -13,6 +15,7 @@ typedef struct XSBuffer {
   size_t cursor;
   bool valid;
 } XSBuffer;
+
 void xs_buffer_init(XSBuffer *buffer);
 void xs_buffer_destroy(XSBuffer *buffer);
 void xs_put(XSBuffer *buffer, uint32_t value, unsigned width);
@@ -37,4 +40,5 @@ bool xs_write_file(const char *path, const void *bytes, size_t length,
                    ErrorStack *errors);
 bool xs_utf8(const char *text);
 bool xs_int32(const char *text, int32_t *value);
+
 #endif
