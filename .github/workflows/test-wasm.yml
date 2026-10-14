@@ -44,6 +44,9 @@ jobs:
       - name: Build WASM
         run: make clean && make -f Makefile-wasm magpie_wasm
 
+      - name: Fetch pinned preview codec data
+        run: python3 wasmentry/fetch_preview_data.py
+
       - name: Build WASM tests
         run: make -f Makefile-wasm magpie_wasm_test
 

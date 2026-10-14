@@ -1,4 +1,5 @@
 import { challengeRuleCode } from "./game-actions.mjs";
+import { XS_OPERATIONS, xsAssets, validateLinkToken } from "./xs-links.mjs";
 export class EngineClient extends EventTarget {
   constructor() {
     super();
@@ -162,6 +163,32 @@ export class EngineClient extends EventTarget {
   }
   importGCG(text, lexicon) {
     return this.request("import_gcg", { text, lexicon }, "gcg_loaded");
+  }
+  async convertXS(operation, text, lexicon = "CSW24") {
+    if (!Object.hasOwn(XS_OPERATIONS, operation)) throw new Error("Unknown link operation.");
+    if (operation.startsWith("decode")) validateLinkToken(text);
+    if (typeof text !== "string" || text.includes("\0") || text.length > 1024 * 1024) {
+      throw new Error("This position or game is too large or contains invalid text.");
+    }
+    // XSG v2 starts at an empty board. Never silently discard a GCG's starting position.
+    if (operation === "encodeGame" && /^#cgp\s/im.test(text)) {
+      throw new Error("Games started from a position cannot be shared as game links yet. Copy a position link or save the GCG instead.");
+    }
+    await this.ready;
+    const profile = lexicon === "NWL23" ? 2 : 1;
+    for (const file of xsAssets(operation, profile)) {
+      if (this.loadedFiles.has(file)) continue;
+      // This release pins the same KWG/KLV bytes as the XS rank profiles.
+      // Native SHA-256 checks reject any future accidental profile repinning.
+      const asset = file.endsWith(".gz") ? file : `lexica/${file.split("/").at(-1)}`;
+      await this.request("precache", {
+        filename: `data/${file}`,
+        url: new URL(`../data/${asset}`, import.meta.url).href,
+      }, "precache_complete");
+      this.loadedFiles.add(file);
+    }
+    const result = await this.request("xs_convert", { operation: XS_OPERATIONS[operation], text, profile }, "xs_converted");
+    return result.value;
   }
   run(commands) {
     if (this.wmpUnavailable) commands = commands.map(command => command.replace(/-(wmp|wit) true\b/g, "-$1 false"));

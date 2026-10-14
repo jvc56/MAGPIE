@@ -1,6 +1,7 @@
 // Run against an unpacked release or its deployed URL, never a source checkout.
 // Service workers are blocked to prove the server itself enables WASM threads.
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import { SAMPLES } from "../analysis-model.mjs";
 import { chromium, expect } from "@playwright/test";
 
@@ -52,11 +53,35 @@ try {
   await second.goto(url);
   await expect(second.locator("#status")).toHaveText("Engine ready", { timeout: 30000 });
   assert.equal(await second.evaluate(() => crossOriginIsolated), true);
+  await second.addInitScript(() => {
+    Object.defineProperty(navigator, "clipboard", {value: {
+      writeText: async text => { window.copiedLink = text; },
+    }});
+  });
+  await second.reload();
+  await expect(second.locator("#status")).toHaveText("Engine ready", {timeout: 30000});
+  await second.locator("#new-game-open").click();
+  await second.locator("#gcg-text").fill(await readFile(new URL("../tests/fixtures/standard.gcg", import.meta.url), "utf8"));
+  await second.locator("#submit-gcg").click();
+  await expect(second.locator("#gcg-dialog")).toBeHidden();
+  const positions = await second.locator("#history-position option").allTextContents();
+  for (const kind of ["game", "position"]) {
+    const menu = second.locator("#game-overflow");
+    if (await menu.isVisible() && await menu.getAttribute("aria-expanded") !== "true") await menu.click();
+    await second.locator(`#copy-${kind}-link`).click();
+    await expect.poll(() => second.evaluate(() => window.copiedLink), {timeout: 30000}).toBeTruthy();
+    const link = await second.evaluate(() => window.copiedLink);
+    assert.equal(new URL(link).pathname, new URL(url).pathname, "Links keep the release path");
+    await second.goto(link);
+    await expect(second.locator("#status")).toHaveText(`Shared ${kind} loaded`, {timeout: 30000});
+    await expect(second.locator("#error")).toBeEmpty();
+    if (kind === "game") assert.deepEqual(await second.locator("#history-position option").allTextContents(), positions);
+  }
   assert(!requests.some((request) => /\.(rit|wit|wmp)(?:\?|$)|\/data\/wmp/.test(request)));
   assert(!requests.some((request) => request.endsWith("/isolation-worker.js")));
   assert(requests.some((request) => request.endsWith(".kwg")));
   assert.deepEqual(errors, []);
-  console.log("Headers, local word-map building, all four searches, reload and second tab passed without hosted tables or service workers.");
+  console.log("Headers, local word-map building, all four searches, reload, second tab and XSP/XSG links passed without hosted tables or service workers.");
 } finally {
   await browser.close();
 }

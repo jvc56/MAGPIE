@@ -157,6 +157,24 @@ exports those edits. Return to a recorded board before committing a move. Loadin
 a CGP, recent position or example closes the record. Unsupported lexica and
 malformed files leave the current game intact.
 
+**Copy position link** and **Copy game link** in **Game** create links to the
+current release. Opening `wasmentry/?xsp=TOKEN` loads a position; opening
+`wasmentry/?xsg=TOKEN` loads a game for review. Both use the native, versioned
+XSP/XSG codecs, with URL-safe Base64 tokens that need no further escaping.
+Position links include the board (including phonies and blanks), racks, scores
+and lexicon. Game links include player names and recorded moves, but omit notes
+and rack ordering. XSG v2 cannot represent a nonempty starting board: games
+started from a CGP must use GCG export or a position link instead. Sharing is
+disabled during live play while racks are hidden.
+
+Malformed links show an error and leave New game and import available. If the
+browser denies clipboard access, a dialog presents the link for manual copying.
+Codec assets load only when a link is opened or copied. The packaged codebooks
+and the KWG/KLV files used by frozen rank profiles come from the pinned data
+revision; native checksums verify the latter before use. Serve `.xsw.json.gz`
+files as binary data, without HTTP `Content-Encoding: gzip` (the codec itself
+decompresses them).
+
 Review uses a two-player history table, first/previous/next/last navigation and
 optional hidden upcoming moves. Each analyzed position retains its results for
 this session. Auto-analyze and Analyze game run the appropriate sim/solver;
@@ -226,8 +244,8 @@ PR CI; publishing the artifact uses the chosen host's normal deployment flow.
 The **Release WASM preview** workflow owns the deployable app versions in this
 repository. Dispatch it on the revision to publish with a new tag such as
 `wasm-preview-v0.1.0`. It builds with the Emscripten version and MAGPIE-DATA
-revision pinned in `release-build.json`, fetches only the seven required data
-files, and tests the packaged app with service workers blocked. A successful
+revision pinned in `release-build.json`, fetches the required engine and codec
+data, and tests the packaged app with service workers blocked. A successful
 run publishes a GitHub prerelease with `magpie-wasm-preview.tar.gz` and its
 SHA-256 checksum. Never overwrite an existing version.
 

@@ -16,11 +16,14 @@ ASSETS = [
     'wasmentry/peg-review.mjs', 'wasmentry/peg-memory.mjs', 'wasmentry/analysis.mjs', 'wasmentry/analysis-model.mjs', 'wasmentry/move-entry.mjs', 'wasmentry/move-tiles.mjs', 'wasmentry/tile-drag.mjs', 'wasmentry/tile-order.mjs',
     'wasmentry/computer-time.mjs', 'wasmentry/device-budget.mjs', 'wasmentry/wmp-assets.mjs', 'wasmentry/wmp-cache.mjs', 'wasmentry/analysis-cache.mjs', 'wasmentry/game-actions.mjs',
     'wasmentry/engine-client.mjs', 'wasmentry/wasm-worker.js',
+    'wasmentry/xs-links.mjs',
     'wasmentry/gcg-loader.mjs', 'wasmentry/gcg-loader-worker.js', 'wasmentry/gcg-diagnostics.mjs',
     'wasmentry/isolation.mjs', 'wasmentry/isolation-worker.js',
     'wasmentry/magpie_wasm.mjs', 'wasmentry/magpie_wasm.wasm',
     'data/letterdistributions/english.csv', 'data/layouts/standard15.txt',
     'data/strategy/winpct_english.csv',
+    'data/xs/english-v1/CSW24.xsw.json.gz',
+    'data/xs/english-v1/NWL23.xsw.json.gz',
 ]
 ASSETS += [f'data/lexica/{lexicon}.{extension}'
            for lexicon in ('CSW24', 'NWL23') for extension in ('kwg', 'klv2')]

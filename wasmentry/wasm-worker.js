@@ -109,6 +109,7 @@ function readString(fn) {
         "number",
       ]),
       importGCG: wrap("browser_game_import_gcg", "number", ["number", "number"]),
+      convertXS: wrap("wasm_xs_convert", "number", ["number", "number", "number"]),
       destroy: wrap("wasm_magpie_destroy", null),
       run: wrap("wasm_run_command_async", "number", ["number"]),
       output: wrap("wasm_get_output", "number"),
@@ -210,12 +211,22 @@ onmessage = async ({ data: { type, data = {}, requestId: incomingId } }) => {
           send("precache_complete", {filename:data.filename});
           break;
         }
-        const response = await fetch(data.url);
+        const response = await fetch(data.url, {signal: AbortSignal.timeout(30000)});
         if (!response.ok)
           throw new Error(
             `Could not load ${data.filename} (HTTP ${response.status}).`,
           );
         const bytes = new Uint8Array(await response.arrayBuffer());
+        if (data.filename.startsWith("data/xs/english-v1/")) {
+          // Native codecs use ordinary file I/O for immutable asset validation.
+          Module.FS_mkdirTree("data/xs/english-v1");
+          // The frozen ranker resolves lexica/../xs/english-v1 paths.
+          Module.FS_mkdirTree("data/lexica");
+          Module.FS_writeFile(data.filename, bytes);
+          cachedFiles.add(data.filename);
+          send("precache_complete", {filename: data.filename});
+          break;
+        }
         if (data.filename.endsWith(".kwg")) {
           const { sha256 } = await import("./wmp-assets.mjs");
           kwgHashes.set(data.filename, await sha256(bytes));
@@ -223,6 +234,7 @@ onmessage = async ({ data: { type, data = {}, requestId: incomingId } }) => {
         const name = Module.stringToNewUTF8(data.filename);
         const ptr = Module._malloc(bytes.length);
         try {
+          if (!ptr) throw new Error(`Not enough memory to load ${data.filename}.`);
           Module.HEAPU8.set(bytes, ptr);
           api.precache(name, ptr, bytes.length);
         } finally {
@@ -280,6 +292,17 @@ onmessage = async ({ data: { type, data = {}, requestId: incomingId } }) => {
           send("game_updated", { game });
         } finally {
           strings.forEach((ptr) => Module._free(ptr));
+        }
+        break;
+      }
+      case "xs_convert": {
+        const text = Module.stringToNewUTF8(data.text);
+        try {
+          const result = JSON.parse(readString(() => api.convertXS(data.operation, text, data.profile)));
+          if (result.error != null) throw new Error(result.error.replace(/\(error \d+\)\s*/g, "") || "Could not read or create this link.");
+          send("xs_converted", {value: result.value});
+        } finally {
+          Module._free(text);
         }
         break;
       }

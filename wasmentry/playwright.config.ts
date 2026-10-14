@@ -46,8 +46,8 @@ export default defineConfig({
     },
     {
       name: "static-host",
-      testMatch: ["**/analysis.test.js", "**/isolation.test.js"],
-      grep: /all four modes use the real WASM engine|plain static hosting starts/,
+      testMatch: ["**/analysis.test.js", "**/isolation.test.js", "**/xs-links.test.js"],
+      grep: /all four modes use the real WASM engine|plain static hosting starts|plain static hosting opens shared links/,
       use: { ...devices["Desktop Chrome"], baseURL: `http://127.0.0.1:${staticPort}` },
     },
   ],
