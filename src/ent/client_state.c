@@ -5,6 +5,7 @@
 #include "../util/string_util.h"
 #include <errno.h>
 #include <limits.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -52,6 +53,32 @@ static int parse_setting_int(const char *value, const char *key,
   }
   error_stack_destroy(conversion_errors);
   return result;
+}
+
+// Parses `diskreserve` or `memreserve` (`key`): a number of GB from 0 to
+// CONTRIBUTE_MAX_RESERVE_GB, fractions allowed ("0.5"), into bytes. Like
+// parse_setting_int, a malformed value is refused naming the line and never
+// quoted; `fallback_gb` is what it then stands at.
+static int64_t parse_reserve(const char *value, const char *key,
+                             int fallback_gb, const char *settings_path,
+                             int line_number, ErrorStack *error_stack) {
+  char *end = NULL;
+  errno = 0;
+  const double gigabytes = strtod(value, &end);
+  // strtod takes "inf", "nan" and hex floats, none of them a size; the
+  // characters it may have used are checked first.
+  const bool plain =
+      value[0] != '\0' && strspn(value, "0123456789.") == strlen(value);
+  if (!plain || end == value || *end != '\0' || errno == ERANGE ||
+      gigabytes < 0 || gigabytes > CONTRIBUTE_MAX_RESERVE_GB) {
+    error_stack_push(error_stack, ERROR_STATUS_CONTRIBUTE_SETTINGS_MALFORMED,
+                     get_formatted_string("%s line %d: '%s' is not a number of "
+                                          "GB from 0 to %d",
+                                          settings_path, line_number, key,
+                                          CONTRIBUTE_MAX_RESERVE_GB));
+    return (int64_t)fallback_gb * CONTRIBUTE_BYTES_PER_GB;
+  }
+  return (int64_t)(gigabytes * (double)CONTRIBUTE_BYTES_PER_GB);
 }
 
 // Appends the uuid line, or, when there is no file, creates one holding the
@@ -151,12 +178,18 @@ ClientState *client_state_load(const char *path, ErrorStack *error_stack) {
   state->threads = 0;
   state->max_tasks = 0;
   state->idle_wait_seconds = DEFAULT_IDLE_WAIT_SECONDS;
+  state->disk_reserve_bytes =
+      (int64_t)CONTRIBUTE_DEFAULT_DISK_RESERVE_GB * CONTRIBUTE_BYTES_PER_GB;
+  state->memory_reserve_bytes =
+      (int64_t)CONTRIBUTE_DEFAULT_MEMORY_RESERVE_GB * CONTRIBUTE_BYTES_PER_GB;
   state->settings_path = string_duplicate(settings_path);
   state->commented_key_line = 0;
   state->settings_file_found = stream != NULL;
   state->server_stated = false;
   state->max_tasks_stated = false;
   state->idle_wait_stated = false;
+  state->disk_reserve_stated = false;
+  state->memory_reserve_stated = false;
 
   int line_number = 0;
   // The last uuid line's, which is the one that counts.
@@ -260,6 +293,16 @@ ClientState *client_state_load(const char *path, ErrorStack *error_stack) {
                                                      line_number, error_stack);
         // Zero or less is the default (below).
         state->idle_wait_stated = state->idle_wait_seconds > 0;
+      } else if (strings_equal(key, "diskreserve")) {
+        state->disk_reserve_bytes =
+            parse_reserve(value, key, CONTRIBUTE_DEFAULT_DISK_RESERVE_GB,
+                          settings_path, line_number, error_stack);
+        state->disk_reserve_stated = true;
+      } else if (strings_equal(key, "memreserve")) {
+        state->memory_reserve_bytes =
+            parse_reserve(value, key, CONTRIBUTE_DEFAULT_MEMORY_RESERVE_GB,
+                          settings_path, line_number, error_stack);
+        state->memory_reserve_stated = true;
       } else {
         // A typo'd 'apikey' must not silently downgrade someone to anonymous.
         // The word is shown only if it could be a setting's name: a pasted
@@ -269,8 +312,9 @@ ClientState *client_state_load(const char *path, ErrorStack *error_stack) {
           shown = *c >= 'a' && *c <= 'z';
         }
         // A setting's name in the wrong case is shown, with why.
-        static const char *const names[] = {"server",  "apikey",   "uuid",
-                                            "threads", "maxtasks", "idlewait"};
+        static const char *const names[] = {
+            "server",   "apikey",   "uuid",        "threads",
+            "maxtasks", "idlewait", "diskreserve", "memreserve"};
         bool wrong_case = false;
         for (size_t n = 0; n < sizeof(names) / sizeof(names[0]); n++) {
           wrong_case = wrong_case || strings_iequal(key, names[n]);
@@ -280,7 +324,8 @@ ClientState *client_state_load(const char *path, ErrorStack *error_stack) {
             error_stack, ERROR_STATUS_CONTRIBUTE_SETTINGS_MALFORMED,
             get_formatted_string(
                 "%s line %d: unknown setting%s%s%s%s (expected one of: server, "
-                "apikey, uuid, threads, maxtasks, idlewait)",
+                "apikey, uuid, threads, maxtasks, idlewait, diskreserve, "
+                "memreserve)",
                 settings_path, line_number, shown ? " '" : "", shown ? key : "",
                 shown ? "'" : "",
                 wrong_case ? "; settings are lowercase" : ""));

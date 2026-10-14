@@ -36,7 +36,8 @@
       "name": "NWL23",
       "sha256": "214a46d74fb6540fec309c4181b14ebd8f1c019cec76d7373d3c412cb08fc187",
       "builder": "wmp-1",
-      "build_target": "nehalem"
+      "build_target": "nehalem",
+      "bytes": 128361169
     }
   ]
 }

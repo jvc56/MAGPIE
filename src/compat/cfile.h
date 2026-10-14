@@ -51,4 +51,9 @@ typedef struct CFileIdentity {
 
 bool cfile_identity(const char *path, CFileIdentity *identity);
 
+// The bytes this process may still write to the filesystem holding
+// `directory`, in *free_bytes (capped at INT64_MAX). Returns false if the
+// filesystem cannot be asked.
+bool cfile_free_bytes(const char *directory, int64_t *free_bytes);
+
 #endif

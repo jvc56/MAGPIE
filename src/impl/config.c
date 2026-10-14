@@ -72,6 +72,7 @@
 #include "autoplay.h"
 #include "cgp.h"
 #include "contribute.h"
+#include "contribute_tables.h"
 #include "convert.h"
 #include "endgame.h"
 #include "gameplay.h"
@@ -1101,8 +1102,14 @@ char *str_api_fatal(Config *config,
 // second lexicon no longer reads the first's rack info table through the move
 // generator's cache (a crash, or the wrong lexicon's leaves); each captured
 // position names its mover and keeps that player's num_plays_recorded; a
-// simming player's candidates follow its sort type.
-#define MAGPIE_VERSION "0.1.2"
+// simming player's candidates follow its sort type. 0.1.3: a wordmap, word
+// info table or rack info table is used as the disk allows, never required --
+// one that does not fit beyond `diskreserve` is skipped, and the result names
+// it (`derived_skipped`); a full disk during a rack info table's build skips
+// the table rather than ending the run; one that does not fit in the memory
+// beyond `memreserve`, to build or to hold, is skipped the same way; the
+// claim's derived files carry their sizes (`bytes`).
+#define MAGPIE_VERSION "0.1.3"
 
 const char *config_get_magpie_version(void) { return MAGPIE_VERSION; }
 
@@ -1468,7 +1475,8 @@ static const char *contribute_help(const char **usages, const char **examples) {
          "own command API, and submits the results, repeating until the "
          "server has no more work or the settings file's maxtasks is "
          "reached. Settings (server, apikey, uuid, threads, maxtasks, "
-         "idlewait) come from the given file, or contribute.txt in the "
+         "idlewait, diskreserve, memreserve) come from the given file, or "
+         "contribute.txt in the "
          "working directory if no path is given -- never from the command "
          "line, since an API key there ends up in shell history and ps "
          "output. Every setting is optional, and so is contribute.txt itself "
@@ -1477,7 +1485,12 @@ static const char *contribute_help(const char **usages, const char **examples) {
          "and creates contribute.txt to save the identity the server "
          "issues. Rack info tables are "
          "memory-mapped unless -ritmmap false is given here, so workers "
-         "sharing a data directory share one copy.";
+         "sharing a data directory share one copy. The wordmaps and word and "
+         "rack info tables a job's players use are built only into the disk "
+         "space beyond diskreserve GB (default 2), deleting those built for "
+         "other jobs first, least recently used first, and built and held "
+         "only in the memory beyond memreserve GB (default 1); one that does "
+         "not fit is skipped and the task runs without it.";
 }
 
 static const char *convert_help(const char **usages, const char **examples) {
@@ -8495,7 +8508,9 @@ static const char *contribute_shared_lexicon(const char *lexicon,
 // assumed: a job that does not ask for one runs without it, so a worker
 // neither builds nor loads one. `settings` is the "player1"/"player2"/
 // "player" object carrying the use_wordmap flag; a NULL object or an absent
-// flag both mean "no wordmap".
+// flag both mean "no wordmap". Asking is not requiring: the wordmap is used
+// if this machine has room for it (config_contribute_prepare_tables), as is
+// each of the tables below.
 static bool contribute_wants_wordmap(const JsonValue *settings) {
   return json_get_bool_or(settings, CONTRIBUTE_KEY_USE_WORDMAP, false);
 }
@@ -8589,9 +8604,224 @@ static int config_contribute_lock_build(Config *config, const char *name,
   return lock_fd;
 }
 
+// The derived tables a task's players use, and the wordmaps their rack info
+// tables are built from: the most two players can name, each with a wordmap,
+// a word info table, a rack info table and that table's wordmap.
+enum {
+  CONTRIBUTE_MAX_TASK_TABLES = 8,
+};
+
+typedef struct ContributeTaskTables {
+  ContributeTable tables[CONTRIBUTE_MAX_TASK_TABLES];
+  // The leaves a rack info table is built from; NULL for the other roles.
+  const char *leaves[CONTRIBUTE_MAX_TASK_TABLES];
+  int count;
+} ContributeTaskTables;
+
+static data_filepath_t
+contribute_table_filepath_type(contribute_table_role_t role) {
+  switch (role) {
+  case CONTRIBUTE_TABLE_WIT:
+    return DATA_FILEPATH_TYPE_WORD_INFO_TABLE;
+  case CONTRIBUTE_TABLE_RIT:
+    return DATA_FILEPATH_TYPE_RACK_INFO_TABLE;
+  case CONTRIBUTE_TABLE_WMP:
+  case NUMBER_OF_CONTRIBUTE_TABLE_ROLES:
+    break;
+  }
+  return DATA_FILEPATH_TYPE_WORDMAP;
+}
+
+// "the wordmap for CSW24", "the rack info table CSW24.CSW24": how the build
+// lines have always named each. The caller frees.
+static char *contribute_table_label(contribute_table_role_t role,
+                                    const char *name) {
+  return get_formatted_string("the %s %s%s",
+                              contribute_table_role_description(role),
+                              role == CONTRIBUTE_TABLE_RIT ? "" : "for ", name);
+}
+
+// "1.89 GB", "710 MB", "4.6 kB": a size as a skip line says it. The caller
+// frees.
+static char *contribute_size_text(int64_t bytes) {
+  if (bytes < 0) {
+    bytes = 0;
+  }
+  if (bytes >= CONTRIBUTE_BYTES_PER_GB) {
+    return get_formatted_string("%.2f GB", (double)bytes /
+                                               (double)CONTRIBUTE_BYTES_PER_GB);
+  }
+  if (bytes >= 1000000) {
+    return get_formatted_string("%.0f MB", (double)bytes / 1e6);
+  }
+  return get_formatted_string("%.1f kB", (double)bytes / 1e3);
+}
+
+// Says a table is being skipped, once a run for each table and reason: a
+// contributor short of space would otherwise read the same line every task.
+static void config_contribute_say_skipped(Config *config,
+                                          ContributeState *state,
+                                          contribute_table_role_t role,
+                                          const char *name,
+                                          const char *reason) {
+  char *key = get_formatted_string(
+      "skip|%s|%s|%s", contribute_table_role_name(role), name, reason);
+  if (contribute_first_mention(state, key)) {
+    char *label = contribute_table_label(role, name);
+    thread_control_print_formatted(
+        config->thread_control, "skipping %s: %s; the task runs without it\n",
+        label, reason);
+    free(label);
+  }
+  free(key);
+}
+
+// The reason a table did not fit on disk: what it needed against what there
+// was.
+static char *contribute_space_reason(const ContributeState *state,
+                                     int64_t needed, int64_t available) {
+  char *needed_text = contribute_size_text(needed);
+  char *available_text = contribute_size_text(available);
+  char *reserve_text =
+      contribute_size_text(contribute_get_disk_reserve_bytes(state));
+  char *reason =
+      get_formatted_string("%s needed, %s free beyond the %s diskreserve",
+                           needed_text, available_text, reserve_text);
+  free(needed_text);
+  free(available_text);
+  free(reserve_text);
+  return reason;
+}
+
+// The reason a table did not fit in memory, to build it or to hold it.
+static char *contribute_memory_reason(const ContributeState *state,
+                                      const char *to, int64_t needed,
+                                      int64_t available) {
+  char *needed_text = contribute_size_text(needed);
+  char *available_text = contribute_size_text(available);
+  char *reserve_text =
+      contribute_size_text(contribute_get_memory_reserve_bytes(state));
+  char *reason = get_formatted_string(
+      "%s of memory needed to %s, %s available beyond the %s memreserve",
+      needed_text, to, available_text, reserve_text);
+  free(needed_text);
+  free(available_text);
+  free(reserve_text);
+  return reason;
+}
+
+// Whether a build's error is the disk refusing the file -- full, or a
+// directory this worker cannot write -- rather than anything about the
+// table. The table is then skipped, not the task failed.
+static bool contribute_build_hit_storage(ErrorStack *error_stack) {
+  const error_code_t top = error_stack_top(error_stack);
+  return top == ERROR_STATUS_CONVERT_OUTPUT_FILE_NOT_WRITABLE ||
+         top == ERROR_STATUS_FILEPATH_FILE_NOT_WRITABLE ||
+         top == ERROR_STATUS_RW_WRITE_ERROR ||
+         top == ERROR_STATUS_RW_FAILED_TO_OPEN_STREAM;
+}
+
+// Clears a build's storage error, saying the table is skipped for it.
+static void config_contribute_skip_for_storage(Config *config,
+                                               ContributeState *state,
+                                               contribute_table_role_t role,
+                                               const char *name,
+                                               ErrorStack *error_stack) {
+  char *why = error_stack_get_string_and_reset(error_stack);
+  // The last line is the innermost cause -- the system's reason -- which is
+  // the useful one, without its "(error N) ".
+  char *end = why + strlen(why);
+  while (end > why && end[-1] == '\n') {
+    *--end = '\0';
+  }
+  const char *innermost = strrchr(why, '\n');
+  innermost = innermost ? innermost + 1 : why;
+  const char *code_end = strstr(innermost, ") ");
+  if (innermost[0] == '(' && code_end) {
+    innermost = code_end + 2;
+  }
+  char *reason =
+      get_formatted_string("it could not be written (%s)", innermost);
+  config_contribute_say_skipped(config, state, role, name, reason);
+  free(reason);
+  free(why);
+}
+
+// Makes room on the data directory's filesystem for the table (role, name)
+// about to be built, deleting tables built here for other jobs if it has to
+// (contribute_tables_make_room). Returns whether it fits; if not, says so.
+static bool config_contribute_room_for(Config *config, ContributeState *state,
+                                       const ContributeTaskTables *task_tables,
+                                       contribute_table_role_t role,
+                                       const char *name, int64_t bytes) {
+  ErrorStack *errors = error_stack_create();
+  char *path = data_filepaths_get_writable_filename(
+      config->data_paths, name, contribute_table_filepath_type(role), errors);
+  const bool have_path = error_stack_is_empty(errors);
+  error_stack_destroy(errors);
+  if (!have_path) {
+    // The build says why, and is skipped for it.
+    free(path);
+    return true;
+  }
+  char *directory = get_dirpath_from_filepath(path);
+  free(path);
+  const int64_t reserve = contribute_get_disk_reserve_bytes(state);
+  int64_t free_bytes = 0;
+  if (bytes >= 0 && cfile_free_bytes(directory, &free_bytes) &&
+      free_bytes - reserve < bytes) {
+    // A rack info table this process has mapped holds its disk space even
+    // once deleted, so none stays mapped while room is made. The task's own
+    // is mapped again when it loads.
+    players_data_evict(config->players_data, PLAYERS_DATA_TYPE_RIT);
+  }
+  char *manifest_path = contribute_tables_manifest_path(config->data_paths);
+  StringList *evicted = string_list_create();
+  int64_t available = 0;
+  const bool fits = contribute_tables_make_room(
+      manifest_path, directory, bytes, reserve, task_tables->tables,
+      task_tables->count, contribute_tables_real_free_bytes, NULL, &available,
+      evicted);
+  for (int evicted_idx = 0; evicted_idx < string_list_get_count(evicted);
+       evicted_idx++) {
+    thread_control_print_formatted(
+        config->thread_control,
+        "deleted the %s, built here for another job, to make room\n",
+        string_list_get_string(evicted, evicted_idx));
+  }
+  if (!fits) {
+    char *reason = contribute_space_reason(state, bytes, available);
+    config_contribute_say_skipped(config, state, role, name, reason);
+    free(reason);
+  }
+  string_list_destroy(evicted);
+  free(manifest_path);
+  free(directory);
+  return fits;
+}
+
+// Records a table just built and checked in the manifest, so a later task
+// may delete it for space.
+static void config_contribute_record_built(const Config *config,
+                                           contribute_table_role_t role,
+                                           const char *name) {
+  ErrorStack *errors = error_stack_create();
+  char *path = data_filepaths_get_writable_filename(
+      config->data_paths, name, contribute_table_filepath_type(role), errors);
+  if (error_stack_is_empty(errors)) {
+    char *manifest_path = contribute_tables_manifest_path(config->data_paths);
+    contribute_tables_record_built(
+        manifest_path, contribute_table_role_name(role), name, path);
+    free(manifest_path);
+  }
+  error_stack_destroy(errors);
+  free(path);
+}
+
 // Builds the wordmap for `lexicon` and checks it against the hash the claim
-// pins.
-static void
+// pins. Returns false, with nothing on error_stack, when the disk would not
+// take it.
+static bool
 config_contribute_build_pinned_wordmap(Config *config, ContributeState *state,
                                        const char *lexicon, const char *ld_name,
                                        const ContributeDerived *pinned,
@@ -8606,8 +8836,13 @@ config_contribute_build_pinned_wordmap(Config *config, ContributeState *state,
                                  "building the wordmap for %s\n", lexicon);
   contribute_convert(config, "dawg2wordmap", lexicon, ld_name,
                      /*klv_name=*/NULL, /*wmp_name=*/NULL, error_stack);
+  if (contribute_build_hit_storage(error_stack)) {
+    config_contribute_skip_for_storage(config, state, CONTRIBUTE_TABLE_WMP,
+                                       lexicon, error_stack);
+    return false;
+  }
   if (!error_stack_is_empty(error_stack)) {
-    return;
+    return false;
   }
   char *built = contribute_derived_digest(config, state, lexicon,
                                           DATA_FILEPATH_TYPE_WORDMAP);
@@ -8615,7 +8850,8 @@ config_contribute_build_pinned_wordmap(Config *config, ContributeState *state,
     thread_control_print_formatted(config->thread_control,
                                    "built the wordmap for %s\n", lexicon);
     free(built);
-    return;
+    config_contribute_record_built(config, CONTRIBUTE_TABLE_WMP, lexicon);
+    return true;
   }
 
   contribute_record_derived_mismatch(state, "wmp", lexicon, pinned->sha256,
@@ -8628,10 +8864,13 @@ config_contribute_build_pinned_wordmap(Config *config, ContributeState *state,
           "(builder %s, target %s)",
           lexicon, pinned->builder ? pinned->builder : "unstated",
           pinned->build_target ? pinned->build_target : "unstated"));
+  return false;
 }
 
 // Makes a wordmap for `lexicon` available, building it if what is on disk is
-// absent or does not match.
+// absent or does not match. Returns whether it is there to use: false with
+// nothing on error_stack is a wordmap skipped for lack of space, which the
+// task runs without.
 //
 // Wordmaps are never transmitted -- roughly ten times the size of everything
 // else MAGPIE ships -- so the client derives them from the .kwg it already
@@ -8655,12 +8894,12 @@ config_contribute_build_pinned_wordmap(Config *config, ContributeState *state,
 //
 // A build holds the file's build lock, and the check is made again once it is
 // held: another worker sharing this data directory may have built the file
-// while this one waited.
-static void config_contribute_ensure_wordmap(Config *config,
-                                             ContributeState *state,
-                                             const char *lexicon,
-                                             const char *ld_name,
-                                             ErrorStack *error_stack) {
+// while this one waited. Room is made for it under the lock too.
+static bool
+config_contribute_ensure_wordmap(Config *config, ContributeState *state,
+                                 const ContributeTaskTables *task_tables,
+                                 const char *lexicon, const char *ld_name,
+                                 ErrorStack *error_stack) {
   ContributeDerived pinned;
   if (!contribute_find_derived(state, "wmp", lexicon, &pinned)) {
     error_stack_push(
@@ -8669,29 +8908,34 @@ static void config_contribute_ensure_wordmap(Config *config,
             "this job asks for the wordmap for %s but pins no hash for it; a "
             "wordmap that cannot be checked could describe a different lexicon",
             lexicon));
-    return;
+    return false;
   }
   if (config_contribute_derived_matches(
           config, state, lexicon, DATA_FILEPATH_TYPE_WORDMAP, pinned.sha256)) {
-    return;
+    return true;
   }
   char *what = get_formatted_string("the wordmap for %s", lexicon);
   const int lock_fd = config_contribute_lock_build(
       config, lexicon, DATA_FILEPATH_TYPE_WORDMAP, what, error_stack);
   free(what);
   if (!error_stack_is_empty(error_stack)) {
-    return;
+    return false;
   }
-  if (!config_contribute_derived_matches(
-          config, state, lexicon, DATA_FILEPATH_TYPE_WORDMAP, pinned.sha256)) {
-    config_contribute_build_pinned_wordmap(config, state, lexicon, ld_name,
-                                           &pinned, error_stack);
+  bool available = config_contribute_derived_matches(
+      config, state, lexicon, DATA_FILEPATH_TYPE_WORDMAP, pinned.sha256);
+  if (!available &&
+      config_contribute_room_for(config, state, task_tables,
+                                 CONTRIBUTE_TABLE_WMP, lexicon, pinned.bytes)) {
+    available = config_contribute_build_pinned_wordmap(
+        config, state, lexicon, ld_name, &pinned, error_stack);
   }
   contribute_unlock_build(lock_fd);
+  return available;
 }
 
 // Makes the rack info table `table_name` available, building it if what is on
-// disk is absent or does not match.
+// disk is absent or does not match. Returns whether it is there to use, as
+// config_contribute_ensure_wordmap does.
 //
 // Like a wordmap, only ever against a pinned hash. A table is 1.9 GB and
 // stores precomputed leave values that move generation uses in place of the
@@ -8701,9 +8945,11 @@ static void config_contribute_ensure_wordmap(Config *config,
 // The table is built from the player's .klv2 and the wordmap for its lexicon,
 // so `config_contribute_ensure_wordmap` must have run first -- which also
 // means a player that asks for a table and no wordmap still builds one, since
-// the table cannot be made without it.
-static void config_contribute_ensure_rack_info_table(
-    Config *config, ContributeState *state, const char *table_name,
+// the table cannot be made without it. A wordmap skipped for space skips the
+// table with it.
+static bool config_contribute_ensure_rack_info_table(
+    Config *config, ContributeState *state,
+    const ContributeTaskTables *task_tables, const char *table_name,
     const char *lexicon, const char *leaves, const char *ld_name,
     ErrorStack *error_stack) {
   if (!leaves) {
@@ -8712,7 +8958,7 @@ static void config_contribute_ensure_rack_info_table(
         get_formatted_string("a player asking for the rack info table %s "
                              "states no leaves to build it from",
                              table_name));
-    return;
+    return false;
   }
   ContributeDerived pinned;
   if (!contribute_find_derived(state, "rit", table_name, &pinned)) {
@@ -8723,21 +8969,20 @@ static void config_contribute_ensure_rack_info_table(
             "it; a table that cannot be checked would rank every full rack on "
             "leave values nothing verified",
             table_name));
-    return;
+    return false;
   }
 
   if (config_contribute_derived_matches(config, state, table_name,
                                         DATA_FILEPATH_TYPE_RACK_INFO_TABLE,
                                         pinned.sha256)) {
-    return;
+    return true;
   }
 
   // The wordmap the table is built from has to be the right one, and a player
   // that asked for a table but no wordmap has not had one checked yet.
-  config_contribute_ensure_wordmap(config, state, lexicon, ld_name,
-                                   error_stack);
-  if (!error_stack_is_empty(error_stack)) {
-    return;
+  if (!config_contribute_ensure_wordmap(config, state, task_tables, lexicon,
+                                        ld_name, error_stack)) {
+    return false;
   }
 
   // Held for the build, and the table checked again once it is: a worker
@@ -8748,13 +8993,19 @@ static void config_contribute_ensure_rack_info_table(
       error_stack);
   free(what);
   if (!error_stack_is_empty(error_stack)) {
-    return;
+    return false;
   }
   if (config_contribute_derived_matches(config, state, table_name,
                                         DATA_FILEPATH_TYPE_RACK_INFO_TABLE,
                                         pinned.sha256)) {
     contribute_unlock_build(lock_fd);
-    return;
+    return true;
+  }
+  if (!config_contribute_room_for(config, state, task_tables,
+                                  CONTRIBUTE_TABLE_RIT, table_name,
+                                  pinned.bytes)) {
+    contribute_unlock_build(lock_fd);
+    return false;
   }
 
   // One to three minutes and about 2.4 GB of memory, once per (.kwg, .klv2)
@@ -8773,9 +9024,15 @@ static void config_contribute_ensure_rack_info_table(
   players_data_evict(config->players_data, PLAYERS_DATA_TYPE_RIT);
   contribute_convert(config, "klvwmp2rit", table_name, ld_name, leaves, lexicon,
                      error_stack);
+  if (contribute_build_hit_storage(error_stack)) {
+    contribute_unlock_build(lock_fd);
+    config_contribute_skip_for_storage(config, state, CONTRIBUTE_TABLE_RIT,
+                                       table_name, error_stack);
+    return false;
+  }
   if (!error_stack_is_empty(error_stack)) {
     contribute_unlock_build(lock_fd);
-    return;
+    return false;
   }
   char *built = contribute_derived_digest(config, state, table_name,
                                           DATA_FILEPATH_TYPE_RACK_INFO_TABLE);
@@ -8784,7 +9041,8 @@ static void config_contribute_ensure_rack_info_table(
     thread_control_print_formatted(
         config->thread_control, "built the rack info table %s\n", table_name);
     free(built);
-    return;
+    config_contribute_record_built(config, CONTRIBUTE_TABLE_RIT, table_name);
+    return true;
   }
   contribute_record_derived_mismatch(state, "rit", table_name, pinned.sha256,
                                      built);
@@ -8796,10 +9054,12 @@ static void config_contribute_ensure_rack_info_table(
           "(builder %s, target %s)",
           table_name, pinned.builder ? pinned.builder : "unstated",
           pinned.build_target ? pinned.build_target : "unstated"));
+  return false;
 }
 
 // Makes the word info table for `lexicon` available, building it if what is
-// on disk is absent or does not match.
+// on disk is absent or does not match. Returns whether it is there to use, as
+// config_contribute_ensure_wordmap does.
 //
 // Like a rack info table, only ever against a pinned hash. A table records the
 // hash of the .kwg it was built from, and the load refuses one whose hash is
@@ -8809,11 +9069,10 @@ static void config_contribute_ensure_rack_info_table(
 //
 // Built from the .kwg alone, which expected_data has already verified: no
 // wordmap, no leaves. About two seconds and 92 MB for NWL23, once per lexicon.
-static void config_contribute_ensure_word_info_table(Config *config,
-                                                     ContributeState *state,
-                                                     const char *lexicon,
-                                                     const char *ld_name,
-                                                     ErrorStack *error_stack) {
+static bool config_contribute_ensure_word_info_table(
+    Config *config, ContributeState *state,
+    const ContributeTaskTables *task_tables, const char *lexicon,
+    const char *ld_name, ErrorStack *error_stack) {
   ContributeDerived pinned;
   if (!contribute_find_derived(state, "wit", lexicon, &pinned)) {
     error_stack_push(
@@ -8822,12 +9081,12 @@ static void config_contribute_ensure_word_info_table(Config *config,
             "this job asks for the word info table %s but pins no hash for "
             "it; a table that cannot be checked could prune plays that exist",
             lexicon));
-    return;
+    return false;
   }
   if (config_contribute_derived_matches(config, state, lexicon,
                                         DATA_FILEPATH_TYPE_WORD_INFO_TABLE,
                                         pinned.sha256)) {
-    return;
+    return true;
   }
 
   // Held for the build, and the table checked again once it is: a worker
@@ -8837,13 +9096,19 @@ static void config_contribute_ensure_word_info_table(Config *config,
       config, lexicon, DATA_FILEPATH_TYPE_WORD_INFO_TABLE, what, error_stack);
   free(what);
   if (!error_stack_is_empty(error_stack)) {
-    return;
+    return false;
   }
   if (config_contribute_derived_matches(config, state, lexicon,
                                         DATA_FILEPATH_TYPE_WORD_INFO_TABLE,
                                         pinned.sha256)) {
     contribute_unlock_build(lock_fd);
-    return;
+    return true;
+  }
+  if (!config_contribute_room_for(config, state, task_tables,
+                                  CONTRIBUTE_TABLE_WIT, lexicon,
+                                  pinned.bytes)) {
+    contribute_unlock_build(lock_fd);
+    return false;
   }
   thread_control_print_formatted(
       config->thread_control, "building the word info table for %s\n", lexicon);
@@ -8852,9 +9117,15 @@ static void config_contribute_ensure_word_info_table(Config *config,
   // job pins.
   contribute_convert(config, "kwg2wit", lexicon, ld_name, /*klv_name=*/NULL,
                      /*wmp_name=*/NULL, error_stack);
+  if (contribute_build_hit_storage(error_stack)) {
+    contribute_unlock_build(lock_fd);
+    config_contribute_skip_for_storage(config, state, CONTRIBUTE_TABLE_WIT,
+                                       lexicon, error_stack);
+    return false;
+  }
   if (!error_stack_is_empty(error_stack)) {
     contribute_unlock_build(lock_fd);
-    return;
+    return false;
   }
   char *built = contribute_derived_digest(config, state, lexicon,
                                           DATA_FILEPATH_TYPE_WORD_INFO_TABLE);
@@ -8863,7 +9134,8 @@ static void config_contribute_ensure_word_info_table(Config *config,
     thread_control_print_formatted(
         config->thread_control, "built the word info table for %s\n", lexicon);
     free(built);
-    return;
+    config_contribute_record_built(config, CONTRIBUTE_TABLE_WIT, lexicon);
+    return true;
   }
   contribute_record_derived_mismatch(state, "wit", lexicon, pinned.sha256,
                                      built);
@@ -8875,6 +9147,323 @@ static void config_contribute_ensure_word_info_table(Config *config,
           "(builder %s, target %s)",
           lexicon, pinned.builder ? pinned.builder : "unstated",
           pinned.build_target ? pinned.build_target : "unstated"));
+  return false;
+}
+
+// What one player of a task asks of the derived tables, and, once
+// config_contribute_prepare_tables has run, what it gets: the flags it loads
+// with, each off for a table skipped for lack of space.
+typedef struct ContributeTablePlayer {
+  const char *lexicon;
+  const char *leaves;
+  bool use_wordmap;
+  bool use_wit;
+  // NULL for no rack info table.
+  const char *rit_name;
+} ContributeTablePlayer;
+
+// The player's use_wordmap, use_rit (with its rit_name) and use_wit, from
+// its settings object. `rit_allowed` is false for leave generation, which
+// plays without a rack info table whatever its player says: its KLV changes
+// every generation.
+static ContributeTablePlayer contribute_table_player(const JsonValue *settings,
+                                                     const char *lexicon,
+                                                     bool rit_allowed) {
+  ContributeTablePlayer player = {
+      .lexicon = lexicon,
+      .leaves = json_get_string_or_null(settings, CONTRIBUTE_KEY_LEAVES),
+      .use_wordmap = contribute_wants_wordmap(settings),
+      .use_wit = contribute_wants_wit(settings),
+      .rit_name = rit_allowed && contribute_wants_rit(settings)
+                      ? contribute_rit_name(settings)
+                      : NULL,
+  };
+  return player;
+}
+
+// Adds the table (role, name) to the task's list unless it is there, and
+// returns its index; `requested` marks it as one a player loads.
+static int contribute_task_tables_add(ContributeTaskTables *task_tables,
+                                      contribute_table_role_t role,
+                                      const char *name, const char *lexicon,
+                                      const char *leaves, bool requested) {
+  for (int table_idx = 0; table_idx < task_tables->count; table_idx++) {
+    ContributeTable *table = &task_tables->tables[table_idx];
+    if (table->role == role && strings_equal(table->name, name)) {
+      table->requested = table->requested || requested;
+      return table_idx;
+    }
+  }
+  const int index = task_tables->count++;
+  ContributeTable *table = &task_tables->tables[index];
+  memset(table, 0, sizeof(*table));
+  table->role = role;
+  table->name = name;
+  table->lexicon = lexicon;
+  table->bytes = -1;
+  table->requested = requested;
+  task_tables->leaves[index] = leaves;
+  return index;
+}
+
+// The index of the table (role, name) in the task's list, or -1.
+static int contribute_task_table_find(const ContributeTaskTables *task_tables,
+                                      contribute_table_role_t role,
+                                      const char *name) {
+  for (int table_idx = 0; table_idx < task_tables->count; table_idx++) {
+    const ContributeTable *table = &task_tables->tables[table_idx];
+    if (table->role == role && strings_equal(table->name, name)) {
+      return table_idx;
+    }
+  }
+  return -1;
+}
+
+static bool
+contribute_task_table_chosen(const ContributeTaskTables *task_tables,
+                             contribute_table_role_t role, const char *name) {
+  const int found = contribute_task_table_find(task_tables, role, name);
+  return found >= 0 && task_tables->tables[found].chosen;
+}
+
+// Whether the table at `table_idx` has lost the wordmap it goes with since
+// it was chosen, its build having found no room: a rack info table, which is
+// built from it, or a word info table whose player asked for it, which does
+// nothing without it.
+static bool
+contribute_task_table_lost_wordmap(const ContributeTaskTables *task_tables,
+                                   int table_idx) {
+  const ContributeTable *table = &task_tables->tables[table_idx];
+  if (table->role == CONTRIBUTE_TABLE_WMP || table->unpinned) {
+    return false;
+  }
+  const int wordmap = contribute_task_table_find(
+      task_tables, CONTRIBUTE_TABLE_WMP, table->lexicon);
+  if (wordmap < 0 || task_tables->tables[wordmap].chosen) {
+    return false;
+  }
+  return table->role == CONTRIBUTE_TABLE_RIT ||
+         task_tables->tables[wordmap].requested;
+}
+
+// Builds, or finds, the one table of the task's list at `table_idx`.
+static bool config_contribute_ensure_table(Config *config,
+                                           ContributeState *state,
+                                           const ContributeTaskTables *tables,
+                                           int table_idx, const char *ld_name,
+                                           ErrorStack *error_stack) {
+  const ContributeTable *table = &tables->tables[table_idx];
+  switch (table->role) {
+  case CONTRIBUTE_TABLE_WMP:
+    return config_contribute_ensure_wordmap(config, state, tables, table->name,
+                                            ld_name, error_stack);
+  case CONTRIBUTE_TABLE_WIT:
+    return config_contribute_ensure_word_info_table(
+        config, state, tables, table->name, ld_name, error_stack);
+  case CONTRIBUTE_TABLE_RIT:
+    return config_contribute_ensure_rack_info_table(
+        config, state, tables, table->name, table->lexicon,
+        tables->leaves[table_idx], ld_name, error_stack);
+  case NUMBER_OF_CONTRIBUTE_TABLE_ROLES:
+    break;
+  }
+  return false;
+}
+
+static players_data_t
+contribute_table_players_data_type(contribute_table_role_t role) {
+  switch (role) {
+  case CONTRIBUTE_TABLE_WIT:
+    return PLAYERS_DATA_TYPE_WIT;
+  case CONTRIBUTE_TABLE_RIT:
+    return PLAYERS_DATA_TYPE_RIT;
+  case CONTRIBUTE_TABLE_WMP:
+  case NUMBER_OF_CONTRIBUTE_TABLE_ROLES:
+    break;
+  }
+  return PLAYERS_DATA_TYPE_WMP;
+}
+
+// Whether this process has the table loaded (or mapped) already, for either
+// player: holding it again costs nothing.
+static bool config_contribute_table_loaded(const Config *config,
+                                           const ContributeTable *table) {
+  const players_data_t type = contribute_table_players_data_type(table->role);
+  for (int player_index = 0; player_index < 2; player_index++) {
+    if (players_data_get_data(config->players_data, type, player_index) &&
+        strings_equal(players_data_get_data_name(config->players_data, type,
+                                                 player_index),
+                      table->name)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// Says why contribute_choose_tables left out a table a player asked for.
+static void config_contribute_say_not_chosen(Config *config,
+                                             ContributeState *state,
+                                             const ContributeTable *table) {
+  char *reason = NULL;
+  if (table->skip == CONTRIBUTE_TABLE_NO_DISK) {
+    reason = contribute_space_reason(state, table->needed_bytes,
+                                     table->available_bytes);
+  } else if (table->skip == CONTRIBUTE_TABLE_NO_MEMORY_TO_BUILD) {
+    reason = contribute_memory_reason(state, "build it", table->needed_bytes,
+                                      table->available_bytes);
+  } else if (table->skip == CONTRIBUTE_TABLE_NO_MEMORY_TO_HOLD) {
+    reason =
+        contribute_memory_reason(state, "hold it while playing",
+                                 table->needed_bytes, table->available_bytes);
+  } else if (table->role == CONTRIBUTE_TABLE_RIT) {
+    reason = get_formatted_string(
+        "it is built from the wordmap for %s, which was skipped",
+        table->lexicon);
+  } else {
+    reason = get_formatted_string(
+        "it does nothing without the wordmap for %s, which was skipped",
+        table->lexicon);
+  }
+  config_contribute_say_skipped(config, state, table->role, table->name,
+                                reason);
+  free(reason);
+}
+
+// Decides, builds and finds the derived tables the task's players use, as
+// this machine's disk allows, and turns off each player's flag for a table
+// skipped. A table is never required: one that does not fit beyond the
+// diskreserve, or that the disk refuses part-way through its build, is
+// skipped, the task runs without it, and its result says so
+// (contribute_record_derived_skipped). What a skip never covers is a table
+// built and found not to match its pinned hash, or one the claim pins no hash
+// for: those still push ERROR_STATUS_CONTRIBUTE_DERIVED_MISMATCH and decline
+// the task. Runs before the lexicon loads, which reads the flags.
+static void config_contribute_prepare_tables(
+    Config *config, ContributeState *state, ContributeTablePlayer *players,
+    int num_players, const char *ld_name, ErrorStack *error_stack) {
+  ContributeTaskTables task_tables;
+  task_tables.count = 0;
+  for (int player_idx = 0; player_idx < num_players; player_idx++) {
+    const ContributeTablePlayer *player = &players[player_idx];
+    if (player->use_wordmap) {
+      contribute_task_tables_add(&task_tables, CONTRIBUTE_TABLE_WMP,
+                                 player->lexicon, player->lexicon, NULL, true);
+    }
+    if (player->use_wit) {
+      contribute_task_tables_add(&task_tables, CONTRIBUTE_TABLE_WIT,
+                                 player->lexicon, player->lexicon, NULL, true);
+    }
+    if (player->rit_name) {
+      contribute_task_tables_add(&task_tables, CONTRIBUTE_TABLE_RIT,
+                                 player->rit_name, player->lexicon,
+                                 player->leaves, true);
+      contribute_task_tables_add(&task_tables, CONTRIBUTE_TABLE_WMP,
+                                 player->lexicon, player->lexicon, NULL, false);
+    }
+  }
+  if (task_tables.count == 0) {
+    return;
+  }
+
+  for (int table_idx = 0; table_idx < task_tables.count; table_idx++) {
+    ContributeTable *table = &task_tables.tables[table_idx];
+    ContributeDerived pinned;
+    if (!contribute_find_derived(state, contribute_table_role_name(table->role),
+                                 table->name, &pinned)) {
+      table->unpinned = true;
+      continue;
+    }
+    table->bytes = pinned.bytes;
+    table->present = config_contribute_derived_matches(
+        config, state, table->name, contribute_table_filepath_type(table->role),
+        pinned.sha256);
+    table->loaded = config_contribute_table_loaded(config, table);
+  }
+
+  // The space is the filesystem's that builds are written to; one that will
+  // not say is taken to have room, and each build finds out. Memory that
+  // cannot be found is taken as unconstrained.
+  ContributeTableBudget budget = {
+      .free_disk_bytes = INT64_MAX,
+      .disk_reserve_bytes = contribute_get_disk_reserve_bytes(state),
+      .free_memory_bytes = INT64_MAX,
+      .memory_reserve_bytes = contribute_get_memory_reserve_bytes(state),
+  };
+  if (!get_available_memory_bytes(&budget.free_memory_bytes)) {
+    budget.free_memory_bytes = INT64_MAX;
+  }
+  int64_t free_bytes = INT64_MAX;
+  ErrorStack *errors = error_stack_create();
+  char *first_path = data_filepaths_get_writable_filename(
+      config->data_paths, task_tables.tables[0].name,
+      contribute_table_filepath_type(task_tables.tables[0].role), errors);
+  if (first_path) {
+    char *directory = get_dirpath_from_filepath(first_path);
+    if (!cfile_free_bytes(directory, &free_bytes)) {
+      free_bytes = INT64_MAX;
+    }
+    free(directory);
+  }
+  free(first_path);
+  error_stack_destroy(errors);
+  budget.free_disk_bytes = free_bytes;
+
+  char *manifest_path = contribute_tables_manifest_path(config->data_paths);
+  ContributeTableManifest *manifest =
+      contribute_table_manifest_read(manifest_path);
+  int order[CONTRIBUTE_MAX_TASK_TABLES];
+  const int num_chosen = contribute_choose_tables(
+      task_tables.tables, task_tables.count, &budget, manifest, order);
+  contribute_table_manifest_destroy(manifest);
+  for (int table_idx = 0; table_idx < task_tables.count; table_idx++) {
+    const ContributeTable *table = &task_tables.tables[table_idx];
+    if (table->requested && !table->chosen) {
+      config_contribute_say_not_chosen(config, state, table);
+    }
+  }
+
+  for (int rank = 0; rank < num_chosen; rank++) {
+    const int table_idx = order[rank];
+    ContributeTable *table = &task_tables.tables[table_idx];
+    // A wordmap skipped at its build takes what depends on it along.
+    if (contribute_task_table_lost_wordmap(&task_tables, table_idx)) {
+      table->chosen = false;
+      config_contribute_say_not_chosen(config, state, table);
+      continue;
+    }
+    table->chosen = config_contribute_ensure_table(
+        config, state, &task_tables, table_idx, ld_name, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      free(manifest_path);
+      return;
+    }
+  }
+
+  for (int table_idx = 0; table_idx < task_tables.count; table_idx++) {
+    const ContributeTable *table = &task_tables.tables[table_idx];
+    if (table->requested && !table->chosen) {
+      contribute_record_derived_skipped(state, table->role);
+    }
+  }
+  contribute_tables_touch_used(manifest_path, task_tables.tables,
+                               task_tables.count);
+  free(manifest_path);
+
+  for (int player_idx = 0; player_idx < num_players; player_idx++) {
+    ContributeTablePlayer *player = &players[player_idx];
+    player->use_wordmap =
+        player->use_wordmap &&
+        contribute_task_table_chosen(&task_tables, CONTRIBUTE_TABLE_WMP,
+                                     player->lexicon);
+    player->use_wit = player->use_wit &&
+                      contribute_task_table_chosen(
+                          &task_tables, CONTRIBUTE_TABLE_WIT, player->lexicon);
+    if (player->rit_name &&
+        !contribute_task_table_chosen(&task_tables, CONTRIBUTE_TABLE_RIT,
+                                      player->rit_name)) {
+      player->rit_name = NULL;
+    }
+  }
 }
 
 // Sets the rack info table names the next lexicon load should use, or clears
@@ -9998,74 +10587,20 @@ static char *config_contribute_games(Config *config, const JsonValue *request,
   // plays with, which is its own p*_lexicon when it has one and the job's
   // shared lexicon otherwise -- so two players on the same lexicon only need
   // it built once, and a player that did not ask for one never triggers a
-  // build.
+  // build. Likewise a word info table, and a rack info table, which belongs
+  // to the player's (.kwg, .klv2) pair and is named by the server. Each is
+  // used if this machine has room for it, and skipped otherwise.
   const char *shared_lexicon = contribute_shared_lexicon(lexicon, p1_lexicon);
-
-  if (contribute_wants_wordmap(player1)) {
-    config_contribute_ensure_wordmap(config, state,
-                                     p1_lexicon ? p1_lexicon : shared_lexicon,
-                                     letter_distribution, error_stack);
-    if (!error_stack_is_empty(error_stack)) {
-      return NULL;
-    }
-  }
-  if (contribute_wants_wordmap(player2)) {
-    config_contribute_ensure_wordmap(config, state,
-                                     p2_lexicon ? p2_lexicon : shared_lexicon,
-                                     letter_distribution, error_stack);
-    if (!error_stack_is_empty(error_stack)) {
-      return NULL;
-    }
-  }
-
-  // After the wordmaps: a rack info table is built from a .klv2 and the
-  // wordmap for its lexicon, so the wordmap has to be in place and correct
-  // first. Two players that share a table build it once, since the second
-  // finds the first's on disk with the right hash.
-  const char *p1_rit_name =
-      contribute_wants_rit(player1) ? contribute_rit_name(player1) : NULL;
-  const char *p2_rit_name =
-      contribute_wants_rit(player2) ? contribute_rit_name(player2) : NULL;
-  if (p1_rit_name) {
-    config_contribute_ensure_rack_info_table(
-        config, state, p1_rit_name, p1_lexicon ? p1_lexicon : shared_lexicon,
-        json_get_string_or_null(player1, CONTRIBUTE_KEY_LEAVES),
-        letter_distribution, error_stack);
-    if (!error_stack_is_empty(error_stack)) {
-      return NULL;
-    }
-  }
-  if (p2_rit_name &&
-      !(p1_rit_name && strings_equal(p1_rit_name, p2_rit_name))) {
-    config_contribute_ensure_rack_info_table(
-        config, state, p2_rit_name, p2_lexicon ? p2_lexicon : shared_lexicon,
-        json_get_string_or_null(player2, CONTRIBUTE_KEY_LEAVES),
-        letter_distribution, error_stack);
-    if (!error_stack_is_empty(error_stack)) {
-      return NULL;
-    }
-  }
-
-  // A word info table is built from the .kwg alone, so its order against the
-  // other two does not matter. Two players on one lexicon build it once.
-  const bool p1_use_wit = contribute_wants_wit(player1);
-  const bool p2_use_wit = contribute_wants_wit(player2);
-  const char *p1_wit_lexicon = p1_lexicon ? p1_lexicon : shared_lexicon;
-  const char *p2_wit_lexicon = p2_lexicon ? p2_lexicon : shared_lexicon;
-  if (p1_use_wit) {
-    config_contribute_ensure_word_info_table(config, state, p1_wit_lexicon,
-                                             letter_distribution, error_stack);
-    if (!error_stack_is_empty(error_stack)) {
-      return NULL;
-    }
-  }
-  if (p2_use_wit && !(p1_use_wit && p1_wit_lexicon && p2_wit_lexicon &&
-                      strings_equal(p1_wit_lexicon, p2_wit_lexicon))) {
-    config_contribute_ensure_word_info_table(config, state, p2_wit_lexicon,
-                                             letter_distribution, error_stack);
-    if (!error_stack_is_empty(error_stack)) {
-      return NULL;
-    }
+  ContributeTablePlayer table_players[2] = {
+      contribute_table_player(player1, p1_lexicon ? p1_lexicon : shared_lexicon,
+                              /*rit_allowed=*/true),
+      contribute_table_player(player2, p2_lexicon ? p2_lexicon : shared_lexicon,
+                              /*rit_allowed=*/true),
+  };
+  config_contribute_prepare_tables(config, state, table_players, 2,
+                                   letter_distribution, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return NULL;
   }
 
   config_contribute_load_lexicon_and_variant(
@@ -10073,8 +10608,9 @@ static char *config_contribute_games(Config *config, const JsonValue *request,
       p1_lexicon, p2_lexicon,
       json_get_string_or_null(player1, CONTRIBUTE_KEY_LEAVES),
       json_get_string_or_null(player2, CONTRIBUTE_KEY_LEAVES),
-      contribute_wants_wordmap(player1), contribute_wants_wordmap(player2),
-      p1_rit_name, p2_rit_name, p1_use_wit, p2_use_wit, error_stack);
+      table_players[0].use_wordmap, table_players[1].use_wordmap,
+      table_players[0].rit_name, table_players[1].rit_name,
+      table_players[0].use_wit, table_players[1].use_wit, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return NULL;
   }
@@ -10363,46 +10899,27 @@ static char *config_contribute_opening_rack(Config *config,
   const char *p1_lexicon =
       json_get_string_or_null(player, CONTRIBUTE_KEY_PLAYER_LEXICON);
 
-  if (contribute_wants_wordmap(player)) {
-    config_contribute_ensure_wordmap(
-        config, state, contribute_shared_lexicon(lexicon, p1_lexicon),
-        letter_distribution, error_stack);
-    if (!error_stack_is_empty(error_stack)) {
-      return NULL;
-    }
-  }
-  const char *rit_name =
-      contribute_wants_rit(player) ? contribute_rit_name(player) : NULL;
-  if (rit_name) {
-    config_contribute_ensure_rack_info_table(
-        config, state, rit_name, contribute_shared_lexicon(lexicon, p1_lexicon),
-        json_get_string_or_null(player, CONTRIBUTE_KEY_LEAVES),
-        letter_distribution, error_stack);
-    if (!error_stack_is_empty(error_stack)) {
-      return NULL;
-    }
-  }
-
   // Player 2 gets player 1's leaves as well as its lexicon. A simulation plays
   // the opponent's replies with player 2's leaves, and a NULL here kept
   // whichever leaves player 2 last had -- another job's, or the KLV an earlier
   // leave-generation task fetched -- none of which this task's expected_data
-  // verified.
-  const bool use_wit = contribute_wants_wit(player);
-  if (use_wit) {
-    config_contribute_ensure_word_info_table(
-        config, state, contribute_shared_lexicon(lexicon, p1_lexicon),
-        letter_distribution, error_stack);
-    if (!error_stack_is_empty(error_stack)) {
-      return NULL;
-    }
+  // verified. Its tables, as far as this machine has room for them, are the
+  // player's too.
+  ContributeTablePlayer table_player = contribute_table_player(
+      player, contribute_shared_lexicon(lexicon, p1_lexicon),
+      /*rit_allowed=*/true);
+  config_contribute_prepare_tables(config, state, &table_player, 1,
+                                   letter_distribution, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return NULL;
   }
   const char *leaves = json_get_string_or_null(player, CONTRIBUTE_KEY_LEAVES);
   config_contribute_load_lexicon_and_variant(
       config, contribute_shared_lexicon(lexicon, p1_lexicon), variant,
       letter_distribution, board_layout, p1_lexicon, NULL, leaves, leaves,
-      contribute_wants_wordmap(player), contribute_wants_wordmap(player),
-      rit_name, rit_name, use_wit, use_wit, error_stack);
+      table_player.use_wordmap, table_player.use_wordmap, table_player.rit_name,
+      table_player.rit_name, table_player.use_wit, table_player.use_wit,
+      error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return NULL;
   }
@@ -10566,24 +11083,18 @@ static char *config_contribute_leave_gen(Config *config,
   // never loaded: the bot plays with the KLV fetched below, whose values are
   // what the task is measuring.
   const JsonValue *player = json_object_get(request, CONTRIBUTE_KEY_PLAYER);
-  const bool use_wordmap = contribute_wants_wordmap(player);
-  if (use_wordmap) {
-    config_contribute_ensure_wordmap(config, state, lexicon,
-                                     letter_distribution, error_stack);
-    if (!error_stack_is_empty(error_stack)) {
-      return NULL;
-    }
-  }
   // A word info table, unlike a rack info table, holds nothing a generation
   // changes: it is the lexicon's, and every generation plays the same one.
-  const bool use_wit = contribute_wants_wit(player);
-  if (use_wit) {
-    config_contribute_ensure_word_info_table(config, state, lexicon,
-                                             letter_distribution, error_stack);
-    if (!error_stack_is_empty(error_stack)) {
-      return NULL;
-    }
+  // Both it and the wordmap are used as far as this machine has room.
+  ContributeTablePlayer table_player =
+      contribute_table_player(player, lexicon, /*rit_allowed=*/false);
+  config_contribute_prepare_tables(config, state, &table_player, 1,
+                                   letter_distribution, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return NULL;
   }
+  const bool use_wordmap = table_player.use_wordmap;
+  const bool use_wit = table_player.use_wit;
 
   // The fetched KLV is checked against the hash the server recorded when it
   // built it -- every other file a task loads is checked by digest, and this

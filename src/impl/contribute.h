@@ -15,6 +15,7 @@
 #include "../ent/thread_control.h"
 #include "../util/io_util.h"
 #include "../util/json.h"
+#include "contribute_tables.h"
 #include <stdbool.h>
 #include <stdint.h>
 
@@ -185,6 +186,11 @@ typedef struct ContributeDerived {
   // output does not depend on it, and a contributor who builds from source
   // should not be locked out on the strength of a field.
   const char *build_target;
+  // The size in bytes of the server's reference build, or -1 when the claim
+  // does not say (a server before MAGPIE 0.1.3's contract, or a value that is
+  // not a whole number of bytes). What contribute_choose_tables weighs
+  // against the space this machine has before it builds anything.
+  int64_t bytes;
 } ContributeDerived;
 
 // The derived file the current claim pins for (role, name), if any.
@@ -265,17 +271,46 @@ void contribute_decline_derived_mismatch(ContributeState *state,
                                          const char *why,
                                          ErrorStack *error_stack);
 
+// Records that the claimed task's players asked for a table of `role` that
+// this worker skipped for lack of space; the result says so
+// (contribute_result_body). A NULL state is a no-op.
+void contribute_record_derived_skipped(ContributeState *state,
+                                       contribute_table_role_t role);
+// The roles recorded so far for the claimed task, as a set of
+// 1 << contribute_table_role_t. 0 for a NULL state.
+unsigned int contribute_get_derived_skipped(const ContributeState *state);
+
+// The space the settings file's `diskreserve` keeps free, in bytes; the
+// default for a NULL state.
+int64_t contribute_get_disk_reserve_bytes(const ContributeState *state);
+// The memory the settings file's `memreserve` keeps available, in bytes; the
+// default for a NULL state.
+int64_t contribute_get_memory_reserve_bytes(const ContributeState *state);
+
+// Whether this is the first time this run that `key` has been mentioned, for
+// a line that would otherwise repeat every task. Always true for a NULL
+// state.
+bool contribute_first_mention(ContributeState *state, const char *key);
+
+// Makes `assignment` (owned from here) the claimed task's, as a claim does,
+// for an executor to read its pinned derived files from. Exposed for tests.
+void contribute_state_set_assignment(ContributeState *state,
+                                     JsonValue *assignment);
+
 // The body of POST /api/worker/result: the claim it answers, the task's
-// result (`result_json`, an object, as is), and `movegens`, the move
-// generations this machine made computing it -- what the server credits the
-// contributor with. The caller frees. Exposed for tests.
+// result (`result_json`, an object, as is), `movegens`, the move generations
+// this machine made computing it -- what the server credits the contributor
+// with -- and `derived_skipped`, the roles ("rit", "wit", "wmp", sorted) of
+// the tables the task's players asked for that this machine skipped for lack
+// of space, from a set of 1 << contribute_table_role_t: always there, [] for
+// none. The caller frees. Exposed for tests.
 // A task's elapsed time as the finished, stopped and failed lines print it,
 // in birdtest's units with each zero unit left out: "45s", "2m 13s",
 // "1h 2s", "1d 3h". Negative counts as 0, "0s".
 char *contribute_elapsed_text(int64_t seconds);
 
 char *contribute_result_body(const char *claim_token, const char *result_json,
-                             uint64_t movegens);
+                             uint64_t movegens, unsigned int derived_skipped);
 
 // Submits the result for the task claimed by the last contribute_claim_task
 // call, with the move generations it took (see contribute_result_body), and
