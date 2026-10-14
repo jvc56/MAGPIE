@@ -43,12 +43,6 @@ test/contribute_test.c: call utime
 test/contribute_test.c: include sys/stat.h
 test/contribute_test.c: include unistd.h
 test/contribute_test.c: include utime.h
-test/gcg_regex.h: include regex.h
-test/gcg_tokenizer_diff_test.c: call regcomp
-test/gcg_tokenizer_diff_test.c: call regexec
-test/gcg_tokenizer_diff_test.c: call regfree
-test/gcg_tokenizer_diff_test.c: identifier regex_t
-test/gcg_tokenizer_diff_test.c: identifier regmatch_t
 test/pat_opening_sim_test.c: call access
 test/pat_opening_sim_test.c: include unistd.h
 test/pat_test.c: call access
