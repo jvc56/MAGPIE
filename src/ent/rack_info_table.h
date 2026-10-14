@@ -10,6 +10,7 @@
 #include "../util/io_util.h"
 #include "../util/string_util.h"
 #include "data_filepaths.h"
+#include <errno.h>
 #include <fcntl.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -424,84 +425,82 @@ static inline void rack_info_table_destroy(RackInfoTable *rit) {
 //     3 bytes: pad
 //     16 bytes: bit_rack_bytes (full BitRack for collision check)
 
-static inline void rit_write_uint32_or_die(uint32_t value, FILE *stream,
-                                           const char *description) {
-  const uint32_t le = htole32(value);
-  fwrite_or_die(&le, sizeof(le), 1, stream, description);
+// Each writer returns whether every byte went out, rather than ending the
+// process as fwrite_or_die did: a contributor's disk filling during the 1.9 GB
+// write is a table to skip, not a worker to lose (birdtest KL-51).
+static inline bool rit_fwrite(const void *ptr, size_t size, size_t nmemb,
+                              FILE *stream) {
+  return fwrite(ptr, size, nmemb, stream) == nmemb;
 }
 
-static inline void rit_write_uint32s_or_die(const uint32_t *values, size_t n,
-                                            FILE *stream,
-                                            const char *description) {
+static inline bool rit_write_uint32(uint32_t value, FILE *stream) {
+  const uint32_t le = htole32(value);
+  return rit_fwrite(&le, sizeof(le), 1, stream);
+}
+
+static inline bool rit_write_uint32s(const uint32_t *values, size_t n,
+                                     FILE *stream) {
 #if IS_LITTLE_ENDIAN
-  fwrite_or_die(values, sizeof(uint32_t), n, stream, description);
+  return rit_fwrite(values, sizeof(uint32_t), n, stream);
 #else
   for (size_t i = 0; i < n; i++) {
     const uint32_t le = htole32(values[i]);
-    fwrite_or_die(&le, sizeof(uint32_t), 1, stream, description);
+    if (!rit_fwrite(&le, sizeof(uint32_t), 1, stream)) {
+      return false;
+    }
   }
+  return true;
 #endif
 }
 
-static inline void rit_write_entries_or_die(const RackInfoTableEntry *entries,
-                                            uint32_t n, FILE *stream) {
+static inline bool rit_write_entries(const RackInfoTableEntry *entries,
+                                     uint32_t n, FILE *stream) {
 #if IS_LITTLE_ENDIAN
-  fwrite_or_die(entries, sizeof(RackInfoTableEntry), n, stream, "rit entries");
+  return rit_fwrite(entries, sizeof(RackInfoTableEntry), n, stream);
 #else
-  for (uint32_t i = 0; i < n; i++) {
+  bool ok = true;
+  for (uint32_t i = 0; ok && i < n; i++) {
     const RackInfoTableEntry *entry = &entries[i];
     // Packed 24-bit leaves are stored as raw bytes — no endian swap.
-    fwrite_or_die(entry->leaves_packed, sizeof(uint8_t),
-                  RACK_INFO_TABLE_LEAVES_PACKED_BYTES, stream,
-                  "rit leaves packed");
-    for (int union_idx = 0; union_idx < RACK_INFO_TABLE_UNIONS_PER_ENTRY;
+    ok = ok && rit_fwrite(entry->leaves_packed, sizeof(uint8_t),
+                          RACK_INFO_TABLE_LEAVES_PACKED_BYTES, stream);
+    for (int union_idx = 0; ok && union_idx < RACK_INFO_TABLE_UNIONS_PER_ENTRY;
          union_idx++) {
-      const uint32_t le_union = htole32(entry->playthrough_union[union_idx]);
-      fwrite_or_die(&le_union, sizeof(uint32_t), 1, stream,
-                    "rit playthrough union");
+      ok = rit_write_uint32(entry->playthrough_union[union_idx], stream);
     }
     for (int leave_idx = 0;
-         leave_idx < RACK_INFO_TABLE_NONPLAYTHROUGH_BEST_LEAVES_PER_ENTRY;
+         ok && leave_idx < RACK_INFO_TABLE_NONPLAYTHROUGH_BEST_LEAVES_PER_ENTRY;
          leave_idx++) {
-      const uint32_t le_leave =
-          htole32((uint32_t)entry->nonplaythrough_best_leave_values[leave_idx]);
-      fwrite_or_die(&le_leave, sizeof(uint32_t), 1, stream,
-                    "rit nonplaythrough best leave value");
+      ok = rit_write_uint32(
+          (uint32_t)entry->nonplaythrough_best_leave_values[leave_idx], stream);
     }
-    for (int bl_idx = 0; bl_idx < RACK_INFO_TABLE_BEST_LEAVES_PER_ENTRY;
+    for (int bl_idx = 0; ok && bl_idx < RACK_INFO_TABLE_BEST_LEAVES_PER_ENTRY;
          bl_idx++) {
-      const uint32_t le_bl = htole32((uint32_t)entry->best_leaves[bl_idx]);
-      fwrite_or_die(&le_bl, sizeof(uint32_t), 1, stream, "rit best leave");
+      ok = rit_write_uint32((uint32_t)entry->best_leaves[bl_idx], stream);
     }
-    for (int len_idx = 0; len_idx < RIT_MULTI_PT_TP7_NUM_WORD_LENGTHS;
+    for (int len_idx = 0; ok && len_idx < RIT_MULTI_PT_TP7_NUM_WORD_LENGTHS;
          len_idx++) {
-      const uint32_t le_bitvec = htole32(entry->multi_pt_tp7_bitvec[len_idx]);
-      fwrite_or_die(&le_bitvec, sizeof(uint32_t), 1, stream,
-                    "rit multi pt tp7 bitvec");
+      ok = rit_write_uint32(entry->multi_pt_tp7_bitvec[len_idx], stream);
     }
-    for (int len_idx = 0; len_idx < RIT_MULTI_PT_TP6_NUM_WORD_LENGTHS;
+    for (int len_idx = 0; ok && len_idx < RIT_MULTI_PT_TP6_NUM_WORD_LENGTHS;
          len_idx++) {
-      const uint32_t le_bitvec = htole32(entry->multi_pt_tp6_bitvec[len_idx]);
-      fwrite_or_die(&le_bitvec, sizeof(uint32_t), 1, stream,
-                    "rit multi pt tp6 bitvec");
+      ok = rit_write_uint32(entry->multi_pt_tp6_bitvec[len_idx], stream);
     }
-    fwrite_or_die(&entry->nonplaythrough_has_word_of_length_bitmask,
-                  sizeof(uint8_t), 1, stream,
-                  "rit nonplaythrough has word of length bitmask");
-    fwrite_or_die(&entry->num_bingo_words, sizeof(uint8_t), 1, stream,
-                  "rit num bingo words");
-    fwrite_or_die(entry->bingo_words, sizeof(MachineLetter),
-                  RIT_MAX_INLINE_BINGO_WORDS * RACK_SIZE, stream,
-                  "rit bingo words");
-    fwrite_or_die(entry->best_exchange_strip, sizeof(MachineLetter), RACK_SIZE,
-                  stream, "rit best exchange strip");
-    fwrite_or_die(&entry->best_exchange_tiles_exchanged, sizeof(uint8_t), 1,
-                  stream, "rit best exchange tiles exchanged");
-    fwrite_or_die(entry->pad, sizeof(uint8_t), sizeof(entry->pad), stream,
-                  "rit entry pad");
-    fwrite_or_die(entry->bit_rack_bytes, sizeof(uint8_t),
-                  RACK_INFO_TABLE_BITRACK_BYTES, stream, "rit bit_rack_bytes");
+    ok = ok &&
+         rit_fwrite(&entry->nonplaythrough_has_word_of_length_bitmask,
+                    sizeof(uint8_t), 1, stream) &&
+         rit_fwrite(&entry->num_bingo_words, sizeof(uint8_t), 1, stream) &&
+         rit_fwrite(entry->bingo_words, sizeof(MachineLetter),
+                    RIT_MAX_INLINE_BINGO_WORDS * RACK_SIZE, stream) &&
+         rit_fwrite(entry->best_exchange_strip, sizeof(MachineLetter),
+                    RACK_SIZE, stream) &&
+         rit_fwrite(&entry->best_exchange_tiles_exchanged, sizeof(uint8_t), 1,
+                    stream) &&
+         rit_fwrite(entry->pad, sizeof(uint8_t), sizeof(entry->pad), stream) &&
+         rit_fwrite(entry->bit_rack_bytes, sizeof(uint8_t),
+                    RACK_INFO_TABLE_BITRACK_BYTES, stream);
   }
+  return ok;
 #endif
 }
 
@@ -517,22 +516,35 @@ static inline void rack_info_table_write_to_file(const RackInfoTable *rit,
     free(temporary);
     return;
   }
-  const uint8_t version = rit->version;
-  fwrite_or_die(&version, sizeof(version), 1, stream, "rit version");
-  const uint8_t rack_size = rit->rack_size;
-  fwrite_or_die(&rack_size, sizeof(rack_size), 1, stream, "rit rack size");
-  const uint8_t min_played = rit->playthrough_min_played_size;
-  fwrite_or_die(&min_played, sizeof(min_played), 1, stream,
-                "rit playthrough min played size");
-  const uint8_t padding = 0;
-  fwrite_or_die(&padding, sizeof(padding), 1, stream, "rit header padding");
-
-  rit_write_uint32_or_die(rit->num_buckets, stream, "rit num buckets");
-  rit_write_uint32_or_die(rit->num_entries, stream, "rit num entries");
-  rit_write_uint32s_or_die(rit->bucket_starts, (size_t)rit->num_buckets + 1,
-                           stream, "rit bucket starts");
-  rit_write_entries_or_die(rit->entries, rit->num_entries, stream);
-  fclose_or_die(stream);
+  const uint8_t header[4] = {rit->version, rit->rack_size,
+                             rit->playthrough_min_played_size, 0};
+  errno = 0;
+  bool written = rit_fwrite(header, sizeof(uint8_t), sizeof(header), stream) &&
+                 rit_write_uint32(rit->num_buckets, stream) &&
+                 rit_write_uint32(rit->num_entries, stream) &&
+                 rit_write_uint32s(rit->bucket_starts,
+                                   (size_t)rit->num_buckets + 1, stream) &&
+                 rit_write_entries(rit->entries, rit->num_entries, stream);
+  int error_number = written ? 0 : errno;
+  // A full disk often shows only here, when the buffered tail is flushed.
+  if (fclose(stream) != 0) {
+    if (written) {
+      error_number = errno;
+    }
+    written = false;
+  }
+  if (!written) {
+    // The partial table goes now, not an hour from now (temporary_sibling's
+    // sweep): it holds the space whose lack stopped the write.
+    (void)remove(temporary);
+    error_stack_push(
+        error_stack, ERROR_STATUS_RW_WRITE_ERROR,
+        get_formatted_string("could not write rack info table %s: %s", filename,
+                             error_number != 0 ? strerror(error_number)
+                                               : "unknown I/O failure"));
+    free(temporary);
+    return;
+  }
   rename_into_place(temporary, filename, "rack info table", error_stack);
   free(temporary);
 }
