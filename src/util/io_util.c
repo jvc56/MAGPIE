@@ -573,17 +573,6 @@ void fwrite_or_die(const void *ptr, size_t size, size_t nmemb, FILE *stream,
   }
 }
 
-FILE *popen_or_die(const char *command, const char *mode) {
-  // Using popen is safe here because command is constructed with properly
-  // quoted arguments
-  FILE *pipe = popen(command, mode); // NOLINT(cert-env33-c)
-  if (!pipe) {
-    fprintf_or_die(stderr, "Failed to execute command: %s\n", command);
-    exit(EXIT_FAILURE);
-  }
-  return pipe;
-}
-
 bool path_is_directory(const char *path) {
   if (!path) {
     return false;

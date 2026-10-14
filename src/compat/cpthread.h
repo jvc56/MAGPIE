@@ -61,7 +61,7 @@ static inline void cpthread_cond_timedwait_loop(cpthread_cond_t *cond,
   clock_gettime(CLOCK_REALTIME, &ts);
   ts.tv_sec += timeout_seconds;
   cpthread_mutex_lock(mutex);
-  while (!done) {
+  while (!*done) {
     cpthread_cond_timedwait(cond, mutex, &ts);
   }
   cpthread_mutex_unlock(mutex);

@@ -399,8 +399,6 @@ void fwrite_or_die(const void *ptr, size_t size, size_t nmemb, FILE *stream,
                    const char *description);
 void fprintf_or_die(FILE *stream, const char *format, ...);
 
-FILE *popen_or_die(const char *command, const char *mode);
-
 bool path_is_directory(const char *path);
 
 // Identity of a file's *contents*, as far as the filesystem can report it:

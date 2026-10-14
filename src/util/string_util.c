@@ -1033,26 +1033,6 @@ char *json_unescape_string(const char *json_string) {
   return unescaped;
 }
 
-char *get_process_output(const char *cmd) {
-  FILE *pipe = popen_or_die(cmd, "r");
-
-  StringBuilder *content_builder = string_builder_create();
-  char *buffer = NULL;
-  size_t buffer_size = 0;
-
-  while (getline_ignore_carriage_return(&buffer, &buffer_size, pipe) != -1) {
-    string_builder_add_string(content_builder, buffer);
-  }
-
-  free(buffer);
-  int status = pclose(pipe);
-  if (status != 0) {
-    string_builder_destroy(content_builder);
-    return NULL; // The command failed
-  }
-  return string_builder_dump_and_destroy(content_builder, NULL);
-}
-
 // ****************************************************************************
 // ***************************** String Grid **********************************
 // ****************************************************************************
