@@ -1,0 +1,32 @@
+loaded config with command: set -threads 1 -savesettings false -hr false -numplays 15 -ima 0 -minp 100 -autosave false -fgrequired false
+seed: 1792005672
+loaded config with command: set -lex NWL23 -wmp true -threads 1 -s1 equity -s2 equity
+seed: 1792005673
+
+   ＡＢＣＤＥＦＧＨＩＪＫＬＭＮＯ  ➤ Player 1           0
+  ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓   Player 2           0
+ 1┃＝　　＇　　　＝　　　＇　　＝┃   
+ 2┃　－　　　＂　　　＂　　　－　┃   Unseen: 100 (42v | 56c)
+ 3┃　　－　　　＇　＇　　　－　　┃   ? ? A A A A A A A A 
+ 4┃＇　　－　　　＇　　　－　　＇┃   A B B C C D D D D E 
+ 5┃　　　　－　　　　　－　　　　┃   E E E E E E E E E E 
+ 6┃　＂　　　＂　　　＂　　　＂　┃   E F F G G G H H I I 
+ 7┃　　＇　　　＇　＇　　　＇　　┃   I I I I I I I J K L 
+ 8┃＝　　＇　　　－　　　＇　　＝┃   L L L M M N N N N N 
+ 9┃　　＇　　　＇　＇　　　＇　　┃   N O O O O O O O O P 
+10┃　＂　　　＂　　　＂　　　＂　┃   P Q R R R R R R S S 
+11┃　　　　－　　　　　－　　　　┃   S S T T T T T T U U 
+12┃＇　　－　　　＇　　　－　　＇┃   U U V V W W X Y Y Z 
+13┃　　－　　　＇　＇　　　－　　┃   
+14┃　－　　　＂　　　＂　　　－　┃   
+15┃＝　　＇　　　＝　　　＇　　＝┃   
+  ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛ 
+
+loaded config with command: new
+seed: 1792005674
+peg1cont board 746 seed 202610144617 27.7s
+peg1cont board 714 seed 202610144495 156.4s
+peg1cont board 682 seed 202610144345 11.9s
+peg1cont board 650 seed 202610144223 23.0s
+peg1cont board 618 seed 202610144084 93.3s
+peg1cont board 586 seed 202610143966 84.9s
