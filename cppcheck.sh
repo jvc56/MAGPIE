@@ -116,6 +116,7 @@ if [ "${CPPCHECK_EXIT_CODE}" -eq 0 ]; then
         --suppress='*:*/sha256.h' \
         --std=c99 \
         --error-exitcode=1 \
+        --suppress=unmatchedSuppression \
         -D_WIN32 \
         -U__APPLE__ \
         -U__EMSCRIPTEN__ \

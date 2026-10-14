@@ -801,12 +801,14 @@ void cfile_lock_close(int lock) {
 #endif
 }
 
-// localtime_s writes through `local`, which cppcheck's Windows pass does not
-// know.
-// cppcheck-suppress constParameterPointer
 bool cfile_localtime(time_t time, struct tm *local) {
 #if defined(_WIN32)
-  return localtime_s(local, &time) == 0;
+  struct tm converted = {0};
+  if (localtime_s(&converted, &time) != 0) {
+    return false;
+  }
+  *local = converted;
+  return true;
 #else
   return localtime_r(&time, local) != NULL;
 #endif

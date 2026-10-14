@@ -423,11 +423,15 @@ static bool gzip_test_decompress(const unsigned char *gzip, size_t length,
 void test_gzip_reader(void) {
   // Real gzip output, with dynamic and with fixed Huffman codes.
   GzipTestOutput output;
-  assert(gzip_test_decompress(dynamic_gzip, sizeof(dynamic_gzip), &output));
+  bool decompressed = false;
+  decompressed =
+      gzip_test_decompress(dynamic_gzip, sizeof(dynamic_gzip), &output);
+  assert(decompressed);
   assert(output.length == GZIP_TEST_TEXT_BYTES);
   assert(xs_crc32(output.bytes, output.length) == GZIP_TEST_TEXT_CRC);
   unsigned char *text = output.bytes;
-  assert(gzip_test_decompress(fixed_gzip, sizeof(fixed_gzip), &output));
+  decompressed = gzip_test_decompress(fixed_gzip, sizeof(fixed_gzip), &output);
+  assert(decompressed);
   assert(output.length == GZIP_TEST_FIXED_TEXT_BYTES);
   assert(memcmp(output.bytes, text, GZIP_TEST_FIXED_TEXT_BYTES) == 0);
   free(output.bytes);
@@ -444,8 +448,9 @@ void test_gzip_reader(void) {
   char *compressed =
       xs_gzip(random_bytes, GZIP_TEST_ROUND_TRIP_BYTES, &compressed_length);
   assert(compressed);
-  assert(gzip_test_decompress((const unsigned char *)compressed,
-                              compressed_length, &output));
+  decompressed = gzip_test_decompress((const unsigned char *)compressed,
+                                      compressed_length, &output);
+  assert(decompressed);
   assert(output.length == GZIP_TEST_ROUND_TRIP_BYTES);
   assert(output.calls > 1);
   assert(memcmp(output.bytes, random_bytes, GZIP_TEST_ROUND_TRIP_BYTES) == 0);
@@ -456,8 +461,9 @@ void test_gzip_reader(void) {
       malloc_or_die(compressed_length + sizeof(fixed_gzip));
   memcpy(concatenated, compressed, compressed_length);
   memcpy(concatenated + compressed_length, fixed_gzip, sizeof(fixed_gzip));
-  assert(gzip_test_decompress(concatenated,
-                              compressed_length + sizeof(fixed_gzip), &output));
+  decompressed = gzip_test_decompress(
+      concatenated, compressed_length + sizeof(fixed_gzip), &output);
+  assert(decompressed);
   assert(output.length ==
          GZIP_TEST_ROUND_TRIP_BYTES + GZIP_TEST_FIXED_TEXT_BYTES);
   free(output.bytes);
@@ -470,13 +476,16 @@ void test_gzip_reader(void) {
   unsigned char *corrupt = malloc_or_die(sizeof(dynamic_gzip));
   memcpy(corrupt, dynamic_gzip, sizeof(dynamic_gzip));
   corrupt[sizeof(dynamic_gzip) - 9] ^= 1;
-  assert(!gzip_test_decompress(corrupt, sizeof(dynamic_gzip), &output));
+  decompressed = gzip_test_decompress(corrupt, sizeof(dynamic_gzip), &output);
+  assert(!decompressed);
   free(output.bytes);
-  assert(
-      !gzip_test_decompress(dynamic_gzip, sizeof(dynamic_gzip) / 2, &output));
+  decompressed =
+      gzip_test_decompress(dynamic_gzip, sizeof(dynamic_gzip) / 2, &output);
+  assert(!decompressed);
   free(output.bytes);
-  assert(!gzip_test_decompress((const unsigned char *)"not gzip at all", 15,
-                               &output));
+  decompressed = gzip_test_decompress((const unsigned char *)"not gzip at all",
+                                      15, &output);
+  assert(!decompressed);
   free(output.bytes);
   free(corrupt);
   free(text);
