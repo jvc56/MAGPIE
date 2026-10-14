@@ -3,6 +3,9 @@
 #
 #   tools/peg1cont/run_vm.sh VM_IDX NUM_VMS BOARDS [PROCS]
 #
+# Rerunning resumes: set RUN_TAG (e.g. .r1) so the new run writes
+# results/shard-<k><RUN_TAG>.jsonl and skips boards already complete in that
+# shard's earlier result files.
 # Fetches NWL23 data if missing, builds the optimized test binary, and runs
 # PROCS single-threaded processes. Process p on VM v scores the boards whose
 # index % (NUM_VMS * PROCS) == v * PROCS + p. Extra PEG1C_* variables in the
@@ -49,11 +52,13 @@ push_results() {
 mkdir -p results
 NSHARDS=$((NVM * PROCS))
 pids=()
+RUN_TAG=${RUN_TAG:-}
 for p in $(seq 0 $((PROCS - 1))); do
   SHARD=$((VM * PROCS + p))
-  PEG1C_OUT="results/shard-$SHARD.jsonl" PEG1C_SHARD=$SHARD \
-    PEG1C_NSHARDS=$NSHARDS PEG1C_BOARDS=$BOARDS \
-    ./bin/magpie_test peg1cont > "results/shard-$SHARD.log" 2>&1 &
+  SKIP=$(ls results/shard-"$SHARD".jsonl results/shard-"$SHARD".*.jsonl 2> /dev/null | paste -sd, - || true)
+  PEG1C_OUT="results/shard-$SHARD$RUN_TAG.jsonl" PEG1C_SKIP_FROM="$SKIP" \
+    PEG1C_SHARD=$SHARD PEG1C_NSHARDS=$NSHARDS PEG1C_BOARDS=$BOARDS \
+    ./bin/magpie_test peg1cont > "results/shard-$SHARD$RUN_TAG.log" 2>&1 &
   pids+=($!)
 done
 
@@ -78,6 +83,6 @@ status=0
 for pid in "${pids[@]}"; do
   wait "$pid" || status=1
 done
-echo "exit $status" > results/vm$VM.done
+echo "exit $status" > "results/vm$VM$RUN_TAG.done"
 push_results
 exit $status

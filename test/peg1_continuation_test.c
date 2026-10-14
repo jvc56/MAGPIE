@@ -44,6 +44,8 @@
 //   PEG1C_PEG_THREADS  threads for the default PEG (default 1)
 //   PEG1C_TT           transposition table fraction of memory, each of two
 //                      tables (default 0.03)
+//   PEG1C_SKIP_FROM    comma-separated JSONL files from earlier runs; boards
+//                      with a complete line there are skipped
 
 #include "peg1_continuation_test.h"
 
@@ -90,6 +92,7 @@ enum {
   P1C_ALL_MOVES_CAPACITY = 4096,
   P1C_MAX_ATTEMPTS = 10000000,
   P1C_TWO_PLY = 2,
+  P1C_LINE_SIZE = 1 << 16,
 };
 
 typedef struct P1CHarness {
@@ -268,6 +271,46 @@ static int p1c_solve(P1CHarness *harness, Game *game, int plies,
   return value;
 }
 
+static void p1c_peg(P1CHarness *harness, const Game *chooser_game,
+                    bool greedy_seed_only, const Move *const *only_moves,
+                    int n_only_moves, Move *out) {
+  static const int stage_top_k[] = {32, 16, 8, 4, 2};
+  static const int nested_cand_caps[] = {8, 4, 2};
+  static const int nested_strides[] = {0, 1, 1, 5, 7};
+  ThreadControl *thread_control = thread_control_create();
+  thread_control_set_status(thread_control, THREAD_CONTROL_STATUS_STARTED);
+  const bool nested = !greedy_seed_only;
+  PegArgs args;
+  peg_args_fill(
+      chooser_game, thread_control, greedy_seed_only ? 1 : harness->peg_threads,
+      /*time_budget_seconds=*/0.0, /*max_stage=*/0, greedy_seed_only,
+      stage_top_k, (int)(sizeof(stage_top_k) / sizeof(stage_top_k[0])),
+      /*inner_top_k=*/0, PEG_OPP_RATIONAL, /*scenario_stride=*/1, nested,
+      /*nested_cand_cap=*/0, nested ? nested_cand_caps : NULL,
+      nested ? (int)(sizeof(nested_cand_caps) / sizeof(nested_cand_caps[0]))
+             : 0,
+      /*nested_stride=*/0, nested ? nested_strides : NULL,
+      nested ? (int)(sizeof(nested_strides) / sizeof(nested_strides[0])) : 0,
+      /*nested_emptier_ply_cap=*/0, nested ? PEG_NESTED_DEFAULT_DEPTH : 0,
+      /*eval_bag_order=*/NULL, /*eval_bag_order_len=*/0, only_moves,
+      n_only_moves, /*protect_moves=*/NULL, /*n_protect_moves=*/0,
+      /*include_per_scenario=*/false, /*on_stage_start=*/NULL,
+      /*on_cand_done=*/NULL, /*on_scenario_done=*/NULL, /*user_data=*/NULL,
+      /*poll=*/NULL, harness->tt_exact, /*checkpoint=*/NULL,
+      /*resume=*/false, &args);
+  PegResult result = {0};
+  ErrorStack *error_stack = error_stack_create();
+  peg_solve(&args, &result, error_stack);
+  if (!error_stack_is_empty(error_stack) || result.n_top_cands == 0) {
+    error_stack_print_and_reset(error_stack);
+    log_fatal("peg1cont: peg_solve failed");
+  }
+  error_stack_destroy(error_stack);
+  thread_control_destroy(thread_control);
+  move_copy(out, &result.best_move);
+  peg_result_destroy(&result);
+}
+
 // ----- continuations ---------------------------------------------------------
 
 typedef enum {
@@ -275,9 +318,22 @@ typedef enum {
   P1C_CONT_TWO_PLY,
 } p1c_playout_t;
 
-// Plays `move` on a copy of the real position (drawing the real last tile),
-// then plays the game out with `kind` for both players. Returns the mover's
-// final spread.
+// A turn taken while the bag still holds the last tile, which happens only
+// after a pass at the 1PEG: static top-1, or MAGPIE's default PEG pick when
+// `use_peg` (the exact continuation's best stand-in for perfect play there).
+static void p1c_play_peg_turn(P1CHarness *harness, Game *game, bool use_peg) {
+  Move next;
+  if (use_peg) {
+    p1c_peg(harness, game, /*greedy_seed_only=*/false, NULL, 0, &next);
+  } else {
+    move_copy(&next, get_top_equity_move(game, harness->best_list));
+  }
+  play_move(&next, game, NULL);
+}
+
+// Plays `move` on a copy of the real position (drawing the real last tile if
+// it places tiles), then plays the game out with `kind` for both players.
+// Returns the mover's final spread.
 static int p1c_playout(P1CHarness *harness, const Game *real, const Move *move,
                        p1c_playout_t kind) {
   const int mover = game_get_player_on_turn_index(real);
@@ -288,9 +344,8 @@ static int p1c_playout(P1CHarness *harness, const Game *real, const Move *move,
     if (game_get_game_end_reason(game) != GAME_END_REASON_NONE) {
       break;
     }
-    if (kind == P1C_CONT_STATIC) {
-      const Move *next = get_top_equity_move(game, harness->best_list);
-      play_move(next, game, NULL);
+    if (kind == P1C_CONT_STATIC || bag_get_letters(game_get_bag(game)) > 0) {
+      p1c_play_peg_turn(harness, game, /*use_peg=*/false);
     } else {
       Move next;
       (void)p1c_solve(harness, game, P1C_TWO_PLY, harness->tt_two, &next);
@@ -302,24 +357,42 @@ static int p1c_playout(P1CHarness *harness, const Game *real, const Move *move,
 }
 
 // The mover's final spread when both sides play the rest of the game
-// perfectly after `move`.
+// perfectly after `move`. Sets *proven to whether the endgame solve proved
+// its value (it stopped on a pure root before the ply cap).
 static int p1c_exact(P1CHarness *harness, const Game *real, const Move *move,
-                     double *ms) {
+                     double *ms, bool *proven) {
   Timer timer;
   ctimer_start(&timer);
   const int mover = game_get_player_on_turn_index(real);
   p1c_copy_into(&harness->playout, real);
   Game *game = harness->playout;
   play_move(move, game, NULL);
+  for (int ply = 0; ply < P1C_MAX_PLAYOUT_PLIES &&
+                    game_get_game_end_reason(game) == GAME_END_REASON_NONE &&
+                    bag_get_letters(game_get_bag(game)) > 0;
+       ply++) {
+    p1c_play_peg_turn(harness, game, /*use_peg=*/true);
+  }
+  *proven = true;
   int spread = p1c_spread(game, mover);
   if (game_get_game_end_reason(game) == GAME_END_REASON_NONE) {
-    // The opponent is on turn; the solve's value is what the rest of the
-    // game nets the opponent.
+    // The solve's value is what the rest of the game nets the player on turn.
+    const int on_turn = game_get_player_on_turn_index(game);
     const int value =
         p1c_solve(harness, game, harness->exact_plies, harness->tt_exact, NULL);
+    int depth = 0;
+    int root_done = 0;
+    int root_total = 0;
+    int ply2_done = 0;
+    int ply2_total = 0;
+    endgame_ctx_get_progress(harness->endgame_ctx, &depth, &root_done,
+                             &root_total, &ply2_done, &ply2_total);
+    *proven = depth < harness->exact_plies;
     const Player *me = game_get_player(game, mover);
     const Player *op = game_get_player(game, 1 - mover);
-    spread = equity_to_int(player_get_score(me) - player_get_score(op)) - value;
+    const int spread_now =
+        equity_to_int(player_get_score(me) - player_get_score(op));
+    spread = on_turn == mover ? spread_now + value : spread_now - value;
   }
   *ms = p1c_elapsed_ms(&timer);
   return spread;
@@ -474,46 +547,6 @@ static void p1c_rank_by_leaf(P1CHarness *harness, const Game *chooser_game,
   if (win_out != NULL) {
     move_copy(win_out, &cands[best_win_idx]);
   }
-}
-
-static void p1c_peg(P1CHarness *harness, const Game *chooser_game,
-                    bool greedy_seed_only, const Move *const *only_moves,
-                    int n_only_moves, Move *out) {
-  static const int stage_top_k[] = {32, 16, 8, 4, 2};
-  static const int nested_cand_caps[] = {8, 4, 2};
-  static const int nested_strides[] = {0, 1, 1, 5, 7};
-  ThreadControl *thread_control = thread_control_create();
-  thread_control_set_status(thread_control, THREAD_CONTROL_STATUS_STARTED);
-  const bool nested = !greedy_seed_only;
-  PegArgs args;
-  peg_args_fill(
-      chooser_game, thread_control, greedy_seed_only ? 1 : harness->peg_threads,
-      /*time_budget_seconds=*/0.0, /*max_stage=*/0, greedy_seed_only,
-      stage_top_k, (int)(sizeof(stage_top_k) / sizeof(stage_top_k[0])),
-      /*inner_top_k=*/0, PEG_OPP_RATIONAL, /*scenario_stride=*/1, nested,
-      /*nested_cand_cap=*/0, nested ? nested_cand_caps : NULL,
-      nested ? (int)(sizeof(nested_cand_caps) / sizeof(nested_cand_caps[0]))
-             : 0,
-      /*nested_stride=*/0, nested ? nested_strides : NULL,
-      nested ? (int)(sizeof(nested_strides) / sizeof(nested_strides[0])) : 0,
-      /*nested_emptier_ply_cap=*/0, nested ? PEG_NESTED_DEFAULT_DEPTH : 0,
-      /*eval_bag_order=*/NULL, /*eval_bag_order_len=*/0, only_moves,
-      n_only_moves, /*protect_moves=*/NULL, /*n_protect_moves=*/0,
-      /*include_per_scenario=*/false, /*on_stage_start=*/NULL,
-      /*on_cand_done=*/NULL, /*on_scenario_done=*/NULL, /*user_data=*/NULL,
-      /*poll=*/NULL, harness->tt_exact, /*checkpoint=*/NULL,
-      /*resume=*/false, &args);
-  PegResult result = {0};
-  ErrorStack *error_stack = error_stack_create();
-  peg_solve(&args, &result, error_stack);
-  if (!error_stack_is_empty(error_stack) || result.n_top_cands == 0) {
-    error_stack_print_and_reset(error_stack);
-    log_fatal("peg1cont: peg_solve failed");
-  }
-  error_stack_destroy(error_stack);
-  thread_control_destroy(thread_control);
-  move_copy(out, &result.best_move);
-  peg_result_destroy(&result);
 }
 
 // ----- boards ----------------------------------------------------------------
@@ -711,17 +744,48 @@ static void p1c_score_board(P1CHarness *harness, int board_idx, uint64_t seed,
     const int two_ply_spread =
         p1c_playout(harness, real, pick_move, P1C_CONT_TWO_PLY);
     double exact_ms = 0.0;
-    const int exact_spread = p1c_exact(harness, real, pick_move, &exact_ms);
+    bool exact_proven = false;
+    const int exact_spread =
+        p1c_exact(harness, real, pick_move, &exact_ms, &exact_proven);
     (void)fprintf(out, "%s", num_written ? "," : "");
     p1c_json_string(out, picks[pick_idx].move_str);
     (void)fprintf(out,
                   ":{\"static\":%d,\"twoply\":%d,\"exact\":%d,"
-                  "\"exact_ms\":%.1f}",
-                  static_spread, two_ply_spread, exact_spread, exact_ms);
+                  "\"exact_ms\":%.1f,\"exact_complete\":%s}",
+                  static_spread, two_ply_spread, exact_spread, exact_ms,
+                  exact_proven ? "true" : "false");
     num_written++;
   }
   (void)fprintf(out, "}}\n");
   (void)fflush(out);
+}
+
+// Marks done[id] for every complete record (a whole line from `{"id":` to
+// the closing `}}`) in each comma-separated file of `paths`. A record cut off
+// by a crash is not complete, so its board is scored again.
+static void p1c_mark_done(const char *paths, bool *done, int num_boards) {
+  char *list = string_duplicate(paths);
+  char *line = malloc_or_die(P1C_LINE_SIZE);
+  for (char *path = strtok(list, ","); path != NULL; path = strtok(NULL, ",")) {
+    FILE *in = fopen(path, "re");
+    if (in == NULL) {
+      continue;
+    }
+    while (fgets(line, P1C_LINE_SIZE, in) != NULL) {
+      const size_t len = strlen(line);
+      if (strncmp(line, "{\"id\":", 6) != 0 || len < 3 ||
+          strncmp(line + len - 3, "}}\n", 3) != 0) {
+        continue;
+      }
+      const int id = (int)strtol(line + 6, NULL, 10);
+      if (id >= 0 && id < num_boards) {
+        done[id] = true;
+      }
+    }
+    (void)fclose(in);
+  }
+  free(line);
+  free(list);
 }
 
 void test_peg1_continuation(void) {
@@ -764,6 +828,11 @@ void test_peg1_continuation(void) {
   harness.pegfull_boards = env_int("PEG1C_PEGFULL", 0);
   harness.peg_threads = env_int("PEG1C_PEG_THREADS", 1);
 
+  bool *done = calloc_or_die((size_t)num_boards, sizeof(bool));
+  const char *skip_from = getenv("PEG1C_SKIP_FROM");
+  if (skip_from != NULL && *skip_from != '\0') {
+    p1c_mark_done(skip_from, done, num_boards);
+  }
   FILE *out = fopen_or_die(out_path, "ae");
   int board_idx = 0;
   for (int attempt = 0; board_idx < num_boards && attempt < P1C_MAX_ATTEMPTS;
@@ -772,7 +841,7 @@ void test_peg1_continuation(void) {
     if (!p1c_play_to_1peg(&harness, seed)) {
       continue;
     }
-    if (board_idx % num_shards == shard) {
+    if (board_idx % num_shards == shard && !done[board_idx]) {
       Timer timer;
       ctimer_start(&timer);
       p1c_score_board(&harness, board_idx, seed, out);
@@ -783,6 +852,7 @@ void test_peg1_continuation(void) {
     board_idx++;
   }
   (void)fclose(out);
+  free(done);
 
   game_destroy(harness.world);
   game_destroy(harness.playout);
