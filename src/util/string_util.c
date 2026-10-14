@@ -4,6 +4,7 @@
 #include <assert.h>
 #include <ctype.h>
 #include <errno.h>
+#include <inttypes.h>
 #include <stdarg.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -92,15 +93,11 @@ void string_builder_add_formatted_string(StringBuilder *string_builder,
 void string_builder_add_space_padded_string(StringBuilder *string_builder,
                                             const char *string,
                                             size_t total_length) {
-  // string is a format string potentially containing escape sequences, but must
-  // have no arguments.
-  char *formatted_string = get_formatted_string(string);
-  const size_t printed_length = strlen(formatted_string);
-  string_builder_add_string(string_builder, formatted_string);
+  const size_t printed_length = strlen(string);
+  string_builder_add_string(string_builder, string);
   const size_t number_of_spaces =
       total_length > printed_length ? total_length - printed_length : 0;
   string_builder_add_spaces(string_builder, (int)number_of_spaces);
-  free(formatted_string);
 }
 
 void string_builder_add_table_row(StringBuilder *string_builder,
@@ -124,7 +121,7 @@ void string_builder_add_spaces(StringBuilder *string_builder,
 }
 
 void string_builder_add_int(StringBuilder *string_builder, int64_t n) {
-  string_builder_add_formatted_string(string_builder, "%d", n);
+  string_builder_add_formatted_string(string_builder, "%" PRId64, n);
 }
 
 void string_builder_add_char(StringBuilder *string_builder, char c) {

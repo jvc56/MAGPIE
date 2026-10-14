@@ -57,7 +57,7 @@ void string_builder_add_simmed_play_ply_counts(StringBuilder *sb,
 
   string_grid_set_cell(sg, curr_row, 0, string_duplicate("Iters:"));
   string_grid_set_cell(sg, curr_row, 1,
-                       get_formatted_string("%lu", move_type_total));
+                       get_formatted_string("%" PRIu64, move_type_total));
   curr_row++;
 
   string_grid_set_cell(sg, curr_row, 0, string_duplicate("Ply:"));
@@ -74,7 +74,7 @@ void string_builder_add_simmed_play_ply_counts(StringBuilder *sb,
     string_grid_set_cell(sg, curr_row, curr_col++,
                          get_formatted_string("%.2f%%", pct));
     string_grid_set_cell(sg, curr_row, curr_col++,
-                         get_formatted_string("%lu", counts[i]));
+                         get_formatted_string("%" PRIu64, counts[i]));
     curr_row++;
   }
 
@@ -243,7 +243,7 @@ bool string_builder_add_sim_stats_with_display_lock(
 
     string_grid_set_cell(
         sg, curr_row, curr_col++,
-        get_formatted_string("%lu", simmed_play_get_num_rollouts(sp)));
+        get_formatted_string("%" PRIu64, simmed_play_get_num_rollouts(sp)));
 
     for (int j = 0; j < num_display_plies; j++) {
       const Stat *score_stat = simmed_play_get_score_stat(sp, j);
@@ -283,7 +283,7 @@ bool string_builder_add_sim_stats_with_display_lock(
   string_grid_set_cell(summary_sg, curr_row, 0, string_duplicate("Iters:"));
   string_grid_set_cell(
       summary_sg, curr_row, 1,
-      get_formatted_string("%lu",
+      get_formatted_string("%" PRIu64,
                            sim_results_get_iteration_count(sim_results)));
   curr_row++;
 

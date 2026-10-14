@@ -1069,7 +1069,7 @@ void config_load_uint64(const Config *config, arg_token_t arg_token,
     error_stack_push(
         error_stack, ERROR_STATUS_CONFIG_LOAD_INT_ARG_OUT_OF_BOUNDS,
         get_formatted_string(
-            "integer value for %s must be at least %lu, but got %s",
+            "integer value for %s must be at least %" PRIu64 ", but got %s",
             config_get_parg_name(config, arg_token), min, int_str));
     return;
   } else {

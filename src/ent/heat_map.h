@@ -7,6 +7,7 @@
 #include "../util/string_util.h"
 #include "move.h"
 #include <assert.h>
+#include <inttypes.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -198,7 +199,7 @@ static inline void string_builder_add_heat_map(StringBuilder *sb,
         get_formatted_string("%d%c", squares[i].row + 1,
                              squares[i].col + ASCII_UPPERCASE_A));
     string_grid_set_cell(sg, curr_row, curr_col++,
-                         get_formatted_string("%lu", squares[i].count));
+                         get_formatted_string("%" PRIu64, squares[i].count));
   }
   string_builder_add_string_grid(sb, sg, false);
   string_grid_destroy(sg);

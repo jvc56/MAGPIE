@@ -1,6 +1,7 @@
 #ifndef IO_UTIL_H
 #define IO_UTIL_H
 
+#include "../compat/cformat.h"
 #include <dirent.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -326,13 +327,14 @@ typedef enum {
 #define log_fatal(...) log_with_info(LOG_FATAL, __FILE__, __LINE__, __VA_ARGS__)
 
 void log_with_info(log_level_t log_level, const char *caller_filename,
-                   int caller_line, const char *format, ...);
+                   int caller_line, const char *format, ...)
+    CFORMAT_PRINTF(4, 5);
 
 FILE *get_stream_out(void);
 FILE *get_stream_err(void);
 FILE *get_stream_in(void);
-void write_to_stream_out(const char *fmt, ...);
-void write_to_stream(FILE *stream, const char *fmt, ...);
+void write_to_stream_out(const char *fmt, ...) CFORMAT_PRINTF(1, 2);
+void write_to_stream(FILE *stream, const char *fmt, ...) CFORMAT_PRINTF(2, 3);
 ssize_t getline_ignore_carriage_return(char **lineptr, size_t *n, FILE *stream);
 char *read_line_from_stream_in(void);
 
@@ -358,9 +360,10 @@ void io_set_stream_in(FILE *stream);
 void io_reset_stream_in(void);
 
 char *format_string_with_va_list(const char *format, va_list *args);
-char *get_formatted_string(const char *format, ...);
+char *get_formatted_string(const char *format, ...) CFORMAT_PRINTF(1, 2);
 void fflush_or_die(FILE *stream);
-void snprintf_or_die(char *buf, size_t buf_size, const char *format, ...);
+void snprintf_or_die(char *buf, size_t buf_size, const char *format, ...)
+    CFORMAT_PRINTF(3, 4);
 void *malloc_or_die(size_t size);
 void *calloc_or_die(size_t num, size_t size);
 void *realloc_or_die(void *realloc_target, size_t size);
@@ -397,7 +400,7 @@ DIR *opendir_safe(const char *dir_path, ErrorStack *error_stack);
 void fclose_or_die(FILE *stream);
 void fwrite_or_die(const void *ptr, size_t size, size_t nmemb, FILE *stream,
                    const char *description);
-void fprintf_or_die(FILE *stream, const char *format, ...);
+void fprintf_or_die(FILE *stream, const char *format, ...) CFORMAT_PRINTF(2, 3);
 
 bool path_is_directory(const char *path);
 

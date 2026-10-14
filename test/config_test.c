@@ -25,6 +25,7 @@
 #include "test_constants.h"
 #include "test_util.h"
 #include <assert.h>
+#include <inttypes.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -250,7 +251,7 @@ void test_config_load_success(void) {
       "set -ld %s -bb %d -var %s -l1 %s -l2 %s -s1 %s -r1 "
       "%s -s2 %s -r2 %s  -numplays %d "
       "-plies %d -it "
-      "%lu -scond %d -seed %d -threads %d -pfreq %d -gp true -hr true ",
+      "%" PRIu64 " -scond %d -seed %d -threads %d -pfreq %d -gp true -hr true ",
       ld_name, bingo_bonus, game_variant, l1, l2, s1, r1, s2, r2, num_plays,
       plies, max_iterations, stopping_cond, seed, number_of_threads,
       print_info);
@@ -293,7 +294,7 @@ void test_config_load_success(void) {
   string_builder_add_formatted_string(
       test_string_builder,
       "set -ld %s -bb %d -l1 %s -l2 %s  -s1 "
-      "%s -r1 %s -s2 %s -r2 %s -plies %d -it %d "
+      "%s -r1 %s -s2 %s -r2 %s -plies %d -it %" PRIu64 " "
       "-threads %d "
       "-pfreq %d -gp false -hr false",
       ld_name, bingo_bonus, l1, l2, s1, r1, s2, r2, plies, max_iterations,

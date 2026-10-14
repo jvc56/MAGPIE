@@ -16,6 +16,7 @@
 #include "../util/fileproxy.h"
 #include "../util/io_util.h"
 #include "../util/string_util.h"
+#include <inttypes.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -50,7 +51,7 @@ void klv_write_row(void *data, uint32_t word_index) {
   if (klv_write_data->leave_counts) {
     const uint64_t leave_count = klv_write_data->leave_counts[word_index];
     string_builder_add_formatted_string(klv_write_data->string_builder,
-                                        ",%lu\n", leave_count);
+                                        ",%" PRIu64 "\n", leave_count);
   } else {
     const double value = equity_to_double(
         klv_get_indexed_leave_value(klv_write_data->klv, word_index));

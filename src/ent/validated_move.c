@@ -271,7 +271,7 @@ void validate_tiles_played(const LetterDistribution *ld, const Board *board,
         error_stack, ERROR_STATUS_MOVE_VALIDATION_TILES_PLAYED_OUT_OF_BOUNDS,
         get_formatted_string(
             "played more tiles (%d) than can fit on the board (%d)",
-            tiles_played, BOARD_DIM));
+            number_of_machine_letters, BOARD_DIM));
   } else {
     validate_tiles_played_with_mls(
         board, machine_letters, number_of_machine_letters, move,

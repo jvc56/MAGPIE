@@ -50,6 +50,7 @@
 #include "play_chooser.h"
 #include "rack_list.h"
 #include "simmer.h"
+#include <inttypes.h>
 #include <math.h>
 #include <stdatomic.h>
 #include <stdbool.h>
@@ -1395,14 +1396,14 @@ void print_current_status(AutoplayWorker *autoplay_worker,
   StringBuilder *status_sb = string_builder_create();
   AutoplaySharedData *shared_data = autoplay_worker->shared_data;
   string_builder_add_formatted_string(
-      status_sb, "Played %ld games in %.3f seconds.",
+      status_sb, "Played %" PRIu64 " games in %.3f seconds.",
       iter_completed_output->iter_count_completed,
       iter_completed_output->time_elapsed);
   const LeavegenSharedData *lg_shared_data = shared_data->leavegen_shared_data;
   if (lg_shared_data) {
     string_builder_add_formatted_string(
         status_sb,
-        " Played %ld games in generation %d with %ld rack under target "
+        " Played %" PRIu64 " games in generation %d with %d rack under target "
         "count.\n",
         iter_completed_output->iter_count_completed -
             lg_shared_data->gen_start_games,

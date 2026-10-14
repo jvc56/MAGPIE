@@ -309,7 +309,7 @@ void io_reset_stream_in(void) {
 void *malloc_or_die(size_t size) {
   void *uncasted_pointer = malloc(size);
   if (!uncasted_pointer) {
-    log_fatal("failed to malloc size of %lu", size);
+    log_fatal("failed to malloc size of %zu", size);
   }
   return uncasted_pointer;
 }
@@ -317,7 +317,7 @@ void *malloc_or_die(size_t size) {
 void *calloc_or_die(size_t number_of_elements, size_t size_of_element) {
   void *uncasted_pointer = calloc(number_of_elements, size_of_element);
   if (!uncasted_pointer) {
-    log_fatal("failed to calloc %lu elements of size %lu", number_of_elements,
+    log_fatal("failed to calloc %zu elements of size %zu", number_of_elements,
               size_of_element);
   }
   return uncasted_pointer;
@@ -326,7 +326,7 @@ void *calloc_or_die(size_t number_of_elements, size_t size_of_element) {
 void *realloc_or_die(void *realloc_target, size_t size) {
   void *realloc_result = realloc(realloc_target, size);
   if (!realloc_result) {
-    log_fatal("failed to realloc %p with size of %lu", realloc_target, size);
+    log_fatal("failed to realloc %p with size of %zu", realloc_target, size);
   }
   return realloc_result;
 }

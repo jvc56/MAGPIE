@@ -35,6 +35,7 @@
 #include "sim_results.h"
 #include "stats.h"
 #include "win_pct_counts.h"
+#include <inttypes.h>
 #include <math.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -332,14 +333,18 @@ char *game_data_ucgi_str(const GameData *gd,
                          const RecorderContext *recorder_context) {
   StringBuilder *sb = string_builder_create();
   string_builder_add_formatted_string(
-      sb, "autoplay games %lu %lu %lu %lu %lu %f %f %f %f ", gd->total_games,
-      gd->p0_wins, gd->p0_losses, gd->p0_ties, gd->p0_firsts,
+      sb,
+      "autoplay games %" PRIu64 " %" PRIu64 " %" PRIu64 " %" PRIu64 " %" PRIu64
+      " %f %f %f %f ",
+      gd->total_games, gd->p0_wins, gd->p0_losses, gd->p0_ties, gd->p0_firsts,
       stat_get_mean(gd->p0_score), stat_get_stdev(gd->p0_score),
       stat_get_mean(gd->p1_score), stat_get_stdev(gd->p1_score));
   string_builder_add_game_end_reasons(sb, gd);
   if (recorder_context_uses_play_chooser(recorder_context)) {
     string_builder_add_formatted_string(
-        sb, "playchooser %d %d %.0f %.0f %.3f %.3f %.3f %.3f %lu %lu ",
+        sb,
+        "playchooser %d %d %.0f %.0f %.3f %.3f %.3f %.3f %" PRIu64 " %" PRIu64
+        " ",
         recorder_context->play_chooser_active[0],
         recorder_context->play_chooser_active[1],
         recorder_context->time_control_seconds[0] * 1000.0,
@@ -355,7 +360,7 @@ char *game_data_ucgi_str(const GameData *gd,
 }
 
 char *get_total_int_and_percentage_string(uint64_t total, double pct) {
-  return get_formatted_string("%lu (%2.2f%%%%)", total, pct * 100.0);
+  return get_formatted_string("%" PRIu64 " (%2.2f%%%%)", total, pct * 100.0);
 }
 
 char *get_total_float_and_percentage_string(double total, double pct) {
@@ -459,7 +464,7 @@ string_builder_add_play_chooser_timing(StringBuilder *sb, const GameData *gd,
 
   for (int i = 0; i < 2; i++) {
     values[i] = recorder_context->play_chooser_active[i]
-                    ? get_formatted_string("%lu", gd->overtime_games[i])
+                    ? get_formatted_string("%" PRIu64, gd->overtime_games[i])
                     : string_duplicate("-");
   }
   string_builder_add_table_row(sb, col_width, "Overtime games:", values[0],
@@ -469,7 +474,7 @@ string_builder_add_play_chooser_timing(StringBuilder *sb, const GameData *gd,
 
   for (int i = 0; i < 2; i++) {
     values[i] = recorder_context->play_chooser_active[i]
-                    ? get_formatted_string("%lu", gd->penalty_points[i])
+                    ? get_formatted_string("%" PRIu64, gd->penalty_points[i])
                     : string_duplicate("-");
   }
   string_builder_add_table_row(sb, col_width, "Penalty points:", values[0],
@@ -496,9 +501,9 @@ char *game_data_human_readable_str(const GameData *gd, bool divergent,
     string_builder_add_string(sb, "All Games\n\n");
   }
 
-  string_builder_add_formatted_string(sb, "Games Played: %lu\n",
+  string_builder_add_formatted_string(sb, "Games Played: %" PRIu64 "\n",
                                       gd->total_games);
-  string_builder_add_formatted_string(sb, "Turns Played: %lu\n",
+  string_builder_add_formatted_string(sb, "Turns Played: %" PRIu64 "\n",
                                       gd->total_turns);
 
   if (gd->total_games == 0) {

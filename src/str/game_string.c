@@ -116,7 +116,8 @@ void string_builder_add_player_row(const LetterDistribution *ld,
   }
 
   string_builder_add_formatted_string(game_string, "%s %-*s", player_marker,
-                                      player_name_max_length + 2, player_name);
+                                      (int)player_name_max_length + 2,
+                                      player_name);
 
   if (player_on_turn && should_print_escape_codes(game_string_options) &&
       game_string_option_has_on_turn_color(game_string_options) && !game_over) {
