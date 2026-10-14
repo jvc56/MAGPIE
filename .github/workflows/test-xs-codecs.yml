@@ -11,7 +11,7 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
-      # Merged MAGPIE-DATA #17, pinned independently of data release archives.
+      # Pin codec data so compatibility tests use immutable codebooks and ranking assets.
       - uses: actions/checkout@v4
         with:
           repository: jvc56/MAGPIE-DATA
