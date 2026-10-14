@@ -1,11 +1,12 @@
 #include "io_util.h"
 
+#include "../compat/cdir.h"
 #include "../compat/cfile.h"
+#include "../compat/cpath.h"
 #include "../compat/ctime.h"
 #include "../def/cpthread_defs.h"
 #include <assert.h>
 #include <ctype.h>
-#include <dirent.h>
 #include <errno.h>
 #include <pthread.h>
 #include <stdarg.h>
@@ -551,19 +552,6 @@ void append_string_to_file(const char *filename, const char *string,
   write_string_to_file(filename, "ab", string, error_stack);
 }
 
-DIR *opendir_safe(const char *dir_path, ErrorStack *error_stack) {
-  DIR *dir = opendir(dir_path);
-  if (!dir) {
-    int error_number = errno;
-    const char *system_error_message = strerror(error_number);
-    error_stack_push(
-        error_stack, ERROR_STATUS_RW_FAILED_TO_OPEN_STREAM,
-        get_formatted_string("failed to open directory '%s': %s (%d)", dir_path,
-                             system_error_message, error_number));
-  }
-  return dir;
-}
-
 void fclose_or_die(FILE *stream) {
   if (fclose(stream) != 0) {
     int error_number = errno;
@@ -636,23 +624,23 @@ static bool is_temporary_sibling_of(const char *entry, const char *base) {
 // behind, and nothing else would ever remove it. Best effort: a failure here
 // costs disk, never the write.
 static void remove_stale_temporary_siblings(const char *filename) {
-  const char *slash = strrchr(filename, '/');
+  const char *base = cpath_basename(filename);
   char *dir =
-      slash ? get_formatted_string("%.*s", (int)(slash - filename), filename)
-            : get_formatted_string("%s", ".");
-  const char *base = slash ? slash + 1 : filename;
-  DIR *listing = opendir(dir[0] ? dir : "/");
+      base != filename
+          ? get_formatted_string("%.*s", (int)(base - filename - 1), filename)
+          : get_formatted_string("%s", ".");
+  CDir *listing = cdir_open(dir[0] ? dir : "/");
   if (!listing) {
     free(dir);
     return;
   }
   const time_t now = time(NULL);
-  const struct dirent *entry;
-  while ((entry = readdir(listing)) != NULL) {
-    if (!is_temporary_sibling_of(entry->d_name, base)) {
+  const char *entry;
+  while ((entry = cdir_next(listing)) != NULL) {
+    if (!is_temporary_sibling_of(entry, base)) {
       continue;
     }
-    char *path = get_formatted_string("%s/%s", dir, entry->d_name);
+    char *path = get_formatted_string("%s/%s", dir, entry);
     CFileIdentity identity;
     if (cfile_identity(path, &identity) &&
         now - identity.mtime_seconds > STALE_TEMPORARY_SECONDS) {
@@ -660,7 +648,7 @@ static void remove_stale_temporary_siblings(const char *filename) {
     }
     free(path);
   }
-  closedir(listing);
+  cdir_close(listing);
   free(dir);
 }
 
@@ -733,8 +721,13 @@ static int compare_filenames_for_sort(const void *a, const void *b) {
 
 char **get_files_in_directory(const char *dir_path, const char *suffix,
                               int *num_files, ErrorStack *error_stack) {
-  DIR *dir = opendir_safe(dir_path, error_stack);
-  if (!error_stack_is_empty(error_stack)) {
+  CDir *dir = cdir_open(dir_path);
+  if (!dir) {
+    const int error_number = errno;
+    error_stack_push(
+        error_stack, ERROR_STATUS_RW_FAILED_TO_OPEN_STREAM,
+        get_formatted_string("failed to open directory '%s': %s (%d)", dir_path,
+                             strerror(error_number), error_number));
     *num_files = 0;
     return NULL;
   }
@@ -742,11 +735,11 @@ char **get_files_in_directory(const char *dir_path, const char *suffix,
   char **files = malloc_or_die(sizeof(char *) * (size_t)capacity);
   int count = 0;
   const size_t suffix_len = strlen(suffix);
-  const struct dirent *entry;
-  while ((entry = readdir(dir)) != NULL) {
-    const size_t name_len = strlen(entry->d_name);
+  const char *entry;
+  while ((entry = cdir_next(dir)) != NULL) {
+    const size_t name_len = strlen(entry);
     if (name_len < suffix_len ||
-        strcmp(entry->d_name + name_len - suffix_len, suffix) != 0) {
+        strcmp(entry + name_len - suffix_len, suffix) != 0) {
       continue;
     }
     if (count == capacity) {
@@ -755,10 +748,10 @@ char **get_files_in_directory(const char *dir_path, const char *suffix,
     }
     const size_t copy_size = name_len + 1;
     char *name_copy = malloc_or_die(copy_size);
-    memcpy(name_copy, entry->d_name, copy_size);
+    memcpy(name_copy, entry, copy_size);
     files[count++] = name_copy;
   }
-  closedir(dir);
+  cdir_close(dir);
   qsort(files, (size_t)count, sizeof(char *), compare_filenames_for_sort);
   *num_files = count;
   return files;

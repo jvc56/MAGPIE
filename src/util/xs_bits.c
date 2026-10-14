@@ -1,6 +1,7 @@
 #include "xs_bits.h"
 
 #include "../compat/cfile.h"
+#include "../compat/cpath.h"
 #include "../compat/xs_compress.h"
 #include "io_util.h"
 #include "string_util.h"
@@ -286,13 +287,13 @@ bool xs_write_file(const char *path, const void *bytes, size_t length,
 
 char *xs_asset_path(const char *data_paths, const char *name,
                     ErrorStack *errors) {
-  StringSplitter *paths =
-      split_string(data_paths ? data_paths : "data", ':', true);
+  char **paths = NULL;
+  const int paths_count =
+      cpath_split_list(data_paths ? data_paths : "data", &paths);
   char *found = NULL;
-  for (int index = 0;
-       !found && index < string_splitter_get_number_of_items(paths); index++) {
-    char *candidate = get_formatted_string(
-        "%s/xs/english-v1/%s", string_splitter_get_item(paths, index), name);
+  for (int index = 0; !found && index < paths_count; index++) {
+    char *candidate =
+        get_formatted_string("%s/xs/english-v1/%s", paths[index], name);
     FILE *file = cfile_open(candidate, "rb", false);
     if (file) {
       if (fclose(file) == 0) {
@@ -304,7 +305,7 @@ char *xs_asset_path(const char *data_paths, const char *name,
       free(candidate);
     }
   }
-  string_splitter_destroy(paths);
+  cpath_list_destroy(paths, paths_count);
   if (!found) {
     xs_error(errors,
              "missing immutable XS asset (install MAGPIE-DATA XS profile)");

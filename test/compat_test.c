@@ -1,6 +1,8 @@
 #include "compat_test.h"
 
+#include "../src/compat/cdir.h"
 #include "../src/compat/cfile.h"
+#include "../src/compat/cpath.h"
 #include "../src/util/fileproxy.h"
 #include "../src/util/io_util.h"
 #include "../src/util/string_util.h"
@@ -315,6 +317,101 @@ static void test_getline(void) {
   assert(remove(compat_text_path) == 0);
 }
 
+static void assert_path_list(const char *list, int expected_count,
+                             const char *const *expected) {
+  char **paths = NULL;
+  const int count = cpath_split_list(list, &paths);
+  assert(count == expected_count);
+  for (int path_idx = 0; path_idx < count; path_idx++) {
+    assert(strings_equal(paths[path_idx], expected[path_idx]));
+  }
+  cpath_list_destroy(paths, count);
+}
+
+// Lists of paths split on ':' everywhere, and on Windows also on ';' and
+// never on a drive letter's colon.
+static void test_path_lists(void) {
+  assert_path_list("data", 1, (const char *const[]){"data"});
+  assert_path_list("data:more", 2, (const char *const[]){"data", "more"});
+  assert_path_list("::data::more:", 2, (const char *const[]){"data", "more"});
+  assert_path_list("", 0, NULL);
+  char *first = cpath_list_first("first:second");
+  assert(strings_equal(first, "first"));
+  free(first);
+  first = cpath_list_first("");
+  assert(strings_equal(first, ""));
+  free(first);
+  assert(strings_equal(cpath_basename("dir/sub/name.gcg"), "name.gcg"));
+  assert(strings_equal(cpath_basename("name.gcg"), "name.gcg"));
+  assert(cpath_is_separator('/'));
+  // Backslash separates directories on Windows only, which is how this test
+  // tells which platform's rules to expect without testing platform macros.
+  if (cpath_is_separator('\\')) {
+    assert_path_list("C:\\magpie\\data", 1,
+                     (const char *const[]){"C:\\magpie\\data"});
+    assert_path_list(
+        "C:\\magpie\\data;D:/more:data", 3,
+        (const char *const[]){"C:\\magpie\\data", "D:/more", "data"});
+    assert_path_list("x;y", 2, (const char *const[]){"x", "y"});
+    // One letter and a colon is a drive.
+    assert_path_list("d:data", 1, (const char *const[]){"d:data"});
+    assert(strings_equal(cpath_basename("dir\\name.gcg"), "name.gcg"));
+  } else {
+    assert_path_list("x;y", 1, (const char *const[]){"x;y"});
+    assert_path_list("C:/data", 2, (const char *const[]){"C", "/data"});
+  }
+  char *executable_dir = cpath_executable_dir();
+  assert(executable_dir && executable_dir[0]);
+  assert(cfile_is_directory(executable_dir));
+  free(executable_dir);
+}
+
+// A directory lists each entry once, without "." and "..".
+static void test_directory_listing(void) {
+  const char *directory = "compat_test_listing.tmp";
+  assert(cfile_mkdir(directory) == 0);
+  const char *names[] = {"b.txt", "a.kwg", ".hidden"};
+  for (int name_idx = 0; name_idx < 3; name_idx++) {
+    char *path = get_formatted_string("%s/%s", directory, names[name_idx]);
+    write_text(path, names[name_idx]);
+    free(path);
+  }
+  CDir *dir = cdir_open(directory);
+  assert(dir);
+  bool seen[3] = {false, false, false};
+  int entries = 0;
+  const char *entry;
+  while ((entry = cdir_next(dir)) != NULL) {
+    entries++;
+    for (int name_idx = 0; name_idx < 3; name_idx++) {
+      if (strings_equal(entry, names[name_idx])) {
+        assert(!seen[name_idx]);
+        seen[name_idx] = true;
+      }
+    }
+  }
+  cdir_close(dir);
+  assert(entries == 3 && seen[0] && seen[1] && seen[2]);
+
+  int num_files = 0;
+  ErrorStack *error_stack = error_stack_create();
+  char **files =
+      get_files_in_directory(directory, ".txt", &num_files, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  assert(num_files == 1 && strings_equal(files[0], "b.txt"));
+  free(files[0]);
+  free(files);
+  error_stack_destroy(error_stack);
+
+  for (int name_idx = 0; name_idx < 3; name_idx++) {
+    char *path = get_formatted_string("%s/%s", directory, names[name_idx]);
+    assert(remove(path) == 0);
+    free(path);
+  }
+  assert(cfile_rmdir(directory) == 0);
+  assert(!cdir_open(directory));
+}
+
 void test_compat(void) {
   test_binary_round_trip();
   test_text_line_endings();
@@ -324,4 +421,6 @@ void test_compat(void) {
   test_directories_and_access();
   test_open_modes();
   test_getline();
+  test_path_lists();
+  test_directory_listing();
 }

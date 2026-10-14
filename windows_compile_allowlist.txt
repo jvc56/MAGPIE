@@ -3,7 +3,6 @@
 cmd/magpie.c
 src/compat/linenoise.c
 src/ent/autoplay_results.c
-src/ent/data_filepaths.c
 src/ent/endgame_results.c
 src/ent/game.c
 src/ent/game_history.c

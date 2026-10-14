@@ -1,6 +1,7 @@
 #include "convert.h"
 
 #include "../compat/cfile.h"
+#include "../compat/cpath.h"
 #include "../def/board_defs.h"
 #include "../def/convert_defs.h"
 #include "../def/kwg_defs.h"
@@ -372,12 +373,13 @@ static char *get_existing_wit_filename(const char *data_paths, const char *name,
                      string_duplicate("word info table data path is empty"));
     return NULL;
   }
-  StringSplitter *paths = split_string(data_paths, ':', true);
+  char **paths = NULL;
+  const int paths_count = cpath_split_list(data_paths, &paths);
   char *filename = NULL;
-  const int count = string_splitter_get_number_of_items(paths);
+  const int count = paths_count;
   for (int path_index = 0; path_index < count; path_index++) {
-    char *candidate = get_filepath(string_splitter_get_item(paths, path_index),
-                                   name, DATA_FILEPATH_TYPE_WORD_INFO_TABLE);
+    char *candidate = get_filepath(paths[path_index], name,
+                                   DATA_FILEPATH_TYPE_WORD_INFO_TABLE);
     CFileIdentity identity;
     if (fileproxy_file_exists(candidate) ||
         cfile_identity(candidate, &identity)) {
@@ -395,7 +397,7 @@ static char *get_existing_wit_filename(const char *data_paths, const char *name,
     }
     free(candidate);
   }
-  string_splitter_destroy(paths);
+  cpath_list_destroy(paths, paths_count);
   return filename;
 }
 

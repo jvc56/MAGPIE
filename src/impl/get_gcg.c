@@ -2,6 +2,7 @@
 
 #include "../compat/cfile.h"
 #include "../compat/chttp.h"
+#include "../compat/cpath.h"
 #include "../ent/data_filepaths.h"
 #include "../util/io_util.h"
 #include "../util/string_util.h"
@@ -58,8 +59,7 @@ static char *fetch_url(const char *url, const char *body,
 
 // Returns the basename of path with the .gcg extension stripped if present.
 static char *get_file_id(const char *path) {
-  const char *slash = strrchr(path, '/');
-  const char *basename_start = slash ? slash + 1 : path;
+  const char *basename_start = cpath_basename(path);
   const size_t basename_len = string_length(basename_start);
   const size_t gcg_ext_len = string_length(GCG_EXTENSION);
   if (has_suffix(GCG_EXTENSION, basename_start)) {

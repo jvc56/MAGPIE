@@ -2,7 +2,6 @@
 #define IO_UTIL_H
 
 #include "../compat/cformat.h"
-#include <dirent.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -396,7 +395,6 @@ FILE *fopen_exclusive_safe(const char *filename, const char *mode,
                            ErrorStack *error_stack);
 FILE *fopen_safe(const char *filename, const char *mode,
                  ErrorStack *error_stack);
-DIR *opendir_safe(const char *dir_path, ErrorStack *error_stack);
 void fclose_or_die(FILE *stream);
 void fwrite_or_die(const void *ptr, size_t size, size_t nmemb, FILE *stream,
                    const char *description);

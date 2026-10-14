@@ -1,6 +1,7 @@
 #include "contribute_tables.h"
 
 #include "../compat/cfile.h"
+#include "../compat/cpath.h"
 #include "../compat/ctime.h"
 #include "../util/io_util.h"
 #include "../util/string_util.h"
@@ -663,7 +664,7 @@ void contribute_tables_touch_used(const char *manifest_path,
 }
 
 char *contribute_tables_manifest_path(const char *data_paths) {
-  char *first = cut_off_after_first_char(data_paths ? data_paths : ".", ':');
+  char *first = cpath_list_first(data_paths ? data_paths : ".");
   char *path =
       get_formatted_string("%s/%s", first, CONTRIBUTE_TABLE_MANIFEST_FILENAME);
   free(first);
