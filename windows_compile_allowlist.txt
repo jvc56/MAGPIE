@@ -1,6 +1,5 @@
 # C files that do not compile for Windows yet. Remove entries as
 # they are fixed; never add one. See check_windows_compile.py.
-src/impl/gcg.c
 test/autoplay_test.c
 test/benchmark_endgame_test.c
 test/benchmark_peg_test.c

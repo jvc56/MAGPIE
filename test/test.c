@@ -39,6 +39,7 @@
 #include "game_test.h"
 #include "gameplay_test.h"
 #include "gcg_test.h"
+#include "gcg_tokenizer_diff_test.h"
 #include "heat_map_test.h"
 #include "history_replay_test.h"
 #include "infer_cmp_test.h"
@@ -164,6 +165,7 @@ static TestEntry test_table[] = {
     {"cmdapi", test_cmd_api},
     {"browsergame", test_browser_game},
     {"gcg", test_gcg},
+    {"gcgdiff", test_gcg_tokenizer_diff},
     {"analyze", test_analyze},
     {"autoplay", test_autoplay},
     {"apsolvers", test_autoplay_solvers},
