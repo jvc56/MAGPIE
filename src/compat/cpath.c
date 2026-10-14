@@ -131,6 +131,33 @@ static char *cpath_directory_of(const char *path) {
   return cpath_copy(path, length);
 }
 
+char *cpath_user_data_dir(void) {
+#if defined(_WIN32)
+  const wchar_t *local = _wgetenv(L"LOCALAPPDATA");
+  if (!local || !local[0]) {
+    return NULL;
+  }
+  const int bytes =
+      WideCharToMultiByte(CP_UTF8, 0, local, -1, NULL, 0, NULL, NULL);
+  char *base = bytes > 0 ? malloc((size_t)bytes) : NULL;
+  if (!base) {
+    return NULL;
+  }
+  (void)WideCharToMultiByte(CP_UTF8, 0, local, -1, base, bytes, NULL, NULL);
+  const size_t base_length = strlen(base);
+  static const char suffix[] = "\\MAGPIE";
+  char *directory = malloc(base_length + sizeof(suffix));
+  if (directory) {
+    memcpy(directory, base, base_length);
+    memcpy(directory + base_length, suffix, sizeof(suffix));
+  }
+  free(base);
+  return directory;
+#else
+  return NULL;
+#endif
+}
+
 char *cpath_executable_dir(void) {
 #if defined(_WIN32)
   for (DWORD capacity = MAX_PATH; capacity <= CPATH_EXECUTABLE_PATH_MAX;

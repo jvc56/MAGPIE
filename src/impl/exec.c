@@ -1,6 +1,7 @@
 #include "exec.h"
 
 #include "../compat/cfile.h"
+#include "../compat/cpath.h"
 #include "../compat/cpthread.h"
 #include "../compat/cpthread_defs.h"
 #include "../compat/cterm.h"
@@ -14,6 +15,7 @@
 #include "../util/string_util.h"
 #include "command_input.h"
 #include "config.h"
+#include "data_fetch.h"
 #include "move_gen.h"
 #include <assert.h>
 #include <stdbool.h>
@@ -370,12 +372,15 @@ void caches_destroy(void) {
   fileproxy_destroy_cache();
 }
 
-void process_command_internal(int argc, char *argv[],
-                              const ConfigArgs *config_args) {
+// Returns false if MAGPIE could not start: its configuration, which loads
+// the default board layout from the data, failed.
+static bool process_command_internal(int argc, char *argv[],
+                                     const ConfigArgs *config_args) {
   log_set_level(LOG_FATAL);
   ErrorStack *error_stack = error_stack_create();
   Config *config = config_create(config_args, error_stack);
-  if (error_stack_is_empty(error_stack)) {
+  const bool started = error_stack_is_empty(error_stack);
+  if (started) {
     char *initial_command_string = create_command_from_args(argc, argv);
     sync_command_scan_loop(config, error_stack, initial_command_string);
     free(initial_command_string);
@@ -385,13 +390,105 @@ void process_command_internal(int argc, char *argv[],
   }
   config_destroy(config);
   error_stack_destroy(error_stack);
+  return started;
+}
+
+// The data path a run with no -path uses: data in the working directory, as
+// always; failing that, data beside the executable (for one run from a
+// terminal elsewhere), then the user's own (%LOCALAPPDATA%\MAGPIE\data on
+// Windows). With none of them there, the working directory's, which is where
+// `data fetch` puts it. (Started from Explorer, the working directory is the
+// executable's.)
+static char *locate_default_data_path(void) {
+  if (data_fetch_is_data_present(DEFAULT_DATA_PATHS)) {
+    return string_duplicate(DEFAULT_DATA_PATHS);
+  }
+  char *directories[] = {cpath_executable_dir(), cpath_user_data_dir()};
+  char *found = NULL;
+  for (int directory_idx = 0; directory_idx < 2; directory_idx++) {
+    char *directory = directories[directory_idx];
+    if (!found && directory) {
+      char *candidate = get_formatted_string("%s/data", directory);
+      if (data_fetch_is_data_present(candidate)) {
+        found = candidate;
+      } else {
+        free(candidate);
+      }
+    }
+    free(directory);
+  }
+  return found ? found : string_duplicate(DEFAULT_DATA_PATHS);
+}
+
+static void print_data_fetch_progress(void *context, const char *message) {
+  (void)context;
+  write_to_stream_out("%s\n", message);
+}
+
+// Fetches the data into `data_path`, reporting progress. Returns false, having
+// printed why, if it failed.
+static bool fetch_data(const char *data_path, const char *manifest_url) {
+  ErrorStack *error_stack = error_stack_create();
+  data_fetch(manifest_url ? manifest_url : DATA_FETCH_DEFAULT_MANIFEST_URL,
+             data_path, print_data_fetch_progress, NULL, error_stack);
+  const bool fetched = error_stack_is_empty(error_stack);
+  error_stack_print_and_reset(error_stack);
+  error_stack_destroy(error_stack);
+  return fetched;
+}
+
+// With no data where MAGPIE looks, either runs the `data fetch` it was given,
+// offers to fetch it (when someone is at a terminal to answer), or says how.
+// Returns whether the command line was `data fetch`, which has then been run.
+static bool get_missing_data(const char *data_path, int argc, char *argv[]) {
+  if (argc >= 3 && strings_iequal(argv[1], "data") &&
+      strings_iequal(argv[2], "fetch")) {
+    (void)fetch_data(data_path, argc >= 4 ? argv[3] : NULL);
+    return true;
+  }
+  write_to_stream_err("MAGPIE's data files are not in %s.\n", data_path);
+  if (!cterm_is_terminal(get_stream_in())) {
+    write_to_stream_err("Run 'magpie data fetch' to download them.\n");
+    return false;
+  }
+  write_to_stream_out("Download them now (about 10 MB)? [Y/n] ");
+  char *answer = read_line_from_stream_in();
+  if (answer) {
+    trim_whitespace(answer);
+  }
+  const bool yes =
+      answer && (answer[0] == '\0' || strings_iequal(answer, "y") ||
+                 strings_iequal(answer, "yes"));
+  free(answer);
+  if (yes) {
+    (void)fetch_data(data_path, NULL);
+  } else {
+    write_to_stream_out("You can download them later with: data fetch\n");
+  }
+  return false;
 }
 
 void process_command_default(int argc, char *argv[]) {
-  process_command_internal(argc, argv, NULL);
+  if (cterm_owns_console()) {
+    write_to_stream_out("MAGPIE %s. Type help for the commands, quit to "
+                        "leave.\n",
+                        config_get_magpie_version());
+  }
+  char *data_path = locate_default_data_path();
+  bool ran_data_fetch = false;
+  if (!data_fetch_is_data_present(data_path)) {
+    ran_data_fetch = get_missing_data(data_path, argc, argv);
+  }
+  const ConfigArgs config_args = {.data_paths = data_path, .use_wmp = true};
+  // A data fetch already done is not repeated as the first command.
+  if (!process_command_internal(ran_data_fetch ? 1 : argc, argv,
+                                &config_args)) {
+    cterm_wait_before_close();
+  }
+  free(data_path);
 }
 
 void process_command_with_config_args(int argc, char *argv[],
                                       const ConfigArgs *config_args) {
-  process_command_internal(argc, argv, config_args);
+  (void)process_command_internal(argc, argv, config_args);
 }

@@ -2,6 +2,7 @@
 
 #include "../compat/cfile.h"
 #include "../compat/chttp.h"
+#include "../compat/cpath.h"
 #include "../compat/ctime.h"
 #include "../compat/endian_conv.h"
 #include "../compat/memory_info.h"
@@ -74,6 +75,7 @@
 #include "contribute.h"
 #include "contribute_tables.h"
 #include "convert.h"
+#include "data_fetch.h"
 #include "endgame.h"
 #include "gameplay.h"
 #include "gcg.h"
@@ -308,6 +310,7 @@ typedef enum {
   ARG_TOKEN_ANALYZE,
   ARG_TOKEN_VERSION,
   ARG_TOKEN_BUILDERS,
+  ARG_TOKEN_DATA,
   // This must always be the last
   // token for the count to be accurate
   NUMBER_OF_ARG_TOKENS
@@ -1157,6 +1160,35 @@ void execute_version(Config *config,
 char *str_api_version(Config __attribute__((unused)) * config,
                       ErrorStack __attribute__((unused)) * error_stack) {
   return string_duplicate(MAGPIE_VERSION "\n");
+}
+
+static void config_print_data_fetch_progress(void *context,
+                                             const char *message) {
+  thread_control_print_formatted((ThreadControl *)context, "%s\n", message);
+}
+
+// data fetch [<manifest url>]: downloads the data files into the first data
+// path. See src/impl/data_fetch.h.
+void execute_data(Config *config, ErrorStack *error_stack) {
+  const char *subcommand = config_get_parg_value(config, ARG_TOKEN_DATA, 0);
+  if (!strings_iequal(subcommand, "fetch")) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_CONFIG_LOAD_UNRECOGNIZED_ARG,
+        get_formatted_string("unrecognized data command '%s' (try data fetch)",
+                             subcommand));
+    return;
+  }
+  const char *manifest_url = config_get_parg_value(config, ARG_TOKEN_DATA, 1);
+  char *data_dir = cpath_list_first(config->data_paths);
+  data_fetch(manifest_url ? manifest_url : DATA_FETCH_DEFAULT_MANIFEST_URL,
+             data_dir, config_print_data_fetch_progress, config->thread_control,
+             error_stack);
+  free(data_dir);
+}
+
+char *str_api_data(Config *config, ErrorStack *error_stack) {
+  execute_data(config, error_stack);
+  return empty_string();
 }
 
 // The identity of every builder in this binary, as one JSON object.
@@ -2814,6 +2846,15 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       usages[0] = "";
       text = "Prints the version of the magpie executable.";
       break;
+    case ARG_TOKEN_DATA:
+      usages[0] = "fetch [<manifest_url>]";
+      examples[0] = "fetch";
+      text = "Downloads MAGPIE's data files (lexica, leaves, layouts, letter "
+             "distributions, win percentages) into the first data path, "
+             "checking each against the SHA-256 the data manifest lists and "
+             "keeping files that already match. Without a URL, fetches the "
+             "data set this version of MAGPIE goes with.";
+      break;
     case ARG_TOKEN_BUILDERS:
       usages[0] = "";
       text = "Prints, as JSON, the versions of the builders that derive one "
@@ -2937,6 +2978,7 @@ char *impl_help(Config *config, ErrorStack *error_stack) {
         ARG_TOKEN_CONVERT,     /* convert */
         ARG_TOKEN_CONTRIBUTE,  /* contribute */
         ARG_TOKEN_CREATE_DATA, /* createdata */
+        ARG_TOKEN_DATA,        /* data */
         ARG_TOKEN_HELP,        /* help */
         ARG_TOKEN_SET,         /* setoptions */
         ARG_TOKEN_VERSION,     /* version */
@@ -13959,6 +14001,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   cmd(ARG_TOKEN_HELP, "help", 0, 1, help, generic, false);
   cmd(ARG_TOKEN_VERSION, "version", 0, 0, version, generic, false);
   cmd(ARG_TOKEN_BUILDERS, "builders", 0, 0, builders, generic, false);
+  cmd(ARG_TOKEN_DATA, "data", 1, 2, data, generic, false);
   cmd(ARG_TOKEN_SET, "setoptions", 0, 0, noop, generic, false);
   cmd(ARG_TOKEN_CGP, "cgp", 4, 4, load_cgp, generic, false);
   cmd(ARG_TOKEN_LOAD, "load", 1, 1, load_gcg, generic, false);
@@ -14431,6 +14474,7 @@ void config_add_settings_to_string_builder(const Config *config,
     case ARG_TOKEN_HELP:
     case ARG_TOKEN_VERSION:
     case ARG_TOKEN_BUILDERS:
+    case ARG_TOKEN_DATA:
     case ARG_TOKEN_SET:
     case ARG_TOKEN_CGP:
     case ARG_TOKEN_MOVES:

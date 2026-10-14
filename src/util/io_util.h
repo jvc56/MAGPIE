@@ -309,6 +309,10 @@ typedef enum {
   ERROR_STATUS_ENDGAME_INVALID_ACTUAL_MOVE,
   ERROR_STATUS_CMD_API_WORD_MAP,
   ERROR_STATUS_PEG_MEMORY_BUDGET_TOO_SMALL,
+  // `data fetch`: the manifest is malformed or names a path outside the data
+  // directory, or a downloaded file's size or SHA-256 is not the listed one.
+  ERROR_STATUS_DATA_FETCH_MANIFEST_INVALID,
+  ERROR_STATUS_DATA_FETCH_FILE_MISMATCH,
 } error_code_t;
 
 typedef enum {
@@ -333,6 +337,7 @@ FILE *get_stream_out(void);
 FILE *get_stream_err(void);
 FILE *get_stream_in(void);
 void write_to_stream_out(const char *fmt, ...) CFORMAT_PRINTF(1, 2);
+void write_to_stream_err(const char *fmt, ...) CFORMAT_PRINTF(1, 2);
 void write_to_stream(FILE *stream, const char *fmt, ...) CFORMAT_PRINTF(2, 3);
 int64_t getline_ignore_carriage_return(char **lineptr, size_t *n, FILE *stream);
 char *read_line_from_stream_in(void);

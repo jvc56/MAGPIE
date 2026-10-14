@@ -26,6 +26,11 @@ bool cpath_is_separator(char c);
 // The part of `path` after its last separator: its file name.
 const char *cpath_basename(const char *path);
 
+// Where a user's own copy of MAGPIE's files goes when there is nowhere else:
+// %LOCALAPPDATA%\MAGPIE on Windows. NULL elsewhere, where data lives beside
+// the build. The caller frees it.
+char *cpath_user_data_dir(void);
+
 // The directory holding the running executable, with no trailing separator,
 // or NULL if the platform cannot say. The caller frees it.
 char *cpath_executable_dir(void);

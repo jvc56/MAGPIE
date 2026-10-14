@@ -171,6 +171,28 @@ jobs:
         if: matrix.shard == 'ap_rit'
         run: echo "convert klvwmp2rit TWL98" | ./bin/magpie "set -lex TWL98 -wmp true -rit false"
 
+      - name: Fetch data into an empty directory through a data manifest
+        if: matrix.shard == 'ap_rit'
+        run: |
+          mkdir -p fetch-test/served
+          ln -s "$PWD/data" fetch-test/served/data
+          python3 scripts/data_manifest.py data http://127.0.0.1:8765/data \
+            layouts letterdistributions lexica/CSW21.kwg lexica/CSW21.klv2 \
+            lexica/CSW21_super21.klv2 lexica/CSW24_super21.klv2 \
+            > fetch-test/served/manifest.json
+          (cd fetch-test/served && python3 -m http.server 8765 --bind 127.0.0.1 &)
+          sleep 2
+          mkdir -p fetch-test/run
+          cd fetch-test/run
+          ../../bin/magpie data fetch http://127.0.0.1:8765/manifest.json < /dev/null
+          for file in layouts/standard15.txt lexica/CSW21.kwg lexica/CSW21.klv2; do
+            cmp "data/$file" "../../data/$file"
+          done
+          # A symlink in the data set arrives as a copy of its target.
+          test ! -L data/lexica/CSW24_super21.klv2
+          cmp data/lexica/CSW24_super21.klv2 ../../data/lexica/CSW21_super21.klv2
+          echo "version" | ../../bin/magpie
+
       - name: Build dev test binary
         run: make magpie_test
 

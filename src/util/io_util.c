@@ -4,6 +4,7 @@
 #include "../compat/cfile.h"
 #include "../compat/cpath.h"
 #include "../compat/cpthread_defs.h"
+#include "../compat/cterm.h"
 #include "../compat/ctime.h"
 #include <assert.h>
 #include <ctype.h>
@@ -190,6 +191,7 @@ void log_with_info(log_level_t log_level, const char *caller_filename,
   fflush_or_die(output_fh);
 
   if (exit_fatally) {
+    cterm_wait_before_close();
     abort();
   }
 }
@@ -420,7 +422,7 @@ void error_stack_print_and_reset(ErrorStack *error_stack) {
   if (!error_string) {
     return;
   }
-  write_to_stream_err(error_string);
+  write_to_stream_err("%s", error_string);
   free(error_string);
 }
 

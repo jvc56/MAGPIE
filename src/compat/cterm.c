@@ -52,6 +52,25 @@ void cterm_init(void) {
 #endif
 }
 
+bool cterm_owns_console(void) {
+#if defined(_WIN32)
+  DWORD processes[2];
+  return GetConsoleProcessList(processes, 2) == 1;
+#else
+  return false;
+#endif
+}
+
+void cterm_wait_before_close(void) {
+  if (!cterm_owns_console()) {
+    return;
+  }
+  (void)fputs("\nPress Enter to close this window.", stderr);
+  (void)fflush(stderr);
+  char line[16];
+  (void)fgets(line, sizeof(line), stdin);
+}
+
 bool cterm_is_terminal(FILE *stream) {
   if (!stream) {
     return false;
