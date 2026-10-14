@@ -1,6 +1,7 @@
 #include "fileproxy.h"
 
 #include "../compat/cfile.h"
+#include "../compat/cmemfile.h"
 #include "../compat/cpthread.h"
 #include "../def/cpthread_defs.h"
 #include "io_util.h"
@@ -46,8 +47,9 @@ FILE *stream_from_filename(const char *filename, ErrorStack *error_stack) {
   for (int entry_idx = 0; entry_idx < file_cache.num_items; entry_idx++) {
     if (strings_equal(file_cache.entries[entry_idx].filename, filename)) {
       log_debug("Found %s in cache...", filename);
-      FILE *stream = fmemopen(file_cache.entries[entry_idx].raw_data,
-                              file_cache.entries[entry_idx].byte_size, "r");
+      FILE *stream =
+          cmemfile_open(file_cache.entries[entry_idx].raw_data,
+                        (size_t)file_cache.entries[entry_idx].byte_size);
       cpthread_mutex_unlock(&cache_mutex);
       return stream;
     }

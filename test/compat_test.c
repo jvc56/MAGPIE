@@ -2,6 +2,8 @@
 
 #include "../src/compat/cdir.h"
 #include "../src/compat/cfile.h"
+#include "../src/compat/cmap.h"
+#include "../src/compat/cmemfile.h"
 #include "../src/compat/cpath.h"
 #include "../src/util/fileproxy.h"
 #include "../src/util/io_util.h"
@@ -412,6 +414,34 @@ static void test_directory_listing(void) {
   assert(!cdir_open(directory));
 }
 
+// A mapped file reads as the bytes in it, and a missing or empty file does
+// not map. Bytes precached as a stream read back the same way.
+static void test_mapping(void) {
+  char fixture[5000];
+  for (int byte_idx = 0; byte_idx < (int)sizeof(fixture); byte_idx++) {
+    fixture[byte_idx] = (char)(byte_idx * 13);
+  }
+  write_fixture(compat_binary_path, fixture, sizeof(fixture));
+  CMap map;
+  assert(cmap_open(&map, compat_binary_path, true));
+  assert(map.size == sizeof(fixture));
+  assert(memcmp(map.data, fixture, sizeof(fixture)) == 0);
+  cmap_close(&map);
+  assert(!map.data);
+  cmap_close(&map);
+  write_fixture(compat_binary_path, fixture, 0);
+  assert(!cmap_open(&map, compat_binary_path, false));
+  assert(remove(compat_binary_path) == 0);
+  assert(!cmap_open(&map, compat_binary_path, false));
+
+  FILE *stream = cmemfile_open(fixture, sizeof(fixture));
+  assert(stream);
+  char read_back[sizeof(fixture) + 1];
+  assert(fread(read_back, 1, sizeof(read_back), stream) == sizeof(fixture));
+  assert(memcmp(read_back, fixture, sizeof(fixture)) == 0);
+  fclose_or_die(stream);
+}
+
 void test_compat(void) {
   test_binary_round_trip();
   test_text_line_endings();
@@ -423,4 +453,5 @@ void test_compat(void) {
   test_getline();
   test_path_lists();
   test_directory_listing();
+  test_mapping();
 }
