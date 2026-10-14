@@ -33,3 +33,6 @@ peg1cont board 224 seed 202610142601 20.2s
 peg1cont board 256 seed 202610142738 106.2s
 peg1cont board 288 seed 202610142840 20.9s
 peg1cont board 320 seed 202610142947 146.1s
+peg1cont board 352 seed 202610143086 55.4s
+peg1cont board 384 seed 202610143201 304.0s
+peg1cont board 416 seed 202610143337 23.1s
