@@ -335,8 +335,8 @@ export function analysisCommands(position, mode, settings) {
   if (!position.racks[0]) throw new Error("Enter the rack to analyze.");
   if (position.zeros >= 6)
     throw new Error("This game has ended after six scoreless turns.");
-  if (mode === "peg" && (bagCount < 1 || bagCount > 4))
-    throw new Error("PEG needs 1–4 tiles in the bag.");
+  if (mode === "peg" && (bagCount < 1 || bagCount > 3))
+    throw new Error("PEG needs 1–3 tiles in the bag.");
   if (mode === "endgame" && bagCount !== 0)
     throw new Error("Endgame needs an empty bag.");
   const prepared = structuredClone(position);

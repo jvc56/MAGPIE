@@ -39,8 +39,8 @@ previews must be opened in their own tab to enable cross-origin isolation.
   recent-position recall, but CGP import/export cannot encode it.
 - **Kibitz** ranks up to 100 candidates by static equity. **Sim** compares up
   to 100 candidates (default 50) with win percentage, equity and rollout counts.
-- Exactly one search is shown alongside Kibitz: **Sim** with more than four
-  tiles, **PEG** with 1–4, and **Endgame** with an empty
+- Exactly one search is shown alongside Kibitz: **Sim** with four or more
+  tiles, **PEG** with 1–3, and **Endgame** with an empty
   bag; the remaining opponent tiles can then be deduced from the inventory.
 - Select a candidate to preview its tiles. Edits clear analysis for the old
   position. **Stop** / Escape cancels the current search and retains partial

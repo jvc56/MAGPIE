@@ -84,7 +84,15 @@ test("mode guards reject wrong bag sizes and infer the empty-bag opponent rack",
   const settings = { seconds: 10, threads: 4, candidates: 50, plies: 4 };
   expect(() =>
     analysisCommands(parseCGP(SAMPLES.opening), "peg", settings),
-  ).toThrow("1–4");
+  ).toThrow("1–3");
+  const pegPosition = parseCGP(SAMPLES.peg);
+  for (const [row, col] of [[1, 3], [1, 11], [2, 3]]) {
+    expect(analysisCommands(pegPosition, "peg", settings).join("\n")).toContain("peg");
+    pegPosition.board[row][col] = null;
+  }
+  expect(inventory(pegPosition).bagCount).toBe(4);
+  expect(() => analysisCommands(pegPosition, "peg", settings)).toThrow("1–3");
+  expect(analysisCommands(pegPosition, "sim", settings).join("\n")).toContain("sim");
   expect(() =>
     analysisCommands(parseCGP(SAMPLES.peg), "endgame", settings),
   ).toThrow("empty bag");

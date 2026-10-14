@@ -148,7 +148,7 @@ function analysisPosition() {
 const randomSeed = () => crypto.getRandomValues(new Uint32Array(1))[0];
 const searchMode = () => {
   const { bagCount } = inventory(position);
-  return bagCount === 0 ? "endgame" : bagCount <= 4 ? "peg" : "sim";
+  return bagCount === 0 ? "endgame" : bagCount <= 3 ? "peg" : "sim";
 };
 const cacheKey = (kind = mode) =>
   `${analysisPositionKey(analysisPosition())}|${kind}|${$("plies").value}|${$("hide-spoilers").checked ? "hidden" : ""}`;
@@ -406,7 +406,7 @@ function updateActionAvailability() {
   if (busy) return;
   const { bagCount } = inventory(position);
   document.querySelector('[data-mode="peg"]').disabled =
-    bagCount < 1 || bagCount > 4;
+    bagCount < 1 || bagCount > 3;
   document.querySelector('[data-mode="endgame"]').disabled = bagCount !== 0;
 }
 function setRawAnalysis(text) {
