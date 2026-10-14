@@ -1,0 +1,189 @@
+name: Release Windows
+
+# Builds magpie.exe for x64 and arm64 Windows, tests both on real Windows,
+# smoke-tests the first-run path of each in an empty directory, and attaches
+# them, with their SHA-256s, to the GitHub release for the tag. Run for a tag
+# (vX.Y.Z), or by hand to test the workflow without releasing.
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  LLVM_MINGW_VERSION: "20261006"
+  LLVM_MINGW: llvm-mingw-20261006-ucrt-ubuntu-22.04-x86_64
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Get llvm-mingw cache
+        id: cache-llvm-mingw
+        uses: actions/cache@v4
+        with:
+          path: ~/llvm-mingw
+          key: ${{ env.LLVM_MINGW }}
+
+      - name: Download llvm-mingw
+        if: steps.cache-llvm-mingw.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p ~/llvm-mingw
+          curl -fsSL "https://github.com/mstorsjo/llvm-mingw/releases/download/$LLVM_MINGW_VERSION/$LLVM_MINGW.tar.xz" | tar xJ -C ~/llvm-mingw
+
+      - name: Build the executables
+        run: |
+          export PATH="$HOME/llvm-mingw/$LLVM_MINGW/bin:$PATH"
+          version="$(sed -n 's/^#define MAGPIE_VERSION "\(.*\)"/\1/p' src/impl/config.c)"
+          mkdir -p release
+          for arch in x86_64 aarch64; do
+            march=nehalem; name=x64
+            if [ "$arch" = aarch64 ]; then march=armv8-a; name=arm64; fi
+            make magpie magpie_test BUILD=portable_release PORTABLE_MARCH=$march CC=$arch-w64-mingw32-clang
+            exe="magpie-$version-windows-$name.exe"
+            mv bin/magpie.exe "release/$exe"
+            mv bin/magpie_test.exe "release/magpie_test-windows-$name.exe"
+            (cd release && sha256sum "$exe" > "$exe.sha256")
+          done
+
+      - name: Data for the smoke test
+        run: |
+          # A small data set and its manifest, served on the Windows runner,
+          # for `data fetch` into an empty directory.
+          ./download_data.sh
+          mkdir -p smoke/served
+          cp -rL data smoke/served/data
+          python3 scripts/data_manifest.py smoke/served/data http://127.0.0.1:8765/data \
+            layouts letterdistributions strategy lexica/CSW24.kwg lexica/CSW24.klv2 \
+            > smoke/served/manifest.json
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release
+          path: release/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: smoke-data
+          path: |
+            smoke/served/manifest.json
+            smoke/served/data/layouts
+            smoke/served/data/letterdistributions
+            smoke/served/data/strategy
+            smoke/served/data/lexica/CSW24.kwg
+            smoke/served/data/lexica/CSW24.klv2
+
+  # L5: the first-run path of each executable in an empty directory on its
+  # own platform: fetch the data, build a wordmap on first use, then a
+  # session of ordinary commands.
+  smoke:
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: x64
+            runner: windows-latest
+          - name: arm64
+            runner: windows-11-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: release
+          path: release
+      - uses: actions/download-artifact@v4
+        with:
+          name: smoke-data
+          path: served
+
+      - name: Fetch data and play in an empty directory
+        shell: pwsh
+        run: |
+          $server = Start-Process python -ArgumentList '-m','http.server','8765','--bind','127.0.0.1' -WorkingDirectory served -PassThru
+          Start-Sleep -Seconds 3
+          New-Item -ItemType Directory empty | Out-Null
+          Set-Location empty
+          $exe = (Get-ChildItem ..\release\magpie-*-windows-${{ matrix.name }}.exe).FullName
+          & $exe data fetch http://127.0.0.1:8765/manifest.json
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          if (-not (Test-Path data\lexica\CSW24.kwg)) { throw "data fetch wrote nothing" }
+          $session = @(
+            'set -lex CSW24 -threads 2 -savesettings false'
+            'cgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 AEINRST/ 0/0 0'
+            'gen -numplays 3'
+            'sim -plies 2 -it 200 -scond none'
+            'infer 1 MUZAKY 58 -numplays 20'
+            'cgp 2ABERRaNT4G/5HE6FE/5OS5CUR/5DI5OMA/1HARPIST4WEN/5ET2Q3TI/6E1VIVO2A/4JUDY2ABOIL/4I2ERASERS1/1DOWLY8M/4TaLEGGIO2I/7Z6C/7I3PUNK/7NONTONAL/7E2AX2E AD/EFU 467/497 0'
+            'endgame -eplies 4'
+            'builders'
+            'quit'
+          ) -join "`n"
+          $output = $session | & $exe
+          $output
+          $text = $output -join "`n"
+          if ($text -notmatch 'building the wordmap for CSW24') { throw "no wordmap was built" }
+          if ($text -match '\(error') { throw "the session reported an error" }
+          if ($text -notmatch 'Endgame \(depth') { throw "the endgame did not run" }
+          if (-not (Test-Path data\lexica\CSW24.wmp)) { throw "the wordmap is missing" }
+          Stop-Process -Id $server.Id
+
+  # L4 on the release executables themselves.
+  test:
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: x64
+            runner: windows-latest
+          - name: arm64
+            runner: windows-11-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v4
+      - name: Get the Windows data cache
+        uses: actions/cache/restore@v4
+        with:
+          path: windows-data
+          key: windows-data-files-32
+          enableCrossOsArchive: true
+          fail-on-cache-miss: true
+      - name: Put the data in place
+        shell: bash
+        run: mv windows-data/data windows-data/testdata .
+      - uses: actions/download-artifact@v4
+        with:
+          name: release
+          path: release
+      - name: Run the tests
+        shell: bash
+        run: ./release/magpie_test-windows-${{ matrix.name }}.exe
+
+  publish:
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [smoke, test]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: release
+          path: release
+      - name: Attach the executables to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="${GITHUB_REF#refs/tags/}"
+          gh release view "$tag" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1 \
+            || gh release create "$tag" -R "$GITHUB_REPOSITORY" --prerelease --title "$tag" \
+                 --notes "Windows: see the README's Windows section. The executables are not code-signed; Windows will ask you to confirm the first run (More info, then Run anyway)."
+          gh release upload "$tag" -R "$GITHUB_REPOSITORY" --clobber release/magpie-*-windows-*.exe release/magpie-*-windows-*.exe.sha256
