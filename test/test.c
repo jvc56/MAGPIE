@@ -64,6 +64,7 @@
 #include "peg_oracle_test.h"
 #include "peg_pess_test.h"
 #include "peg_poll_test.h"
+#include "peg1_continuation_test.h"
 #include "peg_pool_test.h"
 #include "peg_speed_bench_test.h"
 #include "peg_test.h"
@@ -240,6 +241,7 @@ static TestEntry on_demand_test_table[] = {
     {"pegab", test_peg_strength_ab},
     {"genpegfresh", test_gen_peg_fresh},
     {"pegcurve", test_peg_strength_curve},
+    {"peg1cont", test_peg1_continuation},
     {"benchfp", test_benchmark_forced_pass},
     {"benchns", test_benchmark_nonstuck},
     {"benchns3v3", test_benchmark_nonstuck_3v3},
