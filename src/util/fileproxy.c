@@ -3,10 +3,9 @@
 #include "../compat/cfile.h"
 #include "../compat/cmemfile.h"
 #include "../compat/cpthread.h"
-#include "../def/cpthread_defs.h"
+#include "../compat/cpthread_defs.h"
 #include "io_util.h"
 #include "string_util.h"
-#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -25,7 +24,7 @@ typedef struct FileCache {
 } FileCache;
 
 static FileCache file_cache = {0};
-static cpthread_mutex_t cache_mutex = PTHREAD_MUTEX_INITIALIZER;
+static cpthread_mutex_t cache_mutex = CPTHREAD_MUTEX_INITIALIZER;
 
 // Relative paths with a leading ./ address the same cached file.
 static const char *cache_filename(const char *filename) {

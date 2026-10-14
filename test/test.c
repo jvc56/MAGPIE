@@ -1,3 +1,4 @@
+#include "../src/compat/cterm.h"
 #include "../src/def/board_defs.h"
 #include "../src/impl/exec.h"
 #include "../src/util/io_util.h"
@@ -335,6 +336,7 @@ void run_all_super(void) {
 }
 
 int main(int argc, char *argv[]) {
+  cterm_init();
   log_set_level(LOG_WARN);
 
   // NOLINTNEXTLINE(misc-redundant-expression)

@@ -3,12 +3,11 @@
 #include "../compat/cdir.h"
 #include "../compat/cfile.h"
 #include "../compat/cpath.h"
+#include "../compat/cpthread_defs.h"
 #include "../compat/ctime.h"
-#include "../def/cpthread_defs.h"
 #include <assert.h>
 #include <ctype.h>
 #include <errno.h>
-#include <pthread.h>
 #include <stdarg.h>
 #include <stdatomic.h>
 #include <stdbool.h>
@@ -23,18 +22,18 @@ static log_level_t current_log_level = LOG_FATAL;
 static FILE *stream_out = NULL;
 static FILE *stream_err = NULL;
 static FILE *stream_in = NULL;
-static cpthread_mutex_t stream_mutex = PTHREAD_MUTEX_INITIALIZER;
+static cpthread_mutex_t stream_mutex = CPTHREAD_MUTEX_INITIALIZER;
 
 // Local mutex wrappers to avoid circular dependency with cpthread.h
 static inline void stream_mutex_lock(void) {
-  if (pthread_mutex_lock(&stream_mutex)) {
+  if (cpthread_mutex_lock_status(&stream_mutex)) {
     (void)fprintf(stderr, "FATAL: stream mutex lock failed\n");
     abort();
   }
 }
 
 static inline void stream_mutex_unlock(void) {
-  if (pthread_mutex_unlock(&stream_mutex)) {
+  if (cpthread_mutex_unlock_status(&stream_mutex)) {
     (void)fprintf(stderr, "FATAL: stream mutex unlock failed\n");
     abort();
   }
@@ -175,10 +174,12 @@ void log_with_info(log_level_t log_level, const char *caller_filename,
     break;
   }
 
-  char time_buf[64];
-  time_t current_time = time(NULL);
-  time_buf[strftime(time_buf, sizeof(time_buf), "%Y-%m-%d %H:%M:%S",
-                    localtime(&current_time))] = '\0';
+  char time_buf[64] = "";
+  struct tm local;
+  if (cfile_localtime(time(NULL), &local)) {
+    time_buf[strftime(time_buf, sizeof(time_buf), "%Y-%m-%d %H:%M:%S",
+                      &local)] = '\0';
+  }
   fprintf_or_die(output_fh, "[%s] %-5s %s:%d: ", time_buf, level_string,
                  caller_filename, caller_line);
   va_list args;

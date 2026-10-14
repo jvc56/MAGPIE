@@ -1,9 +1,9 @@
 #include "bai_test.h"
 
 #include "../src/compat/cpthread.h"
+#include "../src/compat/cpthread_defs.h"
 #include "../src/compat/ctime.h"
 #include "../src/def/bai_defs.h"
-#include "../src/def/cpthread_defs.h"
 #include "../src/def/thread_control_defs.h"
 #include "../src/ent/bai_result.h"
 #include "../src/ent/thread_control.h"

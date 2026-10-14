@@ -1,7 +1,7 @@
 #include "inference.h"
 
 #include "../compat/cpthread.h"
-#include "../def/cpthread_defs.h"
+#include "../compat/cpthread_defs.h"
 #include "../def/equity_defs.h"
 #include "../def/game_history_defs.h"
 #include "../def/inference_defs.h"

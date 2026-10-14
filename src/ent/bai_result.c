@@ -1,8 +1,8 @@
 #include "bai_result.h"
 
 #include "../compat/cpthread.h"
+#include "../compat/cpthread_defs.h"
 #include "../compat/ctime.h"
-#include "../def/cpthread_defs.h"
 #include "../util/io_util.h"
 #include <stdatomic.h>
 #include <stdint.h>

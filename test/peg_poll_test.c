@@ -1,8 +1,8 @@
 #include "peg_poll_test.h"
 
 #include "../src/compat/cpthread.h"
+#include "../src/compat/cpthread_defs.h"
 #include "../src/compat/memory_info.h"
-#include "../src/def/cpthread_defs.h"
 #include "../src/def/game_history_defs.h"
 #include "../src/def/letter_distribution_defs.h"
 #include "../src/ent/board.h"

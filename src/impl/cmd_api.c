@@ -1,7 +1,7 @@
 #include "cmd_api.h"
 
 #include "../compat/cpthread.h"
-#include "../def/cpthread_defs.h"
+#include "../compat/cpthread_defs.h"
 #include "../def/players_data_defs.h"
 #include "../def/thread_control_defs.h"
 #include "../ent/kwg.h"

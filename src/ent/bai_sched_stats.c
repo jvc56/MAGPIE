@@ -1,15 +1,14 @@
 #include "bai_sched_stats.h"
 
 #include "../compat/cpthread.h"
-#include "../def/cpthread_defs.h"
+#include "../compat/cpthread_defs.h"
 #include "../util/io_util.h"
 #include <math.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 
-static cpthread_mutex_t bai_sched_stats_mutex =
-    PTHREAD_MUTEX_INITIALIZER; // NOLINT(misc-include-cleaner)
+static cpthread_mutex_t bai_sched_stats_mutex = CPTHREAD_MUTEX_INITIALIZER;
 static BAISchedSimStats *bai_sched_stats_records = NULL;
 static int bai_sched_stats_num_records = 0;
 static int bai_sched_stats_capacity = 0;

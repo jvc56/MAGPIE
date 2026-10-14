@@ -1,5 +1,6 @@
 #include "game_string.h"
 
+#include "../compat/cterm.h"
 #include "../def/board_defs.h"
 #include "../def/game_defs.h"
 #include "../def/game_history_defs.h"
@@ -28,7 +29,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
 
 // Display formatting constants
 enum {
@@ -47,7 +47,7 @@ bool should_print_escape_codes(const GameStringOptions *game_string_options) {
   if (game_string_options == NULL) {
     return false;
   }
-  return isatty(fileno(get_stream_out()));
+  return cterm_is_terminal(get_stream_out());
 }
 
 bool use_ascii_on_turn_marker(const GameStringOptions *game_string_options) {

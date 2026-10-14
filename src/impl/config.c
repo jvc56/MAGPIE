@@ -95,7 +95,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/time.h>
 #include <time.h>
 
 enum {
@@ -4817,17 +4816,15 @@ void impl_peg(Config *config, ErrorStack *error_stack) {
 static char *config_write_peg_chart_file(const char *contents) {
   (void)cfile_mkdir("data");
   (void)cfile_mkdir("data/pegcharts");
-  // struct timeval comes transitively from <sys/time.h> (included), but
-  // include-cleaner maps it to a glibc-internal header that cannot be included
-  // directly. Matches the clock-API suppression in sim_benchmark_test.c.
-  struct timeval now_tv; // NOLINT(misc-include-cleaner)
-  gettimeofday(&now_tv, NULL);
-  const time_t now_secs = now_tv.tv_sec;
-  char stamp[32];
-  stamp[strftime(stamp, sizeof(stamp), "%Y%m%d_%H%M%S", localtime(&now_secs))] =
-      '\0';
+  TimeSpec now;
+  ctimer_clock_gettime_realtime(&now);
+  struct tm local;
+  char stamp[32] = "00000000_000000";
+  if (cfile_localtime(now.tv_sec, &local)) {
+    stamp[strftime(stamp, sizeof(stamp), "%Y%m%d_%H%M%S", &local)] = '\0';
+  }
   char *path = get_formatted_string("data/pegcharts/outcomes_%s_%06ld.txt",
-                                    stamp, (long)now_tv.tv_usec);
+                                    stamp, (long)(now.tv_nsec / 1000));
   ErrorStack *error_stack = error_stack_create();
   write_string_to_file(path, "wb", contents, error_stack);
   const bool ok = error_stack_is_empty(error_stack);

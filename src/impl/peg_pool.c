@@ -1,13 +1,11 @@
 #include "peg_pool.h"
 
 #include "../compat/cpthread.h"
+#include "../compat/cpthread_defs.h"
 #include "../compat/ctime.h"
-#include "../def/cpthread_defs.h"
 #include "../def/peg_defs.h"
 #include "../util/io_util.h"
 #include "move_gen.h"
-#include <errno.h>
-#include <pthread.h>
 #include <stdatomic.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -277,15 +275,11 @@ static void pp_submit_and_wait(PegPool *pool, PegPoolItem *items, int n,
     TimeSpec ts;
     ctimer_clock_gettime_realtime(&ts);
     ts.tv_sec += iter_s; // diagnostic wake-up
-    int ret = pthread_cond_timedwait(&batch.cv, &batch.mutex, &ts);
-    // ret == 0 is a normal wake (re-check pending at the loop top); ETIMEDOUT
-    // drives the diagnostic watchdog below. Any other return is a real error
-    // (e.g. EINVAL) that would otherwise spin here forever with no diagnostic.
-    if (ret != 0 && ret != ETIMEDOUT) {
-      cpthread_mutex_unlock(&batch.mutex);
-      log_fatal("pthread_cond_timedwait failed: %d", ret);
-    }
-    if (ret == ETIMEDOUT) {
+    // A wake re-checks pending at the loop top; a timeout drives the
+    // diagnostic watchdog below. Any other failure ends the process rather
+    // than spinning here forever with no diagnostic.
+    const bool woken = cpthread_cond_timedwait(&batch.cv, &batch.mutex, &ts);
+    if (!woken) {
       const int p_after = atomic_load(&batch.pending);
       cpthread_mutex_lock(&pool->q_mutex);
       const int q_count = pool->q_count;

@@ -2,9 +2,9 @@
 #include "autoplay.h"
 
 #include "../compat/cpthread.h"
+#include "../compat/cpthread_defs.h"
 #include "../compat/ctime.h"
 #include "../def/autoplay_defs.h"
-#include "../def/cpthread_defs.h"
 #include "../def/equity_defs.h"
 #include "../def/game_history_defs.h"
 #include "../def/letter_distribution_defs.h"

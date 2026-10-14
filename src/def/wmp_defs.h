@@ -1,6 +1,7 @@
 #ifndef WMP_DEFS_H
 #define WMP_DEFS_H
 
+#include "../compat/ccache.h"
 #include "board_defs.h"
 #include <stdint.h>
 
@@ -41,17 +42,11 @@ enum {
 // The blankless lookup index stores the entries in buckets of
 // WMP_INDEX_BUCKET_SLOTS 32-byte entries, one cache line: 128 bytes on Apple
 // silicon, 64 bytes elsewhere.
-#if defined(__APPLE__) && defined(__aarch64__)
 enum {
-  WMP_INDEX_BUCKET_SLOTS = 4,
-  WMP_INDEX_BUCKET_ALIGNMENT = 128,
+  WMP_INDEX_ENTRY_BYTES = 32,
+  WMP_INDEX_BUCKET_SLOTS = CCACHE_LINE_BYTES / WMP_INDEX_ENTRY_BYTES,
+  WMP_INDEX_BUCKET_ALIGNMENT = CCACHE_LINE_BYTES,
 };
-#else
-enum {
-  WMP_INDEX_BUCKET_SLOTS = 2,
-  WMP_INDEX_BUCKET_ALIGNMENT = 64,
-};
-#endif
 
 // Odd multipliers for wmp_index_hash.
 #define WMP_INDEX_HASH_LOW_MULTIPLIER 0x9E3779B97F4A7C15ULL

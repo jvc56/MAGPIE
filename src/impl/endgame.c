@@ -1,10 +1,10 @@
 #include "endgame.h"
 
 #include "../compat/cpthread.h"
+#include "../compat/cpthread_defs.h"
 #include "../compat/csched.h"
 #include "../compat/ctime.h"
 #include "../def/board_defs.h"
-#include "../def/cpthread_defs.h"
 #include "../def/equity_defs.h"
 #include "../def/game_defs.h"
 #include "../def/game_history_defs.h"

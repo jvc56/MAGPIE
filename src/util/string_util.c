@@ -11,7 +11,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <strings.h>
 
 enum {
   STRING_LIST_INITIAL_CAPACITY = 10,
@@ -457,8 +456,21 @@ bool has_prefix(const char *pre, const char *str) {
   return strncmp(pre, str, string_length(pre)) == 0;
 }
 
+// Compares at most `length` characters ignoring ASCII case, as POSIX
+// strncasecmp does in the C locale; every string compared this way is ASCII.
+static int ascii_casecmp(const char *first, const char *second, size_t length) {
+  for (size_t char_idx = 0; char_idx < length; char_idx++) {
+    const int first_char = tolower((unsigned char)first[char_idx]);
+    const int second_char = tolower((unsigned char)second[char_idx]);
+    if (first_char != second_char || first_char == '\0') {
+      return first_char - second_char;
+    }
+  }
+  return 0;
+}
+
 bool has_iprefix(const char *pre, const char *str) {
-  return strncasecmp(pre, str, string_length(pre)) == 0;
+  return ascii_casecmp(pre, str, string_length(pre)) == 0;
 }
 
 bool has_suffix(const char *suf, const char *str) {
@@ -510,7 +522,7 @@ bool strings_iequal(const char *str1, const char *str2) {
   if (!str1 || !str2) {
     return false;
   }
-  return strcasecmp(str1, str2) == 0;
+  return ascii_casecmp(str1, str2, SIZE_MAX) == 0;
 }
 
 // Returns false for negative numbers

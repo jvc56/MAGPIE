@@ -1,17 +1,18 @@
 #include "exec.h"
 
-#include "../compat/async_command_control.h"
 #include "../compat/cfile.h"
 #include "../compat/cpthread.h"
+#include "../compat/cpthread_defs.h"
+#include "../compat/cterm.h"
 #include "../compat/linenoise.h"
 #include "../def/config_defs.h"
-#include "../def/cpthread_defs.h"
 #include "../def/exec_defs.h"
 #include "../def/thread_control_defs.h"
 #include "../ent/thread_control.h"
 #include "../util/fileproxy.h"
 #include "../util/io_util.h"
 #include "../util/string_util.h"
+#include "command_input.h"
 #include "config.h"
 #include "move_gen.h"
 #include <assert.h>
@@ -19,16 +20,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
-
-typedef struct AsyncCommandInputArgs {
-  AsyncCommandControl *acc;
-  Config *config;
-  // When non-NULL, lines that aren't async commands are appended here to
-  // run after the current command instead of being rejected. Written
-  // only by the input thread, read after it is joined.
-  StringList *queued_commands;
-} AsyncCommandInputArgs;
 
 char *command_search_status(Config *config, bool should_exit) {
   if (!config) {
@@ -61,6 +52,8 @@ void *execute_async_command_worker(void *uncasted_args) {
   ErrorStack *error_stack_async = error_stack_create();
   execute_command_and_set_status_finished(config, error_stack_async);
   error_stack_destroy(error_stack_async);
+  // The command loop waits on input until the command is no longer running.
+  command_input_wake();
   return NULL;
 }
 
@@ -135,30 +128,39 @@ async_token_t parse_async_command(const char *command, StringBuilder *sb) {
   return token;
 }
 
-void *execute_async_input_worker(void *uncasted_args) {
-  AsyncCommandInputArgs *args = (AsyncCommandInputArgs *)uncasted_args;
-  Config *config = args->config;
+// Whether the running async command has stopped running (finished or been
+// stopped), for command_input_read_line_until.
+static bool async_command_is_done(void *uncasted_thread_control) {
+  ThreadControl *thread_control = (ThreadControl *)uncasted_thread_control;
+  return thread_control_get_status(thread_control) !=
+         THREAD_CONTROL_STATUS_STARTED;
+}
+
+// Handles the input that arrives while an async command runs, until it stops
+// running: async commands (stop, status) run at once; other lines are
+// appended to `queued_commands` when it is non-NULL and rejected otherwise.
+static void handle_async_command_input(Config *config,
+                                       StringList *queued_commands) {
   ThreadControl *thread_control = config_get_thread_control(config);
   ErrorStack *error_stack = error_stack_create();
   StringBuilder *err_msg_sb = string_builder_create();
-  char *input = NULL;
-  while (thread_control_get_status(thread_control) ==
-         THREAD_CONTROL_STATUS_STARTED) {
-    free(input);
-    input = async_command_control_wait_for_input_or_finished_signal(args->acc);
+  while (true) {
+    bool at_end = false;
+    char *input = command_input_read_line_until(async_command_is_done,
+                                                thread_control, &at_end);
     if (input == NULL) {
       break;
     }
     if (is_string_empty_or_whitespace(input)) {
+      free(input);
       continue;
     }
     trim_whitespace(input);
 
     async_token_t input_token = parse_async_command(input, err_msg_sb);
     if (input_token == NUMBER_OF_ASYNC_COMMAND_TOKENS &&
-        string_builder_length(err_msg_sb) == 0 &&
-        args->queued_commands != NULL) {
-      string_list_add_string(args->queued_commands, input);
+        string_builder_length(err_msg_sb) == 0 && queued_commands != NULL) {
+      string_list_add_string(queued_commands, input);
     } else if (string_builder_length(err_msg_sb) > 0) {
       error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_AMBIGUOUS_COMMAND,
                        string_builder_dump(err_msg_sb, NULL));
@@ -175,7 +177,7 @@ void *execute_async_input_worker(void *uncasted_args) {
         break;
       case ASYNC_STATUS_COMMAND_TOKEN:;
         char *status_str = config_get_execute_status(config);
-        thread_control_print(config_get_thread_control(config), status_str);
+        thread_control_print(thread_control, status_str);
         free(status_str);
         break;
       case NUMBER_OF_ASYNC_COMMAND_TOKENS:
@@ -183,11 +185,10 @@ void *execute_async_input_worker(void *uncasted_args) {
         break;
       }
     }
+    free(input);
   }
-  free(input);
   string_builder_destroy(err_msg_sb);
   error_stack_destroy(error_stack);
-  return NULL;
 }
 
 // Blocks until the async command is finished. Lines other than async
@@ -200,38 +201,12 @@ static void execute_command_async_queueing(Config *config,
   if (!load_command_sync(config, error_stack, command)) {
     return;
   }
-
   cpthread_t cmd_execution_thread;
   cpthread_create(&cmd_execution_thread, execute_async_command_worker, config);
-
-  AsyncCommandControl *acc = async_command_control_create();
-
-  AsyncCommandInputArgs async_args;
-  async_args.acc = acc;
-  async_args.config = config;
-  async_args.queued_commands = queued_commands;
-
-  cpthread_t cmd_input_thread;
-  cpthread_create(&cmd_input_thread, execute_async_input_worker, &async_args);
-
-  ThreadControl *thread_control = config_get_thread_control(config);
-  while (thread_control_get_status(thread_control) ==
-         THREAD_CONTROL_STATUS_STARTED) {
-    thread_control_wait_for_status_change(thread_control);
-    if (thread_control_get_status(thread_control) ==
-        THREAD_CONTROL_STATUS_FINISHED) {
-      async_command_control_send_finished_signal(acc);
-    }
-  }
-
+  // Returns when the command stops running or the input ends, whichever is
+  // first; the join then waits for the command itself.
+  handle_async_command_input(config, queued_commands);
   cpthread_join(cmd_execution_thread);
-
-  // Do to race conditions, the async input thread might still
-  // be blocked on polling, so send a signal here to wake it up
-  async_command_control_send_finished_signal(acc);
-
-  cpthread_join(cmd_input_thread);
-  async_command_control_destroy(acc);
 }
 
 void execute_command_async(Config *config, ErrorStack *error_stack,
@@ -352,7 +327,7 @@ void sync_command_scan_loop(Config *config, ErrorStack *error_stack,
   // warning. From a pipe or file (a script), it is queued and run in
   // order afterwards, since nobody is there to see the warning.
   StringList *queued_commands = NULL;
-  if (!isatty(fileno(get_stream_in()))) {
+  if (!cterm_is_terminal(get_stream_in())) {
     queued_commands = string_list_create();
   }
   char *input = NULL;
@@ -363,7 +338,7 @@ void sync_command_scan_loop(Config *config, ErrorStack *error_stack,
       prompt_text = MAGPIE_PROMPT " ";
     }
     free(input);
-    input = linenoise(prompt_text);
+    input = command_input_read_line(prompt_text);
     if (!input) {
       // NULL input indicates an EOF
       break;

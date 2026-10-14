@@ -1,10 +1,10 @@
 #include "peg.h"
 
 #include "../compat/cpthread.h"
+#include "../compat/cpthread_defs.h"
 #include "../compat/ctime.h"
 #include "../compat/memory_info.h"
 #include "../def/board_defs.h"
-#include "../def/cpthread_defs.h"
 #include "../def/equity_defs.h"
 #include "../def/game_defs.h"
 #include "../def/game_history_defs.h"
@@ -2815,8 +2815,7 @@ static void *peg_injector_main(void *arg) {
         endgame_add_worker(least);
       }
     }
-    const struct timespec nap = {0, 2L * 1000 * 1000}; // 2 ms
-    nanosleep(&nap, NULL);
+    ctime_nap(0.002);
   }
   return NULL;
 }

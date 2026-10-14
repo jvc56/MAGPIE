@@ -2,9 +2,9 @@
 
 #include "../compat/cfile.h"
 #include "../compat/cpthread.h"
+#include "../compat/cpthread_defs.h"
 #include "../def/board_defs.h"
 #include "../def/contribute_defs.h"
-#include "../def/cpthread_defs.h"
 #include "../def/equity_defs.h"
 #include "../def/game_defs.h"
 #include "../def/game_history_defs.h"
@@ -360,11 +360,11 @@ char *game_data_ucgi_str(const GameData *gd,
 }
 
 char *get_total_int_and_percentage_string(uint64_t total, double pct) {
-  return get_formatted_string("%" PRIu64 " (%2.2f%%%%)", total, pct * 100.0);
+  return get_formatted_string("%" PRIu64 " (%2.2f%%)", total, pct * 100.0);
 }
 
 char *get_total_float_and_percentage_string(double total, double pct) {
-  return get_formatted_string("%2.1f (%2.2f%%%%)", total, pct * 100.0);
+  return get_formatted_string("%2.1f (%2.2f%%)", total, pct * 100.0);
 }
 
 char *get_score_and_dev_string(double score, double stdev) {
