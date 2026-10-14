@@ -652,6 +652,9 @@ static void p1c_score_board(P1CHarness *harness, int board_idx, uint64_t seed,
     p1c_add_pick(picks, &num_picks, real, "oneply", &move,
                  p1c_elapsed_ms(&timer));
 
+    // A fresh 2-ply table, so nothing from earlier boards or picks feeds the
+    // ranking (2-ply results depend on what deeper entries the table holds).
+    transposition_table_reset(harness->tt_two);
     ctimer_start(&timer);
     p1c_rank_by_leaf(harness, chooser_game, cands, num_cands, P1C_LEAF_TWO_PLY,
                      &move, &win_move);
@@ -741,6 +744,7 @@ static void p1c_score_board(P1CHarness *harness, int board_idx, uint64_t seed,
     const Move *pick_move = &picks[pick_idx].move;
     const int static_spread =
         p1c_playout(harness, real, pick_move, P1C_CONT_STATIC);
+    transposition_table_reset(harness->tt_two);
     const int two_ply_spread =
         p1c_playout(harness, real, pick_move, P1C_CONT_TWO_PLY);
     double exact_ms = 0.0;

@@ -46,21 +46,34 @@ def summarize(values, rng, n_boot):
 
 
 def load(paths):
-    records = []
-    seen = set()
+    """One record per board, keyed by its game seed (which fixes the
+    position). Records of the same board from different runs are merged: a
+    chooser or move missing from one run is taken from another. Lines cut off
+    by a crash are skipped."""
+    by_seed = {}
+    skipped = 0
     for path in paths:
         with open(path) as fh:
             for line in fh:
                 line = line.strip()
                 if not line:
                     continue
-                rec = json.loads(line)
-                if rec["id"] in seen:
+                try:
+                    rec = json.loads(line)
+                except json.JSONDecodeError:
+                    skipped += 1
                     continue
-                seen.add(rec["id"])
-                records.append(rec)
-    records.sort(key=lambda r: r["id"])
-    return records
+                prev = by_seed.get(rec["seed"])
+                if prev is None:
+                    by_seed[rec["seed"]] = rec
+                    continue
+                assert prev["cgp"] == rec["cgp"], rec["seed"]
+                for field in ("choices", "ms", "eval"):
+                    for key, value in rec[field].items():
+                        prev[field].setdefault(key, value)
+    if skipped:
+        print(f"skipped {skipped} incomplete lines", file=sys.stderr)
+    return sorted(by_seed.values(), key=lambda r: r["seed"])
 
 
 def main():
@@ -79,7 +92,7 @@ def main():
     if args.require_exact_complete:
         records = [
             r for r in records
-            if all(e.get("exact_complete", True) for e in r["eval"].values())
+            if all(e.get("exact_complete", False) for e in r["eval"].values())
         ]
     rng = np.random.default_rng(args.seed)
 
