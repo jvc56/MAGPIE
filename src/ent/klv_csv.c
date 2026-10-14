@@ -153,7 +153,7 @@ void klv_write_to_csv(KLV *klv, const LetterDistribution *ld,
   rack_destroy(leave);
   rack_destroy(bag_as_rack);
 
-  write_string_to_file(leaves_filename, "w", string_builder_peek(klv_builder),
+  write_string_to_file(leaves_filename, "wb", string_builder_peek(klv_builder),
                        error_stack);
   free(leaves_filename);
   string_builder_destroy(klv_builder);

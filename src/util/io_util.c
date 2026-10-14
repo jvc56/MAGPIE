@@ -458,40 +458,51 @@ char *get_string_from_file_handle(FILE *file_handle, const char *filename,
     return NULL;
   }
 
-  // Get the file size by seeking to the end and then back to the beginning
-  fseek_or_die(file_handle, 0, SEEK_END);
-  long file_size = ftell(file_handle);
-  fseek_or_die(file_handle, 0, SEEK_SET);
-
-  char *result_string =
-      (char *)malloc_or_die(file_size + 1); // +1 for null terminator
-  if (!result_string) {
-    fclose_or_die(file_handle);
-    free(result_string);
-    error_stack_push(error_stack, ERROR_STATUS_RW_MEMORY_ALLOCATION_ERROR,
-                     get_formatted_string(
-                         "memory allocation error reading file: %s", filename));
-    return NULL;
+  // Read to the end rather than trusting the file's size, which a text-mode
+  // stream on Windows reads short of and a precached stream does not have.
+  size_t capacity = 4096;
+  size_t length = 0;
+  char *contents = (char *)malloc_or_die(capacity);
+  while (true) {
+    if (capacity - length < 2) {
+      capacity *= 2;
+      contents = (char *)realloc_or_die(contents, capacity);
+    }
+    // Leave room for the null terminator.
+    const size_t bytes_read =
+        fread(contents + length, 1, capacity - length - 1, file_handle);
+    length += bytes_read;
+    if (bytes_read == 0) {
+      break;
+    }
   }
 
-  size_t bytes_read = fread(result_string, 1, file_size, file_handle);
-  if (bytes_read != (size_t)file_size) {
+  if (ferror(file_handle)) {
     fclose_or_die(file_handle);
-    free(result_string);
+    free(contents);
     error_stack_push(
         error_stack, ERROR_STATUS_RW_READ_ERROR,
         get_formatted_string("error while reading file: %s", filename));
     return NULL;
   }
-
-  result_string[file_size] = '\0';
   fclose_or_die(file_handle);
 
-  return result_string;
+  // Text files written on Windows end their lines with \r\n; drop the \r so
+  // every caller sees the same text on every platform.
+  size_t kept = 0;
+  for (size_t byte_idx = 0; byte_idx < length; byte_idx++) {
+    if (contents[byte_idx] == '\r' && byte_idx + 1 < length &&
+        contents[byte_idx + 1] == '\n') {
+      continue;
+    }
+    contents[kept++] = contents[byte_idx];
+  }
+  contents[kept] = '\0';
+  return contents;
 }
 
 char *get_string_from_file(const char *filename, ErrorStack *error_stack) {
-  FILE *file_handle = fopen_safe(filename, "r", error_stack);
+  FILE *file_handle = fopen_safe(filename, "rb", error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return NULL;
   }
@@ -538,7 +549,7 @@ FILE *fopen_safe(const char *filename, const char *mode,
 
 void append_string_to_file(const char *filename, const char *string,
                            ErrorStack *error_stack) {
-  write_string_to_file(filename, "a", string, error_stack);
+  write_string_to_file(filename, "ab", string, error_stack);
 }
 
 DIR *opendir_safe(const char *dir_path, ErrorStack *error_stack) {

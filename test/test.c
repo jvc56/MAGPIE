@@ -23,6 +23,7 @@
 #include "checkpoint_test.h"
 #include "cmd_api_test.h"
 #include "command_test.h"
+#include "compat_test.h"
 #include "config_test.h"
 #include "contribute_tables_test.h"
 #include "contribute_test.h"
@@ -150,6 +151,7 @@ static TestEntry test_table[] = {
     {"sim", test_sim},
     {"math", test_math_util},
     {"stablesort", test_stable_sort},
+    {"compat", test_compat},
     {"bai", test_bai},
     {"baiutil", test_bai_utility},
     {"command", test_command},

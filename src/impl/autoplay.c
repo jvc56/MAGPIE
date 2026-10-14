@@ -320,7 +320,7 @@ static void leavegen_write_generation_files(AutoplaySharedData *shared_data) {
     char *report_name =
         get_formatted_string("%s_report.txt", report_name_prefix);
 
-    write_string_to_file(report_name, "w", string_builder_peek(leave_gen_sb),
+    write_string_to_file(report_name, "wb", string_builder_peek(leave_gen_sb),
                          error_stack);
     if (!error_stack_is_empty(error_stack)) {
       failure = "leavegen failed to write the generation's report";
@@ -504,7 +504,7 @@ void pat_postgen_prebroadcast_func(void *data) {
   char *report_name_prefix =
       cut_off_after_last_char(gen_labeled_pat_filename, '.');
   char *report_name = get_formatted_string("%s_report.txt", report_name_prefix);
-  write_string_to_file(report_name, "w", string_builder_peek(report_sb),
+  write_string_to_file(report_name, "wb", string_builder_peek(report_sb),
                        error_stack);
   if (!error_stack_is_empty(error_stack)) {
     error_stack_print_and_reset(error_stack);

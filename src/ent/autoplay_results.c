@@ -908,7 +908,7 @@ void fj_data_reset_fh(FJSharedData *shared_data) {
       fclose_or_die(shared_data->fhs[i]);
       shared_data->fhs[i] = NULL;
     }
-    shared_data->fhs[i] = fopen_or_die(filename_num_remaining, "w");
+    shared_data->fhs[i] = fopen_or_die(filename_num_remaining, "wb");
     if (!shared_data->fhs[i]) {
       log_fatal("error opening fj file for writing: %s",
                 filename_num_remaining);
@@ -1217,7 +1217,7 @@ void win_pct_data_consolidate(Recorder **recorder_list, int list_size,
   }
 
   char *win_pct_string = win_pct_counts_get_string(primary_counts);
-  write_string_to_file(win_pct_filename, "w", win_pct_string, error_stack);
+  write_string_to_file(win_pct_filename, "wb", win_pct_string, error_stack);
 
   if (!error_stack_is_empty(error_stack)) {
     error_stack_print_and_reset(error_stack);
@@ -1304,7 +1304,7 @@ void leaves_data_consolidate(Recorder **recorder_list, int list_size,
   rack_set_dist_size(&leave_rack,
                      ld_get_size(primary_recorder->recorder_context->ld));
   if (access(leaves_count_filename, F_OK) == 0) {
-    FILE *leaves_file = fopen_or_die(leaves_count_filename, "r");
+    FILE *leaves_file = fopen_or_die(leaves_count_filename, "rb");
     char *line = NULL;
     size_t line_capacity = 0;
     while (getline_ignore_carriage_return(&line, &line_capacity, leaves_file) !=

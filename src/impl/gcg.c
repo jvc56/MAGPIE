@@ -1506,7 +1506,7 @@ void write_gcg(const char *gcg_filename, const LetterDistribution *ld,
                const GameHistory *game_history, ErrorStack *error_stack) {
   StringBuilder *gcg_sb = string_builder_create();
   string_builder_add_gcg(gcg_sb, ld, game_history, false);
-  write_string_to_file(gcg_filename, "w", string_builder_peek(gcg_sb),
+  write_string_to_file(gcg_filename, "wb", string_builder_peek(gcg_sb),
                        error_stack);
   string_builder_destroy(gcg_sb);
 }

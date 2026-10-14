@@ -678,7 +678,7 @@ static void convert_win_pct(const char *data_paths, const char *input_name,
   }
   if (error_stack_is_empty(error_stack)) {
     char *smoothed_string = win_pct_counts_get_string(smoothed);
-    write_string_to_file(output_filename, "w", smoothed_string, error_stack);
+    write_string_to_file(output_filename, "wb", smoothed_string, error_stack);
     free(smoothed_string);
     string_builder_add_formatted_string(report, "wrote %s\n", output_filename);
   }

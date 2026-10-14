@@ -1491,7 +1491,7 @@ void analyze_game(AnalyzeArgs *analyze_args, AnalyzeCtx **analyze_ctx,
                                         analyze_args->config_settings_str);
   }
   char *header_str = string_builder_dump_and_destroy(header_sb, NULL);
-  write_string_to_file(report_path, "w", header_str, error_stack);
+  write_string_to_file(report_path, "wb", header_str, error_stack);
   free(header_str);
   if (!error_stack_is_empty(error_stack)) {
     return;

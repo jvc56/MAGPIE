@@ -56,7 +56,7 @@ FILE *stream_from_filename(const char *filename, ErrorStack *error_stack) {
             file_cache.num_items);
   cpthread_mutex_unlock(&cache_mutex);
   FILE *stream;
-  stream = fopen_safe(original_filename, "r", error_stack);
+  stream = fopen_safe(original_filename, "rb", error_stack);
   return stream;
 }
 

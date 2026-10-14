@@ -4830,7 +4830,7 @@ static char *config_write_peg_chart_file(const char *contents) {
   char *path = get_formatted_string("data/pegcharts/outcomes_%s_%06ld.txt",
                                     stamp, (long)now_tv.tv_usec);
   ErrorStack *error_stack = error_stack_create();
-  write_string_to_file(path, "w", contents, error_stack);
+  write_string_to_file(path, "wb", contents, error_stack);
   const bool ok = error_stack_is_empty(error_stack);
   error_stack_destroy(error_stack);
   if (!ok) {
@@ -8123,7 +8123,7 @@ static void config_set_gcg_filename_and_save(Config *config,
   string_builder_add_gcg_filename(sb, config->game_history, 0);
   char *gcg_filename = string_builder_dump_and_destroy(sb, NULL);
   game_history_set_gcg_filename(config->game_history, gcg_filename);
-  write_string_to_file(gcg_filename, "w", gcg_result->gcg_string, error_stack);
+  write_string_to_file(gcg_filename, "wb", gcg_result->gcg_string, error_stack);
   free(gcg_filename);
 }
 
@@ -13613,7 +13613,7 @@ static void write_tournament_summary(const char *dir_path, char **gcg_files,
 
   char *summary_str = string_builder_dump_and_destroy(sb, NULL);
   ErrorStack *write_error_stack = error_stack_create();
-  write_string_to_file(summary_path, "w", summary_str, write_error_stack);
+  write_string_to_file(summary_path, "wb", summary_str, write_error_stack);
   if (!error_stack_is_empty(write_error_stack)) {
     char *err_str = error_stack_get_string_and_reset(write_error_stack);
     thread_control_print_formatted(thread_control, "Failed to write %s: %s\n",
@@ -15222,7 +15222,7 @@ void save_config_settings(const Config *config, ErrorStack *error_stack) {
   }
   StringBuilder *sb = string_builder_create();
   config_add_settings_to_string_builder(config, sb);
-  write_string_to_file(config_get_settings_filename(config), "w",
+  write_string_to_file(config_get_settings_filename(config), "wb",
                        string_builder_peek(sb), error_stack);
   string_builder_destroy(sb);
 }

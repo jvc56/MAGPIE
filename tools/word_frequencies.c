@@ -90,7 +90,7 @@ int main(int argc, char **argv) {
     return 1;
   }
   ErrorStack *errors = error_stack_create();
-  FILE *samples = fopen_safe(argv[4], "w", errors);
+  FILE *samples = fopen_safe(argv[4], "wb", errors);
   check(errors);
   const char *paths = argc == 7 ? argv[6] : "data";
   const ConfigArgs args = {.data_paths = paths,

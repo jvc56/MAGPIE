@@ -1,0 +1,17 @@
+# Check text files out with LF line endings on every platform, so a Windows
+# clone (Git for Windows defaults to CRLF) builds and tests the same bytes as
+# Linux and macOS.
+* text=auto eol=lf
+
+# Binary files are never converted.
+*.png binary
+*.kwg binary
+*.klv2 binary
+*.wmp binary
+*.wit binary
+*.rit binary
+*.dawg binary
+*.gz binary
+*.tgz binary
+*.zip binary
+*.wasm binary
