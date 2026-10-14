@@ -25,3 +25,5 @@ seed: 1792001655
 loaded config with command: new
 seed: 1792001656
 peg1cont board 8 seed 202610141734 162.4s
+(error 196) bag must be empty to solve an endgame, but have 1 letters in the bag
+[2026-10-14 18:25:26] FATAL test/peg1_continuation_test.c:256: peg1cont: endgame_solve failed
