@@ -189,7 +189,6 @@ void assert_command_status_and_output(Config *config, const char *command,
   async_args.cmd = command;
   cpthread_t sync_cmd_thread;
   cpthread_create(&sync_cmd_thread, sync_cmd_thread_worker, &async_args);
-  cpthread_detach(sync_cmd_thread);
 
   // Let the async command start up
   ctime_nap(DEFAULT_NAP_TIME);
@@ -199,6 +198,10 @@ void assert_command_status_and_output(Config *config, const char *command,
     free(status_string);
   }
   block_for_search(config, seconds_to_wait);
+  // The worker reads async_args, which lives on this stack, and a worker the
+  // scheduler starts late can find the previous command's FINISHED status
+  // still set, so block_for_search may return before it has run: wait for it.
+  cpthread_join(sync_cmd_thread);
 
   if (!error_stack_is_empty(error_stack)) {
     error_stack_print_and_reset(error_stack);

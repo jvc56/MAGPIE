@@ -1169,8 +1169,8 @@ static void config_print_data_fetch_progress(void *context,
   thread_control_print_formatted((ThreadControl *)context, "%s\n", message);
 }
 
-// data fetch [<manifest url>]: downloads the data files into the first data
-// path. See src/impl/data_fetch.h.
+// data fetch [<base url>]: downloads the data into the first data path. See
+// src/impl/data_fetch.h.
 void execute_data(Config *config, ErrorStack *error_stack) {
   const char *subcommand = config_get_parg_value(config, ARG_TOKEN_DATA, 0);
   if (!strings_iequal(subcommand, "fetch")) {
@@ -1180,10 +1180,9 @@ void execute_data(Config *config, ErrorStack *error_stack) {
                              subcommand));
     return;
   }
-  const char *manifest_url = config_get_parg_value(config, ARG_TOKEN_DATA, 1);
   char *data_dir = cpath_list_first(config->data_paths);
-  data_fetch(manifest_url ? manifest_url : DATA_FETCH_DEFAULT_MANIFEST_URL,
-             data_dir, config_print_data_fetch_progress, config->thread_control,
+  data_fetch(config_get_parg_value(config, ARG_TOKEN_DATA, 1), data_dir,
+             config_print_data_fetch_progress, config->thread_control,
              error_stack);
   free(data_dir);
 }
@@ -2849,13 +2848,14 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       text = "Prints the version of the magpie executable.";
       break;
     case ARG_TOKEN_DATA:
-      usages[0] = "fetch [<manifest_url>]";
+      usages[0] = "fetch [<base_url>]";
       examples[0] = "fetch";
-      text = "Downloads MAGPIE's data files (lexica, leaves, layouts, letter "
-             "distributions, win percentages) into the first data path, "
-             "checking each against the SHA-256 the data manifest lists and "
-             "keeping files that already match. Without a URL, fetches the "
-             "data set this version of MAGPIE goes with.";
+      text = "Downloads the data set this version of MAGPIE goes with (lexica, "
+             "leaves, layouts, letter distributions, win percentages; about "
+             "195 MB) into the first data path, as download_data.sh does, "
+             "checking every part against the SHA-256 MAGPIE pins for it. Does "
+             "nothing if that data version is already there. <base_url> "
+             "fetches the same parts from a mirror.";
       break;
     case ARG_TOKEN_BUILDERS:
       usages[0] = "";

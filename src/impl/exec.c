@@ -427,10 +427,9 @@ static void print_data_fetch_progress(void *context, const char *message) {
 
 // Fetches the data into `data_path`, reporting progress. Returns false, having
 // printed why, if it failed.
-static bool fetch_data(const char *data_path, const char *manifest_url) {
+static bool fetch_data(const char *data_path, const char *base_url) {
   ErrorStack *error_stack = error_stack_create();
-  data_fetch(manifest_url ? manifest_url : DATA_FETCH_DEFAULT_MANIFEST_URL,
-             data_path, print_data_fetch_progress, NULL, error_stack);
+  data_fetch(base_url, data_path, print_data_fetch_progress, NULL, error_stack);
   const bool fetched = error_stack_is_empty(error_stack);
   error_stack_print_and_reset(error_stack);
   error_stack_destroy(error_stack);
@@ -451,7 +450,7 @@ static bool get_missing_data(const char *data_path, int argc, char *argv[]) {
     write_to_stream_err("Run 'magpie data fetch' to download them.\n");
     return false;
   }
-  write_to_stream_out("Download them now (about 10 MB)? [Y/n] ");
+  write_to_stream_out("Download them now (about 195 MB)? [Y/n] ");
   char *answer = read_line_from_stream_in();
   if (answer) {
     trim_whitespace(answer);

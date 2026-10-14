@@ -23,6 +23,13 @@ jobs:
       - name: Check that platform-specific code stays in src/compat
         run: python3 check_portability.py
 
+      - name: Check that data fetch and download_data.sh fetch the same data
+        run: |
+          fetched=$(sed -n 's/^#define DATA_FETCH_VERSION "\(.*\)"/\1/p' src/impl/data_fetch.h)
+          downloaded=$(sed -n 's/^DATA_VERSION="\(.*\)"/\1/p' download_data.sh)
+          echo "data fetch: $fetched, download_data.sh: $downloaded"
+          test -n "$fetched" && test "$fetched" = "$downloaded"
+
       - name: Check formatting
         run: python3 ./format.py
 
@@ -51,6 +58,159 @@ jobs:
         run: |
           export PATH="$HOME/llvm-mingw/$LLVM_MINGW/bin:$PATH"
           python3 check_windows_compile.py --cc x86_64-w64-mingw32-clang --cc aarch64-w64-mingw32-clang
+
+      - name: Lint src/compat's Windows branches with clang-tidy
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-tidy-18
+          MINGW_SYSROOT="$HOME/llvm-mingw/$LLVM_MINGW" ./tidy.sh clang-tidy-18 windows
+
+      - name: Link magpie.exe and magpie_test.exe for x64 and arm64
+        run: |
+          export PATH="$HOME/llvm-mingw/$LLVM_MINGW/bin:$PATH"
+          for arch in x86_64 aarch64; do
+            march=nehalem
+            if [ "$arch" = aarch64 ]; then march=armv8-a; fi
+            make magpie magpie_test BUILD=portable_release PORTABLE_MARCH=$march CC=$arch-w64-mingw32-clang
+            mkdir -p windows-$arch
+            mv bin/magpie.exe bin/magpie_test.exe windows-$arch/
+          done
+
+      - name: Upload the x64 executables
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-x86_64
+          path: windows-x86_64/*.exe
+          retention-days: 7
+
+      - name: Upload the arm64 executables
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-aarch64
+          path: windows-aarch64/*.exe
+          retention-days: 7
+
+  # The data cache with its symlinks turned into copies, for Windows runners:
+  # the tarballs' 27 symlinks would not survive a restore there. Built once
+  # per data version and cached across operating systems.
+  windows-data:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Look up the Windows data cache
+        id: windows-data
+        uses: actions/cache/restore@v4
+        with:
+          path: windows-data
+          key: windows-data-files-32
+          enableCrossOsArchive: true
+          lookup-only: true
+
+      - name: Get datafile cache
+        if: steps.windows-data.outputs.cache-hit != 'true'
+        id: cache-datafiles
+        uses: actions/cache@v3
+        with:
+          path: |
+            data/*
+            testdata/*
+          key: downloaded-data-files-32
+
+      - name: Download data files and convert lexica
+        if: steps.windows-data.outputs.cache-hit != 'true' && steps.cache-datafiles.outputs.cache-hit != 'true'
+        run: ./download_data.sh && ./convert_lexica.sh
+
+      - name: Copy the data without symlinks
+        if: steps.windows-data.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p windows-data
+          cp -rL data testdata windows-data/
+
+      - name: Save the Windows data cache
+        if: steps.windows-data.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: windows-data
+          key: windows-data-files-32
+          enableCrossOsArchive: true
+
+  # L3: the x64 test binary under Wine, which catches most runtime problems
+  # (text mode, paths, threads) on Linux.
+  windows-wine-tests:
+    needs: windows-cross-compile
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Get datafile cache
+        id: cache-datafiles
+        uses: actions/cache@v3
+        with:
+          path: |
+            data/*
+            testdata/*
+          key: downloaded-data-files-32
+
+      - name: Download data files and convert lexica
+        if: steps.cache-datafiles.outputs.cache-hit != 'true'
+        run: ./download_data.sh && ./convert_lexica.sh
+
+      - name: Download the x64 executables
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-x86_64
+          path: bin
+
+      - name: Install Wine
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y wine64
+
+      - name: Run the tests under Wine
+        env:
+          WINEDEBUG: -all
+        run: wine bin/magpie_test.exe
+
+  # L4: the same executables on real Windows, x64 and arm64.
+  windows-native-tests:
+    needs: [windows-cross-compile, windows-data]
+    name: windows-native-tests (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runner: windows-latest
+          - arch: aarch64
+            runner: windows-11-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Get the Windows data cache
+        uses: actions/cache/restore@v4
+        with:
+          path: windows-data
+          key: windows-data-files-32
+          enableCrossOsArchive: true
+          fail-on-cache-miss: true
+
+      - name: Put the data in place
+        shell: bash
+        run: mv windows-data/data windows-data/testdata .
+
+      - name: Download the executables
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-${{ matrix.arch }}
+          path: bin
+
+      - name: Run the tests on Windows
+        shell: bash
+        run: ./bin/magpie_test.exe
 
   cppcheck:
     runs-on: ubuntu-latest
@@ -134,7 +294,7 @@ jobs:
           - shard: analyze_sim
             tests: "analyze_sim"
           - shard: config
-            tests: "config movegen gameplay players string stablesort compat alpha ld l leavemap kwg bag rack bitrack board layout cs move game vm shadow eq eqadj stats infer rv am"
+            tests: "config movegen gameplay players string stablesort compat gzipreader alpha ld l leavemap kwg bag rack bitrack board layout cs move game vm shadow eq eqadj stats infer rv am"
           - shard: rest
             tests: "endgamepause browsergame embedding fileproxy historyreplay peg_embedding pegpoll wordmapapi hm math bai command cmdapi gcg words wordprune kwgmaker cgp rl ch cv cd wmp wmpmaker wmg winpct zobrist tt load wit witcache witsweep contribute builderhash pat patfile patlexicon patutility patfeatures pateval"
           - shard: ap_rit
@@ -171,30 +331,23 @@ jobs:
         if: matrix.shard == 'ap_rit'
         run: echo "convert klvwmp2rit TWL98" | ./bin/magpie "set -lex TWL98 -wmp true -rit false"
 
-      - name: Fetch data into an empty directory through a data manifest
+      - name: Fetch the data into an empty directory with data fetch
         if: matrix.shard == 'ap_rit'
         run: |
-          mkdir -p fetch-test/served
-          ln -s "$PWD/data" fetch-test/served/data
-          python3 scripts/data_manifest.py data http://127.0.0.1:8765/data \
-            layouts letterdistributions lexica/CSW21.kwg lexica/CSW21.klv2 \
-            lexica/CSW21_super21.klv2 lexica/CSW24_super21.klv2 \
-            > fetch-test/served/manifest.json
-          (cd fetch-test/served && python3 -m http.server 8765 --bind 127.0.0.1 &)
-          sleep 2
-          mkdir -p fetch-test/run
-          cd fetch-test/run
-          ../../bin/magpie data fetch http://127.0.0.1:8765/manifest.json < /dev/null
+          mkdir -p fetch-test
+          cd fetch-test
+          ../bin/magpie data fetch < /dev/null
           for file in layouts/standard15.txt lexica/CSW21.kwg lexica/CSW21.klv2; do
-            cmp "data/$file" "../../data/$file"
+            cmp "data/$file" "../data/$file"
           done
-          # A symlink in the data set arrives as a copy of its target.
+          # The tarball's symlinks arrive as copies of their targets.
           test ! -L data/lexica/CSW24_super21.klv2
-          cmp data/lexica/CSW24_super21.klv2 ../../data/lexica/CSW21_super21.klv2
-          echo "version" | ../../bin/magpie
+          cmp data/lexica/CSW24_super21.klv2 ../data/lexica/CSW21_super21.klv2
+          # A second fetch finds the data version already there.
+          ../bin/magpie data fetch < /dev/null | grep -q "already holds data version"
           # The fetched lexicon has no wordmap: its first use builds one.
           printf 'set -lex CSW21\ncgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 ABCDEFG/ 0/0 0\ngen -numplays 1\n' \
-            | ../../bin/magpie | tee first-use.txt
+            | ../bin/magpie | tee first-use.txt
           grep -q "building the wordmap for CSW21" first-use.txt
           test -s data/lexica/CSW21.wmp
 
@@ -289,6 +442,8 @@ jobs:
     needs:
       - lint-fast
       - windows-cross-compile
+      - windows-wine-tests
+      - windows-native-tests
       - cppcheck
       - clang-tidy
       - unit-tests-no-pgo-release
@@ -305,6 +460,8 @@ jobs:
           echo "|-----|--------|" >> $GITHUB_STEP_SUMMARY
           echo "| lint-fast | \`${{ needs.lint-fast.result }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| windows-cross-compile | \`${{ needs.windows-cross-compile.result }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| windows-wine-tests | \`${{ needs.windows-wine-tests.result }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| windows-native-tests | \`${{ needs.windows-native-tests.result }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| cppcheck | \`${{ needs.cppcheck.result }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| clang-tidy | \`${{ needs.clang-tidy.result }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| unit-tests-no-pgo-release | \`${{ needs.unit-tests-no-pgo-release.result }}\` |" >> $GITHUB_STEP_SUMMARY
@@ -316,6 +473,8 @@ jobs:
         if: |
           needs.lint-fast.result != 'success' ||
           needs.windows-cross-compile.result != 'success' ||
+          needs.windows-wine-tests.result != 'success' ||
+          needs.windows-native-tests.result != 'success' ||
           needs.cppcheck.result != 'success' ||
           needs.clang-tidy.result != 'success' ||
           needs.unit-tests-no-pgo-release.result != 'success' ||

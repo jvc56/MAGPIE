@@ -39,6 +39,7 @@
 #include "game_test.h"
 #include "gameplay_test.h"
 #include "gcg_test.h"
+#include "gzip_reader_test.h"
 #include "heat_map_test.h"
 #include "history_replay_test.h"
 #include "infer_cmp_test.h"
@@ -153,6 +154,7 @@ static TestEntry test_table[] = {
     {"math", test_math_util},
     {"stablesort", test_stable_sort},
     {"compat", test_compat},
+    {"gzipreader", test_gzip_reader},
     {"bai", test_bai},
     {"baiutil", test_bai_utility},
     {"command", test_command},

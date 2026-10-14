@@ -52,35 +52,14 @@ jobs:
             (cd release && sha256sum "$exe" > "$exe.sha256")
           done
 
-      - name: Data for the smoke test
-        run: |
-          # A small data set and its manifest, served on the Windows runner,
-          # for `data fetch` into an empty directory.
-          ./download_data.sh
-          mkdir -p smoke/served
-          cp -rL data smoke/served/data
-          python3 scripts/data_manifest.py smoke/served/data http://127.0.0.1:8765/data \
-            layouts letterdistributions strategy lexica/CSW24.kwg lexica/CSW24.klv2 \
-            > smoke/served/manifest.json
-
       - uses: actions/upload-artifact@v4
         with:
           name: release
           path: release/
-      - uses: actions/upload-artifact@v4
-        with:
-          name: smoke-data
-          path: |
-            smoke/served/manifest.json
-            smoke/served/data/layouts
-            smoke/served/data/letterdistributions
-            smoke/served/data/strategy
-            smoke/served/data/lexica/CSW24.kwg
-            smoke/served/data/lexica/CSW24.klv2
 
   # L5: the first-run path of each executable in an empty directory on its
-  # own platform: fetch the data, build a wordmap on first use, then a
-  # session of ordinary commands.
+  # own platform: fetch the data from MAGPIE-DATA, build a wordmap on first
+  # use, then a session of ordinary commands.
   smoke:
     needs: build
     strategy:
@@ -98,20 +77,13 @@ jobs:
         with:
           name: release
           path: release
-      - uses: actions/download-artifact@v4
-        with:
-          name: smoke-data
-          path: served
-
       - name: Fetch data and play in an empty directory
         shell: pwsh
         run: |
-          $server = Start-Process python -ArgumentList '-m','http.server','8765','--bind','127.0.0.1' -WorkingDirectory served -PassThru
-          Start-Sleep -Seconds 3
           New-Item -ItemType Directory empty | Out-Null
           Set-Location empty
           $exe = (Get-ChildItem ..\release\magpie-*-windows-${{ matrix.name }}.exe).FullName
-          & $exe data fetch http://127.0.0.1:8765/manifest.json
+          & $exe data fetch
           if ($LASTEXITCODE -ne 0) { exit 1 }
           if (-not (Test-Path data\lexica\CSW24.kwg)) { throw "data fetch wrote nothing" }
           $session = @(
@@ -132,7 +104,6 @@ jobs:
           if ($text -match '\(error') { throw "the session reported an error" }
           if ($text -notmatch 'Endgame \(depth') { throw "the endgame did not run" }
           if (-not (Test-Path data\lexica\CSW24.wmp)) { throw "the wordmap is missing" }
-          Stop-Process -Id $server.Id
 
   # L4 on the release executables themselves.
   test:
