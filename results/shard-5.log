@@ -25,3 +25,7 @@ seed: 1792001640
 loaded config with command: new
 seed: 1792001641
 peg1cont board 5 seed 202610141717 305.1s
+peg1cont board 37 seed 202610141849 943.2s
+peg1cont board 69 seed 202610141968 179.2s
+peg1cont board 101 seed 202610142130 118.6s
+peg1cont board 133 seed 202610142260 19.8s
