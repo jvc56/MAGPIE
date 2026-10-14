@@ -113,6 +113,51 @@ static inline uint64_t get_search_memory_budget_base(void) {
   return total_memory;
 }
 
+// The memory a new allocation can have without the system swapping, in
+// *available_bytes: MemAvailable on Linux, the available physical memory on
+// Windows. False where it cannot be found easily (macOS, browsers), which a
+// caller takes as unconstrained.
+static inline bool get_available_memory_bytes(int64_t *available_bytes) {
+#if defined(__EMSCRIPTEN__)
+  (void)available_bytes;
+  return false;
+#elif defined(_WIN32) || defined(_WIN64)
+  MEMORYSTATUSEX statex;
+  statex.dwLength = sizeof(statex);
+  if (!GlobalMemoryStatusEx(&statex)) {
+    return false;
+  }
+  *available_bytes = statex.ullAvailPhys > (DWORDLONG)INT64_MAX
+                         ? INT64_MAX
+                         : (int64_t)statex.ullAvailPhys;
+  return true;
+#elif defined(__linux__)
+  FILE *file = fopen("/proc/meminfo", "r");
+  if (!file) {
+    return false;
+  }
+  bool found = false;
+  char line[256];
+  while (!found && fgets(line, sizeof(line), file)) {
+    if (strncmp(line, "MemAvailable:", 13) == 0) {
+      char *endptr;
+      errno = 0;
+      const unsigned long long kilobytes = strtoull(line + 13, &endptr, 10);
+      found = errno == 0 && endptr != line + 13 &&
+              kilobytes < (unsigned long long)INT64_MAX / 1024;
+      if (found) {
+        *available_bytes = (int64_t)(kilobytes * 1024);
+      }
+    }
+  }
+  (void)fclose(file);
+  return found;
+#else
+  (void)available_bytes;
+  return false;
+#endif
+}
+
 static inline int get_num_cores(void) {
   int core_count = 1; // Default fallback value
 

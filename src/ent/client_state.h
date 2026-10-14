@@ -11,7 +11,8 @@
 //
 // The default file is optional, and so is every setting in any file: no
 // contribute.txt in the working directory is every setting at its default
-// (birdtest.org, anonymous, cores - 1 threads, no task limit), and a file
+// (birdtest.org, anonymous, cores - 1 threads, no task limit, 2 GB of disk
+// and 1 GB of memory kept free), and a file
 // states only what it changes. A file named on the command line must exist:
 // a typo in its name would otherwise quietly start a new anonymous worker. What
 // a file does state is held to its rules -- an unknown or miscased setting, or
@@ -21,6 +22,7 @@
 
 #include "../util/io_util.h"
 #include <stdbool.h>
+#include <stdint.h>
 
 #define CONTRIBUTE_SETTINGS_DEFAULT_FILENAME "contribute.txt"
 // The server contributed to when the settings file names none.
@@ -29,6 +31,17 @@
 // server issued an anonymous worker that had no file).
 #define CONTRIBUTE_SETTINGS_HEADER                                             \
   "# magpie contribute settings; see " CONTRIBUTE_DEFAULT_SERVER
+// The disk space, in GB (10^9 bytes), `diskreserve` keeps free when it states
+// none: the wordmaps and word info and rack info tables a task's players use
+// are built only into the space beyond it.
+#define CONTRIBUTE_DEFAULT_DISK_RESERVE_GB 2
+// The memory, in GB, `memreserve` keeps available when it states none: those
+// tables are built and held only in the memory beyond it.
+#define CONTRIBUTE_DEFAULT_MEMORY_RESERVE_GB 1
+// The most `diskreserve` or `memreserve` takes, in GB: a petabyte, past any
+// machine, and far short of what overflows a byte count.
+#define CONTRIBUTE_MAX_RESERVE_GB 1000000
+#define CONTRIBUTE_BYTES_PER_GB 1000000000LL
 
 typedef struct ClientState {
   char *server_url;
@@ -43,6 +56,13 @@ typedef struct ClientState {
   int threads;
   int max_tasks;
   int idle_wait_seconds;
+  // The space `diskreserve` keeps free on the data directory's filesystem,
+  // in bytes: a derived table that would eat into it is not built, and the
+  // task runs without it.
+  int64_t disk_reserve_bytes;
+  // The memory `memreserve` keeps available, in bytes: a table that would
+  // need more of it to build or hold is not used.
+  int64_t memory_reserve_bytes;
   char *settings_path;
   // Whether the settings file was there to read. A missing one is every
   // setting at its default, and is created only to save an issued identity.
@@ -52,6 +72,8 @@ typedef struct ClientState {
   bool server_stated;
   bool max_tasks_stated;
   bool idle_wait_stated;
+  bool disk_reserve_stated;
+  bool memory_reserve_stated;
   // The line of a comment that holds `apikey` then a key, or 0: what
   // appending `apikey bt_...` to a last comment line with no newline makes.
   // A comment is never refused -- a key may be commented out on purpose --

@@ -15,6 +15,7 @@
 #include <windows.h>
 #else
 #include <sys/file.h>
+#include <sys/statvfs.h>
 #include <unistd.h>
 #endif
 
@@ -153,6 +154,34 @@ bool cfile_identity(const char *path, CFileIdentity *identity) {
 #else
   identity->mtime_nanoseconds = (long)info.st_mtim.tv_nsec;
   identity->ctime_nanoseconds = (long)info.st_ctim.tv_nsec;
+#endif
+  return true;
+}
+
+bool cfile_free_bytes(const char *directory, int64_t *free_bytes) {
+  if (!directory) {
+    return false;
+  }
+#if defined(_WIN32)
+  ULARGE_INTEGER available;
+  if (!GetDiskFreeSpaceExA(directory, &available, NULL, NULL)) {
+    return false;
+  }
+  *free_bytes = available.QuadPart > (ULONGLONG)INT64_MAX
+                    ? INT64_MAX
+                    : (int64_t)available.QuadPart;
+#else
+  struct statvfs info;
+  if (statvfs(directory, &info) != 0) {
+    return false;
+  }
+  // What an unprivileged process may use: f_bavail, not f_bfree, which
+  // counts the blocks the filesystem keeps back for root.
+  const uint64_t block_size = info.f_frsize ? info.f_frsize : info.f_bsize;
+  const uint64_t blocks = (uint64_t)info.f_bavail;
+  *free_bytes = block_size != 0 && blocks > (uint64_t)INT64_MAX / block_size
+                    ? INT64_MAX
+                    : (int64_t)(blocks * block_size);
 #endif
   return true;
 }
