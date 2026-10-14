@@ -80,6 +80,7 @@
 #include "sim_quality_test.h"
 #include "sim_regret_test.h"
 #include "sim_test.h"
+#include "stable_sort_test.h"
 #include "stats_test.h"
 #include "string_util_test.h"
 #include "table_bench_test.h"
@@ -148,6 +149,7 @@ static TestEntry test_table[] = {
     {"hm", test_heat_map},
     {"sim", test_sim},
     {"math", test_math_util},
+    {"stablesort", test_stable_sort},
     {"bai", test_bai},
     {"baiutil", test_bai_utility},
     {"command", test_command},

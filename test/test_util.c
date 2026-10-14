@@ -40,6 +40,7 @@
 #include "../src/str/move_string.h"
 #include "../src/str/rack_string.h"
 #include "../src/util/io_util.h"
+#include "../src/util/stable_sort.h"
 #include "../src/util/string_util.h"
 #include "test_constants.h"
 #include <assert.h>
@@ -283,7 +284,7 @@ int compare_moves_for_sml(const void *a, const void *b) {
 
 // Function to sort the moves in the SortedMoveList
 void resort_sorted_move_list_by_score(SortedMoveList *sml) {
-  qsort(sml->moves, sml->count, sizeof(Move *), compare_moves_for_sml);
+  stable_sort(sml->moves, sml->count, sizeof(Move *), compare_moves_for_sml);
 }
 
 // Empties the passed in move list and returns a SortedMoveList

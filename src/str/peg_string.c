@@ -9,6 +9,7 @@
 #include "../ent/move.h"
 #include "../impl/peg.h"
 #include "../util/io_util.h"
+#include "../util/stable_sort.h"
 #include "../util/string_util.h"
 #include "move_string.h"
 #include <inttypes.h>
@@ -465,7 +466,7 @@ char *peg_build_outcomes_string_rows(const PegPerScenario *rows, int n_rows) {
   free(row_drawn);
   free(row_rem_ms);
 
-  qsort(toks, (size_t)n_toks, sizeof(PegOutcomeTok), peg_outcome_tok_cmp);
+  stable_sort(toks, (size_t)n_toks, sizeof(PegOutcomeTok), peg_outcome_tok_cmp);
   int n_bucket_toks[NUMBER_OF_PEG_OUTCOME_BUCKETS] = {0};
   for (int tok_idx = 0; tok_idx < n_toks; tok_idx++) {
     n_bucket_toks[toks[tok_idx].bucket]++;

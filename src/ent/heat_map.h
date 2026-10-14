@@ -151,6 +151,14 @@ static inline int compare_heat_map_squares(const void *a, const void *b) {
   if (sb->count < sa->count) {
     return -1;
   }
+  // Squares are listed row by row, so this is the order a stable sort would
+  // leave equal counts in, whatever the C library's qsort does with ties.
+  if (sa->row != sb->row) {
+    return sa->row < sb->row ? -1 : 1;
+  }
+  if (sa->col != sb->col) {
+    return sa->col < sb->col ? -1 : 1;
+  }
   return 0;
 }
 

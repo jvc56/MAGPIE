@@ -35,6 +35,7 @@
 #include "../str/letter_distribution_string.h"
 #include "../str/rack_string.h"
 #include "../util/io_util.h"
+#include "../util/stable_sort.h"
 #include "../util/string_util.h"
 #include "gameplay.h"
 #include "kwg_maker.h"
@@ -1947,8 +1948,8 @@ void assign_estimates_and_sort(EndgameCtxWorker *worker, int move_count,
   SmallMove *small_moves = (SmallMove *)(worker->small_move_arena->memory +
                                          worker->small_move_arena->size -
                                          (sizeof(SmallMove) * move_count));
-  qsort(small_moves, move_count, sizeof(SmallMove),
-        compare_small_moves_by_estimated_value);
+  stable_sort(small_moves, move_count, sizeof(SmallMove),
+              compare_small_moves_by_estimated_value);
 }
 
 // Fill worker->move_list with the side-to-move's plays from the incremental
@@ -3018,8 +3019,9 @@ int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
             moves_base[best_est_idx] = tmp;
           }
         } else {
-          qsort(moves_base + idx, (size_t)(nplays - idx), sizeof(SmallMove),
-                compare_small_moves_by_estimated_value);
+          stable_sort(moves_base + idx, (size_t)(nplays - idx),
+                      sizeof(SmallMove),
+                      compare_small_moves_by_estimated_value);
           tail_sorted = true;
         }
       }
@@ -3706,8 +3708,8 @@ void iterative_deepening(EndgameCtxWorker *worker, int plies) {
 
     // sort initial moves by valuation for next time.
     SmallMove *initial_moves = (SmallMove *)(worker->small_move_arena->memory);
-    qsort(initial_moves, initial_move_count, sizeof(SmallMove),
-          compare_small_moves_by_estimated_value);
+    stable_sort(initial_moves, initial_move_count, sizeof(SmallMove),
+                compare_small_moves_by_estimated_value);
     force_actual_move_to_front(worker, initial_moves, initial_move_count);
 
     // Store result in worker's local tracking
@@ -4058,8 +4060,8 @@ static int extract_multi_pvs(EndgameCtx *solver, EndgameCtxWorker *best_worker,
   // that cannot beat the board) and the fallback below assume descending
   // order, so restore it here.
   if (num_root_moves > 2) {
-    qsort(root_moves + 1, (size_t)(num_root_moves - 1), sizeof(SmallMove),
-          compare_small_moves_by_estimated_value);
+    stable_sort(root_moves + 1, (size_t)(num_root_moves - 1), sizeof(SmallMove),
+                compare_small_moves_by_estimated_value);
   }
 
   // Solve every displayed line to the end (or to the search depth) instead of
