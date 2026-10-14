@@ -1,5 +1,6 @@
 #include "benchmark_endgame_test.h"
 
+#include "../src/compat/cfile.h"
 #include "../src/compat/ctime.h"
 #include "../src/def/equity_defs.h"
 #include "../src/def/game_defs.h"
@@ -21,23 +22,17 @@
 #include "../src/impl/gameplay.h"
 #include "../src/impl/move_gen.h"
 #include "../src/util/io_util.h"
+#include "test_platform.h"
 #include "test_util.h"
 #include <assert.h>
-#include <fcntl.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
 
 // Execute config command quietly (suppress stdout during execution)
 static void exec_config_quiet(Config *config, const char *cmd) {
-  // Suppress stdout
-  (void)fflush(stdout);
-  int saved_stdout = fcntl(STDOUT_FILENO, F_DUPFD_CLOEXEC, 0);
-  int devnull = open("/dev/null", O_WRONLY | O_CLOEXEC);
-  (void)dup2(devnull, STDOUT_FILENO);
-  close(devnull);
+  const int saved_stdout = test_platform_silence_stdout();
 
   ErrorStack *error_stack = error_stack_create();
   thread_control_set_status(config_get_thread_control(config),
@@ -50,10 +45,7 @@ static void exec_config_quiet(Config *config, const char *cmd) {
   thread_control_set_status(config_get_thread_control(config),
                             THREAD_CONTROL_STATUS_FINISHED);
 
-  // Restore stdout
-  (void)fflush(stdout);
-  (void)dup2(saved_stdout, STDOUT_FILENO);
-  close(saved_stdout);
+  test_platform_restore_stdout(saved_stdout);
 }
 
 // Play moves until the bag is empty, returning true if we get a valid endgame
@@ -124,8 +116,8 @@ static float compute_stuck_fraction(Game *game, MoveList *move_list,
 
 // Generate stuck-tile CGPs: self-play games until endgame, filter for
 // positions where the opponent is 100% stuck (all rack tiles stuck).
-// Saves CGPs to /tmp/stuck_100pct_cgps.txt and partial-stuck to
-// /tmp/stuck_partial_cgps.txt.
+// Saves CGPs, in the working directory, to stuck_100pct_cgps.txt and
+// partial-stuck to stuck_partial_cgps.txt.
 void test_generate_stuck_cgps(void) {
   log_set_level(LOG_FATAL);
 
@@ -142,9 +134,9 @@ void test_generate_stuck_cgps(void) {
   const uint64_t base_seed = 7777;
   const int max_attempts = 1500000;
 
-  FILE *fp_full = fopen("/tmp/stuck_100pct_cgps.txt", "we");
-  FILE *fp_partial = fopen("/tmp/stuck_partial_cgps.txt", "we");
-  FILE *fp_hard = fopen("/tmp/stuck_hard_endgame_cgps.txt", "we");
+  FILE *fp_full = cfile_open("stuck_100pct_cgps.txt", "we", false);
+  FILE *fp_partial = cfile_open("stuck_partial_cgps.txt", "we", false);
+  FILE *fp_hard = cfile_open("stuck_hard_endgame_cgps.txt", "we", false);
   assert(fp_full);
   assert(fp_partial);
   assert(fp_hard);
@@ -234,12 +226,11 @@ void test_generate_stuck_cgps(void) {
   printf("==============================================================\n");
   printf("  Generate Stuck CGPs (seed=%llu)\n", (unsigned long long)base_seed);
   printf("==============================================================\n");
-  printf("  100%% stuck: %d positions → /tmp/stuck_100pct_cgps.txt\n",
-         found_full);
-  printf("  50-99%% stuck: %d positions → /tmp/stuck_partial_cgps.txt\n",
+  printf("  100%% stuck: %d positions → stuck_100pct_cgps.txt\n", found_full);
+  printf("  50-99%% stuck: %d positions → stuck_partial_cgps.txt\n",
          found_partial);
   printf("  any stuck at bag-empty: %d positions → "
-         "/tmp/stuck_hard_endgame_cgps.txt\n",
+         "stuck_hard_endgame_cgps.txt\n",
          found_hard);
   printf("==============================================================\n");
   (void)fflush(stdout);
@@ -260,7 +251,7 @@ static void generate_nonstuck_cgps(uint64_t base_seed, const char *outfile) {
   const int target = 500;
   const int max_attempts = 100000;
 
-  FILE *fp = fopen(outfile, "we");
+  FILE *fp = cfile_open(outfile, "we", false);
   assert(fp);
 
   int found = 0;
@@ -308,19 +299,19 @@ static void generate_nonstuck_cgps(uint64_t base_seed, const char *outfile) {
 
 void test_generate_nonstuck_cgps(void) {
   log_set_level(LOG_FATAL);
-  generate_nonstuck_cgps(31415, "/tmp/nonstuck_cgps.txt");
+  generate_nonstuck_cgps(31415, "nonstuck_cgps.txt");
 }
 
 void test_generate_nonstuck_cgps2(void) {
   log_set_level(LOG_FATAL);
-  generate_nonstuck_cgps(271828, "/tmp/nonstuck_cgps2.txt");
+  generate_nonstuck_cgps(271828, "nonstuck_cgps2.txt");
 }
 
 // Core A/B benchmark: solve each CGP twice (with and without
 // forced-pass bypass), comparing value and time pairwise.
 static void run_ab_benchmark(const char *cgp_file, const char *label,
                              int old_ply, int new_ply, int max_positions) {
-  FILE *fp = fopen(cgp_file, "re");
+  FILE *fp = cfile_open(cgp_file, "re", false);
   if (!fp) {
     printf("No CGP file found at %s — run genstuck/gennonstuck first.\n",
            cgp_file);
@@ -463,17 +454,17 @@ static void run_ab_benchmark(const char *cgp_file, const char *label,
 
 void test_benchmark_forced_pass(void) {
   log_set_level(LOG_FATAL);
-  run_ab_benchmark("/tmp/stuck_100pct_cgps.txt", "stuck", 3, 2, 500);
+  run_ab_benchmark("stuck_100pct_cgps.txt", "stuck", 3, 2, 500);
 }
 
 void test_benchmark_nonstuck(void) {
   log_set_level(LOG_FATAL);
-  run_ab_benchmark("/tmp/nonstuck_cgps.txt", "nonstuck", 3, 2, 500);
+  run_ab_benchmark("nonstuck_cgps.txt", "nonstuck", 3, 2, 500);
 }
 
 void test_benchmark_nonstuck_3v3(void) {
   log_set_level(LOG_FATAL);
-  run_ab_benchmark("/tmp/nonstuck_cgps.txt", "nonstuck", 3, 3, 500);
+  run_ab_benchmark("nonstuck_cgps.txt", "nonstuck", 3, 3, 500);
 }
 
 // ---------------------------------------------------------------------------
@@ -494,7 +485,7 @@ void test_benchmark_nonstuck_3v3(void) {
 //
 // Parameterized entirely by environment so the same binary can sweep depth /
 // thread count / battery without recompiling:
-//   MAGPIE_BENCH_CGP     CGP file           (default /tmp/nonstuck_cgps.txt)
+//   MAGPIE_BENCH_CGP     CGP file           (default nonstuck_cgps.txt)
 //   MAGPIE_BENCH_LEX     lexicon            (default CSW21)
 //   MAGPIE_BENCH_PLIES   endgame plies      (default 4)
 //   MAGPIE_BENCH_THREADS solver threads     (default 1  -> deterministic nodes)
@@ -525,7 +516,7 @@ void test_endgame_speed_bench(void) {
 
   const char *cgp_file = getenv("MAGPIE_BENCH_CGP");
   if (cgp_file == NULL || cgp_file[0] == '\0') {
-    cgp_file = "/tmp/nonstuck_cgps.txt";
+    cgp_file = "nonstuck_cgps.txt";
   }
   const char *lex = getenv("MAGPIE_BENCH_LEX");
   if (lex == NULL || lex[0] == '\0') {
@@ -546,7 +537,7 @@ void test_endgame_speed_bench(void) {
   // entries. Rows carry a cfg column and two summaries are printed.
   const bool interleave = env_int("MAGPIE_BENCH_INTERLEAVE", 0) != 0;
 
-  FILE *fp = fopen(cgp_file, "re");
+  FILE *fp = cfile_open(cgp_file, "re", false);
   if (!fp) {
     printf("BENCHERR no CGP file at %s\n", cgp_file);
     return;
@@ -686,7 +677,7 @@ void test_endgame_speed_bench(void) {
 //   POROW <idx> moves=<n> nodes=<N> depthsum=<D> time=<s> ended=<0|1>
 // and a summary. Set MAGPIE_PO_TIMEMS=0 to disable the time limit and instead
 // fully solve each move to MAGPIE_PO_PLIES (a pure speed comparison).
-//   MAGPIE_PO_CGP    CGP file        (default /tmp/nonstuck_cgps.txt)
+//   MAGPIE_PO_CGP    CGP file        (default nonstuck_cgps.txt)
 //   MAGPIE_PO_LEX    lexicon         (default CSW21)
 //   MAGPIE_PO_MAX    positions       (default 20)
 //   MAGPIE_PO_TIMEMS per-move budget (default 100; 0 = no limit)
@@ -700,7 +691,7 @@ void test_endgame_playout_bench(void) {
 
   const char *cgp_file = getenv("MAGPIE_PO_CGP");
   if (cgp_file == NULL || cgp_file[0] == '\0') {
-    cgp_file = "/tmp/nonstuck_cgps.txt";
+    cgp_file = "nonstuck_cgps.txt";
   }
   const char *lex = getenv("MAGPIE_PO_LEX");
   if (lex == NULL || lex[0] == '\0') {
@@ -717,7 +708,7 @@ void test_endgame_playout_bench(void) {
   const bool incremental = env_int("MAGPIE_PO_INCREMENTAL", 0) != 0;
   const int max_moves = env_int("MAGPIE_PO_MAXMOVES", 40);
 
-  FILE *fp = fopen(cgp_file, "re");
+  FILE *fp = cfile_open(cgp_file, "re", false);
   if (!fp) {
     printf("POERR no CGP file at %s\n", cgp_file);
     return;
@@ -1009,7 +1000,7 @@ void test_endgame_root_bench(void) {
   exec_config_quiet(config, "new");
   Game *game = config_get_game(config);
   if (env_int("MAGPIE_ROOT_GENERATE", 0)) {
-    FILE *output = fopen(path, "we");
+    FILE *output = cfile_open(path, "we", false);
     assert(output != NULL);
     MoveList *moves = move_list_create(1);
     int found = 0;
@@ -1047,7 +1038,7 @@ void test_endgame_root_bench(void) {
     config_destroy(config);
     return;
   }
-  FILE *input = fopen(path, "re");
+  FILE *input = cfile_open(path, "re", false);
   assert(input != NULL);
   char cgp[4096];
   for (int position = 0; position < count; position++) {

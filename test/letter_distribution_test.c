@@ -1,5 +1,6 @@
 #include "letter_distribution_test.h"
 
+#include "../src/compat/cfile.h"
 #include "../src/def/letter_distribution_defs.h"
 #include "../src/ent/data_filepaths.h"
 #include "../src/ent/equity.h"
@@ -318,7 +319,7 @@ static void test_a_distribution_past_the_alphabet_limit_is_refused(void) {
   char *path = data_filepaths_get_writable_filename(
       data_path, "toomanyletters", DATA_FILEPATH_TYPE_LD, error_stack);
   assert(error_stack_is_empty(error_stack));
-  FILE *stream = fopen(path, "we");
+  FILE *stream = cfile_open(path, "we", false);
   assert(stream);
   for (int i = 0; i <= MAX_ALPHABET_SIZE; i++) {
     (void)fprintf(stream, "%c,%c,1,1,0\n", 'A' + i % 26, 'a' + i % 26);
@@ -350,7 +351,7 @@ static void test_a_row_past_what_magpie_holds_is_refused(void) {
     char *path = data_filepaths_get_writable_filename(
         data_path, "rowpastlimit", DATA_FILEPATH_TYPE_LD, error_stack);
     assert(error_stack_is_empty(error_stack));
-    FILE *stream = fopen(path, "we");
+    FILE *stream = cfile_open(path, "we", false);
     assert(stream);
     (void)fputs(rows[i], stream);
     (void)fclose(stream);

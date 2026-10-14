@@ -64,7 +64,7 @@ static void test_pat_utility_prepare(void) {
   error_stack_reset(error_stack);
   assert(missing->utility_table == NULL);
   pat_destroy(missing);
-  free(empty_dir);
+  destroy_temp_pat_data_dir(empty_dir);
 
   error_stack_destroy(error_stack);
   config_destroy(config);

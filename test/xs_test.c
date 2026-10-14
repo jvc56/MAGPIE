@@ -16,6 +16,7 @@
 #include "../src/util/io_util.h"
 #include "../src/util/string_util.h"
 #include "../src/util/xs_bits.h"
+#include "test_platform.h"
 #include "test_util.h"
 #include <assert.h>
 #include <stdbool.h>
@@ -23,7 +24,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
 
 static const char xs_fixture[] =
     "6DOWN5/7U7/6STEPSONs1/1OCCUR1F3META/4MUrAENAS2V/5B1B5QI/7L6A/6KEX5N/"
@@ -253,10 +253,7 @@ static void xs_test_frequencies(void) {
   assert(word_counts_record(counts, board, before)); // pass: no new words
   assert(counts->size == 2);
   ErrorStack *errors = error_stack_create();
-  char path[] = "/tmp/magpie-count-test-XXXXXX";
-  int fd = mkstemp(path);
-  assert(fd >= 0);
-  close(fd);
+  char *path = test_platform_make_temporary_file("magpie-count-test-");
   assert(word_counts_write(counts, path, errors));
   size_t length;
   char *text = xs_read_file(path, &length, errors);
@@ -274,6 +271,7 @@ static void xs_test_frequencies(void) {
   xs_assert_ok(errors);
   int removed = remove(path);
   assert(!removed);
+  free(path);
   word_counts_destroy(counts);
   error_stack_destroy(errors);
   free(board);
@@ -517,10 +515,7 @@ void test_xs(void) {
     free(json);
   }
   // conv uses explicit paths and accepts compressed or plain count inputs.
-  char input[] = "/tmp/magpie-xs-counts-XXXXXX";
-  int descriptor = mkstemp(input);
-  assert(descriptor >= 0);
-  close(descriptor);
+  char *input = test_platform_make_temporary_file("magpie-xs-counts-");
   char *output = get_formatted_string("%s.gz", input);
   const char counts[] = "AB\t2\nAA\t4\nAC\t1\nAD\t1\n";
   assert(xs_write_file(input, counts, strlen(counts), errors));
@@ -548,6 +543,7 @@ void test_xs(void) {
   int removed_input = remove(input);
   int removed_output = remove(output);
   assert(removed_input == 0 && removed_output == 0);
+  free(input);
   free(output);
   error_stack_destroy(errors);
 }

@@ -8,6 +8,11 @@ Outside src/compat, a C file may:
     stat, mkdir, getline, isatty, pthread_*, ...), nor name platform types
     (pthread_t, ssize_t, DIR, ...).
 
+test/test_platform.c is exempt as well: it is the test suite's counterpart
+of src/compat, the one place for what tests need from the platform and
+src/compat has no reason to offer (temporary directories, permission bits,
+symlinks, pipes, file size limits). It keeps its own header portable.
+
 Comments and string literals are skipped, and a banned function only counts
 as a call: `stat(` is a call, `struct stat`, `->close(` and `my_open(` are not.
 
@@ -27,6 +32,8 @@ import sys
 ROOT = os.path.dirname(os.path.abspath(__file__))
 SCAN_DIRS = ["src", "cmd", "tools", "test"]
 COMPAT_DIR = os.path.join("src", "compat")
+# The test suite's platform layer (see the docstring).
+TEST_PLATFORM_FILE = "test/test_platform.c"
 ALLOWLIST = "portability_allowlist.txt"
 
 ISO_C_HEADERS = {
@@ -155,8 +162,10 @@ def source_files():
             if rel_dir == COMPAT_DIR or rel_dir.startswith(COMPAT_DIR + os.sep):
                 continue
             for filename in sorted(filenames):
-                if filename.endswith((".c", ".h")):
-                    yield os.path.join(rel_dir, filename).replace(os.sep, "/")
+                path = os.path.join(rel_dir, filename).replace(os.sep, "/")
+                if (filename.endswith((".c", ".h")) and
+                        path != TEST_PLATFORM_FILE):
+                    yield path
 
 
 def allowlist_key(path, kind, name):

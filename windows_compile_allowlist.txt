@@ -1,14 +1,2 @@
 # C files that do not compile for Windows yet. Remove entries as
 # they are fixed; never add one. See check_windows_compile.py.
-test/autoplay_test.c
-test/benchmark_endgame_test.c
-test/benchmark_peg_test.c
-test/command_test.c
-test/contribute_tables_test.c
-test/contribute_test.c
-test/pat_test_util.c
-test/string_util_test.c
-test/test_util.c
-test/wit_upgrade_test.c
-test/word_map_embedding_test.c
-test/word_plus_floater_maker_test.c

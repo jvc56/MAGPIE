@@ -1,5 +1,6 @@
 #include "benchmark_peg_test.h"
 
+#include "../src/compat/cfile.h"
 #include "../src/compat/ctime.h"
 #include "../src/compat/memory_info.h"
 #include "../src/def/game_defs.h"
@@ -18,15 +19,14 @@
 #include "../src/str/move_string.h"
 #include "../src/util/io_util.h"
 #include "../src/util/string_util.h"
+#include "test_platform.h"
 #include "test_util.h"
 #include <assert.h>
-#include <fcntl.h>
 #include <stdatomic.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
 
 // On-demand pre-endgame (PEG) utility-loss benchmark. Each position is solved
 // with two fast in-game configs (A and B), then a single strong COMMON ORACLE
@@ -127,11 +127,7 @@ typedef struct OracleResult {
 
 // Run `cmd` against `config` with stdout suppressed (CGP loads are chatty).
 static void exec_config_quiet(Config *config, const char *cmd) {
-  (void)fflush(stdout);
-  int saved_stdout = fcntl(STDOUT_FILENO, F_DUPFD_CLOEXEC, 0);
-  int devnull = open("/dev/null", O_WRONLY | O_CLOEXEC);
-  (void)dup2(devnull, STDOUT_FILENO);
-  close(devnull);
+  const int saved_stdout = test_platform_silence_stdout();
 
   ErrorStack *error_stack = error_stack_create();
   thread_control_set_status(config_get_thread_control(config),
@@ -144,9 +140,7 @@ static void exec_config_quiet(Config *config, const char *cmd) {
   thread_control_set_status(config_get_thread_control(config),
                             THREAD_CONTROL_STATUS_FINISHED);
 
-  (void)fflush(stdout);
-  (void)dup2(saved_stdout, STDOUT_FILENO);
-  close(saved_stdout);
+  test_platform_restore_stdout(saved_stdout);
 }
 
 static void fill_peg_args(PegArgs *args, const Config *config,
@@ -286,7 +280,7 @@ static void run_peg_utility_benchmark(const char *cgp_file, const char *label,
                                       const PegBenchConfig *cfg_b,
                                       const PegBenchConfig *oracle_cfg,
                                       int max_positions) {
-  FILE *fp = fopen(cgp_file, "re");
+  FILE *fp = cfile_open(cgp_file, "re", false);
   if (!fp) {
     printf("No CGP file found at %s — run from the repo root.\n", cgp_file);
     return;
@@ -724,7 +718,7 @@ void test_peg_bench_fixture(void) {
                                           : get_num_cores();
   const double tlim = 0.0; // 0 = unbounded
 
-  FILE *fp = fopen(file, "re");
+  FILE *fp = cfile_open(file, "re", false);
   if (!fp) {
     printf("[pegb] no fixture at %s (run from repo root)\n", file);
     return;
@@ -901,7 +895,7 @@ void test_peg_nested_gap(void) {
   for (int bag = first_bag; bag <= last_bag; bag++) {
     char file[256];
     (void)snprintf(file, sizeof(file), "%s/random_%dpeg.txt", dir, bag);
-    FILE *fp = fopen(file, "re");
+    FILE *fp = cfile_open(file, "re", false);
     if (!fp) {
       printf("[gap] bag=%d: no fixture %s\n", bag, file);
       continue;
@@ -1070,7 +1064,7 @@ void test_peg_stage_stability(void) {
   printf("PEGCFG threads=%d kmax=%d maxpos=%d\n", threads, kmax, maxpos);
   (void)fflush(stdout);
   for (int fi = 0; fi < 4; fi++) {
-    FILE *fp = fopen(files[fi].f, "re");
+    FILE *fp = cfile_open(files[fi].f, "re", false);
     if (!fp) {
       printf("PEGERR no %s\n", files[fi].f);
       continue;
@@ -1190,21 +1184,17 @@ void test_peg_strength_ab(void) {
                 ob, maxpos);
 }
 
-// Generate a FRESH battery of PEG positions (new seeds, contested) to /tmp for
-// a long strength run, so we are not measuring on the committed fixtures. Env
-// MAGPIE_PEG_GENCOUNT (positions per bag, default 200).
+// Generate a FRESH battery of PEG positions (new seeds, contested) in the
+// working directory for a long strength run, so we are not measuring on the
+// committed fixtures. Env MAGPIE_PEG_GENCOUNT (positions per bag, default 200).
 void test_gen_peg_fresh(void) {
   log_set_level(LOG_FATAL);
   const char *ec = getenv("MAGPIE_PEG_GENCOUNT");
   const int count = (ec && *ec) ? (int)strtol(ec, NULL, 10) : 200;
-  generate_peg_cgps(918273101ULL, 1, count, "/tmp/peg_fresh_1peg.txt", false,
-                    true);
-  generate_peg_cgps(918273202ULL, 2, count, "/tmp/peg_fresh_2peg.txt", false,
-                    true);
-  generate_peg_cgps(918273303ULL, 3, count, "/tmp/peg_fresh_3peg.txt", false,
-                    true);
-  generate_peg_cgps(918273404ULL, 4, count, "/tmp/peg_fresh_4peg.txt", false,
-                    true);
+  generate_peg_cgps(918273101ULL, 1, count, "peg_fresh_1peg.txt", false, true);
+  generate_peg_cgps(918273202ULL, 2, count, "peg_fresh_2peg.txt", false, true);
+  generate_peg_cgps(918273303ULL, 3, count, "peg_fresh_3peg.txt", false, true);
+  generate_peg_cgps(918273404ULL, 4, count, "peg_fresh_4peg.txt", false, true);
 }
 
 // PEG throughput->strength CURVE: for each position run several arms that
@@ -1250,10 +1240,10 @@ void test_peg_strength_curve(void) {
     const char *f;
     int bag;
   } files[] = {
-      {"/tmp/peg_fresh_1peg.txt", 1},
-      {"/tmp/peg_fresh_2peg.txt", 2},
-      {"/tmp/peg_fresh_3peg.txt", 3},
-      {"/tmp/peg_fresh_4peg.txt", 4},
+      {"peg_fresh_1peg.txt", 1},
+      {"peg_fresh_2peg.txt", 2},
+      {"peg_fresh_3peg.txt", 3},
+      {"peg_fresh_4peg.txt", 4},
   };
   Config *config =
       config_create_or_die("set -lex CSW24 -threads 1 -s1 score -s2 score");
@@ -1264,7 +1254,7 @@ void test_peg_strength_curve(void) {
   }
   (void)fflush(stdout);
   for (int fi = 0; fi < 4; fi++) {
-    FILE *fp = fopen(files[fi].f, "re");
+    FILE *fp = cfile_open(files[fi].f, "re", false);
     if (!fp) {
       printf("PEGCURVEERR no %s\n", files[fi].f);
       continue;

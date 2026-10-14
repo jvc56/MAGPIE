@@ -9,8 +9,10 @@
 #include "../src/ent/rack.h"
 
 // Creates a temporary data directory with a strategy/ subdirectory and
-// returns the path (owned by the caller).
+// returns the path, which the caller gives to destroy_temp_pat_data_dir.
 char *create_temp_pat_data_dir(void);
+// Removes the directory and everything in it, and frees the path.
+void destroy_temp_pat_data_dir(char *data_dir);
 // Writes contents to <data_dir>/strategy/<pat_name>.pat.
 void write_pat_file_contents(const char *data_dir, const char *pat_name,
                              const char *contents);

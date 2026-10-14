@@ -1,5 +1,6 @@
 #include "autoplay_test.h"
 
+#include "../src/compat/cfile.h"
 #include "../src/def/autoplay_defs.h"
 #include "../src/def/pat_defs.h"
 #include "../src/def/players_data_defs.h"
@@ -20,6 +21,7 @@
 #include "../src/util/math_util.h"
 #include "../src/util/string_util.h"
 #include "test_constants.h"
+#include "test_platform.h"
 #include "test_util.h"
 #include "wmp_move_gen_test.h"
 #include <assert.h>
@@ -28,7 +30,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/stat.h>
 
 void test_odds_that_player_is_better(void) {
   assert(within_epsilon(odds_that_player_is_better(0.6, 10), 73.645537));
@@ -188,11 +189,9 @@ void test_autoplay_leavegen(void) {
 }
 
 void test_autoplay_pat_gen(void) {
-  char tmp_template[] = "/tmp/magpie_patgen_XXXXXX";
-  const char *tmp_dir = mkdtemp(tmp_template);
-  assert(tmp_dir);
+  char *tmp_dir = test_platform_make_temporary_directory("magpie_patgen_");
   char *strategy_dir = get_formatted_string("%s/strategy", tmp_dir);
-  assert(mkdir(strategy_dir, 0755) == 0);
+  assert(cfile_mkdir(strategy_dir) == 0);
   free(strategy_dir);
 
   char *set_cmd = get_formatted_string(
@@ -222,6 +221,8 @@ void test_autoplay_pat_gen(void) {
   }
   error_stack_destroy(error_stack);
   config_destroy(ab_config);
+  test_platform_remove_directory_tree(tmp_dir);
+  free(tmp_dir);
 }
 
 void test_autoplay_divergent_games(void) {

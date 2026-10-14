@@ -1,5 +1,6 @@
 #include "config_test.h"
 
+#include "../src/compat/cfile.h"
 #include "../src/def/game_defs.h"
 #include "../src/def/letter_distribution_defs.h"
 #include "../src/def/move_defs.h"
@@ -29,7 +30,6 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <unistd.h>
 
 #define TEST_GCG_FILENAME "a.gcg"
 
@@ -2013,9 +2013,9 @@ void test_config_anno(void) {
   // Test autosave
   assert_config_exec_status(config, "newgame au1.gcg", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "t RETINAS", ERROR_STATUS_SUCCESS);
-  assert(access("au1.gcg", F_OK) != 0);
+  assert(!cfile_access("au1.gcg", CFILE_ACCESS_EXISTS));
   assert_config_exec_status(config, "e", ERROR_STATUS_SUCCESS);
-  assert(access("au1.gcg", F_OK) == 0);
+  assert(cfile_access("au1.gcg", CFILE_ACCESS_EXISTS));
   char *au1_contents_1 = get_string_from_file_or_die("au1.gcg");
   assert_config_exec_status(config, "t CAZIQUE", ERROR_STATUS_SUCCESS);
   char *au1_contents_2 = get_string_from_file_or_die("au1.gcg");
@@ -2030,7 +2030,7 @@ void test_config_anno(void) {
 
   assert_config_exec_status(config, "set -autosave true", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "newgame au2.gcg", ERROR_STATUS_SUCCESS);
-  assert(access("au2.gcg", F_OK) == 0);
+  assert(cfile_access("au2.gcg", CFILE_ACCESS_EXISTS));
   char *au2_contents_1 = get_string_from_file_or_die("au2.gcg");
   assert_config_exec_status(config, "t CAZIQUE", ERROR_STATUS_SUCCESS);
   char *au2_contents_2 = get_string_from_file_or_die("au2.gcg");
@@ -2331,8 +2331,9 @@ void test_config_export(void) {
   assert_config_exec_status(config, "ex " TEST_GCG_FILENAME,
                             ERROR_STATUS_SUCCESS);
 
-  assert(access(game_history_get_gcg_filename(config_get_game_history(config)),
-                F_OK) == 0);
+  assert(cfile_access(
+      game_history_get_gcg_filename(config_get_game_history(config)),
+      CFILE_ACCESS_EXISTS));
 
   assert_config_exec_status(config, "rack HIJKLMN", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "gen", ERROR_STATUS_SUCCESS);
@@ -2374,7 +2375,7 @@ void test_config_export(void) {
 
   char *default_name_1 = string_duplicate(
       game_history_get_gcg_filename(config_get_game_history(config)));
-  assert(access(default_name_1, F_OK) == 0);
+  assert(cfile_access(default_name_1, CFILE_ACCESS_EXISTS));
 
   // Names has not updated, so the "first try" default name will clash with the
   // existing file and it will have to be incremented.
@@ -2392,7 +2393,7 @@ void test_config_export(void) {
 
   char *default_name_2 = string_duplicate(
       game_history_get_gcg_filename(config_get_game_history(config)));
-  assert(access(default_name_2, F_OK) == 0);
+  assert(cfile_access(default_name_2, CFILE_ACCESS_EXISTS));
 
   // Names has not updated, so the "first try" and "second try" default names
   // will clash with the existing files and it will have to be incremented.
@@ -2410,7 +2411,7 @@ void test_config_export(void) {
 
   char *default_name_3 = string_duplicate(
       game_history_get_gcg_filename(config_get_game_history(config)));
-  assert(access(default_name_3, F_OK) == 0);
+  assert(cfile_access(default_name_3, CFILE_ACCESS_EXISTS));
 
   StringBuilder *sb_load_cmd = string_builder_create();
 

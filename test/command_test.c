@@ -13,13 +13,12 @@
 #include "../src/util/io_util.h"
 #include "../src/util/string_util.h"
 #include "test_constants.h"
+#include "test_platform.h"
 #include "test_util.h"
 #include <assert.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <sys/stat.h>
-#include <unistd.h>
 
 #define DEFAULT_NAP_TIME 0.01
 
@@ -511,21 +510,12 @@ void *test_process_command_async(void *uncasted_process_args) {
 }
 
 void test_exec_async_command(void) {
-  char *test_input_filename = get_test_filename("input");
-
-  // Reset the contents of input
-  unlink(test_input_filename);
-
-  // Create the FIFO if it doesn't exist
-  if (mkfifo(test_input_filename, 0666) == -1) {
-    perror("mkfifo");
-  }
-
-  FILE *input_writer = fopen_or_die(test_input_filename, "w+");
-  FILE *input_reader = fopen_or_die(test_input_filename, "r");
+  FILE *input_reader = NULL;
+  FILE *input_writer = NULL;
+  test_platform_open_pipe(&input_reader, &input_writer);
   command_test_set_stream_in(input_reader);
 
-  // Input comes from a FIFO rather than a terminal, so a command sent
+  // Input comes from a pipe rather than a terminal, so a command sent
   // while another runs is queued rather than rejected.
   ProcessArgs *process_args = process_args_create(
       "set -mode async -printonfinish true", "autoplay", 0, "");
@@ -550,7 +540,7 @@ void test_exec_async_command(void) {
       "autoplay game 10000000 -lex CSW21 -s1 equity -s2 equity  -gp false\n");
   fflush_or_die(input_writer);
   // Try to immediately start another command while the previous one
-  // is still running. From a FIFO this is queued and runs after the stop
+  // is still running. From a pipe this is queued and runs after the stop
   // below.
   fprintf_or_die(
       input_writer,
@@ -576,9 +566,7 @@ void test_exec_async_command(void) {
 
   fclose_or_die(input_writer);
   fclose_or_die(input_reader);
-  delete_fifo(test_input_filename);
   process_args_destroy(process_args);
-  free(test_input_filename);
   command_test_reset_stream_in();
 }
 
@@ -589,7 +577,7 @@ void test_exec_async_script(void) {
   char *test_input_filename = get_test_filename("input");
 
   // Reset the contents of input
-  unlink(test_input_filename);
+  delete_file(test_input_filename);
 
   FILE *input_writer = fopen_or_die(test_input_filename, "w+");
   FILE *input_reader = fopen_or_die(test_input_filename, "r");
@@ -614,7 +602,7 @@ void test_exec_async_script(void) {
   block_for_process_command(process_args, 60);
 
   fclose_or_die(input_reader);
-  delete_fifo(test_input_filename);
+  delete_file(test_input_filename);
   process_args_destroy(process_args);
   free(test_input_filename);
   command_test_reset_stream_in();
@@ -624,7 +612,7 @@ void test_exec_sync_command(void) {
   char *test_input_filename = get_test_filename("input");
 
   // Reset the contents of input
-  unlink(test_input_filename);
+  delete_file(test_input_filename);
 
   FILE *input_writer = fopen_or_die(test_input_filename, "w+");
   FILE *input_reader = fopen_or_die(test_input_filename, "r");
@@ -661,7 +649,7 @@ void test_exec_sync_command(void) {
   block_for_process_command(process_args, 30);
 
   fclose_or_die(input_reader);
-  delete_fifo(test_input_filename);
+  delete_file(test_input_filename);
   process_args_destroy(process_args);
   free(config_load_error_substr);
   free(test_input_filename);
@@ -676,7 +664,7 @@ void run_short_autoplay(const char *initial_cmd) {
   char *test_input_filename = get_test_filename("input");
 
   // Reset the contents of input
-  unlink(test_input_filename);
+  delete_file(test_input_filename);
 
   FILE *input_writer = fopen_or_die(test_input_filename, "w+");
   FILE *input_reader = fopen_or_die(test_input_filename, "r");
@@ -698,7 +686,7 @@ void run_short_autoplay(const char *initial_cmd) {
   block_for_process_command(process_args, 5);
 
   fclose_or_die(input_reader);
-  delete_fifo(test_input_filename);
+  delete_file(test_input_filename);
   process_args_destroy(process_args);
   free(test_input_filename);
   command_test_reset_stream_in();
@@ -709,7 +697,7 @@ void run_short_autoplay_with_terminate_command(const char *initial_cmd,
   char *test_input_filename = get_test_filename("input");
 
   // Reset the contents of input
-  unlink(test_input_filename);
+  delete_file(test_input_filename);
 
   FILE *input_writer = fopen_or_die(test_input_filename, "w+");
   FILE *input_reader = fopen_or_die(test_input_filename, "r");
@@ -731,7 +719,7 @@ void run_short_autoplay_with_terminate_command(const char *initial_cmd,
   block_for_process_command(process_args, 5);
 
   fclose_or_die(input_reader);
-  delete_fifo(test_input_filename);
+  delete_file(test_input_filename);
   process_args_destroy(process_args);
   free(test_input_filename);
   command_test_reset_stream_in();

@@ -63,7 +63,11 @@ python3 check_windows_compile.py # every file compiles for Windows (needs llvm-m
 
 **Platform code lives in `src/compat`.** Outside it, include only ISO C headers
 (plus `<stdatomic.h>`) and project headers, test no platform macros, and call
-no POSIX function compat wraps. `check_portability.py` enforces this against
+no POSIX function compat wraps. Tests get what compat lacks (temporary
+directories, permissions, symlinks, pipes, file size limits) from
+`test/test_platform.h`, whose `.c` is the one exempt file in `test/`; a case a
+platform cannot run is skipped through that helper's return value, never
+deleted. `check_portability.py` enforces this against
 `portability_allowlist.txt`, and `check_windows_compile.py` cross-compiles every
 file against `windows_compile_allowlist.txt`. Both lists only shrink: never add
 an entry. The Windows compiler is the pinned llvm-mingw release (see the

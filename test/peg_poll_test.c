@@ -2,6 +2,7 @@
 
 #include "../src/compat/cpthread.h"
 #include "../src/compat/cpthread_defs.h"
+#include "../src/compat/ctime.h"
 #include "../src/compat/memory_info.h"
 #include "../src/def/game_history_defs.h"
 #include "../src/def/letter_distribution_defs.h"
@@ -16,6 +17,7 @@
 #include "../src/str/peg_string.h"
 #include "../src/util/io_util.h"
 #include "../src/util/string_util.h"
+#include "test_platform.h"
 #include "test_util.h"
 #include <assert.h>
 #include <locale.h>
@@ -26,7 +28,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <time.h>
 
 // A 2-in-bag PEG position (from notes/peg_positions/random_2peg.txt). Stage 0
 // runs greedy playouts over the full candidate field, so the poll's leaderboard
@@ -67,8 +68,7 @@ static void *poller_main(void *arg) {
     if (snap.done) {
       break;
     }
-    const struct timespec nap = {0, 1L * 1000 * 1000}; // 1 ms
-    nanosleep(&nap, NULL);
+    ctime_nap(0.001);
   }
   return NULL;
 }
@@ -184,19 +184,21 @@ void test_peg_poll(void) {
   assert(has_substring(json, "\"spread\":0.000000"));
   assert(has_substring(json, "\"seconds\":0.000"));
   free(json);
-#ifndef __EMSCRIPTEN__
-  char *saved_locale = string_duplicate(setlocale(LC_NUMERIC, NULL));
-  if (setlocale(LC_NUMERIC, "de_DE.UTF-8")) {
-    json = peg_snapshot_get_json(&synthetic, game);
-    assert(has_substring(json, "\"spread\":0.000000"));
-    assert(has_substring(json, "\"seconds\":0.000"));
-    free(json);
+  if (test_platform_has_host_locales()) {
+    char *saved_locale = string_duplicate(setlocale(LC_NUMERIC, NULL));
+    if (setlocale(LC_NUMERIC, "de_DE.UTF-8")) {
+      json = peg_snapshot_get_json(&synthetic, game);
+      assert(has_substring(json, "\"spread\":0.000000"));
+      assert(has_substring(json, "\"seconds\":0.000"));
+      free(json);
+    }
+    const char *restored_locale = setlocale(LC_NUMERIC, saved_locale);
+    assert(restored_locale);
+    (void)restored_locale;
+    free(saved_locale);
+  } else {
+    printf("peg-poll: skipped the locale case: no host locales here\n");
   }
-  const char *restored_locale = setlocale(LC_NUMERIC, saved_locale);
-  assert(restored_locale);
-  (void)restored_locale;
-  free(saved_locale);
-#endif
 
   string_builder_destroy(poll_best);
   string_builder_destroy(solve_best);
