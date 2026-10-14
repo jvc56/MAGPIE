@@ -27,6 +27,28 @@ enum {
 static const char compat_binary_path[] = "compat_test_binary.tmp";
 static const char compat_text_path[] = "compat_test_text.tmp";
 
+// Calls with side effects stay outside assert, which a release build drops.
+static void remove_or_fail(const char *path) {
+  const int result = remove(path);
+  assert(result == 0);
+}
+
+static void puts_or_fail(const char *text, FILE *stream) {
+  const int result = fputs(text, stream);
+  assert(result >= 0);
+}
+
+static void assert_read(void *buffer, size_t capacity, FILE *stream,
+                        size_t expected) {
+  const size_t count = fread(buffer, 1, capacity, stream);
+  assert(count == expected);
+}
+
+static void assert_next_byte(FILE *stream, int expected) {
+  const int byte = fgetc(stream);
+  assert(byte == expected);
+}
+
 static void write_fixture(const char *path, const char *bytes, size_t size) {
   ErrorStack *error_stack = error_stack_create();
   FILE *stream = fopen_safe(path, "wb", error_stack);
@@ -53,7 +75,8 @@ static char *read_fixture(const char *path, size_t *size) {
       bytes = realloc_or_die(bytes, capacity);
     }
   }
-  assert(!ferror(stream));
+  const int stream_error = ferror(stream);
+  assert(!stream_error);
   fclose_or_die(stream);
   return bytes;
 }
@@ -77,10 +100,10 @@ static void test_binary_round_trip(void) {
   FILE *stream = cfile_open(compat_binary_path, "rb", false);
   assert(stream);
   char direct[COMPAT_BINARY_FIXTURE_SIZE + 1];
-  assert(fread(direct, 1, sizeof(direct), stream) == sizeof(fixture));
+  assert_read(direct, sizeof(direct), stream, sizeof(fixture));
   assert(memcmp(direct, fixture, sizeof(fixture)) == 0);
   fclose_or_die(stream);
-  assert(remove(compat_binary_path) == 0);
+  remove_or_fail(compat_binary_path);
 }
 
 // Text files MAGPIE writes have \n line endings on every platform, and text
@@ -123,7 +146,7 @@ static void test_text_line_endings(void) {
   free(text);
   string_builder_destroy(builder);
 
-  assert(remove(compat_text_path) == 0);
+  remove_or_fail(compat_text_path);
   error_stack_destroy(error_stack);
 }
 
@@ -144,23 +167,23 @@ static void test_offsets(void) {
     assert(error_stack_is_empty(error_stack));
     error_stack_destroy(error_stack);
     char head[10];
-    assert(fread(head, 1, sizeof(head), stream) == sizeof(head));
+    assert_read(head, sizeof(head), stream, sizeof(head));
     int64_t size = 0;
     assert(cfile_stream_size(stream, &size));
     assert(size == (int64_t)sizeof(fixture));
     assert(cfile_tell(stream) == (int64_t)sizeof(head));
     assert(cfile_seek(stream, 250, SEEK_SET) == 0);
     assert(cfile_tell(stream) == 250);
-    assert(fgetc(stream) == (unsigned char)fixture[250]);
+    assert_next_byte(stream, (unsigned char)fixture[250]);
     assert(cfile_seek(stream, 299, SEEK_SET) == 0);
-    assert(fgetc(stream) == (unsigned char)fixture[299]);
+    assert_next_byte(stream, (unsigned char)fixture[299]);
     assert(cfile_seek(stream, 0, SEEK_END) == 0);
     assert(cfile_tell(stream) == (int64_t)sizeof(fixture));
-    assert(fgetc(stream) == EOF);
+    assert_next_byte(stream, EOF);
     fclose_or_die(stream);
   }
   fileproxy_destroy_cache();
-  assert(remove(compat_binary_path) == 0);
+  remove_or_fail(compat_binary_path);
 }
 
 static char *read_whole_file(const char *path) {
@@ -187,7 +210,7 @@ static void test_rename_over_existing(void) {
   assert(strings_equal(contents, "new"));
   free(contents);
   assert(cfile_rename(from, compat_text_path) != 0);
-  assert(remove(compat_text_path) == 0);
+  remove_or_fail(compat_text_path);
 }
 
 // An atomic write replaces its target even while a reader has it open (as
@@ -203,11 +226,11 @@ static void test_atomic_write(void) {
   assert(stream);
   assert(!strings_equal(atomic_write.temporary, compat_text_path));
   assert(cfile_access(atomic_write.temporary, CFILE_ACCESS_EXISTS));
-  assert(fputs("after", stream) >= 0);
+  puts_or_fail("after", stream);
   assert(cfile_atomic_write_end(&atomic_write, true));
 
   char held[16] = {0};
-  assert(fread(held, 1, sizeof(held) - 1, reader) == strlen("before"));
+  assert_read(held, sizeof(held) - 1, reader, strlen("before"));
   assert(strings_equal(held, "before"));
   fclose_or_die(reader);
   char *contents = read_whole_file(compat_text_path);
@@ -217,7 +240,7 @@ static void test_atomic_write(void) {
   stream = cfile_atomic_write_begin(&atomic_write, compat_text_path);
   assert(stream);
   char *temporary = string_duplicate(atomic_write.temporary);
-  assert(fputs("abandoned", stream) >= 0);
+  puts_or_fail("abandoned", stream);
   assert(cfile_atomic_write_end(&atomic_write, false));
   assert(!cfile_access(temporary, CFILE_ACCESS_EXISTS));
   free(temporary);
@@ -226,15 +249,15 @@ static void test_atomic_write(void) {
   free(contents);
 
   // A target that does not exist yet is created.
-  assert(remove(compat_text_path) == 0);
+  remove_or_fail(compat_text_path);
   stream = cfile_atomic_write_begin(&atomic_write, compat_text_path);
   assert(stream);
-  assert(fputs("created", stream) >= 0);
+  puts_or_fail("created", stream);
   assert(cfile_atomic_write_end(&atomic_write, true));
   contents = read_whole_file(compat_text_path);
   assert(strings_equal(contents, "created"));
   free(contents);
-  assert(remove(compat_text_path) == 0);
+  remove_or_fail(compat_text_path);
 }
 
 static void test_directories_and_access(void) {
@@ -252,7 +275,7 @@ static void test_directories_and_access(void) {
   assert(cfile_access(file, CFILE_ACCESS_READ | CFILE_ACCESS_WRITE));
   // A directory with a file in it is not removed.
   assert(cfile_rmdir(directory) != 0);
-  assert(remove(file) == 0);
+  remove_or_fail(file);
   free(file);
   assert(cfile_rmdir(directory) == 0);
   assert(!cfile_is_directory(directory));
@@ -264,30 +287,30 @@ static void test_directories_and_access(void) {
 static void test_open_modes(void) {
   FILE *stream = cfile_open(compat_text_path, "we", false);
   assert(stream);
-  assert(fputs("one", stream) >= 0);
+  puts_or_fail("one", stream);
   fclose_or_die(stream);
   stream = cfile_open(compat_text_path, "ab", false);
   assert(stream);
-  assert(fputs("two", stream) >= 0);
+  puts_or_fail("two", stream);
   fclose_or_die(stream);
   stream = cfile_open(compat_text_path, "r+b", false);
   assert(stream);
   char text[8] = {0};
-  assert(fread(text, 1, 6, stream) == 6);
+  assert_read(text, 6, stream, 6);
   assert(strings_equal(text, "onetwo"));
   fclose_or_die(stream);
   stream = cfile_open(compat_text_path, "w+", false);
   assert(stream);
-  assert(fputs("three", stream) >= 0);
+  puts_or_fail("three", stream);
   assert(cfile_seek(stream, 0, SEEK_SET) == 0);
   memset(text, 0, sizeof(text));
-  assert(fread(text, 1, sizeof(text) - 1, stream) == 5);
+  assert_read(text, sizeof(text) - 1, stream, 5);
   assert(strings_equal(text, "three"));
   fclose_or_die(stream);
   assert(!cfile_open(compat_text_path, "wb", true));
   assert(!cfile_open(compat_text_path, "q", false));
   assert(!cfile_open(compat_text_path, "rb", true));
-  assert(remove(compat_text_path) == 0);
+  remove_or_fail(compat_text_path);
   assert(!cfile_open(compat_text_path, "rb", false));
 }
 
@@ -316,7 +339,7 @@ static void test_getline(void) {
   free(line);
   fclose_or_die(stream);
   string_builder_destroy(builder);
-  assert(remove(compat_text_path) == 0);
+  remove_or_fail(compat_text_path);
 }
 
 static void assert_path_list(const char *list, int expected_count,
@@ -407,7 +430,7 @@ static void test_directory_listing(void) {
 
   for (int name_idx = 0; name_idx < 3; name_idx++) {
     char *path = get_formatted_string("%s/%s", directory, names[name_idx]);
-    assert(remove(path) == 0);
+    remove_or_fail(path);
     free(path);
   }
   assert(cfile_rmdir(directory) == 0);
@@ -431,13 +454,13 @@ static void test_mapping(void) {
   cmap_close(&map);
   write_fixture(compat_binary_path, fixture, 0);
   assert(!cmap_open(&map, compat_binary_path, false));
-  assert(remove(compat_binary_path) == 0);
+  remove_or_fail(compat_binary_path);
   assert(!cmap_open(&map, compat_binary_path, false));
 
   FILE *stream = cmemfile_open(fixture, sizeof(fixture));
   assert(stream);
   char read_back[sizeof(fixture) + 1];
-  assert(fread(read_back, 1, sizeof(read_back), stream) == sizeof(fixture));
+  assert_read(read_back, sizeof(read_back), stream, sizeof(fixture));
   assert(memcmp(read_back, fixture, sizeof(fixture)) == 0);
   fclose_or_die(stream);
 }

@@ -1,12 +1,13 @@
 #include "cpath.h"
 
-#include <ctype.h>
 #include <stdbool.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #if defined(_WIN32)
+#include <ctype.h>
 #include <windows.h>
 #elif defined(__APPLE__)
 #include <mach-o/dyld.h>
@@ -144,12 +145,11 @@ char *cpath_user_data_dir(void) {
     return NULL;
   }
   (void)WideCharToMultiByte(CP_UTF8, 0, local, -1, base, bytes, NULL, NULL);
-  const size_t base_length = strlen(base);
   static const char suffix[] = "\\MAGPIE";
-  char *directory = malloc(base_length + sizeof(suffix));
+  const size_t size = strlen(base) + sizeof(suffix);
+  char *directory = malloc(size);
   if (directory) {
-    memcpy(directory, base, base_length);
-    memcpy(directory + base_length, suffix, sizeof(suffix));
+    (void)snprintf(directory, size, "%s%s", base, suffix);
   }
   free(base);
   return directory;

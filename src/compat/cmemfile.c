@@ -1,11 +1,10 @@
 #include "cmemfile.h"
 
-#include <errno.h>
 #include <stddef.h>
-#include <stdint.h>
 #include <stdio.h>
 
 #if defined(_WIN32)
+#include <errno.h>
 #include <windows.h>
 #endif
 
@@ -37,6 +36,6 @@ FILE *cmemfile_open(const void *data, size_t size) {
   return stream;
 #else
   // fmemopen takes a non-const pointer, which a read never writes through.
-  return fmemopen((void *)(uintptr_t)data, size, "rb");
+  return fmemopen((void *)data, size, "rb");
 #endif
 }

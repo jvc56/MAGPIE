@@ -2,7 +2,6 @@
 
 #include <errno.h>
 #include <fcntl.h>
-#include <limits.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -37,6 +36,8 @@ enum {
   CFILE_FILE_RENAME_INFO_EX = 22,
   CFILE_RENAME_FLAG_REPLACE_IF_EXISTS = 0x1,
   CFILE_RENAME_FLAG_POSIX_SEMANTICS = 0x2,
+  // The longest symlink target followed: Linux's PATH_MAX.
+  CFILE_LINK_TARGET_MAX = 4096,
   // Room for the suffix that names a replaced file moved aside on Windows.
   CFILE_ASIDE_SUFFIX_LENGTH = 64,
 };
@@ -361,7 +362,7 @@ static bool cfile_rename_around_open_target(const wchar_t *from,
   }
   (void)swprintf(aside, to_length + CFILE_ASIDE_SUFFIX_LENGTH, L"%ls.old.%lu-%ld",
                  to, (unsigned long)GetCurrentProcessId(),
-                 (long)InterlockedIncrement(&counter));
+                 InterlockedIncrement(&counter));
   bool renamed = false;
   if (MoveFileExW(to, aside, MOVEFILE_WRITE_THROUGH)) {
     renamed = MoveFileExW(from, to, MOVEFILE_WRITE_THROUGH) != 0;
@@ -559,7 +560,7 @@ static FILE *cfile_create_temporary(const char *destination,
     char suffix[64];
     (void)snprintf(suffix, sizeof(suffix), ".tmp.%lu-%ld-%llu",
                    (unsigned long)GetCurrentProcessId(),
-                   (long)InterlockedIncrement(&counter),
+                   InterlockedIncrement(&counter),
                    (unsigned long long)GetTickCount64());
     *temporary = cfile_format("%s%s", destination, suffix);
     if (!*temporary) {
@@ -603,11 +604,12 @@ static char *cfile_resolve_destination(const char *path, struct stat *metadata,
       errno = ELOOP;
       return NULL;
     }
-    char target[PATH_MAX + 1];
-    const ssize_t length = readlink(destination, target, PATH_MAX);
-    if (length < 0 || length == PATH_MAX) {
+    char target[CFILE_LINK_TARGET_MAX + 1];
+    const ssize_t length =
+        readlink(destination, target, CFILE_LINK_TARGET_MAX);
+    if (length < 0 || length == CFILE_LINK_TARGET_MAX) {
       free(destination);
-      if (length == PATH_MAX) {
+      if (length == CFILE_LINK_TARGET_MAX) {
         errno = ENAMETOOLONG;
       }
       return NULL;
@@ -756,6 +758,8 @@ int cfile_lock_open(const char *path) {
 bool cfile_lock_try(int lock, bool *busy) {
 #if defined(_WIN32)
   OVERLAPPED overlapped = {0};
+  // A CRT descriptor's Win32 handle comes back as an intptr_t.
+  // NOLINTNEXTLINE(performance-no-int-to-ptr)
   if (LockFileEx((HANDLE)_get_osfhandle(lock),
                  LOCKFILE_EXCLUSIVE_LOCK | LOCKFILE_FAIL_IMMEDIATELY, 0, 1, 0,
                  &overlapped)) {

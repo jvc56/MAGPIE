@@ -15,6 +15,11 @@ bool cterm_is_terminal(FILE *stream);
 // both already and this does nothing.
 void cterm_init(void);
 
+// For unattended runs (the test binary in CI): an abort, a crash or a missing
+// drive ends the process with no dialog waiting for someone to click it --
+// Windows Error Reporting's would hang the job. Does nothing elsewhere.
+void cterm_disable_error_dialogs(void);
+
 // Whether this process has its console to itself: on Windows, true when it
 // was started by double-clicking it in Explorer (Windows made a console for
 // it, which closes when it exits) rather than from a terminal. False

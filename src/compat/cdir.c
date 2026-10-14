@@ -90,10 +90,13 @@ CDir *cdir_open(const char *path) {
   if (dir->find == INVALID_HANDLE_VALUE) {
     const DWORD error = GetLastError();
     free(dir);
-    errno = error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND
-                ? ENOENT
-            : error == ERROR_DIRECTORY ? ENOTDIR
-                                       : EACCES;
+    if (error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND) {
+      errno = ENOENT;
+    } else if (error == ERROR_DIRECTORY) {
+      errno = ENOTDIR;
+    } else {
+      errno = EACCES;
+    }
     return NULL;
   }
   dir->entry_pending = true;

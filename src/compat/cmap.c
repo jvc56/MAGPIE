@@ -109,7 +109,7 @@ void cmap_close(CMap *map) {
   (void)UnmapViewOfFile(map->data);
 #else
   // munmap takes a non-const pointer to memory it never writes through.
-  (void)munmap((void *)(uintptr_t)map->data, map->size);
+  (void)munmap((void *)map->data, map->size);
 #endif
   map->data = NULL;
   map->size = 0;

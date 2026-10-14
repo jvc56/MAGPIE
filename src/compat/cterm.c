@@ -2,10 +2,10 @@
 
 #include <stdbool.h>
 #include <stdio.h>
-#include <stdlib.h>
 
 #if defined(_WIN32)
 #include <io.h>
+#include <stdlib.h>
 #include <windows.h>
 #else
 #include <unistd.h>
@@ -25,7 +25,7 @@ static void cterm_restore_code_pages(void) {
 }
 
 static void cterm_enable_vt(DWORD standard_handle) {
-  const HANDLE handle = GetStdHandle(standard_handle);
+  HANDLE handle = GetStdHandle(standard_handle);
   DWORD mode;
   if (handle != INVALID_HANDLE_VALUE && GetConsoleMode(handle, &mode)) {
     (void)SetConsoleMode(handle, mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING);
@@ -52,6 +52,14 @@ void cterm_init(void) {
 #endif
 }
 
+void cterm_disable_error_dialogs(void) {
+#if defined(_WIN32)
+  (void)_set_abort_behavior(0, _WRITE_ABORT_MSG | _CALL_REPORTFAULT);
+  (void)SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX |
+                     SEM_NOOPENFILEERRORBOX);
+#endif
+}
+
 bool cterm_owns_console(void) {
 #if defined(_WIN32)
   DWORD processes[2];
@@ -62,6 +70,7 @@ bool cterm_owns_console(void) {
 }
 
 void cterm_wait_before_close(void) {
+#if defined(_WIN32)
   if (!cterm_owns_console()) {
     return;
   }
@@ -69,6 +78,7 @@ void cterm_wait_before_close(void) {
   (void)fflush(stderr);
   char line[16];
   (void)fgets(line, sizeof(line), stdin);
+#endif
 }
 
 bool cterm_is_terminal(FILE *stream) {
@@ -80,6 +90,8 @@ bool cterm_is_terminal(FILE *stream) {
   // console mode.
   const intptr_t handle = _get_osfhandle(_fileno(stream));
   DWORD mode;
+  // A CRT descriptor's Win32 handle comes back as an intptr_t.
+  // NOLINTNEXTLINE(performance-no-int-to-ptr)
   return handle != -1 && GetConsoleMode((HANDLE)handle, &mode) != 0;
 #else
   return isatty(fileno(stream)) != 0;

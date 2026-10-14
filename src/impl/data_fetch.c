@@ -228,7 +228,7 @@ void data_fetch(const char *manifest_url, const char *data_dir,
                      get_formatted_string("fetching %s returned HTTP %ld",
                                           manifest_url, response.status_code));
   }
-  JsonValue *manifest = NULL;
+  const JsonValue *manifest = NULL;
   if (error_stack_is_empty(error_stack)) {
     manifest = json_parse(response.body, error_stack);
   }
