@@ -6,6 +6,7 @@
 #include "../src/util/string_util.h"
 #include <assert.h>
 #include <stdbool.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -122,7 +123,44 @@ static void test_text_line_endings(void) {
   error_stack_destroy(error_stack);
 }
 
+// Sizes and offsets are 64-bit on every platform (ftell's long is 32 bits on
+// Windows), and taking a stream's size leaves it where it was, for a file and
+// for a precached buffer alike.
+static void test_offsets(void) {
+  char fixture[300];
+  for (int byte_idx = 0; byte_idx < (int)sizeof(fixture); byte_idx++) {
+    fixture[byte_idx] = (char)(byte_idx * 7);
+  }
+  write_fixture(compat_binary_path, fixture, sizeof(fixture));
+  precache_file_data("compat_test_precached.tmp", fixture, sizeof(fixture));
+  const char *paths[] = {compat_binary_path, "compat_test_precached.tmp"};
+  for (int path_idx = 0; path_idx < 2; path_idx++) {
+    ErrorStack *error_stack = error_stack_create();
+    FILE *stream = stream_from_filename(paths[path_idx], error_stack);
+    assert(error_stack_is_empty(error_stack));
+    error_stack_destroy(error_stack);
+    char head[10];
+    assert(fread(head, 1, sizeof(head), stream) == sizeof(head));
+    int64_t size = 0;
+    assert(cfile_stream_size(stream, &size));
+    assert(size == (int64_t)sizeof(fixture));
+    assert(cfile_tell(stream) == (int64_t)sizeof(head));
+    assert(cfile_seek(stream, 250, SEEK_SET) == 0);
+    assert(cfile_tell(stream) == 250);
+    assert(fgetc(stream) == (unsigned char)fixture[250]);
+    assert(cfile_seek(stream, 299, SEEK_SET) == 0);
+    assert(fgetc(stream) == (unsigned char)fixture[299]);
+    assert(cfile_seek(stream, 0, SEEK_END) == 0);
+    assert(cfile_tell(stream) == (int64_t)sizeof(fixture));
+    assert(fgetc(stream) == EOF);
+    fclose_or_die(stream);
+  }
+  fileproxy_destroy_cache();
+  assert(remove(compat_binary_path) == 0);
+}
+
 void test_compat(void) {
   test_binary_round_trip();
   test_text_line_endings();
+  test_offsets();
 }

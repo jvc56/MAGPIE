@@ -128,6 +128,31 @@ bool cfile_is_regular_file(FILE *stream) {
 #endif
 }
 
+int cfile_seek(FILE *stream, int64_t offset, int whence) {
+#if defined(_WIN32)
+  return _fseeki64(stream, offset, whence) == 0 ? 0 : -1;
+#else
+  return fseeko(stream, (off_t)offset, whence) == 0 ? 0 : -1;
+#endif
+}
+
+int64_t cfile_tell(FILE *stream) {
+#if defined(_WIN32)
+  return (int64_t)_ftelli64(stream);
+#else
+  return (int64_t)ftello(stream);
+#endif
+}
+
+bool cfile_stream_size(FILE *stream, int64_t *size) {
+  const int64_t position = cfile_tell(stream);
+  if (position < 0 || cfile_seek(stream, 0, SEEK_END) != 0) {
+    return false;
+  }
+  *size = cfile_tell(stream);
+  return cfile_seek(stream, position, SEEK_SET) == 0 && *size >= 0;
+}
+
 long cfile_process_id(void) {
 #if defined(_WIN32)
   return (long)_getpid();
@@ -137,10 +162,18 @@ long cfile_process_id(void) {
 }
 
 bool cfile_identity(const char *path, CFileIdentity *identity) {
+#if defined(_WIN32)
+  // The 64-bit stat: plain stat's size is 32 bits on Windows.
+  struct _stat64 info;
+  if (!path || _stat64(path, &info) != 0) {
+    return false;
+  }
+#else
   struct stat info;
   if (!path || stat(path, &info) != 0) {
     return false;
   }
+#endif
   identity->size = (int64_t)info.st_size;
   identity->inode = (uint64_t)info.st_ino;
   identity->mtime_seconds = (int64_t)info.st_mtime;

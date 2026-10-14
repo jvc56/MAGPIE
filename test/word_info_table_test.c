@@ -1,5 +1,6 @@
 #include "word_info_table_test.h"
 
+#include "../src/compat/cfile.h"
 #include "../src/compat/endian_io.h"
 #include "../src/def/board_defs.h"
 #include "../src/def/letter_distribution_defs.h"
@@ -185,12 +186,11 @@ static void test_combined_wit_format(void) {
   word_info_table_write_to_file(wit, filename, error_stack);
   assert(error_stack_is_empty(error_stack));
   FILE *stream = fopen_or_die(filename, "rb");
-  fseek_or_die(stream, 0, SEEK_END);
-  const long file_size = ftell(stream);
+  int64_t file_size = 0;
+  assert(cfile_stream_size(stream, &file_size));
   assert(file_size > 12 && (size_t)file_size > positional_bytes);
   const size_t size = (size_t)file_size;
   uint8_t *bytes = malloc_or_die(size + 1);
-  fseek_or_die(stream, 0, SEEK_SET);
   const size_t read_size = fread(bytes, 1, size, stream);
   assert(read_size == size);
   fclose_or_die(stream);

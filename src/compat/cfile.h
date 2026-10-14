@@ -33,6 +33,18 @@ bool cfile_localtime(time_t time, struct tm *local);
 // some platforms and then reads as garbage.
 bool cfile_is_regular_file(FILE *stream);
 
+// Seeks `stream` as fseek does, but with a 64-bit offset everywhere: fseek
+// takes a long, which is 32 bits on Windows. Returns 0, or -1 with errno set.
+int cfile_seek(FILE *stream, int64_t offset, int whence);
+
+// Where `stream` is, as ftell says, but as a 64-bit offset everywhere.
+// Returns -1 with errno set on failure.
+int64_t cfile_tell(FILE *stream);
+
+// The size in bytes of what `stream` reads, a file or a precached buffer, in
+// *size, leaving the stream where it was. Returns false if it cannot seek.
+bool cfile_stream_size(FILE *stream, int64_t *size);
+
 // This process's id.
 long cfile_process_id(void);
 

@@ -381,7 +381,7 @@ bool error_stack_is_empty(const ErrorStack *error_stack);
 
 void error_stack_reset(ErrorStack *error_stack);
 
-void fseek_or_die(FILE *stream, long offset, int whence);
+void fseek_or_die(FILE *stream, int64_t offset, int whence);
 char *get_string_from_file_handle(FILE *file_handle, const char *filename,
                                   ErrorStack *error_stack);
 char *get_string_from_file(const char *filename, ErrorStack *error_stack);

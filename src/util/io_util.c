@@ -443,8 +443,8 @@ void write_string_to_file(const char *filename, const char *mode,
   fclose_or_die(file_handle);
 }
 
-void fseek_or_die(FILE *stream, long offset, int whence) {
-  if (fseek(stream, offset, whence) != 0) {
+void fseek_or_die(FILE *stream, int64_t offset, int whence) {
+  if (cfile_seek(stream, offset, whence) != 0) {
     int error_number = errno;
     const char *system_error_message = strerror(error_number);
     log_fatal("failed to fseek stream: %s (%d)", system_error_message,

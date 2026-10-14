@@ -1,6 +1,7 @@
 #include "word_info_table.h"
 
 #include "../compat/atomic_file.h"
+#include "../compat/cfile.h"
 #include "../compat/endian_io.h"
 #include "../def/board_defs.h"
 #include "../def/letter_distribution_defs.h"
@@ -373,11 +374,8 @@ static bool wit_read_trie(WitTrie *trie, int length, size_t *remaining,
 // The caller owns the stream and clears partial table allocations on failure.
 static bool wit_read_stream(WordInfoTable *wit, FILE *stream,
                             const char **message, error_code_t *status) {
-  if (fseek(stream, 0, SEEK_END) != 0) {
-    return false;
-  }
-  const long file_size = ftell(stream);
-  if (file_size < 12 || fseek(stream, 0, SEEK_SET) != 0) {
+  int64_t file_size = 0;
+  if (!cfile_stream_size(stream, &file_size) || file_size < 12) {
     return false;
   }
   uint8_t header[4];
