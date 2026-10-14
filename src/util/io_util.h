@@ -335,7 +335,7 @@ FILE *get_stream_err(void);
 FILE *get_stream_in(void);
 void write_to_stream_out(const char *fmt, ...) CFORMAT_PRINTF(1, 2);
 void write_to_stream(FILE *stream, const char *fmt, ...) CFORMAT_PRINTF(2, 3);
-ssize_t getline_ignore_carriage_return(char **lineptr, size_t *n, FILE *stream);
+int64_t getline_ignore_carriage_return(char **lineptr, size_t *n, FILE *stream);
 char *read_line_from_stream_in(void);
 
 // WARNING: This function should only be called once at startup or for testing

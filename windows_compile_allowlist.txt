@@ -12,7 +12,6 @@ src/ent/players_data.c
 src/ent/rack_info_table.c
 src/ent/sim_results.c
 src/ent/validated_move.c
-src/ent/word_info_table.c
 src/impl/analyze.c
 src/impl/autoplay.c
 src/impl/autoplay_solvers.c
@@ -36,7 +35,6 @@ src/impl/rack_draw.c
 src/impl/rack_info_table_maker.c
 src/impl/random_variable.c
 src/impl/simmer.c
-src/impl/wmp_maker.c
 src/impl/word_prune.c
 src/impl/xs_game.c
 src/impl/xs_rank.c
@@ -46,7 +44,6 @@ src/str/peg_string.c
 src/str/sim_string.c
 src/str/validated_moves_string.c
 src/util/fileproxy.c
-src/util/io_util.c
 test/alias_method_test.c
 test/alphabet_test.c
 test/analyze_test.c

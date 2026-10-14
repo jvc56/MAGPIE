@@ -1,5 +1,6 @@
 #include "fileproxy.h"
 
+#include "../compat/cfile.h"
 #include "../compat/cpthread.h"
 #include "../def/cpthread_defs.h"
 #include "io_util.h"
@@ -8,7 +9,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
 
 typedef struct FileCacheEntry {
   char *filename;
@@ -142,5 +142,5 @@ bool fileproxy_file_exists(const char *filename) {
   }
   cpthread_mutex_unlock(&cache_mutex);
   // Fall back to filesystem check
-  return access(original_filename, F_OK | R_OK) == 0;
+  return cfile_access(original_filename, CFILE_ACCESS_READ);
 }

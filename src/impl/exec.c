@@ -1,6 +1,7 @@
 #include "exec.h"
 
 #include "../compat/async_command_control.h"
+#include "../compat/cfile.h"
 #include "../compat/cpthread.h"
 #include "../compat/linenoise.h"
 #include "../def/config_defs.h"
@@ -240,7 +241,8 @@ void execute_command_async(Config *config, ErrorStack *error_stack,
 
 void load_config_settings(Config *config, ErrorStack *error_stack) {
   // if file does not exist, just return
-  if (access(config_get_settings_filename(config), F_OK) != 0) {
+  if (!cfile_access(config_get_settings_filename(config),
+                    CFILE_ACCESS_EXISTS)) {
     return;
   }
   char *settings_string =

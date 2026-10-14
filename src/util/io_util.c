@@ -14,7 +14,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/stat.h>
 #include <time.h>
 
 enum { ERROR_STACK_CAPACITY = 100 };
@@ -215,9 +214,9 @@ void write_to_stream(FILE *stream, const char *fmt, ...) {
   va_end(args);
 }
 
-ssize_t getline_ignore_carriage_return(char **lineptr, size_t *n,
+int64_t getline_ignore_carriage_return(char **lineptr, size_t *n,
                                        FILE *stream) {
-  ssize_t nread = getline(lineptr, n, stream);
+  int64_t nread = cfile_getline(lineptr, n, stream);
   if (nread <= 0) {
     return nread;
   }
@@ -235,7 +234,7 @@ ssize_t getline_ignore_carriage_return(char **lineptr, size_t *n,
 char *read_line_from_stream(FILE *stream) {
   char *line = NULL;
   size_t len = 0;
-  ssize_t read;
+  int64_t read;
   errno = 0;
   read = getline_ignore_carriage_return(&line, &len, stream);
   if (read == -1) {
@@ -510,7 +509,7 @@ char *get_string_from_file(const char *filename, ErrorStack *error_stack) {
 }
 
 FILE *fopen_or_die(const char *filename, const char *mode) {
-  FILE *stream = fopen(filename, mode);
+  FILE *stream = cfile_open(filename, mode, false);
   if (!stream) {
     int error_number = errno;
     const char *system_error_message = strerror(error_number);
@@ -535,7 +534,7 @@ FILE *fopen_exclusive_safe(const char *filename, const char *mode,
 
 FILE *fopen_safe(const char *filename, const char *mode,
                  ErrorStack *error_stack) {
-  FILE *stream = fopen(filename, mode);
+  FILE *stream = cfile_open(filename, mode, false);
   if (!stream) {
     int error_number = errno;
     const char *system_error_message = strerror(error_number);
@@ -588,8 +587,7 @@ bool path_is_directory(const char *path) {
   if (!path) {
     return false;
   }
-  struct stat path_stat;
-  return stat(path, &path_stat) == 0 && S_ISDIR(path_stat.st_mode);
+  return cfile_is_directory(path);
 }
 
 // (size, mtime) alone collides: a file replaced with different bytes of the
@@ -655,9 +653,9 @@ static void remove_stale_temporary_siblings(const char *filename) {
       continue;
     }
     char *path = get_formatted_string("%s/%s", dir, entry->d_name);
-    struct stat info;
-    if (stat(path, &info) == 0 &&
-        now - info.st_mtime > STALE_TEMPORARY_SECONDS) {
+    CFileIdentity identity;
+    if (cfile_identity(path, &identity) &&
+        now - identity.mtime_seconds > STALE_TEMPORARY_SECONDS) {
       (void)remove(path);
     }
     free(path);
@@ -688,7 +686,7 @@ char *temporary_sibling(const char *filename) {
 
 void rename_into_place(const char *temporary, const char *filename,
                        const char *what, ErrorStack *error_stack) {
-  if (rename(temporary, filename) != 0) {
+  if (cfile_rename(temporary, filename) != 0) {
     const int error_number = errno;
     (void)remove(temporary);
     error_stack_push(error_stack, ERROR_STATUS_RW_WRITE_ERROR,

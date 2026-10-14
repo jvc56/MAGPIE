@@ -1,5 +1,6 @@
 #include "game_history.h"
 
+#include "../compat/cfile.h"
 #include "../def/game_defs.h"
 #include "../def/game_history_defs.h"
 #include "../def/rack_defs.h"
@@ -16,7 +17,6 @@
 #include "validated_move.h"
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
 
 enum {
   MAX_GCG_FILENAME_ATTEMPTS = 1000000,
@@ -474,7 +474,7 @@ void game_history_set_gcg_filename(GameHistory *game_history,
   }
   StringBuilder *sb = string_builder_create();
   string_builder_add_gcg_filename(sb, game_history, 0);
-  for (int i = 0; access(string_builder_peek(sb), F_OK) == 0 &&
+  for (int i = 0; cfile_access(string_builder_peek(sb), CFILE_ACCESS_EXISTS) &&
                   i < MAX_GCG_FILENAME_ATTEMPTS;
        i++) {
     string_builder_clear(sb);

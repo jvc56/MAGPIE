@@ -243,7 +243,7 @@ bool contribute_table_manifest_write(const ContributeTableManifest *manifest,
   if (fclose(stream) != 0) {
     written = false;
   }
-  if (written && rename(temporary, path) != 0) {
+  if (written && cfile_rename(temporary, path) != 0) {
     written = false;
   }
   if (!written) {

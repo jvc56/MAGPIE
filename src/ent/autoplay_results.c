@@ -1,5 +1,6 @@
 #include "autoplay_results.h"
 
+#include "../compat/cfile.h"
 #include "../compat/cpthread.h"
 #include "../def/board_defs.h"
 #include "../def/contribute_defs.h"
@@ -41,7 +42,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
 
 enum { DEFAULT_WRITE_BUFFER_SIZE = 1024 };
 
@@ -1190,7 +1190,7 @@ void win_pct_data_consolidate(Recorder **recorder_list, int list_size,
     log_fatal("error creating win percentage filename: %s", win_pct_filename);
   }
 
-  if (access(win_pct_filename, F_OK) == 0) {
+  if (cfile_access(win_pct_filename, CFILE_ACCESS_EXISTS)) {
     char *win_pct_file_string =
         get_string_from_file(win_pct_filename, error_stack);
     WinPctCounts *existing_counts = NULL;
@@ -1308,7 +1308,7 @@ void leaves_data_consolidate(Recorder **recorder_list, int list_size,
   Rack leave_rack;
   rack_set_dist_size(&leave_rack,
                      ld_get_size(primary_recorder->recorder_context->ld));
-  if (access(leaves_count_filename, F_OK) == 0) {
+  if (cfile_access(leaves_count_filename, CFILE_ACCESS_EXISTS)) {
     FILE *leaves_file = fopen_or_die(leaves_count_filename, "rb");
     char *line = NULL;
     size_t line_capacity = 0;

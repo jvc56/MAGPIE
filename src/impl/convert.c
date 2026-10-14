@@ -1,5 +1,6 @@
 #include "convert.h"
 
+#include "../compat/cfile.h"
 #include "../def/board_defs.h"
 #include "../def/convert_defs.h"
 #include "../def/kwg_defs.h"
@@ -35,7 +36,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/stat.h>
 
 // The largest line a rack equity CSV may contain. A row is a rack, a count and
 // a sum: the rack is at most RACK_SIZE multi-character letters, and the two
@@ -100,7 +100,7 @@ static void convert_rack_equity_to_klv(const LetterDistribution *ld,
   rack_set_dist_size(&rack, ld_get_size(ld));
   char *line = NULL;
   size_t line_capacity = 0;
-  ssize_t line_length;
+  int64_t line_length;
   int rows = 0;
   while ((line_length = getline_ignore_carriage_return(&line, &line_capacity,
                                                        stream)) != -1) {
@@ -228,7 +228,7 @@ void convert_from_text_with_dwl(const LetterDistribution *ld,
 
   char *line = NULL;
   size_t len = 0;
-  ssize_t read;
+  int64_t read;
   // Use BOARD_DIM + 2 so we can distinguish "too long" (mls_length ==
   // BOARD_DIM + 1) from "invalid letter" (mls_length == -1). Multi-byte
   // or multichar tiles (e.g. UTF-8, [QU]) mean raw byte length can exceed
@@ -378,12 +378,9 @@ static char *get_existing_wit_filename(const char *data_paths, const char *name,
   for (int path_index = 0; path_index < count; path_index++) {
     char *candidate = get_filepath(string_splitter_get_item(paths, path_index),
                                    name, DATA_FILEPATH_TYPE_WORD_INFO_TABLE);
-    // sys/stat.h supplies this type; clang-tidy 18 attributes it to a private
-    // glibc header instead of the public header included above.
-    // NOLINTNEXTLINE(misc-include-cleaner)
-    struct stat file_status;
+    CFileIdentity identity;
     if (fileproxy_file_exists(candidate) ||
-        stat(candidate, &file_status) == 0) {
+        cfile_identity(candidate, &identity)) {
       filename = candidate;
       break;
     }

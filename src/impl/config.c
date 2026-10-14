@@ -95,7 +95,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/stat.h>
 #include <sys/time.h>
 #include <time.h>
 
@@ -4816,8 +4815,8 @@ void impl_peg(Config *config, ErrorStack *error_stack) {
 // <ts> is the current wall-clock time down to microseconds. Returns the path
 // (caller frees) or NULL on failure.
 static char *config_write_peg_chart_file(const char *contents) {
-  mkdir("data", 0777);
-  mkdir("data/pegcharts", 0777);
+  (void)cfile_mkdir("data");
+  (void)cfile_mkdir("data/pegcharts");
   // struct timeval comes transitively from <sys/time.h> (included), but
   // include-cleaner maps it to a glibc-internal header that cannot be included
   // directly. Matches the clock-API suppression in sim_benchmark_test.c.
@@ -11186,7 +11185,7 @@ static char *config_contribute_leave_gen(Config *config,
   if (created && fclose(klv_file) != 0) {
     written = false;
   }
-  if (written && rename(temp_path, klv_path) != 0) {
+  if (written && cfile_rename(temp_path, klv_path) != 0) {
     written = false;
   }
   if (!written) {

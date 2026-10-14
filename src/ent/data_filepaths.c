@@ -1,11 +1,11 @@
 #include "data_filepaths.h"
 
+#include "../compat/cfile.h"
 #include "../util/fileproxy.h"
 #include "../util/io_util.h"
 #include "../util/string_util.h"
 #include <glob.h>
 #include <stdlib.h>
-#include <unistd.h>
 
 static const char *const filepath_type_names[] = {"kwg",
                                                   "klv",
@@ -191,8 +191,8 @@ char *data_filepaths_get_writable_filename(const char *data_paths,
   char *writable_filepath = get_filepath(first_data_path, data_name, type);
   free(first_data_path);
   // File already exists and is not writable
-  if (access(writable_filepath, F_OK) == 0 &&
-      access(writable_filepath, W_OK) != 0) {
+  if (cfile_access(writable_filepath, CFILE_ACCESS_EXISTS) &&
+      !cfile_access(writable_filepath, CFILE_ACCESS_WRITE)) {
     error_stack_push(
         error_stack, ERROR_STATUS_FILEPATH_FILE_NOT_WRITABLE,
         get_formatted_string(
@@ -202,7 +202,7 @@ char *data_filepaths_get_writable_filename(const char *data_paths,
     return NULL;
   }
   char *dir_path = get_dirpath_from_filepath(writable_filepath);
-  if (access(dir_path, F_OK | W_OK) != 0) {
+  if (!cfile_access(dir_path, CFILE_ACCESS_WRITE)) {
     error_stack_push(
         error_stack, ERROR_STATUS_FILEPATH_FILE_NOT_WRITABLE,
         get_formatted_string("directory %s does not exist or is not writable",

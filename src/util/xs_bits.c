@@ -1,5 +1,6 @@
 #include "xs_bits.h"
 
+#include "../compat/cfile.h"
 #include "../compat/xs_compress.h"
 #include "io_util.h"
 #include "string_util.h"
@@ -243,8 +244,7 @@ bool xs_untoken(XSBuffer *buffer, const char *token, const char *magic) {
 
 char *xs_read_file(const char *path, size_t *length, ErrorStack *errors) {
   // Portable C mode; no spawned child owns this stream.
-  // NOLINTNEXTLINE(android-cloexec-fopen)
-  FILE *file = fopen(path, "rb");
+  FILE *file = cfile_open(path, "rb", false);
   if (!file) {
     xs_error(errors, "cannot open input file");
     return NULL;
@@ -269,8 +269,7 @@ char *xs_read_file(const char *path, size_t *length, ErrorStack *errors) {
 
 bool xs_write_file(const char *path, const void *bytes, size_t length,
                    ErrorStack *errors) {
-  // NOLINTNEXTLINE(android-cloexec-fopen): portable C mode.
-  FILE *file = fopen(path, "wb");
+  FILE *file = cfile_open(path, "wb", false);
   if (!file) {
     xs_error(errors, "cannot open output file");
     return false;
@@ -294,8 +293,7 @@ char *xs_asset_path(const char *data_paths, const char *name,
        !found && index < string_splitter_get_number_of_items(paths); index++) {
     char *candidate = get_formatted_string(
         "%s/xs/english-v1/%s", string_splitter_get_item(paths, index), name);
-    // NOLINTNEXTLINE(android-cloexec-fopen): portable C mode.
-    FILE *file = fopen(candidate, "rb");
+    FILE *file = cfile_open(candidate, "rb", false);
     if (file) {
       if (fclose(file) == 0) {
         found = candidate;

@@ -2,6 +2,7 @@
 #define CFILE_H
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <time.h>
@@ -9,12 +10,69 @@
 // File operations C99 leaves to the platform, kept here so that nothing
 // outside src/compat tests platform macros.
 
-// Opens `path` as fopen would with `mode` ("r", "w" or "a", optionally with
-// "b"; no "+"), but never inherited by a child process -- what glibc's
-// non-standard "e" mode does. With `exclusive` (only for "w" modes) it creates
-// the file and fails with EEXIST if it is already there -- what C11's "x" mode
-// does. Returns NULL with errno set on failure, as fopen does.
+// Paths are UTF-8 everywhere (Windows included). Functions that return an
+// int return 0 on success and -1 with errno set on failure.
+
+// Opens `path` as fopen would with `mode` ("r", "w" or "a", then any of "+"
+// and "b"), but never inherited by a child process -- what glibc's
+// non-standard "e" mode does, which `mode` may also name. With `exclusive`
+// (only for "w" modes) it creates the file and fails with EEXIST if it is
+// already there -- what C11's "x" mode does. On Windows the file is opened
+// sharing deletion, so an open file never stops it being replaced or removed,
+// as on POSIX. Returns NULL with errno set on failure, as fopen does.
 FILE *cfile_open(const char *path, const char *mode, bool exclusive);
+
+// What cfile_access checks, as POSIX access's F_OK, R_OK and W_OK.
+enum {
+  CFILE_ACCESS_EXISTS = 0,
+  CFILE_ACCESS_READ = 1 << 0,
+  CFILE_ACCESS_WRITE = 1 << 1,
+};
+
+// Whether `path` exists and this process may do what `access_flags` asks.
+bool cfile_access(const char *path, int access_flags);
+
+// Whether `path` names a directory.
+bool cfile_is_directory(const char *path);
+
+// Creates the directory `path` (failing with EEXIST if something is there).
+int cfile_mkdir(const char *path);
+
+// Removes the empty directory `path`. (C's remove does on POSIX, not on
+// Windows.)
+int cfile_rmdir(const char *path);
+
+// Renames `from` to `to`, replacing `to` in one step if it exists, as POSIX
+// rename does: C's rename leaves replacing to the platform, and Windows'
+// refuses. On Windows the target may be open, by cfile_open, elsewhere.
+int cfile_rename(const char *from, const char *to);
+
+// Reads a line, newline included, into *line (grown with realloc, as POSIX
+// getline does; *line may start NULL) and returns its length, or -1 at the
+// end of the stream or on an error.
+int64_t cfile_getline(char **line, size_t *capacity, FILE *stream);
+
+// Replaces a file atomically: readers see the old file or the new one, never
+// part of one, and a failed or abandoned write leaves the old file alone.
+typedef struct CFileAtomicWrite {
+  FILE *stream;
+  char *destination;
+  char *temporary;
+} CFileAtomicWrite;
+
+// Starts replacing `path` by opening a new temporary file beside it for
+// binary writing, and returns the stream to write it through. Symlinks at
+// `path` are followed, so the link survives and its target is replaced, and
+// an existing file's permission bits carry over. Returns NULL with errno set
+// on failure, leaving nothing behind.
+FILE *cfile_atomic_write_begin(CFileAtomicWrite *atomic_write,
+                               const char *path);
+
+// Closes the stream, then with `commit` puts the temporary in place of the
+// target with cfile_rename, and without it removes the temporary. Returns
+// false with errno set if closing or committing failed, in which case the
+// temporary is removed and the target is as it was.
+bool cfile_atomic_write_end(CFileAtomicWrite *atomic_write, bool commit);
 
 // An advisory lock on a lock file, released when it is closed or the process
 // dies: cfile_lock_open opens (creating) the file and returns its handle, or

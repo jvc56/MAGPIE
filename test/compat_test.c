@@ -159,8 +159,169 @@ static void test_offsets(void) {
   assert(remove(compat_binary_path) == 0);
 }
 
+static char *read_whole_file(const char *path) {
+  ErrorStack *error_stack = error_stack_create();
+  char *contents = get_string_from_file(path, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  error_stack_destroy(error_stack);
+  return contents;
+}
+
+static void write_text(const char *path, const char *text) {
+  write_fixture(path, text, strlen(text));
+}
+
+// A rename replaces an existing target in one step, as POSIX rename does;
+// C's rename leaves that to the platform, and Windows' refuses.
+static void test_rename_over_existing(void) {
+  const char *from = "compat_test_from.tmp";
+  write_text(compat_text_path, "old");
+  write_text(from, "new");
+  assert(cfile_rename(from, compat_text_path) == 0);
+  assert(!cfile_access(from, CFILE_ACCESS_EXISTS));
+  char *contents = read_whole_file(compat_text_path);
+  assert(strings_equal(contents, "new"));
+  free(contents);
+  assert(cfile_rename(from, compat_text_path) != 0);
+  assert(remove(compat_text_path) == 0);
+}
+
+// An atomic write replaces its target even while a reader has it open (as
+// every data file is, through cfile_open), and the reader keeps reading what
+// it opened. An abandoned write leaves the target alone.
+static void test_atomic_write(void) {
+  write_text(compat_text_path, "before");
+  FILE *reader = cfile_open(compat_text_path, "rb", false);
+  assert(reader);
+
+  CFileAtomicWrite atomic_write;
+  FILE *stream = cfile_atomic_write_begin(&atomic_write, compat_text_path);
+  assert(stream);
+  assert(!strings_equal(atomic_write.temporary, compat_text_path));
+  assert(cfile_access(atomic_write.temporary, CFILE_ACCESS_EXISTS));
+  assert(fputs("after", stream) >= 0);
+  assert(cfile_atomic_write_end(&atomic_write, true));
+
+  char held[16] = {0};
+  assert(fread(held, 1, sizeof(held) - 1, reader) == strlen("before"));
+  assert(strings_equal(held, "before"));
+  fclose_or_die(reader);
+  char *contents = read_whole_file(compat_text_path);
+  assert(strings_equal(contents, "after"));
+  free(contents);
+
+  stream = cfile_atomic_write_begin(&atomic_write, compat_text_path);
+  assert(stream);
+  char *temporary = string_duplicate(atomic_write.temporary);
+  assert(fputs("abandoned", stream) >= 0);
+  assert(cfile_atomic_write_end(&atomic_write, false));
+  assert(!cfile_access(temporary, CFILE_ACCESS_EXISTS));
+  free(temporary);
+  contents = read_whole_file(compat_text_path);
+  assert(strings_equal(contents, "after"));
+  free(contents);
+
+  // A target that does not exist yet is created.
+  assert(remove(compat_text_path) == 0);
+  stream = cfile_atomic_write_begin(&atomic_write, compat_text_path);
+  assert(stream);
+  assert(fputs("created", stream) >= 0);
+  assert(cfile_atomic_write_end(&atomic_write, true));
+  contents = read_whole_file(compat_text_path);
+  assert(strings_equal(contents, "created"));
+  free(contents);
+  assert(remove(compat_text_path) == 0);
+}
+
+static void test_directories_and_access(void) {
+  const char *directory = "compat_test_directory.tmp";
+  assert(!cfile_access(directory, CFILE_ACCESS_EXISTS));
+  assert(cfile_mkdir(directory) == 0);
+  assert(cfile_mkdir(directory) != 0);
+  assert(cfile_is_directory(directory));
+  assert(cfile_access(directory, CFILE_ACCESS_EXISTS));
+  assert(cfile_access(directory, CFILE_ACCESS_WRITE));
+
+  char *file = get_formatted_string("%s/file.tmp", directory);
+  write_text(file, "x");
+  assert(!cfile_is_directory(file));
+  assert(cfile_access(file, CFILE_ACCESS_READ | CFILE_ACCESS_WRITE));
+  // A directory with a file in it is not removed.
+  assert(cfile_rmdir(directory) != 0);
+  assert(remove(file) == 0);
+  free(file);
+  assert(cfile_rmdir(directory) == 0);
+  assert(!cfile_is_directory(directory));
+  assert(!cfile_is_directory(NULL));
+}
+
+// Every mode MAGPIE passes is accepted everywhere, glibc's "e" included,
+// which UCRT's fopen would abort on.
+static void test_open_modes(void) {
+  FILE *stream = cfile_open(compat_text_path, "we", false);
+  assert(stream);
+  assert(fputs("one", stream) >= 0);
+  fclose_or_die(stream);
+  stream = cfile_open(compat_text_path, "ab", false);
+  assert(stream);
+  assert(fputs("two", stream) >= 0);
+  fclose_or_die(stream);
+  stream = cfile_open(compat_text_path, "r+b", false);
+  assert(stream);
+  char text[8] = {0};
+  assert(fread(text, 1, 6, stream) == 6);
+  assert(strings_equal(text, "onetwo"));
+  fclose_or_die(stream);
+  stream = cfile_open(compat_text_path, "w+", false);
+  assert(stream);
+  assert(fputs("three", stream) >= 0);
+  assert(cfile_seek(stream, 0, SEEK_SET) == 0);
+  memset(text, 0, sizeof(text));
+  assert(fread(text, 1, sizeof(text) - 1, stream) == 5);
+  assert(strings_equal(text, "three"));
+  fclose_or_die(stream);
+  assert(!cfile_open(compat_text_path, "wb", true));
+  assert(!cfile_open(compat_text_path, "q", false));
+  assert(!cfile_open(compat_text_path, "rb", true));
+  assert(remove(compat_text_path) == 0);
+  assert(!cfile_open(compat_text_path, "rb", false));
+}
+
+// Lines come back whole, however long, with or without a final newline.
+static void test_getline(void) {
+  StringBuilder *builder = string_builder_create();
+  for (int char_idx = 0; char_idx < 1000; char_idx++) {
+    string_builder_add_char(builder, (char)('a' + char_idx % 26));
+  }
+  string_builder_add_string(builder, "\nshort\r\n\nlast");
+  write_fixture(compat_text_path, string_builder_peek(builder),
+                string_builder_length(builder));
+  FILE *stream = cfile_open(compat_text_path, "rb", false);
+  assert(stream);
+  char *line = NULL;
+  size_t capacity = 0;
+  assert(cfile_getline(&line, &capacity, stream) == 1001);
+  assert(line[999] == 'a' + 999 % 26 && line[1000] == '\n');
+  assert(getline_ignore_carriage_return(&line, &capacity, stream) == 6);
+  assert(strings_equal(line, "short\n"));
+  assert(cfile_getline(&line, &capacity, stream) == 1);
+  assert(strings_equal(line, "\n"));
+  assert(cfile_getline(&line, &capacity, stream) == 4);
+  assert(strings_equal(line, "last"));
+  assert(cfile_getline(&line, &capacity, stream) == -1);
+  free(line);
+  fclose_or_die(stream);
+  string_builder_destroy(builder);
+  assert(remove(compat_text_path) == 0);
+}
+
 void test_compat(void) {
   test_binary_round_trip();
   test_text_line_endings();
   test_offsets();
+  test_rename_over_existing();
+  test_atomic_write();
+  test_directories_and_access();
+  test_open_modes();
+  test_getline();
 }

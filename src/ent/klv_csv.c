@@ -197,7 +197,7 @@ void klv_read_from_csv_internal(const LetterDistribution *ld,
   rack_set_dist_size(&leave_rack, ld_get_size(ld));
   char *line = NULL;
   size_t line_capacity = 0;
-  ssize_t line_length;
+  int64_t line_length;
   while ((line_length = getline_ignore_carriage_return(&line, &line_capacity,
                                                        leaves_stream)) != -1) {
     if (line_length >= LEAVES_CSV_MAX_LINE_LENGTH) {
