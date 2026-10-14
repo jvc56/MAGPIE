@@ -1,14 +1,15 @@
 # Windows port plan
 
-Status: proposal, October 2026. Nothing in this document has been implemented yet.
+Status: proposal, October 2026. Nothing in this document has been implemented
+yet. The maintainer decisions are settled; section 9 records them.
 
 ## Summary
 
 - **Toolchain.** Build `magpie.exe` with MinGW-w64, using the clang-based
   [llvm-mingw](https://github.com/mstorsjo/llvm-mingw) with the UCRT runtime.
   It cross-compiles from Linux and macOS and is linked statically, so the result
-  is one self-contained `.exe` with no DLLs to install. Native MSVC is out of
-  scope.
+  is one self-contained `.exe` with no DLLs to install. Builds ship for x64 and
+  arm64 from the first release. Native MSVC is out of scope.
 - **The hard part.** Making it compile is small. With MinGW, only eight source
   files outside the vendored ones fail to compile: they use `mmap`, `glob`,
   POSIX regex, `fmemopen`, `getline`, two-argument `mkdir`, `poll`/`pipe`, and
@@ -26,18 +27,18 @@ Status: proposal, October 2026. Nothing in this document has been implemented ye
   1. The portability lint.
   2. A MinGW cross-compile with `-Werror` on every push.
   3. The cross-compiled test binary run under Wine on Linux.
-  4. The same `.exe` run on GitHub's hosted `windows-latest` runners, which are
-     real Windows.
+  4. The same `.exe` files run on GitHub's hosted Windows runners (x64 and
+     arm64), which are real Windows.
   5. Contract tests for each compat module, run on every OS.
 
   Nobody on the team needs a Windows machine.
 - **For users.** They get one `.exe`. Double-clicking it opens a console that:
-  - finds or downloads its data;
+  - finds its data, or downloads it with a built-in command;
   - stays open long enough for any error to be read;
   - runs the existing REPL, including `contribute`.
 
   `contribute` (the birdtest worker) is probably the main reason Windows users
-  will download it. People who only want to play or analyze can already use the
+  will download it, but it runs only when the user types `contribute`. People who only want to play or analyze can already use the
   browser build.
 
 ## 1. Constraints this plan is built around
@@ -49,7 +50,7 @@ Status: proposal, October 2026. Nothing in this document has been implemented ye
 2. **MAGPIE's developers do not have Windows machines.** Every Windows check
    must run in CI or on Linux/macOS, and real Windows runs must be automated.
 3. **`src/` outside `src/compat` stays platform-agnostic.** Anything that does
-   not work on Windows goes behind a compat wrapper. Section 4 lists the one
+   not work on Windows goes behind a compat wrapper. Section 3.4 covers the one
    deliberate exception, the GCG regex, and the reason for it.
 
 ## 2. What we found
@@ -188,20 +189,30 @@ them.
 
 `gcg.c` uses POSIX `regcomp`/`regexec` with about 25 fixed patterns that look
 like `>([^[:space:]]+):[[:space:]]+...`. Windows has no `<regex.h>`. There are
-two options:
+two options were considered.
 
-- **(a) Recommended.** Replace the patterns with a small hand-written GCG line
+- **(a) Chosen.** Replace the patterns with a small hand-written GCG line
   tokenizer, in plain C with no platform dependency. This removes the dependency
   instead of wrapping it. To prove the replacement correct on Linux, keep the
   regex path for one PR, behind a test-only build, and have a test run both
   tokenizers on every line of every GCG in `testdata/` plus a set of edge cases.
   The test asserts identical tokens and captures, then the regex path is
   deleted.
-- **(b)** Vendor a POSIX regex implementation (musl's, MIT, about 3,500 lines)
-  as `src/compat/cregex.c`, and use it on every platform so behaviour is
-  identical everywhere.
+- **(b) Rejected.** Vendor a POSIX regex implementation (musl's, MIT, about
+  3,500 lines) as `src/compat/cregex.c`, and use it on every platform so
+  behaviour is identical everywhere.
 
-(a) is less code to own, and the differential test makes the swap provable.
+Why (a):
+- **Less code to own.** The tokenizer is a few hundred lines of plain C. A
+  vendored regex is about 3,500 lines of someone else's code that would have to
+  pass cppcheck and clang-tidy, or be excluded from them.
+- **No second implementation.** A vendored regex only behaves exactly like
+  Linux's if Linux uses it too, which replaces a working system library for
+  every user.
+- **Provably equivalent.** The differential test shows on Linux, before regex
+  is removed, that the tokenizer produces the same tokens and captures over
+  every GCG in `testdata/`.
+- **Speed is not a factor.** GCG parsing is not a hot path.
 
 ## 4. Toolchain and build
 
@@ -209,7 +220,8 @@ two options:
   - It uses the same compiler family as `make release` (clang PGO).
   - It targets UCRT, which handles C99 `printf` (`%zu`, `%lld`), UTF-8 locales
     and `_set_fmode`. Ubuntu's `gcc-mingw-w64` targets the older msvcrt.
-  - It can target both x86_64 and aarch64 Windows.
+  - It targets both x86_64 and aarch64 Windows from the same toolchain, and
+    both ship from the first release.
   - It runs on Linux, macOS, or in a pinned Docker image.
 - **Makefile.**
   - Detect a Windows target from `$(CC) -dumpmachine` containing `mingw`.
@@ -224,6 +236,8 @@ two options:
       CC=x86_64-w64-mingw32-clang` inside the pinned llvm-mingw image, so any
       developer can build the `.exe` locally.
     - `make windows_test` does the same for `magpie_test.exe`.
+    - `WINDOWS_ARCH=aarch64` selects `aarch64-w64-mingw32-clang` for either
+      target.
 - **Manifest and resources** (embedded with `windres`):
   - `activeCodePage = UTF-8`, so narrow `fopen` and paths handle non-ASCII user
     names.
@@ -233,7 +247,9 @@ two options:
     not need `wchar_t` plumbing beyond what chttp already does. It requires
     Windows 10 1903 or later.
 - **CPU target.** `portable_release` (nehalem, the same ISA as x86-64-v2), as
-  for contributor binaries. birdtest compares derived-file SHA-256s by build
+  for contributor binaries. The arm64 build uses
+  `PORTABLE_MARCH=armv8-a`, a baseline every Windows on ARM device meets; a
+  later PR can raise it after measuring. birdtest compares derived-file SHA-256s by build
   target. The Windows build must produce byte-identical WMP/RIT/WIT for the
   same target, and section 5 tests that.
 - **PGO.** Not for the first release. llvm-mingw supports `-fprofile-instr-*`,
@@ -251,11 +267,11 @@ where Windows runners are free for public repositories.
 | Layer | Where it runs | What it catches | Cost |
 |---|---|---|---|
 | **L0** Portability lint (`check_portability.py`) | Linux, the `lint-fast` job | POSIX includes and calls leaking out of compat | Seconds |
-| **L1** Cross-compile `magpie.exe` and `magpie_test.exe` with `-Werror` | Linux, llvm-mingw container | Compile and link breaks on Windows, on every push | About 2 minutes |
+| **L1** Cross-compile `magpie.exe` and `magpie_test.exe` with `-Werror`, for x64 and arm64 | Linux, llvm-mingw container | Compile and link breaks on Windows, on every push | About 2 minutes per architecture |
 | **L2** Compat contract tests (`test/compat_test.c`), using fixtures with `\r\n` and `0x1A` bytes | Every OS that runs tests | That each compat function behaves the same everywhere; listed below | Seconds |
-| **L3** `magpie_test.exe` under Wine | Linux (`wine64` from Ubuntu 24.04) | Most runtime issues: text mode, path parsing, threads, WinHTTP plumbing. Reproducible locally with `make windows_test && wine bin/magpie_test.exe <test>`. | Like a dev shard |
-| **L4** Native Windows: download the L1 `.exe` artifact on `windows-latest`, restore the data cache, run the test suite (no-PGO shards) | Real Windows Server 2022/2025 | What Wine gets wrong: file-sharing and delete semantics on open or mapped files, Defender interference, real WinHTTP/Schannel TLS, stack commit, console behaviour | Like the no-PGO release job |
-| **L5** Release smoke test: run the release `.exe` in an empty directory on `windows-latest` | Real Windows | The first-run path: data download or discovery, `contribute` against a birdtest staging or stub server, `builders` hashes | About 1 minute |
+| **L3** x64 `magpie_test.exe` under Wine | Linux (`wine64` from Ubuntu 24.04) | Most runtime issues: text mode, path parsing, threads, WinHTTP plumbing. Reproducible locally with `make windows_test && wine bin/magpie_test.exe <test>`. | Like a dev shard |
+| **L4** Native Windows: download the L1 `.exe` artifacts, restore the data cache, run the test suite (no-PGO shards): x64 on `windows-latest`, arm64 on `windows-11-arm` | Real Windows Server 2022/2025 and Windows 11 on ARM | What Wine gets wrong: file-sharing and delete semantics on open or mapped files, Defender interference, real WinHTTP/Schannel TLS, stack commit, console behaviour | Like the no-PGO release job |
+| **L5** Release smoke test: run each release `.exe` in an empty directory on its native runner | Real Windows | The first-run path: data download or discovery, `contribute` against a birdtest staging or stub server, `builders` hashes | About 1 minute |
 
 **Contract tests in L2:**
 - binary round-trip;
@@ -304,52 +320,62 @@ Double-clicking `magpie.exe`:
 1. **Console.** `cterm` turns on UTF-8 and VT colours. If the process owns its
    console (it was double-clicked, not run from a terminal), it prints a
    welcome banner. It also waits for Enter before closing after a fatal error or
-   `exit`, so the window doesn't vanish.
+   `exit`, so the window doesn't vanish. Otherwise a no-argument launch opens the
+   normal REPL, as on Linux. It does not prompt about contributing; the user
+   types `contribute` to start.
 2. **Data.** MAGPIE looks for `data/` next to the executable, then in the
    working directory, then in `%LOCALAPPDATA%\MAGPIE\data`. The first location
    is new; it comes from `cpath_executable_dir`. When launched from Explorer,
    the working directory is already the `.exe`'s folder.
-3. **Missing data.** It offers to download it (see 6.2) rather than failing on
-   `standard15`.
-4. **WMP.** No `.wmp` is downloaded. On the first use of a lexicon, MAGPIE
-   either builds the `.wmp` locally (contribute's derived-table code already
-   does this) or falls back to `-wmp false` with a one-line notice. Today `-wmp`
-   defaults to true and fails when the file is missing.
+3. **Missing data.** It offers to run `data fetch` (see 6.2) rather than failing
+   on `standard15`.
+4. **WMP.** No `.wmp` is downloaded. On the first use of a lexicon with no
+   `.wmp`, MAGPIE builds it locally, with a progress message, and then loads it.
+   contribute's derived-table code already does this. The disk check that code
+   uses also applies here: if there isn't room, MAGPIE runs with `-wmp false`
+   and prints one line saying why.
+   - Today `-wmp` defaults to true and a missing `.wmp` is an error, so this
+     changes behaviour on every platform.
+   - The PR that adds it measures how long the build takes for CSW24 on a
+     `windows-latest` runner. The progress message has to set expectations
+     accordingly.
 
 ### 6.2 Getting data onto the machine
 
 `download_data.sh` needs bash, curl and tar, which Windows users won't have.
-Options, in order of preference:
+Decision: a built-in `data fetch` command.
 
-- **(A) Recommended.** A built-in `data fetch` command.
-  - It downloads a small JSON manifest (file, URL, size, SHA-256) and then each
-    file, through `chttp`, which already has WinHTTP.
-  - Fetching files one at a time avoids writing tar and gzip extraction.
-  - It verifies the hashes contribute already checks.
-  - It also replaces the bash script on Linux and macOS, so the code path is
-    exercised constantly rather than only on Windows.
-  - The base set for one lexicon is about 10 MB (CSW24 KWG + KLV2, layouts,
-    letter distributions, win-pct).
-- **(B)** Release a zip: `magpie.exe` + `data/`. It is simple and works
-  offline, but users must unzip it, and updates mean downloading a new zip.
-- **(C)** Embed the base data in the `.exe` and feed it to the existing
-  `precache_file_data` path, which the wasm build already uses. It gives one
-  file that works offline, but the `.exe` grows by about 10 MB per lexicon and
-  any data update needs a new binary.
+How it works:
+- It downloads a small JSON manifest (file, URL, size, SHA-256) and then each
+  file, through `chttp`, which already has WinHTTP.
+- Fetching files one at a time avoids writing tar and gzip extraction.
+- It verifies the hashes contribute already checks.
+- It also replaces the bash script on Linux and macOS, so the code path is
+  exercised constantly rather than only on Windows.
+- The base set for one lexicon is about 10 MB (CSW24 KWG + KLV2, layouts,
+  letter distributions, win-pct).
+
+Rejected:
+- **A release zip** (`magpie.exe` + `data/`). Users must unzip it, and every
+  data update means a new download.
+- **Data embedded in the `.exe`** through `precache_file_data`. The binary grows
+  by about 10 MB per lexicon, and every data update needs a new binary.
 
 ### 6.3 Release
 
 - **Workflow.** A `release-windows.yml` workflow triggered by tag:
-  1. L1 builds `magpie-<version>-windows-x64.exe` (and arm64 later);
-  2. L4 and L5 run against that exact file;
-  3. the workflow attaches the file and its `.sha256` to a GitHub Release.
-- **Code signing.**
-  - Without it, Windows shows the SmartScreen warning ("Windows protected your
-    PC", then More info, then Run anyway). Unsigned executables that open
-    network connections also draw occasional Defender false positives.
-  - Azure Trusted Signing (about $10/month) is the cheapest signing that builds
-    SmartScreen reputation. If the team decides not to pay, the download page
-    should show the More info step with a screenshot.
+  1. L1 builds `magpie-<version>-windows-x64.exe` and
+     `magpie-<version>-windows-arm64.exe`;
+  2. L4 and L5 run against those exact files;
+  3. the workflow attaches both files and their `.sha256` to a GitHub Release.
+- **No code signing.** Windows will show the SmartScreen warning on first
+  launch ("Windows protected your PC", then More info, then Run anyway).
+  - The README's Windows section and the release notes show that step with a
+    screenshot, and say how to check the file against its `.sha256`.
+  - Unsigned executables that open network connections draw occasional Defender
+    false positives. If one is reported, submit the release file to Microsoft's
+    malware analysis portal as a false positive.
+  - Signing can be added later without changing anything else in this plan.
 
 ## 7. PR sequence
 
@@ -360,18 +386,19 @@ and shrinks the L0 allowlist. Sizes are relative: S < M < L.
 |---|---|---|---|
 | 0 | This plan | — | Review |
 | 1 | Fix `cpthread_cond_timedwait_loop` (`!done` should be `!*done`); delete `get_process_output`/`popen_or_die` and the unused `<complex.h>` | S | Existing tests |
-| 2 | `check_portability.py` with today's allowlist, added to `lint-fast`; cross-compile job (L1) marked `continue-on-error` and reporting the error count | S | CI |
+| 2 | `check_portability.py` with today's allowlist, added to `lint-fast`; cross-compile job (L1, x64 and arm64) marked `continue-on-error` and reporting the error count | S | CI |
 | 3 | Binary and text I/O: `"rb"`/`"wb"` everywhere, CRLF-tolerant `get_string_from_file_handle`, `.gitattributes`, printf format fixes plus the format attribute, 64-bit offsets via `cfile` | M | L2 binary round-trip fixtures on Linux; `builderhash` unchanged |
 | 4 | `cfile`/`cdir`/`cpath`: replace rename, access, stat, mkdir, opendir, glob, getline; fold `atomic_file.h` into `cfile`; path-list separator | L | L2 contracts; full Linux suite |
 | 5 | `cmap` for the RIT mmap; byte-span precache in place of `fmemopen` | M | `ap_rit`, `wordmapapi`, `fileproxy`, wasm tests |
 | 6 | Hand-written GCG tokenizer, with the differential test against POSIX regex, then the regex removed | M | `gcg`, `historyreplay`, differential test |
 | 7 | `cpthread`/`ctime`/`cterm`/`cstring`: no raw pthreads, timing calls or `isatty` outside compat; `cpthread_defs.h` moves into compat | M | TSAN build (`BUILD=thread`), full suite |
 | 8 | Console: Windows backend for `async_command_control`, linenoise falling back to `fgets`, VT and UTF-8 setup | M | `command` test under Wine; manual check on L4 |
-| 9 | Makefile Windows target, `make windows`, manifest and resources. **L1 becomes required** and the L0 allowlist is empty. | S | L1 green |
+| 9 | Makefile Windows target for x64 and arm64, `make windows`, manifest and resources. **L1 becomes required** and the L0 allowlist is empty. | S | L1 green |
 | 10 | Portable variants of the POSIX-only test tricks; Wine job (L3) required | M | L3 green |
-| 11 | Native Windows job (L4) required. Fix whatever it finds: open-file delete semantics, stack commit, TLS. | M | L4 green |
-| 12 | First-run UX: executable-relative data, double-click detection, `data fetch` (if option A), WMP fallback | M | L5 smoke test |
-| 13 | `release-windows.yml`, plus code signing if adopted | S | Tagged prerelease |
+| 11 | Native Windows jobs (L4, x64 and arm64) required. Fix whatever it finds: open-file delete semantics, stack commit, TLS. | M | L4 green |
+| 12 | First-run UX: executable-relative data, double-click detection (banner and wait-before-close only), `data fetch` | M | L5 smoke test |
+| 12b | Build a missing `.wmp` on first use, falling back to `-wmp false` only when there isn't disk space | M | Linux suite plus L4/L5 timing |
+| 13 | `release-windows.yml` (x64 and arm64, unsigned) and the README's Windows section | S | Tagged prerelease |
 
 **Ordering.**
 - PRs 1–8 change only Linux code paths and land without any Windows
@@ -401,22 +428,29 @@ and shrinks the L0 allowlist. Sizes are relative: S < M < L.
   L4 runs, run the existing `tablebench`/autoplay timings there once, to make
   sure nothing (winpthreads mutexes, `QueryPerformanceCounter`) is
   pathologically slow.
+- **Unsigned binaries.** Some users will stop at the SmartScreen warning, and
+  antivirus false positives are more likely without a signature. The README
+  instructions reduce the first; the second is handled per report.
+- **arm64 performance.** Code tuned on x86 may have hot paths that are slow on
+  ARM (for example, missing fast paths behind `__has_builtin`). Measure on
+  `windows-11-arm` once L4 runs.
 - **Unicode paths.** These depend on the UTF-8 manifest code page, which needs
   Windows 10 1903 or later. Older Windows is unsupported.
 
-## 9. Decisions for maintainers
+## 9. Decisions
 
-1. **Data delivery.** Built-in `data fetch` (A, recommended), a release zip
-   (B), or data embedded in the `.exe` (C)? Section 6.2.
-2. **WMP on first use.** Build it automatically, or fall back to `-wmp false`?
-   Either changes what a missing `.wmp` does today.
-3. **GCG parsing.** Hand-written tokenizer (recommended) or vendored regex?
-   Section 3.4.
-4. **Code signing.** Is about $10/month for Azure Trusted Signing acceptable?
-5. **What a double-click should do.** Should a no-argument launch on Windows
-   offer a "contribute now" path, given that is the likely main use?
-6. **Windows on ARM.** Ship an arm64 build from day one (llvm-mingw makes it
-   nearly free, and a `windows-11-arm` runner exists), or wait?
+Settled by the maintainer in October 2026:
+
+1. **Data delivery:** a built-in `data fetch` command (section 6.2).
+2. **Missing `.wmp`:** build it on first use (section 6.1). Fall back to
+   `-wmp false` only when there isn't disk space.
+3. **GCG parsing:** a hand-written tokenizer, proven against POSIX regex by a
+   differential test (section 3.4).
+4. **Code signing:** none. The README explains the SmartScreen step (section
+   6.3).
+5. **Double-click:** opens the normal REPL. Contributing starts only when the
+   user types `contribute`.
+6. **Windows on ARM:** arm64 ships alongside x64 from the first release.
 
 ## Appendix A: call sites outside `src/compat`
 
