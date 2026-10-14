@@ -21,7 +21,7 @@ test('manual plays are unioned with the configured top plays before any kibitz a
  await expect(page.locator('#results tbody tr')).toHaveCount(6);
  await expect(page.locator('#results button').filter({hasText:'8H AT'})).toHaveCount(1);
 });
-test('sidebars contain game controls and bag count; equal-height panels show exactly fifteen plays',async({page})=>{
+test('sidebars contain game controls and bag count; analysis shows fifteen plays without resizing the board',async({page})=>{
  await page.setViewportSize({width:1936,height:1080}); await review(page);
  await expect(page.locator('#game-header-actions #new-game')).toBeVisible();
  await expect(page.locator('#game-header-actions [aria-label=GCG]')).toBeVisible();
@@ -29,15 +29,17 @@ test('sidebars contain game controls and bag count; equal-height panels show exa
  await expect(page.locator('#brand-rail #bag-count')).toBeVisible();
  await expect(page.locator('.analysis h2')).toHaveCount(0);
  if (await page.locator('#position-editor').getAttribute('open') !== null) await page.locator('#position-editor summary').click();
+ const boardBefore = await page.locator('#board').boundingBox();
  await page.locator('[data-mode=kibitz]').click(); await expect(page.locator('#stop')).toBeDisabled();
  const dimensions=await page.evaluate(()=>{
   const area=document.querySelector('.results-scroll').getBoundingClientRect();
   const rows=[...document.querySelectorAll('#results tbody tr')].map(row=>row.getBoundingClientRect());
-  return {visible:rows.filter(row=>row.top>=area.top&&row.bottom<=area.bottom+0.5).length,
-   board:document.querySelector('.position').getBoundingClientRect().height,
-   analysis:document.querySelector('.analysis').getBoundingClientRect().height};
+  return {visible:rows.filter(row=>row.top>=area.top&&row.bottom<=area.bottom+0.5).length};
  });
- expect(dimensions.visible).toBe(15); expect(Math.abs(dimensions.board-dimensions.analysis)).toBeLessThan(1);
+ expect(dimensions.visible).toBe(15);
+ const boardAfter = await page.locator('#board').boundingBox();
+ expect(boardAfter.width).toBeCloseTo(boardBefore.width, 1);
+ expect(boardAfter.height).toBeCloseTo(boardBefore.height, 1);
  await expect(page.locator('#load-gcg')).toBeVisible();
  await page.screenshot({path:test.info().outputPath('sidebar-panels.png')});
 });

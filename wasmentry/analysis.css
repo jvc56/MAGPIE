@@ -1,3 +1,6 @@
+/* Reserve classic scrollbar space so content growth cannot narrow the board. */
+html { overflow-y: scroll; }
+
 :root {
   color-scheme: dark;
   --bg: #1e1e2e;
@@ -204,7 +207,7 @@ h3 {
 }
 main {
   display: grid;
-  grid-template-columns: minmax(340px, 560px) minmax(420px, 1fr);
+  grid-template-columns: minmax(340px, 640px) minmax(420px, 1fr);
   gap: 18px;
   max-width: 1320px;
   margin: auto;
@@ -1401,7 +1404,7 @@ body.tile-dragging, body.tile-dragging * { cursor: grabbing !important; }
   .app-shell {
     display: grid;
     grid-template-columns:
-      140px minmax(400px, 560px) minmax(420px, 1fr)
+      140px minmax(400px, 640px) minmax(420px, 1fr)
       148px;
     gap: 18px;
     align-items: start;
@@ -1454,10 +1457,6 @@ body.tile-dragging, body.tile-dragging * { cursor: grabbing !important; }
     grid-column: 2 / 4;
     grid-row: 1;
     width: 100%;
-  }
-  #board {
-    width: clamp(320px, calc(100dvh - 380px), 100%);
-    margin-inline: auto;
   }
 }
 
@@ -1804,15 +1803,6 @@ body.tile-dragging, body.tile-dragging * { cursor: grabbing !important; }
 #unseen-counts span {
   white-space: nowrap;
 }
-@media (min-width: 1001px) {
-  #board {
-    width: clamp(300px, calc(100dvh - 385px), 100%);
-    margin-inline: auto;
-  }
-  .playing #board {
-    width: clamp(260px, calc(100dvh - 490px), 100%);
-  }
-}
 @media (min-width: 1360px) {
   #settings-view {
     width: 100%;
@@ -1956,13 +1946,12 @@ body.tile-dragging, body.tile-dragging * { cursor: grabbing !important; }
 #results th, #results td { padding-block: 5px; }
 #results .move-word { flex-wrap: nowrap; }
 @media (min-width: 1001px) {
-  body:not(.playing) #game-view .position, .show-analysis #game-view .position { grid-row: 1; height: var(--analysis-panel-height, auto); overflow: auto; }
+  body:not(.playing) #game-view .position, .show-analysis #game-view .position { grid-row: 1; }
   .analysis { align-self: start; }
-  body:not(.playing) #board, .show-analysis #board { width: min(100%, var(--fitted-board-width, 100%)); }
 }
 
-/* Desktop fits the playing area vertically; touch layouts prioritize board width. */
-#game-view #board { width: min(100%, var(--fitted-board-width, 100%)); margin-inline: auto; }
+/* Board size depends only on column width, never on changing game or analysis content. */
+#game-view #board { width: 100%; margin-inline: auto; }
 @media (max-width: 1359px) {
   #unseen-tiles { display: flex; flex-wrap: wrap; gap: 3px 1ch; }
   #unseen-tiles span { flex: none; }
@@ -1981,24 +1970,23 @@ body.tile-dragging, body.tile-dragging * { cursor: grabbing !important; }
 #history-position { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12px; }
 
 /* Touch zoom enlarges only the board; the rack and controls stay in reach. */
-#board-viewport { min-width: 0; }
+#board-viewport { min-width: 0; width: min(100%, 720px); margin-inline: auto; }
 #board-zoom { display: none; }
 @media (pointer: coarse) and (max-width: 1000px) {
   #game-view { max-width: none; padding-inline: 4px; }
   #game-view .position { padding-inline: 6px; }
+  #board-viewport { width: 100%; }
 }
 @media (pointer: coarse) {
   #board-zoom { display: inline-block; }
   #board, #rack-tiles { touch-action: manipulation; }
   #board-viewport.zoomed {
-    width: var(--zoom-base-width);
-    height: var(--zoom-base-width);
-    margin-inline: auto;
+    aspect-ratio: 1;
     overflow: auto;
     overscroll-behavior: contain;
   }
   #game-view #board-viewport.zoomed #board {
-    width: calc(var(--zoom-base-width) * 2);
+    width: 200%;
     max-width: none;
   }
 }

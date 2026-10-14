@@ -611,63 +611,6 @@ function terminalPosition() {
     recordedGame?.ended && historyIndex === recordedGame.positions.length - 1
   );
 }
-let panelFitFrame;
-let liveBoardFit = null;
-function fitGamePanels() {
-  cancelAnimationFrame(panelFitFrame);
-  panelFitFrame = requestAnimationFrame(() => {
-    // Validation feedback may arrive mid-gesture. Keep drop targets fixed
-    // until the pointer is released or the drag is canceled.
-    if (tileDrag?.active) return;
-    const panel = document.querySelector(".position"), analysis = document.querySelector(".analysis");
-    const narrow = innerWidth <= 1000;
-    const analysisHeight = analysis.getBoundingClientRect().height;
-    const viewportHeight = innerHeight - document.querySelector(".app-header").getBoundingClientRect().height - 60;
-    const height = narrow || !analysisHeight ? viewportHeight : analysisHeight;
-    const style = getComputedStyle(panel);
-    const availableWidth = panel.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
-    if (narrow && mobileBoard.matches) {
-      // Touch screens use their width for legible tiles; the page can scroll
-      // vertically instead of squeezing the board below the header and controls.
-      panel.style.removeProperty("--analysis-panel-height");
-      panel.style.setProperty("--fitted-board-width", `${availableWidth}px`);
-      panel.style.setProperty("--zoom-base-width", `${availableWidth}px`);
-      liveBoardFit = null;
-      return;
-    }
-    let occupied = parseFloat(style.paddingTop) + parseFloat(style.paddingBottom) + 2;
-    for (const child of panel.children) {
-      if (["board-viewport", "unseen-home"].includes(child.id) || !child.getBoundingClientRect().height) continue;
-      const childStyle = getComputedStyle(child);
-      // Expanded editing fields can scroll below the playing area without shrinking the board.
-      const childHeight = child.id === "position-editor"
-        ? child.querySelector("summary").getBoundingClientRect().height
-        : child.getBoundingClientRect().height;
-      occupied += childHeight + parseFloat(childStyle.marginTop) + parseFloat(childStyle.marginBottom);
-    }
-    if (narrow || !analysisHeight) panel.style.removeProperty("--analysis-panel-height");
-    else panel.style.setProperty("--analysis-panel-height", `${height}px`);
-    let boardWidth = Math.max(260, height - occupied);
-    if (isLive()) {
-      const layout = `${innerWidth}:${innerHeight}:${document.body.classList.contains("show-analysis")}`;
-      if (liveBoardFit?.session === session && liveBoardFit.layout === layout) {
-        // Turn transitions briefly remove controls or status text. Keep their space
-        // reserved instead of growing the board for those intermediate renders.
-        boardWidth = Math.min(boardWidth, liveBoardFit.width);
-      }
-      liveBoardFit = {session, layout, width: boardWidth};
-    } else liveBoardFit = null;
-    panel.style.setProperty("--fitted-board-width", `${boardWidth}px`);
-    panel.style.setProperty("--zoom-base-width", `${Math.min(availableWidth, boardWidth)}px`);
-  });
-}
-const panelResize = new ResizeObserver(fitGamePanels);
-panelResize.observe(document.querySelector(".analysis"));
-panelResize.observe(document.querySelector(".app-header"));
-for (const child of document.querySelector(".position").children) {
-  if (child.id !== "board-viewport") panelResize.observe(child);
-}
-window.addEventListener("resize", fitGamePanels);
 const mobileBoard = matchMedia("(pointer: coarse)");
 function setBoardZoom(zoomed) {
   $("board-viewport").classList.toggle("zoomed", zoomed);
@@ -685,7 +628,6 @@ $("board-zoom").addEventListener("click", () => {
 });
 mobileBoard.addEventListener("change", () => {
   if (!mobileBoard.matches) setBoardZoom(false);
-  fitGamePanels();
 });
 $("game-overflow").addEventListener("click", () => {
   const button = $("game-overflow");
@@ -2652,7 +2594,6 @@ tileDrag = installTileDrag({
       if (feedback) {
         applyDraftFeedback(feedback.generation, feedback.text, feedback.score);
       }
-      fitGamePanels();
     });
   },
   board:$("board"), rack:$("rack-tiles"),

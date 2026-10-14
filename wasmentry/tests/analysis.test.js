@@ -549,7 +549,12 @@ test("move entry: drag, tap, blank, recall, direction, playthrough and validatio
   await newGame(page, "AENRST?");
   const tile = page.locator('#rack-tiles [data-letter="T"]');
   const square = page.locator('[data-row="7"][data-col="7"]');
-  await tile.scrollIntoViewIfNeeded();
+  // The width-first board can extend beyond the viewport. Bring both ends
+  // of the gesture into view before measuring screen coordinates.
+  await tile.evaluate(el => el.scrollIntoView({block: "center"}));
+  await square.scrollIntoViewIfNeeded();
+  await expect(tile).toBeInViewport({ratio: 1});
+  await expect(square).toBeInViewport({ratio: 1});
   const from = await tile.boundingBox(),
     to = await square.boundingBox();
   await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2);

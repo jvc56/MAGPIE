@@ -255,7 +255,7 @@ test("compact header offers grouped file actions in Game overflow", async ({page
   expect(analysis.x).toBeGreaterThanOrEqual(board.x + board.width);
 });
 
-test("single column fits the board and rack above the bottom of the viewport", async ({page}) => {
+test("single column gives the board its width and scrolls to rack controls", async ({page}) => {
   await page.setViewportSize({width:900,height:844});
   await ready(page);
   await page.locator('#new-game').click();
@@ -263,9 +263,10 @@ test("single column fits the board and rack above the bottom of the viewport", a
   await expect(page.locator('#pause-game')).toBeVisible();
   for (const width of [900, 700, 390]) {
     await page.setViewportSize({width,height:844});
-    await expect.poll(() => page.locator('.rack-actions').evaluate(el => el.getBoundingClientRect().bottom)).toBeLessThan(815);
-    await expect(page.locator('#rack-tiles')).toBeInViewport();
-    await expect(page.locator('#board')).toBeInViewport();
+    const boardWidth = await page.locator('#board').evaluate(el => el.getBoundingClientRect().width);
+    expect(boardWidth).toBeGreaterThanOrEqual(Math.min(720, width - 100));
+    await page.locator('#sort-rack').scrollIntoViewIfNeeded();
+    await expect(page.locator('#sort-rack')).toBeInViewport();
   }
   await page.setViewportSize({width:900,height:844});
   await page.locator('#unseen-pool').evaluate(el => el.open = true);

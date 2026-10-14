@@ -589,5 +589,7 @@ test.describe('mobile board entry', () => {
     await zoom.tap();
     await expect(zoom).toHaveAttribute('aria-pressed', 'false');
     expect(await viewport.evaluate(el => el.scrollLeft)).toBe(0);
+    await page.setViewportSize({width:900,height:600});
+    await expect.poll(() => page.locator('#board').evaluate(el => el.getBoundingClientRect().width)).toBeGreaterThan(870);
   });
 });
