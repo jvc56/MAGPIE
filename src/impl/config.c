@@ -72,6 +72,7 @@
 #include "autoplay.h"
 #include "cgp.h"
 #include "contribute.h"
+#include "contribute_tables.h"
 #include "convert.h"
 #include "endgame.h"
 #include "gameplay.h"

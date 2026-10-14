@@ -3,8 +3,9 @@
 #include "../src/compat/ctime.h"
 #include "../src/impl/config.h"
 #include "../src/impl/move_gen.h"
-#include "../src/util/string_util.h"
+#include "../src/util/io_util.h"
 #include "test_util.h"
+#include <limits.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -38,8 +39,10 @@ static int table_bench_env_int(const char *name, int fallback) {
   if (!value || !*value) {
     return fallback;
   }
-  const int parsed = atoi(value);
-  return parsed > 0 ? parsed : fallback;
+  char *end = NULL;
+  const long parsed = strtol(value, &end, 10);
+  return (end && *end == '\0' && parsed > 0 && parsed <= INT_MAX) ? (int)parsed
+                                                                  : fallback;
 }
 
 static void table_bench_row(const char *player, const char *player_flags,

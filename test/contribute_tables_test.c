@@ -1,6 +1,5 @@
 #include "contribute_tables_test.h"
 
-#include "../src/compat/cfile.h"
 #include "../src/def/thread_control_defs.h"
 #include "../src/ent/client_state.h"
 #include "../src/ent/conversion_results.h"
@@ -24,6 +23,7 @@
 #include <string.h>
 #include <sys/resource.h>
 #include <sys/stat.h>
+#include <unistd.h>
 
 // The sizes of CSW24's tables, in MB, which the chooser's cases are written
 // in: what a contributor actually weighs.
@@ -381,7 +381,7 @@ static bool fake_free_bytes(const char *directory, void *context,
   const FakeDisk *disk = (const FakeDisk *)context;
   *free_bytes = disk->base;
   for (int path_idx = 0; path_idx < disk->count; path_idx++) {
-    struct stat info;
+    struct stat info; // NOLINT(misc-include-cleaner)
     if (stat(disk->paths[path_idx], &info) != 0) {
       *free_bytes += disk->sizes[path_idx];
     }
@@ -444,17 +444,20 @@ static void test_room_is_made_from_the_manifest_alone(void) {
   StringList *evicted = string_list_create();
   int64_t available = 0;
 
-  // Fits already: nothing is deleted.
-  assert(contribute_tables_make_room(TABLES_TEST_MANIFEST, TABLES_TEST_DIR, 800,
-                                     200, &keep, 1, fake_free_bytes, &disk,
-                                     &available, evicted));
+  // Fits already: nothing is deleted. Each call is made outside its assert:
+  // it deletes files, which a build without asserts must still do.
+  bool fits = contribute_tables_make_room(TABLES_TEST_MANIFEST, TABLES_TEST_DIR,
+                                          800, 200, &keep, 1, fake_free_bytes,
+                                          &disk, &available, evicted);
+  assert(fits);
   assert(available == 800 && string_list_get_count(evicted) == 0);
 
   // 250 more than there is: the least recently used table goes, and that is
   // enough.
-  assert(contribute_tables_make_room(TABLES_TEST_MANIFEST, TABLES_TEST_DIR,
+  fits = contribute_tables_make_room(TABLES_TEST_MANIFEST, TABLES_TEST_DIR,
                                      1050, 200, &keep, 1, fake_free_bytes,
-                                     &disk, &available, evicted));
+                                     &disk, &available, evicted);
+  assert(fits);
   assert(available == 1100);
   assert(string_list_get_count(evicted) == 1);
   assert_strings_equal(string_list_get_string(evicted, 0), "rit OLD");
@@ -462,9 +465,10 @@ static void test_room_is_made_from_the_manifest_alone(void) {
 
   // More than everything deletable: the next goes, the changed file and the
   // task's own stay, and it still does not fit.
-  assert(!contribute_tables_make_room(TABLES_TEST_MANIFEST, TABLES_TEST_DIR,
-                                      5000, 200, &keep, 1, fake_free_bytes,
-                                      &disk, &available, evicted));
+  fits = contribute_tables_make_room(TABLES_TEST_MANIFEST, TABLES_TEST_DIR,
+                                     5000, 200, &keep, 1, fake_free_bytes,
+                                     &disk, &available, evicted);
+  assert(!fits);
   assert(available == 1300);
   assert(string_list_get_count(evicted) == 2);
   assert(!file_exists(newer_path));
@@ -479,9 +483,11 @@ static void test_room_is_made_from_the_manifest_alone(void) {
   contribute_table_manifest_destroy(manifest);
 
   // An unknown size is left to its build.
-  assert(contribute_tables_make_room(TABLES_TEST_MANIFEST, TABLES_TEST_DIR, -1,
+  fits = contribute_tables_make_room(TABLES_TEST_MANIFEST, TABLES_TEST_DIR, -1,
                                      1000000, &keep, 1, fake_free_bytes, &disk,
-                                     &available, NULL));
+                                     &available, NULL);
+  assert(fits);
+  (void)fits;
 
   string_list_destroy(evicted);
   (void)remove(changed_path);
@@ -728,8 +734,11 @@ static char *run_tables_task(const char *assignment_json, bool use_tables,
     assert(nowhere);
     io_set_stream_out(nowhere);
     io_set_stream_err(nowhere);
-    assert(
-        limit_file_size((rlim_t)file_size_limit, &previous, &previous_handler));
+    // Outside the assert: the limit must be set with or without asserts.
+    const bool limited =
+        limit_file_size((rlim_t)file_size_limit, &previous, &previous_handler);
+    assert(limited);
+    (void)limited;
   }
 #else
   (void)file_size_limit;
@@ -844,9 +853,9 @@ static void copy_file(const char *from, const char *to) {
 static void test_a_task_runs_without_the_tables_it_has_no_room_for(void) {
   (void)mkdir(TABLES_TEST_DIR, 0777);
   (void)mkdir(TABLES_TEST_DIR "/lexica", 0777);
-  copy_file("data/lexica/CSW21_ab.kwg",
+  copy_file("testdata/lexica/CSW21_ab.kwg",
             TABLES_TEST_DIR "/lexica/" TABLES_TEST_LEXICON ".kwg");
-  copy_file("data/lexica/CSW21_ab.klv2",
+  copy_file("testdata/lexica/CSW21_ab.klv2",
             TABLES_TEST_DIR "/lexica/" TABLES_TEST_LEXICON ".klv2");
   (void)remove(TABLES_TEST_MANIFEST);
   char *assignment = tables_test_assignment();

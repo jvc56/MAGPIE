@@ -31,6 +31,7 @@
 #include "../src/ent/thread_control.h"
 #include "../src/impl/config.h"
 #include "../src/impl/contribute.h"
+#include "../src/impl/contribute_tables.h"
 #include "../src/impl/convert.h"
 #include "../src/impl/gameplay.h"
 #include "../src/impl/move_gen.h"
