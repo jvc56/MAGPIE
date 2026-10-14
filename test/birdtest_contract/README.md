@@ -45,8 +45,8 @@ Beside `claim_token`, `job_id`, `min_magpie_version`, `expected_data` and the
   without one its type and the start of its id (`"games job 1d4a7f60"`). What
   the worker calls the job when it says what it is running.
 - `max_task_seconds` -- a whole number, 600 to 86,400: how long the worker may
-  run this task. It is the server's setting (`/admin/settings`) as it stood
-  when the claim was made, and the claim's deadline is its claim time plus
+  run this task. It is the job's own limit (set at its creation, changed on its
+  Manage page) as it stood when the claim was made, and the claim's deadline is its claim time plus
   this. A worker that reaches it stops the task, hands it back unfinished and
   declines it with `"reason": "time_limit"` (`decline-time-limit.json`). A
   minute past the deadline the server takes the claim back whether or not the
@@ -66,6 +66,20 @@ requests state none.
 A decline's `reason` is one of `missing_data`, `magpie_version`,
 `unknown_job_type`, `derived_mismatch`, `task_failed` and `time_limit`;
 anything else is a `400` listing them.
+
+## Derived files: their sizes, and what a worker skipped
+
+Each entry of `expected_data.derived` states, beside its role, name, hash,
+builder and build target, `bytes`: the size of the server's reference build.
+The wordmap, word info table and rack info table are a best attempt (MAGPIE
+0.1.3): a worker short of disk or memory runs a task without the ones that do
+not fit, which is slower (a static player plays the same moves; a simming
+one's games are equally valid but need not be the same, since the wordmap's
+move generator orders equal moves differently), and `bytes` is how it knows
+what fits before it builds anything. A result states what it ran without, beside
+`movegens`: `"derived_skipped"`, a sorted list of `"wmp"`, `"wit"` and
+`"rit"`, `[]` for none. The server accepts the key missing (a build before
+0.1.3) and refuses anything but those three roles.
 
 ## Capturing
 
