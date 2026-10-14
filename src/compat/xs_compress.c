@@ -36,15 +36,18 @@ uint32_t xs_crc32(const void *bytes, size_t length) {
   }
   return crc ^ UINT32_MAX;
 }
+
 static uint32_t xs_little32(const unsigned char *bytes) {
   return (uint32_t)bytes[0] | (uint32_t)bytes[1] << 8 |
          (uint32_t)bytes[2] << 16 | (uint32_t)bytes[3] << 24;
 }
+
 static void xs_store32(unsigned char *bytes, uint32_t value) {
   for (unsigned index = 0; index < 4; index++) {
     bytes[index] = (unsigned char)(value >> (index * 8));
   }
 }
+
 static unsigned xs_inflate_bits(XSInflate *input, unsigned width) {
   if (!input->valid || input->bit > input->size * 8 ||
       width > input->size * 8 - input->bit) {
@@ -57,6 +60,7 @@ static unsigned xs_inflate_bits(XSInflate *input, unsigned width) {
   }
   return value;
 }
+
 static bool xs_huffman_build(XSHuffman *tree, const unsigned *lengths,
                              unsigned count, bool code_lengths) {
   memset(tree, 0, sizeof(*tree));
@@ -91,6 +95,7 @@ static bool xs_huffman_build(XSHuffman *tree, const unsigned *lengths,
   }
   return true;
 }
+
 static unsigned xs_inflate_symbol(XSInflate *input, const XSHuffman *tree) {
   unsigned code = 0;
   unsigned first = 0;
@@ -106,6 +111,7 @@ static unsigned xs_inflate_symbol(XSInflate *input, const XSHuffman *tree) {
   input->valid = false;
   return 0;
 }
+
 static bool xs_inflate_trees(XSInflate *input, unsigned type,
                              XSHuffman *literal, XSHuffman *distance) {
   unsigned lengths[320] = {0};
@@ -165,6 +171,7 @@ static bool xs_inflate_trees(XSInflate *input, unsigned type,
          xs_huffman_build(literal, lengths, literals, false) &&
          xs_huffman_build(distance, lengths + literals, distances, false);
 }
+
 static bool xs_inflate_block(XSInflate *input, unsigned type,
                              unsigned char *output, size_t *used) {
   if (type == 0) {
@@ -234,6 +241,7 @@ static bool xs_inflate_block(XSInflate *input, unsigned type,
   }
   return false;
 }
+
 char *xs_gunzip(const void *bytes, size_t length, size_t *output_length) {
   *output_length = 0;
   const unsigned char *input = bytes;
@@ -295,6 +303,7 @@ char *xs_gunzip(const void *bytes, size_t length, size_t *output_length) {
   *output_length = used;
   return (char *)output;
 }
+
 char *xs_gzip(const void *bytes, size_t length, size_t *output_length) {
   *output_length = 0;
   size_t blocks = length ? (length + 65534) / 65535 : 1;
