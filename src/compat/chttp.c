@@ -217,7 +217,13 @@ void chttp_request(const ChttpRequest *request, ChttpResponse *response,
                    ErrorStack *error_stack) {
   chttp_response_reset(response);
 
-  wchar_t *wide_url = widen(request->url);
+  // libcurl takes a URL with no scheme as http://; WinHTTP refuses it. Do
+  // what libcurl does, so a URL means the same on every platform.
+  char *url = strstr(request->url, "://")
+                  ? string_duplicate(request->url)
+                  : get_formatted_string("http://%s", request->url);
+  wchar_t *wide_url = widen(url);
+  free(url);
   if (!wide_url) {
     error_stack_push(
         error_stack, ERROR_STATUS_HTTP_REQUEST_FAILED,

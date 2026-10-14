@@ -321,7 +321,7 @@ magpie_test: $(OBJ_SRC) $(OBJ_TEST) $(RES_OBJ) | $(BIN_DIR)
 	$(CC) $(LDFLAGS) $(LFLAGS) $^ $(LDLIBS) -o $(BIN_DIR)/$@$(EXE)
 
 $(RES_OBJ): windows/magpie.rc windows/magpie.manifest windows/magpie.ico $(SRC_DIR)/impl/config.c | $(OBJ_DIR)
-	$(WINDRES) -I windows -DMAGPIE_VERSION_STRING=\"$(MAGPIE_VERSION)\" -DMAGPIE_VERSION_COMMAS=$(MAGPIE_VERSION_COMMAS) $< -o $@
+	$(WINDRES) -I windows -DMAGPIE_VERSION_TEXT=$(MAGPIE_VERSION) -DMAGPIE_VERSION_COMMAS=$(MAGPIE_VERSION_COMMAS) $< -o $@
 
 magpie_pgo_train: $(OBJ_SRC) $(PGO_TRAIN_OBJ) | $(BIN_DIR)
 	$(CC) $(LDFLAGS) $(LFLAGS) $^ $(LDLIBS) -o $(BIN_DIR)/$@

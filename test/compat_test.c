@@ -210,6 +210,15 @@ static void test_rename_over_existing(void) {
   assert(strings_equal(contents, "new"));
   free(contents);
   assert(cfile_rename(from, compat_text_path) != 0);
+  // A file never replaces a directory.
+  const char *directory = "compat_test_rename_directory.tmp";
+  assert(cfile_mkdir(directory) == 0);
+  write_text(from, "file");
+  assert(cfile_rename(from, directory) != 0);
+  assert(cfile_is_directory(directory));
+  assert(cfile_access(from, CFILE_ACCESS_EXISTS));
+  remove_or_fail(from);
+  assert(cfile_rmdir(directory) == 0);
   remove_or_fail(compat_text_path);
 }
 

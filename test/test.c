@@ -339,6 +339,7 @@ void run_all_super(void) {
 
 int main(int argc, char *argv[]) {
   cterm_init();
+  cterm_disable_error_dialogs();
   log_set_level(LOG_WARN);
 
   // NOLINTNEXTLINE(misc-redundant-expression)

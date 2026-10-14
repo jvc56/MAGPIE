@@ -38,6 +38,8 @@ enum {
   CFILE_RENAME_FLAG_POSIX_SEMANTICS = 0x2,
   // The longest symlink target followed: Linux's PATH_MAX.
   CFILE_LINK_TARGET_MAX = 4096,
+  // Windows file times: 100 ns ticks since 1601, and 1970 in them.
+  CFILE_TICKS_PER_SECOND = 10000000,
   // Room for the suffix that names a replaced file moved aside on Windows.
   CFILE_ASIDE_SUFFIX_LENGTH = 64,
 };
@@ -389,6 +391,16 @@ int cfile_rename(const char *from, const char *to) {
   wchar_t *wide_to = wide_from ? cfile_wide(to) : NULL;
   if (!wide_to) {
     free(wide_from);
+    return -1;
+  }
+  // As POSIX rename, a file never replaces a directory. (Without this the
+  // fallback below would move the directory aside and take its place.)
+  const DWORD target_attributes = GetFileAttributesW(wide_to);
+  if (target_attributes != INVALID_FILE_ATTRIBUTES &&
+      (target_attributes & FILE_ATTRIBUTE_DIRECTORY)) {
+    free(wide_from);
+    free(wide_to);
+    errno = EISDIR;
     return -1;
   }
   // The rename information takes the new name as a full path.
@@ -844,41 +856,79 @@ long cfile_process_id(void) {
 #endif
 }
 
+#if defined(_WIN32)
+// 1970-01-01 in Windows file time: too large for an enum.
+static const LONGLONG cfile_windows_epoch_ticks = 116444736000000000LL;
+
+// A FILETIME-style count of 100-nanosecond intervals since 1601 as seconds and
+// nanoseconds since 1970.
+static void cfile_split_windows_time(LONGLONG ticks, int64_t *seconds,
+                                     long *nanoseconds) {
+  const LONGLONG since_1970 = ticks - cfile_windows_epoch_ticks;
+  *seconds = (int64_t)(since_1970 / CFILE_TICKS_PER_SECOND);
+  *nanoseconds = (long)((since_1970 % CFILE_TICKS_PER_SECOND) * 100);
+}
+#endif
+
 bool cfile_identity(const char *path, CFileIdentity *identity) {
   if (!path) {
     return false;
   }
 #if defined(_WIN32)
-  // The 64-bit stat: plain stat's size is 32 bits on Windows.
+  // _wstat64 gives no inode (st_ino is always 0), whole seconds, and the
+  // creation time as st_ctime; the handle gives the file index, and the last
+  // write and change times to 100 ns.
   wchar_t *wide = cfile_wide(path);
   if (!wide) {
     return false;
   }
-  struct _stat64 info;
-  const int result = _wstat64(wide, &info);
+  HANDLE handle = CreateFileW(
+      wide, FILE_READ_ATTRIBUTES,
+      FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL,
+      OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
   free(wide);
-  if (result != 0) {
+  if (handle == INVALID_HANDLE_VALUE) {
+    cfile_set_errno(GetLastError());
     return false;
   }
+  BY_HANDLE_FILE_INFORMATION file_information;
+  FILE_BASIC_INFO basic_information;
+  const bool known =
+      GetFileInformationByHandle(handle, &file_information) &&
+      GetFileInformationByHandleEx(handle, FileBasicInfo, &basic_information,
+                                   sizeof(basic_information));
+  const DWORD error = GetLastError();
+  (void)CloseHandle(handle);
+  if (!known) {
+    cfile_set_errno(error);
+    return false;
+  }
+  identity->size = (int64_t)(((uint64_t)file_information.nFileSizeHigh << 32) |
+                             file_information.nFileSizeLow);
+  identity->inode = ((uint64_t)file_information.nFileIndexHigh << 32) |
+                    file_information.nFileIndexLow;
+  cfile_split_windows_time(basic_information.LastWriteTime.QuadPart,
+                           &identity->mtime_seconds,
+                           &identity->mtime_nanoseconds);
+  cfile_split_windows_time(basic_information.ChangeTime.QuadPart,
+                           &identity->ctime_seconds,
+                           &identity->ctime_nanoseconds);
 #else
   struct stat info;
   if (stat(path, &info) != 0) {
     return false;
   }
-#endif
   identity->size = (int64_t)info.st_size;
   identity->inode = (uint64_t)info.st_ino;
   identity->mtime_seconds = (int64_t)info.st_mtime;
   identity->ctime_seconds = (int64_t)info.st_ctime;
-#if defined(_WIN32)
-  identity->mtime_nanoseconds = 0;
-  identity->ctime_nanoseconds = 0;
-#elif defined(__APPLE__)
+#if defined(__APPLE__)
   identity->mtime_nanoseconds = (long)info.st_mtimespec.tv_nsec;
   identity->ctime_nanoseconds = (long)info.st_ctimespec.tv_nsec;
 #else
   identity->mtime_nanoseconds = (long)info.st_mtim.tv_nsec;
   identity->ctime_nanoseconds = (long)info.st_ctim.tv_nsec;
+#endif
 #endif
   return true;
 }

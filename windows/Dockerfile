@@ -4,5 +4,5 @@
 # the same release, unpacked from its tarball (.github/workflows/run-tests.yml).
 FROM mstorsjo/llvm-mingw:20261006
 RUN apt-get update -qq \
- && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends make python3 wine64 \
+ && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq make python3 wine64 \
  && rm -rf /var/lib/apt/lists/*
