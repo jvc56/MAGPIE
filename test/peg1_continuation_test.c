@@ -46,6 +46,7 @@
 //                      tables (default 0.03)
 //   PEG1C_SKIP_FROM    comma-separated JSONL files from earlier runs; boards
 //                      with a complete line there are skipped
+//   PEG1C_REVERSE      1 = score this shard's boards from the last one back
 
 #include "peg1_continuation_test.h"
 
@@ -838,6 +839,12 @@ void test_peg1_continuation(void) {
     p1c_mark_done(skip_from, done, num_boards);
   }
   FILE *out = fopen_or_die(out_path, "ae");
+  // Find this shard's unfinished boards first, so they can be scored in
+  // either order: a second runner taking a shard in reverse meets the first
+  // in the middle.
+  int *todo_idx = malloc_or_die((size_t)num_boards * sizeof(int));
+  uint64_t *todo_seed = malloc_or_die((size_t)num_boards * sizeof(uint64_t));
+  int num_todo = 0;
   int board_idx = 0;
   for (int attempt = 0; board_idx < num_boards && attempt < P1C_MAX_ATTEMPTS;
        attempt++) {
@@ -846,15 +853,27 @@ void test_peg1_continuation(void) {
       continue;
     }
     if (board_idx % num_shards == shard && !done[board_idx]) {
-      Timer timer;
-      ctimer_start(&timer);
-      p1c_score_board(&harness, board_idx, seed, out);
-      printf("peg1cont board %d seed %llu %.1fs\n", board_idx,
-             (unsigned long long)seed, ctimer_elapsed_seconds(&timer));
-      (void)fflush(stdout);
+      todo_idx[num_todo] = board_idx;
+      todo_seed[num_todo] = seed;
+      num_todo++;
     }
     board_idx++;
   }
+  const bool reverse = env_int("PEG1C_REVERSE", 0) != 0;
+  for (int todo_pos = 0; todo_pos < num_todo; todo_pos++) {
+    const int pos = reverse ? num_todo - 1 - todo_pos : todo_pos;
+    const bool reached = p1c_play_to_1peg(&harness, todo_seed[pos]);
+    assert(reached);
+    (void)reached;
+    Timer timer;
+    ctimer_start(&timer);
+    p1c_score_board(&harness, todo_idx[pos], todo_seed[pos], out);
+    printf("peg1cont board %d seed %llu %.1fs\n", todo_idx[pos],
+           (unsigned long long)todo_seed[pos], ctimer_elapsed_seconds(&timer));
+    (void)fflush(stdout);
+  }
+  free(todo_idx);
+  free(todo_seed);
   (void)fclose(out);
   free(done);
 
