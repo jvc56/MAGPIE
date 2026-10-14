@@ -85,6 +85,32 @@ test("all four modes use the real WASM engine and clear stale results", async ({
   });
 });
 
+test("four tiles in the bag switches from preendgame to simulation", async ({page}) => {
+  await ready(page);
+  const positions = await page.evaluate(async () => {
+    const {parseCGP, toCGP, inventory, SAMPLES} = await import('/wasmentry/analysis-model.mjs');
+    const position = parseCGP(SAMPLES.peg);
+    position.board[1][3] = null;
+    position.board[1][11] = null;
+    const three = toCGP(position);
+    position.board[2][3] = null;
+    return {three, four: toCGP(position), bag: inventory(position).bagCount};
+  });
+  expect(positions.bag).toBe(4);
+  for (const [cgp, mode] of [[positions.three, 'peg'], [positions.four, 'sim']]) {
+    await openGameActions(page);
+    await page.locator('#import').click();
+    await page.locator('#cgp').fill(cgp);
+    await page.getByRole('button', {name: 'Load position'}).click();
+    await expect(page.locator('#import-dialog')).toBeHidden();
+    await expect(page.locator(`[data-mode="${mode}"]`)).toBeVisible();
+    await expect(page.locator(`[data-mode="${mode}"]`)).toBeEnabled();
+  }
+  await expect(page.locator('[data-mode="peg"]')).toBeHidden();
+  await expect(page.locator('[data-mode="peg"]')).toBeDisabled();
+  await analyze(page, 'sim');
+});
+
 test("stop permits another analysis, invalid CGP preserves position, edits undo", async ({
   page,
 }) => {
