@@ -40,6 +40,9 @@ enum {
   CFILE_LINK_TARGET_MAX = 4096,
   // Windows file times: 100 ns ticks since 1601, and 1970 in them.
   CFILE_TICKS_PER_SECOND = 10000000,
+  // The most reparse data a Windows link can hold
+  // (MAXIMUM_REPARSE_DATA_BUFFER_SIZE).
+  CFILE_REPARSE_BUFFER_BYTES = 16 * 1024,
   // Room for the suffix that names a replaced file moved aside on Windows.
   CFILE_ASIDE_SUFFIX_LENGTH = 64,
 };
@@ -61,9 +64,11 @@ static char *cfile_format(const char *format, const char *first,
   return result;
 }
 
+#if !defined(_WIN32)
 static char *cfile_duplicate(const char *text) {
   return cfile_format("%s%s", text, "");
 }
+#endif
 
 #if defined(_WIN32)
 // Sets errno to the nearest equivalent of a Win32 error.
@@ -529,39 +534,168 @@ int64_t cfile_getline(char **line, size_t *capacity, FILE *stream) {
 }
 
 #if defined(_WIN32)
-// The file a path names, through any symlinks or junctions, so an atomic
-// write replaces the target rather than the link. A path that does not exist
-// yet is returned as given.
-static char *cfile_resolve_destination(const char *path) {
-  wchar_t *wide = cfile_wide(path);
-  if (!wide) {
+// A symbolic link's reparse data, as FSCTL_GET_REPARSE_POINT returns it
+// (REPARSE_DATA_BUFFER in the Windows driver kit, which user-mode headers do
+// not declare). Offsets and lengths are in bytes, into path_buffer.
+typedef struct CFileSymlinkReparse {
+  ULONG tag;
+  USHORT data_length;
+  USHORT reserved;
+  USHORT substitute_name_offset;
+  USHORT substitute_name_length;
+  USHORT print_name_offset;
+  USHORT print_name_length;
+  ULONG flags;
+  WCHAR path_buffer[1];
+} CFileSymlinkReparse;
+
+// The target a symbolic link at `link` names, as written in the link: relative
+// to the link's directory or absolute. NULL with errno set if `link` is not a
+// symbolic link or cannot be read.
+static wchar_t *cfile_read_link(const wchar_t *link) {
+  HANDLE handle =
+      CreateFileW(link, FILE_READ_ATTRIBUTES,
+                  FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL,
+                  OPEN_EXISTING,
+                  FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS,
+                  NULL);
+  if (handle == INVALID_HANDLE_VALUE) {
+    cfile_set_errno(GetLastError());
     return NULL;
   }
+  unsigned char *buffer = malloc(CFILE_REPARSE_BUFFER_BYTES);
+  DWORD returned = 0;
+  const bool read =
+      buffer && DeviceIoControl(handle, FSCTL_GET_REPARSE_POINT, NULL, 0,
+                                buffer, CFILE_REPARSE_BUFFER_BYTES, &returned,
+                                NULL);
+  const DWORD error = GetLastError();
+  (void)CloseHandle(handle);
+  const CFileSymlinkReparse *reparse = (const CFileSymlinkReparse *)buffer;
+  if (!read || returned < offsetof(CFileSymlinkReparse, path_buffer) ||
+      reparse->tag != IO_REPARSE_TAG_SYMLINK) {
+    free(buffer);
+    if (read) {
+      errno = EINVAL;
+    } else {
+      cfile_set_errno(error);
+    }
+    return NULL;
+  }
+  // The print name is the target as given ("table", "C:\\data\\table"); the
+  // substitute name is the same, absolute ones in NT form ("\\??\\C:\\...").
+  USHORT offset = reparse->print_name_offset;
+  USHORT length = reparse->print_name_length;
+  if (length == 0) {
+    offset = reparse->substitute_name_offset;
+    length = reparse->substitute_name_length;
+  }
+  const size_t characters = length / sizeof(WCHAR);
+  wchar_t *target = malloc(sizeof(wchar_t) * (characters + 1));
+  if (target) {
+    memcpy(target, (const unsigned char *)reparse->path_buffer + offset,
+           length);
+    target[characters] = L'\0';
+    if (wcsncmp(target, L"\\??\\", 4) == 0) {
+      memmove(target, target + 4, sizeof(wchar_t) * (characters - 3));
+    }
+  } else {
+    errno = ENOMEM;
+  }
+  free(buffer);
+  return target;
+}
+
+// `target`, relative to the directory holding `link` unless it is absolute.
+static wchar_t *cfile_link_target_path(const wchar_t *link,
+                                       const wchar_t *target) {
+  const bool absolute =
+      target[0] == L'\\' || target[0] == L'/' ||
+      (target[0] != L'\0' && target[1] == L':');
+  const wchar_t *directory_end = NULL;
+  for (const wchar_t *character = link; *character; character++) {
+    if (*character == L'\\' || *character == L'/') {
+      directory_end = character + 1;
+    }
+  }
+  const size_t prefix = absolute || !directory_end
+                            ? 0
+                            : (size_t)(directory_end - link);
+  const size_t target_length = wcslen(target);
+  wchar_t *path = malloc(sizeof(wchar_t) * (prefix + target_length + 1));
+  if (path) {
+    memcpy(path, link, sizeof(wchar_t) * prefix);
+    memcpy(path + prefix, target, sizeof(wchar_t) * (target_length + 1));
+  }
+  return path;
+}
+
+// The final path of the existing file `wide` names, through any links, or
+// NULL with GetLastError's error left in *error.
+static char *cfile_final_path(const wchar_t *wide, DWORD *error) {
   HANDLE handle = CreateFileW(
       wide, FILE_READ_ATTRIBUTES,
       FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL,
       OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
-  free(wide);
   if (handle == INVALID_HANDLE_VALUE) {
-    const DWORD error = GetLastError();
-    if (error == ERROR_FILE_NOT_FOUND) {
-      return cfile_duplicate(path);
-    }
-    cfile_set_errno(error);
+    *error = GetLastError();
     return NULL;
   }
   const DWORD length = GetFinalPathNameByHandleW(handle, NULL, 0, 0);
   wchar_t *final_path = length ? malloc(sizeof(wchar_t) * length) : NULL;
   char *resolved = NULL;
+  *error = ERROR_SUCCESS;
   if (final_path &&
       GetFinalPathNameByHandleW(handle, final_path, length, 0) < length) {
     resolved = cfile_narrow(final_path);
   } else {
-    cfile_set_errno(GetLastError());
+    *error = GetLastError();
   }
   free(final_path);
   (void)CloseHandle(handle);
   return resolved;
+}
+
+// The file a path names, through any symlinks or junctions, so an atomic
+// write replaces the target rather than the link. A path that does not exist
+// yet is returned as given, and a link to a file that does not exist yet
+// resolves to that file, which the write creates, as on POSIX.
+static char *cfile_resolve_destination(const char *path) {
+  wchar_t *current = cfile_wide(path);
+  for (int links = 0; current; links++) {
+    DWORD error = ERROR_SUCCESS;
+    char *resolved = cfile_final_path(current, &error);
+    if (resolved) {
+      free(current);
+      return resolved;
+    }
+    // ERROR_CANT_RESOLVE_FILENAME: a chain of links Windows gave up on.
+    if (error != ERROR_FILE_NOT_FOUND && error != ERROR_PATH_NOT_FOUND &&
+        error != ERROR_CANT_RESOLVE_FILENAME) {
+      free(current);
+      cfile_set_errno(error);
+      return NULL;
+    }
+    // Nothing there, or a link to something that is not there (yet).
+    const DWORD attributes = GetFileAttributesW(current);
+    if (attributes == INVALID_FILE_ATTRIBUTES ||
+        !(attributes & FILE_ATTRIBUTE_REPARSE_POINT)) {
+      char *destination = cfile_narrow(current);
+      free(current);
+      return destination;
+    }
+    if (links == CFILE_MAX_SYMLINKS) {
+      free(current);
+      errno = ELOOP;
+      return NULL;
+    }
+    wchar_t *target = cfile_read_link(current);
+    wchar_t *next = target ? cfile_link_target_path(current, target) : NULL;
+    free(target);
+    free(current);
+    current = next;
+  }
+  return NULL;
 }
 
 // Opens a new temporary beside `destination` with a name nothing else uses.
