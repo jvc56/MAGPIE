@@ -235,6 +235,8 @@ enum {
   BEST_PLAY_PASS_ONE_IN = 7,
   BEST_PLAY_MIN_CHECKS = 500,
   BEST_PLAY_MIN_DEEPEST = 4,
+  BEST_PLAY_SIBLINGS = 3,
+  BEST_PLAY_MOVE_LIST_CAPACITY = 100000,
 };
 
 static uint64_t next_random(uint64_t *state) {
@@ -362,6 +364,20 @@ static void assert_best_play_matches(PathMoveLists *lists,
   free(derived_pointers);
 }
 
+// Makes `chosen` along the path: pushes it on the lists, plays it, and brings
+// the cross-sets up to date for the next generation.
+static void make_path_move(Game *game, PathMoveLists *lists,
+                           MoveList *move_list, const SmallMove *chosen,
+                           MoveUndo *undo) {
+  small_move_to_move(move_list->spare_move, chosen, game_get_board(game));
+  path_move_lists_push(lists, game_get_board(game), move_list->spare_move);
+  play_move_incremental(move_list->spare_move, game, undo);
+  if (undo->move_tiles_length > 0) {
+    update_cross_set_for_move_from_undo(undo, game);
+  }
+  board_set_cross_sets_valid(game_get_board(game), true);
+}
+
 static void test_best_play_random_paths(void) {
   const char *positions[BEST_PLAY_NUM_POSITIONS] = {
       "15/15/15/15/15/15/15/6CAT6/15/15/15/15/15/15/15 AEINRST/DEILNOR 0/0 0",
@@ -373,7 +389,8 @@ static void test_best_play_random_paths(void) {
       config_create_or_die("set -lex NWL20 -wmp false -rit false -wit false");
   Game *game = config_game_create(config);
   MoveList *move_list = move_list_create_small(100000);
-  MoveList *best_move_list = move_list_create_small(16);
+  MoveList *best_move_list =
+      move_list_create_small(BEST_PLAY_MOVE_LIST_CAPACITY);
   const MoveGenArgs args = {
       .game = game,
       .move_list = move_list,
@@ -407,21 +424,31 @@ static void test_best_play_random_paths(void) {
              game_get_game_end_reason(game) == GAME_END_REASON_NONE) {
         generate_moves(&args);
         const int play_count = move_list->count - 1;
-        // Mostly tile plays, occasionally the trailing pass.
-        int pick = play_count;
-        if (play_count > 0 && next_random(&rng) % BEST_PLAY_PASS_ONE_IN != 0) {
-          pick = (int)(next_random(&rng) % (uint64_t)play_count);
+        // Mostly tile plays, occasionally the trailing pass. The first pick
+        // continues the path; the others are its siblings.
+        SmallMove picks[BEST_PLAY_SIBLINGS + 1];
+        for (int pick_idx = 0; pick_idx <= BEST_PLAY_SIBLINGS; pick_idx++) {
+          int pick = play_count;
+          if (play_count > 0 &&
+              next_random(&rng) % BEST_PLAY_PASS_ONE_IN != 0) {
+            pick = (int)(next_random(&rng) % (uint64_t)play_count);
+          }
+          picks[pick_idx] = *move_list->small_moves[pick];
         }
-        const SmallMove chosen = *move_list->small_moves[pick];
-        small_move_to_move(move_list->spare_move, &chosen,
-                           game_get_board(game));
-        path_move_lists_push(lists, game_get_board(game),
-                             move_list->spare_move);
-        play_move_incremental(move_list->spare_move, game, &undos[length]);
-        if (undos[length].move_tiles_length > 0) {
-          update_cross_set_for_move_from_undo(&undos[length], game);
+        // Siblings share the parent, so they reuse each other's per-lane best
+        // plays in best_play.
+        for (int sibling_idx = 1; sibling_idx <= BEST_PLAY_SIBLINGS;
+             sibling_idx++) {
+          make_path_move(game, lists, move_list, &picks[sibling_idx],
+                         &undos[length]);
+          if (game_get_game_end_reason(game) == GAME_END_REASON_NONE) {
+            assert_best_play_matches(lists, &args, best_move_list, &rng,
+                                     &num_checks);
+          }
+          unplay_move_incremental(game, &undos[length]);
+          path_move_lists_pop(lists);
         }
-        board_set_cross_sets_valid(game_get_board(game), true);
+        make_path_move(game, lists, move_list, &picks[0], &undos[length]);
         length++;
         if (game_get_game_end_reason(game) != GAME_END_REASON_NONE) {
           break;
@@ -463,7 +490,8 @@ static void test_best_play_pass_path(int empty_side) {
   load_and_exec_config_or_die(config, "new");
   Game *game = config_get_game(config);
   MoveList *move_list = move_list_create_small(16);
-  MoveList *best_move_list = move_list_create_small(16);
+  MoveList *best_move_list =
+      move_list_create_small(BEST_PLAY_MOVE_LIST_CAPACITY);
   PathMoveLists *lists = path_move_lists_create();
   const MoveGenArgs args = {
       .game = game,

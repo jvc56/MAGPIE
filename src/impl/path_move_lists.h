@@ -67,6 +67,17 @@ typedef struct PathListSlot {
 // same way -- the natural shape of a depth-first search, where each node
 // generates before descending. Slots are indexed by path length and
 // overwritten freely as sibling subtrees revisit a depth.
+// One lane's best plays for the side to move at the leaves under one parent
+// (see path_move_lists_best_play): the best that uses the whole rack and the
+// best that does not, kept apart because the go-out bonus a whole-rack play
+// earns depends on which sibling's opponent rack it ends.
+typedef struct LaneBestPlays {
+  SmallMove whole_rack;
+  SmallMove partial;
+  bool has_whole_rack;
+  bool has_partial;
+} LaneBestPlays;
+
 typedef struct PathMoveLists {
   PathListSlot roots[2];
   PathListSlot slots[PATH_MOVE_LISTS_MAX_PATH];
@@ -76,6 +87,19 @@ typedef struct PathMoveLists {
   int length;
   // Scratch for the lane regeneration: list count after each lane.
   int lane_end[PATH_MOVE_LISTS_NUM_LANES];
+  // A fresh stamp for every push (and root seeding), so the path prefix that
+  // ends at a move is identified by that move's stamp: a prefix revisited
+  // through a new push gets a new one.
+  uint64_t stamps[PATH_MOVE_LISTS_MAX_PATH];
+  uint64_t root_stamp;
+  uint64_t next_stamp;
+  // Per-lane best plays shared by sibling leaves: valid at path length
+  // sibling_length below the prefix stamped sibling_stamp, for the lanes in
+  // sibling_valid.
+  LaneBestPlays sibling_lanes[PATH_MOVE_LISTS_NUM_LANES];
+  uint64_t sibling_valid;
+  uint64_t sibling_stamp;
+  int sibling_length;
 } PathMoveLists;
 
 PathMoveLists *path_move_lists_create(void);
@@ -116,21 +140,25 @@ path_move_lists_pending_lanes(const PathMoveLists *lists) {
 }
 
 // The single best play of the list moves_at would return, found without
-// materializing that list: the parent's carried-over lanes are scanned in
-// place (through the rack sub-multiset filter when the side's own previous
-// move placed tiles), and their best play is the incumbent that a
-// MOVE_RECORD_BEST_SMALL generation over the regenerated lanes' anchors is
-// shadow-pruned against (generate_best_small_move_in_lanes), so most of those
-// lanes' plays are never enumerated. A play ranks by score plus the go-out
-// bonus when it uses the whole rack, ties going to the larger tiny_move, as in
-// MOVE_RECORD_BEST_SMALL. `best_small_args` is the MOVE_RECORD_BEST_SMALL
-// generation a scratch path would run here (its best_small_out_bonus is the
-// go-out bonus; its move_list is scratch space). Returns false iff the side has
-// no play, where the caller plays the pass. Nothing is stored in the slot of
-// the current length, so a later call at length + 2 must not rely on it (use
-// moves_at where that happens); every shallower slot is read, under the same
-// discipline as moves_at.
-bool path_move_lists_best_play(const PathMoveLists *lists,
+// materializing that list. Sibling leaves (the same path but for the last
+// move) share every lane that last move leaves alone, along with the rack of
+// the side to move, so those lanes' best plays are found once per parent and
+// kept in sibling_lanes: lanes the side's own previous move also left alone
+// are scanned in place in its list two moves up (through the rack
+// sub-multiset filter when that move placed tiles), and the rest are
+// regenerated. Their best play is the incumbent that a MOVE_RECORD_BEST_SMALL
+// generation over the last move's lanes is shadow-pruned against
+// (generate_best_small_move_in_lanes), so most of those lanes' plays are never
+// enumerated. A play ranks by score plus the go-out bonus when it uses the
+// whole rack, ties going to the larger tiny_move, as in MOVE_RECORD_BEST_SMALL.
+// `best_small_args` is the MOVE_RECORD_BEST_SMALL generation a scratch path
+// would run here (its best_small_out_bonus is the go-out bonus; its move_list
+// is scratch space, large enough for every play of the regenerated lanes).
+// Returns false iff the side has no play, where the caller plays the pass.
+// Nothing is stored in the slot of the current length, so a later call at
+// length + 2 must not rely on it (use moves_at where that happens); every
+// shallower slot is read, under the same discipline as moves_at.
+bool path_move_lists_best_play(PathMoveLists *lists,
                                const MoveGenArgs *best_small_args,
                                SmallMove *out_best);
 
