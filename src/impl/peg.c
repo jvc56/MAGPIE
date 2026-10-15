@@ -1968,7 +1968,7 @@ static PegSharedPly *peg_split_opp_reply(const PegEvalCtx *ctx,
   }
   const Rack *opp_rack =
       player_get_rack(game_get_player(game, 1 - ctx->mover_idx));
-  MachineLetter letters[RACK_SIZE];
+  MachineLetter letters[RACK_SIZE] = {0};
   int n_letters = 0;
   for (int ml = 0; ml < ctx->ld_size; ml++) {
     for (int count = rack_get_letter(opp_rack, (MachineLetter)ml); count > 0;
