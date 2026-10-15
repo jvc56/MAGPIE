@@ -13,6 +13,7 @@
 #include "bai_utility_test.h"
 #include "benchmark_endgame_test.h"
 #include "benchmark_peg_test.h"
+#include "best_small_test.h"
 #include "bit_rack_test.h"
 #include "board_layout_default_test.h"
 #include "board_layout_super_test.h"
@@ -138,6 +139,7 @@ static TestEntry test_table[] = {
     {"vm", test_validated_move},
     {"shadow", test_shadow},
     {"movegen", test_move_gen},
+    {"bestsmall", test_best_small},
     {"eq", test_equity},
     {"eqadj", test_equity_adjustments},
     {"gameplay", test_gameplay},

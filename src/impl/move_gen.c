@@ -657,7 +657,13 @@ static inline void update_best_move_or_insert_into_movelist(
     if (tiles_played == gen->best_small_out_rack_size) {
       move_equity_or_score += gen->best_small_out_bonus;
     }
-    if (move_equity_or_score > gen->best_move_equity_or_score) {
+    // Equal values go to the larger tiny_move, so the winner does not depend
+    // on the order in which anchors are searched. A tie leaves the cutoff
+    // unchanged, and the shadow pruning is strict (bound < cutoff), so an
+    // equal-valued rival is never pruned.
+    if (move_equity_or_score > gen->best_move_equity_or_score ||
+        (move_equity_or_score == gen->best_move_equity_or_score &&
+         best_sm->tiny_move > gen->move_list->small_moves[0]->tiny_move)) {
       need_to_update_best_move_equity_or_score = true;
       gen->best_move_equity_or_score = move_equity_or_score;
       // Swap spare_small_move into small_moves[0].
