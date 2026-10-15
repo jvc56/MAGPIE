@@ -6,6 +6,7 @@
 #include "../src/compat/cmemfile.h"
 #include "../src/compat/cpath.h"
 #include "../src/compat/cterm.h"
+#include "../src/compat/ctime.h"
 #include "../src/util/fileproxy.h"
 #include "../src/util/io_util.h"
 #include "../src/util/string_util.h"
@@ -488,6 +489,24 @@ static void test_wide_glyphs(void) {
   remove_or_fail(compat_text_path);
 }
 
+// A nap lasts at least as long as asked by the monotonic clock, also for
+// lengths that are not whole milliseconds or clock ticks, where Windows would
+// otherwise wake early.
+static void test_nap_lasts_at_least_the_request(void) {
+  const double naps[] = {0.0004, 0.001, 0.0101, 0.0157, 0.0313, 0.05};
+  for (size_t nap_idx = 0; nap_idx < sizeof(naps) / sizeof(naps[0]);
+       nap_idx++) {
+    const int64_t started_at_ns = ctimer_monotonic_ns();
+    ctime_nap(naps[nap_idx]);
+    const int64_t napped_ns = ctimer_monotonic_ns() - started_at_ns;
+    assert(napped_ns >= (int64_t)(naps[nap_idx] * 1e9));
+  }
+  const int64_t started_at_ns = ctimer_monotonic_ns();
+  ctime_nap(0.0);
+  ctime_nap(-1.0);
+  assert(ctimer_monotonic_ns() - started_at_ns < 1000000000);
+}
+
 void test_compat(void) {
   test_binary_round_trip();
   test_text_line_endings();
@@ -501,4 +520,5 @@ void test_compat(void) {
   test_directory_listing();
   test_mapping();
   test_wide_glyphs();
+  test_nap_lasts_at_least_the_request();
 }
