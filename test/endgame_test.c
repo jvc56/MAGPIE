@@ -17,6 +17,7 @@
 #include "../src/impl/config.h"
 #include "../src/impl/endgame.h"
 #include "../src/impl/gameplay.h"
+#include "../src/impl/move_gen.h"
 #include "../src/str/endgame_string.h"
 #include "../src/str/game_string.h"
 #include "../src/str/move_string.h"
@@ -728,6 +729,43 @@ static void test_fixed_depth_stepping(void) {
       }
     }
   }
+}
+
+// Solves to a fixed depth on one thread under a movegen budget with the given
+// limit and returns the generations the solve charged to it.
+static uint64_t budgeted_fixed_depth_movegens(const char *cgp, int plies,
+                                              uint64_t budget_limit,
+                                              int *score) {
+  MovegenBudget budget;
+  movegen_budget_init(&budget, budget_limit);
+  MovegenBudget *previous = gen_set_movegen_budget(&budget);
+  uint32_t depth_mask;
+  int reported_depth;
+  *score =
+      solve_fixed_depth(cgp, plies, /*threads=*/1,
+                        /*with_callback=*/false, &depth_mask, &reported_depth);
+  assert(reported_depth == plies);
+  (void)gen_set_movegen_budget(previous);
+  return movegen_budget_get_spent(&budget);
+}
+
+// A movegen budget stops a solve at its last completed depth, as a clock does,
+// so a fixed-depth solve under one keeps every iteration and generates more
+// moves than a stepped solve. A budget whose limit is 0 can never stop the
+// solve and leaves it stepping by two.
+static void test_fixed_depth_budget_keeps_every_depth(void) {
+  const char *cgp =
+      "cgp 7F3QINS/7E3E2H/6ORBITED1O/3JAMBU2OM2R/1ROATE1L2FAV1T/"
+      "GI5ED1T1OPE/OD6R3WEN/EL5RUNTY2S/1E6N2U3/1Y5AKA1C3/ES1VAgUIsH1C3/"
+      "X2I7A3/I2G11/LOOING9/E2A11 ADLRSTZ/EIINPW 451/296 0 -lex CSW24";
+  int stepped_score;
+  int budgeted_score;
+  const uint64_t stepped_movegens = budgeted_fixed_depth_movegens(
+      cgp, /*plies=*/4, /*budget_limit=*/0, &stepped_score);
+  const uint64_t budgeted_movegens = budgeted_fixed_depth_movegens(
+      cgp, /*plies=*/4, /*budget_limit=*/UINT64_MAX, &budgeted_score);
+  assert(budgeted_score == stepped_score);
+  assert(budgeted_movegens > stepped_movegens);
 }
 
 // Regression for transposition-table bound handling at PV nodes in
@@ -2055,6 +2093,7 @@ void test_endgame(void) {
   test_ctx_reuse();
   test_exhausted_tree_stops_early();
   test_fixed_depth_stepping();
+  test_fixed_depth_budget_keeps_every_depth();
   test_solve_standard();
   test_incremental_movegen_identical();
   test_path_move_lists();
