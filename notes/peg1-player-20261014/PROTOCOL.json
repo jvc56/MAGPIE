@@ -52,7 +52,7 @@
   "source_value_net_test_c": "cec2fd6730d283660614cd6f7c5d8166e4faaf3f712072ce6cfcb329c8f54feb"
  },
  "exact_continuation": {
-  "description": "After the 1PEG pick is played with the actual last tile, one endgame_solve from the post-move position: 25 plies, 1 thread, no soft or hard time limit, one transposition table per process (fraction 0.03 of RAM for fresh set 2, 0.02 for the PEG and labelled runs) reused across solves, no two-ply TT. Mover final spread = (mover - opponent) - value if the opponent is on turn, + value if the mover is. proven = endgame_ctx_get_progress depth < 25; every solve so far is proven.",
+  "description": "After the 1PEG pick is played with the actual last tile, one endgame_solve from the post-move position: 25 plies, 1 thread, no soft or hard time limit, one transposition table per process (fraction 0.03 of RAM for fresh set 2, 0.02 for the PEG and labelled runs) reused across solves, no two-ply TT. Mover final spread = (mover - opponent) - value if the opponent is on turn, + value if the mover is. proven = endgame_ctx_get_progress depth < 25; all solves are proven except 3 depth-limited picks (see depth_limited).",
   "pass_handling": "A pass leaves the tile in the bag; the player then on turn plays MAGPIE's default PEG pick (peg_args_fill defaults: built-in stage schedule, nested lookahead caps 8/4/2, 1 thread, no time budget) until the bag is empty, then the exact solve.",
   "earlier_continuations_after_pass": "Greedy-seed scoring (vnt_peg1_finish): after a pass the opponent played static top-1 at its own 1PEG; the two-ply variant resumed once the bag was empty. peg1play/peg1games: candidates were placements only and no forced pass occurred, so they never continued after a pass.",
   "pick_codes": ">=0 static rank in the top-64 pool; -1 greedy seed over all moves (recomputed, must match the earlier run); -2 MAGPIE default PEG pick; -3 default PEG pick plus information-rule check",
@@ -68,7 +68,8 @@
     "picks": 6412,
     "workers": 8,
     "tt_fraction": 0.03,
-    "choosers": "static, fast, fastU, fastUm, cascade, cascadeU, cascadeUm, strong, strongU, strongUm, greedy top64, greedy all; picks deduplicated per board"
+    "choosers": "static, fast, fastU, fastUm, cascade, cascadeU, cascadeUm, strong, strongU, strongUm, greedy top64, greedy all; picks deduplicated per board",
+    "stopped": "547-board prefix complete (1,745 picks); later chunks not run"
    },
    "pegfull": {
     "boards_planned": 256,
@@ -76,7 +77,8 @@
     "picks": 512,
     "workers": 1,
     "tt_fraction": 0.02,
-    "note": "first 256 boards of the same fresh-set-2 order; static and default PEG pick"
+    "note": "first 256 boards of the same fresh-set-2 order; static and default PEG pick",
+    "stopped": "85 boards complete, paused"
    },
    "labeled": {
     "boards_planned": 512,
@@ -84,7 +86,8 @@
     "picks": 1092,
     "workers": 1,
     "tt_fraction": 0.02,
-    "choosers": "static, fast, strong, cascade, depth2 teacher margin-first and win-first"
+    "choosers": "static, fast, strong, cascade, depth2 teacher margin-first and win-first",
+    "stopped": "87 boards complete, paused"
    }
   },
   "hashes": {
@@ -94,6 +97,18 @@
    "source_now": "77f9baed3fc1ba4f8b8e309e060d0a57ad261805cfcb6d5b819edd0721d71a5a  source/test/value_net_test.c (adds only: write the CSV header when a resumed output file is empty)",
    "peg1exact_block": "6cc7c563e15210fd8fbf71d79ec9dc2023925406c15244724ec325d755f7795c  scripts/peg1exact_block.c"
   },
-  "pgo_check": "PGO and non-PGO builds gave identical values and proofs on 22/22 solves"
+  "pgo_check": "PGO and non-PGO builds gave identical values and proofs on 22/22 solves",
+  "depth_limited": {
+   "picks": [
+    "board 2562 pick 0: depth 11 of 25 completed after 16485 s, final -186",
+    "board 4328 pick 24: depth 11 of 25 completed after 45066 s, final 120",
+    "board 4328 pick 29: depth 9 of 25 completed after 10456 s, final 122"
+   ],
+   "method": "lldb read of worker 0 best_pv_value / completed_depth (scripts/eg_best.py, offsets scripts/eg_offsets.c). final = mover margin after the pick (-initial_spread) - best_pv_value. Rows with proven=1 in chunk-0034h/0041h were finished picks read from the processes' unflushed stdio buffers (scripts/eg_rows.py).",
+   "decision": "User chose (2026-10-15) not to wait for a 24 h per-solve cutoff; the deepest completed iterative-deepening value is used and the row is marked proven=0.",
+   "scripts": "exact/fresh2/DEPTH_LIMITED.json; scripts/eg_offsets.c (struct offsets), eg_peek.py (live progress), eg_best.py (completed-depth value), eg_rows.py (unflushed rows)"
+  },
+  "buffered_rows": "peg1exact flushes a board's rows only when all its picks finish. Finished picks of boards 2562 and 4328 were read from the processes' stdio buffers (chunk-0034h, chunk-0041h); the remaining picks of chunks 34 and 41 ran as side chunks (chunk-0034s2-s5, chunk-0041s2-s3). The analyzer keys rows by (root, code), so all files merge. Side runs reproduced 4328 picks 1 and 6 exactly.",
+  "run_conditions": "Solve and PEG timings were taken on a shared, oversubscribed machine (up to 14 CPU-bound processes on 10 cores) and are indicative only."
  }
 }
