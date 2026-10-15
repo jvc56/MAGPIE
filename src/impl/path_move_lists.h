@@ -93,13 +93,17 @@ typedef struct PathMoveLists {
   uint64_t stamps[PATH_MOVE_LISTS_MAX_PATH];
   uint64_t root_stamp;
   uint64_t next_stamp;
-  // Per-lane best plays shared by sibling leaves: valid at path length
-  // sibling_length below the prefix stamped sibling_stamp, for the lanes in
-  // sibling_valid.
-  LaneBestPlays sibling_lanes[PATH_MOVE_LISTS_NUM_LANES];
-  uint64_t sibling_valid;
-  uint64_t sibling_stamp;
-  int sibling_length;
+  // The stamp of the move that reached each slot's position when moves_at
+  // last built that slot (see path_move_lists_slot_is_current).
+  uint64_t slot_stamps[PATH_MOVE_LISTS_MAX_PATH];
+  // Per-lane best plays shared by sibling positions, one cache per path
+  // length (so a node and its children keep theirs): at length L they are
+  // valid below the prefix stamped sibling_stamp[L], for the lanes in
+  // sibling_valid[L].
+  LaneBestPlays sibling_lanes[PATH_MOVE_LISTS_MAX_PATH]
+                             [PATH_MOVE_LISTS_NUM_LANES];
+  uint64_t sibling_valid[PATH_MOVE_LISTS_MAX_PATH];
+  uint64_t sibling_stamp[PATH_MOVE_LISTS_MAX_PATH];
 } PathMoveLists;
 
 PathMoveLists *path_move_lists_create(void);
@@ -126,6 +130,15 @@ void path_move_lists_pop(PathMoveLists *lists);
 // call at the same or a shallower path length.
 int path_move_lists_moves_at(PathMoveLists *lists, const MoveGenArgs *args,
                              const SmallMove **out_moves);
+
+// Whether the slot of path length `length` (>= 1) holds the list of the
+// current path's position there: moves_at has built it since the move that
+// reached that position was pushed. A node that searched its children without
+// building its own list (best_play only) leaves it stale.
+static inline bool path_move_lists_slot_is_current(const PathMoveLists *lists,
+                                                   int length) {
+  return lists->slot_stamps[length] == lists->stamps[length - 1];
+}
 
 // The lanes path_move_lists_moves_at / path_move_lists_best_play would
 // regenerate at the current path position (length >= 1): the union of the last

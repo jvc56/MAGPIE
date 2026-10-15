@@ -58,6 +58,10 @@ enum {
   // 1024 nodes ≈ 10ms granularity — tighter response for PEG inner solves
   // where each scenario's endgame budget can be tens of ms.
   DEPTH_DEADLINE_CHECK_INTERVAL = 1024,
+  // Points added to a play that uses the whole rack when picking an interior
+  // node's first reply before its move list exists, so going out ranks first,
+  // as GOING_OUT_BF makes the move ordering rank it.
+  FIRST_REPLY_GOING_OUT_PRIORITY = 100000,
   // Bit flags for move estimates. These large numbers will force these
   // estimated values to sort first.
   LARGE_VALUE = 1 << 30, // for alpha-beta pruning
@@ -2176,8 +2180,15 @@ static int32_t negamax_greedy_leaf_playout(EndgameCtxWorker *worker,
   }
 
   // Only a stuck playout derives its lists, so only it extends the path.
-  // (opp_stuck_frac is fixed for the whole playout.)
-  const bool follow_path = use_path_lists && opp_stuck_frac > 0.0F;
+  // (opp_stuck_frac is fixed for the whole playout.) Its second step derives
+  // from the leaf's parent's list, which a parent that cut off on its first
+  // reply never built; the playout then generates from scratch, which gives
+  // the same plays.
+  const bool follow_path =
+      use_path_lists && opp_stuck_frac > 0.0F &&
+      (worker->path_lists->length < 2 ||
+       path_move_lists_slot_is_current(worker->path_lists,
+                                       worker->path_lists->length - 1));
 
   bool playout_interrupted = false;
   while (game_get_game_end_reason(worker->game_copy) == GAME_END_REASON_NONE &&
@@ -2469,6 +2480,22 @@ static void negamax_tt_store(const EndgameCtxWorker *worker, uint64_t node_key,
 // Stuck-tile detection, move generation, logging, and estimate assignment
 // for non-root nodes (move ordering itself is done lazily by the caller).
 // Updates *opp_stuck_frac. Returns move count, or -1 if interrupted.
+// Brings an interior node's cross-sets up to date from the move that reached
+// it, if that move left them stale.
+static void update_node_cross_sets(EndgameCtxWorker *worker, int depth) {
+  Board *board = game_get_board(worker->game_copy);
+  if (!board_get_cross_sets_valid(board)) {
+    int undo_index = worker->solver->requested_plies - depth - 1;
+    if (undo_index >= 0) {
+      MoveUndo *parent_undo = &worker->move_undos[undo_index];
+      if (parent_undo->move_tiles_length > 0) {
+        update_cross_set_for_move_from_undo(parent_undo, worker->game_copy);
+      }
+    }
+    board_set_cross_sets_valid(board, true);
+  }
+}
+
 static int negamax_generate_and_estimate_moves(EndgameCtxWorker *worker,
                                                int depth, uint64_t tt_move,
                                                float *opp_stuck_frac) {
@@ -2480,19 +2507,7 @@ static int negamax_generate_and_estimate_moves(EndgameCtxWorker *worker,
   // generate_stm_plays; doing it here first means generate_stm_plays will
   // find cross-sets already valid and skip its own update. Net cost is
   // identical — one update per node either way.
-  {
-    Board *board = game_get_board(worker->game_copy);
-    if (!board_get_cross_sets_valid(board)) {
-      int undo_index = worker->solver->requested_plies - depth - 1;
-      if (undo_index >= 0) {
-        MoveUndo *parent_undo = &worker->move_undos[undo_index];
-        if (parent_undo->move_tiles_length > 0) {
-          update_cross_set_for_move_from_undo(parent_undo, worker->game_copy);
-        }
-      }
-      board_set_cross_sets_valid(board, true);
-    }
-  }
+  update_node_cross_sets(worker, depth);
   if (worker->solver->use_heuristics) {
     // Generate first: with the opponent on turn, the list just generated is
     // their complete play list, so its tile types give the stuck fraction
@@ -2749,6 +2764,59 @@ static uint64_t play_small_move_and_hash(EndgameCtxWorker *worker,
   return child_key;
 }
 
+// A node one ply above the leaves nearly always cuts off on its first move,
+// yet building its move list (and estimating every move) costs far more than
+// searching that move. So it first tries a likely refutation found without the
+// list: with no stuck tiles, the best play by score, going out first, as the
+// move ordering ranks going out first. The incremental lists find it
+// (path_move_lists_best_play), or without them a MOVE_RECORD_BEST_SMALL
+// generation does; both pick the same play, so the search does not depend on
+// which ran. Only if that move does not cut off is the list built. (The node's
+// own list slot then stays unbuilt, which is safe only because its children
+// are leaves: nothing below derives from it.) Picks that move and
+// returns true, or returns false when the node should build its list first: a
+// stuck opponent (the ordering then weighs conservation), an interrupt, or no
+// play at all.
+static bool pick_first_reply_before_list(EndgameCtxWorker *worker, int depth,
+                                         float *opp_stuck_frac,
+                                         SmallMove *first_reply) {
+  update_node_cross_sets(worker, depth);
+  if (worker->solver->use_heuristics) {
+    const int opp_idx = 1 - worker->solver->solving_player;
+    const float stuck_frac = compute_opp_stuck_fraction(
+        worker->game_copy, worker->move_list,
+        solver_get_pruned_kwg(worker->solver, opp_idx), opp_idx, NULL,
+        worker->solver, NULL, 0);
+    if (stuck_frac > 0.0F || iterative_deepening_should_stop(worker->solver)) {
+      return false;
+    }
+  }
+  *opp_stuck_frac = 0.0F;
+  const int stm_idx = game_get_player_on_turn_index(worker->game_copy);
+  const MoveGenArgs best_args = {
+      .best_small_out_bonus = int_to_equity(FIRST_REPLY_GOING_OUT_PRIORITY),
+      .game = worker->game_copy,
+      .move_list = worker->move_list,
+      .move_record_type = MOVE_RECORD_BEST_SMALL,
+      .move_sort_type = MOVE_SORT_SCORE,
+      .override_kwg = solver_get_pruned_kwg(worker->solver, stm_idx),
+      .eq_margin_movegen = 0,
+      .target_equity = EQUITY_MAX_VALUE,
+      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+  };
+  if (worker->path_lists != NULL) {
+    return path_move_lists_best_play(worker->path_lists, &best_args,
+                                     first_reply);
+  }
+  generate_moves(&best_args);
+  const SmallMove *best = worker->move_list->small_moves[0];
+  if (small_move_is_pass(best)) {
+    return false;
+  }
+  *first_reply = *best;
+  return true;
+}
+
 int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
                        int32_t alpha, int32_t beta, PVLine *pv, bool pv_node,
                        bool exclusive_p, float opp_stuck_frac) {
@@ -2883,6 +2951,58 @@ int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
   child_pv.num_moves = 0;
   child_pv.negamax_depth = 0;
 
+  // One ply above the leaves, try the likely refutation before building the
+  // move list (see pick_first_reply_before_list). Only where the ordering
+  // has nothing better to offer: no hash move, no thread jitter, no early
+  // pass, more than one tile (the single-tile shortcuts need the list), and
+  // not under thread 0's first root move, whose ply-2 progress counts the
+  // list.
+  bool first_reply_searched = false;
+  SmallMove first_reply;
+  int32_t first_reply_value = 0;
+  if (depth == 1 && worker->current_iterative_deepening_depth != depth &&
+      tt_move == INVALID_TINY_MOVE &&
+      (worker->solver->threads <= 1 || worker->ordinal == 0) &&
+      game_get_consecutive_scoreless_turns(worker->game_copy) == 0 &&
+      rack_get_total_letters(player_get_rack(player_on_turn)) >= 2 &&
+      !(worker->current_iterative_deepening_depth - 1 == depth &&
+        worker->ordinal == 0 && worker->in_first_root_move) &&
+      pick_first_reply_before_list(worker, depth, &opp_stuck_frac,
+                                   &first_reply)) {
+    const int undo_index = worker->solver->requested_plies - depth;
+    atomic_store_explicit(&worker->current_line[undo_index],
+                          first_reply.tiny_move, memory_order_relaxed);
+    atomic_store_explicit(&worker->current_line_len, undo_index + 1,
+                          memory_order_release);
+    const uint64_t child_key = play_small_move_and_hash(
+        worker, &first_reply, node_key, &worker->move_undos[undo_index]);
+    const int32_t value =
+        abdada_negamax(worker, child_key, depth - 1, -beta, -alpha, &child_pv,
+                       pv_node, false, opp_stuck_frac);
+    unplay_move_incremental(worker->game_copy, &worker->move_undos[undo_index]);
+    if (worker->path_lists != NULL) {
+      path_move_lists_pop(worker->path_lists);
+    }
+    atomic_store_explicit(&worker->current_line_len, undo_index,
+                          memory_order_release);
+    if (value == ABDADA_INTERRUPTED) {
+      return ABDADA_INTERRUPTED;
+    }
+    first_reply_value = -value;
+    first_reply_searched = true;
+    if (first_reply_value >= beta) {
+      pvline_update(pv, &child_pv, &first_reply,
+                    first_reply_value - worker->solver->initial_spread);
+      pv->negamax_depth = child_pv.negamax_depth + 1;
+      if (worker->solver->transposition_table_optim) {
+        negamax_tt_store(worker, node_key, depth, first_reply_value, alpha_orig,
+                         beta, on_turn_spread, first_reply.tiny_move,
+                         worker->impure_events == impure_at_entry);
+      }
+      return first_reply_value;
+    }
+  }
+
   int nplays;
   bool arena_alloced = false;
   if (worker->current_iterative_deepening_depth != depth) {
@@ -2988,6 +3108,17 @@ int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
 
   int32_t best_value = -LARGE_VALUE;
   uint64_t best_tiny_move = INVALID_TINY_MOVE;
+  if (first_reply_searched) {
+    // The first reply did not cut off: it stands as the best so far, and the
+    // list's copy of it is skipped below.
+    best_value = first_reply_value;
+    best_tiny_move = first_reply.tiny_move;
+    pvline_update(pv, &child_pv, &first_reply,
+                  best_value - worker->solver->initial_spread);
+    pv->negamax_depth = child_pv.negamax_depth + 1;
+    alpha = MAX(alpha, best_value);
+    pvline_clear(&child_pv);
+  }
   size_t arena_offset =
       worker->small_move_arena->size - (sizeof(SmallMove) * nplays);
 
@@ -3131,6 +3262,10 @@ int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
       size_t element_offset = arena_offset + idx * sizeof(SmallMove);
       SmallMove *small_move =
           (SmallMove *)(worker->small_move_arena->memory + element_offset);
+      if (first_reply_searched &&
+          small_move->tiny_move == first_reply.tiny_move) {
+        continue;
+      }
 
       // Track whether thread 0 is inside root move #1's subtree
       if (is_root && worker->ordinal == 0 && pass == 0) {
@@ -3199,8 +3334,8 @@ int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
             break;
           }
         }
-      } else if (idx == 0 || !worker->solver->negascout_optim ||
-                 exact_all_root_moves) {
+      } else if ((idx == 0 && !first_reply_searched) ||
+                 !worker->solver->negascout_optim || exact_all_root_moves) {
         value =
             abdada_negamax(worker, child_key, depth - 1, -beta, -alpha,
                            &child_pv, pv_node, child_exclusive, opp_stuck_frac);

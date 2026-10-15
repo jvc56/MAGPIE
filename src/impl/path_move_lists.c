@@ -284,6 +284,7 @@ int path_move_lists_moves_at(PathMoveLists *lists, const MoveGenArgs *args,
   assert(length >= 1);
   // The parent is the same side's list two moves up; at lengths 1 and 2 that
   // is a root list.
+  assert(length <= 2 || path_move_lists_slot_is_current(lists, length - 2));
   const PathListSlot *parent =
       length <= 2 ? &lists->roots[2 - length] : &lists->slots[length - 2];
   uint64_t touched = lists->masks[length - 1];
@@ -305,6 +306,7 @@ int path_move_lists_moves_at(PathMoveLists *lists, const MoveGenArgs *args,
   PathListSlot *out = &lists->slots[length];
   slot_rebuild(out, parent, touched, filter, &avail, args->move_list,
                lists->lane_end);
+  lists->slot_stamps[length] = lists->stamps[length - 1];
   *out_moves = out->moves;
   return out->count;
 }
@@ -372,8 +374,8 @@ static void fill_sibling_lanes(PathMoveLists *lists,
   const uint64_t regenerated = missing & previous_move;
   for (int lane = 0; lane < PATH_MOVE_LISTS_NUM_LANES; lane++) {
     if (((missing >> lane) & 1) != 0) {
-      lists->sibling_lanes[lane].has_whole_rack = false;
-      lists->sibling_lanes[lane].has_partial = false;
+      lists->sibling_lanes[length][lane].has_whole_rack = false;
+      lists->sibling_lanes[length][lane].has_partial = false;
     }
   }
   if (carried != 0) {
@@ -390,7 +392,7 @@ static void fill_sibling_lanes(PathMoveLists *lists,
       if (((carried >> lane) & 1) == 0) {
         continue;
       }
-      LaneBestPlays *best = &lists->sibling_lanes[lane];
+      LaneBestPlays *best = &lists->sibling_lanes[length][lane];
       for (int move_idx = parent->lane_begin[lane];
            move_idx < parent->lane_begin[lane + 1]; move_idx++) {
         if (filter && !counts_subset(&parent->used[move_idx], &avail)) {
@@ -411,7 +413,7 @@ static void fill_sibling_lanes(PathMoveLists *lists,
       const int end = lists->lane_end[lane];
       if (((regenerated >> lane) & 1) != 0) {
         for (int move_idx = begin; move_idx < end; move_idx++) {
-          lane_best_consider(&lists->sibling_lanes[lane],
+          lane_best_consider(&lists->sibling_lanes[length][lane],
                              move_list->small_moves[move_idx],
                              side_to_move_tiles);
         }
@@ -426,6 +428,7 @@ bool path_move_lists_best_play(PathMoveLists *lists,
                                SmallMove *out_best) {
   const int length = lists->length;
   assert(length >= 1);
+  assert(length <= 2 || path_move_lists_slot_is_current(lists, length - 2));
   assert(best_small_args->move_record_type == MOVE_RECORD_BEST_SMALL);
   const Game *game = best_small_args->game;
   const int side_to_move_tiles = rack_get_total_letters(player_get_rack(
@@ -434,17 +437,16 @@ bool path_move_lists_best_play(PathMoveLists *lists,
   // previous move (or at the root).
   const uint64_t prefix_stamp =
       length >= 2 ? lists->stamps[length - 2] : lists->root_stamp;
-  if (lists->sibling_length != length || lists->sibling_stamp != prefix_stamp) {
-    lists->sibling_length = length;
-    lists->sibling_stamp = prefix_stamp;
-    lists->sibling_valid = 0;
+  if (lists->sibling_stamp[length] != prefix_stamp) {
+    lists->sibling_stamp[length] = prefix_stamp;
+    lists->sibling_valid[length] = 0;
   }
   const uint64_t own_lanes = lists->masks[length - 1];
   const uint64_t shared_lanes = all_lanes_mask() & ~own_lanes;
-  const uint64_t missing = shared_lanes & ~lists->sibling_valid;
+  const uint64_t missing = shared_lanes & ~lists->sibling_valid[length];
   if (missing != 0) {
     fill_sibling_lanes(lists, best_small_args, missing, side_to_move_tiles);
-    lists->sibling_valid |= missing;
+    lists->sibling_valid[length] |= missing;
   }
 
   BestScan scan = {
@@ -458,7 +460,7 @@ bool path_move_lists_best_play(PathMoveLists *lists,
     if (((shared_lanes >> lane) & 1) == 0) {
       continue;
     }
-    const LaneBestPlays *best = &lists->sibling_lanes[lane];
+    const LaneBestPlays *best = &lists->sibling_lanes[length][lane];
     if (best->has_whole_rack) {
       best_scan_consider(&scan, &best->whole_rack);
     }
