@@ -47,7 +47,7 @@ Follow these for the whole run.
 |---|---|
 | `SOURCE` | `release` or `ci` |
 | `RELEASE_TAG` | for `release`, e.g. `v0.1.3` |
-| `CI_RUN_ID` | for `ci`, e.g. `38651046488` (artifacts are kept 7 days) |
+| `CI_RUN_ID` | for `ci`, e.g. `38668791241` (artifacts are kept 7 days) |
 | `MAGPIE_VERSION` | `0.1.3` |
 | `SEND_TO` | where the volunteer sends the zip |
 
@@ -58,8 +58,12 @@ Set the parameters from the table above, then the folders:
 ```powershell
 $SOURCE = 'release'            # or 'ci'
 $RELEASE_TAG = 'v0.1.3'        # for release
-$CI_RUN_ID = '38651046488'     # for ci
+$CI_RUN_ID = '38668791241'     # for ci
 $MAGPIE_VERSION = '0.1.3'
+
+# Some agents' shells set this, which stops cmd from finding magpie.exe in the
+# current folder. This clears it for this shell only.
+Remove-Item Env:NoDefaultCurrentDirectoryInExePath -ErrorAction SilentlyContinue
 
 $W = Join-Path $HOME 'magpie-windows-check'   # everything happens in here
 $R = Join-Path $W 'report'                    # everything to send goes in here
@@ -133,7 +137,7 @@ Invoke-WebRequest "$base/$exe" -OutFile (Join-Path $dist $exe)
 Invoke-WebRequest "$base/$exe.sha256" -OutFile (Join-Path $dist "$exe.sha256")
 $expected = ((Get-Content (Join-Path $dist "$exe.sha256")) -split '\s+')[0].ToLower()
 $actual = (Get-FileHash (Join-Path $dist $exe) -Algorithm SHA256).Hash.ToLower()
-"expected $expected`nactual   $actual`nmatch    $($expected -eq $actual)" |
+"expected $expected`nactual   $actual`nmatch    $([bool]$expected -and $expected -eq $actual)" |
   Set-Content -Encoding utf8 (Join-Path $R '02-download-hash.txt')
 Copy-Item (Join-Path $dist $exe) (Join-Path $dist 'magpie.exe')
 ```
@@ -152,7 +156,7 @@ into `$W\dist`.
 $artifact = if ($Name -eq 'arm64') { 'windows-aarch64' } else { 'windows-x86_64' }
 gh run download $CI_RUN_ID -R jvc56/MAGPIE -n $artifact -D (Join-Path $W 'dist')
 Get-FileHash (Join-Path $W 'dist\*.exe') -Algorithm SHA256 |
-  Format-Table -AutoSize | Out-String |
+  Format-Table -AutoSize | Out-String -Width 300 |
   Set-Content -Encoding utf8 (Join-Path $R '02-download-hash.txt')
 ```
 
@@ -375,8 +379,9 @@ given.
    and type:
    - `cgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 AEINRST/ 0/0 0 -lex CSW24`, then
      `gen`. Does the board draw cleanly, with straight lines, coloured premium squares,
-     and no stray characters such as `←[0m` or `â”`? Ask for a screenshot
-     (`console-board.png`).
+     and no stray characters such as `←[0m`, `â”` or empty boxes? In the console window
+     the column letters should be plain `A B C … O` and the turn marker `>`. Windows
+     Terminal shows wider letters and `➤`. Ask for a screenshot (`console-board.png`).
    - Press the up-arrow key. Does the previous command come back, and can it be edited
      with the left and right arrows?
    - `autoplay games 100000000 -lex CSW21 -threads 2`, wait a few seconds, then type

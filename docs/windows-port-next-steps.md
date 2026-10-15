@@ -1,8 +1,11 @@
 # Windows port: next steps once CI passes
 
-What to do once the `ci` run for #814 (`windows-port` at `0a3b953e`) passes. The run is
-https://github.com/jvc56/MAGPIE/actions/runs/38651046488. Any step that uses CI time,
-changes what is published, or rewrites pushed history waits for the maintainer's go-ahead.
+What to do once the `ci` run for #814 passes. It passed at `dc7972ee`:
+https://github.com/jvc56/MAGPIE/actions/runs/38668791241. The run before it, at
+`0a3b953e` (https://github.com/jvc56/MAGPIE/actions/runs/38651046488), failed only in
+`windows-native-tests`, on writing through a symlink whose target didn't exist yet, which
+`dc7972ee` fixes. Any step that uses CI time, changes what is published, or rewrites pushed
+history waits for the maintainer's go-ahead.
 
 ## 1. Check the passes are real
 
@@ -72,6 +75,38 @@ A manual run builds and tests but does not publish.
 - **The README screenshot.** The plan wants a screenshot of the SmartScreen step for the
   README's Windows section, which needs a real Windows machine.
 
+### What the first volunteer check found (15 October)
+
+One volunteer ran the runbook on Windows 10 22H2 (build 19045), x64, i7-1165G7 (4 cores,
+8 threads), 7.7 GB of memory, Windows Defender. They tested `0a3b953e` (run `38651046488`),
+then re-ran steps 2–4 on `dc7972ee` (run `38668791241`).
+
+- **Passed:** download, `data fetch` (with its byte checks), an ordinary session,
+  autoplay determinism (443300 turns in every run, and a CSW21 wordmap byte-identical to
+  Linux's), PEG, `stop` from a pipe, a non-ASCII folder, and the `compat` contract tests.
+- **Speed:** 20,000-game autoplay took about 22 s on 1 thread and 11 s on 4. A 4-core
+  laptop can't settle the 8-thread question in step 3.
+- **PEG memory:**
+
+  | Threads | Peak private | Peak working set |
+  |---|---|---|
+  | 1 | 469 MB | 406 MB |
+  | 4 | 1923 MB | 1358 MB |
+
+  The working set grows by about 317 MB per added thread, close to Linux's 330 MB. The
+  committed (private) memory grows by about 485 MB per thread, so Windows does seem to
+  commit memory up front. That is still for the runner measurement in step 3 to settle.
+- **Console:** on Windows 10's console window (conhost, Consolas), the default board was
+  unreadable: the fullwidth column letters, the "alt" squares and the `➤` marker drew as
+  missing-glyph boxes. `boardtiles primary`, `boardcolumns ascii` and
+  `onturnmarker ascii` fixed it. MAGPIE now picks those itself in a console window outside
+  Windows Terminal and VS Code (see `cterm_shows_wide_glyphs`).
+- **Double-click:** the banner, the offer to download data, and **Press Enter to close
+  this window.** all behaved. Line editing (arrow keys) and `stop` worked.
+- **Not covered:** the SmartScreen prompt. Twice the extracted `.exe` lost the zip's
+  Mark of the Web, so Windows never checked it. Windows Terminal (not installed) and a
+  non-ASCII user name were not covered either.
+
 ## 6. Follow-ups left out of this PR
 
 - **Precache without a temporary file.** On Windows, files precached in memory are
@@ -82,6 +117,11 @@ A manual run builds and tests but does not publish.
 - **More than 64 CPUs.** On Windows, using more than 64 logical CPUs needs threads spread
   across processor groups.
 - **Native Windows threads.** Only if the measurements in step 3 show they are needed.
+- **Font-aware board glyphs.** The console check guesses from the terminal, not the font:
+  a console window with a font that has fullwidth forms (MS Gothic, say, on Japanese
+  Windows) gets the narrow glyphs too. And on Windows 11, a program that Windows hands to
+  Windows Terminal as the default terminal isn't given `WT_SESSION`, so it gets them
+  as well. Both still draw a readable board.
 
 ## 7. Clean up the CI queue
 

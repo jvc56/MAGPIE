@@ -48,8 +48,9 @@ Type each of these at the `magpie>` prompt and note anything odd.
 1. `set -lex CSW24`. The first time, it should say it is building a wordmap, then finish
    within a minute.
 2. `cgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 AEINRST/ 0/0 0`
-   - Does the board draw with clean lines and columns, no stray symbols such as `←[0m`
-     or `â”`?
+   - Does the board draw with clean lines and columns, no stray symbols such as `←[0m`,
+     `â”` or empty boxes? In the plain console window the column letters are `A B C … O`
+     and the turn marker is `>`. Windows Terminal shows wider letters and `➤`.
    - Are the premium squares coloured?
 3. `gen`: a list of moves should appear.
 4. `sim -plies 2 -it 1000`: it should finish and show win percentages.
