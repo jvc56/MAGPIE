@@ -8,6 +8,13 @@
 // than a file, a pipe or the null device.
 bool cterm_is_terminal(FILE *stream);
 
+// Whether `stream` can show the board's wide glyphs: fullwidth column letters
+// and squares, and the on-turn arrowhead. False only for a Windows console
+// window (conhost) outside Windows Terminal and VS Code, since its default
+// fonts lack them and it has no font fallback. True for files, pipes and every
+// other terminal.
+bool cterm_shows_wide_glyphs(FILE *stream);
+
 // Prepares the console for MAGPIE's output, once, at startup. On Windows that
 // means UTF-8 in and out (tiles and board glyphs are UTF-8) and VT escape
 // sequences (the board's colors), restoring the console's code pages when

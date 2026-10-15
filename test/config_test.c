@@ -20,6 +20,7 @@
 #include "../src/ent/validated_move.h"
 #include "../src/ent/wmp.h"
 #include "../src/impl/config.h"
+#include "../src/str/game_string.h"
 #include "../src/str/move_string.h"
 #include "../src/util/io_util.h"
 #include "../src/util/string_util.h"
@@ -3083,8 +3084,23 @@ void test_config_sim_with_inference_results_saved_to_game_event(void) {
   config_destroy(config);
 }
 
+// Narrow glyphs replace only the ones a Windows console font lacks.
+void test_narrow_glyphs(void) {
+  GameStringOptions *gso = game_string_options_create_pretty();
+  game_string_options_use_narrow_glyphs(gso);
+  assert(gso->board_tile_glyphs == GAME_STRING_BOARD_TILE_GLYPHS_PRIMARY);
+  assert(gso->board_column_label == GAME_STRING_BOARD_COLUMN_LABEL_ASCII);
+  assert(gso->on_turn_marker == GAME_STRING_ON_TURN_MARKER_ASCII);
+  assert(gso->board_color == GAME_STRING_BOARD_COLOR_TRUECOLOR);
+  assert(gso->board_border == GAME_STRING_BOARD_BORDER_BOX_DRAWING);
+  assert(gso->on_turn_color == GAME_STRING_ON_TURN_COLOR_ANSI_GREEN);
+  assert(gso->on_turn_score_style == GAME_STRING_ON_TURN_SCORE_BOLD);
+  game_string_options_destroy(gso);
+}
+
 void test_config(void) {
   test_game_display();
+  test_narrow_glyphs();
   test_trie();
   test_config_anno();
   test_config_anno_challenge();

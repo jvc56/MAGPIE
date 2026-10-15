@@ -5,6 +5,7 @@
 #include "../src/compat/cmap.h"
 #include "../src/compat/cmemfile.h"
 #include "../src/compat/cpath.h"
+#include "../src/compat/cterm.h"
 #include "../src/util/fileproxy.h"
 #include "../src/util/io_util.h"
 #include "../src/util/string_util.h"
@@ -474,6 +475,19 @@ static void test_mapping(void) {
   fclose_or_die(stream);
 }
 
+// Output saved to a file keeps the board's wide glyphs on every OS; only a
+// Windows console window gets the narrow ones.
+static void test_wide_glyphs(void) {
+  ErrorStack *error_stack = error_stack_create();
+  FILE *stream = fopen_safe(compat_text_path, "wb", error_stack);
+  assert(error_stack_is_empty(error_stack));
+  error_stack_destroy(error_stack);
+  assert(!cterm_is_terminal(stream));
+  assert(cterm_shows_wide_glyphs(stream));
+  fclose_or_die(stream);
+  remove_or_fail(compat_text_path);
+}
+
 void test_compat(void) {
   test_binary_round_trip();
   test_text_line_endings();
@@ -486,4 +500,5 @@ void test_compat(void) {
   test_path_lists();
   test_directory_listing();
   test_mapping();
+  test_wide_glyphs();
 }

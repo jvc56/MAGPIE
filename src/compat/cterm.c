@@ -97,3 +97,20 @@ bool cterm_is_terminal(FILE *stream) {
   return isatty(fileno(stream)) != 0;
 #endif
 }
+
+bool cterm_shows_wide_glyphs(FILE *stream) {
+#if defined(_WIN32)
+  if (!cterm_is_terminal(stream)) {
+    return true;
+  }
+  // Windows Terminal and VS Code set these for the programs they start, and
+  // both fall back to other fonts for characters the main one lacks.
+  const char *windows_terminal = getenv("WT_SESSION");
+  const char *term_program = getenv("TERM_PROGRAM");
+  return (windows_terminal != NULL && windows_terminal[0] != '\0') ||
+         (term_program != NULL && term_program[0] != '\0');
+#else
+  (void)stream;
+  return true;
+#endif
+}

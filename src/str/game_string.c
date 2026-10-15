@@ -611,6 +611,18 @@ GameStringOptions *game_string_options_create_pretty(void) {
   return gso;
 }
 
+void game_string_options_use_narrow_glyphs(GameStringOptions *gso) {
+  gso->board_tile_glyphs = GAME_STRING_BOARD_TILE_GLYPHS_PRIMARY;
+  gso->board_column_label = GAME_STRING_BOARD_COLUMN_LABEL_ASCII;
+  gso->on_turn_marker = GAME_STRING_ON_TURN_MARKER_ASCII;
+}
+
+void game_string_options_fit_output(GameStringOptions *gso) {
+  if (!cterm_shows_wide_glyphs(get_stream_out())) {
+    game_string_options_use_narrow_glyphs(gso);
+  }
+}
+
 GameStringOptions *game_string_options_create(
     game_string_board_color_t board_color,
     game_string_board_tile_glyphs_t board_tile_glyphs,

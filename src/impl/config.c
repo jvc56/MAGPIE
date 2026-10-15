@@ -12382,6 +12382,7 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
         GAME_STRING_ON_TURN_MARKER_ARROWHEAD;
     config->game_string_options->on_turn_color =
         GAME_STRING_ON_TURN_COLOR_ANSI_GREEN;
+    game_string_options_fit_output(config->game_string_options);
   }
 
   const char *write_buffer_size_str =
@@ -14467,6 +14468,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->conversion_results = conversion_results_create();
   config->tt_fraction_of_mem = DEFAULT_TT_FRACTION;
   config->game_string_options = game_string_options_create_pretty();
+  game_string_options_fit_output(config->game_string_options);
   config->gcg_result = (GetGCGResult){0};
 
   autoplay_results_set_players_data(config->autoplay_results,
