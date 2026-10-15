@@ -34,6 +34,17 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+enum {
+  // test_fixed_depth_stepping: four and five plies cover both parities.
+  FIXED_DEPTH_MIN_PLIES = 4,
+  FIXED_DEPTH_MAX_PLIES = 5,
+  FIXED_DEPTH_THREADS = 4,
+};
+
+// Plenty for the small solves of the fixed-depth tests, and far cheaper to
+// allocate per solve than the default share of memory.
+#define FIXED_DEPTH_TT_FRACTION_OF_MEM 0.002
+
 // Helper: append [Px wins by Y] / [Tie] based on spread delta
 static void append_outcome(StringBuilder *sb, const Game *game,
                            int32_t spread_delta) {
@@ -651,13 +662,14 @@ static void record_depth_mask_callback(int depth, int32_t value,
   *(uint32_t *)user_data |= 1U << depth;
 }
 
-// Solves to a fixed depth. With a callback registered the solver must report
-// every depth; without one it may skip iterations of the other parity.
-static int solve_fixed_depth(const char *cgp, int plies, int threads,
-                             bool with_callback, uint32_t *depth_mask,
-                             int *reported_depth) {
-  Config *config = config_create_or_die("set -s1 score -s2 score");
-  load_and_exec_config_or_die(config, cgp);
+// Solves the position loaded in `config` to `plies` with a small transposition
+// table, so repeated solves do not each allocate the default share of memory.
+// `budget` (or none, when NULL) is the movegen budget the solve runs under, and
+// `with_callback` registers a per-ply callback that records the depths the
+// solve reports.
+static int solve_fixed_depth(Config *config, int plies, int threads,
+                             MovegenBudget *budget, bool with_callback,
+                             uint32_t *depth_mask, uint64_t *nodes) {
   EndgameResults *endgame_results = config_get_endgame_results(config);
   ErrorStack *error_stack = error_stack_create();
   EndgameCtx *endgame_ctx = NULL;
@@ -665,7 +677,7 @@ static int solve_fixed_depth(const char *cgp, int plies, int threads,
   endgame_args.thread_control = config_get_thread_control(config);
   endgame_args.game = config_get_game(config);
   endgame_args.plies = plies;
-  endgame_args.tt_fraction_of_mem = config_get_tt_fraction_of_mem(config);
+  endgame_args.tt_fraction_of_mem = FIXED_DEPTH_TT_FRACTION_OF_MEM;
   endgame_args.initial_small_move_arena_size =
       DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
   endgame_args.num_threads = threads;
@@ -679,73 +691,84 @@ static int solve_fixed_depth(const char *cgp, int plies, int threads,
   }
   endgame_args.seed = 42;
   *depth_mask = 0;
+  MovegenBudget *previous_budget = gen_set_movegen_budget(budget);
   endgame_solve(&endgame_ctx, &endgame_args, endgame_results, error_stack);
+  (void)gen_set_movegen_budget(previous_budget);
   assert(error_stack_is_empty(error_stack));
   const int score =
       endgame_results_get_pvline(endgame_results, ENDGAME_RESULT_BEST)->score;
-  *reported_depth =
-      endgame_results_get_depth(endgame_results, ENDGAME_RESULT_BEST);
+  assert(endgame_results_get_depth(endgame_results, ENDGAME_RESULT_BEST) ==
+         plies);
+  *nodes = endgame_ctx_get_nodes_searched(endgame_ctx);
   endgame_ctx_destroy(endgame_ctx);
   error_stack_destroy(error_stack);
-  config_destroy(config);
   return score;
 }
 
-// A fixed-depth solve with no callback steps by two from its target depth; it
-// must return the same score and report the target depth, and a solve with a
-// single-thread solve with a per-ply callback must still visit every depth.
+// A fixed-depth solve with no clock, budget or callback steps by two from its
+// target depth (1, 2, 4 for four plies; 1, 3, 5 for five). At one thread it
+// must return the same score as plain iterative deepening, which a movegen
+// budget too large to run out forces, while searching fewer nodes. A solve
+// with a per-ply callback must still report every depth, and a four-thread
+// stepped solve, whose helpers start deeper, must return the same score.
 static void test_fixed_depth_stepping(void) {
   const char *cgps[] = {
       "cgp "
       "9A1PIXY/9S1L3/2ToWNLETS1O3/9U1DA1R/3GERANIAL1U1I/9g2T1C/8WE2OBI/"
       "6EMU4ON/6AID3GO1/5HUN4ET1/4ZA1T4ME1/1Q1FAKEY3JOES/FIVE1E5IT1C/"
       "5SPORRAN2A/6ORE2N2D BGIV/DEHILOR 384/389 0 -lex NWL20",
-      "cgp 7F3QINS/7E3E2H/6ORBITED1O/3JAMBU2OM2R/1ROATE1L2FAV1T/"
-      "GI5ED1T1OPE/OD6R3WEN/EL5RUNTY2S/1E6N2U3/1Y5AKA1C3/ES1VAgUIsH1C3/"
-      "X2I7A3/I2G11/LOOING9/E2A11 ADLRSTZ/EIINPW 451/296 0 -lex CSW24"};
-  const int thread_counts[] = {1, 4};
+      "cgp "
+      "AIDER2U7/b1E1E2N1Z5/AWN1T2M1ATT3/LI1COBLE2OW3/OP2U2E2AA3/NE2CUSTARDS1Q1/"
+      "ER1OH5I2U1/S2K2FOB1ERGOT/5HEXYLS2I1/4JIN6N1/2GOOP2NAIVEsT/1DIRE10/"
+      "2GAY10/15/15 AEFILMR/DIV 371/412 0 -lex NWL20"};
   for (int cgp_idx = 0; cgp_idx < 2; cgp_idx++) {
-    for (int plies = 4; plies <= 6; plies++) {
-      for (int thread_idx = 0; thread_idx < 2; thread_idx++) {
-        uint32_t plain_mask;
-        uint32_t stepped_mask;
-        int plain_depth;
-        int stepped_depth;
-        const int plain_score = solve_fixed_depth(
-            cgps[cgp_idx], plies, thread_counts[thread_idx],
-            /*with_callback=*/true, &plain_mask, &plain_depth);
-        const int stepped_score = solve_fixed_depth(
-            cgps[cgp_idx], plies, thread_counts[thread_idx],
-            /*with_callback=*/false, &stepped_mask, &stepped_depth);
-        assert(plain_score == stepped_score);
-        assert(plain_depth == plies);
-        assert(stepped_depth == plies);
-        // With several threads another worker can finish a depth first, so
-        // only a single-thread solve is guaranteed to report every depth.
-        for (int depth = 1; thread_counts[thread_idx] == 1 && depth <= plies;
-             depth++) {
-          assert((plain_mask & (1U << depth)) != 0);
-        }
-      }
+    Config *config = config_create_or_die("set -s1 score -s2 score");
+    load_and_exec_config_or_die(config, cgps[cgp_idx]);
+    uint32_t depth_mask;
+    int plain_score = 0;
+    for (int plies = FIXED_DEPTH_MIN_PLIES; plies <= FIXED_DEPTH_MAX_PLIES;
+         plies++) {
+      MovegenBudget unspent_budget;
+      movegen_budget_init(&unspent_budget, UINT64_MAX);
+      uint64_t plain_nodes;
+      uint64_t stepped_nodes;
+      plain_score =
+          solve_fixed_depth(config, plies, 1, &unspent_budget,
+                            /*with_callback=*/false, &depth_mask, &plain_nodes);
+      const int stepped_score = solve_fixed_depth(
+          config, plies, 1, /*budget=*/NULL,
+          /*with_callback=*/false, &depth_mask, &stepped_nodes);
+      assert(stepped_score == plain_score);
+      assert(stepped_nodes < plain_nodes);
     }
+    uint64_t nodes;
+    const int callback_score =
+        solve_fixed_depth(config, FIXED_DEPTH_MAX_PLIES, 1, /*budget=*/NULL,
+                          /*with_callback=*/true, &depth_mask, &nodes);
+    assert(callback_score == plain_score);
+    for (int depth = 1; depth <= FIXED_DEPTH_MAX_PLIES; depth++) {
+      assert((depth_mask & (1U << depth)) != 0);
+    }
+    const int threaded_score = solve_fixed_depth(
+        config, FIXED_DEPTH_MAX_PLIES, FIXED_DEPTH_THREADS, /*budget=*/NULL,
+        /*with_callback=*/false, &depth_mask, &nodes);
+    assert(threaded_score == plain_score);
+    config_destroy(config);
   }
 }
 
-// Solves to a fixed depth on one thread under a movegen budget with the given
-// limit and returns the generations the solve charged to it.
-static uint64_t budgeted_fixed_depth_movegens(const char *cgp, int plies,
+// Solves the position loaded in `config` to a fixed depth on one thread under
+// a movegen budget with the given limit and returns the generations the solve
+// charged to it.
+static uint64_t budgeted_fixed_depth_movegens(Config *config, int plies,
                                               uint64_t budget_limit,
                                               int *score) {
   MovegenBudget budget;
   movegen_budget_init(&budget, budget_limit);
-  MovegenBudget *previous = gen_set_movegen_budget(&budget);
   uint32_t depth_mask;
-  int reported_depth;
-  *score =
-      solve_fixed_depth(cgp, plies, /*threads=*/1,
-                        /*with_callback=*/false, &depth_mask, &reported_depth);
-  assert(reported_depth == plies);
-  (void)gen_set_movegen_budget(previous);
+  uint64_t nodes;
+  *score = solve_fixed_depth(config, plies, /*threads=*/1, &budget,
+                             /*with_callback=*/false, &depth_mask, &nodes);
   return movegen_budget_get_spent(&budget);
 }
 
@@ -754,18 +777,20 @@ static uint64_t budgeted_fixed_depth_movegens(const char *cgp, int plies,
 // moves than a stepped solve. A budget whose limit is 0 can never stop the
 // solve and leaves it stepping by two.
 static void test_fixed_depth_budget_keeps_every_depth(void) {
-  const char *cgp =
-      "cgp 7F3QINS/7E3E2H/6ORBITED1O/3JAMBU2OM2R/1ROATE1L2FAV1T/"
-      "GI5ED1T1OPE/OD6R3WEN/EL5RUNTY2S/1E6N2U3/1Y5AKA1C3/ES1VAgUIsH1C3/"
-      "X2I7A3/I2G11/LOOING9/E2A11 ADLRSTZ/EIINPW 451/296 0 -lex CSW24";
+  Config *config = config_create_or_die("set -s1 score -s2 score");
+  load_and_exec_config_or_die(
+      config, "cgp 7F3QINS/7E3E2H/6ORBITED1O/3JAMBU2OM2R/1ROATE1L2FAV1T/"
+              "GI5ED1T1OPE/OD6R3WEN/EL5RUNTY2S/1E6N2U3/1Y5AKA1C3/ES1VAgUIsH1C3/"
+              "X2I7A3/I2G11/LOOING9/E2A11 ADLRSTZ/EIINPW 451/296 0 -lex CSW24");
   int stepped_score;
   int budgeted_score;
   const uint64_t stepped_movegens = budgeted_fixed_depth_movegens(
-      cgp, /*plies=*/4, /*budget_limit=*/0, &stepped_score);
+      config, /*plies=*/4, /*budget_limit=*/0, &stepped_score);
   const uint64_t budgeted_movegens = budgeted_fixed_depth_movegens(
-      cgp, /*plies=*/4, /*budget_limit=*/UINT64_MAX, &budgeted_score);
+      config, /*plies=*/4, /*budget_limit=*/UINT64_MAX, &budgeted_score);
   assert(budgeted_score == stepped_score);
   assert(budgeted_movegens > stepped_movegens);
+  config_destroy(config);
 }
 
 // Regression for transposition-table bound handling at PV nodes in
