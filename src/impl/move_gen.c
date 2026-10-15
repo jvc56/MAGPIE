@@ -657,12 +657,14 @@ static inline void update_best_move_or_insert_into_movelist(
     if (tiles_played == gen->best_small_out_rack_size) {
       move_equity_or_score += gen->best_small_out_bonus;
     }
-    // Equal values go to the larger tiny_move, so the winner does not depend
-    // on the order in which anchors are searched. A tie leaves the cutoff
-    // unchanged, and the shadow pruning is strict (bound < cutoff), so an
-    // equal-valued rival is never pruned.
+    // With canonical ties, equal values go to the larger tiny_move, so the
+    // winner does not depend on the order in which anchors are searched. A tie
+    // leaves the cutoff unchanged, and the shadow pruning is strict (bound <
+    // cutoff), so an equal-valued rival is never pruned. Otherwise the first
+    // play found keeps the tie.
     if (move_equity_or_score > gen->best_move_equity_or_score ||
         (move_equity_or_score == gen->best_move_equity_or_score &&
+         gen->best_small_canonical_ties &&
          best_sm->tiny_move > gen->move_list->small_moves[0]->tiny_move)) {
       need_to_update_best_move_equity_or_score = true;
       gen->best_move_equity_or_score = move_equity_or_score;
@@ -3588,6 +3590,7 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
   gen->target_equity_cutoff = args->target_equity;
   gen->target_leave_size = args->target_leave_size_for_exchange_cutoff;
   gen->best_small_out_bonus = args->best_small_out_bonus;
+  gen->best_small_canonical_ties = args->best_small_canonical_ties;
 
   gen->board = game_get_board(game);
   gen->player_index = game_get_player_on_turn_index(game);

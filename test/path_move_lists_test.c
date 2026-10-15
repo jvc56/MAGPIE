@@ -283,11 +283,13 @@ static bool argmax_of_plays(const SmallMove *const *plays, int count,
 }
 
 // The MOVE_RECORD_BEST_SMALL generation for the player on turn, with
-// `go_out_bonus` points for a whole-rack play.
+// `go_out_bonus` points for a whole-rack play and the canonical tie-break
+// path_move_lists_best_play reproduces.
 static MoveGenArgs best_small_args_for(const Game *game, MoveList *move_list,
                                        int go_out_bonus) {
   const MoveGenArgs best_args = {
       .best_small_out_bonus = int_to_equity(go_out_bonus),
+      .best_small_canonical_ties = true,
       .game = game,
       .move_list = move_list,
       .move_record_type = MOVE_RECORD_BEST_SMALL,

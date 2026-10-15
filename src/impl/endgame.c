@@ -149,6 +149,8 @@ struct EndgameCtx {
   bool use_heuristics;
   bool forced_pass_bypass;
   bool incremental_movegen;
+  // EndgameArgs.disable_best_reply_shortcuts, inverted.
+  bool best_reply_shortcuts;
   PVLine principal_variation;
   // If non-NULL, guarantee an exact value for this move alongside the best
   // move (see EndgameArgs.actual_move). Owned by the caller; valid only for
@@ -761,6 +763,7 @@ void endgame_ctx_reset(EndgameCtx *es, EndgameResults *results,
   es->use_heuristics = endgame_args->use_heuristics;
   es->forced_pass_bypass = endgame_args->forced_pass_bypass;
   es->incremental_movegen = endgame_args->incremental_movegen;
+  es->best_reply_shortcuts = !endgame_args->disable_best_reply_shortcuts;
   es->num_top_moves = endgame_args->num_top_moves;
   // The in-search top-K array (topk_values) and the live multi-PV leaderboard
   // are sized to MAX_ENDGAME_DISPLAY_PVS; clamp so a caller asking for more
@@ -2051,6 +2054,7 @@ static int playout_first_step_from_lists(EndgameCtxWorker *worker,
   } else {
     const MoveGenArgs best_args = {
         .best_small_out_bonus = go_out_bonus,
+        .best_small_canonical_ties = true,
         .game = worker->game_copy,
         .move_list = worker->move_list,
         .move_record_type = MOVE_RECORD_BEST_SMALL,
@@ -2232,7 +2236,8 @@ static int32_t negamax_greedy_leaf_playout(EndgameCtxWorker *worker,
       arena_dealloc(worker->small_move_arena, sizeof(SmallMove));
       worker->move_list->count = 1;
       nplays = 1;
-    } else if (opp_stuck_frac == 0.0F && use_path_lists && playout_depth == 0) {
+    } else if (opp_stuck_frac == 0.0F && use_path_lists && playout_depth == 0 &&
+               worker->solver->best_reply_shortcuts) {
       // No stuck tiles, first step: the incremental lists already hold most of
       // this position's plays.
       nplays =
@@ -2242,11 +2247,14 @@ static int32_t negamax_greedy_leaf_playout(EndgameCtxWorker *worker,
       // twice the opponent's rack for going out.
       // MOVE_RECORD_BEST_SMALL prunes during generation via shadow upper
       // bounds, producing a SmallMove directly without full enumeration.
+      // With the best-reply shortcuts, ties go the way the incremental lists
+      // break them, so a search plays the same playouts with or without them.
       const Rack *opp_rack_p =
           player_get_rack(game_get_player(worker->game_copy, 1 - stm_idx_p));
       const MoveGenArgs pargs = {
           .best_small_out_bonus = calculate_end_rack_points(
               opp_rack_p, game_get_ld(worker->game_copy)),
+          .best_small_canonical_ties = worker->solver->best_reply_shortcuts,
           .game = worker->game_copy,
           .move_list = worker->move_list,
           .move_record_type = MOVE_RECORD_BEST_SMALL,
@@ -2795,6 +2803,7 @@ static bool pick_first_reply_before_list(EndgameCtxWorker *worker, int depth,
   const int stm_idx = game_get_player_on_turn_index(worker->game_copy);
   const MoveGenArgs best_args = {
       .best_small_out_bonus = int_to_equity(FIRST_REPLY_GOING_OUT_PRIORITY),
+      .best_small_canonical_ties = true,
       .game = worker->game_copy,
       .move_list = worker->move_list,
       .move_record_type = MOVE_RECORD_BEST_SMALL,
@@ -2952,7 +2961,8 @@ int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
   child_pv.negamax_depth = 0;
 
   // One ply above the leaves, try the likely refutation before building the
-  // move list (see pick_first_reply_before_list). Only where the ordering
+  // move list (see pick_first_reply_before_list), unless
+  // EndgameArgs.disable_best_reply_shortcuts is set. Only where the ordering
   // has nothing better to offer: no hash move, no thread jitter, no early
   // pass, more than one tile (the single-tile shortcuts need the list), and
   // not under thread 0's first root move, whose ply-2 progress counts the
@@ -2960,7 +2970,8 @@ int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
   bool first_reply_searched = false;
   SmallMove first_reply;
   int32_t first_reply_value = 0;
-  if (depth == 1 && worker->current_iterative_deepening_depth != depth &&
+  if (depth == 1 && worker->solver->best_reply_shortcuts &&
+      worker->current_iterative_deepening_depth != depth &&
       tt_move == INVALID_TINY_MOVE &&
       (worker->solver->threads <= 1 || worker->ordinal == 0) &&
       game_get_consecutive_scoreless_turns(worker->game_copy) == 0 &&

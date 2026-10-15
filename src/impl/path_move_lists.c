@@ -430,6 +430,7 @@ bool path_move_lists_best_play(PathMoveLists *lists,
   assert(length >= 1);
   assert(length <= 2 || path_move_lists_slot_is_current(lists, length - 2));
   assert(best_small_args->move_record_type == MOVE_RECORD_BEST_SMALL);
+  assert(best_small_args->best_small_canonical_ties);
   const Game *game = best_small_args->game;
   const int side_to_move_tiles = rack_get_total_letters(player_get_rack(
       game_get_player(game, game_get_player_on_turn_index(game))));

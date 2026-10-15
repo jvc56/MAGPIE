@@ -115,6 +115,8 @@ typedef struct PegWorker {
   bool eg_tt_shared;
   // Shared per-solve cache of per-candidate leaf prunes (see PegPruneCache).
   PegPruneCache *prune_cache;
+  // PegArgs.disable_best_reply_shortcuts, for every leaf endgame solve.
+  bool disable_best_reply_shortcuts;
 
   // Nested-PEG lookahead state. Solve-level knobs copied here so the recursion
   // needn't thread them through every job/ctx.
@@ -1272,7 +1274,7 @@ static int32_t peg_nested_endgame_value(PegWorker *worker, Game *game,
       /*before_search_callback=*/NULL, /*before_search_callback_data=*/NULL,
       /*per_root_move_callback=*/NULL, /*per_root_move_callback_data=*/NULL,
       DUAL_LEXICON_MODE_IGNORANT, /*forced_pass_bypass=*/false,
-      /*incremental_movegen=*/true,
+      /*incremental_movegen=*/true, worker->disable_best_reply_shortcuts,
       /*enable_pv_display=*/false, /*soft_time_limit=*/0.0,
       /*hard_time_limit=*/0.0, PEG_ENDGAME_SEED, /*skip_word_pruning=*/true,
       peg_worker_get_endgame_tt(worker),
@@ -1756,7 +1758,7 @@ static int32_t peg_eval_leaf(PegEvalCtx *ctx, Game *game) {
       /*before_search_callback=*/NULL, /*before_search_callback_data=*/NULL,
       /*per_root_move_callback=*/NULL, /*per_root_move_callback_data=*/NULL,
       DUAL_LEXICON_MODE_IGNORANT, /*forced_pass_bypass=*/false,
-      /*incremental_movegen=*/true,
+      /*incremental_movegen=*/true, ctx->worker->disable_best_reply_shortcuts,
       /*enable_pv_display=*/ctx->capture != NULL, /*soft_time_limit=*/0.0,
       /*hard_time_limit=*/0.0, PEG_ENDGAME_SEED, /*skip_word_pruning=*/true,
       peg_worker_get_endgame_tt(ctx->worker),
@@ -3074,6 +3076,8 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
     workers[worker_idx].eg_tt_shared = args->shared_endgame_tt != NULL;
     workers[worker_idx].eg_tt_fraction = tt_fraction;
     workers[worker_idx].prune_cache = prune_cache;
+    workers[worker_idx].disable_best_reply_shortcuts =
+        args->disable_best_reply_shortcuts;
     // Nested-PEG lookahead config + free-list scratch.
     workers[worker_idx].thread_control = args->thread_control;
     // Inner-peg scenarios fan out across the shared pool (NULL when single-

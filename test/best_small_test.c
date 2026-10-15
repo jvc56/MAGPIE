@@ -20,12 +20,13 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-// MOVE_RECORD_BEST_SMALL must return exactly the argmax of a full
-// MOVE_RECORD_ALL_SMALL generation under one rule: rank a play by its score
-// plus best_small_out_bonus when it uses the whole rack, break equal ranks in
-// favor of the larger tiny_move, and return a pass only when there is no play.
-// The result must not depend on the order in which the shadow-pruned search
-// visits anchors and plays.
+// With best_small_canonical_ties, MOVE_RECORD_BEST_SMALL must return exactly
+// the argmax of a full MOVE_RECORD_ALL_SMALL generation under one rule: rank a
+// play by its score plus best_small_out_bonus when it uses the whole rack,
+// break equal ranks in favor of the larger tiny_move, and return a pass only
+// when there is no play. The result must not depend on the order in which the
+// shadow-pruned search visits anchors and plays. Without it, the result must
+// still be a play of the best rank.
 
 enum {
   ALL_SMALL_CAPACITY = 250000,
@@ -167,8 +168,22 @@ static void check_player_on_turn(const Game *game, MoveList *all_small,
     best_args.move_list = best_small;
     best_args.move_record_type = MOVE_RECORD_BEST_SMALL;
     best_args.best_small_out_bonus = bonus;
+    best_args.best_small_canonical_ties = false;
     generate_moves(&best_args);
+    assert(move_list_get_count(best_small) == 1);
+    const SmallMove *first_found = best_small->small_moves[0];
+    assert(small_move_is_pass(first_found) == !found_play);
+    if (found_play) {
+      Equity first_found_value =
+          int_to_equity(small_move_get_score(first_found));
+      if (small_move_get_tiles_played(first_found) == rack_size) {
+        first_found_value += bonus;
+      }
+      assert(first_found_value == best_value);
+    }
 
+    best_args.best_small_canonical_ties = true;
+    generate_moves(&best_args);
     assert(move_list_get_count(best_small) == 1);
     const SmallMove *result = best_small->small_moves[0];
     stats->checks++;
