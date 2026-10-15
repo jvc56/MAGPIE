@@ -3,8 +3,10 @@
 #include "../def/board_defs.h"
 #include "../def/game_history_defs.h"
 #include "../def/letter_distribution_defs.h"
+#include "../def/move_defs.h"
 #include "../def/rack_defs.h"
 #include "../ent/board.h"
+#include "../ent/equity.h"
 #include "../ent/game.h"
 #include "../ent/move.h"
 #include "../ent/player.h"
@@ -303,4 +305,116 @@ int path_move_lists_moves_at(PathMoveLists *lists, const MoveGenArgs *args,
                lists->lane_end);
   *out_moves = out->moves;
   return out->count;
+}
+
+// The running argmax of path_move_lists_best_play. A play outranks the current
+// best when its adjusted score is higher, or equal with a larger tiny_move.
+typedef struct BestScan {
+  int best_adjusted;
+  uint64_t best_tiny_move;
+  const SmallMove *best_play;
+  int go_out_bonus;
+  int side_to_move_tiles;
+} BestScan;
+
+static inline void best_scan_consider(BestScan *scan,
+                                      const SmallMove *small_move) {
+  int adjusted = small_move_get_score(small_move);
+  if (small_move_get_tiles_played(small_move) == scan->side_to_move_tiles) {
+    adjusted += scan->go_out_bonus;
+  }
+  if (adjusted > scan->best_adjusted ||
+      (adjusted == scan->best_adjusted &&
+       small_move->tiny_move > scan->best_tiny_move)) {
+    scan->best_adjusted = adjusted;
+    scan->best_tiny_move = small_move->tiny_move;
+    scan->best_play = small_move;
+  }
+}
+
+// Carried-over plays [begin, end) of `parent`, all of which stay legal.
+static inline void best_scan_range(BestScan *scan, const PathListSlot *parent,
+                                   int begin, int end) {
+  for (int move_idx = begin; move_idx < end; move_idx++) {
+    best_scan_consider(scan, &parent->moves[move_idx]);
+  }
+}
+
+// Carried-over plays [begin, end) of `parent` that the rack still covers.
+static inline void best_scan_range_filtered(BestScan *scan,
+                                            const PathListSlot *parent,
+                                            int begin, int end,
+                                            const PackedCounts *avail) {
+  for (int move_idx = begin; move_idx < end; move_idx++) {
+    if (counts_subset(&parent->used[move_idx], avail)) {
+      best_scan_consider(scan, &parent->moves[move_idx]);
+    }
+  }
+}
+
+// Feeds `scan` the parent's carried-over plays at the current path position:
+// the lanes outside `touched`, through the rack filter when the side's own
+// previous move placed tiles. Maximal runs of untouched lanes are contiguous
+// in the parent, so each run is one pass.
+static void best_scan_carried(BestScan *scan, const PathMoveLists *lists,
+                              const Game *game, uint64_t touched) {
+  const int length = lists->length;
+  const PathListSlot *parent =
+      length <= 2 ? &lists->roots[2 - length] : &lists->slots[length - 2];
+  const bool filter = length >= 2 && lists->played[length - 2];
+  PackedCounts avail;
+  if (filter) {
+    avail = pack_rack(player_get_rack(
+        game_get_player(game, game_get_player_on_turn_index(game))));
+  }
+  int run_begin = 0;
+  for (int lane = 0; lane <= PATH_MOVE_LISTS_NUM_LANES; lane++) {
+    const bool lane_touched =
+        lane == PATH_MOVE_LISTS_NUM_LANES || ((touched >> lane) & 1) != 0;
+    if (!lane_touched) {
+      continue;
+    }
+    const int begin = parent->lane_begin[run_begin];
+    const int end = parent->lane_begin[lane];
+    if (filter) {
+      best_scan_range_filtered(scan, parent, begin, end, &avail);
+    } else {
+      best_scan_range(scan, parent, begin, end);
+    }
+    run_begin = lane + 1;
+  }
+}
+
+bool path_move_lists_best_play(const PathMoveLists *lists,
+                               const MoveGenArgs *best_small_args,
+                               SmallMove *out_best) {
+  assert(lists->length >= 1);
+  assert(best_small_args->move_record_type == MOVE_RECORD_BEST_SMALL);
+  const Game *game = best_small_args->game;
+  const uint64_t touched = path_move_lists_pending_lanes(lists);
+  BestScan scan = {
+      .best_adjusted = INT32_MIN,
+      .best_tiny_move = 0,
+      .best_play = NULL,
+      .go_out_bonus = equity_to_int(best_small_args->best_small_out_bonus),
+      .side_to_move_tiles = rack_get_total_letters(player_get_rack(
+          game_get_player(game, game_get_player_on_turn_index(game)))),
+  };
+  best_scan_carried(&scan, lists, game, touched);
+  if (touched == 0) {
+    if (scan.best_play == NULL) {
+      return false;
+    }
+    *out_best = *scan.best_play;
+    return true;
+  }
+  // The carried-over best is the incumbent the touched lanes' anchors are
+  // pruned against.
+  if (!generate_best_small_move_in_lanes(
+          best_small_args, touched, scan.best_play,
+          scan.best_play == NULL ? 0 : int_to_equity(scan.best_adjusted))) {
+    return false;
+  }
+  *out_best = *best_small_args->move_list->small_moves[0];
+  return true;
 }

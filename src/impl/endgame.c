@@ -1996,6 +1996,77 @@ static int derive_playout_plays(EndgameCtxWorker *worker,
   return fill_playout_list(worker->move_list, derived, count);
 }
 
+// Sets `best` to the best of `plays` by score, plus `go_out_bonus` for a play
+// of all `side_to_move_tiles` tiles, ties going to the larger tiny_move: the
+// order MOVE_RECORD_BEST_SMALL and path_move_lists_best_play rank by. Leaves
+// `best` untouched when there are no plays.
+static void pick_best_playout_play(const SmallMove *plays, int count,
+                                   int go_out_bonus, int side_to_move_tiles,
+                                   SmallMove *best) {
+  int best_adjusted = INT32_MIN;
+  const SmallMove *best_play = NULL;
+  for (int move_idx = 0; move_idx < count; move_idx++) {
+    const SmallMove *candidate = &plays[move_idx];
+    int adjusted = small_move_get_score(candidate);
+    if (small_move_get_tiles_played(candidate) == side_to_move_tiles) {
+      adjusted += go_out_bonus;
+    }
+    if (best_play == NULL || adjusted > best_adjusted ||
+        (adjusted == best_adjusted &&
+         candidate->tiny_move > best_play->tiny_move)) {
+      best_adjusted = adjusted;
+      best_play = candidate;
+    }
+  }
+  if (best_play != NULL) {
+    *best = *best_play;
+  }
+}
+
+// The first step of a greedy playout with no stuck tiles, from the incremental
+// lists: leaves the best play (the pass when there is none) as the only entry
+// of worker->move_list, exactly as the step's MOVE_RECORD_BEST_SMALL generation
+// would, and returns 1. `leaf_plays` is the side to move's list when the stuck
+// hint has already materialized it, else NULL.
+static int playout_first_step_from_lists(EndgameCtxWorker *worker,
+                                         const SmallMove *leaf_plays,
+                                         int leaf_play_count) {
+  const int stm_idx = game_get_player_on_turn_index(worker->game_copy);
+  const Rack *opp_rack =
+      player_get_rack(game_get_player(worker->game_copy, 1 - stm_idx));
+  const Equity go_out_bonus =
+      calculate_end_rack_points(opp_rack, game_get_ld(worker->game_copy));
+  SmallMove best;
+  small_move_set_as_pass(&best);
+  if (leaf_plays != NULL) {
+    const int stm_tiles =
+        player_get_rack(game_get_player(worker->game_copy, stm_idx))
+            ->number_of_letters;
+    pick_best_playout_play(leaf_plays, leaf_play_count,
+                           equity_to_int(go_out_bonus), stm_tiles, &best);
+  } else {
+    const MoveGenArgs best_args = {
+        .best_small_out_bonus = go_out_bonus,
+        .game = worker->game_copy,
+        .move_list = worker->move_list,
+        .move_record_type = MOVE_RECORD_BEST_SMALL,
+        .move_sort_type = MOVE_SORT_SCORE,
+        .override_kwg = solver_get_pruned_kwg(worker->solver, stm_idx),
+        .eq_margin_movegen = 0,
+        .target_equity = EQUITY_MAX_VALUE,
+        .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+    };
+    SmallMove found;
+    if (path_move_lists_best_play(worker->path_lists, &best_args, &found)) {
+      best = found;
+    }
+  }
+  // Looked up only now: generating into the list reorders its entries.
+  *worker->move_list->small_moves[0] = best;
+  worker->move_list->count = 1;
+  return 1;
+}
+
 // Greedy playout at depth==0 leaf nodes: generate moves iteratively,
 // pick best (with conservation bonus), compute final spread with rack
 // adjustments, unplay moves, store in TT. Returns evaluation from
@@ -2150,6 +2221,11 @@ static int32_t negamax_greedy_leaf_playout(EndgameCtxWorker *worker,
       arena_dealloc(worker->small_move_arena, sizeof(SmallMove));
       worker->move_list->count = 1;
       nplays = 1;
+    } else if (opp_stuck_frac == 0.0F && use_path_lists && playout_depth == 0) {
+      // No stuck tiles, first step: the incremental lists already hold most of
+      // this position's plays.
+      nplays =
+          playout_first_step_from_lists(worker, leaf_plays, leaf_play_count);
     } else if (opp_stuck_frac == 0.0F) {
       // No stuck tiles: only the best play is needed, ranked by score plus
       // twice the opponent's rack for going out.

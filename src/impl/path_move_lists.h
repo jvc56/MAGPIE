@@ -103,4 +103,35 @@ void path_move_lists_pop(PathMoveLists *lists);
 int path_move_lists_moves_at(PathMoveLists *lists, const MoveGenArgs *args,
                              const SmallMove **out_moves);
 
+// The lanes path_move_lists_moves_at / path_move_lists_best_play would
+// regenerate at the current path position (length >= 1): the union of the last
+// two pushed moves' lane-influence masks. Zero means nothing is regenerated.
+static inline uint64_t
+path_move_lists_pending_lanes(const PathMoveLists *lists) {
+  uint64_t pending = lists->masks[lists->length - 1];
+  if (lists->length >= 2) {
+    pending |= lists->masks[lists->length - 2];
+  }
+  return pending;
+}
+
+// The single best play of the list moves_at would return, found without
+// materializing that list: the parent's carried-over lanes are scanned in
+// place (through the rack sub-multiset filter when the side's own previous
+// move placed tiles), and their best play is the incumbent that a
+// MOVE_RECORD_BEST_SMALL generation over the regenerated lanes' anchors is
+// shadow-pruned against (generate_best_small_move_in_lanes), so most of those
+// lanes' plays are never enumerated. A play ranks by score plus the go-out
+// bonus when it uses the whole rack, ties going to the larger tiny_move, as in
+// MOVE_RECORD_BEST_SMALL. `best_small_args` is the MOVE_RECORD_BEST_SMALL
+// generation a scratch path would run here (its best_small_out_bonus is the
+// go-out bonus; its move_list is scratch space). Returns false iff the side has
+// no play, where the caller plays the pass. Nothing is stored in the slot of
+// the current length, so a later call at length + 2 must not rely on it (use
+// moves_at where that happens); every shallower slot is read, under the same
+// discipline as moves_at.
+bool path_move_lists_best_play(const PathMoveLists *lists,
+                               const MoveGenArgs *best_small_args,
+                               SmallMove *out_best);
+
 #endif

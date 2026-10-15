@@ -423,6 +423,21 @@ void generate_moves(const MoveGenArgs *args);
 void generate_small_moves_in_lanes(const MoveGenArgs *args, uint64_t lane_mask,
                                    int *lane_end);
 
+// The MOVE_RECORD_BEST_SMALL generation restricted to the anchors of the lanes
+// in `lane_mask` (indexed as for generate_small_moves_in_lanes), competing
+// against `incumbent`: a play found elsewhere on the board, worth
+// `incumbent_value` (its score, plus args->best_small_out_bonus when it uses
+// the whole rack), or NULL for none. Anchors are pruned by their shadow bounds
+// against the incumbent from the start, and an equal-valued play wins only
+// with a larger tiny_move, so the result is the argmax over the lanes and the
+// incumbent under BEST_SMALL's ranking. Leaves the winner as the only entry of
+// args->move_list and returns true, or returns false with the list empty when
+// there is neither an incumbent nor a play in those lanes. Records no pass.
+bool generate_best_small_move_in_lanes(const MoveGenArgs *args,
+                                       uint64_t lane_mask,
+                                       const SmallMove *incumbent,
+                                       Equity incumbent_value);
+
 MoveGen *get_movegen(void);
 
 void gen_load_position(MoveGen *gen, const MoveGenArgs *args);
