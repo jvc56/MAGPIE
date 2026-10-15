@@ -667,7 +667,7 @@ static void record_depth_mask_callback(int depth, int32_t value,
 // `budget` (or none, when NULL) is the movegen budget the solve runs under, and
 // `with_callback` registers a per-ply callback that records the depths the
 // solve reports.
-static int solve_fixed_depth(Config *config, int plies, int threads,
+static int solve_fixed_depth(const Config *config, int plies, int threads,
                              MovegenBudget *budget, bool with_callback,
                              uint32_t *depth_mask, uint64_t *nodes) {
   EndgameResults *endgame_results = config_get_endgame_results(config);
@@ -760,7 +760,7 @@ static void test_fixed_depth_stepping(void) {
 // Solves the position loaded in `config` to a fixed depth on one thread under
 // a movegen budget with the given limit and returns the generations the solve
 // charged to it.
-static uint64_t budgeted_fixed_depth_movegens(Config *config, int plies,
+static uint64_t budgeted_fixed_depth_movegens(const Config *config, int plies,
                                               uint64_t budget_limit,
                                               int *score) {
   MovegenBudget budget;
