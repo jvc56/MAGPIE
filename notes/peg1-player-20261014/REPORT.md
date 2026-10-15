@@ -9,21 +9,36 @@ why, rebuilt the chooser, and evaluated it on boards never used for training or
 model choice.
 
 ## Summary
-- **Yes:** native choosers now sit between static and depth-2 search in both
-  cost and quality, and beat static on fresh boards in completed games under both
-  endgame continuations tested.
-- **Recommended default:** `cascade-u`, about 3 ms per decision: **+3.3% wins,
-  +6.3 points** per 1PEG decision when the rest of the endgame is played
-  statically, **+2.9%, +5.8** when it is played by two-ply search (8,192 fresh
-  boards).
-- **Full games** from the opening (20,000 seat-swapped pairs, 25.9% of games reach
-  a 1PEG): 50.36% win score (static endgame), 50.31% (two-ply endgame).
-- **Qualification:** MAGPIE's own PEG greedy seed (`peg_solve` stage 0) wins more
-  often than any network when the endgame after the 1PEG is played greedily
-  (+6.0% wins over static), because its playouts simulate exactly that
-  continuation. When the endgame is played by two-ply search, its picks are poor
-  (+1.2% wins, −1.6 points) and `cascade-u` beats it by 1.4–1.7% wins and
-  5.5–7.4 points per decision. It also costs 7–84× more than `cascade-u`.
+**Interim (snapshot 2026-10-15 06:33 PDT).** Every chooser is being rescored
+with MAGPIE's exact endgame solver after the 1PEG move (see
+[Continuation](#continuation)). The runs continue; these numbers will be
+replaced when fresh set 2 reaches 512 boards. "First 132" is the complete prefix
+of a seeded board order and is unbiased. "All 452 complete" adds every board
+whose picks are all scored, which leans toward endgames that solve quickly.
+
+- **Yes:** under exact play the utility-mode networks beat static per 1PEG
+  decision, and the networks sit between static and MAGPIE's PEG in cost.
+- **Recommended default (unchanged):** `cascade-u`, about 3 ms per decision:
+  **+4.9% wins [+1.5, +8.7], +8.7 points** over static on the first 132 boards,
+  +3.5% [+1.9, +5.4], +6.3 points on all 452 complete boards.
+- **Greedy seed:** the earlier qualification was an artifact of the static
+  continuation. Under exact play greedy over all moves gains +1.9% [−3.0, +6.4],
+  +3.3 points (first 132) and +0.0% [−2.3, +2.3], −1.2 points (all 452). Every
+  network beats both greedy variants on points (+4 to +8 per decision, CIs above
+  zero). On wins, on all 452 boards every network beats greedy over all moves and
+  8 of 9 beat greedy top-64 with CIs above zero; on the first 132 the edge is
+  directional only (`cascade-u` +2.3% to +3.0%). Greedy costs 7–84× more.
+- **MAGPIE's default PEG** (first 79 boards): +2.5% [−2.5, +7.6] wins,
+  +11.2 [+5.3, +17.8] points over static. `cascade-u` vs PEG: +1.9%
+  [−2.5, +6.3] wins, −1.2 [−4.0, +1.7] points, no detectable difference so far,
+  at 3 ms against 269 s mean (92 s median) per decision on one thread.
+- **Full games** (20,000 seat-swapped pairs, 25.9% reach a 1PEG) were not rerun
+  with the exact solver. Quote the two-ply result, `cascade-u` 50.31%
+  [50.25, 50.38]: two-ply agreed with exact on 99.0% of W/T/L outcomes, 1.5
+  points optimistic. The static-endgame 50.36% should not be quoted.
+- **Utility vs margin** under exact play is not settled: +1.1% to +1.9% wins
+  (CIs from 0.0) on the first 132 boards, +0.0% to +0.4% (CIs include zero) on
+  all 452, with points within 0.6 either way.
 
 ## Information rule
 Every chooser ranks the mover's candidates from its own rack and public
@@ -33,7 +48,8 @@ count, and its reply features are aggregated *before* the single forward pass pe
 candidate. The actual last tile is consumed only when the chosen move is played.
 Every fresh decision was rerun with the actual last tile swapped for a tile on the
 opponent's rack; inputs had to be bitwise identical and the choice the same. All
-checks passed (MAGPIE's greedy seed: on the first 1,024 boards).
+checks passed (MAGPIE's greedy seed: on the first 1,024 boards; MAGPIE's
+default PEG: 4 boards, same pick).
 
 ## Why the previous network failed
 - **Objective.** 98.4% of the variance of the depth-2 candidate labels is between
@@ -105,10 +121,36 @@ checks passed (MAGPIE's greedy seed: on the first 1,024 boards).
   | fresh set 2 | 202610141504 | 8,192 | utility mode, greedy comparison, timing |
 
 - **Completed games:** each chooser's move is played with the board's actual last
-  tile, then a common continuation finishes the game: static top 1, or a fixed
-  two-ply endgame search for both players. Results are the per-decision change
-  vs static from the mover's view; the seat-swapped pair win score is 50% plus
-  half the win change. 95% CIs from 10,000 bootstrap resamples of boards.
+  tile, then a common continuation finishes the game (see below). Results are the
+  per-decision change vs static from the mover's view; the seat-swapped pair win
+  score is 50% plus half the win change. 95% CIs from 10,000 bootstrap resamples
+  of boards.
+
+## Continuation
+- **Exact (primary).** After the move, one `endgame_solve` from the post-move
+  position: 25 plies, one thread, no time limit, one transposition table per
+  process reused across solves. The mover's final spread is the current spread
+  minus the solver's value if the opponent is on turn, plus it if the mover is.
+  Every solve so far finished below 25 plies, so every value is proven. Solve
+  times are heavy-tailed: median 0.6 s, p90 86 s, p99 56 min, maximum 5.4 h.
+- **After a pass** the tile stays in the bag. The player then on turn plays
+  MAGPIE's default PEG pick until the bag is empty, then the exact solve.
+  Earlier continuations: greedy-seed scoring had the opponent play static top 1
+  at its own 1PEG, with the two-ply variant resuming once the bag was empty;
+  the network and static runs never continued after a pass (candidates were
+  placements only and no forced pass occurred). 9 of 452 greedy-all picks are
+  passes; no network or PEG pick is.
+- **Static top 1 and fixed two-ply (secondary)** were used for the original
+  results. Against exact play over 1,203 (board, move) pairs here, static was
+  7.6 points and 5.0% wins optimistic and wrong on 6.3% of W/T/L outcomes;
+  two-ply was 1.5 points and 0.8% wins optimistic and wrong on 1.0%. Because
+  each chooser is compared with static on the same continuation, most of that
+  bias cancels, except for the greedy seed, whose playouts simulate the static
+  continuation.
+- An independent cloud check with stand-in choosers reached the same
+  conclusions:
+  [notes/peg1-continuation-20261014](https://github.com/jvc56/MAGPIE/blob/claude/peg1-continuation-check/notes/peg1-continuation-20261014/REPORT.md).
+  The two harnesses were not compared position by position.
 
 ## Results
 ### Cost per decision
@@ -130,7 +172,59 @@ Isolated single process, policy PGO build, 512 fresh boards, warm page cache, ms
 An earlier run on fresh set 1 broke down `fast` (2.27 ms): opponent replies
 1.72, building the hypothetical worlds 0.27, move generation 0.19, network 0.07.
 
-### 1PEG decisions in completed games (fresh set 2, 8,192 boards)
+### 1PEG decisions under exact play (interim)
+Fresh set 2, boards in a seeded order (seed 202610141801). Change per decision
+vs static [95% CI]:
+
+| chooser | first 132: wins | points | all 452 complete: wins | points |
+|---|---:|---:|---:|---:|
+| fast | +2.27% [−1.5, 6.1] | +9.02 | +2.88% [1.0, 4.9] | +6.49 |
+| fast-u | +3.79% [0.8, 7.6] | +8.63 | +2.54% [0.8, 4.4] | +5.91 |
+| cascade | +1.52% [−2.3, 6.1] | +9.27 | +2.77% [0.8, 4.9] | +7.06 |
+| **cascade-u** | **+4.92%** [1.5, 8.7] | +8.70 | **+3.54%** [1.9, 5.4] | +6.25 |
+| strong | +2.27% [−1.5, 6.1] | +9.23 | +3.21% [1.1, 5.3] | +6.94 |
+| strong-u | +4.92% [1.5, 8.7] | +8.61 | +3.54% [1.7, 5.6] | +6.08 |
+| greedy seed, top 64 | +2.65% [−2.3, 7.6] | +4.61 | +0.55% [−1.7, 2.8] | +0.56 |
+| greedy seed, all moves | +1.89% [−3.0, 6.4] | +3.33 | +0.00% [−2.3, 2.3] | −1.18 |
+
+On the same 132 boards the two-ply continuation gives `cascade-u` +5.68% /
++8.57 and greedy over all moves +3.03% / +4.24; the static continuation gives
++7.20% / +10.47 and +8.71% / +15.25.
+
+Networks vs greedy seed under exact play, per decision:
+
+| network | vs greedy top 64, all 452: wins | points | vs greedy all, all 452: wins | points | vs greedy all, first 132: wins | points |
+|---|---:|---:|---:|---:|---:|---:|
+| fast | +2.32% [0.3, 4.4] | +5.93 | +2.88% [0.8, 5.1] | +7.67 | +0.38% [−3.8, 4.6] | +5.69 |
+| fast-u | +1.99% [0.1, 3.9] | +5.35 | +2.54% [0.6, 4.5] | +7.09 | +1.89% [−1.9, 6.1] | +5.30 |
+| cascade | +2.21% [0.1, 4.4] | +6.50 | +2.77% [0.6, 5.1] | +8.24 | −0.38% [−4.6, 3.8] | +5.94 |
+| **cascade-u** | +2.99% [1.2, 4.9] | +5.68 | +3.54% [1.7, 5.6] | +7.43 | +3.03% [−0.8, 7.2] | +5.36 |
+| strong | +2.65% [0.9, 4.5] | +6.38 | +3.21% [1.1, 5.3] | +8.12 | +0.38% [−3.8, 4.6] | +5.89 |
+| strong-u | +2.99% [1.4, 4.7] | +5.52 | +3.54% [1.7, 5.5] | +7.27 | +3.03% [−0.8, 7.2] | +5.28 |
+
+Every points CI in this table is above zero. The margin-mode utility networks
+(`fast-u`, `cascade-u`, `strong-u` choosing by expected margin) are in
+`SUMMARY.json`; of the nine networks only margin-mode `fast-u` has a wins CI vs
+greedy top 64 that includes zero on all 452 boards.
+
+MAGPIE's default PEG schedule, first 79 boards of the same order (static and
+PEG pick only; the networks' picks are from the fresh-set-2 run on the same
+boards):
+
+| | wins | points |
+|---|---:|---:|
+| PEG vs static | +2.53% [−2.5, 7.6] | +11.15 [5.3, 17.8] |
+| `cascade-u` vs PEG | +1.90% [−2.5, 6.3] | −1.23 [−4.0, 1.7] |
+| `strong-u` vs PEG | +1.90% [−2.5, 6.3] | −0.16 [−2.7, 2.5] |
+| `cascade` vs PEG | −2.53% [−6.3, 0.0] | −0.58 [−3.8, 2.8] |
+| greedy all vs PEG | −1.27% [−6.3, 2.5] | −4.70 [−7.8, −1.7] |
+
+PEG differs from static on 62% of these boards and takes 269 s mean, 92 s
+median, 643 s p90 per decision on one thread.
+
+### 1PEG decisions, earlier continuations (fresh set 2, 8,192 boards)
+Secondary: the static-endgame columns are biased and the greedy seed's
+static-endgame numbers are an artifact (see [Continuation](#continuation)).
 Change per decision vs static [95% CI]:
 
 | chooser | static endgame: wins | points | two-ply endgame: wins | points |
@@ -149,7 +243,15 @@ Fresh set 1 (7,680 other boards, margin mode) agrees. Static endgame: fast
 +2.19% / +5.60, +2.50% / +6.18, +2.69% / +6.34. All CIs exclude zero.
 
 ### Utility mode vs margin mode
-Same networks, fresh set 2, per decision:
+Under exact play, fresh set 2, per decision:
+
+| network | first 132: wins | points | all 452 complete: wins | points |
+|---|---:|---:|---:|---:|
+| fast | +1.52% [0.0, 3.8] | +0.05 | +0.00% [−1.3, 1.3] | −0.22 |
+| cascade | +1.89% [0.0, 4.6] | −0.39 | +0.44% [−0.6, 1.4] | −0.43 |
+| strong | +1.14% [0.0, 3.0] | −0.51 | +0.11% [−0.9, 1.1] | −0.59 |
+
+Earlier continuations, all 8,192 boards:
 
 | network | static endgame: wins | points | two-ply endgame: wins | points |
 |---|---:|---:|---:|---:|
@@ -211,12 +313,18 @@ deeper relabelling (25–100 CPU-hours) was done.
   old KLV/stuck extras improved margin regret by only 0.05–0.17. Full
   greedy-playout features improved it by about 0.25 at about 1.4× the cost. Win-aware second-stage heads alone
   gave no credible gain; the blended utility mode did.
-- **Headroom left:** the depth-2 teacher's win-first picks still beat every
-  network. Out of fold on stored boards they gained +4.1% wins per decision vs
-  +3.0% for margin-first picks (static endgame), so headroom remains in the
-  model.
+- **Headroom left:** under exact play on the first 81 fresh labelled boards
+  (interim), the depth-2 teacher's win-first picks gain +6.17% [0.0, 12.3] wins,
+  +3.36 points over static and margin-first picks +4.94%, +3.47. `cascade`
+  trails win-first picks by 1.23% [−6.2, +2.5] wins and leads by 0.58 points, so
+  any remaining headroom is not yet measurable. The earlier out-of-fold figures
+  (+4.1% win-first vs +3.0% margin-first) used the static endgame.
 
 ## Caveats
+- The exact-play numbers are interim. The fresh-set-2 run (2,048 boards planned,
+  6,412 picks) has scored 1,442 picks; the PEG run 79 of 256 boards; the
+  labelled run 81 of 512. The "all complete" columns over-represent quickly
+  solved endgames.
 - Labels are depth-2 searches. Hidden tiles are weighted uniformly by public
   count, with no inference about the opponent's rack.
 - Full games use static play outside the 1PEG. Sims and production were not
@@ -227,13 +335,19 @@ deeper relabelling (25–100 CPU-hours) was done.
   opponent and no nested lookahead (pass candidates take one greedy rollout).
 - The chooser code is research-harness code (`test/value_net_test.c` modes
   `peg1feat2`, `peg1net2`, `peg1cascade`, `peg1util`, `peg1games`,
-  `peg1games3`, `peg1play`, `peg1pos`, `peg1greedy`, `peg1deep`, `peg1bench`) in
+  `peg1games3`, `peg1play`, `peg1pos`, `peg1greedy`, `peg1deep`, `peg1bench`,
+  `peg1exact`) in
   the experiment's source copy. It is not merged.
 
 ## Reproduction
 - Everything is in
   `/Volumes/T5 EVO/magpie-distill/inference-weights-20261011/peg1-player-20261014/`:
-  - `results.txt`; `scripts/` (all analysis); `analysis/` (every JSON output);
+  - `results.txt`; `scripts/` (all analysis); `analysis/` (every JSON output;
+    the exact snapshot is `analysis/exact-interim-20261015/`);
+  - `exact/` (exact-continuation plans, per-chunk outputs, binaries and
+    hashes; `scripts/peg1exact_block.c` is the harness mode `peg1exact`,
+    `scripts/exact_plan.py`, `run_exact.py`, `exact_analyze.py`,
+    `exact_aux.py` plan, run and analyze it);
     `fresh*/` (boards, choices, games); `native/` (parity and timing);
     `teacher/` (depth-4 labels).
   - `reproduction/harness-vs-full64-source.patch` is the harness diff against

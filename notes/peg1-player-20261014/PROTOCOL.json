@@ -50,5 +50,50 @@
    "peg1-strong.bin": "5a2c7117c541efa5ab4ab879a4e99318bea8b18d15d16fb33e84ca49c73a4106"
   },
   "source_value_net_test_c": "cec2fd6730d283660614cd6f7c5d8166e4faaf3f712072ce6cfcb329c8f54feb"
+ },
+ "exact_continuation": {
+  "description": "After the 1PEG pick is played with the actual last tile, one endgame_solve from the post-move position: 25 plies, 1 thread, no soft or hard time limit, one transposition table per process (fraction 0.03 of RAM for fresh set 2, 0.02 for the PEG and labelled runs) reused across solves, no two-ply TT. Mover final spread = (mover - opponent) - value if the opponent is on turn, + value if the mover is. proven = endgame_ctx_get_progress depth < 25; every solve so far is proven.",
+  "pass_handling": "A pass leaves the tile in the bag; the player then on turn plays MAGPIE's default PEG pick (peg_args_fill defaults: built-in stage schedule, nested lookahead caps 8/4/2, 1 thread, no time budget) until the bag is empty, then the exact solve.",
+  "earlier_continuations_after_pass": "Greedy-seed scoring (vnt_peg1_finish): after a pass the opponent played static top-1 at its own 1PEG; the two-ply variant resumed once the bag was empty. peg1play/peg1games: candidates were placements only and no forced pass occurred, so they never continued after a pass.",
+  "pick_codes": ">=0 static rank in the top-64 pool; -1 greedy seed over all moves (recomputed, must match the earlier run); -2 MAGPIE default PEG pick; -3 default PEG pick plus information-rule check",
+  "peg_information_rule_check": "default PEG pick rerun with the actual last tile swapped for an opponent-rack tile; fatal unless the pick is identical; 4/4 boards passed",
+  "board_order": {
+   "seed": 202610141801,
+   "note": "seeded permutation; any complete prefix is an unbiased subset"
+  },
+  "runs": {
+   "fresh2": {
+    "boards_planned": 2048,
+    "chunk": 8,
+    "picks": 6412,
+    "workers": 8,
+    "tt_fraction": 0.03,
+    "choosers": "static, fast, fastU, fastUm, cascade, cascadeU, cascadeUm, strong, strongU, strongUm, greedy top64, greedy all; picks deduplicated per board"
+   },
+   "pegfull": {
+    "boards_planned": 256,
+    "chunk": 4,
+    "picks": 512,
+    "workers": 1,
+    "tt_fraction": 0.02,
+    "note": "first 256 boards of the same fresh-set-2 order; static and default PEG pick"
+   },
+   "labeled": {
+    "boards_planned": 512,
+    "chunk": 4,
+    "picks": 1092,
+    "workers": 1,
+    "tt_fraction": 0.02,
+    "choosers": "static, fast, strong, cascade, depth2 teacher margin-first and win-first"
+   }
+  },
+  "hashes": {
+   "binary_pgo": "46a80c293275d815a6dadcaf8e2524297bcd966ccaf30534f0556f3ef31686dd  exact/magpie_test-exact-pgo",
+   "profile": "9097c1395bbed04e598f15de8c461ac5ef76a932631259c8bb3224d64d11026c  profile/exact.profdata",
+   "source_at_build": "203710187549774d6432f3862bea80b82441d674319c8a8bf46f05618d484816  source/test/value_net_test.c",
+   "source_now": "77f9baed3fc1ba4f8b8e309e060d0a57ad261805cfcb6d5b819edd0721d71a5a  source/test/value_net_test.c (adds only: write the CSV header when a resumed output file is empty)",
+   "peg1exact_block": "6cc7c563e15210fd8fbf71d79ec9dc2023925406c15244724ec325d755f7795c  scripts/peg1exact_block.c"
+  },
+  "pgo_check": "PGO and non-PGO builds gave identical values and proofs on 22/22 solves"
  }
 }
