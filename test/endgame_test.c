@@ -799,12 +799,23 @@ void test_solve_standard(void) {
       "5SPORRAN2A/6ORE2N2D BGIV/DEHILOR 384/389 0 -lex NWL20",
       DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE, ERROR_STATUS_SUCCESS, 11, false,
       0);
+  // The same value without the best-reply shortcuts.
+  test_single_endgame(
+      "set -s1 score -s2 score -threads 6 -eplies 4 -ebestreply false",
+      "cgp "
+      "9A1PIXY/9S1L3/2ToWNLETS1O3/9U1DA1R/3GERANIAL1U1I/9g2T1C/8WE2OBI/"
+      "6EMU4ON/6AID3GO1/5HUN4ET1/4ZA1T4ME1/1Q1FAKEY3JOES/FIVE1E5IT1C/"
+      "5SPORRAN2A/6ORE2N2D BGIV/DEHILOR 384/389 0 -lex NWL20",
+      DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE, ERROR_STATUS_SUCCESS, 11, false,
+      0);
 }
 
-// Solve `cgp` single-threaded with the incremental move lists off and on
-// (separate solvers, so separate transposition tables) and return each run's
-// score and node count through the out-params.
+// Solve `cgp` single-threaded with the incremental move lists off or on and
+// the best-reply shortcuts off or on (a separate solver per call, so a
+// separate transposition table) and return the score and node count through
+// the out-params.
 static void solve_for_incremental_check(const char *cgp, bool incremental,
+                                        bool best_reply_shortcuts,
                                         int32_t *score_out,
                                         uint64_t *nodes_out) {
   Config *config =
@@ -820,6 +831,7 @@ static void solve_for_incremental_check(const char *cgp, bool incremental,
   args.use_heuristics = true;
   args.forced_pass_bypass = true;
   args.incremental_movegen = incremental;
+  args.disable_best_reply_shortcuts = !best_reply_shortcuts;
   args.num_top_moves = 1;
   args.seed = 42;
   EndgameCtx *ctx = NULL;
@@ -834,39 +846,46 @@ static void solve_for_incremental_check(const char *cgp, bool incremental,
   config_destroy(config);
 }
 
-// The incremental move lists must be invisible to the search: the same
-// score and, single-threaded, the same node count as scratch generation.
+// With the best-reply shortcuts on and off, the incremental move lists must be
+// invisible to the search of `cgp`: the same score and, single-threaded, the
+// same node count as scratch generation. (The shortcuts change the search
+// order, and their tie-break could change a leaf value, but these positions'
+// scores come out the same either way.)
+static void assert_incremental_movegen_identical(const char *cgp,
+                                                 int32_t expected_score) {
+  for (int shortcuts_idx = 0; shortcuts_idx < 2; shortcuts_idx++) {
+    const bool best_reply_shortcuts = shortcuts_idx == 0;
+    int32_t scratch_score = 0;
+    uint64_t scratch_nodes = 0;
+    solve_for_incremental_check(cgp, false, best_reply_shortcuts,
+                                &scratch_score, &scratch_nodes);
+    int32_t incremental_score = 0;
+    uint64_t incremental_nodes = 0;
+    solve_for_incremental_check(cgp, true, best_reply_shortcuts,
+                                &incremental_score, &incremental_nodes);
+    assert(scratch_score == expected_score);
+    assert(incremental_score == scratch_score);
+    assert(incremental_nodes == scratch_nodes);
+  }
+}
+
 void test_incremental_movegen_identical(void) {
-  const char *cgp =
+  assert_incremental_movegen_identical(
       "cgp "
       "9A1PIXY/9S1L3/2ToWNLETS1O3/9U1DA1R/3GERANIAL1U1I/9g2T1C/8WE2OBI/"
       "6EMU4ON/6AID3GO1/5HUN4ET1/4ZA1T4ME1/1Q1FAKEY3JOES/FIVE1E5IT1C/"
-      "5SPORRAN2A/6ORE2N2D BGIV/DEHILOR 384/389 0 -lex NWL20";
-  int32_t scratch_score = 0;
-  uint64_t scratch_nodes = 0;
-  solve_for_incremental_check(cgp, false, &scratch_score, &scratch_nodes);
-  int32_t incremental_score = 0;
-  uint64_t incremental_nodes = 0;
-  solve_for_incremental_check(cgp, true, &incremental_score,
-                              &incremental_nodes);
-  assert(scratch_score == 11);
-  assert(incremental_score == scratch_score);
-  assert(incremental_nodes == scratch_nodes);
+      "5SPORRAN2A/6ORE2N2D BGIV/DEHILOR 384/389 0 -lex NWL20",
+      11);
 
   // A stuck-tile position (JMZ against EIOS): the leaf playouts take the
   // stuck branch, whose full lists and the opponent's stuck fraction the
   // incremental lists then supply instead of scratch generation.
-  const char *stuck_cgp =
+  assert_incremental_movegen_identical(
       "cgp "
       "11CLAG/9BRAAI1/11N3/11D3/10BOW2/10ERA2/6A3A1R2/C2WEDDInGS1P1I/"
       "U1VOX1O3T3N/RHO1E1PERILUNES/FEM1A1T3Y3O/1HINT1I7U/2TO2V2GEED1L/"
-      "1AYU2ENTITLES1/QI1N3OAF1KEiR EIOS/JMZ 318/517 0 -lex CSW21";
-  solve_for_incremental_check(stuck_cgp, false, &scratch_score, &scratch_nodes);
-  solve_for_incremental_check(stuck_cgp, true, &incremental_score,
-                              &incremental_nodes);
-  assert(scratch_score == 60);
-  assert(incremental_score == scratch_score);
-  assert(incremental_nodes == scratch_nodes);
+      "1AYU2ENTITLES1/QI1N3OAF1KEiR EIOS/JMZ 318/517 0 -lex CSW21",
+      60);
 }
 
 void test_very_deep(void) {

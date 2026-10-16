@@ -224,6 +224,10 @@ typedef struct PegArgs {
   int nested_emptier_ply_cap;
   int nested_max_depth;
 
+  // EndgameArgs.disable_best_reply_shortcuts for every endgame solve the PEG
+  // runs. False (a zero-initialized PegArgs) leaves the shortcuts on.
+  bool disable_best_reply_shortcuts;
+
   // Optional: pin scenario evaluation to a single bag ordering instead of
   // enumerating all scenarios. When eval_bag_order_len > 0, each candidate is
   // evaluated against exactly one scenario: the bag is set to
@@ -302,6 +306,7 @@ static inline void peg_args_fill(
     const int nested_n_cand_caps, const int nested_stride,
     const int *nested_strides_by_bag, const int nested_n_strides_by_bag,
     const int nested_emptier_ply_cap, const int nested_max_depth,
+    const bool disable_best_reply_shortcuts,
     const MachineLetter *eval_bag_order, const int eval_bag_order_len,
     const Move *const *only_moves, const int n_only_moves,
     const Move *const *protect_moves, const int n_protect_moves,
@@ -330,6 +335,7 @@ static inline void peg_args_fill(
   peg_args->nested_n_strides_by_bag = nested_n_strides_by_bag;
   peg_args->nested_emptier_ply_cap = nested_emptier_ply_cap;
   peg_args->nested_max_depth = nested_max_depth;
+  peg_args->disable_best_reply_shortcuts = disable_best_reply_shortcuts;
   peg_args->eval_bag_order = eval_bag_order;
   peg_args->eval_bag_order_len = eval_bag_order_len;
   peg_args->only_moves = only_moves;

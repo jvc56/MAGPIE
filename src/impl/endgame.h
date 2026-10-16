@@ -165,6 +165,18 @@ typedef struct EndgameArgs {
   // Results are identical either way. (default: true via endgame_args_fill;
   // hand-built args get whatever they initialize it to)
   bool incremental_movegen;
+  // If false (the default), nodes next to the leaves find the side to move's
+  // best play without building its whole move list: with incremental_movegen,
+  // a leaf's greedy playout takes its first move from the incremental lists
+  // (path_move_lists_best_play), and a node one ply above the leaves searches
+  // its best-scoring play before building its list. Both find the play
+  // MOVE_RECORD_BEST_SMALL would, with its ties broken by tiny_move
+  // (MoveGenArgs.best_small_canonical_ties) rather than generation order;
+  // that can change which of two equal-scoring plays a greedy leaf playout
+  // makes, and so a leaf's value. The search order changes too, so among
+  // equal-valued lines a different one can be reported. True turns all of
+  // this off. Zero-initialized args get the default.
+  bool disable_best_reply_shortcuts;
   bool enable_pv_display; // Whether to prepare PVLine data for display
                           // (default: false)
   // IDS time management (0 = no limit, rely on external timer only):
@@ -251,10 +263,11 @@ static inline void endgame_args_fill(
     EndgamePerRootMoveCallback per_root_move_callback,
     void *per_root_move_callback_data,
     const dual_lexicon_mode_t dual_lexicon_mode, const bool forced_pass_bypass,
-    const bool incremental_movegen, const bool enable_pv_display,
-    const double soft_time_limit, const double hard_time_limit,
-    const uint64_t seed, const bool skip_word_pruning,
-    TranspositionTable *shared_tt, const int max_workers, const bool first_win,
+    const bool incremental_movegen, const bool disable_best_reply_shortcuts,
+    const bool enable_pv_display, const double soft_time_limit,
+    const double hard_time_limit, const uint64_t seed,
+    const bool skip_word_pruning, TranspositionTable *shared_tt,
+    const int max_workers, const bool first_win,
     const int first_win_fallback_moves, const bool use_initial_window,
     const int32_t initial_alpha, const int32_t initial_beta,
     const int64_t external_deadline_ns, const Move *actual_move,
@@ -276,6 +289,7 @@ static inline void endgame_args_fill(
   endgame_args->dual_lexicon_mode = dual_lexicon_mode;
   endgame_args->forced_pass_bypass = forced_pass_bypass;
   endgame_args->incremental_movegen = incremental_movegen;
+  endgame_args->disable_best_reply_shortcuts = disable_best_reply_shortcuts;
   endgame_args->enable_pv_display = enable_pv_display;
   endgame_args->soft_time_limit = soft_time_limit;
   endgame_args->hard_time_limit = hard_time_limit;
