@@ -409,6 +409,14 @@ static void test_path_lists(void) {
   assert(executable_dir && executable_dir[0]);
   assert(cfile_is_directory(executable_dir));
   free(executable_dir);
+  // A platform that fetches into the user's own directory has one, and the
+  // name it adds has no space: a data path is one token in a command.
+  char *user_data_dir = cpath_user_data_dir();
+  if (cpath_fetches_to_user_data_dir()) {
+    assert(user_data_dir && user_data_dir[0]);
+    assert(!strchr(cpath_basename(user_data_dir), ' '));
+  }
+  free(user_data_dir);
 }
 
 // A directory lists each entry once, without "." and "..".
