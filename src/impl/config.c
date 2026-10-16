@@ -7628,15 +7628,20 @@ static const char *config_wordmap_for_first_use(Config *config,
   if (!lexicon) {
     return NULL;
   }
+  // Every command comes through here, so the loaded wordmap is checked before
+  // anything on disk.
   const char *loaded = players_data_get_data_name(
       config->players_data, PLAYERS_DATA_TYPE_WMP, player_index);
+  if (loaded && strings_equal(loaded, lexicon)) {
+    return lexicon;
+  }
   ErrorStack *errors = error_stack_create();
   char *existing = data_filepaths_get_readable_filename(
       config->data_paths, lexicon, DATA_FILEPATH_TYPE_WORDMAP, errors);
   const bool on_disk = error_stack_is_empty(errors);
   free(existing);
   error_stack_reset(errors);
-  if (on_disk || (loaded && strings_equal(loaded, lexicon))) {
+  if (on_disk) {
     error_stack_destroy(errors);
     return lexicon;
   }
@@ -7963,8 +7968,14 @@ void config_load_lexicon_dependent_data(
   }
 
   if (config->build_missing_wordmaps) {
+    // Players with the same lexicon share its wordmap, so it is built, or
+    // found missing and reported, once rather than once per player.
+    const bool same_wordmap =
+        p1_wmp_name && p2_wmp_name && strings_equal(p1_wmp_name, p2_wmp_name);
     p1_wmp_name = config_wordmap_for_first_use(config, 0, p1_wmp_name);
-    p2_wmp_name = config_wordmap_for_first_use(config, 1, p2_wmp_name);
+    p2_wmp_name = same_wordmap
+                      ? p1_wmp_name
+                      : config_wordmap_for_first_use(config, 1, p2_wmp_name);
   }
 
   players_data_set(config->players_data, PLAYERS_DATA_TYPE_WMP,

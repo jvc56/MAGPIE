@@ -38,6 +38,12 @@ void data_fetch(const char *base_url, const char *data_dir,
                 data_fetch_report_t report, void *report_context,
                 ErrorStack *error_stack);
 
+// The second half of data_fetch, for a data tarball already on disk: unpacks
+// the .tgz at `archive_path` into `data_dir`, writing its symlinks as copies.
+// The archive is not checked against the pinned SHA-256s.
+void data_fetch_unpack_archive(const char *archive_path, const char *data_dir,
+                               ErrorStack *error_stack);
+
 // Whether `data_dir` holds MAGPIE's data, judged by the board layout every
 // game needs: what tells a first run with no data apart from a typo.
 bool data_fetch_is_data_present(const char *data_dir);

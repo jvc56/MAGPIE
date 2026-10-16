@@ -436,13 +436,59 @@ static bool fetch_data(const char *data_path, const char *base_url) {
   return fetched;
 }
 
+// The first directory of the command line's `-path`, or NULL if it has none.
+// Only the full name is recognized: every shorter one ("-p", "-pa", "-pat")
+// is ambiguous among the options anyway.
+static char *command_line_data_path(int argc, char *argv[]) {
+  for (int arg_idx = 1; arg_idx + 1 < argc; arg_idx++) {
+    if (strings_equal(argv[arg_idx], "-path")) {
+      return cpath_list_first(argv[arg_idx + 1]);
+    }
+  }
+  return NULL;
+}
+
+static bool is_data_fetch_command(int argc, char *argv[]) {
+  return argc >= 3 && strings_iequal(argv[1], "data") &&
+         strings_iequal(argv[2], "fetch");
+}
+
+// Runs a command-line `data fetch [<base url>] [-path <dir>]` before there is
+// any data to start MAGPIE with, so before the options parser, which needs
+// the data. Returns whether the data was fetched, having said why not.
+static bool run_data_fetch_command(const char *data_path, int argc,
+                                   char *argv[]) {
+  const char *base_url = NULL;
+  for (int arg_idx = 3; arg_idx < argc; arg_idx++) {
+    if (strings_equal(argv[arg_idx], "-path")) {
+      if (arg_idx + 1 == argc) {
+        write_to_stream_err("-path needs a directory\n");
+        return false;
+      }
+      arg_idx++;
+    } else if (argv[arg_idx][0] != '-' && !base_url) {
+      base_url = argv[arg_idx];
+    } else {
+      write_to_stream_err("data fetch takes a base URL and -path; '%s' can "
+                          "only be used once the data is there\n",
+                          argv[arg_idx]);
+      return false;
+    }
+  }
+  if (!data_path[0]) {
+    write_to_stream_err("data fetch needs a directory to put the data in\n");
+    return false;
+  }
+  return fetch_data(data_path, base_url);
+}
+
 // With no data where MAGPIE looks, either runs the `data fetch` it was given,
 // offers to fetch it (when someone is at a terminal to answer), or says how.
 // Returns whether the command line was `data fetch`, which has then been run.
-static bool get_missing_data(const char *data_path, int argc, char *argv[]) {
-  if (argc >= 3 && strings_iequal(argv[1], "data") &&
-      strings_iequal(argv[2], "fetch")) {
-    (void)fetch_data(data_path, argc >= 4 ? argv[3] : NULL);
+static bool get_missing_data(const char *data_path, int argc, char *argv[],
+                             bool *fetched) {
+  if (is_data_fetch_command(argc, argv)) {
+    *fetched = run_data_fetch_command(data_path, argc, argv);
     return true;
   }
   write_to_stream_err("MAGPIE's data files are not in %s.\n", data_path);
@@ -473,16 +519,26 @@ void process_command_default(int argc, char *argv[]) {
                         "leave.\n",
                         config_get_magpie_version());
   }
-  char *data_path = locate_default_data_path();
-  bool ran_data_fetch = false;
+  // A -path on the command line is where the data is, or is to go.
+  char *data_path = command_line_data_path(argc, argv);
+  if (!data_path) {
+    data_path = locate_default_data_path();
+  }
   if (!data_fetch_is_data_present(data_path)) {
-    ran_data_fetch = get_missing_data(data_path, argc, argv);
+    bool fetched = false;
+    if (get_missing_data(data_path, argc, argv, &fetched)) {
+      // The command line was the data fetch, and that was all it asked for,
+      // as when the data is already there.
+      if (!fetched) {
+        cterm_wait_before_close();
+      }
+      free(data_path);
+      return;
+    }
   }
   const ConfigArgs config_args = {
       .data_paths = data_path, .use_wmp = true, .build_missing_wordmaps = true};
-  // A data fetch already done is not repeated as the first command.
-  if (!process_command_internal(ran_data_fetch ? 1 : argc, argv,
-                                &config_args)) {
+  if (!process_command_internal(argc, argv, &config_args)) {
     cterm_wait_before_close();
   }
   free(data_path);

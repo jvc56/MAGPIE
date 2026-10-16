@@ -1,5 +1,7 @@
 #include "cfile.h"
 
+#include "cwin.h"
+
 #include <errno.h>
 #include <fcntl.h>
 #include <stdbool.h>
@@ -36,6 +38,8 @@ enum {
   CFILE_FILE_RENAME_INFO_EX = 22,
   CFILE_RENAME_FLAG_REPLACE_IF_EXISTS = 0x1,
   CFILE_RENAME_FLAG_POSIX_SEMANTICS = 0x2,
+  // Replaces a read-only target, as POSIX rename does (Windows 10 1809).
+  CFILE_RENAME_FLAG_IGNORE_READONLY_ATTRIBUTE = 0x40,
   // The longest symlink target followed: Linux's PATH_MAX.
   CFILE_LINK_TARGET_MAX = 4096,
   // Windows file times: 100 ns ticks since 1601, and 1970 in them.
@@ -45,6 +49,8 @@ enum {
   CFILE_REPARSE_BUFFER_BYTES = 16 * 1024,
   // Room for the suffix that names a replaced file moved aside on Windows.
   CFILE_ASIDE_SUFFIX_LENGTH = 64,
+  // Room for the name of the file cfile_access creates to test a directory.
+  CFILE_ACCESS_PROBE_NAME_LENGTH = 64,
 };
 
 // Like asprintf, which C99 lacks; NULL with errno set if out of memory.
@@ -70,87 +76,6 @@ static char *cfile_duplicate(const char *text) {
 }
 #endif
 
-#if defined(_WIN32)
-// Sets errno to the nearest equivalent of a Win32 error.
-static void cfile_set_errno(DWORD error) {
-  switch (error) {
-  case ERROR_FILE_NOT_FOUND:
-  case ERROR_PATH_NOT_FOUND:
-  case ERROR_INVALID_DRIVE:
-    errno = ENOENT;
-    break;
-  case ERROR_ACCESS_DENIED:
-  case ERROR_SHARING_VIOLATION:
-  case ERROR_LOCK_VIOLATION:
-  case ERROR_WRITE_PROTECT:
-    errno = EACCES;
-    break;
-  case ERROR_FILE_EXISTS:
-  case ERROR_ALREADY_EXISTS:
-    errno = EEXIST;
-    break;
-  case ERROR_DISK_FULL:
-  case ERROR_HANDLE_DISK_FULL:
-    errno = ENOSPC;
-    break;
-  case ERROR_NOT_ENOUGH_MEMORY:
-  case ERROR_OUTOFMEMORY:
-    errno = ENOMEM;
-    break;
-  case ERROR_DIR_NOT_EMPTY:
-    errno = ENOTEMPTY;
-    break;
-  case ERROR_FILENAME_EXCED_RANGE:
-    errno = ENAMETOOLONG;
-    break;
-  case ERROR_INVALID_NAME:
-  case ERROR_BAD_PATHNAME:
-  case ERROR_INVALID_PARAMETER:
-    errno = EINVAL;
-    break;
-  default:
-    errno = EIO;
-    break;
-  }
-}
-
-// `path`, UTF-8, as the UTF-16 the wide Win32 calls take, so non-ASCII paths
-// work whatever the process code page. The caller frees it. NULL with errno
-// set on failure.
-static wchar_t *cfile_wide(const char *path) {
-  const int length =
-      MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path, -1, NULL, 0);
-  if (length <= 0) {
-    errno = EINVAL;
-    return NULL;
-  }
-  wchar_t *wide = malloc(sizeof(wchar_t) * (size_t)length);
-  if (!wide) {
-    errno = ENOMEM;
-    return NULL;
-  }
-  (void)MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path, -1, wide,
-                            length);
-  return wide;
-}
-
-// The inverse of cfile_wide.
-static char *cfile_narrow(const wchar_t *wide) {
-  const int length =
-      WideCharToMultiByte(CP_UTF8, 0, wide, -1, NULL, 0, NULL, NULL);
-  if (length <= 0) {
-    errno = EINVAL;
-    return NULL;
-  }
-  char *narrow = malloc((size_t)length);
-  if (!narrow) {
-    errno = ENOMEM;
-    return NULL;
-  }
-  (void)WideCharToMultiByte(CP_UTF8, 0, wide, -1, narrow, length, NULL, NULL);
-  return narrow;
-}
-#endif
 
 // What an fopen mode asks for. `mode` is "r", "w" or "a", then any of "+",
 // "b" and glibc's "e", in any order.
@@ -218,7 +143,7 @@ FILE *cfile_open(const char *path, const char *mode, bool exclusive) {
     flags |= _O_APPEND | (parsed.update ? _O_RDWR : _O_WRONLY);
     break;
   }
-  wchar_t *wide = cfile_wide(path);
+  wchar_t *wide = cwin_wide(path);
   if (!wide) {
     return NULL;
   }
@@ -231,7 +156,7 @@ FILE *cfile_open(const char *path, const char *mode, bool exclusive) {
       NULL, disposition, FILE_ATTRIBUTE_NORMAL, NULL);
   free(wide);
   if (handle == INVALID_HANDLE_VALUE) {
-    cfile_set_errno(GetLastError());
+    cwin_set_errno(GetLastError());
     return NULL;
   }
   const int descriptor = _open_osfhandle((intptr_t)handle, flags);
@@ -275,18 +200,53 @@ FILE *cfile_open(const char *path, const char *mode, bool exclusive) {
   return stream;
 }
 
+#if defined(_WIN32)
+// Whether a file can be created in the directory `wide`: _waccess says yes
+// for any directory that exists, whatever its permissions, so this creates a
+// file there, which goes again when it is closed.
+static bool cfile_can_create_in(const wchar_t *wide) {
+  static volatile LONG counter = 0;
+  const size_t length = wcslen(wide) + CFILE_ACCESS_PROBE_NAME_LENGTH;
+  wchar_t *probe = malloc(sizeof(wchar_t) * length);
+  if (!probe) {
+    return false;
+  }
+  (void)swprintf(probe, length, L"%ls\\.cfile-access.%lu-%ld", wide,
+                 (unsigned long)GetCurrentProcessId(),
+                 InterlockedIncrement(&counter));
+  HANDLE handle = CreateFileW(
+      probe, GENERIC_WRITE, 0, NULL, CREATE_NEW,
+      FILE_ATTRIBUTE_TEMPORARY | FILE_ATTRIBUTE_HIDDEN |
+          FILE_FLAG_DELETE_ON_CLOSE,
+      NULL);
+  free(probe);
+  if (handle == INVALID_HANDLE_VALUE) {
+    return false;
+  }
+  (void)CloseHandle(handle);
+  return true;
+}
+#endif
+
 bool cfile_access(const char *path, int access_flags) {
   if (!path) {
     return false;
   }
 #if defined(_WIN32)
-  wchar_t *wide = cfile_wide(path);
+  wchar_t *wide = cwin_wide(path);
   if (!wide) {
     return false;
   }
   const int mode = ((access_flags & CFILE_ACCESS_READ) ? 4 : 0) |
                    ((access_flags & CFILE_ACCESS_WRITE) ? 2 : 0);
-  const bool allowed = _waccess(wide, mode) == 0;
+  bool allowed = _waccess(wide, mode) == 0;
+  if (allowed && (access_flags & CFILE_ACCESS_WRITE)) {
+    const DWORD attributes = GetFileAttributesW(wide);
+    if (attributes != INVALID_FILE_ATTRIBUTES &&
+        (attributes & FILE_ATTRIBUTE_DIRECTORY)) {
+      allowed = cfile_can_create_in(wide);
+    }
+  }
   free(wide);
   return allowed;
 #else
@@ -301,7 +261,7 @@ bool cfile_is_directory(const char *path) {
     return false;
   }
 #if defined(_WIN32)
-  wchar_t *wide = cfile_wide(path);
+  wchar_t *wide = cwin_wide(path);
   if (!wide) {
     return false;
   }
@@ -321,7 +281,7 @@ int cfile_mkdir(const char *path) {
     return -1;
   }
 #if defined(_WIN32)
-  wchar_t *wide = cfile_wide(path);
+  wchar_t *wide = cwin_wide(path);
   if (!wide) {
     return -1;
   }
@@ -339,7 +299,7 @@ int cfile_rmdir(const char *path) {
     return -1;
   }
 #if defined(_WIN32)
-  wchar_t *wide = cfile_wide(path);
+  wchar_t *wide = cwin_wide(path);
   if (!wide) {
     return -1;
   }
@@ -374,7 +334,12 @@ static bool cfile_rename_around_open_target(const wchar_t *from,
   if (MoveFileExW(to, aside, MOVEFILE_WRITE_THROUGH)) {
     renamed = MoveFileExW(from, to, MOVEFILE_WRITE_THROUGH) != 0;
     if (renamed) {
-      (void)DeleteFileW(aside);
+      // A read-only file cannot be deleted until it is made writable, and
+      // nothing else would remove it later.
+      if (!DeleteFileW(aside) && GetLastError() == ERROR_ACCESS_DENIED &&
+          SetFileAttributesW(aside, FILE_ATTRIBUTE_NORMAL)) {
+        (void)DeleteFileW(aside);
+      }
     } else {
       const DWORD error = GetLastError();
       (void)MoveFileExW(aside, to, MOVEFILE_WRITE_THROUGH);
@@ -392,8 +357,8 @@ int cfile_rename(const char *from, const char *to) {
     return -1;
   }
 #if defined(_WIN32)
-  wchar_t *wide_from = cfile_wide(from);
-  wchar_t *wide_to = wide_from ? cfile_wide(to) : NULL;
+  wchar_t *wide_from = cwin_wide(from);
+  wchar_t *wide_to = wide_from ? cwin_wide(to) : NULL;
   if (!wide_to) {
     free(wide_from);
     return -1;
@@ -417,7 +382,7 @@ int cfile_rename(const char *from, const char *to) {
     free(wide_from);
     free(wide_to);
     free(full_to);
-    cfile_set_errno(error);
+    cwin_set_errno(error);
     return -1;
   }
   // POSIX semantics where the file system has them (NTFS on Windows 10 1607
@@ -439,7 +404,8 @@ int cfile_rename(const char *from, const char *to) {
       // Flags shares its offset with the older ReplaceIfExists field, which
       // is how the headers spell it before Windows 10 1607.
       const DWORD flags = CFILE_RENAME_FLAG_REPLACE_IF_EXISTS |
-                          CFILE_RENAME_FLAG_POSIX_SEMANTICS;
+                          CFILE_RENAME_FLAG_POSIX_SEMANTICS |
+                          CFILE_RENAME_FLAG_IGNORE_READONLY_ATTRIBUTE;
       memcpy(info, &flags, sizeof(flags));
       info->RootDirectory = NULL;
       info->FileNameLength = (DWORD)name_bytes;
@@ -472,7 +438,7 @@ int cfile_rename(const char *from, const char *to) {
   free(wide_to);
   free(full_to);
   if (!renamed) {
-    cfile_set_errno(error);
+    cwin_set_errno(error);
     return -1;
   }
   return 0;
@@ -560,7 +526,7 @@ static wchar_t *cfile_read_link(const wchar_t *link) {
                   FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS,
                   NULL);
   if (handle == INVALID_HANDLE_VALUE) {
-    cfile_set_errno(GetLastError());
+    cwin_set_errno(GetLastError());
     return NULL;
   }
   unsigned char *buffer = malloc(CFILE_REPARSE_BUFFER_BYTES);
@@ -578,7 +544,7 @@ static wchar_t *cfile_read_link(const wchar_t *link) {
     if (read) {
       errno = EINVAL;
     } else {
-      cfile_set_errno(error);
+      cwin_set_errno(error);
     }
     return NULL;
   }
@@ -647,7 +613,7 @@ static char *cfile_final_path(const wchar_t *wide, DWORD *error) {
   *error = ERROR_SUCCESS;
   if (final_path &&
       GetFinalPathNameByHandleW(handle, final_path, length, 0) < length) {
-    resolved = cfile_narrow(final_path);
+    resolved = cwin_narrow(final_path);
   } else {
     *error = GetLastError();
   }
@@ -661,7 +627,7 @@ static char *cfile_final_path(const wchar_t *wide, DWORD *error) {
 // yet is returned as given, and a link to a file that does not exist yet
 // resolves to that file, which the write creates, as on POSIX.
 static char *cfile_resolve_destination(const char *path) {
-  wchar_t *current = cfile_wide(path);
+  wchar_t *current = cwin_wide(path);
   for (int links = 0; current; links++) {
     DWORD error = ERROR_SUCCESS;
     char *resolved = cfile_final_path(current, &error);
@@ -673,14 +639,14 @@ static char *cfile_resolve_destination(const char *path) {
     if (error != ERROR_FILE_NOT_FOUND && error != ERROR_PATH_NOT_FOUND &&
         error != ERROR_CANT_RESOLVE_FILENAME) {
       free(current);
-      cfile_set_errno(error);
+      cwin_set_errno(error);
       return NULL;
     }
     // Nothing there, or a link to something that is not there (yet).
     const DWORD attributes = GetFileAttributesW(current);
     if (attributes == INVALID_FILE_ATTRIBUTES ||
         !(attributes & FILE_ATTRIBUTE_REPARSE_POINT)) {
-      char *destination = cfile_narrow(current);
+      char *destination = cwin_narrow(current);
       free(current);
       return destination;
     }
@@ -1014,7 +980,7 @@ bool cfile_identity(const char *path, CFileIdentity *identity) {
   // _wstat64 gives no inode (st_ino is always 0), whole seconds, and the
   // creation time as st_ctime; the handle gives the file index, and the last
   // write and change times to 100 ns.
-  wchar_t *wide = cfile_wide(path);
+  wchar_t *wide = cwin_wide(path);
   if (!wide) {
     return false;
   }
@@ -1024,7 +990,7 @@ bool cfile_identity(const char *path, CFileIdentity *identity) {
       OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
   free(wide);
   if (handle == INVALID_HANDLE_VALUE) {
-    cfile_set_errno(GetLastError());
+    cwin_set_errno(GetLastError());
     return false;
   }
   BY_HANDLE_FILE_INFORMATION file_information;
@@ -1036,7 +1002,7 @@ bool cfile_identity(const char *path, CFileIdentity *identity) {
   const DWORD error = GetLastError();
   (void)CloseHandle(handle);
   if (!known) {
-    cfile_set_errno(error);
+    cwin_set_errno(error);
     return false;
   }
   identity->size = (int64_t)(((uint64_t)file_information.nFileSizeHigh << 32) |
@@ -1075,7 +1041,7 @@ bool cfile_free_bytes(const char *directory, int64_t *free_bytes) {
   }
 #if defined(_WIN32)
   ULARGE_INTEGER available;
-  wchar_t *wide = cfile_wide(directory);
+  wchar_t *wide = cwin_wide(directory);
   if (!wide) {
     return false;
   }

@@ -1,5 +1,6 @@
 #include "cpath.h"
 
+#include "cwin.h"
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -138,13 +139,10 @@ char *cpath_user_data_dir(void) {
   if (!local || !local[0]) {
     return NULL;
   }
-  const int bytes =
-      WideCharToMultiByte(CP_UTF8, 0, local, -1, NULL, 0, NULL, NULL);
-  char *base = bytes > 0 ? malloc((size_t)bytes) : NULL;
+  char *base = cwin_narrow(local);
   if (!base) {
     return NULL;
   }
-  (void)WideCharToMultiByte(CP_UTF8, 0, local, -1, base, bytes, NULL, NULL);
   static const char suffix[] = "\\MAGPIE";
   const size_t size = strlen(base) + sizeof(suffix);
   char *directory = malloc(size);
@@ -172,15 +170,8 @@ char *cpath_executable_dir(void) {
       return NULL;
     }
     if (length < capacity) {
-      const int bytes =
-          WideCharToMultiByte(CP_UTF8, 0, wide, -1, NULL, 0, NULL, NULL);
-      char *path = bytes > 0 ? malloc((size_t)bytes) : NULL;
-      char *directory = NULL;
-      if (path) {
-        (void)WideCharToMultiByte(CP_UTF8, 0, wide, -1, path, bytes, NULL,
-                                  NULL);
-        directory = cpath_directory_of(path);
-      }
+      char *path = cwin_narrow(wide);
+      char *directory = path ? cpath_directory_of(path) : NULL;
       free(path);
       free(wide);
       return directory;

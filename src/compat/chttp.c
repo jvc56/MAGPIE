@@ -1,5 +1,6 @@
 #include "chttp.h"
 
+#include "cwin.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -45,17 +46,6 @@ void chttp_request(const ChttpRequest *request, ChttpResponse *response,
 #include <winhttp.h>
 
 bool chttp_is_available(void) { return true; }
-
-// Widens a UTF-8 string for the WinHTTP API. Caller frees.
-static wchar_t *widen(const char *text) {
-  const int length = MultiByteToWideChar(CP_UTF8, 0, text, -1, NULL, 0);
-  if (length <= 0) {
-    return NULL;
-  }
-  wchar_t *wide = (wchar_t *)malloc_or_die(sizeof(wchar_t) * (size_t)length);
-  MultiByteToWideChar(CP_UTF8, 0, text, -1, wide, length);
-  return wide;
-}
 
 // Everything WinHTTP hands back that needs closing/freeing regardless of
 // where chttp_win32_perform_request stops, so chttp_request can clean it all
@@ -154,7 +144,7 @@ static bool chttp_win32_perform_request(const ChttpRequest *request,
   }
 
   for (int i = 0; i < request->num_headers; i++) {
-    wchar_t *wide_header = widen(request->headers[i]);
+    wchar_t *wide_header = cwin_wide(request->headers[i]);
     if (wide_header) {
       WinHttpAddRequestHeaders(resources->handle, wide_header, (DWORD)-1,
                                WINHTTP_ADDREQ_FLAG_ADD);
@@ -222,7 +212,7 @@ void chttp_request(const ChttpRequest *request, ChttpResponse *response,
   char *url = strstr(request->url, "://")
                   ? string_duplicate(request->url)
                   : get_formatted_string("http://%s", request->url);
-  wchar_t *wide_url = widen(url);
+  wchar_t *wide_url = cwin_wide(url);
   free(url);
   if (!wide_url) {
     error_stack_push(

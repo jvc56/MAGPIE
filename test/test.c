@@ -31,6 +31,7 @@
 #include "convert_test.h"
 #include "create_data_test.h"
 #include "cross_set_test.h"
+#include "data_fetch_test.h"
 #include "dawg_packed_test.h"
 #include "embedding_lifecycle_test.h"
 #include "endgame_test.h"
@@ -155,6 +156,7 @@ static TestEntry test_table[] = {
     {"stablesort", test_stable_sort},
     {"compat", test_compat},
     {"gzipreader", test_gzip_reader},
+    {"datafetch", test_data_fetch},
     {"bai", test_bai},
     {"baiutil", test_bai_utility},
     {"command", test_command},

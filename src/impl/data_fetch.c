@@ -2,6 +2,7 @@
 
 #include "../compat/cfile.h"
 #include "../compat/chttp.h"
+#include "../compat/cpath.h"
 #include "../ent/board_layout.h"
 #include "../ent/data_filepaths.h"
 #include "../util/gzip_reader.h"
@@ -99,25 +100,37 @@ static bool data_fetch_is_safe_path(const char *path) {
   }
 }
 
-// Creates `directory` and every directory on the way to it.
+// Creates `directory` and every directory on the way to it, splitting it at
+// either separator on Windows. Works back from the end, so a part that
+// already exists and cannot be made (a drive, "\\server\share") is never
+// made.
 static bool data_fetch_make_directories(const char *directory) {
-  char *prefix = string_duplicate(directory);
-  bool made = true;
-  for (char *character = prefix + 1; made; character++) {
-    const bool at_end = *character == '\0';
-    if (*character != '/' && !at_end) {
-      continue;
-    }
-    *character = '\0';
-    made = cfile_is_directory(prefix) || cfile_mkdir(prefix) == 0 ||
-           errno == EEXIST;
-    if (at_end) {
-      break;
-    }
-    *character = '/';
+  if (!directory[0]) {
+    errno = ENOENT;
+    return false;
   }
-  free(prefix);
-  return made;
+  if (cfile_is_directory(directory)) {
+    return true;
+  }
+  size_t parent_length = strlen(directory);
+  while (parent_length > 0 &&
+         !cpath_is_separator(directory[parent_length - 1])) {
+    parent_length--;
+  }
+  while (parent_length > 0 &&
+         cpath_is_separator(directory[parent_length - 1])) {
+    parent_length--;
+  }
+  if (parent_length > 0) {
+    char *parent = get_formatted_string("%.*s", (int)parent_length, directory);
+    const bool made_parent = data_fetch_make_directories(parent);
+    free(parent);
+    if (!made_parent) {
+      return false;
+    }
+  }
+  return cfile_mkdir(directory) == 0 ||
+         (errno == EEXIST && cfile_is_directory(directory));
 }
 
 static bool data_fetch_make_parent_directories(const char *path) {
@@ -313,8 +326,23 @@ static bool tar_start_entry(TarExtractor *tar) {
   const uint64_t size = tar_size(tar->header);
   tar->remaining = size;
   tar->padding = (TAR_BLOCK_BYTES - size % TAR_BLOCK_BYTES) % TAR_BLOCK_BYTES;
-  // Every entry is data/ or under it; anything else is not a MAGPIE data
-  // tarball.
+  // A pax header, for the next entry ('x') or the whole archive ('g', which
+  // git archive writes as pax_global_header), holds only what MAGPIE has no
+  // use for, such as times and owners, so it is skipped with its contents
+  // whatever it is called. A GNU long name ('L', 'K', called ././@LongLink)
+  // renames the next entry, which this reader cannot do, so rather than
+  // unpacking that entry under its cut-short name it stops.
+  if (type == 'x' || type == 'g') {
+    free(path);
+    return true;
+  }
+  if (type == 'L' || type == 'K') {
+    free(path);
+    return tar_fail(tar, string_duplicate("the data tarball has a GNU long "
+                                          "name, which MAGPIE cannot read"));
+  }
+  // Every other entry is data/ or under it; anything else is not a MAGPIE
+  // data tarball.
   const char *relative = tar_relative_path(path);
   if (!relative) {
     const bool started = tar_fail(
@@ -338,7 +366,8 @@ static bool tar_start_entry(TarExtractor *tar) {
   } else if (type == '2') {
     started = tar_add_link(tar, relative, destination);
   }
-  // Anything else (a pax or GNU header, say) is skipped with its contents.
+  // Any other type under data/ (a hard link or a device, which MAGPIE-DATA's
+  // tarballs do not have) is skipped with its contents.
   free(destination);
   free(path);
   return started;
@@ -494,6 +523,11 @@ static void data_fetch_unpack(const char *archive_path, const char *data_dir,
   }
   string_list_destroy(tar.link_paths);
   string_list_destroy(tar.link_targets);
+}
+
+void data_fetch_unpack_archive(const char *archive_path, const char *data_dir,
+                               ErrorStack *error_stack) {
+  data_fetch_unpack(archive_path, data_dir, NULL, NULL, error_stack);
 }
 
 // Whether `data_dir` records that it holds data version DATA_FETCH_VERSION.

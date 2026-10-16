@@ -10,6 +10,7 @@
 #include "../src/util/fileproxy.h"
 #include "../src/util/io_util.h"
 #include "../src/util/string_util.h"
+#include "test_platform.h"
 #include <assert.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -489,6 +490,45 @@ static void test_wide_glyphs(void) {
   remove_or_fail(compat_text_path);
 }
 
+static int count_directory_entries(const char *directory) {
+  CDir *dir = cdir_open(directory);
+  assert(dir);
+  int count = 0;
+  while (cdir_next(dir) != NULL) {
+    count++;
+  }
+  cdir_close(dir);
+  return count;
+}
+
+// A directory this process can write is reported writable, without leaving
+// the file Windows needs to find out. Renaming over a read-only file replaces
+// it, as POSIX rename does (the directory's permissions decide, not the
+// file's), and leaves nothing beside it.
+static void test_write_access_and_read_only_targets(void) {
+  char *directory = test_platform_make_temporary_directory("compat_access");
+  assert(cfile_access(directory, CFILE_ACCESS_WRITE));
+  assert(count_directory_entries(directory) == 0);
+
+  char *target = get_formatted_string("%s/target", directory);
+  char *source = get_formatted_string("%s/source", directory);
+  write_fixture(target, "old", 3);
+  write_fixture(source, "new!", 4);
+  assert(test_platform_set_permissions(target, 0444));
+  assert(cfile_rename(source, target) == 0);
+  size_t size = 0;
+  char *bytes = read_fixture(target, &size);
+  assert(size == 4 && memcmp(bytes, "new!", 4) == 0);
+  free(bytes);
+  assert(count_directory_entries(directory) == 1);
+
+  (void)test_platform_set_permissions(target, 0644);
+  test_platform_remove_directory_tree(directory);
+  free(source);
+  free(target);
+  free(directory);
+}
+
 // A nap lasts at least as long as asked by the monotonic clock, also for
 // lengths that are not whole milliseconds or clock ticks, where Windows would
 // otherwise wake early.
@@ -521,4 +561,5 @@ void test_compat(void) {
   test_mapping();
   test_wide_glyphs();
   test_nap_lasts_at_least_the_request();
+  test_write_access_and_read_only_targets();
 }

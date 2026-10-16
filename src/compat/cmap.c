@@ -1,5 +1,6 @@
 #include "cmap.h"
 
+#include "cwin.h"
 #include <errno.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -24,16 +25,10 @@ bool cmap_open(CMap *map, const char *path, bool random_access) {
   }
 #if defined(_WIN32)
   (void)random_access;
-  const int wide_length =
-      MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path, -1, NULL, 0);
-  wchar_t *wide =
-      wide_length > 0 ? malloc(sizeof(wchar_t) * (size_t)wide_length) : NULL;
+  wchar_t *wide = cwin_wide(path);
   if (!wide) {
-    errno = wide_length > 0 ? ENOMEM : EINVAL;
     return false;
   }
-  (void)MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path, -1, wide,
-                            wide_length);
   // Shares deletion like every other open, so a mapped file can still be
   // renamed over (whether the file system then lets go of it is its own
   // business: see cfile_rename).
@@ -42,7 +37,7 @@ bool cmap_open(CMap *map, const char *path, bool random_access) {
       NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
   free(wide);
   if (file == INVALID_HANDLE_VALUE) {
-    errno = GetLastError() == ERROR_FILE_NOT_FOUND ? ENOENT : EACCES;
+    cwin_set_errno(GetLastError());
     return false;
   }
   LARGE_INTEGER size;
