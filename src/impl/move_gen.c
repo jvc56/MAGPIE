@@ -1,8 +1,8 @@
 #include "move_gen.h"
 
 #include "../compat/cpthread.h"
+#include "../compat/cpthread_defs.h"
 #include "../def/board_defs.h"
-#include "../def/cpthread_defs.h"
 #include "../def/cross_set_defs.h"
 #include "../def/equity_defs.h"
 #include "../def/game_defs.h"
@@ -63,7 +63,7 @@ const WMPEntry wmp_entry_unresolved_sentinel = {0};
 // live thread currently owns that slot. See get_movegen below.
 static MoveGen *cached_gens[MAX_THREADS];
 static bool slot_in_use[MAX_THREADS];
-static cpthread_mutex_t cache_mutex = PTHREAD_MUTEX_INITIALIZER; // NOLINT
+static cpthread_mutex_t cache_mutex = CPTHREAD_MUTEX_INITIALIZER;
 // The move generations counted on gens gen_destroy_cache has freed, so the
 // process's count never goes back (gen_get_movegen_count). Under cache_mutex.
 static uint64_t freed_gens_movegen_count = 0;

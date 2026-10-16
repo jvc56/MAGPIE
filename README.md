@@ -41,6 +41,23 @@ You should now be able to run the compiled MAGPIE executable:
 
 This will start MAGPIE in async interactive mode by default. For more details on different ways to run MAGPIE, see [Execution Modes](#execution-modes).
 
+### Windows
+
+Windows 10 (version 1903 or later) and Windows 11, on x64 or ARM, run MAGPIE as a single `.exe` with nothing else to install.
+
+1. From the [Releases](https://github.com/jvc56/MAGPIE/releases) page, download `magpie-<version>-windows-x64.exe` (most PCs) or `magpie-<version>-windows-arm64.exe` (Windows on ARM, such as Snapdragon laptops), and put it in a folder of its own, say `Documents\MAGPIE`.
+2. Optionally, check the download against the `.sha256` file published beside it. In PowerShell:
+   ```
+   Get-FileHash .\magpie-<version>-windows-x64.exe -Algorithm SHA256
+   ```
+   The hash printed must match the one in the `.sha256` file.
+3. Double-click the `.exe`. The release is not code-signed, so the first time Windows shows **Windows protected your PC**: click **More info**, then **Run anyway**. (If your antivirus flags the file, please [open an issue](https://github.com/jvc56/MAGPIE/issues); unsigned programs that download files are sometimes misidentified.)
+4. MAGPIE looks for its data in a `data` folder beside it and offers to download it (about 195 MB, the same data set `download_data.sh` fetches): answer `y`. You can also run `data fetch` at any time. The first time you use a lexicon, MAGPIE builds that lexicon's wordmap, which takes a few seconds and makes move generation faster afterwards.
+
+From there MAGPIE works exactly as it does on Linux and macOS: everything in [Usage](#usage) applies. To run it from a terminal, open PowerShell or Command Prompt in its folder and run `.\magpie-<version>-windows-x64.exe`, with commands as arguments if you like.
+
+To build the Windows executables yourself on Linux or macOS, with Docker installed, run `make windows` (add `WINDOWS_ARCH=aarch64` for ARM); `bin/magpie.exe` is the result.
+
 ### Release builds
 
 The production release is a native profile-guided build. It needs Clang and

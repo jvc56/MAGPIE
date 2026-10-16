@@ -51,28 +51,6 @@ static inline int ctime_nanosleep(TimeSpec *req, TimeSpec *rem) {
   return nanosleep(req, rem);
 }
 
-static inline void ctime_nap(double const seconds) {
-  long const secs = (long)seconds;
-  double const frac = seconds - (double)secs;
-  TimeSpec req;
-  TimeSpec rem;
-
-  if (seconds <= 0.0) {
-    return;
-  }
-
-  req.tv_sec = (time_t)secs;
-  req.tv_nsec = (long)(1000000000.0 * frac);
-  if (req.tv_nsec > 999999999L) {
-    req.tv_nsec = 999999999L;
-  }
-
-  rem.tv_sec = (time_t)0;
-  rem.tv_nsec = 0L;
-
-  ctime_nanosleep(&req, &rem);
-}
-
 static inline void ctimer_clock_gettime_realtime(TimeSpec *ts) {
   clock_gettime(CLOCK_REALTIME, ts);
 }
@@ -83,6 +61,29 @@ static inline int64_t ctimer_monotonic_ns(void) {
   TimeSpec ts;
   clock_gettime(CLOCK_MONOTONIC, &ts);
   return (int64_t)ts.tv_sec * 1000000000LL + (int64_t)ts.tv_nsec;
+}
+
+// Sleeps at least `seconds` by CLOCK_MONOTONIC. On Windows, nanosleep sleeps
+// in whole milliseconds, can wake up to a clock tick (about 15.6 ms) early,
+// and returns at once for less than a millisecond; elsewhere a signal can cut
+// it short. So it sleeps again for what is left, rounded up to a whole
+// millisecond, which blocks every time rather than spinning.
+static inline void ctime_nap(double const seconds) {
+  if (seconds <= 0.0) {
+    return;
+  }
+  const int64_t deadline_ns =
+      ctimer_monotonic_ns() + (int64_t)(seconds * 1000000000.0);
+  for (;;) {
+    const int64_t left_ns = deadline_ns - ctimer_monotonic_ns();
+    if (left_ns <= 0) {
+      return;
+    }
+    const int64_t left_ms = (left_ns + 999999) / 1000000;
+    TimeSpec req = {.tv_sec = (time_t)(left_ms / 1000),
+                    .tv_nsec = (long)((left_ms % 1000) * 1000000)};
+    (void)ctime_nanosleep(&req, NULL);
+  }
 }
 
 #endif

@@ -1,9 +1,9 @@
 #include "rack_info_table_maker.h"
 
 #include "../compat/cpthread.h"
+#include "../compat/cpthread_defs.h"
 #include "../def/bit_rack_defs.h"
 #include "../def/board_defs.h"
-#include "../def/cpthread_defs.h"
 #include "../def/equity_defs.h"
 #include "../def/klv_defs.h"
 #include "../def/kwg_defs.h"

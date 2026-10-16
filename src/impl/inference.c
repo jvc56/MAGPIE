@@ -1,7 +1,7 @@
 #include "inference.h"
 
 #include "../compat/cpthread.h"
-#include "../def/cpthread_defs.h"
+#include "../compat/cpthread_defs.h"
 #include "../def/equity_defs.h"
 #include "../def/game_history_defs.h"
 #include "../def/inference_defs.h"
@@ -293,7 +293,7 @@ void complete_inference_setup(Inference *inference, const InferenceArgs *args) {
     string_builder_add_rack(sb, args->target_known_rack, ld, false);
     string_builder_add_string(sb, ") from the bag");
     char *err_msg = string_builder_dump_and_destroy(sb, NULL);
-    log_fatal(err_msg);
+    log_fatal("%s", err_msg);
     free(err_msg);
   }
 
@@ -307,7 +307,7 @@ void complete_inference_setup(Inference *inference, const InferenceArgs *args) {
     string_builder_add_rack(sb, args->nontarget_known_rack, ld, false);
     string_builder_add_string(sb, ") from the bag");
     char *err_msg = string_builder_dump_and_destroy(sb, NULL);
-    log_fatal(err_msg);
+    log_fatal("%s", err_msg);
     free(err_msg);
   }
 
@@ -598,7 +598,7 @@ void verify_inference_args(const InferenceArgs *args, const Game *game_dup,
                               game_get_ld(game_dup), false);
       string_builder_add_string(sb, ") not available in the bag");
       char *err_msg = string_builder_dump_and_destroy(sb, NULL);
-      log_fatal(err_msg);
+      log_fatal("%s", err_msg);
       free(err_msg);
       return;
     }

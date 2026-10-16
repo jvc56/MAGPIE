@@ -1,6 +1,6 @@
 #include "word_info_table.h"
 
-#include "../compat/atomic_file.h"
+#include "../compat/cfile.h"
 #include "../compat/endian_io.h"
 #include "../def/board_defs.h"
 #include "../def/letter_distribution_defs.h"
@@ -16,7 +16,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
 
 // v3: version, dimension, two zero bytes, KWG hash, ordinary trie sections.
 // v4: byte 2 is flags (bit 0: positional masks), byte 3 remains zero. The
@@ -284,57 +283,30 @@ void word_info_table_write_to_file(const WordInfoTable *wit,
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
-  char *destination = NULL;
-  char *temporary_filename = NULL;
-  const int descriptor =
-      atomic_file_create(filename, &destination, &temporary_filename);
-  if (descriptor == -1) {
+  remove_stale_temporary_siblings(filename);
+  CFileAtomicWrite atomic_write;
+  FILE *stream = cfile_atomic_write_begin(&atomic_write, filename);
+  if (stream == NULL) {
     error_stack_push(
         error_stack, ERROR_STATUS_RW_FAILED_TO_OPEN_STREAM,
         get_formatted_string("could not create word info table beside %s: %s",
                              filename, strerror(errno)));
-    free(destination);
-    free(temporary_filename);
-    return;
-  }
-  FILE *stream = fdopen(descriptor, "wb");
-  if (stream == NULL) {
-    const int error_number = errno;
-    (void)close(descriptor);
-    (void)remove(temporary_filename);
-    error_stack_push(
-        error_stack, ERROR_STATUS_RW_FAILED_TO_OPEN_STREAM,
-        get_formatted_string("could not open word info table output %s: %s",
-                             filename, strerror(error_number)));
-    free(destination);
-    free(temporary_filename);
     return;
   }
   word_info_table_write_to_stream(wit, stream, error_stack);
   bool written = error_stack_is_empty(error_stack);
   int error_number = 0;
-  if (fclose(stream) != 0) {
-    if (written) {
-      error_number = errno;
-    }
-    written = false;
-  }
-  if (written && rename(temporary_filename, destination) != 0) {
+  if (!cfile_atomic_write_end(&atomic_write, written) && written) {
     error_number = errno;
     written = false;
   }
-  if (!written) {
-    (void)remove(temporary_filename);
-    if (error_stack_is_empty(error_stack)) {
-      error_stack_push(error_stack, ERROR_STATUS_RW_WRITE_ERROR,
-                       get_formatted_string(
-                           "could not write word info table %s: %s", filename,
-                           error_number != 0 ? strerror(error_number)
-                                             : "unknown I/O failure"));
-    }
+  if (!written && error_stack_is_empty(error_stack)) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_RW_WRITE_ERROR,
+        get_formatted_string("could not write word info table %s: %s", filename,
+                             error_number != 0 ? strerror(error_number)
+                                               : "unknown I/O failure"));
   }
-  free(destination);
-  free(temporary_filename);
 }
 
 static bool wit_read_trie(WitTrie *trie, int length, size_t *remaining,
@@ -373,11 +345,8 @@ static bool wit_read_trie(WitTrie *trie, int length, size_t *remaining,
 // The caller owns the stream and clears partial table allocations on failure.
 static bool wit_read_stream(WordInfoTable *wit, FILE *stream,
                             const char **message, error_code_t *status) {
-  if (fseek(stream, 0, SEEK_END) != 0) {
-    return false;
-  }
-  const long file_size = ftell(stream);
-  if (file_size < 12 || fseek(stream, 0, SEEK_SET) != 0) {
+  int64_t file_size = 0;
+  if (!cfile_stream_size(stream, &file_size) || file_size < 12) {
     return false;
   }
   uint8_t header[4];

@@ -55,6 +55,18 @@ endif
 # records it alongside every hash (see `magpie builders`).
 PORTABLE_MARCH ?= nehalem
 
+# A Windows build is a cross-compile with MinGW-w64 (llvm-mingw: see `make
+# windows`), recognized from the compiler's target triple. It produces .exe
+# files, links statically (one self-contained executable, no DLLs), and keeps
+# its objects apart from the host's.
+TARGET_TRIPLE := $(shell $(CC) -dumpmachine 2>/dev/null)
+# GCC says x86_64-w64-mingw32, clang x86_64-w64-windows-gnu.
+ifneq ($(findstring mingw,$(TARGET_TRIPLE))$(findstring windows,$(TARGET_TRIPLE)),)
+WINDOWS := 1
+EXE := .exe
+OBJ_TARGET_PREFIX := $(TARGET_TRIPLE)-
+endif
+
 # Key every object (and its .d fragment) by the flags that change its contents:
 # build flavor, board dim, rack size. Switching any of them selects a different
 # obj subtree instead of relinking objects compiled with mismatched flags -- so
@@ -65,9 +77,9 @@ OBJ_ROOT := obj
 # flavor is that the target is fixed, so changing it has to recompile rather
 # than relink objects built for the old one.
 ifeq ($(BUILD),portable_release)
-OBJ_DIR := $(OBJ_ROOT)/$(BUILD)-$(PORTABLE_MARCH)-b$(BOARD_DIM)-r$(RACK_SIZE)
+OBJ_DIR := $(OBJ_ROOT)/$(OBJ_TARGET_PREFIX)$(BUILD)-$(PORTABLE_MARCH)-b$(BOARD_DIM)-r$(RACK_SIZE)
 else
-OBJ_DIR := $(OBJ_ROOT)/$(BUILD)-b$(BOARD_DIM)-r$(RACK_SIZE)
+OBJ_DIR := $(OBJ_ROOT)/$(OBJ_TARGET_PREFIX)$(BUILD)-b$(BOARD_DIM)-r$(RACK_SIZE)
 endif
 
 # Profile-guided optimization data. The default lives below OBJ_ROOT so it is
@@ -134,7 +146,11 @@ SRC_OBJ_SUBDIRS := $(patsubst $(SRC_DIR)/%,$(OBJ_DIR)/$(SRC_DIR)/%,$(SRC_SUBDIRS
 TEST_SUBDIRS := $(shell find $(TEST_DIR) -type d)
 TEST_OBJ_SUBDIRS := $(patsubst $(TEST_DIR)/%,$(OBJ_DIR)/$(TEST_DIR)/%,$(TEST_SUBDIRS))
 
-ifeq ($(BUILD),thread)
+ifdef WINDOWS
+    # MinGW's sanitizer runtimes need DLLs, which a static, self-contained
+    # executable cannot use; Windows builds are checked by running the tests.
+    FSAN_ARG :=
+else ifeq ($(BUILD),thread)
     FSAN_ARG := -fsanitize=thread
 else
     FSAN_ARG := -fsanitize=address,undefined,pointer-compare,pointer-subtract
@@ -232,10 +248,28 @@ LDLIBS   := -lm
 # linking it, so a machine without libcurl still runs every offline command.
 # glibc before 2.34 keeps dlopen in a separate libdl; macOS and newer glibc
 # have it in libc.
-ifeq ($(shell uname -s),Linux)
+ifdef WINDOWS
+  # Windows 10 APIs (FileRenameInfoEx's POSIX rename, VT processing). The
+  # 8 MB main-thread stack matches Linux's default: PEG, the endgame and BAI
+  # recurse on the calling thread, and MinGW's default is 2 MB.
+  CFLAGS += -D_WIN32_WINNT=0x0A00
+  CMD_CFLAGS += -D_WIN32_WINNT=0x0A00
+  LDFLAGS += -static -Wl,--stack,8388608
+  LDLIBS += -lwinhttp
+else ifeq ($(shell uname -s),Linux)
   LDLIBS += -ldl
 endif
 
+# The resources (manifest, icon, version) linked into Windows executables.
+comma := ,
+ifdef WINDOWS
+WINDRES ?= $(subst -gcc,-windres,$(subst -clang,-windres,$(CC)))
+MAGPIE_VERSION := $(shell sed -n 's/^\#define MAGPIE_VERSION "\(.*\)"/\1/p' $(SRC_DIR)/impl/config.c)
+MAGPIE_VERSION_COMMAS := $(subst .,$(comma),$(MAGPIE_VERSION)),0
+RES_OBJ := $(OBJ_DIR)/magpie_resources.o
+endif
+
+.PHONY: windows windows_test windows_wine_test windows_image
 .PHONY: all clean iwyu release leavegen_pgo_release pgo pgo_sim pgo_peg word_frequencies \
 	pgo_toolchain_check \
 	pgo_eg peg_eg pgo_workload prepare_data libmagpie examples
@@ -280,11 +314,14 @@ endif
 examples: libmagpie
 	$(CC) -O2 -Wall -Werror examples/generate_moves.c -L$(BIN_DIR) -lmagpie $(EXAMPLE_RPATH) -o $(BIN_DIR)/generate_moves
 
-magpie: $(OBJ_SRC) $(OBJ_CMD) | $(BIN_DIR)
-	$(CC) $(LDFLAGS) $(LFLAGS) $^ $(LDLIBS) -o $(BIN_DIR)/$@
+magpie: $(OBJ_SRC) $(OBJ_CMD) $(RES_OBJ) | $(BIN_DIR)
+	$(CC) $(LDFLAGS) $(LFLAGS) $^ $(LDLIBS) -o $(BIN_DIR)/$@$(EXE)
 
-magpie_test: $(OBJ_SRC) $(OBJ_TEST) | $(BIN_DIR)
-	$(CC) $(LDFLAGS) $(LFLAGS) $^ $(LDLIBS) -o $(BIN_DIR)/$@
+magpie_test: $(OBJ_SRC) $(OBJ_TEST) $(RES_OBJ) | $(BIN_DIR)
+	$(CC) $(LDFLAGS) $(LFLAGS) $^ $(LDLIBS) -o $(BIN_DIR)/$@$(EXE)
+
+$(RES_OBJ): windows/magpie.rc windows/magpie.manifest windows/magpie.ico $(SRC_DIR)/impl/config.c | $(OBJ_DIR)
+	$(WINDRES) -I windows -DMAGPIE_VERSION_TEXT=$(MAGPIE_VERSION) -DMAGPIE_VERSION_COMMAS=$(MAGPIE_VERSION_COMMAS) $< -o $@
 
 magpie_pgo_train: $(OBJ_SRC) $(PGO_TRAIN_OBJ) | $(BIN_DIR)
 	$(CC) $(LDFLAGS) $(LFLAGS) $^ $(LDLIBS) -o $(BIN_DIR)/$@
@@ -325,6 +362,40 @@ $(BIN_DIR) $(OBJ_DIR) $(OBJ_DIR)/$(SRC_DIR) $(OBJ_DIR)/$(CMD_DIR) $(OBJ_DIR)/$(T
 
 clean:
 	@$(RM) -rv $(BIN_DIR) $(OBJ_ROOT) libmagpie_core.a
+
+# Windows executables, cross-compiled in the pinned llvm-mingw image
+# (windows/Dockerfile), so any developer with Docker can build and test them:
+#   make windows                       bin/magpie.exe, x86_64
+#   make windows WINDOWS_ARCH=aarch64  bin/magpie.exe, arm64
+#   make windows_test                  bin/magpie_test.exe
+#   make windows_wine_test TESTS=compat  run magpie_test.exe under Wine (x86_64)
+# Both use the portable build: the same instruction set as contributor
+# binaries (nehalem on x86_64; armv8-a, which every Windows on ARM device
+# meets, on arm64), so derived files hash the same as Linux builds for it.
+WINDOWS_ARCH ?= x86_64
+WINDOWS_IMAGE ?= magpie-llvm-mingw:20261006
+ifeq ($(WINDOWS_ARCH),aarch64)
+WINDOWS_MARCH := armv8-a
+else
+WINDOWS_MARCH := nehalem
+endif
+WINDOWS_MAKE := docker run --rm -u "$$(id -u):$$(id -g)" -e HOME=/tmp/wine-home \
+	-v "$(CURDIR)":/src -w /src $(WINDOWS_IMAGE) make BUILD=portable_release \
+	PORTABLE_MARCH=$(WINDOWS_MARCH) CC=$(WINDOWS_ARCH)-w64-mingw32-clang
+
+windows_image:
+	docker build -q -t $(WINDOWS_IMAGE) windows
+
+windows: windows_image
+	$(WINDOWS_MAKE) magpie
+
+windows_test: windows_image
+	$(WINDOWS_MAKE) magpie_test
+
+windows_wine_test: windows_test
+	docker run --rm -u "$$(id -u):$$(id -g)" -e HOME=/tmp/wine-home -e WINEDEBUG=-all \
+		-v "$(CURDIR)":/src -w /src $(WINDOWS_IMAGE) \
+		sh -c 'mkdir -p "$$HOME" && wine bin/magpie_test.exe $(TESTS)'
 
 # The production release is trained on static autoplay, the best general
 # profile in the measured workload matrix. Without clang there is nothing to

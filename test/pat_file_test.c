@@ -175,5 +175,5 @@ void test_pat_file(void) {
   char *data_dir = create_temp_pat_data_dir();
   test_pat_file_round_trip_all_rows(data_dir);
   test_pat_file_rejections(data_dir);
-  free(data_dir);
+  destroy_temp_pat_data_dir(data_dir);
 }

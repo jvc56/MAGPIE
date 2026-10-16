@@ -2,6 +2,7 @@
 
 #include "../compat/cfile.h"
 #include "../compat/chttp.h"
+#include "../compat/cpath.h"
 #include "../compat/ctime.h"
 #include "../compat/endian_conv.h"
 #include "../compat/memory_info.h"
@@ -74,6 +75,7 @@
 #include "contribute.h"
 #include "contribute_tables.h"
 #include "convert.h"
+#include "data_fetch.h"
 #include "endgame.h"
 #include "gameplay.h"
 #include "gcg.h"
@@ -95,8 +97,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/stat.h>
-#include <sys/time.h>
 #include <time.h>
 
 enum {
@@ -310,6 +310,7 @@ typedef enum {
   ARG_TOKEN_ANALYZE,
   ARG_TOKEN_VERSION,
   ARG_TOKEN_BUILDERS,
+  ARG_TOKEN_DATA,
   // This must always be the last
   // token for the count to be accurate
   NUMBER_OF_ARG_TOKENS
@@ -335,6 +336,8 @@ typedef struct ParsedArg {
 
 struct Config {
   char *data_paths;
+  // See ConfigArgs.
+  bool build_missing_wordmaps;
   // PEG "never prune" move list (space-free UCGI, comma-separated), persisted
   // across commands since pargs reset each parse. NULL = no protected moves.
   // The "only solve" restriction is instead a per-invocation positional
@@ -1069,7 +1072,7 @@ void config_load_uint64(const Config *config, arg_token_t arg_token,
     error_stack_push(
         error_stack, ERROR_STATUS_CONFIG_LOAD_INT_ARG_OUT_OF_BOUNDS,
         get_formatted_string(
-            "integer value for %s must be at least %lu, but got %s",
+            "integer value for %s must be at least %" PRIu64 ", but got %s",
             config_get_parg_name(config, arg_token), min, int_str));
     return;
   } else {
@@ -1159,6 +1162,34 @@ void execute_version(Config *config,
 char *str_api_version(Config __attribute__((unused)) * config,
                       ErrorStack __attribute__((unused)) * error_stack) {
   return string_duplicate(MAGPIE_VERSION "\n");
+}
+
+static void config_print_data_fetch_progress(void *context,
+                                             const char *message) {
+  thread_control_print_formatted((ThreadControl *)context, "%s\n", message);
+}
+
+// data fetch [<base url>]: downloads the data into the first data path. See
+// src/impl/data_fetch.h.
+void execute_data(Config *config, ErrorStack *error_stack) {
+  const char *subcommand = config_get_parg_value(config, ARG_TOKEN_DATA, 0);
+  if (!strings_iequal(subcommand, "fetch")) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_CONFIG_LOAD_UNRECOGNIZED_ARG,
+        get_formatted_string("unrecognized data command '%s' (try data fetch)",
+                             subcommand));
+    return;
+  }
+  char *data_dir = cpath_list_first(config->data_paths);
+  data_fetch(config_get_parg_value(config, ARG_TOKEN_DATA, 1), data_dir,
+             config_print_data_fetch_progress, config->thread_control,
+             error_stack);
+  free(data_dir);
+}
+
+char *str_api_data(Config *config, ErrorStack *error_stack) {
+  execute_data(config, error_stack);
+  return empty_string();
 }
 
 // The identity of every builder in this binary, as one JSON object.
@@ -1989,7 +2020,12 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       examples[1] = "./data:./testdata:./other_dir";
       text =
           "Designates the data file directories ordered by search precedence. "
-          "Directories listed earlier are preferred when locating files.";
+          "Directories listed earlier are preferred when locating files. "
+          "Directories are separated by ':', and on Windows by ';' too; "
+          "there, a ':' after one letter at the start of a directory "
+          "(C:\\data, "
+          "\\\\?\\C:\\data) belongs to a drive, so separate directories "
+          "named by one letter with ';'.";
       break;
     case ARG_TOKEN_BINGO_BONUS:
       usages[0] = "<bingo_bonus>";
@@ -2816,6 +2852,16 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       usages[0] = "";
       text = "Prints the version of the magpie executable.";
       break;
+    case ARG_TOKEN_DATA:
+      usages[0] = "fetch [<base_url>]";
+      examples[0] = "fetch";
+      text = "Downloads the data set this version of MAGPIE goes with (lexica, "
+             "leaves, layouts, letter distributions, win percentages; about "
+             "195 MB) into the first data path, as download_data.sh does, "
+             "checking every part against the SHA-256 MAGPIE pins for it. Does "
+             "nothing if that data version is already there. <base_url> "
+             "fetches the same parts from a mirror.";
+      break;
     case ARG_TOKEN_BUILDERS:
       usages[0] = "";
       text = "Prints, as JSON, the versions of the builders that derive one "
@@ -2939,6 +2985,7 @@ char *impl_help(Config *config, ErrorStack *error_stack) {
         ARG_TOKEN_CONVERT,     /* convert */
         ARG_TOKEN_CONTRIBUTE,  /* contribute */
         ARG_TOKEN_CREATE_DATA, /* createdata */
+        ARG_TOKEN_DATA,        /* data */
         ARG_TOKEN_HELP,        /* help */
         ARG_TOKEN_SET,         /* setoptions */
         ARG_TOKEN_VERSION,     /* version */
@@ -4816,21 +4863,19 @@ void impl_peg(Config *config, ErrorStack *error_stack) {
 // <ts> is the current wall-clock time down to microseconds. Returns the path
 // (caller frees) or NULL on failure.
 static char *config_write_peg_chart_file(const char *contents) {
-  mkdir("data", 0777);
-  mkdir("data/pegcharts", 0777);
-  // struct timeval comes transitively from <sys/time.h> (included), but
-  // include-cleaner maps it to a glibc-internal header that cannot be included
-  // directly. Matches the clock-API suppression in sim_benchmark_test.c.
-  struct timeval now_tv; // NOLINT(misc-include-cleaner)
-  gettimeofday(&now_tv, NULL);
-  const time_t now_secs = now_tv.tv_sec;
-  char stamp[32];
-  stamp[strftime(stamp, sizeof(stamp), "%Y%m%d_%H%M%S", localtime(&now_secs))] =
-      '\0';
+  (void)cfile_mkdir("data");
+  (void)cfile_mkdir("data/pegcharts");
+  TimeSpec now;
+  ctimer_clock_gettime_realtime(&now);
+  struct tm local;
+  char stamp[32] = "00000000_000000";
+  if (cfile_localtime(now.tv_sec, &local)) {
+    stamp[strftime(stamp, sizeof(stamp), "%Y%m%d_%H%M%S", &local)] = '\0';
+  }
   char *path = get_formatted_string("data/pegcharts/outcomes_%s_%06ld.txt",
-                                    stamp, (long)now_tv.tv_usec);
+                                    stamp, (long)(now.tv_nsec / 1000));
   ErrorStack *error_stack = error_stack_create();
-  write_string_to_file(path, "w", contents, error_stack);
+  write_string_to_file(path, "wb", contents, error_stack);
   const bool ok = error_stack_is_empty(error_stack);
   error_stack_destroy(error_stack);
   if (!ok) {
@@ -7560,6 +7605,113 @@ char *get_default_klv_name(const char *lexicon_name) {
   return string_duplicate(lexicon_name);
 }
 
+// Whether a wordmap can be built for `lexicon`: not for the 21x21 board, not
+// for a lexicon made for it (_super), and not for Polish, as
+// convert_lexica.sh skips them; and returns why not, or NULL.
+static const char *config_wordmap_unsupported_reason(const char *lexicon) {
+  // NOLINTNEXTLINE(misc-redundant-expression)
+  if (BOARD_DIM != DEFAULT_BOARD_DIM || strstr(lexicon, "_super") != NULL) {
+    return "wordmaps do not support this board size";
+  }
+  if (has_iprefix("OSPS", lexicon)) {
+    return "wordmaps do not support this lexicon";
+  }
+  return NULL;
+}
+
+// Makes the wordmap for player `player_index`'s lexicon `lexicon` available
+// to load, building it from the lexicon's .kwg if it is not on disk: wordmaps
+// are not downloaded (one is about thirty times the size of its lexicon), so
+// the first use of a lexicon builds its wordmap, once. Returns `lexicon` when
+// the wordmap is there to load, or NULL when the player plays without one --
+// the lexicon has no wordmap support, the data directory cannot be written,
+// there is not room for it, or the build failed -- having said why in one
+// line. A NULL `lexicon` (no wordmap wanted) is returned as is.
+static const char *config_wordmap_for_first_use(Config *config,
+                                                int player_index,
+                                                const char *lexicon) {
+  if (!lexicon) {
+    return NULL;
+  }
+  // Every command comes through here, so the loaded wordmap is checked before
+  // anything on disk.
+  const char *loaded = players_data_get_data_name(
+      config->players_data, PLAYERS_DATA_TYPE_WMP, player_index);
+  if (loaded && strings_equal(loaded, lexicon)) {
+    return lexicon;
+  }
+  ErrorStack *errors = error_stack_create();
+  char *existing = data_filepaths_get_readable_filename(
+      config->data_paths, lexicon, DATA_FILEPATH_TYPE_WORDMAP, errors);
+  const bool on_disk = error_stack_is_empty(errors);
+  free(existing);
+  error_stack_reset(errors);
+  if (on_disk) {
+    error_stack_destroy(errors);
+    return lexicon;
+  }
+  const char *why_not = config_wordmap_unsupported_reason(lexicon);
+  char *built_path = NULL;
+  char *kwg_path = NULL;
+  if (!why_not) {
+    built_path = data_filepaths_get_writable_filename(
+        config->data_paths, lexicon, DATA_FILEPATH_TYPE_WORDMAP, errors);
+    if (!error_stack_is_empty(errors)) {
+      why_not = "its data directory cannot be written";
+    }
+    error_stack_reset(errors);
+  }
+  if (!why_not) {
+    kwg_path = data_filepaths_get_readable_filename(
+        config->data_paths, lexicon, DATA_FILEPATH_TYPE_KWG, errors);
+    CFileIdentity kwg_identity;
+    int64_t free_bytes = 0;
+    char *directory = get_dirpath_from_filepath(built_path);
+    // A wordmap runs to about thirty times its lexicon's .kwg; ask for forty.
+    if (error_stack_is_empty(errors) &&
+        cfile_identity(kwg_path, &kwg_identity) &&
+        cfile_free_bytes(directory, &free_bytes) &&
+        free_bytes < kwg_identity.size * 40) {
+      why_not = "there is not enough disk space for it";
+    }
+    free(directory);
+    error_stack_reset(errors);
+  }
+  if (!why_not) {
+    thread_control_print_formatted(
+        config->thread_control,
+        "building the wordmap for %s, which makes move generation faster "
+        "(once; this can take a minute)\n",
+        lexicon);
+    char *ld_name = ld_get_default_name_from_lexicon_name(lexicon, errors);
+    if (error_stack_is_empty(errors)) {
+      const ConversionArgs args = {
+          .conversion_type_string = "dawg2wordmap",
+          .data_paths = config->data_paths,
+          .input_and_output_name = lexicon,
+          .ld_name = ld_name,
+          .num_threads = config_get_num_threads(config),
+      };
+      convert(&args, config->conversion_results, errors);
+    }
+    free(ld_name);
+    if (!error_stack_is_empty(errors)) {
+      why_not = "it could not be built";
+      error_stack_print_and_reset(errors);
+    }
+  }
+  free(kwg_path);
+  free(built_path);
+  error_stack_destroy(errors);
+  if (why_not) {
+    thread_control_print_formatted(config->thread_control,
+                                   "playing %s without a wordmap: %s\n",
+                                   lexicon, why_not);
+    return NULL;
+  }
+  return lexicon;
+}
+
 void config_load_lexicon_dependent_data(
     Config *config, const char *new_lexicon_name,
     const char *new_p1_lexicon_name, const char *new_p2_lexicon_name,
@@ -7818,6 +7970,17 @@ void config_load_lexicon_dependent_data(
   const char *p2_wmp_name = NULL;
   if (p2_wmp_use_when_available) {
     p2_wmp_name = updated_p2_lexicon_name;
+  }
+
+  if (config->build_missing_wordmaps) {
+    // Players with the same lexicon share its wordmap, so it is built, or
+    // found missing and reported, once rather than once per player.
+    const bool same_wordmap =
+        p1_wmp_name && p2_wmp_name && strings_equal(p1_wmp_name, p2_wmp_name);
+    p1_wmp_name = config_wordmap_for_first_use(config, 0, p1_wmp_name);
+    p2_wmp_name = same_wordmap
+                      ? p1_wmp_name
+                      : config_wordmap_for_first_use(config, 1, p2_wmp_name);
   }
 
   players_data_set(config->players_data, PLAYERS_DATA_TYPE_WMP,
@@ -8123,7 +8286,7 @@ static void config_set_gcg_filename_and_save(Config *config,
   string_builder_add_gcg_filename(sb, config->game_history, 0);
   char *gcg_filename = string_builder_dump_and_destroy(sb, NULL);
   game_history_set_gcg_filename(config->game_history, gcg_filename);
-  write_string_to_file(gcg_filename, "w", gcg_result->gcg_string, error_stack);
+  write_string_to_file(gcg_filename, "wb", gcg_result->gcg_string, error_stack);
   free(gcg_filename);
 }
 
@@ -11186,7 +11349,7 @@ static char *config_contribute_leave_gen(Config *config,
   if (created && fclose(klv_file) != 0) {
     written = false;
   }
-  if (written && rename(temp_path, klv_path) != 0) {
+  if (written && cfile_rename(temp_path, klv_path) != 0) {
     written = false;
   }
   if (!written) {
@@ -12235,6 +12398,7 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
         GAME_STRING_ON_TURN_MARKER_ARROWHEAD;
     config->game_string_options->on_turn_color =
         GAME_STRING_ON_TURN_COLOR_ANSI_GREEN;
+    game_string_options_fit_output(config->game_string_options);
   }
 
   const char *write_buffer_size_str =
@@ -13613,7 +13777,7 @@ static void write_tournament_summary(const char *dir_path, char **gcg_files,
 
   char *summary_str = string_builder_dump_and_destroy(sb, NULL);
   ErrorStack *write_error_stack = error_stack_create();
-  write_string_to_file(summary_path, "w", summary_str, write_error_stack);
+  write_string_to_file(summary_path, "wb", summary_str, write_error_stack);
   if (!error_stack_is_empty(write_error_stack)) {
     char *err_str = error_stack_get_string_and_reset(write_error_stack);
     thread_control_print_formatted(thread_control, "Failed to write %s: %s\n",
@@ -13933,6 +14097,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   bool default_use_wmp = true;
   if (config_args) {
     default_use_wmp = config_args->use_wmp;
+    config->build_missing_wordmaps = config_args->build_missing_wordmaps;
   }
   // Attempt to load fields that might fail first
   config->board_layout =
@@ -13963,6 +14128,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   cmd(ARG_TOKEN_HELP, "help", 0, 1, help, generic, false);
   cmd(ARG_TOKEN_VERSION, "version", 0, 0, version, generic, false);
   cmd(ARG_TOKEN_BUILDERS, "builders", 0, 0, builders, generic, false);
+  cmd(ARG_TOKEN_DATA, "data", 1, 2, data, generic, false);
   cmd(ARG_TOKEN_SET, "setoptions", 0, 0, noop, generic, false);
   cmd(ARG_TOKEN_CGP, "cgp", 4, 4, load_cgp, generic, false);
   cmd(ARG_TOKEN_LOAD, "load", 1, 1, load_gcg, generic, false);
@@ -14318,6 +14484,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->conversion_results = conversion_results_create();
   config->tt_fraction_of_mem = DEFAULT_TT_FRACTION;
   config->game_string_options = game_string_options_create_pretty();
+  game_string_options_fit_output(config->game_string_options);
   config->gcg_result = (GetGCGResult){0};
 
   autoplay_results_set_players_data(config->autoplay_results,
@@ -14435,6 +14602,7 @@ void config_add_settings_to_string_builder(const Config *config,
     case ARG_TOKEN_HELP:
     case ARG_TOKEN_VERSION:
     case ARG_TOKEN_BUILDERS:
+    case ARG_TOKEN_DATA:
     case ARG_TOKEN_SET:
     case ARG_TOKEN_CGP:
     case ARG_TOKEN_MOVES:
@@ -15222,7 +15390,7 @@ void save_config_settings(const Config *config, ErrorStack *error_stack) {
   }
   StringBuilder *sb = string_builder_create();
   config_add_settings_to_string_builder(config, sb);
-  write_string_to_file(config_get_settings_filename(config), "w",
+  write_string_to_file(config_get_settings_filename(config), "wb",
                        string_builder_peek(sb), error_stack);
   string_builder_destroy(sb);
 }

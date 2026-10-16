@@ -1,6 +1,6 @@
 #include "../src/compat/cpthread.h"
+#include "../src/compat/cpthread_defs.h"
 #include "../src/def/board_defs.h"
-#include "../src/def/cpthread_defs.h"
 #include "../src/def/wmp_defs.h"
 #include "../src/ent/wmp.h"
 #include "../src/ent/word_info_table.h"

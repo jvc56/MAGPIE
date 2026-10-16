@@ -61,11 +61,12 @@ void print_english_rack(const Rack *rack);
 void print_rack(const Rack *rack, const LetterDistribution *ld);
 void load_cgp_or_die(Game *game, const char *cgp);
 void load_and_exec_config_or_die(Config *config, const char *cmd);
-bool load_and_exec_config_or_die_timed(Config *config, const char *cmd,
+// Runs `cmd` as load_and_exec_config_or_die does, ending the process if it
+// takes longer than `seconds`.
+void load_and_exec_config_or_die_timed(Config *config, const char *cmd,
                                        int seconds);
 char *get_test_filename(const char *filename);
 void delete_file(const char *filename);
-void delete_fifo(const char *fifo_name);
 Config *config_create_or_die(const char *cmd);
 Config *config_create_default_test(void);
 WMP *wmp_create_or_die(const char *data_paths, const char *wmp_name);

@@ -2,6 +2,7 @@
 #ifndef STRING_BUILDER_H
 #define STRING_BUILDER_H
 
+#include "../compat/cformat.h"
 #include "io_util.h"
 #include <stdbool.h>
 #include <stddef.h>
@@ -18,7 +19,8 @@ void string_builder_add_string(StringBuilder *string_builder,
 void string_builder_add_bytes(StringBuilder *string_builder, const char *bytes,
                               size_t len);
 void string_builder_add_formatted_string(StringBuilder *string_builder,
-                                         const char *format, ...);
+                                         const char *format, ...)
+    CFORMAT_PRINTF(2, 3);
 void string_builder_add_table_row(StringBuilder *string_builder,
                                   size_t cell_width, const char *left_cell,
                                   const char *middle_cell,
@@ -128,7 +130,6 @@ double string_to_double_prefix(const char *str, const char **end,
 // Append a quoted JSON string, escaping quotes, backslashes and control bytes.
 void string_builder_add_json_string(StringBuilder *sb, const char *value);
 char *json_unescape_string(const char *json_string);
-char *get_process_output(const char *cmd);
 
 // String Grid functions
 

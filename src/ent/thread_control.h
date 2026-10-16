@@ -1,6 +1,7 @@
 #ifndef THREAD_CONTROL_H
 #define THREAD_CONTROL_H
 
+#include "../compat/cformat.h"
 #include "../compat/ctime.h"
 #include "../def/thread_control_defs.h"
 #include "xoshiro.h"
@@ -43,14 +44,13 @@ bool thread_control_set_status(ThreadControl *thread_control,
 void thread_control_wait_for_status_change(ThreadControl *thread_control);
 void thread_control_print(ThreadControl *thread_control, const char *content);
 void thread_control_print_formatted(ThreadControl *thread_control,
-                                    const char *fmt, ...)
-    __attribute__((format(printf, 2, 3)));
+                                    const char *fmt, ...) CFORMAT_PRINTF(2, 3);
 // The same, to the error stream: for what a user has to see even when the
 // output is redirected or ignored.
 void thread_control_print_err(ThreadControl *thread_control,
                               const char *content);
 void thread_control_print_formatted_err(ThreadControl *thread_control,
                                         const char *fmt, ...)
-    __attribute__((format(printf, 2, 3)));
+    CFORMAT_PRINTF(2, 3);
 
 #endif

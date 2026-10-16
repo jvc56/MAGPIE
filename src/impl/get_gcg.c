@@ -1,6 +1,8 @@
 #include "get_gcg.h"
 
+#include "../compat/cfile.h"
 #include "../compat/chttp.h"
+#include "../compat/cpath.h"
 #include "../ent/data_filepaths.h"
 #include "../util/io_util.h"
 #include "../util/string_util.h"
@@ -9,7 +11,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
 
 #define WOOGLES_GCG_START "\"gcg\":\""
 #define XTABLES_URL "cross-tables.com/annotated.php?u="
@@ -58,8 +59,7 @@ static char *fetch_url(const char *url, const char *body,
 
 // Returns the basename of path with the .gcg extension stripped if present.
 static char *get_file_id(const char *path) {
-  const char *slash = strrchr(path, '/');
-  const char *basename_start = slash ? slash + 1 : path;
+  const char *basename_start = cpath_basename(path);
   const size_t basename_len = string_length(basename_start);
   const size_t gcg_ext_len = string_length(GCG_EXTENSION);
   if (has_suffix(GCG_EXTENSION, basename_start)) {
@@ -259,13 +259,13 @@ static void get_url_gcg(const char *identifier, GetGCGResult *result,
 static void get_local_gcg(const char *identifier, GetGCGResult *result,
                           ErrorStack *error_stack) {
   char *identifier_with_possible_ext = NULL;
-  if (access(identifier, R_OK) != 0) {
+  if (!cfile_access(identifier, CFILE_ACCESS_READ)) {
     if (!has_suffix(GCG_EXTENSION, identifier)) {
       // Try adding .gcg extension
       StringBuilder *sb = string_builder_create();
       string_builder_add_string(sb, identifier);
       string_builder_add_string(sb, GCG_EXTENSION);
-      if (access(string_builder_peek(sb), R_OK) == 0) {
+      if (cfile_access(string_builder_peek(sb), CFILE_ACCESS_READ)) {
         identifier_with_possible_ext =
             string_builder_dump_and_destroy(sb, NULL);
       } else {

@@ -1,5 +1,6 @@
 #include "pat_test.h"
 
+#include "../src/compat/cfile.h"
 #include "../src/def/board_defs.h"
 #include "../src/def/cross_set_defs.h"
 #include "../src/def/equity_defs.h"
@@ -43,7 +44,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
 
 static void current_pat_header(char *buf, size_t buf_size) {
   (void)snprintf(buf, buf_size, "%s%d", PAT_MAGIC_PREFIX, PAT_VERSION);
@@ -2477,9 +2477,9 @@ static void pat_wmp_table_parity_lexicon(const char *lexicon) {
   char *wmp_path = get_formatted_string("./data/lexica/%s.wmp", lexicon);
   char *rit_path = get_formatted_string("./data/lexica/%s.rit", lexicon);
   char *wit_path = get_formatted_string("./data/lexica/%s.wit", lexicon);
-  const bool have_wmp = access(wmp_path, R_OK) == 0;
-  const bool have_rit = access(rit_path, R_OK) == 0;
-  const bool have_wit = access(wit_path, R_OK) == 0;
+  const bool have_wmp = cfile_access(wmp_path, CFILE_ACCESS_READ);
+  const bool have_rit = cfile_access(rit_path, CFILE_ACCESS_READ);
+  const bool have_wit = cfile_access(wit_path, CFILE_ACCESS_READ);
   free(wmp_path);
   free(rit_path);
   free(wit_path);
@@ -2547,5 +2547,5 @@ void test_pat(void) {
   test_pat_wmp_parity();
   test_pat_usage_options();
   test_pat_candidates_option();
-  free(data_dir);
+  destroy_temp_pat_data_dir(data_dir);
 }

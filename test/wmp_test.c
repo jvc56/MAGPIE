@@ -1,5 +1,6 @@
 #include "wmp_test.h"
 
+#include "../src/compat/cfile.h"
 #include "../src/compat/ctime.h"
 #include "../src/def/bit_rack_defs.h"
 #include "../src/def/board_defs.h"
@@ -21,12 +22,13 @@
 #include "../src/util/string_util.h"
 #include "test_util.h"
 #include <assert.h>
+#include <inttypes.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-long get_file_size(const char *filename) {
+int64_t get_file_size(const char *filename) {
   ErrorStack *error_stack = error_stack_create();
   FILE *stream = stream_from_filename(filename, error_stack);
   if (!error_stack_is_empty(error_stack)) {
@@ -34,8 +36,10 @@ long get_file_size(const char *filename) {
     log_fatal("wmp test failed to open wmp file: %s", filename);
   }
   error_stack_destroy(error_stack);
-  fseek_or_die(stream, 0L, SEEK_END);
-  const long file_size = ftell(stream);
+  int64_t file_size = 0;
+  if (!cfile_stream_size(stream, &file_size)) {
+    log_fatal("wmp test failed to get the size of %s", filename);
+  }
   fclose_or_die(stream);
   return file_size;
 }
@@ -51,9 +55,9 @@ void write_words_to_testdata_wmp(const DictionaryWordList *words,
   wmp_write_to_file(wmp, wmp_filename, error_stack);
   assert(error_stack_is_empty(error_stack));
   error_stack_destroy(error_stack);
-  const long file_size = get_file_size(wmp_filename);
-  printf("wrote %ld bytes to %s in %f seconds\n", file_size, wmp_filename,
-         seconds_elapsed);
+  const int64_t file_size = get_file_size(wmp_filename);
+  printf("wrote %" PRId64 " bytes to %s in %f seconds\n", file_size,
+         wmp_filename, seconds_elapsed);
   wmp_destroy(wmp);
 }
 

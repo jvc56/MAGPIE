@@ -1,5 +1,6 @@
 #include "klv_test.h"
 
+#include "../src/compat/cfile.h"
 #include "../src/ent/data_filepaths.h"
 #include "../src/ent/equity.h"
 #include "../src/ent/klv.h"
@@ -111,7 +112,7 @@ static void test_a_leave_with_no_index_is_refused(void) {
     char *leaves_filename = data_filepaths_get_writable_filename(
         data_path, "badleaves", DATA_FILEPATH_TYPE_LEAVES, error_stack);
     assert(error_stack_is_empty(error_stack));
-    FILE *stream = fopen(leaves_filename, "we");
+    FILE *stream = cfile_open(leaves_filename, "we", false);
     assert(stream);
     (void)fprintf(stream, "?,1.0\n%s,1.0\n", bad_leaves[i]);
     (void)fclose(stream);

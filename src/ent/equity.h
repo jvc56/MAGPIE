@@ -90,7 +90,7 @@ static inline int equity_to_int(Equity eq) {
 // Should only be needed for tests and loading data, not in movegen etc.
 static inline Equity int_to_equity(int x) {
   if (x > EQUITY_MAX_DOUBLE || x < EQUITY_MIN_DOUBLE) {
-    log_fatal("equity value out of range: %f", x);
+    log_fatal("equity value out of range: %d", x);
   }
   return x * EQUITY_RESOLUTION;
 }

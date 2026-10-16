@@ -4,13 +4,13 @@
 #include <assert.h>
 #include <ctype.h>
 #include <errno.h>
+#include <inttypes.h>
 #include <stdarg.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <strings.h>
 
 enum {
   STRING_LIST_INITIAL_CAPACITY = 10,
@@ -92,15 +92,11 @@ void string_builder_add_formatted_string(StringBuilder *string_builder,
 void string_builder_add_space_padded_string(StringBuilder *string_builder,
                                             const char *string,
                                             size_t total_length) {
-  // string is a format string potentially containing escape sequences, but must
-  // have no arguments.
-  char *formatted_string = get_formatted_string(string);
-  const size_t printed_length = strlen(formatted_string);
-  string_builder_add_string(string_builder, formatted_string);
+  const size_t printed_length = strlen(string);
+  string_builder_add_string(string_builder, string);
   const size_t number_of_spaces =
       total_length > printed_length ? total_length - printed_length : 0;
   string_builder_add_spaces(string_builder, (int)number_of_spaces);
-  free(formatted_string);
 }
 
 void string_builder_add_table_row(StringBuilder *string_builder,
@@ -124,7 +120,7 @@ void string_builder_add_spaces(StringBuilder *string_builder,
 }
 
 void string_builder_add_int(StringBuilder *string_builder, int64_t n) {
-  string_builder_add_formatted_string(string_builder, "%d", n);
+  string_builder_add_formatted_string(string_builder, "%" PRId64, n);
 }
 
 void string_builder_add_char(StringBuilder *string_builder, char c) {
@@ -460,8 +456,21 @@ bool has_prefix(const char *pre, const char *str) {
   return strncmp(pre, str, string_length(pre)) == 0;
 }
 
+// Compares at most `length` characters ignoring ASCII case, as POSIX
+// strncasecmp does in the C locale; every string compared this way is ASCII.
+static int ascii_casecmp(const char *first, const char *second, size_t length) {
+  for (size_t char_idx = 0; char_idx < length; char_idx++) {
+    const int first_char = tolower((unsigned char)first[char_idx]);
+    const int second_char = tolower((unsigned char)second[char_idx]);
+    if (first_char != second_char || first_char == '\0') {
+      return first_char - second_char;
+    }
+  }
+  return 0;
+}
+
 bool has_iprefix(const char *pre, const char *str) {
-  return strncasecmp(pre, str, string_length(pre)) == 0;
+  return ascii_casecmp(pre, str, string_length(pre)) == 0;
 }
 
 bool has_suffix(const char *suf, const char *str) {
@@ -513,7 +522,7 @@ bool strings_iequal(const char *str1, const char *str2) {
   if (!str1 || !str2) {
     return false;
   }
-  return strcasecmp(str1, str2) == 0;
+  return ascii_casecmp(str1, str2, SIZE_MAX) == 0;
 }
 
 // Returns false for negative numbers
@@ -1031,26 +1040,6 @@ char *json_unescape_string(const char *json_string) {
   *dst = '\0';
 
   return unescaped;
-}
-
-char *get_process_output(const char *cmd) {
-  FILE *pipe = popen_or_die(cmd, "r");
-
-  StringBuilder *content_builder = string_builder_create();
-  char *buffer = NULL;
-  size_t buffer_size = 0;
-
-  while (getline_ignore_carriage_return(&buffer, &buffer_size, pipe) != -1) {
-    string_builder_add_string(content_builder, buffer);
-  }
-
-  free(buffer);
-  int status = pclose(pipe);
-  if (status != 0) {
-    string_builder_destroy(content_builder);
-    return NULL; // The command failed
-  }
-  return string_builder_dump_and_destroy(content_builder, NULL);
 }
 
 // ****************************************************************************

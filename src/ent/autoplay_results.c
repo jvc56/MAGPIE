@@ -1,9 +1,10 @@
 #include "autoplay_results.h"
 
+#include "../compat/cfile.h"
 #include "../compat/cpthread.h"
+#include "../compat/cpthread_defs.h"
 #include "../def/board_defs.h"
 #include "../def/contribute_defs.h"
-#include "../def/cpthread_defs.h"
 #include "../def/equity_defs.h"
 #include "../def/game_defs.h"
 #include "../def/game_history_defs.h"
@@ -35,12 +36,12 @@
 #include "sim_results.h"
 #include "stats.h"
 #include "win_pct_counts.h"
+#include <inttypes.h>
 #include <math.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
 
 enum { DEFAULT_WRITE_BUFFER_SIZE = 1024 };
 
@@ -332,14 +333,18 @@ char *game_data_ucgi_str(const GameData *gd,
                          const RecorderContext *recorder_context) {
   StringBuilder *sb = string_builder_create();
   string_builder_add_formatted_string(
-      sb, "autoplay games %lu %lu %lu %lu %lu %f %f %f %f ", gd->total_games,
-      gd->p0_wins, gd->p0_losses, gd->p0_ties, gd->p0_firsts,
+      sb,
+      "autoplay games %" PRIu64 " %" PRIu64 " %" PRIu64 " %" PRIu64 " %" PRIu64
+      " %f %f %f %f ",
+      gd->total_games, gd->p0_wins, gd->p0_losses, gd->p0_ties, gd->p0_firsts,
       stat_get_mean(gd->p0_score), stat_get_stdev(gd->p0_score),
       stat_get_mean(gd->p1_score), stat_get_stdev(gd->p1_score));
   string_builder_add_game_end_reasons(sb, gd);
   if (recorder_context_uses_play_chooser(recorder_context)) {
     string_builder_add_formatted_string(
-        sb, "playchooser %d %d %.0f %.0f %.3f %.3f %.3f %.3f %lu %lu ",
+        sb,
+        "playchooser %d %d %.0f %.0f %.3f %.3f %.3f %.3f %" PRIu64 " %" PRIu64
+        " ",
         recorder_context->play_chooser_active[0],
         recorder_context->play_chooser_active[1],
         recorder_context->time_control_seconds[0] * 1000.0,
@@ -355,11 +360,11 @@ char *game_data_ucgi_str(const GameData *gd,
 }
 
 char *get_total_int_and_percentage_string(uint64_t total, double pct) {
-  return get_formatted_string("%lu (%2.2f%%%%)", total, pct * 100.0);
+  return get_formatted_string("%" PRIu64 " (%2.2f%%)", total, pct * 100.0);
 }
 
 char *get_total_float_and_percentage_string(double total, double pct) {
-  return get_formatted_string("%2.1f (%2.2f%%%%)", total, pct * 100.0);
+  return get_formatted_string("%2.1f (%2.2f%%)", total, pct * 100.0);
 }
 
 char *get_score_and_dev_string(double score, double stdev) {
@@ -459,7 +464,7 @@ string_builder_add_play_chooser_timing(StringBuilder *sb, const GameData *gd,
 
   for (int i = 0; i < 2; i++) {
     values[i] = recorder_context->play_chooser_active[i]
-                    ? get_formatted_string("%lu", gd->overtime_games[i])
+                    ? get_formatted_string("%" PRIu64, gd->overtime_games[i])
                     : string_duplicate("-");
   }
   string_builder_add_table_row(sb, col_width, "Overtime games:", values[0],
@@ -469,7 +474,7 @@ string_builder_add_play_chooser_timing(StringBuilder *sb, const GameData *gd,
 
   for (int i = 0; i < 2; i++) {
     values[i] = recorder_context->play_chooser_active[i]
-                    ? get_formatted_string("%lu", gd->penalty_points[i])
+                    ? get_formatted_string("%" PRIu64, gd->penalty_points[i])
                     : string_duplicate("-");
   }
   string_builder_add_table_row(sb, col_width, "Penalty points:", values[0],
@@ -496,9 +501,9 @@ char *game_data_human_readable_str(const GameData *gd, bool divergent,
     string_builder_add_string(sb, "All Games\n\n");
   }
 
-  string_builder_add_formatted_string(sb, "Games Played: %lu\n",
+  string_builder_add_formatted_string(sb, "Games Played: %" PRIu64 "\n",
                                       gd->total_games);
-  string_builder_add_formatted_string(sb, "Turns Played: %lu\n",
+  string_builder_add_formatted_string(sb, "Turns Played: %" PRIu64 "\n",
                                       gd->total_turns);
 
   if (gd->total_games == 0) {
@@ -908,7 +913,7 @@ void fj_data_reset_fh(FJSharedData *shared_data) {
       fclose_or_die(shared_data->fhs[i]);
       shared_data->fhs[i] = NULL;
     }
-    shared_data->fhs[i] = fopen_or_die(filename_num_remaining, "w");
+    shared_data->fhs[i] = fopen_or_die(filename_num_remaining, "wb");
     if (!shared_data->fhs[i]) {
       log_fatal("error opening fj file for writing: %s",
                 filename_num_remaining);
@@ -1185,7 +1190,7 @@ void win_pct_data_consolidate(Recorder **recorder_list, int list_size,
     log_fatal("error creating win percentage filename: %s", win_pct_filename);
   }
 
-  if (access(win_pct_filename, F_OK) == 0) {
+  if (cfile_access(win_pct_filename, CFILE_ACCESS_EXISTS)) {
     char *win_pct_file_string =
         get_string_from_file(win_pct_filename, error_stack);
     WinPctCounts *existing_counts = NULL;
@@ -1217,7 +1222,7 @@ void win_pct_data_consolidate(Recorder **recorder_list, int list_size,
   }
 
   char *win_pct_string = win_pct_counts_get_string(primary_counts);
-  write_string_to_file(win_pct_filename, "w", win_pct_string, error_stack);
+  write_string_to_file(win_pct_filename, "wb", win_pct_string, error_stack);
 
   if (!error_stack_is_empty(error_stack)) {
     error_stack_print_and_reset(error_stack);
@@ -1303,8 +1308,8 @@ void leaves_data_consolidate(Recorder **recorder_list, int list_size,
   Rack leave_rack;
   rack_set_dist_size(&leave_rack,
                      ld_get_size(primary_recorder->recorder_context->ld));
-  if (access(leaves_count_filename, F_OK) == 0) {
-    FILE *leaves_file = fopen_or_die(leaves_count_filename, "r");
+  if (cfile_access(leaves_count_filename, CFILE_ACCESS_EXISTS)) {
+    FILE *leaves_file = fopen_or_die(leaves_count_filename, "rb");
     char *line = NULL;
     size_t line_capacity = 0;
     while (getline_ignore_carriage_return(&line, &line_capacity, leaves_file) !=

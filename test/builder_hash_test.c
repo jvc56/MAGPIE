@@ -1,5 +1,6 @@
 #include "builder_hash_test.h"
 
+#include "../src/compat/cfile.h"
 #include "../src/def/builder_defs.h"
 #include "../src/def/rack_defs.h"
 #include "../src/ent/conversion_results.h"
@@ -210,7 +211,7 @@ static void write_every_full_rack(const char *data_paths, const char *name) {
     error_stack_print_and_reset(error_stack);
     log_fatal("no writable path for %s", name);
   }
-  FILE *stream = fopen(path, "we");
+  FILE *stream = cfile_open(path, "we", false);
   assert(stream);
   for (int a = 0; a <= RACK_SIZE; a++) {
     char rack[RACK_SIZE + 1];

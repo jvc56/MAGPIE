@@ -1,5 +1,6 @@
 #include "contribute_tables_test.h"
 
+#include "../src/compat/cfile.h"
 #include "../src/def/thread_control_defs.h"
 #include "../src/ent/client_state.h"
 #include "../src/ent/conversion_results.h"
@@ -13,17 +14,14 @@
 #include "../src/util/io_util.h"
 #include "../src/util/json.h"
 #include "../src/util/string_util.h"
+#include "test_platform.h"
 #include "test_util.h"
 #include <assert.h>
-#include <signal.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/resource.h>
-#include <sys/stat.h>
-#include <unistd.h>
 
 // The sizes of CSW24's tables, in MB, which the chooser's cases are written
 // in: what a contributor actually weighs.
@@ -333,7 +331,7 @@ static void test_the_manifest_round_trips(void) {
   contribute_table_manifest_destroy(manifest);
 
   // Malformed lines appended by hand are ignored.
-  FILE *stream = fopen(path, "ae");
+  FILE *stream = cfile_open(path, "ae", false);
   assert(stream);
   (void)fputs("wmp notanumber 5 X data/X.wmp\nwmp 5\n\nrit -1 5 Y y.rit\n",
               stream);
@@ -381,8 +379,7 @@ static bool fake_free_bytes(const char *directory, void *context,
   const FakeDisk *disk = (const FakeDisk *)context;
   *free_bytes = disk->base;
   for (int path_idx = 0; path_idx < disk->count; path_idx++) {
-    struct stat info; // NOLINT(misc-include-cleaner)
-    if (stat(disk->paths[path_idx], &info) != 0) {
+    if (!cfile_access(disk->paths[path_idx], CFILE_ACCESS_EXISTS)) {
       *free_bytes += disk->sizes[path_idx];
     }
   }
@@ -390,7 +387,7 @@ static bool fake_free_bytes(const char *directory, void *context,
 }
 
 static void write_bytes(const char *path, int64_t size) {
-  FILE *stream = fopen(path, "we");
+  FILE *stream = cfile_open(path, "we", false);
   assert(stream);
   for (int64_t byte_idx = 0; byte_idx < size; byte_idx++) {
     (void)fputc('x', stream);
@@ -399,8 +396,7 @@ static void write_bytes(const char *path, int64_t size) {
 }
 
 static bool file_exists(const char *path) {
-  struct stat info;
-  return stat(path, &info) == 0;
+  return cfile_access(path, CFILE_ACCESS_EXISTS);
 }
 
 // Room is made by deleting the tables this contributor built for other jobs,
@@ -408,7 +404,7 @@ static bool file_exists(const char *path) {
 // manifest does not list is never deleted, nor one whose size is no longer
 // what was built, nor the task's own.
 static void test_room_is_made_from_the_manifest_alone(void) {
-  (void)mkdir(TABLES_TEST_DIR, 0777);
+  (void)cfile_mkdir(TABLES_TEST_DIR);
   const char *old_path = TABLES_TEST_DIR "/OLD.rit";
   const char *newer_path = TABLES_TEST_DIR "/NEWER.wmp";
   const char *changed_path = TABLES_TEST_DIR "/CHANGED.wit";
@@ -526,7 +522,7 @@ static void test_the_reserve_settings(void) {
   };
   for (size_t case_idx = 0; case_idx < sizeof(accepted) / sizeof(accepted[0]);
        case_idx++) {
-    FILE *stream = fopen(path, "we");
+    FILE *stream = cfile_open(path, "we", false);
     assert(stream);
     (void)fputs(accepted[case_idx].contents, stream);
     (void)fclose(stream);
@@ -549,7 +545,7 @@ static void test_the_reserve_settings(void) {
   };
   for (size_t case_idx = 0; case_idx < sizeof(memory) / sizeof(memory[0]);
        case_idx++) {
-    FILE *stream = fopen(path, "we");
+    FILE *stream = cfile_open(path, "we", false);
     assert(stream);
     (void)fputs(memory[case_idx].contents, stream);
     (void)fclose(stream);
@@ -566,7 +562,7 @@ static void test_the_reserve_settings(void) {
   };
   for (size_t case_idx = 0; case_idx < sizeof(refused) / sizeof(refused[0]);
        case_idx++) {
-    FILE *stream = fopen(path, "we");
+    FILE *stream = cfile_open(path, "we", false);
     assert(stream);
     (void)fputs("server https://birdtest.example\n", stream);
     (void)fputs(refused[case_idx], stream);
@@ -581,7 +577,7 @@ static void test_the_reserve_settings(void) {
     free(message);
   }
   // A setting's name in the wrong case is named, with why.
-  FILE *stream = fopen(path, "we");
+  FILE *stream = cfile_open(path, "we", false);
   assert(stream);
   (void)fputs("DiskReserve 2\n", stream);
   (void)fclose(stream);
@@ -666,28 +662,6 @@ static bool tables_test_has_temporaries(void) {
   return num_files > 0;
 }
 
-#ifndef __EMSCRIPTEN__
-// Caps the size of any file this process writes at `bytes`, as a full disk
-// would stop it, with writes past it failing (EFBIG) rather than killing the
-// process. Returns false where it cannot be done.
-static bool limit_file_size(rlim_t bytes, struct rlimit *previous,
-                            void (**previous_handler)(int)) {
-  if (getrlimit(RLIMIT_FSIZE, previous) != 0) {
-    return false;
-  }
-  struct rlimit limited = *previous;
-  limited.rlim_cur = bytes;
-  *previous_handler = signal(SIGXFSZ, SIG_IGN);
-  return setrlimit(RLIMIT_FSIZE, &limited) == 0;
-}
-
-static void unlimit_file_size(const struct rlimit *previous,
-                              void (*previous_handler)(int)) {
-  assert(setrlimit(RLIMIT_FSIZE, previous) == 0);
-  (void)signal(SIGXFSZ, previous_handler);
-}
-#endif
-
 // Runs the games task with the tables asked for or not, on a contributor
 // whose contribute.txt is `settings`, returning its result, and setting
 // *movegens and *skipped (the roles the result would name). With
@@ -697,7 +671,7 @@ static char *run_tables_task(const char *assignment_json, bool use_tables,
                              const char *settings, long file_size_limit,
                              uint64_t *movegens, unsigned int *skipped) {
   const char *settings_path = "contribute_tables_test_contribute.txt";
-  FILE *stream = fopen(settings_path, "we");
+  FILE *stream = cfile_open(settings_path, "we", false);
   assert(stream);
   (void)fputs(settings, stream);
   (void)fclose(stream);
@@ -723,38 +697,26 @@ static char *run_tables_task(const char *assignment_json, bool use_tables,
   free(request_json);
   assert(error_stack_is_empty(error_stack));
   char *result_json = NULL;
-#ifndef __EMSCRIPTEN__
-  struct rlimit previous;
-  void (*previous_handler)(int) = SIG_DFL;
   // The limit would stop this process's own output too, where it goes to a
   // file: it goes nowhere while the limit holds.
   FILE *nowhere = NULL;
   if (file_size_limit > 0) {
-    nowhere = fopen("/dev/null", "we");
+    nowhere = cfile_open(test_platform_null_device(), "we", false);
     assert(nowhere);
     io_set_stream_out(nowhere);
     io_set_stream_err(nowhere);
-    // Outside the assert: the limit must be set with or without asserts.
-    const bool limited =
-        limit_file_size((rlim_t)file_size_limit, &previous, &previous_handler);
-    assert(limited);
-    (void)limited;
+    test_platform_limit_file_size(file_size_limit);
   }
-#else
-  (void)file_size_limit;
-#endif
   // One thread, so the captured positions come in one order every run.
   const bool ran =
       config_contribute_execute(task_config, "games", request, 1, state,
                                 &result_json, movegens, error_stack);
-#ifndef __EMSCRIPTEN__
   if (file_size_limit > 0) {
-    unlimit_file_size(&previous, previous_handler);
+    test_platform_unlimit_file_size();
     io_reset_stream_out();
     io_reset_stream_err();
     (void)fclose(nowhere);
   }
-#endif
   assert(ran);
   if (!error_stack_is_empty(error_stack)) {
     error_stack_print_and_reset(error_stack);
@@ -813,14 +775,14 @@ static char *tables_test_assignment(void) {
     char *path = tables_test_path(types[build_idx], builds[build_idx].name);
     char *digest = sha256_hash_file(path, error_stack);
     assert(error_stack_is_empty(error_stack));
-    struct stat info;
-    assert(stat(path, &info) == 0);
+    CFileIdentity info;
+    assert(cfile_identity(path, &info));
     string_builder_add_formatted_string(
         sb,
         "%s{\"role\": \"%s\", \"name\": \"%s\", \"sha256\": \"%s\", "
         "\"builder\": \"test\", \"build_target\": \"test\", \"bytes\": %lld}",
         build_idx ? ", " : "", roles[build_idx], builds[build_idx].name, digest,
-        (long long)info.st_size);
+        (long long)info.size);
     free(digest);
     free(path);
   }
@@ -833,9 +795,9 @@ static char *tables_test_assignment(void) {
 
 // Copies a file byte for byte.
 static void copy_file(const char *from, const char *to) {
-  FILE *in = fopen(from, "rbe");
+  FILE *in = cfile_open(from, "rbe", false);
   assert(in);
-  FILE *out = fopen(to, "wbe");
+  FILE *out = cfile_open(to, "wbe", false);
   assert(out);
   int byte = 0;
   while ((byte = fgetc(in)) != EOF) {
@@ -851,8 +813,8 @@ static void copy_file(const char *from, const char *to) {
 // table is written -- the rack info table's writer used to end the process
 // here -- skips the table and leaves nothing half-written behind.
 static void test_a_task_runs_without_the_tables_it_has_no_room_for(void) {
-  (void)mkdir(TABLES_TEST_DIR, 0777);
-  (void)mkdir(TABLES_TEST_DIR "/lexica", 0777);
+  (void)cfile_mkdir(TABLES_TEST_DIR);
+  (void)cfile_mkdir(TABLES_TEST_DIR "/lexica");
   copy_file("testdata/lexica/CSW21_ab.kwg",
             TABLES_TEST_DIR "/lexica/" TABLES_TEST_LEXICON ".kwg");
   copy_file("testdata/lexica/CSW21_ab.klv2",
@@ -922,34 +884,37 @@ static void test_a_task_runs_without_the_tables_it_has_no_room_for(void) {
   assert(!file_exists(wmp_path) && !file_exists(wit_path) &&
          !file_exists(rit_path));
 
-#ifndef __EMSCRIPTEN__
-  // The disk fills during the builds: the same games again, every table
-  // skipped, no partial file left.
-  result = run_tables_task(assignment, true, "diskreserve 0\n", 1, &movegens,
-                           &skipped);
-  assert(skipped == all_three);
-  assert_strings_equal(result, plain);
-  assert(movegens == plain_movegens);
-  free(result);
-  assert(!file_exists(wmp_path) && !file_exists(wit_path) &&
-         !file_exists(rit_path));
-  assert(!tables_test_has_temporaries());
+  if (!test_platform_can_limit_file_size()) {
+    printf("contribute_tables: skipped the full-disk cases: no file size "
+           "limit here\n");
+  } else {
+    // The disk fills during the builds: the same games again, every table
+    // skipped, no partial file left.
+    result = run_tables_task(assignment, true, "diskreserve 0\n", 1, &movegens,
+                             &skipped);
+    assert(skipped == all_three);
+    assert_strings_equal(result, plain);
+    assert(movegens == plain_movegens);
+    free(result);
+    assert(!file_exists(wmp_path) && !file_exists(wit_path) &&
+           !file_exists(rit_path));
+    assert(!tables_test_has_temporaries());
 
-  // The rack info table alone fills it: the wordmap and word info table are
-  // on disk, and the table's write stops part-way, where it used to end the
-  // process. Only it is skipped.
-  free(run_tables_task(assignment, true, "diskreserve 0\n", 0, &movegens,
-                       &skipped));
-  assert(skipped == 0);
-  (void)remove(rit_path);
-  result = run_tables_task(assignment, true, "diskreserve 0\n", 1024, &movegens,
-                           &skipped);
-  assert(skipped == (1U << CONTRIBUTE_TABLE_RIT));
-  assert_strings_equal(result, plain);
-  free(result);
-  assert(!file_exists(rit_path) && file_exists(wmp_path));
-  assert(!tables_test_has_temporaries());
-#endif
+    // The rack info table alone fills it: the wordmap and word info table are
+    // on disk, and the table's write stops part-way, where it used to end the
+    // process. Only it is skipped.
+    free(run_tables_task(assignment, true, "diskreserve 0\n", 0, &movegens,
+                         &skipped));
+    assert(skipped == 0);
+    (void)remove(rit_path);
+    result = run_tables_task(assignment, true, "diskreserve 0\n", 1024,
+                             &movegens, &skipped);
+    assert(skipped == (1U << CONTRIBUTE_TABLE_RIT));
+    assert_strings_equal(result, plain);
+    free(result);
+    assert(!file_exists(rit_path) && file_exists(wmp_path));
+    assert(!tables_test_has_temporaries());
+  }
 
   free(plain);
   free(assignment);
@@ -968,8 +933,8 @@ static void test_a_task_runs_without_the_tables_it_has_no_room_for(void) {
        leftover_idx++) {
     (void)remove(leftovers[leftover_idx]);
   }
-  (void)rmdir(TABLES_TEST_DIR "/lexica");
-  (void)rmdir(TABLES_TEST_DIR);
+  (void)cfile_rmdir(TABLES_TEST_DIR "/lexica");
+  (void)cfile_rmdir(TABLES_TEST_DIR);
   free(wmp_path);
   free(wit_path);
   free(rit_path);

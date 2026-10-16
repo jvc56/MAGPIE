@@ -1,8 +1,8 @@
 #include "sim_test.h"
 
 #include "../src/compat/cpthread.h"
+#include "../src/compat/cpthread_defs.h"
 #include "../src/compat/ctime.h"
-#include "../src/def/cpthread_defs.h"
 #include "../src/def/game_defs.h"
 #include "../src/def/rack_defs.h"
 #include "../src/def/thread_control_defs.h"
@@ -34,10 +34,19 @@
 #include "test_util.h"
 #include <assert.h>
 #include <errno.h>
+#include <inttypes.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
+
+enum {
+  // How long a test waits on a thread before calling it hung. The work takes
+  // seconds, but the sanitizer builds and Wine run it many times slower, so
+  // this catches a hang, never a slow machine.
+  HANG_TIMEOUT_SECONDS = 600,
+};
 
 int get_best_simmed_play_index(const SimResults *sim_results) {
   const int num_simmed_plays = sim_results_get_number_of_plays(sim_results);
@@ -345,7 +354,7 @@ void test_sim_threshold(void) {
 
   cpthread_t thread;
   cpthread_create(&thread, sim_thread_func, &args);
-  cpthread_cond_timedwait_loop(&cond, &mutex, 10, &done);
+  cpthread_cond_timedwait_loop(&cond, &mutex, HANG_TIMEOUT_SECONDS, &done);
   cpthread_join(thread);
 
   assert(status == ERROR_STATUS_SUCCESS);
@@ -389,7 +398,7 @@ void test_sim_time_limit(void) {
 
   cpthread_t thread;
   cpthread_create(&thread, sim_thread_func, &args);
-  cpthread_cond_timedwait_loop(&cond, &mutex, 10, &done);
+  cpthread_cond_timedwait_loop(&cond, &mutex, HANG_TIMEOUT_SECONDS, &done);
   cpthread_join(thread);
 
   assert(status == ERROR_STATUS_SUCCESS);
@@ -425,7 +434,7 @@ void test_all_plays_are_similar(void) {
 
   cpthread_t thread;
   cpthread_create(&thread, sim_thread_func, &args);
-  cpthread_cond_timedwait_loop(&cond, &mutex, 10, &done);
+  cpthread_cond_timedwait_loop(&cond, &mutex, HANG_TIMEOUT_SECONDS, &done);
   cpthread_join(thread);
 
   assert(status == ERROR_STATUS_SUCCESS);
@@ -449,7 +458,7 @@ void test_sim_round_robin_consistency(void) {
       sim_results_create(convert_user_cutoff_to_cutoff(0.005));
   for (int i = 0; i < 11; i++) {
     char *set_threads_cmd =
-        get_formatted_string("set -threads %d -seed %lu", i + 1, seed);
+        get_formatted_string("set -threads %d -seed %" PRIu64, i + 1, seed);
     load_and_exec_config_or_die(config, set_threads_cmd);
     free(set_threads_cmd);
 
@@ -575,7 +584,7 @@ void test_sim_with_and_without_inference_helper(
 
   // Set an explicit seed so results are independent of the auto-increment chain
   // in the code path above.
-  char *seed_cmd = get_formatted_string("set -seed %llu", sim_seed);
+  char *seed_cmd = get_formatted_string("set -seed %" PRIu64, sim_seed);
   load_and_exec_config_or_die(config, seed_cmd);
   free(seed_cmd);
 
@@ -826,7 +835,7 @@ void test_sim_perf(const char *sim_perf_iters) {
       "all -numplays 100 -plies 2 -scond 99");
   const uint64_t max_samples = 200000;
   char *set_threads_cmd =
-      get_formatted_string("set -threads 1 -iter %lu", max_samples);
+      get_formatted_string("set -threads 1 -iter %" PRIu64, max_samples);
   load_and_exec_config_or_die(config, set_threads_cmd);
   free(set_threads_cmd);
   load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
@@ -847,7 +856,8 @@ void test_sim_perf(const char *sim_perf_iters) {
   const char *sim_perf_filename = "sim_perf_stats.txt";
   const char *sim_perf_game_details_filename = "sim_perf_game_details.txt";
   if (remove(sim_perf_game_details_filename) != 0 && errno != ENOENT) {
-    log_fatal("error deleting %s: %s", sim_perf_game_details_filename);
+    log_fatal("error deleting %s: %s", sim_perf_game_details_filename,
+              strerror(errno));
   }
   draw_starting_racks(game);
   const int details_limit = 100;

@@ -1,10 +1,10 @@
 #include "peg.h"
 
 #include "../compat/cpthread.h"
+#include "../compat/cpthread_defs.h"
 #include "../compat/ctime.h"
 #include "../compat/memory_info.h"
 #include "../def/board_defs.h"
-#include "../def/cpthread_defs.h"
 #include "../def/equity_defs.h"
 #include "../def/game_defs.h"
 #include "../def/game_history_defs.h"
@@ -31,6 +31,7 @@
 #include "../str/move_string.h"
 #include "../util/fnv.h"
 #include "../util/io_util.h"
+#include "../util/stable_sort.h"
 #include "../util/string_util.h"
 #include "cgp.h"
 #include "endgame.h"
@@ -2814,8 +2815,7 @@ static void *peg_injector_main(void *arg) {
         endgame_add_worker(least);
       }
     }
-    const struct timespec nap = {0, 2L * 1000 * 1000}; // 2 ms
-    nanosleep(&nap, NULL);
+    ctime_nap(0.002);
   }
   return NULL;
 }
@@ -3187,7 +3187,7 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
                         scenario_stride, deadline_ns, args->thread_control,
                         args->poll, &progress, args->eval_bag_order,
                         args->eval_bag_order_len, ranked, args->checkpoint);
-    qsort(ranked, (size_t)n_cands, sizeof(PegRankedCand), peg_rank_cmp);
+    stable_sort(ranked, (size_t)n_cands, sizeof(PegRankedCand), peg_rank_cmp);
     // Drop budget-skipped sentinels (win_pct < 0) from the carried set: they
     // sort to the bottom, so the real candidates occupy [0, n_real).
     int n_real = 0;
@@ -3470,7 +3470,8 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
         // Ownership of each rows allocation moved into oc_store.
         free(stage_outcomes);
       }
-      qsort(restaged, (size_t)done_count, sizeof(PegRankedCand), peg_rank_cmp);
+      stable_sort(restaged, (size_t)done_count, sizeof(PegRankedCand),
+                  peg_rank_cmp);
       // Partial stage: candidates [done_count, eval_count) were selected but
       // the cutoff arrived before they were scored at this depth, so record
       // them at the previous depth before narrowing to the finished set.

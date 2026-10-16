@@ -1,13 +1,14 @@
 #include "sim_results.h"
 
 #include "../compat/cpthread.h"
+#include "../compat/cpthread_defs.h"
 #include "../def/bai_defs.h"
-#include "../def/cpthread_defs.h"
 #include "../def/equity_defs.h"
 #include "../def/game_defs.h"
 #include "../def/game_history_defs.h"
 #include "../def/rack_defs.h"
 #include "../util/io_util.h"
+#include "../util/stable_sort.h"
 #include "bai_result.h"
 #include "equity.h"
 #include "heat_map.h"
@@ -959,8 +960,8 @@ bool sim_results_lock_and_sort_display_simmed_plays(SimResults *sim_results) {
         sim_results->utility_w_spread;
   }
 
-  qsort(sim_results->display_simmed_plays, number_of_simmed_plays,
-        sizeof(SimmedPlay *), compare_simmed_plays);
+  stable_sort(sim_results->display_simmed_plays, number_of_simmed_plays,
+              sizeof(SimmedPlay *), compare_simmed_plays);
   return true;
 }
 

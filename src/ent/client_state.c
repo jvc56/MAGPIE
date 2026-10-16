@@ -85,10 +85,10 @@ static int64_t parse_reserve(const char *value, const char *key,
 // header and that line alone. The create is exclusive, so a file that appears
 // in between is appended to rather than replaced.
 static bool append_uuid_line(const char *path, const char *uuid) {
-  FILE *stream = cfile_open(path, "w", true);
+  FILE *stream = cfile_open(path, "wb", true);
   const char *format = CONTRIBUTE_SETTINGS_HEADER "\nuuid %s\n";
   if (!stream && errno == EEXIST) {
-    stream = cfile_open(path, "a", false);
+    stream = cfile_open(path, "ab", false);
     // The leading newline ends a last line that had none.
     format = "\nuuid %s\n";
   }
@@ -128,7 +128,7 @@ ClientState *client_state_load(const char *path, ErrorStack *error_stack) {
   // meant, perhaps an API key. So is one that is there but cannot be read
   // (its permissions, a directory of that name), whichever it is.
   char *contents = NULL;
-  FILE *stream = cfile_open(settings_path, "r", false);
+  FILE *stream = cfile_open(settings_path, "rb", false);
   if (!stream && errno == ENOENT && path) {
     error_stack_push(
         error_stack, ERROR_STATUS_CONTRIBUTE_SETTINGS_MISSING,
