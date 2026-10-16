@@ -462,7 +462,6 @@ static int greedy_playout_for_display(PVLine *pv_line, int start_idx,
         .override_kwg = NULL,
         .eq_margin_movegen = 0,
         .target_equity = EQUITY_MAX_VALUE,
-        .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
     };
     generate_moves(&greedy_args);
     int nplays = move_list->count;
@@ -725,7 +724,6 @@ static float compute_opp_stuck_fraction(Game *game, MoveList *move_list,
       .override_kwg = pruned_kwg,
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
-      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
       .tiles_played_bv = &opp_tiles_bv,
       .initial_tiles_bv = opp_tiles_bv,
   };
@@ -1670,7 +1668,6 @@ int generate_stm_plays(EndgameCtxWorker *worker, int depth) {
       .override_kwg = solver_get_pruned_kwg(worker->solver, stm_idx),
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
-      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
   };
   // Only the root (depth == requested_plies) generates from scratch when the
   // incremental lists are on; every deeper node derives its list from them.
@@ -1715,7 +1712,6 @@ static void seed_opponent_root_list(EndgameCtxWorker *worker) {
       .override_kwg = solver_get_pruned_kwg(worker->solver, opp_idx),
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
-      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
   };
   generate_moves(&args);
   game_set_player_on_turn_index(game, on_turn_idx);
@@ -2197,7 +2193,6 @@ static int32_t negamax_greedy_leaf_playout(EndgameCtxWorker *worker,
           .override_kwg = solver_get_pruned_kwg(worker->solver, opp_idx),
           .eq_margin_movegen = 0,
           .target_equity = EQUITY_MAX_VALUE,
-          .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
       };
       leaf_play_count =
           path_move_lists_moves_at(worker->path_lists, &leaf_args, &leaf_plays);
@@ -2288,7 +2283,6 @@ static int32_t negamax_greedy_leaf_playout(EndgameCtxWorker *worker,
               worker->solver, game_get_player_on_turn_index(worker->game_copy)),
           .eq_margin_movegen = 0,
           .target_equity = EQUITY_MAX_VALUE,
-          .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
       };
       generate_moves(&pargs);
       nplays = worker->move_list->count;
@@ -2302,7 +2296,6 @@ static int32_t negamax_greedy_leaf_playout(EndgameCtxWorker *worker,
               worker->solver, game_get_player_on_turn_index(worker->game_copy)),
           .eq_margin_movegen = 0,
           .target_equity = EQUITY_MAX_VALUE,
-          .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
       };
       // The playout continues the search path one move at a time, so the
       // incremental lists derive each step's full list from the same side's

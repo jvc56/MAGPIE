@@ -12,58 +12,15 @@
 #include "../src/ent/letter_distribution.h"
 #include "../src/ent/move.h"
 #include "../src/ent/rack.h"
-#include "../src/ent/stats.h"
 #include "../src/ent/thread_control.h"
 #include "../src/impl/config.h"
 #include "../src/impl/gameplay.h"
 #include "../src/util/io_util.h"
 #include "test_constants.h"
 #include "test_util.h"
-#include <assert.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
-
-// Helper function to compare inference results between optimized and
-// non-optimized runs
-static void
-assert_inference_results_match(InferenceResults *results_with_cutoff,
-                               InferenceResults *results_without_cutoff,
-                               int ld_size) {
-  // Compare equity values stats for LEAVE type
-  const Stat *eq_with = inference_results_get_equity_values(
-      results_with_cutoff, INFERENCE_TYPE_LEAVE);
-  const Stat *eq_without = inference_results_get_equity_values(
-      results_without_cutoff, INFERENCE_TYPE_LEAVE);
-
-  assert(stat_get_num_samples(eq_with) == stat_get_num_samples(eq_without));
-  assert(stat_get_num_unique_samples(eq_with) ==
-         stat_get_num_unique_samples(eq_without));
-  if (stat_get_num_samples(eq_with) > 0) {
-    assert(within_epsilon(stat_get_mean(eq_with), stat_get_mean(eq_without)));
-  }
-
-  // Compare subtotals for each letter
-  for (int ml = 0; ml < ld_size; ml++) {
-    for (int num_letters = 1; num_letters <= RACK_SIZE; num_letters++) {
-      uint64_t draw_with = inference_results_get_subtotal(
-          results_with_cutoff, INFERENCE_TYPE_LEAVE, ml, num_letters,
-          INFERENCE_SUBTOTAL_DRAW);
-      uint64_t draw_without = inference_results_get_subtotal(
-          results_without_cutoff, INFERENCE_TYPE_LEAVE, ml, num_letters,
-          INFERENCE_SUBTOTAL_DRAW);
-      assert(draw_with == draw_without);
-
-      uint64_t leave_with = inference_results_get_subtotal(
-          results_with_cutoff, INFERENCE_TYPE_LEAVE, ml, num_letters,
-          INFERENCE_SUBTOTAL_LEAVE);
-      uint64_t leave_without = inference_results_get_subtotal(
-          results_without_cutoff, INFERENCE_TYPE_LEAVE, ml, num_letters,
-          INFERENCE_SUBTOTAL_LEAVE);
-      assert(leave_with == leave_without);
-    }
-  }
-}
 
 // Run inference with and without cutoff optimization and verify results match
 static void run_inference_comparison(const Config *config, int target_index,
@@ -98,7 +55,7 @@ static void run_inference_comparison(const Config *config, int target_index,
   }
 
   // Verify results match
-  assert_inference_results_match(results_with_cutoff, results_without_cutoff,
+  assert_inference_results_equal(results_with_cutoff, results_without_cutoff,
                                  ld_size);
 }
 
@@ -117,7 +74,7 @@ static void test_infer_cutoff_optimization(bool use_wmp) {
 
   char *config_str = get_formatted_string(
       "set -lex CSW21 -wmp %s -s1 equity -s2 equity -r1 all -r2 all "
-      "-numplays 1 -threads %d",
+      "-numplays 1 -threads %d -ima 5",
       use_wmp ? "true" : "false", NUM_THREADS);
   Config *config = config_create_or_die(config_str);
   free(config_str);
