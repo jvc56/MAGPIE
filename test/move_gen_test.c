@@ -8,6 +8,8 @@
 #include "../src/def/letter_distribution_defs.h"
 #include "../src/def/move_defs.h"
 #include "../src/def/players_data_defs.h"
+#include "../src/ent/bag.h"
+#include "../src/ent/best_move_carry.h"
 #include "../src/ent/bit_rack.h"
 #include "../src/ent/board.h"
 #include "../src/ent/dictionary_word.h"
@@ -1927,6 +1929,86 @@ static void wit_subrack_prune_movegen_test(void) {
   config_destroy(config);
 }
 
+// Best-move generations seeded from a carry (see best_move_carry.h), which
+// without PAT also skip the lanes unchanged since a carried move was best,
+// choose the same move, at the same equity, as plain ones. The positions mimic
+// a simulation's playouts: every candidate of a position is played on its own
+// copy of the game, and the same opponent rack then moves on each board, so
+// moves the carry remembers from one candidate's board are tried on the next.
+static void best_move_carry_test(const char *config_str) {
+  Config *config = config_create_or_die(config_str);
+  Game *game = config_game_create(config);
+  MoveList *candidates = move_list_create(15);
+  MoveList *plain_list = move_list_create(1);
+  MoveList *carried_list = move_list_create(1);
+  BestMoveCarry *carry = best_move_carry_create();
+  int generations = 0;
+  int racks_with_several_moves = 0;
+  for (int position_idx = 0; position_idx < 12; position_idx++) {
+    game_reset(game);
+    game_seed(game, 7100 + (uint64_t)position_idx);
+    draw_starting_racks(game);
+    for (int turn_idx = 0; turn_idx < 2 + position_idx; turn_idx++) {
+      play_move(get_top_equity_move(game, plain_list), game, NULL);
+      if (game_get_game_end_reason(game) != GAME_END_REASON_NONE) {
+        break;
+      }
+    }
+    if (game_get_game_end_reason(game) != GAME_END_REASON_NONE ||
+        bag_get_letters(game_get_bag(game)) == 0) {
+      continue;
+    }
+    best_move_carry_reset(carry);
+    const MoveGenArgs candidate_args = {
+        .game = game,
+        .move_list = candidates,
+        .move_record_type = MOVE_RECORD_ALL,
+        .move_sort_type = MOVE_SORT_EQUITY,
+        .eq_margin_movegen = 0,
+        .target_equity = EQUITY_MAX_VALUE,
+        .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+    };
+    generate_moves(&candidate_args);
+    const int number_of_candidates = move_list_get_count(candidates);
+    for (int candidate_idx = 0; candidate_idx < number_of_candidates;
+         candidate_idx++) {
+      Game *playout = game_duplicate(game);
+      play_move(move_list_get_move(candidates, candidate_idx), playout, NULL);
+      for (int ply = 0; ply < 2; ply++) {
+        if (game_get_game_end_reason(playout) != GAME_END_REASON_NONE) {
+          break;
+        }
+        const Move *plain = get_top_equity_move(playout, plain_list);
+        const Move *carried =
+            get_top_equity_move_with_carry(playout, carried_list, carry);
+        assert(compare_moves_without_equity(plain, carried, true) == -1);
+        assert(move_get_equity(plain) == move_get_equity(carried));
+        generations++;
+        const BestMoveCarryBucket *bucket = best_move_carry_find(
+            carry,
+            player_get_rack(game_get_player(
+                playout, game_get_player_on_turn_index(playout))),
+            game_get_player_on_turn_index(playout));
+        if (bucket != NULL && bucket->count > 1) {
+          racks_with_several_moves++;
+        }
+        play_move(plain, playout, NULL);
+      }
+      game_destroy(playout);
+    }
+  }
+  assert(generations > 200);
+  // The opponent's best move differs between some candidates' boards, so
+  // the carry holds several moves for its rack and tries them on new boards.
+  assert(racks_with_several_moves > 0);
+  best_move_carry_destroy(carry);
+  move_list_destroy(carried_list);
+  move_list_destroy(plain_list);
+  move_list_destroy(candidates);
+  game_destroy(game);
+  config_destroy(config);
+}
+
 void test_move_gen(void) {
   test_move_gen_instance_fingerprint();
   leave_lookup_test();
@@ -1961,4 +2043,8 @@ void test_move_gen(void) {
   wmp_blank_possibilities_bananas_5();
   large_alphabet_movegen_test();
   wit_subrack_prune_movegen_test();
+  best_move_carry_test("set -lex CSW21 -wmp true -s1 equity -s2 equity");
+  best_move_carry_test("set -lex CSW21 -wmp false -s1 equity -s2 equity");
+  best_move_carry_test(
+      "set -lex CSW21 -wmp true -s1 equity -s2 equity -pat CSW21");
 }

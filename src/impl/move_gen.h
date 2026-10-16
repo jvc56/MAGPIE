@@ -5,6 +5,7 @@
 #include "../def/letter_distribution_defs.h"
 #include "../def/move_defs.h"
 #include "../ent/anchor.h"
+#include "../ent/best_move_carry.h"
 #include "../ent/bit_rack.h"
 #include "../ent/board.h"
 #include "../ent/equity.h"
@@ -353,6 +354,12 @@ typedef struct MoveGenArgs {
   // class the weights have, so one weights file can serve both a fast
   // rollout mode and a full mode. Ignored when disable_pat is set.
   uint32_t pat_disabled_classes_mask;
+  // MOVE_RECORD_BEST by equity only: the best moves earlier generations
+  // found for the same rack (see best_move_carry.h). Each one still legal
+  // here starts the generation as its best move, lanes unchanged since such
+  // a move was best are skipped (without PAT), and the generation's best
+  // move is added. NULL (the default) skips all of this.
+  BestMoveCarry *best_move_carry;
 } MoveGenArgs;
 
 void gen_destroy_cache(void);

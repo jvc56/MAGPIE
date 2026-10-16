@@ -6,6 +6,7 @@
 #include "../def/rack_defs.h"
 #include "../ent/alias_method.h"
 #include "../ent/bag.h"
+#include "../ent/best_move_carry.h"
 #include "../ent/equity.h"
 #include "../ent/game.h"
 #include "../ent/inference_results.h"
@@ -408,6 +409,9 @@ typedef struct SimmerWorker {
   Game *game;
   MoveList *move_list;
   XoshiroPRNG *prng;
+  // The best moves this worker's playouts found, by rack, for the current
+  // simulation.
+  BestMoveCarry *best_move_carry;
 } SimmerWorker;
 
 typedef struct Simmer {
@@ -461,12 +465,14 @@ SimmerWorker *simmer_create_worker(const SimArgs *sim_args) {
   game_set_backup_mode(simmer_worker->game, BACKUP_MODE_SIMULATION);
   simmer_worker->move_list = move_list_create(1);
   simmer_worker->prng = prng_create(0);
+  simmer_worker->best_move_carry = best_move_carry_create();
   return simmer_worker;
 }
 
 void simmer_reset_worker(SimmerWorker *simmer_worker, const SimArgs *sim_args) {
   game_copy(simmer_worker->game, sim_args->game);
   simmer_worker_set_rollout_pat(simmer_worker, sim_args);
+  best_move_carry_reset(simmer_worker->best_move_carry);
 }
 
 void simmer_worker_destroy(SimmerWorker *simmer_worker) {
@@ -476,6 +482,7 @@ void simmer_worker_destroy(SimmerWorker *simmer_worker) {
   game_destroy(simmer_worker->game);
   move_list_destroy(simmer_worker->move_list);
   prng_destroy(simmer_worker->prng);
+  best_move_carry_destroy(simmer_worker->best_move_carry);
   free(simmer_worker);
 }
 
@@ -558,7 +565,8 @@ static double sim_rollout(const Simmer *simmer, SimmerWorker *simmer_worker,
       break;
     }
 
-    const Move *best_play = get_top_equity_move(game, move_list);
+    const Move *best_play = get_top_equity_move_with_carry(
+        game, move_list, simmer_worker->best_move_carry);
     rack_copy(&spare_rack, player_get_rack(player_on_turn));
 
     // On the final ply the resulting cross-sets are never read (no further move
