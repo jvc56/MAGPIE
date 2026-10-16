@@ -1540,10 +1540,14 @@ static const char *convert_help(const char **usages, const char **examples) {
          "input and output name, using different file extensions. The letter "
          "distribution defaults to the lexicon's distribution. Types include "
          "text2kwg, text2wordmap, dawg2wordmap, dawg2text, csv2klv, klv2csv, "
-         "klvwmp2rit, rackequity2klv, kwg2wit, kwg2witifneeded and winpct. "
+         "klvwmp2rit, rackequity2klv, kwg2wit, kwg2witifneeded, kwg2witv4 and "
+         "winpct. "
          "kwg2wit reads the KWG and creates ordinary and positional "
          "word-info tables; kwg2witifneeded preserves a current matching "
-         "table and otherwise rebuilds it before use. klvwmp2rit optionally "
+         "table and otherwise rebuilds it before use. kwg2witv4 writes the "
+         "same table in the version 4 layout, without the position-length "
+         "rows a load then derives; birdtest builds and checks that one. "
+         "klvwmp2rit optionally "
          "takes the KLV's and the wordmap's names separately, since a rack "
          "info table stores precomputed leave values and so belongs to a "
          "(lexicon, leaves) pair rather than to either input. rackequity2klv "
@@ -9276,10 +9280,13 @@ static bool config_contribute_ensure_word_info_table(
   }
   thread_control_print_formatted(
       config->thread_control, "building the word info table for %s\n", lexicon);
-  // `kwg2wit` rather than `kwg2witifneeded`: the second keeps a table it
+  // `kwg2witv4` rather than `kwg2witifneeded`: the second keeps a table it
   // judges current, and this one has just been found not to be the table the
-  // job pins.
-  contribute_convert(config, "kwg2wit", lexicon, ld_name, /*klv_name=*/NULL,
+  // job pins. And the version 4 layout rather than `kwg2wit`'s version 5,
+  // because that is what the server builds and pins: a version 5 file is the
+  // same table plus rows a load derives, and leaving them out keeps this
+  // worker's bytes the same as those of a worker from before version 5.
+  contribute_convert(config, "kwg2witv4", lexicon, ld_name, /*klv_name=*/NULL,
                      /*wmp_name=*/NULL, error_stack);
   if (contribute_build_hit_storage(error_stack)) {
     contribute_unlock_build(lock_fd);

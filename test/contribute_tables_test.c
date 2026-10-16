@@ -748,7 +748,7 @@ static char *tables_test_assignment(void) {
     const char *wmp;
   } builds[] = {
       {"dawg2wordmap", TABLES_TEST_LEXICON, NULL, NULL},
-      {"kwg2wit", TABLES_TEST_LEXICON, NULL, NULL},
+      {"kwg2witv4", TABLES_TEST_LEXICON, NULL, NULL},
       {"klvwmp2rit", TABLES_TEST_RIT, TABLES_TEST_LEXICON, TABLES_TEST_LEXICON},
   };
   const data_filepath_t types[] = {DATA_FILEPATH_TYPE_WORDMAP,
