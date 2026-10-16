@@ -21,12 +21,13 @@ size_t wasm_memory_free_bytes(void) {
 // to exhaustion or assuming that the configured maximum is actually available.
 // The shared reserve covers the UI's 32 MiB maximum TT budget plus the helper
 // and shared search state. Each worker also needs endgame move lists,
-// arenas, and helper contexts. A 16 MiB scratch allowance admitted four
-// workers at a 512 MiB heap limit but could still exhaust that heap during
-// a one-tile-in-bag solve; reserve 64 MiB per worker for this state.
+// arenas, and helper contexts. Measured in this build over one- to
+// four-tile-in-bag solves with a 32 MiB TT, a solve's peak above the loaded
+// lexicon reached 37 MiB on one worker, 97 MiB on two, and 152 MiB on four;
+// 32 MiB per worker reserves 96, 136, and 208 MiB.
 enum {
   WASM_PEG_SHARED_RESERVE_BYTES = 64 * 1024 * 1024,
-  WASM_PEG_WORKER_SCRATCH_BYTES = 64 * 1024 * 1024,
+  WASM_PEG_WORKER_SCRATCH_BYTES = 32 * 1024 * 1024,
   WASM_MAX_SEARCH_THREADS = 32,
   WASM_PEG_SCRATCH_PROBE_BYTES = 8 * 1024 * 1024,
   WASM_PEG_MAX_RESERVATIONS =
@@ -56,7 +57,7 @@ int wasm_peg_memory_fits(int workers) {
   // ABORTING_MALLOC=0 lets refused growth return NULL. Release every block,
   // including after a failed probe, before trying a smaller worker count.
   // Scratch is many smaller allocations (including ~5 MiB move lists), not
-  // one 64 MiB buffer per worker. Keep the full reserve but probe it in chunks.
+  // one 32 MiB buffer per worker. Keep the full reserve but probe it in chunks.
   void *reservations[WASM_PEG_MAX_RESERVATIONS];
   const int stack_count = workers > 1 ? workers : 0;
   const int count =
