@@ -2676,9 +2676,10 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       usages[0] = "<true_or_false>";
       examples[0] = "true";
       examples[1] = "false";
-      text = "Specifies whether or not to save the current settings to file "
-             "after every command. If settings are saved, they will be "
-             "automatically loaded on the next startup.";
+      text = "Specifies whether or not to save the current settings to "
+             "settings.txt after every command. It is false by default. The "
+             "saved settings are loaded on a startup that sets this to true, "
+             "and ignored on any other.";
       break;
     case ARG_TOKEN_AUTOSAVE_GCG:
       usages[0] = "<true_or_false>";
@@ -14463,7 +14464,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->print_on_finish = false;
   config->show_game_with_moves = true;
   config->show_prompt = true;
-  config->save_settings = true;
+  config->save_settings = false;
   config->autosave_gcg = true;
   config->fg_required = true;
   config->loaded_settings = true;
@@ -15382,6 +15383,25 @@ void config_add_settings_to_string_builder(const Config *config,
       break;
     }
   }
+}
+
+bool config_command_turns_on_save_settings(Config *config, const char *cmd) {
+  if (is_string_empty_or_whitespace(cmd)) {
+    return false;
+  }
+  ErrorStack *error_stack = error_stack_create();
+  StringSplitter *cmd_split_string = split_string_by_whitespace(cmd, true);
+  string_splitter_trim_char(cmd_split_string, ';');
+  config_load_parsed_args(config, cmd_split_string, cmd, error_stack);
+  bool save_settings = false;
+  if (error_stack_is_empty(error_stack)) {
+    config_load_bool(config, ARG_TOKEN_SAVE_SETTINGS, &save_settings,
+                     error_stack);
+  }
+  string_splitter_destroy(cmd_split_string);
+  const bool turns_on = error_stack_is_empty(error_stack) && save_settings;
+  error_stack_destroy(error_stack);
+  return turns_on;
 }
 
 void save_config_settings(const Config *config, ErrorStack *error_stack) {

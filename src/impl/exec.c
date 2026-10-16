@@ -309,13 +309,18 @@ static bool run_queued_commands(Config *config, ErrorStack *error_stack,
 
 void sync_command_scan_loop(Config *config, ErrorStack *error_stack,
                             const char *initial_command_string) {
-  // To suppress 'finished' for internal load settings commands
-  config_set_loaded_settings(config, false);
-  load_config_settings(config, error_stack);
-  config_set_loaded_settings(config, true);
-  if (!error_stack_is_empty(error_stack)) {
-    error_stack_print_and_reset(error_stack);
-    return;
+  // The settings file is left alone unless the command line asks for it with
+  // -savesettings true, so a settings.txt in the working directory cannot
+  // change what a run does on its own.
+  if (config_command_turns_on_save_settings(config, initial_command_string)) {
+    // To suppress 'finished' for internal load settings commands
+    config_set_loaded_settings(config, false);
+    load_config_settings(config, error_stack);
+    config_set_loaded_settings(config, true);
+    if (!error_stack_is_empty(error_stack)) {
+      error_stack_print_and_reset(error_stack);
+      return;
+    }
   }
   execute_command_sync(config, error_stack, initial_command_string);
   if (!error_stack_is_empty(error_stack)) {

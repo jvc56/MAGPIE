@@ -286,7 +286,13 @@ magpie> help lex
 
 ### Load and Save Settings
 
-On startup, MAGPIE will check for a `settings.txt` file in the current directory and will load the settings saved in that file if it exists. By default, after every successful command that is not invoked in script mode, MAGPIE will save the current settings to `settings.txt` so they do not have to be reentered on the next startup. To disable this feature, set the "savesettings" setting to false.
+By default, MAGPIE neither reads nor writes a settings file. To keep settings between runs, start MAGPIE with the "savesettings" setting set to true:
+
+```
+./bin/magpie set -savesettings true
+```
+
+On startup with `-savesettings true`, MAGPIE will load the settings saved in `settings.txt` in the current directory if that file exists. While "savesettings" is true, after every successful command that is not invoked in script mode, MAGPIE will save the current settings to `settings.txt` so they do not have to be reentered on the next startup. Setting "savesettings" to false stops the saving, and MAGPIE ignores `settings.txt` on any startup without `-savesettings true`.
 
 ### Execution Modes
 
