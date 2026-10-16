@@ -309,6 +309,10 @@ typedef struct MoveGen {
   Equity best_leaves[RACK_SIZE + 1];
 
   MachineLetter playthrough_marked[BOARD_DIM];
+
+  // MOVE_RECORD_BEST_SMALL only: see MoveGenArgs.best_small_canonical_ties.
+  // Last, so the hot fields above keep their offsets.
+  bool best_small_canonical_ties;
 } MoveGen;
 
 typedef struct MoveGenArgs {
@@ -344,6 +348,12 @@ typedef struct MoveGenArgs {
   // score plus this bonus, e.g. twice the opponent's rack for going out in an
   // endgame. The recorded play keeps its real score. Default 0.
   Equity best_small_out_bonus;
+  // MOVE_RECORD_BEST_SMALL only: if true, a play that ties the best value
+  // replaces it when its tiny_move is larger, so the play returned does not
+  // depend on the order in which anchors are searched (the endgame's
+  // best-reply shortcuts find it in another order and must agree). Default
+  // false: the first play found keeps a tie.
+  bool best_small_canonical_ties;
   // Disables the PAT term even when the player has weights loaded.
   // Set by the inference paths, which build their own equity thresholds
   // from score plus leave and would misclassify moves whose recorded
@@ -429,6 +439,22 @@ void generate_moves(const MoveGenArgs *args);
 // incremental move lists (path_move_lists.h).
 void generate_small_moves_in_lanes(const MoveGenArgs *args, uint64_t lane_mask,
                                    int *lane_end);
+
+// The MOVE_RECORD_BEST_SMALL generation restricted to the anchors of the lanes
+// in `lane_mask` (indexed as for generate_small_moves_in_lanes), competing
+// against `incumbent`: a play found elsewhere on the board, worth
+// `incumbent_value` (its score, plus args->best_small_out_bonus when it uses
+// the whole rack), or NULL for none. Anchors are pruned by their shadow bounds
+// against the incumbent from the start, and with
+// args->best_small_canonical_ties an equal-valued play wins only with a larger
+// tiny_move, so the result is the argmax over the lanes and the incumbent under
+// BEST_SMALL's ranking. Leaves the winner as the only entry of args->move_list
+// and returns true, or returns false with the list empty when there is neither
+// an incumbent nor a play in those lanes. Records no pass.
+bool generate_best_small_move_in_lanes(const MoveGenArgs *args,
+                                       uint64_t lane_mask,
+                                       const SmallMove *incumbent,
+                                       Equity incumbent_value);
 
 MoveGen *get_movegen(void);
 

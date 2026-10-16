@@ -668,7 +668,15 @@ static inline void update_best_move_or_insert_into_movelist(
     if (tiles_played == gen->best_small_out_rack_size) {
       move_equity_or_score += gen->best_small_out_bonus;
     }
-    if (move_equity_or_score > gen->best_move_equity_or_score) {
+    // With canonical ties, equal values go to the larger tiny_move, so the
+    // winner does not depend on the order in which anchors are searched. A tie
+    // leaves the cutoff unchanged, and the shadow pruning is strict (bound <
+    // cutoff), so an equal-valued rival is never pruned. Otherwise the first
+    // play found keeps the tie.
+    if (move_equity_or_score > gen->best_move_equity_or_score ||
+        (move_equity_or_score == gen->best_move_equity_or_score &&
+         gen->best_small_canonical_ties &&
+         best_sm->tiny_move > gen->move_list->small_moves[0]->tiny_move)) {
       need_to_update_best_move_equity_or_score = true;
       gen->best_move_equity_or_score = move_equity_or_score;
       // Swap spare_small_move into small_moves[0].
@@ -3540,29 +3548,35 @@ void shadow_by_orientation(MoveGen *gen) {
   }
 }
 
-void shadow_by_orientation_small(MoveGen *gen) {
-  for (int row = 0; row < BOARD_DIM; row++) {
-    gen->current_row_index = row;
-    if (gen->row_number_of_anchors_cache[BOARD_DIM * gen->dir + row] == 0) {
-      continue;
-    }
-    gen->last_anchor_col = INITIAL_LAST_ANCHOR_COL;
-    gen->row_squares =
-        board_get_row_cache(gen->board_lanes, gen->current_row_index, gen->dir);
-    gen->wit_row_lane = board_get_wit_row_lane(
-        gen->board, gen->current_row_index, gen->dir, gen->cross_index);
-    gen->wit_len_lane = board_get_wit_len_lane(
-        gen->board, gen->current_row_index, gen->dir, gen->cross_index);
-    for (int col = 0; col < BOARD_DIM; col++) {
-      if (gen_cache_get_is_anchor(gen, col)) {
-        shadow_play_for_anchor_small(gen, col);
+// Shadows every anchor of lane `row` in the current gen->dir for BEST_SMALL.
+static inline __attribute__((always_inline)) void
+shadow_lane_small(MoveGen *gen, int row) {
+  gen->current_row_index = row;
+  if (gen->row_number_of_anchors_cache[BOARD_DIM * gen->dir + row] == 0) {
+    return;
+  }
+  gen->last_anchor_col = INITIAL_LAST_ANCHOR_COL;
+  gen->row_squares =
+      board_get_row_cache(gen->board_lanes, gen->current_row_index, gen->dir);
+  gen->wit_row_lane = board_get_wit_row_lane(gen->board, gen->current_row_index,
+                                             gen->dir, gen->cross_index);
+  gen->wit_len_lane = board_get_wit_len_lane(gen->board, gen->current_row_index,
+                                             gen->dir, gen->cross_index);
+  for (int col = 0; col < BOARD_DIM; col++) {
+    if (gen_cache_get_is_anchor(gen, col)) {
+      shadow_play_for_anchor_small(gen, col);
 
-        gen->last_anchor_col = col;
-        if (!gen_cache_is_empty(gen, col)) {
-          gen->last_anchor_col++;
-        }
+      gen->last_anchor_col = col;
+      if (!gen_cache_is_empty(gen, col)) {
+        gen->last_anchor_col++;
       }
     }
+  }
+}
+
+void shadow_by_orientation_small(MoveGen *gen) {
+  for (int row = 0; row < BOARD_DIM; row++) {
+    shadow_lane_small(gen, row);
   }
 }
 
@@ -3591,6 +3605,7 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
   gen->target_equity_cutoff = args->target_equity;
   gen->target_leave_size = args->target_leave_size_for_exchange_cutoff;
   gen->best_small_out_bonus = args->best_small_out_bonus;
+  gen->best_small_canonical_ties = args->best_small_canonical_ties;
 
   gen->board = game_get_board(game);
   gen->player_index = game_get_player_on_turn_index(game);
@@ -4163,6 +4178,37 @@ void generate_small_moves_in_lanes(const MoveGenArgs *args, uint64_t lane_mask,
       lane_end[lane] = gen->move_list->count;
     }
   }
+}
+
+bool generate_best_small_move_in_lanes(const MoveGenArgs *args,
+                                       uint64_t lane_mask,
+                                       const SmallMove *incumbent,
+                                       Equity incumbent_value) {
+  MoveGen *gen = get_movegen();
+  gen_count_movegen(gen);
+  gen_load_position(gen, args);
+  assert(gen->move_record_type == MOVE_RECORD_BEST_SMALL);
+  if (incumbent != NULL) {
+    // The incumbent is the best so far, so the anchor heap prunes against it
+    // from the start and an equal-valued play must beat its tiny_move.
+    *gen->move_list->small_moves[0] = *incumbent;
+    gen->move_list->count = 1;
+    gen->best_move_equity_or_score = incumbent_value;
+    gen->cutoff_equity_or_score = incumbent_value;
+  }
+  rack_copy(&gen->full_player_rack, &gen->player_rack);
+  anchor_heap_reset(&gen->anchor_heap);
+  for (int dir = 0; dir < 2; dir++) {
+    gen->dir = dir;
+    for (int row = 0; row < BOARD_DIM; row++) {
+      if (((lane_mask >> (BOARD_DIM * dir + row)) & 1) != 0) {
+        shadow_lane_small(gen, row);
+      }
+    }
+  }
+  anchor_heapify_all(&gen->anchor_heap);
+  gen_record_scoring_plays(gen);
+  return gen->move_list->count > 0;
 }
 
 // Scores a remembered move on this board into move, or returns false when it

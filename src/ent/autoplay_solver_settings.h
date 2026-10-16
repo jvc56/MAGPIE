@@ -47,6 +47,8 @@ typedef struct AutoplaySolverSettings {
   int peg_nested_max_depth;
   // Stride an inner peg of bag b samples at, for b in 1..PEG_MAX_BAG.
   int peg_nested_strides[AUTOPLAY_SOLVER_NUM_NESTED_STRIDES];
+  // EndgameArgs.disable_best_reply_shortcuts, for the endgame and PEG solves.
+  bool disable_best_reply_shortcuts;
 } AutoplaySolverSettings;
 
 // Solving off, and the PEG knobs at the CLI's own defaults, so turning a
@@ -83,6 +85,7 @@ autoplay_solver_settings_set_defaults(AutoplaySolverSettings *settings) {
   for (int i = 0; i < AUTOPLAY_SOLVER_NUM_NESTED_STRIDES; i++) {
     settings->peg_nested_strides[i] = default_nested_strides[i];
   }
+  settings->disable_best_reply_shortcuts = false;
 }
 
 // Whether a player with these settings solves anything.

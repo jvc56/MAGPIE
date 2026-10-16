@@ -522,21 +522,34 @@ static inline void move_list_load_with_empty_moves(MoveList *ml, int capacity) {
   }
 }
 
+// A small move list keeps its pointer slots, moves and spare in one
+// allocation. The pointer region is rounded to whole SmallMove slots so the
+// moves stay aligned even for odd capacities on 32-bit targets. Pointer swaps
+// never change the owned base.
+static inline size_t small_move_list_pointer_bytes(int capacity) {
+  return ((sizeof(SmallMove *) * (size_t)capacity + sizeof(SmallMove) - 1) /
+          sizeof(SmallMove)) *
+         sizeof(SmallMove);
+}
+
+static inline SmallMove **small_move_list_alloc_slots(int capacity) {
+  return (SmallMove **)malloc_or_die(
+      small_move_list_pointer_bytes(capacity) +
+      (sizeof(SmallMove) * ((size_t)capacity + 1)));
+}
+
+// The capacity + 1 moves (the last one starts as the spare) after the slots.
+static inline SmallMove *small_move_list_storage(SmallMove **slots,
+                                                 int capacity) {
+  return (SmallMove *)((unsigned char *)slots +
+                       small_move_list_pointer_bytes(capacity));
+}
+
 static inline void move_list_load_with_empty_small_moves(MoveList *ml,
                                                          int capacity) {
   ml->capacity = capacity;
-
-  // Keep pointer slots, moves and spare in one allocation. Round the pointer
-  // region to whole SmallMove slots so the moves stay aligned even for odd
-  // capacities on 32-bit targets. Pointer swaps never change the owned base.
-  const size_t pointer_bytes =
-      ((sizeof(SmallMove *) * (size_t)capacity + sizeof(SmallMove) - 1) /
-       sizeof(SmallMove)) *
-      sizeof(SmallMove);
-  ml->small_moves = malloc_or_die(pointer_bytes +
-                                  (sizeof(SmallMove) * ((size_t)capacity + 1)));
-  SmallMove *storage =
-      (SmallMove *)((unsigned char *)ml->small_moves + pointer_bytes);
+  ml->small_moves = small_move_list_alloc_slots(capacity);
+  SmallMove *storage = small_move_list_storage(ml->small_moves, capacity);
   for (int move_idx = 0; move_idx < capacity; move_idx++) {
     ml->small_moves[move_idx] = &storage[move_idx];
   }
@@ -751,9 +764,17 @@ static inline void move_list_set_spare_small_move_as_pass(MoveList *ml) {
   small_move_set_as_pass(ml->spare_small_move);
 }
 
+// Doubles a full small move list's capacity. The moves, the spare and the
+// order of the slots are kept, but they move to a new allocation, so SmallMove
+// pointers taken before the call point into freed memory.
+void small_move_list_grow(MoveList *ml);
+
 static inline void move_list_insert_spare_small_move(MoveList *ml) {
   // small move list does not use a heap. We just append to the end of the list.
   // we're just swapping pointers here.
+  if (ml->count == ml->capacity) {
+    small_move_list_grow(ml);
+  }
   SmallMove *swap = ml->small_moves[ml->count];
   ml->small_moves[ml->count] = ml->spare_small_move;
   ml->spare_small_move = swap;
