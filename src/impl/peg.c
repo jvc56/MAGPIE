@@ -92,6 +92,20 @@ typedef struct PegNestFrame {
   struct PegNestFrame *all_next;  // all-frames link (for teardown)
 } PegNestFrame;
 
+// The endgame transposition table every worker of one solve shares. Jobs are
+// per (candidate, split) and land on any worker, so a table per worker would
+// split the cross-scenario and stage-to-stage reuse that makes the leaf
+// endgames cheap. The greedy seed does not use it, and many solves never reach
+// an exact leaf, so the table is created on first use: under the mutex, by the
+// first worker that needs it. Caller-provided tables
+// (PegArgs.shared_endgame_tt) are installed up front and never destroyed here.
+typedef struct PegSharedEndgameTT {
+  cpthread_mutex_t mutex;
+  TranspositionTable *tt; // guarded by mutex until every worker has cached it
+  double fraction;        // size of the table to create
+  bool owned;             // created here (destroy at teardown)
+} PegSharedEndgameTT;
+
 // One move of a greedy playout that several scenarios play identically: the
 // first playout to reach it records what the generation picked, and the rest
 // play that instead of generating again.
@@ -138,14 +152,11 @@ typedef struct PegWorker {
   // Reused per-scenario game: game_copy from the template, then only the racks
   // and bag are reset (no cand replay, no cross-set work).
   Game *scratch_game;
-  // Shared endgame TT, reused across every leaf solve this worker runs. Many
-  // scenarios reach identical board states, so cross-scenario reuse is the
-  // dominant endgame speedup.
+  // This worker's cached pointer to the solve's shared endgame TT (NULL until
+  // its first exact leaf). Many scenarios reach identical board states, so
+  // cross-scenario reuse is the dominant endgame speedup.
   TranspositionTable *eg_tt;
-  double eg_tt_fraction;
-  // True when eg_tt is the caller's (PegArgs.shared_endgame_tt), which this
-  // worker must not destroy.
-  bool eg_tt_shared;
+  PegSharedEndgameTT *shared_eg_tt;
   // Shared per-solve cache of per-candidate leaf prunes (see PegPruneCache).
   PegPruneCache *prune_cache;
   // PegArgs.disable_best_reply_shortcuts, for every leaf endgame solve.
@@ -174,14 +185,21 @@ typedef struct PegWorker {
   PegNestFrame *nest_all;
 } PegWorker;
 
-// The greedy seed does not use an endgame transposition table. Allocate one
-// only when a worker actually reaches an exact leaf so a short-budget PEG does
-// not spend most of its clock zeroing tables it will never consult.
+// The greedy seed does not use an endgame transposition table. Allocate the
+// shared one only when a worker actually reaches an exact leaf so a
+// short-budget PEG does not spend most of its clock zeroing a table it will
+// never consult. Each worker takes the mutex once, then uses its cached copy.
 static TranspositionTable *peg_worker_get_endgame_tt(PegWorker *worker) {
   if (worker->eg_tt == NULL) {
-    assert(worker->eg_tt_fraction > 0.0);
-    worker->eg_tt = transposition_table_create_with_minimum(
-        worker->eg_tt_fraction, PEG_TT_MIN_SIZE_POWER);
+    PegSharedEndgameTT *shared = worker->shared_eg_tt;
+    cpthread_mutex_lock(&shared->mutex);
+    if (shared->tt == NULL) {
+      assert(shared->fraction > 0.0);
+      shared->tt = transposition_table_create_with_minimum(
+          shared->fraction, PEG_TT_MIN_SIZE_POWER);
+    }
+    worker->eg_tt = shared->tt;
+    cpthread_mutex_unlock(&shared->mutex);
   }
   return worker->eg_tt;
 }
@@ -3101,17 +3119,17 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
   const double total_fraction = args->tt_fraction_of_mem > 0
                                     ? args->tt_fraction_of_mem
                                     : DEFAULT_TT_FRACTION;
+  // Every worker shares one endgame table (see PegSharedEndgameTT), so a
+  // bounded budget has to fit only that table: it no longer caps the workers.
+  int max_tables = INT_MAX;
   if (search_memory_is_bounded()) {
-    const int max_tables = peg_memory_max_tables(total_fraction);
+    max_tables = peg_memory_max_tables(total_fraction);
     if (max_tables < 1) {
       error_stack_push(
           error_stack, ERROR_STATUS_PEG_MEMORY_BUDGET_TOO_SMALL,
           string_duplicate("PEG memory budget is too small for one table"));
       peg_poll_finish(args->poll, false);
       return;
-    }
-    if (n_threads > 1 && n_threads + 1 > max_tables) {
-      n_threads = max_tables > 2 ? max_tables - 1 : 1;
     }
   }
 
@@ -3196,18 +3214,31 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
     peg_pool_set_stuck_timeout_seconds(pool, 0);
   }
   const int n_scratch = pool ? n_threads + 1 : 1;
-  // Per-worker endgame TT. Shallow PEG endgames need little, and the total
-  // across workers stays well under the 50%-RAM ceiling.
+  // Endgame TT size: first what each worker's own table would be, as when
+  // every worker had one. Shallow PEG endgames need little, and the total
+  // across workers stays well under the 50%-RAM ceiling. A bounded budget
+  // divides among at most the tables it can hold at the minimum size.
   double tt_fraction = 0.25 / (double)n_scratch;
   if (tt_fraction > 0.05) {
     tt_fraction = 0.05;
   }
+  int n_tables = n_scratch;
   if (search_memory_is_bounded()) {
+    if (n_tables > max_tables) {
+      n_tables = max_tables;
+    }
     const bool fits =
-        peg_memory_worker_fraction(total_fraction, n_scratch, &tt_fraction);
-    assert(fits); // Worker count was bounded before allocating search state.
+        peg_memory_worker_fraction(total_fraction, n_tables, &tt_fraction);
+    assert(fits); // max_tables tables fit at the minimum size by construction.
     (void)fits;
   }
+  // Then one table shared by every worker, no larger than those tables
+  // combined. A single worker gets exactly its own table.
+  PegSharedEndgameTT shared_eg_tt;
+  cpthread_mutex_init(&shared_eg_tt.mutex);
+  shared_eg_tt.tt = args->shared_endgame_tt;
+  shared_eg_tt.fraction = peg_memory_shared_fraction(tt_fraction, n_tables);
+  shared_eg_tt.owned = args->shared_endgame_tt == NULL;
   // One prune cache shared by every worker (cross-worker board reuse).
   PegPruneCache *prune_cache = peg_prune_cache_create();
   PegWorker *workers = malloc_or_die((size_t)n_scratch * sizeof(PegWorker));
@@ -3220,8 +3251,7 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
     workers[worker_idx].template_game = NULL;
     workers[worker_idx].scratch_game = NULL;
     workers[worker_idx].eg_tt = args->shared_endgame_tt;
-    workers[worker_idx].eg_tt_shared = args->shared_endgame_tt != NULL;
-    workers[worker_idx].eg_tt_fraction = tt_fraction;
+    workers[worker_idx].shared_eg_tt = &shared_eg_tt;
     workers[worker_idx].prune_cache = prune_cache;
     workers[worker_idx].disable_best_reply_shortcuts =
         args->disable_best_reply_shortcuts;
@@ -3772,11 +3802,11 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
       free(frame);
       frame = next;
     }
-    if (!workers[worker_idx].eg_tt_shared) {
-      transposition_table_destroy(workers[worker_idx].eg_tt);
-    }
   }
   free(workers);
+  if (shared_eg_tt.owned) {
+    transposition_table_destroy(shared_eg_tt.tt);
+  }
   // Safe now that every worker's scratch game (which referenced cached KWGs via
   // its override pointer) has been destroyed.
   peg_prune_cache_destroy(prune_cache);

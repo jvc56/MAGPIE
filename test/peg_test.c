@@ -456,6 +456,83 @@ static void test_peg_macondo_only_onyx(void) {
   assert(win >= (7.5 / 8.0) - 0.005 && win <= (7.5 / 8.0) + 0.005); // 0.9375
 }
 
+// Full PEG solve of `cgp` on `num_threads` workers through a short cascade that
+// reaches exact endgame stages, rendered one ranked candidate per line (move,
+// win%, spread, tallies, scenarios). Timing is left out so solves compare.
+static char *peg_shared_tt_table(const char *cgp, int num_threads) {
+  Config *config = config_create_or_die("set -s1 score -s2 score");
+  load_and_exec_config_or_die(config, cgp);
+  const Game *game = config_get_game(config);
+  static const int kCascade[] = {8, 4, 2};
+  PegArgs args;
+  memset(&args, 0, sizeof(args));
+  args.game = game;
+  args.thread_control = config_get_thread_control(config);
+  args.num_threads = num_threads;
+  args.stage_top_k = kCascade;
+  args.num_stages = (int)(sizeof(kCascade) / sizeof(kCascade[0]));
+  ErrorStack *error_stack = error_stack_create();
+  PegResult result;
+  memset(&result, 0, sizeof(result));
+  peg_solve(&args, &result, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  assert(result.last_completed_stage == args.num_stages);
+  assert(!result.last_stage_partial);
+  StringBuilder *table = string_builder_create();
+  for (int cand_idx = 0; cand_idx < result.n_top_cands; cand_idx++) {
+    const PegRankedCand *cand = &result.top_cands[cand_idx];
+    string_builder_add_move(table, game_get_board(game), &cand->move,
+                            game_get_ld(game), false);
+    string_builder_add_formatted_string(
+        table, " %.9f %.9f %lld %lld %lld %d\n", cand->win_pct,
+        cand->mean_spread, (long long)cand->weight_sum,
+        (long long)cand->win_count, (long long)cand->tie_count,
+        cand->n_scenarios);
+  }
+  char *rendered = string_builder_dump(table, NULL);
+  string_builder_destroy(table);
+  peg_result_destroy(&result);
+  error_stack_destroy(error_stack);
+  config_destroy(config);
+  return rendered;
+}
+
+// Every worker of a solve shares one endgame transposition table, so leaf
+// solves running concurrently on different workers read and write the same
+// entries. Entries are keyed by the whole endgame position (board, both racks,
+// side to move, scoreless turns), so sharing must not change a single value:
+// the multi-worker tables match the single-worker one exactly, at 1 and 2
+// tiles in the bag.
+static void test_peg_shared_endgame_tt_matches_single_worker(void) {
+  const char *cgps[] = {
+      // macondo TestStraightforward1PEG (1 in the bag).
+      "cgp 15/3Q7U3/3U2TAURINE2/1CHANSONS2W3/2AI6JO3/DIRL1PO3IN3/E1D2EF3V4/"
+      "F1I2p1TRAIK3/O1L2T4E4/ABy1PIT2BRIG2/ME1MOZELLE5/1GRADE1O1NOH3/"
+      "WE3R1V7/AT5E7/G6D7 ENOSTXY/ACEISUY 356/378 0 -lex NWL20",
+      // macondo TestTwoInBagSingleMove (2 in the bag).
+      "cgp 1T13/1W3Q9/VERB1U9/1E1OPIUM5C1/1LAWIN1I5O1/1Y3A1E5R1/7V4NO1/"
+      "NOTArIZE1C2UN1/6ODAH2LA1/3TAHA2I2LED/2JUT4R2A1O/3G5P4D/3R3BrIEFING/"
+      "3I5L4E/3K2DESYNES1M AEFGSTX/EEIOOST 370/341 0 -lex CSW21",
+  };
+  const int num_cgps = (int)(sizeof(cgps) / sizeof(cgps[0]));
+  const int thread_counts[] = {4, 8};
+  const int num_thread_counts =
+      (int)(sizeof(thread_counts) / sizeof(thread_counts[0]));
+  for (int cgp_idx = 0; cgp_idx < num_cgps; cgp_idx++) {
+    char *single = peg_shared_tt_table(cgps[cgp_idx], 1);
+    for (int count_idx = 0; count_idx < num_thread_counts; count_idx++) {
+      char *multi =
+          peg_shared_tt_table(cgps[cgp_idx], thread_counts[count_idx]);
+      if (!strings_equal(single, multi)) {
+        log_fatal("PEG table on %d workers differs from 1 worker:\n%s\nvs\n%s",
+                  thread_counts[count_idx], multi, single);
+      }
+      free(multi);
+    }
+    free(single);
+  }
+}
+
 // macondo Test1PEGPass: a French (FRA20) 1-in-bag where passing is best (W-L-D
 // 5-2-1). The macondo CGP stores an empty opponent rack, so redistribute to a
 // genuine 1-in-bag, then a full solve must rank the pass first.
@@ -2151,6 +2228,7 @@ void test_peg(void) {
   test_peg_main_inner_top_k();
   // Cases drawn from the macondo codebase + pre-endgame manual.
   test_peg_macondo_only_onyx();
+  test_peg_shared_endgame_tt_matches_single_worker();
   test_peg_macondo_french_pass();
   test_peg_macondo_axe();
   test_peg_macondo_pah_slice();
