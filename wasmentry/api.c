@@ -3,7 +3,6 @@
 #include "../src/def/board_defs.h"
 #include "../src/def/wmp_defs.h"
 #include "../src/ent/wmp.h"
-#include "../src/ent/word_info_table.h"
 #include "../src/impl/browser_game.h"
 #include "../src/impl/cmd_api.h"
 #include "../src/impl/cmd_api_wmp.h"
@@ -115,9 +114,6 @@ int main(void) {
 typedef enum {
   WORD_MAP_BUILDING = 0,
   WORD_MAP_SAVING_WMP = 5,
-  WORD_MAP_BUILDING_WIT = 6,
-  WORD_MAP_LOADING_WIT = 7,
-  WORD_MAP_SAVING_WIT = 8,
 } WordMapPhase;
 typedef struct {
   _Atomic int wmp_phase;
@@ -127,7 +123,6 @@ typedef struct {
   _Atomic bool wmp_done;
   WMPBuildProgress *wmp_progress;
   WMP *prepared_wmp;
-  WordInfoTable *prepared_wit;
   int wmp_threads;
   const char *wmp_name;
   bool wmp_save;
@@ -135,32 +130,9 @@ typedef struct {
   size_t wmp_export_size;
   unsigned char *wmp_bytes;
   size_t wmp_size;
-  unsigned char *wit_bytes;
-  size_t wit_size;
-  char *wit_export;
-  size_t wit_export_size;
-
 } WordMapPreparation;
 
 static WordMapPreparation word_maps;
-
-static WordInfoTable *load_cached_wit(void) {
-  ErrorStack *error_stack = error_stack_create();
-  WordInfoTable *wit = NULL;
-  FILE *stream = fmemopen(word_maps.wit_bytes, word_maps.wit_size, "rb");
-  if (stream) {
-    wit = calloc_or_die(1, sizeof(WordInfoTable));
-    word_info_table_load_from_stream(wit, word_maps.wmp_name, stream,
-                                     error_stack);
-    const bool closed = fclose(stream) == 0;
-    if (!closed || !error_stack_is_empty(error_stack)) {
-      word_info_table_destroy(wit);
-      wit = NULL;
-    }
-  }
-  error_stack_destroy(error_stack);
-  return wit;
-}
 
 // Allocate the final serialized size once. open_memstream's geometric growth
 // can temporarily require both the old and the new buffer near the heap cap.
@@ -191,26 +163,6 @@ static FILE *export_stream(char **buffer, size_t size) {
   return stream;
 }
 
-static void export_prepared_wit(void) {
-  ErrorStack *error_stack = error_stack_create();
-  word_maps.wit_export_size =
-      word_info_table_write_size(word_maps.prepared_wit);
-  FILE *stream =
-      export_stream(&word_maps.wit_export, word_maps.wit_export_size);
-  if (stream) {
-    word_info_table_write_to_stream(word_maps.prepared_wit, stream,
-                                    error_stack);
-    const bool exact = ftell(stream) == (long)word_maps.wit_export_size;
-    const bool closed = fclose(stream) == 0;
-    if (!exact || !closed || !error_stack_is_empty(error_stack)) {
-      free(word_maps.wit_export);
-      word_maps.wit_export = NULL;
-      word_maps.wit_export_size = 0;
-    }
-  }
-  error_stack_destroy(error_stack);
-}
-
 static void *prepare_wmp(void *unused) {
   (void)unused;
   if (word_maps.wmp_bytes) {
@@ -231,23 +183,6 @@ static void *prepare_wmp(void *unused) {
   } else {
     word_maps.prepared_wmp = cmd_api_build_wmp(
         wasm_magpie, word_maps.wmp_threads, word_maps.wmp_progress);
-  }
-  if (word_maps.prepared_wmp &&
-      !wmp_build_progress_is_cancelled(word_maps.wmp_progress)) {
-    if (word_maps.wit_bytes) {
-      atomic_store(&word_maps.wmp_phase, WORD_MAP_LOADING_WIT);
-      word_maps.prepared_wit = load_cached_wit();
-    }
-    if (!word_maps.prepared_wit) {
-      atomic_store(&word_maps.wmp_phase, WORD_MAP_BUILDING_WIT);
-      word_maps.prepared_wit =
-          cmd_api_build_wit(wasm_magpie, word_maps.wmp_threads);
-    }
-    if (word_maps.prepared_wit && word_maps.wmp_save &&
-        !wmp_build_progress_is_cancelled(word_maps.wmp_progress)) {
-      atomic_store(&word_maps.wmp_phase, WORD_MAP_SAVING_WIT);
-      export_prepared_wit();
-    }
   }
   if (word_maps.prepared_wmp && !word_maps.wmp_bytes && word_maps.wmp_save &&
       !wmp_build_progress_is_cancelled(word_maps.wmp_progress)) {
@@ -270,29 +205,23 @@ static void *prepare_wmp(void *unused) {
   return NULL;
 }
 
-// name remains borrowed until finish; bytes until stage 6 or later.
-// Cached WIT bytes remain borrowed until finish. Downloads are validated by the
-// worker before entering the native binary reader.
+// name remains borrowed until finish; bytes until progress reports done.
+// Downloads are validated by the worker before entering the native binary
+// reader.
 int wasm_prepare_wmp(const char *name, unsigned char *bytes, int size,
-                     int threads, int save, unsigned char *cached_wit,
-                     int cached_wit_size) {
+                     int threads, int save) {
   if (!wasm_magpie || word_maps.wmp_joinable ||
       magpie_get_thread_status(wasm_magpie) == MAGPIE_THREAD_STATUS_STARTED) {
     return 1;
   }
   word_maps.wmp_name = name;
   word_maps.wmp_save = save != 0;
-  word_maps.wit_bytes = cached_wit;
-  word_maps.wit_size = (size_t)cached_wit_size;
-  word_maps.wit_export = NULL;
-  word_maps.wit_export_size = 0;
   word_maps.wmp_export = NULL;
   word_maps.wmp_export_size = 0;
   word_maps.wmp_bytes = bytes;
   word_maps.wmp_size = (size_t)size;
   word_maps.wmp_threads = threads;
   word_maps.prepared_wmp = NULL;
-  word_maps.prepared_wit = NULL;
   word_maps.wmp_progress = wmp_build_progress_create();
   atomic_store(&word_maps.wmp_done, false);
   atomic_store(&word_maps.wmp_phase, WORD_MAP_BUILDING);
@@ -332,18 +261,13 @@ int wasm_finish_wmp(int install) {
   wmp_build_progress_destroy(word_maps.wmp_progress);
   word_maps.wmp_progress = NULL;
   const bool success =
-      install && cmd_api_install_wmp(wasm_magpie, word_maps.prepared_wmp,
-                                     word_maps.prepared_wit);
+      install && cmd_api_install_wmp(wasm_magpie, word_maps.prepared_wmp);
   if (!success) {
     wmp_destroy(word_maps.prepared_wmp);
-    word_info_table_destroy(word_maps.prepared_wit);
   }
   word_maps.prepared_wmp = NULL;
-  word_maps.prepared_wit = NULL;
   free(word_maps.wmp_export);
   word_maps.wmp_export = NULL;
-  free(word_maps.wit_export);
-  word_maps.wit_export = NULL;
   return success ? 0 : 1;
 }
 
@@ -353,11 +277,4 @@ const char *wasm_wmp_data(void) {
 
 int wasm_wmp_data_size(void) {
   return atomic_load(&word_maps.wmp_done) ? (int)word_maps.wmp_export_size : 0;
-}
-
-const char *wasm_wit_data(void) {
-  return atomic_load(&word_maps.wmp_done) ? word_maps.wit_export : NULL;
-}
-int wasm_wit_data_size(void) {
-  return atomic_load(&word_maps.wmp_done) ? (int)word_maps.wit_export_size : 0;
 }

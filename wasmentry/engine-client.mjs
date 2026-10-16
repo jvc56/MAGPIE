@@ -135,7 +135,7 @@ export class EngineClient extends EventTarget {
     this.wmpKey = null;
     // Disable the old map before changing lexica so Config never tries to
     // discover an optional WMP on disk. Installing transfers the new map.
-    const disabled = await this.run([`set -wit false -wmp false -lex ${lexicon}`]);
+    const disabled = await this.run([`set -wmp false -lex ${lexicon}`]);
     if (disabled.stopped) return;
     this.wmpCacheAttempted = false;
     if (source !== "off") {
@@ -153,7 +153,7 @@ export class EngineClient extends EventTarget {
   }
   async wmpCache(remove) {
     if (remove && this.wmpKey?.startsWith(`${remove}:`)) {
-      await this.run(["set -wit false -wmp false"]);
+      await this.run(["set -wmp false"]);
       this.wmpKey = null;
     }
     return this.request("wmp_cache", { remove }, "wmp_cache_updated");
@@ -191,7 +191,7 @@ export class EngineClient extends EventTarget {
     return result.value;
   }
   run(commands) {
-    if (this.wmpUnavailable) commands = commands.map(command => command.replace(/-(wmp|wit) true\b/g, "-$1 false"));
+    if (this.wmpUnavailable) commands = commands.map(command => command.replace(/-wmp true\b/g, "-wmp false"));
     return this.request("run", { commands }, "complete");
   }
   destroy() {

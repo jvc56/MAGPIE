@@ -324,7 +324,7 @@ uses flags that relax SharedArrayBuffer requirements. Redundant diagnostic-page
 simulation and mobile drag cases are covered by the application tests.
 
 The browser suite retains constrained heap reservations, WMP cancellation, and
-cached WMP/WIT allocation failure followed by baseline move generation and
+cached WMP allocation failure followed by baseline move generation and
 simulation. These use real WASM with injected failures; a mobile viewport and
 user-agent override do not reproduce a phone's RAM pressure. Tile dragging covers
 rack insertion, duplicates, board placement/movement/return, blanks, canceled
@@ -375,27 +375,28 @@ Expand it to see the same vowel-first, one-row-per-letter tracking as the deskto
 ### Experimental word maps
 
 Settings → Analysis offers **Off** (the default) and **Build on this device**.
-WMP and matching WIT preparation run on a coordinator pthread. The WMP builder
-uses up to 14 threads, bounded by the Threads setting. Progress reports the
-build stages; Stop discards a native build after its preparation finishes.
-Ordinary startup and GCG import never require WMP, WIT or RIT.
+WMP preparation runs on a coordinator pthread. The WMP builder uses up to 14
+threads, bounded by the Threads setting. Progress reports the build stages;
+Stop discards a native build after its preparation finishes. Ordinary startup
+and GCG import never require a WMP.
 
-**Cache WMP and WIT on this device** is opt-in. The cache section lists
-**CSW24** and **NWL23** independently, showing each table's size in MiB and
-combined exact bytes in the tooltip. Cache builds and saves either lexicon
-without running analysis. Both tables are saved atomically in IndexedDB as
-Blobs and reused after reload. Remove deletes both tables for that lexicon
-and releases its active engine tables, leaving the other lexicon cached.
-Clearing browser site data also clears these files. Browser storage is
-origin-specific and may be evicted. Existing WMP-only caches remain readable;
-when caching is enabled, a locally built WIT is added on the next use.
-The checkbox controls new writes; existing cached tables remain reusable.
-Cache failures (including quota limits) are shown without failing analysis.
+**Cache WMP on this device** is opt-in. The cache section lists **CSW24** and
+**NWL23** independently, showing each WMP's size in MiB and exact bytes in the
+tooltip. Cache builds and saves either lexicon without running analysis. Each
+WMP is saved atomically in IndexedDB as a Blob and reused after reload. Remove
+deletes that lexicon's WMP and releases it from the engine, leaving the other
+lexicon cached. Clearing browser site data also clears these files. Browser
+storage is origin-specific and may be evicted. The checkbox controls new
+writes; existing cached WMPs remain reusable. Cache failures (including quota
+limits) are shown without failing analysis.
 
-WIT pruning is enabled with WMP; RIT remains off. Only one lexicon's tables
-are resident in the engine at a time. Cached files are checked against their
-SHA-256 and the loaded KWG's SHA-256 before native parsing. A missing or invalid
-cache is rebuilt locally. No word-map manifest or data download is needed.
+The browser uses neither a WIT nor an RIT. With the WMP on, a WIT makes sims
+about 3.5% faster, but it needs another 121 MiB of WASM heap and a build on the
+device. Earlier releases cached a WIT beside each WMP; listing the cache
+deletes those files and keeps the WMPs. Only one lexicon's WMP is resident in
+the engine at a time. Cached files are checked against their SHA-256 and the
+loaded KWG's SHA-256 before native parsing. A missing or invalid cache is
+rebuilt locally. No word-map manifest or data download is needed.
 
 The network WMP implementation is retained for developer use through
 `EngineClient.prepareWMP(lexicon, "download", threads, cache)`. It is not exposed
@@ -417,15 +418,14 @@ files remain outside Git.
 
 A saved word-map preference falls back to ordinary move generation if the browser
 can reserve less than a 1 GiB WASM heap. A null allocation while copying a cached
-WMP or WIT into WASM also falls back after freeing partial input buffers, keeps the
+WMP into WASM also falls back after freeing partial input buffers, keeps the
 saved files, and avoids retrying the same unavailable map on every analysis.
 A native abort during construction still stops the engine and requires a reload;
 this fallback does not cover OS termination of the tab. Cache records include the builder version,
 lexicon hash and binary format. An incompatible cached installation is removed and
 rebuilt once; transient storage failures do not delete saved maps. If WebKit
 rejects storing Blob/File data, saving retries atomically with typed arrays. Stop requests
-interrupt WMP construction between word-length groups; a WIT build already in
-progress must finish before cancellation completes.
+interrupt WMP construction between word-length groups.
 
 Game exports remain available after a fatal engine error. Native game imports still
 use a watchdog that terminates an unresponsive worker; they do not yet support

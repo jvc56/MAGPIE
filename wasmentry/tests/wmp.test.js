@@ -36,7 +36,7 @@ test('local and downloaded WMPs persist, match ordinary move generation, and can
       engine.addEventListener('message', ({detail}) => messages.push(detail));
     };
     const generate = async (lexicon, wmp, cgp) => {
-      await engine.run([`set -lex ${lexicon} -wmp ${wmp} -wit ${wmp} -numplays 100 -hr false`,
+      await engine.run([`set -lex ${lexicon} -wmp ${wmp} -numplays 100 -hr false`,
         `cgp ${cgp}`, 'generate']);
       return messages.filter(m => m.type === 'output' && m.command === 'generate').at(-1).text;
     };
@@ -69,7 +69,7 @@ test('local and downloaded WMPs persist, match ordinary move generation, and can
       await engine.prepareWMP(lexicon, 'off', 4);
       output[lexicon].disabled = await generate(lexicon, false, SAMPLES.peg.replace(/ -lex .*/, ''));
     }
-    const cachedLoads = messages.filter(m => m.type === 'wmp_ready' && m.fromCache && m.witFromCache).length;
+    const cachedLoads = messages.filter(m => m.type === 'wmp_ready' && m.fromCache).length;
     await engine.wmpCache('CSW24');
     const remaining = await listWMPs();
     await engine.wmpCache('NWL23');
@@ -83,10 +83,10 @@ test('local and downloaded WMPs persist, match ordinary move generation, and can
   expect(report.warnings).toEqual([]);
   expect(report.files.map(f=>f.lexicon).sort()).toEqual(['CSW24','NWL23']);
   expect(report.cachedLoads).toBe(2);
-  expect(report.cachedStages).not.toContain('Building WIT indexes…');
-  expect(report.files.every(file => file.wit_bytes > 0 && file.wit_sha256.length === 64)).toBe(true);
+  expect(report.cachedStages.some(stage => stage.startsWith('Building'))).toBe(false);
+  expect(report.files.every(file => !('wit_bytes' in file))).toBe(true);
   expect(report.hashesMatch).toBe(true);
-  expect(report.stages).toContain('Building WIT indexes…');
+  expect(report.stages.some(stage => stage.includes('WIT'))).toBe(false);
   expect(report.remaining.map(f=>f.lexicon)).toEqual(['NWL23']);
   expect(report.empty).toEqual([]);
   for (const result of Object.values(report.output)) {
@@ -111,7 +111,7 @@ test('WMP settings cache and remove both lexica with file sizes', async ({page})
   await page.getByRole('button', {name:'Cache NWL23 WMP', exact:true}).click();
   await expect(page.getByRole('button', {name:'Remove NWL23 WMP', exact:true})).toBeEnabled({timeout:45000});
   await expect(page.locator('#wmp-files')).toContainText('MiB');
-  await expect(page.locator('#wmp-files')).toContainText('WIT');
+  await expect(page.locator('#wmp-files')).not.toContainText('WIT');
   await page.screenshot({path:test.info().outputPath('wmp-settings.png'),fullPage:true});
   await page.locator('#back-to-game').click();
   await page.reload();
@@ -146,7 +146,7 @@ test('bad downloads do not poison the engine or cache; native preparation can be
       if (detail.type === 'wmp_ready') stopped = detail.stopped;
     });
     await engine.prepareWMP('CSW24','build',1,true);
-    await engine.run(['set -lex CSW24 -wit false -wmp false']);
+    await engine.run(['set -lex CSW24 -wmp false']);
     const files = (await engine.wmpCache()).files;
     engine.worker.terminate();
     return {failure, stopped, progressSeen, files};
@@ -205,67 +205,57 @@ test('local builds need no hosted tables and caching is opt-in', async ({page}) 
   });
   expect(unexpected).toEqual([]);
   expect(report.unsaved).toEqual([]);
-  expect(report.saved[0].wit_bytes).toBeGreaterThan(0);
+  expect(report.saved.map(file => file.lexicon)).toEqual(['CSW24']);
   expect(report.removed).toBeNull();
   expect(report.keys).toEqual([]);
   expect(report.stages.some(stage => stage.startsWith('Building WMP'))).toBe(true);
-  expect(report.stages).toContain('Building WIT indexes…');
+  expect(report.stages.some(stage => stage.includes('WIT'))).toBe(false);
 });
 
-test('WMP-only and damaged WIT caches are repaired locally', async ({page}) => {
-  test.setTimeout(90000);
+test('a WIT saved by an earlier release is deleted and its WMP kept', async ({page}) => {
   await page.goto('/wasmentry/');
   await expect(page.locator('#status')).toHaveText('Engine ready');
   await openSample(page);
   const report = await inCacheWorker(page, async () => {
-    const { EngineClient } = await import('./engine-client.mjs');
-    const { listWMPs, readWMP, saveWMP } = await import('./wmp-cache.mjs');
-    const { sha256 } = await import('./wmp-assets.mjs');
-    const engine = new EngineClient(), messages = [];
-    engine.addEventListener('message', ({detail}) => messages.push(detail));
-    await engine.prepare('NWL23');
-    await engine.prepareWMP('NWL23', 'build', 4, true);
-    const modify = (legacy) => new Promise((resolve, reject) => {
+    const cache = await import('./wmp-cache.mjs');
+    const bytes = new Uint8Array([3,15,1,2,3,4]);
+    await cache.saveWMP('NWL23','kwg','checksum','build',bytes);
+    // Recreate the record an earlier release wrote: a WIT file beside the WMP
+    // and its size and hash in the metadata.
+    const database = () => new Promise((resolve, reject) => {
       const request = indexedDB.open('magpie-wmp', 1);
-      request.onsuccess = () => {
-        const db = request.result, tx = db.transaction(['files', 'metadata'], 'readwrite');
-        if (legacy) {
-          tx.objectStore('files').delete('NWL23:wit');
-          const read = tx.objectStore('metadata').get('NWL23');
-          read.onsuccess = () => {
-            delete read.result.wit_bytes; delete read.result.wit_sha256;
-            tx.objectStore('metadata').put(read.result);
-          };
-        } else tx.objectStore('files').put(new Uint8Array([4,15,0,0]), 'NWL23:wit');
-        tx.oncomplete = () => { db.close(); resolve(); };
-        tx.onabort = () => { db.close(); reject(tx.error); };
-      };
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
     });
-    const repairs = [];
-    for (const legacy of [true, false]) {
-      await modify(legacy);
-      engine.wmpKey = null;
-      await engine.prepareWMP('NWL23', 'build', 4, true);
-      const ready = messages.filter(message => message.type === 'wmp_ready').at(-1);
-      const meta = (await listWMPs())[0];
-      const saved = await readWMP('NWL23', meta.kwg_sha256);
-      repairs.push({ready, valid: saved.wit.length > 100 && await sha256(saved.wit) === meta.wit_sha256});
-    }
-    const meta = (await listWMPs())[0];
-    const saved = await readWMP('NWL23', meta.kwg_sha256);
-    saved.wit[4] ^= 1; // Valid file/checksum, but wrong native KWG hash.
-    await saveWMP('NWL23', meta.kwg_sha256, meta.sha256, 'build', saved.bytes, saved.wit, await sha256(saved.wit));
-    engine.wmpKey = null;
-    await engine.prepareWMP('NWL23', 'build', 4, true);
-    const rebuilt = messages.filter(message => message.type === 'wmp_ready').at(-1);
-    engine.worker.terminate();
-    return {repairs, rebuilt};
+    const inTransaction = async (perform) => {
+      const db = await database();
+      try {
+        return await new Promise((resolve, reject) => {
+          const tx = db.transaction(['files', 'metadata'], 'readwrite');
+          const result = perform(tx);
+          tx.oncomplete = () => resolve(result?.result);
+          tx.onabort = () => reject(tx.error);
+        });
+      } finally { db.close(); }
+    };
+    await inTransaction(tx => {
+      tx.objectStore('files').put(new Uint8Array([4,15,0,0]), 'NWL23:wit');
+      const read = tx.objectStore('metadata').get('NWL23');
+      read.onsuccess = () => tx.objectStore('metadata').put({...read.result, wit_bytes:4, wit_sha256:'a'.repeat(64)});
+    });
+    const listed = await cache.listWMPs();
+    const keys = await inTransaction(tx => tx.objectStore('files').getAllKeys());
+    const stored = await inTransaction(tx => tx.objectStore('metadata').get('NWL23'));
+    const saved = await cache.readWMP('NWL23','kwg');
+    return {listed, keys, stored, bytes:saved && [...saved.bytes]};
   });
-  expect(report.rebuilt).toMatchObject({fromCache:false, witFromCache:false, cached:true});
-  for (const repair of report.repairs) {
-    expect(repair.ready).toMatchObject({fromCache:true, witFromCache:false, cached:true});
-    expect(repair.valid).toBe(true);
+  expect(report.keys).toEqual(['NWL23']);
+  for (const metadata of [...report.listed, report.stored]) {
+    expect(metadata.lexicon).toBe('NWL23');
+    expect('wit_bytes' in metadata || 'wit_sha256' in metadata).toBe(false);
   }
+  expect(report.listed).toHaveLength(1);
+  expect(report.bytes).toEqual([3,15,1,2,3,4]);
 });
 
 test('cache provenance and upgrades are independent of the database schema', async ({page}) => {
@@ -275,7 +265,7 @@ test('cache provenance and upgrades are independent of the database schema', asy
   const report = await inCacheWorker(page, async () => {
     const cache = await import('./wmp-cache.mjs');
     const bytes = new Uint8Array([3,15,1,2,3,4]);
-    await cache.saveWMP('NWL23','kwg','checksum','build',bytes,new Uint8Array([4,15]),'wit');
+    await cache.saveWMP('NWL23','kwg','checksum','build',bytes);
     const valid = !!await cache.readWMP('NWL23','kwg');
     const mismatch = await cache.readWMP('NWL23','other');
     // Exercise an actual schema upgrade over existing object stores.
@@ -312,7 +302,7 @@ test('Stop during a transient cache read preserves saved files and never starts 
   const result = await inCacheWorker(page, async () => {
     const {EngineClient} = await import('./engine-client.mjs');
     const {saveWMP, listWMPs} = await import('./wmp-cache.mjs');
-    await saveWMP('NWL23', 'saved-hash', 'saved-checksum', 'build', new Uint8Array([3,15]), null, null);
+    await saveWMP('NWL23', 'saved-hash', 'saved-checksum', 'build', new Uint8Array([3,15]));
     const before = await listWMPs();
     const engine = new EngineClient();
     const messages = [];

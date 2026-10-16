@@ -3800,8 +3800,8 @@ function renderWMPCache() {
     const row = document.createElement("div");
     row.className = "setting-row wmp-file";
     const label = document.createElement("span");
-    label.textContent = `${lexicon} · ${file ? `WMP ${(file.bytes / 1048576).toFixed(1)} MiB · WIT ${file.wit_bytes ? `${(file.wit_bytes / 1048576).toFixed(1)} MiB` : "not cached"}` : "Not cached"}`;
-    if (file) label.title = `${(file.bytes + (file.wit_bytes || 0)).toLocaleString()} bytes total`;
+    label.textContent = `${lexicon} · ${file ? `WMP ${(file.bytes / 1048576).toFixed(1)} MiB` : "Not cached"}`;
+    if (file) label.title = `${file.bytes.toLocaleString()} bytes`;
     const button = document.createElement("button");
     button.textContent = file ? "Remove" : "Cache";
     button.dataset.unavailable = String(!file && $("wmp-source").value === "off");
@@ -3824,7 +3824,7 @@ function renderWMPCache() {
             await engine.prepareWMP(lexicon, $("wmp-source").value, Number($("threads").value), true);
           }
           // File management does not need to retain a second lexicon in RAM.
-          await engine.run(["set -wit false -wmp false"]);
+          await engine.run(["set -wmp false"]);
           engine.wmpKey = null;
         }
         const status = canceled ? "Stopped" : file ? `${lexicon} WMP removed` : wmpWarning || (engine.wmpCached ? `${lexicon} word maps cached` : `${lexicon} word maps were not cached`);
