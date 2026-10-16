@@ -13,6 +13,7 @@
 #include "../src/ent/player.h"
 #include "../src/ent/rack.h"
 #include "../src/ent/thread_control.h"
+#include "../src/ent/transposition_table.h"
 #include "../src/ent/xoshiro.h"
 #include "../src/impl/config.h"
 #include "../src/impl/endgame.h"
@@ -35,6 +36,10 @@
 #include <stdlib.h>
 
 enum {
+  // How long the lent-helper test waits for the helper to mark a node busy.
+  // The helper marks its root as soon as it reaches depth 4, a few
+  // milliseconds in; the generous cap only bounds a failing run.
+  LENT_HELPER_WATCH_SECONDS = 10,
   // test_fixed_depth_stepping: four and five plies cover both parities.
   FIXED_DEPTH_MIN_PLIES = 4,
   FIXED_DEPTH_MAX_PLIES = 5,
@@ -426,6 +431,119 @@ static void run_injection_case(bool use_inline) {
 void test_endgame_dynamic_worker_injection(void) {
   run_injection_case(/*use_inline=*/false);
   run_injection_case(/*use_inline=*/true);
+}
+
+typedef struct LentHelperWatch {
+  EndgameCtx **solver_ptr; // address of the caller's ctx (set by the solve)
+  ThreadControl *thread_control;
+  bool lent;          // a helper joined the solve
+  bool saw_busy_node; // the helper marked a node in the ABDADA nproc table
+} LentHelperWatch;
+
+static bool nproc_table_has_busy_node(const TranspositionTable *tt) {
+  for (int nproc_idx = 0; nproc_idx < NPROC_SIZE; nproc_idx++) {
+    if (atomic_load_explicit(&tt->nproc[nproc_idx], memory_order_relaxed) > 0) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// Runs on the main worker after depth 1: lends one helper, then holds the main
+// worker here, between depths and outside every node, so the helper searches
+// alone. Any node marked busy in the nproc table is therefore the helper's.
+// Stops the solve once the watch ends; the test needs nothing more from it.
+static void lend_helper_and_watch_abdada(int depth, int32_t value,
+                                         const PVLine *pv_line,
+                                         const Game *game,
+                                         const PVLine *ranked_pvs,
+                                         int num_ranked_pvs, void *user_data) {
+  (void)depth;
+  (void)value;
+  (void)pv_line;
+  (void)game;
+  (void)ranked_pvs;
+  (void)num_ranked_pvs;
+  LentHelperWatch *watch = (LentHelperWatch *)user_data;
+  EndgameCtx *solver = *watch->solver_ptr;
+  if (watch->lent || !endgame_add_worker(solver)) {
+    return;
+  }
+  watch->lent = true;
+  const TranspositionTable *tt = endgame_ctx_get_transposition_table(solver);
+  const int64_t deadline_ns =
+      ctimer_monotonic_ns() + (int64_t)LENT_HELPER_WATCH_SECONDS * 1000000000LL;
+  while (!watch->saw_busy_node && ctimer_monotonic_ns() < deadline_ns) {
+    watch->saw_busy_node = nproc_table_has_busy_node(tt);
+  }
+  thread_control_set_status(watch->thread_control,
+                            THREAD_CONTROL_STATUS_USER_INTERRUPT);
+}
+
+// A helper lent to a single-threaded solve must search as an ABDADA worker.
+// endgame_solve_inline (PEG's path) always runs with threads == 1, and lending
+// raises only the live worker count, so a helper that read threads alone
+// re-searched the main worker's tree in the same order without marking nodes,
+// sharing nothing but the TT. Checked for both entry points.
+static void run_lent_helper_abdada_case(bool use_inline) {
+  Config *config =
+      config_create_or_die("set -s1 score -s2 score -threads 1 -eplies 8");
+  load_and_exec_config_or_die(
+      config,
+      "cgp "
+      "GATELEGs1POGOED/R4MOOLI3X1/AA10U2/YU4BREDRIN2/1TITULE3E1IN1/1E4N3c1BOK/"
+      "1C2O4CHARD1/QI1FLAWN2E1OE1/IS2E1HIN1A1W2/1MOTIVATE1T1S2/1S2N5S4/"
+      "3PERJURY5/15/15/15 FV/AADIZ 442/388 0 -lex CSW21");
+  ThreadControl *thread_control = thread_control_create();
+  thread_control_set_status(thread_control, THREAD_CONTROL_STATUS_STARTED);
+
+  EndgameCtx *ctx = NULL;
+  LentHelperWatch watch = {.solver_ptr = &ctx,
+                           .thread_control = thread_control,
+                           .lent = false,
+                           .saw_busy_node = false};
+
+  EndgameArgs args = {0};
+  args.thread_control = thread_control;
+  args.game = config_get_game(config);
+  // 8 plies stepped by two: the helper (ordinal 1) starts at depth 2 and moves
+  // on to depth 4, the first whose root ABDADA marks busy.
+  args.plies = config_get_endgame_plies(config);
+  args.tt_fraction_of_mem = 0.0001;
+  args.initial_small_move_arena_size = DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
+  args.num_threads = 1;
+  args.max_workers = 2;
+  args.use_heuristics = true;
+  args.forced_pass_bypass = true;
+  args.num_top_moves = 1;
+  args.seed = 42;
+  args.per_ply_callback = lend_helper_and_watch_abdada;
+  args.per_ply_callback_data = &watch;
+
+  EndgameResults *results = config_get_endgame_results(config);
+  ErrorStack *error_stack = error_stack_create();
+  if (use_inline) {
+    endgame_solve_inline(&ctx, &args, results);
+  } else {
+    endgame_solve(&ctx, &args, results, error_stack);
+  }
+  assert(error_stack_is_empty(error_stack));
+  printf("lent helper (%s): lent=%d saw_busy_node=%d\n",
+         use_inline ? "inline" : "spawned", watch.lent, watch.saw_busy_node);
+  assert(watch.lent);
+  assert(watch.saw_busy_node);
+  // Every node the helper marked was unmarked again when it stopped.
+  assert(!nproc_table_has_busy_node(endgame_ctx_get_transposition_table(ctx)));
+
+  error_stack_destroy(error_stack);
+  endgame_ctx_destroy(ctx);
+  thread_control_destroy(thread_control);
+  config_destroy(config);
+}
+
+static void test_lent_helper_runs_abdada(void) {
+  run_lent_helper_abdada_case(/*use_inline=*/false);
+  run_lent_helper_abdada_case(/*use_inline=*/true);
 }
 
 // first_win uses a narrow [-1,+1] window to resolve win/loss/draw cheaply (the
@@ -2152,6 +2270,7 @@ void test_endgame(void) {
   test_2lex_informed();
   test_endgame_interrupt();
   test_time_limited_leaf_playout();
+  test_lent_helper_runs_abdada();
   // Cheap (sub-second) regression of the VIA mover-must-bingo case. The full
   // VIA depth/stress sweeps (viamover / viaopp / viastress) are on-demand only
   // — viamover re-solves plies 1..3 with display (~14s) and viastress runs 100
