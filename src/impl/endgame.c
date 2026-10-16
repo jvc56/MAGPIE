@@ -360,14 +360,21 @@ static bool solver_needs_exact_root_values(const EndgameCtx *solver) {
          solver->per_root_move_callback != NULL;
 }
 
-// A solve with a real target depth, no clock and no consumer of intermediate
-// depths only needs the target: iterations of the other parity are skipped
-// (see iterative_deepening_skips_ply). A solve asked for MAX_SEARCH_DEPTH is
-// "as deep as it can get", and one under a time limit falls back to its last
-// completed depth, so both keep every iteration.
+// Whether a movegen budget (-movebudget) can stop this solve: a limit of 0 is
+// never spent.
+static bool solver_has_movegen_budget(const EndgameCtx *solver) {
+  return solver->movegen_budget != NULL && solver->movegen_budget->limit > 0;
+}
+
+// A solve with a real target depth, no clock, no movegen budget and no
+// consumer of intermediate depths only needs the target: iterations of the
+// other parity are skipped (see iterative_deepening_skips_ply). A solve asked
+// for MAX_SEARCH_DEPTH is "as deep as it can get", and one under a time limit
+// or a movegen budget falls back to its last completed depth, so all of them
+// keep every iteration.
 static bool solver_steps_depth_by_two(const EndgameCtx *solver, int plies) {
   return plies < MAX_SEARCH_DEPTH && solver->soft_time_limit <= 0.0 &&
-         solver->hard_time_limit <= 0.0 &&
+         solver->hard_time_limit <= 0.0 && !solver_has_movegen_budget(solver) &&
          !solver_needs_exact_root_values(solver) && !solver->first_win_optim &&
          !solver->initial_window_optim;
 }
