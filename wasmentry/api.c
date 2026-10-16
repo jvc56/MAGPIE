@@ -178,23 +178,6 @@ static size_t wmp_export_size(const WMP *wmp) {
   return size;
 }
 
-static size_t wit_export_size(const WordInfoTable *wit) {
-  size_t size = 12;
-  for (int length = 1; length <= BOARD_DIM; length++) {
-    const WitTrie *trie = &wit->tries[length];
-    size += 12 + (size_t)trie->num_nodes * 10 +
-            (size_t)trie->num_values * wit_stride_for_len(length) * 4;
-  }
-  for (int length = WPF_MIN_BLOCK_LENGTH; length <= WPF_MAX_BLOCK_LENGTH;
-       length++) {
-    if (wit->word_plus_floater[length]) {
-      size += (size_t)wit->tries[length].num_values *
-              word_plus_floater_cells_per_key(length) * 4;
-    }
-  }
-  return size;
-}
-
 static FILE *export_stream(char **buffer, size_t size) {
   *buffer = malloc(size + 1); // fmemopen reserves a trailing NUL on close.
   if (!*buffer) {
@@ -210,7 +193,8 @@ static FILE *export_stream(char **buffer, size_t size) {
 
 static void export_prepared_wit(void) {
   ErrorStack *error_stack = error_stack_create();
-  word_maps.wit_export_size = wit_export_size(word_maps.prepared_wit);
+  word_maps.wit_export_size =
+      word_info_table_write_size(word_maps.prepared_wit);
   FILE *stream =
       export_stream(&word_maps.wit_export, word_maps.wit_export_size);
   if (stream) {

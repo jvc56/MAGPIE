@@ -258,6 +258,7 @@ static void test_load_rebuild_and_cleanup(void) {
   fseek_or_die(file, 0, SEEK_END);
   const long file_size = ftell(file);
   assert(file_size > 0 && (size_t)file_size > position_bytes);
+  assert(word_info_table_write_size(wit) == (size_t)file_size);
   const size_t ordinary_size = (size_t)file_size - position_bytes;
   uint8_t *bytes = malloc_or_die(ordinary_size);
   fseek_or_die(file, 0, SEEK_SET);

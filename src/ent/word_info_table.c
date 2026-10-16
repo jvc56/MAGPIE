@@ -366,16 +366,41 @@ static bool wit_write_stream(const WordInfoTable *wit, bool positional,
   return true;
 }
 
-void word_info_table_write_to_stream(const WordInfoTable *wit, FILE *stream,
-                                     ErrorStack *error_stack) {
-  if (!error_stack_is_empty(error_stack)) {
-    return;
-  }
+static bool wit_has_word_plus_floater(const WordInfoTable *wit) {
   bool positional = false;
   for (int length = WPF_MIN_BLOCK_LENGTH; length <= WPF_MAX_BLOCK_LENGTH;
        length++) {
     positional |= wit->word_plus_floater[length] != NULL;
   }
+  return positional;
+}
+
+size_t word_info_table_write_size(const WordInfoTable *wit) {
+  size_t size = 12;
+  for (int length = 1; length <= BOARD_DIM; length++) {
+    const WitTrie *trie = &wit->tries[length];
+    size += 12 + (size_t)trie->num_nodes * 10 +
+            (size_t)trie->num_values * wit_stride_for_len(length) * 4;
+  }
+  const bool positional = wit_has_word_plus_floater(wit);
+  for (int length = WPF_MIN_BLOCK_LENGTH;
+       positional && length <= WPF_MAX_BLOCK_LENGTH; length++) {
+    size += (size_t)wit->tries[length].num_values *
+            word_plus_floater_cells_per_key(length) * 4;
+  }
+  for (int length = WIT_POSITION_MIN_BASE_LENGTH;
+       wit->kwg_hash != 0 && length <= WIT_POSITION_MAX_BASE_LENGTH; length++) {
+    size += wit_position_length_cells(wit, length) * 4;
+  }
+  return size;
+}
+
+void word_info_table_write_to_stream(const WordInfoTable *wit, FILE *stream,
+                                     ErrorStack *error_stack) {
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  const bool positional = wit_has_word_plus_floater(wit);
   bool valid = true;
   for (int length = 1; valid && length <= BOARD_DIM; length++) {
     valid = wit_validate_trie(&wit->tries[length], length);
