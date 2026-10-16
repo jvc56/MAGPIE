@@ -202,8 +202,6 @@ static inline void word_info_table_clear_word_plus_floater(WordInfoTable *wit) {
 // positional masks. Both use one KWG identity and the same terminal IDs.
 // Version 5 appends the position-length rows when the table has a KWG hash.
 // The caller owns and closes the stream.
-// The number of bytes word_info_table_write_to_stream writes for a valid wit.
-size_t word_info_table_write_size(const WordInfoTable *wit);
 void word_info_table_write_to_stream(const WordInfoTable *wit, FILE *stream,
                                      ErrorStack *error_stack);
 void word_info_table_load_from_stream(WordInfoTable *wit, const char *name,

@@ -197,7 +197,6 @@ static void test_combined_wit_format(void) {
   assert(cfile_stream_size(stream, &file_size));
   assert(file_size > 12 && (size_t)file_size > positional_bytes);
   const size_t size = (size_t)file_size;
-  assert(word_info_table_write_size(wit) == size);
   uint8_t *bytes = malloc_or_die(size + 1);
   const size_t read_size = fread(bytes, 1, size, stream);
   assert(read_size == size);

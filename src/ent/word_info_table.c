@@ -376,26 +376,6 @@ static bool wit_has_word_plus_floater(const WordInfoTable *wit) {
   return positional;
 }
 
-size_t word_info_table_write_size(const WordInfoTable *wit) {
-  size_t size = 12;
-  for (int length = 1; length <= BOARD_DIM; length++) {
-    const WitTrie *trie = &wit->tries[length];
-    size += 12 + (size_t)trie->num_nodes * 10 +
-            (size_t)trie->num_values * wit_stride_for_len(length) * 4;
-  }
-  const bool positional = wit_has_word_plus_floater(wit);
-  for (int length = WPF_MIN_BLOCK_LENGTH;
-       positional && length <= WPF_MAX_BLOCK_LENGTH; length++) {
-    size += (size_t)wit->tries[length].num_values *
-            word_plus_floater_cells_per_key(length) * 4;
-  }
-  for (int length = WIT_POSITION_MIN_BASE_LENGTH;
-       wit->kwg_hash != 0 && length <= WIT_POSITION_MAX_BASE_LENGTH; length++) {
-    size += wit_position_length_cells(wit, length) * 4;
-  }
-  return size;
-}
-
 // Writes version 5, or with_position_lengths false, version 4.
 static void wit_write_to_stream(const WordInfoTable *wit,
                                 bool with_position_lengths, FILE *stream,
