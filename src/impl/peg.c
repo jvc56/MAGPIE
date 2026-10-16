@@ -103,6 +103,7 @@ typedef struct PegSharedEndgameTT {
   cpthread_mutex_t mutex;
   TranspositionTable *tt; // guarded by mutex until every worker has cached it
   double fraction;        // size of the table to create
+  int zero_threads;       // threads that zero it (the other workers wait)
   bool owned;             // created here (destroy at teardown)
 } PegSharedEndgameTT;
 
@@ -189,14 +190,16 @@ typedef struct PegWorker {
 // shared one only when a worker actually reaches an exact leaf so a
 // short-budget PEG does not spend most of its clock zeroing a table it will
 // never consult. Each worker takes the mutex once, then uses its cached copy.
+// The others are waiting for the table meanwhile, so it is zeroed on as many
+// threads as the solve has, rather than on the creator alone.
 static TranspositionTable *peg_worker_get_endgame_tt(PegWorker *worker) {
   if (worker->eg_tt == NULL) {
     PegSharedEndgameTT *shared = worker->shared_eg_tt;
     cpthread_mutex_lock(&shared->mutex);
     if (shared->tt == NULL) {
       assert(shared->fraction > 0.0);
-      shared->tt = transposition_table_create_with_minimum(
-          shared->fraction, PEG_TT_MIN_SIZE_POWER);
+      shared->tt = transposition_table_create_with_threads(
+          shared->fraction, PEG_TT_MIN_SIZE_POWER, shared->zero_threads);
     }
     worker->eg_tt = shared->tt;
     cpthread_mutex_unlock(&shared->mutex);
@@ -3238,6 +3241,7 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
   cpthread_mutex_init(&shared_eg_tt.mutex);
   shared_eg_tt.tt = args->shared_endgame_tt;
   shared_eg_tt.fraction = peg_memory_shared_fraction(tt_fraction, n_tables);
+  shared_eg_tt.zero_threads = n_threads;
   shared_eg_tt.owned = args->shared_endgame_tt == NULL;
   // One prune cache shared by every worker (cross-worker board reuse).
   PegPruneCache *prune_cache = peg_prune_cache_create();
