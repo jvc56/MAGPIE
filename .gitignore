@@ -9,6 +9,7 @@ covhtml
 *.out
 magpie*
 !examples/magpie.py
+!windows/magpie.iss
 dev/*.txt
 perf*
 .env
