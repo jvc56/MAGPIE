@@ -50,7 +50,10 @@
 #include <string.h>
 
 enum {
-  DEFAULT_ENDGAME_MOVELIST_CAPACITY = 250000,
+  // Endgame move lists start with this many slots and double when a generation
+  // fills them. Over the notes/peg_positions PEG solves, 99.97% of generations
+  // produced fewer than 4,096 plays and the largest produced 20,479.
+  ENDGAME_MOVELIST_INITIAL_CAPACITY = 4096,
   // Maximum moves for stack allocation in ABDADA deferred tracking
   // Keep small to avoid stack overflow in deep recursive searches
   MAX_DEFERRED_STACK = 64,
@@ -506,7 +509,7 @@ void pvline_extend_from_tt(PVLine *pv_line, Game *game_copy,
   }
 
   MoveList *move_list =
-      move_list_create_small(DEFAULT_ENDGAME_MOVELIST_CAPACITY);
+      move_list_create_small(ENDGAME_MOVELIST_INITIAL_CAPACITY);
 
   // Play existing PV moves to advance game state to where extension begins.
   // These moves already have correct scores in their metadata.
@@ -744,7 +747,7 @@ static float compute_initial_stuck_fraction(const EndgameCtx *solver,
                                             const Game *game) {
   int opp_idx = 1 - solver->solving_player;
   Game *root_game = game_duplicate(game);
-  MoveList *tmp_ml = move_list_create_small(DEFAULT_ENDGAME_MOVELIST_CAPACITY);
+  MoveList *tmp_ml = move_list_create_small(ENDGAME_MOVELIST_INITIAL_CAPACITY);
   float frac = compute_opp_stuck_fraction(
       root_game, tmp_ml, solver_get_pruned_kwg(solver, opp_idx), opp_idx, NULL,
       NULL, NULL, 0);
@@ -1177,7 +1180,7 @@ static EndgameCtxWorker *endgame_ctx_create_worker(EndgameCtx *solver,
   game_set_backup_mode(solver_worker->game_copy, BACKUP_MODE_SIMULATION);
 
   solver_worker->move_list =
-      move_list_create_small(DEFAULT_ENDGAME_MOVELIST_CAPACITY);
+      move_list_create_small(ENDGAME_MOVELIST_INITIAL_CAPACITY);
 
   solver_worker->small_move_arena =
       create_arena(solver->initial_small_move_arena_size, 16);
