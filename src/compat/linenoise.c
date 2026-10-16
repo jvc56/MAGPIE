@@ -231,6 +231,15 @@ char *linenoise(const char *prompt) {
   return read_stream_line(in);
 }
 
+char *linenoise_read_plain_line(FILE *stream) {
+  const intptr_t handle = _get_osfhandle(_fileno(stream));
+  DWORD mode;
+  if (handle != -1 && GetConsoleMode((HANDLE)handle, &mode)) {
+    return read_console_line((HANDLE)handle);
+  }
+  return read_stream_line(stream);
+}
+
 void linenoiseFree(void *ptr) {
   if (ptr == linenoiseEditMore) {
     return;
@@ -250,6 +259,7 @@ int linenoiseHistorySetMaxLen(int len) {
 }
 
 #else
+#include "../util/io_util.h"
 #include <ctype.h>
 #include <errno.h>
 #include <stdio.h>
@@ -326,6 +336,10 @@ FILE *linenoise_get_stream_out(void) {
 }
 
 int linenoise_get_in_fileno(void) { return fileno(linenoise_get_stream_in()); }
+
+char *linenoise_read_plain_line(FILE *stream) {
+  return read_line_from_stream(stream);
+}
 
 int linenoise_get_out_fileno(void) {
   return fileno(linenoise_get_stream_out());

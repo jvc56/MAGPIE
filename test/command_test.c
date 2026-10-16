@@ -8,6 +8,7 @@
 #include "../src/def/thread_control_defs.h"
 #include "../src/ent/move.h"
 #include "../src/ent/thread_control.h"
+#include "../src/impl/command_input.h"
 #include "../src/impl/config.h"
 #include "../src/impl/exec.h"
 #include "../src/util/io_util.h"
@@ -565,6 +566,7 @@ void test_exec_async_command(void) {
   block_for_process_command(process_args, 5);
 
   fclose_or_die(input_writer);
+  command_input_release_stream(input_reader);
   fclose_or_die(input_reader);
   process_args_destroy(process_args);
   command_test_reset_stream_in();
@@ -601,6 +603,7 @@ void test_exec_async_script(void) {
   // Wait for magpie to quit
   block_for_process_command(process_args, 60);
 
+  command_input_release_stream(input_reader);
   fclose_or_die(input_reader);
   delete_file(test_input_filename);
   process_args_destroy(process_args);
@@ -648,6 +651,7 @@ void test_exec_sync_command(void) {
   // Wait for magpie to quit
   block_for_process_command(process_args, 30);
 
+  command_input_release_stream(input_reader);
   fclose_or_die(input_reader);
   delete_file(test_input_filename);
   process_args_destroy(process_args);
@@ -685,6 +689,7 @@ void run_short_autoplay(const char *initial_cmd) {
   // Wait for magpie to quit
   block_for_process_command(process_args, 5);
 
+  command_input_release_stream(input_reader);
   fclose_or_die(input_reader);
   delete_file(test_input_filename);
   process_args_destroy(process_args);
@@ -718,6 +723,7 @@ void run_short_autoplay_with_terminate_command(const char *initial_cmd,
   // Wait for magpie to quit
   block_for_process_command(process_args, 5);
 
+  command_input_release_stream(input_reader);
   fclose_or_die(input_reader);
   delete_file(test_input_filename);
   process_args_destroy(process_args);

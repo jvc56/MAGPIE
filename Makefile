@@ -58,7 +58,7 @@ PORTABLE_MARCH ?= nehalem
 # A Windows build is a cross-compile with MinGW-w64 (llvm-mingw: see `make
 # windows`), recognized from the compiler's target triple. It produces .exe
 # files, links statically (one self-contained executable, no DLLs), and keeps
-# its objects apart from the host's. See docs/windows-plan.md, section 4.
+# its objects apart from the host's.
 TARGET_TRIPLE := $(shell $(CC) -dumpmachine 2>/dev/null)
 # GCC says x86_64-w64-mingw32, clang x86_64-w64-windows-gnu.
 ifneq ($(findstring mingw,$(TARGET_TRIPLE))$(findstring windows,$(TARGET_TRIPLE)),)

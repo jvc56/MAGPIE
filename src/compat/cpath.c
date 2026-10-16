@@ -1,6 +1,5 @@
 #include "cpath.h"
 
-#include "cwin.h"
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -8,6 +7,7 @@
 #include <string.h>
 
 #if defined(_WIN32)
+#include "cwin.h"
 #include <ctype.h>
 #include <windows.h>
 #elif defined(__APPLE__)
@@ -38,9 +38,26 @@ static bool cpath_ends_item(const char *list, size_t start, size_t index) {
   if (separator == ';') {
     return true;
   }
-  // A drive letter's colon: one letter, then ':', at the start of a path.
-  return separator == ':' &&
-         !(index == start + 1 && isalpha((unsigned char)list[start]));
+  if (separator != ':') {
+    return false;
+  }
+  // A drive letter's colon: one letter, then ':', at the start of a path, or
+  // after the \\?\ or \\.\ that lets a path past MAX_PATH ("\\?\C:\data").
+  // So "d:data" is the drive's directory, never "d" and "data": a list
+  // separated by ':' cannot start with a one-letter directory here.
+  const size_t letter = index - 1;
+  if (index == start || !isalpha((unsigned char)list[letter])) {
+    return true;
+  }
+  if (letter == start) {
+    return false;
+  }
+  const char *prefix = list + start;
+  const bool device_prefix =
+      letter == start + 4 && cpath_is_separator(prefix[0]) &&
+      cpath_is_separator(prefix[1]) && (prefix[2] == '?' || prefix[2] == '.') &&
+      cpath_is_separator(prefix[3]);
+  return !device_prefix;
 #else
   (void)start;
   return separator == ':';

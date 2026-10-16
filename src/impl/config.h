@@ -35,9 +35,10 @@ typedef struct ConfigArgs {
   const char *settings_filename;
   bool use_wmp;
   // Build a lexicon's missing wordmap on its first use rather than failing to
-  // load it (see config_wordmap_for_first_use). The magpie executable does;
-  // library users, tests and contribute's task configurations, which build
-  // the wordmaps their jobs pin themselves, do not.
+  // load it (see config_wordmap_for_first_use). The magpie executable does
+  // for data that `data fetch` put in place, which has no wordmaps; library
+  // users, tests and contribute's task configurations, which build the
+  // wordmaps their jobs pin themselves, do not.
   bool build_missing_wordmaps;
 } ConfigArgs;
 

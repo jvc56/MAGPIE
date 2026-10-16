@@ -35,6 +35,14 @@ bool cfile_access(const char *path, int access_flags);
 // Whether `path` names a directory.
 bool cfile_is_directory(const char *path);
 
+// Whether `path` is itself a symlink (or, on Windows, a junction), whatever
+// it points to.
+bool cfile_is_symlink(const char *path);
+
+// Removes the symlink `path` itself, whether it points to a file, a directory
+// or nothing.
+int cfile_remove_symlink(const char *path);
+
 // Creates the directory `path` (failing with EEXIST if something is there).
 int cfile_mkdir(const char *path);
 
@@ -67,6 +75,13 @@ typedef struct CFileAtomicWrite {
 // on failure, leaving nothing behind.
 FILE *cfile_atomic_write_begin(CFileAtomicWrite *atomic_write,
                                const char *path);
+
+// As cfile_atomic_write_begin, but replaces what is at `path` itself, a
+// symlink included, rather than what a link points to, as tar does when it
+// unpacks over an earlier extraction. The new file has the umask's
+// permission bits.
+FILE *cfile_atomic_replace_begin(CFileAtomicWrite *atomic_write,
+                                 const char *path);
 
 // Closes the stream, then with `commit` puts the temporary in place of the
 // target with cfile_rename, and without it removes the temporary. Returns

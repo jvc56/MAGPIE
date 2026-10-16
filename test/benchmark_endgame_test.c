@@ -116,7 +116,7 @@ static float compute_stuck_fraction(Game *game, MoveList *move_list,
 
 // Generate stuck-tile CGPs: self-play games until endgame, filter for
 // positions where the opponent is 100% stuck (all rack tiles stuck).
-// Saves CGPs, in the working directory, to stuck_100pct_cgps.txt and
+// Saves CGPs, in the temporary directory, to stuck_100pct_cgps.txt and
 // partial-stuck to stuck_partial_cgps.txt.
 void test_generate_stuck_cgps(void) {
   log_set_level(LOG_FATAL);
@@ -134,9 +134,12 @@ void test_generate_stuck_cgps(void) {
   const uint64_t base_seed = 7777;
   const int max_attempts = 1500000;
 
-  FILE *fp_full = cfile_open("stuck_100pct_cgps.txt", "we", false);
-  FILE *fp_partial = cfile_open("stuck_partial_cgps.txt", "we", false);
-  FILE *fp_hard = cfile_open("stuck_hard_endgame_cgps.txt", "we", false);
+  char *full_path = test_platform_temporary_path("stuck_100pct_cgps.txt");
+  char *partial_path = test_platform_temporary_path("stuck_partial_cgps.txt");
+  char *hard_path = test_platform_temporary_path("stuck_hard_endgame_cgps.txt");
+  FILE *fp_full = cfile_open(full_path, "we", false);
+  FILE *fp_partial = cfile_open(partial_path, "we", false);
+  FILE *fp_hard = cfile_open(hard_path, "we", false);
   assert(fp_full);
   assert(fp_partial);
   assert(fp_hard);
@@ -226,16 +229,17 @@ void test_generate_stuck_cgps(void) {
   printf("==============================================================\n");
   printf("  Generate Stuck CGPs (seed=%llu)\n", (unsigned long long)base_seed);
   printf("==============================================================\n");
-  printf("  100%% stuck: %d positions → stuck_100pct_cgps.txt\n", found_full);
-  printf("  50-99%% stuck: %d positions → stuck_partial_cgps.txt\n",
-         found_partial);
-  printf("  any stuck at bag-empty: %d positions → "
-         "stuck_hard_endgame_cgps.txt\n",
-         found_hard);
+  printf("  100%% stuck: %d positions → %s\n", found_full, full_path);
+  printf("  50-99%% stuck: %d positions → %s\n", found_partial, partial_path);
+  printf("  any stuck at bag-empty: %d positions → %s\n", found_hard,
+         hard_path);
   printf("==============================================================\n");
   (void)fflush(stdout);
 
   move_list_destroy(move_list);
+  free(full_path);
+  free(partial_path);
+  free(hard_path);
   config_destroy(config);
 }
 
@@ -299,12 +303,16 @@ static void generate_nonstuck_cgps(uint64_t base_seed, const char *outfile) {
 
 void test_generate_nonstuck_cgps(void) {
   log_set_level(LOG_FATAL);
-  generate_nonstuck_cgps(31415, "nonstuck_cgps.txt");
+  char *path = test_platform_temporary_path("nonstuck_cgps.txt");
+  generate_nonstuck_cgps(31415, path);
+  free(path);
 }
 
 void test_generate_nonstuck_cgps2(void) {
   log_set_level(LOG_FATAL);
-  generate_nonstuck_cgps(271828, "nonstuck_cgps2.txt");
+  char *path = test_platform_temporary_path("nonstuck_cgps2.txt");
+  generate_nonstuck_cgps(271828, path);
+  free(path);
 }
 
 // Core A/B benchmark: solve each CGP twice (with and without
@@ -454,17 +462,23 @@ static void run_ab_benchmark(const char *cgp_file, const char *label,
 
 void test_benchmark_forced_pass(void) {
   log_set_level(LOG_FATAL);
-  run_ab_benchmark("stuck_100pct_cgps.txt", "stuck", 3, 2, 500);
+  char *path = test_platform_temporary_path("stuck_100pct_cgps.txt");
+  run_ab_benchmark(path, "stuck", 3, 2, 500);
+  free(path);
 }
 
 void test_benchmark_nonstuck(void) {
   log_set_level(LOG_FATAL);
-  run_ab_benchmark("nonstuck_cgps.txt", "nonstuck", 3, 2, 500);
+  char *path = test_platform_temporary_path("nonstuck_cgps.txt");
+  run_ab_benchmark(path, "nonstuck", 3, 2, 500);
+  free(path);
 }
 
 void test_benchmark_nonstuck_3v3(void) {
   log_set_level(LOG_FATAL);
-  run_ab_benchmark("nonstuck_cgps.txt", "nonstuck", 3, 3, 500);
+  char *path = test_platform_temporary_path("nonstuck_cgps.txt");
+  run_ab_benchmark(path, "nonstuck", 3, 3, 500);
+  free(path);
 }
 
 // ---------------------------------------------------------------------------
@@ -485,7 +499,7 @@ void test_benchmark_nonstuck_3v3(void) {
 //
 // Parameterized entirely by environment so the same binary can sweep depth /
 // thread count / battery without recompiling:
-//   MAGPIE_BENCH_CGP     CGP file           (default nonstuck_cgps.txt)
+//   MAGPIE_BENCH_CGP     CGP file  (default nonstuck_cgps.txt, temporary dir)
 //   MAGPIE_BENCH_LEX     lexicon            (default CSW21)
 //   MAGPIE_BENCH_PLIES   endgame plies      (default 4)
 //   MAGPIE_BENCH_THREADS solver threads     (default 1  -> deterministic nodes)
@@ -514,9 +528,10 @@ static double env_double(const char *name, double fallback) {
 void test_endgame_speed_bench(void) {
   log_set_level(LOG_FATAL);
 
+  char *default_cgp_file = test_platform_temporary_path("nonstuck_cgps.txt");
   const char *cgp_file = getenv("MAGPIE_BENCH_CGP");
   if (cgp_file == NULL || cgp_file[0] == '\0') {
-    cgp_file = "nonstuck_cgps.txt";
+    cgp_file = default_cgp_file;
   }
   const char *lex = getenv("MAGPIE_BENCH_LEX");
   if (lex == NULL || lex[0] == '\0') {
@@ -540,6 +555,7 @@ void test_endgame_speed_bench(void) {
   FILE *fp = cfile_open(cgp_file, "re", false);
   if (!fp) {
     printf("BENCHERR no CGP file at %s\n", cgp_file);
+    free(default_cgp_file);
     return;
   }
 
@@ -656,6 +672,7 @@ void test_endgame_speed_bench(void) {
   (void)fflush(stdout);
 
   free(cgp_lines);
+  free(default_cgp_file);
   endgame_ctx_destroy(solver);
   endgame_results_destroy(results);
   config_destroy(config);
@@ -677,7 +694,7 @@ void test_endgame_speed_bench(void) {
 //   POROW <idx> moves=<n> nodes=<N> depthsum=<D> time=<s> ended=<0|1>
 // and a summary. Set MAGPIE_PO_TIMEMS=0 to disable the time limit and instead
 // fully solve each move to MAGPIE_PO_PLIES (a pure speed comparison).
-//   MAGPIE_PO_CGP    CGP file        (default nonstuck_cgps.txt)
+//   MAGPIE_PO_CGP    CGP file  (default nonstuck_cgps.txt, temporary dir)
 //   MAGPIE_PO_LEX    lexicon         (default CSW21)
 //   MAGPIE_PO_MAX    positions       (default 20)
 //   MAGPIE_PO_TIMEMS per-move budget (default 100; 0 = no limit)
@@ -689,9 +706,10 @@ void test_endgame_speed_bench(void) {
 void test_endgame_playout_bench(void) {
   log_set_level(LOG_FATAL);
 
+  char *default_cgp_file = test_platform_temporary_path("nonstuck_cgps.txt");
   const char *cgp_file = getenv("MAGPIE_PO_CGP");
   if (cgp_file == NULL || cgp_file[0] == '\0') {
-    cgp_file = "nonstuck_cgps.txt";
+    cgp_file = default_cgp_file;
   }
   const char *lex = getenv("MAGPIE_PO_LEX");
   if (lex == NULL || lex[0] == '\0') {
@@ -711,6 +729,7 @@ void test_endgame_playout_bench(void) {
   FILE *fp = cfile_open(cgp_file, "re", false);
   if (!fp) {
     printf("POERR no CGP file at %s\n", cgp_file);
+    free(default_cgp_file);
     return;
   }
 
@@ -851,6 +870,7 @@ void test_endgame_playout_bench(void) {
   (void)fflush(stdout);
 
   free(cgp_lines);
+  free(default_cgp_file);
   move_destroy(play);
   endgame_ctx_destroy(solver);
   endgame_results_destroy(results);

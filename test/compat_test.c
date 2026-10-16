@@ -20,7 +20,7 @@
 
 // Contract tests for the platform layer: each one states behavior that must
 // hold on every OS MAGPIE builds for, and runs unchanged on Linux, macOS and
-// Windows (natively and under Wine). See docs/windows-plan.md, section 5.
+// Windows (natively and under Wine).
 
 enum {
   // Every byte value, then the two that text mode on Windows mangles.
@@ -392,6 +392,14 @@ static void test_path_lists(void) {
     assert_path_list("x;y", 2, (const char *const[]){"x", "y"});
     // One letter and a colon is a drive.
     assert_path_list("d:data", 1, (const char *const[]){"d:data"});
+    // So it is after the prefixes that take a path past MAX_PATH.
+    assert_path_list(
+        "\\\\?\\C:\\magpie\\data;D:\\more", 2,
+        (const char *const[]){"\\\\?\\C:\\magpie\\data", "D:\\more"});
+    assert_path_list("\\\\.\\C:\\data", 1,
+                     (const char *const[]){"\\\\.\\C:\\data"});
+    assert_path_list("//?/C:/data:more", 2,
+                     (const char *const[]){"//?/C:/data", "more"});
     assert(strings_equal(cpath_basename("dir\\name.gcg"), "name.gcg"));
   } else {
     assert_path_list("x;y", 1, (const char *const[]){"x;y"});

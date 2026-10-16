@@ -1,7 +1,5 @@
 #include "cfile.h"
 
-#include "cwin.h"
-
 #include <errno.h>
 #include <fcntl.h>
 #include <stdbool.h>
@@ -14,6 +12,7 @@
 #include <time.h>
 
 #if defined(_WIN32)
+#include "cwin.h"
 #include <io.h>
 #include <process.h>
 #include <wchar.h>
@@ -70,12 +69,9 @@ static char *cfile_format(const char *format, const char *first,
   return result;
 }
 
-#if !defined(_WIN32)
 static char *cfile_duplicate(const char *text) {
   return cfile_format("%s%s", text, "");
 }
-#endif
-
 
 // What an fopen mode asks for. `mode` is "r", "w" or "a", then any of "+",
 // "b" and glibc's "e", in any order.
@@ -275,6 +271,63 @@ bool cfile_is_directory(const char *path) {
 #endif
 }
 
+bool cfile_is_symlink(const char *path) {
+  if (!path) {
+    return false;
+  }
+#if defined(_WIN32)
+  wchar_t *wide = cwin_wide(path);
+  if (!wide) {
+    return false;
+  }
+  // Only links count: OneDrive's placeholders and other cloud files are
+  // reparse points too, but they are the file or directory itself. The
+  // reparse tag comes with a directory listing's entry.
+  WIN32_FIND_DATAW entry;
+  HANDLE find = FindFirstFileW(wide, &entry);
+  free(wide);
+  if (find == INVALID_HANDLE_VALUE) {
+    return false;
+  }
+  (void)FindClose(find);
+  return (entry.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0 &&
+         (entry.dwReserved0 == IO_REPARSE_TAG_SYMLINK ||
+          entry.dwReserved0 == IO_REPARSE_TAG_MOUNT_POINT);
+#else
+  struct stat info;
+  return lstat(path, &info) == 0 && S_ISLNK(info.st_mode);
+#endif
+}
+
+int cfile_remove_symlink(const char *path) {
+  if (!path) {
+    errno = EINVAL;
+    return -1;
+  }
+#if defined(_WIN32)
+  wchar_t *wide = cwin_wide(path);
+  if (!wide) {
+    return -1;
+  }
+  // A link to a directory is itself a directory, removed as one; neither call
+  // touches what the link points to.
+  const DWORD attributes = GetFileAttributesW(wide);
+  const BOOL removed = attributes != INVALID_FILE_ATTRIBUTES &&
+                               (attributes & FILE_ATTRIBUTE_DIRECTORY)
+                           ? RemoveDirectoryW(wide)
+                           : DeleteFileW(wide);
+  const DWORD error = GetLastError();
+  free(wide);
+  if (!removed) {
+    cwin_set_errno(error);
+    return -1;
+  }
+  return 0;
+#else
+  return unlink(path) == 0 ? 0 : -1;
+#endif
+}
+
 int cfile_mkdir(const char *path) {
   if (!path) {
     errno = EINVAL;
@@ -312,12 +365,25 @@ int cfile_rmdir(const char *path) {
 }
 
 #if defined(_WIN32)
+// Deletes `path`, making it writable first if it is read-only, which would
+// otherwise stop it being deleted.
+static void cfile_delete_file(const wchar_t *path) {
+  if (!DeleteFileW(path) && GetLastError() == ERROR_ACCESS_DENIED &&
+      SetFileAttributesW(path, FILE_ATTRIBUTE_NORMAL)) {
+    (void)DeleteFileW(path);
+  }
+}
+
 // The last resort for replacing a target that is open, where the file system
 // cannot rename over it: moves the target aside (allowed while every handle
 // on it shares deletion, as cfile_open's do), moves `from` into its place,
 // then deletes the old file, which goes when its last handle closes. Not
 // atomic -- for a moment the target does not exist -- so it is only a
-// fallback. Restores the target if `from` cannot be moved.
+// fallback, for when `from` is known to be free to move. Restores the target
+// if `from` cannot be moved after all, unless another writer has put a file
+// there meanwhile, which then stands. What cannot be deleted at once (a file
+// mapped into memory, say) is left as <target>.old.<pid>-<n>, for the next
+// write to remove (see remove_stale_temporary_siblings in io_util.c).
 static bool cfile_rename_around_open_target(const wchar_t *from,
                                             const wchar_t *to) {
   static volatile LONG counter = 0;
@@ -327,24 +393,21 @@ static bool cfile_rename_around_open_target(const wchar_t *from,
   if (!aside) {
     return false;
   }
-  (void)swprintf(aside, to_length + CFILE_ASIDE_SUFFIX_LENGTH, L"%ls.old.%lu-%ld",
-                 to, (unsigned long)GetCurrentProcessId(),
+  (void)swprintf(aside, to_length + CFILE_ASIDE_SUFFIX_LENGTH,
+                 L"%ls.old.%lu-%ld", to, (unsigned long)GetCurrentProcessId(),
                  InterlockedIncrement(&counter));
   bool renamed = false;
   if (MoveFileExW(to, aside, MOVEFILE_WRITE_THROUGH)) {
-    renamed = MoveFileExW(from, to, MOVEFILE_WRITE_THROUGH) != 0;
-    if (renamed) {
-      // A read-only file cannot be deleted until it is made writable, and
-      // nothing else would remove it later.
-      if (!DeleteFileW(aside) && GetLastError() == ERROR_ACCESS_DENIED &&
-          SetFileAttributesW(aside, FILE_ATTRIBUTE_NORMAL)) {
-        (void)DeleteFileW(aside);
-      }
-    } else {
-      const DWORD error = GetLastError();
-      (void)MoveFileExW(aside, to, MOVEFILE_WRITE_THROUGH);
-      SetLastError(error);
+    // Replacing whatever another writer has put there since, as POSIX rename
+    // would have.
+    renamed = MoveFileExW(from, to,
+                          MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) !=
+              0;
+    const DWORD error = GetLastError();
+    if (renamed || !MoveFileExW(aside, to, MOVEFILE_WRITE_THROUGH)) {
+      cfile_delete_file(aside);
     }
+    SetLastError(error);
   }
   free(aside);
   return renamed;
@@ -391,11 +454,15 @@ int cfile_rename(const char *from, const char *to) {
   // handles keep reading the replaced file, as on POSIX.
   bool renamed = false;
   DWORD error = ERROR_SUCCESS;
+  // Whether `from` itself can be moved: if not, a failure is not the
+  // target's, and moving the target aside would not help.
+  bool from_movable = false;
   HANDLE handle =
       CreateFileW(wide_from, DELETE | SYNCHRONIZE,
                   FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL,
                   OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
   if (handle != INVALID_HANDLE_VALUE) {
+    from_movable = true;
     const size_t name_bytes = wcslen(full_to) * sizeof(wchar_t);
     const size_t info_size =
         offsetof(FILE_RENAME_INFO, FileName) + name_bytes + sizeof(wchar_t);
@@ -430,7 +497,7 @@ int cfile_rename(const char *from, const char *to) {
       error = GetLastError();
     }
   }
-  if (!renamed &&
+  if (!renamed && from_movable &&
       (error == ERROR_ACCESS_DENIED || error == ERROR_SHARING_VIOLATION)) {
     renamed = cfile_rename_around_open_target(wide_from, full_to);
   }
@@ -798,8 +865,10 @@ static FILE *cfile_create_temporary(const char *destination,
 }
 #endif
 
-FILE *cfile_atomic_write_begin(CFileAtomicWrite *atomic_write,
-                               const char *path) {
+// Starts an atomic write of `path`, through any symlinks there when
+// `follow_links` is set.
+static FILE *cfile_atomic_begin(CFileAtomicWrite *atomic_write,
+                                const char *path, bool follow_links) {
   atomic_write->stream = NULL;
   atomic_write->destination = NULL;
   atomic_write->temporary = NULL;
@@ -808,16 +877,19 @@ FILE *cfile_atomic_write_begin(CFileAtomicWrite *atomic_write,
     return NULL;
   }
 #if defined(_WIN32)
-  atomic_write->destination = cfile_resolve_destination(path);
+  atomic_write->destination =
+      follow_links ? cfile_resolve_destination(path) : cfile_duplicate(path);
   if (atomic_write->destination) {
     atomic_write->stream = cfile_create_temporary(atomic_write->destination,
                                                   &atomic_write->temporary);
   }
 #else
   struct stat metadata;
+  memset(&metadata, 0, sizeof(metadata));
   bool exists = false;
   atomic_write->destination =
-      cfile_resolve_destination(path, &metadata, &exists);
+      follow_links ? cfile_resolve_destination(path, &metadata, &exists)
+                   : cfile_duplicate(path);
   if (atomic_write->destination) {
     atomic_write->stream =
         cfile_create_temporary(atomic_write->destination, &metadata, exists,
@@ -833,6 +905,16 @@ FILE *cfile_atomic_write_begin(CFileAtomicWrite *atomic_write,
     errno = error_number;
   }
   return atomic_write->stream;
+}
+
+FILE *cfile_atomic_write_begin(CFileAtomicWrite *atomic_write,
+                               const char *path) {
+  return cfile_atomic_begin(atomic_write, path, true);
+}
+
+FILE *cfile_atomic_replace_begin(CFileAtomicWrite *atomic_write,
+                                 const char *path) {
+  return cfile_atomic_begin(atomic_write, path, false);
 }
 
 bool cfile_atomic_write_end(CFileAtomicWrite *atomic_write, bool commit) {

@@ -16,20 +16,26 @@
 // do returns false there, and its caller skips that case, saying so in one
 // line. Failures the platform should not have end the process.
 
-// Creates a new, empty directory in the working directory, named `prefix`
-// followed by a unique suffix, and returns its (relative) path, which the
-// caller frees. mkdtemp's job, without /tmp, which Windows lacks.
+// The system's directory for temporary files: $TMPDIR, or /tmp without it,
+// and GetTempPath's on Windows, without a trailing separator. Lives as long
+// as the process.
+const char *test_platform_temporary_root(void);
+
+// `name` in test_platform_temporary_root, which the caller frees: where
+// benchmarks leave the positions they generate for later runs.
+char *test_platform_temporary_path(const char *name);
+
+// Creates a new, empty directory in test_platform_temporary_root, named
+// `prefix` followed by a unique suffix, and returns its path, which the
+// caller frees. mkdtemp's job, which Windows lacks.
 char *test_platform_make_temporary_directory(const char *prefix);
 
-// Creates a new, empty file in the working directory, named `prefix` followed
-// by a unique suffix, and returns its (relative) path, which the caller frees.
+// Creates a new, empty file in test_platform_temporary_root, named `prefix`
+// followed by a unique suffix, and returns its path, which the caller frees.
 char *test_platform_make_temporary_file(const char *prefix);
 
 // Removes `path` and everything under it, as a test's temporary directory.
 void test_platform_remove_directory_tree(const char *path);
-
-// The working directory, absolute, which the caller frees.
-char *test_platform_current_directory(void);
 
 // The file that discards what is written to it: /dev/null, or NUL on Windows.
 const char *test_platform_null_device(void);
@@ -102,5 +108,10 @@ void test_platform_unlimit_file_size(void);
 // Whether setlocale switches to the host's locales. Emscripten's C library
 // has none of its own.
 bool test_platform_has_host_locales(void);
+
+// Whether this process's qsort is glibc's merge sort, which stable_sort
+// copies step for step: on glibc but for 2.37 and 2.38, whose qsort was an
+// introsort.
+bool test_platform_qsort_is_glibc_merge_sort(void);
 
 #endif

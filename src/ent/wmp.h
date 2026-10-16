@@ -964,6 +964,7 @@ static inline void wmp_write_to_file(const WMP *wmp, const char *filename,
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
+  remove_stale_temporary_siblings(filename);
   CFileAtomicWrite atomic_write;
   FILE *stream = cfile_atomic_write_begin(&atomic_write, filename);
   if (stream == NULL) {

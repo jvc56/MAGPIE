@@ -1,3 +1,0 @@
-# Platform-specific code outside src/compat that predates
-# check_portability.py. Remove entries as code moves behind
-# compat; never add one. See docs/windows-plan.md, section 3.1.

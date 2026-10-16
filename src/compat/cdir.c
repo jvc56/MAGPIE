@@ -1,12 +1,12 @@
 #include "cdir.h"
 
-#include "cwin.h"
 #include <errno.h>
 #include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
 
 #if defined(_WIN32)
+#include "cwin.h"
 #include <wchar.h>
 #include <windows.h>
 #else

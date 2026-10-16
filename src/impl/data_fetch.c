@@ -26,19 +26,27 @@ enum {
   TAR_NAME_BYTES = 100,
   TAR_SIZE_OFFSET = 124,
   TAR_SIZE_BYTES = 12,
+  TAR_CHECKSUM_OFFSET = 148,
+  TAR_CHECKSUM_BYTES = 8,
   TAR_TYPE_OFFSET = 156,
   TAR_LINK_OFFSET = 157,
   TAR_LINK_BYTES = 100,
   TAR_PREFIX_OFFSET = 345,
   TAR_PREFIX_BYTES = 155,
-  // Two zero blocks end the archive.
+  // Two zero blocks in a row end the archive.
   TAR_END_ZERO_BLOCKS = 2,
+  // The most a pax header may hold; MAGPIE-DATA's hold a time or a comment.
+  TAR_PAX_MAX_BYTES = 65536,
   // Room on disk a fetch asks for: the compressed tarball while it unpacks
   // (195 MB) and its contents (270 MB), and some to spare.
   DATA_FETCH_MIN_FREE_BYTES = 600 * 1048576,
   DATA_FETCH_COPY_BUFFER_BYTES = 65536,
   DATA_FETCH_MB = 1024 * 1024,
 };
+
+// What DATA_FETCH_VERSION_FILENAME holds while a fetch unpacks, in place of a
+// version, so that one that never finished is known for what it is.
+#define DATA_FETCH_INCOMPLETE "incomplete"
 
 typedef struct DataFetchChunk {
   const char *suffix;
@@ -133,19 +141,8 @@ static bool data_fetch_make_directories(const char *directory) {
          (errno == EEXIST && cfile_is_directory(directory));
 }
 
-static bool data_fetch_make_parent_directories(const char *path) {
-  char *directory = string_duplicate(path);
-  char *slash = strrchr(directory, '/');
-  bool made = true;
-  if (slash && slash != directory) {
-    *slash = '\0';
-    made = data_fetch_make_directories(directory);
-  }
-  free(directory);
-  return made;
-}
-
-// Writes `destination` as a copy of `source`, in one step.
+// Writes `destination` as a copy of `source`, in one step, replacing what is
+// at `destination` rather than writing through it if it is a link.
 static void data_fetch_copy(const char *source, const char *destination,
                             ErrorStack *error_stack) {
   FILE *stream = fopen_safe(source, "rb", error_stack);
@@ -153,7 +150,7 @@ static void data_fetch_copy(const char *source, const char *destination,
     return;
   }
   CFileAtomicWrite atomic_write;
-  FILE *output = cfile_atomic_write_begin(&atomic_write, destination);
+  FILE *output = cfile_atomic_replace_begin(&atomic_write, destination);
   if (!output) {
     error_stack_push(error_stack, ERROR_STATUS_RW_WRITE_ERROR,
                      get_formatted_string("could not create %s: %s",
@@ -178,9 +175,19 @@ static void data_fetch_copy(const char *source, const char *destination,
   }
 }
 
-// Unpacks a tar stream (what MAGPIE-DATA's tarballs hold: regular files,
-// directories and symlinks under data/) into a data directory, a decompressed
-// window at a time.
+// Unpacks a MAGPIE-DATA tarball into a data directory, a decompressed window
+// at a time. It reads what GNU tar writes for that data and nothing more:
+// regular files, directories and symlinks under data/, in ustar headers with
+// checked checksums, and pax headers that change nothing it reads. Anything
+// else -- a hard link, a device, a GNU long name, a base-256 size, a pax path
+// or size -- stops it with a message rather than unpacking something other
+// than what the archive holds. The download is pinned by SHA-256, so a new
+// data version is the only way to meet one, and the check that the version
+// unpacks (CI's windows-data job) would fail first.
+//
+// It unpacks over what is already there as tar does: a link where the archive
+// has a file or a directory is replaced, never written through, so the
+// directory's earlier contents cannot send a write outside it.
 typedef struct TarExtractor {
   const char *data_dir;
   unsigned char header[TAR_BLOCK_BYTES];
@@ -192,8 +199,14 @@ typedef struct TarExtractor {
   bool writing;
   CFileAtomicWrite file;
   char *file_path;
+  // A pax header's records, gathered to be checked once they are all in.
+  char *pax;
+  size_t pax_used;
+  // Zero blocks in a row so far.
   int zero_blocks;
-  int files;
+  // The data/-relative paths of the regular files unpacked: what a link may
+  // name.
+  StringList *files;
   // Symlinks, written as copies of their targets once everything is out.
   StringList *link_paths;
   StringList *link_targets;
@@ -213,17 +226,53 @@ static char *tar_field(const unsigned char *header, size_t offset,
   return field;
 }
 
-static uint64_t tar_size(const unsigned char *header) {
-  uint64_t size = 0;
-  for (size_t index = 0; index < TAR_SIZE_BYTES; index++) {
-    const unsigned char digit = header[TAR_SIZE_OFFSET + index];
-    if (digit >= '0' && digit <= '7') {
-      size = size * 8 + (uint64_t)(digit - '0');
-    } else if (digit != ' ' || size != 0) {
-      break;
+// Reads the octal number in the `bytes` at `field`: spaces, then at least
+// one octal digit, then only NULs or spaces. Returns false for anything else,
+// a base-256 number included.
+static bool tar_octal(const unsigned char *field, size_t bytes,
+                      uint64_t *value) {
+  size_t index = 0;
+  while (index < bytes && field[index] == ' ') {
+    index++;
+  }
+  const size_t first_digit = index;
+  *value = 0;
+  while (index < bytes && field[index] >= '0' && field[index] <= '7') {
+    if (*value > (UINT64_MAX >> 3)) {
+      return false;
+    }
+    *value = (*value << 3) | (uint64_t)(field[index] - '0');
+    index++;
+  }
+  if (index == first_digit) {
+    return false;
+  }
+  for (; index < bytes; index++) {
+    if (field[index] != '\0' && field[index] != ' ') {
+      return false;
     }
   }
-  return size;
+  return true;
+}
+
+// Whether the header's checksum field matches its bytes, summed with that
+// field as spaces: as unsigned bytes (POSIX) or signed ones (some old tars).
+static bool tar_checksum_matches(const unsigned char *header) {
+  uint64_t recorded = 0;
+  if (!tar_octal(header + TAR_CHECKSUM_OFFSET, TAR_CHECKSUM_BYTES, &recorded)) {
+    return false;
+  }
+  uint64_t unsigned_sum = 0;
+  int64_t signed_sum = 0;
+  for (size_t index = 0; index < TAR_BLOCK_BYTES; index++) {
+    const bool in_checksum = index >= TAR_CHECKSUM_OFFSET &&
+                             index < TAR_CHECKSUM_OFFSET + TAR_CHECKSUM_BYTES;
+    const unsigned char byte = in_checksum ? ' ' : header[index];
+    unsigned_sum += byte;
+    signed_sum += byte < 0x80 ? (int64_t)byte : (int64_t)byte - 0x100;
+  }
+  return recorded == unsigned_sum ||
+         (signed_sum >= 0 && recorded == (uint64_t)signed_sum);
 }
 
 static bool tar_fail(TarExtractor *tar, char *message) {
@@ -250,8 +299,47 @@ static bool tar_finish_file(TarExtractor *tar, bool commit) {
   return finished;
 }
 
-// Records a symlink at `relative` (within data/) to `target` (relative to
-// the link's directory), to be written as a copy.
+// Makes the directory `relative` (within data/, "" for data/ itself) and the
+// directories on the way to it, replacing a link anywhere on that way with a
+// directory, as tar does.
+static bool tar_make_directory(TarExtractor *tar, const char *relative) {
+  for (size_t end = 1; relative[0] && relative[end - 1]; end++) {
+    if (relative[end] != '/' && relative[end] != '\0') {
+      continue;
+    }
+    char *path =
+        get_formatted_string("%s/%.*s", tar->data_dir, (int)end, relative);
+    const bool made =
+        (!cfile_is_symlink(path) || cfile_remove_symlink(path) == 0) &&
+        (cfile_is_directory(path) || cfile_mkdir(path) == 0);
+    if (!made) {
+      (void)tar_fail(tar, get_formatted_string("could not create directory "
+                                               "%s: %s",
+                                               path, strerror(errno)));
+    }
+    free(path);
+    if (!made) {
+      return false;
+    }
+  }
+  return true;
+}
+
+// Makes the directory that holds `relative`, within data/.
+static bool tar_make_parent_directory(TarExtractor *tar, const char *relative) {
+  const char *slash = strrchr(relative, '/');
+  if (!slash) {
+    return true;
+  }
+  char *parent =
+      get_formatted_string("%.*s", (int)(slash - relative), relative);
+  const bool made = tar_make_directory(tar, parent);
+  free(parent);
+  return made;
+}
+
+// Records a symlink at `relative` (within data/) to the target in its header
+// (relative to the link's directory), to be written as a copy.
 static bool tar_add_link(TarExtractor *tar, const char *relative,
                          const char *destination) {
   char *target = tar_field(tar->header, TAR_LINK_OFFSET, TAR_LINK_BYTES);
@@ -266,28 +354,29 @@ static bool tar_add_link(TarExtractor *tar, const char *relative,
         tar_fail(tar, get_formatted_string("the data tarball links %s outside "
                                            "its data: %s",
                                            relative, target));
-  } else {
+  } else if (tar_make_parent_directory(tar, relative)) {
     string_list_add_string(tar->link_paths, destination);
-    char *target_path =
-        get_formatted_string("%s/%s", tar->data_dir, target_relative);
-    string_list_add_string(tar->link_targets, target_path);
-    free(target_path);
+    string_list_add_string(tar->link_targets, target_relative);
+  } else {
+    added = false;
   }
   free(target_relative);
   free(target);
   return added;
 }
 
-static bool tar_start_file(TarExtractor *tar, const char *destination,
-                           uint64_t size) {
-  if (!data_fetch_make_parent_directories(destination) ||
-      !cfile_atomic_write_begin(&tar->file, destination)) {
+static bool tar_start_file(TarExtractor *tar, const char *relative,
+                           const char *destination, uint64_t size) {
+  if (!tar_make_parent_directory(tar, relative)) {
+    return false;
+  }
+  if (!cfile_atomic_replace_begin(&tar->file, destination)) {
     return tar_fail(tar, get_formatted_string("could not create %s: %s",
                                               destination, strerror(errno)));
   }
   tar->writing = true;
   tar->file_path = string_duplicate(destination);
-  tar->files++;
+  string_list_add_string(tar->files, relative);
   return size > 0 || tar_finish_file(tar, true);
 }
 
@@ -303,6 +392,60 @@ static const char *tar_relative_path(const char *path) {
   return NULL;
 }
 
+// Checks a pax header's records ("<length> <key>=<value>\n" each) once they
+// are all in: one that would change what the next entry is called, links to
+// or holds stops the unpacking, since this reader takes those from the ustar
+// header; the rest (times, owners, comments) do not matter here.
+static bool tar_check_pax(TarExtractor *tar) {
+  const char *record = tar->pax;
+  const char *end = tar->pax + tar->pax_used;
+  bool readable = true;
+  while (readable && record < end) {
+    char *after_length = NULL;
+    const unsigned long length = strtoul(record, &after_length, 10);
+    const char *key = after_length + 1;
+    readable = after_length > record && *after_length == ' ' && length > 0 &&
+               length <= (size_t)(end - record) && record[length - 1] == '\n';
+    if (readable) {
+      const char *equals = memchr(key, '=', (size_t)(record + length - key));
+      readable = equals != NULL;
+      const size_t key_length = readable ? (size_t)(equals - key) : 0;
+      const bool sets_path = (key_length == 4 && !strncmp(key, "path", 4)) ||
+                             (key_length == 8 && !strncmp(key, "linkpath", 8));
+      const bool sets_size = key_length == 4 && !strncmp(key, "size", 4);
+      const bool sparse = key_length >= 10 && !strncmp(key, "GNU.sparse", 10);
+      if (readable && (sets_path || sets_size || sparse)) {
+        return tar_fail(
+            tar, get_formatted_string("the data tarball has a pax %.*s, which "
+                                      "MAGPIE does not unpack",
+                                      (int)key_length, key));
+      }
+      record += length;
+    }
+  }
+  return readable ||
+         tar_fail(tar, string_duplicate("the data tarball has a pax header "
+                                        "MAGPIE cannot read"));
+}
+
+// What an entry of the type `type` is, for a message refusing it.
+static const char *tar_type_name(char type) {
+  switch (type) {
+  case '1':
+    return "hard link";
+  case '3':
+  case '4':
+    return "device";
+  case '6':
+    return "FIFO";
+  case 'K':
+  case 'L':
+    return "GNU long name";
+  default:
+    return "entry of an unknown type";
+  }
+}
+
 static bool tar_start_entry(TarExtractor *tar) {
   bool all_zero = true;
   for (size_t index = 0; index < TAR_BLOCK_BYTES && all_zero; index++) {
@@ -311,6 +454,34 @@ static bool tar_start_entry(TarExtractor *tar) {
   if (all_zero) {
     tar->zero_blocks++;
     return true;
+  }
+  if (tar->zero_blocks > 0) {
+    return tar_fail(tar, string_duplicate("the data tarball is corrupt: a "
+                                          "zero block inside it"));
+  }
+  if (!tar_checksum_matches(tar->header)) {
+    return tar_fail(tar, string_duplicate("the data tarball is corrupt: a "
+                                          "header's checksum is wrong"));
+  }
+  uint64_t size = 0;
+  if (!tar_octal(tar->header + TAR_SIZE_OFFSET, TAR_SIZE_BYTES, &size)) {
+    return tar_fail(tar, string_duplicate("the data tarball has a size "
+                                          "MAGPIE cannot read"));
+  }
+  tar->remaining = size;
+  tar->padding = (TAR_BLOCK_BYTES - size % TAR_BLOCK_BYTES) % TAR_BLOCK_BYTES;
+  const char type = (char)tar->header[TAR_TYPE_OFFSET];
+  // A pax header, for the next entry ('x') or the whole archive ('g', which
+  // git archive writes as pax_global_header), is checked whatever it is
+  // called, and its contents are not unpacked.
+  if (type == 'x' || type == 'g') {
+    if (size > TAR_PAX_MAX_BYTES) {
+      return tar_fail(tar, string_duplicate("the data tarball has a pax "
+                                            "header too large to read"));
+    }
+    tar->pax = malloc_or_die((size_t)size + 1);
+    tar->pax_used = 0;
+    return size > 0 || tar_check_pax(tar);
   }
   char *name = tar_field(tar->header, TAR_NAME_OFFSET, TAR_NAME_BYTES);
   char *prefix = tar_field(tar->header, TAR_PREFIX_OFFSET, TAR_PREFIX_BYTES);
@@ -322,24 +493,13 @@ static bool tar_start_entry(TarExtractor *tar) {
   while (length > 0 && path[length - 1] == '/') {
     path[--length] = '\0';
   }
-  const char type = (char)tar->header[TAR_TYPE_OFFSET];
-  const uint64_t size = tar_size(tar->header);
-  tar->remaining = size;
-  tar->padding = (TAR_BLOCK_BYTES - size % TAR_BLOCK_BYTES) % TAR_BLOCK_BYTES;
-  // A pax header, for the next entry ('x') or the whole archive ('g', which
-  // git archive writes as pax_global_header), holds only what MAGPIE has no
-  // use for, such as times and owners, so it is skipped with its contents
-  // whatever it is called. A GNU long name ('L', 'K', called ././@LongLink)
-  // renames the next entry, which this reader cannot do, so rather than
-  // unpacking that entry under its cut-short name it stops.
-  if (type == 'x' || type == 'g') {
+  if (type != '0' && type != '\0' && type != '5' && type != '2') {
+    const bool started = tar_fail(
+        tar, get_formatted_string("the data tarball has a %s (%s), which "
+                                  "MAGPIE does not unpack",
+                                  tar_type_name(type), path));
     free(path);
-    return true;
-  }
-  if (type == 'L' || type == 'K') {
-    free(path);
-    return tar_fail(tar, string_duplicate("the data tarball has a GNU long "
-                                          "name, which MAGPIE cannot read"));
+    return started;
   }
   // Every other entry is data/ or under it; anything else is not a MAGPIE
   // data tarball.
@@ -357,20 +517,39 @@ static bool tar_start_entry(TarExtractor *tar) {
                   : string_duplicate(tar->data_dir);
   bool started = true;
   if (type == '5') {
-    started =
-        data_fetch_make_directories(destination) ||
-        tar_fail(tar, get_formatted_string("could not create directory %s: %s",
-                                           destination, strerror(errno)));
-  } else if (type == '0' || type == '\0') {
-    started = tar_start_file(tar, destination, size);
+    started = tar_make_directory(tar, relative);
   } else if (type == '2') {
     started = tar_add_link(tar, relative, destination);
+  } else {
+    started = tar_start_file(tar, relative, destination, size);
   }
-  // Any other type under data/ (a hard link or a device, which MAGPIE-DATA's
-  // tarballs do not have) is skipped with its contents.
   free(destination);
   free(path);
   return started;
+}
+
+// Takes `count` bytes of the current entry's contents.
+static bool tar_take_contents(TarExtractor *tar, const unsigned char *bytes,
+                              size_t count) {
+  if (tar->writing && fwrite(bytes, 1, count, tar->file.stream) != count) {
+    return tar_fail(tar, get_formatted_string("could not write %s: %s",
+                                              tar->file_path, strerror(errno)));
+  }
+  if (tar->pax) {
+    memcpy(tar->pax + tar->pax_used, bytes, count);
+    tar->pax_used += count;
+  }
+  tar->remaining -= count;
+  if (tar->remaining > 0) {
+    return true;
+  }
+  if (tar->pax) {
+    const bool readable = tar_check_pax(tar);
+    free(tar->pax);
+    tar->pax = NULL;
+    return readable;
+  }
+  return tar_finish_file(tar, true);
 }
 
 static bool tar_sink(void *context, const unsigned char *bytes, size_t length) {
@@ -385,17 +564,10 @@ static bool tar_sink(void *context, const unsigned char *bytes, size_t length) {
     if (tar->remaining > 0) {
       const size_t count =
           tar->remaining < available ? (size_t)tar->remaining : available;
-      if (tar->writing &&
-          fwrite(bytes + used, 1, count, tar->file.stream) != count) {
-        return tar_fail(tar,
-                        get_formatted_string("could not write %s: %s",
-                                             tar->file_path, strerror(errno)));
-      }
-      tar->remaining -= count;
-      used += count;
-      if (tar->remaining == 0 && !tar_finish_file(tar, true)) {
+      if (!tar_take_contents(tar, bytes + used, count)) {
         return false;
       }
+      used += count;
     } else if (tar->padding > 0) {
       const size_t count =
           tar->padding < available ? (size_t)tar->padding : available;
@@ -418,6 +590,17 @@ static bool tar_sink(void *context, const unsigned char *bytes, size_t length) {
     }
   }
   return true;
+}
+
+// Whether `files` holds `path`.
+static bool string_list_holds(const StringList *files, const char *path) {
+  const int count = string_list_get_count(files);
+  for (int file_idx = 0; file_idx < count; file_idx++) {
+    if (strings_equal(string_list_get_string(files, file_idx), path)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 // Downloads one chunk, checks it, and appends it to `archive`.
@@ -493,17 +676,25 @@ static void data_fetch_unpack(const char *archive_path, const char *data_dir,
   data_fetch_report(
       report, report_context,
       get_formatted_string("unpacking the data into %s", data_dir));
+  if (!data_fetch_make_directories(data_dir)) {
+    error_stack_push(error_stack, ERROR_STATUS_RW_WRITE_ERROR,
+                     get_formatted_string("could not create %s: %s", data_dir,
+                                          strerror(errno)));
+    return;
+  }
   FILE *archive = fopen_safe(archive_path, "rb", error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
   TarExtractor tar = {.data_dir = data_dir,
+                      .files = string_list_create(),
                       .link_paths = string_list_create(),
                       .link_targets = string_list_create(),
                       .error_stack = error_stack};
   const bool decompressed = gzip_reader_decompress(archive, tar_sink, &tar);
   fclose_or_die(archive);
   (void)tar_finish_file(&tar, false);
+  free(tar.pax);
   if (error_stack_is_empty(error_stack) &&
       (!decompressed || tar.zero_blocks < TAR_END_ZERO_BLOCKS)) {
     error_stack_push(error_stack, ERROR_STATUS_DATA_FETCH_FILE_MISMATCH,
@@ -512,15 +703,28 @@ static void data_fetch_unpack(const char *archive_path, const char *data_dir,
   const int link_count = string_list_get_count(tar.link_paths);
   for (int link_idx = 0;
        link_idx < link_count && error_stack_is_empty(error_stack); link_idx++) {
-    data_fetch_copy(string_list_get_string(tar.link_targets, link_idx),
-                    string_list_get_string(tar.link_paths, link_idx),
-                    error_stack);
+    const char *target = string_list_get_string(tar.link_targets, link_idx);
+    const char *link = string_list_get_string(tar.link_paths, link_idx);
+    // Only a file the tarball held: never whatever happens to be on disk
+    // there, which may be a link of its own to somewhere else.
+    if (!string_list_holds(tar.files, target)) {
+      error_stack_push(error_stack, ERROR_STATUS_DATA_FETCH_FILE_MISMATCH,
+                       get_formatted_string("the data tarball links %s to %s, "
+                                            "which is not a file in it",
+                                            link, target));
+      break;
+    }
+    char *target_path = get_formatted_string("%s/%s", data_dir, target);
+    data_fetch_copy(target_path, link, error_stack);
+    free(target_path);
   }
   if (error_stack_is_empty(error_stack)) {
     data_fetch_report(
         report, report_context,
-        get_formatted_string("unpacked %d files", tar.files + link_count));
+        get_formatted_string("unpacked %d files",
+                             string_list_get_count(tar.files) + link_count));
   }
+  string_list_destroy(tar.files);
   string_list_destroy(tar.link_paths);
   string_list_destroy(tar.link_targets);
 }
@@ -530,29 +734,66 @@ void data_fetch_unpack_archive(const char *archive_path, const char *data_dir,
   data_fetch_unpack(archive_path, data_dir, NULL, NULL, error_stack);
 }
 
-// Whether `data_dir` records that it holds data version DATA_FETCH_VERSION.
-static bool data_fetch_is_current(const char *data_dir) {
+// The data version `data_dir` records (DATA_FETCH_INCOMPLETE while a fetch
+// unpacks), or NULL if it records none. The caller frees.
+static char *data_fetch_recorded_version(const char *data_dir) {
   char *path =
       get_formatted_string("%s/%s", data_dir, DATA_FETCH_VERSION_FILENAME);
-  bool current = false;
+  char *version = NULL;
   if (cfile_access(path, CFILE_ACCESS_READ)) {
     ErrorStack *errors = error_stack_create();
-    char *version = get_string_from_file(path, errors);
+    version = get_string_from_file(path, errors);
     if (version) {
       trim_whitespace(version);
-      current = strings_equal(version, DATA_FETCH_VERSION);
     }
-    free(version);
     error_stack_destroy(errors);
   }
   free(path);
-  return current && data_fetch_is_data_present(data_dir);
+  return version;
+}
+
+static void data_fetch_record_version(const char *data_dir, const char *version,
+                                      ErrorStack *error_stack) {
+  char *path =
+      get_formatted_string("%s/%s", data_dir, DATA_FETCH_VERSION_FILENAME);
+  char *contents = get_formatted_string("%s\n", version);
+  write_string_to_file(path, "wb", contents, error_stack);
+  free(contents);
+  free(path);
+}
+
+// Whether `data_dir` holds MAGPIE's data, judged by the board layout every
+// game needs.
+static bool data_fetch_has_layout(const char *data_dir) {
+  char *layout_name = board_layout_get_default_name();
+  char *layout_path =
+      get_filepath(data_dir, layout_name, DATA_FILEPATH_TYPE_LAYOUT);
+  const bool present = cfile_access(layout_path, CFILE_ACCESS_READ);
+  free(layout_path);
+  free(layout_name);
+  return present;
+}
+
+data_fetch_state_t data_fetch_get_state(const char *data_dir) {
+  char *version = data_fetch_recorded_version(data_dir);
+  data_fetch_state_t state = DATA_FETCH_STATE_CURRENT;
+  if (version && strings_equal(version, DATA_FETCH_INCOMPLETE)) {
+    state = DATA_FETCH_STATE_INCOMPLETE;
+  } else if (!data_fetch_has_layout(data_dir)) {
+    state = DATA_FETCH_STATE_MISSING;
+  } else if (!version) {
+    state = DATA_FETCH_STATE_UNVERSIONED;
+  } else if (!strings_equal(version, DATA_FETCH_VERSION)) {
+    state = DATA_FETCH_STATE_OUTDATED;
+  }
+  free(version);
+  return state;
 }
 
 void data_fetch(const char *base_url, const char *data_dir,
                 data_fetch_report_t report, void *report_context,
                 ErrorStack *error_stack) {
-  if (data_fetch_is_current(data_dir)) {
+  if (data_fetch_get_state(data_dir) == DATA_FETCH_STATE_CURRENT) {
     data_fetch_report(report, report_context,
                       get_formatted_string("%s already holds data version %s",
                                            data_dir, DATA_FETCH_VERSION));
@@ -585,6 +826,11 @@ void data_fetch(const char *base_url, const char *data_dir,
                                             data_dir, DATA_FETCH_VERSION);
   data_fetch_download(base_url ? base_url : DATA_FETCH_DEFAULT_BASE_URL,
                       archive_path, report, report_context, error_stack);
+  // From here until the version is recorded, the directory says that what
+  // it holds is incomplete: a fetch cut short leaves old files and new.
+  if (error_stack_is_empty(error_stack)) {
+    data_fetch_record_version(data_dir, DATA_FETCH_INCOMPLETE, error_stack);
+  }
   if (error_stack_is_empty(error_stack)) {
     data_fetch_unpack(archive_path, data_dir, report, report_context,
                       error_stack);
@@ -592,25 +838,11 @@ void data_fetch(const char *base_url, const char *data_dir,
   (void)remove(archive_path);
   free(archive_path);
   if (error_stack_is_empty(error_stack)) {
-    char *version_path =
-        get_formatted_string("%s/%s", data_dir, DATA_FETCH_VERSION_FILENAME);
-    write_string_to_file(version_path, "wb", DATA_FETCH_VERSION "\n",
-                         error_stack);
-    free(version_path);
+    data_fetch_record_version(data_dir, DATA_FETCH_VERSION, error_stack);
   }
   if (error_stack_is_empty(error_stack)) {
     data_fetch_report(report, report_context,
                       get_formatted_string("data version %s is ready in %s",
                                            DATA_FETCH_VERSION, data_dir));
   }
-}
-
-bool data_fetch_is_data_present(const char *data_dir) {
-  char *layout_name = board_layout_get_default_name();
-  char *layout_path =
-      get_filepath(data_dir, layout_name, DATA_FILEPATH_TYPE_LAYOUT);
-  const bool present = cfile_access(layout_path, CFILE_ACCESS_READ);
-  free(layout_path);
-  free(layout_name);
-  return present;
 }

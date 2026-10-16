@@ -36,23 +36,38 @@ jobs:
   windows-cross-compile:
     runs-on: ubuntu-latest
     env:
+      # The pinned toolchain, with the SHA-256 of its release tarball (also
+      # the digest GitHub reports for the asset). Keep in step with
+      # release-windows.yml and windows/Dockerfile.
       LLVM_MINGW_VERSION: "20261006"
       LLVM_MINGW: llvm-mingw-20261006-ucrt-ubuntu-22.04-x86_64
+      LLVM_MINGW_SHA256: 5f9c6ed95b2d4bdb2869a488c5fd5857fbdabcf288a0aa3eb1da43f6a08d8ab4
     steps:
       - uses: actions/checkout@v3
 
+      # The cache holds the tarball itself, keyed by its checksum, and is
+      # saved only when the job succeeds, after the tarball was verified. It
+      # is verified again before every unpack, so a tampered cache entry
+      # fails the job instead of compiling with it.
       - name: Get llvm-mingw cache
         id: cache-llvm-mingw
         uses: actions/cache@v3
         with:
-          path: ~/llvm-mingw
-          key: ${{ env.LLVM_MINGW }}
+          path: ~/llvm-mingw-download
+          key: ${{ env.LLVM_MINGW }}-sha256-${{ env.LLVM_MINGW_SHA256 }}
 
       - name: Download llvm-mingw
         if: steps.cache-llvm-mingw.outputs.cache-hit != 'true'
         run: |
+          mkdir -p ~/llvm-mingw-download
+          curl -fsSL -o ~/llvm-mingw-download/$LLVM_MINGW.tar.xz \
+            "https://github.com/mstorsjo/llvm-mingw/releases/download/$LLVM_MINGW_VERSION/$LLVM_MINGW.tar.xz"
+
+      - name: Verify and unpack llvm-mingw
+        run: |
+          echo "$LLVM_MINGW_SHA256  $HOME/llvm-mingw-download/$LLVM_MINGW.tar.xz" | sha256sum -c --strict -
           mkdir -p ~/llvm-mingw
-          curl -fsSL "https://github.com/mstorsjo/llvm-mingw/releases/download/$LLVM_MINGW_VERSION/$LLVM_MINGW.tar.xz" | tar xJ -C ~/llvm-mingw
+          tar xJf ~/llvm-mingw-download/$LLVM_MINGW.tar.xz -C ~/llvm-mingw
 
       - name: Compile every C file for x64 and arm64 Windows
         run: |
@@ -337,12 +352,18 @@ jobs:
           mkdir -p fetch-test
           cd fetch-test
           ../bin/magpie data fetch < /dev/null
-          for file in layouts/standard15.txt lexica/CSW21.kwg lexica/CSW21.klv2; do
-            cmp "data/$file" "../data/$file"
-          done
-          # The tarball's symlinks arrive as copies of their targets.
+          # Every file GNU tar extracts from the same chunks, and nothing else
+          # but the version marker. diff follows GNU tar's symlinks, which
+          # data fetch writes as copies of their targets.
+          version=$(sed -n 's/^#define DATA_FETCH_VERSION "\(.*\)"/\1/p' ../src/impl/data_fetch.h)
+          suffixes=$(sed -n 's/^ *{"\([a-z][a-z]\)",.*/\1/p' ../src/impl/data_fetch.c)
+          mkdir -p reference
+          for suffix in $suffixes; do
+            curl -fsSL "https://raw.githubusercontent.com/jvc56/MAGPIE-DATA/main/versioned-tarballs/data-$version.tgz.$suffix"
+          done | tar -xzf - -C reference
+          diff -r -x .data-version reference/data data
+          rm -rf reference
           test ! -L data/lexica/CSW24_super21.klv2
-          cmp data/lexica/CSW24_super21.klv2 ../data/lexica/CSW21_super21.klv2
           # A second fetch finds the data version already there.
           ../bin/magpie data fetch < /dev/null | grep -q "already holds data version"
           # The fetched lexicon has no wordmap: its first use builds one.

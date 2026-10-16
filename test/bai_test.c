@@ -25,6 +25,10 @@
 
 enum {
   NUM_UNIQUE_MEANS = 10000,
+  // How long a test waits on a thread before calling it hung. The work takes
+  // seconds, but the sanitizer builds and Wine run it many times slower, so
+  // this catches a hang, never a slow machine.
+  HANG_TIMEOUT_SECONDS = 600,
   // test_bai_paired_z: three arms, two with more common ordinals than the
   // paired statistics keep and one with fewer.
   PAIRED_TEST_ARMS = 3,
@@ -264,7 +268,7 @@ void test_bai_time_limit(int num_threads) {
 
   cpthread_t thread;
   cpthread_create(&thread, bai_thread_func, &args);
-  cpthread_cond_timedwait_loop(&cond, &mutex, 10, &done);
+  cpthread_cond_timedwait_loop(&cond, &mutex, HANG_TIMEOUT_SECONDS, &done);
   cpthread_join(thread);
 
   assert(bai_result_get_status(bai_result) == BAI_RESULT_STATUS_TIMEOUT);
@@ -389,7 +393,7 @@ void test_bai_interrupt(int num_threads) {
   ctime_nap(2.0);
   thread_control_set_status(thread_control,
                             THREAD_CONTROL_STATUS_USER_INTERRUPT);
-  cpthread_cond_timedwait_loop(&cond, &mutex, 5, &done);
+  cpthread_cond_timedwait_loop(&cond, &mutex, HANG_TIMEOUT_SECONDS, &done);
   cpthread_join(thread);
 
   assert(bai_result_get_status(bai_result) == BAI_RESULT_STATUS_USER_INTERRUPT);

@@ -1,4 +1,5 @@
-#include "cwin.h"
+// Outside Windows this file holds nothing but its header, which is kept.
+#include "cwin.h" // IWYU pragma: keep
 
 #if defined(_WIN32)
 #include <errno.h>

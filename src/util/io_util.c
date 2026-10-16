@@ -24,6 +24,9 @@ static log_level_t current_log_level = LOG_FATAL;
 static FILE *stream_out = NULL;
 static FILE *stream_err = NULL;
 static FILE *stream_in = NULL;
+// Where io_wait_before_close reads its line, when a reader of the input has
+// been set (io_set_line_reader).
+static char *(*line_reader)(void) = NULL;
 static cpthread_mutex_t stream_mutex = CPTHREAD_MUTEX_INITIALIZER;
 
 // Local mutex wrappers to avoid circular dependency with cpthread.h
@@ -192,7 +195,8 @@ void log_with_info(log_level_t log_level, const char *caller_filename,
   fflush_or_die(output_fh);
 
   if (exit_fatally) {
-    cterm_wait_before_close();
+    io_wait_before_close();
+    cterm_restore();
     abort();
   }
 }
@@ -261,6 +265,17 @@ char *read_line_from_stream(FILE *stream) {
 
 char *read_line_from_stream_in(void) {
   return read_line_from_stream(get_stream_in());
+}
+
+void io_set_line_reader(char *(*reader)(void)) { line_reader = reader; }
+
+void io_wait_before_close(void) {
+  if (!cterm_owns_console()) {
+    return;
+  }
+  write_to_stream_err("\nPress Enter to close this window.");
+  char *line = line_reader ? line_reader() : read_line_from_stream_in();
+  free(line);
 }
 
 // WARNING: This function should only be called once at startup or for testing
@@ -491,8 +506,11 @@ char *get_string_from_file_handle(FILE *file_handle, const char *filename,
   }
   fclose_or_die(file_handle);
 
-  // Text files written on Windows end their lines with \r\n; drop the \r so
-  // every caller sees the same text on every platform.
+  // Text files written on Windows end their lines with \r\n, and such files
+  // reach every platform (a GCG saved by a Windows editor, a downloaded CSV),
+  // so on every platform each \r\n becomes \n: every caller then sees the
+  // same text wherever the file came from. Only the pair is rewritten; a lone
+  // \r is left as it is.
   size_t kept = 0;
   for (size_t byte_idx = 0; byte_idx < length; byte_idx++) {
     if (contents[byte_idx] == '\r' && byte_idx + 1 < length &&
@@ -606,28 +624,50 @@ enum {
   // A writer touches its temporary file continuously, and the largest (a
   // rack info table) takes minutes; one untouched this long was abandoned.
   STALE_TEMPORARY_SECONDS = 60 * 60,
+  // The XXXXXX mkstemp fills in.
+  MKSTEMP_SUFFIX_LENGTH = 6,
 };
 
-// Whether `entry` is `<base>.<pid>-<n>.tmp` (or `<base>.<pid>.tmp`, the
-// earlier form): a temporary_sibling of `base`.
+// Whether `text` is one or more digits and dashes, or, with
+// `mkstemp_suffix`, also mkstemp's six letters and digits.
+static bool is_temporary_tag(const char *text, bool mkstemp_suffix) {
+  bool digits_and_dashes = text[0] != '\0';
+  bool alphanumeric = text[0] != '\0';
+  size_t length = 0;
+  for (; text[length]; length++) {
+    const unsigned char c = (unsigned char)text[length];
+    digits_and_dashes = digits_and_dashes && (isdigit(c) || c == '-');
+    alphanumeric = alphanumeric && isalnum(c);
+  }
+  return digits_and_dashes ||
+         (mkstemp_suffix && alphanumeric && length == MKSTEMP_SUFFIX_LENGTH);
+}
+
+// Whether `entry` is what an unfinished write of `base` leaves beside it:
+// `<base>.<pid>-<n>-<ns>.tmp` (or `<base>.<pid>.tmp`, the earlier form) from
+// temporary_sibling, `<base>.tmp.<tag>` from cfile_atomic_write_begin, or
+// `<base>.old.<pid>-<n>`, a replaced file cfile_rename could not delete on
+// Windows.
 static bool is_temporary_sibling_of(const char *entry, const char *base) {
   const size_t base_length = strlen(base);
   if (strncmp(entry, base, base_length) != 0 || entry[base_length] != '.') {
     return false;
   }
-  const char *pid = entry + base_length + 1;
-  const char *end = pid;
+  const char *rest = entry + base_length + 1;
+  if (strncmp(rest, "tmp.", 4) == 0) {
+    return is_temporary_tag(rest + 4, true);
+  }
+  if (strncmp(rest, "old.", 4) == 0) {
+    return is_temporary_tag(rest + 4, false);
+  }
+  const char *end = rest;
   while (isdigit((unsigned char)*end) || *end == '-') {
     end++;
   }
-  return end > pid && strcmp(end, ".tmp") == 0;
+  return end > rest && strcmp(end, ".tmp") == 0;
 }
 
-// Removes the temporaries of writes of `filename` that never finished -- a
-// process killed while writing a 1.9 GB table leaves its whole temporary
-// behind, and nothing else would ever remove it. Best effort: a failure here
-// costs disk, never the write.
-static void remove_stale_temporary_siblings(const char *filename) {
+void remove_stale_temporary_siblings(const char *filename) {
   const char *base = cpath_basename(filename);
   char *dir =
       base != filename
@@ -646,8 +686,11 @@ static void remove_stale_temporary_siblings(const char *filename) {
     }
     char *path = get_formatted_string("%s/%s", dir, entry);
     CFileIdentity identity;
+    // A file moved aside keeps its old modification time, so the rename (a
+    // status change) counts too.
     if (cfile_identity(path, &identity) &&
-        now - identity.mtime_seconds > STALE_TEMPORARY_SECONDS) {
+        now - identity.mtime_seconds > STALE_TEMPORARY_SECONDS &&
+        now - identity.ctime_seconds > STALE_TEMPORARY_SECONDS) {
       (void)remove(path);
     }
     free(path);

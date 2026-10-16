@@ -1185,16 +1185,21 @@ void test_peg_strength_ab(void) {
 }
 
 // Generate a FRESH battery of PEG positions (new seeds, contested) in the
-// working directory for a long strength run, so we are not measuring on the
+// temporary directory for a long strength run, so we are not measuring on the
 // committed fixtures. Env MAGPIE_PEG_GENCOUNT (positions per bag, default 200).
 void test_gen_peg_fresh(void) {
   log_set_level(LOG_FATAL);
   const char *ec = getenv("MAGPIE_PEG_GENCOUNT");
   const int count = (ec && *ec) ? (int)strtol(ec, NULL, 10) : 200;
-  generate_peg_cgps(918273101ULL, 1, count, "peg_fresh_1peg.txt", false, true);
-  generate_peg_cgps(918273202ULL, 2, count, "peg_fresh_2peg.txt", false, true);
-  generate_peg_cgps(918273303ULL, 3, count, "peg_fresh_3peg.txt", false, true);
-  generate_peg_cgps(918273404ULL, 4, count, "peg_fresh_4peg.txt", false, true);
+  static const uint64_t seeds[] = {918273101ULL, 918273202ULL, 918273303ULL,
+                                   918273404ULL};
+  for (int bag = 1; bag <= 4; bag++) {
+    char *name = get_formatted_string("peg_fresh_%dpeg.txt", bag);
+    char *path = test_platform_temporary_path(name);
+    generate_peg_cgps(seeds[bag - 1], bag, count, path, false, true);
+    free(path);
+    free(name);
+  }
 }
 
 // PEG throughput->strength CURVE: for each position run several arms that
@@ -1254,11 +1259,14 @@ void test_peg_strength_curve(void) {
   }
   (void)fflush(stdout);
   for (int fi = 0; fi < 4; fi++) {
-    FILE *fp = cfile_open(files[fi].f, "re", false);
+    char *path = test_platform_temporary_path(files[fi].f);
+    FILE *fp = cfile_open(path, "re", false);
     if (!fp) {
-      printf("PEGCURVEERR no %s\n", files[fi].f);
+      printf("PEGCURVEERR no %s\n", path);
+      free(path);
       continue;
     }
+    free(path);
     char line[4096];
     int pos_id = 0;
     while (pos_id < maxpos && fgets(line, sizeof(line), fp)) {

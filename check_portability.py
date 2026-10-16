@@ -13,16 +13,18 @@ of src/compat, the one place for what tests need from the platform and
 src/compat has no reason to offer (temporary directories, permission bits,
 symlinks, pipes, file size limits). It keeps its own header portable.
 
-Comments and string literals are skipped, and a banned function only counts
-as a call: `stat(` is a call, `struct stat`, `->close(` and `my_open(` are not.
+Comments and string literals are skipped, line continuations are joined, and
+a banned function only counts as a call: `stat(` and `(stat)(` are calls,
+`struct stat`, `->close(` and `my_open(` are not. There are no exceptions.
 
-Violations that predate the rule are listed in portability_allowlist.txt. The
-check fails on any violation not listed there, and on any listed entry that no
-longer occurs, so the list only shrinks. See docs/windows-plan.md, section 3.1.
+This is a lint that catches the usual slips early and says where they are,
+not a proof: a macro that renames a call, a function pointer, or a compat
+header that includes a platform header for its own use gets past it. The
+Windows cross-compile (check_windows_compile.py, and the Windows builds in
+CI) is what shows the code builds there.
 
 Usage:
-  python3 check_portability.py          # check
-  python3 check_portability.py --write  # rewrite the allowlist to match
+  python3 check_portability.py
 """
 
 import os
@@ -34,7 +36,6 @@ SCAN_DIRS = ["src", "cmd", "tools", "test"]
 COMPAT_DIR = os.path.join("src", "compat")
 # The test suite's platform layer (see the docstring).
 TEST_PLATFORM_FILE = "test/test_platform.c"
-ALLOWLIST = "portability_allowlist.txt"
 
 ISO_C_HEADERS = {
     "assert.h", "complex.h", "ctype.h", "errno.h", "fenv.h", "float.h",
@@ -46,10 +47,13 @@ ISO_C_HEADERS = {
 }
 
 PLATFORM_MACROS = {
-    "_WIN32", "_WIN64", "__MINGW32__", "__MINGW64__", "_MSC_VER",
-    "__CYGWIN__", "__APPLE__", "__MACH__", "__linux__", "__linux",
-    "__unix__", "__unix", "__FreeBSD__", "__wasm__", "__wasm32__",
-    "__wasm64__", "__EMSCRIPTEN__",
+    "_WIN32", "_WIN64", "WIN32", "WIN64", "__WIN32__", "__WIN32", "_WINDOWS",
+    "__MINGW32__", "__MINGW64__", "_MSC_VER", "__CYGWIN__", "__APPLE__",
+    "__MACH__", "TARGET_OS_MAC", "TARGET_OS_IPHONE", "__linux__", "__linux",
+    "linux", "__gnu_linux__", "__ANDROID__", "__unix__", "__unix", "unix",
+    "__FreeBSD__", "__NetBSD__", "__OpenBSD__", "__DragonFly__", "__sun",
+    "__HAIKU__", "_AIX", "__GLIBC__", "_POSIX_VERSION", "__wasm__",
+    "__wasm32__", "__wasm64__", "__EMSCRIPTEN__",
 }
 
 # Functions that are POSIX or platform specific, or that are ISO C but behave
@@ -126,10 +130,25 @@ def line_of(text, offset):
     return text.count("\n", 0, offset) + 1
 
 
+def join_continuations(text):
+    """Joins lines that end in a backslash, moving their newlines to the end
+    of the joined line so that every later line keeps its number."""
+    joined = []
+    pending = 0
+    for line in text.split("\n"):
+        if line.endswith("\\"):
+            joined.append(line[:-1])
+            pending += 1
+        else:
+            joined.append(line + "\n" * (pending + 1))
+            pending = 0
+    return "".join(joined)[:-1]
+
+
 def scan_file(rel_path):
     """Returns a list of (kind, name, line) violations in one file."""
     with open(os.path.join(ROOT, rel_path), encoding="utf-8") as handle:
-        text = strip_comments(handle.read())
+        text = strip_comments(join_continuations(handle.read()))
     violations = []
     for match in INCLUDE_RE.finditer(text):
         delimiter, header = match.group(1), match.group(2)
@@ -150,7 +169,11 @@ def scan_file(rel_path):
             after = code[match.end():].lstrip()
             is_member = before.endswith(".") or before.endswith("->")
             is_struct_tag = re.search(r"\bstruct$", before) is not None
-            if after.startswith("(") and not is_member and not is_struct_tag:
+            # `(rename)(...)` calls the function past any macro of its name.
+            parenthesized = (before.endswith("(") and after.startswith(")") and
+                             after[1:].lstrip().startswith("("))
+            if ((after.startswith("(") or parenthesized) and not is_member and
+                    not is_struct_tag):
                 violations.append(("call", name, line))
     return violations
 
@@ -168,60 +191,18 @@ def source_files():
                     yield path
 
 
-def allowlist_key(path, kind, name):
-    return f"{path}: {kind} {name}"
-
-
-def read_allowlist():
-    path = os.path.join(ROOT, ALLOWLIST)
-    if not os.path.exists(path):
-        return set()
-    entries = set()
-    with open(path, encoding="utf-8") as handle:
-        for line in handle:
-            line = line.strip()
-            if line and not line.startswith("#"):
-                entries.add(line)
-    return entries
-
-
-def write_allowlist(entries):
-    with open(os.path.join(ROOT, ALLOWLIST), "w", encoding="utf-8") as handle:
-        handle.write(
-            "# Platform-specific code outside src/compat that predates\n"
-            "# check_portability.py. Remove entries as code moves behind\n"
-            "# compat; never add one. See docs/windows-plan.md, section 3.1.\n")
-        for entry in sorted(entries):
-            handle.write(entry + "\n")
-
-
 def main():
-    found = {}
+    violations = []
     for rel_path in sorted(source_files()):
         for kind, name, line in scan_file(rel_path):
-            found.setdefault(allowlist_key(rel_path, kind, name), line)
-
-    if "--write" in sys.argv[1:]:
-        write_allowlist(found.keys())
-        print(f"Wrote {len(found)} entries to {ALLOWLIST}.")
-        return 0
-
-    allowed = read_allowlist()
-    new = sorted(key for key in found if key not in allowed)
-    stale = sorted(key for key in allowed if key not in found)
-    for key in new:
-        path, rest = key.split(": ", 1)
-        kind, name = rest.split(" ", 1)
-        print(f"{path}:{found[key]}: {kind} '{name}' is platform specific; "
+            violations.append((rel_path, line, kind, name))
+    for rel_path, line, kind, name in violations:
+        print(f"{rel_path}:{line}: {kind} '{name}' is platform specific; "
               "move it behind src/compat")
-    for key in stale:
-        print(f"{ALLOWLIST}: '{key}' no longer occurs; delete the entry")
-    if new or stale:
-        print(f"\nPortability check failed: {len(new)} new violation(s), "
-              f"{len(stale)} stale allowlist entr(ies).")
+    if violations:
+        print(f"\nPortability check failed: {len(violations)} violation(s).")
         return 1
-    print(f"Portability check passed ({len(allowed)} allowlisted entries "
-          "remain).")
+    print("Portability check passed.")
     return 0
 
 

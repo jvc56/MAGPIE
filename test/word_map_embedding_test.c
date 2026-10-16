@@ -76,10 +76,8 @@ static void test_map_symlinks(const WMP *wmp, const WordInfoTable *wit,
   remove_or_die(linkname);
   remove_or_die(filename);
   // Both relative and absolute dangling targets are created through the link.
-  char *working_directory = test_platform_current_directory();
-  char *absolute_filename =
-      get_formatted_string("%s/%s", working_directory, filename);
-  const char *targets[] = {"table", absolute_filename};
+  // (`filename` is in the temporary directory, so absolute.)
+  const char *targets[] = {"table", filename};
   for (int target_idx = 0; target_idx < 2; target_idx++) {
     assert(test_platform_symlink(targets[target_idx], linkname));
     write_map(wmp, wit, linkname, errors);
@@ -90,8 +88,6 @@ static void test_map_symlinks(const WMP *wmp, const WordInfoTable *wit,
     remove_or_die(linkname);
     remove_or_die(filename);
   }
-  free(absolute_filename);
-  free(working_directory);
   char *chain = get_formatted_string("%s/chain", directory);
   assert(test_platform_symlink("link", chain));
   assert(test_platform_symlink("table", linkname));

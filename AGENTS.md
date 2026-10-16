@@ -67,10 +67,9 @@ no POSIX function compat wraps. Tests get what compat lacks (temporary
 directories, permissions, symlinks, pipes, file size limits) from
 `test/test_platform.h`, whose `.c` is the one exempt file in `test/`; a case a
 platform cannot run is skipped through that helper's return value, never
-deleted. `check_portability.py` enforces this against
-`portability_allowlist.txt`, and `check_windows_compile.py` cross-compiles every
-file against `windows_compile_allowlist.txt`. Both lists only shrink: never add
-an entry. The Windows compiler is the pinned llvm-mingw release (see the
+deleted. `check_portability.py` lints for this, with no exceptions, and
+`check_windows_compile.py` cross-compiles every file, all of which must
+compile; the cross-compile is the real check. The Windows compiler is the pinned llvm-mingw release (see the
 `windows-cross-compile` job), also available as the
 `mstorsjo/llvm-mingw:20261006` Docker image.
 

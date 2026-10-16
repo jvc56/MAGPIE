@@ -21,6 +21,9 @@
 #include <wchar.h>
 #include <windows.h>
 #else
+#if defined(__GLIBC__)
+#include <gnu/libc-version.h>
+#endif
 #include <fcntl.h>
 #include <signal.h>
 #include <sys/stat.h>
@@ -39,8 +42,6 @@ enum {
   TEST_PLATFORM_OWNER_WRITE = 0200,
   // Room for the pipe's contents on Windows, where _pipe sizes it.
   TEST_PLATFORM_PIPE_BYTES = 65536,
-  // A working directory's longest path, to start with; doubled as needed.
-  TEST_PLATFORM_INITIAL_PATH_CAPACITY = 256,
   // CreateSymbolicLinkW's flag for creating a symlink without the privilege,
   // in developer mode (Windows 10 1703), which older MinGW headers lack.
   TEST_PLATFORM_SYMLINK_ALLOW_UNPRIVILEGED_CREATE = 0x2,
@@ -49,9 +50,47 @@ enum {
 // Distinguishes the temporary names one process makes.
 static int temporary_name_count = 0;
 
+static char *temporary_root = NULL;
+
+static char *find_temporary_root(void) {
+#if defined(_WIN32)
+  wchar_t wide[MAX_PATH + 1];
+  const DWORD length = GetTempPathW(MAX_PATH + 1, wide);
+  if (length == 0 || length > MAX_PATH) {
+    log_fatal("cannot find the temporary directory");
+  }
+  const int bytes =
+      WideCharToMultiByte(CP_UTF8, 0, wide, -1, NULL, 0, NULL, NULL);
+  char *root = malloc_or_die((size_t)bytes);
+  (void)WideCharToMultiByte(CP_UTF8, 0, wide, -1, root, bytes, NULL, NULL);
+#else
+  const char *tmpdir = getenv("TMPDIR");
+  char *root = string_duplicate(tmpdir && tmpdir[0] ? tmpdir : "/tmp");
+#endif
+  size_t root_length = strlen(root);
+  while (root_length > 1 &&
+         (root[root_length - 1] == '/' || root[root_length - 1] == '\\')) {
+    root[--root_length] = '\0';
+  }
+  return root;
+}
+
+const char *test_platform_temporary_root(void) {
+  // Tests make their temporaries from one thread, before any they start.
+  if (!temporary_root) {
+    temporary_root = find_temporary_root();
+  }
+  return temporary_root;
+}
+
+char *test_platform_temporary_path(const char *name) {
+  return get_formatted_string("%s/%s", test_platform_temporary_root(), name);
+}
+
 static char *temporary_name(const char *prefix) {
   temporary_name_count++;
-  return get_formatted_string("%s%ld-%d", prefix, cfile_process_id(),
+  return get_formatted_string("%s/%s%ld-%d", test_platform_temporary_root(),
+                              prefix, cfile_process_id(),
                               temporary_name_count);
 }
 
@@ -137,23 +176,6 @@ static wchar_t *wide_path(const char *path) {
   (void)MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path, -1, wide,
                             length);
   return wide;
-}
-
-char *test_platform_current_directory(void) {
-  wchar_t *wide = _wgetcwd(NULL, 0);
-  if (!wide) {
-    log_fatal("cannot get the working directory: %s", strerror(errno));
-  }
-  const int length =
-      WideCharToMultiByte(CP_UTF8, 0, wide, -1, NULL, 0, NULL, NULL);
-  if (length <= 0) {
-    log_fatal("cannot convert the working directory to UTF-8");
-  }
-  char *directory = malloc_or_die((size_t)length);
-  (void)WideCharToMultiByte(CP_UTF8, 0, wide, -1, directory, length, NULL,
-                            NULL);
-  free(wide);
-  return directory;
 }
 
 const char *test_platform_null_device(void) { return "NUL"; }
@@ -287,20 +309,6 @@ FILE *test_platform_open_bounded_stream(void *buffer, size_t capacity) {
 
 #else
 
-char *test_platform_current_directory(void) {
-  size_t capacity = TEST_PLATFORM_INITIAL_PATH_CAPACITY;
-  char *directory = malloc_or_die(capacity);
-  while (!getcwd(directory, capacity)) {
-    if (errno != ERANGE) {
-      log_fatal("cannot get the working directory: %s", strerror(errno));
-    }
-    capacity *= 2;
-    free(directory);
-    directory = malloc_or_die(capacity);
-  }
-  return directory;
-}
-
 const char *test_platform_null_device(void) { return "/dev/null"; }
 
 bool test_platform_stat(const char *path, TestPlatformFileStatus *status) {
@@ -432,5 +440,22 @@ bool test_platform_has_host_locales(void) {
   return false;
 #else
   return true;
+#endif
+}
+
+bool test_platform_qsort_is_glibc_merge_sort(void) {
+#if defined(__GLIBC__)
+  // glibc 2.37 and 2.38 sorted with an introsort; every other glibc
+  // merge-sorts whenever it can allocate its scratch space.
+  char *after_major = NULL;
+  const char *version = gnu_get_libc_version();
+  const long major = strtol(version, &after_major, 10);
+  if (after_major == version || *after_major != '.') {
+    return false;
+  }
+  const long minor = strtol(after_major + 1, NULL, 10);
+  return major == 2 && (minor < 37 || minor > 38);
+#else
+  return false;
 #endif
 }

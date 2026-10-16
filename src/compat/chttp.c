@@ -1,6 +1,5 @@
 #include "chttp.h"
 
-#include "cwin.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -41,6 +40,7 @@ void chttp_request(const ChttpRequest *request, ChttpResponse *response,
 #elif defined(_WIN32)
 // ---------------------------------------------------------------------------
 
+#include "cwin.h"
 #include <windows.h>
 // winhttp.h must follow windows.h.
 #include <winhttp.h>

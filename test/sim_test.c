@@ -41,6 +41,13 @@
 #include <stdlib.h>
 #include <string.h>
 
+enum {
+  // How long a test waits on a thread before calling it hung. The work takes
+  // seconds, but the sanitizer builds and Wine run it many times slower, so
+  // this catches a hang, never a slow machine.
+  HANG_TIMEOUT_SECONDS = 600,
+};
+
 int get_best_simmed_play_index(const SimResults *sim_results) {
   const int num_simmed_plays = sim_results_get_number_of_plays(sim_results);
   if (num_simmed_plays == 0) {
@@ -347,7 +354,7 @@ void test_sim_threshold(void) {
 
   cpthread_t thread;
   cpthread_create(&thread, sim_thread_func, &args);
-  cpthread_cond_timedwait_loop(&cond, &mutex, 10, &done);
+  cpthread_cond_timedwait_loop(&cond, &mutex, HANG_TIMEOUT_SECONDS, &done);
   cpthread_join(thread);
 
   assert(status == ERROR_STATUS_SUCCESS);
@@ -391,7 +398,7 @@ void test_sim_time_limit(void) {
 
   cpthread_t thread;
   cpthread_create(&thread, sim_thread_func, &args);
-  cpthread_cond_timedwait_loop(&cond, &mutex, 10, &done);
+  cpthread_cond_timedwait_loop(&cond, &mutex, HANG_TIMEOUT_SECONDS, &done);
   cpthread_join(thread);
 
   assert(status == ERROR_STATUS_SUCCESS);
@@ -427,7 +434,7 @@ void test_all_plays_are_similar(void) {
 
   cpthread_t thread;
   cpthread_create(&thread, sim_thread_func, &args);
-  cpthread_cond_timedwait_loop(&cond, &mutex, 10, &done);
+  cpthread_cond_timedwait_loop(&cond, &mutex, HANG_TIMEOUT_SECONDS, &done);
   cpthread_join(thread);
 
   assert(status == ERROR_STATUS_SUCCESS);

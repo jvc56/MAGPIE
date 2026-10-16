@@ -2,6 +2,8 @@
 
 #include "../src/compat/cfile.h"
 #include "../src/compat/cpath.h"
+#include "../src/ent/board_layout.h"
+#include "../src/ent/data_filepaths.h"
 #include "../src/impl/data_fetch.h"
 #include "../src/util/io_util.h"
 #include "../src/util/string_util.h"
@@ -20,7 +22,10 @@
 
 enum {
   TAR_BLOCK = 512,
-  MAX_TARBALL_BYTES = 16 * TAR_BLOCK,
+  TAR_END_BYTES = 2 * TAR_BLOCK,
+  TAR_SIZE_FIELD = 124,
+  TAR_CHECKSUM_FIELD = 148,
+  MAX_TARBALL_BYTES = 32 * TAR_BLOCK,
   STORED_BLOCK_MAX = 65535,
 };
 
@@ -34,45 +39,67 @@ static void tar_octal(unsigned char *field, size_t width, uint64_t value) {
                  (unsigned long long)value);
 }
 
+// Puts `text` in a header field, without the terminating NUL that a field
+// filled to its width does not have.
+static void tar_text(unsigned char *field, const char *text) {
+  for (size_t index = 0; text[index]; index++) {
+    field[index] = (unsigned char)text[index];
+  }
+}
+
+// Fills in `header`'s checksum, as tar does once the rest is written.
+static void tar_checksum(unsigned char *header) {
+  memset(header + TAR_CHECKSUM_FIELD, ' ', 8);
+  unsigned int checksum = 0;
+  for (int byte_idx = 0; byte_idx < TAR_BLOCK; byte_idx++) {
+    checksum += header[byte_idx];
+  }
+  tar_octal(header + TAR_CHECKSUM_FIELD, 7, checksum);
+}
+
 // Appends a ustar header for `name` of `type` and `size` bytes, linking to
 // `link` (or not, for NULL), then `contents`, padded to a whole block.
-static void tar_add(Tarball *tar, const char *name, char type, const char *link,
-                    const char *contents) {
+// Returns the header, for tests to spoil.
+static unsigned char *tar_add(Tarball *tar, const char *name, char type,
+                              const char *link, const char *contents) {
   const size_t size = contents ? strlen(contents) : 0;
   const size_t padded = (size + TAR_BLOCK - 1) / TAR_BLOCK * TAR_BLOCK;
   assert(tar->length + TAR_BLOCK + padded <= MAX_TARBALL_BYTES);
   unsigned char *header = tar->bytes + tar->length;
   memset(header, 0, TAR_BLOCK);
-  memcpy(header, name, strlen(name));
+  tar_text(header, name);
   tar_octal(header + 100, 8, type == '5' ? 0755 : 0644);
   tar_octal(header + 108, 8, 0);
   tar_octal(header + 116, 8, 0);
-  tar_octal(header + 124, 12, size);
+  tar_octal(header + TAR_SIZE_FIELD, 12, size);
   tar_octal(header + 136, 12, 0);
   header[156] = (unsigned char)type;
   if (link) {
-    memcpy(header + 157, link, strlen(link));
+    tar_text(header + 157, link);
   }
-  memcpy(header + 257, "ustar", 6);
-  memcpy(header + 263, "00", 2);
-  memset(header + 148, ' ', 8);
-  unsigned int checksum = 0;
-  for (int byte_idx = 0; byte_idx < TAR_BLOCK; byte_idx++) {
-    checksum += header[byte_idx];
-  }
-  tar_octal(header + 148, 7, checksum);
+  tar_text(header + 257, "ustar");
+  tar_text(header + 263, "00");
+  tar_checksum(header);
   tar->length += TAR_BLOCK;
   memset(tar->bytes + tar->length, 0, padded);
   if (size > 0) {
     memcpy(tar->bytes + tar->length, contents, size);
   }
   tar->length += padded;
+  return header;
+}
+
+// Appends one zero block: half the end of an archive.
+static void tar_zero_block(Tarball *tar) {
+  assert(tar->length + TAR_BLOCK <= MAX_TARBALL_BYTES);
+  memset(tar->bytes + tar->length, 0, TAR_BLOCK);
+  tar->length += TAR_BLOCK;
 }
 
 static void tar_end(Tarball *tar) {
-  assert(tar->length + 2 * TAR_BLOCK <= MAX_TARBALL_BYTES);
-  memset(tar->bytes + tar->length, 0, 2 * TAR_BLOCK);
-  tar->length += 2 * TAR_BLOCK;
+  assert(tar->length + TAR_END_BYTES <= MAX_TARBALL_BYTES);
+  memset(tar->bytes + tar->length, 0, TAR_END_BYTES);
+  tar->length += TAR_END_BYTES;
 }
 
 static uint32_t crc32_of(const unsigned char *bytes, size_t length) {
@@ -170,10 +197,189 @@ static void test_pax_headers_are_skipped(const char *root) {
   char *archive = get_formatted_string("%s/pax.tgz", root);
   char *message = unpack(&tar, archive, data_dir);
   assert(!message);
+  free(message);
   assert_file_holds(data_dir, "layouts/standard15.txt", "layout\n");
   assert_file_holds(data_dir, "layouts/copy.txt", "layout\n");
   assert(!path_exists(data_dir, "PaxHeaders.1"));
   free(archive);
+  free(data_dir);
+}
+
+// Unpacks `tar` into a directory of its own under `root` named `name`, and
+// checks that it stops with a message holding `expected`.
+static void assert_refused(const Tarball *tar, const char *root,
+                           const char *name, const char *expected) {
+  char *data_dir = get_formatted_string("%s/%s", root, name);
+  char *archive = get_formatted_string("%s/%s.tgz", root, name);
+  char *message = unpack(tar, archive, data_dir);
+  if (!message || !strstr(message, expected)) {
+    log_fatal("unpacking %s said '%s', not '%s'", name,
+              message ? message : "nothing", expected);
+  }
+  free(message);
+  free(archive);
+  free(data_dir);
+}
+
+// What MAGPIE-DATA's tarballs never hold, and this reader therefore does not
+// read, stops the unpacking rather than unpacking something else: a hard link
+// (which GNU tar writes for a file with two names) would otherwise be
+// missing, and a pax path or a base-256 size would be read wrong.
+static void test_unsupported_entries_stop_it(const char *root) {
+  Tarball hard_link = {.length = 0};
+  tar_add(&hard_link, "data", '5', NULL, NULL);
+  tar_add(&hard_link, "data/a.txt", '0', NULL, "a");
+  tar_add(&hard_link, "data/b.txt", '1', "data/a.txt", NULL);
+  tar_end(&hard_link);
+  assert_refused(&hard_link, root, "hard", "hard link");
+
+  Tarball pax_path = {.length = 0};
+  tar_add(&pax_path, "data", '5', NULL, NULL);
+  tar_add(&pax_path, "data/PaxHeaders.1/a.txt", 'x', NULL,
+          "19 path=data/b.txt\n");
+  tar_add(&pax_path, "data/a.txt", '0', NULL, "a");
+  tar_end(&pax_path);
+  assert_refused(&pax_path, root, "paxpath", "pax path");
+
+  Tarball base256 = {.length = 0};
+  tar_add(&base256, "data", '5', NULL, NULL);
+  unsigned char *header = tar_add(&base256, "data/a.txt", '0', NULL, "a");
+  memset(header + TAR_SIZE_FIELD, 0, 12);
+  header[TAR_SIZE_FIELD] = 0x80;
+  header[TAR_SIZE_FIELD + 11] = 1;
+  tar_checksum(header);
+  tar_end(&base256);
+  assert_refused(&base256, root, "base256", "size MAGPIE cannot read");
+
+  Tarball checksum = {.length = 0};
+  tar_add(&checksum, "data", '5', NULL, NULL);
+  header = tar_add(&checksum, "data/a.txt", '0', NULL, "a");
+  header[0] = 'D';
+  tar_end(&checksum);
+  assert_refused(&checksum, root, "checksum", "checksum is wrong");
+
+  // One zero block is not the end; one inside the archive is corruption.
+  Tarball zero_block = {.length = 0};
+  tar_add(&zero_block, "data", '5', NULL, NULL);
+  tar_zero_block(&zero_block);
+  tar_add(&zero_block, "data/a.txt", '0', NULL, "a");
+  tar_end(&zero_block);
+  assert_refused(&zero_block, root, "zero", "zero block");
+
+  // A link is written as a copy of a file the tarball holds, never of
+  // whatever is on disk where it points.
+  Tarball dangling = {.length = 0};
+  tar_add(&dangling, "data", '5', NULL, NULL);
+  tar_add(&dangling, "data/b.txt", '2', "a.txt", NULL);
+  tar_end(&dangling);
+  assert_refused(&dangling, root, "dangling", "not a file in it");
+}
+
+// Creates the directory `path`, which must not exist yet.
+static void make_directory(const char *path) {
+  if (cfile_mkdir(path) != 0) {
+    log_fatal("cannot create %s", path);
+  }
+}
+
+// Unpacking over an earlier extraction replaces its links rather than
+// writing through them, as tar does: a data directory made by
+// download_data.sh (GNU tar makes real links) or a developer's links into
+// another checkout keep what they point to.
+static void test_existing_links_are_replaced(const char *root) {
+  char *outside = get_formatted_string("%s/elsewhere", root);
+  char *outside_file = get_formatted_string("%s/victim.txt", outside);
+  char *data_dir = get_formatted_string("%s/linked", root);
+  char *lexica = get_formatted_string("%s/lexica", data_dir);
+  char *file_link = get_formatted_string("%s/lexica/X.kwg", data_dir);
+  char *directory_link = get_formatted_string("%s/layouts", data_dir);
+  make_directory(outside);
+  make_directory(data_dir);
+  make_directory(lexica);
+  ErrorStack *error_stack = error_stack_create();
+  write_string_to_file(outside_file, "wb", "victim", error_stack);
+  assert(error_stack_is_empty(error_stack));
+  error_stack_destroy(error_stack);
+  if (!test_platform_symlink("../../elsewhere/victim.txt", file_link) ||
+      !test_platform_symlink("../elsewhere", directory_link)) {
+    printf("skipping the existing-link cases: this process cannot make "
+           "symlinks\n");
+  } else {
+    Tarball tar = {.length = 0};
+    tar_add(&tar, "data", '5', NULL, NULL);
+    tar_add(&tar, "data/layouts", '5', NULL, NULL);
+    tar_add(&tar, "data/layouts/standard15.txt", '0', NULL, "layout\n");
+    tar_add(&tar, "data/lexica", '5', NULL, NULL);
+    tar_add(&tar, "data/lexica/X.kwg", '0', NULL, "new");
+    tar_add(&tar, "data/lexica/Y.kwg", '2', "X.kwg", NULL);
+    tar_end(&tar);
+    char *archive = get_formatted_string("%s/linked.tgz", root);
+    char *message = unpack(&tar, archive, data_dir);
+    assert(!message);
+    free(message);
+    free(archive);
+    assert_file_holds(outside, "victim.txt", "victim");
+    assert(!path_exists(outside, "standard15.txt"));
+    assert(!test_platform_is_symlink(file_link));
+    assert(!test_platform_is_symlink(directory_link));
+    assert(cfile_is_directory(directory_link));
+    assert_file_holds(data_dir, "layouts/standard15.txt", "layout\n");
+    assert_file_holds(data_dir, "lexica/X.kwg", "new");
+    assert_file_holds(data_dir, "lexica/Y.kwg", "new");
+  }
+  free(directory_link);
+  free(file_link);
+  free(lexica);
+  free(data_dir);
+  free(outside_file);
+  free(outside);
+}
+
+// Writes `contents` to `name` in `directory`.
+static void write_file_in(const char *directory, const char *name,
+                          const char *contents) {
+  char *path = get_formatted_string("%s/%s", directory, name);
+  ErrorStack *error_stack = error_stack_create();
+  write_string_to_file(path, "wb", contents, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  error_stack_destroy(error_stack);
+  free(path);
+}
+
+// What a directory's contents and version marker say at startup: a fetch
+// that never finished is not taken for data, whatever files it left.
+static void test_data_states(const char *root) {
+  char *data_dir = get_formatted_string("%s/states", root);
+  char *layouts = get_formatted_string("%s/layouts", data_dir);
+  make_directory(data_dir);
+  assert(data_fetch_get_state(data_dir) == DATA_FETCH_STATE_MISSING);
+  write_file_in(data_dir, DATA_FETCH_VERSION_FILENAME, "incomplete\n");
+  assert(data_fetch_get_state(data_dir) == DATA_FETCH_STATE_INCOMPLETE);
+
+  make_directory(layouts);
+  char *layout_name = board_layout_get_default_name();
+  char *layout_path =
+      get_filepath(data_dir, layout_name, DATA_FILEPATH_TYPE_LAYOUT);
+  ErrorStack *error_stack = error_stack_create();
+  write_string_to_file(layout_path, "wb", "layout\n", error_stack);
+  assert(error_stack_is_empty(error_stack));
+  error_stack_destroy(error_stack);
+  assert(data_fetch_get_state(data_dir) == DATA_FETCH_STATE_INCOMPLETE);
+  write_file_in(data_dir, DATA_FETCH_VERSION_FILENAME, "19990101\n");
+  assert(data_fetch_get_state(data_dir) == DATA_FETCH_STATE_OUTDATED);
+  write_file_in(data_dir, DATA_FETCH_VERSION_FILENAME,
+                DATA_FETCH_VERSION "\r\n");
+  assert(data_fetch_get_state(data_dir) == DATA_FETCH_STATE_CURRENT);
+  char *marker =
+      get_formatted_string("%s/%s", data_dir, DATA_FETCH_VERSION_FILENAME);
+  if (remove(marker) != 0) {
+    log_fatal("cannot remove %s", marker);
+  }
+  assert(data_fetch_get_state(data_dir) == DATA_FETCH_STATE_UNVERSIONED);
+  free(marker);
+  free(layout_path);
+  free(layout_name);
+  free(layouts);
   free(data_dir);
 }
 
@@ -238,6 +444,9 @@ void test_data_fetch(void) {
   char *root = test_platform_make_temporary_directory("data_fetch_test");
   test_pax_headers_are_skipped(root);
   test_unreadable_entries_stop_it(root);
+  test_unsupported_entries_stop_it(root);
+  test_existing_links_are_replaced(root);
+  test_data_states(root);
   test_data_directories(root);
   test_platform_remove_directory_tree(root);
   free(root);

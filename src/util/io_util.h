@@ -340,7 +340,22 @@ void write_to_stream_out(const char *fmt, ...) CFORMAT_PRINTF(1, 2);
 void write_to_stream_err(const char *fmt, ...) CFORMAT_PRINTF(1, 2);
 void write_to_stream(FILE *stream, const char *fmt, ...) CFORMAT_PRINTF(2, 3);
 int64_t getline_ignore_carriage_return(char **lineptr, size_t *n, FILE *stream);
+// A line from `stream` without its line end (\n or \r\n), which the caller
+// frees, or NULL at its end.
+char *read_line_from_stream(FILE *stream);
 char *read_line_from_stream_in(void);
+
+// Has io_wait_before_close read its line through `reader` (the caller frees
+// what it returns) rather than from the input stream itself: the command
+// loop's input reader sets it, so that a read it already has under way gets
+// the Enter rather than taking it first.
+void io_set_line_reader(char *(*reader)(void));
+
+// If this process owns its console window (cterm_owns_console), asks the user
+// to press Enter and waits, so that the last thing printed (an error, say)
+// stays on screen rather than vanishing with the window. Does nothing
+// otherwise. log_fatal calls it before aborting.
+void io_wait_before_close(void);
 
 // WARNING: This function should only be called once at startup or for testing
 void log_set_level(log_level_t new_log_level);
@@ -414,13 +429,18 @@ bool path_is_directory(const char *path);
 // cannot be stat'ed; the caller frees.
 char *get_file_identity(const char *path);
 
+// Removes what unfinished writes of `filename` left beside it -- a process
+// killed while writing a 1.9 GB table leaves its whole temporary behind, and
+// nothing else would ever remove it -- once untouched for an hour, so not a
+// write still under way. Best effort: a failure here costs disk, never the
+// write.
+void remove_stale_temporary_siblings(const char *filename);
+
 // A name beside `filename` for writing it in full before renaming it into
 // place -- `<filename>.<pid>-<n>-<ns>.tmp` -- so that no reader, and no other
 // process writing the same file, ever sees half of it. Open it exclusively
 // (fopen_exclusive_safe): two containers sharing a volume can both be PID 1.
-// Removes the
-// temporaries of earlier writes of `filename` left untouched for an hour -- a
-// killed writer's. The caller frees.
+// Calls remove_stale_temporary_siblings first. The caller frees.
 char *temporary_sibling(const char *filename);
 
 // Renames `temporary` over `filename`, or removes it and pushes an error

@@ -2020,7 +2020,12 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       examples[1] = "./data:./testdata:./other_dir";
       text =
           "Designates the data file directories ordered by search precedence. "
-          "Directories listed earlier are preferred when locating files.";
+          "Directories listed earlier are preferred when locating files. "
+          "Directories are separated by ':', and on Windows by ';' too; "
+          "there, a ':' after one letter at the start of a directory "
+          "(C:\\data, "
+          "\\\\?\\C:\\data) belongs to a drive, so separate directories "
+          "named by one letter with ';'.";
       break;
     case ARG_TOKEN_BINGO_BONUS:
       usages[0] = "<bingo_bonus>";

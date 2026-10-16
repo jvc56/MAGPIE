@@ -1,6 +1,5 @@
 #include "cmap.h"
 
-#include "cwin.h"
 #include <errno.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -8,6 +7,7 @@
 #include <stdlib.h>
 
 #if defined(_WIN32)
+#include "cwin.h"
 #include <windows.h>
 #else
 #include <fcntl.h>

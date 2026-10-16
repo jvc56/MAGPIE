@@ -6,14 +6,15 @@
 
 // `data fetch`: downloads MAGPIE's data into a data directory with nothing but
 // MAGPIE itself (no bash, curl or tar, which a Windows user does not have).
-// See docs/windows-plan.md, section 6.2.
 //
 // It fetches the same versioned tarball download_data.sh does, from
 // MAGPIE-DATA, in the same chunks, checks each chunk against the size and
-// SHA-256 pinned in data_fetch.c, and unpacks it. Each file is written in one
-// step, so an interrupted fetch leaves no partial file. The tarball's symlinks
-// are written as copies of what they point to: Windows cannot make links
-// without privilege, and no loader depends on a file being a link.
+// SHA-256 pinned in data_fetch.c, and unpacks it into the directory. Each
+// file is written in one step, so an interrupted fetch leaves no partial
+// file, and the directory records that it is incomplete until the last one
+// is out. The tarball's symlinks are written as copies of what they point to:
+// Windows cannot make links without privilege, and no loader depends on a
+// file being a link.
 
 // The data version this MAGPIE goes with: download_data.sh's DATA_VERSION,
 // which CI checks it matches.
@@ -24,7 +25,8 @@
   "https://raw.githubusercontent.com/jvc56/MAGPIE-DATA/main/"                  \
   "versioned-tarballs"
 
-// The data version a fetch records in a data directory, to say it is complete.
+// Where a fetch records, in the data directory, the data version it unpacked
+// there (or that it is still unpacking).
 #define DATA_FETCH_VERSION_FILENAME ".data-version"
 
 // Called with a line of progress to show the user.
@@ -44,8 +46,23 @@ void data_fetch(const char *base_url, const char *data_dir,
 void data_fetch_unpack_archive(const char *archive_path, const char *data_dir,
                                ErrorStack *error_stack);
 
-// Whether `data_dir` holds MAGPIE's data, judged by the board layout every
-// game needs: what tells a first run with no data apart from a typo.
-bool data_fetch_is_data_present(const char *data_dir);
+// What a data directory holds, as far as starting MAGPIE goes.
+typedef enum {
+  // No data: no board layout, which every game needs. What tells a first run
+  // apart from a typo.
+  DATA_FETCH_STATE_MISSING,
+  // A fetch started unpacking here and did not finish, so the files are a
+  // mix of versions, or some are missing.
+  DATA_FETCH_STATE_INCOMPLETE,
+  // Data fetched for another MAGPIE, of another data version.
+  DATA_FETCH_STATE_OUTDATED,
+  // Data put there some other way (download_data.sh, by hand), which records
+  // no version.
+  DATA_FETCH_STATE_UNVERSIONED,
+  // Data version DATA_FETCH_VERSION, fetched.
+  DATA_FETCH_STATE_CURRENT,
+} data_fetch_state_t;
+
+data_fetch_state_t data_fetch_get_state(const char *data_dir);
 
 #endif

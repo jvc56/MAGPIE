@@ -400,7 +400,7 @@ static bool process_command_internal(int argc, char *argv[],
 // `data fetch` puts it. (Started from Explorer, the working directory is the
 // executable's.)
 static char *locate_default_data_path(void) {
-  if (data_fetch_is_data_present(DEFAULT_DATA_PATHS)) {
+  if (data_fetch_get_state(DEFAULT_DATA_PATHS) != DATA_FETCH_STATE_MISSING) {
     return string_duplicate(DEFAULT_DATA_PATHS);
   }
   char *directories[] = {cpath_executable_dir(), cpath_user_data_dir()};
@@ -409,7 +409,7 @@ static char *locate_default_data_path(void) {
     char *directory = directories[directory_idx];
     if (!found && directory) {
       char *candidate = get_formatted_string("%s/data", directory);
-      if (data_fetch_is_data_present(candidate)) {
+      if (data_fetch_get_state(candidate) != DATA_FETCH_STATE_MISSING) {
         found = candidate;
       } else {
         free(candidate);
@@ -482,16 +482,23 @@ static bool run_data_fetch_command(const char *data_path, int argc,
   return fetch_data(data_path, base_url);
 }
 
-// With no data where MAGPIE looks, either runs the `data fetch` it was given,
-// offers to fetch it (when someone is at a terminal to answer), or says how.
-// Returns whether the command line was `data fetch`, which has then been run.
-static bool get_missing_data(const char *data_path, int argc, char *argv[],
-                             bool *fetched) {
+// With no data where MAGPIE looks, or what an unfinished fetch left, either
+// runs the `data fetch` it was given, offers to fetch it (when someone is at a
+// terminal to answer), or says how. Returns whether the command line was
+// `data fetch`, which has then been run.
+static bool get_missing_data(const char *data_path, data_fetch_state_t state,
+                             int argc, char *argv[], bool *fetched) {
   if (is_data_fetch_command(argc, argv)) {
     *fetched = run_data_fetch_command(data_path, argc, argv);
     return true;
   }
-  write_to_stream_err("MAGPIE's data files are not in %s.\n", data_path);
+  if (state == DATA_FETCH_STATE_INCOMPLETE) {
+    write_to_stream_err("MAGPIE's data files in %s are incomplete: a "
+                        "download of them did not finish.\n",
+                        data_path);
+  } else {
+    write_to_stream_err("MAGPIE's data files are not in %s.\n", data_path);
+  }
   if (!cterm_is_terminal(get_stream_in())) {
     write_to_stream_err("Run 'magpie data fetch' to download them.\n");
     return false;
@@ -524,22 +531,39 @@ void process_command_default(int argc, char *argv[]) {
   if (!data_path) {
     data_path = locate_default_data_path();
   }
-  if (!data_fetch_is_data_present(data_path)) {
+  data_fetch_state_t state = data_fetch_get_state(data_path);
+  if (state == DATA_FETCH_STATE_MISSING ||
+      state == DATA_FETCH_STATE_INCOMPLETE) {
     bool fetched = false;
-    if (get_missing_data(data_path, argc, argv, &fetched)) {
+    if (get_missing_data(data_path, state, argc, argv, &fetched)) {
       // The command line was the data fetch, and that was all it asked for,
       // as when the data is already there.
       if (!fetched) {
-        cterm_wait_before_close();
+        io_wait_before_close();
       }
       free(data_path);
       return;
     }
+    // Fetched at the prompt, or not.
+    state = data_fetch_get_state(data_path);
   }
-  const ConfigArgs config_args = {
-      .data_paths = data_path, .use_wmp = true, .build_missing_wordmaps = true};
+  if (state == DATA_FETCH_STATE_OUTDATED &&
+      !is_data_fetch_command(argc, argv)) {
+    write_to_stream_err("The data in %s is not the version this MAGPIE goes "
+                        "with (%s); 'data fetch' updates it.\n",
+                        data_path, DATA_FETCH_VERSION);
+  }
+  // Data from `data fetch` comes without wordmaps, which are thirty times the
+  // size of their lexica, so a lexicon's is built the first time it is used.
+  // Data put there otherwise (download_data.sh, then convert_lexica.sh) is
+  // left as it is.
+  const ConfigArgs config_args = {.data_paths = data_path,
+                                  .use_wmp = true,
+                                  .build_missing_wordmaps =
+                                      state == DATA_FETCH_STATE_CURRENT ||
+                                      state == DATA_FETCH_STATE_OUTDATED};
   if (!process_command_internal(argc, argv, &config_args)) {
-    cterm_wait_before_close();
+    io_wait_before_close();
   }
   free(data_path);
 }
