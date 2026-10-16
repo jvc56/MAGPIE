@@ -871,7 +871,7 @@ RandomVariables *rv_sim_create(RandomVariables *rvs, const SimArgs *sim_args,
        thread_index++) {
     simmer->workers[thread_index] = simmer_create_worker(sim_args);
   }
-  simmer->best_move_carry = best_move_carry_create();
+  simmer->best_move_carry = best_move_carry_create(true);
 
   simmer->win_pcts = sim_args->win_pcts;
   simmer->use_inference = sim_args->use_inference;

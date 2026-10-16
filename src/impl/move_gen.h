@@ -356,9 +356,10 @@ typedef struct MoveGenArgs {
   uint32_t pat_disabled_classes_mask;
   // MOVE_RECORD_BEST by equity only: the best moves earlier generations
   // found for the same rack (see best_move_carry.h). Each one still legal
-  // here starts the generation as its best move, lanes unchanged since such
-  // a move was best are skipped (without PAT), and the generation's best
-  // move is added. NULL (the default) skips all of this.
+  // here starts the generation as its best move, lanes whose remembered
+  // bound it beats are skipped (without PAT), and the generation's best move
+  // is added, as a move and as the bound of the lanes searched. NULL (the
+  // default) skips all of this.
   BestMoveCarry *best_move_carry;
 } MoveGenArgs;
 
