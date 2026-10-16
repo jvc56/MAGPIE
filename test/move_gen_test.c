@@ -1985,12 +1985,13 @@ static void best_move_carry_test(const char *config_str) {
         assert(compare_moves_without_equity(plain, carried, true) == -1);
         assert(move_get_equity(plain) == move_get_equity(carried));
         generations++;
-        const BestMoveCarryBucket *bucket = best_move_carry_find(
-            carry,
-            player_get_rack(game_get_player(
-                playout, game_get_player_on_turn_index(playout))),
-            game_get_player_on_turn_index(playout));
-        if (bucket != NULL && bucket->count > 1) {
+        CarriedRackMoves rack_moves;
+        if (best_move_carry_find(
+                carry,
+                player_get_rack(game_get_player(
+                    playout, game_get_player_on_turn_index(playout))),
+                game_get_player_on_turn_index(playout), &rack_moves) &&
+            rack_moves.count > 1) {
           racks_with_several_moves++;
         }
         play_move(plain, playout, NULL);

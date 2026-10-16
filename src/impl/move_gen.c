@@ -4363,18 +4363,18 @@ static uint64_t gen_get_unchanged_lanes(const MoveGen *gen,
 // it would record them with, and compare_moves breaks ties, so the
 // generation's best move is unchanged. Without PAT it also drops the lanes
 // gen_get_unchanged_lanes finds, by clearing their anchor counts.
-static void gen_seed_carried_best_move(MoveGen *gen, const BestMoveCarry *carry,
+static void gen_seed_carried_best_move(MoveGen *gen, BestMoveCarry *carry,
+                                       const uint64_t *lane_hashes,
                                        const Rack *rack) {
-  const BestMoveCarryBucket *bucket =
-      best_move_carry_find(carry, rack, gen->player_index);
-  if (bucket == NULL) {
+  CarriedRackMoves rack_moves;
+  if (!best_move_carry_find(carry, rack, gen->player_index, &rack_moves)) {
     return;
   }
   const bool can_skip_lanes = !gen_pat_is_active(gen);
   uint64_t unchanged_lanes = 0;
   bool seeded = false;
-  for (int move_idx = 0; move_idx < bucket->count; move_idx++) {
-    const CarriedBestMove *carried = &bucket->moves[move_idx];
+  for (int move_idx = 0; move_idx < rack_moves.count; move_idx++) {
+    const CarriedBestMove *carried = &rack_moves.moves[move_idx];
     Move *current_move = gen_get_current_move(gen);
     if (!gen_score_carried_move(gen, carried, current_move)) {
       continue;
@@ -4382,8 +4382,8 @@ static void gen_seed_carried_best_move(MoveGen *gen, const BestMoveCarry *carry,
     move_set_equity(current_move,
                     gen_get_carried_move_equity(gen, current_move, rack));
     if (can_skip_lanes) {
-      unchanged_lanes |= gen_get_unchanged_lanes(gen, carry->lane_hashes,
-                                                 carried, current_move);
+      unchanged_lanes |=
+          gen_get_unchanged_lanes(gen, lane_hashes, carried, current_move);
     }
     if (compare_moves(current_move, gen_get_readonly_best_move(gen), false)) {
       gen_switch_best_move_and_current_move(gen);
@@ -4408,6 +4408,7 @@ static void gen_seed_carried_best_move(MoveGen *gen, const BestMoveCarry *carry,
 // left out: the generator records each in only one direction, and which one
 // depends on the board.
 static void gen_remember_best_move(const MoveGen *gen, BestMoveCarry *carry,
+                                   const uint64_t *lane_hashes,
                                    const Rack *rack) {
   const Move *best_move = gen_get_readonly_best_move(gen);
   if (move_get_equity(best_move) == EQUITY_INITIAL_VALUE ||
@@ -4415,13 +4416,12 @@ static void gen_remember_best_move(const MoveGen *gen, BestMoveCarry *carry,
       move_get_tiles_played(best_move) < 2) {
     return;
   }
-  CarriedBestMove *carried =
-      best_move_carry_add(carry, rack, gen->player_index, best_move);
-  carried->has_lane_hashes = !gen_pat_is_active(gen);
-  if (carried->has_lane_hashes) {
-    carried->number_of_tiles_in_bag = gen->number_of_tiles_in_bag;
-    memcpy(carried->lane_hashes, carry->lane_hashes,
-           sizeof(carried->lane_hashes));
+  CarriedBestMove carried;
+  move_copy(&carried.move, best_move);
+  carried.has_lane_hashes = !gen_pat_is_active(gen);
+  carried.number_of_tiles_in_bag = gen->number_of_tiles_in_bag;
+  if (carried.has_lane_hashes) {
+    memcpy(carried.lane_hashes, lane_hashes, sizeof(carried.lane_hashes));
   }
   const int dir = move_get_dir(best_move);
   const bool vertical = board_is_dir_vertical(dir);
@@ -4432,9 +4432,10 @@ static void gen_remember_best_move(const MoveGen *gen, BestMoveCarry *carry,
   const Square *lane_squares = board_get_row_cache(gen->board_lanes, lane, dir);
   const int length = move_get_tiles_length(best_move);
   for (int tile_idx = 0; tile_idx < length; tile_idx++) {
-    carried->board_letters[tile_idx] =
+    carried.board_letters[tile_idx] =
         square_get_letter(&lane_squares[start + tile_idx]);
   }
+  best_move_carry_add(carry, rack, gen->player_index, &carried);
 }
 
 void generate_moves(const MoveGenArgs *args) {
@@ -4569,14 +4570,19 @@ void generate_moves(const MoveGenArgs *args) {
     }
 
     const bool carry_best_moves = gen_can_carry_best_moves(gen, args);
+    uint64_t lane_hashes[2 * BOARD_DIM];
     if (carry_best_moves) {
       // Hashed before gen_seed_carried_best_move clears anchor counts, so
       // that skipped lanes keep their hashes. With PAT no lane is skipped
-      // (see gen_get_unchanged_lanes), so none is hashed.
+      // (see gen_get_unchanged_lanes), so none is hashed and the hashes are
+      // never read.
       if (!gen_pat_is_active(gen)) {
-        gen_hash_lanes(gen, args->best_move_carry->lane_hashes);
+        gen_hash_lanes(gen, lane_hashes);
+      } else {
+        memset(lane_hashes, 0, sizeof(lane_hashes));
       }
-      gen_seed_carried_best_move(gen, args->best_move_carry, &gen->player_rack);
+      gen_seed_carried_best_move(gen, args->best_move_carry, lane_hashes,
+                                 &gen->player_rack);
     }
     gen_shadow(gen);
     if (gen->threshold_exceeded) {
@@ -4585,7 +4591,8 @@ void generate_moves(const MoveGenArgs *args) {
     }
     gen_record_scoring_plays(gen);
     if (carry_best_moves) {
-      gen_remember_best_move(gen, args->best_move_carry, &gen->player_rack);
+      gen_remember_best_move(gen, args->best_move_carry, lane_hashes,
+                             &gen->player_rack);
     }
   }
   gen_record_pass(gen);

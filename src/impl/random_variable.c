@@ -409,9 +409,6 @@ typedef struct SimmerWorker {
   Game *game;
   MoveList *move_list;
   XoshiroPRNG *prng;
-  // The best moves this worker's playouts found, by rack, for the current
-  // simulation.
-  BestMoveCarry *best_move_carry;
 } SimmerWorker;
 
 typedef struct Simmer {
@@ -445,6 +442,9 @@ typedef struct Simmer {
   bool bag_cycle;
   ThreadControl *thread_control;
   SimResults *sim_results;
+  // The best moves the current simulation's playouts found, by rack, shared
+  // by all of its workers.
+  BestMoveCarry *best_move_carry;
 } Simmer;
 
 // A worker's copy of the game plays the sim's rollouts, so both of its
@@ -465,14 +465,12 @@ SimmerWorker *simmer_create_worker(const SimArgs *sim_args) {
   game_set_backup_mode(simmer_worker->game, BACKUP_MODE_SIMULATION);
   simmer_worker->move_list = move_list_create(1);
   simmer_worker->prng = prng_create(0);
-  simmer_worker->best_move_carry = best_move_carry_create();
   return simmer_worker;
 }
 
 void simmer_reset_worker(SimmerWorker *simmer_worker, const SimArgs *sim_args) {
   game_copy(simmer_worker->game, sim_args->game);
   simmer_worker_set_rollout_pat(simmer_worker, sim_args);
-  best_move_carry_reset(simmer_worker->best_move_carry);
 }
 
 void simmer_worker_destroy(SimmerWorker *simmer_worker) {
@@ -482,7 +480,6 @@ void simmer_worker_destroy(SimmerWorker *simmer_worker) {
   game_destroy(simmer_worker->game);
   move_list_destroy(simmer_worker->move_list);
   prng_destroy(simmer_worker->prng);
-  best_move_carry_destroy(simmer_worker->best_move_carry);
   free(simmer_worker);
 }
 
@@ -566,7 +563,7 @@ static double sim_rollout(const Simmer *simmer, SimmerWorker *simmer_worker,
     }
 
     const Move *best_play = get_top_equity_move_with_carry(
-        game, move_list, simmer_worker->best_move_carry);
+        game, move_list, simmer->best_move_carry);
     rack_copy(&spare_rack, player_get_rack(player_on_turn));
 
     // On the final ply the resulting cross-sets are never read (no further move
@@ -808,6 +805,7 @@ void rv_sim_destroy(RandomVariables *rvs) {
     simmer_worker_destroy(simmer->workers[thread_index]);
   }
   free(simmer->workers);
+  best_move_carry_destroy(simmer->best_move_carry);
   free(simmer);
 }
 
@@ -873,6 +871,7 @@ RandomVariables *rv_sim_create(RandomVariables *rvs, const SimArgs *sim_args,
        thread_index++) {
     simmer->workers[thread_index] = simmer_create_worker(sim_args);
   }
+  simmer->best_move_carry = best_move_carry_create();
 
   simmer->win_pcts = sim_args->win_pcts;
   simmer->use_inference = sim_args->use_inference;
@@ -931,6 +930,7 @@ void rv_sim_reset(RandomVariables *rvs, const SimArgs *sim_args) {
        thread_index++) {
     simmer_reset_worker(simmer->workers[thread_index], sim_args);
   }
+  best_move_carry_reset(simmer->best_move_carry);
 
   simmer->win_pcts = sim_args->win_pcts;
   simmer->use_inference = sim_args->use_inference;

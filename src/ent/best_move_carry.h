@@ -7,21 +7,26 @@
 #include "letter_distribution.h"
 #include "move.h"
 #include "rack.h"
+#include <stdatomic.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <string.h>
 
-// A simulation worker's memory of the best moves its playouts found, by rack.
-// The same rack recurs across a simulation's playouts (every candidate faces
-// the same opponent racks, and bag cycling draws each rack again), on boards
-// that differ only in a few lanes. A remembered move that is still legal on
-// the new board is a move the generator would find there too, so its equity
+// A simulation's memory of the best moves its playouts found, by rack. The
+// same rack recurs across a simulation's playouts (every candidate faces the
+// same opponent racks, and bag cycling draws each rack again), on boards that
+// differ only in a few lanes. A remembered move that is still legal on the
+// new board is a move the generator would find there too, so its equity
 // there is a floor on the best move's, and seeding the generator with it lets
 // the generator skip every anchor that cannot beat it from the start.
 //
 // Each move also keeps a hash of every lane of the board it was best on. A
 // lane that hashes the same now holds the same moves at the same equities as
-// it did then (see gen_skip_unchanged_lanes), none better than that move.
+// it did then (see gen_get_unchanged_lanes), none better than that move.
+//
+// All of a simulation's worker threads share one carry, since a playout's
+// matching playouts (the same draws for other candidates) run on any of them.
+// Each bucket has its own lock, held only to copy moves in or out.
 
 enum {
   BEST_MOVE_CARRY_NUM_BUCKETS = 1024,
@@ -43,26 +48,31 @@ typedef struct CarriedBestMove {
   uint64_t lane_hashes[2 * BOARD_DIM];
 } CarriedBestMove;
 
-typedef struct BestMoveCarryBucket {
+// The moves remembered for one rack.
+typedef struct CarriedRackMoves {
   uint64_t key;
   Rack rack;
   int player_index;
   int count;
   int next_slot;
   CarriedBestMove moves[BEST_MOVE_CARRY_MOVES_PER_RACK];
+} CarriedRackMoves;
+
+typedef struct BestMoveCarryBucket {
+  atomic_flag lock;
+  CarriedRackMoves rack_moves;
 } BestMoveCarryBucket;
 
 typedef struct BestMoveCarry {
   BestMoveCarryBucket buckets[BEST_MOVE_CARRY_NUM_BUCKETS];
-  // The current generation's lane hashes, kept here so that only
-  // generations that carry moves pay for them.
-  uint64_t lane_hashes[2 * BOARD_DIM];
 } BestMoveCarry;
 
+// Not thread safe: call it while no generation uses the carry.
 static inline void best_move_carry_reset(BestMoveCarry *carry) {
   for (int bucket_idx = 0; bucket_idx < BEST_MOVE_CARRY_NUM_BUCKETS;
        bucket_idx++) {
-    carry->buckets[bucket_idx].count = 0;
+    atomic_flag_clear(&carry->buckets[bucket_idx].lock);
+    carry->buckets[bucket_idx].rack_moves.count = 0;
   }
 }
 
@@ -87,28 +97,48 @@ static inline uint64_t best_move_carry_get_key(const Rack *rack,
 }
 
 static inline bool
-best_move_carry_bucket_matches(const BestMoveCarryBucket *bucket, uint64_t key,
-                               const Rack *rack, int player_index) {
-  if (bucket->count == 0 || bucket->key != key ||
-      bucket->player_index != player_index ||
-      rack_get_dist_size(&bucket->rack) != rack_get_dist_size(rack)) {
+best_move_carry_rack_moves_match(const CarriedRackMoves *rack_moves,
+                                 uint64_t key, const Rack *rack,
+                                 int player_index) {
+  if (rack_moves->count == 0 || rack_moves->key != key ||
+      rack_moves->player_index != player_index ||
+      rack_get_dist_size(&rack_moves->rack) != rack_get_dist_size(rack)) {
     return false;
   }
-  return memcmp(bucket->rack.array, rack->array,
+  return memcmp(rack_moves->rack.array, rack->array,
                 sizeof(rack->array[0]) * rack_get_dist_size(rack)) == 0;
 }
 
-// The bucket holding the moves remembered for this rack, or NULL.
-static inline const BestMoveCarryBucket *
-best_move_carry_find(const BestMoveCarry *carry, const Rack *rack,
-                     int player_index) {
-  const uint64_t key = best_move_carry_get_key(rack, player_index);
-  const BestMoveCarryBucket *bucket =
+// Locks and returns the bucket for key.
+static inline BestMoveCarryBucket *best_move_carry_lock(BestMoveCarry *carry,
+                                                        uint64_t key) {
+  BestMoveCarryBucket *bucket =
       &carry->buckets[key & (BEST_MOVE_CARRY_NUM_BUCKETS - 1)];
-  if (!best_move_carry_bucket_matches(bucket, key, rack, player_index)) {
-    return NULL;
+  while (
+      atomic_flag_test_and_set_explicit(&bucket->lock, memory_order_acquire)) {
+    // The holder only copies a few hundred bytes; spin until it is done.
   }
   return bucket;
+}
+
+static inline void best_move_carry_unlock(BestMoveCarryBucket *bucket) {
+  atomic_flag_clear_explicit(&bucket->lock, memory_order_release);
+}
+
+// Copies the moves remembered for this rack into rack_moves. Returns false,
+// leaving rack_moves unspecified, when there are none.
+static inline bool best_move_carry_find(BestMoveCarry *carry, const Rack *rack,
+                                        int player_index,
+                                        CarriedRackMoves *rack_moves) {
+  const uint64_t key = best_move_carry_get_key(rack, player_index);
+  BestMoveCarryBucket *bucket = best_move_carry_lock(carry, key);
+  const bool found = best_move_carry_rack_moves_match(&bucket->rack_moves, key,
+                                                      rack, player_index);
+  if (found) {
+    *rack_moves = bucket->rack_moves;
+  }
+  best_move_carry_unlock(bucket);
+  return found;
 }
 
 static inline bool best_move_carry_same_placement(const Move *move,
@@ -121,39 +151,41 @@ static inline bool best_move_carry_same_placement(const Move *move,
                 sizeof(move->tiles[0]) * move_get_tiles_length(move)) == 0;
 }
 
-// Remembers a best move for this rack, replacing the rack's oldest move when
-// it already has BEST_MOVE_CARRY_MOVES_PER_RACK of them, or the bucket's
-// moves for another rack. Returns the slot to fill: the move's own slot when
-// the rack already remembers its placement, so the newest board replaces the
-// older one.
-static inline CarriedBestMove *best_move_carry_add(BestMoveCarry *carry,
-                                                   const Rack *rack,
-                                                   int player_index,
-                                                   const Move *move) {
+// Remembers a best move for this rack. It replaces the rack's own entry for
+// the same placement, so the newest board replaces the older one; otherwise
+// the rack's oldest move when it already has BEST_MOVE_CARRY_MOVES_PER_RACK
+// of them, or the bucket's moves for another rack.
+static inline void best_move_carry_add(BestMoveCarry *carry, const Rack *rack,
+                                       int player_index,
+                                       const CarriedBestMove *carried) {
   const uint64_t key = best_move_carry_get_key(rack, player_index);
-  BestMoveCarryBucket *bucket =
-      &carry->buckets[key & (BEST_MOVE_CARRY_NUM_BUCKETS - 1)];
-  if (!best_move_carry_bucket_matches(bucket, key, rack, player_index)) {
-    bucket->key = key;
-    rack_copy(&bucket->rack, rack);
-    bucket->player_index = player_index;
-    bucket->count = 0;
-    bucket->next_slot = 0;
+  BestMoveCarryBucket *bucket = best_move_carry_lock(carry, key);
+  CarriedRackMoves *rack_moves = &bucket->rack_moves;
+  if (!best_move_carry_rack_moves_match(rack_moves, key, rack, player_index)) {
+    rack_moves->key = key;
+    rack_copy(&rack_moves->rack, rack);
+    rack_moves->player_index = player_index;
+    rack_moves->count = 0;
+    rack_moves->next_slot = 0;
   }
-  for (int move_idx = 0; move_idx < bucket->count; move_idx++) {
-    CarriedBestMove *remembered = &bucket->moves[move_idx];
-    if (best_move_carry_same_placement(&remembered->move, move)) {
-      move_copy(&remembered->move, move);
-      return remembered;
+  CarriedBestMove *slot = NULL;
+  for (int move_idx = 0; move_idx < rack_moves->count; move_idx++) {
+    if (best_move_carry_same_placement(&rack_moves->moves[move_idx].move,
+                                       &carried->move)) {
+      slot = &rack_moves->moves[move_idx];
+      break;
     }
   }
-  CarriedBestMove *slot = &bucket->moves[bucket->next_slot];
-  bucket->next_slot = (bucket->next_slot + 1) % BEST_MOVE_CARRY_MOVES_PER_RACK;
-  if (bucket->count < BEST_MOVE_CARRY_MOVES_PER_RACK) {
-    bucket->count++;
+  if (slot == NULL) {
+    slot = &rack_moves->moves[rack_moves->next_slot];
+    rack_moves->next_slot =
+        (rack_moves->next_slot + 1) % BEST_MOVE_CARRY_MOVES_PER_RACK;
+    if (rack_moves->count < BEST_MOVE_CARRY_MOVES_PER_RACK) {
+      rack_moves->count++;
+    }
   }
-  move_copy(&slot->move, move);
-  return slot;
+  *slot = *carried;
+  best_move_carry_unlock(bucket);
 }
 
 #endif
