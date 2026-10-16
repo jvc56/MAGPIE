@@ -43,7 +43,7 @@
 #define PINNED_RIT_SHA256                                                      \
   "b064d7729ba9117890595bdaa72e005314955b36f2377c97e5eb25a705211037"
 #define PINNED_WIT_SHA256                                                      \
-  "a5677f57982fd8b89aed8acce09c76cea2ae90659c8da70a822d8ed1b265397c"
+  "a78131759e2cd2c9820f2852b81fdec1d825dc160d8c45e7b0e7361daa16e479"
 
 // The KLV builders: `createdata klv` (every leave zero, a leave-generation
 // job's generation 0) and `convert rackequity2klv` (each later generation, from
@@ -64,7 +64,7 @@ enum {
   PINNED_WMP_BUILDER_VERSION = 1,
   PINNED_RIT_BUILDER_VERSION = 1,
   PINNED_KLV_BUILDER_VERSION = 1,
-  PINNED_WIT_BUILDER_VERSION = 1,
+  PINNED_WIT_BUILDER_VERSION = 2,
 };
 
 static void assert_built_file_hash(const char *data_paths, const char *name,

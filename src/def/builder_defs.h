@@ -33,7 +33,7 @@
 // generation prunes with, built from the .kwg alone. Checked the same way as
 // the other two: a table built from an older lexicon, or by an older builder,
 // prunes plays that exist.
-#define WIT_BUILDER_VERSION 1
+#define WIT_BUILDER_VERSION 2
 
 // The KLV builder is versioned alongside them because birdtest's server now
 // builds every leave-generation KLV with `convert rackequity2klv` rather than
