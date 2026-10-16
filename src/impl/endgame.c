@@ -1,10 +1,10 @@
 #include "endgame.h"
 
 #include "../compat/cpthread.h"
+#include "../compat/cpthread_defs.h"
 #include "../compat/csched.h"
 #include "../compat/ctime.h"
 #include "../def/board_defs.h"
-#include "../def/cpthread_defs.h"
 #include "../def/equity_defs.h"
 #include "../def/game_defs.h"
 #include "../def/game_history_defs.h"
@@ -35,6 +35,7 @@
 #include "../str/letter_distribution_string.h"
 #include "../str/rack_string.h"
 #include "../util/io_util.h"
+#include "../util/stable_sort.h"
 #include "../util/string_util.h"
 #include "gameplay.h"
 #include "kwg_maker.h"
@@ -181,6 +182,9 @@ struct EndgameCtx {
   // check_depth_deadline takes min(this, depth_deadline_ns) so a caller's
   // wall-clock budget always wins over the EBF-projected per-depth budget.
   int64_t external_deadline_ns;
+  // The move's budget, from the thread that started the solve: every worker,
+  // the late ones too, charges it, and check_depth_deadline stops on it.
+  MovegenBudget *movegen_budget;
   // Flag: stuck-tile mode has been logged (0=not yet, 1=logged)
   atomic_int stuck_tile_logged;
   // Fraction of opponent's tiles that are stuck at the root (0.0 = none)
@@ -348,6 +352,28 @@ static bool solver_needs_exact_root_values(const EndgameCtx *solver) {
   return solver->num_top_moves > 1 || solver->actual_move != NULL ||
          solver->per_ply_callback != NULL ||
          solver->per_root_move_callback != NULL;
+}
+
+// A solve with a real target depth, no clock and no consumer of intermediate
+// depths only needs the target: iterations of the other parity are skipped
+// (see iterative_deepening_skips_ply). A solve asked for MAX_SEARCH_DEPTH is
+// "as deep as it can get", and one under a time limit falls back to its last
+// completed depth, so both keep every iteration.
+static bool solver_steps_depth_by_two(const EndgameCtx *solver, int plies) {
+  return plies < MAX_SEARCH_DEPTH && solver->soft_time_limit <= 0.0 &&
+         solver->hard_time_limit <= 0.0 &&
+         !solver_needs_exact_root_values(solver) && !solver->first_win_optim &&
+         !solver->initial_window_optim;
+}
+
+// Iterations cost in pairs: depth 2k+1 and 2k+2 search about the same number of
+// nodes, and each pair costs roughly ten times the one before. The iteration
+// that does not share the target's parity mostly seeds the transposition table
+// for the next one, so stepping by two from the target is cheaper overall and
+// returns the same value. Depth 1 is always searched; it is nearly free and
+// orders the root moves.
+static bool iterative_deepening_skips_ply(int ply, int plies) {
+  return ply > 1 && ply < plies && ((plies - ply) & 1) != 0;
 }
 
 // Insert a value into a sorted (descending) top-K array.
@@ -1471,6 +1497,48 @@ static int generate_single_tile_plays(EndgameCtxWorker *worker) {
   return 1;
 }
 
+// One tile making words in both directions has two legal notations. Compare
+// its board square and machine letter (including blank designation), not the
+// direction or the surrounding playthrough letters.
+static bool endgame_moves_match(const Move *candidate,
+                                const Move *actual_move) {
+  if (compare_moves_without_equity(candidate, actual_move, true) == -1) {
+    return true;
+  }
+  if (move_get_type(candidate) != GAME_EVENT_TILE_PLACEMENT_MOVE ||
+      move_get_type(actual_move) != GAME_EVENT_TILE_PLACEMENT_MOVE ||
+      candidate->tiles_played != 1 || actual_move->tiles_played != 1) {
+    return false;
+  }
+  int candidate_offset = 0;
+  int actual_offset = 0;
+  while (candidate_offset < candidate->tiles_length &&
+         candidate->tiles[candidate_offset] == PLAYED_THROUGH_MARKER) {
+    candidate_offset++;
+  }
+  while (actual_offset < actual_move->tiles_length &&
+         actual_move->tiles[actual_offset] == PLAYED_THROUGH_MARKER) {
+    actual_offset++;
+  }
+  if (candidate_offset == candidate->tiles_length ||
+      actual_offset == actual_move->tiles_length) {
+    return false;
+  }
+  const bool candidate_vertical = board_is_dir_vertical(candidate->dir);
+  const bool actual_vertical = board_is_dir_vertical(actual_move->dir);
+  const int candidate_row =
+      candidate->row_start + (candidate_vertical ? candidate_offset : 0);
+  const int candidate_col =
+      candidate->col_start + (candidate_vertical ? 0 : candidate_offset);
+  const int actual_row =
+      actual_move->row_start + (actual_vertical ? actual_offset : 0);
+  const int actual_col =
+      actual_move->col_start + (actual_vertical ? 0 : actual_offset);
+  return candidate_row == actual_row && candidate_col == actual_col &&
+         candidate->tiles[candidate_offset] ==
+             actual_move->tiles[actual_offset];
+}
+
 // generate_single_tile_plays only keeps the single highest-scoring placement
 // (see above), so the caller-specified actual_move (EndgameArgs.actual_move,
 // pinned to root index 0 for exact-value extraction) can be entirely absent
@@ -1490,8 +1558,7 @@ static int augment_single_tile_actual_move(EndgameCtxWorker *worker,
   const SmallMove *existing = (SmallMove *)worker->small_move_arena->memory;
   Move candidate;
   small_move_to_move(&candidate, existing, board);
-  if (compare_moves_without_equity(&candidate, solver->actual_move, true) ==
-      -1) {
+  if (endgame_moves_match(&candidate, solver->actual_move)) {
     return move_count; // already present
   }
 
@@ -1502,14 +1569,8 @@ static int augment_single_tile_actual_move(EndgameCtxWorker *worker,
     small_move_set_as_pass(actual_sm);
   } else {
     const bool is_vertical = board_is_dir_vertical(solver->actual_move->dir);
-    // Move.row_start/col_start are stored pre-swapped for vertical plays
-    // (see move_gen.c's move_set_row_start/move_set_col_start swap when
-    // building a vertical Move), but small_move_set_all expects raw,
-    // unswapped row/col and performs that same swap itself. Passing the
-    // already-swapped Move fields straight through double-swaps the
-    // position, silently encoding the wrong square, so the solver could
-    // never find the actual move among its root moves. Undo the Move's
-    // swap here before calling small_move_set_all.
+    // small_move_set_all consumes movegen's traversal coordinates and swaps
+    // vertical ones. Convert the validated move's physical coordinates first.
     int row_start = solver->actual_move->row_start;
     int col_start = solver->actual_move->col_start;
     if (is_vertical) {
@@ -1909,8 +1970,8 @@ void assign_estimates_and_sort(EndgameCtxWorker *worker, int move_count,
   SmallMove *small_moves = (SmallMove *)(worker->small_move_arena->memory +
                                          worker->small_move_arena->size -
                                          (sizeof(SmallMove) * move_count));
-  qsort(small_moves, move_count, sizeof(SmallMove),
-        compare_small_moves_by_estimated_value);
+  stable_sort(small_moves, move_count, sizeof(SmallMove),
+              compare_small_moves_by_estimated_value);
 }
 
 // Fill worker->move_list with the side-to-move's plays from the incremental
@@ -2051,7 +2112,7 @@ static int32_t negamax_greedy_leaf_playout(EndgameCtxWorker *worker,
   bool playout_interrupted = false;
   while (game_get_game_end_reason(worker->game_copy) == GAME_END_REASON_NONE &&
          playout_depth < max_playout) {
-    if (thread_control_get_status(worker->solver->thread_control) ==
+    if (thread_control_search_checkpoint(worker->solver->thread_control) ==
         THREAD_CONTROL_STATUS_USER_INTERRUPT) {
       playout_interrupted = true;
       break;
@@ -2423,6 +2484,12 @@ static int negamax_generate_and_estimate_moves(EndgameCtxWorker *worker,
 // overflow the stack under ASAN's enlarged frames.
 __attribute__((noinline)) static bool
 check_depth_deadline(EndgameCtxWorker *worker) {
+  // A spent movegen budget ends the solve as a deadline would: the last
+  // completed depth stands.
+  if (gen_movegen_budget_spent()) {
+    atomic_store(&worker->solver->search_complete, 1);
+    return true;
+  }
   int64_t deadline_ns = atomic_load_explicit(&worker->solver->depth_deadline_ns,
                                              memory_order_relaxed);
   // External deadline (e.g. PEG's wall-clock cap) takes precedence if it
@@ -2974,8 +3041,9 @@ int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
             moves_base[best_est_idx] = tmp;
           }
         } else {
-          qsort(moves_base + idx, (size_t)(nplays - idx), sizeof(SmallMove),
-                compare_small_moves_by_estimated_value);
+          stable_sort(moves_base + idx, (size_t)(nplays - idx),
+                      sizeof(SmallMove),
+                      compare_small_moves_by_estimated_value);
           tail_sorted = true;
         }
       }
@@ -3350,7 +3418,7 @@ static void root_greedy_sweep(EndgameCtxWorker *worker, uint64_t root_key,
 
 static bool iterative_deepening_should_stop(EndgameCtx *solver) {
   return atomic_load(&solver->search_complete) != 0 ||
-         thread_control_get_status(solver->thread_control) ==
+         thread_control_search_checkpoint(solver->thread_control) ==
              THREAD_CONTROL_STATUS_USER_INTERRUPT;
 }
 
@@ -3445,8 +3513,7 @@ static void force_actual_move_to_front(const EndgameCtxWorker *worker,
   Move candidate;
   for (int idx = 0; idx < n_root; idx++) {
     small_move_to_move(&candidate, &root_moves[idx], board);
-    if (compare_moves_without_equity(&candidate, solver->actual_move, true) ==
-        -1) {
+    if (endgame_moves_match(&candidate, solver->actual_move)) {
       if (idx != 0) {
         SmallMove tmp = root_moves[0];
         root_moves[0] = root_moves[idx];
@@ -3539,6 +3606,7 @@ void iterative_deepening(EndgameCtxWorker *worker, int plies) {
     }
   }
 
+  const bool steps_by_two = solver_steps_depth_by_two(worker->solver, plies);
   worker->current_iterative_deepening_depth = 1;
   int start = 1;
   if (!worker->solver->iterative_deepening_optim) {
@@ -3564,6 +3632,9 @@ void iterative_deepening(EndgameCtxWorker *worker, int plies) {
   }
 
   for (int ply = start; ply <= plies; ply++) {
+    if (steps_by_two && iterative_deepening_skips_ply(ply, plies)) {
+      continue;
+    }
     // Check if another thread has completed the full search
     if (iterative_deepening_should_stop(worker->solver)) {
       break;
@@ -3663,8 +3734,8 @@ void iterative_deepening(EndgameCtxWorker *worker, int plies) {
 
     // sort initial moves by valuation for next time.
     SmallMove *initial_moves = (SmallMove *)(worker->small_move_arena->memory);
-    qsort(initial_moves, initial_move_count, sizeof(SmallMove),
-          compare_small_moves_by_estimated_value);
+    stable_sort(initial_moves, initial_move_count, sizeof(SmallMove),
+                compare_small_moves_by_estimated_value);
     force_actual_move_to_front(worker, initial_moves, initial_move_count);
 
     // Store result in worker's local tracking
@@ -3786,7 +3857,9 @@ void iterative_deepening(EndgameCtxWorker *worker, int plies) {
 void *solver_worker_start(void *uncasted_solver_worker) {
   EndgameCtxWorker *solver_worker = (EndgameCtxWorker *)uncasted_solver_worker;
   const EndgameCtx *solver = solver_worker->solver;
+  (void)gen_set_movegen_budget(solver->movegen_budget);
   iterative_deepening(solver_worker, solver->requested_plies);
+  (void)gen_set_movegen_budget(NULL);
   return NULL;
 }
 
@@ -4013,8 +4086,8 @@ static int extract_multi_pvs(EndgameCtx *solver, EndgameCtxWorker *best_worker,
   // that cannot beat the board) and the fallback below assume descending
   // order, so restore it here.
   if (num_root_moves > 2) {
-    qsort(root_moves + 1, (size_t)(num_root_moves - 1), sizeof(SmallMove),
-          compare_small_moves_by_estimated_value);
+    stable_sort(root_moves + 1, (size_t)(num_root_moves - 1), sizeof(SmallMove),
+                compare_small_moves_by_estimated_value);
   }
 
   // Solve every displayed line to the end (or to the search depth) instead of
@@ -4074,8 +4147,7 @@ static bool extract_actual_move_pvline(EndgameCtx *solver,
   Move candidate;
   for (int idx = 0; idx < n_root; idx++) {
     small_move_to_move(&candidate, &root_moves[idx], board);
-    if (compare_moves_without_equity(&candidate, solver->actual_move, true) !=
-        -1) {
+    if (!endgame_moves_match(&candidate, solver->actual_move)) {
       continue;
     }
     out_pv->moves[0] = root_moves[idx];
@@ -4189,6 +4261,7 @@ void endgame_solve(EndgameCtx **ctx, const EndgameArgs *endgame_args,
   }
   EndgameCtx *solver = *ctx;
   endgame_ctx_reset(solver, results, endgame_args);
+  solver->movegen_budget = gen_get_movegen_budget();
 
   // Set base seed for ABDADA jitter
   endgame_ctx_prepare_workers(solver, endgame_args->seed);

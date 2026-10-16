@@ -1,5 +1,6 @@
 #include "wit_upgrade_test.h"
 
+#include "../src/compat/cfile.h"
 #include "../src/def/board_defs.h"
 #include "../src/def/kwg_defs.h"
 #include "../src/def/letter_distribution_defs.h"
@@ -13,7 +14,7 @@
 #include "../src/impl/word_info_table_maker.h"
 #include "../src/impl/word_plus_floater_maker.h"
 #include "../src/util/io_util.h"
-#include "../src/util/string_util.h"
+#include "test_platform.h"
 #include "test_util.h"
 #include <assert.h>
 #include <errno.h>
@@ -23,9 +24,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/stat.h>
-#include <unistd.h>
-#include <utime.h>
 
 typedef struct WitUpgradeFixture {
   char *root;
@@ -44,18 +42,17 @@ typedef struct WitUpgradeFixture {
 typedef struct WitFileSnapshot {
   uint8_t *bytes;
   size_t size;
-  // sys/stat.h is the public header for glibc's private struct stat definition.
-  // NOLINTNEXTLINE(misc-include-cleaner)
-  struct stat metadata;
+  CFileIdentity identity;
+  TestPlatformFileStatus status;
 } WitFileSnapshot;
 
 static void make_directory(const char *path) {
-  const int status = mkdir(path, 0700);
+  const int status = cfile_mkdir(path);
   assert(status == 0);
 }
 
 static void remove_directory(const char *path) {
-  const int status = rmdir(path);
+  const int status = cfile_rmdir(path);
   assert(status == 0);
 }
 
@@ -74,9 +71,11 @@ static void write_bytes(const char *path, const uint8_t *bytes, size_t size) {
 
 static WitFileSnapshot snapshot_file(const char *path) {
   WitFileSnapshot snapshot = {0};
-  const int status = stat(path, &snapshot.metadata);
-  assert(status == 0 && snapshot.metadata.st_size > 0);
-  snapshot.size = (size_t)snapshot.metadata.st_size;
+  const bool identified = cfile_identity(path, &snapshot.identity) &&
+                          test_platform_stat(path, &snapshot.status);
+  assert(identified && snapshot.identity.size > 0);
+  (void)identified;
+  snapshot.size = (size_t)snapshot.identity.size;
   snapshot.bytes = malloc_or_die(snapshot.size);
   FILE *stream = fopen_or_die(path, "rb");
   const size_t read_count = fread(snapshot.bytes, 1, snapshot.size, stream);
@@ -92,12 +91,10 @@ static void assert_file_matches(const char *path,
   assert(actual.size == expected->size);
   assert(memcmp(actual.bytes, expected->bytes, actual.size) == 0);
   if (unchanged) {
-    assert(actual.metadata.st_dev == expected->metadata.st_dev);
-    assert(actual.metadata.st_ino == expected->metadata.st_ino);
-    // glibc's st_mtime macro is likewise provided through sys/stat.h.
-    // NOLINTNEXTLINE(misc-include-cleaner)
-    assert(actual.metadata.st_mtime == expected->metadata.st_mtime);
-    assert(actual.metadata.st_mode == expected->metadata.st_mode);
+    assert(actual.status.device == expected->status.device);
+    assert(actual.status.inode == expected->status.inode);
+    assert(actual.identity.mtime_seconds == expected->identity.mtime_seconds);
+    assert(actual.status.mode == expected->status.mode);
   }
   free(actual.bytes);
 }
@@ -121,11 +118,9 @@ static void write_kwg(const WitUpgradeFixture *fixture, const KWG *kwg) {
 }
 
 static WitUpgradeFixture make_fixture(const KWG *kwg, const char *ld_name) {
-  char template[] = "/tmp/magpie_wit_upgrade_XXXXXX";
-  char *root = mkdtemp(template);
-  assert(root != NULL);
+  char *root = test_platform_make_temporary_directory("magpie_wit_upgrade_");
   WitUpgradeFixture fixture = {0};
-  fixture.root = string_duplicate(root);
+  fixture.root = root;
   fixture.first = get_formatted_string("%s/first", root);
   fixture.later = get_formatted_string("%s/later", root);
   fixture.first_lexica = get_formatted_string("%s/lexica", fixture.first);
@@ -222,17 +217,17 @@ static void write_wit_with_copied_identity(const char *filename,
 
 static void assert_read_only_reuse(WitUpgradeFixture *fixture,
                                    const char *filename) {
-  const struct utimbuf old_times = {946684800, 946684800};
-  int status = utime(filename, &old_times);
-  assert(status == 0);
-  status = chmod(filename, 0444);
-  assert(status == 0);
+  bool changed = test_platform_set_file_times(filename, 946684800);
+  assert(changed);
+  changed = test_platform_set_permissions(filename, 0444);
+  assert(changed);
   WitFileSnapshot before = snapshot_file(filename);
   run_upgrade(fixture, ERROR_STATUS_SUCCESS);
   assert_file_matches(filename, &before, true);
   free(before.bytes);
-  status = chmod(filename, 0644);
-  assert(status == 0);
+  changed = test_platform_set_permissions(filename, 0644);
+  assert(changed);
+  (void)changed;
 }
 
 static void test_upgrade_and_repair(void) {
@@ -273,7 +268,7 @@ static void test_upgrade_and_repair(void) {
   fixture.args.conversion_type_string = "kwg2witifneeded";
   assert_file_matches(fixture.first_wit, &current, false);
   WitFileSnapshot after_force = snapshot_file(fixture.first_wit);
-  assert(after_force.metadata.st_ino != before_force.metadata.st_ino);
+  assert(after_force.status.inode != before_force.status.inode);
   free(before_force.bytes);
   free(after_force.bytes);
 
@@ -398,14 +393,14 @@ static void test_upgrade_data_path_precedence(void) {
   }
   word_info_table_destroy(wit);
   WitFileSnapshot current = snapshot_file(fixture.first_wit);
-  const int moved = rename(fixture.first_wit, fixture.later_wit);
+  const int moved = cfile_rename(fixture.first_wit, fixture.later_wit);
   assert(moved == 0);
   remove_directory(fixture.first_lexica);
 
   // A current later-path file can be reused without a writable output
   // directory. Do not accidentally force a first-path permission check.
   assert_read_only_reuse(&fixture, fixture.later_wit);
-  assert(access(fixture.first_wit, F_OK) != 0);
+  assert(!cfile_access(fixture.first_wit, CFILE_ACCESS_EXISTS));
 
   // A future-version table in a later path must not be silently hidden by
   // a generated first-path override, even when that output path is absent.
@@ -414,7 +409,7 @@ static void test_upgrade_data_path_precedence(void) {
   WitFileSnapshot future = snapshot_file(fixture.later_wit);
   run_upgrade(&fixture, ERROR_STATUS_WMP_UNSUPPORTED_VERSION);
   assert_file_matches(fixture.later_wit, &future, true);
-  assert(access(fixture.first_wit, F_OK) != 0);
+  assert(!cfile_access(fixture.first_wit, CFILE_ACCESS_EXISTS));
   free(future.bytes);
 
   current.bytes[0] = WIT_EARLIEST_SUPPORTED_VERSION;
@@ -424,7 +419,7 @@ static void test_upgrade_data_path_precedence(void) {
   WitFileSnapshot legacy = snapshot_file(fixture.later_wit);
   run_upgrade(&fixture, ERROR_STATUS_FILEPATH_FILE_NOT_WRITABLE);
   assert_file_matches(fixture.later_wit, &legacy, true);
-  assert(access(fixture.first_wit, F_OK) != 0);
+  assert(!cfile_access(fixture.first_wit, CFILE_ACCESS_EXISTS));
 
   // Once the first directory exists, create its override and retain the
   // original v3 file in the later data path byte-for-byte.

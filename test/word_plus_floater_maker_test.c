@@ -1,5 +1,6 @@
 #include "word_plus_floater_maker_test.h"
 
+#include "../src/compat/cfile.h"
 #include "../src/def/board_defs.h"
 #include "../src/def/kwg_defs.h"
 #include "../src/def/letter_distribution_defs.h"
@@ -19,8 +20,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/stat.h>
-#include <unistd.h>
 
 enum {
   BAD_TRIE_ROOT,
@@ -438,12 +437,12 @@ static void test_writer_preserves_existing_output(void) {
   assert(remove_status == 0);
   // An existing directory cannot be replaced by the atomic rename. The
   // writer must report the failure and leave that destination intact.
-  const int made_directory = mkdir(filename, 0700);
+  const int made_directory = cfile_mkdir(filename);
   assert(made_directory == 0);
   word_info_table_write_to_file(wit, filename, error_stack);
   assert(error_stack_top(error_stack) == ERROR_STATUS_RW_WRITE_ERROR);
   error_stack_reset(error_stack);
-  const int removed_directory = rmdir(filename);
+  const int removed_directory = cfile_rmdir(filename);
   assert(removed_directory == 0);
   free(filename);
   word_info_table_destroy(loaded);

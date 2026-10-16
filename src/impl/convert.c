@@ -1,9 +1,12 @@
 #include "convert.h"
 
+#include "../compat/cfile.h"
+#include "../compat/cpath.h"
 #include "../def/board_defs.h"
 #include "../def/convert_defs.h"
 #include "../def/kwg_defs.h"
 #include "../def/letter_distribution_defs.h"
+#include "../def/rack_defs.h"
 #include "../ent/conversion_results.h"
 #include "../ent/data_filepaths.h"
 #include "../ent/dawg_packed.h"
@@ -12,6 +15,7 @@
 #include "../ent/klv_csv.h"
 #include "../ent/kwg.h"
 #include "../ent/letter_distribution.h"
+#include "../ent/rack.h"
 #include "../ent/rack_info_table.h"
 #include "../ent/win_pct_counts.h"
 #include "../ent/wmp.h"
@@ -21,17 +25,183 @@
 #include "../util/string_util.h"
 #include "kwg_maker.h"
 #include "rack_info_table_maker.h"
+#include "rack_list.h"
 #include "win_pct_smoother.h"
 #include "wmp_maker.h"
 #include "word_info_table_maker.h"
 #include "word_plus_floater_maker.h"
+#include "xs_convert.h"
 #include <errno.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/stat.h>
+
+// The largest line a rack equity CSV may contain. A row is a rack, a count and
+// a sum: the rack is at most RACK_SIZE multi-character letters, and the two
+// numbers are a uint64 and a double in text. Nothing legitimate comes close,
+// and the bound is what stops a malformed file from being read into memory a
+// gigabyte at a time.
+enum { RACK_EQUITY_CSV_MAX_LINE_LENGTH = 512 };
+
+// Builds the KLV a generation's aggregated results imply.
+//
+// birdtest's server holds one row per full rack -- an occurrence count and a
+// sum of equities -- folded from every contribution to a leave-generation
+// generation. The individual games are long gone. This is the conversion from
+// those aggregates to the leave values they imply, so that the server no
+// longer has to carry its own translation of rack_list_write_to_klv and
+// generate_leaves and keep it in step by hand (see birdtest's README.md,
+// "Leave-generation KLVs").
+//
+// The input is `lexica/<input_name>.csv`, one `rack,count,equity_sum` row per
+// full rack, and the output is `lexica/<output_name>.klv2`. Every full rack
+// drawable from `ld` must appear exactly once: a rack the file omits would
+// silently contribute a mean of zero to every leave it contains, which is a
+// real leave value and indistinguishable from one that was measured, so the
+// count is checked rather than assumed.
+//
+// A rack with a count of zero is not the same as a missing rack. It is a rack
+// that was enumerated and never drawn, and it contributes a mean of zero with
+// full weight, exactly as it does within a leavegen run. Its equity_sum must
+// be zero too, since there is nothing to have summed.
+static void convert_rack_equity_to_klv(const LetterDistribution *ld,
+                                       const char *data_paths,
+                                       const char *input_name,
+                                       const char *output_name,
+                                       ErrorStack *error_stack) {
+  char *csv_filename = data_filepaths_get_readable_filename(
+      data_paths, input_name, DATA_FILEPATH_TYPE_LEAVES, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  FILE *stream = stream_from_filename(csv_filename, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    free(csv_filename);
+    return;
+  }
+
+  // target_rack_count is irrelevant here: it governs which racks stay eligible
+  // to be drawn as rare, and nothing in this conversion draws one. Zero forced
+  // racks leaves the list unrestricted, which is the cheapest thing to build.
+  RackList *rack_list =
+      rack_list_create(ld, /*target_rack_count=*/1, NULL, 0, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    fclose_or_die(stream);
+    free(csv_filename);
+    return;
+  }
+
+  // Every rack starts unset, so that a rack the file never mentions is an
+  // error rather than a mean of zero nobody asked for.
+  rack_list_mark_all_racks_unset(rack_list);
+
+  Rack rack;
+  rack_set_dist_size(&rack, ld_get_size(ld));
+  char *line = NULL;
+  size_t line_capacity = 0;
+  int64_t line_length;
+  int rows = 0;
+  while ((line_length = getline_ignore_carriage_return(&line, &line_capacity,
+                                                       stream)) != -1) {
+    if (line_length >= RACK_EQUITY_CSV_MAX_LINE_LENGTH) {
+      error_stack_push(
+          error_stack, ERROR_STATUS_CONVERT_MALFORMED_RACK_EQUITY_ROW,
+          get_formatted_string(
+              "line %d of rack equity csv file '%s' exceeds max length of %d",
+              rows + 1, csv_filename, RACK_EQUITY_CSV_MAX_LINE_LENGTH));
+      break;
+    }
+    // A trailing newline leaves an empty final line, which is not a row.
+    if (line_length == 0 || line[0] == '\n') {
+      continue;
+    }
+    char *rack_str = strtok(line, ",");
+    char *count_str = strtok(NULL, ",");
+    char *equity_sum_str = strtok(NULL, "\n");
+    if (rack_str) {
+      trim_whitespace(rack_str);
+    }
+    if (count_str) {
+      trim_whitespace(count_str);
+    }
+    if (equity_sum_str) {
+      trim_whitespace(equity_sum_str);
+    }
+    if (!rack_str || !count_str || !equity_sum_str) {
+      error_stack_push(
+          error_stack, ERROR_STATUS_CONVERT_MALFORMED_RACK_EQUITY_ROW,
+          get_formatted_string("line %d of rack equity csv file '%s' is not "
+                               "rack,count,equity_sum",
+                               rows + 1, csv_filename));
+      break;
+    }
+    if (rack_set_to_string(ld, &rack, rack_str) < 0) {
+      error_stack_push(
+          error_stack, ERROR_STATUS_CONVERT_MALFORMED_RACK_EQUITY_ROW,
+          get_formatted_string("line %d of rack equity csv file '%s': rack "
+                               "equity rows must name full racks of %d tiles "
+                               "drawable from this letter distribution, and "
+                               "'%s' does not parse as a rack of its letters",
+                               rows + 1, csv_filename, (RACK_SIZE), rack_str));
+      break;
+    }
+    const uint64_t count = string_to_uint64(count_str, error_stack);
+    const double equity_sum =
+        error_stack_is_empty(error_stack)
+            ? string_to_double(equity_sum_str, error_stack)
+            : 0.0;
+    if (!error_stack_is_empty(error_stack)) {
+      error_stack_push(
+          error_stack, ERROR_STATUS_CONVERT_MALFORMED_RACK_EQUITY_ROW,
+          get_formatted_string("line %d of rack equity csv file '%s' has a "
+                               "count or equity sum that is not a number: %s",
+                               rows + 1, csv_filename, rack_str));
+      break;
+    }
+    // The mean, not the sum, is what a rack contributes. A rack that never
+    // occurred has a mean of zero and still carries its full draw weight, as
+    // it does within a leavegen run.
+    const double mean = count > 0 ? equity_sum / (double)count : 0.0;
+    rack_list_set_rack_count_and_mean(rack_list, &rack, count, mean,
+                                      error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      error_stack_push(
+          error_stack, ERROR_STATUS_CONVERT_MALFORMED_RACK_EQUITY_ROW,
+          get_formatted_string("line %d of rack equity csv file '%s': %s",
+                               rows + 1, csv_filename, rack_str));
+      break;
+    }
+    rows++;
+  }
+  free(line);
+  fclose_or_die(stream);
+
+  // Duplicates are caught as they are read, so an unset rack at this point is
+  // one the file left out.
+  const int unset = rack_list_get_number_of_unset_racks(rack_list);
+  if (error_stack_is_empty(error_stack) && unset != 0) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_CONVERT_INCOMPLETE_RACK_EQUITY_CSV,
+        get_formatted_string(
+            "rack equity csv file '%s' has %d rows covering %d of the %d full "
+            "racks this letter distribution draws; every one must appear "
+            "exactly once",
+            csv_filename, rows,
+            rack_list_get_number_of_racks(rack_list) - unset,
+            rack_list_get_number_of_racks(rack_list)));
+  }
+  free(csv_filename);
+
+  if (error_stack_is_empty(error_stack)) {
+    KLV *klv = klv_create_empty(ld, output_name);
+    rack_list_write_to_klv(rack_list, ld, klv);
+    klv_write(klv, data_paths, output_name, error_stack);
+    klv_destroy(klv);
+  }
+  rack_list_destroy(rack_list);
+}
 
 void convert_from_text_with_dwl(const LetterDistribution *ld,
                                 conversion_type_t conversion_type,
@@ -59,7 +229,7 @@ void convert_from_text_with_dwl(const LetterDistribution *ld,
 
   char *line = NULL;
   size_t len = 0;
-  ssize_t read;
+  int64_t read;
   // Use BOARD_DIM + 2 so we can distinguish "too long" (mls_length ==
   // BOARD_DIM + 1) from "invalid letter" (mls_length == -1). Multi-byte
   // or multichar tiles (e.g. UTF-8, [QU]) mean raw byte length can exceed
@@ -203,18 +373,16 @@ static char *get_existing_wit_filename(const char *data_paths, const char *name,
                      string_duplicate("word info table data path is empty"));
     return NULL;
   }
-  StringSplitter *paths = split_string(data_paths, ':', true);
+  char **paths = NULL;
+  const int paths_count = cpath_split_list(data_paths, &paths);
   char *filename = NULL;
-  const int count = string_splitter_get_number_of_items(paths);
+  const int count = paths_count;
   for (int path_index = 0; path_index < count; path_index++) {
-    char *candidate = get_filepath(string_splitter_get_item(paths, path_index),
-                                   name, DATA_FILEPATH_TYPE_WORD_INFO_TABLE);
-    // sys/stat.h supplies this type; clang-tidy 18 attributes it to a private
-    // glibc header instead of the public header included above.
-    // NOLINTNEXTLINE(misc-include-cleaner)
-    struct stat file_status;
+    char *candidate = get_filepath(paths[path_index], name,
+                                   DATA_FILEPATH_TYPE_WORD_INFO_TABLE);
+    CFileIdentity identity;
     if (fileproxy_file_exists(candidate) ||
-        stat(candidate, &file_status) == 0) {
+        cfile_identity(candidate, &identity)) {
       filename = candidate;
       break;
     }
@@ -229,7 +397,7 @@ static char *get_existing_wit_filename(const char *data_paths, const char *name,
     }
     free(candidate);
   }
-  string_splitter_destroy(paths);
+  cpath_list_destroy(paths, paths_count);
   return filename;
 }
 
@@ -328,7 +496,8 @@ static bool wit_file_is_current(const KWG *kwg, const char *name,
 void convert_with_names(const LetterDistribution *ld,
                         conversion_type_t conversion_type,
                         const char *data_paths, const char *input_name,
-                        const char *output_name,
+                        const char *output_name, const char *klv_name,
+                        const char *wmp_name,
                         ConversionResults *conversion_results, int num_threads,
                         ErrorStack *error_stack) {
   if ((conversion_type == CONVERT_TEXT2DAWG) ||
@@ -385,11 +554,13 @@ void convert_with_names(const LetterDistribution *ld,
     }
     klv_destroy(klv);
   } else if (conversion_type == CONVERT_KLVWMP2RIT) {
-    KLV *klv = klv_create(data_paths, input_name, error_stack);
+    KLV *klv =
+        klv_create(data_paths, klv_name ? klv_name : input_name, error_stack);
     if (!error_stack_is_empty(error_stack)) {
       return;
     }
-    WMP *wmp = wmp_create(data_paths, input_name, error_stack);
+    WMP *wmp =
+        wmp_create(data_paths, wmp_name ? wmp_name : input_name, error_stack);
     if (!error_stack_is_empty(error_stack)) {
       klv_destroy(klv);
       return;
@@ -422,6 +593,9 @@ void convert_with_names(const LetterDistribution *ld,
     free(rit_output_filename);
     wmp_destroy(wmp);
     klv_destroy(klv);
+  } else if (conversion_type == CONVERT_RACKEQUITY2KLV) {
+    convert_rack_equity_to_klv(ld, data_paths, input_name, output_name,
+                               error_stack);
   } else if (conversion_type == CONVERT_KWG2WIT ||
              conversion_type == CONVERT_KWG2WIT_IF_NEEDED) {
     KWG *kwg = kwg_create(data_paths, input_name, error_stack);
@@ -503,7 +677,7 @@ static void convert_win_pct(const char *data_paths, const char *input_name,
   }
   if (error_stack_is_empty(error_stack)) {
     char *smoothed_string = win_pct_counts_get_string(smoothed);
-    write_string_to_file(output_filename, "w", smoothed_string, error_stack);
+    write_string_to_file(output_filename, "wb", smoothed_string, error_stack);
     free(smoothed_string);
     string_builder_add_formatted_string(report, "wrote %s\n", output_filename);
   }
@@ -543,12 +717,25 @@ get_conversion_type_from_string(const char *conversion_type_string) {
     conversion_type = CONVERT_DAWG2WORDMAP;
   } else if (strings_equal(conversion_type_string, "klvwmp2rit")) {
     conversion_type = CONVERT_KLVWMP2RIT;
+  } else if (strings_equal(conversion_type_string, "rackequity2klv")) {
+    conversion_type = CONVERT_RACKEQUITY2KLV;
   } else if (strings_equal(conversion_type_string, "kwg2wit")) {
     conversion_type = CONVERT_KWG2WIT;
   } else if (strings_equal(conversion_type_string, "kwg2witifneeded")) {
     conversion_type = CONVERT_KWG2WIT_IF_NEEDED;
   } else if (strings_equal(conversion_type_string, "winpct")) {
     conversion_type = CONVERT_WINPCT;
+  }
+  if (strings_equal(conversion_type_string, "counts2xsw")) {
+    conversion_type = CONVERT_COUNTS2XSW;
+  } else if (strings_equal(conversion_type_string, "cgp2xsp")) {
+    conversion_type = CONVERT_CGP2XSP;
+  } else if (strings_equal(conversion_type_string, "xsp2cgp")) {
+    conversion_type = CONVERT_XSP2CGP;
+  } else if (strings_equal(conversion_type_string, "gcg2xsg")) {
+    conversion_type = CONVERT_GCG2XSG;
+  } else if (strings_equal(conversion_type_string, "xsg2gcg")) {
+    conversion_type = CONVERT_XSG2GCG;
   }
   return conversion_type;
 }
@@ -573,6 +760,13 @@ void convert(const ConversionArgs *args, ConversionResults *conversion_results,
     return;
   }
 
+  if (conversion_type >= CONVERT_COUNTS2XSW &&
+      conversion_type <= CONVERT_XSG2GCG) {
+    xs_convert(args->input_and_output_name, args->ld_name, args->klv_name,
+               args->wmp_name, args->data_paths, conversion_type,
+               conversion_results, error_stack);
+    return;
+  }
   if (conversion_type == CONVERT_WINPCT) {
     // The third argument, a letter distribution for the other conversions,
     // names the output table.
@@ -600,6 +794,7 @@ void convert(const ConversionArgs *args, ConversionResults *conversion_results,
 
   convert_with_names(ld, conversion_type, args->data_paths,
                      args->input_and_output_name, args->input_and_output_name,
-                     conversion_results, args->num_threads, error_stack);
+                     args->klv_name, args->wmp_name, conversion_results,
+                     args->num_threads, error_stack);
   ld_destroy(ld);
 }

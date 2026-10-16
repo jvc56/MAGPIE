@@ -1,8 +1,8 @@
 #include "endgame_test.h"
 
 #include "../src/compat/cpthread.h"
+#include "../src/compat/cpthread_defs.h"
 #include "../src/compat/ctime.h"
-#include "../src/def/cpthread_defs.h"
 #include "../src/def/game_defs.h"
 #include "../src/def/thread_control_defs.h"
 #include "../src/ent/endgame_results.h"
@@ -28,6 +28,7 @@
 #include "test_util.h"
 #include <assert.h>
 #include <stdatomic.h>
+#include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -634,6 +635,98 @@ static void test_exhausted_tree_stops_early(void) {
         solve_recording_last_depth(cgp, 18, thread_counts[i], &mid_last_depth);
     assert(deep_score == mid_score);
     assert(deep_last_depth < MAX_SEARCH_DEPTH);
+  }
+}
+
+static void record_depth_mask_callback(int depth, int32_t value,
+                                       const PVLine *pv_line, const Game *game,
+                                       const PVLine *ranked_pvs,
+                                       int num_ranked_pvs, void *user_data) {
+  (void)value;
+  (void)pv_line;
+  (void)game;
+  (void)ranked_pvs;
+  (void)num_ranked_pvs;
+  *(uint32_t *)user_data |= 1U << depth;
+}
+
+// Solves to a fixed depth. With a callback registered the solver must report
+// every depth; without one it may skip iterations of the other parity.
+static int solve_fixed_depth(const char *cgp, int plies, int threads,
+                             bool with_callback, uint32_t *depth_mask,
+                             int *reported_depth) {
+  Config *config = config_create_or_die("set -s1 score -s2 score");
+  load_and_exec_config_or_die(config, cgp);
+  EndgameResults *endgame_results = config_get_endgame_results(config);
+  ErrorStack *error_stack = error_stack_create();
+  EndgameCtx *endgame_ctx = NULL;
+  EndgameArgs endgame_args = {0};
+  endgame_args.thread_control = config_get_thread_control(config);
+  endgame_args.game = config_get_game(config);
+  endgame_args.plies = plies;
+  endgame_args.tt_fraction_of_mem = config_get_tt_fraction_of_mem(config);
+  endgame_args.initial_small_move_arena_size =
+      DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
+  endgame_args.num_threads = threads;
+  endgame_args.use_heuristics = true;
+  endgame_args.forced_pass_bypass = true;
+  endgame_args.num_top_moves = 1;
+  if (with_callback) {
+    endgame_args.enable_pv_display = true;
+    endgame_args.per_ply_callback = record_depth_mask_callback;
+    endgame_args.per_ply_callback_data = depth_mask;
+  }
+  endgame_args.seed = 42;
+  *depth_mask = 0;
+  endgame_solve(&endgame_ctx, &endgame_args, endgame_results, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  const int score =
+      endgame_results_get_pvline(endgame_results, ENDGAME_RESULT_BEST)->score;
+  *reported_depth =
+      endgame_results_get_depth(endgame_results, ENDGAME_RESULT_BEST);
+  endgame_ctx_destroy(endgame_ctx);
+  error_stack_destroy(error_stack);
+  config_destroy(config);
+  return score;
+}
+
+// A fixed-depth solve with no callback steps by two from its target depth; it
+// must return the same score and report the target depth, and a solve with a
+// single-thread solve with a per-ply callback must still visit every depth.
+static void test_fixed_depth_stepping(void) {
+  const char *cgps[] = {
+      "cgp "
+      "9A1PIXY/9S1L3/2ToWNLETS1O3/9U1DA1R/3GERANIAL1U1I/9g2T1C/8WE2OBI/"
+      "6EMU4ON/6AID3GO1/5HUN4ET1/4ZA1T4ME1/1Q1FAKEY3JOES/FIVE1E5IT1C/"
+      "5SPORRAN2A/6ORE2N2D BGIV/DEHILOR 384/389 0 -lex NWL20",
+      "cgp 7F3QINS/7E3E2H/6ORBITED1O/3JAMBU2OM2R/1ROATE1L2FAV1T/"
+      "GI5ED1T1OPE/OD6R3WEN/EL5RUNTY2S/1E6N2U3/1Y5AKA1C3/ES1VAgUIsH1C3/"
+      "X2I7A3/I2G11/LOOING9/E2A11 ADLRSTZ/EIINPW 451/296 0 -lex CSW24"};
+  const int thread_counts[] = {1, 4};
+  for (int cgp_idx = 0; cgp_idx < 2; cgp_idx++) {
+    for (int plies = 4; plies <= 6; plies++) {
+      for (int thread_idx = 0; thread_idx < 2; thread_idx++) {
+        uint32_t plain_mask;
+        uint32_t stepped_mask;
+        int plain_depth;
+        int stepped_depth;
+        const int plain_score = solve_fixed_depth(
+            cgps[cgp_idx], plies, thread_counts[thread_idx],
+            /*with_callback=*/true, &plain_mask, &plain_depth);
+        const int stepped_score = solve_fixed_depth(
+            cgps[cgp_idx], plies, thread_counts[thread_idx],
+            /*with_callback=*/false, &stepped_mask, &stepped_depth);
+        assert(plain_score == stepped_score);
+        assert(plain_depth == plies);
+        assert(stepped_depth == plies);
+        // With several threads another worker can finish a depth first, so
+        // only a single-thread solve is guaranteed to report every depth.
+        for (int depth = 1; thread_counts[thread_idx] == 1 && depth <= plies;
+             depth++) {
+          assert((plain_mask & (1U << depth)) != 0);
+        }
+      }
+    }
   }
 }
 
@@ -1835,12 +1928,133 @@ static void test_time_limited_leaf_playout(void) {
   config_destroy(config);
 }
 
+static void test_endgame_played_move(void) {
+  Config *config = config_create_or_die(
+      "set -lex CSW24 -threads 1 -ttfraction 0.0001 -eplies 10 -etopk 1");
+  load_and_exec_config_or_die(
+      config, "cgp 2ABERRaNT4G/5HE6FE/5OS5CUR/5DI5OMA/1HARPIST4WEN/"
+              "5ET2Q3TI/6E1VIVO2A/4JUDY2ABOIL/4I2ERASERS1/1DOWLY8M/"
+              "4TaLEGGIO2I/7Z6C/7I3PUNK/7NONTONAL/7E2AX2E AD/EFU 467/497 0");
+  assert_config_exec_status(config, "endgame pass", ERROR_STATUS_SUCCESS);
+  EndgameResults *results = config_get_endgame_results(config);
+  assert(endgame_results_get_actual_move_found(results));
+  assert(endgame_results_get_value(results, ENDGAME_RESULT_ACTUAL) <
+         endgame_results_get_value(results, ENDGAME_RESULT_BEST));
+  char *output =
+      endgame_results_get_string(results, config_get_game(config), NULL);
+  assert(has_substring(output, "played pass"));
+  free(output);
+  assert_config_exec_status(config, "endgame 5K DA...", ERROR_STATUS_SUCCESS);
+  assert(endgame_results_get_actual_move_found(results));
+  assert_config_exec_status(config, "endgame 13H .D", ERROR_STATUS_SUCCESS);
+  assert(endgame_results_get_actual_move_found(results));
+  const int horizontal_value =
+      endgame_results_get_value(results, ENDGAME_RESULT_ACTUAL);
+  assert_config_exec_status(config, "endgame I13 D.", ERROR_STATUS_SUCCESS);
+  assert(endgame_results_get_actual_move_found(results));
+  assert(endgame_results_get_value(results, ENDGAME_RESULT_ACTUAL) ==
+         horizontal_value);
+  // The requested move belongs to this invocation, not subsequent searches.
+  assert_config_exec_status(config, "endgame", ERROR_STATUS_SUCCESS);
+  assert(!endgame_results_get_actual_move_found(results));
+  assert_config_exec_status(config, "endgame pass,pass",
+                            ERROR_STATUS_ENDGAME_INVALID_ACTUAL_MOVE);
+  assert(!endgame_results_get_actual_move_found(results));
+  assert(!endgame_results_get_valid_for_current_game_state(results));
+  config_destroy(config);
+}
+
+typedef struct PauseAfterDepth {
+  ThreadControl *control;
+  atomic_int depth;
+  atomic_bool paused;
+} PauseAfterDepth;
+
+static void pause_after_first_depth(int depth, int32_t value,
+                                    const PVLine *pv_line, const Game *game,
+                                    const PVLine *ranked_pvs,
+                                    int num_ranked_pvs, void *user_data) {
+  (void)value;
+  (void)pv_line;
+  (void)game;
+  (void)ranked_pvs;
+  (void)num_ranked_pvs;
+  PauseAfterDepth *pause = user_data;
+  assert(depth > atomic_load(&pause->depth));
+  atomic_store(&pause->depth, depth);
+  if (depth == 1) {
+    assert(thread_control_set_paused(pause->control, true));
+    atomic_store(&pause->paused, true);
+  }
+}
+
+static void *resume_endgame_search(void *data) {
+  const PauseAfterDepth *pause = data;
+  const int64_t deadline = ctimer_monotonic_ns() + INT64_C(10000000000);
+  while (!atomic_load(&pause->paused)) {
+    assert(ctimer_monotonic_ns() < deadline);
+    ctime_nap(0.001);
+  }
+  ctime_nap(0.05);
+  assert(atomic_load(&pause->depth) == 1);
+  assert(thread_control_get_status(pause->control) ==
+         THREAD_CONTROL_STATUS_STARTED);
+  assert(thread_control_set_paused(pause->control, false));
+  return NULL;
+}
+
+void test_endgame_pause(void) {
+  Config *config =
+      config_create_or_die("set -s1 score -s2 score -ttfraction 0.001");
+  load_and_exec_config_or_die(
+      config,
+      "cgp "
+      "GATELEGs1POGOED/R4MOOLI3X1/AA10U2/YU4BREDRIN2/1TITULE3E1IN1/1E4N3c1BOK/"
+      "1C2O4CHARD1/QI1FLAWN2E1OE1/IS2E1HIN1A1W2/1MOTIVATE1T1S2/1S2N5S4/"
+      "3PERJURY5/15/15/15 FV/AADIZ 442/388 0 -lex CSW24");
+  PauseAfterDepth pause = {.control = config_get_thread_control(config)};
+  atomic_init(&pause.depth, 0);
+  atomic_init(&pause.paused, false);
+  thread_control_set_status(pause.control, THREAD_CONTROL_STATUS_STARTED);
+  EndgameArgs args = {0};
+  args.thread_control = pause.control;
+  args.game = config_get_game(config);
+  args.plies = 25;
+  args.tt_fraction_of_mem = config_get_tt_fraction_of_mem(config);
+  args.initial_small_move_arena_size = DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
+  args.num_threads = 1;
+  args.use_heuristics = true;
+  args.forced_pass_bypass = true;
+  args.enable_pv_display = true;
+  args.num_top_moves = 1;
+  args.per_ply_callback = pause_after_first_depth;
+  args.per_ply_callback_data = &pause;
+  args.seed = 42;
+  cpthread_t controller;
+  cpthread_create(&controller, resume_endgame_search, &pause);
+  EndgameCtx *solver = NULL;
+  EndgameResults *results = config_get_endgame_results(config);
+  ErrorStack *errors = error_stack_create();
+  endgame_solve(&solver, &args, results, errors);
+  cpthread_join(controller);
+  assert(error_stack_is_empty(errors));
+  assert(atomic_load(&pause.paused));
+  assert(atomic_load(&pause.depth) > 1);
+  assert(endgame_results_get_depth(results, ENDGAME_RESULT_BEST) == 25);
+  assert(endgame_results_get_value(results, ENDGAME_RESULT_BEST) == -63);
+  endgame_ctx_destroy(solver);
+  error_stack_destroy(errors);
+  config_destroy(config);
+}
+
 void test_endgame(void) {
+  test_endgame_played_move();
   test_root_pvs_actual_pass();
   test_before_search_callback();
   test_single_pv_display();
   test_ctx_reuse();
   test_exhausted_tree_stops_early();
+  test_fixed_depth_stepping();
   test_solve_standard();
   test_incremental_movegen_identical();
   test_path_move_lists();
@@ -2002,6 +2216,7 @@ void test_multi_pv(void) {
 }
 
 void test_endgame_wasm(void) {
+  test_endgame_played_move();
   test_solve_standard();
   test_small_arena_realloc();
   test_pass_first();

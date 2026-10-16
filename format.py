@@ -21,6 +21,12 @@ IGNORED_DIRECTORIES = [
     # Add other directories to ignore here, e.g., os.path.normpath('src/old_code')
 ]
 
+# Files ignored like src/compat, for the same reason: the test suite's platform
+# layer, whose includes depend on the platform (see check_portability.py).
+IGNORED_FILES = [
+    os.path.normpath('test/test_platform.c'),
+]
+
 def format_c_or_h_file(filepath: str, write_changes: bool) -> Tuple[bool, bool]:
     """
     Formats a single .c/.h file by organizing its include statements according to specified rules.
@@ -216,7 +222,7 @@ def main():
     args = parser.parse_args()
 
     # Define the target directories for recursive processing
-    target_directories: List[str] = ['src', 'cmd', 'test', 'tools']
+    target_directories: List[str] = ['src', 'cmd', 'test', 'tools', 'wasmentry']
     files_to_process: List[str] = []
 
     if args.filename:
@@ -231,6 +237,9 @@ def main():
                     full_filepath = os.path.join(root, file)
                     # Skip files in any of the ignored directories
                     if any(os.path.normpath(full_filepath).startswith(ignored_dir) for ignored_dir in IGNORED_DIRECTORIES):
+                        continue
+
+                    if os.path.normpath(full_filepath) in IGNORED_FILES:
                         continue
 
                     if file == args.filename and (file.endswith('.c') or file.endswith('.h')):
@@ -261,8 +270,11 @@ def main():
                     continue
 
                 for file in files:
+                    full_filepath = os.path.join(root, file)
+                    if os.path.normpath(full_filepath) in IGNORED_FILES:
+                        continue
                     if file.endswith('.c') or file.endswith('.h'):
-                        files_to_process.append(os.path.join(root, file))
+                        files_to_process.append(full_filepath)
 
     if not files_to_process:
         ignored_dirs_str = ", ".join(f"'{d}'" for d in IGNORED_DIRECTORIES)
