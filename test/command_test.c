@@ -1,5 +1,6 @@
 #include "command_test.h"
 
+#include "../src/compat/cfile.h"
 #include "../src/compat/cpthread.h"
 #include "../src/compat/cpthread_defs.h"
 #include "../src/compat/ctime.h"
@@ -427,13 +428,8 @@ void test_process_command(const char *arg_string, const char *output_substr,
   char *test_output_filename = get_test_filename("output");
   char *test_outerror_filename = get_test_filename("outerror");
 
-  const char *disable_save_settings = "";
-  if (!has_substring(arg_string, "-saves")) {
-    disable_save_settings = "-savesettings false";
-  }
-
-  char *arg_string_with_exec = get_formatted_string(
-      "./bin/magpie %s %s", arg_string, disable_save_settings);
+  char *arg_string_with_exec =
+      get_formatted_string("./bin/magpie %s", arg_string);
 
   // Reset the contents of output
   fclose_or_die(fopen_or_die(test_output_filename, "w"));
@@ -766,6 +762,29 @@ void test_save_settings(void) {
   free(save2);
 }
 
+// Unless the command line sets -savesettings true, MAGPIE neither writes the
+// settings file nor reads it.
+void test_settings_file_off_by_default(void) {
+  delete_file(DEFAULT_TEST_SETTINGS_FILENAME);
+  run_short_autoplay("set -mode sync -lex CSW21 -bb 73 -gp true -hr false");
+  assert(!cfile_access(DEFAULT_TEST_SETTINGS_FILENAME, CFILE_ACCESS_EXISTS));
+
+  // A settings file that fails to load shows whether it was read.
+  FILE *settings_file = fopen_or_die(DEFAULT_TEST_SETTINGS_FILENAME, "w");
+  fprintf_or_die(settings_file, "set -plies 2h3\n");
+  fclose_or_die(settings_file);
+  char *plies_error_substr = get_formatted_string(
+      "error %d", ERROR_STATUS_CONFIG_LOAD_MALFORMED_INT_ARG);
+  test_process_command("infer 1 MUZAKY 58 -numplays 20 -threads 4 -lex CSW21 "
+                       "-printonfinish true",
+                       "Total target racks", 0, NULL);
+  test_process_command("infer 1 MUZAKY 58 -numplays 20 -threads 4 -lex CSW21 "
+                       "-printonfinish true -savesettings true",
+                       NULL, 2, plies_error_substr);
+  free(plies_error_substr);
+  remove_or_die(DEFAULT_TEST_SETTINGS_FILENAME);
+}
+
 void test_command(void) {
   test_exec_single_command();
   test_command_execution();
@@ -774,6 +793,7 @@ void test_command(void) {
   test_exec_sync_command();
   test_exec_quit_aliases();
   test_save_settings();
+  test_settings_file_off_by_default();
   command_test_reset_stream_out();
   command_test_reset_stream_err();
   command_test_reset_stream_in();

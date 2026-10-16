@@ -3,6 +3,7 @@
 #include "../compat/cpthread.h"
 #include "../compat/cpthread_defs.h"
 #include "../compat/ctime.h"
+#include "../compat/memory_info.h"
 #include "../def/peg_defs.h"
 #include "../util/io_util.h"
 #include "move_gen.h"

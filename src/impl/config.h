@@ -257,9 +257,13 @@ void config_parse_gcg_string(Config *config, const char *gcg_string,
 // Settings
 void config_add_settings_to_string_builder(const Config *config,
                                            StringBuilder *sb);
+// Whether `cmd` sets savesettings to true. It is only parsed, not applied,
+// so a malformed `cmd` is reported when it is run, not here.
+bool config_command_turns_on_save_settings(Config *config, const char *cmd);
 // Writes config's current settings to config_get_settings_filename(config)
 // (settings.txt by default), the same file the REPL loop keeps in sync after
-// every command. No-op if config_get_save_settings(config) is false.
+// every command. No-op if config_get_save_settings(config) is false, which it
+// is unless savesettings was set to true.
 void save_config_settings(const Config *config, ErrorStack *error_stack);
 // The Config contribute's tasks run in, sharing the caller's thread control
 // and never saving settings, so the caller's session and settings file are
