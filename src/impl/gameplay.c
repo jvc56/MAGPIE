@@ -10,6 +10,7 @@
 #include "../def/players_data_defs.h"
 #include "../def/rack_defs.h"
 #include "../ent/bag.h"
+#include "../ent/best_move_carry.h"
 #include "../ent/board.h"
 #include "../ent/equity.h"
 #include "../ent/game.h"
