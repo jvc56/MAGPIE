@@ -35,6 +35,24 @@
 #define PEG_TT_MIN_SIZE_POWER TT_MIN_SIZE_POWER
 #endif
 
+// Per-worker stack of the PEG pool (peg_pool.c). Workers recurse into nested
+// solves while help-draining the queue (bounded by the PEG fork-nesting cap).
+// Natively 64 MiB is virtual address space, committed lazily, so only the
+// nesting depth actually reached is paid for. Emscripten instead mallocs each
+// thread's whole stack from the wasm heap the searches and lexica share, so the
+// browser gets a stack sized to use: a native worker stack reaches about 20 KiB
+// at the default nesting depth, and the PEG suite plus nesting four deep on
+// four workers run within 256 KiB in wasm with STACK_OVERFLOW_CHECK.
+#ifdef __EMSCRIPTEN__
+enum {
+  PEG_POOL_WORKER_STACK_BYTES = 4 * 1024 * 1024,
+};
+#else
+enum {
+  PEG_POOL_WORKER_STACK_BYTES = 64 * 1024 * 1024,
+};
+#endif
+
 static inline bool search_memory_is_bounded(void) {
 #ifdef __EMSCRIPTEN__
   return true;

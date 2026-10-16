@@ -1,6 +1,6 @@
 // Browser allocator telemetry and probes have no native equivalent.
 #ifdef __EMSCRIPTEN__
-#include "../src/def/peg_defs.h"
+#include "../src/compat/memory_info.h"
 #include <emscripten/heap.h>
 #include <malloc.h>
 #include <stddef.h>
