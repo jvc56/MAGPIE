@@ -882,9 +882,9 @@ static void test_a_task_runs_without_the_tables_it_has_no_room_for(void) {
     printf("contribute_tables: skipped the no-memory case: no free memory "
            "figure here\n");
   } else {
-    result = run_tables_task(assignment, true,
-                             "diskreserve 0\nmemreserve 1000000\n", 0,
-                             &movegens, &skipped);
+    result =
+        run_tables_task(assignment, true, "diskreserve 0\nmemreserve 1000000\n",
+                        0, &movegens, &skipped);
     assert(skipped == all_three);
     assert_strings_equal(result, plain);
     assert(movegens == plain_movegens);
