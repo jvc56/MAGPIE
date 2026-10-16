@@ -81,9 +81,7 @@ function readString(fn) {
       pegMemoryFits: wrap("wasm_peg_memory_fits", "number", ["number"]),
       memoryAllocated: wrap("wasm_memory_allocated_bytes", "number"),
       memoryFree: wrap("wasm_memory_free_bytes", "number"),
-      prepareWMP: wrap("wasm_prepare_wmp", "number", ["number", "number", "number", "number", "number", "number", "number"]),
-      witData: wrap("wasm_wit_data", "number"),
-      witDataSize: wrap("wasm_wit_data_size", "number"),
+      prepareWMP: wrap("wasm_prepare_wmp", "number", ["number", "number", "number", "number", "number"]),
       wmpData: wrap("wasm_wmp_data", "number"),
       wmpDataSize: wrap("wasm_wmp_data_size", "number"),
       cancelWMP: wrap("wasm_cancel_wmp", null),
@@ -387,7 +385,7 @@ async function prepareWMP({ source, lexicon, threads, manifestURL, cache = false
   running = true;
   stopping = false;
   activeCommand = "WMP";
-  let ptr = 0, witPtr = 0, name = 0, nativeStarted = false, nativeFinished = false, retryBuild = false, unavailable = false;
+  let ptr = 0, name = 0, nativeStarted = false, nativeFinished = false, retryBuild = false, unavailable = false;
   wmpAbort = new AbortController();
   const progress = (text) => send("wmp_progress", { text });
   const warning = (error) => send("wmp_cache_warning", { text: `WMP cache unavailable: ${error.message}` });
@@ -395,7 +393,7 @@ async function prepareWMP({ source, lexicon, threads, manifestURL, cache = false
     const { wmpAsset, downloadWMP, sha256, validateWMP } = await import("./wmp-assets.mjs");
     const { readWMP, saveWMP, removeWMP } = await import("./wmp-cache.mjs");
     const kwgHash = kwgHashes.get(`data/lexica/${lexicon}.kwg`);
-    let bytes, wit, cached = false, fromCache = false, witFromCache = false;
+    let bytes, cached = false, fromCache = false;
     let invalidCache = false;
     try {
       const saved = skipCache ? null : await readWMP(lexicon, kwgHash);
@@ -406,13 +404,7 @@ async function prepareWMP({ source, lexicon, threads, manifestURL, cache = false
         validateWMP(saved.bytes);
         bytes = saved.bytes;
         fromCache = true;
-        if (saved.wit && saved.wit.byteLength === saved.metadata.wit_bytes &&
-            saved.wit.byteLength <= 256 * 1024 * 1024 &&
-            await sha256(saved.wit) === saved.metadata.wit_sha256) {
-          wit = saved.wit;
-          witFromCache = true;
-          cached = true;
-        }
+        cached = true;
         invalidCache = false;
         progress("Loading cached WMP…");
       }
@@ -437,33 +429,19 @@ async function prepareWMP({ source, lexicon, threads, manifestURL, cache = false
       Module.HEAPU8.set(bytes, ptr);
       progress(fromCache ? "Loading cached WMP indexes…" : "Loading WMP indexes…");
     }
-    if (wit) {
-      witPtr = Module._malloc(wit.length);
-      if (!witPtr) throw Object.assign(new Error("Not enough memory to load WIT."), {code: "WMP_MEMORY"});
-      Module.HEAPU8.set(wit, witPtr);
-    }
     name = Module.stringToNewUTF8(lexicon);
     const count = Math.max(1, Math.min(14, Math.floor(threads) || 1));
     await Module.warmThreads(count + 3);
     checkEngine();
     if (stopping) return send("wmp_ready", { stopped: true });
     if (!bytes) send("wmp_build_started", {lexicon});
-    if (api.prepareWMP(name, ptr, bytes?.length || 0, count, cache && (!fromCache || !witFromCache) ? 1 : 0, witPtr, wit?.length || 0) !== 0)
+    if (api.prepareWMP(name, ptr, bytes?.length || 0, count, cache && !fromCache ? 1 : 0) !== 0)
       throw new Error("Could not start WMP preparation.");
     nativeStarted = true;
     let value;
     while (!fatal && !(value = JSON.parse(readString(api.wmpProgress))).done) {
       const { stage, total, completed: complete } = value;
-      // Once WIT starts, the native reader no longer borrows the WMP input.
-      if (stage >= 6 && ptr) { Module._free(ptr); ptr = 0; }
-      if (!cache && stage >= 6) bytes = undefined;
-      if (stage === 6) {
-        progress(stopping ? "Stopping after WIT preparation…" : "Building WIT indexes…");
-      } else if (stage === 7) {
-        progress(stopping ? "Stopping after WIT preparation…" : "Loading cached WIT indexes…");
-      } else if (stage === 8) {
-        progress(stopping ? "Stopping after WIT preparation…" : "Preparing WIT cache…");
-      } else if (!bytes) {
+      if (!bytes) {
         progress(stopping ? "Stopping after WMP preparation…" :
           `Building WMP · ${["reading words", "word entries", "single blanks", "double blanks", "indexes", "saving file"][stage]}${total ? ` · ${complete}/${total} lengths` : ""} · ${count} threads`);
       }
@@ -471,14 +449,9 @@ async function prepareWMP({ source, lexicon, threads, manifestURL, cache = false
     }
     checkEngine();
     Module._free(ptr); ptr = 0;
-    Module._free(witPtr); witPtr = 0;
     if (!stopping && cache && !fromCache && !bytes) {
       const start = api.wmpData(), size = api.wmpDataSize();
       if (start && size) bytes = Module.HEAPU8.slice(start, start + size);
-    }
-    if (!stopping && cache && (!fromCache || !witFromCache)) {
-      const start = api.witData(), size = api.witDataSize();
-      if (start && size) wit = Module.HEAPU8.slice(start, start + size);
     }
     const result = api.finishWMP(stopping ? 0 : 1);
     nativeFinished = true;
@@ -492,18 +465,17 @@ async function prepareWMP({ source, lexicon, threads, manifestURL, cache = false
     if (!stopping && !retryBuild && cache && !fromCache && !bytes) {
       warning(new Error("Not enough memory to export WMP for caching."));
     }
-    if (!stopping && !retryBuild && cache && (!fromCache || !witFromCache) && bytes) {
-      progress("Saving WMP and WIT on this device…");
+    if (!stopping && !retryBuild && cache && !fromCache && bytes) {
+      progress("Saving WMP on this device…");
       try {
-        if (!wit) throw new Error("Not enough memory or an export error prevented WIT caching.");
-        await saveWMP(lexicon, kwgHash, await sha256(bytes), source, bytes, wit, await sha256(wit));
+        await saveWMP(lexicon, kwgHash, await sha256(bytes), source, bytes);
         cached = true;
       }
       catch (error) { warning(error); }
     }
     if (!retryBuild) {
       reportMemory();
-      send("wmp_ready", { stopped: stopping, fromCache, witFromCache, cached });
+      send("wmp_ready", { stopped: stopping, fromCache, cached });
     }
   } catch (error) {
     if (stopping && error.name === "AbortError") send("wmp_ready", { stopped: true });
@@ -517,7 +489,6 @@ async function prepareWMP({ source, lexicon, threads, manifestURL, cache = false
       readString(api.error);
     }
     Module._free(ptr);
-    Module._free(witPtr);
     Module._free(name);
     wmpAbort = null;
     running = false;

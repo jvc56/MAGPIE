@@ -136,7 +136,7 @@ test('failed exports warn without disabling ordinary analysis', async ({page}) =
     try {
       await engine.prepare('CSW24');
       await engine.prepareWMP('CSW24','build',2,true);
-      const response = await engine.run(['set -wmp false -wit false']);
+      const response = await engine.run(['set -wmp false']);
       return {warnings, stopped:response.stopped, files:(await engine.wmpCache()).files};
     } finally {engine.worker.terminate();}
   });
