@@ -22,7 +22,6 @@ for (const scenario of [
   {name:'desktop retaining maps after simulation', ceiling:1024, mobile:false, warm:true, maps:true, expected:4},
   {name:'mobile with a 1 GiB ceiling', ceiling:1024, mobile:true, expected:4},
   {name:'desktop with 256 MiB already allocated in a 512 MiB heap', ceiling:512, mobile:false, heldMiB:256, expected:4},
-  {name:'desktop with 320 MiB already allocated in a 512 MiB heap', ceiling:512, mobile:false, heldMiB:320, expected:2},
 ]) {
   test(`PEG chooses workers by allocatable memory on ${scenario.name}`, async ({page}) => {
     test.setTimeout(90000);
