@@ -317,10 +317,11 @@ static size_t wit_position_length_cells(const WordInfoTable *wit,
          (size_t)wit_stride_for_len(base_length);
 }
 
-static bool wit_write_stream(const WordInfoTable *wit, bool positional,
-                             bool position_lengths, FILE *stream) {
+static bool wit_write_stream(const WordInfoTable *wit, uint8_t version,
+                             bool positional, bool position_lengths,
+                             FILE *stream) {
   const uint8_t header[4] = {
-      WIT_VERSION, BOARD_DIM,
+      version, BOARD_DIM,
       (uint8_t)((positional ? WIT_FLAG_WORD_PLUS_FLOATER : 0) |
                 (position_lengths ? WIT_FLAG_POSITION_LENGTHS : 0)),
       0};
@@ -395,8 +396,10 @@ size_t word_info_table_write_size(const WordInfoTable *wit) {
   return size;
 }
 
-void word_info_table_write_to_stream(const WordInfoTable *wit, FILE *stream,
-                                     ErrorStack *error_stack) {
+// Writes version 5, or with_position_lengths false, version 4.
+static void wit_write_to_stream(const WordInfoTable *wit,
+                                bool with_position_lengths, FILE *stream,
+                                ErrorStack *error_stack) {
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
@@ -408,8 +411,8 @@ void word_info_table_write_to_stream(const WordInfoTable *wit, FILE *stream,
   valid = valid && (!positional || (wit->kwg_hash != 0 &&
                                     wit_positional_alphabet_supported(wit)));
   // A table with a KWG hash always has its position lengths built
-  // (word_info_table_build_position_lengths), so they are always written.
-  const bool position_lengths = wit->kwg_hash != 0;
+  // (word_info_table_build_position_lengths), so version 5 always writes them.
+  const bool position_lengths = with_position_lengths && wit->kwg_hash != 0;
   for (int length = WIT_POSITION_MIN_BASE_LENGTH;
        valid && position_lengths && length <= WIT_POSITION_MAX_BASE_LENGTH;
        length++) {
@@ -429,16 +432,24 @@ void word_info_table_write_to_stream(const WordInfoTable *wit, FILE *stream,
                      string_duplicate("cannot write invalid word info table"));
     return;
   }
-  if (!wit_write_stream(wit, positional, position_lengths, stream)) {
+  const uint8_t version = with_position_lengths
+                              ? WIT_VERSION
+                              : WIT_VERSION_WITHOUT_POSITION_LENGTHS;
+  if (!wit_write_stream(wit, version, positional, position_lengths, stream)) {
     error_stack_push(
         error_stack, ERROR_STATUS_RW_WRITE_ERROR,
         string_duplicate("could not write word info table stream"));
   }
 }
 
-void word_info_table_write_to_file(const WordInfoTable *wit,
-                                   const char *filename,
-                                   ErrorStack *error_stack) {
+void word_info_table_write_to_stream(const WordInfoTable *wit, FILE *stream,
+                                     ErrorStack *error_stack) {
+  wit_write_to_stream(wit, true, stream, error_stack);
+}
+
+static void wit_write_to_file(const WordInfoTable *wit, const char *filename,
+                              bool with_position_lengths,
+                              ErrorStack *error_stack) {
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
@@ -452,7 +463,7 @@ void word_info_table_write_to_file(const WordInfoTable *wit,
                              filename, strerror(errno)));
     return;
   }
-  word_info_table_write_to_stream(wit, stream, error_stack);
+  wit_write_to_stream(wit, with_position_lengths, stream, error_stack);
   bool written = error_stack_is_empty(error_stack);
   int error_number = 0;
   if (!cfile_atomic_write_end(&atomic_write, written) && written) {
@@ -466,6 +477,18 @@ void word_info_table_write_to_file(const WordInfoTable *wit,
                              error_number != 0 ? strerror(error_number)
                                                : "unknown I/O failure"));
   }
+}
+
+void word_info_table_write_to_file(const WordInfoTable *wit,
+                                   const char *filename,
+                                   ErrorStack *error_stack) {
+  wit_write_to_file(wit, filename, true, error_stack);
+}
+
+void word_info_table_write_version_4_to_file(const WordInfoTable *wit,
+                                             const char *filename,
+                                             ErrorStack *error_stack) {
+  wit_write_to_file(wit, filename, false, error_stack);
 }
 
 static bool wit_read_trie(WitTrie *trie, int length, size_t *remaining,

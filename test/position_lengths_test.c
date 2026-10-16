@@ -26,6 +26,7 @@
 #include "../src/impl/move_gen.h"
 #include "../src/impl/wmp_maker.h"
 #include "../src/impl/word_info_table_maker.h"
+#include "../src/impl/word_plus_floater_maker.h"
 #include "../src/util/io_util.h"
 #include "../src/util/string_util.h"
 #include "test_util.h"
@@ -292,6 +293,83 @@ static void test_load_rebuild_and_cleanup(void) {
   assert_literal_cache(words, loaded);
   remove_or_die(filename);
   free(filename);
+  error_stack_destroy(errors);
+  word_info_table_destroy(loaded);
+  word_info_table_destroy(wit);
+  kwg_destroy(kwg);
+  dictionary_word_list_destroy(words);
+}
+
+static uint8_t *read_whole_file(const char *filename, size_t *size) {
+  FILE *file = fopen_or_die(filename, "rb");
+  fseek_or_die(file, 0, SEEK_END);
+  const long file_size = ftell(file);
+  assert(file_size > 0);
+  fseek_or_die(file, 0, SEEK_SET);
+  uint8_t *bytes = malloc_or_die((size_t)file_size);
+  const size_t read_size = fread(bytes, 1, (size_t)file_size, file);
+  assert(read_size == (size_t)file_size);
+  fclose_or_die(file);
+  *size = (size_t)file_size;
+  return bytes;
+}
+
+// The version 4 layout birdtest checks (kwg2witv4) is the version 5 file
+// without its position-length rows, under a version 4 header, and loads into
+// the same rows. So leaving the rows out of the checked file loses nothing.
+static void test_version_4_layout(void) {
+  DictionaryWordList *words = oracle_words();
+  KWG *kwg =
+      make_kwg_from_words(words, KWG_MAKER_OUTPUT_DAWG, KWG_MAKER_MERGE_EXACT);
+  WordInfoTable *wit = make_word_info_table_from_kwg(kwg, 1);
+  ErrorStack *errors = error_stack_create();
+  make_word_plus_floater_from_kwg(kwg, wit, errors);
+  assert(error_stack_is_empty(errors));
+  char *filename = data_filepaths_get_writable_filename(
+      DEFAULT_TEST_DATA_PATH, "position_lengths_version_4",
+      DATA_FILEPATH_TYPE_WORD_INFO_TABLE, errors);
+  assert(error_stack_is_empty(errors));
+
+  word_info_table_write_to_file(wit, filename, errors);
+  assert(error_stack_is_empty(errors));
+  size_t v5_size = 0;
+  uint8_t *v5 = read_whole_file(filename, &v5_size);
+  word_info_table_write_version_4_to_file(wit, filename, errors);
+  assert(error_stack_is_empty(errors));
+  size_t v4_size = 0;
+  uint8_t *v4 = read_whole_file(filename, &v4_size);
+
+  size_t position_bytes = 0;
+  for (int length = WIT_POSITION_MIN_BASE_LENGTH;
+       length <= WIT_POSITION_MAX_BASE_LENGTH; length++) {
+    position_bytes += (size_t)wit->tries[length].num_values *
+                      wit_stride_for_len(length) * sizeof(uint32_t);
+  }
+  assert(position_bytes > 0);
+  assert(v4_size + position_bytes == v5_size);
+  assert(v5[0] == WIT_VERSION);
+  assert(v4[0] == WIT_VERSION_WITHOUT_POSITION_LENGTHS);
+  assert(v5[2] == (WIT_FLAG_WORD_PLUS_FLOATER | WIT_FLAG_POSITION_LENGTHS));
+  assert(v4[2] == WIT_FLAG_WORD_PLUS_FLOATER);
+  assert(v4[1] == v5[1] && v4[3] == v5[3]);
+  assert(memcmp(v4 + 4, v5 + 4, v4_size - 4) == 0);
+
+  WordInfoTable *loaded = calloc_or_die(1, sizeof(WordInfoTable));
+  word_info_table_load(loaded, "position_lengths_version_4", filename, errors);
+  assert(error_stack_is_empty(errors));
+  for (int length = WIT_POSITION_MIN_BASE_LENGTH;
+       length <= WIT_POSITION_MAX_BASE_LENGTH; length++) {
+    const size_t bytes = (size_t)wit->tries[length].num_values *
+                         wit_stride_for_len(length) * sizeof(uint32_t);
+    assert(bytes == 0 || memcmp(loaded->position_lengths[length],
+                                wit->position_lengths[length], bytes) == 0);
+  }
+  assert_literal_cache(words, loaded);
+
+  remove_or_die(filename);
+  free(filename);
+  free(v4);
+  free(v5);
   error_stack_destroy(errors);
   word_info_table_destroy(loaded);
   word_info_table_destroy(wit);
@@ -578,6 +656,7 @@ static void test_shadow_foreign_rows_and_undo(void) {
 void test_position_lengths(void) {
   test_literal_derivation();
   test_load_rebuild_and_cleanup();
+  test_version_4_layout();
   test_shadow_boundary_moves();
   test_shadow_foreign_rows_and_undo();
   printf("POSITION_LENGTHS_TEST_PASS board=%d root=%d queries=%d\n", BOARD_DIM,

@@ -2398,7 +2398,7 @@ static void test_lexical_flags_are_set_before_the_load(void) {
   // And a word info table the same way, for the player that asks: built here
   // as the worker builds it, for a lexicon small enough to take milliseconds.
   const ConversionArgs wit_args = {
-      .conversion_type_string = "kwg2wit",
+      .conversion_type_string = "kwg2witv4",
       .data_paths = config_get_data_paths(config),
       .input_and_output_name = "CSW21_ab",
       .ld_name = "english_ab",

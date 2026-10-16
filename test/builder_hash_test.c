@@ -43,7 +43,7 @@
 #define PINNED_RIT_SHA256                                                      \
   "b064d7729ba9117890595bdaa72e005314955b36f2377c97e5eb25a705211037"
 #define PINNED_WIT_SHA256                                                      \
-  "a78131759e2cd2c9820f2852b81fdec1d825dc160d8c45e7b0e7361daa16e479"
+  "a5677f57982fd8b89aed8acce09c76cea2ae90659c8da70a822d8ed1b265397c"
 
 // The KLV builders: `createdata klv` (every leave zero, a leave-generation
 // job's generation 0) and `convert rackequity2klv` (each later generation, from
@@ -64,7 +64,7 @@ enum {
   PINNED_WMP_BUILDER_VERSION = 1,
   PINNED_RIT_BUILDER_VERSION = 1,
   PINNED_KLV_BUILDER_VERSION = 1,
-  PINNED_WIT_BUILDER_VERSION = 2,
+  PINNED_WIT_BUILDER_VERSION = 1,
 };
 
 static void assert_built_file_hash(const char *data_paths, const char *name,
@@ -162,9 +162,10 @@ static void test_derived_builders_match_their_pinned_hashes(void) {
                          "RIT", RIT_BUILDER_VERSION,
                          PINNED_RIT_BUILDER_VERSION);
 
-  // From the .kwg alone, as birdtest's server and its workers build it.
+  // From the .kwg alone, in the version 4 layout, as birdtest's server and
+  // its workers build it.
   const ConversionArgs wit_args = {
-      .conversion_type_string = "kwg2wit",
+      .conversion_type_string = "kwg2witv4",
       .data_paths = data_paths,
       .input_and_output_name = "CSW21_ab",
       .ld_name = "english_ab",
@@ -173,7 +174,7 @@ static void test_derived_builders_match_their_pinned_hashes(void) {
   convert(&wit_args, results, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     error_stack_print_and_reset(error_stack);
-    log_fatal("kwg2wit failed");
+    log_fatal("kwg2witv4 failed");
   }
   assert_built_file_hash(data_paths, "CSW21_ab",
                          DATA_FILEPATH_TYPE_WORD_INFO_TABLE, PINNED_WIT_SHA256,

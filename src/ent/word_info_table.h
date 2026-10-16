@@ -30,6 +30,9 @@
 enum {
   // Bump WIT_VERSION whenever the on-disk layout changes incompatibly.
   WIT_VERSION = 5,
+  // The layout word_info_table_write_version_4_to_file keeps writing: version
+  // 5 without its position-length rows, which a load derives instead.
+  WIT_VERSION_WITHOUT_POSITION_LENGTHS = 4,
   WIT_FLAG_WORD_PLUS_FLOATER = 1,
   WIT_FLAG_POSITION_LENGTHS = 2,
   WIT_EARLIEST_SUPPORTED_VERSION = 3,
@@ -208,6 +211,14 @@ void word_info_table_load_from_stream(WordInfoTable *wit, const char *name,
 void word_info_table_write_to_file(const WordInfoTable *wit,
                                    const char *filename,
                                    ErrorStack *error_stack);
+// The version 4 layout: what word_info_table_write_to_file writes, without the
+// position-length rows and under a version 4 header. A load derives the rows,
+// so it loads into the same table. This is what birdtest checks
+// (`convert kwg2witv4`): its bytes are what WIT builder 1 always wrote, so a
+// worker on any MAGPIE version builds the file the server pins.
+void word_info_table_write_version_4_to_file(const WordInfoTable *wit,
+                                             const char *filename,
+                                             ErrorStack *error_stack);
 void word_info_table_load(WordInfoTable *wit, const char *name,
                           const char *filename, ErrorStack *error_stack);
 WordInfoTable *word_info_table_create(const char *data_paths,

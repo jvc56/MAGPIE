@@ -121,6 +121,13 @@ at `p`, so only bits `b + p` through the dimension may be set. These are
 derived from the complete dictionary; storing them saves deriving them on
 every load, which a version-3 or version-4 file still does.
 
+`convert kwg2witv4 NAME` writes the same table in the version-4 layout: the
+version-5 file without its position-length rows, with version byte 4 and flag
+bit 1 clear. birdtest builds and checks that file (`WIT_BUILDER_VERSION` in
+`src/def/builder_defs.h` versions it). Its bytes are what every MAGPIE before
+version 5 wrote, so workers on either side of the change build the file the
+server pins, and the rows they leave out are derived on load.
+
 The loader validates the version, flags, dimension, trie structure, position
 lengths and exact payload size before exposing a table. The normal lexicon
 loader pairs the WIT with its KWG fingerprint. Unknown flags, malformed tries,
