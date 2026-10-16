@@ -1,7 +1,7 @@
 #include "inference.h"
 
 #include "../compat/cpthread.h"
-#include "../def/cpthread_defs.h"
+#include "../compat/cpthread_defs.h"
 #include "../def/equity_defs.h"
 #include "../def/game_history_defs.h"
 #include "../def/inference_defs.h"
@@ -34,6 +34,7 @@
 #include "move_gen.h"
 #include "rack_draw.h"
 #include <assert.h>
+#include <stdatomic.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -64,11 +65,15 @@ typedef struct Inference {
   // the top move.
   Equity equity_margin;
   bool use_infer_cutoff_optimization;
+  // Every worker walks every possible leave in the same order;
+  // current_rack_index is the position of the walk. A worker evaluates only
+  // the leave at the position it has claimed from shared_next_rack_index,
+  // which hands each position to exactly one worker.
   uint64_t current_rack_index;
+  uint64_t claimed_rack_index;
   int num_threads;
   int print_interval;
-  uint64_t *shared_rack_index;
-  cpthread_mutex_t *shared_rack_index_lock;
+  _Atomic uint64_t *shared_next_rack_index;
   cpthread_t cpthread_id;
   // Rack containing just the unknown leave, which is
   // the tiles on the target's rack unseen to
@@ -95,8 +100,7 @@ struct InferenceCtx {
   Game *game;
   int num_workers;
   Inference **worker_inferences;
-  uint64_t shared_rack_index;
-  cpthread_mutex_t shared_rack_index_lock;
+  _Atomic uint64_t shared_next_rack_index;
   Stat **leave_stats;
   Stat **exchanged_stats;
   Stat **rack_stats;
@@ -293,7 +297,7 @@ void complete_inference_setup(Inference *inference, const InferenceArgs *args) {
     string_builder_add_rack(sb, args->target_known_rack, ld, false);
     string_builder_add_string(sb, ") from the bag");
     char *err_msg = string_builder_dump_and_destroy(sb, NULL);
-    log_fatal(err_msg);
+    log_fatal("%s", err_msg);
     free(err_msg);
   }
 
@@ -307,7 +311,7 @@ void complete_inference_setup(Inference *inference, const InferenceArgs *args) {
     string_builder_add_rack(sb, args->nontarget_known_rack, ld, false);
     string_builder_add_string(sb, ") from the bag");
     char *err_msg = string_builder_dump_and_destroy(sb, NULL);
-    log_fatal(err_msg);
+    log_fatal("%s", err_msg);
     free(err_msg);
   }
 
@@ -427,6 +431,13 @@ bool should_print_info(const Inference *inference) {
          inference->current_rack_index % inference->print_interval == 0;
 }
 
+// Claims the next unclaimed position of the walk. The positions are handed out
+// in increasing order, so the claim is never behind the claiming worker.
+static uint64_t claim_next_rack_index(Inference *inference) {
+  return atomic_fetch_add_explicit(inference->shared_next_rack_index, 1,
+                                   memory_order_relaxed);
+}
+
 void iterate_through_all_possible_leaves(Inference *inference,
                                          int tiles_to_infer, int start_letter) {
   if (thread_control_get_status(inference->thread_control) ==
@@ -435,23 +446,13 @@ void iterate_through_all_possible_leaves(Inference *inference,
     return;
   }
   if (tiles_to_infer == 0) {
-    bool perform_evaluation = false;
-    bool print_info = false;
-
-    cpthread_mutex_lock(inference->shared_rack_index_lock);
-    if (inference->current_rack_index == *inference->shared_rack_index) {
-      print_info = should_print_info(inference);
-      perform_evaluation = true;
-      *inference->shared_rack_index += 1;
-    }
-    cpthread_mutex_unlock(inference->shared_rack_index_lock);
-
-    if (perform_evaluation) {
+    if (inference->current_rack_index == inference->claimed_rack_index) {
       evaluate_possible_leave(inference);
-    }
-    if (print_info) {
-      print_ucgi_inference_current_rack(inference->current_rack_index,
-                                        inference->thread_control);
+      if (should_print_info(inference)) {
+        print_ucgi_inference_current_rack(inference->current_rack_index,
+                                          inference->thread_control);
+      }
+      inference->claimed_rack_index = claim_next_rack_index(inference);
     }
     inference->current_rack_index++;
     return;
@@ -469,6 +470,7 @@ void iterate_through_all_possible_leaves(Inference *inference,
 void *infer_worker(void *uncasted_inference) {
   Inference *inference = (Inference *)uncasted_inference;
   (void)gen_set_movegen_budget(inference->movegen_budget);
+  inference->claimed_rack_index = claim_next_rack_index(inference);
   iterate_through_all_possible_leaves(
       inference,
       (RACK_SIZE)-rack_get_total_letters(inference->current_target_rack),
@@ -478,10 +480,8 @@ void *infer_worker(void *uncasted_inference) {
 }
 
 void set_shared_variables_for_inference(
-    Inference *inference, uint64_t *shared_rack_index,
-    cpthread_mutex_t *shared_rack_index_lock) {
-  inference->shared_rack_index = shared_rack_index;
-  inference->shared_rack_index_lock = shared_rack_index_lock;
+    Inference *inference, _Atomic uint64_t *shared_next_rack_index) {
+  inference->shared_next_rack_index = shared_next_rack_index;
 }
 
 void infer_manager(InferenceCtx *ctx, InferenceResults *results) {
@@ -598,7 +598,7 @@ void verify_inference_args(const InferenceArgs *args, const Game *game_dup,
                               game_get_ld(game_dup), false);
       string_builder_add_string(sb, ") not available in the bag");
       char *err_msg = string_builder_dump_and_destroy(sb, NULL);
-      log_fatal(err_msg);
+      log_fatal("%s", err_msg);
       free(err_msg);
       return;
     }
@@ -735,7 +735,7 @@ void inference_ctx_set_game(InferenceCtx *ctx, const Game *game) {
 // Assumes that ctx->game is set
 void inference_ctx_set_inferences(InferenceCtx *ctx, const InferenceArgs *args,
                                   InferenceResults *results) {
-  ctx->shared_rack_index = 0;
+  atomic_store_explicit(&ctx->shared_next_rack_index, 0, memory_order_relaxed);
   inference_results_reset(results, args->leave_list_capacity,
                           ld_get_size(game_get_ld(args->game)));
   if (ctx->worker_inferences[0]) {
@@ -743,12 +743,10 @@ void inference_ctx_set_inferences(InferenceCtx *ctx, const InferenceArgs *args,
       inference_reset(ctx->worker_inferences[i], ctx->game, args);
     }
   } else {
-    cpthread_mutex_init(&ctx->shared_rack_index_lock);
     for (int i = 0; i < ctx->num_workers; i++) {
       ctx->worker_inferences[i] = inference_create(ctx->game, args, results);
       set_shared_variables_for_inference(ctx->worker_inferences[i],
-                                         &ctx->shared_rack_index,
-                                         &ctx->shared_rack_index_lock);
+                                         &ctx->shared_next_rack_index);
     }
     ctx->leave_stats = malloc_or_die((sizeof(Stat *)) * (ctx->num_workers));
     ctx->exchanged_stats = malloc_or_die((sizeof(Stat *)) * (ctx->num_workers));

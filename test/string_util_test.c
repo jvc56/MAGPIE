@@ -1,5 +1,6 @@
 #include "string_util_test.h"
 
+#include "../src/compat/cmemfile.h"
 #include "../src/util/io_util.h"
 #include "../src/util/string_util.h"
 #include "test_util.h"
@@ -10,7 +11,7 @@
 #include <string.h>
 
 static void test_gicr_single_line(const char *data, const char *expected) {
-  FILE *f = fmemopen((void *)data, strlen(data), "r");
+  FILE *f = cmemfile_open(data, strlen(data));
   assert(f);
 
   char *line = NULL;
@@ -26,7 +27,7 @@ static void test_gicr_single_line(const char *data, const char *expected) {
 
 static void test_gicr_multiple_lines(const char *data, const char **expected,
                                      size_t count) {
-  FILE *f = fmemopen((void *)data, strlen(data), "r");
+  FILE *f = cmemfile_open(data, strlen(data));
   assert(f);
 
   char *line = NULL;

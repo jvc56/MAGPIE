@@ -1,8 +1,8 @@
 #include "endgame_results.h"
 
 #include "../compat/cpthread.h"
+#include "../compat/cpthread_defs.h"
 #include "../compat/ctime.h"
-#include "../def/cpthread_defs.h"
 #include "../ent/equity.h"
 #include "../ent/player.h"
 #include "../ent/transposition_table.h"

@@ -1,10 +1,10 @@
 #include "peg.h"
 
 #include "../compat/cpthread.h"
+#include "../compat/cpthread_defs.h"
 #include "../compat/ctime.h"
 #include "../compat/memory_info.h"
 #include "../def/board_defs.h"
-#include "../def/cpthread_defs.h"
 #include "../def/equity_defs.h"
 #include "../def/game_defs.h"
 #include "../def/game_history_defs.h"
@@ -31,6 +31,7 @@
 #include "../str/move_string.h"
 #include "../util/fnv.h"
 #include "../util/io_util.h"
+#include "../util/stable_sort.h"
 #include "../util/string_util.h"
 #include "cgp.h"
 #include "endgame.h"
@@ -147,6 +148,8 @@ typedef struct PegWorker {
   bool eg_tt_shared;
   // Shared per-solve cache of per-candidate leaf prunes (see PegPruneCache).
   PegPruneCache *prune_cache;
+  // PegArgs.disable_best_reply_shortcuts, for every leaf endgame solve.
+  bool disable_best_reply_shortcuts;
   // Opponent replies to the candidate this worker is evaluating.
   PegReplyCache *reply_cache;
 
@@ -1379,7 +1382,7 @@ static int32_t peg_nested_endgame_value(PegWorker *worker, Game *game,
       /*before_search_callback=*/NULL, /*before_search_callback_data=*/NULL,
       /*per_root_move_callback=*/NULL, /*per_root_move_callback_data=*/NULL,
       DUAL_LEXICON_MODE_IGNORANT, /*forced_pass_bypass=*/false,
-      /*incremental_movegen=*/true,
+      /*incremental_movegen=*/true, worker->disable_best_reply_shortcuts,
       /*enable_pv_display=*/false, /*soft_time_limit=*/0.0,
       /*hard_time_limit=*/0.0, PEG_ENDGAME_SEED, /*skip_word_pruning=*/true,
       peg_worker_get_endgame_tt(worker),
@@ -1863,7 +1866,7 @@ static int32_t peg_eval_leaf(PegEvalCtx *ctx, Game *game) {
       /*before_search_callback=*/NULL, /*before_search_callback_data=*/NULL,
       /*per_root_move_callback=*/NULL, /*per_root_move_callback_data=*/NULL,
       DUAL_LEXICON_MODE_IGNORANT, /*forced_pass_bypass=*/false,
-      /*incremental_movegen=*/true,
+      /*incremental_movegen=*/true, ctx->worker->disable_best_reply_shortcuts,
       /*enable_pv_display=*/ctx->capture != NULL, /*soft_time_limit=*/0.0,
       /*hard_time_limit=*/0.0, PEG_ENDGAME_SEED, /*skip_word_pruning=*/true,
       peg_worker_get_endgame_tt(ctx->worker),
@@ -2961,8 +2964,7 @@ static void *peg_injector_main(void *arg) {
         endgame_add_worker(least);
       }
     }
-    const struct timespec nap = {0, 2L * 1000 * 1000}; // 2 ms
-    nanosleep(&nap, NULL);
+    ctime_nap(0.002);
   }
   return NULL;
 }
@@ -3221,6 +3223,8 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
     workers[worker_idx].eg_tt_shared = args->shared_endgame_tt != NULL;
     workers[worker_idx].eg_tt_fraction = tt_fraction;
     workers[worker_idx].prune_cache = prune_cache;
+    workers[worker_idx].disable_best_reply_shortcuts =
+        args->disable_best_reply_shortcuts;
     workers[worker_idx].reply_cache = calloc_or_die(1, sizeof(PegReplyCache));
     // Nested-PEG lookahead config + free-list scratch.
     workers[worker_idx].thread_control = args->thread_control;
@@ -3335,7 +3339,7 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
                         scenario_stride, deadline_ns, args->thread_control,
                         args->poll, &progress, args->eval_bag_order,
                         args->eval_bag_order_len, ranked, args->checkpoint);
-    qsort(ranked, (size_t)n_cands, sizeof(PegRankedCand), peg_rank_cmp);
+    stable_sort(ranked, (size_t)n_cands, sizeof(PegRankedCand), peg_rank_cmp);
     // Drop budget-skipped sentinels (win_pct < 0) from the carried set: they
     // sort to the bottom, so the real candidates occupy [0, n_real).
     int n_real = 0;
@@ -3618,7 +3622,8 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
         // Ownership of each rows allocation moved into oc_store.
         free(stage_outcomes);
       }
-      qsort(restaged, (size_t)done_count, sizeof(PegRankedCand), peg_rank_cmp);
+      stable_sort(restaged, (size_t)done_count, sizeof(PegRankedCand),
+                  peg_rank_cmp);
       // Partial stage: candidates [done_count, eval_count) were selected but
       // the cutoff arrived before they were scored at this depth, so record
       // them at the previous depth before narrowing to the finished set.

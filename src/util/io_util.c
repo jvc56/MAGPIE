@@ -1,20 +1,21 @@
 #include "io_util.h"
 
+#include "../compat/cdir.h"
 #include "../compat/cfile.h"
+#include "../compat/cpath.h"
+#include "../compat/cpthread_defs.h"
+#include "../compat/cterm.h"
 #include "../compat/ctime.h"
-#include "../def/cpthread_defs.h"
 #include <assert.h>
 #include <ctype.h>
-#include <dirent.h>
 #include <errno.h>
-#include <pthread.h>
 #include <stdarg.h>
 #include <stdatomic.h>
 #include <stdbool.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/stat.h>
 #include <time.h>
 
 enum { ERROR_STACK_CAPACITY = 100 };
@@ -23,18 +24,21 @@ static log_level_t current_log_level = LOG_FATAL;
 static FILE *stream_out = NULL;
 static FILE *stream_err = NULL;
 static FILE *stream_in = NULL;
-static cpthread_mutex_t stream_mutex = PTHREAD_MUTEX_INITIALIZER;
+// Where io_wait_before_close reads its line, when a reader of the input has
+// been set (io_set_line_reader).
+static char *(*line_reader)(void) = NULL;
+static cpthread_mutex_t stream_mutex = CPTHREAD_MUTEX_INITIALIZER;
 
 // Local mutex wrappers to avoid circular dependency with cpthread.h
 static inline void stream_mutex_lock(void) {
-  if (pthread_mutex_lock(&stream_mutex)) {
+  if (cpthread_mutex_lock_status(&stream_mutex)) {
     (void)fprintf(stderr, "FATAL: stream mutex lock failed\n");
     abort();
   }
 }
 
 static inline void stream_mutex_unlock(void) {
-  if (pthread_mutex_unlock(&stream_mutex)) {
+  if (cpthread_mutex_unlock_status(&stream_mutex)) {
     (void)fprintf(stderr, "FATAL: stream mutex unlock failed\n");
     abort();
   }
@@ -175,10 +179,12 @@ void log_with_info(log_level_t log_level, const char *caller_filename,
     break;
   }
 
-  char time_buf[64];
-  time_t current_time = time(NULL);
-  time_buf[strftime(time_buf, sizeof(time_buf), "%Y-%m-%d %H:%M:%S",
-                    localtime(&current_time))] = '\0';
+  char time_buf[64] = "";
+  struct tm local;
+  if (cfile_localtime(time(NULL), &local)) {
+    time_buf[strftime(time_buf, sizeof(time_buf), "%Y-%m-%d %H:%M:%S",
+                      &local)] = '\0';
+  }
   fprintf_or_die(output_fh, "[%s] %-5s %s:%d: ", time_buf, level_string,
                  caller_filename, caller_line);
   va_list args;
@@ -189,6 +195,8 @@ void log_with_info(log_level_t log_level, const char *caller_filename,
   fflush_or_die(output_fh);
 
   if (exit_fatally) {
+    io_wait_before_close();
+    cterm_restore();
     abort();
   }
 }
@@ -215,9 +223,9 @@ void write_to_stream(FILE *stream, const char *fmt, ...) {
   va_end(args);
 }
 
-ssize_t getline_ignore_carriage_return(char **lineptr, size_t *n,
+int64_t getline_ignore_carriage_return(char **lineptr, size_t *n,
                                        FILE *stream) {
-  ssize_t nread = getline(lineptr, n, stream);
+  int64_t nread = cfile_getline(lineptr, n, stream);
   if (nread <= 0) {
     return nread;
   }
@@ -235,7 +243,7 @@ ssize_t getline_ignore_carriage_return(char **lineptr, size_t *n,
 char *read_line_from_stream(FILE *stream) {
   char *line = NULL;
   size_t len = 0;
-  ssize_t read;
+  int64_t read;
   errno = 0;
   read = getline_ignore_carriage_return(&line, &len, stream);
   if (read == -1) {
@@ -257,6 +265,17 @@ char *read_line_from_stream(FILE *stream) {
 
 char *read_line_from_stream_in(void) {
   return read_line_from_stream(get_stream_in());
+}
+
+void io_set_line_reader(char *(*reader)(void)) { line_reader = reader; }
+
+void io_wait_before_close(void) {
+  if (!cterm_owns_console()) {
+    return;
+  }
+  write_to_stream_err("\nPress Enter to close this window.");
+  char *line = line_reader ? line_reader() : read_line_from_stream_in();
+  free(line);
 }
 
 // WARNING: This function should only be called once at startup or for testing
@@ -309,7 +328,7 @@ void io_reset_stream_in(void) {
 void *malloc_or_die(size_t size) {
   void *uncasted_pointer = malloc(size);
   if (!uncasted_pointer) {
-    log_fatal("failed to malloc size of %lu", size);
+    log_fatal("failed to malloc size of %zu", size);
   }
   return uncasted_pointer;
 }
@@ -317,7 +336,7 @@ void *malloc_or_die(size_t size) {
 void *calloc_or_die(size_t number_of_elements, size_t size_of_element) {
   void *uncasted_pointer = calloc(number_of_elements, size_of_element);
   if (!uncasted_pointer) {
-    log_fatal("failed to calloc %lu elements of size %lu", number_of_elements,
+    log_fatal("failed to calloc %zu elements of size %zu", number_of_elements,
               size_of_element);
   }
   return uncasted_pointer;
@@ -326,7 +345,7 @@ void *calloc_or_die(size_t number_of_elements, size_t size_of_element) {
 void *realloc_or_die(void *realloc_target, size_t size) {
   void *realloc_result = realloc(realloc_target, size);
   if (!realloc_result) {
-    log_fatal("failed to realloc %p with size of %lu", realloc_target, size);
+    log_fatal("failed to realloc %p with size of %zu", realloc_target, size);
   }
   return realloc_result;
 }
@@ -419,7 +438,7 @@ void error_stack_print_and_reset(ErrorStack *error_stack) {
   if (!error_string) {
     return;
   }
-  write_to_stream_err(error_string);
+  write_to_stream_err("%s", error_string);
   free(error_string);
 }
 
@@ -443,8 +462,8 @@ void write_string_to_file(const char *filename, const char *mode,
   fclose_or_die(file_handle);
 }
 
-void fseek_or_die(FILE *stream, long offset, int whence) {
-  if (fseek(stream, offset, whence) != 0) {
+void fseek_or_die(FILE *stream, int64_t offset, int whence) {
+  if (cfile_seek(stream, offset, whence) != 0) {
     int error_number = errno;
     const char *system_error_message = strerror(error_number);
     log_fatal("failed to fseek stream: %s (%d)", system_error_message,
@@ -458,40 +477,54 @@ char *get_string_from_file_handle(FILE *file_handle, const char *filename,
     return NULL;
   }
 
-  // Get the file size by seeking to the end and then back to the beginning
-  fseek_or_die(file_handle, 0, SEEK_END);
-  long file_size = ftell(file_handle);
-  fseek_or_die(file_handle, 0, SEEK_SET);
-
-  char *result_string =
-      (char *)malloc_or_die(file_size + 1); // +1 for null terminator
-  if (!result_string) {
-    fclose_or_die(file_handle);
-    free(result_string);
-    error_stack_push(error_stack, ERROR_STATUS_RW_MEMORY_ALLOCATION_ERROR,
-                     get_formatted_string(
-                         "memory allocation error reading file: %s", filename));
-    return NULL;
+  // Read to the end rather than trusting the file's size, which a text-mode
+  // stream on Windows reads short of and a precached stream does not have.
+  size_t capacity = 4096;
+  size_t length = 0;
+  char *contents = (char *)malloc_or_die(capacity);
+  while (true) {
+    if (capacity - length < 2) {
+      capacity *= 2;
+      contents = (char *)realloc_or_die(contents, capacity);
+    }
+    // Leave room for the null terminator.
+    const size_t bytes_read =
+        fread(contents + length, 1, capacity - length - 1, file_handle);
+    length += bytes_read;
+    if (bytes_read == 0) {
+      break;
+    }
   }
 
-  size_t bytes_read = fread(result_string, 1, file_size, file_handle);
-  if (bytes_read != (size_t)file_size) {
+  if (ferror(file_handle)) {
     fclose_or_die(file_handle);
-    free(result_string);
+    free(contents);
     error_stack_push(
         error_stack, ERROR_STATUS_RW_READ_ERROR,
         get_formatted_string("error while reading file: %s", filename));
     return NULL;
   }
-
-  result_string[file_size] = '\0';
   fclose_or_die(file_handle);
 
-  return result_string;
+  // Text files written on Windows end their lines with \r\n, and such files
+  // reach every platform (a GCG saved by a Windows editor, a downloaded CSV),
+  // so on every platform each \r\n becomes \n: every caller then sees the
+  // same text wherever the file came from. Only the pair is rewritten; a lone
+  // \r is left as it is.
+  size_t kept = 0;
+  for (size_t byte_idx = 0; byte_idx < length; byte_idx++) {
+    if (contents[byte_idx] == '\r' && byte_idx + 1 < length &&
+        contents[byte_idx + 1] == '\n') {
+      continue;
+    }
+    contents[kept++] = contents[byte_idx];
+  }
+  contents[kept] = '\0';
+  return contents;
 }
 
 char *get_string_from_file(const char *filename, ErrorStack *error_stack) {
-  FILE *file_handle = fopen_safe(filename, "r", error_stack);
+  FILE *file_handle = fopen_safe(filename, "rb", error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return NULL;
   }
@@ -499,7 +532,7 @@ char *get_string_from_file(const char *filename, ErrorStack *error_stack) {
 }
 
 FILE *fopen_or_die(const char *filename, const char *mode) {
-  FILE *stream = fopen(filename, mode);
+  FILE *stream = cfile_open(filename, mode, false);
   if (!stream) {
     int error_number = errno;
     const char *system_error_message = strerror(error_number);
@@ -524,7 +557,7 @@ FILE *fopen_exclusive_safe(const char *filename, const char *mode,
 
 FILE *fopen_safe(const char *filename, const char *mode,
                  ErrorStack *error_stack) {
-  FILE *stream = fopen(filename, mode);
+  FILE *stream = cfile_open(filename, mode, false);
   if (!stream) {
     int error_number = errno;
     const char *system_error_message = strerror(error_number);
@@ -538,20 +571,7 @@ FILE *fopen_safe(const char *filename, const char *mode,
 
 void append_string_to_file(const char *filename, const char *string,
                            ErrorStack *error_stack) {
-  write_string_to_file(filename, "a", string, error_stack);
-}
-
-DIR *opendir_safe(const char *dir_path, ErrorStack *error_stack) {
-  DIR *dir = opendir(dir_path);
-  if (!dir) {
-    int error_number = errno;
-    const char *system_error_message = strerror(error_number);
-    error_stack_push(
-        error_stack, ERROR_STATUS_RW_FAILED_TO_OPEN_STREAM,
-        get_formatted_string("failed to open directory '%s': %s (%d)", dir_path,
-                             system_error_message, error_number));
-  }
-  return dir;
+  write_string_to_file(filename, "ab", string, error_stack);
 }
 
 void fclose_or_die(FILE *stream) {
@@ -573,23 +593,11 @@ void fwrite_or_die(const void *ptr, size_t size, size_t nmemb, FILE *stream,
   }
 }
 
-FILE *popen_or_die(const char *command, const char *mode) {
-  // Using popen is safe here because command is constructed with properly
-  // quoted arguments
-  FILE *pipe = popen(command, mode); // NOLINT(cert-env33-c)
-  if (!pipe) {
-    fprintf_or_die(stderr, "Failed to execute command: %s\n", command);
-    exit(EXIT_FAILURE);
-  }
-  return pipe;
-}
-
 bool path_is_directory(const char *path) {
   if (!path) {
     return false;
   }
-  struct stat path_stat;
-  return stat(path, &path_stat) == 0 && S_ISDIR(path_stat.st_mode);
+  return cfile_is_directory(path);
 }
 
 // (size, mtime) alone collides: a file replaced with different bytes of the
@@ -616,53 +624,81 @@ enum {
   // A writer touches its temporary file continuously, and the largest (a
   // rack info table) takes minutes; one untouched this long was abandoned.
   STALE_TEMPORARY_SECONDS = 60 * 60,
+  // The XXXXXX mkstemp fills in.
+  MKSTEMP_SUFFIX_LENGTH = 6,
 };
 
-// Whether `entry` is `<base>.<pid>-<n>.tmp` (or `<base>.<pid>.tmp`, the
-// earlier form): a temporary_sibling of `base`.
+// Whether `text` is one or more digits and dashes, or, with
+// `mkstemp_suffix`, also mkstemp's six letters and digits.
+static bool is_temporary_tag(const char *text, bool mkstemp_suffix) {
+  bool digits_and_dashes = text[0] != '\0';
+  bool alphanumeric = text[0] != '\0';
+  size_t length = 0;
+  for (; text[length]; length++) {
+    const unsigned char c = (unsigned char)text[length];
+    digits_and_dashes = digits_and_dashes && (isdigit(c) || c == '-');
+    alphanumeric = alphanumeric && isalnum(c);
+  }
+  return digits_and_dashes ||
+         (mkstemp_suffix && alphanumeric && length == MKSTEMP_SUFFIX_LENGTH);
+}
+
+// Whether `entry` is what an unfinished write of `base` leaves beside it:
+// `<base>.<pid>-<n>-<ns>.tmp` (or `<base>.<pid>.tmp`, the earlier form) from
+// temporary_sibling, `<base>.tmp.<tag>` from cfile_atomic_write_begin, or
+// `<base>.old.<pid>-<n>`, a replaced file cfile_rename could not delete on
+// Windows.
 static bool is_temporary_sibling_of(const char *entry, const char *base) {
   const size_t base_length = strlen(base);
   if (strncmp(entry, base, base_length) != 0 || entry[base_length] != '.') {
     return false;
   }
-  const char *pid = entry + base_length + 1;
-  const char *end = pid;
+  const char *rest = entry + base_length + 1;
+  if (strncmp(rest, "tmp.", 4) == 0) {
+    return is_temporary_tag(rest + 4, true);
+  }
+  if (strncmp(rest, "old.", 4) == 0) {
+    return is_temporary_tag(rest + 4, false);
+  }
+  const char *end = rest;
   while (isdigit((unsigned char)*end) || *end == '-') {
     end++;
   }
-  return end > pid && strcmp(end, ".tmp") == 0;
+  return end > rest && strcmp(end, ".tmp") == 0;
 }
 
-// Removes the temporaries of writes of `filename` that never finished -- a
-// process killed while writing a 1.9 GB table leaves its whole temporary
-// behind, and nothing else would ever remove it. Best effort: a failure here
-// costs disk, never the write.
-static void remove_stale_temporary_siblings(const char *filename) {
-  const char *slash = strrchr(filename, '/');
+void remove_stale_temporary_siblings(const char *filename) {
+  const char *base = cpath_basename(filename);
   char *dir =
-      slash ? get_formatted_string("%.*s", (int)(slash - filename), filename)
-            : get_formatted_string("%s", ".");
-  const char *base = slash ? slash + 1 : filename;
-  DIR *listing = opendir(dir[0] ? dir : "/");
+      base != filename
+          ? get_formatted_string("%.*s", (int)(base - filename - 1), filename)
+          : get_formatted_string("%s", ".");
+  CDir *listing = cdir_open(dir[0] ? dir : "/");
   if (!listing) {
     free(dir);
     return;
   }
   const time_t now = time(NULL);
-  const struct dirent *entry;
-  while ((entry = readdir(listing)) != NULL) {
-    if (!is_temporary_sibling_of(entry->d_name, base)) {
+  const char *entry;
+  while ((entry = cdir_next(listing)) != NULL) {
+    if (!is_temporary_sibling_of(entry, base)) {
       continue;
     }
-    char *path = get_formatted_string("%s/%s", dir, entry->d_name);
-    struct stat info;
-    if (stat(path, &info) == 0 &&
-        now - info.st_mtime > STALE_TEMPORARY_SECONDS) {
+    char *path = get_formatted_string("%s/%s", dir, entry);
+    // A replaced file moved aside keeps its old modification time, so for
+    // one the rename (a status change) has to be an hour old too.
+    const bool moved_aside =
+        strncmp(entry + strlen(base), ".old.", strlen(".old.")) == 0;
+    CFileIdentity identity;
+    if (cfile_identity(path, &identity) &&
+        now - identity.mtime_seconds > STALE_TEMPORARY_SECONDS &&
+        (!moved_aside ||
+         now - identity.ctime_seconds > STALE_TEMPORARY_SECONDS)) {
       (void)remove(path);
     }
     free(path);
   }
-  closedir(listing);
+  cdir_close(listing);
   free(dir);
 }
 
@@ -688,7 +724,7 @@ char *temporary_sibling(const char *filename) {
 
 void rename_into_place(const char *temporary, const char *filename,
                        const char *what, ErrorStack *error_stack) {
-  if (rename(temporary, filename) != 0) {
+  if (cfile_rename(temporary, filename) != 0) {
     const int error_number = errno;
     (void)remove(temporary);
     error_stack_push(error_stack, ERROR_STATUS_RW_WRITE_ERROR,
@@ -735,8 +771,13 @@ static int compare_filenames_for_sort(const void *a, const void *b) {
 
 char **get_files_in_directory(const char *dir_path, const char *suffix,
                               int *num_files, ErrorStack *error_stack) {
-  DIR *dir = opendir_safe(dir_path, error_stack);
-  if (!error_stack_is_empty(error_stack)) {
+  CDir *dir = cdir_open(dir_path);
+  if (!dir) {
+    const int error_number = errno;
+    error_stack_push(
+        error_stack, ERROR_STATUS_RW_FAILED_TO_OPEN_STREAM,
+        get_formatted_string("failed to open directory '%s': %s (%d)", dir_path,
+                             strerror(error_number), error_number));
     *num_files = 0;
     return NULL;
   }
@@ -744,11 +785,11 @@ char **get_files_in_directory(const char *dir_path, const char *suffix,
   char **files = malloc_or_die(sizeof(char *) * (size_t)capacity);
   int count = 0;
   const size_t suffix_len = strlen(suffix);
-  const struct dirent *entry;
-  while ((entry = readdir(dir)) != NULL) {
-    const size_t name_len = strlen(entry->d_name);
+  const char *entry;
+  while ((entry = cdir_next(dir)) != NULL) {
+    const size_t name_len = strlen(entry);
     if (name_len < suffix_len ||
-        strcmp(entry->d_name + name_len - suffix_len, suffix) != 0) {
+        strcmp(entry + name_len - suffix_len, suffix) != 0) {
       continue;
     }
     if (count == capacity) {
@@ -757,10 +798,10 @@ char **get_files_in_directory(const char *dir_path, const char *suffix,
     }
     const size_t copy_size = name_len + 1;
     char *name_copy = malloc_or_die(copy_size);
-    memcpy(name_copy, entry->d_name, copy_size);
+    memcpy(name_copy, entry, copy_size);
     files[count++] = name_copy;
   }
-  closedir(dir);
+  cdir_close(dir);
   qsort(files, (size_t)count, sizeof(char *), compare_filenames_for_sort);
   *num_files = count;
   return files;

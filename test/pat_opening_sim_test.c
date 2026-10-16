@@ -1,5 +1,6 @@
 #include "pat_opening_sim_test.h"
 
+#include "../src/compat/cfile.h"
 #include "../src/def/board_defs.h"
 #include "../src/def/game_history_defs.h"
 #include "../src/def/rack_defs.h"
@@ -19,7 +20,6 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <unistd.h>
 
 // Measures a lexicon's PAT opening table by simulation: for seeded opening
 // racks, the top PAT_OPENING_SIM_NUM_PLAYS static candidates under the given
@@ -86,9 +86,9 @@ void pat_opening_sim_run(const char *lexicon, const char *pat_name,
 #else
   const bool tables_ok = false;
 #endif
-  const bool have_wmp = tables_ok && access(wmp_path, R_OK) == 0;
-  const bool have_rit = tables_ok && access(rit_path, R_OK) == 0;
-  const bool have_wit = tables_ok && access(wit_path, R_OK) == 0;
+  const bool have_wmp = tables_ok && cfile_access(wmp_path, CFILE_ACCESS_READ);
+  const bool have_rit = tables_ok && cfile_access(rit_path, CFILE_ACCESS_READ);
+  const bool have_wit = tables_ok && cfile_access(wit_path, CFILE_ACCESS_READ);
   free(wmp_path);
   free(rit_path);
   free(wit_path);

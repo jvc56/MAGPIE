@@ -16,6 +16,7 @@
 #include "../util/fileproxy.h"
 #include "../util/io_util.h"
 #include "../util/string_util.h"
+#include <inttypes.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -50,7 +51,7 @@ void klv_write_row(void *data, uint32_t word_index) {
   if (klv_write_data->leave_counts) {
     const uint64_t leave_count = klv_write_data->leave_counts[word_index];
     string_builder_add_formatted_string(klv_write_data->string_builder,
-                                        ",%lu\n", leave_count);
+                                        ",%" PRIu64 "\n", leave_count);
   } else {
     const double value = equity_to_double(
         klv_get_indexed_leave_value(klv_write_data->klv, word_index));
@@ -153,7 +154,7 @@ void klv_write_to_csv(KLV *klv, const LetterDistribution *ld,
   rack_destroy(leave);
   rack_destroy(bag_as_rack);
 
-  write_string_to_file(leaves_filename, "w", string_builder_peek(klv_builder),
+  write_string_to_file(leaves_filename, "wb", string_builder_peek(klv_builder),
                        error_stack);
   free(leaves_filename);
   string_builder_destroy(klv_builder);
@@ -196,7 +197,7 @@ void klv_read_from_csv_internal(const LetterDistribution *ld,
   rack_set_dist_size(&leave_rack, ld_get_size(ld));
   char *line = NULL;
   size_t line_capacity = 0;
-  ssize_t line_length;
+  int64_t line_length;
   while ((line_length = getline_ignore_carriage_return(&line, &line_capacity,
                                                        leaves_stream)) != -1) {
     if (line_length >= LEAVES_CSV_MAX_LINE_LENGTH) {

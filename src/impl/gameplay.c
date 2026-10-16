@@ -410,7 +410,7 @@ void set_random_rack(const Game *game, const int player_index,
       string_builder_add_rack(sb, known_rack, ld, false);
       string_builder_add_string(sb, "' from the bag");
       char *err_msg = string_builder_dump_and_destroy(sb, NULL);
-      log_fatal(err_msg);
+      log_fatal("%s", err_msg);
       // Unreachable, but will silence static analyzer warnings
       free(err_msg);
     }
@@ -1489,7 +1489,8 @@ void play_game_history_turn(const GameHistory *game_history, Game *game,
                        ERROR_STATUS_GCG_PARSE_GAME_REDUNDANT_END_RACK_POINTS,
                        get_formatted_string(
                            "encountered an end rack points event when a "
-                           "previous end rack event has already been played",
+                           "previous end rack event has already been played: "
+                           "%s",
                            cgp_move_string));
       return;
     }

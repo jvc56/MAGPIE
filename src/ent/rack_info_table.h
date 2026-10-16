@@ -1,6 +1,7 @@
 #ifndef RACK_INFO_TABLE_H
 #define RACK_INFO_TABLE_H
 
+#include "../compat/cmap.h"
 #include "../compat/endian_conv.h"
 #include "../def/bit_rack_defs.h"
 #include "../def/rack_defs.h"
@@ -11,15 +12,11 @@
 #include "../util/string_util.h"
 #include "data_filepaths.h"
 #include <errno.h>
-#include <fcntl.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/mman.h>
-#include <sys/stat.h>
-#include <unistd.h>
 
 // A RackInfoTable maps full-rack BitRacks to per-rack data computed ahead of
 // time. The table is keyed by BitRack (the multiset of tiles forming a full
@@ -168,8 +165,7 @@ typedef struct RackInfoTable {
   // mmap state: when is_mmapped is true, bucket_starts and entries point
   // into the mapped region and must not be free'd individually.
   bool is_mmapped;
-  void *mmap_base;
-  size_t mmap_size;
+  CMap map;
   // Which load this is: unique for the life of the process, never 0 (see
   // rack_info_table_next_instance_id).
   uint64_t instance_id;
@@ -389,7 +385,7 @@ static inline void rack_info_table_destroy(RackInfoTable *rit) {
   }
   free(rit->name);
   if (rit->is_mmapped) {
-    munmap(rit->mmap_base, rit->mmap_size);
+    cmap_close(&rit->map);
   } else {
     free(rit->bucket_starts);
     free(rit->entries);
@@ -694,45 +690,32 @@ static inline void rack_info_table_load_mmap(RackInfoTable *rit,
           filename));
   return;
 #else
-  int fd = open(filename, O_RDONLY);
-  if (fd < 0) {
-    error_stack_push(
-        error_stack, ERROR_STATUS_FILEPATH_FILE_NOT_FOUND,
-        get_formatted_string("could not open rit file: %s", filename));
+  CMap map;
+  // Lookups are hash-indexed (random), so readahead would only waste I/O.
+  if (!cmap_open(&map, filename, true)) {
+    error_stack_push(error_stack,
+                     errno == ENOENT ? ERROR_STATUS_FILEPATH_FILE_NOT_FOUND
+                                     : ERROR_STATUS_RW_READ_ERROR,
+                     get_formatted_string("could not map rit file %s: %s",
+                                          filename, strerror(errno)));
     return;
   }
-  struct stat st;
-  if (fstat(fd, &st) < 0) {
-    close(fd);
-    error_stack_push(
-        error_stack, ERROR_STATUS_RW_READ_ERROR,
-        get_formatted_string("could not stat rit file: %s", filename));
-    return;
-  }
-  size_t file_size = (size_t)st.st_size;
-  void *mapped = mmap(NULL, file_size, PROT_READ, MAP_PRIVATE, fd, 0);
-  close(fd);
-  if (mapped == MAP_FAILED) {
-    error_stack_push(
-        error_stack, ERROR_STATUS_RW_READ_ERROR,
-        get_formatted_string("could not mmap rit file: %s", filename));
-    return;
-  }
+  const size_t file_size = map.size;
 
   if (file_size < 12) {
-    munmap(mapped, file_size);
+    cmap_close(&map);
     error_stack_push(
         error_stack, ERROR_STATUS_RW_READ_ERROR,
         get_formatted_string("rit file too small for header: %s", filename));
     return;
   }
 
-  const uint8_t *data = (const uint8_t *)mapped;
+  const uint8_t *data = (const uint8_t *)map.data;
 
   // Parse the 12-byte header.
   uint8_t version = data[0];
   if (version < RIT_EARLIEST_SUPPORTED_VERSION) {
-    munmap(mapped, file_size);
+    cmap_close(&map);
     error_stack_push(
         error_stack, ERROR_STATUS_WMP_UNSUPPORTED_VERSION,
         get_formatted_string(
@@ -744,7 +727,7 @@ static inline void rack_info_table_load_mmap(RackInfoTable *rit,
 
   uint8_t rack_size = data[1];
   if (rack_size != RACK_SIZE) {
-    munmap(mapped, file_size);
+    cmap_close(&map);
     error_stack_push(error_stack, ERROR_STATUS_WMP_INCOMPATIBLE_BOARD_DIM,
                      get_formatted_string(
                          "rit rack size %d does not match build rack size %d: "
@@ -766,7 +749,7 @@ static inline void rack_info_table_load_mmap(RackInfoTable *rit,
   const size_t num_bucket_start_slots = (size_t)rit->num_buckets + 1;
   if (num_bucket_start_slots >
       (file_size - bucket_starts_offset) / sizeof(uint32_t)) {
-    munmap(mapped, file_size);
+    cmap_close(&map);
     error_stack_push(
         error_stack, ERROR_STATUS_RW_READ_ERROR,
         get_formatted_string("rit file truncated or corrupt: %s", filename));
@@ -776,7 +759,7 @@ static inline void rack_info_table_load_mmap(RackInfoTable *rit,
   const size_t entries_offset = bucket_starts_offset + bucket_starts_size;
   if ((size_t)rit->num_entries >
       (file_size - entries_offset) / sizeof(RackInfoTableEntry)) {
-    munmap(mapped, file_size);
+    cmap_close(&map);
     error_stack_push(
         error_stack, ERROR_STATUS_RW_READ_ERROR,
         get_formatted_string("rit file truncated or corrupt: %s", filename));
@@ -786,13 +769,8 @@ static inline void rack_info_table_load_mmap(RackInfoTable *rit,
   rit->bucket_starts = (uint32_t *)(data + bucket_starts_offset);
   rit->entries = (RackInfoTableEntry *)(data + entries_offset);
 
-  // Suppress readahead: lookups are hash-indexed (random), so the default
-  // 16-page readahead wastes I/O on every access.
-  madvise(mapped, file_size, MADV_RANDOM);
-
   rit->is_mmapped = true;
-  rit->mmap_base = mapped;
-  rit->mmap_size = file_size;
+  rit->map = map;
   rit->name = string_duplicate(name);
 #endif
 }

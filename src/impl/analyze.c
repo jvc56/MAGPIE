@@ -719,14 +719,14 @@ static void add_summary_event_row(
   game_play_n_events(game_history, game, tr->event_idx, false, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     log_fatal("unexpected error replaying game history events for summary "
-              "table: %s",
-              error_stack_top(error_stack));
+              "table: %d",
+              (int)error_stack_top(error_stack));
   }
   game_history_goto(game_history, tr->event_idx, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     log_fatal("unexpected error updating game history current event for "
-              "summary table: %s",
-              error_stack_top(error_stack));
+              "summary table: %d",
+              (int)error_stack_top(error_stack));
   }
 
   const char *player_name =
@@ -860,8 +860,8 @@ write_analysis_summary(GameHistory *game_history, const LetterDistribution *ld,
                           &total_adjusted_equity_lost, &total_mistake_index,
                           show_mistakes, error_stack);
     if (!error_stack_is_empty(error_stack)) {
-      log_fatal("unexpected error adding row to analysis summary grid: %s",
-                error_stack_top(error_stack));
+      log_fatal("unexpected error adding row to analysis summary grid: %d",
+                (int)error_stack_top(error_stack));
     }
     grid_row++;
   }
@@ -1491,7 +1491,7 @@ void analyze_game(AnalyzeArgs *analyze_args, AnalyzeCtx **analyze_ctx,
                                         analyze_args->config_settings_str);
   }
   char *header_str = string_builder_dump_and_destroy(header_sb, NULL);
-  write_string_to_file(report_path, "w", header_str, error_stack);
+  write_string_to_file(report_path, "wb", header_str, error_stack);
   free(header_str);
   if (!error_stack_is_empty(error_stack)) {
     return;

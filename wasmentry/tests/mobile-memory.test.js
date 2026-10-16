@@ -40,7 +40,7 @@ test('releasing maps returns WASM allocations, preserves cached files, and allow
       const restored = engine.memory;
       await engine.run(analysisCommands(parseCGP(SAMPLES.opening), 'kibitz', {...settings,wmp:true}));
       return {loaded,released,restored,cached:cached.map(item=>item.lexicon),
-        reloaded:messages.some(item=>item.type==='wmp_ready' && item.fromCache && item.witFromCache),
+        reloaded:messages.some(item=>item.type==='wmp_ready' && item.fromCache),
         outputs:messages.filter(item=>item.type==='output').map(item=>item.command)};
     } finally {engine.worker.terminate();}
   });
@@ -87,6 +87,6 @@ test('mobile analysis suspends the saved map preference for a late-game position
   const messages = await page.evaluate(() => window.memoryTestMessages);
   expect(messages.some(message => message.type === 'prepare_wmp')).toBe(false);
   const commands = messages.filter(message => message.type === 'run').flatMap(message => message.data.commands);
-  expect(commands).toContain('set -wit false -wmp false -lex NWL23');
-  expect(commands.some(command => /-(wmp|wit) true\b/.test(command))).toBe(false);
+  expect(commands).toContain('set -wmp false -lex NWL23');
+  expect(commands.some(command => /-wmp true\b/.test(command))).toBe(false);
 });

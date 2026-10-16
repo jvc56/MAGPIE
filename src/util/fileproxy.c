@@ -1,14 +1,14 @@
 #include "fileproxy.h"
 
+#include "../compat/cfile.h"
+#include "../compat/cmemfile.h"
 #include "../compat/cpthread.h"
-#include "../def/cpthread_defs.h"
+#include "../compat/cpthread_defs.h"
 #include "io_util.h"
 #include "string_util.h"
-#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
 
 typedef struct FileCacheEntry {
   char *filename;
@@ -24,7 +24,7 @@ typedef struct FileCache {
 } FileCache;
 
 static FileCache file_cache = {0};
-static cpthread_mutex_t cache_mutex = PTHREAD_MUTEX_INITIALIZER;
+static cpthread_mutex_t cache_mutex = CPTHREAD_MUTEX_INITIALIZER;
 
 // Relative paths with a leading ./ address the same cached file.
 static const char *cache_filename(const char *filename) {
@@ -46,8 +46,9 @@ FILE *stream_from_filename(const char *filename, ErrorStack *error_stack) {
   for (int entry_idx = 0; entry_idx < file_cache.num_items; entry_idx++) {
     if (strings_equal(file_cache.entries[entry_idx].filename, filename)) {
       log_debug("Found %s in cache...", filename);
-      FILE *stream = fmemopen(file_cache.entries[entry_idx].raw_data,
-                              file_cache.entries[entry_idx].byte_size, "r");
+      FILE *stream =
+          cmemfile_open(file_cache.entries[entry_idx].raw_data,
+                        (size_t)file_cache.entries[entry_idx].byte_size);
       cpthread_mutex_unlock(&cache_mutex);
       return stream;
     }
@@ -56,7 +57,7 @@ FILE *stream_from_filename(const char *filename, ErrorStack *error_stack) {
             file_cache.num_items);
   cpthread_mutex_unlock(&cache_mutex);
   FILE *stream;
-  stream = fopen_safe(original_filename, "r", error_stack);
+  stream = fopen_safe(original_filename, "rb", error_stack);
   return stream;
 }
 
@@ -142,5 +143,5 @@ bool fileproxy_file_exists(const char *filename) {
   }
   cpthread_mutex_unlock(&cache_mutex);
   // Fall back to filesystem check
-  return access(original_filename, F_OK | R_OK) == 0;
+  return cfile_access(original_filename, CFILE_ACCESS_READ);
 }

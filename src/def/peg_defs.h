@@ -91,11 +91,6 @@ enum {
 // PEG work-stealing pool capacities (peg_pool.c).
 enum {
   PEG_POOL_QUEUE_INIT_CAP = 1024,
-  // Per-worker stack. Workers recurse into nested solves while help-draining
-  // the queue (bounded by the PEG fork-nesting cap), so the small default
-  // secondary-thread stack is not enough. 64 MiB is virtual address space,
-  // committed lazily, so only the nesting depth actually reached is paid for.
-  PEG_POOL_WORKER_STACK_BYTES = 64 * 1024 * 1024,
 };
 
 #endif

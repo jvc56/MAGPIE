@@ -1,5 +1,6 @@
 #include "contribute_test.h"
 
+#include "../src/compat/cfile.h"
 #include "../src/compat/ctime.h"
 #include "../src/compat/endian_conv.h"
 #include "../src/def/autoplay_defs.h"
@@ -44,6 +45,7 @@
 #include "../src/util/string_util.h"
 #include "contribute_tables_test.h"
 #include "test_constants.h"
+#include "test_platform.h"
 #include "test_util.h"
 #include <assert.h>
 #include <limits.h>
@@ -52,10 +54,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/stat.h>
 #include <time.h>
-#include <unistd.h>
-#include <utime.h>
 
 static void test_version_comparison(void) {
   assert(contribute_compare_versions("1.4.0", "1.4.0") == 0);
@@ -182,7 +181,7 @@ static void test_json_serialization(void) {
 }
 
 static void write_settings_file(const char *path, const char *contents) {
-  FILE *stream = fopen(path, "we");
+  FILE *stream = cfile_open(path, "we", false);
   assert(stream);
   (void)fputs(contents, stream);
   (void)fclose(stream);
@@ -386,7 +385,7 @@ static void test_client_state(void) {
       strstr(refusal, "'contribute_test_does_not_exist.txt' does not exist"));
   free(refusal);
   // And nothing was created in its place.
-  assert(access(missing, F_OK) != 0);
+  assert(!cfile_access(missing, CFILE_ACCESS_EXISTS));
 
   // A server line with no address is refused rather than taken for the
   // default: deleting the line is how to ask for that.
@@ -399,8 +398,8 @@ static void test_client_state(void) {
   // it may hold the API key the contributor means to run under. (Skipped
   // where permissions do not stop a read, as for root.)
   write_settings_file(path, "apikey bt_x\n");
-  assert(chmod(path, 0) == 0);
-  FILE *unreadable = fopen(path, "re");
+  assert(test_platform_set_permissions(path, 0));
+  FILE *unreadable = cfile_open(path, "re", false);
   if (unreadable) {
     (void)fclose(unreadable);
   } else {
@@ -408,17 +407,17 @@ static void test_client_state(void) {
     assert(!error_stack_is_empty(error_stack));
     error_stack_reset(error_stack);
   }
-  assert(chmod(path, S_IRUSR | S_IWUSR) == 0);
+  assert(test_platform_set_permissions(path, 0600));
 
   // So is a directory of that name, which read as a file 2^63 bytes long
   // ended the process.
   const char *directory = "contribute_test_settings_dir";
-  (void)rmdir(directory);
-  assert(mkdir(directory, S_IRWXU) == 0);
+  (void)cfile_rmdir(directory);
+  assert(cfile_mkdir(directory) == 0);
   assert(!client_state_load(directory, error_stack));
   assert(!error_stack_is_empty(error_stack));
   error_stack_reset(error_stack);
-  assert(rmdir(directory) == 0);
+  assert(cfile_rmdir(directory) == 0);
 
   // What the server sends as an identity is taken only in canonical form: it
   // becomes a header and a settings line, and a newline in it wrote a
@@ -459,7 +458,7 @@ static void test_client_state(void) {
 // and must not touch.
 static void test_the_default_settings_file_may_be_missing(void) {
   const char *default_path = CONTRIBUTE_SETTINGS_DEFAULT_FILENAME;
-  if (access(default_path, F_OK) == 0) {
+  if (cfile_access(default_path, CFILE_ACCESS_EXISTS)) {
     return;
   }
   ErrorStack *error_stack = error_stack_create();
@@ -560,9 +559,8 @@ static void test_digest_cache_key_notices_a_same_size_replacement(void) {
   fwrite_or_die("aaaa", 1, 4, file, "cache key test bytes");
   fclose_or_die(file);
 
-  // NOLINTNEXTLINE(misc-include-cleaner)
-  struct stat before;
-  assert(stat(path, &before) == 0);
+  CFileIdentity before;
+  assert(cfile_identity(path, &before));
   char *first = contribute_digest_cache_key(path);
   assert(first);
 
@@ -571,16 +569,12 @@ static void test_digest_cache_key_notices_a_same_size_replacement(void) {
   file = fopen_or_die(path, "wb");
   fwrite_or_die("bbbb", 1, 4, file, "cache key test bytes");
   fclose_or_die(file);
-  // NOLINTNEXTLINE(misc-include-cleaner)
-  struct utimbuf times = {.actime = before.st_atime,
-                          // NOLINTNEXTLINE(misc-include-cleaner)
-                          .modtime = before.st_mtime};
-  assert(utime(path, &times) == 0);
+  assert(test_platform_set_file_times(path, (time_t)before.mtime_seconds));
 
-  struct stat after;
-  assert(stat(path, &after) == 0);
-  assert(after.st_size == before.st_size);
-  assert(after.st_mtime == before.st_mtime);
+  CFileIdentity after;
+  assert(cfile_identity(path, &after));
+  assert(after.size == before.size);
+  assert(after.mtime_seconds == before.mtime_seconds);
 
   char *second = contribute_digest_cache_key(path);
   assert(second);
@@ -2404,7 +2398,7 @@ static void test_lexical_flags_are_set_before_the_load(void) {
   // And a word info table the same way, for the player that asks: built here
   // as the worker builds it, for a lexicon small enough to take milliseconds.
   const ConversionArgs wit_args = {
-      .conversion_type_string = "kwg2wit",
+      .conversion_type_string = "kwg2witv4",
       .data_paths = config_get_data_paths(config),
       .input_and_output_name = "CSW21_ab",
       .ld_name = "english_ab",
@@ -2654,16 +2648,12 @@ static void touch_file(const char *path, time_t age_seconds) {
   fclose_or_die(file);
   if (age_seconds > 0) {
     const time_t then = time(NULL) - age_seconds;
-    // NOLINTNEXTLINE(misc-include-cleaner)
-    struct utimbuf times = {.actime = then, .modtime = then};
-    assert(utime(path, &times) == 0);
+    assert(test_platform_set_file_times(path, then));
   }
 }
 
 static bool file_exists(const char *path) {
-  // NOLINTNEXTLINE(misc-include-cleaner)
-  struct stat info;
-  return stat(path, &info) == 0;
+  return cfile_access(path, CFILE_ACCESS_EXISTS);
 }
 
 // A writer killed mid-write leaves its whole temporary behind (a rack info
@@ -2676,6 +2666,13 @@ static void test_an_abandoned_temporary_is_removed(void) {
   const char *in_progress = "contribute_test_table.rit.23456.tmp";
   const char *not_ours = "contribute_test_table.rit.backup.tmp";
   const char *other_file = "contribute_test_other.rit.12345.tmp";
+  // An atomic write's temporary (cfile_atomic_write_begin), and a replaced
+  // file Windows could not delete, moved aside just now: its modification
+  // time is the old file's, but the move is new, so it stays.
+  const char *abandoned_atomic = "contribute_test_table.rit.tmp.Ab12Cd";
+  const char *moved_aside = "contribute_test_table.rit.old.12345-1";
+  touch_file(abandoned_atomic, (time_t)2 * 60 * 60);
+  touch_file(moved_aside, (time_t)2 * 60 * 60);
   touch_file(abandoned, (time_t)2 * 60 * 60);
   touch_file(abandoned_old_form, (time_t)2 * 60 * 60);
   touch_file(in_progress, 0);
@@ -2685,6 +2682,8 @@ static void test_an_abandoned_temporary_is_removed(void) {
   char *temporary = temporary_sibling(target);
   assert(!file_exists(abandoned));
   assert(!file_exists(abandoned_old_form));
+  assert(!file_exists(abandoned_atomic));
+  assert(file_exists(moved_aside));
   // Two writes in one process get two names.
   char *second = temporary_sibling(target);
   assert(!strings_equal(temporary, second));
@@ -2697,6 +2696,7 @@ static void test_an_abandoned_temporary_is_removed(void) {
   (void)remove(in_progress);
   (void)remove(not_ours);
   (void)remove(other_file);
+  (void)remove(moved_aside);
 }
 
 // A run's state starts with every field set: fields added to it without a
@@ -2765,7 +2765,8 @@ static void test_a_run_starts_quietly(void) {
   char *out = NULL;
   char *err = NULL;
   // Skipped where the working directory has a contribute.txt of its own.
-  if (access(CONTRIBUTE_SETTINGS_DEFAULT_FILENAME, F_OK) != 0) {
+  if (!cfile_access(CONTRIBUTE_SETTINGS_DEFAULT_FILENAME,
+                    CFILE_ACCESS_EXISTS)) {
     printed_at_start(NULL, NULL, &out, &err);
     assert_strings_equal(out, "");
     assert_strings_equal(err, "");

@@ -1,40 +1,42 @@
 #include "word_map_embedding_test.h"
 
+#include "../src/compat/cfile.h"
 #include "../src/def/board_defs.h"
+#include "../src/def/letter_distribution_defs.h"
 #include "../src/def/wmp_defs.h"
+#include "../src/ent/dictionary_word.h"
 #include "../src/ent/wmp.h"
 #include "../src/ent/word_info_table.h"
 #include "../src/impl/cmd_api.h"
 #include "../src/impl/cmd_api_wmp.h"
 #include "../src/impl/wmp_maker.h"
+#include "../src/impl/word_info_table_maker.h"
 #include "../src/util/io_util.h"
 #include "../src/util/string_util.h"
+#include "test_platform.h"
 #include "test_util.h"
 #include <assert.h>
 #include <errno.h>
-#include <signal.h>
+#include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/resource.h>
-#include <sys/stat.h>
-#include <unistd.h>
 
 static void test_word_map_atomic_write(const WMP *wmp) {
-  char directory[] = "/tmp/magpie-wmp-write-XXXXXX";
-  assert(mkdtemp(directory));
+  char *directory = test_platform_make_temporary_directory("magpie-wmp-write-");
   char *filename = get_formatted_string("%s/table.wmp", directory);
-  assert(mkdir(filename, 0700) == 0);
+  assert(cfile_mkdir(filename) == 0);
   ErrorStack *errors = error_stack_create();
   // A directory cannot be replaced by the completed file. Preserve it and
   // clean up the temporary output on this failure path.
   wmp_write_to_file(wmp, filename, errors);
   assert(!error_stack_is_empty(errors));
   error_stack_destroy(errors);
-  assert(rmdir(filename) == 0);
-  assert(rmdir(directory) == 0);
+  assert(cfile_rmdir(filename) == 0);
+  assert(cfile_rmdir(directory) == 0);
   free(filename);
+  free(directory);
 }
 
 static void write_map(const WMP *wmp, const WordInfoTable *wit,
@@ -46,90 +48,121 @@ static void write_map(const WMP *wmp, const WordInfoTable *wit,
   }
 }
 
-static void test_map_permissions(const WMP *wmp, const WordInfoTable *wit) {
-  char directory[] = "/tmp/magpie-map-mode-XXXXXX";
-  assert(mkdtemp(directory));
-  char *filename = get_formatted_string("%s/table", directory);
-  char *linkname = get_formatted_string("%s/link", directory);
-  ErrorStack *errors = error_stack_create();
-  const mode_t original_mask = umask(0022); // NOLINT(misc-include-cleaner)
-  write_map(wmp, wit, filename, errors);
-  assert(error_stack_is_empty(errors));
-  struct stat metadata; // NOLINT(misc-include-cleaner)
-  assert(stat(filename, &metadata) == 0);
-  assert((metadata.st_mode & 0777) == 0644);
-  assert(chmod(filename, 0664) == 0);
-  write_map(wmp, wit, filename, errors);
-  assert(error_stack_is_empty(errors));
-  assert(stat(filename, &metadata) == 0);
-  assert((metadata.st_mode & 0777) == 0664);
+// That `path`'s permission bits are `expected`, where they are POSIX's;
+// Windows has none to compare.
+static void assert_permissions(const char *path, unsigned int expected) {
+  TestPlatformFileStatus status;
+  assert(test_platform_stat(path, &status));
+  if (test_platform_has_posix_permissions()) {
+    assert((status.mode & 0777) == expected);
+  }
+}
+
+static int64_t file_size(const char *path) {
+  CFileIdentity identity;
+  assert(cfile_identity(path, &identity));
+  return identity.size;
+}
+
+// Writes through symlinks in `directory`, where `linkname` already links to
+// the not yet written `filename`'s base name, "table".
+static void test_map_symlinks(const WMP *wmp, const WordInfoTable *wit,
+                              const char *directory, const char *filename,
+                              const char *linkname, ErrorStack *errors) {
   // A relative symlink must survive and update the actual target.
-  assert(symlink("table", linkname) == 0);
   write_string_to_file(filename, "w", "stale", errors);
   write_map(wmp, wit, linkname, errors);
   assert(error_stack_is_empty(errors));
-  assert(lstat(linkname, &metadata) == 0);
-  assert(S_ISLNK(metadata.st_mode));
-  assert(stat(filename, &metadata) == 0);
-  assert(metadata.st_size > 5);
-  assert((metadata.st_mode & 0777) == 0664);
-  assert(unlink(linkname) == 0);
-  assert(unlink(filename) == 0);
+  assert(test_platform_is_symlink(linkname));
+  assert(file_size(filename) > 5);
+  assert_permissions(filename, 0664);
+  remove_or_die(linkname);
+  remove_or_die(filename);
   // Both relative and absolute dangling targets are created through the link.
+  // (`filename` is in the temporary directory, so absolute.)
   const char *targets[] = {"table", filename};
-  for (int index = 0; index < 2; index++) {
-    assert(symlink(targets[index], linkname) == 0);
+  for (int target_idx = 0; target_idx < 2; target_idx++) {
+    assert(test_platform_symlink(targets[target_idx], linkname));
     write_map(wmp, wit, linkname, errors);
     assert(error_stack_is_empty(errors));
-    assert(lstat(linkname, &metadata) == 0);
-    assert(S_ISLNK(metadata.st_mode));
-    assert(stat(filename, &metadata) == 0);
-    assert(metadata.st_size > 5);
-    assert((metadata.st_mode & 0777) == 0644);
-    assert(unlink(linkname) == 0);
-    assert(unlink(filename) == 0);
+    assert(test_platform_is_symlink(linkname));
+    assert(file_size(filename) > 5);
+    assert_permissions(filename, 0644);
+    remove_or_die(linkname);
+    remove_or_die(filename);
   }
   char *chain = get_formatted_string("%s/chain", directory);
-  assert(symlink("link", chain) == 0);
-  assert(symlink("table", linkname) == 0);
+  assert(test_platform_symlink("link", chain));
+  assert(test_platform_symlink("table", linkname));
   write_map(wmp, wit, chain, errors);
   assert(error_stack_is_empty(errors));
-  assert(stat(filename, &metadata) == 0);
-  assert(metadata.st_size > 5);
-  assert(unlink(filename) == 0);
-  assert(unlink(linkname) == 0);
-  assert(symlink("chain", linkname) == 0);
+  assert(file_size(filename) > 5);
+  remove_or_die(filename);
+  remove_or_die(linkname);
+  assert(test_platform_symlink("chain", linkname));
   write_map(wmp, wit, chain, errors);
   assert(!error_stack_is_empty(errors));
-  assert(unlink(chain) == 0);
-  assert(unlink(linkname) == 0);
+  remove_or_die(chain);
+  remove_or_die(linkname);
   free(chain);
-  assert(rmdir(directory) == 0);
-  (void)umask(original_mask);
+}
+
+static void test_map_permissions(const WMP *wmp, const WordInfoTable *wit) {
+  char *directory = test_platform_make_temporary_directory("magpie-map-mode-");
+  char *filename = get_formatted_string("%s/table", directory);
+  char *linkname = get_formatted_string("%s/link", directory);
+  ErrorStack *errors = error_stack_create();
+  if (!test_platform_has_posix_permissions()) {
+    printf("word_map_embedding: skipped the permission bits: none here\n");
+  }
+  const unsigned int original_mask = test_platform_set_umask(0022);
+  write_map(wmp, wit, filename, errors);
+  assert(error_stack_is_empty(errors));
+  assert_permissions(filename, 0644);
+  assert(test_platform_set_permissions(filename, 0664));
+  write_map(wmp, wit, filename, errors);
+  assert(error_stack_is_empty(errors));
+  assert_permissions(filename, 0664);
+  if (test_platform_symlink("table", linkname)) {
+    test_map_symlinks(wmp, wit, directory, filename, linkname, errors);
+  } else {
+    printf("word_map_embedding: skipped the symlink cases: this process may "
+           "not create symlinks\n");
+    remove_or_die(filename);
+  }
+  assert(cfile_rmdir(directory) == 0);
+  (void)test_platform_set_umask(original_mask);
   error_stack_destroy(errors);
   free(linkname);
   free(filename);
+  free(directory);
 }
 
-#ifndef __EMSCRIPTEN__
+// A WIT file is written like a WMP file. Its contents do not matter here, so a
+// one-word table keeps the test quick.
+static WordInfoTable *make_one_word_wit(void) {
+  DictionaryWordList *words = dictionary_word_list_create();
+  const MachineLetter at[] = {1, 20};
+  dictionary_word_list_add_word(words, at, 2);
+  WordInfoTable *wit = make_word_info_table_from_words(words);
+  dictionary_word_list_destroy(words);
+  return wit;
+}
+
 static void test_word_map_write_errno(const WMP *wmp) {
-  char directory[] = "/tmp/magpie-map-error-XXXXXX";
-  assert(mkdtemp(directory));
+  if (!test_platform_can_limit_file_size()) {
+    printf("word_map_embedding: skipped the full-disk case: no file size "
+           "limit here\n");
+    return;
+  }
+  char *directory = test_platform_make_temporary_directory("magpie-map-error-");
   char *filename = get_formatted_string("%s/table", directory);
   ErrorStack *errors = error_stack_create();
   write_string_to_file(filename, "w", "preserved", errors);
   assert(error_stack_is_empty(errors));
-  struct rlimit original;
-  assert(getrlimit(RLIMIT_FSIZE, &original) == 0);
-  struct rlimit limited = original;
-  limited.rlim_cur = 1024;
-  void (*original_handler)(int) = signal(SIGXFSZ, SIG_IGN);
-  assert(original_handler != SIG_ERR);
-  assert(setrlimit(RLIMIT_FSIZE, &limited) == 0);
+  test_platform_limit_file_size(1024);
   wmp_write_to_file(wmp, filename, errors);
-  assert(setrlimit(RLIMIT_FSIZE, &original) == 0);
-  void (*restored_handler)(int) = signal(SIGXFSZ, original_handler);
-  assert(restored_handler != SIG_ERR);
+  test_platform_unlimit_file_size();
   char *message = error_stack_get_string_and_reset(errors);
   const char *expected_error = strerror(EFBIG);
   assert(strstr(message, expected_error));
@@ -137,32 +170,28 @@ static void test_word_map_write_errno(const WMP *wmp) {
   char *contents = get_string_from_file(filename, errors);
   assert(strings_equal(contents, "preserved"));
   free(contents);
-  assert(unlink(filename) == 0);
-  assert(rmdir(directory) == 0);
+  remove_or_die(filename);
+  assert(cfile_rmdir(directory) == 0);
   error_stack_destroy(errors);
   free(filename);
+  free(directory);
 }
-#endif
 
 void test_word_map_embedding(void) {
   assert(cmd_api_build_wmp(NULL, 1, NULL) == NULL);
-  assert(cmd_api_build_wit(NULL) == NULL);
-  assert(!cmd_api_install_wmp(NULL, NULL, NULL));
+  assert(!cmd_api_install_wmp(NULL, NULL));
   Magpie *failed = magpie_create("./nonexistent_data_path");
   assert(magpie_has_error(failed));
   assert(cmd_api_build_wmp(failed, 1, NULL) == NULL);
-  assert(cmd_api_build_wit(failed) == NULL);
-  assert(!cmd_api_install_wmp(failed, NULL, NULL));
+  assert(!cmd_api_install_wmp(failed, NULL));
   magpie_destroy(failed);
   Magpie *mp = magpie_create(DEFAULT_TEST_DATA_PATH);
   assert(!magpie_has_error(mp));
   WMPBuildProgress *progress = wmp_build_progress_create();
   assert(cmd_api_build_wmp(mp, 2, progress) == NULL);
-  assert(cmd_api_build_wit(mp) == NULL);
-  assert(!cmd_api_install_wmp(mp, NULL, NULL));
+  assert(!cmd_api_install_wmp(mp, NULL));
   free(magpie_get_and_clear_error(mp));
-  assert(magpie_run_sync(mp,
-                         "set -lex CSW24 -wmp false -wit false -numplays 20") ==
+  assert(magpie_run_sync(mp, "set -lex CSW24 -wmp false -numplays 20") ==
          MAGPIE_SUCCESS);
   assert(
       magpie_run_sync(
@@ -179,9 +208,7 @@ void test_word_map_embedding(void) {
   assert(wmp != NULL);
   test_word_map_atomic_write(wmp);
   test_map_permissions(wmp, NULL);
-#ifndef __EMSCRIPTEN__
   test_word_map_write_errno(wmp);
-#endif
   wmp_build_stage_t stage;
   int completed;
   int total;
@@ -189,60 +216,60 @@ void test_word_map_embedding(void) {
   assert(stage == WMP_BUILD_INDEXES);
   assert(completed == BOARD_DIM - 1);
   assert(total == BOARD_DIM - 1);
-  WordInfoTable *wit = cmd_api_build_wit(mp);
-  assert(wit != NULL);
+  WordInfoTable *wit = make_one_word_wit();
   test_map_permissions(wmp, wit);
+  word_info_table_destroy(wit);
   // Failed installation leaves ownership with the caller and the engine usable.
   char *name = wmp->name;
   wmp->name = string_duplicate("wrong-lexicon");
-  assert(!cmd_api_install_wmp(mp, wmp, wit));
+  assert(!cmd_api_install_wmp(mp, wmp));
   free(wmp->name);
   wmp->name = name;
   assert(magpie_has_error(mp));
   free(magpie_get_and_clear_error(mp));
   assert(magpie_run_sync(mp, "set -l2 NWL23") == MAGPIE_SUCCESS);
-  assert(!cmd_api_install_wmp(mp, wmp, wit));
+  assert(!cmd_api_install_wmp(mp, wmp));
   assert(magpie_has_error(mp));
   free(magpie_get_and_clear_error(mp));
   assert(magpie_run_sync(mp, "generate") == MAGPIE_SUCCESS);
   assert(magpie_run_sync(mp, "set -l2 CSW24") == MAGPIE_SUCCESS);
   wmp->kwg_hash ^= 1;
-  assert(!cmd_api_install_wmp(mp, wmp, wit));
+  assert(!cmd_api_install_wmp(mp, wmp));
   wmp->kwg_hash ^= 1;
   wmp->ld_fingerprint ^= 1;
-  assert(!cmd_api_install_wmp(mp, wmp, wit));
+  assert(!cmd_api_install_wmp(mp, wmp));
   wmp->ld_fingerprint ^= 1;
-  char small_output[32];
-  FILE *limited_stream = fmemopen(small_output, sizeof(small_output), "wb");
-  assert(limited_stream);
-  const int unbuffered = setvbuf(limited_stream, NULL, _IONBF, 0);
-  assert(unbuffered == 0);
-  (void)unbuffered;
-  const bool serialized = wmp_write_to_stream(wmp, limited_stream);
-  assert(!serialized);
-  (void)fclose(limited_stream);
-  const uint64_t hash = wit->kwg_hash;
-  wit->kwg_hash ^= 1;
-  assert(!cmd_api_install_wmp(mp, wmp, wit));
-  wit->kwg_hash = hash;
   assert(magpie_has_error(mp));
   free(magpie_get_and_clear_error(mp));
+  char small_output[32];
+  FILE *limited_stream =
+      test_platform_open_bounded_stream(small_output, sizeof(small_output));
+  if (limited_stream) {
+    const int unbuffered = setvbuf(limited_stream, NULL, _IONBF, 0);
+    assert(unbuffered == 0);
+    (void)unbuffered;
+    const bool serialized = wmp_write_to_stream(wmp, limited_stream);
+    assert(!serialized);
+    (void)fclose(limited_stream);
+  } else {
+    printf("word_map_embedding: skipped the full-stream case: no bounded "
+           "streams here\n");
+  }
   assert(magpie_run_async(
              mp, "simulate -it 100000000 -plies 7 -scond none -threads 1") ==
          MAGPIE_SUCCESS);
   assert(cmd_api_build_wmp(mp, 2, progress) == NULL);
-  assert(cmd_api_build_wit(mp) == NULL);
-  assert(!cmd_api_install_wmp(mp, wmp, wit));
+  assert(!cmd_api_install_wmp(mp, wmp));
   magpie_stop_current_command(mp);
   assert(magpie_await(mp) == MAGPIE_SUCCESS);
-  assert(cmd_api_install_wmp(mp, wmp, wit));
-  assert(magpie_run_sync(mp, "set -wmp true -wit true") == MAGPIE_SUCCESS);
+  assert(cmd_api_install_wmp(mp, wmp));
+  assert(magpie_run_sync(mp, "set -wmp true") == MAGPIE_SUCCESS);
   assert(magpie_run_sync(mp, "generate") == MAGPIE_SUCCESS);
   char *accelerated = magpie_get_last_command_output(mp);
   assert(strings_equal(baseline, accelerated));
   free(accelerated);
   free(baseline);
-  // The engine now owns both shared tables and destroys each only once.
+  // The engine now owns the shared table and destroys it only once.
   wmp_build_progress_destroy(progress);
   magpie_destroy(mp);
 }

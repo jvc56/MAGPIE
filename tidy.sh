@@ -10,6 +10,10 @@ echo "$CLANG_TIDY_EXEC version:"
 $CLANG_TIDY_EXEC --version
 
 SEARCH_DIRECTORIES="src/ test/ cmd/ tools/ wasmentry/"
+# With "windows" as the second argument, lint src/compat's Windows branches:
+# only src/compat, compiled for MinGW-w64 with _WIN32 defined. Use a
+# clang-tidy that can find the MinGW headers, such as llvm-mingw's.
+TIDY_PLATFORM="$2"
 EXCLUDED_FILES="linenoise.c cjson.c sha256.c"
 CLANG_TIDY_CHECKS="*,
                   -readability-magic-numbers,
@@ -34,6 +38,19 @@ CLANG_TIDY_CHECKS="*,
                   -cppcoreguidelines-avoid-non-const-global-variables"
 CLANG_TIDY_EXCLUDE_HEADER_FILTER="^(?!.*(linenoise|cjson|sha256)\.(c|h)).*"
 C_COMPILER_FLAGS="-std=c99 -Wno-trigraphs -D_GNU_SOURCE -D_POSIX_C_SOURCE=200809L -D__linux__ -U_WIN32 -U__APPLE__ "
+if [ "$TIDY_PLATFORM" = "windows" ]; then
+    SEARCH_DIRECTORIES="src/compat/"
+    # MINGW_SYSROOT: the MinGW headers' root, for a clang-tidy that is not
+    # llvm-mingw's own (e.g. CI's clang-tidy-18 with llvm-mingw unpacked).
+    C_COMPILER_FLAGS="-std=c99 -Wno-trigraphs --target=x86_64-w64-mingw32 -D_WIN32_WINNT=0x0A00 -DBOARD_DIM=15 -DRACK_SIZE=7"
+    if [ -n "$MINGW_SYSROOT" ]; then
+        C_COMPILER_FLAGS="$C_COMPILER_FLAGS -isystem $MINGW_SYSROOT/x86_64-w64-mingw32/include -isystem $MINGW_SYSROOT/generic-w64-mingw32/include"
+    fi
+    # Windows' API is documented, and meant to be included, as <windows.h>,
+    # whose declarations include-cleaner would rather each came from its own
+    # internal header.
+    CLANG_TIDY_CHECKS="$CLANG_TIDY_CHECKS,-misc-include-cleaner"
+fi
 
 MAX_CORES=$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 1)
 LOG_FILE=$(mktemp)

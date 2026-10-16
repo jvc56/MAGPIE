@@ -1,5 +1,6 @@
 #include "builder_hash_test.h"
 
+#include "../src/compat/cfile.h"
 #include "../src/def/builder_defs.h"
 #include "../src/def/rack_defs.h"
 #include "../src/ent/conversion_results.h"
@@ -161,9 +162,10 @@ static void test_derived_builders_match_their_pinned_hashes(void) {
                          "RIT", RIT_BUILDER_VERSION,
                          PINNED_RIT_BUILDER_VERSION);
 
-  // From the .kwg alone, as birdtest's server and its workers build it.
+  // From the .kwg alone, in the version 4 layout, as birdtest's server and
+  // its workers build it.
   const ConversionArgs wit_args = {
-      .conversion_type_string = "kwg2wit",
+      .conversion_type_string = "kwg2witv4",
       .data_paths = data_paths,
       .input_and_output_name = "CSW21_ab",
       .ld_name = "english_ab",
@@ -172,7 +174,7 @@ static void test_derived_builders_match_their_pinned_hashes(void) {
   convert(&wit_args, results, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     error_stack_print_and_reset(error_stack);
-    log_fatal("kwg2wit failed");
+    log_fatal("kwg2witv4 failed");
   }
   assert_built_file_hash(data_paths, "CSW21_ab",
                          DATA_FILEPATH_TYPE_WORD_INFO_TABLE, PINNED_WIT_SHA256,
@@ -210,7 +212,7 @@ static void write_every_full_rack(const char *data_paths, const char *name) {
     error_stack_print_and_reset(error_stack);
     log_fatal("no writable path for %s", name);
   }
-  FILE *stream = fopen(path, "we");
+  FILE *stream = cfile_open(path, "we", false);
   assert(stream);
   for (int a = 0; a <= RACK_SIZE; a++) {
     char rack[RACK_SIZE + 1];

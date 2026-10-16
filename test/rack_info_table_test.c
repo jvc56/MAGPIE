@@ -432,6 +432,14 @@ void test_rack_info_table(void) {
   assert(rit_loaded != NULL);
   assert_rits_equal(rit, rit_loaded);
 
+  // The same file mapped into memory (cmap) instead of read.
+  RackInfoTable *rit_mapped =
+      rack_info_table_create(data_paths, rit_name, true, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  assert(rit_mapped != NULL);
+  assert_rits_equal(rit, rit_mapped);
+  rack_info_table_destroy(rit_mapped);
+
   rack_info_table_destroy(rit_loaded);
   rack_info_table_destroy(rit);
   free(rit_filename);

@@ -1,6 +1,7 @@
 #include "contribute_tables.h"
 
 #include "../compat/cfile.h"
+#include "../compat/cpath.h"
 #include "../compat/ctime.h"
 #include "../util/io_util.h"
 #include "../util/string_util.h"
@@ -192,7 +193,7 @@ static void manifest_add_line(ContributeTableManifest *manifest, char *line) {
 
 ContributeTableManifest *contribute_table_manifest_read(const char *path) {
   ContributeTableManifest *manifest = manifest_create();
-  FILE *stream = path ? cfile_open(path, "r", false) : NULL;
+  FILE *stream = path ? cfile_open(path, "rb", false) : NULL;
   if (!stream) {
     return manifest;
   }
@@ -222,7 +223,7 @@ ContributeTableManifest *contribute_table_manifest_read(const char *path) {
 bool contribute_table_manifest_write(const ContributeTableManifest *manifest,
                                      const char *path) {
   char *temporary = temporary_sibling(path);
-  FILE *stream = cfile_open(temporary, "w", true);
+  FILE *stream = cfile_open(temporary, "wb", true);
   if (!stream) {
     free(temporary);
     return false;
@@ -243,7 +244,7 @@ bool contribute_table_manifest_write(const ContributeTableManifest *manifest,
   if (fclose(stream) != 0) {
     written = false;
   }
-  if (written && rename(temporary, path) != 0) {
+  if (written && cfile_rename(temporary, path) != 0) {
     written = false;
   }
   if (!written) {
@@ -663,7 +664,7 @@ void contribute_tables_touch_used(const char *manifest_path,
 }
 
 char *contribute_tables_manifest_path(const char *data_paths) {
-  char *first = cut_off_after_first_char(data_paths ? data_paths : ".", ':');
+  char *first = cpath_list_first(data_paths ? data_paths : ".");
   char *path =
       get_formatted_string("%s/%s", first, CONTRIBUTE_TABLE_MANIFEST_FILENAME);
   free(first);

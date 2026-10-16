@@ -2,9 +2,9 @@
 #include "autoplay.h"
 
 #include "../compat/cpthread.h"
+#include "../compat/cpthread_defs.h"
 #include "../compat/ctime.h"
 #include "../def/autoplay_defs.h"
-#include "../def/cpthread_defs.h"
 #include "../def/equity_defs.h"
 #include "../def/game_history_defs.h"
 #include "../def/letter_distribution_defs.h"
@@ -50,6 +50,7 @@
 #include "play_chooser.h"
 #include "rack_list.h"
 #include "simmer.h"
+#include <inttypes.h>
 #include <math.h>
 #include <stdatomic.h>
 #include <stdbool.h>
@@ -320,7 +321,7 @@ static void leavegen_write_generation_files(AutoplaySharedData *shared_data) {
     char *report_name =
         get_formatted_string("%s_report.txt", report_name_prefix);
 
-    write_string_to_file(report_name, "w", string_builder_peek(leave_gen_sb),
+    write_string_to_file(report_name, "wb", string_builder_peek(leave_gen_sb),
                          error_stack);
     if (!error_stack_is_empty(error_stack)) {
       failure = "leavegen failed to write the generation's report";
@@ -504,7 +505,7 @@ void pat_postgen_prebroadcast_func(void *data) {
   char *report_name_prefix =
       cut_off_after_last_char(gen_labeled_pat_filename, '.');
   char *report_name = get_formatted_string("%s_report.txt", report_name_prefix);
-  write_string_to_file(report_name, "w", string_builder_peek(report_sb),
+  write_string_to_file(report_name, "wb", string_builder_peek(report_sb),
                        error_stack);
   if (!error_stack_is_empty(error_stack)) {
     error_stack_print_and_reset(error_stack);
@@ -1395,14 +1396,14 @@ void print_current_status(AutoplayWorker *autoplay_worker,
   StringBuilder *status_sb = string_builder_create();
   AutoplaySharedData *shared_data = autoplay_worker->shared_data;
   string_builder_add_formatted_string(
-      status_sb, "Played %ld games in %.3f seconds.",
+      status_sb, "Played %" PRIu64 " games in %.3f seconds.",
       iter_completed_output->iter_count_completed,
       iter_completed_output->time_elapsed);
   const LeavegenSharedData *lg_shared_data = shared_data->leavegen_shared_data;
   if (lg_shared_data) {
     string_builder_add_formatted_string(
         status_sb,
-        " Played %ld games in generation %d with %ld rack under target "
+        " Played %" PRIu64 " games in generation %d with %d rack under target "
         "count.\n",
         iter_completed_output->iter_count_completed -
             lg_shared_data->gen_start_games,

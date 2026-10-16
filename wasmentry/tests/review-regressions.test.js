@@ -275,8 +275,8 @@ test('a low-memory WMP refusal preserves ordinary analysis', { tag: "@unit" }, a
   await Promise.resolve(); await Promise.resolve();
   client.worker.emit({type:'wmp_ready',requestId:client.worker.sent.requestId,unavailable:true});
   await prepare;
-  const run = client.run(['set -wmp true -wit true','generate']);
-  expect(client.worker.sent.data.commands[0]).toBe('set -wmp false -wit false');
+  const run = client.run(['set -wmp true','generate']);
+  expect(client.worker.sent.data.commands[0]).toBe('set -wmp false');
   client.worker.emit({type:'complete',requestId:client.worker.sent.requestId}); await run;
 });
 

@@ -1,5 +1,6 @@
 #include "pat_test_util.h"
 
+#include "../src/compat/cfile.h"
 #include "../src/def/equity_defs.h"
 #include "../src/ent/equity.h"
 #include "../src/ent/game.h"
@@ -10,19 +11,21 @@
 #include "../src/ent/player.h"
 #include "../src/ent/rack.h"
 #include "../src/util/io_util.h"
-#include "../src/util/string_util.h"
+#include "test_platform.h"
 #include <assert.h>
 #include <stdlib.h>
-#include <sys/stat.h>
 
 char *create_temp_pat_data_dir(void) {
-  char tmp_template[] = "/tmp/magpie_pat_XXXXXX";
-  const char *tmp_dir = mkdtemp(tmp_template);
-  assert(tmp_dir);
+  char *tmp_dir = test_platform_make_temporary_directory("magpie_pat_");
   char *strategy_dir = get_formatted_string("%s/strategy", tmp_dir);
-  assert(mkdir(strategy_dir, 0755) == 0);
+  assert(cfile_mkdir(strategy_dir) == 0);
   free(strategy_dir);
-  return string_duplicate(tmp_dir);
+  return tmp_dir;
+}
+
+void destroy_temp_pat_data_dir(char *data_dir) {
+  test_platform_remove_directory_tree(data_dir);
+  free(data_dir);
 }
 
 void write_pat_file_contents(const char *data_dir, const char *pat_name,

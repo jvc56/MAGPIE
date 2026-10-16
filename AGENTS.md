@@ -24,6 +24,8 @@ make magpie BUILD=profile      # profiling build
 make magpie BUILD=thread       # thread sanitizer build
 make leavegen_pgo_release      # leavegen-trained PGO build
 make libmagpie                 # shared library; API is src/impl/cmd_api.h
+make windows                   # bin/magpie.exe via Docker (llvm-mingw); WINDOWS_ARCH=aarch64 for arm64
+make windows_test              # bin/magpie_test.exe; make windows_wine_test TESTS=compat runs it under Wine
 make clean                     # remove build artifacts
 ```
 
@@ -46,7 +48,7 @@ source changes and on each target architecture. Override `PGO_CC`,
 
 ## CI Checks (the hard part)
 
-CI runs on every push. Six jobs must all pass: **cppcheck**, **clang-tidy**, **clang-format**, **circular-dependencies**, **unit-tests**, **wasm-tests**.
+CI runs on every push. These must all pass: **cppcheck**, **clang-tidy**, **clang-format**, **circular-dependencies**, **portability**, **windows-cross-compile**, **unit-tests**, **wasm-tests**.
 
 CI uses **cppcheck 2.17.1**, **clang-tidy-18**, **clang-format-20** (Ubuntu 24.04). Local versions will differ.
 
@@ -55,7 +57,21 @@ python3 format.py --write      # ALWAYS run before pushing
 ./cppcheck.sh                  # builds cppcheck 2.17.1 on first run, cached after
 ./tidy.sh                      # clang-tidy (or: ./tidy.sh clang-tidy-18)
 python3 find_circ_deps.py      # circular dependencies (requires: pip install networkx)
+python3 check_portability.py   # platform-specific code stays in src/compat
+python3 check_windows_compile.py # every file compiles for Windows (needs llvm-mingw on PATH)
 ```
+
+**Platform code lives in `src/compat`.** Outside it, include only ISO C headers
+(plus `<stdatomic.h>`) and project headers, test no platform macros, and call
+no POSIX function compat wraps. Tests get what compat lacks (temporary
+directories, permissions, symlinks, pipes, file size limits) from
+`test/test_platform.h`, whose `.c` is the one exempt file in `test/`; a case a
+platform cannot run is skipped through that helper's return value, never
+deleted. `check_portability.py` lints for this, with no exceptions, and
+`check_windows_compile.py` cross-compiles every file, all of which must
+compile; the cross-compile is the real check. The Windows compiler is the pinned llvm-mingw release (see the
+`windows-cross-compile` job), also available as the
+`mstorsjo/llvm-mingw:20261006` Docker image.
 
 **format.py is NOT just clang-format** — it reorders includes (self-header first, blank line, then all others contiguous) before running `clang-format-20`. No config files.
 

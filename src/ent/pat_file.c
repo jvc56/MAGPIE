@@ -482,7 +482,8 @@ void pat_write(const PATWeights *pat, const char *data_paths,
     string_builder_add_formatted_string(sb, "%s,%d\n", feature_name,
                                         pat->weights[feature_index]);
   }
-  write_string_to_file(pat_filename, "w", string_builder_peek(sb), error_stack);
+  write_string_to_file(pat_filename, "wb", string_builder_peek(sb),
+                       error_stack);
   string_builder_destroy(sb);
   free(pat_filename);
 }

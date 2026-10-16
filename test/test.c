@@ -1,3 +1,4 @@
+#include "../src/compat/cterm.h"
 #include "../src/def/board_defs.h"
 #include "../src/impl/exec.h"
 #include "../src/util/io_util.h"
@@ -13,6 +14,7 @@
 #include "bai_utility_test.h"
 #include "benchmark_endgame_test.h"
 #include "benchmark_peg_test.h"
+#include "best_small_test.h"
 #include "bit_rack_test.h"
 #include "board_layout_default_test.h"
 #include "board_layout_super_test.h"
@@ -23,12 +25,14 @@
 #include "checkpoint_test.h"
 #include "cmd_api_test.h"
 #include "command_test.h"
+#include "compat_test.h"
 #include "config_test.h"
 #include "contribute_tables_test.h"
 #include "contribute_test.h"
 #include "convert_test.h"
 #include "create_data_test.h"
 #include "cross_set_test.h"
+#include "data_fetch_test.h"
 #include "dawg_packed_test.h"
 #include "embedding_lifecycle_test.h"
 #include "endgame_test.h"
@@ -37,6 +41,7 @@
 #include "game_test.h"
 #include "gameplay_test.h"
 #include "gcg_test.h"
+#include "gzip_reader_test.h"
 #include "heat_map_test.h"
 #include "history_replay_test.h"
 #include "infer_cmp_test.h"
@@ -80,6 +85,7 @@
 #include "sim_quality_test.h"
 #include "sim_regret_test.h"
 #include "sim_test.h"
+#include "stable_sort_test.h"
 #include "stats_test.h"
 #include "string_util_test.h"
 #include "table_bench_test.h"
@@ -138,6 +144,7 @@ static TestEntry test_table[] = {
     {"vm", test_validated_move},
     {"shadow", test_shadow},
     {"movegen", test_move_gen},
+    {"bestsmall", test_best_small},
     {"eq", test_equity},
     {"eqadj", test_equity_adjustments},
     {"gameplay", test_gameplay},
@@ -148,6 +155,10 @@ static TestEntry test_table[] = {
     {"hm", test_heat_map},
     {"sim", test_sim},
     {"math", test_math_util},
+    {"stablesort", test_stable_sort},
+    {"compat", test_compat},
+    {"gzipreader", test_gzip_reader},
+    {"datafetch", test_data_fetch},
     {"bai", test_bai},
     {"baiutil", test_bai_utility},
     {"command", test_command},
@@ -331,6 +342,8 @@ void run_all_super(void) {
 }
 
 int main(int argc, char *argv[]) {
+  cterm_init();
+  cterm_disable_error_dialogs();
   log_set_level(LOG_WARN);
 
   // NOLINTNEXTLINE(misc-redundant-expression)
