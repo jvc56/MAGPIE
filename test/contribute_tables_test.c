@@ -1,6 +1,7 @@
 #include "contribute_tables_test.h"
 
 #include "../src/compat/cfile.h"
+#include "../src/compat/memory_info.h"
 #include "../src/def/thread_control_defs.h"
 #include "../src/ent/client_state.h"
 #include "../src/ent/conversion_results.h"
@@ -873,16 +874,24 @@ static void test_a_task_runs_without_the_tables_it_has_no_room_for(void) {
   assert(!file_exists(wmp_path) && !file_exists(wit_path) &&
          !file_exists(rit_path));
 
-  // Disk to spare and no memory: the same again.
-  result =
-      run_tables_task(assignment, true, "diskreserve 0\nmemreserve 1000000\n",
-                      0, &movegens, &skipped);
-  assert(skipped == all_three);
-  assert_strings_equal(result, plain);
-  assert(movegens == plain_movegens);
-  free(result);
-  assert(!file_exists(wmp_path) && !file_exists(wit_path) &&
-         !file_exists(rit_path));
+  // Disk to spare and no memory: the same again. Where the free memory
+  // cannot be found (macOS), it is taken as unconstrained, and nothing is
+  // skipped for want of it.
+  int64_t free_memory_bytes = 0;
+  if (!get_available_memory_bytes(&free_memory_bytes)) {
+    printf("contribute_tables: skipped the no-memory case: no free memory "
+           "figure here\n");
+  } else {
+    result = run_tables_task(assignment, true,
+                             "diskreserve 0\nmemreserve 1000000\n", 0,
+                             &movegens, &skipped);
+    assert(skipped == all_three);
+    assert_strings_equal(result, plain);
+    assert(movegens == plain_movegens);
+    free(result);
+    assert(!file_exists(wmp_path) && !file_exists(wit_path) &&
+           !file_exists(rit_path));
+  }
 
   if (!test_platform_can_limit_file_size()) {
     printf("contribute_tables: skipped the full-disk cases: no file size "
