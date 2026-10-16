@@ -85,7 +85,6 @@ static float compute_stuck_fraction(Game *game, MoveList *move_list,
       .override_kwg = NULL,
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
-      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
       .tiles_played_bv = &tiles_bv,
   };
   generate_moves(&args);

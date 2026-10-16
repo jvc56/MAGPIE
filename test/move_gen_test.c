@@ -125,7 +125,6 @@ void assert_move_gen_row(Game *game, MoveList *move_list,
       .move_list = move_list,
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
-      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
   };
 
   generate_moves_for_game(&move_gen_args);
@@ -179,7 +178,6 @@ void macondo_tests(void) {
       .move_list = move_list,
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
-      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
   };
 
   // TestSimpleRowGen
@@ -434,7 +432,6 @@ void unfound_leave_lookup_test(void) {
       .move_list = move_list,
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
-      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
   };
 
   const char cgp[300] = "15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 "
@@ -479,7 +476,6 @@ void exchange_tests(void) {
       .override_kwg = NULL,
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
-      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
   };
 
   generate_moves(&move_gen_args);
@@ -519,7 +515,6 @@ void movegen_many_moves(void) {
       .move_list = move_list,
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
-      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
   };
 
   load_cgp_or_die(game, MANY_MOVES);
@@ -546,7 +541,6 @@ void equity_test(void) {
       .move_list = move_list,
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
-      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
   };
 
   player_set_move_sort_type(player, MOVE_SORT_EQUITY);
@@ -598,7 +592,6 @@ void top_equity_play_recorder_test(void) {
       .move_list = move_list,
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
-      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
   };
 
   player_set_move_record_type(player, MOVE_RECORD_BEST);
@@ -636,7 +629,6 @@ void small_play_recorder_test(void) {
       .move_list = move_list,
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
-      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
   };
 
   player_set_move_record_type(player, MOVE_RECORD_ALL_SMALL);
@@ -757,7 +749,6 @@ static void test_shadow_multiplier_rebuild(void) {
           .move_record_type = MOVE_RECORD_ALL_SMALL,
           .move_sort_type = MOVE_SORT_SCORE,
           .target_equity = EQUITY_MAX_VALUE,
-          .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
       };
       generate_moves(&args);
       assert(move_list_get_count(all) > 0);
@@ -808,7 +799,6 @@ void best_small_play_recorder_test(void) {
       .move_sort_type = MOVE_SORT_SCORE,
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
-      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
   };
   generate_moves(&args1);
 
@@ -837,7 +827,6 @@ void best_small_play_recorder_test(void) {
       .move_sort_type = MOVE_SORT_SCORE,
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
-      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
   };
   generate_moves(&args2);
 
@@ -863,7 +852,6 @@ void distinct_lexica_test(bool w1) {
       .move_list = move_list,
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
-      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
   };
 
   const Player *player0 = game_get_player(game, 0);
@@ -996,7 +984,6 @@ void consistent_tiebreaking_test(void) {
       .move_list = move_list,
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
-      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
   };
 
   const Player *player0 = game_get_player(game, 0);
@@ -1173,7 +1160,6 @@ void movegen_within_x_of_best_test(bool use_wmp) {
       .move_list = move_list,
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
-      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
   };
   int all_move_list_count = 0;
   int move_list_count = 0;
@@ -1366,7 +1352,6 @@ void movegen_does_not_return_early_from_anchor(void) {
       .move_sort_type = MOVE_SORT_EQUITY,
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
-      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
   };
 
   // A8 BRRR 72 should be 1 equity better than A8 BRR 69
@@ -1417,7 +1402,6 @@ void movegen_one_tile_nonwmp(void) {
       .move_sort_type = MOVE_SORT_SCORE,
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
-      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
   };
 
   SortedMoveList *sml = NULL;
@@ -1461,7 +1445,6 @@ void movegen_one_tile_wmp(void) {
       .move_sort_type = MOVE_SORT_SCORE,
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
-      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
   };
 
   SortedMoveList *sml = NULL;
@@ -1758,7 +1741,6 @@ void large_alphabet_movegen_test(void) {
       .override_kwg = NULL,
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
-      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
   };
   generate_moves_for_game(&move_gen_args);
   // The point of this test is that the leave/exchange path ran without
@@ -1800,7 +1782,6 @@ static void assert_wit_prune_agrees(Game *without_wit, Game *with_wit,
       .move_sort_type = MOVE_SORT_SCORE,
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
-      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
   };
   MoveGenArgs with_wit_args = without_wit_args;
   with_wit_args.game = with_wit;

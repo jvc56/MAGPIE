@@ -178,7 +178,6 @@ typedef struct MoveGen {
 
   // Inference cutoff fields
   Equity target_equity_cutoff;
-  int target_leave_size;
   bool stop_on_threshold;
   bool threshold_exceeded;
 
@@ -317,20 +316,13 @@ typedef struct MoveGenArgs {
   const KWG *override_kwg;
   Equity eq_margin_movegen;
 
-  // Movegen for inferences after plays will need a target equity value to skip
-  // anchors that can't surpass it. Callers may either pass a baseline equity
-  // with a separate margin in eq_margin_movegen, or combine them into
-  // target_equity and pass eq_margin_movegen=0 (the inference code does this
-  // for tile placements). Defaults to EQUITY_MAX_VALUE for non-inference mode.
+  // Inference passes the highest equity a move may have while the inferred
+  // move stays within its margin: move generation stops at the first move
+  // above it and skips anchors that cannot exceed it, so the move it returns
+  // is above it exactly when the best move is. EQUITY_MAX_VALUE, for every
+  // other caller, turns this off.
   Equity target_equity;
 
-  // Movegen for inferences after exchanges will need to know the number of
-  // tiles exchanged so that it can determine the target equity value after
-  // generating exchanges, and then skip anchors that can't surpass that value
-  // by eq_margin_movegen. This field does not itself trigger an early return
-  // from move generation based on alternate exchange sizes. Value is
-  // UNSET_LEAVE_SIZE for non-exchange scenarios.
-  int target_leave_size_for_exchange_cutoff;
   MoveList *move_list;
   // Output: bitvector of machine letters that appear in any valid move.
   // Only used with MOVE_RECORD_TILES_PLAYED. Caller provides pointer; callee

@@ -58,7 +58,6 @@ static void test_pass_path(int empty_side) {
       .move_record_type = MOVE_RECORD_ALL_SMALL,
       .move_sort_type = MOVE_SORT_SCORE,
       .target_equity = EQUITY_MAX_VALUE,
-      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
   };
   for (int side = 0; side < 2; side++) {
     Rack *rack = player_get_rack(game_get_player(game, side));
@@ -141,7 +140,6 @@ static void test_tile_placement_paths(void) {
       .move_record_type = MOVE_RECORD_ALL_SMALL,
       .move_sort_type = MOVE_SORT_SCORE,
       .target_equity = EQUITY_MAX_VALUE,
-      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
   };
   PathMoveLists *lists = path_move_lists_create();
   for (int position_idx = 0; position_idx < 2; position_idx++) {

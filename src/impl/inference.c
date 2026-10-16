@@ -6,7 +6,6 @@
 #include "../def/game_history_defs.h"
 #include "../def/inference_defs.h"
 #include "../def/letter_distribution_defs.h"
-#include "../def/move_defs.h"
 #include "../def/rack_defs.h"
 #include "../def/thread_control_defs.h"
 #include "../ent/alias_method.h"
@@ -22,6 +21,7 @@
 #include "../ent/move.h"
 #include "../ent/player.h"
 #include "../ent/rack.h"
+#include "../ent/static_eval.h"
 #include "../ent/stats.h"
 #include "../ent/thread_control.h"
 #include "../ent/validated_move.h"
@@ -78,6 +78,9 @@ typedef struct Inference {
   // the tiles the target put back into the bag which
   // are unseen to the observer making the inference.
   Rack *current_target_exchanged;
+  // For an exchange of N tiles: the tiles kept by the best exchange of N
+  // tiles from the rack being evaluated (see get_best_exchange_equity).
+  Rack *best_exchange_leave;
   // Rack containing the leave and the other tiles
   // which the observer may know about (for example, due
   // to a lost challenge, coffee housing, or accidental flash).
@@ -108,6 +111,7 @@ void inference_destroy(Inference *inference) {
   }
   rack_destroy(inference->current_target_leave);
   rack_destroy(inference->current_target_exchanged);
+  rack_destroy(inference->best_exchange_leave);
   rack_destroy(inference->bag_as_rack);
   move_list_destroy(inference->move_list);
   inference_results_destroy(inference->results);
@@ -154,103 +158,129 @@ void record_valid_leave(const Rack *rack, InferenceResults *results,
                                   number_of_draws_for_leave);
 }
 
-void evaluate_possible_leave(Inference *inference) {
-  Equity current_leave_value =
-      klv_get_leave_value(inference->klv, inference->current_target_leave);
+// Finds the best leave of exactly keep_size tiles drawn from the target's
+// full rack (current_target_leave): the highest KLV value, the first found in
+// this enumeration order on ties. Enumerates each multiset of tiles once.
+static void find_best_exchange_leave(const Inference *inference, Rack *leave,
+                                     int start_ml, int remaining,
+                                     Equity *best_value) {
+  if (remaining == 0) {
+    const Equity value = klv_get_leave_value(inference->klv, leave);
+    if (value > *best_value) {
+      *best_value = value;
+      rack_copy(inference->best_exchange_leave, leave);
+    }
+    return;
+  }
+  for (int ml = start_ml; ml < inference->ld_size; ml++) {
+    if (rack_get_letter(leave, ml) <
+        rack_get_letter(inference->current_target_leave, ml)) {
+      rack_add_letter(leave, ml);
+      find_best_exchange_leave(inference, leave, ml, remaining - 1, best_value);
+      rack_take_letter(leave, ml);
+    }
+  }
+}
 
-  const Equity target_equity_cutoff =
-      inference->target_score + current_leave_value + inference->equity_margin;
-  int target_leave_size = UNSET_LEAVE_SIZE;
-  Equity eq_margin_movegen = 0;
-  if (inference->use_infer_cutoff_optimization &&
-      (inference->target_number_of_tiles_exchanged > 0)) {
-    target_leave_size = RACK_SIZE - inference->target_number_of_tiles_exchanged;
-    // For exchanges, pass the margin to move generation for best_leaves
-    // calculation
-    eq_margin_movegen = inference->equity_margin;
+// Sets best_exchange_leave to the tiles the target keeps in its best exchange
+// of target_number_of_tiles_exchanged tiles and returns that exchange's
+// equity, computed the way move generation computes it.
+static Equity get_best_exchange_equity(const Inference *inference) {
+  const int keep_size = RACK_SIZE - inference->target_number_of_tiles_exchanged;
+  Rack leave;
+  rack_set_dist_size_and_reset(&leave, inference->ld_size);
+  Equity best_value = EQUITY_MIN_VALUE;
+  find_best_exchange_leave(inference, &leave, 0, keep_size, &best_value);
+  const Game *game = inference->game;
+  return static_eval_get_nonopening_move_equity(
+      game_get_ld(game), inference->best_exchange_leave,
+      player_get_rack(game_get_player(game, 1 - inference->target_index)),
+      inference->target_number_of_tiles_exchanged,
+      bag_get_letters(game_get_bag(game)), 0, best_value);
+}
+
+// A rack is consistent with the target's move when no move beats it by more
+// than the equity margin. For a tile placement the move's equity is its
+// score plus the leave value. For an exchange of N tiles it is the best
+// exchange of N tiles that rack can make, and the leave and exchanged tiles
+// recorded for the rack come from that exchange. Exchanges of other sizes
+// are ordinary moves under this rule.
+void evaluate_possible_leave(Inference *inference) {
+  const Equity current_leave_value =
+      klv_get_leave_value(inference->klv, inference->current_target_leave);
+  const bool is_exchange = inference->target_number_of_tiles_exchanged > 0;
+
+  Equity target_equity_cutoff;
+  if (is_exchange) {
+    target_equity_cutoff =
+        get_best_exchange_equity(inference) + inference->equity_margin;
+  } else {
+    target_equity_cutoff = inference->target_score + current_leave_value +
+                           inference->equity_margin;
   }
 
-  // For tile placements, margin is already in target_equity_cutoff, so pass 0
+  // With the cutoff optimization, move generation stops at the first move
+  // above the cutoff and skips anchors that cannot reach it, so the move it
+  // returns is above the cutoff exactly when the best move is.
   const Move *top_move = get_top_equity_move_for_inferences(
       inference->game, inference->move_list,
       inference->use_infer_cutoff_optimization ? target_equity_cutoff
-                                               : EQUITY_MAX_VALUE,
-      target_leave_size, eq_margin_movegen);
+                                               : EQUITY_MAX_VALUE);
 
-  const bool is_within_equity_margin =
-      target_equity_cutoff >= move_get_equity(top_move);
-  const int tiles_played = move_get_tiles_played(top_move);
-  const bool number_exchanged_matches =
-      move_get_type(top_move) == GAME_EVENT_EXCHANGE &&
-      tiles_played == inference->target_number_of_tiles_exchanged;
-  const bool recordable = is_within_equity_margin || number_exchanged_matches ||
+  const bool recordable = target_equity_cutoff >= move_get_equity(top_move) ||
                           rack_is_empty(inference->bag_as_rack);
+  if (!recordable) {
+    return;
+  }
 
-  if (recordable) {
-    uint64_t number_of_draws_for_leave = get_number_of_draws_for_rack(
-        inference->bag_as_rack, inference->current_target_leave);
-    if (inference->target_number_of_tiles_exchanged > 0) {
-      record_valid_leave(inference->current_target_leave, inference->results,
-                         INFERENCE_TYPE_RACK,
-                         equity_to_double(current_leave_value),
-                         number_of_draws_for_leave);
-
-      if (number_exchanged_matches) {
-        // The full rack for the exchange was recorded above,
-        // but now we have to record the leave and the exchanged tiles
-        for (int exchanged_tile_index = 0; exchanged_tile_index < tiles_played;
-             exchanged_tile_index++) {
-          MachineLetter tile_exchanged =
-              move_get_tile(top_move, exchanged_tile_index);
-          rack_add_letter(inference->current_target_exchanged, tile_exchanged);
-          rack_take_letter(inference->current_target_leave, tile_exchanged);
-        }
-        record_valid_leave(
-            inference->current_target_leave, inference->results,
-            INFERENCE_TYPE_LEAVE,
-            equity_to_double(klv_get_leave_value(
-                inference->klv, inference->current_target_leave)),
-            number_of_draws_for_leave);
-        record_valid_leave(
-            inference->current_target_exchanged, inference->results,
-            INFERENCE_TYPE_EXCHANGED,
-            equity_to_double(klv_get_leave_value(
-                inference->klv, inference->current_target_exchanged)),
-            number_of_draws_for_leave);
-        LeaveRackList *lrl =
-            inference_results_get_leave_rack_list(inference->results);
-        if (lrl) {
-          leave_rack_list_insert_rack(inference->current_target_leave,
-                                      inference->current_target_exchanged,
-                                      (int)number_of_draws_for_leave,
-                                      current_leave_value, lrl);
-        }
-        alias_method_add_rack(
-            inference_results_get_alias_method(inference->results),
-            inference->current_target_leave, (int)number_of_draws_for_leave);
-        rack_reset(inference->current_target_exchanged);
-        for (int exchanged_tile_index = 0; exchanged_tile_index < tiles_played;
-             exchanged_tile_index++) {
-          MachineLetter tile_exchanged =
-              move_get_tile(top_move, exchanged_tile_index);
-          rack_add_letter(inference->current_target_leave, tile_exchanged);
-        }
-      }
-    } else {
-      record_valid_leave(inference->current_target_leave, inference->results,
-                         INFERENCE_TYPE_LEAVE,
-                         equity_to_double(current_leave_value),
-                         number_of_draws_for_leave);
-      alias_method_add_rack(
-          inference_results_get_alias_method(inference->results),
-          inference->current_target_leave, (int)number_of_draws_for_leave);
-      LeaveRackList *lrl =
-          inference_results_get_leave_rack_list(inference->results);
-      if (lrl) {
-        leave_rack_list_insert_rack(inference->current_target_leave, NULL,
-                                    (int)number_of_draws_for_leave,
-                                    current_leave_value, lrl);
-      }
+  const uint64_t number_of_draws_for_leave = get_number_of_draws_for_rack(
+      inference->bag_as_rack, inference->current_target_leave);
+  if (is_exchange) {
+    record_valid_leave(inference->current_target_leave, inference->results,
+                       INFERENCE_TYPE_RACK,
+                       equity_to_double(current_leave_value),
+                       number_of_draws_for_leave);
+    const Rack *best_exchange_leave = inference->best_exchange_leave;
+    rack_copy(inference->current_target_exchanged,
+              inference->current_target_leave);
+    rack_subtract_using_floor_zero(inference->current_target_exchanged,
+                                   best_exchange_leave);
+    record_valid_leave(best_exchange_leave, inference->results,
+                       INFERENCE_TYPE_LEAVE,
+                       equity_to_double(klv_get_leave_value(
+                           inference->klv, best_exchange_leave)),
+                       number_of_draws_for_leave);
+    record_valid_leave(
+        inference->current_target_exchanged, inference->results,
+        INFERENCE_TYPE_EXCHANGED,
+        equity_to_double(klv_get_leave_value(
+            inference->klv, inference->current_target_exchanged)),
+        number_of_draws_for_leave);
+    LeaveRackList *lrl =
+        inference_results_get_leave_rack_list(inference->results);
+    if (lrl) {
+      leave_rack_list_insert_rack(
+          best_exchange_leave, inference->current_target_exchanged,
+          (int)number_of_draws_for_leave, current_leave_value, lrl);
+    }
+    alias_method_add_rack(
+        inference_results_get_alias_method(inference->results),
+        best_exchange_leave, (int)number_of_draws_for_leave);
+    rack_reset(inference->current_target_exchanged);
+  } else {
+    record_valid_leave(inference->current_target_leave, inference->results,
+                       INFERENCE_TYPE_LEAVE,
+                       equity_to_double(current_leave_value),
+                       number_of_draws_for_leave);
+    alias_method_add_rack(
+        inference_results_get_alias_method(inference->results),
+        inference->current_target_leave, (int)number_of_draws_for_leave);
+    LeaveRackList *lrl =
+        inference_results_get_leave_rack_list(inference->results);
+    if (lrl) {
+      leave_rack_list_insert_rack(inference->current_target_leave, NULL,
+                                  (int)number_of_draws_for_leave,
+                                  current_leave_value, lrl);
     }
   }
 }
@@ -353,6 +383,7 @@ Inference *inference_create(const Game *game, const InferenceArgs *args,
 
   inference->current_target_leave = rack_create(inference->ld_size);
   inference->current_target_exchanged = rack_create(inference->ld_size);
+  inference->best_exchange_leave = rack_create(inference->ld_size);
   inference->current_target_rack =
       player_get_rack(game_get_player(inference->game, args->target_index));
   inference->bag_as_rack = rack_create(inference->ld_size);

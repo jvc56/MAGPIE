@@ -859,7 +859,6 @@ static void assert_incremental_play_roundtrip(Game *game,
       .override_kwg = NULL,
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
-      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
   };
   generate_moves(&args);
   SortedMoveList *sml = sorted_move_list_create(move_list);
