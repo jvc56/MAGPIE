@@ -2,6 +2,7 @@
 
 #include "../compat/cpthread.h"
 #include "../compat/cpthread_defs.h"
+#include "../compat/memory_info.h"
 #include "../def/game_defs.h"
 #include "../def/rack_defs.h"
 #include "../ent/alias_method.h"
@@ -871,7 +872,8 @@ RandomVariables *rv_sim_create(RandomVariables *rvs, const SimArgs *sim_args,
        thread_index++) {
     simmer->workers[thread_index] = simmer_create_worker(sim_args);
   }
-  simmer->best_move_carry = best_move_carry_create(true);
+  simmer->best_move_carry =
+      best_move_carry_create(SIM_BEST_MOVE_CARRY_BUCKETS, true);
 
   simmer->win_pcts = sim_args->win_pcts;
   simmer->use_inference = sim_args->use_inference;

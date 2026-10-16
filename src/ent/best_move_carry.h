@@ -9,6 +9,7 @@
 #include "letter_distribution.h"
 #include "move.h"
 #include "rack.h"
+#include <assert.h>
 #include <stdatomic.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -28,25 +29,12 @@
 // same equities as it did then (see gen_get_skippable_lanes), none better
 // than that bound. When the bound is itself a move of the lane it is the
 // lane's best move, and still legal. The bounds take about 11 KB a bucket,
-// nearly all of the carry's memory.
+// nearly all of the carry's memory; a simulation sizes the carry by
+// SIM_BEST_MOVE_CARRY_BUCKETS (see memory_info.h).
 //
 // All of a simulation's worker threads share one carry, since a playout's
 // matching playouts (the same draws for other candidates) run on any of them.
 // Each bucket has its own lock, held only to copy moves in or out.
-
-// The carry takes about 12 MB natively. The browser's simulations share a
-// wasm heap with the lexica, so there it takes about 1.5 MB: a simulation
-// with 128 buckets of 8 bounds a lane still skips more lanes than one with
-// 1024 buckets of 2.
-#ifdef __EMSCRIPTEN__
-enum {
-  BEST_MOVE_CARRY_NUM_BUCKETS = 128,
-};
-#else
-enum {
-  BEST_MOVE_CARRY_NUM_BUCKETS = 1024,
-};
-#endif
 
 enum {
   BEST_MOVE_CARRY_MOVES_PER_RACK = 4,
@@ -55,9 +43,6 @@ enum {
 };
 
 static_assert(BEST_MOVE_CARRY_NUM_LANES <= 64, "lane masks are 64 bits");
-static_assert((BEST_MOVE_CARRY_NUM_BUCKETS &
-               (BEST_MOVE_CARRY_NUM_BUCKETS - 1)) == 0,
-              "keys pick buckets by mask");
 
 typedef struct CarriedBestMove {
   Move move;
@@ -110,7 +95,9 @@ typedef struct BestMoveCarryBucket {
 } BestMoveCarryBucket;
 
 typedef struct BestMoveCarry {
-  BestMoveCarryBucket buckets[BEST_MOVE_CARRY_NUM_BUCKETS];
+  // A power of two, so that a key's low bits pick its bucket.
+  int num_buckets;
+  BestMoveCarryBucket *buckets;
   // By bucket, under the bucket's lock; NULL when the carry skips no lanes.
   CarriedLaneBounds *lane_bounds;
 } BestMoveCarry;
@@ -126,19 +113,24 @@ static inline bool best_move_carry_bags_give_same_equities(int tiles_in_bag,
 
 // Not thread safe: call it while no generation uses the carry.
 static inline void best_move_carry_reset(BestMoveCarry *carry) {
-  for (int bucket_idx = 0; bucket_idx < BEST_MOVE_CARRY_NUM_BUCKETS;
-       bucket_idx++) {
+  for (int bucket_idx = 0; bucket_idx < carry->num_buckets; bucket_idx++) {
     atomic_flag_clear(&carry->buckets[bucket_idx].lock);
     carry->buckets[bucket_idx].rack_moves.is_valid = false;
   }
 }
 
-static inline BestMoveCarry *best_move_carry_create(bool skips_lanes) {
+// num_buckets must be a power of two.
+static inline BestMoveCarry *best_move_carry_create(int num_buckets,
+                                                    bool skips_lanes) {
+  assert(num_buckets > 0 && (num_buckets & (num_buckets - 1)) == 0);
   BestMoveCarry *carry = (BestMoveCarry *)malloc_or_die(sizeof(BestMoveCarry));
+  carry->num_buckets = num_buckets;
+  carry->buckets = (BestMoveCarryBucket *)malloc_or_die(
+      sizeof(BestMoveCarryBucket) * (size_t)num_buckets);
   carry->lane_bounds = NULL;
   if (skips_lanes) {
     carry->lane_bounds = (CarriedLaneBounds *)malloc_or_die(
-        sizeof(CarriedLaneBounds) * BEST_MOVE_CARRY_NUM_BUCKETS);
+        sizeof(CarriedLaneBounds) * (size_t)num_buckets);
   }
   best_move_carry_reset(carry);
   return carry;
@@ -149,6 +141,7 @@ static inline void best_move_carry_destroy(BestMoveCarry *carry) {
     return;
   }
   free(carry->lane_bounds);
+  free(carry->buckets);
   free(carry);
 }
 
@@ -183,7 +176,7 @@ best_move_carry_rack_moves_match(const CarriedRackMoves *rack_moves,
 static inline BestMoveCarryBucket *best_move_carry_lock(BestMoveCarry *carry,
                                                         uint64_t key) {
   BestMoveCarryBucket *bucket =
-      &carry->buckets[key & (BEST_MOVE_CARRY_NUM_BUCKETS - 1)];
+      &carry->buckets[key & (uint64_t)(carry->num_buckets - 1)];
   while (
       atomic_flag_test_and_set_explicit(&bucket->lock, memory_order_acquire)) {
     // The holder only copies a few hundred bytes; spin until it is done.
@@ -206,7 +199,7 @@ static inline bool best_move_carry_find(BestMoveCarry *carry, const Rack *rack,
                                         int number_of_tiles_in_bag,
                                         CarriedRackFind *found) {
   const uint64_t key = best_move_carry_get_key(rack, player_index);
-  const int bucket_idx = (int)(key & (BEST_MOVE_CARRY_NUM_BUCKETS - 1));
+  const int bucket_idx = (int)(key & (uint64_t)(carry->num_buckets - 1));
   BestMoveCarryBucket *bucket = best_move_carry_lock(carry, key);
   const CarriedRackMoves *rack_moves = &bucket->rack_moves;
   const bool is_found =
@@ -326,7 +319,7 @@ best_move_carry_add(BestMoveCarry *carry, const Rack *rack, int player_index,
                     const uint64_t *lane_hashes, uint64_t searched_lanes,
                     int number_of_tiles_in_bag) {
   const uint64_t key = best_move_carry_get_key(rack, player_index);
-  const int bucket_idx = (int)(key & (BEST_MOVE_CARRY_NUM_BUCKETS - 1));
+  const int bucket_idx = (int)(key & (uint64_t)(carry->num_buckets - 1));
   BestMoveCarryBucket *bucket = best_move_carry_lock(carry, key);
   CarriedRackMoves *rack_moves = &bucket->rack_moves;
   CarriedLaneBounds *rack_lane_bounds = NULL;

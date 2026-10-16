@@ -1943,7 +1943,7 @@ static void best_move_carry_test(const char *config_str, bool skips_lanes,
   MoveList *candidates = move_list_create(15);
   MoveList *plain_list = move_list_create(1);
   MoveList *carried_list = move_list_create(1);
-  BestMoveCarry *carry = best_move_carry_create(skips_lanes);
+  BestMoveCarry *carry = best_move_carry_create(1024, skips_lanes);
   int generations = 0;
   int racks_with_several_moves = 0;
   for (int position_idx = 0; position_idx < 12; position_idx++) {
@@ -2008,8 +2008,8 @@ static void best_move_carry_test(const char *config_str, bool skips_lanes,
   // with it.
   assert(best_move_carry_skips_lanes(carry) == skips_lanes);
   int lane_bounds = 0;
-  for (int bucket_idx = 0;
-       skips_lanes && bucket_idx < BEST_MOVE_CARRY_NUM_BUCKETS; bucket_idx++) {
+  for (int bucket_idx = 0; skips_lanes && bucket_idx < carry->num_buckets;
+       bucket_idx++) {
     const CarriedLaneBounds *rack_lane_bounds = &carry->lane_bounds[bucket_idx];
     for (int lane = 0; carry->buckets[bucket_idx].rack_moves.is_valid &&
                        lane < BEST_MOVE_CARRY_NUM_LANES;

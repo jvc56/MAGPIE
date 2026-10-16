@@ -53,6 +53,21 @@ enum {
 };
 #endif
 
+// Buckets of a simulation's best-move carry (best_move_carry.h), about 12 KB
+// each, nearly all of it lane bounds: about 12 MB natively. The browser's
+// simulations share the wasm heap with the lexica, so there the carry takes
+// about 1.5 MB; 128 buckets of 8 bounds a lane still skip more lanes than
+// 1024 buckets of 2.
+#ifdef __EMSCRIPTEN__
+enum {
+  SIM_BEST_MOVE_CARRY_BUCKETS = 128,
+};
+#else
+enum {
+  SIM_BEST_MOVE_CARRY_BUCKETS = 1024,
+};
+#endif
+
 static inline bool search_memory_is_bounded(void) {
 #ifdef __EMSCRIPTEN__
   return true;

@@ -13,7 +13,6 @@
 #include "../def/move_defs.h"
 #include "../def/players_data_defs.h"
 #include "../def/rack_defs.h"
-#include "../def/static_eval_defs.h"
 #include "../def/thread_control_defs.h"
 #include "../ent/anchor.h"
 #include "../ent/bag.h"
