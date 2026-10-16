@@ -2666,6 +2666,13 @@ static void test_an_abandoned_temporary_is_removed(void) {
   const char *in_progress = "contribute_test_table.rit.23456.tmp";
   const char *not_ours = "contribute_test_table.rit.backup.tmp";
   const char *other_file = "contribute_test_other.rit.12345.tmp";
+  // An atomic write's temporary (cfile_atomic_write_begin), and a replaced
+  // file Windows could not delete, moved aside just now: its modification
+  // time is the old file's, but the move is new, so it stays.
+  const char *abandoned_atomic = "contribute_test_table.rit.tmp.Ab12Cd";
+  const char *moved_aside = "contribute_test_table.rit.old.12345-1";
+  touch_file(abandoned_atomic, (time_t)2 * 60 * 60);
+  touch_file(moved_aside, (time_t)2 * 60 * 60);
   touch_file(abandoned, (time_t)2 * 60 * 60);
   touch_file(abandoned_old_form, (time_t)2 * 60 * 60);
   touch_file(in_progress, 0);
@@ -2675,6 +2682,8 @@ static void test_an_abandoned_temporary_is_removed(void) {
   char *temporary = temporary_sibling(target);
   assert(!file_exists(abandoned));
   assert(!file_exists(abandoned_old_form));
+  assert(!file_exists(abandoned_atomic));
+  assert(file_exists(moved_aside));
   // Two writes in one process get two names.
   char *second = temporary_sibling(target);
   assert(!strings_equal(temporary, second));
@@ -2687,6 +2696,7 @@ static void test_an_abandoned_temporary_is_removed(void) {
   (void)remove(in_progress);
   (void)remove(not_ours);
   (void)remove(other_file);
+  (void)remove(moved_aside);
 }
 
 // A run's state starts with every field set: fields added to it without a

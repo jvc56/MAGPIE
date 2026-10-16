@@ -685,12 +685,15 @@ void remove_stale_temporary_siblings(const char *filename) {
       continue;
     }
     char *path = get_formatted_string("%s/%s", dir, entry);
+    // A replaced file moved aside keeps its old modification time, so for
+    // one the rename (a status change) has to be an hour old too.
+    const bool moved_aside =
+        strncmp(entry + strlen(base), ".old.", strlen(".old.")) == 0;
     CFileIdentity identity;
-    // A file moved aside keeps its old modification time, so the rename (a
-    // status change) counts too.
     if (cfile_identity(path, &identity) &&
         now - identity.mtime_seconds > STALE_TEMPORARY_SECONDS &&
-        now - identity.ctime_seconds > STALE_TEMPORARY_SECONDS) {
+        (!moved_aside ||
+         now - identity.ctime_seconds > STALE_TEMPORARY_SECONDS)) {
       (void)remove(path);
     }
     free(path);
