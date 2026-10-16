@@ -1,0 +1,222 @@
+name: Release macOS
+
+# Builds magpie for Apple silicon and for Intel Macs, joins the two into one
+# universal executable, tests it on each architecture, smoke-tests the
+# first-run path of each in an empty directory, and attaches it, zipped and
+# with its SHA-256, to the GitHub release for the tag.
+#
+# Triggers, as in release-windows.yml:
+# - a pushed vX.Y.Z tag runs every job, publish included. The tag must match
+#   MAGPIE_VERSION in src/impl/config.c, or the build job fails first.
+# - a push to any branch that changes this file runs every job but publish,
+#   so a change to the workflow is tested before it merges. This is a branch
+#   push rather than pull_request because the test job restores the
+#   windows-data cache, which run-tests.yml saves on the branch, and a
+#   pull_request run can only restore caches from the base branch.
+# - workflow_dispatch runs every job but publish, on any ref, tags included.
+# Only publish can write to the repository.
+
+on:
+  push:
+    branches:
+      - "**"
+    tags:
+      - "v*"
+    # Applies to branch pushes only: GitHub does not evaluate path filters
+    # for tag pushes, so every tag push runs.
+    paths:
+      - .github/workflows/release-macos.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  # The oldest macOS the executable runs on. 11 is the first with Apple
+  # silicon, so neither half can go lower than the other.
+  MACOSX_DEPLOYMENT_TARGET: "11.0"
+
+jobs:
+  build:
+    runs-on: macos-15
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # As in release-windows.yml: a release tag must name the version the
+      # source builds. Checked before anything is built.
+      - name: Read MAGPIE_VERSION and check it against the tag
+        id: version
+        run: |
+          version="$(sed -n 's/^#define MAGPIE_VERSION "\(.*\)"/\1/p' src/impl/config.c)"
+          if [ -z "$version" ]; then
+            echo "::error::no MAGPIE_VERSION in src/impl/config.c"
+            exit 1
+          fi
+          echo "MAGPIE_VERSION: $version"
+          if [ "$GITHUB_EVENT_NAME" = push ] && [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            tag="${GITHUB_REF#refs/tags/}"
+            if [ "${tag#v}" != "$version" ]; then
+              echo "::error::tag $tag does not match MAGPIE_VERSION $version in src/impl/config.c"
+              exit 1
+            fi
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      # Each half is a portable_release for the targets the Windows
+      # executables use, nehalem and armv8-a, so a Mac builds the same
+      # derived files as any other release of that architecture (README.md,
+      # "Portable builds"). Xcode's clang builds both on this one runner,
+      # through xcrun, which also gives it the SDK.
+      - name: Build both architectures and join them
+        run: |
+          mkdir -p slices release
+          for arch in arm64 x86_64; do
+            march=armv8-a
+            if [ "$arch" = x86_64 ]; then march=nehalem; fi
+            make magpie magpie_test BUILD=portable_release PORTABLE_MARCH=$march CC="xcrun clang -arch $arch"
+            mv bin/magpie "slices/magpie-$arch"
+            mv bin/magpie_test "slices/magpie_test-$arch"
+          done
+          lipo -create -output release/magpie slices/magpie-arm64 slices/magpie-x86_64
+          lipo -create -output release/magpie_test slices/magpie_test-arm64 slices/magpie_test-x86_64
+          lipo -info release/magpie release/magpie_test
+
+      # In a folder, so that unzipping it gives MAGPIE a directory of its own
+      # to keep its data in. ditto keeps the executable bit, and a zip is what
+      # Finder opens with a double-click.
+      - name: Zip the executable
+        env:
+          version: ${{ steps.version.outputs.version }}
+        run: |
+          name="magpie-$version-macos-universal"
+          mkdir -p "zip/$name"
+          cp release/magpie "zip/$name/magpie"
+          cp LICENSE.md "zip/$name/LICENSE.md"
+          (cd zip && ditto -c -k --keepParent "$name" "../release/$name.zip")
+          (cd release && shasum -a 256 "$name.zip" > "$name.zip.sha256" && cat "$name.zip.sha256")
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release
+          path: release/
+
+  # L5: the first-run path of the executable in an empty directory on each
+  # architecture: fetch the data from MAGPIE-DATA, build a wordmap on first
+  # use, then a session of ordinary commands.
+  smoke:
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: arm64
+            runner: macos-15
+            target: armv8-a
+          - name: x86_64
+            runner: macos-15-intel
+            target: nehalem
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: release
+          path: release
+      - name: Unzip, fetch data and play in an empty directory
+        run: |
+          [ "$(uname -m)" = "${{ matrix.name }}" ] || { echo "::error::this runner is $(uname -m)"; exit 1; }
+          mkdir unzipped && ditto -x -k release/magpie-*-macos-universal.zip unzipped
+          magpie="$(echo "$PWD"/unzipped/magpie-*-macos-universal/magpie)"
+          [ -x "$magpie" ] || { echo "::error::the zip lost the executable bit"; exit 1; }
+          mkdir empty && cd empty
+          "$magpie" data fetch
+          [ -f data/lexica/CSW24.kwg ] || { echo "::error::data fetch wrote nothing"; exit 1; }
+          status=0
+          output="$("$magpie" <<'EOF'
+          set -lex CSW24 -threads 2 -savesettings false
+          cgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 AEINRST/ 0/0 0
+          gen -numplays 3
+          sim -plies 2 -it 200 -scond none
+          infer 1 MUZAKY 58 -numplays 20
+          cgp 2ABERRaNT4G/5HE6FE/5OS5CUR/5DI5OMA/1HARPIST4WEN/5ET2Q3TI/6E1VIVO2A/4JUDY2ABOIL/4I2ERASERS1/1DOWLY8M/4TaLEGGIO2I/7Z6C/7I3PUNK/7NONTONAL/7E2AX2E AD/EFU 467/497 0
+          endgame -eplies 4
+          builders
+          quit
+          EOF
+          )" || status=$?
+          echo "$output"
+          [ "$status" -eq 0 ] || { echo "::error::the session exited with $status"; exit 1; }
+          grep -q 'building the wordmap for CSW24' <<<"$output" || { echo "::error::no wordmap was built"; exit 1; }
+          ! grep -q '(error' <<<"$output" || { echo "::error::the session reported an error"; exit 1; }
+          grep -q 'Endgame (depth' <<<"$output" || { echo "::error::the endgame did not run"; exit 1; }
+          grep -q '"build_target":"${{ matrix.target }}"' <<<"$output" || { echo "::error::not the ${{ matrix.target }} half"; exit 1; }
+          [ -f data/lexica/CSW24.wmp ] || { echo "::error::the wordmap is missing"; exit 1; }
+
+  # L4 on the release executable itself, one architecture per runner.
+  test:
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: arm64
+            runner: macos-15
+          - name: x86_64
+            runner: macos-15-intel
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v4
+      # The Windows runners' copy of the data, which has its symlinks turned
+      # into files and so restores on any operating system.
+      - name: Get the data cache
+        uses: actions/cache/restore@v4
+        with:
+          path: windows-data
+          key: windows-data-files-32
+          enableCrossOsArchive: true
+          fail-on-cache-miss: true
+      - name: Put the data in place
+        run: mv windows-data/data windows-data/testdata .
+      - uses: actions/download-artifact@v4
+        with:
+          name: release
+          path: release
+      - name: Run the tests
+        run: |
+          [ "$(uname -m)" = "${{ matrix.name }}" ] || { echo "::error::this runner is $(uname -m)"; exit 1; }
+          chmod +x release/magpie_test
+          ./release/magpie_test
+
+  # Only a pushed vX.Y.Z tag publishes: startsWith alone would also be true
+  # for a workflow_dispatch started on a tag ref.
+  publish:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: [smoke, test]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: release
+          path: release
+      - name: Attach the executable to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="${GITHUB_REF#refs/tags/}"
+          # The build job checked that the tag is v$MAGPIE_VERSION.
+          zip="release/magpie-${tag#v}-macos-universal.zip"
+          # release-windows.yml runs for the same tag and may create the
+          # release first, even between this view and this create, so a
+          # failed create is fine if the release is there after it.
+          gh release view "$tag" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1 \
+            || gh release create "$tag" -R "$GITHUB_REPOSITORY" --prerelease --title "$tag" \
+                 --notes "See the README's Windows and macOS sections. The executables are not code-signed; Windows and macOS will ask you to confirm the first run." \
+            || gh release view "$tag" -R "$GITHUB_REPOSITORY" >/dev/null
+          # No --clobber, as in release-windows.yml: a rerun cannot silently
+          # replace a published file.
+          gh release upload "$tag" -R "$GITHUB_REPOSITORY" "$zip" "$zip.sha256"
