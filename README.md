@@ -62,6 +62,23 @@ From there MAGPIE works exactly as it does on Linux and macOS: everything in [Us
 
 To build the Windows executables yourself on Linux or macOS, with Docker installed, run `make windows` (add `WINDOWS_ARCH=aarch64` for ARM); `bin/magpie.exe` is the result.
 
+### macOS
+
+macOS 11 or later, on Apple silicon or Intel, runs MAGPIE as one universal executable with nothing else to install.
+
+1. From the [Releases](https://github.com/jvc56/MAGPIE/releases) page, download `magpie-<version>-macos-universal.zip` and open it. It unzips to a folder holding `magpie`. Move the folder wherever you like, say your home folder.
+2. Optionally, check the download against the `.sha256` file published beside it. In Terminal:
+   ```
+   shasum -a 256 magpie-<version>-macos-universal.zip
+   ```
+   The hash printed must match the one in the `.sha256` file.
+3. The executable is not signed or notarized, so macOS refuses to run it at first. To allow it, either run `xattr -d com.apple.quarantine magpie` in its folder once, or try to run it and then click **Open Anyway** in **System Settings > Privacy & Security**.
+4. In Terminal, `cd` to its folder and run `./magpie`. MAGPIE looks for its data in a `data` folder there, then in one beside the executable, and offers to download it (about 195 MB) into the first: answer `y`. Double-clicking `magpie` in Finder starts it in your home folder instead, so start it from Terminal the first time.
+
+From there, everything in [Usage](#usage) applies.
+
+To build the universal executable yourself, run `make magpie BUILD=portable_release` once with `PORTABLE_MARCH=armv8-a CC="xcrun clang -arch arm64"` and once with `CC="xcrun clang -arch x86_64"`, moving `bin/magpie` aside after each. Then join the two with `lipo -create -output magpie <arm64 build> <x86_64 build>`.
+
 ### Linux
 
 Linux on x86_64 or arm64, with glibc 2.35 or later (Ubuntu 22.04, Debian 12, Fedora 36 and newer), runs MAGPIE as one executable without building it.
