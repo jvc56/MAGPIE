@@ -1,0 +1,9 @@
+{
+  "shutdown": {
+    "reason": "magpie_too_old",
+    "message": "Every active job requires MAGPIE 1.6.0 or newer; you are running 1.4.0.",
+    "required_tarball_dates": [],
+    "required_magpie_version": "1.6.0",
+    "download_url": "https://github.com/jvc56/MAGPIE"
+  }
+}

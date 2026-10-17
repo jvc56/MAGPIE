@@ -15,6 +15,7 @@
 
 #include "sim_benchmark_test.h"
 
+#include "../src/compat/ctime.h"
 #include "../src/compat/memory_info.h"
 #include "../src/impl/autoplay.h"
 #include "../src/impl/config.h"
@@ -24,12 +25,10 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <time.h>
 
 void test_sim_benchmark(void) {
-  struct timespec start;
-  struct timespec end;
-  clock_gettime(CLOCK_MONOTONIC, &start); // NOLINT(misc-include-cleaner)
+  Timer timer;
+  ctimer_start(&timer);
 
   autoplay_reset_total_sim_iterations();
   // Fix the game trajectory by playing the top-equity static move at every
@@ -64,9 +63,8 @@ void test_sim_benchmark(void) {
 
   load_and_exec_config_or_die(config, "autoplay games 1");
 
-  clock_gettime(CLOCK_MONOTONIC, &end);
-  double elapsed = (double)(end.tv_sec - start.tv_sec) +
-                   (double)(end.tv_nsec - start.tv_nsec) / 1e9;
+  ctimer_stop(&timer);
+  const double elapsed = ctimer_elapsed_seconds(&timer);
   const uint64_t iters = autoplay_get_total_sim_iterations();
   printf("plies=%d: %.1fs, iters=%llu (%.0f iters/sec)\n", plies, elapsed,
          (unsigned long long)iters, (double)iters / elapsed);

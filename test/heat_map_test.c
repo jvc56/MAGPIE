@@ -5,6 +5,7 @@
 #include "../src/ent/game.h"
 #include "../src/ent/heat_map.h"
 #include "../src/ent/move.h"
+#include "../src/ent/sim_results.h"
 #include "../src/ent/validated_move.h"
 #include "../src/impl/config.h"
 #include "../src/util/io_util.h"
@@ -17,6 +18,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 void assert_heat_map_add_move(const Game *game, const char *ucgi_move_str,
                               HeatMap *hm) {
@@ -146,6 +148,62 @@ void show_heat_maps_for_cgp(Config *config, const char *cgp, const char *rack) {
     load_and_exec_config_or_die(config, "heat 3 5 b");
     load_and_exec_config_or_die(config, "set -boardcolor none");
   }
+}
+
+enum {
+  HEAT_MAP_REPRO_PLAYS = 5,
+  HEAT_MAP_REPRO_PLIES = 2,
+};
+
+// Runs a fixed-seed, fixed-budget sim with heat maps and copies out every
+// play's heat map for every ply.
+static void heat_map_repro_sim(Config *config, const char *threads,
+                               HeatMap *maps) {
+  char settings[512];
+  (void)snprintf(settings, sizeof(settings),
+                 "set -numplays %d -plies %d -threads %s -iterations 5000 "
+                 "-minplayiterations 20 -scond none -cutoff 1 -sr tt -tlim 0 "
+                 "-seed 7 -useh true",
+                 HEAT_MAP_REPRO_PLAYS, HEAT_MAP_REPRO_PLIES, threads);
+  load_and_exec_config_or_die(config, settings);
+  load_and_exec_config_or_die(config, "gen");
+  load_and_exec_config_or_die(config, "sim");
+  const SimResults *sim_results = config_get_sim_results(config);
+  assert(sim_results_get_number_of_plays(sim_results) == HEAT_MAP_REPRO_PLAYS);
+  for (int play_idx = 0; play_idx < HEAT_MAP_REPRO_PLAYS; play_idx++) {
+    SimmedPlay *simmed_play =
+        sim_results_get_simmed_play(sim_results, play_idx);
+    for (int ply_idx = 0; ply_idx < HEAT_MAP_REPRO_PLIES; ply_idx++) {
+      const HeatMap *hm = simmed_play_get_heat_map(simmed_play, ply_idx);
+      assert(hm);
+      maps[play_idx * HEAT_MAP_REPRO_PLIES + ply_idx] = *hm;
+    }
+  }
+}
+
+// A sample's heat map contributions are applied when its round folds, like
+// every other statistic, so samples that are speculated and never scheduled,
+// or still running when the sim stops, leave no trace, and a fixed-budget
+// sim's heat maps are the same at any thread count.
+static void test_heat_map_sim_reproducible(Config *config) {
+  // The side to move leads by 400, so every play is a near-certain win and
+  // the sim stops on the win% cutoff soon after the initial phase, with later
+  // rounds and speculative samples still in flight.
+  load_and_exec_config_or_die(
+      config, "cgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 / 400/0 0 "
+              "-lex CSW21;");
+  load_and_exec_config_or_die(config, "r ABCDEFG");
+  const int num_maps = HEAT_MAP_REPRO_PLAYS * HEAT_MAP_REPRO_PLIES;
+  HeatMap *single = malloc_or_die(sizeof(HeatMap) * num_maps);
+  HeatMap *multi = malloc_or_die(sizeof(HeatMap) * num_maps);
+  heat_map_repro_sim(config, "1", single);
+  heat_map_repro_sim(config, "6", multi);
+  for (int map_idx = 0; map_idx < num_maps; map_idx++) {
+    assert(heat_map_get_total_count(&single[map_idx]) > 0);
+    assert(memcmp(&single[map_idx], &multi[map_idx], sizeof(HeatMap)) == 0);
+  }
+  free(multi);
+  free(single);
 }
 
 void test_heat_map(void) {
@@ -282,6 +340,8 @@ void test_heat_map(void) {
   load_and_exec_config_or_die(config, "gsim -iter 1000 -minp 10 -numplays 10 "
                                       "-useh false -plies 5 -boardcolor true");
   assert_config_exec_status(config, "heat 1", ERROR_STATUS_NO_HEAT_MAP_TO_SHOW);
+
+  test_heat_map_sim_reproducible(config);
 
   heat_map_destroy(hm);
   config_destroy(config);

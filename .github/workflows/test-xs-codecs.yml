@@ -1,0 +1,32 @@
+name: Test XS codecs
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  immutable-data:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      # Pin codec data so compatibility tests use immutable codebooks and ranking assets.
+      - uses: actions/checkout@v4
+        with:
+          repository: jvc56/MAGPIE-DATA
+          ref: c4216b80098e8c7e88262cb5d04d0bc033bc4d46
+          path: xs-data
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /data/xs/
+            /data/lexica/CSW24.kwg
+            /data/lexica/CSW24.klv2
+            /data/lexica/NWL23.kwg
+            /data/lexica/NWL23.klv2
+      - name: Install build dependencies
+        run: sudo apt-get update && sudo apt-get install -y clang
+      - name: Build with address and undefined-behavior sanitizers
+        run: make magpie_test word_frequencies CC=clang
+      - name: Test wire formats and both frozen English profiles
+        run: ./bin/magpie_test xs xsdata:xs-data/data
