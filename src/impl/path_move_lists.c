@@ -3,8 +3,10 @@
 #include "../def/board_defs.h"
 #include "../def/game_history_defs.h"
 #include "../def/letter_distribution_defs.h"
+#include "../def/move_defs.h"
 #include "../def/rack_defs.h"
 #include "../ent/board.h"
+#include "../ent/equity.h"
 #include "../ent/game.h"
 #include "../ent/move.h"
 #include "../ent/player.h"
@@ -258,6 +260,7 @@ void path_move_lists_reset(PathMoveLists *lists) { lists->length = 0; }
 void path_move_lists_set_root(PathMoveLists *lists, int side,
                               const MoveList *move_list) {
   slot_fill_from_move_list(&lists->roots[side], move_list);
+  lists->root_stamp = ++lists->next_stamp;
 }
 
 void path_move_lists_push(PathMoveLists *lists, const Board *board,
@@ -266,6 +269,7 @@ void path_move_lists_push(PathMoveLists *lists, const Board *board,
   lists->masks[lists->length] = move_lane_influence(board, move);
   lists->played[lists->length] =
       move_get_type(move) == GAME_EVENT_TILE_PLACEMENT_MOVE;
+  lists->stamps[lists->length] = ++lists->next_stamp;
   lists->length++;
 }
 
@@ -280,6 +284,7 @@ int path_move_lists_moves_at(PathMoveLists *lists, const MoveGenArgs *args,
   assert(length >= 1);
   // The parent is the same side's list two moves up; at lengths 1 and 2 that
   // is a root list.
+  assert(length <= 2 || path_move_lists_slot_is_current(lists, length - 2));
   const PathListSlot *parent =
       length <= 2 ? &lists->roots[2 - length] : &lists->slots[length - 2];
   uint64_t touched = lists->masks[length - 1];
@@ -301,6 +306,183 @@ int path_move_lists_moves_at(PathMoveLists *lists, const MoveGenArgs *args,
   PathListSlot *out = &lists->slots[length];
   slot_rebuild(out, parent, touched, filter, &avail, args->move_list,
                lists->lane_end);
+  lists->slot_stamps[length] = lists->stamps[length - 1];
   *out_moves = out->moves;
   return out->count;
+}
+
+// The running argmax of path_move_lists_best_play. A play outranks the current
+// best when its adjusted score is higher, or equal with a larger tiny_move.
+typedef struct BestScan {
+  int best_adjusted;
+  uint64_t best_tiny_move;
+  const SmallMove *best_play;
+  int go_out_bonus;
+  int side_to_move_tiles;
+} BestScan;
+
+static inline void best_scan_consider(BestScan *scan,
+                                      const SmallMove *small_move) {
+  int adjusted = small_move_get_score(small_move);
+  if (small_move_get_tiles_played(small_move) == scan->side_to_move_tiles) {
+    adjusted += scan->go_out_bonus;
+  }
+  if (adjusted > scan->best_adjusted ||
+      (adjusted == scan->best_adjusted &&
+       small_move->tiny_move > scan->best_tiny_move)) {
+    scan->best_adjusted = adjusted;
+    scan->best_tiny_move = small_move->tiny_move;
+    scan->best_play = small_move;
+  }
+}
+
+// Every lane, rows then columns.
+static inline uint64_t all_lanes_mask(void) {
+  return PATH_MOVE_LISTS_NUM_LANES >= 64
+             ? ~(uint64_t)0
+             : ((uint64_t)1 << PATH_MOVE_LISTS_NUM_LANES) - 1;
+}
+
+// Keeps `small_move` if it is its lane's best whole-rack or best partial play
+// by score, ties going to the larger tiny_move.
+static inline void lane_best_consider(LaneBestPlays *best,
+                                      const SmallMove *small_move,
+                                      int side_to_move_tiles) {
+  const bool whole_rack =
+      small_move_get_tiles_played(small_move) == side_to_move_tiles;
+  SmallMove *kept = whole_rack ? &best->whole_rack : &best->partial;
+  bool *has_kept = whole_rack ? &best->has_whole_rack : &best->has_partial;
+  if (!*has_kept ||
+      small_move_get_score(small_move) > small_move_get_score(kept) ||
+      (small_move_get_score(small_move) == small_move_get_score(kept) &&
+       small_move->tiny_move > kept->tiny_move)) {
+    *kept = *small_move;
+    *has_kept = true;
+  }
+}
+
+// Finds the sibling-shared best plays of the lanes in `missing`, none of which
+// the current leaf's own move touched. Lanes the side's own previous move also
+// left alone carry over from its list two moves up; the others are
+// regenerated on the current board, which matches the parent's there.
+static void fill_sibling_lanes(PathMoveLists *lists,
+                               const MoveGenArgs *best_small_args,
+                               uint64_t missing, int side_to_move_tiles) {
+  const int length = lists->length;
+  const uint64_t previous_move = length >= 2 ? lists->masks[length - 2] : 0;
+  const uint64_t carried = missing & ~previous_move;
+  const uint64_t regenerated = missing & previous_move;
+  for (int lane = 0; lane < PATH_MOVE_LISTS_NUM_LANES; lane++) {
+    if (((missing >> lane) & 1) != 0) {
+      lists->sibling_lanes[length][lane].has_whole_rack = false;
+      lists->sibling_lanes[length][lane].has_partial = false;
+    }
+  }
+  if (carried != 0) {
+    const PathListSlot *parent =
+        length <= 2 ? &lists->roots[2 - length] : &lists->slots[length - 2];
+    const bool filter = length >= 2 && lists->played[length - 2];
+    PackedCounts avail;
+    if (filter) {
+      const Game *game = best_small_args->game;
+      avail = pack_rack(player_get_rack(
+          game_get_player(game, game_get_player_on_turn_index(game))));
+    }
+    for (int lane = 0; lane < PATH_MOVE_LISTS_NUM_LANES; lane++) {
+      if (((carried >> lane) & 1) == 0) {
+        continue;
+      }
+      LaneBestPlays *best = &lists->sibling_lanes[length][lane];
+      for (int move_idx = parent->lane_begin[lane];
+           move_idx < parent->lane_begin[lane + 1]; move_idx++) {
+        if (filter && !counts_subset(&parent->used[move_idx], &avail)) {
+          continue;
+        }
+        lane_best_consider(best, &parent->moves[move_idx], side_to_move_tiles);
+      }
+    }
+  }
+  if (regenerated != 0) {
+    MoveGenArgs all_small_args = *best_small_args;
+    all_small_args.move_record_type = MOVE_RECORD_ALL_SMALL;
+    generate_small_moves_in_lanes(&all_small_args, regenerated,
+                                  lists->lane_end);
+    const MoveList *move_list = best_small_args->move_list;
+    int begin = 0;
+    for (int lane = 0; lane < PATH_MOVE_LISTS_NUM_LANES; lane++) {
+      const int end = lists->lane_end[lane];
+      if (((regenerated >> lane) & 1) != 0) {
+        for (int move_idx = begin; move_idx < end; move_idx++) {
+          lane_best_consider(&lists->sibling_lanes[length][lane],
+                             move_list->small_moves[move_idx],
+                             side_to_move_tiles);
+        }
+      }
+      begin = end;
+    }
+  }
+}
+
+bool path_move_lists_best_play(PathMoveLists *lists,
+                               const MoveGenArgs *best_small_args,
+                               SmallMove *out_best) {
+  const int length = lists->length;
+  assert(length >= 1);
+  assert(length <= 2 || path_move_lists_slot_is_current(lists, length - 2));
+  assert(best_small_args->move_record_type == MOVE_RECORD_BEST_SMALL);
+  assert(best_small_args->best_small_canonical_ties);
+  const Game *game = best_small_args->game;
+  const int side_to_move_tiles = rack_get_total_letters(player_get_rack(
+      game_get_player(game, game_get_player_on_turn_index(game))));
+  // The prefix shared by this leaf's siblings ends with the side's own
+  // previous move (or at the root).
+  const uint64_t prefix_stamp =
+      length >= 2 ? lists->stamps[length - 2] : lists->root_stamp;
+  if (lists->sibling_stamp[length] != prefix_stamp) {
+    lists->sibling_stamp[length] = prefix_stamp;
+    lists->sibling_valid[length] = 0;
+  }
+  const uint64_t own_lanes = lists->masks[length - 1];
+  const uint64_t shared_lanes = all_lanes_mask() & ~own_lanes;
+  const uint64_t missing = shared_lanes & ~lists->sibling_valid[length];
+  if (missing != 0) {
+    fill_sibling_lanes(lists, best_small_args, missing, side_to_move_tiles);
+    lists->sibling_valid[length] |= missing;
+  }
+
+  BestScan scan = {
+      .best_adjusted = INT32_MIN,
+      .best_tiny_move = 0,
+      .best_play = NULL,
+      .go_out_bonus = equity_to_int(best_small_args->best_small_out_bonus),
+      .side_to_move_tiles = side_to_move_tiles,
+  };
+  for (int lane = 0; lane < PATH_MOVE_LISTS_NUM_LANES; lane++) {
+    if (((shared_lanes >> lane) & 1) == 0) {
+      continue;
+    }
+    const LaneBestPlays *best = &lists->sibling_lanes[length][lane];
+    if (best->has_whole_rack) {
+      best_scan_consider(&scan, &best->whole_rack);
+    }
+    if (best->has_partial) {
+      best_scan_consider(&scan, &best->partial);
+    }
+  }
+  if (own_lanes == 0) {
+    if (scan.best_play == NULL) {
+      return false;
+    }
+    *out_best = *scan.best_play;
+    return true;
+  }
+  // The shared lanes' best is the incumbent the own lanes' anchors are pruned
+  // against.
+  if (!generate_best_small_move_in_lanes(
+          best_small_args, own_lanes, scan.best_play,
+          scan.best_play == NULL ? 0 : int_to_equity(scan.best_adjusted))) {
+    return false;
+  }
+  *out_best = *best_small_args->move_list->small_moves[0];
+  return true;
 }

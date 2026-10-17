@@ -1,11 +1,12 @@
 #include "sim_test.h"
 
 #include "../src/compat/cpthread.h"
+#include "../src/compat/cpthread_defs.h"
 #include "../src/compat/ctime.h"
-#include "../src/def/cpthread_defs.h"
 #include "../src/def/game_defs.h"
 #include "../src/def/rack_defs.h"
 #include "../src/def/thread_control_defs.h"
+#include "../src/ent/autoplay_results.h"
 #include "../src/ent/bag.h"
 #include "../src/ent/bai_result.h"
 #include "../src/ent/equity.h"
@@ -20,20 +21,32 @@
 #include "../src/ent/win_pct.h"
 #include "../src/impl/config.h"
 #include "../src/impl/gameplay.h"
+#include "../src/impl/rack_draw.h"
+#include "../src/impl/random_variable.h"
 #include "../src/impl/simmer.h"
 #include "../src/str/game_string.h"
 #include "../src/str/move_string.h"
 #include "../src/str/sim_string.h"
 #include "../src/util/io_util.h"
+#include "../src/util/json.h"
 #include "../src/util/string_util.h"
 #include "test_constants.h"
 #include "test_util.h"
 #include <assert.h>
 #include <errno.h>
+#include <inttypes.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
+
+enum {
+  // How long a test waits on a thread before calling it hung. The work takes
+  // seconds, but the sanitizer builds and Wine run it many times slower, so
+  // this catches a hang, never a slow machine.
+  HANG_TIMEOUT_SECONDS = 600,
+};
 
 int get_best_simmed_play_index(const SimResults *sim_results) {
   const int num_simmed_plays = sim_results_get_number_of_plays(sim_results);
@@ -129,6 +142,77 @@ void test_sim_opp_rack_not_in_bag(void) {
   config_destroy(config);
 }
 
+// The plays a contribute task reports for an analysed position -- an opening
+// rack or a position captured during a game -- come in the simulation's
+// ranking, carrying its win percentage, blended utility and per-ply
+// statistics, not in the move list's equity order with those attached.
+void test_sim_ranked_plays_json(void) {
+  Config *config =
+      config_create_or_die("set -lex NWL20 -wmp true -s1 score -s2 score -r1 "
+                           "all -r2 all -numplays 15 -plies "
+                           "2 -threads 1 -iter 300 -scond none -seed 10");
+  load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
+  load_and_exec_config_or_die(config, "rack AAADERW");
+  load_and_exec_config_or_die(config, "gen");
+  SimResults *sim_results = config_get_sim_results(config);
+  assert(config_simulate_and_return_status(config, NULL, NULL, sim_results) ==
+         ERROR_STATUS_SUCCESS);
+  const Game *game = config_get_game(config);
+  const LetterDistribution *ld = config_get_ld(config);
+
+  StringBuilder *sb = string_builder_create();
+  bool first = true;
+  json_write_object_start(sb);
+  const int ranked = autoplay_results_write_ranked_plays_json(
+      sb, &first, game, config_get_move_list(config), sim_results, 5, 1);
+  json_write_object_end(sb);
+  assert(ranked == sim_results_get_number_of_plays(sim_results));
+
+  ErrorStack *error_stack = error_stack_create();
+  const JsonValue *root = json_parse(string_builder_peek(sb), error_stack);
+  assert(error_stack_is_empty(error_stack));
+  const JsonValue *moves = json_object_get(root, "moves");
+  assert(json_array_length(moves) == 5);
+
+  assert(sim_results_lock_and_sort_display_simmed_plays(sim_results));
+  for (int i = 0; i < 5; i++) {
+    const JsonValue *entry = json_array_get(moves, i);
+    StringBuilder *move_sb = string_builder_create();
+    string_builder_add_move(
+        move_sb, game_get_board(game),
+        simmed_play_get_move(
+            sim_results_get_display_simmed_play(sim_results, i)),
+        ld, false);
+    assert_strings_equal(json_get_string_or_null(entry, "move"),
+                         string_builder_peek(move_sb));
+    string_builder_destroy(move_sb);
+    assert(!json_is_null(json_object_get(entry, "win_percentage")));
+    assert(!json_is_null(json_object_get(entry, "blended_utility")));
+    assert(json_array_length(json_object_get(entry, "plies")) == 1);
+  }
+  sim_results_unlock_display_infos(sim_results);
+  json_destroy(root);
+  string_builder_destroy(sb);
+
+  // A static player: move-list order, no simulation statistics.
+  sb = string_builder_create();
+  first = true;
+  json_write_object_start(sb);
+  autoplay_results_write_ranked_plays_json(
+      sb, &first, game, config_get_move_list(config), NULL, 3, 1);
+  json_write_object_end(sb);
+  root = json_parse(string_builder_peek(sb), error_stack);
+  assert(error_stack_is_empty(error_stack));
+  const JsonValue *static_moves = json_object_get(root, "moves");
+  assert(json_array_length(static_moves) == 3);
+  assert(json_object_get(json_array_get(static_moves, 0), "win_percentage") ==
+         NULL);
+  json_destroy(root);
+  string_builder_destroy(sb);
+  error_stack_destroy(error_stack);
+  config_destroy(config);
+}
+
 void test_sim_single_iteration(void) {
   Config *config =
       config_create_or_die("set -lex NWL20 -wmp true -s1 score -s2 score -r1 "
@@ -143,6 +227,57 @@ void test_sim_single_iteration(void) {
   assert(bai_result_get_status(
              sim_results_get_bai_result(config_get_sim_results(config))) ==
          BAI_RESULT_STATUS_SAMPLE_LIMIT);
+  config_destroy(config);
+}
+
+// Sims cycle the bag by default: each sample plays every rotation of its
+// shuffle by RACK_SIZE until they wrap around, from an opening rack one per
+// RACK_SIZE of the other letters, rounded up. The budget and the iteration
+// count both count rollouts, so a budget of 40 cycles' rollouts runs exactly
+// 40 cycles. A minimum below two cycles still gives every play two.
+void test_sim_bag_cycle(void) {
+  Config *config = config_create_or_die(
+      "set -lex NWL20 -wmp true -s1 score -s2 score -r1 all -r2 all "
+      "-numplays 4 -plies 2 -threads 1 -minp 1 -scond none -seed 10");
+  load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
+  load_and_exec_config_or_die(config, "rack AEIQRST");
+  load_and_exec_config_or_die(config, "gen");
+  const int unseen = ld_get_total_tiles(config_get_ld(config)) - RACK_SIZE;
+  const int rotations = (unseen + RACK_SIZE - 1) / RACK_SIZE;
+  assert(rv_sim_bag_cycle_rotations(config_get_game(config)) == rotations);
+  const int cycles = 40;
+  char *budget = get_formatted_string("set -iter %d", cycles * rotations);
+  load_and_exec_config_or_die(config, budget);
+  free(budget);
+  SimResults *sim_results = config_get_sim_results(config);
+  error_code_t status =
+      config_simulate_and_return_status(config, NULL, NULL, sim_results);
+  assert(status == ERROR_STATUS_SUCCESS);
+  assert(bai_result_get_status(sim_results_get_bai_result(sim_results)) ==
+         BAI_RESULT_STATUS_SAMPLE_LIMIT);
+  const uint64_t cycled_rollouts = (uint64_t)cycles * (uint64_t)rotations;
+  assert(sim_results_get_iteration_count(sim_results) == cycled_rollouts);
+  uint64_t play_rollouts = 0;
+  uint64_t min_play_rollouts = UINT64_MAX;
+  uint64_t max_play_rollouts = 0;
+  const int num_plays = sim_results_get_number_of_plays(sim_results);
+  for (int play_idx = 0; play_idx < num_plays; play_idx++) {
+    const uint64_t num_rollouts = simmed_play_get_num_rollouts(
+        sim_results_get_simmed_play(sim_results, play_idx));
+    assert(num_rollouts >= 2 * (uint64_t)rotations);
+    play_rollouts += num_rollouts;
+    if (num_rollouts < min_play_rollouts) {
+      min_play_rollouts = num_rollouts;
+    }
+    if (num_rollouts > max_play_rollouts) {
+      max_play_rollouts = num_rollouts;
+    }
+  }
+  assert(play_rollouts == cycled_rollouts);
+  // BAI sizes its rounds in rollouts, so the top-two rule takes over within
+  // this budget and the plays' counts differ. Rounds of 32 cycles would have
+  // kept the whole sim round-robin.
+  assert(max_play_rollouts > min_play_rollouts);
   config_destroy(config);
 }
 
@@ -219,7 +354,7 @@ void test_sim_threshold(void) {
 
   cpthread_t thread;
   cpthread_create(&thread, sim_thread_func, &args);
-  cpthread_cond_timedwait_loop(&cond, &mutex, 10, &done);
+  cpthread_cond_timedwait_loop(&cond, &mutex, HANG_TIMEOUT_SECONDS, &done);
   cpthread_join(thread);
 
   assert(status == ERROR_STATUS_SUCCESS);
@@ -263,7 +398,7 @@ void test_sim_time_limit(void) {
 
   cpthread_t thread;
   cpthread_create(&thread, sim_thread_func, &args);
-  cpthread_cond_timedwait_loop(&cond, &mutex, 10, &done);
+  cpthread_cond_timedwait_loop(&cond, &mutex, HANG_TIMEOUT_SECONDS, &done);
   cpthread_join(thread);
 
   assert(status == ERROR_STATUS_SUCCESS);
@@ -299,7 +434,7 @@ void test_all_plays_are_similar(void) {
 
   cpthread_t thread;
   cpthread_create(&thread, sim_thread_func, &args);
-  cpthread_cond_timedwait_loop(&cond, &mutex, 10, &done);
+  cpthread_cond_timedwait_loop(&cond, &mutex, HANG_TIMEOUT_SECONDS, &done);
   cpthread_join(thread);
 
   assert(status == ERROR_STATUS_SUCCESS);
@@ -323,7 +458,7 @@ void test_sim_round_robin_consistency(void) {
       sim_results_create(convert_user_cutoff_to_cutoff(0.005));
   for (int i = 0; i < 11; i++) {
     char *set_threads_cmd =
-        get_formatted_string("set -threads %d -seed %lu", i + 1, seed);
+        get_formatted_string("set -threads %d -seed %" PRIu64, i + 1, seed);
     load_and_exec_config_or_die(config, set_threads_cmd);
     free(set_threads_cmd);
 
@@ -449,7 +584,7 @@ void test_sim_with_and_without_inference_helper(
 
   // Set an explicit seed so results are independent of the auto-increment chain
   // in the code path above.
-  char *seed_cmd = get_formatted_string("set -seed %llu", sim_seed);
+  char *seed_cmd = get_formatted_string("set -seed %" PRIu64, sim_seed);
   load_and_exec_config_or_die(config, seed_cmd);
   free(seed_cmd);
 
@@ -700,7 +835,7 @@ void test_sim_perf(const char *sim_perf_iters) {
       "all -numplays 100 -plies 2 -scond 99");
   const uint64_t max_samples = 200000;
   char *set_threads_cmd =
-      get_formatted_string("set -threads 1 -iter %lu", max_samples);
+      get_formatted_string("set -threads 1 -iter %" PRIu64, max_samples);
   load_and_exec_config_or_die(config, set_threads_cmd);
   free(set_threads_cmd);
   load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
@@ -721,7 +856,8 @@ void test_sim_perf(const char *sim_perf_iters) {
   const char *sim_perf_filename = "sim_perf_stats.txt";
   const char *sim_perf_game_details_filename = "sim_perf_game_details.txt";
   if (remove(sim_perf_game_details_filename) != 0 && errno != ENOENT) {
-    log_fatal("error deleting %s: %s", sim_perf_game_details_filename);
+    log_fatal("error deleting %s: %s", sim_perf_game_details_filename,
+              strerror(errno));
   }
   draw_starting_racks(game);
   const int details_limit = 100;
@@ -1373,6 +1509,8 @@ void test_sim(void) {
     test_sim_error_cases();
     test_sim_opp_rack_not_in_bag();
     test_sim_single_iteration();
+    test_sim_ranked_plays_json();
+    test_sim_bag_cycle();
     test_sim_threshold();
     test_sim_time_limit();
     test_all_plays_are_similar();

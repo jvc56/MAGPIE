@@ -4,13 +4,13 @@
 #include <assert.h>
 #include <ctype.h>
 #include <errno.h>
+#include <inttypes.h>
 #include <stdarg.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <strings.h>
 
 enum {
   STRING_LIST_INITIAL_CAPACITY = 10,
@@ -61,17 +61,22 @@ static void string_builder_ensure_space(StringBuilder *string_builder,
       realloc_or_die(string_builder->string, string_builder->alloced);
 }
 
-void string_builder_add_string(StringBuilder *string_builder, const char *str) {
-  if (!string_builder || !str || *str == '\0') {
+void string_builder_add_bytes(StringBuilder *string_builder, const char *bytes,
+                              size_t len) {
+  if (!string_builder || !bytes || len == 0) {
     return;
   }
-
-  size_t len = string_length(str);
-
   string_builder_ensure_space(string_builder, len);
-  memmove(string_builder->string + string_builder->len, str, len);
+  memmove(string_builder->string + string_builder->len, bytes, len);
   string_builder->len += len;
   string_builder->string[string_builder->len] = '\0';
+}
+
+void string_builder_add_string(StringBuilder *string_builder, const char *str) {
+  if (!str) {
+    return;
+  }
+  string_builder_add_bytes(string_builder, str, string_length(str));
 }
 
 void string_builder_add_formatted_string(StringBuilder *string_builder,
@@ -87,15 +92,11 @@ void string_builder_add_formatted_string(StringBuilder *string_builder,
 void string_builder_add_space_padded_string(StringBuilder *string_builder,
                                             const char *string,
                                             size_t total_length) {
-  // string is a format string potentially containing escape sequences, but must
-  // have no arguments.
-  char *formatted_string = get_formatted_string(string);
-  const size_t printed_length = strlen(formatted_string);
-  string_builder_add_string(string_builder, formatted_string);
+  const size_t printed_length = strlen(string);
+  string_builder_add_string(string_builder, string);
   const size_t number_of_spaces =
       total_length > printed_length ? total_length - printed_length : 0;
   string_builder_add_spaces(string_builder, (int)number_of_spaces);
-  free(formatted_string);
 }
 
 void string_builder_add_table_row(StringBuilder *string_builder,
@@ -119,11 +120,14 @@ void string_builder_add_spaces(StringBuilder *string_builder,
 }
 
 void string_builder_add_int(StringBuilder *string_builder, int64_t n) {
-  string_builder_add_formatted_string(string_builder, "%d", n);
+  string_builder_add_formatted_string(string_builder, "%" PRId64, n);
 }
 
 void string_builder_add_char(StringBuilder *string_builder, char c) {
-  string_builder_add_formatted_string(string_builder, "%c", c);
+  // A NUL adds nothing, as "%c" formatting of it did.
+  if (c != '\0') {
+    string_builder_add_bytes(string_builder, &c, 1);
+  }
 }
 
 void string_builder_truncate(StringBuilder *string_builder, size_t len) {
@@ -168,6 +172,19 @@ char *string_builder_dump(const StringBuilder *string_builder, size_t *len) {
   }
   out = malloc_or_die(string_builder->len + 1);
   memcpy(out, string_builder->string, string_builder->len + 1);
+  return out;
+}
+
+char *string_builder_dump_and_destroy(StringBuilder *string_builder,
+                                      size_t *len) {
+  if (!string_builder) {
+    return NULL;
+  }
+  if (len) {
+    *len = string_builder->len;
+  }
+  char *out = string_builder->string;
+  free(string_builder);
   return out;
 }
 
@@ -272,8 +289,8 @@ char *string_splitter_join(const StringSplitter *string_splitter,
       string_builder_add_string(joined_string_builder, separator);
     }
   }
-  char *joined_string = string_builder_dump(joined_string_builder, NULL);
-  string_builder_destroy(joined_string_builder);
+  char *joined_string =
+      string_builder_dump_and_destroy(joined_string_builder, NULL);
   return joined_string;
 }
 
@@ -439,8 +456,21 @@ bool has_prefix(const char *pre, const char *str) {
   return strncmp(pre, str, string_length(pre)) == 0;
 }
 
+// Compares at most `length` characters ignoring ASCII case, as POSIX
+// strncasecmp does in the C locale; every string compared this way is ASCII.
+static int ascii_casecmp(const char *first, const char *second, size_t length) {
+  for (size_t char_idx = 0; char_idx < length; char_idx++) {
+    const int first_char = tolower((unsigned char)first[char_idx]);
+    const int second_char = tolower((unsigned char)second[char_idx]);
+    if (first_char != second_char || first_char == '\0') {
+      return first_char - second_char;
+    }
+  }
+  return 0;
+}
+
 bool has_iprefix(const char *pre, const char *str) {
-  return strncasecmp(pre, str, string_length(pre)) == 0;
+  return ascii_casecmp(pre, str, string_length(pre)) == 0;
 }
 
 bool has_suffix(const char *suf, const char *str) {
@@ -492,7 +522,7 @@ bool strings_iequal(const char *str1, const char *str2) {
   if (!str1 || !str2) {
     return false;
   }
-  return strcasecmp(str1, str2) == 0;
+  return ascii_casecmp(str1, str2, SIZE_MAX) == 0;
 }
 
 // Returns false for negative numbers
@@ -750,6 +780,24 @@ char *replace_whitespace_with_underscore(const char *str) {
   return new_str;
 }
 
+size_t append_bounded(char *dest, size_t dest_size, size_t pos,
+                      const char *src) {
+  if (pos >= dest_size - 1) {
+    return pos;
+  }
+  const size_t src_len = strlen(src);
+  const size_t space = dest_size - 1 - pos;
+  const size_t to_copy = src_len < space ? src_len : space;
+  memcpy(dest + pos, src, to_copy);
+  return pos + to_copy;
+}
+
+size_t append_int_bounded(char *dest, size_t dest_size, size_t pos, int value) {
+  char int_str[16];
+  snprintf_or_die(int_str, sizeof(int_str), "%d", value);
+  return append_bounded(dest, dest_size, pos, int_str);
+}
+
 const char *get_base_filename(const char *filepath) {
   // Find the last occurrence of the Unix directory separator
   const char *base_filename_unix = strrchr(filepath, '/');
@@ -805,6 +853,25 @@ void trim_internal(char *str, const char c, bool trim_whitespace) {
 void trim_whitespace(char *str) { trim_internal(str, 0, true); }
 
 void trim_char(char *str, const char c) { trim_internal(str, c, false); }
+
+// Trims leading and trailing whitespace from str in place and returns a
+// pointer to the trimmed start. Unlike trim_whitespace(), which memmoves the
+// trimmed text back to the start of the buffer, this only advances the
+// returned pointer past leading whitespace and NUL-terminates before any
+// trailing whitespace -- everything before the returned pointer is left
+// untouched. Useful for trimming a substring that shares a buffer with other
+// data the caller still needs, e.g. splitting a "key value" line and trimming
+// each half without disturbing the other.
+char *trim(char *str) {
+  while (isspace((unsigned char)*str)) {
+    str++;
+  }
+  size_t length = string_length(str);
+  while (length > 0 && isspace((unsigned char)str[length - 1])) {
+    str[--length] = '\0';
+  }
+  return str;
+}
 
 int string_to_int(const char *str, ErrorStack *error_stack) {
   const char *str_copy = str;
@@ -901,6 +968,26 @@ double string_to_double_prefix(const char *str, const char **end,
   return result;
 }
 
+void string_builder_add_json_string(StringBuilder *sb, const char *value) {
+  if (!value) {
+    string_builder_add_string(sb, "\"\"");
+    return;
+  }
+  string_builder_add_char(sb, '"');
+  for (const unsigned char *cursor = (const unsigned char *)value; *cursor;
+       cursor++) {
+    if (*cursor == '"' || *cursor == '\\') {
+      string_builder_add_char(sb, '\\');
+      string_builder_add_char(sb, (char)*cursor);
+    } else if (*cursor < 32) {
+      string_builder_add_formatted_string(sb, "\\u%04x", *cursor);
+    } else {
+      string_builder_add_char(sb, (char)*cursor);
+    }
+  }
+  string_builder_add_char(sb, '"');
+}
+
 char *json_unescape_string(const char *json_string) {
   size_t input_len = string_length(json_string);
   char *unescaped = malloc_or_die(input_len + 1);
@@ -953,29 +1040,6 @@ char *json_unescape_string(const char *json_string) {
   *dst = '\0';
 
   return unescaped;
-}
-
-char *get_process_output(const char *cmd) {
-  FILE *pipe = popen_or_die(cmd, "r");
-
-  StringBuilder *content_builder = string_builder_create();
-  char *buffer = NULL;
-  size_t buffer_size = 0;
-
-  while (getline_ignore_carriage_return(&buffer, &buffer_size, pipe) != -1) {
-    string_builder_add_string(content_builder, buffer);
-  }
-
-  free(buffer);
-  int status = pclose(pipe);
-  char *output = NULL;
-
-  if (status == 0) {
-    output = string_builder_dump(content_builder, NULL);
-  }
-
-  string_builder_destroy(content_builder);
-  return output; // Returns NULL if command failed
 }
 
 // ****************************************************************************

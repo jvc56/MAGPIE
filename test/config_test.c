@@ -1,5 +1,6 @@
 #include "config_test.h"
 
+#include "../src/compat/cfile.h"
 #include "../src/def/game_defs.h"
 #include "../src/def/letter_distribution_defs.h"
 #include "../src/def/move_defs.h"
@@ -19,16 +20,17 @@
 #include "../src/ent/validated_move.h"
 #include "../src/ent/wmp.h"
 #include "../src/impl/config.h"
+#include "../src/str/game_string.h"
 #include "../src/str/move_string.h"
 #include "../src/util/io_util.h"
 #include "../src/util/string_util.h"
 #include "test_constants.h"
 #include "test_util.h"
 #include <assert.h>
+#include <inttypes.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <unistd.h>
 
 #define TEST_GCG_FILENAME "a.gcg"
 
@@ -250,7 +252,7 @@ void test_config_load_success(void) {
       "set -ld %s -bb %d -var %s -l1 %s -l2 %s -s1 %s -r1 "
       "%s -s2 %s -r2 %s  -numplays %d "
       "-plies %d -it "
-      "%lu -scond %d -seed %d -threads %d -pfreq %d -gp true -hr true ",
+      "%" PRIu64 " -scond %d -seed %d -threads %d -pfreq %d -gp true -hr true ",
       ld_name, bingo_bonus, game_variant, l1, l2, s1, r1, s2, r2, num_plays,
       plies, max_iterations, stopping_cond, seed, number_of_threads,
       print_info);
@@ -293,7 +295,7 @@ void test_config_load_success(void) {
   string_builder_add_formatted_string(
       test_string_builder,
       "set -ld %s -bb %d -l1 %s -l2 %s  -s1 "
-      "%s -r1 %s -s2 %s -r2 %s -plies %d -it %d "
+      "%s -r1 %s -s2 %s -r2 %s -plies %d -it %" PRIu64 " "
       "-threads %d "
       "-pfreq %d -gp false -hr false",
       ld_name, bingo_bonus, l1, l2, s1, r1, s2, r2, plies, max_iterations,
@@ -1890,17 +1892,22 @@ void test_config_anno(void) {
   // Allow the sim to hit the stopping threshold
   assert_config_exec_status(config, "sim -seed 1 -iterations 100 -threads 10",
                             ERROR_STATUS_SUCCESS);
+  const Equity best_simmed_score =
+      move_get_score(sim_results_get_best_move(config_get_sim_results(config)));
   assert_config_exec_status(config, "t", ERROR_STATUS_SUCCESS);
   // No rack was given to the top commit command, so it should commit the best
-  // simmed play which should be anything except for 8H BARCHAN.
+  // simmed play, which is not the static best, 8H BARCHAN for 86.
   const Equity p0_score = player_get_score(game_get_player(game, 0));
-  assert(p0_score > int_to_equity(80) && p0_score < int_to_equity(86));
+  assert(p0_score == best_simmed_score);
+  assert(p0_score != int_to_equity(86));
   assert(player_get_score(game_get_player(game, 1)) == int_to_equity(0));
 
   assert_config_exec_status(config, "goto start", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "rack BARCHAN", ERROR_STATUS_SUCCESS);
-  // Generate and sim
-  assert_config_exec_status(config, "gsim -seed 1", ERROR_STATUS_SUCCESS);
+  // Generate and sim. Single rollouts, so that 8D BARCHAN sims best on this
+  // seed: the plays below build on it.
+  assert_config_exec_status(config, "gsim -seed 1 -sbagcycle false",
+                            ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "shm 1 -shplies 1", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "shm 2 -shplies 25", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "shm 5 -shplies 3", ERROR_STATUS_SUCCESS);
@@ -2007,9 +2014,9 @@ void test_config_anno(void) {
   // Test autosave
   assert_config_exec_status(config, "newgame au1.gcg", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "t RETINAS", ERROR_STATUS_SUCCESS);
-  assert(access("au1.gcg", F_OK) != 0);
+  assert(!cfile_access("au1.gcg", CFILE_ACCESS_EXISTS));
   assert_config_exec_status(config, "e", ERROR_STATUS_SUCCESS);
-  assert(access("au1.gcg", F_OK) == 0);
+  assert(cfile_access("au1.gcg", CFILE_ACCESS_EXISTS));
   char *au1_contents_1 = get_string_from_file_or_die("au1.gcg");
   assert_config_exec_status(config, "t CAZIQUE", ERROR_STATUS_SUCCESS);
   char *au1_contents_2 = get_string_from_file_or_die("au1.gcg");
@@ -2024,7 +2031,7 @@ void test_config_anno(void) {
 
   assert_config_exec_status(config, "set -autosave true", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "newgame au2.gcg", ERROR_STATUS_SUCCESS);
-  assert(access("au2.gcg", F_OK) == 0);
+  assert(cfile_access("au2.gcg", CFILE_ACCESS_EXISTS));
   char *au2_contents_1 = get_string_from_file_or_die("au2.gcg");
   assert_config_exec_status(config, "t CAZIQUE", ERROR_STATUS_SUCCESS);
   char *au2_contents_2 = get_string_from_file_or_die("au2.gcg");
@@ -2325,8 +2332,9 @@ void test_config_export(void) {
   assert_config_exec_status(config, "ex " TEST_GCG_FILENAME,
                             ERROR_STATUS_SUCCESS);
 
-  assert(access(game_history_get_gcg_filename(config_get_game_history(config)),
-                F_OK) == 0);
+  assert(cfile_access(
+      game_history_get_gcg_filename(config_get_game_history(config)),
+      CFILE_ACCESS_EXISTS));
 
   assert_config_exec_status(config, "rack HIJKLMN", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "gen", ERROR_STATUS_SUCCESS);
@@ -2368,7 +2376,7 @@ void test_config_export(void) {
 
   char *default_name_1 = string_duplicate(
       game_history_get_gcg_filename(config_get_game_history(config)));
-  assert(access(default_name_1, F_OK) == 0);
+  assert(cfile_access(default_name_1, CFILE_ACCESS_EXISTS));
 
   // Names has not updated, so the "first try" default name will clash with the
   // existing file and it will have to be incremented.
@@ -2386,7 +2394,7 @@ void test_config_export(void) {
 
   char *default_name_2 = string_duplicate(
       game_history_get_gcg_filename(config_get_game_history(config)));
-  assert(access(default_name_2, F_OK) == 0);
+  assert(cfile_access(default_name_2, CFILE_ACCESS_EXISTS));
 
   // Names has not updated, so the "first try" and "second try" default names
   // will clash with the existing files and it will have to be incremented.
@@ -2404,7 +2412,7 @@ void test_config_export(void) {
 
   char *default_name_3 = string_duplicate(
       game_history_get_gcg_filename(config_get_game_history(config)));
-  assert(access(default_name_3, F_OK) == 0);
+  assert(cfile_access(default_name_3, CFILE_ACCESS_EXISTS));
 
   StringBuilder *sb_load_cmd = string_builder_create();
 
@@ -2843,8 +2851,7 @@ void test_config_commit_by_index_uses_saved_move_list(void) {
   // frontier, so committing by index fails cleanly.
   StringBuilder *commit_cmd_sb = string_builder_create();
   string_builder_add_formatted_string(commit_cmd_sb, "com %d", chosen_rank);
-  char *commit_cmd = string_builder_dump(commit_cmd_sb, NULL);
-  string_builder_destroy(commit_cmd_sb);
+  char *commit_cmd = string_builder_dump_and_destroy(commit_cmd_sb, NULL);
   assert_config_exec_status(config, commit_cmd,
                             ERROR_STATUS_COMMIT_MOVE_INDEX_OUT_OF_RANGE);
 
@@ -3077,8 +3084,23 @@ void test_config_sim_with_inference_results_saved_to_game_event(void) {
   config_destroy(config);
 }
 
+// Narrow glyphs replace only the ones a Windows console font lacks.
+void test_narrow_glyphs(void) {
+  GameStringOptions *gso = game_string_options_create_pretty();
+  game_string_options_use_narrow_glyphs(gso);
+  assert(gso->board_tile_glyphs == GAME_STRING_BOARD_TILE_GLYPHS_PRIMARY);
+  assert(gso->board_column_label == GAME_STRING_BOARD_COLUMN_LABEL_ASCII);
+  assert(gso->on_turn_marker == GAME_STRING_ON_TURN_MARKER_ASCII);
+  assert(gso->board_color == GAME_STRING_BOARD_COLOR_TRUECOLOR);
+  assert(gso->board_border == GAME_STRING_BOARD_BORDER_BOX_DRAWING);
+  assert(gso->on_turn_color == GAME_STRING_ON_TURN_COLOR_ANSI_GREEN);
+  assert(gso->on_turn_score_style == GAME_STRING_ON_TURN_SCORE_BOLD);
+  game_string_options_destroy(gso);
+}
+
 void test_config(void) {
   test_game_display();
+  test_narrow_glyphs();
   test_trie();
   test_config_anno();
   test_config_anno_challenge();

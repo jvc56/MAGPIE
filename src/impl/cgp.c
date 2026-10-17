@@ -16,11 +16,11 @@
 #include "../ent/player.h"
 #include "../ent/players_data.h"
 #include "../ent/rack.h"
-#include "../impl/gameplay.h"
 #include "../str/game_string.h"
 #include "../str/rack_string.h"
 #include "../util/io_util.h"
 #include "../util/string_util.h"
+#include "rack_draw.h"
 #include <ctype.h>
 #include <stdlib.h>
 
@@ -41,6 +41,11 @@ void place_letters_on_board(const Game *game, const char *letters,
     error_stack_push(
         error_stack, ERROR_STATUS_CGP_PARSE_MALFORMED_BOARD_LETTERS,
         get_formatted_string("failed to parse letters for cgp: %s", letters));
+  } else if (col_start < 0 || col_start > BOARD_DIM ||
+             number_of_machine_letters > BOARD_DIM - col_start) {
+    error_stack_push(error_stack,
+                     ERROR_STATUS_CGP_PARSE_INVALID_NUMBER_OF_BOARD_COLUMNS,
+                     string_duplicate("cgp board row exceeds board width"));
   } else {
     for (int i = 0; i < number_of_machine_letters; i++) {
       board_set_letter(board, row_start, col_start + i, machine_letters[i]);
@@ -75,6 +80,15 @@ void parse_cgp_board_row(const Game *game, const char *cgp_board_row,
   for (size_t i = 0; i < row_length; i++) {
     char current_char = cgp_board_row[i];
     if (isdigit(current_char)) {
+      // Bound every digit before multiplication, not just the final run.
+      if (current_row_number_of_spaces > BOARD_DIM / 10 ||
+          current_row_number_of_spaces * 10 + (current_char - '0') >
+              BOARD_DIM) {
+        error_stack_push(error_stack,
+                         ERROR_STATUS_CGP_PARSE_INVALID_NUMBER_OF_BOARD_COLUMNS,
+                         string_duplicate("cgp board row exceeds board width"));
+        break;
+      }
       current_row_number_of_spaces =
           (current_row_number_of_spaces * 10) + (current_char - '0');
       if (string_builder_length(tile_string_builder) > 0) {
@@ -94,6 +108,10 @@ void parse_cgp_board_row(const Game *game, const char *cgp_board_row,
     }
   }
 
+  if (!error_stack_is_empty(error_stack)) {
+    string_builder_destroy(tile_string_builder);
+    return;
+  }
   if (string_builder_length(tile_string_builder) > 0) {
     place_letters_on_board(game, string_builder_peek(tile_string_builder),
                            row_index, &current_column_index, error_stack);
@@ -352,9 +370,87 @@ void string_builder_add_cgp(StringBuilder *cgp_builder, const Game *game,
 char *game_get_cgp(const Game *game, bool write_player_on_turn_first) {
   StringBuilder *cgp_builder = string_builder_create();
   string_builder_add_cgp(cgp_builder, game, write_player_on_turn_first);
-  char *cgp = string_builder_dump(cgp_builder, NULL);
-  string_builder_destroy(cgp_builder);
+  char *cgp = string_builder_dump_and_destroy(cgp_builder, NULL);
   return cgp;
+}
+
+// Writes the same representation as string_builder_add_cgp into dest instead
+// of a StringBuilder, so a caller that needs a CGP on every turn of every
+// game (the positions recorder) doesn't pay for a heap allocation per turn.
+// Reuses rack_get_string, which is already bounded-buffer; everything else
+// here is small enough that duplicating the write logic against
+// append_bounded directly is simpler than threading a StringBuilder/buffer
+// abstraction through string_builder_add_cgp itself.
+void game_get_cgp_string(const Game *game, bool write_player_on_turn_first,
+                         char *dest, size_t dest_size) {
+  if (dest_size == 0) {
+    return;
+  }
+  size_t pos = 0;
+  const LetterDistribution *ld = game_get_ld(game);
+  const Board *board = game_get_board(game);
+  for (int row = 0; row < BOARD_DIM; row++) {
+    int consecutive_empty_squares = 0;
+    for (int col = 0; col < BOARD_DIM; col++) {
+      MachineLetter ml = board_get_letter(board, row, col);
+      if (ml == ALPHABET_EMPTY_SQUARE_MARKER) {
+        consecutive_empty_squares++;
+      } else {
+        if (consecutive_empty_squares > 0) {
+          pos = append_int_bounded(dest, dest_size, pos,
+                                   consecutive_empty_squares);
+          consecutive_empty_squares = 0;
+        }
+        char *letter_str = ld_ml_to_hl(ld, ml);
+        pos = append_bounded(dest, dest_size, pos, letter_str);
+        free(letter_str);
+      }
+    }
+
+    if (consecutive_empty_squares > 0) {
+      pos = append_int_bounded(dest, dest_size, pos, consecutive_empty_squares);
+    }
+
+    if (row != BOARD_DIM - 1) {
+      pos = append_bounded(dest, dest_size, pos, "/");
+    }
+  }
+
+  pos = append_bounded(dest, dest_size, pos, " ");
+
+  const Player *player0 = game_get_player(game, 0);
+  const Player *player1 = game_get_player(game, 1);
+
+  if (write_player_on_turn_first && game_get_player_on_turn_index(game) == 1) {
+    player1 = game_get_player(game, 0);
+    player0 = game_get_player(game, 1);
+  }
+
+  // rack_get_string null-terminates on its own, so build each rack into a
+  // scratch buffer and append that rather than writing into dest directly.
+  char rack_str[(RACK_SIZE)*MAX_LETTER_BYTE_LENGTH + 1];
+  rack_get_string(player_get_rack(player0), ld, false, rack_str,
+                  sizeof(rack_str));
+  pos = append_bounded(dest, dest_size, pos, rack_str);
+  pos = append_bounded(dest, dest_size, pos, "/");
+  rack_get_string(player_get_rack(player1), ld, false, rack_str,
+                  sizeof(rack_str));
+  pos = append_bounded(dest, dest_size, pos, rack_str);
+
+  pos = append_bounded(dest, dest_size, pos, " ");
+
+  pos = append_int_bounded(dest, dest_size, pos,
+                           equity_to_int(player_get_score(player0)));
+  pos = append_bounded(dest, dest_size, pos, "/");
+  pos = append_int_bounded(dest, dest_size, pos,
+                           equity_to_int(player_get_score(player1)));
+
+  pos = append_bounded(dest, dest_size, pos, " ");
+
+  pos = append_int_bounded(dest, dest_size, pos,
+                           game_get_consecutive_scoreless_turns(game));
+
+  dest[pos] = '\0';
 }
 
 // Always adds the following options:
@@ -441,7 +537,7 @@ char *game_get_cgp_with_options(const Game *game,
   string_builder_add_cgp_options(cgp_with_options_builder, players_data,
                                  bingo_bonus, board_layout_name, ld_name,
                                  game_variant);
-  char *cgp_with_options = string_builder_dump(cgp_with_options_builder, NULL);
-  string_builder_destroy(cgp_with_options_builder);
+  char *cgp_with_options =
+      string_builder_dump_and_destroy(cgp_with_options_builder, NULL);
   return cgp_with_options;
 }

@@ -11,9 +11,15 @@
 #include "../ent/thread_control.h"
 #include "bai_logger.h"
 #include "inference.h"
+#include <stddef.h>
 #include <stdint.h>
 
 typedef struct RandomVariables RandomVariables;
+
+// The rotations a bag-cycled sample (SimArgs.bag_cycle) plays from game: the
+// letters unseen by the player on turn (the bag and the opponent's rack)
+// divided by RACK_SIZE, rounded up, and at least 1.
+int rv_sim_bag_cycle_rotations(const Game *game);
 
 typedef enum {
   RANDOM_VARIABLES_UNIFORM,
@@ -37,8 +43,30 @@ typedef struct RandomVariablesArgs {
 RandomVariables *rvs_create(const RandomVariablesArgs *rvs_args);
 void rvs_reset(RandomVariables *rvs, const RandomVariablesArgs *rvs_args);
 void rvs_destroy(RandomVariables *rvs);
+// Sentinel meaning "no seed was reserved for this sample; draw one".
+#define RVS_SEED_UNRESERVED UINT64_MAX
+
 double rvs_sample(RandomVariables *rvs, uint64_t k, int thread_index,
                   BAILogger *bai_logger);
+double rvs_sample_with_seed(RandomVariables *rvs, uint64_t k,
+                            uint64_t reserved_seed, int thread_index,
+                            BAILogger *bai_logger, void *record);
+// Bytes in the record a sample can write instead of applying its effect on
+// the random variable's results, or 0 when samples have no such effect.
+size_t rvs_get_sample_record_size(const RandomVariables *rvs);
+// Applies a record written by rvs_sample_with_seed for arm k.
+void rvs_apply_sample_record(const RandomVariables *rvs, uint64_t k,
+                             const void *record);
+uint64_t rvs_next_seed(RandomVariables *rvs, uint64_t k);
+// True when every arm's n-th sample uses the same seed, so that samples of
+// different arms at one ordinal share their luck (common random numbers).
+// Sims' samples do; the test distributions' don't.
+bool rvs_arms_share_seeds(const RandomVariables *rvs);
+// The seed rvs_next_seed would return for arm k after `ahead` more calls,
+// without advancing it, or RVS_SEED_UNRESERVED when this kind of random
+// variable does not draw from seeds. A sample drawn with a peeked seed is the
+// sample the slot reserving that seed would produce.
+uint64_t rvs_peek_seed(RandomVariables *rvs, uint64_t k, uint64_t ahead);
 bool rvs_are_similar(RandomVariables *rvs, int i, int j);
 uint64_t rvs_get_num_rvs(const RandomVariables *rvs);
 uint64_t rvs_get_total_samples(const RandomVariables *rvs);
