@@ -542,6 +542,39 @@ static bool peg_top_cands_contains(const PegResult *result, const Board *board,
   return found;
 }
 
+// True if no move appears twice in the result's graded ranking.
+static bool peg_graded_cands_are_distinct(const PegResult *result) {
+  for (int cand_idx = 0; cand_idx < result->n_graded; cand_idx++) {
+    for (int other_idx = cand_idx + 1; other_idx < result->n_graded;
+         other_idx++) {
+      if (compare_moves_without_equity(&result->graded_cands[cand_idx].move,
+                                       &result->graded_cands[other_idx].move,
+                                       true) == -1) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
+// True if each fidelity tier of the graded ranking is in rank order: by
+// descending win% with mean spread as a tiebreak, as peg_solve ranks them.
+static bool peg_graded_tiers_are_ranked(const PegResult *result) {
+  for (int cand_idx = 1; cand_idx < result->n_graded; cand_idx++) {
+    if (result->graded_fidelity[cand_idx] !=
+        result->graded_fidelity[cand_idx - 1]) {
+      continue;
+    }
+    const PegRankedCand *higher = &result->graded_cands[cand_idx - 1];
+    const PegRankedCand *lower = &result->graded_cands[cand_idx];
+    if (higher->win_pct + 1e-4 * higher->mean_spread <
+        lower->win_pct + 1e-4 * lower->mean_spread) {
+      return false;
+    }
+  }
+  return true;
+}
+
 // Exercises PegArgs.protect_moves ("pnoprune", like the simmer's snoprune): a
 // candidate the cascade's top-K cut would normally drop is force-carried into
 // the final ranking when listed as protected. Runs the same short {2}-cascade
@@ -625,6 +658,46 @@ static void test_peg_main_pnoprune(void) {
   assert(peg_top_cands_contains(&protected_result, board, ld, weak_text));
   printf("[peg_pnoprune] protected '%s' carried: plain n=%d, protected n=%d\n",
          weak_text, plain.n_top_cands, protected_result.n_top_cands);
+  assert(protected_result.n_top_cands == stage_top_k[0] + 1);
+
+  // A protected move that already ranks in the top-K must not take one of the
+  // K slots: protecting the plain leader still carries K unprotected moves.
+  const Move *protect_leader[1] = {&plain.top_cands[0].move};
+  PegArgs leader_args = base;
+  leader_args.protect_moves = protect_leader;
+  leader_args.n_protect_moves = 1;
+  PegResult leader_result;
+  memset(&leader_result, 0, sizeof(leader_result));
+  peg_solve(&leader_args, &leader_result, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  assert(leader_result.n_top_cands == stage_top_k[0] + 1);
+  peg_result_destroy(&leader_result);
+
+  // With two stages the protected move can rank below the second cut by more
+  // than one place. Every candidate that reached the second stage must then be
+  // graded exactly once: the protected move must not leave a stale copy in the
+  // dropped tail, and the candidate it displaces must not be lost.
+  // Protect the lowest-equity play, so it trails the field after both cuts.
+  const Move *weakest = move_list_get_move(gen_ml, n_gen - 1);
+  StringBuilder *weakest_sb = string_builder_create();
+  string_builder_add_move(weakest_sb, board, weakest, ld, false);
+  const Move *protect_weakest[1] = {weakest};
+  static const int two_stage_top_k[] = {4, 2};
+  PegArgs two_stage = prot;
+  two_stage.protect_moves = protect_weakest;
+  two_stage.stage_top_k = two_stage_top_k;
+  two_stage.num_stages = 2;
+  PegResult two_stage_result;
+  memset(&two_stage_result, 0, sizeof(two_stage_result));
+  peg_solve(&two_stage, &two_stage_result, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  assert(peg_top_cands_contains(&two_stage_result, board, ld,
+                                string_builder_peek(weakest_sb)));
+  assert(peg_graded_cands_are_distinct(&two_stage_result));
+  assert(peg_graded_tiers_are_ranked(&two_stage_result));
+  assert(two_stage_result.n_graded == two_stage_top_k[0] + 1);
+  string_builder_destroy(weakest_sb);
+  peg_result_destroy(&two_stage_result);
 
   peg_result_destroy(&plain);
   peg_result_destroy(&protected_result);
@@ -1369,6 +1442,17 @@ static void peg_test_interrupt_partial_candidate(int stage_idx, int cand_rank,
 // Complete one 3-ply candidate, then interrupt the second after its first
 // scenario. A partial candidate must not make the stage look accepted; both
 // rankings and captured outcomes must remain at the completed 2-ply stage.
+static void peg_test_count_scenarios(int stage_idx, int cand_rank,
+                                     int scenario_idx, int32_t value,
+                                     int64_t weight, void *user_data) {
+  (void)cand_rank;
+  (void)scenario_idx;
+  (void)value;
+  (void)weight;
+  int *counts = user_data;
+  counts[stage_idx]++;
+}
+
 void test_peg_interrupted_candidate_outcomes(void) {
   Config *config = config_create_or_die("set -threads 1 -s1 score -s2 score");
   load_and_exec_config_or_die(
@@ -1405,6 +1489,7 @@ void test_peg_interrupted_candidate_outcomes(void) {
   args.on_cand_done = peg_test_count_completed_candidates;
   args.on_scenario_done = peg_test_interrupt_partial_candidate;
   args.user_data = &context;
+  args.checkpoint = peg_checkpoint_create();
   PegResult result = {0};
   peg_solve(&args, &result, error_stack);
   assert(error_stack_is_empty(error_stack));
@@ -1424,7 +1509,57 @@ void test_peg_interrupted_candidate_outcomes(void) {
     }
     assert(captured_weight == 8);
   }
+  assert(result.can_resume);
   peg_result_destroy(&result);
+  peg_poll_reset(poll);
+  int scenario_counts[3] = {0};
+  args.resume = true;
+  args.on_cand_done = NULL;
+  args.on_scenario_done = peg_test_count_scenarios;
+  args.user_data = scenario_counts;
+  thread_control_set_status(context.thread_control,
+                            THREAD_CONTROL_STATUS_STARTED);
+  peg_solve(&args, &result, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  assert(!result.can_resume);
+  assert(result.last_completed_stage == 2);
+  // Stage 0, stage 1, and the completed stage-2 candidate are all reused.
+  assert(scenario_counts[0] == 0);
+  assert(scenario_counts[1] == 0);
+  assert(scenario_counts[2] == 7);
+  assert(result.n_cand_outcomes == 2);
+  for (int index = 0; index < result.n_cand_outcomes; index++) {
+    assert(result.cand_outcomes[index].fidelity == 3);
+    assert(result.cand_outcomes[index].rows[0].pv != NULL);
+    assert(strlen(result.cand_outcomes[index].rows[0].pv) > 0);
+  }
+  PegResult fresh = {0};
+  args.resume = false;
+  memset(scenario_counts, 0, sizeof(scenario_counts));
+  peg_poll_reset(poll);
+  peg_solve(&args, &fresh, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  assert(scenario_counts[0] > 0 && scenario_counts[1] == 14 &&
+         scenario_counts[2] == 14);
+  assert(result.n_top_cands == fresh.n_top_cands);
+  for (int index = 0; index < result.n_top_cands; index++) {
+    assert(result.top_cands[index].win_pct == fresh.top_cands[index].win_pct);
+    assert(result.top_cands[index].mean_spread ==
+           fresh.top_cands[index].mean_spread);
+    assert(result.top_cands[index].weight_sum ==
+           fresh.top_cands[index].weight_sum);
+  }
+  peg_result_destroy(&fresh);
+  // A changed search setting invalidates the checkpoint even with resume set.
+  args.resume = true;
+  args.num_stages = 1;
+  memset(scenario_counts, 0, sizeof(scenario_counts));
+  peg_poll_reset(poll);
+  peg_solve(&args, &fresh, error_stack);
+  assert(scenario_counts[0] > 0 && scenario_counts[1] == 14);
+  peg_result_destroy(&fresh);
+  peg_result_destroy(&result);
+  peg_checkpoint_destroy(args.checkpoint);
   peg_poll_destroy(poll);
   validated_moves_destroy(moves);
   error_stack_destroy(error_stack);

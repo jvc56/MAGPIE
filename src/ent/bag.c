@@ -46,6 +46,31 @@ void bag_shuffle(Bag *bag) {
   }
 }
 
+// Reverses letters[first, last).
+static void bag_reverse(Bag *bag, int first, int last) {
+  for (last--; first < last; first++, last--) {
+    const MachineLetter letter = bag->letters[first];
+    bag->letters[first] = bag->letters[last];
+    bag->letters[last] = letter;
+  }
+}
+
+void bag_rotate(Bag *bag, int shift) {
+  const int num_letters = bag_get_letters(bag);
+  if (num_letters < 2) {
+    return;
+  }
+  shift %= num_letters;
+  if (shift == 0) {
+    return;
+  }
+  const int start = bag->start_tile_index;
+  const int end = bag->end_tile_index;
+  bag_reverse(bag, start, start + shift);
+  bag_reverse(bag, start + shift, end);
+  bag_reverse(bag, start, end);
+}
+
 // Resets the bag to all of the letters in ld
 // and shuffles.
 void bag_reset(const LetterDistribution *ld, Bag *bag) {
@@ -150,15 +175,29 @@ bool bag_draw_letter(Bag *bag, MachineLetter letter, int player_draw_index) {
   if (get_is_blanked(letter)) {
     letter = BLANK_MACHINE_LETTER;
   }
+  // Take a uniformly random copy of the letter (with the bag's PRNG, so a
+  // seeded bag stays deterministic). The tiles drawn from either end after
+  // this one must still be in random order: taking the first copy found
+  // from the start would leave the start of the bag short of the letter and
+  // the end long in it.
+  int copies = 0;
+  for (int i = bag->start_tile_index; i < bag->end_tile_index; i++) {
+    copies += bag->letters[i] == letter ? 1 : 0;
+  }
+  if (copies == 0) {
+    return false;
+  }
+  int skip =
+      copies > 1 ? (int)prng_get_random_number(bag->prng, (uint64_t)copies) : 0;
   int letter_index = -1;
   for (int i = bag->start_tile_index; i < bag->end_tile_index; i++) {
     if (bag->letters[i] == letter) {
-      letter_index = i;
-      break;
+      if (skip == 0) {
+        letter_index = i;
+        break;
+      }
+      skip--;
     }
-  }
-  if (letter_index < 0) {
-    return false;
   }
   if (player_draw_index == 0) {
     bag->end_tile_index--;

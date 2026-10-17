@@ -1,361 +1,503 @@
-// Web Worker for MAGPIE WASM
-// Runs MAGPIE in a background thread to keep UI responsive
+// Shared worker transport for the analysis preview and the diagnostic page.
+// Only one command batch owns the engine. Stop cancels the rest of that batch.
+let Module;
+let api;
+let initialized = false;
+let running = false;
+let stopping = false;
+let activeCommand = "";
+let pegReadable = false;
+let wmpAbort;
+let requestId;
+let fatal = false;
+let memoryLimitMB = 1024;
+let pegThreadsForMemory;
+const cachedFiles = new Set();
+const kwgHashes = new Map();
+const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const send = (type, fields = {}) => postMessage({ type, requestId, ...fields });
 
-let Module = null;
-let precacheFileData = null;
-let wasmMagpieInit = null;
-let wasmMagpieDestroy = null;
-let wasmRunCommand = null;
-let wasmRunCommandAsync = null;
-let wasmGetOutput = null;
-let wasmGetError = null;
-let wasmGetStatus = null;
-let wasmGetThreadStatus = null;
-let wasmStop = null;
-
-let isInitialized = false;
-let isRunning = false;
-let statusCheckInterval = null;
-
-// Import and initialize WASM module
-(async function initWASM() {
-  try {
-    // Check for SharedArrayBuffer support (required for pthreads)
-    if (typeof SharedArrayBuffer === 'undefined') {
-      postMessage({
-        type: 'error',
-        text: 'SharedArrayBuffer is not available. Server must send COOP/COEP headers.'
-      });
-      return;
+function failEngine(reason) {
+  if (fatal) return;
+  fatal = true;
+  send("fatal", {text: String(reason)});
+}
+self.addEventListener("error", event => failEngine(event.message || "Engine worker failed."));
+function checkEngine() {
+  if (fatal) throw new Error("The engine aborted. Reload to restart it.");
+}
+function browserMemory() {
+  for (const maximum of [1024, 512, 256]) {
+    try {
+      const memory = new WebAssembly.Memory({initial:4096, maximum:maximum * 16, shared:true});
+      memoryLimitMB = maximum;
+      return memory;
+    } catch (error) {
+      if (maximum === 256) throw error;
     }
-    postMessage({ type: 'log', text: '✓ SharedArrayBuffer is available' });
+  }
+}
+function reportMemory() {
+  send("memory_status", {
+    allocatedBytes: api.memoryAllocated(),
+    freeBytes: api.memoryFree(),
+    heapBytes: Module.HEAPU8.byteLength,
+    limitBytes: memoryLimitMB * 1024 * 1024,
+  });
+}
+function readString(fn) {
+  checkEngine();
+  const ptr = fn();
+  if (!ptr) return "";
+  try {
+    return Module.UTF8ToString(ptr);
+  } finally {
+    Module._free(ptr);
+  }
+}
 
-    postMessage({ type: 'log', text: 'Starting WASM import...' });
-
-    // Import the WASM module factory
-    const module = await import('./magpie_wasm.mjs');
-    const MAGPIE = module.default;
-
-    postMessage({ type: 'log', text: 'WASM module imported, initializing...' });
-
-    // Configure the Module
-    const ModuleConfig = {
-      print: (text) => {
-        postMessage({ type: 'log', text: text });
-      },
-      printErr: (text) => {
-        // Filter out harmless Emscripten warnings
-        if (text.includes('program exited') && text.includes('keepRuntimeAlive')) {
-          postMessage({ type: 'log', text: 'Runtime initialized (ignoring harmless exit warning)' });
-          return;
-        }
-        // Filter out harmless "still waiting on run dependencies" on slower devices
-        if (text.includes('still waiting on run dependencies') || text.includes('wasm-instantiate')) {
-          postMessage({ type: 'log', text: 'WASM instantiating... (this is normal on mobile)' });
-          return;
-        }
-        postMessage({ type: 'error', text: text });
-      },
-      locateFile: (path, prefix) => {
-        // Files are in the same directory as the worker
-        if (path.endsWith('.wasm') || path.endsWith('.worker.js')) {
-          return './' + path;
-        }
-        return prefix + path;
-      },
+(async () => {
+  try {
+    if (typeof SharedArrayBuffer === "undefined") {
+      throw new Error(
+        "This page needs HTTPS and cross-origin isolation (COOP/COEP headers).",
+      );
+    }
+    const { default: createMagpie } = await import("./magpie_wasm.mjs");
+    const { deviceBudget } = await import("./device-budget.mjs");
+    const budget = deviceBudget();
+    ({ pegThreadsForMemory } = await import("./peg-memory.mjs"));
+    Module = await createMagpie({
+      initialThreadPoolSize: budget.threads + 3,
+      wasmMemory: browserMemory(),
+      onAbort: failEngine,
+      print: (text) => send("log", { text }),
+      printErr: (text) => send("log", { text }),
+      locateFile: (path) => new URL(path, self.location.href).href,
+    });
+    const wrap = (name, result, args = []) =>
+      Module.cwrap(name, result, args);
+    api = {
+      pegMemoryFits: wrap("wasm_peg_memory_fits", "number", ["number"]),
+      memoryAllocated: wrap("wasm_memory_allocated_bytes", "number"),
+      memoryFree: wrap("wasm_memory_free_bytes", "number"),
+      prepareWMP: wrap("wasm_prepare_wmp", "number", ["number", "number", "number", "number", "number"]),
+      wmpData: wrap("wasm_wmp_data", "number"),
+      wmpDataSize: wrap("wasm_wmp_data_size", "number"),
+      cancelWMP: wrap("wasm_cancel_wmp", null),
+      wmpProgress: wrap("wasm_wmp_progress", "number"),
+      finishWMP: wrap("wasm_finish_wmp", "number", ["number"]),
+      precache: wrap("precache_file_data", null, [
+        "number",
+        "number",
+        "number",
+      ]),
+      init: wrap("wasm_magpie_init", "number", ["number"]),
+      gameAction: wrap("browser_game_action", "number", [
+        "number",
+        "number",
+        "number",
+        "number",
+        "number",
+        "number",
+        "number",
+        "number",
+        "number",
+        "number",
+        "number",
+      ]),
+      importGCG: wrap("browser_game_import_gcg", "number", ["number", "number"]),
+      convertXS: wrap("wasm_xs_convert", "number", ["number", "number", "number"]),
+      destroy: wrap("wasm_magpie_destroy", null),
+      run: wrap("wasm_run_command_async", "number", ["number"]),
+      output: wrap("wasm_get_output", "number"),
+      error: wrap("wasm_get_error", "number"),
+      status: wrap("wasm_get_status", "number"),
+      pegOutcomes: wrap("wasm_get_peg_outcomes", "number", ["number"]),
+      thread: wrap("wasm_get_thread_status", "number"),
+      setSearchPaused: wrap("wasm_set_search_paused", "number", ["number"]),
+      stop: wrap("wasm_stop_command", null),
     };
-
-    // Initialize the WASM module
-    postMessage({ type: 'log', text: 'Calling MAGPIE factory...' });
-    Module = await MAGPIE(ModuleConfig);
-
-    postMessage({ type: 'log', text: 'WASM initialized, wrapping functions...' });
-
-    // Wrap the exported functions
-    precacheFileData = Module.cwrap('precache_file_data', null, [
-      'number',
-      'number',
-      'number',
-    ]);
-    wasmMagpieInit = Module.cwrap('wasm_magpie_init', 'number', ['number']);
-    wasmMagpieDestroy = Module.cwrap('wasm_magpie_destroy', null, []);
-    wasmRunCommand = Module.cwrap('wasm_run_command', 'number', ['number']);
-    wasmRunCommandAsync = Module.cwrap('wasm_run_command_async', null, ['number']);
-    wasmGetOutput = Module.cwrap('wasm_get_output', 'number', []);
-    wasmGetError = Module.cwrap('wasm_get_error', 'number', []);
-    wasmGetStatus = Module.cwrap('wasm_get_status', 'number', []);
-    wasmGetThreadStatus = Module.cwrap('wasm_get_thread_status', 'number', []);
-    wasmStop = Module.cwrap('wasm_stop_command', null, []);
-
-    postMessage({ type: 'ready' });
-    postMessage({ type: 'log', text: 'Worker ready!' });
+    send("ready", {memoryLimitMB});
   } catch (error) {
-    const errorMsg = `❌ WASM INITIALIZATION FAILED\n\nError: ${error.message}\n\nThis is likely a memory issue. On mobile devices, try reducing INITIAL_MEMORY in Makefile-wasm.\n\nFull error:\n${error.stack}`;
-    postMessage({ type: 'error', text: errorMsg });
-    postMessage({ type: 'init_failed', text: errorMsg });
-    console.error('Worker initialization error:', error);
+    send("init_failed", { text: error.message });
   }
 })();
 
-// Handle messages from main thread
-onmessage = async (e) => {
-  const { type, data } = e.data;
-
+async function run(commands) {
+  if (!initialized) throw new Error("MAGPIE is not initialized.");
+  if (running) throw new Error("An analysis is already running.");
+  running = true;
+  stopping = false;
   try {
+    // Warm the chosen pool before a timed native search starts.
+    const counts = commands.filter(command => !/^peg(?: |$)/.test(command)).flatMap(command => [...command.matchAll(/-threads\s+(\d+)/g)].map(match => Number(match[1])));
+    if (counts.length) await Module.warmThreads(Math.min(32, Math.max(...counts)) + 3);
+    for (let command of commands) {
+      checkEngine();
+      if (stopping) break;
+      if (/^peg(?: |$)/.test(command)) {
+        const match = command.match(/-threads\s+(\d+)/);
+        // Browser-generated PEG commands always specify a worker count.
+        const requested = match ? Number(match[1]) : 2;
+        const threads = pegThreadsForMemory(requested, api.pegMemoryFits);
+        command = match ? command.replace(/-threads\s+\d+/, `-threads ${threads}`)
+          : `${command} -threads ${threads}`;
+        await Module.warmThreads(threads + 3);
+        if (stopping) break;
+        reportMemory();
+        send("peg_memory_budget", {requested, threads});
+      }
+      activeCommand = command;
+      if (/^peg(?: |$)/.test(command)) pegReadable = false;
+      send("command_started", { command });
+      const ptr = Module.stringToNewUTF8(command);
+      let result;
+      try {
+        result = api.run(ptr);
+      } finally {
+        Module._free(ptr);
+      }
+      // Parse/data errors happen before a thread starts. Never poll an old
+      // thread status (or UNINITIALIZED forever) when a command is rejected.
+      if (result !== 0)
+        throw new Error(readString(api.error) || `Could not run ${command}`);
+      await pause(50);
+      let previousStatus = "";
+      let polls = 0;
+      while (!fatal && api.thread() < 2) {
+        if (stopping) api.stop();
+        if (++polls % 5 === 0 && api.thread() === 1) {
+          const text = readString(api.status);
+          if (text?.includes("peginfo ")) pegReadable = true;
+          if (text && text !== previousStatus) {
+            send("status", { text, command });
+            previousStatus = text;
+          }
+        }
+        await pause(100);
+      }
+      checkEngine();
+      // wasm_get_output joins the worker, including after USER_INTERRUPT.
+      // Keep the batch locked until that join completes.
+      const text = readString(api.output);
+      if (text?.includes("peginfo ")) pegReadable = true;
+      const error = readString(api.error);
+      if (error.trim()) throw new Error(error);
+      if (text.trim()) send("output", { text, command });
+    }
+    reportMemory();
+    send("complete", { stopped: stopping });
+  } finally {
+    running = false;
+    activeCommand = "";
+  }
+}
+
+onmessage = async ({ data: { type, data = {}, requestId: incomingId } }) => {
+  if (fatal) return;
+  const control = type === "stop" || type === "search_pause" || type === "peg_outcomes";
+  if (control && running && incomingId !== requestId) return;
+  if (!running && !control) requestId = incomingId;
+  try {
+    if (!api) throw new Error("The engine is still loading.");
+    if (running && !control)
+      throw new Error("Stop the analysis before changing the engine.");
     switch (type) {
-      case 'precache':
-        await handlePrecache(data);
+      case "precache": {
+        if (cachedFiles.has(data.filename)) {
+          send("precache_complete", {filename:data.filename});
+          break;
+        }
+        const response = await fetch(data.url, {signal: AbortSignal.timeout(30000)});
+        if (!response.ok)
+          throw new Error(
+            `Could not load ${data.filename} (HTTP ${response.status}).`,
+          );
+        const bytes = new Uint8Array(await response.arrayBuffer());
+        if (data.filename.startsWith("data/xs/english-v1/")) {
+          // Native codecs use ordinary file I/O for immutable asset validation.
+          Module.FS_mkdirTree("data/xs/english-v1");
+          // The frozen ranker resolves lexica/../xs/english-v1 paths.
+          Module.FS_mkdirTree("data/lexica");
+          Module.FS_writeFile(data.filename, bytes);
+          cachedFiles.add(data.filename);
+          send("precache_complete", {filename: data.filename});
+          break;
+        }
+        if (data.filename.endsWith(".kwg")) {
+          const { sha256 } = await import("./wmp-assets.mjs");
+          kwgHashes.set(data.filename, await sha256(bytes));
+        }
+        const name = Module.stringToNewUTF8(data.filename);
+        const ptr = Module._malloc(bytes.length);
+        try {
+          if (!ptr) throw new Error(`Not enough memory to load ${data.filename}.`);
+          Module.HEAPU8.set(bytes, ptr);
+          api.precache(name, ptr, bytes.length);
+        } finally {
+          Module._free(ptr);
+          Module._free(name);
+        }
+        cachedFiles.add(data.filename);
+        send("precache_complete", { filename: data.filename });
         break;
-
-      case 'init':
-        handleInit(data);
+      }
+      case "init": {
+        const ptr = Module.stringToNewUTF8(data.dataPath);
+        let result;
+        try {
+          result = api.init(ptr);
+        } finally {
+          Module._free(ptr);
+        }
+        const error = readString(api.error);
+        if (result !== 0 || error.trim())
+          throw new Error(error || "Could not initialize MAGPIE.");
+        initialized = true;
+        reportMemory();
+        send("init_complete");
         break;
-
-      case 'run':
-        handleRun(data);
+      }
+      case "game_action": {
+        const strings = [
+          data.text,
+          data.lexicon,
+          data.rack || "",
+          data.move || "",
+          data.note || "",
+          data.cgp || "",
+        ].map((value) => Module.stringToNewUTF8(value));
+        try {
+          const game = JSON.parse(
+            readString(() =>
+              api.gameAction(
+                strings[0],
+                strings[1],
+                data.index,
+                strings[2],
+                strings[3],
+                strings[4],
+                data.action,
+                strings[5],
+                data.seed || 0,
+                data.onTurn || 0,
+                data.challengeRule ?? 0,
+              ),
+            ),
+          );
+          if (game.error) throw new Error(game.error.replace(/\(error \d+\)\s*/g, ""));
+          send("game_updated", { game });
+        } finally {
+          strings.forEach((ptr) => Module._free(ptr));
+        }
         break;
-
-      case 'stop':
-        handleStop();
+      }
+      case "xs_convert": {
+        const text = Module.stringToNewUTF8(data.text);
+        try {
+          const result = JSON.parse(readString(() => api.convertXS(data.operation, text, data.profile)));
+          if (result.error != null) throw new Error(result.error.replace(/\(error \d+\)\s*/g, "") || "Could not read or create this link.");
+          send("xs_converted", {value: result.value});
+        } finally {
+          Module._free(text);
+        }
         break;
-
-      case 'destroy':
-        handleDestroy();
+      }
+      case "import_gcg": {
+        const text = Module.stringToNewUTF8(data.text);
+        const lexicon = Module.stringToNewUTF8(data.lexicon);
+        try {
+          const game = JSON.parse(
+            readString(() => api.importGCG(text, lexicon)),
+          );
+          if (game.error) throw new Error(game.error.replace(/\(error \d+\)\s*/g, ""));
+          send("gcg_loaded", { game });
+        } finally {
+          Module._free(text);
+          Module._free(lexicon);
+        }
         break;
-
+      }
+      case "wmp_cache": {
+        const { listWMPs, removeWMP } = await import("./wmp-cache.mjs");
+        if (data.remove) await removeWMP(data.remove);
+        send("wmp_cache_updated", { files: await listWMPs() });
+        break;
+      }
+      case "prepare_wmp":
+        await prepareWMP(data);
+        break;
+      case "run":
+        await run(data.commands);
+        break;
+      case "peg_outcomes": {
+        const readable = pegReadable && (!running || /^peg(?: |$)/.test(activeCommand));
+        const name = Module.stringToNewUTF8(data.move);
+        try {
+          const outcomes = readable ? JSON.parse(readString(() => api.pegOutcomes(name)) || "null") : null;
+          self.postMessage({type:"peg_outcomes", move:data.move, key:data.key, sessionId:data.sessionId, outcomes});
+        } finally {
+          Module._free(name);
+        }
+        break;
+      }
+      case "search_pause": {
+        const accepted = running && !stopping && /^(peg|endgame)(?: |$)/.test(activeCommand)
+          && !!api.setSearchPaused(data.paused ? 1 : 0);
+        send("search_pause", {accepted, paused:!!data.paused});
+        break;
+      }
+      case "stop":
+        if (running) {
+          stopping = true;
+          wmpAbort?.abort();
+          if (activeCommand === "WMP") api.cancelWMP();
+          else if (api.thread() === 1) api.stop();
+          send("stopping", { command: activeCommand });
+        }
+        break;
+      case "destroy":
+        pegReadable = false;
+        api.destroy();
+        initialized = false;
+        cachedFiles.clear();
+        kwgHashes.clear();
+        send("destroyed");
+        break;
       default:
-        postMessage({ type: 'error', text: `Unknown message type: ${type}` });
+        throw new Error(`Unknown worker message: ${type}`);
     }
   } catch (error) {
-    postMessage({ type: 'error', text: `Error: ${error.message}` });
+    if (fatal || error instanceof WebAssembly.RuntimeError || /Aborted\(/.test(error.message)) failEngine(error.message);
+    else send("error", { text: error.message, filename: data.filename, requestId: incomingId });
   }
 };
 
-async function handlePrecache({ filename, url }) {
-  if (!Module) {
-    postMessage({ type: 'error', text: 'Module not ready' });
+async function prepareWMP({ source, lexicon, threads, manifestURL, cache = false, skipCache = false }) {
+  if (!initialized || !["build", "download"].includes(source) ||
+      !["CSW24", "NWL23"].includes(lexicon)) throw new Error("Invalid WMP request.");
+  if (memoryLimitMB < 1024) {
+    send("wmp_cache_warning", { text: "Word maps are unavailable with this browser’s memory limit. Using standard move generation." });
+    send("wmp_ready", { unavailable: true, cached: false });
     return;
   }
-
-  postMessage({ type: 'log', text: `Precaching ${filename} from ${url}...` });
-
-  const filenamePtr = Module.stringToNewUTF8(filename);
-
+  running = true;
+  stopping = false;
+  activeCommand = "WMP";
+  let ptr = 0, name = 0, nativeStarted = false, nativeFinished = false, retryBuild = false, unavailable = false;
+  wmpAbort = new AbortController();
+  const progress = (text) => send("wmp_progress", { text });
+  const warning = (error) => send("wmp_cache_warning", { text: `WMP cache unavailable: ${error.message}` });
   try {
-    postMessage({ type: 'log', text: `Fetching ${url}...` });
-    const resp = await fetch(url);
-
-    if (!resp.ok) {
-      throw new Error(`HTTP ${resp.status}: ${resp.statusText}`);
+    const { wmpAsset, downloadWMP, sha256, validateWMP } = await import("./wmp-assets.mjs");
+    const { readWMP, saveWMP, removeWMP } = await import("./wmp-cache.mjs");
+    const kwgHash = kwgHashes.get(`data/lexica/${lexicon}.kwg`);
+    let bytes, cached = false, fromCache = false;
+    let invalidCache = false;
+    try {
+      const saved = skipCache ? null : await readWMP(lexicon, kwgHash);
+      if (saved) {
+        invalidCache = true;
+        if (saved.bytes.byteLength !== saved.metadata.bytes ||
+            await sha256(saved.bytes) !== saved.metadata.sha256) throw new Error("Stored WMP checksum mismatch.");
+        validateWMP(saved.bytes);
+        bytes = saved.bytes;
+        fromCache = true;
+        cached = true;
+        invalidCache = false;
+        progress("Loading cached WMP…");
+      }
+    } catch (error) {
+      warning(error);
+      if (invalidCache) await removeWMP(lexicon).catch(() => {});
     }
-
-    postMessage({ type: 'log', text: `Fetched ${filename}, loading into memory...` });
-    const arrBuffer = new Uint8Array(await resp.arrayBuffer());
-    const buf = Module._malloc(arrBuffer.length * arrBuffer.BYTES_PER_ELEMENT);
-    Module.HEAPU8.set(arrBuffer, buf);
-
-    postMessage({ type: 'log', text: `Calling precache_file_data for ${filename}...` });
-    precacheFileData(filenamePtr, buf, arrBuffer.length);
-
-    Module._free(buf);
-    postMessage({ type: 'log', text: `✓ Precached ${filename}` });
-    postMessage({ type: 'precache_complete', filename: filename });
+    if (stopping) return send("wmp_ready", { stopped: true });
+    if (!bytes && source === "download") {
+      progress("Checking hosted WMP…");
+      const response = await fetch(manifestURL, { signal: wmpAbort.signal, cache: "no-store" });
+      if (!response.ok) throw new Error("No hosted WMP is available for this release. Choose Build on this device.");
+      const asset = wmpAsset(await response.json(), lexicon, kwgHash, manifestURL);
+      bytes = await downloadWMP(asset, (received, total) => {
+        progress(`Downloading WMP · ${(received / 1048576).toFixed(1)} / ${(total / 1048576).toFixed(1)} MB`);
+      }, wmpAbort.signal);
+    }
+    if (stopping) return send("wmp_ready", { stopped: true });
+    if (bytes) {
+      ptr = Module._malloc(bytes.length);
+      if (!ptr) throw Object.assign(new Error("Not enough memory to load WMP."), {code: "WMP_MEMORY"});
+      Module.HEAPU8.set(bytes, ptr);
+      progress(fromCache ? "Loading cached WMP indexes…" : "Loading WMP indexes…");
+    }
+    name = Module.stringToNewUTF8(lexicon);
+    const count = Math.max(1, Math.min(14, Math.floor(threads) || 1));
+    await Module.warmThreads(count + 3);
+    checkEngine();
+    if (stopping) return send("wmp_ready", { stopped: true });
+    if (!bytes) send("wmp_build_started", {lexicon});
+    if (api.prepareWMP(name, ptr, bytes?.length || 0, count, cache && !fromCache ? 1 : 0) !== 0)
+      throw new Error("Could not start WMP preparation.");
+    nativeStarted = true;
+    let value;
+    while (!fatal && !(value = JSON.parse(readString(api.wmpProgress))).done) {
+      const { stage, total, completed: complete } = value;
+      if (!bytes) {
+        progress(stopping ? "Stopping after WMP preparation…" :
+          `Building WMP · ${["reading words", "word entries", "single blanks", "double blanks", "indexes", "saving file"][stage]}${total ? ` · ${complete}/${total} lengths` : ""} · ${count} threads`);
+      }
+      await pause(100);
+    }
+    checkEngine();
+    Module._free(ptr); ptr = 0;
+    if (!stopping && cache && !fromCache && !bytes) {
+      const start = api.wmpData(), size = api.wmpDataSize();
+      if (start && size) bytes = Module.HEAPU8.slice(start, start + size);
+    }
+    const result = api.finishWMP(stopping ? 0 : 1);
+    nativeFinished = true;
+    const preparationError = readString(api.error);
+    if (!stopping && result !== 0) {
+      if (fromCache && !skipCache) {
+        await removeWMP(lexicon).catch(warning);
+        retryBuild = true;
+      } else throw new Error(preparationError || "Could not install WMP.");
+    }
+    if (!stopping && !retryBuild && cache && !fromCache && !bytes) {
+      warning(new Error("Not enough memory to export WMP for caching."));
+    }
+    if (!stopping && !retryBuild && cache && !fromCache && bytes) {
+      progress("Saving WMP on this device…");
+      try {
+        await saveWMP(lexicon, kwgHash, await sha256(bytes), source, bytes);
+        cached = true;
+      }
+      catch (error) { warning(error); }
+    }
+    if (!retryBuild) {
+      reportMemory();
+      send("wmp_ready", { stopped: stopping, fromCache, cached });
+    }
   } catch (error) {
-    const errorMsg = `Failed to precache ${filename} from ${url}: ${error.message}`;
-    postMessage({ type: 'error', text: errorMsg });
-    postMessage({ type: 'log', text: `❌ ${errorMsg}` });
+    if (stopping && error.name === "AbortError") send("wmp_ready", { stopped: true });
+    else if (!fatal && error.code === "WMP_MEMORY") unavailable = true;
+    else throw error;
   } finally {
-    Module._free(filenamePtr);
-  }
-}
-
-function handleInit({ dataPath }) {
-  if (!Module) {
-    postMessage({ type: 'error', text: 'Module not ready' });
-    return;
-  }
-
-  const dataPathPtr = Module.stringToNewUTF8(dataPath);
-  const result = wasmMagpieInit(dataPathPtr);
-  Module._free(dataPathPtr);
-
-  if (result !== 0) {
-    postMessage({ type: 'error', text: 'Failed to initialize MAGPIE' });
-    return;
-  }
-
-  isInitialized = true;
-  postMessage({ type: 'init_complete' });
-}
-
-async function handleRun({ commands }) {
-  if (!Module || !isInitialized) {
-    postMessage({ type: 'error', text: 'MAGPIE not initialized' });
-    return;
-  }
-
-  if (isRunning) {
-    postMessage({ type: 'error', text: 'Already running a command' });
-    return;
-  }
-
-  isRunning = true;
-
-  // Execute commands sequentially
-  for (let i = 0; i < commands.length; i++) {
-    const cmd = commands[i];
-    postMessage({ type: 'log', text: `[${i+1}/${commands.length}] Running command: ${cmd}` });
-
-    const cmdPtr = Module.stringToNewUTF8(cmd);
-    postMessage({ type: 'log', text: `Starting async command...` });
-
-    // Start the async command (spawns a pthread)
-    wasmRunCommandAsync(cmdPtr);
-    Module._free(cmdPtr);
-
-    postMessage({ type: 'log', text: `Command started on pthread, checking status...` });
-
-    // Poll for completion - check thread status
-    // 0 = UNINITIALIZED, 1 = STARTED, 2 = USER_INTERRUPT, 3 = FINISHED
-
-    // Wait a moment for pthread to start
-    await new Promise(resolve => setTimeout(resolve, 50));
-
-    while (true) {
-      let threadStatus = wasmGetThreadStatus();
-
-      // Validate thread status (should be 0-3)
-      if (threadStatus < 0 || threadStatus > 3) {
-        postMessage({ type: 'log', text: `Invalid thread status: ${threadStatus}, waiting...` });
-        await new Promise(resolve => setTimeout(resolve, 50));
-        continue;
-      }
-
-      postMessage({ type: 'log', text: `Thread status: ${threadStatus}` });
-
-      // If still UNINITIALIZED, the pthread hasn't started yet - keep waiting
-      if (threadStatus === 0) {
-        await new Promise(resolve => setTimeout(resolve, 50));
-        continue;
-      }
-
-      // Check if thread finished (3 = THREAD_CONTROL_STATUS_FINISHED)
-      if (threadStatus === 3) {
-        postMessage({ type: 'log', text: `Command completed (thread status = FINISHED)` });
-        break;
-      }
-
-      // Check for user interrupt (2 = THREAD_CONTROL_STATUS_USER_INTERRUPT)
-      if (threadStatus === 2) {
-        postMessage({ type: 'log', text: `Command interrupted by user` });
-        break;
-      }
-
-      // Wait before next poll
-      await new Promise(resolve => setTimeout(resolve, 100));
+    // Do not release borrowed memory while the native coordinator owns it.
+    if (!fatal && nativeStarted && !nativeFinished) {
+      while (!JSON.parse(readString(api.wmpProgress)).done) await pause(100);
+      api.finishWMP(0);
+      readString(api.error);
     }
-
-    // Get output after command completes
-    const outputPtr = wasmGetOutput();
-    if (outputPtr) {
-      const output = Module.UTF8ToString(outputPtr);
-      Module._free(outputPtr);
-      if (output && output.trim()) {
-        postMessage({ type: 'output', text: output });
-      }
-    }
-
-    // Check for errors
-    const errorPtr = wasmGetError();
-    if (errorPtr) {
-      const error = Module.UTF8ToString(errorPtr);
-      Module._free(errorPtr);
-      if (error && error.trim()) {
-        postMessage({ type: 'error', text: `Command "${cmd}" failed: ${error}` });
-        isRunning = false;
-        return;
-      }
-    }
+    Module._free(ptr);
+    Module._free(name);
+    wmpAbort = null;
+    running = false;
+    activeCommand = "";
   }
-
-  // Commands completed successfully
-  postMessage({ type: 'log', text: 'All commands completed' });
-  isRunning = false;
-  postMessage({ type: 'complete' });
-}
-
-function startStatusPolling() {
-  // Note: This is not currently used since sim command is synchronous
-  // and blocks until complete. If we need async status updates in the future,
-  // we'll need to restructure to run commands in a separate thread.
-  let lastStatus = '';
-
-  statusCheckInterval = setInterval(() => {
-    if (!isRunning) {
-      clearInterval(statusCheckInterval);
-      return;
-    }
-
-    const statusPtr = wasmGetStatus();
-    if (statusPtr) {
-      const status = Module.UTF8ToString(statusPtr);
-      Module._free(statusPtr);
-
-      // Only send if status changed
-      if (status !== lastStatus) {
-        lastStatus = status;
-        postMessage({ type: 'status', text: status });
-
-        // Check if command is complete
-        const lowerStatus = status.toLowerCase();
-        if (
-          lowerStatus.includes('complete') ||
-          lowerStatus.includes('finished') ||
-          lowerStatus.includes('done')
-        ) {
-          finishCommand();
-        }
-      }
-    }
-  }, 500); // Poll every 500ms
-}
-
-function finishCommand() {
-  clearInterval(statusCheckInterval);
-  statusCheckInterval = null;
-
-  // Get final output
-  const outputPtr = wasmGetOutput();
-  if (outputPtr) {
-    const output = Module.UTF8ToString(outputPtr);
-    Module._free(outputPtr);
-    postMessage({ type: 'output', text: output });
+  if (unavailable) {
+    send("wmp_cache_warning", {text: "Not enough memory for word maps. Using standard move generation; saved files were kept."});
+    send("wmp_ready", {unavailable: true, cached: false});
   }
-
-  isRunning = false;
-  postMessage({ type: 'complete' });
-}
-
-function handleStop() {
-  if (!isRunning) {
-    return;
-  }
-
-  wasmStop();
-  postMessage({ type: 'stopped' });
-
-  // The status polling will detect the stop and finish
-}
-
-function handleDestroy() {
-  if (statusCheckInterval) {
-    clearInterval(statusCheckInterval);
-  }
-
-  if (isInitialized) {
-    wasmMagpieDestroy();
-    isInitialized = false;
-  }
-
-  postMessage({ type: 'destroyed' });
+  if (retryBuild && stopping) return send("wmp_ready", { stopped: true });
+  if (retryBuild) await prepareWMP({ source: "build", lexicon, threads, manifestURL, cache, skipCache: true });
 }
