@@ -1,7 +1,6 @@
 #ifndef MATH_UTIL_H
 #define MATH_UTIL_H
 
-#include <complex.h>
 #include <stdbool.h>
 #include <stdint.h>
 

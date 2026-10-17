@@ -29,6 +29,7 @@ settings.txt
 # Node.js / Playwright
 node_modules/
 package-lock.json
+!wasmentry/package-lock.json
 test-results/
 playwright-report/
 playwright/.cache/

@@ -41,6 +41,23 @@ You should now be able to run the compiled MAGPIE executable:
 
 This will start MAGPIE in async interactive mode by default. For more details on different ways to run MAGPIE, see [Execution Modes](#execution-modes).
 
+### Windows
+
+Windows 10 (version 1903 or later) and Windows 11, on x64 or ARM, run MAGPIE as a single `.exe` with nothing else to install.
+
+1. From the [Releases](https://github.com/jvc56/MAGPIE/releases) page, download `magpie-<version>-windows-x64.exe` (most PCs) or `magpie-<version>-windows-arm64.exe` (Windows on ARM, such as Snapdragon laptops), and put it in a folder of its own, say `Documents\MAGPIE`.
+2. Optionally, check the download against the `.sha256` file published beside it. In PowerShell:
+   ```
+   Get-FileHash .\magpie-<version>-windows-x64.exe -Algorithm SHA256
+   ```
+   The hash printed must match the one in the `.sha256` file.
+3. Double-click the `.exe`. The release is not code-signed, so the first time Windows shows **Windows protected your PC**: click **More info**, then **Run anyway**. (If your antivirus flags the file, please [open an issue](https://github.com/jvc56/MAGPIE/issues); unsigned programs that download files are sometimes misidentified.)
+4. MAGPIE looks for its data in a `data` folder beside it and offers to download it (about 195 MB, the same data set `download_data.sh` fetches): answer `y`. You can also run `data fetch` at any time. The first time you use a lexicon, MAGPIE builds that lexicon's wordmap, which takes a few seconds and makes move generation faster afterwards.
+
+From there MAGPIE works exactly as it does on Linux and macOS: everything in [Usage](#usage) applies. To run it from a terminal, open PowerShell or Command Prompt in its folder and run `.\magpie-<version>-windows-x64.exe`, with commands as arguments if you like.
+
+To build the Windows executables yourself on Linux or macOS, with Docker installed, run `make windows` (add `WINDOWS_ARCH=aarch64` for ARM); `bin/magpie.exe` is the result.
+
 ### Release builds
 
 The production release is a native profile-guided build. It needs Clang and
@@ -62,6 +79,53 @@ To build the former optimized release without PGO:
 ```
 make magpie BUILD=no_pgo_release
 ```
+
+### Portable builds
+
+```
+make magpie BUILD=portable_release
+```
+
+Identical to `no_pgo_release` except that the instruction set is fixed
+(`-march=nehalem`) instead of being whatever the building machine happens to
+have. Use it whenever a build's *output bytes* have to match another build's.
+
+That matters for one thing in particular. A wordmap, a rack info table and a
+word info table are built on each machine that needs one and are far too large to ship, so
+[birdtest](https://github.com/jvc56/birdtest) checks them by building its own
+reference copy on the server and comparing SHA-256s. `-march=native` makes the
+binary's instruction set a property of whatever compiled it, and two builds of
+one commit could then vectorize the same floating-point reduction differently.
+Measurement says they do not — `-march=native` and `-march=nehalem` produce
+byte-identical wordmaps, rack info tables and word info tables on x86-64 with
+GCC 10 — but being
+right by construction beats being right by measurement, so birdtest's server
+image and the released contributor binaries both use this flavor.
+
+`PORTABLE_MARCH` overrides the target for a non-x86 host. `nehalem` rather than
+`x86-64-v2`, which names the same instruction set but only reached GCC 11 and
+Clang 12.
+
+### Builder versions
+
+```
+magpie> builders
+{"magpie_version":"0.1.1","build_target":"nehalem","wmp_builder_version":1,
+ "rit_builder_version":1,"klv_builder_version":1,"wit_builder_version":1}
+```
+
+A derived file's hash is only meaningful together with the builder that
+produced it: a CSW24 wordmap built in December 2025 and one built nine months
+later differ in 72,852,152 bytes with the same inputs and the same wordmap
+format version 3, because the builder changed and the format did not have to.
+So `src/def/builder_defs.h` versions the four builders separately from
+`MAGPIE_VERSION`, and `test/builder_hash_test.c` pins their output — a change
+that alters a derived builder fails that test until someone bumps the
+version and updates the pinned hash.
+
+birdtest reads this command's output from the binary it runs, rather than being
+told in configuration, so the builder recorded beside a published hash is always
+the one that produced it.
 
 Focused targets are available when the resulting binary will spend most of a
 long-running job in one workload:
@@ -152,6 +216,31 @@ when combined with a clock. Pairs work by having both games see identical draws
 so that only the players' decisions differ; with timing on, the two games can
 diverge for reasons unrelated to strategy.
 
+Without a clock, an autoplay player can still solve the end of the game.
+`-eplies1`/`-eplies2` have that player solve the endgame to the given depth
+once the bag is empty, and `-pegbag1`/`-pegbag2` have it solve the
+pre-endgame while the bag holds 1 to that many tiles (at most 4). Every other
+turn is played as before, statically or by simulation:
+
+```
+magpie> autoplay games 100 -eplies1 6 -pegbag1 2 -hr true
+```
+
+`-eplies1 0` (the default) turns both solvers off, since the pre-endgame
+solver scores its emptier scenarios with endgame solves. The pre-endgame's
+schedule is `-pegtopk1`, `-pegstride1`, `-pegpess1` and `-pegnested1` (and
+their `2` forms), and `-pegncaps`, `-pegndepth` and `-pegnstrides` for its
+nested lookahead, which set both players. Unlike `-eplies` and `-pegtopk`,
+which configure the `endgame` and `peg` commands, these change how the
+player plays.
+
+No time limit applies: the depth and the schedule bound the work, so a player
+is as strong on a slow machine as on a fast one. Every solve uses all of
+`-threads`, whatever `-mtmode` gives a simulation. A solve is multithreaded,
+so these games are not reproducible from the seed either. Cost grows steeply
+with the bag: at a bag of 4 with the default schedule, a single game can take
+minutes.
+
 How much search a clock buys also depends on the threading mode, so the same
 `-pc1` value is not comparable across `-mtmode` settings:
 
@@ -197,7 +286,13 @@ magpie> help lex
 
 ### Load and Save Settings
 
-On startup, MAGPIE will check for a `settings.txt` file in the current directory and will load the settings saved in that file if it exists. By default, after every successful command that is not invoked in script mode, MAGPIE will save the current settings to `settings.txt` so they do not have to be reentered on the next startup. To disable this feature, set the "savesettings" setting to false.
+By default, MAGPIE neither reads nor writes a settings file. To keep settings between runs, start MAGPIE with the "savesettings" setting set to true:
+
+```
+./bin/magpie set -savesettings true
+```
+
+On startup with `-savesettings true`, MAGPIE will load the settings saved in `settings.txt` in the current directory if that file exists. While "savesettings" is true, after every successful command that is not invoked in script mode, MAGPIE will save the current settings to `settings.txt` so they do not have to be reentered on the next startup. Setting "savesettings" to false stops the saving, and MAGPIE ignores `settings.txt` on any startup without `-savesettings true`.
 
 ### Execution Modes
 
@@ -252,7 +347,7 @@ Programs can embed MAGPIE through a string -> string C API. Build the shared lib
 make libmagpie
 ```
 
-which produces `bin/libmagpie.so` (`bin/libmagpie.dylib` on macOS) exporting only the `magpie_*` functions declared in `src/impl/cmd_api.h` — that header plus the shared library is the entire embedding surface.
+which produces `bin/libmagpie.so` (`bin/libmagpie.dylib` on macOS) exporting only the `magpie_*` functions declared in `src/impl/cmd_api.h` — that header, its dependency `src/def/cmd_api_defs.h`, and the shared library form the embedding surface. When packaging the headers, retain their `impl/` and `def/` sibling directories so the relative include resolves.
 
 The API is command-oriented: callers create an opaque `Magpie` handle, pass it the same command strings the console accepts, and read the resulting output back as a string. Output is machine readable by default; the `*_human_readable` function variants format it for display instead. Commands can run synchronously (`magpie_run_sync`) or on a background thread (`magpie_run_async`), with `magpie_get_last_command_status_message` for mid-run progress, `magpie_stop_current_command` to interrupt, and `magpie_await` to collect the result. All returned strings are owned by the caller and freed with `magpie_free_string`.
 
@@ -325,6 +420,47 @@ magpie> convert winpct CSW24_winpct_record winpct_english
 ```
 
 The recorder splits games into two independent samples, and `convert winpct` chooses how much to smooth by predicting each sample from the other; it prints that comparison.
+
+This directory also contains PAT weights, `<lexicon>.pat` for the 15x15 board and `<lexicon>_super21.pat` for the 21x21 board (see PAT below).
+
+## PAT
+
+PAT (positional adjustment term) adds a learned term to static equity for what a move leaves on the board: premium squares, hooks and word windows it opens to the opponent, weighted by the tiles still unseen, plus an opening-length table and a utility correction that reweights points by the current margin and stage (read off the distribution's `winpct_<letter_distribution>` table). It applies while tiles remain in the bag.
+
+PAT is off unless weights are loaded:
+
+```
+magpie> set -lex CSW24 -pat CSW24
+```
+
+`-pat` sets both players and `-pat1`/`-pat2` set one; `none` unloads. The other PAT settings also come in a form for both players and per-player forms ending in 1 or 2:
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `patcand` | `true` | Use PAT in the player's own move generation: static play and the candidates a simulation starts from. |
+| `patclasses` | `all` | Which PAT classes that move generation uses: a comma-separated list from `tws`, `dws`, `tls`, `dls`, `qws`, `qls` and `windows`. |
+| `patrollout` | `true` | Use PAT in the rollouts of the player's simulations (both sides' plies, each with its own weights). |
+| `patrolloutclasses` | `tws,windows` (`qws,tws,windows` on 21x21) | Which PAT classes the rollouts use; `all` uses every class. |
+
+Rollouts default to a cheaper subset of classes, because they generate many more positions than candidate selection does. The defaults keep most of full PAT's value at a fraction of its cost. These numbers are from CSW24 static self-play with the shipped weights; "vs full PAT" is full PAT's spread per game pair against the subset, head to head:
+
+| Board | Classes | Time vs no PAT | vs full PAT |
+|---|---|---|---|
+| 15x15 | `tws` | 1.35x | +2.03 ± 0.28 |
+| 15x15 | **`tws,windows`** (default) | 1.45x | +1.25 ± 0.27 |
+| 15x15 | `all` | 2.66x | — |
+| 21x21 | `tws` | 1.24x | +6.04 ± 0.70 |
+| 21x21 | `tws,windows` | 1.37x | +2.18 ± 0.67 |
+| 21x21 | **`qws,tws,windows`** (default) | 1.35x | +1.64 ± 0.67 |
+| 21x21 | `all` | 1.94x | — |
+
+For example, full PAT everywhere, rollouts included:
+
+```
+magpie> set -lex CSW24 -pat CSW24 -patrolloutclasses all
+```
+
+`test/pat_build.sh` and `test/pat_build_super.sh` run the whole process that trains and validates a lexicon's weights.
 
 ## Examples
 
@@ -565,3 +701,48 @@ magpie> autoplay games 10000 -l1 CSW50 -l2 CSW60 -leaves CSW21 -gp true -hr true
 ```
 
 It is highly recommended to run with game pairs to reduce statistical noise. To see more details about game pairs, use `help gp`.
+
+### Rack info tables and rack-equity KLVs
+
+A rack info table is built from a KLV and a wordmap, and stores each full
+rack's precomputed leave values. It therefore belongs to a *(lexicon, leaves)*
+pair rather than to a lexicon: CSW24 played with `CSW_quackle_leaves` and CSW24
+played with its own leaves need different tables. `klvwmp2rit` takes the KLV's
+and the wordmap's names separately so the output does not have to borrow one of
+theirs:
+
+```
+magpie> convert klvwmp2rit CSW24.CSW_quackle_leaves english CSW_quackle_leaves CSW24
+```
+
+Both extra names are optional and default to the output's, so the short form
+still works where a table really is named after its lexicon:
+
+```
+magpie> convert klvwmp2rit CSW24
+```
+
+`rackequity2klv` turns a generation's aggregated full-rack results into the KLV
+they imply, which is the other half of a leave-generation run when the games
+were played somewhere else. It reads `lexica/<name>.csv`, one
+`rack,count,equity_sum` row per full rack:
+
+```
+magpie> convert rackequity2klv gen1 english
+```
+
+Every full rack the distribution draws must appear exactly once. A rack with a
+count of zero is not the same as a missing rack — it was enumerated and never
+drawn, and contributes a mean of zero at full draw weight, exactly as it does
+inside a `leavegen` run — so a file that omits one is refused rather than having
+its gaps valued at zero. This is what birdtest's server uses to build each
+generation's KLV.
+
+### Compact position and game codecs
+
+The codecs and word-frequency trainer are C-only and add no build dependencies.
+Use `make word_frequencies BUILD=no_pgo_release` to build the training tool.
+Use `conv counts2xsw` to create word codebooks, `conv cgp2xsp` / `xsp2cgp` for
+positions, and `conv gcg2xsg` / `xsg2gcg` for games. See
+[XS codecs](docs/xs-codecs.md) for commands, immutable data installation, wire
+formats, and compatibility tests.
