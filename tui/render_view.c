@@ -382,7 +382,8 @@ void compute_rack_ghost_mask(const TuiGameState *state,
   // Count rack-tiles needed by the move. Blanks consume a blank
   // rack tile (ml = 0) regardless of which letter they stand in
   // for, so strip the blank bit before bucketing. Exchanges have
-  // no PLAYED_THROUGH_MARKER positions; placements may.
+  // no PLAYED_THROUGH_MARKER positions; placements may. One count
+  // per MachineLetter (uint8_t) value, so any letter is in range.
   int needed[256] = {0};
   const int n = mtype == GAME_EVENT_EXCHANGE ? move_get_tiles_played(m)
                                              : move_get_tiles_length(m);
@@ -393,15 +394,13 @@ void compute_rack_ghost_mask(const TuiGameState *state,
     }
     const MachineLetter rack_ml =
         get_is_blanked(tile) ? BLANK_MACHINE_LETTER : tile;
-    if ((int)rack_ml < 256) {
-      needed[(int)rack_ml]++;
-    }
+    needed[rack_ml]++;
   }
   for (int i = 0; i < slot_count; i++) {
     const MachineLetter ml = slot_letters[i];
-    if ((int)ml < 256 && needed[(int)ml] > 0) {
+    if (needed[ml] > 0) {
       out_ghost[i] = true;
-      needed[(int)ml]--;
+      needed[ml]--;
     }
   }
 }
