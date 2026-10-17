@@ -44,6 +44,7 @@ void test_cmd_api_create_failure(void) {
   assert(strings_equal(status_message, ""));
   free(status_message);
 
+  assert(!magpie_set_search_paused(mp, true));
   magpie_stop_current_command(mp);
   magpie_destroy(mp);
 }
@@ -66,6 +67,9 @@ void test_cmd_api_run_commands(void) {
   free(set_output);
 
   assert_run_sync_success(mp, "generate");
+  assert(magpie_get_thread_status(mp) == MAGPIE_THREAD_STATUS_FINISHED);
+
+  magpie_stop_current_command(mp);
   assert(magpie_get_thread_status(mp) == MAGPIE_THREAD_STATUS_FINISHED);
 
   // The default output is machine readable and has no display header.
@@ -161,6 +165,9 @@ void test_cmd_api_async(void) {
   assert(exit_code == MAGPIE_SUCCESS);
   assert(magpie_get_thread_status(mp) == MAGPIE_THREAD_STATUS_STARTED);
 
+  // Simulation has no cooperative solver-pause checkpoints.
+  assert(!magpie_set_search_paused(mp, true));
+
   // Only one command may run at a time.
   assert(magpie_run_async(mp, "generate") == MAGPIE_DID_NOT_RUN);
   assert(magpie_run_sync(mp, "generate") == MAGPIE_DID_NOT_RUN);
@@ -205,7 +212,23 @@ void test_cmd_api_destroy_while_running(void) {
   magpie_destroy(mp);
 }
 
+static void test_idle_pause(void) {
+  Magpie *mp = magpie_create(DEFAULT_TEST_DATA_PATH);
+  assert(!magpie_has_error(mp));
+  bool paused = magpie_set_search_paused(mp, true);
+  assert(!paused);
+  const char *commands[] = {"notacommand", ""};
+  for (int index = 0; index < 2; index++) {
+    magpie_run_sync(mp, commands[index]);
+    paused = magpie_set_search_paused(mp, true);
+    assert(!paused);
+    free(magpie_get_and_clear_error(mp));
+  }
+  magpie_destroy(mp);
+}
+
 void test_cmd_api(void) {
+  test_idle_pause();
   test_cmd_api_create_failure();
   test_cmd_api_run_commands();
   test_cmd_api_errors();

@@ -1,7 +1,9 @@
 #ifndef PEG_STRING_H
 #define PEG_STRING_H
 
+#include "../ent/board.h"
 #include "../ent/game.h"
+#include "../ent/letter_distribution.h"
 #include "../impl/peg.h"
 #include <stdbool.h>
 
@@ -35,5 +37,14 @@ char *peg_result_get_string(const PegResult *result, const Game *game,
 // for unit testing; production reaches it via peg_result_get_string. Caller
 // frees.
 char *peg_build_outcomes_string_rows(const PegPerScenario *rows, int n_rows);
+
+// Caller frees the returned JSON string.
+char *peg_snapshot_get_json(const PegPollSnapshot *snapshot, const Game *game);
+// Read a synchronized live snapshot and serialize it.
+char *peg_poll_outcomes_json(PegPoll *poll, const Board *board,
+                             const LetterDistribution *ld,
+                             const char *move_text);
+
+char *peg_poll_get_json(PegPoll *poll, const Game *game);
 
 #endif // PEG_STRING_H

@@ -7,6 +7,7 @@
 #include <assert.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 
 // WordInfoTable (parallel to RackInfoTable): one trie per key-word length. At a
@@ -28,8 +29,12 @@
 // returns NULL and the caller permits all letters.
 enum {
   // Bump WIT_VERSION whenever the on-disk layout changes incompatibly.
-  WIT_VERSION = 4,
+  WIT_VERSION = 5,
+  // The layout word_info_table_write_version_4_to_file keeps writing: version
+  // 5 without its position-length rows, which a load derives instead.
+  WIT_VERSION_WITHOUT_POSITION_LENGTHS = 4,
   WIT_FLAG_WORD_PLUS_FLOATER = 1,
+  WIT_FLAG_POSITION_LENGTHS = 2,
   WIT_EARLIEST_SUPPORTED_VERSION = 3,
   WPF_MIN_BLOCK_LENGTH = 2,
   WPF_MAX_BLOCK_LENGTH = 4,
@@ -63,9 +68,10 @@ typedef struct WordInfoTable {
   WitTrie tries[BOARD_DIM + 1];
   // Optional positional table, indexed directly by this WIT's value IDs.
   uint32_t *word_plus_floater[BOARD_DIM + 1];
-  // Derived from this table's complete dictionary on construction/load.
-  // For each value ID, position p contains bits for absolute final lengths
-  // having this base at p. It does not change the serialized WIT format.
+  // Derived from this table's complete dictionary on construction, and
+  // stored in version-5 files; older files derive it on load. For each value
+  // ID, position p contains bits for absolute final lengths having this base
+  // at p.
   uint32_t *position_lengths[BOARD_DIM + 1];
 } WordInfoTable;
 
@@ -161,7 +167,10 @@ static inline void word_info_table_clear_position_lengths(WordInfoTable *wit) {
 
 // Requires a complete validated WIT dictionary, as produced by the native
 // maker or loader. A zero source fingerprint leaves this optional cache absent.
-void word_info_table_build_position_lengths(WordInfoTable *wit);
+// Uses num_threads threads (at most one per word length; 1 if num_threads <
+// 1).
+void word_info_table_build_position_lengths(WordInfoTable *wit,
+                                            int num_threads);
 
 static inline void word_info_table_destroy(WordInfoTable *wit) {
   if (wit == NULL) {
@@ -191,9 +200,23 @@ static inline void word_info_table_clear_word_plus_floater(WordInfoTable *wit) {
 
 // Version 4 keeps the version-3 trie representation and appends optional
 // positional masks. Both use one KWG identity and the same terminal IDs.
+// Version 5 appends the position-length rows when the table has a KWG hash.
+// The caller owns and closes the stream.
+void word_info_table_write_to_stream(const WordInfoTable *wit, FILE *stream,
+                                     ErrorStack *error_stack);
+void word_info_table_load_from_stream(WordInfoTable *wit, const char *name,
+                                      FILE *stream, ErrorStack *error_stack);
 void word_info_table_write_to_file(const WordInfoTable *wit,
                                    const char *filename,
                                    ErrorStack *error_stack);
+// The version 4 layout: what word_info_table_write_to_file writes, without the
+// position-length rows and under a version 4 header. A load derives the rows,
+// so it loads into the same table. This is what birdtest checks
+// (`convert kwg2witv4`): its bytes are what WIT builder 1 always wrote, so a
+// worker on any MAGPIE version builds the file the server pins.
+void word_info_table_write_version_4_to_file(const WordInfoTable *wit,
+                                             const char *filename,
+                                             ErrorStack *error_stack);
 void word_info_table_load(WordInfoTable *wit, const char *name,
                           const char *filename, ErrorStack *error_stack);
 WordInfoTable *word_info_table_create(const char *data_paths,
