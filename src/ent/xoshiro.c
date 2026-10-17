@@ -30,6 +30,8 @@ struct XoshiroPRNG {
   uint64_t s[4];
 };
 
+size_t prng_allocation_size(void) { return sizeof(XoshiroPRNG); }
+
 /*  Written in 2015 by Sebastiano Vigna (vigna@acm.org)
 
 To the extent possible under law, the author has dedicated all copyright
@@ -93,6 +95,14 @@ uint64_t prng_next(XoshiroPRNG *prng) {
   prng->s[3] = rotl(prng->s[3], 45);
 
   return result;
+}
+
+uint64_t prng_peek(const XoshiroPRNG *prng, uint64_t ahead) {
+  XoshiroPRNG peek_prng = *prng;
+  for (uint64_t step = 0; step < ahead; step++) {
+    prng_next(&peek_prng);
+  }
+  return prng_next(&peek_prng);
 }
 
 // Use the prng_next function to get a random number

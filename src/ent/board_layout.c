@@ -104,7 +104,7 @@ void board_layout_parse_split_file(BoardLayout *bl,
       error_stack_push(error_stack,
                        ERROR_STATUS_BOARD_LAYOUT_INVALID_NUMBER_OF_COLS,
                        get_formatted_string(
-                           "board layout has an invalid number of columns: %d",
+                           "board layout has an invalid number of columns: %zu",
                            string_length(layout_row)));
       return;
     }

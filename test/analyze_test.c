@@ -1,13 +1,14 @@
 #include "analyze_test.h"
 
+#include "../src/compat/cfile.h"
 #include "../src/impl/config.h"
 #include "../src/util/io_util.h"
 #include "../src/util/string_util.h"
+#include "test_platform.h"
 #include "test_util.h"
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <unistd.h>
 
 static const char *SINGLE_GCG_PATH = "testdata/gcgs/success.gcg";
 static const char *SINGLE_REPORT_PATH = "testdata/gcgs/success_report.txt";
@@ -25,9 +26,7 @@ static const char *MINIMAL_GCG_HEADER = "#character-encoding UTF-8\n"
 // tests. Returns the directory path (caller must free). The file is removed by
 // the caller.
 static char *make_temp_gcg_dir(void) {
-  char tmp_template[] = "/tmp/magpie_analyze_XXXXXX";
-  char *tmp_dir = mkdtemp(tmp_template);
-  assert(tmp_dir != NULL);
+  char *tmp_dir = test_platform_make_temporary_directory("magpie_analyze_");
 
   const char *gcg_content = "#character-encoding UTF-8\n"
                             "#player1 Tim Tim\n"
@@ -40,17 +39,24 @@ static char *make_temp_gcg_dir(void) {
   assert(error_stack_is_empty(es));
   error_stack_destroy(es);
   free(gcg_path);
-  return string_duplicate(tmp_dir);
+  return tmp_dir;
 }
 
+// Removes everything analyzing the directory can leave in it -- the game, its
+// report, and the tournament summary a directory analysis writes -- and then
+// the directory. The removal is checked: a file this misses would otherwise
+// leave a directory behind on every run.
 static void remove_temp_gcg_dir(const char *dir_path) {
-  char *gcg_path = get_formatted_string("%s/test_game.gcg", dir_path);
-  char *report_path = get_formatted_string("%s/test_game_report.txt", dir_path);
-  (void)remove(gcg_path);
-  (void)remove(report_path);
-  free(gcg_path);
-  free(report_path);
-  (void)rmdir(dir_path);
+  const char *files[] = {"test_game.gcg", "test_game_report.txt",
+                         "tournament_summary.txt"};
+  for (size_t i = 0; i < sizeof(files) / sizeof(files[0]); i++) {
+    char *path = get_formatted_string("%s/%s", dir_path, files[i]);
+    (void)remove(path);
+    free(path);
+  }
+  const int removed = cfile_rmdir(dir_path);
+  assert(removed == 0);
+  (void)removed;
 }
 
 // PATH D1: single GCG file as argument (CSV output, plies=0).

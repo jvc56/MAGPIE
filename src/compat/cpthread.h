@@ -2,11 +2,12 @@
 #define COMPAT_PTHREAD_H
 
 #include <errno.h>
+#include <stdbool.h>
 #include <pthread.h>
 #include <stddef.h>
 #include <time.h>
 
-#include "../def/cpthread_defs.h"
+#include "cpthread_defs.h"
 #include "../util/io_util.h"
 
 static inline void cpthread_mutex_init(cpthread_mutex_t *mutex) {
@@ -40,29 +41,42 @@ static inline void cpthread_cond_wait(cpthread_cond_t *cond,
   }
 }
 
-static inline void cpthread_cond_timedwait(cpthread_cond_t *cond,
+// Waits on `cond` until it is signaled or the realtime clock reaches
+// `abstime`. Returns false if the time came first.
+static inline bool cpthread_cond_timedwait(cpthread_cond_t *cond,
                                            cpthread_mutex_t *mutex,
                                            const struct timespec *abstime) {
-  int ret = pthread_cond_timedwait(cond, mutex, abstime);
-  if (ret == 0) {
-    return;
-  }
+  const int ret = pthread_cond_timedwait(cond, mutex, abstime);
   if (ret == ETIMEDOUT) {
-    log_fatal("cond timedwait timed out");
+    return false;
   }
-  log_fatal("cond timedwait failed");
+  if (ret != 0) {
+    log_fatal("cond timedwait failed: %d", ret);
+  }
+  return true;
 }
 
+// Waits on `cond` until *done, and ends the process if that takes more than
+// `timeout_seconds`. The time is measured on the monotonic clock: the
+// realtime one, which timed waits take, can be stepped (NTP, a user), so it
+// only bounds each second's wait.
 static inline void cpthread_cond_timedwait_loop(cpthread_cond_t *cond,
                                                 cpthread_mutex_t *mutex,
                                                 const int timeout_seconds,
                                                 const int *done) {
-  struct timespec ts;
-  clock_gettime(CLOCK_REALTIME, &ts);
-  ts.tv_sec += timeout_seconds;
+  struct timespec start;
+  clock_gettime(CLOCK_MONOTONIC, &start);
   cpthread_mutex_lock(mutex);
-  while (!done) {
-    cpthread_cond_timedwait(cond, mutex, &ts);
+  while (!*done) {
+    struct timespec now;
+    clock_gettime(CLOCK_MONOTONIC, &now);
+    if (now.tv_sec - start.tv_sec >= timeout_seconds) {
+      log_fatal("cond timedwait timed out after %d seconds", timeout_seconds);
+    }
+    struct timespec slice;
+    clock_gettime(CLOCK_REALTIME, &slice);
+    slice.tv_sec += 1;
+    (void)cpthread_cond_timedwait(cond, mutex, &slice);
   }
   cpthread_mutex_unlock(mutex);
 }
