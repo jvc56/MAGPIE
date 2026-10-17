@@ -29,13 +29,60 @@ ifndef RACK_SIZE
 RACK_SIZE = 7
 endif
 
+# The portable optimized build. Identical to no_pgo_release except that the
+# instruction set is fixed instead of being whatever the building machine
+# happens to have.
+#
+# This exists because a wordmap's and a rack info table's bytes have to be a
+# function of their inputs alone. birdtest's server builds a reference copy of
+# each derived file and sends its SHA-256 to workers, which build their own and
+# refuse to use one whose hash differs (see birdtest's README.md, "MAGPIE on
+# the server").
+# -march=native makes the binary's instruction set a property of the machine
+# that compiled it, so two builds of the same commit can vectorize the same
+# floating-point reduction differently and produce different bytes for the same
+# inputs.
+#
+# The target is spelled `nehalem` rather than `x86-64-v2`: they name the same
+# instruction set (SSE4.2, POPCNT), which every machine this runs on already
+# meets, Fargate included, but `x86-64-v2` only reached GCC in 11 and Clang in
+# 12 -- Ubuntu 20.04's clang 10 rejects it outright -- and a target some
+# compilers cannot parse is no use for a build meant to be reproducible
+# everywhere. `nehalem` additionally tunes for that microarchitecture, which
+# changes instruction scheduling and not results.
+#
+# PORTABLE_MARCH overrides the target for a non-x86 host; a build for one
+# architecture is only comparable with another build for that same
+# architecture, which is why the target travels with the binary and the server
+# records it alongside every hash (see `magpie builders`).
+PORTABLE_MARCH ?= nehalem
+
+# A Windows build is a cross-compile with MinGW-w64 (llvm-mingw: see `make
+# windows`), recognized from the compiler's target triple. It produces .exe
+# files, links statically (one self-contained executable, no DLLs), and keeps
+# its objects apart from the host's.
+TARGET_TRIPLE := $(shell $(CC) -dumpmachine 2>/dev/null)
+# GCC says x86_64-w64-mingw32, clang x86_64-w64-windows-gnu.
+ifneq ($(findstring mingw,$(TARGET_TRIPLE))$(findstring windows,$(TARGET_TRIPLE)),)
+WINDOWS := 1
+EXE := .exe
+OBJ_TARGET_PREFIX := $(TARGET_TRIPLE)-
+endif
+
 # Key every object (and its .d fragment) by the flags that change its contents:
 # build flavor, board dim, rack size. Switching any of them selects a different
 # obj subtree instead of relinking objects compiled with mismatched flags -- so
 # no `make clean` is needed between flavors, and switching back reuses the cached
 # objects. `clean` wipes the whole OBJ_ROOT.
 OBJ_ROOT := obj
-OBJ_DIR := $(OBJ_ROOT)/$(BUILD)-b$(BOARD_DIM)-r$(RACK_SIZE)
+# portable_release additionally keys on its target: the whole point of that
+# flavor is that the target is fixed, so changing it has to recompile rather
+# than relink objects built for the old one.
+ifeq ($(BUILD),portable_release)
+OBJ_DIR := $(OBJ_ROOT)/$(OBJ_TARGET_PREFIX)$(BUILD)-$(PORTABLE_MARCH)-b$(BOARD_DIM)-r$(RACK_SIZE)
+else
+OBJ_DIR := $(OBJ_ROOT)/$(OBJ_TARGET_PREFIX)$(BUILD)-b$(BOARD_DIM)-r$(RACK_SIZE)
+endif
 
 # Profile-guided optimization data. The default lives below OBJ_ROOT so it is
 # ignored by git and removed by `make clean` with the other build artifacts.
@@ -84,7 +131,9 @@ LLVM_PROFDATA := xcrun llvm-profdata
 endif
 endif
 
-SRC  := $(wildcard $(SRC_DIR)/**/*.c)
+# find, not a wildcard: `**` is not recursive in make, and vendored code sits
+# two levels down (src/compat/sha256/sha256.c).
+SRC  := $(shell find $(SRC_DIR) -name '*.c')
 TEST := $(wildcard $(TEST_DIR)/*.c)
 CMD := $(wildcard $(CMD_DIR)/*.c)
 TUI := $(wildcard $(TUI_DIR)/*.c)
@@ -106,7 +155,11 @@ TUI_SRC_OBJ_SUBDIRS := $(filter-out $(SRC_DIR),$(patsubst $(SRC_DIR)/%,$(TUI_OBJ
 TEST_SUBDIRS := $(shell find $(TEST_DIR) -type d)
 TEST_OBJ_SUBDIRS := $(patsubst $(TEST_DIR)/%,$(OBJ_DIR)/$(TEST_DIR)/%,$(TEST_SUBDIRS))
 
-ifeq ($(BUILD),thread)
+ifdef WINDOWS
+    # MinGW's sanitizer runtimes need DLLs, which a static, self-contained
+    # executable cannot use; Windows builds are checked by running the tests.
+    FSAN_ARG :=
+else ifeq ($(BUILD),thread)
     FSAN_ARG := -fsanitize=thread
 else
     FSAN_ARG := -fsanitize=address,undefined,pointer-compare,pointer-subtract
@@ -121,8 +174,14 @@ cflags.thread := -g -O0 -Wall -Wno-trigraphs -Wextra -Wshadow -Wstrict-prototype
 cflags.vlg := -g -O0 -Wall -Wno-trigraphs -Wextra
 cflags.cov := -g -O0 -Wall -Wno-trigraphs -Wextra --coverage
 cflags.no_pgo_release := -O3 -flto -march=native -DNDEBUG -Wall -Wno-trigraphs
+cflags.portable_release := -O3 -flto -march=$(PORTABLE_MARCH) -DNDEBUG -Wall -Wno-trigraphs
+cflags.test_portable_release := -O3 -flto -march=$(PORTABLE_MARCH) -Wall -Wno-trigraphs
 # Test-specific flags: like no_pgo_release but without DNDEBUG (asserts always enabled in tests)
 cflags.test_no_pgo_release := -O3 -flto -march=native -Wall -Wno-trigraphs
+# no_pgo_release plus BAI scheduling instrumentation (src/ent/bai_sched_stats.h),
+# read by the on-demand baisched test. Production builds compile it out.
+cflags.bai_stats := $(cflags.no_pgo_release) -DBAI_SCHED_STATS
+cflags.test_bai_stats := $(cflags.test_no_pgo_release) -DBAI_SCHED_STATS
 # Training runs multithreaded, so counter updates must be atomic. clang 17
 # added the GCC-style -fprofile-update=atomic; older clangs get the LLVM-native
 # equivalent. Probed only for the instrumented builds, with the compiler that
@@ -147,12 +206,34 @@ ldflags.lib := -pthread
 ldflags.thread := -pthread -fsanitize=thread
 ldflags.vlg := -pthread
 ldflags.no_pgo_release := -pthread -flto
+ldflags.portable_release := -pthread -flto
+ldflags.bai_stats := -pthread -flto
 ldflags.pgo_generate := -pthread -flto -fprofile-instr-generate $(PGO_LDFLAGS)
 ldflags.pgo_use := -pthread -flto -fprofile-instr-use=$(PGO_PROFILE) $(PGO_LDFLAGS)
 ldflags.profile := -pthread
 ldflags.cov := -pthread
+# The test builds link as the builds they test: without -pthread, a test that
+# starts a thread itself failed to link under test_no_pgo_release.
+ldflags.test_no_pgo_release := $(ldflags.no_pgo_release)
+ldflags.test_portable_release := $(ldflags.portable_release)
+ldflags.test_bai_stats := $(ldflags.bai_stats)
+ldflags.test_pgo_generate := $(ldflags.pgo_generate)
+ldflags.test_pgo_use := $(ldflags.pgo_use)
 
 CFLAGS := ${cflags.${BUILD}}
+
+# The instruction-set target compiled into this binary, reported by
+# `magpie builders` and recorded by birdtest beside every derived-file hash.
+# See src/def/builder_defs.h for why a hash is only meaningful together with
+# the build that produced it.
+ifeq ($(BUILD),portable_release)
+BUILD_TARGET := $(PORTABLE_MARCH)
+else ifneq ($(findstring -march=native,${cflags.${BUILD}}),)
+BUILD_TARGET := native
+else
+BUILD_TARGET := default
+endif
+CFLAGS += -DMAGPIE_BUILD_TARGET=\"$(BUILD_TARGET)\"
 
 # Emit a .d makefile fragment next to each .o listing the headers it includes
 # (-MMD) plus phony targets for those headers (-MP, so deleting a header does
@@ -245,7 +326,33 @@ TUI_ENGINE_CFLAGS := $(TUI_OPT) $(TUI_LTO) -march=native -g $(TUI_NDEBUG) -Wall 
 TUI_CFLAGS := $(TUI_OPT) $(TUI_LTO) -march=native -g $(TUI_NDEBUG) -Wall -Wno-trigraphs -Wextra -Wshadow -Wstrict-prototypes -Werror -DBOARD_DIM=$(BOARD_DIM) -DRACK_SIZE=$(RACK_SIZE) $(TUI_SAN) -MMD -MP
 TUI_LDFLAGS := -pthread $(TUI_LTO) $(TUI_SAN)
 
-.PHONY: all clean iwyu release leavegen_pgo_release pgo pgo_sim pgo_peg \
+# The HTTP compat layer resolves libcurl with dlopen at runtime rather than
+# linking it, so a machine without libcurl still runs every offline command.
+# glibc before 2.34 keeps dlopen in a separate libdl; macOS and newer glibc
+# have it in libc.
+ifdef WINDOWS
+  # Windows 10 APIs (FileRenameInfoEx's POSIX rename, VT processing). The
+  # 8 MB main-thread stack matches Linux's default: PEG, the endgame and BAI
+  # recurse on the calling thread, and MinGW's default is 2 MB.
+  CFLAGS += -D_WIN32_WINNT=0x0A00
+  CMD_CFLAGS += -D_WIN32_WINNT=0x0A00
+  LDFLAGS += -static -Wl,--stack,8388608
+  LDLIBS += -lwinhttp
+else ifeq ($(shell uname -s),Linux)
+  LDLIBS += -ldl
+endif
+
+# The resources (manifest, icon, version) linked into Windows executables.
+comma := ,
+ifdef WINDOWS
+WINDRES ?= $(subst -gcc,-windres,$(subst -clang,-windres,$(CC)))
+MAGPIE_VERSION := $(shell sed -n 's/^\#define MAGPIE_VERSION "\(.*\)"/\1/p' $(SRC_DIR)/impl/config.c)
+MAGPIE_VERSION_COMMAS := $(subst .,$(comma),$(MAGPIE_VERSION)),0
+RES_OBJ := $(OBJ_DIR)/magpie_resources.o
+endif
+
+.PHONY: windows windows_test windows_wine_test windows_image
+.PHONY: all clean iwyu release leavegen_pgo_release pgo pgo_sim pgo_peg word_frequencies \
 	pgo_toolchain_check \
 	pgo_eg peg_eg pgo_workload prepare_data libmagpie examples magpie_tui \
 	magpie_tui_test
@@ -290,11 +397,14 @@ endif
 examples: libmagpie
 	$(CC) -O2 -Wall -Werror examples/generate_moves.c -L$(BIN_DIR) -lmagpie $(EXAMPLE_RPATH) -o $(BIN_DIR)/generate_moves
 
-magpie: $(OBJ_SRC) $(OBJ_CMD) | $(BIN_DIR)
-	$(CC) $(LDFLAGS) $(LFLAGS) $^ $(LDLIBS) -o $(BIN_DIR)/$@
+magpie: $(OBJ_SRC) $(OBJ_CMD) $(RES_OBJ) | $(BIN_DIR)
+	$(CC) $(LDFLAGS) $(LFLAGS) $^ $(LDLIBS) -o $(BIN_DIR)/$@$(EXE)
 
-magpie_test: $(OBJ_SRC) $(OBJ_TEST) | $(BIN_DIR)
-	$(CC) $(LDFLAGS) $(LFLAGS) $^ $(LDLIBS) -o $(BIN_DIR)/$@
+magpie_test: $(OBJ_SRC) $(OBJ_TEST) $(RES_OBJ) | $(BIN_DIR)
+	$(CC) $(LDFLAGS) $(LFLAGS) $^ $(LDLIBS) -o $(BIN_DIR)/$@$(EXE)
+
+$(RES_OBJ): windows/magpie.rc windows/magpie.manifest windows/magpie.ico $(SRC_DIR)/impl/config.c | $(OBJ_DIR)
+	$(WINDRES) -I windows -DMAGPIE_VERSION_TEXT=$(MAGPIE_VERSION) -DMAGPIE_VERSION_COMMAS=$(MAGPIE_VERSION_COMMAS) $< -o $@
 
 magpie_tui: $(TUI_OBJ_SRC) $(TUI_OBJ_TUI) | $(BIN_DIR)
 ifeq ($(strip $(NOTCURSES_CFLAGS)),)
@@ -322,6 +432,9 @@ $(TUI_OBJ_DIR)/$(TUI_DIR)/test/%.o: $(TUI_DIR)/test/%.c | $(TUI_OBJ_DIR)/$(TUI_D
 magpie_pgo_train: $(OBJ_SRC) $(PGO_TRAIN_OBJ) | $(BIN_DIR)
 	$(CC) $(LDFLAGS) $(LFLAGS) $^ $(LDLIBS) -o $(BIN_DIR)/$@
 
+word_frequencies: $(OBJ_SRC) $(OBJ_DIR)/$(TOOLS_DIR)/word_frequencies.o | $(BIN_DIR)
+	$(CC) $(CFLAGS) $(LDFLAGS) $(LFLAGS) $^ $(LDLIBS) -o $(BIN_DIR)/word_frequencies
+
 magpie_convert: $(OBJ_SRC) $(CONVERT_OBJ) | $(BIN_DIR)
 	$(CC) $(LDFLAGS) $(LFLAGS) $^ $(LDLIBS) -o $(BIN_DIR)/$@
 
@@ -344,7 +457,7 @@ $(TUI_OBJ_DIR)/$(TUI_DIR)/%.o: $(TUI_DIR)/%.c | $(TUI_OBJ_DIR) $(TUI_OBJ_DIR)/$(
 	$(CC) $(TUI_CFLAGS) $(NOTCURSES_CFLAGS) $(FREETYPE_CFLAGS) -c $< -o $@
 
 # Compiler and linker flag changes in this file invalidate every object.
-$(OBJ_SRC) $(OBJ_CMD) $(OBJ_TEST) $(PGO_TRAIN_OBJ) $(CONVERT_OBJ): Makefile
+$(OBJ_SRC) $(OBJ_CMD) $(OBJ_TEST) $(PGO_TRAIN_OBJ) $(CONVERT_OBJ) $(OBJ_DIR)/$(TOOLS_DIR)/word_frequencies.o: Makefile
 
 # A newly merged profile must rebuild every profile-use object. Without this
 # dependency, make would reuse objects optimized against an older corpus.
@@ -354,13 +467,47 @@ endif
 
 # Optimized test builds keep assertions enabled.
 $(OBJ_DIR)/$(TEST_DIR)/%.o: $(TEST_DIR)/%.c | $(OBJ_DIR) $(OBJ_DIR)/$(TEST_DIR) $(TEST_OBJ_SUBDIRS)
-	$(CC) $(if $(filter no_pgo_release pgo_generate pgo_use,$(BUILD)),${cflags.test_$(BUILD)},$(CFLAGS)) $(DEPFLAGS) -DBOARD_DIM=$(BOARD_DIM) -DRACK_SIZE=$(RACK_SIZE) -c $< -o $@
+	$(CC) $(if $(filter no_pgo_release portable_release bai_stats pgo_generate pgo_use,$(BUILD)),${cflags.test_$(BUILD)},$(CFLAGS)) $(DEPFLAGS) -DBOARD_DIM=$(BOARD_DIM) -DRACK_SIZE=$(RACK_SIZE) -c $< -o $@
 
 $(BIN_DIR) $(OBJ_DIR) $(OBJ_DIR)/$(SRC_DIR) $(OBJ_DIR)/$(CMD_DIR) $(OBJ_DIR)/$(TEST_DIR) $(OBJ_DIR)/$(TOOLS_DIR) $(TUI_OBJ_DIR) $(TUI_OBJ_DIR)/$(SRC_DIR) $(TUI_OBJ_DIR)/$(TUI_DIR) $(SRC_OBJ_SUBDIRS) $(TUI_SRC_OBJ_SUBDIRS) $(TEST_OBJ_SUBDIRS):
 	mkdir -p $@
 
 clean:
 	@$(RM) -rv $(BIN_DIR) $(OBJ_ROOT) $(TUI_OBJ_DIR) libmagpie_core.a
+
+# Windows executables, cross-compiled in the pinned llvm-mingw image
+# (windows/Dockerfile), so any developer with Docker can build and test them:
+#   make windows                       bin/magpie.exe, x86_64
+#   make windows WINDOWS_ARCH=aarch64  bin/magpie.exe, arm64
+#   make windows_test                  bin/magpie_test.exe
+#   make windows_wine_test TESTS=compat  run magpie_test.exe under Wine (x86_64)
+# Both use the portable build: the same instruction set as contributor
+# binaries (nehalem on x86_64; armv8-a, which every Windows on ARM device
+# meets, on arm64), so derived files hash the same as Linux builds for it.
+WINDOWS_ARCH ?= x86_64
+WINDOWS_IMAGE ?= magpie-llvm-mingw:20261006
+ifeq ($(WINDOWS_ARCH),aarch64)
+WINDOWS_MARCH := armv8-a
+else
+WINDOWS_MARCH := nehalem
+endif
+WINDOWS_MAKE := docker run --rm -u "$$(id -u):$$(id -g)" -e HOME=/tmp/wine-home \
+	-v "$(CURDIR)":/src -w /src $(WINDOWS_IMAGE) make BUILD=portable_release \
+	PORTABLE_MARCH=$(WINDOWS_MARCH) CC=$(WINDOWS_ARCH)-w64-mingw32-clang
+
+windows_image:
+	docker build -q -t $(WINDOWS_IMAGE) windows
+
+windows: windows_image
+	$(WINDOWS_MAKE) magpie
+
+windows_test: windows_image
+	$(WINDOWS_MAKE) magpie_test
+
+windows_wine_test: windows_test
+	docker run --rm -u "$$(id -u):$$(id -g)" -e HOME=/tmp/wine-home -e WINEDEBUG=-all \
+		-v "$(CURDIR)":/src -w /src $(WINDOWS_IMAGE) \
+		sh -c 'mkdir -p "$$HOME" && wine bin/magpie_test.exe $(TESTS)'
 
 # The production release is trained on static autoplay, the best general
 # profile in the measured workload matrix. Without clang there is nothing to
@@ -473,3 +620,5 @@ pgo_workload: pgo_toolchain_check
 -include $(TUI_OBJ_TUI:.o=.d)
 -include $(PGO_TRAIN_OBJ:.o=.d)
 -include $(CONVERT_OBJ:.o=.d)
+
+-include $(OBJ_DIR)/$(TOOLS_DIR)/word_frequencies.d
