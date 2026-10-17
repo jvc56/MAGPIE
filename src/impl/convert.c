@@ -597,7 +597,8 @@ void convert_with_names(const LetterDistribution *ld,
     convert_rack_equity_to_klv(ld, data_paths, input_name, output_name,
                                error_stack);
   } else if (conversion_type == CONVERT_KWG2WIT ||
-             conversion_type == CONVERT_KWG2WIT_IF_NEEDED) {
+             conversion_type == CONVERT_KWG2WIT_IF_NEEDED ||
+             conversion_type == CONVERT_KWG2WIT_V4) {
     KWG *kwg = kwg_create(data_paths, input_name, error_stack);
     bool current = false;
     if (error_stack_is_empty(error_stack) &&
@@ -615,9 +616,13 @@ void convert_with_names(const LetterDistribution *ld,
           data_paths, output_name, DATA_FILEPATH_TYPE_WORD_INFO_TABLE,
           error_stack);
       if (error_stack_is_empty(error_stack)) {
-        WordInfoTable *wit = make_word_info_table_from_kwg(kwg);
+        WordInfoTable *wit = make_word_info_table_from_kwg(kwg, num_threads);
         make_word_plus_floater_from_kwg(kwg, wit, error_stack);
-        if (error_stack_is_empty(error_stack)) {
+        if (error_stack_is_empty(error_stack) &&
+            conversion_type == CONVERT_KWG2WIT_V4) {
+          word_info_table_write_version_4_to_file(wit, wit_output_filename,
+                                                  error_stack);
+        } else if (error_stack_is_empty(error_stack)) {
           word_info_table_write_to_file(wit, wit_output_filename, error_stack);
         }
         if (!error_stack_is_empty(error_stack)) {
@@ -723,6 +728,8 @@ get_conversion_type_from_string(const char *conversion_type_string) {
     conversion_type = CONVERT_KWG2WIT;
   } else if (strings_equal(conversion_type_string, "kwg2witifneeded")) {
     conversion_type = CONVERT_KWG2WIT_IF_NEEDED;
+  } else if (strings_equal(conversion_type_string, "kwg2witv4")) {
+    conversion_type = CONVERT_KWG2WIT_V4;
   } else if (strings_equal(conversion_type_string, "winpct")) {
     conversion_type = CONVERT_WINPCT;
   }

@@ -107,6 +107,38 @@ typedef struct PegSharedEndgameTT {
   bool owned;             // created here (destroy at teardown)
 } PegSharedEndgameTT;
 
+// One move of a greedy playout that several scenarios play identically: the
+// first playout to reach it records what the generation picked, and the rest
+// play that instead of generating again.
+typedef struct PegSharedPly {
+  bool known;
+  // The generation found no move, so the playout stops here.
+  bool none;
+  Move move;
+} PegSharedPly;
+
+// The opponent's first greedy reply to the candidate being evaluated, by the
+// opponent's rack. With the candidate played and its draw made, that reply
+// depends only on the board, the scores, the opponent's rack and the sizes of
+// the bag and the mover's rack, all fixed for the candidate except the
+// opponent's rack: while tiles remain, equity (the PAT term included) reads
+// the bag and the other rack only through their sizes, and once the bag is
+// empty the playout ranks by score. So every split that leaves the opponent
+// the same rack shares it. Entries from an earlier candidate are told apart by
+// their stamp.
+typedef struct PegReplyCacheEntry {
+  uint64_t stamp;
+  int n_letters;
+  MachineLetter letters[RACK_SIZE];
+  PegSharedPly reply;
+} PegReplyCacheEntry;
+
+typedef struct PegReplyCache {
+  uint64_t stamp;
+  int count;
+  PegReplyCacheEntry entries[PEG_REPLY_CACHE_SLOTS];
+} PegReplyCache;
+
 // Per-worker scratch: a greedy-playout move list plus a reusable endgame
 // context/results pair. Indexed by the pool worker_idx (one extra slot for the
 // main thread when it helps drain the queue).
@@ -128,6 +160,10 @@ typedef struct PegWorker {
   PegSharedEndgameTT *shared_eg_tt;
   // Shared per-solve cache of per-candidate leaf prunes (see PegPruneCache).
   PegPruneCache *prune_cache;
+  // PegArgs.disable_best_reply_shortcuts, for every leaf endgame solve.
+  bool disable_best_reply_shortcuts;
+  // Opponent replies to the candidate this worker is evaluating.
+  PegReplyCache *reply_cache;
 
   // Nested-PEG lookahead state. Solve-level knobs copied here so the recursion
   // needn't thread them through every job/ctx.
@@ -773,11 +809,15 @@ static bool peg_should_stop(int64_t deadline_ns,
 // Greedy playout to game end; returns signed mover spread (points), with the
 // usual rack-leave adjustment when the game has not actually ended. A timed
 // playout checks between plies so an in-flight PEG scenario can wind down at
-// the same absolute deadline as the surrounding stage.
+// the same absolute deadline as the surrounding stage. shared_plies, when
+// non-NULL, holds a PegSharedPly (or NULL) for each of the first
+// PEG_SHARED_PLAYOUT_PLIES plies: a known one is played without generating, and
+// an unknown one records the generation's pick.
 static int32_t peg_greedy_playout(Game *game, int mover_idx,
                                   MoveList *playout_ml, int64_t deadline_ns,
                                   ThreadControl *thread_control,
-                                  bool *interrupted) {
+                                  bool *interrupted,
+                                  PegSharedPly *const *shared_plies) {
   const LetterDistribution *ld = game_get_ld(game);
   for (int ply = 0; ply < PEG_PLAYOUT_MAX_PLIES; ply++) {
     if (peg_should_stop(deadline_ns, thread_control)) {
@@ -788,6 +828,17 @@ static int32_t peg_greedy_playout(Game *game, int mover_idx,
     }
     if (game_get_game_end_reason(game) != GAME_END_REASON_NONE) {
       break;
+    }
+    PegSharedPly *shared =
+        shared_plies != NULL && ply < PEG_SHARED_PLAYOUT_PLIES
+            ? shared_plies[ply]
+            : NULL;
+    if (shared != NULL && shared->known) {
+      if (shared->none) {
+        break;
+      }
+      play_move(&shared->move, game, NULL);
+      continue;
     }
     const bool bag_has_tiles = bag_get_letters(game_get_bag(game)) > 0;
     const MoveGenArgs args = {
@@ -810,9 +861,19 @@ static int32_t peg_greedy_playout(Game *game, int mover_idx,
       break;
     }
     if (move_list_get_count(playout_ml) == 0) {
+      if (shared != NULL) {
+        shared->none = true;
+        shared->known = true;
+      }
       break;
     }
-    play_move(move_list_get_move(playout_ml, 0), game, NULL);
+    const Move *best = move_list_get_move(playout_ml, 0);
+    if (shared != NULL) {
+      shared->move = *best;
+      shared->none = false;
+      shared->known = true;
+    }
+    play_move(best, game, NULL);
   }
   const Player *me = game_get_player(game, mover_idx);
   const Player *op = game_get_player(game, 1 - mover_idx);
@@ -822,6 +883,47 @@ static int32_t peg_greedy_playout(Game *game, int mover_idx,
     spread += equity_to_int(rack_get_score(ld, player_get_rack(op)));
   }
   return spread;
+}
+
+// Starts a new candidate: forgets every reply the cache holds.
+static void peg_reply_cache_reset(PegReplyCache *cache) {
+  cache->stamp++;
+  cache->count = 0;
+}
+
+// The opponent-reply slot for the opponent rack `letters` (n_letters of them,
+// ascending), created empty on first use. Returns NULL once half the slots are
+// taken, so probes stay short; the caller then shares the reply only within
+// its own split.
+static PegSharedPly *peg_reply_cache_slot(PegReplyCache *cache,
+                                          const MachineLetter *letters,
+                                          int n_letters) {
+  uint64_t hash = fnv64a_step(FNV_64_OFFSET_BASIS, (uint64_t)n_letters);
+  for (int letter_idx = 0; letter_idx < n_letters; letter_idx++) {
+    hash = fnv64a_step(hash, letters[letter_idx]);
+  }
+  uint64_t slot_idx = hash & (PEG_REPLY_CACHE_SLOTS - 1);
+  for (;;) {
+    PegReplyCacheEntry *entry = &cache->entries[slot_idx];
+    if (entry->stamp != cache->stamp) {
+      if (2 * cache->count >= PEG_REPLY_CACHE_SLOTS) {
+        return NULL;
+      }
+      entry->stamp = cache->stamp;
+      entry->n_letters = n_letters;
+      memcpy(entry->letters, letters,
+             (size_t)n_letters * sizeof(MachineLetter));
+      entry->reply.known = false;
+      cache->count++;
+      return &entry->reply;
+    }
+    if (entry->n_letters == n_letters &&
+        memcmp(entry->letters, letters,
+               (size_t)n_letters * sizeof(MachineLetter)) == 0) {
+      return &entry->reply;
+    }
+    slot_idx = (slot_idx + 1) & (PEG_REPLY_CACHE_SLOTS - 1);
+  }
 }
 
 // Pessimistic playout: the mover plays greedily, but at each opponent turn the
@@ -930,7 +1032,8 @@ static int32_t peg_pessimistic_playout(Game *game, int mover_idx,
       play_move(move_list_get_move(opp_ml, i), branch, NULL);
       const int32_t mover_net =
           peg_greedy_playout(branch, mover_idx, rollout_ml, deadline_ns,
-                             thread_control, interrupted);
+                             thread_control, interrupted,
+                             /*shared_plies=*/NULL);
       if (interrupted != NULL && *interrupted) {
         break;
       }
@@ -1073,6 +1176,11 @@ typedef struct PegEvalCtx {
   int64_t deadline_ns;
   ThreadControl *thread_control;
   PegWorker *worker;
+  // The opponent replies of this candidate's splits when one context
+  // enumerates them all (NULL for a single scenario job), and the plies the
+  // current split's greedy playouts share (see peg_eval_split).
+  PegReplyCache *reply_cache;
+  PegSharedPly *shared_plies[PEG_SHARED_PLAYOUT_PLIES];
   // Collect mode: when out_jobs is non-NULL, peg_eval_split pushes one scenario
   // job per split (for scenario-level parallelism) instead of evaluating it
   // inline. cand_idx tags the pushed jobs; workers is the shared scratch array.
@@ -1260,7 +1368,8 @@ static int32_t peg_nested_floor(PegWorker *worker, const Game *game,
   }
   const int32_t value =
       peg_greedy_playout(frame->game, on_turn, worker->playout_ml, deadline_ns,
-                         worker->thread_control, /*interrupted=*/NULL);
+                         worker->thread_control, /*interrupted=*/NULL,
+                         /*shared_plies=*/NULL);
   peg_nest_release(worker, frame);
   return value;
 }
@@ -1294,7 +1403,7 @@ static int32_t peg_nested_endgame_value(PegWorker *worker, Game *game,
       /*before_search_callback=*/NULL, /*before_search_callback_data=*/NULL,
       /*per_root_move_callback=*/NULL, /*per_root_move_callback_data=*/NULL,
       DUAL_LEXICON_MODE_IGNORANT, /*forced_pass_bypass=*/false,
-      /*incremental_movegen=*/true,
+      /*incremental_movegen=*/true, worker->disable_best_reply_shortcuts,
       /*enable_pv_display=*/false, /*soft_time_limit=*/0.0,
       /*hard_time_limit=*/0.0, PEG_ENDGAME_SEED, /*skip_word_pruning=*/true,
       peg_worker_get_endgame_tt(worker),
@@ -1307,7 +1416,7 @@ static int32_t peg_nested_endgame_value(PegWorker *worker, Game *game,
   if (endgame_results_get_depth(worker->eg_results, ENDGAME_RESULT_BEST) < 0) {
     return peg_greedy_playout(game, on_turn, worker->playout_ml, deadline_ns,
                               worker->thread_control,
-                              /*interrupted=*/NULL);
+                              /*interrupted=*/NULL, /*shared_plies=*/NULL);
   }
   const int32_t eg_val =
       endgame_results_get_value(worker->eg_results, ENDGAME_RESULT_BEST);
@@ -1742,7 +1851,7 @@ static int32_t peg_eval_leaf(PegEvalCtx *ctx, Game *game) {
     }
     return peg_greedy_playout(game, ctx->mover_idx, ctx->worker->playout_ml,
                               ctx->deadline_ns, ctx->thread_control,
-                              &ctx->interrupted);
+                              &ctx->interrupted, ctx->shared_plies);
   }
   // Exact endgame leaf. After the mover plays and draws it is the opponent's
   // turn, so the solved value is from the on-turn player's perspective; fold
@@ -1778,7 +1887,7 @@ static int32_t peg_eval_leaf(PegEvalCtx *ctx, Game *game) {
       /*before_search_callback=*/NULL, /*before_search_callback_data=*/NULL,
       /*per_root_move_callback=*/NULL, /*per_root_move_callback_data=*/NULL,
       DUAL_LEXICON_MODE_IGNORANT, /*forced_pass_bypass=*/false,
-      /*incremental_movegen=*/true,
+      /*incremental_movegen=*/true, ctx->worker->disable_best_reply_shortcuts,
       /*enable_pv_display=*/ctx->capture != NULL, /*soft_time_limit=*/0.0,
       /*hard_time_limit=*/0.0, PEG_ENDGAME_SEED, /*skip_word_pruning=*/true,
       peg_worker_get_endgame_tt(ctx->worker),
@@ -1797,7 +1906,7 @@ static int32_t peg_eval_leaf(PegEvalCtx *ctx, Game *game) {
       0) {
     return peg_greedy_playout(game, ctx->mover_idx, ctx->worker->playout_ml,
                               ctx->deadline_ns, ctx->thread_control,
-                              &ctx->interrupted);
+                              &ctx->interrupted, /*shared_plies=*/NULL);
   }
   if (ctx->capture != NULL) {
     const PVLine *pv =
@@ -1872,6 +1981,31 @@ static void peg_capture_row(PegScenarioCapture *capture,
   capture->count++;
 }
 
+// Where the greedy playouts of `game`'s split share the opponent's first
+// reply: the candidate's cache slot for the opponent's rack, or `split_slot`
+// when there is no cache or it is full.
+static PegSharedPly *peg_split_opp_reply(const PegEvalCtx *ctx,
+                                         const Game *game,
+                                         PegSharedPly *split_slot) {
+  if (ctx->reply_cache == NULL) {
+    return split_slot;
+  }
+  const Rack *opp_rack =
+      player_get_rack(game_get_player(game, 1 - ctx->mover_idx));
+  MachineLetter letters[RACK_SIZE] = {0};
+  int n_letters = 0;
+  for (int ml = 0; ml < ctx->ld_size; ml++) {
+    for (int count = rack_get_letter(opp_rack, (MachineLetter)ml); count > 0;
+         count--) {
+      assert(n_letters < RACK_SIZE);
+      letters[n_letters++] = (MachineLetter)ml;
+    }
+  }
+  PegSharedPly *slot =
+      peg_reply_cache_slot(ctx->reply_cache, letters, n_letters);
+  return slot != NULL ? slot : split_slot;
+}
+
 // Evaluate one (mover_drawn, bag_remaining) split: walk the distinct orderings
 // of bag_remaining (each equally likely), evaluate each leaf, and fold the
 // multiset weight into the accumulator.
@@ -1939,6 +2073,14 @@ static void peg_eval_split(PegEvalCtx *ctx, const MachineLetter *mover_drawn,
   // Captured rows for this split start here; their weight is backfilled to the
   // per-ordering labeled count once n_orderings is known (below).
   const int capture_start = ctx->capture != NULL ? ctx->capture->count : 0;
+  // Every ordering of this split leaves the opponent the same rack and the
+  // mover the same draw, and the bag's order first matters when the opponent
+  // draws after its reply, so their greedy playouts open with the same two
+  // moves: the opponent's reply (shared across the candidate's splits too,
+  // through ctx->reply_cache) and the mover's answer to it.
+  PegSharedPly split_opp_reply = {0};
+  PegSharedPly mover_reply = {0};
+  ctx->shared_plies[1] = &mover_reply;
   do {
     if (peg_eval_should_stop(ctx)) {
       break;
@@ -1946,6 +2088,9 @@ static void peg_eval_split(PegEvalCtx *ctx, const MachineLetter *mover_drawn,
     Game *game = peg_make_post_cand_game(
         ctx->worker, ctx->template_src, ctx->mover_idx, ctx->unseen,
         ctx->ld_size, ctx->k_drawn, mover_drawn, n_bag_remaining, bag_perm);
+    if (n_orderings == 0) {
+      ctx->shared_plies[0] = peg_split_opp_reply(ctx, game, &split_opp_reply);
+    }
     const int32_t value = peg_eval_leaf(ctx, game);
     if (ctx->progress != NULL && ctx->progress->on_scenario_done != NULL) {
       ctx->progress->on_scenario_done(ctx->progress->stage_idx, ctx->cand_idx,
@@ -1966,6 +2111,8 @@ static void peg_eval_split(PegEvalCtx *ctx, const MachineLetter *mover_drawn,
     ordering_spread += (double)value;
     n_orderings++;
   } while (peg_next_perm(bag_perm, n_bag_remaining));
+  ctx->shared_plies[0] = NULL;
+  ctx->shared_plies[1] = NULL;
 
   if (ctx->interrupted || n_orderings == 0) {
     return;
@@ -2167,6 +2314,8 @@ static void peg_cand_worker_fn(void *arg, int worker_idx) {
   // (job->base_game is the pruned prepared base).
   peg_build_template(ctx.worker, job->base_game, job->cand);
   ctx.template_src = ctx.worker->template_game;
+  ctx.reply_cache = ctx.worker->reply_cache;
+  peg_reply_cache_reset(ctx.reply_cache);
   const int tiles_played = move_get_tiles_played(job->cand);
   ctx.k_drawn = tiles_played < job->bag_size ? tiles_played : job->bag_size;
   const int n_bag_remaining = job->bag_size - ctx.k_drawn;
@@ -3108,6 +3257,9 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
     workers[worker_idx].eg_tt = args->shared_endgame_tt;
     workers[worker_idx].shared_eg_tt = &shared_eg_tt;
     workers[worker_idx].prune_cache = prune_cache;
+    workers[worker_idx].disable_best_reply_shortcuts =
+        args->disable_best_reply_shortcuts;
+    workers[worker_idx].reply_cache = calloc_or_die(1, sizeof(PegReplyCache));
     // Nested-PEG lookahead config + free-list scratch.
     workers[worker_idx].thread_control = args->thread_control;
     // Inner-peg scenarios fan out across the shared pool (NULL when single-
@@ -3592,6 +3744,8 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
         ctx.capture = &capture;
         peg_build_template(ctx.worker, prepared_base, &out->top_cands[0].move);
         ctx.template_src = ctx.worker->template_game;
+        ctx.reply_cache = ctx.worker->reply_cache;
+        peg_reply_cache_reset(ctx.reply_cache);
         const int tiles_played = move_get_tiles_played(&out->top_cands[0].move);
         ctx.k_drawn = tiles_played < bag_size ? tiles_played : bag_size;
         const int n_bag_remaining = bag_size - ctx.k_drawn;
@@ -3632,6 +3786,7 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
   }
   for (int worker_idx = 0; worker_idx < n_scratch; worker_idx++) {
     move_list_destroy(workers[worker_idx].playout_ml);
+    free(workers[worker_idx].reply_cache);
     endgame_ctx_destroy(workers[worker_idx].eg_ctx);
     endgame_results_destroy(workers[worker_idx].eg_results);
     if (workers[worker_idx].template_game) {
