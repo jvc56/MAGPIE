@@ -31,6 +31,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 int leave_rack_get_leave_total_letters(const LeaveRack *leave_rack,
                                        const LetterDistribution *ld) {
@@ -1395,6 +1396,134 @@ void test_infer_exchange_cutoff_matches(void) {
   assert(num_accepted > 0);
 }
 
+// Asserts that two inferences of the same position counted the same leaves.
+// The leave list's ties on draws and the low bits of the means may come out
+// in a different order with more than one thread, so those are compared by
+// draws and within epsilon.
+static void
+assert_inference_results_count_the_same(InferenceResults *results,
+                                        InferenceResults *expected) {
+  const int ld_size =
+      rack_get_dist_size(inference_results_get_bag_as_rack(expected));
+  for (int infer_type_idx = 0; infer_type_idx < NUMBER_OF_INFER_TYPES;
+       infer_type_idx++) {
+    const Stat *stat = inference_results_get_equity_values(
+        results, (inference_stat_t)infer_type_idx);
+    const Stat *expected_stat = inference_results_get_equity_values(
+        expected, (inference_stat_t)infer_type_idx);
+    assert(stat_get_num_samples(stat) == stat_get_num_samples(expected_stat));
+    assert(stat_get_num_unique_samples(stat) ==
+           stat_get_num_unique_samples(expected_stat));
+    assert(within_epsilon(stat_get_mean(stat), stat_get_mean(expected_stat)));
+    for (int ml = 0; ml < ld_size; ml++) {
+      for (int num_letters = 1; num_letters <= RACK_SIZE; num_letters++) {
+        for (int subtotal_idx = 0; subtotal_idx < NUMBER_OF_INFERENCE_SUBTOTALS;
+             subtotal_idx++) {
+          assert(inference_results_get_subtotal(
+                     results, (inference_stat_t)infer_type_idx, ml, num_letters,
+                     (inference_subtotal_t)subtotal_idx) ==
+                 inference_results_get_subtotal(
+                     expected, (inference_stat_t)infer_type_idx, ml,
+                     num_letters, (inference_subtotal_t)subtotal_idx));
+        }
+      }
+    }
+  }
+
+  // The alias method's items are sorted before its tables are built, so the
+  // tables a simulation samples from are identical.
+  const AliasMethod *alias_method = inference_results_get_alias_method(results);
+  const AliasMethod *expected_alias_method =
+      inference_results_get_alias_method(expected);
+  assert(alias_method->num_items == expected_alias_method->num_items);
+  assert(alias_method->total_item_count ==
+         expected_alias_method->total_item_count);
+  for (uint32_t item_idx = 0; item_idx < alias_method->num_items; item_idx++) {
+    const AliasMethodItem *item = &alias_method->items[item_idx];
+    const AliasMethodItem *expected_item =
+        &expected_alias_method->items[item_idx];
+    assert(memcmp(&item->rack, &expected_item->rack, sizeof(item->rack)) == 0);
+    assert(item->count == expected_item->count);
+    assert(item->alias == expected_item->alias);
+    assert(item->probability == expected_item->probability);
+  }
+
+  const LeaveRackList *lrl = inference_results_get_leave_rack_list(results);
+  const LeaveRackList *expected_lrl =
+      inference_results_get_leave_rack_list(expected);
+  assert(leave_rack_list_get_count(lrl) ==
+         leave_rack_list_get_count(expected_lrl));
+  for (int rack_idx = 0; rack_idx < leave_rack_list_get_count(lrl);
+       rack_idx++) {
+    assert(
+        leave_rack_get_draws(leave_rack_list_get_rack(lrl, rack_idx)) ==
+        leave_rack_get_draws(leave_rack_list_get_rack(expected_lrl, rack_idx)));
+  }
+}
+
+static Config *create_config_for_threads_test(const int num_threads) {
+  char *config_settings_str = get_formatted_string(
+      "set -lex CSW21 -wmp true -s1 equity -s2 equity -r1 all -r2 "
+      "all -numplays 20 -threads %d",
+      num_threads);
+  Config *config = config_create_or_die(config_settings_str);
+  free(config_settings_str);
+  load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
+  return config;
+}
+
+// Infers a tile placement with three unknown tiles (a few thousand possible
+// leaves) or an exchange with three unknown tiles.
+static void infer_for_threads_test(InferenceCtx **ctx, const Config *config,
+                                   const bool exchange,
+                                   InferenceResults *results) {
+  error_code_t status;
+  if (exchange) {
+    status = infer_for_test(ctx, config, 0, 0, 3, "", "EIQU", "", results);
+  } else {
+    status = infer_for_test(ctx, config, 0, 20, 0, "HUJA", "", "", results);
+  }
+  assert(status == ERROR_STATUS_SUCCESS);
+}
+
+// Each possible leave is evaluated by exactly one of the workers, whichever
+// claims it, so the inference counts the same leaves at any number of threads.
+static void test_infer_same_results_for_any_number_of_threads(void) {
+  Config *config = create_config_for_threads_test(1);
+  InferenceResults *expected_play_results = inference_results_create(NULL);
+  InferenceResults *expected_exchange_results = inference_results_create(NULL);
+  infer_for_threads_test(NULL, config, false, expected_play_results);
+  infer_for_threads_test(NULL, config, true, expected_exchange_results);
+  config_destroy(config);
+  assert(stat_get_num_unique_samples(inference_results_get_equity_values(
+             expected_play_results, INFERENCE_TYPE_LEAVE)) > 0);
+  assert(stat_get_num_unique_samples(inference_results_get_equity_values(
+             expected_exchange_results, INFERENCE_TYPE_EXCHANGED)) > 0);
+
+  const int thread_counts[] = {2, 16};
+  const int num_thread_counts =
+      (int)(sizeof(thread_counts) / sizeof(thread_counts[0]));
+  for (int thread_count_idx = 0; thread_count_idx < num_thread_counts;
+       thread_count_idx++) {
+    config = create_config_for_threads_test(thread_counts[thread_count_idx]);
+    // The second and third inferences reuse the context's workers, as
+    // simulations do.
+    InferenceCtx *ctx = NULL;
+    InferenceResults *results = inference_results_create(NULL);
+    infer_for_threads_test(&ctx, config, false, results);
+    assert_inference_results_count_the_same(results, expected_play_results);
+    infer_for_threads_test(&ctx, config, true, results);
+    assert_inference_results_count_the_same(results, expected_exchange_results);
+    infer_for_threads_test(&ctx, config, false, results);
+    assert_inference_results_count_the_same(results, expected_play_results);
+    inference_results_destroy(results);
+    inference_ctx_destroy(ctx);
+    config_destroy(config);
+  }
+  inference_results_destroy(expected_play_results);
+  inference_results_destroy(expected_exchange_results);
+}
+
 void test_infer(void) {
   test_leave_rack_reset();
   test_trivial_random_probability();
@@ -1413,4 +1542,5 @@ void test_infer(void) {
     test_infer_nonerror_cases(2, use_game_history);
     test_infer_nonerror_cases(7, use_game_history);
   }
+  test_infer_same_results_for_any_number_of_threads();
 }

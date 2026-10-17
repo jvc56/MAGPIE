@@ -10,6 +10,7 @@
 #include "../def/players_data_defs.h"
 #include "../def/rack_defs.h"
 #include "../ent/bag.h"
+#include "../ent/best_move_carry.h"
 #include "../ent/board.h"
 #include "../ent/equity.h"
 #include "../ent/game.h"
@@ -831,16 +832,22 @@ void generate_moves_for_game(const MoveGenArgs *args) {
                 args->game, game_get_player_on_turn_index(args->game))));
 }
 
-const Move *get_top_equity_move(Game *game, MoveList *move_list) {
+const Move *get_top_equity_move_with_carry(Game *game, MoveList *move_list,
+                                           BestMoveCarry *best_move_carry) {
   const MoveGenArgs args = {.game = game,
                             .move_list = move_list,
                             .move_record_type = MOVE_RECORD_BEST,
                             .move_sort_type = MOVE_SORT_EQUITY,
                             .override_kwg = NULL,
                             .eq_margin_movegen = 0,
-                            .target_equity = EQUITY_MAX_VALUE};
+                            .target_equity = EQUITY_MAX_VALUE,
+                            .best_move_carry = best_move_carry};
   generate_moves(&args);
   return move_list_get_move(move_list, 0);
+}
+
+const Move *get_top_equity_move(Game *game, MoveList *move_list) {
+  return get_top_equity_move_with_carry(game, move_list, NULL);
 }
 
 // Like get_top_equity_move, but sorts by the move_sort_type configured for
