@@ -5,6 +5,7 @@
 #include "../def/letter_distribution_defs.h"
 #include "../def/move_defs.h"
 #include "../ent/anchor.h"
+#include "../ent/best_move_carry.h"
 #include "../ent/bit_rack.h"
 #include "../ent/board.h"
 #include "../ent/equity.h"
@@ -14,8 +15,11 @@
 #include "../ent/leave_map.h"
 #include "../ent/letter_distribution.h"
 #include "../ent/move.h"
+#include "../ent/pat.h"
+#include "../ent/pat_eval.h"
 #include "../ent/rack.h"
 #include "../ent/rack_info_table.h"
+#include "../ent/thread_control.h"
 #include "../ent/word_info_table.h"
 #include "wmp_move_gen.h"
 #include <stdbool.h>
@@ -74,7 +78,34 @@ typedef struct UnrestrictedMultiplier {
   uint8_t column;
 } UnrestrictedMultiplier;
 
+// A player's movegen budget for one move (-movebudget, -mb1, -mb2): the move
+// generations it may spend choosing it -- its inference, simulation and
+// solving together. Set on the thread that chooses the move
+// (gen_set_movegen_budget), and by each thread that thread starts for the
+// move's search, so every generation any of them makes is charged to it.
+// Charged a batch at a time, so a move may run a batch per thread past its
+// limit before its search sees it spent; a limit of 0 is never spent.
+typedef struct MovegenBudget {
+  uint64_t limit;
+  _Atomic uint64_t spent;
+} MovegenBudget;
+
+void movegen_budget_init(MovegenBudget *budget, uint64_t limit);
+uint64_t movegen_budget_get_spent(const MovegenBudget *budget);
+
 typedef struct MoveGen {
+  // Move generations made on this MoveGen: generate_moves and
+  // generate_small_moves_in_lanes calls, by whichever thread holds it. Never
+  // reset; see gen_get_movegen_count.
+  uint64_t movegen_count;
+  // Generations not yet charged to the running command's movegen limit
+  // (gen_start_movegen_limit): charged a batch at a time, so the hot path
+  // stays a local increment.
+  uint64_t limit_uncharged;
+  // The move this thread is searching for, if it has a movegen budget, and
+  // generations not yet charged to it.
+  MovegenBudget *movegen_budget;
+  uint64_t budget_uncharged;
   // Owned by this MoveGen struct
   int current_row_index;
   int current_anchor_col;
@@ -96,6 +127,11 @@ typedef struct MoveGen {
   bool wmp_prune_subracks_by_leave;
   int player_index;
   Equity bingo_bonus;
+  // MOVE_RECORD_BEST_SMALL only: added to the ranking value (not the recorded
+  // score) of a play of best_small_out_rack_size tiles, i.e. one that uses the
+  // whole rack.
+  Equity best_small_out_bonus;
+  int best_small_out_rack_size;
   bool kwgs_are_shared;
   bool is_wordsmog;
   Rack player_rack;
@@ -121,7 +157,14 @@ typedef struct MoveGen {
   const uint32_t *const *wit_row_lane;
   const uint8_t *wit_len_lane;
   uint8_t row_number_of_anchors_cache[(BOARD_DIM) * 2];
-  Equity opening_move_penalties[(BOARD_DIM) * 2];
+  Equity opening_move_word_penalties[(BOARD_DIM) * 2];
+  Equity opening_move_letter_penalties[(BOARD_DIM) * 2];
+  // PAT evaluation state; disabled (weights NULL) unless the player
+  // has PAT weights loaded and the record/sort types use static equity.
+  PATEvalContext pat_eval_ctx;
+  // pat_eval_lane_penalty_bound for the lane the shadow phase is on, folded
+  // into every shadow equity bound recorded from it (zero when disabled).
+  Equity pat_lane_penalty_bound;
   int board_number_of_tiles_played;
   int cross_index;
   Move best_move_and_current_move[2];
@@ -214,6 +257,12 @@ typedef struct MoveGen {
   uint64_t klv_instance_fp_at_load;
   uint64_t wmp_instance_fp_at_load;
   const RackInfoTable *rack_info_table;
+  // The rack_info_table's instance id when it was loaded here, for the same
+  // ABA: rit_cache_entries point into the table's entries, and a task that
+  // loads another lexicon's table at the freed one's struct address read the
+  // old table's entries -- unmapped, a crash; still mapped, the wrong
+  // lexicon's bingos and leaves.
+  uint64_t rit_instance_id_at_load;
   // Optional precomputed word info table (loaded with -wit). When non-NULL,
   // wmp_move_gen prunes subracks whose letters cannot appear in any word
   // containing the playthrough blocks. NULL disables the optimization.
@@ -260,6 +309,10 @@ typedef struct MoveGen {
   Equity best_leaves[RACK_SIZE + 1];
 
   MachineLetter playthrough_marked[BOARD_DIM];
+
+  // MOVE_RECORD_BEST_SMALL only: see MoveGenArgs.best_small_canonical_ties.
+  // Last, so the hot fields above keep their offsets.
+  bool best_small_canonical_ties;
 } MoveGen;
 
 typedef struct MoveGenArgs {
@@ -291,9 +344,85 @@ typedef struct MoveGenArgs {
   // Input: initial set of known-playable tiles for MOVE_RECORD_TILES_PLAYED.
   // Movegen ORs further discoveries in. Default 0 (no known tiles).
   uint64_t initial_tiles_bv;
+  // MOVE_RECORD_BEST_SMALL only: rank a play that uses the whole rack by its
+  // score plus this bonus, e.g. twice the opponent's rack for going out in an
+  // endgame. The recorded play keeps its real score. Default 0.
+  Equity best_small_out_bonus;
+  // MOVE_RECORD_BEST_SMALL only: if true, a play that ties the best value
+  // replaces it when its tiny_move is larger, so the play returned does not
+  // depend on the order in which anchors are searched (the endgame's
+  // best-reply shortcuts find it in another order and must agree). Default
+  // false: the first play found keeps a tie.
+  bool best_small_canonical_ties;
+  // Disables the PAT term even when the player has weights loaded.
+  // Set by the inference paths, which build their own equity thresholds
+  // from score plus leave and would misclassify moves whose recorded
+  // equities carried the defense term.
+  bool disable_pat;
+  // Which loaded PAT classes to suppress (bits from pat_premium_class_t
+  // and PAT_CLASS_MASK_WINDOWS; see PAT_CLASS_MASK_ALL). 0 applies every
+  // class the weights have, so one weights file can serve both a fast
+  // rollout mode and a full mode. Ignored when disable_pat is set.
+  uint32_t pat_disabled_classes_mask;
+  // MOVE_RECORD_BEST by equity only: the best moves earlier generations
+  // found for the same rack (see best_move_carry.h). Each one still legal
+  // here starts the generation as its best move, lanes unchanged since such
+  // a move was best are skipped (without PAT), and the generation's best
+  // move is added. NULL (the default) skips all of this.
+  BestMoveCarry *best_move_carry;
 } MoveGenArgs;
 
 void gen_destroy_cache(void);
+
+// The move generations made in this process so far, on every thread: each
+// generate_moves call, and each generate_small_moves_in_lanes call (the
+// endgame's incremental move list for a node, which stands in for a
+// generate_moves call), whoever made it -- autoplay, a simulation, an
+// inference, an endgame or pre-endgame solve. The difference between two
+// readings is what was made in between.
+//
+// Each thread counts on its own MoveGen, unsynchronized, so nothing is shared
+// in the hot path; this sums them, and so is only exact while no thread is
+// generating moves: read it before and after a command, not during one.
+//
+// Only generations made while something accounts for them are counted: a
+// movegen limit, a movegen budget on any thread, or a counting session. A
+// caller that wants the count of some work starts a session around it.
+uint64_t gen_get_movegen_count(void);
+// A counting session: generations on every thread are counted from start to
+// stop. Sessions nest. Started and stopped with no thread generating moves.
+void gen_start_counting_movegens(void);
+void gen_stop_counting_movegens(void);
+
+// A command's movegen limit (-movegenlimit): a work budget that, unlike a
+// time limit, is the same on any machine. Started before a command runs and
+// stopped after it, on one thread, with no thread generating moves. While it
+// runs, every generation on any thread counts against `limit`, and the one
+// that reaches it stops the command as a user interrupt would, through
+// `thread_control`. A command stops where it next checks for an interrupt --
+// after a game, a simulation's iteration -- and generations are charged in
+// batches, so it runs somewhat past the limit, never short of it: further
+// for a player that generates many times a turn. A limit of 0 is none.
+void gen_start_movegen_limit(uint64_t limit, ThreadControl *thread_control);
+// Ends the running command's limit, and says whether it was reached.
+bool gen_stop_movegen_limit(void);
+
+// Makes `budget` the calling thread's move budget (NULL for none), charging
+// the old one what this thread has not yet; returns the old one, for the
+// caller to restore. A thread a search starts for a move takes the starting
+// thread's budget (gen_get_movegen_budget) and clears it before it exits.
+MovegenBudget *gen_set_movegen_budget(MovegenBudget *budget);
+MovegenBudget *gen_get_movegen_budget(void);
+// Whether the calling thread's move budget, if any, is spent: what a search
+// checks wherever it checks its deadline.
+bool gen_movegen_budget_spent(void);
+
+// The most pool slots (see MAX_THREADS) live threads have held at once since
+// the last gen_reset_slots_high_water, which starts the count again from the
+// slots held now. A thread takes its slot on its first move generation and
+// gives it back when it exits; past MAX_THREADS at once, magpie exits.
+int gen_get_slots_high_water(void);
+void gen_reset_slots_high_water(void);
 
 // If override_kwg is NULL, the full KWG for the on-turn player is used,
 // but if it is nonnull, override_kwg is used. The only use case for this
@@ -310,6 +439,22 @@ void generate_moves(const MoveGenArgs *args);
 // incremental move lists (path_move_lists.h).
 void generate_small_moves_in_lanes(const MoveGenArgs *args, uint64_t lane_mask,
                                    int *lane_end);
+
+// The MOVE_RECORD_BEST_SMALL generation restricted to the anchors of the lanes
+// in `lane_mask` (indexed as for generate_small_moves_in_lanes), competing
+// against `incumbent`: a play found elsewhere on the board, worth
+// `incumbent_value` (its score, plus args->best_small_out_bonus when it uses
+// the whole rack), or NULL for none. Anchors are pruned by their shadow bounds
+// against the incumbent from the start, and with
+// args->best_small_canonical_ties an equal-valued play wins only with a larger
+// tiny_move, so the result is the argmax over the lanes and the incumbent under
+// BEST_SMALL's ranking. Leaves the winner as the only entry of args->move_list
+// and returns true, or returns false with the list empty when there is neither
+// an incumbent nor a play in those lanes. Records no pass.
+bool generate_best_small_move_in_lanes(const MoveGenArgs *args,
+                                       uint64_t lane_mask,
+                                       const SmallMove *incumbent,
+                                       Equity incumbent_value);
 
 MoveGen *get_movegen(void);
 

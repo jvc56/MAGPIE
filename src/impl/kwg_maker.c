@@ -902,9 +902,16 @@ typedef struct ReorderItemHead {
 } ReorderItemHead;
 
 static int reorder_pair_cmp(const void *a, const void *b) {
-  const uint64_t x = ((const ReorderItemHead *)a)->key;
-  const uint64_t y = ((const ReorderItemHead *)b)->key;
-  return (x > y) - (x < y);
+  const ReorderItemHead *first = (const ReorderItemHead *)a;
+  const ReorderItemHead *second = (const ReorderItemHead *)b;
+  if (first->key != second->key) {
+    return (first->key > second->key) - (first->key < second->key);
+  }
+  // Pairs are built in ascending head order, so breaking ties on head gives
+  // the order a stable sort would. Without it the layout of the KWG, and so
+  // the bytes of every KLV built through it, would depend on how the C
+  // library's qsort orders ties.
+  return (first->head > second->head) - (first->head < second->head);
 }
 
 // Returns true if `key` is present in the sorted item array of head `h`.

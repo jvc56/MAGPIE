@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Magpie</title>
+  <rect x="2" y="3" width="60" height="59" rx="9" fill="#b58b40"/>
+  <rect x="2" y="2" width="60" height="58" rx="9" fill="#f9e2af"/>
+  <path d="M13 47V17h8l11 18 11-18h8v30h-8V30L32 47 21 30v17Z" fill="#242635"/>
+</svg>

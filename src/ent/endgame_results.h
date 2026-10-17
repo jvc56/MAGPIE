@@ -64,6 +64,12 @@ void endgame_results_update_display_data(EndgameResults *endgame_results);
 void endgame_results_set_best_pvline(EndgameResults *endgame_results,
                                      const PVLine *pv_line, int value,
                                      int depth);
+// Like endgame_results_set_best_pvline, but also replaces a result of the
+// same depth when value is higher. Lets several workers each offer the best
+// line they found at one depth.
+void endgame_results_offer_best_pvline(EndgameResults *endgame_results,
+                                       const PVLine *pv_line, int value,
+                                       int depth);
 // Records the exact value found for EndgameArgs.actual_move, alongside the
 // best move, from the same solve. Called at most once per solve (after all
 // workers join), so unlike endgame_results_set_best_pvline this has no

@@ -11,6 +11,7 @@
 #include "../ent/inference_results.h"
 #include "../ent/letter_distribution.h"
 #include "../ent/move.h"
+#include "../ent/player.h"
 #include "../ent/rack.h"
 #include "../ent/sim_args.h"
 #include "../ent/sim_results.h"
@@ -20,12 +21,19 @@
 #include "../util/io_util.h"
 #include "../util/string_util.h"
 #include "bai.h"
-#include "gameplay.h"
 #include "inference.h"
 #include "move_gen.h"
+#include "rack_draw.h"
 #include "random_variable.h"
+#include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
+
+enum {
+  // The fewest cycles a bag-cycled sim gives each play (see
+  // sim_args_set_bag_cycle_bai_options).
+  SIM_BAG_CYCLE_MIN_CYCLES = 2,
+};
 
 // The sim context allows zero-alloc autoplay sims by maintaining the
 // dynamically allocated sim structs in between sim calls. The following
@@ -38,7 +46,6 @@
 // - num plies
 struct SimCtx {
   RandomVariables *rvs;
-  RandomVariables *rng;
   InferenceCtx *inference_ctx;
 };
 
@@ -47,9 +54,30 @@ void sim_ctx_destroy(SimCtx *sim_ctx) {
     return;
   }
   rvs_destroy(sim_ctx->rvs);
-  rvs_destroy(sim_ctx->rng);
   inference_ctx_destroy(sim_ctx->inference_ctx);
   free(sim_ctx);
+}
+
+// A bag-cycled sample is a whole cycle of rollouts, but the sample limit
+// (-iterations) and minimum (-minplayiterations) count rollouts. Converts them
+// to this position's cycles, rounding up, and gives every play at least
+// SIM_BAG_CYCLE_MIN_CYCLES, so that BAI never estimates a play's variance from
+// one sample. Also tells BAI how many rollouts a cycle averages, so that its
+// rounds hold about as many rollouts as a plain sim's.
+static void sim_args_set_bag_cycle_bai_options(SimArgs *sim_args) {
+  const uint64_t rotations =
+      (uint64_t)rv_sim_bag_cycle_rotations(sim_args->game);
+  const uint64_t limit = sim_args->bai_options.sample_limit;
+  const uint64_t minimum = sim_args->bai_options.sample_minimum;
+  uint64_t minimum_cycles =
+      minimum / rotations + (minimum % rotations != 0 ? 1 : 0);
+  if (minimum_cycles < SIM_BAG_CYCLE_MIN_CYCLES) {
+    minimum_cycles = SIM_BAG_CYCLE_MIN_CYCLES;
+  }
+  sim_args->bai_options.sample_limit =
+      limit / rotations + (limit % rotations != 0 ? 1 : 0);
+  sim_args->bai_options.sample_minimum = minimum_cycles;
+  sim_args->bai_options.draws_per_sample = rotations;
 }
 
 void simulate(SimArgs *sim_args, SimCtx **sim_ctx, SimResults *sim_results,
@@ -78,30 +106,16 @@ void simulate(SimArgs *sim_args, SimCtx **sim_ctx, SimResults *sim_results,
       string_builder_add_string(sb, "opponent rack '");
       string_builder_add_rack(sb, known_opp_rack, ld, false);
       string_builder_add_string(sb, "' is not available in the bag");
-      char *err_msg = string_builder_dump(sb, NULL);
-      string_builder_destroy(sb);
+      char *err_msg = string_builder_dump_and_destroy(sb, NULL);
       error_stack_push(error_stack, ERROR_STATUS_SIM_OPP_RACK_NOT_IN_BAG,
                        err_msg);
       return;
     }
   }
 
-  // If the bag is empty, set sample_limit to the number of moves and
-  // sample_minimum to 1 for endgame simulations
-  const uint64_t original_sample_limit = sim_args->bai_options.sample_limit;
-  const uint64_t original_sample_minimum = sim_args->bai_options.sample_minimum;
-  const int original_num_plies = sim_args->num_plies;
-  if (bag_is_empty(game_get_bag(sim_args->game))) {
-    sim_args->bai_options.sample_limit =
-        move_list_get_count(sim_args->move_list);
-    sim_args->bai_options.sample_minimum = 1;
-    sim_args->num_plies = MAX_PLIES;
-  }
-
   if (*sim_ctx == NULL) {
     *sim_ctx = malloc_or_die(sizeof(SimCtx));
     (*sim_ctx)->rvs = NULL;
-    (*sim_ctx)->rng = NULL;
     (*sim_ctx)->inference_ctx = NULL;
   }
 
@@ -119,23 +133,33 @@ void simulate(SimArgs *sim_args, SimCtx **sim_ctx, SimResults *sim_results,
             sim_args->inference_results, INFERENCE_TYPE_LEAVE));
   }
 
+  // If the bag is empty, set sample_limit to the number of moves and
+  // sample_minimum to 1 for endgame simulations. These are set after inference,
+  // which can return early, so that the reset below always undoes them.
+  const uint64_t original_sample_limit = sim_args->bai_options.sample_limit;
+  const uint64_t original_sample_minimum = sim_args->bai_options.sample_minimum;
+  const uint64_t original_draws_per_sample =
+      sim_args->bai_options.draws_per_sample;
+  const int original_num_plies = sim_args->num_plies;
+  if (bag_is_empty(game_get_bag(sim_args->game))) {
+    sim_args->bai_options.sample_limit =
+        move_list_get_count(sim_args->move_list);
+    sim_args->bai_options.sample_minimum = 1;
+    sim_args->num_plies = MAX_PLIES;
+  } else if (sim_args->bag_cycle) {
+    sim_args_set_bag_cycle_bai_options(sim_args);
+  }
+
   RandomVariablesArgs rv_sim_args = {
       .type = RANDOM_VARIABLES_SIMMED_PLAYS,
       .sim_args = sim_args,
       .sim_results = sim_results,
   };
 
-  RandomVariablesArgs rng_args = {
-      .type = RANDOM_VARIABLES_UNIFORM,
-      .seed = sim_args->seed,
-  };
-
   if ((*sim_ctx)->rvs) {
     rvs_reset((*sim_ctx)->rvs, &rv_sim_args);
-    rvs_reset((*sim_ctx)->rng, &rng_args);
   } else {
     (*sim_ctx)->rvs = rvs_create(&rv_sim_args);
-    (*sim_ctx)->rng = rvs_create(&rng_args);
   }
 
   // On resume the existing results already carry the rack / known
@@ -149,13 +173,14 @@ void simulate(SimArgs *sim_args, SimCtx **sim_ctx, SimResults *sim_results,
   sim_results_set_cutoff(sim_results, sim_args->bai_options.cutoff);
   sim_results_set_utility_w_spread(sim_results, sim_args->utility_w_spread);
 
-  bai(&sim_args->bai_options, (*sim_ctx)->rvs, (*sim_ctx)->rng,
-      sim_args->thread_control, NULL, sim_results_get_bai_result(sim_results));
+  bai(&sim_args->bai_options, (*sim_ctx)->rvs, sim_args->thread_control, NULL,
+      sim_results_get_bai_result(sim_results));
 
   // Reset the sim args to their original values in case they were modified for
-  // endgame sims
+  // endgame or bag-cycled sims
   sim_args->bai_options.sample_limit = original_sample_limit;
   sim_args->bai_options.sample_minimum = original_sample_minimum;
+  sim_args->bai_options.draws_per_sample = original_draws_per_sample;
   sim_args->num_plies = original_num_plies;
 }
 
@@ -170,15 +195,24 @@ void simulate_without_ctx(SimArgs *sim_args, SimResults *sim_results,
 // but they are passed in separately because this function needs to generate
 // moves on a nonconst MoveList pointer but the SimArgs MoveList pointer is
 // const.
+//
+// Sets *simulated to whether a simulation ran. A position with one legal play
+// (a forced pass) is not simulated, and sim_results then still holds whatever
+// the last simulation left in it, which describes another position.
 const Move *get_top_simming_move(Game *game, MoveList *move_list,
                                  SimArgs *sim_args, SimCtx **sim_ctx,
-                                 SimResults *sim_results,
+                                 SimResults *sim_results, bool *simulated,
                                  ErrorStack *error_stack) {
+  *simulated = false;
+  // The candidates are the player's best plays by its own sort type, as a
+  // static player's move is: a player sorted by score simulates the top plays
+  // by score. Equity unless a player asks otherwise.
   const MoveGenArgs gen_args = {
       .game = game,
       .move_list = move_list,
       .move_record_type = MOVE_RECORD_ALL,
-      .move_sort_type = MOVE_SORT_EQUITY,
+      .move_sort_type = player_get_move_sort_type(
+          game_get_player(game, game_get_player_on_turn_index(game))),
       .override_kwg = NULL,
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
@@ -194,6 +228,18 @@ const Move *get_top_simming_move(Game *game, MoveList *move_list,
   if (!error_stack_is_empty(error_stack)) {
     return NULL;
   }
+  // A stop request cuts the simulation short, and one that lands during the
+  // inference that precedes it returns before the simulation starts: the
+  // results are then still the last simulation's, of another position, and
+  // their best play may not even be on this rack. Playing it corrupted the
+  // game (rack counts below zero); the caller is abandoning the run anyway,
+  // so the top static play stands in, as for a turn with nothing to simulate.
+  if (thread_control_get_status(sim_args->thread_control) ==
+      THREAD_CONTROL_STATUS_USER_INTERRUPT) {
+    move_list_sort_moves(move_list);
+    return move_list_get_move(move_list, 0);
+  }
+  *simulated = true;
 
   return sim_results_get_best_move(sim_results);
 }
