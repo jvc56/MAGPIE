@@ -1657,19 +1657,13 @@ static void take_string(StringBuilder *sb, char *out, size_t out_size) {
 static bool equity_has_value(Equity eq) { return eq > EQUITY_PASS_VALUE; }
 
 bool tui_analysis_kibitz(TuiGameState *state, int turn_idx) {
-  if (atomic_load(&state->analysis_running)) {
-    set_analysis_notice(state, "analysis running - /stop first");
-    return false;
-  }
-  if (turn_idx < 0 || turn_idx >= state->history_count) {
-    set_analysis_notice(state, "select a turn in History to kibitz");
+  const char *reason =
+      tui_analysis_unavailable_reason(state, turn_idx, TUI_ANALYSIS_KIBITZ);
+  if (reason != NULL) {
+    set_analysis_notice(state, reason);
     return false;
   }
   TuiHistoryEntry *entry = &state->history[turn_idx];
-  if (entry->pending || entry->cgp_before[0] == '\0') {
-    set_analysis_notice(state, "no position to kibitz for this turn");
-    return false;
-  }
   Game *position = game_duplicate(state->game);
   ErrorStack *err = error_stack_create();
   game_load_cgp(position, entry->cgp_before, err);
@@ -1750,44 +1744,51 @@ bool tui_analysis_kibitz(TuiGameState *state, int turn_idx) {
   return true;
 }
 
+const char *tui_analysis_unavailable_reason(const TuiGameState *state,
+                                            int turn_idx,
+                                            TuiAnalysisAction action) {
+  const bool running = atomic_load(&state->analysis_running);
+  if (action == TUI_ANALYSIS_STOP) {
+    return running ? NULL : "no analysis is running";
+  }
+  const bool play_over = tui_game_state_play_over(state);
+  if (action == TUI_ANALYSIS_RESUME && !play_over) {
+    return "available once the game is over";
+  }
+  if (action == TUI_ANALYSIS_SIM && !play_over && state->bot_started) {
+    return "not while a game against the computer is in progress";
+  }
+  if (running) {
+    return "an analysis is already running - stop it first";
+  }
+  if (turn_idx < 0 || turn_idx >= state->history_count) {
+    return "select a turn in History first";
+  }
+  const TuiHistoryEntry *entry = &state->history[turn_idx];
+  if (entry->pending || entry->cgp_before[0] == '\0') {
+    return "this turn has no position to analyze";
+  }
+  if (action == TUI_ANALYSIS_RESUME) {
+    if (!entry->analysis_snapshot.valid || entry->analysis_snapshot.is_static) {
+      return "nothing saved to resume - use Simulate";
+    }
+    if (entry->analysis_snapshot.is_sim && entry->sim_results_saved == NULL) {
+      return "no saved sim for this turn";
+    }
+  }
+  return NULL;
+}
+
 bool tui_analysis_worker_start(TuiGameState *state, int turn_idx,
                                bool request_sim) {
   if (state == NULL) {
     return false;
   }
-  const char *cmd = request_sim ? "/sim" : "/resume";
-  char notice[96];
-  if (request_sim ? (!tui_game_state_play_over(state) && state->bot_started)
-                  : !tui_game_state_play_over(state)) {
-    (void)snprintf(notice, sizeof(notice),
-                   "%s is available once the game is over", cmd);
-    set_analysis_notice(state, notice);
+  const char *reason = tui_analysis_unavailable_reason(
+      state, turn_idx, request_sim ? TUI_ANALYSIS_SIM : TUI_ANALYSIS_RESUME);
+  if (reason != NULL) {
+    set_analysis_notice(state, reason);
     return false;
-  }
-  if (atomic_load(&state->analysis_running)) {
-    set_analysis_notice(state, "analysis already running - /stop first");
-    return false;
-  }
-  if (turn_idx < 0 || turn_idx >= state->history_count) {
-    (void)snprintf(notice, sizeof(notice), "select a turn in History to %s",
-                   cmd + 1);
-    set_analysis_notice(state, notice);
-    return false;
-  }
-  const TuiHistoryEntry *entry = &state->history[turn_idx];
-  if (entry->pending || entry->cgp_before[0] == '\0') {
-    set_analysis_notice(state, "no position snapshot for this turn");
-    return false;
-  }
-  if (!request_sim) {
-    if (!entry->analysis_snapshot.valid || entry->analysis_snapshot.is_static) {
-      set_analysis_notice(state, "no saved analysis to resume - try /sim");
-      return false;
-    }
-    if (entry->analysis_snapshot.is_sim && entry->sim_results_saved == NULL) {
-      set_analysis_notice(state, "no saved sim for this turn");
-      return false;
-    }
   }
   // Reap a previously finished worker before reusing the handle.
   if (state->analysis_started) {
