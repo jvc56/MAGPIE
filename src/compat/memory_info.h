@@ -3,6 +3,7 @@
 
 #include <errno.h>
 #include <stdint.h>
+#include <stdbool.h>
 #include <stdio.h>
 
 #include "../util/io_util.h"
@@ -22,15 +23,51 @@
 #include <unistd.h>
 #endif
 
-static inline uint64_t get_total_memory(void) {
+// Search budgets use a fixed base on browsers; linear-memory growth must not
+// increase subsequent search allocations. Native budgets use physical RAM.
+#ifdef __EMSCRIPTEN__
+#define DEFAULT_TT_FRACTION 0.125
+#define TT_MIN_SIZE_POWER 20
+#define PEG_TT_MIN_SIZE_POWER 12
+#else
+#define DEFAULT_TT_FRACTION 0.25
+#define TT_MIN_SIZE_POWER 24
+#define PEG_TT_MIN_SIZE_POWER TT_MIN_SIZE_POWER
+#endif
+
+// Per-worker stack of the PEG pool (peg_pool.c). Workers recurse into nested
+// solves while help-draining the queue (bounded by the PEG fork-nesting cap).
+// Natively 64 MiB is virtual address space, committed lazily, so only the
+// nesting depth actually reached is paid for. Emscripten instead mallocs each
+// thread's whole stack from the wasm heap the searches and lexica share, so the
+// browser gets a stack sized to use: a native worker stack reaches about 20 KiB
+// at the default nesting depth, and the PEG suite plus nesting four deep on
+// four workers run within 256 KiB in wasm with STACK_OVERFLOW_CHECK.
+#ifdef __EMSCRIPTEN__
+enum {
+  PEG_POOL_WORKER_STACK_BYTES = 4 * 1024 * 1024,
+};
+#else
+enum {
+  PEG_POOL_WORKER_STACK_BYTES = 64 * 1024 * 1024,
+};
+#endif
+
+static inline bool search_memory_is_bounded(void) {
+#ifdef __EMSCRIPTEN__
+  return true;
+#else
+  return false;
+#endif
+}
+
+static inline uint64_t get_search_memory_budget_base(void) {
   uint64_t total_memory = 0;
 
 #if defined(__EMSCRIPTEN__)
-  // WASM/Emscripten implementation
-  // Return the heap size via EM_ASM
-  total_memory = EM_ASM_INT({
-    return HEAP8.length;
-  });
+  // Fixed browser budgeting base: growing the heap for data must not also
+  // grow search tables on the next solve. 0.125 reserves a stable 32 MiB TT.
+  total_memory = 256ULL * 1024 * 1024;
 
 #elif defined(_WIN32) || defined(_WIN64)
   // Windows implementation
@@ -92,6 +129,51 @@ static inline uint64_t get_total_memory(void) {
 #endif
 
   return total_memory;
+}
+
+// The memory a new allocation can have without the system swapping, in
+// *available_bytes: MemAvailable on Linux, the available physical memory on
+// Windows. False where it cannot be found easily (macOS, browsers), which a
+// caller takes as unconstrained.
+static inline bool get_available_memory_bytes(int64_t *available_bytes) {
+#if defined(__EMSCRIPTEN__)
+  (void)available_bytes;
+  return false;
+#elif defined(_WIN32) || defined(_WIN64)
+  MEMORYSTATUSEX statex;
+  statex.dwLength = sizeof(statex);
+  if (!GlobalMemoryStatusEx(&statex)) {
+    return false;
+  }
+  *available_bytes = statex.ullAvailPhys > (DWORDLONG)INT64_MAX
+                         ? INT64_MAX
+                         : (int64_t)statex.ullAvailPhys;
+  return true;
+#elif defined(__linux__)
+  FILE *file = fopen("/proc/meminfo", "r");
+  if (!file) {
+    return false;
+  }
+  bool found = false;
+  char line[256];
+  while (!found && fgets(line, sizeof(line), file)) {
+    if (strncmp(line, "MemAvailable:", 13) == 0) {
+      char *endptr;
+      errno = 0;
+      const unsigned long long kilobytes = strtoull(line + 13, &endptr, 10);
+      found = errno == 0 && endptr != line + 13 &&
+              kilobytes < (unsigned long long)INT64_MAX / 1024;
+      if (found) {
+        *available_bytes = (int64_t)(kilobytes * 1024);
+      }
+    }
+  }
+  (void)fclose(file);
+  return found;
+#else
+  (void)available_bytes;
+  return false;
+#endif
 }
 
 static inline int get_num_cores(void) {

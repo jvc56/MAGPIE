@@ -1,8 +1,8 @@
 #include "endgame_test.h"
 
 #include "../src/compat/cpthread.h"
+#include "../src/compat/cpthread_defs.h"
 #include "../src/compat/ctime.h"
-#include "../src/def/cpthread_defs.h"
 #include "../src/def/game_defs.h"
 #include "../src/def/thread_control_defs.h"
 #include "../src/ent/endgame_results.h"
@@ -17,6 +17,7 @@
 #include "../src/impl/config.h"
 #include "../src/impl/endgame.h"
 #include "../src/impl/gameplay.h"
+#include "../src/impl/move_gen.h"
 #include "../src/str/endgame_string.h"
 #include "../src/str/game_string.h"
 #include "../src/str/move_string.h"
@@ -28,9 +29,29 @@
 #include "test_util.h"
 #include <assert.h>
 #include <stdatomic.h>
+#include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+
+enum {
+  // test_fixed_depth_stepping: four and five plies cover both parities.
+  FIXED_DEPTH_MIN_PLIES = 4,
+  FIXED_DEPTH_MAX_PLIES = 5,
+  FIXED_DEPTH_THREADS = 4,
+};
+
+// Plenty for the small solves of the fixed-depth tests, and far cheaper to
+// allocate per solve than the default share of memory.
+#define FIXED_DEPTH_TT_FRACTION_OF_MEM 0.002
+
+// The fixed-depth tests' position: cheap enough at four and five plies to
+// solve several times under the sanitizers.
+static const char *const FIXED_DEPTH_CGP =
+    "cgp "
+    "9A1PIXY/9S1L3/2ToWNLETS1O3/9U1DA1R/3GERANIAL1U1I/9g2T1C/8WE2OBI/"
+    "6EMU4ON/6AID3GO1/5HUN4ET1/4ZA1T4ME1/1Q1FAKEY3JOES/FIVE1E5IT1C/"
+    "5SPORRAN2A/6ORE2N2D BGIV/DEHILOR 384/389 0 -lex NWL20";
 
 // Helper: append [Px wins by Y] / [Tie] based on spread delta
 static void append_outcome(StringBuilder *sb, const Game *game,
@@ -144,6 +165,9 @@ static void *timeout_thread_function(void *arg) {
   return NULL;
 }
 
+// Pass as test_single_endgame's expected_score to check only the first move.
+enum { ENDGAME_TEST_ANY_SCORE = INT32_MIN };
+
 void test_single_endgame(const char *config_settings, const char *cgp,
                          int initial_small_move_arena_size,
                          error_code_t expected_error_code,
@@ -222,7 +246,8 @@ void test_single_endgame(const char *config_settings, const char *cgp,
   if (actual_error_code == ERROR_STATUS_SUCCESS && timeout == 0) {
     const PVLine *pv_line =
         endgame_results_get_pvline(endgame_results, ENDGAME_RESULT_BEST);
-    assert(pv_line->score == expected_score);
+    assert(expected_score == ENDGAME_TEST_ANY_SCORE ||
+           pv_line->score == expected_score);
     assert(small_move_is_pass(&pv_line->moves[0]) == is_pass);
     printf(
         "Endgame solved successfully with expected score %d and is_pass=%d\n",
@@ -270,15 +295,23 @@ void test_pass_first(void) {
   // This endgame's first move must be a pass, otherwise Nigel can set up
   // an unblockable ZA. Exact value is -63 (verified at 25-ply with and
   // without heuristics). The optimal PV is 10 moves with 4 passes, so
-  // 7-ply relies on greedy playout for the tail.
-  test_single_endgame(
-      "set -s1 score -s2 score -threads 6 -eplies 7",
+  // 7-ply relies on greedy playout for the tail, so only the pass is checked
+  // there: the tail usually values the position at -60 (in the exact line
+  // Nigel builds Z(E) -> (ZE)D -> (ZED)A, and a greedy tail that takes the out
+  // bonus goes out first), but which transposition-table entries survive
+  // depends on thread timing, and with the small WASM table some runs reach
+  // -63 already. 8-ply converges to the exact value.
+  const char *cgp =
       "cgp "
       "GATELEGs1POGOED/R4MOOLI3X1/AA10U2/YU4BREDRIN2/1TITULE3E1IN1/1E4N3c1BOK/"
       "1C2O4CHARD1/QI1FLAWN2E1OE1/IS2E1HIN1A1W2/1MOTIVATE1T1S2/1S2N5S4/"
-      "3PERJURY5/15/15/15 FV/AADIZ 442/388 0 -lex CSW21",
-      DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE, ERROR_STATUS_SUCCESS, -63, true,
-      0);
+      "3PERJURY5/15/15/15 FV/AADIZ 442/388 0 -lex CSW21";
+  test_single_endgame("set -s1 score -s2 score -threads 6 -eplies 7", cgp,
+                      DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE,
+                      ERROR_STATUS_SUCCESS, ENDGAME_TEST_ANY_SCORE, true, 0);
+  test_single_endgame("set -s1 score -s2 score -threads 6 -eplies 8", cgp,
+                      DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE,
+                      ERROR_STATUS_SUCCESS, -63, true, 0);
 }
 
 // Drives endgame_add_worker from inside the running solve: the per-ply
@@ -321,12 +354,13 @@ static void inject_worker_per_ply(int depth, int32_t value,
 // Exercised for both endgame_solve (master is a spawned thread) and
 // endgame_solve_inline (master runs in the calling thread — the path PEG uses,
 // where injected helpers cooperate while the caller's own core keeps solving).
-// 6 plies is the shallowest depth that reaches the converged -63 (5 gives -60),
-// and still injects one worker per IDS depth — the value-determinism property
-// is what the test checks, not the search depth.
+// 8 plies is the shallowest depth that reaches the converged -63 (6 and 7 give
+// -60 since greedy leaf playouts take the out bonus), and still injects one
+// worker per IDS depth — the value-determinism property is what the test
+// checks, not the search depth.
 static void run_injection_case(bool use_inline) {
   Config *config =
-      config_create_or_die("set -s1 score -s2 score -threads 1 -eplies 6");
+      config_create_or_die("set -s1 score -s2 score -threads 1 -eplies 8");
   load_and_exec_config_or_die(
       config,
       "cgp "
@@ -389,7 +423,7 @@ void test_endgame_dynamic_worker_injection(void) {
 // first_win uses a narrow [-1,+1] window to resolve win/loss/draw cheaply (the
 // path pessimistic PEG uses), and caps the depth-0 interrupt fallback to the
 // top few root moves. It must agree in SIGN with the exact full-spread solve.
-// This position is a converged 63-point loss for the player on turn at 6 plies:
+// This position is a converged 63-point loss for the player on turn at 8 plies:
 // full-spread must report exactly -63, first_win a loss (strictly negative).
 void test_endgame_first_win_sign(void) {
   const char *cgp =
@@ -407,7 +441,7 @@ void test_endgame_first_win_sign(void) {
   } cases[] = {{false, 0}, {true, 0}, {true, -1}};
   for (size_t ci = 0; ci < sizeof(cases) / sizeof(cases[0]); ci++) {
     Config *config =
-        config_create_or_die("set -s1 score -s2 score -threads 1 -eplies 6");
+        config_create_or_die("set -s1 score -s2 score -threads 1 -eplies 8");
     load_and_exec_config_or_die(config, cgp);
     Game *game = config_get_game(config);
     EndgameResults *results = config_get_endgame_results(config);
@@ -555,12 +589,211 @@ void test_ctx_reuse(void) {
   config_destroy(config);
 }
 
+static void record_last_depth_callback(int depth, int32_t value,
+                                       const PVLine *pv_line, const Game *game,
+                                       const PVLine *ranked_pvs,
+                                       int num_ranked_pvs, void *user_data) {
+  (void)value;
+  (void)pv_line;
+  (void)game;
+  (void)ranked_pvs;
+  (void)num_ranked_pvs;
+  *(int *)user_data = depth;
+}
+
+static int solve_recording_last_depth(const char *cgp, int plies, int threads,
+                                      int *last_callback_depth) {
+  Config *config = config_create_or_die("set -s1 score -s2 score");
+  load_and_exec_config_or_die(config, cgp);
+  EndgameResults *endgame_results = config_get_endgame_results(config);
+  ErrorStack *error_stack = error_stack_create();
+  EndgameCtx *endgame_ctx = NULL;
+  EndgameArgs endgame_args = {0};
+  endgame_args.thread_control = config_get_thread_control(config);
+  endgame_args.game = config_get_game(config);
+  endgame_args.plies = plies;
+  endgame_args.tt_fraction_of_mem = config_get_tt_fraction_of_mem(config);
+  endgame_args.initial_small_move_arena_size =
+      DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
+  endgame_args.num_threads = threads;
+  endgame_args.use_heuristics = true;
+  endgame_args.forced_pass_bypass = true;
+  endgame_args.enable_pv_display = true;
+  endgame_args.num_top_moves = 1;
+  endgame_args.per_ply_callback = record_last_depth_callback;
+  endgame_args.per_ply_callback_data = last_callback_depth;
+  endgame_args.seed = 42;
+  *last_callback_depth = 0;
+  endgame_solve(&endgame_ctx, &endgame_args, endgame_results, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  const int score =
+      endgame_results_get_pvline(endgame_results, ENDGAME_RESULT_BEST)->score;
+  endgame_ctx_destroy(endgame_ctx);
+  error_stack_destroy(error_stack);
+  config_destroy(config);
+  return score;
+}
+
+// A game tree that ends before the requested depth is proven exact at the
+// first iteration that reaches only terminal positions; the solver must stop
+// there instead of re-searching the same tree to the requested depth. The
+// score must match a solve that requests fewer plies (still deep enough to
+// reach every game end).
+static void test_exhausted_tree_stops_early(void) {
+  const char *cgp =
+      "cgp "
+      "9A1PIXY/9S1L3/2ToWNLETS1O3/9U1DA1R/3GERANIAL1U1I/9g2T1C/8WE2OBI/"
+      "6EMU4ON/6AID3GO1/5HUN4ET1/4ZA1T4ME1/1Q1FAKEY3JOES/FIVE1E5IT1C/"
+      "5SPORRAN2A/6ORE2N2D BGIV/DEHILOR 384/389 0 -lex NWL20";
+  const int thread_counts[] = {1, 4};
+  for (int i = 0; i < 2; i++) {
+    int deep_last_depth;
+    int mid_last_depth;
+    const int deep_score = solve_recording_last_depth(
+        cgp, MAX_SEARCH_DEPTH, thread_counts[i], &deep_last_depth);
+    const int mid_score =
+        solve_recording_last_depth(cgp, 18, thread_counts[i], &mid_last_depth);
+    assert(deep_score == mid_score);
+    assert(deep_last_depth < MAX_SEARCH_DEPTH);
+  }
+}
+
+static void record_depth_mask_callback(int depth, int32_t value,
+                                       const PVLine *pv_line, const Game *game,
+                                       const PVLine *ranked_pvs,
+                                       int num_ranked_pvs, void *user_data) {
+  (void)value;
+  (void)pv_line;
+  (void)game;
+  (void)ranked_pvs;
+  (void)num_ranked_pvs;
+  *(uint32_t *)user_data |= 1U << depth;
+}
+
+// Solves the position loaded in `config` to `plies` with a small transposition
+// table, so repeated solves do not each allocate the default share of memory.
+// `budget` (or none, when NULL) is the movegen budget the solve runs under, and
+// `with_callback` registers a per-ply callback that records the depths the
+// solve reports.
+static int solve_fixed_depth(const Config *config, int plies, int threads,
+                             MovegenBudget *budget, bool with_callback,
+                             uint32_t *depth_mask, uint64_t *nodes) {
+  EndgameResults *endgame_results = config_get_endgame_results(config);
+  ErrorStack *error_stack = error_stack_create();
+  EndgameCtx *endgame_ctx = NULL;
+  EndgameArgs endgame_args = {0};
+  endgame_args.thread_control = config_get_thread_control(config);
+  endgame_args.game = config_get_game(config);
+  endgame_args.plies = plies;
+  endgame_args.tt_fraction_of_mem = FIXED_DEPTH_TT_FRACTION_OF_MEM;
+  endgame_args.initial_small_move_arena_size =
+      DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
+  endgame_args.num_threads = threads;
+  endgame_args.use_heuristics = true;
+  endgame_args.forced_pass_bypass = true;
+  endgame_args.num_top_moves = 1;
+  if (with_callback) {
+    endgame_args.enable_pv_display = true;
+    endgame_args.per_ply_callback = record_depth_mask_callback;
+    endgame_args.per_ply_callback_data = depth_mask;
+  }
+  endgame_args.seed = 42;
+  *depth_mask = 0;
+  MovegenBudget *previous_budget = gen_set_movegen_budget(budget);
+  endgame_solve(&endgame_ctx, &endgame_args, endgame_results, error_stack);
+  (void)gen_set_movegen_budget(previous_budget);
+  assert(error_stack_is_empty(error_stack));
+  const int score =
+      endgame_results_get_pvline(endgame_results, ENDGAME_RESULT_BEST)->score;
+  assert(endgame_results_get_depth(endgame_results, ENDGAME_RESULT_BEST) ==
+         plies);
+  *nodes = endgame_ctx_get_nodes_searched(endgame_ctx);
+  endgame_ctx_destroy(endgame_ctx);
+  error_stack_destroy(error_stack);
+  return score;
+}
+
+// A fixed-depth solve with no clock, budget or callback steps by two from its
+// target depth (1, 2, 4 for four plies; 1, 3, 5 for five). At one thread it
+// must return the same score as plain iterative deepening, which a movegen
+// budget too large to run out forces, while searching fewer nodes. A solve
+// with a per-ply callback must still report every depth, and a four-thread
+// stepped solve, whose helpers start deeper, must return the same score.
+static void test_fixed_depth_stepping(void) {
+  Config *config = config_create_or_die("set -s1 score -s2 score");
+  load_and_exec_config_or_die(config, FIXED_DEPTH_CGP);
+  uint32_t depth_mask;
+  int plain_score = 0;
+  for (int plies = FIXED_DEPTH_MIN_PLIES; plies <= FIXED_DEPTH_MAX_PLIES;
+       plies++) {
+    MovegenBudget unspent_budget;
+    movegen_budget_init(&unspent_budget, UINT64_MAX);
+    uint64_t plain_nodes;
+    uint64_t stepped_nodes;
+    plain_score =
+        solve_fixed_depth(config, plies, 1, &unspent_budget,
+                          /*with_callback=*/false, &depth_mask, &plain_nodes);
+    const int stepped_score =
+        solve_fixed_depth(config, plies, 1, /*budget=*/NULL,
+                          /*with_callback=*/false, &depth_mask, &stepped_nodes);
+    assert(stepped_score == plain_score);
+    assert(stepped_nodes < plain_nodes);
+  }
+  uint64_t nodes;
+  const int callback_score =
+      solve_fixed_depth(config, FIXED_DEPTH_MAX_PLIES, 1, /*budget=*/NULL,
+                        /*with_callback=*/true, &depth_mask, &nodes);
+  assert(callback_score == plain_score);
+  for (int depth = 1; depth <= FIXED_DEPTH_MAX_PLIES; depth++) {
+    assert((depth_mask & (1U << depth)) != 0);
+  }
+  const int threaded_score = solve_fixed_depth(
+      config, FIXED_DEPTH_MAX_PLIES, FIXED_DEPTH_THREADS, /*budget=*/NULL,
+      /*with_callback=*/false, &depth_mask, &nodes);
+  assert(threaded_score == plain_score);
+  config_destroy(config);
+}
+
+// Solves the position loaded in `config` to a fixed depth on one thread under
+// a movegen budget with the given limit and returns the generations the solve
+// charged to it.
+static uint64_t budgeted_fixed_depth_movegens(const Config *config, int plies,
+                                              uint64_t budget_limit,
+                                              int *score) {
+  MovegenBudget budget;
+  movegen_budget_init(&budget, budget_limit);
+  uint32_t depth_mask;
+  uint64_t nodes;
+  *score = solve_fixed_depth(config, plies, /*threads=*/1, &budget,
+                             /*with_callback=*/false, &depth_mask, &nodes);
+  return movegen_budget_get_spent(&budget);
+}
+
+// A movegen budget stops a solve at its last completed depth, as a clock does,
+// so a fixed-depth solve under one keeps every iteration and generates more
+// moves than a stepped solve. A budget whose limit is 0 can never stop the
+// solve and leaves it stepping by two.
+static void test_fixed_depth_budget_keeps_every_depth(void) {
+  Config *config = config_create_or_die("set -s1 score -s2 score");
+  load_and_exec_config_or_die(config, FIXED_DEPTH_CGP);
+  int stepped_score;
+  int budgeted_score;
+  const uint64_t stepped_movegens = budgeted_fixed_depth_movegens(
+      config, /*plies=*/4, /*budget_limit=*/0, &stepped_score);
+  const uint64_t budgeted_movegens = budgeted_fixed_depth_movegens(
+      config, /*plies=*/4, /*budget_limit=*/UINT64_MAX, &budgeted_score);
+  assert(budgeted_score == stepped_score);
+  assert(budgeted_movegens > stepped_movegens);
+  config_destroy(config);
+}
+
 // Regression for transposition-table bound handling at PV nodes in
 // abdada_negamax. Before the fix, a PV node whose window a stored bound had
 // closed (alpha >= beta) kept searching: its children ran with inverted
 // windows, their beta cutoffs were stored as upper bounds, and a later
 // aspiration re-search that trusted one of those bounds published a wrong
-// "exact" root value (here 10 with a 4-point one-tile play instead of 8).
+// "exact" root value (here 10 with a 4-point one-tile play instead of 8, the
+// 2-ply value before greedy leaf playouts took the out bonus; it is now 16).
 // The trigger is a nine-thread race that hit roughly 4-6% of depth-2 solves
 // of this position before the fix and never at one thread, so this test
 // repeats the solve and is on-demand only (egttpvbound).
@@ -579,7 +812,7 @@ void test_endgame_tt_pv_bound_repeat(void) {
   EndgameCtx *endgame_ctx = NULL;
 
   const int num_solves = 400;
-  const int expected_score = 8;
+  const int expected_score = 16;
   for (int solve_idx = 0; solve_idx < num_solves; solve_idx++) {
     EndgameArgs endgame_args = {0};
     endgame_args.thread_control = config_get_thread_control(config);
@@ -623,12 +856,23 @@ void test_solve_standard(void) {
       "5SPORRAN2A/6ORE2N2D BGIV/DEHILOR 384/389 0 -lex NWL20",
       DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE, ERROR_STATUS_SUCCESS, 11, false,
       0);
+  // The same value without the best-reply shortcuts.
+  test_single_endgame(
+      "set -s1 score -s2 score -threads 6 -eplies 4 -ebestreply false",
+      "cgp "
+      "9A1PIXY/9S1L3/2ToWNLETS1O3/9U1DA1R/3GERANIAL1U1I/9g2T1C/8WE2OBI/"
+      "6EMU4ON/6AID3GO1/5HUN4ET1/4ZA1T4ME1/1Q1FAKEY3JOES/FIVE1E5IT1C/"
+      "5SPORRAN2A/6ORE2N2D BGIV/DEHILOR 384/389 0 -lex NWL20",
+      DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE, ERROR_STATUS_SUCCESS, 11, false,
+      0);
 }
 
-// Solve `cgp` single-threaded with the incremental move lists off and on
-// (separate solvers, so separate transposition tables) and return each run's
-// score and node count through the out-params.
+// Solve `cgp` single-threaded with the incremental move lists off or on and
+// the best-reply shortcuts off or on (a separate solver per call, so a
+// separate transposition table) and return the score and node count through
+// the out-params.
 static void solve_for_incremental_check(const char *cgp, bool incremental,
+                                        bool best_reply_shortcuts,
                                         int32_t *score_out,
                                         uint64_t *nodes_out) {
   Config *config =
@@ -644,6 +888,7 @@ static void solve_for_incremental_check(const char *cgp, bool incremental,
   args.use_heuristics = true;
   args.forced_pass_bypass = true;
   args.incremental_movegen = incremental;
+  args.disable_best_reply_shortcuts = !best_reply_shortcuts;
   args.num_top_moves = 1;
   args.seed = 42;
   EndgameCtx *ctx = NULL;
@@ -658,39 +903,46 @@ static void solve_for_incremental_check(const char *cgp, bool incremental,
   config_destroy(config);
 }
 
-// The incremental move lists must be invisible to the search: the same
-// score and, single-threaded, the same node count as scratch generation.
+// With the best-reply shortcuts on and off, the incremental move lists must be
+// invisible to the search of `cgp`: the same score and, single-threaded, the
+// same node count as scratch generation. (The shortcuts change the search
+// order, and their tie-break could change a leaf value, but these positions'
+// scores come out the same either way.)
+static void assert_incremental_movegen_identical(const char *cgp,
+                                                 int32_t expected_score) {
+  for (int shortcuts_idx = 0; shortcuts_idx < 2; shortcuts_idx++) {
+    const bool best_reply_shortcuts = shortcuts_idx == 0;
+    int32_t scratch_score = 0;
+    uint64_t scratch_nodes = 0;
+    solve_for_incremental_check(cgp, false, best_reply_shortcuts,
+                                &scratch_score, &scratch_nodes);
+    int32_t incremental_score = 0;
+    uint64_t incremental_nodes = 0;
+    solve_for_incremental_check(cgp, true, best_reply_shortcuts,
+                                &incremental_score, &incremental_nodes);
+    assert(scratch_score == expected_score);
+    assert(incremental_score == scratch_score);
+    assert(incremental_nodes == scratch_nodes);
+  }
+}
+
 void test_incremental_movegen_identical(void) {
-  const char *cgp =
+  assert_incremental_movegen_identical(
       "cgp "
       "9A1PIXY/9S1L3/2ToWNLETS1O3/9U1DA1R/3GERANIAL1U1I/9g2T1C/8WE2OBI/"
       "6EMU4ON/6AID3GO1/5HUN4ET1/4ZA1T4ME1/1Q1FAKEY3JOES/FIVE1E5IT1C/"
-      "5SPORRAN2A/6ORE2N2D BGIV/DEHILOR 384/389 0 -lex NWL20";
-  int32_t scratch_score = 0;
-  uint64_t scratch_nodes = 0;
-  solve_for_incremental_check(cgp, false, &scratch_score, &scratch_nodes);
-  int32_t incremental_score = 0;
-  uint64_t incremental_nodes = 0;
-  solve_for_incremental_check(cgp, true, &incremental_score,
-                              &incremental_nodes);
-  assert(scratch_score == 11);
-  assert(incremental_score == scratch_score);
-  assert(incremental_nodes == scratch_nodes);
+      "5SPORRAN2A/6ORE2N2D BGIV/DEHILOR 384/389 0 -lex NWL20",
+      11);
 
   // A stuck-tile position (JMZ against EIOS): the leaf playouts take the
   // stuck branch, whose full lists and the opponent's stuck fraction the
   // incremental lists then supply instead of scratch generation.
-  const char *stuck_cgp =
+  assert_incremental_movegen_identical(
       "cgp "
       "11CLAG/9BRAAI1/11N3/11D3/10BOW2/10ERA2/6A3A1R2/C2WEDDInGS1P1I/"
       "U1VOX1O3T3N/RHO1E1PERILUNES/FEM1A1T3Y3O/1HINT1I7U/2TO2V2GEED1L/"
-      "1AYU2ENTITLES1/QI1N3OAF1KEiR EIOS/JMZ 318/517 0 -lex CSW21";
-  solve_for_incremental_check(stuck_cgp, false, &scratch_score, &scratch_nodes);
-  solve_for_incremental_check(stuck_cgp, true, &incremental_score,
-                              &incremental_nodes);
-  assert(scratch_score == 60);
-  assert(incremental_score == scratch_score);
-  assert(incremental_nodes == scratch_nodes);
+      "1AYU2ENTITLES1/QI1N3OAF1KEiR EIOS/JMZ 318/517 0 -lex CSW21",
+      60);
 }
 
 void test_very_deep(void) {
@@ -1672,11 +1924,214 @@ static void test_root_pvs_actual_pass(void) {
   config_destroy(config);
 }
 
+typedef struct StopAfterDepth {
+  ThreadControl *thread_control;
+  int depth;
+} StopAfterDepth;
+
+// Interrupts the solve once iterative deepening completes stop->depth.
+static void stop_after_depth_callback(int depth, int32_t value,
+                                      const PVLine *pv_line, const Game *game,
+                                      const PVLine *ranked_pvs,
+                                      int num_ranked_pvs, void *user_data) {
+  (void)value;
+  (void)pv_line;
+  (void)game;
+  (void)ranked_pvs;
+  (void)num_ranked_pvs;
+  const StopAfterDepth *stop = (const StopAfterDepth *)user_data;
+  if (depth >= stop->depth) {
+    thread_control_set_status(stop->thread_control,
+                              THREAD_CONTROL_STATUS_USER_INTERRUPT);
+  }
+}
+
+// A time-limited solve requests MAX_SEARCH_DEPTH plies and lets the clock stop
+// iterative deepening, so its leaves sit far above the requested depth. They
+// must still play out to the end of the game, valuing a play that goes out at
+// its score plus twice the opponent's rack. When the leaf playout was capped at
+// MAX_SEARCH_DEPTH + 1 - plies moves (one), this position's 2-ply answer was a
+// move worth -7; three moves are worth +21 (exact values from full-depth
+// solves). The solve here stops after depth 2 through the per-ply callback
+// instead of a clock, so it is deterministic.
+static void test_time_limited_leaf_playout(void) {
+  Config *config = config_create_or_die("set -s1 score -s2 score -threads 1");
+  load_and_exec_config_or_die(
+      config, "cgp "
+              "W5JOE3V2/O5AMNIONIC1/WRiNKLY5B2/S6QUELLS2/10A4/5fATIGUE1UT/"
+              "4POZ3R2NA/3CEBOID1E2GI/3A6A2IT/3P6T2R1/3R6EH1D1/3O7UGS1/"
+              "3A7MA2/3T2LIEF1FE2/3E1HINDERS3 INOORTY/ADEEVX 372/532 0 "
+              "-lex CSW21;");
+  Game *game = config_get_game(config);
+  ThreadControl *thread_control = thread_control_create();
+  thread_control_set_status(thread_control, THREAD_CONTROL_STATUS_STARTED);
+  StopAfterDepth stop = {.thread_control = thread_control, .depth = 2};
+
+  EndgameArgs args = {0};
+  args.thread_control = thread_control;
+  args.game = game;
+  args.plies = MAX_SEARCH_DEPTH;
+  // Small enough that every desktop build gets the minimum table size.
+  args.tt_fraction_of_mem = 0.0001;
+  args.initial_small_move_arena_size = DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
+  args.num_threads = 1;
+  args.use_heuristics = true;
+  args.num_top_moves = 1;
+  args.incremental_movegen = true;
+  args.per_ply_callback = stop_after_depth_callback;
+  args.per_ply_callback_data = &stop;
+  args.seed = 42;
+
+  EndgameCtx *endgame_ctx = NULL;
+  EndgameResults *results = endgame_results_create();
+  ErrorStack *error_stack = error_stack_create();
+  endgame_solve(&endgame_ctx, &args, results, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  assert(endgame_results_get_depth(results, ENDGAME_RESULT_BEST) == 2);
+
+  const PVLine *pv = endgame_results_get_pvline(results, ENDGAME_RESULT_BEST);
+  assert(pv->num_moves >= 1);
+  // The three moves worth +21, by tiny_move code: 15A TOR(E), J9 TIRO and
+  // 15A ROT(E). The capped playout chose G5 R(AZO)O, worth -7.
+  const uint64_t chosen = pv->moves[0].tiny_move;
+  assert(chosen == 78337016704ULL || chosen == 4201102967315ULL ||
+         chosen == 86924854144ULL);
+
+  endgame_ctx_destroy(endgame_ctx);
+  endgame_results_destroy(results);
+  error_stack_destroy(error_stack);
+  thread_control_destroy(thread_control);
+  config_destroy(config);
+}
+
+static void test_endgame_played_move(void) {
+  Config *config = config_create_or_die(
+      "set -lex CSW24 -threads 1 -ttfraction 0.0001 -eplies 10 -etopk 1");
+  load_and_exec_config_or_die(
+      config, "cgp 2ABERRaNT4G/5HE6FE/5OS5CUR/5DI5OMA/1HARPIST4WEN/"
+              "5ET2Q3TI/6E1VIVO2A/4JUDY2ABOIL/4I2ERASERS1/1DOWLY8M/"
+              "4TaLEGGIO2I/7Z6C/7I3PUNK/7NONTONAL/7E2AX2E AD/EFU 467/497 0");
+  assert_config_exec_status(config, "endgame pass", ERROR_STATUS_SUCCESS);
+  EndgameResults *results = config_get_endgame_results(config);
+  assert(endgame_results_get_actual_move_found(results));
+  assert(endgame_results_get_value(results, ENDGAME_RESULT_ACTUAL) <
+         endgame_results_get_value(results, ENDGAME_RESULT_BEST));
+  char *output =
+      endgame_results_get_string(results, config_get_game(config), NULL);
+  assert(has_substring(output, "played pass"));
+  free(output);
+  assert_config_exec_status(config, "endgame 5K DA...", ERROR_STATUS_SUCCESS);
+  assert(endgame_results_get_actual_move_found(results));
+  assert_config_exec_status(config, "endgame 13H .D", ERROR_STATUS_SUCCESS);
+  assert(endgame_results_get_actual_move_found(results));
+  const int horizontal_value =
+      endgame_results_get_value(results, ENDGAME_RESULT_ACTUAL);
+  assert_config_exec_status(config, "endgame I13 D.", ERROR_STATUS_SUCCESS);
+  assert(endgame_results_get_actual_move_found(results));
+  assert(endgame_results_get_value(results, ENDGAME_RESULT_ACTUAL) ==
+         horizontal_value);
+  // The requested move belongs to this invocation, not subsequent searches.
+  assert_config_exec_status(config, "endgame", ERROR_STATUS_SUCCESS);
+  assert(!endgame_results_get_actual_move_found(results));
+  assert_config_exec_status(config, "endgame pass,pass",
+                            ERROR_STATUS_ENDGAME_INVALID_ACTUAL_MOVE);
+  assert(!endgame_results_get_actual_move_found(results));
+  assert(!endgame_results_get_valid_for_current_game_state(results));
+  config_destroy(config);
+}
+
+typedef struct PauseAfterDepth {
+  ThreadControl *control;
+  atomic_int depth;
+  atomic_bool paused;
+} PauseAfterDepth;
+
+static void pause_after_first_depth(int depth, int32_t value,
+                                    const PVLine *pv_line, const Game *game,
+                                    const PVLine *ranked_pvs,
+                                    int num_ranked_pvs, void *user_data) {
+  (void)value;
+  (void)pv_line;
+  (void)game;
+  (void)ranked_pvs;
+  (void)num_ranked_pvs;
+  PauseAfterDepth *pause = user_data;
+  assert(depth > atomic_load(&pause->depth));
+  atomic_store(&pause->depth, depth);
+  if (depth == 1) {
+    assert(thread_control_set_paused(pause->control, true));
+    atomic_store(&pause->paused, true);
+  }
+}
+
+static void *resume_endgame_search(void *data) {
+  const PauseAfterDepth *pause = data;
+  const int64_t deadline = ctimer_monotonic_ns() + INT64_C(10000000000);
+  while (!atomic_load(&pause->paused)) {
+    assert(ctimer_monotonic_ns() < deadline);
+    ctime_nap(0.001);
+  }
+  ctime_nap(0.05);
+  assert(atomic_load(&pause->depth) == 1);
+  assert(thread_control_get_status(pause->control) ==
+         THREAD_CONTROL_STATUS_STARTED);
+  assert(thread_control_set_paused(pause->control, false));
+  return NULL;
+}
+
+void test_endgame_pause(void) {
+  Config *config =
+      config_create_or_die("set -s1 score -s2 score -ttfraction 0.001");
+  load_and_exec_config_or_die(
+      config,
+      "cgp "
+      "GATELEGs1POGOED/R4MOOLI3X1/AA10U2/YU4BREDRIN2/1TITULE3E1IN1/1E4N3c1BOK/"
+      "1C2O4CHARD1/QI1FLAWN2E1OE1/IS2E1HIN1A1W2/1MOTIVATE1T1S2/1S2N5S4/"
+      "3PERJURY5/15/15/15 FV/AADIZ 442/388 0 -lex CSW24");
+  PauseAfterDepth pause = {.control = config_get_thread_control(config)};
+  atomic_init(&pause.depth, 0);
+  atomic_init(&pause.paused, false);
+  thread_control_set_status(pause.control, THREAD_CONTROL_STATUS_STARTED);
+  EndgameArgs args = {0};
+  args.thread_control = pause.control;
+  args.game = config_get_game(config);
+  args.plies = 25;
+  args.tt_fraction_of_mem = config_get_tt_fraction_of_mem(config);
+  args.initial_small_move_arena_size = DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
+  args.num_threads = 1;
+  args.use_heuristics = true;
+  args.forced_pass_bypass = true;
+  args.enable_pv_display = true;
+  args.num_top_moves = 1;
+  args.per_ply_callback = pause_after_first_depth;
+  args.per_ply_callback_data = &pause;
+  args.seed = 42;
+  cpthread_t controller;
+  cpthread_create(&controller, resume_endgame_search, &pause);
+  EndgameCtx *solver = NULL;
+  EndgameResults *results = config_get_endgame_results(config);
+  ErrorStack *errors = error_stack_create();
+  endgame_solve(&solver, &args, results, errors);
+  cpthread_join(controller);
+  assert(error_stack_is_empty(errors));
+  assert(atomic_load(&pause.paused));
+  assert(atomic_load(&pause.depth) > 1);
+  assert(endgame_results_get_depth(results, ENDGAME_RESULT_BEST) == 25);
+  assert(endgame_results_get_value(results, ENDGAME_RESULT_BEST) == -63);
+  endgame_ctx_destroy(solver);
+  error_stack_destroy(errors);
+  config_destroy(config);
+}
+
 void test_endgame(void) {
+  test_endgame_played_move();
   test_root_pvs_actual_pass();
   test_before_search_callback();
   test_single_pv_display();
   test_ctx_reuse();
+  test_exhausted_tree_stops_early();
+  test_fixed_depth_stepping();
+  test_fixed_depth_budget_keeps_every_depth();
   test_solve_standard();
   test_incremental_movegen_identical();
   test_path_move_lists();
@@ -1688,6 +2143,7 @@ void test_endgame(void) {
   test_2lex_ignorant();
   test_2lex_informed();
   test_endgame_interrupt();
+  test_time_limited_leaf_playout();
   // Cheap (sub-second) regression of the VIA mover-must-bingo case. The full
   // VIA depth/stress sweeps (viamover / viaopp / viastress) are on-demand only
   // — viamover re-solves plies 1..3 with display (~14s) and viastress runs 100
@@ -1837,6 +2293,7 @@ void test_multi_pv(void) {
 }
 
 void test_endgame_wasm(void) {
+  test_endgame_played_move();
   test_solve_standard();
   test_small_arena_realloc();
   test_pass_first();
