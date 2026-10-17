@@ -61,7 +61,6 @@ static void test_pass_path(int empty_side) {
       .move_record_type = MOVE_RECORD_ALL_SMALL,
       .move_sort_type = MOVE_SORT_SCORE,
       .target_equity = EQUITY_MAX_VALUE,
-      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
   };
   for (int side = 0; side < 2; side++) {
     Rack *rack = player_get_rack(game_get_player(game, side));
@@ -144,7 +143,6 @@ static void test_tile_placement_paths(void) {
       .move_record_type = MOVE_RECORD_ALL_SMALL,
       .move_sort_type = MOVE_SORT_SCORE,
       .target_equity = EQUITY_MAX_VALUE,
-      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
   };
   PathMoveLists *lists = path_move_lists_create();
   for (int position_idx = 0; position_idx < 2; position_idx++) {
@@ -295,7 +293,6 @@ static MoveGenArgs best_small_args_for(const Game *game, MoveList *move_list,
       .move_record_type = MOVE_RECORD_BEST_SMALL,
       .move_sort_type = MOVE_SORT_SCORE,
       .target_equity = EQUITY_MAX_VALUE,
-      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
   };
   return best_args;
 }
@@ -399,7 +396,6 @@ static void test_best_play_random_paths(void) {
       .move_record_type = MOVE_RECORD_ALL_SMALL,
       .move_sort_type = MOVE_SORT_SCORE,
       .target_equity = EQUITY_MAX_VALUE,
-      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
   };
   PathMoveLists *lists = path_move_lists_create();
   uint64_t rng = 0x9E3779B97F4A7C15ULL;
@@ -501,7 +497,6 @@ static void test_best_play_pass_path(int empty_side) {
       .move_record_type = MOVE_RECORD_ALL_SMALL,
       .move_sort_type = MOVE_SORT_SCORE,
       .target_equity = EQUITY_MAX_VALUE,
-      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
   };
   for (int side = 0; side < 2; side++) {
     Rack *rack = player_get_rack(game_get_player(game, side));

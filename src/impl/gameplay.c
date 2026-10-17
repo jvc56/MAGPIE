@@ -815,7 +815,6 @@ void generate_moves_for_game_override_record_type(
 
       .eq_margin_movegen = args->eq_margin_movegen,
       .target_equity = EQUITY_MAX_VALUE,
-      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
       .disable_pat = args->disable_pat,
       .pat_disabled_classes_mask = args->pat_disabled_classes_mask,
   };
@@ -842,8 +841,6 @@ const Move *get_top_equity_move_with_carry(Game *game, MoveList *move_list,
                             .override_kwg = NULL,
                             .eq_margin_movegen = 0,
                             .target_equity = EQUITY_MAX_VALUE,
-                            .target_leave_size_for_exchange_cutoff =
-                                UNSET_LEAVE_SIZE,
                             .best_move_carry = best_move_carry};
   generate_moves(&args);
   return move_list_get_move(move_list, 0);
@@ -873,9 +870,7 @@ const Move *get_top_move_for_player_on_turn(Game *game, MoveList *move_list,
   const MoveGenArgs args = {.game = game,
                             .move_list = move_list,
                             .eq_margin_movegen = 0,
-                            .target_equity = EQUITY_MAX_VALUE,
-                            .target_leave_size_for_exchange_cutoff =
-                                UNSET_LEAVE_SIZE};
+                            .target_equity = EQUITY_MAX_VALUE};
   generate_moves_for_game_override_record_type(
       &args, record_all ? MOVE_RECORD_ALL : MOVE_RECORD_BEST);
   if (record_all) {
@@ -884,18 +879,15 @@ const Move *get_top_move_for_player_on_turn(Game *game, MoveList *move_list,
   return move_list_get_move(move_list, 0);
 }
 
-Move *get_top_equity_move_for_inferences(
-    Game *game, MoveList *move_list, Equity target_equity,
-    int target_leave_size_for_exchange_cutoff, Equity equity_margin) {
+Move *get_top_equity_move_for_inferences(Game *game, MoveList *move_list,
+                                         Equity target_equity) {
   const MoveGenArgs args = {.game = game,
                             .move_list = move_list,
                             .move_record_type = MOVE_RECORD_BEST,
                             .move_sort_type = MOVE_SORT_EQUITY,
                             .override_kwg = NULL,
-                            .eq_margin_movegen = equity_margin,
+                            .eq_margin_movegen = 0,
                             .target_equity = target_equity,
-                            .target_leave_size_for_exchange_cutoff =
-                                target_leave_size_for_exchange_cutoff,
                             // Inference thresholds are built from score plus
                             // leave; the PAT term would misalign
                             // recorded equities with them.

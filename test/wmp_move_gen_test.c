@@ -637,7 +637,6 @@ generate_sorted_with_record_type(Game *game, move_record_t record_type,
       .move_sort_type = sort_type,
       .eq_margin_movegen = eq_margin,
       .target_equity = EQUITY_MAX_VALUE,
-      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
   };
   // Not generate_moves_for_game(): that replaces the record type with the
   // on-turn player's configured one.
@@ -854,7 +853,6 @@ static void test_shadow_playthrough_restoration(void) {
           .game = game,
           .move_list = list,
           .target_equity = EQUITY_MAX_VALUE,
-          .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
       };
       MoveGenArgs reference_args = args;
       reference_args.game = reference;
@@ -913,7 +911,6 @@ static void test_playthrough_moves_against_recursive(void) {
         .game = config_get_game(config),
         .move_list = list,
         .target_equity = EQUITY_MAX_VALUE,
-        .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
     };
     MoveGenArgs reference_args = args;
     reference_args.game = config_get_game(reference);
@@ -967,7 +964,6 @@ cutoff_modes_generate(Game *game, move_record_t record_type,
       .move_sort_type = sort_type,
       .eq_margin_movegen = eq_margin,
       .target_equity = EQUITY_MAX_VALUE,
-      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
   };
   // Not generate_moves_for_game(): that replaces the record type with the
   // on-turn player's configured one.
@@ -1250,7 +1246,6 @@ static void generate_until_first_play(Game *game, MoveList *move_list) {
       .move_sort_type = MOVE_SORT_EQUITY,
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MIN_VALUE,
-      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
   };
   generate_moves_for_game(&args);
 }
@@ -1262,7 +1257,6 @@ static void generate_all_sorted(Game *game, MoveList *move_list,
       .move_list = move_list,
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
-      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
   };
   generate_moves_for_game(&args);
   *sorted_out = sorted_move_list_create(move_list);

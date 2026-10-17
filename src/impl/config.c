@@ -3459,7 +3459,6 @@ void impl_move_gen_override_record_type(Config *config,
       .move_list = config->move_list,
       .eq_margin_movegen = config->eq_margin_movegen,
       .target_equity = EQUITY_MAX_VALUE,
-      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
   };
   generate_moves_for_game_override_record_type(&args, move_record_type);
   move_list_sort_moves(config->move_list);
@@ -4759,7 +4758,6 @@ config_generate_peg_bag_emptying_moves(const Config *config,
       .override_kwg = NULL,
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
-      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
       .move_list = move_list,
       .tiles_played_bv = NULL,
       .initial_tiles_bv = 0,
