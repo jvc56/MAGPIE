@@ -217,7 +217,8 @@ static const Move *autoplay_solver_solve_endgame(
       /*before_search_callback=*/NULL, /*before_search_callback_data=*/NULL,
       /*per_root_move_callback=*/NULL, /*per_root_move_callback_data=*/NULL,
       DUAL_LEXICON_MODE_IGNORANT, /*forced_pass_bypass=*/false,
-      /*incremental_movegen=*/true, /*enable_pv_display=*/false,
+      /*incremental_movegen=*/true, settings->disable_best_reply_shortcuts,
+      /*enable_pv_display=*/false,
       // No time limit: the depth bounds the work (see
       // AutoplaySolverSettings).
       /*soft_time_limit=*/0.0, /*hard_time_limit=*/0.0, seed,
@@ -353,7 +354,8 @@ static const Move *autoplay_solver_solve_peg(
       settings->peg_nested ? AUTOPLAY_SOLVER_NUM_NESTED_STRIDES : 0,
       /*nested_emptier_ply_cap=*/0,
       settings->peg_nested ? settings->peg_nested_max_depth : 0,
-      /*eval_bag_order=*/NULL, /*eval_bag_order_len=*/0, /*only_moves=*/NULL,
+      settings->disable_best_reply_shortcuts, /*eval_bag_order=*/NULL,
+      /*eval_bag_order_len=*/0, /*only_moves=*/NULL,
       /*n_only_moves=*/0, /*protect_moves=*/NULL, /*n_protect_moves=*/0,
       /*include_per_scenario=*/false, /*on_stage_start=*/NULL,
       /*on_cand_done=*/NULL, /*on_scenario_done=*/NULL, /*user_data=*/NULL,

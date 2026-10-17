@@ -13,9 +13,11 @@
 #include "../def/move_defs.h"
 #include "../def/players_data_defs.h"
 #include "../def/rack_defs.h"
+#include "../def/static_eval_defs.h"
 #include "../def/thread_control_defs.h"
 #include "../ent/anchor.h"
 #include "../ent/bag.h"
+#include "../ent/best_move_carry.h"
 #include "../ent/bit_rack.h"
 #include "../ent/board.h"
 #include "../ent/bonus_square.h"
@@ -50,6 +52,11 @@
 const WMPEntry wmp_entry_unresolved_sentinel = {0};
 
 #define INITIAL_LAST_ANCHOR_COL (BOARD_DIM)
+
+// The odd multiplier of gen_hash_lane's steps (MurmurHash3's fmix64).
+static const uint64_t LANE_HASH_MULTIPLIER = 0xFF51AFD7ED558CCDULL;
+static_assert(2 * BOARD_DIM <= 64,
+              "gen_seed_carried_best_move keeps a bit per lane in a uint64_t");
 
 // Cache move generators since destroying
 // and recreating a movegen for
@@ -620,7 +627,11 @@ static inline void update_best_move_or_insert_into_movelist(
           get_move_equity_for_sort_type(gen, current_move, score);
     }
     move_set_equity(current_move, move_equity_or_score);
-    if (compare_moves(current_move, gen_get_readonly_best_move(gen), false)) {
+    // A best move carried in from an earlier generation (see
+    // gen_seed_carried_best_move) is found again; only a better move
+    // replaces it.
+    if (compare_moves(current_move, gen_get_readonly_best_move(gen), true) ==
+        1) {
       need_to_update_best_move_equity_or_score = true;
       gen_switch_best_move_and_current_move(gen);
     }
@@ -657,7 +668,15 @@ static inline void update_best_move_or_insert_into_movelist(
     if (tiles_played == gen->best_small_out_rack_size) {
       move_equity_or_score += gen->best_small_out_bonus;
     }
-    if (move_equity_or_score > gen->best_move_equity_or_score) {
+    // With canonical ties, equal values go to the larger tiny_move, so the
+    // winner does not depend on the order in which anchors are searched. A tie
+    // leaves the cutoff unchanged, and the shadow pruning is strict (bound <
+    // cutoff), so an equal-valued rival is never pruned. Otherwise the first
+    // play found keeps the tie.
+    if (move_equity_or_score > gen->best_move_equity_or_score ||
+        (move_equity_or_score == gen->best_move_equity_or_score &&
+         gen->best_small_canonical_ties &&
+         best_sm->tiny_move > gen->move_list->small_moves[0]->tiny_move)) {
       need_to_update_best_move_equity_or_score = true;
       gen->best_move_equity_or_score = move_equity_or_score;
       // Swap spare_small_move into small_moves[0].
@@ -1076,7 +1095,11 @@ update_best_move_or_insert_into_movelist_wmp(MoveGen *gen, int start_col,
                                        gen, current_move, leave_value);
     }
     move_set_equity(current_move, move_equity_or_score);
-    if (compare_moves(current_move, gen_get_readonly_best_move(gen), false)) {
+    // A best move carried in from an earlier generation (see
+    // gen_seed_carried_best_move) is found again; only a better move
+    // replaces it.
+    if (compare_moves(current_move, gen_get_readonly_best_move(gen), true) ==
+        1) {
       need_to_update_best_move_equity_or_score = true;
       gen_switch_best_move_and_current_move(gen);
     }
@@ -3525,29 +3548,35 @@ void shadow_by_orientation(MoveGen *gen) {
   }
 }
 
-void shadow_by_orientation_small(MoveGen *gen) {
-  for (int row = 0; row < BOARD_DIM; row++) {
-    gen->current_row_index = row;
-    if (gen->row_number_of_anchors_cache[BOARD_DIM * gen->dir + row] == 0) {
-      continue;
-    }
-    gen->last_anchor_col = INITIAL_LAST_ANCHOR_COL;
-    gen->row_squares =
-        board_get_row_cache(gen->board_lanes, gen->current_row_index, gen->dir);
-    gen->wit_row_lane = board_get_wit_row_lane(
-        gen->board, gen->current_row_index, gen->dir, gen->cross_index);
-    gen->wit_len_lane = board_get_wit_len_lane(
-        gen->board, gen->current_row_index, gen->dir, gen->cross_index);
-    for (int col = 0; col < BOARD_DIM; col++) {
-      if (gen_cache_get_is_anchor(gen, col)) {
-        shadow_play_for_anchor_small(gen, col);
+// Shadows every anchor of lane `row` in the current gen->dir for BEST_SMALL.
+static inline __attribute__((always_inline)) void
+shadow_lane_small(MoveGen *gen, int row) {
+  gen->current_row_index = row;
+  if (gen->row_number_of_anchors_cache[BOARD_DIM * gen->dir + row] == 0) {
+    return;
+  }
+  gen->last_anchor_col = INITIAL_LAST_ANCHOR_COL;
+  gen->row_squares =
+      board_get_row_cache(gen->board_lanes, gen->current_row_index, gen->dir);
+  gen->wit_row_lane = board_get_wit_row_lane(gen->board, gen->current_row_index,
+                                             gen->dir, gen->cross_index);
+  gen->wit_len_lane = board_get_wit_len_lane(gen->board, gen->current_row_index,
+                                             gen->dir, gen->cross_index);
+  for (int col = 0; col < BOARD_DIM; col++) {
+    if (gen_cache_get_is_anchor(gen, col)) {
+      shadow_play_for_anchor_small(gen, col);
 
-        gen->last_anchor_col = col;
-        if (!gen_cache_is_empty(gen, col)) {
-          gen->last_anchor_col++;
-        }
+      gen->last_anchor_col = col;
+      if (!gen_cache_is_empty(gen, col)) {
+        gen->last_anchor_col++;
       }
     }
+  }
+}
+
+void shadow_by_orientation_small(MoveGen *gen) {
+  for (int row = 0; row < BOARD_DIM; row++) {
+    shadow_lane_small(gen, row);
   }
 }
 
@@ -3576,6 +3605,7 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
   gen->target_equity_cutoff = args->target_equity;
   gen->target_leave_size = args->target_leave_size_for_exchange_cutoff;
   gen->best_small_out_bonus = args->best_small_out_bonus;
+  gen->best_small_canonical_ties = args->best_small_canonical_ties;
 
   gen->board = game_get_board(game);
   gen->player_index = game_get_player_on_turn_index(game);
@@ -4150,6 +4180,310 @@ void generate_small_moves_in_lanes(const MoveGenArgs *args, uint64_t lane_mask,
   }
 }
 
+bool generate_best_small_move_in_lanes(const MoveGenArgs *args,
+                                       uint64_t lane_mask,
+                                       const SmallMove *incumbent,
+                                       Equity incumbent_value) {
+  MoveGen *gen = get_movegen();
+  gen_count_movegen(gen);
+  gen_load_position(gen, args);
+  assert(gen->move_record_type == MOVE_RECORD_BEST_SMALL);
+  if (incumbent != NULL) {
+    // The incumbent is the best so far, so the anchor heap prunes against it
+    // from the start and an equal-valued play must beat its tiny_move.
+    *gen->move_list->small_moves[0] = *incumbent;
+    gen->move_list->count = 1;
+    gen->best_move_equity_or_score = incumbent_value;
+    gen->cutoff_equity_or_score = incumbent_value;
+  }
+  rack_copy(&gen->full_player_rack, &gen->player_rack);
+  anchor_heap_reset(&gen->anchor_heap);
+  for (int dir = 0; dir < 2; dir++) {
+    gen->dir = dir;
+    for (int row = 0; row < BOARD_DIM; row++) {
+      if (((lane_mask >> (BOARD_DIM * dir + row)) & 1) != 0) {
+        shadow_lane_small(gen, row);
+      }
+    }
+  }
+  anchor_heapify_all(&gen->anchor_heap);
+  gen_record_scoring_plays(gen);
+  return gen->move_list->count > 0;
+}
+
+// Scores a remembered move on this board into move, or returns false when it
+// is not legal here. It is legal when every square it plays through holds the
+// letter it held, every square it fills is empty and allows its letter, the
+// squares just past its ends are empty, and it touches a tile, so it forms the
+// same main word and only valid cross words. Its score is the generator's sum
+// for those squares.
+static bool gen_score_carried_move(const MoveGen *gen,
+                                   const CarriedBestMove *carried, Move *move) {
+  const Move *carried_move = &carried->move;
+  const int dir = move_get_dir(carried_move);
+  const bool vertical = board_is_dir_vertical(dir);
+  const int lane = vertical ? move_get_col_start(carried_move)
+                            : move_get_row_start(carried_move);
+  const int start = vertical ? move_get_row_start(carried_move)
+                             : move_get_col_start(carried_move);
+  const int length = move_get_tiles_length(carried_move);
+  const Square *lane_squares = board_get_row_cache(gen->board_lanes, lane, dir);
+  if (start > 0 && square_get_letter(&lane_squares[start - 1]) !=
+                       ALPHABET_EMPTY_SQUARE_MARKER) {
+    return false;
+  }
+  if (start + length < BOARD_DIM &&
+      square_get_letter(&lane_squares[start + length]) !=
+          ALPHABET_EMPTY_SQUARE_MARKER) {
+    return false;
+  }
+  Equity main_word_score = 0;
+  int word_multiplier = 1;
+  Equity cross_scores = 0;
+  bool touches_a_tile = false;
+  for (int tile_idx = 0; tile_idx < length; tile_idx++) {
+    const Square *square = &lane_squares[start + tile_idx];
+    const MachineLetter board_ml = square_get_letter(square);
+    const MachineLetter ml = carried_move->tiles[tile_idx];
+    if (ml == PLAYED_THROUGH_MARKER) {
+      if (board_ml != carried->board_letters[tile_idx]) {
+        return false;
+      }
+      main_word_score += gen->tile_scores[board_ml];
+      touches_a_tile = true;
+      continue;
+    }
+    if (board_ml != ALPHABET_EMPTY_SQUARE_MARKER ||
+        square_get_is_brick(square) ||
+        !board_is_letter_allowed_in_cross_set(
+            square_get_cross_set(square), get_unblanked_machine_letter(ml))) {
+      return false;
+    }
+    const BonusSquare bonus_square = square_get_bonus_square(square);
+    const int this_word_multiplier =
+        bonus_square_get_word_multiplier(bonus_square);
+    const Equity letter_score =
+        gen->tile_scores[ml] * bonus_square_get_letter_multiplier(bonus_square);
+    main_word_score += letter_score;
+    word_multiplier *= this_word_multiplier;
+    if (square_get_is_cross_word(square)) {
+      cross_scores += (letter_score + square_get_cross_score(square)) *
+                      this_word_multiplier;
+      touches_a_tile = true;
+    }
+  }
+  if (!touches_a_tile) {
+    return false;
+  }
+  Equity bingo_bonus = 0;
+  if (move_get_tiles_played(carried_move) == RACK_SIZE) {
+    bingo_bonus = gen->bingo_bonus;
+  }
+  move_copy(move, carried_move);
+  move_set_score(move, main_word_score * word_multiplier + cross_scores +
+                           bingo_bonus);
+  return true;
+}
+
+// The equity the generator records for a scored tile placement from rack.
+static Equity gen_get_carried_move_equity(const MoveGen *gen, const Move *move,
+                                          const Rack *rack) {
+  Rack leave;
+  rack_copy(&leave, rack);
+  const int length = move_get_tiles_length(move);
+  for (int tile_idx = 0; tile_idx < length; tile_idx++) {
+    const MachineLetter ml = move->tiles[tile_idx];
+    if (ml == PLAYED_THROUGH_MARKER) {
+      continue;
+    }
+    rack_take_letter(&leave, get_is_blanked(ml) ? BLANK_MACHINE_LETTER : ml);
+  }
+  Equity leave_value = 0;
+  if (!rack_is_empty(&leave)) {
+    leave_value = klv_get_leave_value(gen->klv, &leave);
+  }
+  return static_eval_get_move_equity_with_leave_value(
+      &gen->ld, move, &leave, &gen->opponent_rack,
+      gen->opening_move_word_penalties, gen->opening_move_letter_penalties,
+      pat_eval_context_get_active_classes(&gen->pat_eval_ctx),
+      &gen->pat_eval_ctx, gen->board_number_of_tiles_played,
+      gen->number_of_tiles_in_bag, leave_value);
+}
+
+// Whether this generation can start from remembered moves and remember its
+// best: a best-by-equity generation with no target, on a board with tiles and
+// a bag with tiles, where leaves, scores and legality mean what they meant
+// when the moves were remembered.
+static bool gen_can_carry_best_moves(const MoveGen *gen,
+                                     const MoveGenArgs *args) {
+  return args->best_move_carry != NULL &&
+         gen->move_record_type == MOVE_RECORD_BEST &&
+         gen->move_sort_type == MOVE_SORT_EQUITY && !gen->stop_on_threshold &&
+         gen->target_leave_size == UNSET_LEAVE_SIZE && !gen->is_wordsmog &&
+         args->override_kwg == NULL && gen->number_of_tiles_in_bag > 0 &&
+         gen->board_number_of_tiles_played > 0;
+}
+
+// Hashes what decides which moves a lane holds and what they score: its
+// letters, bonus squares, anchors, and the cross sets, cross scores and
+// cross word flags of its empty squares. The extension sets are left out:
+// they only prune, and are computed from the lane's letters. Lanes without
+// anchors hold no moves and hash to 0, which no other lane hashes to.
+static uint64_t gen_hash_lane(const Square *lane_squares) {
+  // Two independent chains, so that they run in parallel. Each step is a
+  // bijection of the chain so far, so lanes that differ in one square's
+  // cross set or in one square's other fields always differ.
+  uint64_t cross_set_hash = UINT64_C(0x9E3779B97F4A7C15);
+  uint64_t square_hash = UINT64_C(0xC2B2AE3D27D4EB4F);
+  for (int col = 0; col < BOARD_DIM; col++) {
+    const Square *square = &lane_squares[col];
+    const uint64_t square_word =
+        (uint64_t)(uint32_t)square_get_cross_score(square) |
+        ((uint64_t)square_get_letter(square) << 32) |
+        ((uint64_t)square_get_bonus_square(square).raw << 40) |
+        ((uint64_t)square_get_anchor(square) << 48) |
+        ((uint64_t)square_get_is_cross_word(square) << 49);
+    cross_set_hash =
+        (cross_set_hash ^ square_get_cross_set(square)) * LANE_HASH_MULTIPLIER;
+    cross_set_hash ^= cross_set_hash >> 29;
+    square_hash = (square_hash ^ square_word) * LANE_HASH_MULTIPLIER;
+    square_hash ^= square_hash >> 29;
+  }
+  uint64_t hash = cross_set_hash * LANE_HASH_MULTIPLIER;
+  hash ^= hash >> 32;
+  hash = (hash ^ square_hash) * LANE_HASH_MULTIPLIER;
+  hash ^= hash >> 32;
+  return hash | 1;
+}
+
+static void gen_hash_lanes(const MoveGen *gen, uint64_t *lane_hashes) {
+  for (int dir = 0; dir < 2; dir++) {
+    for (int row = 0; row < BOARD_DIM; row++) {
+      const int lane = BOARD_DIM * dir + row;
+      lane_hashes[lane] = 0;
+      if (gen->row_number_of_anchors_cache[lane] != 0) {
+        lane_hashes[lane] =
+            gen_hash_lane(board_get_row_cache(gen->board_lanes, row, dir));
+      }
+    }
+  }
+}
+
+// Whether every move gets the same equity from the bag here as it did with
+// number_of_tiles_in_bag: the bag's only term is peg_adjust_values, which
+// no play from a bag that full reaches.
+static bool gen_bag_gives_same_equities(const MoveGen *gen,
+                                        int number_of_tiles_in_bag) {
+  return number_of_tiles_in_bag == gen->number_of_tiles_in_bag ||
+         (number_of_tiles_in_bag >= PEG_ADJUST_VALUES_LENGTH &&
+          gen->number_of_tiles_in_bag >= PEG_ADJUST_VALUES_LENGTH);
+}
+
+// The lanes a remembered move shows need not be searched, given the move
+// scored on this board (move): those whose hash is unchanged since the move
+// was best. Such a lane holds the same moves with the same scores, leaves
+// and, without PAT, equities as it did then, and the move beat each of them
+// under compare_moves. If it is no worse here, the generation's best move,
+// which is at least as good as it, beats them too.
+static uint64_t gen_get_unchanged_lanes(const MoveGen *gen,
+                                        const uint64_t *lane_hashes,
+                                        const CarriedBestMove *carried,
+                                        const Move *move) {
+  if (!carried->has_lane_hashes ||
+      !gen_bag_gives_same_equities(gen, carried->number_of_tiles_in_bag) ||
+      compare_moves(move, &carried->move, true) == 0) {
+    return 0;
+  }
+  uint64_t unchanged_lanes = 0;
+  for (int lane = 0; lane < 2 * BOARD_DIM; lane++) {
+    if (lane_hashes[lane] == carried->lane_hashes[lane]) {
+      unchanged_lanes |= (uint64_t)1 << lane;
+    }
+  }
+  return unchanged_lanes;
+}
+
+// Starts the generation from the best of the remembered moves for this rack
+// that are still legal, and drops every WMP anchor that cannot reach it. The
+// moves are found among the plays the generator would record, at the equity
+// it would record them with, and compare_moves breaks ties, so the
+// generation's best move is unchanged. Without PAT it also drops the lanes
+// gen_get_unchanged_lanes finds, by clearing their anchor counts.
+static void gen_seed_carried_best_move(MoveGen *gen, BestMoveCarry *carry,
+                                       const uint64_t *lane_hashes,
+                                       const Rack *rack) {
+  CarriedRackMoves rack_moves;
+  if (!best_move_carry_find(carry, rack, gen->player_index, &rack_moves)) {
+    return;
+  }
+  const bool can_skip_lanes = !gen_pat_is_active(gen);
+  uint64_t unchanged_lanes = 0;
+  bool seeded = false;
+  for (int move_idx = 0; move_idx < rack_moves.count; move_idx++) {
+    const CarriedBestMove *carried = &rack_moves.moves[move_idx];
+    Move *current_move = gen_get_current_move(gen);
+    if (!gen_score_carried_move(gen, carried, current_move)) {
+      continue;
+    }
+    move_set_equity(current_move,
+                    gen_get_carried_move_equity(gen, current_move, rack));
+    if (can_skip_lanes) {
+      unchanged_lanes |=
+          gen_get_unchanged_lanes(gen, lane_hashes, carried, current_move);
+    }
+    if (compare_moves(current_move, gen_get_readonly_best_move(gen), false)) {
+      gen_switch_best_move_and_current_move(gen);
+      seeded = true;
+    }
+  }
+  if (seeded) {
+    gen_update_cutoff_equity_or_score(gen);
+    // With no target, target_equity_cutoff is read only by
+    // wmp_move_gen_add_anchors, which drops anchors whose bound is below it.
+    gen->target_equity_cutoff =
+        move_get_equity(gen_get_readonly_best_move(gen));
+  }
+  for (int lane = 0; lane < 2 * BOARD_DIM; lane++) {
+    if (unchanged_lanes & ((uint64_t)1 << lane)) {
+      gen->row_number_of_anchors_cache[lane] = 0;
+    }
+  }
+}
+
+// Remembers the generation's best move for its rack. Plays of one tile are
+// left out: the generator records each in only one direction, and which one
+// depends on the board.
+static void gen_remember_best_move(const MoveGen *gen, BestMoveCarry *carry,
+                                   const uint64_t *lane_hashes,
+                                   const Rack *rack) {
+  const Move *best_move = gen_get_readonly_best_move(gen);
+  if (move_get_equity(best_move) == EQUITY_INITIAL_VALUE ||
+      move_get_type(best_move) != GAME_EVENT_TILE_PLACEMENT_MOVE ||
+      move_get_tiles_played(best_move) < 2) {
+    return;
+  }
+  CarriedBestMove carried;
+  move_copy(&carried.move, best_move);
+  carried.has_lane_hashes = !gen_pat_is_active(gen);
+  carried.number_of_tiles_in_bag = gen->number_of_tiles_in_bag;
+  if (carried.has_lane_hashes) {
+    memcpy(carried.lane_hashes, lane_hashes, sizeof(carried.lane_hashes));
+  }
+  const int dir = move_get_dir(best_move);
+  const bool vertical = board_is_dir_vertical(dir);
+  const int lane =
+      vertical ? move_get_col_start(best_move) : move_get_row_start(best_move);
+  const int start =
+      vertical ? move_get_row_start(best_move) : move_get_col_start(best_move);
+  const Square *lane_squares = board_get_row_cache(gen->board_lanes, lane, dir);
+  const int length = move_get_tiles_length(best_move);
+  for (int tile_idx = 0; tile_idx < length; tile_idx++) {
+    carried.board_letters[tile_idx] =
+        square_get_letter(&lane_squares[start + tile_idx]);
+  }
+  best_move_carry_add(carry, rack, gen->player_index, &carried);
+}
+
 void generate_moves(const MoveGenArgs *args) {
   MoveGen *gen = get_movegen();
   gen_count_movegen(gen);
@@ -4281,12 +4615,31 @@ void generate_moves(const MoveGenArgs *args) {
       return;
     }
 
+    const bool carry_best_moves = gen_can_carry_best_moves(gen, args);
+    uint64_t lane_hashes[2 * BOARD_DIM];
+    if (carry_best_moves) {
+      // Hashed before gen_seed_carried_best_move clears anchor counts, so
+      // that skipped lanes keep their hashes. With PAT no lane is skipped
+      // (see gen_get_unchanged_lanes), so none is hashed and the hashes are
+      // never read.
+      if (!gen_pat_is_active(gen)) {
+        gen_hash_lanes(gen, lane_hashes);
+      } else {
+        memset(lane_hashes, 0, sizeof(lane_hashes));
+      }
+      gen_seed_carried_best_move(gen, args->best_move_carry, lane_hashes,
+                                 &gen->player_rack);
+    }
     gen_shadow(gen);
     if (gen->threshold_exceeded) {
       gen_record_pass(gen);
       return;
     }
     gen_record_scoring_plays(gen);
+    if (carry_best_moves) {
+      gen_remember_best_move(gen, args->best_move_carry, lane_hashes,
+                             &gen->player_rack);
+    }
   }
   gen_record_pass(gen);
 }

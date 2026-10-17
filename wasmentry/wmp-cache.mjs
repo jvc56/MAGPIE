@@ -2,6 +2,7 @@ const DATABASE = "magpie-wmp";
 const DATABASE_VERSION = 1;
 const FORMAT = 2;
 // Bump whenever builder or pruning semantics change, even with identical KWG.
+// The name predates dropping the WIT; changing it would discard saved WMPs.
 const BUILDER = "wmp-wit-2026-10-review2";
 
 async function open() {
@@ -41,34 +42,46 @@ async function transaction(mode, perform) {
   }
 }
 
-export function listWMPs() {
-  return transaction("readonly", (tx) => tx.objectStore("metadata").getAll());
+// Earlier releases also saved a WIT beside each WMP. Nothing reads it now, so
+// delete it to free its storage; the WMP beside it stays valid.
+const witKey = (lexicon) => `${lexicon}:wit`;
+function dropSavedWIT(tx, metadata) {
+  if (!("wit_bytes" in metadata) && !("wit_sha256" in metadata)) return metadata;
+  const stripped = { ...metadata };
+  delete stripped.wit_bytes;
+  delete stripped.wit_sha256;
+  tx.objectStore("files").delete(witKey(metadata.lexicon));
+  tx.objectStore("metadata").put(stripped);
+  return stripped;
+}
+
+export async function listWMPs() {
+  let files = [];
+  await transaction("readwrite", (tx) => {
+    const request = tx.objectStore("metadata").getAll();
+    request.onsuccess = () => { files = request.result.map((metadata) => dropSavedWIT(tx, metadata)); };
+  });
+  return files;
 }
 export async function readWMP(lexicon, kwgHash) {
-  let metadata, wit;
+  let metadata;
   const data = await transaction("readonly", (tx) => {
     const request = tx.objectStore("metadata").get(lexicon);
     request.onsuccess = () => { metadata = request.result; };
-    const witRequest = tx.objectStore("files").get(`${lexicon}:wit`);
-    witRequest.onsuccess = () => { wit = witRequest.result; };
     return tx.objectStore("files").get(lexicon);
   });
   if (!metadata || metadata.format !== FORMAT || metadata.builder !== BUILDER || metadata.wmp_version !== 3 || metadata.board_dim !== 15 || metadata.kwg_sha256 !== kwgHash) return null;
   return data ? { metadata,
     bytes: new Uint8Array(data instanceof Blob ? await data.arrayBuffer() : data),
-    wit: wit ? new Uint8Array(wit instanceof Blob ? await wit.arrayBuffer() : wit) : null,
   } : null;
 }
-export async function saveWMP(lexicon, kwgHash, sha256, source, bytes, wit, witHash) {
+export async function saveWMP(lexicon, kwgHash, sha256, source, bytes) {
   const write = (useBlobs) => transaction("readwrite", (tx) => {
     const files = tx.objectStore("files");
-    const metadata = tx.objectStore("metadata");
-    metadata.put({ lexicon, format: FORMAT, builder: BUILDER, wmp_version: 3,
-      board_dim: 15, kwg_sha256: kwgHash, sha256, source, bytes: bytes.byteLength,
-      wit_bytes: wit?.byteLength || 0, wit_sha256: witHash || null });
+    tx.objectStore("metadata").put({ lexicon, format: FORMAT, builder: BUILDER, wmp_version: 3,
+      board_dim: 15, kwg_sha256: kwgHash, sha256, source, bytes: bytes.byteLength });
     files.put(useBlobs ? new Blob([bytes], { type: "application/octet-stream" }) : bytes, lexicon);
-    if (wit) files.put(useBlobs ? new Blob([wit], { type: "application/octet-stream" }) : wit, `${lexicon}:wit`);
-    else files.delete(`${lexicon}:wit`);
+    files.delete(witKey(lexicon));
   });
   try {
     await write(true);
@@ -83,7 +96,7 @@ export async function saveWMP(lexicon, kwgHash, sha256, source, bytes, wit, witH
 export function removeWMP(lexicon) {
   return transaction("readwrite", (tx) => {
     tx.objectStore("files").delete(lexicon);
-    tx.objectStore("files").delete(`${lexicon}:wit`);
+    tx.objectStore("files").delete(witKey(lexicon));
     tx.objectStore("metadata").delete(lexicon);
   });
 }

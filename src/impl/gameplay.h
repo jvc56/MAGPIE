@@ -3,6 +3,7 @@
 
 #include "../def/move_defs.h"
 #include "../ent/bag.h"
+#include "../ent/best_move_carry.h"
 #include "../ent/game.h"
 #include "../ent/game_history.h"
 #include "../ent/move.h"
@@ -23,6 +24,10 @@ void play_move_without_drawing_tiles(const Move *move, Game *game);
 void set_random_rack(const Game *game, int player_index,
                      const Rack *known_rack);
 const Move *get_top_equity_move(Game *game, MoveList *move_list);
+// get_top_equity_move, starting from and adding to the best moves remembered
+// in best_move_carry (see best_move_carry.h). The move is the same.
+const Move *get_top_equity_move_with_carry(Game *game, MoveList *move_list,
+                                           BestMoveCarry *best_move_carry);
 const Move *get_top_move_for_player_on_turn(Game *game, MoveList *move_list,
                                             bool record_all);
 Move *get_top_equity_move_for_inferences(

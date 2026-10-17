@@ -29,10 +29,18 @@
 #define WMP_BUILDER_VERSION 1
 #define RIT_BUILDER_VERSION 1
 
-// The word info table (`convert kwg2wit`): a per-substring letter mask move
-// generation prunes with, built from the .kwg alone. Checked the same way as
-// the other two: a table built from an older lexicon, or by an older builder,
-// prunes plays that exist.
+// The word info table: a per-substring letter mask move generation prunes
+// with, built from the .kwg alone. Checked the same way as the other two: a
+// table built from an older lexicon, or by an older builder, prunes plays that
+// exist.
+//
+// The builder this versions is `convert kwg2witv4`, the version 4 layout,
+// which is what birdtest's server and its workers build. `convert kwg2wit`
+// writes version 5, which is that file with two header bytes changed and
+// position-length rows appended. A load derives those rows from the rest of
+// the file, so they add nothing a hash needs to check, and leaving them out
+// of the checked file keeps its bytes what builder 1 always wrote: workers
+// from before version 5 and after it build the same file.
 #define WIT_BUILDER_VERSION 1
 
 // The KLV builder is versioned alongside them because birdtest's server now

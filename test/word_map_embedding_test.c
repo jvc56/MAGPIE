@@ -2,12 +2,15 @@
 
 #include "../src/compat/cfile.h"
 #include "../src/def/board_defs.h"
+#include "../src/def/letter_distribution_defs.h"
 #include "../src/def/wmp_defs.h"
+#include "../src/ent/dictionary_word.h"
 #include "../src/ent/wmp.h"
 #include "../src/ent/word_info_table.h"
 #include "../src/impl/cmd_api.h"
 #include "../src/impl/cmd_api_wmp.h"
 #include "../src/impl/wmp_maker.h"
+#include "../src/impl/word_info_table_maker.h"
 #include "../src/util/io_util.h"
 #include "../src/util/string_util.h"
 #include "test_platform.h"
@@ -135,6 +138,17 @@ static void test_map_permissions(const WMP *wmp, const WordInfoTable *wit) {
   free(directory);
 }
 
+// A WIT file is written like a WMP file. Its contents do not matter here, so a
+// one-word table keeps the test quick.
+static WordInfoTable *make_one_word_wit(void) {
+  DictionaryWordList *words = dictionary_word_list_create();
+  const MachineLetter at[] = {1, 20};
+  dictionary_word_list_add_word(words, at, 2);
+  WordInfoTable *wit = make_word_info_table_from_words(words);
+  dictionary_word_list_destroy(words);
+  return wit;
+}
+
 static void test_word_map_write_errno(const WMP *wmp) {
   if (!test_platform_can_limit_file_size()) {
     printf("word_map_embedding: skipped the full-disk case: no file size "
@@ -165,23 +179,19 @@ static void test_word_map_write_errno(const WMP *wmp) {
 
 void test_word_map_embedding(void) {
   assert(cmd_api_build_wmp(NULL, 1, NULL) == NULL);
-  assert(cmd_api_build_wit(NULL) == NULL);
-  assert(!cmd_api_install_wmp(NULL, NULL, NULL));
+  assert(!cmd_api_install_wmp(NULL, NULL));
   Magpie *failed = magpie_create("./nonexistent_data_path");
   assert(magpie_has_error(failed));
   assert(cmd_api_build_wmp(failed, 1, NULL) == NULL);
-  assert(cmd_api_build_wit(failed) == NULL);
-  assert(!cmd_api_install_wmp(failed, NULL, NULL));
+  assert(!cmd_api_install_wmp(failed, NULL));
   magpie_destroy(failed);
   Magpie *mp = magpie_create(DEFAULT_TEST_DATA_PATH);
   assert(!magpie_has_error(mp));
   WMPBuildProgress *progress = wmp_build_progress_create();
   assert(cmd_api_build_wmp(mp, 2, progress) == NULL);
-  assert(cmd_api_build_wit(mp) == NULL);
-  assert(!cmd_api_install_wmp(mp, NULL, NULL));
+  assert(!cmd_api_install_wmp(mp, NULL));
   free(magpie_get_and_clear_error(mp));
-  assert(magpie_run_sync(mp,
-                         "set -lex CSW24 -wmp false -wit false -numplays 20") ==
+  assert(magpie_run_sync(mp, "set -lex CSW24 -wmp false -numplays 20") ==
          MAGPIE_SUCCESS);
   assert(
       magpie_run_sync(
@@ -206,29 +216,31 @@ void test_word_map_embedding(void) {
   assert(stage == WMP_BUILD_INDEXES);
   assert(completed == BOARD_DIM - 1);
   assert(total == BOARD_DIM - 1);
-  WordInfoTable *wit = cmd_api_build_wit(mp);
-  assert(wit != NULL);
+  WordInfoTable *wit = make_one_word_wit();
   test_map_permissions(wmp, wit);
+  word_info_table_destroy(wit);
   // Failed installation leaves ownership with the caller and the engine usable.
   char *name = wmp->name;
   wmp->name = string_duplicate("wrong-lexicon");
-  assert(!cmd_api_install_wmp(mp, wmp, wit));
+  assert(!cmd_api_install_wmp(mp, wmp));
   free(wmp->name);
   wmp->name = name;
   assert(magpie_has_error(mp));
   free(magpie_get_and_clear_error(mp));
   assert(magpie_run_sync(mp, "set -l2 NWL23") == MAGPIE_SUCCESS);
-  assert(!cmd_api_install_wmp(mp, wmp, wit));
+  assert(!cmd_api_install_wmp(mp, wmp));
   assert(magpie_has_error(mp));
   free(magpie_get_and_clear_error(mp));
   assert(magpie_run_sync(mp, "generate") == MAGPIE_SUCCESS);
   assert(magpie_run_sync(mp, "set -l2 CSW24") == MAGPIE_SUCCESS);
   wmp->kwg_hash ^= 1;
-  assert(!cmd_api_install_wmp(mp, wmp, wit));
+  assert(!cmd_api_install_wmp(mp, wmp));
   wmp->kwg_hash ^= 1;
   wmp->ld_fingerprint ^= 1;
-  assert(!cmd_api_install_wmp(mp, wmp, wit));
+  assert(!cmd_api_install_wmp(mp, wmp));
   wmp->ld_fingerprint ^= 1;
+  assert(magpie_has_error(mp));
+  free(magpie_get_and_clear_error(mp));
   char small_output[32];
   FILE *limited_stream =
       test_platform_open_bounded_stream(small_output, sizeof(small_output));
@@ -243,28 +255,21 @@ void test_word_map_embedding(void) {
     printf("word_map_embedding: skipped the full-stream case: no bounded "
            "streams here\n");
   }
-  const uint64_t hash = wit->kwg_hash;
-  wit->kwg_hash ^= 1;
-  assert(!cmd_api_install_wmp(mp, wmp, wit));
-  wit->kwg_hash = hash;
-  assert(magpie_has_error(mp));
-  free(magpie_get_and_clear_error(mp));
   assert(magpie_run_async(
              mp, "simulate -it 100000000 -plies 7 -scond none -threads 1") ==
          MAGPIE_SUCCESS);
   assert(cmd_api_build_wmp(mp, 2, progress) == NULL);
-  assert(cmd_api_build_wit(mp) == NULL);
-  assert(!cmd_api_install_wmp(mp, wmp, wit));
+  assert(!cmd_api_install_wmp(mp, wmp));
   magpie_stop_current_command(mp);
   assert(magpie_await(mp) == MAGPIE_SUCCESS);
-  assert(cmd_api_install_wmp(mp, wmp, wit));
-  assert(magpie_run_sync(mp, "set -wmp true -wit true") == MAGPIE_SUCCESS);
+  assert(cmd_api_install_wmp(mp, wmp));
+  assert(magpie_run_sync(mp, "set -wmp true") == MAGPIE_SUCCESS);
   assert(magpie_run_sync(mp, "generate") == MAGPIE_SUCCESS);
   char *accelerated = magpie_get_last_command_output(mp);
   assert(strings_equal(baseline, accelerated));
   free(accelerated);
   free(baseline);
-  // The engine now owns both shared tables and destroys each only once.
+  // The engine now owns the shared table and destroys it only once.
   wmp_build_progress_destroy(progress);
   magpie_destroy(mp);
 }

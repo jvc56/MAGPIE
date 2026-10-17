@@ -354,7 +354,7 @@ export function analysisCommands(position, mode, settings) {
   if (explicitMoves && !explicitMoves.length) throw new Error("Select at least one play to simulate.");
   const displayCount = Math.max(101, explicitMoves?.length || 0);
   const commands = [
-    `set -lex ${position.lexicon} -wmp ${settings.wmp ? "true" : "false"} -wit ${settings.wmp ? "true" : "false"} -numplays ${explicitMoves?.length || (mode === "kibitz" ? 100 : settings.candidates)} -s1 equity -s2 equity -r1 all -r2 all -maxnumdplays ${mode === "sim" ? displayCount : 100} -shplies ${settings.plies} -ttfraction ${ttMiB / 256} -showbu false -shwithmoves false`,
+    `set -lex ${position.lexicon} -wmp ${settings.wmp ? "true" : "false"} -numplays ${explicitMoves?.length || (mode === "kibitz" ? 100 : settings.candidates)} -s1 equity -s2 equity -r1 all -r2 all -maxnumdplays ${mode === "sim" ? displayCount : 100} -shplies ${settings.plies} -ttfraction ${ttMiB / 256} -showbu false -shwithmoves false`,
     `cgp ${toCGP(prepared)}`,
   ];
   if (mode === "kibitz") commands.push("generate");

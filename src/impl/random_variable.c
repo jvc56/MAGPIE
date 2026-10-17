@@ -6,6 +6,7 @@
 #include "../def/rack_defs.h"
 #include "../ent/alias_method.h"
 #include "../ent/bag.h"
+#include "../ent/best_move_carry.h"
 #include "../ent/equity.h"
 #include "../ent/game.h"
 #include "../ent/inference_results.h"
@@ -441,6 +442,9 @@ typedef struct Simmer {
   bool bag_cycle;
   ThreadControl *thread_control;
   SimResults *sim_results;
+  // The best moves the current simulation's playouts found, by rack, shared
+  // by all of its workers.
+  BestMoveCarry *best_move_carry;
 } Simmer;
 
 // A worker's copy of the game plays the sim's rollouts, so both of its
@@ -558,7 +562,8 @@ static double sim_rollout(const Simmer *simmer, SimmerWorker *simmer_worker,
       break;
     }
 
-    const Move *best_play = get_top_equity_move(game, move_list);
+    const Move *best_play = get_top_equity_move_with_carry(
+        game, move_list, simmer->best_move_carry);
     rack_copy(&spare_rack, player_get_rack(player_on_turn));
 
     // On the final ply the resulting cross-sets are never read (no further move
@@ -800,6 +805,7 @@ void rv_sim_destroy(RandomVariables *rvs) {
     simmer_worker_destroy(simmer->workers[thread_index]);
   }
   free(simmer->workers);
+  best_move_carry_destroy(simmer->best_move_carry);
   free(simmer);
 }
 
@@ -865,6 +871,7 @@ RandomVariables *rv_sim_create(RandomVariables *rvs, const SimArgs *sim_args,
        thread_index++) {
     simmer->workers[thread_index] = simmer_create_worker(sim_args);
   }
+  simmer->best_move_carry = best_move_carry_create();
 
   simmer->win_pcts = sim_args->win_pcts;
   simmer->use_inference = sim_args->use_inference;
@@ -923,6 +930,7 @@ void rv_sim_reset(RandomVariables *rvs, const SimArgs *sim_args) {
        thread_index++) {
     simmer_reset_worker(simmer->workers[thread_index], sim_args);
   }
+  best_move_carry_reset(simmer->best_move_carry);
 
   simmer->win_pcts = sim_args->win_pcts;
   simmer->use_inference = sim_args->use_inference;

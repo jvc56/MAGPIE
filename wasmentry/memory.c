@@ -55,8 +55,8 @@ int wasm_peg_memory_fits(int workers) {
   // ample reusable memory fragmented by earlier simulations or map builds.
   // ABORTING_MALLOC=0 lets refused growth return NULL. Release every block,
   // including after a failed probe, before trying a smaller worker count.
-  // Scratch is many smaller allocations (including ~5 MiB move lists), not
-  // one 64 MiB buffer per worker. Keep the full reserve but probe it in chunks.
+  // Scratch is many allocations of at most a few MiB, not one 64 MiB buffer
+  // per worker. Keep the full reserve but probe it in chunks.
   void *reservations[WASM_PEG_MAX_RESERVATIONS];
   const int stack_count = workers > 1 ? workers : 0;
   const int count =

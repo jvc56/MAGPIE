@@ -178,6 +178,7 @@ typedef enum {
   ARG_TOKEN_ENDGAME_PLIES,
   ARG_TOKEN_ENDGAME_TOP_K,
   ARG_TOKEN_ENDGAME_TIME_LIMIT,
+  ARG_TOKEN_ENDGAME_BEST_REPLY,
   ARG_TOKEN_PEG_TOP_K,
   ARG_TOKEN_PEG_TIME_LIMIT,
   ARG_TOKEN_PEG_STRIDE,
@@ -428,6 +429,9 @@ struct Config {
   int shplies;
   int endgame_plies;
   int endgame_top_k;
+  // The endgame solver's best-reply shortcuts (-ebestreply); see
+  // EndgameArgs.disable_best_reply_shortcuts.
+  bool endgame_best_reply_shortcuts;
   // PEG scenario-sampling stride (halving stages, bag >= 3). 0 = solver
   // default.
   int peg_num_stages;
@@ -1540,10 +1544,14 @@ static const char *convert_help(const char **usages, const char **examples) {
          "input and output name, using different file extensions. The letter "
          "distribution defaults to the lexicon's distribution. Types include "
          "text2kwg, text2wordmap, dawg2wordmap, dawg2text, csv2klv, klv2csv, "
-         "klvwmp2rit, rackequity2klv, kwg2wit, kwg2witifneeded and winpct. "
+         "klvwmp2rit, rackequity2klv, kwg2wit, kwg2witifneeded, kwg2witv4 and "
+         "winpct. "
          "kwg2wit reads the KWG and creates ordinary and positional "
          "word-info tables; kwg2witifneeded preserves a current matching "
-         "table and otherwise rebuilds it before use. klvwmp2rit optionally "
+         "table and otherwise rebuilds it before use. kwg2witv4 writes the "
+         "same table in the version 4 layout, without the position-length "
+         "rows a load then derives; birdtest builds and checks that one. "
+         "klvwmp2rit optionally "
          "takes the KLV's and the wordmap's names separately, since a rack "
          "info table stores precomputed leave values and so belongs to a "
          "(lexicon, leaves) pair rather than to either input. rackequity2klv "
@@ -2221,6 +2229,19 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       usages[0] = "<time_limit_seconds>";
       text = "Specifies the time limit in seconds for the endgame solver. A "
              "value of 0 (the default) falls back to -tlim.";
+      break;
+    case ARG_TOKEN_ENDGAME_BEST_REPLY:
+      usages[0] = "<true/false>";
+      examples[0] = "false";
+      text = "Endgame solver shortcuts next to the leaves: true (default) = "
+             "find the side to move's best play there without generating its "
+             "whole move list, and search it first one ply above the leaves; "
+             "false = generate every list. Applies to endgame and pre-endgame "
+             "solves, including those of autoplay's -eplies1/-eplies2 "
+             "players. The shortcuts break ties between equal-scoring greedy "
+             "playout plays in a fixed order rather than generation order, "
+             "so leaf values, and with them a solve's values, can differ "
+             "slightly between the two settings.";
       break;
     case ARG_TOKEN_PEG_TIME_LIMIT:
       usages[0] = "<time_limit_seconds>";
@@ -3037,6 +3058,7 @@ char *impl_help(Config *config, ErrorStack *error_stack) {
     // Game Analysis Options (alphabetical by name)
     static const arg_token_t game_analysis_opts[] = {
         ARG_TOKEN_CUTOFF,                  /* cutoff */
+        ARG_TOKEN_ENDGAME_BEST_REPLY,      /* ebestreply */
         ARG_TOKEN_ENDGAME_PLIES,           /* eplies */
         ARG_TOKEN_P1_ENDGAME_PLIES,        /* eplies1 */
         ARG_TOKEN_P2_ENDGAME_PLIES,        /* eplies2 */
@@ -4211,6 +4233,7 @@ void config_fill_endgame_args(Config *config, EndgameArgs *endgame_args) {
       /*per_root_move_callback=*/NULL, /*per_root_move_callback_data=*/NULL,
       DUAL_LEXICON_MODE_IGNORANT, /*forced_pass_bypass=*/false,
       /*incremental_movegen=*/true,
+      /*disable_best_reply_shortcuts=*/!config->endgame_best_reply_shortcuts,
       /*enable_pv_display=*/true,
       /*soft_time_limit=*/config->endgame_time_limit_seconds,
       /*hard_time_limit=*/config->endgame_time_limit_seconds, config->seed,
@@ -4461,7 +4484,8 @@ static void config_load_movegen_budgets(Config *config,
 }
 
 // The autoplay endgame and pre-endgame options: per player, plus the nested
-// lookahead knobs, which set both players. See AutoplaySolverSettings.
+// lookahead knobs and -ebestreply, which set both players. See
+// AutoplaySolverSettings.
 static void config_load_solver_settings(Config *config,
                                         ErrorStack *error_stack) {
   static const arg_token_t plies_tokens[2] = {ARG_TOKEN_P1_ENDGAME_PLIES,
@@ -4566,6 +4590,18 @@ static void config_load_solver_settings(Config *config,
       }
     }
   }
+  if (config_get_parg_value(config, ARG_TOKEN_ENDGAME_BEST_REPLY, 0)) {
+    bool best_reply_shortcuts = true;
+    config_load_bool(config, ARG_TOKEN_ENDGAME_BEST_REPLY,
+                     &best_reply_shortcuts, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+    config->solver_settings[0].disable_best_reply_shortcuts =
+        !best_reply_shortcuts;
+    config->solver_settings[1].disable_best_reply_shortcuts =
+        !best_reply_shortcuts;
+  }
 }
 
 static void config_load_peg_stage_top_k(Config *config,
@@ -4647,7 +4683,9 @@ void config_fill_peg_args(Config *config, PegArgs *peg_args) {
             sizeof(PEG_NESTED_DEFAULT_CAND_CAPS[0])),
       /*nested_stride=*/0, /*nested_strides_by_bag=*/NULL,
       /*nested_n_strides_by_bag=*/0, /*nested_emptier_ply_cap=*/0,
-      PEG_NESTED_DEFAULT_DEPTH, /*eval_bag_order=*/NULL,
+      PEG_NESTED_DEFAULT_DEPTH,
+      /*disable_best_reply_shortcuts=*/!config->endgame_best_reply_shortcuts,
+      /*eval_bag_order=*/NULL,
       /*eval_bag_order_len=*/0, /*only_moves=*/NULL, /*n_only_moves=*/0,
       /*protect_moves=*/NULL, /*n_protect_moves=*/0,
       /*include_per_scenario=*/config->peg_show_outcomes,
@@ -9276,10 +9314,13 @@ static bool config_contribute_ensure_word_info_table(
   }
   thread_control_print_formatted(
       config->thread_control, "building the word info table for %s\n", lexicon);
-  // `kwg2wit` rather than `kwg2witifneeded`: the second keeps a table it
+  // `kwg2witv4` rather than `kwg2witifneeded`: the second keeps a table it
   // judges current, and this one has just been found not to be the table the
-  // job pins.
-  contribute_convert(config, "kwg2wit", lexicon, ld_name, /*klv_name=*/NULL,
+  // job pins. And the version 4 layout rather than `kwg2wit`'s version 5,
+  // because that is what the server builds and pins: a version 5 file is the
+  // same table plus rows a load derives, and leaving them out keeps this
+  // worker's bytes the same as those of a worker from before version 5.
+  contribute_convert(config, "kwg2witv4", lexicon, ld_name, /*klv_name=*/NULL,
                      /*wmp_name=*/NULL, error_stack);
   if (contribute_build_hit_storage(error_stack)) {
     contribute_unlock_build(lock_fd);
@@ -11956,6 +11997,12 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
     return;
   }
 
+  config_load_bool(config, ARG_TOKEN_ENDGAME_BEST_REPLY,
+                   &config->endgame_best_reply_shortcuts, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
   config_load_double(config, ARG_TOKEN_ENDGAME_TIME_LIMIT, 0, 1e9,
                      &config->endgame_time_limit_seconds, error_stack);
   if (!error_stack_is_empty(error_stack)) {
@@ -14227,6 +14274,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_ENDGAME_PLIES, "eplies", 1, 1);
   arg(ARG_TOKEN_ENDGAME_TOP_K, "etopk", 1, 1);
   arg(ARG_TOKEN_ENDGAME_TIME_LIMIT, "etlim", 1, 1);
+  arg(ARG_TOKEN_ENDGAME_BEST_REPLY, "ebestreply", 1, 1);
   arg(ARG_TOKEN_PEG_TOP_K, "pegtopk", 1, 1);
   arg(ARG_TOKEN_PEG_TIME_LIMIT, "pegtlim", 1, 1);
   arg(ARG_TOKEN_PEG_STRIDE, "pegstride", 1, 1);
@@ -14376,6 +14424,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->show_bu = false;
   config->endgame_plies = 6;
   config->endgame_top_k = 1;
+  config->endgame_best_reply_shortcuts = true;
   // -1 = no peg results yet; 0 stages = built-in schedule; 0 stride = solver
   // default; rational opponent; no only-solve / never-prune restrictions.
   config->peg_result.last_completed_stage = -1;
@@ -14940,6 +14989,10 @@ void config_add_settings_to_string_builder(const Config *config,
     case ARG_TOKEN_ENDGAME_TOP_K:
       config_add_int_setting_to_string_builder(config, sb, arg_token,
                                                config->endgame_top_k);
+      break;
+    case ARG_TOKEN_ENDGAME_BEST_REPLY:
+      config_add_bool_setting_to_string_builder(
+          config, sb, arg_token, config->endgame_best_reply_shortcuts);
       break;
     case ARG_TOKEN_ENDGAME_TIME_LIMIT:
       config_add_double_setting_to_string_builder(
