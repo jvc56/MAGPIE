@@ -24,10 +24,22 @@ typedef enum {
   CONVERT_TEXT2WORDMAP,
   CONVERT_DAWG2WORDMAP,
   CONVERT_KLVWMP2RIT,
+  // A generation's aggregated full-rack results (rack,count,equity_sum) into
+  // the KLV those results imply. See convert.c.
+  CONVERT_RACKEQUITY2KLV,
   CONVERT_KWG2WIT,
   CONVERT_KWG2WIT_IF_NEEDED,
+  // Like CONVERT_KWG2WIT, in the version 4 layout: without the position-length
+  // rows, which a load derives. What birdtest builds and checks (see
+  // WIT_BUILDER_VERSION in builder_defs.h).
+  CONVERT_KWG2WIT_V4,
   // Smooths a recorded win percentage table into a new one.
   CONVERT_WINPCT,
+  CONVERT_COUNTS2XSW,
+  CONVERT_CGP2XSP,
+  CONVERT_XSP2CGP,
+  CONVERT_GCG2XSG,
+  CONVERT_XSG2GCG,
   CONVERT_UNKNOWN,
 } conversion_type_t;
 

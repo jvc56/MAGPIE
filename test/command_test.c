@@ -1,25 +1,26 @@
 #include "command_test.h"
 
+#include "../src/compat/cfile.h"
 #include "../src/compat/cpthread.h"
+#include "../src/compat/cpthread_defs.h"
 #include "../src/compat/ctime.h"
 #include "../src/compat/linenoise.h"
-#include "../src/def/cpthread_defs.h"
 #include "../src/def/exec_defs.h"
 #include "../src/def/thread_control_defs.h"
 #include "../src/ent/move.h"
 #include "../src/ent/thread_control.h"
+#include "../src/impl/command_input.h"
 #include "../src/impl/config.h"
 #include "../src/impl/exec.h"
 #include "../src/util/io_util.h"
 #include "../src/util/string_util.h"
 #include "test_constants.h"
+#include "test_platform.h"
 #include "test_util.h"
 #include <assert.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <sys/stat.h>
-#include <unistd.h>
 
 #define DEFAULT_NAP_TIME 0.01
 
@@ -189,7 +190,6 @@ void assert_command_status_and_output(Config *config, const char *command,
   async_args.cmd = command;
   cpthread_t sync_cmd_thread;
   cpthread_create(&sync_cmd_thread, sync_cmd_thread_worker, &async_args);
-  cpthread_detach(sync_cmd_thread);
 
   // Let the async command start up
   ctime_nap(DEFAULT_NAP_TIME);
@@ -199,6 +199,10 @@ void assert_command_status_and_output(Config *config, const char *command,
     free(status_string);
   }
   block_for_search(config, seconds_to_wait);
+  // The worker reads async_args, which lives on this stack, and a worker the
+  // scheduler starts late can find the previous command's FINISHED status
+  // still set, so block_for_search may return before it has run: wait for it.
+  cpthread_join(sync_cmd_thread);
 
   if (!error_stack_is_empty(error_stack)) {
     error_stack_print_and_reset(error_stack);
@@ -424,13 +428,8 @@ void test_process_command(const char *arg_string, const char *output_substr,
   char *test_output_filename = get_test_filename("output");
   char *test_outerror_filename = get_test_filename("outerror");
 
-  const char *disable_save_settings = "";
-  if (!has_substring(arg_string, "-saves")) {
-    disable_save_settings = "-savesettings false";
-  }
-
-  char *arg_string_with_exec = get_formatted_string(
-      "./bin/magpie %s %s", arg_string, disable_save_settings);
+  char *arg_string_with_exec =
+      get_formatted_string("./bin/magpie %s", arg_string);
 
   // Reset the contents of output
   fclose_or_die(fopen_or_die(test_output_filename, "w"));
@@ -508,21 +507,12 @@ void *test_process_command_async(void *uncasted_process_args) {
 }
 
 void test_exec_async_command(void) {
-  char *test_input_filename = get_test_filename("input");
-
-  // Reset the contents of input
-  unlink(test_input_filename);
-
-  // Create the FIFO if it doesn't exist
-  if (mkfifo(test_input_filename, 0666) == -1) {
-    perror("mkfifo");
-  }
-
-  FILE *input_writer = fopen_or_die(test_input_filename, "w+");
-  FILE *input_reader = fopen_or_die(test_input_filename, "r");
+  FILE *input_reader = NULL;
+  FILE *input_writer = NULL;
+  test_platform_open_pipe(&input_reader, &input_writer);
   command_test_set_stream_in(input_reader);
 
-  // Input comes from a FIFO rather than a terminal, so a command sent
+  // Input comes from a pipe rather than a terminal, so a command sent
   // while another runs is queued rather than rejected.
   ProcessArgs *process_args = process_args_create(
       "set -mode async -printonfinish true", "autoplay", 0, "");
@@ -547,7 +537,7 @@ void test_exec_async_command(void) {
       "autoplay game 10000000 -lex CSW21 -s1 equity -s2 equity  -gp false\n");
   fflush_or_die(input_writer);
   // Try to immediately start another command while the previous one
-  // is still running. From a FIFO this is queued and runs after the stop
+  // is still running. From a pipe this is queued and runs after the stop
   // below.
   fprintf_or_die(
       input_writer,
@@ -572,10 +562,9 @@ void test_exec_async_command(void) {
   block_for_process_command(process_args, 5);
 
   fclose_or_die(input_writer);
+  command_input_release_stream(input_reader);
   fclose_or_die(input_reader);
-  delete_fifo(test_input_filename);
   process_args_destroy(process_args);
-  free(test_input_filename);
   command_test_reset_stream_in();
 }
 
@@ -586,7 +575,7 @@ void test_exec_async_script(void) {
   char *test_input_filename = get_test_filename("input");
 
   // Reset the contents of input
-  unlink(test_input_filename);
+  delete_file(test_input_filename);
 
   FILE *input_writer = fopen_or_die(test_input_filename, "w+");
   FILE *input_reader = fopen_or_die(test_input_filename, "r");
@@ -610,8 +599,9 @@ void test_exec_async_script(void) {
   // Wait for magpie to quit
   block_for_process_command(process_args, 60);
 
+  command_input_release_stream(input_reader);
   fclose_or_die(input_reader);
-  delete_fifo(test_input_filename);
+  delete_file(test_input_filename);
   process_args_destroy(process_args);
   free(test_input_filename);
   command_test_reset_stream_in();
@@ -621,7 +611,7 @@ void test_exec_sync_command(void) {
   char *test_input_filename = get_test_filename("input");
 
   // Reset the contents of input
-  unlink(test_input_filename);
+  delete_file(test_input_filename);
 
   FILE *input_writer = fopen_or_die(test_input_filename, "w+");
   FILE *input_reader = fopen_or_die(test_input_filename, "r");
@@ -657,8 +647,9 @@ void test_exec_sync_command(void) {
   // Wait for magpie to quit
   block_for_process_command(process_args, 30);
 
+  command_input_release_stream(input_reader);
   fclose_or_die(input_reader);
-  delete_fifo(test_input_filename);
+  delete_file(test_input_filename);
   process_args_destroy(process_args);
   free(config_load_error_substr);
   free(test_input_filename);
@@ -673,7 +664,7 @@ void run_short_autoplay(const char *initial_cmd) {
   char *test_input_filename = get_test_filename("input");
 
   // Reset the contents of input
-  unlink(test_input_filename);
+  delete_file(test_input_filename);
 
   FILE *input_writer = fopen_or_die(test_input_filename, "w+");
   FILE *input_reader = fopen_or_die(test_input_filename, "r");
@@ -694,8 +685,9 @@ void run_short_autoplay(const char *initial_cmd) {
   // Wait for magpie to quit
   block_for_process_command(process_args, 5);
 
+  command_input_release_stream(input_reader);
   fclose_or_die(input_reader);
-  delete_fifo(test_input_filename);
+  delete_file(test_input_filename);
   process_args_destroy(process_args);
   free(test_input_filename);
   command_test_reset_stream_in();
@@ -706,7 +698,7 @@ void run_short_autoplay_with_terminate_command(const char *initial_cmd,
   char *test_input_filename = get_test_filename("input");
 
   // Reset the contents of input
-  unlink(test_input_filename);
+  delete_file(test_input_filename);
 
   FILE *input_writer = fopen_or_die(test_input_filename, "w+");
   FILE *input_reader = fopen_or_die(test_input_filename, "r");
@@ -727,8 +719,9 @@ void run_short_autoplay_with_terminate_command(const char *initial_cmd,
   // Wait for magpie to quit
   block_for_process_command(process_args, 5);
 
+  command_input_release_stream(input_reader);
   fclose_or_die(input_reader);
-  delete_fifo(test_input_filename);
+  delete_file(test_input_filename);
   process_args_destroy(process_args);
   free(test_input_filename);
   command_test_reset_stream_in();
@@ -769,6 +762,29 @@ void test_save_settings(void) {
   free(save2);
 }
 
+// Unless the command line sets -savesettings true, MAGPIE neither writes the
+// settings file nor reads it.
+void test_settings_file_off_by_default(void) {
+  delete_file(DEFAULT_TEST_SETTINGS_FILENAME);
+  run_short_autoplay("set -mode sync -lex CSW21 -bb 73 -gp true -hr false");
+  assert(!cfile_access(DEFAULT_TEST_SETTINGS_FILENAME, CFILE_ACCESS_EXISTS));
+
+  // A settings file that fails to load shows whether it was read.
+  FILE *settings_file = fopen_or_die(DEFAULT_TEST_SETTINGS_FILENAME, "w");
+  fprintf_or_die(settings_file, "set -plies 2h3\n");
+  fclose_or_die(settings_file);
+  char *plies_error_substr = get_formatted_string(
+      "error %d", ERROR_STATUS_CONFIG_LOAD_MALFORMED_INT_ARG);
+  test_process_command("infer 1 MUZAKY 58 -numplays 20 -threads 4 -lex CSW21 "
+                       "-printonfinish true",
+                       "Total target racks", 0, NULL);
+  test_process_command("infer 1 MUZAKY 58 -numplays 20 -threads 4 -lex CSW21 "
+                       "-printonfinish true -savesettings true",
+                       NULL, 2, plies_error_substr);
+  free(plies_error_substr);
+  remove_or_die(DEFAULT_TEST_SETTINGS_FILENAME);
+}
+
 void test_command(void) {
   test_exec_single_command();
   test_command_execution();
@@ -777,6 +793,7 @@ void test_command(void) {
   test_exec_sync_command();
   test_exec_quit_aliases();
   test_save_settings();
+  test_settings_file_off_by_default();
   command_test_reset_stream_out();
   command_test_reset_stream_err();
   command_test_reset_stream_in();

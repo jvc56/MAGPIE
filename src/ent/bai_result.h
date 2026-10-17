@@ -11,6 +11,8 @@ typedef enum {
   BAI_RESULT_STATUS_SAMPLE_LIMIT,
   BAI_RESULT_STATUS_TIMEOUT,
   BAI_RESULT_STATUS_USER_INTERRUPT,
+  // The player's movegen budget for the move ran out (-movebudget).
+  BAI_RESULT_STATUS_MOVEGEN_BUDGET,
 } bai_result_status_t;
 
 typedef struct BAIResult BAIResult;
@@ -21,7 +23,14 @@ BAIResult *bai_result_duplicate(const BAIResult *bai_result);
 void bai_result_destroy(BAIResult *bai_result);
 void bai_result_set_best_arm(BAIResult *bai_result, int best_arm);
 int bai_result_get_best_arm(const BAIResult *bai_result);
+// Samples in the final statistics, which excludes any sample still in flight
+// when the sim stopped.
+void bai_result_set_num_samples(BAIResult *bai_result, uint64_t num_samples);
+uint64_t bai_result_get_num_samples(const BAIResult *bai_result);
 bai_result_status_t bai_result_get_status(BAIResult *bai_result);
+// Sets `status` unless a status is already set, which stands.
+void bai_result_set_status_if_none(BAIResult *bai_result,
+                                   bai_result_status_t status);
 void bai_result_set_status(BAIResult *bai_result,
                            const bai_result_status_t status);
 bai_result_status_t bai_result_set_and_get_status(BAIResult *bai_result,
