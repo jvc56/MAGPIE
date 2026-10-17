@@ -70,9 +70,11 @@ bool within_epsilon(double a, double b) { return fabs(a - b) < TEST_EPSILON; }
 void assert_inference_results_equal(InferenceResults *results_a,
                                     InferenceResults *results_b, int ld_size) {
   for (int type_idx = 0; type_idx < NUMBER_OF_INFER_TYPES; type_idx++) {
-    const inference_stat_t type = (inference_stat_t)type_idx;
-    const Stat *stat_a = inference_results_get_equity_values(results_a, type);
-    const Stat *stat_b = inference_results_get_equity_values(results_b, type);
+    const inference_stat_t inference_stat_type = (inference_stat_t)type_idx;
+    const Stat *stat_a =
+        inference_results_get_equity_values(results_a, inference_stat_type);
+    const Stat *stat_b =
+        inference_results_get_equity_values(results_b, inference_stat_type);
     assert(stat_get_num_samples(stat_a) == stat_get_num_samples(stat_b));
     assert(stat_get_num_unique_samples(stat_a) ==
            stat_get_num_unique_samples(stat_b));
@@ -83,13 +85,14 @@ void assert_inference_results_equal(InferenceResults *results_a,
       for (int num_letters = 1; num_letters <= RACK_SIZE; num_letters++) {
         for (int subtotal_idx = 0; subtotal_idx < NUMBER_OF_INFERENCE_SUBTOTALS;
              subtotal_idx++) {
-          const inference_subtotal_t subtotal =
+          const inference_subtotal_t subtotal_type =
               (inference_subtotal_t)subtotal_idx;
-          assert(
-              inference_results_get_subtotal(results_a, type, (MachineLetter)ml,
-                                             num_letters, subtotal) ==
-              inference_results_get_subtotal(results_b, type, (MachineLetter)ml,
-                                             num_letters, subtotal));
+          assert(inference_results_get_subtotal(results_a, inference_stat_type,
+                                                (MachineLetter)ml, num_letters,
+                                                subtotal_type) ==
+                 inference_results_get_subtotal(results_b, inference_stat_type,
+                                                (MachineLetter)ml, num_letters,
+                                                subtotal_type));
         }
       }
     }
