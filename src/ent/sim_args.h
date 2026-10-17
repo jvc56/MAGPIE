@@ -46,10 +46,25 @@ typedef struct SimArgs {
   double utility_w_winpct;
   double utility_w_spread;
   double utility_spread_scale;
+  // The simming player's rollout PAT settings (see the patrollout and
+  // patrolloutclasses options): whether every rollout ply leaves PAT out,
+  // and which classes it suppresses otherwise. They apply to both players'
+  // plies in the rollouts, each with its own weights; the candidates the sim
+  // is handed come from the candidate-selection settings instead.
+  // sim_args_fill clears them (PAT on, every class); callers set them after.
+  bool pat_rollout_disabled;
+  uint32_t pat_rollout_disabled_classes_mask;
   // Whether a nonterminal sim horizon's spread is projected to the end of the
   // game with the win percentage table's expected swing for that state (see
   // rv_sim_sample).
   bool use_margin_forecast;
+  // Whether each sample plays every rotation of its shuffled bag by RACK_SIZE
+  // letters until the rotations wrap around, and counts their mean as the
+  // sample (see rv_sim_sample). The sample limit and minimum still count
+  // rollouts; simulate converts them to cycles, with at least two per play
+  // (see sim_args_set_bag_cycle_bai_options). sim_args_fill clears it; the
+  // config turns it on by default.
+  bool bag_cycle;
 } SimArgs;
 
 // Unlike endgame_args_fill and peg_args_fill, this does NOT take a parameter
@@ -109,17 +124,21 @@ sim_args_fill(const int num_plies, const MoveList *move_list,
   sim_args->bai_options.parent_worker_thread_index = 0;
   sim_args->bai_options.arm_avoid_prune = NULL;
   sim_args->bai_options.num_arm_avoid_prune = 0;
+  sim_args->bai_options.draws_per_sample = 1;
   // Pure win% (no spread contribution) is (1.0, 0.0, 100.0).
   sim_args->utility_w_winpct = utility_w_winpct;
   sim_args->utility_w_spread = utility_w_spread;
   sim_args->utility_spread_scale = utility_spread_scale;
   sim_args->use_margin_forecast = use_margin_forecast;
+  sim_args->bag_cycle = false;
   // Start fresh, not resuming a prior SimResults. Only the TUI's analysis-
   // resume path sets this true; every other caller fills SimArgs through
   // here, so leaving it uninitialized let stack garbage spuriously trigger
   // a resume — skipping sim_results_reset and accumulating samples, which
   // made multi-threaded sims non-reproducible vs single-threaded.
   sim_args->resume_results = false;
+  sim_args->pat_rollout_disabled = false;
+  sim_args->pat_rollout_disabled_classes_mask = 0;
 }
 
 // Blend rollout win% and (sigmoid-normalized) spread into a single BAI
