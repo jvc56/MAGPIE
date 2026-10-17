@@ -26,6 +26,18 @@ typedef struct Zobrist {
   int board_dim;
 } Zobrist;
 
+// Includes every separately allocated array and the PRNG, not just pointers.
+static inline size_t zobrist_allocation_size(void) {
+  const size_t squares = (size_t)BOARD_DIM * BOARD_DIM;
+  const size_t board_bytes =
+      squares * (sizeof(uint64_t *) +
+                 ((size_t)ZOBRIST_MAX_LETTERS * 2 * sizeof(uint64_t)));
+  const size_t rack_bytes =
+      (size_t)2 * ZOBRIST_MAX_LETTERS *
+      (sizeof(uint64_t *) + ((RACK_SIZE + 1) * sizeof(uint64_t)));
+  return sizeof(Zobrist) + prng_allocation_size() + board_bytes + rack_bytes;
+}
+
 static Zobrist *zobrist_create(uint64_t seed) {
   Zobrist *z = malloc_or_die(sizeof(Zobrist));
   z->prng = prng_create(seed);

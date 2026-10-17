@@ -20,8 +20,212 @@ jobs:
       - name: Check circular dependencies
         run: python3 find_circ_deps.py
 
+      - name: Check that platform-specific code stays in src/compat
+        run: python3 check_portability.py
+
+      - name: Check that data fetch and download_data.sh fetch the same data
+        run: |
+          fetched=$(sed -n 's/^#define DATA_FETCH_VERSION "\(.*\)"/\1/p' src/impl/data_fetch.h)
+          downloaded=$(sed -n 's/^DATA_VERSION="\(.*\)"/\1/p' download_data.sh)
+          echo "data fetch: $fetched, download_data.sh: $downloaded"
+          test -n "$fetched" && test "$fetched" = "$downloaded"
+
       - name: Check formatting
         run: python3 ./format.py
+
+  windows-cross-compile:
+    runs-on: ubuntu-latest
+    env:
+      # The pinned toolchain, with the SHA-256 of its release tarball (also
+      # the digest GitHub reports for the asset). Keep in step with
+      # release-windows.yml and windows/Dockerfile.
+      LLVM_MINGW_VERSION: "20261006"
+      LLVM_MINGW: llvm-mingw-20261006-ucrt-ubuntu-22.04-x86_64
+      LLVM_MINGW_SHA256: 5f9c6ed95b2d4bdb2869a488c5fd5857fbdabcf288a0aa3eb1da43f6a08d8ab4
+    steps:
+      - uses: actions/checkout@v3
+
+      # The cache holds the tarball itself, keyed by its checksum, and is
+      # saved only when the job succeeds, after the tarball was verified. It
+      # is verified again before every unpack, so a tampered cache entry
+      # fails the job instead of compiling with it.
+      - name: Get llvm-mingw cache
+        id: cache-llvm-mingw
+        uses: actions/cache@v3
+        with:
+          path: ~/llvm-mingw-download
+          key: ${{ env.LLVM_MINGW }}-sha256-${{ env.LLVM_MINGW_SHA256 }}
+
+      - name: Download llvm-mingw
+        if: steps.cache-llvm-mingw.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p ~/llvm-mingw-download
+          curl -fsSL -o ~/llvm-mingw-download/$LLVM_MINGW.tar.xz \
+            "https://github.com/mstorsjo/llvm-mingw/releases/download/$LLVM_MINGW_VERSION/$LLVM_MINGW.tar.xz"
+
+      - name: Verify and unpack llvm-mingw
+        run: |
+          echo "$LLVM_MINGW_SHA256  $HOME/llvm-mingw-download/$LLVM_MINGW.tar.xz" | sha256sum -c --strict -
+          mkdir -p ~/llvm-mingw
+          tar xJf ~/llvm-mingw-download/$LLVM_MINGW.tar.xz -C ~/llvm-mingw
+
+      - name: Compile every C file for x64 and arm64 Windows
+        run: |
+          export PATH="$HOME/llvm-mingw/$LLVM_MINGW/bin:$PATH"
+          python3 check_windows_compile.py --cc x86_64-w64-mingw32-clang --cc aarch64-w64-mingw32-clang
+
+      - name: Lint src/compat's Windows branches with clang-tidy
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-tidy-18
+          MINGW_SYSROOT="$HOME/llvm-mingw/$LLVM_MINGW" ./tidy.sh clang-tidy-18 windows
+
+      - name: Link magpie.exe and magpie_test.exe for x64 and arm64
+        run: |
+          export PATH="$HOME/llvm-mingw/$LLVM_MINGW/bin:$PATH"
+          for arch in x86_64 aarch64; do
+            march=nehalem
+            if [ "$arch" = aarch64 ]; then march=armv8-a; fi
+            make magpie magpie_test BUILD=portable_release PORTABLE_MARCH=$march CC=$arch-w64-mingw32-clang
+            mkdir -p windows-$arch
+            mv bin/magpie.exe bin/magpie_test.exe windows-$arch/
+          done
+
+      - name: Upload the x64 executables
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-x86_64
+          path: windows-x86_64/*.exe
+          retention-days: 7
+
+      - name: Upload the arm64 executables
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-aarch64
+          path: windows-aarch64/*.exe
+          retention-days: 7
+
+  # The data cache with its symlinks turned into copies, for Windows runners:
+  # the tarballs' 27 symlinks would not survive a restore there. Built once
+  # per data version and cached across operating systems.
+  windows-data:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Look up the Windows data cache
+        id: windows-data
+        uses: actions/cache/restore@v4
+        with:
+          path: windows-data
+          key: windows-data-files-32
+          enableCrossOsArchive: true
+          lookup-only: true
+
+      - name: Get datafile cache
+        if: steps.windows-data.outputs.cache-hit != 'true'
+        id: cache-datafiles
+        uses: actions/cache@v3
+        with:
+          path: |
+            data/*
+            testdata/*
+          key: downloaded-data-files-32
+
+      - name: Download data files and convert lexica
+        if: steps.windows-data.outputs.cache-hit != 'true' && steps.cache-datafiles.outputs.cache-hit != 'true'
+        run: ./download_data.sh && ./convert_lexica.sh
+
+      - name: Copy the data without symlinks
+        if: steps.windows-data.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p windows-data
+          cp -rL data testdata windows-data/
+
+      - name: Save the Windows data cache
+        if: steps.windows-data.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: windows-data
+          key: windows-data-files-32
+          enableCrossOsArchive: true
+
+  # L3: the x64 test binary under Wine, which catches most runtime problems
+  # (text mode, paths, threads) on Linux.
+  windows-wine-tests:
+    needs: windows-cross-compile
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Get datafile cache
+        id: cache-datafiles
+        uses: actions/cache@v3
+        with:
+          path: |
+            data/*
+            testdata/*
+          key: downloaded-data-files-32
+
+      - name: Download data files and convert lexica
+        if: steps.cache-datafiles.outputs.cache-hit != 'true'
+        run: ./download_data.sh && ./convert_lexica.sh
+
+      - name: Download the x64 executables
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-x86_64
+          path: bin
+
+      - name: Install Wine
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y wine64
+
+      - name: Run the tests under Wine
+        env:
+          WINEDEBUG: -all
+        run: wine bin/magpie_test.exe
+
+  # L4: the same executables on real Windows, x64 and arm64.
+  windows-native-tests:
+    needs: [windows-cross-compile, windows-data]
+    name: windows-native-tests (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runner: windows-latest
+          - arch: aarch64
+            runner: windows-11-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Get the Windows data cache
+        uses: actions/cache/restore@v4
+        with:
+          path: windows-data
+          key: windows-data-files-32
+          enableCrossOsArchive: true
+          fail-on-cache-miss: true
+
+      - name: Put the data in place
+        shell: bash
+        run: mv windows-data/data windows-data/testdata .
+
+      - name: Download the executables
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-${{ matrix.arch }}
+          path: bin
+
+      - name: Run the tests on Windows
+        shell: bash
+        run: ./bin/magpie_test.exe
 
   cppcheck:
     runs-on: ubuntu-latest
@@ -66,7 +270,7 @@ jobs:
           path: |
             data/*
             testdata/*
-          key: downloaded-data-files-31
+          key: downloaded-data-files-32
 
       - name: Download data files and convert lexica
         if: steps.cache-datafiles.outputs.cache-hit != 'true'
@@ -78,8 +282,13 @@ jobs:
       - name: Build shared library
         run: make libmagpie
 
+      - name: Install locale for PEG JSON regression
+        run: sudo locale-gen de_DE.UTF-8
+
       - name: Run no-PGO release tests
-        run: ./bin/magpie_test
+        run: |
+          ./bin/magpie_test
+          ./bin/magpie_test pegpoll
 
   unit-tests-dev:
     name: unit-tests-dev (${{ matrix.shard }})
@@ -101,11 +310,13 @@ jobs:
           - shard: analyze_sim
             tests: "analyze_sim"
           - shard: config
-            tests: "config movegen gameplay players string alpha ld l leavemap kwg bag rack bitrack board layout cs move game vm shadow eq eqadj stats infer rv am"
+            tests: "config movegen gameplay players string stablesort compat gzipreader datafetch alpha ld l leavemap kwg bag rack bitrack board layout cs move game vm shadow eq eqadj stats infer rv am"
           - shard: rest
-            tests: "hm math bai command cmdapi gcg words wordprune kwgmaker cgp rl ch cv cd wmp wmpmaker wmg winpct zobrist tt load wit witcache witsweep"
+            tests: "endgamepause browsergame embedding fileproxy historyreplay peg_embedding pegpoll wordmapapi hm math bai command cmdapi gcg words wordprune kwgmaker cgp rl ch cv cd wmp wmpmaker wmg winpct zobrist tt load wit witcache witsweep contribute builderhash pat patfile patlexicon patutility patfeatures pateval"
           - shard: ap_rit
-            tests: "ap_rit"
+            tests: "ap_rit patwmp"
+          - shard: simdet
+            tests: "simdetigp"
     steps:
       - uses: actions/checkout@v3
 
@@ -122,7 +333,7 @@ jobs:
           path: |
             data/*
             testdata/*
-          key: downloaded-data-files-31
+          key: downloaded-data-files-32
 
       - name: Download data files and convert lexica
         if: steps.cache-datafiles.outputs.cache-hit != 'true'
@@ -135,6 +346,32 @@ jobs:
       - name: Build RIT for TWL98
         if: matrix.shard == 'ap_rit'
         run: echo "convert klvwmp2rit TWL98" | ./bin/magpie "set -lex TWL98 -wmp true -rit false"
+
+      - name: Fetch the data into an empty directory with data fetch
+        if: matrix.shard == 'ap_rit'
+        run: |
+          mkdir -p fetch-test
+          cd fetch-test
+          ../bin/magpie data fetch < /dev/null
+          # Every file GNU tar extracts from the same chunks, and nothing else
+          # but the version marker. diff follows GNU tar's symlinks, which
+          # data fetch writes as copies of their targets.
+          version=$(sed -n 's/^#define DATA_FETCH_VERSION "\(.*\)"/\1/p' ../src/impl/data_fetch.h)
+          suffixes=$(sed -n 's/^ *{"\([a-z][a-z]\)",.*/\1/p' ../src/impl/data_fetch.c)
+          mkdir -p reference
+          for suffix in $suffixes; do
+            curl -fsSL "https://raw.githubusercontent.com/jvc56/MAGPIE-DATA/main/versioned-tarballs/data-$version.tgz.$suffix"
+          done | tar -xzf - -C reference
+          diff -r -x .data-version reference/data data
+          rm -rf reference
+          test ! -L data/lexica/CSW24_super21.klv2
+          # A second fetch finds the data version already there.
+          ../bin/magpie data fetch < /dev/null | grep -q "already holds data version"
+          # The fetched lexicon has no wordmap: its first use builds one.
+          printf 'set -lex CSW21\ncgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 ABCDEFG/ 0/0 0\ngen -numplays 1\n' \
+            | ../bin/magpie | tee first-use.txt
+          grep -q "building the wordmap for CSW21" first-use.txt
+          test -s data/lexica/CSW21.wmp
 
       - name: Build dev test binary
         run: make magpie_test
@@ -151,6 +388,10 @@ jobs:
             echo 'Missing conversion arguments unexpectedly succeeded'
             exit 1
           fi
+
+      - name: Install locale for PEG JSON regression
+        if: matrix.shard == 'rest'
+        run: sudo locale-gen de_DE.UTF-8
 
       - name: Run dev tests
         run: ./bin/magpie_test ${{ matrix.tests }}
@@ -173,7 +414,7 @@ jobs:
           path: |
             data/*
             testdata/*
-          key: downloaded-data-files-31
+          key: downloaded-data-files-32
 
       - name: Download data files and convert lexica
         if: steps.cache-datafiles.outputs.cache-hit != 'true'
@@ -206,7 +447,7 @@ jobs:
           path: |
             data/*
             testdata/*
-          key: downloaded-data-files-31
+          key: downloaded-data-files-32
 
       - name: Download data files and convert lexica
         if: steps.cache-datafiles.outputs.cache-hit != 'true'
@@ -216,12 +457,15 @@ jobs:
         run: make -f Makefile-wasm magpie_wasm_test
 
       - name: Run WASM tests
-        run: node ./bin/magpie_wasm_test.js endgame_wasm tt zobrist
+        run: node ./bin/magpie_wasm_test.js endgame_wasm endgamepause tt zobrist embedding fileproxy historyreplay peg_embedding pegpoll wordmapapi
 
   ci-summary:
     if: always()
     needs:
       - lint-fast
+      - windows-cross-compile
+      - windows-wine-tests
+      - windows-native-tests
       - cppcheck
       - clang-tidy
       - unit-tests-no-pgo-release
@@ -237,6 +481,9 @@ jobs:
           echo "| Job | Result |" >> $GITHUB_STEP_SUMMARY
           echo "|-----|--------|" >> $GITHUB_STEP_SUMMARY
           echo "| lint-fast | \`${{ needs.lint-fast.result }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| windows-cross-compile | \`${{ needs.windows-cross-compile.result }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| windows-wine-tests | \`${{ needs.windows-wine-tests.result }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| windows-native-tests | \`${{ needs.windows-native-tests.result }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| cppcheck | \`${{ needs.cppcheck.result }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| clang-tidy | \`${{ needs.clang-tidy.result }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| unit-tests-no-pgo-release | \`${{ needs.unit-tests-no-pgo-release.result }}\` |" >> $GITHUB_STEP_SUMMARY
@@ -247,6 +494,9 @@ jobs:
       - name: Check for failures
         if: |
           needs.lint-fast.result != 'success' ||
+          needs.windows-cross-compile.result != 'success' ||
+          needs.windows-wine-tests.result != 'success' ||
+          needs.windows-native-tests.result != 'success' ||
           needs.cppcheck.result != 'success' ||
           needs.clang-tidy.result != 'success' ||
           needs.unit-tests-no-pgo-release.result != 'success' ||
