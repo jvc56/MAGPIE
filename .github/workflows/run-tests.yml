@@ -232,11 +232,29 @@ jobs:
     steps:
       - uses: actions/checkout@v3
 
+      # The built binary with its cfg/ beside it, which is all cppcheck.sh
+      # needs to skip the build: about 5 MB, where the source and build trees
+      # were 133.
       - name: Cache cppcheck binary
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
-          path: cppcheck_dir
-          key: cppcheck-2.17.1
+          path: cppcheck_dir/build/bin
+          key: cppcheck-2.17.1-bin
+
+      # cppcheck's own incremental results (--cppcheck-build-dir in
+      # cppcheck.sh). It keys each file's by a hash of the file as
+      # preprocessed, so with its headers, and of the options, analyzes only
+      # the files whose hash changed, and reports the rest's findings from the
+      # cache. About 1.5 MB, saved under a new key by every successful run and
+      # restored from the latest this branch can see: its own, else main's.
+      - name: Cache cppcheck results
+        uses: actions/cache@v4
+        with:
+          path: |
+            cppcheck_build
+            cppcheck_build-windows
+          key: cppcheck-results-2.17.1-${{ hashFiles('cppcheck.sh') }}-${{ github.run_id }}
+          restore-keys: cppcheck-results-2.17.1-${{ hashFiles('cppcheck.sh') }}-
 
       - name: Run cppcheck static analysis
         run: ./cppcheck.sh
