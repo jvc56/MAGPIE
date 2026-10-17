@@ -46,6 +46,12 @@ enum {
   // "/kibitz" lists at most this many moves, best static equity first.
   KIBITZ_MAX_MOVES = 100,
   SIM_PLIES = 4,
+  // Rollouts every candidate gets before the sim may stop. BAI stops once
+  // the leader's mean win% is within the cutoff of 0 or 100%, and after
+  // one rollout per candidate some candidate often reads 100%: the sim
+  // then "finished" after that first round with meaningless numbers.
+  // The CLI's default (-minplayiterations).
+  SIM_MIN_PLAY_ITERATIONS = 500,
   ENDGAME_PLIES = 25,
   // Effective "run until /stop" budget for resumed analysis. Large
   // enough to never fire in practice; the watchdog's interrupt (or
@@ -558,7 +564,7 @@ static bool run_sim(TuiGameState *state, double budget_sec, Move *out_move) {
   args.bai_options.sampling_rule = BAI_SAMPLING_RULE_TOP_TWO_IDS;
   args.bai_options.threshold = BAI_THRESHOLD_NONE;
   args.bai_options.sample_limit = (uint64_t)1e15;
-  args.bai_options.sample_minimum = 1;
+  args.bai_options.sample_minimum = SIM_MIN_PLAY_ITERATIONS;
   // BAI takes fractional seconds; truncating to whole seconds turned any
   // budget under 1s into 0, which BAI treats as no time limit at all.
   args.bai_options.time_limit_seconds = budget_sec;
@@ -1474,7 +1480,7 @@ static void analysis_resume_sim(TuiGameState *state, TuiHistoryEntry *entry,
   args.bai_options.sampling_rule = BAI_SAMPLING_RULE_TOP_TWO_IDS;
   args.bai_options.threshold = BAI_THRESHOLD_NONE;
   args.bai_options.sample_limit = (uint64_t)1e15;
-  args.bai_options.sample_minimum = 1;
+  args.bai_options.sample_minimum = SIM_MIN_PLAY_ITERATIONS;
   args.bai_options.time_limit_seconds = analysis_time_limit(state);
   args.bai_options.num_threads = num_threads;
   args.bai_options.cutoff = 0.005;
