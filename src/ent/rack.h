@@ -177,15 +177,26 @@ static inline char *rack_string_alias_dot_to_blank(const char *rack_string) {
   return normalized_rack_string;
 }
 
+// A rack is undrawn tiles, so it has no designated blanks. A lower-case
+// letter is one to ld_str_to_mls, and its machine letter lies past the end of
+// the rack's counts: counted, it was written outside the rack (a stack
+// overflow from a server-sent opening rack, a forced rack, a rack equity or
+// KLV CSV row, a GCG rack). Such a string is -1, with the rack left empty, as
+// any other malformed string is.
 static inline int rack_set_to_string(const LetterDistribution *ld, Rack *rack,
                                      const char *rack_string) {
   rack->dist_size = ld_get_size(ld);
   rack_reset(rack);
   MachineLetter mls[MAX_RACK_SIZE];
   char *normalized_rack_string = rack_string_alias_dot_to_blank(rack_string);
-  int num_mls =
+  const int num_mls =
       ld_str_to_mls(ld, normalized_rack_string, false, mls, MAX_RACK_SIZE);
   free(normalized_rack_string);
+  for (int i = 0; i < num_mls; i++) {
+    if (mls[i] >= ld_get_size(ld)) {
+      return -1;
+    }
+  }
   for (int i = 0; i < num_mls; i++) {
     rack_add_letter(rack, mls[i]);
   }

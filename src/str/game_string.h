@@ -95,6 +95,14 @@ void string_builder_add_game_with_heat_map(
 GameStringOptions *game_string_options_create_default(void);
 GameStringOptions *game_string_options_create_pretty(void);
 
+// Swaps the board's wide glyphs (alt tiles, fullwidth column letters, the
+// arrowhead) for ones every font has, keeping colors and the border.
+void game_string_options_use_narrow_glyphs(GameStringOptions *gso);
+
+// Does that when the output stream can't show wide glyphs: a Windows console
+// window, whose default fonts lack them. Does nothing elsewhere.
+void game_string_options_fit_output(GameStringOptions *gso);
+
 GameStringOptions *game_string_options_create(
     game_string_board_color_t board_color,
     game_string_board_tile_glyphs_t board_tile_glyphs,

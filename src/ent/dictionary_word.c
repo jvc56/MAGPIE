@@ -199,7 +199,7 @@ void dictionary_word_list_write_to_file(
     }
     string_builder_add_string(sb, "\n");
   }
-  write_string_to_file(filename, "w", string_builder_peek(sb), error_stack);
+  write_string_to_file(filename, "wb", string_builder_peek(sb), error_stack);
   string_builder_destroy(sb);
   free(filename);
 }

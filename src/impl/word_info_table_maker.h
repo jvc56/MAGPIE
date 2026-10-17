@@ -6,6 +6,8 @@
 #include "../ent/word_info_table.h"
 
 WordInfoTable *make_word_info_table_from_words(const DictionaryWordList *words);
-WordInfoTable *make_word_info_table_from_kwg(const KWG *kwg);
+// num_threads builds the position-length rows (see
+// word_info_table_build_position_lengths).
+WordInfoTable *make_word_info_table_from_kwg(const KWG *kwg, int num_threads);
 
 #endif

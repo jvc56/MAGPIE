@@ -1,5 +1,6 @@
 #include "klv_csv.h"
 
+#include "../def/klv_defs.h"
 #include "../def/kwg_defs.h"
 #include "../def/letter_distribution_defs.h"
 #include "../def/rack_defs.h"
@@ -15,6 +16,7 @@
 #include "../util/fileproxy.h"
 #include "../util/io_util.h"
 #include "../util/string_util.h"
+#include <inttypes.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -49,7 +51,7 @@ void klv_write_row(void *data, uint32_t word_index) {
   if (klv_write_data->leave_counts) {
     const uint64_t leave_count = klv_write_data->leave_counts[word_index];
     string_builder_add_formatted_string(klv_write_data->string_builder,
-                                        ",%lu\n", leave_count);
+                                        ",%" PRIu64 "\n", leave_count);
   } else {
     const double value = equity_to_double(
         klv_get_indexed_leave_value(klv_write_data->klv, word_index));
@@ -152,7 +154,7 @@ void klv_write_to_csv(KLV *klv, const LetterDistribution *ld,
   rack_destroy(leave);
   rack_destroy(bag_as_rack);
 
-  write_string_to_file(leaves_filename, "w", string_builder_peek(klv_builder),
+  write_string_to_file(leaves_filename, "wb", string_builder_peek(klv_builder),
                        error_stack);
   free(leaves_filename);
   string_builder_destroy(klv_builder);
@@ -195,7 +197,7 @@ void klv_read_from_csv_internal(const LetterDistribution *ld,
   rack_set_dist_size(&leave_rack, ld_get_size(ld));
   char *line = NULL;
   size_t line_capacity = 0;
-  ssize_t line_length;
+  int64_t line_length;
   while ((line_length = getline_ignore_carriage_return(&line, &line_capacity,
                                                        leaves_stream)) != -1) {
     if (line_length >= LEAVES_CSV_MAX_LINE_LENGTH) {
@@ -211,8 +213,20 @@ void klv_read_from_csv_internal(const LetterDistribution *ld,
     char *value_str = strtok(NULL, "\n");
     trim_whitespace(value_str);
     if (leave_str && value_str) {
-      rack_set_to_string(ld, &leave_rack, leave_str);
-      const uint32_t leave_index = klv_get_word_index(klv, &leave_rack);
+      // A leave that does not parse, or is not in the KLV, has no index:
+      // KLV_UNFOUND_INDEX indexed leave_was_set and the leave values far out
+      // of bounds.
+      const int num_mls = rack_set_to_string(ld, &leave_rack, leave_str);
+      const uint32_t leave_index = num_mls > 0
+                                       ? klv_get_word_index(klv, &leave_rack)
+                                       : KLV_UNFOUND_INDEX;
+      if (leave_index == KLV_UNFOUND_INDEX) {
+        error_stack_push(
+            error_stack, ERROR_STATUS_KLV_INVALID_LEAVE,
+            get_formatted_string("invalid leave found in klv csv file %s: %s",
+                                 leaves_filename, leave_str));
+        break;
+      }
       if (leave_was_set[leave_index]) {
         error_stack_push(
             error_stack, ERROR_STATUS_KLV_DUPLICATE_LEAVE,
