@@ -1,0 +1,229 @@
+name: Release Windows
+
+# Builds magpie.exe for x64 and arm64 Windows, tests both on real Windows,
+# smoke-tests the first-run path of each in an empty directory, and attaches
+# them, with their SHA-256s, to the GitHub release for the tag.
+#
+# Triggers:
+# - a pushed vX.Y.Z tag runs every job, publish included. The tag must match
+#   MAGPIE_VERSION in src/impl/config.c, or the build job fails first.
+# - a push to any branch that changes this file runs every job but publish,
+#   so a change to the workflow is tested before it merges. This is a branch
+#   push rather than pull_request because the test job restores the
+#   windows-data cache, which run-tests.yml saves on the branch, and a
+#   pull_request run can only restore caches from the base branch.
+# - workflow_dispatch runs every job but publish, on any ref, tags included.
+# Only publish can write to the repository.
+
+on:
+  push:
+    branches:
+      - "**"
+    tags:
+      - "v*"
+    # Applies to branch pushes only: GitHub does not evaluate path filters
+    # for tag pushes, so every tag push runs.
+    paths:
+      - .github/workflows/release-windows.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  # The toolchain that builds the shipped executables, with the SHA-256 of its
+  # release tarball (also the digest GitHub reports for the asset). Keep in
+  # step with the windows-cross-compile job in run-tests.yml and with
+  # windows/Dockerfile.
+  LLVM_MINGW_VERSION: "20261006"
+  LLVM_MINGW: llvm-mingw-20261006-ucrt-ubuntu-22.04-x86_64
+  LLVM_MINGW_SHA256: 5f9c6ed95b2d4bdb2869a488c5fd5857fbdabcf288a0aa3eb1da43f6a08d8ab4
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # A release tag must name the version the source builds, or pushing
+      # v0.2.0 without bumping config.c would ship magpie-0.1.3 executables
+      # as v0.2.0. Checked before anything is built.
+      - name: Read MAGPIE_VERSION and check it against the tag
+        id: version
+        run: |
+          version="$(sed -n 's/^#define MAGPIE_VERSION "\(.*\)"/\1/p' src/impl/config.c)"
+          if [ -z "$version" ]; then
+            echo "::error::no MAGPIE_VERSION in src/impl/config.c"
+            exit 1
+          fi
+          echo "MAGPIE_VERSION: $version"
+          if [ "$GITHUB_EVENT_NAME" = push ] && [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            tag="${GITHUB_REF#refs/tags/}"
+            if [ "${tag#v}" != "$version" ]; then
+              echo "::error::tag $tag does not match MAGPIE_VERSION $version in src/impl/config.c"
+              exit 1
+            fi
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      # The cache holds the tarball itself, keyed by its checksum, and is
+      # saved only when the job succeeds, after the tarball was verified. It
+      # is verified again before every unpack, so a tampered cache entry
+      # fails the job instead of building the release.
+      - name: Get llvm-mingw cache
+        id: cache-llvm-mingw
+        uses: actions/cache@v4
+        with:
+          path: ~/llvm-mingw-download
+          key: ${{ env.LLVM_MINGW }}-sha256-${{ env.LLVM_MINGW_SHA256 }}
+
+      - name: Download llvm-mingw
+        if: steps.cache-llvm-mingw.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p ~/llvm-mingw-download
+          curl -fsSL -o ~/llvm-mingw-download/$LLVM_MINGW.tar.xz \
+            "https://github.com/mstorsjo/llvm-mingw/releases/download/$LLVM_MINGW_VERSION/$LLVM_MINGW.tar.xz"
+
+      - name: Verify and unpack llvm-mingw
+        run: |
+          echo "$LLVM_MINGW_SHA256  $HOME/llvm-mingw-download/$LLVM_MINGW.tar.xz" | sha256sum -c --strict -
+          mkdir -p ~/llvm-mingw
+          tar xJf ~/llvm-mingw-download/$LLVM_MINGW.tar.xz -C ~/llvm-mingw
+
+      - name: Build the executables
+        env:
+          version: ${{ steps.version.outputs.version }}
+        run: |
+          export PATH="$HOME/llvm-mingw/$LLVM_MINGW/bin:$PATH"
+          mkdir -p release
+          for arch in x86_64 aarch64; do
+            march=nehalem; name=x64
+            if [ "$arch" = aarch64 ]; then march=armv8-a; name=arm64; fi
+            make magpie magpie_test BUILD=portable_release PORTABLE_MARCH=$march CC=$arch-w64-mingw32-clang
+            exe="magpie-$version-windows-$name.exe"
+            mv bin/magpie.exe "release/$exe"
+            mv bin/magpie_test.exe "release/magpie_test-windows-$name.exe"
+            (cd release && sha256sum "$exe" > "$exe.sha256")
+          done
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release
+          path: release/
+
+  # L5: the first-run path of each executable in an empty directory on its
+  # own platform: fetch the data from MAGPIE-DATA, build a wordmap on first
+  # use, then a session of ordinary commands.
+  smoke:
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: x64
+            runner: windows-latest
+          - name: arm64
+            runner: windows-11-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: release
+          path: release
+      - name: Fetch data and play in an empty directory
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory empty | Out-Null
+          Set-Location empty
+          $exe = (Get-ChildItem ..\release\magpie-*-windows-${{ matrix.name }}.exe).FullName
+          & $exe data fetch
+          if ($LASTEXITCODE -ne 0) { throw "data fetch exited with $LASTEXITCODE" }
+          if (-not (Test-Path data\lexica\CSW24.kwg)) { throw "data fetch wrote nothing" }
+          $session = @(
+            'set -lex CSW24 -threads 2 -savesettings false'
+            'cgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 AEINRST/ 0/0 0'
+            'gen -numplays 3'
+            'sim -plies 2 -it 200 -scond none'
+            'infer 1 MUZAKY 58 -numplays 20'
+            'cgp 2ABERRaNT4G/5HE6FE/5OS5CUR/5DI5OMA/1HARPIST4WEN/5ET2Q3TI/6E1VIVO2A/4JUDY2ABOIL/4I2ERASERS1/1DOWLY8M/4TaLEGGIO2I/7Z6C/7I3PUNK/7NONTONAL/7E2AX2E AD/EFU 467/497 0'
+            'endgame -eplies 4'
+            'builders'
+            'quit'
+          ) -join "`n"
+          $output = $session | & $exe
+          $status = $LASTEXITCODE
+          $output
+          if ($status -ne 0) { throw "the session exited with $status" }
+          $text = $output -join "`n"
+          if ($text -notmatch 'building the wordmap for CSW24') { throw "no wordmap was built" }
+          if ($text -match '\(error') { throw "the session reported an error" }
+          if ($text -notmatch 'Endgame \(depth') { throw "the endgame did not run" }
+          if (-not (Test-Path data\lexica\CSW24.wmp)) { throw "the wordmap is missing" }
+
+  # L4 on the release executables themselves.
+  test:
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: x64
+            runner: windows-latest
+          - name: arm64
+            runner: windows-11-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v4
+      - name: Get the Windows data cache
+        uses: actions/cache/restore@v4
+        with:
+          path: windows-data
+          key: windows-data-files-32
+          enableCrossOsArchive: true
+          fail-on-cache-miss: true
+      - name: Put the data in place
+        shell: bash
+        run: mv windows-data/data windows-data/testdata .
+      - uses: actions/download-artifact@v4
+        with:
+          name: release
+          path: release
+      - name: Run the tests
+        shell: bash
+        run: ./release/magpie_test-windows-${{ matrix.name }}.exe
+
+  # Only a pushed vX.Y.Z tag publishes: startsWith alone would also be true
+  # for a workflow_dispatch started on a tag ref.
+  publish:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: [smoke, test]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: release
+          path: release
+      - name: Attach the executables to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="${GITHUB_REF#refs/tags/}"
+          # The build job checked that the tag is v$MAGPIE_VERSION, so these
+          # are the exact names it built; a missing one fails the upload.
+          assets=()
+          for name in x64 arm64; do
+            exe="release/magpie-${tag#v}-windows-$name.exe"
+            assets+=("$exe" "$exe.sha256")
+          done
+          gh release view "$tag" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1 \
+            || gh release create "$tag" -R "$GITHUB_REPOSITORY" --prerelease --title "$tag" \
+                 --notes "Windows: see the README's Windows section. The executables are not code-signed; Windows will ask you to confirm the first run (More info, then Run anyway)."
+          # No --clobber: gh refuses, before uploading anything, when the
+          # release already has an asset of the same name, so a rerun cannot
+          # silently replace a published executable. To replace one on
+          # purpose, delete it from the release by hand and rerun this job.
+          gh release upload "$tag" -R "$GITHUB_REPOSITORY" "${assets[@]}"
