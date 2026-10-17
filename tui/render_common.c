@@ -8,7 +8,6 @@
 #include "config.h"
 #include "theme.h"
 #include "tile_input.h"
-#include <dirent.h>
 #include <notcurses/notcurses.h>
 #include <stdint.h>
 #include <stdio.h>

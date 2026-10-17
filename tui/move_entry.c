@@ -21,7 +21,6 @@
 #include "config.h"
 #include "game_state.h"
 #include "tile_input.h"
-#include <dirent.h>
 #include <stdatomic.h>
 #include <stdbool.h>
 #include <stddef.h>
