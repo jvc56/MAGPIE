@@ -1,5 +1,6 @@
 #include "game_string.h"
 
+#include "../compat/cterm.h"
 #include "../def/board_defs.h"
 #include "../def/game_defs.h"
 #include "../def/game_history_defs.h"
@@ -28,7 +29,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
 
 // Display formatting constants
 enum {
@@ -47,7 +47,7 @@ bool should_print_escape_codes(const GameStringOptions *game_string_options) {
   if (game_string_options == NULL) {
     return false;
   }
-  return isatty(fileno(get_stream_out()));
+  return cterm_is_terminal(get_stream_out());
 }
 
 bool use_ascii_on_turn_marker(const GameStringOptions *game_string_options) {
@@ -116,7 +116,8 @@ void string_builder_add_player_row(const LetterDistribution *ld,
   }
 
   string_builder_add_formatted_string(game_string, "%s %-*s", player_marker,
-                                      player_name_max_length + 2, player_name);
+                                      (int)player_name_max_length + 2,
+                                      player_name);
 
   if (player_on_turn && should_print_escape_codes(game_string_options) &&
       game_string_option_has_on_turn_color(game_string_options) && !game_over) {
@@ -608,6 +609,18 @@ GameStringOptions *game_string_options_create_pretty(void) {
   gso->on_turn_color = GAME_STRING_ON_TURN_COLOR_ANSI_GREEN;
   gso->on_turn_score_style = GAME_STRING_ON_TURN_SCORE_BOLD;
   return gso;
+}
+
+void game_string_options_use_narrow_glyphs(GameStringOptions *gso) {
+  gso->board_tile_glyphs = GAME_STRING_BOARD_TILE_GLYPHS_PRIMARY;
+  gso->board_column_label = GAME_STRING_BOARD_COLUMN_LABEL_ASCII;
+  gso->on_turn_marker = GAME_STRING_ON_TURN_MARKER_ASCII;
+}
+
+void game_string_options_fit_output(GameStringOptions *gso) {
+  if (!cterm_shows_wide_glyphs(get_stream_out())) {
+    game_string_options_use_narrow_glyphs(gso);
+  }
 }
 
 GameStringOptions *game_string_options_create(
