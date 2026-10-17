@@ -10,6 +10,7 @@
 #define KLV_EXTENSION ".klv2"
 #define RACK_INFO_TABLE_EXTENSION ".rit"
 #define WORD_INFO_TABLE_EXTENSION ".wit"
+#define PAT_EXTENSION ".pat"
 #define TXT_EXTENSION ".txt"
 #define CSV_EXTENSION ".csv"
 #define GCG_EXTENSION ".gcg"
@@ -28,6 +29,7 @@ typedef enum {
   DATA_FILEPATH_TYPE_RACK_INFO_TABLE,
   DATA_FILEPATH_TYPE_DAWG_PACKED,
   DATA_FILEPATH_TYPE_WORD_INFO_TABLE,
+  DATA_FILEPATH_TYPE_PAT,
 } data_filepath_t;
 
 char *get_filepath(const char *data_path, const char *data_name,
@@ -43,5 +45,12 @@ char *data_filepaths_get_writable_filename(const char *data_path,
 StringList *data_filepaths_get_all_data_path_names(const char *data_paths,
                                                    data_filepath_t type,
                                                    ErrorStack *error_stack);
+
+// True if a data name from an untrusted source (a birdtest task request) is
+// safe to join into a path: one or two runs of [A-Za-z0-9_-], joined by a
+// single '.' (a rack info table is named after its lexicon and its leaves,
+// "NWL23.CSW21"). Nothing that could climb out of a data directory or name an
+// absolute path passes.
+bool data_filepaths_is_safe_name(const char *name);
 
 #endif

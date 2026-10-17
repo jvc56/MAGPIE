@@ -36,6 +36,14 @@ enum {
   PEG_CAND_LIST_CAP = 16384,
   // Greedy playout depth ceiling (a PEG playout terminates well before this).
   PEG_PLAYOUT_MAX_PLIES = 40,
+  // Leading greedy playout plies that come before any draw whose outcome
+  // depends on the bag's order (the opponent's reply, then the mover's), so
+  // every ordering of one split plays them identically (see PegSharedPly).
+  PEG_SHARED_PLAYOUT_PLIES = 2,
+  // Opponent racks a candidate's reply cache holds (a power of two). An
+  // opponent holds RACK_SIZE of at most RACK_SIZE + PEG_MAX_BAG unseen tiles,
+  // so at most C(11, 4) = 330 racks at the default rack size.
+  PEG_REPLY_CACHE_SLOTS = 1024,
   // Endgame depth for the exhaustive single stage (-pegtopk all / 0). An
   // emptier PEG leaf holds at most 2*RACK_SIZE tiles, so the endgame tree
   // bottoms out at terminal nodes well short of this; the overshoot is free and
@@ -83,11 +91,6 @@ enum {
 // PEG work-stealing pool capacities (peg_pool.c).
 enum {
   PEG_POOL_QUEUE_INIT_CAP = 1024,
-  // Per-worker stack. Workers recurse into nested solves while help-draining
-  // the queue (bounded by the PEG fork-nesting cap), so the small default
-  // secondary-thread stack is not enough. 64 MiB is virtual address space,
-  // committed lazily, so only the nesting depth actually reached is paid for.
-  PEG_POOL_WORKER_STACK_BYTES = 64 * 1024 * 1024,
 };
 
 #endif

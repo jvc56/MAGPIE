@@ -1,6 +1,7 @@
 #ifndef RACK_INFO_TABLE_H
 #define RACK_INFO_TABLE_H
 
+#include "../compat/cmap.h"
 #include "../compat/endian_conv.h"
 #include "../def/bit_rack_defs.h"
 #include "../def/rack_defs.h"
@@ -10,15 +11,12 @@
 #include "../util/io_util.h"
 #include "../util/string_util.h"
 #include "data_filepaths.h"
-#include <fcntl.h>
+#include <errno.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/mman.h>
-#include <sys/stat.h>
-#include <unistd.h>
 
 // A RackInfoTable maps full-rack BitRacks to per-rack data computed ahead of
 // time. The table is keyed by BitRack (the multiset of tiles forming a full
@@ -167,9 +165,25 @@ typedef struct RackInfoTable {
   // mmap state: when is_mmapped is true, bucket_starts and entries point
   // into the mapped region and must not be free'd individually.
   bool is_mmapped;
-  void *mmap_base;
-  size_t mmap_size;
+  CMap map;
+  // Which load this is: unique for the life of the process, never 0 (see
+  // rack_info_table_next_instance_id).
+  uint64_t instance_id;
 } RackInfoTable;
+
+// A number no other table this process creates or loads will have, never 0.
+// MoveGen caches pointers into a table's entries across move generations, and
+// its per-thread instances outlive the Config that owned the table, so it has
+// to tell a replaced table from the one it cached. Neither the struct's address
+// nor its data's can: a freed table's struct address goes to the next one the
+// allocator hands out, and an unmapped table's region is where the kernel often
+// maps the next one of the same size.
+uint64_t rack_info_table_next_instance_id(void);
+
+static inline uint64_t
+rack_info_table_get_instance_id(const RackInfoTable *rit) {
+  return rit->instance_id;
+}
 
 // Unpack all 128 packed 24-bit leave values to 32-bit Equity in a batch.
 // Sign-extends from bit 23. Designed to be auto-vectorized.
@@ -371,7 +385,7 @@ static inline void rack_info_table_destroy(RackInfoTable *rit) {
   }
   free(rit->name);
   if (rit->is_mmapped) {
-    munmap(rit->mmap_base, rit->mmap_size);
+    cmap_close(&rit->map);
   } else {
     free(rit->bucket_starts);
     free(rit->entries);
@@ -407,110 +421,128 @@ static inline void rack_info_table_destroy(RackInfoTable *rit) {
 //     3 bytes: pad
 //     16 bytes: bit_rack_bytes (full BitRack for collision check)
 
-static inline void rit_write_uint32_or_die(uint32_t value, FILE *stream,
-                                           const char *description) {
-  const uint32_t le = htole32(value);
-  fwrite_or_die(&le, sizeof(le), 1, stream, description);
+// Each writer returns whether every byte went out, rather than ending the
+// process as fwrite_or_die did: a contributor's disk filling during the 1.9 GB
+// write is a table to skip, not a worker to lose (birdtest KL-51).
+static inline bool rit_fwrite(const void *ptr, size_t size, size_t nmemb,
+                              FILE *stream) {
+  return fwrite(ptr, size, nmemb, stream) == nmemb;
 }
 
-static inline void rit_write_uint32s_or_die(const uint32_t *values, size_t n,
-                                            FILE *stream,
-                                            const char *description) {
+static inline bool rit_write_uint32(uint32_t value, FILE *stream) {
+  const uint32_t le = htole32(value);
+  return rit_fwrite(&le, sizeof(le), 1, stream);
+}
+
+static inline bool rit_write_uint32s(const uint32_t *values, size_t n,
+                                     FILE *stream) {
 #if IS_LITTLE_ENDIAN
-  fwrite_or_die(values, sizeof(uint32_t), n, stream, description);
+  return rit_fwrite(values, sizeof(uint32_t), n, stream);
 #else
   for (size_t i = 0; i < n; i++) {
     const uint32_t le = htole32(values[i]);
-    fwrite_or_die(&le, sizeof(uint32_t), 1, stream, description);
+    if (!rit_fwrite(&le, sizeof(uint32_t), 1, stream)) {
+      return false;
+    }
   }
+  return true;
 #endif
 }
 
-static inline void rit_write_entries_or_die(const RackInfoTableEntry *entries,
-                                            uint32_t n, FILE *stream) {
+static inline bool rit_write_entries(const RackInfoTableEntry *entries,
+                                     uint32_t n, FILE *stream) {
 #if IS_LITTLE_ENDIAN
-  fwrite_or_die(entries, sizeof(RackInfoTableEntry), n, stream, "rit entries");
+  return rit_fwrite(entries, sizeof(RackInfoTableEntry), n, stream);
 #else
-  for (uint32_t i = 0; i < n; i++) {
+  bool ok = true;
+  for (uint32_t i = 0; ok && i < n; i++) {
     const RackInfoTableEntry *entry = &entries[i];
     // Packed 24-bit leaves are stored as raw bytes — no endian swap.
-    fwrite_or_die(entry->leaves_packed, sizeof(uint8_t),
-                  RACK_INFO_TABLE_LEAVES_PACKED_BYTES, stream,
-                  "rit leaves packed");
-    for (int union_idx = 0; union_idx < RACK_INFO_TABLE_UNIONS_PER_ENTRY;
+    ok = ok && rit_fwrite(entry->leaves_packed, sizeof(uint8_t),
+                          RACK_INFO_TABLE_LEAVES_PACKED_BYTES, stream);
+    for (int union_idx = 0; ok && union_idx < RACK_INFO_TABLE_UNIONS_PER_ENTRY;
          union_idx++) {
-      const uint32_t le_union = htole32(entry->playthrough_union[union_idx]);
-      fwrite_or_die(&le_union, sizeof(uint32_t), 1, stream,
-                    "rit playthrough union");
+      ok = rit_write_uint32(entry->playthrough_union[union_idx], stream);
     }
     for (int leave_idx = 0;
-         leave_idx < RACK_INFO_TABLE_NONPLAYTHROUGH_BEST_LEAVES_PER_ENTRY;
+         ok && leave_idx < RACK_INFO_TABLE_NONPLAYTHROUGH_BEST_LEAVES_PER_ENTRY;
          leave_idx++) {
-      const uint32_t le_leave =
-          htole32((uint32_t)entry->nonplaythrough_best_leave_values[leave_idx]);
-      fwrite_or_die(&le_leave, sizeof(uint32_t), 1, stream,
-                    "rit nonplaythrough best leave value");
+      ok = rit_write_uint32(
+          (uint32_t)entry->nonplaythrough_best_leave_values[leave_idx], stream);
     }
-    for (int bl_idx = 0; bl_idx < RACK_INFO_TABLE_BEST_LEAVES_PER_ENTRY;
+    for (int bl_idx = 0; ok && bl_idx < RACK_INFO_TABLE_BEST_LEAVES_PER_ENTRY;
          bl_idx++) {
-      const uint32_t le_bl = htole32((uint32_t)entry->best_leaves[bl_idx]);
-      fwrite_or_die(&le_bl, sizeof(uint32_t), 1, stream, "rit best leave");
+      ok = rit_write_uint32((uint32_t)entry->best_leaves[bl_idx], stream);
     }
-    for (int len_idx = 0; len_idx < RIT_MULTI_PT_TP7_NUM_WORD_LENGTHS;
+    for (int len_idx = 0; ok && len_idx < RIT_MULTI_PT_TP7_NUM_WORD_LENGTHS;
          len_idx++) {
-      const uint32_t le_bitvec = htole32(entry->multi_pt_tp7_bitvec[len_idx]);
-      fwrite_or_die(&le_bitvec, sizeof(uint32_t), 1, stream,
-                    "rit multi pt tp7 bitvec");
+      ok = rit_write_uint32(entry->multi_pt_tp7_bitvec[len_idx], stream);
     }
-    for (int len_idx = 0; len_idx < RIT_MULTI_PT_TP6_NUM_WORD_LENGTHS;
+    for (int len_idx = 0; ok && len_idx < RIT_MULTI_PT_TP6_NUM_WORD_LENGTHS;
          len_idx++) {
-      const uint32_t le_bitvec = htole32(entry->multi_pt_tp6_bitvec[len_idx]);
-      fwrite_or_die(&le_bitvec, sizeof(uint32_t), 1, stream,
-                    "rit multi pt tp6 bitvec");
+      ok = rit_write_uint32(entry->multi_pt_tp6_bitvec[len_idx], stream);
     }
-    fwrite_or_die(&entry->nonplaythrough_has_word_of_length_bitmask,
-                  sizeof(uint8_t), 1, stream,
-                  "rit nonplaythrough has word of length bitmask");
-    fwrite_or_die(&entry->num_bingo_words, sizeof(uint8_t), 1, stream,
-                  "rit num bingo words");
-    fwrite_or_die(entry->bingo_words, sizeof(MachineLetter),
-                  RIT_MAX_INLINE_BINGO_WORDS * RACK_SIZE, stream,
-                  "rit bingo words");
-    fwrite_or_die(entry->best_exchange_strip, sizeof(MachineLetter), RACK_SIZE,
-                  stream, "rit best exchange strip");
-    fwrite_or_die(&entry->best_exchange_tiles_exchanged, sizeof(uint8_t), 1,
-                  stream, "rit best exchange tiles exchanged");
-    fwrite_or_die(entry->pad, sizeof(uint8_t), sizeof(entry->pad), stream,
-                  "rit entry pad");
-    fwrite_or_die(entry->bit_rack_bytes, sizeof(uint8_t),
-                  RACK_INFO_TABLE_BITRACK_BYTES, stream, "rit bit_rack_bytes");
+    ok = ok &&
+         rit_fwrite(&entry->nonplaythrough_has_word_of_length_bitmask,
+                    sizeof(uint8_t), 1, stream) &&
+         rit_fwrite(&entry->num_bingo_words, sizeof(uint8_t), 1, stream) &&
+         rit_fwrite(entry->bingo_words, sizeof(MachineLetter),
+                    RIT_MAX_INLINE_BINGO_WORDS * RACK_SIZE, stream) &&
+         rit_fwrite(entry->best_exchange_strip, sizeof(MachineLetter),
+                    RACK_SIZE, stream) &&
+         rit_fwrite(&entry->best_exchange_tiles_exchanged, sizeof(uint8_t), 1,
+                    stream) &&
+         rit_fwrite(entry->pad, sizeof(uint8_t), sizeof(entry->pad), stream) &&
+         rit_fwrite(entry->bit_rack_bytes, sizeof(uint8_t),
+                    RACK_INFO_TABLE_BITRACK_BYTES, stream);
   }
+  return ok;
 #endif
 }
 
 static inline void rack_info_table_write_to_file(const RackInfoTable *rit,
                                                  const char *filename,
                                                  ErrorStack *error_stack) {
-  FILE *stream = fopen_safe(filename, "wb", error_stack);
+  // Written beside the final name and renamed into place: a table is 1.9 GB
+  // and minutes to write, and a contributor's second process (or a loader
+  // hashing it) must never see a half-written one under the real name.
+  char *temporary = temporary_sibling(filename);
+  FILE *stream = fopen_exclusive_safe(temporary, "wb", error_stack);
   if (!error_stack_is_empty(error_stack)) {
+    free(temporary);
     return;
   }
-  const uint8_t version = rit->version;
-  fwrite_or_die(&version, sizeof(version), 1, stream, "rit version");
-  const uint8_t rack_size = rit->rack_size;
-  fwrite_or_die(&rack_size, sizeof(rack_size), 1, stream, "rit rack size");
-  const uint8_t min_played = rit->playthrough_min_played_size;
-  fwrite_or_die(&min_played, sizeof(min_played), 1, stream,
-                "rit playthrough min played size");
-  const uint8_t padding = 0;
-  fwrite_or_die(&padding, sizeof(padding), 1, stream, "rit header padding");
-
-  rit_write_uint32_or_die(rit->num_buckets, stream, "rit num buckets");
-  rit_write_uint32_or_die(rit->num_entries, stream, "rit num entries");
-  rit_write_uint32s_or_die(rit->bucket_starts, (size_t)rit->num_buckets + 1,
-                           stream, "rit bucket starts");
-  rit_write_entries_or_die(rit->entries, rit->num_entries, stream);
-  fclose_or_die(stream);
+  const uint8_t header[4] = {rit->version, rit->rack_size,
+                             rit->playthrough_min_played_size, 0};
+  errno = 0;
+  bool written = rit_fwrite(header, sizeof(uint8_t), sizeof(header), stream) &&
+                 rit_write_uint32(rit->num_buckets, stream) &&
+                 rit_write_uint32(rit->num_entries, stream) &&
+                 rit_write_uint32s(rit->bucket_starts,
+                                   (size_t)rit->num_buckets + 1, stream) &&
+                 rit_write_entries(rit->entries, rit->num_entries, stream);
+  int error_number = written ? 0 : errno;
+  // A full disk often shows only here, when the buffered tail is flushed.
+  if (fclose(stream) != 0) {
+    if (written) {
+      error_number = errno;
+    }
+    written = false;
+  }
+  if (!written) {
+    // The partial table goes now, not an hour from now (temporary_sibling's
+    // sweep): it holds the space whose lack stopped the write.
+    (void)remove(temporary);
+    error_stack_push(
+        error_stack, ERROR_STATUS_RW_WRITE_ERROR,
+        get_formatted_string("could not write rack info table %s: %s", filename,
+                             error_number != 0 ? strerror(error_number)
+                                               : "unknown I/O failure"));
+    free(temporary);
+    return;
+  }
+  rename_into_place(temporary, filename, "rack info table", error_stack);
+  free(temporary);
 }
 
 static inline void rit_read_uint32_or_die(uint32_t *out, FILE *stream) {
@@ -658,45 +690,32 @@ static inline void rack_info_table_load_mmap(RackInfoTable *rit,
           filename));
   return;
 #else
-  int fd = open(filename, O_RDONLY);
-  if (fd < 0) {
-    error_stack_push(
-        error_stack, ERROR_STATUS_FILEPATH_FILE_NOT_FOUND,
-        get_formatted_string("could not open rit file: %s", filename));
+  CMap map;
+  // Lookups are hash-indexed (random), so readahead would only waste I/O.
+  if (!cmap_open(&map, filename, true)) {
+    error_stack_push(error_stack,
+                     errno == ENOENT ? ERROR_STATUS_FILEPATH_FILE_NOT_FOUND
+                                     : ERROR_STATUS_RW_READ_ERROR,
+                     get_formatted_string("could not map rit file %s: %s",
+                                          filename, strerror(errno)));
     return;
   }
-  struct stat st;
-  if (fstat(fd, &st) < 0) {
-    close(fd);
-    error_stack_push(
-        error_stack, ERROR_STATUS_RW_READ_ERROR,
-        get_formatted_string("could not stat rit file: %s", filename));
-    return;
-  }
-  size_t file_size = (size_t)st.st_size;
-  void *mapped = mmap(NULL, file_size, PROT_READ, MAP_PRIVATE, fd, 0);
-  close(fd);
-  if (mapped == MAP_FAILED) {
-    error_stack_push(
-        error_stack, ERROR_STATUS_RW_READ_ERROR,
-        get_formatted_string("could not mmap rit file: %s", filename));
-    return;
-  }
+  const size_t file_size = map.size;
 
   if (file_size < 12) {
-    munmap(mapped, file_size);
+    cmap_close(&map);
     error_stack_push(
         error_stack, ERROR_STATUS_RW_READ_ERROR,
         get_formatted_string("rit file too small for header: %s", filename));
     return;
   }
 
-  const uint8_t *data = (const uint8_t *)mapped;
+  const uint8_t *data = (const uint8_t *)map.data;
 
   // Parse the 12-byte header.
   uint8_t version = data[0];
   if (version < RIT_EARLIEST_SUPPORTED_VERSION) {
-    munmap(mapped, file_size);
+    cmap_close(&map);
     error_stack_push(
         error_stack, ERROR_STATUS_WMP_UNSUPPORTED_VERSION,
         get_formatted_string(
@@ -708,7 +727,7 @@ static inline void rack_info_table_load_mmap(RackInfoTable *rit,
 
   uint8_t rack_size = data[1];
   if (rack_size != RACK_SIZE) {
-    munmap(mapped, file_size);
+    cmap_close(&map);
     error_stack_push(error_stack, ERROR_STATUS_WMP_INCOMPATIBLE_BOARD_DIM,
                      get_formatted_string(
                          "rit rack size %d does not match build rack size %d: "
@@ -730,7 +749,7 @@ static inline void rack_info_table_load_mmap(RackInfoTable *rit,
   const size_t num_bucket_start_slots = (size_t)rit->num_buckets + 1;
   if (num_bucket_start_slots >
       (file_size - bucket_starts_offset) / sizeof(uint32_t)) {
-    munmap(mapped, file_size);
+    cmap_close(&map);
     error_stack_push(
         error_stack, ERROR_STATUS_RW_READ_ERROR,
         get_formatted_string("rit file truncated or corrupt: %s", filename));
@@ -740,7 +759,7 @@ static inline void rack_info_table_load_mmap(RackInfoTable *rit,
   const size_t entries_offset = bucket_starts_offset + bucket_starts_size;
   if ((size_t)rit->num_entries >
       (file_size - entries_offset) / sizeof(RackInfoTableEntry)) {
-    munmap(mapped, file_size);
+    cmap_close(&map);
     error_stack_push(
         error_stack, ERROR_STATUS_RW_READ_ERROR,
         get_formatted_string("rit file truncated or corrupt: %s", filename));
@@ -750,13 +769,8 @@ static inline void rack_info_table_load_mmap(RackInfoTable *rit,
   rit->bucket_starts = (uint32_t *)(data + bucket_starts_offset);
   rit->entries = (RackInfoTableEntry *)(data + entries_offset);
 
-  // Suppress readahead: lookups are hash-indexed (random), so the default
-  // 16-page readahead wastes I/O on every access.
-  madvise(mapped, file_size, MADV_RANDOM);
-
   rit->is_mmapped = true;
-  rit->mmap_base = mapped;
-  rit->mmap_size = file_size;
+  rit->map = map;
   rit->name = string_duplicate(name);
 #endif
 }
@@ -770,6 +784,7 @@ static inline RackInfoTable *rack_info_table_create(const char *data_paths,
   RackInfoTable *rit = NULL;
   if (error_stack_is_empty(error_stack)) {
     rit = (RackInfoTable *)calloc_or_die(1, sizeof(RackInfoTable));
+    rit->instance_id = rack_info_table_next_instance_id();
     if (use_mmap) {
       rack_info_table_load_mmap(rit, rit_name, rit_filename, error_stack);
     } else {
