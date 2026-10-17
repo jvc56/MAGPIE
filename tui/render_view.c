@@ -197,6 +197,17 @@ const Move *pick_analysis_preview_move(const TuiGameState *state,
   // finalize time), whose display_simmed_plays order matches the
   // analysis_snapshot.rows order the user is reading.
   const TuiHistoryEntry *hist_entry = pick_history_view(state);
+  if (hist_entry != NULL && hist_entry->analysis_snapshot.valid &&
+      hist_entry->analysis_snapshot.is_static) {
+    // A "/kibitz" ranking is on screen; preview its rows.
+    if (idx >= hist_entry->static_moves_saved_count) {
+      return NULL;
+    }
+    if (out_player_idx != NULL) {
+      *out_player_idx = hist_entry->player_idx;
+    }
+    return &hist_entry->static_moves_saved[idx];
+  }
   if (hist_entry != NULL) {
     if (hist_entry->sim_results_saved != NULL) {
       SimResults *saved = hist_entry->sim_results_saved;
