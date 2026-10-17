@@ -3,15 +3,18 @@
 #include "../compat/ctime.h"
 #include "../def/peg_defs.h"
 #include "../ent/board.h"
+#include "../ent/equity.h"
 #include "../ent/game.h"
 #include "../ent/letter_distribution.h"
 #include "../ent/move.h"
 #include "../impl/peg.h"
 #include "../util/io_util.h"
+#include "../util/stable_sort.h"
 #include "../util/string_util.h"
 #include "move_string.h"
 #include <inttypes.h>
 #include <limits.h>
+#include <math.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -463,7 +466,7 @@ char *peg_build_outcomes_string_rows(const PegPerScenario *rows, int n_rows) {
   free(row_drawn);
   free(row_rem_ms);
 
-  qsort(toks, (size_t)n_toks, sizeof(PegOutcomeTok), peg_outcome_tok_cmp);
+  stable_sort(toks, (size_t)n_toks, sizeof(PegOutcomeTok), peg_outcome_tok_cmp);
   int n_bucket_toks[NUMBER_OF_PEG_OUTCOME_BUCKETS] = {0};
   for (int tok_idx = 0; tok_idx < n_toks; tok_idx++) {
     n_bucket_toks[toks[tok_idx].bucket]++;
@@ -531,8 +534,7 @@ char *peg_build_outcomes_string_rows(const PegPerScenario *rows, int n_rows) {
                                         otherwise_word[implied]);
   }
   free(toks);
-  char *out = string_builder_dump(sb, NULL);
-  string_builder_destroy(sb);
+  char *out = string_builder_dump_and_destroy(sb, NULL);
   return out;
 }
 
@@ -831,8 +833,7 @@ static void peg_append_graded_table(StringBuilder *sb, const PegResult *result,
       rankc[n_rows] = get_formatted_string("%d", n_rows + 1);
       StringBuilder *move_sb = string_builder_create();
       string_builder_add_move(move_sb, board, &cand->move, ld, false);
-      movec[n_rows] = string_builder_dump(move_sb, NULL);
-      string_builder_destroy(move_sb);
+      movec[n_rows] = string_builder_dump_and_destroy(move_sb, NULL);
       winsc[n_rows] = get_formatted_string("%" PRId64, cand->win_count);
       tiesc[n_rows] = get_formatted_string("%" PRId64, cand->tie_count);
       lossc[n_rows] = get_formatted_string(
@@ -1124,8 +1125,7 @@ static void peg_append_flat_ranking(StringBuilder *sb, const PegResult *result,
 
     StringBuilder *move_sb = string_builder_create();
     string_builder_add_move(move_sb, board, &cand->move, ld, false);
-    char *move_str = string_builder_dump(move_sb, NULL);
-    string_builder_destroy(move_sb);
+    char *move_str = string_builder_dump_and_destroy(move_sb, NULL);
     if (min_move_width > (int)string_length(move_str)) {
       // Left-pad to the stage's widest move so the column never grows
       // mid-solve.
@@ -1268,15 +1268,13 @@ char *peg_result_get_string(const PegResult *result, const Game *game,
         peg_cand_outcomes_destroy_array(live_oc, live_n_oc);
       }
     }
-    char *out = string_builder_dump(sb, NULL);
-    string_builder_destroy(sb);
+    char *out = string_builder_dump_and_destroy(sb, NULL);
     return out;
   }
 
   if (result->last_completed_stage < 0 && result->n_stage_history == 0) {
     string_builder_add_string(sb, "no PEG results.\n");
-    char *out = string_builder_dump(sb, NULL);
-    string_builder_destroy(sb);
+    char *out = string_builder_dump_and_destroy(sb, NULL);
     return out;
   }
 
@@ -1304,8 +1302,7 @@ char *peg_result_get_string(const PegResult *result, const Game *game,
   }
 
   if (result->n_top_cands == 0) {
-    char *out = string_builder_dump(sb, NULL);
-    string_builder_destroy(sb);
+    char *out = string_builder_dump_and_destroy(sb, NULL);
     return out;
   }
 
@@ -1323,8 +1320,7 @@ char *peg_result_get_string(const PegResult *result, const Game *game,
     peg_append_graded_table(sb, result, board, ld, have_snap ? &snap : NULL,
                             show_outcomes, out_width, out_max_lines, trunc_note,
                             out_truncated);
-    char *out = string_builder_dump(sb, NULL);
-    string_builder_destroy(sb);
+    char *out = string_builder_dump_and_destroy(sb, NULL);
     return out;
   }
 
@@ -1338,7 +1334,162 @@ char *peg_result_get_string(const PegResult *result, const Game *game,
     free(outcomes);
   }
 
-  char *out = string_builder_dump(sb, NULL);
-  string_builder_destroy(sb);
+  char *out = string_builder_dump_and_destroy(sb, NULL);
   return out;
+}
+
+static void peg_json_move(StringBuilder *sb, const Move *move,
+                          const Game *game) {
+  StringBuilder *text = string_builder_create();
+  string_builder_add_move(text, game_get_board(game), move, game_get_ld(game),
+                          false);
+  string_builder_add_json_string(sb, string_builder_peek(text));
+  string_builder_destroy(text);
+}
+
+// %f may use a multi-byte decimal separator in the embedding process locale.
+// Fixed-point formatting has no grouping; copy digits/sign and normalize the
+// sole separator without changing the process-global locale.
+static void peg_json_decimal(StringBuilder *sb, double value, int precision) {
+  char *formatted = get_formatted_string("%.*f", precision, value);
+  bool separator_written = false;
+  for (const char *cursor = formatted; *cursor; cursor++) {
+    if ((*cursor >= '0' && *cursor <= '9') || *cursor == '-') {
+      string_builder_add_char(sb, *cursor);
+    } else if (!separator_written) {
+      string_builder_add_char(sb, '.');
+      separator_written = true;
+    }
+  }
+  free(formatted);
+}
+
+static void peg_json_candidates(StringBuilder *sb, const PegRankedCand *rows,
+                                int count, int depth, const Game *game) {
+  string_builder_add_string(sb, "[");
+  for (int entry_idx = 0; entry_idx < count; entry_idx++) {
+    const PegRankedCand *row = &rows[entry_idx];
+    string_builder_add_string(sb, entry_idx > 0 ? ",{\"move\":" : "{\"move\":");
+    peg_json_move(sb, &row->move, game);
+    string_builder_add_formatted_string(
+        sb, ",\"score\":%d", equity_to_int(move_get_score(&row->move)));
+    string_builder_add_string(sb, ",\"win\":");
+    if (row->weight_sum > 0 && isfinite(row->win_pct) && row->win_pct >= 0) {
+      peg_json_decimal(sb, 100.0 * row->win_pct, 6);
+    } else {
+      string_builder_add_string(sb, "null");
+    }
+    string_builder_add_string(sb, ",\"spread\":");
+    peg_json_decimal(sb, isfinite(row->mean_spread) ? row->mean_spread : 0.0,
+                     6);
+    string_builder_add_formatted_string(
+        sb,
+        ",\"wins\":%" PRId64 ",\"ties\":%" PRId64 ",\"losses\":%" PRId64
+        ",\"depth\":%d}",
+        row->win_count, row->tie_count,
+        row->weight_sum - row->win_count - row->tie_count, depth);
+  }
+  string_builder_add_string(sb, "]");
+}
+
+char *peg_snapshot_get_json(const PegPollSnapshot *snapshot, const Game *game) {
+  StringBuilder *sb = string_builder_create();
+  string_builder_add_formatted_string(
+      sb,
+      "{\"stage\":%d,\"depth\":%d,\"done\":%s,\"fieldSize\":%d,\"stages\":[",
+      snapshot->stage, snapshot->fidelity_plies,
+      snapshot->done ? "true" : "false", snapshot->field_size);
+  const int64_t now = ctimer_monotonic_ns();
+  for (int entry_idx = 0; entry_idx < snapshot->n_stage_history; entry_idx++) {
+    const PegStageSnapshot *stage = &snapshot->stage_history[entry_idx];
+    string_builder_add_formatted_string(
+        sb,
+        "%s{\"depth\":%d,\"completed\":%d,\"total\":%d,\"closed\":%s,"
+        "\"seconds\":",
+        entry_idx > 0 ? "," : "", stage->fidelity_plies, stage->cands_done,
+        stage->field_size, stage->end_ns ? "true" : "false");
+    peg_json_decimal(
+        sb,
+        stage->start_ns > 0
+            ? fmax(0.0, (double)((stage->end_ns ? stage->end_ns : now) -
+                                 stage->start_ns) /
+                            1e9)
+            : 0.0,
+        3);
+    string_builder_add_char(sb, '}');
+  }
+  string_builder_add_formatted_string(sb, "],\"canResume\":%s,\"moves\":[",
+                                      snapshot->can_resume ? "true" : "false");
+  for (int entry_idx = 0; entry_idx < snapshot->n_stage_moves; entry_idx++) {
+    if (entry_idx > 0) {
+      string_builder_add_string(sb, ",");
+    }
+    peg_json_move(sb, &snapshot->stage_moves[entry_idx], game);
+  }
+  string_builder_add_string(sb, "],\"evaluating\":");
+  const int active = snapshot->currently_evaluating_move_idx;
+  if (!snapshot->done && active >= 0 && active < snapshot->n_stage_moves) {
+    peg_json_move(sb, &snapshot->stage_moves[active], game);
+  } else {
+    string_builder_add_string(sb, "null");
+  }
+  string_builder_add_string(sb, ",\"entries\":");
+  peg_json_candidates(sb, snapshot->entries, snapshot->n_entries,
+                      snapshot->fidelity_plies, game);
+  string_builder_add_string(sb, ",\"baseline\":");
+  peg_json_candidates(sb, snapshot->baseline_entries,
+                      snapshot->n_baseline_entries, snapshot->baseline_fidelity,
+                      game);
+  string_builder_add_string(sb, "}");
+  char *json = string_builder_dump(sb, NULL);
+  string_builder_destroy(sb);
+  return json;
+}
+
+char *peg_poll_get_json(PegPoll *poll, const Game *game) {
+  if (!poll) {
+    return string_duplicate("null");
+  }
+  PegPollSnapshot snapshot = {0};
+  peg_poll_read(poll, &snapshot);
+  return peg_snapshot_get_json(&snapshot, game);
+}
+
+char *peg_poll_outcomes_json(PegPoll *poll, const Board *board,
+                             const LetterDistribution *ld,
+                             const char *move_text) {
+  PegCandOutcomes *outcomes = NULL;
+  int count = 0;
+  peg_poll_copy_outcomes(poll, &outcomes, &count);
+  StringBuilder *json = string_builder_create();
+  string_builder_add_string(json, "null");
+  for (int index = 0; index < count; index++) {
+    const PegCandOutcomes *one = &outcomes[index];
+    StringBuilder *name = string_builder_create();
+    string_builder_add_move(name, board, &one->move, ld, false);
+    const bool matches = strings_equal(string_builder_peek(name), move_text);
+    string_builder_destroy(name);
+    if (!matches) {
+      continue;
+    }
+    string_builder_clear(json);
+    string_builder_add_formatted_string(json, "{\"depth\":%d,\"rows\":[",
+                                        one->fidelity);
+    for (int row_idx = 0; row_idx < one->n_rows; row_idx++) {
+      const PegPerScenario *row = &one->rows[row_idx];
+      string_builder_add_string(json, row_idx ? ",{\"drawn\":" : "{\"drawn\":");
+      string_builder_add_json_string(json, row->drawn);
+      string_builder_add_string(json, ",\"remaining\":");
+      string_builder_add_json_string(json, row->remaining);
+      string_builder_add_formatted_string(
+          json, ",\"weight\":%" PRId64 ",\"margin\":%d,\"pv\":", row->weight,
+          row->mover_total);
+      string_builder_add_json_string(json, row->pv ? row->pv : "");
+      string_builder_add_char(json, '}');
+    }
+    string_builder_add_string(json, "]}");
+    break;
+  }
+  peg_cand_outcomes_destroy_array(outcomes, count);
+  return string_builder_dump_and_destroy(json, NULL);
 }

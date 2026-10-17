@@ -1,7 +1,7 @@
 #ifndef IO_UTIL_H
 #define IO_UTIL_H
 
-#include <dirent.h>
+#include "../compat/cformat.h"
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -65,6 +65,7 @@ typedef enum {
   ERROR_STATUS_CGP_PARSE_RACK_TOO_MANY_LETTERS,
   // Leavegen error
   ERROR_STATUS_LEAVE_GEN_DIFFERENT_LEXICA_OR_LEAVES,
+  ERROR_STATUS_PAT_GEN_UNSHARED_DATA,
   // Inference errors
   ERROR_STATUS_INFERENCE_NO_TILES_PLAYED,
   ERROR_STATUS_INFERENCE_RACK_OVERFLOW,
@@ -80,7 +81,6 @@ typedef enum {
   ERROR_STATUS_AUTOPLAY_MALFORMED_NUM_GAMES,
   ERROR_STATUS_AUTOPLAY_FORCE_RACKS_MALFORMED_RACK,
   ERROR_STATUS_AUTOPLAY_FORCE_RACKS_DUPLICATE_RACK,
-  ERROR_STATUS_AUTOPLAY_FORCE_RACKS_FILE_EMPTY,
   // Board layout errors
   ERROR_STATUS_BOARD_LAYOUT_MALFORMED_START_COORDS,
   ERROR_STATUS_BOARD_LAYOUT_OUT_OF_BOUNDS_START_COORDS,
@@ -97,6 +97,11 @@ typedef enum {
   ERROR_STATUS_CONVERT_MALFORMED_KWG,
   ERROR_STATUS_CONVERT_UNRECOGNIZED_CONVERSION_TYPE,
   ERROR_STATUS_CONVERT_UNIMPLEMENTED_CONVERSION_TYPE,
+  // A row of a rackequity2klv CSV that is not `rack,count,equity_sum` with a
+  // full RACK_SIZE rack, or a file that does not cover every full rack exactly
+  // once.
+  ERROR_STATUS_CONVERT_MALFORMED_RACK_EQUITY_ROW,
+  ERROR_STATUS_CONVERT_INCOMPLETE_RACK_EQUITY_CSV,
   // Create data errors
   ERROR_STATUS_CREATE_DATA_MISSING_LETTER_DISTRIBUTION,
   // GCG Parse errors
@@ -201,6 +206,13 @@ typedef enum {
   ERROR_STATUS_WMP_INCOMPATIBLE_BOARD_DIM,
   // WIT errors
   ERROR_STATUS_WIT_KWG_MISMATCH,
+  // PAT errors
+  ERROR_STATUS_PAT_INVALID_HEADER,
+  ERROR_STATUS_PAT_UNSUPPORTED_VERSION,
+  ERROR_STATUS_PAT_INVALID_ROW,
+  ERROR_STATUS_PAT_POSITIVE_WEIGHT,
+  ERROR_STATUS_PAT_WRONG_NUMBER_OF_ROWS,
+  ERROR_STATUS_PAT_INVALID_CLASSES_ARG,
   // KLV errors
   ERROR_STATUS_KLV_LINE_EXCEEDS_MAX_LENGTH,
   ERROR_STATUS_KLV_DUPLICATE_LEAVE,
@@ -269,6 +281,38 @@ typedef enum {
   ERROR_STATUS_CONFIG_WIN_PCT_TOO_SMALL,
   ERROR_STATUS_WIN_PCT_INVALID_HEADER,
   ERROR_STATUS_WIN_PCT_INVALID_ROW,
+  // Contribution client errors
+  ERROR_STATUS_HTTP_UNAVAILABLE,
+  ERROR_STATUS_HTTP_REQUEST_FAILED,
+  ERROR_STATUS_RANDOM_UNAVAILABLE,
+  ERROR_STATUS_FILE_PERMISSIONS_FAILED,
+  ERROR_STATUS_JSON_PARSE_FAILED,
+  ERROR_STATUS_JSON_FIELD_MISSING,
+  ERROR_STATUS_JSON_FIELD_WRONG_TYPE,
+  ERROR_STATUS_CONTRIBUTE_SETTINGS_MISSING,
+  ERROR_STATUS_CONTRIBUTE_SETTINGS_MALFORMED,
+  ERROR_STATUS_CONTRIBUTE_SERVER_ERROR,
+  // A wordmap or rack info table built here does not have the SHA-256 the
+  // claimed job pins for it. Handled by handing the claim back with reason
+  // "derived_mismatch" rather than by submitting a failed result: the task is
+  // fine, this build cannot reproduce the file, and the server needs to see
+  // both hashes.
+  ERROR_STATUS_CONTRIBUTE_DERIVED_MISMATCH,
+  // A stop request arrived while this worker waited for another process to
+  // finish building a derived file it needs. The task is handed back.
+  ERROR_STATUS_CONTRIBUTE_INTERRUPTED,
+  // An endgame or pre-endgame solve chose no move for an autoplay player.
+  ERROR_STATUS_AUTOPLAY_SOLVER_NO_MOVE,
+  // A player's endgame / pre-endgame settings are out of range.
+  ERROR_STATUS_AUTOPLAY_INVALID_SOLVER_SETTINGS,
+  ERROR_STATUS_PAT_UTILITY_WIN_PCT,
+  ERROR_STATUS_ENDGAME_INVALID_ACTUAL_MOVE,
+  ERROR_STATUS_CMD_API_WORD_MAP,
+  ERROR_STATUS_PEG_MEMORY_BUDGET_TOO_SMALL,
+  // `data fetch`: the manifest is malformed or names a path outside the data
+  // directory, or a downloaded file's size or SHA-256 is not the listed one.
+  ERROR_STATUS_DATA_FETCH_MANIFEST_INVALID,
+  ERROR_STATUS_DATA_FETCH_FILE_MISMATCH,
 } error_code_t;
 
 typedef enum {
@@ -286,15 +330,32 @@ typedef enum {
 #define log_fatal(...) log_with_info(LOG_FATAL, __FILE__, __LINE__, __VA_ARGS__)
 
 void log_with_info(log_level_t log_level, const char *caller_filename,
-                   int caller_line, const char *format, ...);
+                   int caller_line, const char *format, ...)
+    CFORMAT_PRINTF(4, 5);
 
 FILE *get_stream_out(void);
 FILE *get_stream_err(void);
 FILE *get_stream_in(void);
-void write_to_stream_out(const char *fmt, ...);
-void write_to_stream(FILE *stream, const char *fmt, ...);
-ssize_t getline_ignore_carriage_return(char **lineptr, size_t *n, FILE *stream);
+void write_to_stream_out(const char *fmt, ...) CFORMAT_PRINTF(1, 2);
+void write_to_stream_err(const char *fmt, ...) CFORMAT_PRINTF(1, 2);
+void write_to_stream(FILE *stream, const char *fmt, ...) CFORMAT_PRINTF(2, 3);
+int64_t getline_ignore_carriage_return(char **lineptr, size_t *n, FILE *stream);
+// A line from `stream` without its line end (\n or \r\n), which the caller
+// frees, or NULL at its end.
+char *read_line_from_stream(FILE *stream);
 char *read_line_from_stream_in(void);
+
+// Has io_wait_before_close read its line through `reader` (the caller frees
+// what it returns) rather than from the input stream itself: the command
+// loop's input reader sets it, so that a read it already has under way gets
+// the Enter rather than taking it first.
+void io_set_line_reader(char *(*reader)(void));
+
+// If this process owns its console window (cterm_owns_console), asks the user
+// to press Enter and waits, so that the last thing printed (an error, say)
+// stays on screen rather than vanishing with the window. Does nothing
+// otherwise. log_fatal calls it before aborting.
+void io_wait_before_close(void);
 
 // WARNING: This function should only be called once at startup or for testing
 void log_set_level(log_level_t new_log_level);
@@ -318,9 +379,10 @@ void io_set_stream_in(FILE *stream);
 void io_reset_stream_in(void);
 
 char *format_string_with_va_list(const char *format, va_list *args);
-char *get_formatted_string(const char *format, ...);
+char *get_formatted_string(const char *format, ...) CFORMAT_PRINTF(1, 2);
 void fflush_or_die(FILE *stream);
-void snprintf_or_die(char *buf, size_t buf_size, const char *format, ...);
+void snprintf_or_die(char *buf, size_t buf_size, const char *format, ...)
+    CFORMAT_PRINTF(3, 4);
 void *malloc_or_die(size_t size);
 void *calloc_or_die(size_t num, size_t size);
 void *realloc_or_die(void *realloc_target, size_t size);
@@ -338,7 +400,7 @@ bool error_stack_is_empty(const ErrorStack *error_stack);
 
 void error_stack_reset(ErrorStack *error_stack);
 
-void fseek_or_die(FILE *stream, long offset, int whence);
+void fseek_or_die(FILE *stream, int64_t offset, int whence);
 char *get_string_from_file_handle(FILE *file_handle, const char *filename,
                                   ErrorStack *error_stack);
 char *get_string_from_file(const char *filename, ErrorStack *error_stack);
@@ -347,17 +409,44 @@ void write_string_to_file(const char *filename, const char *mode,
 void append_string_to_file(const char *filename, const char *string,
                            ErrorStack *error_stack);
 FILE *fopen_or_die(const char *filename, const char *mode);
+// Creates `filename` with `mode` ("w" or "wb"), failing with an error if it
+// already exists: C11's "x" mode, which C99 lacks (see cfile_open).
+FILE *fopen_exclusive_safe(const char *filename, const char *mode,
+                           ErrorStack *error_stack);
 FILE *fopen_safe(const char *filename, const char *mode,
                  ErrorStack *error_stack);
-DIR *opendir_safe(const char *dir_path, ErrorStack *error_stack);
 void fclose_or_die(FILE *stream);
 void fwrite_or_die(const void *ptr, size_t size, size_t nmemb, FILE *stream,
                    const char *description);
-void fprintf_or_die(FILE *stream, const char *format, ...);
-
-FILE *popen_or_die(const char *command, const char *mode);
+void fprintf_or_die(FILE *stream, const char *format, ...) CFORMAT_PRINTF(2, 3);
 
 bool path_is_directory(const char *path);
+
+// Identity of a file's *contents*, as far as the filesystem can report it:
+// size, mtime, inode and ctime, the times to the nanosecond where the
+// filesystem records them. Two calls return the same string only if nothing
+// has written to or replaced the file in between. Returns NULL if the file
+// cannot be stat'ed; the caller frees.
+char *get_file_identity(const char *path);
+
+// Removes what unfinished writes of `filename` left beside it -- a process
+// killed while writing a 1.9 GB table leaves its whole temporary behind, and
+// nothing else would ever remove it -- once untouched for an hour, so not a
+// write still under way. Best effort: a failure here costs disk, never the
+// write.
+void remove_stale_temporary_siblings(const char *filename);
+
+// A name beside `filename` for writing it in full before renaming it into
+// place -- `<filename>.<pid>-<n>-<ns>.tmp` -- so that no reader, and no other
+// process writing the same file, ever sees half of it. Open it exclusively
+// (fopen_exclusive_safe): two containers sharing a volume can both be PID 1.
+// Calls remove_stale_temporary_siblings first. The caller frees.
+char *temporary_sibling(const char *filename);
+
+// Renames `temporary` over `filename`, or removes it and pushes an error
+// naming `what` if it cannot. Frees nothing.
+void rename_into_place(const char *temporary, const char *filename,
+                       const char *what, ErrorStack *error_stack);
 
 // Returns a sorted, heap-allocated array of filenames ending with suffix found
 // in dir_path. *num_files is set to the count. Caller frees each string and
