@@ -2,6 +2,7 @@
 #define ENDGAME_TEST_H
 
 void test_endgame(void);
+void test_endgame_pause(void);
 void test_incremental_movegen_identical(void);
 void test_endgame_wasm(void);
 void test_endgame_outplay_zobrist_overflow(void);

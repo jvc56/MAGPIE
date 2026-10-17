@@ -1,12 +1,12 @@
 #include "peg_pool.h"
 
 #include "../compat/cpthread.h"
+#include "../compat/cpthread_defs.h"
 #include "../compat/ctime.h"
-#include "../def/cpthread_defs.h"
+#include "../compat/memory_info.h"
 #include "../def/peg_defs.h"
 #include "../util/io_util.h"
-#include <errno.h>
-#include <pthread.h>
+#include "move_gen.h"
 #include <stdatomic.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -42,6 +42,9 @@ typedef struct PegPoolItem {
   // only ever pulls re-entrant items, so it cannot start an outer job on a
   // worker that is mid-outer-job.
   bool reentrant;
+  // The move's budget, from the thread that submitted the item: whichever
+  // thread runs it charges that budget, and stops on it.
+  MovegenBudget *movegen_budget;
 } PegPoolItem;
 
 typedef struct PegPoolWorkerCtx {
@@ -182,7 +185,9 @@ static bool pp_pop_or_shutdown(PegPool *pool, PegPoolItem *out) {
 //   waiter sees pending=0, returns, batch on stack invalidated
 //   worker=101 cpthread_mutex_lock -> FATAL
 static void pp_run_item(PegPoolItem *item, int worker_idx) {
+  MovegenBudget *previous = gen_set_movegen_budget(item->movegen_budget);
   item->fn(item->arg, worker_idx);
+  (void)gen_set_movegen_budget(previous);
   if (item->batch) {
     cpthread_mutex_lock(&item->batch->mutex);
     const int prev = atomic_fetch_sub(&item->batch->pending, 1);
@@ -271,15 +276,11 @@ static void pp_submit_and_wait(PegPool *pool, PegPoolItem *items, int n,
     TimeSpec ts;
     ctimer_clock_gettime_realtime(&ts);
     ts.tv_sec += iter_s; // diagnostic wake-up
-    int ret = pthread_cond_timedwait(&batch.cv, &batch.mutex, &ts);
-    // ret == 0 is a normal wake (re-check pending at the loop top); ETIMEDOUT
-    // drives the diagnostic watchdog below. Any other return is a real error
-    // (e.g. EINVAL) that would otherwise spin here forever with no diagnostic.
-    if (ret != 0 && ret != ETIMEDOUT) {
-      cpthread_mutex_unlock(&batch.mutex);
-      log_fatal("pthread_cond_timedwait failed: %d", ret);
-    }
-    if (ret == ETIMEDOUT) {
+    // A wake re-checks pending at the loop top; a timeout drives the
+    // diagnostic watchdog below. Any other failure ends the process rather
+    // than spinning here forever with no diagnostic.
+    const bool woken = cpthread_cond_timedwait(&batch.cv, &batch.mutex, &ts);
+    if (!woken) {
       const int p_after = atomic_load(&batch.pending);
       cpthread_mutex_lock(&pool->q_mutex);
       const int q_count = pool->q_count;
@@ -412,6 +413,7 @@ static void pp_submit_batch(PegPool *pool, PegPoolFn fn, void *const *args,
     items[item_idx].fn = fn;
     items[item_idx].arg = args[item_idx];
     items[item_idx].batch = NULL;
+    items[item_idx].movegen_budget = gen_get_movegen_budget();
   }
   pp_submit_and_wait(pool, items, n, helper_worker_idx, reentrant);
   free(items);
