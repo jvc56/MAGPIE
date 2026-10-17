@@ -19,7 +19,6 @@
 #include "theme.h"
 #include "tile_input.h"
 #include "tui_ui_types.h"
-#include <dirent.h>
 #include <notcurses/notcurses.h>
 #include <stdatomic.h>
 #include <stdint.h>
