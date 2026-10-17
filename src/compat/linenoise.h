@@ -111,6 +111,12 @@ void linenoiseMaskModeDisable(void);
 /* MAGPIE utilities */
 void linenoise_set_stream_in(FILE *stream);
 void linenoise_set_stream_out(FILE *stream);
+/* A line from `stream` with no prompt and no editing, without its line end
+ * (the caller frees it), or NULL at the end of the stream: what the command
+ * loop reads while a command runs. On Windows a console is read as linenoise
+ * reads it, through ReadConsoleW, since the CRT's reads of one can turn
+ * non-ASCII text into NULs on older Windows. */
+char *linenoise_read_plain_line(FILE *stream);
 
 #ifdef __cplusplus
 }

@@ -1,9 +1,9 @@
 #include "play_chooser.h"
 
 #include "../compat/cpthread.h"
+#include "../compat/cpthread_defs.h"
 #include "../compat/ctime.h"
 #include "../def/bai_defs.h"
-#include "../def/cpthread_defs.h"
 #include "../def/equity_defs.h"
 #include "../def/game_defs.h"
 #include "../def/game_history_defs.h"
@@ -12,6 +12,7 @@
 #include "../def/peg_defs.h"
 #include "../def/thread_control_defs.h"
 #include "../ent/bag.h"
+#include "../ent/bai_result.h"
 #include "../ent/endgame_results.h"
 #include "../ent/equity.h"
 #include "../ent/game.h"
@@ -40,6 +41,10 @@
 enum {
   PLAY_CHOOSER_DEFAULT_SIM_PLIES = 2,
   PLAY_CHOOSER_DEFAULT_SIM_MAX_CANDIDATES = 15,
+  // Rollouts each candidate gets before BAI samples adaptively. One leaves
+  // the candidate's empirical variance at zero, so top-two treats that single
+  // rollout as its exact mean and may never sample it again.
+  PLAY_CHOOSER_SIM_MIN_PLAY_ITERATIONS = 30,
   // Assume roughly four tiles per play across both players when splitting
   // the remaining clock into per-move budgets.
   PLAY_CHOOSER_TILES_PER_PLAY_PAIR = 8,
@@ -492,11 +497,16 @@ static bool play_chooser_run_sim(PlayChooser *play_chooser, Game *game,
       /*max_num_display_plays=*/num_candidates,
       /*max_num_display_plies=*/sim_plies, strategy->seed,
       /*max_iterations=*/(uint64_t)1e15,
-      /*min_play_iterations=*/1, /*scond=*/0.0, BAI_THRESHOLD_NONE,
+      /*min_play_iterations=*/PLAY_CHOOSER_SIM_MIN_PLAY_ITERATIONS,
+      /*scond=*/0.0, BAI_THRESHOLD_NONE,
       /*time_limit_seconds=*/budget_seconds, BAI_SAMPLING_RULE_TOP_TWO_IDS,
       /*cutoff=*/0.0, play_chooser_util_w_winpct(strategy),
       strategy->utility_w_spread, play_chooser_util_spread_scale(strategy),
       /*use_margin_forecast=*/false, /*inference_args=*/NULL, &sim_args);
+  sim_args.pat_rollout_disabled = strategy->pat_rollout_disabled;
+  sim_args.pat_rollout_disabled_classes_mask =
+      strategy->pat_rollout_disabled_classes_mask;
+  sim_args.bag_cycle = strategy->sim_bag_cycle;
 
   // The persistent SimCtx recycles the simmer's allocations across calls
   // (samples themselves are reset per simulation by the engine).
@@ -571,7 +581,7 @@ static bool play_chooser_run_endgame(
       /*before_search_callback=*/NULL, /*before_search_callback_data=*/NULL,
       /*per_root_move_callback=*/NULL, /*per_root_move_callback_data=*/NULL,
       DUAL_LEXICON_MODE_IGNORANT, /*forced_pass_bypass=*/false,
-      /*incremental_movegen=*/true,
+      /*incremental_movegen=*/true, /*disable_best_reply_shortcuts=*/false,
       /*enable_pv_display=*/false, /*soft_time_limit=*/budget_seconds * 0.9,
       /*hard_time_limit=*/budget_seconds, strategy->seed,
       /*skip_word_pruning=*/false, shared_tt, /*max_workers=*/0,
@@ -718,7 +728,10 @@ static bool play_chooser_run_peg(PlayChooser *play_chooser, const Game *game,
                 strategy->peg_scenario_stride, /*nested_enabled=*/false,
                 /*nested_cand_cap=*/0, /*nested_cand_caps=*/NULL,
                 /*nested_n_cand_caps=*/0, /*nested_stride=*/0,
+                /*nested_strides_by_bag=*/NULL,
+                /*nested_n_strides_by_bag=*/0,
                 /*nested_emptier_ply_cap=*/0, /*nested_max_depth=*/0,
+                /*disable_best_reply_shortcuts=*/false,
                 /*eval_bag_order=*/NULL, /*eval_bag_order_len=*/0,
                 /*only_moves=*/NULL, /*n_only_moves=*/0,
                 /*protect_moves=*/NULL, /*n_protect_moves=*/0,
@@ -727,7 +740,8 @@ static bool play_chooser_run_peg(PlayChooser *play_chooser, const Game *game,
                 benchmarking ? play_chooser_benchmark_peg_candidate_done : NULL,
                 /*on_scenario_done=*/NULL,
                 /*user_data=*/benchmarking ? &benchmark_context : NULL,
-                /*poll=*/NULL, &peg_args);
+                /*poll=*/NULL, /*shared_endgame_tt=*/NULL, /*checkpoint=*/NULL,
+                /*resume=*/false, &peg_args);
   PegResult peg_result = {0};
   peg_solve(&peg_args, &peg_result, error_stack);
   if (benchmarking) {
@@ -920,6 +934,13 @@ play_chooser_evaluate_position(PlayChooser *play_chooser, Game *game,
       // conservatively defaults to challenging.
       return PLAY_CHOOSER_BRANCH_INVALID;
     }
+    if (bai_result_get_num_samples(
+            sim_results_get_bai_result(play_chooser->sim_results)) == 0) {
+      // The budget ran out before any rollout finished. The best play's mean
+      // utility would read 0, a certain loss, and rank this branch below
+      // every evaluated sibling; report it unevaluated instead.
+      return PLAY_CHOOSER_BRANCH_INVALID;
+    }
     // The sim ranked by (and recorded per rollout) the win%+spread blend; read
     // the best play's mean utility back directly.
     return play_chooser_branch_value(
@@ -973,6 +994,8 @@ typedef struct PlayChooserEndgameBranch {
   // False when the solve produced no value at all (never completed even one
   // ply within the budget), so the decision can fall back to challenging.
   bool valid;
+  // The move's budget, from the thread that started the branch.
+  MovegenBudget *movegen_budget;
 } PlayChooserEndgameBranch;
 
 static void
@@ -1003,7 +1026,10 @@ play_chooser_solve_endgame_branch(PlayChooserEndgameBranch *branch) {
 }
 
 static void *play_chooser_endgame_branch_thread(void *arg) {
-  play_chooser_solve_endgame_branch((PlayChooserEndgameBranch *)arg);
+  PlayChooserEndgameBranch *branch = (PlayChooserEndgameBranch *)arg;
+  (void)gen_set_movegen_budget(branch->movegen_budget);
+  play_chooser_solve_endgame_branch(branch);
+  (void)gen_set_movegen_budget(NULL);
   return NULL;
 }
 
@@ -1095,6 +1121,7 @@ static void play_chooser_decide_challenge_endgame(PlayChooser *play_chooser,
     };
     if (run_concurrent) {
       cpthread_t keep_thread;
+      keep_branch.movegen_budget = gen_get_movegen_budget();
       cpthread_create(&keep_thread, play_chooser_endgame_branch_thread,
                       &keep_branch);
       play_chooser_solve_endgame_branch(&challenge_branch);
