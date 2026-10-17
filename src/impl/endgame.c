@@ -251,12 +251,13 @@ struct EndgameCtx {
 };
 
 struct EndgameCtxWorker {
-  // Worker ordinal within this solve (0..threads-1, == position in the cached
-  // workers[] array, so stable across solves). ordinal 0 is the main worker:
-  // it owns root move ordering, ply-2 tracking, the soft-time check, and PV
-  // display. Drives per-worker jitter parity. Each worker reaches move
-  // generation through get_movegen(), which auto-assigns a distinct per-pthread
-  // MoveGen cache slot, so no explicit slot is tracked here.
+  // Worker ordinal within this solve (0..live_workers-1, counting helpers lent
+  // by endgame_add_worker; == position in the cached workers[] array, so
+  // stable across solves). ordinal 0 is the main worker: it owns root move
+  // ordering, ply-2 tracking, the soft-time check, and PV display. Drives
+  // per-worker jitter parity. Each worker reaches move generation through
+  // get_movegen(), which auto-assigns a distinct per-pthread MoveGen cache
+  // slot, so no explicit slot is tracked here.
   int ordinal;
   Game *game_copy;
   Arena *small_move_arena;
@@ -1736,12 +1737,27 @@ static int compute_conservation_bonus(const SmallMove *small_move,
                opp_stuck_frac);
 }
 
+// Whether another worker may be searching this solve's tree alongside this one,
+// which is when ABDADA's bookkeeping pays. solver->threads alone does not say:
+// endgame_add_worker lends helpers to a running solve and raises only
+// live_workers, and endgame_solve_inline always runs with threads == 1. A
+// helper (ordinal > 0) always has company, and the main worker sees helpers
+// arrive through live_workers. A single-threaded solve that nobody helps pays
+// one relaxed load, and only at the nodes where ABDADA could act.
+static bool worker_has_company(const EndgameCtxWorker *worker) {
+  return worker->ordinal > 0 || worker->solver->threads > 1 ||
+         atomic_load_explicit(&worker->solver->live_workers,
+                              memory_order_relaxed) > 1;
+}
+
 // Thread jitter for ABDADA search diversity: each thread gets a unique bias
 // based on tiles played. Odd threads favor aggressive play, even threads favor
-// conservative play. Returns 0 for single-threaded or thread 0.
+// conservative play. Returns 0 for thread 0, the only worker of a
+// single-threaded solve. Workers lent to a solve (endgame_add_worker) take
+// ordinals from 1 up, so they get jitter even though threads stays 1.
 static int compute_thread_jitter(EndgameCtxWorker *worker, int tiles_played) {
   int thread_idx = worker->ordinal;
-  if (worker->solver->threads <= 1 || thread_idx == 0) {
+  if (thread_idx == 0) {
     return 0;
   }
   int bias = thread_idx * tiles_played;
@@ -2874,10 +2890,12 @@ int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
   // ABDADA: if exclusive search and another processor is on this node, defer.
   // Active at depth >= 3 where the cost of redundant search justifies the
   // protocol overhead. At shallower depths, nproc table collisions cause
-  // excessive false deferrals.
-  const int num_threads = worker->solver->threads;
-  const bool abdada_active = (num_threads > 1 && depth >= 3 &&
-                              worker->solver->transposition_table_optim);
+  // excessive false deferrals. Decided once per node: a helper that arrives
+  // mid-node does not change it, so every enter_node below is matched by a
+  // leave_node.
+  const bool abdada_active = depth >= 3 &&
+                             worker->solver->transposition_table_optim &&
+                             worker_has_company(worker);
   if (exclusive_p && abdada_active) {
     if (transposition_table_is_busy(worker->solver->transposition_table,
                                     node_key)) {
@@ -3851,11 +3869,12 @@ void iterative_deepening(EndgameCtxWorker *worker, int plies) {
   // so they don't all compete on the same shallow levels simultaneously.
   // Thread 0 always starts at depth 1 (main thread, provides per-ply callback).
   // Other threads start at depth 1 + (index % depth_spread), clamped to plies.
-  const int num_threads = worker->solver->threads;
+  // That includes helpers lent to a single-threaded solve (endgame_add_worker),
+  // which have ordinals from 1 up although threads stays 1.
   // plies > 1 guards the `% (plies - 1)` below: a 1-ply solve has only depth 1,
   // so there is no range to spread across (and `% 0` is a divide-by-zero that
   // traps as SIGFPE on x86).
-  if (num_threads > 1 && worker->ordinal > 0 && plies > 1) {
+  if (worker->ordinal > 0 && plies > 1) {
     // Spread across up to 4 different starting depths to reduce contention.
     // With 16 threads: 1 at d1 (thread 0), ~4 at d2, ~4 at d3, ~4 at d4, ~3 at
     // d5
