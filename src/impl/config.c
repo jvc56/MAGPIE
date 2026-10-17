@@ -3762,7 +3762,8 @@ void config_fill_sim_args(const Config *config, Rack *known_opp_rack,
                           SimArgs *sim_args) {
   InferenceArgs inference_args;
   if (config->sim_with_inference) {
-    config_fill_infer_args(config, true, 0, 0, 0, target_played_tiles, false,
+    config_fill_infer_args(config, true, 0, 0, 0, target_played_tiles,
+                           /*use_infer_cutoff_optimization=*/true,
                            target_known_inference_tiles, nontarget_known_tiles,
                            &inference_args);
   }
