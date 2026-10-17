@@ -14,6 +14,7 @@
 #include "../util/string_util.h"
 #include "letter_distribution_string.h"
 #include "rack_string.h"
+#include <inttypes.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -81,9 +82,9 @@ void string_builder_add_letter_row(
         sg, curr_row, curr_col++,
         get_formatted_string("%.2f", random_probability * 100));
     string_grid_set_cell(sg, curr_row, curr_col++,
-                         get_formatted_string("%lu", draw_subtotal));
+                         get_formatted_string("%" PRIu64, draw_subtotal));
     string_grid_set_cell(sg, curr_row, curr_col++,
-                         get_formatted_string("%lu", leave_subtotal));
+                         get_formatted_string("%" PRIu64, leave_subtotal));
   }
 }
 
@@ -463,7 +464,6 @@ char *inference_result_get_string(InferenceResults *inference_results,
   StringBuilder *inference_string = string_builder_create();
   string_builder_add_inference(inference_string, inference_results, ld,
                                max_num_leaves_to_display, use_ucgi_format);
-  char *result_string = string_builder_dump(inference_string, NULL);
-  string_builder_destroy(inference_string);
+  char *result_string = string_builder_dump_and_destroy(inference_string, NULL);
   return result_string;
 }

@@ -79,16 +79,53 @@ echo "Running cppcheck analysis on src/, test/, cmd/, tools/, and tui/ directori
     --suppress=checkLevelNormal \
     --suppress='*:*/linenoise.c' \
     --suppress='*:*/linenoise.h' \
+    --suppress='*:*/cjson.c' \
+    --suppress='*:*/cjson.h' \
+    --suppress='*:*/sha256.c' \
+    --suppress='*:*/sha256.h' \
     --std=c99 \
     --error-exitcode=1 \
     -U_WIN32 \
     -U__APPLE__ \
     -U__EMSCRIPTEN__ \
     -j "${MAX_CORES}" \
-    src/ test/ cmd/ tools/ tui/
+    src/ test/ cmd/ tools/ tui/ wasmentry/
+
+CPPCHECK_EXIT_CODE=$?
+
+# src/compat again with _WIN32 defined, so its Windows branches get the same
+# analysis as its POSIX ones.
+if [ "${CPPCHECK_EXIT_CODE}" -eq 0 ]; then
+    mkdir -p "${CPPCHECK_BUILD_DIR}-windows"
+    "${CPPCHECK_EXECUTABLE}" \
+        --check-level=reduced \
+        --enable=all \
+        --force \
+        --cppcheck-build-dir="${CPPCHECK_BUILD_DIR}-windows" \
+        --inline-suppr \
+        --suppress=missingIncludeSystem \
+        --suppress=constParameterCallback \
+        --suppress=unusedFunction \
+        --suppress=normalCheckLevelMaxBranches \
+        --suppress=checkLevelNormal \
+        --suppress='*:*/linenoise.c' \
+        --suppress='*:*/linenoise.h' \
+        --suppress='*:*/cjson.c' \
+        --suppress='*:*/cjson.h' \
+        --suppress='*:*/sha256.c' \
+        --suppress='*:*/sha256.h' \
+        --std=c99 \
+        --error-exitcode=1 \
+        --suppress=unmatchedSuppression \
+        -D_WIN32 \
+        -U__APPLE__ \
+        -U__EMSCRIPTEN__ \
+        -j "${MAX_CORES}" \
+        src/compat/
+    CPPCHECK_EXIT_CODE=$?
+fi
 
 # --- Check exit code of cppcheck ---
-CPPCHECK_EXIT_CODE=$?
 if [ "${CPPCHECK_EXIT_CODE}" -eq 0 ]; then
     echo "cppcheck analysis completed successfully with no errors found."
 elif [ "${CPPCHECK_EXIT_CODE}" -eq 1 ]; then
