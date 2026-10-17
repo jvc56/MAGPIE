@@ -84,7 +84,12 @@ static int wrap_error_lines(const char *text, int width, char lines[][128],
 // interior `width`. Accounts for the 2-cell "⚠ " prefix / indent
 // by wrapping the message to width-2.
 // A kept phony cross-word adds one informational row after them.
-static int history_error_rows(const TuiHistoryEntry *e, int width) {
+static int history_error_rows(const TuiGameState *state, int idx, int width) {
+  const TuiHistoryEntry *e = &state->history[idx];
+  // A turn whose move is hidden hides what it would say about the move.
+  if (tui_history_spoiler(state, idx) != TUI_SPOILER_NONE) {
+    return 0;
+  }
   const int hook_rows = e->phony_hooks[0] != '\0' ? 1 : 0;
   if (e->error_str[0] == '\0') {
     return hook_rows;
@@ -97,12 +102,16 @@ static int history_error_rows(const TuiHistoryEntry *e, int width) {
   int n = wrap_error_lines(e->error_str, ew, lines, HISTORY_ERROR_MAX_LINES);
   return (n < 1 ? 1 : n) + hook_rows;
 }
-static int history_entry_rows(const TuiHistoryEntry *e, int width) {
+static int history_entry_rows(const TuiGameState *state, int idx, int width) {
+  const TuiHistoryEntry *e = &state->history[idx];
+  if (tui_history_spoiler(state, idx) != TUI_SPOILER_NONE) {
+    return 2;
+  }
   int rows = (e->end_bonus != 0 || e->challenged_off) ? 4 : 2;
   // Revalidation error: word-wrapped rows tucked under the entry's
   // move/rack pair. Lets the user see the impossible-move
   // explanation inline rather than hunting for a status line.
-  rows += history_error_rows(e, width);
+  rows += history_error_rows(state, idx, width);
   return rows;
 }
 // Body (rows 1-2 minus the rank prefix) of an event entry — a time
@@ -1027,7 +1036,14 @@ render_history_entry(struct ncplane *plane, const Theme *theme,
     return;
   }
 
-  if (editing) {
+  // Spoiler-free review: the turn under the cursor shows its rack, and
+  // a "?" where the play and its score would be.
+  const bool move_hidden =
+      !editing && tui_history_spoiler(state, idx) == TUI_SPOILER_MOVE;
+  if (move_hidden) {
+    theme_apply_fg(plane, player_dim_fg);
+    ncplane_putstr_yx(plane, row, interior_left + (int)strlen(prefix), "?");
+  } else if (editing) {
     render_history_move_editor(plane, theme, state, row, interior_left,
                                interior_right, player_fg, player_dim_fg,
                                prefix);
@@ -1110,6 +1126,9 @@ render_history_entry(struct ncplane *plane, const Theme *theme,
     theme_apply_bg(plane, theme->bg);
   }
 
+  if (move_hidden) {
+    return;
+  }
   if (!e->pending) {
     char total_str[16];
     (void)snprintf(total_str, sizeof(total_str), "%d", e->total_after);
@@ -1295,12 +1314,12 @@ void render_history_panel(struct ncplane *plane, const Theme *theme,
 
     // Walk backwards to find the oldest entry that still fits, so the
     // most recent entries always show.
-    int first = state->history_count;
+    const int visible_count = tui_history_visible_count(state);
+    int first = visible_count;
     int rows_used = 0;
     const int interior_width = interior_right - interior_left + 1;
     while (first > 0) {
-      const int rows =
-          history_entry_rows(&state->history[first - 1], interior_width);
+      const int rows = history_entry_rows(state, first - 1, interior_width);
       if (rows_used + rows > rows_avail) {
         break;
       }
@@ -1313,9 +1332,9 @@ void render_history_panel(struct ncplane *plane, const Theme *theme,
     // visible window has no leave-bearing rows; render_history_entry
     // suppresses the column in that case.
     int leave_col_w = 0;
-    for (int idx = first; idx < state->history_count; idx++) {
+    for (int idx = first; idx < visible_count; idx++) {
       const TuiHistoryEntry *e = &state->history[idx];
-      if (e->pending) {
+      if (e->pending || tui_history_spoiler(state, idx) != TUI_SPOILER_NONE) {
         continue;
       }
       const int w = e->leave_str[0] != '\0' ? (int)strlen(e->leave_str) : 1;
@@ -1331,10 +1350,10 @@ void render_history_panel(struct ncplane *plane, const Theme *theme,
       rank_digits++;
     }
     int row = top;
-    for (int idx = first; idx < state->history_count; idx++) {
+    for (int idx = first; idx < visible_count; idx++) {
       const TuiHistoryEntry *e = &state->history[idx];
       const bool cursor_here = state->history_cursor == idx;
-      const int entry_rows = history_entry_rows(e, interior_width);
+      const int entry_rows = history_entry_rows(state, idx, interior_width);
       render_history_entry(plane, theme, state, e, idx, row, interior_left,
                            interior_right, bottom, leave_col_w, rank_digits,
                            cursor_here, history_focused, state->bot_started,
@@ -1343,7 +1362,7 @@ void render_history_panel(struct ncplane *plane, const Theme *theme,
       // occupies (entry_rows − base) rows; base = entry_rows minus
       // the error-row count, so the first error row is at
       // row + base.
-      const int err_rows = history_error_rows(e, interior_width);
+      const int err_rows = history_error_rows(state, idx, interior_width);
       if (err_rows > 0) {
         render_history_error_row(plane, theme, e, row + entry_rows - err_rows,
                                  interior_left, interior_right);
@@ -1388,13 +1407,14 @@ void render_history_panel(struct ncplane *plane, const Theme *theme,
   // entry that still fits in its target column.
   int left_used = 0;
   int right_used = 0;
-  int first = state->history_count;
+  const int visible_count = tui_history_visible_count(state);
+  int first = visible_count;
   const int col_width_left = left_r - left_l + 1;
   const int col_width_right = right_r - right_l + 1;
   while (first > 0) {
     const int idx = first - 1;
     const int col_w = (idx % 2 == 0) ? col_width_left : col_width_right;
-    const int rows = history_entry_rows(&state->history[idx], col_w);
+    const int rows = history_entry_rows(state, idx, col_w);
     int *used = (idx % 2 == 0) ? &left_used : &right_used;
     if (*used + rows > rows_avail) {
       break;
@@ -1408,9 +1428,9 @@ void render_history_panel(struct ncplane *plane, const Theme *theme,
   // (the "·" placeholder).
   int leave_w_left = 0;
   int leave_w_right = 0;
-  for (int idx = first; idx < state->history_count; idx++) {
+  for (int idx = first; idx < visible_count; idx++) {
     const TuiHistoryEntry *e = &state->history[idx];
-    if (e->pending) {
+    if (e->pending || tui_history_spoiler(state, idx) != TUI_SPOILER_NONE) {
       continue;
     }
     const int w = e->leave_str[0] != '\0' ? (int)strlen(e->leave_str) : 1;
@@ -1427,11 +1447,11 @@ void render_history_panel(struct ncplane *plane, const Theme *theme,
   }
   int row_left = top;
   int row_right = top;
-  for (int idx = first; idx < state->history_count; idx++) {
+  for (int idx = first; idx < visible_count; idx++) {
     const TuiHistoryEntry *e = &state->history[idx];
     const int col_w = (idx % 2 == 0) ? col_width_left : col_width_right;
-    const int rows = history_entry_rows(e, col_w);
-    const int err_rows = history_error_rows(e, col_w);
+    const int rows = history_entry_rows(state, idx, col_w);
+    const int err_rows = history_error_rows(state, idx, col_w);
     const bool cursor_here = state->history_cursor == idx;
     int row_top = 0;
     int col_left = 0;
