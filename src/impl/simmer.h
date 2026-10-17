@@ -7,6 +7,7 @@
 #include "../ent/sim_results.h"
 #include "../util/io_util.h"
 #include "random_variable.h"
+#include <stdbool.h>
 
 typedef struct SimCtx SimCtx;
 
@@ -17,6 +18,6 @@ void simulate_without_ctx(SimArgs *sim_args, SimResults *sim_results,
 void sim_ctx_destroy(SimCtx *sim_ctx);
 const Move *get_top_simming_move(Game *game, MoveList *move_list,
                                  SimArgs *sim_args, SimCtx **sim_ctx,
-                                 SimResults *sim_results,
+                                 SimResults *sim_results, bool *simulated,
                                  ErrorStack *error_stack);
 #endif

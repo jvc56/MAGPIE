@@ -187,25 +187,28 @@ C14/O2TOY9/mIRADOR8/F4DAB2PUGH1/I5GOOEY3V/T4XI2MALTHA/14N/6GUM3OWN/7PEW2DOE/9EF1
               break;
 
             case "complete":
-              setStatus("✓ Complete", "success");
+              setStatus(e.data.stopped ? "⏸ Stopped" : "✓ Complete", e.data.stopped ? "" : "success");
               submitButton.disabled = false;
               endgameButton.disabled = false;
               stopButton.disabled = true;
               break;
 
-            case "stopped":
-              setStatus("⏸ Stopped", "");
-              submitButton.disabled = false;
-              endgameButton.disabled = false;
+            case "stopping":
+              setStatus("Stopping…", "");
+              submitButton.disabled = true;
+              endgameButton.disabled = true;
               stopButton.disabled = true;
               break;
 
+            case "fatal":
+              workerReady = false;
+              magpieWorker.terminate();
             case "error":
               console.error("Error:", text);
               appendOutput("❌ ERROR: " + text);
               setStatus("Error: " + text, "error");
-              submitButton.disabled = false;
-              endgameButton.disabled = false;
+              submitButton.disabled = !workerReady;
+              endgameButton.disabled = !workerReady;
               stopButton.disabled = true;
               break;
 
