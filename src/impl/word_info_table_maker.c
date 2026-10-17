@@ -239,12 +239,12 @@ make_word_info_table_from_words(const DictionaryWordList *words) {
   return wit;
 }
 
-WordInfoTable *make_word_info_table_from_kwg(const KWG *kwg) {
+WordInfoTable *make_word_info_table_from_kwg(const KWG *kwg, int num_threads) {
   DictionaryWordList *words = dictionary_word_list_create();
   kwg_write_words(kwg, kwg_get_dawg_root_node_index(kwg), words, NULL);
   WordInfoTable *wit = make_word_info_table_from_words(words);
   dictionary_word_list_destroy(words);
   wit->kwg_hash = kwg_get_hash(kwg);
-  word_info_table_build_position_lengths(wit);
+  word_info_table_build_position_lengths(wit, num_threads);
   return wit;
 }

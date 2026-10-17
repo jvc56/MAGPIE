@@ -1,21 +1,31 @@
 #include "autoplay_test.h"
 
+#include "../src/compat/cfile.h"
+#include "../src/def/autoplay_defs.h"
+#include "../src/def/pat_defs.h"
 #include "../src/def/players_data_defs.h"
 #include "../src/ent/autoplay_results.h"
+#include "../src/ent/bai_sched_stats.h"
 #include "../src/ent/data_filepaths.h"
 #include "../src/ent/equity.h"
 #include "../src/ent/game.h"
 #include "../src/ent/klv.h"
+#include "../src/ent/pat.h"
+#include "../src/ent/pat_file.h"
 #include "../src/ent/players_data.h"
 #include "../src/impl/autoplay.h"
 #include "../src/impl/config.h"
+#include "../src/impl/move_gen.h"
 #include "../src/util/io_util.h"
+#include "../src/util/json.h"
 #include "../src/util/math_util.h"
 #include "../src/util/string_util.h"
 #include "test_constants.h"
+#include "test_platform.h"
 #include "test_util.h"
 #include "wmp_move_gen_test.h"
 #include <assert.h>
+#include <inttypes.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -178,6 +188,43 @@ void test_autoplay_leavegen(void) {
   config_destroy(ab_config);
 }
 
+void test_autoplay_pat_gen(void) {
+  char *tmp_dir = test_platform_make_temporary_directory("magpie_patgen_");
+  char *strategy_dir = get_formatted_string("%s/strategy", tmp_dir);
+  assert(cfile_mkdir(strategy_dir) == 0);
+  free(strategy_dir);
+
+  char *set_cmd = get_formatted_string(
+      "set -path %s:%s -lex CSW21_ab -ld english_ab -wmp false -s1 equity "
+      "-s2 equity -r1 best -r2 best -numplays 1 -threads 2",
+      tmp_dir, DEFAULT_TEST_DATA_PATH);
+  Config *ab_config = config_create_or_die(set_cmd);
+  free(set_cmd);
+
+  load_and_exec_config_or_die_timed(ab_config, "patgen 4,4 patgen_test -seed 3",
+                                    60);
+
+  // Both generation snapshots and the final weights reload cleanly with
+  // every applied weight <= 0.
+  ErrorStack *error_stack = error_stack_create();
+  const char *const pat_names[3] = {"patgen_test_gen_1", "patgen_test_gen_2",
+                                    "patgen_test"};
+  for (int name_index = 0; name_index < 3; name_index++) {
+    PATWeights *pat = pat_create(tmp_dir, pat_names[name_index], error_stack);
+    assert(error_stack_is_empty(error_stack));
+    assert(pat);
+    for (int feature_index = 0; feature_index < PAT_NUM_FEATURES;
+         feature_index++) {
+      assert(pat_get_weight(pat, feature_index) <= 0);
+    }
+    pat_destroy(pat);
+  }
+  error_stack_destroy(error_stack);
+  config_destroy(ab_config);
+  test_platform_remove_directory_tree(tmp_dir);
+  free(tmp_dir);
+}
+
 void test_autoplay_divergent_games(void) {
   Config *csw_config =
       config_create_or_die("set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 "
@@ -329,78 +376,44 @@ void test_autoplay_leavegen_force_racks(void) {
   Config *ab_config =
       config_create_or_die("set -lex CSW21_ab -ld english_ab -wmp false -s1 "
                            "equity -s2 equity -r1 best -r2 "
-                           "best -numplays 1 -threads 1");
+                           "best -numplays 1 -threads 1 -seed 3");
 
-  const char *force_racks_filename = "test_leavegen_force_racks.txt";
-  ErrorStack *write_error_stack = error_stack_create();
-  // Racks must be full RACK_SIZE racks: the file restricts which racks
-  // leavegen's RackList treats as eligible to be forced (see
-  // rack_list_create). CSW21_ab/english_ab only has 8 possible full racks
-  // (see test_rack_list in rack_list_test.c), so restricting to 2 of them
-  // makes the generation converge almost immediately.
-  write_string_to_file(force_racks_filename, "w", "AAAAAAB\nABBBBBB\n",
-                       write_error_stack);
-  assert(error_stack_is_empty(write_error_stack));
-  error_stack_destroy(write_error_stack);
+  AutoplayResults *autoplay_results = autoplay_results_create();
+  ErrorStack *error_stack = error_stack_create();
+  autoplay_results_set_options(autoplay_results, "games", error_stack);
+  assert(error_stack_is_empty(error_stack));
 
-  char *leavegen_cmd =
-      get_formatted_string("leavegen 1 0 %s -seed 3", force_racks_filename);
-  // The minimum leave count should be achieved quickly, so if this takes too
-  // long, we know it failed.
-  load_and_exec_config_or_die_timed(ab_config, leavegen_cmd, 60);
-  free(leavegen_cmd);
+  // Forced racks restrict which racks leavegen's RackList treats as eligible
+  // to be forced (see rack_list_create), and only ever come from a
+  // contribute leave_generation task's JSON request, so there is no command
+  // that sets them: call config_autoplay directly, the way
+  // config_contribute_leave_gen does. CSW21_ab/english_ab only has 8
+  // possible full racks (see test_rack_list in rack_list_test.c), so
+  // restricting to 2 of them makes the generation converge almost
+  // immediately.
+  const char *forced_racks[] = {"AAAAAAB", "ABBBBBB"};
+  config_autoplay(ab_config, autoplay_results, AUTOPLAY_TYPE_LEAVE_GEN, "1", 0,
+                  forced_racks, 2, NULL, error_stack);
+  assert(error_stack_is_empty(error_stack));
 
-  // Missing force racks file.
-  assert_config_exec_status(
-      ab_config, "leavegen 1 0 does_not_exist_force_racks.txt -seed 3",
-      ERROR_STATUS_RW_FAILED_TO_OPEN_STREAM);
+  // Racks must all be full RACK_SIZE racks, and no rack may be listed twice
+  // (see rack_list_test.c for what each rejection protects).
+  const char *malformed_racks[] = {"AAAAAAB", "AB"};
+  config_autoplay(ab_config, autoplay_results, AUTOPLAY_TYPE_LEAVE_GEN, "1", 0,
+                  malformed_racks, 2, NULL, error_stack);
+  assert(error_stack_top(error_stack) ==
+         ERROR_STATUS_AUTOPLAY_FORCE_RACKS_MALFORMED_RACK);
+  error_stack_reset(error_stack);
 
-  // Malformed rack line (wrong size for RACK_SIZE-tile racks).
-  const char *bad_force_racks_filename = "test_leavegen_bad_force_racks.txt";
-  ErrorStack *bad_write_error_stack = error_stack_create();
-  write_string_to_file(bad_force_racks_filename, "w", "AAAAAAB\nAB\n",
-                       bad_write_error_stack);
-  assert(error_stack_is_empty(bad_write_error_stack));
-  error_stack_destroy(bad_write_error_stack);
-  char *bad_racks_cmd =
-      get_formatted_string("leavegen 1 0 %s -seed 3", bad_force_racks_filename);
-  assert_config_exec_status(ab_config, bad_racks_cmd,
-                            ERROR_STATUS_AUTOPLAY_FORCE_RACKS_MALFORMED_RACK);
-  free(bad_racks_cmd);
-  (void)remove(bad_force_racks_filename);
+  const char *duplicate_racks[] = {"AAAAAAB", "ABBBBBB", "AAAAAAB"};
+  config_autoplay(ab_config, autoplay_results, AUTOPLAY_TYPE_LEAVE_GEN, "1", 0,
+                  duplicate_racks, 3, NULL, error_stack);
+  assert(error_stack_top(error_stack) ==
+         ERROR_STATUS_AUTOPLAY_FORCE_RACKS_DUPLICATE_RACK);
+  error_stack_reset(error_stack);
 
-  // Duplicate rack.
-  const char *duplicate_force_racks_filename =
-      "test_leavegen_duplicate_force_racks.txt";
-  ErrorStack *duplicate_write_error_stack = error_stack_create();
-  write_string_to_file(duplicate_force_racks_filename, "w",
-                       "AAAAAAB\nABBBBBB\nAAAAAAB\n",
-                       duplicate_write_error_stack);
-  assert(error_stack_is_empty(duplicate_write_error_stack));
-  error_stack_destroy(duplicate_write_error_stack);
-  char *duplicate_racks_cmd = get_formatted_string(
-      "leavegen 1 0 %s -seed 3", duplicate_force_racks_filename);
-  assert_config_exec_status(ab_config, duplicate_racks_cmd,
-                            ERROR_STATUS_AUTOPLAY_FORCE_RACKS_DUPLICATE_RACK);
-  free(duplicate_racks_cmd);
-  (void)remove(duplicate_force_racks_filename);
-
-  // File with no parseable racks.
-  const char *empty_force_racks_filename =
-      "test_leavegen_empty_force_racks.txt";
-  ErrorStack *empty_write_error_stack = error_stack_create();
-  write_string_to_file(empty_force_racks_filename, "w", "\n\n   \n",
-                       empty_write_error_stack);
-  assert(error_stack_is_empty(empty_write_error_stack));
-  error_stack_destroy(empty_write_error_stack);
-  char *empty_racks_cmd = get_formatted_string("leavegen 1 0 %s -seed 3",
-                                               empty_force_racks_filename);
-  assert_config_exec_status(ab_config, empty_racks_cmd,
-                            ERROR_STATUS_AUTOPLAY_FORCE_RACKS_FILE_EMPTY);
-  free(empty_racks_cmd);
-  (void)remove(empty_force_racks_filename);
-
-  (void)remove(force_racks_filename);
+  error_stack_destroy(error_stack);
+  autoplay_results_destroy(autoplay_results);
   config_destroy(ab_config);
 }
 
@@ -651,11 +664,97 @@ void test_autoplay_play_chooser(void) {
   config_destroy(config);
 }
 
+// Reads the five pentanomial counts out of a finished paired run's JSON, and
+// checks them against the game-level totals in the same JSON. The two are
+// different views of the same games, so they must agree exactly:
+//
+//   sum(counts)              == pairs             (every pair lands in one
+//   bucket) sum(i * counts[i])       == 2*wins + ties     (both count player
+//   1's
+//                                                  half-points over the pair)
+//
+// The second is the load-bearing one: it fails if a pair is ever dropped,
+// double-counted, or filed in the wrong bucket.
+static void assert_pentanomial_agrees_with_games(AutoplayResults *ar,
+                                                 uint64_t expected_pairs,
+                                                 uint64_t expected_bucket_2) {
+  const char *json = autoplay_results_get_json(ar, true);
+  ErrorStack *error_stack = error_stack_create();
+  JsonValue *parsed = json_parse(json, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  assert(parsed);
+
+  const JsonValue *pentanomial = json_object_get(parsed, "pentanomial");
+  assert(pentanomial);
+  assert(json_is_array(pentanomial));
+  assert(json_array_length(pentanomial) == 5);
+
+  uint64_t counts[5];
+  uint64_t total_pairs = 0;
+  uint64_t total_half_points = 0;
+  for (int i = 0; i < 5; i++) {
+    counts[i] = (uint64_t)json_array_get_int_or(pentanomial, i, -1);
+    total_pairs += counts[i];
+    total_half_points += (uint64_t)i * counts[i];
+  }
+
+  const JsonValue *all_games = json_object_get(parsed, "all_games");
+  assert(all_games);
+  const int64_t games = json_get_int(all_games, "games", error_stack);
+  const int64_t wins = json_get_int(all_games, "wins", error_stack);
+  const int64_t ties = json_get_int(all_games, "ties", error_stack);
+  assert(error_stack_is_empty(error_stack));
+
+  assert(total_pairs == expected_pairs);
+  assert(total_pairs * 2 == (uint64_t)games);
+  assert(total_half_points == (uint64_t)(2 * wins + ties));
+  assert(counts[2] == expected_bucket_2);
+
+  json_destroy(parsed);
+  error_stack_destroy(error_stack);
+}
+
+void test_autoplay_pentanomial(void) {
+  Config *csw_config = config_create_or_die("set -lex CSW21");
+
+  // Both players sort the same way, so no pair diverges. Every pair is then a
+  // guaranteed 1-1 split and lands in bucket 2 -- and this is exactly the run
+  // where a consumer that looked only at divergent games would see an empty
+  // sample and conclude nothing, or worse, conclude something. The pentanomial
+  // reports all 50 pairs.
+  load_and_exec_config_or_die(
+      csw_config, "autoplay games 50 -seed 50 -s1 equity -s2 equity -gp true");
+  assert_pentanomial_agrees_with_games(config_get_autoplay_results(csw_config),
+                                       50, 50);
+
+  // One player sorts by score and the other by equity, so essentially every
+  // pair diverges and the counts spread across the buckets.
+  load_and_exec_config_or_die(
+      csw_config, "autoplay games 50 -seed 50 -s1 equity -s2 score -gp true");
+  const char *json =
+      autoplay_results_get_json(config_get_autoplay_results(csw_config), true);
+  ErrorStack *error_stack = error_stack_create();
+  const JsonValue *parsed = json_parse(json, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  const JsonValue *pentanomial = json_object_get(parsed, "pentanomial");
+  const int64_t split_pairs = json_array_get_int_or(pentanomial, 2, -1);
+  json_destroy(parsed);
+  error_stack_destroy(error_stack);
+  assert(split_pairs >= 0);
+  assert(split_pairs < 50);
+  assert_pentanomial_agrees_with_games(config_get_autoplay_results(csw_config),
+                                       50, (uint64_t)split_pairs);
+
+  config_destroy(csw_config);
+}
+
 void test_autoplay_remaining(void) {
   test_odds_that_player_is_better();
   test_autoplay_leavegen();
+  test_autoplay_pat_gen();
   test_autoplay_divergent_games();
   test_autoplay_sort_type_divergence();
+  test_autoplay_pentanomial();
   test_autoplay_win_pct_record();
   test_autoplay_leaves_record();
   test_autoplay_leavegen_force_racks();
@@ -663,8 +762,126 @@ void test_autoplay_remaining(void) {
   test_autoplay_play_chooser();
 }
 
+// -movegenlimit stops a command once its move generations, across its
+// threads, reach the limit: at the limit or a little past it (a batch per
+// thread, and a game in progress), never short of it. A limit of 0 is none,
+// and each command has its own budget.
+static void test_autoplay_stops_at_its_movegen_limit(void) {
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -wmp false -s1 equity -s2 equity -r1 best -r2 best "
+      "-numplays 1 -gp false -threads 2");
+  // 200 static games make some 5,000 generations: the limit stops them.
+  const uint64_t limit = 1000;
+  uint64_t before = gen_get_movegen_count();
+  load_and_exec_config_or_die(config,
+                              "autoplay games 200 -seed 9 -movegenlimit 1000");
+  const uint64_t limited = gen_get_movegen_count() - before;
+  printf("autoplay at a movegen limit of %" PRIu64 " made %" PRIu64
+         " generations\n",
+         limit, limited);
+  assert(limited >= limit);
+  assert(limited < 2 * limit);
+  assert(config_get_movegen_limit(config) == limit);
+
+  // A limit of 0 is none: 20 games play out, some 20 generations each.
+  gen_start_counting_movegens();
+  before = gen_get_movegen_count();
+  load_and_exec_config_or_die(config,
+                              "autoplay games 20 -seed 9 -movegenlimit 0");
+  assert(gen_get_movegen_count() - before >= 200);
+  gen_stop_counting_movegens();
+
+  // With no limit, budget or counting session, nothing is counted.
+  before = gen_get_movegen_count();
+  load_and_exec_config_or_die(config, "autoplay games 5 -seed 9");
+  assert(gen_get_movegen_count() == before);
+  config_destroy(config);
+}
+
 void test_autoplay(void) {
+  test_autoplay_stops_at_its_movegen_limit();
   test_autoplay_remaining();
   test_autoplay_default();
   test_autoplay_wmp_correctness();
+}
+
+// Regression test for multithreaded sim determinism under intra-game
+// parallelism (-mtmode igp), where a single sim gets every worker thread.
+//
+// With identical p1/p2 configurations every game pair must be non-divergent.
+// game_get_player_draw_index is seat-based (player_index ^
+// starting_player_index) and the pair swaps only the starting player index
+// while keeping the same bag seed, so at every turn the two games present the
+// same board, rack and bag to whoever is on turn. Two identical strategies can
+// therefore only disagree if the sim itself is nondeterministic, which makes
+// the divergent count an exact, binary determinism check with no statistical
+// interpretation needed.
+//
+// Must be run under igp specifically. Under pgp every sim gets exactly one
+// worker thread, so there is no thread timing inside a sim and the property
+// holds trivially; passing under pgp proves nothing.
+//
+// Requires -tlim 0. A clocked sim is nondeterministic by construction and can
+// never be made pair-exact, so this test must not be run with a time limit or
+// with the -pc1/-pc2 play choosers, whose budgets are clocks.
+//
+// One game pair at 200 iterations per sim. The budget runs well past the
+// initial phase (4 plays x 5 samples) and the round-robin rounds laid out
+// before it folds, so most samples come from top-two rounds, and with six
+// workers on adaptive rounds that lag only two rounds behind, idle workers
+// speculate.
+static void run_sim_determinism_igp(const bool bag_cycle) {
+  const int num_pairs = 1;
+  const int num_iters = 200;
+  char *settings = get_formatted_string(
+      "set -lex CSW21 -pl1 1 -pl2 1 -np1 4 -np2 4 -iterations %d "
+      "-minplayiterations 5 -tlim 0 -threads 6 -mtmode igp -sbagcycle %s",
+      num_iters, bag_cycle ? "true" : "false");
+  Config *config = config_create_or_die(settings);
+  free(settings);
+  bai_sched_stats_reset();
+  char *autoplay_cmd =
+      get_formatted_string("autoplay games %d -gp true -seed 7", num_pairs);
+  load_and_exec_config_or_die(config, autoplay_cmd);
+  free(autoplay_cmd);
+
+  char *res = autoplay_results_to_string(config_get_autoplay_results(config),
+                                         false, true);
+  char *expected_total =
+      get_formatted_string("autoplay games %d", num_pairs * 2);
+  assert_autoplay_output(res, 2,
+                         (const char *[]){expected_total, "autoplay games 0"});
+  free(expected_total);
+  free(res);
+  config_destroy(config);
+
+  printf("IGP sim determinism%s: PASSED (%d game pairs, 0 divergent)\n",
+         bag_cycle ? " (bag cycle)" : "", num_pairs);
+#ifdef BAI_SCHED_STATS
+  // An instrumented build (make BUILD=bai_stats) shows how much of the budget
+  // went past the initial phase and how often idle workers speculated.
+  uint64_t bai_samples = 0;
+  uint64_t speculations = 0;
+  uint64_t speculation_hits = 0;
+  const int num_sims = bai_sched_stats_get_count();
+  for (int sim_idx = 0; sim_idx < num_sims; sim_idx++) {
+    BAISchedSimStats sim_stats;
+    bai_sched_stats_get(sim_idx, &sim_stats);
+    bai_samples += sim_stats.bai_samples;
+    speculations += sim_stats.speculations;
+    speculation_hits += sim_stats.speculation_hits;
+  }
+  printf("IGP sim determinism coverage: %d sims, %" PRIu64
+         " samples past the initial phase, %" PRIu64 " speculations, %" PRIu64
+         " used\n",
+         num_sims, bai_samples, speculations, speculation_hits);
+  bai_sched_stats_reset();
+#endif
+}
+
+void test_autoplay_sim_determinism_igp(void) {
+  run_sim_determinism_igp(false);
+  // Bag-cycled sims take the same budget in rollouts; their samples are whole
+  // cycles, and the budget still runs past the initial phase.
+  run_sim_determinism_igp(true);
 }
