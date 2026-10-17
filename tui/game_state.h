@@ -3,12 +3,18 @@
 
 #include "config.h"
 #include "theme.h"
+#include "tile_input.h"
 #include <pthread.h>
 #include <stdatomic.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <time.h>
+
+// Bytes for a rack or leave as text. Multi-letter tiles are written in
+// brackets, so a Catalan rack like "[QU][NY][L·L]AEIO" needs more than
+// seven bytes' worth.
+enum { TUI_RACK_TEXT_MAX = 64 };
 
 // Forward declarations keep this header light. Implementation pulls in
 // the engine types directly.
@@ -78,7 +84,7 @@ typedef enum {
 // is supplying the data.
 typedef struct {
   char move[80];
-  char leave[16];
+  char leave[TUI_RACK_TEXT_MAX];
   char score[8];     // "30" / "120"; empty if not applicable
   char primary[8];   // "67.3%" in sim; empty in endgame
   char secondary[8]; // "+32.5" or "+27"
@@ -176,14 +182,15 @@ typedef struct {
   // clock_at_start (effectively unused outside the live-watch flow).
   int clock_at_end;
   char move_str[48]; // "8H POND" or "exch DEFG" or "pass" (no score)
-  char rack_str[16]; // full rack the player had at the start of the turn
-  char
-      leave_str[16]; // tiles kept after the play (empty = outplay/exchange-all)
+  char rack_str[TUI_RACK_TEXT_MAX];  // full rack the player had at the start of
+                                     // the turn
+  char leave_str[TUI_RACK_TEXT_MAX]; // tiles kept after the play (empty =
+                                     // outplay/exchange-all)
   // Going-out bonus, attached to the going-out player's last move so it
   // renders as a third line of that entry instead of its own row. Zero
   // when this entry has no end-of-game adjustment.
   int end_bonus;
-  char end_rack_str[16]; // opponent's leftover tiles (e.g. "EE")
+  char end_rack_str[TUI_RACK_TEXT_MAX]; // opponent's leftover tiles (e.g. "EE")
   // True when this play was challenged off (a phony under the
   // SINGLE / DOUBLE / PENALTY challenge rules): the tiles returned
   // and the turn was lost. `score` / `total_after` keep the play's
@@ -598,7 +605,7 @@ typedef struct {
   int edit_move_len;
   int edit_move_cursor;
   bool edit_move_valid;
-  char edit_rack_buf[20];
+  char edit_rack_buf[TUI_RACK_TEXT_MAX];
   int edit_rack_len;
   int edit_rack_cursor;
   bool edit_rack_valid;
@@ -606,7 +613,7 @@ typedef struct {
   // leave column of a pending entry. Arrow-key nav skips it. When
   // it has focus, typing appends to this buffer the same way the
   // rack field does.
-  char edit_leave_buf[20];
+  char edit_leave_buf[TUI_RACK_TEXT_MAX];
   int edit_leave_len;
   int edit_leave_cursor;
   // Carryover leave seeded onto a freshly-created turn (the same
@@ -616,7 +623,7 @@ typedef struct {
   // "ERST" forward yields the rack "AEKMRST" (no overlap = pure
   // union). Cleared the moment the user types into the RACK field
   // directly (edit_rack_user_modified), and reset on each new turn.
-  char edit_rack_carryover[20];
+  char edit_rack_carryover[TUI_RACK_TEXT_MAX];
   // True when the user has typed into the RACK field directly
   // (i.e., the rack buffer is "their" content, not an auto-seed
   // from the move's inferred tiles). While false, the rack panel
@@ -649,12 +656,15 @@ typedef struct {
   // buffer (uppercase → letter, lowercase → '?', dots skipped).
   // The rack panel uses this to preview the player's rack
   // while the user is still typing the move.
-  char edit_move_inferred_rack[16];
+  char edit_move_inferred_rack[TUI_RACK_TEXT_MAX];
+  // Multi-letter tile typing in progress (a "[" not yet closed, or the
+  // rest of a guessed tile to absorb); see tile_input.h.
+  TuiTileKeyState tile_keys;
   // Leave preview: the rack buffer's tiles minus the move's
   // played tiles (multiset subtraction). Empty when one side
   // is missing or the subtraction can't be performed because
   // the rack doesn't contain all played letters.
-  char edit_move_leave[16];
+  char edit_move_leave[TUI_RACK_TEXT_MAX];
   // Live preview Move object — owned, allocated at game init.
   // Populated by tui_game_state_parse_edit_buf when the user's
   // typed move text validates cleanly against the live board.
