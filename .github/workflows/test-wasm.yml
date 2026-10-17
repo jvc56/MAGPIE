@@ -4,38 +4,38 @@ on:
   push:
     branches: [main]
   pull_request:
-    branches: [main]
 
 jobs:
-  test-wasm:
+  build:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
 
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: "3.x"
 
       - name: Set up Emscripten
         uses: mymindstorm/setup-emsdk@v14
         with:
-          version: "latest"
+          version: "6.0.12"
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
 
       - name: Get datafile cache
         id: cache-datafiles
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: |
             data/*
             testdata/*
-          key: downloaded-data-files-wasm-30
+          key: downloaded-data-files-wasm-31
 
       - name: Download data files and convert lexica
         if: steps.cache-datafiles.outputs.cache-hit != 'true'
@@ -44,29 +44,132 @@ jobs:
       - name: Build WASM
         run: make clean && make -f Makefile-wasm magpie_wasm
 
+      - name: Fetch pinned preview codec data
+        run: python3 wasmentry/fetch_preview_data.py
+
       - name: Build WASM tests
         run: make -f Makefile-wasm magpie_wasm_test
 
       - name: Run WASM unit tests
         run: |
-          node bin/magpie_wasm_test.js tt
+          node bin/magpie_wasm_test.js tt browsergame
           node bin/magpie_wasm_test.js endgame
 
-      - name: Install Playwright dependencies
-        working-directory: ./wasmentry
-        run: |
-          npm install
-          npx playwright install chromium
-
-      - name: Run Playwright tests
-        working-directory: ./wasmentry
-        run: npm test
-
-      - name: Upload test results
-        if: failure()
-        uses: actions/upload-artifact@v6
+      - name: Cache optional WMP test downloads
+        id: cache-wmp
+        uses: actions/cache@v4
         with:
-          name: playwright-results
           path: |
-            test-results/
-            playwright-report/
+            data/wmp/
+            data/wmp-manifest.json
+          key: wasm-test-wmp-${{ hashFiles('src/**', 'wasmentry/build_wmp_assets.py', 'data/lexica/CSW24.kwg', 'data/lexica/NWL23.kwg') }}
+
+      - name: Build optional WMP downloads
+        if: steps.cache-wmp.outputs.cache-hit != 'true'
+        run: |
+          make -j2 magpie BUILD=no_pgo_release
+          python3 wasmentry/build_wmp_assets.py --threads 2
+
+      - name: Package test assets
+        run: |
+          python3 wasmentry/package_preview.py preview-dist --with-wmp
+          tar -czf /tmp/wasm-browser-assets.tgz -C preview-dist data wasmentry/magpie_wasm.mjs wasmentry/magpie_wasm.wasm
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wasm-browser-assets
+          path: /tmp/wasm-browser-assets.tgz
+          retention-days: 1
+
+  browser-tests:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        project: [chromium, firefox, webkit]
+        shard: [1, 2, 3]
+        include:
+          - project: unit
+            shard: 1
+          - project: edge
+            shard: 1
+          - project: static-host
+            shard: 1
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: wasmentry/package-lock.json
+      - uses: actions/download-artifact@v4
+        with:
+          name: wasm-browser-assets
+          path: /tmp/wasm-browser-assets
+      - name: Unpack engine and data
+        run: tar -xzf /tmp/wasm-browser-assets/wasm-browser-assets.tgz
+      - run: npm ci
+        working-directory: wasmentry
+      - name: Install browser
+        if: matrix.project != 'unit'
+        working-directory: wasmentry
+        env:
+          PROJECT: ${{ matrix.project }}
+        run: |
+          browser="$PROJECT"
+          if [ "$browser" = edge ]; then browser=msedge; fi
+          if [ "$browser" = static-host ]; then browser=chromium; fi
+          npx playwright install --with-deps "$browser"
+      - name: Run Playwright shard
+        working-directory: wasmentry
+        env:
+          MAGPIE_TEST_EDGE: "1"
+          PROJECT: ${{ matrix.project }}
+          SHARD: ${{ matrix.shard }}
+        run: |
+          total=3
+          case "$PROJECT" in unit|edge|static-host) total=1 ;; esac
+          npm test -- --project="$PROJECT" --shard="$SHARD/$total"
+      # Keep WebKit's first-attempt traces even when its bounded retry passes.
+      - name: Upload browser report
+        if: ${{ !cancelled() && (failure() || matrix.project == 'webkit') }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-${{ matrix.project }}-${{ matrix.shard }}
+          path: |
+            wasmentry/test-results/
+            wasmentry/playwright-report/
+          retention-days: 7
+
+  test-wasm:
+    # Preserve the aggregate check name and only publish a beta when every shard passes.
+    if: always()
+    needs: [build, browser-tests]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require all shards to pass
+        env:
+          BUILD_RESULT: ${{ needs.build.result }}
+          TEST_RESULT: ${{ needs.browser-tests.result }}
+        run: test "$BUILD_RESULT" = success && test "$TEST_RESULT" = success
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+      - uses: actions/download-artifact@v4
+        with:
+          name: wasm-browser-assets
+          path: /tmp/wasm-browser-assets
+      - run: tar -xzf /tmp/wasm-browser-assets/wasm-browser-assets.tgz
+      - name: Package Magpie beta
+        run: python3 wasmentry/package_preview.py preview-dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: magpie-wasm-preview
+          path: preview-dist/
+          retention-days: 14

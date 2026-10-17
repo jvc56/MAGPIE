@@ -1,9 +1,9 @@
 #include "peg_pess_test.h"
 
 #include "../src/compat/cpthread.h"
+#include "../src/compat/cpthread_defs.h"
 #include "../src/compat/ctime.h"
 #include "../src/def/board_defs.h"
-#include "../src/def/cpthread_defs.h"
 #include "../src/def/equity_defs.h"
 #include "../src/def/game_defs.h"
 #include "../src/def/game_history_defs.h"

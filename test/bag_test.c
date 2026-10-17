@@ -11,7 +11,7 @@
 #include <assert.h>
 #include <stdint.h>
 
-enum { TEST_BAG_SIZE = 100 };
+enum { TEST_BAG_SIZE = 100, TEST_ROTATE_TILES = 10 };
 
 void test_add_letter(const Config *config, Bag *bag, const char *r,
                      const char *expected_bag_string, const int player_index) {
@@ -25,6 +25,52 @@ void test_add_letter(const Config *config, Bag *bag, const char *r,
 
 int get_drawn_tile_index(int drawn_tiles, int player_index) {
   return player_index * TEST_BAG_SIZE + drawn_tiles;
+}
+
+// Asserts the bag holds tiles[(offset + i) % TEST_ROTATE_TILES] for its
+// remaining letters, from its start.
+static void assert_bag_rotated(const Bag *bag, const MachineLetter *tiles,
+                               int offset, int first, int count) {
+  MachineLetter peeked[TEST_ROTATE_TILES];
+  assert(bag_peek_tiles(bag, peeked) == count);
+  for (int tile_idx = 0; tile_idx < count; tile_idx++) {
+    assert(peeked[tile_idx] == tiles[first + ((offset + tile_idx) % count)]);
+  }
+}
+
+// bag_rotate moves the letter shift places from the start to the start and
+// wraps the letters before it to the end, takes the shift modulo the letters
+// left, and rotates only the letters still in a partly drawn bag.
+static void test_bag_rotate(const LetterDistribution *ld) {
+  Bag *bag = bag_create(ld, 0);
+  MachineLetter tiles[TEST_ROTATE_TILES];
+  for (int tile_idx = 0; tile_idx < TEST_ROTATE_TILES; tile_idx++) {
+    tiles[tile_idx] = (MachineLetter)(tile_idx + 1);
+  }
+  bag_set_to_tiles(bag, tiles, TEST_ROTATE_TILES);
+  bag_rotate(bag, 3);
+  assert_bag_rotated(bag, tiles, 3, 0, TEST_ROTATE_TILES);
+  // A full turn more, and a shift past the size, are taken modulo it.
+  bag_rotate(bag, TEST_ROTATE_TILES + 4);
+  assert_bag_rotated(bag, tiles, 7, 0, TEST_ROTATE_TILES);
+  bag_rotate(bag, 3);
+  assert_bag_rotated(bag, tiles, 0, 0, TEST_ROTATE_TILES);
+  // Player 1 draws from the start and player 0 from the end, so after a
+  // rotation by 2 they draw what were the third and the second letters.
+  bag_rotate(bag, 2);
+  assert(bag_draw_random_letter(bag, 1) == tiles[2]);
+  assert(bag_draw_random_letter(bag, 0) == tiles[1]);
+  // The 8 letters left, tiles[3..9] then tiles[0], rotate among themselves.
+  MachineLetter left[TEST_ROTATE_TILES];
+  const int num_left = bag_peek_tiles(bag, left);
+  assert(num_left == TEST_ROTATE_TILES - 2);
+  bag_rotate(bag, 5);
+  MachineLetter rotated[TEST_ROTATE_TILES];
+  assert(bag_peek_tiles(bag, rotated) == num_left);
+  for (int tile_idx = 0; tile_idx < num_left; tile_idx++) {
+    assert(rotated[tile_idx] == left[(tile_idx + 5) % num_left]);
+  }
+  bag_destroy(bag);
 }
 
 void test_bag(void) {
@@ -179,6 +225,8 @@ void test_bag(void) {
   }
 
   assert_bags_are_equal(bag, copy_of_bag);
+
+  test_bag_rotate(ld);
 
   bag_destroy(bag);
   bag_destroy(copy_of_bag);
