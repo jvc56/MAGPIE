@@ -2,6 +2,7 @@
 #define BOARD_LAYOUT_H
 
 #include "../util/io_util.h"
+#include "../util/string_util.h"
 #include "bonus_square.h"
 #include <stdbool.h>
 #include <stdint.h>
@@ -9,6 +10,10 @@
 typedef struct BoardLayout BoardLayout;
 
 BoardLayout *board_layout_create(void);
+void board_layout_parse_split_file(BoardLayout *bl,
+                                   const char *board_layout_name,
+                                   const StringSplitter *file_lines,
+                                   ErrorStack *error_stack);
 void board_layout_load(BoardLayout *bl, const char *data_paths,
                        const char *board_layout_name, ErrorStack *error_stack);
 char *board_layout_get_default_name(void);

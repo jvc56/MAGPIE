@@ -1,6 +1,7 @@
 #ifndef KWG_H
 #define KWG_H
 
+#include "../compat/cfile.h"
 #include "../compat/endian_conv.h"
 #include "../def/kwg_defs.h"
 #include "../util/fileproxy.h"
@@ -9,6 +10,7 @@
 #include "../util/string_util.h"
 #include "data_filepaths.h"
 #include "letter_distribution.h"
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -144,11 +146,12 @@ static inline void load_kwg(const char *kwg_name, const char *kwg_filename,
 
   kwg->name = string_duplicate(kwg_name);
 
-  fseek_or_die(stream, 0, SEEK_END); // seek to end of file
-  long int kwg_size = ftell(stream); // get current file pointer
-  fseek_or_die(stream, 0, SEEK_SET);
+  int64_t kwg_size = 0;
+  if (!cfile_stream_size(stream, &kwg_size)) {
+    log_fatal("failed to get the size of %s", kwg_filename);
+  }
 
-  size_t number_of_nodes = kwg_size / sizeof(uint32_t);
+  size_t number_of_nodes = (size_t)kwg_size / sizeof(uint32_t);
 
   kwg_read_nodes_from_stream(kwg, number_of_nodes, stream);
 

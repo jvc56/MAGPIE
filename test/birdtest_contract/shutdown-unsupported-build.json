@@ -1,0 +1,9 @@
+{
+  "shutdown": {
+    "reason": "unsupported_build",
+    "message": "Every job on this server plays on a 15x15 board with 7-tile racks; this MAGPIE was built with BOARD_DIM 21 and RACK_SIZE 7.",
+    "required_tarball_dates": [],
+    "required_magpie_version": null,
+    "download_url": null
+  }
+}
