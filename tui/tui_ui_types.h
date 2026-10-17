@@ -12,14 +12,13 @@ typedef enum {
   TUI_MODAL_MAIN_MENU = 1,
   TUI_MODAL_SETTINGS = 2,
   TUI_MODAL_TIME_PICKER = 3,
-  TUI_MODAL_LEXICON_PICKER = 4,
-  TUI_MODAL_QUIT_CONFIRM = 5,
-  TUI_MODAL_STARTUP_MENU = 6,
-  TUI_MODAL_WATCH_SETUP = 7,
-  TUI_MODAL_LOAD_POSITION = 8,
-  TUI_MODAL_LOAD_GAME = 9,
-  TUI_MODAL_ANNOTATE_SETUP = 10,
-  TUI_MODAL_PLAY_SETUP = 11,
+  TUI_MODAL_QUIT_CONFIRM = 4,
+  TUI_MODAL_STARTUP_MENU = 5,
+  TUI_MODAL_WATCH_SETUP = 6,
+  TUI_MODAL_LOAD_POSITION = 7,
+  TUI_MODAL_LOAD_GAME = 8,
+  TUI_MODAL_ANNOTATE_SETUP = 9,
+  TUI_MODAL_PLAY_SETUP = 10,
 } TuiModalState;
 
 // Play-vs-computer setup modal. A single modal with everything: editable
@@ -58,11 +57,12 @@ typedef enum {
 // — the annotator fills in racks + moves manually as the live
 // game plays out).
 typedef enum {
-  TUI_ANNOTATE_SETUP_LEXICON = 0,
-  TUI_ANNOTATE_SETUP_P1_NAME = 1,
-  TUI_ANNOTATE_SETUP_P2_NAME = 2,
-  TUI_ANNOTATE_SETUP_START = 3,
-  TUI_ANNOTATE_SETUP_ITEM_COUNT = 4,
+  TUI_ANNOTATE_SETUP_LANGUAGE = 0,
+  TUI_ANNOTATE_SETUP_LEXICON = 1,
+  TUI_ANNOTATE_SETUP_P1_NAME = 2,
+  TUI_ANNOTATE_SETUP_P2_NAME = 3,
+  TUI_ANNOTATE_SETUP_START = 4,
+  TUI_ANNOTATE_SETUP_ITEM_COUNT = 5,
 } TuiAnnotateSetupItem;
 
 // Which panel currently has keyboard focus. NONE means no panel is
@@ -107,7 +107,7 @@ typedef enum {
 
 // Watch-game setup modal. Lets the user pick time control, lexicon,
 // and sim parameters before starting a bot-vs-bot game. Pre-focused
-// on the "Start game" row so Enter immediately starts with the
+// on the "Start" row so Enter immediately starts with the
 // currently-displayed values.
 typedef enum {
   TUI_WATCH_SETUP_TIME = 0,

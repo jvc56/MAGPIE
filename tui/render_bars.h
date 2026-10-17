@@ -10,7 +10,7 @@
 
 void render_command_bar(struct ncplane *plane, const Theme *theme,
                         const TuiGameState *state, const Layout *L,
-                        TuiModalState modal);
+                        TuiModalState modal, const char *modal_help);
 void render_command_palette(struct ncplane *plane, const Theme *theme,
                             const TuiGameState *state, const Layout *L);
 void render_pending_bar(struct ncplane *plane, const Theme *theme,
