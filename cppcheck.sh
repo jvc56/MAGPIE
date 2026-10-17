@@ -63,6 +63,22 @@ echo "Using ${MAX_CORES} CPU cores for cppcheck analysis."
 
 mkdir -p "${CPPCHECK_BUILD_DIR}"
 
+SOURCE_DIRS=(src/ test/ cmd/ tools/ wasmentry/)
+CHECK_TARGETS=("${SOURCE_DIRS[@]}")
+
+# CI splits the first pass across jobs. CPPCHECK_SHARD=INDEX/COUNT checks
+# only shard INDEX's files, then stops. CI copies the shards' results into one
+# build dir and runs this script unsharded, which takes every file's results
+# from there, then runs the whole-program checks and the _WIN32 pass (see
+# shard_cppcheck.py).
+if [ -n "${CPPCHECK_SHARD}" ]; then
+    SHARD_FILE_LIST=$(mktemp) || { echo "Error: Failed to create the shard's file list. Exiting."; exit 1; }
+    trap 'rm -f "${SHARD_FILE_LIST}"' EXIT
+    python3 shard_cppcheck.py list "${CPPCHECK_SHARD%/*}" "${CPPCHECK_SHARD#*/}" "${SOURCE_DIRS[@]}" >"${SHARD_FILE_LIST}" || { echo "Error: Failed to list shard ${CPPCHECK_SHARD}'s files. Exiting."; exit 1; }
+    CHECK_TARGETS=("--file-list=${SHARD_FILE_LIST}")
+    echo "Checking shard ${CPPCHECK_SHARD}: $(wc -l <"${SHARD_FILE_LIST}") files."
+fi
+
 # --- Run cppcheck command ---
 echo "Running cppcheck analysis on src/, test/, cmd/, and tools/ directories..."
 "${CPPCHECK_EXECUTABLE}" \
@@ -89,9 +105,19 @@ echo "Running cppcheck analysis on src/, test/, cmd/, and tools/ directories..."
     -U__APPLE__ \
     -U__EMSCRIPTEN__ \
     -j "${MAX_CORES}" \
-    src/ test/ cmd/ tools/ wasmentry/
+    "${CHECK_TARGETS[@]}"
 
 CPPCHECK_EXIT_CODE=$?
+
+# A shard leaves the verdict to the merged run. That run reports every
+# file's findings from the results saved here, and a shard's exit code would
+# also count the command-line suppressions left unmatched because the files
+# they cover are in other shards. Suppressing that would change the options,
+# which are part of each result's hash, so the merged run could reuse none.
+if [ -n "${CPPCHECK_SHARD}" ]; then
+    echo "Shard ${CPPCHECK_SHARD} finished (cppcheck exit code ${CPPCHECK_EXIT_CODE}). The merged run reports the findings."
+    exit 0
+fi
 
 # src/compat again with _WIN32 defined, so its Windows branches get the same
 # analysis as its POSIX ones.
