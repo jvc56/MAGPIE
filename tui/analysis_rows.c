@@ -14,7 +14,6 @@
 #include "../src/str/move_string.h"
 #include "../src/util/string_util.h"
 #include "game_state.h"
-#include <dirent.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>

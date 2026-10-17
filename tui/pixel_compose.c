@@ -14,7 +14,6 @@
 #include "render_common.h"
 #include "render_view.h"
 #include "theme.h"
-#include <dirent.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>

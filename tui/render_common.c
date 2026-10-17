@@ -7,7 +7,6 @@
 #include "../src/util/string_util.h"
 #include "config.h"
 #include "theme.h"
-#include <dirent.h>
 #include <notcurses/notcurses.h>
 #include <stdint.h>
 #include <stdio.h>

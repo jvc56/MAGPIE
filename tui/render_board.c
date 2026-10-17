@@ -18,7 +18,6 @@
 #include "render_view.h"
 #include "theme.h"
 #include "tui_ui_types.h"
-#include <dirent.h>
 #include <notcurses/notcurses.h>
 #include <stdatomic.h>
 #include <stdint.h>
