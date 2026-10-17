@@ -18,7 +18,6 @@
 #include "../src/util/io_util.h"
 #include "../src/util/string_util.h"
 #include "game_state.h"
-#include <dirent.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
