@@ -1,5 +1,6 @@
 // Tests for tui/tile_input: typing multi-letter tiles (Catalan QU, NY, L·L)
-// into a move. Run from the repository root (reads data/letterdistributions).
+// into a move. Run from the repository root (reads data/letterdistributions
+// and tui/assets/tile_aliases.csv).
 // Build and run: make magpie_tui_test && ./bin/magpie_tui_test
 
 #include "../../src/ent/letter_distribution.h"
@@ -114,6 +115,34 @@ static void test_catalan(const LetterDistribution *ld) {
   const char *const ay[] = {"a", "y", NULL};
   check_typed(ld, ay, "A", "Y after A is rejected");
 
+  // Aliases from tui/assets/tile_aliases.csv.
+  check(tui_tile_for_text(ld, "\xc5\x81") == ll, "\xc5\x81 is L·L");
+  check(tui_tile_for_text(ld, "\xc5\x82") == ll, "\xc5\x82 is L·L");
+  check(tui_tile_for_text(ld, "\xc3\x9d") == tui_tile_for_text(ld, "NY"),
+        "\xc3\x9d is NY");
+  check(tui_tile_for_text(ld, "\xc3\xbd") == tui_tile_for_text(ld, "NY"),
+        "\xc3\xbd is NY");
+  check(tui_tile_for_text(ld, "\xc4\xbfL") == ll, "\xc4\xbfL is L·L");
+  const char *const l_stroke[] = {"\xc5\x81", "a", NULL};
+  check_typed(ld, l_stroke, "[L\xc2\xb7L]A", "\xc5\x81 types L·L");
+  const char *const y_acute[] = {"a", "\xc3\xbd", NULL};
+  check_typed(ld, y_acute, "A[NY]", "\xc3\xbd types NY");
+  const char *const l_dot_l[] = {"\xc4\xbf", "l", "a", NULL};
+  check_typed(ld, l_dot_l, "[L\xc2\xb7L]A",
+              "\xc4\xbf starts L·L and absorbs the L");
+  const char *const l_then_l_dot[] = {"l", "\xc5\x80", "l", NULL};
+  check_typed(ld, l_then_l_dot, "L[L\xc2\xb7L]",
+              "\xc5\x80 after L starts a new L·L");
+  const char *const bracket_stroke[] = {"[", "\xc5\x82", "]", NULL};
+  check_typed(ld, bracket_stroke, "[L\xc2\xb7L]", "[\xc5\x82] is L·L");
+  check(tui_tiles_valid(ld, "A[L.L][\xc3\x9d]", 10, TUI_TILES_RACK),
+        "aliases inside brackets in a rack");
+  char rack[64];
+  tui_tiles_canonical_rack(ld, "\xc5\x81?\xc3\xa7[l-l]\xc3\xbd[L.", 16, rack,
+                           sizeof(rack));
+  check_str(rack, "[L\xc2\xb7L]?\xc3\x87[L\xc2\xb7L][NY][L.",
+            "rack aliases become engine tokens; an open bracket stays");
+
   char token[TUI_TILE_TEXT_MAX];
   tui_tile_token(ld, qu, true, token, sizeof(token));
   check_str(token, "[qu]", "a blank QU");
@@ -126,6 +155,15 @@ static void test_english(const LetterDistribution *ld) {
   check_typed(ld, qi, "QI", "English Q is Q");
   const char *const bracket_qu[] = {"[", "q", "u", "]", NULL};
   check_typed(ld, bracket_qu, "", "English has no QU tile");
+  const char *const l_stroke[] = {"\xc5\x81", NULL};
+  check_typed(ld, l_stroke, "", "Catalan aliases don't apply to English");
+  check(tui_tile_for_text(ld, "L.L") < 0, "English has no L.L");
+}
+
+static void test_catalan_super(const LetterDistribution *ld) {
+  const char *const l_stroke[] = {"\xc5\x81", NULL};
+  check_typed(ld, l_stroke, "[L\xc2\xb7L]",
+              "Catalan aliases apply to catalan_super");
 }
 
 static void test_tokens(void) {
@@ -185,16 +223,23 @@ static LetterDistribution *load_ld(const char *name) {
 }
 
 int main(void) {
+  if (tui_tile_aliases_load("tui/assets/tile_aliases.csv") <= 0) {
+    (void)fprintf(stderr, "could not load tui/assets/tile_aliases.csv\n");
+    return 1;
+  }
   LetterDistribution *catalan = load_ld("catalan");
+  LetterDistribution *catalan_super = load_ld("catalan_super");
   LetterDistribution *english = load_ld("english");
-  if (catalan == NULL || english == NULL) {
+  if (catalan == NULL || catalan_super == NULL || english == NULL) {
     return 1;
   }
   test_catalan(catalan);
   test_tile_strings(catalan);
+  test_catalan_super(catalan_super);
   test_english(english);
   test_tokens();
   ld_destroy(catalan);
+  ld_destroy(catalan_super);
   ld_destroy(english);
   if (failures > 0) {
     (void)fprintf(stderr, "%d failure(s)\n", failures);
