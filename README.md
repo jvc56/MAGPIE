@@ -58,6 +58,19 @@ From there MAGPIE works exactly as it does on Linux and macOS: everything in [Us
 
 To build the Windows executables yourself on Linux or macOS, with Docker installed, run `make windows` (add `WINDOWS_ARCH=aarch64` for ARM); `bin/magpie.exe` is the result.
 
+### Linux
+
+Linux on x86_64 or arm64, with glibc 2.35 or later (Ubuntu 22.04, Debian 12, Fedora 36 and newer), runs MAGPIE as one executable without building it.
+
+1. From the [Releases](https://github.com/jvc56/MAGPIE/releases) page, download `magpie-<version>-linux-x64.tar.gz` (most PCs) or `magpie-<version>-linux-arm64.tar.gz` (ARM, such as a Raspberry Pi 4 or 5 on a 64-bit system), and unpack it with `tar -xzf`. It unpacks to a folder holding `magpie`. Move the folder wherever you like.
+2. Optionally, check the download against the `.sha256` file published beside it:
+   ```
+   sha256sum -c magpie-<version>-linux-x64.tar.gz.sha256
+   ```
+3. `cd` to its folder and run `./magpie`. MAGPIE looks for its data in a `data` folder there, then in one beside the executable, and offers to download it (about 195 MB) into the first: answer `y`. The download uses libcurl (`libcurl.so.4`), which most systems have; without it, run `./download_data.sh` from a clone of this repository instead.
+
+From there, everything in [Usage](#usage) applies.
+
 ### Release builds
 
 The production release is a native profile-guided build. It needs Clang and
