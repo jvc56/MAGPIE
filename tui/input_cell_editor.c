@@ -677,6 +677,20 @@ static bool cell_editor_type_char(TuiGameState *state, uint32_t key,
     memcpy(&buf[*pcur], text, (size_t)text_len);
     *pcur += text_len;
     *plen += text_len;
+    if (!field_move && state->ld != NULL && buf_cap <= TUI_RACK_TEXT_MAX) {
+      // Rack tiles are stored as the engine writes them, so a typed
+      // alias ("Ł") or a closed "[L.L]" becomes "[L·L]". The cursor
+      // stays after the same tiles.
+      char canonical[TUI_RACK_TEXT_MAX];
+      tui_tiles_canonical_rack(state->ld, buf, *pcur, canonical,
+                               sizeof(canonical));
+      const int new_cursor = (int)strlen(canonical);
+      tui_tiles_canonical_rack(state->ld, buf, *plen, canonical,
+                               sizeof(canonical));
+      (void)snprintf(buf, buf_cap, "%s", canonical);
+      *plen = (int)strlen(buf);
+      *pcur = new_cursor < *plen ? new_cursor : *plen;
+    }
     if (!field_move) {
       // User typed into the RACK field — the buffer is now
       // theirs; the rack should NOT snap back to whatever
