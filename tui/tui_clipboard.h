@@ -7,4 +7,7 @@
 
 void tui_copy_position_cgp(TuiGameState *gs);
 
+// Copies the game so far to the clipboard as GCG.
+void tui_copy_game_gcg(TuiGameState *gs);
+
 #endif
