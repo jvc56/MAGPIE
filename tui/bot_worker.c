@@ -1340,14 +1340,6 @@ void tui_bot_worker_start(TuiGameState *state) {
 
 // ── Post-game analysis resume ("/resume") ────────────────────────────
 
-// Status-bar notice helper. Caller must hold state->mutex.
-static void set_analysis_notice(TuiGameState *state, const char *message) {
-  (void)snprintf(state->notice_buf, sizeof(state->notice_buf), "%s", message);
-  clock_gettime(CLOCK_MONOTONIC, &state->notice_expires_at);
-  state->notice_expires_at.tv_sec += 3;
-  atomic_fetch_add(&state->render_version, 1);
-}
-
 // Build a MoveList containing the same plays a saved SimResults was
 // built from. The resume path only consumes the count and the rack —
 // sampling reads moves from the SimmedPlays themselves — but the
@@ -1408,8 +1400,8 @@ static void analysis_resume_sim(TuiGameState *state, TuiHistoryEntry *entry,
                                : move_list_from_sim_results(results);
   if (candidates == NULL || move_list_get_count(candidates) < 2) {
     pthread_mutex_lock(&state->mutex);
-    set_analysis_notice(state, fresh ? "nothing to sim: fewer than 2 moves"
-                                     : "resume failed: empty saved sim");
+    tui_game_state_notice(state, fresh ? "nothing to sim: fewer than 2 moves"
+                                       : "resume failed: empty saved sim");
     pthread_mutex_unlock(&state->mutex);
     if (candidates != NULL) {
       moves_for_move_list_destroy(candidates);
@@ -1428,8 +1420,8 @@ static void analysis_resume_sim(TuiGameState *state, TuiHistoryEntry *entry,
   state->analysis_game = position;
   atomic_store(&state->sim_results_turn_idx, turn_idx);
   atomic_store(&state->sim_results_active, true);
-  set_analysis_notice(state, fresh ? "simming - /stop to pause"
-                                   : "resuming sim - /stop to pause");
+  tui_game_state_notice(state, fresh ? "simming - /stop to pause"
+                                     : "resuming sim - /stop to pause");
   pthread_mutex_unlock(&state->mutex);
 
   ThreadControl *tc = thread_control_create();
@@ -1496,7 +1488,7 @@ static void analysis_resume_sim(TuiGameState *state, TuiHistoryEntry *entry,
   (void)snprintf(done_notice, sizeof(done_notice),
                  "sim paused - %llu iterations",
                  (unsigned long long)sim_results_get_iteration_count(results));
-  set_analysis_notice(state, done_notice);
+  tui_game_state_notice(state, done_notice);
   pthread_mutex_unlock(&state->mutex);
 
   moves_for_move_list_destroy(candidates);
@@ -1510,7 +1502,7 @@ static void analysis_resume_sim(TuiGameState *state, TuiHistoryEntry *entry,
 static void analysis_resume_endgame(TuiGameState *state, TuiHistoryEntry *entry,
                                     int turn_idx, const Game *position) {
   pthread_mutex_lock(&state->mutex);
-  set_analysis_notice(state, "resuming endgame solve - /stop to pause");
+  tui_game_state_notice(state, "resuming endgame solve - /stop to pause");
   state->analysis_game = (struct Game *)position;
   pthread_mutex_unlock(&state->mutex);
 
@@ -1548,7 +1540,7 @@ static void analysis_resume_endgame(TuiGameState *state, TuiHistoryEntry *entry,
       entry->endgame_moves_saved_count = num_moves;
     }
   }
-  set_analysis_notice(state, "endgame analysis saved");
+  tui_game_state_notice(state, "endgame analysis saved");
   pthread_mutex_unlock(&state->mutex);
 }
 
@@ -1559,7 +1551,7 @@ static void analysis_resume_endgame(TuiGameState *state, TuiHistoryEntry *entry,
 static void analysis_resume_peg(TuiGameState *state, TuiHistoryEntry *entry,
                                 int turn_idx, const Game *position) {
   pthread_mutex_lock(&state->mutex);
-  set_analysis_notice(state, "resuming peg solve - /stop to pause");
+  tui_game_state_notice(state, "resuming peg solve - /stop to pause");
   state->analysis_game = (struct Game *)position;
   pthread_mutex_unlock(&state->mutex);
 
@@ -1570,7 +1562,7 @@ static void analysis_resume_peg(TuiGameState *state, TuiHistoryEntry *entry,
 
   pthread_mutex_lock(&state->mutex);
   tui_capture_analysis_snapshot(state, &entry->analysis_snapshot);
-  set_analysis_notice(state, "peg analysis saved");
+  tui_game_state_notice(state, "peg analysis saved");
   pthread_mutex_unlock(&state->mutex);
 }
 
@@ -1609,7 +1601,7 @@ static void *analysis_thread_main(void *arg) {
   if (!position_ok) {
     game_destroy(position);
     pthread_mutex_lock(&state->mutex);
-    set_analysis_notice(state, "resume failed: bad position snapshot");
+    tui_game_state_notice(state, "resume failed: bad position snapshot");
     state->analysis_resume_turn_idx = -1;
     pthread_mutex_unlock(&state->mutex);
     atomic_store(&state->analysis_running, false);
@@ -1657,7 +1649,7 @@ bool tui_analysis_kibitz(TuiGameState *state, int turn_idx) {
   const char *reason =
       tui_analysis_unavailable_reason(state, turn_idx, TUI_ANALYSIS_KIBITZ);
   if (reason != NULL) {
-    set_analysis_notice(state, reason);
+    tui_game_state_notice(state, reason);
     return false;
   }
   TuiHistoryEntry *entry = &state->history[turn_idx];
@@ -1670,7 +1662,7 @@ bool tui_analysis_kibitz(TuiGameState *state, int turn_idx) {
       position_ok ? generate_top_candidates(position, KIBITZ_MAX_MOVES) : NULL;
   if (moves == NULL) {
     game_destroy(position);
-    set_analysis_notice(state, "kibitz failed: no moves for this position");
+    tui_game_state_notice(state, "kibitz failed: no moves for this position");
     return false;
   }
   move_list_sort_moves(moves);
@@ -1784,7 +1776,7 @@ bool tui_analysis_worker_start(TuiGameState *state, int turn_idx,
   const char *reason = tui_analysis_unavailable_reason(
       state, turn_idx, request_sim ? TUI_ANALYSIS_SIM : TUI_ANALYSIS_RESUME);
   if (reason != NULL) {
-    set_analysis_notice(state, reason);
+    tui_game_state_notice(state, reason);
     return false;
   }
   // Reap a previously finished worker before reusing the handle.
@@ -1800,7 +1792,7 @@ bool tui_analysis_worker_start(TuiGameState *state, int turn_idx,
                      state) != 0) {
     atomic_store(&state->analysis_running, false);
     state->analysis_resume_turn_idx = -1;
-    set_analysis_notice(state, "failed to start the analysis worker");
+    tui_game_state_notice(state, "failed to start the analysis worker");
     return false;
   }
   state->analysis_started = true;

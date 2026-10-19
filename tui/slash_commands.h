@@ -13,6 +13,7 @@ typedef enum {
   TUI_SLASH_NEW,
   TUI_SLASH_QUIT,
   TUI_SLASH_RESUME,
+  TUI_SLASH_SET,
   TUI_SLASH_SETTINGS,
   TUI_SLASH_SIM,
   TUI_SLASH_STOP,
@@ -32,6 +33,21 @@ const TuiSlashCommand *tui_slash_commands(int *count);
 // Whether `name` starts with the first `len` characters of `typed`.
 bool tui_slash_command_matches(const TuiSlashCommand *cmd, const char *typed,
                                int len);
+
+enum { TUI_SLASH_MAX_WORDS = 4 };
+
+// The words of a typed command line: `start[i]` / `len[i]` locate word i
+// in the buffer. When the buffer ends in a space, a final empty word
+// starts there, so the word being typed is always the last one.
+typedef struct {
+  int count;
+  int start[TUI_SLASH_MAX_WORDS];
+  int len[TUI_SLASH_MAX_WORDS];
+} TuiSlashWords;
+
+// Splits the first `len` characters of `buf` on spaces. Words past
+// TUI_SLASH_MAX_WORDS are dropped.
+void tui_slash_split(const char *buf, int len, TuiSlashWords *words);
 
 // The command `typed` (its first `len` characters) names: an exact name,
 // else the only command it is a prefix of. NULL when none or ambiguous.

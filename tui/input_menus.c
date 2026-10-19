@@ -4,6 +4,7 @@
 #include "config.h"
 #include "game_state.h"
 #include "input_cell_editor.h"
+#include "input_settings.h"
 #include "list_nav.h"
 #include "render_hit_test.h"
 #include "time_picker.h"
@@ -257,9 +258,7 @@ bool tui_input_main_menu(TuiGameState *state, TuiUiState *ui,
       ui->startup_menu_focus = TUI_STARTUP_WATCH;
       ui->startup_menu_return = TUI_MODAL_MAIN_MENU;
     } else if (key == 's' || key == 'S') {
-      ui->modal = TUI_MODAL_SETTINGS;
-      ui->settings_focus = 0;
-      ui->settings_return = TUI_MODAL_MAIN_MENU;
+      tui_open_settings(ui, TUI_MODAL_MAIN_MENU);
     } else if (key == 'q' || key == 'Q') {
       ui->modal = TUI_MODAL_QUIT_CONFIRM;
       ui->quit_confirm_focus = 0;
@@ -274,9 +273,7 @@ bool tui_input_main_menu(TuiGameState *state, TuiUiState *ui,
         ui->startup_menu_focus = TUI_STARTUP_WATCH;
         ui->startup_menu_return = TUI_MODAL_MAIN_MENU;
       } else if (ui->main_menu_focus == TUI_MENU_SETTINGS) {
-        ui->modal = TUI_MODAL_SETTINGS;
-        ui->settings_focus = 0;
-        ui->settings_return = TUI_MODAL_MAIN_MENU;
+        tui_open_settings(ui, TUI_MODAL_MAIN_MENU);
       } else if (ui->main_menu_focus == TUI_MENU_QUIT) {
         ui->modal = TUI_MODAL_QUIT_CONFIRM;
         ui->quit_confirm_focus = 0;

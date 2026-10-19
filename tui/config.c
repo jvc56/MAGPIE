@@ -130,6 +130,8 @@ bool tui_config_load(TuiConfig *config) {
   config->score_subscripts_set = false;
   config->rack_sort = TUI_RACK_SORT_ALPHA;
   config->rack_sort_set = false;
+  config->sim_plies_set = false;
+  config->sim_candidates_set = false;
 
   char path[TUI_CONFIG_PATH_MAX];
   if (!tui_config_resolve_path(path, sizeof(path))) {
@@ -249,6 +251,19 @@ bool tui_config_load(TuiConfig *config) {
       if (endptr != value && parsed >= 0 && parsed <= 8) {
         config->border_thickness = (int)parsed;
         config->border_thickness_set = true;
+      }
+    } else if (strcmp(trimmed, "sim_plies") == 0 ||
+               strcmp(trimmed, "sim_candidates") == 0) {
+      char *endptr = NULL;
+      const long parsed = strtol(value, &endptr, 10);
+      if (endptr != value && parsed >= 1 && parsed <= 1024) {
+        if (strcmp(trimmed, "sim_plies") == 0) {
+          config->sim_plies = (int)parsed;
+          config->sim_plies_set = true;
+        } else {
+          config->sim_candidates = (int)parsed;
+          config->sim_candidates_set = true;
+        }
       }
     } else if (strcmp(trimmed, "blank_uppercase") == 0) {
       if (strcmp(value, "true") == 0 || strcmp(value, "1") == 0) {
@@ -496,6 +511,12 @@ bool tui_config_save(const TuiConfig *config) {
   }
   if (config->load_rit_set) {
     (void)fprintf(file, "load_rit = %s\n", config->load_rit ? "true" : "false");
+  }
+  if (config->sim_plies_set) {
+    (void)fprintf(file, "sim_plies = %d\n", config->sim_plies);
+  }
+  if (config->sim_candidates_set) {
+    (void)fprintf(file, "sim_candidates = %d\n", config->sim_candidates);
   }
 
   if (fclose(file) != 0) {
