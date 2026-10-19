@@ -37,17 +37,18 @@
 // input mode.
 typedef enum {
   TUI_TYPED_LETTER_REJECT = 0,
-  // Place a tile: out_glyph is 'A'-'Z' for a real rack tile or
-  // 'a'-'z' for a blank designated as that letter.
+  // Place a tile: out_token is its move text, uppercase for a real rack
+  // tile ("E", "[QU]") or lowercase for a blank designated as it.
   TUI_TYPED_LETTER_PLACE = 1,
-  // The landing square already holds this letter: spell it as
-  // playthrough. out_glyph carries the BOARD tile's notation case
+  // The landing square already holds this tile: spell it as
+  // playthrough. out_token carries the BOARD tile's notation case
   // (lowercase when the board tile is a designated blank).
   TUI_TYPED_LETTER_PLAYTHROUGH = 2,
 } TuiTypedLetterAction;
 
-// Resolve one typed letter. land_row/land_col is the board square the
-// letter would land on (pass -1,-1 when unknown / not applicable).
+// Resolve one typed tile, machine letter `ml` (unblanked), into move text
+// in `out_token`. land_row/land_col is the board square the tile would
+// land on (pass -1,-1 when unknown / not applicable).
 // Mode policy:
 //   - play-vs-computer: racks are real and known. A letter landing on
 //     a matching occupied square is playthrough; on a mismatched
@@ -60,10 +61,10 @@ typedef enum {
 //     Shift+letter = blank (lowercase), otherwise uppercase. A letter
 //     matching an occupied landing square still resolves as
 //     playthrough so the buffer picks up the canonical notation case.
-TuiTypedLetterAction tui_move_entry_resolve_letter(const TuiGameState *gs,
-                                                   char typed, bool shift,
-                                                   int land_row, int land_col,
-                                                   char *out_glyph);
+TuiTypedLetterAction tui_move_entry_resolve_tile(const TuiGameState *gs, int ml,
+                                                 bool shift, int land_row,
+                                                 int land_col, char *out_token,
+                                                 size_t token_size);
 
 // Board square the next typed WORD letter lands on, derived from the
 // MOVE buffer: the coord token's square advanced along the play
@@ -75,13 +76,14 @@ TuiTypedLetterAction tui_move_entry_resolve_letter(const TuiGameState *gs,
 bool tui_move_entry_landing_square(const TuiGameState *gs, int *out_row,
                                    int *out_col);
 
-// Append one typed letter at the end of the MOVE buffer: resolves it
-// (landing square + mode policy), inserts the coord/word space when
-// needed, re-parses, and absorbs any played-through tiles the word now
-// runs into. The shared whole-keystroke path for board entry and for
-// cell entry when the cursor sits at the end. Returns true when a
-// glyph was added.
-bool tui_move_entry_append_letter(TuiGameState *gs, char ch, bool shift);
+// One key typed at the end of the MOVE buffer (`key` is its UTF-8
+// character): works out the tile (tile_input.h: brackets and multi-letter
+// tiles), resolves it (landing square + mode policy), inserts the
+// coord/word space when needed, re-parses, and absorbs any played-through
+// tiles the word now runs into. The shared whole-keystroke path for board
+// entry and for cell entry when the cursor sits at the end. Returns false
+// when the key doesn't make a tile.
+bool tui_move_entry_append_key(TuiGameState *gs, const char *key, bool shift);
 
 // Absorb contiguous played-through board tiles at the end of the
 // current preview move into the MOVE buffer (with the coord/word space
