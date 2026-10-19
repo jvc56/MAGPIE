@@ -1949,7 +1949,6 @@ static void best_move_carry_test(const char *config_str, bool skips_lanes,
         .move_sort_type = MOVE_SORT_EQUITY,
         .eq_margin_movegen = 0,
         .target_equity = EQUITY_MAX_VALUE,
-        .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
     };
     generate_moves(&candidate_args);
     const int number_of_candidates = move_list_get_count(candidates);

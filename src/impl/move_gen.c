@@ -4292,8 +4292,8 @@ static bool gen_can_carry_best_moves(const MoveGen *gen,
   return args->best_move_carry != NULL &&
          gen->move_record_type == MOVE_RECORD_BEST &&
          gen->move_sort_type == MOVE_SORT_EQUITY && !gen->stop_on_threshold &&
-         gen->target_leave_size == UNSET_LEAVE_SIZE && !gen->is_wordsmog &&
-         args->override_kwg == NULL && gen->number_of_tiles_in_bag > 0 &&
+         !gen->is_wordsmog && args->override_kwg == NULL &&
+         gen->number_of_tiles_in_bag > 0 &&
          gen->board_number_of_tiles_played > 0;
 }
 

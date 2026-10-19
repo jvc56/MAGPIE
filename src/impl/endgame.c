@@ -2083,7 +2083,6 @@ static int playout_first_step_from_lists(EndgameCtxWorker *worker,
         .override_kwg = solver_get_pruned_kwg(worker->solver, stm_idx),
         .eq_margin_movegen = 0,
         .target_equity = EQUITY_MAX_VALUE,
-        .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
     };
     SmallMove found;
     if (path_move_lists_best_play(worker->path_lists, &best_args, &found)) {
@@ -2829,7 +2828,6 @@ static bool pick_first_reply_before_list(EndgameCtxWorker *worker, int depth,
       .override_kwg = solver_get_pruned_kwg(worker->solver, stm_idx),
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
-      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
   };
   if (worker->path_lists != NULL) {
     return path_move_lists_best_play(worker->path_lists, &best_args,
