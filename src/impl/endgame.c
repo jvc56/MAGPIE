@@ -4396,6 +4396,28 @@ static bool extract_actual_move_pvline(EndgameCtx *solver,
   return false;
 }
 
+// Destroys the workers lent to a finished inline solve and keeps the main one.
+// Each PEG worker owns a context and the pool lends a core to whichever
+// context's leaf runs long, so keeping every context's lent workers would hold
+// contexts x pool-size workers (about 10 MiB each: move list, undo stack,
+// incremental lists, game) although only pool-size of them ever run at once.
+// The next lend creates a fresh worker. Called after the helpers are joined
+// with the injection window shut, so no add or live-view read can reach them.
+static void endgame_ctx_release_lent_workers(EndgameCtx *solver) {
+  const int cap = atomic_load(&solver->cap_workers);
+  if (cap <= solver->threads) {
+    return;
+  }
+  cpthread_mutex_lock(&solver->add_mutex);
+  atomic_store(&solver->live_workers, solver->threads);
+  atomic_store(&solver->cap_workers, solver->threads);
+  for (int worker_idx = solver->threads; worker_idx < cap; worker_idx++) {
+    solver_worker_destroy(solver->workers[worker_idx]);
+    solver->workers[worker_idx] = NULL;
+  }
+  cpthread_mutex_unlock(&solver->add_mutex);
+}
+
 // Single-threaded endgame solve that runs in the calling thread (no
 // cpthread_create). Safe for use from concurrent PEG decomp threads.
 void endgame_solve_inline(EndgameCtx **ctx, const EndgameArgs *endgame_args,
@@ -4453,6 +4475,7 @@ void endgame_solve_inline(EndgameCtx **ctx, const EndgameArgs *endgame_args,
   for (int idx = solver->threads; idx < total_workers; idx++) {
     cpthread_join(solver->worker_ids[idx]);
   }
+  endgame_ctx_release_lent_workers(solver);
 
   const PVLine *best_pv =
       endgame_results_get_pvline(results, ENDGAME_RESULT_BEST);

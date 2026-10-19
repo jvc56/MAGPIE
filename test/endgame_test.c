@@ -395,20 +395,28 @@ static void run_injection_case(bool use_inline) {
   args.per_ply_callback = inject_worker_per_ply;
   args.per_ply_callback_data = &injector;
 
+  // Solve twice on one context: the second solve lends workers again after
+  // the first released (inline) or kept (spawned) its lent ones.
   ErrorStack *error_stack = error_stack_create();
-  if (use_inline) {
-    endgame_solve_inline(&ctx, &args, results);
-  } else {
-    endgame_solve(&ctx, &args, results, error_stack);
-  }
-  assert(error_stack_is_empty(error_stack));
-  const int32_t value =
-      endgame_results_get_pvline(results, ENDGAME_RESULT_BEST)->score;
+  for (int solve_idx = 0; solve_idx < 2; solve_idx++) {
+    injector.attempts = 0;
+    injector.added = 0;
+    if (use_inline) {
+      endgame_solve_inline(&ctx, &args, results);
+    } else {
+      endgame_solve(&ctx, &args, results, error_stack);
+    }
+    assert(error_stack_is_empty(error_stack));
+    const int32_t value =
+        endgame_results_get_pvline(results, ENDGAME_RESULT_BEST)->score;
 
-  printf("dynamic-worker-injection (%s): value=%d workers_added=%d\n",
-         use_inline ? "inline" : "spawned", value, injector.added);
-  assert(value == -63);
-  assert(injector.added > 0); // at least one helper joined mid-search
+    printf("dynamic-worker-injection (%s, solve %d): value=%d "
+           "workers_added=%d\n",
+           use_inline ? "inline" : "spawned", solve_idx + 1, value,
+           injector.added);
+    assert(value == -63);
+    assert(injector.added > 0); // at least one helper joined mid-search
+  }
 
   error_stack_destroy(error_stack);
   endgame_ctx_destroy(ctx);
