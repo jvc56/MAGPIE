@@ -33,8 +33,7 @@ permissions:
 env:
   # The toolchain that builds the shipped executables, with the SHA-256 of its
   # release tarball (also the digest GitHub reports for the asset). Keep in
-  # step with the windows-cross-compile job in run-tests.yml and with
-  # windows/Dockerfile.
+  # step with run-tests.yml's env and with windows/Dockerfile.
   LLVM_MINGW_VERSION: "20261006"
   LLVM_MINGW: llvm-mingw-20261006-ucrt-ubuntu-22.04-x86_64
   LLVM_MINGW_SHA256: 5f9c6ed95b2d4bdb2869a488c5fd5857fbdabcf288a0aa3eb1da43f6a08d8ab4
