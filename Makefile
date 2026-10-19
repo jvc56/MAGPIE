@@ -168,9 +168,13 @@ cflags.dev := -g -O0 -Wall -Wno-trigraphs -Wextra -Wshadow -Wstrict-prototypes -
 # Optimizing turns on checks -O0 never runs, which GCC 13 fails on today, so
 # they are turned back off to hold it to dev's warnings: _FORTIFY_SOURCE,
 # whose call checks ASAN makes itself, and -Wmaybe-uninitialized and
-# -Wformat-truncation, which guess from what the optimizer sees. CI's
-# sanitizer jobs build this; dev stays -O0, for the debugger.
-cflags.sanitize := -g -O1 -fno-omit-frame-pointer -fno-optimize-sibling-calls -U_FORTIFY_SOURCE -Wall -Wno-trigraphs -Wextra -Wshadow -Wstrict-prototypes -Wno-maybe-uninitialized -Wno-format-truncation -Werror $(FSAN_ARG)
+# -Wformat-truncation, which guess from what the optimizer sees. Clang has no
+# -Wmaybe-uninitialized and, under -Werror, refuses to turn off a warning it
+# does not know, so each is passed only to a compiler that accepts it; the
+# test compiles run only when this build is selected. CI's sanitizer jobs
+# build this; dev stays -O0, for the debugger.
+sanitize_quiet_warnings = $(foreach warning,-Wno-maybe-uninitialized -Wno-format-truncation,$(shell echo "int main(void) { return 0; }" | $(CC) -x c - -Werror $(warning) -o /dev/null >/dev/null 2>&1 && echo $(warning)))
+cflags.sanitize = -g -O1 -fno-omit-frame-pointer -fno-optimize-sibling-calls -U_FORTIFY_SOURCE -Wall -Wno-trigraphs -Wextra -Wshadow -Wstrict-prototypes $(sanitize_quiet_warnings) -Werror $(FSAN_ARG)
 cflags.thread := -g -O0 -Wall -Wno-trigraphs -Wextra -Wshadow -Wstrict-prototypes -Werror -fsanitize=thread
 cflags.vlg := -g -O0 -Wall -Wno-trigraphs -Wextra
 cflags.cov := -g -O0 -Wall -Wno-trigraphs -Wextra --coverage
