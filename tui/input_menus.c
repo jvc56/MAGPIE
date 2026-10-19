@@ -18,6 +18,74 @@
 #include <string.h>
 #include <time.h>
 
+const char *tui_analysis_menu_reason(const TuiGameState *state, int item) {
+  static const TuiAnalysisAction actions[TUI_ANALYSIS_MENU_ITEM_COUNT] = {
+      [TUI_ANALYSIS_MENU_SIM] = TUI_ANALYSIS_SIM,
+      [TUI_ANALYSIS_MENU_KIBITZ] = TUI_ANALYSIS_KIBITZ,
+      [TUI_ANALYSIS_MENU_RESUME] = TUI_ANALYSIS_RESUME,
+      [TUI_ANALYSIS_MENU_STOP] = TUI_ANALYSIS_STOP,
+  };
+  if (item < 0 || item >= TUI_ANALYSIS_MENU_ITEM_COUNT ||
+      item == TUI_ANALYSIS_MENU_BACK) {
+    return NULL;
+  }
+  return tui_analysis_unavailable_reason(state, state->history_cursor,
+                                         actions[item]);
+}
+
+bool tui_input_analysis_menu(TuiGameState *state, TuiUiState *ui, uint32_t key,
+                             ncinput input) {
+  if (ui->modal != TUI_MODAL_ANALYSIS_MENU) {
+    return false;
+  }
+  bool enabled[TUI_ANALYSIS_MENU_ITEM_COUNT];
+  pthread_mutex_lock(&state->mutex);
+  for (int item = 0; item < TUI_ANALYSIS_MENU_ITEM_COUNT; item++) {
+    enabled[item] = tui_analysis_menu_reason(state, item) == NULL;
+  }
+  pthread_mutex_unlock(&state->mutex);
+  // Unavailable items stay focusable, unlike other dialogs' dimmed rows:
+  // focusing one shows why it can't run in the help line.
+  if (key == NCKEY_BUTTON1 && input.evtype != NCTYPE_RELEASE) {
+    const int hit = tui_modal_item_at(input.y, input.x);
+    if (hit < 0 || hit >= TUI_ANALYSIS_MENU_ITEM_COUNT) {
+      return true;
+    }
+    ui->analysis_menu_focus = hit;
+    if (!enabled[hit]) {
+      return true;
+    }
+    key = NCKEY_ENTER;
+  }
+  const int nav = tui_list_nav(key, &input, ui->analysis_menu_focus,
+                               TUI_ANALYSIS_MENU_ITEM_COUNT, NULL,
+                               TUI_LIST_NAV_HOME_END | TUI_LIST_NAV_VI);
+  if (nav >= 0) {
+    ui->analysis_menu_focus = nav;
+  } else if (key == NCKEY_ESC) {
+    ui->modal = TUI_MODAL_NONE;
+  } else if (key == NCKEY_ENTER || key == '\r' || key == '\n') {
+    const int item = ui->analysis_menu_focus;
+    if (!enabled[item]) {
+      return true;
+    }
+    ui->modal = TUI_MODAL_NONE;
+    if (item == TUI_ANALYSIS_MENU_STOP) {
+      tui_analysis_worker_stop_and_join(state);
+    } else if (item != TUI_ANALYSIS_MENU_BACK) {
+      pthread_mutex_lock(&state->mutex);
+      if (item == TUI_ANALYSIS_MENU_KIBITZ) {
+        tui_analysis_kibitz(state, state->history_cursor);
+      } else {
+        tui_analysis_worker_start(state, state->history_cursor,
+                                  item == TUI_ANALYSIS_MENU_SIM);
+      }
+      pthread_mutex_unlock(&state->mutex);
+    }
+  }
+  return true;
+}
+
 // Quit-confirm modal keys.
 // Returns true when the key was consumed.
 bool tui_input_quit_confirm(TuiGameState *state, TuiUiState *ui,
