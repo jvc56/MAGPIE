@@ -95,7 +95,7 @@ bool tui_input_play_setup(TuiGameState *state, TuiUiState *ui,
     }
     if (!focus_name && (key == NCKEY_LEFT || key == NCKEY_RIGHT)) {
       const int dir = key == NCKEY_RIGHT ? 1 : -1;
-      if (ui->play_setup_focus == TUI_PLAY_SETUP_FIRST_MOVE) {
+      if (ui->play_setup_focus == TUI_PLAY_SETUP_FIRST_PLAYER) {
         ui->play_setup_first_move =
             (ui->play_setup_first_move + dir + TUI_PLAY_FIRST_COUNT) %
             TUI_PLAY_FIRST_COUNT;
@@ -111,21 +111,15 @@ bool tui_input_play_setup(TuiGameState *state, TuiUiState *ui,
         }
         ui->watch_setup_time = tui_time_picker_preset_seconds(next);
       } else if (ui->play_setup_focus == TUI_PLAY_SETUP_OVERTIME) {
-        ui->play_setup_overtime_rule =
-            (UiOvertimeRule)(((int)ui->play_setup_overtime_rule + dir +
-                              UI_OVERTIME_RULE_COUNT) %
-                             UI_OVERTIME_RULE_COUNT);
-      } else if (ui->play_setup_focus == TUI_PLAY_SETUP_OVERTIME_CAP) {
-        if (ui->play_setup_overtime_rule == UI_OVERTIME_MAX) {
-          int v = ui->play_setup_overtime_cap + dir;
-          if (v < 1) {
-            v = 1;
-          }
-          if (v > 60) {
-            v = 60;
-          }
-          ui->play_setup_overtime_cap = v;
-        }
+        // One scale: none, up to 1..10 minutes, unlimited.
+        int step = tui_overtime_step(ui->play_setup_overtime_rule,
+                                     ui->play_setup_overtime_cap) +
+                   dir;
+        step = step < 0 ? 0 : step;
+        step = step > TUI_OVERTIME_STEP_COUNT - 1 ? TUI_OVERTIME_STEP_COUNT - 1
+                                                  : step;
+        tui_overtime_from_step(step, &ui->play_setup_overtime_rule,
+                               &ui->play_setup_overtime_cap);
       } else if (ui->play_setup_focus == TUI_PLAY_SETUP_TIME_PENALTY) {
         if (ui->play_setup_overtime_rule != UI_OVERTIME_FLAG) {
           // Two rates — Left/Right both toggle.
