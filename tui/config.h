@@ -178,6 +178,14 @@ typedef struct {
   // Spoiler-free History review.
   bool hide_spoilers;
   bool hide_spoilers_set;
+  // Analysis: auto-analyze (TuiAutoAnalyze), time limit in seconds (0 =
+  // none), and search threads (0 = auto).
+  int auto_analyze;
+  bool auto_analyze_set;
+  int analysis_time_limit;
+  bool analysis_time_limit_set;
+  int thread_limit;
+  bool thread_limit_set;
 } TuiConfig;
 
 // Override the config file path. When set to a non-NULL, non-empty path,

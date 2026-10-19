@@ -30,6 +30,7 @@
 #include <locale.h>
 #include <notcurses/notcurses.h>
 #include <pthread.h>
+#include <stdatomic.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -654,6 +655,42 @@ static void dispatch_input(struct notcurses *nc, struct ncplane *std_plane,
   tui_input_game(state, ui, session, key, input);
 }
 
+// Auto-analyze: when the History cursor lands on a different turn while
+// reviewing (no computer game in progress), stops the running analysis
+// and starts the setting's: kibitz, or a sim (a solve on endgame and
+// pre-endgame turns). `*last_cursor` tracks the cursor between calls.
+static void auto_analyze_on_cursor_move(TuiGameState *state, int *last_cursor) {
+  pthread_mutex_lock(&state->mutex);
+  const int cursor = state->history_cursor;
+  const int mode = state->auto_analyze;
+  const bool reviewing = !state->bot_started || tui_game_state_play_over(state);
+  pthread_mutex_unlock(&state->mutex);
+  if (cursor == *last_cursor) {
+    return;
+  }
+  *last_cursor = cursor;
+  if (mode == TUI_AUTO_ANALYZE_OFF || !reviewing || cursor < 0) {
+    return;
+  }
+  if (atomic_load(&state->analysis_running)) {
+    tui_analysis_worker_stop_and_join(state);
+  }
+  pthread_mutex_lock(&state->mutex);
+  if (mode == TUI_AUTO_ANALYZE_KIBITZ) {
+    if (tui_analysis_unavailable_reason(state, cursor, TUI_ANALYSIS_KIBITZ) ==
+        NULL) {
+      tui_analysis_kibitz(state, cursor);
+    }
+  } else if (tui_analysis_unavailable_reason(state, cursor,
+                                             TUI_ANALYSIS_SOLVE) == NULL) {
+    tui_analysis_worker_start(state, cursor, TUI_ANALYSIS_SOLVE);
+  } else if (tui_analysis_unavailable_reason(state, cursor, TUI_ANALYSIS_SIM) ==
+             NULL) {
+    tui_analysis_worker_start(state, cursor, TUI_ANALYSIS_SIM);
+  }
+  pthread_mutex_unlock(&state->mutex);
+}
+
 // An annotation commit held back for phonies (phony_confirm_idx set by
 // the cell editor) asks first.
 static void open_phony_confirm(TuiGameState *state, TuiUiState *ui) {
@@ -848,6 +885,16 @@ int main(int argc, char *argv[]) {
   game_state.theme = chosen_theme;
   game_state.hide_spoilers =
       loaded.hide_spoilers_set ? loaded.hide_spoilers : false;
+  game_state.auto_analyze =
+      loaded.auto_analyze_set && loaded.auto_analyze <= TUI_AUTO_ANALYZE_SIM
+          ? loaded.auto_analyze
+          : TUI_AUTO_ANALYZE_OFF;
+  game_state.analysis_time_limit =
+      loaded.analysis_time_limit_set ? loaded.analysis_time_limit : 0;
+  game_state.thread_limit =
+      loaded.thread_limit_set && loaded.thread_limit <= 256
+          ? loaded.thread_limit
+          : 0;
   if (loaded.sim_plies_set) {
     game_state.sim_plies = loaded.sim_plies;
   }
@@ -900,6 +947,8 @@ int main(int argc, char *argv[]) {
   // current (not-yet-rendered) frame, so we can measure keypress-to-pixels.
   struct timespec input_dirty_ts = {0, 0};
   bool input_dirty_pending = false;
+  // History cursor auto-analyze last acted on (it starts on the badge).
+  int auto_analyze_cursor = -1;
   uint64_t rendered_version = ~(uint64_t)0;
   long rendered_wall_sec = -1;
   while (ui.running) {
@@ -1055,6 +1104,7 @@ int main(int argc, char *argv[]) {
       }
       dispatch_input(nc, std_plane, &game_state, &ui, &session, key, input);
       open_phony_confirm(&game_state, &ui);
+      auto_analyze_on_cursor_move(&game_state, &auto_analyze_cursor);
     } while (ui.running);
 
     // If this frame's input drain dirtied the frame, render it ASAP instead
