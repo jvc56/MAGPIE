@@ -1931,18 +1931,19 @@ static void wit_subrack_prune_movegen_test(void) {
 }
 
 // Best-move generations seeded from a carry (see best_move_carry.h), which
-// without PAT also skip the lanes unchanged since a carried move was best,
+// without PAT also skip the lanes whose remembered bounds they beat,
 // choose the same move, at the same equity, as plain ones. The positions mimic
 // a simulation's playouts: every candidate of a position is played on its own
 // copy of the game, and the same opponent rack then moves on each board, so
 // moves the carry remembers from one candidate's board are tried on the next.
-static void best_move_carry_test(const char *config_str) {
+static void best_move_carry_test(const char *config_str, bool skips_lanes,
+                                 bool expect_lane_bounds) {
   Config *config = config_create_or_die(config_str);
   Game *game = config_game_create(config);
   MoveList *candidates = move_list_create(15);
   MoveList *plain_list = move_list_create(1);
   MoveList *carried_list = move_list_create(1);
-  BestMoveCarry *carry = best_move_carry_create();
+  BestMoveCarry *carry = best_move_carry_create(1024, skips_lanes);
   int generations = 0;
   int racks_with_several_moves = 0;
   for (int position_idx = 0; position_idx < 12; position_idx++) {
@@ -1985,13 +1986,13 @@ static void best_move_carry_test(const char *config_str) {
         assert(compare_moves_without_equity(plain, carried, true) == -1);
         assert(move_get_equity(plain) == move_get_equity(carried));
         generations++;
-        CarriedRackMoves rack_moves;
+        CarriedRackFind found;
         if (best_move_carry_find(
                 carry,
                 player_get_rack(game_get_player(
                     playout, game_get_player_on_turn_index(playout))),
-                game_get_player_on_turn_index(playout), &rack_moves) &&
-            rack_moves.count > 1) {
+                game_get_player_on_turn_index(playout), NULL, 0, &found) &&
+            found.count > 1) {
           racks_with_several_moves++;
         }
         play_move(plain, playout, NULL);
@@ -2003,6 +2004,25 @@ static void best_move_carry_test(const char *config_str) {
   // The opponent's best move differs between some candidates' boards, so
   // the carry holds several moves for its rack and tries them on new boards.
   assert(racks_with_several_moves > 0);
+  // A carry that skips lanes remembers lane bounds without PAT, and none
+  // with it.
+  assert(best_move_carry_skips_lanes(carry) == skips_lanes);
+  int lane_bounds = 0;
+  for (int bucket_idx = 0; skips_lanes && bucket_idx < carry->num_buckets;
+       bucket_idx++) {
+    const CarriedLaneBounds *rack_lane_bounds = &carry->lane_bounds[bucket_idx];
+    for (int lane = 0; carry->buckets[bucket_idx].rack_moves.is_valid &&
+                       lane < BEST_MOVE_CARRY_NUM_LANES;
+         lane++) {
+      for (int bound_idx = 0; bound_idx < BEST_MOVE_CARRY_BOUNDS_PER_LANE;
+           bound_idx++) {
+        if (rack_lane_bounds->bounds[lane][bound_idx].lane_hash != 0) {
+          lane_bounds++;
+        }
+      }
+    }
+  }
+  assert((lane_bounds > 0) == expect_lane_bounds);
   best_move_carry_destroy(carry);
   move_list_destroy(carried_list);
   move_list_destroy(plain_list);
@@ -2045,8 +2065,13 @@ void test_move_gen(void) {
   wmp_blank_possibilities_bananas_5();
   large_alphabet_movegen_test();
   wit_subrack_prune_movegen_test();
-  best_move_carry_test("set -lex CSW21 -wmp true -s1 equity -s2 equity");
-  best_move_carry_test("set -lex CSW21 -wmp false -s1 equity -s2 equity");
-  best_move_carry_test(
-      "set -lex CSW21 -wmp true -s1 equity -s2 equity -pat CSW21");
+  for (int skips_lanes = 0; skips_lanes <= 1; skips_lanes++) {
+    best_move_carry_test("set -lex CSW21 -wmp true -s1 equity -s2 equity",
+                         skips_lanes, skips_lanes);
+    best_move_carry_test("set -lex CSW21 -wmp false -s1 equity -s2 equity",
+                         skips_lanes, skips_lanes);
+    best_move_carry_test(
+        "set -lex CSW21 -wmp true -s1 equity -s2 equity -pat CSW21",
+        skips_lanes, false);
+  }
 }
