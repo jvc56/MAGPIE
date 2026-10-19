@@ -669,6 +669,36 @@ static bool cell_editor_type_char(TuiGameState *state, uint32_t key,
   const bool bracket_open =
       strrchr(buf, '[') != NULL &&
       (strrchr(buf, ']') == NULL || strrchr(buf, ']') < strrchr(buf, '['));
+  // Typing at the end of a rack or leave reads keys as the move field
+  // does (tile_input.h): a letter with no tile of its own becomes the
+  // multi-letter tile it starts or completes (Catalan Q is [QU], N then Y
+  // is [NY]). Brackets and "?" are typed as they are.
+  if (!field_move && state->ld != NULL && !bracket_open && *pcur == *plen &&
+      strcmp(text, "?") != 0 && strcmp(text, "[") != 0 &&
+      strcmp(text, "]") != 0) {
+    const int last = *plen > 0 ? tui_tile_prev_boundary(buf, *plen) : -1;
+    char last_face[TUI_TILE_TEXT_MAX] = "";
+    if (last >= 0 && buf[last] != '?') {
+      tui_tile_token_face(buf + last, *plen - last, last_face,
+                          sizeof(last_face));
+    }
+    int ml = -1;
+    const TuiTileKeyAction action =
+        tui_tile_key(state->ld, &state->tile_keys, text,
+                     last_face[0] != '\0' ? last_face : NULL, &ml);
+    if (action == TUI_TILE_KEY_ABSORBED || action == TUI_TILE_KEY_WAIT) {
+      pthread_mutex_unlock(&state->mutex);
+      return true;
+    }
+    if (action == TUI_TILE_KEY_REPLACE_LAST) {
+      buf[last] = '\0';
+      *plen = last;
+      *pcur = last;
+    }
+    if (action == TUI_TILE_KEY_PLACE || action == TUI_TILE_KEY_REPLACE_LAST) {
+      tui_tile_token(state->ld, ml, false, text, sizeof(text));
+    }
+  }
   const bool rack_full =
       !field_move && !bracket_open && tui_tile_count(buf, *plen) >= RACK_SIZE;
   const int text_len = (int)strlen(text);
