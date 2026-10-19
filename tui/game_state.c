@@ -1616,6 +1616,26 @@ bool tui_game_state_phony_words(const TuiGameState *state, int player_idx,
   return any;
 }
 
+TuiSpoiler tui_history_spoiler(const TuiGameState *state, int idx) {
+  const int cursor = state->history_cursor;
+  if (!state->hide_spoilers || state->app_mode == TUI_APP_MODE_ANNOTATE ||
+      cursor < 0 || cursor >= state->history_count || idx < cursor) {
+    return TUI_SPOILER_NONE;
+  }
+  if (idx > cursor) {
+    return TUI_SPOILER_ALL;
+  }
+  return state->history[idx].pending ? TUI_SPOILER_NONE : TUI_SPOILER_MOVE;
+}
+
+int tui_history_visible_count(const TuiGameState *state) {
+  const int cursor = state->history_cursor;
+  if (tui_history_spoiler(state, cursor + 1) == TUI_SPOILER_ALL) {
+    return cursor + 1;
+  }
+  return state->history_count;
+}
+
 void tui_game_state_notice(TuiGameState *state, const char *message) {
   (void)snprintf(state->notice_buf, sizeof(state->notice_buf), "%s", message);
   clock_gettime(CLOCK_MONOTONIC, &state->notice_expires_at);
