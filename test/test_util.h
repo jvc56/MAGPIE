@@ -40,6 +40,10 @@ void sort_and_print_move_list(const Board *board, const LetterDistribution *ld,
 void resort_sorted_move_list_by_score(SortedMoveList *sml);
 void assert_equal_at_equity_resolution(double a, double b);
 bool within_epsilon(double a, double b);
+// Asserts that two inferences recorded the same racks, leaves and exchanged
+// tiles: the same sample counts, means and letter subtotals for every type.
+void assert_inference_results_equal(InferenceResults *results_a,
+                                    InferenceResults *results_b, int ld_size);
 int count_newlines(const char *str);
 bool equal_rack(const Rack *expected_rack, const Rack *actual_rack);
 void assert_strings_equal(const char *str1, const char *str2);

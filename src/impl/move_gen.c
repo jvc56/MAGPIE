@@ -687,22 +687,12 @@ static inline void update_best_move_or_insert_into_movelist(
     break;
   }
 
-  // In exchange cutoff mode, exchanges are recorded first and then
-  // target_equity_cutoff is set to the best exchange + margin. Exchanges
-  // should not update the cutoff or trigger threshold_exceeded since we
-  // need to continue to find scoring plays.
-  const bool is_exchange_in_exchange_cutoff_mode =
-      (move_type == GAME_EVENT_EXCHANGE) &&
-      (gen->target_leave_size != UNSET_LEAVE_SIZE);
-
-  if (need_to_update_best_move_equity_or_score &&
-      !is_exchange_in_exchange_cutoff_mode) {
+  if (need_to_update_best_move_equity_or_score) {
     gen_update_cutoff_equity_or_score(gen);
   }
 
   if (gen->stop_on_threshold &&
-      move_equity_or_score > gen->target_equity_cutoff &&
-      !is_exchange_in_exchange_cutoff_mode) {
+      move_equity_or_score > gen->target_equity_cutoff) {
     gen->threshold_exceeded = true;
   }
 }
@@ -1122,10 +1112,7 @@ update_best_move_or_insert_into_movelist_wmp(MoveGen *gen, int start_col,
 
   if (gen->stop_on_threshold &&
       move_equity_or_score > gen->target_equity_cutoff) {
-    if ((gen->target_leave_size == UNSET_LEAVE_SIZE) ||
-        need_to_update_best_move_equity_or_score) {
-      gen->threshold_exceeded = true;
-    }
+    gen->threshold_exceeded = true;
   }
 }
 
@@ -3602,7 +3589,6 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
   const KWG *override_kwg = args->override_kwg;
   gen->eq_margin_movegen = args->eq_margin_movegen;
   gen->target_equity_cutoff = args->target_equity;
-  gen->target_leave_size = args->target_leave_size_for_exchange_cutoff;
   gen->best_small_out_bonus = args->best_small_out_bonus;
   gen->best_small_canonical_ties = args->best_small_canonical_ties;
 
@@ -3929,18 +3915,6 @@ void gen_look_up_leaves_and_record_exchanges(MoveGen *gen) {
     for (int leave_size_idx = 0; leave_size_idx < RACK_SIZE + 1;
          leave_size_idx++) {
       gen->best_leaves[leave_size_idx] = 0;
-    }
-  }
-
-  if (add_exchange && gen->target_leave_size != UNSET_LEAVE_SIZE &&
-      gen->move_record_type == MOVE_RECORD_BEST) {
-    if (gen->best_leaves[gen->target_leave_size] != EQUITY_INITIAL_VALUE) {
-      const Equity original_target = gen->target_equity_cutoff;
-      const Equity exchange_cutoff =
-          gen->best_leaves[gen->target_leave_size] + gen->eq_margin_movegen;
-      if (exchange_cutoff > original_target) {
-        gen->target_equity_cutoff = exchange_cutoff;
-      }
     }
   }
 }
@@ -4318,8 +4292,8 @@ static bool gen_can_carry_best_moves(const MoveGen *gen,
   return args->best_move_carry != NULL &&
          gen->move_record_type == MOVE_RECORD_BEST &&
          gen->move_sort_type == MOVE_SORT_EQUITY && !gen->stop_on_threshold &&
-         gen->target_leave_size == UNSET_LEAVE_SIZE && !gen->is_wordsmog &&
-         args->override_kwg == NULL && gen->number_of_tiles_in_bag > 0 &&
+         !gen->is_wordsmog && args->override_kwg == NULL &&
+         gen->number_of_tiles_in_bag > 0 &&
          gen->board_number_of_tiles_played > 0;
 }
 

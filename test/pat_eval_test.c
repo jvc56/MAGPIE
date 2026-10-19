@@ -58,7 +58,6 @@ static MoveList *pat_eval_test_generate(const Game *game) {
       .override_kwg = NULL,
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
-      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
   };
   generate_moves(&args);
   return move_list;

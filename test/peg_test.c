@@ -108,7 +108,6 @@ static void peg_assert_single_cand(const char *name, const char *cgp,
         .override_kwg = NULL,
         .eq_margin_movegen = 0,
         .target_equity = EQUITY_MAX_VALUE,
-        .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
     };
     generate_moves(&gen_args);
     assert(move_list_get_count(gen_ml) >= 1);
@@ -355,7 +354,6 @@ static void peg_macondo_case(const char *name, const char *cgp,
         .override_kwg = NULL,
         .eq_margin_movegen = 0,
         .target_equity = EQUITY_MAX_VALUE,
-        .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
     };
     generate_moves(&gen_args);
     const int n_gen = move_list_get_count(gen_ml);
@@ -603,7 +601,6 @@ static void test_peg_main_pnoprune(void) {
       .override_kwg = NULL,
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
-      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
   };
   generate_moves(&gen_args);
   const int n_gen = move_list_get_count(gen_ml);
@@ -801,7 +798,6 @@ static void test_peg_bag_emptying_move_split(void) {
       .override_kwg = NULL,
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
-      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
       .move_list = move_list,
       .tiles_played_bv = NULL,
       .initial_tiles_bv = 0,
@@ -929,7 +925,6 @@ static int peg_collect_moves_with_tiles_played(const Game *game,
       .override_kwg = NULL,
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
-      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
       .move_list = move_list,
       .tiles_played_bv = NULL,
       .initial_tiles_bv = 0,
@@ -1061,7 +1056,6 @@ static void test_peg_bag_emptying_guarantee_rejects_exchange(void) {
       .override_kwg = NULL,
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
-      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
       .move_list = move_list,
       .tiles_played_bv = NULL,
       .initial_tiles_bv = 0,
@@ -1594,7 +1588,6 @@ static void test_peg_main_inner_top_k(void) {
       .override_kwg = NULL,
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
-      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
   };
   generate_moves(&gen_args);
   const int n_gen = move_list_get_count(gen_ml);
@@ -1701,7 +1694,6 @@ static void peg_anchor_protected_move(
       .override_kwg = NULL,
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
-      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
   };
   generate_moves(&gen_args);
   const int n_gen = move_list_get_count(gen_ml);
@@ -1936,7 +1928,6 @@ static void peg_assert_bag_accepted(const char *name, const char *cgp) {
       .override_kwg = NULL,
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
-      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
   };
   generate_moves(&gen_args);
   assert(move_list_get_count(gen_ml) == 1);
