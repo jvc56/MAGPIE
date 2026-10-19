@@ -161,6 +161,16 @@ else
 endif
 
 cflags.dev := -g -O0 -Wall -Wno-trigraphs -Wextra -Wshadow -Wstrict-prototypes -Werror $(FSAN_ARG)
+# dev's checks at -O1, the level the sanitizers' own documentation asks for:
+# locals live in registers rather than a stack slot each, so ASAN has far
+# fewer loads and stores to instrument, and small inline functions inline.
+# Frame pointers and sibling calls are kept so its stack traces stay whole.
+# Optimizing turns on checks -O0 never runs, which GCC 13 fails on today, so
+# they are turned back off to hold it to dev's warnings: _FORTIFY_SOURCE,
+# whose call checks ASAN makes itself, and -Wmaybe-uninitialized and
+# -Wformat-truncation, which guess from what the optimizer sees. CI's
+# sanitizer jobs build this; dev stays -O0, for the debugger.
+cflags.sanitize := -g -O1 -fno-omit-frame-pointer -fno-optimize-sibling-calls -U_FORTIFY_SOURCE -Wall -Wno-trigraphs -Wextra -Wshadow -Wstrict-prototypes -Wno-maybe-uninitialized -Wno-format-truncation -Werror $(FSAN_ARG)
 cflags.thread := -g -O0 -Wall -Wno-trigraphs -Wextra -Wshadow -Wstrict-prototypes -Werror -fsanitize=thread
 cflags.vlg := -g -O0 -Wall -Wno-trigraphs -Wextra
 cflags.cov := -g -O0 -Wall -Wno-trigraphs -Wextra --coverage
@@ -193,6 +203,7 @@ cflags.profile := -O3 -g -march=native -DNDEBUG -Wall -Wno-trigraphs -fno-omit-f
 lflags.cov := --coverage
 
 ldflags.dev := -pthread $(FSAN_ARG)
+ldflags.sanitize := -pthread $(FSAN_ARG)
 ldflags.lib := -pthread
 ldflags.thread := -pthread -fsanitize=thread
 ldflags.vlg := -pthread
