@@ -52,6 +52,30 @@ if [ "$TIDY_PLATFORM" = "windows" ]; then
     CLANG_TIDY_CHECKS="$CLANG_TIDY_CHECKS,-misc-include-cleaner"
 fi
 
+# The TUI also needs the notcurses and FreeType headers. Their umbrella
+# headers (notcurses/notcurses.h, FT_FREETYPE_H) are the supported entry
+# points, so include-cleaner ignores those libraries' internal headers,
+# along with glibc's and the kernel's internal ones (bits/, asm/), which
+# it can't always attribute to the public header (CLOCK_MONOTONIC and
+# <time.h>, for one).
+# Without the headers tui/ is skipped, unless MAGPIE_TIDY_REQUIRE_TUI is
+# set (as in CI), which makes that an error. The Windows run lints only
+# src/compat, so it skips tui/.
+TUI_DIRECTORY="tui/"
+TUI_COMPILER_FLAGS=""
+TUI_TIDY_CONFIG="{CheckOptions: {misc-include-cleaner.IgnoreHeaders: 'notcurses/.*;freetype/.*;ft2build.h;zconf.h;zlib.h;bits/.*;asm/.*;asm-generic/.*'}}"
+if [ "$TIDY_PLATFORM" != "windows" ] && [ -d "$TUI_DIRECTORY" ]; then
+    if pkg-config --exists notcurses-core freetype2 2>/dev/null; then
+        TUI_COMPILER_FLAGS="$C_COMPILER_FLAGS $(pkg-config --cflags notcurses-core freetype2)"
+        SEARCH_DIRECTORIES="$SEARCH_DIRECTORIES $TUI_DIRECTORY"
+    elif [ -n "$MAGPIE_TIDY_REQUIRE_TUI" ]; then
+        echo "ERROR: notcurses or FreeType development headers not found; cannot analyze $TUI_DIRECTORY" >&2
+        exit 1
+    else
+        echo "Skipping $TUI_DIRECTORY: notcurses or FreeType development headers not found."
+    fi
+fi
+
 MAX_CORES=$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 1)
 LOG_FILE=$(mktemp)
 RESULT_DIR=$(mktemp -d)
@@ -60,6 +84,7 @@ set -o pipefail
 
 # Export variables for use in parallel subprocesses
 export CLANG_TIDY_EXEC CLANG_TIDY_EXCLUDE_HEADER_FILTER CLANG_TIDY_CHECKS C_COMPILER_FLAGS
+export TUI_DIRECTORY TUI_COMPILER_FLAGS TUI_TIDY_CONFIG
 
 echo "Starting clang-tidy static analysis for C files in: $SEARCH_DIRECTORIES"
 echo "Using $MAX_CORES parallel workers"
@@ -86,10 +111,19 @@ find $SEARCH_DIRECTORIES -name "*.c" -print0 | grep -zv "$EXCLUDE_PATTERN" | \
         SAFE_NAME=$(echo "$C_FILE" | tr "/" "_")
         OUTPUT_FILE="$RESULT_DIR/$SAFE_NAME"
         echo "Analyzing: $C_FILE"
+        FILE_FLAGS="$C_COMPILER_FLAGS"
+        set --
+        case "$C_FILE" in
+            "$TUI_DIRECTORY"*)
+                FILE_FLAGS="$TUI_COMPILER_FLAGS"
+                set -- --config="$TUI_TIDY_CONFIG"
+                ;;
+        esac
         $CLANG_TIDY_EXEC "$C_FILE" \
             --header-filter="$CLANG_TIDY_EXCLUDE_HEADER_FILTER" \
             -checks="$CLANG_TIDY_CHECKS" \
-            -- $C_COMPILER_FLAGS > "$OUTPUT_FILE" 2>&1
+            "$@" \
+            -- $FILE_FLAGS > "$OUTPUT_FILE" 2>&1
         TIDY_EXIT=$?
         if [ $TIDY_EXIT -ne 0 ]; then
             echo "ERROR: clang-tidy command failed for $C_FILE (exit code $TIDY_EXIT)." >> "$OUTPUT_FILE"
