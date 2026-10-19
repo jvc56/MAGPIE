@@ -26,7 +26,7 @@ uint8_t *compose_rack_tile_pixels(MachineLetter ml, int player_idx, bool ghost,
                                   TuiGlyphCache *glyph_cache_sub,
                                   TuiScoreSubscripts score_subscripts,
                                   bool antialias, const Theme *theme,
-                                  const LetterDistribution *ld, bool empty);
+                                  const LetterDistribution *ld);
 uint8_t *compose_tile_pixels(MachineLetter ml, int owner, bool blank_uppercase,
                              bool is_preview, int tile_w, int tile_h,
                              TuiGlyphCache *glyph_cache,
