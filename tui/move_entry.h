@@ -92,12 +92,14 @@ void tui_autofill_playthrough(TuiGameState *gs);
 // ── Board-entry builder state ────────────────────────────────────────
 
 // Begin (or relocate) board move-entry at origin (row, col) with the
-// given direction; walks the anchor back through leading playthrough
-// and seeds the buffer with those letters. Drops previously-placed
-// tiles.
+// given direction; walks the anchor back through leading playthrough,
+// and forward through the origin's own tiles when it's occupied, and
+// seeds the buffer with those letters so typing starts at the first
+// empty square. Drops previously-placed tiles.
 void tui_board_builder_set_anchor(TuiGameState *gs, int row, int col, int dir);
 
-// Direction for a fresh anchor: always across (Woogles convention).
+// Direction for a fresh anchor: across (Woogles convention), unless
+// (row, col) is a tile whose across run reaches the board edge.
 int tui_board_builder_default_dir(const TuiGameState *gs, int row, int col);
 
 // Toggle across/down, re-anchoring from the origin and re-placing the

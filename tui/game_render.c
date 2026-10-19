@@ -95,7 +95,7 @@ void tui_game_render_reset_grids(void) { invalidate_grid_planes(); }
 
 void tui_game_render(struct ncplane *plane, const Theme *theme,
                      TuiGameState *state, int time_per_side_seconds,
-                     TuiModalState modal) {
+                     TuiModalState modal, const char *modal_help) {
   TuiGridPlanes *planes = tui_grid_planes();
   TuiHitMaps *hit = tui_hit_maps();
   if (plane == NULL || theme == NULL || state == NULL || state->game == NULL) {
@@ -505,7 +505,7 @@ void tui_game_render(struct ncplane *plane, const Theme *theme,
   render_analysis_panel(plane, theme, state, &L);
 
   render_pending_bar(plane, theme, state, &L);
-  render_command_bar(plane, theme, state, &L, modal);
+  render_command_bar(plane, theme, state, &L, modal, modal_help);
   render_command_palette(plane, theme, state, &L);
   render_status_bar(plane, theme, state, &L, modal);
 
