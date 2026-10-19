@@ -20,6 +20,7 @@ make prepare_data              # validate/upgrade CSW24 WIT; create missing RIT
 make magpie BUILD=no_pgo_release # optimized build without PGO
 make magpie_test               # build test binary
 make magpie_test BUILD=no_pgo_release # optimized test binary
+make magpie_test BUILD=sanitize # dev's ASAN/UBSAN checks at -O1, as CI runs the tests
 make magpie BUILD=profile      # profiling build
 make magpie BUILD=thread       # thread sanitizer build
 make leavegen_pgo_release      # leavegen-trained PGO build
@@ -40,7 +41,7 @@ profile data, and trains the current source on static autoplay. Experimental `pg
 source changes and on each target architecture. Override `PGO_CC`,
 `LLVM_PROFDATA`, and `PGO_LDFLAGS` for versioned toolchains.
 
-`BOARD_DIM` (default 15), `RACK_SIZE` (default 7). Parallel make is automatic. **Use `make release` for production jobs or `BUILD=no_pgo_release` for quick optimized builds** — dev is `-O0` + ASAN/UBSAN, very slow.
+`BOARD_DIM` (default 15), `RACK_SIZE` (default 7). Parallel make is automatic. **Use `make release` for production jobs or `BUILD=no_pgo_release` for quick optimized builds** — dev is `-O0` + ASAN/UBSAN, very slow; `BUILD=sanitize` makes the same checks at `-O1`, about 1.6 times as fast.
 
 ## Tests
 

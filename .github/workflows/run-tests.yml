@@ -390,13 +390,13 @@ jobs:
           grep -q "building the wordmap for CSW21" first-use.txt
           test -s data/lexica/CSW21.wmp
 
-      - name: Build dev test binary
-        run: make magpie_test
+      - name: Build the sanitizer test binary
+        run: make magpie_test BUILD=sanitize
 
       - name: Check native batch conversion failures
         if: matrix.shard == 'rest'
         run: |
-          make magpie_convert
+          make magpie_convert BUILD=sanitize
           if ./bin/magpie_convert invalid_conversion CSW21; then
             echo 'Invalid conversion unexpectedly succeeded'
             exit 1
@@ -442,10 +442,10 @@ jobs:
           make magpie_test BUILD=no_pgo_release BOARD_DIM=21
           ./bin/magpie_test
 
-      - name: Build and run super dev tests
+      - name: Build and run super sanitizer tests
         run: |
           make clean
-          make magpie_test BOARD_DIM=21
+          make magpie_test BUILD=sanitize BOARD_DIM=21
           ./bin/magpie_test
 
   wasm-tests:
