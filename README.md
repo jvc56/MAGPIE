@@ -43,7 +43,11 @@ This will start MAGPIE in async interactive mode by default. For more details on
 
 ### Windows
 
-Windows 10 (version 1903 or later) and Windows 11, on x64 or ARM, run MAGPIE as a single `.exe` with nothing else to install.
+Windows 10 (version 1903 or later) and Windows 11, on x64 or ARM, run MAGPIE either installed or as a single `.exe` with nothing else to install.
+
+**To install it**, download `magpie-<version>-windows-setup.exe` from the [Releases](https://github.com/jvc56/MAGPIE/releases) page and run it. Like the executables, it is not code-signed, so Windows shows **Windows protected your PC**: click **More info**, then **Run anyway**. It installs MAGPIE for you alone, with no administrator needed, and picks the x64 or ARM build for your PC. It adds MAGPIE to the Start menu and, if you tick the option, to your PATH, so that any terminal can run it as `magpie`. On its first start from the Start menu, MAGPIE offers to download its data into `%LOCALAPPDATA%\MAGPIE\data`, and it finds the data there wherever you start it from afterwards. Uninstall it from **Settings > Apps**. That asks whether to delete the data as well.
+
+**To run it without installing:**
 
 1. From the [Releases](https://github.com/jvc56/MAGPIE/releases) page, download `magpie-<version>-windows-x64.exe` (most PCs) or `magpie-<version>-windows-arm64.exe` (Windows on ARM, such as Snapdragon laptops), and put it in a folder of its own, say `Documents\MAGPIE`.
 2. Optionally, check the download against the `.sha256` file published beside it. In PowerShell:
