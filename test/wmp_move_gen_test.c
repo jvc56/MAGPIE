@@ -6,6 +6,7 @@
 #include "../src/def/letter_distribution_defs.h"
 #include "../src/def/move_defs.h"
 #include "../src/def/players_data_defs.h"
+#include "../src/def/rack_defs.h"
 #include "../src/def/wmp_defs.h"
 #include "../src/ent/anchor.h"
 #include "../src/ent/bit_rack.h"
