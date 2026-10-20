@@ -64,7 +64,11 @@ To build the Windows executables yourself on Linux or macOS, with Docker install
 
 ### macOS
 
-macOS 11 or later, on Apple silicon or Intel, runs MAGPIE as one universal executable with nothing else to install.
+macOS 11 or later, on Apple silicon or Intel, runs MAGPIE as one universal executable, either installed or with nothing else to install. Either way, MAGPIE downloads its data into `~/.magpie/data` and finds it there whichever folder it starts in.
+
+**To install it**, download `magpie-<version>-macos.pkg` from the [Releases](https://github.com/jvc56/MAGPIE/releases) page and open it. The installer is not signed or notarized, so macOS refuses to open it at first: close the warning, then click **Open Anyway** in **System Settings > Privacy & Security**. It puts `magpie` in `/usr/local/magpie` and links it into `/usr/local/bin`, so a new Terminal window can run it as `magpie`. On its first run, MAGPIE offers to download its data (about 195 MB) into `~/.magpie/data`. To uninstall it, run `sudo rm -rf /usr/local/magpie /usr/local/bin/magpie` and `sudo pkgutil --forget com.github.jvc56.magpie`, plus `rm -rf ~/.magpie` to delete the data.
+
+**To run it without installing:**
 
 1. From the [Releases](https://github.com/jvc56/MAGPIE/releases) page, download `magpie-<version>-macos-universal.zip` and open it. It unzips to a folder holding `magpie`. Move the folder wherever you like, say your home folder.
 2. Optionally, check the download against the `.sha256` file published beside it. In Terminal:
@@ -73,7 +77,7 @@ macOS 11 or later, on Apple silicon or Intel, runs MAGPIE as one universal execu
    ```
    The hash printed must match the one in the `.sha256` file.
 3. The executable is not signed or notarized, so macOS refuses to run it at first. To allow it, either run `xattr -d com.apple.quarantine magpie` in its folder once, or try to run it and then click **Open Anyway** in **System Settings > Privacy & Security**.
-4. In Terminal, `cd` to its folder and run `./magpie`. MAGPIE looks for its data in a `data` folder there, then in one beside the executable, and offers to download it (about 195 MB) into the first: answer `y`. Double-clicking `magpie` in Finder starts it in your home folder instead, so start it from Terminal the first time.
+4. Double-click `magpie` in Finder, which opens it in Terminal, or run `./magpie` in its folder in Terminal. MAGPIE looks for its data in a `data` folder in the working directory, then in one beside the executable, then in `~/.magpie/data`. If it finds none, it offers to download it (about 195 MB) into `~/.magpie/data`: answer `y`.
 
 From there, everything in [Usage](#usage) applies.
 

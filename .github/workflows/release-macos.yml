@@ -2,17 +2,20 @@ name: Release macOS
 
 # Builds magpie for Apple silicon and for Intel Macs, joins the two into one
 # universal executable, tests it on each architecture, smoke-tests the
-# first-run path of each in an empty directory, and attaches it, zipped and
-# with its SHA-256, to the GitHub release for the tag.
+# first-run path of each in an empty directory, builds the installer that
+# puts it on the PATH (macos/) and tests that on each, and attaches the
+# executable, zipped, and the installer, with their SHA-256s, to the GitHub
+# release for the tag.
 #
 # Triggers, as in release-windows.yml:
 # - a pushed vX.Y.Z tag runs every job, publish included. The tag must match
 #   MAGPIE_VERSION in src/impl/config.c, or the build job fails first.
-# - a push to any branch that changes this file runs every job but publish,
-#   so a change to the workflow is tested before it merges. This is a branch
-#   push rather than pull_request because the test job restores the
-#   windows-data cache, which run-tests.yml saves on the branch, and a
-#   pull_request run can only restore caches from the base branch.
+# - a push to any branch that changes this file or the installer's files
+#   runs every job but publish, so a change to either is tested before it
+#   merges. This is a branch push rather than pull_request because the test
+#   job restores the windows-data cache, which run-tests.yml saves on the
+#   branch, and a pull_request run can only restore caches from the base
+#   branch.
 # - workflow_dispatch runs every job but publish, on any ref, tags included.
 # Only publish can write to the repository.
 
@@ -26,6 +29,7 @@ on:
     # for tag pushes, so every tag push runs.
     paths:
       - .github/workflows/release-macos.yml
+      - macos/**
   workflow_dispatch:
 
 permissions:
@@ -97,14 +101,36 @@ jobs:
           (cd zip && ditto -c -k --keepParent "$name" "../release/$name.zip")
           (cd release && shasum -a 256 "$name.zip" > "$name.zip.sha256" && cat "$name.zip.sha256")
 
+      # A component installing the executable in /usr/local/magpie, whose
+      # postinstall links it into /usr/local/bin, wrapped in a product with
+      # macos/'s distribution and conclusion page. Extended attributes would
+      # go in as ._ files, so the inputs are copied and cleared first.
+      - name: Build the installer
+        env:
+          version: ${{ steps.version.outputs.version }}
+        run: |
+          mkdir -p pkg/root pkg/scripts
+          cp release/magpie pkg/root/magpie
+          cp macos/scripts/postinstall pkg/scripts/postinstall
+          chmod 755 pkg/root/magpie pkg/scripts/postinstall
+          xattr -cr pkg/root pkg/scripts
+          pkgbuild --root pkg/root --identifier com.github.jvc56.magpie --version "$version" \
+            --install-location /usr/local/magpie --scripts pkg/scripts --ownership recommended \
+            pkg/magpie-component.pkg
+          sed "s/@VERSION@/$version/" macos/distribution.xml > pkg/distribution.xml
+          installer="magpie-$version-macos.pkg"
+          productbuild --distribution pkg/distribution.xml --resources macos/resources \
+            --package-path pkg "release/$installer"
+          (cd release && shasum -a 256 "$installer" > "$installer.sha256" && cat "$installer.sha256")
+
       - uses: actions/upload-artifact@v4
         with:
           name: release
           path: release/
 
   # L5: the first-run path of the executable in an empty directory on each
-  # architecture: fetch the data from MAGPIE-DATA, build a wordmap on first
-  # use, then a session of ordinary commands.
+  # architecture: fetch the data from MAGPIE-DATA into ~/.magpie/data, build
+  # a wordmap on first use, then a session of ordinary commands.
   smoke:
     needs: build
     strategy:
@@ -132,7 +158,7 @@ jobs:
           [ -x "$magpie" ] || { echo "::error::the zip lost the executable bit"; exit 1; }
           mkdir empty && cd empty
           "$magpie" data fetch
-          [ -f data/lexica/CSW24.kwg ] || { echo "::error::data fetch wrote nothing"; exit 1; }
+          [ -f ~/.magpie/data/lexica/CSW24.kwg ] || { echo "::error::data fetch wrote nothing in ~/.magpie/data"; exit 1; }
           status=0
           output="$("$magpie" <<'EOF'
           set -lex CSW24 -threads 2 -savesettings false
@@ -152,7 +178,59 @@ jobs:
           ! grep -q '(error' <<<"$output" || { echo "::error::the session reported an error"; exit 1; }
           grep -q 'Endgame (depth' <<<"$output" || { echo "::error::the endgame did not run"; exit 1; }
           grep -q '"build_target":"${{ matrix.target }}"' <<<"$output" || { echo "::error::not the ${{ matrix.target }} half"; exit 1; }
-          [ -f data/lexica/CSW24.wmp ] || { echo "::error::the wordmap is missing"; exit 1; }
+          [ -f ~/.magpie/data/lexica/CSW24.wmp ] || { echo "::error::the wordmap is missing"; exit 1; }
+          [ ! -e data ] || { echo "::error::MAGPIE put data in the working directory"; exit 1; }
+
+  # The installer on each architecture, as someone would use it: install,
+  # then data fetch and a session from the PATH, each in a directory of its
+  # own, which find the one copy of the data in ~/.magpie/data.
+  installer-smoke:
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: arm64
+            runner: macos-15
+            target: armv8-a
+          - name: x86_64
+            runner: macos-15-intel
+            target: nehalem
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: release
+          path: release
+      - name: Install and play
+        run: |
+          [ "$(uname -m)" = "${{ matrix.name }}" ] || { echo "::error::this runner is $(uname -m)"; exit 1; }
+          sudo installer -pkg release/magpie-*-macos.pkg -target /
+          pkgutil --pkg-info com.github.jvc56.magpie
+          cmp /usr/local/magpie/magpie release/magpie || { echo "::error::the installed executable is not the release's"; exit 1; }
+          [ "$(readlink /usr/local/bin/magpie)" = /usr/local/magpie/magpie ] || { echo "::error::no link in /usr/local/bin"; exit 1; }
+          [ "$(command -v magpie)" = /usr/local/bin/magpie ] || { echo "::error::magpie on the PATH is $(command -v magpie)"; exit 1; }
+          mkdir fetch && cd fetch
+          magpie data fetch
+          [ -f ~/.magpie/data/lexica/CSW24.kwg ] || { echo "::error::data fetch wrote nothing in ~/.magpie/data"; exit 1; }
+          [ ! -e data ] || { echo "::error::data fetch put data in the working directory"; exit 1; }
+          cd .. && mkdir elsewhere && cd elsewhere
+          status=0
+          output="$(magpie <<'EOF'
+          set -lex CSW24 -threads 2 -savesettings false
+          cgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 AEINRST/ 0/0 0
+          gen -numplays 3
+          builders
+          quit
+          EOF
+          )" || status=$?
+          echo "$output"
+          [ "$status" -eq 0 ] || { echo "::error::the session exited with $status"; exit 1; }
+          ! grep -q '(error' <<<"$output" || { echo "::error::the session reported an error"; exit 1; }
+          grep -q '"build_target":"${{ matrix.target }}"' <<<"$output" || { echo "::error::not the ${{ matrix.target }} half"; exit 1; }
+          [ -f ~/.magpie/data/lexica/CSW24.wmp ] || { echo "::error::the wordmap is not in ~/.magpie/data"; exit 1; }
+          [ ! -e data ] || { echo "::error::MAGPIE put data in the working directory"; exit 1; }
 
   # L4 on the release executable itself, one architecture per runner.
   test:
@@ -215,7 +293,7 @@ jobs:
   # for a workflow_dispatch started on a tag ref.
   publish:
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
-    needs: [smoke, test]
+    needs: [smoke, test, installer-smoke]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -224,13 +302,14 @@ jobs:
         with:
           name: release
           path: release
-      - name: Attach the executable to the release
+      - name: Attach the executable and the installer to the release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           tag="${GITHUB_REF#refs/tags/}"
           # The build job checked that the tag is v$MAGPIE_VERSION.
           zip="release/magpie-${tag#v}-macos-universal.zip"
+          installer="release/magpie-${tag#v}-macos.pkg"
           # release-windows.yml runs for the same tag and may create the
           # release first, even between this view and this create, so a
           # failed create is fine if the release is there after it.
@@ -240,4 +319,5 @@ jobs:
             || gh release view "$tag" -R "$GITHUB_REPOSITORY" >/dev/null
           # No --clobber, as in release-windows.yml: a rerun cannot silently
           # replace a published file.
-          gh release upload "$tag" -R "$GITHUB_REPOSITORY" "$zip" "$zip.sha256"
+          gh release upload "$tag" -R "$GITHUB_REPOSITORY" "$zip" "$zip.sha256" \
+            "$installer" "$installer.sha256"
