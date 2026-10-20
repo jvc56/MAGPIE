@@ -1360,7 +1360,8 @@ wordmap_gen_record_subrack(MoveGen *gen, const Anchor *anchor, int subrack_idx,
                                        anchor_pat_bound)) {
     return false;
   }
-  if (!wmp_move_gen_get_subrack_words(wgen, subrack_idx, lazy)) {
+  if (!wmp_move_gen_get_subrack_words(wgen, subrack_idx, lazy,
+                                      &gen->blank_word_cache)) {
     return false;
   }
   if (gen->number_of_tiles_in_bag == 0) {
@@ -3691,6 +3692,10 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
   // addresses -- a pointer comparison alone would miss it because the move_gen
   // cache outlives the Config that owned the old WMP.
   const WMP *new_wmp = gen->wmp_move_gen.wmp;
+  if (new_wmp != NULL && bit_rack_get_letter(&gen->wmp_move_gen.player_bit_rack,
+                                             BLANK_MACHINE_LETTER) != 0) {
+    wmp_blank_word_cache_reset(&gen->blank_word_cache);
+  }
   const uint64_t new_wmp_instance_fp =
       (new_wmp != NULL) ? wmp_get_instance_fingerprint(new_wmp) : 0;
   if (new_wmp != previous_wmp ||

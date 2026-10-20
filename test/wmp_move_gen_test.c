@@ -6,7 +6,6 @@
 #include "../src/def/letter_distribution_defs.h"
 #include "../src/def/move_defs.h"
 #include "../src/def/players_data_defs.h"
-#include "../src/def/rack_defs.h"
 #include "../src/def/wmp_defs.h"
 #include "../src/ent/anchor.h"
 #include "../src/ent/bit_rack.h"
@@ -31,6 +30,7 @@
 #include "test_util.h"
 #include <assert.h>
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -1115,6 +1115,8 @@ static void test_playthrough_preparation_after_rejection(void) {
   Rack *rack = rack_create(ld_get_size(ld));
   rack_set_to_string(ld, rack, "C??");
   WMPMoveGen wmg = {0};
+  WMPBlankWordCache blank_cache;
+  wmp_blank_word_cache_reset(&blank_cache);
   wmp_move_gen_init(&wmg, ld, rack, wmp);
   MachineLetter *expected_words =
       malloc_or_die(wmp->max_word_lookup_bytes + WMP_WORD_BUFFER_SLACK_BYTES);
@@ -1180,7 +1182,8 @@ static void test_playthrough_preparation_after_rejection(void) {
         if (expected_bytes > 0) {
           assert(((candidates >> idx) & 1) != 0);
         }
-        const bool found = wmp_move_gen_get_subrack_words(&wmg, idx, true);
+        const bool found =
+            wmp_move_gen_get_subrack_words(&wmg, idx, true, &blank_cache);
         assert(found == (expected_bytes > 0));
         if (found) {
           assert(wmg.num_words * wmg.word_length == expected_bytes);
@@ -1209,7 +1212,110 @@ static void test_playthrough_preparation_after_rejection(void) {
   config_destroy(config);
 }
 
+// Compare actual word bytes/order with the uncached WMP API while switching
+// between cached nonplaythroughs and different playthroughs at the same slot.
+static void assert_cached_subrack_words(WMPMoveGen *wmg,
+                                        WMPBlankWordCache *cache,
+                                        const LetterDistribution *ld,
+                                        const char *subrack_string,
+                                        const char *playthrough_string,
+                                        int index, bool lazy) {
+  wmg->tiles_to_play = (int)strlen(subrack_string);
+  const int playthrough_length = (int)strlen(playthrough_string);
+  wmg->word_length = wmg->tiles_to_play + playthrough_length;
+  const int slot = subracks_get_combination_offset(wmg->tiles_to_play) + index;
+  const BitRack subrack = string_to_bit_rack(ld, subrack_string);
+  wmg->nonplaythrough_infos[slot].subrack = subrack;
+  BitRack combined = subrack;
+  const BitRack playthrough = string_to_bit_rack(ld, playthrough_string);
+  bit_rack_add_bit_rack(&combined, &playthrough);
+  wmg->playthrough_infos[slot].subrack = combined;
+  wmg->nonplaythrough_infos[slot].wmp_entry =
+      lazy ? WMP_ENTRY_UNRESOLVED
+           : wmp_get_word_entry(wmg->wmp, &subrack, wmg->tiles_to_play);
+
+  MachineLetter expected[WMP_RESULT_BUFFER_SIZE + WMP_WORD_BUFFER_SLACK_BYTES];
+  const int bytes = wmp_write_words_to_buffer(wmg->wmp, &combined,
+                                              wmg->word_length, expected);
+  const bool found = wmp_move_gen_get_subrack_words(wmg, index, lazy, cache);
+  assert(found == (bytes > 0));
+  if (found) {
+    assert(wmg->num_words * wmg->word_length == bytes);
+    assert(memcmp(wmg->words, expected, (size_t)bytes) == 0);
+  }
+}
+
+static void test_blank_word_cache(void) {
+  Config *config = config_create_or_die("set -lex CSW21 -wmp true");
+  Game *game = config_game_create(config);
+  const LetterDistribution *ld = game_get_ld(game);
+  const WMP *wmp = player_get_wmp(game_get_player(game, 0));
+  Rack *rack = rack_create(ld_get_size(ld));
+  rack_set_to_string(ld, rack, "AE??");
+  WMPMoveGen wmg = {0};
+  WMPBlankWordCache cache;
+  const WMPEntry *entries[1 << RACK_SIZE] = {0};
+  for (int lazy = 0; lazy < 2; lazy++) {
+    wmp_move_gen_init(&wmg, ld, rack, wmp);
+    wmp_blank_word_cache_reset(&cache);
+    wmg.nonplaythrough_wmp_entry_cache = entries;
+    assert_cached_subrack_words(&wmg, &cache, ld, "A?", "", 0, lazy != 0);
+    const MachineLetter *first_words = wmg.words;
+    const int first_bytes = cache.used_bytes;
+    assert(first_bytes > 0);
+    if (lazy != 0) {
+      assert(entries[subracks_get_combination_offset(2)] ==
+             wmp_get_word_entry(
+                 wmp,
+                 &wmg.nonplaythrough_infos[subracks_get_combination_offset(2)]
+                      .subrack,
+                 2));
+    }
+    assert_cached_subrack_words(&wmg, &cache, ld, "??", "", 1, lazy != 0);
+    const MachineLetter *double_blank_words = wmg.words;
+    const int used_bytes = cache.used_bytes;
+    assert(used_bytes > first_bytes);
+    assert_cached_subrack_words(&wmg, &cache, ld, "A?", "T", 0, lazy != 0);
+    assert(wmg.words == wmg.buffer);
+    assert(cache.used_bytes == used_bytes);
+    assert_cached_subrack_words(&wmg, &cache, ld, "??", "QI", 1, lazy != 0);
+    assert(wmg.words == wmg.buffer);
+    assert_cached_subrack_words(&wmg, &cache, ld, "A?", "", 0, lazy != 0);
+    assert(wmg.words == first_words);
+    assert_cached_subrack_words(&wmg, &cache, ld, "??", "", 1, lazy != 0);
+    assert(wmg.words == double_blank_words);
+    assert(cache.used_bytes == used_bytes);
+
+    // Exactly enough remaining capacity must include the writer's slack.
+    cache.used_bytes = WMP_BLANK_WORD_CACHE_BYTES - WMP_RESULT_BUFFER_SIZE -
+                       WMP_WORD_BUFFER_SLACK_BYTES;
+    const int last_offset = cache.used_bytes;
+    assert_cached_subrack_words(&wmg, &cache, ld, "E?", "", 2, lazy != 0);
+    assert(wmg.words == cache.words + last_offset);
+    // With less room, new keys use scratch while old cached words survive.
+    cache.used_bytes = WMP_BLANK_WORD_CACHE_BYTES - WMP_RESULT_BUFFER_SIZE -
+                       WMP_WORD_BUFFER_SLACK_BYTES + 1;
+    assert_cached_subrack_words(&wmg, &cache, ld, "AE?", "", 0, lazy != 0);
+    assert(wmg.words == wmg.buffer);
+    assert_cached_subrack_words(&wmg, &cache, ld, "A?", "", 0, lazy != 0);
+    assert(wmg.words == first_words);
+
+    // A new position may give the same canonical index a different rack.
+    wmp_blank_word_cache_reset(&cache);
+    assert_cached_subrack_words(&wmg, &cache, ld, "E?", "", 0, lazy != 0);
+    assert(wmg.words == cache.words);
+    const int new_used_bytes = cache.used_bytes;
+    assert_cached_subrack_words(&wmg, &cache, ld, "AE", "", 1, lazy != 0);
+    assert(cache.used_bytes == new_used_bytes);
+    assert(wmg.words != wmg.buffer);
+  }
+  rack_destroy(rack);
+  game_destroy(game);
+  config_destroy(config);
+}
+
 void test_wmp_move_gen(void) {
+  test_blank_word_cache();
   test_playthrough_preparation_after_rejection();
   test_wmp_maximum_playthrough_blocks();
   test_word_plus_floater_positional_intersection();

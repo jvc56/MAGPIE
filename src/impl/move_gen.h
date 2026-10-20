@@ -310,8 +310,11 @@ typedef struct MoveGen {
   MachineLetter playthrough_marked[BOARD_DIM];
 
   // MOVE_RECORD_BEST_SMALL only: see MoveGenArgs.best_small_canonical_ties.
-  // Last, so the hot fields above keep their offsets.
+  // After the hot fields above so their offsets stay stable.
   bool best_small_canonical_ties;
+  // WMP-only storage at the end keeps every existing hot field's offset.
+  // Reset/touch it only for active WMP positions whose rack has a blank.
+  WMPBlankWordCache blank_word_cache;
 } MoveGen;
 
 typedef struct MoveGenArgs {
