@@ -907,9 +907,10 @@ void config_reset_move_list_and_invalidate_sim_results(Config *config) {
   config->sim_used_valid_inference = false;
 }
 
-// Forgets the last PEG solve. Its ranking, live poll, outcomes snapshot and
-// resume checkpoint all describe the position it solved, so none of them may
-// outlive that position's game.
+// Forgets the last PEG solve. Its ranking, live poll and outcomes snapshot
+// describe the position it solved, so none of them may outlive that position's
+// game. The resume checkpoint stays: it is keyed by the position and settings
+// it was saved for, and a resume anywhere else discards it.
 static void config_reset_peg_results(Config *config) {
   peg_result_destroy(&config->peg_result);
   config->peg_result.last_completed_stage = -1;
@@ -919,8 +920,16 @@ static void config_reset_peg_results(Config *config) {
   config->peg_outcomes_board = NULL;
   ld_destroy(config->peg_outcomes_ld);
   config->peg_outcomes_ld = NULL;
-  peg_checkpoint_destroy(config->peg_checkpoint);
-  config->peg_checkpoint = NULL;
+}
+
+// The -pnoprune moves name squares on one board, so a command that replaces
+// the position drops them, unless that same command sets new ones.
+static void config_clear_peg_noprune_unless_set(Config *config) {
+  if (config_get_parg_num_set_values(config, ARG_TOKEN_PEG_NOPRUNE) > 0) {
+    return;
+  }
+  free(config->peg_noprune_str);
+  config->peg_noprune_str = NULL;
 }
 
 void config_invalidate_everything(Config *config,
@@ -934,6 +943,25 @@ void config_invalidate_everything(Config *config,
   if (!is_loading_game_history) {
     game_history_reset(config->game_history);
   }
+}
+
+void update_game_history_with_config(Config *config) {
+  if (!config->ld) {
+    return;
+  }
+  const char *ld_name = ld_get_name(config->ld);
+  if (ld_name) {
+    game_history_set_ld_name(config->game_history, ld_name);
+  }
+  const char *existing_p1_lexicon_name = players_data_get_data_name(
+      config->players_data, PLAYERS_DATA_TYPE_KWG, 0);
+  if (existing_p1_lexicon_name) {
+    game_history_set_lexicon_name(config->game_history,
+                                  existing_p1_lexicon_name);
+  }
+  game_history_set_board_layout_name(
+      config->game_history, board_layout_get_name(config->board_layout));
+  game_history_set_game_variant(config->game_history, config->game_variant);
 }
 
 void config_init_move_list(Config *config, int capacity) {
@@ -3308,8 +3336,10 @@ void impl_load_cgp(Config *config, ErrorStack *error_stack) {
       // This should have been caught earlier by the insufficient values error
       log_fatal("missing cgp component: %d", i);
     }
+    if (i > 0) {
+      string_builder_add_char(cgp_builder, ' ');
+    }
     string_builder_add_string(cgp_builder, cgp_component);
-    string_builder_add_char(cgp_builder, ' ');
   }
 
   const char *cgp = string_builder_peek(cgp_builder);
@@ -3327,7 +3357,13 @@ void impl_load_cgp(Config *config, ErrorStack *error_stack) {
       error_stack_print_and_reset(error_stack);
       log_fatal("cgp load unexpected failed");
     }
-    config_reset_move_list_and_invalidate_sim_results(config);
+    // The position starts a new game history. Commits replay from it rather
+    // than from an empty board or the previous game's events, and nothing
+    // analysed for the previous position applies to it.
+    config_invalidate_everything(config, false);
+    game_history_set_initial_cgp(config->game_history, cgp);
+    update_game_history_with_config(config);
+    config_clear_peg_noprune_unless_set(config);
   }
   string_builder_destroy(cgp_builder);
 }
@@ -6083,25 +6119,6 @@ char *str_api_export(Config *config, ErrorStack *error_stack) {
 
 // Start new game
 
-void update_game_history_with_config(Config *config) {
-  if (!config->ld) {
-    return;
-  }
-  const char *ld_name = ld_get_name(config->ld);
-  if (ld_name) {
-    game_history_set_ld_name(config->game_history, ld_name);
-  }
-  const char *existing_p1_lexicon_name = players_data_get_data_name(
-      config->players_data, PLAYERS_DATA_TYPE_KWG, 0);
-  if (existing_p1_lexicon_name) {
-    game_history_set_lexicon_name(config->game_history,
-                                  existing_p1_lexicon_name);
-  }
-  game_history_set_board_layout_name(
-      config->game_history, board_layout_get_name(config->board_layout));
-  game_history_set_game_variant(config->game_history, config->game_variant);
-}
-
 char *impl_new_game(Config *config, ErrorStack *error_stack) {
   if (!config_has_game_data(config)) {
     error_stack_push(
@@ -6124,9 +6141,7 @@ char *impl_new_game(Config *config, ErrorStack *error_stack) {
   // its moves would be committed by index onto the empty board, replayed by
   // heatmap against the new racks, and saved onto this game's first turn.
   config_invalidate_everything(config, false);
-  // The -pnoprune moves name squares on the previous game's board.
-  free(config->peg_noprune_str);
-  config->peg_noprune_str = NULL;
+  config_clear_peg_noprune_unless_set(config);
   update_game_history_with_config(config);
   if (user_provided_filename) {
     game_history_set_gcg_filename(config->game_history, user_provided_filename);
@@ -8291,6 +8306,11 @@ void config_parse_gcg_string(Config *config, const char *gcg_string,
                      string_duplicate("GCG is empty"));
     return;
   }
+  // Nothing analysed for the previous game applies to this one. Dropped before
+  // parsing, since a lexicon the GCG names frees the one the previous endgame
+  // results still point at, even when the parse then fails.
+  config_invalidate_everything(config, true);
+  config_clear_peg_noprune_unless_set(config);
   game_history_reset(game_history);
   GCGParser *gcg_parser =
       gcg_parser_create(gcg_string, game_history,

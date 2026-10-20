@@ -7,6 +7,7 @@
 #include "../src/def/players_data_defs.h"
 #include "../src/def/rack_defs.h"
 #include "../src/ent/bag.h"
+#include "../src/ent/board.h"
 #include "../src/ent/equity.h"
 #include "../src/ent/game.h"
 #include "../src/ent/game_history.h"
@@ -1978,8 +1979,10 @@ void test_config_anno(void) {
   assert(player_get_score(game_get_player(game, 1)) == int_to_equity(362));
   assert_config_exec_status(config, "endgame", ERROR_STATUS_SUCCESS);
 
+  // The inference above was for the game before this load.
   assert_config_exec_status(config, "shmoves", ERROR_STATUS_NO_MOVES_TO_SHOW);
-  assert_config_exec_status(config, "shinfer", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "shinfer",
+                            ERROR_STATUS_NO_INFERENCE_TO_SHOW);
   assert_config_exec_status(config, "shendgame", ERROR_STATUS_SUCCESS);
 
   // A new game drops the previous game's inference and endgame.
@@ -2977,6 +2980,47 @@ void test_config_new_game_drops_previous_analysis(void) {
   config_destroy(config);
 }
 
+// A cgp position starts a new game history. Commits used to replay the
+// previous game's events, or an empty board, and reject the move as not
+// connected; the previous game's endgame results stayed valid, pointing at the
+// lexicon the cgp's -lex freed.
+void test_config_cgp_starts_new_history(void) {
+  Config *config = config_create_or_die("set -s1 score -s2 score -threads 2");
+  assert_config_exec_status(config, "load testdata/gcgs/success_standard.gcg",
+                            ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "goto end", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "prev", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "prev", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "prev", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "endgame", ERROR_STATUS_SUCCESS);
+
+  assert_config_exec_status(
+      config,
+      "cgp 7C6D/7H4LAR/7I2P1ALA/7VOGUE1AG/6RERAN2M1/7S1BY2O1/8OY2Id1/"
+      "5JEUX3NEW/3C1U2O3A1E/3O1M6N1B/3ZIP2OAK1E2/2TI1sTIFLERS2/2WED5F1T2/"
+      "1HIDEOUT7/VEG1N2IDOL4 AEINRST/AEINRST 372/369 0 -lex CSW24",
+      ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "shendgame",
+                            ERROR_STATUS_NO_ENDGAME_TO_SHOW);
+  const GameHistory *game_history = config_get_game_history(config);
+  assert(game_history_get_num_events(game_history) == 0);
+  assert(game_history_get_initial_cgp(game_history));
+
+  const Game *game = config_get_game(config);
+  const int tiles_before = board_get_tiles_played(game_get_board(game));
+  assert_config_exec_status(config, "t", ERROR_STATUS_SUCCESS);
+  assert(game_history_get_num_events(game_history) == 1);
+  assert(board_get_tiles_played(game_get_board(game)) > tiles_before);
+  assert(player_get_score(game_get_player(game, 0)) > int_to_equity(372));
+
+  assert_config_exec_status(config, "prev", ERROR_STATUS_SUCCESS);
+  assert(board_get_tiles_played(game_get_board(game)) == tiles_before);
+  assert(player_get_score(game_get_player(game, 0)) == int_to_equity(372));
+  assert(player_get_score(game_get_player(game, 1)) == int_to_equity(369));
+
+  config_destroy(config);
+}
+
 // The whole point of saving results per GameEvent rather than in a
 // single "last turn" slot: navigating game history backward/forward
 // shows the analysis that was actually done for whichever turn is about
@@ -3168,6 +3212,7 @@ void test_config(void) {
   test_config_commit_by_index_uses_saved_move_list();
   test_config_sim_results_saved_to_game_event();
   test_config_new_game_drops_previous_analysis();
+  test_config_cgp_starts_new_history();
   test_config_game_event_results_follow_navigation();
   test_config_sim_with_inference_results_saved_to_game_event();
 }
