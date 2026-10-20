@@ -189,6 +189,27 @@ jobs:
           [ "$(uname -m)" = "${{ matrix.name }}" ] || { echo "::error::this runner is $(uname -m)"; exit 1; }
           chmod +x release/magpie_test
           ./release/magpie_test
+      # macOS writes a report for each process that crashes, with every
+      # thread's stack, a second or two after the crash. A crash that comes
+      # and goes is then readable from this job's log. magpie_test is not
+      # stripped, so the frames carry function names.
+      - name: Print magpie_test's crash report
+        if: failure()
+        run: |
+          shopt -s nullglob
+          for _ in 1 2 3 4 5 6; do
+            reports=(~/Library/Logs/DiagnosticReports/magpie_test*)
+            [ ${#reports[@]} -gt 0 ] && break
+            sleep 5
+          done
+          if [ ${#reports[@]} -eq 0 ]; then
+            echo "No crash report for magpie_test in ~/Library/Logs/DiagnosticReports."
+            exit 0
+          fi
+          for report in "${reports[@]}"; do
+            echo "== $report"
+            cat "$report"
+          done
 
   # Only a pushed vX.Y.Z tag publishes: startsWith alone would also be true
   # for a workflow_dispatch started on a tag ref.
