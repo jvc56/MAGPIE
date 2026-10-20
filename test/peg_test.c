@@ -854,6 +854,36 @@ static void test_peg_pegonly_positional_arg(void) {
   config_destroy(config);
 }
 
+// A new game drops the previous game's PEG solve and its -pnoprune moves.
+// The moves name squares on the previous game's board: left behind, the next
+// game's peg parsed them against its own position and failed.
+static void test_peg_new_game_drops_previous_peg(void) {
+  Config *config = config_create_or_die("set -threads 4 -s1 score -s2 score");
+  load_and_exec_config_or_die(
+      config,
+      "cgp 15/3Q7U3/3U2TAURINE2/1CHANSONS2W3/2AI6JO3/DIRL1PO3IN3/E1D2EF3V4/"
+      "F1I2p1TRAIK3/O1L2T4E4/ABy1PIT2BRIG2/ME1MOZELLE5/1GRADE1O1NOH3/"
+      "WE3R1V7/AT5E7/G6D7 ENOSTXY/ACEISUY 356/378 0 -lex NWL20");
+  load_and_exec_config_or_die(config,
+                              "peg 13L.ONYX,13L.OXY -pnoprune 13L.ONYX");
+  assert(config_get_peg_result(config)->last_completed_stage >= 0);
+
+  load_and_exec_config_or_die(config, "newgame");
+  assert(config_get_peg_result(config)->last_completed_stage < 0);
+  assert_config_exec_status(config, "shpeg", ERROR_STATUS_NO_PEG_TO_SHOW);
+
+  // 13L is empty on this board, so a leftover 13L.ONYX would not parse.
+  load_and_exec_config_or_die(
+      config,
+      "cgp 7C6D/7H4LAR/7I2P1ALA/7VOGUE1AG/6RERAN2M1/7S1BY2O1/8OY2Id1/"
+      "5JEUX3NEW/3C1U2O3A1E/3O1M6N1B/3ZIP2OAK1E2/2TI1sTIFLERS2/2WED5F1T2/"
+      "1HIDEOUT7/VEG1N2IDOL4 AEINRST/AEINRST 372/369 0 -lex CSW24");
+  assert_config_exec_status(config, "peg pass", ERROR_STATUS_SUCCESS);
+  assert(config_get_peg_result(config)->last_completed_stage >= 0);
+
+  config_destroy(config);
+}
+
 // Confirms, by generating the full root move list directly (no solve, so this
 // stays cheap even though the board's move list is large), that "empties the
 // bag" is a genuine, non-trivial restriction on a real 3-in-bag position:
@@ -2226,6 +2256,7 @@ void test_peg(void) {
   test_peg_macondo_pond_slice();
   test_peg_main_cli();
   test_peg_pegonly_positional_arg();
+  test_peg_new_game_drops_previous_peg();
   test_peg_bag_emptying_move_split();
   test_peg_pegonly_empty();
   test_peg_pegonly_empty_no_moves();

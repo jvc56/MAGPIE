@@ -907,6 +907,35 @@ void config_reset_move_list_and_invalidate_sim_results(Config *config) {
   config->sim_used_valid_inference = false;
 }
 
+// Forgets the last PEG solve. Its ranking, live poll, outcomes snapshot and
+// resume checkpoint all describe the position it solved, so none of them may
+// outlive that position's game.
+static void config_reset_peg_results(Config *config) {
+  peg_result_destroy(&config->peg_result);
+  config->peg_result.last_completed_stage = -1;
+  peg_poll_destroy(config->peg_poll);
+  config->peg_poll = NULL;
+  board_destroy(config->peg_outcomes_board);
+  config->peg_outcomes_board = NULL;
+  ld_destroy(config->peg_outcomes_ld);
+  config->peg_outcomes_ld = NULL;
+  peg_checkpoint_destroy(config->peg_checkpoint);
+  config->peg_checkpoint = NULL;
+}
+
+void config_invalidate_everything(Config *config,
+                                  const bool is_loading_game_history) {
+  config_reset_move_list_and_invalidate_sim_results(config);
+  inference_results_set_valid_for_current_game_state(config->inference_results,
+                                                     false);
+  endgame_results_set_valid_for_current_game_state(config->endgame_results,
+                                                   false);
+  config_reset_peg_results(config);
+  if (!is_loading_game_history) {
+    game_history_reset(config->game_history);
+  }
+}
+
 void config_init_move_list(Config *config, int capacity) {
   if (!config->move_list) {
     config->move_list = move_list_create(capacity);
@@ -6091,7 +6120,13 @@ char *impl_new_game(Config *config, ErrorStack *error_stack) {
   }
   config_init_game(config);
   game_reset(config->game);
-  game_history_reset(config->game_history);
+  // Nothing analysed for the previous game applies to this one. Left valid,
+  // its moves would be committed by index onto the empty board, replayed by
+  // heatmap against the new racks, and saved onto this game's first turn.
+  config_invalidate_everything(config, false);
+  // The -pnoprune moves name squares on the previous game's board.
+  free(config->peg_noprune_str);
+  config->peg_noprune_str = NULL;
   update_game_history_with_config(config);
   if (user_provided_filename) {
     game_history_set_gcg_filename(config->game_history, user_provided_filename);
@@ -7559,18 +7594,6 @@ char *str_api_set_player_two_name(Config *config, ErrorStack *error_stack) {
 }
 
 // Load data helper functions used for loading from user input and GCG
-
-void config_invalidate_everything(Config *config,
-                                  const bool is_loading_game_history) {
-  config_reset_move_list_and_invalidate_sim_results(config);
-  inference_results_set_valid_for_current_game_state(config->inference_results,
-                                                     false);
-  endgame_results_set_valid_for_current_game_state(config->endgame_results,
-                                                   false);
-  if (!is_loading_game_history) {
-    game_history_reset(config->game_history);
-  }
-}
 
 bool lex_lex_compat(const char *p1_lexicon_name, const char *p2_lexicon_name,
                     ErrorStack *error_stack) {

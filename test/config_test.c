@@ -1982,10 +1982,13 @@ void test_config_anno(void) {
   assert_config_exec_status(config, "shinfer", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "shendgame", ERROR_STATUS_SUCCESS);
 
+  // A new game drops the previous game's inference and endgame.
   assert_config_exec_status(config, "newgame", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "shmoves", ERROR_STATUS_NO_MOVES_TO_SHOW);
-  assert_config_exec_status(config, "shinfer", ERROR_STATUS_SUCCESS);
-  assert_config_exec_status(config, "shendgame", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "shinfer",
+                            ERROR_STATUS_NO_INFERENCE_TO_SHOW);
+  assert_config_exec_status(config, "shendgame",
+                            ERROR_STATUS_NO_ENDGAME_TO_SHOW);
 
   assert_config_exec_status(config, "rack ABCDEFG", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "gen", ERROR_STATUS_SUCCESS);
@@ -2934,6 +2937,46 @@ void test_config_sim_results_saved_to_game_event(void) {
   config_destroy(config);
 }
 
+// A new game starts with no analysis. Left valid, the previous game's simmed
+// plays were committed by index onto the empty board (where the replay
+// rejected them as not connected to any tile), replayed by heatmap against
+// the new game's empty racks, and saved onto the new game's first turn.
+void test_config_new_game_drops_previous_analysis(void) {
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -wmp true -s1 equity -s2 equity -r1 all -r2 all "
+      "-numplays 5 -mode sync -useheatmap true -plies 2");
+  assert_config_exec_status(config, "newgame", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "t BARCHAN", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "rack DEGILNO", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "gen", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "sim -iterations 100",
+                            ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "infer", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "heat 1", ERROR_STATUS_SUCCESS);
+
+  assert_config_exec_status(config, "newgame", ERROR_STATUS_SUCCESS);
+  assert(!sim_results_get_valid_for_current_game_state(
+      config_get_sim_results(config)));
+  assert(move_list_get_count(config_get_move_list(config)) == 0);
+  assert_config_exec_status(config, "shmoves", ERROR_STATUS_NO_MOVES_TO_SHOW);
+  assert_config_exec_status(config, "heat 1", ERROR_STATUS_NO_HEAT_MAP_TO_SHOW);
+  assert_config_exec_status(config, "com 1",
+                            ERROR_STATUS_COMMIT_MOVE_INDEX_OUT_OF_RANGE);
+  assert_config_exec_status(config, "t", ERROR_STATUS_COMMIT_EMPTY_RACK);
+  assert_config_exec_status(config, "shinfer",
+                            ERROR_STATUS_NO_INFERENCE_TO_SHOW);
+
+  // The new game's first turn keeps only what was analysed for it.
+  assert_config_exec_status(config, "t BARCHAN", ERROR_STATUS_SUCCESS);
+  const GameEvent *first_event =
+      game_history_get_event(config_get_game_history(config), 0);
+  assert(!game_event_get_sim_results(first_event));
+  assert(!game_event_get_inference_results(first_event));
+  assert(!game_event_get_endgame_results(first_event));
+
+  config_destroy(config);
+}
+
 // The whole point of saving results per GameEvent rather than in a
 // single "last turn" slot: navigating game history backward/forward
 // shows the analysis that was actually done for whichever turn is about
@@ -3124,6 +3167,7 @@ void test_config(void) {
   test_config_move_list_saved_to_game_event();
   test_config_commit_by_index_uses_saved_move_list();
   test_config_sim_results_saved_to_game_event();
+  test_config_new_game_drops_previous_analysis();
   test_config_game_event_results_follow_navigation();
   test_config_sim_with_inference_results_saved_to_game_event();
 }
