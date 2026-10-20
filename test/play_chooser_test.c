@@ -131,10 +131,11 @@ static void drain_bag(const Game *game) {
   }
 }
 
-// An explicit 125 ms endgame budget must reach the solver even when the
+// An explicit sub-second endgame budget must reach the solver even when the
 // game clock has expired. Static play scores 13 with QA(T); a two-ply search
 // spends A and E for 6 instead, denying the opponent's immediate Z(AT)I
-// outplay.
+// outplay. The search stops at two plies, a few milliseconds here, so half a
+// second leaves room for a busy machine without slowing an idle one.
 void test_play_chooser_fixed_short_budget(void) {
   Config *config = config_create_or_die(
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -threads 1");
@@ -162,7 +163,7 @@ void test_play_chooser_fixed_short_budget(void) {
   assert_move_score(&static_move, 13);
   play_chooser_destroy(clock_chooser);
 
-  strategy.fixed_seconds_per_move = 0.125;
+  strategy.fixed_seconds_per_move = 0.5;
   PlayChooser *fixed_chooser = play_chooser_create(&strategy);
   Move searched_move;
   play_chooser_choose_move(fixed_chooser, game, &searched_move, error_stack);
@@ -422,12 +423,18 @@ static void test_keep_phony_for_triple_triple(void) {
 static const char *const SEALED_CLUSTER_ROWS =
     "15/15/15/15/5VMV7/6Y8/15/15/15/15/15/15/15/15/15";
 
+// The verdicts below come from the solves, not from the clock: every solve
+// stops at a depth these one- and two-tile endgames finish well within, and
+// the time limits are far beyond it. Under a budget a busy machine can spend
+// before a solve is done (setting it up counts), the decision challenges by
+// default, which is not what these tests are about.
 static const PlayChooserStrategy ENDGAME_CHALLENGE_STRATEGY = {
     .pre_endgame_eval = PLAY_CHOOSER_EVAL_STATIC,
     .endgame_eval = PLAY_CHOOSER_EVAL_ENDGAME,
-    .fixed_seconds_per_move = 5.0,
+    .endgame_plies = 8,
+    .fixed_seconds_per_move = 60.0,
     .enable_challenges = true,
-    .challenge_decision_seconds = 4.0,
+    .challenge_decision_seconds = 60.0,
     .num_threads = 2,
     .seed = 42,
 };
