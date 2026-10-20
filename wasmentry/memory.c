@@ -23,7 +23,7 @@ size_t wasm_memory_free_bytes(void) {
 // and shared search state. Each worker also needs endgame move lists,
 // arenas, and helper contexts. Measured in this build over one- to
 // four-tile-in-bag solves with a 32 MiB TT, a solve's peak above the loaded
-// lexicon reached 37 MiB on one worker, 97 MiB on two, and 152 MiB on four;
+// lexicon reached 27 MiB on one worker, 69 MiB on two, and 104 MiB on four;
 // 32 MiB per worker reserves 96, 136, and 208 MiB.
 enum {
   WASM_PEG_SHARED_RESERVE_BYTES = 64 * 1024 * 1024,
