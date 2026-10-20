@@ -293,8 +293,15 @@ jobs:
         shell: bash
         run: ./bin/magpie_test.exe ${{ matrix.shard == 'peg' && needs.windows-build.outputs.peg_tests || needs.windows-build.outputs.rest_tests }}
 
-  cppcheck:
+  # cppcheck's first pass, a share of the files per job (see
+  # shard_cppcheck.py). A shard always passes unless it breaks: the cppcheck
+  # job below reports the findings.
+  cppcheck-shard:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
     steps:
       - uses: actions/checkout@v3
 
@@ -307,12 +314,60 @@ jobs:
           path: cppcheck_dir/build/bin
           key: cppcheck-2.17.1-bin
 
+      # The results the cppcheck job saved last (see there), so the shard
+      # analyzes only its files whose hash changed.
+      - name: Restore cppcheck results
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            cppcheck_build
+            cppcheck_build-windows
+          key: cppcheck-results-2.17.1-${{ hashFiles('cppcheck.sh') }}-${{ github.run_id }}
+          restore-keys: cppcheck-results-2.17.1-${{ hashFiles('cppcheck.sh') }}-
+
+      - name: Run cppcheck on this shard
+        env:
+          CPPCHECK_SHARD: ${{ matrix.shard }}/${{ strategy.job-total }}
+        run: ./cppcheck.sh
+
+      - name: Collect this shard's results
+        run: python3 shard_cppcheck.py collect cppcheck_build cppcheck-shard-results
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cppcheck-shard-${{ matrix.shard }}
+          path: cppcheck-shard-results/
+          retention-days: 1
+
+  # Runs cppcheck.sh over the shards' merged results. It analyzes no file a
+  # shard checked, reports every file's findings, and runs the whole-program
+  # checks, which only see the files in one run, and the _WIN32 pass.
+  cppcheck:
+    if: ${{ !cancelled() }}
+    needs: cppcheck-shard
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every shard to finish
+        env:
+          SHARD_RESULT: ${{ needs.cppcheck-shard.result }}
+        run: test "$SHARD_RESULT" = success
+
+      - uses: actions/checkout@v3
+
+      - name: Cache cppcheck binary
+        uses: actions/cache@v4
+        with:
+          path: cppcheck_dir/build/bin
+          key: cppcheck-2.17.1-bin
+
       # cppcheck's own incremental results (--cppcheck-build-dir in
       # cppcheck.sh). It keys each file's by a hash of the file as
       # preprocessed, so with its headers, and of the options, analyzes only
       # the files whose hash changed, and reports the rest's findings from the
-      # cache. About 1.5 MB, saved under a new key by every successful run and
-      # restored from the latest this branch can see: its own, else main's.
+      # cache. About 1.5 MB, saved under a new key by every successful run of
+      # this job and restored from the latest this branch can see: its own,
+      # else main's. This job uses the _WIN32 pass's from it; the shards'
+      # replace the rest.
       - name: Cache cppcheck results
         uses: actions/cache@v4
         with:
@@ -321,6 +376,17 @@ jobs:
             cppcheck_build-windows
           key: cppcheck-results-2.17.1-${{ hashFiles('cppcheck.sh') }}-${{ github.run_id }}
           restore-keys: cppcheck-results-2.17.1-${{ hashFiles('cppcheck.sh') }}-
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: cppcheck-shard-*
+          path: cppcheck-shard-results
+
+      - name: Merge the shards' results
+        run: |
+          rm -rf cppcheck_build
+          mkdir cppcheck_build
+          cp cppcheck-shard-results/*/* cppcheck_build/
 
       - name: Run cppcheck static analysis
         run: ./cppcheck.sh
