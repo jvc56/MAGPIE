@@ -7788,7 +7788,7 @@ static const char *config_wordmap_for_first_use(Config *config,
   return lexicon;
 }
 
-void config_load_lexicon_dependent_data(
+static void config_load_lexicon_dependent_data_internal(
     Config *config, const char *new_lexicon_name,
     const char *new_p1_lexicon_name, const char *new_p2_lexicon_name,
     const char *new_leaves_name, const char *new_p1_leaves_name,
@@ -8209,6 +8209,106 @@ void config_load_lexicon_dependent_data(
     }
   }
   free(updated_ld_name);
+}
+
+// The lexical data each player borrows. Data reloaded under a new name can
+// land at the freed data's address, so the name is kept as well as the
+// pointer.
+typedef struct LexicalDataIdentity {
+  const void *data[NUMBER_OF_DATA][2];
+  char *names[NUMBER_OF_DATA][2];
+} LexicalDataIdentity;
+
+static void lexical_data_identity_capture(const PlayersData *players_data,
+                                          LexicalDataIdentity *identity) {
+  for (int data_idx = 0; data_idx < NUMBER_OF_DATA; data_idx++) {
+    for (int player_idx = 0; player_idx < 2; player_idx++) {
+      identity->data[data_idx][player_idx] = players_data_get_data(
+          players_data, (players_data_t)data_idx, player_idx);
+      identity->names[data_idx][player_idx] =
+          string_duplicate_allow_null(players_data_get_data_name(
+              players_data, (players_data_t)data_idx, player_idx));
+    }
+  }
+}
+
+static bool lexical_data_identity_matches(const PlayersData *players_data,
+                                          const LexicalDataIdentity *identity) {
+  for (int data_idx = 0; data_idx < NUMBER_OF_DATA; data_idx++) {
+    for (int player_idx = 0; player_idx < 2; player_idx++) {
+      if (identity->data[data_idx][player_idx] !=
+              players_data_get_data(players_data, (players_data_t)data_idx,
+                                    player_idx) ||
+          !strings_equal(identity->names[data_idx][player_idx],
+                         players_data_get_data_name(players_data,
+                                                    (players_data_t)data_idx,
+                                                    player_idx))) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
+static void lexical_data_identity_destroy(LexicalDataIdentity *identity) {
+  for (int data_idx = 0; data_idx < NUMBER_OF_DATA; data_idx++) {
+    for (int player_idx = 0; player_idx < 2; player_idx++) {
+      free(identity->names[data_idx][player_idx]);
+    }
+  }
+}
+
+// Rebuilds every game that borrows the players' lexical data against the data
+// now loaded: the live game, and the start game each endgame result keeps to
+// replay its lines, whether live or saved on a turn of the game history.
+static void config_rebuild_lexical_games(Config *config) {
+  GameArgs game_args;
+  config_fill_game_args(config, &game_args);
+  if (config->game) {
+    game_update(config->game, &game_args);
+  }
+  endgame_results_update_start_game(config->endgame_results, &game_args);
+  const int num_events = game_history_get_num_events(config->game_history);
+  for (int event_idx = 0; event_idx < num_events; event_idx++) {
+    EndgameResults *saved_endgame_results = game_event_get_endgame_results(
+        game_history_get_event(config->game_history, event_idx));
+    if (saved_endgame_results) {
+      endgame_results_update_start_game(saved_endgame_results, &game_args);
+    }
+  }
+}
+
+// Loading new lexical data frees the data it replaces, which the live game and
+// the endgame results still borrow until they are rebuilt. A new letter
+// distribution instead drops the game and the results (see
+// config_invalidate_everything), since their racks and bag no longer fit.
+void config_load_lexicon_dependent_data(
+    Config *config, const char *new_lexicon_name,
+    const char *new_p1_lexicon_name, const char *new_p2_lexicon_name,
+    const char *new_leaves_name, const char *new_p1_leaves_name,
+    const char *new_p2_leaves_name, const char *new_ld_name,
+    const bool use_wmp_has_value, const bool p1_use_wmp_has_value,
+    const bool p2_use_wmp_has_value, const bool use_rit_has_value,
+    const bool p1_use_rit_has_value, const bool p2_use_rit_has_value,
+    const bool use_mmap_for_rit_has_value, const bool use_wit_has_value,
+    const bool p1_use_wit_has_value, const bool p2_use_wit_has_value,
+    const bool disable_rit, const bool is_loading_game_history,
+    ErrorStack *error_stack) {
+  LexicalDataIdentity identity_before;
+  lexical_data_identity_capture(config->players_data, &identity_before);
+  config->ld_changed = false;
+  config_load_lexicon_dependent_data_internal(
+      config, new_lexicon_name, new_p1_lexicon_name, new_p2_lexicon_name,
+      new_leaves_name, new_p1_leaves_name, new_p2_leaves_name, new_ld_name,
+      use_wmp_has_value, p1_use_wmp_has_value, p2_use_wmp_has_value,
+      use_rit_has_value, p1_use_rit_has_value, p2_use_rit_has_value,
+      use_mmap_for_rit_has_value, use_wit_has_value, p1_use_wit_has_value,
+      p2_use_wit_has_value, disable_rit, is_loading_game_history, error_stack);
+  if (!config->ld_changed && config->ld &&
+      !lexical_data_identity_matches(config->players_data, &identity_before)) {
+    config_rebuild_lexical_games(config);
+  }
+  lexical_data_identity_destroy(&identity_before);
 }
 
 // Loads a new board layout by name. If the layout name changes and the load

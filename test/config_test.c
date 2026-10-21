@@ -8,6 +8,7 @@
 #include "../src/def/rack_defs.h"
 #include "../src/ent/bag.h"
 #include "../src/ent/board.h"
+#include "../src/ent/endgame_results.h"
 #include "../src/ent/equity.h"
 #include "../src/ent/game.h"
 #include "../src/ent/game_history.h"
@@ -3021,6 +3022,52 @@ void test_config_cgp_starts_new_history(void) {
   config_destroy(config);
 }
 
+static void assert_game_borrows_current_kwgs(const Config *config,
+                                             const Game *game) {
+  const PlayersData *players_data = config_get_players_data(config);
+  for (int player_idx = 0; player_idx < 2; player_idx++) {
+    assert(player_get_kwg(game_get_player(game, player_idx)) ==
+           players_data_get_kwg(players_data, player_idx));
+  }
+}
+
+// Switching lexicon frees the one the live game and each endgame result's
+// start game borrow. Both are rebuilt against the new lexicon: heatmap and
+// shendgame used to replay moves through the freed one.
+void test_config_lexicon_change_rebuilds_games(void) {
+  Config *config = config_create_or_die(
+      "set -s1 score -s2 score -threads 2 -useheatmap true -plies 2");
+  assert_config_exec_status(config, "load testdata/gcgs/success_standard.gcg",
+                            ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "goto end", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "prev", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "prev", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "prev", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "endgame", ERROR_STATUS_SUCCESS);
+  // Committing saves the endgame results onto the turn.
+  assert_config_exec_status(config, "t", ERROR_STATUS_SUCCESS);
+  const GameHistory *game_history = config_get_game_history(config);
+  const EndgameResults *saved_endgame_results =
+      game_event_get_endgame_results(game_history_get_event(
+          game_history, game_history_get_num_played_events(game_history) - 1));
+  assert(saved_endgame_results);
+  assert_config_exec_status(config, "goto 6", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "gsim -iterations 100",
+                            ERROR_STATUS_SUCCESS);
+
+  assert_config_exec_status(config, "set -lex NWL20", ERROR_STATUS_SUCCESS);
+  assert_game_borrows_current_kwgs(config, config_get_game(config));
+  assert_game_borrows_current_kwgs(
+      config,
+      endgame_results_get_start_game(config_get_endgame_results(config)));
+  assert_game_borrows_current_kwgs(
+      config, endgame_results_get_start_game(saved_endgame_results));
+  assert_config_exec_status(config, "heat 1", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "shendgame", ERROR_STATUS_SUCCESS);
+
+  config_destroy(config);
+}
+
 // The whole point of saving results per GameEvent rather than in a
 // single "last turn" slot: navigating game history backward/forward
 // shows the analysis that was actually done for whichever turn is about
@@ -3213,6 +3260,7 @@ void test_config(void) {
   test_config_sim_results_saved_to_game_event();
   test_config_new_game_drops_previous_analysis();
   test_config_cgp_starts_new_history();
+  test_config_lexicon_change_rebuilds_games();
   test_config_game_event_results_follow_navigation();
   test_config_sim_with_inference_results_saved_to_game_event();
 }

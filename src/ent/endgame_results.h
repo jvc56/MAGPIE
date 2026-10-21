@@ -83,6 +83,10 @@ void endgame_results_set_start_game(EndgameResults *endgame_results,
                                     const Game *game);
 const Game *
 endgame_results_get_start_game(const EndgameResults *endgame_results);
+// Rebuilds the start game snapshot against game_args. Its players borrow
+// lexical data, which a configuration change can free.
+void endgame_results_update_start_game(EndgameResults *endgame_results,
+                                       const GameArgs *game_args);
 void endgame_results_stop_ctimer(EndgameResults *endgame_results);
 endgame_result_status_t
 endgame_results_get_status(const EndgameResults *endgame_results);

@@ -373,6 +373,15 @@ endgame_results_get_start_game(const EndgameResults *endgame_results) {
   return endgame_results->start_game;
 }
 
+void endgame_results_update_start_game(EndgameResults *endgame_results,
+                                       const GameArgs *game_args) {
+  endgame_results_lock(endgame_results, ENDGAME_RESULT_DISPLAY);
+  if (endgame_results->start_game) {
+    game_update(endgame_results->start_game, game_args);
+  }
+  endgame_results_unlock(endgame_results, ENDGAME_RESULT_DISPLAY);
+}
+
 void endgame_results_stop_ctimer(EndgameResults *endgame_results) {
   ctimer_stop(&endgame_results->timer);
 }
