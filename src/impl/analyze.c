@@ -1645,57 +1645,72 @@ void analyze_game(AnalyzeArgs *analyze_args, AnalyzeCtx **analyze_ctx,
   }
 
   // Write a machine-parseable trailer marking this report as complete,
-  // regardless of output format. This lets a later run skip re-analyzing an
-  // already-complete game and lets directory-mode batches (e.g. tournament
-  // aggregation) read back a game's total losses without reparsing the
-  // human-readable tables. compute_turn_losses already clamps WPL/EqL (and
-  // therefore AEqL) to >= 0 per turn, so these sums need no further clamping.
-  // Deliberate consequences of always appending this trailer:
+  // regardless of output format: one line per analyzed player, keyed by
+  // player index, with that player's turn count and total losses. This lets a
+  // later run skip re-analyzing an already-complete game and lets
+  // directory-mode batches (e.g. tournament aggregation) read back each
+  // player's losses without reparsing the human-readable tables.
+  // compute_turn_losses already clamps WPL/EqL (and therefore AEqL) to >= 0
+  // per turn, so these sums need no further clamping. Every analyzed player
+  // gets a line, even one with no turns, so the skip logic can tell which
+  // players a report covers. Deliberate consequences of always appending
+  // this trailer:
   // - It is appended to CSV-mode reports too, so downstream CSV consumers
-  //   must tolerate this non-CSV footer line.
-  // - Directory-mode skip logic in read_report_completion_stats keys only
-  //   off the trailer's presence, not the analysis settings used to produce
-  //   it. A report re-run under different plies/plays/budgets still counts
-  //   as complete; the only way to force a refresh is to delete the report.
+  //   must tolerate these non-CSV footer lines.
+  // - Directory-mode skip logic in parse_report_completion_stats checks that
+  //   the trailer covers every requested player, but not the analysis
+  //   settings used to produce it. A report re-run under different
+  //   plies/plays/budgets still counts as complete; the only way to force a
+  //   refresh is to delete the report.
   if (error_stack_is_empty(error_stack)) {
-    double total_win_pct_lost = 0.0;
-    double total_equity_lost = 0.0;
-    double total_adjusted_equity_lost = 0.0;
-    double total_mistake_index = 0.0;
-    int mistake_counts[4] = {0, 0, 0, 0}; // indexed by mistake_size_t
-    for (int result_idx = 0; result_idx < ctx->turn_results_count;
-         result_idx++) {
-      double win_pct_lost;
-      double equity_lost;
-      double adjusted_equity_lost;
-      compute_turn_losses(&ctx->turn_results[result_idx], &win_pct_lost,
-                          &equity_lost, &adjusted_equity_lost);
-      total_win_pct_lost += win_pct_lost;
-      total_equity_lost += equity_lost;
-      total_adjusted_equity_lost += adjusted_equity_lost;
-      if (analyze_args->show_mistakes) {
-        const mistake_size_t mistake_size =
-            compute_mistake_size(&ctx->turn_results[result_idx]);
-        mistake_counts[mistake_size]++;
-        total_mistake_index += mistake_size_to_index(mistake_size);
+    StringBuilder *trailer_sb = string_builder_create();
+    string_builder_add_string(trailer_sb, "\n");
+    for (int player_idx = 0; player_idx < 2; player_idx++) {
+      if (!analyze_args->analyze_players[player_idx]) {
+        continue;
       }
-    }
-    char *trailer;
-    if (analyze_args->show_mistakes) {
-      trailer = get_formatted_string(
-          "\n=== Analysis Complete: turns=%d wpl=%.2f eql=%.2f aeql=%.2f "
-          "small=%d medium=%d large=%d mi=%.2f ===\n",
-          ctx->turn_results_count, total_win_pct_lost, total_equity_lost,
-          total_adjusted_equity_lost, mistake_counts[MISTAKE_SMALL],
-          mistake_counts[MISTAKE_MEDIUM], mistake_counts[MISTAKE_LARGE],
-          total_mistake_index);
-    } else {
-      trailer = get_formatted_string(
-          "\n=== Analysis Complete: turns=%d wpl=%.2f eql=%.2f aeql=%.2f "
-          "===\n",
-          ctx->turn_results_count, total_win_pct_lost, total_equity_lost,
+      int player_turns = 0;
+      double total_win_pct_lost = 0.0;
+      double total_equity_lost = 0.0;
+      double total_adjusted_equity_lost = 0.0;
+      double total_mistake_index = 0.0;
+      int mistake_counts[4] = {0, 0, 0, 0}; // indexed by mistake_size_t
+      for (int result_idx = 0; result_idx < ctx->turn_results_count;
+           result_idx++) {
+        const TurnResult *turn_result = &ctx->turn_results[result_idx];
+        if (turn_result->player_index != player_idx) {
+          continue;
+        }
+        player_turns++;
+        double win_pct_lost;
+        double equity_lost;
+        double adjusted_equity_lost;
+        compute_turn_losses(turn_result, &win_pct_lost, &equity_lost,
+                            &adjusted_equity_lost);
+        total_win_pct_lost += win_pct_lost;
+        total_equity_lost += equity_lost;
+        total_adjusted_equity_lost += adjusted_equity_lost;
+        if (analyze_args->show_mistakes) {
+          const mistake_size_t mistake_size = compute_mistake_size(turn_result);
+          mistake_counts[mistake_size]++;
+          total_mistake_index += mistake_size_to_index(mistake_size);
+        }
+      }
+      string_builder_add_formatted_string(
+          trailer_sb,
+          "=== Analysis Complete: player=%d turns=%d wpl=%.2f eql=%.2f "
+          "aeql=%.2f",
+          player_idx, player_turns, total_win_pct_lost, total_equity_lost,
           total_adjusted_equity_lost);
+      if (analyze_args->show_mistakes) {
+        string_builder_add_formatted_string(
+            trailer_sb, " small=%d medium=%d large=%d mi=%.2f",
+            mistake_counts[MISTAKE_SMALL], mistake_counts[MISTAKE_MEDIUM],
+            mistake_counts[MISTAKE_LARGE], total_mistake_index);
+      }
+      string_builder_add_string(trailer_sb, " ===\n");
     }
+    char *trailer = string_builder_dump_and_destroy(trailer_sb, NULL);
     append_string_to_file(report_path, trailer, error_stack);
     free(trailer);
   }
