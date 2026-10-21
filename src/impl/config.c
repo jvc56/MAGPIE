@@ -907,6 +907,63 @@ void config_reset_move_list_and_invalidate_sim_results(Config *config) {
   config->sim_used_valid_inference = false;
 }
 
+// Forgets the last PEG solve. Its ranking, live poll and outcomes snapshot
+// describe the position it solved, so none of them may outlive that position's
+// game. The resume checkpoint stays: it is keyed by the position and settings
+// it was saved for, and a resume anywhere else discards it.
+static void config_reset_peg_results(Config *config) {
+  peg_result_destroy(&config->peg_result);
+  config->peg_result.last_completed_stage = -1;
+  peg_poll_destroy(config->peg_poll);
+  config->peg_poll = NULL;
+  board_destroy(config->peg_outcomes_board);
+  config->peg_outcomes_board = NULL;
+  ld_destroy(config->peg_outcomes_ld);
+  config->peg_outcomes_ld = NULL;
+}
+
+// The -pnoprune moves name squares on one board, so a command that replaces
+// the position drops them, unless that same command sets new ones.
+static void config_clear_peg_noprune_unless_set(Config *config) {
+  if (config_get_parg_num_set_values(config, ARG_TOKEN_PEG_NOPRUNE) > 0) {
+    return;
+  }
+  free(config->peg_noprune_str);
+  config->peg_noprune_str = NULL;
+}
+
+void config_invalidate_everything(Config *config,
+                                  const bool is_loading_game_history) {
+  config_reset_move_list_and_invalidate_sim_results(config);
+  inference_results_set_valid_for_current_game_state(config->inference_results,
+                                                     false);
+  endgame_results_set_valid_for_current_game_state(config->endgame_results,
+                                                   false);
+  config_reset_peg_results(config);
+  if (!is_loading_game_history) {
+    game_history_reset(config->game_history);
+  }
+}
+
+void update_game_history_with_config(Config *config) {
+  if (!config->ld) {
+    return;
+  }
+  const char *ld_name = ld_get_name(config->ld);
+  if (ld_name) {
+    game_history_set_ld_name(config->game_history, ld_name);
+  }
+  const char *existing_p1_lexicon_name = players_data_get_data_name(
+      config->players_data, PLAYERS_DATA_TYPE_KWG, 0);
+  if (existing_p1_lexicon_name) {
+    game_history_set_lexicon_name(config->game_history,
+                                  existing_p1_lexicon_name);
+  }
+  game_history_set_board_layout_name(
+      config->game_history, board_layout_get_name(config->board_layout));
+  game_history_set_game_variant(config->game_history, config->game_variant);
+}
+
 void config_init_move_list(Config *config, int capacity) {
   if (!config->move_list) {
     config->move_list = move_list_create(capacity);
@@ -3279,8 +3336,10 @@ void impl_load_cgp(Config *config, ErrorStack *error_stack) {
       // This should have been caught earlier by the insufficient values error
       log_fatal("missing cgp component: %d", i);
     }
+    if (i > 0) {
+      string_builder_add_char(cgp_builder, ' ');
+    }
     string_builder_add_string(cgp_builder, cgp_component);
-    string_builder_add_char(cgp_builder, ' ');
   }
 
   const char *cgp = string_builder_peek(cgp_builder);
@@ -3298,7 +3357,13 @@ void impl_load_cgp(Config *config, ErrorStack *error_stack) {
       error_stack_print_and_reset(error_stack);
       log_fatal("cgp load unexpected failed");
     }
-    config_reset_move_list_and_invalidate_sim_results(config);
+    // The position starts a new game history. Commits replay from it rather
+    // than from an empty board or the previous game's events, and nothing
+    // analysed for the previous position applies to it.
+    config_invalidate_everything(config, false);
+    game_history_set_initial_cgp(config->game_history, cgp);
+    update_game_history_with_config(config);
+    config_clear_peg_noprune_unless_set(config);
   }
   string_builder_destroy(cgp_builder);
 }
@@ -6054,25 +6119,6 @@ char *str_api_export(Config *config, ErrorStack *error_stack) {
 
 // Start new game
 
-void update_game_history_with_config(Config *config) {
-  if (!config->ld) {
-    return;
-  }
-  const char *ld_name = ld_get_name(config->ld);
-  if (ld_name) {
-    game_history_set_ld_name(config->game_history, ld_name);
-  }
-  const char *existing_p1_lexicon_name = players_data_get_data_name(
-      config->players_data, PLAYERS_DATA_TYPE_KWG, 0);
-  if (existing_p1_lexicon_name) {
-    game_history_set_lexicon_name(config->game_history,
-                                  existing_p1_lexicon_name);
-  }
-  game_history_set_board_layout_name(
-      config->game_history, board_layout_get_name(config->board_layout));
-  game_history_set_game_variant(config->game_history, config->game_variant);
-}
-
 char *impl_new_game(Config *config, ErrorStack *error_stack) {
   if (!config_has_game_data(config)) {
     error_stack_push(
@@ -6091,7 +6137,11 @@ char *impl_new_game(Config *config, ErrorStack *error_stack) {
   }
   config_init_game(config);
   game_reset(config->game);
-  game_history_reset(config->game_history);
+  // Nothing analysed for the previous game applies to this one. Left valid,
+  // its moves would be committed by index onto the empty board, replayed by
+  // heatmap against the new racks, and saved onto this game's first turn.
+  config_invalidate_everything(config, false);
+  config_clear_peg_noprune_unless_set(config);
   update_game_history_with_config(config);
   if (user_provided_filename) {
     game_history_set_gcg_filename(config->game_history, user_provided_filename);
@@ -7560,18 +7610,6 @@ char *str_api_set_player_two_name(Config *config, ErrorStack *error_stack) {
 
 // Load data helper functions used for loading from user input and GCG
 
-void config_invalidate_everything(Config *config,
-                                  const bool is_loading_game_history) {
-  config_reset_move_list_and_invalidate_sim_results(config);
-  inference_results_set_valid_for_current_game_state(config->inference_results,
-                                                     false);
-  endgame_results_set_valid_for_current_game_state(config->endgame_results,
-                                                   false);
-  if (!is_loading_game_history) {
-    game_history_reset(config->game_history);
-  }
-}
-
 bool lex_lex_compat(const char *p1_lexicon_name, const char *p2_lexicon_name,
                     ErrorStack *error_stack) {
   if (!p1_lexicon_name && !p2_lexicon_name) {
@@ -7750,7 +7788,7 @@ static const char *config_wordmap_for_first_use(Config *config,
   return lexicon;
 }
 
-void config_load_lexicon_dependent_data(
+static void config_load_lexicon_dependent_data_internal(
     Config *config, const char *new_lexicon_name,
     const char *new_p1_lexicon_name, const char *new_p2_lexicon_name,
     const char *new_leaves_name, const char *new_p1_leaves_name,
@@ -8173,6 +8211,106 @@ void config_load_lexicon_dependent_data(
   free(updated_ld_name);
 }
 
+// The lexical data each player borrows. Data reloaded under a new name can
+// land at the freed data's address, so the name is kept as well as the
+// pointer.
+typedef struct LexicalDataIdentity {
+  const void *data[NUMBER_OF_DATA][2];
+  char *names[NUMBER_OF_DATA][2];
+} LexicalDataIdentity;
+
+static void lexical_data_identity_capture(const PlayersData *players_data,
+                                          LexicalDataIdentity *identity) {
+  for (int data_idx = 0; data_idx < NUMBER_OF_DATA; data_idx++) {
+    for (int player_idx = 0; player_idx < 2; player_idx++) {
+      identity->data[data_idx][player_idx] = players_data_get_data(
+          players_data, (players_data_t)data_idx, player_idx);
+      identity->names[data_idx][player_idx] =
+          string_duplicate_allow_null(players_data_get_data_name(
+              players_data, (players_data_t)data_idx, player_idx));
+    }
+  }
+}
+
+static bool lexical_data_identity_matches(const PlayersData *players_data,
+                                          const LexicalDataIdentity *identity) {
+  for (int data_idx = 0; data_idx < NUMBER_OF_DATA; data_idx++) {
+    for (int player_idx = 0; player_idx < 2; player_idx++) {
+      if (identity->data[data_idx][player_idx] !=
+              players_data_get_data(players_data, (players_data_t)data_idx,
+                                    player_idx) ||
+          !strings_equal(identity->names[data_idx][player_idx],
+                         players_data_get_data_name(players_data,
+                                                    (players_data_t)data_idx,
+                                                    player_idx))) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
+static void lexical_data_identity_destroy(LexicalDataIdentity *identity) {
+  for (int data_idx = 0; data_idx < NUMBER_OF_DATA; data_idx++) {
+    for (int player_idx = 0; player_idx < 2; player_idx++) {
+      free(identity->names[data_idx][player_idx]);
+    }
+  }
+}
+
+// Rebuilds every game that borrows the players' lexical data against the data
+// now loaded: the live game, and the start game each endgame result keeps to
+// replay its lines, whether live or saved on a turn of the game history.
+static void config_rebuild_lexical_games(Config *config) {
+  GameArgs game_args;
+  config_fill_game_args(config, &game_args);
+  if (config->game) {
+    game_update(config->game, &game_args);
+  }
+  endgame_results_update_start_game(config->endgame_results, &game_args);
+  const int num_events = game_history_get_num_events(config->game_history);
+  for (int event_idx = 0; event_idx < num_events; event_idx++) {
+    EndgameResults *saved_endgame_results = game_event_get_endgame_results(
+        game_history_get_event(config->game_history, event_idx));
+    if (saved_endgame_results) {
+      endgame_results_update_start_game(saved_endgame_results, &game_args);
+    }
+  }
+}
+
+// Loading new lexical data frees the data it replaces, which the live game and
+// the endgame results still borrow until they are rebuilt. A new letter
+// distribution instead drops the game and the results (see
+// config_invalidate_everything), since their racks and bag no longer fit.
+void config_load_lexicon_dependent_data(
+    Config *config, const char *new_lexicon_name,
+    const char *new_p1_lexicon_name, const char *new_p2_lexicon_name,
+    const char *new_leaves_name, const char *new_p1_leaves_name,
+    const char *new_p2_leaves_name, const char *new_ld_name,
+    const bool use_wmp_has_value, const bool p1_use_wmp_has_value,
+    const bool p2_use_wmp_has_value, const bool use_rit_has_value,
+    const bool p1_use_rit_has_value, const bool p2_use_rit_has_value,
+    const bool use_mmap_for_rit_has_value, const bool use_wit_has_value,
+    const bool p1_use_wit_has_value, const bool p2_use_wit_has_value,
+    const bool disable_rit, const bool is_loading_game_history,
+    ErrorStack *error_stack) {
+  LexicalDataIdentity identity_before;
+  lexical_data_identity_capture(config->players_data, &identity_before);
+  config->ld_changed = false;
+  config_load_lexicon_dependent_data_internal(
+      config, new_lexicon_name, new_p1_lexicon_name, new_p2_lexicon_name,
+      new_leaves_name, new_p1_leaves_name, new_p2_leaves_name, new_ld_name,
+      use_wmp_has_value, p1_use_wmp_has_value, p2_use_wmp_has_value,
+      use_rit_has_value, p1_use_rit_has_value, p2_use_rit_has_value,
+      use_mmap_for_rit_has_value, use_wit_has_value, p1_use_wit_has_value,
+      p2_use_wit_has_value, disable_rit, is_loading_game_history, error_stack);
+  if (!config->ld_changed && config->ld &&
+      !lexical_data_identity_matches(config->players_data, &identity_before)) {
+    config_rebuild_lexical_games(config);
+  }
+  lexical_data_identity_destroy(&identity_before);
+}
+
 // Loads a new board layout by name. If the layout name changes and the load
 // succeeds, invalidates all derived results (sim, inference, endgame) and
 // resets the game history, since board geometry affects move generation and
@@ -8256,6 +8394,12 @@ void config_parse_gcg_string_with_parser(Config *config, GCGParser *gcg_parser,
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
+  // A game made with the distribution the GCG just replaced points at that
+  // distribution, and its bag and racks are sized for it.
+  if (config->ld_changed && config->game) {
+    game_destroy(config->game);
+    config->game = NULL;
+  }
   config_init_game(config);
   parse_gcg_events(gcg_parser, config->game, error_stack);
 }
@@ -8268,6 +8412,11 @@ void config_parse_gcg_string(Config *config, const char *gcg_string,
                      string_duplicate("GCG is empty"));
     return;
   }
+  // Nothing analysed for the previous game applies to this one. Dropped before
+  // parsing, since a lexicon the GCG names frees the one the previous endgame
+  // results still point at, even when the parse then fails.
+  config_invalidate_everything(config, true);
+  config_clear_peg_noprune_unless_set(config);
   game_history_reset(game_history);
   GCGParser *gcg_parser =
       gcg_parser_create(gcg_string, game_history,
@@ -8328,6 +8477,72 @@ static void config_set_gcg_filename_and_save(Config *config,
   free(gcg_filename);
 }
 
+// The lexical settings a GCG may replace as it loads (see
+// config_load_game_history), kept so that a failed load can put them back.
+typedef struct LoadReplacedSettings {
+  char *lexicon_names[2];
+  char *leaves_names[2];
+  char *ld_name;
+  char *board_layout_name;
+  game_variant_t game_variant;
+} LoadReplacedSettings;
+
+static void load_replaced_settings_capture(const Config *config,
+                                           LoadReplacedSettings *settings) {
+  for (int player_idx = 0; player_idx < 2; player_idx++) {
+    settings->lexicon_names[player_idx] =
+        string_duplicate_allow_null(players_data_get_data_name(
+            config->players_data, PLAYERS_DATA_TYPE_KWG, player_idx));
+    settings->leaves_names[player_idx] =
+        string_duplicate_allow_null(players_data_get_data_name(
+            config->players_data, PLAYERS_DATA_TYPE_KLV, player_idx));
+  }
+  settings->ld_name =
+      string_duplicate_allow_null(config->ld ? ld_get_name(config->ld) : NULL);
+  settings->board_layout_name =
+      string_duplicate_allow_null(board_layout_get_name(config->board_layout));
+  settings->game_variant = config->game_variant;
+}
+
+static void load_replaced_settings_destroy(LoadReplacedSettings *settings) {
+  for (int player_idx = 0; player_idx < 2; player_idx++) {
+    free(settings->lexicon_names[player_idx]);
+    free(settings->leaves_names[player_idx]);
+  }
+  free(settings->ld_name);
+  free(settings->board_layout_name);
+}
+
+// Restores the game and history a failed load backed up. The load may already
+// have replaced, and freed, the lexical data they borrow, so that data is
+// reloaded first and the restored game and its endgame start games are rebuilt
+// against it. If it cannot be reloaded, the backup is dropped rather than kept
+// pointing at freed data.
+static void
+config_restore_after_failed_load(Config *config,
+                                 const LoadReplacedSettings *settings) {
+  ErrorStack *restore_error_stack = error_stack_create();
+  config_load_lexicon_dependent_data(
+      config, NULL, settings->lexicon_names[0], settings->lexicon_names[1],
+      NULL, settings->leaves_names[0], settings->leaves_names[1],
+      settings->ld_name, false, false, false, false, false, false, false, false,
+      false, false, false, false, restore_error_stack);
+  if (error_stack_is_empty(restore_error_stack)) {
+    config_load_board_layout(config, settings->board_layout_name,
+                             restore_error_stack);
+  }
+  config->game_variant = settings->game_variant;
+  config_restore_game_and_history(config);
+  if (error_stack_is_empty(restore_error_stack)) {
+    config_rebuild_lexical_games(config);
+  } else {
+    game_destroy(config->game);
+    config->game = NULL;
+    config_invalidate_everything(config, false);
+  }
+  error_stack_destroy(restore_error_stack);
+}
+
 char *impl_load_gcg(Config *config, ErrorStack *error_stack) {
   const char *source_identifier =
       config_get_parg_value(config, ARG_TOKEN_LOAD, 0);
@@ -8338,8 +8553,10 @@ char *impl_load_gcg(Config *config, ErrorStack *error_stack) {
   }
 
   const bool use_backup = !!config->game;
+  LoadReplacedSettings replaced_settings = {0};
   if (use_backup) {
     config_backup_game_and_history(config);
+    load_replaced_settings_capture(config, &replaced_settings);
   }
 
   config_parse_gcg_string(config, config->gcg_result.gcg_string,
@@ -8355,13 +8572,12 @@ char *impl_load_gcg(Config *config, ErrorStack *error_stack) {
     }
   }
 
-  if (!error_stack_is_empty(error_stack)) {
-    if (use_backup) {
-      config_restore_game_and_history(config);
+  if (use_backup) {
+    if (!error_stack_is_empty(error_stack)) {
+      config_restore_after_failed_load(config, &replaced_settings);
     }
-    return empty_string();
+    load_replaced_settings_destroy(&replaced_settings);
   }
-
   return empty_string();
 }
 
