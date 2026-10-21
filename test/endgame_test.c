@@ -506,8 +506,8 @@ static void run_lent_helper_abdada_case(bool use_inline) {
   EndgameArgs args = {0};
   args.thread_control = thread_control;
   args.game = config_get_game(config);
-  // 8 plies stepped by two: the helper (ordinal 1) starts at depth 2 and moves
-  // on to depth 4, the first whose root ABDADA marks busy.
+  // 8 plies stepped by two: the helper (ordinal 1) starts at depth 2, whose
+  // root is already deep enough for ABDADA to mark busy.
   args.plies = config_get_endgame_plies(config);
   args.tt_fraction_of_mem = 0.0001;
   args.initial_small_move_arena_size = DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;

@@ -57,6 +57,11 @@ enum {
   // Maximum moves for stack allocation in ABDADA deferred tracking
   // Keep small to avoid stack overflow in deep recursive searches
   MAX_DEFERRED_STACK = 64,
+  // ABDADA: nodes at least this many plies above the leaves mark themselves
+  // busy while they are searched, and a busy one reached as a younger brother
+  // is deferred. Depth-2 nodes are worth sharing out: two threads in the same
+  // depth-3 node otherwise both search every one of its children.
+  ABDADA_MIN_DEPTH = 2,
   // How many abdada_negamax calls between per-depth deadline checks.
   // Checked per-worker (no cross-thread contention). At ~100K nodes/s/thread,
   // 1024 nodes ≈ 10ms granularity — tighter response for PEG inner solves
@@ -2899,12 +2904,10 @@ int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
   }
 
   // ABDADA: if exclusive search and another processor is on this node, defer.
-  // Active at depth >= 3 where the cost of redundant search justifies the
-  // protocol overhead. At shallower depths, nproc table collisions cause
-  // excessive false deferrals. Decided once per node: a helper that arrives
-  // mid-node does not change it, so every enter_node below is matched by a
-  // leave_node.
-  const bool abdada_active = depth >= 3 &&
+  // Active from ABDADA_MIN_DEPTH up. Decided once per node: a helper that
+  // arrives mid-node does not change it, so every enter_node below is matched
+  // by a leave_node.
+  const bool abdada_active = depth >= ABDADA_MIN_DEPTH &&
                              worker->solver->transposition_table_optim &&
                              worker_has_company(worker);
   if (exclusive_p && abdada_active) {
@@ -3251,7 +3254,8 @@ int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
   bool deferred_stack[MAX_DEFERRED_STACK];
   bool *deferred = NULL;
   bool deferred_heap_allocated = false;
-  bool use_abdada = abdada_active;
+  // Deferrals are tracked only where the children can be deferred.
+  bool use_abdada = abdada_active && depth - 1 >= ABDADA_MIN_DEPTH;
   if (use_abdada) {
     if (nplays <= MAX_DEFERRED_STACK) {
       deferred = deferred_stack;
