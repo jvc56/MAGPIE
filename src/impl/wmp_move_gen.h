@@ -4,6 +4,7 @@
 #include "../def/bit_rack_defs.h"
 #include "../def/kwg_defs.h"
 #include "../def/move_defs.h"
+#include "../def/wmp_defs.h"
 #include "../ent/anchor.h"
 #include "../ent/bit_rack.h"
 #include "../ent/board.h"
@@ -27,7 +28,30 @@ enum {
   // Subracks covered by one candidate mask. A RACK_SIZE of 8 has up to 70
   // subracks of one size, so callers take them in chunks of this many.
   WMP_MOVE_GEN_SUBRACKS_PER_MASK = 64,
+  WMP_BLANK_WORD_CACHE_BYTES = 16 * 1024,
 };
+
+// Nonplaythrough subracks have stable indices for one position. Keep their
+// expanded blank words until the next position instead of copying them into
+// scratch for every anchor. An offset of zero means absent; stored offsets
+// are one-based so the first expansion can start at byte zero.
+typedef struct WMPBlankWordCache {
+  uint16_t offsets[1 << RACK_SIZE];
+  uint16_t word_counts[1 << RACK_SIZE];
+  int used_bytes;
+  MachineLetter words[WMP_BLANK_WORD_CACHE_BYTES];
+} WMPBlankWordCache;
+
+static_assert(WMP_BLANK_WORD_CACHE_BYTES <= UINT16_MAX,
+              "Blank word cache offsets must fit in uint16_t");
+static_assert(WMP_BLANK_WORD_CACHE_BYTES >=
+                  WMP_RESULT_BUFFER_SIZE + WMP_WORD_BUFFER_SLACK_BYTES,
+              "Blank word cache must hold a complete expansion with slack");
+
+static inline void wmp_blank_word_cache_reset(WMPBlankWordCache *cache) {
+  memset(cache->offsets, 0, sizeof(cache->offsets));
+  cache->used_bytes = 0;
+}
 
 typedef struct SubrackInfo {
   BitRack subrack;
@@ -73,8 +97,8 @@ typedef struct WMPMoveGen {
   // Room for the longest result and the writers' slack.
   MachineLetter buffer[WMP_RESULT_BUFFER_SIZE + WMP_WORD_BUFFER_SLACK_BYTES];
   // Points at the current subrack's contiguous word list: directly into the
-  // WMP's storage for blankless subracks (zero copy), or at `buffer` when
-  // blank designation required assembling the words.
+  // WMP's storage for blankless subracks (zero copy), or into the position
+  // cache or scratch buffer when blank designation assembled the words.
   const MachineLetter *words;
   int tiles_to_play;
   int word_length;
@@ -892,7 +916,7 @@ static inline void wmp_move_gen_resolve_filter_miss(WMPMoveGen *wmp_move_gen,
 // into a call per subrack (measured: about -5% sim throughput). Pin it.
 static inline __attribute__((always_inline)) bool
 wmp_move_gen_get_subrack_words(WMPMoveGen *wmp_move_gen, int idx_for_size,
-                               bool lazy) {
+                               bool lazy, WMPBlankWordCache *blank_cache) {
   const int offset =
       subracks_get_combination_offset(wmp_move_gen->tiles_to_play);
   const int subrack_idx = offset + idx_for_size;
@@ -931,13 +955,36 @@ wmp_move_gen_get_subrack_words(WMPMoveGen *wmp_move_gen, int idx_for_size,
     return true;
   }
 
+  if (!is_playthrough && blank_cache->offsets[subrack_idx] != 0) {
+    wmp_move_gen->words =
+        blank_cache->words + blank_cache->offsets[subrack_idx] - 1;
+    wmp_move_gen->num_words = blank_cache->word_counts[subrack_idx];
+    return true;
+  }
+  // A playthrough's key also includes board letters, so its canonical rack
+  // index alone cannot identify its words. Keep those expansions in scratch.
+  // Reserve the maximum write, including inline-copy slack, before choosing
+  // the cache buffer. Running out of space never changes the generated words.
+  const bool cache_words =
+      !is_playthrough &&
+      blank_cache->used_bytes <= WMP_BLANK_WORD_CACHE_BYTES -
+                                     WMP_RESULT_BUFFER_SIZE -
+                                     WMP_WORD_BUFFER_SLACK_BYTES;
+  MachineLetter *buffer = cache_words
+                              ? blank_cache->words + blank_cache->used_bytes
+                              : wmp_move_gen->buffer;
   const int result_bytes = wmp_entry_write_words_to_buffer(
       subrack_info->wmp_entry, wmp_move_gen->wmp, &subrack_info->subrack,
-      wmp_move_gen->word_length, wmp_move_gen->buffer);
+      wmp_move_gen->word_length, buffer);
   assert(result_bytes > 0);
   assert(result_bytes % wmp_move_gen->word_length == 0);
   wmp_move_gen->num_words = result_bytes / wmp_move_gen->word_length;
-  wmp_move_gen->words = wmp_move_gen->buffer;
+  wmp_move_gen->words = buffer;
+  if (cache_words) {
+    blank_cache->offsets[subrack_idx] = (uint16_t)(blank_cache->used_bytes + 1);
+    blank_cache->word_counts[subrack_idx] = (uint16_t)wmp_move_gen->num_words;
+    blank_cache->used_bytes += result_bytes;
+  }
   return true;
 }
 

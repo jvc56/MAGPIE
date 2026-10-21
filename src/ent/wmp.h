@@ -384,6 +384,17 @@ static inline void wmp_load_from_filename_with_stream(WMP *wmp,
                          wmp->board_dim, BOARD_DIM, wmp_filename));
     return;
   }
+  // Move generation uses fixed-size expansion buffers. Check the maximum
+  // recorded by the maker once, before allocating or reading the tables.
+  if (wmp->max_word_lookup_bytes > WMP_RESULT_BUFFER_SIZE) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_WMP_RESULT_TOO_LARGE,
+        get_formatted_string(
+            "wmp maximum word lookup size of %u bytes exceeds the supported "
+            "limit of %d bytes: %s\n",
+            wmp->max_word_lookup_bytes, WMP_RESULT_BUFFER_SIZE, wmp_filename));
+    return;
+  }
   // IMPORTANT: the name must only be set once there are no more possible
   // errors that could be encountered, otherwise, it will introduce a memory
   // leak.
