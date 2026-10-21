@@ -8394,6 +8394,12 @@ void config_parse_gcg_string_with_parser(Config *config, GCGParser *gcg_parser,
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
+  // A game made with the distribution the GCG just replaced points at that
+  // distribution, and its bag and racks are sized for it.
+  if (config->ld_changed && config->game) {
+    game_destroy(config->game);
+    config->game = NULL;
+  }
   config_init_game(config);
   parse_gcg_events(gcg_parser, config->game, error_stack);
 }
@@ -8471,6 +8477,72 @@ static void config_set_gcg_filename_and_save(Config *config,
   free(gcg_filename);
 }
 
+// The lexical settings a GCG may replace as it loads (see
+// config_load_game_history), kept so that a failed load can put them back.
+typedef struct LoadReplacedSettings {
+  char *lexicon_names[2];
+  char *leaves_names[2];
+  char *ld_name;
+  char *board_layout_name;
+  game_variant_t game_variant;
+} LoadReplacedSettings;
+
+static void load_replaced_settings_capture(const Config *config,
+                                           LoadReplacedSettings *settings) {
+  for (int player_idx = 0; player_idx < 2; player_idx++) {
+    settings->lexicon_names[player_idx] =
+        string_duplicate_allow_null(players_data_get_data_name(
+            config->players_data, PLAYERS_DATA_TYPE_KWG, player_idx));
+    settings->leaves_names[player_idx] =
+        string_duplicate_allow_null(players_data_get_data_name(
+            config->players_data, PLAYERS_DATA_TYPE_KLV, player_idx));
+  }
+  settings->ld_name =
+      string_duplicate_allow_null(config->ld ? ld_get_name(config->ld) : NULL);
+  settings->board_layout_name =
+      string_duplicate_allow_null(board_layout_get_name(config->board_layout));
+  settings->game_variant = config->game_variant;
+}
+
+static void load_replaced_settings_destroy(LoadReplacedSettings *settings) {
+  for (int player_idx = 0; player_idx < 2; player_idx++) {
+    free(settings->lexicon_names[player_idx]);
+    free(settings->leaves_names[player_idx]);
+  }
+  free(settings->ld_name);
+  free(settings->board_layout_name);
+}
+
+// Restores the game and history a failed load backed up. The load may already
+// have replaced, and freed, the lexical data they borrow, so that data is
+// reloaded first and the restored game and its endgame start games are rebuilt
+// against it. If it cannot be reloaded, the backup is dropped rather than kept
+// pointing at freed data.
+static void
+config_restore_after_failed_load(Config *config,
+                                 const LoadReplacedSettings *settings) {
+  ErrorStack *restore_error_stack = error_stack_create();
+  config_load_lexicon_dependent_data(
+      config, NULL, settings->lexicon_names[0], settings->lexicon_names[1],
+      NULL, settings->leaves_names[0], settings->leaves_names[1],
+      settings->ld_name, false, false, false, false, false, false, false, false,
+      false, false, false, false, restore_error_stack);
+  if (error_stack_is_empty(restore_error_stack)) {
+    config_load_board_layout(config, settings->board_layout_name,
+                             restore_error_stack);
+  }
+  config->game_variant = settings->game_variant;
+  config_restore_game_and_history(config);
+  if (error_stack_is_empty(restore_error_stack)) {
+    config_rebuild_lexical_games(config);
+  } else {
+    game_destroy(config->game);
+    config->game = NULL;
+    config_invalidate_everything(config, false);
+  }
+  error_stack_destroy(restore_error_stack);
+}
+
 char *impl_load_gcg(Config *config, ErrorStack *error_stack) {
   const char *source_identifier =
       config_get_parg_value(config, ARG_TOKEN_LOAD, 0);
@@ -8481,8 +8553,10 @@ char *impl_load_gcg(Config *config, ErrorStack *error_stack) {
   }
 
   const bool use_backup = !!config->game;
+  LoadReplacedSettings replaced_settings = {0};
   if (use_backup) {
     config_backup_game_and_history(config);
+    load_replaced_settings_capture(config, &replaced_settings);
   }
 
   config_parse_gcg_string(config, config->gcg_result.gcg_string,
@@ -8498,13 +8572,12 @@ char *impl_load_gcg(Config *config, ErrorStack *error_stack) {
     }
   }
 
-  if (!error_stack_is_empty(error_stack)) {
-    if (use_backup) {
-      config_restore_game_and_history(config);
+  if (use_backup) {
+    if (!error_stack_is_empty(error_stack)) {
+      config_restore_after_failed_load(config, &replaced_settings);
     }
-    return empty_string();
+    load_replaced_settings_destroy(&replaced_settings);
   }
-
   return empty_string();
 }
 

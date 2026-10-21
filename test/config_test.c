@@ -27,6 +27,7 @@
 #include "../src/util/io_util.h"
 #include "../src/util/string_util.h"
 #include "test_constants.h"
+#include "test_platform.h"
 #include "test_util.h"
 #include <assert.h>
 #include <inttypes.h>
@@ -3068,6 +3069,109 @@ void test_config_lexicon_change_rebuilds_games(void) {
   config_destroy(config);
 }
 
+static char *write_test_gcg(const char *directory, const char *name,
+                            const char *contents) {
+  char *path = get_formatted_string("%s/%s", directory, name);
+  ErrorStack *error_stack = error_stack_create();
+  write_string_to_file(path, "w", contents, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  error_stack_destroy(error_stack);
+  return path;
+}
+
+static void exec_with_path(Config *config, const char *command,
+                           const char *path, error_code_t expected_status) {
+  char *full_command = get_formatted_string("%s %s", command, path);
+  assert_config_exec_status(config, full_command, expected_status);
+  free(full_command);
+}
+
+// After a failed load, the game from before it is back, along with the
+// lexical data it and its saved endgame results borrow.
+static void assert_restored_standard_game(const Config *config,
+                                          int num_events) {
+  const PlayersData *players_data = config_get_players_data(config);
+  for (int player_idx = 0; player_idx < 2; player_idx++) {
+    assert(strings_equal(players_data_get_data_name(
+                             players_data, PLAYERS_DATA_TYPE_KWG, player_idx),
+                         "CSW21"));
+  }
+  assert(strings_equal(ld_get_name(config_get_ld(config)), "english"));
+  const GameHistory *game_history = config_get_game_history(config);
+  assert(game_history_get_num_events(game_history) == num_events);
+  assert_game_borrows_current_kwgs(config, config_get_game(config));
+  const EndgameResults *saved_endgame_results = game_event_get_endgame_results(
+      game_history_get_event(game_history, num_events - 1));
+  assert_game_borrows_current_kwgs(
+      config, endgame_results_get_start_game(saved_endgame_results));
+}
+
+// A GCG that names another lexicon or distribution loads it before its moves.
+// A failed load then restored the previous game and history still borrowing
+// the data the load had freed, and a load that changed the distribution kept
+// using a game whose bag was sized for the previous one.
+void test_config_load_replacing_lexical_data(void) {
+  char *directory =
+      test_platform_make_temporary_directory("magpie_load_lexical_data");
+  // Scored one point too high: fails once NWL20 is loaded.
+  char *nwl20_path =
+      write_test_gcg(directory, "nwl20.gcg",
+                     "#lexicon NWL20\n#player1 a a\n#player2 b b\n"
+                     ">a: AAENRSZ 8G ZA +22 22\n"
+                     ">b: ?CDEIRW 9E CRoWDIE +80 80\n");
+  // Misses the center square: fails once the French distribution is loaded.
+  char *bad_french_path =
+      write_test_gcg(directory, "bad_french.gcg",
+                     "#lexicon FRA20\n#tile-distribution french\n#player1 a a\n"
+                     "#player2 b b\n>a: ABCDEFG 8D BAC +99 99\n");
+  char *french_path = get_formatted_string("%s/french.gcg", directory);
+  Config *french_config =
+      config_create_or_die("set -lex FRA20 -s1 score -s2 score");
+  assert_config_exec_status(french_config, "newgame", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(french_config, "t ABCDEFG", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(french_config, "t EEIRSTU", ERROR_STATUS_SUCCESS);
+  exec_with_path(french_config, "ex", french_path, ERROR_STATUS_SUCCESS);
+  config_destroy(french_config);
+
+  Config *config = config_create_or_die("set -s1 score -s2 score -threads 2");
+  assert_config_exec_status(config, "load testdata/gcgs/success_standard.gcg",
+                            ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "goto end", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "prev", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "prev", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "prev", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "endgame", ERROR_STATUS_SUCCESS);
+  // Committing saves the endgame results onto the turn.
+  assert_config_exec_status(config, "t", ERROR_STATUS_SUCCESS);
+  const int num_events =
+      game_history_get_num_events(config_get_game_history(config));
+
+  exec_with_path(config, "load", nwl20_path,
+                 ERROR_STATUS_GCG_PARSE_MOVE_SCORING_ERROR);
+  assert_restored_standard_game(config, num_events);
+  assert_config_exec_status(config, "prev", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "shendgame", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "next", ERROR_STATUS_SUCCESS);
+
+  exec_with_path(config, "load", bad_french_path,
+                 ERROR_STATUS_GCG_PARSE_MOVE_VALIDATION_ERROR);
+  assert_restored_standard_game(config, num_events);
+  assert_config_exec_status(config, "prev", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "shendgame", ERROR_STATUS_SUCCESS);
+
+  exec_with_path(config, "load", french_path, ERROR_STATUS_SUCCESS);
+  assert(strings_equal(ld_get_name(config_get_ld(config)), "french"));
+  assert(game_history_get_num_events(config_get_game_history(config)) == 2);
+  assert_config_exec_status(config, "shgame", ERROR_STATUS_SUCCESS);
+
+  config_destroy(config);
+  free(french_path);
+  free(bad_french_path);
+  free(nwl20_path);
+  test_platform_remove_directory_tree(directory);
+  free(directory);
+}
+
 // The whole point of saving results per GameEvent rather than in a
 // single "last turn" slot: navigating game history backward/forward
 // shows the analysis that was actually done for whichever turn is about
@@ -3261,6 +3365,7 @@ void test_config(void) {
   test_config_new_game_drops_previous_analysis();
   test_config_cgp_starts_new_history();
   test_config_lexicon_change_rebuilds_games();
+  test_config_load_replacing_lexical_data();
   test_config_game_event_results_follow_navigation();
   test_config_sim_with_inference_results_saved_to_game_event();
 }
