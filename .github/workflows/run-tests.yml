@@ -241,10 +241,50 @@ jobs:
           name: windows-x86_64
           path: bin
 
+      # Wine comes from the runner's Ubuntu mirror, which sometimes slows to a
+      # few KB/s for hours. Its packages are cached per runner image, so most
+      # runs install them without the mirror; otherwise the mirror gets 10
+      # minutes before one retry from archive.ubuntu.com.
+      - name: Name the Wine package cache
+        id: wine-cache-key
+        run: echo "key=wine64-debs-$ImageOS-$ImageVersion" >> "$GITHUB_OUTPUT"
+
+      - name: Restore Wine packages
+        id: wine-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/wine-debs/*.deb
+          key: ${{ steps.wine-cache-key.outputs.key }}
+
       - name: Install Wine
+        timeout-minutes: 25
         run: |
-          sudo apt-get update
-          sudo apt-get install -y wine64
+          debs="$HOME/wine-debs"
+          if ls "$debs"/*.deb > /dev/null 2>&1 &&
+            timeout 300 sudo apt-get install -y "$debs"/*.deb; then
+            exit 0
+          fi
+          # apt needs the partial/ directory of an archives directory to exist.
+          mkdir -p "$debs/partial"
+          install_wine() {
+            timeout 600 sudo sh -c "apt-get update &&
+              apt-get install -y -o Dir::Cache::Archives='$debs' \
+                -o APT::Keep-Downloaded-Packages=true wine64"
+          }
+          if ! install_wine; then
+            echo "::warning::Installing Wine from the runner's mirror failed or took over 10 minutes; retrying from archive.ubuntu.com"
+            echo "http://archive.ubuntu.com/ubuntu/" | sudo tee /etc/apt/apt-mirrors.txt
+            install_wine
+          fi
+          # apt downloaded as root; let the cache step read the packages.
+          sudo chown -R "$(id -u):$(id -g)" "$debs"
+
+      - name: Save Wine packages
+        if: steps.wine-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/wine-debs/*.deb
+          key: ${{ steps.wine-cache-key.outputs.key }}
 
       - name: Run the tests under Wine
         env:
