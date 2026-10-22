@@ -2932,7 +2932,19 @@ int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
         depth == 0 ? leaf_tt_key(worker, node_key) : node_key;
     TTEntry tt_entry = transposition_table_lookup(
         worker->solver->transposition_table, probe_key);
-    if (ttentry_valid(tt_entry) && ttentry_depth(tt_entry) >= (uint8_t)depth) {
+    // A pass leaves the board and racks as they were, so a position can recur
+    // with fewer plies left: the moves A, Z, B and pass, Z, A, pass, B reach
+    // the same position, scoreless count included, the second with two fewer
+    // plies left. Helpers searching a shallower depth also meet the entries
+    // that threads searching deeper stored. An entry stored deeper than this
+    // node holds a deeper search's value, and which of those a search meets
+    // depends on what other threads stored first, so only its move is used. A
+    // pure entry is the game's value at any depth.
+    if (ttentry_valid(tt_entry) && ttentry_depth(tt_entry) > (uint8_t)depth &&
+        ttentry_depth(tt_entry) != TT_PURE_DEPTH) {
+      tt_move = ttentry_move(tt_entry);
+    } else if (ttentry_valid(tt_entry) &&
+               ttentry_depth(tt_entry) >= (uint8_t)depth) {
       if (ttentry_depth(tt_entry) != TT_PURE_DEPTH) {
         worker->impure_events++;
       }

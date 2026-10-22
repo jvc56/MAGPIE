@@ -972,6 +972,71 @@ void test_endgame_tt_pv_bound_repeat(void) {
   config_destroy(config);
 }
 
+// Passes interleaved with plays make positions recur with fewer plies left:
+// the moves A, Z, B and pass, Z, A, pass, B reach the same transposition-table
+// key, the second with two fewer plies left. (Two scoreless turns in a row end
+// an endgame, so the passes cannot simply come in pairs.) Trusting an entry
+// stored deeper than the node mixed in a deeper search's value, and which of
+// those a solve met depended on what the other threads stored first. Every
+// deeper entry a one-thread solve of this position meets is reached through a
+// pass; at 18 threads, helpers searching a shallower depth also meet the
+// deeper entries other threads stored. At 12 or more threads, 5-ply solves
+// of this position returned 83 with 9F (N)A instead of 81 with 2L V(E)E, in
+// about 1 of 100 solves on main and in every solve once the starting helpers
+// lost their move-ordering jitter. One thread and the search without a
+// transposition table both return 81. The trigger is a race, so this test
+// repeats the solve and is on-demand only (egpassdepth).
+void test_endgame_pass_transposition_depth(void) {
+  const char *cgp =
+      "cgp 5CORDINER2/1G10E2/1O3RECOURED2/1A1B8I1G/1T1AW5L1S1I/1E1PAX4U1T1P/"
+      "ZE2WO1NOSTRILS/I2HEAME2E1L1Y/T4N4T4/IF2JO3Ki4/1O2AN3NU4/FuDGY4AMI3/"
+      "ET7R1N3/EH9I3/B9QADIS AAELOUV/V 392/466 0 -lex CSW21";
+  Config *config =
+      config_create_or_die("set -s1 score -s2 score -threads 18 -eplies 5");
+  load_and_exec_config_or_die(config, cgp);
+
+  Game *game = config_get_game(config);
+  EndgameResults *endgame_results = config_get_endgame_results(config);
+  ErrorStack *error_stack = error_stack_create();
+  EndgameCtx *endgame_ctx = NULL;
+
+  const int num_solves = 100;
+  const int expected_score = 81;
+  for (int solve_idx = 0; solve_idx < num_solves; solve_idx++) {
+    EndgameArgs endgame_args = {0};
+    endgame_args.thread_control = config_get_thread_control(config);
+    endgame_args.game = game;
+    endgame_args.plies = config_get_endgame_plies(config);
+    endgame_args.tt_fraction_of_mem = 0.05;
+    endgame_args.initial_small_move_arena_size =
+        DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
+    endgame_args.num_threads = 18;
+    endgame_args.use_heuristics = true;
+    endgame_args.num_top_moves = 1;
+    endgame_args.incremental_movegen = true;
+    endgame_args.seed = 42 + (uint64_t)solve_idx;
+    if (endgame_ctx != NULL) {
+      endgame_ctx_clear_transposition_table(endgame_ctx);
+    }
+    endgame_solve(&endgame_ctx, &endgame_args, endgame_results, error_stack);
+    assert(error_stack_is_empty(error_stack));
+
+    const PVLine *pv_line =
+        endgame_results_get_pvline(endgame_results, ENDGAME_RESULT_BEST);
+    if (pv_line->score != expected_score) {
+      printf("solve %d of %d returned %d, expected %d\n", solve_idx + 1,
+             num_solves, (int)pv_line->score, expected_score);
+    }
+    assert(pv_line->score == expected_score);
+  }
+  printf("%d eighteen-thread solves all returned %d\n", num_solves,
+         expected_score);
+
+  endgame_ctx_destroy(endgame_ctx);
+  error_stack_destroy(error_stack);
+  config_destroy(config);
+}
+
 void test_solve_standard(void) {
   // A standard out-in-two endgame.
   test_single_endgame(
