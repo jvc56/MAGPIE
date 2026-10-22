@@ -3959,12 +3959,9 @@ void gen_shadow_small(MoveGen *gen) {
   anchor_heapify_all(&gen->anchor_heap);
 }
 
-// Every play anchored in lane `row` of the current gen->dir, scanning the
-// anchors in board order.
-static inline __attribute__((always_inline)) void
-gen_record_lane_plays_unordered(MoveGen *gen, int row,
-                                uint32_t kwg_root_node_index,
-                                bool record_small) {
+// Points the generator at lane `row` of the current gen->dir.
+static inline __attribute__((always_inline)) void gen_load_lane(MoveGen *gen,
+                                                                int row) {
   const int dir = gen->dir;
   gen->current_row_index = row;
   gen->row_squares = board_get_row_cache(gen->board_lanes, row, dir);
@@ -3972,6 +3969,15 @@ gen_record_lane_plays_unordered(MoveGen *gen, int row,
       board_get_wit_row_lane(gen->board, row, dir, gen->cross_index);
   gen->wit_len_lane =
       board_get_wit_len_lane(gen->board, row, dir, gen->cross_index);
+}
+
+// Every play anchored in lane `row` of the current gen->dir, scanning the
+// anchors in board order.
+static inline __attribute__((always_inline)) void
+gen_record_lane_plays_unordered(MoveGen *gen, int row,
+                                uint32_t kwg_root_node_index,
+                                bool record_small) {
+  gen_load_lane(gen, row);
 
   int last_anchor_col = INITIAL_LAST_ANCHOR_COL;
   for (int col = 0; col < BOARD_DIM; col++) {
@@ -4137,21 +4143,137 @@ void gen_record_pass(MoveGen *gen) {
   }
 }
 
+// Index of the highest set bit of a nonzero bitset, following
+// lowest_set_bit_index's guarded-intrinsic pattern.
+static inline int highest_set_bit_index(uint32_t bitset) {
+#if defined(__has_builtin) && __has_builtin(__builtin_clz)
+  return 31 - __builtin_clz(bitset);
+#else
+  int index = 31;
+  while ((bitset & ((uint32_t)1 << index)) == 0) {
+    index--;
+  }
+  return index;
+#endif
+}
+
+// The lane positions a play from the anchor at `col` can span: right of
+// `limit` (the anchor's leftward limit, or -1 for none), and on either side
+// of the anchor no further than `spare` of the lane's `empty` squares, plus
+// the tiles it plays through, and short of any empty square in `blocked`,
+// where no rack tile fits.
+static inline uint32_t anchor_span_reach(uint32_t empty, uint32_t blocked,
+                                         int col, int limit, int spare) {
+  const uint32_t right_of_col = ~(((uint32_t)2 << col) - 1);
+  const uint32_t left_of_col = ((uint32_t)1 << col) - 1;
+  uint32_t right_empties = empty & right_of_col;
+  uint32_t left_empties = empty & left_of_col;
+  for (int tile_idx = 0; tile_idx < spare; tile_idx++) {
+    right_empties &= right_empties - 1;
+    if (left_empties != 0) {
+      left_empties &= ~((uint32_t)1 << highest_set_bit_index(left_empties));
+    }
+  }
+  // The nearest empty square each way that the rack cannot fill: one past
+  // the tiles it has, or a blocked one.
+  right_empties |= blocked & right_of_col;
+  left_empties |= blocked & left_of_col;
+  const int right = right_empties != 0 ? lowest_set_bit_index(right_empties) - 1
+                                       : BOARD_DIM - 1;
+  int left = left_empties != 0 ? highest_set_bit_index(left_empties) + 1 : 0;
+  if (left <= limit) {
+    left = limit + 1;
+  }
+  return (((uint32_t)2 << right) - 1) & ~(((uint32_t)1 << left) - 1);
+}
+
+// The MOVE_RECORD_ALL_SMALL plays of lane `row` of the current gen->dir from
+// the anchors whose plays may span a position in `hit`, scanning the anchors
+// in board order (see generate_small_moves_in_lanes). Sets *anchors to the
+// bits of all of the lane's anchors and *generated to those of the anchors
+// generated from.
+static void gen_record_lane_plays_reaching(MoveGen *gen, int row,
+                                           uint32_t kwg_root_node_index,
+                                           uint32_t hit, int rack_tiles,
+                                           uint32_t *anchors,
+                                           uint32_t *generated) {
+  gen_load_lane(gen, row);
+  const uint64_t rack_cross_set = gen->rack_cross_set;
+  uint32_t lane_anchors = 0;
+  uint32_t empty = 0;
+  uint32_t blocked = 0;
+  for (int col = 0; col < BOARD_DIM; col++) {
+    const uint32_t col_bit = (uint32_t)1 << col;
+    if (gen_cache_get_is_anchor(gen, col)) {
+      lane_anchors |= col_bit;
+    }
+    if (gen_cache_is_empty(gen, col)) {
+      empty |= col_bit;
+      // Read as recursive_gen_small reads it: a cross-set of bit 0 alone
+      // admits no tile.
+      uint64_t possible_letters_here = gen_cache_get_cross_set(gen, col);
+      if (possible_letters_here == 1) {
+        possible_letters_here = 0;
+      }
+      if ((possible_letters_here & rack_cross_set) == 0) {
+        blocked |= col_bit;
+      }
+    }
+  }
+  uint32_t lane_generated = 0;
+  int last_anchor_col = INITIAL_LAST_ANCHOR_COL;
+  for (uint32_t remaining = lane_anchors; remaining != 0;
+       remaining &= remaining - 1) {
+    const int col = lowest_set_bit_index(remaining);
+    const uint32_t anchor_bit = (uint32_t)1 << col;
+    const int limit =
+        last_anchor_col == INITIAL_LAST_ANCHOR_COL ? -1 : last_anchor_col;
+    const int spare = rack_tiles - ((empty & anchor_bit) != 0 ? 1 : 0);
+    // A blocked anchor square anchors no play; one in `hit` is reached.
+    if ((blocked & anchor_bit) == 0 &&
+        ((hit & anchor_bit) != 0 ||
+         (anchor_span_reach(empty, blocked, col, limit, spare) & hit) != 0)) {
+      lane_generated |= anchor_bit;
+      gen->current_anchor_col = col;
+      gen->last_anchor_col = last_anchor_col;
+      gen->anchor_right_extension_set =
+          gen_cache_get_right_extension_set(gen, col);
+      gen->current_anchor_highest_possible_score = EQUITY_MAX_VALUE;
+      recursive_gen_small(gen, col, kwg_root_node_index, col, col,
+                          gen->dir == BOARD_HORIZONTAL_DIRECTION, 0, 1, 0);
+    }
+    last_anchor_col = col;
+    if ((empty & anchor_bit) == 0) {
+      last_anchor_col++;
+    }
+  }
+  *anchors = lane_anchors;
+  *generated = lane_generated;
+}
+
 void generate_small_moves_in_lanes(const MoveGenArgs *args, uint64_t lane_mask,
-                                   int *lane_end) {
+                                   const uint32_t *lane_hits, int *lane_end,
+                                   uint32_t *lane_anchors,
+                                   uint32_t *lane_generated) {
   MoveGen *gen = get_movegen();
   gen_count_movegen(gen);
   gen_load_position(gen, args);
   assert(gen->move_record_type == MOVE_RECORD_ALL_SMALL);
   gen->tiles_played = 0;
   const uint32_t kwg_root_node_index = kwg_get_root_node_index(gen->kwg);
+  const int rack_tiles = rack_get_total_letters(&gen->player_rack);
   for (int dir = 0; dir < 2; dir++) {
     gen->dir = dir;
     for (int row = 0; row < BOARD_DIM; row++) {
       const int lane = BOARD_DIM * dir + row;
-      if (((lane_mask >> lane) & 1) != 0 &&
-          gen->row_number_of_anchors_cache[lane] != 0) {
-        gen_record_lane_plays_unordered(gen, row, kwg_root_node_index, true);
+      if (((lane_mask >> lane) & 1) != 0) {
+        lane_anchors[lane] = 0;
+        lane_generated[lane] = 0;
+        if (gen->row_number_of_anchors_cache[lane] != 0) {
+          gen_record_lane_plays_reaching(
+              gen, row, kwg_root_node_index, lane_hits[lane], rack_tiles,
+              &lane_anchors[lane], &lane_generated[lane]);
+        }
       }
       lane_end[lane] = gen->move_list->count;
     }

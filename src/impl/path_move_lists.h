@@ -54,10 +54,14 @@ typedef struct PathListSlot {
 //     derivation in path_move_lists.c) carry over verbatim, filtered by a
 //     rack sub-multiset test when the side's own intervening move consumed
 //     tiles;
-//   - touched lanes are dropped wholesale and regenerated on the current
-//     board (generate_small_moves_in_lanes), which also produces every newly
-//     enabled play -- the two sources are disjoint by construction, so no
-//     deduplication is needed.
+//   - in touched lanes, only the anchors whose plays can reach a square
+//     either move changed (see move_lane_hits in path_move_lists.c) are
+//     regenerated on the current board (generate_small_moves_in_lanes),
+//     which also produces every newly enabled play; the other anchors' plays
+//     carry over, filtered the same way. A play spanning no changed square
+//     is unaffected, and is generated from the leftmost anchor in its span
+//     on both boards, so the two sources are disjoint by construction and
+//     merge into generation order by anchor, with no deduplication needed.
 //
 // The result is identical to a scratch generation, in the same order, so a
 // consumer cannot tell the difference. The caller owns the discipline the
@@ -84,9 +88,18 @@ typedef struct PathMoveLists {
   // Lane-influence mask and PLAY-ness of the move made at each path index.
   uint64_t masks[PATH_MOVE_LISTS_MAX_PATH];
   bool played[PATH_MOVE_LISTS_MAX_PATH];
+  // Per lane, the squares the move made at each path index changed for the
+  // plays of that lane (bit c: column c of a row, row c of a column): a play
+  // spanning none of them is unaffected by the move.
+  uint32_t hits[PATH_MOVE_LISTS_MAX_PATH][PATH_MOVE_LISTS_NUM_LANES];
   int length;
-  // Scratch for the lane regeneration: list count after each lane.
+  // Scratch for the lane regeneration: list count after each lane, the
+  // squares changed since the parent list, the lane's anchors, and the
+  // anchors regenerated.
   int lane_end[PATH_MOVE_LISTS_NUM_LANES];
+  uint32_t lane_hits[PATH_MOVE_LISTS_NUM_LANES];
+  uint32_t lane_anchors[PATH_MOVE_LISTS_NUM_LANES];
+  uint32_t lane_generated[PATH_MOVE_LISTS_NUM_LANES];
   // A fresh stamp for every push (and root seeding), so the path prefix that
   // ends at a move is identified by that move's stamp: a prefix revisited
   // through a new push gets a new one.
@@ -156,10 +169,11 @@ path_move_lists_pending_lanes(const PathMoveLists *lists) {
 // materializing that list. Sibling leaves (the same path but for the last
 // move) share every lane that last move leaves alone, along with the rack of
 // the side to move, so those lanes' best plays are found once per parent and
-// kept in sibling_lanes: lanes the side's own previous move also left alone
-// are scanned in place in its list two moves up (through the rack
-// sub-multiset filter when that move placed tiles), and the rest are
-// regenerated. Their best play is the incumbent that a MOVE_RECORD_BEST_SMALL
+// kept in sibling_lanes: their plays are scanned in place in the side's list
+// two moves up (through the rack sub-multiset filter when the side's own
+// previous move placed tiles), except in the lanes that move touched, whose
+// anchors that can reach a square it changed are regenerated instead, as in
+// moves_at. Their best play is the incumbent that a MOVE_RECORD_BEST_SMALL
 // generation over the last move's lanes is shadow-pruned against
 // (generate_best_small_move_in_lanes), so most of those lanes' plays are never
 // enumerated. A play ranks by score plus the go-out bonus when it uses the
