@@ -90,6 +90,12 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    # Playwright's image has Chromium, Firefox and WebKit and their system
+    # libraries installed, so no shard waits on apt or a browser download.
+    # Its tag must match @playwright/test in wasmentry/package-lock.json.
+    container:
+      image: mcr.microsoft.com/playwright:v1.63.0-noble
+      options: --user 1001
     strategy:
       fail-fast: false
       matrix:
@@ -97,8 +103,6 @@ jobs:
         shard: [1, 2, 3]
         include:
           - project: unit
-            shard: 1
-          - project: edge
             shard: 1
           - project: static-host
             shard: 1
@@ -120,25 +124,22 @@ jobs:
         run: tar -xzf /tmp/wasm-browser-assets/wasm-browser-assets.tgz
       - run: npm ci
         working-directory: wasmentry
-      - name: Install browser
-        if: matrix.project != 'unit'
+      - name: Check Playwright matches the image
         working-directory: wasmentry
-        env:
-          PROJECT: ${{ matrix.project }}
         run: |
-          browser="$PROJECT"
-          if [ "$browser" = edge ]; then browser=msedge; fi
-          if [ "$browser" = static-host ]; then browser=chromium; fi
-          npx playwright install --with-deps "$browser"
+          version=$(node -p "require('@playwright/test/package.json').version")
+          if [ "$version" != 1.63.0 ]; then
+            echo "::error::@playwright/test is $version; update the container image tag to v$version-noble"
+            exit 1
+          fi
       - name: Run Playwright shard
         working-directory: wasmentry
         env:
-          MAGPIE_TEST_EDGE: "1"
           PROJECT: ${{ matrix.project }}
           SHARD: ${{ matrix.shard }}
         run: |
           total=3
-          case "$PROJECT" in unit|edge|static-host) total=1 ;; esac
+          case "$PROJECT" in unit|static-host) total=1 ;; esac
           npm test -- --project="$PROJECT" --shard="$SHARD/$total"
       # Keep WebKit's first-attempt traces even when its bounded retry passes.
       - name: Upload browser report
@@ -151,17 +152,61 @@ jobs:
             wasmentry/playwright-report/
           retention-days: 7
 
+  # Edge is not in Playwright's image, so this job installs it on the runner.
+  edge-test:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: wasmentry/package-lock.json
+      - uses: actions/download-artifact@v4
+        with:
+          name: wasm-browser-assets
+          path: /tmp/wasm-browser-assets
+      - name: Unpack engine and data
+        run: tar -xzf /tmp/wasm-browser-assets/wasm-browser-assets.tgz
+      - run: npm ci
+        working-directory: wasmentry
+      - name: Install Edge
+        working-directory: wasmentry
+        run: npx playwright install --with-deps msedge
+      - name: Run Edge test
+        working-directory: wasmentry
+        env:
+          MAGPIE_TEST_EDGE: "1"
+        run: npm test -- --project=edge
+      - name: Upload browser report
+        if: ${{ !cancelled() && failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-edge-1
+          path: |
+            wasmentry/test-results/
+            wasmentry/playwright-report/
+          retention-days: 7
+
   test-wasm:
     # Preserve the aggregate check name and only publish a beta when every shard passes.
     if: always()
-    needs: [build, browser-tests]
+    needs: [build, browser-tests, edge-test]
     runs-on: ubuntu-latest
     steps:
       - name: Require all shards to pass
         env:
           BUILD_RESULT: ${{ needs.build.result }}
           TEST_RESULT: ${{ needs.browser-tests.result }}
-        run: test "$BUILD_RESULT" = success && test "$TEST_RESULT" = success
+          EDGE_RESULT: ${{ needs.edge-test.result }}
+        run: |
+          test "$BUILD_RESULT" = success && test "$TEST_RESULT" = success &&
+            test "$EDGE_RESULT" = success
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
