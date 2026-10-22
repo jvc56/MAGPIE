@@ -57,6 +57,11 @@ enum {
   // Maximum moves for stack allocation in ABDADA deferred tracking
   // Keep small to avoid stack overflow in deep recursive searches
   MAX_DEFERRED_STACK = 64,
+  // ABDADA: nodes at least this many plies above the leaves mark themselves
+  // busy while they are searched, and a busy one reached as a younger brother
+  // is deferred. Depth-2 nodes are worth sharing out: two threads in the same
+  // depth-3 node otherwise both search every one of its children.
+  ABDADA_MIN_DEPTH = 2,
   // How many abdada_negamax calls between per-depth deadline checks.
   // Checked per-worker (no cross-thread contention). At ~100K nodes/s/thread,
   // 1024 nodes ≈ 10ms granularity — tighter response for PEG inner solves
@@ -1760,14 +1765,20 @@ static bool worker_has_company(const EndgameCtxWorker *worker) {
                               memory_order_relaxed) > 1;
 }
 
-// Thread jitter for ABDADA search diversity: each thread gets a unique bias
-// based on tiles played. Odd threads favor aggressive play, even threads favor
-// conservative play. Returns 0 for thread 0, the only worker of a
-// single-threaded solve. Workers lent to a solve (endgame_add_worker) take
-// ordinals from 1 up, so they get jitter even though threads stays 1.
+// Thread jitter for search diversity, for the workers lent to a running solve
+// (endgame_add_worker, ordinals from threads up) only: each gets a unique bias
+// based on tiles played, odd ordinals favoring aggressive play and even ones
+// conservative play. A worker that joins late in the main worker's order
+// retraces its path behind it and keeps running into the nodes it is
+// searching.
+//
+// The workers a solve starts with get none. They reach each node together and
+// all search its first move, while ABDADA shares out the younger brothers. A
+// jittered helper's first move differs, and where the usual first move refutes
+// the node, which it nearly always does, the helper's work there is wasted.
 static int compute_thread_jitter(EndgameCtxWorker *worker, int tiles_played) {
   int thread_idx = worker->ordinal;
-  if (thread_idx == 0) {
+  if (thread_idx < worker->solver->threads) {
     return 0;
   }
   int bias = thread_idx * tiles_played;
@@ -2893,12 +2904,10 @@ int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
   }
 
   // ABDADA: if exclusive search and another processor is on this node, defer.
-  // Active at depth >= 3 where the cost of redundant search justifies the
-  // protocol overhead. At shallower depths, nproc table collisions cause
-  // excessive false deferrals. Decided once per node: a helper that arrives
-  // mid-node does not change it, so every enter_node below is matched by a
-  // leave_node.
-  const bool abdada_active = depth >= 3 &&
+  // Active from ABDADA_MIN_DEPTH up. Decided once per node: a helper that
+  // arrives mid-node does not change it, so every enter_node below is matched
+  // by a leave_node.
+  const bool abdada_active = depth >= ABDADA_MIN_DEPTH &&
                              worker->solver->transposition_table_optim &&
                              worker_has_company(worker);
   if (exclusive_p && abdada_active) {
@@ -3009,17 +3018,15 @@ int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
   // One ply above the leaves, try the likely refutation before building the
   // move list (see pick_first_reply_before_list), unless
   // EndgameArgs.disable_best_reply_shortcuts is set. Only where the ordering
-  // has nothing better to offer: no hash move, no thread jitter, no early
-  // pass, more than one tile (the single-tile shortcuts need the list), and
-  // not under thread 0's first root move, whose ply-2 progress counts the
-  // list.
+  // has nothing better to offer: no hash move, no early pass, more than one
+  // tile (the single-tile shortcuts need the list), and not under thread 0's
+  // first root move, whose ply-2 progress counts the list.
   bool first_reply_searched = false;
   SmallMove first_reply;
   int32_t first_reply_value = 0;
   if (depth == 1 && worker->solver->best_reply_shortcuts &&
       worker->current_iterative_deepening_depth != depth &&
       tt_move == INVALID_TINY_MOVE &&
-      (worker->solver->threads <= 1 || worker->ordinal == 0) &&
       game_get_consecutive_scoreless_turns(worker->game_copy) == 0 &&
       rack_get_total_letters(player_get_rack(player_on_turn)) >= 2 &&
       !(worker->current_iterative_deepening_depth - 1 == depth &&
@@ -3247,7 +3254,8 @@ int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
   bool deferred_stack[MAX_DEFERRED_STACK];
   bool *deferred = NULL;
   bool deferred_heap_allocated = false;
-  bool use_abdada = abdada_active;
+  // Deferrals are tracked only where the children can be deferred.
+  bool use_abdada = abdada_active && depth - 1 >= ABDADA_MIN_DEPTH;
   if (use_abdada) {
     if (nplays <= MAX_DEFERRED_STACK) {
       deferred = deferred_stack;
