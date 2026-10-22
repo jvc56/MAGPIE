@@ -30,6 +30,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 // Execute config command quietly (suppress stdout during execution)
 static void exec_config_quiet(Config *config, const char *cmd) {
@@ -506,10 +507,15 @@ void test_benchmark_nonstuck_3v3(void) {
 //   threads      solver threads     (default 1  -> deterministic nodes)
 //   max          max positions      (default 100)
 //   incremental  1 = incremental move lists (default 0)
-//   interleave   1 = solve each position off and on, alternating order, TT
-//                cleared per solve (default 0); incremental is then ignored
+//   interleave   1 = solve each position off and on, alternating order
+//                (default 0); incremental is then ignored
 //   tag          label for the run  (default "bench")
 // For example: egspeedbench:cgp=positions.txt,plies=5,threads=4,incremental=1
+// Every solve starts from a cleared TT, so no solve inherits an earlier one's
+// entries, and with the forced-pass bypass off, as the endgame, analyze and
+// autoplay commands solve. Each row ends with the solve's CPU time across all
+// of its threads (clock(), which is wall time on Windows), so a multi-threaded
+// run shows how much of the machine its speedup cost.
 static int env_int(const char *name, int fallback) {
   const char *v = getenv(name);
   if (v == NULL || v[0] == '\0') {
@@ -551,9 +557,8 @@ static void run_endgame_speed_bench(const EndgameSpeedBenchArgs *bench_args) {
   const bool incremental = bench_args->incremental;
   // Interleaved A/B: solve every position with the incremental lists off and
   // on, back to back, alternating which goes first per position so neither
-  // side systematically benefits from a warm cache. The TT is cleared before
-  // every solve so the second solve of a position cannot hit the first's
-  // entries. Rows carry a cfg column and two summaries are printed.
+  // side systematically benefits from a warm cache. Rows carry a cfg column
+  // and two summaries are printed.
   const bool interleave = bench_args->interleave;
 
   FILE *fp = cfile_open(cgp_file, "re", false);
@@ -594,6 +599,7 @@ static void run_endgame_speed_bench(const EndgameSpeedBenchArgs *bench_args) {
   // Index 0 = incremental off, 1 = on. Non-interleaved runs use only
   // cfg_totals[incremental].
   double cfg_time[2] = {0.0, 0.0};
+  double cfg_cpu[2] = {0.0, 0.0};
   uint64_t cfg_nodes[2] = {0, 0};
 
   for (int ci = 0; ci < num_cgps; ci++) {
@@ -627,20 +633,22 @@ static void run_endgame_speed_bench(const EndgameSpeedBenchArgs *bench_args) {
                           .use_heuristics = true,
                           .per_ply_callback = NULL,
                           .per_ply_callback_data = NULL,
-                          .forced_pass_bypass = true,
+                          .forced_pass_bypass = false,
                           .incremental_movegen = cfg != 0,
                           .enable_pv_display = false,
                           .seed = 42};
 
-      if (interleave && solver != NULL) {
+      if (solver != NULL) {
         endgame_ctx_clear_transposition_table(solver);
       }
 
       Timer t;
       ctimer_start(&t);
+      const clock_t cpu_start = clock();
       err = error_stack_create();
       endgame_solve(&solver, &args, results, err);
       double elapsed = ctimer_elapsed_seconds(&t);
+      const double cpu = (double)(clock() - cpu_start) / (double)CLOCKS_PER_SEC;
       assert(error_stack_is_empty(err));
       error_stack_destroy(err);
 
@@ -649,13 +657,14 @@ static void run_endgame_speed_bench(const EndgameSpeedBenchArgs *bench_args) {
       uint64_t nodes = endgame_ctx_get_nodes_searched(solver);
 
       if (interleave) {
-        printf("BENCHROW %d %s %d %llu %.6f\n", ci, cfg ? "on" : "off", value,
-               (unsigned long long)nodes, elapsed);
+        printf("BENCHROW %d %s %d %llu %.6f %.6f\n", ci, cfg ? "on" : "off",
+               value, (unsigned long long)nodes, elapsed, cpu);
       } else {
-        printf("BENCHROW %d %d %llu %.6f\n", ci, value,
-               (unsigned long long)nodes, elapsed);
+        printf("BENCHROW %d %d %llu %.6f %.6f\n", ci, value,
+               (unsigned long long)nodes, elapsed, cpu);
       }
       cfg_time[cfg] += elapsed;
+      cfg_cpu[cfg] += cpu;
       cfg_nodes[cfg] += nodes;
     }
     if ((ci + 1) % 25 == 0) {
@@ -668,8 +677,8 @@ static void run_endgame_speed_bench(const EndgameSpeedBenchArgs *bench_args) {
   const int last_cfg = interleave ? 1 : single_cfg;
   for (int cfg = first_cfg; cfg <= last_cfg; cfg++) {
     printf("BENCHSUM tag=%s cfg=%s positions=%d total_time=%.4f "
-           "total_nodes=%llu nps=%.0f\n",
-           tag, cfg ? "on" : "off", num_cgps, cfg_time[cfg],
+           "total_cpu=%.4f total_nodes=%llu nps=%.0f\n",
+           tag, cfg ? "on" : "off", num_cgps, cfg_time[cfg], cfg_cpu[cfg],
            (unsigned long long)cfg_nodes[cfg],
            cfg_time[cfg] > 0 ? (double)cfg_nodes[cfg] / cfg_time[cfg] : 0.0);
   }
