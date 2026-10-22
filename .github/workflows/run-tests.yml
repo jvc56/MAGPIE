@@ -262,15 +262,18 @@ jobs:
           debs="$HOME/wine-debs"
           # timeout runs apt-get itself, so a timed-out apt-get is stopped and
           # releases apt's lock for the retry.
+          # dpkg installs exactly the cached packages; given .deb files, apt
+          # would still download any the mirror also has. The cache is per
+          # runner image, which already has everything else they need.
           if ls "$debs"/*.deb > /dev/null 2>&1 &&
-            sudo timeout --kill-after=10 300 apt-get install -y "$debs"/*.deb; then
+            sudo timeout --kill-after=10 300 dpkg -i "$debs"/*.deb; then
             exit 0
           fi
           # apt needs the partial/ directory of an archives directory to exist.
           mkdir -p "$debs/partial"
           install_wine() {
             sudo timeout --kill-after=10 120 apt-get update &&
-              sudo timeout --kill-after=10 480 apt-get install -y \
+              sudo timeout --kill-after=10 480 apt-get install -y --fix-broken \
                 -o Dir::Cache::Archives="$debs" \
                 -o APT::Keep-Downloaded-Packages=true \
                 -o DPkg::Lock::Timeout=60 wine64
