@@ -274,15 +274,16 @@ static void game_gen_cross_set_tracked(const Game *game, int row, int col,
 }
 
 // calc_for_across using MoveUndo (for forward update when tiles are on board)
-static void calc_for_across_from_undo(MoveUndo *undo, const Game *game,
+static void calc_for_across_from_undo(const MoveUndo *move_undo,
+                                      MoveUndo *save_undo, const Game *game,
                                       int row_start, int col_start, int csd) {
   const Board *board = game_get_board(game);
   const bool kwgs_are_shared =
       game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KWG);
 
-  for (int i = 0; i < undo->move_tiles_length; i++) {
+  for (int i = 0; i < move_undo->move_tiles_length; i++) {
     // Check tiles_placed_mask: bit i is set if position i had an actual tile
-    if ((undo->tiles_placed_mask & (1 << i)) == 0) {
+    if ((move_undo->tiles_placed_mask & (1 << i)) == 0) {
       continue; // This was a played-through position, skip it
     }
 
@@ -291,27 +292,87 @@ static void calc_for_across_from_undo(MoveUndo *undo, const Game *game,
         board_get_word_edge(board, row, col_start, WORD_DIRECTION_RIGHT);
     const int left_col =
         board_get_word_edge(board, row, col_start, WORD_DIRECTION_LEFT);
-    game_gen_cross_set_tracked(game, row, right_col + 1, csd, 0, undo);
-    game_gen_cross_set_tracked(game, row, left_col - 1, csd, 0, undo);
+    game_gen_cross_set_tracked(game, row, right_col + 1, csd, 0, save_undo);
+    game_gen_cross_set_tracked(game, row, left_col - 1, csd, 0, save_undo);
     if (!kwgs_are_shared) {
-      game_gen_cross_set_tracked(game, row, right_col + 1, csd, 1, undo);
-      game_gen_cross_set_tracked(game, row, left_col - 1, csd, 1, undo);
+      game_gen_cross_set_tracked(game, row, right_col + 1, csd, 1, save_undo);
+      game_gen_cross_set_tracked(game, row, left_col - 1, csd, 1, save_undo);
     }
   }
 }
 
 // calc_for_self using MoveUndo (doesn't need tiles info, just length)
-static void calc_for_self_from_undo(MoveUndo *undo, const Game *game,
+static void calc_for_self_from_undo(const MoveUndo *move_undo,
+                                    MoveUndo *save_undo, const Game *game,
                                     int row_start, int col_start, int csd) {
   // The move's interior is occupied. New tiles were initialized during
   // placement; played-through tiles already had zero cross sets/scores.
-  game_gen_cross_set_tracked(game, row_start, col_start - 1, csd, 0, undo);
-  game_gen_cross_set_tracked(game, row_start,
-                             col_start + undo->move_tiles_length, csd, 0, undo);
+  const int end_col = col_start + move_undo->move_tiles_length;
+  game_gen_cross_set_tracked(game, row_start, col_start - 1, csd, 0, save_undo);
+  game_gen_cross_set_tracked(game, row_start, end_col, csd, 0, save_undo);
   if (!game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KWG)) {
-    game_gen_cross_set_tracked(game, row_start, col_start - 1, csd, 1, undo);
-    game_gen_cross_set_tracked(
-        game, row_start, col_start + undo->move_tiles_length, csd, 1, undo);
+    game_gen_cross_set_tracked(game, row_start, col_start - 1, csd, 1,
+                               save_undo);
+    game_gen_cross_set_tracked(game, row_start, end_col, csd, 1, save_undo);
+  }
+}
+
+// Updates the anchors around the move recorded in move_undo, saving the
+// squares written into save_undo. save_undo holds the number_of_row_anchors
+// from before its own move, so unplaying that move restores the counts too.
+static void update_anchors_into_undo(const MoveUndo *move_undo,
+                                     MoveUndo *save_undo, Board *board) {
+  int row_start = move_undo->move_row_start;
+  int col_start = move_undo->move_col_start;
+  const int tiles_length = move_undo->move_tiles_length;
+  const bool board_was_transposed = board_is_dir_vertical(move_undo->move_dir);
+  if (board_was_transposed) {
+    board_transpose(board);
+    row_start = move_undo->move_col_start;
+    col_start = move_undo->move_row_start;
+  }
+  for (int col = col_start; col < tiles_length + col_start; col++) {
+    board_update_anchors_tracked(board, row_start, col, save_undo);
+    if (row_start > 0) {
+      board_update_anchors_tracked(board, row_start - 1, col, save_undo);
+    }
+    if (row_start < BOARD_DIM - 1) {
+      board_update_anchors_tracked(board, row_start + 1, col, save_undo);
+    }
+  }
+  if (col_start - 1 >= 0) {
+    board_update_anchors_tracked(board, row_start, col_start - 1, save_undo);
+  }
+  if (tiles_length + col_start < BOARD_DIM) {
+    board_update_anchors_tracked(board, row_start, tiles_length + col_start,
+                                 save_undo);
+  }
+  if (board_was_transposed) {
+    board_transpose(board);
+  }
+}
+
+static void update_cross_sets_into_undo(const MoveUndo *move_undo,
+                                        MoveUndo *save_undo, const Game *game) {
+  Board *board = game_get_board(game);
+  if (board_is_dir_vertical(move_undo->move_dir)) {
+    calc_for_across_from_undo(
+        move_undo, save_undo, game, move_undo->move_row_start,
+        move_undo->move_col_start, BOARD_VERTICAL_DIRECTION);
+    board_transpose(board);
+    calc_for_self_from_undo(
+        move_undo, save_undo, game, move_undo->move_col_start,
+        move_undo->move_row_start, BOARD_VERTICAL_DIRECTION);
+    board_transpose(board);
+  } else {
+    calc_for_self_from_undo(
+        move_undo, save_undo, game, move_undo->move_row_start,
+        move_undo->move_col_start, BOARD_VERTICAL_DIRECTION);
+    board_transpose(board);
+    calc_for_across_from_undo(
+        move_undo, save_undo, game, move_undo->move_col_start,
+        move_undo->move_row_start, BOARD_VERTICAL_DIRECTION);
+    board_transpose(board);
   }
 }
 
@@ -319,22 +380,13 @@ static void calc_for_self_from_undo(MoveUndo *undo, const Game *game,
 // Every square written is first saved into the undo, so unplaying the move
 // restores the cross-sets without recomputation.
 void update_cross_set_for_move_from_undo(MoveUndo *undo, const Game *game) {
-  Board *board = game_get_board(game);
-  if (board_is_dir_vertical(undo->move_dir)) {
-    calc_for_across_from_undo(undo, game, undo->move_row_start,
-                              undo->move_col_start, BOARD_VERTICAL_DIRECTION);
-    board_transpose(board);
-    calc_for_self_from_undo(undo, game, undo->move_col_start,
-                            undo->move_row_start, BOARD_VERTICAL_DIRECTION);
-    board_transpose(board);
-  } else {
-    calc_for_self_from_undo(undo, game, undo->move_row_start,
-                            undo->move_col_start, BOARD_VERTICAL_DIRECTION);
-    board_transpose(board);
-    calc_for_across_from_undo(undo, game, undo->move_col_start,
-                              undo->move_row_start, BOARD_VERTICAL_DIRECTION);
-    board_transpose(board);
-  }
+  update_cross_sets_into_undo(undo, undo, game);
+}
+
+void update_deferred_move_into_undo(const MoveUndo *move_undo,
+                                    MoveUndo *save_undo, const Game *game) {
+  update_anchors_into_undo(move_undo, save_undo, game_get_board(game));
+  update_cross_sets_into_undo(move_undo, save_undo, game);
 }
 
 void update_cross_set_for_move(const Move *move, const Game *game) {
@@ -614,31 +666,13 @@ static void play_move_on_board_tracked(const Move *move, const Game *game,
   // Update tiles_played (old value already saved by play_move_incremental)
   board_increment_tiles_played(board, move_get_tiles_played(move));
 
-  // Update anchors (old number_of_row_anchors already saved by
-  // play_move_incremental)
-  for (int col = col_start; col < tiles_length + col_start; col++) {
-    board_update_anchors_tracked(board, row_start, col, undo);
-    if (row_start > 0) {
-      board_update_anchors_tracked(board, row_start - 1, col, undo);
-    }
-    if (row_start < BOARD_DIM - 1) {
-      board_update_anchors_tracked(board, row_start + 1, col, undo);
-    }
-  }
-  if (col_start - 1 >= 0) {
-    board_update_anchors_tracked(board, row_start, col_start - 1, undo);
-  }
-  if (tiles_length + col_start < BOARD_DIM) {
-    board_update_anchors_tracked(board, row_start, tiles_length + col_start,
-                                 undo);
-  }
-
   if (board_was_transposed) {
     board_transpose(board);
   }
 }
 
-void play_move_incremental(const Move *move, Game *game, MoveUndo *undo) {
+void play_move_incremental_deferred(const Move *move, Game *game,
+                                    MoveUndo *undo) {
   move_undo_reset(undo);
 
   // Save game state
@@ -680,17 +714,7 @@ void play_move_incremental(const Move *move, Game *game, MoveUndo *undo) {
     undo->tiles_placed_mask = tiles_placed_mask;
 
     play_move_on_board_tracked(move, game, undo);
-    // Update cross-sets eagerly, tracked into this move's undo so unplay
-    // restores them exactly. Deferring the update (computing it lazily before
-    // the next move generation) was unsafe: a move whose lazy update never ran
-    // -- e.g. the last move of a greedy playout, or any node that does not
-    // re-generate -- left its placed and neighbor squares with stale,
-    // empty-isolated TRIVIAL cross-sets. Those propagated through the
-    // save/restore cycle across the search tree and let move generation place
-    // tiles forming invalid words. The update is incremental (only the move's
-    // region), so eager evaluation keeps correctness without a full recompute.
-    update_cross_set_for_move_from_undo(undo, game);
-    board_set_cross_sets_valid(board, true);
+    board_set_cross_sets_valid(board, false);
     game_set_consecutive_scoreless_turns(game, 0);
 
     player_add_to_score(player_on_turn, move_get_score(move));
@@ -724,6 +748,22 @@ void play_move_incremental(const Move *move, Game *game, MoveUndo *undo) {
     game_set_game_end_reason(game, GAME_END_REASON_CONSECUTIVE_ZEROS);
   }
   game_start_next_player_turn(game);
+}
+
+void play_move_incremental(const Move *move, Game *game, MoveUndo *undo) {
+  play_move_incremental_deferred(move, game, undo);
+  // Update the anchors and cross-sets now, tracked into this move's undo so
+  // unplay restores them exactly. Deferring the update is only safe when
+  // every deferred move still on the board is brought up to date before
+  // anything reads the board. An earlier deferral updated only the most
+  // recent move, which left older moves' neighbor squares with stale,
+  // empty-isolated TRIVIAL cross-sets and let move generation place tiles
+  // forming invalid words. The endgame defers safely (see
+  // update_deferred_moves in endgame.c).
+  if (undo->move_tiles_length > 0) {
+    update_deferred_move_into_undo(undo, undo, game);
+    board_set_cross_sets_valid(game_get_board(game), true);
+  }
 }
 
 void unplay_move_incremental(Game *game, const MoveUndo *undo) {

@@ -48,6 +48,12 @@ void update_cross_set_for_move(const Move *move, const Game *game);
 
 // Incremental play/unplay functions for endgame solver optimization
 void play_move_incremental(const Move *move, Game *game, MoveUndo *undo);
+// Like play_move_incremental, but a tile placement leaves the anchors and
+// cross-sets around the move stale and marks the board's cross-sets invalid.
+// Before anything reads them, update_deferred_move_into_undo must run for
+// this move and for every other deferred move still on the board.
+void play_move_incremental_deferred(const Move *move, Game *game,
+                                    MoveUndo *undo);
 void unplay_move_incremental(Game *game, const MoveUndo *undo);
 void play_move_endgame_outplay(const Move *move, Game *game, MoveUndo *undo);
 void update_cross_sets_after_unplay(const Move *move, const Game *game);
@@ -58,6 +64,14 @@ void update_cross_sets_after_unplay(const Move *move, const Game *game);
 // updates exactly — no recompute is needed after unplay. This excludes the
 // parallel WIT block caches; unplay invalidates those derived entries.
 void update_cross_set_for_move_from_undo(MoveUndo *undo, const Game *game);
+
+// Updates the anchors and cross-sets around the move recorded in move_undo,
+// which was played with play_move_incremental_deferred and is still on the
+// board. Every square written is saved into save_undo, the undo of the most
+// recent move, so unplaying that move restores them. Later moves may be on
+// the board too: the update reads the board as it is now.
+void update_deferred_move_into_undo(const MoveUndo *move_undo,
+                                    MoveUndo *save_undo, const Game *game);
 
 // Called at the initial position and after each event. Borrowed game/history
 // are valid only during the callback. Return false to stop normally; errors
