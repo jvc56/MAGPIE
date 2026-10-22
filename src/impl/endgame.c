@@ -100,6 +100,9 @@ enum {
   FIRST_WIN_D0_FALLBACK_MOVES = 12,
   // Most moves a greedy leaf playout plays; in practice the game ends first.
   EG_MAX_LEAF_PLAYOUT = MAX_SEARCH_DEPTH + 1,
+  // Most moves on a worker's board at once: one per slot of its move_undos
+  // and pass_undos.
+  EG_MAX_PLAYED_MOVES = (2 * MAX_SEARCH_DEPTH) + EG_MAX_LEAF_PLAYOUT + 1,
 };
 
 // A stuck-tile greedy playout extends the incremental lists' path past the
@@ -290,6 +293,17 @@ struct EndgameCtxWorker {
   // Per-depth MoveUndo for forced-pass bypass. Pass recurses at the same depth
   // so it cannot share move_undos[]; indexed by the depth parameter (0..25).
   MoveUndo pass_undos[MAX_SEARCH_DEPTH + 1];
+  // The undos of the moves on game_copy, oldest first. Moves are played with
+  // their anchor and cross-set updates deferred, and update_deferred_moves
+  // applies those of the moves from first_deferred_move up just before
+  // anything reads the board. A child answered from the transposition table
+  // never looks at its board, so it never pays for them.
+  // first_deferred_move_at_play[i] is first_deferred_move before move i was
+  // played; unplaying move i restores it.
+  MoveUndo *played_move_undos[EG_MAX_PLAYED_MOVES];
+  int first_deferred_move_at_play[EG_MAX_PLAYED_MOVES];
+  int num_played_moves;
+  int first_deferred_move;
   XoshiroPRNG *prng;       // Per-thread PRNG for jitter
   PVLine best_pv;          // Thread-local best PV
   int32_t best_pv_value;   // Thread-local best value
@@ -1193,6 +1207,8 @@ static EndgameCtxWorker *endgame_ctx_create_worker(EndgameCtx *solver,
 
   solver_worker->solver = solver;
   memset(solver_worker->move_undos, 0, sizeof(solver_worker->move_undos));
+  solver_worker->num_played_moves = 0;
+  solver_worker->first_deferred_move = 0;
 
   // Seed by ordinal (stable across solves), not the MoveGen slot, so jitter is
   // deterministic regardless of which slots were borrowed.
@@ -1235,6 +1251,8 @@ static void endgame_ctx_reset_worker(EndgameCtxWorker *worker,
   arena_reset(worker->small_move_arena);
   configure_worker_path_lists(worker, solver);
   memset(worker->move_undos, 0, sizeof(worker->move_undos));
+  worker->num_played_moves = 0;
+  worker->first_deferred_move = 0;
   prng_seed(worker->prng, base_seed + (uint64_t)worker->ordinal * 12345);
   worker->best_pv.game = worker->game_copy;
   worker->best_pv.num_moves = 0;
@@ -1335,6 +1353,7 @@ static void endgame_ctx_prepare_workers(EndgameCtx *solver,
 static int generate_single_tile_plays(EndgameCtxWorker *worker) {
   const Game *game = worker->game_copy;
   const Board *board = game_get_board(game);
+  assert(board_get_cross_sets_valid(board));
   const LetterDistribution *ld = game_get_ld(game);
   int stm_idx = game_get_player_on_turn_index(game);
   const Rack *stm_rack = player_get_rack(game_get_player(game, stm_idx));
@@ -1639,20 +1658,52 @@ static int copy_derived_plays_to_arena(EndgameCtxWorker *worker,
   return count + 1;
 }
 
+// Records the move just played on the worker's game with `undo`.
+static void push_played_move(EndgameCtxWorker *worker, MoveUndo *undo) {
+  assert(worker->num_played_moves < EG_MAX_PLAYED_MOVES);
+  worker->first_deferred_move_at_play[worker->num_played_moves] =
+      worker->first_deferred_move;
+  worker->played_move_undos[worker->num_played_moves] = undo;
+  worker->num_played_moves++;
+}
+
+// Unplays the most recent move on the worker's game, whose undo is `undo`.
+static void unplay_played_move(EndgameCtxWorker *worker, const MoveUndo *undo) {
+  assert(worker->num_played_moves > 0 &&
+         worker->played_move_undos[worker->num_played_moves - 1] == undo);
+  worker->num_played_moves--;
+  worker->first_deferred_move =
+      worker->first_deferred_move_at_play[worker->num_played_moves];
+  unplay_move_incremental(worker->game_copy, undo);
+}
+
+// Applies the deferred anchor and cross-set updates of every move still on
+// the board, reading the board as it is now. The squares written are saved
+// into the most recent move's undo, so unplaying that move restores them and
+// defers the earlier moves' updates again. Call before anything reads the
+// anchors or cross-sets: move generation, the stuck-tile scan, or the
+// single-tile plays.
+static void update_deferred_moves(EndgameCtxWorker *worker) {
+  if (worker->first_deferred_move == worker->num_played_moves) {
+    return;
+  }
+  MoveUndo *latest_undo =
+      worker->played_move_undos[worker->num_played_moves - 1];
+  for (int move_index = worker->first_deferred_move;
+       move_index < worker->num_played_moves; move_index++) {
+    const MoveUndo *deferred_undo = worker->played_move_undos[move_index];
+    if (deferred_undo->move_tiles_length > 0) {
+      update_deferred_move_into_undo(deferred_undo, latest_undo,
+                                     worker->game_copy);
+    }
+  }
+  worker->first_deferred_move = worker->num_played_moves;
+  board_set_cross_sets_valid(game_get_board(worker->game_copy), true);
+}
+
 int generate_stm_plays(EndgameCtxWorker *worker, int depth) {
   // stm means side to move
-  // Lazy cross-set generation: only compute if not already valid.
-  Board *board = game_get_board(worker->game_copy);
-  if (!board_get_cross_sets_valid(board)) {
-    int undo_index = worker->solver->requested_plies - depth - 1;
-    if (undo_index >= 0) {
-      MoveUndo *parent_undo = &worker->move_undos[undo_index];
-      if (parent_undo->move_tiles_length > 0) {
-        update_cross_set_for_move_from_undo(parent_undo, worker->game_copy);
-      }
-    }
-    board_set_cross_sets_valid(board, true);
-  }
+  update_deferred_moves(worker);
 
   int stm_idx = game_get_player_on_turn_index(worker->game_copy);
   const Rack *stm_rack =
@@ -2185,22 +2236,8 @@ static int32_t negamax_greedy_leaf_playout(EndgameCtxWorker *worker,
   // evaluation, which is required for TT consistency across threads and
   // transpositions.
   if (worker->solver->use_heuristics) {
-    // The move that brought us to this leaf may have invalidated cross-sets.
-    // Update them now before compute_opp_stuck_fraction. Same net cost as
-    // the lazy update inside the greedy playout's generate_stm_plays — one
-    // update either way; doing it here means the playout loop's lazy check
-    // becomes a no-op on the first iteration.
-    Board *leaf_board = game_get_board(worker->game_copy);
-    if (!board_get_cross_sets_valid(leaf_board)) {
-      int undo_idx = plies - 1; // last negamax move
-      if (undo_idx >= 0) {
-        MoveUndo *last_undo = &worker->move_undos[undo_idx];
-        if (last_undo->move_tiles_length > 0) {
-          update_cross_set_for_move_from_undo(last_undo, worker->game_copy);
-        }
-      }
-      board_set_cross_sets_valid(leaf_board, true);
-    }
+    // compute_opp_stuck_fraction reads the cross-sets.
+    update_deferred_moves(worker);
     int opp_idx = 1 - solving_player;
     const Rack *leaf_opp_rack =
         player_get_rack(game_get_player(worker->game_copy, opp_idx));
@@ -2248,19 +2285,7 @@ static int32_t negamax_greedy_leaf_playout(EndgameCtxWorker *worker,
       playout_interrupted = true;
       break;
     }
-    // Lazy cross-set update from the previous move's undo.
-    // When playout_depth==0, the previous move is the last negamax move
-    // at undo slot plies-1. For subsequent playout moves, the previous
-    // undo is at plies + playout_depth - 1.
-    Board *pb = game_get_board(worker->game_copy);
-    if (!board_get_cross_sets_valid(pb)) {
-      int undo_idx = plies + playout_depth - 1;
-      MoveUndo *prev = &worker->move_undos[undo_idx];
-      if (prev->move_tiles_length > 0) {
-        update_cross_set_for_move_from_undo(prev, worker->game_copy);
-      }
-      board_set_cross_sets_valid(pb, true);
-    }
+    update_deferred_moves(worker);
 
     int stm_idx_p = game_get_player_on_turn_index(worker->game_copy);
     const Rack *stm_rack_p =
@@ -2420,8 +2445,10 @@ static int32_t negamax_greedy_leaf_playout(EndgameCtxWorker *worker,
                            game_get_board(worker->game_copy),
                            worker->move_list->spare_move);
     }
-    play_move_incremental(worker->move_list->spare_move, worker->game_copy,
-                          &worker->move_undos[undo_slot]);
+    play_move_incremental_deferred(worker->move_list->spare_move,
+                                   worker->game_copy,
+                                   &worker->move_undos[undo_slot]);
+    push_played_move(worker, &worker->move_undos[undo_slot]);
 
     // Store move in PV
     if (playout_depth < MAX_VARIANT_LENGTH) {
@@ -2451,11 +2478,11 @@ static int32_t negamax_greedy_leaf_playout(EndgameCtxWorker *worker,
       playout_depth < MAX_VARIANT_LENGTH ? playout_depth : MAX_VARIANT_LENGTH;
   pv->negamax_depth = 0;
 
-  // Unplay all playout moves in reverse. Lazy cross-set updates were saved
-  // into each move's undo, so the square restore reverts them exactly.
+  // Unplay all playout moves in reverse. Cross-set updates were saved into
+  // each move's undo, so the square restore reverts them exactly.
   for (int d = playout_depth - 1; d >= 0; d--) {
     int undo_slot = plies + d;
-    unplay_move_incremental(worker->game_copy, &worker->move_undos[undo_slot]);
+    unplay_played_move(worker, &worker->move_undos[undo_slot]);
     if (follow_path) {
       path_move_lists_pop(worker->path_lists);
     }
@@ -2532,34 +2559,15 @@ static void negamax_tt_store(const EndgameCtxWorker *worker, uint64_t node_key,
 // Stuck-tile detection, move generation, logging, and estimate assignment
 // for non-root nodes (move ordering itself is done lazily by the caller).
 // Updates *opp_stuck_frac. Returns move count, or -1 if interrupted.
-// Brings an interior node's cross-sets up to date from the move that reached
-// it, if that move left them stale.
-static void update_node_cross_sets(EndgameCtxWorker *worker, int depth) {
-  Board *board = game_get_board(worker->game_copy);
-  if (!board_get_cross_sets_valid(board)) {
-    int undo_index = worker->solver->requested_plies - depth - 1;
-    if (undo_index >= 0) {
-      MoveUndo *parent_undo = &worker->move_undos[undo_index];
-      if (parent_undo->move_tiles_length > 0) {
-        update_cross_set_for_move_from_undo(parent_undo, worker->game_copy);
-      }
-    }
-    board_set_cross_sets_valid(board, true);
-  }
-}
-
 static int negamax_generate_and_estimate_moves(EndgameCtxWorker *worker,
                                                int depth, uint64_t tt_move,
                                                float *opp_stuck_frac) {
   int opp_idx = 1 - worker->solver->solving_player;
   uint64_t opp_tiles_bv = 0;
   int nplays;
-  // Bring cross-sets up to date before compute_opp_stuck_fraction and movegen.
-  // The same incremental update would otherwise happen lazily inside
-  // generate_stm_plays; doing it here first means generate_stm_plays will
-  // find cross-sets already valid and skip its own update. Net cost is
-  // identical — one update per node either way.
-  update_node_cross_sets(worker, depth);
+  // compute_opp_stuck_fraction and movegen read the board; generate_stm_plays
+  // then finds nothing left to update.
+  update_deferred_moves(worker);
   if (worker->solver->use_heuristics) {
     // Generate first: with the opponent on turn, the list just generated is
     // their complete play list, so its tile types give the stuck fraction
@@ -2798,11 +2806,13 @@ static uint64_t play_small_move_and_hash(EndgameCtxWorker *worker,
   if (is_outplay) {
     play_move_endgame_outplay(worker->move_list->spare_move, worker_game, undo);
   } else {
-    play_move_incremental(worker->move_list->spare_move, worker_game, undo);
-    // Cross-sets are left invalid - they will be computed lazily before move
-    // generation if we reach that point. The cross-set squares will be saved
-    // to MoveUndo before updating, so they're restored on unplay.
+    // The child often returns from the transposition table without looking
+    // at the board, so its anchors and cross-sets wait until something reads
+    // them.
+    play_move_incremental_deferred(worker->move_list->spare_move, worker_game,
+                                   undo);
   }
+  push_played_move(worker, undo);
 
   uint64_t child_key = 0;
   if (worker->solver->transposition_table_optim) {
@@ -2829,10 +2839,10 @@ static uint64_t play_small_move_and_hash(EndgameCtxWorker *worker,
 // returns true, or returns false when the node should build its list first: a
 // stuck opponent (the ordering then weighs conservation), an interrupt, or no
 // play at all.
-static bool pick_first_reply_before_list(EndgameCtxWorker *worker, int depth,
+static bool pick_first_reply_before_list(EndgameCtxWorker *worker,
                                          float *opp_stuck_frac,
                                          SmallMove *first_reply) {
-  update_node_cross_sets(worker, depth);
+  update_deferred_moves(worker);
   if (worker->solver->use_heuristics) {
     const int opp_idx = 1 - worker->solver->solving_player;
     const float stuck_frac = compute_opp_stuck_fraction(
@@ -3031,8 +3041,7 @@ int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
       rack_get_total_letters(player_get_rack(player_on_turn)) >= 2 &&
       !(worker->current_iterative_deepening_depth - 1 == depth &&
         worker->ordinal == 0 && worker->in_first_root_move) &&
-      pick_first_reply_before_list(worker, depth, &opp_stuck_frac,
-                                   &first_reply)) {
+      pick_first_reply_before_list(worker, &opp_stuck_frac, &first_reply)) {
     const int undo_index = worker->solver->requested_plies - depth;
     atomic_store_explicit(&worker->current_line[undo_index],
                           first_reply.tiny_move, memory_order_relaxed);
@@ -3043,7 +3052,7 @@ int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
     const int32_t value =
         abdada_negamax(worker, child_key, depth - 1, -beta, -alpha, &child_pv,
                        pv_node, false, opp_stuck_frac);
-    unplay_move_incremental(worker->game_copy, &worker->move_undos[undo_index]);
+    unplay_played_move(worker, &worker->move_undos[undo_index]);
     if (worker->path_lists != NULL) {
       path_move_lists_pop(worker->path_lists);
     }
@@ -3122,6 +3131,7 @@ int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
       }
       play_move_incremental(worker->move_list->spare_move, worker->game_copy,
                             &worker->pass_undos[depth]);
+      push_played_move(worker, &worker->pass_undos[depth]);
 
       uint64_t child_key = 0;
       if (worker->solver->transposition_table_optim) {
@@ -3139,7 +3149,7 @@ int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
       int32_t value = abdada_negamax(worker, child_key, depth, -beta, -alpha,
                                      &child_pv, pv_node, false, opp_stuck_frac);
 
-      unplay_move_incremental(worker->game_copy, &worker->pass_undos[depth]);
+      unplay_played_move(worker, &worker->pass_undos[depth]);
       if (worker->path_lists != NULL) {
         path_move_lists_pop(worker->path_lists);
       }
@@ -3416,8 +3426,7 @@ int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
                                  &child_pv, pv_node, false, opp_stuck_frac);
         }
       }
-      unplay_move_incremental(worker->game_copy,
-                              &worker->move_undos[undo_index]);
+      unplay_played_move(worker, &worker->move_undos[undo_index]);
       if (worker->path_lists != NULL) {
         path_move_lists_pop(worker->path_lists);
       }
@@ -3663,7 +3672,7 @@ static void root_greedy_sweep(EndgameCtxWorker *worker, uint64_t root_key,
     child_pv.negamax_depth = 0;
     const int32_t leaf_val = negamax_leaf_value(
         worker, child_key, post_on_turn, post_on_turn_spread, &child_pv, 0.0F);
-    unplay_move_incremental(worker->game_copy, &worker->move_undos[undo_index]);
+    unplay_played_move(worker, &worker->move_undos[undo_index]);
     if (worker->path_lists != NULL) {
       path_move_lists_pop(worker->path_lists);
     }
@@ -3720,6 +3729,8 @@ static uint64_t solver_root_hash_key(const EndgameCtx *solver,
 static inline void solver_pvline_extend_from_tt(PVLine *pv_line,
                                                 EndgameCtx *solver,
                                                 const Game *source_game) {
+  // The extension scores moves from the copied board's cross-scores.
+  assert(board_get_cross_sets_valid(game_get_board(source_game)));
   if (!solver->ext_game) {
     solver->ext_game = game_duplicate(source_game);
   } else {
@@ -4167,7 +4178,7 @@ static int32_t resolve_root_move_pv(const EndgameCtx *solver,
   const int32_t value =
       abdada_negamax(worker, child_key, depth - 1, -LARGE_VALUE, LARGE_VALUE,
                      &child_pv, true, false, 0.0F);
-  unplay_move_incremental(worker_game, &worker->move_undos[undo_index]);
+  unplay_played_move(worker, &worker->move_undos[undo_index]);
   if (worker->path_lists != NULL) {
     path_move_lists_pop(worker->path_lists);
   }

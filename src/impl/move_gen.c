@@ -3594,6 +3594,9 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
   gen->best_small_canonical_ties = args->best_small_canonical_ties;
 
   gen->board = game_get_board(game);
+  // The endgame defers moves' anchor and cross-set updates; they must be
+  // applied before generating on the board.
+  assert(board_get_cross_sets_valid(gen->board));
   gen->player_index = game_get_player_on_turn_index(game);
   const Player *player = game_get_player(game, gen->player_index);
   const Player *opponent = game_get_player(game, 1 - gen->player_index);

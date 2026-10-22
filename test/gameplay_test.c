@@ -30,6 +30,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 void return_racks_to_bag(const Game *game) {
@@ -837,6 +838,29 @@ void test_moves_are_similar(void) {
   "5DREKS1F3/8YELL3/4ABASER1U3/4GYM3ZO3/WAITE5OR2J/10OI2A/3QUOIT1PINNER/"      \
   "4RENEGADE2P CDIOST?/AIINOOU 450/392 0"
 
+// The board's cross-sets and cross scores must equal a full recompute.
+static void assert_cross_sets_match_full_recompute(const Game *game) {
+  const Board *board = game_get_board(game);
+  Game *fresh = game_duplicate(game);
+  game_gen_all_cross_sets(fresh);
+  const Board *fresh_board = game_get_board(fresh);
+  for (int r = 0; r < BOARD_DIM; r++) {
+    for (int c = 0; c < BOARD_DIM; c++) {
+      for (int d = 0; d < 2; d++) {
+        assert(board_get_cross_set(board, r, c, d, 0) ==
+               board_get_cross_set(fresh_board, r, c, d, 0));
+        assert(board_get_cross_set(board, r, c, d, 1) ==
+               board_get_cross_set(fresh_board, r, c, d, 1));
+        for (int ci = 0; ci < 2; ci++) {
+          assert(board_get_cross_score(board, r, c, d, ci) ==
+                 board_get_cross_score(fresh_board, r, c, d, ci));
+        }
+      }
+    }
+  }
+  game_destroy(fresh);
+}
+
 // Round-trip invariant the endgame solver relies on instead of recomputing
 // cross-sets after unplay: play_move_incremental, then the lazy
 // update_cross_set_for_move_from_undo a descendant node performs before move
@@ -877,26 +901,7 @@ static void assert_incremental_play_roundtrip(Game *game,
     // with NO subsequent lazy update. The old deferred behavior left them
     // invalid/stale, which let the endgame playout generate invalid words.
     assert(board_get_cross_sets_valid(board));
-    {
-      Game *fresh = game_duplicate(game);
-      game_gen_all_cross_sets(fresh);
-      const Board *fresh_board = game_get_board(fresh);
-      for (int r = 0; r < BOARD_DIM; r++) {
-        for (int c = 0; c < BOARD_DIM; c++) {
-          for (int d = 0; d < 2; d++) {
-            assert(board_get_cross_set(board, r, c, d, 0) ==
-                   board_get_cross_set(fresh_board, r, c, d, 0));
-            assert(board_get_cross_set(board, r, c, d, 1) ==
-                   board_get_cross_set(fresh_board, r, c, d, 1));
-            for (int ci = 0; ci < 2; ci++) {
-              assert(board_get_cross_score(board, r, c, d, ci) ==
-                     board_get_cross_score(fresh_board, r, c, d, ci));
-            }
-          }
-        }
-      }
-      game_destroy(fresh);
-    }
+    assert_cross_sets_match_full_recompute(game);
     // Mirror the endgame solver's descendant node: bring cross-sets up to
     // date from the parent's undo before (hypothetical) move generation.
     if (undo.move_tiles_length > 0) {
@@ -944,12 +949,185 @@ static void assert_incremental_play_roundtrip(Game *game,
   game_destroy(snapshot);
 }
 
+// Generates every move for the player on turn, sorted best first. The moves
+// live in move_list, which the caller destroys after the sorted list.
+static SortedMoveList *generate_sorted_moves(Game *game, MoveList *move_list) {
+  const MoveGenArgs args = {
+      .game = game,
+      .move_list = move_list,
+      .move_record_type = MOVE_RECORD_ALL,
+      .move_sort_type = MOVE_SORT_SCORE,
+      .override_kwg = NULL,
+      .eq_margin_movegen = 0,
+      .target_equity = EQUITY_MAX_VALUE,
+  };
+  generate_moves(&args);
+  return sorted_move_list_create(move_list);
+}
+
+// Whether `move` places at most two tiles and keeps at least one on the
+// mover's rack, so a short schedule of such moves never ends the game.
+static bool is_short_tile_placement(const Move *move, int rack_size) {
+  if (move_get_type(move) != GAME_EVENT_TILE_PLACEMENT_MOVE) {
+    return false;
+  }
+  const int tiles_played = move_get_tiles_played(move);
+  if (tiles_played > 2) {
+    return false;
+  }
+  return tiles_played < rack_size;
+}
+
+// The step-th short tile placement (wrapping), or NULL if there is none.
+static const Move *pick_short_tile_placement(const SortedMoveList *sml,
+                                             const Game *game, int step) {
+  const Rack *rack = player_get_rack(
+      game_get_player(game, game_get_player_on_turn_index(game)));
+  const int rack_size = rack_get_total_letters(rack);
+  int num_candidates = 0;
+  for (int move_idx = 0; move_idx < sml->count; move_idx++) {
+    if (is_short_tile_placement(sml->moves[move_idx], rack_size)) {
+      num_candidates++;
+    }
+  }
+  if (num_candidates == 0) {
+    return NULL;
+  }
+  int target = (step * 7) % num_candidates;
+  for (int move_idx = 0; move_idx < sml->count; move_idx++) {
+    const Move *move = sml->moves[move_idx];
+    if (is_short_tile_placement(move, rack_size)) {
+      if (target == 0) {
+        return move;
+      }
+      target--;
+    }
+  }
+  return NULL;
+}
+
+// The schedule of assert_deferred_play_matches_eager. Each step plays a tile
+// placement, or a pass where step_is_pass says so, and the steps marked in
+// step_updates then apply the deferred updates. The pass's undo receives the
+// updates of the tile placement before it.
+enum { DEFERRED_PLAY_NUM_STEPS = 6 };
+static const bool deferred_play_step_is_pass[DEFERRED_PLAY_NUM_STEPS] = {
+    false, false, false, true, false, false};
+static const bool deferred_play_step_updates[DEFERRED_PLAY_NUM_STEPS] = {
+    false, true, false, true, false, true};
+
+// The endgame solver plays moves with play_move_incremental_deferred and,
+// only when something reads the board, applies the deferred anchor and
+// cross-set updates of every move still on it, saving them into the most
+// recent move's undo. After each such update the board must hold the
+// cross-sets of a full recompute and the anchors of an eagerly updated board,
+// and generate exactly its moves. Unplaying must restore every earlier board
+// byte-for-byte, deferred updates included.
+static void assert_deferred_play_matches_eager(Game *game) {
+  game_gen_all_cross_sets(game);
+  Board *board = game_get_board(game);
+  board_set_cross_sets_valid(board, true);
+  Game *eager = game_duplicate(game);
+  const Board *eager_board = game_get_board(eager);
+
+  MoveUndo *undos = malloc_or_die(sizeof(MoveUndo) * DEFERRED_PLAY_NUM_STEPS);
+  MoveUndo *eager_undos =
+      malloc_or_die(sizeof(MoveUndo) * DEFERRED_PLAY_NUM_STEPS);
+  Game *snapshots[DEFERRED_PLAY_NUM_STEPS];
+  int first_deferred_at_play[DEFERRED_PLAY_NUM_STEPS];
+  int first_deferred = 0;
+  // Large enough to hold every move, so the comparison covers them all.
+  MoveList *move_list = move_list_create(100000);
+  MoveList *eager_move_list = move_list_create(100000);
+  Move pass;
+  move_set_as_pass(&pass);
+
+  int num_steps = 0;
+  for (int step = 0; step < DEFERRED_PLAY_NUM_STEPS; step++) {
+    SortedMoveList *eager_moves = generate_sorted_moves(eager, eager_move_list);
+    const Move *move =
+        deferred_play_step_is_pass[step]
+            ? &pass
+            : pick_short_tile_placement(eager_moves, eager, step);
+    if (move == NULL) {
+      sorted_move_list_destroy(eager_moves);
+      break;
+    }
+    snapshots[step] = game_duplicate(game);
+    first_deferred_at_play[step] = first_deferred;
+    play_move_incremental_deferred(move, game, &undos[step]);
+    play_move_incremental(move, eager, &eager_undos[step]);
+    sorted_move_list_destroy(eager_moves);
+    num_steps++;
+    if (!deferred_play_step_updates[step]) {
+      continue;
+    }
+    for (int deferred = first_deferred; deferred <= step; deferred++) {
+      if (undos[deferred].move_tiles_length > 0) {
+        update_deferred_move_into_undo(&undos[deferred], &undos[step], game);
+      }
+    }
+    first_deferred = step + 1;
+    board_set_cross_sets_valid(board, true);
+
+    assert_cross_sets_match_full_recompute(game);
+    for (int row = 0; row < BOARD_DIM; row++) {
+      for (int col = 0; col < BOARD_DIM; col++) {
+        for (int dir = 0; dir < 2; dir++) {
+          assert(board_get_anchor(board, row, col, dir) ==
+                 board_get_anchor(eager_board, row, col, dir));
+        }
+      }
+    }
+    assert(memcmp(board->number_of_row_anchors,
+                  eager_board->number_of_row_anchors,
+                  sizeof(board->number_of_row_anchors)) == 0);
+    SortedMoveList *deferred_moves = generate_sorted_moves(game, move_list);
+    eager_moves = generate_sorted_moves(eager, eager_move_list);
+    assert(deferred_moves->count == eager_moves->count);
+    for (int move_idx = 0; move_idx < eager_moves->count; move_idx++) {
+      assert(compare_moves_without_equity(deferred_moves->moves[move_idx],
+                                          eager_moves->moves[move_idx],
+                                          true) == -1);
+    }
+    sorted_move_list_destroy(deferred_moves);
+    sorted_move_list_destroy(eager_moves);
+  }
+  // Every step must find a move, so updates cover several moves and a pass.
+  assert(num_steps == DEFERRED_PLAY_NUM_STEPS);
+
+  for (int step = num_steps - 1; step >= 0; step--) {
+    first_deferred = first_deferred_at_play[step];
+    unplay_move_incremental(game, &undos[step]);
+    unplay_move_incremental(eager, &eager_undos[step]);
+    const Board *snapshot = game_get_board(snapshots[step]);
+    // NOLINTNEXTLINE(bugprone-suspicious-memory-comparison,cert-exp42-c,cert-flp37-c)
+    assert(memcmp(board->squares, snapshot->squares, sizeof(board->squares)) ==
+           0);
+    assert(memcmp(board->number_of_row_anchors, snapshot->number_of_row_anchors,
+                  sizeof(board->number_of_row_anchors)) == 0);
+    assert(board_get_cross_sets_valid(board) ==
+           board_get_cross_sets_valid(snapshot));
+    assert(board_get_tiles_played(board) == board_get_tiles_played(snapshot));
+    game_destroy(snapshots[step]);
+  }
+  assert(first_deferred == 0);
+
+  move_list_destroy(eager_move_list);
+  move_list_destroy(move_list);
+  free(eager_undos);
+  free(undos);
+  game_destroy(eager);
+}
+
 void test_incremental_cross_set_undo(void) {
   // Shared-KWG (single lexicon): only cross index 0 is maintained.
   Config *config = config_create_or_die("set -lex CSW21 -s1 score -s2 score");
   Game *game = config_game_create(config);
   load_cgp_or_die(game, INCREMENTAL_ROUNDTRIP_ENDGAME_CGP);
   assert_incremental_play_roundtrip(game, true);
+  load_cgp_or_die(game, INCREMENTAL_ROUNDTRIP_ENDGAME_CGP);
+  assert_deferred_play_matches_eager(game);
   game_destroy(game);
   config_destroy(config);
 
@@ -960,6 +1138,8 @@ void test_incremental_cross_set_undo(void) {
   Game *dual_game = config_game_create(dual_config);
   load_cgp_or_die(dual_game, INCREMENTAL_ROUNDTRIP_ENDGAME_CGP);
   assert_incremental_play_roundtrip(dual_game, true);
+  load_cgp_or_die(dual_game, INCREMENTAL_ROUNDTRIP_ENDGAME_CGP);
+  assert_deferred_play_matches_eager(dual_game);
   game_destroy(dual_game);
   config_destroy(dual_config);
 

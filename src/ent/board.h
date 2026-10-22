@@ -69,6 +69,8 @@ typedef struct Board {
   int start_coords[2];
   // Flag for lazy cross-set evaluation in endgame solver.
   // When false, cross-sets need to be recalculated before move generation.
+  // The endgame clears it while it defers the anchor and cross-set updates
+  // of moves on the board (see play_move_incremental_deferred).
   bool cross_sets_valid;
   // True if any WIT row may be non-NULL. Empty caches need no clearing in
   // board_copy or incremental undo, keeping WIT-off copies cheap.
