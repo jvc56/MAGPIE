@@ -972,11 +972,15 @@ void test_endgame_tt_pv_bound_repeat(void) {
   config_destroy(config);
 }
 
-// The opponent's V is stuck, so the mover can pass and get a pass back: pass,
-// pass, then a play reaches the play's position, the same transposition-table
-// key, two plies shallower. Trusting an entry stored deeper than the node
-// mixed in a deeper search's value, and which of those a solve met depended
-// on what the other threads stored first: at 12 or more threads, 5-ply solves
+// Passes interleaved with plays make positions recur with fewer plies left:
+// the moves A, Z, B and pass, Z, A, pass, B reach the same transposition-table
+// key, the second with two fewer plies left. (Two scoreless turns in a row end
+// an endgame, so the passes cannot simply come in pairs.) Trusting an entry
+// stored deeper than the node mixed in a deeper search's value, and which of
+// those a solve met depended on what the other threads stored first. Every
+// deeper entry a one-thread solve of this position meets is reached through a
+// pass; at 18 threads, helpers searching a shallower depth also meet the
+// deeper entries other threads stored. At 12 or more threads, 5-ply solves
 // of this position returned 83 with 9F (N)A instead of 81 with 2L V(E)E, in
 // about 1 of 100 solves on main and in every solve once the starting helpers
 // lost their move-ordering jitter. One thread and the search without a
