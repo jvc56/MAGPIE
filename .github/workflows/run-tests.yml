@@ -243,8 +243,8 @@ jobs:
 
       # Wine comes from the runner's Ubuntu mirror, which sometimes slows to a
       # few KB/s for hours. Its packages are cached per runner image, so most
-      # runs install them without the mirror; otherwise the mirror gets 10
-      # minutes before one retry from archive.ubuntu.com.
+      # runs install them without the mirror; otherwise the mirror gets about
+      # 10 minutes before one retry from archive.ubuntu.com.
       - name: Name the Wine package cache
         id: wine-cache-key
         run: echo "key=wine64-debs-$ImageOS-$ImageVersion" >> "$GITHUB_OUTPUT"
@@ -260,16 +260,20 @@ jobs:
         timeout-minutes: 25
         run: |
           debs="$HOME/wine-debs"
+          # timeout runs apt-get itself, so a timed-out apt-get is stopped and
+          # releases apt's lock for the retry.
           if ls "$debs"/*.deb > /dev/null 2>&1 &&
-            timeout 300 sudo apt-get install -y "$debs"/*.deb; then
+            sudo timeout --kill-after=10 300 apt-get install -y "$debs"/*.deb; then
             exit 0
           fi
           # apt needs the partial/ directory of an archives directory to exist.
           mkdir -p "$debs/partial"
           install_wine() {
-            timeout 600 sudo sh -c "apt-get update &&
-              apt-get install -y -o Dir::Cache::Archives='$debs' \
-                -o APT::Keep-Downloaded-Packages=true wine64"
+            sudo timeout --kill-after=10 120 apt-get update &&
+              sudo timeout --kill-after=10 480 apt-get install -y \
+                -o Dir::Cache::Archives="$debs" \
+                -o APT::Keep-Downloaded-Packages=true \
+                -o DPkg::Lock::Timeout=60 wine64
           }
           if ! install_wine; then
             echo "::warning::Installing Wine from the runner's mirror failed or took over 10 minutes; retrying from archive.ubuntu.com"
