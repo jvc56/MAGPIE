@@ -22,6 +22,7 @@
 #include "../src/impl/gameplay.h"
 #include "../src/impl/move_gen.h"
 #include "../src/util/io_util.h"
+#include "../src/util/string_util.h"
 #include "test_platform.h"
 #include "test_util.h"
 #include <assert.h>
@@ -496,18 +497,19 @@ void test_benchmark_nonstuck_3v3(void) {
 // the search tree identical, while a pruning change shows as fewer nodes with
 // an unchanged value.
 //
-// Parameterized entirely by environment so the same binary can sweep depth /
-// thread count / battery without recompiling:
-//   MAGPIE_BENCH_CGP     CGP file  (default nonstuck_cgps.txt, temporary dir)
-//   MAGPIE_BENCH_LEX     lexicon            (default CSW21)
-//   MAGPIE_BENCH_PLIES   endgame plies      (default 4)
-//   MAGPIE_BENCH_THREADS solver threads     (default 1  -> deterministic nodes)
-//   MAGPIE_BENCH_MAX     max positions      (default 100)
-//   MAGPIE_BENCH_INCREMENTAL 1 = incremental move lists (default 0)
-//   MAGPIE_BENCH_INTERLEAVE 1 = solve each position off and on, alternating
-//                           order, TT cleared per solve (default 0);
-//                           MAGPIE_BENCH_INCREMENTAL is then ignored
-//   MAGPIE_BENCH_TAG     label for the run  (default "bench")
+// Run as egspeedbench for the defaults, or egspeedbench:<key>=<value>,... so
+// the same binary can sweep depth / thread count / battery without
+// recompiling:
+//   cgp          CGP file  (default nonstuck_cgps.txt, temporary dir)
+//   lex          lexicon            (default CSW21)
+//   plies        endgame plies      (default 4)
+//   threads      solver threads     (default 1  -> deterministic nodes)
+//   max          max positions      (default 100)
+//   incremental  1 = incremental move lists (default 0)
+//   interleave   1 = solve each position off and on, alternating order, TT
+//                cleared per solve (default 0); incremental is then ignored
+//   tag          label for the run  (default "bench")
+// For example: egspeedbench:cgp=positions.txt,plies=5,threads=4,incremental=1
 static int env_int(const char *name, int fallback) {
   const char *v = getenv(name);
   if (v == NULL || v[0] == '\0') {
@@ -524,32 +526,35 @@ static double env_double(const char *name, double fallback) {
   return strtod(v, NULL);
 }
 
-void test_endgame_speed_bench(void) {
+typedef struct EndgameSpeedBenchArgs {
+  const char *cgp_file; // NULL = nonstuck_cgps.txt in the temporary directory
+  const char *lex;
+  const char *tag;
+  int plies;
+  int threads;
+  int max_positions;
+  bool incremental;
+  bool interleave;
+} EndgameSpeedBenchArgs;
+
+static void run_endgame_speed_bench(const EndgameSpeedBenchArgs *bench_args) {
   log_set_level(LOG_FATAL);
 
   char *default_cgp_file = test_platform_temporary_path("nonstuck_cgps.txt");
-  const char *cgp_file = getenv("MAGPIE_BENCH_CGP");
-  if (cgp_file == NULL || cgp_file[0] == '\0') {
-    cgp_file = default_cgp_file;
-  }
-  const char *lex = getenv("MAGPIE_BENCH_LEX");
-  if (lex == NULL || lex[0] == '\0') {
-    lex = "CSW21";
-  }
-  const char *tag = getenv("MAGPIE_BENCH_TAG");
-  if (tag == NULL || tag[0] == '\0') {
-    tag = "bench";
-  }
-  const int plies = env_int("MAGPIE_BENCH_PLIES", 4);
-  const int threads = env_int("MAGPIE_BENCH_THREADS", 1);
-  const int max_positions = env_int("MAGPIE_BENCH_MAX", 100);
-  const bool incremental = env_int("MAGPIE_BENCH_INCREMENTAL", 0) != 0;
+  const char *cgp_file =
+      bench_args->cgp_file != NULL ? bench_args->cgp_file : default_cgp_file;
+  const char *lex = bench_args->lex;
+  const char *tag = bench_args->tag;
+  const int plies = bench_args->plies;
+  const int threads = bench_args->threads;
+  const int max_positions = bench_args->max_positions;
+  const bool incremental = bench_args->incremental;
   // Interleaved A/B: solve every position with the incremental lists off and
   // on, back to back, alternating which goes first per position so neither
   // side systematically benefits from a warm cache. The TT is cleared before
   // every solve so the second solve of a position cannot hit the first's
   // entries. Rows carry a cfg column and two summaries are printed.
-  const bool interleave = env_int("MAGPIE_BENCH_INTERLEAVE", 0) != 0;
+  const bool interleave = bench_args->interleave;
 
   FILE *fp = cfile_open(cgp_file, "re", false);
   if (!fp) {
@@ -675,6 +680,67 @@ void test_endgame_speed_bench(void) {
   endgame_ctx_destroy(solver);
   endgame_results_destroy(results);
   config_destroy(config);
+}
+
+static EndgameSpeedBenchArgs endgame_speed_bench_default_args(void) {
+  return (EndgameSpeedBenchArgs){.cgp_file = NULL,
+                                 .lex = "CSW21",
+                                 .tag = "bench",
+                                 .plies = 4,
+                                 .threads = 1,
+                                 .max_positions = 100,
+                                 .incremental = false,
+                                 .interleave = false};
+}
+
+// The integer after "<key>=" in item.
+static int speed_bench_spec_int(const char *item, const char *key) {
+  ErrorStack *error_stack = error_stack_create();
+  const int value = string_to_int(item + strlen(key) + 1, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    log_fatal("egspeedbench %s must be an integer, got '%s'", key, item);
+  }
+  error_stack_destroy(error_stack);
+  return value;
+}
+
+void test_endgame_speed_bench(void) {
+  const EndgameSpeedBenchArgs args = endgame_speed_bench_default_args();
+  run_endgame_speed_bench(&args);
+}
+
+// "<key>=<value>[,<key>=<value>...]", with the keys listed above.
+void endgame_speed_bench_run_spec(const char *spec) {
+  EndgameSpeedBenchArgs args = endgame_speed_bench_default_args();
+  StringSplitter *items = split_string(spec, ',', true);
+  const int num_items = string_splitter_get_number_of_items(items);
+  for (int item_idx = 0; item_idx < num_items; item_idx++) {
+    const char *item = string_splitter_get_item(items, item_idx);
+    if (has_prefix("cgp=", item)) {
+      args.cgp_file = item + strlen("cgp=");
+    } else if (has_prefix("lex=", item)) {
+      args.lex = item + strlen("lex=");
+    } else if (has_prefix("tag=", item)) {
+      args.tag = item + strlen("tag=");
+    } else if (has_prefix("plies=", item)) {
+      args.plies = speed_bench_spec_int(item, "plies");
+    } else if (has_prefix("threads=", item)) {
+      args.threads = speed_bench_spec_int(item, "threads");
+    } else if (has_prefix("max=", item)) {
+      args.max_positions = speed_bench_spec_int(item, "max");
+    } else if (has_prefix("incremental=", item)) {
+      args.incremental = speed_bench_spec_int(item, "incremental") != 0;
+    } else if (has_prefix("interleave=", item)) {
+      args.interleave = speed_bench_spec_int(item, "interleave") != 0;
+    } else {
+      log_fatal("egspeedbench spec takes cgp, lex, tag, plies, threads, max, "
+                "incremental and interleave, got '%s'",
+                item);
+    }
+  }
+  // The strings in args point into items, so it outlives the run.
+  run_endgame_speed_bench(&args);
+  string_splitter_destroy(items);
 }
 
 // ---------------------------------------------------------------------------
