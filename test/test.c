@@ -329,6 +329,10 @@ void run_test(const char *subtest) {
     pat_opening_sim_run_spec(subtest + strlen("patopeningsim:"));
     return;
   }
+  if (has_prefix("egspeedbench:", subtest)) {
+    endgame_speed_bench_run_spec(subtest + strlen("egspeedbench:"));
+    return;
+  }
   log_fatal("unrecognized test: %s\n", subtest);
 }
 
