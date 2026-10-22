@@ -429,12 +429,22 @@ void generate_moves(const MoveGenArgs *args);
 // The MOVE_RECORD_ALL_SMALL plays of the lanes whose bit is set in
 // `lane_mask` (bit dir * BOARD_DIM + row_or_col: the BOARD_DIM horizontal
 // rows, then the BOARD_DIM vertical columns), appended to args->move_list in
-// generate_moves' lane order with no pass. lane_end[lane] receives the list
+// generate_moves' lane order with no pass, skipping every anchor none of whose
+// plays can span a square set in its lane's lane_hits entry (bit c: column c
+// of a row, row c of a column). A play from an anchor starts right of the
+// anchor's leftward limit (the previous anchor's square, or the square after
+// it when that holds a tile) and covers, on either side of the anchor, no
+// more empty squares than the rack has tiles and none where no rack tile
+// fits, besides the tiles it plays through. lane_end[lane] receives the list
 // count once that lane has been processed, so lane L's plays occupy
-// [lane_end[L - 1], lane_end[L]) (from 0 for L == 0). Serves the endgame's
+// [lane_end[L - 1], lane_end[L]) (from 0 for L == 0). For each lane in
+// lane_mask, lane_anchors[lane] receives the bits of the lane's anchors and
+// lane_generated[lane] those of the anchors not skipped. Serves the endgame's
 // incremental move lists (path_move_lists.h).
 void generate_small_moves_in_lanes(const MoveGenArgs *args, uint64_t lane_mask,
-                                   int *lane_end);
+                                   const uint32_t *lane_hits, int *lane_end,
+                                   uint32_t *lane_anchors,
+                                   uint32_t *lane_generated);
 
 // The MOVE_RECORD_BEST_SMALL generation restricted to the anchors of the lanes
 // in `lane_mask` (indexed as for generate_small_moves_in_lanes), competing

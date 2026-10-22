@@ -299,11 +299,12 @@ static MoveGenArgs best_small_args_for(const Game *game, MoveList *move_list,
 
 // Every best_play answer at the current path position must agree with the
 // argmax of the materialized list, of a scratch ALL_SMALL generation, and of a
-// scratch BEST_SMALL generation.
+// scratch BEST_SMALL generation. Counts in *num_split_lanes the lanes the
+// materialized list both regenerated anchors of and carried anchors of.
 static void assert_best_play_matches(PathMoveLists *lists,
                                      const MoveGenArgs *args,
                                      MoveList *best_move_list, uint64_t *rng,
-                                     int *num_checks) {
+                                     int *num_checks, int *num_split_lanes) {
   const Game *game = args->game;
   const int side_to_move_tiles = rack_get_total_letters(player_get_rack(
       game_get_player(game, game_get_player_on_turn_index(game))));
@@ -323,6 +324,13 @@ static void assert_best_play_matches(PathMoveLists *lists,
   const SmallMove *derived = NULL;
   const int count = path_move_lists_moves_at(lists, args, &derived);
   assert_matches_scratch(derived, count, args);
+  const uint64_t pending = path_move_lists_pending_lanes(lists);
+  for (int lane = 0; lane < PATH_MOVE_LISTS_NUM_LANES; lane++) {
+    if (((pending >> lane) & 1) != 0 && lists->lane_generated[lane] != 0 &&
+        lists->lane_generated[lane] != lists->lane_anchors[lane]) {
+      (*num_split_lanes)++;
+    }
+  }
   const MoveList *scratch = args->move_list;
   const SmallMove **derived_pointers =
       malloc_or_die(((size_t)count + 1) * sizeof(const SmallMove *));
@@ -400,6 +408,7 @@ static void test_best_play_random_paths(void) {
   PathMoveLists *lists = path_move_lists_create();
   uint64_t rng = 0x9E3779B97F4A7C15ULL;
   int num_checks = 0;
+  int num_split_lanes = 0;
   int deepest = 0;
   bool saw_filter_case = false;
   for (int position_idx = 0; position_idx < BEST_PLAY_NUM_POSITIONS;
@@ -441,7 +450,7 @@ static void test_best_play_random_paths(void) {
                          &undos[length]);
           if (game_get_game_end_reason(game) == GAME_END_REASON_NONE) {
             assert_best_play_matches(lists, &args, best_move_list, &rng,
-                                     &num_checks);
+                                     &num_checks, &num_split_lanes);
           }
           unplay_move_incremental(game, &undos[length]);
           path_move_lists_pop(lists);
@@ -455,7 +464,7 @@ static void test_best_play_random_paths(void) {
           saw_filter_case = true;
         }
         assert_best_play_matches(lists, &args, best_move_list, &rng,
-                                 &num_checks);
+                                 &num_checks, &num_split_lanes);
         if (length > deepest) {
           deepest = length;
         }
@@ -473,6 +482,9 @@ static void test_best_play_random_paths(void) {
   assert(saw_filter_case);
   assert(deepest >= BEST_PLAY_MIN_DEEPEST);
   assert(num_checks > BEST_PLAY_MIN_CHECKS);
+  // Touched lanes that carried some anchors' plays and regenerated others,
+  // merging the two.
+  assert(num_split_lanes > 0);
   path_move_lists_destroy(lists);
   small_move_list_destroy(best_move_list);
   small_move_list_destroy(move_list);
