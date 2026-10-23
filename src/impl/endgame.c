@@ -109,6 +109,9 @@ enum {
   // compute_build_chain_values' buckets: a line (passes, then each row, then
   // each column) for each count of tiles played, 0 to RACK_SIZE.
   BUILD_CHAIN_BUCKETS = (1 + 2 * BOARD_DIM) * (RACK_SIZE + 1),
+  // Entries in a worker's cache of the opponent's playable tile types; a
+  // power of two.
+  STUCK_TILES_CACHE_SIZE = 1 << 15,
 };
 
 // A stuck-tile greedy playout extends the incremental lists' path past the
@@ -120,6 +123,8 @@ static_assert(PATH_MOVE_LISTS_MAX_PATH > 2 * MAX_SEARCH_DEPTH + 1,
 
 // Salt for the transposition-table key of a capped leaf; see leaf_tt_key.
 static const uint64_t CAPPED_LEAF_KEY_SALT = 0x9E3779B97F4A7C15ULL;
+// What each solve adds to a worker's stuck-tiles cache salt.
+static const uint64_t STUCK_TILES_SALT_STEP = 0xD1B54A32D192ED03ULL;
 
 // Returns fraction of opponent's rack score that is stuck (0.0 = none, 1.0 =
 // all). A tile is "stuck" if no legal move plays that tile type.
@@ -275,6 +280,14 @@ typedef struct BoardOccupancy {
   uint32_t unavailable_rows[BOARD_DIM];
 } BoardOccupancy;
 
+// A board and opponent rack, by stuck_tiles_key, and the tile types of that
+// rack that appear in at least one of the opponent's plays there. Key 0 is
+// empty.
+typedef struct StuckTilesEntry {
+  uint64_t key;
+  uint64_t tiles_bv;
+} StuckTilesEntry;
+
 struct EndgameCtxWorker {
   // Worker ordinal within this solve (0..live_workers-1, counting helpers lent
   // by endgame_add_worker; == position in the cached workers[] array, so
@@ -333,6 +346,11 @@ struct EndgameCtxWorker {
   int build_chain_scratch_capacity;
   SmallMove *sort_scratch;
   int *build_chain_scratch;
+  // The opponent's playable tile types by board and opponent rack (see
+  // compute_opp_stuck_fraction), with keys salted per solve so that entries
+  // from an earlier solve, perhaps in another lexicon, never match.
+  StuckTilesEntry *stuck_tiles_cache;
+  uint64_t stuck_tiles_salt;
   XoshiroPRNG *prng;       // Per-thread PRNG for jitter
   PVLine best_pv;          // Thread-local best PV
   int32_t best_pv_value;   // Thread-local best value
@@ -742,18 +760,31 @@ static uint64_t occupancy_playable_tiles_bv(const Board *board,
 // this board (`opp_play_count` entries; a trailing pass is harmless), which
 // the caller already has. Its tile types then answer exactly, without the
 // MOVE_RECORD_TILES_PLAYED generation, so no interrupt check is needed.
-static float compute_opp_stuck_fraction(Game *game, MoveList *move_list,
-                                        const KWG *pruned_kwg, int opp_idx,
-                                        uint64_t *tiles_played_bv_out,
-                                        EndgameCtx *solver,
-                                        const SmallMove *opp_plays,
-                                        int opp_play_count,
-                                        const BoardOccupancy *occupancy) {
+static float
+compute_opp_stuck_fraction(Game *game, MoveList *move_list,
+                           const KWG *pruned_kwg, int opp_idx,
+                           uint64_t *tiles_played_bv_out, EndgameCtx *solver,
+                           const SmallMove *opp_plays, int opp_play_count,
+                           const BoardOccupancy *occupancy,
+                           StuckTilesEntry *cache, uint64_t cache_key) {
   int saved_on_turn = game_get_player_on_turn_index(game);
+  StuckTilesEntry *cache_entry =
+      cache != NULL && cache_key != 0
+          ? &cache[cache_key & (STUCK_TILES_CACHE_SIZE - 1)]
+          : NULL;
+  const Rack *opp_rack = player_get_rack(game_get_player(game, opp_idx));
+  // The tile types are those of the rack that appear in at least one play,
+  // however they are found, so a cached answer stands for every path below.
+  if (cache_entry != NULL && cache_entry->key == cache_key) {
+    if (tiles_played_bv_out) {
+      *tiles_played_bv_out = cache_entry->tiles_bv;
+    }
+    return stuck_tile_fraction_from_bv(game_get_ld(game), opp_rack,
+                                       cache_entry->tiles_bv);
+  }
   if (saved_on_turn != opp_idx) {
     game_set_player_on_turn_index(game, opp_idx);
   }
-  const Rack *opp_rack = player_get_rack(game_get_player(game, opp_idx));
   // Cross-set scan: scan the board to find which rack tiles have valid
   // single-tile plays. If all tiles are playable, skip movegen entirely.
   // For 1-tile racks the result is authoritative. For multi-tile partial
@@ -782,6 +813,10 @@ static float compute_opp_stuck_fraction(Game *game, MoveList *move_list,
     }
     bool all_playable = (opp_tiles_bv == rack_tiles_bv);
     if (all_playable || rack_get_total_letters(opp_rack) == 1) {
+      if (cache_entry != NULL) {
+        cache_entry->key = cache_key;
+        cache_entry->tiles_bv = opp_tiles_bv;
+      }
       float frac = all_playable ? 0.0F
                                 : stuck_tile_fraction_from_bv(ld, opp_rack,
                                                               opp_tiles_bv);
@@ -800,6 +835,10 @@ static float compute_opp_stuck_fraction(Game *game, MoveList *move_list,
   if (opp_plays != NULL) {
     for (int move_idx = 0; move_idx < opp_play_count; move_idx++) {
       opp_tiles_bv |= small_move_tile_types_bv(&opp_plays[move_idx]);
+    }
+    if (cache_entry != NULL) {
+      cache_entry->key = cache_key;
+      cache_entry->tiles_bv = opp_tiles_bv;
     }
     const float derived_result =
         stuck_tile_fraction_from_bv(game_get_ld(game), opp_rack, opp_tiles_bv);
@@ -835,6 +874,10 @@ static float compute_opp_stuck_fraction(Game *game, MoveList *move_list,
       .initial_tiles_bv = opp_tiles_bv,
   };
   generate_moves(&tp_args);
+  if (cache_entry != NULL) {
+    cache_entry->key = cache_key;
+    cache_entry->tiles_bv = opp_tiles_bv;
+  }
   float movegen_result =
       stuck_tile_fraction_from_bv(game_get_ld(game), opp_rack, opp_tiles_bv);
   if (saved_on_turn != opp_idx) {
@@ -855,7 +898,7 @@ static float compute_initial_stuck_fraction(const EndgameCtx *solver,
   MoveList *tmp_ml = move_list_create_small(ENDGAME_MOVELIST_INITIAL_CAPACITY);
   float frac = compute_opp_stuck_fraction(
       root_game, tmp_ml, solver_get_pruned_kwg(solver, opp_idx), opp_idx, NULL,
-      NULL, NULL, 0, NULL);
+      NULL, NULL, 0, NULL, NULL, 0);
   small_move_list_destroy(tmp_ml);
   game_destroy(root_game);
   return frac;
@@ -1249,6 +1292,7 @@ static void solver_worker_destroy(EndgameCtxWorker *solver_worker) {
   path_move_lists_destroy(solver_worker->path_lists_storage);
   free(solver_worker->sort_scratch);
   free(solver_worker->build_chain_scratch);
+  free(solver_worker->stuck_tiles_cache);
   prng_destroy(solver_worker->prng);
   free(solver_worker);
 }
@@ -1307,6 +1351,9 @@ static EndgameCtxWorker *endgame_ctx_create_worker(EndgameCtx *solver,
 
   // Seed by ordinal (stable across solves), not the MoveGen slot, so jitter is
   // deterministic regardless of which slots were borrowed.
+  solver_worker->stuck_tiles_cache =
+      calloc_or_die(STUCK_TILES_CACHE_SIZE, sizeof(StuckTilesEntry));
+  solver_worker->stuck_tiles_salt = STUCK_TILES_SALT_STEP;
   solver_worker->prng = prng_create(base_seed + (uint64_t)ordinal * 12345);
 
   solver_worker->best_pv.game = solver_worker->game_copy;
@@ -1349,6 +1396,7 @@ static void endgame_ctx_reset_worker(EndgameCtxWorker *worker,
   worker->num_played_moves = 0;
   worker->first_deferred_move = 0;
   memset(worker->occupancy_valid, 0, sizeof(worker->occupancy_valid));
+  worker->stuck_tiles_salt += STUCK_TILES_SALT_STEP;
   prng_seed(worker->prng, base_seed + (uint64_t)worker->ordinal * 12345);
   worker->best_pv.game = worker->game_copy;
   worker->best_pv.num_moves = 0;
@@ -2553,6 +2601,32 @@ static int playout_first_step_from_lists(EndgameCtxWorker *worker,
   return 1;
 }
 
+// The key of the worker's board and the opponent's rack in its stuck-tiles
+// cache: node_key, which hashes the board, both racks, the side to move and
+// the scoreless count, less the solving player's rack, the side to move and
+// the scoreless count, salted for the solve. 0, which disables the cache,
+// without the transposition table.
+static uint64_t stuck_tiles_key(const EndgameCtxWorker *worker,
+                                uint64_t node_key) {
+  const EndgameCtx *solver = worker->solver;
+  if (!solver->transposition_table_optim) {
+    return 0;
+  }
+  const Zobrist *zobrist = solver->transposition_table->zobrist;
+  const Game *game = worker->game_copy;
+  const Rack *solving_rack =
+      player_get_rack(game_get_player(game, solver->solving_player));
+  uint64_t key = node_key;
+  for (int ml = 0; ml < rack_get_dist_size(solving_rack); ml++) {
+    key ^= zobrist->our_rack_table[ml][rack_get_letter(solving_rack, ml)];
+  }
+  if (game_get_player_on_turn_index(game) != solver->solving_player) {
+    key ^= zobrist->their_turn;
+  }
+  key ^= zobrist->scoreless_turns[game_get_consecutive_scoreless_turns(game)];
+  return key ^ worker->stuck_tiles_salt;
+}
+
 // Greedy playout at depth==0 leaf nodes: generate moves iteratively,
 // pick best (with conservation bonus), compute final spread with rack
 // adjustments, unplay moves, store in TT. Returns evaluation from
@@ -2644,7 +2718,8 @@ static int32_t negamax_greedy_leaf_playout(EndgameCtxWorker *worker,
         worker->game_copy, worker->move_list,
         solver_get_pruned_kwg(worker->solver, opp_idx), opp_idx, NULL,
         worker->solver, leaf_plays, leaf_play_count,
-        worker_board_occupancy(worker));
+        worker_board_occupancy(worker), worker->stuck_tiles_cache,
+        stuck_tiles_key(worker, node_key));
   }
 
   // Only a stuck playout derives its lists, so only it extends the path.
@@ -2997,10 +3072,9 @@ static void sort_small_moves_by_estimate(EndgameCtxWorker *worker,
 // Stuck-tile detection, move generation, logging, and estimate assignment
 // for non-root nodes (move ordering itself is done lazily by the caller).
 // Updates *opp_stuck_frac. Returns move count, or -1 if interrupted.
-static int
-negamax_generate_and_estimate_moves(EndgameCtxWorker *worker, int depth,
-                                    uint64_t tt_move, float *opp_stuck_frac,
-                                    const BoardOccupancy **occupancy_out) {
+static int negamax_generate_and_estimate_moves(
+    EndgameCtxWorker *worker, uint64_t node_key, int depth, uint64_t tt_move,
+    float *opp_stuck_frac, const BoardOccupancy **occupancy_out) {
   int opp_idx = 1 - worker->solver->solving_player;
   uint64_t opp_tiles_bv = 0;
   int nplays;
@@ -3024,7 +3098,8 @@ negamax_generate_and_estimate_moves(EndgameCtxWorker *worker, int depth,
     *opp_stuck_frac = compute_opp_stuck_fraction(
         worker->game_copy, worker->move_list,
         solver_get_pruned_kwg(worker->solver, opp_idx), opp_idx, &opp_tiles_bv,
-        worker->solver, opp_plays, nplays, occupancy);
+        worker->solver, opp_plays, nplays, occupancy, worker->stuck_tiles_cache,
+        stuck_tiles_key(worker, node_key));
     // An interrupt inside compute_opp_stuck_fraction leaves the fraction
     // meaningless. Release this node's plays so the arena is untouched, as
     // the caller expects of -1.
@@ -3281,6 +3356,7 @@ static uint64_t play_small_move_and_hash(EndgameCtxWorker *worker,
 // stuck opponent (the ordering then weighs conservation), an interrupt, or no
 // play at all.
 static bool pick_first_reply_before_list(EndgameCtxWorker *worker,
+                                         uint64_t node_key,
                                          float *opp_stuck_frac,
                                          SmallMove *first_reply) {
   update_deferred_moves(worker);
@@ -3289,7 +3365,8 @@ static bool pick_first_reply_before_list(EndgameCtxWorker *worker,
     const float stuck_frac = compute_opp_stuck_fraction(
         worker->game_copy, worker->move_list,
         solver_get_pruned_kwg(worker->solver, opp_idx), opp_idx, NULL,
-        worker->solver, NULL, 0, worker_board_occupancy(worker));
+        worker->solver, NULL, 0, worker_board_occupancy(worker),
+        worker->stuck_tiles_cache, stuck_tiles_key(worker, node_key));
     if (stuck_frac > 0.0F || iterative_deepening_should_stop(worker->solver)) {
       return false;
     }
@@ -3484,7 +3561,8 @@ int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
       rack_get_total_letters(player_get_rack(player_on_turn)) >= 2 &&
       !(worker->current_iterative_deepening_depth - 1 == depth &&
         worker->ordinal == 0 && worker->in_first_root_move) &&
-      pick_first_reply_before_list(worker, &opp_stuck_frac, &first_reply)) {
+      pick_first_reply_before_list(worker, node_key, &opp_stuck_frac,
+                                   &first_reply)) {
     const int undo_index = worker->solver->requested_plies - depth;
     atomic_store_explicit(&worker->current_line[undo_index],
                           first_reply.tiny_move, memory_order_relaxed);
@@ -3533,8 +3611,8 @@ int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
       }
       return ABDADA_INTERRUPTED;
     }
-    nplays = negamax_generate_and_estimate_moves(worker, depth, tt_move,
-                                                 &opp_stuck_frac, &occupancy);
+    nplays = negamax_generate_and_estimate_moves(
+        worker, node_key, depth, tt_move, &opp_stuck_frac, &occupancy);
     if (nplays == -1) {
       // Interrupted during compute_opp_stuck_fraction
       if (abdada_active) {
