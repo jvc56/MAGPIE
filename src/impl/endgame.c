@@ -1457,6 +1457,34 @@ static Equity board_run_score(const Board *board, const LetterDistribution *ld,
   return sum;
 }
 
+// Whether (row, col) is on the board and holds a tile.
+static inline bool occupancy_has_tile(const BoardOccupancy *occupancy, int row,
+                                      int col) {
+  return row >= 0 && row < BOARD_DIM && col >= 0 && col < BOARD_DIM &&
+         (occupancy->occupied_rows[row] & (UINT32_C(1) << col)) != 0;
+}
+
+// The sum of the face values of the tiles beside the empty square (row, col)
+// across a word along (row_step, col_step), or 0 when it has none: its cross
+// score for the direction across.
+static inline Equity tiles_beside_score(const Board *board,
+                                        const BoardOccupancy *occupancy,
+                                        int cross_set_index, int row, int col,
+                                        int row_step, int col_step,
+                                        bool *has_beside) {
+  // A horizontal step (row_step == 0) has the tiles beside it above and
+  // below, which the horizontal cross score sums.
+  *has_beside = occupancy_has_tile(occupancy, row - col_step, col - row_step) ||
+                occupancy_has_tile(occupancy, row + col_step, col + row_step);
+  if (!*has_beside) {
+    return 0;
+  }
+  return board_get_cross_score(board, row, col,
+                               row_step == 0 ? BOARD_HORIZONTAL_DIRECTION
+                                             : BOARD_VERTICAL_DIRECTION,
+                               cross_set_index);
+}
+
 // At most what a drop worth tile_value (before multipliers) scores on the
 // square (row, col), next to a run of tiles worth run_score that lies on the
 // near side of it, stepping (row_step, col_step) away from that run, scored
@@ -1466,11 +1494,13 @@ static Equity board_run_score(const Board *board, const LetterDistribution *ld,
 // board tiles: the run lies on the line along the step, so no tile of the
 // move is beside the square.
 static Equity drop_bound_beside_run(const Board *board,
-                                    const LetterDistribution *ld, int row,
-                                    int col, int row_step, int col_step,
+                                    const BoardOccupancy *occupancy,
+                                    const LetterDistribution *ld,
+                                    int cross_set_index, int row, int col,
+                                    int row_step, int col_step,
                                     Equity run_score, Equity tile_value) {
   if (row < 0 || row >= BOARD_DIM || col < 0 || col >= BOARD_DIM ||
-      board_is_nonempty_or_bricked(board, row, col)) {
+      (occupancy->unavailable_rows[row] & (UINT32_C(1) << col)) != 0) {
     return 0;
   }
   const BonusSquare bonus_square = board_get_bonus_square(board, row, col);
@@ -1481,27 +1511,12 @@ static Equity drop_bound_beside_run(const Board *board,
                   board_run_score(board, ld, row + row_step, col + col_step,
                                   row_step, col_step)) *
                  word_multiplier;
-  // The neighbors across the step: a horizontal step (row_step == 0) has
-  // them above and below. Stepping forward across, whichever way the step
-  // goes, keeps the bounds checks below in range.
-  const int across_row_step = col_step != 0 ? 1 : 0;
-  const int across_col_step = row_step != 0 ? 1 : 0;
-  const bool has_across =
-      (row - across_row_step >= 0 && col - across_col_step >= 0 &&
-       !board_is_empty_or_bricked(board, row - across_row_step,
-                                  col - across_col_step)) ||
-      (row + across_row_step < BOARD_DIM && col + across_col_step < BOARD_DIM &&
-       !board_is_empty_or_bricked(board, row + across_row_step,
-                                  col + across_col_step));
+  bool has_across;
+  const Equity across_score =
+      tiles_beside_score(board, occupancy, cross_set_index, row, col, row_step,
+                         col_step, &has_across);
   if (has_across) {
-    total += (board_run_score(board, ld, row - across_row_step,
-                              col - across_col_step, -across_row_step,
-                              -across_col_step) +
-              board_run_score(board, ld, row + across_row_step,
-                              col + across_col_step, across_row_step,
-                              across_col_step) +
-              tile_score) *
-             word_multiplier;
+    total += (across_score + tile_score) * word_multiplier;
   }
   return total;
 }
@@ -1757,13 +1772,17 @@ static int32_t keep_one_bound(KeepOneBound *bound, const SmallMove *play_sm,
                                         : tile;
     word_score += get_is_blanked(on_square) ? 0 : ld_get_score(ld, on_square);
   }
-  next_drop =
-      MAX(next_drop, drop_bound_beside_run(board, ld, start_row - row_step,
-                                           start_col - col_step, -row_step,
-                                           -col_step, word_score, kept_value));
+  const BoardOccupancy *occupancy = bound->occupancy;
+  const int ci = bound->cross_set_index;
   next_drop =
       MAX(next_drop,
-          drop_bound_beside_run(board, ld, start_row + row_step * tiles_length,
+          drop_bound_beside_run(board, occupancy, ld, ci, start_row - row_step,
+                                start_col - col_step, -row_step, -col_step,
+                                word_score, kept_value));
+  next_drop =
+      MAX(next_drop,
+          drop_bound_beside_run(board, occupancy, ld, ci,
+                                start_row + row_step * tiles_length,
                                 start_col + col_step * tiles_length, row_step,
                                 col_step, word_score, kept_value));
   // Each placed tile joins the board tiles on either side of its square,
@@ -1776,27 +1795,25 @@ static int32_t keep_one_bound(KeepOneBound *bound, const SmallMove *play_sm,
     }
     const int row = start_row + row_step * tile_idx;
     const int col = start_col + col_step * tile_idx;
+    bool has_across;
     const Equity run_score =
         (get_is_blanked(tile) ? 0 : ld_get_score(ld, tile)) +
-        board_run_score(board, ld, row - col_step, col - row_step, -col_step,
-                        -row_step) +
-        board_run_score(board, ld, row + col_step, col + row_step, col_step,
-                        row_step);
+        tiles_beside_score(board, occupancy, ci, row, col, row_step, col_step,
+                           &has_across);
     for (int sign = -1; sign <= 1; sign += 2) {
       const int across_row_step = sign * col_step;
       const int across_col_step = sign * row_step;
       int end_row = row + across_row_step;
       int end_col = col + across_col_step;
-      while (end_row >= 0 && end_row < BOARD_DIM && end_col >= 0 &&
-             end_col < BOARD_DIM &&
-             !board_is_empty_or_bricked(board, end_row, end_col)) {
+      while (occupancy_has_tile(occupancy, end_row, end_col)) {
         end_row += across_row_step;
         end_col += across_col_step;
       }
       next_drop =
-          MAX(next_drop, drop_bound_beside_run(board, ld, end_row, end_col,
-                                               across_row_step, across_col_step,
-                                               run_score, kept_value));
+          MAX(next_drop,
+              drop_bound_beside_run(board, occupancy, ld, ci, end_row, end_col,
+                                    across_row_step, across_col_step, run_score,
+                                    kept_value));
     }
   }
   return move_bound + equity_to_int(next_drop);
