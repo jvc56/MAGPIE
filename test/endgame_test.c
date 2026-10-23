@@ -862,7 +862,9 @@ static int solve_fixed_depth(const Config *config, int plies, int threads,
 // hears each depth searched: a stepped solve reports 1, 3 and 5, and a solve
 // under a budget reports every depth. A multi-PV solve steps too, and must
 // rank the same values as one that searches every depth. A four-thread
-// stepped solve, whose helpers start deeper, must return the same score.
+// stepped solve, whose helpers start deeper, must return the same score, and
+// with a callback must report the target depth even when a helper completes
+// it first.
 static void test_fixed_depth_stepping(void) {
   Config *config = config_create_or_die("set -s1 score -s2 score");
   load_and_exec_config_or_die(config, FIXED_DEPTH_CGP);
@@ -931,6 +933,11 @@ static void test_fixed_depth_stepping(void) {
       config, FIXED_DEPTH_MAX_PLIES, FIXED_DEPTH_THREADS, /*budget=*/NULL,
       /*with_callback=*/false, &depth_mask, &nodes);
   assert(threaded_score == plain_score);
+  const int threaded_callback_score = solve_fixed_depth(
+      config, FIXED_DEPTH_MAX_PLIES, FIXED_DEPTH_THREADS, /*budget=*/NULL,
+      /*with_callback=*/true, &depth_mask, &nodes);
+  assert(threaded_callback_score == plain_score);
+  assert((depth_mask & (1U << FIXED_DEPTH_MAX_PLIES)) != 0);
   config_destroy(config);
 }
 

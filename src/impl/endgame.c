@@ -4243,6 +4243,28 @@ static void build_ranked_pvs_and_notify(EndgameCtxWorker *worker, int depth,
                                    worker->solver->per_ply_callback_data);
 }
 
+// Only the main worker calls the per-ply callback, and a helper that completes
+// the target depth first ends the solve with the main worker partway through
+// it, so the callback never heard of the deepest depth searched, often the
+// target. Called once every worker is joined, this reports the deepest
+// completed depth if the main worker did not.
+static void notify_unreported_deepest_depth(EndgameCtx *solver, int best_thread,
+                                            int best_depth) {
+  if (solver->per_ply_callback == NULL ||
+      best_depth <= solver->workers[0]->completed_depth) {
+    return;
+  }
+  EndgameCtxWorker *best_worker = solver->workers[best_thread];
+  PVLine extended_pv = best_worker->best_pv;
+  if (solver->transposition_table_optim) {
+    solver_pvline_extend_from_tt(&extended_pv, solver, best_worker->game_copy);
+  }
+  build_ranked_pvs_and_notify(
+      best_worker, best_depth, best_worker->best_pv_value, &extended_pv,
+      (const SmallMove *)best_worker->small_move_arena->memory,
+      best_worker->n_initial_moves);
+}
+
 // If the solver has a caller-specified "actual move" (EndgameArgs.actual_move),
 // find it among the just-(re)sorted root moves and swap it to index 0.
 // The root move loop in abdada_negamax always gives index 0 a full,
@@ -5193,6 +5215,7 @@ void endgame_solve(EndgameCtx **ctx, const EndgameArgs *endgame_args,
       best_thread = thread_index;
     }
   }
+  notify_unreported_deepest_depth(solver, best_thread, best_depth);
 
   // Build the display lines into a local buffer, NOT into the results, and
   // without the DISPLAY lock held. The multi-PV resolve pass inside
