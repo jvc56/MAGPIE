@@ -401,6 +401,8 @@ struct Config {
   GameHistory *game_history_backup;
   MoveList *move_list;
   EndgameCtx *endgame_ctx;
+  // The bingo bonus the entries in endgame_ctx's TT were found under.
+  int endgame_tt_bingo_bonus;
   SimResults *sim_results;
   InferenceResults *inference_results;
   EndgameResults *endgame_results;
@@ -4285,6 +4287,17 @@ char *status_rack_and_gen_and_sim(Config *config) { return status_sim(config); }
 
 // Endgame
 
+// The endgame TT outlives a solve, so the next solve can reuse what it found.
+// Its keys hash the board, the racks and the player on turn, and nothing of
+// the words, tile values, board layout, variant or bingo bonus the values were
+// found under. After any of those change, a solve would read back values that
+// no longer hold, so the table is cleared.
+static void config_clear_endgame_tt(const Config *config) {
+  if (config->endgame_ctx) {
+    endgame_ctx_clear_transposition_table(config->endgame_ctx);
+  }
+}
+
 void config_fill_endgame_args(Config *config, EndgameArgs *endgame_args) {
   // The time limits are 0 = unlimited, matching the plain "endgame" command's
   // historical default. Callers that want -tlim to bound an unset -etlim (e.g.
@@ -4320,6 +4333,14 @@ static void impl_endgame_with_pos_args(Config *config, const char *move_text,
     return;
   }
   config_init_game(config);
+  // A bingo scored below an entry is part of its value. The bonus is set by
+  // -bb and again by every contribute task, so it is checked here, before a
+  // solve reads the table, rather than wherever it is set.
+  const int bingo_bonus = game_get_bingo_bonus(config->game);
+  if (bingo_bonus != config->endgame_tt_bingo_bonus) {
+    config_clear_endgame_tt(config);
+    config->endgame_tt_bingo_bonus = bingo_bonus;
+  }
   EndgameArgs args;
   config_fill_endgame_args(config, &args);
   ValidatedMoves *actual = NULL;
@@ -8209,17 +8230,6 @@ static void config_load_lexicon_dependent_data_internal(
     }
   }
   free(updated_ld_name);
-}
-
-// The endgame TT outlives a solve, so the next solve can reuse what it found.
-// Its keys hash the board, the racks and the player on turn, and nothing of
-// the words, tile values, board layout or variant the values were found
-// under. After any of those change, a solve would read back values that no
-// longer hold, so the table is cleared.
-static void config_clear_endgame_tt(const Config *config) {
-  if (config->endgame_ctx) {
-    endgame_ctx_clear_transposition_table(config->endgame_ctx);
-  }
 }
 
 // The lexical data each player borrows. Data reloaded under a new name can
@@ -14922,6 +14932,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->game_history = game_history_create();
   config->game_history_backup = NULL;
   config->endgame_ctx = NULL;
+  config->endgame_tt_bingo_bonus = config->bingo_bonus;
   config->sim_results = sim_results_create(config->cutoff);
   config->inference_results = inference_results_create(NULL);
   config->endgame_results = endgame_results_create();

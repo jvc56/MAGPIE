@@ -3097,6 +3097,29 @@ void test_config_lexicon_change_clears_endgame_tt(void) {
   config_destroy(config);
 }
 
+// The bingo bonus is part of a play's score, and the endgame TT's keys don't
+// hash it. The player on turn here has only J and must pass, so the opponent's
+// bingo, O8 FEELING(S), comes one move below the root, inside the entries a
+// solve stores. After a solve with no bingo bonus, a solve with a bonus of 50
+// read those entries back and returned -82, where its value is -105.
+void test_config_bingo_bonus_change_clears_endgame_tt(void) {
+  Config *config =
+      config_create_or_die("set -lex NWL23 -eplies 3 -threads 1 -bb 0");
+  assert_config_exec_status(
+      config,
+      "cgp "
+      "2GRANTED5L/1XI5ABBOTCY/6FEG2WO1A/6EUOUAE2M/7O2D4/6OI2V1I2/1AN2MO3O1N2/"
+      "CH1QUIRT1DuDS2/HIOI2I3T1T2/3NAPE3R1A2/4UR4Y1R2/3WAI1Z7/4SLEEVEEn3/"
+      "5L1P7/7STARKENS J/EEFGILN 498/389 0",
+      ERROR_STATUS_SUCCESS);
+  assert(config_endgame_value(config) == -82);
+  assert_config_exec_status(config, "set -bb 50", ERROR_STATUS_SUCCESS);
+  assert(config_endgame_value(config) == -105);
+  assert_config_exec_status(config, "set -bb 0", ERROR_STATUS_SUCCESS);
+  assert(config_endgame_value(config) == -82);
+  config_destroy(config);
+}
+
 static char *write_test_gcg(const char *directory, const char *name,
                             const char *contents) {
   char *path = get_formatted_string("%s/%s", directory, name);
@@ -3394,6 +3417,7 @@ void test_config(void) {
   test_config_cgp_starts_new_history();
   test_config_lexicon_change_rebuilds_games();
   test_config_lexicon_change_clears_endgame_tt();
+  test_config_bingo_bonus_change_clears_endgame_tt();
   test_config_load_replacing_lexical_data();
   test_config_game_event_results_follow_navigation();
   test_config_sim_with_inference_results_saved_to_game_event();
