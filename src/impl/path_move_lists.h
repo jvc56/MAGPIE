@@ -160,6 +160,29 @@ static inline bool path_move_lists_slot_is_current(const PathMoveLists *lists,
   return lists->slot_stamps[length] == lists->stamps[length - 1];
 }
 
+// The stamp of the current path's prefix of length `length` (at most
+// lists->length): the stamp of the push that ended it, or of the root lists
+// for the empty prefix. A prefix reached again through a new push gets a new
+// stamp, so a stamp identifies one visit to one position.
+static inline uint64_t path_move_lists_prefix_stamp(const PathMoveLists *lists,
+                                                    int length) {
+  return length == 0 ? lists->root_stamp : lists->stamps[length - 1];
+}
+
+// The lanes the last pushed move touched (lists->length >= 1). In each,
+// path_move_lists_last_move_hits gives the squares that move changed for the
+// lane's plays (see move_lane_hits in path_move_lists.c): a play spanning none
+// of them is a play on the board before the move and after it alike.
+static inline uint64_t
+path_move_lists_last_move_lanes(const PathMoveLists *lists) {
+  return lists->masks[lists->length - 1];
+}
+
+static inline const uint32_t *
+path_move_lists_last_move_hits(const PathMoveLists *lists) {
+  return lists->hits[lists->length - 1];
+}
+
 // The lanes path_move_lists_moves_at / path_move_lists_best_play would
 // regenerate at the current path position (length >= 1): the union of the last
 // two pushed moves' lane-influence masks. Zero means nothing is regenerated.

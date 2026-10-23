@@ -446,6 +446,15 @@ void generate_small_moves_in_lanes(const MoveGenArgs *args, uint64_t lane_mask,
                                    uint32_t *lane_anchors,
                                    uint32_t *lane_generated);
 
+// The MOVE_RECORD_TILES_PLAYED generation (see generate_moves) restricted as
+// generate_small_moves_in_lanes restricts its own: to the lanes in `lane_mask`
+// and, in each, to the anchors some of whose plays can span a square set in
+// its lane_hits entry. Every play it finds is a play on the board, so the tile
+// types it reports are playable; a tile type it does not report has no play
+// from those anchors. Writes the tile types to *args->tiles_played_bv.
+void generate_tiles_played_in_lanes(const MoveGenArgs *args, uint64_t lane_mask,
+                                    const uint32_t *lane_hits);
+
 // The MOVE_RECORD_BEST_SMALL generation restricted to the anchors of the lanes
 // in `lane_mask` (indexed as for generate_small_moves_in_lanes), competing
 // against `incumbent`: a play found elsewhere on the board, worth

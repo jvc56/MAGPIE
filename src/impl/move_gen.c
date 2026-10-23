@@ -4190,11 +4190,11 @@ static inline uint32_t anchor_span_reach(uint32_t empty, uint32_t blocked,
   return (((uint32_t)2 << right) - 1) & ~(((uint32_t)1 << left) - 1);
 }
 
-// The MOVE_RECORD_ALL_SMALL plays of lane `row` of the current gen->dir from
-// the anchors whose plays may span a position in `hit`, scanning the anchors
-// in board order (see generate_small_moves_in_lanes). Sets *anchors to the
-// bits of all of the lane's anchors and *generated to those of the anchors
-// generated from.
+// Records, by the generation's record type, the plays of lane `row` of the
+// current gen->dir from the anchors whose plays may span a position in `hit`,
+// scanning the anchors in board order (see generate_small_moves_in_lanes).
+// Sets *anchors to the bits of all of the lane's anchors and *generated to
+// those of the anchors generated from.
 static void gen_record_lane_plays_reaching(MoveGen *gen, int row,
                                            uint32_t kwg_root_node_index,
                                            uint32_t hit, int rack_tiles,
@@ -4280,6 +4280,54 @@ void generate_small_moves_in_lanes(const MoveGenArgs *args, uint64_t lane_mask,
       }
       lane_end[lane] = gen->move_list->count;
     }
+  }
+}
+
+// Sets up a MOVE_RECORD_TILES_PLAYED generation: the rack's tile types are
+// the target, seeded with those args already knows to be played.
+static void gen_init_tiles_played(MoveGen *gen, const MoveGenArgs *args) {
+  gen->tiles_played_bv = args->initial_tiles_bv;
+  gen->stop_on_threshold = true;
+  gen->target_tiles_bv = 0;
+  const uint16_t dist_size = rack_get_dist_size(&gen->player_rack);
+  for (uint16_t ml = 0; ml < dist_size; ml++) {
+    if (rack_get_letter(&gen->player_rack, ml) > 0) {
+      gen->target_tiles_bv |= ((uint64_t)1 << ml);
+    }
+  }
+  gen->threshold_exceeded =
+      (gen->tiles_played_bv & gen->target_tiles_bv) == gen->target_tiles_bv;
+}
+
+void generate_tiles_played_in_lanes(const MoveGenArgs *args, uint64_t lane_mask,
+                                    const uint32_t *lane_hits) {
+  MoveGen *gen = get_movegen();
+  gen_count_movegen(gen);
+  gen_load_position(gen, args);
+  assert(gen->move_record_type == MOVE_RECORD_TILES_PLAYED);
+  gen_init_tiles_played(gen, args);
+  gen->tiles_played = 0;
+  const uint32_t kwg_root_node_index = kwg_get_root_node_index(gen->kwg);
+  const int rack_tiles = rack_get_total_letters(&gen->player_rack);
+  for (int dir = 0; dir < 2; dir++) {
+    gen->dir = dir;
+    for (int row = 0; row < BOARD_DIM; row++) {
+      if (gen->threshold_exceeded) {
+        break;
+      }
+      const int lane = BOARD_DIM * dir + row;
+      if (((lane_mask >> lane) & 1) != 0 &&
+          gen->row_number_of_anchors_cache[lane] != 0) {
+        uint32_t anchors;
+        uint32_t generated;
+        gen_record_lane_plays_reaching(gen, row, kwg_root_node_index,
+                                       lane_hits[lane], rack_tiles, &anchors,
+                                       &generated);
+      }
+    }
+  }
+  if (args->tiles_played_bv) {
+    *args->tiles_played_bv = gen->tiles_played_bv;
   }
 }
 
@@ -4608,18 +4656,7 @@ void generate_moves(const MoveGenArgs *args) {
   if (gen->move_record_type == MOVE_RECORD_ALL_SMALL ||
       gen->move_record_type == MOVE_RECORD_TILES_PLAYED) {
     if (gen->move_record_type == MOVE_RECORD_TILES_PLAYED) {
-      gen->tiles_played_bv = args->initial_tiles_bv;
-      gen->stop_on_threshold = true;
-      // Build target bitvector from the rack
-      gen->target_tiles_bv = 0;
-      const uint16_t dist_size = rack_get_dist_size(&gen->player_rack);
-      for (uint16_t ml = 0; ml < dist_size; ml++) {
-        if (rack_get_letter(&gen->player_rack, ml) > 0) {
-          gen->target_tiles_bv |= ((uint64_t)1 << ml);
-        }
-      }
-      gen->threshold_exceeded =
-          (gen->tiles_played_bv & gen->target_tiles_bv) == gen->target_tiles_bv;
+      gen_init_tiles_played(gen, args);
     }
     if (!gen->threshold_exceeded) {
       gen_record_scoring_plays_unordered(gen, true);
