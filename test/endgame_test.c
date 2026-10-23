@@ -15,6 +15,7 @@
 #include "../src/ent/thread_control.h"
 #include "../src/ent/transposition_table.h"
 #include "../src/ent/xoshiro.h"
+#include "../src/ent/zobrist.h"
 #include "../src/impl/config.h"
 #include "../src/impl/endgame.h"
 #include "../src/impl/gameplay.h"
@@ -1035,6 +1036,107 @@ void test_endgame_pass_transposition_depth(void) {
   endgame_ctx_destroy(endgame_ctx);
   error_stack_destroy(error_stack);
   config_destroy(config);
+}
+
+// The search's own line can stop short of the depth it solved. A node on the
+// line whose window a transposition-table bound narrowed to its value takes
+// its best move from a null-window probe that it does not re-search, and the
+// probe's line ends at the first node it answers from the TT. Multi-threaded
+// solves meet such bounds when a helper stores one, and the displayed line
+// then showed a "|" partway through a line the solve had proven to the end of
+// the game. This plants such a bound: it solves once, turns the line's exact
+// entry two moves in into a lower bound whose move is a pass, and solves
+// again. The search's line now stops at that node, and the displayed line must
+// still be searched to the end of the game.
+static void assert_display_completes_short_pv(bool incremental_movegen) {
+  // From cross-tables annotated game 35333: the opponent is stuck with the J,
+  // and the player on turn plays EEFL one tile at a time.
+  const char *cgp =
+      "cgp 2GRANTED5L/1XI5ABBOTCY/6FEG2WO1A/6EUOUAE2M/7O2D4/6OI2V1I2/"
+      "1AN2MO3O1N2/CH1QUIRT1DuDS2/HIOI2I3T1T2/I2NAPE3R1A2/N3UR4Y1R2/"
+      "G2WAI1Z7/4SLEEVEEn3/5L1P7/7STARKENS EEFL/J 419/498 1 -lex CSW21";
+  Config *config = config_create_or_die("set -s1 score -s2 score -eplies 10");
+  load_and_exec_config_or_die(config, cgp);
+
+  Game *game = config_get_game(config);
+  EndgameResults *endgame_results = config_get_endgame_results(config);
+  ErrorStack *error_stack = error_stack_create();
+  EndgameCtx *endgame_ctx = NULL;
+  TranspositionTable *tt = transposition_table_create(0.01);
+
+  EndgameArgs endgame_args = {0};
+  endgame_args.thread_control = config_get_thread_control(config);
+  endgame_args.game = game;
+  endgame_args.plies = config_get_endgame_plies(config);
+  endgame_args.shared_tt = tt;
+  endgame_args.initial_small_move_arena_size =
+      DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
+  endgame_args.num_threads = 1;
+  endgame_args.use_heuristics = true;
+  endgame_args.incremental_movegen = incremental_movegen;
+  endgame_args.enable_pv_display = true;
+  endgame_args.num_top_moves = 1;
+  endgame_args.seed = 42;
+
+  // 7A E(AN), pass, A6 E(ECHING), pass, A5 L(EECHING), pass, A4 F(LEECHING).
+  const int line_length = 7;
+  endgame_solve(&endgame_ctx, &endgame_args, endgame_results, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  const PVLine solved_line = endgame_results_get_multi_pvs(endgame_results)[0];
+  assert(solved_line.num_moves == line_length);
+  assert(solved_line.negamax_depth == line_length);
+
+  // The player on turn again, after 7A E(AN) and the opponent's pass.
+  const int solving_player = game_get_player_on_turn_index(game);
+  Game *line_game = game_duplicate(game);
+  for (int move_idx = 0; move_idx < 2; move_idx++) {
+    Move move;
+    small_move_to_move(&move, &solved_line.moves[move_idx],
+                       game_get_board(line_game));
+    play_move(&move, line_game, NULL);
+  }
+  const uint64_t node_key = zobrist_calculate_hash(
+      tt->zobrist, game_get_board(line_game),
+      player_get_rack(game_get_player(line_game, solving_player)),
+      player_get_rack(game_get_player(line_game, 1 - solving_player)),
+      /*their_turn=*/false, game_get_consecutive_scoreless_turns(line_game));
+  game_destroy(line_game);
+  const TTEntry exact_entry = transposition_table_lookup(tt, node_key);
+  assert(ttentry_flag(exact_entry) == TT_EXACT);
+  SmallMove pass;
+  small_move_set_as_pass(&pass);
+  const TTEntry lower_bound = {
+      .score = ttentry_score(exact_entry),
+      .flag_and_depth = (uint8_t)((TT_LOWER << 6) + ttentry_depth(exact_entry)),
+      .tiny_move = pass.tiny_move};
+  transposition_table_store(tt, node_key, lower_bound);
+
+  endgame_solve(&endgame_ctx, &endgame_args, endgame_results, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  const PVLine *search_line =
+      endgame_results_get_pvline(endgame_results, ENDGAME_RESULT_BEST);
+  assert(search_line->score == solved_line.score);
+  assert(search_line->negamax_depth < line_length);
+  const PVLine *display_line = endgame_results_get_multi_pvs(endgame_results);
+  assert(display_line->score == solved_line.score);
+  assert(display_line->num_moves == line_length);
+  assert(display_line->negamax_depth == line_length);
+  for (int move_idx = 0; move_idx < line_length; move_idx++) {
+    assert(display_line->moves[move_idx].tiny_move ==
+           solved_line.moves[move_idx].tiny_move);
+  }
+
+  endgame_ctx_destroy(endgame_ctx);
+  transposition_table_destroy(tt);
+  error_stack_destroy(error_stack);
+  config_destroy(config);
+}
+
+static void test_display_completes_short_pv(void) {
+  assert_display_completes_short_pv(/*incremental_movegen=*/false);
+  // The search from partway down the line cannot derive its move lists from
+  // lists the walk down the line never built.
+  assert_display_completes_short_pv(/*incremental_movegen=*/true);
 }
 
 void test_solve_standard(void) {
@@ -2323,6 +2425,7 @@ void test_endgame(void) {
   test_exhausted_tree_stops_early();
   test_fixed_depth_stepping();
   test_fixed_depth_budget_keeps_every_depth();
+  test_display_completes_short_pv();
   test_solve_standard();
   test_incremental_movegen_identical();
   test_path_move_lists();

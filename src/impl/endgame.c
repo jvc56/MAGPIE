@@ -4150,6 +4150,124 @@ void *solver_worker_start(void *uncasted_solver_worker) {
   return NULL;
 }
 
+// Closes a pass opened by display_pass_begin, leaving the search stopped as
+// the main search left it.
+static void display_pass_end(EndgameCtx *solver) {
+  atomic_store(&solver->depth_deadline_ns, 0);
+  atomic_store(&solver->search_complete, 1);
+}
+
+// Opens a pass that searches again after the main search, to solve the lines
+// the display shows. The main search set search_complete to signal the worker
+// threads to stop; clear it so this pass is not immediately interrupted. A
+// user interrupt (and PEG's external_deadline_ns) still stops it.
+//
+// Under a time limit, the pass gets only what is left of the budget: a solve
+// that stopped because the next depth would not fit must not then overrun the
+// clock solving display lines. Whatever is unsolved when the deadline fires
+// falls back to TT extension. Unlimited solves (the plain endgame command's
+// default) run the pass to completion. Returns false, with the search left
+// stopped, when no time is left.
+static bool display_pass_begin(EndgameCtx *solver) {
+  int64_t deadline_ns = 0;
+  if (solver->hard_time_limit > 0) {
+    // Read the timer itself, not the cached seconds_elapsed: that field is
+    // only refreshed when something renders status, so a scripted solve that
+    // never polls would see 0 here and hand this pass a fresh full budget.
+    const double remaining =
+        solver->hard_time_limit -
+        endgame_results_get_timer_elapsed_seconds(solver->results);
+    if (remaining <= 0) {
+      display_pass_end(solver);
+      return false;
+    }
+    deadline_ns = ctimer_monotonic_ns() + (int64_t)(remaining * 1e9);
+  }
+  atomic_store(&solver->depth_deadline_ns, deadline_ns);
+  atomic_store(&solver->search_complete, 0);
+  return true;
+}
+
+// The search's line can stop short of the depth it was solved to. A node on
+// the line whose window a transposition-table bound narrowed can take its best
+// move from a null-window probe that it does not re-search, and the probe's
+// line ends at the first node it answers from the TT. Extending such a line
+// from the TT would mark moves the search proved as unsearched. Instead,
+// searches from where the line stops with the plies that remain, and again
+// from wherever that search's line stops, so the line is searched to depth
+// plies, or to the end of the game, and never deeper. A search that is
+// interrupted, or whose value disagrees with the line's, leaves the rest of
+// the line to TT extension. The worker's game must be at the root position.
+static void complete_pv_line(const EndgameCtx *solver, EndgameCtxWorker *worker,
+                             int depth, PVLine *pv) {
+  if (!solver->transposition_table_optim || pv->negamax_depth == 0 ||
+      pv->negamax_depth >= depth) {
+    return;
+  }
+  // No node of these searches is the root, and none is ply-2 progress for the
+  // (already finished) first root move.
+  worker->current_iterative_deepening_depth = depth;
+  worker->in_first_root_move = false;
+  // A node's incremental move list derives from its parent's, and the walk
+  // down the line builds none, so these searches generate their moves in full.
+  PathMoveLists *path_lists = worker->path_lists;
+  worker->path_lists = NULL;
+
+  // The solving player's final spread, as the line's value.
+  const int32_t line_value = pv->score + solver->initial_spread;
+  // The search plays the move at a node with d plies left into
+  // move_undos[requested_plies - d], so a search from the end of the played
+  // moves uses the undos after theirs.
+  const int first_undo_index = solver->requested_plies - depth;
+  uint64_t node_key = solver_root_hash_key(solver, worker->game_copy);
+  int num_played = 0;
+  while (true) {
+    // Forced passes the search plays without spending a ply can make the
+    // searched moves outnumber the plies.
+    while (num_played < pv->negamax_depth && num_played < depth) {
+      node_key = play_small_move_and_hash(
+          worker, &pv->moves[num_played], node_key,
+          &worker->move_undos[first_undo_index + num_played]);
+      num_played++;
+    }
+    if (num_played >= depth ||
+        game_get_game_end_reason(worker->game_copy) != GAME_END_REASON_NONE) {
+      break;
+    }
+    PVLine rest_pv;
+    rest_pv.game = worker->game_copy;
+    rest_pv.num_moves = 0;
+    rest_pv.negamax_depth = 0;
+    const int32_t value =
+        abdada_negamax(worker, node_key, depth - num_played, -LARGE_VALUE,
+                       LARGE_VALUE, &rest_pv, true, false, 0.0F);
+    if (value == ABDADA_INTERRUPTED || value == ON_EVALUATION) {
+      break;
+    }
+    const bool solving_player_on_turn =
+        game_get_player_on_turn_index(worker->game_copy) ==
+        solver->solving_player;
+    if ((solving_player_on_turn ? value : -value) != line_value ||
+        rest_pv.negamax_depth == 0) {
+      break;
+    }
+    int rest_moves = rest_pv.num_moves;
+    if (rest_moves > MAX_VARIANT_LENGTH - num_played) {
+      rest_moves = MAX_VARIANT_LENGTH - num_played;
+    }
+    memcpy(&pv->moves[num_played], rest_pv.moves,
+           sizeof(SmallMove) * (size_t)rest_moves);
+    pv->num_moves = num_played + rest_moves;
+    pv->negamax_depth = MIN(num_played + rest_pv.negamax_depth, pv->num_moves);
+  }
+  while (num_played > 0) {
+    num_played--;
+    unplay_played_move(worker,
+                       &worker->move_undos[first_undo_index + num_played]);
+  }
+  worker->path_lists = path_lists;
+}
+
 // Re-searches a single root move to full depth with a full (-LARGE_VALUE,
 // LARGE_VALUE) window and records the exact principal variation beneath it.
 // The main search only tracks a full PV for the one best root move; every
@@ -4191,6 +4309,7 @@ static int32_t resolve_root_move_pv(const EndgameCtx *solver,
                 root_value - solver->initial_spread);
   out_pv->negamax_depth = child_pv.negamax_depth + 1;
   out_pv->game = NULL;
+  complete_pv_line(solver, worker, depth, out_pv);
   return root_value;
 }
 
@@ -4249,32 +4368,10 @@ static int resolve_multi_pv_lines(EndgameCtx *solver,
                                   int num_root_moves, int *next_candidate) {
   const uint64_t root_key =
       solver_root_hash_key(solver, best_worker->game_copy);
-  // The main search set search_complete to signal the worker threads to stop;
-  // clear it so this pass is not immediately interrupted. A user interrupt
-  // (and PEG's external_deadline_ns) still stops it.
-  atomic_store(&solver->search_complete, 0);
-  // Under a time limit, this pass gets only what is left of the budget: a
-  // solve that stopped because the next depth would not fit must not then
-  // overrun the clock resolving display lines. Whatever is unresolved when
-  // the deadline fires falls back to TT extension. Unlimited solves (the
-  // plain endgame command's default) run the pass to completion.
-  int64_t resolve_deadline_ns = 0;
-  if (solver->hard_time_limit > 0) {
-    // Read the timer itself, not the cached seconds_elapsed: that field is
-    // only refreshed when something renders status, so a scripted solve that
-    // never polls would see 0 here and hand this pass a fresh full budget.
-    const double remaining =
-        solver->hard_time_limit -
-        endgame_results_get_timer_elapsed_seconds(solver->results);
-    if (remaining <= 0) {
-      atomic_store(&solver->depth_deadline_ns, 0);
-      atomic_store(&solver->search_complete, 1);
-      *next_candidate = 1;
-      return 1;
-    }
-    resolve_deadline_ns = ctimer_monotonic_ns() + (int64_t)(remaining * 1e9);
+  if (!display_pass_begin(solver)) {
+    *next_candidate = 1;
+    return 1;
   }
-  atomic_store(&solver->depth_deadline_ns, resolve_deadline_ns);
   best_worker->current_iterative_deepening_depth = depth;
   // The search is over; stop this pass's children from being counted as ply-2
   // progress for the (already finished) first root move.
@@ -4323,8 +4420,7 @@ static int resolve_multi_pv_lines(EndgameCtx *solver,
   atomic_store_explicit(&best_worker->published_nodes_searched,
                         best_worker->local_nodes_searched,
                         memory_order_relaxed);
-  atomic_store(&solver->depth_deadline_ns, 0);
-  atomic_store(&solver->search_complete, 1);
+  display_pass_end(solver);
   *next_candidate = candidate_idx;
   return filled;
 }
@@ -4647,6 +4743,17 @@ void endgame_solve(EndgameCtx **ctx, const EndgameArgs *endgame_args,
     // Get the best PV from the search results (tracked via
     // endgame_results_set_best_pvline during the search).
     local_pvs[0] = *endgame_results_get_pvline(results, ENDGAME_RESULT_BEST);
+    if (display_pass_begin(solver)) {
+      EndgameCtxWorker *best_worker = solver->workers[best_thread];
+      complete_pv_line(solver, best_worker,
+                       endgame_results_get_depth(results, ENDGAME_RESULT_BEST),
+                       &local_pvs[0]);
+      // Publish again to include the nodes this pass searched.
+      atomic_store_explicit(&best_worker->published_nodes_searched,
+                            best_worker->local_nodes_searched,
+                            memory_order_relaxed);
+      display_pass_end(solver);
+    }
     // TT-extend the best PV for display.
     solver_pvline_extend_from_tt(&local_pvs[0], solver, endgame_args->game);
     num_pvs = 1;

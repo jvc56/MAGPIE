@@ -30,7 +30,10 @@ typedef struct PVLine {
   Game *game;
   int32_t score;
   int num_moves;
-  int negamax_depth; // number of moves from exact search (rest are greedy)
+  // Number of moves from exact search. The rest are a greedy playout past the
+  // search depth, or moves read from the transposition table where a time
+  // limit or interrupt left the line unsearched.
+  int negamax_depth;
 } PVLine;
 
 typedef struct EndgameResults EndgameResults;
