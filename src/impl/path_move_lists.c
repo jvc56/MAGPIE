@@ -363,6 +363,13 @@ void path_move_lists_set_root(PathMoveLists *lists, int side,
   lists->root_stamp = ++lists->next_stamp;
 }
 
+void path_move_lists_set_current(PathMoveLists *lists,
+                                 const MoveList *move_list) {
+  assert(lists->length >= 1);
+  slot_fill_from_move_list(&lists->slots[lists->length], move_list);
+  lists->slot_stamps[lists->length] = lists->stamps[lists->length - 1];
+}
+
 void path_move_lists_push(PathMoveLists *lists, const Board *board,
                           const Move *move) {
   assert(lists->length < PATH_MOVE_LISTS_MAX_PATH);

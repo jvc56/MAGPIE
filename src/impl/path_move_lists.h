@@ -144,6 +144,13 @@ void path_move_lists_pop(PathMoveLists *lists);
 int path_move_lists_moves_at(PathMoveLists *lists, const MoveGenArgs *args,
                              const SmallMove **out_moves);
 
+// Stores `move_list`, a MOVE_RECORD_ALL_SMALL generation at the current path
+// position (length >= 1) ending in its pass, as that position's list: what
+// path_move_lists_moves_at would build there, so later positions can derive
+// from it.
+void path_move_lists_set_current(PathMoveLists *lists,
+                                 const MoveList *move_list);
+
 // Whether the slot of path length `length` (>= 1) holds the list of the
 // current path's position there: moves_at has built it since the move that
 // reached that position was pushed. A node that searched its children without
