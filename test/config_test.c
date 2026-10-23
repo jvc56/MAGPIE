@@ -3069,6 +3069,34 @@ void test_config_lexicon_change_rebuilds_games(void) {
   config_destroy(config);
 }
 
+static int config_endgame_value(Config *config) {
+  assert_config_exec_status(config, "endgame", ERROR_STATUS_SUCCESS);
+  return endgame_results_get_value(config_get_endgame_results(config),
+                                   ENDGAME_RESULT_BEST);
+}
+
+// The endgame TT keeps a solve's values for the next solve, under keys that
+// hash only the board, the racks and the player on turn. After set -lex, an
+// NWL23 solve of this position read back CSW21's values and returned 51, where
+// NWL23's value is 37. The other way round, CSW21 returned 38 for 42. Every
+// word on this board is valid in both lexica.
+void test_config_lexicon_change_clears_endgame_tt(void) {
+  Config *config = config_create_or_die("set -lex CSW21 -eplies 2 -threads 1");
+  assert_config_exec_status(
+      config,
+      "cgp "
+      "PISOLITH7/E14/r13E/I1MEW2F3H2C/ATENOLOL2NY2Z/G6A2AR1BE/U6VERBATIM/"
+      "A4UPO2EX1NA/6OR7/5WO8/4IRKSOmE1T2/5I1QUINOA2/5N1U4Y2/5G1A7/"
+      "GRICES1DELISTED ADDEJRT/FNV 536/474 0",
+      ERROR_STATUS_SUCCESS);
+  assert(config_endgame_value(config) == 42);
+  assert_config_exec_status(config, "set -lex NWL23", ERROR_STATUS_SUCCESS);
+  assert(config_endgame_value(config) == 37);
+  assert_config_exec_status(config, "set -lex CSW21", ERROR_STATUS_SUCCESS);
+  assert(config_endgame_value(config) == 42);
+  config_destroy(config);
+}
+
 static char *write_test_gcg(const char *directory, const char *name,
                             const char *contents) {
   char *path = get_formatted_string("%s/%s", directory, name);
@@ -3365,6 +3393,7 @@ void test_config(void) {
   test_config_new_game_drops_previous_analysis();
   test_config_cgp_starts_new_history();
   test_config_lexicon_change_rebuilds_games();
+  test_config_lexicon_change_clears_endgame_tt();
   test_config_load_replacing_lexical_data();
   test_config_game_event_results_follow_navigation();
   test_config_sim_with_inference_results_saved_to_game_event();

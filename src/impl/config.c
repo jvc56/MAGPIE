@@ -8211,6 +8211,17 @@ static void config_load_lexicon_dependent_data_internal(
   free(updated_ld_name);
 }
 
+// The endgame TT outlives a solve, so the next solve can reuse what it found.
+// Its keys hash the board, the racks and the player on turn, and nothing of
+// the words, tile values, board layout or variant the values were found
+// under. After any of those change, a solve would read back values that no
+// longer hold, so the table is cleared.
+static void config_clear_endgame_tt(const Config *config) {
+  if (config->endgame_ctx) {
+    endgame_ctx_clear_transposition_table(config->endgame_ctx);
+  }
+}
+
 // The lexical data each player borrows. Data reloaded under a new name can
 // land at the freed data's address, so the name is kept as well as the
 // pointer.
@@ -8232,19 +8243,28 @@ static void lexical_data_identity_capture(const PlayersData *players_data,
   }
 }
 
+static bool
+lexical_data_identity_matches_type(const PlayersData *players_data,
+                                   const LexicalDataIdentity *identity,
+                                   const players_data_t data_type) {
+  for (int player_idx = 0; player_idx < 2; player_idx++) {
+    if (identity->data[data_type][player_idx] !=
+            players_data_get_data(players_data, data_type, player_idx) ||
+        !strings_equal(
+            identity->names[data_type][player_idx],
+            players_data_get_data_name(players_data, data_type, player_idx))) {
+      return false;
+    }
+  }
+  return true;
+}
+
 static bool lexical_data_identity_matches(const PlayersData *players_data,
                                           const LexicalDataIdentity *identity) {
   for (int data_idx = 0; data_idx < NUMBER_OF_DATA; data_idx++) {
-    for (int player_idx = 0; player_idx < 2; player_idx++) {
-      if (identity->data[data_idx][player_idx] !=
-              players_data_get_data(players_data, (players_data_t)data_idx,
-                                    player_idx) ||
-          !strings_equal(identity->names[data_idx][player_idx],
-                         players_data_get_data_name(players_data,
-                                                    (players_data_t)data_idx,
-                                                    player_idx))) {
-        return false;
-      }
+    if (!lexical_data_identity_matches_type(players_data, identity,
+                                            (players_data_t)data_idx)) {
+      return false;
     }
   }
   return true;
@@ -8308,6 +8328,11 @@ void config_load_lexicon_dependent_data(
       !lexical_data_identity_matches(config->players_data, &identity_before)) {
     config_rebuild_lexical_games(config);
   }
+  if (config->ld_changed ||
+      !lexical_data_identity_matches_type(
+          config->players_data, &identity_before, PLAYERS_DATA_TYPE_KWG)) {
+    config_clear_endgame_tt(config);
+  }
   lexical_data_identity_destroy(&identity_before);
 }
 
@@ -8329,6 +8354,7 @@ void config_load_board_layout(Config *config, const char *new_board_layout_name,
       return;
     }
     config_invalidate_everything(config, false);
+    config_clear_endgame_tt(config);
   }
 }
 
@@ -8350,6 +8376,7 @@ void config_load_game_variant(Config *config, const char *new_game_variant_str,
     if (config->game_variant != new_game_variant) {
       config->game_variant = new_game_variant;
       config_invalidate_everything(config, false);
+      config_clear_endgame_tt(config);
     }
   }
 }
