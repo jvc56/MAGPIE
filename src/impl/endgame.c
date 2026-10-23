@@ -326,13 +326,13 @@ struct EndgameCtxWorker {
   // leads to, and a node sets its level's from the level below.
   BoardOccupancy occupancy_stack[EG_MAX_PLAYED_MOVES + 1];
   bool occupancy_valid[EG_MAX_PLAYED_MOVES + 1];
-  // Scratch for sort_small_moves_by_estimate, grown as needed.
-  SmallMove *sort_scratch;
+  // Scratch, grown as needed, for sort_small_moves_by_estimate and for
+  // compute_build_chain_values (its values and its bookkeeping). The
+  // capacities sit together, ahead of the pointers, to limit the padding.
   int sort_scratch_capacity;
-  // Scratch for compute_build_chain_values: its values and its bookkeeping,
-  // grown as needed.
-  int *build_chain_scratch;
   int build_chain_scratch_capacity;
+  SmallMove *sort_scratch;
+  int *build_chain_scratch;
   XoshiroPRNG *prng;       // Per-thread PRNG for jitter
   PVLine best_pv;          // Thread-local best PV
   int32_t best_pv_value;   // Thread-local best value
