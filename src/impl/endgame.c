@@ -2643,7 +2643,8 @@ static int32_t negamax_greedy_leaf_playout(EndgameCtxWorker *worker,
     opp_stuck_frac = compute_opp_stuck_fraction(
         worker->game_copy, worker->move_list,
         solver_get_pruned_kwg(worker->solver, opp_idx), opp_idx, NULL,
-        worker->solver, leaf_plays, leaf_play_count, NULL);
+        worker->solver, leaf_plays, leaf_play_count,
+        worker_board_occupancy(worker));
   }
 
   // Only a stuck playout derives its lists, so only it extends the path.
@@ -3285,7 +3286,7 @@ static bool pick_first_reply_before_list(EndgameCtxWorker *worker,
     const float stuck_frac = compute_opp_stuck_fraction(
         worker->game_copy, worker->move_list,
         solver_get_pruned_kwg(worker->solver, opp_idx), opp_idx, NULL,
-        worker->solver, NULL, 0, NULL);
+        worker->solver, NULL, 0, worker_board_occupancy(worker));
     if (stuck_frac > 0.0F || iterative_deepening_should_stop(worker->solver)) {
       return false;
     }
