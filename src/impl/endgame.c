@@ -2648,15 +2648,12 @@ static int32_t negamax_greedy_leaf_playout(EndgameCtxWorker *worker,
   }
 
   // Only a stuck playout derives its lists, so only it extends the path.
-  // (opp_stuck_frac is fixed for the whole playout.) Its second step derives
-  // from the leaf's parent's list, which a parent that cut off on its first
-  // reply never built; the playout then generates from scratch, which gives
-  // the same plays.
-  const bool follow_path =
-      use_path_lists && opp_stuck_frac > 0.0F &&
-      (worker->path_lists->length < 2 ||
-       path_move_lists_slot_is_current(worker->path_lists,
-                                       worker->path_lists->length - 1));
+  // (opp_stuck_frac is fixed for the whole playout.) A step derives from the
+  // same side's list two moves up. Where that list was never built (the
+  // second step's, when the leaf's parent cut off on its first reply), the
+  // step generates from scratch, which gives the same plays in the same
+  // order, and stores its list for the steps that follow.
+  const bool follow_path = use_path_lists && opp_stuck_frac > 0.0F;
 
   bool playout_interrupted = false;
   while (game_get_game_end_reason(worker->game_copy) == GAME_END_REASON_NONE &&
@@ -2736,11 +2733,17 @@ static int32_t negamax_greedy_leaf_playout(EndgameCtxWorker *worker,
       if (follow_path && playout_depth == 0 && leaf_plays != NULL) {
         nplays =
             fill_playout_list(worker->move_list, leaf_plays, leaf_play_count);
-      } else if (follow_path) {
+      } else if (follow_path &&
+                 (worker->path_lists->length <= 2 ||
+                  path_move_lists_slot_is_current(
+                      worker->path_lists, worker->path_lists->length - 2))) {
         nplays = derive_playout_plays(worker, &pargs);
       } else {
         generate_moves(&pargs);
         nplays = worker->move_list->count;
+        if (follow_path) {
+          path_move_lists_set_current(worker->path_lists, worker->move_list);
+        }
       }
     }
 
