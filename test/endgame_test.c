@@ -715,6 +715,36 @@ void test_ctx_reuse(void) {
   config_destroy(config);
 }
 
+static int32_t exec_endgame_value(Config *config, const char *cgp,
+                                  const char *lexicon) {
+  char *load_cmd = get_formatted_string("%s -lex %s", cgp, lexicon);
+  load_and_exec_config_or_die(config, load_cmd);
+  free(load_cmd);
+  assert_config_exec_status(config, "endgame", ERROR_STATUS_SUCCESS);
+  return endgame_results_get_pvline(config_get_endgame_results(config),
+                                    ENDGAME_RESULT_BEST)
+      ->score;
+}
+
+// The CLI keeps one endgame context, and the transposition table it owns, for
+// the whole session, but a TT key hashes only the position. Solving this
+// position under NWL23 and then under CSW21 reused NWL23's entries and
+// returned NWL23's best play, O8 FEELING(S) for 105, instead of CSW21's, 3A GI
+// for 106. From cross-tables annotated game 35333.
+static void test_lexicon_change_clears_tt(void) {
+  const char *cgp =
+      "cgp 2GRANTED5L/1XI5ABBOTCY/6FEG2WO1A/6EUOUAE2M/7O2D4/6OI2V1I2/"
+      "1AN2MO3O1N2/CH1QUIRT1DuDS2/HIOI2I3T1T2/3NAPE3R1A2/4UR4Y1R2/3WAI1Z7/"
+      "4SLEEVEEn3/5L1P7/7STARKENS EEFGILN/J 389/498 0";
+  Config *config = config_create_or_die(
+      "set -s1 score -s2 score -threads 1 -eplies 4 -ttfraction 0.01");
+  const int32_t nwl23_value = exec_endgame_value(config, cgp, "NWL23");
+  assert(nwl23_value == 105);
+  const int32_t csw21_value = exec_endgame_value(config, cgp, "CSW21");
+  assert(csw21_value == 106);
+  config_destroy(config);
+}
+
 static void record_last_depth_callback(int depth, int32_t value,
                                        const PVLine *pv_line, const Game *game,
                                        const PVLine *ranked_pvs,
@@ -2320,6 +2350,7 @@ void test_endgame(void) {
   test_before_search_callback();
   test_single_pv_display();
   test_ctx_reuse();
+  test_lexicon_change_clears_tt();
   test_exhausted_tree_stops_early();
   test_fixed_depth_stepping();
   test_fixed_depth_budget_keeps_every_depth();

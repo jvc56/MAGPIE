@@ -34,6 +34,7 @@
 #include "../ent/zobrist.h"
 #include "../str/letter_distribution_string.h"
 #include "../str/rack_string.h"
+#include "../util/fnv.h"
 #include "../util/io_util.h"
 #include "../util/stable_sort.h"
 #include "../util/string_util.h"
@@ -180,6 +181,8 @@ struct EndgameCtx {
   double tt_fraction_of_mem;
   TranspositionTable *transposition_table;
   bool tt_is_external; // true when using a caller-provided shared TT
+  // endgame_tt_rules_fingerprint of the solves an owned TT's entries came from
+  uint64_t tt_rules;
 
   // Depth-0 root sweep shared by every worker (see root_greedy_sweep): the
   // root moves in thread 0's static-estimate order, published once per solve
@@ -774,6 +777,45 @@ static float compute_initial_stuck_fraction(const EndgameCtx *solver,
   return frac;
 }
 
+// Folds a string into a running FNV-1a hash, ending with a 0 so that
+// consecutive strings cannot run together.
+static uint64_t fnv64a_string(uint64_t hash, const char *string) {
+  if (string != NULL) {
+    for (const char *c = string; *c != '\0'; c++) {
+      hash = fnv64a_step(hash, (uint64_t)(unsigned char)*c);
+    }
+  }
+  return fnv64a_step(hash, 0);
+}
+
+// A fingerprint of what a TT entry's value depends on besides the position its
+// key hashes: the lexicons, tile values, board, bingo bonus, variant and how
+// many scoreless turns end the game, and the solve options that change how a
+// position is valued.
+static uint64_t endgame_tt_rules_fingerprint(const EndgameArgs *endgame_args) {
+  const Game *game = endgame_args->game;
+  uint64_t hash = FNV_64_OFFSET_BASIS;
+  for (int player_idx = 0; player_idx < 2; player_idx++) {
+    hash = fnv64a_string(
+        hash, kwg_get_name(player_get_kwg(game_get_player(game, player_idx))));
+  }
+  hash = fnv64a_string(hash, ld_get_name(game_get_ld(game)));
+  const Board *board = game_get_board(game);
+  for (int row = 0; row < BOARD_DIM; row++) {
+    for (int col = 0; col < BOARD_DIM; col++) {
+      hash = fnv64a_step(hash, board_get_bonus_square(board, row, col).raw);
+      hash = fnv64a_step(hash, board_get_is_brick(board, row, col));
+    }
+  }
+  hash = fnv64a_step(hash, (uint64_t)game_get_bingo_bonus(game));
+  hash = fnv64a_step(hash, (uint64_t)game_get_variant(game));
+  hash = fnv64a_step(hash, (uint64_t)game_get_max_scoreless_turns(game));
+  hash = fnv64a_step(hash, (uint64_t)endgame_args->dual_lexicon_mode);
+  hash = fnv64a_step(hash, endgame_args->use_heuristics);
+  hash = fnv64a_step(hash, endgame_args->first_win);
+  return hash;
+}
+
 void endgame_ctx_reset(EndgameCtx *es, EndgameResults *results,
                        const EndgameArgs *endgame_args) {
   es->first_win_optim = endgame_args->first_win;
@@ -914,6 +956,7 @@ void endgame_ctx_reset(EndgameCtx *es, EndgameResults *results,
     es->tt_fraction_of_mem = 0;
     es->tt_is_external = true;
   } else {
+    bool tt_created = false;
     if (!es->tt_is_external) {
       if (endgame_args->tt_fraction_of_mem == 0) {
         transposition_table_destroy(es->transposition_table);
@@ -922,6 +965,7 @@ void endgame_ctx_reset(EndgameCtx *es, EndgameResults *results,
         transposition_table_destroy(es->transposition_table);
         es->transposition_table =
             transposition_table_create(endgame_args->tt_fraction_of_mem);
+        tt_created = true;
       }
     } else {
       // Transitioning from external to owned. Don't destroy the external TT.
@@ -929,10 +973,21 @@ void endgame_ctx_reset(EndgameCtx *es, EndgameResults *results,
       if (endgame_args->tt_fraction_of_mem > 0) {
         es->transposition_table =
             transposition_table_create(endgame_args->tt_fraction_of_mem);
+        tt_created = true;
       }
     }
     es->tt_fraction_of_mem = endgame_args->tt_fraction_of_mem;
     es->tt_is_external = false;
+    // An owned TT keeps its entries from one solve to the next, which pays
+    // off when the same game is solved again or stepped through. Its keys
+    // hash the position alone, so entries from solves under other rules (say,
+    // another lexicon) would give wrong values here: clear them.
+    const uint64_t tt_rules = endgame_tt_rules_fingerprint(endgame_args);
+    if (es->transposition_table != NULL && !tt_created &&
+        tt_rules != es->tt_rules) {
+      transposition_table_reset(es->transposition_table);
+    }
+    es->tt_rules = tt_rules;
   }
   // Disable TT optimization when no TT is available.
   if (es->transposition_table == NULL) {
