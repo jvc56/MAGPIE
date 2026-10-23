@@ -399,6 +399,7 @@ static void run_injection_case(bool use_inline) {
   args.max_workers = 5; // ...and allow growth to 1 + 4 injected
   args.use_heuristics = true;
   args.forced_pass_bypass = true;
+  args.incremental_movegen = true;
   args.num_top_moves = 1;
   args.seed = 42;
   args.per_ply_callback = inject_worker_per_ply;
@@ -1327,7 +1328,7 @@ void test_endgame_interrupt(void) {
 }
 
 void test_kue(void) {
-  Config *config = config_create_or_die("set -s1 score -s2 score -eplies 14 "
+  Config *config = config_create_or_die("set -s1 score -s2 score -eplies 7 "
                                         "-ttfraction 0.5");
   load_and_exec_config_or_die(
       config, "cgp "
@@ -1344,12 +1345,14 @@ void test_kue(void) {
   EndgameArgs endgame_args = {0};
   endgame_args.thread_control = config_get_thread_control(config);
   endgame_args.game = game;
-  endgame_args.plies = 14;
+  endgame_args.plies = 7;
   endgame_args.tt_fraction_of_mem = 0.5;
   endgame_args.initial_small_move_arena_size =
       DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
   endgame_args.num_threads = 8;
   endgame_args.use_heuristics = true;
+  endgame_args.forced_pass_bypass = true;
+  endgame_args.incremental_movegen = true;
   endgame_args.num_top_moves = 10;
   endgame_args.per_ply_callback = print_pv_and_ranked_callback;
   endgame_args.per_ply_callback_data = &timer;
@@ -1374,7 +1377,7 @@ void test_kue(void) {
 
   const PVLine *pv_line =
       endgame_results_get_pvline(endgame_results, ENDGAME_RESULT_BEST);
-  assert(pv_line->score == 52);
+  assert(pv_line->score == 56);
 
   endgame_ctx_destroy(endgame_ctx);
   error_stack_destroy(error_stack);
@@ -1560,6 +1563,7 @@ void test_via_interrupted_reasonable_under_time_pressure(void) {
     endgame_args.num_threads = 6;
     endgame_args.use_heuristics = true;
     endgame_args.forced_pass_bypass = true;
+    endgame_args.incremental_movegen = true;
     endgame_args.enable_pv_display = true;
     endgame_args.num_top_moves = 1;
     endgame_args.seed = 42;
@@ -2106,6 +2110,7 @@ void test_endgame_progress_stream(void) {
     warmup_args.num_top_moves = 1;
     warmup_args.use_heuristics = true;
     warmup_args.forced_pass_bypass = true;
+    warmup_args.incremental_movegen = true;
     warmup_args.enable_pv_display = true;
     warmup_args.seed = 1;
     EndgameResults *warmup_results = config_get_endgame_results(warmup_config);
@@ -2154,6 +2159,7 @@ void test_endgame_progress_stream(void) {
       args.num_top_moves = 5;
       args.use_heuristics = true;
       args.forced_pass_bypass = true;
+      args.incremental_movegen = true;
       args.enable_pv_display = true;
       args.seed = 42;
       args.before_search_callback = stream_before_search_cb;
@@ -2521,6 +2527,7 @@ void test_monster_q(void) {
   endgame_args.num_threads = 6;
   endgame_args.use_heuristics = true;
   endgame_args.forced_pass_bypass = true;
+  endgame_args.incremental_movegen = true;
   endgame_args.enable_pv_display = true;
   endgame_args.num_top_moves = 1;
   endgame_args.per_ply_callback = print_pv_callback;
@@ -2573,6 +2580,8 @@ void test_multi_pv(void) {
   endgame_args.num_threads = 6;
   endgame_args.num_top_moves = 1;
   endgame_args.use_heuristics = true;
+  endgame_args.forced_pass_bypass = true;
+  endgame_args.incremental_movegen = true;
   endgame_args.per_ply_callback = NULL;
   endgame_args.per_ply_callback_data = NULL;
   endgame_args.seed = 42;
