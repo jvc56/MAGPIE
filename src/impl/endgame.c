@@ -12,6 +12,7 @@
 #include "../def/letter_distribution_defs.h"
 #include "../def/move_defs.h"
 #include "../def/players_data_defs.h"
+#include "../def/rack_defs.h"
 #include "../def/thread_control_defs.h"
 #include "../ent/bag.h"
 #include "../ent/board.h"
@@ -103,6 +104,11 @@ enum {
   // Most moves on a worker's board at once: one per slot of its move_undos
   // and pass_undos.
   EG_MAX_PLAYED_MOVES = (2 * MAX_SEARCH_DEPTH) + EG_MAX_LEAF_PLAYOUT + 1,
+  // sort_small_moves_by_estimate sorts runs this short by insertion.
+  SMALL_MOVE_INSERTION_SORT_MAX = 16,
+  // compute_build_chain_values' buckets: a line (passes, then each row, then
+  // each column) for each count of tiles played, 0 to RACK_SIZE.
+  BUILD_CHAIN_BUCKETS = (1 + 2 * BOARD_DIM) * (RACK_SIZE + 1),
 };
 
 // A stuck-tile greedy playout extends the incremental lists' path past the
@@ -258,6 +264,17 @@ struct EndgameCtx {
   cpthread_mutex_t add_mutex; // serializes add vs the close+snapshot in solve
 };
 
+// Which squares hold a tile, row by row (bit col of occupied_rows[row]), and
+// which cannot take one (holding a tile or bricked), for the scans of the
+// squares a single tile can drop on. Read from the letters on the board, or
+// from the occupancy before the last move plus that move's tiles; the board's
+// own records of which squares hold cross words can be stale after an
+// unplay.
+typedef struct BoardOccupancy {
+  uint32_t occupied_rows[BOARD_DIM];
+  uint32_t unavailable_rows[BOARD_DIM];
+} BoardOccupancy;
+
 struct EndgameCtxWorker {
   // Worker ordinal within this solve (0..live_workers-1, counting helpers lent
   // by endgame_add_worker; == position in the cached workers[] array, so
@@ -304,6 +321,18 @@ struct EndgameCtxWorker {
   int first_deferred_move_at_play[EG_MAX_PLAYED_MOVES];
   int num_played_moves;
   int first_deferred_move;
+  // The occupancy of the board with the first i played moves on it, valid
+  // when occupancy_valid[i]: playing a move clears the flag of the level it
+  // leads to, and a node sets its level's from the level below.
+  BoardOccupancy occupancy_stack[EG_MAX_PLAYED_MOVES + 1];
+  bool occupancy_valid[EG_MAX_PLAYED_MOVES + 1];
+  // Scratch, grown as needed, for sort_small_moves_by_estimate and for
+  // compute_build_chain_values (its values and its bookkeeping). The
+  // capacities sit together, ahead of the pointers, to limit the padding.
+  int sort_scratch_capacity;
+  int build_chain_scratch_capacity;
+  SmallMove *sort_scratch;
+  int *build_chain_scratch;
   XoshiroPRNG *prng;       // Per-thread PRNG for jitter
   PVLine best_pv;          // Thread-local best PV
   int32_t best_pv_value;   // Thread-local best value
@@ -646,6 +675,61 @@ static inline uint64_t small_move_tile_types_bv(const SmallMove *small_move) {
   return tile_types;
 }
 
+static void board_occupancy_init(const Board *board, BoardOccupancy *occ) {
+  for (int row = 0; row < BOARD_DIM; row++) {
+    occ->occupied_rows[row] = 0;
+    occ->unavailable_rows[row] = 0;
+    for (int col = 0; col < BOARD_DIM; col++) {
+      const uint32_t square_bit = UINT32_C(1) << col;
+      if (!board_is_empty(board, row, col)) {
+        occ->occupied_rows[row] |= square_bit;
+      }
+      if (board_is_nonempty_or_bricked(board, row, col)) {
+        occ->unavailable_rows[row] |= square_bit;
+      }
+    }
+  }
+}
+
+// The empty squares of row next to a tile, across (bits of *across) or down
+// (bits of *down); returns their union.
+static inline uint32_t board_occupancy_candidates(const BoardOccupancy *occ,
+                                                  int row, uint32_t *across,
+                                                  uint32_t *down) {
+  const uint32_t row_mask = (UINT32_C(1) << BOARD_DIM) - 1;
+  *across = (occ->occupied_rows[row] << 1) | (occ->occupied_rows[row] >> 1);
+  *down = (row > 0 ? occ->occupied_rows[row - 1] : 0) |
+          (row < BOARD_DIM - 1 ? occ->occupied_rows[row + 1] : 0);
+  return (*across | *down) & ~occ->unavailable_rows[row] & row_mask;
+}
+
+// board_get_playable_tiles_bv over the squares occ lists as next to a tile,
+// in the same order, so with the same early exit and the same result.
+static uint64_t occupancy_playable_tiles_bv(const Board *board,
+                                            const BoardOccupancy *occ,
+                                            int cross_set_index,
+                                            uint64_t rack_tiles_bv) {
+  uint64_t playable = 0;
+  for (int row = 0; row < BOARD_DIM; row++) {
+    uint32_t across;
+    uint32_t down;
+    uint32_t candidates = board_occupancy_candidates(occ, row, &across, &down);
+    while (candidates) {
+      const int col = __builtin_ctz(candidates);
+      candidates &= candidates - 1;
+      playable |=
+          board_get_cross_set(board, row, col, BOARD_HORIZONTAL_DIRECTION,
+                              cross_set_index) &
+          board_get_cross_set(board, row, col, BOARD_VERTICAL_DIRECTION,
+                              cross_set_index);
+      if (rack_tiles_bv && (playable & rack_tiles_bv) == rack_tiles_bv) {
+        return playable;
+      }
+    }
+  }
+  return playable;
+}
+
 // Generate opponent's moves in TILES_PLAYED mode and return stuck-tile
 // fraction. Saves and restores player-on-turn if it differs from opp_idx.
 // If tiles_played_bv_out is non-NULL, writes the bitvector of tile types
@@ -663,7 +747,8 @@ static float compute_opp_stuck_fraction(Game *game, MoveList *move_list,
                                         uint64_t *tiles_played_bv_out,
                                         EndgameCtx *solver,
                                         const SmallMove *opp_plays,
-                                        int opp_play_count) {
+                                        int opp_play_count,
+                                        const BoardOccupancy *occupancy) {
   int saved_on_turn = game_get_player_on_turn_index(game);
   if (saved_on_turn != opp_idx) {
     game_set_player_on_turn_index(game, opp_idx);
@@ -688,7 +773,9 @@ static float compute_opp_stuck_fraction(Game *game, MoveList *move_list,
     }
     uint64_t rack_non_blank = rack_tiles_bv & ~(uint64_t)1;
     uint64_t playable_bv =
-        board_get_playable_tiles_bv(board, ci, rack_non_blank);
+        occupancy != NULL
+            ? occupancy_playable_tiles_bv(board, occupancy, ci, rack_non_blank)
+            : board_get_playable_tiles_bv(board, ci, rack_non_blank);
     opp_tiles_bv = playable_bv & rack_tiles_bv;
     if ((rack_tiles_bv & 1) && (playable_bv >> 1)) {
       opp_tiles_bv |= 1;
@@ -768,7 +855,7 @@ static float compute_initial_stuck_fraction(const EndgameCtx *solver,
   MoveList *tmp_ml = move_list_create_small(ENDGAME_MOVELIST_INITIAL_CAPACITY);
   float frac = compute_opp_stuck_fraction(
       root_game, tmp_ml, solver_get_pruned_kwg(solver, opp_idx), opp_idx, NULL,
-      NULL, NULL, 0);
+      NULL, NULL, 0, NULL);
   small_move_list_destroy(tmp_ml);
   game_destroy(root_game);
   return frac;
@@ -1160,6 +1247,8 @@ static void solver_worker_destroy(EndgameCtxWorker *solver_worker) {
   small_move_list_destroy(solver_worker->move_list);
   arena_destroy(solver_worker->small_move_arena);
   path_move_lists_destroy(solver_worker->path_lists_storage);
+  free(solver_worker->sort_scratch);
+  free(solver_worker->build_chain_scratch);
   prng_destroy(solver_worker->prng);
   free(solver_worker);
 }
@@ -1209,6 +1298,12 @@ static EndgameCtxWorker *endgame_ctx_create_worker(EndgameCtx *solver,
   memset(solver_worker->move_undos, 0, sizeof(solver_worker->move_undos));
   solver_worker->num_played_moves = 0;
   solver_worker->first_deferred_move = 0;
+  memset(solver_worker->occupancy_valid, 0,
+         sizeof(solver_worker->occupancy_valid));
+  solver_worker->sort_scratch = NULL;
+  solver_worker->sort_scratch_capacity = 0;
+  solver_worker->build_chain_scratch = NULL;
+  solver_worker->build_chain_scratch_capacity = 0;
 
   // Seed by ordinal (stable across solves), not the MoveGen slot, so jitter is
   // deterministic regardless of which slots were borrowed.
@@ -1253,6 +1348,7 @@ static void endgame_ctx_reset_worker(EndgameCtxWorker *worker,
   memset(worker->move_undos, 0, sizeof(worker->move_undos));
   worker->num_played_moves = 0;
   worker->first_deferred_move = 0;
+  memset(worker->occupancy_valid, 0, sizeof(worker->occupancy_valid));
   prng_seed(worker->prng, base_seed + (uint64_t)worker->ordinal * 12345);
   worker->best_pv.game = worker->game_copy;
   worker->best_pv.num_moves = 0;
@@ -1345,66 +1441,120 @@ static void endgame_ctx_prepare_workers(EndgameCtx *solver,
   }
 }
 
-// Generate moves for a single-tile rack by scanning cross-sets, bypassing
-// the GADDAG entirely.  In a bag-empty endgame, every tile placement uses the
-// last rack tile and ends the game, so only the best-scoring position matters.
-// Always returns 1; writes the best-scoring placement to the arena, or a pass
-// move if no legal placement exists.
-static int generate_single_tile_plays(EndgameCtxWorker *worker) {
-  const Game *game = worker->game_copy;
-  const Board *board = game_get_board(game);
+// The sum of the face values of the board tiles from (row, col) on, stepping
+// by (row_step, col_step), up to the first empty or bricked square or the
+// edge of the board.
+static Equity board_run_score(const Board *board, const LetterDistribution *ld,
+                              int row, int col, int row_step, int col_step) {
+  Equity sum = 0;
+  while (row >= 0 && row < BOARD_DIM && col >= 0 && col < BOARD_DIM &&
+         !board_is_empty_or_bricked(board, row, col)) {
+    const MachineLetter ml = board_get_letter(board, row, col);
+    sum += get_is_blanked(ml) ? 0 : ld_get_score(ld, ml);
+    row += row_step;
+    col += col_step;
+  }
+  return sum;
+}
+
+// Whether (row, col) is on the board and holds a tile.
+static inline bool occupancy_has_tile(const BoardOccupancy *occupancy, int row,
+                                      int col) {
+  return row >= 0 && row < BOARD_DIM && col >= 0 && col < BOARD_DIM &&
+         (occupancy->occupied_rows[row] & (UINT32_C(1) << col)) != 0;
+}
+
+// The sum of the face values of the tiles beside the empty square (row, col)
+// across a word along (row_step, col_step), or 0 when it has none: its cross
+// score for the direction across.
+static inline Equity tiles_beside_score(const Board *board,
+                                        const BoardOccupancy *occupancy,
+                                        int cross_set_index, int row, int col,
+                                        int row_step, int col_step,
+                                        bool *has_beside) {
+  // A horizontal step (row_step == 0) has the tiles beside it above and
+  // below, which the horizontal cross score sums.
+  *has_beside = occupancy_has_tile(occupancy, row - col_step, col - row_step) ||
+                occupancy_has_tile(occupancy, row + col_step, col + row_step);
+  if (!*has_beside) {
+    return 0;
+  }
+  return board_get_cross_score(board, row, col,
+                               row_step == 0 ? BOARD_HORIZONTAL_DIRECTION
+                                             : BOARD_VERTICAL_DIRECTION,
+                               cross_set_index);
+}
+
+// At most what a drop worth tile_value (before multipliers) scores on the
+// square (row, col), next to a run of tiles worth run_score that lies on the
+// near side of it, stepping (row_step, col_step) away from that run, scored
+// whether or not the words are in the lexicon; 0 off the board or on an
+// occupied or bricked square. The word along the step holds the run, the
+// drop and the board tiles beyond the square. The word across it holds only
+// board tiles: the run lies on the line along the step, so no tile of the
+// move is beside the square.
+static Equity drop_bound_beside_run(const Board *board,
+                                    const BoardOccupancy *occupancy,
+                                    const LetterDistribution *ld,
+                                    int cross_set_index, int row, int col,
+                                    int row_step, int col_step,
+                                    Equity run_score, Equity tile_value) {
+  if (row < 0 || row >= BOARD_DIM || col < 0 || col >= BOARD_DIM ||
+      (occupancy->unavailable_rows[row] & (UINT32_C(1) << col)) != 0) {
+    return 0;
+  }
+  const BonusSquare bonus_square = board_get_bonus_square(board, row, col);
+  const int word_multiplier = bonus_square_get_word_multiplier(bonus_square);
+  const Equity tile_score =
+      tile_value * bonus_square_get_letter_multiplier(bonus_square);
+  Equity total = (run_score + tile_score +
+                  board_run_score(board, ld, row + row_step, col + col_step,
+                                  row_step, col_step)) *
+                 word_multiplier;
+  bool has_across;
+  const Equity across_score =
+      tiles_beside_score(board, occupancy, cross_set_index, row, col, row_step,
+                         col_step, &has_across);
+  if (has_across) {
+    total += (across_score + tile_score) * word_multiplier;
+  }
+  return total;
+}
+
+// The best-scoring drop of one tile on an empty square.
+typedef struct SingleDrop {
+  Equity score;
+  int row;
+  int col;
+  bool vertical;
+  int start; // leftmost col (H) or topmost row (V) of the word
+  int play_length;
+  MachineLetter ml; // for blank: the letter the blank plays as
+} SingleDrop;
+
+// Finds the best-scoring drop of the tile tile_ml (or the blank, played as
+// any letter, when is_blank) by scanning the cross-sets, bypassing the
+// GADDAG. Returns false when it has no legal square.
+static bool find_best_single_drop(const Board *board,
+                                  const BoardOccupancy *occupancy,
+                                  const LetterDistribution *ld,
+                                  int cross_set_index, MachineLetter tile_ml,
+                                  bool is_blank, SingleDrop *best) {
   assert(board_get_cross_sets_valid(board));
-  const LetterDistribution *ld = game_get_ld(game);
-  int stm_idx = game_get_player_on_turn_index(game);
-  const Rack *stm_rack = player_get_rack(game_get_player(game, stm_idx));
-  bool kwgs_shared = game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KWG);
-  int ci = board_get_cross_set_index(kwgs_shared, stm_idx);
-  int ld_size = ld_get_size(ld);
-
-  // Find the single tile on the rack.
-  MachineLetter tile_ml = BLANK_MACHINE_LETTER;
-  bool is_blank = false;
-  for (int ml = 0; ml < ld_size; ml++) {
-    if (rack_get_letter(stm_rack, ml) > 0) {
-      tile_ml = ml;
-      is_blank = (ml == BLANK_MACHINE_LETTER);
-      break;
-    }
-  }
-
+  const int ci = cross_set_index;
+  const int ld_size = ld_get_size(ld);
   bool found = false;
-  Equity best_score = 0;
-  int best_row = 0;
-  int best_col = 0;
-  bool best_dir_vertical = false;
-  int best_start = 0; // leftmost col (H) or topmost row (V) of the word
-  int best_play_length = 0;
-  MachineLetter best_ml = 0; // for blank: the letter the blank plays as
 
-  // Read actual occupancy: is_cross_word can be stale after unplay.
-  // Keep these masks local, with no maintenance on other move paths.
-  uint32_t occupied_rows[BOARD_DIM] = {0};
-  uint32_t unavailable_rows[BOARD_DIM] = {0};
-  for (int row = 0; row < BOARD_DIM; row++) {
-    for (int col = 0; col < BOARD_DIM; col++) {
-      const uint32_t square_bit = UINT32_C(1) << col;
-      if (!board_is_empty(board, row, col)) {
-        occupied_rows[row] |= square_bit;
-      }
-      if (board_is_nonempty_or_bricked(board, row, col)) {
-        unavailable_rows[row] |= square_bit;
-      }
-    }
+  BoardOccupancy local_occupancy;
+  if (occupancy == NULL) {
+    board_occupancy_init(board, &local_occupancy);
+    occupancy = &local_occupancy;
   }
-  const uint32_t row_mask = (UINT32_C(1) << BOARD_DIM) - 1;
   for (int row = 0; row < BOARD_DIM; row++) {
-    const uint32_t horizontal_neighbors =
-        (occupied_rows[row] << 1) | (occupied_rows[row] >> 1);
-    const uint32_t vertical_neighbors =
-        (row > 0 ? occupied_rows[row - 1] : 0) |
-        (row < BOARD_DIM - 1 ? occupied_rows[row + 1] : 0);
-    uint32_t candidates = (horizontal_neighbors | vertical_neighbors) &
-                          ~unavailable_rows[row] & row_mask;
+    uint32_t horizontal_neighbors;
+    uint32_t vertical_neighbors;
+    uint32_t candidates = board_occupancy_candidates(
+        occupancy, row, &horizontal_neighbors, &vertical_neighbors);
     // Ascending columns preserve the original row-major tie-breaking order.
     while (candidates) {
       const int col = __builtin_ctz(candidates);
@@ -1454,7 +1604,7 @@ static int generate_single_tile_plays(EndgameCtxWorker *worker) {
       if (has_v_nbrs) {
         score += (tile_ls + v_nbr_score) * wm;
       }
-      if (found && score <= best_score) {
+      if (found && score <= best->score) {
         continue;
       }
 
@@ -1504,16 +1654,201 @@ static int generate_single_tile_plays(EndgameCtxWorker *worker) {
         }
       }
       found = true;
-      best_score = score;
-      best_row = row;
-      best_col = col;
-      best_dir_vertical = dir_vertical;
-      best_start = word_start;
-      best_play_length = word_end - word_start + 1;
-      best_ml = chosen_ml;
+      best->score = score;
+      best->row = row;
+      best->col = col;
+      best->vertical = dir_vertical;
+      best->start = word_start;
+      best->play_length = word_end - word_start + 1;
+      best->ml = chosen_ml;
     }
   }
 
+  return found;
+}
+
+// What a node needs to bound the moves that leave one tile on the rack.
+typedef struct KeepOneBound {
+  const Board *board;
+  const LetterDistribution *ld;
+  const Rack *rack;
+  int rack_size;
+  // The sum of the rack's machine letters, a blank counting as
+  // BLANK_MACHINE_LETTER.
+  int rack_letter_sum;
+  int cross_set_index;
+  int32_t on_turn_spread;
+  Equity out_bonus;
+  // The node's occupancy, for the scans of the kept tiles' drops.
+  const BoardOccupancy *occupancy;
+  // Best drop of each tile kept so far (bit ml of scanned set), or -1 when it
+  // has no legal square.
+  uint64_t scanned;
+  Equity best_drop[MAX_ALPHABET_SIZE];
+} KeepOneBound;
+
+static void keep_one_bound_init(KeepOneBound *bound, const Game *game,
+                                int32_t on_turn_spread,
+                                const BoardOccupancy *occupancy) {
+  const int on_turn = game_get_player_on_turn_index(game);
+  bound->board = game_get_board(game);
+  bound->ld = game_get_ld(game);
+  bound->rack = player_get_rack(game_get_player(game, on_turn));
+  bound->rack_size = rack_get_total_letters(bound->rack);
+  bound->rack_letter_sum = 0;
+  for (int ml = 0; ml < ld_get_size(bound->ld); ml++) {
+    bound->rack_letter_sum += ml * rack_get_letter(bound->rack, ml);
+  }
+  bound->cross_set_index = board_get_cross_set_index(
+      game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KWG), on_turn);
+  bound->on_turn_spread = on_turn_spread;
+  bound->occupancy = occupancy;
+  bound->out_bonus = calculate_end_rack_points(
+      player_get_rack(game_get_player(game, 1 - on_turn)), bound->ld);
+  bound->scanned = 0;
+}
+
+// A move that leaves one tile y on the rack is worth at most its score, plus
+// the most y can drop for next, plus the going-out bonus: the side to move's
+// value after the move, from the node's spread. The opponent can always pass,
+// so whatever they reply leaves the side to move no better off than a pass
+// would; with one tile, the opponent is searched with their best drop only,
+// which leaves less still. After a pass, y drops where it could before the
+// move, which its best drop now bounds, or on a square whose words hold one
+// of the move's tiles, which drop_bound_next_to bounds. A drop the move
+// blocks only lowers what y can score, and if y cannot be played the game
+// ends on passes with less than the going-out bonus.
+static int32_t keep_one_bound(KeepOneBound *bound, const SmallMove *play_sm,
+                              int32_t alpha) {
+  const Board *board = bound->board;
+  const LetterDistribution *ld = bound->ld;
+  Move play;
+  small_move_to_move(&play, play_sm, board);
+  const bool vertical = board_is_dir_vertical(move_get_dir(&play));
+  const int row_step = vertical ? 1 : 0;
+  const int col_step = vertical ? 0 : 1;
+  // The move leaves one tile, so it is the rack's sum of machine letters
+  // less the played tiles' (a blank counting as BLANK_MACHINE_LETTER).
+  int kept_sum = bound->rack_letter_sum;
+  const int tiles_length = move_get_tiles_length(&play);
+  for (int tile_idx = 0; tile_idx < tiles_length; tile_idx++) {
+    const MachineLetter tile = move_get_tile(&play, tile_idx);
+    if (tile != PLAYED_THROUGH_MARKER) {
+      kept_sum -= get_is_blanked(tile) ? BLANK_MACHINE_LETTER : tile;
+    }
+  }
+  const MachineLetter kept = (MachineLetter)kept_sum;
+  const bool kept_is_blank = kept == BLANK_MACHINE_LETTER;
+  if (!(bound->scanned & ((uint64_t)1 << kept))) {
+    SingleDrop best;
+    bound->best_drop[kept] = find_best_single_drop(board, bound->occupancy, ld,
+                                                   bound->cross_set_index, kept,
+                                                   kept_is_blank, &best)
+                                 ? best.score
+                                 : -1;
+    bound->scanned |= (uint64_t)1 << kept;
+  }
+  const int32_t move_bound = bound->on_turn_spread +
+                             (int32_t)small_move_get_score(play_sm) +
+                             equity_to_int(bound->out_bonus);
+  Equity next_drop = MAX(bound->best_drop[kept], 0);
+  // The squares the move touched can only raise the bound, so when it already
+  // beats alpha there is no need to look at them.
+  if (move_bound + equity_to_int(next_drop) > alpha) {
+    return move_bound + equity_to_int(next_drop);
+  }
+  const Equity kept_value = kept_is_blank ? 0 : ld_get_score(ld, kept);
+  const int start_row = move_get_row_start(&play);
+  const int start_col = move_get_col_start(&play);
+  // The main word, the move's tiles and the board tiles it plays through,
+  // and the empty squares at its two ends.
+  Equity word_score = 0;
+  for (int tile_idx = 0; tile_idx < tiles_length; tile_idx++) {
+    const MachineLetter tile = move_get_tile(&play, tile_idx);
+    const int row = start_row + row_step * tile_idx;
+    const int col = start_col + col_step * tile_idx;
+    const MachineLetter on_square = tile == PLAYED_THROUGH_MARKER
+                                        ? board_get_letter(board, row, col)
+                                        : tile;
+    word_score += get_is_blanked(on_square) ? 0 : ld_get_score(ld, on_square);
+  }
+  const BoardOccupancy *occupancy = bound->occupancy;
+  const int ci = bound->cross_set_index;
+  next_drop =
+      MAX(next_drop,
+          drop_bound_beside_run(board, occupancy, ld, ci, start_row - row_step,
+                                start_col - col_step, -row_step, -col_step,
+                                word_score, kept_value));
+  next_drop =
+      MAX(next_drop,
+          drop_bound_beside_run(board, occupancy, ld, ci,
+                                start_row + row_step * tiles_length,
+                                start_col + col_step * tiles_length, row_step,
+                                col_step, word_score, kept_value));
+  // Each placed tile joins the board tiles on either side of its square,
+  // across the main word; the empty squares at the two ends of that run are
+  // touched too.
+  for (int tile_idx = 0; tile_idx < tiles_length; tile_idx++) {
+    const MachineLetter tile = move_get_tile(&play, tile_idx);
+    if (tile == PLAYED_THROUGH_MARKER) {
+      continue;
+    }
+    const int row = start_row + row_step * tile_idx;
+    const int col = start_col + col_step * tile_idx;
+    bool has_across;
+    const Equity run_score =
+        (get_is_blanked(tile) ? 0 : ld_get_score(ld, tile)) +
+        tiles_beside_score(board, occupancy, ci, row, col, row_step, col_step,
+                           &has_across);
+    for (int sign = -1; sign <= 1; sign += 2) {
+      const int across_row_step = sign * col_step;
+      const int across_col_step = sign * row_step;
+      int end_row = row + across_row_step;
+      int end_col = col + across_col_step;
+      while (occupancy_has_tile(occupancy, end_row, end_col)) {
+        end_row += across_row_step;
+        end_col += across_col_step;
+      }
+      next_drop =
+          MAX(next_drop,
+              drop_bound_beside_run(board, occupancy, ld, ci, end_row, end_col,
+                                    across_row_step, across_col_step, run_score,
+                                    kept_value));
+    }
+  }
+  return move_bound + equity_to_int(next_drop);
+}
+
+// Generate moves for a single-tile rack by scanning cross-sets, bypassing
+// the GADDAG entirely.  In a bag-empty endgame, every tile placement uses the
+// last rack tile and ends the game, so only the best-scoring position matters.
+// Always returns 1; writes the best-scoring placement to the arena, or a pass
+// move if no legal placement exists.
+static int generate_single_tile_plays(EndgameCtxWorker *worker,
+                                      const BoardOccupancy *occupancy) {
+  const Game *game = worker->game_copy;
+  const Board *board = game_get_board(game);
+  const LetterDistribution *ld = game_get_ld(game);
+  int stm_idx = game_get_player_on_turn_index(game);
+  const Rack *stm_rack = player_get_rack(game_get_player(game, stm_idx));
+  bool kwgs_shared = game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KWG);
+  int ci = board_get_cross_set_index(kwgs_shared, stm_idx);
+  int ld_size = ld_get_size(ld);
+
+  // Find the single tile on the rack.
+  MachineLetter tile_ml = BLANK_MACHINE_LETTER;
+  bool is_blank = false;
+  for (int ml = 0; ml < ld_size; ml++) {
+    if (rack_get_letter(stm_rack, ml) > 0) {
+      tile_ml = ml;
+      is_blank = (ml == BLANK_MACHINE_LETTER);
+      break;
+    }
+  }
+
+  SingleDrop best;
+  const bool found =
+      find_best_single_drop(board, occupancy, ld, ci, tile_ml, is_blank, &best);
   SmallMove *sm =
       (SmallMove *)arena_alloc(worker->small_move_arena, sizeof(SmallMove));
   sm->metadata.estimated_value = 0;
@@ -1527,25 +1862,25 @@ static int generate_single_tile_plays(EndgameCtxWorker *worker) {
     return 1;
   }
 
-  sm->metadata.score = (uint16_t)equity_to_int(best_score);
-  sm->metadata.play_length = (uint8_t)best_play_length;
+  sm->metadata.score = (uint16_t)equity_to_int(best.score);
+  sm->metadata.play_length = (uint8_t)best.play_length;
   sm->metadata.tiles_played = 1;
 
   // Build tiny_move following the same convention as small_move_set_all:
   // for vertical, row_start and col_start are swapped before storing.
-  uint64_t tm = (uint64_t)best_ml << SMALL_MOVE_TILES_SHIFT;
+  uint64_t tm = (uint64_t)best.ml << SMALL_MOVE_TILES_SHIFT;
   if (is_blank) {
     tm |= 1ULL << SMALL_MOVE_BLANKS_SHIFT; // blank flag for tile index 0
   }
-  if (best_dir_vertical) {
+  if (best.vertical) {
     tm |= 1; // direction bit
     // small_move_set_all swaps row/col for vertical, so the true board
     // column goes in the column field and the true row in the row field.
-    tm |= (uint64_t)best_col << SMALL_MOVE_COL_SHIFT;
-    tm |= (uint64_t)best_start << SMALL_MOVE_ROW_SHIFT;
+    tm |= (uint64_t)best.col << SMALL_MOVE_COL_SHIFT;
+    tm |= (uint64_t)best.start << SMALL_MOVE_ROW_SHIFT;
   } else {
-    tm |= (uint64_t)best_start << SMALL_MOVE_COL_SHIFT;
-    tm |= (uint64_t)best_row << SMALL_MOVE_ROW_SHIFT;
+    tm |= (uint64_t)best.start << SMALL_MOVE_COL_SHIFT;
+    tm |= (uint64_t)best.row << SMALL_MOVE_ROW_SHIFT;
   }
   sm->tiny_move = tm;
   return 1;
@@ -1665,6 +2000,42 @@ static void push_played_move(EndgameCtxWorker *worker, MoveUndo *undo) {
       worker->first_deferred_move;
   worker->played_move_undos[worker->num_played_moves] = undo;
   worker->num_played_moves++;
+  worker->occupancy_valid[worker->num_played_moves] = false;
+}
+
+// The occupancy of the worker's board: the level's own when valid, else the
+// nearest valid level below's with the tiles of the moves played since added,
+// else read from the board.
+static const BoardOccupancy *worker_board_occupancy(EndgameCtxWorker *worker) {
+  const int level = worker->num_played_moves;
+  BoardOccupancy *occupancy = &worker->occupancy_stack[level];
+  if (worker->occupancy_valid[level]) {
+    return occupancy;
+  }
+  int base = level - 1;
+  while (base >= 0 && !worker->occupancy_valid[base]) {
+    base--;
+  }
+  if (base < 0) {
+    board_occupancy_init(game_get_board(worker->game_copy), occupancy);
+  } else {
+    *occupancy = worker->occupancy_stack[base];
+    for (int move_idx = base; move_idx < level; move_idx++) {
+      const MoveUndo *undo = worker->played_move_undos[move_idx];
+      const bool vertical = board_is_dir_vertical(undo->move_dir);
+      for (int tile_idx = 0; tile_idx < undo->move_tiles_length; tile_idx++) {
+        if (!(undo->tiles_placed_mask & (1U << tile_idx))) {
+          continue;
+        }
+        const int row = undo->move_row_start + (vertical ? tile_idx : 0);
+        const int col = undo->move_col_start + (vertical ? 0 : tile_idx);
+        occupancy->occupied_rows[row] |= UINT32_C(1) << col;
+        occupancy->unavailable_rows[row] |= UINT32_C(1) << col;
+      }
+    }
+  }
+  worker->occupancy_valid[level] = true;
+  return occupancy;
 }
 
 // Unplays the most recent move on the worker's game, whose undo is `undo`.
@@ -1701,7 +2072,8 @@ static void update_deferred_moves(EndgameCtxWorker *worker) {
   board_set_cross_sets_valid(game_get_board(worker->game_copy), true);
 }
 
-int generate_stm_plays(EndgameCtxWorker *worker, int depth) {
+int generate_stm_plays(EndgameCtxWorker *worker, int depth,
+                       const BoardOccupancy *occupancy) {
   // stm means side to move
   update_deferred_moves(worker);
 
@@ -1710,7 +2082,7 @@ int generate_stm_plays(EndgameCtxWorker *worker, int depth) {
       player_get_rack(game_get_player(worker->game_copy, stm_idx));
 
   if (stm_rack->number_of_letters == 1) {
-    int move_count = generate_single_tile_plays(worker);
+    int move_count = generate_single_tile_plays(worker, occupancy);
     if (depth == worker->solver->requested_plies) {
       move_count = augment_single_tile_actual_move(worker, move_count);
     }
@@ -1842,8 +2214,8 @@ static int compute_thread_jitter(EndgameCtxWorker *worker, int tiles_played) {
 // Compute build chain values for recursive build detection. When opponent is
 // stuck, cumulative build chain values reward moves that build toward longer
 // scoring sequences (e.g., ED->RED->IRED->AIRED->WAIRED).
-// Returns malloc'd int[] (caller frees), or NULL when move_count <= 1 or
-// opp_stuck_frac == 0.
+// Returns the values in the worker's scratch, valid until the next call, or
+// NULL when move_count <= 1 or opp_stuck_frac == 0.
 static int *compute_build_chain_values(EndgameCtxWorker *worker, int move_count,
                                        size_t arena_offset,
                                        float opp_stuck_frac) {
@@ -1851,33 +2223,49 @@ static int *compute_build_chain_values(EndgameCtxWorker *worker, int move_count,
     return NULL;
   }
 
-  int *build_values = malloc_or_die(move_count * sizeof(int));
-
-  // Sort indices by tiles_played descending for bottom-up computation
-  int *order = malloc_or_die(move_count * sizeof(int));
-  for (int i = 0; i < move_count; i++) {
-    order[i] = i;
+  if (4 * move_count > worker->build_chain_scratch_capacity) {
+    worker->build_chain_scratch_capacity = 4 * move_count;
+    worker->build_chain_scratch = realloc_or_die(
+        worker->build_chain_scratch, sizeof(int) * (size_t)(4 * move_count));
   }
-  // Simple insertion sort by tiles_played descending
-  for (int i = 1; i < move_count; i++) {
-    int key = order[i];
-    const SmallMove *sm_key =
+  int *build_values = worker->build_chain_scratch;
+  // Which squares hold tiles, for matching the tiles of nested moves.
+  const BoardOccupancy *occupancy = worker_board_occupancy(worker);
+  int *bucket = build_values + move_count;
+  int *order = bucket + move_count;
+  int *line_start = order + move_count;
+
+  // Only a move on the same line, in the same direction, can contain another,
+  // so the moves are grouped by line (a pass, the row of a horizontal move,
+  // the column of a vertical one) and, within a line, ordered by tiles_played
+  // descending for bottom-up computation, with a counting sort over those
+  // buckets. A move is only compared with the moves of its own line.
+  int bucket_starts[BUILD_CHAIN_BUCKETS + 1] = {0};
+  for (int i = 0; i < move_count; i++) {
+    const SmallMove *sm =
         (const SmallMove *)(worker->small_move_arena->memory + arena_offset +
-                            key * sizeof(SmallMove));
-    int tp_key = small_move_get_tiles_played(sm_key);
-    int j = i - 1;
-    while (j >= 0) {
-      const SmallMove *sm_j =
-          (const SmallMove *)(worker->small_move_arena->memory + arena_offset +
-                              order[j] * sizeof(SmallMove));
-      int tp_j = small_move_get_tiles_played(sm_j);
-      if (tp_j >= tp_key) {
-        break;
-      }
-      order[j + 1] = order[j];
-      j--;
+                            i * sizeof(SmallMove));
+    int line = 0;
+    if (!small_move_is_pass(sm)) {
+      line = 1 + (small_move_is_vertical(sm)
+                      ? BOARD_DIM + small_move_get_col_start(sm)
+                      : small_move_get_row_start(sm));
     }
-    order[j + 1] = key;
+    bucket[i] =
+        line * (RACK_SIZE + 1) + (RACK_SIZE - small_move_get_tiles_played(sm));
+    bucket_starts[bucket[i] + 1]++;
+  }
+  for (int bucket_idx = 0; bucket_idx < BUILD_CHAIN_BUCKETS; bucket_idx++) {
+    bucket_starts[bucket_idx + 1] += bucket_starts[bucket_idx];
+  }
+  for (int i = 0; i < move_count; i++) {
+    order[bucket_starts[bucket[i]]++] = i;
+  }
+  for (int oi = 0; oi < move_count; oi++) {
+    const bool same_line =
+        oi > 0 && bucket[order[oi]] / (RACK_SIZE + 1) ==
+                      bucket[order[oi - 1]] / (RACK_SIZE + 1);
+    line_start[oi] = same_line ? line_start[oi - 1] : oi;
   }
 
   // Bottom-up: process moves from most tiles to fewest
@@ -1899,11 +2287,8 @@ static int *compute_build_chain_values(EndgameCtxWorker *worker, int move_count,
 
     // Find the best extension (containing move with more tiles, already
     // processed so build_values[j] is final)
-    Move mv_a;
-    bool mv_a_initialized = false;
-    const Board *brd = game_get_board(worker->game_copy);
     int best_extension = 0;
-    for (int oj = 0; oj < oi; oj++) {
+    for (int oj = line_start[oi]; oj < oi; oj++) {
       int j = order[oj];
       const SmallMove *sm_b =
           (const SmallMove *)(worker->small_move_arena->memory + arena_offset +
@@ -1935,32 +2320,29 @@ static int *compute_build_chain_values(EndgameCtxWorker *worker, int move_count,
         continue;
       }
 
-      // Verify actual tiles match at each position.
-      // Expand mv_a once (lazily) on first containment hit; expand mv_b each
-      // time.
-      if (!mv_a_initialized) {
-        small_move_to_move(&mv_a, sm_a, brd);
-        mv_a_initialized = true;
-      }
-      Move mv_b;
-      small_move_to_move(&mv_b, sm_b, brd);
-
-      // Offset of A's start within B's tile span
-      int offset_in_b;
+      // Verify the tiles match. Both moves fill every empty square of their
+      // spans, so A's placed tiles are B's, from the B tile after the empty
+      // squares between their starts.
+      int offset_in_b = 0;
       if (!vert_a) {
-        offset_in_b = col_a - col_b;
+        const uint32_t before_a =
+            ((UINT32_C(1) << col_a) - 1) & ~((UINT32_C(1) << col_b) - 1);
+        offset_in_b =
+            col_a - col_b -
+            __builtin_popcount(occupancy->occupied_rows[row_a] & before_a);
       } else {
-        offset_in_b = row_a - row_b;
-      }
-
-      bool tiles_match = true;
-      for (int ti = 0; ti < len_a; ti++) {
-        uint8_t ml_a = move_get_tile(&mv_a, ti);
-        if (ml_a == PLAYED_THROUGH_MARKER) {
-          continue; // board tile, not placed by A
+        for (int row = row_b; row < row_a; row++) {
+          if (!(occupancy->occupied_rows[row] & (UINT32_C(1) << col_a))) {
+            offset_in_b++;
+          }
         }
-        uint8_t ml_b = move_get_tile(&mv_b, ti + offset_in_b);
-        if (ml_a != ml_b) {
+      }
+      bool tiles_match = true;
+      for (int tile_idx = 0; tile_idx < tp_a; tile_idx++) {
+        if (small_move_get_tile(sm_a, tile_idx) !=
+                small_move_get_tile(sm_b, tile_idx + offset_in_b) ||
+            small_move_tile_is_blank(sm_a, tile_idx) !=
+                small_move_tile_is_blank(sm_b, tile_idx + offset_in_b)) {
           tiles_match = false;
           break;
         }
@@ -1977,7 +2359,6 @@ static int *compute_build_chain_values(EndgameCtxWorker *worker, int move_count,
       build_values[i] += best_extension;
     }
   }
-  free(order);
   return build_values;
 }
 
@@ -1998,8 +2379,8 @@ void assign_estimates(EndgameCtxWorker *worker, int move_count,
   size_t arena_offset =
       worker->small_move_arena->size - (sizeof(SmallMove) * move_count);
 
-  int *build_values = compute_build_chain_values(worker, move_count,
-                                                 arena_offset, opp_stuck_frac);
+  const int *build_values = compute_build_chain_values(
+      worker, move_count, arena_offset, opp_stuck_frac);
 
   const LetterDistribution *est_ld = game_get_ld(worker->game_copy);
 
@@ -2064,7 +2445,6 @@ void assign_estimates(EndgameCtxWorker *worker, int move_count,
       small_move_add_estimated_value(current_move, EARLY_PASS_BF);
     }
   }
-  free(build_values);
 }
 
 // assign_estimates plus a full sort by estimated value, biggest first.
@@ -2263,7 +2643,8 @@ static int32_t negamax_greedy_leaf_playout(EndgameCtxWorker *worker,
     opp_stuck_frac = compute_opp_stuck_fraction(
         worker->game_copy, worker->move_list,
         solver_get_pruned_kwg(worker->solver, opp_idx), opp_idx, NULL,
-        worker->solver, leaf_plays, leaf_play_count);
+        worker->solver, leaf_plays, leaf_play_count,
+        worker_board_occupancy(worker));
   }
 
   // Only a stuck playout derives its lists, so only it extends the path.
@@ -2300,7 +2681,7 @@ static int32_t negamax_greedy_leaf_playout(EndgameCtxWorker *worker,
       // move_list and immediately pop the arena so the per-node dealloc in
       // abdada_negamax stays correct.
       size_t arena_before = worker->small_move_arena->size;
-      generate_single_tile_plays(worker);
+      generate_single_tile_plays(worker, worker_board_occupancy(worker));
       const SmallMove *arena_sm =
           (const SmallMove *)(worker->small_move_arena->memory + arena_before);
       *worker->move_list->small_moves[0] = *arena_sm;
@@ -2556,24 +2937,81 @@ static void negamax_tt_store(const EndgameCtxWorker *worker, uint64_t node_key,
                             entry_to_store);
 }
 
+// Sorts moves by estimated value, highest first, keeping the order of moves
+// with equal values: the order stable_sort gives with
+// compare_small_moves_by_estimated_value, which is the only order a stable
+// sort by that key can give. Insertion sort for short runs, merged in the
+// worker's scratch; the comparisons are inline.
+static void sort_small_moves_range(SmallMove *moves, int count,
+                                   SmallMove *scratch) {
+  if (count <= SMALL_MOVE_INSERTION_SORT_MAX) {
+    for (int idx = 1; idx < count; idx++) {
+      const SmallMove move = moves[idx];
+      const int32_t value = move.metadata.estimated_value;
+      int pos = idx;
+      while (pos > 0 && moves[pos - 1].metadata.estimated_value < value) {
+        moves[pos] = moves[pos - 1];
+        pos--;
+      }
+      moves[pos] = move;
+    }
+    return;
+  }
+  const int left_count = count / 2;
+  sort_small_moves_range(moves, left_count, scratch);
+  sort_small_moves_range(moves + left_count, count - left_count, scratch);
+  if (moves[left_count - 1].metadata.estimated_value >=
+      moves[left_count].metadata.estimated_value) {
+    return;
+  }
+  memcpy(scratch, moves, sizeof(SmallMove) * (size_t)left_count);
+  int left = 0;
+  int right = left_count;
+  int out = 0;
+  while (left < left_count && right < count) {
+    if (scratch[left].metadata.estimated_value >=
+        moves[right].metadata.estimated_value) {
+      moves[out++] = scratch[left++];
+    } else {
+      moves[out++] = moves[right++];
+    }
+  }
+  while (left < left_count) {
+    moves[out++] = scratch[left++];
+  }
+}
+
+static void sort_small_moves_by_estimate(EndgameCtxWorker *worker,
+                                         SmallMove *moves, int count) {
+  if (count / 2 + 1 > worker->sort_scratch_capacity) {
+    worker->sort_scratch_capacity = count;
+    worker->sort_scratch =
+        realloc_or_die(worker->sort_scratch, sizeof(SmallMove) * (size_t)count);
+  }
+  sort_small_moves_range(moves, count, worker->sort_scratch);
+}
+
 // Stuck-tile detection, move generation, logging, and estimate assignment
 // for non-root nodes (move ordering itself is done lazily by the caller).
 // Updates *opp_stuck_frac. Returns move count, or -1 if interrupted.
-static int negamax_generate_and_estimate_moves(EndgameCtxWorker *worker,
-                                               int depth, uint64_t tt_move,
-                                               float *opp_stuck_frac) {
+static int
+negamax_generate_and_estimate_moves(EndgameCtxWorker *worker, int depth,
+                                    uint64_t tt_move, float *opp_stuck_frac,
+                                    const BoardOccupancy **occupancy_out) {
   int opp_idx = 1 - worker->solver->solving_player;
   uint64_t opp_tiles_bv = 0;
   int nplays;
   // compute_opp_stuck_fraction and movegen read the board; generate_stm_plays
   // then finds nothing left to update.
   update_deferred_moves(worker);
+  const BoardOccupancy *occupancy = worker_board_occupancy(worker);
+  *occupancy_out = occupancy;
   if (worker->solver->use_heuristics) {
     // Generate first: with the opponent on turn, the list just generated is
     // their complete play list, so its tile types give the stuck fraction
     // without a MOVE_RECORD_TILES_PLAYED generation. (The caller checked the
     // interrupt just before calling.)
-    nplays = generate_stm_plays(worker, depth);
+    nplays = generate_stm_plays(worker, depth, occupancy);
     const SmallMove *opp_plays = NULL;
     if (game_get_player_on_turn_index(worker->game_copy) == opp_idx) {
       opp_plays = (const SmallMove *)(worker->small_move_arena->memory +
@@ -2583,7 +3021,7 @@ static int negamax_generate_and_estimate_moves(EndgameCtxWorker *worker,
     *opp_stuck_frac = compute_opp_stuck_fraction(
         worker->game_copy, worker->move_list,
         solver_get_pruned_kwg(worker->solver, opp_idx), opp_idx, &opp_tiles_bv,
-        worker->solver, opp_plays, nplays);
+        worker->solver, opp_plays, nplays, occupancy);
     // An interrupt inside compute_opp_stuck_fraction leaves the fraction
     // meaningless. Release this node's plays so the arena is untouched, as
     // the caller expects of -1.
@@ -2592,7 +3030,7 @@ static int negamax_generate_and_estimate_moves(EndgameCtxWorker *worker,
       return -1;
     }
   } else {
-    nplays = generate_stm_plays(worker, depth);
+    nplays = generate_stm_plays(worker, depth, occupancy);
     *opp_stuck_frac = 0.0F;
   }
 
@@ -2848,7 +3286,7 @@ static bool pick_first_reply_before_list(EndgameCtxWorker *worker,
     const float stuck_frac = compute_opp_stuck_fraction(
         worker->game_copy, worker->move_list,
         solver_get_pruned_kwg(worker->solver, opp_idx), opp_idx, NULL,
-        worker->solver, NULL, 0);
+        worker->solver, NULL, 0, worker_board_occupancy(worker));
     if (stuck_frac > 0.0F || iterative_deepening_should_stop(worker->solver)) {
       return false;
     }
@@ -3032,6 +3470,8 @@ int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
   // tile (the single-tile shortcuts need the list), and not under thread 0's
   // first root move, whose ply-2 progress counts the list.
   bool first_reply_searched = false;
+  // Which squares hold tiles, once this node's moves are generated.
+  const BoardOccupancy *occupancy = NULL;
   SmallMove first_reply;
   int32_t first_reply_value = 0;
   if (depth == 1 && worker->solver->best_reply_shortcuts &&
@@ -3091,7 +3531,7 @@ int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
       return ABDADA_INTERRUPTED;
     }
     nplays = negamax_generate_and_estimate_moves(worker, depth, tt_move,
-                                                 &opp_stuck_frac);
+                                                 &opp_stuck_frac, &occupancy);
     if (nplays == -1) {
       // Interrupted during compute_opp_stuck_fraction
       if (abdada_active) {
@@ -3278,6 +3718,17 @@ int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
     }
   }
 
+  // See keep_one_bound. A move that leaves one tile at or below alpha needs
+  // no search; the opponent's reply is searched (depth >= 2).
+  KeepOneBound keep_one;
+  const bool keep_one_active =
+      arena_alloced && depth >= 2 && !is_root &&
+      rack_get_total_letters(player_get_rack(player_on_turn)) >= 2;
+  if (keep_one_active) {
+    keep_one_bound_init(&keep_one, worker->game_copy, on_turn_spread,
+                        occupancy);
+  }
+
   // ABDADA two-phase iteration:
   // Pass 0: search all moves with exclusion (defer busy nodes).
   // Pass 1+: retry only deferred moves without exclusion.
@@ -3322,9 +3773,7 @@ int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
             moves_base[best_est_idx] = tmp;
           }
         } else {
-          stable_sort(moves_base + idx, (size_t)(nplays - idx),
-                      sizeof(SmallMove),
-                      compare_small_moves_by_estimated_value);
+          sort_small_moves_by_estimate(worker, moves_base + idx, nplays - idx);
           tail_sorted = true;
         }
       }
@@ -3341,6 +3790,17 @@ int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
       if (first_reply_searched &&
           small_move->tiny_move == first_reply.tiny_move) {
         continue;
+      }
+      if (keep_one_active && !small_move_is_pass(small_move) &&
+          small_move_get_tiles_played(small_move) == keep_one.rack_size - 1) {
+        const int32_t bound = keep_one_bound(&keep_one, small_move, alpha);
+        if (bound <= alpha) {
+          if (deferred != NULL) {
+            deferred[idx] = false;
+          }
+          best_value = MAX(best_value, bound);
+          continue;
+        }
       }
 
       // Track whether thread 0 is inside root move #1's subtree
@@ -3861,7 +4321,7 @@ void iterative_deepening(EndgameCtxWorker *worker, int plies) {
     path_move_lists_reset(worker->path_lists);
   }
   int initial_move_count =
-      generate_stm_plays(worker, worker->solver->requested_plies);
+      generate_stm_plays(worker, worker->solver->requested_plies, NULL);
   if (worker->path_lists != NULL) {
     seed_opponent_root_list(worker);
   }

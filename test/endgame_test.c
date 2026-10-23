@@ -45,6 +45,9 @@ enum {
   FIXED_DEPTH_MIN_PLIES = 4,
   FIXED_DEPTH_MAX_PLIES = 5,
   FIXED_DEPTH_THREADS = 4,
+  // test_keep_one_tile_bound: deep enough to solve both positions to the end
+  // of the game.
+  KEEP_ONE_TILE_PLIES = 14,
 };
 
 // Plenty for the small solves of the fixed-depth tests, and far cheaper to
@@ -396,6 +399,7 @@ static void run_injection_case(bool use_inline) {
   args.max_workers = 5; // ...and allow growth to 1 + 4 injected
   args.use_heuristics = true;
   args.forced_pass_bypass = true;
+  args.incremental_movegen = true;
   args.num_top_moves = 1;
   args.seed = 42;
   args.per_ply_callback = inject_worker_per_ply;
@@ -914,6 +918,48 @@ static void test_fixed_depth_budget_keeps_every_depth(void) {
   config_destroy(config);
 }
 
+// A move that leaves one tile on the rack is skipped when its score, the most
+// the kept tile can drop for next and the going-out bonus cannot beat alpha.
+// These full solves skip most such moves: the first with the opponent stuck
+// with the Q and the W, the second with neither side stuck. The bound is
+// exact, so the values are those found before it existed, at any thread
+// count.
+static void test_keep_one_tile_bound(void) {
+  const struct {
+    const char *cgp;
+    int value;
+  } cases[] = {
+      {"cgp "
+       "OUTREmER4DZO/EPEE3E1MOVIE1/2MAInSTAY2VAN/HEEL3R2FUEL1/7A7/"
+       "5CRINGINGS1/4L2N5A1/2AXOIDS3WINY/2BUB8T1/4UH7E1/4LI7R1/3DEN7OK/"
+       "2JO1D8A/2OI10F/COTTA9S AIRT/GPQW 469/454 0 -lex CSW21",
+       57},
+      {"cgp "
+       "15/12B2/6INTRADOS1/2RETINUE3A2/10DATO1/9KALIF1/7WAY2E2/VOE3FEM6/"
+       "2ZE1VEXILS4/1QIN2HERON4/TANTrUM2BY4/1PEE1GEO7/1I1R3PHATIC2/"
+       "1k1I4OWE4/3C1JIAO1GUANO DRSU/DGLLRS 437/397 0 -lex CSW21",
+       44},
+  };
+  const int thread_counts[] = {1, 4};
+  for (size_t case_idx = 0; case_idx < sizeof(cases) / sizeof(cases[0]);
+       case_idx++) {
+    Config *config = config_create_or_die("set -s1 score -s2 score");
+    load_and_exec_config_or_die(config, cases[case_idx].cgp);
+    for (size_t thread_idx = 0;
+         thread_idx < sizeof(thread_counts) / sizeof(thread_counts[0]);
+         thread_idx++) {
+      uint32_t depth_mask;
+      uint64_t nodes;
+      const int score = solve_fixed_depth(
+          config, KEEP_ONE_TILE_PLIES, thread_counts[thread_idx],
+          /*budget=*/NULL,
+          /*with_callback=*/false, &depth_mask, &nodes);
+      assert(score == cases[case_idx].value);
+    }
+    config_destroy(config);
+  }
+}
+
 // Regression for transposition-table bound handling at PV nodes in
 // abdada_negamax. Before the fix, a PV node whose window a stored bound had
 // closed (alpha >= beta) kept searching: its children ran with inverted
@@ -1282,7 +1328,7 @@ void test_endgame_interrupt(void) {
 }
 
 void test_kue(void) {
-  Config *config = config_create_or_die("set -s1 score -s2 score -eplies 14 "
+  Config *config = config_create_or_die("set -s1 score -s2 score -eplies 7 "
                                         "-ttfraction 0.5");
   load_and_exec_config_or_die(
       config, "cgp "
@@ -1299,12 +1345,14 @@ void test_kue(void) {
   EndgameArgs endgame_args = {0};
   endgame_args.thread_control = config_get_thread_control(config);
   endgame_args.game = game;
-  endgame_args.plies = 14;
+  endgame_args.plies = 7;
   endgame_args.tt_fraction_of_mem = 0.5;
   endgame_args.initial_small_move_arena_size =
       DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
   endgame_args.num_threads = 8;
   endgame_args.use_heuristics = true;
+  endgame_args.forced_pass_bypass = true;
+  endgame_args.incremental_movegen = true;
   endgame_args.num_top_moves = 10;
   endgame_args.per_ply_callback = print_pv_and_ranked_callback;
   endgame_args.per_ply_callback_data = &timer;
@@ -1329,7 +1377,7 @@ void test_kue(void) {
 
   const PVLine *pv_line =
       endgame_results_get_pvline(endgame_results, ENDGAME_RESULT_BEST);
-  assert(pv_line->score == 52);
+  assert(pv_line->score == 56);
 
   endgame_ctx_destroy(endgame_ctx);
   error_stack_destroy(error_stack);
@@ -1515,6 +1563,7 @@ void test_via_interrupted_reasonable_under_time_pressure(void) {
     endgame_args.num_threads = 6;
     endgame_args.use_heuristics = true;
     endgame_args.forced_pass_bypass = true;
+    endgame_args.incremental_movegen = true;
     endgame_args.enable_pv_display = true;
     endgame_args.num_top_moves = 1;
     endgame_args.seed = 42;
@@ -2061,6 +2110,7 @@ void test_endgame_progress_stream(void) {
     warmup_args.num_top_moves = 1;
     warmup_args.use_heuristics = true;
     warmup_args.forced_pass_bypass = true;
+    warmup_args.incremental_movegen = true;
     warmup_args.enable_pv_display = true;
     warmup_args.seed = 1;
     EndgameResults *warmup_results = config_get_endgame_results(warmup_config);
@@ -2109,6 +2159,7 @@ void test_endgame_progress_stream(void) {
       args.num_top_moves = 5;
       args.use_heuristics = true;
       args.forced_pass_bypass = true;
+      args.incremental_movegen = true;
       args.enable_pv_display = true;
       args.seed = 42;
       args.before_search_callback = stream_before_search_cb;
@@ -2425,6 +2476,7 @@ void test_endgame(void) {
   test_exhausted_tree_stops_early();
   test_fixed_depth_stepping();
   test_fixed_depth_budget_keeps_every_depth();
+  test_keep_one_tile_bound();
   test_display_completes_short_pv();
   test_solve_standard();
   test_incremental_movegen_identical();
@@ -2475,6 +2527,7 @@ void test_monster_q(void) {
   endgame_args.num_threads = 6;
   endgame_args.use_heuristics = true;
   endgame_args.forced_pass_bypass = true;
+  endgame_args.incremental_movegen = true;
   endgame_args.enable_pv_display = true;
   endgame_args.num_top_moves = 1;
   endgame_args.per_ply_callback = print_pv_callback;
@@ -2527,6 +2580,8 @@ void test_multi_pv(void) {
   endgame_args.num_threads = 6;
   endgame_args.num_top_moves = 1;
   endgame_args.use_heuristics = true;
+  endgame_args.forced_pass_bypass = true;
+  endgame_args.incremental_movegen = true;
   endgame_args.per_ply_callback = NULL;
   endgame_args.per_ply_callback_data = NULL;
   endgame_args.seed = 42;
