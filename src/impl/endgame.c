@@ -12,6 +12,7 @@
 #include "../def/letter_distribution_defs.h"
 #include "../def/move_defs.h"
 #include "../def/players_data_defs.h"
+#include "../def/rack_defs.h"
 #include "../def/thread_control_defs.h"
 #include "../ent/bag.h"
 #include "../ent/board.h"
@@ -1345,41 +1346,127 @@ static void endgame_ctx_prepare_workers(EndgameCtx *solver,
   }
 }
 
-// Generate moves for a single-tile rack by scanning cross-sets, bypassing
-// the GADDAG entirely.  In a bag-empty endgame, every tile placement uses the
-// last rack tile and ends the game, so only the best-scoring position matters.
-// Always returns 1; writes the best-scoring placement to the arena, or a pass
-// move if no legal placement exists.
-static int generate_single_tile_plays(EndgameCtxWorker *worker) {
-  const Game *game = worker->game_copy;
-  const Board *board = game_get_board(game);
-  assert(board_get_cross_sets_valid(board));
-  const LetterDistribution *ld = game_get_ld(game);
-  int stm_idx = game_get_player_on_turn_index(game);
-  const Rack *stm_rack = player_get_rack(game_get_player(game, stm_idx));
-  bool kwgs_shared = game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KWG);
-  int ci = board_get_cross_set_index(kwgs_shared, stm_idx);
-  int ld_size = ld_get_size(ld);
+// The tiles a move places, as squares and face values, for scoring a later
+// drop as if the move had been played.
+typedef struct PlacedTiles {
+  int rows[RACK_SIZE];
+  int cols[RACK_SIZE];
+  Equity scores[RACK_SIZE];
+  int count;
+} PlacedTiles;
 
-  // Find the single tile on the rack.
-  MachineLetter tile_ml = BLANK_MACHINE_LETTER;
-  bool is_blank = false;
-  for (int ml = 0; ml < ld_size; ml++) {
-    if (rack_get_letter(stm_rack, ml) > 0) {
-      tile_ml = ml;
-      is_blank = (ml == BLANK_MACHINE_LETTER);
-      break;
+// The face value of the tile at (row, col), counting the placed tiles as on
+// the board, or -1 for an empty square.
+static Equity square_tile_score(const Board *board,
+                                const LetterDistribution *ld, int row, int col,
+                                const PlacedTiles *placed) {
+  for (int placed_idx = 0; placed_idx < placed->count; placed_idx++) {
+    if (placed->rows[placed_idx] == row && placed->cols[placed_idx] == col) {
+      return placed->scores[placed_idx];
     }
   }
+  if (board_is_empty_or_bricked(board, row, col)) {
+    return -1;
+  }
+  const MachineLetter ml = board_get_letter(board, row, col);
+  return get_is_blanked(ml) ? 0 : ld_get_score(ld, ml);
+}
 
+// At most what a drop worth tile_value (before multipliers) scores on the
+// empty square (row, col) with the placed tiles on the board: the words it
+// would form, scored whether or not they are in the lexicon.
+static Equity unchecked_drop_score(const Board *board,
+                                   const LetterDistribution *ld, int row,
+                                   int col, const PlacedTiles *placed,
+                                   Equity tile_value) {
+  const BonusSquare bonus_square = board_get_bonus_square(board, row, col);
+  const int word_multiplier = bonus_square_get_word_multiplier(bonus_square);
+  const Equity tile_score =
+      tile_value * bonus_square_get_letter_multiplier(bonus_square);
+  Equity total = 0;
+  for (int dir = 0; dir < 2; dir++) {
+    const int row_step = dir == 0 ? 0 : 1;
+    const int col_step = dir == 0 ? 1 : 0;
+    Equity word_score = tile_score;
+    int word_length = 1;
+    for (int sign = -1; sign <= 1; sign += 2) {
+      int r = row + sign * row_step;
+      int c = col + sign * col_step;
+      while (r >= 0 && r < BOARD_DIM && c >= 0 && c < BOARD_DIM) {
+        const Equity score = square_tile_score(board, ld, r, c, placed);
+        if (score < 0) {
+          break;
+        }
+        word_score += score;
+        word_length++;
+        r += sign * row_step;
+        c += sign * col_step;
+      }
+    }
+    if (word_length >= 2) {
+      total += word_score * word_multiplier;
+    }
+  }
+  return total;
+}
+
+// At most what the kept tile, worth tile_value, scores in one drop after the
+// placed tiles land, on the squares whose words would hold one of them: the
+// empty squares at the ends of the runs through each placed tile, across and
+// down. Every other square forms the same words as before the move.
+static Equity drop_bound_next_to(const Board *board,
+                                 const LetterDistribution *ld,
+                                 const PlacedTiles *placed, Equity tile_value) {
+  Equity best = 0;
+  for (int placed_idx = 0; placed_idx < placed->count; placed_idx++) {
+    for (int dir = 0; dir < 2; dir++) {
+      const int row_step = dir == 0 ? 0 : 1;
+      const int col_step = dir == 0 ? 1 : 0;
+      for (int sign = -1; sign <= 1; sign += 2) {
+        int r = placed->rows[placed_idx] + sign * row_step;
+        int c = placed->cols[placed_idx] + sign * col_step;
+        while (r >= 0 && r < BOARD_DIM && c >= 0 && c < BOARD_DIM &&
+               square_tile_score(board, ld, r, c, placed) >= 0) {
+          r += sign * row_step;
+          c += sign * col_step;
+        }
+        if (r < 0 || r >= BOARD_DIM || c < 0 || c >= BOARD_DIM ||
+            board_get_is_brick(board, r, c)) {
+          continue;
+        }
+        const Equity score =
+            unchecked_drop_score(board, ld, r, c, placed, tile_value);
+        if (score > best) {
+          best = score;
+        }
+      }
+    }
+  }
+  return best;
+}
+
+// The best-scoring drop of one tile on an empty square.
+typedef struct SingleDrop {
+  Equity score;
+  int row;
+  int col;
+  bool vertical;
+  int start; // leftmost col (H) or topmost row (V) of the word
+  int play_length;
+  MachineLetter ml; // for blank: the letter the blank plays as
+} SingleDrop;
+
+// Finds the best-scoring drop of the tile tile_ml (or the blank, played as
+// any letter, when is_blank) by scanning the cross-sets, bypassing the
+// GADDAG. Returns false when it has no legal square.
+static bool find_best_single_drop(const Board *board,
+                                  const LetterDistribution *ld,
+                                  int cross_set_index, MachineLetter tile_ml,
+                                  bool is_blank, SingleDrop *best) {
+  assert(board_get_cross_sets_valid(board));
+  const int ci = cross_set_index;
+  const int ld_size = ld_get_size(ld);
   bool found = false;
-  Equity best_score = 0;
-  int best_row = 0;
-  int best_col = 0;
-  bool best_dir_vertical = false;
-  int best_start = 0; // leftmost col (H) or topmost row (V) of the word
-  int best_play_length = 0;
-  MachineLetter best_ml = 0; // for blank: the letter the blank plays as
 
   // Read actual occupancy: is_cross_word can be stale after unplay.
   // Keep these masks local, with no maintenance on other move paths.
@@ -1454,7 +1541,7 @@ static int generate_single_tile_plays(EndgameCtxWorker *worker) {
       if (has_v_nbrs) {
         score += (tile_ls + v_nbr_score) * wm;
       }
-      if (found && score <= best_score) {
+      if (found && score <= best->score) {
         continue;
       }
 
@@ -1504,16 +1591,137 @@ static int generate_single_tile_plays(EndgameCtxWorker *worker) {
         }
       }
       found = true;
-      best_score = score;
-      best_row = row;
-      best_col = col;
-      best_dir_vertical = dir_vertical;
-      best_start = word_start;
-      best_play_length = word_end - word_start + 1;
-      best_ml = chosen_ml;
+      best->score = score;
+      best->row = row;
+      best->col = col;
+      best->vertical = dir_vertical;
+      best->start = word_start;
+      best->play_length = word_end - word_start + 1;
+      best->ml = chosen_ml;
     }
   }
 
+  return found;
+}
+
+// What a node needs to bound the moves that leave one tile on the rack.
+typedef struct KeepOneBound {
+  const Board *board;
+  const LetterDistribution *ld;
+  const Rack *rack;
+  int rack_size;
+  int cross_set_index;
+  int32_t on_turn_spread;
+  Equity out_bonus;
+  // Best drop of each tile kept so far (bit ml of scanned set), or -1 when it
+  // has no legal square.
+  uint64_t scanned;
+  Equity best_drop[MAX_ALPHABET_SIZE];
+} KeepOneBound;
+
+static void keep_one_bound_init(KeepOneBound *bound, const Game *game,
+                                int32_t on_turn_spread) {
+  const int on_turn = game_get_player_on_turn_index(game);
+  bound->board = game_get_board(game);
+  bound->ld = game_get_ld(game);
+  bound->rack = player_get_rack(game_get_player(game, on_turn));
+  bound->rack_size = rack_get_total_letters(bound->rack);
+  bound->cross_set_index = board_get_cross_set_index(
+      game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KWG), on_turn);
+  bound->on_turn_spread = on_turn_spread;
+  bound->out_bonus = calculate_end_rack_points(
+      player_get_rack(game_get_player(game, 1 - on_turn)), bound->ld);
+  bound->scanned = 0;
+}
+
+// A move that leaves one tile y on the rack is worth at most its score, plus
+// the most y can drop for next, plus the going-out bonus: the side to move's
+// value after the move, from the node's spread. The opponent can always pass,
+// so whatever they reply leaves the side to move no better off than a pass
+// would; with one tile, the opponent is searched with their best drop only,
+// which leaves less still. After a pass, y drops where it could before the
+// move, which its best drop now bounds, or on a square whose words hold one
+// of the move's tiles, which drop_bound_next_to bounds. A drop the move
+// blocks only lowers what y can score, and if y cannot be played the game
+// ends on passes with less than the going-out bonus.
+static int32_t keep_one_bound(KeepOneBound *bound, const SmallMove *play_sm) {
+  Move play;
+  small_move_to_move(&play, play_sm, bound->board);
+  const bool vertical = board_is_dir_vertical(move_get_dir(&play));
+  const int ld_size = ld_get_size(bound->ld);
+  PlacedTiles placed = {.count = 0};
+  int left[MAX_ALPHABET_SIZE];
+  for (int ml = 0; ml < ld_size; ml++) {
+    left[ml] = rack_get_letter(bound->rack, ml);
+  }
+  for (int tile_idx = 0; tile_idx < move_get_tiles_length(&play); tile_idx++) {
+    const MachineLetter tile = move_get_tile(&play, tile_idx);
+    if (tile == PLAYED_THROUGH_MARKER) {
+      continue;
+    }
+    placed.rows[placed.count] =
+        move_get_row_start(&play) + (vertical ? tile_idx : 0);
+    placed.cols[placed.count] =
+        move_get_col_start(&play) + (vertical ? 0 : tile_idx);
+    placed.scores[placed.count] =
+        get_is_blanked(tile) ? 0 : ld_get_score(bound->ld, tile);
+    placed.count++;
+    left[get_is_blanked(tile) ? BLANK_MACHINE_LETTER : tile]--;
+  }
+  MachineLetter kept = 0;
+  for (int ml = 0; ml < ld_size; ml++) {
+    if (left[ml] > 0) {
+      kept = (MachineLetter)ml;
+      break;
+    }
+  }
+  const bool kept_is_blank = kept == BLANK_MACHINE_LETTER;
+  if (!(bound->scanned & ((uint64_t)1 << kept))) {
+    SingleDrop best;
+    bound->best_drop[kept] =
+        find_best_single_drop(bound->board, bound->ld, bound->cross_set_index,
+                              kept, kept_is_blank, &best)
+            ? best.score
+            : -1;
+    bound->scanned |= (uint64_t)1 << kept;
+  }
+  const Equity next_drop = MAX(
+      MAX(bound->best_drop[kept], 0),
+      drop_bound_next_to(bound->board, bound->ld, &placed,
+                         kept_is_blank ? 0 : ld_get_score(bound->ld, kept)));
+  return bound->on_turn_spread + (int32_t)small_move_get_score(play_sm) +
+         equity_to_int(next_drop + bound->out_bonus);
+}
+
+// Generate moves for a single-tile rack by scanning cross-sets, bypassing
+// the GADDAG entirely.  In a bag-empty endgame, every tile placement uses the
+// last rack tile and ends the game, so only the best-scoring position matters.
+// Always returns 1; writes the best-scoring placement to the arena, or a pass
+// move if no legal placement exists.
+static int generate_single_tile_plays(EndgameCtxWorker *worker) {
+  const Game *game = worker->game_copy;
+  const Board *board = game_get_board(game);
+  const LetterDistribution *ld = game_get_ld(game);
+  int stm_idx = game_get_player_on_turn_index(game);
+  const Rack *stm_rack = player_get_rack(game_get_player(game, stm_idx));
+  bool kwgs_shared = game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KWG);
+  int ci = board_get_cross_set_index(kwgs_shared, stm_idx);
+  int ld_size = ld_get_size(ld);
+
+  // Find the single tile on the rack.
+  MachineLetter tile_ml = BLANK_MACHINE_LETTER;
+  bool is_blank = false;
+  for (int ml = 0; ml < ld_size; ml++) {
+    if (rack_get_letter(stm_rack, ml) > 0) {
+      tile_ml = ml;
+      is_blank = (ml == BLANK_MACHINE_LETTER);
+      break;
+    }
+  }
+
+  SingleDrop best;
+  const bool found =
+      find_best_single_drop(board, ld, ci, tile_ml, is_blank, &best);
   SmallMove *sm =
       (SmallMove *)arena_alloc(worker->small_move_arena, sizeof(SmallMove));
   sm->metadata.estimated_value = 0;
@@ -1527,25 +1735,25 @@ static int generate_single_tile_plays(EndgameCtxWorker *worker) {
     return 1;
   }
 
-  sm->metadata.score = (uint16_t)equity_to_int(best_score);
-  sm->metadata.play_length = (uint8_t)best_play_length;
+  sm->metadata.score = (uint16_t)equity_to_int(best.score);
+  sm->metadata.play_length = (uint8_t)best.play_length;
   sm->metadata.tiles_played = 1;
 
   // Build tiny_move following the same convention as small_move_set_all:
   // for vertical, row_start and col_start are swapped before storing.
-  uint64_t tm = (uint64_t)best_ml << SMALL_MOVE_TILES_SHIFT;
+  uint64_t tm = (uint64_t)best.ml << SMALL_MOVE_TILES_SHIFT;
   if (is_blank) {
     tm |= 1ULL << SMALL_MOVE_BLANKS_SHIFT; // blank flag for tile index 0
   }
-  if (best_dir_vertical) {
+  if (best.vertical) {
     tm |= 1; // direction bit
     // small_move_set_all swaps row/col for vertical, so the true board
     // column goes in the column field and the true row in the row field.
-    tm |= (uint64_t)best_col << SMALL_MOVE_COL_SHIFT;
-    tm |= (uint64_t)best_start << SMALL_MOVE_ROW_SHIFT;
+    tm |= (uint64_t)best.col << SMALL_MOVE_COL_SHIFT;
+    tm |= (uint64_t)best.start << SMALL_MOVE_ROW_SHIFT;
   } else {
-    tm |= (uint64_t)best_start << SMALL_MOVE_COL_SHIFT;
-    tm |= (uint64_t)best_row << SMALL_MOVE_ROW_SHIFT;
+    tm |= (uint64_t)best.start << SMALL_MOVE_COL_SHIFT;
+    tm |= (uint64_t)best.row << SMALL_MOVE_ROW_SHIFT;
   }
   sm->tiny_move = tm;
   return 1;
@@ -3278,6 +3486,16 @@ int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
     }
   }
 
+  // See keep_one_bound. A move that leaves one tile at or below alpha needs
+  // no search; the opponent's reply is searched (depth >= 2).
+  KeepOneBound keep_one;
+  const bool keep_one_active =
+      arena_alloced && depth >= 2 && !is_root &&
+      rack_get_total_letters(player_get_rack(player_on_turn)) >= 2;
+  if (keep_one_active) {
+    keep_one_bound_init(&keep_one, worker->game_copy, on_turn_spread);
+  }
+
   // ABDADA two-phase iteration:
   // Pass 0: search all moves with exclusion (defer busy nodes).
   // Pass 1+: retry only deferred moves without exclusion.
@@ -3341,6 +3559,17 @@ int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
       if (first_reply_searched &&
           small_move->tiny_move == first_reply.tiny_move) {
         continue;
+      }
+      if (keep_one_active && !small_move_is_pass(small_move) &&
+          small_move_get_tiles_played(small_move) == keep_one.rack_size - 1) {
+        const int32_t bound = keep_one_bound(&keep_one, small_move);
+        if (bound <= alpha) {
+          if (deferred != NULL) {
+            deferred[idx] = false;
+          }
+          best_value = MAX(best_value, bound);
+          continue;
+        }
       }
 
       // Track whether thread 0 is inside root move #1's subtree
