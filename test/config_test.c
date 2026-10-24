@@ -3078,8 +3078,7 @@ static int config_endgame_value(Config *config) {
 // The endgame TT keeps a solve's values for the next solve, under keys that
 // hash only the board, the racks and the player on turn. After set -lex, an
 // NWL23 solve of this position read back CSW21's values and returned 51, where
-// NWL23's value is 37. The other way round, CSW21 returned 38 for 42. Every
-// word on this board is valid in both lexica.
+// NWL23's value is 43. Every word on this board is valid in both lexica.
 void test_config_lexicon_change_clears_endgame_tt(void) {
   Config *config = config_create_or_die("set -lex CSW21 -eplies 2 -threads 1");
   assert_config_exec_status(
@@ -3089,11 +3088,11 @@ void test_config_lexicon_change_clears_endgame_tt(void) {
       "A4UPO2EX1NA/6OR7/5WO8/4IRKSOmE1T2/5I1QUINOA2/5N1U4Y2/5G1A7/"
       "GRICES1DELISTED ADDEJRT/FNV 536/474 0",
       ERROR_STATUS_SUCCESS);
-  assert(config_endgame_value(config) == 42);
+  assert(config_endgame_value(config) == 47);
   assert_config_exec_status(config, "set -lex NWL23", ERROR_STATUS_SUCCESS);
-  assert(config_endgame_value(config) == 37);
+  assert(config_endgame_value(config) == 43);
   assert_config_exec_status(config, "set -lex CSW21", ERROR_STATUS_SUCCESS);
-  assert(config_endgame_value(config) == 42);
+  assert(config_endgame_value(config) == 47);
   config_destroy(config);
 }
 
@@ -3104,7 +3103,7 @@ void test_config_lexicon_change_clears_endgame_tt(void) {
 // read those entries back and returned -82, where its value is -105.
 void test_config_bingo_bonus_change_clears_endgame_tt(void) {
   Config *config =
-      config_create_or_die("set -lex NWL23 -eplies 3 -threads 1 -bb 0");
+      config_create_or_die("set -lex NWL23 -eplies 2 -threads 1 -bb 0");
   assert_config_exec_status(
       config,
       "cgp "

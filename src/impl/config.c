@@ -4309,7 +4309,7 @@ void config_fill_endgame_args(Config *config, EndgameArgs *endgame_args) {
       /*per_ply_callback=*/NULL, /*per_ply_callback_data=*/NULL,
       /*before_search_callback=*/NULL, /*before_search_callback_data=*/NULL,
       /*per_root_move_callback=*/NULL, /*per_root_move_callback_data=*/NULL,
-      DUAL_LEXICON_MODE_IGNORANT, /*forced_pass_bypass=*/false,
+      DUAL_LEXICON_MODE_IGNORANT, /*forced_pass_bypass=*/true,
       /*incremental_movegen=*/true,
       /*disable_best_reply_shortcuts=*/!config->endgame_best_reply_shortcuts,
       /*enable_pv_display=*/true,

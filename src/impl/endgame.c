@@ -2714,15 +2714,18 @@ static float worker_opp_stuck_fraction(EndgameCtxWorker *worker,
 // Through iterative-deepening depth 1 (the root sweep and the depth-1 search)
 // a leaf plays one greedy move before the rack adjustment instead of playing
 // out: at those depths it chooses better. From depth 2 the full playout is
-// better.
+// better. With the bypass, a leaf whose opponent can only pass is exempt (see
+// negamax_greedy_leaf_playout).
 static inline bool leaf_playout_is_capped(const EndgameCtxWorker *worker) {
   return worker->current_iterative_deepening_depth <= 1;
 }
 
 // The same position gets a different leaf value capped and uncapped, and with
 // several threads both kinds are in flight at once (helpers start at depth 2
-// or deeper while thread 0 runs depth 1). Capped leaf values live under a
-// salted key so an uncapped leaf never reads one, and vice versa.
+// or deeper while thread 0 runs depth 1). Leaf values found through depth 1
+// live under a salted key so a deeper search never reads one, and vice versa.
+// A position exempt from the cap is exempt wherever depth 1 meets it, so its
+// salted key holds only uncapped values.
 static inline uint64_t leaf_tt_key(const EndgameCtxWorker *worker,
                                    uint64_t node_key) {
   return leaf_playout_is_capped(worker) ? node_key ^ CAPPED_LEAF_KEY_SALT
@@ -2746,20 +2749,6 @@ static int32_t negamax_greedy_leaf_playout(EndgameCtxWorker *worker,
   // along a pushed path (never from the root itself).
   const bool use_path_lists =
       worker->path_lists != NULL && worker->path_lists->length >= 1;
-  // The playout runs to the end of the game. A stuck playout pushes each of
-  // its moves onto the incremental lists' path, on top of up to 2 * plies
-  // negamax and bypass moves, so it also stops where the path is full.
-  int max_playout = EG_MAX_LEAF_PLAYOUT;
-  if (leaf_playout_is_capped(worker)) {
-    max_playout = 1;
-  }
-  if (use_path_lists) {
-    const int path_room =
-        PATH_MOVE_LISTS_MAX_PATH - 1 - worker->path_lists->length;
-    if (path_room < max_playout) {
-      max_playout = path_room;
-    }
-  }
   // The side to move's derived list at the leaf, when it was materialized
   // for the stuck fraction; the first playout step reuses it.
   const SmallMove *leaf_plays = NULL;
@@ -2797,6 +2786,28 @@ static int32_t negamax_greedy_leaf_playout(EndgameCtxWorker *worker,
     opp_stuck_frac =
         worker_opp_stuck_fraction(worker, node_key, leaf_plays, leaf_play_count,
                                   worker_board_occupancy(worker), NULL);
+  }
+
+  // The playout runs to the end of the game. A stuck playout pushes each of
+  // its moves onto the incremental lists' path, on top of up to 2 * plies
+  // negamax and bypass moves, so it also stops where the path is full.
+  int max_playout = EG_MAX_LEAF_PLAYOUT;
+  // Depth 1's leaves have the solving player's opponent on turn, so when the
+  // opponent can only pass, the capped playout's one move is that pass.
+  // Without the bypass, depth 2 plays out from after the pass. With it, the
+  // pass spends no ply, and depth 2 searches two of the solving player's
+  // moves, a far larger search that a time limit can stop short of. Such a
+  // leaf plays out in full instead, as depth 2 does without the bypass.
+  if (leaf_playout_is_capped(worker) &&
+      !(worker->solver->forced_pass_bypass && opp_stuck_frac >= 1.0F)) {
+    max_playout = 1;
+  }
+  if (use_path_lists) {
+    const int path_room =
+        PATH_MOVE_LISTS_MAX_PATH - 1 - worker->path_lists->length;
+    if (path_room < max_playout) {
+      max_playout = path_room;
+    }
   }
 
   // Only a stuck playout derives its lists, so only it extends the path.
@@ -4821,6 +4832,23 @@ static bool display_pass_begin(EndgameCtx *solver) {
   return true;
 }
 
+// Whether the search played move, the next move of a line it searched, as a
+// forced pass: with EndgameArgs.forced_pass_bypass, a pass below the root by
+// a side with no other play, after a move that scored, which the search plays
+// without spending a ply. The worker's game is at the move's position, which
+// is not the root.
+static bool pv_move_is_forced_pass(const EndgameCtx *solver,
+                                   EndgameCtxWorker *worker,
+                                   const SmallMove *move, int plies_left) {
+  if (!solver->forced_pass_bypass || !small_move_is_pass(move) ||
+      game_get_consecutive_scoreless_turns(worker->game_copy) != 0) {
+    return false;
+  }
+  const int nplays = generate_stm_plays(worker, plies_left, NULL);
+  arena_dealloc(worker->small_move_arena, nplays * sizeof(SmallMove));
+  return nplays == 1;
+}
+
 // The search's line can stop short of the depth it was solved to. A node on
 // the line whose window a transposition-table bound narrowed can take its best
 // move from a null-window probe that it does not re-search, and the probe's
@@ -4830,11 +4858,12 @@ static bool display_pass_begin(EndgameCtx *solver) {
 // from wherever that search's line stops, so the line is searched to depth
 // plies, or to the end of the game, and never deeper. A search that is
 // interrupted, or whose value disagrees with the line's, leaves the rest of
-// the line to TT extension. The worker's game must be at the root position.
+// the line to TT extension. A forced pass (see pv_move_is_forced_pass) spends
+// no ply here, as in the search. The worker's game must be at the root
+// position.
 static void complete_pv_line(const EndgameCtx *solver, EndgameCtxWorker *worker,
                              int depth, PVLine *pv) {
-  if (!solver->transposition_table_optim || pv->negamax_depth == 0 ||
-      pv->negamax_depth >= depth) {
+  if (!solver->transposition_table_optim || pv->negamax_depth == 0) {
     return;
   }
   // No node of these searches is the root, and none is ply-2 progress for the
@@ -4848,22 +4877,33 @@ static void complete_pv_line(const EndgameCtx *solver, EndgameCtxWorker *worker,
 
   // The solving player's final spread, as the line's value.
   const int32_t line_value = pv->score + solver->initial_spread;
-  // The search plays the move at a node with d plies left into
-  // move_undos[requested_plies - d], so a search from the end of the played
-  // moves uses the undos after theirs.
   const int first_undo_index = solver->requested_plies - depth;
   uint64_t node_key = solver_root_hash_key(solver, worker->game_copy);
+  MoveUndo *played_undos[MAX_VARIANT_LENGTH];
   int num_played = 0;
+  int plies_used = 0;
   while (true) {
-    // Forced passes the search plays without spending a ply can make the
-    // searched moves outnumber the plies.
-    while (num_played < pv->negamax_depth && num_played < depth) {
-      node_key = play_small_move_and_hash(
-          worker, &pv->moves[num_played], node_key,
-          &worker->move_undos[first_undo_index + num_played]);
+    while (num_played < pv->negamax_depth && plies_used < depth) {
+      const SmallMove *move = &pv->moves[num_played];
+      const int plies_left = depth - plies_used;
+      // The search plays the move at a node with d plies left into
+      // move_undos[requested_plies - d], and a forced pass, which leaves d as
+      // it is, into pass_undos[d]. Played into the same undos, the line's
+      // moves leave a search from its end the undos below theirs.
+      MoveUndo *undo = NULL;
+      if (num_played > 0 &&
+          pv_move_is_forced_pass(solver, worker, move, plies_left)) {
+        undo = &worker->pass_undos[plies_left];
+      } else {
+        undo = &worker->move_undos[first_undo_index + plies_used];
+        plies_used++;
+      }
+      node_key = play_small_move_and_hash(worker, move, node_key, undo);
+      played_undos[num_played] = undo;
       num_played++;
     }
-    if (num_played >= depth ||
+    // A line of forced passes can fill the PV before it spends its plies.
+    if (plies_used >= depth || num_played >= MAX_VARIANT_LENGTH ||
         game_get_game_end_reason(worker->game_copy) != GAME_END_REASON_NONE) {
       break;
     }
@@ -4872,7 +4912,7 @@ static void complete_pv_line(const EndgameCtx *solver, EndgameCtxWorker *worker,
     rest_pv.num_moves = 0;
     rest_pv.negamax_depth = 0;
     const int32_t value =
-        abdada_negamax(worker, node_key, depth - num_played, -LARGE_VALUE,
+        abdada_negamax(worker, node_key, depth - plies_used, -LARGE_VALUE,
                        LARGE_VALUE, &rest_pv, true, false, 0.0F);
     if (value == ABDADA_INTERRUPTED || value == ON_EVALUATION) {
       break;
@@ -4895,8 +4935,7 @@ static void complete_pv_line(const EndgameCtx *solver, EndgameCtxWorker *worker,
   }
   while (num_played > 0) {
     num_played--;
-    unplay_played_move(worker,
-                       &worker->move_undos[first_undo_index + num_played]);
+    unplay_played_move(worker, played_undos[num_played]);
   }
   worker->path_lists = path_lists;
 }
