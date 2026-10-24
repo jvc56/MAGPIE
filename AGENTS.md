@@ -21,7 +21,6 @@ make magpie BUILD=no_pgo_release # optimized build without PGO
 make magpie_test               # build test binary
 make magpie_test BUILD=no_pgo_release # optimized test binary
 make magpie_test BUILD=sanitize # dev's ASAN/UBSAN checks at -O1, as CI runs the tests
-make magpie BUILD=profile      # profiling build
 make magpie BUILD=thread       # thread sanitizer build
 make leavegen_pgo_release      # leavegen-trained PGO build
 make libmagpie                 # shared library; API is src/impl/cmd_api.h
@@ -104,7 +103,9 @@ Keep performance work and quality work separate.
 
 ### Performance work
 
-Make it faster **without changing behavior**. Validate with autoplay or on-demand tests comparing before/after. Profile with `BUILD=profile` and `sample <pid>` on macOS. Measure the specific functions changed, not just wall-clock time.
+Make it faster **without changing behavior**. Validate with autoplay or on-demand tests comparing before/after. Measure the specific functions changed, not just wall-clock time.
+
+Profile the optimized binary itself (`make release` or `BUILD=no_pgo_release`) with `sample <pid>` on macOS or `perf record` on Linux, not a build with inlining turned off, which is a different program. These builds carry debug information, which leaves their code all but unchanged. An inlined function's time counts toward its caller: split a hot function up by the source line `sample` prints for each address, inlined code included, or by inlined function with `atos -i` or `llvm-symbolizer --inlines` (`perf report --inline` on Linux). On macOS the debug information stays in `obj/`, so run `dsymutil` on a binary you keep past the next build.
 
 ### Feature flags must be free when off
 
