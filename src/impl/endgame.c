@@ -404,8 +404,8 @@ struct EndgameCtxWorker {
   uint64_t playout_tail_keys[EG_MAX_LEAF_PLAYOUT + 1];
   int32_t playout_tail_spreads[EG_MAX_LEAF_PLAYOUT + 1];
   // The line of the depth in progress whose root move beat every root move
-  // searched before it at that depth (see adopt_unfinished_depth_best).
-  bool unfinished_best_valid;
+  // searched before it at that depth, or no moves when none has (see
+  // adopt_unfinished_depth_best).
   PVLine unfinished_best_pv;
 
   // Per-thread node counter for the live-progress getter. Plain uint64
@@ -4224,7 +4224,6 @@ int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
         pv->negamax_depth = child_pv.negamax_depth + 1;
         if (beats_earlier_roots) {
           worker->unfinished_best_pv = *pv;
-          worker->unfinished_best_valid = true;
         }
         // Live PV publish (root only): a polling reader sees the engine's
         // evolving best line refine through each depth as root moves get
@@ -4595,7 +4594,8 @@ static void force_actual_move_to_front(const EndgameCtxWorker *worker,
 // stays the last completed one: callers read it to tell whether the value is
 // exact, and this one comes from a depth not every root move finished.
 static void adopt_unfinished_depth_best(const EndgameCtxWorker *worker) {
-  if (!worker->unfinished_best_valid || worker->completed_depth < 1) {
+  if (worker->unfinished_best_pv.num_moves == 0 ||
+      worker->completed_depth < 1) {
     return;
   }
   endgame_results_replace_best_pvline(
@@ -4721,7 +4721,7 @@ void iterative_deepening(EndgameCtxWorker *worker, int plies) {
     }
 
     worker->current_iterative_deepening_depth = ply;
-    worker->unfinished_best_valid = false;
+    worker->unfinished_best_pv.num_moves = 0;
     // Update root move progress counters (main worker, ordinal 0, only)
     if (worker->ordinal == 0) {
       atomic_store(&worker->solver->current_depth, ply);
