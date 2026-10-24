@@ -291,7 +291,7 @@ ifndef WINDOWS
 ifeq ($(shell uname -s),Darwin)
 ifneq ($(filter -flto,${ldflags.${BUILD}}),)
 ifneq ($(filter -gdwarf-4,${ldflags.${BUILD}}),)
-ifneq ($(findstring clang,$(shell $(CC) --version 2>/dev/null)),)
+ifneq ($(findstring clang,$(CC_VERSION_TEXT)),)
 LDFLAGS += -Wl,-object_path_lto,$(OBJ_DIR)/$(@F).lto.o
 endif
 endif
