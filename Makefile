@@ -178,11 +178,15 @@ cflags.sanitize = -g -O1 -fno-omit-frame-pointer -fno-optimize-sibling-calls -U_
 cflags.thread := -g -O0 -Wall -Wno-trigraphs -Wextra -Wshadow -Wstrict-prototypes -Werror -fsanitize=thread
 cflags.vlg := -g -O0 -Wall -Wno-trigraphs -Wextra
 cflags.cov := -g -O0 -Wall -Wno-trigraphs -Wextra --coverage
-cflags.no_pgo_release := -O3 -flto -march=native -DNDEBUG -Wall -Wno-trigraphs
+# The optimized builds carry debug information, so a profile of the binary
+# that runs attributes its time to source lines and to the functions inlined
+# there. -g leaves GCC's code as it is, and changes clang's only in the
+# registers and instruction order of a few functions.
+cflags.no_pgo_release := -O3 -flto -march=native -DNDEBUG -Wall -Wno-trigraphs -g
 cflags.portable_release := -O3 -flto -march=$(PORTABLE_MARCH) -DNDEBUG -Wall -Wno-trigraphs
 cflags.test_portable_release := -O3 -flto -march=$(PORTABLE_MARCH) -Wall -Wno-trigraphs
 # Test-specific flags: like no_pgo_release but without DNDEBUG (asserts always enabled in tests)
-cflags.test_no_pgo_release := -O3 -flto -march=native -Wall -Wno-trigraphs
+cflags.test_no_pgo_release := -O3 -flto -march=native -Wall -Wno-trigraphs -g
 # no_pgo_release plus BAI scheduling instrumentation (src/ent/bai_sched_stats.h),
 # read by the on-demand baisched test. Production builds compile it out.
 cflags.bai_stats := $(cflags.no_pgo_release) -DBAI_SCHED_STATS
@@ -203,7 +207,6 @@ cflags.pgo_use := $(cflags.no_pgo_release) $(pgo_use_flags)
 cflags.test_pgo_use := $(cflags.test_no_pgo_release) $(pgo_use_flags)
 # Shared library flavor: release optimization plus -fPIC, no sanitizers
 cflags.lib := -O3 -flto -march=native -DNDEBUG -Wall -Wno-trigraphs -fPIC
-cflags.profile := -O3 -g -march=native -DNDEBUG -Wall -Wno-trigraphs -fno-omit-frame-pointer -mllvm -inline-threshold=0
 lflags.cov := --coverage
 
 ldflags.dev := -pthread $(FSAN_ARG)
@@ -211,12 +214,12 @@ ldflags.sanitize := -pthread $(FSAN_ARG)
 ldflags.lib := -pthread
 ldflags.thread := -pthread -fsanitize=thread
 ldflags.vlg := -pthread
-ldflags.no_pgo_release := -pthread -flto
+# GCC compiles an LTO build's code at the link, so the link takes -g too.
+ldflags.no_pgo_release := -pthread -flto -g
 ldflags.portable_release := -pthread -flto
-ldflags.bai_stats := -pthread -flto
-ldflags.pgo_generate := -pthread -flto -fprofile-instr-generate $(PGO_LDFLAGS)
-ldflags.pgo_use := -pthread -flto -fprofile-instr-use=$(PGO_PROFILE) $(PGO_LDFLAGS)
-ldflags.profile := -pthread
+ldflags.bai_stats := -pthread -flto -g
+ldflags.pgo_generate := -pthread -flto -g -fprofile-instr-generate $(PGO_LDFLAGS)
+ldflags.pgo_use := -pthread -flto -g -fprofile-instr-use=$(PGO_PROFILE) $(PGO_LDFLAGS)
 ldflags.cov := -pthread
 # The test builds link as the builds they test: without -pthread, a test that
 # starts a thread itself failed to link under test_no_pgo_release.
@@ -256,8 +259,26 @@ endif
 
 
 LFLAGS := ${lflags.${BUILD}}
-LDFLAGS  := ${ldflags.${BUILD}}
+# Expanded at each link, for the macOS LTO object path below.
+LDFLAGS  = ${ldflags.${BUILD}}
 LDLIBS   := -lm
+
+# On macOS the debug information stays in the object files, which the
+# executable points to. Clang's LTO link compiles its code into a temporary
+# object and deletes it afterwards, and the debug information of that code with
+# it, so keep that object beside the build's others, one per linked file. GCC
+# runs its own LTO, and its link driver misreads the option.
+ifndef WINDOWS
+ifeq ($(shell uname -s),Darwin)
+ifneq ($(filter -flto,${ldflags.${BUILD}}),)
+ifneq ($(filter -g,${ldflags.${BUILD}}),)
+ifneq ($(findstring clang,$(shell $(CC) --version 2>/dev/null)),)
+LDFLAGS += -Wl,-object_path_lto,$(OBJ_DIR)/$(@F).lto.o
+endif
+endif
+endif
+endif
+endif
 
 # The HTTP compat layer resolves libcurl with dlopen at runtime rather than
 # linking it, so a machine without libcurl still runs every offline command.
