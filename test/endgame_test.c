@@ -1146,18 +1146,21 @@ void test_endgame_pass_transposition_depth(void) {
 // probe's line ends at the first node it answers from the TT. Multi-threaded
 // solves meet such bounds when a helper stores one, and the displayed line
 // then showed a "|" partway through a line the solve had proven to the end of
-// the game. This plants such a bound: it solves once, turns the line's exact
-// entry two moves in into a lower bound whose move is a pass, and solves
-// again. The search's line now stops at that node, and the displayed line must
-// still be searched to the end of the game.
-static void assert_display_completes_short_pv(bool incremental_movegen) {
+// the game. This plants such a bound: it solves once, turns the line's entry
+// two moves in into a bound of type bound_flag at the same value, whose move
+// is a pass, and solves again. The search's line now stops short, and the
+// displayed line must still be searched to the end of the game.
+static void assert_display_completes_short_pv(int plies,
+                                              bool forced_pass_bypass,
+                                              int bound_flag,
+                                              bool incremental_movegen) {
   // From cross-tables annotated game 35333: the opponent is stuck with the J,
   // and the player on turn plays EEFL one tile at a time.
   const char *cgp =
       "cgp 2GRANTED5L/1XI5ABBOTCY/6FEG2WO1A/6EUOUAE2M/7O2D4/6OI2V1I2/"
       "1AN2MO3O1N2/CH1QUIRT1DuDS2/HIOI2I3T1T2/I2NAPE3R1A2/N3UR4Y1R2/"
       "G2WAI1Z7/4SLEEVEEn3/5L1P7/7STARKENS EEFL/J 419/498 1 -lex CSW21";
-  Config *config = config_create_or_die("set -s1 score -s2 score -eplies 10");
+  Config *config = config_create_or_die("set -s1 score -s2 score");
   load_and_exec_config_or_die(config, cgp);
 
   Game *game = config_get_game(config);
@@ -1169,7 +1172,8 @@ static void assert_display_completes_short_pv(bool incremental_movegen) {
   EndgameArgs endgame_args = {0};
   endgame_args.thread_control = config_get_thread_control(config);
   endgame_args.game = game;
-  endgame_args.plies = config_get_endgame_plies(config);
+  endgame_args.plies = plies;
+  endgame_args.forced_pass_bypass = forced_pass_bypass;
   endgame_args.shared_tt = tt;
   endgame_args.initial_small_move_arena_size =
       DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
@@ -1203,15 +1207,16 @@ static void assert_display_completes_short_pv(bool incremental_movegen) {
       player_get_rack(game_get_player(line_game, 1 - solving_player)),
       /*their_turn=*/false, game_get_consecutive_scoreless_turns(line_game));
   game_destroy(line_game);
-  const TTEntry exact_entry = transposition_table_lookup(tt, node_key);
-  assert(ttentry_flag(exact_entry) == TT_EXACT);
+  const TTEntry line_entry = transposition_table_lookup(tt, node_key);
+  assert(ttentry_flag(line_entry) == TT_EXACT);
   SmallMove pass;
   small_move_set_as_pass(&pass);
-  const TTEntry lower_bound = {
-      .score = ttentry_score(exact_entry),
-      .flag_and_depth = (uint8_t)((TT_LOWER << 6) + ttentry_depth(exact_entry)),
+  const TTEntry planted_bound = {
+      .score = ttentry_score(line_entry),
+      .flag_and_depth =
+          (uint8_t)((bound_flag << 6) + ttentry_depth(line_entry)),
       .tiny_move = pass.tiny_move};
-  transposition_table_store(tt, node_key, lower_bound);
+  transposition_table_store(tt, node_key, planted_bound);
 
   endgame_solve(&endgame_ctx, &endgame_args, endgame_results, error_stack);
   assert(error_stack_is_empty(error_stack));
@@ -1235,10 +1240,21 @@ static void assert_display_completes_short_pv(bool incremental_movegen) {
 }
 
 static void test_display_completes_short_pv(void) {
-  assert_display_completes_short_pv(/*incremental_movegen=*/false);
+  assert_display_completes_short_pv(10, /*forced_pass_bypass=*/false, TT_LOWER,
+                                    /*incremental_movegen=*/false);
   // The search from partway down the line cannot derive its move lists from
   // lists the walk down the line never built.
-  assert_display_completes_short_pv(/*incremental_movegen=*/true);
+  assert_display_completes_short_pv(10, /*forced_pass_bypass=*/false, TT_LOWER,
+                                    /*incremental_movegen=*/true);
+  // With the bypass, the opponent's passes are forced and spend no ply, so
+  // four plies search the whole game. An upper bound cuts the line after
+  // 7A E(AN), pass, A6 E(ECHING): three moves, but two plies, so the search
+  // from there has two plies left. Counting the pass as a ply would leave it
+  // one, which stops at A5 L(EECHING).
+  assert_display_completes_short_pv(4, /*forced_pass_bypass=*/true, TT_UPPER,
+                                    /*incremental_movegen=*/false);
+  assert_display_completes_short_pv(4, /*forced_pass_bypass=*/true, TT_UPPER,
+                                    /*incremental_movegen=*/true);
 }
 
 void test_solve_standard(void) {

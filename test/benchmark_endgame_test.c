@@ -515,8 +515,8 @@ void test_benchmark_nonstuck_3v3(void) {
 //   tag          label for the run  (default "bench")
 // For example: egspeedbench:cgp=positions.txt,plies=5,threads=4,bypass=0
 // Every solve starts from a cleared TT, so no solve inherits an earlier one's
-// entries. bypass=0 solves as the endgame, analyze and autoplay commands do,
-// with the forced-pass bypass off. Each row ends with the solve's CPU time
+// entries. The default, bypass=1, solves as the endgame, analyze, autoplay
+// and PEG solves do. Each row ends with the solve's CPU time
 // across all of its threads (clock(), which is wall time on Windows), so a
 // multi-threaded run shows how much of the machine its speedup cost.
 static int env_int(const char *name, int fallback) {

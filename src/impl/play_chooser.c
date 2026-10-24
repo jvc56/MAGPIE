@@ -579,7 +579,7 @@ static bool play_chooser_run_endgame(
       /*per_ply_callback=*/NULL, /*per_ply_callback_data=*/NULL,
       /*before_search_callback=*/NULL, /*before_search_callback_data=*/NULL,
       /*per_root_move_callback=*/NULL, /*per_root_move_callback_data=*/NULL,
-      DUAL_LEXICON_MODE_IGNORANT, /*forced_pass_bypass=*/false,
+      DUAL_LEXICON_MODE_IGNORANT, /*forced_pass_bypass=*/true,
       /*incremental_movegen=*/true, /*disable_best_reply_shortcuts=*/false,
       /*enable_pv_display=*/false, /*soft_time_limit=*/budget_seconds * 0.9,
       /*hard_time_limit=*/budget_seconds, strategy->seed,
