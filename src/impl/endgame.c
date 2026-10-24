@@ -189,6 +189,9 @@ struct EndgameCtx {
   const Move *actual_move;
 
   KWG *pruned_kwgs[2];
+  // Each tile type's face value, by machine letter, for the sums of the tiles
+  // moves place.
+  int tile_face_values[MAX_ALPHABET_SIZE];
   dual_lexicon_mode_t dual_lexicon_mode;
   double soft_time_limit;
   double hard_time_limit;
@@ -1024,6 +1027,10 @@ void endgame_ctx_reset(EndgameCtx *es, EndgameResults *results,
 
   es->initial_spread =
       equity_to_int(player_get_score(player) - player_get_score(opponent));
+  const LetterDistribution *ld = game_get_ld(endgame_args->game);
+  for (int ml = 0; ml < ld_get_size(ld); ml++) {
+    es->tile_face_values[ml] = equity_to_int(ld_get_score(ld, ml));
+  }
 
   kwg_destroy(es->pruned_kwgs[0]);
   kwg_destroy(es->pruned_kwgs[1]);
@@ -2260,17 +2267,17 @@ static void seed_opponent_root_list(EndgameCtxWorker *worker) {
   path_move_lists_set_root(worker->path_lists, 1, worker->move_list);
 }
 
-// Sum the face values of the rack tiles a move places; a designated blank
-// counts as the blank.
+// Sum the face values (tile_face_values, by machine letter) of the rack tiles
+// a move places; a designated blank counts as the blank.
 static int compute_played_tiles_face_value(const SmallMove *small_move,
-                                           const LetterDistribution *ld) {
+                                           const int *tile_face_values) {
   int face_value = 0;
   const int tiles_played = small_move_get_tiles_played(small_move);
   for (int tile_idx = 0; tile_idx < tiles_played; tile_idx++) {
     const MachineLetter ml = small_move_tile_is_blank(small_move, tile_idx)
                                  ? BLANK_MACHINE_LETTER
                                  : small_move_get_tile(small_move, tile_idx);
-    face_value += equity_to_int(ld_get_score(ld, ml));
+    face_value += tile_face_values[ml];
   }
   return face_value;
 }
@@ -2279,10 +2286,11 @@ static int compute_played_tiles_face_value(const SmallMove *small_move,
 // Returns (CONSERVATION_TILE_WEIGHT * tile_count +
 //          CONSERVATION_VALUE_WEIGHT * face_value) * opp_stuck_frac.
 static int compute_conservation_bonus(const SmallMove *small_move,
-                                      const LetterDistribution *ld,
+                                      const int *tile_face_values,
                                       float opp_stuck_frac) {
   const int tiles_played = small_move_get_tiles_played(small_move);
-  const int face_value = compute_played_tiles_face_value(small_move, ld);
+  const int face_value =
+      compute_played_tiles_face_value(small_move, tile_face_values);
   return (int)((float)(CONSERVATION_TILE_WEIGHT * tiles_played +
                        CONSERVATION_VALUE_WEIGHT * face_value) *
                opp_stuck_frac);
@@ -2495,7 +2503,7 @@ void assign_estimates(EndgameCtxWorker *worker, int move_count,
   const int *build_values = compute_build_chain_values(
       worker, move_count, arena_offset, opp_stuck_frac);
 
-  const LetterDistribution *est_ld = game_get_ld(worker->game_copy);
+  const int *tile_face_values = worker->solver->tile_face_values;
 
   for (size_t i = 0; i < (size_t)move_count; i++) {
     size_t element_offset = arena_offset + i * sizeof(SmallMove);
@@ -2509,8 +2517,8 @@ void assign_estimates(EndgameCtxWorker *worker, int move_count,
     // Conservation bonus: penalize playing tiles when opponent has stuck tiles.
     int conservation_bonus = 0;
     if (opp_stuck_frac > 0.0F && is_non_pass_partial) {
-      conservation_bonus =
-          compute_conservation_bonus(current_move, est_ld, opp_stuck_frac);
+      conservation_bonus = compute_conservation_bonus(
+          current_move, tile_face_values, opp_stuck_frac);
     }
 
     if (small_move_get_tiles_played(current_move) == ntiles_on_rack) {
@@ -2541,7 +2549,8 @@ void assign_estimates(EndgameCtxWorker *worker, int move_count,
       int estimate = score - conservation_bonus;
       // Static endgame equity: score minus face value of tiles played.
       if (is_non_pass_partial) {
-        estimate -= compute_played_tiles_face_value(current_move, est_ld);
+        estimate -=
+            compute_played_tiles_face_value(current_move, tile_face_values);
       }
       estimate += compute_thread_jitter(
           worker, small_move_get_tiles_played(current_move));
@@ -3028,7 +3037,7 @@ static int32_t negamax_greedy_leaf_playout(EndgameCtxWorker *worker,
           adj = score - pass_penalty;
         } else {
           int conservation_bonus = compute_conservation_bonus(
-              sm, game_get_ld(worker->game_copy), opp_stuck_frac);
+              sm, worker->solver->tile_face_values, opp_stuck_frac);
           adj = score - conservation_bonus;
         }
       } else {
