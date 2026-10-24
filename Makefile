@@ -196,13 +196,15 @@ cflags.vlg := -g -O0 -Wall -Wno-trigraphs -Wextra
 cflags.cov := -g -O0 -Wall -Wno-trigraphs -Wextra --coverage
 # The optimized builds carry debug information, so a profile of the binary
 # that runs attributes its time to source lines and to the functions inlined
-# there. -g leaves GCC's code as it is, and changes clang's only in the
-# registers and instruction order of a few functions.
-cflags.no_pgo_release := -O3 -flto -march=native -DNDEBUG -Wall -Wno-trigraphs -g
+# there. It costs build time, not run time: it changes the code only a little
+# (clang's registers and instruction order in a few functions, GCC 13's LTO
+# partitioning) and not its speed. DWARF 4, since the binutils of older Linux
+# distributions, which perf reads source lines through, cannot read DWARF 5.
+cflags.no_pgo_release := -O3 -flto -march=native -DNDEBUG -Wall -Wno-trigraphs -gdwarf-4
 cflags.portable_release := -O3 -flto -march=$(PORTABLE_MARCH) -DNDEBUG -Wall -Wno-trigraphs
 cflags.test_portable_release := -O3 -flto -march=$(PORTABLE_MARCH) -Wall -Wno-trigraphs
 # Test-specific flags: like no_pgo_release but without DNDEBUG (asserts always enabled in tests)
-cflags.test_no_pgo_release := -O3 -flto -march=native -Wall -Wno-trigraphs -g
+cflags.test_no_pgo_release := -O3 -flto -march=native -Wall -Wno-trigraphs -gdwarf-4
 # no_pgo_release plus BAI scheduling instrumentation (src/ent/bai_sched_stats.h),
 # read by the on-demand baisched test. Production builds compile it out.
 cflags.bai_stats := $(cflags.no_pgo_release) -DBAI_SCHED_STATS
@@ -230,12 +232,13 @@ ldflags.sanitize := -pthread $(FSAN_ARG)
 ldflags.lib := -pthread
 ldflags.thread := -pthread -fsanitize=thread
 ldflags.vlg := -pthread
-# GCC compiles an LTO build's code at the link, so the link takes -g too.
-ldflags.no_pgo_release := -pthread -flto -g
+# GCC compiles an LTO build's code at the link, so the link takes the debug
+# flag too.
+ldflags.no_pgo_release := -pthread -flto -gdwarf-4
 ldflags.portable_release := -pthread -flto
-ldflags.bai_stats := -pthread -flto -g
-ldflags.pgo_generate := -pthread -flto -g -fprofile-instr-generate $(PGO_LDFLAGS)
-ldflags.pgo_use := -pthread -flto -g -fprofile-instr-use=$(PGO_PROFILE) $(PGO_LDFLAGS)
+ldflags.bai_stats := -pthread -flto -gdwarf-4
+ldflags.pgo_generate := -pthread -flto -gdwarf-4 -fprofile-instr-generate $(PGO_LDFLAGS)
+ldflags.pgo_use := -pthread -flto -gdwarf-4 -fprofile-instr-use=$(PGO_PROFILE) $(PGO_LDFLAGS)
 ldflags.cov := -pthread
 # The test builds link as the builds they test: without -pthread, a test that
 # starts a thread itself failed to link under test_no_pgo_release.
@@ -287,7 +290,7 @@ LDLIBS   := -lm
 ifndef WINDOWS
 ifeq ($(shell uname -s),Darwin)
 ifneq ($(filter -flto,${ldflags.${BUILD}}),)
-ifneq ($(filter -g,${ldflags.${BUILD}}),)
+ifneq ($(filter -gdwarf-4,${ldflags.${BUILD}}),)
 ifneq ($(findstring clang,$(shell $(CC) --version 2>/dev/null)),)
 LDFLAGS += -Wl,-object_path_lto,$(OBJ_DIR)/$(@F).lto.o
 endif
