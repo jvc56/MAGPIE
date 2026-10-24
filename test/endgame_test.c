@@ -2476,6 +2476,51 @@ static void test_stuck_depth_one_leaf_playout(void) {
   config_destroy(config);
 }
 
+// The opponent's L can't be played, so every playout is a stuck one, and many
+// pass through positions an earlier playout reached, where they stop and take
+// the rest of that playout's value. The 3-ply value must be the one full
+// playouts give, 28 (from a solve before the rest was stored); a rest one
+// point off makes it 31.
+static void test_stuck_playout_tails(void) {
+  Config *config = config_create_or_die("set -s1 score -s2 score -threads 1");
+  load_and_exec_config_or_die(
+      config, "cgp "
+              "15/15/15/15/14C/3L5YUAN1A/2JOW1DOYENnE1R/R2PIXIE1HI1WAB/"
+              "EF2GUV3T3O/GI5O1FAQIRs/IN1ROOTSIER4/S4KAM2DE3/T1BEE2OPUSCLES/"
+              "EMIT1DALI2O1HA/RUNAGATE3D2Z ENNTV/L 406/476 0 -lex CSW21;");
+  Game *game = config_get_game(config);
+  ThreadControl *thread_control = thread_control_create();
+  thread_control_set_status(thread_control, THREAD_CONTROL_STATUS_STARTED);
+
+  EndgameArgs args = {0};
+  args.thread_control = thread_control;
+  args.game = game;
+  args.plies = 3;
+  // Small enough that every desktop build gets the minimum table size.
+  args.tt_fraction_of_mem = 0.0001;
+  args.initial_small_move_arena_size = DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
+  args.num_threads = 1;
+  args.use_heuristics = true;
+  args.num_top_moves = 1;
+  args.forced_pass_bypass = true;
+  args.incremental_movegen = true;
+  args.seed = 42;
+
+  EndgameCtx *endgame_ctx = NULL;
+  EndgameResults *results = endgame_results_create();
+  ErrorStack *error_stack = error_stack_create();
+  endgame_solve(&endgame_ctx, &args, results, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  assert(endgame_results_get_depth(results, ENDGAME_RESULT_BEST) == 3);
+  assert(endgame_results_get_value(results, ENDGAME_RESULT_BEST) == 28);
+
+  endgame_ctx_destroy(endgame_ctx);
+  endgame_results_destroy(results);
+  error_stack_destroy(error_stack);
+  thread_control_destroy(thread_control);
+  config_destroy(config);
+}
+
 static void test_endgame_played_move(void) {
   Config *config = config_create_or_die(
       "set -lex CSW24 -threads 1 -ttfraction 0.0001 -eplies 10 -etopk 1");
@@ -2619,6 +2664,7 @@ void test_endgame(void) {
   test_endgame_interrupt();
   test_time_limited_leaf_playout();
   test_stuck_depth_one_leaf_playout();
+  test_stuck_playout_tails();
   test_lent_helper_runs_abdada();
   // Cheap (sub-second) regression of the VIA mover-must-bingo case. The full
   // VIA depth/stress sweeps (viamover / viaopp / viastress) are on-demand only

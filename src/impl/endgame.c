@@ -112,6 +112,9 @@ enum {
   // Entries in a worker's cache of the opponent's playable tile types; a
   // power of two.
   STUCK_TILES_CACHE_SIZE = 1 << 15,
+  // Entries in a worker's cache of the rest of stuck playouts; a power of
+  // two.
+  PLAYOUT_TAIL_CACHE_SIZE = 1 << 15,
 };
 
 // A stuck-tile greedy playout extends the incremental lists' path past the
@@ -123,6 +126,11 @@ static_assert(PATH_MOVE_LISTS_MAX_PATH > 2 * MAX_SEARCH_DEPTH + 1,
 
 // Salt for the transposition-table key of a capped leaf; see leaf_tt_key.
 static const uint64_t CAPPED_LEAF_KEY_SALT = 0x9E3779B97F4A7C15ULL;
+// Salt for the key of the rest of a stuck playout, whose top half also carries
+// the stuck fraction's bits; see negamax_greedy_leaf_playout.
+static const uint64_t PLAYOUT_TAIL_KEY_SALT = 0xC2B2AE3D27D4EB4FULL;
+static_assert(sizeof(float) == sizeof(uint32_t),
+              "a stuck fraction's bits fill half a key");
 // What each solve adds to a worker's stuck-tiles cache salt.
 static const uint64_t STUCK_TILES_SALT_STEP = 0xD1B54A32D192ED03ULL;
 
@@ -288,6 +296,16 @@ typedef struct StuckTilesEntry {
   uint64_t tiles_bv;
 } StuckTilesEntry;
 
+// A position a stuck playout passed through, by its key (see
+// negamax_greedy_leaf_playout), with the value of the rest of the playout
+// from there, from the solving player's side, and the rest's length. Key 0 is
+// empty.
+typedef struct PlayoutTailEntry {
+  uint64_t key;
+  int32_t value;
+  int32_t length;
+} PlayoutTailEntry;
+
 // What the opponent's stuck-tile check knows from the position before the
 // last move: the tile types playable there, and the squares the last move
 // changed for each lane's plays (see path_move_lists_last_move_lanes). A play
@@ -363,6 +381,9 @@ struct EndgameCtxWorker {
   // from an earlier solve, perhaps in another lexicon, never match.
   StuckTilesEntry *stuck_tiles_cache;
   uint64_t stuck_tiles_salt;
+  // The rest of the stuck playouts that passed through a position, with keys
+  // salted by stuck_tiles_salt too (see negamax_greedy_leaf_playout).
+  PlayoutTailEntry *playout_tail_cache;
   // The opponent's playable tile types at each position along the incremental
   // lists' path, by path length, valid while stuck_tiles_stamp[length] is the
   // stamp of that position's prefix (see worker_opp_stuck_fraction). A stamp
@@ -377,6 +398,11 @@ struct EndgameCtxWorker {
   bool in_first_root_move; // True when thread 0 is inside root move idx==0
   // Counter for throttling per-depth deadline checks in abdada_negamax
   uint64_t nodes_since_deadline_check;
+  // The playout_tail_cache key and the solving player's spread of each
+  // position a stuck playout passes through, by its move count (see
+  // negamax_greedy_leaf_playout).
+  uint64_t playout_tail_keys[EG_MAX_LEAF_PLAYOUT + 1];
+  int32_t playout_tail_spreads[EG_MAX_LEAF_PLAYOUT + 1];
 
   // Per-thread node counter for the live-progress getter. Plain uint64
   // (no atomics on the writer side); flushed periodically to the
@@ -1328,6 +1354,7 @@ static void solver_worker_destroy(EndgameCtxWorker *solver_worker) {
   free(solver_worker->sort_scratch);
   free(solver_worker->build_chain_scratch);
   free(solver_worker->stuck_tiles_cache);
+  free(solver_worker->playout_tail_cache);
   prng_destroy(solver_worker->prng);
   free(solver_worker);
 }
@@ -1389,6 +1416,8 @@ static EndgameCtxWorker *endgame_ctx_create_worker(EndgameCtx *solver,
   solver_worker->stuck_tiles_cache =
       calloc_or_die(STUCK_TILES_CACHE_SIZE, sizeof(StuckTilesEntry));
   solver_worker->stuck_tiles_salt = STUCK_TILES_SALT_STEP;
+  solver_worker->playout_tail_cache =
+      calloc_or_die(PLAYOUT_TAIL_CACHE_SIZE, sizeof(PlayoutTailEntry));
   solver_worker->prng = prng_create(base_seed + (uint64_t)ordinal * 12345);
 
   solver_worker->best_pv.game = solver_worker->game_copy;
@@ -2735,7 +2764,7 @@ static inline uint64_t leaf_tt_key(const EndgameCtxWorker *worker,
 static int32_t negamax_greedy_leaf_playout(EndgameCtxWorker *worker,
                                            uint64_t node_key, int on_turn_idx,
                                            int32_t on_turn_spread, PVLine *pv,
-                                           float opp_stuck_frac) {
+                                           bool pv_node, float opp_stuck_frac) {
   // Negamax checks the deadline only every DEPTH_DEADLINE_CHECK_INTERVAL
   // nodes, which at shallow depths, where every node is a playout, can be a
   // large share of a short budget. A clock read is cheap next to a playout.
@@ -2817,6 +2846,35 @@ static int32_t negamax_greedy_leaf_playout(EndgameCtxWorker *worker,
   // step generates from scratch, which gives the same plays in the same
   // order, and stores its list for the steps that follow.
   const bool follow_path = use_path_lists && opp_stuck_frac > 0.0F;
+
+  // A stuck playout often passes through a position an earlier one reached,
+  // the same moves in another order, and from there it plays the same moves.
+  // So a stuck playout stores, for each position it passes through, the value
+  // of the rest of the playout from there and its length, and a later playout
+  // that reaches the position stops there. The rest depends on the stuck
+  // fraction found at the leaf, so the key carries it. A playout cut short by
+  // max_playout stores nothing, and a stored rest is used only where the
+  // playout has room for all of it. A PV node plays its rest out for its
+  // line, as it does where its own value is stored. The worker's own small
+  // cache holds them: in the transposition table, every step's probe and store
+  // missed the processor's caches in a large search, and cost more than the
+  // rests saved.
+  const bool cache_tails = worker->solver->transposition_table_optim &&
+                           opp_stuck_frac > 0.0F && max_playout > 1;
+  uint32_t frac_bits;
+  memcpy(&frac_bits, &opp_stuck_frac, sizeof(frac_bits));
+  const uint64_t tail_salt = PLAYOUT_TAIL_KEY_SALT ^
+                             ((uint64_t)frac_bits << 32) ^
+                             worker->stuck_tiles_salt;
+  uint64_t tail_key = node_key ^ tail_salt;
+  if (cache_tails) {
+    worker->playout_tail_keys[0] = tail_key;
+    worker->playout_tail_spreads[0] =
+        on_turn_idx == solving_player ? on_turn_spread : -on_turn_spread;
+  }
+  bool tail_hit = false;
+  int32_t hit_tail_value = 0;
+  int hit_tail_length = 0;
 
   bool playout_interrupted = false;
   while (game_get_game_end_reason(worker->game_copy) == GAME_END_REASON_NONE &&
@@ -2992,6 +3050,8 @@ static int32_t negamax_greedy_leaf_playout(EndgameCtxWorker *worker,
                            game_get_board(worker->game_copy),
                            worker->move_list->spare_move);
     }
+    const int scoreless_before =
+        game_get_consecutive_scoreless_turns(worker->game_copy);
     play_move_incremental_deferred(worker->move_list->spare_move,
                                    worker->game_copy,
                                    &worker->move_undos[undo_slot]);
@@ -3002,6 +3062,32 @@ static int32_t negamax_greedy_leaf_playout(EndgameCtxWorker *worker,
       pv->moves[playout_depth] = best_sm;
     }
     playout_depth++;
+
+    // A position where the game ended has no rest to store.
+    if (cache_tails &&
+        game_get_game_end_reason(worker->game_copy) == GAME_END_REASON_NONE) {
+      tail_key = zobrist_add_move(
+          worker->solver->transposition_table->zobrist, tail_key,
+          worker->move_list->spare_move,
+          player_get_rack(game_get_player(worker->game_copy, playout_on_turn)),
+          playout_on_turn == solving_player,
+          game_get_consecutive_scoreless_turns(worker->game_copy),
+          scoreless_before);
+      worker->playout_tail_keys[playout_depth] = tail_key;
+      worker->playout_tail_spreads[playout_depth] = equity_to_int(
+          player_get_score(game_get_player(worker->game_copy, solving_player)) -
+          player_get_score(
+              game_get_player(worker->game_copy, 1 - solving_player)));
+      const PlayoutTailEntry *tail =
+          &worker->playout_tail_cache[tail_key & (PLAYOUT_TAIL_CACHE_SIZE - 1)];
+      if (!pv_node && tail->key == tail_key &&
+          tail->length <= max_playout - playout_depth) {
+        tail_hit = true;
+        hit_tail_value = tail->value;
+        hit_tail_length = tail->length;
+        break;
+      }
+    }
   }
 
   // Compute final spread from solving_player's perspective
@@ -3009,9 +3095,18 @@ static int32_t negamax_greedy_leaf_playout(EndgameCtxWorker *worker,
   const Player *op = game_get_player(worker->game_copy, 1 - solving_player);
   int32_t greedy_spread =
       equity_to_int(player_get_score(sp) - player_get_score(op));
+  const bool game_ended =
+      game_get_game_end_reason(worker->game_copy) != GAME_END_REASON_NONE;
+  // Whether the playout ran to its natural end, or reached a stored rest that
+  // did.
+  const bool natural_end =
+      tail_hit || game_ended || playout_depth < max_playout;
 
-  // End-of-game rack adjustments if game didn't end naturally
-  if (game_get_game_end_reason(worker->game_copy) == GAME_END_REASON_NONE) {
+  if (tail_hit) {
+    greedy_spread =
+        worker->playout_tail_spreads[playout_depth] + hit_tail_value;
+  } else if (!game_ended) {
+    // End-of-game rack adjustments if game didn't end naturally
     const LetterDistribution *ld = game_get_ld(worker->game_copy);
     int32_t sp_rack =
         equity_to_int(calculate_end_rack_points(player_get_rack(sp), ld));
@@ -3019,6 +3114,22 @@ static int32_t negamax_greedy_leaf_playout(EndgameCtxWorker *worker,
         equity_to_int(calculate_end_rack_points(player_get_rack(op), ld));
     greedy_spread -= sp_rack;
     greedy_spread += op_rack;
+  }
+
+  if (cache_tails && natural_end && !playout_interrupted) {
+    const int total_length = playout_depth + hit_tail_length;
+    // The position whose rest was found already holds it, and one where the
+    // game ended was never keyed.
+    const int last_step =
+        tail_hit || game_ended ? playout_depth - 1 : playout_depth;
+    for (int step = 0; step <= last_step; step++) {
+      const uint64_t key = worker->playout_tail_keys[step];
+      PlayoutTailEntry *entry =
+          &worker->playout_tail_cache[key & (PLAYOUT_TAIL_CACHE_SIZE - 1)];
+      entry->key = key;
+      entry->value = greedy_spread - worker->playout_tail_spreads[step];
+      entry->length = total_length - step;
+    }
   }
 
   pv->num_moves =
@@ -3071,11 +3182,13 @@ static int32_t negamax_greedy_leaf_playout(EndgameCtxWorker *worker,
 // depth 1 would compute.
 static int32_t negamax_leaf_value(EndgameCtxWorker *worker, uint64_t node_key,
                                   int on_turn_idx, int32_t on_turn_spread,
-                                  PVLine *pv, float opp_stuck_frac) {
+                                  PVLine *pv, bool pv_node,
+                                  float opp_stuck_frac) {
   if (worker->solver->use_heuristics &&
       game_get_game_end_reason(worker->game_copy) == GAME_END_REASON_NONE) {
     return negamax_greedy_leaf_playout(worker, node_key, on_turn_idx,
-                                       on_turn_spread, pv, opp_stuck_frac);
+                                       on_turn_spread, pv, pv_node,
+                                       opp_stuck_frac);
   }
   pv->negamax_depth = 0;
   return on_turn_spread;
@@ -3616,7 +3729,7 @@ int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
                                      node_key);
     }
     return negamax_leaf_value(worker, node_key, on_turn_idx, on_turn_spread, pv,
-                              opp_stuck_frac);
+                              pv_node, opp_stuck_frac);
   }
 
   PVLine child_pv;
@@ -4292,8 +4405,9 @@ static void root_greedy_sweep(EndgameCtxWorker *worker, uint64_t root_key,
     child_pv.game = worker->game_copy;
     child_pv.num_moves = 0;
     child_pv.negamax_depth = 0;
-    const int32_t leaf_val = negamax_leaf_value(
-        worker, child_key, post_on_turn, post_on_turn_spread, &child_pv, 0.0F);
+    const int32_t leaf_val =
+        negamax_leaf_value(worker, child_key, post_on_turn, post_on_turn_spread,
+                           &child_pv, /*pv_node=*/true, 0.0F);
     unplay_played_move(worker, &worker->move_undos[undo_index]);
     if (worker->path_lists != NULL) {
       path_move_lists_pop(worker->path_lists);
