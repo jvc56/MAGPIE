@@ -2572,27 +2572,20 @@ void assign_estimates_and_sort(EndgameCtxWorker *worker, int move_count,
               compare_small_moves_by_estimated_value);
 }
 
-// Fill worker->move_list with the side-to-move's plays from the incremental
-// move lists followed by the pass, exactly the list a MOVE_RECORD_ALL_SMALL
-// generation would produce. Returns the count including the pass.
-static int fill_playout_list(MoveList *move_list, const SmallMove *plays,
-                             int count) {
-  small_move_list_reset(move_list);
-  for (int move_idx = 0; move_idx < count; move_idx++) {
-    *small_move_list_get_spare_move(move_list) = plays[move_idx];
-    move_list_insert_spare_small_move(move_list);
+// Play play_idx of a playout step's nplays plays: those of move_list, or,
+// when in_place, plays[0] to plays[nplays - 2] and then pass. The incremental
+// lists' plays are read where they lie rather than copied into move_list; in
+// that order, the pass last, they are the list a MOVE_RECORD_ALL_SMALL
+// generation would produce. An empty list's plays may be NULL, so in_place,
+// not plays, says where they are.
+static inline const SmallMove *
+playout_step_play(const MoveList *move_list, bool in_place,
+                  const SmallMove *plays, int nplays, const SmallMove *pass,
+                  int play_idx) {
+  if (!in_place) {
+    return move_list->small_moves[play_idx];
   }
-  move_list_set_spare_small_move_as_pass(move_list);
-  move_list_insert_spare_small_move(move_list);
-  return move_list->count;
-}
-
-static int derive_playout_plays(EndgameCtxWorker *worker,
-                                const MoveGenArgs *args) {
-  const SmallMove *derived = NULL;
-  const int count =
-      path_move_lists_moves_at(worker->path_lists, args, &derived);
-  return fill_playout_list(worker->move_list, derived, count);
+  return play_idx < nplays - 1 ? &plays[play_idx] : pass;
 }
 
 // Sets `best` to the best of `plays` by score, plus `go_out_bonus` for a play
@@ -2782,6 +2775,8 @@ static int32_t negamax_greedy_leaf_playout(EndgameCtxWorker *worker,
   // for the stuck fraction; the first playout step reuses it.
   const SmallMove *leaf_plays = NULL;
   int leaf_play_count = 0;
+  SmallMove pass;
+  small_move_set_as_pass(&pass);
 
   // Recompute opp_stuck_frac from the current position rather than using the
   // parent's value. This ensures position-dependent (not path-dependent)
@@ -2890,6 +2885,11 @@ static int32_t negamax_greedy_leaf_playout(EndgameCtxWorker *worker,
     const Rack *stm_rack_p =
         player_get_rack(game_get_player(worker->game_copy, stm_idx_p));
     int nplays;
+    // Whether the step's plays are the incremental lists' plays, read in
+    // place, and then the pass (see playout_step_play), rather than
+    // worker->move_list.
+    bool in_place = false;
+    const SmallMove *plays = NULL;
     if (stm_rack_p->number_of_letters == 1) {
       // Single-tile fast path: cross-set scan instead of KWG traversal.
       // Its move is still pushed when following the path, without a
@@ -2952,13 +2952,16 @@ static int32_t negamax_greedy_leaf_playout(EndgameCtxWorker *worker,
       // list two moves up (the leaf's own from the grandparent's). Every
       // playout move is pushed below and popped in the unwind.
       if (follow_path && playout_depth == 0 && leaf_plays != NULL) {
-        nplays =
-            fill_playout_list(worker->move_list, leaf_plays, leaf_play_count);
+        in_place = true;
+        plays = leaf_plays;
+        nplays = leaf_play_count + 1;
       } else if (follow_path &&
                  (worker->path_lists->length <= 2 ||
                   path_move_lists_slot_is_current(
                       worker->path_lists, worker->path_lists->length - 2))) {
-        nplays = derive_playout_plays(worker, &pargs);
+        in_place = true;
+        nplays =
+            path_move_lists_moves_at(worker->path_lists, &pargs, &plays) + 1;
       } else {
         generate_moves(&pargs);
         nplays = worker->move_list->count;
@@ -2973,7 +2976,9 @@ static int32_t negamax_greedy_leaf_playout(EndgameCtxWorker *worker,
     }
 
     // Check for consecutive passes ending the game
-    if (nplays == 1 && small_move_is_pass(worker->move_list->small_moves[0]) &&
+    if (nplays == 1 &&
+        small_move_is_pass(playout_step_play(worker->move_list, in_place, plays,
+                                             nplays, &pass, 0)) &&
         game_get_consecutive_scoreless_turns(worker->game_copy) >= 1) {
       break; // would be 6 consecutive zeros
     }
@@ -3016,7 +3021,8 @@ static int32_t negamax_greedy_leaf_playout(EndgameCtxWorker *worker,
 
     int best_adj = INT32_MIN;
     for (int j = 0; j < nplays; j++) {
-      const SmallMove *sm = worker->move_list->small_moves[j];
+      const SmallMove *sm = playout_step_play(worker->move_list, in_place,
+                                              plays, nplays, &pass, j);
       int score = small_move_get_score(sm);
       if (go_out_bonus > 0 && !small_move_is_pass(sm) &&
           small_move_get_tiles_played(sm) == stm_tiles) {
@@ -3040,7 +3046,8 @@ static int32_t negamax_greedy_leaf_playout(EndgameCtxWorker *worker,
       }
     }
 
-    SmallMove best_sm = *(worker->move_list->small_moves[best_idx]);
+    SmallMove best_sm = *playout_step_play(worker->move_list, in_place, plays,
+                                           nplays, &pass, best_idx);
     small_move_to_move(worker->move_list->spare_move, &best_sm,
                        game_get_board(worker->game_copy));
 
