@@ -2420,6 +2420,62 @@ static void test_time_limited_leaf_playout(void) {
   config_destroy(config);
 }
 
+// With the bypass, the stuck opponent's passes spend no ply, so depth 2 here
+// searches two of the solving player's moves, and a time-limited solve can
+// stop after depth 1. Depth 1's leaves have the opponent on turn. When their
+// capped playout's one move was the pass, a leaf was worth the solving
+// player's move less twice the tiles it kept, and depth 1 chose 11C S(P)ORTED,
+// worth 59, which keeps one tile to go out with. Played out in full, the
+// leaves find 12M (D)R(Y), worth 89, as much as any move, which scores turn
+// after turn while the opponent holds the Q (exact values from full solves).
+static void test_stuck_depth_one_leaf_playout(void) {
+  Config *config = config_create_or_die("set -s1 score -s2 score -threads 1");
+  load_and_exec_config_or_die(
+      config, "cgp "
+              "7J6A/5BLERT4G/2ODEA1U6N/2FOG2XU1V3A/W2POUF3I3M/H4V1EONS2ZE/"
+              "E3NEBEK1I2O1/L2G1A1LACEY1AN/pUERILE3I1D1I/SHRI3TINNIEST/"
+              "3P6g1O1R/3T8D1Y/12A2/10CORM1/11WAIT ADEORST/Q 421/345 0 "
+              "-lex CSW21;");
+  Game *game = config_get_game(config);
+  ThreadControl *thread_control = thread_control_create();
+  thread_control_set_status(thread_control, THREAD_CONTROL_STATUS_STARTED);
+  StopAfterDepth stop = {.thread_control = thread_control, .depth = 1};
+
+  EndgameArgs args = {0};
+  args.thread_control = thread_control;
+  args.game = game;
+  args.plies = MAX_SEARCH_DEPTH;
+  // Small enough that every desktop build gets the minimum table size.
+  args.tt_fraction_of_mem = 0.0001;
+  args.initial_small_move_arena_size = DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
+  args.num_threads = 1;
+  args.use_heuristics = true;
+  args.num_top_moves = 1;
+  args.forced_pass_bypass = true;
+  args.incremental_movegen = true;
+  args.per_ply_callback = stop_after_depth_callback;
+  args.per_ply_callback_data = &stop;
+  args.seed = 42;
+
+  EndgameCtx *endgame_ctx = NULL;
+  EndgameResults *results = endgame_results_create();
+  ErrorStack *error_stack = error_stack_create();
+  endgame_solve(&endgame_ctx, &args, results, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  assert(endgame_results_get_depth(results, ENDGAME_RESULT_BEST) == 1);
+
+  const PVLine *pv = endgame_results_get_pvline(results, ENDGAME_RESULT_BEST);
+  assert(pv->num_moves >= 1);
+  // 12M (D)R(Y), by tiny_move code.
+  assert(pv->moves[0].tiny_move == 18875096ULL);
+
+  endgame_ctx_destroy(endgame_ctx);
+  endgame_results_destroy(results);
+  error_stack_destroy(error_stack);
+  thread_control_destroy(thread_control);
+  config_destroy(config);
+}
+
 static void test_endgame_played_move(void) {
   Config *config = config_create_or_die(
       "set -lex CSW24 -threads 1 -ttfraction 0.0001 -eplies 10 -etopk 1");
@@ -2562,6 +2618,7 @@ void test_endgame(void) {
   test_2lex_informed();
   test_endgame_interrupt();
   test_time_limited_leaf_playout();
+  test_stuck_depth_one_leaf_playout();
   test_lent_helper_runs_abdada();
   // Cheap (sub-second) regression of the VIA mover-must-bingo case. The full
   // VIA depth/stress sweeps (viamover / viaopp / viastress) are on-demand only

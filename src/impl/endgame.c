@@ -2714,15 +2714,18 @@ static float worker_opp_stuck_fraction(EndgameCtxWorker *worker,
 // Through iterative-deepening depth 1 (the root sweep and the depth-1 search)
 // a leaf plays one greedy move before the rack adjustment instead of playing
 // out: at those depths it chooses better. From depth 2 the full playout is
-// better.
+// better. With the bypass, a leaf whose opponent can only pass is exempt (see
+// negamax_greedy_leaf_playout).
 static inline bool leaf_playout_is_capped(const EndgameCtxWorker *worker) {
   return worker->current_iterative_deepening_depth <= 1;
 }
 
 // The same position gets a different leaf value capped and uncapped, and with
 // several threads both kinds are in flight at once (helpers start at depth 2
-// or deeper while thread 0 runs depth 1). Capped leaf values live under a
-// salted key so an uncapped leaf never reads one, and vice versa.
+// or deeper while thread 0 runs depth 1). Leaf values found through depth 1
+// live under a salted key so a deeper search never reads one, and vice versa.
+// A position exempt from the cap is exempt wherever depth 1 meets it, so its
+// salted key holds only uncapped values.
 static inline uint64_t leaf_tt_key(const EndgameCtxWorker *worker,
                                    uint64_t node_key) {
   return leaf_playout_is_capped(worker) ? node_key ^ CAPPED_LEAF_KEY_SALT
@@ -2746,20 +2749,6 @@ static int32_t negamax_greedy_leaf_playout(EndgameCtxWorker *worker,
   // along a pushed path (never from the root itself).
   const bool use_path_lists =
       worker->path_lists != NULL && worker->path_lists->length >= 1;
-  // The playout runs to the end of the game. A stuck playout pushes each of
-  // its moves onto the incremental lists' path, on top of up to 2 * plies
-  // negamax and bypass moves, so it also stops where the path is full.
-  int max_playout = EG_MAX_LEAF_PLAYOUT;
-  if (leaf_playout_is_capped(worker)) {
-    max_playout = 1;
-  }
-  if (use_path_lists) {
-    const int path_room =
-        PATH_MOVE_LISTS_MAX_PATH - 1 - worker->path_lists->length;
-    if (path_room < max_playout) {
-      max_playout = path_room;
-    }
-  }
   // The side to move's derived list at the leaf, when it was materialized
   // for the stuck fraction; the first playout step reuses it.
   const SmallMove *leaf_plays = NULL;
@@ -2797,6 +2786,28 @@ static int32_t negamax_greedy_leaf_playout(EndgameCtxWorker *worker,
     opp_stuck_frac =
         worker_opp_stuck_fraction(worker, node_key, leaf_plays, leaf_play_count,
                                   worker_board_occupancy(worker), NULL);
+  }
+
+  // The playout runs to the end of the game. A stuck playout pushes each of
+  // its moves onto the incremental lists' path, on top of up to 2 * plies
+  // negamax and bypass moves, so it also stops where the path is full.
+  int max_playout = EG_MAX_LEAF_PLAYOUT;
+  // Depth 1's leaves have the solving player's opponent on turn, so when the
+  // opponent can only pass, the capped playout's one move is that pass.
+  // Without the bypass, depth 2 plays out from after the pass. With it, the
+  // pass spends no ply, and depth 2 searches two of the solving player's
+  // moves, a far larger search that a time limit can stop short of. Such a
+  // leaf plays out in full instead, as depth 2 does without the bypass.
+  if (leaf_playout_is_capped(worker) &&
+      !(worker->solver->forced_pass_bypass && opp_stuck_frac >= 1.0F)) {
+    max_playout = 1;
+  }
+  if (use_path_lists) {
+    const int path_room =
+        PATH_MOVE_LISTS_MAX_PATH - 1 - worker->path_lists->length;
+    if (path_room < max_playout) {
+      max_playout = path_room;
+    }
   }
 
   // Only a stuck playout derives its lists, so only it extends the path.
