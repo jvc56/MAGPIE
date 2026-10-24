@@ -67,19 +67,35 @@ EXE := .exe
 OBJ_TARGET_PREFIX := $(TARGET_TRIPLE)-
 endif
 
-# Key every object (and its .d fragment) by the flags that change its contents:
-# build flavor, board dim, rack size. Switching any of them selects a different
-# obj subtree instead of relinking objects compiled with mismatched flags -- so
-# no `make clean` is needed between flavors, and switching back reuses the cached
-# objects. `clean` wipes the whole OBJ_ROOT.
+# The compiler, by family and major version (appleclang17, clang18, gcc13). An
+# LTO object holds its compiler's own intermediate code, which another
+# compiler, or an older version of the same one, cannot link.
+CC_VERSION_TEXT := $(shell $(CC) --version 2>/dev/null)
+CC_MAJOR := $(firstword $(subst ., ,$(shell $(CC) -dumpversion 2>/dev/null)))
+ifneq ($(findstring Apple clang,$(CC_VERSION_TEXT)),)
+OBJ_CC := appleclang$(CC_MAJOR)
+else ifneq ($(findstring clang,$(CC_VERSION_TEXT)),)
+OBJ_CC := clang$(CC_MAJOR)
+else ifneq ($(findstring GCC,$(CC_VERSION_TEXT))$(findstring gcc,$(CC_VERSION_TEXT)),)
+OBJ_CC := gcc$(CC_MAJOR)
+else
+OBJ_CC := cc
+endif
+
+# Key every object (and its .d fragment) by what changes its contents: build
+# flavor, compiler, board dim, rack size. Switching any of them selects a
+# different obj subtree instead of relinking objects compiled with mismatched
+# flags or by another compiler -- so no `make clean` is needed between them,
+# and switching back reuses the cached objects. `clean` wipes the whole
+# OBJ_ROOT.
 OBJ_ROOT := obj
 # portable_release additionally keys on its target: the whole point of that
 # flavor is that the target is fixed, so changing it has to recompile rather
 # than relink objects built for the old one.
 ifeq ($(BUILD),portable_release)
-OBJ_DIR := $(OBJ_ROOT)/$(OBJ_TARGET_PREFIX)$(BUILD)-$(PORTABLE_MARCH)-b$(BOARD_DIM)-r$(RACK_SIZE)
+OBJ_DIR := $(OBJ_ROOT)/$(OBJ_TARGET_PREFIX)$(BUILD)-$(PORTABLE_MARCH)-$(OBJ_CC)-b$(BOARD_DIM)-r$(RACK_SIZE)
 else
-OBJ_DIR := $(OBJ_ROOT)/$(OBJ_TARGET_PREFIX)$(BUILD)-b$(BOARD_DIM)-r$(RACK_SIZE)
+OBJ_DIR := $(OBJ_ROOT)/$(OBJ_TARGET_PREFIX)$(BUILD)-$(OBJ_CC)-b$(BOARD_DIM)-r$(RACK_SIZE)
 endif
 
 # Profile-guided optimization data. The default lives below OBJ_ROOT so it is
