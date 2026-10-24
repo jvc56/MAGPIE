@@ -69,17 +69,20 @@ endif
 
 # The compiler, by family and major version (appleclang17, clang18, gcc13). An
 # LTO object holds its compiler's own intermediate code, which another
-# compiler, or an older version of the same one, cannot link.
+# compiler, or an older version of the same one, cannot link. GCC does not
+# always name itself: Ubuntu's cc says only "cc (Ubuntu 13.1.0-...) 13.1.0"
+# above the Free Software Foundation's copyright. A compiler of no known
+# family still keys on its version.
 CC_VERSION_TEXT := $(shell $(CC) --version 2>/dev/null)
 CC_MAJOR := $(firstword $(subst ., ,$(shell $(CC) -dumpversion 2>/dev/null)))
 ifneq ($(findstring Apple clang,$(CC_VERSION_TEXT)),)
 OBJ_CC := appleclang$(CC_MAJOR)
 else ifneq ($(findstring clang,$(CC_VERSION_TEXT)),)
 OBJ_CC := clang$(CC_MAJOR)
-else ifneq ($(findstring GCC,$(CC_VERSION_TEXT))$(findstring gcc,$(CC_VERSION_TEXT)),)
+else ifneq ($(findstring GCC,$(CC_VERSION_TEXT))$(findstring gcc,$(CC_VERSION_TEXT))$(findstring Free Software Foundation,$(CC_VERSION_TEXT)),)
 OBJ_CC := gcc$(CC_MAJOR)
 else
-OBJ_CC := cc
+OBJ_CC := cc$(CC_MAJOR)
 endif
 
 # Key every object (and its .d fragment) by what changes its contents: build
