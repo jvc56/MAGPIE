@@ -403,6 +403,10 @@ struct EndgameCtxWorker {
   // negamax_greedy_leaf_playout).
   uint64_t playout_tail_keys[EG_MAX_LEAF_PLAYOUT + 1];
   int32_t playout_tail_spreads[EG_MAX_LEAF_PLAYOUT + 1];
+  // The line of the depth in progress whose root move beat every root move
+  // searched before it at that depth, or no moves when none has (see
+  // adopt_unfinished_depth_best).
+  PVLine unfinished_best_pv;
 
   // Per-thread node counter for the live-progress getter. Plain uint64
   // (no atomics on the writer side); flushed periodically to the
@@ -3973,6 +3977,13 @@ int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
   // (called with k == multi_pv_k) never writes past this array.
   int32_t topk_values[MAX_ENDGAME_DISPLAY_PVS];
   int topk_n = 0;
+  // See adopt_unfinished_depth_best. Its first root move must be the last
+  // completed depth's best, which an actual move pinned to the front is not,
+  // and the first-win and initial-window windows answer other questions.
+  const bool track_unfinished_best =
+      is_root && !multi_pv && worker->solver->actual_move == NULL &&
+      !worker->solver->first_win_optim && !worker->solver->initial_window_optim;
+  bool root_move_completed = false;
 
   // ABDADA: track deferred moves for second phase
   // Use stack allocation when possible to avoid malloc overhead
@@ -4200,12 +4211,20 @@ int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
       // small_move_arena.
       small_move =
           (SmallMove *)(worker->small_move_arena->memory + element_offset);
+      // alpha is at least every earlier root move's value, so a later root
+      // move that comes back above it is better than all of them.
+      const bool beats_earlier_roots =
+          track_unfinished_best && root_move_completed && -value > alpha;
+      root_move_completed = true;
       if (-value > best_value) {
         best_value = -value;
         best_tiny_move = small_move->tiny_move;
         pvline_update(pv, &child_pv, small_move,
                       best_value - worker->solver->initial_spread);
         pv->negamax_depth = child_pv.negamax_depth + 1;
+        if (beats_earlier_roots) {
+          worker->unfinished_best_pv = *pv;
+        }
         // Live PV publish (root only): a polling reader sees the engine's
         // evolving best line refine through each depth as root moves get
         // evaluated. Seqlock pattern: bump seq odd to signal "writing", write
@@ -4568,6 +4587,22 @@ static void force_actual_move_to_front(const EndgameCtxWorker *worker,
   }
 }
 
+// Under a deadline, most of a solve's time goes to the depth the deadline cuts
+// short. That depth searches the last completed depth's best root move first,
+// so a root move that then comes back above alpha is better at the deeper
+// depth, and the solve returns it with its line and value. The reported depth
+// stays the last completed one: callers read it to tell whether the value is
+// exact, and this one comes from a depth not every root move finished.
+static void adopt_unfinished_depth_best(const EndgameCtxWorker *worker) {
+  if (worker->unfinished_best_pv.num_moves == 0 ||
+      worker->completed_depth < 1) {
+    return;
+  }
+  endgame_results_replace_best_pvline(
+      worker->solver->results, &worker->unfinished_best_pv,
+      worker->unfinished_best_pv.score, worker->completed_depth);
+}
+
 void iterative_deepening(EndgameCtxWorker *worker, int plies) {
 
   int32_t alpha = -LARGE_VALUE;
@@ -4686,6 +4721,7 @@ void iterative_deepening(EndgameCtxWorker *worker, int plies) {
     }
 
     worker->current_iterative_deepening_depth = ply;
+    worker->unfinished_best_pv.num_moves = 0;
     // Update root move progress counters (main worker, ordinal 0, only)
     if (worker->ordinal == 0) {
       atomic_store(&worker->solver->current_depth, ply);
@@ -4765,9 +4801,10 @@ void iterative_deepening(EndgameCtxWorker *worker, int plies) {
                            true, false, initial_opp_stuck_frac);
     }
 
-    // If search was interrupted, discard this depth and use last complete depth
+    // An interrupted depth stands only through a root move it proved better.
     bool interrupted = !search_valid || val == ABDADA_INTERRUPTED;
     if (interrupted) {
+      adopt_unfinished_depth_best(worker);
       break;
     }
 

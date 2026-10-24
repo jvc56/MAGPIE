@@ -2521,6 +2521,115 @@ static void test_stuck_playout_tails(void) {
   config_destroy(config);
 }
 
+typedef struct UnfinishedDepth {
+  ThreadControl *thread_control;
+  // The depth to cut short.
+  int depth;
+  // The best root move of the depth before it.
+  uint64_t completed_best;
+  // The value of the first root move searched at `depth`, then of the first
+  // root move to beat it, and how many root moves completed there.
+  int32_t first_value;
+  int completed;
+  uint64_t overtaker;
+  int32_t overtaker_value;
+} UnfinishedDepth;
+
+static void unfinished_depth_ply_callback(int depth, int32_t value,
+                                          const PVLine *pv_line,
+                                          const Game *game,
+                                          const PVLine *ranked_pvs,
+                                          int num_ranked_pvs, void *user_data) {
+  (void)value;
+  (void)game;
+  (void)ranked_pvs;
+  (void)num_ranked_pvs;
+  UnfinishedDepth *unfinished = (UnfinishedDepth *)user_data;
+  if (depth == unfinished->depth - 1) {
+    unfinished->completed_best = pv_line->moves[0].tiny_move;
+  }
+}
+
+// Interrupts the solve once a root move of unfinished->depth beats the first
+// root move searched there.
+static void unfinished_depth_root_callback(int depth, int root_index,
+                                           const SmallMove *move, int32_t value,
+                                           void *user_data) {
+  (void)root_index;
+  UnfinishedDepth *unfinished = (UnfinishedDepth *)user_data;
+  if (depth != unfinished->depth || unfinished->overtaker != 0) {
+    return;
+  }
+  if (unfinished->completed == 0) {
+    unfinished->first_value = value;
+  } else if (value > unfinished->first_value) {
+    unfinished->overtaker = move->tiny_move;
+    unfinished->overtaker_value = value;
+    thread_control_set_status(unfinished->thread_control,
+                              THREAD_CONTROL_STATUS_USER_INTERRUPT);
+  }
+  unfinished->completed++;
+}
+
+// A depth cut short searches the last completed depth's best root move first.
+// Here depth 1's best is worth -43 at depth 2, and the third root move
+// searched there is worth 10. A solve interrupted right after that move
+// returns it, with its value, and still reports depth 1, the depth it
+// completed.
+static void test_unfinished_depth_best(void) {
+  Config *config = config_create_or_die("set -s1 score -s2 score -threads 1");
+  load_and_exec_config_or_die(
+      config, "cgp "
+              "1W1VOCAB7/1OBI2GAWK5/SPAR11/E1NEP10/I1D1U6L2S/Z1I1LOAF3E2E/"
+              "I1E3MAA2N2E/N1SHOVING2I2T/3Y7e2H/3OM2T3N2E/3IO1JUsTICERS/"
+              "3DE2F3Y3/4RUNT7/7E7/1AERODART6 EILLQRT/ADGOUX 320/456 0 "
+              "-lex CSW21;");
+  Game *game = config_get_game(config);
+  ThreadControl *thread_control = thread_control_create();
+  thread_control_set_status(thread_control, THREAD_CONTROL_STATUS_STARTED);
+  UnfinishedDepth unfinished = {.thread_control = thread_control, .depth = 2};
+
+  EndgameArgs args = {0};
+  args.thread_control = thread_control;
+  args.game = game;
+  args.plies = MAX_SEARCH_DEPTH;
+  // Small enough that every desktop build gets the minimum table size.
+  args.tt_fraction_of_mem = 0.0001;
+  args.initial_small_move_arena_size = DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
+  args.num_threads = 1;
+  args.use_heuristics = true;
+  args.num_top_moves = 1;
+  args.forced_pass_bypass = true;
+  args.incremental_movegen = true;
+  args.per_ply_callback = unfinished_depth_ply_callback;
+  args.per_ply_callback_data = &unfinished;
+  args.per_root_move_callback = unfinished_depth_root_callback;
+  args.per_root_move_callback_data = &unfinished;
+  args.seed = 42;
+
+  EndgameCtx *endgame_ctx = NULL;
+  EndgameResults *results = endgame_results_create();
+  ErrorStack *error_stack = error_stack_create();
+  endgame_solve(&endgame_ctx, &args, results, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  assert(unfinished.overtaker != 0);
+  assert(unfinished.completed == 3);
+  assert(unfinished.first_value == -43);
+  assert(unfinished.overtaker_value == 10);
+  assert(unfinished.overtaker != unfinished.completed_best);
+  assert(endgame_results_get_depth(results, ENDGAME_RESULT_BEST) == 1);
+  const PVLine *pv = endgame_results_get_pvline(results, ENDGAME_RESULT_BEST);
+  assert(pv->num_moves >= 1);
+  assert(pv->moves[0].tiny_move == unfinished.overtaker);
+  assert(endgame_results_get_value(results, ENDGAME_RESULT_BEST) == 10);
+
+  endgame_ctx_destroy(endgame_ctx);
+  endgame_results_destroy(results);
+  error_stack_destroy(error_stack);
+  thread_control_destroy(thread_control);
+  config_destroy(config);
+}
+
 static void test_endgame_played_move(void) {
   Config *config = config_create_or_die(
       "set -lex CSW24 -threads 1 -ttfraction 0.0001 -eplies 10 -etopk 1");
@@ -2665,6 +2774,7 @@ void test_endgame(void) {
   test_time_limited_leaf_playout();
   test_stuck_depth_one_leaf_playout();
   test_stuck_playout_tails();
+  test_unfinished_depth_best();
   test_lent_helper_runs_abdada();
   // Cheap (sub-second) regression of the VIA mover-must-bingo case. The full
   // VIA depth/stress sweeps (viamover / viaopp / viastress) are on-demand only
