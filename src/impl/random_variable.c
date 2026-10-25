@@ -410,6 +410,10 @@ typedef struct SimmerWorker {
   Game *game;
   MoveList *move_list;
   XoshiroPRNG *prng;
+  // This worker's index (0..num_threads-1), for SimArgs.rollout_move_fn, and
+  // the move it last chose.
+  int worker_index;
+  Move rollout_move;
 } SimmerWorker;
 
 typedef struct Simmer {
@@ -441,6 +445,9 @@ typedef struct Simmer {
   bool use_margin_forecast;
   // SimArgs.bag_cycle.
   bool bag_cycle;
+  // SimArgs.rollout_move_fn and its context.
+  sim_rollout_move_fn rollout_move_fn;
+  void *rollout_move_context;
   ThreadControl *thread_control;
   SimResults *sim_results;
   // The best moves the current simulation's playouts found, by rack, shared
@@ -490,10 +497,14 @@ void simmer_worker_destroy(SimmerWorker *simmer_worker) {
 // One rollout of simmed_play from seed's shuffled bag, rotated left by
 // rotation * RACK_SIZE letters (see bag_rotate) before the opponent's rack is
 // drawn. When record is non-NULL, the rollout's contributions to its
-// SimmedPlay are written there instead of applied. Returns its utility.
-static double sim_rollout(const Simmer *simmer, SimmerWorker *simmer_worker,
-                          SimmedPlay *simmed_play, const uint64_t seed,
-                          const int rotation, SimmedPlaySampleRecord *record) {
+// SimmedPlay are written there instead of applied. With rollout_hook, each
+// ply is first offered to SimArgs.rollout_move_fn (the hooked entry points
+// pass a constant true; the plain ones a constant false, so their loop has no
+// extra branch). Returns its utility.
+static inline __attribute__((always_inline)) double
+sim_rollout(const Simmer *simmer, SimmerWorker *simmer_worker,
+            SimmedPlay *simmed_play, const uint64_t seed, const int rotation,
+            SimmedPlaySampleRecord *record, const bool rollout_hook) {
   SimResults *sim_results = simmer->sim_results;
   Game *game = simmer_worker->game;
   MoveList *move_list = simmer_worker->move_list;
@@ -566,8 +577,16 @@ static double sim_rollout(const Simmer *simmer, SimmerWorker *simmer_worker,
       break;
     }
 
-    const Move *best_play = get_top_equity_move_with_carry(
-        game, move_list, simmer->best_move_carry);
+    const Move *best_play;
+    if (rollout_hook &&
+        simmer->rollout_move_fn(simmer->rollout_move_context,
+                                simmer_worker->worker_index, game,
+                                &simmer_worker->rollout_move)) {
+      best_play = &simmer_worker->rollout_move;
+    } else {
+      best_play = get_top_equity_move_with_carry(game, move_list,
+                                                 simmer->best_move_carry);
+    }
     rack_copy(&spare_rack, player_get_rack(player_on_turn));
 
     // On the final ply the resulting cross-sets are never read (no further move
@@ -672,7 +691,7 @@ static double sim_cycled_rollouts(const Simmer *simmer,
   for (int rotation = 0; rotation < rotations; rotation++) {
     simmed_play_sample_record_clear(&rollout);
     utility_sum += sim_rollout(simmer, simmer_worker, simmed_play, seed,
-                               rotation, &rollout);
+                               rotation, &rollout, false);
     if (rotation == 0) {
       *out = rollout;
     }
@@ -695,12 +714,11 @@ static double sim_cycled_rollouts(const Simmer *simmer,
 
 // When record is non-NULL, the sample's contributions to its SimmedPlay are
 // written there instead of applied; rv_sim_apply_record applies them.
-static double rv_sim_sample_impl(RandomVariables *rvs,
-                                 const uint64_t play_index,
-                                 const uint64_t reserved_seed,
-                                 const int thread_index,
-                                 const uint64_t sample_count,
-                                 SimmedPlaySampleRecord *record) {
+static inline __attribute__((always_inline)) double
+rv_sim_sample_impl(RandomVariables *rvs, const uint64_t play_index,
+                   const uint64_t reserved_seed, const int thread_index,
+                   const uint64_t sample_count, SimmedPlaySampleRecord *record,
+                   const bool rollout_hook) {
   Simmer *simmer = (Simmer *)rvs->data;
   SimResults *sim_results = simmer->sim_results;
   SimmedPlay *simmed_play =
@@ -728,7 +746,8 @@ static double rv_sim_sample_impl(RandomVariables *rvs,
                             : simmed_play_get_seed(simmed_play);
   double utility;
   if (!simmer->bag_cycle) {
-    utility = sim_rollout(simmer, simmer_worker, simmed_play, seed, 0, record);
+    utility = sim_rollout(simmer, simmer_worker, simmed_play, seed, 0, record,
+                          rollout_hook);
     // A recorded sample is counted when its record is applied.
     if (!record) {
       sim_results_increment_iteration_count(sim_results);
@@ -751,7 +770,7 @@ double rv_sim_sample(RandomVariables *rvs, const uint64_t play_index,
                      const uint64_t sample_count,
                      BAILogger __attribute__((unused)) * bai_logger) {
   return rv_sim_sample_impl(rvs, play_index, reserved_seed, thread_index,
-                            sample_count, NULL);
+                            sample_count, NULL, false);
 }
 
 static double
@@ -761,7 +780,47 @@ rv_sim_sample_into_record(RandomVariables *rvs, const uint64_t play_index,
                           BAILogger __attribute__((unused)) * bai_logger,
                           void *record) {
   return rv_sim_sample_impl(rvs, play_index, reserved_seed, thread_index,
-                            sample_count, (SimmedPlaySampleRecord *)record);
+                            sample_count, (SimmedPlaySampleRecord *)record,
+                            false);
+}
+
+// Plain rollouts that offer each ply to SimArgs.rollout_move_fn first.
+static double rv_sim_hooked_sample(RandomVariables *rvs,
+                                   const uint64_t play_index,
+                                   const uint64_t reserved_seed,
+                                   const int thread_index,
+                                   const uint64_t sample_count,
+                                   BAILogger __attribute__((unused)) *
+                                       bai_logger) {
+  return rv_sim_sample_impl(rvs, play_index, reserved_seed, thread_index,
+                            sample_count, NULL, true);
+}
+
+static double rv_sim_hooked_sample_into_record(
+    RandomVariables *rvs, const uint64_t play_index,
+    const uint64_t reserved_seed, const int thread_index,
+    const uint64_t sample_count, BAILogger __attribute__((unused)) * bai_logger,
+    void *record) {
+  return rv_sim_sample_impl(rvs, play_index, reserved_seed, thread_index,
+                            sample_count, (SimmedPlaySampleRecord *)record,
+                            true);
+}
+
+// Takes SimArgs.rollout_move_fn: hooked sims use the hooked entry points.
+static void simmer_set_rollout_move(RandomVariables *rvs, Simmer *simmer,
+                                    const SimArgs *sim_args) {
+  if (sim_args->rollout_move_fn != NULL && sim_args->bag_cycle) {
+    log_fatal("a rollout move chooser does not support bag cycling");
+  }
+  simmer->rollout_move_fn = sim_args->rollout_move_fn;
+  simmer->rollout_move_context = sim_args->rollout_move_context;
+  if (sim_args->rollout_move_fn != NULL) {
+    rvs->sample_func = rv_sim_hooked_sample;
+    rvs->sample_into_record_func = rv_sim_hooked_sample_into_record;
+  } else {
+    rvs->sample_func = rv_sim_sample;
+    rvs->sample_into_record_func = rv_sim_sample_into_record;
+  }
 }
 
 static void rv_sim_apply_record(const RandomVariables *rvs,
@@ -874,6 +933,7 @@ RandomVariables *rv_sim_create(RandomVariables *rvs, const SimArgs *sim_args,
   for (int thread_index = 0; thread_index < simmer->num_threads;
        thread_index++) {
     simmer->workers[thread_index] = simmer_create_worker(sim_args);
+    simmer->workers[thread_index]->worker_index = thread_index;
   }
   simmer->best_move_carry =
       best_move_carry_create(SIM_BEST_MOVE_CARRY_BUCKETS, true);
@@ -890,6 +950,7 @@ RandomVariables *rv_sim_create(RandomVariables *rvs, const SimArgs *sim_args,
   simmer->utility_spread_scale = sim_args->utility_spread_scale;
   simmer->use_margin_forecast = sim_args->use_margin_forecast;
   simmer->bag_cycle = sim_args->bag_cycle;
+  simmer_set_rollout_move(rvs, simmer, sim_args);
 
   simmer->thread_control = thread_control;
 
@@ -948,6 +1009,7 @@ void rv_sim_reset(RandomVariables *rvs, const SimArgs *sim_args) {
   simmer->utility_spread_scale = sim_args->utility_spread_scale;
   simmer->use_margin_forecast = sim_args->use_margin_forecast;
   simmer->bag_cycle = sim_args->bag_cycle;
+  simmer_set_rollout_move(rvs, simmer, sim_args);
 
   if (!rv_sim_can_resume(sim_args, simmer->sim_results)) {
     sim_results_reset(sim_args->move_list, simmer->sim_results,

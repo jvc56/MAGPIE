@@ -110,6 +110,22 @@ typedef struct PegCheckpoint PegCheckpoint;
 PegCheckpoint *peg_checkpoint_create(void);
 void peg_checkpoint_destroy(PegCheckpoint *checkpoint);
 
+// Optional 1PEG move chooser for the nested lookahead (see
+// PegArgs.nested_peg1_chooser). Writes the on-turn player's move for `game`,
+// a fully resolved scenario with exactly one tile in the bag, and returns true;
+// returns false to fall back to the staged inner peg. It must decide from the
+// on-turn player's information only: its own rack and public state, never the
+// opponent's rack or the bag. worker_idx identifies the calling PEG worker
+// (distinct per concurrent caller, below num_threads + 1).
+typedef bool (*PegPeg1Chooser)(const Game *game, int worker_idx, void *ctx,
+                               Move *move);
+
+// Optional 2PEG move chooser for the nested lookahead (see
+// PegArgs.nested_peg2_chooser): the same contract as PegPeg1Chooser, for a
+// resolved scenario with exactly two tiles in the bag.
+typedef bool (*PegPeg2Chooser)(const Game *game, int worker_idx, void *ctx,
+                               Move *move);
+
 typedef struct PegArgs {
   // Required: PEG position to analyze. Must have bag size in [PEG_MIN_BAG,
   // PEG_MAX_BAG], except bag sizes up to RACK_SIZE are also accepted when
@@ -223,6 +239,19 @@ typedef struct PegArgs {
   int nested_n_strides_by_bag; // length of nested_strides_by_bag
   int nested_emptier_ply_cap;
   int nested_max_depth;
+  // Optional drop-in for the nested level of a 1PEG: when set, a nested node
+  // with one tile in the bag takes the on-turn player's move from this chooser
+  // instead of running the staged inner peg, plays it in the resolved
+  // scenario, and values the result as an emptier leaf at the fidelity of the
+  // inner peg's last stage. NULL = off (default).
+  PegPeg1Chooser nested_peg1_chooser;
+  void *nested_peg1_chooser_ctx;
+  // The same drop-in for nested nodes with two tiles in the bag (the opponent
+  // of a 3PEG candidate facing a 2PEG, ...). Its move is played and valued as
+  // a leaf at the inner peg's last-stage fidelity; a one-tile node below then
+  // takes nested_peg1_chooser when nested_max_depth leaves room. NULL = off.
+  PegPeg2Chooser nested_peg2_chooser;
+  void *nested_peg2_chooser_ctx;
 
   // EndgameArgs.disable_best_reply_shortcuts for every endgame solve the PEG
   // runs. False (a zero-initialized PegArgs) leaves the shortcuts on.
@@ -307,7 +336,9 @@ static inline void peg_args_fill(
     const int nested_n_cand_caps, const int nested_stride,
     const int *nested_strides_by_bag, const int nested_n_strides_by_bag,
     const int nested_emptier_ply_cap, const int nested_max_depth,
-    const bool disable_best_reply_shortcuts,
+    const bool disable_best_reply_shortcuts, PegPeg1Chooser nested_peg1_chooser,
+    void *nested_peg1_chooser_ctx, PegPeg2Chooser nested_peg2_chooser,
+    void *nested_peg2_chooser_ctx,
     const MachineLetter *eval_bag_order, const int eval_bag_order_len,
     const Move *const *only_moves, const int n_only_moves,
     const Move *const *protect_moves, const int n_protect_moves,
@@ -337,6 +368,10 @@ static inline void peg_args_fill(
   peg_args->nested_emptier_ply_cap = nested_emptier_ply_cap;
   peg_args->nested_max_depth = nested_max_depth;
   peg_args->disable_best_reply_shortcuts = disable_best_reply_shortcuts;
+  peg_args->nested_peg1_chooser = nested_peg1_chooser;
+  peg_args->nested_peg1_chooser_ctx = nested_peg1_chooser_ctx;
+  peg_args->nested_peg2_chooser = nested_peg2_chooser;
+  peg_args->nested_peg2_chooser_ctx = nested_peg2_chooser_ctx;
   peg_args->eval_bag_order = eval_bag_order;
   peg_args->eval_bag_order_len = eval_bag_order_len;
   peg_args->only_moves = only_moves;

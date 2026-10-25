@@ -7,12 +7,22 @@
 #include "../ent/game_history.h"
 #include "../ent/inference_args.h"
 #include "../ent/inference_results.h"
+#include "../ent/move.h"
 #include "../ent/rack.h"
 #include "../ent/sim_results.h"
 #include "../ent/thread_control.h"
 #include <math.h>
 #include <stdbool.h>
 #include <stdint.h>
+
+// A rollout move chooser: for the rollout position game (whose on-turn player
+// is to move, with every rack and the bag of this iteration's world), either
+// writes the move to play to move and returns true, or returns false to play
+// the top static move. It must decide from the on-turn player's information
+// only. worker_index is the sim worker (0..num_threads-1); calls with
+// different indices may run at once.
+typedef bool (*sim_rollout_move_fn)(void *context, int worker_index,
+                                    const Game *game, Move *move);
 
 typedef struct SimArgs {
   int num_plies;
@@ -65,6 +75,11 @@ typedef struct SimArgs {
   // (see sim_args_set_bag_cycle_bai_options). sim_args_fill clears it; the
   // config turns it on by default.
   bool bag_cycle;
+  // When set, every rollout ply after the candidate first offers
+  // rollout_move_fn the position; see sim_rollout_move_fn. Not with
+  // bag_cycle. sim_args_fill clears it.
+  sim_rollout_move_fn rollout_move_fn;
+  void *rollout_move_context;
 } SimArgs;
 
 // Unlike endgame_args_fill and peg_args_fill, this does NOT take a parameter
@@ -131,6 +146,8 @@ sim_args_fill(const int num_plies, const MoveList *move_list,
   sim_args->utility_spread_scale = utility_spread_scale;
   sim_args->use_margin_forecast = use_margin_forecast;
   sim_args->bag_cycle = false;
+  sim_args->rollout_move_fn = NULL;
+  sim_args->rollout_move_context = NULL;
   // Start fresh, not resuming a prior SimResults. Only the TUI's analysis-
   // resume path sets this true; every other caller fills SimArgs through
   // here, so leaving it uninitialized let stack garbage spuriously trigger

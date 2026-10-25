@@ -4771,6 +4771,8 @@ void config_fill_peg_args(Config *config, PegArgs *peg_args) {
       /*nested_n_strides_by_bag=*/0, /*nested_emptier_ply_cap=*/0,
       PEG_NESTED_DEFAULT_DEPTH,
       /*disable_best_reply_shortcuts=*/!config->endgame_best_reply_shortcuts,
+      /*nested_peg1_chooser=*/NULL, /*nested_peg1_chooser_ctx=*/NULL,
+      /*nested_peg2_chooser=*/NULL, /*nested_peg2_chooser_ctx=*/NULL,
       /*eval_bag_order=*/NULL,
       /*eval_bag_order_len=*/0, /*only_moves=*/NULL, /*n_only_moves=*/0,
       /*protect_moves=*/NULL, /*n_protect_moves=*/0,

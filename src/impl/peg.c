@@ -180,6 +180,10 @@ typedef struct PegWorker {
   int nested_n_strides_by_bag;
   int nested_emptier_ply_cap;
   int nested_max_depth;
+  PegPeg1Chooser nested_peg1_chooser; // NULL = staged inner peg at 1-tile nodes
+  void *nested_peg1_chooser_ctx;
+  PegPeg2Chooser nested_peg2_chooser; // NULL = staged inner peg at 2-tile nodes
+  void *nested_peg2_chooser_ctx;
   // Free-list of reusable scratch frames (see PegNestFrame). nest_free holds
   // released frames; nest_all chains every allocated frame for teardown.
   PegNestFrame *nest_free;
@@ -1688,6 +1692,47 @@ static int32_t peg_inner_leaf(PegWorker *worker, Game *game, int stage_fidelity,
                            deadline_ns);
 }
 
+// Inner-peg stage count: the schedule length, capped at outer_fidelity - 1 so
+// early outer stages run a single cheap inner stage.
+static int peg_inner_stage_count(const PegWorker *worker, int outer_fidelity) {
+  int n_stages = worker->nested_n_cand_caps > 0 ? worker->nested_n_cand_caps : 1;
+  const int fidelity_stage_cap = outer_fidelity - 1;
+  if (fidelity_stage_cap >= 1 && fidelity_stage_cap < n_stages) {
+    n_stages = fidelity_stage_cap;
+  }
+  return n_stages < 1 ? 1 : n_stages;
+}
+
+// Chooser drop-in for the staged inner peg (1PEG or 2PEG node): the chooser
+// picks the on-turn player's move from its own information, the move is played
+// in this resolved scenario, and the result is scored as a leaf at the fidelity
+// of the inner peg's last stage. Returns false when the chooser declines.
+static bool peg_inner_chooser_value(PegWorker *worker, PegPeg1Chooser chooser,
+                                    void *chooser_ctx, Game *game, int depth,
+                                    int outer_fidelity, int64_t deadline_ns,
+                                    int32_t *value) {
+  const int on_turn = game_get_player_on_turn_index(game);
+  Move choice;
+  if (!chooser(game, worker->nest_worker_idx, chooser_ctx, &choice)) {
+    return false;
+  }
+  PegNestFrame *frame = peg_nest_acquire(worker);
+  if (frame->game == NULL) {
+    frame->game = game_duplicate(game);
+  } else {
+    game_copy(frame->game, game);
+  }
+  play_move(&choice, frame->game, NULL);
+  const int stage_fidelity =
+      1 + peg_inner_stage_count(worker, outer_fidelity);
+  const int32_t child = peg_inner_leaf(worker, frame->game, stage_fidelity,
+                                       depth, outer_fidelity, deadline_ns);
+  const int next = game_get_player_on_turn_index(frame->game);
+  peg_nest_release(worker, frame);
+  *value = next == on_turn ? child : -child;
+  return true;
+}
+
 // Staged cascade over the on-turn player's candidates: seed the field by static
 // equity to the schedule's first cap, then run one stage per schedule entry at
 // rising endgame fidelity (2-ply, 3-ply, ...), narrowing to each entry's keep
@@ -1695,6 +1740,23 @@ static int32_t peg_inner_leaf(PegWorker *worker, Game *game, int stage_fidelity,
 static int32_t peg_inner_cascade(PegWorker *worker, Game *game, int depth,
                                  int outer_fidelity, int64_t deadline_ns) {
   const int on_turn = game_get_player_on_turn_index(game);
+  const int bag_tiles = bag_get_letters(game_get_bag(game));
+  PegPeg1Chooser chooser = NULL;
+  void *chooser_ctx = NULL;
+  if (bag_tiles == 1) {
+    chooser = worker->nested_peg1_chooser;
+    chooser_ctx = worker->nested_peg1_chooser_ctx;
+  } else if (bag_tiles == 2) {
+    chooser = worker->nested_peg2_chooser;
+    chooser_ctx = worker->nested_peg2_chooser_ctx;
+  }
+  if (chooser != NULL) {
+    int32_t value;
+    if (peg_inner_chooser_value(worker, chooser, chooser_ctx, game, depth,
+                                outer_fidelity, deadline_ns, &value)) {
+      return value;
+    }
+  }
   // The candidate list is read across the stage loop (which submits + waits per
   // candidate), so it is held on its own frame for the cascade's lifetime.
   PegNestFrame *cframe = peg_nest_acquire(worker);
@@ -1758,14 +1820,7 @@ static int32_t peg_inner_cascade(PegWorker *worker, Game *game, int depth,
   // outer stages (2-ply) thus run a single cheap inner stage; the inner peg
   // only deepens as the outer cascade does, keeping early outer stages
   // affordable.
-  int n_stages = n_sched > 0 ? n_sched : 1;
-  const int fidelity_stage_cap = outer_fidelity - 1;
-  if (fidelity_stage_cap >= 1 && fidelity_stage_cap < n_stages) {
-    n_stages = fidelity_stage_cap;
-  }
-  if (n_stages < 1) {
-    n_stages = 1;
-  }
+  const int n_stages = peg_inner_stage_count(worker, outer_fidelity);
   for (int stage_idx = 0; stage_idx < n_stages; stage_idx++) {
     if (stage_idx > 0 && peg_nested_should_stop(worker, deadline_ns)) {
       break;
@@ -3277,6 +3332,10 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
     workers[worker_idx].nested_n_strides_by_bag = args->nested_n_strides_by_bag;
     workers[worker_idx].nested_emptier_ply_cap = args->nested_emptier_ply_cap;
     workers[worker_idx].nested_max_depth = args->nested_max_depth;
+    workers[worker_idx].nested_peg1_chooser = args->nested_peg1_chooser;
+    workers[worker_idx].nested_peg1_chooser_ctx = args->nested_peg1_chooser_ctx;
+    workers[worker_idx].nested_peg2_chooser = args->nested_peg2_chooser;
+    workers[worker_idx].nested_peg2_chooser_ctx = args->nested_peg2_chooser_ctx;
     workers[worker_idx].nest_free = NULL;
     workers[worker_idx].nest_all = NULL;
   }
