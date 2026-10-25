@@ -83,40 +83,32 @@ static inline bool anchor_is_better(const Anchor *anchor_a,
   return anchor_a->highest_possible_equity > anchor_b->highest_possible_equity;
 }
 
-static inline void swap_anchors(Anchor *a, Anchor *b) {
-  Anchor temp;
-  memcpy(&temp, a, sizeof(Anchor));
-  memcpy(a, b, sizeof(Anchor));
-  memcpy(b, &temp, sizeof(Anchor));
-}
-
+// Sifts the anchor at parent_node down to its place. The anchors it passes
+// move up one level each into the hole it leaves, and it is written once, at
+// the end, instead of being swapped at every level, as in the original
+// heapsort (J. W. J. Williams, "Algorithm 232: Heapsort", CACM 7, 1964). A
+// child moves up only when strictly better than the sifted anchor, and the
+// right child is preferred only when strictly better than the left, so ties
+// settle as with swaps.
 static inline void anchor_heapify_down(AnchorHeap *heap, int parent_node) {
-  int left = parent_node * 2 + 1;
-  int right = parent_node * 2 + 2;
-  int min;
-
-  if (left >= heap->count || left < 0) {
-    left = -1;
+  const Anchor sifted = heap->anchors[parent_node];
+  int hole = parent_node;
+  while (true) {
+    int child = hole * 2 + 1;
+    if (child >= heap->count) {
+      break;
+    }
+    if (child + 1 < heap->count &&
+        anchor_is_better(&heap->anchors[child + 1], &heap->anchors[child])) {
+      child++;
+    }
+    if (!anchor_is_better(&heap->anchors[child], &sifted)) {
+      break;
+    }
+    heap->anchors[hole] = heap->anchors[child];
+    hole = child;
   }
-  if (right >= heap->count || right < 0) {
-    right = -1;
-  }
-
-  if (left != -1 &&
-      anchor_is_better(&heap->anchors[left], &heap->anchors[parent_node])) {
-    min = left;
-  } else {
-    min = parent_node;
-  }
-  if (right != -1 &&
-      anchor_is_better(&heap->anchors[right], &heap->anchors[min])) {
-    min = right;
-  }
-
-  if (min != parent_node) {
-    swap_anchors(&heap->anchors[min], &heap->anchors[parent_node]);
-    anchor_heapify_down(heap, min);
-  }
+  heap->anchors[hole] = sifted;
 }
 
 // O(n)

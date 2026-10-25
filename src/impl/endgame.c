@@ -1404,7 +1404,6 @@ static EndgameCtxWorker *endgame_ctx_create_worker(EndgameCtx *solver,
   solver_worker->ordinal = ordinal;
   solver_worker->game_copy = game_duplicate(template_game);
   game_set_endgame_solving_mode(solver_worker->game_copy);
-  game_set_backup_mode(solver_worker->game_copy, BACKUP_MODE_SIMULATION);
 
   solver_worker->move_list =
       move_list_create_small(ENDGAME_MOVELIST_INITIAL_CAPACITY);
@@ -1467,7 +1466,6 @@ static void endgame_ctx_reset_worker(EndgameCtxWorker *worker,
   worker->solver = solver;
   game_copy(worker->game_copy, template_game);
   game_set_endgame_solving_mode(worker->game_copy);
-  game_set_backup_mode(worker->game_copy, BACKUP_MODE_SIMULATION);
   arena_reset(worker->small_move_arena);
   configure_worker_path_lists(worker, solver);
   memset(worker->move_undos, 0, sizeof(worker->move_undos));
