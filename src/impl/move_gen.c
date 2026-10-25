@@ -25,6 +25,7 @@
 #include "../ent/klv.h"
 #include "../ent/kwg.h"
 #include "../ent/kwg_alpha.h"
+#include "../ent/lane_shadow_cache.h"
 #include "../ent/leave_map.h"
 #include "../ent/letter_distribution.h"
 #include "../ent/move.h"
