@@ -1,0 +1,45 @@
+#ifndef VALUE_NET_FEATURES_H
+#define VALUE_NET_FEATURES_H
+
+#include "../ent/game.h"
+#include "../ent/move.h"
+#include "../ent/value_net_history.h"
+#include <stdbool.h>
+
+// Writes the value net's scalar inputs (VALUE_NET_SCALARS floats, see
+// value_net_defs.h) for the player on turn in game making move.
+void value_net_scalars_for_move(const Game *game, const Move *move,
+                                const ValueNetHistory *history,
+                                float *scalars_row);
+
+// The opponent-leave head's side inputs (VALUE_NET_RACK_SIDE floats, see
+// value_net_defs.h) from the history of the player on turn: the tiles the
+// opponent's last placement played by tile type over 7 (a blank as the blank),
+// its score over 100, and whether it was an exchange, a bingo, or there was
+// none. Tile-identity entries are zero for exchanges: those identities are
+// private. Models trained with exchanged identities need public-input
+// validation or refitting before their exchange predictions are relied on.
+void value_net_rack_side_features(const ValueNetHistory *history, float *side);
+
+// How many tiles the opponent kept from their last move (7 less the tiles
+// it played or exchanged), or -1 when there was none or it was a pass.
+int value_net_rack_leave_size(const ValueNetHistory *history);
+
+// The spread in points of the player on turn in game just after making
+// move, from that player's side (the input row's spread scalar).
+double value_net_spread_after_move(const Game *game, const Move *move);
+
+// MAGPIE's score+win utility (sim_args.h's sim_utility_blend) of the
+// position after a candidate, from the net's value and spread for its row:
+// win% is (1 + value) / 2, draws counting half, and the final spread is
+// spread_after (value_net_spread_after_move) plus the spread head's
+// predicted change to the end of the game, 130 * atanh(spread). With
+// w_spread 0 it is the win% alone and spread is not read.
+double value_net_utility(float value, float spread, double spread_after,
+                         double w_winpct, double w_spread, double spread_scale);
+
+// The predicted final spread in points of the row's mover: spread_after
+// plus 130 * atanh(spread), as in value_net_utility.
+double value_net_final_spread(float spread, double spread_after);
+
+#endif

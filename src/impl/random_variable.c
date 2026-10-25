@@ -785,13 +785,11 @@ rv_sim_sample_into_record(RandomVariables *rvs, const uint64_t play_index,
 }
 
 // Plain rollouts that offer each ply to SimArgs.rollout_move_fn first.
-static double rv_sim_hooked_sample(RandomVariables *rvs,
-                                   const uint64_t play_index,
-                                   const uint64_t reserved_seed,
-                                   const int thread_index,
-                                   const uint64_t sample_count,
-                                   BAILogger __attribute__((unused)) *
-                                       bai_logger) {
+static double
+rv_sim_hooked_sample(RandomVariables *rvs, const uint64_t play_index,
+                     const uint64_t reserved_seed, const int thread_index,
+                     const uint64_t sample_count,
+                     BAILogger __attribute__((unused)) * bai_logger) {
   return rv_sim_sample_impl(rvs, play_index, reserved_seed, thread_index,
                             sample_count, NULL, true);
 }

@@ -4540,6 +4540,28 @@ static uint64_t gen_get_skippable_lanes(const MoveGen *gen,
   return skippable_lanes;
 }
 
+// MoveGenArgs.initial_best_move and lane_mask: seeds the best move and drops
+// the lanes outside the mask by clearing their anchor counts.
+static void gen_restrict_search(MoveGen *gen, const MoveGenArgs *args) {
+  if (args->initial_best_move != NULL) {
+    assert(gen->move_record_type == MOVE_RECORD_BEST);
+    Move *current_move = gen_get_current_move(gen);
+    move_copy(current_move, args->initial_best_move);
+    if (compare_moves(current_move, gen_get_readonly_best_move(gen), true) ==
+        1) {
+      gen_switch_best_move_and_current_move(gen);
+      gen_update_cutoff_equity_or_score(gen);
+    }
+  }
+  if (args->lane_mask != 0) {
+    for (int lane = 0; lane < 2 * BOARD_DIM; lane++) {
+      if (((args->lane_mask >> lane) & 1) == 0) {
+        gen->row_number_of_anchors_cache[lane] = 0;
+      }
+    }
+  }
+}
+
 // Starts the generation from the best of the remembered moves for this rack
 // that are still legal, and drops every WMP anchor that cannot reach it. The
 // moves are found among the plays the generator would record, at the equity
@@ -4785,6 +4807,9 @@ void generate_moves(const MoveGenArgs *args) {
       }
       skipped_lanes = gen_seed_carried_best_move(
           gen, args->best_move_carry, lane_hashes, &gen->player_rack);
+    }
+    if (args->initial_best_move != NULL || args->lane_mask != 0) {
+      gen_restrict_search(gen, args);
     }
     gen_shadow(gen);
     if (gen->threshold_exceeded) {

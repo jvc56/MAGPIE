@@ -66,6 +66,7 @@
 #include "pat_utility_test.h"
 #include "path_move_lists_test.h"
 #include "peg_embedding_test.h"
+#include "peg_net_test.h"
 #include "peg_oracle_test.h"
 #include "peg_pess_test.h"
 #include "peg_poll_test.h"
@@ -305,6 +306,10 @@ void run_all(void) {
 }
 
 void run_test(const char *subtest) {
+  if (has_prefix("pegnet:", subtest)) {
+    peg_net_test_run_spec(subtest + strlen("pegnet:"));
+    return;
+  }
   if (has_prefix("xsdata:", subtest)) {
     test_xs_data_paths(subtest + strlen("xsdata:"));
     return;

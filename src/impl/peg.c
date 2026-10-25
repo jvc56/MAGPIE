@@ -1695,7 +1695,8 @@ static int32_t peg_inner_leaf(PegWorker *worker, Game *game, int stage_fidelity,
 // Inner-peg stage count: the schedule length, capped at outer_fidelity - 1 so
 // early outer stages run a single cheap inner stage.
 static int peg_inner_stage_count(const PegWorker *worker, int outer_fidelity) {
-  int n_stages = worker->nested_n_cand_caps > 0 ? worker->nested_n_cand_caps : 1;
+  int n_stages =
+      worker->nested_n_cand_caps > 0 ? worker->nested_n_cand_caps : 1;
   const int fidelity_stage_cap = outer_fidelity - 1;
   if (fidelity_stage_cap >= 1 && fidelity_stage_cap < n_stages) {
     n_stages = fidelity_stage_cap;
@@ -1723,8 +1724,7 @@ static bool peg_inner_chooser_value(PegWorker *worker, PegPeg1Chooser chooser,
     game_copy(frame->game, game);
   }
   play_move(&choice, frame->game, NULL);
-  const int stage_fidelity =
-      1 + peg_inner_stage_count(worker, outer_fidelity);
+  const int stage_fidelity = 1 + peg_inner_stage_count(worker, outer_fidelity);
   const int32_t child = peg_inner_leaf(worker, frame->game, stage_fidelity,
                                        depth, outer_fidelity, deadline_ns);
   const int next = game_get_player_on_turn_index(frame->game);

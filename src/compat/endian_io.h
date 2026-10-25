@@ -2,10 +2,12 @@
 #define ENDIAN_IO_H
 
 #include "endian_conv.h"
+#include <assert.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <string.h>
 
 // Transfer little-endian uint32 arrays without changing the write buffer.
 // Empty arrays succeed without accessing the buffer or stream. Callers own
@@ -39,6 +41,27 @@ static inline bool fread_le_uint32s(uint32_t *values, size_t count,
   }
 #endif
   return true;
+}
+
+// IEEE binary32 payloads, including NaNs, are preserved bit for bit.
+static inline bool fwrite_le_floats(const float *values, size_t count,
+                                    FILE *stream) {
+  static_assert(sizeof(float) == sizeof(uint32_t), "float must be 32 bits");
+  if (count == 0) {
+    return true;
+  }
+#if IS_LITTLE_ENDIAN
+  return fwrite(values, sizeof(float), count, stream) == count;
+#else
+  for (size_t index = 0; index < count; index++) {
+    uint32_t bits;
+    memcpy(&bits, &values[index], sizeof(bits));
+    if (!fwrite_le_uint32s(&bits, 1, stream)) {
+      return false;
+    }
+  }
+  return true;
+#endif
 }
 
 #endif

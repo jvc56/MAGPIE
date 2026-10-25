@@ -349,6 +349,20 @@ typedef struct MoveGenArgs {
   // best-reply shortcuts find it in another order and must agree). Default
   // false: the first play found keeps a tie.
   bool best_small_canonical_ties;
+  // Restricts MOVE_RECORD_BEST and WITHIN_X_EQUITY_OF_BEST searches (and
+  // MOVE_RECORD_ALL with WMP) to the lanes whose bit is set: bit
+  // dir * BOARD_DIM + row_or_col, as in generate_small_moves_in_lanes. 0, the
+  // default, searches every lane. A single-tile play is recorded only from
+  // its canonical lane, so a restricted search may miss one whose canonical
+  // lane is excluded, but never records it in another form. Not with
+  // best_move_carry.
+  uint64_t lane_mask;
+  // MOVE_RECORD_BEST only: when non-NULL, generation starts as if this move
+  // had been found, with its equity (the score for MOVE_SORT_SCORE), so
+  // anchors that cannot reach it are pruned and the result is this move
+  // unless a better one (by compare_moves) is found. The move must be legal
+  // on the board with that equity. Not with best_move_carry.
+  const Move *initial_best_move;
   // Disables the PAT term even when the player has weights loaded.
   // Set by the inference paths, which build their own equity thresholds
   // from score plus leave and would misclassify moves whose recorded

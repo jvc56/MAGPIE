@@ -338,14 +338,14 @@ static inline void peg_args_fill(
     const int nested_emptier_ply_cap, const int nested_max_depth,
     const bool disable_best_reply_shortcuts, PegPeg1Chooser nested_peg1_chooser,
     void *nested_peg1_chooser_ctx, PegPeg2Chooser nested_peg2_chooser,
-    void *nested_peg2_chooser_ctx,
-    const MachineLetter *eval_bag_order, const int eval_bag_order_len,
-    const Move *const *only_moves, const int n_only_moves,
-    const Move *const *protect_moves, const int n_protect_moves,
-    const bool include_per_scenario, PegOnStageStart on_stage_start,
-    PegOnCandDone on_cand_done, PegOnScenarioDone on_scenario_done,
-    void *user_data, PegPoll *poll, TranspositionTable *shared_endgame_tt,
-    PegCheckpoint *checkpoint, bool resume, PegArgs *peg_args) {
+    void *nested_peg2_chooser_ctx, const MachineLetter *eval_bag_order,
+    const int eval_bag_order_len, const Move *const *only_moves,
+    const int n_only_moves, const Move *const *protect_moves,
+    const int n_protect_moves, const bool include_per_scenario,
+    PegOnStageStart on_stage_start, PegOnCandDone on_cand_done,
+    PegOnScenarioDone on_scenario_done, void *user_data, PegPoll *poll,
+    TranspositionTable *shared_endgame_tt, PegCheckpoint *checkpoint,
+    bool resume, PegArgs *peg_args) {
   peg_args->game = game;
   peg_args->thread_control = thread_control;
   peg_args->num_threads = num_threads;
