@@ -12,6 +12,7 @@
 #include "../ent/game.h"
 #include "../ent/klv.h"
 #include "../ent/kwg.h"
+#include "../ent/lane_shadow_cache.h"
 #include "../ent/leave_map.h"
 #include "../ent/letter_distribution.h"
 #include "../ent/move.h"
@@ -312,6 +313,9 @@ typedef struct MoveGen {
   // MOVE_RECORD_BEST_SMALL only: see MoveGenArgs.best_small_canonical_ties.
   // After the hot fields above so their offsets stay stable.
   bool best_small_canonical_ties;
+  // MOVE_RECORD_BEST_SMALL only: see MoveGenArgs.lane_shadow_cache. NULL when
+  // the generation shadows every lane itself.
+  LaneShadowCache *lane_shadow_cache;
   // WMP-only storage at the end keeps every existing hot field's offset.
   // Reset/touch it only for active WMP positions whose rack has a blank.
   WMPBlankWordCache blank_word_cache;
@@ -366,6 +370,13 @@ typedef struct MoveGenArgs {
   // is added, as a move and as the bound of the lanes searched. NULL (the
   // default) skips all of this.
   BestMoveCarry *best_move_carry;
+  // MOVE_RECORD_BEST_SMALL only: lane shadows that earlier generations
+  // recorded (see lane_shadow_cache.h). A lane the cache holds adds the
+  // anchors recorded for it instead of being shadowed, and every other lane
+  // is recorded. Not used with a word info table or in wordsmog, whose
+  // shadows read more than the key holds. NULL (the default) shadows every
+  // lane.
+  LaneShadowCache *lane_shadow_cache;
 } MoveGenArgs;
 
 void gen_destroy_cache(void);
