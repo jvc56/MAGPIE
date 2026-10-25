@@ -82,22 +82,6 @@ static float vnf_tanh_scaled(double x, double center, double scale) {
   return (float)tanh((x - center) / scale);
 }
 
-// Marks the squares a placement put tiles on in the given plane.
-static void vnf_mark_placement(const Move *move, float *plane) {
-  if (move_get_type(move) != GAME_EVENT_TILE_PLACEMENT_MOVE) {
-    return;
-  }
-  const bool vertical = board_is_dir_vertical(move_get_dir(move));
-  for (int tile_idx = 0; tile_idx < move_get_tiles_length(move); tile_idx++) {
-    if (move_get_tile(move, tile_idx) == PLAYED_THROUGH_MARKER) {
-      continue;
-    }
-    const int row = move_get_row_start(move) + (vertical ? tile_idx : 0);
-    const int col = move_get_col_start(move) + (vertical ? 0 : tile_idx);
-    plane[(row * VALUE_NET_BOARD_DIM) + col] = 1.0F;
-  }
-}
-
 // The mover's leave: the rack less the tiles the move uses (for an
 // exchange, the exchanged tiles, a blank being machine letter 0).
 static void vnf_leave(const Game *game, const Move *move, Rack *leave) {
@@ -109,62 +93,6 @@ static void vnf_leave(const Game *game, const Move *move, Rack *leave) {
                        game, game_get_player_on_turn_index(game))));
   for (int tile_idx = 0; tile_idx < move_get_tiles_length(move); tile_idx++) {
     rack_take_letter(leave, move_get_tile(move, tile_idx));
-  }
-}
-
-static void vnf_board_planes(const Board *board, float *row) {
-  float *plane_base = row;
-  for (int board_row = 0; board_row < VALUE_NET_BOARD_DIM; board_row++) {
-    for (int col = 0; col < VALUE_NET_BOARD_DIM; col++) {
-      const int square = (board_row * VALUE_NET_BOARD_DIM) + col;
-      const MachineLetter ml = board_get_letter(board, board_row, col);
-      if (ml != ALPHABET_EMPTY_SQUARE_MARKER) {
-        if (get_is_blanked(ml)) {
-          plane_base[(VNF_PLANE_BLANK * VALUE_NET_SQUARES) + square] = 1.0F;
-        }
-        const int letter = get_unblanked_machine_letter(ml) - VNF_ML_A;
-        plane_base[((VNF_PLANE_LETTERS + letter) * VALUE_NET_SQUARES) +
-                   square] = 1.0F;
-      } else {
-        const BonusSquare bonus = board_get_bonus_square(board, board_row, col);
-        const int word = bonus_square_get_word_multiplier(bonus);
-        const int letter = bonus_square_get_letter_multiplier(bonus);
-        int plane = -1;
-        if (letter == 2) {
-          plane = VNF_PLANE_DOUBLE_LETTER;
-        } else if (letter == 3) {
-          plane = VNF_PLANE_TRIPLE_LETTER;
-        } else if (word == 2) {
-          plane = VNF_PLANE_DOUBLE_WORD;
-        } else if (word == 3) {
-          plane = VNF_PLANE_TRIPLE_WORD;
-        }
-        if (plane >= 0) {
-          plane_base[(plane * VALUE_NET_SQUARES) + square] = 1.0F;
-        }
-      }
-      // MAGPIE's vertical-direction cross set holds the letters that fit
-      // with the left and right neighbors (Macondo's horizontal one), and
-      // its horizontal-direction set those that fit above and below. Both
-      // are empty on occupied squares and full with no neighbors.
-      const uint64_t left_right = board_get_cross_set(
-          board, board_row, col, BOARD_VERTICAL_DIRECTION, 0);
-      const uint64_t up_down = board_get_cross_set(
-          board, board_row, col, BOARD_HORIZONTAL_DIRECTION, 0);
-      for (int letter_idx = 0; letter_idx < VNF_LETTERS; letter_idx++) {
-        const int cross_ml = VNF_ML_A + letter_idx;
-        if ((left_right >> cross_ml) & 1) {
-          plane_base[((VNF_PLANE_LEFT_RIGHT_CROSS + letter_idx) *
-                      VALUE_NET_SQUARES) +
-                     square] = 1.0F;
-        }
-        if ((up_down >> cross_ml) & 1) {
-          plane_base[((VNF_PLANE_UP_DOWN_CROSS + letter_idx) *
-                      VALUE_NET_SQUARES) +
-                     square] = 1.0F;
-        }
-      }
-    }
   }
 }
 

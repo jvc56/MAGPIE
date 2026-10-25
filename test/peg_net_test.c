@@ -1,5 +1,6 @@
 #include "peg_net_test.h"
 
+#include "../src/compat/cfile.h"
 #include "../src/compat/cpthread.h"
 #include "../src/compat/ctime.h"
 #include "../src/compat/endian_io.h"
@@ -53,6 +54,7 @@
 #include "../src/util/string_util.h"
 #include "test_util.h"
 #include <assert.h>
+#include <errno.h>
 #include <math.h>
 #include <stdatomic.h>
 #include <stdbool.h>
@@ -61,6 +63,16 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+
+// Creates path for writing (mode "w" or "wb"); dies if it exists or cannot be
+// created, as C11's "x" modes do.
+static FILE *vnt_fopen_new_or_die(const char *path, const char *mode) {
+  FILE *stream = cfile_open(path, mode, true);
+  if (stream == NULL) {
+    log_fatal("failed to create file '%s': %s", path, strerror(errno));
+  }
+  return stream;
+}
 
 enum {
   VNT_MAX_THROUGHPUT_THREADS = 32,
@@ -352,7 +364,7 @@ static void vnt_peg1_data(const StringSplitter *fields) {
   FILE *files[4];
   for (int idx = 0; idx < 4; idx++) {
     char *path = get_formatted_string("%s.%s", prefix, suffixes[idx]);
-    files[idx] = fopen_or_die(path, "wbx");
+    files[idx] = vnt_fopen_new_or_die(path, "wb");
     free(path);
   }
   fprintf(files[0], "root,source_seed,source_attempt,turn,seat,bag,first_row,"
@@ -708,7 +720,7 @@ static void vnt_peg1_eval(const StringSplitter *fields) {
   FILE *output[3];
   for (int idx = 0; idx < 3; idx++) {
     path = get_formatted_string("%s.%s", prefix, suffixes[idx]);
-    output[idx] = fopen_or_die(path, "wbx");
+    output[idx] = vnt_fopen_new_or_die(path, "wb");
     free(path);
   }
   fprintf(output[0],
@@ -971,10 +983,10 @@ static void vnt_peg1_features(const StringSplitter *fields) {
   FILE *inputs_file = fopen_or_die(path, "rb");
   free(path);
   path = get_formatted_string("%s.reply.f32", prefix);
-  FILE *output = fopen_or_die(path, "wbx");
+  FILE *output = vnt_fopen_new_or_die(path, "wb");
   free(path);
   path = get_formatted_string("%s.reply-timing.csv", prefix);
-  FILE *timing_file = fopen_or_die(path, "wx");
+  FILE *timing_file = vnt_fopen_new_or_die(path, "w");
   free(path);
   fprintf(timing_file,
           "root,candidates,worlds,movegen_ms,world_ms,mover_now_ms,"
@@ -1103,7 +1115,7 @@ static void vnt_peg1_roots(const StringSplitter *fields) {
   FILE *files[5];
   for (int idx = 0; idx < 5; idx++) {
     char *path = get_formatted_string("%s.%s", prefix, suffixes[idx]);
-    files[idx] = fopen_or_die(path, "wbx");
+    files[idx] = vnt_fopen_new_or_die(path, "wb");
     free(path);
   }
   fprintf(files[0], "root,source_seed,source_attempt,turn,seat,bag,first_row,"
@@ -1260,7 +1272,7 @@ static void vnt_peg1_play(const StringSplitter *fields) {
   free(path);
   FILE *choices = fopen_or_die(choices_path, "r");
   path = get_formatted_string("%s.games.csv", prefix);
-  FILE *output = fopen_or_die(path, "wx");
+  FILE *output = vnt_fopen_new_or_die(path, "w");
   free(path);
   fprintf(output, "root,candidate,mover,actual_tile,initial_spread,final_"
                   "spread,win,turns,continuation_depth\n");
@@ -1706,7 +1718,7 @@ static void vnt_peg1_net_eval(const StringSplitter *fields) {
   FILE *output[4];
   for (int idx = 0; idx < 4; idx++) {
     path = get_formatted_string("%s.%s", prefix, suffixes[idx]);
-    output[idx] = fopen_or_die(path, "wbx");
+    output[idx] = vnt_fopen_new_or_die(path, "wb");
     free(path);
   }
   fprintf(output[0], "root,candidates,scored,choice,movegen_ms,scalar_ms,"
@@ -1911,7 +1923,7 @@ static void vnt_peg1_bench(const StringSplitter *fields) {
   char *path = get_formatted_string("%s.positions.csv", data);
   FILE *positions = fopen_or_die(path, "r");
   free(path);
-  FILE *output = fopen_or_die(string_splitter_get_item(fields, 2), "wx");
+  FILE *output = vnt_fopen_new_or_die(string_splitter_get_item(fields, 2), "w");
   fprintf(output, "root,worlds,scored,blank_unseen,small_ms,best_ms,"
                   "root_prep_ms,lane_ms,lane_fallbacks,score_mismatch_best,"
                   "score_mismatch_lane,value_mismatch_small_vs_best,"
@@ -2230,7 +2242,7 @@ static void vnt_peg1_features_v2(const StringSplitter *fields) {
   FILE *positions = fopen_or_die(path, "r");
   free(path);
   path = get_formatted_string("%s.reply2.f32", prefix);
-  FILE *output = fopen_or_die(path, "wbx");
+  FILE *output = vnt_fopen_new_or_die(path, "wb");
   free(path);
   char *line = NULL;
   size_t capacity = 0;
@@ -2493,7 +2505,7 @@ static void vnt_peg1_net2_eval(const StringSplitter *fields) {
   FILE *output[4];
   for (int idx = 0; idx < 4; idx++) {
     path = get_formatted_string("%s.%s", prefix, suffixes[idx]);
-    output[idx] = fopen_or_die(path, "wbx");
+    output[idx] = vnt_fopen_new_or_die(path, "wb");
     free(path);
   }
   fprintf(output[0], "root,candidates,scored,choice,movegen_ms,scalar_ms,"
@@ -2712,7 +2724,7 @@ static void vnt_peg1_games(const StringSplitter *fields) {
   MoveList *pool = move_list_create(VNT_PEG1_POOL + 1);
   MoveList *static_list = move_list_create(1);
   char *path = get_formatted_string("%s.fullgames.csv", prefix);
-  FILE *output = fopen_or_die(path, "wx");
+  FILE *output = vnt_fopen_new_or_die(path, "w");
   free(path);
   fprintf(output, "game,source_seed,starter,peg1,mover,net_choice,candidates,"
                   "static_final,net_final,static_win,net_win,decision_ms,"
@@ -2845,7 +2857,7 @@ static void vnt_peg1_positions(const StringSplitter *fields) {
   MoveList *pool = move_list_create(VNT_PEG1_POOL + 1);
   MoveList *static_list = move_list_create(1);
   char *path = get_formatted_string("%s.positions.csv", prefix);
-  FILE *output = fopen_or_die(path, "wx");
+  FILE *output = vnt_fopen_new_or_die(path, "w");
   free(path);
   fprintf(output, "root,source_seed,source_attempt,turn,seat,bag,first_row,"
                   "rows,pass_rank,movegen_ms,cgp\n");
@@ -2933,7 +2945,7 @@ static void vnt_peg1_deep(const StringSplitter *fields) {
   free(path);
   FILE *choices = fopen_or_die(choices_path, "r");
   path = get_formatted_string("%s.deep.csv", prefix);
-  FILE *output = fopen_or_die(path, "wx");
+  FILE *output = vnt_fopen_new_or_die(path, "w");
   free(path);
   fprintf(output, "root,candidate,tile,multiplicity,plies,margin,solve_ms\n");
   char *line = NULL, *choice_line = NULL;
@@ -3077,7 +3089,7 @@ static void vnt_peg1_cascade_eval(const StringSplitter *fields) {
   FILE *output[2];
   for (int idx = 0; idx < 2; idx++) {
     path = get_formatted_string("%s.%s", prefix, suffixes[idx]);
-    output[idx] = fopen_or_die(path, "wx");
+    output[idx] = vnt_fopen_new_or_die(path, "w");
     free(path);
   }
   fprintf(output[0],
@@ -3544,7 +3556,7 @@ static void vnt_peg1_util_eval(const StringSplitter *fields) {
   FILE *output[3];
   for (int idx = 0; idx < 3; idx++) {
     path = get_formatted_string("%s.%s", prefix, suffixes[idx]);
-    output[idx] = fopen_or_die(path, "wbx");
+    output[idx] = vnt_fopen_new_or_die(path, "wb");
     free(path);
   }
   fprintf(output[0], "root,candidates,scored,choice,win,spread,movegen_ms,"
@@ -3703,7 +3715,7 @@ static void vnt_peg1_games3(const StringSplitter *fields) {
   MoveList *pool = move_list_create(VNT_PEG1_POOL + 1);
   MoveList *static_list = move_list_create(1);
   char *path = get_formatted_string("%s.fullgames.csv", prefix);
-  FILE *output = fopen_or_die(path, "wx");
+  FILE *output = vnt_fopen_new_or_die(path, "w");
   free(path);
   fprintf(output, "game,source_seed,starter,peg1,mover,net_choice,candidates,"
                   "static_final,net_final,static_win,net_win,decision_ms,"
@@ -3887,7 +3899,7 @@ static void vnt_peg1_greedy_eval(const StringSplitter *fields) {
   FILE *positions = fopen_or_die(path, "r");
   free(path);
   path = get_formatted_string("%s.greedy.csv", prefix);
-  FILE *output = fopen_or_die(path, "wx");
+  FILE *output = vnt_fopen_new_or_die(path, "w");
   free(path);
   fprintf(output, "root,variant,choice,pass,solve_ms,final_d0,win_d0,"
                   "final_d2,win_d2,privacy_checked,move\n");
@@ -4790,7 +4802,7 @@ static void vnt_pegn_positions(const StringSplitter *fields, int bag_size) {
   MoveList *pool = move_list_create(VNT_PEG1_POOL + 1);
   MoveList *static_list = move_list_create(1);
   char *path = get_formatted_string("%s.positions.csv", prefix);
-  FILE *output = fopen_or_die(path, "wx");
+  FILE *output = vnt_fopen_new_or_die(path, "w");
   free(path);
   fprintf(output, "root,source_seed,source_attempt,turn,seat,bag,first_row,"
                   "rows,pass_rank,movegen_ms,cgp\n");
@@ -4909,7 +4921,7 @@ static void vnt_peg1_predict(const StringSplitter *fields) {
   FILE *positions = fopen_or_die(path, "r");
   free(path);
   path = get_formatted_string("%s.pred.csv", prefix);
-  FILE *output = fopen_or_die(path, "wbx");
+  FILE *output = vnt_fopen_new_or_die(path, "wb");
   free(path);
   fprintf(output, "root,rank,candidates,tiles,fast_win,fast_spread,strong_win,"
                   "strong_spread,move\n");
@@ -5864,13 +5876,13 @@ static void vnt_peg2_features(const StringSplitter *fields) {
   int *ids = malloc_or_die(sizeof(int) * VNT_PEG2_WIDE_CAP);
   ErrorStack *errors = error_stack_create();
   char *path = get_formatted_string("%s.cands.csv", prefix);
-  FILE *cands = fopen_or_die(path, "wx");
+  FILE *cands = vnt_fopen_new_or_die(path, "w");
   free(path);
   path = get_formatted_string("%s.public.f32", prefix);
-  FILE *public_out = fopen_or_die(path, "wx");
+  FILE *public_out = vnt_fopen_new_or_die(path, "w");
   free(path);
   path = get_formatted_string("%s.worlds.f32", prefix);
-  FILE *worlds_out = fopen_or_die(path, "wx");
+  FILE *worlds_out = vnt_fopen_new_or_die(path, "w");
   free(path);
   // worlds.f32 columns: 0 weight (ordered-draw probability), 1 opponent
   // top-scoring reply (+ mover rack x2 when it goes out), 2 out, 3 tiles,
@@ -6625,15 +6637,15 @@ static void vnt_peg2_pick_eval(const StringSplitter *fields) {
   VntPeg2PickWork work = vnt_peg2_pick_work_create(root);
   ErrorStack *errors = error_stack_create();
   char *path = get_formatted_string("%s.picks.csv", prefix);
-  FILE *picks = fopen_or_die(path, "wx");
+  FILE *picks = vnt_fopen_new_or_die(path, "w");
   free(path);
   path = get_formatted_string("%s.scores.csv", prefix);
-  FILE *scores_out = fopen_or_die(path, "wx");
+  FILE *scores_out = vnt_fopen_new_or_die(path, "w");
   free(path);
   FILE *dump = NULL;
   if (dump_rows) {
     path = get_formatted_string("%s.worlds.f32", prefix);
-    dump = fopen_or_die(path, "wx");
+    dump = vnt_fopen_new_or_die(path, "w");
     free(path);
   }
   fprintf(picks, "root,candidates,scored,pick,tiles,pool_ms,prep_ms,opp_ms,"
@@ -6898,10 +6910,10 @@ static void vnt_peg2_wide_eval(const StringSplitter *fields) {
   ErrorStack *errors = error_stack_create();
   StringBuilder *name = string_builder_create();
   char *path = get_formatted_string("%s.picks.csv", prefix);
-  FILE *picks = fopen_or_die(path, "wx");
+  FILE *picks = vnt_fopen_new_or_die(path, "w");
   free(path);
   path = get_formatted_string("%s.ranks.csv", prefix);
-  FILE *ranks_out = fopen_or_die(path, "wx");
+  FILE *ranks_out = vnt_fopen_new_or_die(path, "w");
   free(path);
   fprintf(picks, "root,candidates,pick,tiles,pool_ms,prep_ms,opp_ms,"
                  "greedy_ms,model_ms,total_ms,checked\n");
