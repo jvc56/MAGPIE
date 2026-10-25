@@ -250,6 +250,41 @@ static void slot_fill_from_move_list(PathListSlot *slot,
   }
 }
 
+// Where a lane's merge stands after appending regenerated plays: the list's
+// count, and the index and anchor of the next regenerated play (BOARD_DIM past
+// the last).
+typedef struct RegenFlush {
+  int count;
+  int regen_idx;
+  int regen_anchor;
+} RegenFlush;
+
+// Appends the regenerated plays of `move_list` from `regen_idx`, whose anchor
+// is below `anchor`, up to the first whose anchor is not, to the list `moves`
+// and `used` of `count` plays. It runs once per run of regenerated plays, and
+// is out of line for slot_merge_lane's loop over the parent's plays: inlined
+// there, it left GCC too few registers, and the loop kept its pointers on the
+// stack. It takes the list's arrays and count, not its SlotWriter, so that the
+// writer stays in registers (see SlotWriter).
+static __attribute__((noinline)) RegenFlush append_regenerated_below(
+    SmallMove *moves, PackedCounts *used, int count, const MoveList *move_list,
+    int regen_idx, int regen_end, int anchor, uint32_t anchors) {
+  int regen_anchor;
+  do {
+    const SmallMove *regenerated = move_list->small_moves[regen_idx];
+    moves[count] = *regenerated;
+    used[count] = pack_move_used(regenerated);
+    count++;
+    regen_idx++;
+    regen_anchor =
+        regen_idx < regen_end
+            ? span_anchor(small_move_span(move_list->small_moves[regen_idx]),
+                          anchors)
+            : BOARD_DIM;
+  } while (regen_anchor < anchor);
+  return (RegenFlush){count, regen_idx, regen_anchor};
+}
+
 // Appends lane `lane` of `out`: `parent`'s plays that span no square in `hit`
 // and whose anchors (among `anchors`) are not in `generated`, filtered
 // against `avail` iff `filter`, merged by anchor with the regenerated plays
@@ -280,22 +315,24 @@ static void slot_merge_lane(SlotWriter *out, const PathListSlot *parent,
         continue;
       }
       const int anchor = span_anchor(span, anchors);
-      if (((generated >> anchor) & 1) != 0 ||
-          (filter && !counts_subset(&parent_used[move_idx], avail))) {
-        continue;
+      // The regenerated plays before this anchor go first even if this play
+      // is dropped: the next play kept has an anchor no smaller, so the order
+      // is the same.
+      if (regen_anchor < anchor) {
+        const RegenFlush flush = append_regenerated_below(
+            out->moves, out->used, out->count, move_list, regen_idx, regen_end,
+            anchor, anchors);
+        out->count = flush.count;
+        regen_idx = flush.regen_idx;
+        regen_anchor = flush.regen_anchor;
       }
-      while (regen_anchor < anchor) {
-        const SmallMove *regenerated = move_list->small_moves[regen_idx];
-        const PackedCounts used = pack_move_used(regenerated);
-        writer_append(out, regenerated, &used);
-        regen_idx++;
-        regen_anchor = regen_idx < regen_end
-                           ? span_anchor(small_move_span(
-                                             move_list->small_moves[regen_idx]),
-                                         anchors)
-                           : BOARD_DIM;
-      }
-      writer_append(out, small_move, &parent_used[move_idx]);
+      // Without a branch, as slot_rebuild filters: the play is written to the
+      // next free slot, which the reservation holds, and kept by counting it.
+      const int keep = (((generated >> anchor) & 1) == 0) &
+                       (!filter | counts_subset(&parent_used[move_idx], avail));
+      out->moves[out->count] = *small_move;
+      out->used[out->count] = parent_used[move_idx];
+      out->count += keep;
     }
   }
   for (; regen_idx < regen_end; regen_idx++) {
