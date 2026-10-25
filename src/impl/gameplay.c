@@ -321,7 +321,8 @@ static void calc_for_self_from_undo(const MoveUndo *move_undo,
 // squares written into save_undo. save_undo holds the number_of_row_anchors
 // from before its own move, so unplaying that move restores the counts too.
 static void update_anchors_into_undo(const MoveUndo *move_undo,
-                                     MoveUndo *save_undo, Board *board) {
+                                     MoveUndo *save_undo, Board *board,
+                                     int cross_indices) {
   int row_start = move_undo->move_row_start;
   int col_start = move_undo->move_col_start;
   const int tiles_length = move_undo->move_tiles_length;
@@ -332,20 +333,24 @@ static void update_anchors_into_undo(const MoveUndo *move_undo,
     col_start = move_undo->move_row_start;
   }
   for (int col = col_start; col < tiles_length + col_start; col++) {
-    board_update_anchors_tracked(board, row_start, col, save_undo);
+    board_update_anchors_tracked(board, row_start, col, cross_indices,
+                                 save_undo);
     if (row_start > 0) {
-      board_update_anchors_tracked(board, row_start - 1, col, save_undo);
+      board_update_anchors_tracked(board, row_start - 1, col, cross_indices,
+                                   save_undo);
     }
     if (row_start < BOARD_DIM - 1) {
-      board_update_anchors_tracked(board, row_start + 1, col, save_undo);
+      board_update_anchors_tracked(board, row_start + 1, col, cross_indices,
+                                   save_undo);
     }
   }
   if (col_start - 1 >= 0) {
-    board_update_anchors_tracked(board, row_start, col_start - 1, save_undo);
+    board_update_anchors_tracked(board, row_start, col_start - 1, cross_indices,
+                                 save_undo);
   }
   if (tiles_length + col_start < BOARD_DIM) {
     board_update_anchors_tracked(board, row_start, tiles_length + col_start,
-                                 save_undo);
+                                 cross_indices, save_undo);
   }
   if (board_was_transposed) {
     board_transpose(board);
@@ -385,7 +390,9 @@ void update_cross_set_for_move_from_undo(MoveUndo *undo, const Game *game) {
 
 void update_deferred_move_into_undo(const MoveUndo *move_undo,
                                     MoveUndo *save_undo, const Game *game) {
-  update_anchors_into_undo(move_undo, save_undo, game_get_board(game));
+  update_anchors_into_undo(
+      move_undo, save_undo, game_get_board(game),
+      game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KWG) ? 1 : 2);
   update_cross_sets_into_undo(move_undo, save_undo, game);
 }
 
@@ -542,19 +549,21 @@ static void play_move_on_board_tracked(const Move *move, const Game *game,
   }
 
   int tiles_length = move_get_tiles_length(move);
+  // Shared lexicon mode leaves the inactive cross index alone, as the
+  // incremental updates do (see board_set_letter_tracked).
+  const int cross_indices =
+      game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KWG) ? 1 : 2;
 
   for (int idx = 0; idx < tiles_length; idx++) {
     MachineLetter letter = move_get_tile(move, idx);
     if (letter == PLAYED_THROUGH_MARKER) {
       continue;
     }
-    board_set_letter_tracked(board, row_start, col_start + idx, letter, undo);
+    board_set_letter_tracked(board, row_start, col_start + idx, letter,
+                             cross_indices, undo);
     // Occupied squares have no cross set or cross score. The letter write
     // already saved these squares, so initialize them here without a later
-    // tracked generator call. Preserve the inactive cross index in shared
-    // lexicon mode, matching the existing incremental update policy.
-    const int cross_indices =
-        game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KWG) ? 1 : 2;
+    // tracked generator call.
     for (int ci = 0; ci < cross_indices; ci++) {
       for (int dir = 0; dir < 2; dir++) {
         Square *square = board_get_writable_square(board, row_start,
