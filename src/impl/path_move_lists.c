@@ -328,8 +328,9 @@ static void slot_merge_lane(SlotWriter *out, const PathListSlot *parent,
       }
       // Without a branch, as slot_rebuild filters: the play is written to the
       // next free slot, which the reservation holds, and kept by counting it.
-      const int keep = (((generated >> anchor) & 1) == 0) &
-                       (!filter | counts_subset(&parent_used[move_idx], avail));
+      const int keep =
+          (((generated >> anchor) & 1) == 0) &
+          ((!filter) | counts_subset(&parent_used[move_idx], avail));
       out->moves[out->count] = *small_move;
       out->used[out->count] = parent_used[move_idx];
       out->count += keep;
