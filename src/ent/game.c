@@ -67,8 +67,13 @@ struct Game {
   // instead of the player's full KWG. Not owned by Game.
   const KWG *override_kwgs[2];
   dual_lexicon_mode_t dual_lexicon_mode;
-  // Backups
+  // Backups. Each simulation backup is allocated the first time a backup
+  // reaches its depth: sims back up only the candidate move, and many games
+  // that enable them never back up at all.
   MinimalGameBackup *sim_game_backups[MAX_SEARCH_DEPTH];
+  // Whether simulation backups were ever enabled, so that unplays pop them
+  // rather than the GCG backup.
+  bool sim_backups_enabled;
   int backup_cursor;
   MinimalGameBackup *gcg_game_backup;
   backup_mode_t backup_mode;
@@ -565,12 +570,7 @@ void game_set_backup_mode(Game *game, backup_mode_t backup_mode) {
   case BACKUP_MODE_OFF:
     break;
   case BACKUP_MODE_SIMULATION:
-    if (!game->sim_game_backups[0]) {
-      for (int i = 0; i < MAX_SEARCH_DEPTH; i++) {
-        game->sim_game_backups[i] = malloc_or_die(sizeof(MinimalGameBackup));
-        pre_allocate_single_game_backup(game->sim_game_backups[i], game);
-      }
-    }
+    game->sim_backups_enabled = true;
     break;
   case BACKUP_MODE_GCG:
     if (!game->gcg_game_backup) {
@@ -639,6 +639,7 @@ Game *game_create(const GameArgs *game_args) {
   for (int i = 0; i < MAX_SEARCH_DEPTH; i++) {
     game->sim_game_backups[i] = NULL;
   }
+  game->sim_backups_enabled = false;
   game->backup_cursor = 0;
   game->backup_mode = BACKUP_MODE_OFF;
   game->gcg_game_backup = NULL;
@@ -677,6 +678,7 @@ Game *game_duplicate(const Game *game) {
   for (int i = 0; i < MAX_SEARCH_DEPTH; i++) {
     new_game->sim_game_backups[i] = NULL;
   }
+  new_game->sim_backups_enabled = false;
   new_game->backup_cursor = 0;
   new_game->backup_mode = BACKUP_MODE_OFF;
   new_game->gcg_game_backup = NULL;
@@ -720,6 +722,12 @@ void game_backup(Game *game) {
     return;
     break;
   case BACKUP_MODE_SIMULATION:
+    if (!game->sim_game_backups[game->backup_cursor]) {
+      game->sim_game_backups[game->backup_cursor] =
+          malloc_or_die(sizeof(MinimalGameBackup));
+      pre_allocate_single_game_backup(
+          game->sim_game_backups[game->backup_cursor], game);
+    }
     state = game->sim_game_backups[game->backup_cursor];
     game->backup_cursor++;
     break;
@@ -763,7 +771,7 @@ void game_unplay_last_move(Game *game) {
   // Since there are two kinds of backups and a restore from backup can occur
   // with the backup mode off, we check which kind of backup to perform by
   // checking for sim backups first.
-  if (game->sim_game_backups[0]) {
+  if (game->sim_backups_enabled) {
     if (game->backup_cursor == 0) {
       log_fatal("cannot unplay last move without a game backup");
     }
@@ -813,8 +821,8 @@ void backups_destroy(Game *game) {
   if (game->gcg_game_backup) {
     single_game_backup_destroy(game->gcg_game_backup);
   }
-  if (game->sim_game_backups[0]) {
-    for (int i = 0; i < MAX_SEARCH_DEPTH; i++) {
+  for (int i = 0; i < MAX_SEARCH_DEPTH; i++) {
+    if (game->sim_game_backups[i]) {
       single_game_backup_destroy(game->sim_game_backups[i]);
     }
   }
