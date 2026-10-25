@@ -123,12 +123,17 @@ static inline void move_undo_save_square_at(MoveUndo *undo, Board *board,
 }
 
 // Tracked version of board_set_letter
-// Saves all squares that will be modified before modifying them
+// Saves all squares that will be modified before modifying them.
+//
+// cross_indices is the number of cross indices in use: 1 when both players
+// share a lexicon. Every reader then picks index 0 (board_get_cross_set_index),
+// so index 1 is not written or saved. Unplaying the move restores the board
+// either way.
 static inline void board_set_letter_tracked(Board *b, int row, int col,
                                             MachineLetter letter,
-                                            MoveUndo *undo) {
-  // Save and set letter on all 4 squares
-  for (int ci = 0; ci < 2; ci++) {
+                                            int cross_indices, MoveUndo *undo) {
+  // Save and set letter on the squares of each cross index in use
+  for (int ci = 0; ci < cross_indices; ci++) {
     for (int dir = 0; dir < 2; dir++) {
       move_undo_save_square_at(undo, b, row, col, dir, ci);
       square_set_letter(board_get_writable_square(b, row, col, dir, ci),
@@ -202,20 +207,22 @@ static inline void board_set_cross_score_tracked(Board *b, int row, int col,
 }
 
 // Tracked version of board_set_anchor
-// Must set anchor on BOTH cross indices (ci=0 and ci=1), same as
-// board_set_anchor Also updates number_of_row_anchors like the original
+// Sets the anchor on each of the cross_indices cross indices in use, as
+// board_set_letter_tracked does its letter, and updates number_of_row_anchors
+// like board_set_anchor.
 static inline bool board_set_anchor_tracked(Board *board, int row, int col,
                                             int dir, bool anchor,
-                                            MoveUndo *undo) {
-  // Every anchor writer sets both cross indices, so ci 0 holds the value of
-  // both. An unchanged anchor needs no save and no write.
+                                            int cross_indices, MoveUndo *undo) {
+  // Every anchor writer sets every cross index in use, so ci 0 holds the value
+  // of all of them. An unchanged anchor needs no save and no write.
   if (board_get_readonly_square(board, row, col, dir, 0)->anchor == anchor) {
-    assert(board_get_readonly_square(board, row, col, dir, 1)->anchor ==
-           anchor);
+    assert(cross_indices == 1 ||
+           board_get_readonly_square(board, row, col, dir, 1)->anchor ==
+               anchor);
     return anchor;
   }
   bool old_anchor = false;
-  for (int ci = 0; ci < 2; ci++) {
+  for (int ci = 0; ci < cross_indices; ci++) {
     move_undo_save_square_at(undo, board, row, col, dir, ci);
     Square *s = board_get_writable_square(board, row, col, dir, ci);
     bool prev_anchor = s->anchor;
@@ -262,6 +269,7 @@ static inline void board_set_right_extension_set_with_blank_tracked(
 
 // Tracked version of board_update_anchors - must match original exactly
 static inline void board_update_anchors_tracked(Board *board, int row, int col,
+                                                int cross_indices,
                                                 MoveUndo *undo) {
   bool horizontal_anchor = false;
   bool vertical_anchor = false;
@@ -283,9 +291,9 @@ static inline void board_update_anchors_tracked(Board *board, int row, int col,
   }
   // Save the original state and write each final anchor value once.
   board_set_anchor_tracked(board, row, col, BOARD_HORIZONTAL_DIRECTION,
-                           horizontal_anchor, undo);
+                           horizontal_anchor, cross_indices, undo);
   board_set_anchor_tracked(board, row, col, BOARD_VERTICAL_DIRECTION,
-                           vertical_anchor, undo);
+                           vertical_anchor, cross_indices, undo);
 }
 
 #endif
