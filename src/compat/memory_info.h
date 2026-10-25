@@ -68,6 +68,20 @@ enum {
 };
 #endif
 
+// Entries of an endgame worker's lane shadow cache (lane_shadow_cache.h), as
+// a power of two: natively 2^16 entries of 64 bytes, 4 MiB a worker. The
+// browser's endgames share the wasm heap with the lexica and the
+// transposition table, so there it is 2^12, 256 KiB a worker.
+#ifdef __EMSCRIPTEN__
+enum {
+  ENDGAME_LANE_SHADOW_CACHE_INDEX_BITS = 12,
+};
+#else
+enum {
+  ENDGAME_LANE_SHADOW_CACHE_INDEX_BITS = 16,
+};
+#endif
+
 static inline bool search_memory_is_bounded(void) {
 #ifdef __EMSCRIPTEN__
   return true;

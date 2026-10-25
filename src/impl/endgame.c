@@ -4,6 +4,7 @@
 #include "../compat/cpthread_defs.h"
 #include "../compat/csched.h"
 #include "../compat/ctime.h"
+#include "../compat/memory_info.h"
 #include "../def/board_defs.h"
 #include "../def/equity_defs.h"
 #include "../def/game_defs.h"
@@ -22,6 +23,7 @@
 #include "../ent/equity.h"
 #include "../ent/game.h"
 #include "../ent/kwg.h"
+#include "../ent/lane_shadow_cache.h"
 #include "../ent/letter_distribution.h"
 #include "../ent/move.h"
 #include "../ent/move_undo.h"
@@ -390,6 +392,9 @@ struct EndgameCtxWorker {
   // The rest of the stuck playouts that passed through a position, with keys
   // salted by stuck_tiles_salt too (see negamax_greedy_leaf_playout).
   PlayoutTailEntry *playout_tail_cache;
+  // The lane shadows of the worker's best-play generations, salted by
+  // stuck_tiles_salt too (see lane_shadow_cache.h).
+  LaneShadowCache *lane_shadow_cache;
   // The opponent's playable tile types at each position along the incremental
   // lists' path, by path length, valid while stuck_tiles_stamp[length] is the
   // stamp of that position's prefix (see worker_opp_stuck_fraction). A stamp
@@ -1369,6 +1374,7 @@ static void solver_worker_destroy(EndgameCtxWorker *solver_worker) {
   free(solver_worker->build_chain_scratch);
   free(solver_worker->stuck_tiles_cache);
   free(solver_worker->playout_tail_cache);
+  lane_shadow_cache_destroy(solver_worker->lane_shadow_cache);
   prng_destroy(solver_worker->prng);
   free(solver_worker);
 }
@@ -1431,6 +1437,10 @@ static EndgameCtxWorker *endgame_ctx_create_worker(EndgameCtx *solver,
   solver_worker->stuck_tiles_salt = STUCK_TILES_SALT_STEP;
   solver_worker->playout_tail_cache =
       calloc_or_die(PLAYOUT_TAIL_CACHE_SIZE, sizeof(PlayoutTailEntry));
+  solver_worker->lane_shadow_cache =
+      lane_shadow_cache_create(ENDGAME_LANE_SHADOW_CACHE_INDEX_BITS);
+  lane_shadow_cache_set_salt(solver_worker->lane_shadow_cache,
+                             solver_worker->stuck_tiles_salt);
   solver_worker->prng = prng_create(base_seed + (uint64_t)ordinal * 12345);
 
   solver_worker->best_pv.game = solver_worker->game_copy;
@@ -1473,6 +1483,8 @@ static void endgame_ctx_reset_worker(EndgameCtxWorker *worker,
   worker->first_deferred_move = 0;
   memset(worker->occupancy_valid, 0, sizeof(worker->occupancy_valid));
   worker->stuck_tiles_salt += STUCK_TILES_SALT_STEP;
+  lane_shadow_cache_set_salt(worker->lane_shadow_cache,
+                             worker->stuck_tiles_salt);
   memset(worker->stuck_tiles_stamp, 0, sizeof(worker->stuck_tiles_stamp));
   prng_seed(worker->prng, base_seed + (uint64_t)worker->ordinal * 12345);
   worker->best_pv.game = worker->game_copy;
@@ -2658,6 +2670,7 @@ static int playout_first_step_from_lists(EndgameCtxWorker *worker,
         .override_kwg = solver_get_pruned_kwg(worker->solver, stm_idx),
         .eq_margin_movegen = 0,
         .target_equity = EQUITY_MAX_VALUE,
+        .lane_shadow_cache = worker->lane_shadow_cache,
     };
     SmallMove found;
     if (path_move_lists_best_play(worker->path_lists, &best_args, &found)) {
@@ -2944,6 +2957,7 @@ static int32_t negamax_greedy_leaf_playout(EndgameCtxWorker *worker,
               worker->solver, game_get_player_on_turn_index(worker->game_copy)),
           .eq_margin_movegen = 0,
           .target_equity = EQUITY_MAX_VALUE,
+          .lane_shadow_cache = worker->lane_shadow_cache,
       };
       generate_moves(&pargs);
       nplays = worker->move_list->count;
@@ -3595,6 +3609,7 @@ static bool pick_first_reply_before_list(EndgameCtxWorker *worker,
       .override_kwg = solver_get_pruned_kwg(worker->solver, stm_idx),
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
+      .lane_shadow_cache = worker->lane_shadow_cache,
   };
   if (worker->path_lists != NULL) {
     return path_move_lists_best_play(worker->path_lists, &best_args,
