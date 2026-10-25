@@ -481,6 +481,10 @@ static inline void board_set_wit_block(Board *b, int row, int col, int dir,
   }
 }
 
+static inline bool board_get_wit_cache_populated(const Board *board) {
+  return board->wit_cache_populated;
+}
+
 // WIT rows borrow storage from lexical data and describe the current board.
 // Discard them whenever either changes without corresponding cache updates.
 // NULL rows conservatively disable the optional pruning.

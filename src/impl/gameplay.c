@@ -526,6 +526,83 @@ void draw_starting_racks(const Game *game) {
   draw_to_full_rack(game, 1);
 }
 
+static void play_move_on_board_tracked(const Move *move, const Game *game,
+                                       MoveUndo *undo) {
+  Board *board = game_get_board(game);
+  int row_start = move_get_row_start(move);
+  int col_start = move_get_col_start(move);
+  int move_dir = move_get_dir(move);
+
+  bool board_was_transposed = false;
+  if (!board_matches_dir(board, move_dir)) {
+    board_transpose(board);
+    board_was_transposed = true;
+    row_start = move_get_col_start(move);
+    col_start = move_get_row_start(move);
+  }
+
+  int tiles_length = move_get_tiles_length(move);
+
+  for (int idx = 0; idx < tiles_length; idx++) {
+    MachineLetter letter = move_get_tile(move, idx);
+    if (letter == PLAYED_THROUGH_MARKER) {
+      continue;
+    }
+    board_set_letter_tracked(board, row_start, col_start + idx, letter, undo);
+    // Occupied squares have no cross set or cross score. The letter write
+    // already saved these squares, so initialize them here without a later
+    // tracked generator call. Preserve the inactive cross index in shared
+    // lexicon mode, matching the existing incremental update policy.
+    const int cross_indices =
+        game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KWG) ? 1 : 2;
+    for (int ci = 0; ci < cross_indices; ci++) {
+      for (int dir = 0; dir < 2; dir++) {
+        Square *square = board_get_writable_square(board, row_start,
+                                                   col_start + idx, dir, ci);
+        square_set_cross_set(square, 0);
+        square_set_cross_score(square, 0);
+      }
+    }
+    if (get_is_blanked(letter)) {
+      letter = BLANK_MACHINE_LETTER;
+    }
+    rack_take_letter(player_get_rack(game_get_player(
+                         game, game_get_player_on_turn_index(game))),
+                     letter);
+  }
+
+  // Update tiles_played (old value already saved by play_move_incremental)
+  board_increment_tiles_played(board, move_get_tiles_played(move));
+
+  if (board_was_transposed) {
+    board_transpose(board);
+  }
+}
+
+// Plays move's tiles onto the board as play_move_on_board does, saving every
+// square written into undo first. A sim rollout records all of its moves in one
+// undo (see game_enable_rollout_board_undo), so the record keeps each square's
+// value from before the rollout. With update_board_sets, the anchors and
+// cross-sets around the move are brought up to date as well, the same way.
+static void record_move_on_board(const Move *move, const Game *game,
+                                 MoveUndo *undo, bool update_board_sets) {
+  undo->move_row_start = (uint8_t)move_get_row_start(move);
+  undo->move_col_start = (uint8_t)move_get_col_start(move);
+  undo->move_tiles_length = (uint8_t)move_get_tiles_length(move);
+  undo->move_dir = (uint8_t)move_get_dir(move);
+  uint16_t tiles_placed_mask = 0;
+  for (int tile_idx = 0; tile_idx < move_get_tiles_length(move); tile_idx++) {
+    if (move_get_tile(move, tile_idx) != PLAYED_THROUGH_MARKER) {
+      tiles_placed_mask |= (uint16_t)(1 << tile_idx);
+    }
+  }
+  undo->tiles_placed_mask = tiles_placed_mask;
+  play_move_on_board_tracked(move, game, undo);
+  if (update_board_sets) {
+    update_deferred_move_into_undo(undo, undo, game);
+  }
+}
+
 // Assumes the move has been validated
 // If the input leave rack is not null, it will record the leave of
 // the play in the leave rack.
@@ -537,15 +614,21 @@ static void play_move_internal(const Move *move, Game *game, Rack *leave,
   Player *player_on_turn = game_get_player(game, player_on_turn_index);
   const Rack *player_on_turn_rack = player_get_rack(player_on_turn);
   if (move_get_type(move) == GAME_EVENT_TILE_PLACEMENT_MOVE) {
-    play_move_on_board(move, game);
-    if (leave) {
-      rack_copy(leave, player_on_turn_rack);
-    }
     // Cross-sets are scratch state used only by subsequent move generation.
     // Callers that play a terminal move whose board state is immediately
-    // discarded (e.g. the final ply of a sim rollout) can skip this work.
-    if (update_cross_sets) {
-      update_cross_set_for_move(move, game);
+    // discarded (e.g. the final ply of a sim rollout) can skip this work, and
+    // when the board's changes are recorded, the anchors' too.
+    MoveUndo *board_undo = game_get_open_rollout_board_undo(game);
+    if (board_undo != NULL) {
+      record_move_on_board(move, game, board_undo, update_cross_sets);
+    } else {
+      play_move_on_board(move, game);
+      if (update_cross_sets) {
+        update_cross_set_for_move(move, game);
+      }
+    }
+    if (leave) {
+      rack_copy(leave, player_on_turn_rack);
     }
     game_set_consecutive_scoreless_turns(game, 0);
 
@@ -616,59 +699,6 @@ void return_phony_letters(Game *game) {
   game_unplay_last_move(game);
   game_start_next_player_turn(game);
   game_increment_consecutive_scoreless_turns(game);
-}
-
-static void play_move_on_board_tracked(const Move *move, const Game *game,
-                                       MoveUndo *undo) {
-  Board *board = game_get_board(game);
-  int row_start = move_get_row_start(move);
-  int col_start = move_get_col_start(move);
-  int move_dir = move_get_dir(move);
-
-  bool board_was_transposed = false;
-  if (!board_matches_dir(board, move_dir)) {
-    board_transpose(board);
-    board_was_transposed = true;
-    row_start = move_get_col_start(move);
-    col_start = move_get_row_start(move);
-  }
-
-  int tiles_length = move_get_tiles_length(move);
-
-  for (int idx = 0; idx < tiles_length; idx++) {
-    MachineLetter letter = move_get_tile(move, idx);
-    if (letter == PLAYED_THROUGH_MARKER) {
-      continue;
-    }
-    board_set_letter_tracked(board, row_start, col_start + idx, letter, undo);
-    // Occupied squares have no cross set or cross score. The letter write
-    // already saved these squares, so initialize them here without a later
-    // tracked generator call. Preserve the inactive cross index in shared
-    // lexicon mode, matching the existing incremental update policy.
-    const int cross_indices =
-        game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KWG) ? 1 : 2;
-    for (int ci = 0; ci < cross_indices; ci++) {
-      for (int dir = 0; dir < 2; dir++) {
-        Square *square = board_get_writable_square(board, row_start,
-                                                   col_start + idx, dir, ci);
-        square_set_cross_set(square, 0);
-        square_set_cross_score(square, 0);
-      }
-    }
-    if (get_is_blanked(letter)) {
-      letter = BLANK_MACHINE_LETTER;
-    }
-    rack_take_letter(player_get_rack(game_get_player(
-                         game, game_get_player_on_turn_index(game))),
-                     letter);
-  }
-
-  // Update tiles_played (old value already saved by play_move_incremental)
-  board_increment_tiles_played(board, move_get_tiles_played(move));
-
-  if (board_was_transposed) {
-    board_transpose(board);
-  }
 }
 
 void play_move_incremental_deferred(const Move *move, Game *game,

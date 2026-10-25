@@ -7,6 +7,7 @@
 #include "board.h"
 #include "kwg.h"
 #include "letter_distribution.h"
+#include "move_undo.h"
 #include "player.h"
 #include <stdbool.h>
 
@@ -57,6 +58,14 @@ void game_set_game_end_reason(Game *game, game_end_reason_t game_end_reason);
 void game_start_next_player_turn(Game *game);
 
 void game_set_backup_mode(Game *game, backup_mode_t backup_mode);
+// Lets the game's first simulation backup record the board squares its moves
+// change instead of copying the whole board, so that unplaying it restores
+// only those (see game_backup). For a sim rollout's game, which plays a few
+// moves after each such backup and then unplays them all at once.
+void game_enable_rollout_board_undo(Game *game);
+// The record the board's changes go into while a backup that records them is
+// open, or NULL.
+MoveUndo *game_get_open_rollout_board_undo(const Game *game);
 void game_backup(Game *game);
 void game_unplay_last_move(Game *game);
 void game_set_starting_player_index(Game *game, int starting_player_index);

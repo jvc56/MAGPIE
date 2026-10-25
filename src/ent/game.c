@@ -13,15 +13,20 @@
 #include "kwg.h"
 #include "kwg_alpha.h"
 #include "letter_distribution.h"
+#include "move_undo.h"
 #include "player.h"
 #include "players_data.h"
 #include "rack.h"
 #include "word_info_table.h"
 #include <stdint.h>
 #include <stdlib.h>
+#include <string.h>
 
 typedef struct MinimalGameBackup {
   Board *board;
+  // Whether this backup recorded the board's changes in the game's rollout
+  // board undo rather than copying the board.
+  bool board_recorded;
   Bag *bag;
   Rack *p0rack;
   Rack *p1rack;
@@ -67,6 +72,11 @@ struct Game {
   int backup_cursor;
   MinimalGameBackup *gcg_game_backup;
   backup_mode_t backup_mode;
+  // The record of the board squares changed since an open simulation backup,
+  // when the game records them (see game_enable_rollout_board_undo), and
+  // whether such a backup is open.
+  MoveUndo *rollout_board_undo;
+  bool rollout_board_undo_open;
 };
 
 game_variant_t game_get_variant(const Game *game) { return game->variant; }
@@ -571,6 +581,17 @@ void game_set_backup_mode(Game *game, backup_mode_t backup_mode) {
   }
 }
 
+void game_enable_rollout_board_undo(Game *game) {
+  if (game->rollout_board_undo == NULL) {
+    game->rollout_board_undo = malloc_or_die(sizeof(MoveUndo));
+  }
+  game->rollout_board_undo_open = false;
+}
+
+MoveUndo *game_get_open_rollout_board_undo(const Game *game) {
+  return game->rollout_board_undo_open ? game->rollout_board_undo : NULL;
+}
+
 void game_update(Game *game, const GameArgs *game_args) {
   game->ld = game_args->ld;
   game->bingo_bonus = int_to_equity(game_args->bingo_bonus);
@@ -621,6 +642,8 @@ Game *game_create(const GameArgs *game_args) {
   game->backup_cursor = 0;
   game->backup_mode = BACKUP_MODE_OFF;
   game->gcg_game_backup = NULL;
+  game->rollout_board_undo = NULL;
+  game->rollout_board_undo_open = false;
   return game;
 }
 
@@ -657,6 +680,8 @@ Game *game_duplicate(const Game *game) {
   new_game->backup_cursor = 0;
   new_game->backup_mode = BACKUP_MODE_OFF;
   new_game->gcg_game_backup = NULL;
+  new_game->rollout_board_undo = NULL;
+  new_game->rollout_board_undo_open = false;
   return new_game;
 }
 
@@ -683,6 +708,7 @@ void game_copy(Game *dst, const Game *src) {
   dst->dual_lexicon_mode = src->dual_lexicon_mode;
   dst->backup_cursor = 0;
   dst->backup_mode = BACKUP_MODE_OFF;
+  dst->rollout_board_undo_open = false;
 }
 
 // Backups do not restore the move list or
@@ -701,7 +727,23 @@ void game_backup(Game *game) {
     state = game->gcg_game_backup;
     break;
   }
-  board_copy(state->board, game->board);
+  // The board's WIT cache is no Square, so a record of squares cannot restore
+  // it: a populated one is copied with the board.
+  state->board_recorded = game->backup_mode == BACKUP_MODE_SIMULATION &&
+                          game->rollout_board_undo != NULL &&
+                          !game->rollout_board_undo_open &&
+                          !board_get_wit_cache_populated(game->board);
+  if (state->board_recorded) {
+    MoveUndo *undo = game->rollout_board_undo;
+    move_undo_reset(undo);
+    undo->old_tiles_played = board_get_tiles_played(game->board);
+    memcpy(undo->old_number_of_row_anchors, game->board->number_of_row_anchors,
+           sizeof(undo->old_number_of_row_anchors));
+    undo->old_cross_sets_valid = board_get_cross_sets_valid(game->board);
+    game->rollout_board_undo_open = true;
+  } else {
+    board_copy(state->board, game->board);
+  }
   bag_copy(state->bag, game->bag);
   state->game_end_reason = game->game_end_reason;
   state->player_on_turn_index = game->player_on_turn_index;
@@ -744,7 +786,19 @@ void game_unplay_last_move(Game *game) {
   rack_copy(player_get_rack(player0), state->p0rack);
   rack_copy(player_get_rack(player1), state->p1rack);
   bag_copy(game->bag, state->bag);
-  board_copy(game->board, state->board);
+  if (state->board_recorded) {
+    // A WIT cache the moves populated describes their board, not this one.
+    const MoveUndo *undo = game->rollout_board_undo;
+    move_undo_restore_squares(undo, game->board);
+    board_clear_wit_cache(game->board);
+    board_set_tiles_played(game->board, undo->old_tiles_played);
+    memcpy(game->board->number_of_row_anchors, undo->old_number_of_row_anchors,
+           sizeof(game->board->number_of_row_anchors));
+    board_set_cross_sets_valid(game->board, undo->old_cross_sets_valid);
+    game->rollout_board_undo_open = false;
+  } else {
+    board_copy(game->board, state->board);
+  }
 }
 
 void single_game_backup_destroy(MinimalGameBackup *mgb) {
@@ -777,6 +831,7 @@ void game_destroy(Game *game) {
   player_destroy(game->players[0]);
   player_destroy(game->players[1]);
   backups_destroy(game);
+  free(game->rollout_board_undo);
   free(game);
 }
 
