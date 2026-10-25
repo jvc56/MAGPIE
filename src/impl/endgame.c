@@ -106,9 +106,12 @@ enum {
   EG_MAX_PLAYED_MOVES = (2 * MAX_SEARCH_DEPTH) + EG_MAX_LEAF_PLAYOUT + 1,
   // sort_small_moves_by_estimate sorts runs this short by insertion.
   SMALL_MOVE_INSERTION_SORT_MAX = 16,
-  // compute_build_chain_values' buckets: a line (passes, then each row, then
-  // each column) for each count of tiles played, 0 to RACK_SIZE.
-  BUILD_CHAIN_BUCKETS = (1 + 2 * BOARD_DIM) * (RACK_SIZE + 1),
+  // compute_build_chain_values' lines: passes, then each row, then each
+  // column.
+  BUILD_CHAIN_LINES = 1 + 2 * BOARD_DIM,
+  // The int arrays of move_count entries compute_build_chain_values keeps in
+  // its scratch.
+  BUILD_CHAIN_SCRATCH_ARRAYS = 6,
   // Entries in a worker's cache of the opponent's playable tile types; a
   // power of two.
   STUCK_TILES_CACHE_SIZE = 1 << 15,
@@ -2344,115 +2347,112 @@ static int *compute_build_chain_values(EndgameCtxWorker *worker, int move_count,
     return NULL;
   }
 
-  if (4 * move_count > worker->build_chain_scratch_capacity) {
-    worker->build_chain_scratch_capacity = 4 * move_count;
+  const int scratch_needed = BUILD_CHAIN_SCRATCH_ARRAYS * move_count;
+  if (scratch_needed > worker->build_chain_scratch_capacity) {
+    worker->build_chain_scratch_capacity = scratch_needed;
     worker->build_chain_scratch = realloc_or_die(
-        worker->build_chain_scratch, sizeof(int) * (size_t)(4 * move_count));
+        worker->build_chain_scratch, sizeof(int) * (size_t)scratch_needed);
   }
-  int *build_values = worker->build_chain_scratch;
+  const SmallMove *moves =
+      (const SmallMove *)(worker->small_move_arena->memory + arena_offset);
   // Which squares hold tiles, for matching the tiles of nested moves.
   const BoardOccupancy *occupancy = worker_board_occupancy(worker);
-  int *bucket = build_values + move_count;
-  int *order = bucket + move_count;
-  int *line_start = order + move_count;
+  // By move: its value and its line.
+  int *build_values = worker->build_chain_scratch;
+  int *line = build_values + move_count;
+  // The moves ordered by tiles_played descending, then in the final order.
+  int *by_tiles = line + move_count;
+  int *order = by_tiles + move_count;
+  // By position in the final order: where the move's span starts along its
+  // line and where it ends, one past its last square.
+  int *span_start = order + move_count;
+  int *span_end = span_start + move_count;
 
   // Only a move on the same line, in the same direction, can contain another,
   // so the moves are grouped by line (a pass, the row of a horizontal move,
   // the column of a vertical one) and, within a line, ordered by tiles_played
-  // descending for bottom-up computation, with a counting sort over those
-  // buckets. A move is only compared with the moves of its own line.
-  int bucket_starts[BUILD_CHAIN_BUCKETS + 1] = {0};
+  // descending for bottom-up computation. A move is only compared with the
+  // moves of its own line. A stable counting sort by tiles_played and then
+  // one by line give that order, each over a handful of counts.
+  int tile_starts[RACK_SIZE + 2] = {0};
+  int line_starts[BUILD_CHAIN_LINES + 1] = {0};
   for (int i = 0; i < move_count; i++) {
-    const SmallMove *sm =
-        (const SmallMove *)(worker->small_move_arena->memory + arena_offset +
-                            i * sizeof(SmallMove));
-    int line = 0;
+    const SmallMove *sm = &moves[i];
+    line[i] = 0;
     if (!small_move_is_pass(sm)) {
-      line = 1 + (small_move_is_vertical(sm)
-                      ? BOARD_DIM + small_move_get_col_start(sm)
-                      : small_move_get_row_start(sm));
+      line[i] = 1 + (small_move_is_vertical(sm)
+                         ? BOARD_DIM + small_move_get_col_start(sm)
+                         : small_move_get_row_start(sm));
     }
-    bucket[i] =
-        line * (RACK_SIZE + 1) + (RACK_SIZE - small_move_get_tiles_played(sm));
-    bucket_starts[bucket[i] + 1]++;
+    line_starts[line[i] + 1]++;
+    tile_starts[RACK_SIZE - small_move_get_tiles_played(sm) + 1]++;
   }
-  for (int bucket_idx = 0; bucket_idx < BUILD_CHAIN_BUCKETS; bucket_idx++) {
-    bucket_starts[bucket_idx + 1] += bucket_starts[bucket_idx];
+  for (int count_idx = 0; count_idx < RACK_SIZE + 1; count_idx++) {
+    tile_starts[count_idx + 1] += tile_starts[count_idx];
+  }
+  for (int line_idx = 0; line_idx < BUILD_CHAIN_LINES; line_idx++) {
+    line_starts[line_idx + 1] += line_starts[line_idx];
   }
   for (int i = 0; i < move_count; i++) {
-    order[bucket_starts[bucket[i]]++] = i;
+    by_tiles[tile_starts[RACK_SIZE -
+                         small_move_get_tiles_played(&moves[i])]++] = i;
   }
-  for (int oi = 0; oi < move_count; oi++) {
-    const bool same_line =
-        oi > 0 && bucket[order[oi]] / (RACK_SIZE + 1) ==
-                      bucket[order[oi - 1]] / (RACK_SIZE + 1);
-    line_start[oi] = same_line ? line_start[oi - 1] : oi;
+  for (int tiles_idx = 0; tiles_idx < move_count; tiles_idx++) {
+    const int i = by_tiles[tiles_idx];
+    const int oi = line_starts[line[i]]++;
+    order[oi] = i;
+    span_start[oi] = small_move_is_vertical(&moves[i])
+                         ? small_move_get_row_start(&moves[i])
+                         : small_move_get_col_start(&moves[i]);
+    span_end[oi] = span_start[oi] + small_move_get_play_length(&moves[i]);
   }
 
-  // Bottom-up: process moves from most tiles to fewest
+  // Bottom-up: process moves from most tiles to fewest. The moves of oi's
+  // line with more tiles than it are those from line_begin to
+  // more_tiles_end, already processed, so their build_values are final.
+  int line_begin = 0;
+  int more_tiles_end = 0;
   for (int oi = 0; oi < move_count; oi++) {
-    int i = order[oi];
-    const SmallMove *sm_a =
-        (const SmallMove *)(worker->small_move_arena->memory + arena_offset +
-                            i * sizeof(SmallMove));
+    const int i = order[oi];
+    const SmallMove *sm_a = &moves[i];
+    const int tp_a = small_move_get_tiles_played(sm_a);
+    if (oi == 0 || line[i] != line[order[oi - 1]]) {
+      line_begin = oi;
+      more_tiles_end = oi;
+    } else if (tp_a != small_move_get_tiles_played(&moves[order[oi - 1]])) {
+      more_tiles_end = oi;
+    }
     build_values[i] = small_move_get_score(sm_a);
     if (small_move_is_pass(sm_a)) {
       continue;
     }
+    const bool vert_a = small_move_is_vertical(sm_a);
+    const int row_a = small_move_get_row_start(sm_a);
+    const int col_a = small_move_get_col_start(sm_a);
 
-    bool vert_a = small_move_is_vertical(sm_a);
-    int row_a = small_move_get_row_start(sm_a);
-    int col_a = small_move_get_col_start(sm_a);
-    int len_a = small_move_get_play_length(sm_a);
-    int tp_a = small_move_get_tiles_played(sm_a);
-
-    // Find the best extension (containing move with more tiles, already
-    // processed so build_values[j] is final)
+    // Find the best extension: a move of the line with more tiles whose span
+    // contains this one's.
     int best_extension = 0;
-    for (int oj = line_start[oi]; oj < oi; oj++) {
-      int j = order[oj];
-      const SmallMove *sm_b =
-          (const SmallMove *)(worker->small_move_arena->memory + arena_offset +
-                              j * sizeof(SmallMove));
-      if (small_move_is_pass(sm_b)) {
+    for (int oj = line_begin; oj < more_tiles_end; oj++) {
+      if (span_start[oi] < span_start[oj] || span_end[oi] > span_end[oj]) {
         continue;
       }
-      int tp_b = small_move_get_tiles_played(sm_b);
-      if (tp_b <= tp_a) {
-        continue;
-      }
-      if (small_move_is_vertical(sm_b) != vert_a) {
-        continue;
-      }
-
-      int row_b = small_move_get_row_start(sm_b);
-      int col_b = small_move_get_col_start(sm_b);
-      int len_b = small_move_get_play_length(sm_b);
-
-      bool contained;
-      if (!vert_a) {
-        contained = (row_a == row_b) && (col_a >= col_b) &&
-                    (col_a + len_a <= col_b + len_b);
-      } else {
-        contained = (col_a == col_b) && (row_a >= row_b) &&
-                    (row_a + len_a <= row_b + len_b);
-      }
-      if (!contained) {
-        continue;
-      }
+      const int j = order[oj];
+      const SmallMove *sm_b = &moves[j];
 
       // Verify the tiles match. Both moves fill every empty square of their
       // spans, so A's placed tiles are B's, from the B tile after the empty
       // squares between their starts.
       int offset_in_b = 0;
       if (!vert_a) {
+        const int col_b = span_start[oj];
         const uint32_t before_a =
             ((UINT32_C(1) << col_a) - 1) & ~((UINT32_C(1) << col_b) - 1);
         offset_in_b =
             col_a - col_b -
             __builtin_popcount(occupancy->occupied_rows[row_a] & before_a);
       } else {
-        for (int row = row_b; row < row_a; row++) {
+        for (int row = span_start[oj]; row < row_a; row++) {
           if (!(occupancy->occupied_rows[row] & (UINT32_C(1) << col_a))) {
             offset_in_b++;
           }
