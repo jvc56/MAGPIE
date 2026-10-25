@@ -3944,6 +3944,10 @@ void gen_shadow(MoveGen *gen) {
   // ordering of output.
   if (gen->move_record_type != MOVE_RECORD_ALL_SMALL) {
     anchor_heapify_all(&gen->anchor_heap);
+  } else {
+    // The anchors are still extracted one by one, and each extraction's sift
+    // reads the sentinels.
+    anchor_heap_set_sentinels(&gen->anchor_heap);
   }
 }
 
