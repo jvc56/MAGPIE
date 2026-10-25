@@ -4146,6 +4146,7 @@ static void vnt_peg_pick_nets(const Game *game, int threads,
       /*nested_emptier_ply_cap=*/0, nest_depth, vnt_best_reply_disabled(),
       chooser, chooser_ctx, chooser2, chooser2_ctx,
       /*eval_bag_order=*/NULL, /*eval_bag_order_len=*/0, only, n_only,
+      /*only_moves_ranked=*/false,
       /*protect_moves=*/NULL, /*n_protect_moves=*/0,
       /*include_per_scenario=*/false, trace ? vnt_peg_trace_stage : NULL,
       /*on_cand_done=*/NULL, /*on_scenario_done=*/NULL, trace ? &start : NULL,
@@ -8542,6 +8543,338 @@ static void vnt_peg_sim(const StringSplitter *fields) {
   config_destroy(config);
 }
 
+// pegbudget arms (codes in PREFIX.pegb.csv; b = the budget's index).
+enum {
+  VNT_PB_MAX_BUDGETS = 8,
+  VNT_PB_ARM_NET = 0,         // the 2PEG chooser's pick, no search
+  VNT_PB_ARM_PEG = 100,       // default PEG (no pass), budget b
+  VNT_PB_ARM_PEG_NET = 200,   // PEG with the 1PEG net nested, budget b
+  VNT_PB_ARM_NET_ORDER = 300, // PEG with the net nested, over the chooser's
+                              // top K in its order, budget b
+  VNT_PB_ORDER_K = 16,
+};
+
+// Live-mode completions of the first halving stage (PegArgs.on_cand_done).
+static void vnt_peg_budget_cand_done(int stage_idx, int cand_rank,
+                                     const Move *cand, double win_pct,
+                                     double mean_spread, int scen_done,
+                                     int64_t completed_ns, bool reordered,
+                                     void *user_data) {
+  (void)cand_rank;
+  (void)cand;
+  (void)win_pct;
+  (void)mean_spread;
+  (void)scen_done;
+  (void)completed_ns;
+  (void)reordered;
+  if (stage_idx == 1) {
+    (*(int *)user_data)++;
+  }
+}
+
+// One budgeted root PEG pick: default schedule, nested 1PEG chooser (NULL =
+// the staged inner peg), over only (n_only moves; ranked = keep their order
+// with the K-first schedule, sequential live evaluation). Writes the pick,
+// wall ms, the last completed stage, whether it was partial and how many
+// candidates the first halving stage finished (ranked only).
+static void vnt_peg_budget_pick(const Game *game, int threads,
+                                PegPeg1Chooser chooser, void *chooser_ctx,
+                                const Move *const *only, int n_only,
+                                bool ranked, double budget_s, Move *best,
+                                double *ms, int *stage, bool *partial,
+                                int *stage1_done) {
+  static const int caps[] = {8, 4, 2};
+  static const int ranked_top_k[] = {VNT_PB_ORDER_K, 8, 4, 2};
+  ThreadControl *control = thread_control_create();
+  thread_control_set_status(control, THREAD_CONTROL_STATUS_STARTED);
+  PegPoll *poll = ranked ? peg_poll_create() : NULL;
+  *stage1_done = 0;
+  PegArgs args;
+  peg_args_fill(
+      game, control, threads, budget_s, /*max_stage=*/0,
+      /*greedy_seed_only=*/false, ranked ? ranked_top_k : NULL,
+      ranked ? (int)(sizeof(ranked_top_k) / sizeof(ranked_top_k[0])) : 0,
+      /*inner_top_k=*/0, PEG_OPP_RATIONAL, /*scenario_stride=*/0,
+      /*nested_enabled=*/true, /*nested_cand_cap=*/0, caps,
+      (int)(sizeof(caps) / sizeof(caps[0])), /*nested_stride=*/0,
+      /*nested_strides_by_bag=*/NULL, /*nested_n_strides_by_bag=*/0,
+      /*nested_emptier_ply_cap=*/0, PEG_NESTED_DEFAULT_DEPTH,
+      vnt_best_reply_disabled(), chooser, chooser_ctx, NULL, NULL,
+      /*eval_bag_order=*/NULL, /*eval_bag_order_len=*/0, only, n_only, ranked,
+      /*protect_moves=*/NULL, /*n_protect_moves=*/0,
+      /*include_per_scenario=*/false, /*on_stage_start=*/NULL,
+      ranked ? vnt_peg_budget_cand_done : NULL, /*on_scenario_done=*/NULL,
+      stage1_done, poll, /*shared_endgame_tt=*/NULL, /*checkpoint=*/NULL,
+      /*resume=*/false, &args);
+  PegResult result;
+  ErrorStack *errors = error_stack_create();
+  const int64_t start = ctimer_monotonic_ns();
+  peg_solve(&args, &result, errors);
+  *ms = (double)(ctimer_monotonic_ns() - start) / 1e6;
+  if (!error_stack_is_empty(errors) || result.n_top_cands < 1) {
+    error_stack_print_and_reset(errors);
+    log_fatal("pegbudget peg_solve failed");
+  }
+  move_copy(best, &result.best_move);
+  *stage = result.last_completed_stage;
+  *partial = result.last_stage_partial;
+  peg_result_destroy(&result);
+  error_stack_destroy(errors);
+  if (poll != NULL) {
+    peg_poll_destroy(poll);
+  }
+  thread_control_destroy(control);
+}
+
+// The 2PEG chooser's ranking of root's static top 64 (its staged best N by
+// the full model, then the rest by the first model): writes up to max moves
+// in order into order[], returns how many, and the chooser's pick rank.
+static int vnt_peg_budget_rank(VntPeg2Chooser *chooser, const Game *root,
+                               Move *candidates, const Move **order, int max,
+                               int *pick_rank) {
+  VntPeg2ChooserSlot *slot = &chooser->slot[0];
+  VntPeg2PickTiming timing = {0};
+  int count, scored;
+  float scores[VNT_PEG1_POOL], first_scores[VNT_PEG1_POOL];
+  *pick_rank = vnt_peg2_cheap_pick(root, chooser->model, chooser->first,
+                                   chooser->stage_n, chooser->top_k,
+                                   &slot->work, candidates, &count, &scored,
+                                   scores, first_scores, &timing, NULL);
+  int idx[VNT_PEG1_POOL];
+  double key[VNT_PEG1_POOL];
+  for (int rank = 0; rank < count; rank++) {
+    idx[rank] = rank;
+    // Fully scored ranks first (by the full model), then by the first model.
+    key[rank] = !isnan(scores[rank])     ? 1e9 + scores[rank]
+                : chooser->first != NULL ? (double)first_scores[rank]
+                                         : -1e18;
+  }
+  for (int left = 1; left < count; left++) {
+    const int cur = idx[left];
+    int pos = left;
+    while (pos > 0 && (key[idx[pos - 1]] < key[cur] ||
+                       (key[idx[pos - 1]] == key[cur] && idx[pos - 1] > cur))) {
+      idx[pos] = idx[pos - 1];
+      pos--;
+    }
+    idx[pos] = cur;
+  }
+  const int n = count < max ? count : max;
+  for (int pos = 0; pos < n; pos++) {
+    order[pos] = &candidates[idx[pos]];
+  }
+  if (*pick_rank >= 0 && n > 0 && order[0] != &candidates[*pick_rank]) {
+    log_fatal("pegbudget ranking disagrees with the chooser's pick");
+  }
+  return n;
+}
+
+// Matched-budget 2PEG picks (pegbudget/PROTOCOL-ENGINE.txt). Fields:
+// positions prefix (2 tiles in the bag), output prefix, budgets in seconds
+// (comma-separated), 1PEG first, second|-, shortlist, w_spread, scale, 2PEG
+// model, 2PEG first|-, stage N, top K. VNT_PB_THREADS (default 10) threads
+// per PEG solve; VNT_PB_ARMS a subset of "net,peg,pegnet,order" (default
+// all). Writes PREFIX.pegb.csv: root, code, arm, budget_s, ms, net_ms,
+// stage, partial, stage1_done, quoted move (a peg3oracle picks file).
+// Roots already in the output are skipped.
+static void vnt_peg_budget(const StringSplitter *fields) {
+  if (string_splitter_get_number_of_items(fields) != 13) {
+    log_fatal("pegbudget needs positions prefix, output prefix, budgets, "
+              "first, second|-, shortlist, w_spread, scale, 2PEG model, 2PEG "
+              "first|-, stage N, top K");
+  }
+  const char *data = string_splitter_get_item(fields, 1);
+  const char *prefix = string_splitter_get_item(fields, 2);
+  double budgets[VNT_PB_MAX_BUDGETS];
+  int n_budgets = 0;
+  StringSplitter *budget_items =
+      split_string(string_splitter_get_item(fields, 3), ',', true);
+  for (int idx = 0; idx < string_splitter_get_number_of_items(budget_items);
+       idx++) {
+    if (n_budgets == VNT_PB_MAX_BUDGETS) {
+      log_fatal("pegbudget takes at most %d budgets", VNT_PB_MAX_BUDGETS);
+    }
+    budgets[n_budgets] =
+        strtod(string_splitter_get_item(budget_items, idx), NULL);
+    if (budgets[n_budgets] <= 0) {
+      log_fatal("pegbudget budgets must be positive");
+    }
+    n_budgets++;
+  }
+  string_splitter_destroy(budget_items);
+  const char *threads_env = getenv("VNT_PB_THREADS");
+  const int threads =
+      threads_env != NULL && atoi(threads_env) > 0 ? atoi(threads_env) : 10;
+  const char *arms_env = getenv("VNT_PB_ARMS");
+  StringSplitter *arm_items = split_string(
+      arms_env != NULL ? arms_env : "net,peg,pegnet,order", ',', true);
+  bool arm_net = false, arm_peg = false, arm_peg_net = false, arm_order = false;
+  for (int idx = 0; idx < string_splitter_get_number_of_items(arm_items);
+       idx++) {
+    const char *item = string_splitter_get_item(arm_items, idx);
+    arm_net |= strings_equal(item, "net");
+    arm_peg |= strings_equal(item, "peg");
+    arm_peg_net |= strings_equal(item, "pegnet");
+    arm_order |= strings_equal(item, "order");
+  }
+  string_splitter_destroy(arm_items);
+  char *out_path = get_formatted_string("%s.pegb.csv", prefix);
+  char *line = NULL;
+  size_t capacity = 0;
+  int done_capacity = 64, n_done = 0;
+  int *done_roots = malloc_or_die(sizeof(int) * (size_t)done_capacity);
+  FILE *previous = fopen(out_path, "r");
+  bool fresh = previous == NULL;
+  if (previous != NULL) {
+    fresh = fgetc(previous) == EOF;
+    rewind(previous);
+    (void)getline_ignore_carriage_return(&line, &capacity, previous);
+    while (getline_ignore_carriage_return(&line, &capacity, previous) >= 0) {
+      int root_id;
+      if (sscanf(line, "%d,", &root_id) == 1 &&
+          (n_done == 0 || done_roots[n_done - 1] != root_id)) {
+        if (n_done == done_capacity) {
+          done_capacity *= 2;
+          done_roots =
+              realloc_or_die(done_roots, sizeof(int) * (size_t)done_capacity);
+        }
+        done_roots[n_done++] = root_id;
+      }
+    }
+    fclose(previous);
+  }
+  FILE *output = fopen_or_die(out_path, "a");
+  free(out_path);
+  if (fresh) {
+    fprintf(output, "root,code,arm,budget_s,ms,net_ms,stage,partial,"
+                    "stage1_done,move\n");
+  }
+  Config *config = vnt_peg2_config();
+  Game *root = config_get_game(config);
+  VntPegNet *net = vnt_peg_net_create(
+      string_splitter_get_item(fields, 4), string_splitter_get_item(fields, 5),
+      atoi(string_splitter_get_item(fields, 6)),
+      strtod(string_splitter_get_item(fields, 7), NULL),
+      strtod(string_splitter_get_item(fields, 8), NULL), root, threads + 1);
+  VntPeg2Chooser *chooser = vnt_peg2_chooser_create(
+      string_splitter_get_item(fields, 9), string_splitter_get_item(fields, 10),
+      atoi(string_splitter_get_item(fields, 11)),
+      atoi(string_splitter_get_item(fields, 12)), root, 1);
+  net->cache = true;
+  MoveList *pool = move_list_create(VNT_PEG1_POOL + 1);
+  MoveList *wide = move_list_create(VNT_PEG2_WIDE_CAP);
+  Move *wide_moves = malloc_or_die(sizeof(Move) * VNT_PEG2_WIDE_CAP);
+  const Move **placements = malloc_or_die(sizeof(Move *) * VNT_PEG2_WIDE_CAP);
+  ErrorStack *errors = error_stack_create();
+  StringBuilder *name = string_builder_create();
+  char *path = get_formatted_string("%s.positions.csv", data);
+  FILE *positions = fopen_or_die(path, "r");
+  free(path);
+  (void)getline_ignore_carriage_return(&line, &capacity, positions);
+  while (true) {
+    int expected;
+    uint64_t source_seed;
+    const int root_id = vnt_peg2_next_root(positions, &line, &capacity, root,
+                                           errors, 2, &expected, &source_seed);
+    if (root_id < 0) {
+      break;
+    }
+    bool skip = false;
+    for (int idx = 0; idx < n_done && !skip; idx++) {
+      skip = done_roots[idx] == root_id;
+    }
+    if (skip) {
+      continue;
+    }
+    int unseen[VALUE_NET_TILE_TYPES];
+    if (vnt_peg1_public_unseen(root, unseen) != VNT_PEG2_UNSEEN) {
+      log_fatal("pegbudget root does not have nine unseen tiles");
+    }
+    Move candidates[VNT_PEG1_POOL];
+    int pass_rank;
+    const int count = vnt_peg1_pool(root, pool, candidates, &pass_rank);
+    if (count != expected) {
+      log_fatal("pegbudget candidate replay mismatch");
+    }
+    const int n_placements = vnt_peg2_wide_pool(root, wide, wide_moves);
+    for (int rank = 0; rank < n_placements; rank++) {
+      placements[rank] = &wide_moves[rank];
+    }
+    // Each row: code, arm name, budget, ms, net ms, stage, partial, done, pick.
+    Move pick;
+    if (arm_net) {
+      const Move *order[VNT_PEG1_POOL];
+      int pick_rank;
+      const int64_t start = ctimer_monotonic_ns();
+      vnt_peg_budget_rank(chooser, root, candidates, order, 1, &pick_rank);
+      const double net_ms = (double)(ctimer_monotonic_ns() - start) / 1e6;
+      move_copy(&pick, order[0]);
+      string_builder_clear(name);
+      string_builder_add_move(name, game_get_board(root), &pick,
+                              game_get_ld(root), false);
+      fprintf(output, "%d,%d,net,0,%.3f,%.3f,0,0,0,\"%s\"\n", root_id,
+              VNT_PB_ARM_NET, net_ms, net_ms, string_builder_peek(name));
+    }
+    for (int bud = 0; bud < n_budgets; bud++) {
+      for (int arm = 0; arm < 3; arm++) {
+        if ((arm == 0 && !arm_peg) || (arm == 1 && !arm_peg_net) ||
+            (arm == 2 && !arm_order)) {
+          continue;
+        }
+        double ms = 0, net_ms = 0;
+        int stage = 0, stage1_done = 0;
+        bool partial = false;
+        vnt_peg_net_reset(net);
+        if (arm == 2) {
+          const Move *order[VNT_PEG1_POOL];
+          int pick_rank;
+          const int64_t start = ctimer_monotonic_ns();
+          const int n_order = vnt_peg_budget_rank(
+              chooser, root, candidates, order, VNT_PB_ORDER_K, &pick_rank);
+          net_ms = (double)(ctimer_monotonic_ns() - start) / 1e6;
+          const double left = budgets[bud] - net_ms / 1e3;
+          if (n_order < 2 || left <= 0) {
+            move_copy(&pick, order[0]);
+          } else {
+            vnt_peg_budget_pick(root, threads, vnt_peg_net_chooser, net, order,
+                                n_order, true, left, &pick, &ms, &stage,
+                                &partial, &stage1_done);
+          }
+          ms += net_ms;
+        } else {
+          vnt_peg_budget_pick(
+              root, threads, arm == 1 ? vnt_peg_net_chooser : NULL,
+              arm == 1 ? net : NULL, placements, n_placements, false,
+              budgets[bud], &pick, &ms, &stage, &partial, &stage1_done);
+        }
+        static const char *const arm_names[] = {"peg", "pegnet", "order"};
+        static const int arm_codes[] = {VNT_PB_ARM_PEG, VNT_PB_ARM_PEG_NET,
+                                        VNT_PB_ARM_NET_ORDER};
+        string_builder_clear(name);
+        string_builder_add_move(name, game_get_board(root), &pick,
+                                game_get_ld(root), false);
+        fprintf(output, "%d,%d,%s,%g,%.3f,%.3f,%d,%d,%d,\"%s\"\n", root_id,
+                arm_codes[arm] + bud, arm_names[arm], budgets[bud], ms, net_ms,
+                stage, partial, stage1_done, string_builder_peek(name));
+      }
+    }
+    fflush(output);
+  }
+  fclose(positions);
+  fclose(output);
+  string_builder_destroy(name);
+  error_stack_destroy(errors);
+  free(placements);
+  free(wide_moves);
+  move_list_destroy(wide);
+  move_list_destroy(pool);
+  vnt_peg2_chooser_destroy(chooser);
+  vnt_peg_net_destroy(net);
+  config_destroy(config);
+  free(done_roots);
+  free(line);
+}
+
 // pegnet:<mode>:<fields>: the PEG-net harness modes (1PEG/2PEG/3PEG data,
 // choosers, evaluation, oracles and pegsim), split from value_net_test.c.
 void peg_net_test_run_spec(const char *spec) {
@@ -8612,6 +8945,8 @@ void peg_net_test_run_spec(const char *spec) {
     vnt_pegn_positions(fields, bag_size);
   } else if (strings_equal(mode, "peg3oracle")) {
     vnt_peg3_oracle(fields);
+  } else if (strings_equal(mode, "pegbudget")) {
+    vnt_peg_budget(fields);
   } else {
     log_fatal("unknown pegnet spec: %s", spec);
   }
