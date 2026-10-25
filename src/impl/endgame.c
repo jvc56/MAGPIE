@@ -18,6 +18,7 @@
 #include "../ent/bag.h"
 #include "../ent/board.h"
 #include "../ent/bonus_square.h"
+#include "../ent/cross_set_cache.h"
 #include "../ent/dictionary_word.h"
 #include "../ent/endgame_results.h"
 #include "../ent/equity.h"
@@ -395,6 +396,9 @@ struct EndgameCtxWorker {
   // The lane shadows of the worker's best-play generations, salted by
   // stuck_tiles_salt too (see lane_shadow_cache.h).
   LaneShadowCache *lane_shadow_cache;
+  // The classic cross sets of the worker's game, salted by stuck_tiles_salt
+  // too, since each solve prunes its own lexica (see cross_set_cache.h).
+  CrossSetCache *cross_set_cache;
   // The opponent's playable tile types at each position along the incremental
   // lists' path, by path length, valid while stuck_tiles_stamp[length] is the
   // stamp of that position's prefix (see worker_opp_stuck_fraction). A stamp
@@ -1375,6 +1379,7 @@ static void solver_worker_destroy(EndgameCtxWorker *solver_worker) {
   free(solver_worker->stuck_tiles_cache);
   free(solver_worker->playout_tail_cache);
   lane_shadow_cache_destroy(solver_worker->lane_shadow_cache);
+  cross_set_cache_destroy(solver_worker->cross_set_cache);
   prng_destroy(solver_worker->prng);
   free(solver_worker);
 }
@@ -1441,6 +1446,12 @@ static EndgameCtxWorker *endgame_ctx_create_worker(EndgameCtx *solver,
       lane_shadow_cache_create(ENDGAME_LANE_SHADOW_CACHE_INDEX_BITS);
   lane_shadow_cache_set_salt(solver_worker->lane_shadow_cache,
                              solver_worker->stuck_tiles_salt);
+  solver_worker->cross_set_cache =
+      cross_set_cache_create(ENDGAME_CROSS_SET_CACHE_INDEX_BITS);
+  cross_set_cache_set_salt(solver_worker->cross_set_cache,
+                           solver_worker->stuck_tiles_salt);
+  game_set_cross_set_cache(solver_worker->game_copy,
+                           solver_worker->cross_set_cache);
   solver_worker->prng = prng_create(base_seed + (uint64_t)ordinal * 12345);
 
   solver_worker->best_pv.game = solver_worker->game_copy;
@@ -1485,6 +1496,7 @@ static void endgame_ctx_reset_worker(EndgameCtxWorker *worker,
   worker->stuck_tiles_salt += STUCK_TILES_SALT_STEP;
   lane_shadow_cache_set_salt(worker->lane_shadow_cache,
                              worker->stuck_tiles_salt);
+  cross_set_cache_set_salt(worker->cross_set_cache, worker->stuck_tiles_salt);
   memset(worker->stuck_tiles_stamp, 0, sizeof(worker->stuck_tiles_stamp));
   prng_seed(worker->prng, base_seed + (uint64_t)worker->ordinal * 12345);
   worker->best_pv.game = worker->game_copy;
