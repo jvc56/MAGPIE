@@ -207,6 +207,13 @@ static inline void board_set_cross_score_tracked(Board *b, int row, int col,
 static inline bool board_set_anchor_tracked(Board *board, int row, int col,
                                             int dir, bool anchor,
                                             MoveUndo *undo) {
+  // Every anchor writer sets both cross indices, so ci 0 holds the value of
+  // both. An unchanged anchor needs no save and no write.
+  if (board_get_readonly_square(board, row, col, dir, 0)->anchor == anchor) {
+    assert(board_get_readonly_square(board, row, col, dir, 1)->anchor ==
+           anchor);
+    return anchor;
+  }
   bool old_anchor = false;
   for (int ci = 0; ci < 2; ci++) {
     move_undo_save_square_at(undo, board, row, col, dir, ci);
