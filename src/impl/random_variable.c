@@ -464,6 +464,9 @@ SimmerWorker *simmer_create_worker(const SimArgs *sim_args) {
   simmer_worker->game = game_duplicate(sim_args->game);
   simmer_worker_set_rollout_pat(simmer_worker, sim_args);
   game_set_backup_mode(simmer_worker->game, BACKUP_MODE_SIMULATION);
+  // A rollout plays its candidate and plies, then unplays them all at once,
+  // so recording the squares they change beats copying the board twice.
+  game_enable_rollout_board_undo(simmer_worker->game);
   simmer_worker->move_list = move_list_create(1);
   simmer_worker->prng = prng_create(0);
   return simmer_worker;
