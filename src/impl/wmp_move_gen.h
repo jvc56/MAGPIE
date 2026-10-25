@@ -830,11 +830,14 @@ wmp_move_gen_subrack_leave_kept(const SubrackInfo *nonplaythrough_info,
 //
 // The leave check needs no lookup, so it runs over the subracks first, and
 // only those it keeps are hashed and filtered: in a sim, it drops about a third
-// of them. Every kept subrack gets the same straight-line work with no branch
-// on what it holds, so the filter loads overlap and no branch mispredicts. The
-// eager path looks up every nonplaythrough subrack before generation, so for a
-// nonplaythrough anchor there the entry alone decides and the filter, which
-// would only repeat it, is skipped.
+// of them. On the lazy path, a nonplaythrough subrack an earlier anchor
+// resolved is decided by its entry and not filtered either: its filter word
+// would only be loaded to be thrown away. Every subrack filtered gets the same
+// straight-line work with no branch on what it holds, so the filter loads
+// overlap and no branch mispredicts. The eager path looks up every
+// nonplaythrough subrack before generation, so for a nonplaythrough anchor
+// there the entry alone decides and the filter, which would only repeat it, is
+// skipped.
 static inline __attribute__((always_inline)) uint64_t
 wmp_move_gen_get_candidate_subracks(const WMPMoveGen *wmp_move_gen,
                                     int first_idx, int count, bool lazy,
@@ -862,7 +865,6 @@ wmp_move_gen_get_candidate_subracks(const WMPMoveGen *wmp_move_gen,
     *filter_misses = 0;
     return candidates;
   }
-  const bool may_be_unresolved = lazy && !is_playthrough;
   const SubrackInfo *lookup_infos =
       is_playthrough ? &wmp_move_gen->playthrough_infos[offset]
                      : nonplaythrough_infos;
@@ -873,8 +875,23 @@ wmp_move_gen_get_candidate_subracks(const WMPMoveGen *wmp_move_gen,
                       &nonplaythrough_infos[bit_idx], score_bound, leave_cutoff)
                   << bit_idx;
   }
-  uint64_t misses = 0;
-  for (uint64_t remaining = leave_kept; remaining != 0;
+  // A playthrough anchor's lookup decides alone, so every subrack kept is
+  // looked up. On the lazy nonplaythrough path, only the unresolved ones are,
+  // and a resolved one is a candidate when its entry is not NULL.
+  uint64_t looked_up = leave_kept;
+  if (!is_playthrough) {
+    looked_up = 0;
+    for (uint64_t remaining = leave_kept; remaining != 0;
+         remaining &= remaining - 1) {
+      const int bit_idx = wmp_move_gen_get_lowest_set_bit(remaining);
+      const WMPEntry *entry = nonplaythrough_infos[bit_idx].wmp_entry;
+      looked_up |= (uint64_t)(entry == WMP_ENTRY_UNRESOLVED) << bit_idx;
+      candidates |= (uint64_t)(entry != NULL && entry != WMP_ENTRY_UNRESOLVED)
+                    << bit_idx;
+    }
+  }
+  uint64_t may_have_words_mask = 0;
+  for (uint64_t remaining = looked_up; remaining != 0;
        remaining &= remaining - 1) {
     const int bit_idx = wmp_move_gen_get_lowest_set_bit(remaining);
     // Each test is a 0 or 1 combined with bitwise operators, so the filter
@@ -882,22 +899,12 @@ wmp_move_gen_get_candidate_subracks(const WMPMoveGen *wmp_move_gen,
     const BitRack *subrack = &lookup_infos[bit_idx].subrack;
     const uint64_t has_blank =
         (uint64_t)(bit_rack_get_letter(subrack, BLANK_MACHINE_LETTER) != 0);
-    const uint64_t may_have_words =
-        has_blank | (uint64_t)wfl_blankless_rack_may_have_words(wfl, subrack);
-    // A playthrough anchor's lookup decides alone, so its nonplaythrough
-    // entries are not read; on the lazy path some of them are stale.
-    const WMPEntry *entry =
-        is_playthrough ? NULL : nonplaythrough_infos[bit_idx].wmp_entry;
-    const uint64_t unresolved =
-        (uint64_t)(may_be_unresolved && entry == WMP_ENTRY_UNRESOLVED);
-    const uint64_t looked_up = (uint64_t)is_playthrough | unresolved;
-    const uint64_t may_record =
-        looked_up != 0 ? may_have_words : (uint64_t)(entry != NULL);
-    candidates |= may_record << bit_idx;
-    misses |= (unresolved & (may_have_words ^ 1)) << bit_idx;
+    may_have_words_mask |=
+        (has_blank | (uint64_t)wfl_blankless_rack_may_have_words(wfl, subrack))
+        << bit_idx;
   }
-  *filter_misses = misses;
-  return candidates;
+  *filter_misses = is_playthrough ? 0 : looked_up & ~may_have_words_mask;
+  return candidates | may_have_words_mask;
 }
 
 // Stores the NULL that looking up this lazy nonplaythrough subrack would
