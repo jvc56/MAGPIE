@@ -828,9 +828,11 @@ wmp_move_gen_subrack_leave_kept(const SubrackInfo *nonplaythrough_info,
 // rejected playthrough subrack keeps its old wmp_entry instead of NULL, which
 // nothing reads: a playthrough entry is written before every read.
 //
-// Every subrack gets the same straight-line work with no branch on what it
-// holds, so the filter loads overlap and no branch mispredicts. The eager
-// path looks up every nonplaythrough subrack before generation, so for a
+// The leave check needs no lookup, so it runs over the subracks first, and
+// only those it keeps are hashed and filtered: in a sim, it drops about a third
+// of them. Every kept subrack gets the same straight-line work with no branch
+// on what it holds, so the filter loads overlap and no branch mispredicts. The
+// eager path looks up every nonplaythrough subrack before generation, so for a
 // nonplaythrough anchor there the entry alone decides and the filter, which
 // would only repeat it, is skipped.
 static inline __attribute__((always_inline)) uint64_t
@@ -865,8 +867,16 @@ wmp_move_gen_get_candidate_subracks(const WMPMoveGen *wmp_move_gen,
       is_playthrough ? &wmp_move_gen->playthrough_infos[offset]
                      : nonplaythrough_infos;
   const WMPForLength *wfl = &wmp_move_gen->wmp->wfls[wmp_move_gen->word_length];
-  uint64_t misses = 0;
+  uint64_t leave_kept = 0;
   for (int bit_idx = 0; bit_idx < count; bit_idx++) {
+    leave_kept |= wmp_move_gen_subrack_leave_kept(
+                      &nonplaythrough_infos[bit_idx], score_bound, leave_cutoff)
+                  << bit_idx;
+  }
+  uint64_t misses = 0;
+  for (uint64_t remaining = leave_kept; remaining != 0;
+       remaining &= remaining - 1) {
+    const int bit_idx = wmp_move_gen_get_lowest_set_bit(remaining);
     // Each test is a 0 or 1 combined with bitwise operators, so the filter
     // load is not conditional and nothing branches.
     const BitRack *subrack = &lookup_infos[bit_idx].subrack;
@@ -883,10 +893,8 @@ wmp_move_gen_get_candidate_subracks(const WMPMoveGen *wmp_move_gen,
     const uint64_t looked_up = (uint64_t)is_playthrough | unresolved;
     const uint64_t may_record =
         looked_up != 0 ? may_have_words : (uint64_t)(entry != NULL);
-    const uint64_t leave_kept = wmp_move_gen_subrack_leave_kept(
-        &nonplaythrough_infos[bit_idx], score_bound, leave_cutoff);
-    candidates |= (may_record & leave_kept) << bit_idx;
-    misses |= (unresolved & (may_have_words ^ 1) & leave_kept) << bit_idx;
+    candidates |= may_record << bit_idx;
+    misses |= (unresolved & (may_have_words ^ 1)) << bit_idx;
   }
   *filter_misses = misses;
   return candidates;
