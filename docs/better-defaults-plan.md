@@ -15,7 +15,6 @@ are validated with game pairs or before/after on-demand tests.
 | 3 | Rethink PEG positional args and `-pnoprune` | 5 |
 | 4 | See which features should be defaults | 1, 4, 7, 8 |
 | 5 | Clarify the default WMP / RIT / WIT behavior | 2, 7 |
-| 6 | Should PAT be on by default? | 8 |
 | 7 | Find other settings that should be on for strength or speed | 8 |
 | 8 | Analysis should use PEG only at 2 in the bag by default | 3b |
 | 9 | PEG and endgame time limits unlimited by default | 3a, 4 |
@@ -691,8 +690,15 @@ Problems to fix on the way:
   - `false` never uses it.
 - Decide when the lexicon loads, in `config_load_lexicon_dependent_data`, and
   decide again on every lexicon or leaves change.
-- `-savesettings` writes these flags only when they aren't `auto`. Otherwise
-  every existing `settings.txt` keeps RIT and WIT off.
+- `-savesettings` saves the setting chosen (`auto`, `true` or `false`),
+  never the state the load resolved to. Today it writes the loaded state as
+  a boolean (`players_data_get_use_when_available`, config.c:15160-15177).
+  Under `auto` that would pin the machine's decision at save time: a RIT
+  skipped for lack of memory would be saved as `-rit1 false` and stay off
+  after a memory upgrade. Store the tri-state setting separately from what
+  is loaded. Whether default values are written at all is the cross-cutting
+  settings decision. Existing files that say `-rit1 false` or `-wit1 false`
+  only because those were the old defaults are handled there too.
 - Fix sticky WMP-off first. Under `auto`, "this lexicon has no wordmap" must
   not become "never use a wordmap".
 
@@ -823,7 +829,7 @@ today, so `auto` that skips a table must cost exactly what `false` costs now.
 | `-rit auto` | +17% simmer, +6% static with a WMP | Off |  |
 | `-ritmmap true` where the platform maps files and is little-endian | About 400 ms faster startup, one shared copy, pages the OS can reclaim | Off (on for `contribute`) |  |
 | libmagpie `magpie_create()` uses `auto` | Library users get the speed without knowing about the tables | Off |  |
-| `-savesettings` writes these flags only when they aren't `auto` | Otherwise every saved settings file keeps RIT and WIT off | Always written |  |
+| `-savesettings` saves the setting chosen (`auto`, `true` or `false`), not the loaded state | A saved resolved state pins one machine's decision: a RIT skipped for lack of memory stays off after an upgrade | The loaded state, as a boolean |  |
 
 **New features**
 
@@ -847,7 +853,7 @@ today, so `auto` that skips a table must cost exactly what `false` costs now.
 
 ---
 
-## Phase 8: PAT and other strength/performance defaults (todos 4, 6, 7)
+## Phase 8: Other strength/performance defaults (todos 4, 7)
 
 Each item below is a separate measurement and, if it wins, a separate
 PR. Quality changes use game pairs:
@@ -859,42 +865,6 @@ autoplay games N -gp true -threads 12 -seed 42
 
 Estimate each run from a short timed run and state the estimate before
 launching. Keep runs under ~1 h.
-
-### PAT on by default? (todo 6)
-
-Context:
-- PAT (src/ent/pat.h) adds a learned positional term to static equity:
-  penalties for the premium squares, hooks and word windows a move opens,
-  an opening-length table, and a utility correction for margin and game
-  stage (#713). It applies in equity-sorted movegen while the bag is
-  non-empty: static play, sim candidates and sim rollouts, not endgames or
-  PEG (move_gen.c:3766-3785).
-- Trained weights ship for every lexicon in `data/strategy/`, with
-  `_super21` versions for 21x21. Nothing loads them unless the user passes
-  `-pat`.
-- Static evidence (CSW21, 1M mirrored pairs): **+0.77 pp win share, +4.1 ±
-  0.10 spread per pair** with PAT.
-- Cost: full PAT doubles static movegen time (CSW24, 2000 games: 4.92 s
-  without, 9.71 s with; the rollout subset `tws,windows` is 1.17x).
-- **Not measured: PAT in sims.** Under a time limit, a slower movegen means
-  fewer iterations, and the sim already sees much of what PAT approximates.
-
-Change, decided by the data:
-1. **Sim game pairs, PAT vs no PAT, at the same time limit**, in CSW and
-   NWL, using the default rollout classes. If PAT wins there, turn it on.
-2. If it wins in static play only, turn it on for **static play only**:
-   candidate generation with `patcand true` and `patrollout false`.
-3. Load `<lexicon>.pat` (or `_super21`) automatically when it exists, and
-   stay off silently when it doesn't. `-pat none` turns it off.
-
-Constraints:
-- PAT is refused when both players share one PAT file but use different
-  lexicons (config.c:13265-13280). Per-player defaults must never trigger
-  this.
-- Tests with hard-coded moves or equities need a PAT-off setting or new
-  expected values.
-- The output should make it visible that PAT is in effect, since it changes
-  static equity compared with other engines.
 
 ### Other candidates (todo 7)
 
@@ -911,7 +881,6 @@ Each waits for its measurement.
 
 | Change | Reason | MAGPIE default | Macondo default |
 |---|---|---|---|
-| Load `<lexicon>.pat` (or `_super21`) automatically when it exists, if sim game pairs show a gain; static play only (`patcand true`, `patrollout false`) if only static play gains | +0.77 pp win share and +4.1 spread per pair in static play. Check: sim game pairs at equal time, CSW and NWL | Not loaded; `-pat <name>` |  |
 | First-win at the timed cascade's intermediate stages, full window at the final stage, and every candidate tied at a cut line kept | About 3x per endgame solve. Check: decisions and time vs today | Full window | First-win throughout its PEG |
 | Skip timed-cascade stages that cut nothing | Saves whole stages on short candidate lists. Check: time at equal decisions | Every stage runs (peg.c:3420-3424) |  |
 | `-pegstride` by bag size in the timed cascade | Much faster at 3-4 in the bag; the nested inner solve already uses strides 5 and 7 there (peg.c:1570-1586). Check: decision agreement and time vs full enumeration | 0 (full enumeration) |  |
