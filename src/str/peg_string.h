@@ -40,6 +40,10 @@ char *peg_build_outcomes_string_rows(const PegPerScenario *rows, int n_rows);
 
 // Caller frees the returned JSON string.
 char *peg_snapshot_get_json(const PegPollSnapshot *snapshot, const Game *game);
+// The live view of a running solve from a snapshot, as status shows it at
+// monotonic time `now_ns`, less the best play's outcomes.
+char *peg_snapshot_get_status_string(const PegPollSnapshot *snapshot,
+                                     const Game *game, int64_t now_ns);
 // Read a synchronized live snapshot and serialize it.
 char *peg_poll_outcomes_json(PegPoll *poll, const Board *board,
                              const LetterDistribution *ld,

@@ -577,6 +577,50 @@ typedef struct PegCandOutcomes {
 // completion via cands_done in the stage history. `done` flips true when the
 // solve finishes.
 
+// Where one mover draw of the candidate in progress stands, when candidates are
+// solved one at a time (PegStageSnapshot.scenarios_total > 0). A draw is one
+// scenario job: the candidate with those tiles drawn, over every ordering of
+// the rest of the bag.
+typedef enum {
+  PEG_DRAW_QUEUED,
+  PEG_DRAW_RUNNING,
+  PEG_DRAW_DONE,
+  // Not solved, or not all its orderings: the candidate was cut, or the
+  // deadline or a user interrupt came first.
+  PEG_DRAW_STOPPED,
+} peg_draw_state_t;
+
+typedef struct PegDrawStatus {
+  // The mover's draw, and the tiles left in the bag, whose orderings the draw
+  // runs through. A pass or an exchange draws nothing, so its draws differ
+  // only in the bag.
+  MachineLetter drawn[PEG_SCENARIO_ARRAY_CAP];
+  int n_drawn;
+  MachineLetter bag[PEG_SCENARIO_ARRAY_CAP];
+  int n_bag;
+  peg_draw_state_t state;
+  int worker_idx;   // the worker solving it, while running
+  int64_t start_ns; // monotonic ns when it started; 0 while queued
+  int64_t end_ns;   // monotonic ns when it finished; 0 until then
+  // Done: the orderings it won and tied of all it had (weight_sum), and its
+  // mean spread over them, which means nothing when spread_unknown (a
+  // first-win solve).
+  int64_t weight_sum;
+  int64_t win_count;
+  int64_t tie_count;
+  double mean_spread;
+  bool spread_unknown;
+  // Running: the endgame its worker is searching, read when the poll is read.
+  // in_endgame is false between endgames, and with one thread, whose
+  // endgames take no helpers and so do not open the window this reads.
+  bool in_endgame;
+  int depth;
+  int root_moves_done;
+  int root_moves_total;
+  uint64_t nodes;
+  int helpers; // idle threads lent to its endgame
+} PegDrawStatus;
+
 // Compact per-candidate record kept for each completed non-greedy stage so the
 // status display can show one time column per stage.
 typedef struct {
@@ -615,6 +659,23 @@ typedef struct PegPollSnapshot {
   // live elapsed time and a '*' marker on the depth label.
   int currently_evaluating_move_idx;
   int64_t eval_start_ns;
+  // That candidate, which stage_moves holds only while it is among the
+  // stage's first PEG_POLL_MAX_ENTRIES.
+  Move evaluating_move;
+  // The mover draws of that candidate, when candidates are solved one at a
+  // time: how many are in each state, the orderings the done ones won and
+  // tied of all they had, and up to PEG_POLL_MAX_DRAW_ROWS of the draws
+  // themselves -- every running one, then finished ones -- in the order they
+  // are solved. Filled by peg_poll_read; all zero otherwise.
+  int draws_queued;
+  int draws_running;
+  int draws_done;
+  int draws_stopped;
+  int64_t draws_done_weight;
+  int64_t draws_done_wins;
+  int64_t draws_done_ties;
+  int n_draw_rows;
+  PegDrawStatus draw_rows[PEG_POLL_MAX_DRAW_ROWS];
   // Per-candidate timing history for completed non-greedy stages, accumulated
   // by peg_poll_clear_entries. Greedy (fidelity 0) is excluded — it is always
   // instant and the user does not need a greedy time column. Each slot records

@@ -79,6 +79,9 @@ enum {
   // Max non-greedy stages we keep per-candidate timing history for. 8 covers
   // the default cascade (32->16->8->4->2, five stages) with room to spare.
   PEG_POLL_MAX_HISTORY_STAGES = 8,
+  // Max mover draws of the candidate in progress a snapshot lists: every
+  // running one (one per thread), then finished ones.
+  PEG_POLL_MAX_DRAW_ROWS = 64,
 };
 
 // Smallest outcomes-cell content width the renderer ever wraps to: enough for

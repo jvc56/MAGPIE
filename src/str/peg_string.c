@@ -11,6 +11,7 @@
 #include "../util/io_util.h"
 #include "../util/stable_sort.h"
 #include "../util/string_util.h"
+#include "letter_distribution_string.h"
 #include "move_string.h"
 #include <inttypes.h>
 #include <limits.h>
@@ -31,6 +32,12 @@ enum {
   PEG_OUTCOME_BUCKET_LOSS,
   PEG_OUTCOME_BUCKET_TIE,
   NUMBER_OF_PEG_OUTCOME_BUCKETS,
+};
+
+// The candidate in progress lists each finished draw only when it has at most
+// this many draws; past it, its finished draws are totalled in one line.
+enum {
+  PEG_STATUS_MAX_FINISHED_DRAW_ROWS = 16,
 };
 
 // One displayable outcome token: a draw rendered as the mover's drawn multiset
@@ -543,6 +550,18 @@ static char *peg_build_outcomes_string(const PegResult *result) {
                                         result->n_per_scenario);
 }
 
+// A stage's fidelity as the stage table names it: greedy, eg to end, or an
+// N-ply eg.
+static char *peg_stage_fidelity_name(int fidelity_plies) {
+  if (fidelity_plies == 0) {
+    return string_duplicate("greedy");
+  }
+  if (fidelity_plies >= PEG_EXHAUSTIVE_PLIES) {
+    return string_duplicate("eg to end");
+  }
+  return get_formatted_string("%d-ply eg", fidelity_plies);
+}
+
 static void peg_append_stage_table(StringBuilder *sb,
                                    const PegStageSnapshot *history,
                                    int n_history) {
@@ -562,26 +581,12 @@ static void peg_append_stage_table(StringBuilder *sb,
 
     string_grid_set_cell(sg, row, 0, get_formatted_string("%d", stage_idx));
 
-    if (st->fidelity_plies == 0) {
-      string_grid_set_cell(sg, row, 1, string_duplicate("greedy"));
-    } else {
-      string_grid_set_cell(
-          sg, row, 1,
-          st->fidelity_plies >= PEG_EXHAUSTIVE_PLIES
-              ? string_duplicate("eg to end")
-              : get_formatted_string("%d-ply eg", st->fidelity_plies));
-    }
+    string_grid_set_cell(sg, row, 1,
+                         peg_stage_fidelity_name(st->fidelity_plies));
 
-    if (is_current && st->field_size > 0 && st->scenarios_total > 0) {
-      // Candidates solved one at a time: also how far the one in progress
-      // has got through its draws.
-      const double pct = 100.0 * st->cands_done / st->field_size;
-      string_grid_set_cell(sg, row, 2,
-                           get_formatted_string("%d/%d (%.0f%%), draws %d/%d",
-                                                st->cands_done, st->field_size,
-                                                pct, st->scenarios_done,
-                                                st->scenarios_total));
-    } else if (is_current && st->field_size > 0) {
+    // How far the candidate in progress has got through its draws is shown
+    // below the table (peg_append_live_candidate).
+    if (is_current && st->field_size > 0) {
       const double pct = 100.0 * st->cands_done / st->field_size;
       string_grid_set_cell(sg, row, 2,
                            get_formatted_string("%d/%d (%.0f%%)",
@@ -1241,6 +1246,246 @@ static double peg_graded_history_time(const PegPollSnapshot *snap, int slot,
   return -1.0;
 }
 
+// Nodes searched, compactly: 950, 12.3k, 4.5M, 1.2G.
+static char *peg_nodes_text(uint64_t nodes) {
+  if (nodes >= 1000000000ULL) {
+    return get_formatted_string("%.1fG", (double)nodes / 1e9);
+  }
+  if (nodes >= 1000000ULL) {
+    return get_formatted_string("%.1fM", (double)nodes / 1e6);
+  }
+  if (nodes >= 1000ULL) {
+    return get_formatted_string("%.1fk", (double)nodes / 1e3);
+  }
+  return get_formatted_string("%" PRIu64, nodes);
+}
+
+// A draw's status: running, stopped, or for a done one won, lost or tied when
+// every one of its orderings went that way, else its orderings won, tied and
+// lost.
+static char *peg_draw_status_text(const PegDrawStatus *draw) {
+  if (draw->state == PEG_DRAW_RUNNING) {
+    return string_duplicate("running");
+  }
+  if (draw->state != PEG_DRAW_DONE || draw->weight_sum <= 0) {
+    return string_duplicate("stopped");
+  }
+  const int64_t losses = draw->weight_sum - draw->win_count - draw->tie_count;
+  if (draw->win_count == draw->weight_sum) {
+    return string_duplicate("won");
+  }
+  if (losses == draw->weight_sum) {
+    return string_duplicate("lost");
+  }
+  if (draw->tie_count == draw->weight_sum) {
+    return string_duplicate("tied");
+  }
+  return get_formatted_string("%" PRId64 "W %" PRId64 "T %" PRId64 "L",
+                              draw->win_count, draw->tie_count, losses);
+}
+
+// The candidate in progress, when candidates are solved one at a time: which
+// it is and for how long, how many of its draws are in each state, then a row
+// for each running draw, with the endgame it is searching, and for each
+// finished one when there are few; past PEG_STATUS_MAX_FINISHED_DRAW_ROWS
+// draws, the finished ones are totalled instead.
+static void peg_append_live_candidate(StringBuilder *sb,
+                                      const PegPollSnapshot *snap,
+                                      const Game *game, int64_t now_ns) {
+  if (snap->eval_start_ns == 0 || snap->currently_evaluating_move_idx < 0 ||
+      snap->n_stage_history == 0) {
+    return;
+  }
+  const PegStageSnapshot *stage =
+      &snap->stage_history[snap->n_stage_history - 1];
+  const Board *board = game_get_board(game);
+  const LetterDistribution *ld = game_get_ld(game);
+  StringBuilder *move_sb = string_builder_create();
+  string_builder_add_move(move_sb, board, &snap->evaluating_move, ld, false);
+  string_builder_add_formatted_string(
+      sb, "solving %s (candidate %d of %d) for %.1fs",
+      string_builder_peek(move_sb), snap->currently_evaluating_move_idx + 1,
+      stage->field_size, (double)(now_ns - snap->eval_start_ns) / 1e9);
+  string_builder_destroy(move_sb);
+  const int n_draws = snap->draws_queued + snap->draws_running +
+                      snap->draws_done + snap->draws_stopped;
+  if (n_draws == 0) {
+    string_builder_add_string(sb, "\n\n");
+    return;
+  }
+  string_builder_add_formatted_string(sb, "; draws: %d done, %d running",
+                                      snap->draws_done, snap->draws_running);
+  if (snap->draws_queued > 0) {
+    string_builder_add_formatted_string(sb, ", %d queued", snap->draws_queued);
+  }
+  if (snap->draws_stopped > 0) {
+    string_builder_add_formatted_string(sb, ", %d stopped",
+                                        snap->draws_stopped);
+  }
+  string_builder_add_string(sb, "\n");
+  const bool list_finished = n_draws <= PEG_STATUS_MAX_FINISHED_DRAW_ROWS;
+  int n_rows = 0;
+  for (int row_idx = 0; row_idx < snap->n_draw_rows; row_idx++) {
+    if (list_finished || snap->draw_rows[row_idx].state == PEG_DRAW_RUNNING) {
+      n_rows++;
+    }
+  }
+  if (n_rows > 0) {
+    StringGrid *sg = string_grid_create(n_rows + 1, 8, 2);
+    const char *headers[] = {"draw",  "status", "time",  "spread",
+                             "depth", "roots",  "nodes", "helpers"};
+    for (int col_idx = 0; col_idx < 8; col_idx++) {
+      string_grid_set_cell(sg, 0, col_idx, string_duplicate(headers[col_idx]));
+    }
+    int grid_row = 1;
+    for (int row_idx = 0; row_idx < snap->n_draw_rows; row_idx++) {
+      const PegDrawStatus *draw = &snap->draw_rows[row_idx];
+      const bool running = draw->state == PEG_DRAW_RUNNING;
+      if (!list_finished && !running) {
+        continue;
+      }
+      // The draw, then the bag it leaves, as the outcomes write them
+      // ("drawn/bag"); "-" when the mover draws nothing.
+      StringBuilder *drawn_sb = string_builder_create();
+      for (int tile_idx = 0; tile_idx < draw->n_drawn; tile_idx++) {
+        string_builder_add_user_visible_letter(drawn_sb, ld,
+                                               draw->drawn[tile_idx]);
+      }
+      if (draw->n_drawn == 0) {
+        string_builder_add_char(drawn_sb, '-');
+      }
+      if (draw->n_bag > 0) {
+        string_builder_add_char(drawn_sb, '/');
+      }
+      for (int tile_idx = 0; tile_idx < draw->n_bag; tile_idx++) {
+        string_builder_add_user_visible_letter(drawn_sb, ld,
+                                               draw->bag[tile_idx]);
+      }
+      string_grid_set_cell(sg, grid_row, 0,
+                           string_builder_dump_and_destroy(drawn_sb, NULL));
+      string_grid_set_cell(sg, grid_row, 1, peg_draw_status_text(draw));
+      const int64_t end_ns = running ? now_ns : draw->end_ns;
+      string_grid_set_cell(
+          sg, grid_row, 2,
+          get_formatted_string("%.1fs",
+                               (double)(end_ns - draw->start_ns) / 1e9));
+      string_grid_set_cell(
+          sg, grid_row, 3,
+          draw->state == PEG_DRAW_DONE && !draw->spread_unknown
+              ? get_formatted_string("%+.1f", draw->mean_spread)
+              : string_duplicate("-"));
+      if (running && draw->in_endgame) {
+        string_grid_set_cell(sg, grid_row, 4,
+                             get_formatted_string("%d", draw->depth));
+        string_grid_set_cell(sg, grid_row, 5,
+                             get_formatted_string("%d/%d",
+                                                  draw->root_moves_done,
+                                                  draw->root_moves_total));
+        string_grid_set_cell(sg, grid_row, 6, peg_nodes_text(draw->nodes));
+        string_grid_set_cell(sg, grid_row, 7,
+                             get_formatted_string("%d", draw->helpers));
+      } else {
+        for (int col_idx = 4; col_idx < 8; col_idx++) {
+          string_grid_set_cell(sg, grid_row, col_idx, string_duplicate("-"));
+        }
+      }
+      grid_row++;
+    }
+    string_builder_add_string_grid(sb, sg, false);
+    string_grid_destroy(sg);
+  }
+  if (!list_finished && snap->draws_done > 0) {
+    string_builder_add_formatted_string(
+        sb,
+        "%d finished draws: orderings won %" PRId64 ", tied %" PRId64
+        ", lost %" PRId64 "\n",
+        snap->draws_done, snap->draws_done_wins, snap->draws_done_ties,
+        snap->draws_done_weight - snap->draws_done_wins -
+            snap->draws_done_ties);
+  }
+  string_builder_add_string(sb, "\n");
+}
+
+// Says which ranking the live view shows: the previous stage's while the
+// current one has finished no candidate, else the current stage's, with how
+// many of its candidates have finished.
+static void peg_append_live_ranking_label(StringBuilder *sb,
+                                          const PegPollSnapshot *snap,
+                                          bool from_baseline) {
+  if (snap->n_stage_history == 0) {
+    return;
+  }
+  const int stage_idx = snap->n_stage_history - 1;
+  const PegStageSnapshot *stage = &snap->stage_history[stage_idx];
+  char *stage_name = peg_stage_fidelity_name(stage->fidelity_plies);
+  if (from_baseline) {
+    char *baseline_name = peg_stage_fidelity_name(snap->baseline_fidelity);
+    string_builder_add_formatted_string(
+        sb,
+        "ranking from stage %d (%s); stage %d (%s) has not finished a "
+        "candidate yet\n",
+        stage_idx - 1, baseline_name, stage_idx, stage_name);
+    free(baseline_name);
+  } else if (stage->cands_done < stage->field_size) {
+    string_builder_add_formatted_string(
+        sb, "stage %d (%s) ranking: %d of %d candidates finished\n", stage_idx,
+        stage_name, stage->cands_done, stage->field_size);
+  }
+  free(stage_name);
+}
+
+// The live view of a running solve, as status shows it at `now_ns`, without
+// the best play's outcomes, which need the poll: how long it has run, the
+// stage table, the candidate in progress, and the best ranking so far -- the
+// current stage's, or the previous stage's while the current one has finished
+// no candidate. Returns that ranking's entries, NULL when there are none.
+static const PegRankedCand *peg_append_live_status(StringBuilder *sb,
+                                                   const PegPollSnapshot *snap,
+                                                   const Game *game,
+                                                   int64_t now_ns) {
+  const int64_t start_ns =
+      snap->n_stage_history > 0 ? snap->stage_history[0].start_ns : now_ns;
+  const double total_secs = (double)(now_ns - start_ns) / 1e9;
+  string_builder_add_formatted_string(sb, "PEG (running): %.1fs\n", total_secs);
+  if (snap->n_stage_history > 0) {
+    peg_append_stage_table(sb, snap->stage_history, snap->n_stage_history);
+    string_builder_add_string(sb, "\n");
+  }
+  peg_append_live_candidate(sb, snap, game, now_ns);
+  const PegRankedCand *live_entries = snap->entries;
+  int n_live_entries = snap->n_entries;
+  const bool from_baseline =
+      n_live_entries == 0 && snap->n_baseline_entries > 0;
+  if (from_baseline) {
+    live_entries = snap->baseline_entries;
+    n_live_entries = snap->n_baseline_entries;
+  }
+  if (n_live_entries == 0) {
+    return NULL;
+  }
+  peg_append_live_ranking_label(sb, snap, from_baseline);
+  // Render the same flat table as the final printout on the live snapshot, so
+  // a `sta` poll matches the final view (with partial data) rather than a
+  // separate live layout.
+  PegRankedCand ranking[PEG_POLL_MAX_ENTRIES];
+  memcpy(ranking, live_entries, (size_t)n_live_entries * sizeof(*ranking));
+  PegResult live = {0};
+  live.top_cands = ranking;
+  live.n_top_cands = n_live_entries;
+  live.last_completed_stage = snap->stage;
+  peg_append_flat_ranking(sb, &live, game_get_board(game), game_get_ld(game),
+                          /*show_wins=*/true, /*show_time=*/false,
+                          /*show_stats=*/true, /*min_move_width=*/0);
+  return live_entries;
+}
+
+char *peg_snapshot_get_status_string(const PegPollSnapshot *snapshot,
+                                     const Game *game, int64_t now_ns) {
+  StringBuilder *sb = string_builder_create();
+  peg_append_live_status(sb, snapshot, game, now_ns);
+  return string_builder_dump_and_destroy(sb, NULL);
+}
+
 char *peg_result_get_string(const PegResult *result, const Game *game,
                             bool show_outcomes, PegPoll *poll, int out_width,
                             int out_max_lines, const char *trunc_note,
@@ -1260,55 +1505,24 @@ char *peg_result_get_string(const PegResult *result, const Game *game,
 
   // Live path: poll is set and the solve is still running.
   if (have_snap && !snap.done) {
-    const int64_t now_ns = ctimer_monotonic_ns();
-    const int64_t start_ns =
-        snap.n_stage_history > 0 ? snap.stage_history[0].start_ns : now_ns;
-    const double total_secs = (double)(now_ns - start_ns) / 1e9;
-    string_builder_add_formatted_string(sb, "PEG (running): %.1fs\n",
-                                        total_secs);
-    if (snap.n_stage_history > 0) {
-      peg_append_stage_table(sb, snap.stage_history, snap.n_stage_history);
-      string_builder_add_string(sb, "\n");
-    }
-    // Use the current stage's entries, or fall back to the previous stage's
-    // ranking (saved at each stage boundary) while a new stage has not yet
-    // finished a candidate, so a poll always shows the best available ranking.
-    PegRankedCand *live_entries = snap.entries;
-    int n_live_entries = snap.n_entries;
-    if (n_live_entries == 0 && snap.n_baseline_entries > 0) {
-      live_entries = snap.baseline_entries;
-      n_live_entries = snap.n_baseline_entries;
-    }
-    if (n_live_entries > 0) {
-      const Board *board = game_get_board(game);
-      const LetterDistribution *ld = game_get_ld(game);
-      // Render the same flat table as the final printout on the live snapshot,
-      // so a `sta` poll matches the final view (with partial data) rather than
-      // a separate live layout.
+    const PegRankedCand *live_entries =
+        peg_append_live_status(sb, &snap, game, ctimer_monotonic_ns());
+    // Per-multiset W/L/T for the best play, fed live via the poll outcomes.
+    if (live_entries != NULL && show_outcomes) {
+      PegCandOutcomes *live_oc = NULL;
+      int live_n_oc = 0;
+      peg_poll_copy_outcomes(poll, &live_oc, &live_n_oc);
       PegResult live = {0};
-      live.top_cands = live_entries;
-      live.n_top_cands = n_live_entries;
-      live.last_completed_stage = snap.stage;
-      peg_append_flat_ranking(sb, &live, board, ld, /*show_wins=*/true,
-                              /*show_time=*/false, /*show_stats=*/true,
-                              /*min_move_width=*/0);
-      // Per-multiset W/L/T for the best play, fed live via the poll outcomes.
-      if (show_outcomes) {
-        PegCandOutcomes *live_oc = NULL;
-        int live_n_oc = 0;
-        peg_poll_copy_outcomes(poll, &live_oc, &live_n_oc);
-        live.cand_outcomes = live_oc;
-        live.n_cand_outcomes = live_n_oc;
-        const PegCandOutcomes *best =
-            peg_find_cand_outcomes(&live, &live_entries[0].move);
-        if (best != NULL && best->n_rows > 0) {
-          char *oc = peg_build_outcomes_string_rows(best->rows, best->n_rows);
-          string_builder_add_formatted_string(sb, "\noutcomes (best): %s\n",
-                                              oc);
-          free(oc);
-        }
-        peg_cand_outcomes_destroy_array(live_oc, live_n_oc);
+      live.cand_outcomes = live_oc;
+      live.n_cand_outcomes = live_n_oc;
+      const PegCandOutcomes *best =
+          peg_find_cand_outcomes(&live, &live_entries[0].move);
+      if (best != NULL && best->n_rows > 0) {
+        char *oc = peg_build_outcomes_string_rows(best->rows, best->n_rows);
+        string_builder_add_formatted_string(sb, "\noutcomes (best): %s\n", oc);
+        free(oc);
       }
+      peg_cand_outcomes_destroy_array(live_oc, live_n_oc);
     }
     char *out = string_builder_dump_and_destroy(sb, NULL);
     return out;

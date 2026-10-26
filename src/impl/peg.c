@@ -254,6 +254,15 @@ struct PegPoll {
   // each PegCandOutcomes.rows is heap-allocated.
   PegCandOutcomes *outcomes;
   int n_outcomes;
+  // The mover draws of the candidate in progress (peg_poll_start_scenarios),
+  // and the solve's workers, whose endgames a read reports for the running
+  // draws. workers is set only while they exist (peg_poll_attach_workers), and
+  // read only under the mutex, so a read never follows it into freed memory.
+  PegDrawStatus *draws;
+  int n_draws;
+  int draws_cap;
+  const PegWorker *workers;
+  int n_workers;
 };
 
 void peg_scenario_rows_destroy(PegPerScenario *rows, int count) {
@@ -309,6 +318,11 @@ PegPoll *peg_poll_create(void) {
   poll->s.stage = -1;
   poll->outcomes = NULL;
   poll->n_outcomes = 0;
+  poll->draws = NULL;
+  poll->n_draws = 0;
+  poll->draws_cap = 0;
+  poll->workers = NULL;
+  poll->n_workers = 0;
   return poll;
 }
 
@@ -323,6 +337,7 @@ void peg_poll_reset(PegPoll *poll) {
   const int old_n = poll->n_outcomes;
   poll->outcomes = NULL;
   poll->n_outcomes = 0;
+  poll->n_draws = 0;
   cpthread_mutex_unlock(&poll->mutex);
   peg_cand_outcomes_destroy_array(old, old_n);
 }
@@ -332,13 +347,95 @@ void peg_poll_destroy(PegPoll *poll) {
     return;
   }
   peg_cand_outcomes_destroy_array(poll->outcomes, poll->n_outcomes);
+  free(poll->draws);
   // No cpthread_mutex_destroy: project mutexes don't dynamically allocate.
   free(poll);
+}
+
+// Reads the endgame `worker` is searching into a running draw's status. An
+// endgame takes helpers only with more than one thread, and only then opens
+// the window this checks, so with one thread nothing is read. A worker that
+// waits on a nested batch helps with other jobs, so for a pass's draw this
+// can be one of those jobs' endgames: it is for display only.
+static void peg_poll_read_worker_endgame(const PegWorker *worker,
+                                         PegDrawStatus *draw) {
+  const EndgameCtx *eg_ctx = worker->eg_ctx;
+  if (eg_ctx == NULL || !endgame_injecting(eg_ctx)) {
+    return;
+  }
+  int ply2_done = 0;
+  int ply2_total = 0;
+  draw->in_endgame = true;
+  endgame_ctx_get_progress(eg_ctx, &draw->depth, &draw->root_moves_done,
+                           &draw->root_moves_total, &ply2_done, &ply2_total);
+  draw->nodes = endgame_ctx_get_nodes_searched(eg_ctx);
+  draw->helpers = endgame_live_workers(eg_ctx) - 1;
+}
+
+// Fills out's draws of the candidate in progress from the poll's: the counts
+// in each state, the done ones' orderings, and the rows, every running draw
+// first, then finished ones while there is room, kept in solve order. Called
+// under the mutex.
+static void peg_poll_fill_draws(const PegPoll *poll, PegPollSnapshot *out) {
+  int running = 0;
+  for (int draw_idx = 0; draw_idx < poll->n_draws; draw_idx++) {
+    if (poll->draws[draw_idx].state == PEG_DRAW_RUNNING) {
+      running++;
+    }
+  }
+  int finished_room = PEG_POLL_MAX_DRAW_ROWS - running;
+  for (int draw_idx = 0; draw_idx < poll->n_draws; draw_idx++) {
+    const PegDrawStatus *draw = &poll->draws[draw_idx];
+    bool listed = false;
+    switch (draw->state) {
+    case PEG_DRAW_QUEUED:
+      out->draws_queued++;
+      break;
+    case PEG_DRAW_RUNNING:
+      out->draws_running++;
+      listed = true;
+      break;
+    case PEG_DRAW_DONE:
+      out->draws_done++;
+      out->draws_done_weight += draw->weight_sum;
+      out->draws_done_wins += draw->win_count;
+      out->draws_done_ties += draw->tie_count;
+      listed = finished_room-- > 0;
+      break;
+    case PEG_DRAW_STOPPED:
+      out->draws_stopped++;
+      listed = finished_room-- > 0;
+      break;
+    }
+    if (!listed || out->n_draw_rows >= PEG_POLL_MAX_DRAW_ROWS) {
+      continue;
+    }
+    PegDrawStatus *row = &out->draw_rows[out->n_draw_rows++];
+    *row = *draw;
+    if (draw->state == PEG_DRAW_RUNNING && poll->workers != NULL &&
+        draw->worker_idx >= 0 && draw->worker_idx < poll->n_workers) {
+      peg_poll_read_worker_endgame(&poll->workers[draw->worker_idx], row);
+    }
+  }
 }
 
 void peg_poll_read(PegPoll *poll, PegPollSnapshot *out) {
   cpthread_mutex_lock(&poll->mutex);
   *out = poll->s;
+  peg_poll_fill_draws(poll, out);
+  cpthread_mutex_unlock(&poll->mutex);
+}
+
+// Lets a read report the endgames of `workers` (n_workers of them) for the
+// running draws, until called again with NULL before they are freed.
+static void peg_poll_attach_workers(PegPoll *poll, const PegWorker *workers,
+                                    int n_workers) {
+  if (poll == NULL) {
+    return;
+  }
+  cpthread_mutex_lock(&poll->mutex);
+  poll->workers = workers;
+  poll->n_workers = n_workers;
   cpthread_mutex_unlock(&poll->mutex);
 }
 
@@ -527,38 +624,6 @@ static void peg_poll_bump_cand_done(PegPoll *poll) {
   cpthread_mutex_unlock(&poll->mutex);
 }
 
-// Starts counting the scenario jobs of the candidate in progress: `total` of
-// them, none solved yet.
-static void peg_poll_start_scenarios(PegPoll *poll, int total) {
-  if (poll == NULL) {
-    return;
-  }
-  cpthread_mutex_lock(&poll->mutex);
-  PegStageSnapshot *cur = peg_poll_open_stage(&poll->s);
-  if (cur != NULL) {
-    cur->scenarios_done = 0;
-    cur->scenarios_total = total;
-  }
-  poll->s.version++;
-  cpthread_mutex_unlock(&poll->mutex);
-}
-
-// Counts one more of the candidate in progress's scenario jobs solved (or
-// skipped). Called from worker threads, so it locks; a job is a whole mover
-// draw, so this is rare next to the work it counts.
-static void peg_poll_bump_scenario_done(PegPoll *poll) {
-  if (poll == NULL) {
-    return;
-  }
-  cpthread_mutex_lock(&poll->mutex);
-  PegStageSnapshot *cur = peg_poll_open_stage(&poll->s);
-  if (cur != NULL) {
-    cur->scenarios_done++;
-  }
-  poll->s.version++;
-  cpthread_mutex_unlock(&poll->mutex);
-}
-
 // Insert one finished candidate into the descending top-K (stage-0 liveness).
 // Also bumps the stage cands_done counter and updates best_win_pct. Called from
 // worker threads, so it locks. Returns true iff the insert shuffled the
@@ -670,17 +735,23 @@ static void peg_poll_clear_entries(PegPoll *poll) {
   cpthread_mutex_unlock(&poll->mutex);
 }
 
-// Mark the candidate at stage_moves[move_idx] as currently in-flight so the
-// status display can show a live elapsed time and '*' depth marker. Call with
-// move_idx = -1 / start_ns = 0 to clear (no candidate in flight).
+// Mark the candidate `move`, the stage's move_idx-th, as currently in-flight so
+// the status display can show a live elapsed time and '*' depth marker. Call
+// with move_idx = -1 / start_ns = 0 / move = NULL to clear (no candidate in
+// flight), which also forgets the finished candidate's draws.
 static void peg_poll_set_evaluating(PegPoll *poll, int move_idx,
-                                    int64_t start_ns) {
+                                    int64_t start_ns, const Move *move) {
   if (poll == NULL) {
     return;
   }
   cpthread_mutex_lock(&poll->mutex);
   poll->s.currently_evaluating_move_idx = move_idx;
   poll->s.eval_start_ns = start_ns;
+  if (move != NULL) {
+    poll->s.evaluating_move = *move;
+  } else {
+    poll->n_draws = 0;
+  }
   poll->s.version++;
   cpthread_mutex_unlock(&poll->mutex);
 }
@@ -1246,6 +1317,8 @@ typedef struct PegScenarioJob {
   // Greedy value of the split's first ordering, by which a cutoff solve
   // orders its jobs (losses first).
   int32_t greedy_value;
+  // This job's index among scenario_poll's draws.
+  int draw_idx;
 } PegScenarioJob;
 
 // A growable list of scenario jobs (collect mode). Not recursive, so defined
@@ -2939,6 +3012,91 @@ static void peg_eval_candidates(
   free(jobs);
 }
 
+// Starts tracking the scenario jobs of the candidate in progress, list->count
+// of them, each a mover draw, all queued, in the order they are solved.
+static void peg_poll_start_scenarios(PegPoll *poll,
+                                     const PegScenarioJobList *list) {
+  if (poll == NULL) {
+    return;
+  }
+  cpthread_mutex_lock(&poll->mutex);
+  PegStageSnapshot *cur = peg_poll_open_stage(&poll->s);
+  if (cur != NULL) {
+    cur->scenarios_done = 0;
+    cur->scenarios_total = list->count;
+  }
+  if (list->count > poll->draws_cap) {
+    poll->draws_cap = list->count;
+    poll->draws = realloc_or_die(poll->draws, (size_t)poll->draws_cap *
+                                                  sizeof(PegDrawStatus));
+  }
+  poll->n_draws = list->count;
+  for (int job_idx = 0; job_idx < list->count; job_idx++) {
+    const PegScenarioJob *job = &list->jobs[job_idx];
+    PegDrawStatus *draw = &poll->draws[job_idx];
+    memset(draw, 0, sizeof(*draw));
+    draw->n_drawn = job->k_drawn;
+    memcpy(draw->drawn, job->mover_drawn,
+           (size_t)job->k_drawn * sizeof(MachineLetter));
+    draw->n_bag = job->n_bag_remaining;
+    memcpy(draw->bag, job->bag_remaining,
+           (size_t)job->n_bag_remaining * sizeof(MachineLetter));
+    draw->state = PEG_DRAW_QUEUED;
+    draw->worker_idx = -1;
+  }
+  poll->s.version++;
+  cpthread_mutex_unlock(&poll->mutex);
+}
+
+// Marks draw `draw_idx` of the candidate in progress running on worker
+// `worker_idx`. Called from worker threads, so it locks; a job is a whole
+// mover draw, so this is rare next to the work it marks.
+static void peg_poll_start_draw(PegPoll *poll, int draw_idx, int worker_idx) {
+  if (poll == NULL) {
+    return;
+  }
+  cpthread_mutex_lock(&poll->mutex);
+  if (draw_idx >= 0 && draw_idx < poll->n_draws) {
+    PegDrawStatus *draw = &poll->draws[draw_idx];
+    draw->state = PEG_DRAW_RUNNING;
+    draw->worker_idx = worker_idx;
+    draw->start_ns = ctimer_monotonic_ns();
+  }
+  poll->s.version++;
+  cpthread_mutex_unlock(&poll->mutex);
+}
+
+// Records how `job`'s draw finished: solved, with its results, or stopped
+// (`solved` false), and counts it among the candidate's solved (or skipped)
+// scenario jobs.
+static void peg_poll_finish_draw(PegPoll *poll, const PegScenarioJob *job,
+                                 bool solved, bool spread_unknown) {
+  if (poll == NULL) {
+    return;
+  }
+  cpthread_mutex_lock(&poll->mutex);
+  PegStageSnapshot *cur = peg_poll_open_stage(&poll->s);
+  if (cur != NULL) {
+    cur->scenarios_done++;
+  }
+  if (job->draw_idx >= 0 && job->draw_idx < poll->n_draws) {
+    PegDrawStatus *draw = &poll->draws[job->draw_idx];
+    draw->state = solved ? PEG_DRAW_DONE : PEG_DRAW_STOPPED;
+    draw->end_ns = ctimer_monotonic_ns();
+    if (draw->start_ns == 0) {
+      draw->start_ns = draw->end_ns;
+    }
+    draw->weight_sum = job->weight_sum;
+    draw->win_count = job->win_count;
+    draw->tie_count = job->tie_count;
+    draw->mean_spread =
+        job->total_weight > 0 ? job->spread_weight / job->total_weight : 0.0;
+    draw->spread_unknown = spread_unknown;
+  }
+  poll->s.version++;
+  cpthread_mutex_unlock(&poll->mutex);
+}
+
 // Evaluate one scenario job (a single cand x mover-draw split), folding its
 // orderings into the job's own result fields.
 static void peg_scenario_worker_fn(void *arg, int worker_idx) {
@@ -2955,9 +3113,11 @@ static void peg_scenario_worker_fn(void *arg, int worker_idx) {
       job->completed = false;
       job->completed_ns = ctimer_monotonic_ns();
     }
-    peg_poll_bump_scenario_done(job->scenario_poll);
+    peg_poll_finish_draw(job->scenario_poll, job, /*solved=*/false,
+                         /*spread_unknown=*/true);
     return;
   }
+  peg_poll_start_draw(job->scenario_poll, job->draw_idx, worker_idx);
   PegEvalCtx ctx;
   memset(&ctx, 0, sizeof(ctx));
   ctx.template_src = job->template_src;
@@ -2996,7 +3156,9 @@ static void peg_scenario_worker_fn(void *arg, int worker_idx) {
     job->completed = !ctx.interrupted;
     job->completed_ns = ctimer_monotonic_ns();
   }
-  peg_poll_bump_scenario_done(job->scenario_poll);
+  peg_poll_finish_draw(job->scenario_poll, job, /*solved=*/!ctx.interrupted,
+                       /*spread_unknown=*/ctx.worker->first_win &&
+                           job->fidelity_plies > 0);
 }
 
 // True when two moves are the same play (type, position, tiles).
@@ -3123,8 +3285,9 @@ static void peg_eval_candidates_scenario(
   }
   for (int job_idx = 0; job_idx < list.count; job_idx++) {
     list.jobs[job_idx].scenario_poll = scenario_poll;
+    list.jobs[job_idx].draw_idx = job_idx;
   }
-  peg_poll_start_scenarios(scenario_poll, list.count);
+  peg_poll_start_scenarios(scenario_poll, &list);
 
   // Enable per-ordering capture on every job when the caller asked for it.
   if (out_outcomes != NULL) {
@@ -3664,6 +3827,7 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
     cpthread_create(&injector_thread, peg_injector_main, &injector);
     injector_running = true;
   }
+  peg_poll_attach_workers(args->poll, workers, n_scratch);
 
   // Candidate set: either the caller-supplied "only solve" list (used as-is),
   // or the generated, equity-sorted move list, cut to the moves that leave at
@@ -3936,7 +4100,8 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
           }
           Timer cand_timer;
           const int64_t cand_start_ns = ctimer_monotonic_ns();
-          peg_poll_set_evaluating(args->poll, cand_idx, cand_start_ns);
+          peg_poll_set_evaluating(args->poll, cand_idx, cand_start_ns,
+                                  moves[cand_idx]);
           ctimer_start(&cand_timer);
           const PegSavedCandidate *saved = peg_checkpoint_find(
               args->checkpoint, stage_fidelity, moves[cand_idx]);
@@ -3995,7 +4160,7 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
               best_score = score;
             }
           }
-          peg_poll_set_evaluating(args->poll, -1, 0);
+          peg_poll_set_evaluating(args->poll, -1, 0, NULL);
           // A deadline or user interrupt can leave scenarios unscored. Require
           // the full weight carried from this candidate's preceding stage
           // before publishing its score or captured outcomes.
@@ -4242,6 +4407,8 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
            (size_t)poll_snap.n_stage_history * sizeof(PegStageSnapshot));
   }
 
+  // A status read must not reach the workers once they are freed.
+  peg_poll_attach_workers(args->poll, NULL, 0);
   // Stop the injection monitor before tearing down the workers it observes.
   if (injector_running) {
     atomic_store(&injector.stop, 1);

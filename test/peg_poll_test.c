@@ -44,7 +44,43 @@ typedef struct PollerArgs {
   int max_entries_seen;
   int max_stage_seen;
   uint64_t max_version_seen;
+  int draw_reads; // reads that caught a candidate's draws
 } PollerArgs;
+
+// A candidate's draws agree with its stage: one per scenario job, the finished
+// ones counted as solved, every running one listed, and a done one's orderings
+// won and tied within all it had.
+static void assert_draws_consistent(const PegPollSnapshot *snap) {
+  const int n_draws = snap->draws_queued + snap->draws_running +
+                      snap->draws_done + snap->draws_stopped;
+  assert(snap->n_draw_rows <= PEG_POLL_MAX_DRAW_ROWS);
+  if (n_draws == 0) {
+    assert(snap->n_draw_rows == 0);
+    return;
+  }
+  assert(snap->n_stage_history > 0);
+  const PegStageSnapshot *stage =
+      &snap->stage_history[snap->n_stage_history - 1];
+  assert(n_draws == stage->scenarios_total);
+  assert(snap->draws_done + snap->draws_stopped == stage->scenarios_done);
+  int running_rows = 0;
+  for (int row_idx = 0; row_idx < snap->n_draw_rows; row_idx++) {
+    const PegDrawStatus *draw = &snap->draw_rows[row_idx];
+    assert(draw->state != PEG_DRAW_QUEUED);
+    assert(draw->start_ns != 0);
+    if (draw->state == PEG_DRAW_RUNNING) {
+      running_rows++;
+    } else {
+      assert(draw->end_ns >= draw->start_ns);
+    }
+    if (draw->state == PEG_DRAW_DONE) {
+      assert(draw->win_count + draw->tie_count <= draw->weight_sum);
+    }
+  }
+  assert(running_rows == snap->draws_running);
+  assert(snap->draws_done_wins + snap->draws_done_ties <=
+         snap->draws_done_weight);
+}
 
 // Polls the live leaderboard ~1 kHz, like a render loop would, until the solve
 // reports done (or the caller asks it to stop). Records what it observed so the
@@ -65,12 +101,124 @@ static void *poller_main(void *arg) {
     if (snap.version > poller->max_version_seen) {
       poller->max_version_seen = snap.version;
     }
+    assert_draws_consistent(&snap);
+    if (snap.n_draw_rows > 0) {
+      poller->draw_reads++;
+    }
     if (snap.done) {
       break;
     }
     ctime_nap(0.001);
   }
   return NULL;
+}
+
+// The status text of a 1-in-bag exhaustive solve whose first candidate,
+// `move`, is part way through its draws: the candidate and its time, each
+// draw's state and endgame, and the greedy ranking labelled as such; then the
+// same with too many draws to list the finished ones.
+static void test_peg_status_string(const Game *game, const Move *move) {
+  const int64_t now_ns = 1000LL * 1000 * 1000 * 1000;
+  const int64_t second_ns = 1000LL * 1000 * 1000;
+  PegPollSnapshot *snap = calloc_or_die(1, sizeof(*snap));
+  snap->stage = 1;
+  snap->n_stage_history = 2;
+  snap->stage_history[0].fidelity_plies = 0;
+  snap->stage_history[0].field_size = 168;
+  snap->stage_history[0].cands_done = 168;
+  snap->stage_history[0].start_ns = now_ns - 312 * second_ns;
+  snap->stage_history[0].end_ns = now_ns - 311 * second_ns;
+  snap->stage_history[0].best_win_pct = 1.0;
+  snap->stage_history[1].fidelity_plies = PEG_EXHAUSTIVE_PLIES;
+  snap->stage_history[1].field_size = 168;
+  snap->stage_history[1].start_ns = now_ns - 311 * second_ns;
+  snap->stage_history[1].best_win_pct = -1.0;
+  snap->stage_history[1].scenarios_total = 4;
+  snap->stage_history[1].scenarios_done = 2;
+  snap->n_baseline_entries = 1;
+  snap->baseline_fidelity = 0;
+  snap->baseline_entries[0].move = *move;
+  snap->baseline_entries[0].win_pct = 1.0;
+  snap->baseline_entries[0].weight_sum = 8;
+  snap->baseline_entries[0].win_count = 8;
+  snap->currently_evaluating_move_idx = 0;
+  snap->eval_start_ns = now_ns - 311 * second_ns;
+  snap->evaluating_move = *move;
+  snap->draws_done = 2;
+  snap->draws_running = 2;
+  snap->draws_done_weight = 2;
+  snap->draws_done_wins = 1;
+  snap->n_draw_rows = 4;
+  // Machine letters 1 and 5 are A and E.
+  const MachineLetter tiles[] = {1, 5, 9, 15};
+  for (int row_idx = 0; row_idx < 4; row_idx++) {
+    PegDrawStatus *draw = &snap->draw_rows[row_idx];
+    draw->drawn[0] = tiles[row_idx];
+    draw->n_drawn = 1;
+    draw->start_ns = now_ns - 311 * second_ns;
+    draw->weight_sum = 1;
+  }
+  snap->draw_rows[0].state = PEG_DRAW_DONE;
+  snap->draw_rows[0].end_ns = now_ns - 310 * second_ns;
+  snap->draw_rows[0].win_count = 1;
+  snap->draw_rows[0].spread_unknown = true;
+  snap->draw_rows[1].state = PEG_DRAW_DONE;
+  snap->draw_rows[1].end_ns = now_ns - 300 * second_ns;
+  snap->draw_rows[1].mean_spread = -12.5;
+  snap->draw_rows[2].state = PEG_DRAW_RUNNING;
+  snap->draw_rows[2].in_endgame = true;
+  snap->draw_rows[2].depth = 23;
+  snap->draw_rows[2].root_moves_done = 5;
+  snap->draw_rows[2].root_moves_total = 14;
+  snap->draw_rows[2].nodes = 1234567890ULL;
+  snap->draw_rows[2].helpers = 3;
+  snap->draw_rows[3].state = PEG_DRAW_RUNNING;
+  // A pass draws nothing: only the bag it leaves tells its draws apart.
+  snap->draw_rows[3].n_drawn = 0;
+  snap->draw_rows[3].bag[0] = 5;
+  snap->draw_rows[3].n_bag = 1;
+
+  StringBuilder *move_sb = string_builder_create();
+  string_builder_add_move(move_sb, game_get_board(game), move,
+                          game_get_ld(game), false);
+  char *solving = get_formatted_string(
+      "solving %s (candidate 1 of 168) for 311.0s; draws: 2 done, 2 running\n",
+      string_builder_peek(move_sb));
+  string_builder_destroy(move_sb);
+
+  char *status = peg_snapshot_get_status_string(snap, game, now_ns);
+  assert(has_substring(status, "0/168 (0%)"));
+  assert(!has_substring(status, "draws 2/4"));
+  assert(has_substring(status, solving));
+  assert(has_substring(status, "won"));
+  assert(has_substring(status, "lost"));
+  assert(has_substring(status, "-12.5"));
+  assert(has_substring(status, "5/14"));
+  assert(has_substring(status, "1.2G"));
+  assert(has_substring(status, "311.0s"));
+  assert(has_substring(status, "\n-/E "));
+  assert(has_substring(status, "ranking from stage 0 (greedy); stage 1 (eg to "
+                               "end) has not finished a candidate yet"));
+  free(status);
+
+  // Past PEG_STATUS_MAX_FINISHED_DRAW_ROWS draws, the finished ones are
+  // totalled, and only the running ones listed.
+  snap->stage_history[1].scenarios_total = 40;
+  snap->stage_history[1].scenarios_done = 20;
+  snap->draws_queued = 18;
+  snap->draws_done = 20;
+  snap->draws_done_weight = 20;
+  snap->draws_done_wins = 15;
+  snap->draws_done_ties = 1;
+  status = peg_snapshot_get_status_string(snap, game, now_ns);
+  assert(has_substring(status, "draws: 20 done, 2 running, 18 queued"));
+  assert(has_substring(status,
+                       "20 finished draws: orderings won 15, tied 1, lost 4"));
+  assert(!has_substring(status, "-12.5"));
+  assert(has_substring(status, "5/14"));
+  free(status);
+  free(solving);
+  free(snap);
 }
 
 void test_peg_poll(void) {
@@ -152,11 +300,17 @@ void test_peg_poll(void) {
   assert(strings_equal(string_builder_peek(poll_best),
                        string_builder_peek(solve_best)));
 
-  printf("peg-poll: reads=%d max_entries=%d max_stage=%d versions=%llu "
-         "best=%s win=%.1f\n",
-         poller.reads, poller.max_entries_seen, poller.max_stage_seen,
-         (unsigned long long) final.version, string_builder_peek(poll_best),
-         100.0 * final.entries[0].win_pct);
+  // Draws belong to the candidate in progress, and none is once it is done.
+  assert(final.n_draw_rows == 0);
+  assert(final.draws_queued + final.draws_running + final.draws_done +
+             final.draws_stopped ==
+         0);
+
+  printf("peg-poll: reads=%d draw_reads=%d max_entries=%d max_stage=%d "
+         "versions=%llu best=%s win=%.1f\n",
+         poller.reads, poller.draw_reads, poller.max_entries_seen,
+         poller.max_stage_seen, (unsigned long long) final.version,
+         string_builder_peek(poll_best), 100.0 * final.entries[0].win_pct);
 
   // Synthetic display snapshot: non-finite values and unusual distribution
   // glyphs must still serialize as valid JSON; malformed timing stays zero.
@@ -199,6 +353,38 @@ void test_peg_poll(void) {
   } else {
     printf("peg-poll: skipped the locale case: no host locales here\n");
   }
+
+  // A solve of a few candidates reaches the stages that solve one candidate
+  // at a time, whose draws the poller checks while they run.
+  Move few_moves[3];
+  const Move *few[3];
+  const int n_few = final.n_entries < 3 ? final.n_entries : 3;
+  for (int move_idx = 0; move_idx < n_few; move_idx++) {
+    few_moves[move_idx] = final.entries[move_idx].move;
+    few[move_idx] = &few_moves[move_idx];
+  }
+  peg_poll_reset(poll);
+  PollerArgs few_poller;
+  memset(&few_poller, 0, sizeof(few_poller));
+  few_poller.poll = poll;
+  atomic_init(&few_poller.stop, false);
+  cpthread_create(&poller_thread, poller_main, &few_poller);
+  PegArgs few_args = args;
+  few_args.only_moves = few;
+  few_args.n_only_moves = n_few;
+  few_args.time_budget_seconds = 3.0;
+  PegResult few_result;
+  memset(&few_result, 0, sizeof(few_result));
+  peg_solve(&few_args, &few_result, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  atomic_store(&few_poller.stop, true);
+  cpthread_join(poller_thread);
+  assert(few_poller.max_stage_seen >= 1);
+  printf("peg-poll: few candidates: reads=%d draw_reads=%d max_stage=%d\n",
+         few_poller.reads, few_poller.draw_reads, few_poller.max_stage_seen);
+  peg_result_destroy(&few_result);
+
+  test_peg_status_string(game, &final.entries[0].move);
 
   string_builder_destroy(poll_best);
   string_builder_destroy(solve_best);
