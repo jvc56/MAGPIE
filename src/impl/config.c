@@ -8263,12 +8263,14 @@ config_choose_auto_tables(Config *config, const char *const lexicons[2],
   if (!any_auto) {
     return;
   }
-  // A rack info table whose wordmap is not auto still needs one on disk to
-  // be built from: add it, unrequested, so it is charged for when missing.
+  // The chooser takes a rack info table only with its lexicon's wordmap. One
+  // whose wordmap is not auto gets that wordmap added, unrequested: a missing
+  // table is built from it, so it is charged for when missing; a table on
+  // disk needs none, so it costs nothing.
   const int rit_tables = count;
   for (int table_idx = 0; table_idx < rit_tables; table_idx++) {
     const ContributeTable *rit = &tables[table_idx];
-    if (rit->role != CONTRIBUTE_TABLE_RIT || rit->present) {
+    if (rit->role != CONTRIBUTE_TABLE_RIT) {
       continue;
     }
     bool has_wordmap = false;
@@ -8288,7 +8290,8 @@ config_choose_auto_tables(Config *config, const char *const lexicons[2],
     wordmap->lexicon = rit->lexicon;
     wordmap->bytes = config_table_bytes(config, PLAYERS_DATA_TYPE_WMP,
                                         rit->lexicon, rit->lexicon, ld_name);
-    wordmap->present = config_table_file_bytes(config, rit->lexicon,
+    wordmap->present = rit->present ||
+                       config_table_file_bytes(config, rit->lexicon,
                                                DATA_FILEPATH_TYPE_WORDMAP) >= 0;
   }
   ErrorStack *errors = error_stack_create();
@@ -8342,6 +8345,21 @@ config_choose_auto_tables(Config *config, const char *const lexicons[2],
       }
       const int table_idx = table_of[role_idx][player_idx];
       const char *what = contribute_table_role_description(roles[role_idx]);
+      // A rack info table is built from a wordmap, so a lexicon with no
+      // wordmap support has neither.
+      const char *unsupported =
+          type == PLAYERS_DATA_TYPE_WIT
+              ? NULL
+              : config_wordmap_unsupported_reason(lexicons[player_idx]);
+      if (table_idx < 0 && unsupported) {
+        string_builder_add_formatted_string(
+            skipped, "%sno %s (%s%s)",
+            string_builder_length(skipped) > 0 ? "; " : "", what,
+            type == PLAYERS_DATA_TYPE_RIT ? "it is built from a wordmap, and "
+                                          : "",
+            unsupported);
+        continue;
+      }
       if (table_idx < 0) {
         // Not on disk, and not built by itself here: say what builds it.
         const char *leaves = players_data_get_data_name(
@@ -8371,6 +8389,10 @@ config_choose_auto_tables(Config *config, const char *const lexicons[2],
       }
       use[type][player_idx] = false;
       if (table->skip == CONTRIBUTE_TABLE_NO_WORDMAP) {
+        // Taken only with the wordmap, which was skipped for want of room.
+        string_builder_add_formatted_string(
+            skipped, "%s%s skipped: it goes with the wordmap",
+            string_builder_length(skipped) > 0 ? "; " : "", what);
         continue;
       }
       char *needed = contribute_size_text(table->needed_bytes);

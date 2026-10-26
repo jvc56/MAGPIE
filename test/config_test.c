@@ -2737,6 +2737,30 @@ static void test_config_builds_missing_tables_on_first_use(void) {
         players_data_get_data_name(config_get_players_data(config),
                                    PLAYERS_DATA_TYPE_RIT, 0),
         rit_name));
+
+    // A lexicon with no wordmap support says why it has no wordmap, and no
+    // rack info table, which is built from one, instead of naming a convert
+    // command that cannot build them.
+    const char *unsupported = "CSW21_ab_superfirstuse";
+    char *unsupported_kwg =
+        get_formatted_string("%s/%s.kwg", lexica, unsupported);
+    char *unsupported_klv =
+        get_formatted_string("%s/%s.klv2", lexica, unsupported);
+    copy_test_file("testdata/lexica/CSW21_ab.kwg", unsupported_kwg);
+    copy_test_file("testdata/lexica/CSW21_ab.klv2", unsupported_klv);
+    char *unsupported_command =
+        get_formatted_string("set -lex %s -ld english_ab -k1 %s -k2 %s",
+                             unsupported, unsupported, unsupported);
+    exec_capturing_output(config, unsupported_command, output, sizeof(output));
+    assert(strstr(output, "no wordmap (wordmaps do not support this board "
+                          "size)"));
+    assert(strstr(output, "no rack info table (it is built from a wordmap, "
+                          "and wordmaps do not support this board size)"));
+    assert(!strstr(output, "dawg2wordmap"));
+    assert(!strstr(output, "klvwmp2rit"));
+    free(unsupported_command);
+    free(unsupported_klv);
+    free(unsupported_kwg);
   }
   free(rit_name);
   free(command);
