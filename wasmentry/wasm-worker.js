@@ -376,7 +376,14 @@ onmessage = async ({ data: { type, data = {}, requestId: incomingId } }) => {
 
 async function prepareWMP({ source, lexicon, threads, manifestURL, cache = false, skipCache = false }) {
   if (!initialized || !["build", "download"].includes(source) ||
-      !["CSW24", "NWL23"].includes(lexicon)) throw new Error("Invalid WMP request.");
+      !["CSW24", "NWL23", "FRA24"].includes(lexicon)) throw new Error("Invalid WMP request.");
+  // FRA24's builder exceeds the 1 GiB WASM heap even with one thread.
+  // Keep the normal move generator available instead of entering native OOM.
+  if (lexicon === "FRA24") {
+    send("wmp_cache_warning", { text: "French word maps are unavailable in this browser build. Using standard move generation." });
+    send("wmp_ready", { unavailable: true, cached: false });
+    return;
+  }
   if (memoryLimitMB < 1024) {
     send("wmp_cache_warning", { text: "Word maps are unavailable with this browser’s memory limit. Using standard move generation." });
     send("wmp_ready", { unavailable: true, cached: false });

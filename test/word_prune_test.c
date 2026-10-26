@@ -125,9 +125,7 @@ static int assert_reachable_words_are_kept(Game *game,
                             .move_sort_type = MOVE_SORT_SCORE,
                             .override_kwg = NULL,
                             .eq_margin_movegen = 0,
-                            .target_equity = EQUITY_MAX_VALUE,
-                            .target_leave_size_for_exchange_cutoff =
-                                UNSET_LEAVE_SIZE};
+                            .target_equity = EQUITY_MAX_VALUE};
   generate_moves(&args);
   int moves_played = 0;
   for (int move_idx = 0; move_idx < move_list_get_count(moves); move_idx++) {

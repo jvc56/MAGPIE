@@ -1,3 +1,4 @@
+import { t } from "./i18n.mjs";
 export function parsePegProgress(text) {
   const line = text.split("\n").find((value) => value.startsWith("peginfo "));
   return line ? JSON.parse(line.slice(8)) : null;
@@ -124,13 +125,13 @@ export function renderPegOutcomes(container, data, state) {
     const toolbar = document.createElement("div");
     toolbar.className = "peg-outcome-toolbar";
     const title = document.createElement("strong");
-    title.textContent = `Draw outcomes · ${data.depth ? `${data.depth}-ply` : "greedy"}`;
+    title.textContent = t`Draw outcomes · ${data.depth ? `${data.depth}-ply` : "greedy"}`;
     const label = document.createElement("label");
-    label.textContent = "Sort ";
+    label.textContent = t("Sort ");
     const sort = document.createElement("select");
-    sort.setAttribute("aria-label", "Sort draw outcomes");
-    for (const [value, text] of [["result", "Result: best first"], ["result-asc", "Result: worst first"],
-      ["weight", "Weight: most frequent"], ["weight-asc", "Weight: least frequent"]]) {
+    sort.setAttribute("aria-label", t("Sort draw outcomes"));
+    for (const [value, text] of [["result", t("Result: best first")], ["result-asc", t("Result: worst first")],
+      ["weight", t("Weight: most frequent")], ["weight-asc", t("Weight: least frequent")]]) {
       const option = document.createElement("option");
       option.value = value;
       option.textContent = text;
@@ -147,7 +148,7 @@ export function renderPegOutcomes(container, data, state) {
     table.className = "peg-outcome-table";
     const header = table.createTHead().insertRow();
     const hasPV = rows.some(row => row.pv);
-    for (const text of ["Draw sequence", "Result", "Weight", ...(hasPV ? ["Principal variation"] : [])]) {
+    for (const text of [t("Draw sequence"), t("Result"), t("Weight"), ...(hasPV ? [t("Principal variation")] : [])]) {
       const th = document.createElement("th");
       th.scope = "col";
       th.textContent = text;
@@ -158,7 +159,7 @@ export function renderPegOutcomes(container, data, state) {
       const tr = body.insertRow();
       tr.insertCell().textContent = row.sequence || "—";
       const result = tr.insertCell();
-      result.textContent = row.margin === 0 ? "Tie" : `${row.margin > 0 ? "Win" : "Loss"} ${Math.abs(row.margin)}`;
+      result.textContent = row.margin === 0 ? t("Tie") : `${row.margin > 0 ? t("Win") : t("Loss")} ${Math.abs(row.margin)}`;
       result.className = row.margin > 0 ? "winning" : row.margin < 0 ? "losing" : "tie";
       tr.insertCell().textContent = `${row.weight.toLocaleString()} (${(100 * row.weight / totalWeight).toFixed(1)}%)`;
       if (hasPV) {
@@ -166,7 +167,7 @@ export function renderPegOutcomes(container, data, state) {
         if (row.pv) {
           const details = document.createElement("details");
           const summary = document.createElement("summary");
-          summary.textContent = "Show line";
+          summary.textContent = t("Show line");
           const line = document.createElement("div");
           line.className = "peg-outcome-pv";
           line.textContent = row.pv;
@@ -178,10 +179,10 @@ export function renderPegOutcomes(container, data, state) {
     const footer = document.createElement("div");
     footer.className = "peg-outcome-toolbar";
     const note = document.createElement("span");
-    note.textContent = "Letters within each block are unordered; / separates draw groups. Weight counts possible draws.";
+    note.textContent = t("Letters within each block are unordered; / separates draw groups. Weight counts possible draws.");
     const pager = document.createElement("span");
     pager.className = "peg-outcome-pager";
-    for (const [label, delta] of [["Previous outcomes", -1], ["Next outcomes", 1]]) {
+    for (const [label, delta] of [[t("Previous outcomes"), -1], [t("Next outcomes"), 1]]) {
       const button = document.createElement("button");
       button.type = "button";
       button.textContent = delta < 0 ? "←" : "→";
