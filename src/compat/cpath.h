@@ -27,9 +27,20 @@ bool cpath_is_separator(char c);
 const char *cpath_basename(const char *path);
 
 // Where a user's own copy of MAGPIE's files goes when there is nowhere else:
-// %LOCALAPPDATA%\MAGPIE on Windows. NULL elsewhere, where data lives beside
-// the build. The caller frees it.
+// %LOCALAPPDATA%\MAGPIE on Windows and ~/.magpie on macOS. NULL elsewhere,
+// where data lives beside the build. The caller frees it.
+//
+// macOS's has no space in it, unlike ~/Library/Application Support: a data
+// path is one token in MAGPIE's commands and in a saved settings file.
 char *cpath_user_data_dir(void);
+
+// Whether data that is nowhere to be found is fetched into the user's own
+// directory rather than the working directory. On macOS it is: started from
+// Finder, from a terminal, or from the PATH, MAGPIE's working directory is
+// wherever the shell is, the home folder for a double-click. Started from
+// Explorer on Windows, it is the executable's own folder, and a shortcut
+// names one.
+bool cpath_fetches_to_user_data_dir(void);
 
 // The directory holding the running executable, with no trailing separator,
 // or NULL if the platform cannot say. The caller frees it.

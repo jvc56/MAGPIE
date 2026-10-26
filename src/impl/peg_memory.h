@@ -40,4 +40,19 @@ static inline bool peg_memory_worker_fraction(double total_fraction,
   return true;
 }
 
+// The fraction for one endgame table shared by `workers` workers, given the
+// fraction each would get for a table of its own: the largest power-of-two
+// multiple of it that does not exceed `workers`. Scaling a fraction by a power
+// of two scales the table's rounded-down power-of-two entry count by that same
+// power, so the shared table never holds more entries than the per-worker
+// tables would in total, and it pays the per-table overhead once.
+static inline double peg_memory_shared_fraction(double worker_fraction,
+                                                int workers) {
+  int tables = 1;
+  while (tables <= workers / 2) {
+    tables *= 2;
+  }
+  return worker_fraction * tables;
+}
+
 #endif
