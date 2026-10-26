@@ -40,6 +40,11 @@ typedef struct ConfigArgs {
   // users, tests and contribute's task configurations, which build the
   // wordmaps their jobs pin themselves, do not.
   bool build_missing_wordmaps;
+  // -wmp, -rit and -wit default to auto: each table is used when this
+  // machine has the disk and memory for it. The magpie executable and the
+  // library's magpie_create() do; tests, browser games and contribute's task
+  // configurations state what they use, with use_wmp for the wordmap.
+  bool auto_tables;
 } ConfigArgs;
 
 // Constructors and Destructors

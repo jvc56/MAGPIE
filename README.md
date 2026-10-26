@@ -393,17 +393,19 @@ See `examples/generate_moves.c` for a minimal C client (build it with `make exam
 
 ### Defaults
 
-Word maps (WMP), rack info tables (RIT) and word info tables (WIT) only make move generation faster; none of them changes which move is chosen. PAT changes static equity, so it changes moves. Their defaults depend on how MAGPIE is run:
+Word maps (WMP), rack info tables (RIT) and word info tables (WIT) only make move generation faster; none of them changes which move is chosen. PAT changes static equity, so it changes moves.
+
+The command line program and the library's `magpie_create()` set `-wmp`, `-wit` and `-rit` to `auto`: each table is used when this machine has the disk to store it and the memory to hold it, beside the search table a solve allocates, and is otherwise left out, with a line saying why. They share the room by value per byte: wordmaps first (3-4x faster on their own), then word info tables (about 9% on a simulation), then rack info tables (about 17%, but 1.9 GB for English). A missing wordmap or word info table is built on first use for data from `data fetch`; a rack info table is never built by itself, and the line names the `convert` command that builds one. `true` requires a table, and `false` never uses one. The settings file records `auto` as `auto`, not what one machine decided.
 
 | | WMP (`-wmp`) | RIT (`-rit`) | WIT (`-wit`) | PAT (`-pat`) |
 |---|---|---|---|---|
-| Command line program | On; a missing word map is built on first use | Off | Off | Off |
-| Library, `magpie_create()` | Off | Off | Off | Off |
-| Library, `magpie_create_with_options()` | The caller chooses | Off | Off | Off |
+| Command line program | auto | auto | auto | Off |
+| Library, `magpie_create()` | auto | auto | auto | Off |
+| Library, `magpie_create_with_options()` | auto, or off | auto, or off | auto, or off | Off |
 | Browser build | Off until the page installs a word map | Off | Off | Off |
 | `contribute` tasks | Each task chooses, and a table is skipped when the machine has no room for it | Each task chooses | Each task chooses | Never loaded |
 
-RIT and WIT are off because their files are built by a `convert` command and may not exist for every lexicon. When one is turned on and its file is missing, the command that loads the data fails.
+A rack info table caches the leave values of one set of leaves, so it is named for its lexicon and leaves: `<lexicon>.<leaves>.rit`, or `<lexicon>.rit` for the lexicon's own leaves.
 
 ## Data
 

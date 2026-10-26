@@ -193,7 +193,11 @@ void players_data_set_data(PlayersData *players_data,
   int data_index =
       players_data_get_player_data_index(players_data_type, player_index);
   players_data->data[data_index] = data;
-  players_data->use_when_available[data_index] = !!data;
+  // Loaded data is in use. No data leaves the setting as it was: a lexicon
+  // with no wordmap must not turn the wordmap off for the next lexicon.
+  if (data) {
+    players_data->use_when_available[data_index] = true;
+  }
 }
 
 void *players_data_create_data(players_data_t players_data_type,
@@ -459,7 +463,6 @@ void players_data_evict(PlayersData *players_data,
     if (player_index == 0 || !data_is_shared) {
       players_data_destroy_data(players_data, players_data_type, player_index);
     }
-    // Not players_data_set_data, which would also clear use_when_available.
     players_data->data[data_index] = NULL;
   }
   players_data_set_is_shared(players_data, players_data_type, false);

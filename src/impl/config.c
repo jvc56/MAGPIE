@@ -346,6 +346,13 @@ struct Config {
   char *data_paths;
   // See ConfigArgs.
   bool build_missing_wordmaps;
+  // Per table type and player: set to auto (-wmp, -rit, -wit auto), so the
+  // table is used when this machine has room for it. Only the WMP, RIT and
+  // WIT entries are used.
+  bool table_auto[NUMBER_OF_DATA][2];
+  // The last line config_choose_auto_tables printed, so it says it again only
+  // when what it decided changes.
+  char *auto_table_report;
   // The last peg solve's positionals (the candidate set and the move list,
   // NULL when not given), so that `peg resume` repeats them.
   char *peg_last_set_str;
@@ -2160,25 +2167,34 @@ void add_help_arg_to_string_builder(const Config *config, int token,
              "'l1' or 'l2' options.";
       break;
     case ARG_TOKEN_USE_WMP:
-      usages[0] = "<true_or_false>";
-      examples[0] = "true";
+      usages[0] = "<auto_true_or_false>";
+      examples[0] = "auto";
       examples[1] = "false";
       text = "Specifies whether to use word maps as opposed to KWGs when "
-             "generating moves. Word maps are much faster but use more memory. "
-             "On by default in the command line program, which builds a "
-             "missing word map on first use; off by default for the library's "
-             "magpie_create(), the browser build and browser games.";
+             "generating moves; they are 3-4 times faster but use more memory. "
+             "auto (the default for the command line program and the "
+             "library's magpie_create()) uses one when this machine has the "
+             "disk and memory for it, building a missing one on first use for "
+             "data from 'data fetch', and otherwise plays without; true "
+             "requires one; false never uses one. The wordmap, word info table "
+             "and rack info table share the room, wordmaps first. Off for the "
+             "browser build and browser games.";
       break;
     case ARG_TOKEN_USE_RIT:
-      usages[0] = "<true_or_false>";
-      examples[0] = "true";
+      usages[0] = "<auto_true_or_false>";
+      examples[0] = "auto";
       examples[1] = "false";
       text = "Specifies whether to use the precomputed rack info table when "
-             "generating moves. The table stores leave values (and, in the "
-             "future, other per-rack data) for every possible full rack, "
-             "enabling a single hash lookup to replace repeated KLV traversal. "
-             "Off by default because .rit files are large and must be built "
-             "with the klvwmp2rit convert command.";
+             "generating moves. The table stores leave values for every "
+             "possible full rack, so a single hash lookup replaces repeated "
+             "KLV traversal: about 17% faster simulation with a wordmap. It "
+             "belongs to a lexicon played with a set of leaves, and is the "
+             "file <lexicon>.<leaves>.rit (or <lexicon>.rit for the lexicon's "
+             "own leaves), built with 'convert klvwmp2rit'. auto (the default "
+             "for the command line program and the library) uses one that is "
+             "there when this machine has the memory for it, and is never "
+             "built by itself: it is 1.9 GB for English. true requires one; "
+             "false never uses one.";
       break;
     case ARG_TOKEN_USE_MMAP_FOR_RIT:
       usages[0] = "<true_or_false>";
@@ -2186,18 +2202,24 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       examples[1] = "false";
       text = "When true, the rack info table is memory-mapped instead of read "
              "into allocated memory. This eliminates the startup cost of "
-             "loading the file but pages are faulted on demand during play. "
-             "Only supported on little-endian architectures.";
+             "loading the file and lets processes using the same data share "
+             "one copy, but pages are faulted on demand during play. Only "
+             "supported on little-endian architectures, where it is the "
+             "default for the command line program and the library.";
       break;
     case ARG_TOKEN_USE_WIT:
-      usages[0] = "<true_or_false>";
-      examples[0] = "true";
+      usages[0] = "<auto_true_or_false>";
+      examples[0] = "auto";
       examples[1] = "false";
       text = "Specifies whether to use the precomputed word info table when "
              "generating moves. The table stores, for each word, the letters "
              "usable in longer words containing it as a substring, letting "
-             "movegen prune subracks that cannot fit. Off by default because "
-             ".wit files must be built with the kwg2wit convert command.";
+             "movegen prune subracks that cannot fit: about 9% faster "
+             "simulation with a wordmap. auto (the default for the command "
+             "line program and the library) uses one when this machine has "
+             "the disk and memory for it, building a missing one on first use "
+             "for data from 'data fetch'; true requires one; false never uses "
+             "one. Built with 'convert kwg2wit'.";
       break;
     case ARG_TOKEN_LEAVES:
       usages[0] = "<leaves>";
@@ -2217,24 +2239,24 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       break;
     case ARG_TOKEN_P1_USE_WMP:
     case ARG_TOKEN_P2_USE_WMP:
-      usages[0] = "<true_or_false>";
-      examples[0] = "true";
+      usages[0] = "<auto_true_or_false>";
+      examples[0] = "auto";
       examples[1] = "false";
       text = "Specifies whether to use word maps as opposed to KWGs when "
              "generating moves for the given player.";
       break;
     case ARG_TOKEN_P1_USE_RIT:
     case ARG_TOKEN_P2_USE_RIT:
-      usages[0] = "<true_or_false>";
-      examples[0] = "true";
+      usages[0] = "<auto_true_or_false>";
+      examples[0] = "auto";
       examples[1] = "false";
       text = "Specifies whether to use the precomputed rack info table when "
              "generating moves for the given player.";
       break;
     case ARG_TOKEN_P1_USE_WIT:
     case ARG_TOKEN_P2_USE_WIT:
-      usages[0] = "<true_or_false>";
-      examples[0] = "true";
+      usages[0] = "<auto_true_or_false>";
+      examples[0] = "auto";
       examples[1] = "false";
       text = "Specifies whether to use the precomputed word info table when "
              "generating moves for the given player.";
@@ -7900,6 +7922,362 @@ static const char *config_wordmap_for_first_use(Config *config,
   return lexicon;
 }
 
+// Loads a table option's value into *use and *automatic: true or false, or
+// auto, which uses the table when this machine has room for it (and sets
+// *use, the setting's "wanted"). Leaves both when the option is absent.
+static void config_load_table_setting(Config *config, arg_token_t arg_token,
+                                      bool *use, bool *automatic,
+                                      ErrorStack *error_stack) {
+  const char *value = config_get_parg_value(config, arg_token, 0);
+  if (!value) {
+    return;
+  }
+  if (strings_iequal(value, "auto")) {
+    *use = true;
+    *automatic = true;
+    return;
+  }
+  config_load_bool(config, arg_token, use, error_stack);
+  if (error_stack_is_empty(error_stack)) {
+    *automatic = false;
+  }
+}
+
+// ----- Tables used when this machine has room (-wmp, -rit, -wit auto) -----
+
+// The bytes of the data file `name` of `type`, or -1 when there is none.
+static int64_t config_table_file_bytes(const Config *config, const char *name,
+                                       data_filepath_t type) {
+  ErrorStack *errors = error_stack_create();
+  char *path = data_filepaths_get_readable_filename(config->data_paths, name,
+                                                    type, errors);
+  int64_t bytes = -1;
+  CFileIdentity identity;
+  if (error_stack_is_empty(errors) && cfile_identity(path, &identity)) {
+    bytes = identity.size;
+  }
+  free(path);
+  error_stack_destroy(errors);
+  return bytes;
+}
+
+// The rack info table for `lexicon` played with `leaves`. A rack info table
+// caches leave values, so it belongs to a (lexicon, leaves) pair, and is
+// named "<lexicon>.<leaves>" as contribute names it. The older name
+// "<lexicon>" (make prepare_data's CSW24.rit) still counts when the leaves
+// are the lexicon's default ones, which it was built from. The caller frees.
+static char *config_rack_info_table_name(const Config *config,
+                                         const char *lexicon,
+                                         const char *leaves) {
+  char *paired = get_formatted_string("%s.%s", lexicon, leaves);
+  if (config_table_file_bytes(config, paired,
+                              DATA_FILEPATH_TYPE_RACK_INFO_TABLE) >= 0) {
+    return paired;
+  }
+  char *default_leaves = get_default_klv_name(lexicon);
+  const bool default_pair = strings_equal(default_leaves, leaves);
+  free(default_leaves);
+  if (default_pair &&
+      config_table_file_bytes(config, lexicon,
+                              DATA_FILEPATH_TYPE_RACK_INFO_TABLE) >= 0) {
+    free(paired);
+    return string_duplicate(lexicon);
+  }
+  return paired;
+}
+
+static char *contribute_size_text(int64_t bytes);
+
+// The disk an automatic build leaves free: the larger of this and
+// CONFIG_AUTO_TABLE_DISK_RESERVE_PERMILLE of the filesystem. A personal
+// machine's disk is not the program's, as a contributor's is.
+#define CONFIG_AUTO_TABLE_DISK_RESERVE_BYTES 10000000000LL
+// The memory the tables never take: the system's and other programs' share.
+#define CONFIG_AUTO_TABLE_MEMORY_RESERVE_BYTES 1000000000LL
+
+// Which tables set to auto this machine has room for: the disk to store (or
+// build) each, and the memory to hold them beside the search table a solve
+// allocates. It is contribute's decision (contribute_choose_tables), by value
+// per byte -- wordmaps, then word info tables, then rack info tables -- with
+// this machine's budget:
+// - disk: what is free on the data directory's filesystem, less the larger
+//   of 10 GB and 1% of it;
+// - memory: what is available, less a 1 GB reserve and the search table
+//   (-ttfraction of the physical memory), and never more than a quarter of
+//   the physical memory, so the decision does not change with whatever else
+//   is open. Where the available memory cannot be read, the quarter alone.
+// A wordmap or word info table that is not on disk is built only where
+// missing wordmaps are (the command line program with fetched data); a rack
+// info table never is. Clears the use flag of each auto table left out, and
+// writes a line saying what each player's lexicon got to *report (NULL when
+// no table is auto). rit_names hold each player's rack info table name.
+static void config_choose_auto_tables(Config *config,
+                                      const char *const lexicons[2],
+                                      char *const rit_names[2],
+                                      bool use[NUMBER_OF_DATA][2],
+                                      char **report) {
+  *report = NULL;
+  const players_data_t types[] = {PLAYERS_DATA_TYPE_WMP, PLAYERS_DATA_TYPE_WIT,
+                                  PLAYERS_DATA_TYPE_RIT};
+  const contribute_table_role_t roles[] = {
+      CONTRIBUTE_TABLE_WMP, CONTRIBUTE_TABLE_WIT, CONTRIBUTE_TABLE_RIT};
+  const data_filepath_t file_types[] = {DATA_FILEPATH_TYPE_WORDMAP,
+                                        DATA_FILEPATH_TYPE_WORD_INFO_TABLE,
+                                        DATA_FILEPATH_TYPE_RACK_INFO_TABLE};
+  enum { NUM_ROLES = 3, MAX_TABLES = 8 };
+  ContributeTable tables[MAX_TABLES];
+  int table_of[NUM_ROLES][2];
+  // Auto and wanted by this load (leave generation goes without a rack info
+  // table).
+  bool wanted[NUM_ROLES][2];
+  int count = 0;
+  bool any_auto = false;
+  for (int role_idx = 0; role_idx < NUM_ROLES; role_idx++) {
+    for (int player_idx = 0; player_idx < 2; player_idx++) {
+      table_of[role_idx][player_idx] = -1;
+      const players_data_t type = types[role_idx];
+      wanted[role_idx][player_idx] =
+          config->table_auto[type][player_idx] && use[type][player_idx];
+      if (!config->table_auto[type][player_idx] || !use[type][player_idx]) {
+        continue;
+      }
+      any_auto = true;
+      const char *name = type == PLAYERS_DATA_TYPE_RIT ? rit_names[player_idx]
+                                                       : lexicons[player_idx];
+      // Players with the same table share it.
+      for (int table_idx = 0; table_idx < count; table_idx++) {
+        if (tables[table_idx].role == roles[role_idx] &&
+            strings_equal(tables[table_idx].name, name)) {
+          table_of[role_idx][player_idx] = table_idx;
+        }
+      }
+      if (table_of[role_idx][player_idx] >= 0) {
+        continue;
+      }
+      const int64_t bytes =
+          config_table_file_bytes(config, name, file_types[role_idx]);
+      const bool can_build = type != PLAYERS_DATA_TYPE_RIT &&
+                             config->build_missing_wordmaps &&
+                             (type != PLAYERS_DATA_TYPE_WMP ||
+                              !config_wordmap_unsupported_reason(name));
+      if (bytes < 0 && !can_build) {
+        // Not there, and not built here: left out without a budget.
+        use[type][player_idx] = false;
+        continue;
+      }
+      ContributeTable *table = &tables[count];
+      memset(table, 0, sizeof(*table));
+      table->role = roles[role_idx];
+      table->name = name;
+      table->lexicon = lexicons[player_idx];
+      table->present = bytes >= 0;
+      table->requested = true;
+      if (bytes >= 0) {
+        table->bytes = bytes;
+      } else {
+        // A table not yet built: about 30 (wordmap) and 20 (word info
+        // table) times its lexicon's .kwg.
+        const int64_t kwg_bytes = config_table_file_bytes(
+            config, lexicons[player_idx], DATA_FILEPATH_TYPE_KWG);
+        table->bytes =
+            kwg_bytes < 0
+                ? -1
+                : kwg_bytes * (type == PLAYERS_DATA_TYPE_WMP ? 30 : 20);
+      }
+      const char *loaded_name =
+          players_data_get_data_name(config->players_data, type, player_idx);
+      table->loaded = loaded_name && strings_equal(loaded_name, name);
+      table_of[role_idx][player_idx] = count++;
+    }
+  }
+  if (!any_auto) {
+    return;
+  }
+  ErrorStack *errors = error_stack_create();
+  char *probe = data_filepaths_get_writable_filename(
+      config->data_paths, lexicons[0], DATA_FILEPATH_TYPE_WORDMAP, errors);
+  char *directory =
+      error_stack_is_empty(errors) ? get_dirpath_from_filepath(probe) : NULL;
+  free(probe);
+  error_stack_destroy(errors);
+  ContributeTableBudget budget = {
+      .free_disk_bytes = INT64_MAX,
+      .disk_reserve_bytes = CONFIG_AUTO_TABLE_DISK_RESERVE_BYTES,
+      .free_memory_bytes = INT64_MAX,
+      .memory_reserve_bytes = CONFIG_AUTO_TABLE_MEMORY_RESERVE_BYTES,
+  };
+  int64_t disk_total = 0;
+  if (directory && cfile_free_bytes(directory, &budget.free_disk_bytes) &&
+      cfile_total_bytes(directory, &disk_total) &&
+      disk_total / 100 > budget.disk_reserve_bytes) {
+    budget.disk_reserve_bytes = disk_total / 100;
+  }
+  free(directory);
+  const int64_t physical = (int64_t)get_search_memory_budget_base();
+  const int64_t search_table =
+      (int64_t)(config->tt_fraction_of_mem * (double)physical);
+  int64_t available = INT64_MAX;
+  if (!get_available_memory_bytes(&available)) {
+    available = INT64_MAX;
+  }
+  const int64_t quarter = physical / 4 + budget.memory_reserve_bytes;
+  budget.free_memory_bytes =
+      available == INT64_MAX ? quarter : available - search_table;
+  if (budget.free_memory_bytes > quarter) {
+    budget.free_memory_bytes = quarter;
+  }
+  int order[MAX_TABLES];
+  contribute_choose_tables(tables, count, &budget, NULL, order);
+
+  StringBuilder *line = string_builder_create();
+  for (int player_idx = 0; player_idx < 2; player_idx++) {
+    if (player_idx == 1 && strings_equal(lexicons[0], lexicons[1]) &&
+        strings_equal(rit_names[0], rit_names[1])) {
+      break;
+    }
+    StringBuilder *used = string_builder_create();
+    StringBuilder *skipped = string_builder_create();
+    for (int role_idx = 0; role_idx < NUM_ROLES; role_idx++) {
+      const players_data_t type = types[role_idx];
+      if (!wanted[role_idx][player_idx]) {
+        continue;
+      }
+      const int table_idx = table_of[role_idx][player_idx];
+      const char *what = contribute_table_role_description(roles[role_idx]);
+      if (table_idx < 0) {
+        // Not on disk, and not built by itself here: say what builds it.
+        const char *leaves = players_data_get_data_name(
+            config->players_data, PLAYERS_DATA_TYPE_KLV, player_idx);
+        ErrorStack *ld_errors = error_stack_create();
+        char *ld_name = ld_get_default_name_from_lexicon_name(
+            lexicons[player_idx], ld_errors);
+        error_stack_destroy(ld_errors);
+        char *command =
+            type == PLAYERS_DATA_TYPE_RIT
+                ? get_formatted_string("convert klvwmp2rit %s %s %s %s",
+                                       rit_names[player_idx],
+                                       ld_name ? ld_name : "<distribution>",
+                                       leaves ? leaves : lexicons[player_idx],
+                                       lexicons[player_idx])
+                : get_formatted_string("convert %s %s",
+                                       type == PLAYERS_DATA_TYPE_WMP
+                                           ? "dawg2wordmap"
+                                           : "kwg2wit",
+                                       lexicons[player_idx]);
+        free(ld_name);
+        string_builder_add_formatted_string(
+            skipped, "%sno %s ('%s' builds one)",
+            string_builder_length(skipped) > 0 ? "; " : "", what, command);
+        free(command);
+        continue;
+      }
+      const ContributeTable *table = &tables[table_idx];
+      if (table->chosen) {
+        string_builder_add_formatted_string(
+            used, "%s%s", string_builder_length(used) > 0 ? ", " : "", what);
+        continue;
+      }
+      use[type][player_idx] = false;
+      if (table->skip == CONTRIBUTE_TABLE_NO_WORDMAP) {
+        continue;
+      }
+      char *needed = contribute_size_text(table->needed_bytes);
+      char *room = contribute_size_text(table->available_bytes);
+      string_builder_add_formatted_string(
+          skipped, "%s%s skipped: %s %s needed, %s free",
+          string_builder_length(skipped) > 0 ? "; " : "", what, needed,
+          table->skip == CONTRIBUTE_TABLE_NO_DISK ? "of disk" : "of memory",
+          room);
+      free(needed);
+      free(room);
+    }
+    string_builder_add_formatted_string(
+        line, "%s: %s%s%s\n", lexicons[player_idx],
+        string_builder_length(used) > 0 ? string_builder_peek(used)
+                                        : "no tables",
+        string_builder_length(skipped) > 0 ? "; " : "",
+        string_builder_peek(skipped));
+    string_builder_destroy(used);
+    string_builder_destroy(skipped);
+  }
+  *report = string_builder_dump_and_destroy(line, NULL);
+}
+
+// Makes the word info table for player `player_index`'s lexicon `lexicon`
+// available to load, building it from the lexicon's .kwg if it is not on
+// disk, as config_wordmap_for_first_use does for the wordmap: once, and about
+// twenty times the size of the lexicon. Returns `lexicon` when the table is
+// there to load, or NULL when the player plays without one -- the data
+// directory cannot be written, there is not room for it, or the build failed
+// -- having said why in one line. A NULL `lexicon` is returned as is.
+static const char *config_word_info_table_for_first_use(Config *config,
+                                                        int player_index,
+                                                        const char *lexicon) {
+  if (!lexicon) {
+    return NULL;
+  }
+  const char *loaded = players_data_get_data_name(
+      config->players_data, PLAYERS_DATA_TYPE_WIT, player_index);
+  if (loaded && strings_equal(loaded, lexicon)) {
+    return lexicon;
+  }
+  if (config_table_file_bytes(config, lexicon,
+                              DATA_FILEPATH_TYPE_WORD_INFO_TABLE) >= 0) {
+    return lexicon;
+  }
+  ErrorStack *errors = error_stack_create();
+  const char *why_not = NULL;
+  char *built_path = data_filepaths_get_writable_filename(
+      config->data_paths, lexicon, DATA_FILEPATH_TYPE_WORD_INFO_TABLE, errors);
+  if (!error_stack_is_empty(errors)) {
+    why_not = "its data directory cannot be written";
+  }
+  error_stack_reset(errors);
+  if (!why_not) {
+    const int64_t kwg_bytes =
+        config_table_file_bytes(config, lexicon, DATA_FILEPATH_TYPE_KWG);
+    int64_t free_bytes = 0;
+    char *directory = get_dirpath_from_filepath(built_path);
+    if (kwg_bytes >= 0 && cfile_free_bytes(directory, &free_bytes) &&
+        free_bytes < kwg_bytes * 30) {
+      why_not = "there is not enough disk space for it";
+    }
+    free(directory);
+  }
+  if (!why_not) {
+    thread_control_print_formatted(
+        config->thread_control,
+        "building the word info table for %s, which makes move generation "
+        "faster (once; this can take a minute)\n",
+        lexicon);
+    char *ld_name = ld_get_default_name_from_lexicon_name(lexicon, errors);
+    if (error_stack_is_empty(errors)) {
+      const ConversionArgs args = {
+          .conversion_type_string = "kwg2witifneeded",
+          .data_paths = config->data_paths,
+          .input_and_output_name = lexicon,
+          .ld_name = ld_name,
+          .num_threads = config_get_num_threads(config),
+      };
+      convert(&args, config->conversion_results, errors);
+    }
+    free(ld_name);
+    if (!error_stack_is_empty(errors)) {
+      why_not = "it could not be built";
+      error_stack_print_and_reset(errors);
+    }
+  }
+  free(built_path);
+  error_stack_destroy(errors);
+  if (why_not) {
+    thread_control_print_formatted(config->thread_control,
+                                   "playing %s without a word info table: %s\n",
+                                   lexicon, why_not);
+    return NULL;
+  }
+  return lexicon;
+}
+
 static void config_load_lexicon_dependent_data_internal(
     Config *config, const char *new_lexicon_name,
     const char *new_p1_lexicon_name, const char *new_p2_lexicon_name,
@@ -7962,93 +8340,67 @@ static void config_load_lexicon_dependent_data_internal(
     return;
   }
 
-  // Determine the status of the wmp for both players
-  // Start by assuming we are just using whatever the existing wmp settings
-  // are
-  bool p1_wmp_use_when_available = players_data_get_use_when_available(
-      config->players_data, PLAYERS_DATA_TYPE_WMP, 0);
-  bool p2_wmp_use_when_available = players_data_get_use_when_available(
-      config->players_data, PLAYERS_DATA_TYPE_WMP, 1);
-
-  if (use_wmp_has_value) {
-    config_load_bool(config, ARG_TOKEN_USE_WMP, &p1_wmp_use_when_available,
-                     error_stack);
-    if (!error_stack_is_empty(error_stack)) {
-      return;
+  // Each player's setting for each table: true, false, or auto -- use it
+  // when this machine has room (config->table_auto). wmp / w1 / w2, rit /
+  // rit1 / rit2 and wit / wit1 / wit2 follow one pattern: the per-player arg
+  // overrides the shared one. The settings persist; what a load uses is
+  // decided below, from them, every time.
+  const players_data_t table_types[] = {
+      PLAYERS_DATA_TYPE_WMP, PLAYERS_DATA_TYPE_RIT, PLAYERS_DATA_TYPE_WIT};
+  const arg_token_t shared_tokens[] = {ARG_TOKEN_USE_WMP, ARG_TOKEN_USE_RIT,
+                                       ARG_TOKEN_USE_WIT};
+  const arg_token_t player_tokens[][2] = {
+      {ARG_TOKEN_P1_USE_WMP, ARG_TOKEN_P2_USE_WMP},
+      {ARG_TOKEN_P1_USE_RIT, ARG_TOKEN_P2_USE_RIT},
+      {ARG_TOKEN_P1_USE_WIT, ARG_TOKEN_P2_USE_WIT}};
+  const bool shared_has_value[] = {use_wmp_has_value, use_rit_has_value,
+                                   use_wit_has_value};
+  const bool player_has_value[][2] = {
+      {p1_use_wmp_has_value, p2_use_wmp_has_value},
+      {p1_use_rit_has_value, p2_use_rit_has_value},
+      {p1_use_wit_has_value, p2_use_wit_has_value}};
+  bool use[NUMBER_OF_DATA][2] = {{false}};
+  for (int table_idx = 0; table_idx < 3; table_idx++) {
+    const players_data_t type = table_types[table_idx];
+    bool player_use[2];
+    bool player_auto[2];
+    for (int player_idx = 0; player_idx < 2; player_idx++) {
+      player_use[player_idx] = players_data_get_use_when_available(
+          config->players_data, type, player_idx);
+      player_auto[player_idx] = config->table_auto[type][player_idx];
     }
-    p2_wmp_use_when_available = p1_wmp_use_when_available;
-  }
-
-  // The "w1" and "w2" args override the "use_wmp" arg
-  if (p1_use_wmp_has_value) {
-    config_load_bool(config, ARG_TOKEN_P1_USE_WMP, &p1_wmp_use_when_available,
-                     error_stack);
-    if (!error_stack_is_empty(error_stack)) {
-      return;
+    if (shared_has_value[table_idx]) {
+      config_load_table_setting(config, shared_tokens[table_idx],
+                                &player_use[0], &player_auto[0], error_stack);
+      if (!error_stack_is_empty(error_stack)) {
+        return;
+      }
+      player_use[1] = player_use[0];
+      player_auto[1] = player_auto[0];
     }
-  }
-
-  if (p2_use_wmp_has_value) {
-    config_load_bool(config, ARG_TOKEN_P2_USE_WMP, &p2_wmp_use_when_available,
-                     error_stack);
-    if (!error_stack_is_empty(error_stack)) {
-      return;
-    }
-  }
-
-  players_data_set_use_when_available(config->players_data,
-                                      PLAYERS_DATA_TYPE_WMP, 0,
-                                      p1_wmp_use_when_available);
-  players_data_set_use_when_available(config->players_data,
-                                      PLAYERS_DATA_TYPE_WMP, 1,
-                                      p2_wmp_use_when_available);
-
-  // Determine the status of the rack info table for both players, mirroring
-  // the WMP arg pattern (rit / rit1 / rit2).
-  bool p1_rit_use_when_available = players_data_get_use_when_available(
-      config->players_data, PLAYERS_DATA_TYPE_RIT, 0);
-  bool p2_rit_use_when_available = players_data_get_use_when_available(
-      config->players_data, PLAYERS_DATA_TYPE_RIT, 1);
-
-  if (use_rit_has_value) {
-    config_load_bool(config, ARG_TOKEN_USE_RIT, &p1_rit_use_when_available,
-                     error_stack);
-    if (!error_stack_is_empty(error_stack)) {
-      return;
-    }
-    p2_rit_use_when_available = p1_rit_use_when_available;
-  }
-
-  // The "rit1" and "rit2" args override the "rit" arg.
-  if (p1_use_rit_has_value) {
-    config_load_bool(config, ARG_TOKEN_P1_USE_RIT, &p1_rit_use_when_available,
-                     error_stack);
-    if (!error_stack_is_empty(error_stack)) {
-      return;
-    }
-  }
-
-  if (p2_use_rit_has_value) {
-    config_load_bool(config, ARG_TOKEN_P2_USE_RIT, &p2_rit_use_when_available,
-                     error_stack);
-    if (!error_stack_is_empty(error_stack)) {
-      return;
+    for (int player_idx = 0; player_idx < 2; player_idx++) {
+      if (player_has_value[table_idx][player_idx]) {
+        config_load_table_setting(config, player_tokens[table_idx][player_idx],
+                                  &player_use[player_idx],
+                                  &player_auto[player_idx], error_stack);
+        if (!error_stack_is_empty(error_stack)) {
+          return;
+        }
+      }
+      players_data_set_use_when_available(config->players_data, type,
+                                          player_idx, player_use[player_idx]);
+      config->table_auto[type][player_idx] = player_auto[player_idx];
+      use[type][player_idx] = player_use[player_idx];
     }
   }
 
   // Rack info tables cache KLV-derived leave values. Leave generation updates
   // the KLV after every generation, so an RIT would become stale immediately.
+  // Only this load goes without: the settings stand.
   if (disable_rit) {
-    p1_rit_use_when_available = false;
-    p2_rit_use_when_available = false;
+    use[PLAYERS_DATA_TYPE_RIT][0] = false;
+    use[PLAYERS_DATA_TYPE_RIT][1] = false;
   }
-
-  players_data_set_use_when_available(config->players_data,
-                                      PLAYERS_DATA_TYPE_RIT, 0,
-                                      p1_rit_use_when_available);
-  players_data_set_use_when_available(config->players_data,
-                                      PLAYERS_DATA_TYPE_RIT, 1,
-                                      p2_rit_use_when_available);
 
   if (use_mmap_for_rit_has_value) {
     config_load_bool(config, ARG_TOKEN_USE_MMAP_FOR_RIT,
@@ -8057,46 +8409,6 @@ static void config_load_lexicon_dependent_data_internal(
       return;
     }
   }
-
-  // Determine the status of the word info table for both players, mirroring
-  // the WMP/RIT arg pattern (wit / wit1 / wit2).
-  bool p1_wit_use_when_available = players_data_get_use_when_available(
-      config->players_data, PLAYERS_DATA_TYPE_WIT, 0);
-  bool p2_wit_use_when_available = players_data_get_use_when_available(
-      config->players_data, PLAYERS_DATA_TYPE_WIT, 1);
-
-  if (use_wit_has_value) {
-    config_load_bool(config, ARG_TOKEN_USE_WIT, &p1_wit_use_when_available,
-                     error_stack);
-    if (!error_stack_is_empty(error_stack)) {
-      return;
-    }
-    p2_wit_use_when_available = p1_wit_use_when_available;
-  }
-
-  // The "wit1" and "wit2" args override the "wit" arg.
-  if (p1_use_wit_has_value) {
-    config_load_bool(config, ARG_TOKEN_P1_USE_WIT, &p1_wit_use_when_available,
-                     error_stack);
-    if (!error_stack_is_empty(error_stack)) {
-      return;
-    }
-  }
-
-  if (p2_use_wit_has_value) {
-    config_load_bool(config, ARG_TOKEN_P2_USE_WIT, &p2_wit_use_when_available,
-                     error_stack);
-    if (!error_stack_is_empty(error_stack)) {
-      return;
-    }
-  }
-
-  players_data_set_use_when_available(config->players_data,
-                                      PLAYERS_DATA_TYPE_WIT, 0,
-                                      p1_wit_use_when_available);
-  players_data_set_use_when_available(config->players_data,
-                                      PLAYERS_DATA_TYPE_WIT, 1,
-                                      p2_wit_use_when_available);
 
   // Both lexicons are not specified, so we don't
   // load any of the lexicon dependent data
@@ -8141,39 +8453,6 @@ static void config_load_lexicon_dependent_data_internal(
   players_data_set(config->players_data, PLAYERS_DATA_TYPE_KWG,
                    config->data_paths, updated_p1_lexicon_name,
                    updated_p2_lexicon_name, false, error_stack);
-
-  if (!error_stack_is_empty(error_stack)) {
-    return;
-  }
-
-  // Load lexica (in WMP format)
-
-  // For the wmp, we allow non-NULL -> NULL transitions.
-
-  const char *p1_wmp_name = NULL;
-  if (p1_wmp_use_when_available) {
-    p1_wmp_name = updated_p1_lexicon_name;
-  }
-
-  const char *p2_wmp_name = NULL;
-  if (p2_wmp_use_when_available) {
-    p2_wmp_name = updated_p2_lexicon_name;
-  }
-
-  if (config->build_missing_wordmaps) {
-    // Players with the same lexicon share its wordmap, so it is built, or
-    // found missing and reported, once rather than once per player.
-    const bool same_wordmap =
-        p1_wmp_name && p2_wmp_name && strings_equal(p1_wmp_name, p2_wmp_name);
-    p1_wmp_name = config_wordmap_for_first_use(config, 0, p1_wmp_name);
-    p2_wmp_name = same_wordmap
-                      ? p1_wmp_name
-                      : config_wordmap_for_first_use(config, 1, p2_wmp_name);
-  }
-
-  players_data_set(config->players_data, PLAYERS_DATA_TYPE_WMP,
-                   config->data_paths, p1_wmp_name, p2_wmp_name, false,
-                   error_stack);
 
   if (!error_stack_is_empty(error_stack)) {
     return;
@@ -8232,34 +8511,86 @@ static void config_load_lexicon_dependent_data_internal(
     return;
   }
 
-  // Load rack info tables (if enabled). Like the WMP, the .rit file shares
-  // the lexicon name and non-NULL -> NULL transitions are allowed.
-  const char *p1_rit_name = NULL;
-  if (p1_rit_use_when_available) {
-    p1_rit_name = config->p1_rit_name_override ? config->p1_rit_name_override
-                                               : updated_p1_lexicon_name;
+  // The tables. A rack info table is named for its (lexicon, leaves) pair
+  // (config_rack_info_table_name), unless a contribute task names it. Those
+  // set to auto are used if this machine has room for them, as
+  // config_choose_auto_tables decides, which says so in a line when what it
+  // decided changes.
+  const char *lexicons[2] = {updated_p1_lexicon_name, updated_p2_lexicon_name};
+  char *rit_names[2];
+  for (int player_idx = 0; player_idx < 2; player_idx++) {
+    const char *override = player_idx == 0 ? config->p1_rit_name_override
+                                           : config->p2_rit_name_override;
+    rit_names[player_idx] =
+        override
+            ? string_duplicate(override)
+            : config_rack_info_table_name(
+                  config, lexicons[player_idx],
+                  players_data_get_data_name(
+                      config->players_data, PLAYERS_DATA_TYPE_KLV, player_idx));
   }
-  const char *p2_rit_name = NULL;
-  if (p2_rit_use_when_available) {
-    p2_rit_name = config->p2_rit_name_override ? config->p2_rit_name_override
-                                               : updated_p2_lexicon_name;
+  char *report = NULL;
+  config_choose_auto_tables(config, lexicons, rit_names, use, &report);
+  if (report && !strings_equal(report, config->auto_table_report)) {
+    thread_control_print_formatted(config->thread_control, "%s", report);
+    free(config->auto_table_report);
+    config->auto_table_report = report;
+  } else {
+    free(report);
   }
+
+  // The wordmaps. For the wmp, we allow non-NULL -> NULL transitions.
+  const char *p1_wmp_name =
+      use[PLAYERS_DATA_TYPE_WMP][0] ? updated_p1_lexicon_name : NULL;
+  const char *p2_wmp_name =
+      use[PLAYERS_DATA_TYPE_WMP][1] ? updated_p2_lexicon_name : NULL;
+  if (config->build_missing_wordmaps) {
+    // Players with the same lexicon share its wordmap, so it is built, or
+    // found missing and reported, once rather than once per player.
+    const bool same_wordmap =
+        p1_wmp_name && p2_wmp_name && strings_equal(p1_wmp_name, p2_wmp_name);
+    p1_wmp_name = config_wordmap_for_first_use(config, 0, p1_wmp_name);
+    p2_wmp_name = same_wordmap
+                      ? p1_wmp_name
+                      : config_wordmap_for_first_use(config, 1, p2_wmp_name);
+  }
+  players_data_set(config->players_data, PLAYERS_DATA_TYPE_WMP,
+                   config->data_paths, p1_wmp_name, p2_wmp_name, false,
+                   error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    free(rit_names[0]);
+    free(rit_names[1]);
+    return;
+  }
+
+  // Load rack info tables (if enabled). Non-NULL -> NULL transitions are
+  // allowed.
   players_data_set(config->players_data, PLAYERS_DATA_TYPE_RIT,
-                   config->data_paths, p1_rit_name, p2_rit_name,
+                   config->data_paths,
+                   use[PLAYERS_DATA_TYPE_RIT][0] ? rit_names[0] : NULL,
+                   use[PLAYERS_DATA_TYPE_RIT][1] ? rit_names[1] : NULL,
                    config->use_mmap_for_rit, error_stack);
+  free(rit_names[0]);
+  free(rit_names[1]);
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
 
   // Load word info tables (if enabled). Like the WMP, the .wit file shares
-  // the lexicon name and non-NULL -> NULL transitions are allowed.
-  const char *p1_wit_name = NULL;
-  if (p1_wit_use_when_available) {
-    p1_wit_name = updated_p1_lexicon_name;
-  }
-  const char *p2_wit_name = NULL;
-  if (p2_wit_use_when_available) {
-    p2_wit_name = updated_p2_lexicon_name;
+  // the lexicon name and non-NULL -> NULL transitions are allowed; one set to
+  // auto is built on first use where missing wordmaps are.
+  const char *p1_wit_name =
+      use[PLAYERS_DATA_TYPE_WIT][0] ? updated_p1_lexicon_name : NULL;
+  const char *p2_wit_name =
+      use[PLAYERS_DATA_TYPE_WIT][1] ? updated_p2_lexicon_name : NULL;
+  if (config->build_missing_wordmaps) {
+    const bool same_table =
+        p1_wit_name && p2_wit_name && strings_equal(p1_wit_name, p2_wit_name);
+    p1_wit_name = config_word_info_table_for_first_use(config, 0, p1_wit_name);
+    p2_wit_name =
+        same_table
+            ? p1_wit_name
+            : config_word_info_table_for_first_use(config, 1, p2_wit_name);
   }
   players_data_set(config->players_data, PLAYERS_DATA_TYPE_WIT,
                    config->data_paths, p1_wit_name, p2_wit_name,
@@ -15061,6 +15392,27 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->game_variant = DEFAULT_GAME_VARIANT;
   config->ld = NULL;
   config->players_data = players_data_create(default_use_wmp);
+  // The command line program and the library's magpie_create() use each
+  // table when this machine has room for it; tests, browser games and
+  // contribute's task configurations state what they use.
+  const bool auto_tables = config_args && config_args->auto_tables;
+  for (int player_idx = 0; player_idx < 2; player_idx++) {
+    config->table_auto[PLAYERS_DATA_TYPE_WMP][player_idx] = auto_tables;
+    config->table_auto[PLAYERS_DATA_TYPE_RIT][player_idx] = auto_tables;
+    config->table_auto[PLAYERS_DATA_TYPE_WIT][player_idx] = auto_tables;
+    if (auto_tables) {
+      players_data_set_use_when_available(
+          config->players_data, PLAYERS_DATA_TYPE_WMP, player_idx, true);
+      players_data_set_use_when_available(
+          config->players_data, PLAYERS_DATA_TYPE_RIT, player_idx, true);
+      players_data_set_use_when_available(
+          config->players_data, PLAYERS_DATA_TYPE_WIT, player_idx, true);
+    }
+  }
+  // A mapped rack info table starts faster, is shared by the processes using
+  // its data directory, and gives the system pages it can reclaim.
+  config->use_mmap_for_rit = auto_tables && IS_LITTLE_ENDIAN;
+  config->auto_table_report = NULL;
   config->thread_control = thread_control_create();
   config->game = NULL;
   config->game_backup = NULL;
@@ -15111,6 +15463,7 @@ void config_destroy(Config *config) {
   peg_result_destroy(&config->peg_result);
   peg_poll_destroy(config->peg_poll);
   free(config->peg_last_set_str);
+  free(config->auto_table_report);
   free(config->peg_last_moves_str);
   free(config->p1_rit_name_override);
   free(config->p2_rit_name_override);
@@ -15183,6 +15536,24 @@ static void config_add_int_list_setting_to_string_builder(const Config *config,
   for (int i = 0; i < count; i++) {
     string_builder_add_formatted_string(sb, i > 0 ? ",%d" : "%d", values[i]);
   }
+}
+
+// A table option as set: auto, or true or false -- never what the last load
+// used, which on another machine, or with more memory, could differ.
+static void config_add_table_setting_to_string_builder(const Config *config,
+                                                       StringBuilder *sb,
+                                                       arg_token_t arg_token,
+                                                       players_data_t type,
+                                                       int player_index) {
+  if (config->table_auto[type][player_index]) {
+    string_builder_add_formatted_string(sb, " -%s auto",
+                                        config->pargs[arg_token]->name);
+    return;
+  }
+  config_add_bool_setting_to_string_builder(
+      config, sb, arg_token,
+      players_data_get_use_when_available(config->players_data, type,
+                                          player_index));
 }
 
 void config_add_settings_to_string_builder(const Config *config,
@@ -15305,22 +15676,16 @@ void config_add_settings_to_string_builder(const Config *config,
                                      PLAYERS_DATA_TYPE_KWG, 0));
       break;
     case ARG_TOKEN_P1_USE_WMP:
-      config_add_bool_setting_to_string_builder(
-          config, sb, arg_token,
-          players_data_get_use_when_available(config->players_data,
-                                              PLAYERS_DATA_TYPE_WMP, 0));
+      config_add_table_setting_to_string_builder(config, sb, arg_token,
+                                                 PLAYERS_DATA_TYPE_WMP, 0);
       break;
     case ARG_TOKEN_P1_USE_RIT:
-      config_add_bool_setting_to_string_builder(
-          config, sb, arg_token,
-          players_data_get_use_when_available(config->players_data,
-                                              PLAYERS_DATA_TYPE_RIT, 0));
+      config_add_table_setting_to_string_builder(config, sb, arg_token,
+                                                 PLAYERS_DATA_TYPE_RIT, 0);
       break;
     case ARG_TOKEN_P1_USE_WIT:
-      config_add_bool_setting_to_string_builder(
-          config, sb, arg_token,
-          players_data_get_use_when_available(config->players_data,
-                                              PLAYERS_DATA_TYPE_WIT, 0));
+      config_add_table_setting_to_string_builder(config, sb, arg_token,
+                                                 PLAYERS_DATA_TYPE_WIT, 0);
       break;
     case ARG_TOKEN_P1_LEAVES:
       config_add_string_setting_to_string_builder(
@@ -15389,22 +15754,16 @@ void config_add_settings_to_string_builder(const Config *config,
                                      PLAYERS_DATA_TYPE_KWG, 1));
       break;
     case ARG_TOKEN_P2_USE_WMP:
-      config_add_bool_setting_to_string_builder(
-          config, sb, arg_token,
-          players_data_get_use_when_available(config->players_data,
-                                              PLAYERS_DATA_TYPE_WMP, 1));
+      config_add_table_setting_to_string_builder(config, sb, arg_token,
+                                                 PLAYERS_DATA_TYPE_WMP, 1);
       break;
     case ARG_TOKEN_P2_USE_RIT:
-      config_add_bool_setting_to_string_builder(
-          config, sb, arg_token,
-          players_data_get_use_when_available(config->players_data,
-                                              PLAYERS_DATA_TYPE_RIT, 1));
+      config_add_table_setting_to_string_builder(config, sb, arg_token,
+                                                 PLAYERS_DATA_TYPE_RIT, 1);
       break;
     case ARG_TOKEN_P2_USE_WIT:
-      config_add_bool_setting_to_string_builder(
-          config, sb, arg_token,
-          players_data_get_use_when_available(config->players_data,
-                                              PLAYERS_DATA_TYPE_WIT, 1));
+      config_add_table_setting_to_string_builder(config, sb, arg_token,
+                                                 PLAYERS_DATA_TYPE_WIT, 1);
       break;
     case ARG_TOKEN_P2_LEAVES:
       config_add_string_setting_to_string_builder(

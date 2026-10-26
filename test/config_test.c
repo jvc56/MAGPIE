@@ -2615,6 +2615,32 @@ void test_config_upgrade_settings_line(void) {
   config_destroy(config);
 }
 
+// -wmp, -rit and -wit take auto beside true and false, and a settings file
+// records auto as auto rather than what this machine's load decided.
+void test_config_table_auto_settings(void) {
+  Config *config = config_create_default_test();
+  assert_config_exec_status(config, "set -lex CSW21 -wmp auto -wit auto",
+                            ERROR_STATUS_SUCCESS);
+  StringBuilder *sb = string_builder_create();
+  config_add_settings_to_string_builder(config, sb);
+  assert(strstr(string_builder_peek(sb), " -w1 auto") != NULL);
+  assert(strstr(string_builder_peek(sb), " -w2 auto") != NULL);
+  assert(strstr(string_builder_peek(sb), " -wit1 auto") != NULL);
+  assert(strstr(string_builder_peek(sb), " -rit1 false") != NULL);
+  string_builder_destroy(sb);
+  assert_config_exec_status(config, "set -w2 true -wit false",
+                            ERROR_STATUS_SUCCESS);
+  sb = string_builder_create();
+  config_add_settings_to_string_builder(config, sb);
+  assert(strstr(string_builder_peek(sb), " -w1 auto") != NULL);
+  assert(strstr(string_builder_peek(sb), " -w2 true") != NULL);
+  assert(strstr(string_builder_peek(sb), " -wit1 false") != NULL);
+  string_builder_destroy(sb);
+  assert_config_exec_status(config, "set -wmp maybe",
+                            ERROR_STATUS_CONFIG_LOAD_MALFORMED_BOOL_ARG);
+  config_destroy(config);
+}
+
 void test_config_exchange_blank(void) {
   Config *config = config_create_default_test();
   assert_config_exec_status(config, "set -lex CSW21", ERROR_STATUS_SUCCESS);
@@ -3411,6 +3437,7 @@ void test_config(void) {
   test_config_note_move_interpolation();
   test_config_fg_required();
   test_config_upgrade_settings_line();
+  test_config_table_auto_settings();
   test_config_exchange_blank();
   test_config_utility_blend();
   test_config_move_list_saved_to_game_event();

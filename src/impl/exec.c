@@ -575,6 +575,7 @@ void process_command_default(int argc, char *argv[]) {
   // left as it is.
   const ConfigArgs config_args = {.data_paths = data_path,
                                   .use_wmp = true,
+                                  .auto_tables = true,
                                   .build_missing_wordmaps =
                                       state == DATA_FETCH_STATE_CURRENT ||
                                       state == DATA_FETCH_STATE_OUTDATED};
