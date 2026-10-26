@@ -81,6 +81,19 @@ static uint32_t count_all_racks(const LetterDistribution *ld) {
   return count;
 }
 
+int64_t rack_info_table_file_bytes(const LetterDistribution *ld) {
+  const uint32_t total_racks = count_all_racks(ld);
+  uint32_t num_buckets =
+      total_racks > 0 ? next_power_of_2(total_racks) : RIT_MIN_BUCKETS;
+  if (num_buckets < RIT_MIN_BUCKETS) {
+    num_buckets = RIT_MIN_BUCKETS;
+  }
+  // The header (4 bytes of version and sizes, then the bucket and entry
+  // counts), the bucket starts and the entries, as the table is written.
+  return 12 + ((int64_t)num_buckets + 1) * (int64_t)sizeof(uint32_t) +
+         (int64_t)total_racks * (int64_t)sizeof(RackInfoTableEntry);
+}
+
 static void enumerate_racks_recursive(const LetterDistribution *ld, int ld_size,
                                       int ml, int remaining, BitRack *current,
                                       BitRack *out_racks, uint32_t *index) {

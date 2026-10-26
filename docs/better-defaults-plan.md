@@ -761,14 +761,17 @@ Problems to fix on the way:
 - **WMP**: already built on first use. Keep it, and put it under the same
   budget.
 - **WIT**: build it on first use the same way, with `kwg2witifneeded`.
-- **RIT**: it needs more care, at 1.9 GB on disk and a 2.4 GB build peak:
-  - build it automatically only when R3 and R4 both pass;
-  - print one line before starting, e.g. "building the rack info table for
-    CSW24 (1.9 GB, once), which makes simulation about 17% faster";
-  - at an interactive prompt, ask once, the way the first run offers to
-    download data (README.md:69);
-  - in a non-interactive run, use a RIT only if one is already present;
-  - measure its build time and state it in the message.
+- **RIT**: build it on first use the same way, from the lexicon's wordmap
+  (built first if missing, and charged to the RIT's budget), only when R3
+  and R4 both pass. It is 1.9 GB on disk and peaks at 2.4 GB while it
+  builds; on 12 threads, NWL20's wordmap, RIT and WIT built in under 45 s
+  together.
+- Before each first-use build, print one line naming the table and the disk
+  and build memory it takes, e.g. "building the rack info table
+  NWL20.NWL20, which makes simulation about 17% faster: about 1.89 GB on
+  disk, and up to 2.40 GB of memory while it builds". The RIT size is exact
+  (computed from the letter distribution); the wordmap is estimated at
+  700 bytes a word and the WIT at 21 times the .kwg.
 - Report what each lexicon load chose, in one line, e.g. "CSW24: wordmap,
   word info table; rack info table skipped: 1.2 GB available, 1.9 GB
   needed".
@@ -814,8 +817,8 @@ today, so `auto` that skips a table must cost exactly what `false` costs now.
 3. On a machine under 8 GB, or with memory pressure simulated by a lower
    reserve, check that the RIT is skipped with its one-line reason, and that a
    solve afterwards doesn't swap.
-4. Start with a fresh data directory: first run builds the WMP and WIT, asks
-   about the RIT, and the second run builds nothing.
+4. Start with a fresh data directory: first run builds the WMP, WIT and
+   RIT, each with its line, and the second run builds nothing.
 5. Unit tests at `BOARD_DIM` 15 and 21.
 
 ### Recommended changes
@@ -839,7 +842,7 @@ today, so `auto` that skips a table must cost exactly what `false` costs now.
 | Memory budget: subtract the search TT, and cap the tables at a quarter of RAM (R3) | No swapping, and the same decision on every run |  |  |
 | Disk budget: a larger reserve, a manifest of automatic builds, a size cap with LRU eviction, and a size estimate (R4) | A personal machine's disk isn't dedicated to MAGPIE |  |  |
 | Build the WIT on first use (R5) |  | Built only by `convert kwg2wit` |  |
-| Build the RIT on first use when the budget allows, asking first at an interactive prompt (R5) | It is 1.9 GB on disk and 2.4 GB at its build peak | Built only by `make prepare_data` or `convert klvwmp2rit` |  |
+| Build the RIT on first use when the budget allows, like the wordmap, with a line giving its disk and build memory (R5) | It is 1.9 GB on disk and 2.4 GB at its build peak | Built only by `make prepare_data` or `convert klvwmp2rit` |  |
 | A one-line report of the tables each lexicon load chose (R5) |  |  |  |
 | An available-memory figure for macOS, in src/compat (R3) | Without it, `auto` would load a 1.9 GB RIT on any Mac | None: treated as unconstrained |  |
 

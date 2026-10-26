@@ -1,5 +1,6 @@
 #include "rack_info_table_test.h"
 
+#include "../src/compat/cfile.h"
 #include "../src/def/bit_rack_defs.h"
 #include "../src/def/board_defs.h"
 #include "../src/def/kwg_defs.h"
@@ -425,6 +426,15 @@ void test_rack_info_table(void) {
 
   rack_info_table_write_to_file(rit, rit_filename, error_stack);
   assert(error_stack_is_empty(error_stack));
+  // The size the table is estimated at before it is built is the size it is
+  // written at: here, and for the English distribution's 1.9 GB.
+  CFileIdentity rit_file;
+  assert(cfile_identity(rit_filename, &rit_file));
+  assert(rit_file.size == rack_info_table_file_bytes(ld));
+  LetterDistribution *english = ld_create(data_paths, "english", error_stack);
+  assert(error_stack_is_empty(error_stack));
+  assert(rack_info_table_file_bytes(english) == 1885416048);
+  ld_destroy(english);
 
   RackInfoTable *rit_loaded =
       rack_info_table_create(data_paths, rit_name, false, error_stack);

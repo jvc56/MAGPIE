@@ -2642,6 +2642,113 @@ void test_config_table_auto_settings(void) {
   config_destroy(config);
 }
 
+// Copies a file byte for byte.
+static void copy_test_file(const char *from, const char *to) {
+  FILE *in = cfile_open(from, "rbe", false);
+  assert(in);
+  FILE *out = cfile_open(to, "wbe", false);
+  assert(out);
+  int byte = 0;
+  while ((byte = fgetc(in)) != EOF) {
+    (void)fputc(byte, out);
+  }
+  (void)fclose(in);
+  (void)fclose(out);
+}
+
+// Runs `command` on `config`, writing what it prints to `output` (`size`
+// bytes, terminated).
+static void exec_capturing_output(Config *config, const char *command,
+                                  char *output, size_t size) {
+  FILE *captured = tmpfile();
+  assert(captured);
+  io_set_stream_out(captured);
+  load_and_exec_config_or_die(config, command);
+  io_reset_stream_out();
+  const int seek_result = fseek(captured, 0, SEEK_SET);
+  assert(seek_result == 0);
+  const size_t length = fread(output, 1, size - 1, captured);
+  output[length] = '\0';
+  (void)fclose(captured);
+}
+
+// Where missing tables are built (data from `data fetch`), a lexicon's first
+// use builds its wordmap, word info table and rack info table, each with a
+// line naming it and the disk and memory it takes, and loads them; the next
+// use builds nothing.
+static void test_config_builds_missing_tables_on_first_use(void) {
+  char *dir = test_platform_make_temporary_directory("magpie_first_use");
+  char *lexica = get_formatted_string("%s/lexica", dir);
+  assert(cfile_mkdir(lexica) == 0);
+  // A lexicon name no other data directory has tables for.
+  const char *lexicon = "CSW21_abfirstuse";
+  char *kwg = get_formatted_string("%s/%s.kwg", lexica, lexicon);
+  char *klv = get_formatted_string("%s/%s.klv2", lexica, lexicon);
+  copy_test_file("testdata/lexica/CSW21_ab.kwg", kwg);
+  copy_test_file("testdata/lexica/CSW21_ab.klv2", klv);
+  char *data_paths = get_formatted_string("%s:%s", dir, DEFAULT_TEST_DATA_PATH);
+  const ConfigArgs args = {.data_paths = data_paths,
+                           .settings_filename = DEFAULT_TEST_SETTINGS_FILENAME,
+                           .use_wmp = true,
+                           .auto_tables = true,
+                           .build_missing_wordmaps = true};
+  ErrorStack *error_stack = error_stack_create();
+  Config *config = config_create(&args, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  error_stack_destroy(error_stack);
+  char *command = get_formatted_string(
+      "set -threads 1 -savesettings false -lex %s -ld english_ab", lexicon);
+
+  char output[4096];
+  exec_capturing_output(config, command, output, sizeof(output));
+
+  const PlayersData *players_data = config_get_players_data(config);
+  char *rit_name = get_formatted_string("%s.%s", lexicon, lexicon);
+  if (strstr(output, "skipped")) {
+    // A machine with less disk than the reserve the tables leave free.
+    printf("config: skipped the first-use build: %s", output);
+  } else {
+    const char *built[] = {"building the wordmap",
+                           "building the word info table",
+                           "building the rack info table"};
+    for (int line_idx = 0; line_idx < 3; line_idx++) {
+      const char *line = strstr(output, built[line_idx]);
+      assert(line);
+      assert(strstr(line, " on disk, and up to "));
+    }
+    assert(strings_equal(
+        players_data_get_data_name(players_data, PLAYERS_DATA_TYPE_WMP, 0),
+        lexicon));
+    assert(strings_equal(
+        players_data_get_data_name(players_data, PLAYERS_DATA_TYPE_WIT, 0),
+        lexicon));
+    assert(strings_equal(
+        players_data_get_data_name(players_data, PLAYERS_DATA_TYPE_RIT, 0),
+        rit_name));
+    // Loaded again from disk by a new config: nothing is built.
+    config_destroy(config);
+    error_stack = error_stack_create();
+    config = config_create(&args, error_stack);
+    assert(error_stack_is_empty(error_stack));
+    error_stack_destroy(error_stack);
+    exec_capturing_output(config, command, output, sizeof(output));
+    assert(!strstr(output, "building"));
+    assert(strings_equal(
+        players_data_get_data_name(config_get_players_data(config),
+                                   PLAYERS_DATA_TYPE_RIT, 0),
+        rit_name));
+  }
+  free(rit_name);
+  free(command);
+  config_destroy(config);
+  free(data_paths);
+  free(klv);
+  free(kwg);
+  free(lexica);
+  test_platform_remove_directory_tree(dir);
+  free(dir);
+}
+
 void test_config_exchange_blank(void) {
   Config *config = config_create_default_test();
   assert_config_exec_status(config, "set -lex CSW21", ERROR_STATUS_SUCCESS);
@@ -3439,6 +3546,7 @@ void test_config(void) {
   test_config_fg_required();
   test_config_upgrade_settings_line();
   test_config_table_auto_settings();
+  test_config_builds_missing_tables_on_first_use();
   test_config_exchange_blank();
   test_config_utility_blend();
   test_config_move_list_saved_to_game_event();

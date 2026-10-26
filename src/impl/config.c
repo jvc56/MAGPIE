@@ -85,6 +85,7 @@
 #include "peg.h"
 #include "play_chooser.h"
 #include "rack_draw.h"
+#include "rack_info_table_maker.h"
 #include "simmer.h"
 #include <assert.h>
 #include <ctype.h>
@@ -1418,10 +1419,11 @@ static void add_analyze_and_settings_help_arg(arg_token_t arg_token,
             "belongs to a lexicon played with a set of leaves, and is the "
             "file <lexicon>.<leaves>.rit (or <lexicon>.rit for the lexicon's "
             "own leaves), built with 'convert klvwmp2rit'. auto (the default "
-            "for the command line program and the library) uses one that is "
-            "there when this machine has the memory for it, and is never "
-            "built by itself: it is 1.9 GB for English. true requires one; "
-            "false never uses one.";
+            "for the command line program and the library) uses one when "
+            "this machine has the disk and memory for it, building a missing "
+            "one on first use for data from 'data fetch' as it does the "
+            "wordmap, and otherwise plays without: it is 1.9 GB for English. "
+            "true requires one; false never uses one.";
     break;
   case ARG_TOKEN_USE_MMAP_FOR_RIT:
     usages[0] = "<true_or_false>";
@@ -7865,6 +7867,172 @@ static const char *config_wordmap_unsupported_reason(const char *lexicon) {
   return NULL;
 }
 
+static char *contribute_size_text(int64_t bytes);
+
+// The bytes of the data file `name` of `type`, or -1 when there is none.
+static int64_t config_table_file_bytes(const Config *config, const char *name,
+                                       data_filepath_t type) {
+  ErrorStack *errors = error_stack_create();
+  char *path = data_filepaths_get_readable_filename(config->data_paths, name,
+                                                    type, errors);
+  int64_t bytes = -1;
+  CFileIdentity identity;
+  if (error_stack_is_empty(errors) && cfile_identity(path, &identity)) {
+    bytes = identity.size;
+  }
+  free(path);
+  error_stack_destroy(errors);
+  return bytes;
+}
+
+// What a table type (WMP, WIT or RIT) is on disk, to contribute's chooser,
+// and to the player.
+typedef struct ConfigTableKind {
+  data_filepath_t file_type;
+  contribute_table_role_t role;
+  const char *speedup;
+} ConfigTableKind;
+
+static ConfigTableKind config_table_kind(players_data_t type) {
+  switch (type) {
+  case PLAYERS_DATA_TYPE_WMP:
+    return (ConfigTableKind){DATA_FILEPATH_TYPE_WORDMAP, CONTRIBUTE_TABLE_WMP,
+                             "move generation 3-4 times faster"};
+  case PLAYERS_DATA_TYPE_WIT:
+    return (ConfigTableKind){DATA_FILEPATH_TYPE_WORD_INFO_TABLE,
+                             CONTRIBUTE_TABLE_WIT,
+                             "simulation about 9% faster"};
+  default:
+    return (ConfigTableKind){DATA_FILEPATH_TYPE_RACK_INFO_TABLE,
+                             CONTRIBUTE_TABLE_RIT,
+                             "simulation about 17% faster"};
+  }
+}
+
+// The words in the DAWG lists starting at `node_index`, memoized by list in
+// `memo` (-1 for a list not counted yet).
+static int64_t config_kwg_words_from(const KWG *kwg, uint32_t node_index,
+                                     int64_t *memo) {
+  if (node_index == 0) {
+    return 0;
+  }
+  if (memo[node_index] >= 0) {
+    return memo[node_index];
+  }
+  int64_t words = 0;
+  bool list_ended = false;
+  for (uint32_t list_idx = node_index; !list_ended; list_idx++) {
+    const uint32_t node = kwg_node(kwg, list_idx);
+    if (kwg_node_accepts(node)) {
+      words++;
+    }
+    words += config_kwg_words_from(kwg, kwg_node_arc_index(node), memo);
+    list_ended = kwg_node_is_end(node);
+  }
+  memo[node_index] = words;
+  return words;
+}
+
+// The words in lexicon `lexicon`, or -1 when its .kwg cannot be read.
+static int64_t config_lexicon_word_count(const Config *config,
+                                         const char *lexicon) {
+  ErrorStack *errors = error_stack_create();
+  KWG *kwg = kwg_create(config->data_paths, lexicon, errors);
+  int64_t words = -1;
+  if (error_stack_is_empty(errors)) {
+    const int num_nodes = kwg_get_number_of_nodes(kwg);
+    int64_t *memo = malloc_or_die(sizeof(int64_t) * (size_t)num_nodes);
+    for (int node_idx = 0; node_idx < num_nodes; node_idx++) {
+      memo[node_idx] = -1;
+    }
+    words = config_kwg_words_from(kwg, kwg_get_dawg_root_node_index(kwg), memo);
+    free(memo);
+  }
+  kwg_destroy(kwg);
+  error_stack_destroy(errors);
+  return words;
+}
+
+// The bytes a table of `type` (WMP, WIT or RIT) named `name`, for `lexicon`,
+// takes on disk: its file's, or an estimate when it is not built yet. A
+// wordmap runs to about 700 bytes a word (640-700 for the English and German
+// lexica, 420-520 for Catalan and French), a word info table to about 21
+// times its lexicon's .kwg (for English and French; less for German and
+// Polish, 33 for Catalan), and a rack info table to exactly what one for the
+// letter distribution `ld_name` writes. -1 when it cannot be told.
+static int64_t config_table_bytes(const Config *config, players_data_t type,
+                                  const char *name, const char *lexicon,
+                                  const char *ld_name) {
+  const int64_t bytes =
+      config_table_file_bytes(config, name, config_table_kind(type).file_type);
+  if (bytes >= 0) {
+    return bytes;
+  }
+  if (type == PLAYERS_DATA_TYPE_WMP) {
+    const int64_t words = config_lexicon_word_count(config, lexicon);
+    return words < 0 ? -1 : words * 700;
+  }
+  if (type == PLAYERS_DATA_TYPE_WIT) {
+    const int64_t kwg_bytes =
+        config_table_file_bytes(config, lexicon, DATA_FILEPATH_TYPE_KWG);
+    return kwg_bytes < 0 ? -1 : kwg_bytes * 21;
+  }
+  ErrorStack *errors = error_stack_create();
+  LetterDistribution *ld = ld_create(config->data_paths, ld_name, errors);
+  int64_t rit_bytes = -1;
+  if (error_stack_is_empty(errors)) {
+    rit_bytes = rack_info_table_file_bytes(ld);
+  }
+  ld_destroy(ld);
+  error_stack_destroy(errors);
+  return rit_bytes;
+}
+
+// Whether the filesystem `built_path` is written to lacks room for a table of
+// about `bytes` (-1 unknown): a third more than the estimate is asked for.
+static bool config_table_lacks_disk(const char *built_path, int64_t bytes) {
+  if (bytes < 0) {
+    return false;
+  }
+  int64_t free_bytes = 0;
+  char *directory = get_dirpath_from_filepath(built_path);
+  const bool lacks = cfile_free_bytes(directory, &free_bytes) &&
+                     free_bytes < bytes + bytes / 3;
+  free(directory);
+  return lacks;
+}
+
+// Says a table is about to be built on first use: what it is, for which
+// lexicon, and the disk it will take and the memory its build peaks at.
+static void config_announce_table_build(const Config *config,
+                                        players_data_t type, const char *name,
+                                        const char *lexicon,
+                                        const char *ld_name) {
+  const ConfigTableKind kind = config_table_kind(type);
+  const contribute_table_role_t role = kind.role;
+  const char *speedup = kind.speedup;
+  const int64_t bytes =
+      config_table_bytes(config, type, name, lexicon, ld_name);
+  if (bytes < 0) {
+    thread_control_print_formatted(
+        config->thread_control,
+        "building the %s %s, which makes %s (once; this can take a few "
+        "minutes)\n",
+        contribute_table_role_description(role), name, speedup);
+    return;
+  }
+  char *disk = contribute_size_text(bytes);
+  char *memory =
+      contribute_size_text(contribute_table_build_memory(role, bytes));
+  thread_control_print_formatted(
+      config->thread_control,
+      "building the %s %s, which makes %s: about %s on disk, and up to %s of "
+      "memory while it builds (once; this can take a few minutes)\n",
+      contribute_table_role_description(role), name, speedup, disk, memory);
+  free(disk);
+  free(memory);
+}
+
 // Makes the wordmap for player `player_index`'s lexicon `lexicon` available
 // to load, building it from the lexicon's .kwg if it is not on disk: wordmaps
 // are not downloaded (one is about thirty times the size of its lexicon), so
@@ -7872,10 +8040,12 @@ static const char *config_wordmap_unsupported_reason(const char *lexicon) {
 // the wordmap is there to load, or NULL when the player plays without one --
 // the lexicon has no wordmap support, the data directory cannot be written,
 // there is not room for it, or the build failed -- having said why in one
-// line. A NULL `lexicon` (no wordmap wanted) is returned as is.
+// line. A NULL `lexicon` (no wordmap wanted) is returned as is. `ld_name` is
+// the letter distribution the lexicon is loaded with.
 static const char *config_wordmap_for_first_use(Config *config,
                                                 int player_index,
-                                                const char *lexicon) {
+                                                const char *lexicon,
+                                                const char *ld_name) {
   if (!lexicon) {
     return NULL;
   }
@@ -7898,7 +8068,6 @@ static const char *config_wordmap_for_first_use(Config *config,
   }
   const char *why_not = config_wordmap_unsupported_reason(lexicon);
   char *built_path = NULL;
-  char *kwg_path = NULL;
   if (!why_not) {
     built_path = data_filepaths_get_writable_filename(
         config->data_paths, lexicon, DATA_FILEPATH_TYPE_WORDMAP, errors);
@@ -7907,46 +8076,28 @@ static const char *config_wordmap_for_first_use(Config *config,
     }
     error_stack_reset(errors);
   }
-  if (!why_not) {
-    kwg_path = data_filepaths_get_readable_filename(
-        config->data_paths, lexicon, DATA_FILEPATH_TYPE_KWG, errors);
-    CFileIdentity kwg_identity;
-    int64_t free_bytes = 0;
-    char *directory = get_dirpath_from_filepath(built_path);
-    // A wordmap runs to about thirty times its lexicon's .kwg; ask for forty.
-    if (error_stack_is_empty(errors) &&
-        cfile_identity(kwg_path, &kwg_identity) &&
-        cfile_free_bytes(directory, &free_bytes) &&
-        free_bytes < kwg_identity.size * 40) {
-      why_not = "there is not enough disk space for it";
-    }
-    free(directory);
-    error_stack_reset(errors);
+  if (!why_not &&
+      config_table_lacks_disk(built_path,
+                              config_table_bytes(config, PLAYERS_DATA_TYPE_WMP,
+                                                 lexicon, lexicon, ld_name))) {
+    why_not = "there is not enough disk space for it";
   }
   if (!why_not) {
-    thread_control_print_formatted(
-        config->thread_control,
-        "building the wordmap for %s, which makes move generation faster "
-        "(once; this can take a minute)\n",
-        lexicon);
-    char *ld_name = ld_get_default_name_from_lexicon_name(lexicon, errors);
-    if (error_stack_is_empty(errors)) {
-      const ConversionArgs args = {
-          .conversion_type_string = "dawg2wordmap",
-          .data_paths = config->data_paths,
-          .input_and_output_name = lexicon,
-          .ld_name = ld_name,
-          .num_threads = config_get_num_threads(config),
-      };
-      convert(&args, config->conversion_results, errors);
-    }
-    free(ld_name);
+    config_announce_table_build(config, PLAYERS_DATA_TYPE_WMP, lexicon, lexicon,
+                                ld_name);
+    const ConversionArgs args = {
+        .conversion_type_string = "dawg2wordmap",
+        .data_paths = config->data_paths,
+        .input_and_output_name = lexicon,
+        .ld_name = ld_name,
+        .num_threads = config_get_num_threads(config),
+    };
+    convert(&args, config->conversion_results, errors);
     if (!error_stack_is_empty(errors)) {
       why_not = "it could not be built";
       error_stack_print_and_reset(errors);
     }
   }
-  free(kwg_path);
   free(built_path);
   error_stack_destroy(errors);
   if (why_not) {
@@ -7982,22 +8133,6 @@ static void config_load_table_setting(const Config *config,
 
 // ----- Tables used when this machine has room (-wmp, -rit, -wit auto) -----
 
-// The bytes of the data file `name` of `type`, or -1 when there is none.
-static int64_t config_table_file_bytes(const Config *config, const char *name,
-                                       data_filepath_t type) {
-  ErrorStack *errors = error_stack_create();
-  char *path = data_filepaths_get_readable_filename(config->data_paths, name,
-                                                    type, errors);
-  int64_t bytes = -1;
-  CFileIdentity identity;
-  if (error_stack_is_empty(errors) && cfile_identity(path, &identity)) {
-    bytes = identity.size;
-  }
-  free(path);
-  error_stack_destroy(errors);
-  return bytes;
-}
-
 // The rack info table for `lexicon` played with `leaves`. A rack info table
 // caches leave values, so it belongs to a (lexicon, leaves) pair, and is
 // named "<lexicon>.<leaves>" as contribute names it. The older name
@@ -8023,8 +8158,6 @@ static char *config_rack_info_table_name(const Config *config,
   return paired;
 }
 
-static char *contribute_size_text(int64_t bytes);
-
 // The disk an automatic build leaves free: the larger of this and
 // CONFIG_AUTO_TABLE_DISK_RESERVE_PERMILLE of the filesystem. A personal
 // machine's disk is not the program's, as a contributor's is.
@@ -8043,16 +8176,17 @@ static char *contribute_size_text(int64_t bytes);
 //   (-ttfraction of the physical memory), and never more than a quarter of
 //   the physical memory, so the decision does not change with whatever else
 //   is open. Where the available memory cannot be read, the quarter alone.
-// A wordmap or word info table that is not on disk is built only where
-// missing wordmaps are (the command line program with fetched data); a rack
-// info table never is. Clears the use flag of each auto table left out, and
+// A table that is not on disk is built only where missing wordmaps are (the
+// command line program with fetched data); a rack info table is built from
+// its lexicon's wordmap, so it costs that wordmap's disk too when the
+// wordmap is missing. Clears the use flag of each auto table left out, and
 // writes a line saying what each player's lexicon got to *report (NULL when
-// no table is auto). rit_names hold each player's rack info table name.
-static void config_choose_auto_tables(Config *config,
-                                      const char *const lexicons[2],
-                                      char *const rit_names[2],
-                                      bool use[NUMBER_OF_DATA][2],
-                                      char **report) {
+// no table is auto). rit_names hold each player's rack info table name, and
+// ld_name is the letter distribution the lexicons are loaded with.
+static void
+config_choose_auto_tables(Config *config, const char *const lexicons[2],
+                          char *const rit_names[2], const char *ld_name,
+                          bool use[NUMBER_OF_DATA][2], char **report) {
   *report = NULL;
   const players_data_t types[] = {PLAYERS_DATA_TYPE_WMP, PLAYERS_DATA_TYPE_WIT,
                                   PLAYERS_DATA_TYPE_RIT};
@@ -8093,10 +8227,11 @@ static void config_choose_auto_tables(Config *config,
       }
       const int64_t bytes =
           config_table_file_bytes(config, name, file_types[role_idx]);
-      const bool can_build = type != PLAYERS_DATA_TYPE_RIT &&
-                             config->build_missing_wordmaps &&
-                             (type != PLAYERS_DATA_TYPE_WMP ||
-                              !config_wordmap_unsupported_reason(name));
+      // A rack info table is built from its lexicon's wordmap.
+      const bool can_build =
+          config->build_missing_wordmaps &&
+          (type == PLAYERS_DATA_TYPE_WIT ||
+           !config_wordmap_unsupported_reason(lexicons[player_idx]));
       if (bytes < 0 && !can_build) {
         // Not there, and not built here: left out without a budget.
         use[type][player_idx] = false;
@@ -8109,18 +8244,10 @@ static void config_choose_auto_tables(Config *config,
       table->lexicon = lexicons[player_idx];
       table->present = bytes >= 0;
       table->requested = true;
-      if (bytes >= 0) {
-        table->bytes = bytes;
-      } else {
-        // A table not yet built: about 30 (wordmap) and 20 (word info
-        // table) times its lexicon's .kwg.
-        const int64_t kwg_bytes = config_table_file_bytes(
-            config, lexicons[player_idx], DATA_FILEPATH_TYPE_KWG);
-        table->bytes =
-            kwg_bytes < 0
-                ? -1
-                : kwg_bytes * (type == PLAYERS_DATA_TYPE_WMP ? 30 : 20);
-      }
+      table->bytes = bytes >= 0
+                         ? bytes
+                         : config_table_bytes(config, type, name,
+                                              lexicons[player_idx], ld_name);
       const char *loaded_name =
           players_data_get_data_name(config->players_data, type, player_idx);
       table->loaded = loaded_name && strings_equal(loaded_name, name);
@@ -8129,6 +8256,34 @@ static void config_choose_auto_tables(Config *config,
   }
   if (!any_auto) {
     return;
+  }
+  // A rack info table whose wordmap is not auto still needs one on disk to
+  // be built from: add it, unrequested, so it is charged for when missing.
+  const int rit_tables = count;
+  for (int table_idx = 0; table_idx < rit_tables; table_idx++) {
+    const ContributeTable *rit = &tables[table_idx];
+    if (rit->role != CONTRIBUTE_TABLE_RIT || rit->present) {
+      continue;
+    }
+    bool has_wordmap = false;
+    for (int other_idx = 0; other_idx < count; other_idx++) {
+      if (tables[other_idx].role == CONTRIBUTE_TABLE_WMP &&
+          strings_equal(tables[other_idx].name, rit->lexicon)) {
+        has_wordmap = true;
+      }
+    }
+    if (has_wordmap) {
+      continue;
+    }
+    ContributeTable *wordmap = &tables[count++];
+    memset(wordmap, 0, sizeof(*wordmap));
+    wordmap->role = CONTRIBUTE_TABLE_WMP;
+    wordmap->name = rit->lexicon;
+    wordmap->lexicon = rit->lexicon;
+    wordmap->bytes = config_table_bytes(config, PLAYERS_DATA_TYPE_WMP,
+                                        rit->lexicon, rit->lexicon, ld_name);
+    wordmap->present = config_table_file_bytes(config, rit->lexicon,
+                                               DATA_FILEPATH_TYPE_WORDMAP) >= 0;
   }
   ErrorStack *errors = error_stack_create();
   char *probe = data_filepaths_get_writable_filename(
@@ -8185,15 +8340,10 @@ static void config_choose_auto_tables(Config *config,
         // Not on disk, and not built by itself here: say what builds it.
         const char *leaves = players_data_get_data_name(
             config->players_data, PLAYERS_DATA_TYPE_KLV, player_idx);
-        ErrorStack *ld_errors = error_stack_create();
-        char *ld_name = ld_get_default_name_from_lexicon_name(
-            lexicons[player_idx], ld_errors);
-        error_stack_destroy(ld_errors);
         char *command =
             type == PLAYERS_DATA_TYPE_RIT
                 ? get_formatted_string("convert klvwmp2rit %s %s %s %s",
-                                       rit_names[player_idx],
-                                       ld_name ? ld_name : "<distribution>",
+                                       rit_names[player_idx], ld_name,
                                        leaves ? leaves : lexicons[player_idx],
                                        lexicons[player_idx])
                 : get_formatted_string("convert %s %s",
@@ -8201,7 +8351,6 @@ static void config_choose_auto_tables(Config *config,
                                            ? "dawg2wordmap"
                                            : "kwg2wit",
                                        lexicons[player_idx]);
-        free(ld_name);
         string_builder_add_formatted_string(
             skipped, "%sno %s ('%s' builds one)",
             string_builder_length(skipped) > 0 ? "; " : "", what, command);
@@ -8249,7 +8398,8 @@ static void config_choose_auto_tables(Config *config,
 // -- having said why in one line. A NULL `lexicon` is returned as is.
 static const char *config_word_info_table_for_first_use(Config *config,
                                                         int player_index,
-                                                        const char *lexicon) {
+                                                        const char *lexicon,
+                                                        const char *ld_name) {
   if (!lexicon) {
     return NULL;
   }
@@ -8270,35 +8420,23 @@ static const char *config_word_info_table_for_first_use(Config *config,
     why_not = "its data directory cannot be written";
   }
   error_stack_reset(errors);
-  if (!why_not) {
-    const int64_t kwg_bytes =
-        config_table_file_bytes(config, lexicon, DATA_FILEPATH_TYPE_KWG);
-    int64_t free_bytes = 0;
-    char *directory = get_dirpath_from_filepath(built_path);
-    if (kwg_bytes >= 0 && cfile_free_bytes(directory, &free_bytes) &&
-        free_bytes < kwg_bytes * 30) {
-      why_not = "there is not enough disk space for it";
-    }
-    free(directory);
+  if (!why_not &&
+      config_table_lacks_disk(built_path,
+                              config_table_bytes(config, PLAYERS_DATA_TYPE_WIT,
+                                                 lexicon, lexicon, ld_name))) {
+    why_not = "there is not enough disk space for it";
   }
   if (!why_not) {
-    thread_control_print_formatted(
-        config->thread_control,
-        "building the word info table for %s, which makes move generation "
-        "faster (once; this can take a minute)\n",
-        lexicon);
-    char *ld_name = ld_get_default_name_from_lexicon_name(lexicon, errors);
-    if (error_stack_is_empty(errors)) {
-      const ConversionArgs args = {
-          .conversion_type_string = "kwg2witifneeded",
-          .data_paths = config->data_paths,
-          .input_and_output_name = lexicon,
-          .ld_name = ld_name,
-          .num_threads = config_get_num_threads(config),
-      };
-      convert(&args, config->conversion_results, errors);
-    }
-    free(ld_name);
+    config_announce_table_build(config, PLAYERS_DATA_TYPE_WIT, lexicon, lexicon,
+                                ld_name);
+    const ConversionArgs args = {
+        .conversion_type_string = "kwg2witifneeded",
+        .data_paths = config->data_paths,
+        .input_and_output_name = lexicon,
+        .ld_name = ld_name,
+        .num_threads = config_get_num_threads(config),
+    };
+    convert(&args, config->conversion_results, errors);
     if (!error_stack_is_empty(errors)) {
       why_not = "it could not be built";
       error_stack_print_and_reset(errors);
@@ -8313,6 +8451,98 @@ static const char *config_word_info_table_for_first_use(Config *config,
     return NULL;
   }
   return lexicon;
+}
+
+// Makes the rack info table `rit_name` for player `player_index`'s lexicon
+// `lexicon` and leaves `leaves` available to load, building it from the
+// lexicon's wordmap and the leaves if it is not on disk, as
+// config_wordmap_for_first_use does for the wordmap: once, and about 1.9 GB
+// for English. Builds the wordmap first if that is missing too. Returns
+// `rit_name` when the table is there to load, or NULL when the player plays
+// without one, having said why in one line. A NULL `rit_name` is returned as
+// is.
+static const char *
+config_rack_info_table_for_first_use(Config *config, int player_index,
+                                     const char *rit_name, const char *lexicon,
+                                     const char *leaves, const char *ld_name) {
+  if (!rit_name) {
+    return NULL;
+  }
+  const char *loaded = players_data_get_data_name(
+      config->players_data, PLAYERS_DATA_TYPE_RIT, player_index);
+  if (loaded && strings_equal(loaded, rit_name)) {
+    return rit_name;
+  }
+  if (config_table_file_bytes(config, rit_name,
+                              DATA_FILEPATH_TYPE_RACK_INFO_TABLE) >= 0) {
+    return rit_name;
+  }
+  ErrorStack *errors = error_stack_create();
+  const char *why_not = NULL;
+  char *built_path = data_filepaths_get_writable_filename(
+      config->data_paths, rit_name, DATA_FILEPATH_TYPE_RACK_INFO_TABLE, errors);
+  if (!error_stack_is_empty(errors)) {
+    why_not = "its data directory cannot be written";
+  }
+  error_stack_reset(errors);
+  if (!why_not && !leaves) {
+    why_not = "there are no leaves to build it from";
+  }
+  if (!why_not &&
+      config_table_lacks_disk(built_path,
+                              config_table_bytes(config, PLAYERS_DATA_TYPE_RIT,
+                                                 rit_name, lexicon, ld_name))) {
+    why_not = "there is not enough disk space for it";
+  }
+  if (!why_not &&
+      config_table_file_bytes(config, lexicon, DATA_FILEPATH_TYPE_WORDMAP) <
+          0 &&
+      !config_wordmap_for_first_use(config, player_index, lexicon, ld_name)) {
+    why_not = "its wordmap could not be built";
+  }
+  if (!why_not) {
+    config_announce_table_build(config, PLAYERS_DATA_TYPE_RIT, rit_name,
+                                lexicon, ld_name);
+    const ConversionArgs args = {
+        .conversion_type_string = "klvwmp2rit",
+        .data_paths = config->data_paths,
+        .input_and_output_name = rit_name,
+        .ld_name = ld_name,
+        .klv_name = leaves,
+        .wmp_name = lexicon,
+        .num_threads = config_get_num_threads(config),
+    };
+    convert(&args, config->conversion_results, errors);
+    if (!error_stack_is_empty(errors)) {
+      why_not = "it could not be built";
+      error_stack_print_and_reset(errors);
+    }
+  }
+  free(built_path);
+  error_stack_destroy(errors);
+  if (why_not) {
+    thread_control_print_formatted(config->thread_control,
+                                   "playing %s without a rack info table: %s\n",
+                                   lexicon, why_not);
+    return NULL;
+  }
+  return rit_name;
+}
+
+// The letter distribution a lexicon load uses: `new_ld_name` if given, else
+// `lexicon`'s default when defaults are asked for or none is loaded, else the
+// loaded one's.
+static char *config_updated_ld_name(const Config *config,
+                                    const char *new_ld_name, bool use_default,
+                                    const char *lexicon,
+                                    ErrorStack *error_stack) {
+  if (new_ld_name) {
+    return string_duplicate(new_ld_name);
+  }
+  if (use_default || !config->ld) {
+    return ld_get_default_name_from_lexicon_name(lexicon, error_stack);
+  }
+  return string_duplicate(ld_get_name(config->ld));
 }
 
 static void config_load_lexicon_dependent_data_internal(
@@ -8566,8 +8796,18 @@ static void config_load_lexicon_dependent_data_internal(
                   players_data_get_data_name(
                       config->players_data, PLAYERS_DATA_TYPE_KLV, player_idx));
   }
+  // The tables are built for the letter distribution loaded below.
+  char *table_ld_name = config_updated_ld_name(
+      config, new_ld_name, use_default, updated_p1_lexicon_name, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    free(table_ld_name);
+    free(rit_names[0]);
+    free(rit_names[1]);
+    return;
+  }
   char *report = NULL;
-  config_choose_auto_tables(config, lexicons, rit_names, use, &report);
+  config_choose_auto_tables(config, lexicons, rit_names, table_ld_name, use,
+                            &report);
   if (report && !strings_equal(report, config->auto_table_report)) {
     thread_control_print_formatted(config->thread_control, "%s", report);
     free(config->auto_table_report);
@@ -8586,30 +8826,50 @@ static void config_load_lexicon_dependent_data_internal(
     // found missing and reported, once rather than once per player.
     const bool same_wordmap =
         p1_wmp_name && p2_wmp_name && strings_equal(p1_wmp_name, p2_wmp_name);
-    p1_wmp_name = config_wordmap_for_first_use(config, 0, p1_wmp_name);
-    p2_wmp_name = same_wordmap
-                      ? p1_wmp_name
-                      : config_wordmap_for_first_use(config, 1, p2_wmp_name);
+    p1_wmp_name =
+        config_wordmap_for_first_use(config, 0, p1_wmp_name, table_ld_name);
+    p2_wmp_name = same_wordmap ? p1_wmp_name
+                               : config_wordmap_for_first_use(
+                                     config, 1, p2_wmp_name, table_ld_name);
   }
   players_data_set(config->players_data, PLAYERS_DATA_TYPE_WMP,
                    config->data_paths, p1_wmp_name, p2_wmp_name, false,
                    error_stack);
   if (!error_stack_is_empty(error_stack)) {
+    free(table_ld_name);
     free(rit_names[0]);
     free(rit_names[1]);
     return;
   }
 
   // Load rack info tables (if enabled). Non-NULL -> NULL transitions are
-  // allowed.
+  // allowed; like the wordmap, one is built on first use where missing
+  // wordmaps are.
+  const char *p1_rit_name = use[PLAYERS_DATA_TYPE_RIT][0] ? rit_names[0] : NULL;
+  const char *p2_rit_name = use[PLAYERS_DATA_TYPE_RIT][1] ? rit_names[1] : NULL;
+  if (config->build_missing_wordmaps) {
+    const bool same_table =
+        p1_rit_name && p2_rit_name && strings_equal(p1_rit_name, p2_rit_name);
+    p1_rit_name = config_rack_info_table_for_first_use(
+        config, 0, p1_rit_name, updated_p1_lexicon_name,
+        players_data_get_data_name(config->players_data, PLAYERS_DATA_TYPE_KLV,
+                                   0),
+        table_ld_name);
+    p2_rit_name =
+        same_table ? p1_rit_name
+                   : config_rack_info_table_for_first_use(
+                         config, 1, p2_rit_name, updated_p2_lexicon_name,
+                         players_data_get_data_name(config->players_data,
+                                                    PLAYERS_DATA_TYPE_KLV, 1),
+                         table_ld_name);
+  }
   players_data_set(config->players_data, PLAYERS_DATA_TYPE_RIT,
-                   config->data_paths,
-                   use[PLAYERS_DATA_TYPE_RIT][0] ? rit_names[0] : NULL,
-                   use[PLAYERS_DATA_TYPE_RIT][1] ? rit_names[1] : NULL,
+                   config->data_paths, p1_rit_name, p2_rit_name,
                    config->use_mmap_for_rit, error_stack);
   free(rit_names[0]);
   free(rit_names[1]);
   if (!error_stack_is_empty(error_stack)) {
+    free(table_ld_name);
     return;
   }
 
@@ -8623,12 +8883,13 @@ static void config_load_lexicon_dependent_data_internal(
   if (config->build_missing_wordmaps) {
     const bool same_table =
         p1_wit_name && p2_wit_name && strings_equal(p1_wit_name, p2_wit_name);
-    p1_wit_name = config_word_info_table_for_first_use(config, 0, p1_wit_name);
-    p2_wit_name =
-        same_table
-            ? p1_wit_name
-            : config_word_info_table_for_first_use(config, 1, p2_wit_name);
+    p1_wit_name = config_word_info_table_for_first_use(config, 0, p1_wit_name,
+                                                       table_ld_name);
+    p2_wit_name = same_table ? p1_wit_name
+                             : config_word_info_table_for_first_use(
+                                   config, 1, p2_wit_name, table_ld_name);
   }
+  free(table_ld_name);
   players_data_set(config->players_data, PLAYERS_DATA_TYPE_WIT,
                    config->data_paths, p1_wit_name, p2_wit_name,
                    /*use_mmap_for_rit=*/false, error_stack);
@@ -8648,17 +8909,11 @@ static void config_load_lexicon_dependent_data_internal(
   if (config->ld) {
     existing_ld_name = ld_get_name(config->ld);
   }
-  char *updated_ld_name = NULL;
-  if (new_ld_name) {
-    updated_ld_name = string_duplicate(new_ld_name);
-  } else if (use_default || !existing_ld_name) {
-    updated_ld_name = ld_get_default_name_from_lexicon_name(
-        updated_p1_lexicon_name, error_stack);
-    if (!error_stack_is_empty(error_stack)) {
-      return;
-    }
-  } else {
-    updated_ld_name = string_duplicate(existing_ld_name);
+  char *updated_ld_name = config_updated_ld_name(
+      config, new_ld_name, use_default, updated_p1_lexicon_name, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    free(updated_ld_name);
+    return;
   }
 
   const bool lex_ld_is_compat =

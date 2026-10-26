@@ -28,4 +28,9 @@ RackInfoTable *make_rack_info_table(const KLV *klv, const WMP *wmp,
                                     int num_threads,
                                     uint8_t playthrough_min_played_size);
 
+// The bytes of the .rit file a table for `ld` is written to: it holds an
+// entry for every full rack the distribution can deal, whatever its lexicon
+// and leaves.
+int64_t rack_info_table_file_bytes(const LetterDistribution *ld);
+
 #endif
