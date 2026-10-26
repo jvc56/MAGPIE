@@ -658,6 +658,17 @@ static inline int wmp_lowest_set_bit(uint32_t bits) {
 #endif
 }
 
+// The index bucket that a lookup of a rack with this hash reads first.
+static inline uint32_t wfl_index_first_bucket_idx(const WMPForLength *wfl,
+                                                  uint64_t hash) {
+  return (uint32_t)(hash >> wfl->word_index_shift);
+}
+
+static inline const WMPEntry *wfl_index_bucket(const WMPForLength *wfl,
+                                               uint32_t bucket_idx) {
+  return &wfl->word_index_slots[(size_t)bucket_idx * WMP_INDEX_BUCKET_SLOTS];
+}
+
 // Probes the index from the hash's bucket. All of a bucket's slots are
 // compared before branching on the result.
 static inline const WMPEntry *wfl_index_get_entry(const WMPForLength *wfl,
@@ -665,10 +676,9 @@ static inline const WMPEntry *wfl_index_get_entry(const WMPForLength *wfl,
                                                   const BitRack *bit_rack) {
   const uint64_t low = bit_rack_get_low_64(bit_rack);
   const uint64_t high = bit_rack_get_high_64(bit_rack);
-  uint32_t bucket_idx = (uint32_t)(hash >> wfl->word_index_shift);
+  uint32_t bucket_idx = wfl_index_first_bucket_idx(wfl, hash);
   while (true) {
-    const WMPEntry *bucket =
-        &wfl->word_index_slots[(size_t)bucket_idx * WMP_INDEX_BUCKET_SLOTS];
+    const WMPEntry *bucket = wfl_index_bucket(wfl, bucket_idx);
     uint32_t matching_slots = 0;
     uint32_t empty_slots = 0;
     for (int slot_idx = 0; slot_idx < WMP_INDEX_BUCKET_SLOTS; slot_idx++) {

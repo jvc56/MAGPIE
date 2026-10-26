@@ -925,6 +925,43 @@ static inline void wmp_move_gen_resolve_filter_miss(WMPMoveGen *wmp_move_gen,
   }
 }
 
+// Starts the load that each candidate subrack's lookup in
+// wmp_move_gen_get_subrack_words begins with, so the candidates' cache misses
+// overlap instead of coming one at a time: recording one candidate's plays
+// takes long enough to hide the next one's miss. A nonplaythrough subrack that
+// an earlier anchor resolved reads its entry; any other subrack reads its first
+// index bucket. A subrack with a blank is looked up elsewhere, so its bucket is
+// fetched for nothing, which costs less than branching on the blank.
+static inline void
+wmp_move_gen_prefetch_candidates(const WMPMoveGen *wmp_move_gen, int first_idx,
+                                 uint64_t candidates) {
+#if defined(__has_builtin) && __has_builtin(__builtin_prefetch)
+  const int offset =
+      subracks_get_combination_offset(wmp_move_gen->tiles_to_play) + first_idx;
+  const bool is_playthrough =
+      wmp_move_gen->word_length > wmp_move_gen->tiles_to_play;
+  const SubrackInfo *infos = is_playthrough
+                                 ? &wmp_move_gen->playthrough_infos[offset]
+                                 : &wmp_move_gen->nonplaythrough_infos[offset];
+  const WMPForLength *wfl = &wmp_move_gen->wmp->wfls[wmp_move_gen->word_length];
+  for (uint64_t remaining = candidates; remaining != 0;
+       remaining &= remaining - 1) {
+    const SubrackInfo *info =
+        &infos[wmp_move_gen_get_lowest_set_bit(remaining)];
+    const WMPEntry *bucket = wfl_index_bucket(
+        wfl, wfl_index_first_bucket_idx(wfl, wmp_index_hash(&info->subrack)));
+    // A playthrough subrack's entry is from an earlier anchor's board letters.
+    const bool resolved =
+        !is_playthrough && info->wmp_entry != WMP_ENTRY_UNRESOLVED;
+    __builtin_prefetch(resolved ? info->wmp_entry : bucket);
+  }
+#else
+  (void)wmp_move_gen;
+  (void)first_idx;
+  (void)candidates;
+#endif
+}
+
 // Called once per candidate subrack from the hottest loop in wordmap_gen.
 // clang inlines it there while it has a single caller; a second caller
 // anywhere in that translation unit flips the cost model and turns the loop

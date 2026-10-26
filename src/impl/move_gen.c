@@ -1613,6 +1613,7 @@ wordmap_gen(MoveGen *gen, const Anchor *anchor, bool lazy) {
       candidates &= allowed;
       filter_misses &= allowed;
     }
+    wmp_move_gen_prefetch_candidates(wgen, first_idx, candidates);
     while (candidates != 0) {
       const int bit_idx = wmp_move_gen_get_lowest_set_bit(candidates);
       candidates &= candidates - 1;
