@@ -65,6 +65,7 @@
 #include "pat_test.h"
 #include "pat_utility_test.h"
 #include "path_move_lists_test.h"
+#include "peg_cascade_bench_test.h"
 #include "peg_embedding_test.h"
 #include "peg_oracle_test.h"
 #include "peg_pess_test.h"
@@ -220,6 +221,8 @@ static TestEntry on_demand_test_table[] = {
     {"xsdata", test_xs_data},
     {"pathmovelists", test_path_move_lists},
     {"egincremental", test_incremental_movegen_identical},
+    {"pegcascade", test_peg_cascade_bench},
+    {"egdepth", test_endgame_depth_bench},
     {"pegspeedbench1", test_peg_speed_bench_1},
     {"pegspeedbench2", test_peg_speed_bench_2},
     {"positionloaded", test_position_lengths_loaded},

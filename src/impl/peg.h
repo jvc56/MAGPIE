@@ -273,6 +273,23 @@ typedef struct PegArgs {
   // as when `game` holds the opponent's actual rack (autoplay).
   bool opp_rack_known;
 
+  // Timed-cascade refinements, each false (today's cascade) in a
+  // zero-initialized PegArgs:
+  // - first_win_intermediate: the halving stages before the last solve their
+  //   endgames first-win, as a complete solve does (their cuts depend on win%
+  //   almost always), keeping every candidate tied at a cut line; the last
+  //   stage keeps a full window, so the answer's spreads are exact.
+  // - skip_noncutting_stages: a stage that would keep every live candidate
+  //   (fewer of them than its count), other than the last, is skipped: its
+  //   ranking decides nothing.
+  // - final_stage_cutoff: the last stage evaluates its candidates one at a
+  //   time and stops solving one once its losses and draws prove it cannot
+  //   reach the best finished one at that depth (PegRankedCand.cut), as
+  //   early_cutoff does for a complete solve. Protected moves are never cut.
+  bool first_win_intermediate;
+  bool skip_noncutting_stages;
+  bool final_stage_cutoff;
+
   // Optional: pin scenario evaluation to a single bag ordering instead of
   // enumerating all scenarios. When eval_bag_order_len > 0, each candidate is
   // evaluated against exactly one scenario: the bag is set to
@@ -364,14 +381,16 @@ static inline void peg_args_fill(
     const bool nested_score_actual, const bool nested_pessimistic,
     const bool disable_best_reply_shortcuts, const bool first_win,
     const bool early_cutoff, const bool opp_rack_known,
-    const MachineLetter *eval_bag_order, const int eval_bag_order_len,
-    const bool limit_tiles_left, const int max_tiles_left,
-    const Move *const *only_moves, const int n_only_moves,
-    const Move *const *protect_moves, const int n_protect_moves,
-    const bool include_per_scenario, PegOnStageStart on_stage_start,
-    PegOnCandDone on_cand_done, PegOnScenarioDone on_scenario_done,
-    void *user_data, PegPoll *poll, TranspositionTable *shared_endgame_tt,
-    PegCheckpoint *checkpoint, bool resume, PegArgs *peg_args) {
+    const bool first_win_intermediate, const bool skip_noncutting_stages,
+    const bool final_stage_cutoff, const MachineLetter *eval_bag_order,
+    const int eval_bag_order_len, const bool limit_tiles_left,
+    const int max_tiles_left, const Move *const *only_moves,
+    const int n_only_moves, const Move *const *protect_moves,
+    const int n_protect_moves, const bool include_per_scenario,
+    PegOnStageStart on_stage_start, PegOnCandDone on_cand_done,
+    PegOnScenarioDone on_scenario_done, void *user_data, PegPoll *poll,
+    TranspositionTable *shared_endgame_tt, PegCheckpoint *checkpoint,
+    bool resume, PegArgs *peg_args) {
   peg_args->game = game;
   peg_args->thread_control = thread_control;
   peg_args->num_threads = num_threads;
@@ -399,6 +418,9 @@ static inline void peg_args_fill(
   peg_args->first_win = first_win;
   peg_args->early_cutoff = early_cutoff;
   peg_args->opp_rack_known = opp_rack_known;
+  peg_args->first_win_intermediate = first_win_intermediate;
+  peg_args->skip_noncutting_stages = skip_noncutting_stages;
+  peg_args->final_stage_cutoff = final_stage_cutoff;
   peg_args->eval_bag_order = eval_bag_order;
   peg_args->eval_bag_order_len = eval_bag_order_len;
   peg_args->limit_tiles_left = limit_tiles_left;

@@ -1906,7 +1906,7 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       examples[4] = "testdata/game.gcg Alice,Bob";
       text = "Analyzes each turn of a GCG game: with a static evaluation when "
              "-plies is 0, with the pre-endgame solver when 1 to -apegmaxbag "
-             "(4 by default) tiles are in the bag, with the endgame solver "
+             "(1 by default) tiles are in the bag, with the endgame solver "
              "when the bag is empty, and with simulation otherwise. With 0 "
              "args, analyzes the currently "
              "loaded game. With 1 "
@@ -2632,7 +2632,10 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       examples[1] = "0";
       text = "The largest bag, from 0 to 4 tiles, that analyze solves with "
              "the pre-endgame solver; larger bags are simulated. 0 simulates "
-             "every pre-endgame turn. Defaults to 4.";
+             "every pre-endgame turn. Defaults to 1: a complete pre-endgame "
+             "solve at 2 or more in the bag can take well over 20 minutes, "
+             "and a time limit (-pegtlim) gives the quicker staged cascade "
+             "instead.";
       break;
     case ARG_TOKEN_RANDOM_SEED:
       usages[0] = "<random_seed>";
@@ -4886,6 +4889,12 @@ void config_fill_peg_args(Config *config, PegArgs *peg_args) {
       /*disable_best_reply_shortcuts=*/!config->endgame_best_reply_shortcuts,
       /*first_win=*/complete, /*early_cutoff=*/complete,
       /*opp_rack_known=*/true,
+      // The cascade's stages before the last decide by win%: solved first-win
+      // they took half the time or less for the same answer (pegcascade).
+      // Skipping stages that cut nothing and a final-stage cutoff saved
+      // nothing measurable, so they stay off.
+      /*first_win_intermediate=*/!complete, /*skip_noncutting_stages=*/false,
+      /*final_stage_cutoff=*/false,
       /*eval_bag_order=*/NULL,
       /*eval_bag_order_len=*/0,
       /*limit_tiles_left=*/true, /*max_tiles_left=*/1, /*only_moves=*/NULL,
@@ -15338,7 +15347,9 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->peg_outcomes_board = NULL;
   config->peg_outcomes_ld = NULL;
   config->show_mistakes = false;
-  config->analyze_peg_max_bag = PEG_MAX_BAG;
+  // A complete solve at 2 or more in the bag can take well over 20 minutes,
+  // so analyze solves only 1-in-bag turns with PEG unless told otherwise.
+  config->analyze_peg_max_bag = 1;
   config->sim_with_inference = true;
   config->pat_label_plies = 1;
   config->sim_margin_forecast = false;

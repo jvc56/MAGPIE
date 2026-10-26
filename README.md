@@ -698,9 +698,12 @@ descriptions:
   (faster, approximate).
 - `-threads <n>` is a pure speedup at the same answer.
 
-How far a complete solve is practical depends on the bag: at 1 in the bag it
-usually takes a minute or two on a desktop; at 3 and 4 in the bag it can take
-much longer, and a time limit gives a quick, approximate answer instead.
+How far a complete solve is practical depends on the bag. At 1 in the bag it
+usually takes under a minute on a 12-thread desktop, though a lost position,
+where every candidate's every draw must be proven a loss, can take over ten
+minutes. At 2 to 4 in the bag it can take well over twenty minutes, and a time
+limit gives a quick, approximate answer instead. `analyze` solves 1-in-bag
+turns with PEG and simulates larger bags; `-apegmaxbag` raises the limit.
 
 ### Comparing lexica
 

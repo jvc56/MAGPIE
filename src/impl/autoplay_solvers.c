@@ -356,6 +356,8 @@ static const Move *autoplay_solver_solve_peg(
       /*nested_score_actual=*/false, /*nested_pessimistic=*/false,
       settings->disable_best_reply_shortcuts, /*first_win=*/false,
       /*early_cutoff=*/false, /*opp_rack_known=*/false,
+      /*first_win_intermediate=*/false, /*skip_noncutting_stages=*/false,
+      /*final_stage_cutoff=*/false,
       /*eval_bag_order=*/NULL,
       /*eval_bag_order_len=*/0, /*limit_tiles_left=*/false,
       /*max_tiles_left=*/0, /*only_moves=*/NULL,

@@ -2829,6 +2829,9 @@ static void peg_checkpoint_prepare(const PegArgs *args) {
       args->include_per_scenario, game_get_player_on_turn_index(args->game),
       args->nested_score_actual, args->nested_pessimistic, args->first_win);
   string_builder_add_formatted_string(
+      key, "|%d,%d,%d", args->first_win_intermediate,
+      args->skip_noncutting_stages, args->final_stage_cutoff);
+  string_builder_add_formatted_string(
       key, "|%d,%d,%d,%d", args->early_cutoff, args->opp_rack_known,
       args->limit_tiles_left, args->max_tiles_left);
   string_builder_add_formatted_string(
@@ -3816,9 +3819,31 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
     for (int stage_idx = 1; stage_idx <= num_stages; stage_idx++) {
       const int stage_fidelity =
           exhaustive ? PEG_EXHAUSTIVE_PLIES : stage_idx + 1;
-      const int keep = live_count < counts[stage_idx - 1]
-                           ? live_count
-                           : counts[stage_idx - 1];
+      const bool last_stage = stage_idx == num_stages;
+      // A stage that keeps every live candidate decides nothing; with
+      // skip_noncutting_stages the next one that cuts (or the last) runs in
+      // its place, at its own depth.
+      if (args->skip_noncutting_stages && !exhaustive && !last_stage &&
+          counts[stage_idx - 1] >= live_count) {
+        continue;
+      }
+      // first_win_intermediate: first-win before the last stage, a full
+      // window at it.
+      const bool stage_first_win =
+          args->first_win ||
+          (args->first_win_intermediate && !exhaustive && !last_stage);
+      for (int worker_idx = 0; worker_idx < n_scratch; worker_idx++) {
+        workers[worker_idx].first_win = stage_first_win;
+      }
+      int keep = live_count < counts[stage_idx - 1] ? live_count
+                                                    : counts[stage_idx - 1];
+      // Under first-win the previous stage's ranking knows no spreads, so the
+      // candidates tied at the cut line all go on rather than an arbitrary
+      // few of them.
+      while (keep > 0 && keep < live_count && ranked[keep - 1].spread_unknown &&
+             peg_cand_compare(&ranked[keep - 1], &ranked[keep]) == 0) {
+        keep++;
+      }
       const int eval_count = peg_select_survivors(ranked, live_count, keep,
                                                   protect_moves, n_protect);
       // A halving stage re-ranks a set, so it needs two candidates. The
@@ -3880,7 +3905,8 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
       // The exact early cutoff (PegArgs.early_cutoff) needs the candidates one
       // at a time, the best finished one's score in hand.
       const bool cutoff_on =
-          args->early_cutoff && args->first_win && exhaustive;
+          (args->early_cutoff && args->first_win && exhaustive) ||
+          (args->final_stage_cutoff && !exhaustive && last_stage);
       if (args->poll != NULL || args->checkpoint != NULL || cutoff_on) {
         // Live mode: evaluate one candidate at a time so each completion
         // updates the pollable leaderboard (for `sta`/`shpeg`) and so we can
