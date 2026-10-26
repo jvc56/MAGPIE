@@ -28,6 +28,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 
 static void test_game_timer(void) {
@@ -439,6 +440,106 @@ static const PlayChooserStrategy ENDGAME_CHALLENGE_STRATEGY = {
     .seed = 42,
 };
 
+static const char *
+challenge_order_name(play_chooser_challenge_order_t challenge_order) {
+  switch (challenge_order) {
+  case PLAY_CHOOSER_CHALLENGE_ORDER_CONCURRENT:
+    return "concurrent";
+  case PLAY_CHOOSER_CHALLENGE_ORDER_KEEP_FIRST:
+    return "keep first";
+  case PLAY_CHOOSER_CHALLENGE_ORDER_CHALLENGE_FIRST:
+    return "challenge first";
+  }
+  return "unknown order";
+}
+
+// Asserts a challenge verdict. A wrong one is printed first, with how the
+// decision was reached, so a failure says which path it took. A tie
+// challenges, and a branch resolved by a null window reports a bound, so a
+// challenge verdict only needs the challenge value to be at least the keep
+// value.
+static void assert_challenge_verdict(const char *context,
+                                     const ChallengeDecision *decision,
+                                     bool should_challenge) {
+  const bool values_agree =
+      should_challenge ? decision->challenge_value >= decision->keep_value
+                       : decision->keep_value > decision->challenge_value;
+  if (!decision->move_is_phony ||
+      decision->should_challenge != should_challenge || !values_agree) {
+    (void)fprintf(stderr,
+                  "%s: expected to %s, got phony=%d challenge=%d "
+                  "keep_value=%.1f challenge_value=%.1f keep_exact=%d "
+                  "keep_valid=%d challenge_exact=%d challenge_valid=%d "
+                  "resolve_completed=%d\n",
+                  context, should_challenge ? "challenge" : "keep",
+                  (int)decision->move_is_phony, (int)decision->should_challenge,
+                  decision->keep_value, decision->challenge_value,
+                  (int)decision->keep_exact, (int)decision->keep_valid,
+                  (int)decision->challenge_exact,
+                  (int)decision->challenge_valid,
+                  (int)decision->resolve_completed);
+  }
+  assert(decision->move_is_phony);
+  assert(decision->should_challenge == should_challenge);
+  assert(values_agree);
+}
+
+// An endgame verdict on a phony must not depend on which branch finishes
+// first, on the thread count, or on the score. The outcome of an endgame is
+// set by the board and the racks, so shifting the score shifts both
+// branches' values alike. Decides the phony every way: each branch solved
+// first, both concurrently, with one and two threads, and with the
+// chooser's score moved up and down by 100.
+static void assert_endgame_challenge_verdict_every_way(const Game *game,
+                                                       const Move *phony_move,
+                                                       bool should_challenge) {
+  static const play_chooser_challenge_order_t challenge_orders[] = {
+      PLAY_CHOOSER_CHALLENGE_ORDER_CONCURRENT,
+      PLAY_CHOOSER_CHALLENGE_ORDER_KEEP_FIRST,
+      PLAY_CHOOSER_CHALLENGE_ORDER_CHALLENGE_FIRST,
+  };
+  static const int thread_counts[] = {1, 2};
+  static const int score_shifts[] = {0, 100, -100};
+  const int num_challenge_orders =
+      (int)(sizeof(challenge_orders) / sizeof(challenge_orders[0]));
+  const int num_thread_counts =
+      (int)(sizeof(thread_counts) / sizeof(thread_counts[0]));
+  const int num_score_shifts =
+      (int)(sizeof(score_shifts) / sizeof(score_shifts[0]));
+  ErrorStack *error_stack = error_stack_create();
+  for (int order_idx = 0; order_idx < num_challenge_orders; order_idx++) {
+    for (int thread_idx = 0; thread_idx < num_thread_counts; thread_idx++) {
+      PlayChooserStrategy strategy = ENDGAME_CHALLENGE_STRATEGY;
+      strategy.challenge_order = challenge_orders[order_idx];
+      strategy.num_threads = thread_counts[thread_idx];
+      // One chooser for every score: its transposition table holds values
+      // relative to the current spread, so the shifted positions share it.
+      PlayChooser *play_chooser = play_chooser_create(&strategy);
+      for (int shift_idx = 0; shift_idx < num_score_shifts; shift_idx++) {
+        Game *shifted_game = game_duplicate(game);
+        // The chooser is the player not on turn: the phony is the opponent's.
+        const int chooser_index =
+            1 - game_get_player_on_turn_index(shifted_game);
+        player_add_to_score(game_get_player(shifted_game, chooser_index),
+                            int_to_equity(score_shifts[shift_idx]));
+        ChallengeDecision decision;
+        play_chooser_decide_challenge(play_chooser, shifted_game, phony_move,
+                                      &decision, error_stack);
+        assert(error_stack_is_empty(error_stack));
+        char *context = get_formatted_string(
+            "%s, %d thread(s), chooser's score %+d",
+            challenge_order_name(challenge_orders[order_idx]),
+            thread_counts[thread_idx], score_shifts[shift_idx]);
+        assert_challenge_verdict(context, &decision, should_challenge);
+        free(context);
+        game_destroy(shifted_game);
+      }
+      play_chooser_destroy(play_chooser);
+    }
+  }
+  error_stack_destroy(error_stack);
+}
+
 // Endgame keep: the chooser holds TRANQ, and the only way to ever play
 // the Q is through the opponent's phony. The opponent plays G4 I(MY) —
 // IMY is not a word — but the I turns the dead G4 column into R(IMY),
@@ -466,15 +567,14 @@ static void test_endgame_keep_phony_for_only_q_play(void) {
   assert(validated_moves_is_phony(vms, 0));
   const Move *phony_move = validated_moves_get_move(vms, 0);
   assert(equity_to_int(move_get_score(phony_move)) == 8);
+  assert_endgame_challenge_verdict_every_way(game, phony_move, false);
 
   PlayChooser *play_chooser = play_chooser_create(&ENDGAME_CHALLENGE_STRATEGY);
   ChallengeDecision decision;
   play_chooser_decide_challenge(play_chooser, game, phony_move, &decision,
                                 error_stack);
   assert(error_stack_is_empty(error_stack));
-  assert(decision.move_is_phony);
-  assert(!decision.should_challenge);
-  assert(decision.keep_value > decision.challenge_value);
+  assert_challenge_verdict("keep for the only Q play", &decision, false);
 
   // Counterfactual: had the chooser challenged the I off, its best play
   // would be a small dump (ARMY or VANT-class plays through the cluster)
@@ -536,15 +636,14 @@ static void test_endgame_challenge_off_phony(void) {
   assert(validated_moves_is_phony(vms, 0));
   const Move *phony_move = validated_moves_get_move(vms, 0);
   assert(equity_to_int(move_get_score(phony_move)) == 17);
+  assert_endgame_challenge_verdict_every_way(game, phony_move, true);
 
   PlayChooser *play_chooser = play_chooser_create(&ENDGAME_CHALLENGE_STRATEGY);
   ChallengeDecision decision;
   play_chooser_decide_challenge(play_chooser, game, phony_move, &decision,
                                 error_stack);
   assert(error_stack_is_empty(error_stack));
-  assert(decision.move_is_phony);
-  assert(decision.should_challenge);
-  assert(decision.challenge_value > decision.keep_value);
+  assert_challenge_verdict("challenge off the phony", &decision, true);
 
   // Apply the challenge; the chooser goes out with (V)AT against the
   // opponent's stranded 26-point rack.
@@ -590,15 +689,14 @@ static void test_endgame_keep_phony_to_deny_better_replay(void) {
   assert(validated_moves_is_phony(vms, 0));
   const Move *phony_move = validated_moves_get_move(vms, 0);
   assert(equity_to_int(move_get_score(phony_move)) == 17);
+  assert_endgame_challenge_verdict_every_way(game, phony_move, false);
 
   PlayChooser *play_chooser = play_chooser_create(&ENDGAME_CHALLENGE_STRATEGY);
   ChallengeDecision decision;
   play_chooser_decide_challenge(play_chooser, game, phony_move, &decision,
                                 error_stack);
   assert(error_stack_is_empty(error_stack));
-  assert(decision.move_is_phony);
-  assert(!decision.should_challenge);
-  assert(decision.keep_value > decision.challenge_value);
+  assert_challenge_verdict("keep to deny a better replay", &decision, false);
 
   // Sanity check the threat the chooser is avoiding: if the phony were
   // challenged off, the opponent's best reply would be the 42-point
@@ -626,9 +724,8 @@ static void test_endgame_keep_phony_to_deny_better_replay(void) {
 
 // Solve game to the full requested plies with a single thread, optionally
 // with a fixed [window_alpha, window_beta] search window, and return the
-// reported value. The scores in the test position are equal, so the
-// reported value (a spread delta) and the window units (final spread)
-// coincide.
+// reported value. The window is in final-spread units, and the reported
+// value is the change from the current spread.
 static int32_t solve_endgame_with_window(Game *game, EndgameCtx **endgame_ctx,
                                          EndgameResults *endgame_results,
                                          bool use_window, int32_t window_alpha,
@@ -661,15 +758,22 @@ static int32_t solve_endgame_with_window(Game *game, EndgameCtx **endgame_ctx,
 }
 
 // Verify the fixed-window solve semantics that the challenge decider's
-// null-window resolve relies on: against the exact value V of a
-// position, a [V, V+1] window must fail low (the position does not beat
-// V) and a [V-1, V] window must fail high (it does beat V-1).
-static void test_endgame_initial_window(void) {
+// null-window resolve relies on: against the exact final spread F of a
+// position, a [F, F+1] window must fail low (the position does not beat
+// F) and a [F-1, F] window must fail high (it does beat F-1). The decider
+// puts the window around the other branch's final spread, so the window
+// must be in final-spread units: with the player on turn behind by 50, F
+// is the reported value minus 50.
+static void check_endgame_initial_window(const char *scores,
+                                         int32_t on_turn_spread) {
   Config *config = config_create_or_die(
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -threads 1");
-  load_and_exec_config_or_die(
-      config, "cgp 15/7A7/15/15/5VMV7/6Y8/15/15/15/15/15/15/15/15/15 "
-              "ZC/QC 300/300 0 -lex CSW21;");
+  char *cgp_command = get_formatted_string(
+      "cgp 15/7A7/15/15/5VMV7/6Y8/15/15/15/15/15/15/15/15/15 ZC/QC %s 0 "
+      "-lex CSW21;",
+      scores);
+  load_and_exec_config_or_die(config, cgp_command);
+  free(cgp_command);
   Game *game = config_get_game(config);
   drain_bag(game);
 
@@ -677,16 +781,24 @@ static void test_endgame_initial_window(void) {
   EndgameResults *endgame_results = endgame_results_create();
   const int32_t exact_value = solve_endgame_with_window(
       game, &endgame_ctx, endgame_results, false, 0, 0);
-  const int32_t at_value = solve_endgame_with_window(
-      game, &endgame_ctx, endgame_results, true, exact_value, exact_value + 1);
+  const int32_t final_spread = on_turn_spread + exact_value;
+  const int32_t at_value =
+      solve_endgame_with_window(game, &endgame_ctx, endgame_results, true,
+                                final_spread, final_spread + 1);
   assert(at_value <= exact_value);
-  const int32_t below_value = solve_endgame_with_window(
-      game, &endgame_ctx, endgame_results, true, exact_value - 1, exact_value);
+  const int32_t below_value =
+      solve_endgame_with_window(game, &endgame_ctx, endgame_results, true,
+                                final_spread - 1, final_spread);
   assert(below_value >= exact_value);
 
   endgame_results_destroy(endgame_results);
   endgame_ctx_destroy(endgame_ctx);
   config_destroy(config);
+}
+
+static void test_endgame_initial_window(void) {
+  check_endgame_initial_window("300/300", 0);
+  check_endgame_initial_window("250/300", -50);
 }
 
 // Pre-endgame challenge decisions driven by the PEG solver. In a real
