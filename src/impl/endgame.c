@@ -4027,6 +4027,14 @@ void iterative_deepening(EndgameCtxWorker *worker, int plies) {
 
     // Store result in worker's local tracking
     int32_t pv_value = val - worker->solver->initial_spread;
+    // A fixed window (first-win) can be decided at the root by a stored
+    // bound, which keeps no line: keep the last depth's, whose first move has
+    // the same result.
+    if (pv.num_moves == 0 && worker->best_pv.num_moves > 0 &&
+        (worker->solver->first_win_optim ||
+         worker->solver->initial_window_optim)) {
+      pv = worker->best_pv;
+    }
     worker->best_pv_value = pv_value;
     pv.score = pv_value;
     worker->best_pv = pv;

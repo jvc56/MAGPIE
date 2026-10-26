@@ -640,7 +640,8 @@ magpie> infer
 
 The `peg` command solves a pre-endgame (1 to 4 tiles in the bag): for each
 candidate move it enumerates the possible bag/opponent-rack orderings, solves
-the resulting endgames, and reports each move's win percentage and spread.
+the resulting endgames, and reports each move's wins, draws, losses and win
+percentage.
 
 Load a position with `cgp` and run `peg`:
 
@@ -649,86 +650,55 @@ magpie> cgp 15/3Q7U3/3U2TAURINE2/1CHANSONS2W3/2AI6JO3/DIRL1PO3IN3/E1D2EF3V4/F1I2
 magpie> peg
 ```
 
-By default the solver generates all root moves and assumes a **rational**
-opponent (it replies with its best-equity move). An optional positional
-argument restricts the search to a fixed set of root candidates instead of
-generating all moves. Moves are comma-separated UCGI with no spaces —
-coordinate and tiles joined by a period, pass as `pass` (exchanges are not
-valid PEG moves):
+By default the solve is **complete** and counts only results: a win by 1 is as
+good as a win by 100. Every candidate is solved with every endgame searched to
+the end of the game, and a candidate is cut only once its losses and draws
+prove it cannot reach the best one, so the best move and its win% are exact.
+Cut candidates show the most they could have reached (`<=`), and spreads are
+not shown. The opponent is **pessimistic**: wherever it replies, it plays as if
+it could see your rack and the bag order. Tiles the opponent is known to hold,
+on its rack in the position or returned there after a challenged-off phony, are
+kept on its rack in every scenario.
+
+The first argument chooses the candidates, and an optional second one lists
+moves to add to them and keep through every stage. Moves are comma-separated
+UCGI with no spaces -- coordinate and tiles joined by a period, pass as
+`pass`:
 
 ```
-magpie> peg 13L.ONYX,13L.OXY
+magpie> peg                          # plays that leave at most 1 tile in the bag
+magpie> peg all                      # every move
+magpie> peg empty                    # every play that empties the bag
+magpie> peg leaves2 13L.ONYX         # plays that leave at most 2 tiles, plus 13L ONYX
+magpie> peg only 13L.ONYX,13L.OXY    # exactly these moves
 ```
 
-The case-insensitive word `empty` restricts the search to every generated
-move that would empty the bag (plays at least as many tiles as remain in the
-bag):
+A bag of 5 to 7 tiles is accepted when every candidate leaves at most 4 of
+them.
 
-```
-magpie> peg empty
-```
+Several settings tune the search further; see `help peg` for full
+descriptions:
 
-Several settings tune the search further; see `help peg`, `help pnoprune`,
-etc. for full descriptions:
+- `-pegtlim <seconds>` gives the solve a time limit, which switches it to the
+  **staged cascade**: stage 0 greedy-evaluates every candidate, and each
+  halving stage keeps the best of them and re-ranks them at one more ply of
+  endgame depth. It returns the best answer it has when the limit hits, from
+  the last completed stage. An explicit `-pegtopk` also runs the cascade.
+- `-pegtopk <count1>,<count2>,...` sets the cascade's per-stage counts
+  (default `32,16,8,4,2`); `all` (or `0`) keeps every candidate in one deep
+  stage.
+- `-pegpess false` switches to a **rational** opponent, which chooses its
+  reply from what it can see; its choice is then scored on the actual racks.
+- `-pegndepth`, `-pegncaps` and `-pegnstrides` set how far, how wide and how
+  densely the nested pre-endgames of later turns are searched. A complete
+  solve nests until the game resolves, over every candidate and scenario.
+- `-pegstride <n>` samples ~1/n of the scenarios for bag >= 3 in the cascade
+  (faster, approximate).
+- `-threads <n>` is a pure speedup at the same answer.
 
-- `-pegpess true` switches to the **pessimistic** opponent model (the opponent
-  plays the worst-for-you reply) — i.e. guaranteed-win analysis.
-- `-pnoprune <moves>` protects moves from being cut by the halving cascade so
-  they are evaluated at full fidelity even if their win% rank falls below the cut.
-- `-pegtopk <count1>,<count2>,...` overrides the per-stage halving counts
-  (default `32,16,8,4,2`). Stage 0 always greedy-evaluates *every* candidate
-  play; each count is how many top plays are then kept and re-ranked at the next
-  ply of fidelity (so the default keeps the top 32 after stage 0, then narrows
-  16/8/4/2 across the halving stages). A single `all` (or `0`) is the
-  **exhaustive** setting: it keeps every candidate and solves each at full
-  endgame depth in one deep stage, with full scenario enumeration (it ignores
-  `-pegstride`).
-- `-pegstride <n>` samples ~1/n of the scenarios for bag >= 3 (faster, approximate).
-
-Use `-` to clear `pnoprune`.
-
-#### Speed vs. accuracy
-
-The same `peg` command spans a spectrum from a fast in-game estimate to an
-exhaustive analysis, controlled by a few knobs:
-
-- **Scenario coverage — `-pegstride`.** Stride `1` (the default) enumerates
-  *every* bag/opponent-rack ordering. `-pegstride <n>` instead samples ~1/n of
-  them (reweighted to preserve the expected aggregate), trading accuracy for
-  speed; it applies only at bag ≥ 3 (bag ≤ 2 is always fully enumerated). A
-  larger stride is the single biggest speedup.
-- **Search depth — `-pegtopk`.** A longer/wider schedule carries more candidates
-  into the deeper, higher-fidelity stages (where bag-emptying leaves are solved
-  further), so it is more accurate but slower; a shorter/narrower schedule is
-  faster and coarser. Stage 0 always greedy-scores *every* move, so even an
-  interrupted run returns a ranked answer.
-- **Time — `-pegtlim <seconds>`.** The solver returns the best answer it has
-  when the limit hits (stage 0 finishes first, then each halving stage
-  refines). With no limit (the default) it runs the full schedule to
-  completion. `-tlim` bounds only simulations.
-- **Cores — `-threads <n>`.** Pure speedup at the same accuracy.
-
-So a quick in-game read might sample scenarios under a time cap, while an
-exhaustive study enumerates everything and solves to game end. The most thorough
-setting is `-pegtopk all`: after the greedy stage 0 it runs a single deep stage
-that keeps *every* candidate, enumerates *every* scenario (no stride), and solves
-each bag-emptying leaf at full endgame depth — no narrowing, no truncation:
-
-```
-magpie> peg -pegstride 7 -pegtlim 5 # fast: sampled, 5s cap
-magpie> peg                         # default: full enumeration, halving cascade, uncapped time
-magpie> peg -pegtopk all            # exhaustive: every play, full-depth endgame, no caps
-```
-
-(`-pegtopk all` — or `0` — forces full enumeration regardless of `-pegstride`;
-with no `-pegtlim` it is uncapped in time.) How far this extreme is practical
-depends on the bag: at **1-in-bag**, exhaustively solving every candidate is
-realistic for most positions given enough time; at **4-in-bag** it can take
-effectively forever — but you can still configure and run it.
-
-The leaf evaluation is an exact `endgame_solve` for bag-emptying scenarios but a
-greedy playout (averaged over the leftover-bag orderings) for the rest, so even
-the exhaustive end is a very strong estimate rather than a literal proof.
+How far a complete solve is practical depends on the bag: at 1 in the bag it
+usually takes a minute or two on a desktop; at 3 and 4 in the bag it can take
+much longer, and a time limit gives a quick, approximate answer instead.
 
 ### Comparing lexica
 

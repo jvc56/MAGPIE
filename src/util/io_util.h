@@ -314,6 +314,14 @@ typedef enum {
   ERROR_STATUS_DATA_FETCH_MANIFEST_INVALID,
   ERROR_STATUS_DATA_FETCH_FILE_MISMATCH,
   ERROR_STATUS_WMP_RESULT_TOO_LARGE,
+  // peg's first argument is not a candidate set, `peg only` has no moves,
+  // `peg resume` has some, a move list holds an exchange, or -pnoprune (which
+  // was removed) was given.
+  ERROR_STATUS_PEG_INVALID_CANDIDATE_SET,
+  ERROR_STATUS_PEG_ONLY_NEEDS_MOVES,
+  ERROR_STATUS_PEG_RESUME_TAKES_NO_MOVES,
+  ERROR_STATUS_PEG_EXCHANGE_IN_MOVE_LIST,
+  ERROR_STATUS_PEG_NOPRUNE_REMOVED,
 } error_code_t;
 
 typedef enum {

@@ -211,6 +211,8 @@ typedef enum {
   ARG_TOKEN_WRITE_BUFFER_SIZE,
   ARG_TOKEN_HUMAN_READABLE,
   ARG_TOKEN_SHOW_MISTAKES,
+  ARG_TOKEN_ANALYZE_PEG_MAX_BAG,
+  ARG_TOKEN_ANALYZE_ENDGAME_SPREAD,
   ARG_TOKEN_RANDOM_SEED,
   ARG_TOKEN_NUMBER_OF_THREADS,
   ARG_TOKEN_PRINT_INTERVAL,
@@ -344,11 +346,10 @@ struct Config {
   char *data_paths;
   // See ConfigArgs.
   bool build_missing_wordmaps;
-  // PEG "never prune" move list (space-free UCGI, comma-separated), persisted
-  // across commands since pargs reset each parse. NULL = no protected moves.
-  // The "only solve" restriction is instead a per-invocation positional
-  // argument on the peg command itself (see ARG_TOKEN_PEG).
-  char *peg_noprune_str;
+  // The last peg solve's positionals (the candidate set and the move list,
+  // NULL when not given), so that `peg resume` repeats them.
+  char *peg_last_set_str;
+  char *peg_last_moves_str;
   uint64_t max_iterations;
   // Each command's movegen budget (gen_start_movegen_limit); 0 is none.
   uint64_t movegen_limit;
@@ -483,8 +484,15 @@ struct Config {
   bool ld_changed;
   // Show the blended utility (BU) column when printing sim results.
   bool show_bu;
-  // PEG pessimistic opponent model (-pegpess); else rational (the default).
+  // PEG pessimistic opponent model (-pegpess, the default); else rational.
   bool peg_pessimistic;
+  // Whether -pegncaps, -pegndepth and -pegnstrides were given. They set the
+  // nested schedule of both autoplay players (solver_settings) and of the peg
+  // command and analyze; until they are given, peg and analyze use the
+  // schedule that suits the solve (config_fill_peg_args).
+  bool peg_nested_cand_caps_set;
+  bool peg_nested_depth_set;
+  bool peg_nested_strides_set;
   // PEG nested inner-peg lookahead for non-emptier leaves (-pegnested). On by
   // default (depth 1); off restores the flat greedy/pessimistic rollout.
   bool peg_nested;
@@ -494,6 +502,14 @@ struct Config {
   bool human_readable;
   bool peg_json;
   bool show_mistakes;
+  // The largest bag analyze solves with PEG (-apegmaxbag); 0 = none.
+  int analyze_peg_max_bag;
+  // Whether -eplies was given; until then analyze searches its endgame
+  // turns to the end of the game.
+  bool endgame_plies_set;
+  // Whether analyze's endgame turns are solved with a full window, for their
+  // exact spreads (-aegspread), rather than first-win.
+  bool analyze_endgame_spread;
   bool use_small_plays;
   bool sim_with_inference;
   bool sim_margin_forecast;
@@ -926,16 +942,6 @@ static void config_reset_peg_results(Config *config) {
   config->peg_outcomes_board = NULL;
   ld_destroy(config->peg_outcomes_ld);
   config->peg_outcomes_ld = NULL;
-}
-
-// The -pnoprune moves name squares on one board, so a command that replaces
-// the position drops them, unless that same command sets new ones.
-static void config_clear_peg_noprune_unless_set(Config *config) {
-  if (config_get_parg_num_set_values(config, ARG_TOKEN_PEG_NOPRUNE) > 0) {
-    return;
-  }
-  free(config->peg_noprune_str);
-  config->peg_noprune_str = NULL;
 }
 
 void config_invalidate_everything(Config *config,
@@ -1538,23 +1544,27 @@ static void add_player_solver_help_arg(arg_token_t arg_token,
   case ARG_TOKEN_PEG_NESTED_CAND_CAPS:
     usages[0] = "<cap1>,<cap2>,...";
     examples[0] = "8,4,2";
-    *text = "Per-level candidate caps of the nested lookahead in both "
-            "players' autoplay pre-endgame solves. Each must be >= 1. "
-            "Defaults to 8,4,2.";
+    *text = "Per-level candidate caps of the nested lookahead in the peg "
+            "command, analyze and both players' autoplay pre-endgame solves. "
+            "Each must be >= 1. Defaults to 8,4,2 for autoplay and a timed "
+            "peg, and to every candidate (up to 64) for a complete one.";
     break;
   case ARG_TOKEN_PEG_NESTED_DEPTH:
     usages[0] = "<depth>";
     examples[0] = "1";
-    *text = "How many nested pre-endgames deep both players' autoplay "
-            "pre-endgame solves look before a greedy rollout, from 1 to 4. "
-            "Defaults to 1.";
+    *text = "How many nested pre-endgames deep the peg command, analyze and "
+            "both players' autoplay pre-endgame solves look before a greedy "
+            "rollout, from 1 to 24. Defaults to 1 for autoplay and a timed "
+            "peg, and to 24, as deep as a game can need, for a complete one.";
     break;
   case ARG_TOKEN_PEG_NESTED_STRIDES:
     usages[0] = "<bag1>,<bag2>,<bag3>,<bag4>";
     examples[0] = "1,1,5,7";
     *text = "Scenario-sampling stride of an inner pre-endgame with a bag of "
-            "1, 2, 3 and 4 tiles, in both players' autoplay pre-endgame "
-            "solves. Each must be >= 1. Defaults to 1,1,5,7.";
+            "1, 2, 3 and 4 tiles, in the peg command, analyze and both "
+            "players' autoplay pre-endgame solves. Each must be >= 1. "
+            "Defaults to 1,1,5,7 for autoplay and a timed peg, and to 1 (every "
+            "scenario) for a complete one.";
     break;
   default:
     break;
@@ -1803,26 +1813,28 @@ void add_help_arg_to_string_builder(const Config *config, int token,
              "even when it falls outside the top-K.";
       break;
     case ARG_TOKEN_PEG:
-      usages[0] = "";
-      usages[1] = "<moves>";
-      usages[2] = "empty";
-      usages[3] = "resume";
-      examples[0] = "11J.MEH,1F.VENeY";
-      examples[1] = "8D.WORD,pass";
-      examples[2] = "empty";
-      examples[3] = "resume";
+      usages[0] = "[<candidate_set> [<moves>]]";
+      usages[1] = "only <moves>";
+      usages[2] = "resume";
+      examples[0] = "";
+      examples[1] = "all";
+      examples[2] = "empty 8D.WORD";
+      examples[3] = "leaves2 8D.WORD,11J.MEH";
+      examples[4] = "only 11J.MEH,1F.VENeY,pass";
+      examples[5] = "resume";
       text =
-          "Runs the pre-endgame (PEG) solver on the current position (1..4 "
-          "tiles in the bag). With no argument, evaluates every generated "
-          "move. An optional positional argument restricts the root "
-          "candidates: comma-separated space-free UCGI moves (coordinate and "
-          "tiles joined by a period, e.g. 11J.MEH, and pass as pass; "
-          "exchanges are not valid PEG moves), or the case-insensitive word "
-          "'empty' to restrict to every generated move that would empty the "
-          "bag (plays at least as many tiles as remain in the bag). 'resume' "
-          "continues the last interrupted solve of the same position and "
-          "settings from its checkpoint; checkpoints are kept only when "
-          "-pegjson and -pegoutcomes are both true.";
+          "Runs the pre-endgame (PEG) solver on the current position (1 to 4 "
+          "tiles in the bag, or up to 7 when every candidate leaves at most "
+          "4). "
+          "The first argument is the candidate set: leaves<N>, the moves that "
+          "leave at most N tiles in the bag (leaves1 when it is not given); "
+          "empty, which is leaves0; all, every move; only, exactly the moves "
+          "that follow; or resume, which continues the last interrupted solve "
+          "from its checkpoint (kept only when -pegjson and -pegoutcomes are "
+          "both true). The optional second argument lists moves to add to the "
+          "set and keep through every stage: comma-separated space-free UCGI "
+          "moves, coordinate and tiles joined by a period (11J.MEH), and pass "
+          "as pass. Exchanges are not pre-endgame moves.";
       break;
     case ARG_TOKEN_AUTOPLAY:
       usages[0] = "<type1> <num_games>";
@@ -1886,9 +1898,10 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       examples[3] = "Alice";
       examples[4] = "testdata/game.gcg Alice,Bob";
       text = "Analyzes each turn of a GCG game: with a static evaluation when "
-             "-plies is 0, with the pre-endgame solver when 1 to 4 tiles are "
-             "in the bag, with the endgame solver when the bag is empty, and "
-             "with simulation otherwise. With 0 args, analyzes the currently "
+             "-plies is 0, with the pre-endgame solver when 1 to -apegmaxbag "
+             "(4 by default) tiles are in the bag, with the endgame solver "
+             "when the bag is empty, and with simulation otherwise. With 0 "
+             "args, analyzes the currently "
              "loaded game. With 1 "
              "arg, the argument is interpreted as a directory, a GCG file, or "
              "a comma-delimited player name list for the current game. With 2 "
@@ -2290,7 +2303,9 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       usages[0] = "<endgame_plies>";
       examples[0] = "4";
       examples[1] = "8";
-      text = "Specifies the number of plies to use for solving endgames.";
+      text = "Specifies the number of plies to use for solving endgames. "
+             "Defaults to 6 for the endgame command and to 25, the end of the "
+             "game, for analyze's endgame turns.";
       break;
     case ARG_TOKEN_ENDGAME_TOP_K:
       usages[0] = "<endgame_top_k>";
@@ -2322,7 +2337,12 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       text =
           "Specifies the time limit in seconds for the pre-endgame solver, "
           "in the peg command and in analyze's pre-endgame turns. A value of "
-          "0 (the default) is unlimited.";
+          "0 (the default) is unlimited. The limit picks the strategy: with "
+          "none and no -pegtopk, the solve is complete (every candidate "
+          "solved to the end of the game with first-win endgames, cut only "
+          "once it provably cannot reach the best, so spreads are not "
+          "shown); with one, it is the staged cascade (see -pegtopk), which "
+          "always has an answer from its last completed stage.";
       break;
     case ARG_TOKEN_PEG_TOP_K:
       usages[0] = "<count1>,<count2>,...";
@@ -2357,27 +2377,30 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       usages[0] = "<moves>";
       examples[0] = "11J.MEH";
       examples[1] = "8D.WORD,J11.BUM";
-      text = "Protects a set of moves from being pruned by the PEG cascade "
-             "(like the simmer's snoprune): each stage carries them to the "
-             "deepest fidelity even when their win%% rank falls below the cut. "
-             "Same space-free UCGI format as the peg command's move-list "
-             "positional argument. Use '-' to clear.";
+      text = "Removed. Give the moves to protect as the peg command's second "
+             "argument (peg leaves1 8D.WORD), which adds them to the "
+             "candidates and carries them through every stage for that one "
+             "solve.";
       break;
     case ARG_TOKEN_PEG_PESSIMISTIC:
       usages[0] = "<true/false>";
       examples[0] = "true";
-      text = "PEG opponent model: true = pessimistic (the opponent plays the "
-             "worst-for-the-mover reply, i.e. guaranteed-win analysis); false "
-             "(default) = rational (the opponent plays its best-equity reply).";
+      text = "PEG opponent model. true (the default) = pessimistic: wherever "
+             "the opponent replies, it tries every reply as if it could see "
+             "the mover's rack and the bag order and plays the worst one for "
+             "the mover, so a win% is a guaranteed lower bound. false = "
+             "rational: the opponent chooses from what it can see, and its "
+             "choice is scored on the actual racks.";
       break;
     case ARG_TOKEN_PEG_NESTED:
       usages[0] = "<true/false>";
       examples[0] = "false";
       text =
           "PEG non-emptier leaf evaluation: true (default) = nested inner-peg "
-          "lookahead (solve the opponent's sub-pre-endgame, depth 1); false = "
-          "flat greedy/pessimistic rollout. Nested wins more decisions but "
-          "costs more per solve.";
+          "lookahead (solve the opponent's sub-pre-endgame; see -pegndepth, "
+          "-pegncaps and -pegnstrides for its schedule); false = flat "
+          "greedy/pessimistic rollout. Nested wins more decisions but costs "
+          "more per solve.";
       break;
     case ARG_TOKEN_PEG_JSON:
       usages[0] = "<true/false>";
@@ -2571,6 +2594,23 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       text = "Specifies whether analyze grades each turn into a discrete "
              "mistake size (small/medium/large) and includes mistake counts "
              "and the mistake index (MI) in its output. Off by default.";
+      break;
+    case ARG_TOKEN_ANALYZE_ENDGAME_SPREAD:
+      usages[0] = "<true_or_false>";
+      examples[0] = "true";
+      text = "Specifies whether analyze solves its endgame turns with a full "
+             "window, which reports their exact spreads and spread lost. False "
+             "by default: they are solved first-win, which proves each play's "
+             "result -- win, draw or loss -- and grades a turn on the result "
+             "alone, much faster.";
+      break;
+    case ARG_TOKEN_ANALYZE_PEG_MAX_BAG:
+      usages[0] = "<bag_size>";
+      examples[0] = "2";
+      examples[1] = "0";
+      text = "The largest bag, from 0 to 4 tiles, that analyze solves with "
+             "the pre-endgame solver; larger bags are simulated. 0 simulates "
+             "every pre-endgame turn. Defaults to 4.";
       break;
     case ARG_TOKEN_RANDOM_SEED:
       usages[0] = "<random_seed>";
@@ -3145,6 +3185,8 @@ char *impl_help(Config *config, ErrorStack *error_stack) {
     };
     // Game Analysis Options (alphabetical by name)
     static const arg_token_t game_analysis_opts[] = {
+        ARG_TOKEN_ANALYZE_ENDGAME_SPREAD,  /* aegspread */
+        ARG_TOKEN_ANALYZE_PEG_MAX_BAG,     /* apegmaxbag */
         ARG_TOKEN_CUTOFF,                  /* cutoff */
         ARG_TOKEN_ENDGAME_BEST_REPLY,      /* ebestreply */
         ARG_TOKEN_ENDGAME_PLIES,           /* eplies */
@@ -3395,7 +3437,6 @@ void impl_load_cgp(Config *config, ErrorStack *error_stack) {
     config_invalidate_everything(config, false);
     game_history_set_initial_cgp(config->game_history, cgp);
     update_game_history_with_config(config);
-    config_clear_peg_noprune_unless_set(config);
   }
   string_builder_destroy(cgp_builder);
 }
@@ -4658,16 +4699,18 @@ static void config_load_solver_settings(Config *config,
       }
       config->solver_settings[player_index].peg_nested_num_cand_caps = n;
     }
+    config->peg_nested_cand_caps_set = true;
   }
   int depth = 0;
   if (config_get_parg_value(config, ARG_TOKEN_PEG_NESTED_DEPTH, 0)) {
-    config_load_int(config, ARG_TOKEN_PEG_NESTED_DEPTH, 1, PEG_MAX_BAG, &depth,
-                    error_stack);
+    config_load_int(config, ARG_TOKEN_PEG_NESTED_DEPTH, 1, PEG_MAX_NEST_DEPTH,
+                    &depth, error_stack);
     if (!error_stack_is_empty(error_stack)) {
       return;
     }
     config->solver_settings[0].peg_nested_max_depth = depth;
     config->solver_settings[1].peg_nested_max_depth = depth;
+    config->peg_nested_depth_set = true;
   }
   const char *strides =
       config_get_parg_value(config, ARG_TOKEN_PEG_NESTED_STRIDES, 0);
@@ -4685,6 +4728,7 @@ static void config_load_solver_settings(Config *config,
             values[bag - 1];
       }
     }
+    config->peg_nested_strides_set = true;
   }
   if (config_get_parg_value(config, ARG_TOKEN_ENDGAME_BEST_REPLY, 0)) {
     bool best_reply_shortcuts = true;
@@ -4750,12 +4794,49 @@ static void config_load_peg_stage_top_k(Config *config,
   config->peg_num_stages = n;
 }
 
-// Default inner-peg stage schedule when nesting is on: the inner cascade keeps
-// 8 candidates at its first stage, then 4, then 2 -- enough lookahead to
-// sharpen the non-emptier leaf decision without paying for a wide inner field.
+// Default inner-peg stage schedule of a timed solve when nesting is on: the
+// inner cascade keeps 8 candidates at its first stage, then 4, then 2 --
+// enough lookahead to sharpen the non-emptier leaf decision without paying for
+// a wide inner field.
 static const int PEG_NESTED_DEFAULT_CAND_CAPS[] = {8, 4, 2};
 
+// The one stage of a complete solve: every candidate, solved in full.
+static const int PEG_COMPLETE_STAGE_COUNTS[] = {INT_MAX};
+
 void config_fill_peg_args(Config *config, PegArgs *peg_args) {
+  // The time limit picks the strategy. With none (the default) and no
+  // explicit -pegtopk, the solve is complete: after the greedy seed orders
+  // them, every candidate is solved to the end of the game with first-win
+  // endgames, and cut only once it provably cannot reach the best. With a
+  // limit, or an explicit -pegtopk, it is the staged cascade, which always has
+  // an answer from its last completed stage.
+  const bool complete =
+      config->peg_time_limit_seconds == 0 && config->peg_num_stages == 0;
+  // The nested schedule. A complete solve uses every inner candidate (up to
+  // PEG_NEST_FIELD_MAX), every inner scenario, inner endgames to the end of
+  // the game, and nesting until the game resolves, so no line ends in a
+  // greedy playout. The cascade keeps the cheaper schedule. Either way
+  // -pegncaps, -pegndepth and -pegnstrides, once given, decide.
+  const AutoplaySolverSettings *given = &config->solver_settings[0];
+  const int *nested_caps = PEG_NESTED_DEFAULT_CAND_CAPS;
+  int nested_n_caps = (int)(sizeof(PEG_NESTED_DEFAULT_CAND_CAPS) /
+                            sizeof(PEG_NESTED_DEFAULT_CAND_CAPS[0]));
+  if (config->peg_nested_cand_caps_set) {
+    nested_caps = given->peg_nested_cand_caps;
+    nested_n_caps = given->peg_nested_num_cand_caps;
+  } else if (complete) {
+    nested_caps = NULL;
+    nested_n_caps = 0;
+  }
+  int nested_depth = complete ? PEG_MAX_NEST_DEPTH : PEG_NESTED_DEFAULT_DEPTH;
+  if (config->peg_nested_depth_set) {
+    nested_depth = given->peg_nested_max_depth;
+  }
+  const int nested_stride = complete ? 1 : 0;
+  const int *nested_strides =
+      config->peg_nested_strides_set ? given->peg_nested_strides : NULL;
+  const int nested_n_strides =
+      config->peg_nested_strides_set ? AUTOPLAY_SOLVER_NUM_NESTED_STRIDES : 0;
   // Nested inner-peg lookahead for non-emptier leaves is on by default at depth
   // 1 with the default inner stage schedule and the bag-size default scenario
   // stride (0). -pegnested false restores the flat rollout. Emptier (bag-empty)
@@ -4768,19 +4849,25 @@ void config_fill_peg_args(Config *config, PegArgs *peg_args) {
       /*time_budget_seconds=*/config->peg_time_limit_seconds,
       /*max_stage=*/0, /*greedy_seed_only=*/false,
       /*stage_top_k=*/
-      config->peg_num_stages > 0 ? config->peg_stage_top_k : NULL,
-      config->peg_num_stages, /*inner_top_k=*/0,
+      config->peg_num_stages > 0
+          ? config->peg_stage_top_k
+          : (complete ? PEG_COMPLETE_STAGE_COUNTS : NULL),
+      config->peg_num_stages > 0 ? config->peg_num_stages : (complete ? 1 : 0),
+      /*inner_top_k=*/0,
       config->peg_pessimistic ? PEG_OPP_PESSIMISTIC : PEG_OPP_RATIONAL,
       config->peg_scenario_stride, /*nested_enabled=*/config->peg_nested,
-      /*nested_cand_cap=*/0, PEG_NESTED_DEFAULT_CAND_CAPS,
-      (int)(sizeof(PEG_NESTED_DEFAULT_CAND_CAPS) /
-            sizeof(PEG_NESTED_DEFAULT_CAND_CAPS[0])),
-      /*nested_stride=*/0, /*nested_strides_by_bag=*/NULL,
-      /*nested_n_strides_by_bag=*/0, /*nested_emptier_ply_cap=*/0,
-      PEG_NESTED_DEFAULT_DEPTH,
+      /*nested_cand_cap=*/0, nested_caps, nested_n_caps, nested_stride,
+      nested_strides, nested_n_strides,
+      /*nested_emptier_ply_cap=*/complete ? PEG_EXHAUSTIVE_PLIES : 0,
+      nested_depth, /*nested_score_actual=*/true,
+      /*nested_pessimistic=*/config->peg_pessimistic,
       /*disable_best_reply_shortcuts=*/!config->endgame_best_reply_shortcuts,
+      /*first_win=*/complete, /*early_cutoff=*/complete,
+      /*opp_rack_known=*/true,
       /*eval_bag_order=*/NULL,
-      /*eval_bag_order_len=*/0, /*only_moves=*/NULL, /*n_only_moves=*/0,
+      /*eval_bag_order_len=*/0,
+      /*limit_tiles_left=*/true, /*max_tiles_left=*/1, /*only_moves=*/NULL,
+      /*n_only_moves=*/0,
       /*protect_moves=*/NULL, /*n_protect_moves=*/0,
       /*include_per_scenario=*/config->peg_show_outcomes,
       /*on_stage_start=*/NULL, /*on_cand_done=*/NULL,
@@ -4834,58 +4921,29 @@ static ValidatedMoves *config_parse_peg_move_list(const Config *config,
   return vms;
 }
 
-// Generates the full root candidate move list for the current game state and
-// filters it down to the moves that would empty the bag: those playing at
-// least as many tiles as remain in the bag. Backs the peg command's "empty"
-// positional value. On success returns the owning MoveList (caller destroys
-// with move_list_destroy) and writes the filtered Move-pointer array (caller
-// free()s it) to *moves_out and the count to *n_out. If no generated move
-// empties the bag, pushes onto error_stack and returns NULL.
-static MoveList *
-config_generate_peg_bag_emptying_moves(const Config *config,
-                                       const Move ***moves_out, int *n_out,
-                                       ErrorStack *error_stack) {
-  MoveList *move_list = move_list_create(PEG_CAND_LIST_CAP);
-  const MoveGenArgs gen_args = {
-      .game = config->game,
-      .move_record_type = MOVE_RECORD_ALL,
-      .move_sort_type = MOVE_SORT_EQUITY,
-      .override_kwg = NULL,
-      .eq_margin_movegen = 0,
-      .target_equity = EQUITY_MAX_VALUE,
-      .move_list = move_list,
-      .tiles_played_bv = NULL,
-      .initial_tiles_bv = 0,
-  };
-  generate_moves(&gen_args);
-
-  // The PEG-effective bag size (matching peg_solve's own computation), not
-  // the raw bag_get_letters count: when the opponent's rack isn't fully
-  // known, those tiles sit in the raw bag too, but they are not part of the
-  // real bag peg_solve will enumerate.
-  const int bag_size = peg_compute_bag_size(config->game);
-  const int num_moves = move_list_get_count(move_list);
-  const Move **moves = malloc_or_die((size_t)num_moves * sizeof(Move *));
-  int num_kept = 0;
-  for (int move_idx = 0; move_idx < num_moves; move_idx++) {
-    const Move *move = move_list_get_move(move_list, move_idx);
-    if (peg_move_empties_bag(move, bag_size)) {
-      moves[num_kept++] = move;
+// Parses the leaves<N> candidate set (and "empty", which is leaves0): the
+// moves that leave at most N tiles in the bag. Case-insensitive.
+static bool config_parse_peg_leaves(const char *str, int *max_tiles_left) {
+  if (strings_iequal(str, "empty")) {
+    *max_tiles_left = 0;
+    return true;
+  }
+  if (!has_iprefix("leaves", str)) {
+    return false;
+  }
+  const char *digits = str + string_length("leaves");
+  if (*digits == '\0') {
+    return false;
+  }
+  int value = 0;
+  for (const char *cursor = digits; *cursor; cursor++) {
+    if (*cursor < '0' || *cursor > '9' || value > RACK_SIZE * 2) {
+      return false;
     }
+    value = value * 10 + (*cursor - '0');
   }
-  if (num_kept == 0) {
-    free(moves);
-    move_list_destroy(move_list);
-    error_stack_push(error_stack, ERROR_STATUS_PEG_EMPTY_NO_MOVES,
-                     get_formatted_string(
-                         "peg 'empty' found no generated move that empties the "
-                         "%d-tile bag",
-                         bag_size));
-    return NULL;
-  }
-  *moves_out = moves;
-  *n_out = num_kept;
-  return move_list;
+  *max_tiles_left = value;
+  return true;
 }
 
 void config_peg(Config *config, ErrorStack *error_stack) {
@@ -4909,17 +4967,27 @@ void config_peg(Config *config, ErrorStack *error_stack) {
   config_fill_peg_args(config, &peg_args);
   peg_args.poll = config->peg_poll;
 
-  // Optional "only solve" set: evaluate exactly these moves as the
-  // candidates. This is a per-invocation positional argument on the peg
-  // command itself (not a persisted setting), so it is read straight off
-  // ARG_TOKEN_PEG rather than a config field. "empty" (case-insensitive)
-  // restricts to every generated move that would empty the bag; anything
-  // else is parsed as a space-free UCGI move list.
-  ValidatedMoves *only_vms = NULL;
-  MoveList *only_ml = NULL;
-  const Move **only_moves = NULL;
-  const char *peg_only_str = config_get_parg_value(config, ARG_TOKEN_PEG, 0);
-  const bool resume = peg_only_str && strings_equal(peg_only_str, "resume");
+  // The positionals: the candidate set, then the moves to add to it and
+  // protect (or, for "only", the moves that are the set). `peg resume` reuses
+  // the last solve's, so its checkpoint matches.
+  const char *set_str = config_get_parg_value(config, ARG_TOKEN_PEG, 0);
+  const char *moves_str = config_get_parg_value(config, ARG_TOKEN_PEG, 1);
+  const bool resume = set_str && strings_iequal(set_str, "resume");
+  if (resume && moves_str) {
+    error_stack_push(error_stack, ERROR_STATUS_PEG_RESUME_TAKES_NO_MOVES,
+                     string_duplicate("peg resume takes no moves: it resumes "
+                                      "the last solve with its own"));
+    return;
+  }
+  if (resume) {
+    set_str = config->peg_last_set_str;
+    moves_str = config->peg_last_moves_str;
+  } else {
+    free(config->peg_last_set_str);
+    free(config->peg_last_moves_str);
+    config->peg_last_set_str = set_str ? string_duplicate(set_str) : NULL;
+    config->peg_last_moves_str = moves_str ? string_duplicate(moves_str) : NULL;
+  }
   if (config->peg_json && config->peg_show_outcomes) {
     if (!config->peg_checkpoint) {
       config->peg_checkpoint = peg_checkpoint_create();
@@ -4927,49 +4995,66 @@ void config_peg(Config *config, ErrorStack *error_stack) {
     peg_args.checkpoint = config->peg_checkpoint;
     peg_args.resume = resume;
   }
-  if (!resume && peg_only_str && !is_string_empty_or_whitespace(peg_only_str) &&
-      !strings_equal(peg_only_str, "-")) {
-    if (strings_iequal(peg_only_str, "empty")) {
-      only_ml = config_generate_peg_bag_emptying_moves(
-          config, &only_moves, &peg_args.n_only_moves, error_stack);
-      if (!error_stack_is_empty(error_stack)) {
-        return;
-      }
+  bool only = false;
+  if (set_str) {
+    int max_tiles_left = 0;
+    if (strings_iequal(set_str, "all")) {
+      peg_args.limit_tiles_left = false;
+    } else if (strings_iequal(set_str, "only")) {
+      only = true;
+    } else if (config_parse_peg_leaves(set_str, &max_tiles_left)) {
+      peg_args.limit_tiles_left = true;
+      peg_args.max_tiles_left = max_tiles_left;
     } else {
-      only_vms =
-          config_parse_peg_move_list(config, peg_only_str, &only_moves,
-                                     &peg_args.n_only_moves, error_stack);
-      if (!error_stack_is_empty(error_stack)) {
-        return;
-      }
-    }
-    peg_args.only_moves = only_moves;
-  }
-
-  // Optional "never prune" set: protect these moves from each stage's top-K
-  // cut.
-  ValidatedMoves *protect_vms = NULL;
-  const Move **protect_moves = NULL;
-  if (config->peg_noprune_str) {
-    protect_vms = config_parse_peg_move_list(
-        config, config->peg_noprune_str, &protect_moves,
-        &peg_args.n_protect_moves, error_stack);
-    if (!error_stack_is_empty(error_stack)) {
-      free(only_moves);
-      validated_moves_destroy(only_vms);
-      move_list_destroy(only_ml);
+      error_stack_push(
+          error_stack, ERROR_STATUS_PEG_INVALID_CANDIDATE_SET,
+          get_formatted_string(
+              "peg's first argument is the candidate set -- all, empty, "
+              "leaves<N>, only or resume -- not '%s'. To add moves and "
+              "protect them, give them second (peg leaves1 %s); to solve "
+              "only them, peg only %s",
+              set_str, set_str, set_str));
       return;
     }
-    peg_args.protect_moves = protect_moves;
+  }
+  if (only && !moves_str) {
+    error_stack_push(error_stack, ERROR_STATUS_PEG_ONLY_NEEDS_MOVES,
+                     string_duplicate("peg only needs the moves to solve, "
+                                      "e.g. peg only 8D.WORD,11J.MEH"));
+    return;
+  }
+  ValidatedMoves *listed_vms = NULL;
+  const Move **listed_moves = NULL;
+  int n_listed = 0;
+  if (moves_str) {
+    listed_vms = config_parse_peg_move_list(config, moves_str, &listed_moves,
+                                            &n_listed, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+    for (int move_idx = 0; move_idx < n_listed; move_idx++) {
+      if (move_get_type(listed_moves[move_idx]) == GAME_EVENT_EXCHANGE) {
+        error_stack_push(error_stack, ERROR_STATUS_PEG_EXCHANGE_IN_MOVE_LIST,
+                         string_duplicate("an exchange is not a pre-endgame "
+                                          "move: the bag is too small"));
+        free(listed_moves);
+        validated_moves_destroy(listed_vms);
+        return;
+      }
+    }
+  }
+  if (only) {
+    peg_args.only_moves = listed_moves;
+    peg_args.n_only_moves = n_listed;
+  } else {
+    peg_args.protect_moves = listed_moves;
+    peg_args.n_protect_moves = n_listed;
   }
 
   peg_solve(&peg_args, &config->peg_result, error_stack);
 
-  free(only_moves);
-  validated_moves_destroy(only_vms);
-  move_list_destroy(only_ml);
-  free(protect_moves);
-  validated_moves_destroy(protect_vms);
+  free(listed_moves);
+  validated_moves_destroy(listed_vms);
 }
 
 void impl_peg(Config *config, ErrorStack *error_stack) {
@@ -6169,7 +6254,6 @@ char *impl_new_game(Config *config, ErrorStack *error_stack) {
   // its moves would be committed by index onto the empty board, replayed by
   // heatmap against the new racks, and saved onto this game's first turn.
   config_invalidate_everything(config, false);
-  config_clear_peg_noprune_unless_set(config);
   update_game_history_with_config(config);
   if (user_provided_filename) {
     game_history_set_gcg_filename(config->game_history, user_provided_filename);
@@ -8471,7 +8555,6 @@ void config_parse_gcg_string(Config *config, const char *gcg_string,
   // parsing, since a lexicon the GCG names frees the one the previous endgame
   // results still point at, even when the parse then fails.
   config_invalidate_everything(config, true);
-  config_clear_peg_noprune_unless_set(config);
   game_history_reset(game_history);
   GCGParser *gcg_parser =
       gcg_parser_create(gcg_string, game_history,
@@ -12255,10 +12338,13 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
     return;
   }
 
-  config_load_int(config, ARG_TOKEN_ENDGAME_PLIES, 1, MAX_VARIANT_LENGTH,
-                  &config->endgame_plies, error_stack);
-  if (!error_stack_is_empty(error_stack)) {
-    return;
+  if (config_get_parg_value(config, ARG_TOKEN_ENDGAME_PLIES, 0)) {
+    config_load_int(config, ARG_TOKEN_ENDGAME_PLIES, 1, MAX_VARIANT_LENGTH,
+                    &config->endgame_plies, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+    config->endgame_plies_set = true;
   }
 
   config_load_int(config, ARG_TOKEN_ENDGAME_TOP_K, 1, MAX_ENDGAME_DISPLAY_PVS,
@@ -12334,15 +12420,14 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
   // PEG "never prune" list persists across commands (pargs reset each parse).
   // Update only when given this parse; an empty value or "-" clears the
   // restriction.
+  // -pnoprune was removed: the moves to protect are now the peg command's
+  // second argument, which lasts one solve rather than outliving the position.
   if (config_get_parg_num_set_values(config, ARG_TOKEN_PEG_NOPRUNE) > 0) {
-    const char *peg_noprune =
-        config_get_parg_value(config, ARG_TOKEN_PEG_NOPRUNE, 0);
-    free(config->peg_noprune_str);
-    config->peg_noprune_str = NULL;
-    if (peg_noprune && !is_string_empty_or_whitespace(peg_noprune) &&
-        !strings_equal(peg_noprune, "-")) {
-      config->peg_noprune_str = string_duplicate(peg_noprune);
-    }
+    error_stack_push(
+        error_stack, ERROR_STATUS_PEG_NOPRUNE_REMOVED,
+        string_duplicate("-pnoprune was removed: give the moves to protect as "
+                         "peg's second argument, e.g. peg leaves1 8D.WORD"));
+    return;
   }
 
   config_load_int(config, ARG_TOKEN_NUMBER_OF_PLAYS, 1, INT_MAX,
@@ -12495,6 +12580,17 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
 
   config_load_bool(config, ARG_TOKEN_SHOW_MISTAKES, &config->show_mistakes,
                    error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
+  config_load_int(config, ARG_TOKEN_ANALYZE_PEG_MAX_BAG, 0, PEG_MAX_BAG,
+                  &config->analyze_peg_max_bag, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  config_load_bool(config, ARG_TOKEN_ANALYZE_ENDGAME_SPREAD,
+                   &config->analyze_endgame_spread, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
@@ -13711,9 +13807,18 @@ static void config_fill_analyze_args(Config *config, AnalyzeArgs *analyze_args,
                        &analyze_args->sim_args);
   config_fill_endgame_args(config, &analyze_args->endgame_args);
   analyze_args->endgame_args.num_top_moves = 1;
+  // Analyze's endgame turns are graded on the result, which a first-win solve
+  // to the end of the game proves; -aegspread keeps the full window for the
+  // spreads, and -eplies a depth of its own.
+  if (!config->endgame_plies_set) {
+    analyze_args->endgame_args.plies = MAX_SEARCH_DEPTH;
+  }
+  analyze_args->endgame_args.first_win = !config->analyze_endgame_spread;
+  analyze_args->endgame_spread = config->analyze_endgame_spread;
   config_fill_peg_args(config, &analyze_args->peg_args);
   analyze_args->human_readable = config->human_readable;
   analyze_args->show_mistakes = config->show_mistakes;
+  analyze_args->peg_max_bag = config->analyze_peg_max_bag;
   analyze_args->max_num_display_plays = config->max_num_display_plays;
 }
 
@@ -14638,7 +14743,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
       rack_and_gen_and_sim, false);
   cmd(ARG_TOKEN_INFER, "infer", 0, 5, infer, generic, false);
   cmd(ARG_TOKEN_ENDGAME, "endgame", 0, 2, endgame, endgame, false);
-  cmd(ARG_TOKEN_PEG, "peg", 0, 1, peg, peg, false);
+  cmd(ARG_TOKEN_PEG, "peg", 0, 2, peg, peg, false);
   cmd(ARG_TOKEN_AUTOPLAY, "autoplay", 2, 2, autoplay, autoplay, false);
   cmd(ARG_TOKEN_CONVERT, "convert", 2, 5, convert, generic, false);
   cmd(ARG_TOKEN_CONTRIBUTE, "contribute", 0, 1, contribute, generic, false);
@@ -14728,6 +14833,8 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_USE_HEAT_MAP, "useheatmap", 1, 1);
   arg(ARG_TOKEN_HUMAN_READABLE, "hr", 1, 1);
   arg(ARG_TOKEN_SHOW_MISTAKES, "mistakes", 1, 1);
+  arg(ARG_TOKEN_ANALYZE_PEG_MAX_BAG, "apegmaxbag", 1, 1);
+  arg(ARG_TOKEN_ANALYZE_ENDGAME_SPREAD, "aegspread", 1, 1);
   arg(ARG_TOKEN_WRITE_BUFFER_SIZE, "wb", 1, 1);
   arg(ARG_TOKEN_RANDOM_SEED, "seed", 1, 1);
   arg(ARG_TOKEN_NUMBER_OF_THREADS, "threads", 1, 1);
@@ -14850,6 +14957,8 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->shplies = CONFIG_DEFAULT_SHPLIES;
   config->show_bu = false;
   config->endgame_plies = 6;
+  config->endgame_plies_set = false;
+  config->analyze_endgame_spread = false;
   config->endgame_top_k = 1;
   config->endgame_best_reply_shortcuts = true;
   // -1 = no peg results yet; 0 stages = built-in schedule; 0 stride = solver
@@ -14859,12 +14968,16 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->leavegen_max_games = 0;
   config->leavegen_write_files = true;
   config->peg_scenario_stride = 0;
-  config->peg_pessimistic = false;
+  config->peg_pessimistic = true;
   config->peg_nested = true;
+  config->peg_nested_cand_caps_set = false;
+  config->peg_nested_depth_set = false;
+  config->peg_nested_strides_set = false;
   config->peg_show_outcomes = true;
   config->peg_out_width = 100;
   config->peg_out_lines = 1;
-  config->peg_noprune_str = NULL;
+  config->peg_last_set_str = NULL;
+  config->peg_last_moves_str = NULL;
   config->eq_margin_inference = int_to_equity(CONFIG_DEFAULT_EQ_MARGIN);
   config->eq_margin_movegen = int_to_equity(CONFIG_DEFAULT_EQ_MARGIN);
   config->min_play_iterations = CONFIG_DEFAULT_MIN_PLAY_ITERATIONS;
@@ -14894,6 +15007,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->peg_outcomes_board = NULL;
   config->peg_outcomes_ld = NULL;
   config->show_mistakes = false;
+  config->analyze_peg_max_bag = PEG_MAX_BAG;
   config->sim_with_inference = true;
   config->pat_label_plies = 1;
   config->sim_margin_forecast = false;
@@ -14996,7 +15110,8 @@ void config_destroy(Config *config) {
   ld_destroy(config->peg_outcomes_ld);
   peg_result_destroy(&config->peg_result);
   peg_poll_destroy(config->peg_poll);
-  free(config->peg_noprune_str);
+  free(config->peg_last_set_str);
+  free(config->peg_last_moves_str);
   free(config->p1_rit_name_override);
   free(config->p2_rit_name_override);
   for (int type = 0; type < NUMBER_OF_DATA; type++) {
@@ -15380,8 +15495,11 @@ void config_add_settings_to_string_builder(const Config *config,
                                                 config->show_bu);
       break;
     case ARG_TOKEN_ENDGAME_PLIES:
-      config_add_int_setting_to_string_builder(config, sb, arg_token,
-                                               config->endgame_plies);
+      // Written only once given, so analyze keeps its own depth until then.
+      if (config->endgame_plies_set) {
+        config_add_int_setting_to_string_builder(config, sb, arg_token,
+                                                 config->endgame_plies);
+      }
       break;
     case ARG_TOKEN_PEG_TOP_K:
       // Serialize the raw -pegtopk value (e.g. "32,16,8,4,2") if set, so the
@@ -15554,21 +15672,29 @@ void config_add_settings_to_string_builder(const Config *config,
       break;
     // The nested knobs are one option for both players; player 1's values
     // stand for both, as the option sets both.
+    // Written only once given, so peg and analyze keep choosing their own
+    // schedule until then.
     case ARG_TOKEN_PEG_NESTED_CAND_CAPS:
-      config_add_int_list_setting_to_string_builder(
-          config, sb, arg_token,
-          config->solver_settings[0].peg_nested_cand_caps,
-          config->solver_settings[0].peg_nested_num_cand_caps);
+      if (config->peg_nested_cand_caps_set) {
+        config_add_int_list_setting_to_string_builder(
+            config, sb, arg_token,
+            config->solver_settings[0].peg_nested_cand_caps,
+            config->solver_settings[0].peg_nested_num_cand_caps);
+      }
       break;
     case ARG_TOKEN_PEG_NESTED_DEPTH:
-      config_add_int_setting_to_string_builder(
-          config, sb, arg_token,
-          config->solver_settings[0].peg_nested_max_depth);
+      if (config->peg_nested_depth_set) {
+        config_add_int_setting_to_string_builder(
+            config, sb, arg_token,
+            config->solver_settings[0].peg_nested_max_depth);
+      }
       break;
     case ARG_TOKEN_PEG_NESTED_STRIDES:
-      config_add_int_list_setting_to_string_builder(
-          config, sb, arg_token,
-          &config->solver_settings[0].peg_nested_strides[1], PEG_MAX_BAG);
+      if (config->peg_nested_strides_set) {
+        config_add_int_list_setting_to_string_builder(
+            config, sb, arg_token,
+            &config->solver_settings[0].peg_nested_strides[1], PEG_MAX_BAG);
+      }
       break;
     case ARG_TOKEN_MOVEGEN_MARGIN:
       if (config->eq_margin_movegen != 0) {
@@ -15653,6 +15779,14 @@ void config_add_settings_to_string_builder(const Config *config,
     case ARG_TOKEN_SHOW_MISTAKES:
       config_add_bool_setting_to_string_builder(config, sb, arg_token,
                                                 config->show_mistakes);
+      break;
+    case ARG_TOKEN_ANALYZE_PEG_MAX_BAG:
+      config_add_int_setting_to_string_builder(config, sb, arg_token,
+                                               config->analyze_peg_max_bag);
+      break;
+    case ARG_TOKEN_ANALYZE_ENDGAME_SPREAD:
+      config_add_bool_setting_to_string_builder(config, sb, arg_token,
+                                                config->analyze_endgame_spread);
       break;
     case ARG_TOKEN_RANDOM_SEED:
       // Do not save the seed in the settings.
@@ -15897,10 +16031,12 @@ typedef struct StaleSetting {
 } StaleSetting;
 
 static const StaleSetting config_stale_settings[] = {
-    {2, ARG_TOKEN_PEG_PESSIMISTIC}, {2, ARG_TOKEN_P1_USE_WMP},
-    {2, ARG_TOKEN_P2_USE_WMP},      {2, ARG_TOKEN_P1_USE_RIT},
-    {2, ARG_TOKEN_P2_USE_RIT},      {2, ARG_TOKEN_P1_USE_WIT},
-    {2, ARG_TOKEN_P2_USE_WIT},      {2, ARG_TOKEN_USE_MMAP_FOR_RIT},
+    {2, ARG_TOKEN_PEG_PESSIMISTIC},      {2, ARG_TOKEN_P1_USE_WMP},
+    {2, ARG_TOKEN_P2_USE_WMP},           {2, ARG_TOKEN_P1_USE_RIT},
+    {2, ARG_TOKEN_P2_USE_RIT},           {2, ARG_TOKEN_P1_USE_WIT},
+    {2, ARG_TOKEN_P2_USE_WIT},           {2, ARG_TOKEN_USE_MMAP_FOR_RIT},
+    {2, ARG_TOKEN_PEG_NESTED_CAND_CAPS}, {2, ARG_TOKEN_PEG_NESTED_DEPTH},
+    {2, ARG_TOKEN_PEG_NESTED_STRIDES},   {2, ARG_TOKEN_ENDGAME_PLIES},
 };
 
 // The arg token whose full name is `name` (without its dash), or

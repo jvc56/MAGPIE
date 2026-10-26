@@ -17,9 +17,11 @@
 //
 // Solves positions with PEG_MIN_BAG..PEG_MAX_BAG tiles in the bag; larger
 // positions are midgame and are rejected, unless every candidate move is
-// guaranteed to empty the bag (see peg_solve's bag-emptying-guarantee
-// exception, reachable only via a caller-supplied only_moves set), in which
-// case a bag up to RACK_SIZE is also accepted.
+// guaranteed to leave at most PEG_MAX_BAG tiles in it (an only_moves set, or
+// a limit_tiles_left of at most PEG_MAX_BAG, with any protected moves
+// leaving that few too), in which case a bag up to RACK_SIZE is also
+// accepted: each candidate then hands the opponent a pre-endgame the solver
+// handles.
 //
 // The solver ranks candidate moves by their win% (and spread) over every way
 // the bag could be drawn, in a cascade of progressively-deeper stages:
@@ -223,10 +225,53 @@ typedef struct PegArgs {
   int nested_n_strides_by_bag; // length of nested_strides_by_bag
   int nested_emptier_ply_cap;
   int nested_max_depth;
+  // How a nested player's choice is valued. False (a zero-initialized
+  // PegArgs) values the chosen play by its average over every scenario that
+  // player could be in, which is not the result on the scenario at hand. True
+  // chooses by that average, then plays the choice on the scenario's actual
+  // racks and bag and values what follows.
+  bool nested_score_actual;
+  // With PEG_OPP_PESSIMISTIC and nesting on: at every nested node where the
+  // opponent of the root mover is on turn, it tries every reply (or its
+  // inner_top_k highest-equity ones) on the scenario, as if it could see every
+  // rack and the bag order, and plays the one worst for the mover; under
+  // first-win it stops at the first reply that wins for it. False (a
+  // zero-initialized PegArgs) uses the pessimistic model only where a rollout
+  // is used, so with nesting on only at the greedy seed.
+  bool nested_pessimistic;
 
   // EndgameArgs.disable_best_reply_shortcuts for every endgame solve the PEG
   // runs. False (a zero-initialized PegArgs) leaves the shortcuts on.
   bool disable_best_reply_shortcuts;
+
+  // Solve every endgame leaf, outer and nested, first-win: a [-1, +1] window
+  // on the final spread, which answers win, draw or loss and not by how much.
+  // Win% is unchanged and the solves are much faster, but the mean spread of a
+  // candidate scored past the greedy seed is unknown
+  // (PegRankedCand.spread_unknown), and nested values become -1, 0 or +1, so a
+  // nested player ranks its plays by wins plus half the draws. False (a
+  // zero-initialized PegArgs) computes exact spreads.
+  bool first_win;
+
+  // In an exhaustive solve (a single uncapped stage, PegArgs.stage_top_k =
+  // {INT_MAX}), with first-win endgames: evaluate candidates one at a time,
+  // and stop solving one, and mark it PegRankedCand.cut, once its losses and
+  // draws so far prove it cannot reach the best finished candidate's win%. It
+  // is exact because first-win verdicts are exact, so the best move and its
+  // win% are those of the uncut solve. Protected moves are never cut. Its
+  // scenarios are solved likeliest losses first (by a greedy playout), so a
+  // losing candidate is cut sooner. False (a zero-initialized PegArgs) solves
+  // every candidate in full.
+  bool early_cutoff;
+
+  // The tiles on the opponent's rack in `game` are tiles the mover knows it
+  // holds: given in the position, or returned to its rack after a
+  // challenged-off phony. Every scenario keeps them on its rack, and only the
+  // rest of the unseen tiles are dealt to the bag and to the rest of its
+  // rack. Only the root solve uses them; a nested player deals from all it
+  // cannot see. False (a zero-initialized PegArgs) deals every unseen tile,
+  // as when `game` holds the opponent's actual rack (autoplay).
+  bool opp_rack_known;
 
   // Optional: pin scenario evaluation to a single bag ordering instead of
   // enumerating all scenarios. When eval_bag_order_len > 0, each candidate is
@@ -241,6 +286,14 @@ typedef struct PegArgs {
   const MachineLetter *eval_bag_order;
   int eval_bag_order_len;
 
+  // Optional limit on the generated candidates (when n_only_moves is 0): with
+  // limit_tiles_left, only moves that leave at most max_tiles_left tiles in
+  // the bag (peg_move_bag_after) are candidates, so 0 is every move that
+  // empties the bag. A pass leaves the whole bag. False (a zero-initialized
+  // PegArgs) generates every move.
+  bool limit_tiles_left;
+  int max_tiles_left;
+
   // Optional "only solve" set: a fixed list of root candidate moves to
   // evaluate instead of generating the full move list. When n_only_moves > 0,
   // the solver skips move generation and uses exactly these moves as the
@@ -251,13 +304,14 @@ typedef struct PegArgs {
   int n_only_moves;
 
   // Optional "protect from pruning" set (like the simmer's snoprune): moves
-  // that must survive every stage's top-K cut even when their win% rank falls
-  // below it. Each stage advances its top-K unprotected moves plus every
-  // protected move, carrying them to the deepest fidelity. A protected move
-  // never takes one of the K slots, so protecting a move that already ranks in
-  // the top-K still carries K unprotected moves alongside it. Matched
-  // against the candidate set by move-similarity key. The pointed-to Move
-  // objects must outlive the solve. NULL / 0 = no protection (default).
+  // that are always candidates -- added to the set when the limit above leaves
+  // them out -- and that must survive every stage's top-K cut even when their
+  // win% rank falls below it. Each stage advances its top-K unprotected moves
+  // plus every protected move, carrying them to the deepest fidelity. A
+  // protected move never takes one of the K slots, so protecting a move that
+  // already ranks in the top-K still carries K unprotected moves alongside it.
+  // Matched against the candidate set by move-similarity key. The pointed-to
+  // Move objects must outlive the solve. NULL / 0 = no protection (default).
   const Move *const *protect_moves;
   int n_protect_moves;
 
@@ -307,8 +361,11 @@ static inline void peg_args_fill(
     const int nested_n_cand_caps, const int nested_stride,
     const int *nested_strides_by_bag, const int nested_n_strides_by_bag,
     const int nested_emptier_ply_cap, const int nested_max_depth,
-    const bool disable_best_reply_shortcuts,
+    const bool nested_score_actual, const bool nested_pessimistic,
+    const bool disable_best_reply_shortcuts, const bool first_win,
+    const bool early_cutoff, const bool opp_rack_known,
     const MachineLetter *eval_bag_order, const int eval_bag_order_len,
+    const bool limit_tiles_left, const int max_tiles_left,
     const Move *const *only_moves, const int n_only_moves,
     const Move *const *protect_moves, const int n_protect_moves,
     const bool include_per_scenario, PegOnStageStart on_stage_start,
@@ -336,9 +393,16 @@ static inline void peg_args_fill(
   peg_args->nested_n_strides_by_bag = nested_n_strides_by_bag;
   peg_args->nested_emptier_ply_cap = nested_emptier_ply_cap;
   peg_args->nested_max_depth = nested_max_depth;
+  peg_args->nested_score_actual = nested_score_actual;
+  peg_args->nested_pessimistic = nested_pessimistic;
   peg_args->disable_best_reply_shortcuts = disable_best_reply_shortcuts;
+  peg_args->first_win = first_win;
+  peg_args->early_cutoff = early_cutoff;
+  peg_args->opp_rack_known = opp_rack_known;
   peg_args->eval_bag_order = eval_bag_order;
   peg_args->eval_bag_order_len = eval_bag_order_len;
+  peg_args->limit_tiles_left = limit_tiles_left;
+  peg_args->max_tiles_left = max_tiles_left;
   peg_args->only_moves = only_moves;
   peg_args->n_only_moves = n_only_moves;
   peg_args->protect_moves = protect_moves;
@@ -365,6 +429,10 @@ typedef struct PegStageSnapshot {
   int64_t start_ns;    // monotonic ns when this stage started
   int64_t end_ns;      // monotonic ns when this stage ended; 0 = still running
   double best_win_pct; // best mover win% seen; -1.0 if none yet
+  // The candidate in progress, when one is evaluated at a time: its scenario
+  // jobs (mover draws) solved, and their total. 0/0 otherwise.
+  int scenarios_done;
+  int scenarios_total;
 } PegStageSnapshot;
 
 // ----- Solver outputs ---------------------------------------------------
@@ -382,6 +450,11 @@ typedef struct PegRankedCand {
   int n_scenarios;     // distinct (multiset, bag-ordering) scenarios evaluated
   double eval_seconds; // wall-clock time to score this cand at its deepest
                        // stage (live/CLI solves only; 0 otherwise)
+  bool spread_unknown; // scored with first-win endgames (PegArgs.first_win),
+                       // so mean_spread means nothing
+  bool cut;            // stopped by PegArgs.early_cutoff once it could not
+                       // reach the best: win_pct is the most it could have
+                       // reached, and the counts are of the orderings solved
 } PegRankedCand;
 
 typedef struct PegResult {
@@ -405,8 +478,9 @@ typedef struct PegResult {
   // elapsed time while running and the final elapsed time after completion.
   Timer timer;
 
-  // Top-K cand list from the last completed stage, sorted descending by
-  // (win_pct + 1e-4 * mean_spread). Caller owns/frees via peg_result_destroy.
+  // Top-K cand list from the last completed stage, sorted by win% (wins plus
+  // half the draws), with mean spread breaking only exact ties. Caller
+  // owns/frees via peg_result_destroy.
   // NULL on failure.
   PegRankedCand *top_cands;
   int n_top_cands;
@@ -557,6 +631,11 @@ void peg_cand_outcomes_destroy_array(PegCandOutcomes *arr, int n);
 // "empty" positional value) can match exactly the bag size peg_solve itself
 // will compute, rather than the raw (unadjusted) bag_get_letters count.
 int peg_compute_bag_size(const Game *game);
+
+// How many of a `bag_size`-tile bag's tiles `move` leaves in it: a tile
+// placement draws as many as it plays, while a pass leaves the whole bag, and
+// so does an exchange, which returns what it draws.
+int peg_move_bag_after(const Move *move, int bag_size);
 
 // True when playing `move` is guaranteed to empty a bag of `bag_size` tiles:
 // a tile placement that plays at least bag_size tiles draws the whole bag on

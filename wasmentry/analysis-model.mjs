@@ -368,9 +368,16 @@ export function analysisCommands(position, mode, settings) {
         protectedMove = `${match[1]}.${word}`;
       }
       return protectedMove;
-    }).join(",") || "-";
+    }).join(",");
+    // The candidate set comes first, then the moves to add and keep through
+    // every stage. A resumed solve repeats its own.
+    const candidates = settings.resumePeg
+      ? "resume"
+      : protectedMoves
+      ? `leaves1 ${protectedMoves}`
+      : "";
     commands.push(
-      `peg ${settings.resumePeg ? "resume " : ""}${common} -pegtlim ${solveSeconds} -pegoutcomes ${settings.capturePegOutcomes === false ? "false" : "true"} -pnoprune ${protectedMoves}`,
+      `peg ${candidates ? `${candidates} ` : ""}${common} -pegoutcomes ${settings.capturePegOutcomes === false ? "false" : "true"} -pegtlim ${solveSeconds}`,
     );
   }
   if (mode === "endgame") {

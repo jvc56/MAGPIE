@@ -633,7 +633,8 @@ static bool peg_graded_cands_are_distinct(const PegResult *result) {
 }
 
 // True if each fidelity tier of the graded ranking is in rank order: by
-// descending win% with mean spread as a tiebreak, as peg_solve ranks them.
+// descending win% with mean spread breaking only exact ties, as peg_solve
+// ranks them.
 static bool peg_graded_tiers_are_ranked(const PegResult *result) {
   for (int cand_idx = 1; cand_idx < result->n_graded; cand_idx++) {
     if (result->graded_fidelity[cand_idx] !=
@@ -642,8 +643,11 @@ static bool peg_graded_tiers_are_ranked(const PegResult *result) {
     }
     const PegRankedCand *higher = &result->graded_cands[cand_idx - 1];
     const PegRankedCand *lower = &result->graded_cands[cand_idx];
-    if (higher->win_pct + 1e-4 * higher->mean_spread <
-        lower->win_pct + 1e-4 * lower->mean_spread) {
+    if (higher->win_pct < lower->win_pct - 1e-9) {
+      return false;
+    }
+    if (higher->win_pct <= lower->win_pct + 1e-9 &&
+        higher->mean_spread < lower->mean_spread) {
       return false;
     }
   }
@@ -792,10 +796,10 @@ static void test_peg_main_cli(void) {
       "cgp 15/3Q7U3/3U2TAURINE2/1CHANSONS2W3/2AI6JO3/DIRL1PO3IN3/E1D2EF3V4/"
       "F1I2p1TRAIK3/O1L2T4E4/ABy1PIT2BRIG2/ME1MOZELLE5/1GRADE1O1NOH3/"
       "WE3R1V7/AT5E7/G6D7 ENOSTXY/ACEISUY 356/378 0 -lex NWL20");
-  // pegonly is a positional argument on the peg command itself: space-free
-  // UCGI moves, the period is the in-move separator. It is per-invocation
-  // (not persisted), so every `peg` call below repeats it.
-  load_and_exec_config_or_die(config, "peg 13L.ONYX,13L.OXY");
+  // `only` restricts the candidates to the moves in the second positional:
+  // space-free UCGI moves, the period is the in-move separator. It is
+  // per-invocation (not persisted), so every `peg` call below repeats it.
+  load_and_exec_config_or_die(config, "peg only 13L.ONYX,13L.OXY");
 
   const Game *game = config_get_game(config);
   const PegResult *result = config_get_peg_result(config);
@@ -812,7 +816,7 @@ static void test_peg_main_cli(void) {
   // to the two pegonly candidates, so this stays fast).
   load_and_exec_config_or_die(config,
                               "set -pegpess true -pegstride 1 -pegtopk 4,2");
-  load_and_exec_config_or_die(config, "peg 13L.ONYX,13L.OXY");
+  load_and_exec_config_or_die(config, "peg only 13L.ONYX,13L.OXY");
   assert(config_get_peg_result(config)->last_completed_stage >= 0);
 
   printf("[peg_cli] pegonly best=13L ONYX win=%.4f\n", onyx_win);
@@ -838,25 +842,33 @@ static void test_peg_pegonly_positional_arg(void) {
          ERROR_STATUS_CONFIG_LOAD_UNRECOGNIZED_ARG);
   error_stack_destroy(error_stack);
 
+  // A move list in the first position is not a candidate set: the old
+  // only-list syntax now fails rather than changing meaning.
+  assert_config_exec_status(config, "peg 13L.ONYX,13L.OXY",
+                            ERROR_STATUS_PEG_INVALID_CANDIDATE_SET);
+  assert_config_exec_status(config, "peg only",
+                            ERROR_STATUS_PEG_ONLY_NEEDS_MOVES);
+  assert_config_exec_status(config, "peg resume 13L.ONYX",
+                            ERROR_STATUS_PEG_RESUME_TAKES_NO_MOVES);
+
   // Restricted to the two onyx candidates: at most 2 candidates ever enter a
   // halving stage.
-  load_and_exec_config_or_die(config, "peg 13L.ONYX,13L.OXY");
+  load_and_exec_config_or_die(config, "peg only 13L.ONYX,13L.OXY");
   assert(config_get_peg_result(config)->last_completed_stage >= 0);
   assert(config_get_peg_result(config)->n_graded <= 2);
 
   // A later `peg` call with no positional argument must not inherit the
   // restriction from the previous call: with the full board's moves in play,
-  // many more than 2 candidates enter the halving stages.
-  load_and_exec_config_or_die(config, "peg");
+  // many more than 2 candidates enter the halving stages. (Timed, so the
+  // quick cascade runs rather than a complete solve.)
+  load_and_exec_config_or_die(config, "peg -pegtlim 60");
   assert(config_get_peg_result(config)->last_completed_stage >= 0);
   assert(config_get_peg_result(config)->n_graded > 2);
 
   config_destroy(config);
 }
 
-// A new game drops the previous game's PEG solve and its -pnoprune moves.
-// The moves name squares on the previous game's board: left behind, the next
-// game's peg parsed them against its own position and failed.
+// A new game drops the previous game's PEG solve.
 static void test_peg_new_game_drops_previous_peg(void) {
   Config *config = config_create_or_die("set -threads 4 -s1 score -s2 score");
   load_and_exec_config_or_die(
@@ -864,55 +876,48 @@ static void test_peg_new_game_drops_previous_peg(void) {
       "cgp 15/3Q7U3/3U2TAURINE2/1CHANSONS2W3/2AI6JO3/DIRL1PO3IN3/E1D2EF3V4/"
       "F1I2p1TRAIK3/O1L2T4E4/ABy1PIT2BRIG2/ME1MOZELLE5/1GRADE1O1NOH3/"
       "WE3R1V7/AT5E7/G6D7 ENOSTXY/ACEISUY 356/378 0 -lex NWL20");
-  load_and_exec_config_or_die(config,
-                              "peg 13L.ONYX,13L.OXY -pnoprune 13L.ONYX");
+  load_and_exec_config_or_die(config, "peg only 13L.ONYX,13L.OXY");
   assert(config_get_peg_result(config)->last_completed_stage >= 0);
 
   load_and_exec_config_or_die(config, "newgame");
   assert(config_get_peg_result(config)->last_completed_stage < 0);
   assert_config_exec_status(config, "shpeg", ERROR_STATUS_NO_PEG_TO_SHOW);
 
-  // 13L is empty on this board, so a leftover 13L.ONYX would not parse.
   load_and_exec_config_or_die(
       config,
       "cgp 7C6D/7H4LAR/7I2P1ALA/7VOGUE1AG/6RERAN2M1/7S1BY2O1/8OY2Id1/"
       "5JEUX3NEW/3C1U2O3A1E/3O1M6N1B/3ZIP2OAK1E2/2TI1sTIFLERS2/2WED5F1T2/"
       "1HIDEOUT7/VEG1N2IDOL4 AEINRST/AEINRST 372/369 0 -lex CSW24");
-  assert_config_exec_status(config, "peg pass", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "peg only pass", ERROR_STATUS_SUCCESS);
   assert(config_get_peg_result(config)->last_completed_stage >= 0);
 
   config_destroy(config);
 }
 
-// A cgp position drops the previous position's -pnoprune moves as well, but
-// keeps moves the cgp command itself sets.
-static void test_peg_cgp_drops_previous_pnoprune(void) {
+// -pnoprune was removed in favor of peg's second positional, which adds the
+// moves it lists to the candidate set and keeps them through every stage, for
+// that one solve only.
+static void test_peg_protected_moves_positional(void) {
   Config *config = config_create_or_die("set -threads 4 -s1 score -s2 score");
   load_and_exec_config_or_die(
       config,
       "cgp 15/3Q7U3/3U2TAURINE2/1CHANSONS2W3/2AI6JO3/DIRL1PO3IN3/E1D2EF3V4/"
       "F1I2p1TRAIK3/O1L2T4E4/ABy1PIT2BRIG2/ME1MOZELLE5/1GRADE1O1NOH3/"
       "WE3R1V7/AT5E7/G6D7 ENOSTXY/ACEISUY 356/378 0 -lex NWL20");
-  load_and_exec_config_or_die(config,
-                              "peg 13L.ONYX,13L.OXY -pnoprune 13L.ONYX");
+  assert_config_exec_status(config, "peg -pnoprune 13L.ONYX",
+                            ERROR_STATUS_PEG_NOPRUNE_REMOVED);
 
-  const char *one_in_bag_cgp =
-      "cgp 7C6D/7H4LAR/7I2P1ALA/7VOGUE1AG/6RERAN2M1/7S1BY2O1/8OY2Id1/"
-      "5JEUX3NEW/3C1U2O3A1E/3O1M6N1B/3ZIP2OAK1E2/2TI1sTIFLERS2/2WED5F1T2/"
-      "1HIDEOUT7/VEG1N2IDOL4 AEINRST/AEINRST 372/369 0 -lex CSW24";
-  load_and_exec_config_or_die(config, one_in_bag_cgp);
-  assert_config_exec_status(config, "peg pass", ERROR_STATUS_SUCCESS);
-
-  // Set by the cgp command itself, 13L.ONYX is kept, and does not parse on
-  // this board.
-  StringBuilder *cgp_with_noprune = string_builder_create();
-  string_builder_add_formatted_string(cgp_with_noprune, "%s -pnoprune 13L.ONYX",
-                                      one_in_bag_cgp);
-  load_and_exec_config_or_die(config, string_builder_peek(cgp_with_noprune));
-  string_builder_destroy(cgp_with_noprune);
-  assert_config_exec_status(config, "peg pass",
-                            ERROR_STATUS_MOVE_VALIDATION_INVALID_START_COORDS);
-
+  // A pass never empties the bag, so `empty` leaves it out; listed second,
+  // it is added and carried to the final stage (timed, so the cascade runs).
+  load_and_exec_config_or_die(config, "peg empty pass -pegtlim 60 -pegtopk 2");
+  const PegResult *result = config_get_peg_result(config);
+  bool pass_ranked = false;
+  for (int cand_idx = 0; cand_idx < result->n_top_cands; cand_idx++) {
+    pass_ranked =
+        pass_ranked ||
+        move_get_type(&result->top_cands[cand_idx].move) == GAME_EVENT_PASS;
+  }
+  assert(pass_ranked);
   config_destroy(config);
 }
 
@@ -977,8 +982,9 @@ static void test_peg_pegonly_empty(void) {
       "WE3R1V7/AT5E7/G6D7 ENOSTXY/ACEISUY 356/378 0 -lex NWL20");
   assert(bag_get_letters(game_get_bag(config_get_game(config))) == 1);
 
-  // Case-insensitive: mixed case still matches.
-  load_and_exec_config_or_die(config, "peg EmptY");
+  // Case-insensitive: mixed case still matches. (Timed, so the quick cascade
+  // runs rather than a complete solve.)
+  load_and_exec_config_or_die(config, "peg EmptY -pegtlim 60");
   const PegResult *result = config_get_peg_result(config);
   assert(result->last_completed_stage >= 0);
   assert(result->n_top_cands > 0);
@@ -1134,9 +1140,9 @@ static void test_peg_bag_emptying_guarantee_only_moves(void) {
   config_destroy(config);
 }
 
-// Mixing a single move that does NOT empty the bag into only_moves still
-// rejects the whole solve: the guarantee requires every candidate under
-// consideration to empty the bag, not just some of them.
+// Above PEG_MAX_BAG, every candidate must leave at most PEG_MAX_BAG tiles in
+// the bag. A 1-tile play leaves 4 of this 5-tile bag, so beside an emptier it
+// is accepted; a pass leaves all 5, so mixing one in rejects the whole solve.
 static void test_peg_bag_emptying_guarantee_rejects_short_move(void) {
   Config *config = config_create_or_die("set -threads 1 -s1 score -s2 score");
   load_and_exec_config_or_die(config, PEG_5BAG_CGP);
@@ -1161,9 +1167,18 @@ static void test_peg_bag_emptying_guarantee_rejects_short_move(void) {
   args.num_threads = 1;
   args.only_moves = only_moves;
   args.n_only_moves = 2;
+  args.greedy_seed_only = true;
 
   ErrorStack *error_stack = error_stack_create();
   PegResult result;
+  memset(&result, 0, sizeof(result));
+  peg_solve(&args, &result, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  peg_result_destroy(&result);
+
+  Move pass;
+  move_set_as_pass(&pass);
+  only_moves[1] = &pass;
   memset(&result, 0, sizeof(result));
   peg_solve(&args, &result, error_stack);
   assert(error_stack_top(error_stack) == ERROR_STATUS_PEG_BAG_OUT_OF_RANGE);
@@ -1270,7 +1285,9 @@ static void test_peg_pegonly_empty_above_max_bag_cli(void) {
   load_and_exec_config_or_die(config, PEG_5BAG_CGP);
   assert(bag_get_letters(game_get_bag(config_get_game(config))) == 12);
 
-  load_and_exec_config_or_die(config, "peg empty");
+  // Accepting the bag is the point, not a complete solve: bound it as -tlim
+  // once did.
+  load_and_exec_config_or_die(config, "peg empty -pegtlim 60");
   const PegResult *result = config_get_peg_result(config);
   assert(result->last_completed_stage >= 0);
   assert(result->n_top_cands > 0);
@@ -1280,10 +1297,10 @@ static void test_peg_pegonly_empty_above_max_bag_cli(void) {
   printf("[peg_empty_above_max_bag] n_top_cands=%d best_win=%.4f\n",
          result->n_top_cands, result->best_win);
 
-  // The same board with no pegonly restriction (full move generation) must
-  // still reject: not every generated move empties this 5-tile bag.
+  // Every move (a pass among them, which leaves the whole bag) must still
+  // reject: not every candidate leaves at most 4 of this 5-tile bag.
   ErrorStack *error_stack = error_stack_create();
-  config_load_command(config, "peg", error_stack);
+  config_load_command(config, "peg all", error_stack);
   assert(error_stack_is_empty(error_stack));
   config_execute_command(config, error_stack);
   assert(error_stack_top(error_stack) == ERROR_STATUS_PEG_BAG_OUT_OF_RANGE);
@@ -1317,6 +1334,10 @@ static void test_peg_pegonly_empty_at_rack_size_cli(void) {
   config_execute_command(config, error_stack);
   assert(error_stack_top(error_stack) == ERROR_STATUS_PEG_EMPTY_NO_MOVES);
   error_stack_destroy(error_stack);
+
+  // An exchange in the move list is rejected when the list is parsed.
+  assert_config_exec_status(config, "peg all ex.DEFNNPT",
+                            ERROR_STATUS_PEG_EXCHANGE_IN_MOVE_LIST);
 
   config_destroy(config);
 }
@@ -2140,7 +2161,7 @@ static void test_peg_opp_rack_sizes_cli(void) {
       "cgp 15/3Q7U3/3U2TAURINE2/1CHANSONS2W3/2AI6JO3/DIRL1PO3IN3/E1D2EF3V4/"
       "F1I2p1TRAIK3/O1L2T4E4/ABy1PIT2BRIG2/ME1MOZELLE5/1GRADE1O1NOH3/"
       "WE3R1V7/AT5E7/G6D7 ENOSTXY/ 356/378 0 -lex NWL20");
-  load_and_exec_config_or_die(config, "peg 13L.ONYX");
+  load_and_exec_config_or_die(config, "peg only 13L.ONYX");
   assert(config_get_peg_result(config)->last_completed_stage >= 0);
   printf("[peg_cli_opp_empty] accepted: win=%.4f\n",
          config_get_peg_result(config)->best_win);
@@ -2153,7 +2174,7 @@ static void test_peg_opp_rack_sizes_cli(void) {
       "cgp 15/3Q7U3/3U2TAURINE2/1CHANSONS2W3/2AI6JO3/DIRL1PO3IN3/E1D2EF3V4/"
       "F1I2p1TRAIK3/O1L2T4E4/ABy1PIT2BRIG2/ME1MOZELLE5/1GRADE1O1NOH3/"
       "WE3R1V7/AT5E7/G6D7 ENOSTXY/ACE 356/378 0 -lex NWL20");
-  load_and_exec_config_or_die(config, "peg 13L.ONYX");
+  load_and_exec_config_or_die(config, "peg only 13L.ONYX");
   assert(config_get_peg_result(config)->last_completed_stage >= 0);
   printf("[peg_cli_opp_partial] accepted: win=%.4f\n",
          config_get_peg_result(config)->best_win);
@@ -2289,7 +2310,7 @@ void test_peg(void) {
   test_peg_main_cli();
   test_peg_pegonly_positional_arg();
   test_peg_new_game_drops_previous_peg();
-  test_peg_cgp_drops_previous_pnoprune();
+  test_peg_protected_moves_positional();
   test_peg_bag_emptying_move_split();
   test_peg_pegonly_empty();
   test_peg_pegonly_empty_no_moves();

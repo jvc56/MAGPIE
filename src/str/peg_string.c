@@ -566,10 +566,22 @@ static void peg_append_stage_table(StringBuilder *sb,
       string_grid_set_cell(sg, row, 1, string_duplicate("greedy"));
     } else {
       string_grid_set_cell(
-          sg, row, 1, get_formatted_string("%d-ply eg", st->fidelity_plies));
+          sg, row, 1,
+          st->fidelity_plies >= PEG_EXHAUSTIVE_PLIES
+              ? string_duplicate("eg to end")
+              : get_formatted_string("%d-ply eg", st->fidelity_plies));
     }
 
-    if (is_current && st->field_size > 0) {
+    if (is_current && st->field_size > 0 && st->scenarios_total > 0) {
+      // Candidates solved one at a time: also how far the one in progress
+      // has got through its draws.
+      const double pct = 100.0 * st->cands_done / st->field_size;
+      string_grid_set_cell(sg, row, 2,
+                           get_formatted_string("%d/%d (%.0f%%), draws %d/%d",
+                                                st->cands_done, st->field_size,
+                                                pct, st->scenarios_done,
+                                                st->scenarios_total));
+    } else if (is_current && st->field_size > 0) {
       const double pct = 100.0 * st->cands_done / st->field_size;
       string_grid_set_cell(sg, row, 2,
                            get_formatted_string("%d/%d (%.0f%%)",
@@ -834,12 +846,25 @@ static void peg_append_graded_table(StringBuilder *sb, const PegResult *result,
       StringBuilder *move_sb = string_builder_create();
       string_builder_add_move(move_sb, board, &cand->move, ld, false);
       movec[n_rows] = string_builder_dump_and_destroy(move_sb, NULL);
-      winsc[n_rows] = get_formatted_string("%" PRId64, cand->win_count);
-      tiesc[n_rows] = get_formatted_string("%" PRId64, cand->tie_count);
-      lossc[n_rows] = get_formatted_string(
-          "%" PRId64, cand->weight_sum - cand->win_count - cand->tie_count);
-      winc[n_rows] = get_formatted_string("%.1f", 100.0 * cand->win_pct);
-      spreadc[n_rows] = get_formatted_string("%+.1f", cand->mean_spread);
+      // A cut candidate (PegArgs.early_cutoff) has no counts, and its win%
+      // is the most it could have reached.
+      winsc[n_rows] = cand->cut
+                          ? string_duplicate("-")
+                          : get_formatted_string("%" PRId64, cand->win_count);
+      tiesc[n_rows] = cand->cut
+                          ? string_duplicate("-")
+                          : get_formatted_string("%" PRId64, cand->tie_count);
+      lossc[n_rows] =
+          cand->cut ? string_duplicate("-")
+                    : get_formatted_string("%" PRId64, cand->weight_sum -
+                                                           cand->win_count -
+                                                           cand->tie_count);
+      winc[n_rows] = cand->cut
+                         ? get_formatted_string("<=%.1f", 100.0 * cand->win_pct)
+                         : get_formatted_string("%.1f", 100.0 * cand->win_pct);
+      spreadc[n_rows] = cand->spread_unknown
+                            ? string_duplicate("-")
+                            : get_formatted_string("%+.1f", cand->mean_spread);
       if (show_outc) {
         const PegCandOutcomes *oc = peg_find_cand_outcomes(result, &cand->move);
         outc[n_rows] =
@@ -1136,23 +1161,34 @@ static void peg_append_flat_ranking(StringBuilder *sb, const PegResult *result,
     string_grid_set_cell(sg, row, move_col, move_str);
 
     if (wins_col >= 0) {
-      string_grid_set_cell(sg, row, wins_col,
-                           get_formatted_string("%" PRId64, cand->win_count));
+      string_grid_set_cell(
+          sg, row, wins_col,
+          cand->cut ? string_duplicate("-")
+                    : get_formatted_string("%" PRId64, cand->win_count));
     }
     if (ties_col >= 0) {
-      string_grid_set_cell(sg, row, ties_col,
-                           get_formatted_string("%" PRId64, cand->tie_count));
+      string_grid_set_cell(
+          sg, row, ties_col,
+          cand->cut ? string_duplicate("-")
+                    : get_formatted_string("%" PRId64, cand->tie_count));
     }
     if (loss_col >= 0) {
       const int64_t loss_count =
           cand->weight_sum - cand->win_count - cand->tie_count;
       string_grid_set_cell(sg, row, loss_col,
-                           get_formatted_string("%" PRId64, loss_count));
+                           cand->cut
+                               ? string_duplicate("-")
+                               : get_formatted_string("%" PRId64, loss_count));
     }
-    string_grid_set_cell(sg, row, winpct_col,
-                         get_formatted_string("%.1f", 100.0 * cand->win_pct));
-    string_grid_set_cell(sg, row, spread_col,
-                         get_formatted_string("%+.1f", cand->mean_spread));
+    string_grid_set_cell(
+        sg, row, winpct_col,
+        cand->cut ? get_formatted_string("<=%.1f", 100.0 * cand->win_pct)
+                  : get_formatted_string("%.1f", 100.0 * cand->win_pct));
+    string_grid_set_cell(
+        sg, row, spread_col,
+        cand->spread_unknown
+            ? string_duplicate("-")
+            : get_formatted_string("%+.1f", cand->mean_spread));
 
     if (time_col >= 0) {
       string_grid_set_cell(sg, row, time_col,
@@ -1182,8 +1218,14 @@ static bool peg_moves_match(const Move *m1, const Move *m2) {
 
 // Return a heap-allocated depth label string. Caller frees.
 static char *peg_fidelity_label(int fidelity) {
-  return fidelity == 0 ? string_duplicate("greedy")
-                       : get_formatted_string("%d-ply", fidelity);
+  if (fidelity == 0) {
+    return string_duplicate("greedy");
+  }
+  // An exhaustive stage searches each endgame to the end of the game.
+  if (fidelity >= PEG_EXHAUSTIVE_PLIES) {
+    return string_duplicate("end");
+  }
+  return get_formatted_string("%d-ply", fidelity);
 }
 
 // Look up a candidate's eval_seconds in a specific history slot by move
@@ -1380,14 +1422,19 @@ static void peg_json_candidates(StringBuilder *sb, const PegRankedCand *rows,
       string_builder_add_string(sb, "null");
     }
     string_builder_add_string(sb, ",\"spread\":");
-    peg_json_decimal(sb, isfinite(row->mean_spread) ? row->mean_spread : 0.0,
-                     6);
+    if (row->spread_unknown) {
+      string_builder_add_string(sb, "null");
+    } else {
+      peg_json_decimal(sb, isfinite(row->mean_spread) ? row->mean_spread : 0.0,
+                       6);
+    }
     string_builder_add_formatted_string(
         sb,
         ",\"wins\":%" PRId64 ",\"ties\":%" PRId64 ",\"losses\":%" PRId64
-        ",\"depth\":%d}",
+        ",\"depth\":%d,\"cut\":%s}",
         row->win_count, row->tie_count,
-        row->weight_sum - row->win_count - row->tie_count, depth);
+        row->weight_sum - row->win_count - row->tie_count, depth,
+        row->cut ? "true" : "false");
   }
   string_builder_add_string(sb, "]");
 }
