@@ -53,6 +53,49 @@ enum {
 };
 #endif
 
+// Buckets of a simulation's best-move carry (best_move_carry.h), about 12 KB
+// each, nearly all of it lane bounds: about 12 MB natively. The browser's
+// simulations share the wasm heap with the lexica, so there the carry takes
+// about 1.5 MB; 128 buckets of 8 bounds a lane still skip more lanes than
+// 1024 buckets of 2.
+#ifdef __EMSCRIPTEN__
+enum {
+  SIM_BEST_MOVE_CARRY_BUCKETS = 128,
+};
+#else
+enum {
+  SIM_BEST_MOVE_CARRY_BUCKETS = 1024,
+};
+#endif
+
+// Entries of an endgame worker's lane shadow cache (lane_shadow_cache.h), as
+// a power of two: natively 2^16 entries of 64 bytes, 4 MiB a worker. The
+// browser's endgames share the wasm heap with the lexica and the
+// transposition table, so there it is 2^12, 256 KiB a worker.
+#ifdef __EMSCRIPTEN__
+enum {
+  ENDGAME_LANE_SHADOW_CACHE_INDEX_BITS = 12,
+};
+#else
+enum {
+  ENDGAME_LANE_SHADOW_CACHE_INDEX_BITS = 16,
+};
+#endif
+
+// Entries of the cross set cache (cross_set_cache.h) of an endgame worker, a
+// simulation worker or an autoplay game, as a power of two: natively 2^14
+// entries of 64 bytes, 1 MiB each, which answers about 99% of an endgame's or
+// a simulation's cross sets. In the browser 2^11, 128 KiB each.
+#ifdef __EMSCRIPTEN__
+enum {
+  CROSS_SET_CACHE_INDEX_BITS = 11,
+};
+#else
+enum {
+  CROSS_SET_CACHE_INDEX_BITS = 14,
+};
+#endif
+
 static inline bool search_memory_is_bounded(void) {
 #ifdef __EMSCRIPTEN__
   return true;
