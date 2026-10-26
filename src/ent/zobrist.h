@@ -151,11 +151,6 @@ inline static uint64_t zobrist_add_move(const Zobrist *z, uint64_t key,
     rack_table = z->their_rack_table;
   }
   if (move->move_type != GAME_EVENT_PASS) {
-    // create placeholder rack to keep track of what our rack would be
-    // before we made the play.
-    MachineLetter placeholder_rack[ZOBRIST_MAX_LETTERS];
-    memset(placeholder_rack, 0, ZOBRIST_MAX_LETTERS);
-
     int row = move_get_row_start(move);
     int col = move_get_col_start(move);
     bool vertical = move_get_dir(move) == BOARD_VERTICAL_DIRECTION;
@@ -173,26 +168,42 @@ inline static uint64_t zobrist_add_move(const Zobrist *z, uint64_t key,
         board_tile = get_unblanked_machine_letter(tile) + ZOBRIST_MAX_LETTERS;
       }
       key ^= z->pos_table[new_row * BOARD_DIM + new_col][board_tile];
-      // Build up placeholder rack.
-      int tile_idx = get_is_blanked(tile) ? 0 : tile;
-      placeholder_rack[tile_idx]++;
     }
-    // move_rack contains the left-over tiles
-    for (int idx = 0; idx < move_rack->dist_size; idx++) {
-      for (int j = 0; j < move_rack->array[idx]; j++) {
-        placeholder_rack[idx]++;
-      }
-    }
-    // now "play" all the tiles in the placeholder rack
+    // move_rack contains the left-over tiles. Playing the copies of a tile
+    // one at a time, from the leftover count plus the copies played down to
+    // the leftover count, XORs the rack table at every count in between
+    // twice, so only the first and last remain. Each tile is handled at its
+    // first copy in the move.
     for (int idx = 0; idx < move->tiles_length; idx++) {
       MachineLetter tile = move->tiles[idx];
       if (tile == PLAYED_THROUGH_MARKER) {
         continue;
       }
       int tile_idx = get_is_blanked(tile) ? 0 : tile;
-      key ^= rack_table[tile_idx][placeholder_rack[tile_idx]];
-      placeholder_rack[tile_idx]--;
-      key ^= rack_table[tile_idx][placeholder_rack[tile_idx]];
+      bool seen = false;
+      for (int earlier_idx = 0; earlier_idx < idx; earlier_idx++) {
+        MachineLetter earlier = move->tiles[earlier_idx];
+        if (earlier != PLAYED_THROUGH_MARKER &&
+            (get_is_blanked(earlier) ? 0 : earlier) == tile_idx) {
+          seen = true;
+          break;
+        }
+      }
+      if (seen) {
+        continue;
+      }
+      int copies = 1;
+      for (int later_idx = idx + 1; later_idx < move->tiles_length;
+           later_idx++) {
+        MachineLetter later = move->tiles[later_idx];
+        if (later != PLAYED_THROUGH_MARKER &&
+            (get_is_blanked(later) ? 0 : later) == tile_idx) {
+          copies++;
+        }
+      }
+      int leftover = move_rack->array[tile_idx];
+      key ^= rack_table[tile_idx][leftover + copies];
+      key ^= rack_table[tile_idx][leftover];
     }
   }
 

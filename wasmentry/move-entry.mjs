@@ -1,3 +1,4 @@
+import { t } from "./i18n.mjs";
 import { compareTiles } from "./tile-order.mjs";
 // Pending tiles never mutate the recorded board. Both typing and pointer input
 // use the same rack accounting and notation builder.
@@ -15,19 +16,19 @@ export function placeTile(
   rackIndex = null,
 ) {
   if (row < 0 || row >= 15 || col < 0 || col >= 15 || position.board[row][col])
-    throw new Error("Choose an empty board square.");
+    throw new Error(t("Choose an empty board square."));
   if (tiles.some((tile) => tile.row === row && tile.col === col))
-    throw new Error("There is already a pending tile on that square.");
+    throw new Error(t("There is already a pending tile on that square."));
   if (!/^[A-Za-z]$/.test(letter))
-    throw new Error("Choose a letter for the blank.");
+    throw new Error(t("Choose a letter for the blank."));
   const slots = rackSlots(position.racks[0], tiles).remaining;
   const rack = slots.map(slot => slot.letter);
   const upper = letter.toUpperCase();
   const blank = forceBlank || !rack.includes(upper);
   if (!rack.includes(blank ? "?" : upper))
-    throw new Error(`The rack has no ${blank ? "blank" : upper} tile left.`);
+    throw new Error(t`The rack has no ${blank ? "blank" : upper} tile left.`);
   const slot = slots.find(slot => slot.letter === (blank ? "?" : upper) && (rackIndex == null || slot.index === rackIndex));
-  if (!slot) throw new Error("That rack tile is no longer available.");
+  if (!slot) throw new Error(t("That rack tile is no longer available."));
   return [...tiles, { row, col, letter: blank ? upper.toLowerCase() : upper, rackIndex:slot.index }];
 }
 export function moveNotation(position, tiles, vertical = false) {
@@ -35,7 +36,7 @@ export function moveNotation(position, tiles, vertical = false) {
   if (tiles.length > 1) {
     if (tiles.every((tile) => tile.row === tiles[0].row)) vertical = false;
     else if (tiles.every((tile) => tile.col === tiles[0].col)) vertical = true;
-    else throw new Error("Place all tiles in one row or column.");
+    else throw new Error(t("Place all tiles in one row or column."));
   } else {
     const { row, col } = tiles[0];
     const across = position.board[row][col - 1] || position.board[row][col + 1];
@@ -67,7 +68,7 @@ export function moveNotation(position, tiles, vertical = false) {
       pending.get(tileKey(row, col)) || (position.board[row][col] ? "." : "");
     if (!letter) {
       if (vertical ? row <= last.row : col <= last.col)
-        throw new Error("Fill the gaps between your tiles.");
+        throw new Error(t("Fill the gaps between your tiles."));
       break;
     }
     word += letter;
@@ -86,7 +87,7 @@ export function normalizeMove(value) {
   );
   if (!play)
     throw new Error(
-      "Enter a move such as 8H TRAIN, H8 TRAIN, ex AE, or pass. Lowercase tiles are blanks.",
+      t("Enter a move such as 8H TRAIN, H8 TRAIN, ex AE, or pass. Lowercase tiles are blanks."),
     );
   return `${play[1].toUpperCase()} ${play[2]}`;
 }
@@ -121,7 +122,7 @@ export function rackSlots(rack, tiles = []) {
     if (indexes[index] != null) return;
     const token = tile.letter === tile.letter.toLowerCase() ? "?" : tile.letter;
     const slot = slots.find(slot => slot.letter === token && !reserved.has(slot.index));
-    if (!slot) throw new Error(`The rack has no ${token} tile left.`);
+    if (!slot) throw new Error(t`The rack has no ${token} tile left.`);
     indexes[index] = slot.index;
     reserved.add(slot.index);
   });
@@ -132,7 +133,7 @@ export function rackSlots(rack, tiles = []) {
 export function reorderRack(rack, tiles, sourceIndex, gap) {
   const {remaining, indexes} = rackSlots(rack, tiles);
   if (!Number.isInteger(sourceIndex) || sourceIndex < 0 || sourceIndex >= rack.length ||
-      !Number.isInteger(gap) || gap < 0 || gap > remaining.length) throw new Error("Invalid rack drop.");
+      !Number.isInteger(gap) || gap < 0 || gap > remaining.length) throw new Error(t("Invalid rack drop."));
   const order = [...rack].map((_, index) => index);
   const destination = remaining[gap]?.index ?? rack.length;
   order.splice(sourceIndex, 1);

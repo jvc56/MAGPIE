@@ -54,7 +54,7 @@ previews must be opened in their own tab to enable cross-origin isolation.
   offers Dark, Light and Browser / system themes, with the selection saved locally. **Search settings**
   opens the Analysis category directly. During a search, its controls are
   disabled while navigation and board preferences remain available.
-  **Lexicon** chooses CSW24 or NWL23 for the current position. Changing it
+  **Lexicon** chooses CSW24, NWL23 or FRA24 (French ODS 9) for the current position. Changing it
   preserves the board, racks and scores and clears previous analysis. The
   current lexicon in the game header opens this category directly.
 - Searches default to 10 seconds and at most four analysis threads. The thread
@@ -193,7 +193,14 @@ and clickable continuation previews. Played-move rank/loss is shown when the
 move is in the candidate list and spoilers are enabled. Analysis snapshots and
 clocks stay in the current page session; GCG carries moves, notes and scores.
 
-The preview supports the standard 15×15 English board, CSW24 and NWL23.
+The preview supports the standard 15×15 board with CSW24, NWL23 and FRA24 (ODS 9).
+French uses its 102-tile distribution, letter values, leave values and win-percentage table.
+Choose **Settings → Appearance → Interface language → Français** for the French
+interface. This setting is independent of the game lexicon, follows the browser
+language initially, and is saved on the device. Engine diagnostics and game
+notation remain in their original format. French games support CGP/GCG import,
+play, analysis and export; compact XS share links currently require an English
+lexicon.
 Inference, bulk engine autoplay and multilingual tile entry are not exposed.
 Analysis runs entirely on the device; recent CGPs are stored in localStorage.
 Lexicon and engine assets are downloaded from the same server when needed.
@@ -208,7 +215,7 @@ python3 /tmp/magpie-preview/serve_preview.py
 The **Test WASM Build** workflow produces a `magpie-wasm-preview` artifact on
 pull requests, including drafts. Download and extract it, then run the included
 `serve_preview.py`, or publish its contents to a static HTTPS host. It contains
-only the UI, engine and required English data, not test data or the full repo.
+only the UI, engine and required English and French data, not test data or the full repo.
 The destination directory must be empty.
 
 Prefer serving all routes with these response headers:
@@ -382,7 +389,9 @@ and GCG import never require a WMP.
 
 **Cache WMP on this device** is opt-in. The cache section lists **CSW24** and
 **NWL23** independently, showing each WMP's size in MiB and exact bytes in the
-tooltip. Cache builds and saves either lexicon without running analysis. Each
+tooltip. French uses standard move generation; WMP controls are hidden for
+FRA24 because building its word map exceeds the WASM memory budget. Cache
+builds and saves either English lexicon without running analysis. Each
 WMP is saved atomically in IndexedDB as a Blob and reused after reload. Remove
 deletes that lexicon's WMP and releases it from the engine, leaving the other
 lexicon cached. Clearing browser site data also clears these files. Browser
@@ -460,3 +469,21 @@ tiles have unknown ownership. Saved games retain the position in a MAGPIE
 `#cgp` GCG extension (other GCG readers need support for that extension).
 
 Shuffle, recall/sort, and mobile board zoom use labeled icon buttons. Recall/sort returns all unplayed tiles before sorting; Escape still recalls without sorting.
+
+### French data provenance
+
+`FRA24` is the French 2024 lexicon (ODS 9, effective January 1, 2024),
+currently listed by the [FISF](https://fisf.net/lofficiel-du-scrabble/).
+MAGPIE-DATA currently carries FRA20 (ODS 8). Until FRA24 is available there,
+`fetch_preview_data.py` fetches the FRA24 KWG and KLV2 used by
+[Woogles](https://github.com/woogles-io/liwords/tree/fd53c8d01c9a97f04b3cef76f539a5d637cff017/liwords-ui/public/wasm/2024).
+`release-build.json` pins their source revision and SHA-256 checksums. French
+letter distributions and win-percentage data come from the existing pinned
+MAGPIE-DATA revision. No generated dictionary or engine binary is checked in.
+
+To check French support after building and fetching preview data:
+
+```sh
+cd wasmentry
+npx playwright test french.test.js
+```

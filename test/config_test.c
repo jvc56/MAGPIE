@@ -7,6 +7,8 @@
 #include "../src/def/players_data_defs.h"
 #include "../src/def/rack_defs.h"
 #include "../src/ent/bag.h"
+#include "../src/ent/board.h"
+#include "../src/ent/endgame_results.h"
 #include "../src/ent/equity.h"
 #include "../src/ent/game.h"
 #include "../src/ent/game_history.h"
@@ -25,6 +27,7 @@
 #include "../src/util/io_util.h"
 #include "../src/util/string_util.h"
 #include "test_constants.h"
+#include "test_platform.h"
 #include "test_util.h"
 #include <assert.h>
 #include <inttypes.h>
@@ -1978,14 +1981,19 @@ void test_config_anno(void) {
   assert(player_get_score(game_get_player(game, 1)) == int_to_equity(362));
   assert_config_exec_status(config, "endgame", ERROR_STATUS_SUCCESS);
 
+  // The inference above was for the game before this load.
   assert_config_exec_status(config, "shmoves", ERROR_STATUS_NO_MOVES_TO_SHOW);
-  assert_config_exec_status(config, "shinfer", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "shinfer",
+                            ERROR_STATUS_NO_INFERENCE_TO_SHOW);
   assert_config_exec_status(config, "shendgame", ERROR_STATUS_SUCCESS);
 
+  // A new game drops the previous game's inference and endgame.
   assert_config_exec_status(config, "newgame", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "shmoves", ERROR_STATUS_NO_MOVES_TO_SHOW);
-  assert_config_exec_status(config, "shinfer", ERROR_STATUS_SUCCESS);
-  assert_config_exec_status(config, "shendgame", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "shinfer",
+                            ERROR_STATUS_NO_INFERENCE_TO_SHOW);
+  assert_config_exec_status(config, "shendgame",
+                            ERROR_STATUS_NO_ENDGAME_TO_SHOW);
 
   assert_config_exec_status(config, "rack ABCDEFG", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "gen", ERROR_STATUS_SUCCESS);
@@ -2934,6 +2942,286 @@ void test_config_sim_results_saved_to_game_event(void) {
   config_destroy(config);
 }
 
+// A new game starts with no analysis. Left valid, the previous game's simmed
+// plays were committed by index onto the empty board (where the replay
+// rejected them as not connected to any tile), replayed by heatmap against
+// the new game's empty racks, and saved onto the new game's first turn.
+void test_config_new_game_drops_previous_analysis(void) {
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -wmp true -s1 equity -s2 equity -r1 all -r2 all "
+      "-numplays 5 -mode sync -useheatmap true -plies 2");
+  assert_config_exec_status(config, "newgame", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "t BARCHAN", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "rack DEGILNO", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "gen", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "sim -iterations 100",
+                            ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "infer", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "heat 1", ERROR_STATUS_SUCCESS);
+
+  assert_config_exec_status(config, "newgame", ERROR_STATUS_SUCCESS);
+  assert(!sim_results_get_valid_for_current_game_state(
+      config_get_sim_results(config)));
+  assert(move_list_get_count(config_get_move_list(config)) == 0);
+  assert_config_exec_status(config, "shmoves", ERROR_STATUS_NO_MOVES_TO_SHOW);
+  assert_config_exec_status(config, "heat 1", ERROR_STATUS_NO_HEAT_MAP_TO_SHOW);
+  assert_config_exec_status(config, "com 1",
+                            ERROR_STATUS_COMMIT_MOVE_INDEX_OUT_OF_RANGE);
+  assert_config_exec_status(config, "t", ERROR_STATUS_COMMIT_EMPTY_RACK);
+  assert_config_exec_status(config, "shinfer",
+                            ERROR_STATUS_NO_INFERENCE_TO_SHOW);
+
+  // The new game's first turn keeps only what was analysed for it.
+  assert_config_exec_status(config, "t BARCHAN", ERROR_STATUS_SUCCESS);
+  const GameEvent *first_event =
+      game_history_get_event(config_get_game_history(config), 0);
+  assert(!game_event_get_sim_results(first_event));
+  assert(!game_event_get_inference_results(first_event));
+  assert(!game_event_get_endgame_results(first_event));
+
+  config_destroy(config);
+}
+
+// A cgp position starts a new game history. Commits used to replay the
+// previous game's events, or an empty board, and reject the move as not
+// connected; the previous game's endgame results stayed valid, pointing at the
+// lexicon the cgp's -lex freed.
+void test_config_cgp_starts_new_history(void) {
+  Config *config = config_create_or_die("set -s1 score -s2 score -threads 2");
+  assert_config_exec_status(config, "load testdata/gcgs/success_standard.gcg",
+                            ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "goto end", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "prev", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "prev", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "prev", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "endgame", ERROR_STATUS_SUCCESS);
+
+  assert_config_exec_status(
+      config,
+      "cgp 7C6D/7H4LAR/7I2P1ALA/7VOGUE1AG/6RERAN2M1/7S1BY2O1/8OY2Id1/"
+      "5JEUX3NEW/3C1U2O3A1E/3O1M6N1B/3ZIP2OAK1E2/2TI1sTIFLERS2/2WED5F1T2/"
+      "1HIDEOUT7/VEG1N2IDOL4 AEINRST/AEINRST 372/369 0 -lex CSW24",
+      ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "shendgame",
+                            ERROR_STATUS_NO_ENDGAME_TO_SHOW);
+  const GameHistory *game_history = config_get_game_history(config);
+  assert(game_history_get_num_events(game_history) == 0);
+  assert(game_history_get_initial_cgp(game_history));
+
+  const Game *game = config_get_game(config);
+  const int tiles_before = board_get_tiles_played(game_get_board(game));
+  assert_config_exec_status(config, "t", ERROR_STATUS_SUCCESS);
+  assert(game_history_get_num_events(game_history) == 1);
+  assert(board_get_tiles_played(game_get_board(game)) > tiles_before);
+  assert(player_get_score(game_get_player(game, 0)) > int_to_equity(372));
+
+  assert_config_exec_status(config, "prev", ERROR_STATUS_SUCCESS);
+  assert(board_get_tiles_played(game_get_board(game)) == tiles_before);
+  assert(player_get_score(game_get_player(game, 0)) == int_to_equity(372));
+  assert(player_get_score(game_get_player(game, 1)) == int_to_equity(369));
+
+  config_destroy(config);
+}
+
+static void assert_game_borrows_current_kwgs(const Config *config,
+                                             const Game *game) {
+  const PlayersData *players_data = config_get_players_data(config);
+  for (int player_idx = 0; player_idx < 2; player_idx++) {
+    assert(player_get_kwg(game_get_player(game, player_idx)) ==
+           players_data_get_kwg(players_data, player_idx));
+  }
+}
+
+// Switching lexicon frees the one the live game and each endgame result's
+// start game borrow. Both are rebuilt against the new lexicon: heatmap and
+// shendgame used to replay moves through the freed one.
+void test_config_lexicon_change_rebuilds_games(void) {
+  Config *config = config_create_or_die(
+      "set -s1 score -s2 score -threads 2 -useheatmap true -plies 2");
+  assert_config_exec_status(config, "load testdata/gcgs/success_standard.gcg",
+                            ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "goto end", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "prev", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "prev", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "prev", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "endgame", ERROR_STATUS_SUCCESS);
+  // Committing saves the endgame results onto the turn.
+  assert_config_exec_status(config, "t", ERROR_STATUS_SUCCESS);
+  const GameHistory *game_history = config_get_game_history(config);
+  const EndgameResults *saved_endgame_results =
+      game_event_get_endgame_results(game_history_get_event(
+          game_history, game_history_get_num_played_events(game_history) - 1));
+  assert(saved_endgame_results);
+  assert_config_exec_status(config, "goto 6", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "gsim -iterations 100",
+                            ERROR_STATUS_SUCCESS);
+
+  assert_config_exec_status(config, "set -lex NWL20", ERROR_STATUS_SUCCESS);
+  assert_game_borrows_current_kwgs(config, config_get_game(config));
+  assert_game_borrows_current_kwgs(
+      config,
+      endgame_results_get_start_game(config_get_endgame_results(config)));
+  assert_game_borrows_current_kwgs(
+      config, endgame_results_get_start_game(saved_endgame_results));
+  assert_config_exec_status(config, "heat 1", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "shendgame", ERROR_STATUS_SUCCESS);
+
+  config_destroy(config);
+}
+
+static int config_endgame_value(Config *config) {
+  assert_config_exec_status(config, "endgame", ERROR_STATUS_SUCCESS);
+  return endgame_results_get_value(config_get_endgame_results(config),
+                                   ENDGAME_RESULT_BEST);
+}
+
+// The endgame TT keeps a solve's values for the next solve, under keys that
+// hash only the board, the racks and the player on turn. After set -lex, an
+// NWL23 solve of this position read back CSW21's values and returned 51, where
+// NWL23's value is 43. Every word on this board is valid in both lexica.
+void test_config_lexicon_change_clears_endgame_tt(void) {
+  Config *config = config_create_or_die("set -lex CSW21 -eplies 2 -threads 1");
+  assert_config_exec_status(
+      config,
+      "cgp "
+      "PISOLITH7/E14/r13E/I1MEW2F3H2C/ATENOLOL2NY2Z/G6A2AR1BE/U6VERBATIM/"
+      "A4UPO2EX1NA/6OR7/5WO8/4IRKSOmE1T2/5I1QUINOA2/5N1U4Y2/5G1A7/"
+      "GRICES1DELISTED ADDEJRT/FNV 536/474 0",
+      ERROR_STATUS_SUCCESS);
+  assert(config_endgame_value(config) == 47);
+  assert_config_exec_status(config, "set -lex NWL23", ERROR_STATUS_SUCCESS);
+  assert(config_endgame_value(config) == 43);
+  assert_config_exec_status(config, "set -lex CSW21", ERROR_STATUS_SUCCESS);
+  assert(config_endgame_value(config) == 47);
+  config_destroy(config);
+}
+
+// The bingo bonus is part of a play's score, and the endgame TT's keys don't
+// hash it. The player on turn here has only J and must pass, so the opponent's
+// bingo, O8 FEELING(S), comes one move below the root, inside the entries a
+// solve stores. After a solve with no bingo bonus, a solve with a bonus of 50
+// read those entries back and returned -82, where its value is -105.
+void test_config_bingo_bonus_change_clears_endgame_tt(void) {
+  Config *config =
+      config_create_or_die("set -lex NWL23 -eplies 2 -threads 1 -bb 0");
+  assert_config_exec_status(
+      config,
+      "cgp "
+      "2GRANTED5L/1XI5ABBOTCY/6FEG2WO1A/6EUOUAE2M/7O2D4/6OI2V1I2/1AN2MO3O1N2/"
+      "CH1QUIRT1DuDS2/HIOI2I3T1T2/3NAPE3R1A2/4UR4Y1R2/3WAI1Z7/4SLEEVEEn3/"
+      "5L1P7/7STARKENS J/EEFGILN 498/389 0",
+      ERROR_STATUS_SUCCESS);
+  assert(config_endgame_value(config) == -82);
+  assert_config_exec_status(config, "set -bb 50", ERROR_STATUS_SUCCESS);
+  assert(config_endgame_value(config) == -105);
+  assert_config_exec_status(config, "set -bb 0", ERROR_STATUS_SUCCESS);
+  assert(config_endgame_value(config) == -82);
+  config_destroy(config);
+}
+
+static char *write_test_gcg(const char *directory, const char *name,
+                            const char *contents) {
+  char *path = get_formatted_string("%s/%s", directory, name);
+  ErrorStack *error_stack = error_stack_create();
+  write_string_to_file(path, "w", contents, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  error_stack_destroy(error_stack);
+  return path;
+}
+
+static void exec_with_path(Config *config, const char *command,
+                           const char *path, error_code_t expected_status) {
+  char *full_command = get_formatted_string("%s %s", command, path);
+  assert_config_exec_status(config, full_command, expected_status);
+  free(full_command);
+}
+
+// After a failed load, the game from before it is back, along with the
+// lexical data it and its saved endgame results borrow.
+static void assert_restored_standard_game(const Config *config,
+                                          int num_events) {
+  const PlayersData *players_data = config_get_players_data(config);
+  for (int player_idx = 0; player_idx < 2; player_idx++) {
+    assert(strings_equal(players_data_get_data_name(
+                             players_data, PLAYERS_DATA_TYPE_KWG, player_idx),
+                         "CSW21"));
+  }
+  assert(strings_equal(ld_get_name(config_get_ld(config)), "english"));
+  const GameHistory *game_history = config_get_game_history(config);
+  assert(game_history_get_num_events(game_history) == num_events);
+  assert_game_borrows_current_kwgs(config, config_get_game(config));
+  const EndgameResults *saved_endgame_results = game_event_get_endgame_results(
+      game_history_get_event(game_history, num_events - 1));
+  assert_game_borrows_current_kwgs(
+      config, endgame_results_get_start_game(saved_endgame_results));
+}
+
+// A GCG that names another lexicon or distribution loads it before its moves.
+// A failed load then restored the previous game and history still borrowing
+// the data the load had freed, and a load that changed the distribution kept
+// using a game whose bag was sized for the previous one.
+void test_config_load_replacing_lexical_data(void) {
+  char *directory =
+      test_platform_make_temporary_directory("magpie_load_lexical_data");
+  // Scored one point too high: fails once NWL20 is loaded.
+  char *nwl20_path =
+      write_test_gcg(directory, "nwl20.gcg",
+                     "#lexicon NWL20\n#player1 a a\n#player2 b b\n"
+                     ">a: AAENRSZ 8G ZA +22 22\n"
+                     ">b: ?CDEIRW 9E CRoWDIE +80 80\n");
+  // Misses the center square: fails once the French distribution is loaded.
+  char *bad_french_path =
+      write_test_gcg(directory, "bad_french.gcg",
+                     "#lexicon FRA20\n#tile-distribution french\n#player1 a a\n"
+                     "#player2 b b\n>a: ABCDEFG 8D BAC +99 99\n");
+  char *french_path = get_formatted_string("%s/french.gcg", directory);
+  Config *french_config =
+      config_create_or_die("set -lex FRA20 -s1 score -s2 score");
+  assert_config_exec_status(french_config, "newgame", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(french_config, "t ABCDEFG", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(french_config, "t EEIRSTU", ERROR_STATUS_SUCCESS);
+  exec_with_path(french_config, "ex", french_path, ERROR_STATUS_SUCCESS);
+  config_destroy(french_config);
+
+  Config *config = config_create_or_die("set -s1 score -s2 score -threads 2");
+  assert_config_exec_status(config, "load testdata/gcgs/success_standard.gcg",
+                            ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "goto end", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "prev", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "prev", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "prev", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "endgame", ERROR_STATUS_SUCCESS);
+  // Committing saves the endgame results onto the turn.
+  assert_config_exec_status(config, "t", ERROR_STATUS_SUCCESS);
+  const int num_events =
+      game_history_get_num_events(config_get_game_history(config));
+
+  exec_with_path(config, "load", nwl20_path,
+                 ERROR_STATUS_GCG_PARSE_MOVE_SCORING_ERROR);
+  assert_restored_standard_game(config, num_events);
+  assert_config_exec_status(config, "prev", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "shendgame", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "next", ERROR_STATUS_SUCCESS);
+
+  exec_with_path(config, "load", bad_french_path,
+                 ERROR_STATUS_GCG_PARSE_MOVE_VALIDATION_ERROR);
+  assert_restored_standard_game(config, num_events);
+  assert_config_exec_status(config, "prev", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "shendgame", ERROR_STATUS_SUCCESS);
+
+  exec_with_path(config, "load", french_path, ERROR_STATUS_SUCCESS);
+  assert(strings_equal(ld_get_name(config_get_ld(config)), "french"));
+  assert(game_history_get_num_events(config_get_game_history(config)) == 2);
+  assert_config_exec_status(config, "shgame", ERROR_STATUS_SUCCESS);
+
+  config_destroy(config);
+  free(french_path);
+  free(bad_french_path);
+  free(nwl20_path);
+  test_platform_remove_directory_tree(directory);
+  free(directory);
+}
+
 // The whole point of saving results per GameEvent rather than in a
 // single "last turn" slot: navigating game history backward/forward
 // shows the analysis that was actually done for whichever turn is about
@@ -3124,6 +3412,12 @@ void test_config(void) {
   test_config_move_list_saved_to_game_event();
   test_config_commit_by_index_uses_saved_move_list();
   test_config_sim_results_saved_to_game_event();
+  test_config_new_game_drops_previous_analysis();
+  test_config_cgp_starts_new_history();
+  test_config_lexicon_change_rebuilds_games();
+  test_config_lexicon_change_clears_endgame_tt();
+  test_config_bingo_bonus_change_clears_endgame_tt();
+  test_config_load_replacing_lexical_data();
   test_config_game_event_results_follow_navigation();
   test_config_sim_with_inference_results_saved_to_game_event();
 }
