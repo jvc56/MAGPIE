@@ -598,7 +598,6 @@ void test_board_get_playable_tiles_bv(void) {
         .override_kwg = NULL,
         .eq_margin_movegen = 0,
         .target_equity = EQUITY_MAX_VALUE,
-        .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
         .tiles_played_bv = &tiles_bv,
     };
     generate_moves(&args);

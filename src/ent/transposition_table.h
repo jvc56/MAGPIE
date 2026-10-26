@@ -1,6 +1,8 @@
 #ifndef TRANSPOSITION_TABLE_H
 #define TRANSPOSITION_TABLE_H
 
+#include "../compat/cpthread.h"
+#include "../compat/cpthread_defs.h"
 #include "../compat/ctime.h"
 #include "../compat/malloc.h"
 #include "../compat/memory_info.h"
@@ -8,6 +10,7 @@
 #include <assert.h>
 #include <stdatomic.h>
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <string.h>
 
@@ -42,6 +45,10 @@ enum {
   NPROC_SIZE_POWER = 18, // 2^18 = 256K entries
   NPROC_SIZE = (1 << NPROC_SIZE_POWER),
   NPROC_MASK = (NPROC_SIZE - 1),
+  // A table is zeroed in slices of at least this many bytes, one per thread.
+  // Page-faulting gigabytes in on one thread stalls its creator for a
+  // noticeable fraction of a second; small tables zero on the caller alone.
+  TT_ZERO_MIN_SLICE_BYTES = 64 * 1024 * 1024,
 };
 
 typedef struct TTEntry {
@@ -90,9 +97,55 @@ typedef struct TranspositionTable {
   atomic_int t2_collisions;
 } TranspositionTable;
 
-static inline TranspositionTable *
-transposition_table_create_with_minimum(double fraction_of_memory,
-                                        int minimum_size_power) {
+typedef struct TTZeroSlice {
+  unsigned char *start;
+  size_t bytes;
+} TTZeroSlice;
+
+static inline void *tt_zero_slice(void *arg) {
+  const TTZeroSlice *slice = arg;
+  memset(slice->start, 0, slice->bytes);
+  return NULL;
+}
+
+// Zero `bytes` at `table` on up to num_threads threads (the caller is one).
+static inline void tt_zero_table(void *table, size_t bytes, int num_threads) {
+  size_t num_slices = bytes / TT_ZERO_MIN_SLICE_BYTES;
+  if (num_threads < 1) {
+    num_threads = 1;
+  }
+  if (num_slices > (size_t)num_threads) {
+    num_slices = (size_t)num_threads;
+  }
+  if (num_slices <= 1) {
+    memset(table, 0, bytes);
+    return;
+  }
+  TTZeroSlice *slices = malloc_or_die(num_slices * sizeof(TTZeroSlice));
+  cpthread_t *threads = malloc_or_die(num_slices * sizeof(cpthread_t));
+  const size_t slice_bytes = bytes / num_slices;
+  for (size_t slice_idx = 0; slice_idx < num_slices; slice_idx++) {
+    slices[slice_idx].start =
+        (unsigned char *)table + (slice_idx * slice_bytes);
+    slices[slice_idx].bytes = slice_idx + 1 == num_slices
+                                  ? bytes - (slice_idx * slice_bytes)
+                                  : slice_bytes;
+  }
+  for (size_t slice_idx = 1; slice_idx < num_slices; slice_idx++) {
+    cpthread_create(&threads[slice_idx], tt_zero_slice, &slices[slice_idx]);
+  }
+  tt_zero_slice(&slices[0]);
+  for (size_t slice_idx = 1; slice_idx < num_slices; slice_idx++) {
+    cpthread_join(threads[slice_idx]);
+  }
+  free(threads);
+  free(slices);
+}
+
+// Like transposition_table_create_with_minimum, but zeroes a large table on up
+// to zero_threads threads.
+static inline TranspositionTable *transposition_table_create_with_threads(
+    double fraction_of_memory, int minimum_size_power, int zero_threads) {
   TranspositionTable *tt = malloc_or_die(sizeof(TranspositionTable));
 
   uint64_t total_memory = get_search_memory_budget_base();
@@ -128,7 +181,7 @@ transposition_table_create_with_minimum(double fraction_of_memory,
     log_fatal("failed to allocate transposition table");
   }
   tt->table = (_Atomic uint64_t *)table_memory;
-  memset(tt->table, 0, sizeof(uint64_t) * 2 * num_elems);
+  tt_zero_table(table_memory, sizeof(uint64_t) * 2 * num_elems, zero_threads);
   // ABDADA: allocate smaller nproc table for tracking concurrent searches
   // Using a smaller table (256K vs millions) improves cache locality
   tt->nproc = (atomic_uchar *)malloc_or_die(sizeof(atomic_uchar) * NPROC_SIZE);
@@ -141,6 +194,13 @@ transposition_table_create_with_minimum(double fraction_of_memory,
   atomic_init(&tt->lookups, 0);
   atomic_init(&tt->t2_collisions, 0);
   return tt;
+}
+
+static inline TranspositionTable *
+transposition_table_create_with_minimum(double fraction_of_memory,
+                                        int minimum_size_power) {
+  return transposition_table_create_with_threads(fraction_of_memory,
+                                                 minimum_size_power, 1);
 }
 
 static inline TranspositionTable *

@@ -29,6 +29,7 @@
 #include "test_util.h"
 #include <assert.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -1200,6 +1201,201 @@ void test_infer_nonerror_cases(const int number_of_threads,
   config_destroy(config);
 }
 
+// Infers an exchange of num_exch tiles by the player on turn, who is the
+// target, from a rack the observer knows in full, so that exactly one rack is
+// evaluated. Returns whether the inference accepted that rack.
+static bool infer_known_rack_exchange(const Config *config,
+                                      const char *rack_str, int num_exch,
+                                      bool use_cutoff,
+                                      InferenceResults *inference_results) {
+  const LetterDistribution *ld = config_get_ld(config);
+  const int ld_size = ld_get_size(ld);
+  Rack target_played_tiles;
+  rack_set_dist_size_and_reset(&target_played_tiles, ld_size);
+  Rack target_known_rack;
+  rack_set_dist_size_and_reset(&target_known_rack, ld_size);
+  rack_set_to_string(ld, &target_known_rack, rack_str);
+  Rack nontarget_known_rack;
+  rack_set_dist_size_and_reset(&nontarget_known_rack, ld_size);
+  ErrorStack *error_stack = error_stack_create();
+  thread_control_set_status(config_get_thread_control(config),
+                            THREAD_CONTROL_STATUS_STARTED);
+  config_infer(
+      config, false, game_get_player_on_turn_index(config_get_game(config)), 0,
+      num_exch, &target_played_tiles, &target_known_rack, &nontarget_known_rack,
+      use_cutoff, inference_results, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  error_stack_destroy(error_stack);
+  return stat_get_num_samples(inference_results_get_equity_values(
+             inference_results, INFERENCE_TYPE_RACK)) > 0;
+}
+
+static void assert_known_rack_exchange_accepted(const Config *config,
+                                                const char *rack_str,
+                                                int num_exch, bool expected) {
+  InferenceResults *inference_results = inference_results_create(NULL);
+  for (int cutoff_idx = 0; cutoff_idx < 2; cutoff_idx++) {
+    const bool use_cutoff = cutoff_idx == 1;
+    const bool accepted = infer_known_rack_exchange(
+        config, rack_str, num_exch, use_cutoff, inference_results);
+    if (accepted != expected) {
+      printf("exchange of %d from %s: expected %s, got %s (cutoff %s)\n",
+             num_exch, rack_str, expected ? "accepted" : "rejected",
+             accepted ? "accepted" : "rejected", use_cutoff ? "on" : "off");
+      assert(0);
+    }
+  }
+  inference_results_destroy(inference_results);
+}
+
+// An exchange of N tiles is consistent with a rack when no move beats the
+// rack's best exchange of N tiles by more than the inference margin, the
+// same test a tile placement's equity gets. The equities below are from the
+// test CSW21 leaves on an empty board, with the best exchange of 5 keeping
+// the blanks (37.559 points).
+void test_infer_exchange_margin(void) {
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -wmp true -s1 equity -s2 equity -r1 all -r2 all "
+      "-numplays 1 -threads 1 -ima 5");
+  load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
+
+  // The exchange is itself the best move.
+  assert_known_rack_exchange_accepted(config, "BBJVW??", 5, true);
+  // A play (41.429) beats the exchange by 3.870, inside the margin.
+  assert_known_rack_exchange_accepted(config, "BFNTT??", 5, true);
+  // A play (43.753) beats the exchange by 6.194, outside the margin.
+  assert_known_rack_exchange_accepted(config, "GNRRR??", 5, false);
+  // An exchange of another size (37.753) and a play (39.397) both beat the
+  // exchange of 5, the play by 1.838: exchanges of other sizes are ordinary
+  // moves, so this is inside the margin.
+  assert_known_rack_exchange_accepted(config, "BLNRV??", 5, true);
+
+  load_and_exec_config_or_die(config, "set -ima 3");
+  assert_known_rack_exchange_accepted(config, "BFNTT??", 5, false);
+  assert_known_rack_exchange_accepted(config, "BLNRV??", 5, true);
+
+  load_and_exec_config_or_die(config, "set -ima 0");
+  assert_known_rack_exchange_accepted(config, "BBJVW??", 5, true);
+  assert_known_rack_exchange_accepted(config, "BLNRV??", 5, false);
+
+  // An accepted rack records the leave and exchanged tiles of its best
+  // exchange of 5, even though a play is its best move.
+  load_and_exec_config_or_die(config, "set -ima 5");
+  const LetterDistribution *ld = config_get_ld(config);
+  InferenceResults *inference_results = inference_results_create(NULL);
+  assert(
+      infer_known_rack_exchange(config, "BFNTT??", 5, true, inference_results));
+  assert(inference_results_get_subtotal(inference_results, INFERENCE_TYPE_LEAVE,
+                                        BLANK_MACHINE_LETTER, 2,
+                                        INFERENCE_SUBTOTAL_LEAVE) == 1);
+  assert(inference_results_get_subtotal(
+             inference_results, INFERENCE_TYPE_EXCHANGED, ld_hl_to_ml(ld, "T"),
+             2, INFERENCE_SUBTOTAL_LEAVE) == 1);
+  assert(inference_results_get_subtotal(
+             inference_results, INFERENCE_TYPE_EXCHANGED, ld_hl_to_ml(ld, "B"),
+             1, INFERENCE_SUBTOTAL_LEAVE) == 1);
+  inference_results_destroy(inference_results);
+  config_destroy(config);
+}
+
+// Runs the same inference with and without the cutoff optimization, asserts
+// that they record the same racks, and returns how many racks were accepted.
+static uint64_t
+assert_infer_cutoff_matches(const Config *config, bool use_game_history,
+                            int num_exch, const char *target_known_rack_str,
+                            const char *nontarget_known_rack_str) {
+  const LetterDistribution *ld = config_get_ld(config);
+  const int ld_size = ld_get_size(ld);
+  InferenceResults *results[2] = {inference_results_create(NULL),
+                                  inference_results_create(NULL)};
+  for (int cutoff_idx = 0; cutoff_idx < 2; cutoff_idx++) {
+    Rack target_played_tiles;
+    rack_set_dist_size_and_reset(&target_played_tiles, ld_size);
+    Rack target_known_rack;
+    rack_set_dist_size_and_reset(&target_known_rack, ld_size);
+    rack_set_to_string(ld, &target_known_rack, target_known_rack_str);
+    Rack nontarget_known_rack;
+    rack_set_dist_size_and_reset(&nontarget_known_rack, ld_size);
+    rack_set_to_string(ld, &nontarget_known_rack, nontarget_known_rack_str);
+    ErrorStack *error_stack = error_stack_create();
+    thread_control_set_status(config_get_thread_control(config),
+                              THREAD_CONTROL_STATUS_STARTED);
+    config_infer(config, use_game_history,
+                 game_get_player_on_turn_index(config_get_game(config)), 0,
+                 num_exch, &target_played_tiles, &target_known_rack,
+                 &nontarget_known_rack, cutoff_idx == 1, results[cutoff_idx],
+                 error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      error_stack_print_and_reset(error_stack);
+      assert(0);
+    }
+    error_stack_destroy(error_stack);
+  }
+  assert_inference_results_equal(results[0], results[1], ld_size);
+  const uint64_t num_accepted = stat_get_num_unique_samples(
+      inference_results_get_equity_values(results[0], INFERENCE_TYPE_RACK));
+  inference_results_destroy(results[0]);
+  inference_results_destroy(results[1]);
+  return num_accepted;
+}
+
+// The cutoff optimization only changes how fast inference finds out whether
+// a move beats the target's by more than the margin, never the answer: for
+// every exchange size, with and without a margin, from explicit arguments
+// and from the game history.
+void test_infer_exchange_cutoff_matches(void) {
+  // The player on turn has ILOOPQR and 14 tiles are unseen to them, the
+  // fewest that still allow inferring an exchange.
+  const char *cgp_14_unseen =
+      "cgp 2CHIGOE3T3/3O6NAE2/3M6END2/2AY6UG1G1/2B7MO1L1/1VODKA5i1OD/"
+      "2R2TANNERS1RE/OUTA2ZA3T1IF/2I1CRoWDIE2A1/2V6FEEBS1/1NEWISHLY1LEA2/"
+      "JA13/15/15/15 ILOOPQR/EEINTTX 0/0 0 -lex CSW21;";
+  const char *margins[] = {"5", "0", NULL};
+  uint64_t num_accepted = 0;
+  for (int margin_idx = 0; margins[margin_idx]; margin_idx++) {
+    char *settings = get_formatted_string(
+        "set -lex CSW21 -wmp true -s1 equity -s2 equity -r1 all -r2 all "
+        "-numplays 1 -threads 2 -ima %s",
+        margins[margin_idx]);
+    for (int num_exch = 1; num_exch <= RACK_SIZE; num_exch++) {
+      // A new config for each exchange starts a new game history.
+      Config *config = config_create_or_die(settings);
+      load_and_exec_config_or_die(config, cgp_14_unseen);
+      num_accepted +=
+          assert_infer_cutoff_matches(config, false, num_exch, "", "EEINTTX");
+      // On an empty board, with four of the target's tiles known so that
+      // only three are enumerated: a good leave and a bad one.
+      load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
+      num_accepted +=
+          assert_infer_cutoff_matches(config, false, num_exch, "EIRS", "");
+      num_accepted +=
+          assert_infer_cutoff_matches(config, false, num_exch, "UVVW", "");
+      // The same, inferred from the game history.
+      load_and_exec_config_or_die(config, "r EUVVWIR");
+      char *exchange_cmd =
+          get_formatted_string("com ex %.*s", num_exch, "UVVWIRE");
+      load_and_exec_config_or_die(config, exchange_cmd);
+      free(exchange_cmd);
+      num_accepted += assert_infer_cutoff_matches(config, true, 0, "EIRS", "");
+      num_accepted += assert_infer_cutoff_matches(config, true, 0, "UVVW", "");
+      config_destroy(config);
+    }
+    // A whole game's history ending in an exchange of 6.
+    Config *config = config_create_or_die(settings);
+    free(settings);
+    load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
+    assert(test_parse_gcg("exchange_with_seven_in_bag", config,
+                          config_get_game_history(config)) ==
+           ERROR_STATUS_SUCCESS);
+    game_play_to_end_or_die(config_get_game_history(config),
+                            config_get_game(config));
+    num_accepted += assert_infer_cutoff_matches(config, true, 0, "", "");
+    config_destroy(config);
+  }
+  // The comparisons above mean something only if racks were accepted.
+  assert(num_accepted > 0);
+}
+
 // Asserts that two inferences of the same position counted the same leaves.
 // The leave list's ties on draws and the low bits of the means may come out
 // in a different order with more than one thread, so those are compared by
@@ -1338,6 +1534,8 @@ void test_infer(void) {
   test_infer_exchange_not_board_is_letter_allowed_in_cross_set();
   test_infer_tiles_played_not_in_bag();
   test_infer_empty_game_history();
+  test_infer_exchange_margin();
+  test_infer_exchange_cutoff_matches();
   for (int i = 0; i < 2; i++) {
     const bool use_game_history = i == 1;
     test_infer_nonerror_cases(1, use_game_history);
