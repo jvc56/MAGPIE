@@ -172,7 +172,7 @@ typedef struct PegArgs {
 
   // Scenario stride: weight-stratified sampling. 1 = full enumeration.
   // k > 1 = sample one multiset per k weight-units, scaled accordingly.
-  // 0 = use the bag-size default (the solver picks a sane stride per bag size).
+  // 0 (the CLI default) = full enumeration, the same as 1.
   int scenario_stride;
 
   // Nested pre-endgame lookahead for NON-EMPTIER leaves. When nested_enabled,

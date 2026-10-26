@@ -391,6 +391,20 @@ The API is command-oriented: callers create an opaque `Magpie` handle, pass it t
 
 See `examples/generate_moves.c` for a minimal C client (build it with `make examples`) and `examples/magpie.py` for a Python ctypes wrapper with an interactive REPL.
 
+### Defaults
+
+Word maps (WMP), rack info tables (RIT) and word info tables (WIT) only make move generation faster; none of them changes which move is chosen. PAT changes static equity, so it changes moves. Their defaults depend on how MAGPIE is run:
+
+| | WMP (`-wmp`) | RIT (`-rit`) | WIT (`-wit`) | PAT (`-pat`) |
+|---|---|---|---|---|
+| Command line program | On; a missing word map is built on first use | Off | Off | Off |
+| Library, `magpie_create()` | Off | Off | Off | Off |
+| Library, `magpie_create_with_options()` | The caller chooses | Off | Off | Off |
+| Browser build | Off until the page installs a word map | Off | Off | Off |
+| `contribute` tasks | Each task chooses, and a table is skipped when the machine has no room for it | Each task chooses | Each task chooses | Never loaded |
+
+RIT and WIT are off because their files are built by a `convert` command and may not exist for every lexicon. When one is turned on and its file is missing, the command that loads the data fails.
+
 ## Data
 
 The `setup.sh` command will download the necessary lexical data for several common lexica into the `./data` directory organized into 4 subdirectories. All lexical, board layout, and strategy data must be saved in their respective directories for MAGPIE to find them. When specifying input data in MAGPIE, always use the basename without the file extension.

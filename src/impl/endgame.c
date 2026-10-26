@@ -4063,7 +4063,7 @@ void iterative_deepening(EndgameCtxWorker *worker, int plies) {
     // EBF time management is active only when soft_time_limit > 0.
     // Callers using only hard_time_limit rely on the external timer thread
     // and check_depth_deadline instead; soft_time_limit = 0 disables this
-    // block intentionally (e.g. baseline time_mode=0 via endgame_time.c).
+    // block intentionally.
     if (worker->ordinal == 0 && worker->solver->soft_time_limit > 0) {
       double elapsed = ctimer_elapsed_seconds(&ids_timer);
       double this_depth_time = elapsed - depth_start_time;

@@ -1734,16 +1734,16 @@ void add_help_arg_to_string_builder(const Config *config, int token,
              "sim to use a completely random rack.";
       break;
     case ARG_TOKEN_SNOPRUNE:
-      usages[0] = "[[<opponent_known_rack>] <move1>[,<move2>,...]]";
+      usages[0] = "[[<opponent_known_rack>], <move1>[,<move2>,...]]";
       examples[0] = "";
-      examples[1] = "8G QI";
-      examples[2] = "- 8G QI,8H QI";
-      examples[3] = "ABC 8G QI,8H QI";
+      examples[1] = ", 8G QI";
+      examples[2] = "-, 8G QI,8H QI";
+      examples[3] = "ABC, 8G QI,8H QI";
       text = "Runs a Monte Carlo simulation for the current position, "
              "preventing the BAI algorithm from pruning the specified moves. "
-             "An optional opponent rack may precede the comma-separated move "
-             "list; if omitted the opponent's currently known rack is used. "
-             "Use '-' to force a random opponent rack. Moves are "
+             "The move list follows an optional opponent rack and a comma; "
+             "with no rack before the comma, the opponent's currently known "
+             "rack is used, and '-' forces a random opponent rack. Moves are "
              "comma-separated and may contain spaces (e.g. '8G QI').";
       break;
     case ARG_TOKEN_GEN_AND_SIM:
@@ -1800,9 +1800,11 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       usages[0] = "";
       usages[1] = "<moves>";
       usages[2] = "empty";
+      usages[3] = "resume";
       examples[0] = "11J.MEH,1F.VENeY";
       examples[1] = "8D.WORD,pass";
       examples[2] = "empty";
+      examples[3] = "resume";
       text =
           "Runs the pre-endgame (PEG) solver on the current position (1..4 "
           "tiles in the bag). With no argument, evaluates every generated "
@@ -1811,7 +1813,10 @@ void add_help_arg_to_string_builder(const Config *config, int token,
           "tiles joined by a period, e.g. 11J.MEH, and pass as pass; "
           "exchanges are not valid PEG moves), or the case-insensitive word "
           "'empty' to restrict to every generated move that would empty the "
-          "bag (plays at least as many tiles as remain in the bag).";
+          "bag (plays at least as many tiles as remain in the bag). 'resume' "
+          "continues the last interrupted solve of the same position and "
+          "settings from its checkpoint; checkpoints are kept only when "
+          "-pegjson and -pegoutcomes are both true.";
       break;
     case ARG_TOKEN_AUTOPLAY:
       usages[0] = "<type1> <num_games>";
@@ -1874,8 +1879,11 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       examples[2] = "testdata/";
       examples[3] = "Alice";
       examples[4] = "testdata/game.gcg Alice,Bob";
-      text = "Analyzes each turn of a GCG game using simulation or endgame "
-             "solving. With 0 args, analyzes the currently loaded game. With 1 "
+      text = "Analyzes each turn of a GCG game: with a static evaluation when "
+             "-plies is 0, with the pre-endgame solver when 1 to 4 tiles are "
+             "in the bag, with the endgame solver when the bag is empty, and "
+             "with simulation otherwise. With 0 args, analyzes the currently "
+             "loaded game. With 1 "
              "arg, the argument is interpreted as a directory, a GCG file, or "
              "a comma-delimited player name list for the current game. With 2 "
              "args, the first is a GCG file or directory and the second is a "
@@ -2137,8 +2145,10 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       examples[0] = "true";
       examples[1] = "false";
       text = "Specifies whether to use word maps as opposed to KWGs when "
-             "generating moves. Word maps are much faster but use more memory "
-             "and are on by default.";
+             "generating moves. Word maps are much faster but use more memory. "
+             "On by default in the command line program, which builds a "
+             "missing word map on first use; off by default for the library's "
+             "magpie_create(), the browser build and browser games.";
       break;
     case ARG_TOKEN_USE_RIT:
       usages[0] = "<true_or_false>";
@@ -2380,7 +2390,7 @@ void add_help_arg_to_string_builder(const Config *config, int token,
           "multiset (FGHI) when order is irrelevant, or a slash-joined "
           "sequence "
           "(F/G/H/I) when it matters; each carries an xN labeled-ordering "
-          "weight. Default false.";
+          "weight. Default true.";
       break;
     case ARG_TOKEN_PEG_OUT_WIDTH:
       usages[0] = "<columns>";
@@ -4847,12 +4857,11 @@ config_generate_peg_bag_emptying_moves(const Config *config,
   if (num_kept == 0) {
     free(moves);
     move_list_destroy(move_list);
-    error_stack_push(
-        error_stack, ERROR_STATUS_PEG_EMPTY_NO_MOVES,
-        get_formatted_string(
-            "pegonly 'empty' found no generated move that empties the "
-            "%d-tile bag",
-            bag_size));
+    error_stack_push(error_stack, ERROR_STATUS_PEG_EMPTY_NO_MOVES,
+                     get_formatted_string(
+                         "peg 'empty' found no generated move that empties the "
+                         "%d-tile bag",
+                         bag_size));
     return NULL;
   }
   *moves_out = moves;
