@@ -9,7 +9,6 @@ SRC_DIR := src
 TEST_DIR := test
 CMD_DIR := cmd
 TUI_DIR := tui
-TUI_OBJ_DIR := obj_tui
 TOOLS_DIR := tools
 BIN_DIR := bin
 COV_DIR := cov
@@ -102,6 +101,16 @@ OBJ_DIR := $(OBJ_ROOT)/$(OBJ_TARGET_PREFIX)$(BUILD)-$(PORTABLE_MARCH)-$(OBJ_CC)-
 else
 OBJ_DIR := $(OBJ_ROOT)/$(OBJ_TARGET_PREFIX)$(BUILD)-$(OBJ_CC)-b$(BOARD_DIM)-r$(RACK_SIZE)
 endif
+# magpie_tui keys its objects the same way, by its own flavor (see its flags
+# below): debug, release, or pgo, the release compiled against its profile.
+ifeq ($(BUILD),debug)
+TUI_FLAVOR := debug
+else ifeq ($(TUI_PGO_USE),1)
+TUI_FLAVOR := pgo
+else
+TUI_FLAVOR := release
+endif
+TUI_OBJ_DIR := $(OBJ_ROOT)/tui-$(TUI_FLAVOR)-$(OBJ_CC)-b$(BOARD_DIM)-r$(RACK_SIZE)
 
 # Profile-guided optimization data. The default lives below OBJ_ROOT so it is
 # ignored by git and removed by `make clean` with the other build artifacts.
@@ -225,7 +234,7 @@ align_cflags := -falign-functions=64
 ALIGNED_BUILDS := no_pgo_release portable_release lib bai_stats pgo_generate pgo_use \
                   test_no_pgo_release test_portable_release test_bai_stats \
                   test_pgo_generate test_pgo_use
-ifneq ($(filter $(ALIGNED_BUILDS),$(BUILD)),)
+ifneq ($(filter $(ALIGNED_BUILDS),$(BUILD))$(if $(filter-out debug,$(TUI_FLAVOR)),$(filter magpie_tui%,$(MAKECMDGOALS))),)
 ifneq ($(findstring clang,$(CC_VERSION_TEXT)),)
 align_ldflags := $(shell for flag in -Wl,-mllvm,-align-all-functions=6 -Wl,-plugin-opt=-align-all-functions=6; do if printf 'int main(void) { return 0; }\n' | $(CC) -x c - -flto $$flag -o /dev/null >/dev/null 2>&1; then echo $$flag; break; fi; done)
 else
@@ -390,9 +399,37 @@ else
     TUI_NDEBUG := -DNDEBUG
 endif
 
-TUI_ENGINE_CFLAGS := $(TUI_OPT) $(TUI_LTO) -march=native -g $(TUI_NDEBUG) -Wall -Wno-trigraphs -DBOARD_DIM=$(BOARD_DIM) -DRACK_SIZE=$(RACK_SIZE) $(TUI_SAN) -MMD -MP
-TUI_CFLAGS := $(TUI_OPT) $(TUI_LTO) -march=native -g $(TUI_NDEBUG) -Wall -Wno-trigraphs -Wextra -Wshadow -Wstrict-prototypes -Werror -DBOARD_DIM=$(BOARD_DIM) -DRACK_SIZE=$(RACK_SIZE) $(TUI_SAN) -MMD -MP
-TUI_LDFLAGS := -pthread $(TUI_LTO) $(TUI_SAN)
+# The release flavors align functions like the optimized magpie builds (see
+# align_cflags).
+ifneq ($(TUI_FLAVOR),debug)
+    TUI_ALIGN_CFLAGS := $(align_cflags)
+    TUI_ALIGN_LDFLAGS := $(align_ldflags)
+endif
+
+TUI_ENGINE_CFLAGS := $(TUI_OPT) $(TUI_LTO) -march=native -g $(TUI_NDEBUG) -Wall -Wno-trigraphs -DBOARD_DIM=$(BOARD_DIM) -DRACK_SIZE=$(RACK_SIZE) $(TUI_ALIGN_CFLAGS) $(TUI_SAN) -MMD -MP
+TUI_CFLAGS := $(TUI_OPT) $(TUI_LTO) -march=native -g $(TUI_NDEBUG) -Wall -Wno-trigraphs -Wextra -Wshadow -Wstrict-prototypes -Werror -DBOARD_DIM=$(BOARD_DIM) -DRACK_SIZE=$(RACK_SIZE) $(TUI_ALIGN_CFLAGS) $(TUI_SAN) -MMD -MP
+TUI_LDFLAGS := -pthread $(TUI_LTO) $(TUI_ALIGN_LDFLAGS) $(TUI_SAN)
+
+# The release TUI is profile-guided like `make release`: magpie_tui trains
+# magpie_pgo_train on TUI_PGO_WORKLOAD (static, the release's workload) and
+# compiles the engine's sources against that profile. The TUI's own sources
+# take none, since training never runs them. The profile has a file of its
+# own, which the pgo_* targets leave alone, and is retrained only when an
+# engine source or the trainer changes. TUI_PGO=0 builds the release without
+# it, which is quicker; without a usable clang it is built without it too.
+TUI_PGO ?= 1
+TUI_PGO_WORKLOAD ?= static
+TUI_PGO_PROFILE ?= $(abspath $(PGO_DIR)/tui-$(TUI_PGO_WORKLOAD).profdata)
+TUI_PGO_RAW_DIR ?= $(PGO_DIR)/tui-raw
+ifeq ($(TUI_FLAVOR),pgo)
+    TUI_ENGINE_CFLAGS += -fprofile-instr-use=$(TUI_PGO_PROFILE) \
+                         -Werror=profile-instr-out-of-date \
+                         -Wno-profile-instr-unprofiled
+    TUI_LDFLAGS += -fprofile-instr-use=$(TUI_PGO_PROFILE)
+else ifeq ($(TUI_FLAVOR)$(TUI_PGO),release1)
+    # magpie_tui rebuilds itself with PGO_CC as the pgo flavor.
+    TUI_PGO_CC := $(if $(PGO_CC_USABLE),$(PGO_CC))
+endif
 
 # On macOS the debug information stays in the object files, which the
 # executable points to. Clang's LTO link compiles its code into a temporary
@@ -491,7 +528,14 @@ magpie_test: $(OBJ_SRC) $(OBJ_TEST) $(RES_OBJ) | $(BIN_DIR)
 $(RES_OBJ): windows/magpie.rc windows/magpie.manifest windows/magpie.ico $(SRC_DIR)/impl/config.c | $(OBJ_DIR)
 	$(WINDRES) -I windows -DMAGPIE_VERSION_TEXT=$(MAGPIE_VERSION) -DMAGPIE_VERSION_COMMAS=$(MAGPIE_VERSION_COMMAS) $< -o $@
 
+ifneq ($(TUI_PGO_CC),)
+magpie_tui:
+	$(MAKE) magpie_tui CC="$(PGO_CC)" TUI_PGO_USE=1 PGO_LDFLAGS="$(PGO_LDFLAGS)"
+else
 magpie_tui: $(TUI_OBJ_SRC) $(TUI_OBJ_TUI) | $(BIN_DIR)
+ifeq ($(TUI_FLAVOR)$(TUI_PGO),release1)
+	@echo '*** No clang $(PGO_MIN_CLANG_MAJOR) or newer for the profile-guided TUI; building it without PGO. Pass PGO_CC=<clang> LLVM_PROFDATA=<llvm-profdata> to train it, or TUI_PGO=0 to skip this.'
+endif
 ifeq ($(strip $(NOTCURSES_CFLAGS)),)
 	@echo "magpie_tui: notcurses not found. Install via 'brew install notcurses' (macOS) or 'apt install libnotcurses-dev' (Debian/Ubuntu)."
 	@exit 1
@@ -501,6 +545,26 @@ else ifeq ($(strip $(FREETYPE_CFLAGS)),)
 else
 	$(CC) $(TUI_LDFLAGS) $^ $(LDLIBS) $(NOTCURSES_LDLIBS) $(FREETYPE_LDLIBS) -lz -o $(BIN_DIR)/$@
 endif
+endif
+
+# Trains the TUI's profile as pgo_workload trains magpie's, into its own raw
+# directory and profile.
+$(TUI_PGO_PROFILE): $(SRC) $(shell find $(SRC_DIR) -name '*.h') $(TOOLS_DIR)/pgo_train.c
+	$(MAKE) pgo_toolchain_check
+	$(MAKE) prepare_data CC="$(PGO_CC)" LDFLAGS="-pthread -flto $(PGO_LDFLAGS)"
+	$(RM) -r $(TUI_PGO_RAW_DIR) $@
+	mkdir -p $(TUI_PGO_RAW_DIR)
+	$(MAKE) magpie_pgo_train BUILD=pgo_generate CC="$(PGO_CC)"
+	LLVM_PROFILE_FILE="$(abspath $(TUI_PGO_RAW_DIR))/magpie-%p.profraw" \
+		./$(BIN_DIR)/magpie_pgo_train \
+			"$(TUI_PGO_WORKLOAD)" \
+			"$(PGO_TRAIN_GAMES)" \
+			"$(PGO_TRAIN_TIME_MS)" \
+			"$(PGO_TRAIN_SECONDS)" \
+			"$(PGO_TRAIN_THREADS)" \
+			"$(PGO_LEAVEGEN_DATA_DIR):./data" \
+			"$(PGO_LEAVEGEN_TARGET)"
+	$(LLVM_PROFDATA) merge -sparse -o $@ $(TUI_PGO_RAW_DIR)/*.profraw
 
 # Unit tests for the TUI's notcurses-free modules. Run from the repo root.
 TUI_TEST_SRC := $(wildcard $(TUI_DIR)/test/*.c)
@@ -549,6 +613,10 @@ $(OBJ_SRC) $(OBJ_CMD) $(OBJ_TEST) $(PGO_TRAIN_OBJ) $(CONVERT_OBJ) $(OBJ_DIR)/$(T
 ifeq ($(BUILD),pgo_use)
 $(OBJ_SRC) $(OBJ_CMD) $(OBJ_TEST): $(PGO_PROFILE)
 endif
+$(TUI_OBJ_SRC) $(TUI_OBJ_TUI): Makefile
+ifeq ($(TUI_FLAVOR),pgo)
+$(TUI_OBJ_SRC): $(TUI_PGO_PROFILE)
+endif
 
 # Optimized test builds keep assertions enabled.
 $(OBJ_DIR)/$(TEST_DIR)/%.o: $(TEST_DIR)/%.c | $(OBJ_DIR) $(OBJ_DIR)/$(TEST_DIR) $(TEST_OBJ_SUBDIRS)
@@ -558,7 +626,7 @@ $(BIN_DIR) $(OBJ_DIR) $(OBJ_DIR)/$(SRC_DIR) $(OBJ_DIR)/$(CMD_DIR) $(OBJ_DIR)/$(T
 	mkdir -p $@
 
 clean:
-	@$(RM) -rv $(BIN_DIR) $(OBJ_ROOT) $(TUI_OBJ_DIR) libmagpie_core.a
+	@$(RM) -rv $(BIN_DIR) $(OBJ_ROOT) libmagpie_core.a
 
 # Windows executables, cross-compiled in the pinned llvm-mingw image
 # (windows/Dockerfile), so any developer with Docker can build and test them:
