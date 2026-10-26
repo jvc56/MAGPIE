@@ -401,9 +401,10 @@ static bool process_command_internal(int argc, char *argv[],
 // The data path a run with no -path uses: data in the working directory, as
 // always; failing that, data beside the executable (for one run from a
 // terminal elsewhere), then the user's own (%LOCALAPPDATA%\MAGPIE\data on
-// Windows). With none of them there, the working directory's, which is where
-// `data fetch` puts it. (Started from Explorer, the working directory is the
-// executable's.)
+// Windows, ~/.magpie/data on macOS). With none of them there, where `data
+// fetch` puts it: the user's own on macOS, where the working directory is
+// wherever MAGPIE was started from, and the working directory's elsewhere.
+// (Started from Explorer, the working directory is the executable's.)
 static char *locate_default_data_path(void) {
   if (data_fetch_get_state(DEFAULT_DATA_PATHS) != DATA_FETCH_STATE_MISSING) {
     return string_duplicate(DEFAULT_DATA_PATHS);
@@ -422,7 +423,15 @@ static char *locate_default_data_path(void) {
     }
     free(directory);
   }
-  return found ? found : string_duplicate(DEFAULT_DATA_PATHS);
+  if (found) {
+    return found;
+  }
+  char *user_dir =
+      cpath_fetches_to_user_data_dir() ? cpath_user_data_dir() : NULL;
+  char *path = user_dir ? get_formatted_string("%s/data", user_dir)
+                        : string_duplicate(DEFAULT_DATA_PATHS);
+  free(user_dir);
+  return path;
 }
 
 static void print_data_fetch_progress(void *context, const char *message) {

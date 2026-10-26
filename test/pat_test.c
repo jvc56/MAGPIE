@@ -1617,7 +1617,6 @@ static void pat_path_parity_run(double utility_adjust) {
           .override_kwg = NULL,
           .eq_margin_movegen = 0,
           .target_equity = EQUITY_MAX_VALUE,
-          .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
       };
       generate_moves(&all_args);
       move_list_sort_moves(all_lists[c]);
@@ -1636,7 +1635,6 @@ static void pat_path_parity_run(double utility_adjust) {
           .override_kwg = NULL,
           .eq_margin_movegen = int_to_equity(12),
           .target_equity = EQUITY_MAX_VALUE,
-          .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
       };
       generate_moves(&within_args);
       move_list_sort_moves(within_list);
@@ -1816,7 +1814,6 @@ static void test_pat_candidates_option(void) {
         .override_kwg = NULL,
         .eq_margin_movegen = 0,
         .target_equity = EQUITY_MAX_VALUE,
-        .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
     };
     generate_moves(&args);
   }
@@ -1946,7 +1943,6 @@ static void test_pat_stage_scale(const char *data_dir) {
           .override_kwg = NULL,
           .eq_margin_movegen = 0,
           .target_equity = EQUITY_MAX_VALUE,
-          .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
       };
       generate_moves(&args);
       move_list_sort_moves(lists[i]);
@@ -2105,7 +2101,6 @@ static void test_pat_opening_adjustments_with_wmp(const char *data_dir,
           .override_kwg = NULL,
           .eq_margin_movegen = 0,
           .target_equity = EQUITY_MAX_VALUE,
-          .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
       };
       generate_moves(&args);
       move_list_sort_moves(lists[i]);
@@ -2236,7 +2231,6 @@ static void test_pat_movegen_integration(void) {
       .move_list = move_list,
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
-      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
   };
   rack_set_to_string(game_get_ld(game),
                      player_get_rack(game_get_player(game, 0)), "QUIXOTE");
@@ -2414,7 +2408,6 @@ static int pat_wmp_table_parity_run(const char *lexicon, const char *tables,
         .override_kwg = NULL,
         .eq_margin_movegen = 0,
         .target_equity = EQUITY_MAX_VALUE,
-        .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
     };
     generate_moves(&args);
     move_list_sort_moves(oracle_list);
