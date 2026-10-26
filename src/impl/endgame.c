@@ -1447,7 +1447,7 @@ static EndgameCtxWorker *endgame_ctx_create_worker(EndgameCtx *solver,
   lane_shadow_cache_set_salt(solver_worker->lane_shadow_cache,
                              solver_worker->stuck_tiles_salt);
   solver_worker->cross_set_cache =
-      cross_set_cache_create(ENDGAME_CROSS_SET_CACHE_INDEX_BITS);
+      cross_set_cache_create(CROSS_SET_CACHE_INDEX_BITS);
   cross_set_cache_set_salt(solver_worker->cross_set_cache,
                            solver_worker->stuck_tiles_salt);
   game_set_cross_set_cache(solver_worker->game_copy,
