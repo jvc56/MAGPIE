@@ -63,6 +63,13 @@ test('stopped PEG resumes in this session and exposes real weighted outcomes', a
     const post = Worker.prototype.postMessage;
     Worker.prototype.postMessage = function(message, ...args) {
       if (message.type === 'run') message.data.commands = message.data.commands.map(command => {
+        // An opponent's rack in the position is known to PEG; without it,
+        // each of the bag's possible draws is its own outcome.
+        if (command.startsWith('cgp ')) {
+          const fields = command.split(' ');
+          fields[2] = `${fields[2].split('/')[0]}/`;
+          return fields.join(' ');
+        }
         if (!command.startsWith('peg ')) return command;
         command = command.replace(/-pegtlim \S+/, '-pegtlim 0') + ' -pegtopk 16,8 -pegnested false';
         window.pegCommands.push(command);

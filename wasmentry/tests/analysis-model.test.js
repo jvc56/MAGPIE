@@ -124,5 +124,6 @@ test("PEG protects the union of manual plays and the recorded play", { tag: "@un
     protectedMoves: ["D1 A.", "pass", "D1 A."],
     playedMove: "pass",
   });
-  expect(commands.at(-1)).toContain("-pnoprune D1.AQ,pass");
+  expect(commands.at(-1)).toMatch(/^peg leaves1 D1\.AQ,pass /);
+  expect(commands.at(-1)).not.toContain("-pnoprune");
 });

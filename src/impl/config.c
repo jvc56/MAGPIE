@@ -8003,22 +8003,26 @@ static bool config_table_lacks_disk(const char *built_path, int64_t bytes) {
 }
 
 // Says a table is about to be built on first use: what it is, for which
-// lexicon, and the disk it will take and the memory its build peaks at.
+// lexicon (and, for a rack info table, which leaves), and the disk it will
+// take and the memory its build peaks at.
 static void config_announce_table_build(const Config *config,
                                         players_data_t type, const char *name,
-                                        const char *lexicon,
+                                        const char *lexicon, const char *leaves,
                                         const char *ld_name) {
   const ConfigTableKind kind = config_table_kind(type);
   const contribute_table_role_t role = kind.role;
-  const char *speedup = kind.speedup;
+  char *what_for =
+      leaves ? get_formatted_string("%s with the leaves %s", lexicon, leaves)
+             : string_duplicate(lexicon);
   const int64_t bytes =
       config_table_bytes(config, type, name, lexicon, ld_name);
   if (bytes < 0) {
     thread_control_print_formatted(
         config->thread_control,
-        "building the %s %s, which makes %s (once; this can take a few "
+        "building the %s for %s, which makes %s (once; this can take a few "
         "minutes)\n",
-        contribute_table_role_description(role), name, speedup);
+        contribute_table_role_description(role), what_for, kind.speedup);
+    free(what_for);
     return;
   }
   char *disk = contribute_size_text(bytes);
@@ -8026,11 +8030,13 @@ static void config_announce_table_build(const Config *config,
       contribute_size_text(contribute_table_build_memory(role, bytes));
   thread_control_print_formatted(
       config->thread_control,
-      "building the %s %s, which makes %s: about %s on disk, and up to %s of "
-      "memory while it builds (once; this can take a few minutes)\n",
-      contribute_table_role_description(role), name, speedup, disk, memory);
+      "building the %s for %s, which makes %s: about %s on disk, and up to %s "
+      "of memory while it builds (once; this can take a few minutes)\n",
+      contribute_table_role_description(role), what_for, kind.speedup, disk,
+      memory);
   free(disk);
   free(memory);
+  free(what_for);
 }
 
 // Makes the wordmap for player `player_index`'s lexicon `lexicon` available
@@ -8084,7 +8090,7 @@ static const char *config_wordmap_for_first_use(Config *config,
   }
   if (!why_not) {
     config_announce_table_build(config, PLAYERS_DATA_TYPE_WMP, lexicon, lexicon,
-                                ld_name);
+                                NULL, ld_name);
     const ConversionArgs args = {
         .conversion_type_string = "dawg2wordmap",
         .data_paths = config->data_paths,
@@ -8428,7 +8434,7 @@ static const char *config_word_info_table_for_first_use(Config *config,
   }
   if (!why_not) {
     config_announce_table_build(config, PLAYERS_DATA_TYPE_WIT, lexicon, lexicon,
-                                ld_name);
+                                NULL, ld_name);
     const ConversionArgs args = {
         .conversion_type_string = "kwg2witifneeded",
         .data_paths = config->data_paths,
@@ -8502,7 +8508,7 @@ config_rack_info_table_for_first_use(Config *config, int player_index,
   }
   if (!why_not) {
     config_announce_table_build(config, PLAYERS_DATA_TYPE_RIT, rit_name,
-                                lexicon, ld_name);
+                                lexicon, leaves, ld_name);
     const ConversionArgs args = {
         .conversion_type_string = "klvwmp2rit",
         .data_paths = config->data_paths,
