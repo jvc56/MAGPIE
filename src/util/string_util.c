@@ -635,7 +635,9 @@ char *iso_8859_1_to_utf8(const char *iso_8859_1_string) {
   char *utf8_string_pointer = utf8_string;
 
   while (*iso_8859_1_string_pointer != '\0') {
-    if (*iso_8859_1_string_pointer < 0) {
+    // Compared as unsigned: char is unsigned on Linux arm64, where < 0 is
+    // never true.
+    if (*(unsigned char *)iso_8859_1_string_pointer >= 0x80) {
       // Handle non-ASCII characters
       *utf8_string_pointer++ =
           (char)(0xC0 | (*(unsigned char *)iso_8859_1_string_pointer >> 6));

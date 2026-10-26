@@ -277,11 +277,12 @@ typedef struct PegArgs {
   // concurrently via peg_poll_read. The caller owns the PegPoll.
   PegPoll *poll;
   // Optional caller-owned endgame transposition table every leaf solve uses,
-  // in place of the per-worker tables peg_solve otherwise allocates (sized
-  // from RAM) on every call. Transposition tables are safe to share between
-  // threads, and between solves of different positions. Autoplay passes one
-  // table for the whole run, so concurrent games each solving a pre-endgame do
-  // not each claim a share of RAM. NULL = allocate per worker (default).
+  // in place of the table peg_solve otherwise allocates (sized from RAM) and
+  // shares among its workers on every call. Transposition tables are safe to
+  // share between threads, and between solves of different positions.
+  // Autoplay passes one table for the whole run, so concurrent games each
+  // solving a pre-endgame do not each claim a share of RAM. NULL = allocate
+  // one per solve on first use (default).
   TranspositionTable *shared_endgame_tt;
   // Optional caller-owned session checkpoint. Reuses complete candidate
   // evaluations only when position and search settings match. Time budget and
