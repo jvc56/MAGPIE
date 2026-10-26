@@ -1,0 +1,225 @@
+name: Release Linux
+
+# Builds magpie for x86_64 and arm64 Linux, tests each on its architecture,
+# smoke-tests the first-run path of each in an empty directory on the oldest
+# and newest Ubuntu runners, and attaches them, as tarballs with their
+# SHA-256s, to the GitHub release for the tag.
+#
+# Triggers, as in release-windows.yml:
+# - a pushed vX.Y.Z tag runs every job, publish included. The tag must match
+#   MAGPIE_VERSION in src/impl/config.c, or the build job fails first.
+# - a push to any branch that changes this file runs every job but publish,
+#   so a change to the workflow is tested before it merges. This is a branch
+#   push rather than pull_request because the test job restores the
+#   windows-data cache, which run-tests.yml saves on the branch, and a
+#   pull_request run can only restore caches from the base branch.
+# - workflow_dispatch runs every job but publish, on any ref, tags included.
+# Only publish can write to the repository.
+
+on:
+  push:
+    branches:
+      - "**"
+    tags:
+      - "v*"
+    # Applies to branch pushes only: GitHub does not evaluate path filters
+    # for tag pushes, so every tag push runs.
+    paths:
+      - .github/workflows/release-linux.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  # Built on the oldest Ubuntu runner: the executables link glibc
+  # dynamically (data fetch dlopens libcurl, which a static executable
+  # cannot), and run on any glibc as new as the one they were built with.
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: x64
+            runner: ubuntu-22.04
+            march: nehalem
+          - name: arm64
+            runner: ubuntu-22.04-arm
+            march: armv8-a
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # As in release-windows.yml: a release tag must name the version the
+      # source builds. Checked before anything is built.
+      - name: Read MAGPIE_VERSION and check it against the tag
+        id: version
+        run: |
+          version="$(sed -n 's/^#define MAGPIE_VERSION "\(.*\)"/\1/p' src/impl/config.c)"
+          if [ -z "$version" ]; then
+            echo "::error::no MAGPIE_VERSION in src/impl/config.c"
+            exit 1
+          fi
+          echo "MAGPIE_VERSION: $version"
+          if [ "$GITHUB_EVENT_NAME" = push ] && [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            tag="${GITHUB_REF#refs/tags/}"
+            if [ "${tag#v}" != "$version" ]; then
+              echo "::error::tag $tag does not match MAGPIE_VERSION $version in src/impl/config.c"
+              exit 1
+            fi
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      # A portable_release for the targets the Windows and macOS executables
+      # use, nehalem and armv8-a, so Linux builds the same derived files as
+      # any other release of that architecture (README.md, "Portable builds").
+      - name: Build the executables
+        run: |
+          make magpie magpie_test BUILD=portable_release PORTABLE_MARCH=${{ matrix.march }}
+          file bin/magpie bin/magpie_test
+
+      # In a folder, so that unpacking it gives MAGPIE a directory of its own
+      # to keep its data in; a tarball keeps the executable bit.
+      - name: Pack the executable
+        env:
+          version: ${{ steps.version.outputs.version }}
+        run: |
+          name="magpie-$version-linux-${{ matrix.name }}"
+          mkdir -p "pack/$name" release
+          cp bin/magpie "pack/$name/magpie"
+          cp LICENSE.md "pack/$name/LICENSE.md"
+          tar -czf "release/$name.tar.gz" -C pack "$name"
+          (cd release && sha256sum "$name.tar.gz" > "$name.tar.gz.sha256" && cat "$name.tar.gz.sha256")
+          mv bin/magpie_test "release/magpie_test-linux-${{ matrix.name }}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.name }}
+          path: release/
+
+  # L5: the first-run path of each executable in an empty directory: fetch
+  # the data from MAGPIE-DATA, build a wordmap on first use, then a session
+  # of ordinary commands. On the build's Ubuntu and the newest one.
+  smoke:
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: x64
+            runner: ubuntu-22.04
+            target: nehalem
+          - name: x64
+            runner: ubuntu-latest
+            target: nehalem
+          - name: arm64
+            runner: ubuntu-22.04-arm
+            target: armv8-a
+          - name: arm64
+            runner: ubuntu-24.04-arm
+            target: armv8-a
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-${{ matrix.name }}
+          path: release
+      - name: Unpack, fetch data and play in an empty directory
+        run: |
+          mkdir unpacked && tar -xzf release/magpie-*-linux-${{ matrix.name }}.tar.gz -C unpacked
+          magpie="$(echo "$PWD"/unpacked/magpie-*-linux-${{ matrix.name }}/magpie)"
+          [ -x "$magpie" ] || { echo "::error::the tarball lost the executable bit"; exit 1; }
+          mkdir empty && cd empty
+          "$magpie" data fetch
+          [ -f data/lexica/CSW24.kwg ] || { echo "::error::data fetch wrote nothing"; exit 1; }
+          status=0
+          output="$("$magpie" <<'EOF'
+          set -lex CSW24 -threads 2 -savesettings false
+          cgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 AEINRST/ 0/0 0
+          gen -numplays 3
+          sim -plies 2 -it 200 -scond none
+          infer 1 MUZAKY 58 -numplays 20
+          cgp 2ABERRaNT4G/5HE6FE/5OS5CUR/5DI5OMA/1HARPIST4WEN/5ET2Q3TI/6E1VIVO2A/4JUDY2ABOIL/4I2ERASERS1/1DOWLY8M/4TaLEGGIO2I/7Z6C/7I3PUNK/7NONTONAL/7E2AX2E AD/EFU 467/497 0
+          endgame -eplies 4
+          builders
+          quit
+          EOF
+          )" || status=$?
+          echo "$output"
+          [ "$status" -eq 0 ] || { echo "::error::the session exited with $status"; exit 1; }
+          grep -q 'building the wordmap for CSW24' <<<"$output" || { echo "::error::no wordmap was built"; exit 1; }
+          ! grep -q '(error' <<<"$output" || { echo "::error::the session reported an error"; exit 1; }
+          grep -q 'Endgame (depth' <<<"$output" || { echo "::error::the endgame did not run"; exit 1; }
+          grep -q '"build_target":"${{ matrix.target }}"' <<<"$output" || { echo "::error::not the ${{ matrix.target }} build"; exit 1; }
+          [ -f data/lexica/CSW24.wmp ] || { echo "::error::the wordmap is missing"; exit 1; }
+
+  # L4 on the release executables themselves, one architecture per runner.
+  test:
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: x64
+            runner: ubuntu-22.04
+          - name: arm64
+            runner: ubuntu-22.04-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v4
+      # The Windows runners' copy of the data, which has its symlinks turned
+      # into files and so restores on any operating system.
+      - name: Get the data cache
+        uses: actions/cache/restore@v4
+        with:
+          path: windows-data
+          key: windows-data-files-32
+          enableCrossOsArchive: true
+          fail-on-cache-miss: true
+      - name: Put the data in place
+        run: mv windows-data/data windows-data/testdata .
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-${{ matrix.name }}
+          path: release
+      - name: Run the tests
+        run: |
+          chmod +x release/magpie_test-linux-${{ matrix.name }}
+          ./release/magpie_test-linux-${{ matrix.name }}
+
+  # Only a pushed vX.Y.Z tag publishes: startsWith alone would also be true
+  # for a workflow_dispatch started on a tag ref.
+  publish:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: [smoke, test]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          merge-multiple: true
+          path: release
+      - name: Attach the executables to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="${GITHUB_REF#refs/tags/}"
+          # The build job checked that the tag is v$MAGPIE_VERSION.
+          version="${tag#v}"
+          # release-windows.yml runs for the same tag and may create the
+          # release first, even between this view and this create, so a
+          # failed create is fine if the release is there after it.
+          gh release view "$tag" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1 \
+            || gh release create "$tag" -R "$GITHUB_REPOSITORY" --prerelease --title "$tag" \
+                 --notes "See the README's Windows, macOS and Linux sections. The executables are not code-signed; Windows and macOS will ask you to confirm the first run." \
+            || gh release view "$tag" -R "$GITHUB_REPOSITORY" >/dev/null
+          # No --clobber, as in release-windows.yml: a rerun cannot silently
+          # replace a published file.
+          for name in x64 arm64; do
+            tarball="release/magpie-$version-linux-$name.tar.gz"
+            gh release upload "$tag" -R "$GITHUB_REPOSITORY" "$tarball" "$tarball.sha256"
+          done
