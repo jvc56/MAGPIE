@@ -858,12 +858,16 @@ static float compute_opp_stuck_fraction(
   // Cross-set scan: scan the board to find which rack tiles have valid
   // single-tile plays. If all tiles are playable, skip movegen entirely.
   // For 1-tile racks the result is authoritative. For multi-tile partial
-  // results, fall through to movegen with opp_tiles_bv pre-seeded.
+  // results, fall through to movegen with opp_tiles_bv pre-seeded. A 1-tile
+  // rack's plays, when the caller has them, are its single-tile plays or the
+  // pass, which answer just as exactly without the scan.
   uint64_t opp_tiles_bv = 0;
   const Board *board = game_get_board(game);
   const bool cross_sets_valid = board_get_cross_sets_valid(board);
+  const bool one_tile_plays_known =
+      opp_plays != NULL && rack_get_total_letters(opp_rack) == 1;
   uint64_t rack_tiles_bv = 0;
-  if (cross_sets_valid) {
+  if (cross_sets_valid && !one_tile_plays_known) {
     bool kwgs_shared = game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KWG);
     int ci = board_get_cross_set_index(kwgs_shared, opp_idx);
     const LetterDistribution *ld = game_get_ld(game);
@@ -2813,6 +2817,10 @@ static int32_t negamax_greedy_leaf_playout(EndgameCtxWorker *worker,
   int leaf_play_count = 0;
   SmallMove pass;
   small_move_set_as_pass(&pass);
+  // Whether the opponent is on turn at the leaf with one tile, which the stuck
+  // check found has no play there: the first step is then the pass that the
+  // single-tile scan would find.
+  bool first_step_is_pass = false;
 
   // Recompute opp_stuck_frac from the current position rather than using the
   // parent's value. This ensures position-dependent (not path-dependent)
@@ -2843,9 +2851,15 @@ static int32_t negamax_greedy_leaf_playout(EndgameCtxWorker *worker,
       leaf_play_count =
           path_move_lists_moves_at(worker->path_lists, &leaf_args, &leaf_plays);
     }
-    opp_stuck_frac =
-        worker_opp_stuck_fraction(worker, node_key, leaf_plays, leaf_play_count,
-                                  worker_board_occupancy(worker), NULL);
+    // The playable tile types are the rack's, so a one-tile rack's are none
+    // exactly when its tile has no play.
+    uint64_t leaf_opp_playable = 0;
+    opp_stuck_frac = worker_opp_stuck_fraction(
+        worker, node_key, leaf_plays, leaf_play_count,
+        worker_board_occupancy(worker), &leaf_opp_playable);
+    first_step_is_pass = on_turn_idx == opp_idx &&
+                         rack_get_total_letters(leaf_opp_rack) == 1 &&
+                         leaf_opp_playable == 0;
   }
 
   // The playout runs to the end of the game. A stuck playout pushes each of
@@ -2935,11 +2949,24 @@ static int32_t negamax_greedy_leaf_playout(EndgameCtxWorker *worker,
       // move_list and immediately pop the arena so the per-node dealloc in
       // abdada_negamax stays correct.
       size_t arena_before = worker->small_move_arena->size;
-      generate_single_tile_plays(worker, worker_board_occupancy(worker));
-      const SmallMove *arena_sm =
-          (const SmallMove *)(worker->small_move_arena->memory + arena_before);
-      *worker->move_list->small_moves[0] = *arena_sm;
-      arena_dealloc(worker->small_move_arena, sizeof(SmallMove));
+      if (playout_depth == 0 && first_step_is_pass) {
+#ifndef NDEBUG
+        generate_single_tile_plays(worker, worker_board_occupancy(worker));
+        const SmallMove *scanned =
+            (const SmallMove *)(worker->small_move_arena->memory +
+                                arena_before);
+        assert(small_move_is_pass(scanned));
+        arena_dealloc(worker->small_move_arena, sizeof(SmallMove));
+#endif
+        *worker->move_list->small_moves[0] = pass;
+      } else {
+        generate_single_tile_plays(worker, worker_board_occupancy(worker));
+        const SmallMove *arena_sm =
+            (const SmallMove *)(worker->small_move_arena->memory +
+                                arena_before);
+        *worker->move_list->small_moves[0] = *arena_sm;
+        arena_dealloc(worker->small_move_arena, sizeof(SmallMove));
+      }
       worker->move_list->count = 1;
       nplays = 1;
     } else if (opp_stuck_frac == 0.0F && use_path_lists && playout_depth == 0 &&
