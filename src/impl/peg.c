@@ -2410,8 +2410,8 @@ static void peg_cand_worker_fn(void *arg, int worker_idx) {
   }
 }
 
-// PegArgs.only_moves_ranked: moves stage 0 finished (win_pct >= 0) ahead of
-// the budget-skipped sentinels, each group in its original order.
+// PegArgs.n_ranked_only_moves: moves stage 0 finished (win_pct >= 0) ahead of
+// the budget-skipped sentinels, each group in its current order.
 static void peg_partition_finished(PegRankedCand *ranked, int n) {
   PegRankedCand *sorted = malloc_or_die((size_t)n * sizeof(PegRankedCand));
   int placed = 0;
@@ -3443,7 +3443,14 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
                         scenario_stride, deadline_ns, args->thread_control,
                         args->poll, &progress, args->eval_bag_order,
                         args->eval_bag_order_len, ranked, args->checkpoint);
-    if (args->only_moves_ranked && args->n_only_moves > 0) {
+    if (args->n_ranked_only_moves > 0 && args->n_only_moves > 0) {
+      const int n_head = args->n_ranked_only_moves < n_cands
+                             ? args->n_ranked_only_moves
+                             : n_cands;
+      if (n_head < n_cands) {
+        stable_sort(ranked + n_head, (size_t)(n_cands - n_head),
+                    sizeof(PegRankedCand), peg_rank_cmp);
+      }
       peg_partition_finished(ranked, n_cands);
     } else {
       stable_sort(ranked, (size_t)n_cands, sizeof(PegRankedCand), peg_rank_cmp);

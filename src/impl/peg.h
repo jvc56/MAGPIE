@@ -278,11 +278,13 @@ typedef struct PegArgs {
   // must outlive the solve. NULL / 0 = generate all moves (default).
   const Move *const *only_moves;
   int n_only_moves;
-  // With only_moves: the caller's order is the initial ranking. Stage 0 still
-  // scores every candidate (greedy) but does not re-rank them, so the first
-  // halving stage takes the first stage_top_k[0] moves in this order (those
-  // the budget let stage 0 finish, in order). False = rank by stage 0.
-  bool only_moves_ranked;
+  // With only_moves: the first n_ranked_only_moves keep the caller's order at
+  // the head of the initial ranking. Stage 0 still scores every candidate
+  // (greedy) but ranks only the rest, behind that head, so the first halving
+  // stage takes the head in the caller's order and then the best of the rest
+  // by stage 0 (of those the budget let stage 0 finish). 0 = rank all by
+  // stage 0; n_only_moves = keep the caller's order throughout.
+  int n_ranked_only_moves;
 
   // Optional "protect from pruning" set (like the simmer's snoprune): moves
   // that must survive every stage's top-K cut even when their win% rank falls
@@ -345,7 +347,7 @@ static inline void peg_args_fill(
     void *nested_peg1_chooser_ctx, PegPeg2Chooser nested_peg2_chooser,
     void *nested_peg2_chooser_ctx, const MachineLetter *eval_bag_order,
     const int eval_bag_order_len, const Move *const *only_moves,
-    const int n_only_moves, const bool only_moves_ranked,
+    const int n_only_moves, const int n_ranked_only_moves,
     const Move *const *protect_moves, const int n_protect_moves,
     const bool include_per_scenario, PegOnStageStart on_stage_start,
     PegOnCandDone on_cand_done, PegOnScenarioDone on_scenario_done,
@@ -381,7 +383,7 @@ static inline void peg_args_fill(
   peg_args->eval_bag_order_len = eval_bag_order_len;
   peg_args->only_moves = only_moves;
   peg_args->n_only_moves = n_only_moves;
-  peg_args->only_moves_ranked = only_moves_ranked;
+  peg_args->n_ranked_only_moves = n_ranked_only_moves;
   peg_args->protect_moves = protect_moves;
   peg_args->n_protect_moves = n_protect_moves;
   peg_args->include_per_scenario = include_per_scenario;

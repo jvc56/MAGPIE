@@ -735,7 +735,7 @@ static bool play_chooser_run_peg(PlayChooser *play_chooser, const Game *game,
                 /*nested_peg2_chooser=*/NULL, /*nested_peg2_chooser_ctx=*/NULL,
                 /*eval_bag_order=*/NULL, /*eval_bag_order_len=*/0,
                 /*only_moves=*/NULL, /*n_only_moves=*/0,
-                /*only_moves_ranked=*/false,
+                /*n_ranked_only_moves=*/0,
                 /*protect_moves=*/NULL, /*n_protect_moves=*/0,
                 /*include_per_scenario=*/false, /*on_stage_start=*/NULL,
                 /*on_cand_done=*/
