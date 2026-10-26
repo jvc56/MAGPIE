@@ -24,6 +24,7 @@
 #include "../impl/simmer.h"
 #include "../util/io_util.h"
 #include "../util/json.h"
+#include "endgame.h"
 #include "peg.h"
 #include <stdbool.h>
 #include <stdint.h>
@@ -205,6 +206,8 @@ ThreadControl *config_get_thread_control(const Config *config);
 // Fills peg_args with the peg command's arguments (defaults plus any -peg*
 // settings), leaving the poll and only/protect move sets unset.
 void config_fill_peg_args(Config *config, PegArgs *peg_args);
+// The endgame command's arguments for the current position.
+void config_fill_endgame_args(Config *config, EndgameArgs *endgame_args);
 exec_mode_t config_get_exec_mode(const Config *config);
 Game *config_get_game(const Config *config);
 GameHistory *config_get_game_history(const Config *config);

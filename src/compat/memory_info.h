@@ -169,7 +169,7 @@ static inline bool get_available_memory_bytes(int64_t *available_bytes) {
   // Inactive and purgeable pages are reclaimed for a new allocation before
   // anything is swapped out, so they count as available, as Activity Monitor
   // counts them.
-  vm_statistics64_data_t stats;
+  vm_statistics64_data_t stats = {0};
   mach_msg_type_number_t count = HOST_VM_INFO64_COUNT;
   if (host_statistics64(mach_host_self(), HOST_VM_INFO64,
                         (host_info64_t)&stats, &count) != KERN_SUCCESS) {

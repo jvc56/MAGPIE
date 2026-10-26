@@ -3037,7 +3037,7 @@ static void peg_order_jobs_losses_first(PegScenarioJobList *list,
                                         ThreadControl *thread_control) {
   for (int job_idx = 0; job_idx < list->count; job_idx++) {
     PegScenarioJob *job = &list->jobs[job_idx];
-    MachineLetter first_ordering[PEG_SCENARIO_ARRAY_CAP + 1];
+    MachineLetter first_ordering[PEG_SCENARIO_ARRAY_CAP + 1] = {0};
     for (int tile_idx = 0; tile_idx < job->n_bag_remaining; tile_idx++) {
       first_ordering[tile_idx] = job->bag_remaining[tile_idx];
     }

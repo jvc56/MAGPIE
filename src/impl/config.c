@@ -1386,6 +1386,102 @@ arg_token_t get_token_from_string(Config *config, const char *arg_name,
   return NUMBER_OF_ARG_TOKENS;
 }
 
+// The help for the table options, analyze's PEG and endgame options and the
+// settings file's version (see add_help_arg_to_string_builder).
+static void add_analyze_and_settings_help_arg(arg_token_t arg_token,
+                                              const char **usages,
+                                              const char **examples,
+                                              const char **text) {
+  switch (arg_token) {
+  case ARG_TOKEN_USE_WMP:
+    usages[0] = "<auto_true_or_false>";
+    examples[0] = "auto";
+    examples[1] = "false";
+    *text = "Specifies whether to use word maps as opposed to KWGs when "
+            "generating moves; they are 3-4 times faster but use more memory. "
+            "auto (the default for the command line program and the "
+            "library's magpie_create()) uses one when this machine has the "
+            "disk and memory for it, building a missing one on first use for "
+            "data from 'data fetch', and otherwise plays without; true "
+            "requires one; false never uses one. The wordmap, word info table "
+            "and rack info table share the room, wordmaps first. Off for the "
+            "browser build and browser games.";
+    break;
+  case ARG_TOKEN_USE_RIT:
+    usages[0] = "<auto_true_or_false>";
+    examples[0] = "auto";
+    examples[1] = "false";
+    *text = "Specifies whether to use the precomputed rack info table when "
+            "generating moves. The table stores leave values for every "
+            "possible full rack, so a single hash lookup replaces repeated "
+            "KLV traversal: about 17% faster simulation with a wordmap. It "
+            "belongs to a lexicon played with a set of leaves, and is the "
+            "file <lexicon>.<leaves>.rit (or <lexicon>.rit for the lexicon's "
+            "own leaves), built with 'convert klvwmp2rit'. auto (the default "
+            "for the command line program and the library) uses one that is "
+            "there when this machine has the memory for it, and is never "
+            "built by itself: it is 1.9 GB for English. true requires one; "
+            "false never uses one.";
+    break;
+  case ARG_TOKEN_USE_MMAP_FOR_RIT:
+    usages[0] = "<true_or_false>";
+    examples[0] = "true";
+    examples[1] = "false";
+    *text = "When true, the rack info table is memory-mapped instead of read "
+            "into allocated memory. This eliminates the startup cost of "
+            "loading the file and lets processes using the same data share "
+            "one copy, but pages are faulted on demand during play. Only "
+            "supported on little-endian architectures, where it is the "
+            "default for the command line program and the library.";
+    break;
+  case ARG_TOKEN_USE_WIT:
+    usages[0] = "<auto_true_or_false>";
+    examples[0] = "auto";
+    examples[1] = "false";
+    *text = "Specifies whether to use the precomputed word info table when "
+            "generating moves. The table stores, for each word, the letters "
+            "usable in longer words containing it as a substring, letting "
+            "movegen prune subracks that cannot fit: about 9% faster "
+            "simulation with a wordmap. auto (the default for the command "
+            "line program and the library) uses one when this machine has "
+            "the disk and memory for it, building a missing one on first use "
+            "for data from 'data fetch'; true requires one; false never uses "
+            "one. Built with 'convert kwg2wit'.";
+    break;
+  case ARG_TOKEN_ANALYZE_ENDGAME_SPREAD:
+    usages[0] = "<true_or_false>";
+    examples[0] = "true";
+    *text = "Specifies whether analyze solves its endgame turns with a full "
+            "window, which reports their exact spreads and spread lost. False "
+            "by default: they are solved first-win, which proves each play's "
+            "result -- win, draw or loss -- and grades a turn on the result "
+            "alone, much faster.";
+    break;
+  case ARG_TOKEN_ANALYZE_PEG_MAX_BAG:
+    usages[0] = "<bag_size>";
+    examples[0] = "2";
+    examples[1] = "0";
+    *text = "The largest bag, from 0 to 4 tiles, that analyze solves with "
+            "the pre-endgame solver; larger bags are simulated. 0 simulates "
+            "every pre-endgame turn. Defaults to 1: a complete pre-endgame "
+            "solve at 2 or more in the bag can take well over 20 minutes, "
+            "and a time limit (-pegtlim) gives the quicker staged cascade "
+            "instead.";
+    break;
+  case ARG_TOKEN_SETTINGS_VERSION:
+    usages[0] = "<version>";
+    examples[0] = "2";
+    *text = "Records the format of a saved settings file; -savesettings "
+            "writes it. A file saved by an older version recorded every "
+            "setting, including defaults that have since changed, so those "
+            "settings are dropped when it is loaded and the new defaults "
+            "apply.";
+    break;
+  default:
+    break;
+  }
+}
+
 // The help for the PAT options (see add_help_arg_to_string_builder).
 static void add_pat_help_arg(arg_token_t arg_token, const char **usages,
                              const char **examples, const char **text) {
@@ -2167,59 +2263,10 @@ void add_help_arg_to_string_builder(const Config *config, int token,
              "'l1' or 'l2' options.";
       break;
     case ARG_TOKEN_USE_WMP:
-      usages[0] = "<auto_true_or_false>";
-      examples[0] = "auto";
-      examples[1] = "false";
-      text = "Specifies whether to use word maps as opposed to KWGs when "
-             "generating moves; they are 3-4 times faster but use more memory. "
-             "auto (the default for the command line program and the "
-             "library's magpie_create()) uses one when this machine has the "
-             "disk and memory for it, building a missing one on first use for "
-             "data from 'data fetch', and otherwise plays without; true "
-             "requires one; false never uses one. The wordmap, word info table "
-             "and rack info table share the room, wordmaps first. Off for the "
-             "browser build and browser games.";
-      break;
     case ARG_TOKEN_USE_RIT:
-      usages[0] = "<auto_true_or_false>";
-      examples[0] = "auto";
-      examples[1] = "false";
-      text = "Specifies whether to use the precomputed rack info table when "
-             "generating moves. The table stores leave values for every "
-             "possible full rack, so a single hash lookup replaces repeated "
-             "KLV traversal: about 17% faster simulation with a wordmap. It "
-             "belongs to a lexicon played with a set of leaves, and is the "
-             "file <lexicon>.<leaves>.rit (or <lexicon>.rit for the lexicon's "
-             "own leaves), built with 'convert klvwmp2rit'. auto (the default "
-             "for the command line program and the library) uses one that is "
-             "there when this machine has the memory for it, and is never "
-             "built by itself: it is 1.9 GB for English. true requires one; "
-             "false never uses one.";
-      break;
     case ARG_TOKEN_USE_MMAP_FOR_RIT:
-      usages[0] = "<true_or_false>";
-      examples[0] = "true";
-      examples[1] = "false";
-      text = "When true, the rack info table is memory-mapped instead of read "
-             "into allocated memory. This eliminates the startup cost of "
-             "loading the file and lets processes using the same data share "
-             "one copy, but pages are faulted on demand during play. Only "
-             "supported on little-endian architectures, where it is the "
-             "default for the command line program and the library.";
-      break;
     case ARG_TOKEN_USE_WIT:
-      usages[0] = "<auto_true_or_false>";
-      examples[0] = "auto";
-      examples[1] = "false";
-      text = "Specifies whether to use the precomputed word info table when "
-             "generating moves. The table stores, for each word, the letters "
-             "usable in longer words containing it as a substring, letting "
-             "movegen prune subracks that cannot fit: about 9% faster "
-             "simulation with a wordmap. auto (the default for the command "
-             "line program and the library) uses one when this machine has "
-             "the disk and memory for it, building a missing one on first use "
-             "for data from 'data fetch'; true requires one; false never uses "
-             "one. Built with 'convert kwg2wit'.";
+      add_analyze_and_settings_help_arg(arg_token, usages, examples, &text);
       break;
     case ARG_TOKEN_LEAVES:
       usages[0] = "<leaves>";
@@ -2618,24 +2665,9 @@ void add_help_arg_to_string_builder(const Config *config, int token,
              "and the mistake index (MI) in its output. Off by default.";
       break;
     case ARG_TOKEN_ANALYZE_ENDGAME_SPREAD:
-      usages[0] = "<true_or_false>";
-      examples[0] = "true";
-      text = "Specifies whether analyze solves its endgame turns with a full "
-             "window, which reports their exact spreads and spread lost. False "
-             "by default: they are solved first-win, which proves each play's "
-             "result -- win, draw or loss -- and grades a turn on the result "
-             "alone, much faster.";
-      break;
     case ARG_TOKEN_ANALYZE_PEG_MAX_BAG:
-      usages[0] = "<bag_size>";
-      examples[0] = "2";
-      examples[1] = "0";
-      text = "The largest bag, from 0 to 4 tiles, that analyze solves with "
-             "the pre-endgame solver; larger bags are simulated. 0 simulates "
-             "every pre-endgame turn. Defaults to 1: a complete pre-endgame "
-             "solve at 2 or more in the bag can take well over 20 minutes, "
-             "and a time limit (-pegtlim) gives the quicker staged cascade "
-             "instead.";
+    case ARG_TOKEN_SETTINGS_VERSION:
+      add_analyze_and_settings_help_arg(arg_token, usages, examples, &text);
       break;
     case ARG_TOKEN_RANDOM_SEED:
       usages[0] = "<random_seed>";
@@ -2845,15 +2877,6 @@ void add_help_arg_to_string_builder(const Config *config, int token,
              "settings.txt after every command. It is false by default. The "
              "saved settings are loaded on a startup that sets this to true, "
              "and ignored on any other.";
-      break;
-    case ARG_TOKEN_SETTINGS_VERSION:
-      usages[0] = "<version>";
-      examples[0] = "2";
-      text = "Records the format of a saved settings file; -savesettings "
-             "writes it. A file saved by an older version recorded every "
-             "setting, including defaults that have since changed, so those "
-             "settings are dropped when it is loaded and the new defaults "
-             "apply.";
       break;
     case ARG_TOKEN_AUTOSAVE_GCG:
       usages[0] = "<true_or_false>";
@@ -4837,6 +4860,15 @@ void config_fill_peg_args(Config *config, PegArgs *peg_args) {
   // an answer from its last completed stage.
   const bool complete =
       config->peg_time_limit_seconds == 0 && config->peg_num_stages == 0;
+  const int *stage_top_k = NULL;
+  int num_stages = 0;
+  if (config->peg_num_stages > 0) {
+    stage_top_k = config->peg_stage_top_k;
+    num_stages = config->peg_num_stages;
+  } else if (complete) {
+    stage_top_k = PEG_COMPLETE_STAGE_COUNTS;
+    num_stages = 1;
+  }
   // The nested schedule. A complete solve uses every inner candidate (up to
   // PEG_NEST_FIELD_MAX), every inner scenario, inner endgames to the end of
   // the game, and nesting until the game resolves, so no line ends in a
@@ -4872,12 +4904,7 @@ void config_fill_peg_args(Config *config, PegArgs *peg_args) {
   peg_args_fill(
       config->game, config->thread_control, config->num_threads,
       /*time_budget_seconds=*/config->peg_time_limit_seconds,
-      /*max_stage=*/0, /*greedy_seed_only=*/false,
-      /*stage_top_k=*/
-      config->peg_num_stages > 0
-          ? config->peg_stage_top_k
-          : (complete ? PEG_COMPLETE_STAGE_COUNTS : NULL),
-      config->peg_num_stages > 0 ? config->peg_num_stages : (complete ? 1 : 0),
+      /*max_stage=*/0, /*greedy_seed_only=*/false, stage_top_k, num_stages,
       /*inner_top_k=*/0,
       config->peg_pessimistic ? PEG_OPP_PESSIMISTIC : PEG_OPP_RATIONAL,
       config->peg_scenario_stride, /*nested_enabled=*/config->peg_nested,
@@ -7934,8 +7961,9 @@ static const char *config_wordmap_for_first_use(Config *config,
 // Loads a table option's value into *use and *automatic: true or false, or
 // auto, which uses the table when this machine has room for it (and sets
 // *use, the setting's "wanted"). Leaves both when the option is absent.
-static void config_load_table_setting(Config *config, arg_token_t arg_token,
-                                      bool *use, bool *automatic,
+static void config_load_table_setting(const Config *config,
+                                      arg_token_t arg_token, bool *use,
+                                      bool *automatic,
                                       ErrorStack *error_stack) {
   const char *value = config_get_parg_value(config, arg_token, 0);
   if (!value) {

@@ -3,6 +3,7 @@
 #include "../src/compat/ctime.h"
 #include "../src/ent/endgame_results.h"
 #include "../src/ent/game.h"
+#include "../src/ent/move.h"
 #include "../src/impl/cgp.h"
 #include "../src/impl/config.h"
 #include "../src/impl/endgame.h"
@@ -13,6 +14,7 @@
 #include "test_util.h"
 #include <assert.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 // Measures the timed cascade's refinements (PegArgs.first_win_intermediate,
@@ -44,13 +46,16 @@ static void peg_cascade_bench_set_variant(PegArgs *args, int variant,
   args->first_win_intermediate = variant == 1 || variant == 4;
   args->skip_noncutting_stages = variant == 2 || variant == 4;
   args->final_stage_cutoff = variant == 3 || variant == 4;
-  if (variant == 5) {
-    args->scenario_stride = bag_size >= 4 ? 7 : (bag_size == 3 ? 5 : 1);
+  if (variant == 5 && bag_size == 3) {
+    args->scenario_stride = 5;
+  } else if (variant == 5 && bag_size >= 4) {
+    args->scenario_stride = 7;
   }
 }
 
 // Cuts the opponent's rack out of a fixture line ("<board> AB/CD ..." becomes
 // "<board> AB/ ...") in place.
+// cppcheck-suppress constParameterPointer
 static void peg_cascade_bench_strip_opp_rack(char *line) {
   char *space = strchr(line, ' ');
   if (space == NULL) {
@@ -129,10 +134,13 @@ static void run_peg_cascade_bench(const char *cgp_file, int first,
       if (same || same_win) {
         agree[variant]++;
       }
+      const char *verdict = "";
+      if (!same) {
+        verdict = same_win ? "  (tied)" : "  DIFFERS";
+      }
       printf("  %4d  %-16s  %8.2fs  %-18s  %6.2f%%%s\n", index,
              peg_cascade_bench_names[variant], seconds,
-             string_builder_peek(move_sb), 100.0 * result.best_win,
-             same ? "" : (same_win ? "  (tied)" : "  DIFFERS"));
+             string_builder_peek(move_sb), 100.0 * result.best_win, verdict);
       string_builder_destroy(move_sb);
       peg_result_destroy(&result);
     }

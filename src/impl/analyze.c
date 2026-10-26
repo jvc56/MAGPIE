@@ -424,6 +424,34 @@ static const char *analyze_result_label(int result) {
   return result < 0 ? "L" : "D";
 }
 
+// The spread cell of an endgame turn's row (NULL for another turn): the
+// spread, or for a first-win turn, which knows only results, W, D or L.
+static char *analyze_endgame_spread_cell(const TurnResultMove *trm,
+                                         bool is_endgame, bool show_results) {
+  if (!is_endgame) {
+    return NULL;
+  }
+  if (show_results) {
+    return string_duplicate(analyze_result_label(trm->endgame_spread));
+  }
+  return get_formatted_string("%d", trm->endgame_spread);
+}
+
+// The diff row's spread cell: the spread lost, or "-" for a first-win turn.
+static char *analyze_endgame_spread_diff_cell(const TurnResultMove *best,
+                                              const TurnResultMove *actual,
+                                              bool is_endgame,
+                                              bool show_results) {
+  if (!is_endgame) {
+    return NULL;
+  }
+  if (show_results) {
+    return string_duplicate("-");
+  }
+  return get_formatted_string("%d",
+                              best->endgame_spread - actual->endgame_spread);
+}
+
 static void add_move_comparison_rows(StringGrid *move_sg, const TurnResult *tr,
                                      const Board *board,
                                      const LetterDistribution *ld,
@@ -456,11 +484,7 @@ static void add_move_comparison_rows(StringGrid *move_sg, const TurnResult *tr,
       move_sg, 1, "Best", string_duplicate("1"), best_move_str, best_leave_str,
       get_formatted_string("%d",
                            equity_to_int(move_get_score(&best_trm->move))),
-      is_endgame ? (show_results
-                        ? string_duplicate(
-                              analyze_result_label(best_trm->endgame_spread))
-                        : get_formatted_string("%d", best_trm->endgame_spread))
-                 : NULL,
+      analyze_endgame_spread_cell(best_trm, is_endgame, show_results),
       best_trm->win_pct >= 0.0 ? get_formatted_string("%.2f", best_trm->win_pct)
                                : string_duplicate("-"),
       best_trm->win_pct >= 0.0 ? get_formatted_string("%.2f", best_trm->equity)
@@ -481,12 +505,7 @@ static void add_move_comparison_rows(StringGrid *move_sg, const TurnResult *tr,
       string_duplicate(tr->actual.display_move), actual_leave_str,
       get_formatted_string("%d",
                            equity_to_int(move_get_score(&actual_trm->move))),
-      is_endgame
-          ? (show_results
-                 ? string_duplicate(
-                       analyze_result_label(actual_trm->endgame_spread))
-                 : get_formatted_string("%d", actual_trm->endgame_spread))
-          : NULL,
+      analyze_endgame_spread_cell(actual_trm, is_endgame, show_results),
       actual_trm->win_pct >= 0.0
           ? get_formatted_string("%.2f", actual_trm->win_pct)
           : string_duplicate("-"),
@@ -504,12 +523,8 @@ static void add_move_comparison_rows(StringGrid *move_sg, const TurnResult *tr,
   add_move_comparison_row(
       move_sg, 3, "Diff", string_duplicate("-"), string_duplicate("-"),
       string_duplicate("-"), get_formatted_string("%d", score_diff),
-      is_endgame
-          ? (show_results
-                 ? string_duplicate("-")
-                 : get_formatted_string("%d", best_trm->endgame_spread -
-                                                  actual_trm->endgame_spread))
-          : NULL,
+      analyze_endgame_spread_diff_cell(best_trm, actual_trm, is_endgame,
+                                       show_results),
       get_formatted_string("%.2f", win_pct_lost),
       get_formatted_string("%.2f", equity_lost),
       is_endgame ? string_duplicate("-")
