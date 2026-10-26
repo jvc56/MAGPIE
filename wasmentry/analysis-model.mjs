@@ -1,38 +1,7 @@
+import { t } from "./i18n.mjs";
 // Position and result adapters. Analysis remains in MAGPIE, never in the UI.
-export const LEXICA = ["CSW24", "NWL23"];
-export const VALUES = {
-  A: 1,
-  B: 3,
-  C: 3,
-  D: 2,
-  E: 1,
-  F: 4,
-  G: 2,
-  H: 4,
-  I: 1,
-  J: 8,
-  K: 5,
-  L: 1,
-  M: 3,
-  N: 1,
-  O: 1,
-  P: 3,
-  Q: 10,
-  R: 1,
-  S: 1,
-  T: 1,
-  U: 1,
-  V: 4,
-  W: 4,
-  X: 8,
-  Y: 4,
-  Z: 10,
-  "?": 0,
-};
-const COUNTS = [
-  9, 2, 2, 4, 12, 2, 3, 2, 9, 1, 1, 4, 2, 6, 8, 2, 1, 6, 4, 6, 4, 2, 2, 1, 2,
-  1,
-];
+import { LEXICA, tileCounts } from "./lexica.mjs";
+export { LEXICA } from "./lexica.mjs";
 export function emptyPosition(lexicon = "CSW24") {
   return parseCGP(`${Array(15).fill("15").join("/")} / 0/0 0 -lex ${lexicon}`);
 }
@@ -58,35 +27,35 @@ export function parseCGP(text, defaultLexicon = "CSW24") {
     !/^[0-6]$/.test(zeros || "")
   ) {
     throw new Error(
-      "Use CGP: board rack/opponent score/score scoreless-turns -lex CSW24.",
+      t("Use CGP: board rack/opponent score/score scoreless-turns -lex CSW24."),
     );
   }
   let lexicon = defaultLexicon;
   if (options.length) {
     if (options.length !== 2 || !["-lex", "lex"].includes(options[0])) {
-      throw new Error("This preview accepts only the -lex option in a CGP.");
+      throw new Error(t("This preview accepts only the -lex option in a CGP."));
     }
     lexicon = options[1].replace(/;$/, "");
   }
   if (!LEXICA.includes(lexicon))
-    throw new Error("This preview supports CSW24 and NWL23.");
+    throw new Error(t("This preview supports CSW24, NWL23 and FRA24 (ODS 9)."));
   const rows = encoded.split("/");
-  if (rows.length !== 15) throw new Error("The board must have 15 rows.");
+  if (rows.length !== 15) throw new Error(t("The board must have 15 rows."));
   const board = rows.map((row) => {
     if (!/^(?:[A-Za-z]|[1-9]\d*)+$/.test(row))
       throw new Error(
-        "Invalid board row. Lowercase letters designate blanks.",
+        t("Invalid board row. Lowercase letters designate blanks."),
       );
     const cells = [];
     for (const token of row.match(/[A-Za-z]|\d+/g)) {
       if (/^\d/.test(token)) {
         if (Number(token) > 15)
-          throw new Error("A board row is longer than 15 squares.");
+          throw new Error(t("A board row is longer than 15 squares."));
         cells.push(...Array(Number(token)).fill(""));
       } else cells.push(token);
     }
     if (cells.length !== 15)
-      throw new Error("Every board row must contain 15 squares.");
+      throw new Error(t("Every board row must contain 15 squares."));
     return cells;
   });
   const position = {
@@ -103,7 +72,7 @@ export function parseCGP(text, defaultLexicon = "CSW24") {
       (n) => !Number.isSafeInteger(n) || Math.abs(n) > 10000,
     )
   )
-    throw new Error("Scores must be between -10000 and 10000.");
+    throw new Error(t("Scores must be between -10000 and 10000."));
   inventory(position); // Reject impossible tile counts before handing them to C.
   return position;
 }
@@ -130,7 +99,7 @@ export function restorePosition(saved) {
         row.some((owner) => ![-1, 0, 1].includes(owner)),
     )
   ) {
-    throw new Error("Invalid saved tile ownership.");
+    throw new Error(t("Invalid saved tile ownership."));
   }
   position.onTurn = saved.onTurn;
   position.owners = saved.owners.map((row, r) =>
@@ -158,7 +127,7 @@ export function toCGP(position) {
 }
 export function inventory(position) {
   const unseen = Object.fromEntries(
-    COUNTS.map((n, i) => [String.fromCharCode(65 + i), n]),
+    tileCounts(position.lexicon).map((n, i) => [String.fromCharCode(65 + i), n]),
   );
   unseen["?"] = 2;
   for (const tile of [
@@ -168,13 +137,13 @@ export function inventory(position) {
     const letter = tile === tile.toLowerCase() ? "?" : tile;
     if (--unseen[letter] < 0)
       throw new Error(
-        `Too many ${letter === "?" ? "blank" : letter} tiles in the position.`,
+        t`Too many ${letter === "?" ? t("blank") : letter} tiles in the position.`,
       );
   }
   const bag = { ...unseen };
   for (const tile of position.racks[1])
     if (--bag[tile] < 0)
-      throw new Error(`Opponent rack contains unavailable ${tile} tiles.`);
+      throw new Error(t`Opponent rack contains unavailable ${tile} tiles.`);
   const unseenCount = Object.values(unseen).reduce((a, b) => a + b, 0);
   // A partial/unknown opponent rack still occupies up to seven unseen tiles.
   return { unseen, unseenCount, bagCount: Math.max(0, unseenCount - 7) };
@@ -332,13 +301,13 @@ export function previewMove(position, move) {
 }
 export function analysisCommands(position, mode, settings) {
   const { bagCount, unseenCount } = inventory(position);
-  if (!position.racks[0]) throw new Error("Enter the rack to analyze.");
+  if (!position.racks[0]) throw new Error(t("Enter the rack to analyze."));
   if (position.zeros >= 6)
-    throw new Error("This game has ended after six scoreless turns.");
+    throw new Error(t("This game has ended after six scoreless turns."));
   if (mode === "peg" && (bagCount < 1 || bagCount > 3))
-    throw new Error("PEG needs 1–3 tiles in the bag.");
+    throw new Error(t("PEG needs 1–3 tiles in the bag."));
   if (mode === "endgame" && bagCount !== 0)
-    throw new Error("Endgame needs an empty bag.");
+    throw new Error(t("Endgame needs an empty bag."));
   const prepared = structuredClone(position);
   if (mode === "endgame" && prepared.racks[1].length !== unseenCount) {
     const { unseen } = inventory(position);
@@ -347,11 +316,11 @@ export function analysisCommands(position, mode, settings) {
       .join("");
   }
   const ttMiB = settings.ttMiB ?? 32;
-  if (![16, 32].includes(ttMiB)) throw new Error("Search memory must be 16 or 32 MiB.");
+  if (![16, 32].includes(ttMiB)) throw new Error(t("Search memory must be 16 or 32 MiB."));
   const solveSeconds = settings.solveToCompletion ? 0 : settings.seconds;
   const common = `-threads ${settings.threads} -tlim ${["peg", "endgame"].includes(mode) ? solveSeconds : settings.seconds}`;
   const explicitMoves = settings.moves?.map(move => move.replace(/[()]/g, ""));
-  if (explicitMoves && !explicitMoves.length) throw new Error("Select at least one play to simulate.");
+  if (explicitMoves && !explicitMoves.length) throw new Error(t("Select at least one play to simulate."));
   const displayCount = Math.max(101, explicitMoves?.length || 0);
   const commands = [
     `set -lex ${position.lexicon} -wmp ${settings.wmp ? "true" : "false"} -numplays ${explicitMoves?.length || (mode === "kibitz" ? 100 : settings.candidates)} -s1 equity -s2 equity -r1 all -r2 all -maxnumdplays ${mode === "sim" ? displayCount : 100} -shplies ${settings.plies} -ttfraction ${ttMiB / 256} -showbu false -shwithmoves false`,

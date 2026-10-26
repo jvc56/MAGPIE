@@ -402,6 +402,13 @@
             aria-labelledby="appearance-settings-heading"
           >
             <h3 id="appearance-settings-heading">Appearance</h3>
+            <label class="setting-row" for="language">
+              <span class="setting-name">Interface language</span>
+              <select id="language">
+                <option value="en" lang="en">English</option>
+                <option value="fr" lang="fr">Français</option>
+              </select>
+            </label>
             <label class="setting-row" for="theme">
               <span class="setting-name">Theme</span>
               <select id="theme">
@@ -450,6 +457,7 @@
               <select id="lexicon">
                 <option value="CSW24">CSW24 · Collins</option>
                 <option value="NWL23">NWL23 · North America</option>
+                <option value="FRA24">FRA24 · Français (ODS 9)</option>
               </select>
             </label>
           </section>
@@ -462,20 +470,22 @@
             <p id="settings-busy" class="hint" hidden>
               Stop analysis to change these settings.
             </p>
-            <label class="setting-row" for="wmp-source">
-              <span class="setting-name">Word maps (experimental)</span>
-              <select id="wmp-source">
-                <option value="off">Off</option>
-                <option value="build">Build on this device</option>
-              </select>
-            </label>
-            <label class="setting-row" for="wmp-cache-enabled">
-              <span class="setting-name">Cache WMP on this device</span>
-              <input id="wmp-cache-enabled" type="checkbox" />
-            </label>
-            <div id="wmp-files" aria-label="Cached word maps"></div>
-            <p id="wmp-cache-status" class="hint" role="status"></p>
-            <button id="stop-wmp" type="button" hidden>Stop</button>
+            <div id="wmp-settings">
+              <label class="setting-row" for="wmp-source">
+                <span class="setting-name">Word maps (experimental)</span>
+                <select id="wmp-source">
+                  <option value="off">Off</option>
+                  <option value="build">Build on this device</option>
+                </select>
+              </label>
+              <label class="setting-row" for="wmp-cache-enabled">
+                <span class="setting-name">Cache WMP on this device</span>
+                <input id="wmp-cache-enabled" type="checkbox" />
+              </label>
+              <div id="wmp-files" aria-label="Cached word maps"></div>
+              <p id="wmp-cache-status" class="hint" role="status"></p>
+              <button id="stop-wmp" type="button" hidden>Stop</button>
+            </div>
             <label class="setting-row" for="auto-analyze"
               ><span class="setting-name">Auto-analyze turns</span
               ><select id="auto-analyze">
@@ -649,7 +659,7 @@
             <p>A CGP describes a position in four space-separated fields:</p>
             <code>board rack1/rack2 score1/score2 scoreless-turns</code>
             <p>Board: 15 rows separated by <code>/</code>. Numbers count empty squares; letters are tiles, with lowercase letters for designated blanks. For example, <code>7A7</code> is a row with A in the center.</p>
-            <p>Racks: uppercase letters and <code>?</code> for blanks; an empty opponent rack means unknown (in an endgame it is inferred from the unseen tiles). Scores and racks list Player 1 first. The last field counts consecutive scoreless turns. Optionally append <code>-lex CSW24</code> or <code>-lex NWL23</code>; otherwise the current lexicon is used.</p>
+            <p>Racks: uppercase letters and <code>?</code> for blanks; an empty opponent rack means unknown (in an endgame it is inferred from the unseen tiles). Scores and racks list Player 1 first. The last field counts consecutive scoreless turns. Optionally append <code>-lex CSW24</code>, <code>-lex NWL23</code> or <code>-lex FRA24</code>; otherwise the current lexicon is used.</p>
             <p>Player 1 is on turn. History starts at this position. Leave empty to start a new board.</p>
           </div>
           <textarea id="new-game-cgp" rows="3" spellcheck="false" autocomplete="off" aria-describedby="new-game-cgp-help new-game-cgp-status"></textarea>

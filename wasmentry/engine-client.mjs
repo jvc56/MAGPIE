@@ -1,3 +1,5 @@
+import { t } from "./i18n.mjs";
+import { LEXICA, letterDistribution } from "./lexica.mjs";
 import { challengeRuleCode } from "./game-actions.mjs";
 import { XS_OPERATIONS, xsAssets, validateLinkToken } from "./xs-links.mjs";
 export class EngineClient extends EventTarget {
@@ -21,7 +23,7 @@ export class EngineClient extends EventTarget {
     this.ready.catch(() => {});
     this.worker.onmessage = ({ data }) => {
       if (data.type === "fatal" || data.type === "init_failed") {
-        this.fail(new Error(`The engine stopped. Reload to try again. ${this.lastFatalLog || data.text}`));
+        this.fail(new Error(t`The engine stopped. Reload to try again. ${this.lastFatalLog || data.text}`));
         return;
       }
       if (data.requestId != null && data.requestId !== this.pending?.id) return;
@@ -55,7 +57,7 @@ export class EngineClient extends EventTarget {
     };
     this.worker.onerror = (event) => {
       const error = new Error(
-        `The engine worker stopped. Reload to try again. ${this.lastLog || event.message || ""}`,
+        t`The engine worker stopped. Reload to try again. ${this.lastLog || event.message || ""}`,
       );
       this.fail(error);
     };
@@ -88,28 +90,28 @@ export class EngineClient extends EventTarget {
   }
   request(type, data, response) {
     if (this.fatalError) return Promise.reject(this.fatalError);
-    if (this.pending) return Promise.reject(new Error("The engine is busy."));
+    if (this.pending) return Promise.reject(new Error(t("The engine is busy.")));
     return new Promise((resolve, reject) => {
       const id = ++this.nextRequestId;
       const limit = ["import_gcg", "game_action"].includes(type) ? 30000 : 0;
       const watchdog = limit ? setTimeout(() => {
-        this.fail(new Error("Game loading or editing timed out. Reload to restart the engine; the current record was not changed."));
+        this.fail(new Error(t("Game loading or editing timed out. Reload to restart the engine; the current record was not changed.")));
       }, limit) : null;
       this.pending = { id, response, resolve, reject, watchdog };
       this.worker.postMessage({ type, data, requestId:id });
     });
   }
   async prepare(lexicon) {
-    if (!["CSW24", "NWL23"].includes(lexicon)) {
-      throw new Error("Choose a supported lexicon before preparing the engine.");
+    if (!LEXICA.includes(lexicon)) {
+      throw new Error(t("Choose a supported lexicon before preparing the engine."));
     }
     if (this.fatalError) throw this.fatalError;
     await this.ready;
     const files = [
       `lexica/${lexicon}.kwg`,
       `lexica/${lexicon}.klv2`,
-      "letterdistributions/english.csv",
-      "strategy/winpct_english.csv",
+      `letterdistributions/${letterDistribution(lexicon)}.csv`,
+      `strategy/winpct_${letterDistribution(lexicon)}.csv`,
       "layouts/standard15.txt",
     ];
     for (const file of files) {
@@ -165,14 +167,17 @@ export class EngineClient extends EventTarget {
     return this.request("import_gcg", { text, lexicon }, "gcg_loaded");
   }
   async convertXS(operation, text, lexicon = "CSW24") {
-    if (!Object.hasOwn(XS_OPERATIONS, operation)) throw new Error("Unknown link operation.");
+    if (operation.startsWith("encode") && lexicon === "FRA24") {
+      throw new Error(t("French share links are not available yet. Copy CGP or save GCG instead."));
+    }
+    if (!Object.hasOwn(XS_OPERATIONS, operation)) throw new Error(t("Unknown link operation."));
     if (operation.startsWith("decode")) validateLinkToken(text);
     if (typeof text !== "string" || text.includes("\0") || text.length > 1024 * 1024) {
-      throw new Error("This position or game is too large or contains invalid text.");
+      throw new Error(t("This position or game is too large or contains invalid text."));
     }
     // XSG v2 starts at an empty board. Never silently discard a GCG's starting position.
     if (operation === "encodeGame" && /^#cgp\s/im.test(text)) {
-      throw new Error("Games started from a position cannot be shared as game links yet. Copy a position link or save the GCG instead.");
+      throw new Error(t("Games started from a position cannot be shared as game links yet. Copy a position link or save the GCG instead."));
     }
     await this.ready;
     const profile = lexicon === "NWL23" ? 2 : 1;

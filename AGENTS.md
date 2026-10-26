@@ -20,7 +20,7 @@ make prepare_data              # validate/upgrade CSW24 WIT; create missing RIT
 make magpie BUILD=no_pgo_release # optimized build without PGO
 make magpie_test               # build test binary
 make magpie_test BUILD=no_pgo_release # optimized test binary
-make magpie BUILD=profile      # profiling build
+make magpie_test BUILD=sanitize # dev's ASAN/UBSAN checks at -O1, as CI runs the tests
 make magpie BUILD=thread       # thread sanitizer build
 make leavegen_pgo_release      # leavegen-trained PGO build
 make libmagpie                 # shared library; API is src/impl/cmd_api.h
@@ -40,7 +40,7 @@ profile data, and trains the current source on static autoplay. Experimental `pg
 source changes and on each target architecture. Override `PGO_CC`,
 `LLVM_PROFDATA`, and `PGO_LDFLAGS` for versioned toolchains.
 
-`BOARD_DIM` (default 15), `RACK_SIZE` (default 7). Parallel make is automatic. **Use `make release` for production jobs or `BUILD=no_pgo_release` for quick optimized builds** — dev is `-O0` + ASAN/UBSAN, very slow.
+`BOARD_DIM` (default 15), `RACK_SIZE` (default 7). Parallel make is automatic. **Use `make release` for production jobs or `BUILD=no_pgo_release` for quick optimized builds** — dev is `-O0` + ASAN/UBSAN, very slow; `BUILD=sanitize` makes the same checks at `-O1`, about 1.6 times as fast.
 
 ## Tests
 
@@ -103,7 +103,12 @@ Keep performance work and quality work separate.
 
 ### Performance work
 
-Make it faster **without changing behavior**. Validate with autoplay or on-demand tests comparing before/after. Profile with `BUILD=profile` and `sample <pid>` on macOS. Measure the specific functions changed, not just wall-clock time.
+Make it faster **without changing behavior**. Validate with autoplay or on-demand tests comparing before/after. Measure the specific functions changed, not just wall-clock time.
+
+Profile the optimized binary itself (`make release` or `BUILD=no_pgo_release`), not a build with inlining turned off, which is a different program. These builds carry debug information, which leaves their code all but unchanged. An inlined function's time counts toward its caller, so split a hot function up by inlined function and source line.
+
+- **macOS:** use the CPU Profiler (`xctrace`) through the scripts of the `cycle-profile` skill, in `.claude/skills/cycle-profile/`. Its `SKILL.md` gives the procedure and the checks. The scripts weight samples by cycles, attribute them to inlined functions and source lines, refuse a stale dSYM and check their own symbol lookups. `sample` misattributes stalls.
+- **Linux:** use `perf record`. `perf report --inline` lists inlined functions only with some perf builds, while `addr2line -i` and `llvm-symbolizer --inlines` always do.
 
 ### Feature flags must be free when off
 
