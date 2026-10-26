@@ -767,8 +767,10 @@ static void parse_edit_move_buffer(TuiGameState *state) {
   state->edit_move_leave[0] = '\0';
   state->edit_move_valid = true;
   // Drop any stale preview from the prior parse. We only re-enable
-  // it below when the engine accepts a TILE_PLACEMENT move — bare
-  // words / partial / invalid / exchange / pass don't get ghosted.
+  // it below when the engine accepts a move (and for placements
+  // still being shaped) — bare words / partial / invalid don't get
+  // ghosted. An exchange's preview ghosts its tiles on the rack and
+  // a pass's ghosts nothing; play-vs-computer commits either one.
   state->edit_preview_move_valid = false;
 
   const char *buf = state->edit_move_buf;
@@ -837,11 +839,13 @@ static void parse_edit_move_buffer(TuiGameState *state) {
     state->edit_move_score =
         score_canonical_move(state, state->edit_move_canonical,
                              state->history[state->edit_history_idx].player_idx,
-                             /*capture_move=*/NULL);
+                             state->edit_preview_move);
     if (state->edit_move_score < 0) {
       // Engine rejected (e.g., bag too small for an exchange).
       // Treat that as invalid so the row colors red.
       state->edit_move_valid = false;
+    } else {
+      state->edit_preview_move_valid = true;
     }
     return;
   }
@@ -852,6 +856,8 @@ static void parse_edit_move_buffer(TuiGameState *state) {
     (void)snprintf(state->edit_move_canonical,
                    sizeof(state->edit_move_canonical), "pass");
     state->edit_move_score = 0;
+    move_set_as_pass(state->edit_preview_move);
+    state->edit_preview_move_valid = true;
     sync_player_rack_to_editor(state);
     return;
   }
@@ -889,9 +895,11 @@ static void parse_edit_move_buffer(TuiGameState *state) {
       state->edit_move_score = score_canonical_move(
           state, state->edit_move_canonical,
           state->history[state->edit_history_idx].player_idx,
-          /*capture_move=*/NULL);
+          state->edit_preview_move);
       if (state->edit_move_score < 0) {
         state->edit_move_valid = false;
+      } else {
+        state->edit_preview_move_valid = true;
       }
       return;
     }
