@@ -71,7 +71,8 @@ test('stopped PEG resumes in this session and exposes real weighted outcomes', a
           return fields.join(' ');
         }
         if (!command.startsWith('peg ')) return command;
-        command = command.replace(/-pegtlim \S+/, '-pegtlim 0') + ' -pegtopk 16,8 -pegnested false';
+        // The rational opponent keeps the resumed solve within the timeout.
+        command = command.replace(/-pegtlim \S+/, '-pegtlim 0') + ' -pegtopk 16,8 -pegnested false -pegpess false';
         window.pegCommands.push(command);
         return command;
       });
