@@ -1,3 +1,4 @@
+import { t } from "./i18n.mjs";
 // Some static hosts ignore _headers. A same-origin service worker can supply
 // COOP/COEP on the first reload without moving any computation off the device.
 export async function ensureIsolation() {
@@ -17,12 +18,12 @@ export async function ensureIsolation() {
   }
   if (!globalThis.isSecureContext || !("serviceWorker" in navigator)) {
     throw new Error(
-      "The engine needs HTTPS (or localhost) and a browser with WebAssembly threads and service workers.",
+      t("The engine needs HTTPS (or localhost) and a browser with WebAssembly threads and service workers."),
     );
   }
   if (window.top !== window.self) {
     throw new Error(
-      "Open this preview in its own browser tab to enable the engine.",
+      t("Open this preview in its own browser tab to enable the engine."),
     );
   }
   let reloaded = url.searchParams.has(reloadParam);
@@ -31,7 +32,7 @@ export async function ensureIsolation() {
     // Stop automatic retries, but permit a later user-initiated reload.
     clearReload();
     throw new Error(
-      "This browser could not enable shared memory. Open the preview in a current Chrome, Firefox or Safari tab.",
+      t("This browser could not enable shared memory. Open the preview in a current Chrome, Firefox or Safari tab."),
     );
   }
   const workerURL = new URL("./isolation-worker.js", import.meta.url);
@@ -72,7 +73,7 @@ export async function ensureIsolation() {
         cleanup();
         reject(
           new Error(
-            "Browser shared-memory setup timed out while activating its service worker. Reload the page to retry.",
+            t("Browser shared-memory setup timed out while activating its service worker. Reload the page to retry."),
           ),
         );
       }, 15000);
