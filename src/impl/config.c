@@ -8384,14 +8384,15 @@ config_choose_auto_tables(Config *config, const char *const lexicons[2],
       const ContributeTable *table = &tables[table_idx];
       if (table->chosen) {
         string_builder_add_formatted_string(
-            used, "%s%s", string_builder_length(used) > 0 ? ", " : "", what);
+            used, "%susing %s", string_builder_length(used) > 0 ? ", " : "",
+            what);
         continue;
       }
       use[type][player_idx] = false;
       if (table->skip == CONTRIBUTE_TABLE_NO_WORDMAP) {
         // Taken only with the wordmap, which was skipped for want of room.
         string_builder_add_formatted_string(
-            skipped, "%s%s skipped: it goes with the wordmap",
+            skipped, "%s%s not built (it requires a wordmap)",
             string_builder_length(skipped) > 0 ? "; " : "", what);
         continue;
       }

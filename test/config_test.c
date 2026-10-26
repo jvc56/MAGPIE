@@ -2716,6 +2716,8 @@ static void test_config_builds_missing_tables_on_first_use(void) {
       assert(line);
       assert(strstr(line, " on disk, and up to "));
     }
+    assert(strstr(output, "using wordmap, using word info table, using rack "
+                          "info table"));
     assert(strings_equal(
         players_data_get_data_name(players_data, PLAYERS_DATA_TYPE_WMP, 0),
         lexicon));
