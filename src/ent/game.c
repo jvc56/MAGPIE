@@ -523,7 +523,7 @@ static inline void game_gen_classic_cross_set(const Game *game, int row,
   // The values depend only on the words beside the square and the lexicon,
   // so the game's cache, if it has one, answers for words it has seen.
   CrossSetValues values;
-  CrossSetCache *cache = game->cross_set_cache;
+  const CrossSetCache *cache = game->cross_set_cache;
   if (cache != NULL) {
     const uint64_t key = game_cross_set_cache_key(cache, kwg, board, row, col,
                                                   left_col, right_col);
