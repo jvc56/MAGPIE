@@ -702,9 +702,10 @@ exhaustive analysis, controlled by a few knobs:
   further), so it is more accurate but slower; a shorter/narrower schedule is
   faster and coarser. Stage 0 always greedy-scores *every* move, so even an
   interrupted run returns a ranked answer.
-- **Time — `-tlim <seconds>`.** The solver returns the best answer it has when
-  the limit hits (stage 0 finishes first, then each halving stage refines). With
-  no limit it runs the full schedule to completion.
+- **Time — `-pegtlim <seconds>`.** The solver returns the best answer it has
+  when the limit hits (stage 0 finishes first, then each halving stage
+  refines). With no limit (the default) it runs the full schedule to
+  completion. `-tlim` bounds only simulations.
 - **Cores — `-threads <n>`.** Pure speedup at the same accuracy.
 
 So a quick in-game read might sample scenarios under a time cap, while an
@@ -714,13 +715,13 @@ that keeps *every* candidate, enumerates *every* scenario (no stride), and solve
 each bag-emptying leaf at full endgame depth — no narrowing, no truncation:
 
 ```
-magpie> peg -pegstride 7 -tlim 5    # fast: sampled, 5s cap
+magpie> peg -pegstride 7 -pegtlim 5 # fast: sampled, 5s cap
 magpie> peg                         # default: full enumeration, halving cascade, uncapped time
 magpie> peg -pegtopk all            # exhaustive: every play, full-depth endgame, no caps
 ```
 
 (`-pegtopk all` — or `0` — forces full enumeration regardless of `-pegstride`;
-with no `-tlim` it is uncapped in time.) How far this extreme is practical
+with no `-pegtlim` it is uncapped in time.) How far this extreme is practical
 depends on the bag: at **1-in-bag**, exhaustively solving every candidate is
 realistic for most positions given enough time; at **4-in-bag** it can take
 effectively forever — but you can still configure and run it.

@@ -361,8 +361,9 @@ struct Config {
   char *record_filepath;
   char *settings_filename;
   double tt_fraction_of_mem;
+  // The sim time limit. Each solver has its own, which no other reads; 0 is
+  // unlimited for all of them.
   double time_limit_seconds;
-  // 0 = fall back to time_limit_seconds.
   double endgame_time_limit_seconds;
   double peg_time_limit_seconds;
   uint64_t seed;
@@ -2299,8 +2300,9 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       break;
     case ARG_TOKEN_ENDGAME_TIME_LIMIT:
       usages[0] = "<time_limit_seconds>";
-      text = "Specifies the time limit in seconds for the endgame solver. A "
-             "value of 0 (the default) falls back to -tlim.";
+      text = "Specifies the time limit in seconds for the endgame solver, in "
+             "the endgame command and in analyze's endgame turns. A value of 0 "
+             "(the default) is unlimited.";
       break;
     case ARG_TOKEN_ENDGAME_BEST_REPLY:
       usages[0] = "<true/false>";
@@ -2317,8 +2319,10 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       break;
     case ARG_TOKEN_PEG_TIME_LIMIT:
       usages[0] = "<time_limit_seconds>";
-      text = "Specifies the time limit in seconds for the pre-endgame solver. "
-             "A value of 0 (the default) falls back to -tlim.";
+      text =
+          "Specifies the time limit in seconds for the pre-endgame solver, "
+          "in the peg command and in analyze's pre-endgame turns. A value of "
+          "0 (the default) is unlimited.";
       break;
     case ARG_TOKEN_PEG_TOP_K:
       usages[0] = "<count1>,<count2>,...";
@@ -2609,8 +2613,11 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       usages[0] = "<time_limit>";
       examples[0] = "10";
       examples[1] = "0.05";
-      text = "Specifies the time limit in seconds for simulations. "
-             "Fractional values (e.g. 0.05 for 50 ms) are supported.";
+      text = "Specifies the time limit in seconds for simulations, 60 by "
+             "default; 0 is unlimited. It bounds only simulations: the endgame "
+             "and pre-endgame solvers have their own limits (-etlim, "
+             "-pegtlim), and inference has none. Fractional values (e.g. 0.05 "
+             "for 50 ms) are supported.";
       break;
     case ARG_TOKEN_SAMPLING_RULE:
       usages[0] = "<sampling_rule>";
@@ -4311,9 +4318,8 @@ char *status_rack_and_gen_and_sim(Config *config) { return status_sim(config); }
 // Endgame
 
 void config_fill_endgame_args(Config *config, EndgameArgs *endgame_args) {
-  // The time limits are 0 = unlimited, matching the plain "endgame" command's
-  // historical default. Callers that want -tlim to bound an unset -etlim (e.g.
-  // autoanalyze) must opt in explicitly via config_fill_analyze_args.
+  // -etlim, where 0 is unlimited, bounds the endgame command and analyze's
+  // endgame turns alike.
   endgame_args_fill(
       config->thread_control, config->game, config->tt_fraction_of_mem,
       config->endgame_plies, DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE,
@@ -4759,9 +4765,7 @@ void config_fill_peg_args(Config *config, PegArgs *peg_args) {
   // config_peg installs them after this call.
   peg_args_fill(
       config->game, config->thread_control, config->num_threads,
-      /*time_budget_seconds=*/config->peg_time_limit_seconds != 0
-          ? config->peg_time_limit_seconds
-          : config->time_limit_seconds,
+      /*time_budget_seconds=*/config->peg_time_limit_seconds,
       /*max_stage=*/0, /*greedy_seed_only=*/false,
       /*stage_top_k=*/
       config->peg_num_stages > 0 ? config->peg_stage_top_k : NULL,
@@ -13707,12 +13711,6 @@ static void config_fill_analyze_args(Config *config, AnalyzeArgs *analyze_args,
                        &analyze_args->sim_args);
   config_fill_endgame_args(config, &analyze_args->endgame_args);
   analyze_args->endgame_args.num_top_moves = 1;
-  // Unlike the plain "endgame" command, autoanalyze bounds an unset -etlim
-  // with -tlim so a single game's endgame turns can't run unbounded.
-  if (config->endgame_time_limit_seconds == 0) {
-    analyze_args->endgame_args.soft_time_limit = config->time_limit_seconds;
-    analyze_args->endgame_args.hard_time_limit = config->time_limit_seconds;
-  }
   config_fill_peg_args(config, &analyze_args->peg_args);
   analyze_args->human_readable = config->human_readable;
   analyze_args->show_mistakes = config->show_mistakes;
