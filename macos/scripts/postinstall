@@ -1,0 +1,9 @@
+#!/bin/sh
+# Runs as root after the installer puts the executable in /usr/local/magpie.
+# A link in /usr/local/bin puts it on every shell's PATH. The payload stays in
+# a directory of its own: one rooted at /usr/local/bin would carry an owner
+# and permissions for that directory too, and Homebrew on Intel Macs needs it
+# to stay the user's.
+set -e
+mkdir -p /usr/local/bin
+ln -sf /usr/local/magpie/magpie /usr/local/bin/magpie
