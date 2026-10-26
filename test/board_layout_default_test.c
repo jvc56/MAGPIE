@@ -2,7 +2,6 @@
 
 #include "../src/def/board_defs.h"
 #include "../src/def/equity_defs.h"
-#include "../src/def/move_defs.h"
 #include "../src/def/static_eval_defs.h"
 #include "../src/ent/board.h"
 #include "../src/ent/bonus_square.h"
@@ -128,7 +127,6 @@ void assert_opening_penalties(Game *game, const char *data_paths,
       .move_list = move_list,
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
-      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
   };
   generate_moves_for_game(&move_gen_args);
   const Move *move = move_list_get_move(move_list, 0);

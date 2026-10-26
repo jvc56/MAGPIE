@@ -1072,7 +1072,7 @@ static void test_results_carry_every_key_the_server_reads(void) {
   // Both players solve their endgames and small pre-endgames, so the captured
   // positions include solver analyses alongside the static turns before them.
   Config *config = config_create_or_die(
-      "set -lex CSW21 -wmp false -s1 equity -s2 score -r1 best -r2 best "
+      "set -lex CSW21 -wmp true -s1 equity -s2 score -r1 best -r2 best "
       "-threads 1 -maxnumdplays 5 -eplies1 2 -eplies2 2 -pegbag1 2 -pegbag2 2 "
       "-pegtopk1 2 -pegtopk2 2 -pegnested1 false -pegnested2 false");
 
@@ -1114,7 +1114,7 @@ static void test_results_carry_every_key_the_server_reads(void) {
   // config_contribute_analyze_rack writes one -- the rack, the ranked plays
   // with their simulation statistics, and how many were ranked.
   config = config_create_or_die(
-      "set -lex CSW21 -wmp false -s1 equity -s2 equity -r1 all -r2 all "
+      "set -lex CSW21 -wmp true -s1 equity -s2 equity -r1 all -r2 all "
       "-numplays 5 -plies 2 -threads 1 -iter 30 -scond none -seed 10");
   load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
   load_and_exec_config_or_die(config, "rack AEINRST");
@@ -1974,7 +1974,7 @@ static int assert_first_divergences(Config *config, const char *settings,
 // two games play different moves, and nothing else from the pair.
 static void test_a_pairs_first_divergence_is_both_games_at_one_turn(void) {
   Config *config = config_create_or_die(
-      "set -lex CSW21 -wmp false -r1 best -r2 best -threads 1 "
+      "set -lex CSW21 -wmp true -r1 best -r2 best -threads 1 "
       "-maxnumdplays 3");
   // Equity against score: nearly every pair diverges, at whatever turn the
   // two first disagree.
@@ -2062,7 +2062,7 @@ static void test_each_players_positions_keep_its_own_play_count(void) {
 // same job without capture, and nothing failed.
 static void test_capturing_positions_does_not_change_the_games(void) {
   Config *config = config_create_or_die(
-      "set -lex CSW21 -wmp false -s1 equity -s2 equity -r1 best -r2 best "
+      "set -lex CSW21 -wmp true -s1 equity -s2 equity -r1 best -r2 best "
       "-threads 1 -maxnumdplays 5");
   ErrorStack *error_stack = error_stack_create();
 
@@ -3196,7 +3196,7 @@ static void test_static_games_are_identical_across_thread_counts(void) {
   for (size_t i = 0; i < sizeof(thread_counts) / sizeof(thread_counts[0]);
        i++) {
     char *settings = get_formatted_string(
-        "set -lex CSW21 -wmp false -s1 equity -s2 equity -r1 best -r2 best "
+        "set -lex CSW21 -wmp true -s1 equity -s2 equity -r1 best -r2 best "
         "-threads %d",
         thread_counts[i]);
     Config *config = config_create_or_die(settings);
@@ -3447,7 +3447,7 @@ static void test_solver_options_round_trip(void) {
 // as before.
 static void test_solving_players_report_their_solves(void) {
   Config *config = config_create_or_die(
-      "set -lex CSW21 -wmp false -s1 equity -s2 equity -r1 best -r2 best "
+      "set -lex CSW21 -wmp true -s1 equity -s2 equity -r1 best -r2 best "
       "-threads 2 -maxnumdplays 5 -eplies1 2 -eplies2 2 -pegbag1 2 -pegbag2 2 "
       "-pegtopk1 2 -pegtopk2 2 -pegnested1 false -pegnested2 false");
   load_and_exec_config_or_die(config, "autoplay games,positions 4 -seed 7");
@@ -3513,7 +3513,7 @@ static void test_solving_players_report_their_solves(void) {
 // analysis of its one play. A position with more than one play is simulated.
 static void test_a_forced_turn_is_not_simulated(void) {
   Config *config = config_create_or_die(
-      "set -lex CSW21 -wmp false -s1 equity -s2 equity -r1 all -r2 all "
+      "set -lex CSW21 -wmp true -s1 equity -s2 equity -r1 all -r2 all "
       "-numplays 3 -plies 2 -minp 2 -iter 10 -threads 1 -sinfer false");
   load_and_exec_config_or_die(config, "cgp " OPENING_CGP);
   ErrorStack *error_stack = error_stack_create();
@@ -3610,7 +3610,7 @@ static void test_a_forced_turn_is_not_simulated(void) {
 // player that does not infer reports none anywhere.
 static void test_inferring_players_report_their_inference(void) {
   Config *config = config_create_or_die(
-      "set -lex CSW21 -wmp false -s1 equity -s2 equity -r1 all -r2 all "
+      "set -lex CSW21 -wmp true -s1 equity -s2 equity -r1 all -r2 all "
       "-numplays 3 -plies 2 -minp 2 -iter 10 -threads 2 -maxnumdplays 3 "
       "-sinfer true");
   load_and_exec_config_or_die(config, "autoplay games,positions 2 -seed 4");
