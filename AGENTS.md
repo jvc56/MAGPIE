@@ -105,7 +105,10 @@ Keep performance work and quality work separate.
 
 Make it faster **without changing behavior**. Validate with autoplay or on-demand tests comparing before/after. Measure the specific functions changed, not just wall-clock time.
 
-Profile the optimized binary itself (`make release` or `BUILD=no_pgo_release`) with `sample <pid>` on macOS or `perf record` on Linux, not a build with inlining turned off, which is a different program. These builds carry debug information, which leaves their code all but unchanged. An inlined function's time counts toward its caller: split a hot function up by the source line `sample` prints for each address, inlined code included, or by inlined function with `atos -i` or `llvm-symbolizer --inlines` on the sampled addresses (on Linux, `perf report --inline` lists inlined functions only with some perf builds, while `addr2line -i` and `llvm-symbolizer --inlines` always do). On macOS the debug information stays in `obj/`, so run `dsymutil` on a binary you keep past the next build.
+Profile the optimized binary itself (`make release` or `BUILD=no_pgo_release`), not a build with inlining turned off, which is a different program. These builds carry debug information, which leaves their code all but unchanged. An inlined function's time counts toward its caller, so split a hot function up by inlined function and source line.
+
+- **macOS:** use the CPU Profiler (`xctrace`) through the scripts of the `cycle-profile` skill, in `.claude/skills/cycle-profile/`. Its `SKILL.md` gives the procedure and the checks. The scripts weight samples by cycles, attribute them to inlined functions and source lines, refuse a stale dSYM and check their own symbol lookups. `sample` misattributes stalls.
+- **Linux:** use `perf record`. `perf report --inline` lists inlined functions only with some perf builds, while `addr2line -i` and `llvm-symbolizer --inlines` always do.
 
 ### Feature flags must be free when off
 

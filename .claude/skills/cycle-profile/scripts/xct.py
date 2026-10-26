@@ -1,0 +1,349 @@
+#!/usr/bin/env python3
+"""Attribute the cycles of an xctrace CPU Profiler export to functions,
+inlined functions and source lines, with checks against misattribution.
+
+usage:
+  xct.py self      XML DSYM [--top N]           self cycles by innermost inlined function
+  xct.py compare   BASE_DSYM NEW_DSYM BASE_XML:NEW_XML ... [--top N]
+                                                 same fixed work, base vs new, per pair
+  xct.py lines     FUNC XML DSYM [--top N]      cycles by source line inside FUNC
+  xct.py callers   FUNC XML DSYM [--depth D]    inline chains that FUNC's cycles sit in
+  xct.py contains  XML DSYM NAME...             share of cycles with NAME on the stack,
+                                                 real frames or inlined
+  xct.py inclusive XML [--top N]               inclusive cycles by real (not inlined)
+                                                 frame; blind to inlined functions
+  xct.py check     XML DSYM                     look up every address one at a time and
+                                                 compare with the batched lookups
+
+DSYM is a .dSYM bundle, or the DWARF file inside one. The binary is found in
+the export by the dSYM's UUID, so a wrong or stale dSYM is an error, not a
+quiet misattribution. Percentages are of all the export's cycles, including
+samples outside the binary.
+"""
+import collections
+import glob
+import os
+import random
+import re
+import subprocess
+import sys
+import xml.etree.ElementTree as ET
+
+BATCH = 500
+SPOT_CHECKS = 24
+
+
+def die(msg):
+    sys.exit(f'xct.py: {msg}')
+
+
+def dwarf_path(dsym):
+    if os.path.isdir(dsym):
+        found = glob.glob(os.path.join(dsym, 'Contents/Resources/DWARF/*'))
+        if len(found) != 1:
+            die(f'{dsym}: expected one DWARF file inside, found {len(found)}')
+        return found[0]
+    return dsym
+
+
+def dsym_uuids(dwarf):
+    out = subprocess.run(['dwarfdump', '--uuid', dwarf], capture_output=True, text=True).stdout
+    uuids = set(re.findall(r'UUID: ([0-9A-F-]+)', out))
+    if not uuids:
+        die(f'{dwarf}: no UUID (is it a dSYM?)')
+    return uuids
+
+
+class Profile:
+    """The samples of one export: weight, leaf address, the leaf's binary UUID
+    and the real frames' names."""
+
+    def __init__(self, xml_path):
+        root = ET.parse(xml_path).getroot()
+        by_id = {el.get('id'): el for el in root.iter() if el.get('id') is not None}
+
+        def deref(el):
+            r = el.get('ref')
+            return by_id[r] if r is not None else el
+
+        self.samples = []
+        self.binaries = {}  # UUID -> (name, load address)
+        self.total = 0
+        self.unit = None
+        for row in root.iter('row'):
+            w = row.find('cycle-weight')
+            unit = 'cycles'
+            if w is None:
+                w = row.find('weight')
+                unit = 'weight'
+            bt = row.find('backtrace')
+            if w is None or bt is None:
+                continue
+            if self.unit is None:
+                self.unit = unit
+            elif self.unit != unit:
+                die(f'{xml_path}: mixes cycle-weight and weight rows')
+            weight = int(deref(w).text or 0)
+            self.total += weight
+            frames = [deref(f) for f in deref(bt).findall('frame')]
+            if not frames:
+                self.samples.append((weight, None, None, ()))
+                continue
+            leaf = frames[0]
+            uuid = None
+            b = leaf.find('binary')
+            if b is not None:
+                b = deref(b)
+                uuid = b.get('UUID')
+                if uuid:
+                    self.binaries.setdefault(uuid, (b.get('name', '?'), b.get('load-addr')))
+            names = tuple(f.get('name') for f in frames)
+            self.samples.append((weight, leaf.get('addr'), uuid, names))
+        if self.total == 0:
+            die(f'{xml_path}: no weighted samples (export the cpu-profile table)')
+        if self.unit != 'cycles':
+            print(f'note: {xml_path} has no cycle weights; percentages are of sample weight')
+
+    def binary_for(self, dwarf):
+        uuids = dsym_uuids(dwarf)
+        hits = [u for u in self.binaries if u in uuids]
+        if not hits:
+            seen = ', '.join(f'{n} {u}' for u, (n, _) in self.binaries.items())
+            die(f'{dwarf} (UUID {", ".join(sorted(uuids))}) matches no binary in the '
+                f'profile; it is the wrong or a stale dSYM. Binaries seen: {seen}')
+        return hits[0], self.binaries[hits[0]][1]
+
+
+def parse_block(block):
+    """One address's atos -i block: [(function, file:line or None)], innermost
+    first; empty for an address atos can't symbolicate."""
+    chain = []
+    for line in block.split('\n'):
+        line = line.strip()
+        if not line:
+            continue
+        m = re.match(r'(\S+) \(in [^)]*\)', line)
+        if not m:
+            chain.append(('?', None))
+            continue
+        loc = re.search(r'\(([^()]*:\d+)\)\s*$', line)
+        # Clang's local-symbol suffixes (wmp_get_word_entry.1436) change from
+        # build to build, so drop them.
+        chain.append((re.sub(r'\.\d+$', '', m.group(1)), loc.group(1) if loc else None))
+    return chain
+
+
+def atos(dwarf, load, addrs):
+    out = subprocess.run(['atos', '-i', '-o', dwarf, '-l', load] + addrs,
+                         capture_output=True, text=True)
+    if out.returncode != 0:
+        die(f'atos failed: {out.stderr.strip()}')
+    # Every address's block ends with a blank line, and an address atos can't
+    # symbolicate gets an empty block. So split without stripping: strip()
+    # would delete a leading empty block and shift every later address onto
+    # its neighbour's function.
+    return out.stdout.split('\n\n')[:-1]
+
+
+def symbolicate(dwarf, load, addrs, spot_checks=SPOT_CHECKS):
+    """address -> inline chain, checked: one block per address, and a sample
+    of addresses (each batch's first among them) looked up one at a time must
+    give the same chain."""
+    chains = {}
+    for c in range(0, len(addrs), BATCH):
+        chunk = addrs[c:c + BATCH]
+        blocks = atos(dwarf, load, chunk)
+        if len(blocks) != len(chunk):
+            # Don't guess at the pairing; look each address up on its own.
+            blocks = ['\n'.join(atos(dwarf, load, [a])) for a in chunk]
+        for a, b in zip(chunk, blocks):
+            chains[a] = parse_block(b)
+    if addrs and spot_checks:
+        rng = random.Random(0)
+        picks = set(addrs[::BATCH]) | set(rng.sample(addrs, min(spot_checks, len(addrs))))
+        for a in picks:
+            alone = atos(dwarf, load, [a])
+            if len(alone) != 1 or parse_block(alone[0]) != chains[a]:
+                die(f'batched and single lookups of {a} disagree; attribution is unreliable')
+    return chains
+
+
+def leaf_chains(profile, dsym):
+    """Per-sample innermost-first inline chain for samples in the dSYM's binary;
+    None for samples elsewhere."""
+    dwarf = dwarf_path(dsym)
+    uuid, load = profile.binary_for(dwarf)
+    addrs = list(dict.fromkeys(a for _, a, u, _ in profile.samples if u == uuid and a))
+    chains = symbolicate(dwarf, load, addrs)
+    return [chains[a] if u == uuid and a else None for _, a, u, _ in profile.samples], uuid, load
+
+
+def self_by_function(profile, dsym):
+    chains, uuid, load = leaf_chains(profile, dsym)
+    by_func = collections.Counter()
+    by_pc = collections.Counter()
+    for (weight, addr, u, _), chain in zip(profile.samples, chains):
+        if chain is None:
+            name = profile.binaries.get(u, ('<no binary>', None))[0]
+            by_func[f'<other: {name}>'] += weight
+        elif not chain:
+            by_func['<unsymbolicated>'] += weight
+        else:
+            by_func[chain[0][0]] += weight
+            rel = hex(int(addr, 16) - int(load, 16) + 0x100000000)
+            by_pc[(rel, chain[0][0], chain[0][1])] += weight
+    return by_func, by_pc
+
+
+def pct(x, total):
+    return 100 * x / total
+
+
+def opt(args, name, default):
+    if name in args:
+        i = args.index(name)
+        v = args[i + 1]
+        del args[i:i + 2]
+        return type(default)(v)
+    return default
+
+
+def cmd_self(args):
+    top = opt(args, '--top', 25)
+    xml, dsym = args
+    p = Profile(xml)
+    by_func, by_pc = self_by_function(p, dsym)
+    outside = sum(c for f, c in by_func.items() if f.startswith('<other'))
+    print(f'{p.total / 1e9:.2f}G {p.unit}, {pct(outside, p.total):.1f}% outside the binary')
+    for f, c in by_func.most_common(top):
+        print(f'  {pct(c, p.total):6.2f}%  {f}')
+    print('hottest PCs:')
+    for (a, f, loc), c in by_pc.most_common(8):
+        print(f'  {pct(c, p.total):6.2f}%  {a}  {f} ({loc})')
+
+
+def cmd_compare(args):
+    top = opt(args, '--top', 25)
+    base_dsym, new_dsym, *pairs = args
+    if not pairs:
+        die('compare needs at least one BASE_XML:NEW_XML pair')
+    results = []
+    for pair in pairs:
+        bx, nx = pair.split(':')
+        b, n = Profile(bx), Profile(nx)
+        bf, _ = self_by_function(b, base_dsym)
+        nf, _ = self_by_function(n, new_dsym)
+        results.append((b.total, n.total, bf, nf))
+    for i, (bt, nt, _, _) in enumerate(results):
+        print(f'pair {i + 1}: base {bt / 1e9:.2f}G, new {nt / 1e9:.2f}G, change {pct(nt - bt, bt):+.2f}%')
+    names = set().union(*[set(bf) | set(nf) for _, _, bf, nf in results])
+
+    # A change as a share of its pair's base total, so changes add up to the
+    # total's change.
+    def change(r, f):
+        bt, _, bf, nf = r
+        return pct(nf[f] - bf[f], bt)
+
+    ranked = sorted(names, key=lambda f: -max(abs(change(r, f)) for r in results))[:top]
+    head = ''.join(f'  {"pair " + str(i + 1):>24}' for i in range(len(results)))
+    print(f'{"function (base% -> new%, change)":44}{head}')
+    for f in ranked:
+        cells = ''.join(f'  {pct(r[2][f], r[0]):6.2f}->{pct(r[3][f], r[1]):6.2f} {change(r, f):+6.2f}'
+                        for r in results)
+        print(f'  {f[:42]:42}{cells}')
+    if len(results) > 1:
+        same = [f for f in names
+                if all(change(r, f) > 0.05 for r in results) or all(change(r, f) < -0.05 for r in results)]
+        nets = [sum(change(r, f) for f in same) for r in results]
+        print(f'net of the {len(same)} functions that move the same way, by more than 0.05%, '
+              f'in every pair: ' + ' / '.join(f'{x:+.2f}%' for x in nets))
+
+
+def cmd_lines(args):
+    top = opt(args, '--top', 15)
+    func, xml, dsym = args
+    p = Profile(xml)
+    chains, _, _ = leaf_chains(p, dsym)
+    by_line = collections.Counter()
+    for (weight, _, _, _), chain in zip(p.samples, chains):
+        if chain and chain[0][0] == func:
+            by_line[chain[0][1] or '?'] += weight
+    print(f'{func}: {pct(sum(by_line.values()), p.total):.2f}% of {p.unit}')
+    for loc, c in by_line.most_common(top):
+        print(f'  {pct(c, p.total):6.2f}%  {loc}')
+    print('note: a line\'s cycles sit on the instruction that waits, so a hot line can be '
+          'a load stall or the consumer of a slow value, not its own work.')
+
+
+def cmd_callers(args):
+    depth = opt(args, '--depth', 3)
+    func, xml, dsym = args
+    p = Profile(xml)
+    chains, _, _ = leaf_chains(p, dsym)
+    by_chain = collections.Counter()
+    for (weight, _, _, _), chain in zip(p.samples, chains):
+        if chain and chain[0][0] == func:
+            by_chain[' < '.join(f'{f}@{loc or "?"}' for f, loc in chain[:depth])] += weight
+    print(f'{func}: {pct(sum(by_chain.values()), p.total):.2f}% of {p.unit}')
+    for c, w in by_chain.most_common(12):
+        print(f'  {pct(w, p.total):6.2f}%  {c}')
+
+
+def cmd_contains(args):
+    xml, dsym, *wanted = args
+    if not wanted:
+        die('contains needs at least one NAME')
+    p = Profile(xml)
+    chains, _, _ = leaf_chains(p, dsym)
+    combo = collections.Counter()
+    for (weight, _, _, names), chain in zip(p.samples, chains):
+        present = set(names) | {f for f, _ in (chain or [])}
+        combo[tuple(w for w in wanted if w in present)] += weight
+    for w in wanted:
+        print(f'  {pct(sum(c for k, c in combo.items() if w in k), p.total):6.2f}%  {w}')
+    if len(wanted) > 1:
+        print('by combination:')
+        for k, c in combo.most_common(12):
+            print(f'  {pct(c, p.total):6.2f}%  {" + ".join(k) if k else "(none)"}')
+
+
+def cmd_inclusive(args):
+    top = opt(args, '--top', 30)
+    (xml,) = args
+    p = Profile(xml)
+    incl = collections.Counter()
+    for weight, _, _, names in p.samples:
+        for n in set(names):
+            incl[n] += weight
+    print(f'{p.total / 1e9:.2f}G {p.unit}; real frames only, so inlined functions are '
+          'counted in their callers (use contains for them)')
+    for n, c in incl.most_common(top):
+        print(f'  {pct(c, p.total):6.2f}%  {n}')
+
+
+def cmd_check(args):
+    xml, dsym = args
+    p = Profile(xml)
+    dwarf = dwarf_path(dsym)
+    uuid, load = p.binary_for(dwarf)
+    addrs = list(dict.fromkeys(a for _, a, u, _ in p.samples if u == uuid and a))
+    batched = symbolicate(dwarf, load, addrs, spot_checks=0)
+    bad = 0
+    for a in addrs:
+        alone = atos(dwarf, load, [a])
+        if len(alone) != 1 or parse_block(alone[0]) != batched[a]:
+            bad += 1
+    print(f'{len(addrs)} addresses in the binary; {bad} batched lookups disagree with single ones')
+    sys.exit(1 if bad else 0)
+
+
+COMMANDS = {'self': cmd_self, 'compare': cmd_compare, 'lines': cmd_lines, 'callers': cmd_callers,
+            'contains': cmd_contains, 'inclusive': cmd_inclusive, 'check': cmd_check}
+
+if __name__ == '__main__':
+    if len(sys.argv) < 2 or sys.argv[1] not in COMMANDS:
+        sys.exit(__doc__)
+    try:
+        COMMANDS[sys.argv[1]](sys.argv[2:])
+    except ValueError:
+        sys.exit(__doc__)
