@@ -265,6 +265,10 @@ bool config_command_turns_on_save_settings(Config *config, const char *cmd);
 // every command. No-op if config_get_save_settings(config) is false, which it
 // is unless savesettings was set to true.
 void save_config_settings(const Config *config, ErrorStack *error_stack);
+// A line of a saved settings file, with the settings dropped whose defaults
+// changed after the version the file records with -fileversion (1 when it
+// records none). The caller frees the result.
+char *config_upgrade_settings_line(const Config *config, const char *line);
 // The Config contribute's tasks run in, sharing the caller's thread control
 // and never saving settings, so the caller's session and settings file are
 // left as they were; and its destruction, which leaves the thread control to

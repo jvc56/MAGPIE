@@ -229,8 +229,10 @@ void load_config_settings(Config *config, ErrorStack *error_stack) {
   const int num_lines =
       string_splitter_get_number_of_items(settings_split_by_newline);
   for (int i = 0; i < num_lines; i++) {
-    const char *line = string_splitter_get_item(settings_split_by_newline, i);
+    char *line = config_upgrade_settings_line(
+        config, string_splitter_get_item(settings_split_by_newline, i));
     execute_command_sync(config, error_stack, line);
+    free(line);
     if (!error_stack_is_empty(error_stack)) {
       break;
     }

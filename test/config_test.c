@@ -2590,6 +2590,31 @@ void test_config_fg_required(void) {
   config_destroy(config);
 }
 
+void test_config_upgrade_settings_line(void) {
+  Config *config = config_create_default_test();
+  // An old file (no -fileversion) drops the settings whose defaults
+  // changed, with their values, and keeps everything else.
+  char *upgraded = config_upgrade_settings_line(
+      config, "set -lex CSW21 -w1 true -rit1 false -tlim 60 -pegpess false "
+              "-wit2 false -threads 4");
+  assert_strings_equal(upgraded, "set -lex CSW21 -tlim 60 -threads 4");
+  free(upgraded);
+  // A current file is left as it is.
+  upgraded = config_upgrade_settings_line(
+      config, "set -fileversion 2 -w1 true -pegpess false");
+  assert_strings_equal(upgraded, "set -fileversion 2 -w1 true -pegpess false");
+  free(upgraded);
+  // Saved settings record the current version, and load.
+  StringBuilder *sb = string_builder_create();
+  config_add_settings_to_string_builder(config, sb);
+  assert(strstr(string_builder_peek(sb), " -fileversion 2") != NULL);
+  string_builder_destroy(sb);
+  assert_config_exec_status(config, "set -fileversion 2", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "set -fileversion 3",
+                            ERROR_STATUS_CONFIG_LOAD_INT_ARG_OUT_OF_BOUNDS);
+  config_destroy(config);
+}
+
 void test_config_exchange_blank(void) {
   Config *config = config_create_default_test();
   assert_config_exec_status(config, "set -lex CSW21", ERROR_STATUS_SUCCESS);
@@ -3385,6 +3410,7 @@ void test_config(void) {
   test_config_wmp();
   test_config_note_move_interpolation();
   test_config_fg_required();
+  test_config_upgrade_settings_line();
   test_config_exchange_blank();
   test_config_utility_blend();
   test_config_move_list_saved_to_game_event();

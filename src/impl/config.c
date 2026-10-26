@@ -104,6 +104,10 @@ enum {
   // Upper bound on the number of per-stage counts the -pegtopk CLI arg accepts.
   // This caps only the parse buffer; the solver itself imposes no stage limit.
   CONFIG_PEG_MAX_STAGES = 16,
+  // The format -savesettings writes as -fileversion. Raise it whenever a
+  // default that settings files record changes, and list the setting in
+  // config_stale_settings.
+  CONFIG_SETTINGS_VERSION = 2,
 };
 
 typedef enum {
@@ -251,6 +255,7 @@ typedef enum {
   ARG_TOKEN_PRINT_ON_FINISH,
   ARG_TOKEN_SHOW_PROMPT,
   ARG_TOKEN_SAVE_SETTINGS,
+  ARG_TOKEN_SETTINGS_VERSION,
   ARG_TOKEN_AUTOSAVE_GCG,
   ARG_TOKEN_FG_REQUIRED,
   ARG_TOKEN_SHOW_GAME_WITH_MOVES,
@@ -2769,6 +2774,15 @@ void add_help_arg_to_string_builder(const Config *config, int token,
              "saved settings are loaded on a startup that sets this to true, "
              "and ignored on any other.";
       break;
+    case ARG_TOKEN_SETTINGS_VERSION:
+      usages[0] = "<version>";
+      examples[0] = "2";
+      text = "Records the format of a saved settings file; -savesettings "
+             "writes it. A file saved by an older version recorded every "
+             "setting, including defaults that have since changed, so those "
+             "settings are dropped when it is loaded and the new defaults "
+             "apply.";
+      break;
     case ARG_TOKEN_AUTOSAVE_GCG:
       usages[0] = "<true_or_false>";
       examples[0] = "true";
@@ -3239,6 +3253,7 @@ char *impl_help(Config *config, ErrorStack *error_stack) {
     static const arg_token_t other_opts[] = {
         ARG_TOKEN_AUTOSAVE_GCG,      /* autosavegcg */
         ARG_TOKEN_FG_REQUIRED,       /* fgrequired */
+        ARG_TOKEN_SETTINGS_VERSION,  /* fileversion */
         ARG_TOKEN_EXEC_MODE,         /* mode */
         ARG_TOKEN_MOVEGEN_LIMIT,     /* movegenlimit */
         ARG_TOKEN_DATA_PATH,         /* path */
@@ -12520,6 +12535,15 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
     return;
   }
 
+  // Settings version: only checked. A saved file's stale settings are dropped
+  // before its line is run (config_upgrade_settings_line).
+  int settings_version = CONFIG_SETTINGS_VERSION;
+  config_load_int(config, ARG_TOKEN_SETTINGS_VERSION, 1,
+                  CONFIG_SETTINGS_VERSION, &settings_version, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
   // Autosave GCG
   config_load_bool(config, ARG_TOKEN_AUTOSAVE_GCG, &config->autosave_gcg,
                    error_stack);
@@ -14785,6 +14809,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_PRINT_ON_FINISH, "printonfinish", 1, 1);
   arg(ARG_TOKEN_SHOW_PROMPT, "shprompt", 1, 1);
   arg(ARG_TOKEN_SAVE_SETTINGS, "savesettings", 1, 1);
+  arg(ARG_TOKEN_SETTINGS_VERSION, "fileversion", 1, 1);
   arg(ARG_TOKEN_AUTOSAVE_GCG, "autosavegcg", 1, 1);
   arg(ARG_TOKEN_FG_REQUIRED, "fgrequired", 1, 1);
   arg(ARG_TOKEN_SHOW_GAME_WITH_MOVES, "shwithmoves", 1, 1);
@@ -15827,6 +15852,10 @@ void config_add_settings_to_string_builder(const Config *config,
       config_add_bool_setting_to_string_builder(config, sb, arg_token,
                                                 config->save_settings);
       break;
+    case ARG_TOKEN_SETTINGS_VERSION:
+      config_add_int_setting_to_string_builder(config, sb, arg_token,
+                                               CONFIG_SETTINGS_VERSION);
+      break;
     case ARG_TOKEN_AUTOSAVE_GCG:
       config_add_bool_setting_to_string_builder(config, sb, arg_token,
                                                 config->autosave_gcg);
@@ -15859,6 +15888,85 @@ bool config_command_turns_on_save_settings(Config *config, const char *cmd) {
   const bool turns_on = error_stack_is_empty(error_stack) && save_settings;
   error_stack_destroy(error_stack);
   return turns_on;
+}
+
+// A setting whose default changed in `version`: a settings file older than
+// that recorded the old default, which looks the same as a choice, so the
+// loader drops the setting and the new default applies.
+typedef struct StaleSetting {
+  int version;
+  arg_token_t arg_token;
+} StaleSetting;
+
+static const StaleSetting config_stale_settings[] = {
+    {2, ARG_TOKEN_PEG_PESSIMISTIC}, {2, ARG_TOKEN_P1_USE_WMP},
+    {2, ARG_TOKEN_P2_USE_WMP},      {2, ARG_TOKEN_P1_USE_RIT},
+    {2, ARG_TOKEN_P2_USE_RIT},      {2, ARG_TOKEN_P1_USE_WIT},
+    {2, ARG_TOKEN_P2_USE_WIT},      {2, ARG_TOKEN_USE_MMAP_FOR_RIT},
+};
+
+// The arg token whose full name is `name` (without its dash), or
+// NUMBER_OF_ARG_TOKENS.
+static arg_token_t config_arg_token_from_full_name(const Config *config,
+                                                   const char *name) {
+  for (arg_token_t arg_token = 0; arg_token < NUMBER_OF_ARG_TOKENS;
+       arg_token++) {
+    if (strings_equal(config->pargs[arg_token]->name, name)) {
+      return arg_token;
+    }
+  }
+  return NUMBER_OF_ARG_TOKENS;
+}
+
+static bool config_setting_is_stale(arg_token_t arg_token, int file_version) {
+  const int num_stale =
+      (int)(sizeof(config_stale_settings) / sizeof(config_stale_settings[0]));
+  for (int stale_idx = 0; stale_idx < num_stale; stale_idx++) {
+    if (config_stale_settings[stale_idx].arg_token == arg_token &&
+        config_stale_settings[stale_idx].version > file_version) {
+      return true;
+    }
+  }
+  return false;
+}
+
+char *config_upgrade_settings_line(const Config *config, const char *line) {
+  StringSplitter *items = split_string_by_whitespace(line, true);
+  const int num_items = string_splitter_get_number_of_items(items);
+  const char *version_name = config->pargs[ARG_TOKEN_SETTINGS_VERSION]->name;
+  int file_version = 1;
+  for (int item_idx = 0; item_idx + 1 < num_items; item_idx++) {
+    const char *item = string_splitter_get_item(items, item_idx);
+    if (item[0] == '-' && strings_equal(item + 1, version_name)) {
+      ErrorStack *error_stack = error_stack_create();
+      file_version = string_to_int(
+          string_splitter_get_item(items, item_idx + 1), error_stack);
+      if (!error_stack_is_empty(error_stack)) {
+        file_version = 1;
+      }
+      error_stack_destroy(error_stack);
+    }
+  }
+  StringBuilder *sb = string_builder_create();
+  int item_idx = 0;
+  while (item_idx < num_items) {
+    const char *item = string_splitter_get_item(items, item_idx);
+    const arg_token_t arg_token =
+        item[0] == '-' ? config_arg_token_from_full_name(config, item + 1)
+                       : NUMBER_OF_ARG_TOKENS;
+    if (arg_token != NUMBER_OF_ARG_TOKENS &&
+        config_setting_is_stale(arg_token, file_version)) {
+      item_idx += 1 + config->pargs[arg_token]->num_values;
+      continue;
+    }
+    if (string_builder_length(sb) > 0) {
+      string_builder_add_char(sb, ' ');
+    }
+    string_builder_add_string(sb, item);
+    item_idx++;
+  }
+  string_splitter_destroy(items);
+  return string_builder_dump_and_destroy(sb, NULL);
 }
 
 void save_config_settings(const Config *config, ErrorStack *error_stack) {
