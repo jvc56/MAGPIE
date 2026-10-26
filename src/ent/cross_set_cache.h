@@ -86,8 +86,8 @@ static inline void cross_set_cache_set_salt(CrossSetCache *cache,
   cache->salt = salt;
 }
 
-static inline CrossSetCacheEntry *cross_set_cache_entry(CrossSetCache *cache,
-                                                        uint64_t key) {
+static inline CrossSetCacheEntry *
+cross_set_cache_entry(const CrossSetCache *cache, uint64_t key) {
   return (CrossSetCacheEntry *)(cache->entries +
                                 (key >> (64 - cache->index_bits)) *
                                     CROSS_SET_CACHE_ENTRY_BYTES);
