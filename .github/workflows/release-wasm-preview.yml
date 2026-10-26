@@ -105,5 +105,5 @@ jobs:
           gh release create "$VERSION" --repo "$GITHUB_REPOSITORY" \
             --target "$GITHUB_SHA" --prerelease --latest=false \
             --title "Magpie beta $VERSION" \
-            --notes "Magpie browser beta built from $GITHUB_SHA. Includes UI, threaded WASM and CSW24/NWL23 data. See wasmentry/README.md for hosting and verification." \
+            --notes "Magpie browser beta built from $GITHUB_SHA. Includes UI, threaded WASM and CSW24/NWL23/FRA24 data. See wasmentry/README.md for hosting and verification." \
             magpie-wasm-preview.tar.gz magpie-wasm-preview.tar.gz.sha256

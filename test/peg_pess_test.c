@@ -765,7 +765,6 @@ static PegPessOut peg_pess_nested_solve(PegPessSolver *s, const MoveList *ml,
           .override_kwg = NULL,
           .eq_margin_movegen = 0,
           .target_equity = EQUITY_MAX_VALUE,
-          .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
       };
       generate_moves(&est_ga);
       int64_t top = INT64_MIN;
@@ -940,7 +939,6 @@ static PegPessOut peg_pess_recursive_solve(PegPessSolver *s) {
       .override_kwg = NULL,
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
-      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
   };
   generate_moves(&ga);
   const int n_moves = move_list_get_count(ml);
@@ -1294,7 +1292,6 @@ static int peg_pess_compute_opp_top_score(const Game *base_game,
       .override_kwg = NULL,
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
-      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
   };
   generate_moves(&ga);
   int top = 0;
