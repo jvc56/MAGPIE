@@ -12,6 +12,7 @@
 #include "../ent/game.h"
 #include "../ent/klv.h"
 #include "../ent/kwg.h"
+#include "../ent/lane_shadow_cache.h"
 #include "../ent/leave_map.h"
 #include "../ent/letter_distribution.h"
 #include "../ent/move.h"
@@ -179,7 +180,6 @@ typedef struct MoveGen {
 
   // Inference cutoff fields
   Equity target_equity_cutoff;
-  int target_leave_size;
   bool stop_on_threshold;
   bool threshold_exceeded;
 
@@ -311,8 +311,14 @@ typedef struct MoveGen {
   MachineLetter playthrough_marked[BOARD_DIM];
 
   // MOVE_RECORD_BEST_SMALL only: see MoveGenArgs.best_small_canonical_ties.
-  // Last, so the hot fields above keep their offsets.
+  // After the hot fields above so their offsets stay stable.
   bool best_small_canonical_ties;
+  // MOVE_RECORD_BEST_SMALL only: see MoveGenArgs.lane_shadow_cache. NULL when
+  // the generation shadows every lane itself.
+  LaneShadowCache *lane_shadow_cache;
+  // WMP-only storage at the end keeps every existing hot field's offset.
+  // Reset/touch it only for active WMP positions whose rack has a blank.
+  WMPBlankWordCache blank_word_cache;
 } MoveGen;
 
 typedef struct MoveGenArgs {
@@ -322,20 +328,13 @@ typedef struct MoveGenArgs {
   const KWG *override_kwg;
   Equity eq_margin_movegen;
 
-  // Movegen for inferences after plays will need a target equity value to skip
-  // anchors that can't surpass it. Callers may either pass a baseline equity
-  // with a separate margin in eq_margin_movegen, or combine them into
-  // target_equity and pass eq_margin_movegen=0 (the inference code does this
-  // for tile placements). Defaults to EQUITY_MAX_VALUE for non-inference mode.
+  // Inference passes the highest equity a move may have while the inferred
+  // move stays within its margin: move generation stops at the first move
+  // above it and skips anchors that cannot exceed it, so the move it returns
+  // is above it exactly when the best move is. EQUITY_MAX_VALUE, for every
+  // other caller, turns this off.
   Equity target_equity;
 
-  // Movegen for inferences after exchanges will need to know the number of
-  // tiles exchanged so that it can determine the target equity value after
-  // generating exchanges, and then skip anchors that can't surpass that value
-  // by eq_margin_movegen. This field does not itself trigger an early return
-  // from move generation based on alternate exchange sizes. Value is
-  // UNSET_LEAVE_SIZE for non-exchange scenarios.
-  int target_leave_size_for_exchange_cutoff;
   MoveList *move_list;
   // Output: bitvector of machine letters that appear in any valid move.
   // Only used with MOVE_RECORD_TILES_PLAYED. Caller provides pointer; callee
@@ -366,10 +365,18 @@ typedef struct MoveGenArgs {
   uint32_t pat_disabled_classes_mask;
   // MOVE_RECORD_BEST by equity only: the best moves earlier generations
   // found for the same rack (see best_move_carry.h). Each one still legal
-  // here starts the generation as its best move, lanes unchanged since such
-  // a move was best are skipped (without PAT), and the generation's best
-  // move is added. NULL (the default) skips all of this.
+  // here starts the generation as its best move, lanes whose remembered
+  // bound it beats are skipped (without PAT), and the generation's best move
+  // is added, as a move and as the bound of the lanes searched. NULL (the
+  // default) skips all of this.
   BestMoveCarry *best_move_carry;
+  // MOVE_RECORD_BEST_SMALL only: lane shadows that earlier generations
+  // recorded (see lane_shadow_cache.h). A lane the cache holds adds the
+  // anchors recorded for it instead of being shadowed, and every other lane
+  // is recorded. Not used with a word info table or in wordsmog, whose
+  // shadows read more than the key holds. NULL (the default) shadows every
+  // lane.
+  LaneShadowCache *lane_shadow_cache;
 } MoveGenArgs;
 
 void gen_destroy_cache(void);
@@ -433,12 +440,31 @@ void generate_moves(const MoveGenArgs *args);
 // The MOVE_RECORD_ALL_SMALL plays of the lanes whose bit is set in
 // `lane_mask` (bit dir * BOARD_DIM + row_or_col: the BOARD_DIM horizontal
 // rows, then the BOARD_DIM vertical columns), appended to args->move_list in
-// generate_moves' lane order with no pass. lane_end[lane] receives the list
+// generate_moves' lane order with no pass, skipping every anchor none of whose
+// plays can span a square set in its lane's lane_hits entry (bit c: column c
+// of a row, row c of a column). A play from an anchor starts right of the
+// anchor's leftward limit (the previous anchor's square, or the square after
+// it when that holds a tile) and covers, on either side of the anchor, no
+// more empty squares than the rack has tiles and none where no rack tile
+// fits, besides the tiles it plays through. lane_end[lane] receives the list
 // count once that lane has been processed, so lane L's plays occupy
-// [lane_end[L - 1], lane_end[L]) (from 0 for L == 0). Serves the endgame's
+// [lane_end[L - 1], lane_end[L]) (from 0 for L == 0). For each lane in
+// lane_mask, lane_anchors[lane] receives the bits of the lane's anchors and
+// lane_generated[lane] those of the anchors not skipped. Serves the endgame's
 // incremental move lists (path_move_lists.h).
 void generate_small_moves_in_lanes(const MoveGenArgs *args, uint64_t lane_mask,
-                                   int *lane_end);
+                                   const uint32_t *lane_hits, int *lane_end,
+                                   uint32_t *lane_anchors,
+                                   uint32_t *lane_generated);
+
+// The MOVE_RECORD_TILES_PLAYED generation (see generate_moves) restricted as
+// generate_small_moves_in_lanes restricts its own: to the lanes in `lane_mask`
+// and, in each, to the anchors some of whose plays can span a square set in
+// its lane_hits entry. Every play it finds is a play on the board, so the tile
+// types it reports are playable; a tile type it does not report has no play
+// from those anchors. Writes the tile types to *args->tiles_played_bv.
+void generate_tiles_played_in_lanes(const MoveGenArgs *args, uint64_t lane_mask,
+                                    const uint32_t *lane_hits);
 
 // The MOVE_RECORD_BEST_SMALL generation restricted to the anchors of the lanes
 // in `lane_mask` (indexed as for generate_small_moves_in_lanes), competing

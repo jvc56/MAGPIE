@@ -43,7 +43,11 @@ This will start MAGPIE in async interactive mode by default. For more details on
 
 ### Windows
 
-Windows 10 (version 1903 or later) and Windows 11, on x64 or ARM, run MAGPIE as a single `.exe` with nothing else to install.
+Windows 10 (version 1903 or later) and Windows 11, on x64 or ARM, run MAGPIE either installed or as a single `.exe` with nothing else to install.
+
+**To install it**, download `magpie-<version>-windows-setup.exe` from the [Releases](https://github.com/jvc56/MAGPIE/releases) page and run it. Like the executables, it is not code-signed, so Windows shows **Windows protected your PC**: click **More info**, then **Run anyway**. It installs MAGPIE for you alone, with no administrator needed, and picks the x64 or ARM build for your PC. It adds MAGPIE to the Start menu and, if you tick the option, to your PATH, so that any terminal can run it as `magpie`. On its first start from the Start menu, MAGPIE offers to download its data into `%LOCALAPPDATA%\MAGPIE\data`, and it finds the data there wherever you start it from afterwards. Uninstall it from **Settings > Apps**. That asks whether to delete the data as well.
+
+**To run it without installing:**
 
 1. From the [Releases](https://github.com/jvc56/MAGPIE/releases) page, download `magpie-<version>-windows-x64.exe` (most PCs) or `magpie-<version>-windows-arm64.exe` (Windows on ARM, such as Snapdragon laptops), and put it in a folder of its own, say `Documents\MAGPIE`.
 2. Optionally, check the download against the `.sha256` file published beside it. In PowerShell:
@@ -57,6 +61,40 @@ Windows 10 (version 1903 or later) and Windows 11, on x64 or ARM, run MAGPIE as 
 From there MAGPIE works exactly as it does on Linux and macOS: everything in [Usage](#usage) applies. To run it from a terminal, open PowerShell or Command Prompt in its folder and run `.\magpie-<version>-windows-x64.exe`, with commands as arguments if you like.
 
 To build the Windows executables yourself on Linux or macOS, with Docker installed, run `make windows` (add `WINDOWS_ARCH=aarch64` for ARM); `bin/magpie.exe` is the result.
+
+### macOS
+
+macOS 11 or later, on Apple silicon or Intel, runs MAGPIE as one universal executable, either installed or with nothing else to install. Either way, MAGPIE downloads its data into `~/.magpie/data` and finds it there whichever folder it starts in.
+
+**To install it**, download `magpie-<version>-macos.pkg` from the [Releases](https://github.com/jvc56/MAGPIE/releases) page and open it. The installer is not signed or notarized, so macOS refuses to open it at first: close the warning, then click **Open Anyway** in **System Settings > Privacy & Security**. It puts `magpie` in `/usr/local/magpie` and links it into `/usr/local/bin`, so a new Terminal window can run it as `magpie`. On its first run, MAGPIE offers to download its data (about 195 MB) into `~/.magpie/data`. To uninstall it, run `sudo rm -rf /usr/local/magpie /usr/local/bin/magpie` and `sudo pkgutil --forget com.github.jvc56.magpie`, plus `rm -rf ~/.magpie` to delete the data.
+
+**To run it without installing:**
+
+1. From the [Releases](https://github.com/jvc56/MAGPIE/releases) page, download `magpie-<version>-macos-universal.zip` and open it. It unzips to a folder holding `magpie`. Move the folder wherever you like, say your home folder.
+2. Optionally, check the download against the `.sha256` file published beside it. In Terminal:
+   ```
+   shasum -a 256 magpie-<version>-macos-universal.zip
+   ```
+   The hash printed must match the one in the `.sha256` file.
+3. The executable is not signed or notarized, so macOS refuses to run it at first. To allow it, either run `xattr -d com.apple.quarantine magpie` in its folder once, or try to run it and then click **Open Anyway** in **System Settings > Privacy & Security**.
+4. Double-click `magpie` in Finder, which opens it in Terminal, or run `./magpie` in its folder in Terminal. MAGPIE looks for its data in a `data` folder in the working directory, then in one beside the executable, then in `~/.magpie/data`. If it finds none, it offers to download it (about 195 MB) into `~/.magpie/data`: answer `y`.
+
+From there, everything in [Usage](#usage) applies.
+
+To build the universal executable yourself, run `make magpie BUILD=portable_release` once with `PORTABLE_MARCH=armv8-a CC="xcrun clang -arch arm64"` and once with `CC="xcrun clang -arch x86_64"`, moving `bin/magpie` aside after each. Then join the two with `lipo -create -output magpie <arm64 build> <x86_64 build>`.
+
+### Linux
+
+Linux on x86_64 or arm64, with glibc 2.35 or later (Ubuntu 22.04, Debian 12, Fedora 36 and newer), runs MAGPIE as one executable without building it.
+
+1. From the [Releases](https://github.com/jvc56/MAGPIE/releases) page, download `magpie-<version>-linux-x64.tar.gz` (most PCs) or `magpie-<version>-linux-arm64.tar.gz` (ARM, such as a Raspberry Pi 4 or 5 on a 64-bit system), and unpack it with `tar -xzf`. It unpacks to a folder holding `magpie`. Move the folder wherever you like.
+2. Optionally, check the download against the `.sha256` file published beside it:
+   ```
+   sha256sum -c magpie-<version>-linux-x64.tar.gz.sha256
+   ```
+3. `cd` to its folder and run `./magpie`. MAGPIE looks for its data in a `data` folder there, then in one beside the executable, and offers to download it (about 195 MB) into the first: answer `y`. The download uses libcurl (`libcurl.so.4`), which most systems have; without it, run `./download_data.sh` from a clone of this repository instead.
+
+From there, everything in [Usage](#usage) applies.
 
 ### Release builds
 

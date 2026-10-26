@@ -378,7 +378,8 @@ char *browser_game_action(const char *text, const char *lexicon,
        (current_player < 0 || current_player > 1)) ||
       challenge_rule < BROWSER_CHALLENGE_VOID ||
       challenge_rule > BROWSER_CHALLENGE_TEN_PER_WORD ||
-      !(strings_equal(lexicon, "CSW24") || strings_equal(lexicon, "NWL23")) ||
+      !(strings_equal(lexicon, "CSW24") || strings_equal(lexicon, "NWL23") ||
+        strings_equal(lexicon, "FRA24")) ||
       ((action == BROWSER_GAME_COMMIT || action == BROWSER_GAME_LIVE_MOVE) &&
        !valid_rack(rack))) {
     return string_duplicate("{\"error\":\"Invalid game action or import "

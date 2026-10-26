@@ -2,6 +2,7 @@
 
 #include "../src/compat/cfile.h"
 #include "../src/compat/ctime.h"
+#include "../src/compat/endian_io.h"
 #include "../src/def/bit_rack_defs.h"
 #include "../src/def/board_defs.h"
 #include "../src/def/letter_distribution_defs.h"
@@ -23,6 +24,8 @@
 #include "test_util.h"
 #include <assert.h>
 #include <inttypes.h>
+#include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -409,7 +412,60 @@ void check_all_wmp_result_sizes_fit_in_buffer(void) {
   config_destroy(config);
 }
 
+static void test_wmp_load_result_size_limit(void) {
+  const uint32_t sizes[] = {0, WMP_RESULT_BUFFER_SIZE - 1,
+                            WMP_RESULT_BUFFER_SIZE, WMP_RESULT_BUFFER_SIZE + 1,
+                            UINT32_MAX};
+  for (size_t size_idx = 0; size_idx < sizeof(sizes) / sizeof(sizes[0]);
+       size_idx++) {
+    const uint32_t max_bytes = sizes[size_idx];
+    const bool oversized = max_bytes > WMP_RESULT_BUFFER_SIZE;
+    FILE *stream = tmpfile();
+    assert(stream != NULL);
+    const uint8_t header[] = {WMP_VERSION, BOARD_DIM};
+    const size_t header_written = fwrite(header, 1, sizeof(header), stream);
+    assert(header_written == sizeof(header));
+    const bool maximum_written = fwrite_le_uint32s(&max_bytes, 1, stream);
+    assert(maximum_written);
+    if (!oversized) {
+      // An empty table has four blankless fields (including the sole bucket
+      // offset), and three each for the single- and double-blank maps.
+      const uint32_t empty_length[10] = {0};
+      for (int length = 2; length <= BOARD_DIM; length++) {
+        const bool length_written = fwrite_le_uint32s(
+            empty_length, sizeof(empty_length) / sizeof(empty_length[0]),
+            stream);
+        assert(length_written);
+      }
+    }
+    // Oversized fixtures contain only a header: trying to read their tables
+    // would fail, so rejection must happen before any table reads.
+    const int seek_result = fseek(stream, 0, SEEK_SET);
+    assert(seek_result == 0);
+    ErrorStack *errors = error_stack_create();
+    WMP *wmp = calloc_or_die(1, sizeof(*wmp));
+    wmp_load_from_filename_with_stream(wmp, "size-limit", "size-limit.wmp",
+                                       stream, errors);
+    if (oversized) {
+      assert(error_stack_top(errors) == ERROR_STATUS_WMP_RESULT_TOO_LARGE);
+      assert(wmp->name == NULL);
+      for (int length = 2; length <= BOARD_DIM; length++) {
+        assert(wmp->wfls[length].word_bucket_starts == NULL);
+        assert(wmp->wfls[length].word_index_slots == NULL);
+      }
+    } else {
+      assert(error_stack_is_empty(errors));
+      assert(wmp->max_word_lookup_bytes == max_bytes);
+      assert(strings_equal(wmp->name, "size-limit"));
+    }
+    wmp_destroy(wmp);
+    error_stack_destroy(errors);
+    fclose_or_die(stream);
+  }
+}
+
 void test_wmp(void) {
+  test_wmp_load_result_size_limit();
   write_wmp_files();
   test_short_and_long_words();
   test_word_index_matches_bucket_starts();
