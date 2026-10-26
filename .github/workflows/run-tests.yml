@@ -1,5 +1,13 @@
 name: ci
 on: [push]
+env:
+  # The pinned Windows toolchain, for windows-build and windows-cross-compile,
+  # with the SHA-256 of its release tarball (also the digest GitHub reports
+  # for the asset). Keep in step with release-windows.yml and
+  # windows/Dockerfile.
+  LLVM_MINGW_VERSION: "20261006"
+  LLVM_MINGW: llvm-mingw-20261006-ucrt-ubuntu-22.04-x86_64
+  LLVM_MINGW_SHA256: 5f9c6ed95b2d4bdb2869a488c5fd5857fbdabcf288a0aa3eb1da43f6a08d8ab4
 jobs:
   lint-fast:
     runs-on: ubuntu-latest
@@ -33,22 +41,97 @@ jobs:
       - name: Check formatting
         run: python3 ./format.py
 
-  windows-cross-compile:
+  # The Windows executables, for the test jobs, which wait for nothing else
+  # (windows-cross-compile's checks run beside this), and the tests' split
+  # into the shards those jobs run.
+  windows-build:
     runs-on: ubuntu-latest
-    env:
-      # The pinned toolchain, with the SHA-256 of its release tarball (also
-      # the digest GitHub reports for the asset). Keep in step with
-      # release-windows.yml and windows/Dockerfile.
-      LLVM_MINGW_VERSION: "20261006"
-      LLVM_MINGW: llvm-mingw-20261006-ucrt-ubuntu-22.04-x86_64
-      LLVM_MINGW_SHA256: 5f9c6ed95b2d4bdb2869a488c5fd5857fbdabcf288a0aa3eb1da43f6a08d8ab4
+    outputs:
+      peg_tests: ${{ steps.shards.outputs.peg }}
+      rest_tests: ${{ steps.shards.outputs.rest }}
     steps:
       - uses: actions/checkout@v3
+
+      # Two shards that take about the same time: peg, the tests named here
+      # (a quarter of the suite's time is peg's), and rest, every other test
+      # in test/test.c's test_table, so a new test lands in rest.
+      - name: Split the tests into two shards
+        id: shards
+        run: |
+          peg="peg contribute endgame config"
+          all=$(awk '/^static TestEntry test_table\[\] = \{/ {f = 1; next} f && /^\};/ {exit} f' test/test.c \
+            | sed -n 's/^ *{"\([a-z0-9_]*\)",.*/\1/p')
+          for test in $peg; do
+            if ! grep -qx "$test" <<<"$all"; then
+              echo "::error::test/test.c's test_table has no test $test"
+              exit 1
+            fi
+          done
+          rest=$(grep -vxF -f <(printf '%s\n' $peg) <<<"$all" | tr '\n' ' ')
+          if [ -z "$rest" ]; then
+            echo "::error::found no other tests in test/test.c's test_table"
+            exit 1
+          fi
+          echo "peg: $peg"
+          echo "rest: $rest"
+          echo "peg=$peg" >> "$GITHUB_OUTPUT"
+          echo "rest=$rest" >> "$GITHUB_OUTPUT"
 
       # The cache holds the tarball itself, keyed by its checksum, and is
       # saved only when the job succeeds, after the tarball was verified. It
       # is verified again before every unpack, so a tampered cache entry
       # fails the job instead of compiling with it.
+      - name: Get llvm-mingw cache
+        id: cache-llvm-mingw
+        uses: actions/cache@v3
+        with:
+          path: ~/llvm-mingw-download
+          key: ${{ env.LLVM_MINGW }}-sha256-${{ env.LLVM_MINGW_SHA256 }}
+
+      - name: Download llvm-mingw
+        if: steps.cache-llvm-mingw.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p ~/llvm-mingw-download
+          curl -fsSL -o ~/llvm-mingw-download/$LLVM_MINGW.tar.xz \
+            "https://github.com/mstorsjo/llvm-mingw/releases/download/$LLVM_MINGW_VERSION/$LLVM_MINGW.tar.xz"
+
+      - name: Verify and unpack llvm-mingw
+        run: |
+          echo "$LLVM_MINGW_SHA256  $HOME/llvm-mingw-download/$LLVM_MINGW.tar.xz" | sha256sum -c --strict -
+          mkdir -p ~/llvm-mingw
+          tar xJf ~/llvm-mingw-download/$LLVM_MINGW.tar.xz -C ~/llvm-mingw
+
+      - name: Link magpie.exe and magpie_test.exe for x64 and arm64
+        run: |
+          export PATH="$HOME/llvm-mingw/$LLVM_MINGW/bin:$PATH"
+          for arch in x86_64 aarch64; do
+            march=nehalem
+            if [ "$arch" = aarch64 ]; then march=armv8-a; fi
+            make magpie magpie_test BUILD=portable_release PORTABLE_MARCH=$march CC=$arch-w64-mingw32-clang
+            mkdir -p windows-$arch
+            mv bin/magpie.exe bin/magpie_test.exe windows-$arch/
+          done
+
+      - name: Upload the x64 executables
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-x86_64
+          path: windows-x86_64/*.exe
+          retention-days: 7
+
+      - name: Upload the arm64 executables
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-aarch64
+          path: windows-aarch64/*.exe
+          retention-days: 7
+
+  windows-cross-compile:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      # As in windows-build.
       - name: Get llvm-mingw cache
         id: cache-llvm-mingw
         uses: actions/cache@v3
@@ -79,31 +162,6 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y clang-tidy-18
           MINGW_SYSROOT="$HOME/llvm-mingw/$LLVM_MINGW" ./tidy.sh clang-tidy-18 windows
-
-      - name: Link magpie.exe and magpie_test.exe for x64 and arm64
-        run: |
-          export PATH="$HOME/llvm-mingw/$LLVM_MINGW/bin:$PATH"
-          for arch in x86_64 aarch64; do
-            march=nehalem
-            if [ "$arch" = aarch64 ]; then march=armv8-a; fi
-            make magpie magpie_test BUILD=portable_release PORTABLE_MARCH=$march CC=$arch-w64-mingw32-clang
-            mkdir -p windows-$arch
-            mv bin/magpie.exe bin/magpie_test.exe windows-$arch/
-          done
-
-      - name: Upload the x64 executables
-        uses: actions/upload-artifact@v4
-        with:
-          name: windows-x86_64
-          path: windows-x86_64/*.exe
-          retention-days: 7
-
-      - name: Upload the arm64 executables
-        uses: actions/upload-artifact@v4
-        with:
-          name: windows-aarch64
-          path: windows-aarch64/*.exe
-          retention-days: 7
 
   # The data cache with its symlinks turned into copies, for Windows runners:
   # the tarballs' 27 symlinks would not survive a restore there. Built once
@@ -151,9 +209,14 @@ jobs:
           enableCrossOsArchive: true
 
   # L3: the x64 test binary under Wine, which catches most runtime problems
-  # (text mode, paths, threads) on Linux.
+  # (text mode, paths, threads) on Linux. In windows-build's two shards.
   windows-wine-tests:
-    needs: windows-cross-compile
+    needs: windows-build
+    name: windows-wine-tests (${{ matrix.shard }})
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [peg, rest]
     runs-on: ubuntu-latest
     timeout-minutes: 150
     steps:
@@ -178,23 +241,73 @@ jobs:
           name: windows-x86_64
           path: bin
 
+      # Wine comes from the runner's Ubuntu mirror, which sometimes slows to a
+      # few KB/s for hours. Its packages are cached per runner image, so most
+      # runs install them without the mirror; otherwise the mirror gets about
+      # 10 minutes before one retry from archive.ubuntu.com.
+      - name: Name the Wine package cache
+        id: wine-cache-key
+        run: echo "key=wine64-debs-$ImageOS-$ImageVersion" >> "$GITHUB_OUTPUT"
+
+      - name: Restore Wine packages
+        id: wine-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/wine-debs/*.deb
+          key: ${{ steps.wine-cache-key.outputs.key }}
+
       - name: Install Wine
+        timeout-minutes: 25
         run: |
-          sudo apt-get update
-          sudo apt-get install -y wine64
+          debs="$HOME/wine-debs"
+          # timeout runs apt-get itself, so a timed-out apt-get is stopped and
+          # releases apt's lock for the retry.
+          # dpkg installs exactly the cached packages; given .deb files, apt
+          # would still download any the mirror also has. The cache is per
+          # runner image, which already has everything else they need.
+          if ls "$debs"/*.deb > /dev/null 2>&1 &&
+            sudo timeout --kill-after=10 300 dpkg -i "$debs"/*.deb; then
+            exit 0
+          fi
+          # apt needs the partial/ directory of an archives directory to exist.
+          mkdir -p "$debs/partial"
+          install_wine() {
+            sudo timeout --kill-after=10 120 apt-get update &&
+              sudo timeout --kill-after=10 480 apt-get install -y --fix-broken \
+                -o Dir::Cache::Archives="$debs" \
+                -o APT::Keep-Downloaded-Packages=true \
+                -o DPkg::Lock::Timeout=60 wine64
+          }
+          if ! install_wine; then
+            echo "::warning::Installing Wine from the runner's mirror failed or took over 10 minutes; retrying from archive.ubuntu.com"
+            echo "http://archive.ubuntu.com/ubuntu/" | sudo tee /etc/apt/apt-mirrors.txt
+            install_wine
+          fi
+          # apt downloaded as root; let the cache step read the packages.
+          sudo chown -R "$(id -u):$(id -g)" "$debs"
+
+      - name: Save Wine packages
+        if: steps.wine-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/wine-debs/*.deb
+          key: ${{ steps.wine-cache-key.outputs.key }}
 
       - name: Run the tests under Wine
         env:
           WINEDEBUG: -all
-        run: wine bin/magpie_test.exe
+        run: wine bin/magpie_test.exe ${{ matrix.shard == 'peg' && needs.windows-build.outputs.peg_tests || needs.windows-build.outputs.rest_tests }}
 
-  # L4: the same executables on real Windows, x64 and arm64.
+  # L4: the same executables on real Windows, x64 and arm64, each in
+  # windows-build's two shards.
   windows-native-tests:
-    needs: [windows-cross-compile, windows-data]
-    name: windows-native-tests (${{ matrix.arch }})
+    needs: [windows-build, windows-data]
+    name: windows-native-tests (${{ matrix.arch }}, ${{ matrix.shard }})
     strategy:
       fail-fast: false
       matrix:
+        arch: [x86_64, aarch64]
+        shard: [peg, rest]
         include:
           - arch: x86_64
             runner: windows-latest
@@ -225,18 +338,102 @@ jobs:
 
       - name: Run the tests on Windows
         shell: bash
-        run: ./bin/magpie_test.exe
+        run: ./bin/magpie_test.exe ${{ matrix.shard == 'peg' && needs.windows-build.outputs.peg_tests || needs.windows-build.outputs.rest_tests }}
 
-  cppcheck:
+  # cppcheck's first pass, a share of the files per job (see
+  # shard_cppcheck.py). A shard always passes unless it breaks: the cppcheck
+  # job below reports the findings.
+  cppcheck-shard:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
     steps:
       - uses: actions/checkout@v3
 
+      # The built binary with its cfg/ beside it, which is all cppcheck.sh
+      # needs to skip the build: about 5 MB, where the source and build trees
+      # were 133.
       - name: Cache cppcheck binary
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
-          path: cppcheck_dir
-          key: cppcheck-2.17.1
+          path: cppcheck_dir/build/bin
+          key: cppcheck-2.17.1-bin
+
+      # The results the cppcheck job saved last (see there), so the shard
+      # analyzes only its files whose hash changed.
+      - name: Restore cppcheck results
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            cppcheck_build
+            cppcheck_build-windows
+          key: cppcheck-results-2.17.1-${{ hashFiles('cppcheck.sh') }}-${{ github.run_id }}
+          restore-keys: cppcheck-results-2.17.1-${{ hashFiles('cppcheck.sh') }}-
+
+      - name: Run cppcheck on this shard
+        env:
+          CPPCHECK_SHARD: ${{ matrix.shard }}/${{ strategy.job-total }}
+        run: ./cppcheck.sh
+
+      - name: Collect this shard's results
+        run: python3 shard_cppcheck.py collect cppcheck_build cppcheck-shard-results
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cppcheck-shard-${{ matrix.shard }}
+          path: cppcheck-shard-results/
+          retention-days: 1
+
+  # Runs cppcheck.sh over the shards' merged results. It analyzes no file a
+  # shard checked, reports every file's findings, and runs the whole-program
+  # checks, which only see the files in one run, and the _WIN32 pass.
+  cppcheck:
+    if: ${{ !cancelled() }}
+    needs: cppcheck-shard
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every shard to finish
+        env:
+          SHARD_RESULT: ${{ needs.cppcheck-shard.result }}
+        run: test "$SHARD_RESULT" = success
+
+      - uses: actions/checkout@v3
+
+      - name: Cache cppcheck binary
+        uses: actions/cache@v4
+        with:
+          path: cppcheck_dir/build/bin
+          key: cppcheck-2.17.1-bin
+
+      # cppcheck's own incremental results (--cppcheck-build-dir in
+      # cppcheck.sh). It keys each file's by a hash of the file as
+      # preprocessed, so with its headers, and of the options, analyzes only
+      # the files whose hash changed, and reports the rest's findings from the
+      # cache. About 1.5 MB, saved under a new key by every successful run of
+      # this job and restored from the latest this branch can see: its own,
+      # else main's. This job uses the _WIN32 pass's from it; the shards'
+      # replace the rest.
+      - name: Cache cppcheck results
+        uses: actions/cache@v4
+        with:
+          path: |
+            cppcheck_build
+            cppcheck_build-windows
+          key: cppcheck-results-2.17.1-${{ hashFiles('cppcheck.sh') }}-${{ github.run_id }}
+          restore-keys: cppcheck-results-2.17.1-${{ hashFiles('cppcheck.sh') }}-
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: cppcheck-shard-*
+          path: cppcheck-shard-results
+
+      - name: Merge the shards' results
+        run: |
+          rm -rf cppcheck_build
+          mkdir cppcheck_build
+          cp cppcheck-shard-results/*/* cppcheck_build/
 
       - name: Run cppcheck static analysis
         run: ./cppcheck.sh
@@ -373,13 +570,13 @@ jobs:
           grep -q "building the wordmap for CSW21" first-use.txt
           test -s data/lexica/CSW21.wmp
 
-      - name: Build dev test binary
-        run: make magpie_test
+      - name: Build the sanitizer test binary
+        run: make magpie_test BUILD=sanitize
 
       - name: Check native batch conversion failures
         if: matrix.shard == 'rest'
         run: |
-          make magpie_convert
+          make magpie_convert BUILD=sanitize
           if ./bin/magpie_convert invalid_conversion CSW21; then
             echo 'Invalid conversion unexpectedly succeeded'
             exit 1
@@ -425,10 +622,10 @@ jobs:
           make magpie_test BUILD=no_pgo_release BOARD_DIM=21
           ./bin/magpie_test
 
-      - name: Build and run super dev tests
+      - name: Build and run super sanitizer tests
         run: |
           make clean
-          make magpie_test BOARD_DIM=21
+          make magpie_test BUILD=sanitize BOARD_DIM=21
           ./bin/magpie_test
 
   wasm-tests:
@@ -463,6 +660,7 @@ jobs:
     if: always()
     needs:
       - lint-fast
+      - windows-build
       - windows-cross-compile
       - windows-wine-tests
       - windows-native-tests
@@ -481,6 +679,7 @@ jobs:
           echo "| Job | Result |" >> $GITHUB_STEP_SUMMARY
           echo "|-----|--------|" >> $GITHUB_STEP_SUMMARY
           echo "| lint-fast | \`${{ needs.lint-fast.result }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| windows-build | \`${{ needs.windows-build.result }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| windows-cross-compile | \`${{ needs.windows-cross-compile.result }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| windows-wine-tests | \`${{ needs.windows-wine-tests.result }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| windows-native-tests | \`${{ needs.windows-native-tests.result }}\` |" >> $GITHUB_STEP_SUMMARY
@@ -494,6 +693,7 @@ jobs:
       - name: Check for failures
         if: |
           needs.lint-fast.result != 'success' ||
+          needs.windows-build.result != 'success' ||
           needs.windows-cross-compile.result != 'success' ||
           needs.windows-wine-tests.result != 'success' ||
           needs.windows-native-tests.result != 'success' ||

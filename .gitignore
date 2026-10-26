@@ -11,6 +11,7 @@ covhtml
 magpie*
 !tui/assets/magpie.ttf
 !examples/magpie.py
+!windows/magpie.iss
 dev/*.txt
 perf*
 .env

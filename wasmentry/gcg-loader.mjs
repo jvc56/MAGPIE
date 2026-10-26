@@ -1,3 +1,5 @@
+import { t } from "./i18n.mjs";
+import { LEXICA } from "./lexica.mjs";
 export function readGCG(file, pastedText, defaultLexicon, progress = () => {}) {
   return new Promise((resolve, reject) => {
     progress("loader.create");
@@ -18,8 +20,8 @@ export function readGCG(file, pastedText, defaultLexicon, progress = () => {}) {
     // Keep the watchdog on the page: it must still run if the loader is stuck.
     const timer = setTimeout(() => finish(new Error(
       file
-        ? "File read timed out. Paste the GCG text, or try a file stored locally."
-        : "GCG preparation timed out. Try loading the game again.",
+        ? t("File read timed out. Paste the GCG text, or try a file stored locally.")
+        : t("GCG preparation timed out. Try loading the game again."),
     )), 10000);
     worker.onmessage = ({ data }) => {
       if (data?.type === "progress") {
@@ -27,19 +29,19 @@ export function readGCG(file, pastedText, defaultLexicon, progress = () => {}) {
         return;
       }
       if (data?.error) {
-        finish(new Error(data.error));
-      } else if (typeof data?.text !== "string" || !["CSW24", "NWL23"].includes(data.lexicon)) {
-        finish(new Error("The GCG loader returned an incomplete result. Reload Magpie and try again."));
+        finish(new Error(t(data.error)));
+      } else if (typeof data?.text !== "string" || !LEXICA.includes(data.lexicon)) {
+        finish(new Error(t("The GCG loader returned an incomplete result. Reload Magpie and try again.")));
       } else {
         finish(null, data);
       }
     };
     worker.onerror = (event) => {
       event.preventDefault();
-      finish(new Error("The GCG loading worker stopped. Try loading the game again."));
+      finish(new Error(t("The GCG loading worker stopped. Try loading the game again.")));
     };
     worker.onmessageerror = () => {
-      finish(new Error("The GCG loading worker returned an unreadable result."));
+      finish(new Error(t("The GCG loading worker returned an unreadable result.")));
     };
     try {
       worker.postMessage({ file, pastedText, defaultLexicon, reportProgress: true });

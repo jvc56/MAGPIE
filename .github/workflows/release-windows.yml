@@ -1,17 +1,20 @@
 name: Release Windows
 
 # Builds magpie.exe for x64 and arm64 Windows, tests both on real Windows,
-# smoke-tests the first-run path of each in an empty directory, and attaches
-# them, with their SHA-256s, to the GitHub release for the tag.
+# smoke-tests the first-run path of each in an empty directory, builds the
+# installer that holds both (windows/magpie.iss) and tests it on each, and
+# attaches the executables and the installer, with their SHA-256s, to the
+# GitHub release for the tag.
 #
 # Triggers:
 # - a pushed vX.Y.Z tag runs every job, publish included. The tag must match
 #   MAGPIE_VERSION in src/impl/config.c, or the build job fails first.
-# - a push to any branch that changes this file runs every job but publish,
-#   so a change to the workflow is tested before it merges. This is a branch
-#   push rather than pull_request because the test job restores the
-#   windows-data cache, which run-tests.yml saves on the branch, and a
-#   pull_request run can only restore caches from the base branch.
+# - a push to any branch that changes this file or the installer's script
+#   runs every job but publish, so a change to either is tested before it
+#   merges. This is a branch push rather than pull_request because the test
+#   job restores the windows-data cache, which run-tests.yml saves on the
+#   branch, and a pull_request run can only restore caches from the base
+#   branch.
 # - workflow_dispatch runs every job but publish, on any ref, tags included.
 # Only publish can write to the repository.
 
@@ -25,6 +28,7 @@ on:
     # for tag pushes, so every tag push runs.
     paths:
       - .github/workflows/release-windows.yml
+      - windows/magpie.iss
   workflow_dispatch:
 
 permissions:
@@ -33,15 +37,21 @@ permissions:
 env:
   # The toolchain that builds the shipped executables, with the SHA-256 of its
   # release tarball (also the digest GitHub reports for the asset). Keep in
-  # step with the windows-cross-compile job in run-tests.yml and with
-  # windows/Dockerfile.
+  # step with run-tests.yml's env and with windows/Dockerfile.
   LLVM_MINGW_VERSION: "20261006"
   LLVM_MINGW: llvm-mingw-20261006-ucrt-ubuntu-22.04-x86_64
   LLVM_MINGW_SHA256: 5f9c6ed95b2d4bdb2869a488c5fd5857fbdabcf288a0aa3eb1da43f6a08d8ab4
+  # The compiler for the installer, the 64-bit edition's setup, pinned the
+  # same way (its SHA-256 is also the digest GitHub reports for the asset).
+  INNO_SETUP_TAG: is-7_1_0
+  INNO_SETUP: innosetup-7.1.0-x64
+  INNO_SETUP_SHA256: 0362a383ed217d4c4239b5933866dd96d3eb2102737da92f80f6057a4b40df2f
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@v4
 
@@ -194,11 +204,160 @@ jobs:
         shell: bash
         run: ./release/magpie_test-windows-${{ matrix.name }}.exe
 
+  # The installer, from the executables the build job made.
+  installer:
+    needs: build
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: release
+          path: release
+
+      # Cached and verified like llvm-mingw: the hash is checked in the step
+      # that runs the setup, so a tampered cache entry never runs.
+      - name: Get Inno Setup cache
+        id: cache-inno-setup
+        uses: actions/cache@v4
+        with:
+          path: inno-setup-download
+          key: ${{ env.INNO_SETUP }}-sha256-${{ env.INNO_SETUP_SHA256 }}
+
+      - name: Download Inno Setup
+        if: steps.cache-inno-setup.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          mkdir -p inno-setup-download
+          curl -fsSL -o "inno-setup-download/$INNO_SETUP.exe" \
+            "https://github.com/jrsoftware/issrc/releases/download/$INNO_SETUP_TAG/$INNO_SETUP.exe"
+
+      - name: Verify and install Inno Setup
+        shell: pwsh
+        run: |
+          $setup = "inno-setup-download\$env:INNO_SETUP.exe"
+          $hash = (Get-FileHash $setup -Algorithm SHA256).Hash
+          if ($hash -ne $env:INNO_SETUP_SHA256) { throw "$setup has SHA-256 $hash, not $env:INNO_SETUP_SHA256" }
+          $process = Start-Process $setup -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-', "/DIR=$env:RUNNER_TEMP\inno-setup" -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw "the Inno Setup setup exited with $($process.ExitCode)" }
+
+      - name: Build the installer
+        shell: pwsh
+        env:
+          version: ${{ needs.build.outputs.version }}
+        run: |
+          & "$env:RUNNER_TEMP\inno-setup\ISCC.exe" -qp "-DMagpieVersion=$env:version" "-DReleaseDir=$env:GITHUB_WORKSPACE\release" "-O$env:GITHUB_WORKSPACE\installer" windows\magpie.iss
+          if ($LASTEXITCODE -ne 0) { throw "ISCC exited with $LASTEXITCODE" }
+
+      # In the build job's format, `<hash>  <name>`.
+      - name: Checksum the installer
+        shell: bash
+        env:
+          version: ${{ needs.build.outputs.version }}
+        run: |
+          cd installer
+          setup="magpie-$version-windows-setup.exe"
+          printf '%s  %s\n' "$(sha256sum < "$setup" | cut -d' ' -f1)" "$setup" > "$setup.sha256"
+          cat "$setup.sha256"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: installer
+          path: installer/
+
+  # The installer on each architecture, as someone would use it: a silent
+  # install with the PATH task, the Start menu shortcut's first run (data
+  # fetch in its working directory), a session from a terminal elsewhere, and
+  # a silent uninstall, which keeps the data.
+  installer-smoke:
+    needs: installer
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: x64
+            runner: windows-latest
+            target: nehalem
+          - name: arm64
+            runner: windows-11-arm
+            target: armv8-a
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: installer
+          path: installer
+      - uses: actions/download-artifact@v4
+        with:
+          name: release
+          path: release
+      - name: Install, play, uninstall
+        shell: pwsh
+        run: |
+          $setup = (Get-ChildItem installer\magpie-*-windows-setup.exe).FullName
+          $log = "$env:RUNNER_TEMP\setup.log"
+          $process = Start-Process $setup -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/TASKS=addtopath', "/LOG=$log" -Wait -PassThru
+          if ($process.ExitCode -ne 0) { Get-Content $log; throw "setup exited with $($process.ExitCode)" }
+
+          $app = "$env:LOCALAPPDATA\Programs\MAGPIE"
+          $exe = "$app\magpie.exe"
+          $home_dir = "$env:LOCALAPPDATA\MAGPIE"
+          if (-not (Test-Path $exe)) { throw "setup put nothing at $exe" }
+          $expected = (Get-ChildItem release\magpie-*-windows-${{ matrix.name }}.exe).FullName
+          if ((Get-FileHash $exe).Hash -ne (Get-FileHash $expected).Hash) { throw "setup installed the wrong executable for ${{ matrix.name }}" }
+          $user_path = [Environment]::GetEnvironmentVariable('Path', 'User')
+          if (($user_path -split ';') -notcontains $app) { throw "setup did not put $app on the user's PATH: $user_path" }
+          $shortcut_path = "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\MAGPIE.lnk"
+          $shortcut = (New-Object -ComObject WScript.Shell).CreateShortcut($shortcut_path)
+          if ($shortcut.TargetPath -ne $exe) { throw "the shortcut runs $($shortcut.TargetPath)" }
+          if ($shortcut.WorkingDirectory -ne $home_dir) { throw "the shortcut starts in $($shortcut.WorkingDirectory)" }
+
+          # The shortcut's first run, which offers to fetch the data.
+          Push-Location $home_dir
+          & $exe data fetch
+          if ($LASTEXITCODE -ne 0) { throw "data fetch exited with $LASTEXITCODE" }
+          Pop-Location
+          if (-not (Test-Path "$home_dir\data\lexica\CSW24.kwg")) { throw "data fetch wrote nothing in $home_dir" }
+
+          # A terminal elsewhere finds that data.
+          New-Item -ItemType Directory elsewhere | Out-Null
+          Push-Location elsewhere
+          $session = @(
+            'set -lex CSW24 -threads 2 -savesettings false'
+            'cgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 AEINRST/ 0/0 0'
+            'gen -numplays 3'
+            'builders'
+            'quit'
+          ) -join "`n"
+          $output = $session | & $exe
+          $status = $LASTEXITCODE
+          $output
+          if ($status -ne 0) { throw "the session exited with $status" }
+          $text = $output -join "`n"
+          if ($text -match '\(error') { throw "the session reported an error" }
+          if ($text -notmatch '"build_target":"${{ matrix.target }}"') { throw "not the ${{ matrix.target }} build" }
+          if (Test-Path data) { throw "MAGPIE put data where it was started instead of finding $home_dir\data" }
+          Pop-Location
+          if (-not (Test-Path "$home_dir\data\lexica\CSW24.wmp")) { throw "the wordmap is not in $home_dir\data" }
+
+          # The uninstaller hands over to a copy of itself in %TEMP%, so wait
+          # for the executable to go rather than for the process started.
+          $process = Start-Process "$app\unins000.exe" -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART' -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw "the uninstaller exited with $($process.ExitCode)" }
+          $deadline = (Get-Date).AddSeconds(60)
+          while ((Test-Path $exe) -and (Get-Date) -lt $deadline) { Start-Sleep -Seconds 1 }
+          if (Test-Path $exe) { throw "the uninstaller left $exe" }
+          if (Test-Path $shortcut_path) { throw "the uninstaller left the shortcut" }
+          $user_path = [Environment]::GetEnvironmentVariable('Path', 'User')
+          if (($user_path -split ';') -contains $app) { throw "the uninstaller left $app on the user's PATH: $user_path" }
+          if (-not (Test-Path "$home_dir\data\lexica\CSW24.kwg")) { throw "a silent uninstall deleted the data" }
+
   # Only a pushed vX.Y.Z tag publishes: startsWith alone would also be true
   # for a workflow_dispatch started on a tag ref.
   publish:
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
-    needs: [smoke, test]
+    needs: [smoke, test, installer-smoke]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -207,7 +366,11 @@ jobs:
         with:
           name: release
           path: release
-      - name: Attach the executables to the release
+      - uses: actions/download-artifact@v4
+        with:
+          name: installer
+          path: release
+      - name: Attach the executables and the installer to the release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -215,7 +378,7 @@ jobs:
           # The build job checked that the tag is v$MAGPIE_VERSION, so these
           # are the exact names it built; a missing one fails the upload.
           assets=()
-          for name in x64 arm64; do
+          for name in x64 arm64 setup; do
             exe="release/magpie-${tag#v}-windows-$name.exe"
             assets+=("$exe" "$exe.sha256")
           done

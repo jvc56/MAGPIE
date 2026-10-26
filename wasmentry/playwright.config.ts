@@ -5,6 +5,9 @@ const staticPort = Number(process.env.MAGPIE_STATIC_TEST_PORT || 8001);
 
 export default defineConfig({
   testDir: "./tests",
+  // App modules are native ESM in both browsers and Node. Transpiling them to
+  // CommonJS can poison Node 22.23's shared require/import module cache.
+  build: { external: ["**/*.mjs"] },
   // One engine at a time per runner; CI shards distribute cases across runners.
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
