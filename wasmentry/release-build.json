@@ -1,4 +1,14 @@
 {
   "emscripten_version": "6.0.12",
-  "data_revision": "c4216b80098e8c7e88262cb5d04d0bc033bc4d46"
+  "data_revision": "c4216b80098e8c7e88262cb5d04d0bc033bc4d46",
+  "additional_data": {
+    "data/lexica/FRA24.kwg": {
+      "url": "https://raw.githubusercontent.com/woogles-io/liwords/fd53c8d01c9a97f04b3cef76f539a5d637cff017/liwords-ui/public/wasm/2024/FRA24.kwg",
+      "sha256": "267d1854791d80a5fc71458f42ce356c2385cad0f0e1f6efe790a2beb544822c"
+    },
+    "data/lexica/FRA24.klv2": {
+      "url": "https://raw.githubusercontent.com/woogles-io/liwords/fd53c8d01c9a97f04b3cef76f539a5d637cff017/liwords-ui/public/wasm/2024/FRA24.klv2",
+      "sha256": "80034768c7d978540eed9cf89b1437907b6e329b854f66a5abd319977f7e28f3"
+    }
+  }
 }

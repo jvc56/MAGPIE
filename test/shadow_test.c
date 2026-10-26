@@ -45,7 +45,6 @@ void load_and_generate_moves(Game *game, MoveList *move_list,
       .move_list = move_list,
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
-      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
   };
 
   load_cgp_or_die(game, cgp);
