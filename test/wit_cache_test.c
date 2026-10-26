@@ -5,7 +5,6 @@
 #include "../src/def/game_defs.h"
 #include "../src/def/kwg_defs.h"
 #include "../src/def/letter_distribution_defs.h"
-#include "../src/def/move_defs.h"
 #include "../src/def/players_data_defs.h"
 #include "../src/ent/bag.h"
 #include "../src/ent/board.h"
@@ -123,7 +122,6 @@ static MoveList *generate_cache_moves(const Game *game) {
       .game = game,
       .move_list = moves,
       .target_equity = EQUITY_MAX_VALUE,
-      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
   };
   generate_moves_for_game(&args);
   // A capped list would not establish equality of the complete move sets.
