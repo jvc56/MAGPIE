@@ -313,6 +313,7 @@ typedef enum {
   // directory, or a downloaded file's size or SHA-256 is not the listed one.
   ERROR_STATUS_DATA_FETCH_MANIFEST_INVALID,
   ERROR_STATUS_DATA_FETCH_FILE_MISMATCH,
+  ERROR_STATUS_WMP_RESULT_TOO_LARGE,
 } error_code_t;
 
 typedef enum {

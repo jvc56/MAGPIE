@@ -6,8 +6,10 @@
 #include "../src/def/board_defs.h"
 #include "../src/def/cross_set_defs.h"
 #include "../src/def/equity_defs.h"
+#include "../src/def/inference_defs.h"
 #include "../src/def/letter_distribution_defs.h"
 #include "../src/def/move_defs.h"
+#include "../src/def/rack_defs.h"
 #include "../src/def/thread_control_defs.h"
 #include "../src/ent/anchor.h"
 #include "../src/ent/bag.h"
@@ -20,6 +22,7 @@
 #include "../src/ent/equity.h"
 #include "../src/ent/game.h"
 #include "../src/ent/game_history.h"
+#include "../src/ent/inference_results.h"
 #include "../src/ent/klv.h"
 #include "../src/ent/klv_csv.h"
 #include "../src/ent/kwg.h"
@@ -63,6 +66,38 @@ void assert_equal_at_equity_resolution(double a, double b) {
 }
 
 bool within_epsilon(double a, double b) { return fabs(a - b) < TEST_EPSILON; }
+
+void assert_inference_results_equal(InferenceResults *results_a,
+                                    InferenceResults *results_b, int ld_size) {
+  for (int type_idx = 0; type_idx < NUMBER_OF_INFER_TYPES; type_idx++) {
+    const inference_stat_t inference_stat_type = (inference_stat_t)type_idx;
+    const Stat *stat_a =
+        inference_results_get_equity_values(results_a, inference_stat_type);
+    const Stat *stat_b =
+        inference_results_get_equity_values(results_b, inference_stat_type);
+    assert(stat_get_num_samples(stat_a) == stat_get_num_samples(stat_b));
+    assert(stat_get_num_unique_samples(stat_a) ==
+           stat_get_num_unique_samples(stat_b));
+    if (stat_get_num_samples(stat_a) > 0) {
+      assert(within_epsilon(stat_get_mean(stat_a), stat_get_mean(stat_b)));
+    }
+    for (int ml = 0; ml < ld_size; ml++) {
+      for (int num_letters = 1; num_letters <= RACK_SIZE; num_letters++) {
+        for (int subtotal_idx = 0; subtotal_idx < NUMBER_OF_INFERENCE_SUBTOTALS;
+             subtotal_idx++) {
+          const inference_subtotal_t subtotal_type =
+              (inference_subtotal_t)subtotal_idx;
+          assert(inference_results_get_subtotal(results_a, inference_stat_type,
+                                                (MachineLetter)ml, num_letters,
+                                                subtotal_type) ==
+                 inference_results_get_subtotal(results_b, inference_stat_type,
+                                                (MachineLetter)ml, num_letters,
+                                                subtotal_type));
+        }
+      }
+    }
+  }
+}
 
 // This test function only works for single-char alphabets
 void set_row(const Game *game, const int row, const char *row_content) {
@@ -385,7 +420,6 @@ void play_top_n_equity_move(Game *game, int n) {
       .override_kwg = NULL,
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
-      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
   };
 
   generate_moves(&args);
@@ -734,7 +768,6 @@ void assert_validated_and_generated_moves(Game *game, const char *rack_string,
       .move_list = move_list,
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
-      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
   };
 
   const int player_index = game_get_player_on_turn_index(game);
@@ -1026,7 +1059,6 @@ void generate_anchors_for_test(Game *game) {
       .override_kwg = NULL,
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
-      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
   };
   gen_load_position(gen, &args);
   gen_look_up_leaves_and_record_exchanges(gen);

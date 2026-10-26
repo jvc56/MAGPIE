@@ -22,6 +22,7 @@
 #include "../src/impl/gameplay.h"
 #include "../src/impl/move_gen.h"
 #include "../src/util/io_util.h"
+#include "../src/util/string_util.h"
 #include "test_platform.h"
 #include "test_util.h"
 #include <assert.h>
@@ -29,6 +30,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 // Execute config command quietly (suppress stdout during execution)
 static void exec_config_quiet(Config *config, const char *cmd) {
@@ -85,7 +87,6 @@ static float compute_stuck_fraction(Game *game, MoveList *move_list,
       .override_kwg = NULL,
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
-      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
       .tiles_played_bv = &tiles_bv,
   };
   generate_moves(&args);
@@ -316,7 +317,8 @@ void test_generate_nonstuck_cgps2(void) {
 }
 
 // Core A/B benchmark: solve each CGP twice (with and without
-// forced-pass bypass), comparing value and time pairwise.
+// forced-pass bypass), comparing value and time pairwise. Both solves use the
+// incremental move lists, as the endgame command does.
 static void run_ab_benchmark(const char *cgp_file, const char *label,
                              int old_ply, int new_ply, int max_positions) {
   FILE *fp = cfile_open(cgp_file, "re", false);
@@ -389,6 +391,7 @@ static void run_ab_benchmark(const char *cgp_file, const char *label,
                         .per_ply_callback = NULL,
                         .per_ply_callback_data = NULL,
                         .forced_pass_bypass = false,
+                        .incremental_movegen = true,
                         .enable_pv_display = false,
                         .seed = 42};
 
@@ -497,18 +500,25 @@ void test_benchmark_nonstuck_3v3(void) {
 // the search tree identical, while a pruning change shows as fewer nodes with
 // an unchanged value.
 //
-// Parameterized entirely by environment so the same binary can sweep depth /
-// thread count / battery without recompiling:
-//   MAGPIE_BENCH_CGP     CGP file  (default nonstuck_cgps.txt, temporary dir)
-//   MAGPIE_BENCH_LEX     lexicon            (default CSW21)
-//   MAGPIE_BENCH_PLIES   endgame plies      (default 4)
-//   MAGPIE_BENCH_THREADS solver threads     (default 1  -> deterministic nodes)
-//   MAGPIE_BENCH_MAX     max positions      (default 100)
-//   MAGPIE_BENCH_INCREMENTAL 1 = incremental move lists (default 0)
-//   MAGPIE_BENCH_INTERLEAVE 1 = solve each position off and on, alternating
-//                           order, TT cleared per solve (default 0);
-//                           MAGPIE_BENCH_INCREMENTAL is then ignored
-//   MAGPIE_BENCH_TAG     label for the run  (default "bench")
+// Run as egspeedbench for the defaults, or egspeedbench:<key>=<value>,... so
+// the same binary can sweep depth / thread count / battery without
+// recompiling:
+//   cgp          CGP file  (default nonstuck_cgps.txt, temporary dir)
+//   lex          lexicon            (default CSW21)
+//   plies        endgame plies      (default 4)
+//   threads      solver threads     (default 1  -> deterministic nodes)
+//   max          max positions      (default 100)
+//   bypass       1 = forced-pass bypass (default 1)
+//   incremental  1 = incremental move lists (default 1)
+//   interleave   1 = solve each position with the lists off and on,
+//                alternating order (default 0); incremental is then ignored
+//   tag          label for the run  (default "bench")
+// For example: egspeedbench:cgp=positions.txt,plies=5,threads=4,bypass=0
+// Every solve starts from a cleared TT, so no solve inherits an earlier one's
+// entries. The default, bypass=1, solves as the endgame, analyze, autoplay
+// and PEG solves do. Each row ends with the solve's CPU time
+// across all of its threads (clock(), which is wall time on Windows), so a
+// multi-threaded run shows how much of the machine its speedup cost.
 static int env_int(const char *name, int fallback) {
   const char *v = getenv(name);
   if (v == NULL || v[0] == '\0') {
@@ -525,32 +535,36 @@ static double env_double(const char *name, double fallback) {
   return strtod(v, NULL);
 }
 
-void test_endgame_speed_bench(void) {
+typedef struct EndgameSpeedBenchArgs {
+  const char *cgp_file; // NULL = nonstuck_cgps.txt in the temporary directory
+  const char *lex;
+  const char *tag;
+  int plies;
+  int threads;
+  int max_positions;
+  bool bypass;
+  bool incremental;
+  bool interleave;
+} EndgameSpeedBenchArgs;
+
+static void run_endgame_speed_bench(const EndgameSpeedBenchArgs *bench_args) {
   log_set_level(LOG_FATAL);
 
   char *default_cgp_file = test_platform_temporary_path("nonstuck_cgps.txt");
-  const char *cgp_file = getenv("MAGPIE_BENCH_CGP");
-  if (cgp_file == NULL || cgp_file[0] == '\0') {
-    cgp_file = default_cgp_file;
-  }
-  const char *lex = getenv("MAGPIE_BENCH_LEX");
-  if (lex == NULL || lex[0] == '\0') {
-    lex = "CSW21";
-  }
-  const char *tag = getenv("MAGPIE_BENCH_TAG");
-  if (tag == NULL || tag[0] == '\0') {
-    tag = "bench";
-  }
-  const int plies = env_int("MAGPIE_BENCH_PLIES", 4);
-  const int threads = env_int("MAGPIE_BENCH_THREADS", 1);
-  const int max_positions = env_int("MAGPIE_BENCH_MAX", 100);
-  const bool incremental = env_int("MAGPIE_BENCH_INCREMENTAL", 0) != 0;
+  const char *cgp_file =
+      bench_args->cgp_file != NULL ? bench_args->cgp_file : default_cgp_file;
+  const char *lex = bench_args->lex;
+  const char *tag = bench_args->tag;
+  const int plies = bench_args->plies;
+  const int threads = bench_args->threads;
+  const int max_positions = bench_args->max_positions;
+  const bool bypass = bench_args->bypass;
+  const bool incremental = bench_args->incremental;
   // Interleaved A/B: solve every position with the incremental lists off and
   // on, back to back, alternating which goes first per position so neither
-  // side systematically benefits from a warm cache. The TT is cleared before
-  // every solve so the second solve of a position cannot hit the first's
-  // entries. Rows carry a cfg column and two summaries are printed.
-  const bool interleave = env_int("MAGPIE_BENCH_INTERLEAVE", 0) != 0;
+  // side systematically benefits from a warm cache. Rows carry a cfg column
+  // and two summaries are printed.
+  const bool interleave = bench_args->interleave;
 
   FILE *fp = cfile_open(cgp_file, "re", false);
   if (!fp) {
@@ -582,14 +596,15 @@ void test_endgame_speed_bench(void) {
   }
   (void)fclose(fp);
 
-  printf("BENCHCFG tag=%s lex=%s plies=%d threads=%d incremental=%d "
+  printf("BENCHCFG tag=%s lex=%s plies=%d threads=%d bypass=%d incremental=%d "
          "interleave=%d positions=%d file=%s\n",
-         tag, lex, plies, threads, (int)incremental, (int)interleave, num_cgps,
-         cgp_file);
+         tag, lex, plies, threads, (int)bypass, (int)incremental,
+         (int)interleave, num_cgps, cgp_file);
 
   // Index 0 = incremental off, 1 = on. Non-interleaved runs use only
   // cfg_totals[incremental].
   double cfg_time[2] = {0.0, 0.0};
+  double cfg_cpu[2] = {0.0, 0.0};
   uint64_t cfg_nodes[2] = {0, 0};
 
   for (int ci = 0; ci < num_cgps; ci++) {
@@ -623,20 +638,22 @@ void test_endgame_speed_bench(void) {
                           .use_heuristics = true,
                           .per_ply_callback = NULL,
                           .per_ply_callback_data = NULL,
-                          .forced_pass_bypass = true,
+                          .forced_pass_bypass = bypass,
                           .incremental_movegen = cfg != 0,
                           .enable_pv_display = false,
                           .seed = 42};
 
-      if (interleave && solver != NULL) {
+      if (solver != NULL) {
         endgame_ctx_clear_transposition_table(solver);
       }
 
       Timer t;
       ctimer_start(&t);
+      const clock_t cpu_start = clock();
       err = error_stack_create();
       endgame_solve(&solver, &args, results, err);
       double elapsed = ctimer_elapsed_seconds(&t);
+      const double cpu = (double)(clock() - cpu_start) / (double)CLOCKS_PER_SEC;
       assert(error_stack_is_empty(err));
       error_stack_destroy(err);
 
@@ -645,13 +662,14 @@ void test_endgame_speed_bench(void) {
       uint64_t nodes = endgame_ctx_get_nodes_searched(solver);
 
       if (interleave) {
-        printf("BENCHROW %d %s %d %llu %.6f\n", ci, cfg ? "on" : "off", value,
-               (unsigned long long)nodes, elapsed);
+        printf("BENCHROW %d %s %d %llu %.6f %.6f\n", ci, cfg ? "on" : "off",
+               value, (unsigned long long)nodes, elapsed, cpu);
       } else {
-        printf("BENCHROW %d %d %llu %.6f\n", ci, value,
-               (unsigned long long)nodes, elapsed);
+        printf("BENCHROW %d %d %llu %.6f %.6f\n", ci, value,
+               (unsigned long long)nodes, elapsed, cpu);
       }
       cfg_time[cfg] += elapsed;
+      cfg_cpu[cfg] += cpu;
       cfg_nodes[cfg] += nodes;
     }
     if ((ci + 1) % 25 == 0) {
@@ -664,8 +682,8 @@ void test_endgame_speed_bench(void) {
   const int last_cfg = interleave ? 1 : single_cfg;
   for (int cfg = first_cfg; cfg <= last_cfg; cfg++) {
     printf("BENCHSUM tag=%s cfg=%s positions=%d total_time=%.4f "
-           "total_nodes=%llu nps=%.0f\n",
-           tag, cfg ? "on" : "off", num_cgps, cfg_time[cfg],
+           "total_cpu=%.4f total_nodes=%llu nps=%.0f\n",
+           tag, cfg ? "on" : "off", num_cgps, cfg_time[cfg], cfg_cpu[cfg],
            (unsigned long long)cfg_nodes[cfg],
            cfg_time[cfg] > 0 ? (double)cfg_nodes[cfg] / cfg_time[cfg] : 0.0);
   }
@@ -676,6 +694,70 @@ void test_endgame_speed_bench(void) {
   endgame_ctx_destroy(solver);
   endgame_results_destroy(results);
   config_destroy(config);
+}
+
+static EndgameSpeedBenchArgs endgame_speed_bench_default_args(void) {
+  return (EndgameSpeedBenchArgs){.cgp_file = NULL,
+                                 .lex = "CSW21",
+                                 .tag = "bench",
+                                 .plies = 4,
+                                 .threads = 1,
+                                 .max_positions = 100,
+                                 .bypass = true,
+                                 .incremental = true,
+                                 .interleave = false};
+}
+
+// The integer after "<key>=" in item.
+static int speed_bench_spec_int(const char *item, const char *key) {
+  ErrorStack *error_stack = error_stack_create();
+  const int value = string_to_int(item + strlen(key) + 1, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    log_fatal("egspeedbench %s must be an integer, got '%s'", key, item);
+  }
+  error_stack_destroy(error_stack);
+  return value;
+}
+
+void test_endgame_speed_bench(void) {
+  const EndgameSpeedBenchArgs args = endgame_speed_bench_default_args();
+  run_endgame_speed_bench(&args);
+}
+
+// "<key>=<value>[,<key>=<value>...]", with the keys listed above.
+void endgame_speed_bench_run_spec(const char *spec) {
+  EndgameSpeedBenchArgs args = endgame_speed_bench_default_args();
+  StringSplitter *items = split_string(spec, ',', true);
+  const int num_items = string_splitter_get_number_of_items(items);
+  for (int item_idx = 0; item_idx < num_items; item_idx++) {
+    const char *item = string_splitter_get_item(items, item_idx);
+    if (has_prefix("cgp=", item)) {
+      args.cgp_file = item + strlen("cgp=");
+    } else if (has_prefix("lex=", item)) {
+      args.lex = item + strlen("lex=");
+    } else if (has_prefix("tag=", item)) {
+      args.tag = item + strlen("tag=");
+    } else if (has_prefix("plies=", item)) {
+      args.plies = speed_bench_spec_int(item, "plies");
+    } else if (has_prefix("threads=", item)) {
+      args.threads = speed_bench_spec_int(item, "threads");
+    } else if (has_prefix("max=", item)) {
+      args.max_positions = speed_bench_spec_int(item, "max");
+    } else if (has_prefix("bypass=", item)) {
+      args.bypass = speed_bench_spec_int(item, "bypass") != 0;
+    } else if (has_prefix("incremental=", item)) {
+      args.incremental = speed_bench_spec_int(item, "incremental") != 0;
+    } else if (has_prefix("interleave=", item)) {
+      args.interleave = speed_bench_spec_int(item, "interleave") != 0;
+    } else {
+      log_fatal("egspeedbench spec takes cgp, lex, tag, plies, threads, max, "
+                "bypass, incremental and interleave, got '%s'",
+                item);
+    }
+  }
+  // The strings in args point into items, so it outlives the run.
+  run_endgame_speed_bench(&args);
+  string_splitter_destroy(items);
 }
 
 // ---------------------------------------------------------------------------
@@ -702,7 +784,7 @@ void test_endgame_speed_bench(void) {
 //   MAGPIE_PO_THREADS solver threads (default 1)
 //   MAGPIE_PO_MAXMOVES per-playout move cap (default 40, safety)
 //   MAGPIE_PO_TAG    label           (default "playout")
-//   MAGPIE_PO_INCREMENTAL 1 = incremental move lists (default 0)
+//   MAGPIE_PO_INCREMENTAL 1 = incremental move lists (default 1)
 void test_endgame_playout_bench(void) {
   log_set_level(LOG_FATAL);
 
@@ -723,7 +805,7 @@ void test_endgame_playout_bench(void) {
   const int time_ms = env_int("MAGPIE_PO_TIMEMS", 100);
   const int max_plies = env_int("MAGPIE_PO_PLIES", 25);
   const int threads = env_int("MAGPIE_PO_THREADS", 1);
-  const bool incremental = env_int("MAGPIE_PO_INCREMENTAL", 0) != 0;
+  const bool incremental = env_int("MAGPIE_PO_INCREMENTAL", 1) != 0;
   const int max_moves = env_int("MAGPIE_PO_MAXMOVES", 40);
 
   FILE *fp = cfile_open(cgp_file, "re", false);
@@ -958,6 +1040,7 @@ void test_endgame_move1(void) {
       .num_top_moves = 1,
       .use_heuristics = true,
       .forced_pass_bypass = true,
+      .incremental_movegen = true,
       .enable_pv_display = false,
       .soft_time_limit = soft,
       .hard_time_limit = hard,
@@ -1079,6 +1162,7 @@ void test_endgame_root_bench(void) {
         .num_top_moves = env_int("MAGPIE_ROOT_TOPK", 1),
         .use_heuristics = true,
         .forced_pass_bypass = true,
+        .incremental_movegen = true,
         .first_win = env_int("MAGPIE_ROOT_FIRSTWIN", 0) != 0,
         .hard_time_limit = env_double("MAGPIE_ROOT_SECONDS", 0),
         .seed = 42,

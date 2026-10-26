@@ -126,7 +126,6 @@ static void check_player_on_turn(const Game *game, MoveList *all_small,
       .move_sort_type = MOVE_SORT_SCORE,
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
-      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
   };
   generate_moves(&args);
   const int all_count = move_list_get_count(all_small);
@@ -240,7 +239,6 @@ static void check_self_play_games(const char *lexicon, MoveList *all_small,
           .move_sort_type = MOVE_SORT_EQUITY,
           .eq_margin_movegen = 0,
           .target_equity = EQUITY_MAX_VALUE,
-          .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
       };
       generate_moves(&args);
       const int candidate_count = move_list_get_count(candidates);
