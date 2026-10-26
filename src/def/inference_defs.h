@@ -3,7 +3,8 @@
 
 // Minimum leave size for enabling cutoff optimization on exchanges.
 // Benchmarks show cutoff optimization hurts performance for exchanges
-// with leave size >= this threshold (i.e., small exchanges).
+// with leave size >= this threshold (i.e., small exchanges). The
+// optimization never changes which racks are inferred, only how fast.
 #define INFERENCE_CUTOFF_MIN_EXCHANGE_LEAVE_SIZE 3
 
 typedef enum {

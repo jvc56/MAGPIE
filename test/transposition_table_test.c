@@ -7,11 +7,45 @@
 #include "../src/ent/xoshiro.h"
 #include "../src/ent/zobrist.h"
 #include "../src/impl/peg_memory.h"
+#include "../src/util/io_util.h"
 #include <assert.h>
 #include <stdatomic.h>
+#include <stddef.h>
 #include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
+
+// A large table is zeroed in slices on several threads. Three slices and a
+// remainder that is not a whole slice must leave every byte zero, and a table
+// zeroed this way starts empty.
+static void test_transposition_table_parallel_zero(void) {
+  const size_t bytes = (3 * (size_t)TT_ZERO_MIN_SLICE_BYTES) + 47;
+  unsigned char *buffer = malloc_or_die(bytes);
+  memset(buffer, 0xAB, bytes);
+  tt_zero_table(buffer, bytes, 3);
+  const unsigned char zeros[4096] = {0};
+  for (size_t offset = 0; offset < bytes; offset += sizeof(zeros)) {
+    const size_t span =
+        bytes - offset < sizeof(zeros) ? bytes - offset : sizeof(zeros);
+    assert(memcmp(buffer + offset, zeros, span) == 0);
+  }
+  free(buffer);
+
+  TranspositionTable *tt =
+      transposition_table_create_with_threads(0, TT_MIN_SIZE_POWER, 4);
+  assert(tt->size_power_of_2 == TT_MIN_SIZE_POWER);
+  const uint64_t num_elems = (uint64_t)1 << tt->size_power_of_2;
+  for (uint64_t elem_idx = 0; elem_idx < num_elems; elem_idx += 4099) {
+    assert(atomic_load(&tt->table[elem_idx * 2]) == 0);
+    assert(atomic_load(&tt->table[(elem_idx * 2) + 1]) == 0);
+  }
+  assert(atomic_load(&tt->table[(num_elems * 2) - 1]) == 0);
+  assert(!ttentry_valid(transposition_table_lookup(tt, 0x123456789ULL)));
+  transposition_table_destroy(tt);
+}
 
 void test_transposition_table(void) {
+  test_transposition_table_parallel_zero();
   const uint64_t zobrist_bytes =
       sizeof(Zobrist) + prng_allocation_size() +
       ((uint64_t)BOARD_DIM * BOARD_DIM * sizeof(uint64_t *)) +
@@ -20,11 +54,26 @@ void test_transposition_table(void) {
       (2ULL * ZOBRIST_MAX_LETTERS * sizeof(uint64_t *)) +
       (2ULL * ZOBRIST_MAX_LETTERS * (RACK_SIZE + 1) * sizeof(uint64_t));
   assert(zobrist_allocation_size() == zobrist_bytes);
+  // PEG workers share one endgame table: the per-worker fraction scaled by the
+  // largest power of two not above the worker count. One worker keeps its own.
+  for (int workers = 1; workers <= 40; workers++) {
+    int largest_power_of_two = 1;
+    while (largest_power_of_two * 2 <= workers) {
+      largest_power_of_two *= 2;
+    }
+    const double shared_fraction = peg_memory_shared_fraction(0.01, workers);
+    assert(shared_fraction == 0.01 * largest_power_of_two);
+    assert(shared_fraction <= 0.01 * workers);
+    (void)shared_fraction;
+  }
+  assert(peg_memory_shared_fraction(0.05, 1) == 0.05);
   if (search_memory_is_bounded()) {
     const uint64_t budget_base = get_search_memory_budget_base();
     assert(budget_base == 256ULL * 1024 * 1024);
-    // Deep PEG may allocate a table for every worker plus the helper. Check
-    // actual allocations, including ABDADA storage, at every supported count.
+    // Deep PEG sizes its shared endgame table from a table per worker plus the
+    // helper. Check actual allocations, including ABDADA storage, at every
+    // supported count: the per-worker tables fit the budget together, and the
+    // shared table has no more entries than they would.
     for (int budget_mb = 16; budget_mb <= 32; budget_mb *= 2) {
       const int capacity = peg_memory_max_tables((double)budget_mb / 256);
       assert(capacity >= 33);
@@ -45,6 +94,13 @@ void test_transposition_table(void) {
             NPROC_SIZE * sizeof(atomic_uchar) + sizeof(TranspositionTable) +
             zobrist_bytes;
         assert(bytes * workers <= (uint64_t)budget_mb * 1024 * 1024);
+        TranspositionTable *shared_tt = transposition_table_create_with_minimum(
+            peg_memory_shared_fraction(worker_fraction, workers),
+            PEG_TT_MIN_SIZE_POWER);
+        assert(((uint64_t)1 << shared_tt->size_power_of_2) <=
+               ((uint64_t)workers << worker_tt->size_power_of_2));
+        assert(shared_tt->size_power_of_2 >= worker_tt->size_power_of_2);
+        transposition_table_destroy(shared_tt);
         transposition_table_destroy(worker_tt);
       }
       TranspositionTable *endgame_tt =
