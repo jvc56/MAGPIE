@@ -4,7 +4,6 @@
 #include "../src/def/equity_defs.h"
 #include "../src/def/game_history_defs.h"
 #include "../src/def/letter_distribution_defs.h"
-#include "../src/def/move_defs.h"
 #include "../src/ent/game.h"
 #include "../src/ent/klv.h"
 #include "../src/ent/letter_distribution.h"
@@ -617,7 +616,6 @@ void test_validated_move_distinct_kwg(void) {
       .move_list = move_list,
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
-      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
   };
 
   // Play SPORK, better than best NWL move of PORKS

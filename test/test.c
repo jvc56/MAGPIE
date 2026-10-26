@@ -239,6 +239,7 @@ static TestEntry on_demand_test_table[] = {
     {"endgame_wasm", test_endgame_wasm},
     {"endgameinject", test_endgame_dynamic_worker_injection},
     {"egttpvbound", test_endgame_tt_pv_bound_repeat},
+    {"egpassdepth", test_endgame_pass_transposition_depth},
     {"viamover", test_via_mover_must_bingo_every_depth},
     {"viaopp", test_via_opp_must_block_every_depth},
     {"viastress", test_via_interrupted_reasonable_under_time_pressure},
@@ -327,6 +328,10 @@ void run_test(const char *subtest) {
   }
   if (has_prefix("patopeningsim:", subtest)) {
     pat_opening_sim_run_spec(subtest + strlen("patopeningsim:"));
+    return;
+  }
+  if (has_prefix("egspeedbench:", subtest)) {
+    endgame_speed_bench_run_spec(subtest + strlen("egspeedbench:"));
     return;
   }
   log_fatal("unrecognized test: %s\n", subtest);
