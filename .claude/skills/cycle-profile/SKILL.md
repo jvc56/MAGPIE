@@ -36,9 +36,16 @@ dsymutil reads the debug information from the object files the binary was linked
 ## 2. Record fixed work
 
 - **Run the same fixed work in every profile you'll compare.** A different amount of work changes every share.
-- **Single-threaded runs** have exact, repeatable work, so their total cycles are comparable. Examples:
+- **Single-threaded runs with a fixed amount of work** repeat exactly, so their total cycles are comparable. Examples:
   - endgame: `egspeedbench:cgp=FILE,plies=5,max=10,threads=1,tag=x`;
-  - sims: `simbench` with `SIMBENCH_THREADS=1`.
+  - sims: the CLI on one thread with a fixed iteration count and no stopping condition, recorded with `--stdin`. For example, a command file of:
+    - `set -lex CSW24 -wmp true -rit true -threads 1 -plies 2 -numplays 8 -it 4000 -scond none -seed 7 -hr true`;
+    - `load testdata/gcgs/success_long_game.gcg`;
+    - `goto N`, `gen` and `sim` for each N of 6, 10, 14, 18, 22, 26 and 30;
+    - `quit`.
+
+    That takes about 5 seconds; raise `-it` for more samples.
+- **Time-limited runs are not fixed work.** `simbench` gives each turn 2 seconds, so a faster build runs more iterations, and so does a run that happens to go faster. Compare its shares and its iters/s, never its total cycles. `SIMBENCH_THREADS=1` makes it single-threaded; `record.sh` passes its environment to the command.
 - **Multithreaded runs** can vary in work from run to run, for example threads sharing a transposition table. `pegspeedbench1` uses 9 threads, and its totals vary by ±2%.
   - Compare their shares, never their totals, over several runs.
   - For exact pairs, build both sides from a local, uncommitted copy of the benchmark set to one thread. Don't commit benchmark tweaks or add environment variables for them.
