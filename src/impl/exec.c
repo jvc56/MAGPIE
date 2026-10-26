@@ -93,40 +93,52 @@ bool run_str_api_command(Config *config, ErrorStack *error_stack,
   return false;
 }
 
+static const char *async_command_name(async_token_t token) {
+  switch (token) {
+  case ASYNC_STOP_COMMAND_TOKEN:
+    return ASYNC_STOP_COMMAND_STRING;
+  case ASYNC_STATUS_COMMAND_TOKEN:
+    return ASYNC_STATUS_COMMAND_STRING;
+  case ASYNC_SHOW_GAME_COMMAND_TOKEN:
+    return ASYNC_SHOW_GAME_COMMAND_STRING;
+  case NUMBER_OF_ASYNC_COMMAND_TOKENS:
+    break;
+  }
+  log_fatal("encountered unexpected async command token when processing "
+            "command");
+  return NULL;
+}
+
 // Returns the async token of the command, or NUMBER_OF_ASYNC_COMMAND_TOKENS
-// if the command was not recognized.
-// Clears the string builder at the beginning of the function
+// if the command was not recognized or is ambiguous, in which case `sb` says
+// what it could be. A command is any prefix of an async command's name, and
+// "s" alone is shgame. Clears the string builder at the beginning of the
+// function.
 async_token_t parse_async_command(const char *command, StringBuilder *sb) {
-  async_token_t token = NUMBER_OF_ASYNC_COMMAND_TOKENS;
   string_builder_clear(sb);
-  for (async_token_t i = 0; i < NUMBER_OF_ASYNC_COMMAND_TOKENS; i++) {
-    const char *token_to_eval_string = NULL;
-    switch (i) {
-    case ASYNC_STOP_COMMAND_TOKEN:
-      token_to_eval_string = ASYNC_STOP_COMMAND_STRING;
-      break;
-    case ASYNC_STATUS_COMMAND_TOKEN:;
-      token_to_eval_string = ASYNC_STATUS_COMMAND_STRING;
-      break;
-    case NUMBER_OF_ASYNC_COMMAND_TOKENS:
-      log_fatal(
-          "encountered unexpected async command token when processing command");
-      break;
-    }
-    if (has_iprefix(command, token_to_eval_string)) {
-      if (token == NUMBER_OF_ASYNC_COMMAND_TOKENS) {
-        token = i;
-      } else if (string_builder_length(sb) == 0) {
-        // This only works because there are two valid async commands, if we add
-        // more, this whole scheme will need to be refactored
-        string_builder_add_formatted_string(
-            sb, "ambiguous async command '%s' could be: %s, %s", command,
-            ASYNC_STOP_COMMAND_STRING, ASYNC_STATUS_COMMAND_STRING);
-      } else {
-        string_builder_add_formatted_string(sb, ", %s", token_to_eval_string);
-      }
+  if (strings_iequal(command, ASYNC_SHOW_GAME_COMMAND_STRING_SHORT)) {
+    return ASYNC_SHOW_GAME_COMMAND_TOKEN;
+  }
+  async_token_t token = NUMBER_OF_ASYNC_COMMAND_TOKENS;
+  int match_count = 0;
+  StringBuilder *matches = string_builder_create();
+  for (async_token_t token_idx = 0; token_idx < NUMBER_OF_ASYNC_COMMAND_TOKENS;
+       token_idx++) {
+    const char *name = async_command_name(token_idx);
+    if (has_iprefix(command, name)) {
+      token = token_idx;
+      string_builder_add_formatted_string(matches, "%s%s",
+                                          match_count > 0 ? ", " : "", name);
+      match_count++;
     }
   }
+  if (match_count > 1) {
+    string_builder_add_formatted_string(
+        sb, "ambiguous async command '%s' could be: %s", command,
+        string_builder_peek(matches));
+    token = NUMBER_OF_ASYNC_COMMAND_TOKENS;
+  }
+  string_builder_destroy(matches);
   return token;
 }
 
@@ -139,8 +151,10 @@ static bool async_command_is_done(void *uncasted_thread_control) {
 }
 
 // Handles the input that arrives while an async command runs, until it stops
-// running: async commands (stop, status) run at once; other lines are
-// appended to `queued_commands` when it is non-NULL and rejected otherwise.
+// running: async commands (stop, status, shgame) run at once; other lines
+// are appended to `queued_commands` when it is non-NULL (a script) and
+// rejected otherwise. A script's shgame is queued too, so it shows the game
+// after the command, where the script put it.
 static void handle_async_command_input(Config *config,
                                        StringList *queued_commands) {
   ThreadControl *thread_control = config_get_thread_control(config);
@@ -160,7 +174,8 @@ static void handle_async_command_input(Config *config,
     trim_whitespace(input);
 
     async_token_t input_token = parse_async_command(input, err_msg_sb);
-    if (input_token == NUMBER_OF_ASYNC_COMMAND_TOKENS &&
+    if ((input_token == NUMBER_OF_ASYNC_COMMAND_TOKENS ||
+         input_token == ASYNC_SHOW_GAME_COMMAND_TOKEN) &&
         string_builder_length(err_msg_sb) == 0 && queued_commands != NULL) {
       string_list_add_string(queued_commands, input);
     } else if (string_builder_length(err_msg_sb) > 0) {
@@ -170,7 +185,13 @@ static void handle_async_command_input(Config *config,
     } else if (input_token == NUMBER_OF_ASYNC_COMMAND_TOKENS) {
       error_stack_push(
           error_stack, ERROR_STATUS_CONFIG_LOAD_UNRECOGNIZED_ARG,
-          get_formatted_string("unrecognized async command '%s'", input));
+          get_formatted_string("unrecognized async command '%s': while a "
+                               "command runs, only %s, %s and %s (or %s) can "
+                               "be entered",
+                               input, ASYNC_STOP_COMMAND_STRING,
+                               ASYNC_STATUS_COMMAND_STRING,
+                               ASYNC_SHOW_GAME_COMMAND_STRING,
+                               ASYNC_SHOW_GAME_COMMAND_STRING_SHORT));
       error_stack_print_and_reset(error_stack);
     } else {
       switch (input_token) {
@@ -181,6 +202,18 @@ static void handle_async_command_input(Config *config,
         char *status_str = config_get_execute_status(config);
         thread_control_print(thread_control, status_str);
         free(status_str);
+        break;
+      case ASYNC_SHOW_GAME_COMMAND_TOKEN:;
+        char *game_str = config_show_game_while_running(config);
+        if (game_str) {
+          thread_control_print(thread_control, game_str);
+          free(game_str);
+        } else {
+          error_stack_push(error_stack,
+                           ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
+                           string_duplicate("there is no game to show"));
+          error_stack_print_and_reset(error_stack);
+        }
         break;
       case NUMBER_OF_ASYNC_COMMAND_TOKENS:
         log_fatal("found unexpected async command token");

@@ -1775,6 +1775,12 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       name = ASYNC_STATUS_COMMAND_STRING;
       shortest_unambiguous_name = ASYNC_STATUS_COMMAND_STRING_SHORT;
       break;
+    case ASYNC_SHOW_GAME_COMMAND_TOKEN:
+      usages[0] = "";
+      text = "Shows the game while a command runs, as shgame does.";
+      name = ASYNC_SHOW_GAME_COMMAND_STRING;
+      shortest_unambiguous_name = ASYNC_SHOW_GAME_COMMAND_STRING_SHORT;
+      break;
     case NUMBER_OF_ASYNC_COMMAND_TOKENS:
       log_fatal("encountered unexpected async command token in help command");
       break;
@@ -3389,8 +3395,10 @@ char *impl_help(Config *config, ErrorStack *error_stack) {
       add_help_arg_to_string_builder(config, other_cmds[i], sb, false, true);
       total_tokens++;
     }
-    // Async Commands in alphabetical order: status, stop
+    // Async Commands in alphabetical order: shgame, status, stop
     string_builder_add_string(sb, "\nAsync Commands\n\n");
+    add_help_arg_to_string_builder(config, ASYNC_SHOW_GAME_COMMAND_TOKEN, sb,
+                                   true, true);
     add_help_arg_to_string_builder(config, ASYNC_STATUS_COMMAND_TOKEN, sb, true,
                                    true);
     add_help_arg_to_string_builder(config, ASYNC_STOP_COMMAND_TOKEN, sb, true,
@@ -5679,6 +5687,19 @@ void execute_show_game(Config *config, ErrorStack *error_stack) {
 
 char *str_api_show_game(Config *config, ErrorStack *error_stack) {
   return impl_show_game(config, error_stack);
+}
+
+// The game as shgame shows it, for shgame typed while a command runs. It only
+// reads the game: config_init_game would update it under the running command.
+// NULL when there is no game yet.
+char *config_show_game_while_running(const Config *config) {
+  if (!config->game) {
+    return NULL;
+  }
+  StringBuilder *game_string = string_builder_create();
+  string_builder_add_game(config->game, NULL, config->game_string_options,
+                          config->game_history, game_string);
+  return string_builder_dump_and_destroy(game_string, NULL);
 }
 
 // Show moves

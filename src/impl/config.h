@@ -146,6 +146,7 @@ void config_load_command(Config *config, const char *cmd,
                          ErrorStack *error_stack);
 void config_execute_command(Config *config, ErrorStack *error_stack);
 char *config_get_execute_status(Config *config);
+char *config_show_game_while_running(const Config *config);
 bool config_continue_on_coldstart(const Config *config);
 bool config_run_str_api_command(Config *config, ErrorStack *error_stack,
                                 char **output);
