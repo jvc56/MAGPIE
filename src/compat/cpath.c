@@ -168,8 +168,28 @@ char *cpath_user_data_dir(void) {
   }
   free(base);
   return directory;
+#elif defined(__APPLE__)
+  const char *home = getenv("HOME");
+  if (!home || !home[0]) {
+    return NULL;
+  }
+  static const char suffix[] = "/.magpie";
+  const size_t size = strlen(home) + sizeof(suffix);
+  char *directory = malloc(size);
+  if (directory) {
+    (void)snprintf(directory, size, "%s%s", home, suffix);
+  }
+  return directory;
 #else
   return NULL;
+#endif
+}
+
+bool cpath_fetches_to_user_data_dir(void) {
+#if defined(__APPLE__)
+  return true;
+#else
+  return false;
 #endif
 }
 

@@ -5,8 +5,10 @@
 #include "../def/players_data_defs.h"
 #include "bag.h"
 #include "board.h"
+#include "cross_set_cache.h"
 #include "kwg.h"
 #include "letter_distribution.h"
+#include "move_undo.h"
 #include "player.h"
 #include <stdbool.h>
 
@@ -57,6 +59,20 @@ void game_set_game_end_reason(Game *game, game_end_reason_t game_end_reason);
 void game_start_next_player_turn(Game *game);
 
 void game_set_backup_mode(Game *game, backup_mode_t backup_mode);
+// Lets the game's first simulation backup record the board squares its moves
+// change instead of copying the whole board, so that unplaying it restores
+// only those (see game_backup). For a sim rollout's game, which plays a few
+// moves after each such backup and then unplays them all at once.
+void game_enable_rollout_board_undo(Game *game);
+// Lets the game's classic cross sets come from, and go into, cache (see
+// cross_set_cache.h), or not with NULL. The cache stays its caller's, who
+// salts it whenever the game's lexica may change and frees it after the game
+// stops using it. game_copy keeps the destination's cache; game_duplicate
+// gives the copy none.
+void game_set_cross_set_cache(Game *game, CrossSetCache *cache);
+// The record the board's changes go into while a backup that records them is
+// open, or NULL.
+MoveUndo *game_get_open_rollout_board_undo(const Game *game);
 void game_backup(Game *game);
 void game_unplay_last_move(Game *game);
 void game_set_starting_player_index(Game *game, int starting_player_index);

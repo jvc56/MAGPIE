@@ -31,6 +31,21 @@ typedef enum {
   PLAY_CHOOSER_EVAL_PEG,
 } play_chooser_eval_t;
 
+// Order of an endgame challenge decision's keep and challenge solves.
+typedef enum {
+  // Both at once, against a shared transposition table. Whichever finishes
+  // exactly first interrupts the other, which a null-window solve around the
+  // first one's value then resolves. Which one finishes first depends on
+  // timing.
+  PLAY_CHOOSER_CHALLENGE_ORDER_CONCURRENT,
+  // For tests, so each side finishing first is covered every run: the keep
+  // branch is solved first, and if it is exact the challenge branch is
+  // resolved against it as though the keep branch had finished first.
+  PLAY_CHOOSER_CHALLENGE_ORDER_KEEP_FIRST,
+  // The same, with the challenge branch first.
+  PLAY_CHOOSER_CHALLENGE_ORDER_CHALLENGE_FIRST,
+} play_chooser_challenge_order_t;
+
 // Describes how a computer player delegates its decisions. Examples:
 //   static always:          pre_endgame_eval=STATIC, endgame_eval=STATIC
 //   static until endgame:   pre_endgame_eval=STATIC, endgame_eval=ENDGAME
@@ -75,6 +90,9 @@ typedef struct PlayChooserStrategy {
   // selects, the preliminary search seeds the move-choosing solve (the
   // post-verdict position is exactly that branch's root).
   double challenge_decision_seconds;
+  // Order of the endgame decision's two solves; the default solves them
+  // concurrently. The other orders are for tests.
+  play_chooser_challenge_order_t challenge_order;
   WinPct *win_pcts; // required for SIM; not owned
   int num_threads;  // 0 = 1
   // PEG scenario stride: 1 = full enumeration, k > 1 = weight-stratified
@@ -154,6 +172,17 @@ typedef struct ChallengeDecision {
   // verdict, since the utility is monotonic in spread).
   double keep_value;
   double challenge_value;
+  // How a both-endgame decision was reached, for diagnostics:
+  // - *_exact: the branch's own solve completed every ply. A branch whose
+  //   sibling finished exactly first is interrupted, so it is not exact.
+  // - *_valid: the branch's own solve produced a value at all.
+  // - resolve_completed: when exactly one branch was exact, the other was
+  //   resolved with a null window around its value, and this proof finished.
+  bool keep_exact;
+  bool keep_valid;
+  bool challenge_exact;
+  bool challenge_valid;
+  bool resolve_completed;
 } ChallengeDecision;
 
 PlayChooser *play_chooser_create(const PlayChooserStrategy *strategy);
