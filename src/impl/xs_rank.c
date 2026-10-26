@@ -173,7 +173,6 @@ XSMove *xs_rank_moves(XSRanker *ranker, const char board[225], const char *rack,
                       .move_record_type = MOVE_RECORD_ALL,
                       .move_sort_type = MOVE_SORT_SCORE,
                       .target_equity = EQUITY_MAX_VALUE,
-                      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
                       .move_list = moves,
                       .disable_pat = true};
   generate_moves(&args);

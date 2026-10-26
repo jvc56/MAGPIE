@@ -1460,6 +1460,70 @@ static void assert_simmed_plays_identical(const SimResults *sim_results_a,
   }
 }
 
+// Sims the position after an exchange of 6 with inference, as
+// config_simulate does, with the inference's cutoff optimization on or off.
+static void simulate_after_exchange(Config *config, bool use_cutoff,
+                                    SimResults *sim_results) {
+  load_and_exec_config_or_die(config, "set -seed 10");
+  const int ld_size = ld_get_size(config_get_ld(config));
+  Rack target_played_tiles;
+  rack_set_dist_size_and_reset(&target_played_tiles, ld_size);
+  Rack nontarget_known_tiles;
+  rack_set_dist_size_and_reset(&nontarget_known_tiles, ld_size);
+  Rack target_known_inference_tiles;
+  rack_set_dist_size_and_reset(&target_known_inference_tiles, ld_size);
+  SimArgs sim_args;
+  config_fill_sim_args(config, NULL, &target_played_tiles,
+                       &nontarget_known_tiles, &target_known_inference_tiles,
+                       &sim_args);
+  // Simulation runs its inference with the cutoff optimization.
+  assert(sim_args.use_inference);
+  assert(sim_args.inference_args.use_inference_cutoff_optimization);
+  sim_args.inference_args.use_inference_cutoff_optimization = use_cutoff;
+  ErrorStack *error_stack = error_stack_create();
+  thread_control_set_status(config_get_thread_control(config),
+                            THREAD_CONTROL_STATUS_STARTED);
+  simulate_without_ctx(&sim_args, sim_results, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  error_stack_destroy(error_stack);
+}
+
+// The inference a sim runs gives the same racks with and without the cutoff
+// optimization, so the sim comes out the same.
+void test_sim_with_inference_cutoff(void) {
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -wmp true -s1 equity -s2 equity -r1 all -r2 all "
+      "-numplays 4 -plies 2 -threads 1 -iter 200 -scond none -sinfer true "
+      "-ima 5");
+  load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
+  assert(test_parse_gcg("exchange_with_seven_in_bag", config,
+                        config_get_game_history(config)) ==
+         ERROR_STATUS_SUCCESS);
+  game_play_to_end_or_die(config_get_game_history(config),
+                          config_get_game(config));
+  load_and_exec_config_or_die(config, "gen");
+  ErrorStack *error_stack = error_stack_create();
+  config_load_win_pcts(config, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  error_stack_destroy(error_stack);
+
+  SimResults *with_cutoff =
+      sim_results_create(convert_user_cutoff_to_cutoff(0.005));
+  SimResults *without_cutoff =
+      sim_results_create(convert_user_cutoff_to_cutoff(0.005));
+  simulate_after_exchange(config, true, with_cutoff);
+  simulate_after_exchange(config, false, without_cutoff);
+  assert(sim_results_get_num_infer_leaves(with_cutoff) > 0);
+  assert(sim_results_get_num_infer_leaves(with_cutoff) ==
+         sim_results_get_num_infer_leaves(without_cutoff));
+  assert(sim_results_get_iteration_count(with_cutoff) ==
+         sim_results_get_iteration_count(without_cutoff));
+  assert_simmed_plays_identical(with_cutoff, without_cutoff);
+  sim_results_destroy(with_cutoff);
+  sim_results_destroy(without_cutoff);
+  config_destroy(config);
+}
+
 // A resumed sim continues accumulating onto the existing samples, and a
 // duplicated SimResults resumes exactly as the original would: the duplicate
 // copies each play's PRNG state rather than reseeding it.
@@ -1518,6 +1582,7 @@ void test_sim(void) {
     test_play_similarity();
     perf_test_multithread_sim();
     test_sim_with_inference();
+    test_sim_with_inference_cutoff();
     test_sim_round_robin_consistency();
     test_sim_top_two_consistency();
     test_sim_one_ply();

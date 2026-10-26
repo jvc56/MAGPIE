@@ -2,6 +2,7 @@ import { openSample } from "./helpers/startup.js";
 import { test, expect } from "@playwright/test";
 import { readFile } from "node:fs/promises";
 import vm from "node:vm";
+import { t } from "../i18n.mjs";
 
 async function setupHarness(state = "activated") {
   const source = await readFile("isolation.mjs", "utf8");
@@ -24,6 +25,7 @@ async function setupHarness(state = "activated") {
   window.top = window;
   const context = {
     URL,
+    t,
     window,
     isSecureContext: true,
     crossOriginIsolated: false,
@@ -48,6 +50,7 @@ async function setupHarness(state = "activated") {
   const run = () =>
     vm.runInNewContext(
       source
+        .replace('import { t } from "./i18n.mjs";', "")
         .replace("export async function", "async function")
         .replaceAll(
           "import.meta.url",
