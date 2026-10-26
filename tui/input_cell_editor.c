@@ -447,20 +447,19 @@ static bool cell_editor_commit(TuiGameState *state, int idx, bool field_move) {
       }
     }
   }
-  // If the rack commit followed a *legal* play (engine-
-  // accepted placement / exchange / pass), advance the
-  // annotation to the next turn: play the move on the
+  // If the rack commit followed a *legal* placement, advance
+  // the annotation to the next turn: play the move on the
   // engine, tag tile owners so placed tiles render in their
   // player's permanent color, append a fresh pending entry
   // for the OTHER player, and re-open the editor on it. If
   // the play wasn't legal (score < 0, partial, bare word,
   // invalid), fall through to the existing "just exit edit
   // mode" behavior — the user keeps editing the same turn.
+  // Exchanges and passes take that path too: the engine's
+  // exchange draws replacement tiles, which the annotator owns.
   if (field_move == false && state->edit_preview_move_valid &&
       state->edit_preview_move != NULL && state->edit_move_score >= 0 &&
-      (state->edit_move_kind == TUI_EDIT_MOVE_KIND_PLACEMENT ||
-       state->edit_move_kind == TUI_EDIT_MOVE_KIND_EXCHANGE ||
-       state->edit_move_kind == TUI_EDIT_MOVE_KIND_PASS)) {
+      state->edit_move_kind == TUI_EDIT_MOVE_KIND_PLACEMENT) {
     if (phony_gate(state, idx, TUI_PHONY_ACTION_ENTER)) {
       pthread_mutex_unlock(&state->mutex);
       return true;
