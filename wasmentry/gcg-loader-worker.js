@@ -48,9 +48,9 @@ self.onmessage = async ({ data: { file, pastedText, defaultLexicon, reportProgre
     }
     const lexicon =
       text.match(/^#lexicon\s+(\S+)/im)?.[1] || defaultLexicon;
-    if (!["CSW24", "NWL23"].includes(lexicon)) {
+    if (!["CSW24", "NWL23", "FRA24"].includes(lexicon)) {
       throw new Error(
-        `This preview supports CSW24 and NWL23; this game uses ${lexicon}.`,
+        `This preview supports CSW24, NWL23 and FRA24 (ODS 9); this game uses ${lexicon}.`,
       );
     }
     self.postMessage({ text, lexicon });
