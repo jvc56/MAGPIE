@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The macOS installer's distribution, read by productbuild in
+  release-macos.yml, which first fills in the pkg-ref's version.
+  hostArchitectures names both, so that Apple silicon installs the universal
+  executable without asking for Rosetta.
+-->
+<installer-gui-script minSpecVersion="2">
+  <title>MAGPIE</title>
+  <options customize="never" require-scripts="false" hostArchitectures="arm64,x86_64"/>
+  <domains enable_localSystem="true"/>
+  <volume-check>
+    <allowed-os-versions>
+      <os-version min="11.0"/>
+    </allowed-os-versions>
+  </volume-check>
+  <conclusion file="conclusion.html" mime-type="text/html"/>
+  <choices-outline>
+    <line choice="com.github.jvc56.magpie"/>
+  </choices-outline>
+  <choice id="com.github.jvc56.magpie" visible="false">
+    <pkg-ref id="com.github.jvc56.magpie"/>
+  </choice>
+  <pkg-ref id="com.github.jvc56.magpie" version="@VERSION@" onConclusion="none">magpie-component.pkg</pkg-ref>
+</installer-gui-script>
