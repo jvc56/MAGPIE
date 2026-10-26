@@ -5,6 +5,8 @@
 #include "../ent/equity.h"
 #include "../util/io_util.h"
 #include "../util/string_util.h"
+#include <assert.h>
+#include <stdint.h>
 #include <stdlib.h>
 
 typedef struct Anchor {
@@ -33,6 +35,14 @@ typedef struct Anchor {
   // this anchor column.
   unsigned dir : 1;
 } Anchor;
+
+// Each anchor of the heap has up to ANCHOR_HEAP_ARITY children. A node's
+// children are compared all at once, so up to ANCHOR_HEAP_ARITY - 1 slots
+// past the last anchor are read: they hold sentinels, which no anchor's bound
+// is below (see anchor_heap_set_sentinels). The heap holds far fewer anchors
+// than ANCHOR_HEAP_CAPACITY, so the sentinels fit in it; growing it instead
+// would move the move generator's fields that follow it.
+enum { ANCHOR_HEAP_ARITY = 4 };
 
 typedef struct AnchorHeap {
   int count;
@@ -78,60 +88,74 @@ static inline void anchor_heap_add_unheaped_wmp_anchor(
 
 static inline void anchor_heap_reset(AnchorHeap *ah) { ah->count = 0; }
 
-static inline bool anchor_is_better(const Anchor *anchor_a,
-                                    const Anchor *anchor_b) {
-  return anchor_a->highest_possible_equity > anchor_b->highest_possible_equity;
+// The bound of the sentinels past the last anchor: below every anchor's, so
+// a sentinel is never a better child than an anchor.
+#define ANCHOR_HEAP_SENTINEL_EQUITY INT32_MIN
+
+// Writes the sentinels into the slots past the last anchor that a sift reads.
+static inline void anchor_heap_set_sentinels(AnchorHeap *heap) {
+  assert(heap->count + ANCHOR_HEAP_ARITY - 1 <= ANCHOR_HEAP_CAPACITY);
+  for (int slot = heap->count; slot < heap->count + ANCHOR_HEAP_ARITY - 1;
+       slot++) {
+    heap->anchors[slot].highest_possible_equity = ANCHOR_HEAP_SENTINEL_EQUITY;
+  }
 }
 
-static inline void swap_anchors(Anchor *a, Anchor *b) {
-  Anchor temp;
-  memcpy(&temp, a, sizeof(Anchor));
-  memcpy(a, b, sizeof(Anchor));
-  memcpy(b, &temp, sizeof(Anchor));
-}
-
+// Sifts the anchor at parent_node down to its place. The heap is 4-ary, half
+// as deep as a binary heap, and a node's best child is chosen by comparing
+// the four bounds pairwise with no branch on the results. The anchors the
+// sifted one passes move up one level each into the hole it leaves, and it is
+// written once, at the end (J. W. J. Williams, "Algorithm 232: Heapsort",
+// CACM 7, 1964). Anchors with equal bounds may come out in any order: the
+// plays they record are ranked by the move comparison's tiebreaks, not by
+// when they are found.
 static inline void anchor_heapify_down(AnchorHeap *heap, int parent_node) {
-  int left = parent_node * 2 + 1;
-  int right = parent_node * 2 + 2;
-  int min;
-
-  if (left >= heap->count || left < 0) {
-    left = -1;
+  const Anchor sifted = heap->anchors[parent_node];
+  int hole = parent_node;
+  while (true) {
+    const int first_child = hole * ANCHOR_HEAP_ARITY + 1;
+    if (first_child >= heap->count) {
+      break;
+    }
+    const Anchor *children = &heap->anchors[first_child];
+    const Equity bound0 = children[0].highest_possible_equity;
+    const Equity bound1 = children[1].highest_possible_equity;
+    const Equity bound2 = children[2].highest_possible_equity;
+    const Equity bound3 = children[3].highest_possible_equity;
+    const int pick01 = bound1 > bound0;
+    const Equity best01 = pick01 ? bound1 : bound0;
+    const int pick23 = bound3 > bound2;
+    const Equity best23 = pick23 ? bound3 : bound2;
+    const int pick_high = best23 > best01;
+    const Equity best = pick_high ? best23 : best01;
+    if (best <= sifted.highest_possible_equity) {
+      break;
+    }
+    const int child = first_child + (pick_high ? 2 + pick23 : pick01);
+    heap->anchors[hole] = heap->anchors[child];
+    hole = child;
   }
-  if (right >= heap->count || right < 0) {
-    right = -1;
-  }
-
-  if (left != -1 &&
-      anchor_is_better(&heap->anchors[left], &heap->anchors[parent_node])) {
-    min = left;
-  } else {
-    min = parent_node;
-  }
-  if (right != -1 &&
-      anchor_is_better(&heap->anchors[right], &heap->anchors[min])) {
-    min = right;
-  }
-
-  if (min != parent_node) {
-    swap_anchors(&heap->anchors[min], &heap->anchors[parent_node]);
-    anchor_heapify_down(heap, min);
-  }
+  heap->anchors[hole] = sifted;
 }
 
 // O(n)
 static inline void anchor_heapify_all(AnchorHeap *heap) {
-  for (int node_idx = heap->count / 2; node_idx >= 0; node_idx--) {
+  anchor_heap_set_sentinels(heap);
+  for (int node_idx = (heap->count - 2) / ANCHOR_HEAP_ARITY; node_idx >= 0;
+       node_idx--) {
     anchor_heapify_down(heap, node_idx);
   }
 }
 
-// Removes max anchor, returns a copy.
+// Removes max anchor, returns a copy. The last anchor's slot becomes a
+// sentinel before the sift.
 static inline Anchor anchor_heap_extract_max(AnchorHeap *heap) {
   const Anchor max_anchor = heap->anchors[0];
-  heap->anchors[0] = heap->anchors[heap->count - 1];
-  anchor_heapify_down(heap, 0);
   heap->count--;
+  heap->anchors[0] = heap->anchors[heap->count];
+  heap->anchors[heap->count].highest_possible_equity =
+      ANCHOR_HEAP_SENTINEL_EQUITY;
+  anchor_heapify_down(heap, 0);
   return max_anchor;
 }
 

@@ -209,6 +209,132 @@ static void test_analyze_directory_with_player(void) {
   config_destroy(config);
 }
 
+// Reads <dir_path>/<filename> into a newly allocated string.
+static char *get_dir_file_string_or_die(const char *dir_path,
+                                        const char *filename) {
+  char *path = get_formatted_string("%s/%s", dir_path, filename);
+  char *content = get_string_from_file_or_die(path);
+  free(path);
+  return content;
+}
+
+// An unnamed directory run analyzes both players and writes a trailer line
+// for each. A later run naming one player reuses that report (it is not
+// rewritten) and counts only the named player: in the fixture GCG Tim's
+// play is optimal and Josh's DEFO loses 4.06 equity, so Tim's averages must
+// not include Josh's loss.
+static void test_analyze_directory_unnamed_then_named(void) {
+  Config *config = config_create_or_die("set -lex CSW21 -plies 0 -hr true");
+  char *tmp_dir = make_temp_gcg_dir();
+  char *cmd = get_formatted_string("analyze %s", tmp_dir);
+  assert_config_exec_status(config, cmd, ERROR_STATUS_SUCCESS);
+  free(cmd);
+
+  char *report = get_dir_file_string_or_die(tmp_dir, "test_game_report.txt");
+  assert(has_substring(report, "=== Analysis Complete: player=0 turns=1 "
+                               "wpl=0.00 eql=0.00 aeql=0.00 ==="));
+  assert(has_substring(report, "=== Analysis Complete: player=1 turns=1 "
+                               "wpl=0.00 eql=4.06 aeql=4.06 ==="));
+  char *tournament_summary =
+      get_dir_file_string_or_die(tmp_dir, "tournament_summary.txt");
+  assert(has_substring(tournament_summary,
+                       "=== Tournament Averages: Josh ===\nGames: 1\n"));
+  assert(has_substring(tournament_summary,
+                       "=== Tournament Averages: Tim ===\nGames: 1\n"));
+  assert(!has_substring(tournament_summary, "=== Tournament Averages ==="));
+  free(tournament_summary);
+
+  cmd = get_formatted_string("analyze %s Tim", tmp_dir);
+  assert_config_exec_status(config, cmd, ERROR_STATUS_SUCCESS);
+  free(cmd);
+
+  // Skipped: the report still holds the unnamed run's trailer for Josh.
+  char *report_after =
+      get_dir_file_string_or_die(tmp_dir, "test_game_report.txt");
+  assert(strings_equal(report, report_after));
+  free(report_after);
+  free(report);
+
+  tournament_summary =
+      get_dir_file_string_or_die(tmp_dir, "tournament_summary.txt");
+  assert(has_substring(tournament_summary, "=== Game Summary: Tim ==="));
+  assert(!has_substring(tournament_summary, "=== Game Summary: Josh ==="));
+  assert(has_substring(tournament_summary,
+                       "=== Tournament Averages: Tim ===\nGames: 1\n"
+                       "Turns: 1\n"));
+  assert(!has_substring(tournament_summary, "Tournament Averages: Josh"));
+  assert(has_substring(tournament_summary, "Average EqL per game: 0.00"));
+  assert(!has_substring(tournament_summary, "4.06"));
+  free(tournament_summary);
+
+  remove_temp_gcg_dir(tmp_dir);
+  free(tmp_dir);
+  config_destroy(config);
+}
+
+// A directory run naming one player writes a trailer line for that player
+// only, so a later unnamed run must re-analyze the game rather than count
+// one player's losses as the whole game's.
+static void test_analyze_directory_named_then_unnamed(void) {
+  Config *config = config_create_or_die("set -lex CSW21 -plies 0");
+  char *tmp_dir = make_temp_gcg_dir();
+  char *cmd = get_formatted_string("analyze %s Tim", tmp_dir);
+  assert_config_exec_status(config, cmd, ERROR_STATUS_SUCCESS);
+  free(cmd);
+
+  char *report = get_dir_file_string_or_die(tmp_dir, "test_game_report.txt");
+  assert(has_substring(report, "=== Analysis Complete: player=0 "));
+  assert(!has_substring(report, "=== Analysis Complete: player=1 "));
+  free(report);
+
+  cmd = get_formatted_string("analyze %s", tmp_dir);
+  assert_config_exec_status(config, cmd, ERROR_STATUS_SUCCESS);
+  free(cmd);
+
+  report = get_dir_file_string_or_die(tmp_dir, "test_game_report.txt");
+  assert(has_substring(report, "=== Analysis Complete: player=0 "));
+  assert(has_substring(report, "=== Analysis Complete: player=1 "));
+  free(report);
+  char *tournament_summary =
+      get_dir_file_string_or_die(tmp_dir, "tournament_summary.txt");
+  assert(has_substring(tournament_summary, "Tournament Averages: Tim"));
+  assert(has_substring(tournament_summary, "Tournament Averages: Josh"));
+  free(tournament_summary);
+
+  remove_temp_gcg_dir(tmp_dir);
+  free(tmp_dir);
+  config_destroy(config);
+}
+
+// A report with the single combined trailer written before trailers were
+// per player doesn't say which players it covers, so it is re-analyzed.
+static void test_analyze_directory_old_trailer(void) {
+  Config *config = config_create_or_die("set -lex CSW21 -plies 0");
+  char *tmp_dir = make_temp_gcg_dir();
+  char *report_path = get_formatted_string("%s/test_game_report.txt", tmp_dir);
+  ErrorStack *error_stack = error_stack_create();
+  write_string_to_file(report_path, "w",
+                       "\n=== Analysis Complete: turns=2 wpl=0.00 eql=4.06 "
+                       "aeql=4.06 ===\n",
+                       error_stack);
+  assert(error_stack_is_empty(error_stack));
+  error_stack_destroy(error_stack);
+
+  char *cmd = get_formatted_string("analyze %s Tim", tmp_dir);
+  assert_config_exec_status(config, cmd, ERROR_STATUS_SUCCESS);
+  free(cmd);
+
+  char *report = get_string_from_file_or_die(report_path);
+  assert(!has_substring(report, "=== Analysis Complete: turns="));
+  assert(has_substring(report, "=== Analysis Complete: player=0 turns=1 "));
+  free(report);
+  free(report_path);
+
+  remove_temp_gcg_dir(tmp_dir);
+  free(tmp_dir);
+  config_destroy(config);
+}
+
 // Error: no lexicon loaded — GCG parse fails before we can check game data.
 static void test_analyze_no_lexicon(void) {
   Config *config = config_create_default_test();
@@ -300,6 +426,9 @@ void test_analyze(void) {
   test_analyze_directory();
   test_analyze_directory_with_mistakes();
   test_analyze_directory_with_player();
+  test_analyze_directory_unnamed_then_named();
+  test_analyze_directory_named_then_unnamed();
+  test_analyze_directory_old_trailer();
   test_analyze_no_lexicon();
   test_analyze_no_game();
   test_analyze_unknown_player();

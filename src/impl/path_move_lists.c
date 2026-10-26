@@ -66,17 +66,16 @@ static PackedCounts pack_move_used(const SmallMove *small_move) {
 
 // True iff `used` is a sub-multiset of `avail`: per 4-bit field, seeding the
 // high bit makes the subtraction borrow-free exactly when the field's avail
-// count covers its used count.
+// count covers its used count. Every word is checked, with no early exit, so
+// the check has no branch (clang subtracts the words as one vector).
 static inline bool counts_subset(const PackedCounts *used,
                                  const PackedCounts *avail) {
+  uint64_t borrow_free = PACKED_COUNTS_HIGH_BITS;
   for (int word_idx = 0; word_idx < PATH_MOVE_LISTS_COUNT_WORDS; word_idx++) {
-    const uint64_t diff = (avail->words[word_idx] | PACKED_COUNTS_HIGH_BITS) -
-                          used->words[word_idx];
-    if ((diff & PACKED_COUNTS_HIGH_BITS) != PACKED_COUNTS_HIGH_BITS) {
-      return false;
-    }
+    borrow_free &= (avail->words[word_idx] | PACKED_COUNTS_HIGH_BITS) -
+                   used->words[word_idx];
   }
-  return true;
+  return borrow_free == PACKED_COUNTS_HIGH_BITS;
 }
 
 static inline uint64_t lane_bit_row(int row) { return (uint64_t)1 << row; }
@@ -95,23 +94,31 @@ static inline int lane_of_small_move(const SmallMove *small_move) {
              : small_move_get_row_start(small_move);
 }
 
-// The lanes whose legal-play sets can change when `move`'s tiles land on
-// `board` (as it stands before the move) -- the lane-touch set.
+// Per lane, the squares whose change can affect a play of that lane when
+// `move`'s tiles land on `board` (as it stands before the move), written to
+// `hits`; returns the lanes with any -- the lane-touch set.
 //
-// Derivation: a placed cell p affects exactly (a) plays placing a tile on p
-// and (b) plays placing a tile on the first empty cell reached from p in each
-// of the four directions by walking through pre-existing tiles -- in-line,
-// the cell a word extends through p's run from; perpendicular, the cell whose
-// cross-word p's run rewrites. Marking the rows and columns of p and of those
-// (at most four) cells therefore covers every affected play, and every newly
-// enabled play too, since it must place on such a cell or play through p.
-// Anchor, cross-set, extension-set, and single-tile-dedup state in unmarked
-// lanes is untouched, so their plays carry over verbatim, scores included.
-static uint64_t move_lane_influence(const Board *board, const Move *move) {
+// Derivation: a placed cell p affects exactly (a) plays whose span holds p or
+// ends next to p in p's row or column, where the word now runs into p, and
+// (b) plays placing a tile on the first empty cell reached from p in each of
+// the four directions by walking through pre-existing tiles -- in-line, that
+// cell's plays run through p's run and so end next to p or hold it; across,
+// the cell whose cross-word p's run rewrites, which a play of the lane through
+// that cell fills. So p and its two neighbours are hits in p's row and
+// column, and each walk's end cell a hit in the lane across the walk.
+// Every newly enabled play spans a hit too, since it must play through p or
+// place on such a cell. A play spanning no hit keeps its squares, its ends,
+// its cross-words and its anchors, so it carries over verbatim, score
+// included.
+static uint64_t move_lane_hits(const Board *board, const Move *move,
+                               uint32_t *hits) {
+  memset(hits, 0, PATH_MOVE_LISTS_NUM_LANES * sizeof(uint32_t));
   if (move_get_type(move) != GAME_EVENT_TILE_PLACEMENT_MOVE) {
     return 0;
   }
   static const int deltas[4][2] = {{-1, 0}, {1, 0}, {0, -1}, {0, 1}};
+  const uint32_t lane_squares =
+      BOARD_DIM >= 32 ? ~(uint32_t)0 : ((uint32_t)1 << BOARD_DIM) - 1;
   const bool vertical = board_is_dir_vertical(move_get_dir(move));
   const int row_start = move_get_row_start(move);
   const int col_start = move_get_col_start(move);
@@ -123,6 +130,10 @@ static uint64_t move_lane_influence(const Board *board, const Move *move) {
     }
     const int row = vertical ? row_start + tile_idx : row_start;
     const int col = vertical ? col_start : col_start + tile_idx;
+    // The square and its two neighbours along the lane.
+    hits[row] |= (uint32_t)((((uint64_t)7 << col) >> 1) & lane_squares);
+    hits[BOARD_DIM + col] |=
+        (uint32_t)((((uint64_t)7 << row) >> 1) & lane_squares);
     touched |= lane_bit_row(row) | lane_bit_col(col);
     for (int delta_idx = 0; delta_idx < 4; delta_idx++) {
       int walk_row = row + deltas[delta_idx][0];
@@ -132,12 +143,48 @@ static uint64_t move_lane_influence(const Board *board, const Move *move) {
         walk_row += deltas[delta_idx][0];
         walk_col += deltas[delta_idx][1];
       }
-      if (board_is_position_in_bounds(walk_row, walk_col)) {
-        touched |= lane_bit_row(walk_row) | lane_bit_col(walk_col);
+      if (!board_is_position_in_bounds(walk_row, walk_col)) {
+        continue;
+      }
+      if (deltas[delta_idx][0] != 0) {
+        // Walked along the column: the end's row sees its cross-word change.
+        hits[walk_row] |= (uint32_t)1 << walk_col;
+        touched |= lane_bit_row(walk_row);
+      } else {
+        hits[BOARD_DIM + walk_col] |= (uint32_t)1 << walk_row;
+        touched |= lane_bit_col(walk_col);
       }
     }
   }
   return touched;
+}
+
+// The lane positions a small move spans, through tiles included.
+static inline uint32_t small_move_span(const SmallMove *small_move) {
+  const int start = small_move_is_vertical(small_move)
+                        ? small_move_get_row_start(small_move)
+                        : small_move_get_col_start(small_move);
+  const int length = small_move_get_play_length(small_move);
+  const uint32_t squares =
+      length >= 32 ? ~(uint32_t)0 : ((uint32_t)1 << length) - 1;
+  return squares << start;
+}
+
+// The anchor a play is generated from: the leftmost anchor in its span, the
+// lowest bit of span & anchors, which a legal play always has.
+static inline int span_anchor(uint32_t span, uint32_t anchors) {
+  uint32_t spanned_anchors = span & anchors;
+  assert(spanned_anchors != 0);
+#if defined(__has_builtin) && __has_builtin(__builtin_ctz)
+  return __builtin_ctz(spanned_anchors);
+#else
+  int index = 0;
+  while ((spanned_anchors & 1U) == 0) {
+    spanned_anchors >>= 1U;
+    index++;
+  }
+  return index;
+#endif
 }
 
 static void slot_reserve(PathListSlot *slot, int needed) {
@@ -158,11 +205,22 @@ static void slot_reserve(PathListSlot *slot, int needed) {
   slot->capacity = capacity;
 }
 
-static inline void slot_append(PathListSlot *slot, const SmallMove *small_move,
-                               const PackedCounts *used) {
-  slot->moves[slot->count] = *small_move;
-  slot->used[slot->count] = *used;
-  slot->count++;
+// The end of a list being built, held apart from its PathListSlot so the
+// compiler keeps it in registers. A store of a play may alias the slot's int
+// fields, so appending through the slot reloads its count and arrays after
+// every play.
+typedef struct SlotWriter {
+  SmallMove *moves;
+  PackedCounts *used;
+  int count;
+} SlotWriter;
+
+static inline void writer_append(SlotWriter *writer,
+                                 const SmallMove *small_move,
+                                 const PackedCounts *used) {
+  writer->moves[writer->count] = *small_move;
+  writer->used[writer->count] = *used;
+  writer->count++;
 }
 
 // Rebuild `slot` from `move_list`, a full generation in lane order ending in
@@ -173,7 +231,7 @@ static void slot_fill_from_move_list(PathListSlot *slot,
   assert(count > 0 && small_move_is_pass(move_list->small_moves[count - 1]));
   count--;
   slot_reserve(slot, count);
-  slot->count = 0;
+  SlotWriter writer = {slot->moves, slot->used, 0};
   int lane = 0;
   slot->lane_begin[0] = 0;
   for (int move_idx = 0; move_idx < count; move_idx++) {
@@ -184,53 +242,148 @@ static void slot_fill_from_move_list(PathListSlot *slot,
       slot->lane_begin[++lane] = move_idx;
     }
     const PackedCounts used = pack_move_used(small_move);
-    slot_append(slot, small_move, &used);
+    writer_append(&writer, small_move, &used);
   }
+  slot->count = writer.count;
   while (lane < PATH_MOVE_LISTS_NUM_LANES) {
     slot->lane_begin[++lane] = count;
   }
 }
 
-// Derive `out` from `parent`: the `touched` lanes come from `move_list`, whose
-// lane L occupies [lane_end[L - 1], lane_end[L]) (0 for L == 0); the rest
-// carry over from `parent`, filtered against `avail` iff `filter`.
+// Where a lane's merge stands after appending regenerated plays: the list's
+// count, and the index and anchor of the next regenerated play (BOARD_DIM past
+// the last).
+typedef struct RegenFlush {
+  int count;
+  int regen_idx;
+  int regen_anchor;
+} RegenFlush;
+
+// Appends the regenerated plays of `move_list` from `regen_idx`, whose anchor
+// is below `anchor`, up to the first whose anchor is not, to the list `moves`
+// and `used` of `count` plays. It runs once per run of regenerated plays, and
+// is out of line for slot_merge_lane's loop over the parent's plays: inlined
+// there, it left GCC too few registers, and the loop kept its pointers on the
+// stack. It takes the list's arrays and count, not its SlotWriter, so that the
+// writer stays in registers (see SlotWriter).
+static __attribute__((noinline)) RegenFlush append_regenerated_below(
+    SmallMove *moves, PackedCounts *used, int count, const MoveList *move_list,
+    int regen_idx, int regen_end, int anchor, uint32_t anchors) {
+  int regen_anchor;
+  do {
+    const SmallMove *regenerated = move_list->small_moves[regen_idx];
+    moves[count] = *regenerated;
+    used[count] = pack_move_used(regenerated);
+    count++;
+    regen_idx++;
+    regen_anchor =
+        regen_idx < regen_end
+            ? span_anchor(small_move_span(move_list->small_moves[regen_idx]),
+                          anchors)
+            : BOARD_DIM;
+  } while (regen_anchor < anchor);
+  return (RegenFlush){count, regen_idx, regen_anchor};
+}
+
+// Appends lane `lane` of `out`: `parent`'s plays that span no square in `hit`
+// and whose anchors (among `anchors`) are not in `generated`, filtered
+// against `avail` iff `filter`, merged by anchor with the regenerated plays
+// [regen_begin, regen_end) of `move_list`. Both sources list their plays by
+// ascending anchor, so the merge is in generation order.
+static void slot_merge_lane(SlotWriter *out, const PathListSlot *parent,
+                            int lane, uint32_t hit, uint32_t anchors,
+                            uint32_t generated, bool filter,
+                            const PackedCounts *avail,
+                            const MoveList *move_list, int regen_begin,
+                            int regen_end) {
+  int regen_idx = regen_begin;
+  if (generated != anchors) {
+    // The anchor of the next regenerated play, BOARD_DIM past the last.
+    int regen_anchor =
+        regen_idx < regen_end
+            ? span_anchor(small_move_span(move_list->small_moves[regen_idx]),
+                          anchors)
+            : BOARD_DIM;
+    const SmallMove *parent_moves = parent->moves;
+    const PackedCounts *parent_used = parent->used;
+    const int lane_end = parent->lane_begin[lane + 1];
+    for (int move_idx = parent->lane_begin[lane]; move_idx < lane_end;
+         move_idx++) {
+      const SmallMove *small_move = &parent_moves[move_idx];
+      const uint32_t span = small_move_span(small_move);
+      if ((span & hit) != 0) {
+        continue;
+      }
+      const int anchor = span_anchor(span, anchors);
+      // The regenerated plays before this anchor go first even if this play
+      // is dropped: the next play kept has an anchor no smaller, so the order
+      // is the same.
+      if (regen_anchor < anchor) {
+        const RegenFlush flush = append_regenerated_below(
+            out->moves, out->used, out->count, move_list, regen_idx, regen_end,
+            anchor, anchors);
+        out->count = flush.count;
+        regen_idx = flush.regen_idx;
+        regen_anchor = flush.regen_anchor;
+      }
+      // Without a branch, as slot_rebuild filters: the play is written to the
+      // next free slot, which the reservation holds, and kept by counting it.
+      const int keep =
+          (((generated >> anchor) & 1) == 0) &
+          ((!filter) | counts_subset(&parent_used[move_idx], avail));
+      out->moves[out->count] = *small_move;
+      out->used[out->count] = parent_used[move_idx];
+      out->count += keep;
+    }
+  }
+  for (; regen_idx < regen_end; regen_idx++) {
+    const SmallMove *regenerated = move_list->small_moves[regen_idx];
+    const PackedCounts used = pack_move_used(regenerated);
+    writer_append(out, regenerated, &used);
+  }
+}
+
+// Derive `out` from `parent`: the `touched` lanes merge `parent`'s plays with
+// `move_list`'s, whose lane L occupies [lane_end[L - 1], lane_end[L])
+// (0 for L == 0), by `lists`'s lane scratch (see slot_merge_lane); the rest
+// carry over from `parent`. Filtered against `avail` iff `filter`.
 static void slot_rebuild(PathListSlot *out, const PathListSlot *parent,
                          uint64_t touched, bool filter,
                          const PackedCounts *avail, const MoveList *move_list,
-                         const int *lane_end) {
+                         const PathMoveLists *lists) {
   slot_reserve(out, parent->count + move_list->count);
-  out->count = 0;
+  SlotWriter writer = {out->moves, out->used, 0};
+  const SmallMove *parent_moves = parent->moves;
+  const PackedCounts *parent_used = parent->used;
   int regen_begin = 0;
   for (int lane = 0; lane < PATH_MOVE_LISTS_NUM_LANES; lane++) {
-    out->lane_begin[lane] = out->count;
+    out->lane_begin[lane] = writer.count;
+    const int begin = parent->lane_begin[lane];
+    const int end = parent->lane_begin[lane + 1];
     if ((touched >> lane) & 1) {
-      for (int move_idx = regen_begin; move_idx < lane_end[lane]; move_idx++) {
-        const SmallMove *small_move = move_list->small_moves[move_idx];
-        const PackedCounts used = pack_move_used(small_move);
-        slot_append(out, small_move, &used);
-      }
-      regen_begin = lane_end[lane];
+      slot_merge_lane(&writer, parent, lane, lists->lane_hits[lane],
+                      lists->lane_anchors[lane], lists->lane_generated[lane],
+                      filter, avail, move_list, regen_begin,
+                      lists->lane_end[lane]);
+      regen_begin = lists->lane_end[lane];
     } else if (filter) {
-      for (int move_idx = parent->lane_begin[lane];
-           move_idx < parent->lane_begin[lane + 1]; move_idx++) {
-        if (!counts_subset(&parent->used[move_idx], avail)) {
-          continue;
-        }
-        slot_append(out, &parent->moves[move_idx], &parent->used[move_idx]);
+      // Without a branch: every play is written to the next free slot, which
+      // the reservation holds, and kept by counting it.
+      for (int move_idx = begin; move_idx < end; move_idx++) {
+        writer.moves[writer.count] = parent_moves[move_idx];
+        writer.used[writer.count] = parent_used[move_idx];
+        writer.count += counts_subset(&parent_used[move_idx], avail) ? 1 : 0;
       }
-    } else {
-      const int begin = parent->lane_begin[lane];
-      const int lane_count = parent->lane_begin[lane + 1] - begin;
-      if (lane_count > 0) {
-        memcpy(out->moves + out->count, parent->moves + begin,
-               (size_t)lane_count * sizeof(SmallMove));
-        memcpy(out->used + out->count, parent->used + begin,
-               (size_t)lane_count * sizeof(PackedCounts));
-      }
-      out->count += lane_count;
+    } else if (end > begin) {
+      memcpy(writer.moves + writer.count, parent_moves + begin,
+             (size_t)(end - begin) * sizeof(SmallMove));
+      memcpy(writer.used + writer.count, parent_used + begin,
+             (size_t)(end - begin) * sizeof(PackedCounts));
+      writer.count += end - begin;
     }
   }
-  out->lane_begin[PATH_MOVE_LISTS_NUM_LANES] = out->count;
+  out->count = writer.count;
+  out->lane_begin[PATH_MOVE_LISTS_NUM_LANES] = writer.count;
 }
 
 PathMoveLists *path_move_lists_create(void) {
@@ -263,10 +416,18 @@ void path_move_lists_set_root(PathMoveLists *lists, int side,
   lists->root_stamp = ++lists->next_stamp;
 }
 
+void path_move_lists_set_current(PathMoveLists *lists,
+                                 const MoveList *move_list) {
+  assert(lists->length >= 1);
+  slot_fill_from_move_list(&lists->slots[lists->length], move_list);
+  lists->slot_stamps[lists->length] = lists->stamps[lists->length - 1];
+}
+
 void path_move_lists_push(PathMoveLists *lists, const Board *board,
                           const Move *move) {
   assert(lists->length < PATH_MOVE_LISTS_MAX_PATH);
-  lists->masks[lists->length] = move_lane_influence(board, move);
+  lists->masks[lists->length] =
+      move_lane_hits(board, move, lists->hits[lists->length]);
   lists->played[lists->length] =
       move_get_type(move) == GAME_EVENT_TILE_PLACEMENT_MOVE;
   lists->stamps[lists->length] = ++lists->next_stamp;
@@ -294,7 +455,15 @@ int path_move_lists_moves_at(PathMoveLists *lists, const MoveGenArgs *args,
     filter = lists->played[length - 2];
   }
   if (touched != 0) {
-    generate_small_moves_in_lanes(args, touched, lists->lane_end);
+    for (int lane = 0; lane < PATH_MOVE_LISTS_NUM_LANES; lane++) {
+      lists->lane_hits[lane] = lists->hits[length - 1][lane];
+      if (length >= 2) {
+        lists->lane_hits[lane] |= lists->hits[length - 2][lane];
+      }
+    }
+    generate_small_moves_in_lanes(args, touched, lists->lane_hits,
+                                  lists->lane_end, lists->lane_anchors,
+                                  lists->lane_generated);
   } else {
     // Two passes: nothing to regenerate, and the scratch list is unused.
     memset(lists->lane_end, 0, sizeof(lists->lane_end));
@@ -304,8 +473,7 @@ int path_move_lists_moves_at(PathMoveLists *lists, const MoveGenArgs *args,
       game_get_player(game, game_get_player_on_turn_index(game)));
   const PackedCounts avail = pack_rack(rack);
   PathListSlot *out = &lists->slots[length];
-  slot_rebuild(out, parent, touched, filter, &avail, args->move_list,
-               lists->lane_end);
+  slot_rebuild(out, parent, touched, filter, &avail, args->move_list, lists);
   lists->slot_stamps[length] = lists->stamps[length - 1];
   *out_moves = out->moves;
   return out->count;
@@ -362,51 +530,35 @@ static inline void lane_best_consider(LaneBestPlays *best,
 }
 
 // Finds the sibling-shared best plays of the lanes in `missing`, none of which
-// the current leaf's own move touched. Lanes the side's own previous move also
-// left alone carry over from its list two moves up; the others are
-// regenerated on the current board, which matches the parent's there.
+// the current leaf's own move touched, so they stand as they did after the
+// side's own previous move. Lanes that move also left alone carry over from
+// the side's list two moves up; in the others, only the anchors that can reach
+// a square the move changed are regenerated on the current board, and the
+// other anchors' plays carry over too.
 static void fill_sibling_lanes(PathMoveLists *lists,
                                const MoveGenArgs *best_small_args,
                                uint64_t missing, int side_to_move_tiles) {
   const int length = lists->length;
   const uint64_t previous_move = length >= 2 ? lists->masks[length - 2] : 0;
-  const uint64_t carried = missing & ~previous_move;
   const uint64_t regenerated = missing & previous_move;
   for (int lane = 0; lane < PATH_MOVE_LISTS_NUM_LANES; lane++) {
     if (((missing >> lane) & 1) != 0) {
       lists->sibling_lanes[length][lane].has_whole_rack = false;
       lists->sibling_lanes[length][lane].has_partial = false;
-    }
-  }
-  if (carried != 0) {
-    const PathListSlot *parent =
-        length <= 2 ? &lists->roots[2 - length] : &lists->slots[length - 2];
-    const bool filter = length >= 2 && lists->played[length - 2];
-    PackedCounts avail;
-    if (filter) {
-      const Game *game = best_small_args->game;
-      avail = pack_rack(player_get_rack(
-          game_get_player(game, game_get_player_on_turn_index(game))));
-    }
-    for (int lane = 0; lane < PATH_MOVE_LISTS_NUM_LANES; lane++) {
-      if (((carried >> lane) & 1) == 0) {
-        continue;
-      }
-      LaneBestPlays *best = &lists->sibling_lanes[length][lane];
-      for (int move_idx = parent->lane_begin[lane];
-           move_idx < parent->lane_begin[lane + 1]; move_idx++) {
-        if (filter && !counts_subset(&parent->used[move_idx], &avail)) {
-          continue;
-        }
-        lane_best_consider(best, &parent->moves[move_idx], side_to_move_tiles);
-      }
+      lists->lane_hits[lane] = 0;
+      lists->lane_generated[lane] = 0;
+      lists->lane_anchors[lane] = 0;
     }
   }
   if (regenerated != 0) {
+    for (int lane = 0; lane < PATH_MOVE_LISTS_NUM_LANES; lane++) {
+      lists->lane_hits[lane] = lists->hits[length - 2][lane];
+    }
     MoveGenArgs all_small_args = *best_small_args;
     all_small_args.move_record_type = MOVE_RECORD_ALL_SMALL;
     generate_small_moves_in_lanes(&all_small_args, regenerated,
-                                  lists->lane_end);
+                                  lists->lane_hits, lists->lane_end,
+                                  lists->lane_anchors, lists->lane_generated);
     const MoveList *move_list = best_small_args->move_list;
     int begin = 0;
     for (int lane = 0; lane < PATH_MOVE_LISTS_NUM_LANES; lane++) {
@@ -419,6 +571,42 @@ static void fill_sibling_lanes(PathMoveLists *lists,
         }
       }
       begin = end;
+    }
+  }
+  const PathListSlot *parent =
+      length <= 2 ? &lists->roots[2 - length] : &lists->slots[length - 2];
+  const bool filter = length >= 2 && lists->played[length - 2];
+  PackedCounts avail;
+  if (filter) {
+    const Game *game = best_small_args->game;
+    avail = pack_rack(player_get_rack(
+        game_get_player(game, game_get_player_on_turn_index(game))));
+  }
+  for (int lane = 0; lane < PATH_MOVE_LISTS_NUM_LANES; lane++) {
+    if (((missing >> lane) & 1) == 0) {
+      continue;
+    }
+    // A lane the move left alone has no hits, so all of its plays carry.
+    const uint32_t hit = lists->lane_hits[lane];
+    const uint32_t anchors = lists->lane_anchors[lane];
+    const uint32_t generated = lists->lane_generated[lane];
+    if (hit != 0 && generated == anchors) {
+      continue;
+    }
+    LaneBestPlays *best = &lists->sibling_lanes[length][lane];
+    for (int move_idx = parent->lane_begin[lane];
+         move_idx < parent->lane_begin[lane + 1]; move_idx++) {
+      if (hit != 0) {
+        const uint32_t span = small_move_span(&parent->moves[move_idx]);
+        if ((span & hit) != 0 ||
+            ((generated >> span_anchor(span, anchors)) & 1) != 0) {
+          continue;
+        }
+      }
+      if (filter && !counts_subset(&parent->used[move_idx], &avail)) {
+        continue;
+      }
+      lane_best_consider(best, &parent->moves[move_idx], side_to_move_tiles);
     }
   }
 }

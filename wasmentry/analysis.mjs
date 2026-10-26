@@ -1,3 +1,5 @@
+import { t, currentLanguage, localizeDocument, setLanguage } from "./i18n.mjs";
+import { LEXICA, tileValues, vowelLetters } from "./lexica.mjs";
 import { moveTiles } from "./move-tiles.mjs";
 import { computerSearchPlan } from "./computer-time.mjs";
 import { TILE_ORDERS, DEFAULT_TILE_ORDER, tileAlphabet, sortTiles, formatTileGroups } from "./tile-order.mjs";
@@ -14,7 +16,6 @@ import { readSharedLink, sharedLink } from "./xs-links.mjs";
 import { logGCG, gcgLogText } from "./gcg-diagnostics.mjs";
 import {
   emptyPosition,
-  VALUES,
   parseCGP,
   toCGP,
   snapshotPosition,
@@ -45,6 +46,8 @@ import {
 let cachedWMPFiles = [];
 let positionGeneration = 0, analysisGeneration = -1, historyClickTimer, pendingHistoryIndex = null;
 const $ = (id) => document.getElementById(id);
+localizeDocument();
+$("language").value = currentLanguage();
 let position = emptyPosition();
 let engineInitialized = false;
 let mode = "kibitz",
@@ -94,11 +97,11 @@ function showComputerMove(index, before) {
   const toast = $("computer-move");
   clearComputerMove();
   const name = recordedGame.players[before.onTurn];
-  if (move === "-") toast.append(`${name} passed`);
+  if (move === "-") toast.append(t`${name} passed`);
   else if (/^-\d+$/.test(move)) {
     const count = Number(move.slice(1));
-    toast.append(`${name} exchanged ${count} tile${count === 1 ? "" : "s"}`);
-  } else toast.append(`${name} played`, moveTiles(displayMove(move), before.onTurn, before), score);
+    toast.append(t`${name} exchanged ${count} tile${count === 1 ? "" : "s"}`);
+  } else toast.append(t`${name} played`, moveTiles(displayMove(move), before.onTurn, before), score);
   toast.hidden = false;
   computerMoveTimer = setTimeout(clearComputerMove, 12000);
 }
@@ -238,12 +241,18 @@ const note = {
   endgame:
     "Spread is the final margin from the on-turn player’s perspective. A time-limited line may still be approximate.",
 };
-function message(text) {
+let currentMessage = () => "";
+function message(render) {
+  currentMessage = render;
+  renderMessage();
+}
+function renderMessage() {
+  const text = currentMessage();
   $("status").textContent = text;
-  if (!engineInitialized) $("new-game-status").textContent = text;
+  if (!engineInitialized) { $("new-game-status").textContent = text; }
 }
 function error(text) {
-  if (/\(error 149\).*phony/i.test(text)) text = `This play contains a word outside ${position.lexicon}.`;
+  if (/\(error 149\).*phony/i.test(text)) text = t`This play contains a word outside ${position.lexicon}.`;
   $("error").hidden = !text;
   const match = text.match(/^(Play )([A-O]\d+|\d+[A-O]) ([A-Za-z().?]+)( contains at least one phony word)$/);
   if (match) {
@@ -265,12 +274,12 @@ function readSettings() {
       n > Number(field.max)
     )
       throw new Error(
-        `${field.labels[0].querySelector(".setting-name")?.textContent || field.labels[0].textContent.trim()} must be ${field.min}–${field.max}.`,
+        t`${field.labels[0].querySelector(".setting-name")?.textContent || field.labels[0].textContent.trim()} must be ${field.min}–${field.max}.`,
       );
     settings[id] = n;
   }
   settings.ttMiB = Number($("tt-memory").value);
-  settings.wmpSource = searchWordMapSource($("wmp-source").value, inventory(position).bagCount, budget);
+  settings.wmpSource = position.lexicon === "FRA24" ? "off" : searchWordMapSource($("wmp-source").value, inventory(position).bagCount, budget);
   settings.wmp = settings.wmpSource !== "off";
   return settings;
 }
@@ -280,12 +289,12 @@ $("threads").value = budget.threads;
 $("tt-memory").value = budget.ttMiB;
 function settingsSummary() {
   const time = isLive()
-    ? session.strategy === "kibitz" ? "Static equity"
-      : session.manageTime && session.time ? "Automatic time management" : `${session.seconds}s per turn`
+    ? session.strategy === "kibitz" ? t("Static equity")
+      : session.manageTime && session.time ? t("Automatic time management") : t`${session.seconds}s per turn`
     : `${$("seconds").value}s`;
   $("settings-summary").textContent = !isLive() && searchMode() !== "sim"
-    ? `No time limit · ${$("threads").value} threads`
-    : `${time} · ${$("plies").value} plies · ${$("threads").value} threads`;
+    ? t`No time limit · ${$("threads").value} threads`
+    : t`${time} · ${$("plies").value} plies · ${$("threads").value} threads`;
 }
 for (const id of ["seconds", "candidates", "plies", "threads"])
   $(id).addEventListener("input", settingsSummary);
@@ -357,13 +366,13 @@ function renderSettingsAvailability() {
     .forEach(button => { button.disabled = locked || button.dataset.unavailable === "true"; });
   $("settings-busy").hidden = !locked;
   $("settings-busy").textContent = isLive() && session.kind === "watch" && !session.paused
-    ? "Pause the game to change these settings."
-    : "Stop analysis to change these settings.";
+    ? t("Pause the game to change these settings.")
+    : t("Stop analysis to change these settings.");
   $("lexicon").disabled = locked || Boolean(isLive());
   $("lexicon-busy").hidden = !$("lexicon").disabled;
   $("lexicon-busy").textContent = isLive()
-    ? "Finish the game to change the lexicon."
-    : "Stop analysis to change the lexicon.";
+    ? t("Finish the game to change the lexicon.")
+    : t("Stop analysis to change the lexicon.");
 }
 function setBusy(value) {
   value = value || Boolean(engine?.fatalError);
@@ -455,7 +464,7 @@ function setPosition(next, fromHistory = false) {
   error("");
   clearResults();
   renderPosition();
-  message("Position ready");
+  message(() => t("Position ready"));
   restoreAnalysis();
   renderSession();
 }
@@ -560,11 +569,11 @@ function renderBoard() {
         ? letter.toUpperCase()
         : row === 7 && col === 7
           ? "★"
-          : name;
+          : t(name);
       cell.append(glyph);
       cell.setAttribute(
         "aria-label",
-        `${coord} ${letter ? `${letter === letter.toLowerCase() ? "blank " : ""}${letter.toUpperCase()}` : name || "empty"}${ghost ? " preview" : ""}${letter && owner !== -1 ? ` · Player ${owner + 1}` : ""}`,
+        `${coord} ${letter ? `${letter === letter.toLowerCase() ? t("blank") + " " : ""}${letter.toUpperCase()}` : t(name || "empty")}${ghost ? " " + t("preview") : ""}${letter && owner !== -1 ? t` · Player ${owner + 1}` : ""}`,
       );
       cell.tabIndex =
         ($("edit").checked || recordedGame) &&
@@ -575,8 +584,8 @@ function renderBoard() {
           : -1;
       if (letter && letter !== letter.toLowerCase()) {
         const points = document.createElement("sup");
-        points.textContent = VALUES[letter];
-        points.classList.toggle("two-digit", VALUES[letter] >= 10);
+        points.textContent = tileValues(position.lexicon)[letter];
+        points.classList.toggle("two-digit", tileValues(position.lexicon)[letter] >= 10);
         cell.append(points);
       }
       if (
@@ -598,7 +607,7 @@ function renderBoard() {
     const marker = document.createElement("span");
     marker.className = `edge-cursor${vertical ? " down" : ""}`;
     marker.tabIndex = 0;
-    marker.setAttribute("aria-label", `End of board, typing ${vertical ? "down" : "right"}`);
+    marker.setAttribute("aria-label", t`End of board, typing ${t(vertical ? "down" : "right")}`);
     marker.dataset.row = edge.row;
     marker.dataset.col = edge.col;
     board.querySelector(`[data-row="${Math.min(edge.row,14)}"][data-col="${Math.min(edge.col,14)}"]`).append(marker);
@@ -615,8 +624,8 @@ const mobileBoard = matchMedia("(pointer: coarse)");
 function setBoardZoom(zoomed) {
   $("board-viewport").classList.toggle("zoomed", zoomed);
   $("board-zoom").setAttribute("aria-pressed", String(zoomed));
-  $("board-zoom").setAttribute("aria-label", zoomed ? "Fit board" : "Zoom board");
-  $("board-zoom").title = zoomed ? "Fit board" : "Zoom board";
+  $("board-zoom").setAttribute("aria-label", zoomed ? t("Fit board") : t("Zoom board"));
+  $("board-zoom").title = zoomed ? t("Fit board") : t("Zoom board");
   if (zoomed) {
     requestAnimationFrame(() => focusCursor());
   } else {
@@ -668,6 +677,7 @@ function renderPosition() {
   $("score").value = position.scores[0];
   $("opponent-score").value = position.scores[1];
   $("lexicon").value = position.lexicon;
+  $("wmp-settings").hidden = position.lexicon === "FRA24";
   if ($("current-lexicon"))
     $("current-lexicon").textContent = position.lexicon;
   $("on-turn-player").value = position.onTurn;
@@ -681,9 +691,9 @@ function renderPosition() {
   if (rackIndex) visiblePosition.racks.reverse();
   const { unseen, unseenCount } = inventory(visiblePosition);
   const { bagCount } = inventory(position);
-  $("bag-count").textContent = `${bagCount} in bag`;
-  $("unseen-label").textContent = `Unseen tiles · ${unseenCount}`;
-  const vowels = [..."AEIOU"].reduce(
+  $("bag-count").textContent = t`${bagCount} in bag`;
+  $("unseen-label").textContent = t`Unseen tiles · ${unseenCount}`;
+  const vowels = [...vowelLetters(position.lexicon)].reduce(
     (total, letter) => total + unseen[letter], 0,
   );
   const blanks = unseen["?"];
@@ -694,7 +704,7 @@ function renderPosition() {
   ]) {
     const tally = document.createElement("span");
     tally.dataset.kind = kind;
-    tally.textContent = `${count} ${count === 1 ? kind.slice(0, -1) : kind}`;
+    tally.textContent = `${count} ${t(count === 1 ? kind.slice(0, -1) : kind)}`;
     $("unseen-counts").append(tally, " ");
   }
   $("unseen-tiles").replaceChildren();
@@ -707,7 +717,7 @@ function renderPosition() {
       tile.dataset.count = count;
       tile.setAttribute(
         "aria-label",
-        `${letter === "?" ? "Blank" : letter}: ${count}`,
+        `${letter === "?" ? t("Blank") : letter}: ${count}`,
       );
       if ($("unseen-tiles").childNodes.length)
         $("unseen-tiles").append(" ");
@@ -722,7 +732,7 @@ function renderPosition() {
     tile.dataset.rackIndex = index;
     tile.setAttribute(
       "aria-label",
-      letter === "?" ? "Blank tile" : `Tile ${letter}`,
+      letter === "?" ? t("Blank tile") : t`Tile ${letter}`,
     );
     tile.disabled = !canArrangeRack();
     tile.classList.toggle("chosen", rackChoice?.index === index);
@@ -731,8 +741,8 @@ function renderPosition() {
     glyph.className = "tile-letter";
     glyph.textContent = letter;
     const score = document.createElement("sup");
-    score.textContent = VALUES[letter];
-    score.classList.toggle("two-digit", VALUES[letter] >= 10);
+    score.textContent = tileValues(position.lexicon)[letter];
+    score.classList.toggle("two-digit", tileValues(position.lexicon)[letter] >= 10);
     tile.append(glyph, score);
     $("rack-tiles").append(tile);
   }
@@ -747,7 +757,7 @@ const format = (n, decimals = 2) =>
   Number.isFinite(n) ? n.toFixed(decimals) : "—";
 function updateSimSelection() {
   $("continue-selected").hidden = mode !== "sim" || !selectedMove;
-  $("continue-selected").textContent = "Continue selected play";
+  $("continue-selected").textContent = t("Continue selected play");
   $("continue-selected").disabled = busy;
 }
 function concealComputerAnalysis() {
@@ -788,36 +798,36 @@ function renderResults() {
   renderPegProgress();
   const columns = [
     ["rank", "#"],
-    ["move", "Play"],
+    ["move", t("Play")],
   ];
   if (mode === "kibitz")
     columns.push(
-      ["leave", "Leave"],
-      ["score", "Score"],
-      ["equity", "Equity"],
+      ["leave", t("Leave")],
+      ["score", t("Score")],
+      ["equity", t("Equity")],
     );
   if (mode === "sim")
     columns.push(
-      ["leave", "Leave"],
-      ["score", "Score"],
-      ["win", "Win %"],
-      ["equity", "Equity"],
-      ["iterations", "Iters"],
+      ["leave", t("Leave")],
+      ["score", t("Score")],
+      ["win", t("Win %")],
+      ["equity", t("Equity")],
+      ["iterations", t("Iters")],
     );
   if (mode === "peg")
     columns.push(
-      ["score", "Score"],
-      ["state", "Status"],
-      ["win", "Win %"],
-      ["spread", "Spread"],
-      ["outcomes", "W / T / L"],
-      ["depth", "Depth"],
+      ["score", t("Score")],
+      ["state", t("Status")],
+      ["win", t("Win %")],
+      ["spread", t("Spread")],
+      ["outcomes", t("W / T / L")],
+      ["depth", t("Depth")],
     );
   if (mode === "endgame")
     columns.push(
-      ["score", "Score"],
-      ["outcome", "Result"],
-      ["value", "Gain"],
+      ["score", t("Score")],
+      ["outcome", t("Result")],
+      ["value", t("Gain")],
     );
   if (mode === "sim") {
     const plies = Math.max(
@@ -825,18 +835,18 @@ function renderResults() {
       ...results.map((row) => row.plyAverages?.length || 0),
     );
     for (let index = 0; index < plies; index++)
-      columns.push([`ply${index}`, `Ply ${index + 1}`]);
+      columns.push([`ply${index}`, t`Ply ${index + 1}`]);
   }
   $("analysis-meta").textContent = results.length
-    ? [analysisMeta, playedAssessment()].filter(Boolean).join(" · ")
+    ? [localizeAnalysisMeta(analysisMeta), playedAssessment()].filter(Boolean).join(" · ")
     : "";
   const simButton = document.querySelector('[data-mode="sim"]');
   const canContinueSim = (mode === "sim" && results.length > 0) || analysisCache.has(cacheKey("sim"));
   const pegButton = document.querySelector('[data-mode="peg"]');
-  pegButton.textContent = resumablePegKey === cacheKey("peg") ? "Resume preendgame" : "Solve Preendgame";
-  simButton.textContent = canContinueSim ? "Continue sim" : "Run sim";
+  pegButton.textContent = resumablePegKey === cacheKey("peg") ? t("Resume preendgame") : t("Solve Preendgame");
+  simButton.textContent = canContinueSim ? t("Continue sim") : t("Run sim");
   simButton.dataset.contextHint = canContinueSim
-    ? "Add iterations to this position’s simulation."
+    ? t("Add iterations to this position’s simulation.")
     : simButton.title;
   $("fresh-analysis").hidden = !results.length || mode === "kibitz";
   $("fresh-analysis").disabled = busy;
@@ -894,7 +904,7 @@ function renderResults() {
           : "—";
       else if (key === "outcome")
         td.textContent =
-          row.spread === 0 ? "Tie" : `${row.spread > 0 ? "Win" : "Loss"} by ${Math.abs(row.spread)}`;
+          row.spread === 0 ? t("Tie") : t`${t(row.spread > 0 ? "Win" : "Loss")} by ${Math.abs(row.spread)}`;
       else if (key.startsWith("ply")) {
         const index = +key.slice(3);
         td.textContent = format(row.plyAverages?.[index], 1);
@@ -906,7 +916,7 @@ function renderResults() {
       } else
         td.textContent = ["equity", "win", "spread"].includes(key)
           ? format(row[key], mode === "endgame" ? 0 : 2)
-          : (row[key] ?? "—");
+          : (key === "state" ? t(row[key] ?? "—") : row[key] ?? "—");
       if (
         ["score", "win", "equity", "spread"].includes(key) &&
         Number.isFinite(row[key])
@@ -936,7 +946,7 @@ function renderResults() {
         if (!pegOutcomeViews.has(key)) pegOutcomeViews.set(key, {page:0, sort:"result"});
         renderPegOutcomes(cell, data, pegOutcomeViews.get(key));
       } else if (!data) {
-        cell.textContent = "Per-draw outcomes are recorded after a play completes a stage beyond greedy.";
+        cell.textContent = t("Per-draw outcomes are recorded after a play completes a stage beyond greedy.");
       }
       expandedPegView = {key, data, cell};
       details.append(cell);
@@ -949,7 +959,7 @@ function renderResults() {
       const cell = document.createElement("td");
       cell.colSpan = columns.length;
       const title = document.createElement("strong");
-      title.textContent = "Principal variation";
+      title.textContent = t("Principal variation");
       const line = document.createElement("div");
       line.className = "pv-line";
       const steps = principalVariation(row);
@@ -961,8 +971,8 @@ function renderResults() {
         button.dataset.pvStep = index + 1;
         button.setAttribute("aria-pressed", String(continuationSteps === index + 1));
         button.append(`${index + 1}. `, moveTiles(displayMove(step.move), player), step.score === null ? "" : ` · ${step.score}`);
-        button.setAttribute("aria-label", `${recordedGame?.players[player] || `Player ${player + 1}`}: ${displayMove(step.move)}${step.score === null ? "" : `, ${step.score} points`}`);
-        button.dataset.contextHint = "Preview the principal variation through this move.";
+        button.setAttribute("aria-label", `${recordedGame?.players[player] || t`Player ${player + 1}`}: ${displayMove(step.move)}${step.score === null ? "" : `, ${step.score} points`}`);
+        button.dataset.contextHint = t("Preview the principal variation through this move.");
         button.addEventListener("click", () => previewContinuation(steps.slice(0, index + 1).map(step => step.move)));
         line.append(button);
       });
@@ -970,14 +980,14 @@ function renderResults() {
       if (recordedGame && !terminalPosition()) {
         const play = document.createElement("button");
         play.type = "button";
-        play.textContent = "Play selected move";
+        play.textContent = t("Play selected move");
         play.disabled = busy || (isLive() && (!humanTurn() || session.paused));
         play.addEventListener("click", () => submitMove(row.move));
         cell.append(play);
       }
       if (row.continuation?.includes("Search in progress")) {
         const pending = document.createElement("p");
-        pending.textContent = "Searching for the continuation…";
+        pending.textContent = t("Searching for the continuation…");
         cell.append(pending);
       }
       details.append(cell);
@@ -986,7 +996,7 @@ function renderResults() {
   });
   $("results").tBodies[0].replaceChildren(body);
   $("empty").hidden = results.length > 0;
-  $("result-note").textContent = note[mode];
+  $("result-note").textContent = t(note[mode]);
   const row = results.find((r) => r.move === selectedMove);
   $("selection").hidden = !row || mode === "endgame";
   $("selection").replaceChildren();
@@ -995,11 +1005,11 @@ function renderResults() {
     title.append(moveTiles(displayMove(row.move), position.onTurn, position));
     $("selection").append(
       title,
-      ` · ${row.leave ? `Leave ${displayTiles(row.leave)}` : "Board preview"}`,
+      ` · ${row.leave ? t`Leave ${displayTiles(row.leave)}` : t("Board preview")}`,
     );
     if (recordedGame && !terminalPosition()) {
       const play = document.createElement("button");
-      play.textContent = "Play selected move";
+      play.textContent = t("Play selected move");
       play.disabled = busy || (isLive() && (!humanTurn() || session.paused));
       play.addEventListener("click", () => submitMove(row.move));
       $("selection").append(document.createTextNode(" "), play);
@@ -1007,7 +1017,7 @@ function renderResults() {
     if (mode === "sim")
       $("selection").append(
         document.createElement("br"),
-        `Win ${format(row.win)}% ±${format(row.winSE)} · Equity ${format(row.equity)} ±${format(row.equitySE)} · ${row.iterations.toLocaleString()} iterations`,
+        t`Win ${format(row.win)}% ±${format(row.winSE)} · Equity ${format(row.equity)} ±${format(row.equitySE)} · ${row.iterations.toLocaleString()} iterations`,
       );
     if (row.continuation && mode !== "endgame") {
       const line = document.createElement("div");
@@ -1022,7 +1032,7 @@ function renderResults() {
         const button = document.createElement("button");
         button.append(`${index + 1}. `, moveTiles(displayMove(move), (position.onTurn + index) % 2));
         button.dataset.contextHint =
-          "Preview the continuation through this move.";
+          t("Preview the continuation through this move.");
         button.addEventListener("click", () =>
           previewContinuation(steps.slice(0, index + 1)),
         );
@@ -1043,7 +1053,7 @@ function renderPegProgress() {
     card.classList.toggle("current", index === pegProgress.stages.length - 1);
     const title = document.createElement("strong");
     title.textContent =
-      index === 0 ? "Greedy" : `Stage ${index} · ${stage.depth} ply`;
+      index === 0 ? t("Greedy") : t`Stage ${index} · ${stage.depth} ply`;
     const count = document.createElement("span");
     count.textContent = `${stage.completed} / ${stage.total}`;
     const bar = document.createElement("progress");
@@ -1051,13 +1061,13 @@ function renderPegProgress() {
     bar.value = stage.completed;
     bar.setAttribute(
       "aria-label",
-      `${title.textContent} candidates evaluated`,
+      t`${title.textContent} candidates evaluated`,
     );
     const detail = document.createElement("small");
     const next = pegProgress.stages[index + 1];
     detail.textContent = next
-      ? `${next.total} retained · ${Math.max(0, stage.completed - next.total)} pruned`
-      : `${stage.seconds.toFixed(1)}s${pegProgress.done && stage.completed < stage.total ? " · partial" : ""}`;
+      ? t`${next.total} retained · ${Math.max(0, stage.completed - next.total)} pruned`
+      : `${stage.seconds.toFixed(1)}s${pegProgress.done && stage.completed < stage.total ? t(" · partial") : ""}`;
     card.append(title, count, bar, detail);
     panel.append(card);
   });
@@ -1214,13 +1224,13 @@ async function analyze(nextMode, options = {}) {
       );
     setBusy(true);
     if (previewChanged) renderBoard();
-    message(`Loading ${position.lexicon}…`);
+    message(() => t`Loading ${position.lexicon}…`);
     await previewPromise;
     await engine.prepare(position.lexicon);
     if (!canceled) await engine.prepareWMP(position.lexicon, settings.wmpSource, settings.threads, $("wmp-cache-enabled").checked);
     if (generation !== positionGeneration) return false;
     if (canceled) {
-      message("Stopped");
+      message(() => t("Stopped"));
       return;
     }
     if (options.computerTime) {
@@ -1242,7 +1252,7 @@ async function analyze(nextMode, options = {}) {
       commands[0] += ` -seed ${randomSeed()}`;
     }
     message(
-      `${{ kibitz: "Generating moves", sim: "Simulating", peg: "Solving preendgame", endgame: "Solving endgame" }[mode]}…`,
+      () => `${{ kibitz: t("Generating moves"), sim: t("Simulating"), peg: t("Solving preendgame"), endgame: t("Solving endgame") }[mode]}…`,
     );
     const started = performance.now();
     if (settings.solveToCompletion) {
@@ -1254,18 +1264,18 @@ async function analyze(nextMode, options = {}) {
     }, 100);
     const response = await engine.run(commands);
     if (generation !== positionGeneration) return false;
-    message(response.stopped ? "Stopped · partial results" : "Complete");
+    message(() => response.stopped ? t("Stopped · partial results") : t("Complete"));
     succeeded = !response.stopped && results.length > 0;
     if (results.length) retainAnalysis(activeAnalysisKey);
   } catch (e) {
     if (generation !== positionGeneration) return false;
     error(e.message);
-    message("Analysis could not run");
+    message(() => t("Analysis could not run"));
   } finally {
     clearInterval(timer);
     activeSolve = null;
     $("pause-solve").hidden = true;
-    $("pause-solve").textContent = "Pause";
+    $("pause-solve").textContent = t("Pause");
     setBusy(false);
     analysisBase = null;
     refreshWMPCache();
@@ -1278,7 +1288,7 @@ function stop() {
   if (!busy || !engine || $("stop").disabled) return;
   canceled = true;
   engine.stop();
-  message("Stopping…");
+  message(() => t("Stopping…"));
   $("pause-solve").disabled = true;
   $("stop").disabled = true;
 }
@@ -1327,7 +1337,7 @@ $("on-turn-player").addEventListener("change", () => {
 });
 $("assign-owner").addEventListener("click", () => {
   if (!cursor || !position.board[cursor.row][cursor.col]) {
-    error("Select an occupied square first.");
+    error(t("Select an occupied square first."));
     return;
   }
   const next = structuredClone(position);
@@ -1491,12 +1501,12 @@ $("copy").addEventListener("click", async () => {
   if (hiddenLiveGame()) return;
   try {
     await navigator.clipboard.writeText(toCGP(position));
-    message("CGP copied");
+    message(() => t("CGP copied"));
   } catch {
     $("import-dialog").showModal();
     $("cgp").value = toCGP(position);
     $("cgp").select();
-    $("import-error").textContent = "Copy the selected CGP.";
+    $("import-error").textContent = t("Copy the selected CGP.");
   }
 });
 function canExportGame() {
@@ -1510,23 +1520,23 @@ async function copySharedLink(kind) {
   setBusy(true);
   $("stop").disabled = true;
   error("");
-  message("Creating link…");
+  message(() => t("Creating link…"));
   try {
     await previewPromise;
     const token = await engine.convertXS(kind === "xsp" ? "encodePosition" : "encodeGame", text, lexicon);
     const url = sharedLink(location.href, kind, token);
     try {
       await navigator.clipboard.writeText(url);
-      message(kind === "xsp" ? "Position link copied" : "Game link copied");
+      message(() => kind === "xsp" ? t("Position link copied") : t("Game link copied"));
     } catch {
       $("share-link-text").value = url;
       $("share-link-dialog").showModal();
       $("share-link-text").select();
-      message("Link ready to copy");
+      message(() => t("Link ready to copy"));
     }
   } catch (failure) {
     error(failure.message);
-    message("Could not create link");
+    message(() => t("Could not create link"));
   } finally {
     setBusy(false);
   }
@@ -1546,17 +1556,20 @@ function renderHistory() {
   const target = challengeTarget();
   $("challenge-move").hidden = !target;
   $("challenge-move").disabled = busy || !target;
-  $("challenge-move").replaceChildren("Challenge");
+  $("challenge-move").replaceChildren(t("Challenge"));
   if (target) $("challenge-move").append(" ", moveTiles(target, 1 - position.onTurn, restorePosition(recordedGame.positions[historyIndex - 1])));
   $("game-history").hidden = !recordedGame;
   $("copy").disabled = busy || hiddenLiveGame();
   $("save-gcg").disabled = !canExportGame();
   $("copy-gcg").disabled = !canExportGame() || hiddenLiveGame();
-  $("copy-position-link").disabled = !engineInitialized || busy || hiddenLiveGame();
-  $("copy-game-link").disabled = !engineInitialized || busy || !recordedGame || hiddenLiveGame();
-  $("save-gcg").title = hiddenLiveGame() ? "Finish the game before exporting hidden racks" : recordedGame
-    ? "Save the complete recorded game"
-    : "Load a game record first";
+  for (const id of ["copy-position-link", "copy-game-link"]) {
+    $(id).title = position.lexicon === "FRA24" ? t("French links use CGP / GCG for now.") : "";
+  }
+  $("copy-position-link").disabled = position.lexicon === "FRA24" || !engineInitialized || busy || hiddenLiveGame();
+  $("copy-game-link").disabled = position.lexicon === "FRA24" || !engineInitialized || busy || !recordedGame || hiddenLiveGame();
+  $("save-gcg").title = hiddenLiveGame() ? t("Finish the game before exporting hidden racks") : recordedGame
+    ? t("Save the complete recorded game")
+    : t("Load a game record first");
   if (!recordedGame) return;
   $("history-previous").disabled = busy || historyIndex === 0;
   $("history-next").disabled =
@@ -1614,14 +1627,14 @@ logGCG("page.ready", {
 $("copy-gcg-diagnostics").addEventListener("click", async () => {
   try {
     await navigator.clipboard.writeText(gcgLogText());
-    $("copy-gcg-diagnostics").textContent = "Copied";
+    $("copy-gcg-diagnostics").textContent = t("Copied");
   } catch {
     const selection = getSelection();
     const range = document.createRange();
     range.selectNodeContents($("gcg-diagnostics-log"));
     selection.removeAllRanges();
     selection.addRange(range);
-    $("copy-gcg-diagnostics").textContent = "Select and copy log";
+    $("copy-gcg-diagnostics").textContent = t("Select and copy log");
   }
 });
 for (const name of ["focus", "blur", "pageshow", "pagehide"]) {
@@ -1638,7 +1651,7 @@ document.addEventListener("visibilitychange", () => {
 });
 function openGameImport() {
   logGCG("dialog.open", { busy });
-  $("copy-gcg-diagnostics").textContent = "Copy log";
+  $("copy-gcg-diagnostics").textContent = t("Copy log");
   $("gcg-load-error").textContent = "";
   $("gcg-load-status").textContent = "";
   $("gcg-dialog").showModal();
@@ -1688,7 +1701,7 @@ $("gcg-drop-zone").addEventListener("drop", (event) => {
   if (busy) return;
   const files = event.dataTransfer.files;
   if (files.length !== 1) {
-    $("gcg-load-error").textContent = "Drop one GCG file at a time.";
+    $("gcg-load-error").textContent = t("Drop one GCG file at a time.");
     return;
   }
   loadGame(files[0]);
@@ -1706,8 +1719,8 @@ async function loadGame(file, pastedText = "") {
     clearTimeout(botTimer);
     renderSession();
   }
-  if (isLive() && !(await confirmGame("Open another game?",
-      "The current game will end and be replaced.", "Open game"))) {
+  if (isLive() && !(await confirmGame(t("Open another game?"),
+      t("The current game will end and be replaced."), t("Open game")))) {
     if (resumeSession && session === previousSession) {
       session.paused = false;
       session.started = performance.now();
@@ -1731,13 +1744,13 @@ async function loadGame(file, pastedText = "") {
   }), 5000);
   try {
     if ((file?.size ?? new Blob([pastedText]).size) > 1024 * 1024)
-      throw new Error("GCG files must be smaller than 1 MB.");
+      throw new Error(t("GCG files must be smaller than 1 MB."));
     setBusy(true);
     $("stop").disabled = true;
     error("");
-    message("Loading game…");
+    message(() => t("Loading game…"));
     $("gcg-load-error").textContent = "";
-    $("gcg-load-status").textContent = "Loading game…";
+    $("gcg-load-status").textContent = t("Loading game…");
     const { text, lexicon } = await readGCG(file, pastedText, position.lexicon, progress);
     progress("preview.wait");
     await previewPromise;
@@ -1755,7 +1768,7 @@ async function loadGame(file, pastedText = "") {
     progress("board.render");
     adoptGame(game, lexicon, 0);
     progress("load.complete");
-    message(`Loaded ${file?.name || "pasted game"} · ${game.positions.length - 1} events`);
+    message(() => t`Loaded ${file?.name || "pasted game"} · ${game.positions.length - 1} events`);
     $("gcg-dialog").close();
     $("gcg-text").value = "";
   } catch (failure) {
@@ -1763,7 +1776,7 @@ async function loadGame(file, pastedText = "") {
     $("gcg-load-error").textContent = failure.message;
     logGCG("load.failed", { stage, message: failure.message, stack: failure.stack });
     $("gcg-diagnostics").open = true;
-    message("Game could not be loaded");
+    message(() => t("Game could not be loaded"));
   } finally {
     gcgLoading = false;
     setBusy(false);
@@ -1787,7 +1800,7 @@ $("save-gcg").addEventListener("click", () => {
   link.download = recordedGame.filename;
   link.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
-  message("GCG saved · complete recorded game");
+  message(() => t("GCG saved · complete recorded game"));
 });
 $("pause-solve").addEventListener("click", () => {
   if (!activeSolve || canceled) return;
@@ -1840,8 +1853,8 @@ function historyRackLabel(player, rack, index, bingo = false) {
   const hideUpcoming = $("hide-spoilers").checked;
   const publicRack = bingo && (!hideUpcoming || index < historyIndex);
   if ((hiddenLiveGame() && player !== session.human && !publicRack) ||
-      (hideUpcoming && index > historyIndex)) return "Rack hidden";
-  return rack ? displayTiles(rack) : "Rack unknown";
+      (hideUpcoming && index > historyIndex)) return t("Rack hidden");
+  return rack ? displayTiles(rack) : t("Rack unknown");
 }
 function renderHistoryOptions() {
   if (!recordedGame) return;
@@ -1855,8 +1868,8 @@ function renderHistoryOptions() {
       const timeoutTurn = entries[index]?.parts.move === "(time)" && !entries[index - 1]?.parts.adjustment;
       const turn = timeoutTurn ? (entries[index - 1]?.turn ?? 0) + 1 : entries[index]?.turn ?? (entries.at(-1)?.turn ?? 0) + 1;
       const rack = historyRackLabel(next.onTurn, next.racks[0], index, entries[index]?.bingo);
-      const prefix = entries[index]?.parts.challenge ? `Challenge result · ${turn}.` : entries[index]?.parts.adjustment && !timeoutTurn ? "Final scoring" : `${turn}.`;
-      const label = finished ? "Game over" : `${prefix} ${recordedGame.players[next.onTurn]} · ${rack}`;
+      const prefix = entries[index]?.parts.challenge ? t`Challenge result · ${turn}.` : entries[index]?.parts.adjustment && !timeoutTurn ? t("Final scoring") : `${turn}.`;
+      const label = finished ? t("Game over") : `${prefix} ${recordedGame.players[next.onTurn]} · ${rack}`;
       return new Option(label, String(index));
     }),
   );
@@ -1869,7 +1882,7 @@ function adoptGame(game, lexicon, index = game.index || 0) {
   }
   recordedGame = game;
   historyIndex = Math.min(index, game.positions.length - 1);
-  $("game-players").textContent = game.players.join(" vs ");
+  $("game-players").textContent = game.players.join(t(" vs "));
   renderHistoryOptions();
   setPosition(restorePosition(game.positions[historyIndex]), true);
 }
@@ -1896,7 +1909,7 @@ function finishGameConfirmation(confirmed) {
   $("game-confirm").close();
   resolve?.(confirmed);
 }
-function confirmGame(title, text, label = "Continue") {
+function confirmGame(title, text, label = t("Continue")) {
   if (resolveGameConfirmation) return Promise.resolve(false);
   $("confirm-title").textContent = title;
   $("confirm-message").textContent = text;
@@ -1932,7 +1945,7 @@ function moveErrorMessage(text) {
   const formatted = text.replace(/(\bplay:\s*)([A-O]\d+ [A-Za-z.]+|\d+[A-O] [A-Za-z.]+)/g,
     (_, prefix, play) => prefix + formatBoardPlay(play, position));
   const phony = formatted.trim().match(/expected valid play but detected at least one phony for play:\s*(.+)$/i);
-  return phony ? `Play ${phony[1]} contains at least one phony word` : formatted;
+  return phony ? t`Play ${phony[1]} contains at least one phony word` : formatted;
 }
 function applyDraftFeedback(generation, text, score = null) {
   if (generation !== previewGeneration || busy) {
@@ -2159,10 +2172,10 @@ function entryKey(event) {
       let next = [];
       try {
         for (const tile of previous) {
-          if (!cursor) throw new Error("The move runs past the board edge.");
+          if (!cursor) throw new Error(t("The move runs past the board edge."));
           while (cursor && position.board[cursor.row][cursor.col])
             advanceCursor();
-          if (!cursor) throw new Error("The move runs past the board edge.");
+          if (!cursor) throw new Error(t("The move runs past the board edge."));
           next = placeTile(
             position,
             next,
@@ -2216,32 +2229,32 @@ async function submitMove(value = null, computer = false) {
   const before = position;
   const moveIndex = historyIndex;
   try {
-    if (!recordedGame) throw new Error("Start or load a game first.");
+    if (!recordedGame) throw new Error(t("Start or load a game first."));
     if (!recordedBoardMatches())
       throw new Error(
-        "Return to a recorded board before committing a move. Rack changes are allowed.",
+        t("Return to a recorded board before committing a move. Rack changes are allowed."),
       );
     const pendingMove = value || (draftTiles.length ? moveNotation(position, draftTiles, vertical) : selectedMove);
-    if (!pendingMove) throw new Error("Place tiles on the board first.");
+    if (!pendingMove) throw new Error(t("Place tiles on the board first."));
     const move = normalizeMove(pendingMove);
     if (move === "pass" && !computer && !(await confirmGame(
-      "Are you sure you wish to pass?",
+      t("Are you sure you wish to pass?"),
       "",
-      "Pass",
+      t("Pass"),
     ))) return;
     if (
       historyIndex < recordedGame.positions.length - 1 &&
       !(await confirmGame(
-        "Replace later history?",
-        "This move will replace every event after this position. Undo game change can restore the complete previous record.",
-        "Replace and play",
+        t("Replace later history?"),
+        t("This move will replace every event after this position. Undo game change can restore the complete previous record."),
+        t("Replace and play"),
       ))
     )
       return;
     if (generation !== positionGeneration) return;
     setBusy(true);
     $("stop").disabled = true;
-    message("Validating move…");
+    message(() => t("Validating move…"));
     error("");
     await previewPromise;
     await engine.prepare(position.lexicon);
@@ -2265,13 +2278,13 @@ async function submitMove(value = null, computer = false) {
       !isLive() &&
       game.warning.trim() &&
       !(await confirmGame(
-        "Word not in the lexicon",
+        t("Word not in the lexicon"),
         game.warning +
           "\nRecord the play anyway? You can challenge it afterward.",
-        "Record play",
+        t("Record play"),
       ))
     ) {
-      message("Move not recorded");
+      message(() => t("Move not recorded"));
       return;
     }
     if (generation !== positionGeneration) return;
@@ -2288,17 +2301,17 @@ async function submitMove(value = null, computer = false) {
     adoptGame(game, position.lexicon);
     if (isLive()) {
       session.started = performance.now();
-      if (game.ended) finishSession("Game over");
+      if (game.ended) finishSession(t("Game over"));
     }
-    message("Move recorded");
+    message(() => t("Move recorded"));
     if (computer) showComputerMove(moveIndex, before);
   } catch (failure) {
     if (generation !== positionGeneration) return;
     error(moveErrorMessage(failure.message));
-    message("Move could not be recorded");
+    message(() => t("Move could not be recorded"));
   } finally {
     setBusy(false);
-    if ($("status").textContent === "Move recorded" && !session)
+    if ($("status").textContent === t("Move recorded") && !session)
       $("rack").focus();
     renderSession();
     // Disabling the board during validation can blur it. A rejected or
@@ -2336,7 +2349,7 @@ function openExchange(selected = "") {
 function updateExchange() {
   const count = $("exchange-tiles").querySelectorAll('[aria-pressed="true"]').length;
   $("confirm-exchange").disabled = count === 0;
-  $("confirm-exchange").textContent = count ? `Exchange ${count} tile${count === 1 ? "" : "s"}` : "Exchange";
+  $("confirm-exchange").textContent = count ? t`Exchange ${count} tile${count === 1 ? "" : "s"}` : t("Exchange");
 }
 $("exchange-move").addEventListener("click", () => openExchange());
 $("cancel-exchange").addEventListener("click", () => $("exchange-dialog").close());
@@ -2400,7 +2413,7 @@ $("new-game-form").addEventListener("submit", async (event) => {
     clearTimeout(botTimer);
     renderSession();
   }
-  if (isLive() && !(await confirmGame("Start a new game?", "The current game will end and be replaced.", "New game"))) {
+  if (isLive() && !(await confirmGame(t("Start a new game?"), t("The current game will end and be replaced."), t("New game")))) {
     if (resumeSession && session === previousSession) {
       session.paused = false;
       session.started = performance.now();
@@ -2416,7 +2429,7 @@ $("new-game-form").addEventListener("submit", async (event) => {
     setBusy(true);
     $("stop").disabled = true;
     error("");
-    message("Starting game…");
+    message(() => t("Starting game…"));
     await previewPromise;
     await engine.prepare(lexicon);
     const kind = $("game-kind").value;
@@ -2430,7 +2443,7 @@ $("new-game-form").addEventListener("submit", async (event) => {
     const text = `#character-encoding UTF-8\n#lexicon ${lexicon}\n#player1 p1 ${players[0]}\n#player2 p2 ${players[1]}\n`;
     const gameText = text + (startingPosition ? `#cgp ${toCGP(startingPosition)}\n` : "");
     let { game } = await engine.importGCG(gameText, lexicon);
-    if (game.ended) throw new Error("This position has already ended.");
+    if (game.ended) throw new Error(t("This position has already ended."));
     let nextSession = null;
     if (kind !== "record") {
       const response = await engine.gameAction({
@@ -2453,14 +2466,14 @@ $("new-game-form").addEventListener("submit", async (event) => {
     }
     game.filename = "magpie-game.gcg";
     adoptGame(game, lexicon, 0);
-    message(session || startingPosition?.racks[0] ? "Game ready" : "Game ready · enter the first rack");
+    message(() => session || startingPosition?.racks[0] ? t("Game ready") : t("Game ready · enter the first rack"));
     if (!session && !startingPosition?.racks[0]) {
       $("position-editor").open = true;
       focusRack = true;
     }
   } catch (failure) {
     $("new-game-error").textContent = failure.message;
-    message("Game could not be started");
+    message(() => t("Game could not be started"));
     $("new-game-dialog").showModal();
   } finally {
     setBusy(false);
@@ -2484,7 +2497,7 @@ $("undo-game").addEventListener("click", () => {
   );
   position = restorePosition(previous.position);
   renderPosition();
-  message("Game change undone");
+  message(() => t("Game change undone"));
 });
 function editHistoryMove() {
   if (!recordedGame || !historyIndex || busy) return;
@@ -2500,7 +2513,7 @@ function editHistoryMove() {
     move = `${match[2]} ${match[3]}`;
   else {
     error(
-      "Navigate to before the event and play a replacement move, or undo the last game change.",
+      t("Navigate to before the event and play a replacement move, or undo the last game change."),
     );
     return;
   }
@@ -2528,9 +2541,9 @@ async function changeRecordedEvent(action) {
     action === GameAction.CHALLENGE &&
     historyIndex < recordedGame.positions.length - 1 &&
     !(await confirmGame(
-      "Challenge at this position?",
-      "A successful challenge replaces later history. Undo game change restores the previous record.",
-      "Challenge",
+      t("Challenge at this position?"),
+      t("A successful challenge replaces later history. Undo game change restores the previous record."),
+      t("Challenge"),
     ))
   )
     return;
@@ -2559,8 +2572,8 @@ async function changeRecordedEvent(action) {
     game.filename = recordedGame.filename;
     if (action === GameAction.CHALLENGE && !liveChallenge) clearFinishedGameResult(game);
     adoptGame(game, restorePosition(recordedGame.positions[0]).lexicon);
-    if (liveChallenge && game.ended) finishSession("Game over");
-    message(action === GameAction.NOTE ? "Note saved" : "Challenge recorded");
+    if (liveChallenge && game.ended) finishSession(t("Game over"));
+    message(() => action === GameAction.NOTE ? t("Note saved") : t("Challenge recorded"));
   } catch (failure) {
     error(failure.message);
   } finally {
@@ -2771,11 +2784,11 @@ function renderSession() {
     $("hide-spoilers").checked && !terminalPosition());
   $("position-editor").hidden = !!live;
   for (const [index, suffix] of ["one", "two"].entries()) {
-    const playerName = recordedGame?.players[index] || `Player ${index + 1}`;
+    const playerName = recordedGame?.players[index] || t`Player ${index + 1}`;
     const thinking = !!(live && botRunning && !session.paused && index === position.onTurn);
     const yourTurn = headerTurnStatus && humanTurn() && index === position.onTurn;
     const name = $("name-" + suffix);
-    const label = thinking ? `${playerName} is thinking…` : yourTurn ? `${playerName} · Your turn` : playerName;
+    const label = thinking ? t`${playerName} is thinking…` : yourTurn ? t`${playerName} · Your turn` : playerName;
     if (name.textContent !== label) name.textContent = label;
     name.classList.toggle("thinking", thinking);
     name.classList.toggle("your-turn", yourTurn);
@@ -2799,7 +2812,7 @@ function renderSession() {
         ? recordedGame.positions[historyIndex].clocks || session.remaining
         : session.remaining;
     $(id).textContent =
-      `${session.time ? formatClock(clocks[index]) : "Untimed"}`;
+      `${session.time ? formatClock(clocks[index]) : t("Untimed")}`;
     $(id).classList.toggle(
       "running",
       live && !session.paused && index === position.onTurn,
@@ -2808,23 +2821,23 @@ function renderSession() {
   }
   // Clock refreshes must not replace the text node under a pressed mouse.
   // WebKit otherwise drops the click between pointerdown and pointerup.
-  const pauseLabel = botRunning ? "Pause" : session.paused ? "Resume game" : "Pause";
+  const pauseLabel = botRunning ? t("Pause") : session.paused ? t("Resume game") : t("Pause");
   if ($("pause-game").textContent !== pauseLabel)
     $("pause-game").textContent = pauseLabel;
   $("pause-game").disabled = session.finished;
-  const finishLabel = session.kind === "play" ? "Resign" : "End game";
+  const finishLabel = session.kind === "play" ? t("Resign") : t("End game");
   if ($("finish-game").textContent !== finishLabel)
     $("finish-game").textContent = finishLabel;
   $("finish-game").disabled = session.finished || busy;
-  $("finish-game").title = busy && botRunning ? "Pause the computer before ending the game." : "";
+  $("finish-game").title = busy && botRunning ? t("Pause the computer before ending the game.") : "";
   const sessionMessage =
     session.result ||
     (session.paused
-      ? "Paused"
+      ? t("Paused")
       : botRunning
-        ? `${recordedGame.players[position.onTurn]} is thinking…`
-        : recordedGame.players[position.onTurn] === "You"
-          ? "Your turn"
+        ? t`${recordedGame.players[position.onTurn]} is thinking…`
+        : recordedGame.players[position.onTurn] === t("You")
+          ? t("Your turn")
           : `${recordedGame.players[position.onTurn]}’s turn`);
   if ($("session-result").textContent !== sessionMessage)
     $("session-result").textContent = sessionMessage;
@@ -2859,7 +2872,7 @@ function restoreFinishedSession(game, text) {
     const index = player === final.onTurn ? 0 : 1;
     if (final.scores[index] - Number(penalty) !== Number(total)) return;
     final.scores[index] = Number(total);
-    restored.push({ ...snapshotPosition(final), note: "Time penalty" });
+    restored.push({ ...snapshotPosition(final), note: t("Time penalty") });
   }
   game.positions.push(...restored);
   game.gcg = text;
@@ -2895,7 +2908,7 @@ function finishSession(reason) {
       : 0,
   );
   const adjusted = scores.map((score, index) => score - penalties[index]);
-  session.result = `${reason} · ${recordedGame.players[0]} ${adjusted[0]} — ${adjusted[1]} ${recordedGame.players[1]}${penalties.some(Boolean) ? ` · Time penalties ${penalties.join(" / ")}` : ""}`;
+  session.result = `${reason} · ${recordedGame.players[0]} ${adjusted[0]} — ${adjusted[1]} ${recordedGame.players[1]}${penalties.some(Boolean) ? t` · Time penalties ${penalties.join(" / ")}` : ""}`;
   // GCG supports time penalties. Keep the exported totals consistent with the clocks.
   if (penalties.some(Boolean)) {
     recordedGame.gcg = recordedGame.gcg.replace(/^#rack[12][^\n]*\n?/gm, "");
@@ -2909,7 +2922,7 @@ function finishSession(reason) {
         position.scores[index === position.onTurn ? 0 : 1] = adjusted[index];
         recordedGame.positions.push({
           ...snapshotPosition(position),
-          note: "Time penalty",
+          note: t("Time penalty"),
           clocks: [...session.remaining],
         });
       }
@@ -2927,7 +2940,8 @@ function finishSession(reason) {
     recordedGame.positions.length - 1,
   );
   renderSession();
-  message(session.result);
+  const result = session.result;
+  message(() => result);
 }
 function scheduleComputer() {
   clearTimeout(botTimer);
@@ -2966,9 +2980,9 @@ async function computerTurn() {
       canceled || session.paused
     )
       return;
-    if (!complete) throw new Error($("error").textContent || "Computer analysis failed. Resume to retry.");
+    if (!complete) throw new Error($("error").textContent || t("Computer analysis failed. Resume to retry."));
     const move = results[0]?.move;
-    if (!move) throw new Error("The computer did not return a move.");
+    if (!move) throw new Error(t("The computer did not return a move."));
     await submitMove(move, true);
     if ($("error").textContent) session.paused = true;
   } catch (failure) {
@@ -2991,7 +3005,7 @@ function validateNewGameCGP() {
     if (cgp) {
       startingPosition = parseCGP(cgp, position.lexicon);
       const { unseen, unseenCount } = inventory(startingPosition);
-      if (unseenCount <= 7 && startingPosition.racks.every(rack => !rack)) throw new Error("Enter at least one rack to start from this position.");
+      if (unseenCount <= 7 && startingPosition.racks.every(rack => !rack)) throw new Error(t("Enter at least one rack to start from this position."));
       if (!startingPosition.racks[0] && startingPosition.racks[1]) {
         const pool = {...unseen};
         for (const tile of startingPosition.racks[1]) pool[tile]--;
@@ -3002,9 +3016,9 @@ function validateNewGameCGP() {
       }
       const remaining = inventory(startingPosition).unseenCount - startingPosition.racks[1].length;
       if (remaining === 0 && startingPosition.racks.some(rack => !rack)) {
-        throw new Error("This position has already ended.");
+        throw new Error(t("This position has already ended."));
       }
-      if (startingPosition.zeros >= 6) throw new Error("This position has already ended.");
+      if (startingPosition.zeros >= 6) throw new Error(t("This position has already ended."));
     }
   } catch (error) {
     failure = error.message;
@@ -3012,7 +3026,7 @@ function validateNewGameCGP() {
   input.setAttribute("aria-invalid", String(Boolean(failure)));
   input.setCustomValidity(failure);
   const status = $("new-game-cgp-status");
-  status.textContent = failure || (cgp ? `Valid CGP · ${startingPosition.lexicon}` : "");
+  status.textContent = failure || (cgp ? t`Valid CGP · ${startingPosition.lexicon}` : "");
   status.classList.toggle("invalid", Boolean(failure));
   $("first-player").disabled = Boolean(cgp);
   $("start-game").disabled = busy || Boolean(engine?.fatalError) || Boolean(failure);
@@ -3028,10 +3042,10 @@ function updateGameSetup() {
   $("challenge-points-label").hidden = !penalty;
   $("challenge-unit-label").hidden = !penalty;
   $("challenge-help").textContent = {
-    void: "Phony plays cannot be played.",
-    single: "A failed challenge has no penalty.",
-    double: "A failed challenge loses your turn.",
-    penalty: "A failed challenge awards the bonus to the player who made the play. Per word counts every word formed; Challenge checks all of them.",
+    void: t("Phony plays cannot be played."),
+    single: t("A failed challenge has no penalty."),
+    double: t("A failed challenge loses your turn."),
+    penalty: t("A failed challenge awards the bonus to the player who made the play. Per word counts every word formed; Challenge checks all of them."),
   }[$("challenge-rule").value];
   $("computer-setup").hidden = kind === "record";
   $("human-side").closest("label").hidden = kind !== "play";
@@ -3048,12 +3062,12 @@ function updateGameSetup() {
   });
   const defaults =
     kind === "record"
-      ? ["Player 1", "Player 2"]
+      ? [t("Player 1"), t("Player 2")]
       : kind === "watch"
         ? ["Magpie 1", "Magpie 2"]
         : $("human-side").value === "0"
-          ? ["You", "Magpie"]
-          : ["Magpie", "You"];
+          ? [t("You"), "Magpie"]
+          : ["Magpie", t("You")];
   for (const [index, id] of [
     "player-one-name",
     "player-two-name",
@@ -3061,7 +3075,7 @@ function updateGameSetup() {
     const input = $(id);
     if (!input.dataset.custom) input.value = defaults[index];
     for (const selector of ["first-player", "human-side"])
-      $(selector).options[index].textContent = input.value.trim() || `Player ${index + 1}`;
+      $(selector).options[index].textContent = input.value.trim() || t`Player ${index + 1}`;
   }
 }
 for (const id of ["player-one-name", "player-two-name"]) {
@@ -3115,16 +3129,16 @@ $("finish-game").addEventListener("click", async () => {
   if (!isLive()) return;
   if (
     !(await confirmGame(
-      "End this game?",
-      "The game will remain available for review and saving.",
-      "End game",
+      t("End this game?"),
+      t("The game will remain available for review and saving."),
+      t("End game"),
     ))
   )
     return;
   const reason =
     session.kind === "play"
       ? `${recordedGame.players[session.human]} resigned`
-      : "Game ended";
+      : t("Game ended");
   if (busy) stop();
   finishSession(reason);
 });
@@ -3137,21 +3151,21 @@ setInterval(() => {
     session.remaining[position.onTurn] < -Number(session.overtime)
   ) {
     if (busy) stop();
-    finishSession(`${recordedGame.players[position.onTurn]} lost on time`);
+    finishSession(t`${recordedGame.players[position.onTurn]} lost on time`);
   }
   renderSession();
 }, 250);
 async function branchGame(kind) {
   if (busy || !recordedGame) return;
   if (!recordedBoardMatches()) {
-    error("Return to a recorded board before continuing the game. Rack changes are allowed.");
+    error(t("Return to a recorded board before continuing the game. Rack changes are allowed."));
     return;
   }
   if (
     !(await confirmGame(
-      "Continue from this position?",
-      "Later moves will be replaced. After ending the game, Undo game change restores the original.",
-      "Continue",
+      t("Continue from this position?"),
+      t("Later moves will be replaced. After ending the game, Undo game change restores the original."),
+      t("Continue"),
     ))
   )
     return;
@@ -3179,9 +3193,9 @@ $("copy-gcg").addEventListener("click", async () => {
   if (!canExportGame() || hiddenLiveGame()) return;
   try {
     await navigator.clipboard.writeText(recordedGame.gcg);
-    message("GCG copied");
+    message(() => t("GCG copied"));
   } catch {
-    error("Clipboard unavailable. Use Save GCG.");
+    error(t("Clipboard unavailable. Use Save GCG."));
   }
 });
 $("history-first").addEventListener("click", () => showHistory(0));
@@ -3218,18 +3232,18 @@ function playedAssessment() {
   const row = results.find(
     (candidate) => moveIdentity(candidate.move) === moveIdentity(played),
   );
-  if (!row) return "Played move outside candidate list";
+  if (!row) return t("Played move outside candidate list");
   const metric =
     mode === "sim" || mode === "peg"
       ? "win"
       : mode === "endgame"
         ? "spread"
         : "equity";
-  if (mode === "peg" && busy) return `Played ${row.rank == null ? "(unranked)" : `#${row.rank}`}`;
+  if (mode === "peg" && busy) return t`Played ${row.rank == null ? "(unranked)" : `#${row.rank}`}`;
   if (mode === "peg" && row.depth !== results[0].depth)
-    return `Played ${row.rank == null ? "(unranked)" : `#${row.rank}`} · comparison needs equal depth`;
+    return t`Played ${row.rank == null ? "(unranked)" : `#${row.rank}`} · comparison needs equal depth`;
   const loss = Math.max(0, results[0][metric] - row[metric]);
-  return `Played ${row.rank == null ? "(unranked)" : `#${row.rank}`} · ${format(loss, mode === "endgame" ? 0 : 2)} ${metric === "win" ? "win %-points" : metric} lost`;
+  return t`Played ${row.rank == null ? "(unranked)" : `#${row.rank}`} · ${format(loss, mode === "endgame" ? 0 : 2)} ${metric === "win" ? "win %-points" : metric} lost`;
 }
 function gameEvents() {
   return (
@@ -3251,7 +3265,7 @@ function historyEntries() {
     if (parts.move === "--" || parts.move === "(challenge)") {
       parts.adjustment = true;
       parts.challenge = true;
-      parts.move = parts.move === "--" ? "Withdrawn after challenge" : "Challenge bonus";
+      parts.move = parts.move === "--" ? t("Withdrawn after challenge") : t("Challenge bonus");
     }
     if (!rowNumber || (!parts.adjustment && player <= previousPlayer)) rowNumber++;
     if (!turn || !parts.adjustment) turn++;
@@ -3382,14 +3396,14 @@ async function analyzeDraft() {
       existing.manual = true;
       const visible = results.find(row => moveIdentity(row.move) === moveIdentity(move));
       if (visible) visible.manual = true;
-      message("Play added");
+      message(() => t("Play added"));
       return;
     }
     cancelDraftCheck();
     setBusy(true);
     $("stop").disabled = true;
     error("");
-    message("Adding play…");
+    message(() => t("Adding play…"));
     await previewPromise;
     await engine.prepare(position.lexicon);
     let text = "";
@@ -3415,7 +3429,7 @@ async function analyzeDraft() {
     if (generation !== positionGeneration) return;
     const generated = parseResults(text, "kibitz");
     const candidate = generated.find(row => moveIdentity(row.move) === moveIdentity(move));
-    if (!candidate) throw new Error("Could not analyze this play.");
+    if (!candidate) throw new Error(t("Could not analyze this play."));
     mode = targetMode;
     const previous = new Map((saved?.results || []).map(row => [moveIdentity(row.move), row]));
     results = generated.map((row, index) => {
@@ -3431,7 +3445,7 @@ async function analyzeDraft() {
     recallTiles(false);
     selectedMove = candidate.move;
     retainAnalysis(key);
-    message("Play added");
+    message(() => t("Play added"));
   } catch (failure) {
     if (generation === positionGeneration) error(failure.message);
   } finally {
@@ -3464,7 +3478,7 @@ $("review-game").addEventListener("click", async () => {
     if (!playedMove(index)) continue;
     showHistory(index);
     $("review-progress").textContent =
-      `Analyzing turn ${index + 1} of ${game.positions.length - 1}`;
+      t`Analyzing turn ${index + 1} of ${game.positions.length - 1}`;
     if (position.racks[0] && !hasReusableAnalysis(searchMode()) &&
         !(await analyze(searchMode())) && reviewRunning)
       failed++;
@@ -3475,9 +3489,9 @@ $("review-game").addEventListener("click", async () => {
   showHistory(original);
   $("review-progress").textContent = completed
     ? failed
-      ? `Review complete · ${failed} failed`
-      : "Review complete"
-    : "Review stopped";
+      ? t`Review complete · ${failed} failed`
+      : t("Review complete")
+    : t("Review stopped");
 });
 $("stop-review").addEventListener("click", () => {
   reviewRunning = false;
@@ -3493,6 +3507,16 @@ function analysisSummary(text, kind) {
   if (kind === "peg")
     return `${inventory(position).bagCount} in bag · ${results[0]?.depth || "Solving"}`;
   return "Static equity";
+}
+function localizeAnalysisMeta(meta) {
+  if (!meta) { return ""; }
+  const sim = meta.match(/^(\d+) plies · (.+) total iterations$/);
+  if (sim) { return t`${sim[1]} plies · ${sim[2]} total iterations`; }
+  const endgame = meta.match(/^(\d+) plies · (.+)$/);
+  if (endgame) { return t`${endgame[1]} plies · ${t(endgame[2])}`; }
+  const peg = meta.match(/^(\d+) in bag · (.+)$/);
+  if (peg) { return t`${peg[1]} in bag · ${t(peg[2])}`; }
+  return t(meta);
 }
 
 const controlHints = {
@@ -3568,7 +3592,7 @@ for (const [id, hint] of Object.entries(controlHints)) {
   $(id).dataset.contextHint = hint;
 }
 for (const button of document.querySelectorAll("[data-mode]")) {
-  button.dataset.contextHint = button.title;
+  button.dataset.contextHint = button.getAttribute("data-mode") === "sim" ? "Compare moves with Monte Carlo simulation" : ({kibitz:"Rank moves by score and leave",peg:"Analyze with 1–3 tiles in the bag",endgame:"Solve with an empty bag"})[button.dataset.mode];
 }
 function contextTarget(element) {
   return element instanceof Element
@@ -3603,7 +3627,7 @@ function renderContextHint() {
     hint =
       "Select a move to preview it on the board; select it again to clear the preview.";
   }
-  $("context-status").textContent = hint;
+  $("context-status").textContent = t(hint);
 }
 for (const type of ["pointerover", "focusin"]) {
   document.addEventListener(type, (event) => {
@@ -3671,11 +3695,11 @@ async function loadSharedLink() {
     if (!link) return;
     setBusy(true);
     $("stop").disabled = true;
-    message("Opening shared link…");
+    message(() => t("Opening shared link…"));
     const text = await engine.convertXS(link.kind === "xsp" ? "decodePosition" : "decodeGame", link.token);
     if (link.kind === "xsp") {
       const next = parseCGP(text, "CSW24");
-      if (!["CSW24", "NWL23"].includes(next.lexicon)) throw new Error(`This preview does not support ${next.lexicon}.`);
+      if (!LEXICA.includes(next.lexicon)) throw new Error(t`This preview does not support ${next.lexicon}.`);
       setPosition(next);
     } else {
       const {text: gameText, lexicon} = await readGCG(null, text, "CSW24");
@@ -3685,10 +3709,10 @@ async function loadSharedLink() {
       game.filename = "shared-game.gcg";
       adoptGame(game, lexicon, 0);
     }
-    message(link.kind === "xsp" ? "Shared position loaded" : "Shared game loaded");
+    message(() => link.kind === "xsp" ? t("Shared position loaded") : t("Shared game loaded"));
   } catch (failure) {
-    error(`Could not open shared link: ${failure.message}`);
-    message("Link could not be loaded. Start a new game or import a position.");
+    error(t`Could not open shared link: ${failure.message}`);
+    message(() => t("Link could not be loaded. Start a new game or import a position."));
   } finally {
     setBusy(false);
   }
@@ -3696,7 +3720,7 @@ async function loadSharedLink() {
 async function startEngine() {
   setBusy(true);
   $("stop").disabled = true;
-  message("Preparing browser engine…");
+  message(() => t("Preparing browser engine…"));
   try {
     if (!(await ensureIsolation())) return;
     engine = new EngineClient();
@@ -3736,7 +3760,7 @@ async function startEngine() {
         }
         setBusy(false);
         error(detail.text);
-        message("Engine unavailable — reload to restart");
+        message(() => t("Engine unavailable — reload to restart"));
         return;
       }
       if (activeSolve && !canceled) {
@@ -3749,9 +3773,9 @@ async function startEngine() {
             if (detail.paused) activeSolve.pausedAt = performance.now();
             else activeSolve.pausedDuration += performance.now() - activeSolve.pausedAt;
             activeSolve.paused = detail.paused;
-            message(detail.paused ? "Paused" : `Solving ${mode === "peg" ? "preendgame" : "endgame"}…`);
+            message(() => detail.paused ? t("Paused") : t(mode === "peg" ? "Solving preendgame" : "Solving endgame") + "…");
           }
-          $("pause-solve").textContent = activeSolve.paused ? "Resume" : "Pause";
+          $("pause-solve").textContent = activeSolve.paused ? t("Resume") : t("Pause");
           $("pause-solve").disabled = !detail.accepted;
         }
       }
@@ -3759,7 +3783,7 @@ async function startEngine() {
         logGCG("engine.message", { type: detail.type });
       }
       if (detail.type === "wmp_progress") {
-        message(detail.text);
+        message(() => t(detail.text));
         $("wmp-cache-status").textContent = detail.text;
         $("stop-wmp").hidden = botRunning;
         $("stop-wmp").disabled = canceled || botRunning;
@@ -3767,11 +3791,11 @@ async function startEngine() {
       if (detail.type === "wmp_prepare_started") wmpWarning = "";
       if (detail.type === "wmp_ready") {
         $("stop-wmp").hidden = true;
-        $("wmp-cache-status").textContent = wmpWarning || (detail.stopped ? "Stopped" : detail.unavailable ? "Word maps unavailable" : detail.cached ? "Word maps cached" : "Word maps ready for this session");
+        $("wmp-cache-status").textContent = wmpWarning || (detail.stopped ? t("Stopped") : detail.unavailable ? t("Word maps unavailable") : detail.cached ? t("Word maps cached") : t("Word maps ready for this session"));
       }
       if (detail.type === "wmp_cache_warning") {
-        wmpWarning = detail.text;
-        $("wmp-cache-status").textContent = detail.text;
+        wmpWarning = t(detail.text);
+        $("wmp-cache-status").textContent = wmpWarning;
       }
       if (detail.type === "output" || detail.type === "status")
         acceptOutput(detail.text, detail.command || "");
@@ -3780,12 +3804,12 @@ async function startEngine() {
     engineInitialized = true;
     $("new-game-status").hidden = true;
     setBusy(false);
-    message("Engine ready");
+    message(() => t("Engine ready"));
     refreshWMPCache();
     if (hasSharedLink) await loadSharedLink();
   } catch (failure) {
     error(failure.message);
-    message("Engine unavailable");
+    message(() => t("Engine unavailable"));
     // Keep analysis disabled when initialization fails instead of offering
     // buttons whose engine promise can never resolve.
   }
@@ -3795,18 +3819,18 @@ startEngine();
 function renderWMPCache() {
   const host = $("wmp-files");
   host.replaceChildren();
-  for (const lexicon of ["CSW24", "NWL23"]) {
+  for (const lexicon of LEXICA.filter(value => value !== "FRA24")) {
     const file = cachedWMPFiles.find((entry) => entry.lexicon === lexicon);
     const row = document.createElement("div");
     row.className = "setting-row wmp-file";
     const label = document.createElement("span");
-    label.textContent = `${lexicon} · ${file ? `WMP ${(file.bytes / 1048576).toFixed(1)} MiB` : "Not cached"}`;
+    label.textContent = `${lexicon} · ${file ? `WMP ${(file.bytes / 1048576).toFixed(1)} MiB` : t("Not cached")}`;
     if (file) label.title = `${file.bytes.toLocaleString()} bytes`;
     const button = document.createElement("button");
-    button.textContent = file ? "Remove" : "Cache";
+    button.textContent = file ? t("Remove") : t("Cache");
     button.dataset.unavailable = String(!file && $("wmp-source").value === "off");
     button.disabled = analysisSettingsLocked() || button.dataset.unavailable === "true";
-    button.setAttribute("aria-label", `${file ? "Remove" : "Cache"} ${lexicon} WMP`);
+    button.setAttribute("aria-label", `${file ? t("Remove") : t("Cache")} ${lexicon} WMP`);
     button.addEventListener("click", async () => {
       if (busy) return;
       setBusy(true);
@@ -3827,8 +3851,8 @@ function renderWMPCache() {
           await engine.run(["set -wmp false"]);
           engine.wmpKey = null;
         }
-        const status = canceled ? "Stopped" : file ? `${lexicon} WMP removed` : wmpWarning || (engine.wmpCached ? `${lexicon} word maps cached` : `${lexicon} word maps were not cached`);
-        message(status);
+        const status = canceled ? t("Stopped") : file ? t`${lexicon} WMP removed` : wmpWarning || (engine.wmpCached ? t`${lexicon} word maps cached` : t`${lexicon} word maps were not cached`);
+        message(() => status);
         $("wmp-cache-status").textContent = status;
       } catch (failure) { $("wmp-cache-status").textContent = failure.message; }
       finally { setBusy(false); await refreshWMPCache(); }
@@ -3841,7 +3865,7 @@ async function refreshWMPCache() {
   try {
     cachedWMPFiles = await listWMPs();
     renderWMPCache();
-  } catch (failure) { $("wmp-cache-status").textContent = `WMP cache unavailable: ${failure.message}`; }
+  } catch (failure) { $("wmp-cache-status").textContent = t`WMP cache unavailable: ${failure.message}`; }
 }
 $("wmp-source").addEventListener("change", () => {
   $("wmp-recovery-notice").hidden = true;
@@ -3849,3 +3873,15 @@ $("wmp-source").addEventListener("change", () => {
 });
 
 $("stop-wmp").addEventListener("click", () => { if (!botRunning) stop(); });
+
+$("language").addEventListener("change", () => {
+  setLanguage($("language").value);
+  renderPosition();
+  renderResults();
+  renderHistoryOptions();
+  renderWMPCache();
+  updateGameSetup();
+  settingsSummary();
+  renderContextHint();
+  renderMessage();
+});
