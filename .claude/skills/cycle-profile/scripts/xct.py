@@ -15,10 +15,18 @@ usage:
   xct.py check     XML DSYM                     look up every address one at a time and
                                                  compare with the batched lookups
 
+For CPU Counters recordings (counters_template.py, then record.sh --template):
+  xct.py pmi         XML DSYM [--counter C] [--top N]
+                                                 a sampling mode's samples by function,
+                                                 line and instruction, per counter
+  xct.py bottlenecks XML                       the bottlenecks mode's shares of issue
+                                                 slots: useful, discarded, processing,
+                                                 delivery
+
 DSYM is a .dSYM bundle, or the DWARF file inside one. The binary is found in
 the export by the dSYM's UUID, so a wrong or stale dSYM is an error, not a
-quiet misattribution. Percentages are of all the export's cycles, including
-samples outside the binary.
+quiet misattribution. Percentages are of all the export's cycles (or, for pmi,
+of the counter's samples), including samples outside the binary.
 """
 import collections
 import glob
@@ -337,8 +345,143 @@ def cmd_check(args):
     sys.exit(1 if bad else 0)
 
 
+def parse_with_refs(xml_path):
+    """The export's root and a function that follows an element's ref."""
+    root = ET.parse(xml_path).getroot()
+    by_id = {el.get('id'): el for el in root.iter() if el.get('id') is not None}
+
+    def deref(el):
+        r = el.get('ref')
+        return by_id[r] if r is not None else el
+    return root, deref
+
+
+class PmiSamples:
+    """The samples of a CPU Counters sampling mode (the pmi-sample table): each
+    one's counter and the address of the instruction that triggered it. A
+    sample stands for a fixed number of its counter's events, and its address
+    is the instruction that caused them: the mispredicted branch or the load
+    that missed, not an instruction that waited. The binaries' load addresses
+    come from the time-profile table that record.sh exports beside it."""
+
+    def __init__(self, xml_path):
+        root, deref = parse_with_refs(xml_path)
+        self.samples = []  # (counter, address)
+        for row in root.iter('row'):
+            values = [deref(c) for c in row]
+            numbers = [int(v.text) for v in values if v.tag == 'uint64']
+            if len(numbers) != 3:
+                die(f'{xml_path}: expected a pmi-sample row with three numbers: '
+                    'count, counter and address')
+            self.samples.append((numbers[1], numbers[2]))
+        if not self.samples:
+            die(f'{xml_path}: no pmi samples (export the pmi-sample table)')
+        time_path = re.sub(r'\.xml$', '', xml_path) + '.time.xml'
+        if not os.path.exists(time_path):
+            die(f'{time_path} is missing; record.sh exports it beside {xml_path}')
+        time_root, time_deref = parse_with_refs(time_path)
+        self.binaries = {}  # UUID -> (name, load address)
+        for b in time_root.iter('binary'):
+            b = time_deref(b)
+            if b.get('UUID') and b.get('load-addr'):
+                self.binaries.setdefault(b.get('UUID'), (b.get('name', '?'), b.get('load-addr')))
+
+    binary_for = Profile.binary_for
+
+
+def text_range(dwarf):
+    """The binary's __TEXT segment, unslid, from the dSYM's load commands."""
+    out = subprocess.run(['otool', '-l', dwarf], capture_output=True, text=True).stdout
+    m = re.search(r'segname __TEXT\n\s+vmaddr (0x[0-9a-f]+)\n\s+vmsize (0x[0-9a-f]+)', out)
+    if not m:
+        die(f'{dwarf}: no __TEXT segment in its load commands')
+    return int(m.group(1), 16), int(m.group(2), 16)
+
+
+def cmd_pmi(args):
+    top = opt(args, '--top', 15)
+    only = opt(args, '--counter', -1)
+    xml, dsym = args
+    p = PmiSamples(xml)
+    dwarf = dwarf_path(dsym)
+    _, load = p.binary_for(dwarf)
+    text_start, text_size = text_range(dwarf)
+    slide = int(load, 16) - text_start
+    per_counter = collections.Counter(c for c, _ in p.samples)
+    print('samples by counter (in a mode\'s trigger order, lowest counter first; '
+          'counters_template.py --list names them):')
+    for c in sorted(per_counter):
+        print(f'  counter {c}: {per_counter[c]}')
+    inside = sorted({a for _, a in p.samples if 0 <= a - slide - text_start < text_size})
+    chains = symbolicate(dwarf, load, [hex(a) for a in inside])
+    for counter in sorted(per_counter):
+        if only not in (-1, counter):
+            continue
+        total = per_counter[counter]
+        by_func, by_line, by_pc = collections.Counter(), collections.Counter(), collections.Counter()
+        outside = 0
+        for c, a in p.samples:
+            if c != counter:
+                continue
+            chain = chains.get(hex(a))
+            if not chain:
+                outside += 1
+                continue
+            func, loc = chain[0]
+            by_func[func] += 1
+            by_line[(func, loc)] += 1
+            by_pc[(hex(a - slide), func, loc)] += 1
+        print(f'counter {counter}: {total} samples, {pct(outside, total):.1f}% outside the binary')
+        print('  by function:')
+        for f, n in by_func.most_common(top):
+            print(f'    {pct(n, total):6.2f}%  {f}')
+        print('  by line:')
+        for (f, loc), n in by_line.most_common(top):
+            print(f'    {pct(n, total):6.2f}%  {f} ({loc})')
+        print('  by instruction (unslid, as llvm-objdump prints it):')
+        for (a, f, loc), n in by_pc.most_common(top):
+            print(f'    {pct(n, total):6.2f}%  {a}  {f} ({loc})')
+
+
+def cmd_bottlenecks(args):
+    (xml,) = args
+    root, deref = parse_with_refs(xml)
+    # Each row is one metric over one interval of one process. Instruments
+    # averages the metrics weighted by time; their scale in the export isn't
+    # documented, so this reports each as a share of the four's sum, weighting
+    # each interval by its cycles. Precise rows, where present, are used alone.
+    intervals = collections.defaultdict(dict)
+    for row in root.iter('row'):
+        values = [deref(c) for c in row]
+        start = values[0].text
+        process = next((v.get('fmt') for v in values if v.tag == 'process'), '?')
+        number = next(int(v.text) for v in values if v.tag == 'uint64')
+        fraction = next(float(v.text) for v in values if v.tag == 'fixed-decimal')
+        name = next(v.text for v in values if v.tag == 'string')
+        precise = next((v.text for v in values if v.tag == 'boolean'), '0')
+        intervals[(process, precise, start)][name] = number if name == 'cycle' else fraction
+    if not intervals:
+        die(f'{xml}: no metric rows (export the MetricAggregationForProcess table)')
+    processes = collections.Counter(p for p, _, _ in intervals)
+    process = processes.most_common(1)[0][0]
+    precise = '1' if any(p == process and q == '1' for p, q, _ in intervals) else '0'
+    names = ['useful', 'discarded', 'processing', 'delivery']
+    sums = dict.fromkeys(names, 0.0)
+    for (p, q, _), metrics in intervals.items():
+        if p != process or q != precise:
+            continue
+        for n in names:
+            sums[n] += metrics.get(n, 0.0) * metrics.get('cycle', 1)
+    total = sum(sums.values())
+    print(f'{process}, {"precise" if precise == "1" else "imprecise"} intervals, '
+          'shares of issue slots:')
+    for n in names:
+        print(f'  {pct(sums[n], total):5.1f}%  {n}')
+
+
 COMMANDS = {'self': cmd_self, 'compare': cmd_compare, 'lines': cmd_lines, 'callers': cmd_callers,
-            'contains': cmd_contains, 'inclusive': cmd_inclusive, 'check': cmd_check}
+            'contains': cmd_contains, 'inclusive': cmd_inclusive, 'check': cmd_check,
+            'pmi': cmd_pmi, 'bottlenecks': cmd_bottlenecks}
 
 if __name__ == '__main__':
     if len(sys.argv) < 2 or sys.argv[1] not in COMMANDS:
