@@ -4,6 +4,7 @@
 #include "../src/def/game_defs.h"
 #include "../src/def/game_history_defs.h"
 #include "../src/def/letter_distribution_defs.h"
+#include "../src/ent/bag.h"
 #include "../src/ent/board.h"
 #include "../src/ent/equity.h"
 #include "../src/ent/game.h"
@@ -1002,6 +1003,50 @@ bool tui_pvc_commit_preview_move(TuiGameState *gs) {
   tui_game_state_parse_edit_buf(gs);
   atomic_fetch_add(&gs->render_version, 1);
   return true;
+}
+
+const char *tui_pvc_move_unavailable_reason(const TuiGameState *gs,
+                                            bool exchange) {
+  if (gs->app_mode != TUI_APP_MODE_PLAY_VS_COMPUTER || gs->game == NULL ||
+      tui_game_state_play_over(gs)) {
+    return "Only in a game against the computer.";
+  }
+  const int last = gs->history_count - 1;
+  if (last < 0 || !gs->history[last].pending ||
+      !tui_history_entry_editable(gs, last)) {
+    return "Wait for your turn.";
+  }
+  // The engine's rule (is_exchange_allowed in src/ent/validated_move.c).
+  if (exchange && bag_get_letters(game_get_bag(gs->game)) < RACK_SIZE) {
+    return "Too few tiles in the bag to exchange.";
+  }
+  return NULL;
+}
+
+bool tui_pvc_play_typed(TuiGameState *gs, const char *move_text) {
+  const bool exchange = move_text[0] == '-';
+  const char *reason = tui_pvc_move_unavailable_reason(gs, exchange);
+  if (reason != NULL) {
+    tui_game_state_notice(gs, reason);
+    return false;
+  }
+  tui_tile_key_reset(&gs->tile_keys);
+  gs->board_entry_active = false;
+  gs->edit_history_idx = gs->history_count - 1;
+  gs->edit_field = TUI_EDIT_FIELD_MOVE;
+  (void)snprintf(gs->edit_move_buf, sizeof(gs->edit_move_buf), "%s", move_text);
+  gs->edit_move_len = (int)strlen(gs->edit_move_buf);
+  gs->edit_move_cursor = gs->edit_move_len;
+  tui_game_state_parse_edit_buf(gs);
+  if (tui_pvc_commit_preview_move(gs)) {
+    return true;
+  }
+  tui_board_builder_cancel(gs);
+  char notice[sizeof(gs->notice_buf)];
+  (void)snprintf(notice, sizeof(notice), "Can't exchange %s from this rack.",
+                 move_text + 1);
+  tui_game_state_notice(gs, exchange ? notice : "Can't pass now.");
+  return false;
 }
 
 void tui_board_entry_submit(TuiGameState *gs) {

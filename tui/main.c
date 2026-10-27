@@ -1,5 +1,6 @@
 #include "bot_worker.h"
 #include "config.h"
+#include "exchange_dialog.h"
 #include "frame_dump.h"
 #include "game_render.h"
 #include "game_state.h"
@@ -312,6 +313,10 @@ static void render_modal_overlay(struct ncplane *std_plane, const Theme *theme,
     tui_game_render_time_picker(std_plane, theme, ui->time_focus);
   } else if (ui->modal == TUI_MODAL_QUIT_CONFIRM) {
     tui_game_render_quit_confirm(std_plane, theme, ui->quit_confirm_focus);
+  } else if (ui->modal == TUI_MODAL_EXCHANGE) {
+    tui_game_render_exchange(std_plane, theme, ui);
+  } else if (ui->modal == TUI_MODAL_PASS_CONFIRM) {
+    tui_game_render_pass_confirm(std_plane, theme, ui->pass_confirm_focus);
   } else if (ui->modal == TUI_MODAL_PANEL_MENU) {
     tui_render_panel_menu(std_plane, theme, state, ui, session);
   } else if (ui->modal == TUI_MODAL_PHONY_CONFIRM) {
@@ -585,6 +590,20 @@ static void dispatch_input(struct notcurses *nc, struct ncplane *std_plane,
     return;
   }
 
+  // The Rack panel's Exchange and Pass buttons (render_rack.c).
+  if (key == NCKEY_BUTTON1 && input.evtype != NCTYPE_RELEASE &&
+      ui->modal == TUI_MODAL_NONE) {
+    const TuiRackButton button = tui_rack_button_at(input.y, input.x);
+    if (button == TUI_RACK_BUTTON_EXCHANGE) {
+      tui_exchange_dialog_open(state, ui);
+      return;
+    }
+    if (button == TUI_RACK_BUTTON_PASS) {
+      tui_pass_confirm_open(state, ui);
+      return;
+    }
+  }
+
   if (tui_input_mouse(state, std_plane, ui->modal, key, input)) {
     return;
   }
@@ -645,6 +664,10 @@ static void dispatch_input(struct notcurses *nc, struct ncplane *std_plane,
   }
 
   if (tui_input_phony_confirm(state, ui, key, input)) {
+    return;
+  }
+
+  if (tui_input_exchange_dialog(state, ui, key, input)) {
     return;
   }
 

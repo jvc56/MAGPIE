@@ -105,6 +105,7 @@ void tui_game_render(struct ncplane *plane, const Theme *theme,
   // Invalidate modal hit-test data at the start of each frame.
   // render_modal_ex will set it valid again if a modal renders.
   hit->modal_hit_map.valid = false;
+  hit->rack_buttons_row = -1;
 
   // Force a defensive full repaint whenever the plane's dimensions have
   // changed since the previous render — not only when *this* call did the

@@ -123,6 +123,19 @@ int tui_analysis_cursor_column_at(int y, int x, TuiAnalysisColumn *out_column) {
   }
   return -1;
 }
+TuiRackButton tui_rack_button_at(int y, int x) {
+  if (hit_maps.rack_buttons_row < 0 || y != hit_maps.rack_buttons_row) {
+    return TUI_RACK_BUTTON_NONE;
+  }
+  if (x >= hit_maps.rack_exchange_left && x <= hit_maps.rack_exchange_right) {
+    return TUI_RACK_BUTTON_EXCHANGE;
+  }
+  if (x >= hit_maps.rack_pass_left && x <= hit_maps.rack_pass_right) {
+    return TUI_RACK_BUTTON_PASS;
+  }
+  return TUI_RACK_BUTTON_NONE;
+}
+
 int tui_modal_item_at(int y, int x) {
   if (!hit_maps.modal_hit_map.valid) {
     return -2;
