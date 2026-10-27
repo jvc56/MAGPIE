@@ -871,12 +871,16 @@ bool tui_pvc_commit_preview_move(TuiGameState *gs) {
     formed_words_destroy(fw);
   }
   if (phony && gs->challenge_rule == UI_CHALLENGE_VOID) {
-    // VOID: invalid plays never reach the board. Reject the commit
-    // and leave the editor open for a do-over.
+    // VOID: invalid plays never reach the board. The tiles go back on
+    // the rack, as Esc leaves them, and the turn stays open for a
+    // do-over.
     (void)snprintf(gs->notice_buf, sizeof(gs->notice_buf), "not valid: %s",
                    invalid_words);
+    (void)snprintf(e->void_refused, sizeof(e->void_refused), "%s",
+                   invalid_words);
     clock_gettime(CLOCK_MONOTONIC, &gs->notice_expires_at);
-    gs->notice_expires_at.tv_sec += 3;
+    gs->notice_expires_at.tv_sec += 4;
+    tui_board_builder_cancel(gs);
     atomic_fetch_add(&gs->render_version, 1);
     return false;
   }
@@ -944,6 +948,7 @@ bool tui_pvc_commit_preview_move(TuiGameState *gs) {
   e->challenged_off = phony;
   e->total_after = phony ? post + e->score : post - bonus;
   e->pending = false;
+  e->void_refused[0] = '\0';
   // Charge wall time to the human, clamping clock skew to 0.
   struct timespec now;
   clock_gettime(CLOCK_MONOTONIC, &now);
