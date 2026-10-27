@@ -331,6 +331,7 @@ typedef struct {
   TuiPremiumLabels premium_labels; // TW/tw/none label style
   int board_scale; // 1 = classic cell tiles, 2 = 4×2 pixel tiles
   bool antialias;  // FT_RENDER_MODE_NORMAL vs MONO at 2x
+  bool sound;      // sound effects against the computer (sound.h)
   TuiScoreSubscripts score_subscripts; // off / nonzero / all (2x only)
   TuiRackSort rack_sort;               // display ordering of rack tiles
   // Glyph cache used by the 2x render path. NULL when the bundled font

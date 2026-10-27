@@ -170,6 +170,8 @@ OBJ_TEST := $(TEST:$(TEST_DIR)/%.c=$(OBJ_DIR)/$(TEST_DIR)/%.o)
 OBJ_CMD := $(CMD:$(CMD_DIR)/%.c=$(OBJ_DIR)/$(CMD_DIR)/%.o)
 TUI_OBJ_SRC := $(SRC:$(SRC_DIR)/%.c=$(TUI_OBJ_DIR)/$(SRC_DIR)/%.o)
 TUI_OBJ_TUI := $(TUI:$(TUI_DIR)/%.c=$(TUI_OBJ_DIR)/$(TUI_DIR)/%.o)
+# miniaudio (vendor/miniaudio), which plays the TUI's sound effects.
+TUI_MINIAUDIO_OBJ := $(TUI_OBJ_DIR)/vendor/miniaudio/miniaudio.o
 PGO_TRAIN_OBJ := $(OBJ_DIR)/$(TOOLS_DIR)/pgo_train.o
 CONVERT_OBJ := $(OBJ_DIR)/$(TOOLS_DIR)/convert.o
 
@@ -532,7 +534,7 @@ ifneq ($(TUI_PGO_CC),)
 magpie_tui:
 	$(MAKE) magpie_tui CC="$(PGO_CC)" TUI_PGO_USE=1 PGO_LDFLAGS="$(PGO_LDFLAGS)"
 else
-magpie_tui: $(TUI_OBJ_SRC) $(TUI_OBJ_TUI) | $(BIN_DIR)
+magpie_tui: $(TUI_OBJ_SRC) $(TUI_OBJ_TUI) $(TUI_MINIAUDIO_OBJ) | $(BIN_DIR)
 ifeq ($(TUI_FLAVOR)$(TUI_PGO),release1)
 	@echo '*** No clang $(PGO_MIN_CLANG_MAJOR) or newer for the profile-guided TUI; building it without PGO. Pass PGO_CC=<clang> LLVM_PROFDATA=<llvm-profdata> to train it, or TUI_PGO=0 to skip this.'
 endif
@@ -602,6 +604,12 @@ $(OBJ_DIR)/$(TOOLS_DIR)/%.o: $(TOOLS_DIR)/%.c | $(OBJ_DIR) $(OBJ_DIR)/$(TOOLS_DI
 $(TUI_OBJ_DIR)/$(SRC_DIR)/%.o: $(SRC_DIR)/%.c | $(TUI_OBJ_DIR) $(TUI_OBJ_DIR)/$(SRC_DIR) $(TUI_SRC_OBJ_SUBDIRS)
 	$(CC) $(TUI_ENGINE_CFLAGS) -c $< -o $@
 
+# Third-party code, built with the TUI's optimization but none of its
+# warnings.
+$(TUI_MINIAUDIO_OBJ): vendor/miniaudio/miniaudio.c | $(TUI_OBJ_DIR)
+	@mkdir -p $(dir $@)
+	$(CC) $(TUI_OPT) $(TUI_LTO) -march=native -g $(TUI_NDEBUG) $(TUI_ALIGN_CFLAGS) $(TUI_SAN) -w -MMD -MP -c $< -o $@
+
 $(TUI_OBJ_DIR)/$(TUI_DIR)/%.o: $(TUI_DIR)/%.c | $(TUI_OBJ_DIR) $(TUI_OBJ_DIR)/$(TUI_DIR)
 	$(CC) $(TUI_CFLAGS) $(NOTCURSES_CFLAGS) $(FREETYPE_CFLAGS) -c $< -o $@
 
@@ -613,7 +621,7 @@ $(OBJ_SRC) $(OBJ_CMD) $(OBJ_TEST) $(PGO_TRAIN_OBJ) $(CONVERT_OBJ) $(OBJ_DIR)/$(T
 ifeq ($(BUILD),pgo_use)
 $(OBJ_SRC) $(OBJ_CMD) $(OBJ_TEST): $(PGO_PROFILE)
 endif
-$(TUI_OBJ_SRC) $(TUI_OBJ_TUI): Makefile
+$(TUI_OBJ_SRC) $(TUI_OBJ_TUI) $(TUI_MINIAUDIO_OBJ): Makefile
 ifeq ($(TUI_FLAVOR),pgo)
 $(TUI_OBJ_SRC): $(TUI_PGO_PROFILE)
 endif
@@ -771,6 +779,7 @@ pgo_workload: pgo_toolchain_check
 -include $(OBJ_TEST:.o=.d)
 -include $(TUI_OBJ_SRC:.o=.d)
 -include $(TUI_OBJ_TUI:.o=.d)
+-include $(TUI_MINIAUDIO_OBJ:.o=.d)
 -include $(PGO_TRAIN_OBJ:.o=.d)
 -include $(CONVERT_OBJ:.o=.d)
 

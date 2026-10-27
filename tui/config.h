@@ -152,6 +152,9 @@ typedef struct {
   // Antialiasing toggle for the 2x render path. No effect at 1x.
   bool antialias;
   bool antialias_set;
+  // Sound effects for play against the computer (see sound.h).
+  bool sound;
+  bool sound_set;
   // Score subscripts on placed 2x board tiles. No effect at 1x (no
   // room in a 2-col × 1-row cell). When non-OFF, the letter glyph
   // shrinks to 80% and pins to the top-left, freeing the bottom-right
