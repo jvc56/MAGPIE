@@ -431,6 +431,18 @@ static bool is_prefix_of_exchange(const char *s, int n) {
   return true;
 }
 
+bool tui_game_state_edit_move_is_exchange(const TuiGameState *state) {
+  const char *buf = state->edit_move_buf;
+  while (*buf == ' ' || *buf == '\t') {
+    buf++;
+  }
+  if (*buf == '-') {
+    return true;
+  }
+  const char *space = strpbrk(buf, " \t");
+  return space != NULL && is_prefix_of_exchange(buf, (int)(space - buf));
+}
+
 // "pass" prefix detector — same shape as exchange's but
 // short-circuits when the buffer is exactly "pass".
 static bool is_iequal(const char *s, int n, const char *target) {
