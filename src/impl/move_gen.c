@@ -1666,58 +1666,61 @@ void recursive_gen(MoveGen *gen, int col, uint32_t node_index, int leftstrip,
     const MachineLetter raw = get_unblanked_machine_letter(current_letter);
     uint32_t next_node_index = 0;
     bool accepts = false;
-    for (uint32_t i = node_index;; i++) {
-      const uint32_t node = kwg_node(gen->kwg, i);
-      if (kwg_node_tile(node) == raw) {
-        next_node_index = kwg_node_arc_index_prefetch(node, gen->kwg);
-        accepts = kwg_node_accepts(node);
-        break;
-      }
-      if (kwg_node_is_end(node)) {
-        break;
-      }
+    const uint64_t list_tiles = kwg_get_sibling_tiles(gen->kwg)[node_index];
+    const uint64_t raw_bit = (uint64_t)1 << raw;
+    if ((list_tiles & raw_bit) != 0) {
+      const uint32_t node =
+          kwg_list_node(gen->kwg, node_index, list_tiles, raw_bit);
+      next_node_index = kwg_node_arc_index_prefetch(node, gen->kwg);
+      accepts = kwg_node_accepts(node);
     }
     go_on(gen, col, current_letter, next_node_index, accepts, leftstrip,
           rightstrip, unique_play, main_word_score, word_multiplier,
           cross_score);
   } else if (!rack_is_empty(&gen->player_rack) &&
              ((possible_letters_here & gen->rack_cross_set) != 0)) {
-    for (uint32_t i = node_index;; i++) {
-      const uint32_t node = kwg_node(gen->kwg, i);
-      const MachineLetter ml = kwg_node_tile(node);
+    // Visit only the arcs whose tiles could be placed here, in the list's
+    // ascending order. rack_cross_set has every letter the rack started with;
+    // a blank can be any.
+    const uint64_t list_tiles = kwg_get_sibling_tiles(gen->kwg)[node_index];
+    uint64_t placeable = possible_letters_here & list_tiles & ~(uint64_t)1;
+    if (rack_get_letter(&gen->player_rack, BLANK_MACHINE_LETTER) == 0) {
+      placeable &= gen->rack_cross_set;
+    }
+    for (; placeable != 0; placeable &= placeable - 1) {
+      const MachineLetter ml =
+          (MachineLetter)lowest_set_bit_index_64(placeable);
       const uint16_t number_of_ml = rack_get_letter(&gen->player_rack, ml);
-      if (ml != 0 &&
-          (number_of_ml != 0 ||
-           rack_get_letter(&gen->player_rack, BLANK_MACHINE_LETTER) != 0) &&
-          board_is_letter_allowed_in_cross_set(possible_letters_here, ml)) {
-        const uint32_t next_node_index =
-            kwg_node_arc_index_prefetch(node, gen->kwg);
-        bool accepts = kwg_node_accepts(node);
-        if (number_of_ml > 0) {
-          leave_map_take_letter_and_update_current_index(&gen->leave_map,
-                                                         &gen->player_rack, ml);
-          gen->tiles_played++;
-          go_on(gen, col, ml, next_node_index, accepts, leftstrip, rightstrip,
-                unique_play, main_word_score, word_multiplier, cross_score);
-          gen->tiles_played--;
-          leave_map_add_letter_and_update_current_index(&gen->leave_map,
-                                                        &gen->player_rack, ml);
-        }
-        // check blank
-        if (rack_get_letter(&gen->player_rack, BLANK_MACHINE_LETTER) > 0) {
-          leave_map_take_letter_and_update_current_index(
-              &gen->leave_map, &gen->player_rack, BLANK_MACHINE_LETTER);
-          gen->tiles_played++;
-          go_on(gen, col, get_blanked_machine_letter(ml), next_node_index,
-                accepts, leftstrip, rightstrip, unique_play, main_word_score,
-                word_multiplier, cross_score);
-          gen->tiles_played--;
-          leave_map_add_letter_and_update_current_index(
-              &gen->leave_map, &gen->player_rack, BLANK_MACHINE_LETTER);
-        }
+      if (number_of_ml == 0 &&
+          rack_get_letter(&gen->player_rack, BLANK_MACHINE_LETTER) == 0) {
+        continue;
       }
-      if (kwg_node_is_end(node)) {
-        break;
+      const uint32_t node =
+          kwg_list_node(gen->kwg, node_index, list_tiles, (uint64_t)1 << ml);
+      const uint32_t next_node_index =
+          kwg_node_arc_index_prefetch(node, gen->kwg);
+      bool accepts = kwg_node_accepts(node);
+      if (number_of_ml > 0) {
+        leave_map_take_letter_and_update_current_index(&gen->leave_map,
+                                                       &gen->player_rack, ml);
+        gen->tiles_played++;
+        go_on(gen, col, ml, next_node_index, accepts, leftstrip, rightstrip,
+              unique_play, main_word_score, word_multiplier, cross_score);
+        gen->tiles_played--;
+        leave_map_add_letter_and_update_current_index(&gen->leave_map,
+                                                      &gen->player_rack, ml);
+      }
+      // check blank
+      if (rack_get_letter(&gen->player_rack, BLANK_MACHINE_LETTER) > 0) {
+        leave_map_take_letter_and_update_current_index(
+            &gen->leave_map, &gen->player_rack, BLANK_MACHINE_LETTER);
+        gen->tiles_played++;
+        go_on(gen, col, get_blanked_machine_letter(ml), next_node_index,
+              accepts, leftstrip, rightstrip, unique_play, main_word_score,
+              word_multiplier, cross_score);
+        gen->tiles_played--;
+        leave_map_add_letter_and_update_current_index(
+            &gen->leave_map, &gen->player_rack, BLANK_MACHINE_LETTER);
       }
       if (gen->threshold_exceeded) {
         break;
@@ -1859,16 +1862,13 @@ static inline void recursive_gen_small(MoveGen *gen, int col,
     const MachineLetter raw = get_unblanked_machine_letter(current_letter);
     uint32_t next_node_index = 0;
     bool accepts = false;
-    for (uint32_t i = node_index;; i++) {
-      const uint32_t node = kwg_node(gen->kwg, i);
-      if (kwg_node_tile(node) == raw) {
-        next_node_index = kwg_node_arc_index_prefetch(node, gen->kwg);
-        accepts = kwg_node_accepts(node);
-        break;
-      }
-      if (kwg_node_is_end(node)) {
-        break;
-      }
+    const uint64_t list_tiles = kwg_get_sibling_tiles(gen->kwg)[node_index];
+    const uint64_t raw_bit = (uint64_t)1 << raw;
+    if ((list_tiles & raw_bit) != 0) {
+      const uint32_t node =
+          kwg_list_node(gen->kwg, node_index, list_tiles, raw_bit);
+      next_node_index = kwg_node_arc_index_prefetch(node, gen->kwg);
+      accepts = kwg_node_accepts(node);
     }
     go_on_small(gen, col, current_letter, next_node_index, accepts, leftstrip,
                 rightstrip, unique_play, main_word_score, word_multiplier,
@@ -1892,37 +1892,44 @@ static inline void recursive_gen_small(MoveGen *gen, int col,
     // go_on_small recursion fully restores player_rack, so hoist it.
     const uint16_t num_blanks =
         rack_get_letter(&gen->player_rack, BLANK_MACHINE_LETTER);
-    for (uint32_t i = node_index;; i++) {
-      const uint32_t node = kwg_node(gen->kwg, i);
-      const MachineLetter ml = kwg_node_tile(node);
+    // Visit only the arcs whose tiles could be placed here, in the list's
+    // ascending order. rack_cross_set has every letter the rack started with;
+    // a blank can be any.
+    const uint64_t list_tiles = kwg_get_sibling_tiles(gen->kwg)[node_index];
+    uint64_t placeable = possible_letters_here & list_tiles & ~(uint64_t)1;
+    if (num_blanks == 0) {
+      placeable &= gen->rack_cross_set;
+    }
+    for (; placeable != 0; placeable &= placeable - 1) {
+      const MachineLetter ml =
+          (MachineLetter)lowest_set_bit_index_64(placeable);
       const uint16_t number_of_ml = rack_get_letter(&gen->player_rack, ml);
-      if (ml != 0 && (number_of_ml != 0 || num_blanks != 0) &&
-          board_is_letter_allowed_in_cross_set(possible_letters_here, ml)) {
-        const uint32_t next_node_index =
-            kwg_node_arc_index_prefetch(node, gen->kwg);
-        bool accepts = kwg_node_accepts(node);
-        if (number_of_ml > 0) {
-          rack_take_letter(&gen->player_rack, ml);
-          gen->tiles_played++;
-          go_on_small(gen, col, ml, next_node_index, accepts, leftstrip,
-                      rightstrip, unique_play, main_word_score, word_multiplier,
-                      cross_score);
-          gen->tiles_played--;
-          rack_add_letter(&gen->player_rack, ml);
-        }
-        // check blank
-        if (num_blanks > 0) {
-          rack_take_letter(&gen->player_rack, BLANK_MACHINE_LETTER);
-          gen->tiles_played++;
-          go_on_small(gen, col, get_blanked_machine_letter(ml), next_node_index,
-                      accepts, leftstrip, rightstrip, unique_play,
-                      main_word_score, word_multiplier, cross_score);
-          gen->tiles_played--;
-          rack_add_letter(&gen->player_rack, BLANK_MACHINE_LETTER);
-        }
+      if (number_of_ml == 0 && num_blanks == 0) {
+        continue;
       }
-      if (kwg_node_is_end(node)) {
-        break;
+      const uint32_t node =
+          kwg_list_node(gen->kwg, node_index, list_tiles, (uint64_t)1 << ml);
+      const uint32_t next_node_index =
+          kwg_node_arc_index_prefetch(node, gen->kwg);
+      bool accepts = kwg_node_accepts(node);
+      if (number_of_ml > 0) {
+        rack_take_letter(&gen->player_rack, ml);
+        gen->tiles_played++;
+        go_on_small(gen, col, ml, next_node_index, accepts, leftstrip,
+                    rightstrip, unique_play, main_word_score, word_multiplier,
+                    cross_score);
+        gen->tiles_played--;
+        rack_add_letter(&gen->player_rack, ml);
+      }
+      // check blank
+      if (num_blanks > 0) {
+        rack_take_letter(&gen->player_rack, BLANK_MACHINE_LETTER);
+        gen->tiles_played++;
+        go_on_small(gen, col, get_blanked_machine_letter(ml), next_node_index,
+                    accepts, leftstrip, rightstrip, unique_play,
+                    main_word_score, word_multiplier, cross_score);
+        gen->tiles_played--;
+        rack_add_letter(&gen->player_rack, BLANK_MACHINE_LETTER);
       }
     }
   }

@@ -416,21 +416,18 @@ static void game_compute_classic_cross_set(const KWG *kwg,
   uint64_t cross_set = 0;
   if (nonempty_to_left && nonempty_to_right) {
     if (left_lpath_is_valid && right_lpath_is_valid) {
-      for (uint32_t i = right_lnode_index;; i++) {
-        const uint32_t node = kwg_node(kwg, i);
-        const uint32_t ml = kwg_node_tile(node);
-        // Only try letters that are possible in right extensions from the
-        // left side of the empty square.
-        if (board_is_letter_allowed_in_cross_set(leftside_rightx_set, ml)) {
-          const uint32_t next_node_index =
-              kwg_node_arc_index_prefetch(node, kwg);
-          if (traverse_backwards(kwg, board, row, col - 1, next_node_index,
-                                 true, left_col) != 0) {
-            cross_set |= get_cross_set_bit(ml);
-          }
-        }
-        if (kwg_node_is_end(node)) {
-          break;
+      // Visit only the arcs whose tiles are right extensions from the left
+      // side of the empty square.
+      const uint64_t list_tiles = kwg_get_sibling_tiles(kwg)[right_lnode_index];
+      for (uint64_t remaining = list_tiles & leftside_rightx_set;
+           remaining != 0; remaining &= remaining - 1) {
+        const uint64_t tile_bit = remaining & (~remaining + 1);
+        const uint32_t node =
+            kwg_list_node(kwg, right_lnode_index, list_tiles, tile_bit);
+        if (traverse_backwards(kwg, board, row, col - 1,
+                               kwg_node_arc_index_prefetch(node, kwg), true,
+                               left_col) != 0) {
+          cross_set |= tile_bit;
         }
       }
     }
