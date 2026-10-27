@@ -2,10 +2,12 @@
 
 #include "../src/def/rack_defs.h"
 #include "config.h"
+#include "exchange_dialog.h"
 #include "render_common.h"
 #include "render_hit_test.h"
 #include "render_planes.h"
 #include "theme.h"
+#include "tile_input.h"
 #include "time_picker.h"
 #include "tui_ui_state.h"
 #include "tui_ui_types.h"
@@ -877,13 +879,14 @@ void tui_game_render_exchange(struct ncplane *plane, const Theme *theme,
   if (plane == NULL || theme == NULL) {
     return;
   }
-  // Each rack tile, then Exchange (grayed until a tile is picked), then
+  // Each rack tile, then Exchange (grayed until a tile is picked) naming
+  // the picked tiles, Keep naming the rest (only information), and
   // Cancel.
-  enum { ROW_TEXT = 48 };
-  char rows[RACK_SIZE + 2][ROW_TEXT];
-  const char *items[RACK_SIZE + 2];
-  const char *shortcuts[RACK_SIZE + 2] = {NULL};
-  bool disabled[RACK_SIZE + 2] = {false};
+  enum { ROW_TEXT = 48 + RACK_SIZE * TUI_TILE_TEXT_MAX };
+  char rows[RACK_SIZE + 3][ROW_TEXT];
+  const char *items[RACK_SIZE + 3];
+  const char *shortcuts[RACK_SIZE + 3] = {NULL};
+  bool disabled[RACK_SIZE + 3] = {false};
   int picked = 0;
   const int tile_count = ui->exchange_tile_count;
   for (int tile_idx = 0; tile_idx < tile_count; tile_idx++) {
@@ -893,20 +896,28 @@ void tui_game_render_exchange(struct ncplane *plane, const Theme *theme,
     items[tile_idx] = rows[tile_idx];
     picked += ui->exchange_picked[tile_idx] ? 1 : 0;
   }
+  char picked_tiles[RACK_SIZE * TUI_TILE_TEXT_MAX];
+  char kept_tiles[RACK_SIZE * TUI_TILE_TEXT_MAX];
+  tui_exchange_dialog_tiles(ui, true, picked_tiles, sizeof(picked_tiles));
+  tui_exchange_dialog_tiles(ui, false, kept_tiles, sizeof(kept_tiles));
   if (picked == 0) {
     (void)snprintf(rows[tile_count], ROW_TEXT, "Exchange");
   } else {
-    (void)snprintf(rows[tile_count], ROW_TEXT, "Exchange %d tile%s", picked,
-                   picked == 1 ? "" : "s");
+    (void)snprintf(rows[tile_count], ROW_TEXT, "Exchange %d tile%s (%s)",
+                   picked, picked == 1 ? "" : "s", picked_tiles);
   }
   items[tile_count] = rows[tile_count];
   shortcuts[tile_count] = "Enter";
   disabled[tile_count] = picked == 0;
-  items[tile_count + 1] = "Cancel";
-  shortcuts[tile_count + 1] = "Esc";
+  (void)snprintf(rows[tile_count + 1], ROW_TEXT, "Keep %s",
+                 kept_tiles[0] != '\0' ? kept_tiles : "nothing");
+  items[tile_count + 1] = rows[tile_count + 1];
+  disabled[tile_count + 1] = true;
+  items[tile_count + 2] = "Cancel";
+  shortcuts[tile_count + 2] = "Esc";
   render_modal_ex(plane, theme, "Exchange tiles", items, shortcuts, disabled,
                   /*cursor_cols=*/NULL, /*zone_starts=*/NULL,
-                  /*zone_widths=*/NULL, tile_count + 2, ui->exchange_focus, 28);
+                  /*zone_widths=*/NULL, tile_count + 3, ui->exchange_focus, 38);
 }
 void tui_game_render_pass_confirm(struct ncplane *plane, const Theme *theme,
                                   int focus) {
