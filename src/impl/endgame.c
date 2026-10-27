@@ -822,7 +822,12 @@ void endgame_ctx_reset(EndgameCtx *es, EndgameResults *results,
   atomic_store(&es->adding_closed, 1);
   atomic_store(&es->live_workers, es->threads);
   atomic_store(&es->window_open_ns, (int64_t)0);
-  es->requested_plies = endgame_args->plies;
+  // The per-ply arrays (current_line, the PV, the undos) hold
+  // MAX_SEARCH_DEPTH entries, so a deeper request searches as deep as they
+  // allow.
+  es->requested_plies = endgame_args->plies < MAX_SEARCH_DEPTH
+                            ? endgame_args->plies
+                            : MAX_SEARCH_DEPTH;
   es->solving_player = game_get_player_on_turn_index(endgame_args->game);
   es->initial_small_move_arena_size =
       endgame_args->initial_small_move_arena_size;

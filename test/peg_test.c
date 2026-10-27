@@ -825,7 +825,7 @@ static void test_peg_main_cli(void) {
   config_fill_peg_args(config, &peg_args);
   assert(peg_args.exhaustive_plies == 6);
   assert(peg_args.nested_emptier_ply_cap == 6);
-  const char *bad_plies[] = {"set -pegplies -1", "set -pegplies 41",
+  const char *bad_plies[] = {"set -pegplies -1", "set -pegplies 26",
                              "set -pegplies deep"};
   for (int bad_idx = 0; bad_idx < 3; bad_idx++) {
     ErrorStack *plies_errors = error_stack_create();

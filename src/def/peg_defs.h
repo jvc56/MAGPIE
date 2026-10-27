@@ -1,6 +1,7 @@
 #ifndef PEG_DEFS_H
 #define PEG_DEFS_H
 
+#include "game_defs.h"
 #include "rack_defs.h"
 
 // Bag-size range a pre-endgame (PEG) position may have. PEG handles 1..4 tiles
@@ -44,11 +45,12 @@ enum {
   // opponent holds RACK_SIZE of at most RACK_SIZE + PEG_MAX_BAG unseen tiles,
   // so at most C(11, 4) = 330 racks at the default rack size.
   PEG_REPLY_CACHE_SLOTS = 1024,
-  // Endgame depth for the exhaustive single stage (-pegtopk all / 0). An
-  // emptier PEG leaf holds at most 2*RACK_SIZE tiles, so the endgame tree
-  // bottoms out at terminal nodes well short of this; the overshoot is free and
-  // just guarantees the solve runs to game end with no frontier truncation.
-  PEG_EXHAUSTIVE_PLIES = 40,
+  // Endgame depth for the exhaustive single stage (-pegtopk all / 0): the
+  // deepest the endgame searches, whose per-ply arrays hold MAX_SEARCH_DEPTH
+  // entries. An emptier PEG leaf holds at most 2*RACK_SIZE tiles, so the
+  // endgame tree bottoms out at terminal nodes short of this in practice, and
+  // the solve runs to game end with no frontier truncation.
+  PEG_EXHAUSTIVE_PLIES = MAX_SEARCH_DEPTH,
   // Fixed endgame seed for deterministic leaf solves.
   PEG_ENDGAME_SEED = 1,
   // Pessimistic playout: capacity of the opponent reply list. The adversarial
