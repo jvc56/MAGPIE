@@ -16,11 +16,56 @@
 #include "tui_ui_types.h"
 #include <notcurses/notcurses.h>
 #include <pthread.h>
+#include <stdatomic.h>
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+void tui_exchange_dialog_tiles(const TuiUiState *ui, bool picked, char *out,
+                               size_t out_size) {
+  out[0] = '\0';
+  for (int tile_idx = 0; tile_idx < ui->exchange_tile_count; tile_idx++) {
+    if (ui->exchange_picked[tile_idx] == picked) {
+      (void)strncat(out, ui->exchange_tiles[tile_idx],
+                    out_size - strlen(out) - 1);
+    }
+  }
+}
+
+// Shows the picked tiles as the turn's tentative move ("-LLQ"), in History
+// and as the rack's grayed tiles, as a typed exchange shows; with none
+// picked the turn shows no move.
+static void show_tentative_exchange(TuiGameState *state, const TuiUiState *ui) {
+  char tiles[RACK_SIZE * TUI_TILE_TEXT_MAX];
+  tui_exchange_dialog_tiles(ui, true, tiles, sizeof(tiles));
+  pthread_mutex_lock(&state->mutex);
+  if (tui_pvc_move_unavailable_reason(state, true) == NULL) {
+    tui_tile_key_reset(&state->tile_keys);
+    state->board_entry_active = false;
+    state->edit_history_idx = state->history_count - 1;
+    state->edit_field = TUI_EDIT_FIELD_MOVE;
+    (void)snprintf(state->edit_move_buf, sizeof(state->edit_move_buf), "%s%s",
+                   tiles[0] != '\0' ? "-" : "", tiles);
+    state->edit_move_len = (int)strlen(state->edit_move_buf);
+    state->edit_move_cursor = state->edit_move_len;
+    tui_game_state_parse_edit_buf(state);
+    atomic_fetch_add(&state->render_version, 1);
+  }
+  pthread_mutex_unlock(&state->mutex);
+}
+
+// Closes the picker, clearing its tentative move from the turn.
+static void cancel_exchange(TuiGameState *state, TuiUiState *ui) {
+  ui->modal = TUI_MODAL_NONE;
+  pthread_mutex_lock(&state->mutex);
+  if (state->edit_history_idx >= 0) {
+    tui_board_builder_cancel(state);
+  }
+  pthread_mutex_unlock(&state->mutex);
+}
 
 void tui_exchange_dialog_open(TuiGameState *state, TuiUiState *ui) {
   pthread_mutex_lock(&state->mutex);
@@ -47,6 +92,8 @@ void tui_exchange_dialog_open(TuiGameState *state, TuiUiState *ui) {
   ui->exchange_focus = 0;
   ui->modal = TUI_MODAL_EXCHANGE;
   pthread_mutex_unlock(&state->mutex);
+  // Replaces any move half-typed on the turn.
+  show_tentative_exchange(state, ui);
 }
 
 void tui_pass_confirm_open(TuiGameState *state, TuiUiState *ui) {
@@ -71,30 +118,27 @@ static int picked_count(const TuiUiState *ui) {
 
 // Plays the picked tiles as "-ABC" and closes the picker.
 static void exchange_picked_tiles(TuiGameState *state, TuiUiState *ui) {
-  char move_text[2 + RACK_SIZE * TUI_TILE_TEXT_MAX] = "-";
-  for (int tile_idx = 0; tile_idx < ui->exchange_tile_count; tile_idx++) {
-    if (ui->exchange_picked[tile_idx]) {
-      (void)strncat(move_text, ui->exchange_tiles[tile_idx],
-                    sizeof(move_text) - strlen(move_text) - 1);
-    }
-  }
-  if (move_text[1] == '\0') {
+  char tiles[RACK_SIZE * TUI_TILE_TEXT_MAX];
+  tui_exchange_dialog_tiles(ui, true, tiles, sizeof(tiles));
+  if (tiles[0] == '\0') {
     return;
   }
+  char move_text[sizeof(tiles) + 1];
+  (void)snprintf(move_text, sizeof(move_text), "-%s", tiles);
   ui->modal = TUI_MODAL_NONE;
   pthread_mutex_lock(&state->mutex);
   (void)tui_pvc_play_typed(state, move_text);
   pthread_mutex_unlock(&state->mutex);
 }
 
-// Picks the first unpicked tile whose face starts with `key` (a letter in
-// either case, or ?), else unpicks the last picked one. Returns whether a
-// tile matched.
-static bool toggle_tile_for_key(TuiUiState *ui, uint32_t key) {
+// Steps how many tiles whose face starts with `key` (a letter in either
+// case, or ?) are picked: one more each time until all are, then none, so
+// typing L three times on a rack with two Ls picks 1, 2, then 0.
+static void cycle_tiles_for_key(TuiUiState *ui, uint32_t key) {
   const char wanted =
       (char)(key >= 'a' && key <= 'z' ? key - 'a' + 'A' : (int)key);
-  int unpicked = -1;
-  int picked = -1;
+  int first_unpicked = -1;
+  int first_match = -1;
   for (int tile_idx = 0; tile_idx < ui->exchange_tile_count; tile_idx++) {
     const char *face = ui->exchange_tiles[tile_idx];
     if (face[0] == '[') {
@@ -103,38 +147,49 @@ static bool toggle_tile_for_key(TuiUiState *ui, uint32_t key) {
     if (face[0] != wanted) {
       continue;
     }
-    if (!ui->exchange_picked[tile_idx] && unpicked < 0) {
-      unpicked = tile_idx;
-    } else if (ui->exchange_picked[tile_idx]) {
-      picked = tile_idx;
+    if (first_match < 0) {
+      first_match = tile_idx;
+    }
+    if (!ui->exchange_picked[tile_idx] && first_unpicked < 0) {
+      first_unpicked = tile_idx;
     }
   }
-  const int target = unpicked >= 0 ? unpicked : picked;
-  if (target < 0) {
-    return false;
+  if (first_match < 0) {
+    return;
   }
-  ui->exchange_picked[target] = !ui->exchange_picked[target];
-  ui->exchange_focus = target;
-  return true;
+  if (first_unpicked >= 0) {
+    ui->exchange_picked[first_unpicked] = true;
+    ui->exchange_focus = first_unpicked;
+    return;
+  }
+  for (int tile_idx = 0; tile_idx < ui->exchange_tile_count; tile_idx++) {
+    const char *face = ui->exchange_tiles[tile_idx];
+    if ((face[0] == '[' ? face[1] : face[0]) == wanted) {
+      ui->exchange_picked[tile_idx] = false;
+    }
+  }
+  ui->exchange_focus = first_match;
 }
 
-// Acts on row `row`: toggles a tile, plays the exchange, or cancels.
+// Acts on row `row` (tiles, then Exchange, Keep, Cancel): toggles a tile,
+// plays the exchange, or cancels. Keep is only information.
 static void activate_exchange_row(TuiGameState *state, TuiUiState *ui,
                                   int row) {
   const int tile_count = ui->exchange_tile_count;
   if (row < tile_count) {
     ui->exchange_picked[row] = !ui->exchange_picked[row];
+    show_tentative_exchange(state, ui);
   } else if (row == tile_count) {
     exchange_picked_tiles(state, ui);
-  } else {
-    ui->modal = TUI_MODAL_NONE;
+  } else if (row == tile_count + 2) {
+    cancel_exchange(state, ui);
   }
 }
 
 static void input_exchange(TuiGameState *state, TuiUiState *ui, uint32_t key,
                            ncinput input) {
   const int tile_count = ui->exchange_tile_count;
-  const int row_count = tile_count + 2;
+  const int row_count = tile_count + 3;
   if (key == NCKEY_BUTTON1) {
     if (input.evtype == NCTYPE_RELEASE) {
       return;
@@ -146,25 +201,26 @@ static void input_exchange(TuiGameState *state, TuiUiState *ui, uint32_t key,
     }
     return;
   }
-  // Exchange is skipped while no tile is picked. Letters pick tiles, so
-  // j/k don't navigate here.
-  bool enabled[RACK_SIZE + 2] = {false};
+  // Exchange is skipped while no tile is picked, and Keep always. Letters
+  // pick tiles, so j/k don't navigate here.
+  bool enabled[RACK_SIZE + 3] = {false};
   for (int row = 0; row < row_count; row++) {
-    enabled[row] = row != tile_count || picked_count(ui) > 0;
+    enabled[row] =
+        row != tile_count + 1 && (row != tile_count || picked_count(ui) > 0);
   }
   const int nav = tui_list_nav(key, &input, ui->exchange_focus, row_count,
                                enabled, TUI_LIST_NAV_HOME_END);
   if (nav >= 0) {
     ui->exchange_focus = nav;
   } else if (key == NCKEY_ESC) {
-    ui->modal = TUI_MODAL_NONE;
+    cancel_exchange(state, ui);
   } else if (key == ' ') {
     activate_exchange_row(state, ui, ui->exchange_focus);
   } else if (key == NCKEY_ENTER || key == '\r' || key == '\n') {
     // Enter plays the exchange from any row once a tile is picked; before
     // that it picks the focused tile.
-    if (ui->exchange_focus == tile_count + 1) {
-      ui->modal = TUI_MODAL_NONE;
+    if (ui->exchange_focus == tile_count + 2) {
+      cancel_exchange(state, ui);
     } else if (picked_count(ui) > 0) {
       exchange_picked_tiles(state, ui);
     } else {
@@ -172,7 +228,8 @@ static void input_exchange(TuiGameState *state, TuiUiState *ui, uint32_t key,
     }
   } else if ((key >= 'a' && key <= 'z') || (key >= 'A' && key <= 'Z') ||
              key == '?') {
-    (void)toggle_tile_for_key(ui, key);
+    cycle_tiles_for_key(ui, key);
+    show_tentative_exchange(state, ui);
   }
 }
 
