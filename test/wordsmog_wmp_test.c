@@ -743,6 +743,106 @@ static void test_wordsmog_play_graph(void) {
   config_destroy(alpha_config);
 }
 
+// The output of a command that must succeed.
+static char *command_output(Config *config, const char *command) {
+  ErrorStack *error_stack = error_stack_create();
+  config_load_command(config, command, error_stack);
+  char *output = NULL;
+  if (error_stack_is_empty(error_stack)) {
+    config_run_str_api_command(config, error_stack, &output);
+  }
+  if (!error_stack_is_empty(error_stack)) {
+    error_stack_print_and_reset(error_stack);
+    log_fatal("command '%s' failed", command);
+  }
+  error_stack_destroy(error_stack);
+  return output;
+}
+
+static void assert_output_has(const char *output, const char *expected) {
+  if (strstr(output, expected) == NULL) {
+    log_fatal("expected '%s' in:\n%s", expected, output);
+  }
+}
+
+// The smog command shows what the play graph says, and rejects positions
+// and arguments it cannot use.
+static void test_wordsmog_smog_command(void) {
+  Config *config = create_wmp_config();
+  load_and_exec_config_or_die(config,
+                              "load testdata/gcgs/success_long_game.gcg");
+  load_and_exec_config_or_die(config, "goto 6");
+  load_and_exec_config_or_die(config, "set -var wordsmog");
+  load_and_exec_config_or_die(config, "rack ?EINRST");
+  const Game *game = config_get_game(config);
+
+  WordsmogPlayGraph *graph = wordsmog_play_graph_create(game, MOVE_SORT_EQUITY);
+  uint64_t arrangements;
+  uint64_t plays;
+  wordsmog_play_graph_count(graph, &arrangements, &plays);
+  const int groups = wordsmog_play_graph_rank_groups(graph);
+  char *expected = get_formatted_string(
+      "Groups (placement and tiles):     %d\n"
+      "Arrangements:                     %llu\n"
+      "Plays, every blank designation:   %llu\n",
+      groups, (unsigned long long)arrangements, (unsigned long long)plays);
+  char *output = command_output(config, "smog count");
+  assert_output_has(output, expected);
+  free(output);
+  free(expected);
+
+  // The best play, and the best play of the second group with a blank pinned
+  // to its first square, as the graph gives them.
+  Move move;
+  StringBuilder *sb = string_builder_create();
+  const bool has_play = wordsmog_play_graph_next(graph, &move);
+  assert(has_play);
+  (void)has_play;
+  string_builder_add_move(sb, game_get_board(game), &move, game_get_ld(game),
+                          false);
+  output = command_output(config, "smog 5");
+  assert_output_has(output, string_builder_peek(sb));
+  assert_output_has(output, "    5  ");
+  free(output);
+  WordsmogPlayNode node;
+  wordsmog_play_graph_get_group(graph, 1, &node);
+  WordsmogPlayNode children[RACK_SIZE + 1];
+  const int num_children =
+      wordsmog_play_graph_get_children(graph, &node, children);
+  int blank_child = 0;
+  while (blank_child < num_children &&
+         children[blank_child].pins[0] != WORDSMOG_PIN_BLANK) {
+    blank_child++;
+  }
+  assert(blank_child < num_children);
+  wordsmog_play_graph_get_play(graph, &children[blank_child], &move);
+  string_builder_clear(sb);
+  string_builder_add_move(sb, game_get_board(game), &move, game_get_ld(game),
+                          false);
+  output = command_output(config, "smog group 2 ?");
+  assert_output_has(output, "pinned: ? (1 of 7 squares)");
+  assert_output_has(output, string_builder_peek(sb));
+  free(output);
+  output = command_output(config, "smog groups 3");
+  assert_output_has(output, "    3  ");
+  free(output);
+  string_builder_destroy(sb);
+  wordsmog_play_graph_destroy(graph);
+
+  assert_config_exec_status(config, "smog group 0",
+                            ERROR_STATUS_WORDSMOG_GRAPH_INVALID_ARG);
+  assert_config_exec_status(config, "smog group 1 Q",
+                            ERROR_STATUS_WORDSMOG_GRAPH_INVALID_ARG);
+  assert_config_exec_status(config, "smog groups 0",
+                            ERROR_STATUS_WORDSMOG_GRAPH_INVALID_ARG);
+  assert_config_exec_status(config, "smog nonsense",
+                            ERROR_STATUS_WORDSMOG_GRAPH_INVALID_ARG);
+  load_and_exec_config_or_die(config, "set -var classic");
+  assert_config_exec_status(config, "smog",
+                            ERROR_STATUS_WORDSMOG_GRAPH_UNAVAILABLE);
+  config_destroy(config);
+}
+
 // The play graph's speed on the positions of static WMP wordsmog games: per
 // position, the best play from move generation, and from the graph its count
 // and its first 1, 100 and 10000 plays. Run with "wsmogbench" on a release
@@ -815,5 +915,6 @@ void test_wordsmog_wmp_bench(void) {
 void test_wordsmog_wmp(void) {
   test_wordsmog_arrangement_brute_force();
   test_wordsmog_play_graph();
+  test_wordsmog_smog_command();
   test_wordsmog_wmp_games();
 }

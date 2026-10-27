@@ -25,6 +25,7 @@
 #include "../def/sim_defs.h"
 #include "../def/thread_control_defs.h"
 #include "../def/validated_move_defs.h"
+#include "../def/wordsmog_defs.h"
 #include "../ent/autoplay_results.h"
 #include "../ent/autoplay_solver_settings.h"
 #include "../ent/bag.h"
@@ -60,6 +61,7 @@
 #include "../str/endgame_string.h"
 #include "../str/game_string.h"
 #include "../str/inference_string.h"
+#include "../str/letter_distribution_string.h"
 #include "../str/move_string.h"
 #include "../str/peg_string.h"
 #include "../str/rack_string.h"
@@ -114,6 +116,7 @@ typedef enum {
   ARG_TOKEN_RACK,
   ARG_TOKEN_RANDOM_RACK,
   ARG_TOKEN_GEN,
+  ARG_TOKEN_WORDSMOG_GRAPH,
   ARG_TOKEN_SIM,
   ARG_TOKEN_SNOPRUNE,
   ARG_TOKEN_GEN_AND_SIM,
@@ -1724,6 +1727,29 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       usages[0] = "";
       text = "Generates moves for the current position.";
       break;
+    case ARG_TOKEN_WORDSMOG_GRAPH:
+      usages[0] = "[<num_plays>]";
+      usages[1] = "groups [<num_groups>]";
+      usages[2] = "count";
+      usages[3] = "group <rank> [<tile> ...]";
+      examples[0] = "";
+      examples[1] = "50";
+      examples[2] = "groups 20";
+      examples[3] = "count";
+      examples[4] = "group 1";
+      examples[5] = "group 3 E ?";
+      text = "Explores the ranked graph of a wordsmog position's plays "
+             "without listing them all (needs -var wordsmog and -wmp true). "
+             "With no subcommand, shows the best plays, each arrangement of "
+             "tiles once. 'groups' shows the best placement and tile "
+             "multisets, each with its best play and how many arrangements "
+             "it has. 'count' counts the groups, the arrangements and "
+             "the plays with every blank designation. 'group' shows "
+             "one group, ranked as 'groups' ranks them, with the given "
+             "tiles pinned to its empty squares in board order (? for a "
+             "blank): its best play, and for its next square, each tile that "
+             "can go there and the best play that puts it there.";
+      break;
     case ARG_TOKEN_SIM:
       usages[0] = "[<opponent_known_rack>]";
       examples[0] = "";
@@ -3055,6 +3081,7 @@ char *impl_help(Config *config, ErrorStack *error_stack) {
         ARG_TOKEN_SHOW_INFERENCE,       /* shinference */
         ARG_TOKEN_SHOW_MOVES,           /* shmoves */
         ARG_TOKEN_SIM,                  /* simulate */
+        ARG_TOKEN_WORDSMOG_GRAPH,       /* smog */
         ARG_TOKEN_SNOPRUNE,             /* snoprune */
         ARG_TOKEN_PAT_GEN,              /* patgen */
     };
@@ -3545,6 +3572,286 @@ void impl_move_gen(Config *config, ErrorStack *error_stack) {
   impl_move_gen_override_record_type(
       config, player_get_move_record_type(game_get_player(
                   config->game, game_get_player_on_turn_index(config->game))));
+}
+
+// Exploring the wordsmog play graph (smog)
+
+// A play's line in a smog table: rank, play, score and equity.
+static void string_builder_add_smog_play(StringBuilder *sb, const Game *game,
+                                         int rank, const Move *move) {
+  StringBuilder *move_sb = string_builder_create();
+  string_builder_add_move(move_sb, game_get_board(game), move,
+                          game_get_ld(game), false);
+  string_builder_add_formatted_string(sb, "%5d  %-24s %5d %9.2f", rank,
+                                      string_builder_peek(move_sb),
+                                      equity_to_int(move_get_score(move)),
+                                      equity_to_double(move_get_equity(move)));
+  string_builder_destroy(move_sb);
+}
+
+static void string_builder_add_smog_tile(StringBuilder *sb,
+                                         const LetterDistribution *ld,
+                                         MachineLetter pin) {
+  string_builder_add_user_visible_letter(
+      sb, ld, pin == WORDSMOG_PIN_BLANK ? BLANK_MACHINE_LETTER : pin);
+}
+
+static void string_builder_add_smog_square(StringBuilder *sb, int row,
+                                           int col) {
+  string_builder_add_formatted_string(sb, "%c%d", 'A' + col, row + 1);
+}
+
+// The number of plays or groups to show, from argument arg_idx, or
+// default_count when there is none.
+static int smog_count_arg(const Config *config, int arg_idx, int default_count,
+                          ErrorStack *error_stack) {
+  const char *count_str =
+      config_get_parg_value(config, ARG_TOKEN_WORDSMOG_GRAPH, arg_idx);
+  if (count_str == NULL) {
+    return default_count;
+  }
+  int count;
+  string_to_int_or_push_error("count", count_str, 1, INT32_MAX,
+                              ERROR_STATUS_WORDSMOG_GRAPH_INVALID_ARG, &count,
+                              error_stack);
+  return count;
+}
+
+// The top plays, best first, each arrangement once.
+static void smog_add_plays(const Config *config, WordsmogPlayGraph *graph,
+                           int num_plays, StringBuilder *sb) {
+  uint64_t arrangements;
+  uint64_t plays;
+  wordsmog_play_graph_count(graph, &arrangements, &plays);
+  string_builder_add_formatted_string(
+      sb,
+      "Top plays of %llu (%llu with every blank designation), best first:\n"
+      " Rank  Play                     Score    Equity\n",
+      (unsigned long long)arrangements, (unsigned long long)plays);
+  Move move;
+  for (int rank = 1;
+       rank <= num_plays && wordsmog_play_graph_next(graph, &move); rank++) {
+    string_builder_add_smog_play(sb, config->game, rank, &move);
+    string_builder_add_string(sb, "\n");
+  }
+}
+
+// The top groups, a placement and tile multiset each, with the best play and
+// the number of arrangements and plays of each.
+static void smog_add_groups(const Config *config, WordsmogPlayGraph *graph,
+                            int num_groups, StringBuilder *sb) {
+  const int total_groups = wordsmog_play_graph_rank_groups(graph);
+  string_builder_add_formatted_string(
+      sb,
+      "Top groups (placement and tiles) of %d, by best play:\n"
+      " Rank  Best play                Score    Equity  Arrangements     "
+      "Plays\n",
+      total_groups);
+  for (int rank = 0; rank < num_groups && rank < total_groups; rank++) {
+    WordsmogPlayNode node;
+    wordsmog_play_graph_get_group(graph, rank, &node);
+    Move move;
+    wordsmog_play_graph_get_play(graph, &node, &move);
+    uint64_t arrangements;
+    uint64_t plays;
+    wordsmog_play_graph_count_node(graph, &node, &arrangements, &plays);
+    string_builder_add_smog_play(sb, config->game, rank + 1, &move);
+    string_builder_add_formatted_string(sb, " %13llu %9llu\n",
+                                        (unsigned long long)arrangements,
+                                        (unsigned long long)plays);
+  }
+}
+
+static void smog_add_count(WordsmogPlayGraph *graph, StringBuilder *sb) {
+  uint64_t arrangements;
+  uint64_t plays;
+  wordsmog_play_graph_count(graph, &arrangements, &plays);
+  const int groups = wordsmog_play_graph_rank_groups(graph);
+  string_builder_add_formatted_string(
+      sb,
+      "Groups (placement and tiles):     %d\n"
+      "Arrangements:                     %llu\n"
+      "Plays, every blank designation:   %llu\n",
+      groups, (unsigned long long)arrangements, (unsigned long long)plays);
+}
+
+// A node: the group ranked by the argument after "group", with each later
+// argument pinned to the next square in turn, and then its children.
+static void smog_add_node(const Config *config, WordsmogPlayGraph *graph,
+                          StringBuilder *sb, ErrorStack *error_stack) {
+  const int total_groups = wordsmog_play_graph_rank_groups(graph);
+  const char *rank_str =
+      config_get_parg_value(config, ARG_TOKEN_WORDSMOG_GRAPH, 1);
+  if (rank_str == NULL || total_groups == 0) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_WORDSMOG_GRAPH_INVALID_ARG,
+        get_formatted_string(total_groups == 0
+                                 ? "the position has no tile placement plays"
+                                 : "expected a group rank from 1 to %d",
+                             total_groups));
+    return;
+  }
+  int rank;
+  string_to_int_or_push_error("group rank", rank_str, 1, total_groups,
+                              ERROR_STATUS_WORDSMOG_GRAPH_INVALID_ARG, &rank,
+                              error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  const LetterDistribution *ld = game_get_ld(config->game);
+  WordsmogPlayNode node;
+  wordsmog_play_graph_get_group(graph, rank - 1, &node);
+  for (int arg_idx = 2;; arg_idx++) {
+    const char *tile_str =
+        config_get_parg_value(config, ARG_TOKEN_WORDSMOG_GRAPH, arg_idx);
+    if (tile_str == NULL) {
+      break;
+    }
+    MachineLetter mls[2];
+    const int num_mls = ld_str_to_mls(ld, tile_str, false, mls, 2);
+    if (num_mls != 1 || node.num_pinned == node.num_squares) {
+      error_stack_push(
+          error_stack, ERROR_STATUS_WORDSMOG_GRAPH_INVALID_ARG,
+          get_formatted_string(
+              num_mls != 1 ? "expected one tile, a letter or ?, but got '%s'"
+                           : "every square is already pinned before '%s'",
+              tile_str));
+      return;
+    }
+    const MachineLetter pin =
+        mls[0] == BLANK_MACHINE_LETTER || get_is_blanked(mls[0])
+            ? WORDSMOG_PIN_BLANK
+            : mls[0];
+    WordsmogPlayNode children[RACK_SIZE + 1];
+    const int num_children =
+        wordsmog_play_graph_get_children(graph, &node, children);
+    int child_idx = 0;
+    while (child_idx < num_children &&
+           children[child_idx].pins[node.num_pinned] != pin) {
+      child_idx++;
+    }
+    if (child_idx == num_children) {
+      int row;
+      int col;
+      wordsmog_play_graph_get_next_square(graph, &node, &row, &col);
+      error_stack_push(
+          error_stack, ERROR_STATUS_WORDSMOG_GRAPH_INVALID_ARG,
+          get_formatted_string("no play of group %d puts '%s' on %c%d next",
+                               rank, tile_str, 'A' + col, row + 1));
+      return;
+    }
+    node = children[child_idx];
+  }
+
+  Move move;
+  wordsmog_play_graph_get_play(graph, &node, &move);
+  uint64_t arrangements;
+  uint64_t plays;
+  wordsmog_play_graph_count_node(graph, &node, &arrangements, &plays);
+  string_builder_add_formatted_string(sb, "Group %d of %d, pinned:", rank,
+                                      total_groups);
+  if (node.num_pinned == 0) {
+    string_builder_add_string(sb, " none");
+  }
+  for (int pin_idx = 0; pin_idx < node.num_pinned; pin_idx++) {
+    string_builder_add_string(sb, " ");
+    string_builder_add_smog_tile(sb, ld, node.pins[pin_idx]);
+  }
+  string_builder_add_formatted_string(
+      sb, " (%d of %d squares); %llu arrangements, %llu plays\n",
+      node.num_pinned, node.num_squares, (unsigned long long)arrangements,
+      (unsigned long long)plays);
+  string_builder_add_string(sb, " Best  Play                     Score    "
+                                "Equity\n");
+  string_builder_add_smog_play(sb, config->game, 1, &move);
+  string_builder_add_string(sb, "\n");
+  if (node.num_pinned == node.num_squares) {
+    return;
+  }
+  int row;
+  int col;
+  wordsmog_play_graph_get_next_square(graph, &node, &row, &col);
+  string_builder_add_string(sb, "Next square ");
+  string_builder_add_smog_square(sb, row, col);
+  string_builder_add_string(sb, ", by tile:\n"
+                                " Rank  Best play                Score    "
+                                "Equity  Tile  Arrangements\n");
+  WordsmogPlayNode children[RACK_SIZE + 1];
+  const int num_children =
+      wordsmog_play_graph_get_children(graph, &node, children);
+  for (int child_idx = 0; child_idx < num_children; child_idx++) {
+    wordsmog_play_graph_get_play(graph, &children[child_idx], &move);
+    wordsmog_play_graph_count_node(graph, &children[child_idx], &arrangements,
+                                   &plays);
+    string_builder_add_smog_play(sb, config->game, child_idx + 1, &move);
+    string_builder_add_string(sb, "  ");
+    string_builder_add_smog_tile(sb, ld,
+                                 children[child_idx].pins[node.num_pinned]);
+    string_builder_add_formatted_string(sb, "  %12llu\n",
+                                        (unsigned long long)arrangements);
+  }
+}
+
+char *impl_wordsmog_graph(Config *config, ErrorStack *error_stack) {
+  if (!config_has_game_data(config)) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
+        string_duplicate("cannot explore plays without a lexicon"));
+    return empty_string();
+  }
+  config_init_game(config);
+  const Player *player = game_get_player(
+      config->game, game_get_player_on_turn_index(config->game));
+  if (game_get_variant(config->game) != GAME_VARIANT_WORDSMOG ||
+      player_get_wmp(player) == NULL) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_WORDSMOG_GRAPH_UNAVAILABLE,
+        string_duplicate("smog needs a wordsmog game (-var wordsmog) and a "
+                         "word map (-wmp true)"));
+    return empty_string();
+  }
+  const char *subcommand =
+      config_get_parg_value(config, ARG_TOKEN_WORDSMOG_GRAPH, 0);
+  StringBuilder *sb = string_builder_create();
+  WordsmogPlayGraph *graph = wordsmog_play_graph_create(
+      config->game, player_get_move_sort_type(player));
+  if (subcommand == NULL || is_all_digits_or_empty(subcommand)) {
+    const int num_plays =
+        smog_count_arg(config, 0, config_get_num_plays(config), error_stack);
+    if (error_stack_is_empty(error_stack)) {
+      smog_add_plays(config, graph, num_plays, sb);
+    }
+  } else if (strings_iequal(subcommand, "groups")) {
+    const int num_groups =
+        smog_count_arg(config, 1, config_get_num_plays(config), error_stack);
+    if (error_stack_is_empty(error_stack)) {
+      smog_add_groups(config, graph, num_groups, sb);
+    }
+  } else if (strings_iequal(subcommand, "count")) {
+    smog_add_count(graph, sb);
+  } else if (strings_iequal(subcommand, "group")) {
+    smog_add_node(config, graph, sb, error_stack);
+  } else {
+    error_stack_push(
+        error_stack, ERROR_STATUS_WORDSMOG_GRAPH_INVALID_ARG,
+        get_formatted_string("unrecognized smog subcommand '%s'; expected a "
+                             "number of plays, groups, count or group",
+                             subcommand));
+  }
+  wordsmog_play_graph_destroy(graph);
+  return string_builder_dump_and_destroy(sb, NULL);
+}
+
+void execute_wordsmog_graph(Config *config, ErrorStack *error_stack) {
+  char *result = impl_wordsmog_graph(config, error_stack);
+  if (error_stack_is_empty(error_stack)) {
+    thread_control_print(config->thread_control, result);
+  }
+  free(result);
+}
+
+char *str_api_wordsmog_graph(Config *config, ErrorStack *error_stack) {
+  return impl_wordsmog_graph(config, error_stack);
 }
 
 // Rack and gen
@@ -14608,6 +14915,8 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   cmd(ARG_TOKEN_RACK, "rack", 1, 1, set_rack, generic, true);
   cmd(ARG_TOKEN_RANDOM_RACK, "rrack", 0, 0, set_random_rack, generic, true);
   cmd(ARG_TOKEN_GEN, "generate", 0, 0, move_gen, generic, true);
+  cmd(ARG_TOKEN_WORDSMOG_GRAPH, "smog", 0, 2 + RACK_SIZE, wordsmog_graph,
+      generic, false);
   cmd(ARG_TOKEN_SIM, "simulate", 0, 1, sim, sim, false);
   cmd(ARG_TOKEN_SNOPRUNE, "snoprune", 0, 1, snoprune, snoprune, false);
   cmd(ARG_TOKEN_GEN_AND_SIM, "gsimulate", 0, 1, gen_and_sim, gen_and_sim,
@@ -15065,6 +15374,7 @@ void config_add_settings_to_string_builder(const Config *config,
     case ARG_TOKEN_RACK:
     case ARG_TOKEN_RANDOM_RACK:
     case ARG_TOKEN_GEN:
+    case ARG_TOKEN_WORDSMOG_GRAPH:
     case ARG_TOKEN_SIM:
     case ARG_TOKEN_SNOPRUNE:
     case ARG_TOKEN_GEN_AND_SIM:

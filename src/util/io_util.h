@@ -314,6 +314,10 @@ typedef enum {
   ERROR_STATUS_DATA_FETCH_MANIFEST_INVALID,
   ERROR_STATUS_DATA_FETCH_FILE_MISMATCH,
   ERROR_STATUS_WMP_RESULT_TOO_LARGE,
+  // `smog`: the position is not wordsmog with a WMP, or an argument is out of
+  // range.
+  ERROR_STATUS_WORDSMOG_GRAPH_UNAVAILABLE,
+  ERROR_STATUS_WORDSMOG_GRAPH_INVALID_ARG,
 } error_code_t;
 
 typedef enum {

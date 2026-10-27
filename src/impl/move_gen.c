@@ -5152,6 +5152,9 @@ typedef struct WordsmogGraphGroup {
   // adjustment, and its score is base_score plus its arrangement's score.
   Equity base_equity;
   Equity base_score;
+  // The equity and score of its best play.
+  Equity best_equity;
+  Equity best_score;
 } WordsmogGraphGroup;
 
 // The arrangements of a group that put pins[square] on each square below
@@ -5177,6 +5180,8 @@ struct WordsmogPlayGraph {
   WordsmogTiles *tiles;
   int num_tiles;
   int tiles_capacity;
+  // The groups best first, once wordsmog_play_graph_rank_groups has run.
+  int *group_ranks;
   WordsmogGraphNode *heap;
   int heap_count;
   int heap_capacity;
@@ -5359,6 +5364,8 @@ static void wordsmog_graph_expand_anchor(WordsmogPlayGraph *graph,
                                                   pins, &root, &best);
       assert(legal);
       (void)legal;
+      group->best_equity = root.equity;
+      group->best_score = root.score;
       graph->num_groups++;
       wordsmog_graph_push(graph, root);
     }
@@ -5368,10 +5375,11 @@ static void wordsmog_graph_expand_anchor(WordsmogPlayGraph *graph,
   }
 }
 
-// Pushes the children of node: one more square pinned to each tile the node
-// has left that has a legal arrangement there.
-static void wordsmog_graph_expand_node(WordsmogPlayGraph *graph,
-                                       const WordsmogGraphNode *node) {
+// The children of node: one more square pinned to each tile the node has left
+// that has a legal arrangement there. Returns how many.
+static int wordsmog_graph_children(const WordsmogPlayGraph *graph,
+                                   const WordsmogGraphNode *node,
+                                   WordsmogGraphNode children[RACK_SIZE + 1]) {
   const WordsmogGraphGroup *group = &graph->groups[node->group_idx];
   const WordsmogTiles *tiles = &graph->tiles[group->tiles_idx];
   int counts[RACK_SIZE];
@@ -5394,8 +5402,8 @@ static void wordsmog_graph_expand_node(WordsmogPlayGraph *graph,
   memcpy(pins, node->pins, sizeof(pins));
   const int square_idx = node->num_pinned;
   const uint64_t cross_set = group->squares[square_idx].cross_set;
-  WordsmogGraphNode child;
   WordsmogArrangement arrangement;
+  int num_children = 0;
   for (int letter_idx = 0; letter_idx < tiles->num_letters; letter_idx++) {
     const MachineLetter ml = tiles->letters[letter_idx];
     if (counts[letter_idx] == 0 || ((cross_set >> ml) & 1U) == 0) {
@@ -5403,20 +5411,30 @@ static void wordsmog_graph_expand_node(WordsmogPlayGraph *graph,
     }
     pins[square_idx] = ml;
     if (wordsmog_graph_node_init(graph, node->group_idx, square_idx + 1, pins,
-                                 &child, &arrangement)) {
-      wordsmog_graph_push(graph, child);
+                                 &children[num_children], &arrangement)) {
+      num_children++;
     }
   }
   if (blanks > 0) {
     pins[square_idx] = WORDSMOG_PIN_BLANK;
     if (wordsmog_graph_node_init(graph, node->group_idx, square_idx + 1, pins,
-                                 &child, &arrangement)) {
-      wordsmog_graph_push(graph, child);
+                                 &children[num_children], &arrangement)) {
+      num_children++;
     }
+  }
+  return num_children;
+}
+
+static void wordsmog_graph_expand_node(WordsmogPlayGraph *graph,
+                                       const WordsmogGraphNode *node) {
+  WordsmogGraphNode children[RACK_SIZE + 1];
+  const int num_children = wordsmog_graph_children(graph, node, children);
+  for (int child_idx = 0; child_idx < num_children; child_idx++) {
+    wordsmog_graph_push(graph, children[child_idx]);
   }
 }
 
-// Writes the play of a node with every square pinned.
+// Writes the best play of node.
 static void wordsmog_graph_write_play(const WordsmogPlayGraph *graph,
                                       const WordsmogGraphNode *node,
                                       Move *move) {
@@ -5521,6 +5539,148 @@ void wordsmog_play_graph_count(WordsmogPlayGraph *graph, uint64_t *arrangements,
   }
 }
 
+// Exploring the graph's nodes (see move_gen.h).
+
+static void wordsmog_graph_node_to_public(const WordsmogPlayGraph *graph,
+                                          const WordsmogGraphNode *node,
+                                          WordsmogPlayNode *public_node) {
+  public_node->group_idx = node->group_idx;
+  public_node->num_squares = graph->groups[node->group_idx].num_squares;
+  public_node->num_pinned = node->num_pinned;
+  memcpy(public_node->pins, node->pins, sizeof(public_node->pins));
+  public_node->equity = node->equity;
+  public_node->score = node->score;
+}
+
+static void wordsmog_graph_node_from_public(const WordsmogPlayNode *public_node,
+                                            WordsmogGraphNode *node) {
+  node->equity = public_node->equity;
+  node->score = public_node->score;
+  node->order = 0;
+  node->group_idx = public_node->group_idx;
+  node->num_pinned = public_node->num_pinned;
+  memcpy(node->pins, public_node->pins, sizeof(node->pins));
+}
+
+// A group's rank key: its best play's equity and score, then its index.
+typedef struct WordsmogGroupRank {
+  Equity equity;
+  Equity score;
+  int group_idx;
+} WordsmogGroupRank;
+
+static int compare_wordsmog_group_ranks(const void *a, const void *b) {
+  const WordsmogGroupRank *rank_a = a;
+  const WordsmogGroupRank *rank_b = b;
+  if (rank_a->equity != rank_b->equity) {
+    return rank_a->equity > rank_b->equity ? -1 : 1;
+  }
+  if (rank_a->score != rank_b->score) {
+    return rank_a->score > rank_b->score ? -1 : 1;
+  }
+  return rank_a->group_idx - rank_b->group_idx;
+}
+
+int wordsmog_play_graph_rank_groups(WordsmogPlayGraph *graph) {
+  AnchorHeap *anchors = &graph->gen->anchor_heap;
+  while (anchors->count > 0) {
+    const Anchor anchor = anchor_heap_extract_max(anchors);
+    wordsmog_graph_expand_anchor(graph, &anchor);
+  }
+  WordsmogGroupRank *ranks = malloc_or_die((size_t)(graph->num_groups + 1) *
+                                           sizeof(WordsmogGroupRank));
+  for (int group_idx = 0; group_idx < graph->num_groups; group_idx++) {
+    ranks[group_idx].equity = graph->groups[group_idx].best_equity;
+    ranks[group_idx].score = graph->groups[group_idx].best_score;
+    ranks[group_idx].group_idx = group_idx;
+  }
+  qsort(ranks, (size_t)graph->num_groups, sizeof(WordsmogGroupRank),
+        compare_wordsmog_group_ranks);
+  free(graph->group_ranks);
+  graph->group_ranks =
+      malloc_or_die((size_t)(graph->num_groups + 1) * sizeof(int));
+  for (int rank = 0; rank < graph->num_groups; rank++) {
+    graph->group_ranks[rank] = ranks[rank].group_idx;
+  }
+  free(ranks);
+  return graph->num_groups;
+}
+
+void wordsmog_play_graph_get_group(const WordsmogPlayGraph *graph, int rank,
+                                   WordsmogPlayNode *node) {
+  assert(graph->group_ranks != NULL);
+  assert(rank >= 0 && rank < graph->num_groups);
+  const int group_idx = graph->group_ranks[rank];
+  const WordsmogGraphGroup *group = &graph->groups[group_idx];
+  node->group_idx = group_idx;
+  node->num_squares = group->num_squares;
+  node->num_pinned = 0;
+  memset(node->pins, WORDSMOG_PIN_FREE, sizeof(node->pins));
+  node->equity = group->best_equity;
+  node->score = group->best_score;
+}
+
+void wordsmog_play_graph_get_play(const WordsmogPlayGraph *graph,
+                                  const WordsmogPlayNode *node, Move *move) {
+  WordsmogGraphNode internal_node;
+  wordsmog_graph_node_from_public(node, &internal_node);
+  wordsmog_graph_write_play(graph, &internal_node, move);
+}
+
+void wordsmog_play_graph_count_node(const WordsmogPlayGraph *graph,
+                                    const WordsmogPlayNode *node,
+                                    uint64_t *arrangements, uint64_t *plays) {
+  const WordsmogGraphGroup *group = &graph->groups[node->group_idx];
+  wordsmog_count_arrangements(group->squares, group->num_squares,
+                              &graph->tiles[group->tiles_idx], node->pins,
+                              arrangements, plays);
+}
+
+int wordsmog_play_graph_get_children(const WordsmogPlayGraph *graph,
+                                     const WordsmogPlayNode *node,
+                                     WordsmogPlayNode children[RACK_SIZE + 1]) {
+  if (node->num_pinned == node->num_squares) {
+    return 0;
+  }
+  WordsmogGraphNode internal_node;
+  wordsmog_graph_node_from_public(node, &internal_node);
+  WordsmogGraphNode internal_children[RACK_SIZE + 1];
+  const int num_children =
+      wordsmog_graph_children(graph, &internal_node, internal_children);
+  // Best first, as the graph would pop them.
+  for (int child_idx = 1; child_idx < num_children; child_idx++) {
+    const WordsmogGraphNode child = internal_children[child_idx];
+    int insert_idx = child_idx;
+    while (insert_idx > 0 && wordsmog_graph_node_ranks_above(
+                                 &child, &internal_children[insert_idx - 1])) {
+      internal_children[insert_idx] = internal_children[insert_idx - 1];
+      insert_idx--;
+    }
+    internal_children[insert_idx] = child;
+  }
+  for (int child_idx = 0; child_idx < num_children; child_idx++) {
+    wordsmog_graph_node_to_public(graph, &internal_children[child_idx],
+                                  &children[child_idx]);
+  }
+  return num_children;
+}
+
+void wordsmog_play_graph_get_next_square(const WordsmogPlayGraph *graph,
+                                         const WordsmogPlayNode *node, int *row,
+                                         int *col) {
+  assert(node->num_pinned < node->num_squares);
+  const WordsmogGraphGroup *group = &graph->groups[node->group_idx];
+  const int lane_position =
+      group->start_col + group->square_letter_idxs[node->num_pinned];
+  if (board_is_dir_vertical(group->dir)) {
+    *row = lane_position;
+    *col = group->row;
+  } else {
+    *row = group->row;
+    *col = lane_position;
+  }
+}
+
 void wordsmog_play_graph_destroy(WordsmogPlayGraph *graph) {
   if (graph == NULL) {
     return;
@@ -5528,6 +5688,7 @@ void wordsmog_play_graph_destroy(WordsmogPlayGraph *graph) {
   free(graph->heap);
   free(graph->groups);
   free(graph->tiles);
+  free(graph->group_ranks);
   move_list_destroy(graph->move_list);
   generator_destroy(graph->gen);
   free(graph);
