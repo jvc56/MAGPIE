@@ -126,6 +126,8 @@ bool tui_config_load(TuiConfig *config) {
   config->board_scale_set = false;
   config->antialias = true;
   config->antialias_set = false;
+  config->sound = true;
+  config->sound_set = false;
   config->score_subscripts = TUI_SCORE_SUBSCRIPTS_OFF;
   config->score_subscripts_set = false;
   config->rack_sort = TUI_RACK_SORT_ALPHA;
@@ -327,6 +329,14 @@ bool tui_config_load(TuiConfig *config) {
         config->antialias = false;
         config->antialias_set = true;
       }
+    } else if (strcmp(trimmed, "sound") == 0) {
+      if (strcmp(value, "true") == 0 || strcmp(value, "1") == 0) {
+        config->sound = true;
+        config->sound_set = true;
+      } else if (strcmp(value, "false") == 0 || strcmp(value, "0") == 0) {
+        config->sound = false;
+        config->sound_set = true;
+      }
     } else if (strcmp(trimmed, "score_subscripts") == 0) {
       if (strcmp(value, "off") == 0) {
         config->score_subscripts = TUI_SCORE_SUBSCRIPTS_OFF;
@@ -495,6 +505,9 @@ bool tui_config_save(const TuiConfig *config) {
   if (config->antialias_set) {
     (void)fprintf(file, "antialias = %s\n",
                   config->antialias ? "true" : "false");
+  }
+  if (config->sound_set) {
+    (void)fprintf(file, "sound = %s\n", config->sound ? "true" : "false");
   }
   if (config->score_subscripts_set) {
     const char *value;
