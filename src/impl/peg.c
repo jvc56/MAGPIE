@@ -2440,6 +2440,22 @@ static int peg_rank_cmp(const void *lhs, const void *rhs) {
   return 0;
 }
 
+// PegArgs.rank_by_utility: descending by mean spread + 2 x win% in points,
+// which orders the same as win_pct (0..1) + mean_spread / 200.
+static int peg_rank_utility_cmp(const void *lhs, const void *rhs) {
+  const PegRankedCand *a = (const PegRankedCand *)lhs;
+  const PegRankedCand *b = (const PegRankedCand *)rhs;
+  const double a_key = a->win_pct + a->mean_spread / 200.0;
+  const double b_key = b->win_pct + b->mean_spread / 200.0;
+  if (a_key < b_key) {
+    return 1;
+  }
+  if (a_key > b_key) {
+    return -1;
+  }
+  return 0;
+}
+
 // True if `move` matches one of the protected moves (snoprune analogue).
 // Cheap linear scan: the protected set is tiny.
 static bool peg_move_protected(const Move *move,
@@ -3397,6 +3413,8 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
   }
 
   if (n_cands > 0) {
+    int (*const rank_cmp)(const void *, const void *) =
+        args->rank_by_utility ? peg_rank_utility_cmp : peg_rank_cmp;
     // Protected ("never prune") moves: each stage carries these past its
     // top-K cut so they always end up in the final results.
     const int n_protect = args->n_protect_moves;
@@ -3449,11 +3467,11 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
                              : n_cands;
       if (n_head < n_cands) {
         stable_sort(ranked + n_head, (size_t)(n_cands - n_head),
-                    sizeof(PegRankedCand), peg_rank_cmp);
+                    sizeof(PegRankedCand), rank_cmp);
       }
       peg_partition_finished(ranked, n_cands);
     } else {
-      stable_sort(ranked, (size_t)n_cands, sizeof(PegRankedCand), peg_rank_cmp);
+      stable_sort(ranked, (size_t)n_cands, sizeof(PegRankedCand), rank_cmp);
     }
     // Drop budget-skipped sentinels (win_pct < 0) from the carried set: they
     // sort to the bottom, so the real candidates occupy [0, n_real).
@@ -3738,7 +3756,7 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
         free(stage_outcomes);
       }
       stable_sort(restaged, (size_t)done_count, sizeof(PegRankedCand),
-                  peg_rank_cmp);
+                  rank_cmp);
       // Partial stage: candidates [done_count, eval_count) were selected but
       // the cutoff arrived before they were scored at this depth, so record
       // them at the previous depth before narrowing to the finished set.

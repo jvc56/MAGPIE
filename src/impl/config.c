@@ -4775,7 +4775,7 @@ void config_fill_peg_args(Config *config, PegArgs *peg_args) {
       /*nested_peg2_chooser=*/NULL, /*nested_peg2_chooser_ctx=*/NULL,
       /*eval_bag_order=*/NULL,
       /*eval_bag_order_len=*/0, /*only_moves=*/NULL, /*n_only_moves=*/0,
-      /*n_ranked_only_moves=*/0,
+      /*n_ranked_only_moves=*/0, /*rank_by_utility=*/false,
       /*protect_moves=*/NULL, /*n_protect_moves=*/0,
       /*include_per_scenario=*/config->peg_show_outcomes,
       /*on_stage_start=*/NULL, /*on_cand_done=*/NULL,

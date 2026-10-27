@@ -285,6 +285,10 @@ typedef struct PegArgs {
   // by stage 0 (of those the budget let stage 0 finish). 0 = rank all by
   // stage 0; n_only_moves = keep the caller's order throughout.
   int n_ranked_only_moves;
+  // Rank the root's candidates (every stage's cut and the pick) by utility,
+  // mean spread + 2 x win% in points, instead of by win% with spread only as a
+  // tiebreak. Nested pegs are unaffected. False = win% first (default).
+  bool rank_by_utility;
 
   // Optional "protect from pruning" set (like the simmer's snoprune): moves
   // that must survive every stage's top-K cut even when their win% rank falls
@@ -348,11 +352,12 @@ static inline void peg_args_fill(
     void *nested_peg2_chooser_ctx, const MachineLetter *eval_bag_order,
     const int eval_bag_order_len, const Move *const *only_moves,
     const int n_only_moves, const int n_ranked_only_moves,
-    const Move *const *protect_moves, const int n_protect_moves,
-    const bool include_per_scenario, PegOnStageStart on_stage_start,
-    PegOnCandDone on_cand_done, PegOnScenarioDone on_scenario_done,
-    void *user_data, PegPoll *poll, TranspositionTable *shared_endgame_tt,
-    PegCheckpoint *checkpoint, bool resume, PegArgs *peg_args) {
+    const bool rank_by_utility, const Move *const *protect_moves,
+    const int n_protect_moves, const bool include_per_scenario,
+    PegOnStageStart on_stage_start, PegOnCandDone on_cand_done,
+    PegOnScenarioDone on_scenario_done, void *user_data, PegPoll *poll,
+    TranspositionTable *shared_endgame_tt, PegCheckpoint *checkpoint,
+    bool resume, PegArgs *peg_args) {
   peg_args->game = game;
   peg_args->thread_control = thread_control;
   peg_args->num_threads = num_threads;
@@ -384,6 +389,7 @@ static inline void peg_args_fill(
   peg_args->only_moves = only_moves;
   peg_args->n_only_moves = n_only_moves;
   peg_args->n_ranked_only_moves = n_ranked_only_moves;
+  peg_args->rank_by_utility = rank_by_utility;
   peg_args->protect_moves = protect_moves;
   peg_args->n_protect_moves = n_protect_moves;
   peg_args->include_per_scenario = include_per_scenario;
@@ -449,7 +455,8 @@ typedef struct PegResult {
   Timer timer;
 
   // Top-K cand list from the last completed stage, sorted descending by
-  // (win_pct + 1e-4 * mean_spread). Caller owns/frees via peg_result_destroy.
+  // (win_pct + 1e-4 * mean_spread), or by utility with
+  // PegArgs.rank_by_utility. Caller owns/frees via peg_result_destroy.
   // NULL on failure.
   PegRankedCand *top_cands;
   int n_top_cands;
