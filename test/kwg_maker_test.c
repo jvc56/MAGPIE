@@ -618,6 +618,52 @@ void test_kwg_merge_build_bench(void) {
   config_destroy(pos_config);
 }
 
+// The small KWGs that the endgame and PEG generate moves from carry sibling
+// tile bitsets: each node's bitset holds its tile and those of the siblings
+// after it in its list.
+static void test_small_kwg_sibling_tiles(void) {
+  Config *config = config_create_or_die("set -lex CSW21");
+  Game *game = config_game_create(config);
+  const KWG *csw_kwg = player_get_kwg(game_get_player(game, 0));
+  DictionaryWordList *all_words = dictionary_word_list_create();
+  kwg_write_words(csw_kwg, kwg_get_dawg_root_node_index(csw_kwg), all_words,
+                  NULL);
+  const int total = dictionary_word_list_get_count(all_words);
+  DictionaryWordList *words = dictionary_word_list_create();
+  const int target = 5000;
+  for (int word_idx = 0; word_idx < target; word_idx++) {
+    const DictionaryWord *word = dictionary_word_list_get_word(
+        all_words, (int)((int64_t)word_idx * total / target));
+    dictionary_word_list_add_word(words, dictionary_word_get_word(word),
+                                  dictionary_word_get_length(word));
+  }
+  const kwg_maker_output_t outputs[2] = {KWG_MAKER_OUTPUT_GADDAG,
+                                         KWG_MAKER_OUTPUT_DAWG_AND_GADDAG};
+  for (int output_idx = 0; output_idx < 2; output_idx++) {
+    KWG *kwg = make_kwg_from_words_small(words, outputs[output_idx],
+                                         KWG_MAKER_MERGE_EXACT);
+    const uint64_t *sibling_tiles = kwg_get_sibling_tiles(kwg);
+    assert(sibling_tiles != NULL);
+    for (int node_idx = 0; node_idx < kwg_get_number_of_nodes(kwg);
+         node_idx++) {
+      uint64_t expected = 0;
+      for (uint32_t sibling_idx = (uint32_t)node_idx;; sibling_idx++) {
+        const uint32_t node = kwg_node(kwg, sibling_idx);
+        expected |= (uint64_t)1 << kwg_node_tile(node);
+        if (kwg_node_is_end(node)) {
+          break;
+        }
+      }
+      assert(sibling_tiles[node_idx] == expected);
+    }
+    kwg_destroy(kwg);
+  }
+  dictionary_word_list_destroy(words);
+  dictionary_word_list_destroy(all_words);
+  game_destroy(game);
+  config_destroy(config);
+}
+
 void test_kwg_maker(void) {
   test_qi_xi_xu_word_trie();
   test_egg_unmerged_gaddag();
@@ -628,4 +674,5 @@ void test_kwg_maker(void) {
   test_polish_gaddag();
   test_large_gaddag();
   test_full_csw_gaddag();
+  test_small_kwg_sibling_tiles();
 }

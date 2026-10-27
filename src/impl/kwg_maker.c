@@ -1930,9 +1930,9 @@ KWG *make_kwg_from_words(const DictionaryWordList *words,
 
 // Optimized version for small dictionaries (endgame wordprune case).
 // Uses the compact state builder for efficiency.
-KWG *make_kwg_from_words_small(const DictionaryWordList *words,
-                               kwg_maker_output_t output,
-                               kwg_maker_merge_t merging) {
+static KWG *make_small_kwg(const DictionaryWordList *words,
+                           kwg_maker_output_t output,
+                           kwg_maker_merge_t merging) {
   if (merging == KWG_MAKER_MERGE_TAIL_REORDER) {
     if (output != KWG_MAKER_OUTPUT_DAWG) {
       log_fatal("KWG_MAKER_MERGE_TAIL_REORDER supports DAWG output only");
@@ -2032,5 +2032,15 @@ KWG *make_kwg_from_words_small(const DictionaryWordList *words,
 
   mutable_node_list_destroy(nodes);
   node_pointer_list_destroy(ordered_pointers);
+  return kwg;
+}
+
+// The endgame and PEG generate moves from these word graphs at every node, so
+// each gets its sibling tile bitsets (kwg_build_sibling_tiles).
+KWG *make_kwg_from_words_small(const DictionaryWordList *words,
+                               kwg_maker_output_t output,
+                               kwg_maker_merge_t merging) {
+  KWG *kwg = make_small_kwg(words, output, merging);
+  kwg_build_sibling_tiles(kwg);
   return kwg;
 }

@@ -18,6 +18,9 @@ typedef struct KWG {
   char *name;
   uint32_t *nodes;
   int number_of_nodes;
+  // For each node, the tiles of it and of the siblings after it in its list,
+  // as a bitset; see kwg_build_sibling_tiles. NULL unless built.
+  uint64_t *sibling_tiles;
 } KWG;
 
 // The KWG data structure was originally
@@ -98,6 +101,42 @@ static inline uint32_t kwg_get_next_node_index(const KWG *kwg,
   }
 }
 
+// Builds kwg->sibling_tiles, so a node list's arc for a tile is found from
+// the list's first node without walking the list: it is there exactly when
+// the list's bitset has the tile, at the first node plus the number of the
+// list's tiles below it. That needs every list's tiles to ascend and to fit in
+// the bitset; for a KWG where they don't, nothing is built.
+static inline void kwg_build_sibling_tiles(KWG *kwg) {
+  const int number_of_nodes = kwg->number_of_nodes;
+  uint64_t *sibling_tiles =
+      malloc_or_die((size_t)number_of_nodes * sizeof(uint64_t));
+  uint64_t after = 0;
+  uint32_t next_tile = 0;
+  for (int node_idx = number_of_nodes - 1; node_idx >= 0; node_idx--) {
+    const uint32_t node = kwg->nodes[node_idx];
+    const uint32_t tile = kwg_node_tile(node);
+    if (kwg_node_is_end(node)) {
+      after = 0;
+    } else if (tile >= next_tile) {
+      free(sibling_tiles);
+      return;
+    }
+    if (tile >= 64) {
+      free(sibling_tiles);
+      return;
+    }
+    after |= (uint64_t)1 << tile;
+    sibling_tiles[node_idx] = after;
+    next_tile = tile;
+  }
+  free(kwg->sibling_tiles);
+  kwg->sibling_tiles = sibling_tiles;
+}
+
+static inline const uint64_t *kwg_get_sibling_tiles(const KWG *kwg) {
+  return kwg->sibling_tiles;
+}
+
 static inline uint64_t kwg_get_letter_sets(const KWG *kwg, uint32_t node_index,
                                            uint64_t *extension_set) {
   uint64_t ls = 0;
@@ -154,6 +193,7 @@ static inline void load_kwg(const char *kwg_name, const char *kwg_filename,
   size_t number_of_nodes = (size_t)kwg_size / sizeof(uint32_t);
 
   kwg_read_nodes_from_stream(kwg, number_of_nodes, stream);
+  kwg_build_sibling_tiles(kwg);
 
   fclose_or_die(stream);
 }
@@ -164,6 +204,7 @@ static inline void kwg_destroy(KWG *kwg) {
   }
   free(kwg->nodes);
   free(kwg->name);
+  free(kwg->sibling_tiles);
   free(kwg);
 }
 
@@ -187,6 +228,7 @@ static inline KWG *kwg_create(const char *data_paths, const char *kwg_name,
 static inline KWG *kwg_create_empty(void) {
   KWG *kwg = malloc_or_die(sizeof(KWG));
   kwg->name = NULL;
+  kwg->sibling_tiles = NULL;
   return kwg;
 }
 
