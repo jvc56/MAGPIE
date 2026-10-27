@@ -1,19 +1,23 @@
 #include "wordsmog_wmp_test.h"
 
+#include "../src/compat/ctime.h"
 #include "../src/def/board_defs.h"
 #include "../src/def/game_defs.h"
 #include "../src/def/letter_distribution_defs.h"
 #include "../src/def/rack_defs.h"
+#include "../src/def/wordsmog_defs.h"
 #include "../src/ent/board.h"
 #include "../src/ent/equity.h"
 #include "../src/ent/game.h"
 #include "../src/ent/letter_distribution.h"
 #include "../src/ent/move.h"
 #include "../src/ent/player.h"
+#include "../src/ent/rack.h"
 #include "../src/ent/words.h"
 #include "../src/impl/cgp.h"
 #include "../src/impl/config.h"
 #include "../src/impl/gameplay.h"
+#include "../src/impl/move_gen.h"
 #include "../src/impl/wordsmog_arrangement.h"
 #include "../src/str/move_string.h"
 #include "../src/util/io_util.h"
@@ -32,6 +36,8 @@ enum {
   // The brute-force check's letters are 1 .. ARRANGEMENT_TEST_LETTERS.
   ARRANGEMENT_TEST_LETTERS = 5,
   ARRANGEMENT_TEST_CASES = 20000,
+  PLAY_GRAPH_TEST_GAMES = 2,
+  PLAY_GRAPH_TEST_MAX_PLAYS = 100000,
 };
 
 // The alpha generator, which needs no WMP, is the reference.
@@ -59,15 +65,22 @@ static int test_random_below(uint64_t *state, int bound) {
   return (int)(test_random_next(state) % (uint64_t)bound);
 }
 
-// The best arrangement found by trying every order of the tiles and every
-// blank designation, ranked as wordsmog_best_arrangement ranks them.
+// Every arrangement found by brute force: each order of the tiles, a blank as
+// an undesignated tile, and then each designation of the blanks, ranked as
+// wordsmog_best_arrangement ranks them and counted as
+// wordsmog_count_arrangements counts them.
 typedef struct BruteForce {
   const WordsmogSquare *squares;
   int num_squares;
   const WordsmogTiles *tiles;
+  const MachineLetter *pins;
   int remaining[RACK_SIZE];
   int blanks_remaining;
+  // Each square's tile: a natural letter, or WORDSMOG_PIN_BLANK.
+  MachineLetter types[RACK_SIZE];
   MachineLetter current[RACK_SIZE];
+  uint64_t arrangements;
+  uint64_t plays;
   bool found;
   Equity best_total;
   Equity best_score;
@@ -97,9 +110,6 @@ static bool brute_force_designations_valid(const BruteForce *bf) {
 }
 
 static void brute_force_consider(BruteForce *bf) {
-  if (!brute_force_designations_valid(bf)) {
-    return;
-  }
   Equity score = 0;
   Equity adjustment = 0;
   for (int square_idx = 0; square_idx < bf->num_squares; square_idx++) {
@@ -133,39 +143,68 @@ static void brute_force_consider(BruteForce *bf) {
   }
 }
 
+// Each designation of the blanks in bf->types from square_idx on. Returns how
+// many keep the main word valid.
+static uint64_t brute_force_designate(BruteForce *bf, int square_idx) {
+  if (square_idx == bf->num_squares) {
+    if (!brute_force_designations_valid(bf)) {
+      return 0;
+    }
+    brute_force_consider(bf);
+    return 1;
+  }
+  if (bf->types[square_idx] != WORDSMOG_PIN_BLANK) {
+    bf->current[square_idx] = bf->types[square_idx];
+    return brute_force_designate(bf, square_idx + 1);
+  }
+  uint64_t count = 0;
+  for (int ml = 1; ml <= ARRANGEMENT_TEST_LETTERS; ml++) {
+    if (((bf->squares[square_idx].cross_set >> ml) & 1U) == 0) {
+      continue;
+    }
+    bf->current[square_idx] = get_blanked_machine_letter((MachineLetter)ml);
+    count += brute_force_designate(bf, square_idx + 1);
+  }
+  return count;
+}
+
 static void brute_force_place(BruteForce *bf, int square_idx) {
   if (square_idx == bf->num_squares) {
-    brute_force_consider(bf);
+    const uint64_t designations = brute_force_designate(bf, 0);
+    if (designations > 0) {
+      bf->arrangements++;
+      bf->plays += designations;
+    }
     return;
   }
+  const MachineLetter pin =
+      bf->pins != NULL ? bf->pins[square_idx] : WORDSMOG_PIN_FREE;
   const uint64_t cross_set = bf->squares[square_idx].cross_set;
   for (int letter_idx = 0; letter_idx < bf->tiles->num_letters; letter_idx++) {
     const MachineLetter ml = bf->tiles->letters[letter_idx];
-    if (bf->remaining[letter_idx] == 0 || ((cross_set >> ml) & 1U) == 0) {
+    if (bf->remaining[letter_idx] == 0 || ((cross_set >> ml) & 1U) == 0 ||
+        (pin != WORDSMOG_PIN_FREE && pin != ml)) {
       continue;
     }
     bf->remaining[letter_idx]--;
-    bf->current[square_idx] = ml;
+    bf->types[square_idx] = ml;
     brute_force_place(bf, square_idx + 1);
     bf->remaining[letter_idx]++;
   }
-  if (bf->blanks_remaining > 0) {
+  if (bf->blanks_remaining > 0 &&
+      (pin == WORDSMOG_PIN_FREE || pin == WORDSMOG_PIN_BLANK)) {
     bf->blanks_remaining--;
-    for (int ml = 1; ml <= ARRANGEMENT_TEST_LETTERS; ml++) {
-      if (((cross_set >> ml) & 1U) == 0) {
-        continue;
-      }
-      bf->current[square_idx] = get_blanked_machine_letter((MachineLetter)ml);
-      brute_force_place(bf, square_idx + 1);
-    }
+    bf->types[square_idx] = WORDSMOG_PIN_BLANK;
+    brute_force_place(bf, square_idx + 1);
     bf->blanks_remaining++;
   }
 }
 
-// wordsmog_best_arrangement agrees with brute force on random squares and
-// tiles: whether any arrangement is legal, and the best one's score,
-// adjustment and tiles.
-static void test_wordsmog_best_arrangement_brute_force(void) {
+// wordsmog_best_arrangement and wordsmog_count_arrangements agree with brute
+// force on random squares, tiles and pins: whether any arrangement is legal,
+// the best one's score, adjustment and tiles, and how many there are with and
+// without the blanks' designations.
+static void test_wordsmog_arrangement_brute_force(void) {
   uint64_t random_state = WORDSMOG_WMP_TEST_SEED;
   const uint64_t letter_mask =
       ((1ULL << (ARRANGEMENT_TEST_LETTERS + 1)) - 1) & ~(uint64_t)1;
@@ -218,36 +257,58 @@ static void test_wordsmog_best_arrangement_brute_force(void) {
           (uint32_t)(test_random_next(&random_state) & letter_mask) &
           ~((1U << low) - 1U);
     }
+    wordsmog_tiles_set_states(&tiles);
+    // Half the cases pin some squares, to a letter or to a blank.
+    MachineLetter pin_storage[RACK_SIZE];
+    const MachineLetter *pins = NULL;
+    if (test_random_below(&random_state, 2) == 0) {
+      for (int square_idx = 0; square_idx < num_squares; square_idx++) {
+        const int pick = test_random_below(&random_state, 10);
+        pin_storage[square_idx] =
+            pick < 6
+                ? WORDSMOG_PIN_FREE
+                : (pick < 9 ? (MachineLetter)(1 + test_random_below(
+                                                      &random_state,
+                                                      ARRANGEMENT_TEST_LETTERS))
+                            : WORDSMOG_PIN_BLANK);
+      }
+      pins = pin_storage;
+    }
 
     WordsmogArrangement arrangement;
-    const bool found =
-        wordsmog_best_arrangement(squares, num_squares, &tiles, &arrangement);
+    const bool found = wordsmog_best_arrangement(squares, num_squares, &tiles,
+                                                 pins, &arrangement);
+    uint64_t arrangements;
+    uint64_t plays;
+    wordsmog_count_arrangements(squares, num_squares, &tiles, pins,
+                                &arrangements, &plays);
 
     BruteForce bf;
     memset(&bf, 0, sizeof(bf));
     bf.squares = squares;
     bf.num_squares = num_squares;
     bf.tiles = &tiles;
+    bf.pins = pins;
     for (int letter_idx = 0; letter_idx < tiles.num_letters; letter_idx++) {
       bf.remaining[letter_idx] = tiles.counts[letter_idx];
     }
     bf.blanks_remaining = tiles.num_blanks;
     brute_force_place(&bf, 0);
 
-    if (found != bf.found ||
+    if (found != bf.found || arrangements != bf.arrangements ||
+        plays != bf.plays ||
         (found &&
          (arrangement.score + arrangement.adjustment != bf.best_total ||
           arrangement.score != bf.best_score ||
           memcmp(arrangement.tiles, bf.best_tiles, (size_t)num_squares) !=
               0))) {
-      log_fatal("best arrangement differs from brute force in case %d",
-                case_idx);
+      log_fatal("arrangements differ from brute force in case %d", case_idx);
     }
     if (found) {
       num_legal++;
     }
   }
-  printf("wordsmog best arrangement: %d of %d cases legal, all matched brute "
+  printf("wordsmog arrangements: %d of %d cases legal, all matched brute "
          "force\n",
          num_legal, ARRANGEMENT_TEST_CASES);
   assert(num_legal > ARRANGEMENT_TEST_CASES / 4);
@@ -369,7 +430,390 @@ static void test_wordsmog_wmp_games(void) {
   config_destroy(alpha_config);
 }
 
+// A play's place and tiles, comparable with memcmp: with designate false, a
+// blank is BLANK_MASK whatever it stands for, and with sort_tiles true, the
+// placed tiles are sorted, so the key is the placement and tile multiset.
+typedef struct PlayKey {
+  uint8_t row;
+  uint8_t col;
+  uint8_t dir;
+  uint8_t length;
+  MachineLetter tiles[BOARD_DIM];
+} PlayKey;
+
+typedef struct PlayRecord {
+  PlayKey key;
+  Equity equity;
+  Equity score;
+} PlayRecord;
+
+static int compare_machine_letters(const void *a, const void *b) {
+  return (int)*(const MachineLetter *)a - (int)*(const MachineLetter *)b;
+}
+
+static void play_key_init(const Move *move, bool designate, bool sort_tiles,
+                          PlayKey *key) {
+  memset(key, 0, sizeof(*key));
+  key->row = (uint8_t)move_get_row_start(move);
+  key->col = (uint8_t)move_get_col_start(move);
+  key->dir = (uint8_t)move_get_dir(move);
+  key->length = (uint8_t)move_get_tiles_length(move);
+  int num_tiles = 0;
+  for (int tile_idx = 0; tile_idx < key->length; tile_idx++) {
+    MachineLetter tile = move_get_tile(move, tile_idx);
+    if (sort_tiles && tile == PLAYED_THROUGH_MARKER) {
+      continue;
+    }
+    if (!designate && get_is_blanked(tile)) {
+      tile = BLANK_MASK;
+    }
+    key->tiles[num_tiles++] = tile;
+  }
+  if (sort_tiles) {
+    qsort(key->tiles, (size_t)num_tiles, sizeof(MachineLetter),
+          compare_machine_letters);
+  }
+}
+
+static int compare_play_records(const void *a, const void *b) {
+  return memcmp(&((const PlayRecord *)a)->key, &((const PlayRecord *)b)->key,
+                sizeof(PlayKey));
+}
+
+// The tile placement plays of move_list, keyed as play_key_init keys them and
+// sorted by key. Returns how many.
+static int play_records_create(const MoveList *move_list, bool designate,
+                               bool sort_tiles, PlayRecord **records) {
+  *records = malloc_or_die((size_t)(move_list_get_count(move_list) + 1) *
+                           sizeof(PlayRecord));
+  int num_records = 0;
+  for (int move_idx = 0; move_idx < move_list_get_count(move_list);
+       move_idx++) {
+    const Move *move = move_list_get_move(move_list, move_idx);
+    if (move_get_type(move) != GAME_EVENT_TILE_PLACEMENT_MOVE) {
+      continue;
+    }
+    PlayRecord *record = &(*records)[num_records++];
+    play_key_init(move, designate, sort_tiles, &record->key);
+    record->equity = move_get_equity(move);
+    record->score = move_get_score(move);
+  }
+  qsort(*records, (size_t)num_records, sizeof(PlayRecord),
+        compare_play_records);
+  return num_records;
+}
+
+// Keeps the record with the best equity, then score, of each run of equal
+// keys. Returns how many are left.
+static int play_records_keep_best_per_key(PlayRecord *records,
+                                          int num_records) {
+  int num_kept = 0;
+  for (int record_idx = 0; record_idx < num_records; record_idx++) {
+    if (num_kept > 0 &&
+        memcmp(&records[num_kept - 1].key, &records[record_idx].key,
+               sizeof(PlayKey)) == 0) {
+      PlayRecord *kept = &records[num_kept - 1];
+      if (records[record_idx].equity > kept->equity ||
+          (records[record_idx].equity == kept->equity &&
+           records[record_idx].score > kept->score)) {
+        *kept = records[record_idx];
+      }
+      continue;
+    }
+    records[num_kept++] = records[record_idx];
+  }
+  return num_kept;
+}
+
+static const PlayRecord *play_records_find(const PlayRecord *records,
+                                           int num_records,
+                                           const PlayKey *key) {
+  PlayRecord target = {.key = *key, .equity = 0, .score = 0};
+  return bsearch(&target, records, (size_t)num_records, sizeof(PlayRecord),
+                 compare_play_records);
+}
+
+static MoveList *generate_all_moves(Game *game, int capacity) {
+  MoveList *move_list = move_list_create(capacity);
+  const MoveGenArgs args = {.game = game,
+                            .move_list = move_list,
+                            .move_record_type = MOVE_RECORD_ALL,
+                            .move_sort_type = MOVE_SORT_EQUITY,
+                            .override_kwg = NULL,
+                            .eq_margin_movegen = 0,
+                            .target_equity = EQUITY_MAX_VALUE};
+  generate_moves(&args);
+  return move_list;
+}
+
+// Checks one position's play graph, and the WMP's MOVE_RECORD_ALL list,
+// against every play the alpha generator lists. Returns false when the
+// position has more plays than max_plays, and is skipped.
+static bool check_play_graph(Game *alpha_game, Game *wmp_game,
+                             uint64_t max_plays, uint64_t *num_plays) {
+  WordsmogPlayGraph *graph =
+      wordsmog_play_graph_create(wmp_game, MOVE_SORT_EQUITY);
+  uint64_t arrangements;
+  uint64_t plays;
+  wordsmog_play_graph_count(graph, &arrangements, &plays);
+  *num_plays = plays;
+  if (plays > max_plays) {
+    wordsmog_play_graph_destroy(graph);
+    return false;
+  }
+  // Every play the alpha generator lists, with room for exchanges and the
+  // pass.
+  MoveList *alpha_list = generate_all_moves(alpha_game, (int)plays + 1000);
+  PlayRecord *alpha_plays;
+  const int num_alpha_plays =
+      play_records_create(alpha_list, true, false, &alpha_plays);
+  assert((uint64_t)num_alpha_plays == plays);
+  PlayRecord *alpha_arrangements;
+  int num_alpha_arrangements =
+      play_records_create(alpha_list, false, false, &alpha_arrangements);
+  num_alpha_arrangements = play_records_keep_best_per_key(
+      alpha_arrangements, num_alpha_arrangements);
+  assert((uint64_t)num_alpha_arrangements == arrangements);
+
+  // The graph lists each arrangement once, best first, with the equity of its
+  // best designation, and each play is one the alpha generator lists.
+  Move move;
+  uint64_t num_listed = 0;
+  Equity previous_equity = EQUITY_MAX_VALUE;
+  while (wordsmog_play_graph_next(graph, &move)) {
+    assert(move_get_equity(&move) <= previous_equity);
+    previous_equity = move_get_equity(&move);
+    PlayKey key;
+    play_key_init(&move, true, false, &key);
+    const PlayRecord *alpha_play =
+        play_records_find(alpha_plays, num_alpha_plays, &key);
+    assert(alpha_play != NULL);
+    assert(alpha_play->equity == move_get_equity(&move));
+    assert(alpha_play->score == move_get_score(&move));
+    play_key_init(&move, false, false, &key);
+    const PlayRecord *alpha_arrangement =
+        play_records_find(alpha_arrangements, num_alpha_arrangements, &key);
+    assert(alpha_arrangement != NULL);
+    assert(alpha_arrangement->equity == move_get_equity(&move));
+    num_listed++;
+  }
+  assert(num_listed == arrangements);
+  wordsmog_play_graph_destroy(graph);
+
+  // MOVE_RECORD_ALL with the WMP holds the best play of each placement and
+  // tile multiset.
+  PlayRecord *alpha_groups;
+  int num_alpha_groups =
+      play_records_create(alpha_list, false, true, &alpha_groups);
+  num_alpha_groups =
+      play_records_keep_best_per_key(alpha_groups, num_alpha_groups);
+  MoveList *wmp_list = generate_all_moves(wmp_game, num_alpha_groups + 1000);
+  int num_wmp_plays = 0;
+  for (int move_idx = 0; move_idx < move_list_get_count(wmp_list); move_idx++) {
+    const Move *wmp_move = move_list_get_move(wmp_list, move_idx);
+    if (move_get_type(wmp_move) != GAME_EVENT_TILE_PLACEMENT_MOVE) {
+      continue;
+    }
+    PlayKey key;
+    play_key_init(wmp_move, true, false, &key);
+    const PlayRecord *alpha_play =
+        play_records_find(alpha_plays, num_alpha_plays, &key);
+    assert(alpha_play != NULL);
+    (void)alpha_play;
+    play_key_init(wmp_move, false, true, &key);
+    const PlayRecord *alpha_group =
+        play_records_find(alpha_groups, num_alpha_groups, &key);
+    assert(alpha_group != NULL);
+    assert(alpha_group->equity == move_get_equity(wmp_move));
+    assert(alpha_group->score == move_get_score(wmp_move));
+    num_wmp_plays++;
+  }
+  assert(num_wmp_plays == num_alpha_groups);
+  move_list_destroy(wmp_list);
+  free(alpha_groups);
+  free(alpha_arrangements);
+  free(alpha_plays);
+  move_list_destroy(alpha_list);
+  return true;
+}
+
+// What test_wordsmog_play_graph checked.
+typedef struct PlayGraphStats {
+  int checked;
+  int skipped;
+  int with_blanks;
+  uint64_t total_plays;
+  uint64_t most_plays;
+} PlayGraphStats;
+
+// Loads cgp into both games and checks its play graph. Returns false, and
+// checks nothing, when the position is not legal, as a rack whose tiles are
+// not all left can make it.
+static bool check_position(Game *alpha_game, Game *wmp_game, const char *cgp,
+                           PlayGraphStats *stats) {
+  ErrorStack *error_stack = error_stack_create();
+  game_load_cgp(alpha_game, cgp, error_stack);
+  if (error_stack_is_empty(error_stack)) {
+    game_load_cgp(wmp_game, cgp, error_stack);
+  }
+  const bool legal = error_stack_is_empty(error_stack);
+  error_stack_destroy(error_stack);
+  if (!legal) {
+    return false;
+  }
+  uint64_t num_plays;
+  if (!check_play_graph(alpha_game, wmp_game, PLAY_GRAPH_TEST_MAX_PLAYS,
+                        &num_plays)) {
+    stats->skipped++;
+    return true;
+  }
+  stats->checked++;
+  stats->total_plays += num_plays;
+  if (num_plays > stats->most_plays) {
+    stats->most_plays = num_plays;
+  }
+  const Rack *rack = player_get_rack(
+      game_get_player(alpha_game, game_get_player_on_turn_index(alpha_game)));
+  if (rack_get_letter(rack, BLANK_MACHINE_LETTER) > 0) {
+    stats->with_blanks++;
+  }
+  return true;
+}
+
+// cgp with the rack of the player on turn replaced by rack.
+static char *cgp_with_rack(const char *cgp, const char *rack) {
+  const char *racks = strchr(cgp, ' ');
+  assert(racks != NULL);
+  const char *other_rack = strchr(racks + 1, '/');
+  assert(other_rack != NULL);
+  return get_formatted_string("%.*s %s%s", (int)(racks - cgp), cgp, rack,
+                              other_rack);
+}
+
+// The play graph and MOVE_RECORD_ALL against the alpha generator's full
+// lists, on positions of alpha-played games with at most
+// PLAY_GRAPH_TEST_MAX_PLAYS plays, and on each again with a small rack of
+// blanks and a few letters, when its tiles are left.
+static void test_wordsmog_play_graph(void) {
+  static const char *const blank_racks[] = {"??",  "?AE",   "??ST",
+                                            "?QU", "??EIN", "?"};
+  const int num_blank_racks = (int)(sizeof(blank_racks) / sizeof(*blank_racks));
+  Config *alpha_config = create_alpha_config();
+  Config *check_config = create_alpha_config();
+  Config *wmp_config = create_wmp_config();
+  load_and_exec_config_or_die(alpha_config, "new");
+  load_and_exec_config_or_die(check_config, "new");
+  load_and_exec_config_or_die(wmp_config, "new");
+  Game *alpha_game = config_get_game(alpha_config);
+  Game *check_game = config_get_game(check_config);
+  Game *wmp_game = config_get_game(wmp_config);
+  MoveList *move_list = move_list_create(1);
+  PlayGraphStats stats;
+  memset(&stats, 0, sizeof(stats));
+  int position_idx = 0;
+  for (int game_idx = 0; game_idx < PLAY_GRAPH_TEST_GAMES; game_idx++) {
+    game_reset(alpha_game);
+    game_seed(alpha_game, WORDSMOG_WMP_TEST_SEED + game_idx);
+    draw_starting_racks(alpha_game);
+    while (game_get_game_end_reason(alpha_game) == GAME_END_REASON_NONE) {
+      char *cgp = game_get_cgp(alpha_game, true);
+      const bool legal = check_position(check_game, wmp_game, cgp, &stats);
+      assert(legal);
+      (void)legal;
+      char *blank_cgp =
+          cgp_with_rack(cgp, blank_racks[position_idx % num_blank_racks]);
+      check_position(check_game, wmp_game, blank_cgp, &stats);
+      free(blank_cgp);
+      free(cgp);
+      play_move(get_top_equity_move(alpha_game, move_list), alpha_game, NULL);
+      position_idx++;
+    }
+  }
+  printf("wordsmog play graph: %d positions (%d with a blank on the rack) "
+         "matched the alpha lists, %llu plays in all, at most %llu; %d "
+         "skipped as too large\n",
+         stats.checked, stats.with_blanks,
+         (unsigned long long)stats.total_plays,
+         (unsigned long long)stats.most_plays, stats.skipped);
+  assert(stats.checked >= PLAY_GRAPH_TEST_GAMES * 3);
+  assert(stats.with_blanks >= PLAY_GRAPH_TEST_GAMES * 5);
+  move_list_destroy(move_list);
+  config_destroy(wmp_config);
+  config_destroy(check_config);
+  config_destroy(alpha_config);
+}
+
+// The play graph's speed on the positions of static WMP wordsmog games: per
+// position, the best play from move generation, and from the graph its count
+// and its first 1, 100 and 10000 plays. Run with "wsmogbench" on a release
+// build.
+void test_wordsmog_wmp_bench(void) {
+  enum { BENCH_GAMES = 20, BENCH_STAGES = 5 };
+  static const int stage_plays[BENCH_STAGES] = {0, 0, 1, 100, 10000};
+  static const char *const stage_names[BENCH_STAGES] = {
+      "best play (movegen)", "graph count", "graph first 1", "graph first 100",
+      "graph first 10000"};
+  Config *config = create_wmp_config();
+  load_and_exec_config_or_die(config, "new");
+  Game *game = config_get_game(config);
+  MoveList *move_list = move_list_create(1);
+  double seconds[BENCH_STAGES] = {0};
+  uint64_t total_plays = 0;
+  uint64_t most_plays = 0;
+  int positions = 0;
+  for (int game_idx = 0; game_idx < BENCH_GAMES; game_idx++) {
+    game_reset(game);
+    game_seed(game, WORDSMOG_WMP_TEST_SEED + game_idx);
+    draw_starting_racks(game);
+    while (game_get_game_end_reason(game) == GAME_END_REASON_NONE) {
+      Timer timer;
+      ctimer_start(&timer);
+      const Move *best = get_top_equity_move(game, move_list);
+      seconds[0] += ctimer_elapsed_seconds(&timer);
+      for (int stage = 1; stage < BENCH_STAGES; stage++) {
+        ctimer_start(&timer);
+        WordsmogPlayGraph *graph =
+            wordsmog_play_graph_create(game, MOVE_SORT_EQUITY);
+        if (stage == 1) {
+          uint64_t arrangements;
+          uint64_t plays;
+          wordsmog_play_graph_count(graph, &arrangements, &plays);
+          total_plays += plays;
+          if (plays > most_plays) {
+            most_plays = plays;
+          }
+        } else {
+          Move move;
+          for (int play_idx = 0; play_idx < stage_plays[stage] &&
+                                 wordsmog_play_graph_next(graph, &move);
+               play_idx++) {
+            if (play_idx == 0 &&
+                move_get_type(best) == GAME_EVENT_TILE_PLACEMENT_MOVE) {
+              assert(move_get_equity(&move) == move_get_equity(best));
+            }
+          }
+        }
+        wordsmog_play_graph_destroy(graph);
+        seconds[stage] += ctimer_elapsed_seconds(&timer);
+      }
+      play_move(best, game, NULL);
+      positions++;
+    }
+  }
+  printf("wordsmog graph bench: %d positions, %llu plays (with every "
+         "designation), at most %llu in one position\n",
+         positions, (unsigned long long)total_plays,
+         (unsigned long long)most_plays);
+  for (int stage = 0; stage < BENCH_STAGES; stage++) {
+    printf("  %-20s %9.3f ms per position\n", stage_names[stage],
+           1000.0 * seconds[stage] / positions);
+  }
+  move_list_destroy(move_list);
+  config_destroy(config);
+}
+
 void test_wordsmog_wmp(void) {
-  test_wordsmog_best_arrangement_brute_force();
+  test_wordsmog_arrangement_brute_force();
+  test_wordsmog_play_graph();
   test_wordsmog_wmp_games();
 }

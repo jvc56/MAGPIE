@@ -4,6 +4,7 @@
 #include "../def/bit_rack_defs.h"
 #include "../def/letter_distribution_defs.h"
 #include "../def/rack_defs.h"
+#include "../def/wordsmog_defs.h"
 #include "../ent/equity.h"
 #include <stdbool.h>
 #include <stdint.h>
@@ -43,7 +44,22 @@ typedef struct WordsmogTiles {
   // With two blanks, pair_letters[x] holds each y >= x for which the pair
   // {x, y} keeps the main word valid.
   uint32_t pair_letters[BIT_RACK_MAX_ALPHABET_SIZE];
+  // Set from the letters and counts by wordsmog_tiles_set_states: each
+  // multiset of the natural tiles, a state, in mixed radix with one digit per
+  // letter, and its count of each letter. The states with t tiles are
+  // states_by_total[state_starts[t] .. state_starts[t + 1] - 1].
+  int num_states;
+  int strides[RACK_SIZE];
+  uint8_t digits[WORDSMOG_MAX_STATES][RACK_SIZE];
+  uint8_t states_by_total[WORDSMOG_MAX_STATES];
+  uint8_t state_starts[RACK_SIZE + 2];
+  // Every tile's score, blanks included, highest first.
+  Equity descending_scores[RACK_SIZE];
 } WordsmogTiles;
+
+// Sets the tiles' states, which every function below reads, once their letters
+// and counts are set.
+void wordsmog_tiles_set_states(WordsmogTiles *tiles);
 
 typedef struct WordsmogArrangement {
   // The tile on each square, a blank as its blanked designation.
@@ -54,12 +70,30 @@ typedef struct WordsmogArrangement {
   Equity adjustment;
 } WordsmogArrangement;
 
+// An upper bound on the score of every arrangement of tiles on the squares:
+// the tiles' scores, highest first, times the coefficients, highest first.
+Equity wordsmog_score_bound(const WordsmogSquare *squares, int num_squares,
+                            const WordsmogTiles *tiles);
+
+// pins, when not NULL, holds a WORDSMOG_PIN_* value or a natural letter for
+// each square (see wordsmog_defs.h): the arrangements considered are those
+// that put that letter, or a blank, on each pinned square.
+
 // Finds the arrangement of tiles on the num_squares squares (as many as there
 // are tiles) with the highest score + adjustment, then the highest score, then
 // the smallest tiles in board order, a natural tile ranking below any blank,
-// as compare_moves ranks plays. Returns false when no arrangement is legal.
+// as compare_moves ranks plays. A blank takes the designation with the best
+// adjustment, then the lowest. Returns false when no arrangement is legal.
 bool wordsmog_best_arrangement(const WordsmogSquare *squares, int num_squares,
                                const WordsmogTiles *tiles,
+                               const MachineLetter *pins,
                                WordsmogArrangement *best);
+
+// Counts the legal arrangements: in arrangements with each blank's designation
+// left open, and in plays with every designation that keeps every word valid.
+void wordsmog_count_arrangements(const WordsmogSquare *squares, int num_squares,
+                                 const WordsmogTiles *tiles,
+                                 const MachineLetter *pins,
+                                 uint64_t *arrangements, uint64_t *plays);
 
 #endif

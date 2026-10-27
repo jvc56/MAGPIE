@@ -14,6 +14,7 @@
 #include "../def/players_data_defs.h"
 #include "../def/rack_defs.h"
 #include "../def/thread_control_defs.h"
+#include "../def/wordsmog_defs.h"
 #include "../ent/anchor.h"
 #include "../ent/bag.h"
 #include "../ent/best_move_carry.h"
@@ -1119,7 +1120,9 @@ update_best_move_or_insert_into_movelist_wmp(MoveGen *gen, int start_col,
   }
 }
 
-void record_wmp_play(MoveGen *gen, int start_col, Equity leave_value) {
+// The score of the play gen->playthrough_marked spells from start_col.
+static inline __attribute__((always_inline)) Equity
+wmp_play_score(const MoveGen *gen, int start_col) {
   const WMPMoveGen *wgen = &gen->wmp_move_gen;
   const Equity bingo_bonus =
       gen->max_tiles_to_play == RACK_SIZE ? gen->bingo_bonus : 0;
@@ -1155,11 +1158,13 @@ void record_wmp_play(MoveGen *gen, int start_col, Equity leave_value) {
       playthrough_score_total += gen->tile_scores[ml];
     }
   }
-  const Equity score =
-      (played_score_total + playthrough_score_total) * word_multiplier +
-      hooked_cross_total + played_cross_total + bingo_bonus;
-  update_best_move_or_insert_into_movelist_wmp(gen, start_col, score,
-                                               leave_value);
+  return (played_score_total + playthrough_score_total) * word_multiplier +
+         hooked_cross_total + played_cross_total + bingo_bonus;
+}
+
+void record_wmp_play(MoveGen *gen, int start_col, Equity leave_value) {
+  update_best_move_or_insert_into_movelist_wmp(
+      gen, start_col, wmp_play_score(gen, start_col), leave_value);
 }
 
 void get_blank_possibilities(const MoveGen *gen,
@@ -1697,13 +1702,19 @@ static void wordsmog_tiles_init(const MoveGen *gen, const BitRack *subrack,
       }
     }
   }
+  wordsmog_tiles_set_states(tiles);
 }
 
-// Records the best arrangement of tiles at each of the anchor's start
-// columns. Returns true once the recording threshold has been exceeded.
-static bool wordsmog_record_placements(MoveGen *gen, const Anchor *anchor,
-                                       const WordsmogTiles *tiles) {
-  WMPMoveGen *wgen = &gen->wmp_move_gen;
+// The empty squares of the current anchor's placement at start_col, in board
+// order, for wordsmog_best_arrangement, and their positions in the word in
+// square_letter_idxs. Marks the board's tiles in gen->playthrough_marked, and
+// writes the part of every play's score there that does not depend on its
+// tiles to base_score. Returns how many squares there are.
+static int wordsmog_placement_squares(MoveGen *gen, int start_col,
+                                      WordsmogSquare squares[RACK_SIZE],
+                                      int square_letter_idxs[RACK_SIZE],
+                                      Equity *base_score) {
+  const WMPMoveGen *wgen = &gen->wmp_move_gen;
   // The opening move's placement penalty is the one equity term that depends
   // on where the tiles go (PAT is off in wordsmog).
   const bool opening = gen->move_sort_type == MOVE_SORT_EQUITY &&
@@ -1712,53 +1723,94 @@ static bool wordsmog_record_placements(MoveGen *gen, const Anchor *anchor,
   // A square with no cross word allows every bit; keep the alphabet's letters.
   const uint64_t letters =
       (((uint64_t)1 << ld_get_size(&gen->ld)) - 1) & ~(uint64_t)1;
+  int num_squares = 0;
+  int word_multiplier = 1;
+  Equity playthrough_score = 0;
+  Equity hooked_cross_score = 0;
+  for (int letter_idx = 0; letter_idx < wgen->word_length; letter_idx++) {
+    const int board_col = start_col + letter_idx;
+    if ((wgen->playthrough_positions & (1U << board_col)) != 0) {
+      gen->playthrough_marked[letter_idx] = PLAYED_THROUGH_MARKER;
+      playthrough_score +=
+          gen->tile_scores[gen_cache_get_letter(gen, board_col)];
+      continue;
+    }
+    assert(num_squares < RACK_SIZE);
+    const int this_word_multiplier = bonus_square_get_word_multiplier(
+        gen_cache_get_bonus_square(gen, board_col));
+    word_multiplier *= this_word_multiplier;
+    hooked_cross_score +=
+        gen_cache_get_cross_score(gen, board_col) * this_word_multiplier;
+    square_letter_idxs[num_squares] = letter_idx;
+    squares[num_squares].cross_set =
+        gen_cache_get_cross_set(gen, board_col) & letters;
+    squares[num_squares].vowel_adjustment =
+        opening
+            ? gen->opening_move_word_penalties[penalty_offset + board_col] +
+                  gen->opening_move_letter_penalties[penalty_offset + board_col]
+            : 0;
+    num_squares++;
+  }
+  for (int square_idx = 0; square_idx < num_squares; square_idx++) {
+    const int board_col = start_col + square_letter_idxs[square_idx];
+    const BonusSquare bonus_square = gen_cache_get_bonus_square(gen, board_col);
+    const int cross_word_multiplier =
+        gen_cache_get_is_cross_word(gen, board_col)
+            ? bonus_square_get_word_multiplier(bonus_square)
+            : 0;
+    squares[square_idx].coefficient =
+        bonus_square_get_letter_multiplier(bonus_square) *
+        (word_multiplier + cross_word_multiplier);
+  }
+  *base_score = playthrough_score * word_multiplier + hooked_cross_score +
+                (gen->max_tiles_to_play == RACK_SIZE ? gen->bingo_bonus : 0);
+  return num_squares;
+}
+
+// Whether no play at a placement whose scores are at most score_bound can be
+// recorded: as wordmap_gen_leave_prunes_subrack, with the placement's own
+// score bound in place of the anchor's, under equity sort with tiles in the
+// bag; by score alone under score sort.
+static inline bool wordsmog_placement_pruned(const MoveGen *gen,
+                                             Equity score_bound) {
+  if (gen->wmp_prune_subracks_by_leave) {
+    return better_play_has_been_found(gen, score_bound +
+                                               gen->wmp_move_gen.leave_value);
+  }
+  return gen->move_sort_type == MOVE_SORT_SCORE &&
+         better_play_has_been_found(gen, score_bound);
+}
+
+// Records the best arrangement of tiles at each of the anchor's start
+// columns. Returns true once the recording threshold has been exceeded.
+static bool wordsmog_record_placements(MoveGen *gen, const Anchor *anchor,
+                                       const WordsmogTiles *tiles) {
+  const WMPMoveGen *wgen = &gen->wmp_move_gen;
   for (int start_col = anchor->leftmost_start_col;
        start_col <= anchor->rightmost_start_col; start_col++) {
     WordsmogSquare squares[RACK_SIZE];
     int square_letter_idxs[RACK_SIZE];
-    int num_squares = 0;
-    int word_multiplier = 1;
-    for (int letter_idx = 0; letter_idx < wgen->word_length; letter_idx++) {
-      const int board_col = start_col + letter_idx;
-      if ((wgen->playthrough_positions & (1U << board_col)) != 0) {
-        gen->playthrough_marked[letter_idx] = PLAYED_THROUGH_MARKER;
-        continue;
-      }
-      assert(num_squares < RACK_SIZE);
-      word_multiplier *= bonus_square_get_word_multiplier(
-          gen_cache_get_bonus_square(gen, board_col));
-      square_letter_idxs[num_squares] = letter_idx;
-      squares[num_squares].cross_set =
-          gen_cache_get_cross_set(gen, board_col) & letters;
-      squares[num_squares].vowel_adjustment =
-          opening
-              ? gen->opening_move_word_penalties[penalty_offset + board_col] +
-                    gen->opening_move_letter_penalties[penalty_offset +
-                                                       board_col]
-              : 0;
-      num_squares++;
-    }
+    Equity base_score;
+    const int num_squares = wordsmog_placement_squares(
+        gen, start_col, squares, square_letter_idxs, &base_score);
     assert(num_squares == anchor->tiles_to_play);
-    for (int square_idx = 0; square_idx < num_squares; square_idx++) {
-      const int board_col = start_col + square_letter_idxs[square_idx];
-      const BonusSquare bonus_square =
-          gen_cache_get_bonus_square(gen, board_col);
-      const int cross_word_multiplier =
-          gen_cache_get_is_cross_word(gen, board_col)
-              ? bonus_square_get_word_multiplier(bonus_square)
-              : 0;
-      squares[square_idx].coefficient =
-          bonus_square_get_letter_multiplier(bonus_square) *
-          (word_multiplier + cross_word_multiplier);
+    if (wordsmog_placement_pruned(
+            gen,
+            base_score + wordsmog_score_bound(squares, num_squares, tiles))) {
+      continue;
     }
     WordsmogArrangement arrangement;
-    if (!wordsmog_best_arrangement(squares, num_squares, tiles, &arrangement)) {
+    if (!wordsmog_best_arrangement(squares, num_squares, tiles, NULL,
+                                   &arrangement)) {
       continue;
     }
     for (int square_idx = 0; square_idx < num_squares; square_idx++) {
       gen->playthrough_marked[square_letter_idxs[square_idx]] =
           arrangement.tiles[square_idx];
     }
+    // A play's score is the placement's part plus its tiles', which the
+    // prune above and the play graph rely on.
+    assert(wmp_play_score(gen, start_col) == base_score + arrangement.score);
     record_wmp_play(gen, start_col, wgen->leave_value);
     if (gen->threshold_exceeded) {
       return true;
@@ -4430,6 +4482,30 @@ gen_record_scoring_plays_unordered(MoveGen *gen, bool record_small) {
   }
 }
 
+// Points the generator at an anchor's lane and sets the anchor's fields.
+static inline __attribute__((always_inline)) void
+gen_load_anchor(MoveGen *gen, const Anchor *anchor) {
+  gen->current_anchor_col = anchor->col;
+  // Don't recopy the row cache if we're working on the same board lane
+  // as the previous anchor. When anchors have been sorted by descending
+  // max equity, doing this check is a wash, but it helps for endgame when
+  // we are just scanning over the board in order.
+  if ((gen->current_row_index != anchor->row) || (gen->dir != anchor->dir)) {
+    gen->current_row_index = anchor->row;
+    gen->dir = anchor->dir;
+    gen->row_squares =
+        board_get_row_cache(gen->board_lanes, anchor->row, anchor->dir);
+    gen->wit_row_lane = board_get_wit_row_lane(gen->board, anchor->row,
+                                               anchor->dir, gen->cross_index);
+    gen->wit_len_lane = board_get_wit_len_lane(gen->board, anchor->row,
+                                               anchor->dir, gen->cross_index);
+  }
+  gen->last_anchor_col = anchor->last_anchor_col;
+  gen->anchor_right_extension_set =
+      gen_cache_get_right_extension_set(gen, gen->current_anchor_col);
+  gen->current_anchor_highest_possible_score = anchor->highest_possible_score;
+}
+
 static inline __attribute__((always_inline)) void
 gen_record_scoring_plays_impl(MoveGen *gen, bool lazy) {
   if (gen->threshold_exceeded) {
@@ -4460,25 +4536,7 @@ gen_record_scoring_plays_impl(MoveGen *gen, bool lazy) {
     if (better_play_has_been_found(gen, anchor.highest_possible_equity)) {
       break;
     }
-    gen->current_anchor_col = anchor.col;
-    // Don't recopy the row cache if we're working on the same board lane
-    // as the previous anchor. When anchors have been sorted by descending
-    // max equity, doing this check is a wash, but it helps for endgame when
-    // we are just scanning over the board in order.
-    if ((gen->current_row_index != anchor.row) || (gen->dir != anchor.dir)) {
-      gen->current_row_index = anchor.row;
-      gen->dir = anchor.dir;
-      gen->row_squares =
-          board_get_row_cache(gen->board_lanes, anchor.row, anchor.dir);
-      gen->wit_row_lane = board_get_wit_row_lane(gen->board, anchor.row,
-                                                 anchor.dir, gen->cross_index);
-      gen->wit_len_lane = board_get_wit_len_lane(gen->board, anchor.row,
-                                                 anchor.dir, gen->cross_index);
-    }
-    gen->last_anchor_col = anchor.last_anchor_col;
-    gen->anchor_right_extension_set =
-        gen_cache_get_right_extension_set(gen, gen->current_anchor_col);
-    gen->current_anchor_highest_possible_score = anchor.highest_possible_score;
+    gen_load_anchor(gen, &anchor);
     if (gen->move_record_type == MOVE_RECORD_BEST_SMALL) {
       recursive_gen_small(gen, anchor.col, kwg_root_node_index, anchor.col,
                           anchor.col, gen->dir == BOARD_HORIZONTAL_DIRECTION, 0,
@@ -5059,6 +5117,420 @@ static void gen_remember_best_move(const MoveGen *gen, BestMoveCarry *carry,
   best_move_carry_add(carry, rack, gen->player_index,
                       carry_move ? &carried : NULL, best_move, lane_hashes,
                       searched_lanes, gen->number_of_tiles_in_bag);
+}
+
+// The wordsmog play graph (see move_gen.h). Its frontier is the shadow's
+// anchor heap and a heap of nodes:
+// - An anchor is expanded into its groups, a group for each start column and
+//   tile multiset with a legal arrangement, each pushed as the root of its
+//   arrangements.
+// - A node of a group is the arrangements that put its pins on its first
+//   squares; expanding it pins one more square to each tile the node has
+//   left. A node's equity is that of the best of its arrangements, exactly:
+//   wordsmog_best_arrangement with its pins.
+// - A node with every square pinned is one play.
+// Every anchor's equity bounds its plays', so the next play is the best node
+// popped while no anchor bounds more.
+
+// A placement and tile multiset: what a group's plays share.
+typedef struct WordsmogGraphGroup {
+  int row;
+  int dir;
+  int start_col;
+  int word_length;
+  int tiles_played;
+  // The play's tiles, with PLAYED_THROUGH_MARKER on the board's tiles; an
+  // arrangement's tiles go at square_letter_idxs.
+  MachineLetter strip[BOARD_DIM];
+  int square_letter_idxs[RACK_SIZE];
+  int num_squares;
+  WordsmogSquare squares[RACK_SIZE];
+  // The group's tiles, in the graph's tiles, shared by the start columns of
+  // a subrack.
+  int tiles_idx;
+  // A play's equity is base_equity plus its arrangement's score and
+  // adjustment, and its score is base_score plus its arrangement's score.
+  Equity base_equity;
+  Equity base_score;
+} WordsmogGraphGroup;
+
+// The arrangements of a group that put pins[square] on each square below
+// num_pinned, with the equity and score of the best of them.
+typedef struct WordsmogGraphNode {
+  Equity equity;
+  Equity score;
+  // When the node was pushed: equal nodes come out first in, first out.
+  uint32_t order;
+  int group_idx;
+  int num_pinned;
+  MachineLetter pins[RACK_SIZE];
+} WordsmogGraphNode;
+
+struct WordsmogPlayGraph {
+  // The graph's own generator, which keeps the position's anchors and lanes
+  // between calls.
+  MoveGen *gen;
+  MoveList *move_list;
+  WordsmogGraphGroup *groups;
+  int num_groups;
+  int groups_capacity;
+  WordsmogTiles *tiles;
+  int num_tiles;
+  int tiles_capacity;
+  WordsmogGraphNode *heap;
+  int heap_count;
+  int heap_capacity;
+  uint32_t next_order;
+};
+
+// Best equity, then score. Among nodes that tie, the one with more squares
+// pinned, and then the smaller pins, so that a node's best play comes out
+// before the plays it ties with, without visiting their nodes first.
+static bool wordsmog_graph_node_ranks_above(const WordsmogGraphNode *a,
+                                            const WordsmogGraphNode *b) {
+  if (a->equity != b->equity) {
+    return a->equity > b->equity;
+  }
+  if (a->score != b->score) {
+    return a->score > b->score;
+  }
+  if (a->num_pinned != b->num_pinned) {
+    return a->num_pinned > b->num_pinned;
+  }
+  const int pins_order = memcmp(a->pins, b->pins, sizeof(a->pins));
+  if (pins_order != 0) {
+    return pins_order < 0;
+  }
+  return a->order < b->order;
+}
+
+static void wordsmog_graph_push(WordsmogPlayGraph *graph,
+                                WordsmogGraphNode node) {
+  if (graph->heap_count == graph->heap_capacity) {
+    graph->heap_capacity =
+        graph->heap_capacity == 0 ? 256 : graph->heap_capacity * 2;
+    graph->heap = realloc_or_die(graph->heap, (size_t)graph->heap_capacity *
+                                                  sizeof(WordsmogGraphNode));
+  }
+  node.order = graph->next_order++;
+  int child = graph->heap_count++;
+  while (child > 0) {
+    const int parent = (child - 1) / 2;
+    if (!wordsmog_graph_node_ranks_above(&node, &graph->heap[parent])) {
+      break;
+    }
+    graph->heap[child] = graph->heap[parent];
+    child = parent;
+  }
+  graph->heap[child] = node;
+}
+
+static WordsmogGraphNode wordsmog_graph_pop(WordsmogPlayGraph *graph) {
+  const WordsmogGraphNode top = graph->heap[0];
+  const WordsmogGraphNode last = graph->heap[--graph->heap_count];
+  int parent = 0;
+  for (;;) {
+    int child = 2 * parent + 1;
+    if (child >= graph->heap_count) {
+      break;
+    }
+    if (child + 1 < graph->heap_count &&
+        wordsmog_graph_node_ranks_above(&graph->heap[child + 1],
+                                        &graph->heap[child])) {
+      child++;
+    }
+    if (!wordsmog_graph_node_ranks_above(&graph->heap[child], &last)) {
+      break;
+    }
+    graph->heap[parent] = graph->heap[child];
+    parent = child;
+  }
+  if (graph->heap_count > 0) {
+    graph->heap[parent] = last;
+  }
+  return top;
+}
+
+// The node of group's arrangements with pins, and whether any is legal.
+static bool wordsmog_graph_node_init(const WordsmogPlayGraph *graph,
+                                     int group_idx, int num_pinned,
+                                     const MachineLetter pins[RACK_SIZE],
+                                     WordsmogGraphNode *node,
+                                     WordsmogArrangement *arrangement) {
+  const WordsmogGraphGroup *group = &graph->groups[group_idx];
+  if (!wordsmog_best_arrangement(group->squares, group->num_squares,
+                                 &graph->tiles[group->tiles_idx], pins,
+                                 arrangement)) {
+    return false;
+  }
+  node->equity =
+      group->base_equity + arrangement->score + arrangement->adjustment;
+  node->score = group->base_score + arrangement->score;
+  node->group_idx = group_idx;
+  node->num_pinned = num_pinned;
+  memcpy(node->pins, pins, sizeof(node->pins));
+  return true;
+}
+
+// Adds the groups of an anchor, each as the root of its arrangements.
+static void wordsmog_graph_expand_anchor(WordsmogPlayGraph *graph,
+                                         const Anchor *anchor) {
+  MoveGen *gen = graph->gen;
+  gen_load_anchor(gen, anchor);
+  gen->max_tiles_to_play = anchor->tiles_to_play;
+  WMPMoveGen *wgen = &gen->wmp_move_gen;
+  wmp_move_gen_set_playthrough_bit_rack(wgen, anchor, gen->row_squares, NULL,
+                                        gen->wit_len_lane, NULL);
+  wmp_move_gen_playthrough_metadata_init(wgen, anchor);
+  wmp_move_gen_build_playthrough_subracks(wgen);
+  const int num_subrack_combinations =
+      wmp_move_gen_get_num_subrack_combinations(wgen);
+  for (int subrack_idx = 0; subrack_idx < num_subrack_combinations;
+       subrack_idx++) {
+    BitRack main_word;
+    const WMPEntry *entry =
+        wmp_move_gen_get_subrack_entry(wgen, subrack_idx, false, &main_word);
+    if (entry == NULL) {
+      continue;
+    }
+    if (gen->wmp_prune_subracks_by_leave) {
+      wgen->leave_value = wmp_move_gen_get_leave_value(wgen, subrack_idx);
+    }
+    if (gen->number_of_tiles_in_bag == 0) {
+      wordmap_gen_set_empty_bag_leave(gen, anchor, subrack_idx);
+    }
+    if (graph->num_tiles == graph->tiles_capacity) {
+      graph->tiles_capacity =
+          graph->tiles_capacity == 0 ? 16 : graph->tiles_capacity * 2;
+      graph->tiles = realloc_or_die(
+          graph->tiles, (size_t)graph->tiles_capacity * sizeof(WordsmogTiles));
+    }
+    const int tiles_idx = graph->num_tiles;
+    const WordsmogTiles *tiles = &graph->tiles[tiles_idx];
+    wordsmog_tiles_init(
+        gen, wmp_move_gen_get_nonplaythrough_subrack(wgen, subrack_idx),
+        &main_word, entry, &graph->tiles[tiles_idx]);
+    bool tiles_used = false;
+    for (int start_col = anchor->leftmost_start_col;
+         start_col <= anchor->rightmost_start_col; start_col++) {
+      if (graph->num_groups == graph->groups_capacity) {
+        graph->groups_capacity =
+            graph->groups_capacity == 0 ? 64 : graph->groups_capacity * 2;
+        graph->groups =
+            realloc_or_die(graph->groups, (size_t)graph->groups_capacity *
+                                              sizeof(WordsmogGraphGroup));
+      }
+      WordsmogGraphGroup *group = &graph->groups[graph->num_groups];
+      Equity base_score;
+      group->num_squares =
+          wordsmog_placement_squares(gen, start_col, group->squares,
+                                     group->square_letter_idxs, &base_score);
+      assert(group->num_squares == anchor->tiles_to_play);
+      group->tiles_idx = tiles_idx;
+      WordsmogArrangement best;
+      if (!wordsmog_best_arrangement(group->squares, group->num_squares, tiles,
+                                     NULL, &best)) {
+        continue;
+      }
+      tiles_used = true;
+      // Price the best arrangement as move generation would, and keep what
+      // the group's other arrangements share with it.
+      for (int square_idx = 0; square_idx < group->num_squares; square_idx++) {
+        gen->playthrough_marked[group->square_letter_idxs[square_idx]] =
+            best.tiles[square_idx];
+      }
+      const Equity score = wmp_play_score(gen, start_col);
+      Move *move = move_list_get_spare_move(graph->move_list);
+      set_play_for_record_wmp(gen, move, start_col, score);
+      const Equity equity =
+          get_move_equity_for_sort_type_wmp(gen, move, wgen->leave_value);
+      group->row = gen->current_row_index;
+      group->dir = gen->dir;
+      group->start_col = start_col;
+      group->word_length = wgen->word_length;
+      group->tiles_played = anchor->tiles_to_play;
+      memcpy(group->strip, gen->playthrough_marked, (size_t)wgen->word_length);
+      group->base_equity = equity - best.score - best.adjustment;
+      group->base_score = score - best.score;
+      MachineLetter pins[RACK_SIZE];
+      memset(pins, WORDSMOG_PIN_FREE, sizeof(pins));
+      WordsmogGraphNode root;
+      const bool legal = wordsmog_graph_node_init(graph, graph->num_groups, 0,
+                                                  pins, &root, &best);
+      assert(legal);
+      (void)legal;
+      graph->num_groups++;
+      wordsmog_graph_push(graph, root);
+    }
+    if (tiles_used) {
+      graph->num_tiles++;
+    }
+  }
+}
+
+// Pushes the children of node: one more square pinned to each tile the node
+// has left that has a legal arrangement there.
+static void wordsmog_graph_expand_node(WordsmogPlayGraph *graph,
+                                       const WordsmogGraphNode *node) {
+  const WordsmogGraphGroup *group = &graph->groups[node->group_idx];
+  const WordsmogTiles *tiles = &graph->tiles[group->tiles_idx];
+  int counts[RACK_SIZE];
+  int blanks = tiles->num_blanks;
+  for (int letter_idx = 0; letter_idx < tiles->num_letters; letter_idx++) {
+    counts[letter_idx] = tiles->counts[letter_idx];
+  }
+  for (int square_idx = 0; square_idx < node->num_pinned; square_idx++) {
+    if (node->pins[square_idx] == WORDSMOG_PIN_BLANK) {
+      blanks--;
+      continue;
+    }
+    for (int letter_idx = 0; letter_idx < tiles->num_letters; letter_idx++) {
+      if (tiles->letters[letter_idx] == node->pins[square_idx]) {
+        counts[letter_idx]--;
+      }
+    }
+  }
+  MachineLetter pins[RACK_SIZE];
+  memcpy(pins, node->pins, sizeof(pins));
+  const int square_idx = node->num_pinned;
+  const uint64_t cross_set = group->squares[square_idx].cross_set;
+  WordsmogGraphNode child;
+  WordsmogArrangement arrangement;
+  for (int letter_idx = 0; letter_idx < tiles->num_letters; letter_idx++) {
+    const MachineLetter ml = tiles->letters[letter_idx];
+    if (counts[letter_idx] == 0 || ((cross_set >> ml) & 1U) == 0) {
+      continue;
+    }
+    pins[square_idx] = ml;
+    if (wordsmog_graph_node_init(graph, node->group_idx, square_idx + 1, pins,
+                                 &child, &arrangement)) {
+      wordsmog_graph_push(graph, child);
+    }
+  }
+  if (blanks > 0) {
+    pins[square_idx] = WORDSMOG_PIN_BLANK;
+    if (wordsmog_graph_node_init(graph, node->group_idx, square_idx + 1, pins,
+                                 &child, &arrangement)) {
+      wordsmog_graph_push(graph, child);
+    }
+  }
+}
+
+// Writes the play of a node with every square pinned.
+static void wordsmog_graph_write_play(const WordsmogPlayGraph *graph,
+                                      const WordsmogGraphNode *node,
+                                      Move *move) {
+  const WordsmogGraphGroup *group = &graph->groups[node->group_idx];
+  WordsmogArrangement arrangement;
+  const bool legal = wordsmog_best_arrangement(
+      group->squares, group->num_squares, &graph->tiles[group->tiles_idx],
+      node->pins, &arrangement);
+  assert(legal);
+  (void)legal;
+  MachineLetter strip[BOARD_DIM];
+  memcpy(strip, group->strip, (size_t)group->word_length);
+  for (int square_idx = 0; square_idx < group->num_squares; square_idx++) {
+    strip[group->square_letter_idxs[square_idx]] =
+        arrangement.tiles[square_idx];
+  }
+  move_set_all_except_equity(move, strip, 0, group->word_length - 1,
+                             group->base_score + arrangement.score, group->row,
+                             group->start_col, group->tiles_played, group->dir,
+                             GAME_EVENT_TILE_PLACEMENT_MOVE);
+  if (board_is_dir_vertical(group->dir)) {
+    move_set_row_start(move, group->start_col);
+    move_set_col_start(move, group->row);
+  }
+  move_set_equity(move, group->base_equity + arrangement.score +
+                            arrangement.adjustment);
+}
+
+WordsmogPlayGraph *wordsmog_play_graph_create(const Game *game,
+                                              move_sort_t move_sort_type) {
+  WordsmogPlayGraph *graph = calloc_or_die(1, sizeof(WordsmogPlayGraph));
+  graph->gen = calloc_or_die(1, sizeof(MoveGen));
+  graph->move_list = move_list_create(1);
+  const MoveGenArgs args = {.game = game,
+                            .move_list = graph->move_list,
+                            .move_record_type = MOVE_RECORD_ALL,
+                            .move_sort_type = move_sort_type,
+                            .override_kwg = NULL,
+                            .eq_margin_movegen = 0,
+                            .target_equity = EQUITY_MAX_VALUE};
+  MoveGen *gen = graph->gen;
+  gen_load_position(gen, &args);
+  if (!gen->is_wordsmog || !wmp_move_gen_is_active(&gen->wmp_move_gen)) {
+    log_fatal("the wordsmog play graph needs a wordsmog game with a WMP");
+  }
+  // As generate_moves: the leaves, the rack's subracks with their WMP
+  // entries, and the shadow's anchors. The exchanges recorded on the way are
+  // not part of the graph.
+  gen_look_up_leaves_and_record_exchanges(gen);
+  const bool check_leaves =
+      gen->number_of_tiles_in_bag > 0 && gen->move_sort_type != MOVE_SORT_SCORE;
+  wmp_move_gen_check_nonplaythrough_existence(&gen->wmp_move_gen, check_leaves,
+                                              &gen->leave_map, false, false);
+  gen_shadow(gen);
+  gen->tiles_played = 0;
+  // Values outside their valid ranges, so the first anchor loads its lane.
+  gen->current_row_index = -1;
+  gen->dir = -1;
+  return graph;
+}
+
+bool wordsmog_play_graph_next(WordsmogPlayGraph *graph, Move *move) {
+  AnchorHeap *anchors = &graph->gen->anchor_heap;
+  for (;;) {
+    if (anchors->count > 0 && (graph->heap_count == 0 ||
+                               anchors->anchors[0].highest_possible_equity >=
+                                   graph->heap[0].equity)) {
+      const Anchor anchor = anchor_heap_extract_max(anchors);
+      wordsmog_graph_expand_anchor(graph, &anchor);
+      continue;
+    }
+    if (graph->heap_count == 0) {
+      return false;
+    }
+    const WordsmogGraphNode node = wordsmog_graph_pop(graph);
+    if (node.num_pinned == graph->groups[node.group_idx].num_squares) {
+      wordsmog_graph_write_play(graph, &node, move);
+      return true;
+    }
+    wordsmog_graph_expand_node(graph, &node);
+  }
+}
+
+void wordsmog_play_graph_count(WordsmogPlayGraph *graph, uint64_t *arrangements,
+                               uint64_t *plays) {
+  AnchorHeap *anchors = &graph->gen->anchor_heap;
+  while (anchors->count > 0) {
+    const Anchor anchor = anchor_heap_extract_max(anchors);
+    wordsmog_graph_expand_anchor(graph, &anchor);
+  }
+  *arrangements = 0;
+  *plays = 0;
+  for (int group_idx = 0; group_idx < graph->num_groups; group_idx++) {
+    const WordsmogGraphGroup *group = &graph->groups[group_idx];
+    uint64_t group_arrangements;
+    uint64_t group_plays;
+    wordsmog_count_arrangements(group->squares, group->num_squares,
+                                &graph->tiles[group->tiles_idx], NULL,
+                                &group_arrangements, &group_plays);
+    *arrangements += group_arrangements;
+    *plays += group_plays;
+  }
+}
+
+void wordsmog_play_graph_destroy(WordsmogPlayGraph *graph) {
+  if (graph == NULL) {
+    return;
+  }
+  free(graph->heap);
+  free(graph->groups);
+  free(graph->tiles);
+  move_list_destroy(graph->move_list);
+  generator_destroy(graph->gen);
+  free(graph);
 }
 
 void generate_moves(const MoveGenArgs *args) {

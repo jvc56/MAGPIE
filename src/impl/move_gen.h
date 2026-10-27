@@ -437,6 +437,35 @@ void gen_reset_slots_high_water(void);
 // solving.
 void generate_moves(const MoveGenArgs *args);
 
+// The tile placement plays of a wordsmog position with a WMP, enumerated
+// lazily, best first: the full list of a wordsmog position's plays is far too
+// large to make, above all with blanks.
+//
+// A play is a placement, a multiset of rack tiles that with the placement's
+// board tiles is an anagram of a word, and an arrangement of those tiles on
+// the placement's empty squares. The graph's nodes are the shadow's anchors,
+// then the groups of an anchor (a placement and tile multiset each), then
+// partial arrangements: a node pins one more square to a tile than its parent,
+// in board order, and knows the exact equity of its best play. A blank stands
+// for the designation with the best equity, then the lowest letter, so each
+// arrangement is one play.
+//
+// The graph keeps its own generator, so it may outlive other move generation
+// on the thread, but the game must not change while it exists.
+typedef struct WordsmogPlayGraph WordsmogPlayGraph;
+WordsmogPlayGraph *wordsmog_play_graph_create(const Game *game,
+                                              move_sort_t move_sort_type);
+// Writes the next play to move, in descending order of equity (or score,
+// under score sort), then score. Returns false when every play has been
+// written.
+bool wordsmog_play_graph_next(WordsmogPlayGraph *graph, Move *move);
+// The number of the position's plays: arrangements, with each blank
+// designated as wordsmog_play_graph_next does, and plays with every
+// designation. Expands every anchor but no arrangement.
+void wordsmog_play_graph_count(WordsmogPlayGraph *graph, uint64_t *arrangements,
+                               uint64_t *plays);
+void wordsmog_play_graph_destroy(WordsmogPlayGraph *graph);
+
 // The MOVE_RECORD_ALL_SMALL plays of the lanes whose bit is set in
 // `lane_mask` (bit dir * BOARD_DIM + row_or_col: the BOARD_DIM horizontal
 // rows, then the BOARD_DIM vertical columns), appended to args->move_list in

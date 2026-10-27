@@ -223,6 +223,7 @@ static TestEntry on_demand_test_table[] = {
     {"pathmovelists", test_path_move_lists},
     {"egincremental", test_incremental_movegen_identical},
     {"pegspeedbench1", test_peg_speed_bench_1},
+    {"wsmogbench", test_wordsmog_wmp_bench},
     {"pegspeedbench2", test_peg_speed_bench_2},
     {"positionloaded", test_position_lengths_loaded},
     {"witdiff", test_wit_cache_differential},
