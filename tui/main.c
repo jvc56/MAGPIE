@@ -21,6 +21,7 @@
 #include "render_modals.h"
 #include "render_rack.h"
 #include "settings_table.h"
+#include "sound.h"
 #include "theme.h"
 #include "tile_input.h"
 #include "time_picker.h"
@@ -885,6 +886,8 @@ int main(int argc, char *argv[]) {
                                   : TUI_PREMIUM_LABELS_UPPERCASE;
   game_state.board_scale = loaded.board_scale_set ? loaded.board_scale : 1;
   game_state.antialias = loaded.antialias_set ? loaded.antialias : true;
+  game_state.sound = loaded.sound_set ? loaded.sound : true;
+  tui_sound_init();
   game_state.score_subscripts = loaded.score_subscripts_set
                                     ? loaded.score_subscripts
                                     : TUI_SCORE_SUBSCRIPTS_OFF;
@@ -1129,6 +1132,7 @@ int main(int argc, char *argv[]) {
   }
 
   tui_game_state_destroy(&game_state);
+  tui_sound_shutdown();
   if (ui.lexicon_list != NULL) {
     tui_lexicon_list_destroy(ui.lexicon_list);
   }
