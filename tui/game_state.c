@@ -1043,6 +1043,19 @@ void tui_game_state_parse_edit_buf(TuiGameState *state) {
   if (state == NULL) {
     return;
   }
+  // Entering a new move on a turn whose last play the VOID rule
+  // refused drops the note about it, and its status-bar notice.
+  if (state->edit_history_idx >= 0 &&
+      state->edit_history_idx < state->history_count &&
+      state->edit_move_len > 0) {
+    TuiHistoryEntry *e = &state->history[state->edit_history_idx];
+    if (e->void_refused[0] != '\0') {
+      e->void_refused[0] = '\0';
+      if (strncmp(state->notice_buf, "not valid: ", 11) == 0) {
+        state->notice_buf[0] = '\0';
+      }
+    }
+  }
   // Position the engine board at the START of the turn being
   // edited, so score_canonical_move validates against the board
   // the player faced — NOT the post-game board (which already has

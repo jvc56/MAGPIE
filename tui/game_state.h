@@ -296,6 +296,12 @@ typedef struct {
   bool phony_main;
   char phony_words[64];
   char phony_hooks[64];
+
+  // Play-vs-computer under the VOID rule: the invalid words of the
+  // user's last play on this turn ("BOOSHITS*"), which was refused and
+  // its tiles returned. History notes it under the turn until the turn
+  // is played.
+  char void_refused[48];
 } TuiHistoryEntry;
 
 typedef struct {
