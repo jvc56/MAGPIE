@@ -769,6 +769,11 @@ void tui_game_state_parse_edit_buf(TuiGameState *state);
 // the engine accepts as playthrough.
 void tui_game_state_seed_edit_move(TuiGameState *state, const char *move_str);
 
+// Whether the MOVE edit buffer is an exchange being typed: a leading "-"
+// ("-AB", "- AB"), or a prefix of "exchange" and a space ("ex AB"). Its
+// letters are tiles going back to the bag, never blanks.
+bool tui_game_state_edit_move_is_exchange(const TuiGameState *state);
+
 // Writes the parsed MOVE buffer in the history's stored notation: an
 // engine-accepted placement in the engine's display form, with
 // playthrough tiles parenthesized from the board ("M2 pANIN(I)"), an
