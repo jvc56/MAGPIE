@@ -380,12 +380,185 @@ static void blank_squares_of(uint32_t blanks, int *first, int *second) {
   *second = rest != 0 ? wordsmog_lowest_bit(rest) : -1;
 }
 
+// Removes one copy of value from scores, highest first, keeping the order.
+static void remove_score(Equity *scores, int num_scores, Equity value) {
+  int score_idx = 0;
+  while (scores[score_idx] != value) {
+    score_idx++;
+  }
+  for (; score_idx < num_scores - 1; score_idx++) {
+    scores[score_idx] = scores[score_idx + 1];
+  }
+}
+
+// The best arrangement without the DP, when the squares have no vowel
+// adjustments and there are no pins and at most one blank. Then the best
+// arrangements are those that reach wordsmog_score_bound, if any does: the
+// comonotone ones, in which no square holds a lower score than a square with a
+// lower coefficient. So each square in board order takes a tile whose score
+// lies between the remaining tiles' scores at the ranks of the remaining
+// squares that share its coefficient: the smallest letter its cross set allows,
+// or else the blank. When that never gets stuck, the arrangement is comonotone,
+// and it is the smallest in board order, since at each square every best
+// arrangement with the same tiles before it puts one of the tiles considered
+// there. Returns false when it gets stuck, leaving the DP to decide.
+static bool greedy_arrangement(const WordsmogSquare *squares, int num_squares,
+                               const WordsmogTiles *tiles,
+                               WordsmogArrangement *best) {
+  Equity remaining_scores[RACK_SIZE];
+  for (int square_idx = 0; square_idx < num_squares; square_idx++) {
+    remaining_scores[square_idx] = tiles->descending_scores[square_idx];
+  }
+  int counts[RACK_SIZE];
+  for (int letter_idx = 0; letter_idx < tiles->num_letters; letter_idx++) {
+    counts[letter_idx] = tiles->counts[letter_idx];
+  }
+  int num_blanks = tiles->num_blanks;
+  best->score = 0;
+  best->adjustment = 0;
+  for (int square_idx = 0; square_idx < num_squares; square_idx++) {
+    const WordsmogSquare *square = &squares[square_idx];
+    int num_above = 0;
+    int num_level = 0;
+    for (int later_idx = square_idx; later_idx < num_squares; later_idx++) {
+      num_above += squares[later_idx].coefficient > square->coefficient;
+      num_level += squares[later_idx].coefficient == square->coefficient;
+    }
+    const Equity highest = remaining_scores[num_above];
+    const Equity lowest = remaining_scores[num_above + num_level - 1];
+    Equity score = 0;
+    bool placed = false;
+    for (int letter_idx = 0; letter_idx < tiles->num_letters; letter_idx++) {
+      score = tiles->scores[letter_idx];
+      if (counts[letter_idx] == 0 || score > highest || score < lowest ||
+          !natural_allowed(square, tiles, letter_idx)) {
+        continue;
+      }
+      counts[letter_idx]--;
+      best->tiles[square_idx] = tiles->letters[letter_idx];
+      placed = true;
+      break;
+    }
+    if (!placed) {
+      score = tiles->blank_score;
+      MachineLetter designation;
+      if (num_blanks == 0 || score > highest || score < lowest ||
+          !blank_designation(square, tiles,
+                             square->cross_set & tiles->blank_letters &
+                                 ~(uint64_t)1,
+                             &designation)) {
+        return false;
+      }
+      num_blanks--;
+      best->tiles[square_idx] = get_blanked_machine_letter(designation);
+    }
+    best->score += score * square->coefficient;
+    remove_score(remaining_scores, num_squares - square_idx, score);
+  }
+  return true;
+}
+
+// Whether no square has a vowel adjustment, which only the opening move has.
+static bool no_vowel_adjustments(const WordsmogSquare *squares,
+                                 int num_squares) {
+  for (int square_idx = 0; square_idx < num_squares; square_idx++) {
+    if (squares[square_idx].vowel_adjustment != 0) {
+      return false;
+    }
+  }
+  return true;
+}
+
+// Sets square_tiles[square] to the tiles, numbered with each letter's copies
+// in order and then the blank, that the square's cross set allows: a blank
+// when some designation keeps every word valid. For at most one blank.
+// Returns false when a square allows none of them.
+static bool allowed_tiles(const WordsmogSquare *squares, int num_squares,
+                          const WordsmogTiles *tiles,
+                          uint32_t square_tiles[RACK_SIZE]) {
+  for (int square_idx = 0; square_idx < num_squares; square_idx++) {
+    const WordsmogSquare *square = &squares[square_idx];
+    uint32_t allowed = 0;
+    int tile_idx = 0;
+    for (int letter_idx = 0; letter_idx < tiles->num_letters; letter_idx++) {
+      const uint32_t copies = (1U << tiles->counts[letter_idx]) - 1;
+      if (natural_allowed(square, tiles, letter_idx)) {
+        allowed |= copies << tile_idx;
+      }
+      tile_idx += tiles->counts[letter_idx];
+    }
+    if (tiles->num_blanks == 1 &&
+        (square->cross_set & tiles->blank_letters & ~(uint64_t)1) != 0) {
+      allowed |= 1U << tile_idx;
+    }
+    if (allowed == 0) {
+      return false;
+    }
+    square_tiles[square_idx] = allowed;
+  }
+  return true;
+}
+
+// Finds square_idx a tile among those not yet visited, moving the squares
+// already matched to other tiles as needed: one augmenting path.
+static bool match_square(const uint32_t square_tiles[RACK_SIZE], int square_idx,
+                         uint32_t *visited, int tile_squares[RACK_SIZE]) {
+  for (uint32_t candidates = square_tiles[square_idx] & ~*visited;
+       candidates != 0; candidates &= candidates - 1) {
+    const int tile_idx = wordsmog_lowest_bit(candidates);
+    if ((*visited >> tile_idx) & 1U) {
+      continue;
+    }
+    *visited |= 1U << tile_idx;
+    if (tile_squares[tile_idx] < 0 ||
+        match_square(square_tiles, tile_squares[tile_idx], visited,
+                     tile_squares)) {
+      tile_squares[tile_idx] = square_idx;
+      return true;
+    }
+  }
+  return false;
+}
+
+// Whether each square can take a different tile it allows, which is whether
+// any arrangement is legal.
+static bool tiles_can_match(const uint32_t square_tiles[RACK_SIZE],
+                            int num_squares) {
+  int tile_squares[RACK_SIZE];
+  for (int tile_idx = 0; tile_idx < num_squares; tile_idx++) {
+    tile_squares[tile_idx] = -1;
+  }
+  for (int square_idx = 0; square_idx < num_squares; square_idx++) {
+    uint32_t visited = 0;
+    if (!match_square(square_tiles, square_idx, &visited, tile_squares)) {
+      return false;
+    }
+  }
+  return true;
+}
+
 bool wordsmog_best_arrangement(const WordsmogSquare *squares, int num_squares,
                                const WordsmogTiles *tiles,
                                const MachineLetter *pins,
                                WordsmogArrangement *best) {
   assert(num_squares <= RACK_SIZE);
   assert(tiles->num_blanks >= 0 && tiles->num_blanks <= 2);
+  // Without pins and with at most one blank, most placements are settled
+  // without the DP: many allow no arrangement, and in many the greedy
+  // arrangement reaches the score bound.
+  if (pins == NULL && tiles->num_blanks <= 1) {
+    uint32_t square_tiles[RACK_SIZE];
+    if (!allowed_tiles(squares, num_squares, tiles, square_tiles)) {
+      return false;
+    }
+    if (no_vowel_adjustments(squares, num_squares) &&
+        greedy_arrangement(squares, num_squares, tiles, best)) {
+      return true;
+    }
+    if (!tiles_can_match(square_tiles, num_squares)) {
+      return false;
+    }
+  }
   WordsmogSquare pinned[RACK_SIZE];
   uint32_t blank_forbidden;
   uint32_t blank_required;
