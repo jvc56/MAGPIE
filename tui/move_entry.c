@@ -21,6 +21,7 @@
 #include "config.h"
 #include "game_state.h"
 #include "tile_input.h"
+#include "tui_history_edit.h"
 #include <stdatomic.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -435,6 +436,14 @@ int tui_board_builder_default_dir(const TuiGameState *gs, int row, int col) {
 }
 
 void tui_board_builder_set_anchor(TuiGameState *gs, int row, int col, int dir) {
+  // The turn being entered is the pending last one, and only when it's
+  // the user's to enter: in play-vs-computer, not the computer's while
+  // it thinks (which would open its turn, show its rack, and leave the
+  // editor on that turn after it plays).
+  if (gs->history_count > 0 &&
+      !tui_history_entry_editable(gs, gs->history_count - 1)) {
+    return;
+  }
   tui_tile_key_reset(&gs->tile_keys);
   // The clicked cell is the ORIGIN — remembered so direction toggles
   // and arrow moves can re-derive everything from the user's cell. The
