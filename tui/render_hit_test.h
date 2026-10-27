@@ -91,7 +91,20 @@ typedef struct {
   int analysis_panel_right;
   // The currently-open modal, filled by render_modal_ex.
   ModalHitMap modal_hit_map;
+  // The Rack panel's Exchange and Pass buttons on its top border, drawn
+  // on the user's turn against the computer; row -1 when not shown.
+  int rack_buttons_row;
+  int rack_exchange_left;
+  int rack_exchange_right;
+  int rack_pass_left;
+  int rack_pass_right;
 } TuiHitMaps;
+
+typedef enum {
+  TUI_RACK_BUTTON_NONE,
+  TUI_RACK_BUTTON_EXCHANGE,
+  TUI_RACK_BUTTON_PASS,
+} TuiRackButton;
 
 // The renderers write through this pointer while drawing a frame.
 TuiHitMaps *tui_hit_maps(void);
@@ -124,6 +137,9 @@ bool tui_board_cell_at(struct ncplane *plane, const TuiGameState *state, int y,
 //        caller to treat as if the user pressed Enter on that
 //        focused item.
 int tui_modal_item_at(int y, int x);
+
+// The Rack panel button at cell (y, x), if any.
+TuiRackButton tui_rack_button_at(int y, int x);
 
 TuiModalChevron tui_modal_chevron_at(int y, int x);
 

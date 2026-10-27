@@ -2,10 +2,12 @@
 
 #include "bot_worker.h"
 #include "config.h"
+#include "exchange_dialog.h"
 #include "game_render.h"
 #include "game_state.h"
 #include "gcg_export.h"
 #include "input_settings.h"
+#include "move_entry.h"
 #include "slash_commands.h"
 #include "time_picker.h"
 #include "tui_clipboard.h"
@@ -62,6 +64,9 @@ const char *tui_command_unavailable_reason(const TuiGameState *state,
   case TUI_SLASH_SAVE:
   case TUI_SLASH_COPY_GCG:
     return has_committed_turn(state) ? NULL : "No turns to save yet.";
+  case TUI_SLASH_EXCHANGE:
+  case TUI_SLASH_PASS:
+    return tui_pvc_move_unavailable_reason(state, id == TUI_SLASH_EXCHANGE);
   case TUI_SLASH_SIM:
     return tui_analysis_unavailable_reason(state, state->history_cursor,
                                            TUI_ANALYSIS_SIM);
@@ -137,6 +142,12 @@ void tui_command_run(TuiGameState *state, TuiUiState *ui,
     break;
   case TUI_SLASH_COPY:
     tui_copy_position_cgp(state);
+    break;
+  case TUI_SLASH_EXCHANGE:
+    tui_exchange_dialog_open(state, ui);
+    break;
+  case TUI_SLASH_PASS:
+    tui_pass_confirm_open(state, ui);
     break;
   case TUI_SLASH_COPY_GCG:
     tui_copy_game_gcg(state);
