@@ -67,7 +67,7 @@ typedef struct {
   int phony_confirm_focus;
   // Exchange picker (TUI_MODAL_EXCHANGE): the user's rack in display
   // order, each tile in move notation ("E", "?", "[QU]"), which are
-  // picked, and the focused row (each tile, then Exchange, then Cancel).
+  // picked, and the focused row (each tile, then Exchange, Keep, Cancel).
   int exchange_tile_count;
   char exchange_tiles[RACK_SIZE][TUI_TILE_TEXT_MAX];
   bool exchange_picked[RACK_SIZE];
