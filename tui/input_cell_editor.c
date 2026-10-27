@@ -655,12 +655,14 @@ static bool cell_editor_type_char(TuiGameState *state, uint32_t key,
   } else if (text[1] == '\0' && text[0] >= 'a' && text[0] <= 'z') {
     // Letters are uppercase; in the MOVE field, Shift+letter marks a
     // played blank, stored lowercase as in the engine's move notation.
-    const bool blank_letter = field_move && shift;
+    // An exchange returns tiles, never blanks, so there Shift is ignored.
+    const bool blank_letter =
+        field_move && shift && !tui_game_state_edit_move_is_exchange(state);
     if (!blank_letter) {
       text[0] = (char)(text[0] - 'a' + 'A');
     }
   } else if (field_move && shift && text[1] == '\0' && text[0] >= 'A' &&
-             text[0] <= 'Z') {
+             text[0] <= 'Z' && !tui_game_state_edit_move_is_exchange(state)) {
     text[0] = (char)(text[0] - 'A' + 'a');
   }
   // A rack holds seven tiles, however many letters they spell ("[QU]" is

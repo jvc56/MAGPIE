@@ -87,6 +87,13 @@ TuiTypedLetterAction tui_move_entry_resolve_tile(const TuiGameState *gs, int ml,
   if (gs->ld == NULL || ml <= 0) {
     return TUI_TYPED_LETTER_REJECT;
   }
+  // An exchange's letters ("ex AB", "- AB") are tiles going back to the
+  // bag: never blanks, with or without Shift, and not checked against the
+  // rack here (the parser rejects tiles the rack doesn't hold).
+  if (tui_game_state_edit_move_is_exchange(gs)) {
+    tui_tile_token(gs->ld, ml, /*blank=*/false, out_token, token_size);
+    return TUI_TYPED_LETTER_PLACE;
+  }
   const bool pvc = gs->app_mode == TUI_APP_MODE_PLAY_VS_COMPUTER;
   // Occupied landing square: a matching tile is playthrough spelling
   // (take the BOARD tile's notation case — lowercase when it's a
