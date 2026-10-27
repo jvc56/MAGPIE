@@ -47,6 +47,7 @@
 #include "../ent/letter_distribution.h"
 #include "../ent/move.h"
 #include "../ent/pat.h"
+#include "../ent/pat_eval.h"
 #include "../ent/pat_lexicon.h"
 #include "../ent/pat_utility.h"
 #include "../ent/player.h"
@@ -54,6 +55,7 @@
 #include "../ent/rack.h"
 #include "../ent/sim_args.h"
 #include "../ent/sim_results.h"
+#include "../ent/static_eval.h"
 #include "../ent/thread_control.h"
 #include "../ent/trie.h"
 #include "../ent/validated_move.h"
@@ -3576,16 +3578,50 @@ void impl_move_gen(Config *config, ErrorStack *error_stack) {
 
 // Exploring the wordsmog play graph (smog)
 
-// A play's line in a smog table: rank, play, score and equity.
+// A play's static equity, as move generation prices it with equity sort,
+// whatever the player's sort type: its score and leave, the opening and
+// endgame adjustments, and no PAT term, which is off in wordsmog.
+static Equity smog_static_equity(const Game *game, const Move *move) {
+  const int player_index = game_get_player_on_turn_index(game);
+  const Player *player = game_get_player(game, player_index);
+  const Board *board = game_get_board(game);
+  Rack leave;
+  get_leave_for_move(move, game, &leave);
+  PATEvalContext pat_eval_ctx;
+  pat_eval_context_disable(&pat_eval_ctx);
+  return static_eval_get_move_equity(
+      game_get_ld(game), player_get_klv(player), move, &leave,
+      player_get_rack(game_get_player(game, 1 - player_index)),
+      board_get_opening_move_word_penalties(board),
+      board_get_opening_move_letter_penalties(board), 0, &pat_eval_ctx,
+      board_get_tiles_played(board), bag_get_letters(game_get_bag(game)));
+}
+
+// The columns every smog table starts with, below a label for its first:
+// rank, play, leave (Lv), score (Sc) and static equity (StEq), as move lists
+// show them.
+static void string_builder_add_smog_header(StringBuilder *sb,
+                                           const char *rank_label,
+                                           const char *play_label) {
+  string_builder_add_formatted_string(sb, "%5s  %-24s %-7s %4s %8s", rank_label,
+                                      play_label, "Lv", "Sc", "StEq");
+}
+
 static void string_builder_add_smog_play(StringBuilder *sb, const Game *game,
                                          int rank, const Move *move) {
+  const LetterDistribution *ld = game_get_ld(game);
   StringBuilder *move_sb = string_builder_create();
-  string_builder_add_move(move_sb, game_get_board(game), move,
-                          game_get_ld(game), false);
-  string_builder_add_formatted_string(sb, "%5d  %-24s %5d %9.2f", rank,
-                                      string_builder_peek(move_sb),
-                                      equity_to_int(move_get_score(move)),
-                                      equity_to_double(move_get_equity(move)));
+  string_builder_add_move(move_sb, game_get_board(game), move, ld, false);
+  StringBuilder *leave_sb = string_builder_create();
+  string_builder_add_move_leave(leave_sb,
+                                player_get_rack(game_get_player(
+                                    game, game_get_player_on_turn_index(game))),
+                                move, ld);
+  string_builder_add_formatted_string(
+      sb, "%5d  %-24s %-7s %4d %8.2f", rank, string_builder_peek(move_sb),
+      string_builder_peek(leave_sb), equity_to_int(move_get_score(move)),
+      equity_to_double(smog_static_equity(game, move)));
+  string_builder_destroy(leave_sb);
   string_builder_destroy(move_sb);
 }
 
@@ -3617,6 +3653,15 @@ static int smog_count_arg(const Config *config, int arg_idx, int default_count,
   return count;
 }
 
+// What the graph ranks plays by: the player's sort type.
+static const char *smog_ranking(const Config *config) {
+  return player_get_move_sort_type(game_get_player(
+             config->game, game_get_player_on_turn_index(config->game))) ==
+                 MOVE_SORT_SCORE
+             ? "score"
+             : "static equity";
+}
+
 // The top plays, best first, each arrangement once.
 static void smog_add_plays(const Config *config, WordsmogPlayGraph *graph,
                            int num_plays, StringBuilder *sb) {
@@ -3624,10 +3669,11 @@ static void smog_add_plays(const Config *config, WordsmogPlayGraph *graph,
   uint64_t plays;
   wordsmog_play_graph_count(graph, &arrangements, &plays);
   string_builder_add_formatted_string(
-      sb,
-      "Top plays of %llu (%llu with every blank designation), best first:\n"
-      " Rank  Play                     Score    Equity\n",
-      (unsigned long long)arrangements, (unsigned long long)plays);
+      sb, "Top plays of %llu (%llu with every blank designation), by %s:\n",
+      (unsigned long long)arrangements, (unsigned long long)plays,
+      smog_ranking(config));
+  string_builder_add_smog_header(sb, "Rank", "Play");
+  string_builder_add_string(sb, "\n");
   Move move;
   for (int rank = 1;
        rank <= num_plays && wordsmog_play_graph_next(graph, &move); rank++) {
@@ -3642,11 +3688,11 @@ static void smog_add_groups(const Config *config, WordsmogPlayGraph *graph,
                             int num_groups, StringBuilder *sb) {
   const int total_groups = wordsmog_play_graph_rank_groups(graph);
   string_builder_add_formatted_string(
-      sb,
-      "Top groups (placement and tiles) of %d, by best play:\n"
-      " Rank  Best play                Score    Equity  Arrangements     "
-      "Plays\n",
-      total_groups);
+      sb, "Top groups (placement and tiles) of %d, by their best play's %s:\n",
+      total_groups, smog_ranking(config));
+  string_builder_add_smog_header(sb, "Rank", "Best play");
+  string_builder_add_formatted_string(sb, " %13s %9s\n", "Arrangements",
+                                      "Plays");
   for (int rank = 0; rank < num_groups && rank < total_groups; rank++) {
     WordsmogPlayNode node;
     wordsmog_play_graph_get_group(graph, rank, &node);
@@ -3761,8 +3807,8 @@ static void smog_add_node(const Config *config, WordsmogPlayGraph *graph,
       sb, " (%d of %d squares); %llu arrangements, %llu plays\n",
       node.num_pinned, node.num_squares, (unsigned long long)arrangements,
       (unsigned long long)plays);
-  string_builder_add_string(sb, " Best  Play                     Score    "
-                                "Equity\n");
+  string_builder_add_smog_header(sb, "Best", "Play");
+  string_builder_add_string(sb, "\n");
   string_builder_add_smog_play(sb, config->game, 1, &move);
   string_builder_add_string(sb, "\n");
   if (node.num_pinned == node.num_squares) {
@@ -3773,9 +3819,10 @@ static void smog_add_node(const Config *config, WordsmogPlayGraph *graph,
   wordsmog_play_graph_get_next_square(graph, &node, &row, &col);
   string_builder_add_string(sb, "Next square ");
   string_builder_add_smog_square(sb, row, col);
-  string_builder_add_string(sb, ", by tile:\n"
-                                " Rank  Best play                Score    "
-                                "Equity  Tile  Arrangements\n");
+  string_builder_add_formatted_string(sb, ", by tile, by best play's %s:\n",
+                                      smog_ranking(config));
+  string_builder_add_smog_header(sb, "Rank", "Best play");
+  string_builder_add_string(sb, "  Tile  Arrangements\n");
   WordsmogPlayNode children[RACK_SIZE + 1];
   const int num_children =
       wordsmog_play_graph_get_children(graph, &node, children);
@@ -3784,11 +3831,13 @@ static void smog_add_node(const Config *config, WordsmogPlayGraph *graph,
     wordsmog_play_graph_count_node(graph, &children[child_idx], &arrangements,
                                    &plays);
     string_builder_add_smog_play(sb, config->game, child_idx + 1, &move);
-    string_builder_add_string(sb, "  ");
-    string_builder_add_smog_tile(sb, ld,
+    StringBuilder *tile_sb = string_builder_create();
+    string_builder_add_smog_tile(tile_sb, ld,
                                  children[child_idx].pins[node.num_pinned]);
-    string_builder_add_formatted_string(sb, "  %12llu\n",
+    string_builder_add_formatted_string(sb, "  %-4s  %12llu\n",
+                                        string_builder_peek(tile_sb),
                                         (unsigned long long)arrangements);
+    string_builder_destroy(tile_sb);
   }
 }
 

@@ -800,10 +800,17 @@ static void test_wordsmog_smog_command(void) {
   (void)has_play;
   string_builder_add_move(sb, game_get_board(game), &move, game_get_ld(game),
                           false);
+  // Under equity sort the graph ranks by static equity, which the tables
+  // show in their StEq column.
+  char *equity_str =
+      get_formatted_string(" %8.2f", equity_to_double(move_get_equity(&move)));
   output = command_output(config, "smog 5");
   assert_output_has(output, string_builder_peek(sb));
   assert_output_has(output, "    5  ");
+  assert_output_has(output, "Lv        Sc     StEq");
+  assert_output_has(output, equity_str);
   free(output);
+  free(equity_str);
   WordsmogPlayNode node;
   wordsmog_play_graph_get_group(graph, 1, &node);
   WordsmogPlayNode children[RACK_SIZE + 1];
