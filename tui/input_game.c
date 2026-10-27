@@ -137,6 +137,29 @@ static void complete_slash_word(TuiGameState *state) {
 
 // "/set <name> <value>": changes a setting, reporting the result (or
 // what's wrong) in the status bar. "/set <name>" shows its value.
+// "/exchange ABC": plays the tiles after the command as an exchange. Its
+// letters are regular tiles in any case ("/ex foo" is -FOO), as an
+// exchange has no blanks; "?" is a blank tile.
+static void exchange_typed_tiles(TuiGameState *state,
+                                 const TuiSlashWords *words) {
+  char move_text[sizeof(state->slash_buf) + 1] = "-";
+  int len = 1;
+  for (int word_idx = 1; word_idx < words->count; word_idx++) {
+    const char *word = state->slash_buf + words->start[word_idx];
+    for (int char_idx = 0;
+         char_idx < words->len[word_idx] && len < (int)sizeof(move_text) - 1;
+         char_idx++) {
+      const char ch = word[char_idx];
+      move_text[len++] =
+          (char)(ch >= 'a' && ch <= 'z' ? ch - 'a' + 'A' : (int)ch);
+    }
+  }
+  move_text[len] = '\0';
+  pthread_mutex_lock(&state->mutex);
+  (void)tui_pvc_play_typed(state, move_text);
+  pthread_mutex_unlock(&state->mutex);
+}
+
 static void run_set_command(TuiGameState *state, TuiSession *session,
                             const TuiSlashWords *words) {
   char message[sizeof(state->notice_buf)];
@@ -615,6 +638,20 @@ bool tui_input_game(TuiGameState *state, TuiUiState *ui, TuiSession *session,
         switch (cmd != NULL ? cmd->id : TUI_SLASH_COUNT) {
         case TUI_SLASH_SET:
           run_set_command(state, session, &words);
+          break;
+        case TUI_SLASH_EXCHANGE:
+          // "/exchange ABC" plays it; "/exchange" alone opens the picker.
+          if (words.count > 1) {
+            exchange_typed_tiles(state, &words);
+          } else {
+            tui_command_run(state, ui, session, cmd->id);
+          }
+          break;
+        case TUI_SLASH_PASS:
+          // Typed, it needs no confirming (the button and menu ask).
+          pthread_mutex_lock(&state->mutex);
+          (void)tui_pvc_play_typed(state, "pass");
+          pthread_mutex_unlock(&state->mutex);
           break;
         case TUI_SLASH_SAVE: {
           // Everything after "/save " is the file name, spaces included.

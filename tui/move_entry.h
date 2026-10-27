@@ -134,6 +134,18 @@ void tui_board_entry_submit(TuiGameState *gs);
 // and cell-entry Enter. Returns true when a move was committed.
 bool tui_pvc_commit_preview_move(TuiGameState *gs);
 
+// Why the user can't play an exchange (`exchange`) or a pass now, or NULL:
+// play-vs-computer only, on the user's turn, and an exchange needs a full
+// rack's worth of tiles in the bag. Caller holds gs->mutex.
+const char *tui_pvc_move_unavailable_reason(const TuiGameState *gs,
+                                            bool exchange);
+
+// Plays `move_text`, an exchange ("-ABC") or "pass", as the user's turn,
+// as if typed into its move field and entered. On failure posts a notice
+// saying why and leaves the turn open. Returns whether it was played.
+// Caller holds gs->mutex.
+bool tui_pvc_play_typed(TuiGameState *gs, const char *move_text);
+
 // Tag a placed move's squares with the player index so the renderer
 // colors them.
 void tui_tag_move_owners(Board *board, const Move *move, int player_idx);

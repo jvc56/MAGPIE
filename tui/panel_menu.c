@@ -23,13 +23,14 @@ enum { PANEL_COUNT = 6, MAX_PANEL_COMMANDS = 6 };
 static const TuiSlashCommandId panel_commands[PANEL_COUNT][MAX_PANEL_COMMANDS] =
     {
         [1] = {TUI_SLASH_COPY},
+        [2] = {TUI_SLASH_EXCHANGE, TUI_SLASH_PASS},
         [4] = {TUI_SLASH_PLAY_FROM, TUI_SLASH_WATCH_FROM, TUI_SLASH_SAVE,
                TUI_SLASH_COPY_GCG},
         [5] = {TUI_SLASH_SIM, TUI_SLASH_SOLVE, TUI_SLASH_KIBITZ,
                TUI_SLASH_RESUME, TUI_SLASH_STOP},
 };
 static const int panel_command_counts[PANEL_COUNT] = {
-    [1] = 1, [4] = 4, [5] = 5};
+    [1] = 1, [2] = 2, [4] = 4, [5] = 5};
 
 int tui_panel_menu_rows(int panel,
                         TuiPanelMenuRow rows[TUI_PANEL_MENU_MAX_ROWS]) {
