@@ -1253,20 +1253,6 @@ static inline int lowest_set_bit_index(uint32_t bitset) {
 #endif
 }
 
-// The number of set bits, following the guarded-intrinsic pattern.
-static inline int bit_count_64(uint64_t bitset) {
-#if defined(__has_builtin) && __has_builtin(__builtin_popcountll)
-  return __builtin_popcountll(bitset);
-#else
-  int count = 0;
-  while (bitset != 0) {
-    bitset &= bitset - 1;
-    count++;
-  }
-  return count;
-#endif
-}
-
 // lowest_set_bit_index for a 64-bit bitset.
 static inline int lowest_set_bit_index_64(uint64_t bitset) {
 #if defined(__has_builtin) && __has_builtin(__builtin_ctzll)
@@ -1279,26 +1265,6 @@ static inline int lowest_set_bit_index_64(uint64_t bitset) {
   }
   return index;
 #endif
-}
-
-// kwg_get_next_node_index, from the list's sibling tiles when the KWG has
-// them, without walking the list.
-static inline uint32_t gen_next_node_index(const MoveGen *gen,
-                                           uint32_t node_index,
-                                           MachineLetter tile) {
-  const uint64_t *sibling_tiles = kwg_get_sibling_tiles(gen->kwg);
-  if (sibling_tiles == NULL) {
-    return kwg_get_next_node_index(gen->kwg, node_index, tile);
-  }
-  const uint64_t list_tiles = sibling_tiles[node_index];
-  const uint64_t tile_bit = (uint64_t)1 << tile;
-  if ((list_tiles & tile_bit) == 0) {
-    return 0;
-  }
-  return kwg_node_arc_index_prefetch(
-      kwg_node(gen->kwg, node_index + (uint32_t)bit_count_64(list_tiles &
-                                                             (tile_bit - 1))),
-      gen->kwg);
 }
 
 bool wordmap_gen_check_playthrough_and_crosses(MoveGen *gen, int word_idx,
@@ -1743,9 +1709,9 @@ void recursive_gen(MoveGen *gen, int col, uint32_t node_index, int leftstrip,
       const uint64_t list_tiles = sibling_tiles[node_index];
       const uint64_t raw_bit = (uint64_t)1 << raw;
       if ((list_tiles & raw_bit) != 0) {
-        const uint32_t node = kwg_node(
-            gen->kwg,
-            node_index + (uint32_t)bit_count_64(list_tiles & (raw_bit - 1)));
+        const uint32_t node =
+            kwg_node(gen->kwg, node_index + (uint32_t)kwg_bit_count_64(
+                                                list_tiles & (raw_bit - 1)));
         next_node_index = kwg_node_arc_index_prefetch(node, gen->kwg);
         accepts = kwg_node_accepts(node);
       }
@@ -1781,9 +1747,9 @@ void recursive_gen(MoveGen *gen, int col, uint32_t node_index, int leftstrip,
             (MachineLetter)lowest_set_bit_index_64(placeable);
         const uint64_t tile_bit = placeable & (~placeable + 1);
         placeable ^= tile_bit;
-        const uint32_t node = kwg_node(
-            gen->kwg,
-            node_index + (uint32_t)bit_count_64(list_tiles & (tile_bit - 1)));
+        const uint32_t node =
+            kwg_node(gen->kwg, node_index + (uint32_t)kwg_bit_count_64(
+                                                list_tiles & (tile_bit - 1)));
         assert(kwg_node_tile(node) == ml);
         recursive_gen_place(gen, col, node, ml, leftstrip, rightstrip,
                             unique_play, main_word_score, word_multiplier,
@@ -1889,8 +1855,8 @@ void go_on(MoveGen *gen, int current_col, MachineLetter L,
     // placing the first tile of a play and continuing to the right.
     if ((gen->tiles_played != 0) ||
         (gen->anchor_right_extension_set & gen->rack_cross_set) != 0) {
-      uint32_t separation_node_index =
-          gen_next_node_index(gen, new_node_index, SEPARATION_MACHINE_LETTER);
+      uint32_t separation_node_index = kwg_get_next_node_index(
+          gen->kwg, new_node_index, SEPARATION_MACHINE_LETTER);
       if (separation_node_index != 0 && no_letter_directly_left &&
           gen->current_anchor_col < BOARD_DIM - 1) {
         recursive_gen(gen, gen->current_anchor_col + 1, separation_node_index,
@@ -1984,9 +1950,9 @@ static inline void recursive_gen_small(MoveGen *gen, int col,
       const uint64_t list_tiles = sibling_tiles[node_index];
       const uint64_t raw_bit = (uint64_t)1 << raw;
       if ((list_tiles & raw_bit) != 0) {
-        const uint32_t node = kwg_node(
-            gen->kwg,
-            node_index + (uint32_t)bit_count_64(list_tiles & (raw_bit - 1)));
+        const uint32_t node =
+            kwg_node(gen->kwg, node_index + (uint32_t)kwg_bit_count_64(
+                                                list_tiles & (raw_bit - 1)));
         next_node_index = kwg_node_arc_index_prefetch(node, gen->kwg);
         accepts = kwg_node_accepts(node);
       }
@@ -2041,9 +2007,9 @@ static inline void recursive_gen_small(MoveGen *gen, int col,
             (MachineLetter)lowest_set_bit_index_64(placeable);
         const uint64_t tile_bit = placeable & (~placeable + 1);
         placeable ^= tile_bit;
-        const uint32_t node = kwg_node(
-            gen->kwg,
-            node_index + (uint32_t)bit_count_64(list_tiles & (tile_bit - 1)));
+        const uint32_t node =
+            kwg_node(gen->kwg, node_index + (uint32_t)kwg_bit_count_64(
+                                                list_tiles & (tile_bit - 1)));
         assert(kwg_node_tile(node) == ml);
         recursive_gen_small_place(gen, col, node, ml, num_blanks, leftstrip,
                                   rightstrip, unique_play, main_word_score,
@@ -2129,8 +2095,8 @@ static inline void go_on_small(MoveGen *gen, int current_col, MachineLetter L,
 
     if ((gen->tiles_played != 0) ||
         (gen->anchor_right_extension_set & gen->rack_cross_set) != 0) {
-      uint32_t separation_node_index =
-          gen_next_node_index(gen, new_node_index, SEPARATION_MACHINE_LETTER);
+      uint32_t separation_node_index = kwg_get_next_node_index(
+          gen->kwg, new_node_index, SEPARATION_MACHINE_LETTER);
       if (separation_node_index != 0 && no_letter_directly_left &&
           gen->current_anchor_col < BOARD_DIM - 1) {
         recursive_gen_small(gen, gen->current_anchor_col + 1,

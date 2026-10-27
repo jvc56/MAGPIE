@@ -85,9 +85,47 @@ static inline uint32_t kwg_get_root_node_index(const KWG *kwg) {
   return kwg_node_arc_index(gaddag_pointer_node);
 }
 
+// The number of set bits, following the guarded-intrinsic pattern.
+static inline int kwg_bit_count_64(uint64_t bitset) {
+#if defined(__has_builtin) && __has_builtin(__builtin_popcountll)
+  return __builtin_popcountll(bitset);
+#else
+  int count = 0;
+  while (bitset != 0) {
+    bitset &= bitset - 1;
+    count++;
+  }
+  return count;
+#endif
+}
+
+// The node for tile in the list that starts at node_index, whose sibling
+// tiles (see kwg_build_sibling_tiles) are list_tiles and include the tile.
+static inline uint32_t kwg_sibling_node_index(uint32_t node_index,
+                                              uint64_t list_tiles,
+                                              MachineLetter tile) {
+  return node_index +
+         (uint32_t)kwg_bit_count_64(list_tiles & (((uint64_t)1 << tile) - 1));
+}
+
+// The tile's bit in a list's sibling tiles, or 0 for a tile too large for
+// any list to hold.
+static inline uint64_t kwg_sibling_tile_bit(MachineLetter tile) {
+  return tile < 64 ? (uint64_t)1 << tile : 0;
+}
+
 static inline uint32_t kwg_get_next_node_index(const KWG *kwg,
                                                uint32_t node_index,
                                                MachineLetter letter) {
+  if (kwg->sibling_tiles != NULL) {
+    const uint64_t list_tiles = kwg->sibling_tiles[node_index];
+    if ((list_tiles & kwg_sibling_tile_bit(letter)) == 0) {
+      return 0;
+    }
+    return kwg_node_arc_index_prefetch(
+        kwg_node(kwg, kwg_sibling_node_index(node_index, list_tiles, letter)),
+        kwg);
+  }
   uint32_t i = node_index;
   while (1) {
     const uint32_t node = kwg_node(kwg, i);
@@ -255,6 +293,14 @@ static inline void kwg_write_to_file(const KWG *kwg, const char *filename,
 static inline bool kwg_in_letter_set(const KWG *kwg, MachineLetter letter,
                                      uint32_t node_index) {
   letter = get_unblanked_machine_letter(letter);
+  if (kwg->sibling_tiles != NULL) {
+    const uint64_t list_tiles = kwg->sibling_tiles[node_index];
+    if ((list_tiles & kwg_sibling_tile_bit(letter)) == 0) {
+      return false;
+    }
+    return kwg_node_accepts(
+        kwg_node(kwg, kwg_sibling_node_index(node_index, list_tiles, letter)));
+  }
   uint32_t i = node_index;
   for (;;) {
     const uint32_t node = kwg_node(kwg, i);
