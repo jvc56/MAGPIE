@@ -653,9 +653,11 @@ magpie> peg
 ```
 
 By default the solve is **complete** and counts only results: a win by 1 is as
-good as a win by 100. Every candidate is solved with every endgame searched to
-the end of the game, and a candidate is cut only once its losses and draws
-prove it cannot reach the best one, so the best move and its win% are exact.
+good as a win by 100. Every candidate is solved, each endgame searched 2 plies
+deep (`-pegplies`), and a candidate is cut once its losses and draws show it
+cannot reach the best one. A line still going at that depth is finished by a
+greedy playout, so the results are estimates; `-pegplies end` searches every
+endgame to the end of the game, which makes the best move and its win% exact.
 Cut candidates show the most they could have reached (`<=`), and spreads are
 not shown. The opponent is **pessimistic**: wherever it replies, it plays as if
 it could see your rack and the bag order. Tiles the opponent is known to hold,
@@ -681,6 +683,8 @@ them.
 Several settings tune the search further; see `help peg` for full
 descriptions:
 
+- `-pegplies <plies|end>` sets how deep the complete solve searches each
+  endgame (default 2); `end` searches to the end of the game.
 - `-pegtlim <seconds>` gives the solve a time limit, which switches it to the
   **staged cascade**: stage 0 greedy-evaluates every candidate, and each
   halving stage keeps the best of them and re-ranks them at one more ply of
@@ -698,11 +702,11 @@ descriptions:
   (faster, approximate).
 - `-threads <n>` is a pure speedup at the same answer.
 
-How far a complete solve is practical depends on the bag. At 1 in the bag it
-usually takes under a minute on a 12-thread desktop, though a lost position,
-where every candidate's every draw must be proven a loss, can take over ten
-minutes. At 2 to 4 in the bag it can take well over twenty minutes, and a time
-limit gives a quick, approximate answer instead. `analyze` solves 1-in-bag
+At the default 2 plies, a 1-in-bag solve took 1 to 146 seconds on a 12-thread
+desktop, half of them under 26 seconds. To the end of the game (`-pegplies
+end`), it often takes several minutes, more when the opponent holds a blank,
+and at 2 to 4 in the bag well over twenty minutes; a time limit gives a quick,
+approximate answer instead. `analyze` solves 1-in-bag
 turns with PEG and simulates larger bags; `-apegmaxbag` raises the limit.
 
 ### Comparing lexica

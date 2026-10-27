@@ -133,6 +133,13 @@ typedef struct PegArgs {
   // callers supply the selected budget. Ignored on native builds.
   double tt_fraction_of_mem;
 
+  // The endgame depth of an exhaustive solve, whose one stage keeps every
+  // candidate (stage_top_k {INT_MAX}): each emptier endgame is searched this
+  // many plies deep, judging a line still going there by the leaf estimate. 0
+  // (or PEG_EXHAUSTIVE_PLIES or more) searches to the end of the game, so its
+  // values are proven. peg_args_fill sets 0; the cascade's stages ignore it.
+  int exhaustive_plies;
+
   // Total wall-clock budget in seconds for the whole peg_solve call.
   // 0 = unbounded (run to the last stage). When the budget is hit mid-stage,
   // the last *fully-completed* stage's top-K is returned; partial-stage work
@@ -395,6 +402,7 @@ static inline void peg_args_fill(
   peg_args->thread_control = thread_control;
   peg_args->num_threads = num_threads;
   peg_args->tt_fraction_of_mem = 0;
+  peg_args->exhaustive_plies = 0;
   peg_args->time_budget_seconds = time_budget_seconds;
   peg_args->max_stage = max_stage;
   peg_args->greedy_seed_only = greedy_seed_only;

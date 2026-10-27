@@ -105,6 +105,11 @@ enum {
   // Upper bound on the number of per-stage counts the -pegtopk CLI arg accepts.
   // This caps only the parse buffer; the solver itself imposes no stage limit.
   CONFIG_PEG_MAX_STAGES = 16,
+  // The pre-endgame solver's endgame depth when it keeps every candidate
+  // (-pegplies). On ten 1-in-bag games, 2 plies solved all of them in 1-146 s
+  // (half under 26 s) with the best move and win% of deeper searches, while 4
+  // plies and the end of the game each solved 4 of the 10 within 3 minutes.
+  CONFIG_DEFAULT_PEG_PLIES = 2,
   // The format -savesettings writes as -fileversion. Raise it whenever a
   // default that settings files record changes, and list the setting in
   // config_stale_settings.
@@ -186,6 +191,7 @@ typedef enum {
   ARG_TOKEN_ENDGAME_BEST_REPLY,
   ARG_TOKEN_PEG_TOP_K,
   ARG_TOKEN_PEG_TIME_LIMIT,
+  ARG_TOKEN_PEG_PLIES,
   ARG_TOKEN_PEG_STRIDE,
   ARG_TOKEN_PEG_NOPRUNE,
   ARG_TOKEN_PEG_PESSIMISTIC,
@@ -450,6 +456,9 @@ struct Config {
   // PEG scenario-sampling stride (halving stages, bag >= 3). 0 = solver
   // default.
   int peg_num_stages;
+  // The endgame depth of a solve that keeps every candidate (-pegplies); 0 =
+  // to the end of the game.
+  int peg_plies;
   int peg_scenario_stride;
   // AUTOPLAY_TYPE_LEAVE_GEN only: see AutoplayArgs.leavegen_max_games, which
   // this feeds via config_fill_autoplay_args. 0 = unbounded (the CLI
@@ -2416,10 +2425,24 @@ void add_help_arg_to_string_builder(const Config *config, int token,
           "in the peg command and in analyze's pre-endgame turns. A value of "
           "0 (the default) is unlimited. The limit picks the strategy: with "
           "none and no -pegtopk, the solve is complete (every candidate "
-          "solved to the end of the game with first-win endgames, cut only "
-          "once it provably cannot reach the best, so spreads are not "
-          "shown); with one, it is the staged cascade (see -pegtopk), which "
-          "always has an answer from its last completed stage.";
+          "solved with first-win endgames -pegplies deep, cut once it cannot "
+          "reach the best, so spreads are not shown); with one, it is the "
+          "staged cascade (see -pegtopk), which always has an answer from its "
+          "last completed stage.";
+      break;
+    case ARG_TOKEN_PEG_PLIES:
+      usages[0] = "<plies|end>";
+      examples[0] = "6";
+      examples[1] = "end";
+      text =
+          "The endgame depth of the pre-endgame solver's complete solve (no "
+          "-pegtlim or -pegtopk, or -pegtopk all), in the peg command and in "
+          "analyze's pre-endgame turns. Each endgame once the bag is empty "
+          "is searched this many plies deep, and a line still going there is "
+          "finished by a greedy playout, so its results are estimates, which "
+          "can be wrong when a line turns after that depth. end (or 0) "
+          "searches every line to the end of the game, so its results are "
+          "proven, and can take minutes at 1 in the bag. Defaults to 2.";
       break;
     case ARG_TOKEN_PEG_TOP_K:
       usages[0] = "<count1>,<count2>,...";
@@ -2435,8 +2458,9 @@ void add_help_arg_to_string_builder(const Config *config, int token,
           "after "
           "stage 0, then narrows 16/8/4/2 across the halving stages). A single "
           "'all' (or 0) is the EXHAUSTIVE setting: keep every candidate and "
-          "solve each at full endgame depth in one deep stage, with full "
-          "scenario enumeration (ignores -pegstride). Realistic at 1-in-bag, "
+          "solve each in one deep stage, its endgames -pegplies deep, with "
+          "full scenario enumeration (ignores -pegstride). Realistic at "
+          "1-in-bag, "
           "astronomically slow at higher bag counts. Each count must be "
           "'all'/0 "
           "or an integer >= 2.";
@@ -3289,6 +3313,7 @@ char *impl_help(Config *config, ErrorStack *error_stack) {
         ARG_TOKEN_PEG_PESSIMISTIC,         /* pegpess */
         ARG_TOKEN_P1_PEG_PESSIMISTIC,      /* pegpess1 */
         ARG_TOKEN_P2_PEG_PESSIMISTIC,      /* pegpess2 */
+        ARG_TOKEN_PEG_PLIES,               /* pegplies */
         ARG_TOKEN_PEG_STRIDE,              /* pegstride */
         ARG_TOKEN_P1_PEG_STRIDE,           /* pegstride1 */
         ARG_TOKEN_P2_PEG_STRIDE,           /* pegstride2 */
@@ -4852,6 +4877,21 @@ static void config_load_peg_stage_top_k(Config *config,
   config->peg_num_stages = n;
 }
 
+// -pegplies: a depth of 1 or more plies, or end (or 0), stored as 0, for the
+// end of the game.
+static void config_load_peg_plies(Config *config, ErrorStack *error_stack) {
+  const char *value = config_get_parg_value(config, ARG_TOKEN_PEG_PLIES, 0);
+  if (!value) {
+    return;
+  }
+  if (strings_iequal(value, "end")) {
+    config->peg_plies = 0;
+    return;
+  }
+  config_load_int(config, ARG_TOKEN_PEG_PLIES, 0, PEG_EXHAUSTIVE_PLIES,
+                  &config->peg_plies, error_stack);
+}
+
 // Default inner-peg stage schedule of a timed solve when nesting is on: the
 // inner cascade keeps 8 candidates at its first stage, then 4, then 2 --
 // enough lookahead to sharpen the non-emptier leaf decision without paying for
@@ -4864,12 +4904,14 @@ static const int PEG_COMPLETE_STAGE_COUNTS[] = {INT_MAX};
 void config_fill_peg_args(Config *config, PegArgs *peg_args) {
   // The time limit picks the strategy. With none (the default) and no
   // explicit -pegtopk, the solve is complete: after the greedy seed orders
-  // them, every candidate is solved to the end of the game with first-win
-  // endgames, and cut only once it provably cannot reach the best. With a
-  // limit, or an explicit -pegtopk, it is the staged cascade, which always has
-  // an answer from its last completed stage.
+  // them, every candidate is solved with first-win endgames -pegplies deep
+  // (to the end of the game with -pegplies end), and cut only once it cannot
+  // reach the best. With a limit, or an explicit -pegtopk, it is the staged
+  // cascade, which always has an answer from its last completed stage.
   const bool complete =
       config->peg_time_limit_seconds == 0 && config->peg_num_stages == 0;
+  const int complete_plies =
+      config->peg_plies > 0 ? config->peg_plies : PEG_EXHAUSTIVE_PLIES;
   const int *stage_top_k = NULL;
   int num_stages = 0;
   if (config->peg_num_stages > 0) {
@@ -4920,8 +4962,8 @@ void config_fill_peg_args(Config *config, PegArgs *peg_args) {
       config->peg_scenario_stride, /*nested_enabled=*/config->peg_nested,
       /*nested_cand_cap=*/0, nested_caps, nested_n_caps, nested_stride,
       nested_strides, nested_n_strides,
-      /*nested_emptier_ply_cap=*/complete ? PEG_EXHAUSTIVE_PLIES : 0,
-      nested_depth, /*nested_score_actual=*/true,
+      /*nested_emptier_ply_cap=*/complete ? complete_plies : 0, nested_depth,
+      /*nested_score_actual=*/true,
       /*nested_pessimistic=*/config->peg_pessimistic,
       /*disable_best_reply_shortcuts=*/!config->endgame_best_reply_shortcuts,
       /*first_win=*/complete, /*early_cutoff=*/complete,
@@ -4943,6 +4985,9 @@ void config_fill_peg_args(Config *config, PegArgs *peg_args) {
       /*shared_endgame_tt=*/NULL, /*checkpoint=*/NULL, /*resume=*/false,
       peg_args);
   peg_args->tt_fraction_of_mem = config->tt_fraction_of_mem;
+  // A solve that keeps every candidate in one stage, the complete one or
+  // -pegtopk all, searches its endgames -pegplies deep.
+  peg_args->exhaustive_plies = config->peg_plies;
 }
 
 // Parses a space-free UCGI PEG move list (coordinate.tiles, comma-separated)
@@ -13049,6 +13094,11 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
     return;
   }
 
+  config_load_peg_plies(config, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
   config_load_int(config, ARG_TOKEN_PEG_STRIDE, 0, INT_MAX,
                   &config->peg_scenario_stride, error_stack);
   if (!error_stack_is_empty(error_stack)) {
@@ -15481,6 +15531,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_ENDGAME_BEST_REPLY, "ebestreply", 1, 1);
   arg(ARG_TOKEN_PEG_TOP_K, "pegtopk", 1, 1);
   arg(ARG_TOKEN_PEG_TIME_LIMIT, "pegtlim", 1, 1);
+  arg(ARG_TOKEN_PEG_PLIES, "pegplies", 1, 1);
   arg(ARG_TOKEN_PEG_STRIDE, "pegstride", 1, 1);
   arg(ARG_TOKEN_PEG_NOPRUNE, "pnoprune", 1, 1);
   arg(ARG_TOKEN_PEG_PESSIMISTIC, "pegpess", 1, 1);
@@ -15638,6 +15689,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   // default; rational opponent; no only-solve / never-prune restrictions.
   config->peg_result.last_completed_stage = -1;
   config->peg_num_stages = 0;
+  config->peg_plies = CONFIG_DEFAULT_PEG_PLIES;
   config->leavegen_max_games = 0;
   config->leavegen_write_files = true;
   config->peg_scenario_stride = 0;
@@ -16249,6 +16301,10 @@ void config_add_settings_to_string_builder(const Config *config,
     case ARG_TOKEN_PEG_TIME_LIMIT:
       config_add_double_setting_to_string_builder(
           config, sb, arg_token, config->peg_time_limit_seconds);
+      break;
+    case ARG_TOKEN_PEG_PLIES:
+      config_add_int_setting_to_string_builder(config, sb, arg_token,
+                                               config->peg_plies);
       break;
     case ARG_TOKEN_NUMBER_OF_PLAYS:
       config_add_int_setting_to_string_builder(config, sb, arg_token,

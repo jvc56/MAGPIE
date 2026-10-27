@@ -5,6 +5,7 @@
 #include "../src/def/game_history_defs.h"
 #include "../src/def/letter_distribution_defs.h"
 #include "../src/def/move_defs.h"
+#include "../src/def/peg_defs.h"
 #include "../src/def/thread_control_defs.h"
 #include "../src/ent/bag.h"
 #include "../src/ent/board.h"
@@ -811,6 +812,34 @@ static void test_peg_main_cli(void) {
   string_builder_destroy(best);
   const double onyx_win = result->best_win;
   assert(onyx_win >= 0.9); // 7.5/8 = 0.9375
+
+  // -pegplies sets the complete solve's endgame depth: end (or 0) searches
+  // to the end of the game, and a depth outside 0..PEG_EXHAUSTIVE_PLIES or
+  // a word other than end is rejected.
+  PegArgs peg_args;
+  load_and_exec_config_or_die(config, "set -pegplies end");
+  config_fill_peg_args(config, &peg_args);
+  assert(peg_args.exhaustive_plies == 0);
+  assert(peg_args.nested_emptier_ply_cap == PEG_EXHAUSTIVE_PLIES);
+  load_and_exec_config_or_die(config, "set -pegplies 6");
+  config_fill_peg_args(config, &peg_args);
+  assert(peg_args.exhaustive_plies == 6);
+  assert(peg_args.nested_emptier_ply_cap == 6);
+  const char *bad_plies[] = {"set -pegplies -1", "set -pegplies 41",
+                             "set -pegplies deep"};
+  for (int bad_idx = 0; bad_idx < 3; bad_idx++) {
+    ErrorStack *plies_errors = error_stack_create();
+    config_load_command(config, bad_plies[bad_idx], plies_errors);
+    assert(!error_stack_is_empty(plies_errors));
+    error_stack_destroy(plies_errors);
+  }
+  // A 2-ply complete solve runs its one stage at 2 plies.
+  load_and_exec_config_or_die(config, "set -pegplies 2");
+  load_and_exec_config_or_die(config, "peg only 13L.ONYX,13L.OXY");
+  const PegResult *two_ply = config_get_peg_result(config);
+  assert(two_ply->last_completed_stage == 1);
+  assert(two_ply->n_stage_history == 2);
+  assert(two_ply->stage_history[1].fidelity_plies == 2);
 
   // The -pegpess / -pegstride / -pegtopk knobs parse and run (still restricted
   // to the two pegonly candidates, so this stays fast).

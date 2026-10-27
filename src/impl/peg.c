@@ -3714,6 +3714,12 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
   // field with full scenario enumeration. The greedy stage 0 still seeds the
   // ranking.
   const bool exhaustive = num_stages == 1 && counts[0] == INT_MAX;
+  // Its endgame depth: PegArgs.exhaustive_plies, or to the end of the game.
+  const int exhaustive_plies =
+      args->exhaustive_plies > 0 &&
+              args->exhaustive_plies < PEG_EXHAUSTIVE_PLIES
+          ? args->exhaustive_plies
+          : PEG_EXHAUSTIVE_PLIES;
 
   // Scenario sampling: opt-in via scenario_stride > 1, and only for bag >= 3
   // (the bag <= 2 scenario space is too small to sample without destroying
@@ -3978,11 +3984,10 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
     // Halving stages. Stage s re-evaluates the surviving top counts[s-1] (plus
     // protected stragglers) at one more ply of fidelity, then re-ranks; a stage
     // needs >= 2 candidates to be meaningful, and is skipped once the budget is
-    // spent. In exhaustive mode the lone stage runs at full endgame depth
+    // spent. In exhaustive mode the lone stage runs at exhaustive_plies
     // instead of the stage_idx+1 ramp (see `exhaustive` above).
     for (int stage_idx = 1; stage_idx <= num_stages; stage_idx++) {
-      const int stage_fidelity =
-          exhaustive ? PEG_EXHAUSTIVE_PLIES : stage_idx + 1;
+      const int stage_fidelity = exhaustive ? exhaustive_plies : stage_idx + 1;
       const bool last_stage = stage_idx == num_stages;
       // A stage that keeps every live candidate decides nothing; with
       // skip_noncutting_stages the next one that cuts (or the last) runs in
@@ -4358,7 +4363,7 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
         int capture_fidelity = 0;
         if (out->last_completed_stage > 0) {
           capture_fidelity =
-              exhaustive ? PEG_EXHAUSTIVE_PLIES : out->last_completed_stage + 1;
+              exhaustive ? exhaustive_plies : out->last_completed_stage + 1;
         }
         PegScenarioCapture capture = {0};
         capture.ld = ld;
