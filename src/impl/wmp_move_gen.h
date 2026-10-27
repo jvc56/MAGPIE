@@ -925,6 +925,37 @@ static inline void wmp_move_gen_resolve_filter_miss(WMPMoveGen *wmp_move_gen,
   }
 }
 
+// The WMP entry of subrack idx_for_size plus the playthrough letters, resolved
+// as wmp_move_gen_get_subrack_words resolves it, or NULL when that multiset is
+// no anagram of a word. Writes the multiset to main_word. For wordsmog, which
+// needs only the entry, never the words: a blank entry's letters are the
+// blank's designations.
+static inline const WMPEntry *
+wmp_move_gen_get_subrack_entry(WMPMoveGen *wmp_move_gen, int idx_for_size,
+                               bool lazy, BitRack *main_word) {
+  const int subrack_idx =
+      subracks_get_combination_offset(wmp_move_gen->tiles_to_play) +
+      idx_for_size;
+  const bool is_playthrough =
+      wmp_move_gen->word_length > wmp_move_gen->tiles_to_play;
+  SubrackInfo *subrack_info =
+      is_playthrough ? &wmp_move_gen->playthrough_infos[subrack_idx]
+                     : &wmp_move_gen->nonplaythrough_infos[subrack_idx];
+  if (is_playthrough) {
+    subrack_info->wmp_entry = wmp_get_word_entry(
+        wmp_move_gen->wmp, &subrack_info->subrack, wmp_move_gen->word_length);
+  } else if (lazy && subrack_info->wmp_entry == WMP_ENTRY_UNRESOLVED) {
+    subrack_info->wmp_entry = wmp_get_word_entry(
+        wmp_move_gen->wmp, &subrack_info->subrack, wmp_move_gen->word_length);
+    if (wmp_move_gen->nonplaythrough_wmp_entry_cache != NULL) {
+      wmp_move_gen->nonplaythrough_wmp_entry_cache[subrack_idx] =
+          subrack_info->wmp_entry;
+    }
+  }
+  *main_word = subrack_info->subrack;
+  return subrack_info->wmp_entry;
+}
+
 // Called once per candidate subrack from the hottest loop in wordmap_gen.
 // clang inlines it there while it has a single caller; a second caller
 // anywhere in that translation unit flips the cost model and turns the loop

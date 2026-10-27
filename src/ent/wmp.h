@@ -850,6 +850,30 @@ wmp_get_word_entry(const WMP *wmp, const BitRack *bit_rack, int word_length) {
   return entry;
 }
 
+// Whether the multiset bit_rack, with up to two blanks, is an anagram of a
+// word of word_length letters: a wordsmog word's validity.
+static inline bool wmp_has_anagram(const WMP *wmp, const BitRack *bit_rack,
+                                   int word_length) {
+  return word_length >= 2 && word_length <= BOARD_DIM &&
+         wmp_get_word_entry(wmp, bit_rack, word_length) != NULL;
+}
+
+// The letters that make the blankless multiset bit_rack, of num_letters
+// letters, an anagram of a word when added to it, as a bitset by machine
+// letter: a wordsmog square's cross set when its perpendicular word has those
+// letters.
+static inline uint64_t
+wmp_get_anagram_completions(const WMP *wmp, BitRack bit_rack, int num_letters) {
+  const int word_length = num_letters + 1;
+  if (word_length > BOARD_DIM) {
+    return 0;
+  }
+  bit_rack_add_letter(&bit_rack, BLANK_MACHINE_LETTER);
+  const WMPEntry *entry =
+      wfl_get_blank_entry(&wmp->wfls[word_length], &bit_rack);
+  return entry == NULL ? 0 : entry->blank_letters;
+}
+
 static inline int wfl_write_blanks_to_buffer(const WMPForLength *wfl,
                                              const BitRack *bit_rack,
                                              int word_length,

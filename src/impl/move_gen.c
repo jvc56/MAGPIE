@@ -40,6 +40,7 @@
 #include "../ent/word_info_table.h"
 #include "../util/io_util.h"
 #include "wmp_move_gen.h"
+#include "wordsmog_arrangement.h"
 #include <assert.h>
 #include <stdatomic.h>
 #include <stdbool.h>
@@ -1352,6 +1353,25 @@ wordmap_gen_leave_prunes_subrack(const MoveGen *gen, const Anchor *anchor,
       gen, leave_value + anchor->highest_possible_score + anchor_pat_bound);
 }
 
+// With the bag empty, a play is priced by its actual leave, not a leave value:
+// sets gen->leave to the rack less the subrack, and the leave value to 0.
+static inline __attribute__((always_inline)) void
+wordmap_gen_set_empty_bag_leave(MoveGen *gen, const Anchor *anchor,
+                                int subrack_idx) {
+  WMPMoveGen *wgen = &gen->wmp_move_gen;
+  wgen->leave_value = 0;
+  for (int ml = 0; ml < ld_get_size(&gen->ld); ml++) {
+    const int leave_num_ml =
+        rack_get_letter(&gen->player_rack, ml) -
+        bit_rack_get_letter(
+            wmp_move_gen_get_nonplaythrough_subrack(wgen, subrack_idx), ml);
+    rack_set_letter(&gen->leave, ml, leave_num_ml);
+  }
+  rack_set_total_letters(&gen->leave,
+                         rack_get_total_letters(&gen->player_rack) -
+                             anchor->tiles_to_play);
+}
+
 // Probes the WMP for one canonical subrack of the current anchor and records
 // every play its words allow. Returns true once the recording threshold has
 // been exceeded, so the caller stops scanning subracks.
@@ -1381,17 +1401,7 @@ wordmap_gen_record_subrack(MoveGen *gen, const Anchor *anchor, int subrack_idx,
     return false;
   }
   if (gen->number_of_tiles_in_bag == 0) {
-    wgen->leave_value = 0;
-    for (int ml = 0; ml < ld_get_size(&gen->ld); ml++) {
-      const int leave_num_ml =
-          rack_get_letter(&gen->player_rack, ml) -
-          bit_rack_get_letter(
-              wmp_move_gen_get_nonplaythrough_subrack(wgen, subrack_idx), ml);
-      rack_set_letter(&gen->leave, ml, leave_num_ml);
-    }
-    rack_set_total_letters(&gen->leave,
-                           rack_get_total_letters(&gen->player_rack) -
-                               anchor->tiles_to_play);
+    wordmap_gen_set_empty_bag_leave(gen, anchor, subrack_idx);
   }
   for (int word_idx = 0; word_idx < wgen->num_words; word_idx++) {
     for (int start_col = anchor->leftmost_start_col;
@@ -1630,6 +1640,199 @@ wordmap_gen(MoveGen *gen, const Anchor *anchor, bool lazy) {
     if (filter_misses != 0) {
       wordmap_gen_resolve_filter_misses(gen, anchor, first_idx, filter_misses,
                                         anchor_pat_bound);
+    }
+  }
+}
+
+// Wordsmog with the WMP. A subrack whose letters and the playthrough letters
+// are an anagram of a word forms a valid main word in every arrangement, so
+// each of the anchor's start columns gets one play per such subrack: its best
+// arrangement on the placement's empty squares (see wordsmog_arrangement.h).
+
+// The tiles of a subrack for wordsmog_best_arrangement: its natural letters,
+// its blanks, and the designations that keep main_word, the subrack plus the
+// playthrough letters, an anagram of a word. entry is main_word's WMP entry.
+static void wordsmog_tiles_init(const MoveGen *gen, const BitRack *subrack,
+                                const BitRack *main_word, const WMPEntry *entry,
+                                WordsmogTiles *tiles) {
+  const int ld_size = ld_get_size(&gen->ld);
+  tiles->num_letters = 0;
+  tiles->vowels = 0;
+  for (int ml = 1; ml < ld_size; ml++) {
+    if (ld_get_is_vowel(&gen->ld, ml)) {
+      tiles->vowels |= 1U << ml;
+    }
+    const int count = bit_rack_get_letter(subrack, ml);
+    if (count == 0) {
+      continue;
+    }
+    tiles->letters[tiles->num_letters] = (MachineLetter)ml;
+    tiles->counts[tiles->num_letters] = count;
+    tiles->scores[tiles->num_letters] = gen->tile_scores[ml];
+    tiles->num_letters++;
+  }
+  tiles->num_blanks = bit_rack_get_letter(subrack, BLANK_MACHINE_LETTER);
+  tiles->blank_score =
+      gen->tile_scores[get_blanked_machine_letter(BLANK_MACHINE_LETTER)];
+  tiles->blank_letters = 0;
+  memset(tiles->pair_letters, 0, sizeof(tiles->pair_letters));
+  if (tiles->num_blanks == 1) {
+    tiles->blank_letters = entry->blank_letters;
+  } else if (tiles->num_blanks == 2) {
+    // A double-blank entry holds the lower letter of each pair. The higher
+    // ones are the designations of the other blank once the lower one is
+    // fixed, at or above it.
+    const int word_length = gen->wmp_move_gen.word_length;
+    for (uint32_t lows = entry->first_blank_letters & ~1U; lows != 0;
+         lows &= lows - 1) {
+      const MachineLetter low = (MachineLetter)lowest_set_bit_index(lows);
+      BitRack one_blank = *main_word;
+      bit_rack_take_letter(&one_blank, BLANK_MACHINE_LETTER);
+      bit_rack_add_letter(&one_blank, low);
+      const WMPEntry *one_blank_entry = wfl_get_blank_entry(
+          &gen->wmp_move_gen.wmp->wfls[word_length], &one_blank);
+      if (one_blank_entry != NULL) {
+        tiles->pair_letters[low] =
+            one_blank_entry->blank_letters & ~((1U << low) - 1U);
+      }
+    }
+  }
+}
+
+// Records the best arrangement of tiles at each of the anchor's start
+// columns. Returns true once the recording threshold has been exceeded.
+static bool wordsmog_record_placements(MoveGen *gen, const Anchor *anchor,
+                                       const WordsmogTiles *tiles) {
+  WMPMoveGen *wgen = &gen->wmp_move_gen;
+  // The opening move's placement penalty is the one equity term that depends
+  // on where the tiles go (PAT is off in wordsmog).
+  const bool opening = gen->move_sort_type == MOVE_SORT_EQUITY &&
+                       gen->board_number_of_tiles_played == 0;
+  const int penalty_offset = board_is_dir_vertical(gen->dir) ? BOARD_DIM : 0;
+  // A square with no cross word allows every bit; keep the alphabet's letters.
+  const uint64_t letters =
+      (((uint64_t)1 << ld_get_size(&gen->ld)) - 1) & ~(uint64_t)1;
+  for (int start_col = anchor->leftmost_start_col;
+       start_col <= anchor->rightmost_start_col; start_col++) {
+    WordsmogSquare squares[RACK_SIZE];
+    int square_letter_idxs[RACK_SIZE];
+    int num_squares = 0;
+    int word_multiplier = 1;
+    for (int letter_idx = 0; letter_idx < wgen->word_length; letter_idx++) {
+      const int board_col = start_col + letter_idx;
+      if ((wgen->playthrough_positions & (1U << board_col)) != 0) {
+        gen->playthrough_marked[letter_idx] = PLAYED_THROUGH_MARKER;
+        continue;
+      }
+      assert(num_squares < RACK_SIZE);
+      word_multiplier *= bonus_square_get_word_multiplier(
+          gen_cache_get_bonus_square(gen, board_col));
+      square_letter_idxs[num_squares] = letter_idx;
+      squares[num_squares].cross_set =
+          gen_cache_get_cross_set(gen, board_col) & letters;
+      squares[num_squares].vowel_adjustment =
+          opening
+              ? gen->opening_move_word_penalties[penalty_offset + board_col] +
+                    gen->opening_move_letter_penalties[penalty_offset +
+                                                       board_col]
+              : 0;
+      num_squares++;
+    }
+    assert(num_squares == anchor->tiles_to_play);
+    for (int square_idx = 0; square_idx < num_squares; square_idx++) {
+      const int board_col = start_col + square_letter_idxs[square_idx];
+      const BonusSquare bonus_square =
+          gen_cache_get_bonus_square(gen, board_col);
+      const int cross_word_multiplier =
+          gen_cache_get_is_cross_word(gen, board_col)
+              ? bonus_square_get_word_multiplier(bonus_square)
+              : 0;
+      squares[square_idx].coefficient =
+          bonus_square_get_letter_multiplier(bonus_square) *
+          (word_multiplier + cross_word_multiplier);
+    }
+    WordsmogArrangement arrangement;
+    if (!wordsmog_best_arrangement(squares, num_squares, tiles, &arrangement)) {
+      continue;
+    }
+    for (int square_idx = 0; square_idx < num_squares; square_idx++) {
+      gen->playthrough_marked[square_letter_idxs[square_idx]] =
+          arrangement.tiles[square_idx];
+    }
+    record_wmp_play(gen, start_col, wgen->leave_value);
+    if (gen->threshold_exceeded) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// As wordmap_gen_record_subrack, but plays the subrack's best arrangements
+// instead of its words. Returns true once the recording threshold has been
+// exceeded.
+static bool wordsmog_record_subrack(MoveGen *gen, const Anchor *anchor,
+                                    int subrack_idx, bool lazy) {
+  WMPMoveGen *wgen = &gen->wmp_move_gen;
+  if (gen->wmp_prune_subracks_by_leave) {
+    wgen->leave_value = wmp_move_gen_get_leave_value(wgen, subrack_idx);
+  }
+  if (wordmap_gen_leave_prunes_subrack(gen, anchor, subrack_idx, 0)) {
+    return false;
+  }
+  BitRack main_word;
+  const WMPEntry *entry =
+      wmp_move_gen_get_subrack_entry(wgen, subrack_idx, lazy, &main_word);
+  if (entry == NULL) {
+    return false;
+  }
+  if (gen->number_of_tiles_in_bag == 0) {
+    wordmap_gen_set_empty_bag_leave(gen, anchor, subrack_idx);
+  }
+  WordsmogTiles tiles;
+  wordsmog_tiles_init(
+      gen, wmp_move_gen_get_nonplaythrough_subrack(wgen, subrack_idx),
+      &main_word, entry, &tiles);
+  return wordsmog_record_placements(gen, anchor, &tiles);
+}
+
+// As wordmap_gen for wordsmog: the anchor's candidate subracks, each played in
+// its best arrangement. The word info table and PAT are off in wordsmog, and
+// the RIT's bingo words are spellings, so their prunes and fast path are
+// skipped.
+static void wordsmog_wmp_gen(MoveGen *gen, const Anchor *anchor, bool lazy) {
+  gen->max_tiles_to_play = anchor->tiles_to_play;
+  WMPMoveGen *wgen = &gen->wmp_move_gen;
+  wmp_move_gen_set_playthrough_bit_rack(wgen, anchor, gen->row_squares, NULL,
+                                        gen->wit_len_lane, NULL);
+  wmp_move_gen_playthrough_metadata_init(wgen, anchor);
+  wmp_move_gen_build_playthrough_subracks(wgen);
+  const int num_subrack_combinations =
+      wmp_move_gen_get_num_subrack_combinations(wgen);
+  for (int first_idx = 0; first_idx < num_subrack_combinations;
+       first_idx += WMP_MOVE_GEN_SUBRACKS_PER_MASK) {
+    const int remaining = num_subrack_combinations - first_idx;
+    const int count = remaining < WMP_MOVE_GEN_SUBRACKS_PER_MASK
+                          ? remaining
+                          : WMP_MOVE_GEN_SUBRACKS_PER_MASK;
+    uint64_t filter_misses = 0;
+    uint64_t candidates = wordmap_gen_candidate_subracks(
+        gen, anchor, first_idx, count, lazy, 0, &filter_misses);
+    while (candidates != 0) {
+      const int bit_idx = wmp_move_gen_get_lowest_set_bit(candidates);
+      candidates &= candidates - 1;
+      const uint64_t misses_below = filter_misses & ((1ULL << bit_idx) - 1);
+      if (misses_below != 0) {
+        wordmap_gen_resolve_filter_misses(gen, anchor, first_idx, misses_below,
+                                          0);
+        filter_misses ^= misses_below;
+      }
+      if (wordsmog_record_subrack(gen, anchor, first_idx + bit_idx, lazy)) {
+        return;
+      }
+    }
+    if (filter_misses != 0) {
+      wordmap_gen_resolve_filter_misses(gen, anchor, first_idx, filter_misses,
+                                        0);
     }
   }
 }
@@ -2290,7 +2493,8 @@ shadow_record_impl(MoveGen *gen, bool wmp_active, uint32_t allowed_lengths) {
     }
   }
 
-  if (gen->is_wordsmog && (gen->tiles_played == RACK_SIZE) &&
+  // With the WMP on, its existence checks above have already answered this.
+  if (gen->is_wordsmog && !wmp_active && (gen->tiles_played == RACK_SIZE) &&
       !kwg_accepts_alpha_with_blanks(gen->kwg, &gen->bingo_alpha_rack)) {
     return;
   }
@@ -3681,7 +3885,11 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
   }
   gen->rack_info_table = new_rit;
   gen->rit_instance_id_at_load = new_rit_instance_id;
-  gen->word_info_table = player_get_word_info_table(player);
+  // The word info table describes how letters sit in words, which wordsmog
+  // ignores.
+  gen->word_info_table = game_get_variant(game) == GAME_VARIANT_WORDSMOG
+                             ? NULL
+                             : player_get_word_info_table(player);
   gen->board_number_of_tiles_played = board_get_tiles_played(gen->board);
   rack_copy(&gen->opponent_rack, player_get_rack(opponent));
   rack_copy(&gen->player_rack, player_get_rack(player));
@@ -3784,8 +3992,10 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
     // re-read from the player on every position load, so a training loop
     // that rewrites them between generations needs no extra invalidation,
     // and so are the player's PAT settings (see player_set_pat_usage).
+    // PAT's patterns are spellings, which wordsmog ignores.
     const PATWeights *pat = player_get_pat(player);
     if (pat && !args->disable_pat && !player_get_pat_disabled(player) &&
+        game_get_variant(game) != GAME_VARIANT_WORDSMOG &&
         gen->move_sort_type == MOVE_SORT_EQUITY &&
         gen->number_of_tiles_in_bag > 0 &&
         board_get_cross_sets_valid(gen->board)) {
@@ -4274,8 +4484,12 @@ gen_record_scoring_plays_impl(MoveGen *gen, bool lazy) {
                           anchor.col, gen->dir == BOARD_HORIZONTAL_DIRECTION, 0,
                           1, 0);
     } else if (gen->is_wordsmog) {
-      recursive_gen_alpha(gen, anchor.col, anchor.col, anchor.col,
-                          gen->dir == BOARD_HORIZONTAL_DIRECTION, 0, 1, 0);
+      if (wmp_move_gen_is_active(&gen->wmp_move_gen)) {
+        wordsmog_wmp_gen(gen, &anchor, lazy);
+      } else {
+        recursive_gen_alpha(gen, anchor.col, anchor.col, anchor.col,
+                            gen->dir == BOARD_HORIZONTAL_DIRECTION, 0, 1, 0);
+      }
     } else if (wmp_move_gen_is_active(&gen->wmp_move_gen)) {
       wordmap_gen(gen, &anchor, lazy);
     } else {

@@ -102,6 +102,7 @@
 #include "word_plus_floater_maker_test.h"
 #include "word_prune_test.h"
 #include "word_test.h"
+#include "wordsmog_wmp_test.h"
 #include "xs_test.h"
 #include "zobrist_test.h"
 #include <stdio.h>
@@ -175,6 +176,7 @@ static TestEntry test_table[] = {
     {"apsolvers", test_autoplay_solvers},
     {"contribute", test_contribute},
     {"words", test_words},
+    {"wsmog", test_wordsmog_wmp},
     {"wordprune", test_word_prune},
     {"kwgmaker", test_kwg_maker},
     {"cgp", test_cgp},
