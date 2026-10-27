@@ -83,14 +83,16 @@ static int wrap_error_lines(const char *text, int width, char lines[][128],
 // Number of wrapped rows the error message needs for the given
 // interior `width`. Accounts for the 2-cell "⚠ " prefix / indent
 // by wrapping the message to width-2.
-// A kept phony cross-word adds one informational row after them.
+// A kept phony cross-word adds one informational row after them, and a
+// play the VOID rule refused one more.
 static int history_error_rows(const TuiGameState *state, int idx, int width) {
   const TuiHistoryEntry *e = &state->history[idx];
   // A turn whose move is hidden hides what it would say about the move.
   if (tui_history_spoiler(state, idx) != TUI_SPOILER_NONE) {
     return 0;
   }
-  const int hook_rows = e->phony_hooks[0] != '\0' ? 1 : 0;
+  const int hook_rows = (e->phony_hooks[0] != '\0' ? 1 : 0) +
+                        (e->void_refused[0] != '\0' ? 1 : 0);
   if (e->error_str[0] == '\0') {
     return hook_rows;
   }
@@ -1227,13 +1229,30 @@ render_history_entry(struct ncplane *plane, const Theme *theme,
 // row per-entry, so two adjacent entries' errors can coexist on
 // the same screen row (each in its own column).
 // Draws the entry's kept phony cross-words ("phony hook: ZE*") at
-// `row`, dim: the play stands, this is just information. Returns the
-// rows drawn (0 or 1).
+// `row`, dim: the play stands, this is just information. Then, for a
+// turn whose last play the VOID rule refused, why it went back to the
+// rack, in the error color. Returns the rows drawn (0 to 2).
 static int render_history_hook_row(struct ncplane *plane, const Theme *theme,
                                    const TuiHistoryEntry *e, int row,
                                    int interior_left, int width) {
+  int drawn = 0;
+  if (e->void_refused[0] != '\0') {
+    char refused[96];
+    (void)snprintf(refused, sizeof(refused), "\xe2\x9a\xa0 not valid: %s",
+                   e->void_refused);
+    // The "⚠" is three bytes and one cell.
+    if ((int)strlen(refused) - 2 > width) {
+      refused[width > 0 ? width + 2 : 0] = '\0';
+    }
+    theme_apply_fg(plane, theme->error_fg);
+    theme_apply_bg(plane, theme->bg);
+    ncplane_set_styles(plane, 0);
+    ncplane_putstr_yx(plane, row, interior_left, refused);
+    row++;
+    drawn++;
+  }
   if (e->phony_hooks[0] == '\0') {
-    return 0;
+    return drawn;
   }
   char text[96];
   (void)snprintf(text, sizeof(text), "phony hook: %s", e->phony_hooks);
@@ -1244,7 +1263,7 @@ static int render_history_hook_row(struct ncplane *plane, const Theme *theme,
   theme_apply_bg(plane, theme->bg);
   ncplane_set_styles(plane, 0);
   ncplane_putstr_yx(plane, row, interior_left, text);
-  return 1;
+  return drawn + 1;
 }
 // Render the entry's (word-wrapped) error message starting at
 // `err_row`. The first line carries the "⚠ " glyph prefix;
