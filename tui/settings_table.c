@@ -102,6 +102,10 @@ static const TuiSettingDef setting_defs[] = {
      "Threads for sims and solves; auto uses every core but one, leaving "
      "it for the display.",
      TUI_SETTING_KIND_INT, NULL, 0, 0, THREADS_MAX, 1, "threads", "auto"},
+    {TUI_SETTING_SOUND, TUI_SETTING_PANEL_GENERAL, "sound", "Sound",
+     "Against the computer: a sound for each move it makes, and for a "
+     "phony of yours.",
+     TUI_SETTING_KIND_BOOL, NULL, 0, 0, 1, 1, NULL, NULL},
 };
 
 #undef CHOICES
@@ -219,6 +223,8 @@ int tui_setting_get(const TuiGameState *state, TuiSettingId id) {
     return (int)state->theme;
   case TUI_SETTING_RIT:
     return state->pending_load_rit ? 1 : 0;
+  case TUI_SETTING_SOUND:
+    return state->sound ? 1 : 0;
   case TUI_SETTING_COUNT:
   default:
     return 0;
@@ -539,6 +545,11 @@ static void apply_setting(TuiGameState *state, TuiSession *session,
     cfg->load_rit = value != 0;
     cfg->load_rit_set = true;
     state->pending_load_rit = cfg->load_rit;
+    break;
+  case TUI_SETTING_SOUND:
+    state->sound = value != 0;
+    cfg->sound = state->sound;
+    cfg->sound_set = true;
     break;
   case TUI_SETTING_COUNT:
   default:

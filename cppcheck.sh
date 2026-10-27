@@ -99,6 +99,8 @@ echo "Running cppcheck analysis on src/, test/, cmd/, tools/, and tui/ directori
     --suppress='*:*/cjson.h' \
     --suppress='*:*/sha256.c' \
     --suppress='*:*/sha256.h' \
+    --suppress='*:*/miniaudio.h' \
+    --config-exclude=vendor/ \
     --std=c99 \
     --error-exitcode=1 \
     -U_WIN32 \

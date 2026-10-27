@@ -33,6 +33,7 @@
 #include "analysis_rows.h"
 #include "config.h"
 #include "game_state.h"
+#include "sound.h"
 #include <pthread.h>
 #include <stdatomic.h>
 #include <stdint.h>
@@ -1273,6 +1274,15 @@ static void *bot_thread_main(void *arg) {
     const int total_after_move = post_play_score - bonus;
     finalize_history(state, pending_idx, chosen, move_score, total_after_move,
                      &leave);
+    // Against the user, the computer's move sounds: a tock for each tile
+    // it placed, or a drop into the bag for each it exchanged.
+    if (state->app_mode == TUI_APP_MODE_PLAY_VS_COMPUTER && state->sound) {
+      if (move_get_type(chosen) == GAME_EVENT_TILE_PLACEMENT_MOVE) {
+        tui_sound_play(TUI_SOUND_PLACE, move_get_tiles_played(chosen));
+      } else if (move_get_type(chosen) == GAME_EVENT_EXCHANGE) {
+        tui_sound_play(TUI_SOUND_EXCHANGE, move_get_tiles_played(chosen));
+      }
+    }
 
     // Charge wall time used to the on-turn player. Clamp negative
     // deltas (clock skew / bad turn_started) to 0 so a single bad
