@@ -1,13 +1,16 @@
 #include "render_modals.h"
 
+#include "../src/def/rack_defs.h"
 #include "config.h"
 #include "render_common.h"
 #include "render_hit_test.h"
 #include "render_planes.h"
 #include "theme.h"
 #include "time_picker.h"
+#include "tui_ui_state.h"
 #include "tui_ui_types.h"
 #include <notcurses/notcurses.h>
+#include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
@@ -868,6 +871,51 @@ void tui_game_render_quit_confirm(struct ncplane *plane, const Theme *theme,
   const char *items[2] = {"No", "Yes"};
   const char *shortcuts[2] = {"N", "Y"};
   render_modal(plane, theme, "Quit?", items, shortcuts, 2, focus, 24);
+}
+void tui_game_render_exchange(struct ncplane *plane, const Theme *theme,
+                              const TuiUiState *ui) {
+  if (plane == NULL || theme == NULL) {
+    return;
+  }
+  // Each rack tile, then Exchange (grayed until a tile is picked), then
+  // Cancel.
+  enum { ROW_TEXT = 48 };
+  char rows[RACK_SIZE + 2][ROW_TEXT];
+  const char *items[RACK_SIZE + 2];
+  const char *shortcuts[RACK_SIZE + 2] = {NULL};
+  bool disabled[RACK_SIZE + 2] = {false};
+  int picked = 0;
+  const int tile_count = ui->exchange_tile_count;
+  for (int tile_idx = 0; tile_idx < tile_count; tile_idx++) {
+    (void)snprintf(rows[tile_idx], ROW_TEXT, "%s %s",
+                   ui->exchange_picked[tile_idx] ? "[x]" : "[ ]",
+                   ui->exchange_tiles[tile_idx]);
+    items[tile_idx] = rows[tile_idx];
+    picked += ui->exchange_picked[tile_idx] ? 1 : 0;
+  }
+  if (picked == 0) {
+    (void)snprintf(rows[tile_count], ROW_TEXT, "Exchange");
+  } else {
+    (void)snprintf(rows[tile_count], ROW_TEXT, "Exchange %d tile%s", picked,
+                   picked == 1 ? "" : "s");
+  }
+  items[tile_count] = rows[tile_count];
+  shortcuts[tile_count] = "Enter";
+  disabled[tile_count] = picked == 0;
+  items[tile_count + 1] = "Cancel";
+  shortcuts[tile_count + 1] = "Esc";
+  render_modal_ex(plane, theme, "Exchange tiles", items, shortcuts, disabled,
+                  /*cursor_cols=*/NULL, /*zone_starts=*/NULL,
+                  /*zone_widths=*/NULL, tile_count + 2, ui->exchange_focus, 28);
+}
+void tui_game_render_pass_confirm(struct ncplane *plane, const Theme *theme,
+                                  int focus) {
+  if (plane == NULL || theme == NULL) {
+    return;
+  }
+  const char *items[2] = {"No", "Pass"};
+  const char *shortcuts[2] = {"N", "Y"};
+  render_modal(plane, theme, "Pass your turn?", items, shortcuts, 2, focus, 26);
 }
 void tui_play_setup_enabled_rows(UiOvertimeRule overtime_rule, int time_seconds,
                                  UiChallengeRule challenge_rule,

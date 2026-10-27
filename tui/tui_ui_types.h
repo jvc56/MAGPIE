@@ -21,6 +21,8 @@ typedef enum {
   TUI_MODAL_PLAY_SETUP = 10,
   TUI_MODAL_PANEL_MENU = 11, // a panel's context menu (panel_menu.h)
   TUI_MODAL_PHONY_CONFIRM = 12,
+  TUI_MODAL_EXCHANGE = 13,     // pick tiles to exchange (exchange_dialog.h)
+  TUI_MODAL_PASS_CONFIRM = 14, // confirm passing the turn
 } TuiModalState;
 
 // Play-vs-computer setup modal. A single modal with everything: editable

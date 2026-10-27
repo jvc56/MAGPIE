@@ -1,8 +1,10 @@
 #ifndef TUI_UI_STATE_H
 #define TUI_UI_STATE_H
 
+#include "../src/def/rack_defs.h"
 #include "config.h"
 #include "lexicon_picker.h"
+#include "tile_input.h"
 #include "tui_cli_args.h"
 #include "tui_ui_types.h"
 #include <stdbool.h>
@@ -63,6 +65,14 @@ typedef struct {
   int panel_menu_focus;
   int panel_menu_scroll;
   int phony_confirm_focus;
+  // Exchange picker (TUI_MODAL_EXCHANGE): the user's rack in display
+  // order, each tile in move notation ("E", "?", "[QU]"), which are
+  // picked, and the focused row (each tile, then Exchange, then Cancel).
+  int exchange_tile_count;
+  char exchange_tiles[RACK_SIZE][TUI_TILE_TEXT_MAX];
+  bool exchange_picked[RACK_SIZE];
+  int exchange_focus;
+  int pass_confirm_focus; // 0 = No, 1 = Pass
   TuiModalState quit_confirm_return;
   LexiconList *lexicon_list;
   bool frame_dirty;
