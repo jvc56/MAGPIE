@@ -56,6 +56,8 @@ bool config_get_player_sim_margin_forecast(const Config *config,
 bool config_get_sim_margin_forecast(const Config *config);
 bool config_get_player_sim_bag_cycle(const Config *config, int player_index);
 bool config_get_sim_bag_cycle(const Config *config);
+bool config_get_player_sim_tempo(const Config *config, int player_index);
+bool config_get_sim_tempo(const Config *config);
 int config_get_player_num_plays(const Config *config, int player_index);
 uint64_t config_get_player_max_iterations(const Config *config,
                                           int player_index);

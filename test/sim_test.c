@@ -1563,6 +1563,116 @@ void test_sim_resume(void) {
   config_destroy(config);
 }
 
+// A simulating player's candidates are its best plays and the tempo plays
+// they leave out: a pass, an exchange, the exchange that throws every tile
+// worth two or more, and plays of one and of two tiles.
+void test_sim_tempo_candidates(void) {
+  Config *config =
+      config_create_or_die("set -lex CSW21 -threads 1 -s1 equity -s2 equity "
+                           "-r1 all -r2 all -numplays 2");
+  load_and_exec_config_or_die(
+      config, "cgp 15/15/15/15/15/15/15/3RETAINS5/15/15/15/15/15/15/15 "
+              "ABCDEQZ/ 64/0 0");
+  Game *game = config_get_game(config);
+  const LetterDistribution *ld = game_get_ld(game);
+  const int num_plays = 2;
+  MoveList *move_list = move_list_create(num_plays);
+  SimCtx *sim_ctx = NULL;
+  sim_generate_candidates(game, move_list, num_plays, &sim_ctx);
+
+  // The tiles worth two or more points: B, C, D, Q and Z.
+  Rack thrown;
+  rack_set_dist_size_and_reset(&thrown, ld_get_size(ld));
+  rack_set_to_string(ld, &thrown, "BCDQZ");
+  bool has_pass = false;
+  bool has_exchange = false;
+  bool has_exchange_keeping_one_pointers = false;
+  int num_one_tile_plays = 0;
+  int num_two_tile_plays = 0;
+  const int num_candidates = move_list_get_count(move_list);
+  assert(num_candidates > num_plays &&
+         num_candidates <= num_plays + SIM_NUMBER_OF_TEMPO_CANDIDATES);
+  for (int i = 0; i < num_candidates; i++) {
+    const Move *move = move_list_get_move(move_list, i);
+    for (int j = i + 1; j < num_candidates; j++) {
+      assert(compare_moves(move, move_list_get_move(move_list, j), true) != -1);
+    }
+    switch (move_get_type(move)) {
+    case GAME_EVENT_PASS:
+      has_pass = true;
+      break;
+    case GAME_EVENT_EXCHANGE: {
+      has_exchange = true;
+      Rack exchanged;
+      rack_set_dist_size_and_reset(&exchanged, ld_get_size(ld));
+      for (int tile_idx = 0; tile_idx < move_get_tiles_played(move);
+           tile_idx++) {
+        rack_add_letter(&exchanged, move_get_tile(move, tile_idx));
+      }
+      has_exchange_keeping_one_pointers = has_exchange_keeping_one_pointers ||
+                                          racks_are_equal(&exchanged, &thrown);
+      break;
+    }
+    case GAME_EVENT_TILE_PLACEMENT_MOVE:
+      num_one_tile_plays += move_get_tiles_played(move) == 1;
+      num_two_tile_plays += move_get_tiles_played(move) == 2;
+      break;
+    default:
+      break;
+    }
+  }
+  assert(has_pass);
+  assert(has_exchange);
+  assert(has_exchange_keeping_one_pointers);
+  assert(num_one_tile_plays >= 1);
+  assert(num_two_tile_plays >= 1);
+
+  // With enough room for every play, the candidates are every play and
+  // nothing more.
+  MoveList *every_play = move_list_create(1);
+  SimCtx *every_ctx = NULL;
+  sim_generate_candidates(game, every_play, 100000, &every_ctx);
+  MoveList *all_plays = move_list_create(100000);
+  const MoveGenArgs args = {
+      .game = game,
+      .move_list = all_plays,
+      .move_record_type = MOVE_RECORD_ALL,
+      .move_sort_type = MOVE_SORT_EQUITY,
+      .eq_margin_movegen = 0,
+      .target_equity = EQUITY_MAX_VALUE,
+  };
+  generate_moves(&args);
+  assert(move_list_get_count(every_play) == move_list_get_count(all_plays));
+  move_list_destroy(all_plays);
+  move_list_destroy(every_play);
+  sim_ctx_destroy(every_ctx);
+  move_list_destroy(move_list);
+  sim_ctx_destroy(sim_ctx);
+  config_destroy(config);
+}
+
+// Tempo candidates are off unless asked for, for both players or one.
+void test_sim_tempo_option(void) {
+  Config *config = config_create_or_die("set -lex CSW21 -threads 1");
+  assert(!config_get_sim_tempo(config));
+  assert(!config_get_player_sim_tempo(config, 0));
+  assert(!config_get_player_sim_tempo(config, 1));
+  load_and_exec_config_or_die(config, "set -stempo true");
+  assert(config_get_sim_tempo(config));
+  assert(config_get_player_sim_tempo(config, 0));
+  assert(config_get_player_sim_tempo(config, 1));
+  load_and_exec_config_or_die(config, "set -stc2 false");
+  assert(config_get_player_sim_tempo(config, 0));
+  assert(!config_get_player_sim_tempo(config, 1));
+  load_and_exec_config_or_die(config, "set -stempo false -stc1 true");
+  assert(!config_get_sim_tempo(config));
+  assert(config_get_player_sim_tempo(config, 0));
+  assert(!config_get_player_sim_tempo(config, 1));
+  assert_config_exec_status(config, "set -stempo maybe",
+                            ERROR_STATUS_CONFIG_LOAD_MALFORMED_BOOL_ARG);
+  config_destroy(config);
+}
+
 void test_sim(void) {
   const char *sim_perf_iters = getenv("SIM_PERF_ITERS");
   if (sim_perf_iters) {
@@ -1571,6 +1681,8 @@ void test_sim(void) {
     test_similar_play_consistency(1);
     test_similar_play_consistency(10);
     test_sim_error_cases();
+    test_sim_tempo_candidates();
+    test_sim_tempo_option();
     test_sim_opp_rack_not_in_bag();
     test_sim_single_iteration();
     test_sim_ranked_plays_json();

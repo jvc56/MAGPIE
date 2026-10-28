@@ -47,7 +47,19 @@ enum {
 struct SimCtx {
   RandomVariables *rvs;
   InferenceCtx *inference_ctx;
+  // Every play of the position being simulated, from which get_top_simming
+  // move picks its candidates. Made when first needed, and kept so that it
+  // grows only as far as the largest position needs.
+  MoveList *all_moves;
 };
+
+static SimCtx *sim_ctx_create(void) {
+  SimCtx *sim_ctx = malloc_or_die(sizeof(SimCtx));
+  sim_ctx->rvs = NULL;
+  sim_ctx->inference_ctx = NULL;
+  sim_ctx->all_moves = NULL;
+  return sim_ctx;
+}
 
 void sim_ctx_destroy(SimCtx *sim_ctx) {
   if (!sim_ctx) {
@@ -55,6 +67,7 @@ void sim_ctx_destroy(SimCtx *sim_ctx) {
   }
   rvs_destroy(sim_ctx->rvs);
   inference_ctx_destroy(sim_ctx->inference_ctx);
+  move_list_destroy(sim_ctx->all_moves);
   free(sim_ctx);
 }
 
@@ -114,9 +127,7 @@ void simulate(SimArgs *sim_args, SimCtx **sim_ctx, SimResults *sim_results,
   }
 
   if (*sim_ctx == NULL) {
-    *sim_ctx = malloc_or_die(sizeof(SimCtx));
-    (*sim_ctx)->rvs = NULL;
-    (*sim_ctx)->inference_ctx = NULL;
+    *sim_ctx = sim_ctx_create();
   }
 
   uint64_t num_infer_leaves = 0;
@@ -191,6 +202,129 @@ void simulate_without_ctx(SimArgs *sim_args, SimResults *sim_results,
   sim_ctx_destroy(ctx);
 }
 
+enum {
+  // The kinds of play a simulating player always considers, besides its best
+  // plays: tempo plays. In a game where most turns draw seven tiles, such as
+  // one with many bingos, whoever makes the last play can be decided by a
+  // pass, an exchange or a short play that no equity ranking puts near the
+  // top, and a simulation can only find such a play if it is a candidate.
+  SIM_CANDIDATE_PASS = 1 << 0,
+  SIM_CANDIDATE_EXCHANGE = 1 << 1,
+  // The exchange that keeps only the tiles worth less than two points, so
+  // that every tile worth two or more is thrown back.
+  SIM_CANDIDATE_EXCHANGE_KEEPING_ONE_POINTERS = 1 << 2,
+  SIM_CANDIDATE_ONE_TILE_PLAY = 1 << 3,
+  SIM_CANDIDATE_TWO_TILE_PLAY = 1 << 4,
+  // The most plays the scratch list holds. A position with more has its
+  // candidates picked from the best plays by equity that fit.
+  SIM_ALL_MOVES_INITIAL_CAPACITY = 4096,
+  SIM_ALL_MOVES_MAX_CAPACITY = 1 << 18,
+};
+
+// The kinds of tempo candidate the move is. keep is the rack's tiles that
+// score less than two points, and num_to_throw the number of its other tiles:
+// the exchange of exactly those keeps only the tiles of keep.
+static unsigned sim_candidate_categories(const Move *move, const Rack *keep,
+                                         int num_to_throw) {
+  switch (move_get_type(move)) {
+  case GAME_EVENT_PASS:
+    return SIM_CANDIDATE_PASS;
+  case GAME_EVENT_EXCHANGE: {
+    unsigned categories = SIM_CANDIDATE_EXCHANGE;
+    // It throws every tile worth two or more when it throws that many tiles
+    // and none of them scores less.
+    bool keeps_one_pointers = move_get_tiles_played(move) == num_to_throw;
+    for (int i = 0; i < move_get_tiles_played(move); i++) {
+      if (rack_get_letter(keep, move_get_tile(move, i)) > 0) {
+        keeps_one_pointers = false;
+      }
+    }
+    if (keeps_one_pointers) {
+      categories |= SIM_CANDIDATE_EXCHANGE_KEEPING_ONE_POINTERS;
+    }
+    return categories;
+  }
+  case GAME_EVENT_TILE_PLACEMENT_MOVE:
+    if (move_get_tiles_played(move) == 1) {
+      return SIM_CANDIDATE_ONE_TILE_PLAY;
+    }
+    if (move_get_tiles_played(move) == 2) {
+      return SIM_CANDIDATE_TWO_TILE_PLAY;
+    }
+    return 0;
+  default:
+    return 0;
+  }
+}
+
+void sim_generate_candidates(Game *game, MoveList *move_list, int num_plays,
+                             SimCtx **sim_ctx) {
+  if (*sim_ctx == NULL) {
+    *sim_ctx = sim_ctx_create();
+  }
+  SimCtx *ctx = *sim_ctx;
+  const int player_on_turn_index = game_get_player_on_turn_index(game);
+  const Player *player = game_get_player(game, player_on_turn_index);
+  // The candidates are the player's best plays by its own sort type, as a
+  // static player's move is: a player sorted by score simulates the top plays
+  // by score. Equity unless a player asks otherwise.
+  if (ctx->all_moves == NULL) {
+    ctx->all_moves = move_list_create(SIM_ALL_MOVES_INITIAL_CAPACITY);
+  }
+  MoveList *all_moves = ctx->all_moves;
+  while (true) {
+    const MoveGenArgs gen_args = {
+        .game = game,
+        .move_list = all_moves,
+        .move_record_type = MOVE_RECORD_ALL,
+        .move_sort_type = player_get_move_sort_type(player),
+        .override_kwg = NULL,
+        .eq_margin_movegen = 0,
+        .target_equity = EQUITY_MAX_VALUE,
+    };
+    generate_moves(&gen_args);
+    const int capacity = move_list_get_capacity(all_moves);
+    if (move_list_get_count(all_moves) < capacity ||
+        capacity >= SIM_ALL_MOVES_MAX_CAPACITY) {
+      break;
+    }
+    move_list_resize(all_moves, capacity * 2);
+  }
+  move_list_sort_moves(all_moves);
+
+  // The rack's tiles that score less than two points: the exchange that
+  // throws back every other tile.
+  const LetterDistribution *ld = game_get_ld(game);
+  const Rack *rack = player_get_rack(player);
+  Rack keep;
+  rack_set_dist_size_and_reset(&keep, rack_get_dist_size(rack));
+  int num_to_throw = rack_get_total_letters(rack);
+  for (int ml = 0; ml < rack_get_dist_size(rack); ml++) {
+    if (ld_get_score(ld, ml) < int_to_equity(2)) {
+      for (int i = 0; i < rack_get_letter(rack, ml); i++) {
+        rack_add_letter(&keep, ml);
+        num_to_throw--;
+      }
+    }
+  }
+
+  move_list_resize(move_list, num_plays + SIM_NUMBER_OF_TEMPO_CANDIDATES);
+  move_list_reset(move_list);
+  // The best plays, and the first play of each kind of tempo candidate that
+  // they don't include.
+  unsigned included = 0;
+  const int num_moves = move_list_get_count(all_moves);
+  for (int move_idx = 0; move_idx < num_moves; move_idx++) {
+    const Move *move = move_list_get_move(all_moves, move_idx);
+    const unsigned categories =
+        sim_candidate_categories(move, &keep, num_to_throw);
+    if (move_idx < num_plays || (categories & ~included) != 0) {
+      move_list_add_move(move_list, move);
+      included |= categories;
+    }
+  }
+}
+
 // The move_list and sim_args->move_list are expected to be the same pointer,
 // but they are passed in separately because this function needs to generate
 // moves on a nonconst MoveList pointer but the SimArgs MoveList pointer is
@@ -204,20 +338,24 @@ const Move *get_top_simming_move(Game *game, MoveList *move_list,
                                  SimResults *sim_results, bool *simulated,
                                  ErrorStack *error_stack) {
   *simulated = false;
-  // The candidates are the player's best plays by its own sort type, as a
-  // static player's move is: a player sorted by score simulates the top plays
-  // by score. Equity unless a player asks otherwise.
-  const MoveGenArgs gen_args = {
-      .game = game,
-      .move_list = move_list,
-      .move_record_type = MOVE_RECORD_ALL,
-      .move_sort_type = player_get_move_sort_type(
-          game_get_player(game, game_get_player_on_turn_index(game))),
-      .override_kwg = NULL,
-      .eq_margin_movegen = 0,
-      .target_equity = EQUITY_MAX_VALUE,
-  };
-  generate_moves(&gen_args);
+  if (sim_args->tempo_candidates) {
+    sim_generate_candidates(game, move_list, sim_args->num_plays, sim_ctx);
+  } else {
+    // The candidates are the player's best plays by its own sort type, as a
+    // static player's move is: a player sorted by score simulates the top
+    // plays by score. Equity unless a player asks otherwise.
+    const MoveGenArgs gen_args = {
+        .game = game,
+        .move_list = move_list,
+        .move_record_type = MOVE_RECORD_ALL,
+        .move_sort_type = player_get_move_sort_type(
+            game_get_player(game, game_get_player_on_turn_index(game))),
+        .override_kwg = NULL,
+        .eq_margin_movegen = 0,
+        .target_equity = EQUITY_MAX_VALUE,
+    };
+    generate_moves(&gen_args);
+  }
 
   if (move_list_get_count(move_list) == 1) {
     return move_list_get_move(move_list, 0);
