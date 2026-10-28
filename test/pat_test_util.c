@@ -42,7 +42,7 @@ void write_pat_file_contents(const char *data_dir, const char *pat_name,
 PATWeights *pat_test_create_prepared(const char *name, const Game *game) {
   PATWeights *pat = pat_create_zeroed(name);
   pat_prepare_hook_flex(pat, player_get_kwg(game_get_player(game, 0)),
-                        game_get_ld(game));
+                        game_get_ld(game), false);
   return pat;
 }
 

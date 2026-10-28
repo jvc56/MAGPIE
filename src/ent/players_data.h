@@ -52,6 +52,13 @@ void players_data_set_pat_candidates_disabled(PlayersData *players_data,
                                               int player_index, bool disabled);
 bool players_data_get_pat_candidates_disabled(const PlayersData *players_data,
                                               int player_index);
+// How many plays a move generation of the player's prices with the PAT term in
+// wordsmog (see WordsmogPATGroup in move_gen.c), 0 for no limit. Defaults to
+// WORDSMOG_DEFAULT_PAT_EVALS.
+void players_data_set_wordsmog_pat_evals(PlayersData *players_data,
+                                         int player_index, int evals);
+int players_data_get_wordsmog_pat_evals(const PlayersData *players_data,
+                                        int player_index);
 // Whether the rollouts of the player's sims leave PAT out, and which classes
 // they suppress when they don't. Default to false and 0 (every class).
 void players_data_set_pat_rollout_disabled(PlayersData *players_data,

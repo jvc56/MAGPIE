@@ -2,8 +2,10 @@
 
 #include "../src/compat/ctime.h"
 #include "../src/def/board_defs.h"
+#include "../src/def/equity_defs.h"
 #include "../src/def/game_defs.h"
 #include "../src/def/letter_distribution_defs.h"
+#include "../src/def/move_defs.h"
 #include "../src/def/rack_defs.h"
 #include "../src/def/wordsmog_defs.h"
 #include "../src/ent/board.h"
@@ -384,21 +386,49 @@ static void print_move(const Game *game, const char *label, const Move *move) {
   string_builder_destroy(sb);
 }
 
+// The best move by equity, from the exact PAT search when the term is on (see
+// MoveGenArgs.wordsmog_exact_pat).
+static const Move *get_top_equity_move_exact(Game *game, MoveList *move_list) {
+  const MoveGenArgs args = {.game = game,
+                            .move_list = move_list,
+                            .move_record_type = MOVE_RECORD_BEST,
+                            .move_sort_type = MOVE_SORT_EQUITY,
+                            .override_kwg = NULL,
+                            .eq_margin_movegen = 0,
+                            .target_equity = EQUITY_MAX_VALUE,
+                            .wordsmog_exact_pat = true};
+  generate_moves(&args);
+  return move_list_get_move(move_list, 0);
+}
+
 // Plays wordsmog games with the alpha generator and loads every position into
 // a game that takes its cross sets, word validity and moves from the WMP: the
 // cross sets, cross scores and the validity of each played move must agree,
-// and so must the best move.
-static void test_wordsmog_wmp_games(void) {
+// and so must the best move. With pat_command, both players of both games
+// also take the PAT term, which the alpha generator prices on every
+// arrangement and designation of every play and the WMP generator finds
+// through its exact search (see WordsmogPATSearch); its default search, which
+// prices fewer plays, finds a play no better, and the test reports how often
+// it finds a worse one and by how much.
+static void test_wordsmog_wmp_games(const char *pat_command, int num_games) {
   Config *alpha_config = create_alpha_config();
   Config *wmp_config = create_wmp_config();
+  if (pat_command != NULL) {
+    load_and_exec_config_or_die(alpha_config, pat_command);
+    load_and_exec_config_or_die(wmp_config, pat_command);
+  }
   load_and_exec_config_or_die(alpha_config, "new");
   load_and_exec_config_or_die(wmp_config, "new");
   Game *alpha_game = config_get_game(alpha_config);
   Game *wmp_game = config_get_game(wmp_config);
   MoveList *alpha_move_list = move_list_create(1);
   MoveList *wmp_move_list = move_list_create(1);
+  MoveList *budget_move_list = move_list_create(1);
+  MoveList *all_move_list = move_list_create(10);
   int positions = 0;
-  for (int game_idx = 0; game_idx < WORDSMOG_WMP_TEST_GAMES; game_idx++) {
+  int budget_misses = 0;
+  int64_t budget_loss = 0;
+  for (int game_idx = 0; game_idx < num_games; game_idx++) {
     game_reset(alpha_game);
     game_seed(alpha_game, WORDSMOG_WMP_TEST_SEED + game_idx);
     draw_starting_racks(alpha_game);
@@ -407,7 +437,30 @@ static void test_wordsmog_wmp_games(void) {
       load_cgp_or_die(wmp_game, cgp);
       assert_cross_sets_match(alpha_game, wmp_game);
       const Move *alpha_move = get_top_equity_move(alpha_game, alpha_move_list);
-      const Move *wmp_move = get_top_equity_move(wmp_game, wmp_move_list);
+      const Move *wmp_move = get_top_equity_move_exact(wmp_game, wmp_move_list);
+      if (pat_command != NULL) {
+        // A list of every play, one per group, starts with a play as good.
+        const MoveGenArgs all_args = {.game = wmp_game,
+                                      .move_list = all_move_list,
+                                      .move_record_type = MOVE_RECORD_ALL,
+                                      .move_sort_type = MOVE_SORT_EQUITY,
+                                      .override_kwg = NULL,
+                                      .eq_margin_movegen = 0,
+                                      .target_equity = EQUITY_MAX_VALUE,
+                                      .wordsmog_exact_pat = true};
+        generate_moves(&all_args);
+        move_list_sort_moves(all_move_list);
+        assert(move_get_equity(move_list_get_move(all_move_list, 0)) ==
+               move_get_equity(wmp_move));
+        const Move *budget_move =
+            get_top_equity_move(wmp_game, budget_move_list);
+        assert(move_get_equity(budget_move) <= move_get_equity(wmp_move));
+        if (move_get_equity(budget_move) < move_get_equity(wmp_move)) {
+          budget_misses++;
+          budget_loss +=
+              move_get_equity(wmp_move) - move_get_equity(budget_move);
+        }
+      }
       if (!moves_match(alpha_move, wmp_move)) {
         printf("best moves differ in game %d at position %d:\n%s\n", game_idx,
                positions, cgp);
@@ -421,9 +474,17 @@ static void test_wordsmog_wmp_games(void) {
       positions++;
     }
   }
-  printf("wordsmog wmp: %d positions with matching cross sets and best moves\n",
-         positions);
-  assert(positions >= WORDSMOG_WMP_TEST_GAMES * 10);
+  printf("wordsmog wmp%s: %d positions with matching cross sets and best "
+         "moves\n",
+         pat_command != NULL ? " with PAT" : "", positions);
+  assert(positions >= num_games * 10);
+  if (pat_command != NULL) {
+    printf("wordsmog wmp with PAT: the default search found a worse play in %d "
+           "positions, by %.3f points on average over all positions\n",
+           budget_misses, (double)budget_loss / 1000.0 / positions);
+  }
+  move_list_destroy(all_move_list);
+  move_list_destroy(budget_move_list);
   move_list_destroy(wmp_move_list);
   move_list_destroy(alpha_move_list);
   config_destroy(wmp_config);
@@ -923,5 +984,6 @@ void test_wordsmog_wmp(void) {
   test_wordsmog_arrangement_brute_force();
   test_wordsmog_play_graph();
   test_wordsmog_smog_command();
-  test_wordsmog_wmp_games();
+  test_wordsmog_wmp_games(NULL, WORDSMOG_WMP_TEST_GAMES);
+  test_wordsmog_wmp_games("set -pat CSW21", WORDSMOG_WMP_TEST_GAMES);
 }

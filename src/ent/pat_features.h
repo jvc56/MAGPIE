@@ -9,6 +9,7 @@
 #include "move.h"
 #include "pat.h"
 #include "rack.h"
+#include "wmp.h"
 #include <stdbool.h>
 #include <stdint.h>
 
@@ -48,6 +49,11 @@ typedef struct PATMoveOverlay {
   // Non-NULL when floater runs the move places a tile in are to be resolved
   // exactly (see PATWeights.exact_fresh_runs).
   const KWG *run_kwg;
+  // For weights prepared in anagram mode (see PATWeights.anagram): hooks the
+  // move creates are resolved by anagram, from wmp when it is not NULL and
+  // otherwise from kwg, which is then a wordsmog alphagram KWG.
+  bool anagram;
+  const WMP *wmp;
 } PATMoveOverlay;
 
 // Fills unseen_counts (MAX_ALPHABET_SIZE entries) with the tiles neither on

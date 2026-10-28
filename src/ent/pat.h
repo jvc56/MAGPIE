@@ -7,6 +7,7 @@
 #include "../def/rack_defs.h"
 #include "../util/io_util.h"
 #include "equity.h"
+#include "letter_distribution.h"
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -105,6 +106,19 @@ struct PATWeights {
   // opening exchange, milli-equity <= 0 (see PAT_OPENING_TILES_ROW_PREFIX).
   Equity opening_tiles[RACK_SIZE + 1];
   Equity opening_exchange;
+  // Set by pat_prepare_hook_flex for wordsmog, whose words are any
+  // arrangement of a valid word's letters: the lexicon tables count letter
+  // multisets, a letter at either end of each, and run keys in any order, and
+  // the hooks a move creates are resolved by anagram (see
+  // PATEvalContext.wmp). A run's extension sets are not, so exact_fresh_runs
+  // does not apply.
+  bool anagram;
+  // What the lexicon tables were last built from: the KWG's hash (see
+  // kwg_get_hash), the letter distribution and the mode. pat_prepare_hook_flex
+  // keeps tables built from the same ones, since building them, above all in
+  // anagram mode, takes about a second.
+  uint64_t prepared_kwg_hash;
+  const LetterDistribution *prepared_ld;
   // Set by pat_prepare_hook_flex. The lexicon tables are part of the model,
   // so evaluation and training refuse an unprepared one rather than scoring
   // with empty tables.

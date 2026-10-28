@@ -94,6 +94,10 @@ typedef struct MovegenBudget {
 void movegen_budget_init(MovegenBudget *budget, uint64_t limit);
 uint64_t movegen_budget_get_spent(const MovegenBudget *budget);
 
+// Wordsmog's search for the best play with the PAT term (see
+// WordsmogPATGroup in move_gen.c).
+typedef struct WordsmogPATRefine WordsmogPATRefine;
+
 typedef struct MoveGen {
   // Move generations made on this MoveGen: generate_moves and
   // generate_small_moves_in_lanes calls, by whichever thread holds it. Never
@@ -135,6 +139,11 @@ typedef struct MoveGen {
   int best_small_out_rack_size;
   bool kwgs_are_shared;
   bool is_wordsmog;
+  // How many plays wordsmog's PAT search prices in a generation, INT_MAX for
+  // no limit (see player_get_wordsmog_pat_evals), and its state, allocated
+  // when first used.
+  int wordsmog_pat_evals;
+  WordsmogPATRefine *wordsmog_pat;
   Rack player_rack;
   Rack player_rack_shadow_right_copy;
   // Using to save the player's full rack
@@ -363,6 +372,10 @@ typedef struct MoveGenArgs {
   // class the weights have, so one weights file can serve both a fast
   // rollout mode and a full mode. Ignored when disable_pat is set.
   uint32_t pat_disabled_classes_mask;
+  // In wordsmog with the PAT term, whether the WMP generator prices every play
+  // that could be the best, as the alpha generator does, whatever the
+  // player's limit (see player_get_wordsmog_pat_evals). Default false.
+  bool wordsmog_exact_pat;
   // MOVE_RECORD_BEST by equity only: the best moves earlier generations
   // found for the same rack (see best_move_carry.h). Each one still legal
   // here starts the generation as its best move, lanes whose remembered

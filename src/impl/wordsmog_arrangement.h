@@ -44,21 +44,25 @@ typedef struct WordsmogTiles {
   // With two blanks, pair_letters[x] holds each y >= x for which the pair
   // {x, y} keeps the main word valid.
   uint32_t pair_letters[BIT_RACK_MAX_ALPHABET_SIZE];
-  // Set from the letters and counts by wordsmog_tiles_set_states: each
+  // Built from the letters and counts by the first DP or count that needs
+  // them, 0 until then (see wordsmog_tiles_set_states): each
   // multiset of the natural tiles, a state, in mixed radix with one digit per
   // letter, and its count of each letter. The states with t tiles are
   // states_by_total[state_starts[t] .. state_starts[t + 1] - 1].
   int num_states;
   int strides[RACK_SIZE];
   uint8_t digits[WORDSMOG_MAX_STATES][RACK_SIZE];
+  // Bit letter_idx is set when the state holds that letter.
+  uint8_t present[WORDSMOG_MAX_STATES];
   uint8_t states_by_total[WORDSMOG_MAX_STATES];
   uint8_t state_starts[RACK_SIZE + 2];
   // Every tile's score, blanks included, highest first.
   Equity descending_scores[RACK_SIZE];
 } WordsmogTiles;
 
-// Sets the tiles' states, which every function below reads, once their letters
-// and counts are set.
+// Sets the tiles' descending scores, which every function below reads, once
+// their letters and counts are set, and marks their states unbuilt: the
+// functions that need them build them.
 void wordsmog_tiles_set_states(WordsmogTiles *tiles);
 
 typedef struct WordsmogArrangement {
@@ -75,6 +79,13 @@ typedef struct WordsmogArrangement {
 Equity wordsmog_score_bound(const WordsmogSquare *squares, int num_squares,
                             const WordsmogTiles *tiles);
 
+// A tighter bound when cross sets keep tiles off squares: score_bound, or the
+// sum over the squares of the highest score of a tile the square allows times
+// its coefficient, when that is lower. It ignores how many of each tile there
+// are, so it is not exact.
+Equity wordsmog_cross_set_bound(const WordsmogSquare *squares, int num_squares,
+                                const WordsmogTiles *tiles, Equity score_bound);
+
 // pins, when not NULL, holds a WORDSMOG_PIN_* value or a natural letter for
 // each square (see wordsmog_defs.h): the arrangements considered are those
 // that put that letter, or a blank, on each pinned square.
@@ -85,14 +96,13 @@ Equity wordsmog_score_bound(const WordsmogSquare *squares, int num_squares,
 // as compare_moves ranks plays. A blank takes the designation with the best
 // adjustment, then the lowest. Returns false when no arrangement is legal.
 bool wordsmog_best_arrangement(const WordsmogSquare *squares, int num_squares,
-                               const WordsmogTiles *tiles,
-                               const MachineLetter *pins,
+                               WordsmogTiles *tiles, const MachineLetter *pins,
                                WordsmogArrangement *best);
 
 // Counts the legal arrangements: in arrangements with each blank's designation
 // left open, and in plays with every designation that keeps every word valid.
 void wordsmog_count_arrangements(const WordsmogSquare *squares, int num_squares,
-                                 const WordsmogTiles *tiles,
+                                 WordsmogTiles *tiles,
                                  const MachineLetter *pins,
                                  uint64_t *arrangements, uint64_t *plays);
 

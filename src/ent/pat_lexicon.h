@@ -5,6 +5,7 @@
 #include "kwg.h"
 #include "letter_distribution.h"
 #include "pat.h"
+#include <stdbool.h>
 
 // The lexicon tables a PATWeights evaluates with: per-letter hook
 // flexibility and the floater through tables, built from the lexicon by
@@ -15,9 +16,12 @@
 // and extension flexibility of squares whose real cross and extension sets
 // do not exist yet because they are created by the move being evaluated.
 // Must be called before the weights are used for evaluation; kwg may be
-// NULL, which zeroes the table.
+// NULL, which zeroes the table. With anagram set, for wordsmog, where a word
+// is valid when its letters are those of a word in any order, the tables
+// count the lexicon's distinct letter multisets instead of its spellings (see
+// PATWeights.anagram).
 void pat_prepare_hook_flex(PATWeights *pat, const KWG *kwg,
-                           const LetterDistribution *ld);
+                           const LetterDistribution *ld, bool anagram);
 // Returns the flexibility table entry for an (unblanked) machine letter.
 int pat_get_hook_flex(const PATWeights *pat, MachineLetter ml);
 // The end-specific through tables: word_end 0 when ml is the word's first

@@ -69,7 +69,10 @@ static void sort_descending(Equity *values, int num_values) {
   }
 }
 
-void wordsmog_tiles_set_states(WordsmogTiles *tiles) {
+// Builds the tiles' states (see WordsmogTiles.num_states), which only the DP
+// and the counts read, so most tiles, whose placements are settled without
+// them, never need them.
+static void wordsmog_tiles_build_states(WordsmogTiles *tiles) {
   int num_states = 1;
   for (int letter_idx = 0; letter_idx < tiles->num_letters; letter_idx++) {
     tiles->strides[letter_idx] = num_states;
@@ -84,10 +87,15 @@ void wordsmog_tiles_set_states(WordsmogTiles *tiles) {
   int num_with_total[RACK_SIZE + 1] = {0};
   for (int state = 0; state < num_states; state++) {
     int total = 0;
+    uint8_t present = 0;
     for (int letter_idx = 0; letter_idx < tiles->num_letters; letter_idx++) {
       tiles->digits[state][letter_idx] = digits[letter_idx];
       total += digits[letter_idx];
+      if (digits[letter_idx] > 0) {
+        present |= (uint8_t)(1U << letter_idx);
+      }
     }
+    tiles->present[state] = present;
     totals[state] = (uint8_t)total;
     num_with_total[total]++;
     for (int letter_idx = 0; letter_idx < tiles->num_letters; letter_idx++) {
@@ -109,6 +117,10 @@ void wordsmog_tiles_set_states(WordsmogTiles *tiles) {
     tiles->states_by_total[tiles->state_starts[total] + filled[total]++] =
         (uint8_t)state;
   }
+}
+
+void wordsmog_tiles_set_states(WordsmogTiles *tiles) {
+  tiles->num_states = 0;
   int num_tiles = 0;
   for (int letter_idx = 0; letter_idx < tiles->num_letters; letter_idx++) {
     for (int count = 0; count < tiles->counts[letter_idx]; count++) {
@@ -133,6 +145,24 @@ Equity wordsmog_score_bound(const WordsmogSquare *squares, int num_squares,
     bound += tiles->descending_scores[square_idx] * coefficients[square_idx];
   }
   return bound;
+}
+
+Equity wordsmog_cross_set_bound(const WordsmogSquare *squares, int num_squares,
+                                const WordsmogTiles *tiles,
+                                Equity score_bound) {
+  Equity bound = 0;
+  for (int square_idx = 0; square_idx < num_squares; square_idx++) {
+    const WordsmogSquare *square = &squares[square_idx];
+    Equity square_best = tiles->num_blanks > 0 ? tiles->blank_score : 0;
+    for (int letter_idx = 0; letter_idx < tiles->num_letters; letter_idx++) {
+      if (tiles->scores[letter_idx] > square_best &&
+          ((square->cross_set >> tiles->letters[letter_idx]) & 1U) != 0) {
+        square_best = tiles->scores[letter_idx];
+      }
+    }
+    bound += square_best * square->coefficient;
+  }
+  return bound < score_bound ? bound : score_bound;
 }
 
 // The key of the tile letter_idx on square.
@@ -162,20 +192,28 @@ static int64_t natural_dp(const WordsmogSquare *squares,
   for (int pos = num_natural - 1; pos >= 0; pos--) {
     const WordsmogSquare *square = &squares[square_indices[pos]];
     const int total = num_natural - pos;
+    // The square's key for each letter it allows, so that each state only
+    // walks the letters it holds that the square allows.
+    int64_t keys[RACK_SIZE];
+    uint32_t allowed = 0;
+    for (int letter_idx = 0; letter_idx < tiles->num_letters; letter_idx++) {
+      if (natural_allowed(square, tiles, letter_idx)) {
+        allowed |= 1U << letter_idx;
+        keys[letter_idx] = natural_key(square, tiles, letter_idx);
+      }
+    }
     for (int state_idx = tiles->state_starts[total];
          state_idx < tiles->state_starts[total + 1]; state_idx++) {
       const int state = tiles->states_by_total[state_idx];
       int64_t state_best = WORDSMOG_NO_KEY;
-      for (int letter_idx = 0; letter_idx < tiles->num_letters; letter_idx++) {
-        if (tiles->digits[state][letter_idx] == 0 ||
-            !natural_allowed(square, tiles, letter_idx)) {
-          continue;
-        }
+      for (uint32_t candidates = tiles->present[state] & allowed;
+           candidates != 0; candidates &= candidates - 1) {
+        const int letter_idx = wordsmog_lowest_bit(candidates);
         const int64_t rest = best[pos + 1][state - tiles->strides[letter_idx]];
         if (rest == WORDSMOG_NO_KEY) {
           continue;
         }
-        const int64_t key = natural_key(square, tiles, letter_idx) + rest;
+        const int64_t key = keys[letter_idx] + rest;
         if (key > state_best) {
           state_best = key;
         }
@@ -538,8 +576,7 @@ static bool tiles_can_match(const uint32_t square_tiles[RACK_SIZE],
 }
 
 bool wordsmog_best_arrangement(const WordsmogSquare *squares, int num_squares,
-                               const WordsmogTiles *tiles,
-                               const MachineLetter *pins,
+                               WordsmogTiles *tiles, const MachineLetter *pins,
                                WordsmogArrangement *best) {
   assert(num_squares <= RACK_SIZE);
   assert(tiles->num_blanks >= 0 && tiles->num_blanks <= 2);
@@ -564,7 +601,9 @@ bool wordsmog_best_arrangement(const WordsmogSquare *squares, int num_squares,
   uint32_t blank_required;
   apply_pins(squares, num_squares, pins, pinned, &blank_forbidden,
              &blank_required);
-  assert(tiles->num_states > 0);
+  if (tiles->num_states == 0) {
+    wordsmog_tiles_build_states(tiles);
+  }
   uint32_t choices[WORDSMOG_MAX_BLANK_CHOICES];
   const int num_choices = blank_square_choices(
       num_squares, tiles->num_blanks, blank_forbidden, blank_required, choices);
@@ -681,7 +720,7 @@ static uint64_t blank_designation_count(const WordsmogSquare *squares,
 }
 
 void wordsmog_count_arrangements(const WordsmogSquare *squares, int num_squares,
-                                 const WordsmogTiles *tiles,
+                                 WordsmogTiles *tiles,
                                  const MachineLetter *pins,
                                  uint64_t *arrangements, uint64_t *plays) {
   WordsmogSquare pinned[RACK_SIZE];
@@ -689,7 +728,9 @@ void wordsmog_count_arrangements(const WordsmogSquare *squares, int num_squares,
   uint32_t blank_required;
   apply_pins(squares, num_squares, pins, pinned, &blank_forbidden,
              &blank_required);
-  assert(tiles->num_states > 0);
+  if (tiles->num_states == 0) {
+    wordsmog_tiles_build_states(tiles);
+  }
   uint32_t choices[WORDSMOG_MAX_BLANK_CHOICES];
   const int num_choices = blank_square_choices(
       num_squares, tiles->num_blanks, blank_forbidden, blank_required, choices);

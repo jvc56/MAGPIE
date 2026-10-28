@@ -152,6 +152,7 @@ typedef enum {
   ARG_TOKEN_PAT_CANDIDATES,
   ARG_TOKEN_PAT_ROLLOUT,
   ARG_TOKEN_PAT_ROLLOUT_CLASSES,
+  ARG_TOKEN_WORDSMOG_PAT_EVALS,
   ARG_TOKEN_P1_LEXICON,
   ARG_TOKEN_P1_USE_WMP,
   ARG_TOKEN_P1_USE_RIT,
@@ -162,6 +163,7 @@ typedef enum {
   ARG_TOKEN_P1_PAT_CANDIDATES,
   ARG_TOKEN_P1_PAT_ROLLOUT,
   ARG_TOKEN_P1_PAT_ROLLOUT_CLASSES,
+  ARG_TOKEN_P1_WORDSMOG_PAT_EVALS,
   ARG_TOKEN_P1_MOVE_SORT_TYPE,
   ARG_TOKEN_P1_MOVE_RECORD_TYPE,
   ARG_TOKEN_P2_LEXICON,
@@ -174,6 +176,7 @@ typedef enum {
   ARG_TOKEN_P2_PAT_CANDIDATES,
   ARG_TOKEN_P2_PAT_ROLLOUT,
   ARG_TOKEN_P2_PAT_ROLLOUT_CLASSES,
+  ARG_TOKEN_P2_WORDSMOG_PAT_EVALS,
   ARG_TOKEN_P2_MOVE_SORT_TYPE,
   ARG_TOKEN_P2_MOVE_RECORD_TYPE,
   ARG_TOKEN_WIN_PCT,
@@ -1462,6 +1465,24 @@ static void add_pat_help_arg(arg_token_t arg_token, const char **usages,
             "'patrolloutclasses' sets both players; 'patrolloutclasses1' "
             "and 'patrolloutclasses2' set one.";
     break;
+  case ARG_TOKEN_WORDSMOG_PAT_EVALS:
+  case ARG_TOKEN_P1_WORDSMOG_PAT_EVALS:
+  case ARG_TOKEN_P2_WORDSMOG_PAT_EVALS:
+    usages[0] = "<plays>";
+    examples[0] = "64";
+    examples[1] = "0";
+    *text = "Specifies how many plays a wordsmog move generation prices with "
+            "the PAT term when it looks for the best play. Every placement "
+            "that could hold the best play gets its best arrangement priced, "
+            "and then each, in turn, its next best, until this many have "
+            "been priced or no play left could be best. For a list of plays, "
+            "such as a simulation's candidates, it counts the plays priced "
+            "after each placement's first, for the placements that could "
+            "make the list. 0 prices every play that could be best, which is "
+            "exact and slow. A simulating player's setting also applies to "
+            "its rollouts, for both sides' plies. Defaults to 64. 'smogpat' "
+            "sets both players; 'smogpat1' and 'smogpat2' set one.";
+    break;
   case ARG_TOKEN_PAT_LABEL_PLIES:
     usages[0] = "<plies>";
     *text = "Specifies how many plies of net result a PAT training "
@@ -1688,6 +1709,9 @@ void add_help_arg_to_string_builder(const Config *config, int token,
     case ARG_TOKEN_PAT_ROLLOUT_CLASSES:
     case ARG_TOKEN_P1_PAT_ROLLOUT_CLASSES:
     case ARG_TOKEN_P2_PAT_ROLLOUT_CLASSES:
+    case ARG_TOKEN_WORDSMOG_PAT_EVALS:
+    case ARG_TOKEN_P1_WORDSMOG_PAT_EVALS:
+    case ARG_TOKEN_P2_WORDSMOG_PAT_EVALS:
     case ARG_TOKEN_PAT_LABEL_PLIES:
       add_pat_help_arg(arg_token, usages, examples, &text);
       break;
@@ -3135,6 +3159,9 @@ char *impl_help(Config *config, ErrorStack *error_stack) {
         ARG_TOKEN_PAT_ROLLOUT_CLASSES,    /* patrolloutclasses */
         ARG_TOKEN_P1_PAT_ROLLOUT_CLASSES, /* patrolloutclasses1 */
         ARG_TOKEN_P2_PAT_ROLLOUT_CLASSES, /* patrolloutclasses2 */
+        ARG_TOKEN_WORDSMOG_PAT_EVALS,     /* smogpat */
+        ARG_TOKEN_P1_WORDSMOG_PAT_EVALS,  /* smogpat1 */
+        ARG_TOKEN_P2_WORDSMOG_PAT_EVALS,  /* smogpat2 */
         ARG_TOKEN_GAME_VARIANT,           /* var */
         ARG_TOKEN_P1_USE_WMP,             /* w1 */
         ARG_TOKEN_P2_USE_WMP,             /* w2 */
@@ -3580,7 +3607,7 @@ void impl_move_gen(Config *config, ErrorStack *error_stack) {
 
 // A play's static equity, as move generation prices it with equity sort,
 // whatever the player's sort type: its score and leave, the opening and
-// endgame adjustments, and no PAT term, which is off in wordsmog.
+// endgame adjustments, and no PAT term, which the play graph ranks without.
 static Equity smog_static_equity(const Game *game, const Move *move) {
   const int player_index = game_get_player_on_turn_index(game);
   const Player *player = game_get_player(game, player_index);
@@ -4117,8 +4144,9 @@ static bool config_parse_bool_arg(const char *value, const char *name,
   return true;
 }
 
-// Loads one player's PAT usage options (patcand, patclasses, patrollout and
-// patrolloutclasses, each global or per player) into players_data.
+// Loads one player's PAT usage options (patcand, patclasses, patrollout,
+// patrolloutclasses and smogpat, each global or per player) into
+// players_data.
 static void config_load_player_pat_usage(Config *config, int player_index,
                                          ErrorStack *error_stack) {
   PlayersData *players_data = config->players_data;
@@ -4164,6 +4192,19 @@ static void config_load_player_pat_usage(Config *config, int player_index,
     players_data_set_pat_rollout_disabled_classes_mask(
         players_data, player_index, PAT_CLASS_MASK_ALL & ~enabled_mask);
   }
+  value = config_get_player_arg_value(
+      config, ARG_TOKEN_WORDSMOG_PAT_EVALS, ARG_TOKEN_P1_WORDSMOG_PAT_EVALS,
+      ARG_TOKEN_P2_WORDSMOG_PAT_EVALS, player_index);
+  if (value) {
+    int evals;
+    string_to_int_or_push_error("smogpat", value, 0, INT_MAX,
+                                ERROR_STATUS_CONFIG_LOAD_INT_ARG_OUT_OF_BOUNDS,
+                                &evals, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+    players_data_set_wordsmog_pat_evals(players_data, player_index, evals);
+  }
 }
 
 // Copies the rollout PAT settings of the simming player (player_index) into
@@ -4176,6 +4217,8 @@ static void config_set_sim_args_pat_rollout(const Config *config,
   sim_args->pat_rollout_disabled_classes_mask =
       players_data_get_pat_rollout_disabled_classes_mask(config->players_data,
                                                          player_index);
+  sim_args->wordsmog_pat_rollout_evals =
+      players_data_get_wordsmog_pat_evals(config->players_data, player_index);
 }
 
 void config_fill_sim_args(const Config *config, Rack *known_opp_rack,
@@ -5783,7 +5826,8 @@ void impl_pat_gen(Config *config, ErrorStack *error_stack) {
                                true);
   }
   pat_prepare_hook_flex(pat, players_data_get_kwg(config->players_data, 0),
-                        config_get_ld(config));
+                        config_get_ld(config),
+                        config->game_variant == GAME_VARIANT_WORDSMOG);
   pat_prepare_utility(pat, config->data_paths, config_get_ld(config),
                       error_stack);
   if (!error_stack_is_empty(error_stack)) {
@@ -13650,7 +13694,7 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
         pat_prepare_hook_flex(
             player_pat,
             players_data_get_kwg(config->players_data, player_index),
-            config->ld);
+            config->ld, config->game_variant == GAME_VARIANT_WORDSMOG);
         pat_prepare_utility(player_pat, config->data_paths, config->ld,
                             error_stack);
         if (!error_stack_is_empty(error_stack)) {
@@ -15006,6 +15050,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_PAT_CANDIDATES, "patcand", 1, 1);
   arg(ARG_TOKEN_PAT_ROLLOUT, "patrollout", 1, 1);
   arg(ARG_TOKEN_PAT_ROLLOUT_CLASSES, "patrolloutclasses", 1, 1);
+  arg(ARG_TOKEN_WORDSMOG_PAT_EVALS, "smogpat", 1, 1);
   arg(ARG_TOKEN_P1_LEXICON, "l1", 1, 1);
   arg(ARG_TOKEN_P1_USE_WMP, "w1", 1, 1);
   arg(ARG_TOKEN_P1_USE_RIT, "rit1", 1, 1);
@@ -15016,6 +15061,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_P1_PAT_CANDIDATES, "patcand1", 1, 1);
   arg(ARG_TOKEN_P1_PAT_ROLLOUT, "patrollout1", 1, 1);
   arg(ARG_TOKEN_P1_PAT_ROLLOUT_CLASSES, "patrolloutclasses1", 1, 1);
+  arg(ARG_TOKEN_P1_WORDSMOG_PAT_EVALS, "smogpat1", 1, 1);
   arg(ARG_TOKEN_P1_MOVE_SORT_TYPE, "s1", 1, 1);
   arg(ARG_TOKEN_P1_MOVE_RECORD_TYPE, "r1", 1, 1);
   arg(ARG_TOKEN_P2_LEXICON, "l2", 1, 1);
@@ -15028,6 +15074,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_P2_PAT_CANDIDATES, "patcand2", 1, 1);
   arg(ARG_TOKEN_P2_PAT_ROLLOUT, "patrollout2", 1, 1);
   arg(ARG_TOKEN_P2_PAT_ROLLOUT_CLASSES, "patrolloutclasses2", 1, 1);
+  arg(ARG_TOKEN_P2_WORDSMOG_PAT_EVALS, "smogpat2", 1, 1);
   arg(ARG_TOKEN_P2_MOVE_SORT_TYPE, "s2", 1, 1);
   arg(ARG_TOKEN_P2_MOVE_RECORD_TYPE, "r2", 1, 1);
   arg(ARG_TOKEN_WIN_PCT, "winpct", 1, 1);
@@ -15515,6 +15562,7 @@ void config_add_settings_to_string_builder(const Config *config,
     case ARG_TOKEN_PAT_CANDIDATES:
     case ARG_TOKEN_PAT_ROLLOUT:
     case ARG_TOKEN_PAT_ROLLOUT_CLASSES:
+    case ARG_TOKEN_WORDSMOG_PAT_EVALS:
       // Set these values on a per-player basis
       break;
     case ARG_TOKEN_USE_MMAP_FOR_RIT:
@@ -15593,6 +15641,11 @@ void config_add_settings_to_string_builder(const Config *config,
       free(classes_str);
       break;
     }
+    case ARG_TOKEN_P1_WORDSMOG_PAT_EVALS:
+      config_add_int_setting_to_string_builder(
+          config, sb, arg_token,
+          players_data_get_wordsmog_pat_evals(config->players_data, 0));
+      break;
     case ARG_TOKEN_P1_MOVE_SORT_TYPE:
       string_builder_add_formatted_string(sb, " -%s ",
                                           config->pargs[arg_token]->name);
@@ -15677,6 +15730,11 @@ void config_add_settings_to_string_builder(const Config *config,
       free(classes_str);
       break;
     }
+    case ARG_TOKEN_P2_WORDSMOG_PAT_EVALS:
+      config_add_int_setting_to_string_builder(
+          config, sb, arg_token,
+          players_data_get_wordsmog_pat_evals(config->players_data, 1));
+      break;
     case ARG_TOKEN_P2_MOVE_SORT_TYPE:
       string_builder_add_formatted_string(sb, " -%s ",
                                           config->pargs[arg_token]->name);

@@ -4,15 +4,18 @@
 #include "../src/def/letter_distribution_defs.h"
 #include "../src/def/pat_defs.h"
 #include "../src/ent/dictionary_word.h"
+#include "../src/ent/game.h"
 #include "../src/ent/kwg.h"
 #include "../src/ent/letter_distribution.h"
 #include "../src/ent/pat.h"
 #include "../src/ent/pat_lexicon.h"
+#include "../src/ent/player.h"
 #include "../src/impl/config.h"
 #include "../src/impl/kwg_maker.h"
 #include "test_util.h"
 #include <assert.h>
 #include <stddef.h>
+#include <string.h>
 
 static MachineLetter pat_lexicon_test_ml(const LetterDistribution *ld,
                                          const char *letter) {
@@ -49,7 +52,7 @@ static void test_pat_lexicon_tables(void) {
   const MachineLetter ml_z = pat_lexicon_test_ml(ld, "Z");
 
   PATWeights *pat = pat_create_zeroed("lexicon");
-  pat_prepare_hook_flex(pat, kwg, ld);
+  pat_prepare_hook_flex(pat, kwg, ld, false);
   pat_require_prepared(pat);
 
   // Two-letter words containing each letter: A is in AE, AT and TA.
@@ -105,9 +108,39 @@ static void test_pat_lexicon_tables(void) {
   assert(pat_get_run_through_score(unprepared, 1, key_at, 2, 3) == 0);
   pat_destroy(unprepared);
 
+  // Anagram mode, for wordsmog: the lexicon's multisets AE, AT (spelled AT
+  // and TA, counted once), ACT, ACST and IQ, each letter at either end and
+  // each run key in any order.
+  pat_prepare_hook_flex(pat, kwg, ld, true);
+  pat_require_prepared(pat);
+  // A two-letter multiset of different letters is a word in both orders.
+  assert(pat_get_hook_flex(pat, ml_a) == 4);
+  assert(pat_get_hook_flex(pat, ml_t) == 2);
+  assert(pat_get_hook_flex(pat, ml_e) == 2);
+  assert(pat_get_hook_flex(pat, ml_c) == 0);
+  // C can end ACT as well as start it (rest AT: 2).
+  assert(pat_get_through_count_end(pat, 0, ml_c, 3) == 8);
+  assert(pat_get_through_count_end(pat, 1, ml_c, 3) == 8);
+  assert(pat_get_through_score_end(pat, 1, ml_c, 3) == 2);
+  // A is in AE and AT, at both ends: four, each with 1 left.
+  assert(pat_get_through_count(pat, ml_a, 2) == 19);
+  assert(pat_get_through_score_end(pat, 0, ml_a, 2) == 1);
+  // ACT holds the key AT in either order at either end (rest C: 3), and ACST
+  // at length 4 (rest CS: 4).
+  const MachineLetter key_ta[] = {ml_t, ml_a};
+  assert(pat_get_run_through_count(pat, 0, key_at, 2, 3) == 8);
+  assert(pat_get_run_through_count(pat, 1, key_ta, 2, 3) == 8);
+  assert(pat_get_run_through_score(pat, 0, key_ta, 2, 3) == 3);
+  assert(pat_get_run_through_count(pat, 1, key_at, 2, 4) == 8);
+  assert(pat_get_run_through_score(pat, 1, key_at, 2, 4) == 4);
+  const MachineLetter key_sta[] = {ml_s, ml_t, ml_a};
+  assert(pat_get_run_through_count(pat, 0, key_sta, 3, 4) == 8);
+  assert(pat_get_run_through_score(pat, 0, key_sta, 3, 4) == 3);
+  assert(pat_get_run_through_count(pat, 0, key_sta, 3, 3) == 0);
+
   // Without a lexicon every table is empty, but the weights count as
   // prepared.
-  pat_prepare_hook_flex(pat, NULL, ld);
+  pat_prepare_hook_flex(pat, NULL, ld, false);
   pat_require_prepared(pat);
   assert(pat_get_hook_flex(pat, ml_a) == 0);
   assert(pat_get_through_count(pat, ml_a, 2) == 0);
@@ -119,4 +152,62 @@ static void test_pat_lexicon_tables(void) {
   config_destroy(config);
 }
 
-void test_pat_lexicon(void) { test_pat_lexicon_tables(); }
+// The KWG of a config's first player.
+static const KWG *pat_lexicon_test_kwg(Config *config) {
+  load_and_exec_config_or_die(config, "new");
+  return player_get_kwg(game_get_player(config_get_game(config), 0));
+}
+
+// Anagram mode counts each multiset once however many words spell it, so a
+// lexicon's tables match those of its alphagram KWG, which holds each
+// multiset once.
+static void test_pat_lexicon_anagram_matches_alpha(void) {
+  Config *config = config_create_or_die("set -lex CSW21 -var wordsmog");
+  Config *alpha_config =
+      config_create_or_die("set -lex CSW21_alpha -wmp false -var wordsmog");
+  const LetterDistribution *ld = config_get_ld(config);
+  PATWeights *pat = pat_create_zeroed("spelled");
+  PATWeights *alpha_pat = pat_create_zeroed("alphagrams");
+  pat_prepare_hook_flex(pat, pat_lexicon_test_kwg(config), ld, true);
+  pat_prepare_hook_flex(alpha_pat, pat_lexicon_test_kwg(alpha_config), ld,
+                        true);
+  assert(memcmp(pat->hook_flex, alpha_pat->hook_flex, sizeof(pat->hook_flex)) ==
+         0);
+  assert(memcmp(pat->through_count, alpha_pat->through_count,
+                sizeof(pat->through_count)) == 0);
+  assert(memcmp(pat->through_score, alpha_pat->through_score,
+                sizeof(pat->through_score)) == 0);
+  assert(memcmp(pat->through_count_end, alpha_pat->through_count_end,
+                sizeof(pat->through_count_end)) == 0);
+  assert(memcmp(pat->through_score_end, alpha_pat->through_score_end,
+                sizeof(pat->through_score_end)) == 0);
+  assert(pat->run_through_alphabet_size ==
+         alpha_pat->run_through_alphabet_size);
+  // The run-keyed tables hold this many cells (see pat_run_through_rows).
+  size_t rows = 0;
+  size_t block = 1;
+  for (int key_len = 1; key_len <= PAT_RUN_THROUGH_MAX_KEY; key_len++) {
+    block *= (size_t)pat->run_through_alphabet_size;
+    rows += block;
+  }
+  const size_t run_cells = rows * PAT_MAX_THROUGH_LEN * 2;
+  assert(memcmp(pat->run_through_count, alpha_pat->run_through_count,
+                run_cells) == 0);
+  assert(memcmp(pat->run_through_score, alpha_pat->run_through_score,
+                run_cells) == 0);
+  // Words have different spellings, so the spelled tables differ.
+  PATWeights *spelled_pat = pat_create_zeroed("spellings");
+  pat_prepare_hook_flex(spelled_pat, pat_lexicon_test_kwg(config), ld, false);
+  assert(memcmp(pat->hook_flex, spelled_pat->hook_flex,
+                sizeof(pat->hook_flex)) != 0);
+  pat_destroy(spelled_pat);
+  pat_destroy(alpha_pat);
+  pat_destroy(pat);
+  config_destroy(alpha_config);
+  config_destroy(config);
+}
+
+void test_pat_lexicon(void) {
+  test_pat_lexicon_tables();
+  test_pat_lexicon_anagram_matches_alpha();
+}

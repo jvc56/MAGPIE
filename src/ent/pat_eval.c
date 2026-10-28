@@ -15,6 +15,7 @@
 #include "pat_features.h"
 #include "pat_utility.h"
 #include "rack.h"
+#include "wmp.h"
 #include <assert.h>
 #include <math.h>
 #include <stdbool.h>
@@ -389,6 +390,8 @@ static void pat_eval_context_load_units(
     bool drop_unweighted_units, uint32_t enabled_classes_mask,
     int opponent_rack_size) {
   pat_eval_ctx->weights = weights;
+  // Hooks resolve from the KWG until pat_eval_context_set_wmp says otherwise.
+  pat_eval_ctx->wmp = NULL;
   // Inert until pat_eval_context_set_utility says otherwise.
   pat_eval_ctx->utility_row = NULL;
   pat_eval_ctx->utility_bound = 0;
@@ -597,6 +600,10 @@ void pat_eval_context_set_kwg(PATEvalContext *pat_eval_ctx, const KWG *kwg) {
   pat_eval_ctx->kwg = kwg;
 }
 
+void pat_eval_context_set_wmp(PATEvalContext *pat_eval_ctx, const WMP *wmp) {
+  pat_eval_ctx->wmp = wmp;
+}
+
 void pat_eval_context_load(PATEvalContext *pat_eval_ctx,
                            const PATWeights *weights, const Square *lanes,
                            const LetterDistribution *ld,
@@ -718,9 +725,17 @@ Equity pat_eval_move_penalty_bound(const PATEvalContext *pat_eval_ctx,
   }
   // The utility correction is exact and cheap, so the bound carries it
   // as is rather than bounding it.
-  const Equity utility = pat_eval_utility_adjustment(pat_eval_ctx, move);
+  return pat_eval_move_defense_bound(pat_eval_ctx, move, leave) +
+         pat_eval_utility_adjustment(pat_eval_ctx, move);
+}
+
+Equity pat_eval_move_defense_bound(const PATEvalContext *pat_eval_ctx,
+                                   const Move *move, const Rack *leave) {
+  if (!pat_eval_ctx || !pat_eval_ctx->weights) {
+    return 0;
+  }
   if (move_get_type(move) != GAME_EVENT_TILE_PLACEMENT_MOVE) {
-    return pat_eval_scaled(pat_eval_ctx, pat_eval_ctx->pre_penalty) + utility;
+    return pat_eval_scaled(pat_eval_ctx, pat_eval_ctx->pre_penalty);
   }
   const bool vertical = board_is_dir_vertical(move_get_dir(move));
   const int row_start = move_get_row_start(move);
@@ -743,9 +758,8 @@ Equity pat_eval_move_penalty_bound(const PATEvalContext *pat_eval_ctx,
   for (int word = 0; word < PAT_MASK_WORDS; word++) {
     combined_units[word] = affected_units[word] | leave_units[word];
   }
-  return pat_eval_scaled(pat_eval_ctx, pat_units_penalty_bound(
-                                           pat_eval_ctx, combined_units)) +
-         utility;
+  return pat_eval_scaled(pat_eval_ctx,
+                         pat_units_penalty_bound(pat_eval_ctx, combined_units));
 }
 
 // The opening adjustment for a move on an empty board (see
@@ -851,8 +865,12 @@ static Equity pat_eval_move_penalty_scaled(const PATEvalContext *pat_eval_ctx,
       .kwg =
           pat_eval_ctx->weights->exact_created_hooks ? pat_eval_ctx->kwg : NULL,
       .lanes = pat_eval_ctx->lanes,
-      .run_kwg =
-          pat_eval_ctx->weights->exact_fresh_runs ? pat_eval_ctx->kwg : NULL,
+      .run_kwg = pat_eval_ctx->weights->exact_fresh_runs &&
+                         !pat_eval_ctx->weights->anagram
+                     ? pat_eval_ctx->kwg
+                     : NULL,
+      .anagram = pat_eval_ctx->weights->anagram,
+      .wmp = pat_eval_ctx->wmp,
   };
   // Rescan only the units the move can reach (geometrically, or through
   // its own leave) and combine the whole set: the units in neither set
