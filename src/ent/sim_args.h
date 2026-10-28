@@ -2,6 +2,7 @@
 #define SIM_ARGS_H
 
 #include "../def/bai_defs.h"
+#include "../def/wordsmog_defs.h"
 #include "../ent/equity.h"
 #include "../ent/game.h"
 #include "../ent/game_history.h"
@@ -54,6 +55,10 @@ typedef struct SimArgs {
   // sim_args_fill clears them (PAT on, every class); callers set them after.
   bool pat_rollout_disabled;
   uint32_t pat_rollout_disabled_classes_mask;
+  // The simming player's smogpat: in wordsmog, how many plays each rollout
+  // ply's move generation prices with PAT (see player_get_wordsmog_pat_evals),
+  // for both players' plies. sim_args_fill sets the default.
+  int wordsmog_pat_rollout_evals;
   // Whether a nonterminal sim horizon's spread is projected to the end of the
   // game with the win percentage table's expected swing for that state (see
   // rv_sim_sample).
@@ -139,6 +144,7 @@ sim_args_fill(const int num_plies, const MoveList *move_list,
   sim_args->resume_results = false;
   sim_args->pat_rollout_disabled = false;
   sim_args->pat_rollout_disabled_classes_mask = 0;
+  sim_args->wordsmog_pat_rollout_evals = WORDSMOG_DEFAULT_PAT_EVALS;
 }
 
 // Blend rollout win% and (sigmoid-normalized) spread into a single BAI

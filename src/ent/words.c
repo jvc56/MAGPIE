@@ -8,10 +8,12 @@
 #include "../ent/move.h"
 #include "../ent/rack.h"
 #include "../util/io_util.h"
+#include "bit_rack.h"
 #include "board.h"
 #include "kwg_alpha.h"
 #include "kwg_woadwage.h"
 #include "letter_distribution.h"
+#include "wmp.h"
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -194,13 +196,24 @@ bool is_word_valid_alpha(const FormedWord *w, const KWG *kwg) {
   return is_valid;
 }
 
-bool is_word_valid(const FormedWord *w, const KWG *kwg,
+// A wordsmog word is valid when its letters are an anagram of a word in the
+// WMP.
+static bool is_word_valid_wmp(const FormedWord *w, const WMP *wmp) {
+  BitRack bit_rack = bit_rack_create_empty();
+  for (int i = 0; i < w->word_length; i++) {
+    bit_rack_add_letter(&bit_rack, get_unblanked_machine_letter(w->word[i]));
+  }
+  return wmp_has_anagram(wmp, &bit_rack, w->word_length);
+}
+
+bool is_word_valid(const FormedWord *w, const KWG *kwg, const WMP *wmp,
                    game_variant_t variant) {
   if (w->word_length < 2) {
     return false;
   }
   if (variant == GAME_VARIANT_WORDSMOG) {
-    return is_word_valid_alpha(w, kwg);
+    return wmp != NULL ? is_word_valid_wmp(w, wmp)
+                       : is_word_valid_alpha(w, kwg);
   }
   if (variant == GAME_VARIANT_WOADWAGE) {
     return kwg_accepts_woadwage(kwg, w->word, w->word_length);
@@ -208,9 +221,9 @@ bool is_word_valid(const FormedWord *w, const KWG *kwg,
   return is_word_valid_standard(w, kwg);
 }
 
-void formed_words_populate_validities(const KWG *kwg, FormedWords *ws,
-                                      game_variant_t variant) {
+void formed_words_populate_validities(const KWG *kwg, const WMP *wmp,
+                                      FormedWords *ws, game_variant_t variant) {
   for (int i = 0; i < ws->num_words; i++) {
-    ws->words[i].valid = is_word_valid(&ws->words[i], kwg, variant);
+    ws->words[i].valid = is_word_valid(&ws->words[i], kwg, wmp, variant);
   }
 }

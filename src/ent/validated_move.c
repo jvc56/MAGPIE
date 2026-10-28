@@ -454,8 +454,8 @@ void validated_move_load(ValidatedMove *vm, const Game *game, int player_index,
 
     vm->formed_words = formed_words_create(board, vm->move);
 
-    formed_words_populate_validities(kwg, vm->formed_words,
-                                     game_get_variant(game));
+    formed_words_populate_validities(kwg, player_get_wmp(player),
+                                     vm->formed_words, game_get_variant(game));
 
     if (!allow_phonies) {
       for (int i = 0; i < formed_words_get_num_words(vm->formed_words); i++) {
@@ -492,6 +492,10 @@ void validated_move_load(ValidatedMove *vm, const Game *game, int player_index,
                 player_get_rack(game_get_player(game, 1 - player_index))));
         pat_eval_context_set_kwg(&pat_eval_ctx, player_get_kwg(player),
                                  game_get_variant(game));
+        // Wordsmog's cross sets come from the WMP when one is loaded (see
+        // game_gen_alpha_cross_set), and so do PAT's for the hooks a move
+        // creates.
+        pat_eval_context_set_wmp(&pat_eval_ctx, player_get_wmp(player));
       }
       move_set_equity(
           vm->move,

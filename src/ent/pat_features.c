@@ -6,16 +6,19 @@
 #include "../def/letter_distribution_defs.h"
 #include "../def/pat_defs.h"
 #include "../def/rack_defs.h"
+#include "bit_rack.h"
 #include "board.h"
 #include "bonus_square.h"
 #include "equity.h"
 #include "kwg.h"
+#include "kwg_alpha.h"
 #include "kwg_woadwage.h"
 #include "letter_distribution.h"
 #include "move.h"
 #include "pat.h"
 #include "pat_lexicon.h"
 #include "rack.h"
+#include "wmp.h"
 #include <assert.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -110,6 +113,32 @@ static inline bool pat_move_covers(const PATMoveOverlay *overlay, int row,
   return true;
 }
 
+// The letters that complete the perpendicular word's letters, before and
+// after the square, to an anagram of a word, as game_gen_alpha_cross_set
+// computes a wordsmog square's cross set: from the WMP when there is one, and
+// otherwise from kwg, the alphagram KWG.
+static uint64_t
+pat_anagram_cross_set(const KWG *kwg, const LetterDistribution *ld,
+                      const WMP *wmp, const MachineLetter *before,
+                      int num_before, const MachineLetter *after,
+                      int num_after) {
+  Rack rack;
+  rack_set_dist_size_and_reset(&rack, ld_get_size(ld));
+  for (int before_idx = 0; before_idx < num_before; before_idx++) {
+    rack_add_letter(&rack, before[before_idx]);
+  }
+  for (int after_idx = 0; after_idx < num_after; after_idx++) {
+    rack_add_letter(&rack, after[after_idx]);
+  }
+  const uint64_t cross_set =
+      wmp != NULL
+          ? wmp_get_anagram_completions(wmp,
+                                        bit_rack_create_from_rack(ld, &rack),
+                                        num_before + num_after)
+          : kwg_compute_alpha_cross_set(kwg, &rack);
+  return cross_set & ~(uint64_t)1;
+}
+
 // The cross set of the empty square (row, col) on a dir lane after the
 // move, and the cross score to go with it: the perpendicular pattern
 // through the square, existing and fresh tiles alike, resolved on the
@@ -168,6 +197,10 @@ static uint64_t pat_fresh_cross_set(const KWG *kwg,
   *cross_score_out = cross_score;
   if (num_before == 0 && num_after == 0) {
     return TRIVIAL_CROSS_SET;
+  }
+  if (overlay->anagram) {
+    return pat_anagram_cross_set(kwg, ld, overlay->wmp, before, num_before,
+                                 after, num_after);
   }
   if (overlay->woadwage) {
     // before holds the tiles outward from the square; the cross set wants

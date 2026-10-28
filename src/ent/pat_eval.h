@@ -13,6 +13,7 @@
 #include "move.h"
 #include "pat.h"
 #include "rack.h"
+#include "wmp.h"
 #include <math.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -40,6 +41,10 @@ typedef struct PATEvalContext {
   // PATWeights.exact_created_hooks); NULL, the default after a load, means
   // the approximation is used. Set with pat_eval_context_set_kwg.
   const KWG *kwg;
+  // For weights prepared in anagram mode, the WMP that resolves the hooks a
+  // move creates; NULL means kwg does, as a wordsmog alphagram KWG. Set with
+  // pat_eval_context_set_wmp.
+  const WMP *wmp;
   // Whether the game is woadwage, whose words may be two of kwg's run
   // together.
   bool woadwage;
@@ -169,6 +174,9 @@ void pat_eval_context_set_utility(PATEvalContext *pat_eval_ctx, int margin,
 // words it spells.
 void pat_eval_context_set_kwg(PATEvalContext *pat_eval_ctx, const KWG *kwg,
                               game_variant_t variant);
+// Sets the WMP that resolves the hooks a move creates in wordsmog (see
+// PATWeights.anagram); NULL means the KWG does.
+void pat_eval_context_set_wmp(PATEvalContext *pat_eval_ctx, const WMP *wmp);
 // Builds the context static evaluation uses. Premium squares whose class has
 // no nonzero weight or that enabled_classes_mask excludes, and windows whose
 // tier has none or whose PAT_CLASS_MASK_WINDOWS bit is clear, are not walked:
@@ -212,6 +220,13 @@ Equity pat_eval_move_penalty_capped(const PATEvalContext *pat_eval_ctx,
 // moves that cannot contend. leave has the same meaning as in
 // pat_eval_move_penalty above.
 Equity pat_eval_move_penalty_bound(const PATEvalContext *pat_eval_ctx,
+                                   const Move *move, const Rack *leave);
+// pat_eval_move_penalty_bound without the utility correction: an upper bound
+// on the rest of the term, which depends only on where the move puts tiles
+// and on leave, so it holds for every move with the same squares and leave
+// whatever its tiles. Add pat_eval_utility_bound_for_play for a bound over
+// moves of different scores.
+Equity pat_eval_move_defense_bound(const PATEvalContext *pat_eval_ctx,
                                    const Move *move, const Rack *leave);
 // The defense term of every non-placement move (exchange or pass): the
 // position baseline, exactly, since they leave the board unchanged. Zero

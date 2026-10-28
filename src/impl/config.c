@@ -25,6 +25,7 @@
 #include "../def/sim_defs.h"
 #include "../def/thread_control_defs.h"
 #include "../def/validated_move_defs.h"
+#include "../def/wordsmog_defs.h"
 #include "../ent/autoplay_results.h"
 #include "../ent/autoplay_solver_settings.h"
 #include "../ent/bag.h"
@@ -46,6 +47,7 @@
 #include "../ent/letter_distribution.h"
 #include "../ent/move.h"
 #include "../ent/pat.h"
+#include "../ent/pat_eval.h"
 #include "../ent/pat_lexicon.h"
 #include "../ent/pat_utility.h"
 #include "../ent/player.h"
@@ -53,6 +55,7 @@
 #include "../ent/rack.h"
 #include "../ent/sim_args.h"
 #include "../ent/sim_results.h"
+#include "../ent/static_eval.h"
 #include "../ent/thread_control.h"
 #include "../ent/trie.h"
 #include "../ent/validated_move.h"
@@ -60,6 +63,7 @@
 #include "../str/endgame_string.h"
 #include "../str/game_string.h"
 #include "../str/inference_string.h"
+#include "../str/letter_distribution_string.h"
 #include "../str/move_string.h"
 #include "../str/peg_string.h"
 #include "../str/rack_string.h"
@@ -87,6 +91,7 @@
 #include "play_chooser.h"
 #include "rack_draw.h"
 #include "simmer.h"
+#include "wordsmog_play_graph.h"
 #include <assert.h>
 #include <ctype.h>
 #include <float.h>
@@ -115,6 +120,7 @@ typedef enum {
   ARG_TOKEN_RACK,
   ARG_TOKEN_RANDOM_RACK,
   ARG_TOKEN_GEN,
+  ARG_TOKEN_WORDSMOG_GRAPH,
   ARG_TOKEN_SIM,
   ARG_TOKEN_SNOPRUNE,
   ARG_TOKEN_GEN_AND_SIM,
@@ -148,6 +154,7 @@ typedef enum {
   ARG_TOKEN_PAT_CANDIDATES,
   ARG_TOKEN_PAT_ROLLOUT,
   ARG_TOKEN_PAT_ROLLOUT_CLASSES,
+  ARG_TOKEN_WORDSMOG_PAT_EVALS,
   ARG_TOKEN_P1_LEXICON,
   ARG_TOKEN_P1_USE_WMP,
   ARG_TOKEN_P1_USE_RIT,
@@ -158,6 +165,7 @@ typedef enum {
   ARG_TOKEN_P1_PAT_CANDIDATES,
   ARG_TOKEN_P1_PAT_ROLLOUT,
   ARG_TOKEN_P1_PAT_ROLLOUT_CLASSES,
+  ARG_TOKEN_P1_WORDSMOG_PAT_EVALS,
   ARG_TOKEN_P1_MOVE_SORT_TYPE,
   ARG_TOKEN_P1_MOVE_RECORD_TYPE,
   ARG_TOKEN_P2_LEXICON,
@@ -170,6 +178,7 @@ typedef enum {
   ARG_TOKEN_P2_PAT_CANDIDATES,
   ARG_TOKEN_P2_PAT_ROLLOUT,
   ARG_TOKEN_P2_PAT_ROLLOUT_CLASSES,
+  ARG_TOKEN_P2_WORDSMOG_PAT_EVALS,
   ARG_TOKEN_P2_MOVE_SORT_TYPE,
   ARG_TOKEN_P2_MOVE_RECORD_TYPE,
   ARG_TOKEN_WIN_PCT,
@@ -1458,6 +1467,24 @@ static void add_pat_help_arg(arg_token_t arg_token, const char **usages,
             "'patrolloutclasses' sets both players; 'patrolloutclasses1' "
             "and 'patrolloutclasses2' set one.";
     break;
+  case ARG_TOKEN_WORDSMOG_PAT_EVALS:
+  case ARG_TOKEN_P1_WORDSMOG_PAT_EVALS:
+  case ARG_TOKEN_P2_WORDSMOG_PAT_EVALS:
+    usages[0] = "<plays>";
+    examples[0] = "64";
+    examples[1] = "0";
+    *text = "Specifies how many plays a wordsmog move generation prices with "
+            "the PAT term when it looks for the best play. Every placement "
+            "that could hold the best play gets its best arrangement priced, "
+            "and then each, in turn, its next best, until this many have "
+            "been priced or no play left could be best. For a list of plays, "
+            "such as a simulation's candidates, it counts the plays priced "
+            "after each placement's first, for the placements that could "
+            "make the list. 0 prices every play that could be best, which is "
+            "exact and slow. A simulating player's setting also applies to "
+            "its rollouts, for both sides' plies. Defaults to 64. 'smogpat' "
+            "sets both players; 'smogpat1' and 'smogpat2' set one.";
+    break;
   case ARG_TOKEN_PAT_LABEL_PLIES:
     usages[0] = "<plies>";
     *text = "Specifies how many plies of net result a PAT training "
@@ -1684,6 +1711,9 @@ void add_help_arg_to_string_builder(const Config *config, int token,
     case ARG_TOKEN_PAT_ROLLOUT_CLASSES:
     case ARG_TOKEN_P1_PAT_ROLLOUT_CLASSES:
     case ARG_TOKEN_P2_PAT_ROLLOUT_CLASSES:
+    case ARG_TOKEN_WORDSMOG_PAT_EVALS:
+    case ARG_TOKEN_P1_WORDSMOG_PAT_EVALS:
+    case ARG_TOKEN_P2_WORDSMOG_PAT_EVALS:
     case ARG_TOKEN_PAT_LABEL_PLIES:
       add_pat_help_arg(arg_token, usages, examples, &text);
       break;
@@ -1724,6 +1754,29 @@ void add_help_arg_to_string_builder(const Config *config, int token,
     case ARG_TOKEN_GEN:
       usages[0] = "";
       text = "Generates moves for the current position.";
+      break;
+    case ARG_TOKEN_WORDSMOG_GRAPH:
+      usages[0] = "[<num_plays>]";
+      usages[1] = "groups [<num_groups>]";
+      usages[2] = "count";
+      usages[3] = "group <rank> [<tile> ...]";
+      examples[0] = "";
+      examples[1] = "50";
+      examples[2] = "groups 20";
+      examples[3] = "count";
+      examples[4] = "group 1";
+      examples[5] = "group 3 E ?";
+      text = "Explores the ranked graph of a wordsmog position's plays "
+             "without listing them all (needs -var wordsmog and -wmp true). "
+             "With no subcommand, shows the best plays, each arrangement of "
+             "tiles once. 'groups' shows the best placement and tile "
+             "multisets, each with its best play and how many arrangements "
+             "it has. 'count' counts the groups, the arrangements and "
+             "the plays with every blank designation. 'group' shows "
+             "one group, ranked as 'groups' ranks them, with the given "
+             "tiles pinned to its empty squares in board order (? for a "
+             "blank): its best play, and for its next square, each tile that "
+             "can go there and the best play that puts it there.";
       break;
     case ARG_TOKEN_SIM:
       usages[0] = "[<opponent_known_rack>]";
@@ -3059,6 +3112,7 @@ char *impl_help(Config *config, ErrorStack *error_stack) {
         ARG_TOKEN_SHOW_INFERENCE,       /* shinference */
         ARG_TOKEN_SHOW_MOVES,           /* shmoves */
         ARG_TOKEN_SIM,                  /* simulate */
+        ARG_TOKEN_WORDSMOG_GRAPH,       /* smog */
         ARG_TOKEN_SNOPRUNE,             /* snoprune */
         ARG_TOKEN_PAT_GEN,              /* patgen */
     };
@@ -3110,6 +3164,9 @@ char *impl_help(Config *config, ErrorStack *error_stack) {
         ARG_TOKEN_PAT_ROLLOUT_CLASSES,    /* patrolloutclasses */
         ARG_TOKEN_P1_PAT_ROLLOUT_CLASSES, /* patrolloutclasses1 */
         ARG_TOKEN_P2_PAT_ROLLOUT_CLASSES, /* patrolloutclasses2 */
+        ARG_TOKEN_WORDSMOG_PAT_EVALS,     /* smogpat */
+        ARG_TOKEN_P1_WORDSMOG_PAT_EVALS,  /* smogpat1 */
+        ARG_TOKEN_P2_WORDSMOG_PAT_EVALS,  /* smogpat2 */
         ARG_TOKEN_GAME_VARIANT,           /* var */
         ARG_TOKEN_P1_USE_WMP,             /* w1 */
         ARG_TOKEN_P2_USE_WMP,             /* w2 */
@@ -3551,6 +3608,333 @@ void impl_move_gen(Config *config, ErrorStack *error_stack) {
                   config->game, game_get_player_on_turn_index(config->game))));
 }
 
+// Exploring the wordsmog play graph (smog)
+
+// A play's static equity, as move generation prices it with equity sort,
+// whatever the player's sort type: its score and leave, the opening and
+// endgame adjustments, and no PAT term, which the play graph ranks without.
+static Equity smog_static_equity(const Game *game, const Move *move) {
+  const int player_index = game_get_player_on_turn_index(game);
+  const Player *player = game_get_player(game, player_index);
+  const Board *board = game_get_board(game);
+  Rack leave;
+  get_leave_for_move(move, game, &leave);
+  PATEvalContext pat_eval_ctx;
+  pat_eval_context_disable(&pat_eval_ctx);
+  return static_eval_get_move_equity(
+      game_get_ld(game), player_get_klv(player), move, &leave,
+      player_get_rack(game_get_player(game, 1 - player_index)),
+      board_get_opening_move_word_penalties(board),
+      board_get_opening_move_letter_penalties(board), 0, &pat_eval_ctx,
+      board_get_tiles_played(board), bag_get_letters(game_get_bag(game)));
+}
+
+// The columns every smog table starts with, below a label for its first:
+// rank, play, leave (Lv), score (Sc) and static equity (StEq), as move lists
+// show them.
+static void string_builder_add_smog_header(StringBuilder *sb,
+                                           const char *rank_label,
+                                           const char *play_label) {
+  string_builder_add_formatted_string(sb, "%5s  %-24s %-7s %4s %8s", rank_label,
+                                      play_label, "Lv", "Sc", "StEq");
+}
+
+static void string_builder_add_smog_play(StringBuilder *sb, const Game *game,
+                                         int rank, const Move *move) {
+  const LetterDistribution *ld = game_get_ld(game);
+  StringBuilder *move_sb = string_builder_create();
+  string_builder_add_move(move_sb, game_get_board(game), move, ld, false);
+  StringBuilder *leave_sb = string_builder_create();
+  string_builder_add_move_leave(leave_sb,
+                                player_get_rack(game_get_player(
+                                    game, game_get_player_on_turn_index(game))),
+                                move, ld);
+  string_builder_add_formatted_string(
+      sb, "%5d  %-24s %-7s %4d %8.2f", rank, string_builder_peek(move_sb),
+      string_builder_peek(leave_sb), equity_to_int(move_get_score(move)),
+      equity_to_double(smog_static_equity(game, move)));
+  string_builder_destroy(leave_sb);
+  string_builder_destroy(move_sb);
+}
+
+static void string_builder_add_smog_tile(StringBuilder *sb,
+                                         const LetterDistribution *ld,
+                                         MachineLetter pin) {
+  string_builder_add_user_visible_letter(
+      sb, ld, pin == WORDSMOG_PIN_BLANK ? BLANK_MACHINE_LETTER : pin);
+}
+
+static void string_builder_add_smog_square(StringBuilder *sb, int row,
+                                           int col) {
+  string_builder_add_formatted_string(sb, "%c%d", 'A' + col, row + 1);
+}
+
+// The number of plays or groups to show, from argument arg_idx, or
+// default_count when there is none.
+static int smog_count_arg(const Config *config, int arg_idx, int default_count,
+                          ErrorStack *error_stack) {
+  const char *count_str =
+      config_get_parg_value(config, ARG_TOKEN_WORDSMOG_GRAPH, arg_idx);
+  if (count_str == NULL) {
+    return default_count;
+  }
+  int count;
+  string_to_int_or_push_error("count", count_str, 1, INT32_MAX,
+                              ERROR_STATUS_WORDSMOG_GRAPH_INVALID_ARG, &count,
+                              error_stack);
+  return count;
+}
+
+// What the graph ranks plays by: the player's sort type.
+static const char *smog_ranking(const Config *config) {
+  return player_get_move_sort_type(game_get_player(
+             config->game, game_get_player_on_turn_index(config->game))) ==
+                 MOVE_SORT_SCORE
+             ? "score"
+             : "static equity";
+}
+
+// The top plays, best first, each arrangement once.
+static void smog_add_plays(const Config *config, WordsmogPlayGraph *graph,
+                           int num_plays, StringBuilder *sb) {
+  uint64_t arrangements;
+  uint64_t plays;
+  wordsmog_play_graph_count(graph, &arrangements, &plays);
+  string_builder_add_formatted_string(
+      sb, "Top plays of %llu (%llu with every blank designation), by %s:\n",
+      (unsigned long long)arrangements, (unsigned long long)plays,
+      smog_ranking(config));
+  string_builder_add_smog_header(sb, "Rank", "Play");
+  string_builder_add_string(sb, "\n");
+  Move move;
+  for (int rank = 1;
+       rank <= num_plays && wordsmog_play_graph_next(graph, &move); rank++) {
+    string_builder_add_smog_play(sb, config->game, rank, &move);
+    string_builder_add_string(sb, "\n");
+  }
+}
+
+// The top groups, a placement and tile multiset each, with the best play and
+// the number of arrangements and plays of each.
+static void smog_add_groups(const Config *config, WordsmogPlayGraph *graph,
+                            int num_groups, StringBuilder *sb) {
+  const int total_groups = wordsmog_play_graph_rank_groups(graph);
+  string_builder_add_formatted_string(
+      sb, "Top groups (placement and tiles) of %d, by their best play's %s:\n",
+      total_groups, smog_ranking(config));
+  string_builder_add_smog_header(sb, "Rank", "Best play");
+  string_builder_add_formatted_string(sb, " %13s %9s\n", "Arrangements",
+                                      "Plays");
+  for (int rank = 0; rank < num_groups && rank < total_groups; rank++) {
+    WordsmogPlayNode node;
+    wordsmog_play_graph_get_group(graph, rank, &node);
+    Move move;
+    wordsmog_play_graph_get_play(graph, &node, &move);
+    uint64_t arrangements;
+    uint64_t plays;
+    wordsmog_play_graph_count_node(graph, &node, &arrangements, &plays);
+    string_builder_add_smog_play(sb, config->game, rank + 1, &move);
+    string_builder_add_formatted_string(sb, " %13llu %9llu\n",
+                                        (unsigned long long)arrangements,
+                                        (unsigned long long)plays);
+  }
+}
+
+static void smog_add_count(WordsmogPlayGraph *graph, StringBuilder *sb) {
+  uint64_t arrangements;
+  uint64_t plays;
+  wordsmog_play_graph_count(graph, &arrangements, &plays);
+  const int groups = wordsmog_play_graph_rank_groups(graph);
+  string_builder_add_formatted_string(
+      sb,
+      "Groups (placement and tiles):     %d\n"
+      "Arrangements:                     %llu\n"
+      "Plays, every blank designation:   %llu\n",
+      groups, (unsigned long long)arrangements, (unsigned long long)plays);
+}
+
+// A node: the group ranked by the argument after "group", with each later
+// argument pinned to the next square in turn, and then its children.
+static void smog_add_node(const Config *config, WordsmogPlayGraph *graph,
+                          StringBuilder *sb, ErrorStack *error_stack) {
+  const int total_groups = wordsmog_play_graph_rank_groups(graph);
+  const char *rank_str =
+      config_get_parg_value(config, ARG_TOKEN_WORDSMOG_GRAPH, 1);
+  if (rank_str == NULL || total_groups == 0) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_WORDSMOG_GRAPH_INVALID_ARG,
+        get_formatted_string(total_groups == 0
+                                 ? "the position has no tile placement plays"
+                                 : "expected a group rank from 1 to %d",
+                             total_groups));
+    return;
+  }
+  int rank;
+  string_to_int_or_push_error("group rank", rank_str, 1, total_groups,
+                              ERROR_STATUS_WORDSMOG_GRAPH_INVALID_ARG, &rank,
+                              error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  const LetterDistribution *ld = game_get_ld(config->game);
+  WordsmogPlayNode node;
+  wordsmog_play_graph_get_group(graph, rank - 1, &node);
+  for (int arg_idx = 2;; arg_idx++) {
+    const char *tile_str =
+        config_get_parg_value(config, ARG_TOKEN_WORDSMOG_GRAPH, arg_idx);
+    if (tile_str == NULL) {
+      break;
+    }
+    MachineLetter mls[2];
+    const int num_mls = ld_str_to_mls(ld, tile_str, false, mls, 2);
+    if (num_mls != 1 || node.num_pinned == node.num_squares) {
+      error_stack_push(
+          error_stack, ERROR_STATUS_WORDSMOG_GRAPH_INVALID_ARG,
+          get_formatted_string(
+              num_mls != 1 ? "expected one tile, a letter or ?, but got '%s'"
+                           : "every square is already pinned before '%s'",
+              tile_str));
+      return;
+    }
+    const MachineLetter pin =
+        mls[0] == BLANK_MACHINE_LETTER || get_is_blanked(mls[0])
+            ? WORDSMOG_PIN_BLANK
+            : mls[0];
+    WordsmogPlayNode children[RACK_SIZE + 1];
+    const int num_children =
+        wordsmog_play_graph_get_children(graph, &node, children);
+    int child_idx = 0;
+    while (child_idx < num_children &&
+           children[child_idx].pins[node.num_pinned] != pin) {
+      child_idx++;
+    }
+    if (child_idx == num_children) {
+      int row;
+      int col;
+      wordsmog_play_graph_get_next_square(graph, &node, &row, &col);
+      error_stack_push(
+          error_stack, ERROR_STATUS_WORDSMOG_GRAPH_INVALID_ARG,
+          get_formatted_string("no play of group %d puts '%s' on %c%d next",
+                               rank, tile_str, 'A' + col, row + 1));
+      return;
+    }
+    node = children[child_idx];
+  }
+
+  Move move;
+  wordsmog_play_graph_get_play(graph, &node, &move);
+  uint64_t arrangements;
+  uint64_t plays;
+  wordsmog_play_graph_count_node(graph, &node, &arrangements, &plays);
+  string_builder_add_formatted_string(sb, "Group %d of %d, pinned:", rank,
+                                      total_groups);
+  if (node.num_pinned == 0) {
+    string_builder_add_string(sb, " none");
+  }
+  for (int pin_idx = 0; pin_idx < node.num_pinned; pin_idx++) {
+    string_builder_add_string(sb, " ");
+    string_builder_add_smog_tile(sb, ld, node.pins[pin_idx]);
+  }
+  string_builder_add_formatted_string(
+      sb, " (%d of %d squares); %llu arrangements, %llu plays\n",
+      node.num_pinned, node.num_squares, (unsigned long long)arrangements,
+      (unsigned long long)plays);
+  string_builder_add_smog_header(sb, "Best", "Play");
+  string_builder_add_string(sb, "\n");
+  string_builder_add_smog_play(sb, config->game, 1, &move);
+  string_builder_add_string(sb, "\n");
+  if (node.num_pinned == node.num_squares) {
+    return;
+  }
+  int row;
+  int col;
+  wordsmog_play_graph_get_next_square(graph, &node, &row, &col);
+  string_builder_add_string(sb, "Next square ");
+  string_builder_add_smog_square(sb, row, col);
+  string_builder_add_formatted_string(sb, ", by tile, by best play's %s:\n",
+                                      smog_ranking(config));
+  string_builder_add_smog_header(sb, "Rank", "Best play");
+  string_builder_add_string(sb, "  Tile  Arrangements\n");
+  WordsmogPlayNode children[RACK_SIZE + 1];
+  const int num_children =
+      wordsmog_play_graph_get_children(graph, &node, children);
+  for (int child_idx = 0; child_idx < num_children; child_idx++) {
+    wordsmog_play_graph_get_play(graph, &children[child_idx], &move);
+    wordsmog_play_graph_count_node(graph, &children[child_idx], &arrangements,
+                                   &plays);
+    string_builder_add_smog_play(sb, config->game, child_idx + 1, &move);
+    StringBuilder *tile_sb = string_builder_create();
+    string_builder_add_smog_tile(tile_sb, ld,
+                                 children[child_idx].pins[node.num_pinned]);
+    string_builder_add_formatted_string(sb, "  %-4s  %12llu\n",
+                                        string_builder_peek(tile_sb),
+                                        (unsigned long long)arrangements);
+    string_builder_destroy(tile_sb);
+  }
+}
+
+char *impl_wordsmog_graph(Config *config, ErrorStack *error_stack) {
+  if (!config_has_game_data(config)) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
+        string_duplicate("cannot explore plays without a lexicon"));
+    return empty_string();
+  }
+  config_init_game(config);
+  const Player *player = game_get_player(
+      config->game, game_get_player_on_turn_index(config->game));
+  if (game_get_variant(config->game) != GAME_VARIANT_WORDSMOG ||
+      player_get_wmp(player) == NULL) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_WORDSMOG_GRAPH_UNAVAILABLE,
+        string_duplicate("smog needs a wordsmog game (-var wordsmog) and a "
+                         "word map (-wmp true)"));
+    return empty_string();
+  }
+  const char *subcommand =
+      config_get_parg_value(config, ARG_TOKEN_WORDSMOG_GRAPH, 0);
+  StringBuilder *sb = string_builder_create();
+  WordsmogPlayGraph *graph = wordsmog_play_graph_create(
+      config->game, player_get_move_sort_type(player));
+  if (subcommand == NULL || is_all_digits_or_empty(subcommand)) {
+    const int num_plays =
+        smog_count_arg(config, 0, config_get_num_plays(config), error_stack);
+    if (error_stack_is_empty(error_stack)) {
+      smog_add_plays(config, graph, num_plays, sb);
+    }
+  } else if (strings_iequal(subcommand, "groups")) {
+    const int num_groups =
+        smog_count_arg(config, 1, config_get_num_plays(config), error_stack);
+    if (error_stack_is_empty(error_stack)) {
+      smog_add_groups(config, graph, num_groups, sb);
+    }
+  } else if (strings_iequal(subcommand, "count")) {
+    smog_add_count(graph, sb);
+  } else if (strings_iequal(subcommand, "group")) {
+    smog_add_node(config, graph, sb, error_stack);
+  } else {
+    error_stack_push(
+        error_stack, ERROR_STATUS_WORDSMOG_GRAPH_INVALID_ARG,
+        get_formatted_string("unrecognized smog subcommand '%s'; expected a "
+                             "number of plays, groups, count or group",
+                             subcommand));
+  }
+  wordsmog_play_graph_destroy(graph);
+  return string_builder_dump_and_destroy(sb, NULL);
+}
+
+void execute_wordsmog_graph(Config *config, ErrorStack *error_stack) {
+  char *result = impl_wordsmog_graph(config, error_stack);
+  if (error_stack_is_empty(error_stack)) {
+    thread_control_print(config->thread_control, result);
+  }
+  free(result);
+}
+
+char *str_api_wordsmog_graph(Config *config, ErrorStack *error_stack) {
+  return impl_wordsmog_graph(config, error_stack);
+}
+
 // Rack and gen
 
 void impl_rack_and_gen(Config *config, ErrorStack *error_stack) {
@@ -3765,8 +4149,9 @@ static bool config_parse_bool_arg(const char *value, const char *name,
   return true;
 }
 
-// Loads one player's PAT usage options (patcand, patclasses, patrollout and
-// patrolloutclasses, each global or per player) into players_data.
+// Loads one player's PAT usage options (patcand, patclasses, patrollout,
+// patrolloutclasses and smogpat, each global or per player) into
+// players_data.
 static void config_load_player_pat_usage(Config *config, int player_index,
                                          ErrorStack *error_stack) {
   PlayersData *players_data = config->players_data;
@@ -3812,6 +4197,19 @@ static void config_load_player_pat_usage(Config *config, int player_index,
     players_data_set_pat_rollout_disabled_classes_mask(
         players_data, player_index, PAT_CLASS_MASK_ALL & ~enabled_mask);
   }
+  value = config_get_player_arg_value(
+      config, ARG_TOKEN_WORDSMOG_PAT_EVALS, ARG_TOKEN_P1_WORDSMOG_PAT_EVALS,
+      ARG_TOKEN_P2_WORDSMOG_PAT_EVALS, player_index);
+  if (value) {
+    int evals;
+    string_to_int_or_push_error("smogpat", value, 0, INT_MAX,
+                                ERROR_STATUS_CONFIG_LOAD_INT_ARG_OUT_OF_BOUNDS,
+                                &evals, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+    players_data_set_wordsmog_pat_evals(players_data, player_index, evals);
+  }
 }
 
 // Copies the rollout PAT settings of the simming player (player_index) into
@@ -3824,6 +4222,8 @@ static void config_set_sim_args_pat_rollout(const Config *config,
   sim_args->pat_rollout_disabled_classes_mask =
       players_data_get_pat_rollout_disabled_classes_mask(config->players_data,
                                                          player_index);
+  sim_args->wordsmog_pat_rollout_evals =
+      players_data_get_wordsmog_pat_evals(config->players_data, player_index);
 }
 
 void config_fill_sim_args(const Config *config, Rack *known_opp_rack,
@@ -5431,7 +5831,8 @@ void impl_pat_gen(Config *config, ErrorStack *error_stack) {
                                true);
   }
   pat_prepare_hook_flex(pat, players_data_get_kwg(config->players_data, 0),
-                        config_get_ld(config));
+                        config_get_ld(config),
+                        config->game_variant == GAME_VARIANT_WORDSMOG);
   pat_prepare_utility(pat, config->data_paths, config_get_ld(config),
                       error_stack);
   if (!error_stack_is_empty(error_stack)) {
@@ -13298,7 +13699,7 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
         pat_prepare_hook_flex(
             player_pat,
             players_data_get_kwg(config->players_data, player_index),
-            config->ld);
+            config->ld, config->game_variant == GAME_VARIANT_WORDSMOG);
         pat_prepare_utility(player_pat, config->data_paths, config->ld,
                             error_stack);
         if (!error_stack_is_empty(error_stack)) {
@@ -14612,6 +15013,8 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   cmd(ARG_TOKEN_RACK, "rack", 1, 1, set_rack, generic, true);
   cmd(ARG_TOKEN_RANDOM_RACK, "rrack", 0, 0, set_random_rack, generic, true);
   cmd(ARG_TOKEN_GEN, "generate", 0, 0, move_gen, generic, true);
+  cmd(ARG_TOKEN_WORDSMOG_GRAPH, "smog", 0, 2 + RACK_SIZE, wordsmog_graph,
+      generic, false);
   cmd(ARG_TOKEN_SIM, "simulate", 0, 1, sim, sim, false);
   cmd(ARG_TOKEN_SNOPRUNE, "snoprune", 0, 1, snoprune, snoprune, false);
   cmd(ARG_TOKEN_GEN_AND_SIM, "gsimulate", 0, 1, gen_and_sim, gen_and_sim,
@@ -14652,6 +15055,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_PAT_CANDIDATES, "patcand", 1, 1);
   arg(ARG_TOKEN_PAT_ROLLOUT, "patrollout", 1, 1);
   arg(ARG_TOKEN_PAT_ROLLOUT_CLASSES, "patrolloutclasses", 1, 1);
+  arg(ARG_TOKEN_WORDSMOG_PAT_EVALS, "smogpat", 1, 1);
   arg(ARG_TOKEN_P1_LEXICON, "l1", 1, 1);
   arg(ARG_TOKEN_P1_USE_WMP, "w1", 1, 1);
   arg(ARG_TOKEN_P1_USE_RIT, "rit1", 1, 1);
@@ -14662,6 +15066,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_P1_PAT_CANDIDATES, "patcand1", 1, 1);
   arg(ARG_TOKEN_P1_PAT_ROLLOUT, "patrollout1", 1, 1);
   arg(ARG_TOKEN_P1_PAT_ROLLOUT_CLASSES, "patrolloutclasses1", 1, 1);
+  arg(ARG_TOKEN_P1_WORDSMOG_PAT_EVALS, "smogpat1", 1, 1);
   arg(ARG_TOKEN_P1_MOVE_SORT_TYPE, "s1", 1, 1);
   arg(ARG_TOKEN_P1_MOVE_RECORD_TYPE, "r1", 1, 1);
   arg(ARG_TOKEN_P2_LEXICON, "l2", 1, 1);
@@ -14674,6 +15079,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_P2_PAT_CANDIDATES, "patcand2", 1, 1);
   arg(ARG_TOKEN_P2_PAT_ROLLOUT, "patrollout2", 1, 1);
   arg(ARG_TOKEN_P2_PAT_ROLLOUT_CLASSES, "patrolloutclasses2", 1, 1);
+  arg(ARG_TOKEN_P2_WORDSMOG_PAT_EVALS, "smogpat2", 1, 1);
   arg(ARG_TOKEN_P2_MOVE_SORT_TYPE, "s2", 1, 1);
   arg(ARG_TOKEN_P2_MOVE_RECORD_TYPE, "r2", 1, 1);
   arg(ARG_TOKEN_WIN_PCT, "winpct", 1, 1);
@@ -15069,6 +15475,7 @@ void config_add_settings_to_string_builder(const Config *config,
     case ARG_TOKEN_RACK:
     case ARG_TOKEN_RANDOM_RACK:
     case ARG_TOKEN_GEN:
+    case ARG_TOKEN_WORDSMOG_GRAPH:
     case ARG_TOKEN_SIM:
     case ARG_TOKEN_SNOPRUNE:
     case ARG_TOKEN_GEN_AND_SIM:
@@ -15160,6 +15567,7 @@ void config_add_settings_to_string_builder(const Config *config,
     case ARG_TOKEN_PAT_CANDIDATES:
     case ARG_TOKEN_PAT_ROLLOUT:
     case ARG_TOKEN_PAT_ROLLOUT_CLASSES:
+    case ARG_TOKEN_WORDSMOG_PAT_EVALS:
       // Set these values on a per-player basis
       break;
     case ARG_TOKEN_USE_MMAP_FOR_RIT:
@@ -15238,6 +15646,11 @@ void config_add_settings_to_string_builder(const Config *config,
       free(classes_str);
       break;
     }
+    case ARG_TOKEN_P1_WORDSMOG_PAT_EVALS:
+      config_add_int_setting_to_string_builder(
+          config, sb, arg_token,
+          players_data_get_wordsmog_pat_evals(config->players_data, 0));
+      break;
     case ARG_TOKEN_P1_MOVE_SORT_TYPE:
       string_builder_add_formatted_string(sb, " -%s ",
                                           config->pargs[arg_token]->name);
@@ -15322,6 +15735,11 @@ void config_add_settings_to_string_builder(const Config *config,
       free(classes_str);
       break;
     }
+    case ARG_TOKEN_P2_WORDSMOG_PAT_EVALS:
+      config_add_int_setting_to_string_builder(
+          config, sb, arg_token,
+          players_data_get_wordsmog_pat_evals(config->players_data, 1));
+      break;
     case ARG_TOKEN_P2_MOVE_SORT_TYPE:
       string_builder_add_formatted_string(sb, " -%s ",
                                           config->pargs[arg_token]->name);

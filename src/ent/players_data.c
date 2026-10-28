@@ -2,6 +2,7 @@
 
 #include "../def/move_defs.h"
 #include "../def/players_data_defs.h"
+#include "../def/wordsmog_defs.h"
 #include "../util/io_util.h"
 #include "../util/string_util.h"
 #include "klv.h"
@@ -40,6 +41,8 @@ struct PlayersData {
   // Whether the player's own move generation (static play and the candidate
   // list a sim starts from) leaves PAT out.
   bool pat_candidates_disabled[2];
+  // See players_data_set_wordsmog_pat_evals.
+  int wordsmog_pat_evals[2];
   // The same two settings for the rollouts of the player's sims.
   bool pat_rollout_disabled[2];
   uint32_t pat_rollout_disabled_classes_masks[2];
@@ -96,6 +99,16 @@ void players_data_set_pat_candidates_disabled(PlayersData *players_data,
 bool players_data_get_pat_candidates_disabled(const PlayersData *players_data,
                                               int player_index) {
   return players_data->pat_candidates_disabled[player_index];
+}
+
+void players_data_set_wordsmog_pat_evals(PlayersData *players_data,
+                                         int player_index, int evals) {
+  players_data->wordsmog_pat_evals[player_index] = evals;
+}
+
+int players_data_get_wordsmog_pat_evals(const PlayersData *players_data,
+                                        int player_index) {
+  return players_data->wordsmog_pat_evals[player_index];
 }
 
 void players_data_set_pat_rollout_disabled(PlayersData *players_data,
@@ -342,6 +355,8 @@ PlayersData *players_data_create(bool use_wmp) {
                                       DEFAULT_MOVE_RECORD_TYPE);
     players_data_set_pat_disabled_classes_mask(players_data, player_index, 0);
     players_data_set_pat_candidates_disabled(players_data, player_index, false);
+    players_data_set_wordsmog_pat_evals(players_data, player_index,
+                                        WORDSMOG_DEFAULT_PAT_EVALS);
     players_data_set_pat_rollout_disabled(players_data, player_index, false);
     players_data_set_pat_rollout_disabled_classes_mask(
         players_data, player_index,

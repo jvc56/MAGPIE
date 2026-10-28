@@ -37,6 +37,7 @@ struct Player {
   // rollouts (see player_set_pat_usage).
   bool pat_disabled;
   uint32_t pat_disabled_classes_mask;
+  int wordsmog_pat_evals;
 };
 
 void player_reset(Player *player) {
@@ -62,6 +63,8 @@ void player_update(const PlayersData *players_data, Player *player) {
       players_data_get_pat_candidates_disabled(players_data, player->index);
   player->pat_disabled_classes_mask =
       players_data_get_pat_disabled_classes_mask(players_data, player->index);
+  player->wordsmog_pat_evals =
+      players_data_get_wordsmog_pat_evals(players_data, player->index);
 }
 
 Player *player_create(const PlayersData *players_data,
@@ -93,6 +96,7 @@ Player *player_duplicate(const Player *player) {
   new_player->pat = player->pat;
   new_player->pat_disabled = player->pat_disabled;
   new_player->pat_disabled_classes_mask = player->pat_disabled_classes_mask;
+  new_player->wordsmog_pat_evals = player->wordsmog_pat_evals;
   return new_player;
 }
 
@@ -111,6 +115,7 @@ void player_copy(Player *dst, const Player *src) {
   dst->pat = src->pat;
   dst->pat_disabled = src->pat_disabled;
   dst->pat_disabled_classes_mask = src->pat_disabled_classes_mask;
+  dst->wordsmog_pat_evals = src->wordsmog_pat_evals;
 }
 
 void player_destroy(Player *player) {
@@ -162,6 +167,14 @@ uint32_t player_get_pat_disabled_classes_mask(const Player *player) {
 
 bool player_get_pat_disabled(const Player *player) {
   return player->pat_disabled;
+}
+
+int player_get_wordsmog_pat_evals(const Player *player) {
+  return player->wordsmog_pat_evals;
+}
+
+void player_set_wordsmog_pat_evals(Player *player, int evals) {
+  player->wordsmog_pat_evals = evals;
 }
 
 void player_set_score(Player *player, Equity score) { player->score = score; }

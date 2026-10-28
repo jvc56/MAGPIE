@@ -462,9 +462,10 @@ typedef struct Simmer {
 static void simmer_worker_set_rollout_pat(const SimmerWorker *simmer_worker,
                                           const SimArgs *sim_args) {
   for (int player_index = 0; player_index < 2; player_index++) {
-    player_set_pat_usage(game_get_player(simmer_worker->game, player_index),
-                         sim_args->pat_rollout_disabled,
+    Player *player = game_get_player(simmer_worker->game, player_index);
+    player_set_pat_usage(player, sim_args->pat_rollout_disabled,
                          sim_args->pat_rollout_disabled_classes_mask);
+    player_set_wordsmog_pat_evals(player, sim_args->wordsmog_pat_rollout_evals);
   }
 }
 

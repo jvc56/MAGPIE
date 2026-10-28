@@ -48,26 +48,52 @@ static int pat_run_through_rows(int alphabet_size) {
   return rows;
 }
 
+// The cell of key in the run-keyed tables, or -1 when it has none. In
+// anagram mode the tables are keyed by the key's letters in ascending order
+// (see pat_credit_multiset).
+static int pat_run_through_cell(const PATWeights *pat, int word_end,
+                                const MachineLetter *key, int key_len,
+                                int word_length) {
+  if (key_len < 1 || key_len > PAT_RUN_THROUGH_MAX_KEY ||
+      word_length >= PAT_MAX_THROUGH_LEN) {
+    return -1;
+  }
+  if (!pat->anagram) {
+    return pat_run_through_index(pat, word_end, key, key_len, word_length);
+  }
+  MachineLetter sorted[PAT_RUN_THROUGH_MAX_KEY];
+  for (int key_idx = 0; key_idx < key_len; key_idx++) {
+    const MachineLetter ml = key[key_idx];
+    int insert_idx = key_idx;
+    while (insert_idx > 0 && sorted[insert_idx - 1] > ml) {
+      sorted[insert_idx] = sorted[insert_idx - 1];
+      insert_idx--;
+    }
+    sorted[insert_idx] = ml;
+  }
+  return pat_run_through_index(pat, word_end, sorted, key_len, word_length);
+}
+
 int pat_get_run_through_count(const PATWeights *pat, int word_end,
                               const MachineLetter *key, int key_len,
                               int word_length) {
-  if (pat->run_through_count == NULL || key_len < 1 ||
-      key_len > PAT_RUN_THROUGH_MAX_KEY || word_length >= PAT_MAX_THROUGH_LEN) {
+  if (pat->run_through_count == NULL) {
     return 0;
   }
-  return pat->run_through_count[pat_run_through_index(pat, word_end, key,
-                                                      key_len, word_length)];
+  const int cell =
+      pat_run_through_cell(pat, word_end, key, key_len, word_length);
+  return cell < 0 ? 0 : pat->run_through_count[cell];
 }
 
 int pat_get_run_through_score(const PATWeights *pat, int word_end,
                               const MachineLetter *key, int key_len,
                               int word_length) {
-  if (pat->run_through_score == NULL || key_len < 1 ||
-      key_len > PAT_RUN_THROUGH_MAX_KEY || word_length >= PAT_MAX_THROUGH_LEN) {
+  if (pat->run_through_score == NULL) {
     return 0;
   }
-  return pat->run_through_score[pat_run_through_index(pat, word_end, key,
-                                                      key_len, word_length)];
+  const int cell =
+      pat_run_through_cell(pat, word_end, key, key_len, word_length);
+  return cell < 0 ? 0 : pat->run_through_score[cell];
 }
 
 // Accumulators for the through table: for each (end letter, word length),
@@ -149,18 +175,172 @@ static void pat_walk_words(const KWG *kwg, const LetterDistribution *ld,
   }
 }
 
-void pat_prepare_hook_flex(PATWeights *pat, const KWG *kwg,
-                           const LetterDistribution *ld) {
-  pat->prepared = true;
-  memset(pat->hook_flex, 0, sizeof(pat->hook_flex));
-  memset(pat->through_score, 0, sizeof(pat->through_score));
-  memset(pat->through_count, 0, sizeof(pat->through_count));
-  memset(pat->through_score_end, 0, sizeof(pat->through_score_end));
-  memset(pat->through_count_end, 0, sizeof(pat->through_count_end));
-  if (!kwg) {
+// A word's letters in ascending order, zero past its length so that equal
+// multisets compare equal byte for byte.
+typedef struct PATMultiset {
+  uint8_t length;
+  MachineLetter letters[PAT_MAX_THROUGH_LEN - 1];
+} PATMultiset;
+
+typedef struct PATMultisetList {
+  PATMultiset *items;
+  size_t count;
+  size_t capacity;
+} PATMultisetList;
+
+// Collects the letters of every word in the lexicon shorter than
+// PAT_MAX_THROUGH_LEN, sorted, walking it as pat_walk_words does.
+static void pat_collect_multisets(const KWG *kwg, uint32_t node_index,
+                                  MachineLetter *word, int length,
+                                  PATMultisetList *list) {
+  if (node_index == 0) {
     return;
   }
-  int counts[MAX_ALPHABET_SIZE] = {0};
+  for (uint32_t index = node_index;; index++) {
+    const uint32_t node = kwg_node(kwg, index);
+    word[length] = (MachineLetter)kwg_node_tile(node);
+    const int word_length = length + 1;
+    if (kwg_node_accepts(node) && word_length >= MINIMUM_WORD_LENGTH &&
+        word_length < PAT_MAX_THROUGH_LEN) {
+      if (list->count == list->capacity) {
+        list->capacity = list->capacity == 0 ? 4096 : list->capacity * 2;
+        list->items =
+            realloc_or_die(list->items, list->capacity * sizeof(PATMultiset));
+      }
+      PATMultiset *multiset = &list->items[list->count++];
+      memset(multiset, 0, sizeof(*multiset));
+      multiset->length = (uint8_t)word_length;
+      for (int letter_idx = 0; letter_idx < word_length; letter_idx++) {
+        const MachineLetter ml = word[letter_idx];
+        int insert_idx = letter_idx;
+        while (insert_idx > 0 && multiset->letters[insert_idx - 1] > ml) {
+          multiset->letters[insert_idx] = multiset->letters[insert_idx - 1];
+          insert_idx--;
+        }
+        multiset->letters[insert_idx] = ml;
+      }
+    }
+    if (word_length < PAT_MAX_THROUGH_LEN - 1) {
+      pat_collect_multisets(kwg, kwg_node_arc_index(node), word, word_length,
+                            list);
+    }
+    if (kwg_node_is_end(node)) {
+      break;
+    }
+  }
+}
+
+static int pat_compare_multisets(const void *a, const void *b) {
+  return memcmp(a, b, sizeof(PATMultiset));
+}
+
+// Credits the run-keyed accumulators with each sub-multiset of the word's
+// letters of up to PAT_RUN_THROUGH_MAX_KEY letters, in ascending order: the
+// distinct letters from first_idx on, each taken at most as often as the word
+// holds it.
+static void pat_credit_anagram_keys(const MachineLetter *distinct,
+                                    const int *multiplicities, int num_distinct,
+                                    int first_idx, MachineLetter *key,
+                                    int key_len, int key_score, int total_score,
+                                    int word_length,
+                                    const LetterDistribution *ld,
+                                    PATThroughStats *stats) {
+  if (key_len > 0) {
+    for (int word_end = 0; word_end <= 1; word_end++) {
+      const int index = pat_run_through_index(stats->pat, word_end, key,
+                                              key_len, word_length);
+      stats->run_count[index] += 1.0;
+      stats->run_score_sum[index] += total_score - key_score;
+    }
+  }
+  if (key_len == PAT_RUN_THROUGH_MAX_KEY) {
+    return;
+  }
+  for (int distinct_idx = first_idx; distinct_idx < num_distinct;
+       distinct_idx++) {
+    int used = 0;
+    for (int key_idx = 0; key_idx < key_len; key_idx++) {
+      used += key[key_idx] == distinct[distinct_idx];
+    }
+    if (used == multiplicities[distinct_idx]) {
+      continue;
+    }
+    key[key_len] = distinct[distinct_idx];
+    pat_credit_anagram_keys(
+        distinct, multiplicities, num_distinct, distinct_idx, key, key_len + 1,
+        key_score + equity_to_int(ld_get_score(ld, distinct[distinct_idx])),
+        total_score, word_length, ld, stats);
+  }
+}
+
+// Credits one word multiset in anagram mode. Any arrangement of it is a word,
+// so each of its letters can sit at either end, and a run's letters at
+// either end in any order: the through tables credit every distinct letter
+// at both ends, and the run tables every sub-multiset, keyed in ascending
+// order. A two-letter multiset makes a word in both orders.
+static void pat_credit_multiset(const PATMultiset *multiset,
+                                const LetterDistribution *ld,
+                                PATThroughStats *stats,
+                                int counts[MAX_ALPHABET_SIZE]) {
+  const int word_length = multiset->length;
+  int total_score = 0;
+  MachineLetter distinct[PAT_MAX_THROUGH_LEN] = {0};
+  int multiplicities[PAT_MAX_THROUGH_LEN] = {0};
+  int num_distinct = 0;
+  for (int letter_idx = 0; letter_idx < word_length; letter_idx++) {
+    const MachineLetter ml = multiset->letters[letter_idx];
+    total_score += equity_to_int(ld_get_score(ld, ml));
+    if (num_distinct > 0 && distinct[num_distinct - 1] == ml) {
+      multiplicities[num_distinct - 1]++;
+    } else {
+      distinct[num_distinct] = ml;
+      multiplicities[num_distinct] = 1;
+      num_distinct++;
+    }
+  }
+  if (word_length == 2) {
+    // As pat_count_two_letter_words counts each word's two letters: both
+    // orders when they differ, the one word when they are the same.
+    for (int letter_idx = 0; letter_idx < 2; letter_idx++) {
+      counts[multiset->letters[letter_idx]] += num_distinct;
+    }
+  }
+  for (int distinct_idx = 0; distinct_idx < num_distinct; distinct_idx++) {
+    const MachineLetter ml = distinct[distinct_idx];
+    for (int word_end = 0; word_end <= 1; word_end++) {
+      stats->count[word_end][ml][word_length] += 1.0;
+      stats->score_sum[word_end][ml][word_length] +=
+          total_score - equity_to_int(ld_get_score(ld, ml));
+    }
+  }
+  MachineLetter key[PAT_RUN_THROUGH_MAX_KEY];
+  pat_credit_anagram_keys(distinct, multiplicities, num_distinct, 0, key, 0, 0,
+                          total_score, word_length, ld, stats);
+}
+
+// The anagram mode's walk: the lexicon's distinct word multisets, each
+// credited once however many words spell it.
+static void pat_walk_multisets(const KWG *kwg, const LetterDistribution *ld,
+                               PATThroughStats *stats,
+                               int counts[MAX_ALPHABET_SIZE]) {
+  PATMultisetList list = {.items = NULL, .count = 0, .capacity = 0};
+  MachineLetter word[PAT_MAX_THROUGH_LEN];
+  pat_collect_multisets(kwg, kwg_get_dawg_root_node_index(kwg), word, 0, &list);
+  qsort(list.items, list.count, sizeof(PATMultiset), pat_compare_multisets);
+  for (size_t item_idx = 0; item_idx < list.count; item_idx++) {
+    if (item_idx > 0 && pat_compare_multisets(&list.items[item_idx - 1],
+                                              &list.items[item_idx]) == 0) {
+      continue;
+    }
+    pat_credit_multiset(&list.items[item_idx], ld, stats, counts);
+  }
+  free(list.items);
+}
+
+// Counts, for each letter, the two-letter words containing it.
+static void pat_count_two_letter_words(const KWG *kwg,
+                                       const LetterDistribution *ld,
+                                       int counts[MAX_ALPHABET_SIZE]) {
   const uint32_t dawg_root = kwg_get_dawg_root_node_index(kwg);
   const int ld_size = ld_get_size(ld);
   for (int first_ml = 1; first_ml < ld_size; first_ml++) {
@@ -179,13 +359,28 @@ void pat_prepare_hook_flex(PATWeights *pat, const KWG *kwg,
       }
     }
   }
-  for (int ml = 0; ml < MAX_ALPHABET_SIZE; ml++) {
-    if (counts[ml] > UINT8_MAX) {
-      counts[ml] = UINT8_MAX;
-    }
-    pat->hook_flex[ml] = (uint8_t)counts[ml];
-  }
+}
 
+void pat_prepare_hook_flex(PATWeights *pat, const KWG *kwg,
+                           const LetterDistribution *ld, bool anagram) {
+  const uint64_t kwg_hash = kwg != NULL ? kwg_get_hash(kwg) : 0;
+  if (kwg != NULL && pat->prepared && pat->anagram == anagram &&
+      pat->prepared_kwg_hash == kwg_hash && pat->prepared_ld == ld) {
+    return;
+  }
+  pat->prepared_kwg_hash = kwg_hash;
+  pat->prepared_ld = ld;
+  pat->prepared = true;
+  pat->anagram = anagram;
+  memset(pat->hook_flex, 0, sizeof(pat->hook_flex));
+  memset(pat->through_score, 0, sizeof(pat->through_score));
+  memset(pat->through_count, 0, sizeof(pat->through_count));
+  memset(pat->through_score_end, 0, sizeof(pat->through_score_end));
+  memset(pat->through_count_end, 0, sizeof(pat->through_count_end));
+  if (!kwg) {
+    return;
+  }
+  const int ld_size = ld_get_size(ld);
   PATThroughStats *stats = calloc_or_die(1, sizeof(PATThroughStats));
   pat->run_through_alphabet_size = ld_size;
   const size_t run_cells =
@@ -193,8 +388,20 @@ void pat_prepare_hook_flex(PATWeights *pat, const KWG *kwg,
   stats->run_count = calloc_or_die(run_cells, sizeof(double));
   stats->run_score_sum = calloc_or_die(run_cells, sizeof(double));
   stats->pat = pat;
-  MachineLetter word[PAT_MAX_THROUGH_LEN];
-  pat_walk_words(kwg, ld, dawg_root, word, 0, stats);
+  int counts[MAX_ALPHABET_SIZE] = {0};
+  if (anagram) {
+    pat_walk_multisets(kwg, ld, stats, counts);
+  } else {
+    pat_count_two_letter_words(kwg, ld, counts);
+    MachineLetter word[PAT_MAX_THROUGH_LEN];
+    pat_walk_words(kwg, ld, kwg_get_dawg_root_node_index(kwg), word, 0, stats);
+  }
+  for (int ml = 0; ml < MAX_ALPHABET_SIZE; ml++) {
+    if (counts[ml] > UINT8_MAX) {
+      counts[ml] = UINT8_MAX;
+    }
+    pat->hook_flex[ml] = (uint8_t)counts[ml];
+  }
   free(pat->run_through_count);
   free(pat->run_through_score);
   pat->run_through_count = calloc_or_die(run_cells, sizeof(uint8_t));

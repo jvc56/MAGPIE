@@ -58,6 +58,10 @@ typedef struct MoveGenArgs {
   // class the weights have, so one weights file can serve both a fast
   // rollout mode and a full mode. Ignored when disable_pat is set.
   uint32_t pat_disabled_classes_mask;
+  // In wordsmog with the PAT term, whether the WMP generator prices every play
+  // that could be the best, as the alpha generator does, whatever the
+  // player's limit (see player_get_wordsmog_pat_evals). Default false.
+  bool wordsmog_exact_pat;
   // MOVE_RECORD_BEST by equity only: the best moves earlier generations
   // found for the same rack (see best_move_carry.h). Each one still legal
   // here starts the generation as its best move, lanes whose remembered
@@ -178,6 +182,10 @@ bool generate_best_small_move_in_lanes(const MoveGenArgs *args,
                                        Equity incumbent_value);
 
 MoveGen *get_movegen(void);
+
+// Frees a MoveGen that was allocated with calloc_or_die, not one of the
+// per-thread pool's (get_movegen), which gen_destroy_cache frees.
+void generator_destroy(MoveGen *gen);
 
 void gen_load_position(MoveGen *gen, const MoveGenArgs *args);
 

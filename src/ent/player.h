@@ -31,6 +31,12 @@ const RackInfoTable *player_get_rack_info_table(const Player *player);
 const WordInfoTable *player_get_word_info_table(const Player *player);
 const PATWeights *player_get_pat(const Player *player);
 uint32_t player_get_pat_disabled_classes_mask(const Player *player);
+// How many plays a move generation of the player's prices with the PAT term in
+// wordsmog, 0 for no limit (see players_data_set_wordsmog_pat_evals).
+int player_get_wordsmog_pat_evals(const Player *player);
+// Sets it until the next player_update, as player_set_pat_usage does for a
+// sim's rollouts.
+void player_set_wordsmog_pat_evals(Player *player, int evals);
 // Whether this player's move generation leaves PAT out.
 bool player_get_pat_disabled(const Player *player);
 

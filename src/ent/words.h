@@ -5,6 +5,7 @@
 #include "board.h"
 #include "kwg.h"
 #include "move.h"
+#include "wmp.h"
 #include <stdint.h>
 
 typedef struct FormedWords FormedWords;
@@ -22,8 +23,9 @@ int formed_words_get_word_letter(const FormedWords *fw, int word_index,
                                  int letter_index);
 
 // populate the validity of the formed words passed in, under the variant's
-// rules for what counts as a word.
-void formed_words_populate_validities(const KWG *kwg, FormedWords *ws,
-                                      game_variant_t variant);
+// rules for what counts as a word. A wordsmog word is checked against the WMP
+// when wmp is non-NULL, and against the alpha KWG otherwise.
+void formed_words_populate_validities(const KWG *kwg, const WMP *wmp,
+                                      FormedWords *ws, game_variant_t variant);
 
 #endif

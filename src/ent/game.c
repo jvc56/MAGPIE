@@ -9,6 +9,7 @@
 #include "../util/io_util.h"
 #include "../util/string_util.h"
 #include "bag.h"
+#include "bit_rack.h"
 #include "board.h"
 #include "cross_set_cache.h"
 #include "kwg.h"
@@ -19,6 +20,7 @@
 #include "player.h"
 #include "players_data.h"
 #include "rack.h"
+#include "wmp.h"
 #include "word_info_table.h"
 #include <assert.h>
 #include <stdint.h>
@@ -296,6 +298,17 @@ get_word_info_table_for_cross_set(const Game *game, int cross_set_index) {
   return player_get_word_info_table(game_get_player(game, cross_set_index));
 }
 
+// The WMP for wordsmog cross sets parallel to get_kwg_for_cross_set. Returns
+// NULL, for the alpha KWG to answer instead, when no WMP is loaded or when an
+// override KWG (a reduced word list the WMP does not match) is in use.
+static inline const WMP *get_wmp_for_cross_set(const Game *game,
+                                               int cross_set_index) {
+  if (game->override_kwgs[0] != NULL) {
+    return NULL;
+  }
+  return player_get_wmp(game_get_player(game, cross_set_index));
+}
+
 // Computes and caches the word info table value-row pointer for the block of
 // tiles [block_left, block_right] on `row` (this orientation), keyed to the
 // block's leftmost square in the word direction. Move generation reads it with
@@ -355,11 +368,16 @@ static inline void game_gen_alpha_cross_set(const Game *game, int row, int col,
     score += traverse_backwards_for_score(board, ld, row, right_col);
   }
 
-  const KWG *kwg = get_kwg_for_cross_set(game, cross_set_index);
-
-  board_set_cross_set_with_blank(
-      board, row, col, dir, cross_set_index,
-      kwg_compute_alpha_cross_set(kwg, &cross_set_rack));
+  const WMP *wmp = get_wmp_for_cross_set(game, cross_set_index);
+  const uint64_t cross_set =
+      wmp != NULL
+          ? wmp_get_anagram_completions(
+                wmp, bit_rack_create_from_rack(ld, &cross_set_rack),
+                rack_get_total_letters(&cross_set_rack))
+          : kwg_compute_alpha_cross_set(
+                get_kwg_for_cross_set(game, cross_set_index), &cross_set_rack);
+  board_set_cross_set_with_blank(board, row, col, dir, cross_set_index,
+                                 cross_set);
   board_set_cross_score(board, row, col, dir, cross_set_index, score);
 }
 

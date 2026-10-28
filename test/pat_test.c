@@ -440,7 +440,7 @@ static void test_pat_signed_through(const char *data_dir) {
   const LetterDistribution *ld = game_get_ld(game);
   const KWG *kwg = player_get_kwg(game_get_player(game, 0));
   PATWeights *pat = pat_create_zeroed("signed_through");
-  pat_prepare_hook_flex(pat, kwg, ld);
+  pat_prepare_hook_flex(pat, kwg, ld, false);
   const MachineLetter j = ld_hl_to_ml(ld, "J");
   const MachineLetter y = ld_hl_to_ml(ld, "Y");
   for (int span = 4; span <= 8; span += 4) {
@@ -1469,7 +1469,7 @@ static void test_pat_opening_and_hook_flex(void) {
 
   PATWeights *pat = pat_create_zeroed("opening_test");
   pat_set_weight(pat, PAT_FEATURE_FLOAT_SCORE_START + 1, -500);
-  pat_prepare_hook_flex(pat, player_get_kwg(player), ld);
+  pat_prepare_hook_flex(pat, player_get_kwg(player), ld, false);
   const MachineLetter z_ml = ld_hl_to_ml(ld, "Z");
   const MachineLetter e_ml = ld_hl_to_ml(ld, "E");
   // Two-letter-word flexibility is real for common letters.
@@ -1558,7 +1558,7 @@ static void pat_path_parity_run(double utility_adjust) {
   for (int c = 0; c < 2; c++) {
     const Game *game = config_get_game(configs[c]);
     pat_prepare_hook_flex(pats[c], player_get_kwg(game_get_player(game, 0)),
-                          game_get_ld(game));
+                          game_get_ld(game), false);
     for (int player_index = 0; player_index < 2; player_index++) {
       player_update(config_get_players_data(configs[c]),
                     game_get_player(game, player_index));
@@ -1793,7 +1793,7 @@ static void test_pat_candidates_option(void) {
   load_and_exec_config_or_die(config, PAT_FLOATER_CGP_CMD);
   Game *game = config_get_game(config);
   pat_prepare_hook_flex(pat, player_get_kwg(game_get_player(game, 0)),
-                        game_get_ld(game));
+                        game_get_ld(game), false);
   rack_set_to_string(game_get_ld(game),
                      player_get_rack(game_get_player(game, 0)), "AEINRST");
   Player *player = game_get_player(game, 0);
@@ -1875,7 +1875,7 @@ static void test_pat_stage_scale(const char *data_dir) {
     pat_set_lexicon_floaters(pats[i], true);
     pat_set_signed_through(pats[i], true);
     pat_prepare_hook_flex(pats[i], player_get_kwg(game_get_player(game, 0)),
-                          game_get_ld(game));
+                          game_get_ld(game), false);
   }
   pat_set_stage_scale(scaled, PAT_STAGE_EARLY, 0.5);
   pat_set_stage_scale(scaled, PAT_STAGE_MID, 1.0);
@@ -2044,7 +2044,7 @@ static void test_pat_opening_adjustments_with_wmp(const char *data_dir,
     pat_set_lexicon_floaters(pats[i], true);
     pat_set_signed_through(pats[i], true);
     pat_prepare_hook_flex(pats[i], player_get_kwg(game_get_player(game, 0)),
-                          game_get_ld(game));
+                          game_get_ld(game), false);
   }
   static const Equity table[RACK_SIZE + 1] = {0,     0,     -1000, -2500,
                                               -3170, -2630, -1860, 0};
@@ -2361,7 +2361,7 @@ static int pat_wmp_table_parity_run(const char *lexicon, const char *tables,
         "cgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 / 0/0 0");
     const Game *game = config_get_game(configs[config_idx]);
     pat_prepare_hook_flex(pat, player_get_kwg(game_get_player(game, 0)),
-                          game_get_ld(game));
+                          game_get_ld(game), false);
     for (int player_index = 0; player_index < 2; player_index++) {
       player_update(players_data, game_get_player(game, player_index));
     }
