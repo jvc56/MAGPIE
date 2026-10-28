@@ -4,6 +4,7 @@
 #define GAME_VARIANT_UNKNOWN_NAME "unknown"
 #define GAME_VARIANT_CLASSIC_NAME "classic"
 #define GAME_VARIANT_WORDSMOG_NAME "wordsmog"
+#define GAME_VARIANT_WOADWAGE_NAME "woadwage"
 
 enum {
   MAX_SEARCH_DEPTH = 25,
@@ -15,6 +16,9 @@ typedef enum {
   GAME_VARIANT_UNKNOWN,
   GAME_VARIANT_CLASSIC,
   GAME_VARIANT_WORDSMOG,
+  // Classic play, where every word a play forms may also be two words of the
+  // lexicon run together.
+  GAME_VARIANT_WOADWAGE,
 } game_variant_t;
 
 typedef enum {
