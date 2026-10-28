@@ -82,6 +82,7 @@
 #include "get_gcg.h"
 #include "inference.h"
 #include "move_gen.h"
+#include "move_gen_base.h"
 #include "peg.h"
 #include "play_chooser.h"
 #include "rack_draw.h"

@@ -7,6 +7,7 @@
 #include "../def/peg_defs.h"
 #include "../util/io_util.h"
 #include "move_gen.h"
+#include "move_gen_base.h"
 #include <stdatomic.h>
 #include <stdbool.h>
 #include <stdio.h>
