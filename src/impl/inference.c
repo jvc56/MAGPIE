@@ -32,6 +32,7 @@
 #include "../util/string_util.h"
 #include "gameplay.h"
 #include "move_gen.h"
+#include "move_gen_base.h"
 #include "rack_draw.h"
 #include <assert.h>
 #include <stdatomic.h>

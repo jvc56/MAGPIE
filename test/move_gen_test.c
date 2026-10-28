@@ -30,6 +30,7 @@
 #include "../src/impl/gameplay.h"
 #include "../src/impl/kwg_maker.h"
 #include "../src/impl/move_gen.h"
+#include "../src/impl/move_gen_base.h"
 #include "../src/impl/wmp_maker.h"
 #include "../src/impl/word_info_table_maker.h"
 #include "../src/util/io_util.h"

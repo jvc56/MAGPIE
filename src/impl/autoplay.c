@@ -48,6 +48,7 @@
 #include "autoplay_solvers.h"
 #include "gameplay.h"
 #include "move_gen.h"
+#include "move_gen_base.h"
 #include "pat_gen.h"
 #include "play_chooser.h"
 #include "rack_list.h"

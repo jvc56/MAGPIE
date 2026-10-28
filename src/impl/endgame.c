@@ -44,6 +44,7 @@
 #include "gameplay.h"
 #include "kwg_maker.h"
 #include "move_gen.h"
+#include "move_gen_base.h"
 #include "path_move_lists.h"
 #include "word_prune.h"
 #include <assert.h>

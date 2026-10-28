@@ -30,6 +30,7 @@
 #include "endgame.h"
 #include "gameplay.h"
 #include "move_gen.h"
+#include "move_gen_base.h"
 #include "peg.h"
 #include "simmer.h"
 #include <math.h>
