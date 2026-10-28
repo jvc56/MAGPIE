@@ -9,6 +9,7 @@
 #include "../ent/rack.h"
 #include "../util/io_util.h"
 #include "board.h"
+#include <assert.h>
 #include <math.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -32,7 +33,34 @@ typedef struct Move {
   uint8_t tiles_length;
   uint8_t dir;
   MachineLetter tiles[MOVE_MAX_TILES];
+#ifdef IF_ONLY
+  // If Only: the index in tiles of the tile played upside down as a fake
+  // blank, or MOVE_NO_FAKE_BLANK, and the real tile under it. In tiles, the
+  // fake blank is the declared letter, blanked, as a blank is.
+  uint8_t fake_blank_index;
+  MachineLetter fake_blank_tile;
+  // If Only: the square of the fake blank swapped off the board before the
+  // move, or MOVE_NO_SWAP as the row; the letter the rack gives up for it,
+  // the fake blank's declared one; and the real tile the rack takes back.
+  uint8_t swap_row;
+  uint8_t swap_col;
+  MachineLetter swap_letter;
+  MachineLetter swap_tile;
+#endif
 } Move;
+
+#ifdef IF_ONLY
+enum {
+  MOVE_NO_FAKE_BLANK = 0xFF,
+  // A placement in an If Only game without a fake blank, whose blanks are
+  // all real: its notation still names them, as "/?".
+  MOVE_REAL_BLANKS_ONLY = 0xFE,
+  MOVE_NO_SWAP = 0xFF,
+  // A placement with a fake blank must score at least this, bingo bonus
+  // included.
+  IF_ONLY_FAKE_BLANK_MIN_SCORE = 50,
+};
+#endif
 
 // SmallMove is a compact 128-bit move representation used by the endgame
 // solver. It encodes up to 7 tiles in 64 bits and each start coordinate in 5
@@ -182,6 +210,18 @@ static inline void move_set_equity(Move *move, Equity equity) {
   move->equity = equity;
 }
 
+#ifdef IF_ONLY
+// No fake blank and no swap, as in every move outside If Only.
+static inline void move_clear_if_only(Move *move) {
+  move->fake_blank_index = MOVE_NO_FAKE_BLANK;
+  move->fake_blank_tile = 0;
+  move->swap_row = MOVE_NO_SWAP;
+  move->swap_col = 0;
+  move->swap_letter = 0;
+  move->swap_tile = 0;
+}
+#endif
+
 static inline void move_set_all_except_equity(Move *move,
                                               const MachineLetter *strip,
                                               int leftstrip, int rightstrip,
@@ -194,6 +234,9 @@ static inline void move_set_all_except_equity(Move *move,
   move->tiles_played = tiles_played;
   move->dir = dir;
   move->move_type = move_type;
+#ifdef IF_ONLY
+  move_clear_if_only(move);
+#endif
   if (move_type == GAME_EVENT_EXCHANGE) {
     move->tiles_length = move->tiles_played;
   } else {
@@ -215,6 +258,114 @@ static inline void move_set_all(Move *move, MachineLetter strip[],
                              row_start, col_start, tiles_played, dir,
                              move_type);
   move->equity = score + leave_value;
+}
+
+#ifdef IF_ONLY
+// The index in the move's tiles of its fake blank, or MOVE_NO_FAKE_BLANK or
+// MOVE_REAL_BLANKS_ONLY.
+static inline int move_get_fake_blank_index(const Move *move) {
+  return move->fake_blank_index;
+}
+
+static inline bool move_has_fake_blank(const Move *move) {
+  return move->fake_blank_index < MOVE_REAL_BLANKS_ONLY;
+}
+
+// Whether the move is a placement in an If Only game, whose notation names
+// the source of each blank it places.
+static inline bool move_is_if_only_placement(const Move *move) {
+  return move->fake_blank_index != MOVE_NO_FAKE_BLANK;
+}
+
+// Makes a placement without a fake blank one in an If Only game.
+static inline void move_set_if_only_placement(Move *move) {
+  assert(move->move_type == GAME_EVENT_TILE_PLACEMENT_MOVE);
+  if (move->fake_blank_index == MOVE_NO_FAKE_BLANK) {
+    move->fake_blank_index = MOVE_REAL_BLANKS_ONLY;
+  }
+}
+
+// The real tile played upside down as the move's fake blank.
+static inline MachineLetter move_get_fake_blank_tile(const Move *move) {
+  assert(move_has_fake_blank(move));
+  return move->fake_blank_tile;
+}
+
+// Makes the move's tile at index, a blanked letter, a fake blank over
+// real_tile.
+static inline void move_set_fake_blank(Move *move, int index,
+                                       MachineLetter real_tile) {
+  assert(index >= 0 && index < move->tiles_length);
+  assert(get_is_blanked(move->tiles[index]));
+  move->fake_blank_index = (uint8_t)index;
+  move->fake_blank_tile = real_tile;
+}
+
+static inline bool move_has_swap(const Move *move) {
+  return move->swap_row != MOVE_NO_SWAP;
+}
+
+static inline int move_get_swap_row(const Move *move) {
+  assert(move_has_swap(move));
+  return move->swap_row;
+}
+
+static inline int move_get_swap_col(const Move *move) {
+  assert(move_has_swap(move));
+  return move->swap_col;
+}
+
+// The letter the rack gives up in the move's swap.
+static inline MachineLetter move_get_swap_letter(const Move *move) {
+  assert(move_has_swap(move));
+  return move->swap_letter;
+}
+
+// The real tile the rack takes back in the move's swap.
+static inline MachineLetter move_get_swap_tile(const Move *move) {
+  assert(move_has_swap(move));
+  return move->swap_tile;
+}
+
+// The move first swaps the fake blank at (row, col), whose declared letter is
+// letter, off the board, and the rack takes back tile, the real tile under it.
+static inline void move_set_swap(Move *move, int row, int col,
+                                 MachineLetter letter, MachineLetter tile) {
+  move->swap_row = (uint8_t)row;
+  move->swap_col = (uint8_t)col;
+  move->swap_letter = letter;
+  move->swap_tile = tile;
+}
+
+// Whether the move plays a fake blank but scores too little to. Validation
+// accepts such a play when phonies are allowed, and it comes off like one.
+static inline bool move_is_if_only_short_flip(const Move *move) {
+  return move->move_type == GAME_EVENT_TILE_PLACEMENT_MOVE &&
+         move_has_fake_blank(move) &&
+         move->score < int_to_equity(IF_ONLY_FAKE_BLANK_MIN_SCORE);
+}
+
+// Makes the move's swap, if it has one, on the rack it starts from.
+static inline void move_apply_swap_to_rack(const Move *move, Rack *rack) {
+  if (!move_has_swap(move)) {
+    return;
+  }
+  rack_take_letter(rack, move->swap_letter);
+  rack_add_letter(rack, move->swap_tile);
+}
+#endif
+
+// The tile from the rack that the tile placement's tile at index takes: the
+// blank for a blank and, under If Only, the real tile for a fake blank.
+static inline MachineLetter move_get_rack_tile(const Move *move, int index) {
+  const MachineLetter tile = move->tiles[index];
+#ifdef IF_ONLY
+  if (move->move_type == GAME_EVENT_TILE_PLACEMENT_MOVE &&
+      move->fake_blank_index == index) {
+    return move->fake_blank_tile;
+  }
+#endif
+  return get_is_blanked(tile) ? BLANK_MACHINE_LETTER : tile;
 }
 
 static inline void move_copy(Move *dest_move, const Move *src_move) {
@@ -317,6 +468,27 @@ static inline void small_move_destroy(SmallMove *move) {
   free(move);
 }
 
+#ifdef IF_ONLY
+// If Only: orders two moves that differ only in their swap or fake blank, as
+// compare_moves orders moves. Returns -1 for moves that don't differ in them.
+static inline int compare_moves_if_only(const Move *move_1,
+                                        const Move *move_2) {
+  if (move_1->swap_row != move_2->swap_row) {
+    return move_1->swap_row < move_2->swap_row;
+  }
+  if (move_1->swap_col != move_2->swap_col) {
+    return move_1->swap_col < move_2->swap_col;
+  }
+  if (move_1->fake_blank_index != move_2->fake_blank_index) {
+    return move_1->fake_blank_index < move_2->fake_blank_index;
+  }
+  if (move_1->fake_blank_tile != move_2->fake_blank_tile) {
+    return move_1->fake_blank_tile < move_2->fake_blank_tile;
+  }
+  return -1;
+}
+#endif
+
 // Returns 1 if move_1 is "better" than move_2
 // Returns 0 if move_2 is "better" than move_1
 // Returns -1 if the moves are equivalent
@@ -354,6 +526,12 @@ static inline int compare_moves(const Move *move_1, const Move *move_2,
       return move_1->tiles[i] < move_2->tiles[i];
     }
   }
+#ifdef IF_ONLY
+  const int if_only_order = compare_moves_if_only(move_1, move_2);
+  if (if_only_order != -1) {
+    return if_only_order;
+  }
+#endif
   if (!allow_duplicates) {
     log_fatal("duplicate move type '%d' in move list detected",
               move_1->move_type);
@@ -397,6 +575,12 @@ static inline int compare_moves_without_equity(const Move *move_1,
       return move_1->tiles[i] < move_2->tiles[i];
     }
   }
+#ifdef IF_ONLY
+  const int if_only_order = compare_moves_if_only(move_1, move_2);
+  if (if_only_order != -1) {
+    return if_only_order;
+  }
+#endif
   if (!allow_duplicates) {
     log_fatal("duplicate move in move list detected: %d", move_1->move_type);
   }
@@ -475,6 +659,13 @@ static inline uint64_t move_get_similarity_key(const Move *m,
     if (get_is_blanked(ml)) {
       ml = BLANK_MACHINE_LETTER;
     }
+#ifdef IF_ONLY
+    // A fake blank spends the real tile played upside down.
+    if (move_get_type(m) == GAME_EVENT_TILE_PLACEMENT_MOVE &&
+        m->fake_blank_index == i) {
+      ml = m->fake_blank_tile;
+    }
+#endif
     rack_add_letter(&move_tiles_played, ml);
   }
   const int rack_dist_size = rack_get_dist_size(&move_tiles_played);
@@ -489,6 +680,12 @@ static inline uint64_t move_get_similarity_key(const Move *m,
       }
     }
   }
+#ifdef IF_ONLY
+  // A move with a swap is never similar to one with another swap or none.
+  move_key_set_field(&key, &shift, m->swap_row != MOVE_NO_SWAP, 1);
+  move_key_set_field(&key, &shift, m->swap_row, BITS_PER_BOARD_DIM);
+  move_key_set_field(&key, &shift, m->swap_col, BITS_PER_BOARD_DIM);
+#endif
   move_key_set_field(&key, &shift, (uint64_t)m->score, 64 - shift);
   return key;
 }
@@ -930,6 +1127,9 @@ static inline void small_move_to_move(Move *move, const SmallMove *sm,
     midx++;
   }
   move->move_type = GAME_EVENT_TILE_PLACEMENT_MOVE;
+#ifdef IF_ONLY
+  move_clear_if_only(move);
+#endif
   move->tiles_length = midx;
   move->tiles_played = tidx;
   move->score = int_to_equity(small_move_get_score(sm));

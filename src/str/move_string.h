@@ -8,6 +8,10 @@
 #include "../util/string_util.h"
 #include <stddef.h>
 
+#ifdef IF_ONLY
+void string_builder_add_if_only_swap(StringBuilder *sb, const Move *move,
+                                     bool lowercase);
+#endif
 void string_builder_add_move_description(StringBuilder *move_string_builder,
                                          const Move *move,
                                          const LetterDistribution *ld);

@@ -2121,9 +2121,17 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       examples[0] = "classic";
       examples[1] = "wordsmog";
       examples[2] = "woadwage";
+#ifdef IF_ONLY
+      text = "Specifies the game variant: classic; wordsmog, where a word "
+             "is played as any anagram of a word; woadwage, where a word "
+             "may also be two words run together; ifonly, classic with "
+             "swaps and fake blanks; or lonify, wordsmog with swaps and fake "
+             "blanks.";
+#else
       text = "Specifies the game variant: classic; wordsmog, where a word "
              "is played as any anagram of a word; or woadwage, where a word "
              "may also be two words run together.";
+#endif
       break;
     case ARG_TOKEN_LETTER_DISTRIBUTION:
       usages[0] = "<letter_distribution>";
@@ -3597,6 +3605,21 @@ void config_infer(const Config *config, bool use_game_history, int target_index,
                                                      true);
 }
 
+#ifdef IF_ONLY
+// If Only: the endgame, PEG and inference solvers don't know its swaps and
+// fake blanks, so they refuse its games. Returns true after refusing.
+static bool config_refuse_if_only(const Config *config, const char *command,
+                                  ErrorStack *error_stack) {
+  if (!game_variant_is_if_only(game_get_variant(config->game))) {
+    return false;
+  }
+  error_stack_push(
+      error_stack, ERROR_STATUS_IF_ONLY_UNSUPPORTED_COMMAND,
+      get_formatted_string("%s does not support If Only games", command));
+  return true;
+}
+#endif
+
 void impl_infer(Config *config, ErrorStack *error_stack) {
   if (!config_has_game_data(config)) {
     error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
@@ -3605,6 +3628,11 @@ void impl_infer(Config *config, ErrorStack *error_stack) {
   }
 
   config_init_game(config);
+#ifdef IF_ONLY
+  if (config_refuse_if_only(config, "infer", error_stack)) {
+    return;
+  }
+#endif
   const LetterDistribution *ld = game_get_ld(config->game);
   const int ld_size = ld_get_size(game_get_ld(config->game));
   Rack target_played_tiles;
@@ -4337,6 +4365,11 @@ static void impl_endgame_with_pos_args(Config *config, const char *move_text,
     return;
   }
   config_init_game(config);
+#ifdef IF_ONLY
+  if (config_refuse_if_only(config, "endgame", error_stack)) {
+    return;
+  }
+#endif
   // A bingo scored below an entry is part of its value. The bonus is set by
   // -bb and again by every contribute task, so it is checked here, before a
   // solve reads the table, rather than wherever it is set.
@@ -4984,6 +5017,11 @@ void impl_peg(Config *config, ErrorStack *error_stack) {
     return;
   }
   config_init_game(config);
+#ifdef IF_ONLY
+  if (config_refuse_if_only(config, "peg", error_stack)) {
+    return;
+  }
+#endif
   config_peg(config, error_stack);
 }
 
@@ -6667,6 +6705,18 @@ void parse_commit(Config *config, StringBuilder *move_string_builder,
                                  game_get_board(config->game), config->ld);
     game_event_type = move_get_type(&move);
     rack_to_draw_before_pass_out_game_end_str = commit_pos_arg_2;
+#ifdef IF_ONLY
+  } else if (commit_pos_arg_1[0] == '@' && !commit_pos_arg_2) {
+    // If Only: a swap and a pass, which impl_commit joins into one argument.
+    string_builder_add_string(move_string_builder, commit_pos_arg_1);
+    *vms = validated_moves_create(config->game, player_on_turn_index,
+                                  commit_pos_arg_1, true, true, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+    move_copy(&move, validated_moves_get_move(*vms, 0));
+    game_event_type = move_get_type(&move);
+#endif
   } else {
     // Commit UCGI move
     if (!commit_pos_arg_2) {
@@ -6856,6 +6906,19 @@ char *impl_commit(Config *config, ErrorStack *error_stack) {
       config_get_parg_value(config, ARG_TOKEN_COMMIT, 1);
   const char *commit_pos_arg_3 =
       config_get_parg_value(config, ARG_TOKEN_COMMIT, 2);
+#ifdef IF_ONLY
+  // If Only: a move with a swap, "@H8 8D RETAINS", joins the swap to the
+  // argument after it, so the rest are where they are for a move without one.
+  if (commit_pos_arg_1 && commit_pos_arg_1[0] == '@' && commit_pos_arg_2) {
+    char *joined =
+        get_formatted_string("%s %s", commit_pos_arg_1, commit_pos_arg_2);
+    char *result = impl_commit_with_pos_args(
+        config, error_stack, joined, commit_pos_arg_3,
+        config_get_parg_value(config, ARG_TOKEN_COMMIT, 3), true);
+    free(joined);
+    return result;
+  }
+#endif
   return impl_commit_with_pos_args(config, error_stack, commit_pos_arg_1,
                                    commit_pos_arg_2, commit_pos_arg_3, true);
 }
@@ -14593,7 +14656,12 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   cmd(ARG_TOKEN_NEW_GAME, "newgame", 0, 1, new_game, generic, false);
   cmd(ARG_TOKEN_EXPORT, "export", 0, 1, export, generic, true);
   cmd(ARG_TOKEN_CNOTE, "cnote", 1, 1, cnote, generic, false);
+#ifdef IF_ONLY
+  // If Only: a fourth argument for a move with a swap.
+  cmd(ARG_TOKEN_COMMIT, "commit", 1, 4, commit, generic, true);
+#else
   cmd(ARG_TOKEN_COMMIT, "commit", 1, 3, commit, generic, true);
+#endif
   cmd(ARG_TOKEN_TOP_COMMIT, "tcommit", 0, 1, top_commit, generic, true);
   cmd(ARG_TOKEN_CHALLENGE, "challenge", 0, 1, challenge, generic, false);
   cmd(ARG_TOKEN_UNCHALLENGE, "unchallenge", 0, 1, unchallenge, generic, false);

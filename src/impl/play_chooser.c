@@ -853,14 +853,10 @@ static void play_chooser_add_played_letters_to_rack(const Move *move,
                                                     Rack *rack) {
   const int tiles_length = move_get_tiles_length(move);
   for (int tile_idx = 0; tile_idx < tiles_length; tile_idx++) {
-    MachineLetter ml = move_get_tile(move, tile_idx);
-    if (ml == PLAYED_THROUGH_MARKER) {
+    if (move_get_tile(move, tile_idx) == PLAYED_THROUGH_MARKER) {
       continue;
     }
-    if (get_is_blanked(ml)) {
-      ml = BLANK_MACHINE_LETTER;
-    }
-    rack_add_letter(rack, ml);
+    rack_add_letter(rack, move_get_rack_tile(move, tile_idx));
   }
 }
 
@@ -1298,7 +1294,7 @@ void play_chooser_decide_challenge(PlayChooser *play_chooser,
       formed_words_create(game_get_board(keep_game), opp_move);
   formed_words_populate_validities(
       player_get_kwg(game_get_player(keep_game, chooser_index)), formed_words,
-      game_get_variant(keep_game));
+      game_variant_word_rules(game_get_variant(keep_game)));
   const int num_words = formed_words_get_num_words(formed_words);
   bool any_word_invalid = false;
   for (int word_idx = 0; word_idx < num_words; word_idx++) {
@@ -1307,6 +1303,12 @@ void play_chooser_decide_challenge(PlayChooser *play_chooser,
       break;
     }
   }
+#ifdef IF_ONLY
+  // A fake blank in a play scoring too little comes off like a phony.
+  if (move_is_if_only_short_flip(opp_move)) {
+    any_word_invalid = true;
+  }
+#endif
   formed_words_destroy(formed_words);
   if (!any_word_invalid) {
     game_destroy(keep_game);
@@ -1404,7 +1406,7 @@ void play_chooser_challenge_off(Game *game, const Move *challenged_move) {
   // After the challenged move was played, the turn passed to the
   // challenger; the offender is the player not on turn.
   const int offender_index = 1 - game_get_player_on_turn_index(game);
-  return_phony_letters(game);
+  return_phony_letters(game, challenged_move);
   Rack *known_rack =
       player_get_known_rack_from_phonies(game_get_player(game, offender_index));
   if (bag_get_letters(game_get_bag(game)) == 0) {

@@ -18,6 +18,9 @@
 #include "../ent/rack.h"
 #include "../str/game_string.h"
 #include "../str/rack_string.h"
+#ifdef IF_ONLY
+#include "../str/letter_distribution_string.h"
+#endif
 #include "../util/io_util.h"
 #include "../util/string_util.h"
 #include "rack_draw.h"
@@ -128,9 +131,86 @@ void parse_cgp_board_row(const Game *game, const char *cgp_board_row,
   }
 }
 
+#ifdef IF_ONLY
+// If Only: applies the board's blank tail, the text after the slash that
+// follows its last row: an entry for each blank on the board, left to right
+// and top down, "?" for a real blank or the real tile under a fake one. The
+// bag gives up that tile, not a blank. Only an If Only game has one.
+static void parse_cgp_if_only_blanks(const Game *game, const char *blank_tail,
+                                     ErrorStack *error_stack) {
+  const LetterDistribution *ld = game_get_ld(game);
+  Board *board = game_get_board(game);
+  Bag *bag = game_get_bag(game);
+  const size_t entries_size = string_length(blank_tail) + 1;
+  MachineLetter *entries = malloc_or_die(sizeof(MachineLetter) * entries_size);
+  const int number_of_entries =
+      ld_str_to_mls(ld, blank_tail, false, entries, entries_size);
+  int entry_idx = 0;
+  bool valid = number_of_entries > 0;
+  for (int row = 0; row < BOARD_DIM && valid; row++) {
+    for (int col = 0; col < BOARD_DIM && valid; col++) {
+      const MachineLetter ml = board_get_letter(board, row, col);
+      if (ml == ALPHABET_EMPTY_SQUARE_MARKER || !get_is_blanked(ml)) {
+        continue;
+      }
+      if (entry_idx >= number_of_entries) {
+        valid = false;
+        break;
+      }
+      const MachineLetter entry = entries[entry_idx++];
+      if (entry == BLANK_MACHINE_LETTER) {
+        continue;
+      }
+      if (get_is_blanked(entry)) {
+        valid = false;
+        break;
+      }
+      bag_add_letter(bag, BLANK_MACHINE_LETTER, 0);
+      if (!bag_draw_letter(bag, entry, 0)) {
+        error_stack_push(
+            error_stack, ERROR_STATUS_CGP_PARSE_BOARD_LETTERS_NOT_IN_BAG,
+            get_formatted_string("cgp contains more fake blank tiles than are "
+                                 "available in the distribution: %s",
+                                 blank_tail));
+        free(entries);
+        return;
+      }
+      board_set_fake_blank(board, row, col, entry);
+    }
+  }
+  free(entries);
+  if (!valid || entry_idx != number_of_entries) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_CGP_PARSE_IF_ONLY_BLANKS,
+        get_formatted_string("the cgp blank tail '%s' needs an uppercase tile "
+                             "or ? for each blank on the board",
+                             blank_tail));
+  }
+}
+#endif
+
 void parse_cgp_board(const Game *game, const char *cgp_board,
                      ErrorStack *error_stack) {
   StringSplitter *board_rows = split_string(cgp_board, '/', true);
+
+#ifdef IF_ONLY
+  if (game_variant_is_if_only(game_get_variant(game)) &&
+      string_splitter_get_number_of_items(board_rows) == BOARD_DIM + 1) {
+    for (int i = 0; i < BOARD_DIM; i++) {
+      parse_cgp_board_row(game, string_splitter_get_item(board_rows, i), i,
+                          error_stack);
+      if (!error_stack_is_empty(error_stack)) {
+        break;
+      }
+    }
+    if (error_stack_is_empty(error_stack)) {
+      parse_cgp_if_only_blanks(
+          game, string_splitter_get_item(board_rows, BOARD_DIM), error_stack);
+    }
+    string_splitter_destroy(board_rows);
+    return;
+  }
+#endif
 
   if (string_splitter_get_number_of_items(board_rows) != BOARD_DIM) {
     error_stack_push(
@@ -340,6 +420,36 @@ void string_builder_add_cgp(StringBuilder *cgp_builder, const Game *game,
       string_builder_add_char(cgp_builder, '/');
     }
   }
+
+#ifdef IF_ONLY
+  // If Only: a board with a fake blank gets a blank tail, an entry for each
+  // blank, left to right and top down: "?" for a real blank, or the real tile.
+  bool has_fake_blank = false;
+  for (int row = 0; row < BOARD_DIM && !has_fake_blank; row++) {
+    for (int col = 0; col < BOARD_DIM; col++) {
+      if (board_is_fake_blank(board, row, col)) {
+        has_fake_blank = true;
+        break;
+      }
+    }
+  }
+  if (has_fake_blank) {
+    string_builder_add_char(cgp_builder, '/');
+    for (int row = 0; row < BOARD_DIM; row++) {
+      for (int col = 0; col < BOARD_DIM; col++) {
+        const MachineLetter ml = board_get_letter(board, row, col);
+        if (ml == ALPHABET_EMPTY_SQUARE_MARKER || !get_is_blanked(ml)) {
+          continue;
+        }
+        string_builder_add_user_visible_letter(
+            cgp_builder, ld,
+            board_is_fake_blank(board, row, col)
+                ? board_get_fake_blank_tile(board, row, col)
+                : BLANK_MACHINE_LETTER);
+      }
+    }
+  }
+#endif
 
   string_builder_add_char(cgp_builder, ' ');
 

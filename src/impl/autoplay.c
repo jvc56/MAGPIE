@@ -996,13 +996,8 @@ const Move *game_runner_get_top_simming_move(AutoplayWorker *autoplay_worker,
       for (int i = 0; i < move_tiles_length; i++) {
         if (move_get_tile(&game_runner->previous_move, i) !=
             PLAYED_THROUGH_MARKER) {
-          if (get_is_blanked(move_get_tile(&game_runner->previous_move, i))) {
-            rack_add_letter(&autoplay_worker->target_played_tiles,
-                            BLANK_MACHINE_LETTER);
-          } else {
-            rack_add_letter(&autoplay_worker->target_played_tiles,
-                            move_get_tile(&game_runner->previous_move, i));
-          }
+          rack_add_letter(&autoplay_worker->target_played_tiles,
+                          move_get_rack_tile(&game_runner->previous_move, i));
         }
       }
     }

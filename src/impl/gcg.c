@@ -27,6 +27,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef IF_ONLY
+#include <ctype.h>
+#endif
 
 #define INTERNAL_DEFAULT_BOARD_LAYOUT_NAME "standard15"
 #define INTERNAL_SUPER_BOARD_LAYOUT_NAME "standard21"
@@ -55,6 +58,10 @@ struct GCGParser {
   // Owned by the caller
   GameHistory *game_history;
   const LetterDistribution *ld;
+#ifdef IF_ONLY
+  // If Only: the swap, "@H8", of the event line being parsed, if it has one.
+  const char *if_only_swap;
+#endif
 };
 
 #define GCG_DESCRIPTION_CREATION_TEXT "Created with MAGPIE"
@@ -156,6 +163,9 @@ GCGParser *gcg_parser_create(const char *gcg_string, GameHistory *game_history,
   GCGParser *gcg_parser = malloc_or_die(sizeof(GCGParser));
   gcg_parser->game_history = game_history;
   gcg_parser->ld = NULL;
+#ifdef IF_ONLY
+  gcg_parser->if_only_swap = NULL;
+#endif
   gcg_parser->note_builder = string_builder_create();
   memset(gcg_parser->gcg_token_count, 0, sizeof(gcg_parser->gcg_token_count));
   gcg_parser->player_is_reset[0] = false;
@@ -438,8 +448,64 @@ char *get_external_board_layout_name(const char *board_layout_name) {
 }
 
 // Returns true if processing should continue
+#ifdef IF_ONLY
+// If Only: for an event line whose word after the rack is a swap, as in
+// ">jo: ABCDEFS @J8 9C QAB +30 94", returns the line without that word and
+// sets *swap to it, or returns NULL for a line without one.
+static char *gcg_line_strip_if_only_swap(const char *gcg_line, char **swap) {
+  const char *event = strchr(gcg_line, '>');
+  if (!event) {
+    return NULL;
+  }
+  const char *pos = event;
+  // The nickname with its colon, then the rack.
+  for (int word_idx = 0; word_idx < 2; word_idx++) {
+    while (*pos != '\0' && !isspace((unsigned char)*pos)) {
+      pos++;
+    }
+    while (isspace((unsigned char)*pos)) {
+      pos++;
+    }
+  }
+  if (*pos != '@') {
+    return NULL;
+  }
+  const char *swap_end = pos;
+  while (*swap_end != '\0' && !isspace((unsigned char)*swap_end)) {
+    swap_end++;
+  }
+  *swap = string_duplicate(pos);
+  (*swap)[swap_end - pos] = '\0';
+  while (isspace((unsigned char)*swap_end)) {
+    swap_end++;
+  }
+  StringBuilder *sb = string_builder_create();
+  char *before = string_duplicate(gcg_line);
+  before[pos - gcg_line] = '\0';
+  string_builder_add_string(sb, before);
+  string_builder_add_string(sb, swap_end);
+  free(before);
+  return string_builder_dump_and_destroy(sb, NULL);
+}
+#endif
+
 bool parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line,
                     parse_gcg_mode_t parse_gcg_mode, ErrorStack *error_stack) {
+#ifdef IF_ONLY
+  if (!gcg_parser->if_only_swap) {
+    char *swap = NULL;
+    char *line_without_swap = gcg_line_strip_if_only_swap(gcg_line, &swap);
+    if (line_without_swap) {
+      gcg_parser->if_only_swap = swap;
+      const bool success = parse_gcg_line(gcg_parser, line_without_swap,
+                                          parse_gcg_mode, error_stack);
+      gcg_parser->if_only_swap = NULL;
+      free(swap);
+      free(line_without_swap);
+      return success;
+    }
+  }
+#endif
   GameHistory *game_history = gcg_parser->game_history;
   gcg_token_t token = gcg_tokenize_line(gcg_line, gcg_parser->matching_groups);
   gcg_token_t previous_token = gcg_parser->previous_token;
@@ -1007,6 +1073,24 @@ bool parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line,
     break;
   }
 
+#ifdef IF_ONLY
+  if (gcg_parser->if_only_swap) {
+    if (token != GCG_MOVE_TOKEN && token != GCG_PASS_TOKEN &&
+        token != GCG_EXCHANGE_TOKEN) {
+      free(cgp_move_string);
+      error_stack_push(
+          error_stack, ERROR_STATUS_GCG_PARSE_NO_MATCHING_TOKEN,
+          get_formatted_string("only a move, pass or exchange can have a "
+                               "swap: %s",
+                               gcg_line));
+      return false;
+    }
+    char *swapped_move_string = get_formatted_string(
+        "%s %s", gcg_parser->if_only_swap, cgp_move_string);
+    free(cgp_move_string);
+    cgp_move_string = swapped_move_string;
+  }
+#endif
   if (game_event) {
     game_event_set_cgp_move_string(game_event, cgp_move_string);
     game_event_set_move_score(game_event, move_score);

@@ -474,8 +474,11 @@ SimmerWorker *simmer_create_worker(const SimArgs *sim_args) {
   simmer_worker_set_rollout_pat(simmer_worker, sim_args);
   game_set_backup_mode(simmer_worker->game, BACKUP_MODE_SIMULATION);
   // A rollout plays its candidate and plies, then unplays them all at once,
-  // so recording the squares they change beats copying the board twice.
-  game_enable_rollout_board_undo(simmer_worker->game);
+  // so recording the squares they change beats copying the board twice. An If
+  // Only game's swaps and fake blanks aren't recorded, so it copies the board.
+  if (!game_variant_is_if_only(game_get_variant(simmer_worker->game))) {
+    game_enable_rollout_board_undo(simmer_worker->game);
+  }
   // A rollout's plays recompute the cross sets around them, of the same few
   // words again and again.
   simmer_worker->cross_set_cache =

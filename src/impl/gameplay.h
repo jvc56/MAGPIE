@@ -41,7 +41,7 @@ void draw_leave_from_bag(Bag *bag, int player_draw_index, Rack *rack_to_update,
 void get_leave_for_move(const Move *move, const Game *game, Rack *leave);
 void return_rack_to_bag(const Game *game, int player_index);
 Equity get_leave_value_for_move(const KLV *klv, const Move *move, Rack *rack);
-void return_phony_letters(Game *game);
+void return_phony_letters(Game *game, const Move *phony_move);
 
 // Cross-set update for move affected squares
 void update_cross_set_for_move(const Move *move, const Game *game);

@@ -118,7 +118,7 @@ void test_config_load_error_cases(void) {
   test_config_load_error(config, "sim -bdn invalid_number_of_rows15",
                          ERROR_STATUS_CONFIG_LOAD_BOARD_LAYOUT_ERROR,
                          error_stack);
-  test_config_load_error(config, "sim -var Lonify",
+  test_config_load_error(config, "sim -var Lonely",
                          ERROR_STATUS_CONFIG_LOAD_UNRECOGNIZED_GAME_VARIANT,
                          error_stack);
   test_config_load_error(config, "sim -bb 3b4",

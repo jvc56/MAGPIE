@@ -44,6 +44,7 @@
 #include "gzip_reader_test.h"
 #include "heat_map_test.h"
 #include "history_replay_test.h"
+#include "if_only_test.h"
 #include "infer_cmp_test.h"
 #include "infer_test.h"
 #include "klv_test.h"
@@ -214,6 +215,9 @@ static TestEntry test_table[] = {
     {"pegpessdraw", test_peg_pessfull_draw_regression},
     {"pegtopkall", test_peg_pegtopk_all},
     {"playchooser", test_play_chooser},
+#ifdef IF_ONLY
+    {"ifonly", test_if_only},
+#endif
     {NULL, NULL} // Sentinel value to mark end of array
 };
 

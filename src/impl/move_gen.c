@@ -98,6 +98,10 @@ void generator_destroy(MoveGen *gen) {
   if (!gen) {
     return;
   }
+#ifdef IF_ONLY
+  move_list_destroy(gen->if_only_move_list);
+  game_destroy(gen->if_only_game);
+#endif
   free(gen);
 }
 
@@ -176,6 +180,9 @@ MoveGen *get_movegen(void) {
   gen = cached_gens[slot];
   if (gen == NULL) {
     gen = calloc_or_die(1, sizeof(MoveGen));
+#ifdef IF_ONLY
+    gen->if_only_cutoff_floor = EQUITY_INITIAL_VALUE;
+#endif
     cached_gens[slot] = gen;
   }
   cpthread_mutex_unlock(&cache_mutex);
@@ -595,9 +602,14 @@ static inline bool get_wmp_equity_without_move(const MoveGen *gen, Equity score,
 #endif
 }
 
-static inline void
-update_best_move_or_insert_into_movelist_wmp(MoveGen *gen, int start_col,
-                                             Equity score, Equity leave_value) {
+static inline void update_best_move_or_insert_into_movelist_wmp_once(
+    MoveGen *gen, int start_col, Equity score, Equity leave_value) {
+#ifdef IF_ONLY
+  if (gen_if_only_skips_play(gen, score, gen->playthrough_marked, 0,
+                             gen->wmp_move_gen.word_length - 1)) {
+    return;
+  }
+#endif
   bool need_to_update_best_move_equity_or_score = false;
   Equity move_equity_or_score = 0;
   switch (gen->move_record_type) {
@@ -625,6 +637,9 @@ update_best_move_or_insert_into_movelist_wmp(MoveGen *gen, int start_col,
     }
     Move *move = move_list_get_spare_move(gen->move_list);
     set_play_for_record_wmp(gen, move, start_col, score);
+#ifdef IF_ONLY
+    gen_if_only_set_fake_blank(gen, move);
+#endif
     if (has_precomputed_equity) {
       // precomputed_equity is score plus leave only (see
       // get_wmp_equity_without_move); the defense term still has to be
@@ -660,6 +675,9 @@ update_best_move_or_insert_into_movelist_wmp(MoveGen *gen, int start_col,
     }
     Move *current_move = gen_get_current_move(gen);
     set_play_for_record_wmp(gen, current_move, start_col, score);
+#ifdef IF_ONLY
+    gen_if_only_set_fake_blank(gen, current_move);
+#endif
     if (gen->move_sort_type == MOVE_SORT_EQUITY && gen_pat_is_active(gen) &&
         !gen->stop_on_threshold) {
       // See the lazy defense-term comment on gen_pat_is_active.
@@ -718,6 +736,27 @@ update_best_move_or_insert_into_movelist_wmp(MoveGen *gen, int start_col,
       move_equity_or_score > gen->target_equity_cutoff) {
     gen->threshold_exceeded = true;
   }
+}
+
+// Records a play found by WMP generation; see
+// update_best_move_or_insert_into_movelist for If Only's flip passes.
+static inline void
+update_best_move_or_insert_into_movelist_wmp(MoveGen *gen, int start_col,
+                                             Equity score, Equity leave_value) {
+#ifdef IF_ONLY
+  if (gen->if_only_flipping) {
+    const int number_of_blanks = gen_if_only_number_of_blanks(
+        gen->playthrough_marked, 0, gen->wmp_move_gen.word_length - 1);
+    for (int ordinal = 0; ordinal < number_of_blanks; ordinal++) {
+      gen->if_only_fake_blank_ordinal = ordinal;
+      update_best_move_or_insert_into_movelist_wmp_once(gen, start_col, score,
+                                                        leave_value);
+    }
+    return;
+  }
+#endif
+  update_best_move_or_insert_into_movelist_wmp_once(gen, start_col, score,
+                                                    leave_value);
 }
 
 void record_wmp_play(MoveGen *gen, int start_col, Equity leave_value) {
@@ -1205,6 +1244,119 @@ wordmap_gen(MoveGen *gen, const Anchor *anchor, bool lazy) {
     }
   }
 }
+
+#ifdef IF_ONLY
+// If Only: records the single flip pass's plays of a word that fits, as
+// record_wmp_plays_for_word records a subrack's: blanks are assigned, then
+// each play is recorded once for each tile of the rack that can be the fake
+// blank, with its leave.
+static void if_only_record_flip_plays_for_word(MoveGen *gen,
+                                               const IfOnlyFlipSubrack *flip,
+                                               int start_col, int blanks_so_far,
+                                               int pos) {
+  const WMPMoveGen *wgen = &gen->wmp_move_gen;
+  const int num_blanks =
+      bit_rack_get_letter(&flip->subrack, BLANK_MACHINE_LETTER);
+  if (num_blanks == blanks_so_far) {
+    for (int flip_idx = 0; flip_idx < flip->num_flip_tiles; flip_idx++) {
+      const MachineLetter flip_tile = flip->flip_tiles[flip_idx];
+      gen->if_only_flip_tile = flip_tile;
+      if (gen->number_of_tiles_in_bag == 0) {
+        // The leave is the rack less S, whose blank is the fake one, and less
+        // the tile played upside down.
+        rack_copy(&gen->leave, &gen->player_rack);
+        for (int ml = 0; ml < ld_get_size(&gen->ld); ml++) {
+          int played = bit_rack_get_letter(&flip->subrack, ml);
+          if (ml == BLANK_MACHINE_LETTER) {
+            played--;
+          }
+          for (int i = 0; i < played; i++) {
+            rack_take_letter(&gen->leave, ml);
+          }
+        }
+        rack_take_letter(&gen->leave, flip_tile);
+      }
+      record_wmp_play(gen, start_col, flip->flip_leave_values[flip_idx]);
+      if (gen->threshold_exceeded) {
+        return;
+      }
+    }
+    return;
+  }
+  assert(pos < wgen->word_length);
+  const MachineLetter ml = gen->playthrough_marked[pos];
+  if (ml == PLAYED_THROUGH_MARKER) {
+    if_only_record_flip_plays_for_word(gen, flip, start_col, blanks_so_far,
+                                       pos + 1);
+    return;
+  }
+  bool can_be_unblanked;
+  bool can_be_blanked;
+  get_blank_possibilities(gen, &flip->subrack, pos, &can_be_unblanked,
+                          &can_be_blanked);
+  if (can_be_unblanked) {
+    if_only_record_flip_plays_for_word(gen, flip, start_col, blanks_so_far,
+                                       pos + 1);
+  }
+  if (can_be_blanked) {
+    gen->playthrough_marked[pos] = get_blanked_machine_letter(ml);
+    if_only_record_flip_plays_for_word(gen, flip, start_col, blanks_so_far + 1,
+                                       pos + 1);
+    gen->playthrough_marked[pos] = ml;
+  }
+}
+
+// If Only: the single flip pass's generation for one anchor, which plays
+// tiles_to_play tiles: for each subrack S of the real rack one tile smaller,
+// the WMP's words of S, a blank and the anchor's playthrough tiles.
+static void if_only_flip_wordmap_gen(MoveGen *gen, const Anchor *anchor) {
+  gen->max_tiles_to_play = anchor->tiles_to_play;
+  WMPMoveGen *wgen = &gen->wmp_move_gen;
+  wmp_move_gen_set_playthrough_bit_rack(
+      wgen, anchor, gen->row_squares,
+      gen->word_info_table != NULL ? gen->wit_row_lane : NULL,
+      gen->wit_len_lane, gen->word_info_table);
+  wmp_move_gen_playthrough_metadata_init(wgen, anchor);
+  const int subrack_size = anchor->tiles_to_play - 1;
+  const int offset = subracks_get_combination_offset(subrack_size);
+  const Equity anchor_pat_bound =
+      gen_wmp_anchor_pat_bound(gen, anchor->dir, anchor->row, anchor);
+  for (int idx = 0; idx < gen->if_only_flip_count_by_size[subrack_size];
+       idx++) {
+    const IfOnlyFlipSubrack *flip = &gen->if_only_flip_subracks[offset + idx];
+    if (gen->wmp_prune_subracks_by_leave &&
+        better_play_has_been_found(gen, flip->best_flip_leave_value +
+                                            anchor->highest_possible_score +
+                                            anchor_pat_bound)) {
+      continue;
+    }
+    BitRack key = flip->subrack;
+    bit_rack_add_bit_rack(&key, &wgen->playthrough_bit_rack);
+    const WMPEntry *entry =
+        wmp_get_word_entry(wgen->wmp, &key, wgen->word_length);
+    if (entry == NULL) {
+      continue;
+    }
+    const int result_bytes = wmp_entry_write_words_to_buffer(
+        entry, wgen->wmp, &key, wgen->word_length, wgen->buffer);
+    assert(result_bytes > 0);
+    wgen->words = wgen->buffer;
+    wgen->num_words = result_bytes / wgen->word_length;
+    for (int word_idx = 0; word_idx < wgen->num_words; word_idx++) {
+      for (int start_col = anchor->leftmost_start_col;
+           start_col <= anchor->rightmost_start_col; start_col++) {
+        if (wordmap_gen_check_playthrough_and_crosses(
+                gen, word_idx, start_col, wgen->playthrough_positions)) {
+          if_only_record_flip_plays_for_word(gen, flip, start_col, 0, 0);
+          if (gen->threshold_exceeded) {
+            return;
+          }
+        }
+      }
+    }
+  }
+}
+#endif
 
 void go_on(MoveGen *gen, int current_col, MachineLetter L,
            uint32_t new_node_index, bool accepts, int leftstrip, int rightstrip,
@@ -1789,7 +1941,12 @@ shadow_record_impl(MoveGen *gen, bool wmp_active, uint32_t allowed_lengths) {
         if (((union_bitmask >> playthrough_ml) & 1U) == 0) {
           return;
         }
-      } else if (gen->tiles_played == gen->number_of_letters_on_rack) {
+      } else if (gen->tiles_played == gen->number_of_letters_on_rack
+#ifdef IF_ONLY
+                 // The check reads the real rack, not the flip pass's.
+                 && !gen->if_only_single_flip
+#endif
+      ) {
         // Fall back to the existing WMP check for full-rack cases not
         // handled by the RIT fast path: full rack + multi-playthrough,
         // or full rack + single-playthrough when the RIT is unavailable
@@ -3024,6 +3181,13 @@ void shadow_play_for_anchor(MoveGen *gen, int col) {
 
   // Set the number of letters
   gen->number_of_letters_on_rack = rack_get_total_letters(&gen->player_rack);
+#ifdef IF_ONLY
+  // The single flip pass's extra blank, the fake one, takes the place of a
+  // rack tile, so it never lets more tiles be played.
+  if (gen->if_only_single_flip) {
+    gen->number_of_letters_on_rack--;
+  }
+#endif
 
   // Set the current anchor column
   gen->current_anchor_col = col;
@@ -3275,10 +3439,17 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
   // work on every endgame node, which always passes override_kwg. The seeded
   // fields are only read while WMP is active, so skipping them when it is NULL
   // is safe.
-  const bool wmp_disabled = gen->move_record_type == MOVE_RECORD_ALL_SMALL ||
-                            gen->move_record_type == MOVE_RECORD_TILES_PLAYED ||
-                            override_kwg != NULL || !gen->bit_rack_compatible ||
-                            gen->is_woadwage;
+  const bool wmp_disabled =
+      gen->move_record_type == MOVE_RECORD_ALL_SMALL ||
+      gen->move_record_type == MOVE_RECORD_TILES_PLAYED ||
+      override_kwg != NULL || !gen->bit_rack_compatible ||
+      gen->is_woadwage
+#ifdef IF_ONLY
+      // An If Only flip pass can add a third blank,
+      // which the WMP doesn't support.
+      || rack_get_letter(&gen->player_rack, BLANK_MACHINE_LETTER) > 2
+#endif
+      ;
   wmp_move_gen_init(&gen->wmp_move_gen, &gen->ld, &gen->player_rack,
                     wmp_disabled ? NULL : player_get_wmp(player));
   // The subrack cache holds wmp_entry pointers derived from the WMP; a WMP
@@ -3387,7 +3558,10 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
     pat_eval_context_disable(&gen->pat_eval_ctx);
   }
 
-  gen->is_wordsmog = game_get_variant(game) == GAME_VARIANT_WORDSMOG;
+  gen->is_wordsmog = game_variant_is_wordsmog(game_get_variant(game));
+#ifdef IF_ONLY
+  gen->is_if_only = game_variant_is_if_only(game_get_variant(game));
+#endif
   gen->threshold_exceeded = false;
   gen->stop_on_threshold = args->target_equity != EQUITY_MAX_VALUE;
   // A word info table's prune and wordsmog's letters are shadow inputs that
@@ -3832,6 +4006,14 @@ gen_record_scoring_plays_impl(MoveGen *gen, bool lazy) {
     if (better_play_has_been_found(gen, anchor.highest_possible_equity)) {
       break;
     }
+#ifdef IF_ONLY
+    // A flip pass needs a play that scores enough for a fake blank.
+    if (gen->if_only_flipping &&
+        anchor.highest_possible_score <
+            int_to_equity(IF_ONLY_FAKE_BLANK_MIN_SCORE)) {
+      continue;
+    }
+#endif
     gen->current_anchor_col = anchor.col;
     // Don't recopy the row cache if we're working on the same board lane
     // as the previous anchor. When anchors have been sorted by descending
@@ -3860,6 +4042,10 @@ gen_record_scoring_plays_impl(MoveGen *gen, bool lazy) {
     } else if (gen->is_wordsmog) {
       recursive_gen_alpha(gen, anchor.col, anchor.col, anchor.col,
                           gen->dir == BOARD_HORIZONTAL_DIRECTION, 0, 1, 0);
+#ifdef IF_ONLY
+    } else if (gen->if_only_single_flip) {
+      if_only_flip_wordmap_gen(gen, &anchor);
+#endif
     } else if (wmp_move_gen_is_active(&gen->wmp_move_gen)) {
       wordmap_gen(gen, &anchor, lazy);
     } else {
@@ -3889,6 +4075,13 @@ gen_record_scoring_plays(MoveGen *gen) {
 }
 
 void gen_record_pass(MoveGen *gen) {
+#ifdef IF_ONLY
+  // A flip pass has no pass of its own; a best-move one still reports its
+  // best move, which may be the one it was seeded with.
+  if (gen->if_only_flipping && gen->move_record_type != MOVE_RECORD_BEST) {
+    return;
+  }
+#endif
   switch (gen->move_record_type) {
   case MOVE_RECORD_ALL:
     move_list_set_spare_move_as_pass(gen->move_list);
@@ -4435,10 +4628,139 @@ static void gen_remember_best_move(const MoveGen *gen, BestMoveCarry *carry,
                       searched_lanes, gen->number_of_tiles_in_bag);
 }
 
-void generate_moves(const MoveGenArgs *args) {
+#ifdef IF_ONLY
+// If Only: adds the single flip pass's subracks S of the real rack, one
+// letter of it at a time, with subrack_counts holding S's counts of the
+// letters before letter_idx. A subrack is kept when the rest of the rack
+// holds a nonblank tile to play upside down. Each such tile's leave is read
+// from the leave map, at the index that keeps the rest of the rack less it.
+static void if_only_add_flip_subracks(MoveGen *gen,
+                                      const MachineLetter *letters,
+                                      const int *counts, int num_letters,
+                                      int letter_idx, int size,
+                                      int *subrack_counts, bool use_leaves) {
+  if (letter_idx < num_letters) {
+    for (int count = 0; count <= counts[letter_idx]; count++) {
+      subrack_counts[letter_idx] = count;
+      if_only_add_flip_subracks(gen, letters, counts, num_letters,
+                                letter_idx + 1, size + count, subrack_counts,
+                                use_leaves);
+    }
+    subrack_counts[letter_idx] = 0;
+    return;
+  }
+  IfOnlyFlipSubrack flip;
+  flip.subrack = bit_rack_create_empty();
+  flip.num_flip_tiles = 0;
+  flip.best_flip_leave_value = EQUITY_MIN_VALUE;
+  int leave_index = 0;
+  for (int i = 0; i < num_letters; i++) {
+    const int kept = counts[i] - subrack_counts[i];
+    leave_index |= ((1 << kept) - 1)
+                   << gen->leave_map.letter_base_index_map[letters[i]];
+    for (int j = 0; j < subrack_counts[i]; j++) {
+      bit_rack_add_letter(&flip.subrack, letters[i]);
+    }
+  }
+  for (int i = 0; i < num_letters; i++) {
+    const int kept = counts[i] - subrack_counts[i];
+    if (kept == 0 || letters[i] == BLANK_MACHINE_LETTER) {
+      continue;
+    }
+    const int flip_index =
+        leave_index &
+        ~(1 << (gen->leave_map.letter_base_index_map[letters[i]] + kept - 1));
+    const Equity leave_value =
+        use_leaves ? gen->leave_map.leave_values[flip_index] : 0;
+    flip.flip_tiles[flip.num_flip_tiles] = letters[i];
+    flip.flip_leave_values[flip.num_flip_tiles] = leave_value;
+    flip.num_flip_tiles++;
+    if (leave_value > flip.best_flip_leave_value) {
+      flip.best_flip_leave_value = leave_value;
+    }
+  }
+  if (flip.num_flip_tiles == 0) {
+    return;
+  }
+  bit_rack_add_letter(&flip.subrack, BLANK_MACHINE_LETTER);
+  gen->if_only_flip_subracks[subracks_get_combination_offset(size) +
+                             gen->if_only_flip_count_by_size[size]] = flip;
+  gen->if_only_flip_count_by_size[size]++;
+}
+
+// If Only: the single flip pass, which generates every flip of the rack at
+// once, in place of a pass for each kind of tile. Called with the position
+// loaded and the rack's leaves looked up.
+//
+// The shadow sees the rack with an extra blank and plays at most as many
+// tiles as the rack has. Its bounds then hold for every flip: a flip plays a
+// subrack S and the fake blank, from the rack and the extra blank, and its
+// leave, the rest of the rack less a tile, is the size the shadow assumes.
+// The checks that read the real rack's words are off: the RIT, the full-rack
+// word, and the per-length existence and best leaves, which become every
+// length and the rack's best leaves.
+static void if_only_single_flip_generate(MoveGen *gen) {
+  if (!wmp_move_gen_is_active(&gen->wmp_move_gen)) {
+    gen->if_only_single_flip_unavailable = true;
+    return;
+  }
+  MachineLetter letters[RACK_SIZE];
+  int counts[RACK_SIZE];
+  int subrack_counts[RACK_SIZE] = {0};
+  int num_letters = 0;
+  for (int ml = 0; ml < ld_get_size(&gen->ld); ml++) {
+    if (rack_get_letter(&gen->player_rack, ml) > 0) {
+      letters[num_letters] = (MachineLetter)ml;
+      counts[num_letters] = rack_get_letter(&gen->player_rack, ml);
+      num_letters++;
+    }
+  }
+  memset(gen->if_only_flip_count_by_size, 0,
+         sizeof(gen->if_only_flip_count_by_size));
+  const bool use_leaves =
+      gen->number_of_tiles_in_bag > 0 && gen->move_sort_type != MOVE_SORT_SCORE;
+  if_only_add_flip_subracks(gen, letters, counts, num_letters, 0, 0,
+                            subrack_counts, use_leaves);
+
+  Rack real_rack;
+  rack_copy(&real_rack, &gen->player_rack);
+  const uint64_t real_rack_cross_set = gen->rack_cross_set;
+  rack_add_letter(&gen->player_rack, BLANK_MACHINE_LETTER);
+  gen->rack_cross_set |= (uint64_t)1 << BLANK_MACHINE_LETTER;
+  set_descending_tile_scores(gen);
+  gen->rit_entry = NULL;
+  WMPMoveGen *wgen = &gen->wmp_move_gen;
+  for (int size = 0; size <= RACK_SIZE; size++) {
+    wgen->nonplaythrough_has_word_of_length[size] = true;
+    wgen->nonplaythrough_best_leave_values[size] = gen->best_leaves[size];
+  }
+  gen_shadow(gen);
+  rack_copy(&gen->player_rack, &real_rack);
+  gen->rack_cross_set = real_rack_cross_set;
+  set_descending_tile_scores(gen);
+  leave_map_set_current_index(
+      &gen->leave_map, (1 << rack_get_total_letters(&gen->player_rack)) - 1);
+  gen_record_scoring_plays(gen);
+  gen_record_pass(gen);
+}
+#endif
+
+// Generates the moves of the position, without If Only's swaps and flips.
+static void generate_moves_for_position(const MoveGenArgs *args) {
   MoveGen *gen = get_movegen();
   gen_count_movegen(gen);
   gen_load_position(gen, args);
+#ifdef IF_ONLY
+  // A pass after the first starts from the value of the best move so far.
+  if (gen->if_only_cutoff_floor != EQUITY_INITIAL_VALUE) {
+    if (gen->move_record_type == MOVE_RECORD_BEST) {
+      gen_update_cutoff_equity_or_score(gen);
+    } else if (gen->move_record_type == MOVE_RECORD_WITHIN_X_EQUITY_OF_BEST) {
+      gen->best_move_equity_or_score = gen->if_only_cutoff_floor;
+      gen_update_cutoff_equity_or_score(gen);
+    }
+  }
+#endif
   if (gen->move_record_type == MOVE_RECORD_ALL_SMALL ||
       gen->move_record_type == MOVE_RECORD_TILES_PLAYED) {
     if (gen->move_record_type == MOVE_RECORD_TILES_PLAYED) {
@@ -4461,6 +4783,12 @@ void generate_moves(const MoveGenArgs *args) {
     gen_record_scoring_plays(gen);
   } else {
     gen_look_up_leaves_and_record_exchanges(gen);
+#ifdef IF_ONLY
+    if (gen->if_only_single_flip) {
+      if_only_single_flip_generate(gen);
+      return;
+    }
+#endif
 
     if (wmp_move_gen_is_active(&gen->wmp_move_gen)) {
       const bool check_leaves = (gen->number_of_tiles_in_bag > 0) &&
@@ -4584,4 +4912,194 @@ void generate_moves(const MoveGenArgs *args) {
     }
   }
   gen_record_pass(gen);
+}
+
+#ifdef IF_ONLY
+// If Only: the best move in a move list, or NULL for an empty one.
+static const Move *if_only_best_move(const MoveList *move_list) {
+  const Move *best_move = NULL;
+  for (int i = 0; i < move_list_get_count(move_list); i++) {
+    const Move *move = move_list_get_move(move_list, i);
+    if (!best_move || move_get_equity(move) > move_get_equity(best_move)) {
+      best_move = move;
+    }
+  }
+  return best_move;
+}
+
+// If Only: adds the moves of a later pass to the caller's list, each first
+// making the swap when swap_move has one. A best-move list keeps the better
+// move as compare_moves ranks them, as a single generation would, so that
+// the order of the passes never decides a tie. A list of moves near the best
+// drops those no longer near it.
+static void if_only_merge_moves(const MoveGenArgs *args, const MoveList *moves,
+                                const Move *swap_move) {
+  MoveList *move_list = args->move_list;
+  for (int i = 0; i < move_list_get_count(moves); i++) {
+    const Move *move = move_list_get_move(moves, i);
+    Move *spare_move = move_list_get_spare_move(move_list);
+    move_copy(spare_move, move);
+    if (move_has_swap(swap_move)) {
+      move_set_swap(spare_move, move_get_swap_row(swap_move),
+                    move_get_swap_col(swap_move),
+                    move_get_swap_letter(swap_move),
+                    move_get_swap_tile(swap_move));
+    }
+    // A pass started from the best move so far may report it again.
+    if (args->move_record_type == MOVE_RECORD_BEST &&
+        compare_moves(spare_move, move_list_get_move(move_list, 0), true) !=
+            1) {
+      continue;
+    }
+    if (args->move_record_type == MOVE_RECORD_BEST) {
+      move_list_insert_spare_move_top_equity(move_list,
+                                             move_get_equity(spare_move));
+    } else {
+      move_list_insert_spare_move(move_list, move_get_equity(spare_move));
+    }
+  }
+  if (args->move_record_type == MOVE_RECORD_WITHIN_X_EQUITY_OF_BEST) {
+    const Equity cutoff =
+        move_get_equity(if_only_best_move(move_list)) - args->eq_margin_movegen;
+    while (move_list_get_count(move_list) > 0 &&
+           move_list_peek_equity(move_list) < cutoff) {
+      move_list_pop_move(move_list);
+    }
+  }
+}
+
+// If Only: runs one later pass, on game, into the scratch move list, and adds
+// its moves to the caller's list.
+static void if_only_run_pass(MoveGen *gen, const MoveGenArgs *args,
+                             const Game *game, const Move *swap_move) {
+  MoveGenArgs pass_args = *args;
+  pass_args.game = game;
+  pass_args.move_list = gen->if_only_move_list;
+  pass_args.best_move_carry = NULL;
+  gen->if_only_cutoff_floor = EQUITY_INITIAL_VALUE;
+  if (args->move_record_type != MOVE_RECORD_ALL) {
+    const Move *best_move = if_only_best_move(args->move_list);
+    gen->if_only_cutoff_floor = args->move_sort_type == MOVE_SORT_EQUITY
+                                    ? move_get_equity(best_move)
+                                    : move_get_score(best_move);
+  }
+  generate_moves_for_position(&pass_args);
+  gen->if_only_cutoff_floor = EQUITY_INITIAL_VALUE;
+  if_only_merge_moves(args, gen->if_only_move_list, swap_move);
+}
+
+// If Only: the flips, in the single flip pass (see
+// if_only_single_flip_generate) when the WMP can take them, and otherwise in
+// a pass for each kind of tile on the rack: the tile gives its place to a
+// blank, and the pass records the plays that make that blank a fake one (see
+// MoveGen.if_only_flipping). The rack is the player's own, changed for each
+// pass and then restored. A real blank is never flipped: it is always played
+// face up.
+static void if_only_run_flip_passes(MoveGen *gen, const MoveGenArgs *args,
+                                    const Game *game, const Move *swap_move) {
+  // The generation reads the rack from the game, so it is changed in place.
+  Rack *rack = player_get_rack(
+      game_get_player((Game *)game, game_get_player_on_turn_index(game)));
+  // One pass for every flip when the WMP can take it: with at most one real
+  // blank, so a subrack and the fake blank hold at most two, outside
+  // WordSmog, whose generation doesn't use the WMP.
+  if (rack_get_letter(rack, BLANK_MACHINE_LETTER) <= 1 &&
+      !game_variant_is_wordsmog(game_get_variant(game)) &&
+      args->override_kwg == NULL) {
+    gen->if_only_single_flip = true;
+    gen->if_only_single_flip_unavailable = false;
+    gen->if_only_flipping = true;
+    if_only_run_pass(gen, args, game, swap_move);
+    gen->if_only_flipping = false;
+    gen->if_only_single_flip = false;
+    if (!gen->if_only_single_flip_unavailable) {
+      return;
+    }
+  }
+  Rack saved_rack;
+  rack_copy(&saved_rack, rack);
+  for (int ml = BLANK_MACHINE_LETTER + 1; ml < rack_get_dist_size(rack); ml++) {
+    if (rack_get_letter(&saved_rack, ml) == 0) {
+      continue;
+    }
+    rack_take_letter(rack, ml);
+    rack_add_letter(rack, BLANK_MACHINE_LETTER);
+    gen->if_only_flipping = true;
+    gen->if_only_flip_tile = (MachineLetter)ml;
+    if_only_run_pass(gen, args, game, swap_move);
+    gen->if_only_flipping = false;
+    rack_copy(rack, &saved_rack);
+  }
+}
+
+// If Only: the moves that first swap a fake blank off the board, for each one
+// whose letter the rack has as a real tile: the swapped position's own moves,
+// exchanges and pass included, and its flips.
+static void if_only_run_swap_passes(MoveGen *gen, const MoveGenArgs *args) {
+  const Game *game = args->game;
+  const Board *board = game_get_board(game);
+  const int player_index = game_get_player_on_turn_index(game);
+  const Rack *rack = player_get_rack(game_get_player(game, player_index));
+  for (int row = 0; row < BOARD_DIM; row++) {
+    for (int col = 0; col < BOARD_DIM; col++) {
+      if (!board_is_fake_blank(board, row, col)) {
+        continue;
+      }
+      const MachineLetter letter =
+          get_unblanked_machine_letter(board_get_letter(board, row, col));
+      if (rack_get_letter(rack, letter) == 0) {
+        continue;
+      }
+      Move swap_move;
+      move_clear_if_only(&swap_move);
+      move_set_swap(&swap_move, row, col, letter,
+                    board_get_fake_blank_tile(board, row, col));
+      if (gen->if_only_game == NULL) {
+        gen->if_only_game = game_duplicate(game);
+      } else {
+        game_copy(gen->if_only_game, game);
+      }
+      game_if_only_swap(gen->if_only_game, player_index, row, col);
+      game_gen_all_cross_sets(gen->if_only_game);
+      if_only_run_pass(gen, args, gen->if_only_game, &swap_move);
+      if_only_run_flip_passes(gen, args, gen->if_only_game, &swap_move);
+    }
+  }
+}
+
+// If Only: the moves without a swap or a flip, then those with a flip, then
+// those with a swap. Each later pass starts from the best move so far, and
+// one with a flip skips the anchors where no play scores enough for it.
+static void if_only_generate_moves(const MoveGenArgs *args) {
+  MoveGen *gen = get_movegen();
+  gen->if_only_flipping = false;
+  gen->if_only_cutoff_floor = EQUITY_INITIAL_VALUE;
+  generate_moves_for_position(args);
+  const int capacity = move_list_get_capacity(args->move_list);
+  if (gen->if_only_move_list != NULL &&
+      move_list_get_capacity(gen->if_only_move_list) != capacity) {
+    move_list_destroy(gen->if_only_move_list);
+    gen->if_only_move_list = NULL;
+  }
+  if (gen->if_only_move_list == NULL) {
+    gen->if_only_move_list = move_list_create(capacity);
+  }
+  Move no_swap_move;
+  move_clear_if_only(&no_swap_move);
+  if_only_run_flip_passes(gen, args, args->game, &no_swap_move);
+  if_only_run_swap_passes(gen, args);
+}
+#endif
+
+void generate_moves(const MoveGenArgs *args) {
+#ifdef IF_ONLY
+  if (game_variant_is_if_only(game_get_variant(args->game)) &&
+      (args->move_record_type == MOVE_RECORD_ALL ||
+       args->move_record_type == MOVE_RECORD_BEST ||
+       args->move_record_type == MOVE_RECORD_WITHIN_X_EQUITY_OF_BEST)) {
+    if_only_generate_moves(args);
+    return;
+  }
+#endif
+  generate_moves_for_position(args);
 }

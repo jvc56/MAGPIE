@@ -41,6 +41,18 @@ char *validated_move_get_phonies_formed(const LetterDistribution *ld,
       }
     }
   }
+#ifdef IF_ONLY
+  // A fake blank in a play that scores too little comes off like a phony.
+  if (move_is_if_only_short_flip(move)) {
+    if (phonies_formed) {
+      string_builder_add_string(phonies_string_builder, ",");
+    }
+    string_builder_add_formatted_string(phonies_string_builder,
+                                        "fake blank in a play under %d",
+                                        IF_ONLY_FAKE_BLANK_MIN_SCORE);
+    phonies_formed = true;
+  }
+#endif
   if (!phonies_formed) {
     string_builder_destroy(phonies_string_builder);
     return NULL;

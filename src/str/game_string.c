@@ -474,6 +474,14 @@ void string_builder_add_game_internal(
           string_builder_add_rack(game_string, player_rack, ld, false);
           break;
         case GAME_EVENT_PASS:
+#ifdef IF_ONLY
+          if (game_event_get_vms(game_event)) {
+            string_builder_add_if_only_swap(
+                game_string,
+                validated_moves_get_move(game_event_get_vms(game_event), 0),
+                false);
+          }
+#endif
           string_builder_add_string(game_string, "(pass) ");
           string_builder_add_rack(game_string, player_rack, ld, false);
           break;
@@ -486,6 +494,9 @@ void string_builder_add_game_internal(
           for (int j = 0; j < num_exch; j++) {
             rack_add_letter(&exchanged_tiles, move_get_tile(move, j));
           }
+#ifdef IF_ONLY
+          string_builder_add_if_only_swap(game_string, move, false);
+#endif
           string_builder_add_string(game_string, "(exch ");
           string_builder_add_rack(game_string, &exchanged_tiles, ld, false);
           string_builder_add_string(game_string, ") ");
@@ -657,6 +668,14 @@ void string_builder_add_game_variant(StringBuilder *sb,
   case GAME_VARIANT_WOADWAGE:
     variant_name = GAME_VARIANT_WOADWAGE_NAME;
     break;
+#ifdef IF_ONLY
+  case GAME_VARIANT_IF_ONLY:
+    variant_name = GAME_VARIANT_IF_ONLY_NAME;
+    break;
+  case GAME_VARIANT_LONIFY:
+    variant_name = GAME_VARIANT_LONIFY_NAME;
+    break;
+#endif
   default:
     variant_name = GAME_VARIANT_UNKNOWN_NAME;
     break;
