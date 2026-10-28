@@ -150,6 +150,8 @@ typedef struct MoveGen {
   Rack bingo_alpha_rack_shadow_right_copy;
   Rack opponent_rack;
   Rack leave;
+  // In the padding before board_lanes, so no field before it moves.
+  bool is_woadwage;
   // Read-only view into the board's lanes for the current cross index;
   // refreshed by gen_load_position each call.
   // Direct views into the board (not copies): board_lanes points at all lane

@@ -2,7 +2,6 @@
 
 #include "../def/board_defs.h"
 #include "../def/equity_defs.h"
-#include "../def/game_defs.h"
 #include "../def/game_history_defs.h"
 #include "../def/letter_distribution_defs.h"
 #include "../def/move_defs.h"
@@ -455,8 +454,8 @@ void validated_move_load(ValidatedMove *vm, const Game *game, int player_index,
 
     vm->formed_words = formed_words_create(board, vm->move);
 
-    formed_words_populate_validities(
-        kwg, vm->formed_words, game_get_variant(game) == GAME_VARIANT_WORDSMOG);
+    formed_words_populate_validities(kwg, vm->formed_words,
+                                     game_get_variant(game));
 
     if (!allow_phonies) {
       for (int i = 0; i < formed_words_get_num_words(vm->formed_words); i++) {

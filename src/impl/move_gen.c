@@ -40,6 +40,7 @@
 #include "../ent/word_info_table.h"
 #include "../util/io_util.h"
 #include "move_gen_base.h"
+#include "movegen_woadwage.h"
 #include "wmp_move_gen.h"
 #include <assert.h>
 #include <stdatomic.h>
@@ -3254,7 +3255,11 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
   }
   gen->rack_info_table = new_rit;
   gen->rit_instance_id_at_load = new_rit_instance_id;
-  gen->word_info_table = player_get_word_info_table(player);
+  gen->is_woadwage = game_get_variant(game) == GAME_VARIANT_WOADWAGE;
+  // The word info table, the WMP and PAT know single words, and a woadwage
+  // word may be two.
+  gen->word_info_table =
+      gen->is_woadwage ? NULL : player_get_word_info_table(player);
   gen->board_number_of_tiles_played = board_get_tiles_played(gen->board);
   rack_copy(&gen->opponent_rack, player_get_rack(opponent));
   rack_copy(&gen->player_rack, player_get_rack(player));
@@ -3272,7 +3277,8 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
   // is safe.
   const bool wmp_disabled = gen->move_record_type == MOVE_RECORD_ALL_SMALL ||
                             gen->move_record_type == MOVE_RECORD_TILES_PLAYED ||
-                            override_kwg != NULL || !gen->bit_rack_compatible;
+                            override_kwg != NULL || !gen->bit_rack_compatible ||
+                            gen->is_woadwage;
   wmp_move_gen_init(&gen->wmp_move_gen, &gen->ld, &gen->player_rack,
                     wmp_disabled ? NULL : player_get_wmp(player));
   // The subrack cache holds wmp_entry pointers derived from the WMP; a WMP
@@ -3358,7 +3364,8 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
     // that rewrites them between generations needs no extra invalidation,
     // and so are the player's PAT settings (see player_set_pat_usage).
     const PATWeights *pat = player_get_pat(player);
-    if (pat && !args->disable_pat && !player_get_pat_disabled(player) &&
+    if (pat && !gen->is_woadwage && !args->disable_pat &&
+        !player_get_pat_disabled(player) &&
         gen->move_sort_type == MOVE_SORT_EQUITY &&
         gen->number_of_tiles_in_bag > 0 &&
         board_get_cross_sets_valid(gen->board)) {
@@ -3758,7 +3765,9 @@ gen_record_lane_plays_unordered(MoveGen *gen, int row,
           gen_cache_get_right_extension_set(gen, col);
       gen->current_anchor_highest_possible_score = EQUITY_MAX_VALUE;
 
-      if (record_small) {
+      if (gen->is_woadwage) {
+        woadwage_gen_anchor(gen);
+      } else if (record_small) {
         recursive_gen_small(gen, col, kwg_root_node_index, col, col,
                             gen->dir == BOARD_HORIZONTAL_DIRECTION, 0, 1, 0);
       } else {
@@ -3842,7 +3851,9 @@ gen_record_scoring_plays_impl(MoveGen *gen, bool lazy) {
     gen->anchor_right_extension_set =
         gen_cache_get_right_extension_set(gen, gen->current_anchor_col);
     gen->current_anchor_highest_possible_score = anchor.highest_possible_score;
-    if (gen->move_record_type == MOVE_RECORD_BEST_SMALL) {
+    if (gen->is_woadwage) {
+      woadwage_gen_anchor(gen);
+    } else if (gen->move_record_type == MOVE_RECORD_BEST_SMALL) {
       recursive_gen_small(gen, anchor.col, kwg_root_node_index, anchor.col,
                           anchor.col, gen->dir == BOARD_HORIZONTAL_DIRECTION, 0,
                           1, 0);
@@ -4009,8 +4020,12 @@ static void gen_record_lane_plays_reaching(MoveGen *gen, int row,
       gen->anchor_right_extension_set =
           gen_cache_get_right_extension_set(gen, col);
       gen->current_anchor_highest_possible_score = EQUITY_MAX_VALUE;
-      recursive_gen_small(gen, col, kwg_root_node_index, col, col,
-                          gen->dir == BOARD_HORIZONTAL_DIRECTION, 0, 1, 0);
+      if (gen->is_woadwage) {
+        woadwage_gen_anchor(gen);
+      } else {
+        recursive_gen_small(gen, col, kwg_root_node_index, col, col,
+                            gen->dir == BOARD_HORIZONTAL_DIRECTION, 0, 1, 0);
+      }
     }
     last_anchor_col = col;
     if ((empty & anchor_bit) == 0) {

@@ -1076,7 +1076,11 @@ void endgame_ctx_reset(EndgameCtx *es, EndgameResults *results,
   // skip_word_pruning: leave pruned_kwgs NULL so move gen uses the full KWG
   // (or any override KWGs the caller set on the game). Used by PEG which
   // builds its own pruned KWGs once at the root position.
-  if (!endgame_args->skip_word_pruning) {
+  // Woadwage solves read the whole lexicon too: pruning keeps the words a
+  // position can play, which leaves out words of the lexicon that a woadwage
+  // word joins to another.
+  if (!endgame_args->skip_word_pruning &&
+      game_get_variant(endgame_args->game) != GAME_VARIANT_WOADWAGE) {
     // Generate pruned KWG(s) from the set of possible words on this board.
     // In IGNORANT mode (or shared-KWG), one pruned KWG is used for everything.
     // In INFORMED mode with different lexicons, each player index gets its own
