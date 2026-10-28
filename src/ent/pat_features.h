@@ -48,6 +48,10 @@ typedef struct PATMoveOverlay {
   // Non-NULL when floater runs the move places a tile in are to be resolved
   // exactly (see PATWeights.exact_fresh_runs).
   const KWG *run_kwg;
+  // Whether the words are woadwage's, which may be two of the lexicon's run
+  // together: created hooks are then woadwage cross sets, and fresh runs,
+  // like the board's runs in woadwage, extend by any letter.
+  bool woadwage;
 } PATMoveOverlay;
 
 // Fills unseen_counts (MAX_ALPHABET_SIZE entries) with the tiles neither on

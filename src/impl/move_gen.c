@@ -3256,8 +3256,8 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
   gen->rack_info_table = new_rit;
   gen->rit_instance_id_at_load = new_rit_instance_id;
   gen->is_woadwage = game_get_variant(game) == GAME_VARIANT_WOADWAGE;
-  // The word info table, the WMP and PAT know single words, and a woadwage
-  // word may be two.
+  // The word info table and the WMP know single words, and a woadwage word
+  // may be two.
   gen->word_info_table =
       gen->is_woadwage ? NULL : player_get_word_info_table(player);
   gen->board_number_of_tiles_played = board_get_tiles_played(gen->board);
@@ -3364,8 +3364,7 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
     // that rewrites them between generations needs no extra invalidation,
     // and so are the player's PAT settings (see player_set_pat_usage).
     const PATWeights *pat = player_get_pat(player);
-    if (pat && !gen->is_woadwage && !args->disable_pat &&
-        !player_get_pat_disabled(player) &&
+    if (pat && !args->disable_pat && !player_get_pat_disabled(player) &&
         gen->move_sort_type == MOVE_SORT_EQUITY &&
         gen->number_of_tiles_in_bag > 0 &&
         board_get_cross_sets_valid(gen->board)) {
@@ -3375,7 +3374,8 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
                                 ~args->pat_disabled_classes_mask &
                                 ~player_get_pat_disabled_classes_mask(player),
                             rack_get_total_letters(&gen->opponent_rack));
-      pat_eval_context_set_kwg(&gen->pat_eval_ctx, gen->kwg);
+      pat_eval_context_set_kwg(&gen->pat_eval_ctx, gen->kwg,
+                               game_get_variant(game));
       pat_eval_context_set_utility(
           &gen->pat_eval_ctx,
           equity_to_int(player_get_score(player) - player_get_score(opponent)),

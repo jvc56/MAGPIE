@@ -2,6 +2,7 @@
 
 #include "../src/def/board_defs.h"
 #include "../src/def/equity_defs.h"
+#include "../src/def/game_defs.h"
 #include "../src/def/game_history_defs.h"
 #include "../src/def/letter_distribution_defs.h"
 #include "../src/def/move_defs.h"
@@ -113,7 +114,8 @@ static void test_pat_eval_hand_position(void) {
   pat_eval_context_load(pat_eval_ctx, pat,
                         board_get_readonly_lanes(game_get_board(game), 0), ld,
                         player_get_rack(player), PAT_CLASS_MASK_ALL, RACK_SIZE);
-  pat_eval_context_set_kwg(pat_eval_ctx, player_get_kwg(player));
+  pat_eval_context_set_kwg(pat_eval_ctx, player_get_kwg(player),
+                           GAME_VARIANT_CLASSIC);
   assert(pat_eval_ctx->pre_penalty == 7 * PAT_EVAL_TEST_HOOK_WEIGHT);
   assert(pat_eval_non_placement_penalty(pat_eval_ctx) ==
          7 * PAT_EVAL_TEST_HOOK_WEIGHT);
@@ -363,7 +365,8 @@ static Equity pat_eval_test_fresh_run_penalty(const char *move_string,
   pat_eval_context_load(pat_eval_ctx, pat,
                         board_get_readonly_lanes(game_get_board(game), 0), ld,
                         player_get_rack(player), PAT_CLASS_MASK_ALL, RACK_SIZE);
-  pat_eval_context_set_kwg(pat_eval_ctx, player_get_kwg(player));
+  pat_eval_context_set_kwg(pat_eval_ctx, player_get_kwg(player),
+                           GAME_VARIANT_CLASSIC);
   ValidatedMoves *vms = validated_moves_create_and_assert_status(
       game, 0, move_string, false, false, ERROR_STATUS_SUCCESS);
   const Move *move = validated_moves_get_move(vms, 0);
