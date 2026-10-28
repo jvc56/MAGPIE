@@ -184,6 +184,7 @@ static int woadwage_test_random_string(const DictionaryWordList *words,
                                        uint64_t *random_state,
                                        MachineLetter *letters) {
   const int word_count = dictionary_word_list_get_count(words);
+  assert(word_count > 0);
   const int pieces = 1 + (int)(woadwage_test_random(random_state) % 3);
   int length = 0;
   for (int piece_idx = 0; piece_idx < pieces; piece_idx++) {
@@ -197,7 +198,7 @@ static int woadwage_test_random_string(const DictionaryWordList *words,
       letters[length++] = dictionary_word_get_word(word)[letter_idx];
     }
   }
-  if (woadwage_test_random(random_state) % 3 == 0) {
+  if (length > 0 && woadwage_test_random(random_state) % 3 == 0) {
     letters[woadwage_test_random(random_state) % length] =
         (MachineLetter)(1 + woadwage_test_random(random_state) %
                                 (ld_get_size(ld) - 1));
