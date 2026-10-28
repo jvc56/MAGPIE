@@ -314,6 +314,18 @@ typedef enum {
   ERROR_STATUS_DATA_FETCH_MANIFEST_INVALID,
   ERROR_STATUS_DATA_FETCH_FILE_MISMATCH,
   ERROR_STATUS_WMP_RESULT_TOO_LARGE,
+#ifdef IF_ONLY
+  // If Only: a swap or fake blank in a game of another variant, a swap that
+  // the board or rack doesn't allow, a blank suffix that doesn't match the
+  // blanks played, a fake blank in a play scoring too little, a command that
+  // doesn't support If Only, and a bad cgp blank tail.
+  ERROR_STATUS_MOVE_VALIDATION_IF_ONLY_NOT_ALLOWED,
+  ERROR_STATUS_MOVE_VALIDATION_IF_ONLY_INVALID_SWAP,
+  ERROR_STATUS_MOVE_VALIDATION_IF_ONLY_INVALID_BLANKS,
+  ERROR_STATUS_MOVE_VALIDATION_IF_ONLY_SCORE_TOO_LOW,
+  ERROR_STATUS_IF_ONLY_UNSUPPORTED_COMMAND,
+  ERROR_STATUS_CGP_PARSE_IF_ONLY_BLANKS,
+#endif
 } error_code_t;
 
 typedef enum {

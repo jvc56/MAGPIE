@@ -16,6 +16,7 @@
 #include "../ent/board.h"
 #include "../ent/bonus_square.h"
 #include "../ent/equity.h"
+#include "../ent/game.h"
 #include "../ent/klv.h"
 #include "../ent/kwg.h"
 #include "../ent/lane_shadow_cache.h"
@@ -98,6 +99,32 @@ typedef struct MovegenBudget {
   uint64_t limit;
   _Atomic uint64_t spent;
 } MovegenBudget;
+
+#ifdef IF_ONLY
+enum {
+  // If Only: the shadow of the single flip pass sees the rack with an extra
+  // blank, the fake one, so its tile score arrays hold one more tile.
+  MOVE_GEN_SHADOW_RACK_CAPACITY = RACK_SIZE + 1,
+};
+
+// If Only: one subrack S of the real rack for the single flip pass, which
+// plays S and a fake blank. The fake blank is a tile of the rest of the rack,
+// R - S, played upside down; each kind of nonblank tile there can be it, and
+// the leave is R - S less that tile.
+typedef struct IfOnlyFlipSubrack {
+  // S and a blank, for the fake one.
+  BitRack subrack;
+  int num_flip_tiles;
+  MachineLetter flip_tiles[RACK_SIZE];
+  Equity flip_leave_values[RACK_SIZE];
+  // The highest of flip_leave_values.
+  Equity best_flip_leave_value;
+} IfOnlyFlipSubrack;
+#else
+enum {
+  MOVE_GEN_SHADOW_RACK_CAPACITY = RACK_SIZE,
+};
+#endif
 
 typedef struct MoveGen {
   // Move generations made on this MoveGen: generate_moves and
@@ -306,9 +333,9 @@ typedef struct MoveGen {
   MoveList *move_list;
   AnchorHeap anchor_heap;
   Equity tile_scores[MACHINE_LETTER_MAX_VALUE];
-  Equity full_rack_descending_tile_scores[RACK_SIZE];
-  Equity descending_tile_scores[RACK_SIZE];
-  Equity descending_tile_scores_copy[RACK_SIZE];
+  Equity full_rack_descending_tile_scores[MOVE_GEN_SHADOW_RACK_CAPACITY];
+  Equity descending_tile_scores[MOVE_GEN_SHADOW_RACK_CAPACITY];
+  Equity descending_tile_scores_copy[MOVE_GEN_SHADOW_RACK_CAPACITY];
   WMPMoveGen wmp_move_gen;
   uint64_t rack_cross_set;
   bool target_word_full_rack_existence[RACK_SIZE + 1];
@@ -326,6 +353,34 @@ typedef struct MoveGen {
   // WMP-only storage at the end keeps every existing hot field's offset.
   // Reset/touch it only for active WMP positions whose rack has a blank.
   WMPBlankWordCache blank_word_cache;
+#ifdef IF_ONLY
+  // If Only: while a flip pass runs (see generate_moves), the rack tile played
+  // upside down as a fake blank, whose place in the rack a blank takes. The
+  // pass records only plays that place a blank and score at least
+  // IF_ONLY_FAKE_BLANK_MIN_SCORE, once for each blank they place as the fake
+  // one; this is which of them, counting from 0, is being recorded.
+  bool if_only_flipping;
+  MachineLetter if_only_flip_tile;
+  int if_only_fake_blank_ordinal;
+  // Whether the game is an If Only one, whose placements are marked so.
+  bool is_if_only;
+  // The value, equity or score as the sort says, of the best move of the
+  // earlier passes. A later pass prunes against it as if it had found a move
+  // of that value, but never returns one: that move is in the caller's list.
+  // EQUITY_INITIAL_VALUE for the first pass.
+  Equity if_only_cutoff_floor;
+  // The passes after the first generate into this list, and the passes after
+  // a swap on this game; both are made on first use and kept.
+  MoveList *if_only_move_list;
+  Game *if_only_game;
+  // While the single flip pass runs (see if_only_single_flip_generate): its
+  // subracks, S of each size, at the offsets subracks of a rack have, and
+  // whether the position had no WMP for it.
+  bool if_only_single_flip;
+  bool if_only_single_flip_unavailable;
+  uint8_t if_only_flip_count_by_size[RACK_SIZE + 1];
+  IfOnlyFlipSubrack if_only_flip_subracks[1 << RACK_SIZE];
+#endif
 } MoveGen;
 
 // Cache getter functions
@@ -535,6 +590,11 @@ static inline void gen_update_cutoff_equity_or_score(MoveGen *gen) {
     gen->cutoff_equity_or_score = (gen->move_sort_type == MOVE_SORT_EQUITY)
                                       ? move_get_equity(move)
                                       : move_get_score(move);
+#ifdef IF_ONLY
+    if (gen->cutoff_equity_or_score < gen->if_only_cutoff_floor) {
+      gen->cutoff_equity_or_score = gen->if_only_cutoff_floor;
+    }
+#endif
     break;
   case MOVE_RECORD_BEST_SMALL:
     // No Move object; best_move_equity_or_score is already the best score.
@@ -575,10 +635,70 @@ gen_insert_spare_move_within_x_equity_of_best(MoveGen *gen,
   }
 }
 
-static inline void update_best_move_or_insert_into_movelist(
+#ifdef IF_ONLY
+// If Only: whether a flip pass leaves out a play: one that places no blank,
+// for the fake blank, or that scores too little to have one.
+static inline bool gen_if_only_skips_play(const MoveGen *gen, Equity score,
+                                          const MachineLetter *strip,
+                                          int leftstrip, int rightstrip) {
+  if (!gen->if_only_flipping) {
+    return false;
+  }
+  if (score < int_to_equity(IF_ONLY_FAKE_BLANK_MIN_SCORE)) {
+    return true;
+  }
+  for (int i = leftstrip; i <= rightstrip; i++) {
+    if (strip[i] != PLAYED_THROUGH_MARKER && get_is_blanked(strip[i])) {
+      return false;
+    }
+  }
+  return true;
+}
+
+// If Only: the number of blanks a play places.
+static inline int gen_if_only_number_of_blanks(const MachineLetter *strip,
+                                               int leftstrip, int rightstrip) {
+  int number_of_blanks = 0;
+  for (int i = leftstrip; i <= rightstrip; i++) {
+    if (strip[i] != PLAYED_THROUGH_MARKER && get_is_blanked(strip[i])) {
+      number_of_blanks++;
+    }
+  }
+  return number_of_blanks;
+}
+
+// If Only: marks a placement in an If Only game as one, and in a flip pass
+// makes the blank it places at if_only_fake_blank_ordinal the fake one.
+static inline void gen_if_only_set_fake_blank(const MoveGen *gen, Move *move) {
+  if (!gen->is_if_only ||
+      move_get_type(move) != GAME_EVENT_TILE_PLACEMENT_MOVE) {
+    return;
+  }
+  move_set_if_only_placement(move);
+  if (!gen->if_only_flipping) {
+    return;
+  }
+  int ordinal = 0;
+  for (int i = 0; i < move_get_tiles_length(move); i++) {
+    const MachineLetter tile = move_get_tile(move, i);
+    if (tile != PLAYED_THROUGH_MARKER && get_is_blanked(tile) &&
+        ordinal++ == gen->if_only_fake_blank_ordinal) {
+      move_set_fake_blank(move, i, gen->if_only_flip_tile);
+      return;
+    }
+  }
+}
+#endif
+
+static inline void update_best_move_or_insert_into_movelist_once(
     MoveGen *gen, int leftstrip, int rightstrip, game_event_t move_type,
     Equity score, int start_row, int start_col, int tiles_played, int dir,
     MachineLetter strip[]) {
+#ifdef IF_ONLY
+  if (gen_if_only_skips_play(gen, score, strip, leftstrip, rightstrip)) {
+    return;
+  }
+#endif
   bool need_to_update_best_move_equity_or_score = false;
   Equity move_equity_or_score = 0;
   switch (gen->move_record_type) {
@@ -587,6 +707,9 @@ static inline void update_best_move_or_insert_into_movelist(
     Move *move = move_list_get_spare_move(gen->move_list);
     set_play_for_record(move, move_type, leftstrip, rightstrip, score,
                         start_row, start_col, tiles_played, dir, strip);
+#ifdef IF_ONLY
+    gen_if_only_set_fake_blank(gen, move);
+#endif
     move_equity_or_score = get_move_equity_for_sort_type(gen, move, score);
     if (gen->move_record_type == MOVE_RECORD_WITHIN_X_EQUITY_OF_BEST) {
       // This updates the cutoff move internally so no update will be pending
@@ -600,6 +723,9 @@ static inline void update_best_move_or_insert_into_movelist(
     Move *current_move = gen_get_current_move(gen);
     set_play_for_record(current_move, move_type, leftstrip, rightstrip, score,
                         start_row, start_col, tiles_played, dir, strip);
+#ifdef IF_ONLY
+    gen_if_only_set_fake_blank(gen, current_move);
+#endif
     if (gen->move_sort_type == MOVE_SORT_EQUITY && gen_pat_is_active(gen) &&
         !gen->stop_on_threshold) {
       const Equity equity_without_pat =
@@ -680,6 +806,31 @@ static inline void update_best_move_or_insert_into_movelist(
       move_equity_or_score > gen->target_equity_cutoff) {
     gen->threshold_exceeded = true;
   }
+}
+
+// Records a play. An If Only flip pass records it once for each blank it
+// places, with that blank the fake one: the plays score the same, but only a
+// fake blank can be swapped, so the positions they leave differ.
+static inline void update_best_move_or_insert_into_movelist(
+    MoveGen *gen, int leftstrip, int rightstrip, game_event_t move_type,
+    Equity score, int start_row, int start_col, int tiles_played, int dir,
+    MachineLetter strip[]) {
+#ifdef IF_ONLY
+  if (gen->if_only_flipping) {
+    const int number_of_blanks =
+        gen_if_only_number_of_blanks(strip, leftstrip, rightstrip);
+    for (int ordinal = 0; ordinal < number_of_blanks; ordinal++) {
+      gen->if_only_fake_blank_ordinal = ordinal;
+      update_best_move_or_insert_into_movelist_once(
+          gen, leftstrip, rightstrip, move_type, score, start_row, start_col,
+          tiles_played, dir, strip);
+    }
+    return;
+  }
+#endif
+  update_best_move_or_insert_into_movelist_once(
+      gen, leftstrip, rightstrip, move_type, score, start_row, start_col,
+      tiles_played, dir, strip);
 }
 
 static inline void record_tile_placement_move(MoveGen *gen, int leftstrip,

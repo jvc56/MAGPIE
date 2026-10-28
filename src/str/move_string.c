@@ -18,9 +18,75 @@
 #include <stdlib.h>
 #include <string.h>
 
+#ifdef IF_ONLY
+// If Only: "@H8 " for a move that first swaps the fake blank at H8, with the
+// column in lowercase for UCGI.
+void string_builder_add_if_only_swap(StringBuilder *sb, const Move *move,
+                                     bool lowercase) {
+  if (!move_has_swap(move)) {
+    return;
+  }
+  string_builder_add_formatted_string(
+      sb, "@%c%d ", move_get_swap_col(move) + (lowercase ? 'a' : 'A'),
+      move_get_swap_row(move) + 1);
+}
+
+// If Only: for a placement in an If Only game that places a blank, "/" and,
+// for each blank it places, in order, "?" for a real blank or the real tile
+// under the fake one.
+static void string_builder_add_if_only_blanks(StringBuilder *sb,
+                                              const Move *move,
+                                              const LetterDistribution *ld) {
+  if (move_get_type(move) != GAME_EVENT_TILE_PLACEMENT_MOVE ||
+      !move_is_if_only_placement(move)) {
+    return;
+  }
+  bool places_blank = false;
+  for (int i = 0; i < move_get_tiles_length(move); i++) {
+    const MachineLetter tile = move_get_tile(move, i);
+    if (tile != PLAYED_THROUGH_MARKER && get_is_blanked(tile)) {
+      places_blank = true;
+      break;
+    }
+  }
+  if (!places_blank) {
+    return;
+  }
+  string_builder_add_char(sb, '/');
+  for (int i = 0; i < move_get_tiles_length(move); i++) {
+    const MachineLetter tile = move_get_tile(move, i);
+    if (tile == PLAYED_THROUGH_MARKER || !get_is_blanked(tile)) {
+      continue;
+    }
+    string_builder_add_user_visible_letter(sb, ld,
+                                           i == move_get_fake_blank_index(move)
+                                               ? move_get_fake_blank_tile(move)
+                                               : BLANK_MACHINE_LETTER);
+  }
+}
+#endif
+
+#ifdef IF_ONLY
+// If Only: the letter of a square a move plays through, as it is after the
+// move's swap, which makes the swapped fake blank's letter a real tile.
+static MachineLetter if_only_played_through_letter(const Move *move,
+                                                   const Board *board, int row,
+                                                   int col) {
+  const MachineLetter letter = board_get_letter(board, row, col);
+  if (move_has_swap(move) && move_get_swap_row(move) == row &&
+      move_get_swap_col(move) == col) {
+    return get_unblanked_machine_letter(letter);
+  }
+  return letter;
+}
+#endif
+
 void string_builder_add_move_description(StringBuilder *move_string_builder,
                                          const Move *move,
                                          const LetterDistribution *ld) {
+#ifdef IF_ONLY
+  string_builder_add_if_only_swap(move_string_builder, move, false);
+#endif
   if (move_get_type(move) != GAME_EVENT_PASS) {
     if (move_get_type(move) == GAME_EVENT_TILE_PLACEMENT_MOVE) {
       if (board_is_dir_vertical(move_get_dir(move))) {
@@ -47,6 +113,9 @@ void string_builder_add_move_description(StringBuilder *move_string_builder,
         string_builder_add_user_visible_letter(move_string_builder, ld, letter);
       }
     }
+#ifdef IF_ONLY
+    string_builder_add_if_only_blanks(move_string_builder, move, ld);
+#endif
     if (move_get_type(move) == GAME_EVENT_EXCHANGE) {
       string_builder_add_string(move_string_builder, ")");
     }
@@ -58,6 +127,9 @@ void string_builder_add_move_description(StringBuilder *move_string_builder,
 void string_builder_add_move(StringBuilder *string_builder, const Board *board,
                              const Move *move, const LetterDistribution *ld,
                              bool add_score) {
+#ifdef IF_ONLY
+  string_builder_add_if_only_swap(string_builder, move, false);
+#endif
   if (move_get_type(move) == GAME_EVENT_PASS) {
     string_builder_add_string(string_builder, "pass");
     return;
@@ -91,7 +163,12 @@ void string_builder_add_move(StringBuilder *string_builder, const Board *board,
     MachineLetter print_tile = tile;
     if (tile == PLAYED_THROUGH_MARKER) {
       if (board) {
+#ifdef IF_ONLY
+        print_tile = if_only_played_through_letter(move, board, current_row,
+                                                   current_col);
+#else
         print_tile = board_get_letter(board, current_row, current_col);
+#endif
       }
       if (i == 0 && board) {
         string_builder_add_string(string_builder, "(");
@@ -122,6 +199,9 @@ void string_builder_add_move(StringBuilder *string_builder, const Board *board,
       current_col++;
     }
   }
+#ifdef IF_ONLY
+  string_builder_add_if_only_blanks(string_builder, move, ld);
+#endif
   if (board && add_score) {
     string_builder_add_spaces(string_builder, 1);
     string_builder_add_int(string_builder, equity_to_int(move_get_score(move)));
@@ -132,6 +212,20 @@ void move_get_string(const Move *move, const Board *board,
                      const LetterDistribution *ld, bool add_score, char *dest,
                      size_t dest_size) {
   size_t pos = 0;
+#ifdef IF_ONLY
+  // A swap or a fake blank is written as string_builder_add_move writes it,
+  // the same format.
+  if (move_has_swap(move) ||
+      (move_get_type(move) == GAME_EVENT_TILE_PLACEMENT_MOVE &&
+       move_is_if_only_placement(move))) {
+    StringBuilder *sb = string_builder_create();
+    string_builder_add_move(sb, board, move, ld, add_score);
+    pos = append_bounded(dest, dest_size, pos, string_builder_peek(sb));
+    dest[pos] = '\0';
+    string_builder_destroy(sb);
+    return;
+  }
+#endif
   if (move_get_type(move) == GAME_EVENT_PASS) {
     pos = append_bounded(dest, dest_size, pos, "pass");
     dest[pos] = '\0';
@@ -215,7 +309,9 @@ void move_get_string(const Move *move, const Board *board,
 void string_builder_add_ucgi_move(StringBuilder *move_string_builder,
                                   const Move *move, const Board *board,
                                   const LetterDistribution *ld) {
-
+#ifdef IF_ONLY
+  string_builder_add_if_only_swap(move_string_builder, move, true);
+#endif
   if (move_get_type(move) != GAME_EVENT_PASS) {
     if (move_get_type(move) == GAME_EVENT_TILE_PLACEMENT_MOVE) {
       if (board_is_dir_vertical(move_get_dir(move))) {
@@ -247,10 +343,17 @@ void string_builder_add_ucgi_move(StringBuilder *move_string_builder,
           move_get_type(move) == GAME_EVENT_TILE_PLACEMENT_MOVE) {
         int r = move_get_row_start(move) + (ri * i);
         int c = move_get_col_start(move) + (ci * i);
+#ifdef IF_ONLY
+        letter = if_only_played_through_letter(move, board, r, c);
+#else
         letter = board_get_letter(board, r, c);
+#endif
       }
       string_builder_add_user_visible_letter(move_string_builder, ld, letter);
     }
+#ifdef IF_ONLY
+    string_builder_add_if_only_blanks(move_string_builder, move, ld);
+#endif
   } else {
     string_builder_add_string(move_string_builder, "pass");
   }
@@ -261,6 +364,9 @@ void string_builder_add_gcg_move(StringBuilder *move_string_builder,
                                  const Move *move,
                                  const LetterDistribution *ld) {
   const game_event_t move_type = move_get_type(move);
+#ifdef IF_ONLY
+  string_builder_add_if_only_swap(move_string_builder, move, false);
+#endif
   switch (move_type) {
   case GAME_EVENT_PASS:
     string_builder_add_char(move_string_builder, '-');
@@ -293,6 +399,9 @@ void string_builder_add_gcg_move(StringBuilder *move_string_builder,
         string_builder_add_user_visible_letter(move_string_builder, ld, letter);
       }
     }
+#ifdef IF_ONLY
+    string_builder_add_if_only_blanks(move_string_builder, move, ld);
+#endif
     break;
   default:
     log_fatal("encountered unexpected move type while building move string: %d",
@@ -307,14 +416,13 @@ void string_builder_add_move_leave(StringBuilder *sb, const Rack *rack,
                                    const Move *move,
                                    const LetterDistribution *ld) {
   Rack leave = *rack;
+#ifdef IF_ONLY
+  move_apply_swap_to_rack(move, &leave);
+#endif
   const int move_tiles_length = move_get_tiles_length(move);
   for (int i = 0; i < move_tiles_length; i++) {
     if (move_get_tile(move, i) != PLAYED_THROUGH_MARKER) {
-      if (get_is_blanked(move_get_tile(move, i))) {
-        rack_take_letter(&leave, BLANK_MACHINE_LETTER);
-      } else {
-        rack_take_letter(&leave, move_get_tile(move, i));
-      }
+      rack_take_letter(&leave, move_get_rack_tile(move, i));
     }
   }
   string_builder_add_rack(sb, &leave, ld, false);

@@ -108,6 +108,13 @@ game_variant_t get_game_variant_type_from_name(const char *variant_name) {
   } else if (strings_iequal(variant_name, GAME_VARIANT_WOADWAGE_NAME)) {
     game_variant = GAME_VARIANT_WOADWAGE;
   }
+#ifdef IF_ONLY
+  else if (strings_iequal(variant_name, GAME_VARIANT_IF_ONLY_NAME)) {
+    game_variant = GAME_VARIANT_IF_ONLY;
+  } else if (strings_iequal(variant_name, GAME_VARIANT_LONIFY_NAME)) {
+    game_variant = GAME_VARIANT_LONIFY;
+  }
+#endif
   return game_variant;
 }
 
@@ -650,7 +657,8 @@ static inline void game_gen_classic_cross_set(const Game *game, int row,
 
 void game_gen_cross_set(const Game *game, int row, int col, int dir,
                         int cross_set_index) {
-  const game_variant_t variant = game_get_variant(game);
+  const game_variant_t variant =
+      game_variant_word_rules(game_get_variant(game));
   if (variant == GAME_VARIANT_CLASSIC) {
     game_gen_classic_cross_set(game, row, col, dir, cross_set_index);
   } else if (variant == GAME_VARIANT_WOADWAGE) {
@@ -812,6 +820,24 @@ Game *game_create(const GameArgs *game_args) {
 
 // This creates a move list and a generator but does
 // not copy them from game.
+#ifdef IF_ONLY
+// If Only: the player swaps the fake blank at (row, col) for the matching real
+// tile from their rack. The square keeps its letter, now a real tile, and the
+// rack takes the tile that was under the fake blank. Cross sets are left to
+// the caller: only the scores of the words through the square change.
+void game_if_only_swap(const Game *game, int player_index, int row, int col) {
+  Board *board = game_get_board(game);
+  assert(board_is_fake_blank(board, row, col));
+  const MachineLetter letter =
+      get_unblanked_machine_letter(board_get_letter(board, row, col));
+  Rack *rack = player_get_rack(game_get_player(game, player_index));
+  rack_take_letter(rack, letter);
+  rack_add_letter(rack, board_get_fake_blank_tile(board, row, col));
+  board_set_letter(board, row, col, letter);
+  board_clear_fake_blank(board, row, col);
+}
+#endif
+
 Game *game_duplicate(const Game *game) {
   Game *new_game = malloc_or_die(sizeof(Game));
   new_game->bag = bag_duplicate(game->bag);

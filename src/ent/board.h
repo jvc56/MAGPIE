@@ -36,8 +36,22 @@ typedef struct Square {
   uint8_t is_cross_word : 1;
   uint8_t player_idx : 1;
   uint8_t owner_known : 1;
+#ifdef IF_ONLY
+  // If Only: the tile is a fake blank, a tile played upside down. Its letter
+  // is the declared one, blanked, and fake_blank_tile the real tile under it.
+  // Both fit in what was padding, so Square stays 32 bytes.
+  uint8_t is_fake_blank : 1;
+  uint8_t _pad : 3;
+  MachineLetter fake_blank_tile;
+#else
   uint8_t _pad : 4;
+#endif
 } Square;
+
+#ifdef IF_ONLY
+static_assert(sizeof(Square) == 32,
+              "If Only's fake blank fields must fit in Square's padding");
+#endif
 
 typedef struct Board {
   // The Board struct maintains four "sub-boards":
@@ -225,6 +239,43 @@ static inline MachineLetter board_get_letter(const Board *b, int row, int col) {
   // Cross index doesn't matter for letter reads.
   return square_get_letter(board_get_readonly_square(b, row, col, 0, 0));
 }
+
+#ifdef IF_ONLY
+// If Only: marks (row, col), whose letter is the declared one, blanked, as a
+// fake blank over real_tile, on every sub-board copy.
+static inline void board_set_fake_blank(Board *b, int row, int col,
+                                        MachineLetter real_tile) {
+  for (int ci = 0; ci < 2; ci++) {
+    for (int dir = 0; dir < 2; dir++) {
+      Square *square = board_get_writable_square(b, row, col, dir, ci);
+      square->is_fake_blank = 1;
+      square->fake_blank_tile = real_tile;
+    }
+  }
+}
+
+// If Only: (row, col) holds no fake blank, on every sub-board copy.
+static inline void board_clear_fake_blank(Board *b, int row, int col) {
+  for (int ci = 0; ci < 2; ci++) {
+    for (int dir = 0; dir < 2; dir++) {
+      Square *square = board_get_writable_square(b, row, col, dir, ci);
+      square->is_fake_blank = 0;
+      square->fake_blank_tile = 0;
+    }
+  }
+}
+
+static inline bool board_is_fake_blank(const Board *b, int row, int col) {
+  return board_get_readonly_square(b, row, col, 0, 0)->is_fake_blank;
+}
+
+// The real tile under the fake blank at (row, col).
+static inline MachineLetter board_get_fake_blank_tile(const Board *b, int row,
+                                                      int col) {
+  assert(board_is_fake_blank(b, row, col));
+  return board_get_readonly_square(b, row, col, 0, 0)->fake_blank_tile;
+}
+#endif
 
 // Marks every sub-board copy of (row, col) with `player_idx` (0 or 1).
 // Only meaningful when the square actually has a letter. Sim and
@@ -834,6 +885,9 @@ static inline void board_reset(Board *board) {
       board_set_letter(board, row, col, ALPHABET_EMPTY_SQUARE_MARKER);
       board_reset_is_cross_word(board, row, col, BOARD_HORIZONTAL_DIRECTION);
       board_reset_is_cross_word(board, row, col, BOARD_VERTICAL_DIRECTION);
+#ifdef IF_ONLY
+      board_clear_fake_blank(board, row, col);
+#endif
     }
   }
 

@@ -27,6 +27,9 @@
 #include <ctype.h>
 #include <stdint.h>
 #include <stdlib.h>
+#ifdef IF_ONLY
+#include <string.h>
+#endif
 
 enum { MOVE_MAX_FIELDS = 2 };
 
@@ -279,6 +282,119 @@ void validate_tiles_played(const LetterDistribution *ld, const Board *board,
   free(machine_letters);
 }
 
+#ifdef IF_ONLY
+// If Only: applies a placement's blank suffix, the text after its "/": an
+// entry for each blank the move places, in order, "?" for a real blank or the
+// real tile played upside down as a fake blank, at most one. The fake blank's
+// tile, not a blank, then comes from the rack.
+static void validate_if_only_blanks(const Game *game, Move *move,
+                                    const char *blank_suffix,
+                                    Rack *tiles_played_rack,
+                                    ErrorStack *error_stack) {
+  if (!game_variant_is_if_only(game_get_variant(game))) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_MOVE_VALIDATION_IF_ONLY_NOT_ALLOWED,
+        string_duplicate("a blank suffix is only allowed in If Only games"));
+    return;
+  }
+  if (move_get_type(move) != GAME_EVENT_TILE_PLACEMENT_MOVE) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_MOVE_VALIDATION_IF_ONLY_INVALID_BLANKS,
+        string_duplicate("only a tile placement can have a blank suffix"));
+    return;
+  }
+  MachineLetter entries[BOARD_DIM];
+  const int number_of_entries = ld_str_to_mls(
+      game_get_ld(game), blank_suffix, false, entries, BOARD_DIM);
+  int blank_indexes[BOARD_DIM];
+  int number_of_blanks = 0;
+  for (int i = 0; i < move_get_tiles_length(move); i++) {
+    const MachineLetter tile = move_get_tile(move, i);
+    if (tile != PLAYED_THROUGH_MARKER && get_is_blanked(tile)) {
+      blank_indexes[number_of_blanks++] = i;
+    }
+  }
+  if (number_of_blanks == 0 || number_of_entries != number_of_blanks) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_MOVE_VALIDATION_IF_ONLY_INVALID_BLANKS,
+        get_formatted_string("the blank suffix '%s' needs one entry for each "
+                             "of the %d blanks played, and there must be one",
+                             blank_suffix, number_of_blanks));
+    return;
+  }
+  bool has_fake_blank = false;
+  for (int entry_idx = 0; entry_idx < number_of_entries; entry_idx++) {
+    const MachineLetter entry = entries[entry_idx];
+    if (entry == BLANK_MACHINE_LETTER) {
+      continue;
+    }
+    if (has_fake_blank || get_is_blanked(entry)) {
+      error_stack_push(
+          error_stack, ERROR_STATUS_MOVE_VALIDATION_IF_ONLY_INVALID_BLANKS,
+          get_formatted_string("the blank suffix '%s' can name one real tile "
+                               "for a fake blank, in uppercase",
+                               blank_suffix));
+      return;
+    }
+    has_fake_blank = true;
+    move_set_fake_blank(move, blank_indexes[entry_idx], entry);
+    rack_take_letter(tiles_played_rack, BLANK_MACHINE_LETTER);
+    rack_add_letter(tiles_played_rack, entry);
+  }
+}
+
+// If Only: parses the swap square after the "@" of a move's first field, as
+// a column letter and a row number in either order, and checks that it holds
+// a fake blank whose declared letter the player's rack holds as a real tile.
+static void validate_if_only_swap(const Game *game, int player_index,
+                                  const char *square, int *row, int *col,
+                                  ErrorStack *error_stack) {
+  if (!game_variant_is_if_only(game_get_variant(game))) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_MOVE_VALIDATION_IF_ONLY_NOT_ALLOWED,
+        string_duplicate("a swap is only allowed in If Only games"));
+    return;
+  }
+  *row = -1;
+  *col = -1;
+  int row_number = 0;
+  bool valid = true;
+  for (const char *c = square; *c != '\0'; c++) {
+    if (isdigit((unsigned char)*c)) {
+      row_number = row_number * 10 + (*c - '0');
+    } else if (isalpha((unsigned char)*c) && *col < 0) {
+      *col = get_letter_coords(*c);
+    } else {
+      valid = false;
+    }
+  }
+  *row = row_number - 1;
+  const Board *board = game_get_board(game);
+  if (!valid || !board_is_position_in_bounds(*row, *col)) {
+    error_stack_push(error_stack,
+                     ERROR_STATUS_MOVE_VALIDATION_IF_ONLY_INVALID_SWAP,
+                     get_formatted_string("invalid swap square: %s", square));
+    return;
+  }
+  if (!board_is_fake_blank(board, *row, *col)) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_MOVE_VALIDATION_IF_ONLY_INVALID_SWAP,
+        get_formatted_string("there is no fake blank to swap at %s", square));
+    return;
+  }
+  const MachineLetter letter =
+      get_unblanked_machine_letter(board_get_letter(board, *row, *col));
+  if (rack_get_letter(player_get_rack(game_get_player(game, player_index)),
+                      letter) == 0) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_MOVE_VALIDATION_IF_ONLY_INVALID_SWAP,
+        get_formatted_string("the rack has no real tile to swap for the fake "
+                             "blank at %s",
+                             square));
+  }
+}
+#endif
+
 void validate_split_move(const StringSplitter *split_move, const Game *game,
                          ValidatedMove *vm, int player_index,
                          Rack *tiles_played_rack, bool allow_playthrough,
@@ -294,6 +410,9 @@ void validate_split_move(const StringSplitter *split_move, const Game *game,
   const Board *board = game_get_board(game);
   const Bag *bag = game_get_bag(game);
   int number_of_fields = string_splitter_get_number_of_items(split_move);
+#ifdef IF_ONLY
+  move_clear_if_only(vm->move);
+#endif
 
   if (number_of_fields > MOVE_MAX_FIELDS) {
     error_stack_push(
@@ -379,8 +498,47 @@ void validate_split_move(const StringSplitter *split_move, const Game *game,
     return;
   }
 
+#ifdef IF_ONLY
+  // If Only: a placement's tiles may end with "/" and an entry for each blank
+  // it places, "?" for a real blank or the real tile played as a fake one.
+  char *tiles_copy = string_duplicate(tiles);
+  char *blank_suffix = strchr(tiles_copy, '/');
+  if (blank_suffix) {
+    *blank_suffix = '\0';
+    blank_suffix++;
+  }
+  validate_tiles_played(ld, board, vm->move, tiles_copy, tiles_played_rack,
+                        allow_playthrough, error_stack);
+  if (error_stack_is_empty(error_stack) && blank_suffix) {
+    validate_if_only_blanks(game, vm->move, blank_suffix, tiles_played_rack,
+                            error_stack);
+  } else if (error_stack_is_empty(error_stack) &&
+             game_variant_is_if_only(game_get_variant(game)) &&
+             move_get_type(vm->move) == GAME_EVENT_TILE_PLACEMENT_MOVE) {
+    // The blanks a placement places need a suffix naming their sources.
+    for (int i = 0; i < move_get_tiles_length(vm->move); i++) {
+      const MachineLetter tile = move_get_tile(vm->move, i);
+      if (tile != PLAYED_THROUGH_MARKER && get_is_blanked(tile)) {
+        error_stack_push(
+            error_stack, ERROR_STATUS_MOVE_VALIDATION_IF_ONLY_INVALID_BLANKS,
+            get_formatted_string("a play with a blank in an If Only game "
+                                 "needs a blank suffix, such as /? for a "
+                                 "real blank: %s",
+                                 tiles));
+        break;
+      }
+    }
+  }
+  if (error_stack_is_empty(error_stack) &&
+      game_variant_is_if_only(game_get_variant(game)) &&
+      move_get_type(vm->move) == GAME_EVENT_TILE_PLACEMENT_MOVE) {
+    move_set_if_only_placement(vm->move);
+  }
+  free(tiles_copy);
+#else
   validate_tiles_played(ld, board, vm->move, tiles, tiles_played_rack,
                         allow_playthrough, error_stack);
+#endif
 
   if (!error_stack_is_empty(error_stack)) {
     return;
@@ -428,6 +586,47 @@ void validated_move_load(ValidatedMove *vm, const Game *game, int player_index,
     return;
   }
 
+#ifdef IF_ONLY
+  // If Only: a move may start with a swap, "@" and a square. The swap is
+  // checked against the game, and the rest of the move against a copy of the
+  // game with the swap made, so its score and leave are the ones after it.
+  const char *swap_start = move_string + strspn(move_string, " \t");
+  if (*swap_start == '@') {
+    const char *square_start = swap_start + 1;
+    const size_t square_length = strcspn(square_start, " \t");
+    char *square = string_duplicate(square_start);
+    square[square_length] = '\0';
+    int row;
+    int col;
+    validate_if_only_swap(game, player_index, square, &row, &col, error_stack);
+    free(square);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+    const char *rest = square_start + square_length;
+    if (*(rest + strspn(rest, " \t")) == '@') {
+      error_stack_push(error_stack,
+                       ERROR_STATUS_MOVE_VALIDATION_IF_ONLY_INVALID_SWAP,
+                       string_duplicate("a turn can make only one swap"));
+      return;
+    }
+    const Board *board = game_get_board(game);
+    const MachineLetter letter =
+        get_unblanked_machine_letter(board_get_letter(board, row, col));
+    const MachineLetter tile = board_get_fake_blank_tile(board, row, col);
+    Game *swapped_game = game_duplicate(game);
+    game_if_only_swap(swapped_game, player_index, row, col);
+    game_gen_all_cross_sets(swapped_game);
+    validated_move_load(vm, swapped_game, player_index, rest, allow_phonies,
+                        allow_playthrough, error_stack);
+    if (error_stack_is_empty(error_stack)) {
+      move_set_swap(vm->move, row, col, letter, tile);
+    }
+    game_destroy(swapped_game);
+    return;
+  }
+#endif
+
   validate_move(vm, game, player_index, move_string, allow_playthrough,
                 error_stack);
 
@@ -451,11 +650,23 @@ void validated_move_load(ValidatedMove *vm, const Game *game, int player_index,
             player_index));
 
     move_set_score(vm->move, score);
+#ifdef IF_ONLY
+    // A play with a fake blank that scores too little is accepted when
+    // phonies are, and comes off like one when challenged.
+    if (!allow_phonies && move_is_if_only_short_flip(vm->move)) {
+      error_stack_push(
+          error_stack, ERROR_STATUS_MOVE_VALIDATION_IF_ONLY_SCORE_TOO_LOW,
+          get_formatted_string("a play with a fake blank must score at least "
+                               "%d: %s",
+                               IF_ONLY_FAKE_BLANK_MIN_SCORE, move_string));
+      return;
+    }
+#endif
 
     vm->formed_words = formed_words_create(board, vm->move);
 
-    formed_words_populate_validities(kwg, vm->formed_words,
-                                     game_get_variant(game));
+    formed_words_populate_validities(
+        kwg, vm->formed_words, game_variant_word_rules(game_get_variant(game)));
 
     if (!allow_phonies) {
       for (int i = 0; i < formed_words_get_num_words(vm->formed_words); i++) {
@@ -674,13 +885,8 @@ void validated_moves_set_rack_to_played_letters(const ValidatedMoves *vms,
   rack_reset(rack_to_set);
   const int tiles_length = move_get_tiles_length(move);
   for (int j = 0; j < tiles_length; j++) {
-    const MachineLetter tile = move_get_tile(move, j);
-    if (tile != PLAYED_THROUGH_MARKER) {
-      if (get_is_blanked(tile)) {
-        rack_add_letter(rack_to_set, BLANK_MACHINE_LETTER);
-      } else {
-        rack_add_letter(rack_to_set, tile);
-      }
+    if (move_get_tile(move, j) != PLAYED_THROUGH_MARKER) {
+      rack_add_letter(rack_to_set, move_get_rack_tile(move, j));
     }
   }
 }
@@ -693,6 +899,11 @@ bool validated_moves_is_phony(const ValidatedMoves *vms, int vm_index) {
   if (move_type != GAME_EVENT_TILE_PLACEMENT_MOVE) {
     return false;
   }
+#ifdef IF_ONLY
+  if (move_is_if_only_short_flip(move)) {
+    return true;
+  }
+#endif
   const FormedWords *fw = validated_moves_get_formed_words(vms, vm_index);
   int number_of_words = formed_words_get_num_words(fw);
   for (int i = 0; i < number_of_words; i++) {

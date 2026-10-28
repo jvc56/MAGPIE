@@ -43,13 +43,12 @@ typedef struct PlayEventsData {
 } PlayEventsData;
 
 Equity get_leave_value_for_move(const KLV *klv, const Move *move, Rack *rack) {
+#ifdef IF_ONLY
+  move_apply_swap_to_rack(move, rack);
+#endif
   for (int i = 0; i < move_get_tiles_length(move); i++) {
     if (move_get_tile(move, i) != PLAYED_THROUGH_MARKER) {
-      if (get_is_blanked(move_get_tile(move, i))) {
-        rack_take_letter(rack, BLANK_MACHINE_LETTER);
-      } else {
-        rack_take_letter(rack, move_get_tile(move, i));
-      }
+      rack_take_letter(rack, move_get_rack_tile(move, i));
     }
   }
   return klv_get_leave_value(klv, rack);
@@ -59,16 +58,15 @@ Equity get_leave_value_for_move(const KLV *klv, const Move *move, Rack *rack) {
 void get_leave_for_move(const Move *move, const Game *game, Rack *leave) {
   rack_copy(leave, player_get_rack(game_get_player(
                        game, game_get_player_on_turn_index(game))));
+#ifdef IF_ONLY
+  move_apply_swap_to_rack(move, leave);
+#endif
   int tiles_length = move_get_tiles_length(move);
   for (int idx = 0; idx < tiles_length; idx++) {
-    MachineLetter letter = move_get_tile(move, idx);
-    if (letter == PLAYED_THROUGH_MARKER) {
+    if (move_get_tile(move, idx) == PLAYED_THROUGH_MARKER) {
       continue;
     }
-    if (get_is_blanked(letter)) {
-      letter = BLANK_MACHINE_LETTER;
-    }
-    rack_take_letter(leave, letter);
+    rack_take_letter(leave, move_get_rack_tile(move, idx));
   }
 }
 
@@ -95,6 +93,18 @@ void play_move_on_board(const Move *move, const Game *game) {
       continue;
     }
     board_set_letter(board, row_start, col_start + idx, letter);
+#ifdef IF_ONLY
+    if (move_get_fake_blank_index(move) == idx) {
+      // A fake blank is the declared letter, blanked, over the real tile the
+      // rack gives up.
+      board_set_fake_blank(board, row_start, col_start + idx,
+                           move_get_fake_blank_tile(move));
+      rack_take_letter(player_get_rack(game_get_player(
+                           game, game_get_player_on_turn_index(game))),
+                       move_get_fake_blank_tile(move));
+      continue;
+    }
+#endif
     if (get_is_blanked(letter)) {
       letter = BLANK_MACHINE_LETTER;
     }
@@ -612,12 +622,63 @@ static void record_move_on_board(const Move *move, const Game *game,
   }
 }
 
+#ifdef IF_ONLY
+// A swap turns the square's tile from a blank into a real one with the same
+// letter, so only the scores of the words through it change. Their cross sets
+// are regenerated as if a tile had just been played there, through its row's
+// word.
+static void update_cross_sets_for_swap(const Game *game, int row, int col) {
+  const Board *board = game_get_board(game);
+  const int left_col =
+      board_get_word_edge(board, row, col, WORD_DIRECTION_LEFT);
+  const int right_col =
+      board_get_word_edge(board, row, col, WORD_DIRECTION_RIGHT);
+  MachineLetter strip[BOARD_DIM];
+  for (int strip_col = left_col; strip_col <= right_col; strip_col++) {
+    strip[strip_col] = PLAYED_THROUGH_MARKER;
+  }
+  strip[col] = board_get_letter(board, row, col);
+  Move span;
+  move_set_all(&span, strip, left_col, right_col, /*score=*/0, row, left_col,
+               /*tiles_played=*/1, BOARD_HORIZONTAL_DIRECTION,
+               GAME_EVENT_TILE_PLACEMENT_MOVE, /*leave_value=*/0);
+  update_cross_set_for_move(&span, game);
+}
+
+// If Only: before the move, the player on turn swaps the fake blank at the
+// move's swap square for the matching real tile from their rack. The square
+// keeps its letter, now a real tile, and the rack takes the tile that was
+// under the fake blank.
+static void play_swap(const Move *move, const Game *game,
+                      bool update_cross_sets) {
+  if (!move_has_swap(move)) {
+    return;
+  }
+  Board *board = game_get_board(game);
+  const int row = move_get_swap_row(move);
+  const int col = move_get_swap_col(move);
+  assert(board_is_fake_blank(board, row, col));
+  assert(board_get_letter(board, row, col) ==
+         get_blanked_machine_letter(move_get_swap_letter(move)));
+  assert(board_get_fake_blank_tile(board, row, col) ==
+         move_get_swap_tile(move));
+  (void)board;
+  game_if_only_swap(game, game_get_player_on_turn_index(game), row, col);
+  if (update_cross_sets) {
+    update_cross_sets_for_swap(game, row, col);
+  }
+}
+#endif
+
 // Assumes the move has been validated
 // If the input leave rack is not null, it will record the leave of
 // the play in the leave rack.
 static void play_move_internal(const Move *move, Game *game, Rack *leave,
                                bool update_cross_sets) {
   game_backup(game);
+#ifdef IF_ONLY
+  play_swap(move, game, update_cross_sets);
+#endif
   const LetterDistribution *ld = game_get_ld(game);
   int player_on_turn_index = game_get_player_on_turn_index(game);
   Player *player_on_turn = game_get_player(game, player_on_turn_index);
@@ -680,6 +741,9 @@ void play_move_no_cross_set_update(const Move *move, Game *game, Rack *leave) {
 
 void play_move_without_drawing_tiles(const Move *move, Game *game) {
   game_backup(game);
+#ifdef IF_ONLY
+  play_swap(move, game, true);
+#endif
   int player_on_turn_index = game_get_player_on_turn_index(game);
   Player *player_on_turn = game_get_player(game, player_on_turn_index);
   const Rack *player_on_turn_rack = player_get_rack(player_on_turn);
@@ -704,8 +768,15 @@ void play_move_without_drawing_tiles(const Move *move, Game *game) {
   game_start_next_player_turn(game);
 }
 
-void return_phony_letters(Game *game) {
+// Takes back phony_move, the last move played. Under If Only, a swap it made
+// first stands: the swapped tile stays on the board.
+void return_phony_letters(Game *game, const Move *phony_move) {
   game_unplay_last_move(game);
+#ifdef IF_ONLY
+  play_swap(phony_move, game, true);
+#else
+  (void)phony_move;
+#endif
   game_start_next_player_turn(game);
   game_increment_consecutive_scoreless_turns(game);
 }
@@ -1496,7 +1567,8 @@ void play_game_history_turn(const GameHistory *game_history, Game *game,
     }
     // This event is guaranteed to immediately succeed
     // a tile placement move.
-    return_phony_letters(game);
+    return_phony_letters(game, validated_moves_get_move(
+                                   game_event_get_vms(previous_game_event), 0));
     break;
   case GAME_EVENT_TIME_PENALTY:
     if (play_events_data->played_time_penalty[game_event_player_index]) {

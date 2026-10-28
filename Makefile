@@ -26,6 +26,18 @@ endif
 ifndef RACK_SIZE
 RACK_SIZE = 7
 endif
+# IF_ONLY=1 builds in the If Only variant (fake blanks and swaps). Classic
+# builds compile none of it.
+ifndef IF_ONLY
+IF_ONLY = 0
+endif
+ifeq ($(IF_ONLY),1)
+IF_ONLY_CFLAGS := -DIF_ONLY
+IF_ONLY_OBJ_SUFFIX := -io
+else
+IF_ONLY_CFLAGS :=
+IF_ONLY_OBJ_SUFFIX :=
+endif
 
 # The portable optimized build. Identical to no_pgo_release except that the
 # instruction set is fixed instead of being whatever the building machine
@@ -96,9 +108,9 @@ OBJ_ROOT := obj
 # flavor is that the target is fixed, so changing it has to recompile rather
 # than relink objects built for the old one.
 ifeq ($(BUILD),portable_release)
-OBJ_DIR := $(OBJ_ROOT)/$(OBJ_TARGET_PREFIX)$(BUILD)-$(PORTABLE_MARCH)-$(OBJ_CC)-b$(BOARD_DIM)-r$(RACK_SIZE)
+OBJ_DIR := $(OBJ_ROOT)/$(OBJ_TARGET_PREFIX)$(BUILD)-$(PORTABLE_MARCH)-$(OBJ_CC)-b$(BOARD_DIM)-r$(RACK_SIZE)$(IF_ONLY_OBJ_SUFFIX)
 else
-OBJ_DIR := $(OBJ_ROOT)/$(OBJ_TARGET_PREFIX)$(BUILD)-$(OBJ_CC)-b$(BOARD_DIM)-r$(RACK_SIZE)
+OBJ_DIR := $(OBJ_ROOT)/$(OBJ_TARGET_PREFIX)$(BUILD)-$(OBJ_CC)-b$(BOARD_DIM)-r$(RACK_SIZE)$(IF_ONLY_OBJ_SUFFIX)
 endif
 
 # Profile-guided optimization data. The default lives below OBJ_ROOT so it is
@@ -299,9 +311,9 @@ CFLAGS += -DMAGPIE_BUILD_TARGET=\"$(BUILD_TARGET)\"
 # a header recompiles exactly the .c files that include it -- no `make clean`.
 DEPFLAGS := -MMD -MP
 
-CFLAGS += -DBOARD_DIM=$(BOARD_DIM) -DRACK_SIZE=$(RACK_SIZE)
+CFLAGS += -DBOARD_DIM=$(BOARD_DIM) -DRACK_SIZE=$(RACK_SIZE) $(IF_ONLY_CFLAGS)
 ifeq ($(BUILD),pgo_use)
-CMD_CFLAGS := $(cflags.no_pgo_release) -DBOARD_DIM=$(BOARD_DIM) -DRACK_SIZE=$(RACK_SIZE)
+CMD_CFLAGS := $(cflags.no_pgo_release) -DBOARD_DIM=$(BOARD_DIM) -DRACK_SIZE=$(RACK_SIZE) $(IF_ONLY_CFLAGS)
 else
 CMD_CFLAGS := $(CFLAGS)
 endif
@@ -440,7 +452,7 @@ endif
 
 # Optimized test builds keep assertions enabled.
 $(OBJ_DIR)/$(TEST_DIR)/%.o: $(TEST_DIR)/%.c | $(OBJ_DIR) $(OBJ_DIR)/$(TEST_DIR) $(TEST_OBJ_SUBDIRS)
-	$(CC) $(if $(filter no_pgo_release portable_release bai_stats pgo_generate pgo_use,$(BUILD)),${cflags.test_$(BUILD)},$(CFLAGS)) $(DEPFLAGS) -DBOARD_DIM=$(BOARD_DIM) -DRACK_SIZE=$(RACK_SIZE) -c $< -o $@
+	$(CC) $(if $(filter no_pgo_release portable_release bai_stats pgo_generate pgo_use,$(BUILD)),${cflags.test_$(BUILD)},$(CFLAGS)) $(DEPFLAGS) -DBOARD_DIM=$(BOARD_DIM) -DRACK_SIZE=$(RACK_SIZE) $(IF_ONLY_CFLAGS) -c $< -o $@
 
 $(BIN_DIR) $(OBJ_DIR) $(OBJ_DIR)/$(SRC_DIR) $(OBJ_DIR)/$(CMD_DIR) $(OBJ_DIR)/$(TEST_DIR) $(OBJ_DIR)/$(TOOLS_DIR) $(SRC_OBJ_SUBDIRS) $(TEST_OBJ_SUBDIRS):
 	mkdir -p $@

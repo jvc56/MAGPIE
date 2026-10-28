@@ -227,8 +227,11 @@ void test_error_cases(GameHistory *game_history) {
                          ERROR_STATUS_GCG_PARSE_MOVE_VALIDATION_ERROR);
   test_single_error_case("redundant_pragma", config, game_history,
                          ERROR_STATUS_GCG_PARSE_REDUNDANT_PRAGMA);
+#ifndef IF_ONLY
+  // The file's game type is lonify, a variant only in an If Only build.
   test_single_error_case("unrecognized_game_variant", config, game_history,
                          ERROR_STATUS_GCG_PARSE_UNRECOGNIZED_GAME_VARIANT);
+#endif
   test_single_error_case("last_rack_penalty_incorrect", config, game_history,
                          ERROR_STATUS_GCG_PARSE_END_RACK_PENALTY_INCORRECT);
   test_single_error_case("end_rack_points_incorrect", config, game_history,
