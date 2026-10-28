@@ -3,6 +3,7 @@
 
 #include "../def/board_defs.h"
 #include "../def/equity_defs.h"
+#include "../def/game_defs.h"
 #include "../def/letter_distribution_defs.h"
 #include "../def/pat_defs.h"
 #include "board.h"
@@ -44,6 +45,9 @@ typedef struct PATEvalContext {
   // move creates; NULL means kwg does, as a wordsmog alphagram KWG. Set with
   // pat_eval_context_set_wmp.
   const WMP *wmp;
+  // Whether the game is woadwage, whose words may be two of kwg's run
+  // together.
+  bool woadwage;
   Equity pre_penalty;
   // The premium squares walked, in row-major order within each class, and
   // which class each belongs to.
@@ -166,7 +170,12 @@ void pat_eval_context_disable(PATEvalContext *pat_eval_ctx);
 // carry no correction; every load or disable clears it.
 void pat_eval_context_set_utility(PATEvalContext *pat_eval_ctx, int margin,
                                   int bag);
-void pat_eval_context_set_kwg(PATEvalContext *pat_eval_ctx, const KWG *kwg);
+// Sets the lexicon that resolves hooks a move creates, and the variant whose
+// words it spells.
+void pat_eval_context_set_kwg(PATEvalContext *pat_eval_ctx, const KWG *kwg,
+                              game_variant_t variant);
+// Sets the WMP that resolves the hooks a move creates in wordsmog (see
+// PATWeights.anagram); NULL means the KWG does.
 void pat_eval_context_set_wmp(PATEvalContext *pat_eval_ctx, const WMP *wmp);
 // Builds the context static evaluation uses. Premium squares whose class has
 // no nonzero weight or that enabled_classes_mask excludes, and windows whose

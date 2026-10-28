@@ -1,6 +1,7 @@
 #include "words.h"
 
 #include "../def/board_defs.h"
+#include "../def/game_defs.h"
 #include "../def/letter_distribution_defs.h"
 #include "../def/rack_defs.h"
 #include "../ent/kwg.h"
@@ -10,6 +11,7 @@
 #include "bit_rack.h"
 #include "board.h"
 #include "kwg_alpha.h"
+#include "kwg_woadwage.h"
 #include "letter_distribution.h"
 #include "wmp.h"
 #include <stdbool.h>
@@ -205,20 +207,24 @@ static bool is_word_valid_wmp(const FormedWord *w, const WMP *wmp) {
 }
 
 bool is_word_valid(const FormedWord *w, const KWG *kwg, const WMP *wmp,
-                   bool is_wordsmog) {
+                   game_variant_t variant) {
   if (w->word_length < 2) {
     return false;
   }
-  if (is_wordsmog) {
+  if (variant == GAME_VARIANT_WORDSMOG) {
     return wmp != NULL ? is_word_valid_wmp(w, wmp)
                        : is_word_valid_alpha(w, kwg);
+  }
+  if (variant == GAME_VARIANT_WOADWAGE) {
+    return kwg_accepts_woadwage(kwg, w->word, w->word_length);
   }
   return is_word_valid_standard(w, kwg);
 }
 
 void formed_words_populate_validities(const KWG *kwg, const WMP *wmp,
-                                      FormedWords *ws, bool is_wordsmog) {
+                                      FormedWords *ws,
+                                      game_variant_t variant) {
   for (int i = 0; i < ws->num_words; i++) {
-    ws->words[i].valid = is_word_valid(&ws->words[i], kwg, wmp, is_wordsmog);
+    ws->words[i].valid = is_word_valid(&ws->words[i], kwg, wmp, variant);
   }
 }

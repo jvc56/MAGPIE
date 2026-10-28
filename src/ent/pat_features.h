@@ -54,6 +54,10 @@ typedef struct PATMoveOverlay {
   // otherwise from kwg, which is then a wordsmog alphagram KWG.
   bool anagram;
   const WMP *wmp;
+  // Whether the words are woadwage's, which may be two of the lexicon's run
+  // together: created hooks are then woadwage cross sets, and fresh runs,
+  // like the board's runs in woadwage, extend by any letter.
+  bool woadwage;
 } PATMoveOverlay;
 
 // Fills unseen_counts (MAX_ALPHABET_SIZE entries) with the tiles neither on

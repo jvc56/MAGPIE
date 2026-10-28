@@ -618,6 +618,79 @@ void test_kwg_merge_build_bench(void) {
   config_destroy(pos_config);
 }
 
+// Every node's sibling tiles hold its tile and those of the siblings after it
+// in its list, and its accepting tiles those of them that accept. The letter
+// sets and arc lookups read from them match a walk of the list.
+static void assert_tile_bitsets_match_lists(const KWG *kwg) {
+  const uint64_t *sibling_tiles = kwg_get_sibling_tiles(kwg);
+  for (int node_idx = 0; node_idx < kwg_get_number_of_nodes(kwg); node_idx++) {
+    uint64_t expected = 0;
+    uint64_t expected_accepting = 0;
+    for (uint32_t sibling_idx = (uint32_t)node_idx;; sibling_idx++) {
+      const uint32_t node = kwg_node(kwg, sibling_idx);
+      expected |= (uint64_t)1 << kwg_node_tile(node);
+      if (kwg_node_accepts(node)) {
+        expected_accepting |= (uint64_t)1 << kwg_node_tile(node);
+      }
+      if (kwg_node_is_end(node)) {
+        break;
+      }
+    }
+    assert(sibling_tiles[node_idx] == expected);
+    // The letter sets leave out the separator, tile 0.
+    uint64_t extension_set = 0;
+    const uint64_t letter_set =
+        kwg_get_letter_sets(kwg, (uint32_t)node_idx, &extension_set);
+    assert(extension_set == (expected & ~(uint64_t)1));
+    assert(letter_set == (expected_accepting & ~(uint64_t)1));
+    // A node is the first of its tile from itself on.
+    const uint32_t node = kwg_node(kwg, (uint32_t)node_idx);
+    const MachineLetter tile = (MachineLetter)kwg_node_tile(node);
+    assert(kwg_get_next_node_index(kwg, (uint32_t)node_idx, tile) ==
+           kwg_node_arc_index(node));
+    assert(kwg_in_letter_set(kwg, tile, (uint32_t)node_idx) ==
+           kwg_node_accepts(node));
+  }
+}
+
+// Every KWG has tile bitsets: one loaded from a file, and the ones both
+// makers build, including the small ones the endgame and PEG generate moves
+// from.
+static void test_kwg_tile_bitsets(void) {
+  Config *config = config_create_or_die("set -lex CSW21");
+  Game *game = config_game_create(config);
+  const KWG *csw_kwg = player_get_kwg(game_get_player(game, 0));
+  assert_tile_bitsets_match_lists(csw_kwg);
+  DictionaryWordList *all_words = dictionary_word_list_create();
+  kwg_write_words(csw_kwg, kwg_get_dawg_root_node_index(csw_kwg), all_words,
+                  NULL);
+  const int total = dictionary_word_list_get_count(all_words);
+  DictionaryWordList *words = dictionary_word_list_create();
+  const int target = 5000;
+  for (int word_idx = 0; word_idx < target; word_idx++) {
+    const DictionaryWord *word = dictionary_word_list_get_word(
+        all_words, (int)((int64_t)word_idx * total / target));
+    dictionary_word_list_add_word(words, dictionary_word_get_word(word),
+                                  dictionary_word_get_length(word));
+  }
+  const kwg_maker_output_t outputs[2] = {KWG_MAKER_OUTPUT_GADDAG,
+                                         KWG_MAKER_OUTPUT_DAWG_AND_GADDAG};
+  for (int output_idx = 0; output_idx < 2; output_idx++) {
+    KWG *small_kwg = make_kwg_from_words_small(words, outputs[output_idx],
+                                               KWG_MAKER_MERGE_EXACT);
+    assert_tile_bitsets_match_lists(small_kwg);
+    kwg_destroy(small_kwg);
+    KWG *kwg =
+        make_kwg_from_words(words, outputs[output_idx], KWG_MAKER_MERGE_EXACT);
+    assert_tile_bitsets_match_lists(kwg);
+    kwg_destroy(kwg);
+  }
+  dictionary_word_list_destroy(words);
+  dictionary_word_list_destroy(all_words);
+  game_destroy(game);
+  config_destroy(config);
+}
+
 void test_kwg_maker(void) {
   test_qi_xi_xu_word_trie();
   test_egg_unmerged_gaddag();
@@ -628,4 +701,5 @@ void test_kwg_maker(void) {
   test_polish_gaddag();
   test_large_gaddag();
   test_full_csw_gaddag();
+  test_kwg_tile_bitsets();
 }

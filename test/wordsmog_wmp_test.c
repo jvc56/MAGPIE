@@ -350,7 +350,8 @@ static void assert_move_valid_by_wmp(const Game *wmp_game, const Move *move) {
   FormedWords *formed_words =
       formed_words_create(game_get_board(wmp_game), move);
   formed_words_populate_validities(player_get_kwg(player),
-                                   player_get_wmp(player), formed_words, true);
+                                   player_get_wmp(player), formed_words,
+                                   GAME_VARIANT_WORDSMOG);
   for (int word_idx = 0; word_idx < formed_words_get_num_words(formed_words);
        word_idx++) {
     assert(formed_words_get_word_valid(formed_words, word_idx));

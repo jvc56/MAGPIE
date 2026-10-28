@@ -27,6 +27,7 @@
 #include "../util/io_util.h"
 #include "bai_logger.h"
 #include "move_gen.h"
+#include "move_gen_base.h"
 #include "random_variable.h"
 #include <assert.h>
 #include <limits.h>

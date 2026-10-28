@@ -14,6 +14,7 @@
 #include "cross_set_cache.h"
 #include "kwg.h"
 #include "kwg_alpha.h"
+#include "kwg_woadwage.h"
 #include "letter_distribution.h"
 #include "move_undo.h"
 #include "player.h"
@@ -106,6 +107,8 @@ game_variant_t get_game_variant_type_from_name(const char *variant_name) {
     game_variant = GAME_VARIANT_CLASSIC;
   } else if (strings_iequal(variant_name, GAME_VARIANT_WORDSMOG_NAME)) {
     game_variant = GAME_VARIANT_WORDSMOG;
+  } else if (strings_iequal(variant_name, GAME_VARIANT_WOADWAGE_NAME)) {
+    game_variant = GAME_VARIANT_WOADWAGE;
   }
   return game_variant;
 }
@@ -378,6 +381,69 @@ static inline void game_gen_alpha_cross_set(const Game *game, int row, int col,
   board_set_cross_score(board, row, col, dir, cross_set_index, score);
 }
 
+// Woadwage's cross set at (row, col): the letters that make a woadwage word
+// with the tiles beside the square. Woadwage move generation reads no
+// extension sets, so the square's own are left trivial for the shadow, which
+// does read them, in case classic ones were computed for this board.
+static inline void game_gen_woadwage_cross_set(const Game *game, int row,
+                                               int col, int dir,
+                                               int cross_set_index) {
+  if (!board_is_position_in_bounds(row, col)) {
+    return;
+  }
+
+  Board *board = game_get_board(game);
+  const int through_dir = board_toggle_dir(dir);
+  board_set_left_extension_set(board, row, col, through_dir, cross_set_index,
+                               TRIVIAL_CROSS_SET);
+  board_set_right_extension_set(board, row, col, through_dir, cross_set_index,
+                                TRIVIAL_CROSS_SET);
+
+  if (board_is_nonempty_or_bricked(board, row, col)) {
+    board_set_cross_set(board, row, col, dir, cross_set_index, 0);
+    board_set_cross_score(board, row, col, dir, cross_set_index, 0);
+    return;
+  }
+  if (board_are_left_and_right_empty(board, row, col)) {
+    board_set_cross_set(board, row, col, dir, cross_set_index,
+                        TRIVIAL_CROSS_SET);
+    board_set_cross_score(board, row, col, dir, cross_set_index, 0);
+    return;
+  }
+
+  const LetterDistribution *ld = game_get_ld(game);
+  const int left_col =
+      board_get_word_edge(board, row, col - 1, WORD_DIRECTION_LEFT);
+  const int right_col =
+      board_get_word_edge(board, row, col + 1, WORD_DIRECTION_RIGHT);
+  MachineLetter before[BOARD_DIM] = {0};
+  MachineLetter after[BOARD_DIM] = {0};
+  const int before_length = col - left_col;
+  const int after_length = right_col - col;
+  for (int letter_idx = 0; letter_idx < before_length; letter_idx++) {
+    before[letter_idx] = get_unblanked_machine_letter(
+        board_get_letter(board, row, left_col + letter_idx));
+  }
+  for (int letter_idx = 0; letter_idx < after_length; letter_idx++) {
+    after[letter_idx] = get_unblanked_machine_letter(
+        board_get_letter(board, row, col + 1 + letter_idx));
+  }
+  Equity score = 0;
+  if (before_length > 0) {
+    score += traverse_backwards_for_score(board, ld, row, col - 1);
+  }
+  if (after_length > 0) {
+    score += traverse_backwards_for_score(board, ld, row, right_col);
+  }
+
+  const KWG *kwg = get_kwg_for_cross_set(game, cross_set_index);
+  board_set_cross_set_with_blank(
+      board, row, col, dir, cross_set_index,
+      kwg_compute_woadwage_cross_set(kwg, before, before_length, after,
+                                     after_length));
+  board_set_cross_score(board, row, col, dir, cross_set_index, score);
+}
+
 // The values game_gen_classic_cross_set writes for the empty square at
 // (row, col) between the words that end at left_col and right_col, at least
 // one of them nonempty, read from the lexicon.
@@ -434,21 +500,18 @@ static void game_compute_classic_cross_set(const KWG *kwg,
   uint64_t cross_set = 0;
   if (nonempty_to_left && nonempty_to_right) {
     if (left_lpath_is_valid && right_lpath_is_valid) {
-      for (uint32_t i = right_lnode_index;; i++) {
-        const uint32_t node = kwg_node(kwg, i);
-        const uint32_t ml = kwg_node_tile(node);
-        // Only try letters that are possible in right extensions from the
-        // left side of the empty square.
-        if (board_is_letter_allowed_in_cross_set(leftside_rightx_set, ml)) {
-          const uint32_t next_node_index =
-              kwg_node_arc_index_prefetch(node, kwg);
-          if (traverse_backwards(kwg, board, row, col - 1, next_node_index,
-                                 true, left_col) != 0) {
-            cross_set |= get_cross_set_bit(ml);
-          }
-        }
-        if (kwg_node_is_end(node)) {
-          break;
+      // Visit only the arcs whose tiles are right extensions from the left
+      // side of the empty square.
+      const uint64_t list_tiles = kwg_get_sibling_tiles(kwg)[right_lnode_index];
+      for (uint64_t remaining = list_tiles & leftside_rightx_set;
+           remaining != 0; remaining &= remaining - 1) {
+        const uint64_t tile_bit = remaining & (~remaining + 1);
+        const uint32_t node =
+            kwg_list_node(kwg, right_lnode_index, list_tiles, tile_bit);
+        if (traverse_backwards(kwg, board, row, col - 1,
+                               kwg_node_arc_index_prefetch(node, kwg), true,
+                               left_col) != 0) {
+          cross_set |= tile_bit;
         }
       }
     }
@@ -605,8 +668,11 @@ static inline void game_gen_classic_cross_set(const Game *game, int row,
 
 void game_gen_cross_set(const Game *game, int row, int col, int dir,
                         int cross_set_index) {
-  if (game_get_variant(game) == GAME_VARIANT_CLASSIC) {
+  const game_variant_t variant = game_get_variant(game);
+  if (variant == GAME_VARIANT_CLASSIC) {
     game_gen_classic_cross_set(game, row, col, dir, cross_set_index);
+  } else if (variant == GAME_VARIANT_WOADWAGE) {
+    game_gen_woadwage_cross_set(game, row, col, dir, cross_set_index);
   } else {
     game_gen_alpha_cross_set(game, row, col, dir, cross_set_index);
   }

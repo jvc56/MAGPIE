@@ -1,6 +1,7 @@
 #ifndef WORDS_H
 #define WORDS_H
 
+#include "../def/game_defs.h"
 #include "board.h"
 #include "kwg.h"
 #include "move.h"
@@ -21,10 +22,10 @@ bool formed_words_get_word_valid(const FormedWords *fw, int word_index);
 int formed_words_get_word_letter(const FormedWords *fw, int word_index,
                                  int letter_index);
 
-// populate the validity of the formed words passed in.
-// A wordsmog word is checked against the WMP when wmp is non-NULL, and against
-// the alpha KWG otherwise.
+// populate the validity of the formed words passed in, under the variant's
+// rules for what counts as a word. A wordsmog word is checked against the WMP
+// when wmp is non-NULL, and against the alpha KWG otherwise.
 void formed_words_populate_validities(const KWG *kwg, const WMP *wmp,
-                                      FormedWords *ws, bool is_wordsmog);
+                                      FormedWords *ws, game_variant_t variant);
 
 #endif

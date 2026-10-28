@@ -86,6 +86,7 @@
 #include "get_gcg.h"
 #include "inference.h"
 #include "move_gen.h"
+#include "move_gen_base.h"
 #include "peg.h"
 #include "play_chooser.h"
 #include "rack_draw.h"
@@ -2171,7 +2172,10 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       usages[0] = "<game_variant>";
       examples[0] = "classic";
       examples[1] = "wordsmog";
-      text = "Specifies the game variant.";
+      examples[2] = "woadwage";
+      text = "Specifies the game variant: classic; wordsmog, where a word "
+             "is played as any anagram of a word; or woadwage, where a word "
+             "may also be two words run together.";
       break;
     case ARG_TOKEN_LETTER_DISTRIBUTION:
       usages[0] = "<letter_distribution>";

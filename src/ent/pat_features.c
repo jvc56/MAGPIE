@@ -12,6 +12,7 @@
 #include "equity.h"
 #include "kwg.h"
 #include "kwg_alpha.h"
+#include "kwg_woadwage.h"
 #include "letter_distribution.h"
 #include "move.h"
 #include "pat.h"
@@ -200,6 +201,16 @@ static uint64_t pat_fresh_cross_set(const KWG *kwg,
   if (overlay->anagram) {
     return pat_anagram_cross_set(kwg, ld, overlay->wmp, before, num_before,
                                  after, num_after);
+  }
+  if (overlay->woadwage) {
+    // before holds the tiles outward from the square; the cross set wants
+    // them in word order.
+    MachineLetter before_in_order[BOARD_DIM] = {0};
+    for (int before_idx = 0; before_idx < num_before; before_idx++) {
+      before_in_order[before_idx] = before[num_before - 1 - before_idx];
+    }
+    return kwg_compute_woadwage_cross_set(kwg, before_in_order, num_before,
+                                          after, num_after);
   }
   const uint32_t root = kwg_get_root_node_index(kwg);
   uint64_t extension_set = 0;
@@ -751,8 +762,11 @@ void pat_scan_unit(const Square *lanes, const LetterDistribution *ld,
         // A fresh tile implies an overlay; the check lets the analyzer
         // see it.
         if (run_has_fresh_tile && overlay != NULL && overlay->run_kwg != NULL) {
-          const uint64_t extension_set = pat_fresh_run_extension_set(
-              overlay->run_kwg, run_letters, run_length, side);
+          const uint64_t extension_set =
+              overlay->woadwage
+                  ? TRIVIAL_CROSS_SET
+                  : pat_fresh_run_extension_set(overlay->run_kwg, run_letters,
+                                                run_length, side);
           run_flex = pat_set_flex(unseen_counts, extension_set);
           if (hook_letters_out) {
             *hook_letters_out |= extension_set;

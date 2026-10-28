@@ -1671,7 +1671,8 @@ static void pat_path_parity_run(double utility_adjust) {
           game_get_ld(game_wmp), player_get_rack(mover), PAT_CLASS_MASK_ALL,
           rack_get_total_letters(
               player_get_rack(game_get_player(game_wmp, 1 - mover_index))));
-      pat_eval_context_set_kwg(parity_ctx, player_get_kwg(mover));
+      pat_eval_context_set_kwg(parity_ctx, player_get_kwg(mover),
+                               GAME_VARIANT_CLASSIC);
       const int num_top = move_list_get_count(all_list_wmp);
       const int margin = equity_to_int(
           player_get_score(mover) -
