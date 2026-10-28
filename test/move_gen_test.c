@@ -1831,6 +1831,8 @@ static void wit_subrack_prune_movegen_test(void) {
        word_idx < sizeof(word_strings) / sizeof(word_strings[0]); word_idx++) {
     add_wit_prune_test_word(words, ld, word_strings[word_idx]);
   }
+  // A lexicon is made from words in alphabetical order.
+  dictionary_word_list_sort(words);
 
   KWG *test_kwg = make_kwg_from_words(words, KWG_MAKER_OUTPUT_DAWG_AND_GADDAG,
                                       KWG_MAKER_MERGE_EXACT);

@@ -1837,8 +1837,9 @@ static inline int get_letters_in_common(const DictionaryWord *word,
 }
 
 // The dictionary word list must be in alphabetical order.
-KWG *make_kwg_from_words(const DictionaryWordList *words,
-                         kwg_maker_output_t output, kwg_maker_merge_t merging) {
+static KWG *make_full_kwg(const DictionaryWordList *words,
+                          kwg_maker_output_t output,
+                          kwg_maker_merge_t merging) {
   if (merging == KWG_MAKER_MERGE_TAIL_REORDER) {
     if (output != KWG_MAKER_OUTPUT_DAWG) {
       log_fatal("KWG_MAKER_MERGE_TAIL_REORDER supports DAWG output only");
@@ -1928,11 +1929,22 @@ KWG *make_kwg_from_words(const DictionaryWordList *words,
   return kwg;
 }
 
+// The dictionary word list must be in alphabetical order for the KWG to get
+// its tile bitsets (kwg_try_build_tile_bitsets) and serve as a lexicon. A
+// leave graph made from racks in generation order gets none; its KLV reads
+// only its nodes.
+KWG *make_kwg_from_words(const DictionaryWordList *words,
+                         kwg_maker_output_t output, kwg_maker_merge_t merging) {
+  KWG *kwg = make_full_kwg(words, output, merging);
+  kwg_try_build_tile_bitsets(kwg);
+  return kwg;
+}
+
 // Optimized version for small dictionaries (endgame wordprune case).
 // Uses the compact state builder for efficiency.
-KWG *make_kwg_from_words_small(const DictionaryWordList *words,
-                               kwg_maker_output_t output,
-                               kwg_maker_merge_t merging) {
+static KWG *make_small_kwg(const DictionaryWordList *words,
+                           kwg_maker_output_t output,
+                           kwg_maker_merge_t merging) {
   if (merging == KWG_MAKER_MERGE_TAIL_REORDER) {
     if (output != KWG_MAKER_OUTPUT_DAWG) {
       log_fatal("KWG_MAKER_MERGE_TAIL_REORDER supports DAWG output only");
@@ -2032,5 +2044,15 @@ KWG *make_kwg_from_words_small(const DictionaryWordList *words,
 
   mutable_node_list_destroy(nodes);
   node_pointer_list_destroy(ordered_pointers);
+  return kwg;
+}
+
+// The words must be in alphabetical order for the KWG to get its tile bitsets
+// (kwg_try_build_tile_bitsets).
+KWG *make_kwg_from_words_small(const DictionaryWordList *words,
+                               kwg_maker_output_t output,
+                               kwg_maker_merge_t merging) {
+  KWG *kwg = make_small_kwg(words, output, merging);
+  kwg_try_build_tile_bitsets(kwg);
   return kwg;
 }

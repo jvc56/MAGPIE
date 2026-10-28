@@ -8,6 +8,7 @@
 #include "../ent/alias_method.h"
 #include "../ent/bag.h"
 #include "../ent/best_move_carry.h"
+#include "../ent/cross_set_cache.h"
 #include "../ent/equity.h"
 #include "../ent/game.h"
 #include "../ent/inference_results.h"
@@ -414,7 +415,15 @@ typedef struct SimmerWorker {
   // the move it last chose.
   int worker_index;
   Move rollout_move;
+  // The classic cross sets of the worker's game (see cross_set_cache.h),
+  // salted anew for each simulation, whose lexica may not be the last one's.
+  CrossSetCache *cross_set_cache;
+  uint64_t cross_set_salt;
 } SimmerWorker;
+
+// The step of a simulation worker's cross set salt: odd, so a worker's
+// salts do not repeat.
+static const uint64_t SIMMER_CROSS_SET_SALT_STEP = 0xD1B54A32D192ED03ULL;
 
 typedef struct Simmer {
   Equity initial_spread;
@@ -474,6 +483,14 @@ SimmerWorker *simmer_create_worker(const SimArgs *sim_args) {
   // A rollout plays its candidate and plies, then unplays them all at once,
   // so recording the squares they change beats copying the board twice.
   game_enable_rollout_board_undo(simmer_worker->game);
+  // A rollout's plays recompute the cross sets around them, of the same few
+  // words again and again.
+  simmer_worker->cross_set_cache =
+      cross_set_cache_create(CROSS_SET_CACHE_INDEX_BITS);
+  simmer_worker->cross_set_salt = SIMMER_CROSS_SET_SALT_STEP;
+  cross_set_cache_set_salt(simmer_worker->cross_set_cache,
+                           simmer_worker->cross_set_salt);
+  game_set_cross_set_cache(simmer_worker->game, simmer_worker->cross_set_cache);
   simmer_worker->move_list = move_list_create(1);
   simmer_worker->prng = prng_create(0);
   return simmer_worker;
@@ -481,6 +498,9 @@ SimmerWorker *simmer_create_worker(const SimArgs *sim_args) {
 
 void simmer_reset_worker(SimmerWorker *simmer_worker, const SimArgs *sim_args) {
   game_copy(simmer_worker->game, sim_args->game);
+  simmer_worker->cross_set_salt += SIMMER_CROSS_SET_SALT_STEP;
+  cross_set_cache_set_salt(simmer_worker->cross_set_cache,
+                           simmer_worker->cross_set_salt);
   simmer_worker_set_rollout_pat(simmer_worker, sim_args);
 }
 
@@ -489,6 +509,7 @@ void simmer_worker_destroy(SimmerWorker *simmer_worker) {
     return;
   }
   game_destroy(simmer_worker->game);
+  cross_set_cache_destroy(simmer_worker->cross_set_cache);
   move_list_destroy(simmer_worker->move_list);
   prng_destroy(simmer_worker->prng);
   free(simmer_worker);

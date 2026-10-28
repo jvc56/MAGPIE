@@ -282,23 +282,19 @@ small_move_set_all(SmallMove *move, const MachineLetter strip[], int leftstrip,
     return;
   }
   uint64_t move_code = 0;
-  int tidx = 0;
-  int bts = SMALL_MOVE_TILES_SHIFT;
+  int tiles_packed = 0;
+  int tile_shift = SMALL_MOVE_TILES_SHIFT;
   int blanks_mask = 0;
+  // Without a branch on what each square holds: a played-through square
+  // adds no tile bits and no blank bit, because PLAYED_THROUGH_MARKER is 0,
+  // and only a placed tile moves on to the next tile's place.
   for (int i = 0; i < play_length; i++) {
-    MachineLetter ml = strip[leftstrip + i];
-    if (ml == PLAYED_THROUGH_MARKER) {
-      // play-through tile
-      continue;
-    }
-    uint64_t val = ml;
-    if (get_is_blanked(ml)) {
-      blanks_mask |= (1 << tidx);
-      val = get_unblanked_machine_letter(ml);
-    }
-    move_code |= (val << bts);
-    tidx++;
-    bts += SMALL_MOVE_TILE_BITS;
+    const MachineLetter ml = strip[leftstrip + i];
+    const int placed = ml != PLAYED_THROUGH_MARKER;
+    move_code |= (uint64_t)get_unblanked_machine_letter(ml) << tile_shift;
+    blanks_mask |= (int)get_is_blanked(ml) << tiles_packed;
+    tiles_packed += placed;
+    tile_shift += SMALL_MOVE_TILE_BITS * placed;
   }
   if (dir_is_vertical) {
     move_code |= 1;
