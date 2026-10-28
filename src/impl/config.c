@@ -91,6 +91,7 @@
 #include "play_chooser.h"
 #include "rack_draw.h"
 #include "simmer.h"
+#include "wordsmog_play_graph.h"
 #include <assert.h>
 #include <ctype.h>
 #include <float.h>

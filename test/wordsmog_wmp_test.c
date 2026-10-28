@@ -21,6 +21,7 @@
 #include "../src/impl/gameplay.h"
 #include "../src/impl/move_gen.h"
 #include "../src/impl/wordsmog_arrangement.h"
+#include "../src/impl/wordsmog_play_graph.h"
 #include "../src/str/move_string.h"
 #include "../src/util/io_util.h"
 #include "../src/util/string_util.h"
