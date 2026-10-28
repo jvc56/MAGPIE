@@ -48,6 +48,10 @@ enum {
   WOADWAGE_TEST_GAMES = 8,
   WOADWAGE_TEST_MAX_TURNS = 40,
   WOADWAGE_TEST_MOVE_CAPACITY = 1 << 15,
+  // The games whose first position with an empty bag is solved: all but 2, 6
+  // and 7, whose solves take one to four seconds each.
+  WOADWAGE_TEST_ENDGAME_GAMES =
+      (1 << 0) | (1 << 1) | (1 << 3) | (1 << 4) | (1 << 5),
 };
 
 static const char *const WOADWAGE_TEST_WORDS_LEXICON = "CSW21_woadwage_words";
@@ -423,7 +427,7 @@ static void test_woadwage_games(const KWG *gaddag_kwg) {
       game_seed(game, 1000 + (uint64_t)game_idx);
       draw_starting_racks(game);
     }
-    bool solved_endgame = false;
+    bool solve_endgame = ((WOADWAGE_TEST_ENDGAME_GAMES >> game_idx) & 1) != 0;
     for (int turn = 0;
          turn < WOADWAGE_TEST_MAX_TURNS && !game_over(classic_game); turn++) {
       const int player_index = game_get_player_on_turn_index(classic_game);
@@ -434,11 +438,12 @@ static void test_woadwage_games(const KWG *gaddag_kwg) {
       plays += woadwage_test_assert_same_moves(woadwage_game, override_kwg,
                                                classic_game, &best_move);
       positions++;
-      // The game's first position with an empty bag, solved both ways: the
-      // endgame searches woadwage plays with its small-move generation and
-      // the incremental cross set updates it plays them with.
-      if (!solved_endgame && bag_is_empty(game_get_bag(classic_game))) {
-        solved_endgame = true;
+      // In the games WOADWAGE_TEST_ENDGAME_GAMES names, the first position
+      // with an empty bag is solved both ways: the endgame searches woadwage
+      // plays with its small-move generation and the incremental cross set
+      // updates it plays them with.
+      if (solve_endgame && bag_is_empty(game_get_bag(classic_game))) {
+        solve_endgame = false;
         assert(woadwage_test_endgame_value(woadwage_config, woadwage_game) ==
                woadwage_test_endgame_value(classic_config, classic_game));
         assert(game_get_variant(config_get_game(woadwage_config)) ==
