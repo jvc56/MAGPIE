@@ -75,18 +75,7 @@ static FILE *vnt_fopen_new_or_die(const char *path, const char *mode) {
 }
 
 enum {
-  VNT_MAX_THROUGHPUT_THREADS = 32,
-  VALUE_NET_PARITY_ROWS = 64,
-  VALUE_NET_PARITY_REPEATS = 20,
   VNT_MAX_TURNS = 256,
-  // Distillation records (vnt_distill): the board's 0/1 planes as bits,
-  // padded to a multiple of 8 bytes.
-  VNT_DISTILL_BOARD_BYTES = ((VALUE_NET_BOARD_FLOATS + 63) / 64) * 8,
-  VNT_DISTILL_CANDIDATES = 50,
-  VNT_DISTILL_PROGRESS_GAMES = 200,
-  // A pass's static equity in distillation records and exploration (its
-  // equity is a sentinel, not points).
-  VNT_DISTILL_PASS_EQUITY = -1000,
 };
 
 static uint64_t vnt_mix(uint64_t value) {
@@ -557,318 +546,6 @@ static void vnt_peg1_data(const StringSplitter *fields) {
   config_destroy(config);
 }
 
-typedef struct VntPeg1Head {
-  int width;
-  bool extras;
-  bool own_stuck;
-  bool opp_stuck;
-  float *blob;
-  const float *first;
-  const float *bias;
-  const float *second;
-  const float *out_bias;
-} VntPeg1Head;
-
-static VntPeg1Head *vnt_peg1_head_load(const char *path) {
-  FILE *file = fopen_or_die(path, "rb");
-  uint32_t shape[4];
-  if (!fread_le_uint32s(shape, 4, file) || shape[0] != 0x50474131 ||
-      shape[1] != VNT_PEG1_INPUT || shape[2] < 1 || shape[2] > 256 ||
-      shape[3] != 4) {
-    log_fatal("invalid aggregate1PEG head");
-  }
-  VntPeg1Head *head = calloc_or_die(1, sizeof(VntPeg1Head));
-  head->width = (int)shape[2];
-  const size_t count = head->width * (VNT_PEG1_INPUT + 5) + 4;
-  uint32_t *bits = malloc_or_die(count * sizeof(uint32_t));
-  head->blob = malloc_or_die(count * sizeof(float));
-  if (!fread_le_uint32s(bits, count, file) || fgetc(file) != EOF) {
-    log_fatal("invalid aggregate1PEG weights");
-  }
-  memcpy(head->blob, bits, count * sizeof(float));
-  free(bits);
-  fclose(file);
-  head->first = head->blob;
-  head->bias = head->first + head->width * VNT_PEG1_INPUT;
-  head->second = head->bias + head->width;
-  head->out_bias = head->second + 4 * head->width;
-  for (int unit = 0; unit < head->width; unit++) {
-    for (int col = VALUE_NET_SCALARS; col < VNT_PEG1_INPUT; col++) {
-      if (head->first[unit * VNT_PEG1_INPUT + col] != 0) {
-        head->extras = true;
-        const int extra = (col - VALUE_NET_SCALARS) % VNT_PEG1_EXTRA;
-        head->own_stuck |= extra == 6 || extra == 8;
-        head->opp_stuck |= extra == 7 || extra == 9;
-      }
-    }
-  }
-  return head;
-}
-
-static void vnt_peg1_head_predict(const VntPeg1Head *head, const float *input,
-                                  double after, float *raw, double *win,
-                                  double *margin) {
-  float activation[256];
-  for (int unit = 0; unit < head->width; unit++) {
-    float sum = head->bias[unit];
-    for (int col = 0; col < VNT_PEG1_INPUT; col++) {
-      sum += head->first[unit * VNT_PEG1_INPUT + col] * input[col];
-    }
-    activation[unit] = fmaxf(sum, 0);
-  }
-  for (int channel = 0; channel < 4; channel++) {
-    float sum = head->out_bias[channel];
-    for (int unit = 0; unit < head->width; unit++) {
-      sum += head->second[channel * head->width + unit] * activation[unit];
-    }
-    raw[channel] = sum;
-  }
-  const double maximum = fmax(raw[0], fmax(raw[1], raw[2]));
-  const double loss = exp(raw[0] - maximum);
-  const double tie = exp(raw[1] - maximum);
-  const double victory = exp(raw[2] - maximum);
-  *win = (victory + .5 * tie) / (loss + tie + victory);
-  *margin = after + 30 * raw[3];
-}
-
-static void vnt_peg1_public_inputs(const Game *root, const Move *move,
-                                   const float *public_history,
-                                   const VntPeg1Head *head, Game *scenario,
-                                   MoveList *stuck, float *inputs) {
-  memset(inputs, 0, sizeof(float) * VNT_PEG1_INPUT);
-  ValueNetHistory history;
-  value_net_history_reset(&history);
-  value_net_scalars_for_move(root, move, &history, inputs);
-  // These four candidate-invariant public-history scalars were saved during
-  // the original self-play, and are not recoverable from a CGP alone.
-  inputs[54] = public_history[54];
-  inputs[55] = public_history[55];
-  inputs[56] = public_history[56];
-  inputs[67] = public_history[67];
-  if (!head->extras) {
-    return;
-  }
-  int unseen[VALUE_NET_TILE_TYPES];
-  for (int ml = 0; ml < VALUE_NET_TILE_TYPES; ml++) {
-    unseen[ml] = (int)lroundf(inputs[27 + ml] * 100 * inputs[70]);
-  }
-  const int mover = game_get_player_on_turn_index(root);
-  double sums[VNT_PEG1_EXTRA] = {0}, squared[VNT_PEG1_EXTRA] = {0};
-  float low[VNT_PEG1_EXTRA], high[VNT_PEG1_EXTRA];
-  for (int idx = 0; idx < VNT_PEG1_EXTRA; idx++) {
-    low[idx] = INFINITY;
-    high[idx] = -INFINITY;
-  }
-  for (int tile = 0; tile < VALUE_NET_TILE_TYPES; tile++) {
-    if (unseen[tile] == 0) {
-      continue;
-    }
-    vnt_peg1_world(root, unseen, tile, scenario);
-    play_move(move, scenario, NULL);
-    float extra[VNT_PEG1_EXTRA];
-    double cheap, own, opp;
-    vnt_peg1_extras(scenario, mover, stuck, extra, &cheap, &own, &opp,
-                    head->own_stuck, head->opp_stuck);
-    const double probability = unseen[tile] / 8.0;
-    for (int idx = 0; idx < VNT_PEG1_EXTRA; idx++) {
-      sums[idx] += probability * extra[idx];
-      squared[idx] += probability * extra[idx] * extra[idx];
-      low[idx] = fminf(low[idx], extra[idx]);
-      high[idx] = fmaxf(high[idx], extra[idx]);
-    }
-  }
-  for (int idx = 0; idx < VNT_PEG1_EXTRA; idx++) {
-    inputs[VALUE_NET_SCALARS + idx] = sums[idx];
-    inputs[VALUE_NET_SCALARS + VNT_PEG1_EXTRA + idx] =
-        sqrt(fmax(0, squared[idx] - sums[idx] * sums[idx]));
-    inputs[VALUE_NET_SCALARS + 2 * VNT_PEG1_EXTRA + idx] = low[idx];
-    inputs[VALUE_NET_SCALARS + 3 * VNT_PEG1_EXTRA + idx] = high[idx];
-  }
-}
-
-static void vnt_peg1_eval(const StringSplitter *fields) {
-  if (string_splitter_get_number_of_items(fields) != 5) {
-    log_fatal("peg1eval needs model, data prefix, output prefix, continuation "
-              "depth0|2");
-  }
-  VntPeg1Head *head = vnt_peg1_head_load(string_splitter_get_item(fields, 1));
-  const char *data = string_splitter_get_item(fields, 2);
-  const char *prefix = string_splitter_get_item(fields, 3);
-  const int depth = atoi(string_splitter_get_item(fields, 4));
-  if (depth != 0 && depth != 2) {
-    log_fatal("peg1eval invalid continuation");
-  }
-  Config *config = config_create_or_die(
-      "set -path ./collection-runtime-data:./data -lex NWL23 -wmp true -wit "
-      "true -rit true -ritmmap true -threads 1 -s1 equity -s2 equity -r1 all "
-      "-r2 all -numplays 1");
-  load_and_exec_config_or_die(
-      config, "cgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 / 0/0 0");
-  Game *root = config_get_game(config);
-  Game *game = game_duplicate(root), *scenario = game_duplicate(root),
-       *swapped = game_duplicate(root);
-  MoveList *pool = move_list_create(VNT_PEG1_POOL + 1),
-           *stuck = move_list_create(1), *static_list = move_list_create(1);
-  ErrorStack *errors = error_stack_create();
-  char *path = get_formatted_string("%s.positions.csv", data);
-  FILE *positions = fopen_or_die(path, "r");
-  free(path);
-  path = get_formatted_string("%s.inputs.f32", data);
-  FILE *inputs_file = fopen_or_die(path, "rb");
-  free(path);
-  const char *suffixes[] = {"games.csv", "decisions.csv", "raw.f32"};
-  FILE *output[3];
-  for (int idx = 0; idx < 3; idx++) {
-    path = get_formatted_string("%s.%s", prefix, suffixes[idx]);
-    output[idx] = vnt_fopen_new_or_die(path, "wb");
-    free(path);
-  }
-  fprintf(output[0],
-          "root,game,net_seat,initial_spread,final_spread,win,chosen_candidate,"
-          "actual_tile,turns,continuation_depth,ended\n");
-  fprintf(output[1], "root,candidates,choice,pass_rank,movegen_ms,feature_ms,"
-                     "head_ms,privacy_input_error\n");
-  char *line = NULL;
-  size_t capacity = 0;
-  (void)getline_ignore_carriage_return(&line, &capacity, positions);
-  while (getline_ignore_carriage_return(&line, &capacity, positions) >= 0) {
-    int root_id, attempt, turn, seat, bag, first, expected, pass_rank;
-    unsigned long long source_seed;
-    if (sscanf(line, "%d,%llu,%d,%d,%d,%d,%d,%d,%d,", &root_id, &source_seed,
-               &attempt, &turn, &seat, &bag, &first, &expected,
-               &pass_rank) != 9 ||
-        bag != 1) {
-      log_fatal("peg1eval invalid position");
-    }
-    char *cgp = strchr(line, '"'), *end = strrchr(line, '"');
-    if (cgp == NULL || end <= cgp) {
-      log_fatal("peg1eval invalid CGP");
-    }
-    *end = '\0';
-    game_load_cgp(root, cgp + 1, errors);
-    game_set_player_on_turn_index(root, seat);
-    if (!error_stack_is_empty(errors) ||
-        bag_get_letters(game_get_bag(root)) != 1) {
-      log_fatal("peg1eval CGP load failed");
-    }
-    float saved[VNT_PEG1_POOL * VNT_PEG1_INPUT];
-    uint32_t bits[VNT_PEG1_POOL * VNT_PEG1_INPUT];
-    if (!fread_le_uint32s(bits, expected * VNT_PEG1_INPUT, inputs_file)) {
-      log_fatal("peg1eval cached input read failed");
-    }
-    memcpy(saved, bits, expected * VNT_PEG1_INPUT * sizeof(float));
-    Move candidates[VNT_PEG1_POOL];
-    int current_pass;
-    const int64_t gen_start = ctimer_monotonic_ns();
-    const int count = vnt_peg1_pool(root, pool, candidates, &current_pass);
-    const double gen_ms = (double)(ctimer_monotonic_ns() - gen_start) / 1e6;
-    if (count != expected || current_pass != pass_rank) {
-      log_fatal("peg1eval candidate replay mismatch");
-    }
-    int unseen[VALUE_NET_TILE_TYPES];
-    int actual_tile = -1, swapped_tile = -1;
-    for (int ml = 0; ml < VALUE_NET_TILE_TYPES; ml++) {
-      unseen[ml] = (int)lroundf(saved[27 + ml] * 100 * saved[70]);
-      if (bag_get_letter(game_get_bag(root), (MachineLetter)ml) > 0) {
-        actual_tile = ml;
-      }
-    }
-    for (int ml = 0; ml < VALUE_NET_TILE_TYPES; ml++) {
-      if (unseen[ml] > 0 && ml != actual_tile) {
-        swapped_tile = ml;
-        break;
-      }
-    }
-    if (swapped_tile < 0) {
-      swapped_tile = actual_tile;
-    }
-    vnt_peg1_world(root, unseen, swapped_tile, swapped);
-    double features_ms = 0, heads_ms = 0, best = -INFINITY;
-    int choice = 0;
-    for (int candidate = 0; candidate < count; candidate++) {
-      float inputs[VNT_PEG1_INPUT], private_swap[VNT_PEG1_INPUT], raw[4];
-      const int64_t feature_start = ctimer_monotonic_ns();
-      vnt_peg1_public_inputs(root, &candidates[candidate], saved, head,
-                             scenario, stuck, inputs);
-      features_ms += (double)(ctimer_monotonic_ns() - feature_start) / 1e6;
-      vnt_peg1_public_inputs(swapped, &candidates[candidate], saved, head,
-                             scenario, stuck, private_swap);
-      if (memcmp(inputs, private_swap, sizeof(inputs)) != 0) {
-        log_fatal("peg1 policy input depends on actual hidden tile");
-      }
-      double win, margin;
-      const int64_t head_start = ctimer_monotonic_ns();
-      vnt_peg1_head_predict(
-          head, inputs,
-          value_net_spread_after_move(root, &candidates[candidate]), raw, &win,
-          &margin);
-      const double score = (win + .5 / (1 + exp(-margin / 100))) / 1.5;
-      heads_ms += (double)(ctimer_monotonic_ns() - head_start) / 1e6;
-      if (!fwrite_le_floats(raw, 4, output[2])) {
-        log_fatal("peg1eval prediction write failed");
-      }
-      if (score > best) {
-        best = score;
-        choice = candidate;
-      }
-    }
-    fprintf(output[1], "%d,%d,%d,%d,%.9g,%.9g,%.9g,0\n", root_id, count, choice,
-            pass_rank, gen_ms, features_ms, heads_ms);
-    // Choose without knowledge of actual_tile. Only the real play below
-    // consumes it; all subsequent endgame decisions use then-public racks.
-    for (int pair_game = 0; pair_game < 2; pair_game++) {
-      const int net_seat = pair_game;
-      const int picked = seat == net_seat ? choice : 0;
-      game_copy(game, root);
-      const double initial = vnt_peg1_margin(game, net_seat);
-      play_move(&candidates[picked], game, NULL);
-      if (bag_get_letters(game_get_bag(game)) != 0) {
-        log_fatal("peg1eval actual draw not consumed");
-      }
-      int turns = 1;
-      while (!game_over(game) && turns < VNT_MAX_TURNS) {
-        Move move;
-        if (depth == 2) {
-          vnt_fixed_endgame(game, &move, 2);
-        } else {
-          move_copy(&move, vnt_static_move(game, static_list));
-        }
-        play_move(&move, game, NULL);
-        turns++;
-      }
-      if (!game_over(game)) {
-        log_fatal("peg1eval continuation did not reach game over");
-      }
-      const double final = vnt_peg1_margin(game, net_seat);
-      fprintf(output[0], "%d,%d,%d,%.9g,%.9g,%.1f,%d,%d,%d,%d,1\n", root_id,
-              pair_game, net_seat, initial, final,
-              final > 0   ? 1.0
-              : final < 0 ? 0.0
-                          : .5,
-              picked, actual_tile, turns, depth);
-    }
-    for (int idx = 0; idx < 3; idx++) {
-      fflush(output[idx]);
-    }
-  }
-  free(line);
-  fclose(positions);
-  fclose(inputs_file);
-  for (int idx = 0; idx < 3; idx++) {
-    fclose(output[idx]);
-  }
-  error_stack_destroy(errors);
-  move_list_destroy(pool);
-  move_list_destroy(stuck);
-  move_list_destroy(static_list);
-  game_destroy(game);
-  game_destroy(scenario);
-  game_destroy(swapped);
-  config_destroy(config);
-  free(head->blob);
-  free(head);
-}
-
 // Reply features for stored 1PEG roots. For every candidate and every public
 // hypothetical last tile, the world is built from public unseen counts only;
 // the actual private split never enters these features.
@@ -947,142 +624,11 @@ static void vnt_peg1_reply_world(const Game *scenario, int mover, Game *work,
     moves++;
   }
   if (!game_over(work)) {
-    log_fatal("peg1feat greedy playout did not end");
+    log_fatal("1PEG greedy playout did not end");
   }
   feature[7] = (float)vnt_peg1_margin(work, mover);
   feature[8] = (float)moves;
   timing[3] += (double)(ctimer_monotonic_ns() - start) / 1e6;
-}
-
-static void vnt_peg1_features(const StringSplitter *fields) {
-  if (string_splitter_get_number_of_items(fields) != 4) {
-    log_fatal("peg1feat needs data prefix, output prefix and inputs width");
-  }
-  const char *data = string_splitter_get_item(fields, 1);
-  const char *prefix = string_splitter_get_item(fields, 2);
-  const int width = atoi(string_splitter_get_item(fields, 3));
-  if (width != VNT_PEG1_INPUT) {
-    log_fatal("peg1feat unexpected stored input width");
-  }
-  Config *config = config_create_or_die(
-      "set -path ./collection-runtime-data:./data -lex NWL23 -wmp true -wit "
-      "true -rit true -ritmmap true -threads 1 -s1 equity -s2 equity -r1 all "
-      "-r2 all -numplays 1");
-  load_and_exec_config_or_die(
-      config, "cgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 / 0/0 0");
-  Game *root = config_get_game(config);
-  Game *scenario = game_duplicate(root), *work = game_duplicate(root);
-  MoveList *pool = move_list_create(VNT_PEG1_POOL + 1);
-  MoveList *small = move_list_create_small(16);
-  Move *move = move_create();
-  ErrorStack *errors = error_stack_create();
-  char *path = get_formatted_string("%s.positions.csv", data);
-  FILE *positions = fopen_or_die(path, "r");
-  free(path);
-  path = get_formatted_string("%s.inputs.f32", data);
-  FILE *inputs_file = fopen_or_die(path, "rb");
-  free(path);
-  path = get_formatted_string("%s.reply.f32", prefix);
-  FILE *output = vnt_fopen_new_or_die(path, "wb");
-  free(path);
-  path = get_formatted_string("%s.reply-timing.csv", prefix);
-  FILE *timing_file = vnt_fopen_new_or_die(path, "w");
-  free(path);
-  fprintf(timing_file,
-          "root,candidates,worlds,movegen_ms,world_ms,mover_now_ms,"
-          "opp_reply_ms,playout_ms\n");
-  char *line = NULL;
-  size_t capacity = 0;
-  (void)getline_ignore_carriage_return(&line, &capacity, positions);
-  while (getline_ignore_carriage_return(&line, &capacity, positions) >= 0) {
-    int root_id, attempt, turn, seat, bag, first, expected, pass_rank;
-    unsigned long long source_seed;
-    if (sscanf(line, "%d,%llu,%d,%d,%d,%d,%d,%d,%d,", &root_id, &source_seed,
-               &attempt, &turn, &seat, &bag, &first, &expected,
-               &pass_rank) != 9 ||
-        bag != 1) {
-      log_fatal("peg1feat invalid position");
-    }
-    char *cgp = strchr(line, '"'), *end = strrchr(line, '"');
-    if (cgp == NULL || end <= cgp) {
-      log_fatal("peg1feat invalid CGP");
-    }
-    *end = '\0';
-    game_load_cgp(root, cgp + 1, errors);
-    game_set_player_on_turn_index(root, seat);
-    if (!error_stack_is_empty(errors) ||
-        bag_get_letters(game_get_bag(root)) != 1) {
-      log_fatal("peg1feat CGP load failed");
-    }
-    float saved[VNT_PEG1_INPUT];
-    uint32_t bits[VNT_PEG1_INPUT];
-    for (int row = 0; row < expected; row++) {
-      if (!fread_le_uint32s(bits, VNT_PEG1_INPUT, inputs_file)) {
-        log_fatal("peg1feat cached input read failed");
-      }
-      if (row == 0) {
-        memcpy(saved, bits, sizeof(saved));
-      }
-    }
-    Move candidates[VNT_PEG1_POOL];
-    int current_pass;
-    const int64_t gen_start = ctimer_monotonic_ns();
-    const int count = vnt_peg1_pool(root, pool, candidates, &current_pass);
-    const double gen_ms = (double)(ctimer_monotonic_ns() - gen_start) / 1e6;
-    if (count != expected || current_pass != pass_rank) {
-      log_fatal("peg1feat candidate replay mismatch");
-    }
-    int unseen[VALUE_NET_TILE_TYPES];
-    int worlds = 0;
-    for (int ml = 0; ml < VALUE_NET_TILE_TYPES; ml++) {
-      unseen[ml] = (int)lroundf(saved[27 + ml] * 100 * saved[70]);
-      worlds += unseen[ml] > 0;
-    }
-    const int mover = game_get_player_on_turn_index(root);
-    double timing[4] = {0};
-    for (int candidate = 0; candidate < count; candidate++) {
-      const Move *cand = &candidates[candidate];
-      float row[VNT_PEG1_REPLY_ROW] = {0};
-      row[0] = (float)value_net_spread_after_move(root, cand);
-      row[1] = (float)equity_to_double(move_get_equity(cand));
-      row[2] = (float)move_get_tiles_played(cand);
-      for (int tile = 0; tile < VALUE_NET_TILE_TYPES; tile++) {
-        if (unseen[tile] == 0) {
-          continue;
-        }
-        const int64_t world_start = ctimer_monotonic_ns();
-        vnt_peg1_world(root, unseen, tile, scenario);
-        play_move(cand, scenario, NULL);
-        if (bag_get_letters(game_get_bag(scenario)) != 0 ||
-            game_over(scenario)) {
-          log_fatal("peg1feat placement did not empty the bag");
-        }
-        timing[0] += (double)(ctimer_monotonic_ns() - world_start) / 1e6;
-        vnt_peg1_reply_world(scenario, mover, work, small, move,
-                             &row[VNT_PEG1_REPLY_HEAD + tile * VNT_PEG1_REPLY],
-                             timing);
-      }
-      if (!fwrite_le_floats(row, VNT_PEG1_REPLY_ROW, output)) {
-        log_fatal("peg1feat write failed");
-      }
-    }
-    fprintf(timing_file, "%d,%d,%d,%.9g,%.9g,%.9g,%.9g,%.9g\n", root_id, count,
-            worlds, gen_ms, timing[0], timing[1], timing[2], timing[3]);
-    fflush(output);
-    fflush(timing_file);
-  }
-  free(line);
-  fclose(positions);
-  fclose(inputs_file);
-  fclose(output);
-  fclose(timing_file);
-  error_stack_destroy(errors);
-  move_destroy(move);
-  move_list_destroy(small);
-  move_list_destroy(pool);
-  game_destroy(scenario);
-  game_destroy(work);
-  config_destroy(config);
 }
 
 // Fresh 1PEG roots from static self-play (the peg1data source procedure),
@@ -1381,33 +927,15 @@ static void vnt_peg1_play(const StringSplitter *fields) {
   config_destroy(config);
 }
 
-// Native 1PEG reply-feature network. The mover ranks its static top-K
-// placements using only its own rack and public information: every
-// hypothetical last tile is enumerated from the public unseen pool, the
-// per-world reply features are averaged by multiplicity, and one forward
-// pass scores each candidate. The actual hidden tile is never read.
+// 1PEG network limits and the reply-feature groups a network reads (bits in
+// its header): the opponent's reply, and the mover's immediate greedy value
+// on the post-candidate board.
 enum {
-  VNT_PEG1_NET_MAGIC = 0x50473152,
   VNT_PEG1_NET_MAX_INPUT = 160,
   VNT_PEG1_NET_MAX_WIDTH = 512,
   VNT_PEG1_GROUP_OPP = 1,
   VNT_PEG1_GROUP_MOVER_NOW = 2,
-  VNT_PEG1_GROUP_PLAYOUT = 4,
 };
-
-typedef struct VntPeg1Net {
-  int inputs;
-  int width;
-  int top_k;
-  uint32_t groups;
-  int reply_index[VNT_PEG1_REPLY];
-  int reply_count;
-  float *blob;
-  const float *first;
-  const float *bias;
-  const float *out;
-  float out_bias;
-} VntPeg1Net;
 
 typedef struct VntPeg1NetTiming {
   double movegen_ms;
@@ -1415,62 +943,8 @@ typedef struct VntPeg1NetTiming {
   double world_ms;
   double opp_ms;
   double mover_ms;
-  double playout_ms;
   double head_ms;
 } VntPeg1NetTiming;
-
-static VntPeg1Net *vnt_peg1_net_load(const char *path) {
-  FILE *file = fopen_or_die(path, "rb");
-  uint32_t shape[5];
-  if (!fread_le_uint32s(shape, 5, file) || shape[0] != VNT_PEG1_NET_MAGIC ||
-      shape[1] < 1 || shape[1] > VNT_PEG1_NET_MAX_INPUT || shape[2] < 1 ||
-      shape[2] > VNT_PEG1_NET_MAX_WIDTH || shape[3] < 1 ||
-      shape[3] > VNT_PEG1_POOL || shape[4] > 7) {
-    log_fatal("invalid 1PEG reply network header");
-  }
-  VntPeg1Net *net = calloc_or_die(1, sizeof(VntPeg1Net));
-  net->inputs = (int)shape[1];
-  net->width = (int)shape[2];
-  net->top_k = (int)shape[3];
-  net->groups = shape[4];
-  const size_t count = (size_t)net->width * (net->inputs + 2) + 1;
-  uint32_t *bits = malloc_or_die(count * sizeof(uint32_t));
-  net->blob = malloc_or_die(count * sizeof(float));
-  if (!fread_le_uint32s(bits, count, file) || fgetc(file) != EOF) {
-    log_fatal("invalid 1PEG reply network weights");
-  }
-  memcpy(net->blob, bits, count * sizeof(float));
-  free(bits);
-  fclose(file);
-  net->first = net->blob;
-  net->bias = net->first + (size_t)net->width * net->inputs;
-  net->out = net->bias + net->width;
-  net->out_bias = net->out[net->width];
-  // Sorted reply-feature indices, matching the training feature builder.
-  const bool opp = net->groups & VNT_PEG1_GROUP_OPP;
-  const bool mover_now = net->groups & VNT_PEG1_GROUP_MOVER_NOW;
-  const bool playout = net->groups & VNT_PEG1_GROUP_PLAYOUT;
-  const bool use[VNT_PEG1_REPLY] = {opp,       opp,     opp,     mover_now,
-                                    mover_now, playout, playout, playout,
-                                    playout,   opp};
-  for (int idx = 0; idx < VNT_PEG1_REPLY; idx++) {
-    if (use[idx]) {
-      net->reply_index[net->reply_count++] = idx;
-    }
-  }
-  const int expected = (VALUE_NET_SCALARS - 4) + 2 + 4 * net->reply_count +
-                       (playout ? 1 : 0) + (opp ? 1 : 0);
-  if (expected != net->inputs) {
-    log_fatal("1PEG reply network input width %d, expected %d", net->inputs,
-              expected);
-  }
-  return net;
-}
-
-static void vnt_peg1_net_destroy(VntPeg1Net *net) {
-  free(net->blob);
-  free(net);
-}
 
 // Unseen counts from the mover's own view: the distribution less the board
 // and the mover's own rack. Uses no hidden information.
@@ -1501,338 +975,6 @@ static int vnt_peg1_public_unseen(const Game *game, int *unseen) {
     total += unseen[ml];
   }
   return total;
-}
-
-// Per-world reply features for the groups the network uses. scenario is the
-// post-candidate hypothetical world with the opponent on turn.
-static void vnt_peg1_net_world(const VntPeg1Net *net, Game *scenario, int mover,
-                               Game *work, MoveList *small, Move *move,
-                               float *feature, VntPeg1NetTiming *timing) {
-  bool out, pass;
-  int tiles;
-  if (net->groups & VNT_PEG1_GROUP_MOVER_NOW) {
-    const int64_t start = ctimer_monotonic_ns();
-    game_set_player_on_turn_index(scenario, mover);
-    feature[3] =
-        (float)vnt_peg1_greedy(scenario, small, move, &out, &tiles, &pass);
-    feature[4] = out;
-    game_set_player_on_turn_index(scenario, 1 - mover);
-    timing->mover_ms += (double)(ctimer_monotonic_ns() - start) / 1e6;
-  }
-  if (net->groups & VNT_PEG1_GROUP_PLAYOUT) {
-    const int64_t start = ctimer_monotonic_ns();
-    game_copy(work, scenario);
-    int moves = 0;
-    while (!game_over(work) && moves < VNT_PEG1_PLAYOUT_CAP) {
-      const int value = vnt_peg1_greedy(work, small, move, &out, &tiles, &pass);
-      if (moves == 0) {
-        feature[0] = (float)value;
-        feature[1] = out;
-        feature[2] = (float)tiles;
-        feature[9] = pass;
-      } else if (moves == 1) {
-        feature[5] = (float)value;
-        feature[6] = out;
-      }
-      play_move(move, work, NULL);
-      moves++;
-    }
-    if (!game_over(work)) {
-      log_fatal("1PEG network greedy playout did not end");
-    }
-    feature[7] = (float)vnt_peg1_margin(work, mover);
-    feature[8] = (float)moves;
-    timing->playout_ms += (double)(ctimer_monotonic_ns() - start) / 1e6;
-  } else if (net->groups & VNT_PEG1_GROUP_OPP) {
-    const int64_t start = ctimer_monotonic_ns();
-    feature[0] =
-        (float)vnt_peg1_greedy(scenario, small, move, &out, &tiles, &pass);
-    feature[1] = out;
-    feature[2] = (float)tiles;
-    feature[9] = pass;
-    timing->opp_ms += (double)(ctimer_monotonic_ns() - start) / 1e6;
-  }
-}
-
-// Fills inputs (K x net->inputs) for the root's static top-K placements.
-static void vnt_peg1_net_inputs(const VntPeg1Net *net, const Game *root,
-                                const Move *candidates, int count,
-                                Game *scenario, Game *work, MoveList *small,
-                                Move *move, float *inputs,
-                                VntPeg1NetTiming *timing) {
-  int unseen[VALUE_NET_TILE_TYPES];
-  const int total = vnt_peg1_public_unseen(root, unseen);
-  if (total != RACK_SIZE + 1) {
-    log_fatal("1PEG network needs eight unseen tiles, found %d", total);
-  }
-  const int mover = game_get_player_on_turn_index(root);
-  ValueNetHistory history;
-  value_net_history_reset(&history);
-  for (int candidate = 0; candidate < count; candidate++) {
-    const Move *cand = &candidates[candidate];
-    float *row = &inputs[candidate * net->inputs];
-    int64_t start = ctimer_monotonic_ns();
-    float scalars[VALUE_NET_SCALARS];
-    value_net_scalars_for_move(root, cand, &history, scalars);
-    int col = 0;
-    for (int idx = 0; idx < VALUE_NET_SCALARS; idx++) {
-      if (idx != 54 && idx != 55 && idx != 56 && idx != 67) {
-        row[col++] = scalars[idx];
-      }
-    }
-    const double after = value_net_spread_after_move(root, cand);
-    row[col++] = (float)equity_to_double(move_get_equity(cand));
-    row[col++] = (float)after;
-    timing->scalar_ms += (double)(ctimer_monotonic_ns() - start) / 1e6;
-    double sums[VNT_PEG1_REPLY] = {0}, squares[VNT_PEG1_REPLY] = {0};
-    double low[VNT_PEG1_REPLY], high[VNT_PEG1_REPLY];
-    for (int idx = 0; idx < VNT_PEG1_REPLY; idx++) {
-      low[idx] = INFINITY;
-      high[idx] = -INFINITY;
-    }
-    double playout_win = 0;
-    for (int tile = 0; tile < VALUE_NET_TILE_TYPES; tile++) {
-      if (unseen[tile] == 0) {
-        continue;
-      }
-      start = ctimer_monotonic_ns();
-      vnt_peg1_world(root, unseen, tile, scenario);
-      play_move(cand, scenario, NULL);
-      timing->world_ms += (double)(ctimer_monotonic_ns() - start) / 1e6;
-      float feature[VNT_PEG1_REPLY] = {0};
-      vnt_peg1_net_world(net, scenario, mover, work, small, move, feature,
-                         timing);
-      const double probability = (double)unseen[tile] / total;
-      if (net->groups & VNT_PEG1_GROUP_PLAYOUT) {
-        playout_win += probability * (feature[7] > 0    ? 1.0
-                                      : feature[7] == 0 ? 0.5
-                                                        : 0.0);
-        feature[7] = (float)(feature[7] - after);
-      }
-      for (int idx = 0; idx < net->reply_count; idx++) {
-        const double value = feature[net->reply_index[idx]];
-        sums[idx] += probability * value;
-        squares[idx] += probability * value * value;
-        low[idx] = fmin(low[idx], value);
-        high[idx] = fmax(high[idx], value);
-      }
-    }
-    for (int idx = 0; idx < net->reply_count; idx++) {
-      row[col + idx] = (float)sums[idx];
-      row[col + net->reply_count + idx] =
-          (float)sqrt(fmax(0, squares[idx] - sums[idx] * sums[idx]));
-      row[col + 2 * net->reply_count + idx] = (float)low[idx];
-      row[col + 3 * net->reply_count + idx] = (float)high[idx];
-    }
-    col += 4 * net->reply_count;
-    if (net->groups & VNT_PEG1_GROUP_PLAYOUT) {
-      row[col++] = (float)playout_win;
-    }
-    if (net->groups & VNT_PEG1_GROUP_OPP) {
-      row[col++] = (float)(after - sums[0]);
-    }
-    if (col != net->inputs) {
-      log_fatal("1PEG network input assembly mismatch");
-    }
-  }
-}
-
-static double vnt_peg1_net_score(const VntPeg1Net *net, const float *input) {
-  float hidden[VNT_PEG1_NET_MAX_WIDTH];
-  for (int unit = 0; unit < net->width; unit++) {
-    const float *weights = &net->first[(size_t)unit * net->inputs];
-    float sum = net->bias[unit];
-    for (int col = 0; col < net->inputs; col++) {
-      sum += weights[col] * input[col];
-    }
-    hidden[unit] = fmaxf(sum, 0);
-  }
-  float score = net->out_bias;
-  for (int unit = 0; unit < net->width; unit++) {
-    score += net->out[unit] * hidden[unit];
-  }
-  return score;
-}
-
-// Chooses among the static top-K placements; returns the static rank chosen,
-// or -1 when the mover has no placement (the caller must pass).
-static int vnt_peg1_net_choose(const VntPeg1Net *net, const Game *root,
-                               MoveList *pool, Move *candidates, int *count,
-                               Game *scenario, Game *work, MoveList *small,
-                               Move *move, float *inputs, double *scores,
-                               VntPeg1NetTiming *timing) {
-  int64_t start = ctimer_monotonic_ns();
-  int pass_rank;
-  *count = vnt_peg1_pool(root, pool, candidates, &pass_rank);
-  timing->movegen_ms += (double)(ctimer_monotonic_ns() - start) / 1e6;
-  if (*count == 0) {
-    return -1;
-  }
-  const int scored = *count < net->top_k ? *count : net->top_k;
-  vnt_peg1_net_inputs(net, root, candidates, scored, scenario, work, small,
-                      move, inputs, timing);
-  start = ctimer_monotonic_ns();
-  int choice = 0;
-  for (int candidate = 0; candidate < scored; candidate++) {
-    scores[candidate] =
-        vnt_peg1_net_score(net, &inputs[candidate * net->inputs]);
-    if (scores[candidate] > scores[choice]) {
-      choice = candidate;
-    }
-  }
-  timing->head_ms += (double)(ctimer_monotonic_ns() - start) / 1e6;
-  return choice;
-}
-
-// Evaluates the network on stored or fresh roots. Writes decisions.csv,
-// choices.csv (static rank 0 and the network choice, for peg1play),
-// inputs.f32 and scores.f32. check=1 also rebuilds each root with the
-// actual last tile swapped for an opponent-rack tile and requires identical
-// inputs and choice (excluded from timing).
-static void vnt_peg1_net_eval(const StringSplitter *fields) {
-  if (string_splitter_get_number_of_items(fields) != 5) {
-    log_fatal("peg1net needs model, positions prefix, output prefix, check");
-  }
-  VntPeg1Net *net = vnt_peg1_net_load(string_splitter_get_item(fields, 1));
-  const char *data = string_splitter_get_item(fields, 2);
-  const char *prefix = string_splitter_get_item(fields, 3);
-  const bool check = atoi(string_splitter_get_item(fields, 4)) != 0;
-  Config *config = config_create_or_die(
-      "set -path ./collection-runtime-data:./data -lex NWL23 -wmp true -wit "
-      "true -rit true -ritmmap true -threads 1 -s1 equity -s2 equity -r1 all "
-      "-r2 all -numplays 1");
-  load_and_exec_config_or_die(
-      config, "cgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 / 0/0 0");
-  Game *root = config_get_game(config);
-  Game *swapped = game_duplicate(root), *scenario = game_duplicate(root),
-       *work = game_duplicate(root);
-  MoveList *pool = move_list_create(VNT_PEG1_POOL + 1);
-  MoveList *small = move_list_create_small(16);
-  Move *move = move_create();
-  ErrorStack *errors = error_stack_create();
-  char *path = get_formatted_string("%s.positions.csv", data);
-  FILE *positions = fopen_or_die(path, "r");
-  free(path);
-  const char *suffixes[] = {"decisions.csv", "choices.csv", "inputs.f32",
-                            "scores.f32"};
-  FILE *output[4];
-  for (int idx = 0; idx < 4; idx++) {
-    path = get_formatted_string("%s.%s", prefix, suffixes[idx]);
-    output[idx] = vnt_fopen_new_or_die(path, "wb");
-    free(path);
-  }
-  fprintf(output[0], "root,candidates,scored,choice,movegen_ms,scalar_ms,"
-                     "world_ms,opp_ms,mover_ms,playout_ms,head_ms,total_ms,"
-                     "privacy_checked\n");
-  float *inputs = malloc_or_die(sizeof(float) * VNT_PEG1_POOL * net->inputs);
-  float *private_inputs =
-      malloc_or_die(sizeof(float) * VNT_PEG1_POOL * net->inputs);
-  double scores[VNT_PEG1_POOL], private_scores[VNT_PEG1_POOL];
-  char *line = NULL;
-  size_t capacity = 0;
-  (void)getline_ignore_carriage_return(&line, &capacity, positions);
-  while (getline_ignore_carriage_return(&line, &capacity, positions) >= 0) {
-    int root_id, attempt, turn, seat, bag, first, expected, pass_rank;
-    unsigned long long source_seed;
-    if (sscanf(line, "%d,%llu,%d,%d,%d,%d,%d,%d,%d,", &root_id, &source_seed,
-               &attempt, &turn, &seat, &bag, &first, &expected,
-               &pass_rank) != 9 ||
-        bag != 1) {
-      log_fatal("peg1net invalid position");
-    }
-    char *cgp = strchr(line, '"'), *end = strrchr(line, '"');
-    if (cgp == NULL || end <= cgp) {
-      log_fatal("peg1net invalid CGP");
-    }
-    *end = '\0';
-    game_load_cgp(root, cgp + 1, errors);
-    game_set_player_on_turn_index(root, seat);
-    if (!error_stack_is_empty(errors) ||
-        bag_get_letters(game_get_bag(root)) != 1) {
-      log_fatal("peg1net CGP load failed");
-    }
-    Move candidates[VNT_PEG1_POOL];
-    int count;
-    VntPeg1NetTiming timing = {0};
-    const int64_t start = ctimer_monotonic_ns();
-    const int choice =
-        vnt_peg1_net_choose(net, root, pool, candidates, &count, scenario, work,
-                            small, move, inputs, scores, &timing);
-    const double total_ms = (double)(ctimer_monotonic_ns() - start) / 1e6;
-    if (count != expected) {
-      log_fatal("peg1net candidate replay mismatch");
-    }
-    const int scored = count < net->top_k ? count : net->top_k;
-    if (check) {
-      int unseen[VALUE_NET_TILE_TYPES];
-      vnt_peg1_public_unseen(root, unseen);
-      int actual = -1, other = -1;
-      for (int ml = 0; ml < VALUE_NET_TILE_TYPES; ml++) {
-        if (bag_get_letter(game_get_bag(root), (MachineLetter)ml) > 0) {
-          actual = ml;
-        }
-      }
-      for (int ml = 0; ml < VALUE_NET_TILE_TYPES && other < 0; ml++) {
-        if (unseen[ml] > 0 && ml != actual) {
-          other = ml;
-        }
-      }
-      vnt_peg1_world(root, unseen, other < 0 ? actual : other, swapped);
-      Move private_candidates[VNT_PEG1_POOL];
-      int private_count;
-      VntPeg1NetTiming ignored = {0};
-      const int private_choice = vnt_peg1_net_choose(
-          net, swapped, pool, private_candidates, &private_count, scenario,
-          work, small, move, private_inputs, private_scores, &ignored);
-      if (private_count != count || private_choice != choice ||
-          memcmp(inputs, private_inputs,
-                 sizeof(float) * scored * net->inputs) != 0) {
-        log_fatal("1PEG network depends on the hidden last tile");
-      }
-      for (int candidate = 0; candidate < count; candidate++) {
-        if (compare_moves(&candidates[candidate],
-                          &private_candidates[candidate], true) != -1) {
-          log_fatal("1PEG network candidate order depends on hidden tile");
-        }
-      }
-    }
-    fprintf(output[0],
-            "%d,%d,%d,%d,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%d\n", root_id,
-            count, scored, choice, timing.movegen_ms, timing.scalar_ms,
-            timing.world_ms, timing.opp_ms, timing.mover_ms, timing.playout_ms,
-            timing.head_ms, total_ms, check);
-    fprintf(output[1], "%d,0\n", root_id);
-    if (choice > 0) {
-      fprintf(output[1], "%d,%d\n", root_id, choice);
-    }
-    float score_row[VNT_PEG1_POOL];
-    for (int candidate = 0; candidate < scored; candidate++) {
-      score_row[candidate] = (float)scores[candidate];
-    }
-    if (!fwrite_le_floats(inputs, (size_t)scored * net->inputs, output[2]) ||
-        !fwrite_le_floats(score_row, scored, output[3])) {
-      log_fatal("peg1net write failed");
-    }
-    for (int idx = 0; idx < 4; idx++) {
-      fflush(output[idx]);
-    }
-  }
-  free(line);
-  free(inputs);
-  free(private_inputs);
-  fclose(positions);
-  for (int idx = 0; idx < 4; idx++) {
-    fclose(output[idx]);
-  }
-  error_stack_destroy(errors);
-  move_destroy(move);
-  move_list_destroy(small);
-  move_list_destroy(pool);
-  game_destroy(swapped);
-  game_destroy(scenario);
-  game_destroy(work);
-  config_destroy(config);
-  vnt_peg1_net_destroy(net);
 }
 
 // Lanes whose plays can change when move lands on board (before the move):
@@ -1896,204 +1038,7 @@ static void vnt_peg1_best_scoring(const Game *game, MoveList *list,
 
 enum { VNT_PEG1_ROOT_LANES = 3 };
 
-// Benchmarks opponent-reply methods on stored roots' static top-K.
-static void vnt_peg1_bench(const StringSplitter *fields) {
-  if (string_splitter_get_number_of_items(fields) != 5) {
-    log_fatal("peg1bench needs positions prefix, output CSV, top K, wmp");
-  }
-  const bool use_wmp = atoi(string_splitter_get_item(fields, 4)) != 0;
-  const char *data = string_splitter_get_item(fields, 1);
-  const int top_k = atoi(string_splitter_get_item(fields, 3));
-  Config *config = config_create_or_die(
-      "set -path ./collection-runtime-data:./data -lex NWL23 -wmp true -wit "
-      "true -rit true -ritmmap true -threads 1 -s1 equity -s2 equity -r1 all "
-      "-r2 all -numplays 1");
-  load_and_exec_config_or_die(
-      config, "cgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 / 0/0 0");
-  Game *root = config_get_game(config);
-  vnt_peg1_override_kwg =
-      use_wmp ? NULL : player_get_kwg(game_get_player(root, 0));
-  Game *scenario = game_duplicate(root), *opp_root = game_duplicate(root);
-  MoveList *pool = move_list_create(VNT_PEG1_POOL + 1);
-  MoveList *small = move_list_create_small(16);
-  MoveList *best_list = move_list_create(1);
-  Move *move = move_create(), *found = move_create(),
-       *touched_best = move_create();
-  ErrorStack *errors = error_stack_create();
-  char *path = get_formatted_string("%s.positions.csv", data);
-  FILE *positions = fopen_or_die(path, "r");
-  free(path);
-  FILE *output = vnt_fopen_new_or_die(string_splitter_get_item(fields, 2), "w");
-  fprintf(output, "root,worlds,scored,blank_unseen,small_ms,best_ms,"
-                  "root_prep_ms,lane_ms,lane_fallbacks,score_mismatch_best,"
-                  "score_mismatch_lane,value_mismatch_small_vs_best,"
-                  "mover_small_ms,mover_best_ms,mover_mismatch\n");
-  char *line = NULL;
-  size_t capacity = 0;
-  (void)getline_ignore_carriage_return(&line, &capacity, positions);
-  while (getline_ignore_carriage_return(&line, &capacity, positions) >= 0) {
-    int root_id, attempt, turn, seat, bag, first, expected, pass_rank;
-    unsigned long long source_seed;
-    if (sscanf(line, "%d,%llu,%d,%d,%d,%d,%d,%d,%d,", &root_id, &source_seed,
-               &attempt, &turn, &seat, &bag, &first, &expected,
-               &pass_rank) != 9) {
-      log_fatal("peg1bench invalid position");
-    }
-    char *cgp = strchr(line, '"'), *end = strrchr(line, '"');
-    *end = '\0';
-    game_load_cgp(root, cgp + 1, errors);
-    game_set_player_on_turn_index(root, seat);
-    if (!error_stack_is_empty(errors)) {
-      log_fatal("peg1bench CGP load failed");
-    }
-    Move candidates[VNT_PEG1_POOL];
-    int current_pass;
-    const int count = vnt_peg1_pool(root, pool, candidates, &current_pass);
-    const int scored = count < top_k ? count : top_k;
-    int unseen[VALUE_NET_TILE_TYPES];
-    vnt_peg1_public_unseen(root, unseen);
-    const int mover = seat;
-    // Per world: the opponent's best plays on the root board in its three
-    // best lanes (each excluding the previous lanes).
-    Move lane_best[VALUE_NET_TILE_TYPES][VNT_PEG1_ROOT_LANES];
-    int64_t start = ctimer_monotonic_ns();
-    int worlds = 0;
-    for (int tile = 0; tile < VALUE_NET_TILE_TYPES; tile++) {
-      if (unseen[tile] == 0) {
-        continue;
-      }
-      worlds++;
-      vnt_peg1_world(root, unseen, tile, opp_root);
-      game_set_player_on_turn_index(opp_root, 1 - mover);
-      uint64_t lanes = ~UINT64_C(0) >> (64 - 2 * BOARD_DIM);
-      for (int idx = 0; idx < VNT_PEG1_ROOT_LANES; idx++) {
-        vnt_peg1_best_scoring(opp_root, best_list, lanes, NULL,
-                              &lane_best[tile][idx]);
-        if (move_get_type(&lane_best[tile][idx]) ==
-            GAME_EVENT_TILE_PLACEMENT_MOVE) {
-          lanes &= ~(UINT64_C(1) << vnt_peg1_move_lane(&lane_best[tile][idx]));
-        }
-      }
-    }
-    const double root_prep_ms = (double)(ctimer_monotonic_ns() - start) / 1e6;
-    double small_ms = 0, best_ms = 0, lane_ms = 0, mover_small_ms = 0,
-           mover_best_ms = 0;
-    int fallbacks = 0, mismatch_best = 0, mismatch_lane = 0, value_mismatch = 0,
-        mover_mismatch = 0;
-    for (int candidate = 0; candidate < scored; candidate++) {
-      const Move *cand = &candidates[candidate];
-      const uint64_t touched =
-          vnt_peg1_lane_influence(game_get_board(root), cand);
-      for (int tile = 0; tile < VALUE_NET_TILE_TYPES; tile++) {
-        if (unseen[tile] == 0) {
-          continue;
-        }
-        vnt_peg1_world(root, unseen, tile, scenario);
-        play_move(cand, scenario, NULL);
-        bool out, pass;
-        int tiles;
-        start = ctimer_monotonic_ns();
-        const int value_small =
-            vnt_peg1_greedy(scenario, small, move, &out, &tiles, &pass);
-        small_ms += (double)(ctimer_monotonic_ns() - start) / 1e6;
-        start = ctimer_monotonic_ns();
-        vnt_peg1_best_scoring(scenario, best_list, 0, NULL, found);
-        best_ms += (double)(ctimer_monotonic_ns() - start) / 1e6;
-        const int best_score = equity_to_int(move_get_score(found));
-        // Lane-incremental: first root lane best whose lane is untouched
-        // remains legal with its score; regenerate touched lanes only.
-        start = ctimer_monotonic_ns();
-        const Move *base = NULL;
-        for (int idx = 0; idx < VNT_PEG1_ROOT_LANES; idx++) {
-          const Move *lb = &lane_best[tile][idx];
-          if (move_get_type(lb) != GAME_EVENT_TILE_PLACEMENT_MOVE) {
-            break;
-          }
-          if (!((touched >> vnt_peg1_move_lane(lb)) & 1)) {
-            base = lb;
-            break;
-          }
-        }
-        int lane_score;
-        if (base == NULL) {
-          fallbacks++;
-          vnt_peg1_best_scoring(scenario, best_list, 0, NULL, touched_best);
-          lane_score = equity_to_int(move_get_score(touched_best));
-        } else {
-          vnt_peg1_best_scoring(scenario, best_list, touched, base,
-                                touched_best);
-          lane_score = equity_to_int(move_get_score(touched_best));
-        }
-        lane_ms += (double)(ctimer_monotonic_ns() - start) / 1e6;
-        mismatch_lane += lane_score != best_score;
-        // BEST_SMALL greedy value ignores the bonus only when not going out.
-        const int small_score =
-            pass ? 0
-                 : value_small - (out ? equity_to_int(calculate_end_rack_points(
-                                            player_get_rack(game_get_player(
-                                                scenario, mover)),
-                                            game_get_ld(scenario)))
-                                      : 0);
-        mismatch_best += small_score != best_score;
-        const bool best_out =
-            move_get_type(found) == GAME_EVENT_TILE_PLACEMENT_MOVE &&
-            move_get_tiles_played(found) ==
-                rack_get_total_letters(
-                    player_get_rack(game_get_player(scenario, 1 - mover)));
-        const int best_value =
-            best_score +
-            (best_out ? equity_to_int(calculate_end_rack_points(
-                            player_get_rack(game_get_player(scenario, mover)),
-                            game_get_ld(scenario)))
-                      : 0);
-        value_mismatch += best_value != value_small;
-        // Mover's immediate reply both ways.
-        game_set_player_on_turn_index(scenario, mover);
-        start = ctimer_monotonic_ns();
-        const int mover_small =
-            vnt_peg1_greedy(scenario, small, move, &out, &tiles, &pass);
-        mover_small_ms += (double)(ctimer_monotonic_ns() - start) / 1e6;
-        start = ctimer_monotonic_ns();
-        vnt_peg1_best_scoring(scenario, best_list, 0, NULL, found);
-        mover_best_ms += (double)(ctimer_monotonic_ns() - start) / 1e6;
-        const bool mover_out =
-            move_get_type(found) == GAME_EVENT_TILE_PLACEMENT_MOVE &&
-            move_get_tiles_played(found) ==
-                rack_get_total_letters(
-                    player_get_rack(game_get_player(scenario, mover)));
-        const int mover_best =
-            equity_to_int(move_get_score(found)) +
-            (mover_out
-                 ? equity_to_int(calculate_end_rack_points(
-                       player_get_rack(game_get_player(scenario, 1 - mover)),
-                       game_get_ld(scenario)))
-                 : 0);
-        mover_mismatch += mover_best != mover_small;
-      }
-    }
-    fprintf(output,
-            "%d,%d,%d,%d,%.9g,%.9g,%.9g,%.9g,%d,%d,%d,%d,%.9g,%.9g,%d\n",
-            root_id, worlds, scored, unseen[0], small_ms, best_ms, root_prep_ms,
-            lane_ms, fallbacks, mismatch_best, mismatch_lane, value_mismatch,
-            mover_small_ms, mover_best_ms, mover_mismatch);
-    fflush(output);
-  }
-  free(line);
-  fclose(positions);
-  fclose(output);
-  error_stack_destroy(errors);
-  move_destroy(move);
-  move_destroy(found);
-  move_destroy(touched_best);
-  move_list_destroy(best_list);
-  move_list_destroy(small);
-  move_list_destroy(pool);
-  game_destroy(scenario);
-  game_destroy(opp_root);
-  config_destroy(config);
-}
-
-// ---- 1PEG reply features v2 (shared by extraction and the served policy) --
+// ---- 1PEG reply features v2 (shared by extraction and the v3 networks) ---
 // Opponent reply: the opponent's highest-scoring play on the post-candidate
 // board, found incrementally. Per hypothetical world the opponent's best
 // plays on the root board in its three best lanes are generated once; for a
@@ -2305,533 +1250,6 @@ static void vnt_peg1_features_v2(const StringSplitter *fields) {
   move_list_destroy(pool);
   vnt_peg1_work_destroy(&work);
   config_destroy(config);
-}
-
-// ---- Served v2 policy ------------------------------------------------------
-enum {
-  VNT_PEG1_NET2_MAGIC = 0x50473153,
-};
-
-typedef struct VntPeg1Net2 {
-  VntPeg1Net base;
-  int mover_max_leave;
-} VntPeg1Net2;
-
-static VntPeg1Net2 *vnt_peg1_net2_load(const char *path) {
-  FILE *file = fopen_or_die(path, "rb");
-  uint32_t shape[6];
-  if (!fread_le_uint32s(shape, 6, file) || shape[0] != VNT_PEG1_NET2_MAGIC ||
-      shape[1] < 1 || shape[1] > VNT_PEG1_NET_MAX_INPUT || shape[2] < 1 ||
-      shape[2] > VNT_PEG1_NET_MAX_WIDTH || shape[3] < 1 ||
-      shape[3] > VNT_PEG1_POOL || (shape[4] & ~UINT32_C(3)) != 0 ||
-      (shape[4] & VNT_PEG1_GROUP_OPP) == 0 || shape[5] > RACK_SIZE) {
-    log_fatal("invalid 1PEG v2 network header");
-  }
-  VntPeg1Net2 *net = calloc_or_die(1, sizeof(VntPeg1Net2));
-  VntPeg1Net *base = &net->base;
-  base->inputs = (int)shape[1];
-  base->width = (int)shape[2];
-  base->top_k = (int)shape[3];
-  base->groups = shape[4];
-  net->mover_max_leave = (int)shape[5];
-  const size_t count = (size_t)base->width * (base->inputs + 2) + 1;
-  uint32_t *bits = malloc_or_die(count * sizeof(uint32_t));
-  base->blob = malloc_or_die(count * sizeof(float));
-  if (!fread_le_uint32s(bits, count, file) || fgetc(file) != EOF) {
-    log_fatal("invalid 1PEG v2 network weights");
-  }
-  memcpy(base->blob, bits, count * sizeof(float));
-  free(bits);
-  fclose(file);
-  base->first = base->blob;
-  base->bias = base->first + (size_t)base->width * base->inputs;
-  base->out = base->bias + base->width;
-  base->out_bias = base->out[base->width];
-  const bool mover_now = base->groups & VNT_PEG1_GROUP_MOVER_NOW;
-  const bool use[VNT_PEG1_REPLY] = {true,  true,  true,  mover_now, mover_now,
-                                    false, false, false, false,     true};
-  for (int idx = 0; idx < VNT_PEG1_REPLY; idx++) {
-    if (use[idx]) {
-      base->reply_index[base->reply_count++] = idx;
-    }
-  }
-  const bool restricted = mover_now && net->mover_max_leave < RACK_SIZE;
-  const int expected = (VALUE_NET_SCALARS - 4) + 2 + 4 * base->reply_count + 1 +
-                       (restricted ? 1 : 0);
-  if (expected != base->inputs) {
-    log_fatal("1PEG v2 network input width %d, expected %d", base->inputs,
-              expected);
-  }
-  return net;
-}
-
-static void vnt_peg1_net2_inputs(const VntPeg1Net2 *net, const Game *root,
-                                 const Move *candidates, int count,
-                                 VntPeg1Work *work, const VntPeg1Prep *shared,
-                                 float *inputs, VntPeg1NetTiming *timing) {
-  const VntPeg1Net *base = &net->base;
-  const bool mover_now = base->groups & VNT_PEG1_GROUP_MOVER_NOW;
-  const bool restricted = mover_now && net->mover_max_leave < RACK_SIZE;
-  int64_t start = ctimer_monotonic_ns();
-  VntPeg1Prep local;
-  if (shared == NULL) {
-    vnt_peg1_prep(root, work, &local, true);
-  }
-  const VntPeg1Prep *prep_ptr = shared == NULL ? &local : shared;
-  const VntPeg1Prep prep = *prep_ptr;
-  timing->opp_ms += (double)(ctimer_monotonic_ns() - start) / 1e6;
-  ValueNetHistory history;
-  value_net_history_reset(&history);
-  for (int candidate = 0; candidate < count; candidate++) {
-    const Move *cand = &candidates[candidate];
-    float *row = &inputs[candidate * base->inputs];
-    start = ctimer_monotonic_ns();
-    float scalars[VALUE_NET_SCALARS];
-    value_net_scalars_for_move(root, cand, &history, scalars);
-    int col = 0;
-    for (int idx = 0; idx < VALUE_NET_SCALARS; idx++) {
-      if (idx != 54 && idx != 55 && idx != 56 && idx != 67) {
-        row[col++] = scalars[idx];
-      }
-    }
-    const double after = value_net_spread_after_move(root, cand);
-    row[col++] = (float)equity_to_double(move_get_equity(cand));
-    row[col++] = (float)after;
-    const int leave_size = RACK_SIZE - move_get_tiles_played(cand);
-    const bool mover_here =
-        mover_now && (!restricted || leave_size <= net->mover_max_leave);
-    const uint64_t touched =
-        vnt_peg1_lane_influence(game_get_board(root), cand);
-    timing->scalar_ms += (double)(ctimer_monotonic_ns() - start) / 1e6;
-    double sums[VNT_PEG1_REPLY] = {0}, squares[VNT_PEG1_REPLY] = {0};
-    double low[VNT_PEG1_REPLY], high[VNT_PEG1_REPLY];
-    for (int idx = 0; idx < VNT_PEG1_REPLY; idx++) {
-      low[idx] = INFINITY;
-      high[idx] = -INFINITY;
-    }
-    for (int tile = 0; tile < VALUE_NET_TILE_TYPES; tile++) {
-      if (prep.unseen[tile] == 0) {
-        continue;
-      }
-      float feature[VNT_PEG1_REPLY] = {0};
-      vnt_peg1_v2_world(root, cand, touched, tile, &prep, work, true,
-                        mover_here, feature, timing);
-      const double probability = (double)prep.unseen[tile] / prep.total;
-      for (int idx = 0; idx < base->reply_count; idx++) {
-        const double value = feature[base->reply_index[idx]];
-        sums[idx] += probability * value;
-        squares[idx] += probability * value * value;
-        low[idx] = fmin(low[idx], value);
-        high[idx] = fmax(high[idx], value);
-      }
-    }
-    for (int idx = 0; idx < base->reply_count; idx++) {
-      row[col + idx] = (float)sums[idx];
-      row[col + base->reply_count + idx] =
-          (float)sqrt(fmax(0, squares[idx] - sums[idx] * sums[idx]));
-      row[col + 2 * base->reply_count + idx] = (float)low[idx];
-      row[col + 3 * base->reply_count + idx] = (float)high[idx];
-    }
-    col += 4 * base->reply_count;
-    row[col++] = (float)(after - sums[0]);
-    if (restricted) {
-      row[col++] = mover_here;
-    }
-    if (col != base->inputs) {
-      log_fatal("1PEG v2 input assembly mismatch");
-    }
-  }
-}
-
-// Returns the chosen static rank, or -1 when no placement exists (pass).
-static int vnt_peg1_net2_choose(const VntPeg1Net2 *net, const Game *root,
-                                MoveList *pool, Move *candidates, int *count,
-                                VntPeg1Work *work, float *inputs,
-                                double *scores, VntPeg1NetTiming *timing) {
-  int64_t start = ctimer_monotonic_ns();
-  int pass_rank;
-  *count = vnt_peg1_pool(root, pool, candidates, &pass_rank);
-  timing->movegen_ms += (double)(ctimer_monotonic_ns() - start) / 1e6;
-  if (*count == 0) {
-    return -1;
-  }
-  const int scored = *count < net->base.top_k ? *count : net->base.top_k;
-  vnt_peg1_net2_inputs(net, root, candidates, scored, work, NULL, inputs,
-                       timing);
-  start = ctimer_monotonic_ns();
-  int choice = 0;
-  for (int candidate = 0; candidate < scored; candidate++) {
-    scores[candidate] =
-        vnt_peg1_net_score(&net->base, &inputs[candidate * net->base.inputs]);
-    if (scores[candidate] > scores[choice]) {
-      choice = candidate;
-    }
-  }
-  timing->head_ms += (double)(ctimer_monotonic_ns() - start) / 1e6;
-  return choice;
-}
-
-static void vnt_peg1_net2_destroy(VntPeg1Net2 *net) {
-  free(net->base.blob);
-  free(net);
-}
-
-// v2 policy over stored or fresh roots: decisions/choices/inputs/scores, as
-// peg1net, with the optional hidden-tile permutation check.
-static void vnt_peg1_net2_eval(const StringSplitter *fields) {
-  if (string_splitter_get_number_of_items(fields) != 5) {
-    log_fatal("peg1net2 needs model, positions prefix, output prefix, check");
-  }
-  VntPeg1Net2 *net = vnt_peg1_net2_load(string_splitter_get_item(fields, 1));
-  const char *data = string_splitter_get_item(fields, 2);
-  const char *prefix = string_splitter_get_item(fields, 3);
-  const bool check = atoi(string_splitter_get_item(fields, 4)) != 0;
-  Config *config = config_create_or_die(
-      "set -path ./collection-runtime-data:./data -lex NWL23 -wmp true -wit "
-      "true -rit true -ritmmap true -threads 1 -s1 equity -s2 equity -r1 all "
-      "-r2 all -numplays 1");
-  load_and_exec_config_or_die(
-      config, "cgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 / 0/0 0");
-  Game *root = config_get_game(config);
-  Game *swapped = game_duplicate(root);
-  VntPeg1Work work = vnt_peg1_work_create(root);
-  MoveList *pool = move_list_create(VNT_PEG1_POOL + 1);
-  ErrorStack *errors = error_stack_create();
-  char *path = get_formatted_string("%s.positions.csv", data);
-  FILE *positions = fopen_or_die(path, "r");
-  free(path);
-  const char *suffixes[] = {"decisions.csv", "choices.csv", "inputs.f32",
-                            "scores.f32"};
-  FILE *output[4];
-  for (int idx = 0; idx < 4; idx++) {
-    path = get_formatted_string("%s.%s", prefix, suffixes[idx]);
-    output[idx] = vnt_fopen_new_or_die(path, "wb");
-    free(path);
-  }
-  fprintf(output[0], "root,candidates,scored,choice,movegen_ms,scalar_ms,"
-                     "world_ms,opp_ms,mover_ms,playout_ms,head_ms,total_ms,"
-                     "privacy_checked\n");
-  const int inputs_width = net->base.inputs;
-  float *inputs = malloc_or_die(sizeof(float) * VNT_PEG1_POOL * inputs_width);
-  float *private_inputs =
-      malloc_or_die(sizeof(float) * VNT_PEG1_POOL * inputs_width);
-  double scores[VNT_PEG1_POOL], private_scores[VNT_PEG1_POOL];
-  char *line = NULL;
-  size_t capacity = 0;
-  (void)getline_ignore_carriage_return(&line, &capacity, positions);
-  while (getline_ignore_carriage_return(&line, &capacity, positions) >= 0) {
-    int root_id, attempt, turn, seat, bag, first, expected, pass_rank;
-    unsigned long long source_seed;
-    if (sscanf(line, "%d,%llu,%d,%d,%d,%d,%d,%d,%d,", &root_id, &source_seed,
-               &attempt, &turn, &seat, &bag, &first, &expected,
-               &pass_rank) != 9 ||
-        bag != 1) {
-      log_fatal("peg1net2 invalid position");
-    }
-    char *cgp = strchr(line, '"'), *end = strrchr(line, '"');
-    if (cgp == NULL || end <= cgp) {
-      log_fatal("peg1net2 invalid CGP");
-    }
-    *end = '\0';
-    game_load_cgp(root, cgp + 1, errors);
-    game_set_player_on_turn_index(root, seat);
-    if (!error_stack_is_empty(errors) ||
-        bag_get_letters(game_get_bag(root)) != 1) {
-      log_fatal("peg1net2 CGP load failed");
-    }
-    Move candidates[VNT_PEG1_POOL];
-    int count;
-    VntPeg1NetTiming timing = {0};
-    const int64_t start = ctimer_monotonic_ns();
-    const int choice = vnt_peg1_net2_choose(net, root, pool, candidates, &count,
-                                            &work, inputs, scores, &timing);
-    const double total_ms = (double)(ctimer_monotonic_ns() - start) / 1e6;
-    if (count != expected) {
-      log_fatal("peg1net2 candidate replay mismatch");
-    }
-    const int scored = count < net->base.top_k ? count : net->base.top_k;
-    if (check) {
-      int unseen[VALUE_NET_TILE_TYPES];
-      vnt_peg1_public_unseen(root, unseen);
-      int actual = -1, other = -1;
-      for (int ml = 0; ml < VALUE_NET_TILE_TYPES; ml++) {
-        if (bag_get_letter(game_get_bag(root), (MachineLetter)ml) > 0) {
-          actual = ml;
-        }
-      }
-      for (int ml = 0; ml < VALUE_NET_TILE_TYPES && other < 0; ml++) {
-        if (unseen[ml] > 0 && ml != actual) {
-          other = ml;
-        }
-      }
-      vnt_peg1_world(root, unseen, other < 0 ? actual : other, swapped);
-      Move private_candidates[VNT_PEG1_POOL];
-      int private_count;
-      VntPeg1NetTiming ignored = {0};
-      const int private_choice = vnt_peg1_net2_choose(
-          net, swapped, pool, private_candidates, &private_count, &work,
-          private_inputs, private_scores, &ignored);
-      if (private_count != count || private_choice != choice ||
-          memcmp(inputs, private_inputs,
-                 sizeof(float) * scored * inputs_width) != 0) {
-        log_fatal("1PEG v2 network depends on the hidden last tile");
-      }
-      for (int candidate = 0; candidate < count; candidate++) {
-        if (compare_moves(&candidates[candidate],
-                          &private_candidates[candidate], true) != -1) {
-          log_fatal("1PEG v2 candidate order depends on hidden tile");
-        }
-      }
-    }
-    fprintf(output[0],
-            "%d,%d,%d,%d,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%d\n", root_id,
-            count, scored, choice, timing.movegen_ms, timing.scalar_ms,
-            timing.world_ms, timing.opp_ms, timing.mover_ms, timing.playout_ms,
-            timing.head_ms, total_ms, check);
-    fprintf(output[1], "%d,0\n", root_id);
-    if (choice > 0) {
-      fprintf(output[1], "%d,%d\n", root_id, choice);
-    }
-    float score_row[VNT_PEG1_POOL];
-    for (int candidate = 0; candidate < scored; candidate++) {
-      score_row[candidate] = (float)scores[candidate];
-    }
-    if (!fwrite_le_floats(inputs, (size_t)scored * inputs_width, output[2]) ||
-        !fwrite_le_floats(score_row, scored, output[3])) {
-      log_fatal("peg1net2 write failed");
-    }
-    for (int idx = 0; idx < 4; idx++) {
-      fflush(output[idx]);
-    }
-  }
-  free(line);
-  free(inputs);
-  free(private_inputs);
-  fclose(positions);
-  for (int idx = 0; idx < 4; idx++) {
-    fclose(output[idx]);
-  }
-  error_stack_destroy(errors);
-  move_list_destroy(pool);
-  vnt_peg1_work_destroy(&work);
-  game_destroy(swapped);
-  config_destroy(config);
-  vnt_peg1_net2_destroy(net);
-}
-
-// Two-stage 1PEG chooser: the fast network ranks the static top-K by
-// opponent-reply features; the strong network rescoring only the fast
-// network's top shortlist entries adds the mover follow-up features.
-// Returns the chosen static rank, or -1 when no placement exists (pass).
-static int vnt_peg1_cascade_choose(
-    const VntPeg1Net2 *fast, const VntPeg1Net2 *strong, int shortlist,
-    const Game *root, MoveList *pool, Move *candidates, int *count,
-    VntPeg1Work *work, float *fast_inputs, float *strong_inputs,
-    double *fast_scores, double *strong_scores, int *short_ranks,
-    VntPeg1NetTiming *stage1, VntPeg1NetTiming *stage2) {
-  int64_t start = ctimer_monotonic_ns();
-  int pass_rank;
-  *count = vnt_peg1_pool(root, pool, candidates, &pass_rank);
-  stage1->movegen_ms += (double)(ctimer_monotonic_ns() - start) / 1e6;
-  if (*count == 0) {
-    return -1;
-  }
-  const int scored = *count < fast->base.top_k ? *count : fast->base.top_k;
-  start = ctimer_monotonic_ns();
-  VntPeg1Prep prep;
-  vnt_peg1_prep(root, work, &prep, true);
-  stage1->opp_ms += (double)(ctimer_monotonic_ns() - start) / 1e6;
-  vnt_peg1_net2_inputs(fast, root, candidates, scored, work, &prep, fast_inputs,
-                       stage1);
-  start = ctimer_monotonic_ns();
-  for (int candidate = 0; candidate < scored; candidate++) {
-    fast_scores[candidate] = vnt_peg1_net_score(
-        &fast->base, &fast_inputs[candidate * fast->base.inputs]);
-  }
-  // Shortlist: highest stage-1 scores, ties to the lower static rank.
-  const int listed = scored < shortlist ? scored : shortlist;
-  bool taken[VNT_PEG1_POOL] = {false};
-  for (int slot = 0; slot < listed; slot++) {
-    int best = -1;
-    for (int candidate = 0; candidate < scored; candidate++) {
-      if (!taken[candidate] &&
-          (best < 0 || fast_scores[candidate] > fast_scores[best])) {
-        best = candidate;
-      }
-    }
-    taken[best] = true;
-  }
-  int filled = 0;
-  Move short_moves[VNT_PEG1_POOL];
-  for (int candidate = 0; candidate < scored; candidate++) {
-    if (taken[candidate]) {
-      short_ranks[filled] = candidate;
-      move_copy(&short_moves[filled++], &candidates[candidate]);
-    }
-  }
-  stage1->head_ms += (double)(ctimer_monotonic_ns() - start) / 1e6;
-  vnt_peg1_net2_inputs(strong, root, short_moves, filled, work, &prep,
-                       strong_inputs, stage2);
-  start = ctimer_monotonic_ns();
-  int choice = 0;
-  for (int slot = 0; slot < filled; slot++) {
-    strong_scores[slot] = vnt_peg1_net_score(
-        &strong->base, &strong_inputs[slot * strong->base.inputs]);
-    if (strong_scores[slot] > strong_scores[choice]) {
-      choice = slot;
-    }
-  }
-  stage2->head_ms += (double)(ctimer_monotonic_ns() - start) / 1e6;
-  return short_ranks[choice];
-}
-
-// Full-game pairs. Each game is static self-play from the opening (the
-// peg1data source procedure, without rejection). If a 1PEG arises, the
-// mover's choice is made twice -- static top-1 and the v2 network -- and
-// each branch is continued to game over with the common continuation
-// (0 = static, 2 = fixed two-ply endgame); both final spreads come from the
-// 1PEG mover's view. Games without a 1PEG are recorded as identical pairs.
-static void vnt_peg1_games(const StringSplitter *fields) {
-  const int items = string_splitter_get_number_of_items(fields);
-  if (items != 7 && items != 9) {
-    log_fatal("peg1games needs model, count, offset, seed, depth, prefix "
-              "[, strong model, shortlist]");
-  }
-  VntPeg1Net2 *net = vnt_peg1_net2_load(string_splitter_get_item(fields, 1));
-  // Optional cascade: net ranks, the strong model rescoring its shortlist.
-  VntPeg1Net2 *strong =
-      items == 9 ? vnt_peg1_net2_load(string_splitter_get_item(fields, 7))
-                 : NULL;
-  const int shortlist =
-      items == 9 ? atoi(string_splitter_get_item(fields, 8)) : 0;
-  const int games = atoi(string_splitter_get_item(fields, 2));
-  const int offset = atoi(string_splitter_get_item(fields, 3));
-  const uint64_t seed = strtoull(string_splitter_get_item(fields, 4), NULL, 10);
-  const int depth = atoi(string_splitter_get_item(fields, 5));
-  const char *prefix = string_splitter_get_item(fields, 6);
-  if (games < 1 || offset < 0 || (depth != 0 && depth != 2)) {
-    log_fatal("peg1games invalid arguments");
-  }
-  Config *config = config_create_or_die(
-      "set -path ./collection-runtime-data:./data -lex NWL23 -wmp true "
-      "-wit true -rit true -ritmmap true -threads 1 "
-      "-s1 equity -s2 equity -r1 all -r2 all -numplays 1");
-  load_and_exec_config_or_die(
-      config, "cgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 / 0/0 0");
-  Game *game = config_get_game(config);
-  Game *branch = game_duplicate(game);
-  VntPeg1Work work = vnt_peg1_work_create(game);
-  MoveList *pool = move_list_create(VNT_PEG1_POOL + 1);
-  MoveList *static_list = move_list_create(1);
-  char *path = get_formatted_string("%s.fullgames.csv", prefix);
-  FILE *output = vnt_fopen_new_or_die(path, "w");
-  free(path);
-  fprintf(output, "game,source_seed,starter,peg1,mover,net_choice,candidates,"
-                  "static_final,net_final,static_win,net_win,decision_ms,"
-                  "continuation_depth\n");
-  float *inputs =
-      malloc_or_die(sizeof(float) * VNT_PEG1_POOL * net->base.inputs);
-  float *strong_inputs =
-      strong == NULL
-          ? NULL
-          : malloc_or_die(sizeof(float) * VNT_PEG1_POOL * strong->base.inputs);
-  double scores[VNT_PEG1_POOL], strong_scores[VNT_PEG1_POOL];
-  int short_ranks[VNT_PEG1_POOL];
-  for (int local = 0; local < games; local++) {
-    const int game_id = offset + local;
-    const uint64_t source_seed =
-        vnt_mix(seed ^ vnt_mix((uint64_t)game_id) ^ vnt_mix(UINT64_C(918273)));
-    game_reset(game);
-    game_seed(game, source_seed);
-    game_set_starting_player_index(game, game_id % 2);
-    draw_starting_racks(game);
-    int turns = 0;
-    while (!game_over(game) && bag_get_letters(game_get_bag(game)) > 1 &&
-           turns < VNT_MAX_TURNS) {
-      Move played;
-      move_copy(&played, vnt_static_move(game, static_list));
-      play_move(&played, game, NULL);
-      turns++;
-    }
-    const bool peg1 =
-        !game_over(game) && bag_get_letters(game_get_bag(game)) == 1;
-    double finals[2] = {0, 0};
-    int count = 0, choice = 0, mover = -1;
-    double decision_ms = 0;
-    if (peg1) {
-      mover = game_get_player_on_turn_index(game);
-      Move candidates[VNT_PEG1_POOL];
-      VntPeg1NetTiming timing = {0}, timing2 = {0};
-      const int64_t start = ctimer_monotonic_ns();
-      if (strong == NULL) {
-        choice = vnt_peg1_net2_choose(net, game, pool, candidates, &count,
-                                      &work, inputs, scores, &timing);
-      } else {
-        choice = vnt_peg1_cascade_choose(net, strong, shortlist, game, pool,
-                                         candidates, &count, &work, inputs,
-                                         strong_inputs, scores, strong_scores,
-                                         short_ranks, &timing, &timing2);
-      }
-      decision_ms = (double)(ctimer_monotonic_ns() - start) / 1e6;
-      for (int arm = 0; arm < 2; arm++) {
-        game_copy(branch, game);
-        Move first;
-        if (choice < 0) {
-          // No placement: both policies must pass.
-          move_set_as_pass(&first);
-        } else {
-          move_copy(&first, &candidates[arm == 0 ? 0 : choice]);
-        }
-        play_move(&first, branch, NULL);
-        int steps = 0;
-        while (!game_over(branch) && steps < VNT_MAX_TURNS) {
-          Move next;
-          if (depth == 2 && bag_get_letters(game_get_bag(branch)) == 0) {
-            vnt_fixed_endgame(branch, &next, 2);
-          } else {
-            move_copy(&next, vnt_static_move(branch, static_list));
-          }
-          play_move(&next, branch, NULL);
-          steps++;
-        }
-        if (!game_over(branch)) {
-          log_fatal("peg1games continuation did not end");
-        }
-        finals[arm] = vnt_peg1_margin(branch, mover);
-      }
-    } else {
-      while (!game_over(game) && turns < VNT_MAX_TURNS) {
-        Move played;
-        move_copy(&played, vnt_static_move(game, static_list));
-        play_move(&played, game, NULL);
-        turns++;
-      }
-      finals[0] = finals[1] = vnt_peg1_margin(game, 0);
-    }
-    fprintf(output, "%d,%llu,%d,%d,%d,%d,%d,%.9g,%.9g,%.1f,%.1f,%.9g,%d\n",
-            game_id, (unsigned long long)source_seed, game_id % 2, peg1, mover,
-            choice, count, finals[0], finals[1],
-            finals[0] > 0   ? 1.0
-            : finals[0] < 0 ? 0.0
-                            : .5,
-            finals[1] > 0   ? 1.0
-            : finals[1] < 0 ? 0.0
-                            : .5,
-            decision_ms, depth);
-    fflush(output);
-  }
-  free(inputs);
-  free(strong_inputs);
-  fclose(output);
-  move_list_destroy(pool);
-  move_list_destroy(static_list);
-  vnt_peg1_work_destroy(&work);
-  game_destroy(branch);
-  config_destroy(config);
-  vnt_peg1_net2_destroy(net);
-  if (strong != NULL) {
-    vnt_peg1_net2_destroy(strong);
-  }
 }
 
 // Fresh 1PEG root positions only (the peg1data source procedure, no labels or
@@ -3056,157 +1474,6 @@ static void vnt_peg1_deep(const StringSplitter *fields) {
   config_destroy(config);
 }
 
-static void vnt_peg1_cascade_eval(const StringSplitter *fields) {
-  if (string_splitter_get_number_of_items(fields) != 7) {
-    log_fatal("peg1cascade needs fast model, strong model, shortlist, "
-              "positions prefix, output prefix, check");
-  }
-  VntPeg1Net2 *fast = vnt_peg1_net2_load(string_splitter_get_item(fields, 1));
-  VntPeg1Net2 *strong = vnt_peg1_net2_load(string_splitter_get_item(fields, 2));
-  const int shortlist = atoi(string_splitter_get_item(fields, 3));
-  const char *data = string_splitter_get_item(fields, 4);
-  const char *prefix = string_splitter_get_item(fields, 5);
-  const bool check = atoi(string_splitter_get_item(fields, 6)) != 0;
-  if (shortlist < 1 || shortlist > VNT_PEG1_POOL ||
-      (strong->base.groups & VNT_PEG1_GROUP_MOVER_NOW) == 0) {
-    log_fatal("peg1cascade invalid shortlist or stage-2 model");
-  }
-  Config *config = config_create_or_die(
-      "set -path ./collection-runtime-data:./data -lex NWL23 -wmp true -wit "
-      "true -rit true -ritmmap true -threads 1 -s1 equity -s2 equity -r1 all "
-      "-r2 all -numplays 1");
-  load_and_exec_config_or_die(
-      config, "cgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 / 0/0 0");
-  Game *root = config_get_game(config);
-  Game *swapped = game_duplicate(root);
-  VntPeg1Work work = vnt_peg1_work_create(root);
-  MoveList *pool = move_list_create(VNT_PEG1_POOL + 1);
-  ErrorStack *errors = error_stack_create();
-  char *path = get_formatted_string("%s.positions.csv", data);
-  FILE *positions = fopen_or_die(path, "r");
-  free(path);
-  const char *suffixes[] = {"decisions.csv", "choices.csv"};
-  FILE *output[2];
-  for (int idx = 0; idx < 2; idx++) {
-    path = get_formatted_string("%s.%s", prefix, suffixes[idx]);
-    output[idx] = vnt_fopen_new_or_die(path, "w");
-    free(path);
-  }
-  fprintf(output[0],
-          "root,candidates,choice,movegen_ms,stage1_world_ms,stage1_opp_ms,"
-          "stage1_scalar_ms,stage1_head_ms,stage2_world_ms,stage2_opp_ms,"
-          "stage2_mover_ms,stage2_scalar_ms,stage2_head_ms,total_ms,"
-          "privacy_checked,static_ms,static_is_pool_top\n");
-  MoveList *static_list = move_list_create(1);
-  float *fast_inputs =
-      malloc_or_die(sizeof(float) * VNT_PEG1_POOL * fast->base.inputs);
-  float *strong_inputs =
-      malloc_or_die(sizeof(float) * VNT_PEG1_POOL * strong->base.inputs);
-  double fast_scores[VNT_PEG1_POOL], strong_scores[VNT_PEG1_POOL];
-  int short_ranks[VNT_PEG1_POOL];
-  char *line = NULL;
-  size_t capacity = 0;
-  (void)getline_ignore_carriage_return(&line, &capacity, positions);
-  while (getline_ignore_carriage_return(&line, &capacity, positions) >= 0) {
-    int root_id, attempt, turn, seat, bag, first, expected, pass_rank;
-    unsigned long long source_seed;
-    if (sscanf(line, "%d,%llu,%d,%d,%d,%d,%d,%d,%d,", &root_id, &source_seed,
-               &attempt, &turn, &seat, &bag, &first, &expected,
-               &pass_rank) != 9 ||
-        bag != 1) {
-      log_fatal("peg1cascade invalid position");
-    }
-    char *cgp = strchr(line, '"'), *end = strrchr(line, '"');
-    if (cgp == NULL || end <= cgp) {
-      log_fatal("peg1cascade invalid CGP");
-    }
-    *end = '\0';
-    game_load_cgp(root, cgp + 1, errors);
-    game_set_player_on_turn_index(root, seat);
-    if (!error_stack_is_empty(errors) ||
-        bag_get_letters(game_get_bag(root)) != 1) {
-      log_fatal("peg1cascade CGP load failed");
-    }
-    // Reference cost of plain static selection on the same root.
-    const int64_t static_start = ctimer_monotonic_ns();
-    Move static_choice;
-    move_copy(&static_choice, vnt_static_move(root, static_list));
-    const double static_ms =
-        (double)(ctimer_monotonic_ns() - static_start) / 1e6;
-    Move candidates[VNT_PEG1_POOL];
-    int count;
-    VntPeg1NetTiming stage1 = {0}, stage2 = {0};
-    const int64_t start = ctimer_monotonic_ns();
-    const int choice = vnt_peg1_cascade_choose(
-        fast, strong, shortlist, root, pool, candidates, &count, &work,
-        fast_inputs, strong_inputs, fast_scores, strong_scores, short_ranks,
-        &stage1, &stage2);
-    const double total_ms = (double)(ctimer_monotonic_ns() - start) / 1e6;
-    if (count != expected) {
-      log_fatal("peg1cascade candidate replay mismatch");
-    }
-    if (check) {
-      int unseen[VALUE_NET_TILE_TYPES];
-      vnt_peg1_public_unseen(root, unseen);
-      int actual = -1, other = -1;
-      for (int ml = 0; ml < VALUE_NET_TILE_TYPES; ml++) {
-        if (bag_get_letter(game_get_bag(root), (MachineLetter)ml) > 0) {
-          actual = ml;
-        }
-      }
-      for (int ml = 0; ml < VALUE_NET_TILE_TYPES && other < 0; ml++) {
-        if (unseen[ml] > 0 && ml != actual) {
-          other = ml;
-        }
-      }
-      vnt_peg1_world(root, unseen, other < 0 ? actual : other, swapped);
-      Move private_candidates[VNT_PEG1_POOL];
-      int private_count;
-      VntPeg1NetTiming ignored1 = {0}, ignored2 = {0};
-      double private_fast[VNT_PEG1_POOL], private_strong[VNT_PEG1_POOL];
-      int private_ranks[VNT_PEG1_POOL];
-      const int private_choice = vnt_peg1_cascade_choose(
-          fast, strong, shortlist, swapped, pool, private_candidates,
-          &private_count, &work, fast_inputs, strong_inputs, private_fast,
-          private_strong, private_ranks, &ignored1, &ignored2);
-      const int scored = count < fast->base.top_k ? count : fast->base.top_k;
-      if (private_count != count || private_choice != choice ||
-          memcmp(private_fast, fast_scores, sizeof(double) * scored) != 0) {
-        log_fatal("1PEG cascade depends on the hidden last tile");
-      }
-    }
-    fprintf(output[0],
-            "%d,%d,%d,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,"
-            "%d,%.9g,%d\n",
-            root_id, count, choice, stage1.movegen_ms, stage1.world_ms,
-            stage1.opp_ms, stage1.scalar_ms, stage1.head_ms, stage2.world_ms,
-            stage2.opp_ms, stage2.mover_ms, stage2.scalar_ms, stage2.head_ms,
-            total_ms, check, static_ms,
-            count > 0 &&
-                compare_moves(&static_choice, &candidates[0], true) == -1);
-    fprintf(output[1], "%d,0\n", root_id);
-    if (choice > 0) {
-      fprintf(output[1], "%d,%d\n", root_id, choice);
-    }
-    fflush(output[0]);
-    fflush(output[1]);
-  }
-  free(line);
-  free(fast_inputs);
-  free(strong_inputs);
-  fclose(positions);
-  fclose(output[0]);
-  fclose(output[1]);
-  error_stack_destroy(errors);
-  move_list_destroy(pool);
-  move_list_destroy(static_list);
-  vnt_peg1_work_destroy(&work);
-  game_destroy(swapped);
-  config_destroy(config);
-  vnt_peg1_net2_destroy(fast);
-  vnt_peg1_net2_destroy(strong);
-}
-
 // ---- Utility mode (v3): win probability and spread blended for choosing --
 // A v3 network has three outputs per candidate: win logit z, absolute-spread
 // residual r (spread = one-ply estimate + 20 r) and a ranking score. Inputs
@@ -3228,11 +1495,19 @@ static const double vnt_peg1_thresholds[VNT_PEG1_THRESHOLDS] = {
     -40, -20, -10, -5, 0, 5, 10, 20, 40};
 
 typedef struct VntPeg1Net3 {
-  VntPeg1Net2 v2;
+  int inputs;
+  int width;
+  int top_k;
+  uint32_t groups;
+  int reply_index[VNT_PEG1_REPLY];
+  int reply_count;
   int v2_inputs;
   int estimates;
-  const float *out3;
-  float out_bias3[VNT_PEG1_NET3_OUTPUTS];
+  float *blob;
+  const float *first;
+  const float *bias;
+  const float *out;
+  float out_bias[VNT_PEG1_NET3_OUTPUTS];
 } VntPeg1Net3;
 
 typedef struct VntPeg1Utility {
@@ -3253,65 +1528,64 @@ static VntPeg1Net3 *vnt_peg1_net3_load(const char *path) {
     log_fatal("invalid 1PEG v3 network header");
   }
   VntPeg1Net3 *net = calloc_or_die(1, sizeof(VntPeg1Net3));
-  VntPeg1Net *base = &net->v2.base;
-  base->inputs = (int)shape[1];
-  base->width = (int)shape[2];
-  base->top_k = (int)shape[3];
-  base->groups = shape[4];
-  net->v2.mover_max_leave = RACK_SIZE;
-  const size_t count = (size_t)base->width * (base->inputs + 1) +
-                       (size_t)VNT_PEG1_NET3_OUTPUTS * (base->width + 1);
+  net->inputs = (int)shape[1];
+  net->width = (int)shape[2];
+  net->top_k = (int)shape[3];
+  net->groups = shape[4];
+  const size_t count = (size_t)net->width * (net->inputs + 1) +
+                       (size_t)VNT_PEG1_NET3_OUTPUTS * (net->width + 1);
   uint32_t *bits = malloc_or_die(count * sizeof(uint32_t));
-  base->blob = malloc_or_die(count * sizeof(float));
+  net->blob = malloc_or_die(count * sizeof(float));
   if (!fread_le_uint32s(bits, count, file) || fgetc(file) != EOF) {
     log_fatal("invalid 1PEG v3 network weights");
   }
-  memcpy(base->blob, bits, count * sizeof(float));
+  memcpy(net->blob, bits, count * sizeof(float));
   free(bits);
   fclose(file);
-  base->first = base->blob;
-  base->bias = base->first + (size_t)base->width * base->inputs;
-  net->out3 = base->bias + base->width;
+  net->first = net->blob;
+  net->bias = net->first + (size_t)net->width * net->inputs;
+  net->out = net->bias + net->width;
   for (int out = 0; out < VNT_PEG1_NET3_OUTPUTS; out++) {
-    net->out_bias3[out] =
-        net->out3[(size_t)VNT_PEG1_NET3_OUTPUTS * base->width + out];
+    net->out_bias[out] =
+        net->out[(size_t)VNT_PEG1_NET3_OUTPUTS * net->width + out];
   }
-  const bool mover_now = base->groups & VNT_PEG1_GROUP_MOVER_NOW;
+  const bool mover_now = net->groups & VNT_PEG1_GROUP_MOVER_NOW;
   const bool use[VNT_PEG1_REPLY] = {true,  true,  true,  mover_now, mover_now,
                                     false, false, false, false,     true};
   for (int idx = 0; idx < VNT_PEG1_REPLY; idx++) {
     if (use[idx]) {
-      base->reply_index[base->reply_count++] = idx;
+      net->reply_index[net->reply_count++] = idx;
     }
   }
   net->estimates = mover_now ? 2 : 1;
-  net->v2_inputs = (VALUE_NET_SCALARS - 4) + 2 + 4 * base->reply_count + 1;
+  net->v2_inputs = (VALUE_NET_SCALARS - 4) + 2 + 4 * net->reply_count + 1;
   if (net->v2_inputs + net->estimates * VNT_PEG1_THRESHOLD_BLOCK !=
-      base->inputs) {
-    log_fatal("1PEG v3 network input width %d, expected %d", base->inputs,
+      net->inputs) {
+    log_fatal("1PEG v3 network input width %d, expected %d", net->inputs,
               net->v2_inputs + net->estimates * VNT_PEG1_THRESHOLD_BLOCK);
   }
   return net;
 }
 
 static void vnt_peg1_net3_destroy(VntPeg1Net3 *net) {
-  free(net->v2.base.blob);
+  free(net->blob);
   free(net);
 }
 
-// v3 inputs: the v2 row (built by the v2 code into a scratch row) followed
-// by the threshold block(s), from the same per-world features.
+// v3 inputs: the v2 columns (public scalars, then the mean, standard
+// deviation, minimum and maximum of each reply feature over the hypothetical
+// worlds, then the one-ply spread) followed by the threshold block(s), from
+// the same per-world features.
 static void vnt_peg1_net3_inputs(const VntPeg1Net3 *net, const Game *root,
                                  const Move *candidates, int count,
                                  VntPeg1Work *work, const VntPeg1Prep *prep,
                                  float *inputs, VntPeg1NetTiming *timing) {
-  const VntPeg1Net *base = &net->v2.base;
-  const bool mover_now = base->groups & VNT_PEG1_GROUP_MOVER_NOW;
+  const bool mover_now = net->groups & VNT_PEG1_GROUP_MOVER_NOW;
   ValueNetHistory history;
   value_net_history_reset(&history);
   for (int candidate = 0; candidate < count; candidate++) {
     const Move *cand = &candidates[candidate];
-    float *row = &inputs[candidate * base->inputs];
+    float *row = &inputs[candidate * net->inputs];
     int64_t start = ctimer_monotonic_ns();
     float scalars[VALUE_NET_SCALARS];
     value_net_scalars_for_move(root, cand, &history, scalars);
@@ -3344,8 +1618,8 @@ static void vnt_peg1_net3_inputs(const VntPeg1Net3 *net, const Game *root,
       vnt_peg1_v2_world(root, cand, touched, tile, prep, work, true, mover_now,
                         feature, timing);
       const double probability = (double)prep->unseen[tile] / prep->total;
-      for (int idx = 0; idx < base->reply_count; idx++) {
-        const double value = feature[base->reply_index[idx]];
+      for (int idx = 0; idx < net->reply_count; idx++) {
+        const double value = feature[net->reply_index[idx]];
         sums[idx] += probability * value;
         squares[idx] += probability * value * value;
         low[idx] = fmin(low[idx], value);
@@ -3357,14 +1631,14 @@ static void vnt_peg1_net3_inputs(const VntPeg1Net3 *net, const Game *root,
           one_ply + (1.0 - (double)feature[1]) * (double)feature[3];
       est_prob[worlds++] = probability;
     }
-    for (int idx = 0; idx < base->reply_count; idx++) {
+    for (int idx = 0; idx < net->reply_count; idx++) {
       row[col + idx] = (float)sums[idx];
-      row[col + base->reply_count + idx] =
+      row[col + net->reply_count + idx] =
           (float)sqrt(fmax(0, squares[idx] - sums[idx] * sums[idx]));
-      row[col + 2 * base->reply_count + idx] = (float)low[idx];
-      row[col + 3 * base->reply_count + idx] = (float)high[idx];
+      row[col + 2 * net->reply_count + idx] = (float)low[idx];
+      row[col + 3 * net->reply_count + idx] = (float)high[idx];
     }
-    col += 4 * base->reply_count;
+    col += 4 * net->reply_count;
     row[col++] = (float)(after - sums[0]);
     for (int est = 0; est < net->estimates; est++) {
       double mean = 0, square = 0, lo = INFINITY, hi = -INFINITY;
@@ -3393,7 +1667,7 @@ static void vnt_peg1_net3_inputs(const VntPeg1Net3 *net, const Game *root,
       row[col++] = (float)lo;
       row[col++] = (float)hi;
     }
-    if (col != base->inputs) {
+    if (col != net->inputs) {
       log_fatal("1PEG v3 input assembly mismatch");
     }
   }
@@ -3404,21 +1678,20 @@ static void vnt_peg1_net3_inputs(const VntPeg1Net3 *net, const Game *root,
 static double vnt_peg1_net3_value(const VntPeg1Net3 *net, const float *input,
                                   const VntPeg1Utility *utility, double *win,
                                   double *spread) {
-  const VntPeg1Net *base = &net->v2.base;
   float hidden[VNT_PEG1_NET_MAX_WIDTH];
-  for (int unit = 0; unit < base->width; unit++) {
-    const float *weights = &base->first[(size_t)unit * base->inputs];
-    float sum = base->bias[unit];
-    for (int col = 0; col < base->inputs; col++) {
+  for (int unit = 0; unit < net->width; unit++) {
+    const float *weights = &net->first[(size_t)unit * net->inputs];
+    float sum = net->bias[unit];
+    for (int col = 0; col < net->inputs; col++) {
       sum += weights[col] * input[col];
     }
     hidden[unit] = fmaxf(sum, 0);
   }
   float raw[VNT_PEG1_NET3_OUTPUTS];
   for (int out = 0; out < VNT_PEG1_NET3_OUTPUTS; out++) {
-    float sum = net->out_bias3[out];
-    const float *weights = &net->out3[(size_t)out * base->width];
-    for (int unit = 0; unit < base->width; unit++) {
+    float sum = net->out_bias[out];
+    const float *weights = &net->out[(size_t)out * net->width];
+    for (int unit = 0; unit < net->width; unit++) {
       sum += weights[unit] * hidden[unit];
     }
     raw[out] = sum;
@@ -3450,8 +1723,7 @@ static int vnt_peg1_util_choose(const VntPeg1Net3 *first,
   if (*count == 0) {
     return -1;
   }
-  const int scored =
-      *count < first->v2.base.top_k ? *count : first->v2.base.top_k;
+  const int scored = *count < first->top_k ? *count : first->top_k;
   start = ctimer_monotonic_ns();
   VntPeg1Prep prep;
   vnt_peg1_prep(root, work, &prep, true);
@@ -3461,8 +1733,8 @@ static int vnt_peg1_util_choose(const VntPeg1Net3 *first,
   start = ctimer_monotonic_ns();
   for (int candidate = 0; candidate < scored; candidate++) {
     values[candidate] =
-        vnt_peg1_net3_value(first, &inputs[candidate * first->v2.base.inputs],
-                            utility, &wins[candidate], &spreads[candidate]);
+        vnt_peg1_net3_value(first, &inputs[candidate * first->inputs], utility,
+                            &wins[candidate], &spreads[candidate]);
   }
   timing->head_ms += (double)(ctimer_monotonic_ns() - start) / 1e6;
   if (second == NULL) {
@@ -3501,9 +1773,8 @@ static int vnt_peg1_util_choose(const VntPeg1Net3 *first,
   double best_value = -INFINITY;
   for (int slot = 0; slot < filled; slot++) {
     double win, spread;
-    const double value =
-        vnt_peg1_net3_value(second, &inputs2[slot * second->v2.base.inputs],
-                            utility, &win, &spread);
+    const double value = vnt_peg1_net3_value(
+        second, &inputs2[slot * second->inputs], utility, &win, &spread);
     if (value > best_value) {
       best_value = value;
       choice = slot;
@@ -3562,8 +1833,8 @@ static void vnt_peg1_util_eval(const StringSplitter *fields) {
   fprintf(output[0], "root,candidates,scored,choice,win,spread,movegen_ms,"
                      "world_ms,opp_ms,mover_ms,head_ms,stage2_ms,total_ms,"
                      "privacy_checked\n");
-  const int width1 = first->v2.base.inputs;
-  const int width2 = second == NULL ? 1 : second->v2.base.inputs;
+  const int width1 = first->inputs;
+  const int width2 = second == NULL ? 1 : second->inputs;
   float *inputs = malloc_or_die(sizeof(float) * VNT_PEG1_POOL * width1);
   float *inputs2 = malloc_or_die(sizeof(float) * VNT_PEG1_POOL * width2);
   float *private_inputs = malloc_or_die(sizeof(float) * VNT_PEG1_POOL * width1);
@@ -3602,8 +1873,7 @@ static void vnt_peg1_util_eval(const StringSplitter *fields) {
     if (count != expected) {
       log_fatal("peg1util candidate replay mismatch");
     }
-    const int scored =
-        count < first->v2.base.top_k ? count : first->v2.base.top_k;
+    const int scored = count < first->top_k ? count : first->top_k;
     if (check) {
       int unseen[VALUE_NET_TILE_TYPES];
       vnt_peg1_public_unseen(root, unseen);
@@ -3672,16 +1942,16 @@ static void vnt_peg1_util_eval(const StringSplitter *fields) {
   }
 }
 
-// Full-game pairs. Each game is static self-play from the opening (the
-// peg1data source procedure, without rejection). If a 1PEG arises, the
-// mover's choice is made twice -- static top-1 and the v2 network -- and
-// each branch is continued to game over with the common continuation
-// (0 = static, 2 = fixed two-ply endgame); both final spreads come from the
-// 1PEG mover's view. Games without a 1PEG are recorded as identical pairs.
+// Full-game pairs with the v3 networks. Each game is static self-play from
+// the opening (the peg1data source procedure, without rejection). If a 1PEG
+// arises, the mover's choice is made twice -- static top-1 and the v3
+// chooser -- and each branch is continued to game over with the common
+// continuation (0 = static, 2 = fixed two-ply endgame); both final spreads
+// come from the 1PEG mover's view. Games without a 1PEG are recorded as
+// identical pairs. Fields: first model, second model or "-", shortlist,
+// w_spread (negative = margin mode), scale, count, offset, seed, depth 0|2,
+// prefix.
 static void vnt_peg1_games3(const StringSplitter *fields) {
-  // Utility-mode (v3) full games: first model, second model or "-",
-  // shortlist, w_spread (negative = margin mode), scale, then count, offset,
-  // seed, depth and prefix as peg1games.
   if (string_splitter_get_number_of_items(fields) != 11) {
     log_fatal("peg1games3 needs first, second|-, shortlist, w_spread, scale, "
               "count, offset, seed, depth, prefix");
@@ -3701,7 +1971,7 @@ static void vnt_peg1_games3(const StringSplitter *fields) {
   const int depth = atoi(string_splitter_get_item(fields, 9));
   const char *prefix = string_splitter_get_item(fields, 10);
   if (games < 1 || offset < 0 || (depth != 0 && depth != 2)) {
-    log_fatal("peg1games invalid arguments");
+    log_fatal("peg1games3 invalid arguments");
   }
   Config *config = config_create_or_die(
       "set -path ./collection-runtime-data:./data -lex NWL23 -wmp true "
@@ -3720,10 +1990,9 @@ static void vnt_peg1_games3(const StringSplitter *fields) {
   fprintf(output, "game,source_seed,starter,peg1,mover,net_choice,candidates,"
                   "static_final,net_final,static_win,net_win,decision_ms,"
                   "continuation_depth\n");
-  float *inputs =
-      malloc_or_die(sizeof(float) * VNT_PEG1_POOL * first->v2.base.inputs);
+  float *inputs = malloc_or_die(sizeof(float) * VNT_PEG1_POOL * first->inputs);
   float *inputs2 = malloc_or_die(sizeof(float) * VNT_PEG1_POOL *
-                                 (second == NULL ? 1 : second->v2.base.inputs));
+                                 (second == NULL ? 1 : second->inputs));
   double values[VNT_PEG1_POOL], wins[VNT_PEG1_POOL], spreads[VNT_PEG1_POOL];
   for (int local = 0; local < games; local++) {
     const int game_id = offset + local;
@@ -3777,7 +2046,7 @@ static void vnt_peg1_games3(const StringSplitter *fields) {
           steps++;
         }
         if (!game_over(branch)) {
-          log_fatal("peg1games continuation did not end");
+          log_fatal("peg1games3 continuation did not end");
         }
         finals[arm] = vnt_peg1_margin(branch, mover);
       }
@@ -4496,11 +2765,11 @@ static VntPegNet *vnt_peg_net_create(const char *first, const char *second,
     VntPegNetSlot *slot = &net->slot[slot_idx];
     slot->work = vnt_peg1_work_create(game);
     slot->pool = move_list_create(VNT_PEG1_POOL + 1);
-    slot->inputs = malloc_or_die(sizeof(float) * VNT_PEG1_POOL *
-                                 net->first->v2.base.inputs);
+    slot->inputs =
+        malloc_or_die(sizeof(float) * VNT_PEG1_POOL * net->first->inputs);
     slot->inputs2 =
         malloc_or_die(sizeof(float) * VNT_PEG1_POOL *
-                      (net->second == NULL ? 1 : net->second->v2.base.inputs));
+                      (net->second == NULL ? 1 : net->second->inputs));
     slot->swap = game_duplicate(game);
     slot->keys = malloc_or_die((size_t)VNT_PEG_CACHE_SLOTS * VNT_PEG_KEY_BYTES);
     slot->picks = malloc_or_die(sizeof(Move) * VNT_PEG_CACHE_SLOTS);
@@ -4929,8 +3198,8 @@ static void vnt_peg1_predict(const StringSplitter *fields) {
                   "strong_spread,move\n");
   int max_inputs = 1;
   for (int net_idx = 0; net_idx < 2; net_idx++) {
-    if (nets[net_idx]->v2.base.inputs > max_inputs) {
-      max_inputs = nets[net_idx]->v2.base.inputs;
+    if (nets[net_idx]->inputs > max_inputs) {
+      max_inputs = nets[net_idx]->inputs;
     }
   }
   float *inputs = malloc_or_die(sizeof(float) * VNT_PEG1_POOL * max_inputs);
@@ -4956,9 +3225,8 @@ static void vnt_peg1_predict(const StringSplitter *fields) {
                                  candidates, &count, &work, inputs, NULL,
                                  values, wins[net_idx], spreads[net_idx],
                                  &timing, &timing2);
-      scored[net_idx] = count < nets[net_idx]->v2.base.top_k
-                            ? count
-                            : nets[net_idx]->v2.base.top_k;
+      scored[net_idx] =
+          count < nets[net_idx]->top_k ? count : nets[net_idx]->top_k;
     }
     if (count != expected) {
       log_fatal("peg1pred candidate replay mismatch");
@@ -9129,32 +7397,18 @@ static void vnt_peg_rank(const StringSplitter *fields) {
 void peg_net_test_run_spec(const char *spec) {
   StringSplitter *fields = split_string(spec, ':', true);
   const char *mode = string_splitter_get_item(fields, 0);
-  if (strings_equal(mode, "peg1eval")) {
-    vnt_peg1_eval(fields);
-  } else if (strings_equal(mode, "peg1data")) {
+  if (strings_equal(mode, "peg1data")) {
     vnt_peg1_data(fields);
-  } else if (strings_equal(mode, "peg1feat")) {
-    vnt_peg1_features(fields);
   } else if (strings_equal(mode, "peg1roots")) {
     vnt_peg1_roots(fields);
   } else if (strings_equal(mode, "peg1play")) {
     vnt_peg1_play(fields);
-  } else if (strings_equal(mode, "peg1net")) {
-    vnt_peg1_net_eval(fields);
-  } else if (strings_equal(mode, "peg1bench")) {
-    vnt_peg1_bench(fields);
   } else if (strings_equal(mode, "peg1feat2")) {
     vnt_peg1_features_v2(fields);
-  } else if (strings_equal(mode, "peg1net2")) {
-    vnt_peg1_net2_eval(fields);
-  } else if (strings_equal(mode, "peg1games")) {
-    vnt_peg1_games(fields);
   } else if (strings_equal(mode, "peg1pos")) {
     vnt_peg1_positions(fields);
   } else if (strings_equal(mode, "peg1deep")) {
     vnt_peg1_deep(fields);
-  } else if (strings_equal(mode, "peg1cascade")) {
-    vnt_peg1_cascade_eval(fields);
   } else if (strings_equal(mode, "peg1util")) {
     vnt_peg1_util_eval(fields);
   } else if (strings_equal(mode, "peg1pred")) {
