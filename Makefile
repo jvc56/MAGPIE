@@ -476,7 +476,8 @@ endif
 .PHONY: windows windows_test windows_wine_test windows_image
 .PHONY: all clean iwyu release leavegen_pgo_release pgo pgo_sim pgo_peg word_frequencies \
 	pgo_toolchain_check \
-	pgo_eg peg_eg pgo_workload prepare_data libmagpie examples magpie_tui
+	pgo_eg peg_eg pgo_workload prepare_data libmagpie examples magpie_tui \
+	magpie_tui_test
 
 all: magpie magpie_test
 
@@ -564,6 +565,18 @@ $(TUI_PGO_PROFILE): $(SRC) $(shell find $(SRC_DIR) -name '*.h') $(TOOLS_DIR)/pgo
 			"$(PGO_LEAVEGEN_DATA_DIR):./data" \
 			"$(PGO_LEAVEGEN_TARGET)"
 	$(LLVM_PROFDATA) merge -sparse -o $@ $(TUI_PGO_RAW_DIR)/*.profraw
+
+# Unit tests for the TUI's notcurses-free modules. Run from the repo root.
+TUI_TEST_SRC := $(wildcard $(TUI_DIR)/test/*.c)
+TUI_TEST_OBJ := $(TUI_TEST_SRC:$(TUI_DIR)/%.c=$(TUI_OBJ_DIR)/$(TUI_DIR)/%.o)
+TUI_TESTED_OBJ := $(TUI_OBJ_DIR)/$(TUI_DIR)/tile_input.o
+
+magpie_tui_test: $(TUI_OBJ_SRC) $(TUI_TESTED_OBJ) $(TUI_TEST_OBJ) | $(BIN_DIR)
+	$(CC) $(TUI_LDFLAGS) $^ $(LDLIBS) -o $(BIN_DIR)/$@
+
+$(TUI_OBJ_DIR)/$(TUI_DIR)/test/%.o: $(TUI_DIR)/test/%.c | $(TUI_OBJ_DIR)/$(TUI_DIR)
+	@mkdir -p $(dir $@)
+	$(CC) $(TUI_CFLAGS) -c $< -o $@
 
 magpie_pgo_train: $(OBJ_SRC) $(PGO_TRAIN_OBJ) | $(BIN_DIR)
 	$(CC) $(LDFLAGS) $(LFLAGS) $^ $(LDLIBS) -o $(BIN_DIR)/$@
