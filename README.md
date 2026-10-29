@@ -395,7 +395,7 @@ See `examples/generate_moves.c` for a minimal C client (build it with `make exam
 
 Word maps (WMP), rack info tables (RIT) and word info tables (WIT) only make move generation faster; none of them changes which move is chosen. PAT changes static equity, so it changes moves.
 
-The command line program and the library's `magpie_create()` set `-wmp`, `-wit` and `-rit` to `auto`: each table is used when this machine has the disk to store it and the memory to hold it, beside the search table a solve allocates, and is otherwise left out, with a line saying why. They share the room by value per byte: wordmaps first (3-4x faster on their own), then word info tables (about 9% on a simulation), then rack info tables (about 17%, but 1.9 GB for English). A missing table is built on first use for data from `data fetch`, with a line saying what is being built, the disk it will take and the memory its build peaks at; a rack info table is built from its lexicon's wordmap, so a missing wordmap counts against its room too. For other data, the line names the `convert` command that builds a missing table. `true` requires a table, and `false` never uses one. The settings file records `auto` as `auto`, not what one machine decided.
+The command line program and the library's `magpie_create()` set `-wmp`, `-wit` and `-rit` to `auto`: each table is used when this machine has the disk to store it and the memory to hold it, beside the search table a solve allocates, and is otherwise left out, with a line saying why. They share the room by value per byte: wordmaps first (3-4x faster on their own), then word info tables (about 9% on a simulation), then rack info tables (about 17%, but 1.9 GB for English). A missing table is built on first use for data from `data fetch`, with a line saying what is being built, the disk it will take and the memory its build peaks at; a rack info table is built from its lexicon's wordmap, so a missing wordmap counts against its room too. For other data, the line names the `convert` command that builds a missing table. The tables built this way are listed in `auto_tables.txt` in the data directory, and are the only ones MAGPIE ever deletes: when a build needs the room, or when together they pass 8 GB, the ones used least recently go (and are built again when a lexicon needs them). A rack info table records the lexicon and leaves it was built from; one built from others is left out under `auto` and is an error under `true`. `true` requires a table, and `false` never uses one. The settings file records `auto` as `auto`, not what one machine decided.
 
 | | WMP (`-wmp`) | RIT (`-rit`) | WIT (`-wit`) | PAT (`-pat`) |
 |---|---|---|---|---|
@@ -653,7 +653,7 @@ magpie> peg
 ```
 
 By default the solve is **complete** and counts only results: a win by 1 is as
-good as a win by 100. Every candidate is solved, each endgame searched 2 plies
+good as a win by 100. Every candidate is solved, each endgame searched 3 plies
 deep (`-pegplies`), and a candidate is cut once its losses and draws show it
 cannot reach the best one. A line still going at that depth is finished by a
 greedy playout, so the results are estimates; `-pegplies end` searches every
@@ -684,7 +684,7 @@ Several settings tune the search further; see `help peg` for full
 descriptions:
 
 - `-pegplies <plies|end>` sets how deep the complete solve searches each
-  endgame (default 2); `end` searches to the end of the game.
+  endgame (default 3); `end` searches to the end of the game.
 - `-pegtlim <seconds>` gives the solve a time limit, which switches it to the
   **staged cascade**: stage 0 greedy-evaluates every candidate, and each
   halving stage keeps the best of them and re-ranks them at one more ply of
@@ -702,8 +702,9 @@ descriptions:
   (faster, approximate).
 - `-threads <n>` is a pure speedup at the same answer.
 
-At the default 2 plies, a 1-in-bag solve took 1 to 146 seconds on a 12-thread
-desktop, half of them under 26 seconds. To the end of the game (`-pegplies
+At the default 3 plies, a 1-in-bag solve took a median 16 seconds on 10
+threads in ten positions, though one took 11 minutes and one saved game ran past
+15; `-pegplies 2` is a few times faster. To the end of the game (`-pegplies
 end`), it often takes several minutes, more when the opponent holds a blank,
 and at 2 to 4 in the bag well over twenty minutes; a time limit gives a quick,
 approximate answer instead. `analyze` solves 1-in-bag

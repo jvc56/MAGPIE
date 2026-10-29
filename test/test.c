@@ -73,6 +73,7 @@
 #include "peg_pool_test.h"
 #include "peg_speed_bench_test.h"
 #include "peg_test.h"
+#include "peg_validate_test.h"
 #include "play_chooser_test.h"
 #include "players_data_test.h"
 #include "position_lengths_test.h"
@@ -222,6 +223,7 @@ static TestEntry on_demand_test_table[] = {
     {"pathmovelists", test_path_move_lists},
     {"egincremental", test_incremental_movegen_identical},
     {"pegcascade", test_peg_cascade_bench},
+    {"pegvalidate", test_peg_validate},
     {"egdepth", test_endgame_depth_bench},
     {"pegspeedbench1", test_peg_speed_bench_1},
     {"pegspeedbench2", test_peg_speed_bench_2},

@@ -12,6 +12,7 @@
 #include "../src/ent/equity.h"
 #include "../src/ent/game.h"
 #include "../src/ent/klv.h"
+#include "../src/ent/kwg.h"
 #include "../src/ent/leave_map.h"
 #include "../src/ent/letter_distribution.h"
 #include "../src/ent/move.h"
@@ -55,6 +56,8 @@ static uint32_t count_racks_for_ld(const LetterDistribution *ld, int ml,
 
 static void assert_rits_equal(const RackInfoTable *a, const RackInfoTable *b) {
   assert(a->version == b->version);
+  assert(a->kwg_hash == b->kwg_hash);
+  assert(a->klv_hash == b->klv_hash);
   assert(a->rack_size == b->rack_size);
   assert(a->playthrough_min_played_size == b->playthrough_min_played_size);
   assert(a->num_buckets == b->num_buckets);
@@ -424,6 +427,10 @@ void test_rack_info_table(void) {
       data_paths, rit_name, DATA_FILEPATH_TYPE_RACK_INFO_TABLE, error_stack);
   assert(error_stack_is_empty(error_stack));
 
+  // What it was built from survives the file, read or mapped.
+  rit->kwg_hash = kwg_get_hash(player_get_kwg(player));
+  rit->klv_hash = klv_get_hash(klv);
+  assert(rit->kwg_hash != 0 && rit->klv_hash != 0);
   rack_info_table_write_to_file(rit, rit_filename, error_stack);
   assert(error_stack_is_empty(error_stack));
   // The size the table is estimated at before it is built is the size it is
@@ -433,7 +440,7 @@ void test_rack_info_table(void) {
   assert(rit_file.size == rack_info_table_file_bytes(ld));
   LetterDistribution *english = ld_create(data_paths, "english", error_stack);
   assert(error_stack_is_empty(error_stack));
-  assert(rack_info_table_file_bytes(english) == 1885416048);
+  assert(rack_info_table_file_bytes(english) == 1885416064);
   ld_destroy(english);
 
   RackInfoTable *rit_loaded =

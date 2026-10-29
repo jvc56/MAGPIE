@@ -497,6 +497,22 @@ void players_data_validate_word_info_tables(const PlayersData *players_data,
   }
 }
 
+bool players_data_rit_matches_inputs(const PlayersData *players_data,
+                                     int player_index) {
+  const RackInfoTable *rit =
+      players_data_get_rack_info_table(players_data, player_index);
+  if (rit == NULL) {
+    return true;
+  }
+  const KWG *kwg = players_data_get_kwg(players_data, player_index);
+  const KLV *klv = players_data_get_klv(players_data, player_index);
+  const bool kwg_matches =
+      rit->kwg_hash == 0 || kwg == NULL || rit->kwg_hash == kwg_get_hash(kwg);
+  const bool klv_matches =
+      rit->klv_hash == 0 || klv == NULL || rit->klv_hash == klv_get_hash(klv);
+  return kwg_matches && klv_matches;
+}
+
 void players_data_reload(PlayersData *players_data,
                          players_data_t players_data_type,
                          const char *data_paths, ErrorStack *error_stack) {

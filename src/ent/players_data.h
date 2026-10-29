@@ -93,6 +93,11 @@ void players_data_set_data(PlayersData *players_data,
                            void *data);
 void players_data_validate_word_info_tables(const PlayersData *players_data,
                                             ErrorStack *error_stack);
+// Whether player `player_index`'s rack info table, if any, was built from
+// that player's lexicon and leaves. A table that records neither (built
+// before version 13) cannot be checked, and matches.
+bool players_data_rit_matches_inputs(const PlayersData *players_data,
+                                     int player_index);
 // Destroys both players' data of this type and leaves the slots empty, so the
 // next players_data_set loads from disk even for a name that is already
 // loaded. The use-when-available flags are left as they are.

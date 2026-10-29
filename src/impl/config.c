@@ -106,10 +106,12 @@ enum {
   // This caps only the parse buffer; the solver itself imposes no stage limit.
   CONFIG_PEG_MAX_STAGES = 16,
   // The pre-endgame solver's endgame depth when it keeps every candidate
-  // (-pegplies). On ten 1-in-bag games, 2 plies solved all of them in 1-146 s
-  // (half under 26 s) with the best move and win% of deeper searches, while 4
-  // plies and the end of the game each solved 4 of the 10 within 3 minutes.
-  CONFIG_DEFAULT_PEG_PLIES = 2,
+  // (-pegplies). On 41 positions with the player on turn 20 to 40 points
+  // behind, 2 plies picked the same best play as 3 on 33 of the 34 both
+  // finished in 15 minutes, but put its win% higher on 15 and never lower,
+  // by up to 12.5 points; the end of the game agreed with 3 plies on every
+  // one it could check. 3 plies took a median 2.7 times as long.
+  CONFIG_DEFAULT_PEG_PLIES = 3,
   // The format -savesettings writes as -fileversion. Raise it whenever a
   // default that settings files record changes, and list the setting in
   // config_stale_settings.
@@ -1432,7 +1434,12 @@ static void add_analyze_and_settings_help_arg(arg_token_t arg_token,
             "this machine has the disk and memory for it, building a missing "
             "one on first use for data from 'data fetch' as it does the "
             "wordmap, and otherwise plays without: it is 1.9 GB for English. "
-            "true requires one; false never uses one.";
+            "A table built from another lexicon or other leaves is left out "
+            "under auto. Tables built on first use are listed in "
+            "auto_tables.txt in the data directory and are the only ones "
+            "deleted: the least recently used, when a build needs the room "
+            "or they pass 8 GB together. true requires one, built from the "
+            "player's lexicon and leaves; false never uses one.";
     break;
   case ARG_TOKEN_USE_MMAP_FOR_RIT:
     usages[0] = "<true_or_false>";
@@ -1475,9 +1482,9 @@ static void add_analyze_and_settings_help_arg(arg_token_t arg_token,
     *text = "The largest bag, from 0 to 4 tiles, that analyze solves with "
             "the pre-endgame solver; larger bags are simulated. 0 simulates "
             "every pre-endgame turn. Defaults to 1: a complete pre-endgame "
-            "solve at 2 or more in the bag can take well over 20 minutes, "
-            "and a time limit (-pegtlim) gives the quicker staged cascade "
-            "instead.";
+            "solve at 1 in the bag usually takes seconds to minutes, but at 2 "
+            "or more it often takes well over 5 minutes, and a time limit "
+            "(-pegtlim) gives the quicker staged cascade instead.";
     break;
   case ARG_TOKEN_SETTINGS_VERSION:
     usages[0] = "<version>";
@@ -1875,12 +1882,15 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       examples[1] = ", 8G QI";
       examples[2] = "-, 8G QI,8H QI";
       examples[3] = "ABC, 8G QI,8H QI";
+      examples[4] = "8G.QI,8H.QI";
       text = "Runs a Monte Carlo simulation for the current position, "
              "preventing the BAI algorithm from pruning the specified moves. "
              "The move list follows an optional opponent rack and a comma; "
              "with no rack before the comma, the opponent's currently known "
              "rack is used, and '-' forces a random opponent rack. Moves are "
-             "comma-separated and may contain spaces (e.g. '8G QI').";
+             "comma-separated, with a space (8G QI) or, as peg takes them, a "
+             "period (8G.QI) after the coordinate; a list in the period "
+             "format needs no comma before it when there is no rack.";
       break;
     case ARG_TOKEN_GEN_AND_SIM:
       usages[0] = "[<opponent_known_rack>]";
@@ -2442,7 +2452,7 @@ void add_help_arg_to_string_builder(const Config *config, int token,
           "finished by a greedy playout, so its results are estimates, which "
           "can be wrong when a line turns after that depth. end (or 0) "
           "searches every line to the end of the game, so its results are "
-          "proven, and can take minutes at 1 in the bag. Defaults to 2.";
+          "proven, and can take minutes at 1 in the bag. Defaults to 3.";
       break;
     case ARG_TOKEN_PEG_TOP_K:
       usages[0] = "<count1>,<count2>,...";
@@ -4232,6 +4242,37 @@ void impl_sim(Config *config, const arg_token_t known_opp_rack_arg_token,
   (void)gen_set_movegen_budget(previous);
 }
 
+// Rewrites a move list in the period format peg takes (8G.QI,8D.W.RD) to the
+// space format: in each comma-separated move without a space, the first
+// period separates the coordinate from the tiles, and later ones stay
+// played-through markers. Moves already in the space format are unchanged.
+static char *snoprune_moves_to_space_format(const char *moves_str) {
+  char *space_form = string_duplicate(moves_str);
+  bool in_spaced_move = false;
+  bool separator_found = false;
+  for (char *cursor = space_form; *cursor; cursor++) {
+    if (*cursor == ',') {
+      in_spaced_move = false;
+      separator_found = false;
+      continue;
+    }
+    if (separator_found || in_spaced_move) {
+      continue;
+    }
+    if (*cursor == ' ') {
+      // A space before any period: this move is in the space format, unless
+      // the space only leads the move.
+      const bool leading =
+          cursor == space_form || *(cursor - 1) == ',' || *(cursor - 1) == ' ';
+      in_spaced_move = !leading;
+    } else if (*cursor == '.') {
+      *cursor = ' ';
+      separator_found = true;
+    }
+  }
+  return space_form;
+}
+
 void impl_snoprune(Config *config, ErrorStack *error_stack) {
   if (!config_has_game_data(config)) {
     error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
@@ -4260,12 +4301,18 @@ void impl_snoprune(Config *config, ErrorStack *error_stack) {
   const char *moves_str = NULL;
   bool rack_provided = false;
 
-  if (snoprune_arg && !is_string_empty_or_whitespace(snoprune_arg)) {
+  const char *first_comma = snoprune_arg ? strchr(snoprune_arg, ',') : NULL;
+  const char *first_period = snoprune_arg ? strchr(snoprune_arg, '.') : NULL;
+  if (first_period && (!first_comma || first_period < first_comma)) {
+    // A period before the first comma: a rack holds none, so the argument
+    // is all moves, in the period format peg takes (8G.QI,8H.QI).
+    moves_str = snoprune_arg;
+  } else if (snoprune_arg && !is_string_empty_or_whitespace(snoprune_arg)) {
     // Format: [rack][optional whitespace],moves
     // The first comma separates the optional rack from the move list.
     // Example with rack:    "AB, H8 QI" or "-, H8 QI"
     // Example without rack: ", H8 QI"
-    const char *comma = strchr(snoprune_arg, ',');
+    const char *comma = first_comma;
     if (!comma) {
       error_stack_push(
           error_stack, ERROR_STATUS_CONFIG_LOAD_MALFORMED_RACK_ARG,
@@ -4318,9 +4365,11 @@ void impl_snoprune(Config *config, ErrorStack *error_stack) {
   }
 
   if (moves_str && !is_string_empty_or_whitespace(moves_str)) {
+    char *space_form = snoprune_moves_to_space_format(moves_str);
     ValidatedMoves *unpruned_vms = validated_moves_create(
-        config->game, game_get_player_on_turn_index(config->game), moves_str,
+        config->game, game_get_player_on_turn_index(config->game), space_form,
         true, true, error_stack);
+    free(space_form);
     if (!error_stack_is_empty(error_stack)) {
       validated_moves_destroy(unpruned_vms);
       return;
@@ -4922,10 +4971,10 @@ void config_fill_peg_args(Config *config, PegArgs *peg_args) {
     num_stages = 1;
   }
   // The nested schedule. A complete solve uses every inner candidate (up to
-  // PEG_NEST_FIELD_MAX), every inner scenario, inner endgames to the end of
-  // the game, and nesting until the game resolves, so no line ends in a
-  // greedy playout. The cascade keeps the cheaper schedule. Either way
-  // -pegncaps, -pegndepth and -pegnstrides, once given, decide.
+  // PEG_NEST_FIELD_MAX), every inner scenario, inner endgames -pegplies deep
+  // like its outer ones, and nesting until the game resolves. The cascade
+  // keeps the cheaper schedule. Either way -pegncaps, -pegndepth and
+  // -pegnstrides, once given, decide.
   const AutoplaySolverSettings *given = &config->solver_settings[0];
   const int *nested_caps = PEG_NESTED_DEFAULT_CAND_CAPS;
   int nested_n_caps = (int)(sizeof(PEG_NESTED_DEFAULT_CAND_CAPS) /
@@ -8068,6 +8117,137 @@ static bool config_table_lacks_disk(const char *built_path, int64_t bytes) {
   return lacks;
 }
 
+// The disk an automatic build leaves free: the larger of this and 1% of the
+// filesystem. A personal machine's disk is not the program's, as a
+// contributor's is.
+#define CONFIG_AUTO_TABLE_DISK_RESERVE_BYTES 10000000000LL
+
+// The disk reserve on the filesystem holding `directory`: the larger of
+// CONFIG_AUTO_TABLE_DISK_RESERVE_BYTES and 1% of the filesystem. *free_bytes
+// gets the free space, or INT64_MAX when the filesystem will not say.
+static int64_t config_auto_table_disk_reserve(const char *directory,
+                                              int64_t *free_bytes) {
+  int64_t reserve = CONFIG_AUTO_TABLE_DISK_RESERVE_BYTES;
+  int64_t disk_total = 0;
+  *free_bytes = INT64_MAX;
+  if (directory && cfile_free_bytes(directory, free_bytes) &&
+      cfile_total_bytes(directory, &disk_total) && disk_total / 100 > reserve) {
+    reserve = disk_total / 100;
+  }
+  return reserve;
+}
+
+// The command line program's manifest of the tables it built on first use,
+// in the data directory: the only tables it ever deletes. contribute keeps
+// its own, so neither deletes what the other built.
+#define CONFIG_AUTO_TABLE_MANIFEST_FILENAME "auto_tables.txt"
+// The disk the tables built on first use may take together. Past it, the
+// least recently used go (and are built again if a lexicon needs them): a
+// user who tries several lexicons would otherwise keep a 1.9 GB rack info
+// table for each.
+#define CONFIG_AUTO_TABLE_CAP_BYTES 8000000000LL
+
+// The tables a lexicon load uses, which making room for a build never
+// deletes: each player's wordmap, word info table and rack info table.
+typedef struct ConfigTablesInUse {
+  ContributeTable tables[6];
+  int count;
+} ConfigTablesInUse;
+
+static void config_tables_in_use_init(ConfigTablesInUse *in_use,
+                                      const char *const lexicons[2],
+                                      char *const rit_names[2]) {
+  memset(in_use, 0, sizeof(*in_use));
+  for (int player_idx = 0; player_idx < 2; player_idx++) {
+    const contribute_table_role_t roles[3] = {
+        CONTRIBUTE_TABLE_WMP, CONTRIBUTE_TABLE_WIT, CONTRIBUTE_TABLE_RIT};
+    const char *names[3] = {lexicons[player_idx], lexicons[player_idx],
+                            rit_names[player_idx]};
+    for (int role_idx = 0; role_idx < 3; role_idx++) {
+      if (!names[role_idx]) {
+        continue;
+      }
+      ContributeTable *table = &in_use->tables[in_use->count++];
+      table->role = roles[role_idx];
+      table->name = names[role_idx];
+      table->lexicon = lexicons[player_idx];
+      table->bytes = -1;
+    }
+  }
+}
+
+// Says which tables built on first use were deleted, one line each.
+static void config_report_evicted_tables(const Config *config,
+                                         const StringList *evicted,
+                                         const char *why) {
+  for (int line_idx = 0; line_idx < string_list_get_count(evicted);
+       line_idx++) {
+    // Each line is "<role> <name>", as the manifest has them.
+    const char *line = string_list_get_string(evicted, line_idx);
+    const char *space = strchr(line, ' ');
+    const char *what = "table";
+    for (int role_idx = 0; space && role_idx < NUMBER_OF_CONTRIBUTE_TABLE_ROLES;
+         role_idx++) {
+      const char *role_name =
+          contribute_table_role_name((contribute_table_role_t)role_idx);
+      if (strncmp(line, role_name, (size_t)(space - line)) == 0 &&
+          role_name[space - line] == '\0') {
+        what = contribute_table_role_description(
+            (contribute_table_role_t)role_idx);
+      }
+    }
+    thread_control_print_formatted(
+        config->thread_control,
+        "deleted the %s %s, built on first use and unused the longest, %s\n",
+        what, space ? space + 1 : line, why);
+  }
+}
+
+// Whether there is room to build a table of about `bytes` at `built_path`.
+// Tables built on first use that the load does not use are deleted first,
+// least recently used first, while the build would cut into the disk reserve
+// config_choose_auto_tables keeps, as that choice counted on.
+static bool config_make_room_for_build(const Config *config,
+                                       const char *built_path, int64_t bytes,
+                                       const ConfigTablesInUse *in_use) {
+  char *manifest_path = contribute_tables_manifest_path_named(
+      config->data_paths, CONFIG_AUTO_TABLE_MANIFEST_FILENAME);
+  char *directory = get_dirpath_from_filepath(built_path);
+  int64_t free_bytes = 0;
+  const int64_t reserve =
+      config_auto_table_disk_reserve(directory, &free_bytes);
+  StringList *evicted = string_list_create();
+  int64_t available = 0;
+  (void)contribute_tables_make_room(
+      manifest_path, directory, bytes, reserve, in_use->tables, in_use->count,
+      contribute_tables_real_free_bytes, NULL, &available, evicted);
+  config_report_evicted_tables(config, evicted, "to make room");
+  string_list_destroy(evicted);
+  free(directory);
+  free(manifest_path);
+  return !config_table_lacks_disk(built_path, bytes);
+}
+
+// Records a table just built on first use at `built_path`, and keeps the
+// tables built that way within CONFIG_AUTO_TABLE_CAP_BYTES.
+static void config_record_first_use_build(const Config *config,
+                                          players_data_t type, const char *name,
+                                          const char *built_path,
+                                          const ConfigTablesInUse *in_use) {
+  char *manifest_path = contribute_tables_manifest_path_named(
+      config->data_paths, CONFIG_AUTO_TABLE_MANIFEST_FILENAME);
+  contribute_tables_record_built(
+      manifest_path, contribute_table_role_name(config_table_kind(type).role),
+      name, built_path);
+  StringList *evicted = string_list_create();
+  (void)contribute_tables_trim_to(manifest_path, CONFIG_AUTO_TABLE_CAP_BYTES,
+                                  in_use->tables, in_use->count, evicted);
+  config_report_evicted_tables(config, evicted,
+                               "to keep them within their disk cap");
+  string_list_destroy(evicted);
+  free(manifest_path);
+}
+
 // Says a table is about to be built on first use: what it is, for which
 // lexicon (and, for a rack info table, which leaves), and the disk it will
 // take and the memory its build peaks at.
@@ -8114,10 +8294,10 @@ static void config_announce_table_build(const Config *config,
 // there is not room for it, or the build failed -- having said why in one
 // line. A NULL `lexicon` (no wordmap wanted) is returned as is. `ld_name` is
 // the letter distribution the lexicon is loaded with.
-static const char *config_wordmap_for_first_use(Config *config,
-                                                int player_index,
-                                                const char *lexicon,
-                                                const char *ld_name) {
+static const char *
+config_wordmap_for_first_use(Config *config, int player_index,
+                             const char *lexicon, const char *ld_name,
+                             const ConfigTablesInUse *in_use) {
   if (!lexicon) {
     return NULL;
   }
@@ -8148,10 +8328,11 @@ static const char *config_wordmap_for_first_use(Config *config,
     }
     error_stack_reset(errors);
   }
-  if (!why_not &&
-      config_table_lacks_disk(built_path,
-                              config_table_bytes(config, PLAYERS_DATA_TYPE_WMP,
-                                                 lexicon, lexicon, ld_name))) {
+  if (!why_not && !config_make_room_for_build(
+                      config, built_path,
+                      config_table_bytes(config, PLAYERS_DATA_TYPE_WMP, lexicon,
+                                         lexicon, ld_name),
+                      in_use)) {
     why_not = "there is not enough disk space for it";
   }
   if (!why_not) {
@@ -8168,6 +8349,9 @@ static const char *config_wordmap_for_first_use(Config *config,
     if (!error_stack_is_empty(errors)) {
       why_not = "it could not be built";
       error_stack_print_and_reset(errors);
+    } else {
+      config_record_first_use_build(config, PLAYERS_DATA_TYPE_WMP, lexicon,
+                                    built_path, in_use);
     }
   }
   free(built_path);
@@ -8230,10 +8414,6 @@ static char *config_rack_info_table_name(const Config *config,
   return paired;
 }
 
-// The disk an automatic build leaves free: the larger of this and
-// CONFIG_AUTO_TABLE_DISK_RESERVE_PERMILLE of the filesystem. A personal
-// machine's disk is not the program's, as a contributor's is.
-#define CONFIG_AUTO_TABLE_DISK_RESERVE_BYTES 10000000000LL
 // The memory the tables never take: the system's and other programs' share.
 #define CONFIG_AUTO_TABLE_MEMORY_RESERVE_BYTES 1000000000LL
 
@@ -8373,12 +8553,8 @@ config_choose_auto_tables(Config *config, const char *const lexicons[2],
       .free_memory_bytes = INT64_MAX,
       .memory_reserve_bytes = CONFIG_AUTO_TABLE_MEMORY_RESERVE_BYTES,
   };
-  int64_t disk_total = 0;
-  if (directory && cfile_free_bytes(directory, &budget.free_disk_bytes) &&
-      cfile_total_bytes(directory, &disk_total) &&
-      disk_total / 100 > budget.disk_reserve_bytes) {
-    budget.disk_reserve_bytes = disk_total / 100;
-  }
+  budget.disk_reserve_bytes =
+      config_auto_table_disk_reserve(directory, &budget.free_disk_bytes);
   free(directory);
   const int64_t physical = (int64_t)get_search_memory_budget_base();
   const int64_t search_table =
@@ -8393,8 +8569,17 @@ config_choose_auto_tables(Config *config, const char *const lexicons[2],
   if (budget.free_memory_bytes > quarter) {
     budget.free_memory_bytes = quarter;
   }
+  // Tables built on first use that this load does not use count as free
+  // disk: a build deletes them, least recently used first, to make room.
+  char *manifest_path = contribute_tables_manifest_path_named(
+      config->data_paths, CONFIG_AUTO_TABLE_MANIFEST_FILENAME);
+  ContributeTableManifest *manifest =
+      contribute_table_manifest_read(manifest_path);
   int order[MAX_TABLES];
-  contribute_choose_tables(tables, count, &budget, NULL, order);
+  contribute_choose_tables(tables, count, &budget, manifest, order);
+  contribute_table_manifest_destroy(manifest);
+  contribute_tables_touch_used(manifest_path, tables, count);
+  free(manifest_path);
 
   StringBuilder *line = string_builder_create();
   for (int player_idx = 0; player_idx < 2; player_idx++) {
@@ -8491,10 +8676,10 @@ config_choose_auto_tables(Config *config, const char *const lexicons[2],
 // there to load, or NULL when the player plays without one -- the data
 // directory cannot be written, there is not room for it, or the build failed
 // -- having said why in one line. A NULL `lexicon` is returned as is.
-static const char *config_word_info_table_for_first_use(Config *config,
-                                                        int player_index,
-                                                        const char *lexicon,
-                                                        const char *ld_name) {
+static const char *
+config_word_info_table_for_first_use(Config *config, int player_index,
+                                     const char *lexicon, const char *ld_name,
+                                     const ConfigTablesInUse *in_use) {
   if (!lexicon) {
     return NULL;
   }
@@ -8515,10 +8700,11 @@ static const char *config_word_info_table_for_first_use(Config *config,
     why_not = "its data directory cannot be written";
   }
   error_stack_reset(errors);
-  if (!why_not &&
-      config_table_lacks_disk(built_path,
-                              config_table_bytes(config, PLAYERS_DATA_TYPE_WIT,
-                                                 lexicon, lexicon, ld_name))) {
+  if (!why_not && !config_make_room_for_build(
+                      config, built_path,
+                      config_table_bytes(config, PLAYERS_DATA_TYPE_WIT, lexicon,
+                                         lexicon, ld_name),
+                      in_use)) {
     why_not = "there is not enough disk space for it";
   }
   if (!why_not) {
@@ -8535,6 +8721,9 @@ static const char *config_word_info_table_for_first_use(Config *config,
     if (!error_stack_is_empty(errors)) {
       why_not = "it could not be built";
       error_stack_print_and_reset(errors);
+    } else {
+      config_record_first_use_build(config, PLAYERS_DATA_TYPE_WIT, lexicon,
+                                    built_path, in_use);
     }
   }
   free(built_path);
@@ -8556,10 +8745,9 @@ static const char *config_word_info_table_for_first_use(Config *config,
 // `rit_name` when the table is there to load, or NULL when the player plays
 // without one, having said why in one line. A NULL `rit_name` is returned as
 // is.
-static const char *
-config_rack_info_table_for_first_use(Config *config, int player_index,
-                                     const char *rit_name, const char *lexicon,
-                                     const char *leaves, const char *ld_name) {
+static const char *config_rack_info_table_for_first_use(
+    Config *config, int player_index, const char *rit_name, const char *lexicon,
+    const char *leaves, const char *ld_name, const ConfigTablesInUse *in_use) {
   if (!rit_name) {
     return NULL;
   }
@@ -8583,16 +8771,18 @@ config_rack_info_table_for_first_use(Config *config, int player_index,
   if (!why_not && !leaves) {
     why_not = "there are no leaves to build it from";
   }
-  if (!why_not &&
-      config_table_lacks_disk(built_path,
-                              config_table_bytes(config, PLAYERS_DATA_TYPE_RIT,
-                                                 rit_name, lexicon, ld_name))) {
+  if (!why_not && !config_make_room_for_build(
+                      config, built_path,
+                      config_table_bytes(config, PLAYERS_DATA_TYPE_RIT,
+                                         rit_name, lexicon, ld_name),
+                      in_use)) {
     why_not = "there is not enough disk space for it";
   }
   if (!why_not &&
       config_table_file_bytes(config, lexicon, DATA_FILEPATH_TYPE_WORDMAP) <
           0 &&
-      !config_wordmap_for_first_use(config, player_index, lexicon, ld_name)) {
+      !config_wordmap_for_first_use(config, player_index, lexicon, ld_name,
+                                    in_use)) {
     why_not = "its wordmap could not be built";
   }
   if (!why_not) {
@@ -8611,6 +8801,9 @@ config_rack_info_table_for_first_use(Config *config, int player_index,
     if (!error_stack_is_empty(errors)) {
       why_not = "it could not be built";
       error_stack_print_and_reset(errors);
+    } else {
+      config_record_first_use_build(config, PLAYERS_DATA_TYPE_RIT, rit_name,
+                                    built_path, in_use);
     }
   }
   free(built_path);
@@ -8622,6 +8815,47 @@ config_rack_info_table_for_first_use(Config *config, int player_index,
     return NULL;
   }
   return rit_name;
+}
+
+// A rack info table built from another lexicon or other leaves than its
+// player's holds other words and leave values. One set to auto is dropped,
+// said in a line, and its name in *p1_rit_name or *p2_rit_name cleared; one
+// set to true is an error.
+static void config_drop_mismatched_rack_info_tables(Config *config,
+                                                    const char **p1_rit_name,
+                                                    const char **p2_rit_name,
+                                                    ErrorStack *error_stack) {
+  const char **rit_names[2] = {p1_rit_name, p2_rit_name};
+  bool dropped = false;
+  for (int player_idx = 0; player_idx < 2; player_idx++) {
+    if (players_data_rit_matches_inputs(config->players_data, player_idx)) {
+      continue;
+    }
+    const char *name = *rit_names[player_idx];
+    if (!config->table_auto[PLAYERS_DATA_TYPE_RIT][player_idx]) {
+      error_stack_push(
+          error_stack, ERROR_STATUS_RIT_INPUTS_MISMATCH,
+          get_formatted_string(
+              "rack info table '%s' was not built from the lexicon and leaves "
+              "of player %d; delete the .rit file and rebuild it with "
+              "'convert klvwmp2rit'\n",
+              name, player_idx + 1));
+      return;
+    }
+    thread_control_print_formatted(
+        config->thread_control,
+        "playing without the rack info table %s: it was built from another "
+        "lexicon or other leaves (delete the .rit file to build it again)\n",
+        name);
+    *rit_names[player_idx] = NULL;
+    dropped = true;
+  }
+  if (dropped) {
+    // The other player's table, if any, is loaded already and kept.
+    players_data_set(config->players_data, PLAYERS_DATA_TYPE_RIT,
+                     config->data_paths, *p1_rit_name, *p2_rit_name,
+                     config->use_mmap_for_rit, error_stack);
+  }
 }
 
 // The letter distribution a lexicon load uses: `new_ld_name` if given, else
@@ -8903,6 +9137,8 @@ static void config_load_lexicon_dependent_data_internal(
   char *report = NULL;
   config_choose_auto_tables(config, lexicons, rit_names, table_ld_name, use,
                             &report);
+  ConfigTablesInUse in_use;
+  config_tables_in_use_init(&in_use, lexicons, rit_names);
   if (report && !strings_equal(report, config->auto_table_report)) {
     thread_control_print_formatted(config->thread_control, "%s", report);
     free(config->auto_table_report);
@@ -8921,11 +9157,12 @@ static void config_load_lexicon_dependent_data_internal(
     // found missing and reported, once rather than once per player.
     const bool same_wordmap =
         p1_wmp_name && p2_wmp_name && strings_equal(p1_wmp_name, p2_wmp_name);
-    p1_wmp_name =
-        config_wordmap_for_first_use(config, 0, p1_wmp_name, table_ld_name);
-    p2_wmp_name = same_wordmap ? p1_wmp_name
-                               : config_wordmap_for_first_use(
-                                     config, 1, p2_wmp_name, table_ld_name);
+    p1_wmp_name = config_wordmap_for_first_use(config, 0, p1_wmp_name,
+                                               table_ld_name, &in_use);
+    p2_wmp_name = same_wordmap
+                      ? p1_wmp_name
+                      : config_wordmap_for_first_use(config, 1, p2_wmp_name,
+                                                     table_ld_name, &in_use);
   }
   players_data_set(config->players_data, PLAYERS_DATA_TYPE_WMP,
                    config->data_paths, p1_wmp_name, p2_wmp_name, false,
@@ -8949,22 +9186,26 @@ static void config_load_lexicon_dependent_data_internal(
         config, 0, p1_rit_name, updated_p1_lexicon_name,
         players_data_get_data_name(config->players_data, PLAYERS_DATA_TYPE_KLV,
                                    0),
-        table_ld_name);
+        table_ld_name, &in_use);
     p2_rit_name =
         same_table ? p1_rit_name
                    : config_rack_info_table_for_first_use(
                          config, 1, p2_rit_name, updated_p2_lexicon_name,
                          players_data_get_data_name(config->players_data,
                                                     PLAYERS_DATA_TYPE_KLV, 1),
-                         table_ld_name);
+                         table_ld_name, &in_use);
   }
   players_data_set(config->players_data, PLAYERS_DATA_TYPE_RIT,
                    config->data_paths, p1_rit_name, p2_rit_name,
                    config->use_mmap_for_rit, error_stack);
-  free(rit_names[0]);
-  free(rit_names[1]);
+  if (error_stack_is_empty(error_stack)) {
+    config_drop_mismatched_rack_info_tables(config, &p1_rit_name, &p2_rit_name,
+                                            error_stack);
+  }
   if (!error_stack_is_empty(error_stack)) {
     free(table_ld_name);
+    free(rit_names[0]);
+    free(rit_names[1]);
     return;
   }
 
@@ -8979,11 +9220,15 @@ static void config_load_lexicon_dependent_data_internal(
     const bool same_table =
         p1_wit_name && p2_wit_name && strings_equal(p1_wit_name, p2_wit_name);
     p1_wit_name = config_word_info_table_for_first_use(config, 0, p1_wit_name,
-                                                       table_ld_name);
-    p2_wit_name = same_table ? p1_wit_name
-                             : config_word_info_table_for_first_use(
-                                   config, 1, p2_wit_name, table_ld_name);
+                                                       table_ld_name, &in_use);
+    p2_wit_name = same_table
+                      ? p1_wit_name
+                      : config_word_info_table_for_first_use(
+                            config, 1, p2_wit_name, table_ld_name, &in_use);
   }
+  // The tables in use name the rack info tables until here.
+  free(rit_names[0]);
+  free(rit_names[1]);
   free(table_ld_name);
   players_data_set(config->players_data, PLAYERS_DATA_TYPE_WIT,
                    config->data_paths, p1_wit_name, p2_wit_name,
@@ -15732,8 +15977,10 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->peg_outcomes_board = NULL;
   config->peg_outcomes_ld = NULL;
   config->show_mistakes = false;
-  // A complete solve at 2 or more in the bag can take well over 20 minutes,
-  // so analyze solves only 1-in-bag turns with PEG unless told otherwise.
+  // A complete 3-ply solve at 1 in the bag took a median 16 s on 10 threads
+  // in ten positions, though one saved game ran past 15 minutes; at 2 to 4 in
+  // the bag even 2 plies ran past 5 minutes in 13 of 30, so analyze solves
+  // only 1-in-bag turns with PEG unless told otherwise.
   config->analyze_peg_max_bag = 1;
   config->sim_with_inference = true;
   config->pat_label_plies = 1;

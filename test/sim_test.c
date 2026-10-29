@@ -1181,6 +1181,40 @@ void test_sim_avoid_prune_cmd_multi(void) {
   config_destroy(config);
 }
 
+// Asserts that each of the moves, given as move descriptions, was simulated
+// as often as the winner: none was pruned.
+static void assert_snoprune_moves_unpruned(const Config *config,
+                                           const char *const *moves,
+                                           int num_moves) {
+  const SimResults *sim_results = config_get_sim_results(config);
+  const int winner_arm =
+      bai_result_get_best_arm(sim_results_get_bai_result(sim_results));
+  const uint64_t winner_count =
+      stat_get_num_samples(simmed_play_get_equity_stat(
+          sim_results_get_simmed_play(sim_results, winner_arm)));
+  const int num_plays = sim_results_get_number_of_plays(sim_results);
+  int found_count = 0;
+  for (int play_idx = 0; play_idx < num_plays; play_idx++) {
+    const SimmedPlay *simmed_play =
+        sim_results_get_simmed_play(sim_results, play_idx);
+    StringBuilder *move_string_builder = string_builder_create();
+    string_builder_add_move_description(move_string_builder,
+                                        simmed_play_get_move(simmed_play),
+                                        config_get_ld(config));
+    const char *move_str = string_builder_peek(move_string_builder);
+    for (int ap_idx = 0; ap_idx < num_moves; ap_idx++) {
+      if (strings_equal(move_str, moves[ap_idx])) {
+        const uint64_t ap_count =
+            stat_get_num_samples(simmed_play_get_equity_stat(simmed_play));
+        assert(ap_count == winner_count);
+        found_count++;
+      }
+    }
+    string_builder_destroy(move_string_builder);
+  }
+  assert(found_count == num_moves);
+}
+
 void test_snoprune_with_opp_rack_and_mixed_coords(void) {
   Config *config = config_create_or_die(
       "set -lex NWL20 -wmp true -s1 score -s2 score -r1 all -r2 all "
@@ -1194,39 +1228,16 @@ void test_snoprune_with_opp_rack_and_mixed_coords(void) {
   // the center square). Together they verify that the snoprune parser
   // accepts both coordinate formats.
   load_and_exec_config_or_die(config, "addmoves H8 QI,8H QI");
+  const char *avoid_prune_moves[] = {"H8 QI", "8H QI"};
   // "AB" is a non-empty, non-"-" opp rack.
   load_and_exec_config_or_die(config, "snoprune AB, H8 QI,8H QI");
-
-  const SimResults *sim_results = config_get_sim_results(config);
-  const int winner_arm =
-      bai_result_get_best_arm(sim_results_get_bai_result(sim_results));
-  const uint64_t winner_count =
-      stat_get_num_samples(simmed_play_get_equity_stat(
-          sim_results_get_simmed_play(sim_results, winner_arm)));
-
-  const char *avoid_prune_moves[] = {"H8 QI", "8H QI"};
-  const int num_avoid_prune = 2;
-  const int num_plays = sim_results_get_number_of_plays(sim_results);
-  int found_count = 0;
-  for (int play_idx = 0; play_idx < num_plays; play_idx++) {
-    const SimmedPlay *simmed_play =
-        sim_results_get_simmed_play(sim_results, play_idx);
-    StringBuilder *move_string_builder = string_builder_create();
-    string_builder_add_move_description(move_string_builder,
-                                        simmed_play_get_move(simmed_play),
-                                        config_get_ld(config));
-    const char *move_str = string_builder_peek(move_string_builder);
-    for (int ap_idx = 0; ap_idx < num_avoid_prune; ap_idx++) {
-      if (strings_equal(move_str, avoid_prune_moves[ap_idx])) {
-        const uint64_t ap_count =
-            stat_get_num_samples(simmed_play_get_equity_stat(simmed_play));
-        assert(ap_count == winner_count);
-        found_count++;
-      }
-    }
-    string_builder_destroy(move_string_builder);
-  }
-  assert(found_count == num_avoid_prune);
+  assert_snoprune_moves_unpruned(config, avoid_prune_moves, 2);
+  // The period format peg takes, with no rack and no leading comma, and
+  // after a rack.
+  load_and_exec_config_or_die(config, "snoprune H8.QI,8H.QI");
+  assert_snoprune_moves_unpruned(config, avoid_prune_moves, 2);
+  load_and_exec_config_or_die(config, "snoprune AB,H8.QI, 8H QI");
+  assert_snoprune_moves_unpruned(config, avoid_prune_moves, 2);
   config_destroy(config);
 }
 

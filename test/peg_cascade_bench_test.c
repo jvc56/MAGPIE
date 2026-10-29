@@ -53,22 +53,6 @@ static void peg_cascade_bench_set_variant(PegArgs *args, int variant,
   }
 }
 
-// Cuts the opponent's rack out of a fixture line ("<board> AB/CD ..." becomes
-// "<board> AB/ ...") in place.
-// cppcheck-suppress constParameterPointer
-static void peg_cascade_bench_strip_opp_rack(char *line) {
-  char *space = strchr(line, ' ');
-  if (space == NULL) {
-    return;
-  }
-  char *slash = strchr(space + 1, '/');
-  char *end = slash ? strchr(slash, ' ') : NULL;
-  if (slash == NULL || end == NULL) {
-    return;
-  }
-  memmove(slash + 1, end, strlen(end) + 1);
-}
-
 // Solves positions [first, first + max_positions) of `cgp_file` with the
 // variants whose bits are set in `variant_mask`.
 static void run_peg_cascade_bench(const char *cgp_file, int first,
@@ -97,7 +81,7 @@ static void run_peg_cascade_bench(const char *cgp_file, int first,
     if (line_idx++ < first) {
       continue;
     }
-    peg_cascade_bench_strip_opp_rack(line);
+    strip_cgp_opp_rack(line);
     ErrorStack *error_stack = error_stack_create();
     game_load_cgp(config_get_game(config), line, error_stack);
     assert(error_stack_is_empty(error_stack));

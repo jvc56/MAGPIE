@@ -817,6 +817,8 @@ static void test_peg_main_cli(void) {
   // to the end of the game, and a depth outside 0..PEG_EXHAUSTIVE_PLIES or
   // a word other than end is rejected.
   PegArgs peg_args;
+  config_fill_peg_args(config, &peg_args);
+  assert(peg_args.exhaustive_plies == 3);
   load_and_exec_config_or_die(config, "set -pegplies end");
   config_fill_peg_args(config, &peg_args);
   assert(peg_args.exhaustive_plies == 0);

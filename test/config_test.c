@@ -22,6 +22,7 @@
 #include "../src/ent/validated_move.h"
 #include "../src/ent/wmp.h"
 #include "../src/impl/config.h"
+#include "../src/impl/contribute_tables.h"
 #include "../src/str/game_string.h"
 #include "../src/str/move_string.h"
 #include "../src/util/io_util.h"
@@ -2739,6 +2740,50 @@ static void test_config_builds_missing_tables_on_first_use(void) {
         players_data_get_data_name(config_get_players_data(config),
                                    PLAYERS_DATA_TYPE_RIT, 0),
         rit_name));
+
+    // What was built is in the program's own manifest, the only tables it
+    // ever deletes, and not in contribute's.
+    char *manifest_path = get_formatted_string("%s/auto_tables.txt", dir);
+    ContributeTableManifest *manifest =
+        contribute_table_manifest_read(manifest_path);
+    assert(manifest->count == 3);
+    assert(contribute_table_manifest_touch(manifest, "wmp", lexicon, 1));
+    assert(contribute_table_manifest_touch(manifest, "wit", lexicon, 1));
+    assert(contribute_table_manifest_touch(manifest, "rit", rit_name, 1));
+    contribute_table_manifest_destroy(manifest);
+    free(manifest_path);
+    char *contribute_manifest =
+        get_formatted_string("%s/%s", dir, CONTRIBUTE_TABLE_MANIFEST_FILENAME);
+    assert(!cfile_access(contribute_manifest, CFILE_ACCESS_EXISTS));
+    free(contribute_manifest);
+
+    // The rack info table records the lexicon and leaves it was built from.
+    // One that records others is dropped under auto, said in a line, and is
+    // an error under true.
+    char *rit_path = get_formatted_string("%s/%s.rit", lexica, rit_name);
+    FILE *rit_file = cfile_open(rit_path, "r+be", false);
+    assert(rit_file);
+    const int seek_result = fseek(rit_file, -8, SEEK_END);
+    assert(seek_result == 0);
+    const uint8_t other_leaves_hash[8] = {0x5a, 0x5a, 0x5a, 0x5a,
+                                          0x5a, 0x5a, 0x5a, 0x5a};
+    const size_t patched =
+        fwrite(other_leaves_hash, 1, sizeof(other_leaves_hash), rit_file);
+    assert(patched == sizeof(other_leaves_hash));
+    (void)fclose(rit_file);
+    free(rit_path);
+    config_destroy(config);
+    error_stack = error_stack_create();
+    config = config_create(&args, error_stack);
+    assert(error_stack_is_empty(error_stack));
+    error_stack_destroy(error_stack);
+    exec_capturing_output(config, command, output, sizeof(output));
+    assert(strstr(output, "playing without the rack info table"));
+    assert(!players_data_get_data_name(config_get_players_data(config),
+                                       PLAYERS_DATA_TYPE_RIT, 0));
+    assert_config_exec_status(config, "set -rit true",
+                              ERROR_STATUS_RIT_INPUTS_MISMATCH);
+    assert_config_exec_status(config, "set -rit auto", ERROR_STATUS_SUCCESS);
 
     // A lexicon with no wordmap support says why it has no wordmap, and no
     // rack info table, which is built from one, instead of naming a convert

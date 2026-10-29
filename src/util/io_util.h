@@ -322,6 +322,9 @@ typedef enum {
   ERROR_STATUS_PEG_RESUME_TAKES_NO_MOVES,
   ERROR_STATUS_PEG_EXCHANGE_IN_MOVE_LIST,
   ERROR_STATUS_PEG_NOPRUNE_REMOVED,
+  // A rack info table set to true was built from another lexicon or other
+  // leaves than the player's.
+  ERROR_STATUS_RIT_INPUTS_MISMATCH,
 } error_code_t;
 
 typedef enum {

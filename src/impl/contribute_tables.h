@@ -76,7 +76,7 @@ typedef enum {
 #define CONTRIBUTE_RIT_BUILD_PERMILLE 1273
 #define CONTRIBUTE_WMP_ASSUMED_BYTES 178929167LL
 #define CONTRIBUTE_WIT_ASSUMED_BYTES 121972344LL
-#define CONTRIBUTE_RIT_ASSUMED_BYTES 1885416048LL
+#define CONTRIBUTE_RIT_ASSUMED_BYTES 1885416064LL
 
 // The memory building a table of `role` and `bytes` (-1 unknown) peaks at,
 // and the memory holding it takes.
@@ -236,6 +236,15 @@ bool contribute_tables_make_room(const char *manifest_path,
                                  void *free_bytes_context, int64_t *available,
                                  StringList *evicted);
 
+// Deletes the tables the manifest at `manifest_path` lists and `keep` does
+// not, least recently used first, until the tables it lists take at most
+// `cap_bytes`, under the same rules as make_room. Returns the bytes the
+// listed tables take afterwards. `evicted` (may be NULL) gets a line per
+// table deleted.
+int64_t contribute_tables_trim_to(const char *manifest_path, int64_t cap_bytes,
+                                  const ContributeTable *keep, int keep_count,
+                                  StringList *evicted);
+
 // Records a table just built at `path` in the manifest at `manifest_path`,
 // with the size it has on disk, under the manifest's lock.
 void contribute_tables_record_built(const char *manifest_path, const char *role,
@@ -250,5 +259,9 @@ void contribute_tables_touch_used(const char *manifest_path,
 // The manifest's path for `data_paths` (its first directory, where builds
 // are written). The caller frees.
 char *contribute_tables_manifest_path(const char *data_paths);
+// The same for a manifest of another name: the command line program keeps
+// its own, of the tables it built on first use. The caller frees.
+char *contribute_tables_manifest_path_named(const char *data_paths,
+                                            const char *filename);
 
 #endif
