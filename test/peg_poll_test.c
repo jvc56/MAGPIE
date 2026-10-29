@@ -186,7 +186,8 @@ static void test_peg_status_string(const Game *game, const Move *move) {
       string_builder_peek(move_sb));
   string_builder_destroy(move_sb);
 
-  char *status = peg_snapshot_get_status_string(snap, game, now_ns);
+  char *status = peg_snapshot_get_status_string(snap, game, now_ns, NULL, 0);
+  assert(!has_substring(status, "outcomes"));
   assert(has_substring(status, "0/168 (0%)"));
   assert(!has_substring(status, "draws 2/4"));
   assert(has_substring(status, solving));
@@ -201,6 +202,26 @@ static void test_peg_status_string(const Game *game, const Move *move) {
                                "end) has not finished a candidate yet"));
   free(status);
 
+  // With outcomes, the ranking has an outcomes column: each candidate's
+  // draws, here a win drawing A and a loss drawing E.
+  PegPerScenario rows[2] = {0};
+  (void)snprintf(rows[0].drawn, sizeof(rows[0].drawn), "A");
+  rows[0].weight = 1;
+  rows[0].mover_total = 10;
+  (void)snprintf(rows[1].drawn, sizeof(rows[1].drawn), "E");
+  rows[1].weight = 1;
+  rows[1].mover_total = -10;
+  PegCandOutcomes outcomes = {.move = *move, .rows = rows, .n_rows = 2};
+  char *cell = peg_build_outcomes_string_rows(rows, 2);
+  assert(cell[0] != '\0');
+  status = peg_snapshot_get_status_string(snap, game, now_ns, &outcomes, 1);
+  assert(has_substring(status, "spread  outcomes\n"));
+  char *cell_line = get_formatted_string("  %s\n", cell);
+  assert(has_substring(status, cell_line));
+  free(cell_line);
+  free(cell);
+  free(status);
+
   // Past PEG_STATUS_MAX_FINISHED_DRAW_ROWS draws, the finished ones are
   // totalled, and only the running ones listed.
   snap->stage_history[1].scenarios_total = 40;
@@ -210,7 +231,7 @@ static void test_peg_status_string(const Game *game, const Move *move) {
   snap->draws_done_weight = 20;
   snap->draws_done_wins = 15;
   snap->draws_done_ties = 1;
-  status = peg_snapshot_get_status_string(snap, game, now_ns);
+  status = peg_snapshot_get_status_string(snap, game, now_ns, NULL, 0);
   assert(has_substring(status, "draws: 20 done, 2 running, 18 queued"));
   assert(has_substring(status,
                        "20 finished draws: orderings won 15, tied 1, lost 4"));

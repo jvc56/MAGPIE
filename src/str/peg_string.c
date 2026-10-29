@@ -742,6 +742,22 @@ static void peg_append_wrapped(StringBuilder *sb, const char *text, int indent,
   free(tok_len);
 }
 
+// Per-line width available for an outcomes cell that starts at column
+// `indent`. out_width is the whole line; it is clamped up so the cell always
+// fits at least the label and one worst-case token. out_width <= 0 means
+// unbounded (no wrapping).
+static int peg_outcomes_avail(size_t indent, int out_width) {
+  if (out_width <= 0) {
+    return INT_MAX;
+  }
+  int eff_width = out_width;
+  const int floor_width = (int)indent + PEG_OUTCOMES_MIN_CELL;
+  if (eff_width < floor_width) {
+    eff_width = floor_width;
+  }
+  return eff_width - (int)indent;
+}
+
 // Find the captured per-ordering outcomes for a given move, or NULL.
 static const PegCandOutcomes *peg_find_cand_outcomes(const PegResult *result,
                                                      const Move *move) {
@@ -987,18 +1003,7 @@ static void peg_append_graded_table(StringBuilder *sb, const PegResult *result,
     outc_indent += 2 + wfid[uf_idx];
   }
   outc_indent += 2;
-  // Per-line width available for outcomes content. out_width is the whole line;
-  // clamp it up so the cell always fits at least the label + one worst-case
-  // token. out_width <= 0 means unbounded (no wrapping).
-  int outc_avail = INT_MAX;
-  if (out_width > 0) {
-    int eff_width = out_width;
-    const int floor_width = (int)outc_indent + PEG_OUTCOMES_MIN_CELL;
-    if (eff_width < floor_width) {
-      eff_width = floor_width;
-    }
-    outc_avail = eff_width - (int)outc_indent;
-  }
+  const int outc_avail = peg_outcomes_avail(outc_indent, out_width);
 
   // Header.
   string_builder_add_formatted_string(
@@ -1084,13 +1089,16 @@ static void peg_append_graded_table(StringBuilder *sb, const PegResult *result,
 // counts; losses are weight_sum - wins - ties) and time (per-candidate wall
 // clock, live solves only). With show_stats, a "<P> weighted bag orderings (<U>
 // unique)" line precedes the table. The live stream omits wins/ties and stats;
-// the final view omits time. The caller appends the outcomes line (as in the
-// graded view).
+// the final view omits time. With show_outcomes and captured outcomes
+// (result->cand_outcomes), a trailing outcomes column shows each play's draws,
+// wrapped to out_width and out_max_lines as in the graded view.
 static void peg_append_flat_ranking(StringBuilder *sb, const PegResult *result,
                                     const Board *board,
                                     const LetterDistribution *ld,
                                     bool show_wins, bool show_time,
-                                    bool show_stats, int min_move_width) {
+                                    bool show_stats, int min_move_width,
+                                    bool show_outcomes, int out_width,
+                                    int out_max_lines, bool *out_truncated) {
   int col = 0;
   const int rank_col = col++;
   const int move_col = col++;
@@ -1201,8 +1209,40 @@ static void peg_append_flat_ranking(StringBuilder *sb, const PegResult *result,
     }
   }
 
-  string_builder_add_string_grid(sb, sg, false);
+  if (!show_outcomes || result->n_cand_outcomes == 0) {
+    string_builder_add_string_grid(sb, sg, false);
+    string_grid_destroy(sg);
+    return;
+  }
+  // Every grid line has the same width and ends in the column padding, so the
+  // outcomes cell starts right after it, and wrapped lines indent to there.
+  StringBuilder *grid_sb = string_builder_create();
+  string_builder_add_string_grid(grid_sb, sg, false);
   string_grid_destroy(sg);
+  const char *line = string_builder_peek(grid_sb);
+  for (int row = 0; row < num_rows; row++) {
+    const char *line_end = strchr(line, '\n');
+    char *row_str = get_substring(line, 0, (int)(line_end - line));
+    string_builder_add_string(sb, row_str);
+    if (row == 0) {
+      string_builder_add_string(sb, "outcomes");
+    } else {
+      const PegCandOutcomes *oc =
+          peg_find_cand_outcomes(result, &result->top_cands[row - 1].move);
+      char *cell = (oc != NULL && oc->n_rows > 0)
+                       ? peg_build_outcomes_string_rows(oc->rows, oc->n_rows)
+                       : string_duplicate("-");
+      const size_t indent = visual_string_length(row_str);
+      peg_append_wrapped(sb, cell, (int)indent,
+                         peg_outcomes_avail(indent, out_width), out_max_lines,
+                         out_truncated);
+      free(cell);
+    }
+    free(row_str);
+    string_builder_add_string(sb, "\n");
+    line = line_end + 1;
+  }
+  string_builder_destroy(grid_sb);
 }
 
 // True when two moves are the same play (type, position, tiles).
@@ -1434,15 +1474,16 @@ static void peg_append_live_ranking_label(StringBuilder *sb,
   free(stage_name);
 }
 
-// The live view of a running solve, as status shows it at `now_ns`, without
-// the best play's outcomes, which need the poll: how long it has run, the
-// stage table, the candidate in progress, and the best ranking so far -- the
-// current stage's, or the previous stage's while the current one has finished
-// no candidate. Returns that ranking's entries, NULL when there are none.
-static const PegRankedCand *peg_append_live_status(StringBuilder *sb,
-                                                   const PegPollSnapshot *snap,
-                                                   const Game *game,
-                                                   int64_t now_ns) {
+// The live view of a running solve, as status shows it at `now_ns`: how long
+// it has run, the stage table, the candidate in progress, and the best ranking
+// so far -- the current stage's, or the previous stage's while the current one
+// has finished no candidate. With show_outcomes, the ranking has an outcomes
+// column from the finished candidates' `outcomes`, which come from the poll.
+static void
+peg_append_live_status(StringBuilder *sb, const PegPollSnapshot *snap,
+                       const Game *game, int64_t now_ns, bool show_outcomes,
+                       PegCandOutcomes *outcomes, int n_outcomes, int out_width,
+                       int out_max_lines, bool *out_truncated) {
   const int64_t start_ns =
       snap->n_stage_history > 0 ? snap->stage_history[0].start_ns : now_ns;
   const double total_secs = (double)(now_ns - start_ns) / 1e9;
@@ -1461,7 +1502,7 @@ static const PegRankedCand *peg_append_live_status(StringBuilder *sb,
     n_live_entries = snap->n_baseline_entries;
   }
   if (n_live_entries == 0) {
-    return NULL;
+    return;
   }
   peg_append_live_ranking_label(sb, snap, from_baseline);
   // Render the same flat table as the final printout on the live snapshot, so
@@ -1473,16 +1514,24 @@ static const PegRankedCand *peg_append_live_status(StringBuilder *sb,
   live.top_cands = ranking;
   live.n_top_cands = n_live_entries;
   live.last_completed_stage = snap->stage;
+  // The live result only borrows the outcomes; the caller frees them.
+  live.cand_outcomes = outcomes;
+  live.n_cand_outcomes = n_outcomes;
   peg_append_flat_ranking(sb, &live, game_get_board(game), game_get_ld(game),
                           /*show_wins=*/true, /*show_time=*/false,
-                          /*show_stats=*/true, /*min_move_width=*/0);
-  return live_entries;
+                          /*show_stats=*/true, /*min_move_width=*/0,
+                          show_outcomes, out_width, out_max_lines,
+                          out_truncated);
 }
 
 char *peg_snapshot_get_status_string(const PegPollSnapshot *snapshot,
-                                     const Game *game, int64_t now_ns) {
+                                     const Game *game, int64_t now_ns,
+                                     PegCandOutcomes *outcomes,
+                                     int n_outcomes) {
   StringBuilder *sb = string_builder_create();
-  peg_append_live_status(sb, snapshot, game, now_ns);
+  peg_append_live_status(sb, snapshot, game, now_ns, outcomes != NULL, outcomes,
+                         n_outcomes, /*out_width=*/0,
+                         /*out_max_lines=*/0, NULL);
   return string_builder_dump_and_destroy(sb, NULL);
 }
 
@@ -1505,25 +1554,16 @@ char *peg_result_get_string(const PegResult *result, const Game *game,
 
   // Live path: poll is set and the solve is still running.
   if (have_snap && !snap.done) {
-    const PegRankedCand *live_entries =
-        peg_append_live_status(sb, &snap, game, ctimer_monotonic_ns());
-    // Per-multiset W/L/T for the best play, fed live via the poll outcomes.
-    if (live_entries != NULL && show_outcomes) {
-      PegCandOutcomes *live_oc = NULL;
-      int live_n_oc = 0;
+    // Each finished candidate's per-draw outcomes, fed live via the poll.
+    PegCandOutcomes *live_oc = NULL;
+    int live_n_oc = 0;
+    if (show_outcomes) {
       peg_poll_copy_outcomes(poll, &live_oc, &live_n_oc);
-      PegResult live = {0};
-      live.cand_outcomes = live_oc;
-      live.n_cand_outcomes = live_n_oc;
-      const PegCandOutcomes *best =
-          peg_find_cand_outcomes(&live, &live_entries[0].move);
-      if (best != NULL && best->n_rows > 0) {
-        char *oc = peg_build_outcomes_string_rows(best->rows, best->n_rows);
-        string_builder_add_formatted_string(sb, "\noutcomes (best): %s\n", oc);
-        free(oc);
-      }
-      peg_cand_outcomes_destroy_array(live_oc, live_n_oc);
     }
+    peg_append_live_status(sb, &snap, game, ctimer_monotonic_ns(),
+                           show_outcomes, live_oc, live_n_oc, out_width,
+                           out_max_lines, out_truncated);
+    peg_cand_outcomes_destroy_array(live_oc, live_n_oc);
     char *out = string_builder_dump_and_destroy(sb, NULL);
     return out;
   }
@@ -1582,7 +1622,8 @@ char *peg_result_get_string(const PegResult *result, const Game *game,
 
   peg_append_flat_ranking(sb, result, board, ld, /*show_wins=*/true,
                           /*show_time=*/false, /*show_stats=*/true,
-                          /*min_move_width=*/0);
+                          /*min_move_width=*/0, /*show_outcomes=*/false,
+                          out_width, out_max_lines, out_truncated);
   if (show_outcomes && result->n_per_scenario > 0) {
     char *outcomes = peg_build_outcomes_string(result);
     string_builder_add_formatted_string(sb, "\noutcomes (best): %s\n",
