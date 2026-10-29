@@ -117,7 +117,7 @@ void peg3_exact_eval_mode(const StringSplitter *fields);
 // bag (peg_sim_rollout_move); 2 static rollouts for arm 1's wall time on
 // this root, no iteration cap (needs arm 1); 3 arm 1 with every bag-empty ply
 // chosen by a PEG_SIM_EG_PLIES-ply endgame search (default 2; 0 = the
-// greedy move, greedy_endgame_move); 4 static rollouts with that endgame
+// solver's greedy playout move); 4 static rollouts with that endgame
 // search; 5 static rollouts for arm 3's wall time (needs arm 3). The
 // choosers' pick caches are cleared before every arm, so each arm's time
 // includes its own chooser work. PEG_SIM_THREADS threads

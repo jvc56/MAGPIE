@@ -1946,8 +1946,8 @@ void peg3_exact_eval_mode(const StringSplitter *fields) {
 // Per-worker fixed-depth endgame search for rollouts (the bag is empty, so
 // both racks are known in the rollout's world): fixed_depth_endgame_move's
 // search with each worker's solver context kept between calls. With 0 plies,
-// the greedy move instead (greedy_endgame_move: the highest score, plus twice
-// the opponent's rack when going out).
+// the solver's depth-0 move: the first move of the greedy playout its leaves
+// play, stuck-tile conservation included.
 // PEG_SIM_EG_TT: the searches' transposition table. "none" (the default):
 // every search starts empty; "worker": one table per worker, kept across that
 // worker's searches; "shared": one table for every worker. Tables hold
@@ -1964,7 +1964,6 @@ typedef struct PegSimRolloutEndgame {
   double *ms;
   int n_tt;
   TranspositionTable **tt;
-  MoveList **small;
 } PegSimRolloutEndgame;
 
 static PegSimRolloutEndgame peg_sim_endgame_create(int plies, int workers) {
@@ -1976,12 +1975,10 @@ static PegSimRolloutEndgame peg_sim_endgame_create(int plies, int workers) {
       .control = malloc_or_die(sizeof(ThreadControl *) * (size_t)workers),
       .calls = calloc_or_die((size_t)workers, sizeof(int64_t)),
       .ms = calloc_or_die((size_t)workers, sizeof(double)),
-      .small = malloc_or_die(sizeof(MoveList *) * (size_t)workers),
   };
   for (int worker = 0; worker < workers; worker++) {
     endgame.results[worker] = endgame_results_create();
     endgame.control[worker] = thread_control_create();
-    endgame.small[worker] = move_list_create_small(16);
   }
   return endgame;
 }
@@ -2025,9 +2022,7 @@ static void peg_sim_endgame_destroy(PegSimRolloutEndgame *endgame) {
     }
     endgame_results_destroy(endgame->results[worker]);
     thread_control_destroy(endgame->control[worker]);
-    move_list_destroy(endgame->small[worker]);
   }
-  free(endgame->small);
   free(endgame->ctx);
   free(endgame->results);
   free(endgame->control);
@@ -2042,15 +2037,6 @@ static void peg_sim_endgame_destroy(PegSimRolloutEndgame *endgame) {
 static void peg_sim_endgame_move(PegSimRolloutEndgame *endgame, int worker,
                                  const Game *game, Move *move) {
   const int64_t start = ctimer_monotonic_ns();
-  if (endgame->plies == 0) {
-    bool out, pass;
-    int tiles;
-    (void)greedy_endgame_move(game, endgame->small[worker], move, &out, &tiles,
-                              &pass);
-    endgame->calls[worker]++;
-    endgame->ms[worker] += (double)(ctimer_monotonic_ns() - start) / 1e6;
-    return;
-  }
   EndgameArgs args = {
       .thread_control = endgame->control[worker],
       .game = game,
