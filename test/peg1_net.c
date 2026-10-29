@@ -92,7 +92,7 @@ void peg1_scratch_destroy(Peg1Scratch *work) {
   game_destroy(work->scenario);
   game_destroy(work->opp_root);
   move_list_destroy(work->best_list);
-  move_list_destroy(work->small);
+  small_move_list_destroy(work->small);
   move_destroy(work->move);
   move_destroy(work->found);
 }

@@ -485,7 +485,7 @@ void peg1_roots_mode(const StringSplitter *fields) {
   }
   string_builder_destroy(name);
   move_destroy(move);
-  move_list_destroy(small);
+  small_move_list_destroy(small);
   move_list_destroy(pool);
   move_list_destroy(static_list);
   game_destroy(scenario);
