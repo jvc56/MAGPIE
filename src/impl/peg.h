@@ -126,6 +126,14 @@ typedef bool (*PegPeg1Chooser)(const Game *game, int worker_idx, void *ctx,
 typedef bool (*PegPeg2Chooser)(const Game *game, int worker_idx, void *ctx,
                                Move *move);
 
+// Optional root move ranker (see PegArgs.root_ranker). Writes up to max_moves
+// of the on-turn player's legal moves for `game`, best first, into moves and
+// returns how many (0 = no ranking). Like the choosers above, it must decide
+// from the on-turn player's information only. Called once per solve, on the
+// calling thread.
+typedef int (*PegRootRanker)(const Game *game, void *ctx, Move *moves,
+                             int max_moves);
+
 typedef struct PegArgs {
   // Required: PEG position to analyze. Must have bag size in [PEG_MIN_BAG,
   // PEG_MAX_BAG], except bag sizes up to RACK_SIZE are also accepted when
@@ -289,6 +297,20 @@ typedef struct PegArgs {
   // mean spread + 2 x win% in points, instead of by win% with spread only as a
   // tiebreak. Nested pegs are unaffected. False = win% first (default).
   bool rank_by_utility;
+  // Optional ranker-guided root search. The ranker's top PEG_RANKER_HEAD moves
+  // lead the candidate list in the ranker's order, and with a time budget the
+  // halving stages score candidates one at a time in rank order, so a budget
+  // cut keeps the ranker's best. With a budget of at least
+  // PEG_RANKER_TAIL_MIN_MS, or none, the other candidates (only_moves, else
+  // every generated move) follow, ranked by stage 0, and the default schedule
+  // is 48, 16, 8, 4, 2: the head and the best 32 of the rest. Below it the
+  // ranker's moves are the only candidates, schedule 16, 8, 4, 2. stage_top_k
+  // overrides the schedule; n_ranked_only_moves is ignored. The ranker's time
+  // counts against the budget. With rank_by_utility this is the net-guided
+  // search H2 of the pegbudget experiments. A ranker that returns no moves
+  // leaves the solve as if none were set. NULL = off (default).
+  PegRootRanker root_ranker;
+  void *root_ranker_ctx;
 
   // Optional "protect from pruning" set (like the simmer's snoprune): moves
   // that must survive every stage's top-K cut even when their win% rank falls
@@ -352,7 +374,8 @@ static inline void peg_args_fill(
     void *nested_peg2_chooser_ctx, const MachineLetter *eval_bag_order,
     const int eval_bag_order_len, const Move *const *only_moves,
     const int n_only_moves, const int n_ranked_only_moves,
-    const bool rank_by_utility, const Move *const *protect_moves,
+    const bool rank_by_utility, PegRootRanker root_ranker,
+    void *root_ranker_ctx, const Move *const *protect_moves,
     const int n_protect_moves, const bool include_per_scenario,
     PegOnStageStart on_stage_start, PegOnCandDone on_cand_done,
     PegOnScenarioDone on_scenario_done, void *user_data, PegPoll *poll,
@@ -390,6 +413,8 @@ static inline void peg_args_fill(
   peg_args->n_only_moves = n_only_moves;
   peg_args->n_ranked_only_moves = n_ranked_only_moves;
   peg_args->rank_by_utility = rank_by_utility;
+  peg_args->root_ranker = root_ranker;
+  peg_args->root_ranker_ctx = root_ranker_ctx;
   peg_args->protect_moves = protect_moves;
   peg_args->n_protect_moves = n_protect_moves;
   peg_args->include_per_scenario = include_per_scenario;

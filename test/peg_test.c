@@ -5,6 +5,7 @@
 #include "../src/def/game_history_defs.h"
 #include "../src/def/letter_distribution_defs.h"
 #include "../src/def/move_defs.h"
+#include "../src/def/peg_defs.h"
 #include "../src/def/thread_control_defs.h"
 #include "../src/ent/bag.h"
 #include "../src/ent/board.h"
@@ -775,6 +776,180 @@ static void test_peg_main_pnoprune(void) {
 
   peg_result_destroy(&plain);
   peg_result_destroy(&protected_result);
+  move_list_destroy(gen_ml);
+  error_stack_destroy(error_stack);
+  config_destroy(config);
+}
+
+// A PegRootRanker for the tests: the n_return lowest-equity moves of an
+// equity-sorted list, lowest first -- an order stage 0 would never produce.
+typedef struct PegTestRanker {
+  const MoveList *moves;
+  int n_return;
+} PegTestRanker;
+
+static int peg_test_reverse_ranker(const Game *game, void *ctx, Move *moves,
+                                   int max_moves) {
+  (void)game;
+  const PegTestRanker *ranker = ctx;
+  const int n_moves = move_list_get_count(ranker->moves);
+  int count = ranker->n_return < max_moves ? ranker->n_return : max_moves;
+  if (count > n_moves) {
+    count = n_moves;
+  }
+  for (int rank = 0; rank < count; rank++) {
+    move_copy(&moves[rank],
+              move_list_get_move(ranker->moves, n_moves - 1 - rank));
+  }
+  return count;
+}
+
+// The rank of `move` in peg_test_reverse_ranker's full order; -1 = not listed.
+static int peg_test_ranker_rank(const PegTestRanker *ranker, const Move *move) {
+  const int n_moves = move_list_get_count(ranker->moves);
+  for (int rank = 0; rank < ranker->n_return && rank < n_moves; rank++) {
+    if (compare_moves_without_equity(
+            move_list_get_move(ranker->moves, n_moves - 1 - rank), move,
+            true) == -1) {
+      return rank;
+    }
+  }
+  return -1;
+}
+
+static void peg_assert_same_ranking(const PegResult *lhs,
+                                    const PegResult *rhs) {
+  assert(lhs->n_top_cands == rhs->n_top_cands);
+  for (int cand_idx = 0; cand_idx < lhs->n_top_cands; cand_idx++) {
+    assert(compare_moves_without_equity(&lhs->top_cands[cand_idx].move,
+                                        &rhs->top_cands[cand_idx].move,
+                                        true) == -1);
+    assert(lhs->top_cands[cand_idx].win_pct ==
+           rhs->top_cands[cand_idx].win_pct);
+    assert(lhs->top_cands[cand_idx].mean_spread ==
+           rhs->top_cands[cand_idx].mean_spread);
+  }
+}
+
+// PegArgs.root_ranker: the ranker's moves lead the candidate list in its
+// order, then the best of the rest by stage 0; below PEG_RANKER_TAIL_MIN_MS
+// they are the only candidates; a ranker that lists nothing changes nothing;
+// and a budgeted solve (halving stages one candidate at a time) ranks as the
+// unbudgeted one does.
+static void test_peg_main_root_ranker(void) {
+  const char *cgp =
+      "cgp 15/3Q7U3/3U2TAURINE2/1CHANSONS2W3/2AI6JO3/DIRL1PO3IN3/E1D2EF3V4/"
+      "F1I2p1TRAIK3/O1L2T4E4/ABy1PIT2BRIG2/ME1MOZELLE5/1GRADE1O1NOH3/"
+      "WE3R1V7/AT5E7/G6D7 ENOSTXY/ACEISUY 356/378 0 -lex NWL20";
+  Config *config = config_create_or_die("set -threads 4 -s1 score -s2 score");
+  load_and_exec_config_or_die(config, cgp);
+  Game *game = config_get_game(config);
+  ErrorStack *error_stack = error_stack_create();
+  MoveList *gen_ml = move_list_create(4096);
+  const MoveGenArgs gen_args = {
+      .game = game,
+      .move_list = gen_ml,
+      .move_record_type = MOVE_RECORD_ALL,
+      .move_sort_type = MOVE_SORT_EQUITY,
+      .override_kwg = NULL,
+      .eq_margin_movegen = 0,
+      .target_equity = EQUITY_MAX_VALUE,
+  };
+  generate_moves(&gen_args);
+  move_list_sort_moves(gen_ml);
+  assert(move_list_get_count(gen_ml) > 3 * PEG_RANKER_HEAD);
+
+  PegTestRanker ranker = {.moves = gen_ml, .n_return = PEG_RANKER_HEAD};
+  PegArgs base;
+  memset(&base, 0, sizeof(base));
+  base.game = game;
+  base.thread_control = config_get_thread_control(config);
+  base.num_threads = 4;
+  base.greedy_seed_only = true;
+  base.rank_by_utility = true;
+  base.root_ranker = peg_test_reverse_ranker;
+  base.root_ranker_ctx = &ranker;
+
+  // No budget: the ranker's moves in its order, then the best 32 of the rest
+  // by stage 0, in utility order.
+  PegResult wide;
+  memset(&wide, 0, sizeof(wide));
+  peg_solve(&base, &wide, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  assert(wide.n_top_cands == 3 * PEG_RANKER_HEAD);
+  for (int cand_idx = 0; cand_idx < wide.n_top_cands; cand_idx++) {
+    const int rank =
+        peg_test_ranker_rank(&ranker, &wide.top_cands[cand_idx].move);
+    assert(rank == (cand_idx < PEG_RANKER_HEAD ? cand_idx : -1));
+    if (cand_idx > PEG_RANKER_HEAD) {
+      const PegRankedCand *higher = &wide.top_cands[cand_idx - 1];
+      const PegRankedCand *lower = &wide.top_cands[cand_idx];
+      assert(higher->win_pct + higher->mean_spread / 200.0 >=
+             lower->win_pct + lower->mean_spread / 200.0);
+    }
+  }
+
+  // A budget below PEG_RANKER_TAIL_MIN_MS: the ranker's moves alone, those
+  // stage 0 finished still in the ranker's order.
+  PegArgs head_args = base;
+  head_args.time_budget_seconds = PEG_RANKER_TAIL_MIN_MS / 2000.0;
+  PegResult head;
+  memset(&head, 0, sizeof(head));
+  peg_solve(&head_args, &head, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  assert(head.n_top_cands >= 1 && head.n_top_cands <= PEG_RANKER_HEAD);
+  int last_rank = -1;
+  for (int cand_idx = 0; cand_idx < head.n_top_cands; cand_idx++) {
+    const int rank =
+        peg_test_ranker_rank(&ranker, &head.top_cands[cand_idx].move);
+    assert(rank > last_rank);
+    last_rank = rank;
+  }
+
+  // A ranker that lists nothing leaves the solve as if none were set.
+  PegTestRanker silent = {.moves = gen_ml, .n_return = 0};
+  PegArgs silent_args = base;
+  silent_args.root_ranker_ctx = &silent;
+  PegArgs plain_args = base;
+  plain_args.root_ranker = NULL;
+  plain_args.root_ranker_ctx = NULL;
+  PegResult silent_result;
+  PegResult plain;
+  memset(&silent_result, 0, sizeof(silent_result));
+  memset(&plain, 0, sizeof(plain));
+  peg_solve(&silent_args, &silent_result, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  peg_solve(&plain_args, &plain, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  peg_assert_same_ranking(&silent_result, &plain);
+
+  // Halving stages: a budgeted solve scores them one candidate at a time and
+  // must rank as the unbudgeted solve does.
+  static const int stage_top_k[] = {4, 2};
+  PegArgs staged = base;
+  staged.greedy_seed_only = false;
+  staged.stage_top_k = stage_top_k;
+  staged.num_stages = 2;
+  PegArgs budgeted = staged;
+  budgeted.time_budget_seconds = 600.0;
+  PegResult staged_result;
+  PegResult budgeted_result;
+  memset(&staged_result, 0, sizeof(staged_result));
+  memset(&budgeted_result, 0, sizeof(budgeted_result));
+  peg_solve(&staged, &staged_result, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  peg_solve(&budgeted, &budgeted_result, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  assert(staged_result.last_completed_stage == 2);
+  assert(budgeted_result.last_completed_stage == 2);
+  peg_assert_same_ranking(&staged_result, &budgeted_result);
+
+  peg_result_destroy(&budgeted_result);
+  peg_result_destroy(&staged_result);
+  peg_result_destroy(&plain);
+  peg_result_destroy(&silent_result);
+  peg_result_destroy(&head);
+  peg_result_destroy(&wide);
   move_list_destroy(gen_ml);
   error_stack_destroy(error_stack);
   config_destroy(config);
@@ -2275,6 +2450,7 @@ void test_peg(void) {
   test_peg_short_budget_interrupts();
   test_peg_main_opp_models();
   test_peg_main_pnoprune();
+  test_peg_main_root_ranker();
   test_peg_main_progress_detail();
   test_peg_discarded_stage_outcomes();
   test_peg_interrupted_candidate_outcomes();

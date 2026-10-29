@@ -358,6 +358,7 @@ static const Move *autoplay_solver_solve_peg(
       /*nested_peg2_chooser_ctx=*/NULL, /*eval_bag_order=*/NULL,
       /*eval_bag_order_len=*/0, /*only_moves=*/NULL,
       /*n_only_moves=*/0, /*n_ranked_only_moves=*/0, /*rank_by_utility=*/false,
+      /*root_ranker=*/NULL, /*root_ranker_ctx=*/NULL,
       /*protect_moves=*/NULL,
       /*n_protect_moves=*/0,
       /*include_per_scenario=*/false, /*on_stage_start=*/NULL,

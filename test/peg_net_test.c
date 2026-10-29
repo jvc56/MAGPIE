@@ -3757,14 +3757,14 @@ static void vnt_peg1_games3(const StringSplitter *fields) {
       decision_ms = (double)(ctimer_monotonic_ns() - start) / 1e6;
       for (int arm = 0; arm < 2; arm++) {
         game_copy(branch, game);
-        Move first;
+        Move first_move;
         if (choice < 0) {
           // No placement: both policies must pass.
-          move_set_as_pass(&first);
+          move_set_as_pass(&first_move);
         } else {
-          move_copy(&first, &candidates[arm == 0 ? 0 : choice]);
+          move_copy(&first_move, &candidates[arm == 0 ? 0 : choice]);
         }
-        play_move(&first, branch, NULL);
+        play_move(&first_move, branch, NULL);
         int steps = 0;
         while (!game_over(branch) && steps < VNT_MAX_TURNS) {
           Move next;
@@ -4147,6 +4147,7 @@ static void vnt_peg_pick_nets(const Game *game, int threads,
       chooser, chooser_ctx, chooser2, chooser2_ctx,
       /*eval_bag_order=*/NULL, /*eval_bag_order_len=*/0, only, n_only,
       /*n_ranked_only_moves=*/0, /*rank_by_utility=*/false,
+      /*root_ranker=*/NULL, /*root_ranker_ctx=*/NULL,
       /*protect_moves=*/NULL, /*n_protect_moves=*/0,
       /*include_per_scenario=*/false, trace ? vnt_peg_trace_stage : NULL,
       /*on_cand_done=*/NULL, /*on_scenario_done=*/NULL, trace ? &start : NULL,
@@ -8556,6 +8557,8 @@ enum {
                               // 0, first stage VNT_PB_HYBRID_WIDTH wide
   VNT_PB_ARM_HYBRID_UTILITY = 500, // hybrid ranked by utility, no greedy tail
                                    // below VNT_PB_HYBRID_GREEDY_MIN_MS
+  VNT_PB_ARM_PEG_H2 = 600, // the hybridu search built into PEG: root_ranker
+                           // over the chooser, ranked by utility
   VNT_PB_ORDER_K = 16,
   VNT_PB_HYBRID_WIDTH = 48,
   VNT_PB_HYBRID_GREEDY_MIN_MS = 500,
@@ -8602,22 +8605,28 @@ static void vnt_peg_budget_cand_done(int stage_idx, int cand_rank,
 // peg) over only (n_only moves), schedule top_k (NULL = PEG's default),
 // ranked by utility or by win% first. With n_ranked > 0 the first n_ranked
 // keep their order ahead of the rest and the halving stages run live (one
-// candidate at a time). Writes the pick, wall ms,
-// the last completed stage, whether it was partial, how many candidates the
-// first halving stage finished (live only) and when it began (ms after the
-// start; -1 = never).
-static void vnt_peg_budget_pick(
-    const Game *game, int threads, PegPeg1Chooser chooser, void *chooser_ctx,
-    const Move *const *only, int n_only, int n_ranked, const int *top_k,
-    int n_top_k, bool rank_by_utility, double budget_s, Move *best, double *ms,
-    int *stage, bool *partial, int *stage1_done, double *stage1_start_ms) {
+// candidate at a time). ranker (NULL = none) is PegArgs.root_ranker. Writes
+// the pick, wall ms, the last completed stage, whether it was partial, how
+// many candidates the first halving stage finished (live only) and when it
+// began (ms after the start; -1 = never). VNT_PB_MAX_STAGE > 0 caps the
+// halving stages (PegArgs.max_stage), for fixed-work parity checks.
+static void vnt_peg_budget_pick(const Game *game, int threads,
+                                PegPeg1Chooser chooser, void *chooser_ctx,
+                                const Move *const *only, int n_only,
+                                int n_ranked, const int *top_k, int n_top_k,
+                                bool rank_by_utility, PegRootRanker ranker,
+                                void *ranker_ctx, double budget_s, Move *best,
+                                double *ms, int *stage, bool *partial,
+                                int *stage1_done, double *stage1_start_ms) {
   static const int caps[] = {8, 4, 2};
+  const char *max_stage_env = getenv("VNT_PB_MAX_STAGE");
+  const int max_stage = max_stage_env != NULL ? atoi(max_stage_env) : 0;
   ThreadControl *control = thread_control_create();
   thread_control_set_status(control, THREAD_CONTROL_STATUS_STARTED);
   PegPoll *poll = n_ranked > 0 ? peg_poll_create() : NULL;
   VntPegBudgetProgress progress = {0};
   PegArgs args;
-  peg_args_fill(game, control, threads, budget_s, /*max_stage=*/0,
+  peg_args_fill(game, control, threads, budget_s, max_stage,
                 /*greedy_seed_only=*/false, top_k, top_k != NULL ? n_top_k : 0,
                 /*inner_top_k=*/0, PEG_OPP_RATIONAL, /*scenario_stride=*/0,
                 /*nested_enabled=*/true, /*nested_cand_cap=*/0, caps,
@@ -8626,10 +8635,12 @@ static void vnt_peg_budget_pick(
                 /*nested_emptier_ply_cap=*/0, PEG_NESTED_DEFAULT_DEPTH,
                 vnt_best_reply_disabled(), chooser, chooser_ctx, NULL, NULL,
                 /*eval_bag_order=*/NULL, /*eval_bag_order_len=*/0, only, n_only,
-                n_ranked, rank_by_utility, /*protect_moves=*/NULL,
+                n_ranked, rank_by_utility, ranker, ranker_ctx,
+                /*protect_moves=*/NULL,
                 /*n_protect_moves=*/0,
                 /*include_per_scenario=*/false, vnt_peg_budget_stage_start,
-                n_ranked > 0 ? vnt_peg_budget_cand_done : NULL,
+                n_ranked > 0 || ranker != NULL ? vnt_peg_budget_cand_done
+                                               : NULL,
                 /*on_scenario_done=*/NULL, &progress, poll,
                 /*shared_endgame_tt=*/NULL,
                 /*checkpoint=*/NULL, /*resume=*/false, &args);
@@ -8701,12 +8712,39 @@ static int vnt_peg_budget_rank(VntPeg2Chooser *chooser, const Game *root,
   return n;
 }
 
+// PegArgs.root_ranker over the 2PEG chooser: vnt_peg_budget_rank of the
+// root's static top 64. ms is the last call's wall time.
+typedef struct VntPegBudgetRanker {
+  VntPeg2Chooser *chooser;
+  MoveList *pool;
+  double ms;
+} VntPegBudgetRanker;
+
+static int vnt_peg_budget_ranker(const Game *game, void *ctx, Move *moves,
+                                 int max_moves) {
+  VntPegBudgetRanker *ranker = ctx;
+  const int64_t start = ctimer_monotonic_ns();
+  Move candidates[VNT_PEG1_POOL];
+  const Move *order[VNT_PEG1_POOL];
+  int pass_rank, pick_rank;
+  (void)vnt_peg1_pool(game, ranker->pool, candidates, &pass_rank);
+  const int n = vnt_peg_budget_rank(
+      ranker->chooser, game, candidates, order,
+      max_moves < VNT_PEG1_POOL ? max_moves : VNT_PEG1_POOL, &pick_rank);
+  for (int rank = 0; rank < n; rank++) {
+    move_copy(&moves[rank], order[rank]);
+  }
+  ranker->ms = (double)(ctimer_monotonic_ns() - start) / 1e6;
+  return n;
+}
+
 // Matched-budget 2PEG picks (pegbudget/PROTOCOL-ENGINE.txt). Fields:
 // positions prefix (2 tiles in the bag), output prefix, budgets in seconds
 // (comma-separated), 1PEG first, second|-, shortlist, w_spread, scale, 2PEG
 // model, 2PEG first|-, stage N, top K. VNT_PB_THREADS (default 10) threads
 // per PEG solve; VNT_PB_ARMS a subset of
-// "net,peg,pegnet,order,hybrid,hybridu" (default "net,peg,pegnet,order").
+// "net,peg,pegnet,order,hybrid,hybridu,h2peg" (default
+// "net,peg,pegnet,order").
 // Writes PREFIX.pegb.csv: root, code, arm, budget_s, ms, net_ms, stage,
 // partial, stage1_done, s1_ms (when the first halving stage began, -1 = never),
 // quoted move (a peg3oracle picks file). Roots already in the output are
@@ -8743,7 +8781,7 @@ static void vnt_peg_budget(const StringSplitter *fields) {
   StringSplitter *arm_items = split_string(
       arms_env != NULL ? arms_env : "net,peg,pegnet,order", ',', true);
   bool arm_net = false, arm_peg = false, arm_peg_net = false, arm_order = false,
-       arm_hybrid = false, arm_hybrid_utility = false;
+       arm_hybrid = false, arm_hybrid_utility = false, arm_peg_h2 = false;
   for (int idx = 0; idx < string_splitter_get_number_of_items(arm_items);
        idx++) {
     const char *item = string_splitter_get_item(arm_items, idx);
@@ -8753,6 +8791,7 @@ static void vnt_peg_budget(const StringSplitter *fields) {
     arm_order |= strings_equal(item, "order");
     arm_hybrid |= strings_equal(item, "hybrid");
     arm_hybrid_utility |= strings_equal(item, "hybridu");
+    arm_peg_h2 |= strings_equal(item, "h2peg");
   }
   string_splitter_destroy(arm_items);
   char *out_path = get_formatted_string("%s.pegb.csv", prefix);
@@ -8799,6 +8838,8 @@ static void vnt_peg_budget(const StringSplitter *fields) {
       atoi(string_splitter_get_item(fields, 12)), root, 1);
   net->cache = true;
   MoveList *pool = move_list_create(VNT_PEG1_POOL + 1);
+  VntPegBudgetRanker ranker = {.chooser = chooser,
+                               .pool = move_list_create(VNT_PEG1_POOL + 1)};
   MoveList *wide = move_list_create(VNT_PEG2_WIDE_CAP);
   Move *wide_moves = malloc_or_die(sizeof(Move) * VNT_PEG2_WIDE_CAP);
   const Move **placements = malloc_or_die(sizeof(Move *) * VNT_PEG2_WIDE_CAP);
@@ -8856,17 +8897,27 @@ static void vnt_peg_budget(const StringSplitter *fields) {
     static const int order_top_k[] = {VNT_PB_ORDER_K, 8, 4, 2};
     static const int hybrid_top_k[] = {VNT_PB_HYBRID_WIDTH, 16, 8, 4, 2};
     for (int bud = 0; bud < n_budgets; bud++) {
-      for (int arm = 0; arm < 5; arm++) {
+      for (int arm = 0; arm < 6; arm++) {
         if ((arm == 0 && !arm_peg) || (arm == 1 && !arm_peg_net) ||
             (arm == 2 && !arm_order) || (arm == 3 && !arm_hybrid) ||
-            (arm == 4 && !arm_hybrid_utility)) {
+            (arm == 4 && !arm_hybrid_utility) || (arm == 5 && !arm_peg_h2)) {
           continue;
         }
         double ms = 0, net_ms = 0, stage1_start_ms = -1;
         int stage = 0, stage1_done = 0;
         bool partial = false;
         vnt_peg_net_reset(net);
-        if (arm >= 2) {
+        if (arm == 5) {
+          // PEG asks the ranker itself; the budget covers its time.
+          ranker.ms = 0;
+          vnt_peg_budget_pick(root, threads, vnt_peg_net_chooser, net,
+                              placements, n_placements, /*n_ranked=*/0,
+                              /*top_k=*/NULL, /*n_top_k=*/0,
+                              /*rank_by_utility=*/true, vnt_peg_budget_ranker,
+                              &ranker, budgets[bud], &pick, &ms, &stage,
+                              &partial, &stage1_done, &stage1_start_ms);
+          net_ms = ranker.ms;
+        } else if (arm >= 2) {
           const Move *order[VNT_PEG1_POOL];
           int pick_rank;
           const int64_t start = ctimer_monotonic_ns();
@@ -8903,26 +8954,27 @@ static void vnt_peg_budget(const StringSplitter *fields) {
                 n_order, greedy_tail ? hybrid_top_k : order_top_k,
                 greedy_tail ? (int)(sizeof(hybrid_top_k) / sizeof(int))
                             : (int)(sizeof(order_top_k) / sizeof(int)),
-                arm == 4, left, &pick, &ms, &stage, &partial, &stage1_done,
-                &stage1_start_ms);
+                arm == 4, /*ranker=*/NULL, /*ranker_ctx=*/NULL, left, &pick,
+                &ms, &stage, &partial, &stage1_done, &stage1_start_ms);
             if (stage1_start_ms >= 0) {
               stage1_start_ms += net_ms;
             }
           }
           ms += net_ms;
         } else {
-          vnt_peg_budget_pick(
-              root, threads, arm == 1 ? vnt_peg_net_chooser : NULL,
-              arm == 1 ? net : NULL, placements, n_placements,
-              /*n_ranked=*/0, /*top_k=*/NULL, /*n_top_k=*/0,
-              /*rank_by_utility=*/false, budgets[bud], &pick, &ms, &stage,
-              &partial, &stage1_done, &stage1_start_ms);
+          vnt_peg_budget_pick(root, threads,
+                              arm == 1 ? vnt_peg_net_chooser : NULL,
+                              arm == 1 ? net : NULL, placements, n_placements,
+                              /*n_ranked=*/0, /*top_k=*/NULL, /*n_top_k=*/0,
+                              /*rank_by_utility=*/false, /*ranker=*/NULL,
+                              /*ranker_ctx=*/NULL, budgets[bud], &pick, &ms,
+                              &stage, &partial, &stage1_done, &stage1_start_ms);
         }
-        static const char *const arm_names[] = {"peg", "pegnet", "order",
-                                                "hybrid", "hybridu"};
-        static const int arm_codes[] = {VNT_PB_ARM_PEG, VNT_PB_ARM_PEG_NET,
-                                        VNT_PB_ARM_NET_ORDER, VNT_PB_ARM_HYBRID,
-                                        VNT_PB_ARM_HYBRID_UTILITY};
+        static const char *const arm_names[] = {"peg",    "pegnet",  "order",
+                                                "hybrid", "hybridu", "h2peg"};
+        static const int arm_codes[] = {
+            VNT_PB_ARM_PEG,    VNT_PB_ARM_PEG_NET,        VNT_PB_ARM_NET_ORDER,
+            VNT_PB_ARM_HYBRID, VNT_PB_ARM_HYBRID_UTILITY, VNT_PB_ARM_PEG_H2};
         string_builder_clear(name);
         string_builder_add_move(name, game_get_board(root), &pick,
                                 game_get_ld(root), false);
@@ -8942,6 +8994,7 @@ static void vnt_peg_budget(const StringSplitter *fields) {
   free(placements);
   free(wide_moves);
   move_list_destroy(wide);
+  move_list_destroy(ranker.pool);
   move_list_destroy(pool);
   vnt_peg2_chooser_destroy(chooser);
   vnt_peg_net_destroy(net);

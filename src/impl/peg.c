@@ -63,6 +63,12 @@
 // PegArgs.stage_top_k.
 static const int PEG_DEFAULT_HALVING_COUNTS[] = {32, 16, 8, 4, 2};
 
+// Default schedules with a root ranker (PegArgs.root_ranker): the ranker's
+// PEG_RANKER_HEAD moves and the best 32 of the rest by stage 0, then halving;
+// or, below PEG_RANKER_TAIL_MIN_MS, the ranker's moves alone.
+static const int PEG_RANKER_WIDE_COUNTS[] = {48, 16, 8, 4, 2};
+static const int PEG_RANKER_HEAD_COUNTS[] = {PEG_RANKER_HEAD, 8, 4, 2};
+
 // Solve-scoped cache mapping a post-candidate board signature to its
 // per-candidate pruned KWG. At an emptier (0-in-bag) endgame leaf the pruned
 // KWG depends only on the post-cand board and the union of both racks (all
@@ -3257,14 +3263,43 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
   }
   game_gen_all_cross_sets(prepared_base);
 
+  // Ranker-guided root search (PegArgs.root_ranker): the ranker's moves head
+  // the candidate list; the rest follow only with a budget of at least
+  // PEG_RANKER_TAIL_MIN_MS, or none.
+  Move *ranker_moves = NULL;
+  int n_ranker_moves = 0;
+  if (args->root_ranker != NULL) {
+    ranker_moves = malloc_or_die(PEG_RANKER_HEAD * sizeof(Move));
+    n_ranker_moves = args->root_ranker(game, args->root_ranker_ctx,
+                                       ranker_moves, PEG_RANKER_HEAD);
+    if (n_ranker_moves > PEG_RANKER_HEAD) {
+      n_ranker_moves = PEG_RANKER_HEAD;
+    }
+  }
+  const bool ranked_root = n_ranker_moves > 0;
+  const bool ranker_tail =
+      ranked_root &&
+      (budget <= 0.0 || budget * 1000.0 >= PEG_RANKER_TAIL_MIN_MS);
+
   // Per-stage halving counts: the caller override, else the built-in default
-  // schedule. The number of stages is just the schedule length — there is no
-  // fixed cap, so a caller may pass a longer stage_top_k.
-  const int default_num_stages = (int)(sizeof(PEG_DEFAULT_HALVING_COUNTS) /
-                                       sizeof(PEG_DEFAULT_HALVING_COUNTS[0]));
+  // schedule (the ranker's, with a root ranker). The number of stages is just
+  // the schedule length — there is no fixed cap, so a caller may pass a longer
+  // stage_top_k.
+  const int *default_counts = PEG_DEFAULT_HALVING_COUNTS;
+  int default_num_stages = (int)(sizeof(PEG_DEFAULT_HALVING_COUNTS) /
+                                 sizeof(PEG_DEFAULT_HALVING_COUNTS[0]));
+  if (ranker_tail) {
+    default_counts = PEG_RANKER_WIDE_COUNTS;
+    default_num_stages = (int)(sizeof(PEG_RANKER_WIDE_COUNTS) /
+                               sizeof(PEG_RANKER_WIDE_COUNTS[0]));
+  } else if (ranked_root) {
+    default_counts = PEG_RANKER_HEAD_COUNTS;
+    default_num_stages = (int)(sizeof(PEG_RANKER_HEAD_COUNTS) /
+                               sizeof(PEG_RANKER_HEAD_COUNTS[0]));
+  }
   const int *counts = (args->stage_top_k && args->num_stages > 0)
                           ? args->stage_top_k
-                          : PEG_DEFAULT_HALVING_COUNTS;
+                          : default_counts;
   int num_stages = (args->stage_top_k && args->num_stages > 0)
                        ? args->num_stages
                        : default_num_stages;
@@ -3402,11 +3437,14 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
 
   // Candidate set: either the caller-supplied "only solve" list (used as-is),
   // or the full generated, equity-sorted move list. Stage 0 re-ranks by win%
-  // regardless, so the only-solve input order does not matter.
+  // regardless, so the only-solve input order does not matter. A root ranker's
+  // moves go ahead of this base set, which is needed only with ranker_tail.
   MoveList *cand_ml = NULL;
-  int n_cands;
-  if (args->n_only_moves > 0) {
-    n_cands = args->n_only_moves;
+  int n_base;
+  if (ranked_root && !ranker_tail) {
+    n_base = 0;
+  } else if (args->n_only_moves > 0) {
+    n_base = args->n_only_moves;
   } else {
     cand_ml = move_list_create(PEG_CAND_LIST_CAP);
     const MoveGenArgs gen_args = {
@@ -3421,8 +3459,10 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
         .initial_tiles_bv = 0,
     };
     generate_moves(&gen_args);
-    n_cands = move_list_get_count(cand_ml);
+    n_base = move_list_get_count(cand_ml);
   }
+  // At most: the ranker's moves that duplicate base moves are counted once.
+  int n_cands = n_ranker_moves + n_base;
 
   if (n_cands > 0) {
     int (*const rank_cmp)(const void *, const void *) =
@@ -3445,14 +3485,22 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
         .stage_idx = 0,
     };
 
-    // Stage 0: greedy evaluation of every candidate.
-    if (args->n_only_moves > 0) {
-      for (int cand_idx = 0; cand_idx < n_cands; cand_idx++) {
-        moves[cand_idx] = args->only_moves[cand_idx];
+    // Stage 0: greedy evaluation of every candidate: a root ranker's moves
+    // first, then each base move the ranker did not list.
+    n_cands = 0;
+    for (int head_idx = 0; head_idx < n_ranker_moves; head_idx++) {
+      moves[n_cands++] = &ranker_moves[head_idx];
+    }
+    for (int base_idx = 0; base_idx < n_base; base_idx++) {
+      const Move *move = args->n_only_moves > 0
+                             ? args->only_moves[base_idx]
+                             : move_list_get_move(cand_ml, base_idx);
+      bool listed = false;
+      for (int head_idx = 0; head_idx < n_ranker_moves && !listed; head_idx++) {
+        listed = peg_move_eq(move, &ranker_moves[head_idx]);
       }
-    } else {
-      for (int cand_idx = 0; cand_idx < n_cands; cand_idx++) {
-        moves[cand_idx] = move_list_get_move(cand_ml, cand_idx);
+      if (!listed) {
+        moves[n_cands++] = move;
       }
     }
     // See peg_force_protected_to_front: give protected candidates the best
@@ -3473,10 +3521,14 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
                         scenario_stride, deadline_ns, args->thread_control,
                         args->poll, &progress, args->eval_bag_order,
                         args->eval_bag_order_len, ranked, args->checkpoint);
-    if (args->n_ranked_only_moves > 0 && args->n_only_moves > 0) {
-      const int n_head = args->n_ranked_only_moves < n_cands
-                             ? args->n_ranked_only_moves
-                             : n_cands;
+    int n_head = 0;
+    if (ranked_root) {
+      n_head = n_ranker_moves;
+    } else if (args->n_only_moves > 0) {
+      n_head = args->n_ranked_only_moves < n_cands ? args->n_ranked_only_moves
+                                                   : n_cands;
+    }
+    if (n_head > 0) {
       if (n_head < n_cands) {
         stable_sort(ranked + n_head, (size_t)(n_cands - n_head),
                     sizeof(PegRankedCand), rank_cmp);
@@ -3591,12 +3643,15 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
           args->include_per_scenario
               ? malloc_or_die((size_t)eval_count * sizeof(PegCandOutcomes))
               : NULL;
-      if (args->poll != NULL || args->checkpoint != NULL) {
+      if (args->poll != NULL || args->checkpoint != NULL ||
+          (ranked_root && deadline_ns != 0)) {
         // Live mode: evaluate one candidate at a time so each completion
         // updates the pollable leaderboard (for `sta`/`shpeg`) and so we can
         // record each candidate's own wall-clock time. Each candidate still
         // gets the whole pool for its scenarios. Greedy stage 0 is not routed
-        // here.
+        // here. A budgeted ranker-guided solve runs here too, so a budget cut
+        // keeps a prefix of the ranking rather than whichever candidates
+        // happened to finish.
         // Publish the whole stage's moves so a live renderer can fix the move
         // column width up front (moves[] aliases ranked[].move for [0,eval)).
         peg_poll_set_stage_moves(args->poll, moves, eval_count);
@@ -3895,6 +3950,7 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
   if (cand_ml) {
     move_list_destroy(cand_ml);
   }
+  free(ranker_moves);
   for (int worker_idx = 0; worker_idx < n_scratch; worker_idx++) {
     move_list_destroy(workers[worker_idx].playout_ml);
     free(workers[worker_idx].reply_cache);

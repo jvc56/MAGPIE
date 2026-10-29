@@ -30,6 +30,15 @@ enum {
   PEG_NESTED_DEFAULT_DEPTH = 1,
 };
 
+// Ranker-guided root search (PegArgs.root_ranker): how many of the ranker's
+// moves lead the candidate list, and the time budget below which they are the
+// only candidates (below it, stage 0's greedy pass over the rest of the moves
+// costs more than it finds).
+enum {
+  PEG_RANKER_HEAD = 16,
+  PEG_RANKER_TAIL_MIN_MS = 500,
+};
+
 // Solver internals: fixed capacities and depth ceilings for peg.c.
 enum {
   // Candidate move-list capacity for the root generate_moves.
