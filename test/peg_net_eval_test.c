@@ -3,6 +3,7 @@
 #include "../src/compat/cpthread.h"
 #include "../src/compat/ctime.h"
 #include "../src/compat/endian_io.h"
+#include "../src/compat/memory_info.h"
 #include "../src/def/bai_defs.h"
 #include "../src/def/game_defs.h"
 #include "../src/def/game_history_defs.h"
@@ -22,6 +23,7 @@
 #include "../src/ent/sim_results.h"
 #include "../src/ent/stats.h"
 #include "../src/ent/thread_control.h"
+#include "../src/ent/transposition_table.h"
 #include "../src/impl/cgp.h"
 #include "../src/impl/config.h"
 #include "../src/impl/endgame.h"
@@ -1944,6 +1946,12 @@ void peg3_exact_eval_mode(const StringSplitter *fields) {
 // Per-worker fixed-depth endgame search for rollouts (the bag is empty, so
 // both racks are known in the rollout's world): fixed_depth_endgame_move's
 // search with each worker's solver context kept between calls.
+// PEG_SIM_EG_TT: the searches' transposition table. "none" (the default):
+// every search starts empty; "worker": one table per worker, kept across that
+// worker's searches; "shared": one table for every worker. Tables hold
+// 2^PEG_SIM_EG_TT_POWER entries (default 26 shared, 24 per worker) and are
+// cleared before each sim (one root and arm). A kept table makes a rollout's
+// result depend on the searches before it, so runs are not reproducible.
 typedef struct PegSimRolloutEndgame {
   int plies;
   int workers;
@@ -1952,6 +1960,8 @@ typedef struct PegSimRolloutEndgame {
   ThreadControl **control;
   int64_t *calls;
   double *ms;
+  int n_tt;
+  TranspositionTable **tt;
 } PegSimRolloutEndgame;
 
 static PegSimRolloutEndgame peg_sim_endgame_create(int plies, int workers) {
@@ -1971,6 +1981,38 @@ static PegSimRolloutEndgame peg_sim_endgame_create(int plies, int workers) {
   return endgame;
 }
 
+static void peg_sim_endgame_set_tt(PegSimRolloutEndgame *endgame) {
+  const char *mode = getenv("PEG_SIM_EG_TT");
+  if (mode == NULL || strings_equal(mode, "none")) {
+    return;
+  }
+  const bool shared = strings_equal(mode, "shared");
+  if (!shared && !strings_equal(mode, "worker")) {
+    log_fatal("PEG_SIM_EG_TT must be none, worker or shared");
+  }
+  const char *power_env = getenv("PEG_SIM_EG_TT_POWER");
+  const int power = power_env != NULL ? atoi(power_env) : shared ? 26 : 24;
+  if (power < TT_MIN_SIZE_POWER || power > 32) {
+    log_fatal("PEG_SIM_EG_TT_POWER must be %d..32", TT_MIN_SIZE_POWER);
+  }
+  // transposition_table_create takes a fraction of the search memory budget
+  // and rounds the entry count down to a power of two.
+  const double fraction = ldexp(1.0, power) * TTENTRY_SIZE_BYTES * 1.0001 /
+                          (double)get_search_memory_budget_base();
+  endgame->n_tt = shared ? 1 : endgame->workers;
+  endgame->tt =
+      malloc_or_die(sizeof(TranspositionTable *) * (size_t)endgame->n_tt);
+  for (int idx = 0; idx < endgame->n_tt; idx++) {
+    endgame->tt[idx] = transposition_table_create(fraction);
+  }
+}
+
+static void peg_sim_endgame_clear_tt(PegSimRolloutEndgame *endgame) {
+  for (int idx = 0; idx < endgame->n_tt; idx++) {
+    transposition_table_reset(endgame->tt[idx]);
+  }
+}
+
 static void peg_sim_endgame_destroy(PegSimRolloutEndgame *endgame) {
   for (int worker = 0; worker < endgame->workers; worker++) {
     if (endgame->ctx[worker] != NULL) {
@@ -1984,6 +2026,10 @@ static void peg_sim_endgame_destroy(PegSimRolloutEndgame *endgame) {
   free(endgame->control);
   free(endgame->calls);
   free(endgame->ms);
+  for (int idx = 0; idx < endgame->n_tt; idx++) {
+    transposition_table_destroy(endgame->tt[idx]);
+  }
+  free(endgame->tt);
 }
 
 static void peg_sim_endgame_move(PegSimRolloutEndgame *endgame, int worker,
@@ -2001,6 +2047,9 @@ static void peg_sim_endgame_move(PegSimRolloutEndgame *endgame, int worker,
       .incremental_movegen = true,
       .enable_pv_display = true,
       .dual_lexicon_mode = DUAL_LEXICON_MODE_IGNORANT,
+      .shared_tt = endgame->n_tt == 0   ? NULL
+                   : endgame->n_tt == 1 ? endgame->tt[0]
+                                        : endgame->tt[worker],
   };
   EndgameResults *results = endgame->results[worker];
   endgame_solve_inline(&endgame->ctx[worker], &args, results);
@@ -2216,6 +2265,7 @@ void peg_sim_mode(const StringSplitter *fields) {
   net->check = check_env != NULL && atoi(check_env) != 0;
   chooser->check = net->check;
   PegSimRolloutEndgame endgame = peg_sim_endgame_create(eg_plies, threads);
+  peg_sim_endgame_set_tt(&endgame);
   PegSimRolloutPolicy hooks[PEG_SIM_MAX_ARMS] = {
       {.nets = false},
       {.nets = true, .net = net, .chooser = chooser},
@@ -2276,6 +2326,7 @@ void peg_sim_mode(const StringSplitter *fields) {
       }
       peg1_net_chooser_reset(net);
       peg2_net_chooser_reset(chooser);
+      peg_sim_endgame_clear_tt(&endgame);
       trace.root = root_id;
       trace.arm = arm;
       const bool timed = arm == 2 || arm == 5;
