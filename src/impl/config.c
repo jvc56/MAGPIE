@@ -204,6 +204,7 @@ typedef enum {
   ARG_TOKEN_SIM_WITH_INFERENCE,
   ARG_TOKEN_SIM_MARGIN_FORECAST,
   ARG_TOKEN_SIM_BAG_CYCLE,
+  ARG_TOKEN_SIM_TEMPO_CANDIDATES,
   ARG_TOKEN_USE_HEAT_MAP,
   ARG_TOKEN_WRITE_BUFFER_SIZE,
   ARG_TOKEN_HUMAN_READABLE,
@@ -272,6 +273,8 @@ typedef enum {
   ARG_TOKEN_P2_SIM_MARGIN_FORECAST,
   ARG_TOKEN_P1_SIM_BAG_CYCLE,
   ARG_TOKEN_P2_SIM_BAG_CYCLE,
+  ARG_TOKEN_P1_SIM_TEMPO_CANDIDATES,
+  ARG_TOKEN_P2_SIM_TEMPO_CANDIDATES,
   ARG_TOKEN_P1_TIME_LIMIT,
   ARG_TOKEN_P2_TIME_LIMIT,
   ARG_TOKEN_MOVE_BUDGET,
@@ -495,6 +498,7 @@ struct Config {
   bool sim_with_inference;
   bool sim_margin_forecast;
   bool sim_bag_cycle;
+  bool sim_tempo_candidates;
   bool use_heat_map;
   bool print_boards;
   // A config contribute's tasks run in (config_create_for_contribute): its
@@ -536,6 +540,8 @@ struct Config {
   bool p2_sim_margin_forecast;
   bool p1_sim_bag_cycle;
   bool p2_sim_bag_cycle;
+  bool p1_sim_tempo_candidates;
+  bool p2_sim_tempo_candidates;
   // Set when the most recent sim ran inference internally and it completed
   // (not interrupted). Separate from inference_results's own valid flag,
   // which a sim-driven inference deliberately does not set so that an
@@ -1208,6 +1214,16 @@ bool config_get_sim_bag_cycle(const Config *config) {
   return config->sim_bag_cycle;
 }
 
+bool config_get_player_sim_tempo_candidates(const Config *config,
+                                            int player_index) {
+  return player_index == 0 ? config->p1_sim_tempo_candidates
+                           : config->p2_sim_tempo_candidates;
+}
+
+bool config_get_sim_tempo_candidates(const Config *config) {
+  return config->sim_tempo_candidates;
+}
+
 int config_get_player_num_plays(const Config *config, int player_index) {
   return player_index == 0 ? config->p1_num_plays : config->p2_num_plays;
 }
@@ -1562,6 +1578,56 @@ static void add_player_solver_help_arg(arg_token_t arg_token,
 // The contribute and convert commands' help, apart from
 // add_help_arg_to_string_builder to keep it under the function-size limit:
 // each fills usages and examples and returns the text.
+// The help for the true-or-false simulation options that change how a
+// simulation picks or scores its plays, and their per-player forms.
+static const char *sim_option_help(int token, const char **usages,
+                                   const char **examples) {
+  usages[0] = "<true_or_false>";
+  switch (token) {
+  case ARG_TOKEN_SIM_MARGIN_FORECAST:
+    examples[0] = "true";
+    examples[1] = "false";
+    return "Specifies whether simulations project each nonterminal "
+           "horizon's spread to the end of the game with the win "
+           "percentage table's expected swing for that bag and rack "
+           "state. The projection feeds the equity and the spread term "
+           "of the utility blend.";
+  case ARG_TOKEN_SIM_BAG_CYCLE:
+    examples[0] = "true";
+    examples[1] = "false";
+    return "Specifies whether each simulation sample plays every rotation of "
+           "its shuffled bag by the rack size, until the rotations wrap "
+           "around, and counts their mean as one sample. Every unseen tile "
+           "starts on the opponent's rack once per shuffle. Iterations and "
+           "minimum iterations still count rollouts, and every play gets at "
+           "least two cycles. On by default.";
+  case ARG_TOKEN_SIM_TEMPO_CANDIDATES:
+    examples[0] = "true";
+    examples[1] = "false";
+    return "Specifies whether a player's simulations during autoplay "
+           "always include a pass, the best exchange, the exchange that "
+           "keeps only the one-point tiles and blanks, and the best one- "
+           "and two-tile plays among their candidates, besides the best "
+           "plays. Where nearly every turn is a bingo, as in woadwage, "
+           "these moves decide who gets the last turn. Off by default.";
+  case ARG_TOKEN_P1_SIM_MARGIN_FORECAST:
+  case ARG_TOKEN_P2_SIM_MARGIN_FORECAST:
+    return "Specifies whether simulation projects the final margin (see "
+           "smargin) for player 1 or 2 during autoplay.";
+  case ARG_TOKEN_P1_SIM_BAG_CYCLE:
+  case ARG_TOKEN_P2_SIM_BAG_CYCLE:
+    return "Specifies whether simulation cycles each sample's bag through "
+           "its rotations (see sbagcycle) for player 1 or 2 during "
+           "autoplay.";
+  case ARG_TOKEN_P1_SIM_TEMPO_CANDIDATES:
+  case ARG_TOKEN_P2_SIM_TEMPO_CANDIDATES:
+    return "Specifies whether simulation adds the tempo candidates (see "
+           "stempo) for player 1 or 2 during autoplay.";
+  default:
+    return NULL;
+  }
+}
+
 static const char *contribute_help(const char **usages, const char **examples) {
   usages[0] = "[<settings_path>]";
   examples[0] = "";
@@ -2509,25 +2575,15 @@ void add_help_arg_to_string_builder(const Config *config, int token,
              "when simulating.";
       break;
     case ARG_TOKEN_SIM_MARGIN_FORECAST:
-      usages[0] = "<true_or_false>";
-      examples[0] = "true";
-      examples[1] = "false";
-      text = "Specifies whether simulations project each nonterminal "
-             "horizon's spread to the end of the game with the win "
-             "percentage table's expected swing for that bag and rack "
-             "state. The projection feeds the equity and the spread term "
-             "of the utility blend.";
-      break;
     case ARG_TOKEN_SIM_BAG_CYCLE:
-      usages[0] = "<true_or_false>";
-      examples[0] = "true";
-      examples[1] = "false";
-      text = "Specifies whether each simulation sample plays every rotation of "
-             "its shuffled bag by the rack size, until the rotations wrap "
-             "around, and counts their mean as one sample. Every unseen tile "
-             "starts on the opponent's rack once per shuffle. Iterations and "
-             "minimum iterations still count rollouts, and every play gets at "
-             "least two cycles. On by default.";
+    case ARG_TOKEN_SIM_TEMPO_CANDIDATES:
+    case ARG_TOKEN_P1_SIM_MARGIN_FORECAST:
+    case ARG_TOKEN_P2_SIM_MARGIN_FORECAST:
+    case ARG_TOKEN_P1_SIM_BAG_CYCLE:
+    case ARG_TOKEN_P2_SIM_BAG_CYCLE:
+    case ARG_TOKEN_P1_SIM_TEMPO_CANDIDATES:
+    case ARG_TOKEN_P2_SIM_TEMPO_CANDIDATES:
+      text = sim_option_help(token, usages, examples);
       break;
     case ARG_TOKEN_USE_HEAT_MAP:
       usages[0] = "<true_or_false>";
@@ -2815,12 +2871,6 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       text = "Specifies whether to use inference during simulation for player "
              "1 or 2 during autoplay.";
       break;
-    case ARG_TOKEN_P1_SIM_MARGIN_FORECAST:
-    case ARG_TOKEN_P2_SIM_MARGIN_FORECAST:
-      usages[0] = "<true_or_false>";
-      text = "Specifies whether simulation projects the final margin (see "
-             "smargin) for player 1 or 2 during autoplay.";
-      break;
     case ARG_TOKEN_MOVE_BUDGET:
     case ARG_TOKEN_P1_MOVE_BUDGET:
     case ARG_TOKEN_P2_MOVE_BUDGET:
@@ -2835,13 +2885,6 @@ void add_help_arg_to_string_builder(const Config *config, int token,
              "is the same work on any machine; it does not make games repeat "
              "exactly on several threads, and a move may run a little past "
              "it. 0, the default, is no budget.";
-      break;
-    case ARG_TOKEN_P1_SIM_BAG_CYCLE:
-    case ARG_TOKEN_P2_SIM_BAG_CYCLE:
-      usages[0] = "<true_or_false>";
-      text = "Specifies whether simulation cycles each sample's bag through "
-             "its rotations (see sbagcycle) for player 1 or 2 during "
-             "autoplay.";
       break;
     case ARG_TOKEN_P1_TIME_LIMIT:
     case ARG_TOKEN_P2_TIME_LIMIT:
@@ -3181,6 +3224,7 @@ char *impl_help(Config *config, ErrorStack *error_stack) {
         ARG_TOKEN_SIM_WITH_INFERENCE,      /* sinfer */
         ARG_TOKEN_SIM_MARGIN_FORECAST,     /* smargin */
         ARG_TOKEN_SIM_BAG_CYCLE,           /* sbagcycle */
+        ARG_TOKEN_SIM_TEMPO_CANDIDATES,    /* stempo */
         ARG_TOKEN_USE_SMALL_PLAYS,         /* sp */
         ARG_TOKEN_SAMPLING_RULE,           /* sr */
         ARG_TOKEN_P1_STOP_COND_PCT,        /* sc1 */
@@ -3192,6 +3236,8 @@ char *impl_help(Config *config, ErrorStack *error_stack) {
         ARG_TOKEN_P2_SIM_MARGIN_FORECAST,  /* sm2 */
         ARG_TOKEN_P1_SIM_BAG_CYCLE,        /* sbc1 */
         ARG_TOKEN_P2_SIM_BAG_CYCLE,        /* sbc2 */
+        ARG_TOKEN_P1_SIM_TEMPO_CANDIDATES, /* stc1 */
+        ARG_TOKEN_P2_SIM_TEMPO_CANDIDATES, /* stc2 */
         ARG_TOKEN_P1_SAMPLING_RULE,        /* sa1 */
         ARG_TOKEN_P2_SAMPLING_RULE,        /* sa2 */
         ARG_TOKEN_P1_THRESHOLD,            /* th1 */
@@ -3850,6 +3896,7 @@ void config_fill_sim_args(const Config *config, Rack *known_opp_rack,
       config->utility_w_spread, config->utility_spread_scale,
       config->sim_margin_forecast, &inference_args, sim_args);
   sim_args->bag_cycle = config->sim_bag_cycle;
+  sim_args->tempo_candidates = config->sim_tempo_candidates;
   if (config->game) {
     config_set_sim_args_pat_rollout(
         config, game_get_player_on_turn_index(config->game), sim_args);
@@ -5196,6 +5243,8 @@ void config_fill_autoplay_args(const Config *config,
       config->p1_utility_spread_scale, config->p1_sim_margin_forecast,
       &p1_inference_args, &autoplay_args->p1_sim_args);
   autoplay_args->p1_sim_args.bag_cycle = config->p1_sim_bag_cycle;
+  autoplay_args->p1_sim_args.tempo_candidates =
+      config->p1_sim_tempo_candidates;
 
   sim_args_fill(
       config->p2_sim_plies, /*move_list=*/NULL, config->p2_num_plays,
@@ -5211,6 +5260,8 @@ void config_fill_autoplay_args(const Config *config,
       config->p2_utility_spread_scale, config->p2_sim_margin_forecast,
       &p2_inference_args, &autoplay_args->p2_sim_args);
   autoplay_args->p2_sim_args.bag_cycle = config->p2_sim_bag_cycle;
+  autoplay_args->p2_sim_args.tempo_candidates =
+      config->p2_sim_tempo_candidates;
 
   config_set_sim_args_pat_rollout(config, 0, &autoplay_args->p1_sim_args);
   config_set_sim_args_pat_rollout(config, 1, &autoplay_args->p2_sim_args);
@@ -10308,6 +10359,10 @@ static void config_contribute_reset_player_settings(Config *config,
   // (-sbc1/-sbc2), and it changes how a simulation samples, so a
   // contributor's -sbagcycle false must not govern how this player plays.
   *(p1 ? &config->p1_sim_bag_cycle : &config->p2_sim_bag_cycle) = true;
+  // Tempo candidates off, the build's default: birdtest has no field for
+  // them (-stc1/-stc2), and they change which plays a simulation weighs.
+  *(p1 ? &config->p1_sim_tempo_candidates
+       : &config->p2_sim_tempo_candidates) = false;
   // Solving off: a request turns it on per player, and a contributor's
   // -eplies1 must not.
   autoplay_solver_settings_set_defaults(&config->solver_settings[p1 ? 0 : 1]);
@@ -10854,6 +10909,7 @@ void config_contribute_reset_shared_settings(Config *config) {
   // config_contribute_reset_player_settings gives.
   config->sim_margin_forecast = false;
   config->sim_bag_cycle = true;
+  config->sim_tempo_candidates = false;
 }
 
 // Applies the run-wide settings a task request states, on top of
@@ -12187,6 +12243,29 @@ static void config_load_sim_bag_cycle(Config *config, ErrorStack *error_stack) {
                    &config->p2_sim_bag_cycle, error_stack);
 }
 
+// Assumes all args are parsed and correctly set in pargs.
+// Loads -stempo and the per-player -stc1 and -stc2, which default to it.
+static void config_load_sim_tempo_candidates(Config *config,
+                                             ErrorStack *error_stack) {
+  config_load_bool(config, ARG_TOKEN_SIM_TEMPO_CANDIDATES,
+                   &config->sim_tempo_candidates, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  if (config_get_parg_value(config, ARG_TOKEN_SIM_TEMPO_CANDIDATES, 0) !=
+      NULL) {
+    config->p1_sim_tempo_candidates = config->sim_tempo_candidates;
+    config->p2_sim_tempo_candidates = config->sim_tempo_candidates;
+  }
+  config_load_bool(config, ARG_TOKEN_P1_SIM_TEMPO_CANDIDATES,
+                   &config->p1_sim_tempo_candidates, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  config_load_bool(config, ARG_TOKEN_P2_SIM_TEMPO_CANDIDATES,
+                   &config->p2_sim_tempo_candidates, error_stack);
+}
+
 void config_load_data(Config *config, ErrorStack *error_stack) {
   const char *new_path = config_get_parg_value(config, ARG_TOKEN_DATA_PATH, 0);
   if (new_path) {
@@ -12897,6 +12976,11 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
   }
 
   config_load_sim_bag_cycle(config, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
+  config_load_sim_tempo_candidates(config, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
@@ -14708,6 +14792,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_SIM_WITH_INFERENCE, "sinfer", 1, 1);
   arg(ARG_TOKEN_SIM_MARGIN_FORECAST, "smargin", 1, 1);
   arg(ARG_TOKEN_SIM_BAG_CYCLE, "sbagcycle", 1, 1);
+  arg(ARG_TOKEN_SIM_TEMPO_CANDIDATES, "stempo", 1, 1);
   arg(ARG_TOKEN_USE_HEAT_MAP, "useheatmap", 1, 1);
   arg(ARG_TOKEN_HUMAN_READABLE, "hr", 1, 1);
   arg(ARG_TOKEN_SHOW_MISTAKES, "mistakes", 1, 1);
@@ -14747,6 +14832,8 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_P2_SIM_MARGIN_FORECAST, "sm2", 1, 1);
   arg(ARG_TOKEN_P1_SIM_BAG_CYCLE, "sbc1", 1, 1);
   arg(ARG_TOKEN_P2_SIM_BAG_CYCLE, "sbc2", 1, 1);
+  arg(ARG_TOKEN_P1_SIM_TEMPO_CANDIDATES, "stc1", 1, 1);
+  arg(ARG_TOKEN_P2_SIM_TEMPO_CANDIDATES, "stc2", 1, 1);
   arg(ARG_TOKEN_P1_TIME_LIMIT, "tl1", 1, 1);
   arg(ARG_TOKEN_P2_TIME_LIMIT, "tl2", 1, 1);
   arg(ARG_TOKEN_MOVE_BUDGET, "movebudget", 1, 1);
@@ -14880,6 +14967,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->pat_label_plies = 1;
   config->sim_margin_forecast = false;
   config->sim_bag_cycle = true;
+  config->sim_tempo_candidates = false;
   config->p1_sim_plies = 0;
   config->p2_sim_plies = 0;
   config->p1_num_plays = config->num_plays;
@@ -14896,6 +14984,8 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->p2_sim_margin_forecast = config->sim_margin_forecast;
   config->p1_sim_bag_cycle = config->sim_bag_cycle;
   config->p2_sim_bag_cycle = config->sim_bag_cycle;
+  config->p1_sim_tempo_candidates = config->sim_tempo_candidates;
+  config->p2_sim_tempo_candidates = config->sim_tempo_candidates;
   config->p1_time_limit_seconds = config->time_limit_seconds;
   config->p2_time_limit_seconds = config->time_limit_seconds;
   config->p1_play_chooser_time_ms = -1.0;
@@ -15618,6 +15708,18 @@ void config_add_settings_to_string_builder(const Config *config,
     case ARG_TOKEN_P2_SIM_BAG_CYCLE:
       config_add_bool_setting_to_string_builder(config, sb, arg_token,
                                                 config->p2_sim_bag_cycle);
+      break;
+    case ARG_TOKEN_SIM_TEMPO_CANDIDATES:
+      config_add_bool_setting_to_string_builder(config, sb, arg_token,
+                                                config->sim_tempo_candidates);
+      break;
+    case ARG_TOKEN_P1_SIM_TEMPO_CANDIDATES:
+      config_add_bool_setting_to_string_builder(
+          config, sb, arg_token, config->p1_sim_tempo_candidates);
+      break;
+    case ARG_TOKEN_P2_SIM_TEMPO_CANDIDATES:
+      config_add_bool_setting_to_string_builder(
+          config, sb, arg_token, config->p2_sim_tempo_candidates);
       break;
     case ARG_TOKEN_USE_HEAT_MAP:
       config_add_bool_setting_to_string_builder(config, sb, arg_token,

@@ -3,7 +3,10 @@
 #include "../src/compat/cpthread.h"
 #include "../src/compat/cpthread_defs.h"
 #include "../src/compat/ctime.h"
+#include "../src/def/equity_defs.h"
 #include "../src/def/game_defs.h"
+#include "../src/def/game_history_defs.h"
+#include "../src/def/move_defs.h"
 #include "../src/def/rack_defs.h"
 #include "../src/def/thread_control_defs.h"
 #include "../src/ent/autoplay_results.h"
@@ -21,6 +24,7 @@
 #include "../src/ent/win_pct.h"
 #include "../src/impl/config.h"
 #include "../src/impl/gameplay.h"
+#include "../src/impl/move_gen.h"
 #include "../src/impl/rack_draw.h"
 #include "../src/impl/random_variable.h"
 #include "../src/impl/simmer.h"
@@ -1563,6 +1567,145 @@ void test_sim_resume(void) {
   config_destroy(config);
 }
 
+static bool move_list_has_play(const MoveList *move_list, const Move *move) {
+  for (int move_idx = 0; move_idx < move_list_get_count(move_list);
+       move_idx++) {
+    if (compare_moves_without_equity(move_list_get_move(move_list, move_idx),
+                                     move, true) == -1) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// The best move of a type in a list sorted best first: of any size when
+// tiles_played is 0, otherwise of that many tiles. thrown, if not NULL, is the
+// rack an exchange must throw back.
+static const Move *best_move_of_kind(const MoveList *sorted,
+                                     game_event_t move_type, int tiles_played,
+                                     const Rack *thrown) {
+  for (int move_idx = 0; move_idx < move_list_get_count(sorted); move_idx++) {
+    const Move *move = move_list_get_move(sorted, move_idx);
+    if (move_get_type(move) != move_type ||
+        (tiles_played > 0 && move_get_tiles_played(move) != tiles_played)) {
+      continue;
+    }
+    if (thrown != NULL) {
+      Rack move_tiles;
+      rack_set_dist_size_and_reset(&move_tiles, rack_get_dist_size(thrown));
+      for (int tile_idx = 0; tile_idx < move_get_tiles_played(move);
+           tile_idx++) {
+        rack_add_letter(&move_tiles, move_get_tile(move, tile_idx));
+      }
+      if (!racks_are_equal(&move_tiles, thrown)) {
+        continue;
+      }
+    }
+    return move;
+  }
+  return NULL;
+}
+
+// With -stempo, a simulation's candidates are the best plays and, where they
+// are not among them, a pass, the best exchange, the exchange that keeps only
+// the one-point tiles and blanks, and the best one- and two-tile plays. Off,
+// they are the best plays alone. -stc1 and -stc2 set one player's.
+void test_sim_tempo_candidates(void) {
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -wmp true -s1 equity -s2 equity -r1 all -r2 all "
+      "-numplays 3 -plies 2 -minp 2 -iter 30 -threads 1 -sinfer false "
+      "-stempo true");
+  assert(config_get_player_sim_tempo_candidates(config, 0));
+  assert(config_get_player_sim_tempo_candidates(config, 1));
+  // AENNRSV with 73 tiles in the bag: the low-tile keeper throws back the V.
+  load_and_exec_config_or_die(config, "cgp " INCOMPLETE_3_CGP);
+  ErrorStack *error_stack = error_stack_create();
+  config_load_win_pcts(config, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  const LetterDistribution *ld = config_get_ld(config);
+  const int ld_size = ld_get_size(ld);
+  Rack target_played_tiles;
+  rack_set_dist_size_and_reset(&target_played_tiles, ld_size);
+  Rack nontarget_known_tiles;
+  rack_set_dist_size_and_reset(&nontarget_known_tiles, ld_size);
+  Rack target_known_inference_tiles;
+  rack_set_dist_size_and_reset(&target_known_inference_tiles, ld_size);
+  SimArgs sim_args;
+  config_fill_sim_args(config, NULL, &target_played_tiles,
+                       &nontarget_known_tiles, &target_known_inference_tiles,
+                       &sim_args);
+  assert(sim_args.tempo_candidates);
+  MoveList *candidates = move_list_create(3);
+  sim_args.move_list = candidates;
+  SimResults *sim_results = config_get_sim_results(config);
+  SimCtx *sim_ctx = NULL;
+  Game *game = config_get_game(config);
+  bool simulated = false;
+  const Move *move = get_top_simming_move(
+      game, candidates, &sim_args, &sim_ctx, sim_results, &simulated,
+      error_stack);
+  assert(error_stack_is_empty(error_stack));
+  assert(move && simulated);
+
+  MoveList *all_plays = move_list_create(4096);
+  const MoveGenArgs all_args = {
+      .game = game,
+      .move_list = all_plays,
+      .move_record_type = MOVE_RECORD_ALL,
+      .move_sort_type = MOVE_SORT_EQUITY,
+      .override_kwg = NULL,
+      .eq_margin_movegen = 0,
+      .target_equity = EQUITY_MAX_VALUE,
+  };
+  generate_moves(&all_args);
+  assert(move_list_get_count(all_plays) < 4096);
+  move_list_sort_moves(all_plays);
+  for (int move_idx = 0; move_idx < 3; move_idx++) {
+    assert(move_list_has_play(candidates,
+                              move_list_get_move(all_plays, move_idx)));
+  }
+  Rack high_tiles;
+  rack_set_dist_size_and_reset(&high_tiles, ld_size);
+  rack_set_to_string(ld, &high_tiles, "V");
+  const Move *expected[] = {
+      best_move_of_kind(all_plays, GAME_EVENT_PASS, 0, NULL),
+      best_move_of_kind(all_plays, GAME_EVENT_EXCHANGE, 0, NULL),
+      best_move_of_kind(all_plays, GAME_EVENT_EXCHANGE, 0, &high_tiles),
+      best_move_of_kind(all_plays, GAME_EVENT_TILE_PLACEMENT_MOVE, 1, NULL),
+      best_move_of_kind(all_plays, GAME_EVENT_TILE_PLACEMENT_MOVE, 2, NULL),
+  };
+  const int number_of_kinds = (int)(sizeof(expected) / sizeof(expected[0]));
+  for (int kind_idx = 0; kind_idx < number_of_kinds; kind_idx++) {
+    assert(expected[kind_idx] != NULL);
+    assert(move_list_has_play(candidates, expected[kind_idx]));
+  }
+  assert(move_list_get_count(candidates) <= 3 + 5);
+  assert(sim_results_get_number_of_plays(sim_results) ==
+         move_list_get_count(candidates));
+
+  // The list grew to hold them, so the best plays alone go in a new one.
+  MoveList *best_plays = move_list_create(3);
+  sim_args.move_list = best_plays;
+  sim_args.tempo_candidates = false;
+  move = get_top_simming_move(game, best_plays, &sim_args, &sim_ctx,
+                              sim_results, &simulated, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  assert(move && simulated);
+  assert(move_list_get_count(best_plays) == 3);
+
+  load_and_exec_config_or_die(config, "set -stempo false -stc2 true");
+  assert(!config_get_sim_tempo_candidates(config));
+  assert(!config_get_player_sim_tempo_candidates(config, 0));
+  assert(config_get_player_sim_tempo_candidates(config, 1));
+
+  move_list_destroy(all_plays);
+  move_list_destroy(best_plays);
+  move_list_destroy(candidates);
+  sim_ctx_destroy(sim_ctx);
+  error_stack_destroy(error_stack);
+  config_destroy(config);
+}
+
 void test_sim(void) {
   const char *sim_perf_iters = getenv("SIM_PERF_ITERS");
   if (sim_perf_iters) {
@@ -1575,6 +1718,7 @@ void test_sim(void) {
     test_sim_single_iteration();
     test_sim_ranked_plays_json();
     test_sim_bag_cycle();
+    test_sim_tempo_candidates();
     test_sim_threshold();
     test_sim_time_limit();
     test_all_plays_are_similar();

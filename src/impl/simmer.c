@@ -2,11 +2,14 @@
 
 #include "../def/equity_defs.h"
 #include "../def/game_defs.h"
+#include "../def/game_history_defs.h"
 #include "../def/inference_defs.h"
+#include "../def/letter_distribution_defs.h"
 #include "../def/move_defs.h"
 #include "../def/sim_defs.h"
 #include "../def/thread_control_defs.h"
 #include "../ent/bag.h"
+#include "../ent/equity.h"
 #include "../ent/game.h"
 #include "../ent/inference_results.h"
 #include "../ent/letter_distribution.h"
@@ -30,6 +33,19 @@
 #include <stdlib.h>
 
 enum {
+  // The candidates beyond the num_plays best plays that
+  // SimArgs.tempo_candidates adds: a pass, the best exchange, the exchange
+  // that keeps only the low tiles, and the best one- and two-tile plays.
+  SIM_NUM_TEMPO_CANDIDATES = 5,
+  // The exchange that keeps only the low tiles throws back every tile that
+  // scores more than this, keeping the one-point tiles and blanks.
+  SIM_TEMPO_KEPT_TILE_MAX_SCORE = 1,
+  // The starting capacity of the list that holds every legal play for
+  // SimArgs.tempo_candidates. It doubles whenever a position has more.
+  SIM_TEMPO_ALL_PLAYS_INITIAL_CAPACITY = 1024,
+};
+
+enum {
   // The fewest cycles a bag-cycled sim gives each play (see
   // sim_args_set_bag_cycle_bai_options).
   SIM_BAG_CYCLE_MIN_CYCLES = 2,
@@ -47,6 +63,9 @@ enum {
 struct SimCtx {
   RandomVariables *rvs;
   InferenceCtx *inference_ctx;
+  // Every legal play of the last position, for SimArgs.tempo_candidates.
+  // NULL until a simulation asks for them.
+  MoveList *all_plays;
 };
 
 void sim_ctx_destroy(SimCtx *sim_ctx) {
@@ -55,7 +74,18 @@ void sim_ctx_destroy(SimCtx *sim_ctx) {
   }
   rvs_destroy(sim_ctx->rvs);
   inference_ctx_destroy(sim_ctx->inference_ctx);
+  move_list_destroy(sim_ctx->all_plays);
   free(sim_ctx);
+}
+
+static SimCtx *sim_ctx_get_or_create(SimCtx **sim_ctx) {
+  if (*sim_ctx == NULL) {
+    *sim_ctx = malloc_or_die(sizeof(SimCtx));
+    (*sim_ctx)->rvs = NULL;
+    (*sim_ctx)->inference_ctx = NULL;
+    (*sim_ctx)->all_plays = NULL;
+  }
+  return *sim_ctx;
 }
 
 // A bag-cycled sample is a whole cycle of rollouts, but the sample limit
@@ -113,11 +143,7 @@ void simulate(SimArgs *sim_args, SimCtx **sim_ctx, SimResults *sim_results,
     }
   }
 
-  if (*sim_ctx == NULL) {
-    *sim_ctx = malloc_or_die(sizeof(SimCtx));
-    (*sim_ctx)->rvs = NULL;
-    (*sim_ctx)->inference_ctx = NULL;
-  }
+  sim_ctx_get_or_create(sim_ctx);
 
   uint64_t num_infer_leaves = 0;
   if (sim_args->use_inference) {
@@ -191,10 +217,107 @@ void simulate_without_ctx(SimArgs *sim_args, SimResults *sim_results,
   sim_ctx_destroy(ctx);
 }
 
+// Generates every legal play into all_plays, best first. A list that comes
+// back full may have dropped plays, so it grows and generates again.
+static void generate_all_plays_sorted(const MoveGenArgs *gen_args,
+                                      MoveList *all_plays) {
+  MoveGenArgs all_args = *gen_args;
+  all_args.move_list = all_plays;
+  all_args.move_record_type = MOVE_RECORD_ALL;
+  generate_moves(&all_args);
+  while (move_list_get_count(all_plays) ==
+         move_list_get_capacity(all_plays)) {
+    move_list_resize(all_plays, 2 * move_list_get_capacity(all_plays));
+    generate_moves(&all_args);
+  }
+  move_list_sort_moves(all_plays);
+}
+
+// Whether the exchange throws back exactly the tiles in high_tiles.
+static bool exchange_throws_exactly(const Move *exchange,
+                                    const Rack *high_tiles) {
+  const int tiles_thrown = move_get_tiles_played(exchange);
+  if (tiles_thrown != rack_get_total_letters(high_tiles)) {
+    return false;
+  }
+  Rack thrown;
+  rack_set_dist_size_and_reset(&thrown, rack_get_dist_size(high_tiles));
+  for (int tile_idx = 0; tile_idx < tiles_thrown; tile_idx++) {
+    rack_add_letter(&thrown, move_get_tile(exchange, tile_idx));
+  }
+  return racks_are_equal(&thrown, high_tiles);
+}
+
+// Fills gen_args->move_list with the num_plays best plays and, where they are
+// not among them, the tempo candidates (see SimArgs.tempo_candidates).
+static void generate_candidates_with_tempo(const MoveGenArgs *gen_args,
+                                           const int num_plays,
+                                           SimCtx *sim_ctx) {
+  if (sim_ctx->all_plays == NULL) {
+    sim_ctx->all_plays =
+        move_list_create(SIM_TEMPO_ALL_PLAYS_INITIAL_CAPACITY);
+  }
+  MoveList *all_plays = sim_ctx->all_plays;
+  generate_all_plays_sorted(gen_args, all_plays);
+
+  const Game *game = gen_args->game;
+  const LetterDistribution *ld = game_get_ld(game);
+  const Rack *rack =
+      player_get_rack(game_get_player(game, game_get_player_on_turn_index(game)));
+  Rack high_tiles;
+  rack_set_dist_size_and_reset(&high_tiles, ld_get_size(ld));
+  for (int ml = 0; ml < ld_get_size(ld); ml++) {
+    if (ld_get_score(ld, (MachineLetter)ml) >
+        int_to_equity(SIM_TEMPO_KEPT_TILE_MAX_SCORE)) {
+      rack_add_letters(&high_tiles, (MachineLetter)ml,
+                       rack_get_letter(rack, (MachineLetter)ml));
+    }
+  }
+
+  MoveList *candidates = gen_args->move_list;
+  if (move_list_get_capacity(candidates) <
+      num_plays + SIM_NUM_TEMPO_CANDIDATES) {
+    move_list_resize(candidates, num_plays + SIM_NUM_TEMPO_CANDIDATES);
+  }
+  move_list_reset(candidates);
+  bool have_pass = false;
+  bool have_exchange = false;
+  bool have_low_keeper = false;
+  bool have_one_tile = false;
+  bool have_two_tile = false;
+  const int number_of_plays = move_list_get_count(all_plays);
+  for (int move_idx = 0; move_idx < number_of_plays; move_idx++) {
+    const Move *move = move_list_get_move(all_plays, move_idx);
+    const game_event_t move_type = move_get_type(move);
+    const bool is_placement = move_type == GAME_EVENT_TILE_PLACEMENT_MOVE;
+    const bool is_pass = move_type == GAME_EVENT_PASS;
+    const bool is_exchange = move_type == GAME_EVENT_EXCHANGE;
+    const bool is_low_keeper =
+        is_exchange && exchange_throws_exactly(move, &high_tiles);
+    const bool is_one_tile = is_placement && move_get_tiles_played(move) == 1;
+    const bool is_two_tile = is_placement && move_get_tiles_played(move) == 2;
+    if (move_idx < num_plays || (is_pass && !have_pass) ||
+        (is_exchange && !have_exchange) ||
+        (is_low_keeper && !have_low_keeper) ||
+        (is_one_tile && !have_one_tile) || (is_two_tile && !have_two_tile)) {
+      move_list_add_move(candidates, move);
+      have_pass = have_pass || is_pass;
+      have_exchange = have_exchange || is_exchange;
+      have_low_keeper = have_low_keeper || is_low_keeper;
+      have_one_tile = have_one_tile || is_one_tile;
+      have_two_tile = have_two_tile || is_two_tile;
+    }
+  }
+}
+
 // The move_list and sim_args->move_list are expected to be the same pointer,
 // but they are passed in separately because this function needs to generate
 // moves on a nonconst MoveList pointer but the SimArgs MoveList pointer is
 // const.
+//
+// The list's capacity is the number of best plays. With
+// sim_args->tempo_candidates it grows to hold the tempo candidates too, and
+// keeps that capacity.
 //
 // Sets *simulated to whether a simulation ran. A position with one legal play
 // (a forced pass) is not simulated, and sim_results then still holds whatever
@@ -217,7 +340,12 @@ const Move *get_top_simming_move(Game *game, MoveList *move_list,
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
   };
-  generate_moves(&gen_args);
+  if (sim_args->tempo_candidates) {
+    generate_candidates_with_tempo(&gen_args, sim_args->num_plays,
+                                   sim_ctx_get_or_create(sim_ctx));
+  } else {
+    generate_moves(&gen_args);
+  }
 
   if (move_list_get_count(move_list) == 1) {
     return move_list_get_move(move_list, 0);
