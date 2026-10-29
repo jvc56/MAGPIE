@@ -3216,6 +3216,25 @@ void test_config_new_game_drops_previous_analysis(void) {
 // previous game's events, or an empty board, and reject the move as not
 // connected; the previous game's endgame results stayed valid, pointing at the
 // lexicon the cgp's -lex freed.
+// Started with set, cgp or load, magpie keeps running commands afterwards;
+// started with another command, it exits once that command finishes.
+static void test_config_continue_on_coldstart(void) {
+  Config *config = config_create_default_test();
+  ErrorStack *error_stack = error_stack_create();
+  const char *continuing_cmds[] = {"set -threads 2", "cgp " EMPTY_CGP,
+                                   "load " TEST_GCG_FILENAME};
+  for (int cmd_idx = 0; cmd_idx < 3; cmd_idx++) {
+    config_load_command(config, continuing_cmds[cmd_idx], error_stack);
+    assert(error_stack_is_empty(error_stack));
+    assert(config_continue_on_coldstart(config));
+  }
+  config_load_command(config, "shgame", error_stack);
+  assert(error_stack_is_empty(error_stack));
+  assert(!config_continue_on_coldstart(config));
+  error_stack_destroy(error_stack);
+  config_destroy(config);
+}
+
 void test_config_cgp_starts_new_history(void) {
   Config *config = config_create_or_die("set -s1 score -s2 score -threads 2");
   assert_config_exec_status(config, "load testdata/gcgs/success_standard.gcg",
@@ -3625,6 +3644,7 @@ void test_config(void) {
   test_config_sim_results_saved_to_game_event();
   test_config_new_game_drops_previous_analysis();
   test_config_cgp_starts_new_history();
+  test_config_continue_on_coldstart();
   test_config_lexicon_change_rebuilds_games();
   test_config_lexicon_change_clears_endgame_tt();
   test_config_load_replacing_lexical_data();

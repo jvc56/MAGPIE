@@ -891,6 +891,7 @@ bool config_continue_on_coldstart(const Config *config) {
   // commands
   return config->exec_parg_token == ARG_TOKEN_SET ||
          config->exec_parg_token == ARG_TOKEN_CGP ||
+         config->exec_parg_token == ARG_TOKEN_LOAD ||
          !config_exec_parg_is_set(config) ||
          config_get_parg_num_set_values(config, ARG_TOKEN_EXEC_MODE) > 0;
 }
