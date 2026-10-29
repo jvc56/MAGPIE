@@ -22,6 +22,7 @@
 #include "render_rack.h"
 #include "settings_table.h"
 #include "theme.h"
+#include "tile_input.h"
 #include "time_picker.h"
 #include "tui_cli_args.h"
 #include "tui_crash.h"
@@ -719,6 +720,13 @@ int main(int argc, char *argv[]) {
   tui_config_set_path_override(session.args.config_path);
 
   (void)setlocale(LC_ALL, "");
+
+  // Other ways to type tiles (Catalan Ł for L·L). Without the file,
+  // tiles are typed only as their faces.
+  char aliases_path[512];
+  if (tui_tile_aliases_find_path(aliases_path, sizeof(aliases_path))) {
+    (void)tui_tile_aliases_load(aliases_path);
+  }
 
   // Redirect stderr to a known file BEFORE notcurses takes over the
   // TTY. notcurses puts the terminal in alt-screen mode, so any
