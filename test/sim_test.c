@@ -1641,9 +1641,8 @@ void test_sim_tempo_candidates(void) {
   SimCtx *sim_ctx = NULL;
   Game *game = config_get_game(config);
   bool simulated = false;
-  const Move *move = get_top_simming_move(
-      game, candidates, &sim_args, &sim_ctx, sim_results, &simulated,
-      error_stack);
+  const Move *move = get_top_simming_move(game, candidates, &sim_args, &sim_ctx,
+                                          sim_results, &simulated, error_stack);
   assert(error_stack_is_empty(error_stack));
   assert(move && simulated);
 

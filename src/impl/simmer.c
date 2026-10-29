@@ -225,8 +225,7 @@ static void generate_all_plays_sorted(const MoveGenArgs *gen_args,
   all_args.move_list = all_plays;
   all_args.move_record_type = MOVE_RECORD_ALL;
   generate_moves(&all_args);
-  while (move_list_get_count(all_plays) ==
-         move_list_get_capacity(all_plays)) {
+  while (move_list_get_count(all_plays) == move_list_get_capacity(all_plays)) {
     move_list_resize(all_plays, 2 * move_list_get_capacity(all_plays));
     generate_moves(&all_args);
   }
@@ -254,16 +253,15 @@ static void generate_candidates_with_tempo(const MoveGenArgs *gen_args,
                                            const int num_plays,
                                            SimCtx *sim_ctx) {
   if (sim_ctx->all_plays == NULL) {
-    sim_ctx->all_plays =
-        move_list_create(SIM_TEMPO_ALL_PLAYS_INITIAL_CAPACITY);
+    sim_ctx->all_plays = move_list_create(SIM_TEMPO_ALL_PLAYS_INITIAL_CAPACITY);
   }
   MoveList *all_plays = sim_ctx->all_plays;
   generate_all_plays_sorted(gen_args, all_plays);
 
   const Game *game = gen_args->game;
   const LetterDistribution *ld = game_get_ld(game);
-  const Rack *rack =
-      player_get_rack(game_get_player(game, game_get_player_on_turn_index(game)));
+  const Rack *rack = player_get_rack(
+      game_get_player(game, game_get_player_on_turn_index(game)));
   Rack high_tiles;
   rack_set_dist_size_and_reset(&high_tiles, ld_get_size(ld));
   for (int ml = 0; ml < ld_get_size(ld); ml++) {

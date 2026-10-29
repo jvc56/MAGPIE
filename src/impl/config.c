@@ -5243,8 +5243,7 @@ void config_fill_autoplay_args(const Config *config,
       config->p1_utility_spread_scale, config->p1_sim_margin_forecast,
       &p1_inference_args, &autoplay_args->p1_sim_args);
   autoplay_args->p1_sim_args.bag_cycle = config->p1_sim_bag_cycle;
-  autoplay_args->p1_sim_args.tempo_candidates =
-      config->p1_sim_tempo_candidates;
+  autoplay_args->p1_sim_args.tempo_candidates = config->p1_sim_tempo_candidates;
 
   sim_args_fill(
       config->p2_sim_plies, /*move_list=*/NULL, config->p2_num_plays,
@@ -5260,8 +5259,7 @@ void config_fill_autoplay_args(const Config *config,
       config->p2_utility_spread_scale, config->p2_sim_margin_forecast,
       &p2_inference_args, &autoplay_args->p2_sim_args);
   autoplay_args->p2_sim_args.bag_cycle = config->p2_sim_bag_cycle;
-  autoplay_args->p2_sim_args.tempo_candidates =
-      config->p2_sim_tempo_candidates;
+  autoplay_args->p2_sim_args.tempo_candidates = config->p2_sim_tempo_candidates;
 
   config_set_sim_args_pat_rollout(config, 0, &autoplay_args->p1_sim_args);
   config_set_sim_args_pat_rollout(config, 1, &autoplay_args->p2_sim_args);
@@ -10361,8 +10359,8 @@ static void config_contribute_reset_player_settings(Config *config,
   *(p1 ? &config->p1_sim_bag_cycle : &config->p2_sim_bag_cycle) = true;
   // Tempo candidates off, the build's default: birdtest has no field for
   // them (-stc1/-stc2), and they change which plays a simulation weighs.
-  *(p1 ? &config->p1_sim_tempo_candidates
-       : &config->p2_sim_tempo_candidates) = false;
+  *(p1 ? &config->p1_sim_tempo_candidates : &config->p2_sim_tempo_candidates) =
+      false;
   // Solving off: a request turns it on per player, and a contributor's
   // -eplies1 must not.
   autoplay_solver_settings_set_defaults(&config->solver_settings[p1 ? 0 : 1]);
