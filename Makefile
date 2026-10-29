@@ -8,6 +8,7 @@ endif
 SRC_DIR := src
 TEST_DIR := test
 CMD_DIR := cmd
+TUI_DIR := tui
 TOOLS_DIR := tools
 BIN_DIR := bin
 COV_DIR := cov
@@ -100,6 +101,16 @@ OBJ_DIR := $(OBJ_ROOT)/$(OBJ_TARGET_PREFIX)$(BUILD)-$(PORTABLE_MARCH)-$(OBJ_CC)-
 else
 OBJ_DIR := $(OBJ_ROOT)/$(OBJ_TARGET_PREFIX)$(BUILD)-$(OBJ_CC)-b$(BOARD_DIM)-r$(RACK_SIZE)
 endif
+# magpie_tui keys its objects the same way, by its own flavor (see its flags
+# below): debug, release, or pgo, the release compiled against its profile.
+ifeq ($(BUILD),debug)
+TUI_FLAVOR := debug
+else ifeq ($(TUI_PGO_USE),1)
+TUI_FLAVOR := pgo
+else
+TUI_FLAVOR := release
+endif
+TUI_OBJ_DIR := $(OBJ_ROOT)/tui-$(TUI_FLAVOR)-$(OBJ_CC)-b$(BOARD_DIM)-r$(RACK_SIZE)
 
 # Profile-guided optimization data. The default lives below OBJ_ROOT so it is
 # ignored by git and removed by `make clean` with the other build artifacts.
@@ -153,14 +164,21 @@ endif
 SRC  := $(shell find $(SRC_DIR) -name '*.c')
 TEST := $(wildcard $(TEST_DIR)/*.c)
 CMD := $(wildcard $(CMD_DIR)/*.c)
+TUI := $(wildcard $(TUI_DIR)/*.c)
 OBJ_SRC := $(SRC:$(SRC_DIR)/%.c=$(OBJ_DIR)/$(SRC_DIR)/%.o)
 OBJ_TEST := $(TEST:$(TEST_DIR)/%.c=$(OBJ_DIR)/$(TEST_DIR)/%.o)
 OBJ_CMD := $(CMD:$(CMD_DIR)/%.c=$(OBJ_DIR)/$(CMD_DIR)/%.o)
+TUI_OBJ_SRC := $(SRC:$(SRC_DIR)/%.c=$(TUI_OBJ_DIR)/$(SRC_DIR)/%.o)
+TUI_OBJ_TUI := $(TUI:$(TUI_DIR)/%.c=$(TUI_OBJ_DIR)/$(TUI_DIR)/%.o)
 PGO_TRAIN_OBJ := $(OBJ_DIR)/$(TOOLS_DIR)/pgo_train.o
 CONVERT_OBJ := $(OBJ_DIR)/$(TOOLS_DIR)/convert.o
 
 SRC_SUBDIRS := $(shell find $(SRC_DIR) -type d)
 SRC_OBJ_SUBDIRS := $(patsubst $(SRC_DIR)/%,$(OBJ_DIR)/$(SRC_DIR)/%,$(SRC_SUBDIRS))
+# Drop the bare $(SRC_DIR) entry that find emits; SRC_OBJ_SUBDIRS already
+# carries it (untransformed) so its mkdir rule fires once. Listing it twice
+# in the rule below trips a make warning.
+TUI_SRC_OBJ_SUBDIRS := $(filter-out $(SRC_DIR),$(patsubst $(SRC_DIR)/%,$(TUI_OBJ_DIR)/$(SRC_DIR)/%,$(SRC_SUBDIRS)))
 
 TEST_SUBDIRS := $(shell find $(TEST_DIR) -type d)
 TEST_OBJ_SUBDIRS := $(patsubst $(TEST_DIR)/%,$(OBJ_DIR)/$(TEST_DIR)/%,$(TEST_SUBDIRS))
@@ -216,7 +234,7 @@ align_cflags := -falign-functions=64
 ALIGNED_BUILDS := no_pgo_release portable_release lib bai_stats pgo_generate pgo_use \
                   test_no_pgo_release test_portable_release test_bai_stats \
                   test_pgo_generate test_pgo_use
-ifneq ($(filter $(ALIGNED_BUILDS),$(BUILD)),)
+ifneq ($(filter $(ALIGNED_BUILDS),$(BUILD))$(if $(filter-out debug,$(TUI_FLAVOR)),$(filter magpie_tui%,$(MAKECMDGOALS))),)
 ifneq ($(findstring clang,$(CC_VERSION_TEXT)),)
 align_ldflags := $(shell for flag in -Wl,-mllvm,-align-all-functions=6 -Wl,-plugin-opt=-align-all-functions=6; do if printf 'int main(void) { return 0; }\n' | $(CC) -x c - -flto $$flag -o /dev/null >/dev/null 2>&1; then echo $$flag; break; fi; done)
 else
@@ -312,6 +330,107 @@ LFLAGS := ${lflags.${BUILD}}
 LDFLAGS  = ${ldflags.${BUILD}}
 LDLIBS   := -lm
 
+# notcurses detection for the optional magpie_tui target. Prefer pkg-config;
+# fall back to a Homebrew prefix probe on macOS. magpie_tui is opt-in and is
+# not part of `all`, so a missing notcurses does not break the default build.
+NOTCURSES_HAS_PKGCONFIG := $(shell command -v pkg-config >/dev/null 2>&1 && pkg-config --exists notcurses-core 2>/dev/null && echo yes)
+ifeq ($(NOTCURSES_HAS_PKGCONFIG),yes)
+    NOTCURSES_CFLAGS := $(shell pkg-config --cflags notcurses-core)
+    NOTCURSES_LDLIBS := $(shell pkg-config --libs notcurses-core)
+else
+    NOTCURSES_BREW_PREFIX := $(shell command -v brew >/dev/null 2>&1 && brew --prefix notcurses 2>/dev/null)
+    ifneq ($(wildcard $(NOTCURSES_BREW_PREFIX)/include/notcurses/notcurses.h),)
+        NOTCURSES_CFLAGS := -I$(NOTCURSES_BREW_PREFIX)/include
+        NOTCURSES_LDLIBS := -L$(NOTCURSES_BREW_PREFIX)/lib -lnotcurses-core
+    endif
+endif
+
+# FreeType is required for magpie_tui: the 2x board-tile mode rasterizes
+# TTF glyphs through it, and the renderer links the library unconditionally
+# so the same binary works at both 1x and 2x. Same detection pattern as
+# notcurses — pkg-config preferred, Homebrew prefix as macOS fallback.
+FREETYPE_HAS_PKGCONFIG := $(shell command -v pkg-config >/dev/null 2>&1 && pkg-config --exists freetype2 2>/dev/null && echo yes)
+ifeq ($(FREETYPE_HAS_PKGCONFIG),yes)
+    FREETYPE_CFLAGS := $(shell pkg-config --cflags freetype2)
+    FREETYPE_LDLIBS := $(shell pkg-config --libs freetype2)
+else
+    FREETYPE_BREW_PREFIX := $(shell command -v brew >/dev/null 2>&1 && brew --prefix freetype 2>/dev/null)
+    ifneq ($(wildcard $(FREETYPE_BREW_PREFIX)/include/freetype2/ft2build.h),)
+        FREETYPE_CFLAGS := -I$(FREETYPE_BREW_PREFIX)/include/freetype2
+        FREETYPE_LDLIBS := -L$(FREETYPE_BREW_PREFIX)/lib -lfreetype
+    endif
+endif
+
+# magpie_tui builds engine and tui sources into a separate object tree
+# without sanitizers. AddressSanitizer's munmap interception conflicts with
+# notcurses/terminfo cleanup on macOS Darwin >= 25 and aborts on exit. The
+# default obj/ tree (with sanitizers under BUILD=dev) is unaffected, and
+# magpie_test still exercises the engine with ASAN.
+#
+# Engine sources use the project's release-style flags (no -Werror) since
+# they are already linted under BUILD=dev for magpie/magpie_test. TUI
+# sources use stricter flags so new code stays in project style.
+# Use release-grade optimization for both engine and TUI sources. The
+# 2x pixel composite + per-cell fill loops are tight per-pixel work
+# that vectorizes well at -O3 -march=native, and the engine's move gen
+# is the same code path the release magpie binary uses. -flto lets the
+# linker inline across translation units (notably the engine's small
+# accessor helpers called from the renderer).
+# magpie_tui has its own build flags independent of the top-level BUILD
+# variable used for `magpie`. Default is release-grade (-O3 -flto
+# -march=native) for the 60fps-on-pixel-blits hot path. Pass
+# BUILD=debug to swap in -O1 + AddressSanitizer + UBSan for crash
+# troubleshooting; that build is slower, larger, and on macOS aborts on
+# exit due to ASAN's munmap interception conflicting with notcurses/
+# terminfo cleanup, but it prints a stack trace on SIGSEGV which is
+# what makes it worth the noise.
+ifeq ($(BUILD),debug)
+    TUI_OPT := -O1
+    TUI_LTO :=
+    TUI_SAN := -fsanitize=address,undefined -fno-omit-frame-pointer
+    # Debug build leaves NDEBUG undefined so engine asserts (e.g.,
+    # rack_take_letter's underflow check) fire and produce a usable
+    # backtrace alongside ASAN/UBSan output.
+    TUI_NDEBUG :=
+else
+    TUI_OPT := -O3
+    TUI_LTO := -flto
+    TUI_SAN :=
+    TUI_NDEBUG := -DNDEBUG
+endif
+
+# The release flavors align functions like the optimized magpie builds (see
+# align_cflags).
+ifneq ($(TUI_FLAVOR),debug)
+    TUI_ALIGN_CFLAGS := $(align_cflags)
+    TUI_ALIGN_LDFLAGS := $(align_ldflags)
+endif
+
+TUI_ENGINE_CFLAGS := $(TUI_OPT) $(TUI_LTO) -march=native -g $(TUI_NDEBUG) -Wall -Wno-trigraphs -DBOARD_DIM=$(BOARD_DIM) -DRACK_SIZE=$(RACK_SIZE) $(TUI_ALIGN_CFLAGS) $(TUI_SAN) -MMD -MP
+TUI_CFLAGS := $(TUI_OPT) $(TUI_LTO) -march=native -g $(TUI_NDEBUG) -Wall -Wno-trigraphs -Wextra -Wshadow -Wstrict-prototypes -Werror -DBOARD_DIM=$(BOARD_DIM) -DRACK_SIZE=$(RACK_SIZE) $(TUI_ALIGN_CFLAGS) $(TUI_SAN) -MMD -MP
+TUI_LDFLAGS := -pthread $(TUI_LTO) $(TUI_ALIGN_LDFLAGS) $(TUI_SAN)
+
+# The release TUI is profile-guided like `make release`: magpie_tui trains
+# magpie_pgo_train on TUI_PGO_WORKLOAD (static, the release's workload) and
+# compiles the engine's sources against that profile. The TUI's own sources
+# take none, since training never runs them. The profile has a file of its
+# own, which the pgo_* targets leave alone, and is retrained only when an
+# engine source or the trainer changes. TUI_PGO=0 builds the release without
+# it, which is quicker; without a usable clang it is built without it too.
+TUI_PGO ?= 1
+TUI_PGO_WORKLOAD ?= static
+TUI_PGO_PROFILE ?= $(abspath $(PGO_DIR)/tui-$(TUI_PGO_WORKLOAD).profdata)
+TUI_PGO_RAW_DIR ?= $(PGO_DIR)/tui-raw
+ifeq ($(TUI_FLAVOR),pgo)
+    TUI_ENGINE_CFLAGS += -fprofile-instr-use=$(TUI_PGO_PROFILE) \
+                         -Werror=profile-instr-out-of-date \
+                         -Wno-profile-instr-unprofiled
+    TUI_LDFLAGS += -fprofile-instr-use=$(TUI_PGO_PROFILE)
+else ifeq ($(TUI_FLAVOR)$(TUI_PGO),release1)
+    # magpie_tui rebuilds itself with PGO_CC as the pgo flavor.
+    TUI_PGO_CC := $(if $(PGO_CC_USABLE),$(PGO_CC))
+endif
+
 # On macOS the debug information stays in the object files, which the
 # executable points to. Clang's LTO link compiles its code into a temporary
 # object and deletes it afterwards, and the debug information of that code with
@@ -357,7 +476,7 @@ endif
 .PHONY: windows windows_test windows_wine_test windows_image
 .PHONY: all clean iwyu release leavegen_pgo_release pgo pgo_sim pgo_peg word_frequencies \
 	pgo_toolchain_check \
-	pgo_eg peg_eg pgo_workload prepare_data libmagpie examples
+	pgo_eg peg_eg pgo_workload prepare_data libmagpie examples magpie_tui
 
 all: magpie magpie_test
 
@@ -408,6 +527,44 @@ magpie_test: $(OBJ_SRC) $(OBJ_TEST) $(RES_OBJ) | $(BIN_DIR)
 $(RES_OBJ): windows/magpie.rc windows/magpie.manifest windows/magpie.ico $(SRC_DIR)/impl/config.c | $(OBJ_DIR)
 	$(WINDRES) -I windows -DMAGPIE_VERSION_TEXT=$(MAGPIE_VERSION) -DMAGPIE_VERSION_COMMAS=$(MAGPIE_VERSION_COMMAS) $< -o $@
 
+ifneq ($(TUI_PGO_CC),)
+magpie_tui:
+	$(MAKE) magpie_tui CC="$(PGO_CC)" TUI_PGO_USE=1 PGO_LDFLAGS="$(PGO_LDFLAGS)"
+else
+magpie_tui: $(TUI_OBJ_SRC) $(TUI_OBJ_TUI) | $(BIN_DIR)
+ifeq ($(TUI_FLAVOR)$(TUI_PGO),release1)
+	@echo '*** No clang $(PGO_MIN_CLANG_MAJOR) or newer for the profile-guided TUI; building it without PGO. Pass PGO_CC=<clang> LLVM_PROFDATA=<llvm-profdata> to train it, or TUI_PGO=0 to skip this.'
+endif
+ifeq ($(strip $(NOTCURSES_CFLAGS)),)
+	@echo "magpie_tui: notcurses not found. Install via 'brew install notcurses' (macOS) or 'apt install libnotcurses-dev' (Debian/Ubuntu)."
+	@exit 1
+else ifeq ($(strip $(FREETYPE_CFLAGS)),)
+	@echo "magpie_tui: freetype not found. Install via 'brew install freetype' (macOS) or 'apt install libfreetype-dev' (Debian/Ubuntu)."
+	@exit 1
+else
+	$(CC) $(TUI_LDFLAGS) $^ $(LDLIBS) $(NOTCURSES_LDLIBS) $(FREETYPE_LDLIBS) -lz -o $(BIN_DIR)/$@
+endif
+endif
+
+# Trains the TUI's profile as pgo_workload trains magpie's, into its own raw
+# directory and profile.
+$(TUI_PGO_PROFILE): $(SRC) $(shell find $(SRC_DIR) -name '*.h') $(TOOLS_DIR)/pgo_train.c
+	$(MAKE) pgo_toolchain_check
+	$(MAKE) prepare_data CC="$(PGO_CC)" LDFLAGS="-pthread -flto $(PGO_LDFLAGS)"
+	$(RM) -r $(TUI_PGO_RAW_DIR) $@
+	mkdir -p $(TUI_PGO_RAW_DIR)
+	$(MAKE) magpie_pgo_train BUILD=pgo_generate CC="$(PGO_CC)"
+	LLVM_PROFILE_FILE="$(abspath $(TUI_PGO_RAW_DIR))/magpie-%p.profraw" \
+		./$(BIN_DIR)/magpie_pgo_train \
+			"$(TUI_PGO_WORKLOAD)" \
+			"$(PGO_TRAIN_GAMES)" \
+			"$(PGO_TRAIN_TIME_MS)" \
+			"$(PGO_TRAIN_SECONDS)" \
+			"$(PGO_TRAIN_THREADS)" \
+			"$(PGO_LEAVEGEN_DATA_DIR):./data" \
+			"$(PGO_LEAVEGEN_TARGET)"
+	$(LLVM_PROFDATA) merge -sparse -o $@ $(TUI_PGO_RAW_DIR)/*.profraw
+
 magpie_pgo_train: $(OBJ_SRC) $(PGO_TRAIN_OBJ) | $(BIN_DIR)
 	$(CC) $(LDFLAGS) $(LFLAGS) $^ $(LDLIBS) -o $(BIN_DIR)/$@
 
@@ -429,6 +586,12 @@ $(OBJ_DIR)/$(CMD_DIR)/%.o: $(CMD_DIR)/%.c | $(OBJ_DIR) $(OBJ_DIR)/$(CMD_DIR)
 $(OBJ_DIR)/$(TOOLS_DIR)/%.o: $(TOOLS_DIR)/%.c | $(OBJ_DIR) $(OBJ_DIR)/$(TOOLS_DIR)
 	$(CC) $(CFLAGS) $(DEPFLAGS) -c $< -o $@
 
+$(TUI_OBJ_DIR)/$(SRC_DIR)/%.o: $(SRC_DIR)/%.c | $(TUI_OBJ_DIR) $(TUI_OBJ_DIR)/$(SRC_DIR) $(TUI_SRC_OBJ_SUBDIRS)
+	$(CC) $(TUI_ENGINE_CFLAGS) -c $< -o $@
+
+$(TUI_OBJ_DIR)/$(TUI_DIR)/%.o: $(TUI_DIR)/%.c | $(TUI_OBJ_DIR) $(TUI_OBJ_DIR)/$(TUI_DIR)
+	$(CC) $(TUI_CFLAGS) $(NOTCURSES_CFLAGS) $(FREETYPE_CFLAGS) -c $< -o $@
+
 # Compiler and linker flag changes in this file invalidate every object.
 $(OBJ_SRC) $(OBJ_CMD) $(OBJ_TEST) $(PGO_TRAIN_OBJ) $(CONVERT_OBJ) $(OBJ_DIR)/$(TOOLS_DIR)/word_frequencies.o: Makefile
 
@@ -437,12 +600,16 @@ $(OBJ_SRC) $(OBJ_CMD) $(OBJ_TEST) $(PGO_TRAIN_OBJ) $(CONVERT_OBJ) $(OBJ_DIR)/$(T
 ifeq ($(BUILD),pgo_use)
 $(OBJ_SRC) $(OBJ_CMD) $(OBJ_TEST): $(PGO_PROFILE)
 endif
+$(TUI_OBJ_SRC) $(TUI_OBJ_TUI): Makefile
+ifeq ($(TUI_FLAVOR),pgo)
+$(TUI_OBJ_SRC): $(TUI_PGO_PROFILE)
+endif
 
 # Optimized test builds keep assertions enabled.
 $(OBJ_DIR)/$(TEST_DIR)/%.o: $(TEST_DIR)/%.c | $(OBJ_DIR) $(OBJ_DIR)/$(TEST_DIR) $(TEST_OBJ_SUBDIRS)
 	$(CC) $(if $(filter no_pgo_release portable_release bai_stats pgo_generate pgo_use,$(BUILD)),${cflags.test_$(BUILD)},$(CFLAGS)) $(DEPFLAGS) -DBOARD_DIM=$(BOARD_DIM) -DRACK_SIZE=$(RACK_SIZE) -c $< -o $@
 
-$(BIN_DIR) $(OBJ_DIR) $(OBJ_DIR)/$(SRC_DIR) $(OBJ_DIR)/$(CMD_DIR) $(OBJ_DIR)/$(TEST_DIR) $(OBJ_DIR)/$(TOOLS_DIR) $(SRC_OBJ_SUBDIRS) $(TEST_OBJ_SUBDIRS):
+$(BIN_DIR) $(OBJ_DIR) $(OBJ_DIR)/$(SRC_DIR) $(OBJ_DIR)/$(CMD_DIR) $(OBJ_DIR)/$(TEST_DIR) $(OBJ_DIR)/$(TOOLS_DIR) $(TUI_OBJ_DIR) $(TUI_OBJ_DIR)/$(SRC_DIR) $(TUI_OBJ_DIR)/$(TUI_DIR) $(SRC_OBJ_SUBDIRS) $(TUI_SRC_OBJ_SUBDIRS) $(TEST_OBJ_SUBDIRS):
 	mkdir -p $@
 
 clean:
@@ -589,6 +756,8 @@ pgo_workload: pgo_toolchain_check
 -include $(OBJ_SRC:.o=.d)
 -include $(OBJ_CMD:.o=.d)
 -include $(OBJ_TEST:.o=.d)
+-include $(TUI_OBJ_SRC:.o=.d)
+-include $(TUI_OBJ_TUI:.o=.d)
 -include $(PGO_TRAIN_OBJ:.o=.d)
 -include $(CONVERT_OBJ:.o=.d)
 

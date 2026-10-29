@@ -63,7 +63,7 @@ echo "Using ${MAX_CORES} CPU cores for cppcheck analysis."
 
 mkdir -p "${CPPCHECK_BUILD_DIR}"
 
-SOURCE_DIRS=(src/ test/ cmd/ tools/ wasmentry/)
+SOURCE_DIRS=(src/ test/ cmd/ tools/ tui/ wasmentry/)
 CHECK_TARGETS=("${SOURCE_DIRS[@]}")
 
 # CI splits the first pass across jobs. CPPCHECK_SHARD=INDEX/COUNT checks
@@ -80,7 +80,7 @@ if [ -n "${CPPCHECK_SHARD}" ]; then
 fi
 
 # --- Run cppcheck command ---
-echo "Running cppcheck analysis on src/, test/, cmd/, and tools/ directories..."
+echo "Running cppcheck analysis on src/, test/, cmd/, tools/, and tui/ directories..."
 "${CPPCHECK_EXECUTABLE}" \
     --check-level=reduced \
     --enable=all \
