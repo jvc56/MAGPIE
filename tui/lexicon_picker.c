@@ -100,9 +100,31 @@ static LexLang classify_lexicon(const char *name) {
   return LEX_LANG_OTHER;
 }
 
+// Within a language, lexica list current editions first, then legacy
+// ones, then variants (phony-trained lists like CSW24PH1400), so the
+// ones people play come first and the rest sit in an overflow section.
+typedef enum {
+  LEX_TIER_CURRENT,
+  LEX_TIER_LEGACY,
+  LEX_TIER_VARIANT,
+  LEX_TIER_COUNT,
+} LexTier;
+
+// English lexicon families, in listing order; other languages' lexica
+// are all LEX_FAMILY_OTHER.
+typedef enum {
+  LEX_FAMILY_CSW,
+  LEX_FAMILY_NORTH_AMERICAN, // NWL, TWL, OSPD
+  LEX_FAMILY_OSW,            // OSW, OSWI: Collins's predecessors
+  LEX_FAMILY_OTHER,
+} LexFamily;
+
 typedef struct {
   char name[LEXICON_NAME_MAX];
   LexLang lang;
+  LexTier tier;
+  LexFamily family;
+  int year;       // edition year (2024 for CSW24); 0 when the name has none
   int word_count; // -1 if the .txt sibling could not be read
   bool has_wmp;   // sibling .wmp file present
   bool has_rit;   // sibling .rit file present
@@ -153,6 +175,104 @@ static void format_with_commas(int value, char *out, size_t out_size) {
   out[out_idx < out_size ? out_idx : out_size - 1] = '\0';
 }
 
+static LexFamily lexicon_family(const char *name) {
+  if (has_iprefix(name, "CSW")) {
+    return LEX_FAMILY_CSW;
+  }
+  if (has_iprefix(name, "NWL") || has_iprefix(name, "TWL") ||
+      has_iprefix(name, "OSPD")) {
+    return LEX_FAMILY_NORTH_AMERICAN;
+  }
+  if (has_iprefix(name, "OSW")) {
+    return LEX_FAMILY_OSW;
+  }
+  return LEX_FAMILY_OTHER;
+}
+
+// The edition year in a lexicon name: 2024 for CSW24, 1998 for TWL98,
+// 4 for OSW4; 0 when the name has no digits after its letters.
+static int lexicon_year(const char *name) {
+  const char *ch = name;
+  while (*ch != '\0' && !isdigit((unsigned char)*ch)) {
+    ch++;
+  }
+  int digits = 0;
+  int value = 0;
+  while (isdigit((unsigned char)*ch)) {
+    value = value * 10 + (*ch - '0');
+    digits++;
+    ch++;
+  }
+  enum { CENTURY_PIVOT = 50 };
+  if (digits == 2) {
+    value += value < CENTURY_PIVOT ? 2000 : 1900;
+  }
+  return value;
+}
+
+// The installed lexicon `name` is a variant of (the one whose name is
+// the longest proper prefix of it: CSW24 for CSW24PH1400, OSWI for
+// OSWIPH1000), or NULL when it isn't a variant.
+static const LexiconEntry *variant_base(const LexiconEntry *entries, int count,
+                                        const char *name) {
+  const LexiconEntry *base = NULL;
+  const size_t name_len = strlen(name);
+  for (int idx = 0; idx < count; idx++) {
+    const size_t base_len = strlen(entries[idx].name);
+    if (base_len < name_len &&
+        strncmp(entries[idx].name, name, base_len) == 0 &&
+        (base == NULL || base_len > strlen(base->name))) {
+      base = &entries[idx];
+    }
+  }
+  return base;
+}
+
+// Sets each entry's family, edition year, and tier: variants of another
+// installed lexicon are variants (listed under their base's edition);
+// the newest edition of each family is current, except for English
+// families no longer played (OSW); other editions are legacy.
+static void rank_lexica(LexiconEntry *entries, int count) {
+  for (int idx = 0; idx < count; idx++) {
+    LexiconEntry *entry = &entries[idx];
+    entry->family = lexicon_family(entry->name);
+    const LexiconEntry *base = variant_base(entries, count, entry->name);
+    entry->year = lexicon_year(base != NULL ? base->name : entry->name);
+    entry->tier = base != NULL ? LEX_TIER_VARIANT : LEX_TIER_LEGACY;
+  }
+  for (int idx = 0; idx < count; idx++) {
+    LexiconEntry *entry = &entries[idx];
+    if (entry->tier == LEX_TIER_VARIANT || entry->family == LEX_FAMILY_OSW) {
+      continue;
+    }
+    bool newest = true;
+    for (int other = 0; other < count && newest; other++) {
+      const LexiconEntry *rival = &entries[other];
+      newest =
+          !(rival->tier != LEX_TIER_VARIANT && rival->lang == entry->lang &&
+            rival->family == entry->family && rival->year > entry->year);
+    }
+    if (newest) {
+      entry->tier = LEX_TIER_CURRENT;
+    }
+  }
+}
+
+// The header over a run of a language's lexica in one tier.
+static void group_label(const LexiconEntry *entry, char *out, size_t out_size) {
+  static const char *const tier_suffix[LEX_TIER_COUNT] = {
+      [LEX_TIER_CURRENT] = "",
+      [LEX_TIER_LEGACY] = " \xc2\xb7 legacy",
+      [LEX_TIER_VARIANT] = " \xc2\xb7 variants",
+  };
+  (void)snprintf(out, out_size, "%s%s", lang_label(entry->lang),
+                 tier_suffix[entry->tier]);
+}
+
+static bool same_group(const LexiconEntry *lhs, const LexiconEntry *rhs) {
+  return lhs->lang == rhs->lang && lhs->tier == rhs->tier;
+}
+
 struct LexiconList {
   LexiconEntry entries[LEXICON_LIST_MAX];
   int count;
@@ -169,16 +289,16 @@ static int compare_entries(const void *lhs, const void *rhs) {
   if (left->lang != right->lang) {
     return (int)left->lang - (int)right->lang;
   }
-  // Within a language, sort by word count descending. Entries with an
-  // unknown count (-1) fall to the bottom of the group.
-  if (left->word_count != right->word_count) {
-    if (left->word_count < 0) {
-      return 1;
-    }
-    if (right->word_count < 0) {
-      return -1;
-    }
-    return left->word_count > right->word_count ? -1 : 1;
+  // Within a language: current, legacy, then variants; within those, by
+  // family, then newest edition first.
+  if (left->tier != right->tier) {
+    return (int)left->tier - (int)right->tier;
+  }
+  if (left->family != right->family) {
+    return (int)left->family - (int)right->family;
+  }
+  if (left->year != right->year) {
+    return left->year > right->year ? -1 : 1;
   }
   // Stable tie-break.
   return strcmp(left->name, right->name);
@@ -243,16 +363,15 @@ static bool scan_lexica_dir(const char *dir_path, LexiconList *list) {
     return false;
   }
 
+  rank_lexica(list->entries, list->count);
   qsort(list->entries, (size_t)list->count, sizeof(list->entries[0]),
         compare_entries);
-  // Compute display rows: a header precedes each language group.
-  LexLang prev_lang = LEX_LANG_COUNT;
+  // Compute display rows: a header precedes each language's tier group.
   int display_row = 0;
   for (int idx = 0; idx < list->count; idx++) {
-    if (list->entries[idx].lang != prev_lang) {
-      // Reserve a row for the language header.
+    if (idx == 0 || !same_group(&list->entries[idx - 1], &list->entries[idx])) {
+      // Reserve a row for the group header.
       display_row++;
-      prev_lang = list->entries[idx].lang;
     }
     list->entry_display_row[idx] = display_row;
     display_row++;
@@ -308,18 +427,18 @@ static void render_picker(struct ncplane *plane, const Theme *theme,
 
   // Walk display rows (headers + entries) in order, emitting only the
   // ones inside the visible window.
-  LexLang prev_lang = LEX_LANG_COUNT;
   int display_row = 0;
   for (int idx = 0; idx < list->count; idx++) {
-    if (list->entries[idx].lang != prev_lang) {
+    if (idx == 0 || !same_group(&list->entries[idx - 1], &list->entries[idx])) {
       if (display_row >= scroll_offset && display_row < last_visible) {
         const int screen_row = list_top + (display_row - scroll_offset);
+        char label[48];
+        group_label(&list->entries[idx], label, sizeof(label));
         theme_apply_fg(plane, theme->status_fg);
         ncplane_putstr_yx(plane, screen_row, 2, "── ");
-        ncplane_putstr(plane, lang_label(list->entries[idx].lang));
+        ncplane_putstr(plane, label);
         ncplane_putstr(plane, " ──");
       }
-      prev_lang = list->entries[idx].lang;
       display_row++;
     }
     if (display_row >= scroll_offset && display_row < last_visible) {
@@ -417,7 +536,8 @@ static int clamp_scroll(const LexiconList *list, int focus, int scroll_offset,
   // above. Aim to keep that header visible too.
   int target_top = focus_row;
   const bool first_of_lang =
-      focus == 0 || list->entries[focus].lang != list->entries[focus - 1].lang;
+      focus == 0 ||
+      !same_group(&list->entries[focus - 1], &list->entries[focus]);
   if (first_of_lang && focus_row > 0) {
     target_top = focus_row - 1;
   }
