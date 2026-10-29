@@ -93,7 +93,8 @@ typedef void (*PegOnStageStart)(int stage_idx, int k_cands, int inner_d,
 // barrier. reordered is true when the candidate slotted in above the bottom of
 // the live ranking (so the displayed order changed and the whole list should be
 // redrawn); false when it sorted to the bottom (the new worst), so a streaming
-// view can just append its one row.
+// view can just append its one row. When a cutoff stage solves candidates at
+// once (see early_cutoff), it fires from pool threads, one call at a time.
 typedef void (*PegOnCandDone)(int stage_idx, int cand_rank, const Move *cand,
                               double win_pct, double mean_spread, int scen_done,
                               int64_t completed_ns, bool reordered,
@@ -261,14 +262,18 @@ typedef struct PegArgs {
   bool first_win;
 
   // In an exhaustive solve (a single uncapped stage, PegArgs.stage_top_k =
-  // {INT_MAX}), with first-win endgames: evaluate candidates one at a time,
-  // and stop solving one, and mark it PegRankedCand.cut, once its losses and
+  // {INT_MAX}), with first-win endgames: score candidates separately, and
+  // stop solving one, and mark it PegRankedCand.cut, once its losses and
   // draws so far prove it cannot reach the best finished candidate's win%. It
   // is exact because first-win verdicts are exact, so the best move and its
   // win% are those of the uncut solve. Protected moves are never cut. Its
   // scenarios are solved likeliest losses first (by a greedy playout), so a
-  // losing candidate is cut sooner. False (a zero-initialized PegArgs) solves
-  // every candidate in full.
+  // losing candidate is cut sooner. With more than one thread, the seed's
+  // best candidate is solved first, every thread on its scenarios, and then
+  // the rest at once, one per thread, each against the best finished so far;
+  // which candidates are cut, and the bounds they show, can then vary from
+  // run to run. False (a zero-initialized PegArgs) solves every candidate in
+  // full.
   bool early_cutoff;
 
   // The tiles on the opponent's rack in `game` are tiles the mover knows it
@@ -289,10 +294,11 @@ typedef struct PegArgs {
   // - skip_noncutting_stages: a stage that would keep every live candidate
   //   (fewer of them than its count), other than the last, is skipped: its
   //   ranking decides nothing.
-  // - final_stage_cutoff: the last stage evaluates its candidates one at a
-  //   time and stops solving one once its losses and draws prove it cannot
-  //   reach the best finished one at that depth (PegRankedCand.cut), as
-  //   early_cutoff does for a complete solve. Protected moves are never cut.
+  // - final_stage_cutoff: the last stage scores its candidates separately
+  //   and stops solving one once its losses and draws prove it cannot reach
+  //   the best finished one at that depth (PegRankedCand.cut), as
+  //   early_cutoff does for a complete solve, threads included. Protected
+  //   moves are never cut.
   bool first_win_intermediate;
   bool skip_noncutting_stages;
   bool final_stage_cutoff;
@@ -670,6 +676,9 @@ typedef struct PegPollSnapshot {
   // That candidate, which stage_moves holds only while it is among the
   // stage's first PEG_POLL_MAX_ENTRIES.
   Move evaluating_move;
+  // How many candidates are being solved at once, one per thread, as a
+  // cutoff stage solves all but its first; 0 otherwise.
+  int cands_running;
   // The mover draws of that candidate, when candidates are solved one at a
   // time: how many are in each state, the orderings the done ones won and
   // tied of all they had, and up to PEG_POLL_MAX_DRAW_ROWS of the draws

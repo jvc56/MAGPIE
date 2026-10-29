@@ -854,6 +854,49 @@ static void test_peg_main_cli(void) {
   config_destroy(config);
 }
 
+// A complete solve with more than one thread solves the seed's best candidate
+// first and the rest at once, one per thread, against the best finished so
+// far. Its answer must be the one-thread solve's: the same best move with the
+// same counts, every other candidate cut below it, and the best's outcomes
+// captured.
+static void test_peg_complete_threads_match(void) {
+  Config *config = config_create_or_die("set -threads 1 -s1 score -s2 score");
+  load_and_exec_config_or_die(
+      config, "cgp 13R1/12MA1/12OB1/11OHIA/11FACE/9Q1LI1R/2VUG1SIDECAR1A/"
+              "3PALEO1ERG2D/4BOX2MI3I/6TENANT1ZO/10I2L1/7FOUND1O1/8UNGIRT1/"
+              "2NyLONED4Y1/AJEE1KAT3WEST EEHISTY/ 364/387 0 -lex CSW24");
+  const char *threads[] = {"1", "4"};
+  PegRankedCand best[2];
+  for (int run_idx = 0; run_idx < 2; run_idx++) {
+    char *command = get_formatted_string(
+        "peg only 11C.YITES,11E.YES,12N.OY,14N.YE -pegplies 1 -threads %s",
+        threads[run_idx]);
+    load_and_exec_config_or_die(config, command);
+    free(command);
+    const PegResult *result = config_get_peg_result(config);
+    assert(result->n_top_cands == 4);
+    best[run_idx] = result->top_cands[0];
+    assert(!best[run_idx].cut);
+    for (int cand_idx = 1; cand_idx < result->n_top_cands; cand_idx++) {
+      const PegRankedCand *cand = &result->top_cands[cand_idx];
+      assert(cand->cut);
+      assert(cand->win_pct < best[run_idx].win_pct);
+    }
+    assert(result->n_per_scenario > 0);
+  }
+  const Game *game = config_get_game(config);
+  StringBuilder *move_sb = string_builder_create();
+  string_builder_add_move(move_sb, game_get_board(game), &best[1].move,
+                          game_get_ld(game), false);
+  assert(strings_equal(string_builder_peek(move_sb), "11C YITES"));
+  string_builder_destroy(move_sb);
+  assert(best[0].win_count == best[1].win_count);
+  assert(best[0].tie_count == best[1].tie_count);
+  assert(best[0].weight_sum == best[1].weight_sum);
+  assert(best[0].win_count == 38 && best[0].tie_count == 4);
+  config_destroy(config);
+}
+
 // pegonly moved from the persistent -pegonly option to a positional argument
 // on the peg command itself: `-pegonly` as a standalone option must no longer
 // parse, and the restriction it applies must not persist to a later `peg`
@@ -2339,6 +2382,7 @@ void test_peg(void) {
   test_peg_macondo_pah_slice();
   test_peg_macondo_pond_slice();
   test_peg_main_cli();
+  test_peg_complete_threads_match();
   test_peg_pegonly_positional_arg();
   test_peg_new_game_drops_previous_peg();
   test_peg_protected_moves_positional();

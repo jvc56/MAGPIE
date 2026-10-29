@@ -756,6 +756,17 @@ static void peg_poll_set_evaluating(PegPoll *poll, int move_idx,
   cpthread_mutex_unlock(&poll->mutex);
 }
 
+// Counts candidates solved at once that start (delta 1) or end (delta -1).
+static void peg_poll_add_cands_running(PegPoll *poll, int delta) {
+  if (poll == NULL) {
+    return;
+  }
+  cpthread_mutex_lock(&poll->mutex);
+  poll->s.cands_running += delta;
+  poll->s.version++;
+  cpthread_mutex_unlock(&poll->mutex);
+}
+
 static void peg_poll_finish(PegPoll *poll, bool can_resume) {
   if (poll == NULL) {
     return;
@@ -1240,17 +1251,30 @@ typedef struct PegScenarioCapture {
 // its scenario jobs. Results count in half-orderings: a labeled ordering won
 // is worth 2, drawn 1 and lost 0, so a candidate scores 2 * wins + draws out
 // of 2 * weight_sum. `deficit` sums what the orderings solved so far fell
-// short of 2; once it exceeds `limit` -- 2 * weight_sum less the best finished
-// candidate's score -- the candidate can no longer reach the best and `cut`
-// is set.
+// short of 2; once it exceeds 2 * weight_sum less the best finished
+// candidate's score, the candidate can no longer reach the best and `cut` is
+// set. The best is read live: candidates solved at once raise it as they
+// finish, which can cut one already under way.
 typedef struct PegCutoff {
   _Atomic int64_t deficit;
-  int64_t limit;
+  int64_t full_score;                // 2 * weight_sum
+  const _Atomic int64_t *best_score; // the best finished score, -1 for none
   atomic_bool cut;
 } PegCutoff;
 
+static bool peg_cutoff_over(const PegCutoff *cutoff, int64_t deficit) {
+  return deficit > cutoff->full_score - atomic_load(cutoff->best_score);
+}
+
 static bool peg_cutoff_is_cut(PegCutoff *cutoff) {
-  return cutoff != NULL && atomic_load(&cutoff->cut);
+  if (cutoff == NULL) {
+    return false;
+  }
+  if (!atomic_load(&cutoff->cut) &&
+      peg_cutoff_over(cutoff, atomic_load(&cutoff->deficit))) {
+    atomic_store(&cutoff->cut, true);
+  }
+  return atomic_load(&cutoff->cut);
 }
 
 // Adds what one solved ordering of `per_ordering` labeled orderings fell short
@@ -1261,8 +1285,8 @@ static void peg_cutoff_add(PegCutoff *cutoff, int64_t per_ordering,
     return;
   }
   const int64_t shortfall = (value == 0 ? 1 : 2) * per_ordering;
-  if (atomic_fetch_add(&cutoff->deficit, shortfall) + shortfall >
-      cutoff->limit) {
+  if (peg_cutoff_over(cutoff, atomic_fetch_add(&cutoff->deficit, shortfall) +
+                                  shortfall)) {
     atomic_store(&cutoff->cut, true);
   }
 }
@@ -3228,7 +3252,10 @@ static void peg_order_jobs_losses_first(PegScenarioJobList *list,
 // expand every (cand, mover-draw split) into a job, run them all across the
 // pool, then reduce per candidate. This keeps all cores busy even when a stage
 // has only a few candidates (the deep stages), where per-candidate parallelism
-// would leave most cores idle.
+// would leave most cores idle. caller_worker_idx is the calling thread's
+// scratch worker: the pool's helper slot, or with no pool the worker that runs
+// every job. injection_cap (the pool's size, 0 for none) opens each leaf
+// endgame's window so the monitor can lend idle cores to the long ones.
 static void peg_eval_candidates_scenario(
     PegPool *pool, PegWorker *workers, const Game *prepared_base, int mover_idx,
     const uint8_t *unseen, int ld_size, const LetterDistribution *ld,
@@ -3236,7 +3263,8 @@ static void peg_eval_candidates_scenario(
     int inner_top_k, int fidelity_plies, int scenario_stride,
     int64_t deadline_ns, ThreadControl *thread_control,
     const PegProgress *progress, PegPoll *poll, PegRankedCand *ranked,
-    PegCandOutcomes *out_outcomes, PegCutoff *cutoff, PegPoll *scenario_poll) {
+    PegCandOutcomes *out_outcomes, PegCutoff *cutoff, PegPoll *scenario_poll,
+    int caller_worker_idx, int injection_cap) {
   // Shared per-cand templates: post-cand board + cross-sets + pruned override,
   // built once and read concurrently by the scenario workers.
   Game **templates = malloc_or_die((size_t)n * sizeof(Game *));
@@ -3246,9 +3274,7 @@ static void peg_eval_candidates_scenario(
     game_gen_all_cross_sets(templates[i]);
   }
 
-  // Expand all (cand, split) jobs. The injection cap (== pool size) opens each
-  // leaf endgame's window so the monitor can lend idle cores to the long ones.
-  const int injection_cap = pool ? peg_pool_num_workers(pool) : 0;
+  // Expand all (cand, split) jobs.
   PegScenarioJobList list = {0};
   for (int i = 0; i < n; i++) {
     PegEvalCtx ctx;
@@ -3279,9 +3305,8 @@ static void peg_eval_candidates_scenario(
   }
 
   if (cutoff != NULL) {
-    peg_order_jobs_losses_first(&list,
-                                &workers[pool ? peg_pool_num_workers(pool) : 0],
-                                mover_idx, deadline_ns, thread_control);
+    peg_order_jobs_losses_first(&list, &workers[caller_worker_idx], mover_idx,
+                                deadline_ns, thread_control);
   }
   for (int job_idx = 0; job_idx < list.count; job_idx++) {
     list.jobs[job_idx].scenario_poll = scenario_poll;
@@ -3308,7 +3333,7 @@ static void peg_eval_candidates_scenario(
     free(ptrs);
   } else {
     for (int j = 0; j < list.count; j++) {
-      peg_scenario_worker_fn(&list.jobs[j], 0);
+      peg_scenario_worker_fn(&list.jobs[j], caller_worker_idx);
     }
   }
 
@@ -3410,6 +3435,217 @@ static void peg_eval_candidates_scenario(
     game_destroy(templates[i]);
   }
   free(templates);
+}
+
+// ----- live stages ---------------------------------------------------------
+
+// A live-mode stage (a poll, a checkpoint or a cutoff): each candidate is
+// published to the poll, the checkpoint and the caller as soon as it is
+// scored. Solved one after another, each gets the whole pool for its
+// scenarios. With a cutoff and a pool, only the first is: it sets the bar,
+// and the rest are solved at once, one per thread, each its draws in turn, so
+// a thread spends little more on a losing candidate than the draws that prove
+// it loses (spread over the pool, every draw starts before the first loss is
+// found, and the draws a candidate wins are the expensive ones).
+typedef struct PegLiveStage {
+  const PegArgs *args;
+  PegWorker *workers;
+  const Game *prepared_base;
+  int mover_idx;
+  const uint8_t *unseen;
+  int ld_size;
+  const LetterDistribution *ld;
+  int bag_size;
+  int injection_cap; // the pool's size, so idle threads can join endgames
+  int fidelity;
+  int scenario_stride;
+  int64_t deadline_ns;
+  const Move *const *protect_moves;
+  int n_protect;
+  bool cutoff_on;
+  const PegProgress *inner; // per-scenario progress; no on_cand_done
+  int stage_idx;
+  // moves[cand_idx] is ranked[cand_idx].move: the candidate as the previous
+  // stage scored it, whose weight_sum a complete score here must reach.
+  const Move **moves;
+  const PegRankedCand *ranked;
+  PegRankedCand *restaged;         // this stage's scores
+  PegCandOutcomes *stage_outcomes; // NULL unless include_per_scenario
+  bool *complete;                  // scored in full within budget
+  // The best finished, uncut candidate's score in half-orderings (2 * wins +
+  // draws); -1 before the first.
+  _Atomic int64_t best_score;
+  // Serializes the checkpoint and the publishing of candidates solved at once.
+  cpthread_mutex_t mutex;
+} PegLiveStage;
+
+// Scores candidate cand_idx into restaged[cand_idx]: from the checkpoint when
+// it is saved there, else solving it, with the pool on its scenarios or, with
+// no pool, on scratch worker_idx a draw at a time. A candidate solved `alone`
+// is the poll's candidate in progress. Publishes it if complete, and returns
+// whether it is.
+static bool peg_live_solve_cand(PegLiveStage *stage, int cand_idx,
+                                PegPool *pool, int worker_idx, bool alone) {
+  const PegArgs *args = stage->args;
+  PegRankedCand *result = &stage->restaged[cand_idx];
+  PegCandOutcomes *outcomes =
+      stage->stage_outcomes ? &stage->stage_outcomes[cand_idx] : NULL;
+  PegPoll *alone_poll = alone ? args->poll : NULL;
+  Timer cand_timer;
+  ctimer_start(&cand_timer);
+  peg_poll_set_evaluating(alone_poll, cand_idx, ctimer_monotonic_ns(),
+                          stage->moves[cand_idx]);
+  cpthread_mutex_lock(&stage->mutex);
+  const PegSavedCandidate *saved = peg_checkpoint_find(
+      args->checkpoint, stage->fidelity, stage->moves[cand_idx]);
+  if (saved) {
+    *result = saved->value;
+    if (outcomes) {
+      PegCandOutcomes *copy = peg_cand_outcomes_dup_array(saved->outcomes, 1);
+      *outcomes = *copy;
+      free(copy);
+    }
+  }
+  cpthread_mutex_unlock(&stage->mutex);
+  const int64_t full_weight = stage->ranked[cand_idx].weight_sum;
+  if (!saved) {
+    // A protected move (analyze's played move) is always solved in full: its
+    // exact win% is the point.
+    const bool can_cut =
+        stage->cutoff_on &&
+        !peg_move_protected(stage->moves[cand_idx], stage->protect_moves,
+                            stage->n_protect);
+    PegCutoff cutoff;
+    atomic_init(&cutoff.deficit, 0);
+    atomic_init(&cutoff.cut, false);
+    cutoff.full_score = 2 * full_weight;
+    cutoff.best_score = &stage->best_score;
+    peg_eval_candidates_scenario(
+        pool, stage->workers, stage->prepared_base, stage->mover_idx,
+        stage->unseen, stage->ld_size, stage->ld, stage->bag_size,
+        &stage->moves[cand_idx], 1, args->opp_model, args->inner_top_k,
+        stage->fidelity, stage->scenario_stride, stage->deadline_ns,
+        args->thread_control, stage->inner, /*poll=*/NULL, result, outcomes,
+        can_cut ? &cutoff : NULL, alone_poll, worker_idx, stage->injection_cap);
+    result->eval_seconds = ctimer_elapsed_seconds(&cand_timer);
+    if (can_cut && atomic_load(&cutoff.cut)) {
+      // Cut: it cannot reach the best. Report the most it could have reached,
+      // and drop its partial outcome rows.
+      result->cut = true;
+      result->spread_unknown = true;
+      result->weight_sum = full_weight;
+      result->win_pct =
+          (double)(cutoff.full_score - atomic_load(&cutoff.deficit)) /
+          (double)cutoff.full_score;
+      if (outcomes) {
+        peg_scenario_rows_destroy(outcomes->rows, outcomes->n_rows);
+        outcomes->rows = NULL;
+        outcomes->n_rows = 0;
+      }
+    }
+  }
+  if (!result->cut && result->weight_sum >= full_weight) {
+    const int64_t score = 2 * result->win_count + result->tie_count;
+    int64_t best = atomic_load(&stage->best_score);
+    while (score > best &&
+           !atomic_compare_exchange_weak(&stage->best_score, &best, score)) {
+    }
+  }
+  peg_poll_set_evaluating(alone_poll, -1, 0, NULL);
+  // A deadline or user interrupt can leave scenarios unscored. Require the
+  // full weight carried from this candidate's preceding stage before
+  // publishing its score or captured outcomes.
+  if (peg_should_stop(stage->deadline_ns, args->thread_control) ||
+      result->weight_sum < full_weight) {
+    if (outcomes) {
+      peg_scenario_rows_destroy(outcomes->rows, outcomes->n_rows);
+      outcomes->rows = NULL;
+      outcomes->n_rows = 0;
+    }
+    return false;
+  }
+  cpthread_mutex_lock(&stage->mutex);
+  peg_checkpoint_save(args->checkpoint, stage->fidelity, result, outcomes);
+  peg_poll_upsert_outcomes(args->poll, outcomes);
+  // Surface this finished candidate into the leaderboard, then stream the
+  // updated ranking to the caller right away -- every candidate's result
+  // prints as soon as it finishes, so the deep stages fill in row by row.
+  // reordered tells the renderer whether the candidate slotted in above the
+  // bottom (redraw the whole list) or sorted to the bottom as the new worst
+  // (just append its row).
+  const bool reordered = peg_poll_upsert(args->poll, result);
+  if (args->on_cand_done != NULL) {
+    args->on_cand_done(stage->stage_idx, cand_idx, &result->move,
+                       result->win_pct, result->mean_spread,
+                       result->n_scenarios, ctimer_monotonic_ns(), reordered,
+                       args->user_data);
+  }
+  cpthread_mutex_unlock(&stage->mutex);
+  return true;
+}
+
+typedef struct PegLiveJob {
+  PegLiveStage *stage;
+  int cand_idx;
+} PegLiveJob;
+
+static void peg_live_job_fn(void *arg, int worker_idx) {
+  const PegLiveJob *job = (const PegLiveJob *)arg;
+  PegLiveStage *stage = job->stage;
+  if (peg_should_stop(stage->deadline_ns, stage->args->thread_control)) {
+    return;
+  }
+  peg_poll_add_cands_running(stage->args->poll, 1);
+  stage->complete[job->cand_idx] =
+      peg_live_solve_cand(stage, job->cand_idx, /*pool=*/NULL, worker_idx,
+                          /*alone=*/false);
+  peg_poll_add_cands_running(stage->args->poll, -1);
+}
+
+// Solves candidates [first, count) at once, one per pool thread (the caller
+// helping), and moves every complete one, in order, ahead of the rest, with
+// its previous-stage record (ranked) and outcomes. Returns how many complete
+// candidates lead, counting the first `first`, which must be complete.
+static int peg_live_solve_at_once(PegLiveStage *stage, PegPool *pool,
+                                  PegRankedCand *ranked, int first, int count) {
+  PegLiveJob *jobs = malloc_or_die((size_t)count * sizeof(PegLiveJob));
+  void **ptrs = malloc_or_die((size_t)count * sizeof(void *));
+  for (int cand_idx = first; cand_idx < count; cand_idx++) {
+    jobs[cand_idx].stage = stage;
+    jobs[cand_idx].cand_idx = cand_idx;
+    ptrs[cand_idx - first] = &jobs[cand_idx];
+  }
+  peg_pool_submit_and_wait(pool, peg_live_job_fn, ptrs, count - first,
+                           peg_pool_num_workers(pool));
+  free(ptrs);
+  free(jobs);
+  int done = first;
+  for (int cand_idx = first; cand_idx < count; cand_idx++) {
+    if (!stage->complete[cand_idx]) {
+      continue;
+    }
+    // Rotate it down to slot `done`, keeping the incomplete ones in order.
+    const PegRankedCand old_rec = ranked[cand_idx];
+    const PegRankedCand new_rec = stage->restaged[cand_idx];
+    PegCandOutcomes oc = {0};
+    if (stage->stage_outcomes) {
+      oc = stage->stage_outcomes[cand_idx];
+    }
+    for (int slot = cand_idx; slot > done; slot--) {
+      ranked[slot] = ranked[slot - 1];
+      stage->restaged[slot] = stage->restaged[slot - 1];
+      if (stage->stage_outcomes) {
+        stage->stage_outcomes[slot] = stage->stage_outcomes[slot - 1];
+      }
+    }
+    ranked[done] = old_rec;
+    stage->restaged[done] = new_rec;
+    if (stage->stage_outcomes) {
+      stage->stage_outcomes[done] = oc;
+    }
+    done++;
+  }
+  return done;
 }
 
 // ----- result publishing ---------------------------------------------------
@@ -4069,136 +4305,72 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
       // outcomes with the restored shallower ranking.
       PegCandOutcomes *stage_outcomes =
           args->include_per_scenario
-              ? malloc_or_die((size_t)eval_count * sizeof(PegCandOutcomes))
+              ? calloc_or_die((size_t)eval_count, sizeof(PegCandOutcomes))
               : NULL;
-      // The exact early cutoff (PegArgs.early_cutoff) needs the candidates one
-      // at a time, the best finished one's score in hand.
+      // The exact early cutoff (PegArgs.early_cutoff) needs the candidates
+      // scored separately, against the best finished one's score.
       const bool cutoff_on =
           (args->early_cutoff && args->first_win && exhaustive) ||
           (args->final_stage_cutoff && !exhaustive && last_stage);
       if (args->poll != NULL || args->checkpoint != NULL || cutoff_on) {
-        // Live mode: evaluate one candidate at a time so each completion
-        // updates the pollable leaderboard (for `sta`/`shpeg`) and so we can
-        // record each candidate's own wall-clock time. Each candidate still
-        // gets the whole pool for its scenarios. Greedy stage 0 is not routed
-        // here.
+        // Live mode: score candidates separately so each completion updates
+        // the pollable leaderboard (for `sta`/`shpeg`) and so we can record
+        // each candidate's own wall-clock time (see PegLiveStage for how the
+        // pool is spread over them). Greedy stage 0 is not routed here.
         // Publish the whole stage's moves so a live renderer can fix the move
         // column width up front (moves[] aliases ranked[].move for [0,eval)).
         peg_poll_set_stage_moves(args->poll, moves, eval_count);
         PegProgress inner = progress;
-        inner.on_cand_done = NULL; // fired below, once, after the poll upsert
+        inner.on_cand_done = NULL; // fired once per candidate, when published
+        PegLiveStage live = {
+            .args = args,
+            .workers = workers,
+            .prepared_base = prepared_base,
+            .mover_idx = mover_idx,
+            .unseen = unseen,
+            .ld_size = ld_size,
+            .ld = ld,
+            .bag_size = bag_size,
+            .injection_cap = peg_pool_num_workers(pool),
+            .fidelity = stage_fidelity,
+            .scenario_stride = scenario_stride,
+            .deadline_ns = deadline_ns,
+            .protect_moves = protect_moves,
+            .n_protect = n_protect,
+            .cutoff_on = cutoff_on,
+            .inner = &inner,
+            .stage_idx = stage_idx,
+            .moves = moves,
+            .ranked = ranked,
+            .restaged = restaged,
+            .stage_outcomes = stage_outcomes,
+            .complete = calloc_or_die((size_t)eval_count, sizeof(bool)),
+        };
+        atomic_init(&live.best_score, -1);
+        cpthread_mutex_init(&live.mutex);
+        // With a cutoff and a pool, the first candidate alone sets the bar
+        // and the rest are solved at once (see PegLiveStage).
+        const bool at_once = cutoff_on && pool != NULL;
+        const int n_alone = at_once ? 1 : eval_count;
         done_count = 0;
-        // The best finished, uncut candidate's score in half-orderings (2 *
-        // wins + draws); -1 before the first.
-        int64_t best_score = -1;
-        for (int cand_idx = 0; cand_idx < eval_count; cand_idx++) {
+        for (int cand_idx = 0; cand_idx < n_alone; cand_idx++) {
           // Stop deepening once the budget or a user interrupt hits. Checked
           // before starting a candidate so done_count counts only candidates
           // evaluated within budget; the finished ones (if >= 2) still form a
           // usable, if partial, tier at this stage's depth.
-          if (deadline_ns != 0 && ctimer_monotonic_ns() >= deadline_ns) {
-            break;
-          }
-          if (thread_control_search_checkpoint(args->thread_control) ==
-              THREAD_CONTROL_STATUS_USER_INTERRUPT) {
-            break;
-          }
-          Timer cand_timer;
-          const int64_t cand_start_ns = ctimer_monotonic_ns();
-          peg_poll_set_evaluating(args->poll, cand_idx, cand_start_ns,
-                                  moves[cand_idx]);
-          ctimer_start(&cand_timer);
-          const PegSavedCandidate *saved = peg_checkpoint_find(
-              args->checkpoint, stage_fidelity, moves[cand_idx]);
-          if (saved) {
-            restaged[cand_idx] = saved->value;
-            if (stage_outcomes) {
-              PegCandOutcomes *copy =
-                  peg_cand_outcomes_dup_array(saved->outcomes, 1);
-              stage_outcomes[cand_idx] = *copy;
-              free(copy);
-            }
-          } else {
-            // A protected move (analyze's played move) is always solved in
-            // full: its exact win% is the point.
-            const bool can_cut =
-                cutoff_on &&
-                !peg_move_protected(moves[cand_idx], protect_moves, n_protect);
-            const int64_t full_score = 2 * ranked[cand_idx].weight_sum;
-            PegCutoff cutoff;
-            atomic_init(&cutoff.deficit, 0);
-            atomic_init(&cutoff.cut, false);
-            cutoff.limit = full_score - best_score;
-            peg_eval_candidates_scenario(
-                pool, workers, prepared_base, mover_idx, unseen, ld_size, ld,
-                bag_size, &moves[cand_idx], 1, args->opp_model,
-                args->inner_top_k, stage_fidelity, scenario_stride, deadline_ns,
-                args->thread_control, &inner, /*poll=*/NULL,
-                &restaged[cand_idx],
-                args->include_per_scenario ? &stage_outcomes[cand_idx] : NULL,
-                can_cut ? &cutoff : NULL, args->poll);
-            restaged[cand_idx].eval_seconds =
-                ctimer_elapsed_seconds(&cand_timer);
-            if (can_cut && atomic_load(&cutoff.cut)) {
-              // Cut: it cannot reach the best. Report the most it could have
-              // reached, and drop its partial outcome rows.
-              PegRankedCand *cut = &restaged[cand_idx];
-              cut->cut = true;
-              cut->spread_unknown = true;
-              cut->weight_sum = ranked[cand_idx].weight_sum;
-              cut->win_pct =
-                  (double)(full_score - atomic_load(&cutoff.deficit)) /
-                  (double)full_score;
-              if (stage_outcomes) {
-                peg_scenario_rows_destroy(stage_outcomes[cand_idx].rows,
-                                          stage_outcomes[cand_idx].n_rows);
-                stage_outcomes[cand_idx].rows = NULL;
-                stage_outcomes[cand_idx].n_rows = 0;
-              }
-            }
-          }
-          if (!restaged[cand_idx].cut &&
-              restaged[cand_idx].weight_sum >= ranked[cand_idx].weight_sum) {
-            const int64_t score =
-                2 * restaged[cand_idx].win_count + restaged[cand_idx].tie_count;
-            if (score > best_score) {
-              best_score = score;
-            }
-          }
-          peg_poll_set_evaluating(args->poll, -1, 0, NULL);
-          // A deadline or user interrupt can leave scenarios unscored. Require
-          // the full weight carried from this candidate's preceding stage
-          // before publishing its score or captured outcomes.
           if (peg_should_stop(deadline_ns, args->thread_control) ||
-              restaged[cand_idx].weight_sum < ranked[cand_idx].weight_sum) {
-            if (args->include_per_scenario) {
-              peg_scenario_rows_destroy(stage_outcomes[cand_idx].rows,
-                                        stage_outcomes[cand_idx].n_rows);
-            }
+              !peg_live_solve_cand(&live, cand_idx, pool,
+                                   peg_pool_num_workers(pool),
+                                   /*alone=*/true)) {
             break;
           }
-          peg_checkpoint_save(
-              args->checkpoint, stage_fidelity, &restaged[cand_idx],
-              stage_outcomes ? &stage_outcomes[cand_idx] : NULL);
-          peg_poll_upsert_outcomes(
-              args->poll, stage_outcomes ? &stage_outcomes[cand_idx] : NULL);
           done_count = cand_idx + 1;
-          // Surface this finished candidate into the leaderboard, then stream
-          // the updated ranking to the caller right away — every candidate's
-          // result prints as soon as it finishes, so the deep stages fill in
-          // row by row. reordered tells the renderer whether the candidate
-          // slotted in above the bottom (redraw the whole list) or sorted to
-          // the bottom as the new worst (just append its row).
-          const bool reordered =
-              peg_poll_upsert(args->poll, &restaged[cand_idx]);
-          if (args->on_cand_done != NULL) {
-            args->on_cand_done(
-                stage_idx, cand_idx, &restaged[cand_idx].move,
-                restaged[cand_idx].win_pct, restaged[cand_idx].mean_spread,
-                restaged[cand_idx].n_scenarios, ctimer_monotonic_ns(),
-                reordered, args->user_data);
-          }
         }
+        if (at_once && done_count == n_alone && n_alone < eval_count) {
+          done_count =
+              peg_live_solve_at_once(&live, pool, ranked, n_alone, eval_count);
+        }
+        free(live.complete);
       } else {
         // Fast path (no live poll, e.g. benchmarks): scenario-level parallelism
         // across all candidates at once — a halving stage has few candidates,
@@ -4209,7 +4381,8 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
             bag_size, moves, eval_count, args->opp_model, args->inner_top_k,
             stage_fidelity, scenario_stride, deadline_ns, args->thread_control,
             &progress, args->poll, restaged, stage_outcomes, /*cutoff=*/NULL,
-            /*scenario_poll=*/NULL);
+            /*scenario_poll=*/NULL, peg_pool_num_workers(pool),
+            peg_pool_num_workers(pool));
         // A deadline can cut the stage mid-flight: a candidate whose scenario
         // jobs bailed has a short weight_sum, so keep only the fully-scored
         // ones (as the live path does) instead of ranking partial scores.

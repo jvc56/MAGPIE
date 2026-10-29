@@ -1328,10 +1328,17 @@ static char *peg_draw_status_text(const PegDrawStatus *draw) {
 // it is and for how long, how many of its draws are in each state, then a row
 // for each running draw, with the endgame it is searching, and for each
 // finished one when there are few; past PEG_STATUS_MAX_FINISHED_DRAW_ROWS
-// draws, the finished ones are totalled instead.
+// draws, the finished ones are totalled instead. When candidates are solved
+// at once, just how many are.
 static void peg_append_live_candidate(StringBuilder *sb,
                                       const PegPollSnapshot *snap,
                                       const Game *game, int64_t now_ns) {
+  if (snap->cands_running > 0) {
+    string_builder_add_formatted_string(
+        sb, "solving %d candidate%s at once, one per thread\n\n",
+        snap->cands_running, snap->cands_running == 1 ? "" : "s");
+    return;
+  }
   if (snap->eval_start_ns == 0 || snap->currently_evaluating_move_idx < 0 ||
       snap->n_stage_history == 0) {
     return;

@@ -700,11 +700,14 @@ descriptions:
   solve nests until the game resolves, over every candidate and scenario.
 - `-pegstride <n>` samples ~1/n of the scenarios for bag >= 3 in the cascade
   (faster, approximate).
-- `-threads <n>` is a pure speedup at the same answer.
+- `-threads <n>` is a pure speedup at the same answer (only which
+  candidates are cut, and the bounds they show, can vary).
 
-At the default 3 plies, a 1-in-bag solve took a median 16 seconds on 10
-threads in ten positions, though one took 11 minutes and one saved game ran past
-15; `-pegplies 2` is a few times faster. To the end of the game (`-pegplies
+At the default 3 plies, a 1-in-bag solve took a median 3.5 seconds on 10
+threads in ten positions, at most 22. The ten 1-in-the-bag games in
+`example_pegs/` took from under a second to 7 minutes, except one where every
+play wins every draw, so nothing can be cut, which ran past 15 minutes;
+`-pegplies 2` is a few times faster. To the end of the game (`-pegplies
 end`), it often takes several minutes, more when the opponent holds a blank,
 and at 2 to 4 in the bag well over twenty minutes; a time limit gives a quick,
 approximate answer instead. `analyze` solves 1-in-bag

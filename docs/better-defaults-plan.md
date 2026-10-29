@@ -56,11 +56,13 @@ always has an answer from its last completed stage. `config_fill_peg_args`
 makes the choice.
 
 **Progress against a known total (1a).** While a solve runs, `status` shows
-the candidate in progress and how long it has run. It also shows the
-ranking's label (which stage and depth it comes from), a row for each draw in
-progress (its endgame depth, root moves done, nodes and helpers), and the
-finished draws' results. In interactive mode, `stop`, `status` and `shgame`
-(or `s`) are the only commands accepted while a command runs.
+the candidate in progress and how long it has run, or, once a complete solve
+has its first candidate, how many candidates are being solved at once. It
+also shows the ranking's label (which stage and depth it comes from), a row
+for each draw in progress (its endgame depth, root moves done, nodes and
+helpers), and the finished draws' results. In interactive mode, `stop`,
+`status` and `shgame` (or `s`) are the only commands accepted while a
+command runs.
 
 **Ranking by results (1b).** Candidates rank by wins + ½ draws, counted
 exactly in labeled orderings: a win is worth 2, a draw 1 and a loss 0.
@@ -83,6 +85,14 @@ keeps its full window (Phase 4).
   first-win verdicts.
 - Within a candidate, the draws most likely to lose are solved first, so a
   losing candidate is cut sooner.
+- With more than one thread, the seed's best candidate is solved first,
+  every thread on its draws, to set the bar. The rest are then solved at
+  once, one per thread, each its draws in turn against the best finished so
+  far. Spread over every thread, one candidate's draws all start before the
+  first loss is found, and the draws a candidate wins are the expensive ones;
+  solved by one thread, a losing candidate costs little more than its first
+  loss. The answer is the same; which candidates are cut, and the bounds they
+  show, can vary between runs. See `docs/peg-vs-macondo.md`.
 - Scenarios are fully enumerated (`-pegstride` 0).
 
 **The endgame depth: `-pegplies`, default 3.** The plan called for solving
