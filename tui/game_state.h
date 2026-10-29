@@ -119,8 +119,15 @@ typedef struct {
   // shown and whether the solve ran to completion.
   int peg_fidelity;
   bool peg_done;
-  // Which mode produced this snapshot: is_peg wins over is_sim; when
-  // both are false the snapshot is from an endgame solve.
+  // Static-mode ("/kibitz") meta: the played move's 1-based rank in
+  // the static list (0 when it isn't in the list or unknown) and its
+  // equity behind the top move.
+  int static_played_rank;
+  double static_played_equity_loss;
+  // Which mode produced this snapshot: is_static (a "/kibitz" ranking
+  // by static equity) wins, then is_peg, then is_sim; when all are
+  // false the snapshot is from an endgame solve.
+  bool is_static;
   bool is_sim;
   bool is_peg;
   bool valid;
@@ -226,6 +233,11 @@ typedef struct {
   // endgame_moves_saved_count. NULL when not an endgame turn.
   struct Move *endgame_moves_saved;
   int endgame_moves_saved_count;
+
+  // The "/kibitz" static ranking's moves, in analysis_snapshot.rows
+  // order, so the board can preview a static row.
+  struct Move *static_moves_saved;
+  int static_moves_saved_count;
 
   // Pre-move rack snapshot, owned. Pairs with board_before for
   // resuming analysis on this turn's position. The text rack_str
@@ -399,6 +411,9 @@ typedef struct {
   _Atomic bool analysis_stop;
   _Atomic bool analysis_running;
   int analysis_resume_turn_idx; // history idx being resumed; -1 = none
+  // true: "/sim" (simulate the turn, fresh or continuing its saved sim);
+  // false: "/resume" (continue whatever analysis the turn saved).
+  bool analysis_request_sim;
   // Scratch game positioned at the resumed turn (reloaded from the
   // entry's cgp_before). Owned by the worker; non-NULL only while a
   // resume is running. The analysis row builder and snapshot capture
