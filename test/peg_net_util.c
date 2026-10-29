@@ -158,8 +158,8 @@ double spread_for_player(const Game *game, int mover) {
                           player_get_score(game_get_player(game, 1 - mover)));
 }
 
-int greedy_endgame_move(Game *game, MoveList *small, Move *move, bool *out,
-                        int *tiles, bool *pass) {
+int greedy_endgame_move(const Game *game, MoveList *small, Move *move,
+                        bool *out, int *tiles, bool *pass) {
   const int stm = game_get_player_on_turn_index(game);
   const LetterDistribution *ld = game_get_ld(game);
   const Rack *own = player_get_rack(game_get_player(game, stm));

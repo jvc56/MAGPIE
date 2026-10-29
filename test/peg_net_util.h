@@ -47,8 +47,8 @@ double spread_for_player(const Game *game, int mover);
 // The side on turn's greedy endgame choice: highest score, plus twice the
 // opponent's rack when going out. Returns the greedy value; pass when no
 // placement exists.
-int greedy_endgame_move(Game *game, MoveList *small, Move *move, bool *out,
-                        int *tiles, bool *pass);
+int greedy_endgame_move(const Game *game, MoveList *small, Move *move,
+                        bool *out, int *tiles, bool *pass);
 
 // Experiment toggle for PR #819's best-reply shortcuts (-ebestreply): set
 // PEG_NET_BEST_REPLY=0 to disable them in the harness's PEG and exact solves.
