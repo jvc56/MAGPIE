@@ -2,6 +2,7 @@
 #define TUI_GAME_STATE_H
 
 #include "config.h"
+#include "theme.h"
 #include <pthread.h>
 #include <stdatomic.h>
 #include <stdbool.h>
@@ -551,6 +552,8 @@ typedef struct {
   // active values at game-state init.
   char pending_lexicon[32];
   bool pending_load_rit;
+  // The theme the UI draws with; Settings can change it mid-session.
+  ThemeName theme;
 
   // Transient status-bar notice (e.g. "Copied CGP"). Rendered until
   // notice_expires_at (CLOCK_MONOTONIC); an all-zero timespec means
@@ -780,6 +783,10 @@ void tui_game_state_reset_game_for_annotation(TuiGameState *state);
 // the live game state matches the committed sequence and
 // every entry's error_str is empty.
 void tui_game_state_revalidate_history(TuiGameState *state);
+
+// Shows `message` in the status bar for a few seconds. Caller holds
+// state->mutex.
+void tui_game_state_notice(TuiGameState *state, const char *message);
 
 // The words `move` (played by `player_idx` on the engine's current
 // board) forms that aren't in that player's lexicon. `out_words` gets

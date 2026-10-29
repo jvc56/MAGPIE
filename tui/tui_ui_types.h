@@ -139,21 +139,6 @@ typedef enum {
   TUI_WATCH_SETUP_ITEM_COUNT = 6,
 } TuiWatchSetupItem;
 
-// Settings modal — opened from the main menu. Left/Right arrows on the
-// focused row adjust that setting's value.
-typedef enum {
-  TUI_SETTINGS_SCALE = 0,
-  TUI_SETTINGS_AA = 1,
-  TUI_SETTINGS_SUBSCRIPTS = 2,
-  TUI_SETTINGS_BORDER = 3,
-  TUI_SETTINGS_PREMIUM = 4,
-  TUI_SETTINGS_BLANKS = 5,
-  TUI_SETTINGS_RACK_SORT = 6,
-  TUI_SETTINGS_RIT = 7,
-  TUI_SETTINGS_BACK = 8,
-  TUI_SETTINGS_ITEM_COUNT = 9,
-} TuiSettingsItem;
-
 // Adjuster-row chevron click detection. For settings / watch-
 // setup rows that render with "◀ value ▶" decorations, this
 // reports which chevron (if any) the click landed on. Caller

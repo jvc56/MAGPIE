@@ -169,6 +169,12 @@ typedef struct {
   // start.
   bool load_rit;
   bool load_rit_set;
+  // Analysis sims: plies each one looks ahead, and how many candidate
+  // moves it compares.
+  int sim_plies;
+  bool sim_plies_set;
+  int sim_candidates;
+  bool sim_candidates_set;
 } TuiConfig;
 
 // Override the config file path. When set to a non-NULL, non-empty path,
