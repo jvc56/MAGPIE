@@ -56,7 +56,6 @@ typedef struct {
   int screen_left;
   bool antialias;
   bool ghost;
-  bool empty; // concealed opponent tile (no letter)
   bool valid;
 } RackTileCache;
 static RackTileCache rack_tile_cache[RACK_SIZE];
@@ -76,10 +75,21 @@ void invalidate_rack_tile_planes(void) {
 static _Atomic unsigned long g_rack_blits;
 unsigned long tui_debug_rack_blits(void) { return atomic_load(&g_rack_blits); }
 static BlitCache rack_pixel_cache;
+
+// Whose rack the Rack panel shows: the human's throughout a game against
+// the computer (the computer's stays hidden, and the human keeps seeing
+// their tiles while the computer thinks); otherwise the on-turn player's,
+// following the History cursor.
+static int rack_panel_player(const TuiGameState *state) {
+  if (state->app_mode == TUI_APP_MODE_PLAY_VS_COMPUTER &&
+      !tui_game_state_play_over(state)) {
+    return state->human_player_idx;
+  }
+  return pick_render_on_turn(state);
+}
 static void render_rack_panel_pixel(struct ncplane *plane, const Theme *theme,
                                     const TuiGameState *state, const Layout *L,
-                                    int start_col, int tile_count,
-                                    bool conceal) {
+                                    int start_col, int tile_count) {
   TuiGridPlanes *planes = tui_grid_planes();
   struct notcurses *nc = ncplane_notcurses(plane);
   if (nc == NULL || !notcurses_canpixel(nc) || state->glyph_cache == NULL) {
@@ -124,7 +134,7 @@ static void render_rack_panel_pixel(struct ncplane *plane, const Theme *theme,
   // is resolved through pick_render_on_turn so navigating to a
   // committed turn rewinds the rack panel to that turn's player
   // + rack.
-  const int player_idx = pick_render_on_turn(state);
+  const int player_idx = rack_panel_player(state);
   MachineLetter slot_letters[RACK_SIZE];
   for (int i = 0; i < RACK_SIZE; i++) {
     slot_letters[i] = ALPHABET_EMPTY_SQUARE_MARKER;
@@ -133,9 +143,7 @@ static void render_rack_panel_pixel(struct ncplane *plane, const Theme *theme,
   for (int i = 0; i < RACK_SIZE; i++) {
     slot_ghost[i] = false;
   }
-  // Concealed mode draws `tile_count` bare tile boxes (no letters) for
-  // the on-turn opponent; skip all the real-rack expansion.
-  if (!conceal) {
+  {
     const Rack *rack = pick_render_rack(state, player_idx);
     const int slot_max = tile_count < RACK_SIZE ? tile_count : RACK_SIZE;
     const int slot_idx = sort_rack_for_display(
@@ -157,9 +165,8 @@ static void render_rack_panel_pixel(struct ncplane *plane, const Theme *theme,
   }
 
   for (int i = 0; i < tile_count && i < RACK_SIZE; i++) {
-    const MachineLetter ml = conceal ? 0 : slot_letters[i];
-    const bool ghost = conceal ? false : slot_ghost[i];
-    const bool empty = conceal;
+    const MachineLetter ml = slot_letters[i];
+    const bool ghost = slot_ghost[i];
     RackTileCache *rc = &rack_tile_cache[i];
     const int tile_score =
         (ml == 0) ? 0 : equity_to_int(ld_get_score(state->ld, ml));
@@ -184,7 +191,7 @@ static void render_rack_panel_pixel(struct ncplane *plane, const Theme *theme,
     }
     if (rc->valid && rc->letter == (int)ml && rc->player_idx == player_idx &&
         rc->score == tile_score && rc->antialias == state->antialias &&
-        rc->ghost == ghost && rc->empty == empty &&
+        rc->ghost == ghost &&
         rc->score_subscripts == (int)state->score_subscripts &&
         rc->cdy == cdy && rc->cdx == cdx && rc->scale == L->scale &&
         rack_tile_planes[i] != NULL) {
@@ -205,7 +212,7 @@ static void render_rack_panel_pixel(struct ncplane *plane, const Theme *theme,
     uint8_t *buf = compose_rack_tile_pixels(
         ml, player_idx, ghost, tile_w, tile_h, state->glyph_cache,
         state->glyph_cache_sub, state->score_subscripts, state->antialias,
-        theme, state->ld, empty);
+        theme, state->ld);
     if (buf == NULL) {
       continue;
     }
@@ -223,7 +230,6 @@ static void render_rack_panel_pixel(struct ncplane *plane, const Theme *theme,
     rc->score = tile_score;
     rc->antialias = state->antialias;
     rc->ghost = ghost;
-    rc->empty = empty;
     rc->score_subscripts = (int)state->score_subscripts;
     rc->cdy = cdy;
     rc->cdx = cdx;
@@ -249,44 +255,9 @@ void render_rack_panel(struct ncplane *plane, const Theme *theme,
   // show that turn's player + rack, not the live game's on-turn
   // player. pick_render_rack falls through to live state when the
   // cursor is on the label or a pending entry.
-  const int player_idx = pick_render_on_turn(state);
+  const int player_idx = rack_panel_player(state);
   const Rack *rack = pick_render_rack(state, player_idx);
   const bool rack_focused = state->focused_panel == TUI_FOCUS_RACK;
-  // Play-vs-computer: while it's the computer's turn its rack is concealed
-  // (pick_render_rack returned NULL). Rather than blank the panel, show a
-  // row of empty tile slots so the human sees "opponent's tiles hidden."
-  const bool concealed = state->app_mode == TUI_APP_MODE_PLAY_VS_COMPUTER &&
-                         player_idx != state->human_player_idx &&
-                         state->game != NULL &&
-                         !tui_game_state_play_over(state);
-  if (concealed) {
-    draw_box_styled(plane, theme, L->rack_top, 0, box_height, L->board_width,
-                    "Rack", TUI_FOCUS_RACK, rack_focused);
-    const int cell_w = L->board_cell_w;
-    const int board_center = CELL_COL_BASE + (BOARD_DIM * cell_w) / 2;
-    int slot_col = board_center - (RACK_SIZE * cell_w) / 2;
-    if (slot_col < 1) {
-      slot_col = 1;
-    }
-    if (L->scale >= 2 && state->glyph_cache != NULL) {
-      // Real tile-shaped boxes in the opponent's color, no letters.
-      render_rack_panel_pixel(plane, theme, state, L, slot_col, RACK_SIZE,
-                              true);
-    } else {
-      // 1x: tile-colored blanks (bg fill, no glyph). Clear any stale 2x
-      // planes first in case the scale just changed.
-      render_rack_panel_pixel(plane, theme, state, L, slot_col, 0, false);
-      theme_apply_fg(plane, player_idx == 1 ? theme->rack_tile2_fg
-                                            : theme->rack_tile1_fg);
-      theme_apply_bg(plane, player_idx == 1 ? theme->rack_tile2_bg
-                                            : theme->rack_tile1_bg);
-      for (int i = 0; i < RACK_SIZE; i++) {
-        ncplane_putstr_yx(plane, L->rack_top + 1, slot_col + i * cell_w,
-                          cell_w == 1 ? " " : "  ");
-      }
-    }
-    return;
-  }
   if (rack == NULL) {
     return;
   }
@@ -337,8 +308,7 @@ void render_rack_panel(struct ncplane *plane, const Theme *theme,
   }
 
   if (L->scale >= 2 && state->glyph_cache != NULL) {
-    render_rack_panel_pixel(plane, theme, state, L, start_col, total_letters,
-                            false);
+    render_rack_panel_pixel(plane, theme, state, L, start_col, total_letters);
     return;
   }
 
