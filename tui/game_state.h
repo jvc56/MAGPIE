@@ -537,7 +537,7 @@ typedef struct {
   // Tab / Enter / Backspace into the buffer instead of the global
   // hotkey dispatch.
   bool slash_active;
-  char slash_buf[64];
+  char slash_buf[512]; // room for a file path after "/save "
   int slash_len;
   // Insertion-point cursor into slash_buf, in [0, slash_len]. Driven
   // by arrow keys / Home / End. Typed characters insert at this
@@ -783,6 +783,12 @@ void tui_game_state_reset_game_for_annotation(TuiGameState *state);
 // the live game state matches the committed sequence and
 // every entry's error_str is empty.
 void tui_game_state_revalidate_history(TuiGameState *state);
+
+// A history entry's move text ("8H V(O)X", "-ABC", "pass") in the
+// engine's notation ("8H V.X", "ex ABC", "pass"); empty when there is
+// none.
+void tui_history_move_to_engine(const char *display, char *out,
+                                size_t out_size);
 
 // Shows `message` in the status bar for a few seconds. Caller holds
 // state->mutex.
