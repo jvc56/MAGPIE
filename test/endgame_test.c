@@ -2750,6 +2750,84 @@ void test_endgame_pause(void) {
   config_destroy(config);
 }
 
+// The solver's depth-0 move for the side on turn of cgp, and the move a plain
+// greedy generation picks (the highest score plus twice the opponent's rack
+// for going out, ties broken as the search breaks them).
+static void depth_zero_and_greedy(const char *cgp, uint64_t *depth_zero_tiny,
+                                  uint64_t *greedy_tiny) {
+  Config *config = config_create_or_die("set -s1 score -s2 score -threads 1");
+  load_and_exec_config_or_die(config, cgp);
+  Game *game = config_get_game(config);
+  ThreadControl *thread_control = thread_control_create();
+  thread_control_set_status(thread_control, THREAD_CONTROL_STATUS_STARTED);
+  EndgameArgs args = {0};
+  args.thread_control = thread_control;
+  args.game = game;
+  args.plies = 0;
+  // Small enough that every desktop build gets the minimum table size.
+  args.tt_fraction_of_mem = 0.0001;
+  args.initial_small_move_arena_size = DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
+  args.num_threads = 1;
+  args.use_heuristics = true;
+  args.num_top_moves = 1;
+  args.incremental_movegen = true;
+  args.seed = 42;
+  EndgameCtx *endgame_ctx = NULL;
+  EndgameResults *results = endgame_results_create();
+  endgame_solve_inline(&endgame_ctx, &args, results);
+  assert(endgame_results_get_status(results) == ENDGAME_RESULT_STATUS_FINISHED);
+  assert(endgame_results_get_depth(results, ENDGAME_RESULT_BEST) == 0);
+  const PVLine *pv = endgame_results_get_pvline(results, ENDGAME_RESULT_BEST);
+  assert(pv->num_moves == 1);
+  *depth_zero_tiny = pv->moves[0].tiny_move;
+
+  const int on_turn = game_get_player_on_turn_index(game);
+  const Rack *opp_rack = player_get_rack(game_get_player(game, 1 - on_turn));
+  MoveList *small = move_list_create_small(1);
+  const MoveGenArgs greedy_args = {
+      .game = game,
+      .move_list = small,
+      .move_record_type = MOVE_RECORD_BEST_SMALL,
+      .move_sort_type = MOVE_SORT_SCORE,
+      .override_kwg = NULL,
+      .eq_margin_movegen = 0,
+      .target_equity = EQUITY_MAX_VALUE,
+      .best_small_out_bonus =
+          calculate_end_rack_points(opp_rack, game_get_ld(game)),
+      .best_small_canonical_ties = true,
+  };
+  generate_moves(&greedy_args);
+  assert(small->count >= 1);
+  *greedy_tiny = small->small_moves[0]->tiny_move;
+
+  small_move_list_destroy(small);
+  endgame_ctx_destroy(endgame_ctx);
+  endgame_results_destroy(results);
+  thread_control_destroy(thread_control);
+  config_destroy(config);
+}
+
+// A depth-0 solve is the leaves' greedy playout from the root: with no stuck
+// tiles its move is the plain greedy one; with the opponent's Q stuck, the
+// playout's conservation rules pick another.
+static void test_depth_zero_greedy_move(void) {
+  uint64_t depth_zero_tiny, greedy_tiny;
+  depth_zero_and_greedy(
+      "cgp W5JOE3V2/O5AMNIONIC1/WRiNKLY5B2/S6QUELLS2/10A4/5fATIGUE1UT/"
+      "4POZ3R2NA/3CEBOID1E2GI/3A6A2IT/3P6T2R1/3R6EH1D1/3O7UGS1/3A7MA2/"
+      "3T2LIEF1FE2/3E1HINDERS3 INOORTY/ADEEVX 372/532 0 -lex CSW21;",
+      &depth_zero_tiny, &greedy_tiny);
+  assert(depth_zero_tiny == greedy_tiny);
+  depth_zero_and_greedy(
+      "cgp 7J6A/5BLERT4G/2ODEA1U6N/2FOG2XU1V3A/W2POUF3I3M/H4V1EONS2ZE/"
+      "E3NEBEK1I2O1/L2G1A1LACEY1AN/pUERILE3I1D1I/SHRI3TINNIEST/3P6g1O1R/"
+      "3T8D1Y/12A2/10CORM1/11WAIT ADEORST/Q 421/345 0 -lex CSW21;",
+      &depth_zero_tiny, &greedy_tiny);
+  // By tiny_move code; plain greedy would play another move.
+  assert(depth_zero_tiny == 1026556425ULL);
+  assert(greedy_tiny != depth_zero_tiny);
+}
+
 void test_endgame(void) {
   test_endgame_played_move();
   test_root_pvs_actual_pass();
@@ -2774,6 +2852,7 @@ void test_endgame(void) {
   test_endgame_interrupt();
   test_time_limited_leaf_playout();
   test_stuck_depth_one_leaf_playout();
+  test_depth_zero_greedy_move();
   test_stuck_playout_tails();
   test_unfinished_depth_best();
   test_lent_helper_runs_abdada();

@@ -4786,6 +4786,40 @@ static void adopt_unfinished_depth_best(const EndgameCtxWorker *worker) {
       worker->unfinished_best_pv.score, worker->completed_depth);
 }
 
+// A depth-0 solve: the root's leaf evaluation, the greedy playout the
+// search's leaves play (with use_heuristics, its stuck-tile conservation
+// rules), with the side to move as the solving player. Below depth 2 a leaf's
+// playout stops after its first move, so the line is that move and the value
+// the spread after it, both racks counted as at the end of the game. Where
+// the playout plays nothing because the only play is a pass that ends the
+// game, the line is that pass.
+static void iterative_deepening_depth_zero(EndgameCtxWorker *worker,
+                                           uint64_t root_key,
+                                           float opp_stuck_frac) {
+  EndgameCtx *solver = worker->solver;
+  worker->current_iterative_deepening_depth = 0;
+  const int on_turn = game_get_player_on_turn_index(worker->game_copy);
+  const int32_t on_turn_spread = equity_to_int(
+      player_get_score(game_get_player(worker->game_copy, on_turn)) -
+      player_get_score(game_get_player(worker->game_copy, 1 - on_turn)));
+  PVLine pv;
+  pv.game = worker->game_copy;
+  pv.num_moves = 0;
+  pv.negamax_depth = 0;
+  const int32_t value =
+      negamax_leaf_value(worker, root_key, on_turn, on_turn_spread, &pv,
+                         /*pv_node=*/true, opp_stuck_frac);
+  if (value == ABDADA_INTERRUPTED) {
+    return;
+  }
+  if (pv.num_moves == 0) {
+    small_move_set_as_pass(&pv.moves[0]);
+    pv.num_moves = 1;
+  }
+  pv.score = value - solver->initial_spread;
+  endgame_results_offer_best_pvline(solver->results, &pv, pv.score, 0);
+}
+
 void iterative_deepening(EndgameCtxWorker *worker, int plies) {
 
   int32_t alpha = -LARGE_VALUE;
@@ -4835,6 +4869,13 @@ void iterative_deepening(EndgameCtxWorker *worker, int plies) {
 
   if (worker->path_lists != NULL) {
     path_move_lists_reset(worker->path_lists);
+  }
+  if (plies == 0) {
+    if (worker->ordinal == 0) {
+      iterative_deepening_depth_zero(worker, initial_hash_key,
+                                     initial_opp_stuck_frac);
+    }
+    return;
   }
   int initial_move_count =
       generate_stm_plays(worker, worker->solver->requested_plies, NULL);
