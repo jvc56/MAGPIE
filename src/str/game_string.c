@@ -654,6 +654,9 @@ void string_builder_add_game_variant(StringBuilder *sb,
   case GAME_VARIANT_WORDSMOG:
     variant_name = GAME_VARIANT_WORDSMOG_NAME;
     break;
+  case GAME_VARIANT_WOADWAGE:
+    variant_name = GAME_VARIANT_WOADWAGE_NAME;
+    break;
   default:
     variant_name = GAME_VARIANT_UNKNOWN_NAME;
     break;

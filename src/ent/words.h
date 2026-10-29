@@ -1,6 +1,7 @@
 #ifndef WORDS_H
 #define WORDS_H
 
+#include "../def/game_defs.h"
 #include "board.h"
 #include "kwg.h"
 #include "move.h"
@@ -20,8 +21,9 @@ bool formed_words_get_word_valid(const FormedWords *fw, int word_index);
 int formed_words_get_word_letter(const FormedWords *fw, int word_index,
                                  int letter_index);
 
-// populate the validity of the formed words passed in.
+// populate the validity of the formed words passed in, under the variant's
+// rules for what counts as a word.
 void formed_words_populate_validities(const KWG *kwg, FormedWords *ws,
-                                      bool is_wordsmog);
+                                      game_variant_t variant);
 
 #endif

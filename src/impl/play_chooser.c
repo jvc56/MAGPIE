@@ -30,6 +30,7 @@
 #include "endgame.h"
 #include "gameplay.h"
 #include "move_gen.h"
+#include "move_gen_base.h"
 #include "peg.h"
 #include "simmer.h"
 #include <math.h>
@@ -1300,7 +1301,7 @@ void play_chooser_decide_challenge(PlayChooser *play_chooser,
       formed_words_create(game_get_board(keep_game), opp_move);
   formed_words_populate_validities(
       player_get_kwg(game_get_player(keep_game, chooser_index)), formed_words,
-      game_get_variant(keep_game) == GAME_VARIANT_WORDSMOG);
+      game_get_variant(keep_game));
   const int num_words = formed_words_get_num_words(formed_words);
   bool any_word_invalid = false;
   for (int word_idx = 0; word_idx < num_words; word_idx++) {

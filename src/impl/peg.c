@@ -1264,6 +1264,13 @@ static uint64_t peg_board_signature(const Game *game) {
   return hash == 0 ? 1 : hash; // reserve 0 as the empty-slot sentinel
 }
 
+// Whether solves prune the lexicon to the words a position can play. Woadwage
+// solves read the whole lexicon: pruning leaves out words of the lexicon that
+// a woadwage word joins to another.
+static bool peg_prunes_words(const Game *game) {
+  return game_get_variant(game) != GAME_VARIANT_WOADWAGE;
+}
+
 // Prunes the lexicon to the words this position can still form. Cross-check
 // aware pruning is only sound for classic play with one shared lexicon; see
 // generate_possible_words_with_cross_checks.
@@ -1390,7 +1397,7 @@ static int32_t peg_nested_endgame_value(PegWorker *worker, Game *game,
   if (plies < 1) {
     plies = 1;
   }
-  if (plies >= 2) {
+  if (plies >= 2 && peg_prunes_words(game)) {
     const KWG *leaf_kwg =
         peg_prune_cache_get(worker->prune_cache, game, on_turn);
     game_set_override_kwgs(game, leaf_kwg, NULL, DUAL_LEXICON_MODE_IGNORANT);
@@ -1921,7 +1928,7 @@ static int32_t peg_eval_leaf(PegEvalCtx *ctx, Game *game) {
   // 1 ply there are too few to amortize the build. (The default cascade only
   // ever uses 2..6-ply exact leaves, so this is a robustness guard for custom
   // configs.)
-  if (ctx->fidelity_plies >= 2) {
+  if (ctx->fidelity_plies >= 2 && peg_prunes_words(game)) {
     const KWG *leaf_kwg =
         peg_prune_cache_get(ctx->worker->prune_cache, game, ctx->mover_idx);
     game_set_override_kwgs(game, leaf_kwg, NULL, DUAL_LEXICON_MODE_IGNORANT);
@@ -3232,17 +3239,22 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
   // carrying the override KWG and pruned cross-sets — and play_move only
   // incrementally updates the cross-sets, so no leaf rebuilds a pruned KWG or
   // regenerates all cross-sets (the dominant per-leaf cost).
-  DictionaryWordList *word_list = dictionary_word_list_create();
-  const KWG *full_kwg = player_get_kwg(game_get_player(game, mover_idx));
-  peg_generate_possible_words(game, full_kwg, word_list);
-  KWG *pruned_kwg = make_kwg_from_words_small(
-      word_list, KWG_MAKER_OUTPUT_GADDAG, KWG_MAKER_MERGE_EXACT);
-  dictionary_word_list_destroy(word_list);
+  KWG *pruned_kwg = NULL;
+  if (peg_prunes_words(game)) {
+    DictionaryWordList *word_list = dictionary_word_list_create();
+    const KWG *full_kwg = player_get_kwg(game_get_player(game, mover_idx));
+    peg_generate_possible_words(game, full_kwg, word_list);
+    pruned_kwg = make_kwg_from_words_small(word_list, KWG_MAKER_OUTPUT_GADDAG,
+                                           KWG_MAKER_MERGE_EXACT);
+    dictionary_word_list_destroy(word_list);
+  }
   Game *prepared_base = game_duplicate(game);
   game_set_endgame_solving_mode(prepared_base);
   game_set_backup_mode(prepared_base, BACKUP_MODE_OFF);
-  game_set_override_kwgs(prepared_base, pruned_kwg, NULL,
-                         DUAL_LEXICON_MODE_IGNORANT);
+  if (pruned_kwg != NULL) {
+    game_set_override_kwgs(prepared_base, pruned_kwg, NULL,
+                           DUAL_LEXICON_MODE_IGNORANT);
+  }
   game_gen_all_cross_sets(prepared_base);
 
   // Per-stage halving counts: the caller override, else the built-in default
