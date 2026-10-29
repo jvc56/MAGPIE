@@ -1,5 +1,6 @@
 #include "peg_net_eval_test.h"
 
+#include "../src/compat/cpthread.h"
 #include "../src/compat/ctime.h"
 #include "../src/compat/endian_io.h"
 #include "../src/def/bai_defs.h"
@@ -2015,6 +2016,60 @@ static void peg_sim_endgame_move(PegSimRolloutEndgame *endgame, int worker,
   endgame->ms[worker] += (double)(ctimer_monotonic_ns() - start) / 1e6;
 }
 
+// PEG_SIM_TRACE=PATH: one line per rollout decision of the hooked arms, for
+// measuring how often rollout positions repeat. Columns: root, arm, worker,
+// bag, tiles on the board, side on turn, kind (E the endgame search, 1 or 2 a
+// chooser's pick, S static), the position key (board, both racks, side on
+// turn, scoreless turns: what a bag-empty search depends on), the on-turn
+// player's information key (peg_net_cache_key) and microseconds.
+typedef struct PegSimTrace {
+  FILE *out;
+  cpthread_mutex_t mutex;
+  int root;
+  int arm;
+} PegSimTrace;
+
+static uint64_t peg_sim_position_key(const Game *game, int *tiles) {
+  uint64_t hash = UINT64_C(1469598103934665603);
+  const Board *board = game_get_board(game);
+  *tiles = 0;
+  for (int row = 0; row < BOARD_DIM; row++) {
+    for (int col = 0; col < BOARD_DIM; col++) {
+      const MachineLetter ml = board_get_letter(board, row, col);
+      *tiles += ml != ALPHABET_EMPTY_SQUARE_MARKER;
+      hash = (hash ^ ml) * UINT64_C(1099511628211);
+    }
+  }
+  for (int player = 0; player < 2; player++) {
+    const Rack *rack = player_get_rack(game_get_player(game, player));
+    for (int ml = 0; ml < VALUE_NET_TILE_TYPES; ml++) {
+      hash = (hash ^ (uint64_t)rack_get_letter(rack, (MachineLetter)ml)) *
+             UINT64_C(1099511628211);
+    }
+  }
+  hash = (hash ^ (uint64_t)game_get_player_on_turn_index(game)) *
+         UINT64_C(1099511628211);
+  hash = (hash ^ (uint64_t)game_get_consecutive_scoreless_turns(game)) *
+         UINT64_C(1099511628211);
+  return hash;
+}
+
+static void peg_sim_trace_write(PegSimTrace *trace, int worker_index,
+                                const Game *game, char kind, int64_t start) {
+  const double us = (double)(ctimer_monotonic_ns() - start) / 1e3;
+  int tiles;
+  const uint64_t position = peg_sim_position_key(game, &tiles);
+  uint8_t key[PEG_NET_CACHE_KEY_BYTES];
+  const uint64_t info = peg_net_cache_key(game, key);
+  cpthread_mutex_lock(&trace->mutex);
+  fprintf(trace->out, "%d,%d,%d,%d,%d,%d,%c,%016llx,%016llx,%.1f\n",
+          trace->root, trace->arm, worker_index,
+          bag_get_letters(game_get_bag(game)), tiles,
+          game_get_player_on_turn_index(game), kind,
+          (unsigned long long)position, (unsigned long long)info, us);
+  cpthread_mutex_unlock(&trace->mutex);
+}
+
 // SimArgs.rollout_move_fn for pegsim. With nets, the 1PEG network chooses
 // with one tile in the bag and the 2PEG chooser with two (both from the
 // on-turn player's information: their rack, the board and the unseen counts);
@@ -2026,19 +2081,29 @@ typedef struct PegSimRolloutPolicy {
   Peg1NetChooser *net;
   Peg2NetChooser *chooser;
   PegSimRolloutEndgame *endgame;
+  PegSimTrace *trace;
 } PegSimRolloutPolicy;
 
 static bool peg_sim_rollout_move(void *context, int worker_index,
                                  const Game *game, Move *move) {
   PegSimRolloutPolicy *hook = context;
+  const int64_t start = hook->trace != NULL ? ctimer_monotonic_ns() : 0;
+  char kind = 'S';
   if (hook->endgame != NULL && !game_over(game) &&
       bag_get_letters(game_get_bag(game)) == 0) {
     peg_sim_endgame_move(hook->endgame, worker_index, game, move);
-    return true;
+    kind = 'E';
+  } else if (hook->nets &&
+             peg1_net_chooser_pick(hook->net, worker_index, game, move)) {
+    kind = '1';
+  } else if (hook->nets &&
+             peg2_net_chooser_pick(hook->chooser, worker_index, game, move)) {
+    kind = '2';
   }
-  return hook->nets &&
-         (peg1_net_chooser_pick(hook->net, worker_index, game, move) ||
-          peg2_net_chooser_pick(hook->chooser, worker_index, game, move));
+  if (hook->trace != NULL) {
+    peg_sim_trace_write(hook->trace, worker_index, game, kind, start);
+  }
+  return kind != 'S';
 }
 
 enum {
@@ -2159,6 +2224,17 @@ void peg_sim_mode(const StringSplitter *fields) {
       {.nets = false, .endgame = &endgame},
       {.nets = false},
   };
+  PegSimTrace trace = {.out = NULL};
+  const char *trace_path = getenv("PEG_SIM_TRACE");
+  if (trace_path != NULL) {
+    trace.out = fopen_exclusive_or_die(trace_path, "w");
+    fprintf(trace.out,
+            "root,arm,worker,bag,tiles,on_turn,kind,position,info,us\n");
+    cpthread_mutex_init(&trace.mutex);
+    for (int arm = 0; arm < PEG_SIM_MAX_ARMS; arm++) {
+      hooks[arm].trace = &trace;
+    }
+  }
   MoveList *wide = move_list_create(PEG_WORLD_ALL_PLACEMENTS_CAP);
   Move *wide_moves = malloc_or_die(sizeof(Move) * PEG_WORLD_ALL_PLACEMENTS_CAP);
   MoveList *pool = move_list_create(max_candidates);
@@ -2200,6 +2276,8 @@ void peg_sim_mode(const StringSplitter *fields) {
       }
       peg1_net_chooser_reset(net);
       peg2_net_chooser_reset(chooser);
+      trace.root = root_id;
+      trace.arm = arm;
       const bool timed = arm == 2 || arm == 5;
       const double time_limit = arm == 2   ? arm_seconds[1]
                                 : arm == 5 ? arm_seconds[3]
@@ -2328,6 +2406,9 @@ void peg_sim_mode(const StringSplitter *fields) {
   peg1_net_chooser_destroy(net);
   peg2_net_chooser_destroy(chooser);
   config_destroy(config);
+  if (trace.out != NULL) {
+    fclose(trace.out);
+  }
 }
 
 // pegbudget arms (codes in PREFIX.pegb.csv; b = the budget's index).
