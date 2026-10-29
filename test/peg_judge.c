@@ -25,7 +25,6 @@
 #include "peg2_net.h"
 #include "peg_net_util.h"
 #include "peg_world.h"
-#include <_stdio.h>
 #include <math.h>
 #include <stdatomic.h>
 #include <stdbool.h>
@@ -33,7 +32,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/_pthread/_pthread_t.h>
 #include <unistd.h>
 
 PegExactSolver peg_exact_create(int plies, double tt_fraction) {
@@ -577,7 +575,7 @@ void peg_judge_mode(const StringSplitter *fields) {
   net->cache = true;
   chooser->cache = true;
   PegJudgeWorker workers[PEG_JUDGE_MAX_THREADS];
-  pthread_t thread_ids[PEG_JUDGE_MAX_THREADS];
+  cpthread_t thread_ids[PEG_JUDGE_MAX_THREADS];
   for (int thread_idx = 0; thread_idx < threads; thread_idx++) {
     workers[thread_idx] = (PegJudgeWorker){
         .net = net,

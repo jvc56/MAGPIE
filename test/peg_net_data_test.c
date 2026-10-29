@@ -32,7 +32,6 @@
 #include "peg_net_util.h"
 #include "peg_world.h"
 #include "test_util.h"
-#include <_stdio.h>
 #include <math.h>
 #include <stdbool.h>
 #include <stdint.h>
