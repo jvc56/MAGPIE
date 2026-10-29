@@ -100,10 +100,11 @@ static int history_two_col_rows_needed(const TuiGameState *state) {
                       state->history[idx].challenged_off)
                          ? 4
                          : 2; // mirrors history_entry_rows
+    const int hook_rows = state->history[idx].phony_hooks[0] != '\0' ? 1 : 0;
     if (idx % 2 == 0) {
-      left += rows;
+      left += rows + hook_rows;
     } else {
-      right += rows;
+      right += rows + hook_rows;
     }
   }
   return left > right ? left : right;
