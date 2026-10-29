@@ -2117,7 +2117,8 @@ static void test_capturing_positions_does_not_change_the_games(void) {
 // after the contributor's own settings asked for plies -- must not simulate.
 static void test_player_settings_do_not_leak_between_tasks(void) {
   Config *config = config_create_or_die(
-      "set -lex CSW21 -plies 5 -sm1 true -sm2 true -sbagcycle false");
+      "set -lex CSW21 -plies 5 -sm1 true -sm2 true -sbagcycle false "
+      "-stempo true");
   const JsonValue *request = NULL;
   const JsonValue *games =
       load_task_request_fixture(BIRDTEST_GAMES_FIXTURE, &request);
@@ -2131,6 +2132,8 @@ static void test_player_settings_do_not_leak_between_tasks(void) {
   assert(config_get_player_sim_margin_forecast(config, 1));
   assert(!config_get_player_sim_bag_cycle(config, 0));
   assert(!config_get_player_sim_bag_cycle(config, 1));
+  assert(config_get_player_sim_tempo_candidates(config, 0));
+  assert(config_get_player_sim_tempo_candidates(config, 1));
   config_contribute_apply_player_settings(config, simmer, 0, error_stack);
   config_contribute_apply_player_settings(config, static_player, 1,
                                           error_stack);
@@ -2148,6 +2151,10 @@ static void test_player_settings_do_not_leak_between_tasks(void) {
   // default rather than the contributor's.
   assert(config_get_player_sim_bag_cycle(config, 0));
   assert(config_get_player_sim_bag_cycle(config, 1));
+  // Nor are the tempo candidates, which change which plays a simulation
+  // weighs.
+  assert(!config_get_player_sim_tempo_candidates(config, 0));
+  assert(!config_get_player_sim_tempo_candidates(config, 1));
 
   // Nor does the previous task's simulation.
   config_contribute_apply_player_settings(config, static_player, 0,
@@ -2166,11 +2173,13 @@ static void test_player_settings_do_not_leak_between_tasks(void) {
 // would otherwise score every game of every job differently from the fleet.
 static void test_shared_settings_do_not_leak_between_tasks(void) {
   Config *config = config_create_or_die(
-      "set -lex CSW21 -bb 35 -sp true -smargin true -sbagcycle false");
+      "set -lex CSW21 -bb 35 -sp true -smargin true -sbagcycle false "
+      "-stempo true");
   assert(config_get_bingo_bonus(config) == 35);
   assert(config_get_use_small_plays(config));
   assert(config_get_sim_margin_forecast(config));
   assert(!config_get_sim_bag_cycle(config));
+  assert(config_get_sim_tempo_candidates(config));
 
   config_contribute_reset_shared_settings(config);
   assert(config_get_bingo_bonus(config) == DEFAULT_BINGO_BONUS);
@@ -2179,6 +2188,7 @@ static void test_shared_settings_do_not_leak_between_tasks(void) {
   // run-wide margin forecast is reset as each player's is.
   assert(!config_get_sim_margin_forecast(config));
   assert(config_get_sim_bag_cycle(config));
+  assert(!config_get_sim_tempo_candidates(config));
 
   // The bingo bonus is then the request's, not this build's default.
   ErrorStack *error_stack = error_stack_create();
