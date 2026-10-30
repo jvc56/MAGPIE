@@ -2,22 +2,20 @@
 
 How `status` (while a PEG runs) and `shpeg` (when it is done) show a PEG
 solve. Done:
-- the three-section layout: summary, the candidates being solved, ranking;
+- the three-section layout: summary, the candidates being solved, ranking,
+  in `status`, `shpeg` and `peg`, with `shpeg <number>` and `shpeg all`;
 - the per-thread table of candidates solved at once;
-- `THREADS` and `MOVES` in the solving tables;
-- solved plays pinned below the live top 10;
+- the solving tables' endgame columns, `Depth` and `Moves`, with a reason
+  in `Depth` when there is no endgame to show;
+- solved plays pinned below the top 10;
 - plays the cutoff flags on their last draw counted as solved.
 
-What is left: three open choices about the layout, and the thread count,
-which needs measuring first.
+What is left: one open choice about the layout. The thread count was
+measured: the current behavior stays (see Threads).
 
-## Open choices
+## Open choice
 
-- **`shpeg` length.** `shpeg` lists every play; `status` shows the top 10
-  and the solved plays below them. `shpeg` could do the same.
-- **Label case.** The summary labels are capitalized (`Status`, `Phase`,
-  ...), to match `Status`. The mockup's were lowercase.
-- **`OUTCOMES`.** The ranking's outcomes column follows `-pegoutcomes`,
+- **`Outcomes`.** The ranking's outcomes column follows `-pegoutcomes`,
   which defaults to on. The mockup had none.
 
 ## Threads: `-threads N` keeps N + 1 busy
@@ -36,97 +34,93 @@ are sized for that (`n_scratch = n_threads + 1`). This is why status shows
 - **As many threads as cores.** `-threads` defaults to the core count
   (`get_num_cores()`), so this is the common case. With 13 busy threads on
   12 CPUs, the extra thread adds no compute; the OS only switches threads in
-  and out. That may cost something or nothing. It has not been measured.
+  and out. Measured below: on this machine that costs nothing measurable.
 
-**Decision: keep it as is**, unless the evaluation below shows that cores +
-1 busy threads is measurably slower than cores. Document the behavior in
-the `-threads` help: "PEG uses this many pool threads, plus the calling
-thread."
+**Decision: keep it as is**, and say so in the `-threads` help: "PEG uses
+this many pool threads, plus the calling thread." Done.
 
-**Options, if the evaluation shows a cost:**
+**If a machine with uniform cores shows a cost**, the options were:
 - **(a) Pool of `threads - 1` when `-threads` is at least the core count.**
   The default stops oversubscribing, and smaller counts keep their extra
   thread. `-threads` then means two things.
-- **(b) Always a pool of `threads - 1`.** `-threads` is honest everywhere.
-  A run below the core count loses the extra thread, which is up to about
-  1/9 of the compute at `-threads 8` in phases that keep every thread busy.
-- **(c) The caller only waits.** Busy threads are the same as (b), but the
-  calling thread sits idle; there's no reason to prefer it.
+- **(b) Always a pool of `threads - 1`.** `-threads` is honest everywhere,
+  but a run below the core count loses the extra thread.
+- **(c) The caller only waits.** Busy threads are the same as (b), with the
+  calling thread idle; no reason to prefer it.
 
-### Evaluation plan
+### Evaluation (2026-10-30)
 
-**The question:** with `-threads` equal to the core count, is a PEG solve
-slower with cores + 1 busy threads than with cores?
+**Question:** with `-threads` equal to the core count, is a PEG solve
+slower with cores + 1 busy threads than with cores? `-threads N` keeps
+N + 1 busy, so no code change was needed: on this 12-CPU i7-1250U,
+`-threads 12` (13 busy, today's default), `-threads 11` (12 busy, what (a)
+or (b) would give) and `-threads 10` (11 busy, a noise check).
 
-**No code change is needed to measure it.** `-threads N` keeps N + 1
-threads busy. So on this machine (12 logical CPUs):
+**Method.**
+- `make release` (PGO), `peg` at the default 3 plies with
+  `-pegoutcomes false`, timed from peg's `Status` line.
+- 24 positions:
+  - the 18 deficit positions from `docs/peg-vs-macondo.md` with 1 or 2 in
+    the bag that finish in under 60 s;
+  - the 6 `example_pegs/` 1-in-the-bag games that finish in under 2 min.
+- One solve at a time, each in its own process, 3 runs per setting.
+- The order rotated each repeat (12-11-10, 11-10-12, 10-12-11). It matters:
+  the first solve of each position's block ran 3.6% faster than the other
+  two, likely because the chip was cooler. The rotation gives each setting
+  that slot once per position.
+- 216 solves in 90 minutes. None hit the 10-minute cap.
 
-| Run | Busy threads | Stands for |
-|---|---|---|
-| `-threads 12` | 13 | today's default |
-| `-threads 11` | 12 | options (a) and (b) at the default |
-| `-threads 10` | 11 | a check on noise: one fewer again |
+**Results.**
 
-Two other things differ by one between these runs, with no expected effect:
-- the injection monitor's target (`core_target = n_threads`);
-- the threads that zero the endgame transposition table.
+| | `-threads 12` | `-threads 11` | `-threads 10` |
+|---|---|---|---|
+| Busy threads | 13 | 12 | 11 |
+| Sum of per-position medians | 458.5 s | 456.6 s | 460.3 s |
+| Relative to `-threads 11` | +0.4% | | +0.8% |
 
-**Positions.** Use positions that finish in seconds to a few minutes, so
-each can be repeated:
-- the 1- and 2-in-the-bag deficit positions in `docs/peg-vs-macondo.md`
-  that finish in under 60 s: 18 of them, from 1 to 57 s;
-- the `example_pegs/` 1-in-the-bag games that finish in under 2 minutes.
+- **12 vs 11:**
+  - median per-position ratio 1.000 (range 0.992 to 1.333);
+  - `-threads 12` slower on 11 of 24 positions.
+  - The fastest 12 run was slower than the slowest 11 run on only 2
+    positions, by 0.1 s of a 50 s solve (0.2%).
+  - The 1.333 is 0.4 s against 0.3 s, which is the timer's resolution.
+- **11 vs 10:** median ratio 0.994. One more thread below the core count is
+  worth under 1%.
+- **Noise:**
+  - On solves over 10 s, the three runs of a position spread by up to 18%,
+    with a median of 5.5%.
+  - Every gap between settings is smaller than that.
+- **Answers:** identical in all 216 solves. Every run had the same best
+  play, and every play solved in two runs had the same exact W/T/L.
 
-Together these cover all three parts of a solve:
-- the first candidate solved alone, spread over every thread;
-- the at-once phase, one candidate per thread, where every thread is busy;
-- the tail, where idle threads join the remaining endgames as helpers.
+**How much the test could see.** A check of scaling, `-threads 6` (7 busy)
+against `-threads 12` (13 busy) on 4 positions, two runs at 6:
 
-**Procedure.**
-- **Build:** `make release`, the production PGO build.
-- **Settings:** `peg` at the default 3 plies, `-pegoutcomes false`. Time
-  from the `Status` line of `shpeg`.
-- **Serial:** one solve at a time, with nothing else running.
-- **Repeats:** 3 runs of each position at each setting, interleaved: 12,
-  11, 10, 12, 11, 10, and so on. This spreads thermal and background drift
-  across the settings, which matters on this machine. The i7-1250U is a
-  laptop chip with mixed performance and efficiency cores, and the extra
-  thread may land on either kind.
-- **Second machine:** if one is available, repeat on a desktop or cloud
-  machine whose cores are all alike. A result that holds on only one kind
-  of CPU decides little.
-- **Answers:** for every run, compare the best play and the exact
-  W/T/L counts with the `-threads 12` run. Only cut plays' bounds may
-  differ.
+| Position | `-threads 6` | `-threads 12` | Speedup |
+|---|---|---|---|
+| g111791_t20 | 10.0, 10.8 s | 7.8 s | 1.33 |
+| g105295_t16 | 28.7, 29.2 s | 23.0 s | 1.26 |
+| g109781_t20 | 29.1, 29.1 s | 24.0 s | 1.21 |
+| g116234_t17 | 68.5, 68.6 s | 55.3 s | 1.24 |
 
-**Measures.**
-- **Per position:** the median time at each setting, and the ratios 12/11
-  and 11/10.
-- **Over all positions:** the median ratio and the total time.
-- **Noise:** the spread between a position's three runs. A difference
-  smaller than that is noise.
+Nearly twice the threads buys about 1.25 times the speed. The chip has 2
+performance cores (4 logical CPUs) and 8 efficiency cores, at 9 W base
+power (29 W turbo), so threads near the top add little. On this machine
+both a thread's gain and an extra thread's cost are small. A machine whose cores
+are all alike, with more power, would test the question harder.
 
-**Reading the result.**
-- **`-threads 12` within noise of, or faster than, `-threads 11`:** the
-  extra thread costs nothing at the default. Keep the current behavior and
-  document it.
-- **`-threads 12` consistently slower than `-threads 11`:** slower by more
-  than the run-to-run spread, on most positions and on both machines. Then
-  the extra thread costs time at the default. Adopt (a), and repeat the
-  measurement with the change against `-threads 11` today, which should
-  match it.
-- **`-threads 11` slower than `-threads 10`:** this would mean more threads
-  hurt even below oversubscription, from shared-table contention or memory
-  bandwidth. That is a separate question; record it and don't act on it
-  here.
+**Reading.** `-threads 12` is within noise of `-threads 11`, so per the
+plan the current behavior stays. `-threads 11` is not slower than
+`-threads 10`, so there is no separate contention question.
 
-**Follow-up: parallel games.** In autoplay, several games can solve PEGs at
-once, each with its share of the threads. A share of 2 keeps 3 busy, so the
-machine can be oversubscribed by much more than one thread. The thread
-flags alone cannot show this, because each solve's share is computed
-inside autoplay. Measure it only if the single-solve result shows a cost.
-Use a scratch build in which the pool has `threads - 1` workers, and
-compare games per hour with PEG on, over the same seed and game pairs.
+**Still open.**
+- **A second machine.** None was available. If a desktop or cloud machine
+  with uniform cores becomes available, rerun the method above there with
+  `-threads` at its core count, one less, and two less. Adopt (a) only if
+  that machine shows the core count consistently slower than one less.
+- **Parallel games.** In autoplay, several games can solve PEGs at once,
+  each with its share of the threads; a share of 2 keeps 3 busy. That
+  follow-up was conditional on a single-solve cost, which did not appear.
 
 **Where candidates are not one per thread**, which status should keep
 saying plainly:

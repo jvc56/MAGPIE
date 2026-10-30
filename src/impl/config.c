@@ -2730,7 +2730,8 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       usages[0] = "<number_of_threads>";
       examples[0] = "1";
       examples[1] = "4";
-      text = "Specifies the number of threads to use when running commands.";
+      text = "Specifies the number of threads to use when running commands. "
+             "PEG uses this many pool threads, plus the calling thread.";
       break;
     case ARG_TOKEN_PRINT_INTERVAL:
       usages[0] = "<print_interval>";
