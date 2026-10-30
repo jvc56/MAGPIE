@@ -30,8 +30,9 @@ static void test_peg_show_rows(void) {
   assert(magpie_run_sync(mp, "shpeg") == MAGPIE_SUCCESS);
   char *output = magpie_get_last_command_output(mp);
   assert(has_prefix("Status          ", output));
-  assert(has_substring(output, " (finished)\n  Seed          "));
-  assert(has_substring(output, "\nBest Move       14A BRIEF  25.0%"));
+  assert(has_substring(output, " (finished)\n  Greedy        "));
+  assert(has_substring(output,
+                       " unique draws)\nBest Move       14A BRIEF  25.0%"));
   assert(has_substring(output, "\n  10  "));
   assert(has_substring(output, "\n ...  "));
   assert(has_substring(output, " more, including "));
@@ -175,14 +176,24 @@ static PegStatusMilestone peg_status_milestone(const char *status) {
     }
     (void)sscanf(line, "%127s", stage_label);
   }
+  // "Currently working on 9 candidates:" while candidates are solved at
+  // once, or "Currently working on <move>" while one is solved alone.
   int n_at_once = 0;
+  bool alone = false;
   const char *working = strstr(status, "\nCurrently working on ");
   if (working != NULL) {
-    (void)sscanf(working, "\nCurrently working on %d", &n_at_once);
+    // A move can start with a digit ("10C ITS"), so the count is the one
+    // followed by " candidate".
+    char word[PEG_STATUS_PHASE_MAX] = "";
+    alone = sscanf(working, "\nCurrently working on %d %127s", &n_at_once,
+                   word) != 2 ||
+            !has_prefix("candidate", word);
+    if (alone) {
+      n_at_once = 0;
+    }
   }
   (void)snprintf(milestone.phase, sizeof(milestone.phase), "%s %d %d",
-                 stage_label, n_at_once,
-                 has_substring(status, "\nSolving ") ? 1 : 0);
+                 stage_label, n_at_once, alone ? 1 : 0);
   char progress[PEG_STATUS_PHASE_MAX];
   peg_status_summary_value(status, "\nProgress ", progress, sizeof(progress));
   int cands_done = 0;

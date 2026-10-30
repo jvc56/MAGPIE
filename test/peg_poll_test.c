@@ -182,24 +182,24 @@ static void test_peg_status_string(const Game *game, const Move *move) {
   StringBuilder *move_sb = string_builder_create();
   string_builder_add_move(move_sb, game_get_board(game), move,
                           game_get_ld(game), false);
-  char *solving = get_formatted_string(
-      "Solving %s (candidate 1 of 168) for 311.0s; draws: 2 done, 2 running\n",
-      string_builder_peek(move_sb));
+  char *solving = get_formatted_string("\nCurrently working on %s\nDraw ",
+                                       string_builder_peek(move_sb));
   string_builder_destroy(move_sb);
 
   char *status = peg_snapshot_get_status_string(snap, game, now_ns, NULL, 0);
   assert(has_prefix("Status          312.0s (running)\n", status));
   assert(has_substring(status, "\nProgress        0 of 168 (0%)\n"));
   assert(has_substring(status, "\nBest Move       "));
-  assert(has_substring(status, "100.0% (greedy estimate)\n"));
+  assert(has_substring(status, " unique draws)\nBest Move       "));
+  assert(has_substring(status, "100.0% (greedy)\n"));
   assert(has_prefix("Status          312.0s (running)\n"
-                    "  Seed          1.0s (finished)\n"
+                    "  Greedy        1.0s (finished)\n"
                     "  End           311.0s (running)\n"
                     "Progress        0 of 168 (0%)\n"
                     "  Finished      0 (0.0%)\n"
                     "  Cut           0 (0.0%)\n"
                     "  Pending       168 (100.0%)\n"
-                    "Best Move       ",
+                    "Draws           ",
                     status));
   assert(!has_substring(status, "Phase"));
   assert(!has_substring(status, "Stages"));
@@ -217,8 +217,10 @@ static void test_peg_status_string(const Game *game, const Move *move) {
   assert(has_substring(status, "5/14"));
   assert(has_substring(status, "311.0s"));
   assert(has_substring(status, "\n-/E "));
-  assert(has_substring(status, "\nSeed ranking (greedy estimates), until a "
-                               "candidate finishes\nRank  Move"));
+  assert(has_substring(status, "\nGreedy ranking, until a candidate "
+                               "finishes\nRank  Move"));
+  assert(!has_substring(status, "Seed"));
+  assert(!has_substring(status, "estimate"));
   free(status);
 
   // With outcomes, the ranking has an outcomes column: each candidate's
@@ -251,7 +253,7 @@ static void test_peg_status_string(const Game *game, const Move *move) {
   snap->draws_done_wins = 15;
   snap->draws_done_ties = 1;
   status = peg_snapshot_get_status_string(snap, game, now_ns, NULL, 0);
-  assert(has_substring(status, "draws: 20 done, 2 running, 18 queued"));
+  assert(!has_substring(status, "queued"));
   assert(has_substring(status,
                        "20 finished draws: orderings won 15, tied 1, lost 4"));
   assert(!has_substring(status, "-12.5"));
@@ -338,7 +340,7 @@ static void test_peg_status_ranking(const Game *game, const Move *move) {
                                "  Finished      2 (3.3%)\n"
                                "  Cut           48 (80.0%)\n"
                                "  Pending       10 (16.7%)\n"
-                               "Best Move       "));
+                               "Draws           "));
   assert(has_substring(status, "\n  10  "));
   assert(has_substring(status, "<=0.01"));
   assert(!has_substring(status, "<=0.0 "));

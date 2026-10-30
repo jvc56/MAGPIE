@@ -1361,10 +1361,10 @@ static void peg_set_endgame_cells(StringGrid *sg, int row, int first_col,
 }
 
 // The candidate in progress, when candidates are solved one at a time: which
-// it is and for how long, how many of its draws are in each state, then a row
-// for each running draw, with the endgame it is searching, and for each
-// finished one when there are few; past PEG_STATUS_MAX_FINISHED_DRAW_ROWS
-// draws, the finished ones are totalled instead.
+// it is, then a row for each running draw, with the endgame it is searching,
+// and for each finished one when there are few; past
+// PEG_STATUS_MAX_FINISHED_DRAW_ROWS draws, the finished ones are totalled
+// instead.
 static void peg_append_live_candidate(StringBuilder *sb,
                                       const PegPollSnapshot *snap,
                                       const Game *game, int64_t now_ns) {
@@ -1372,33 +1372,18 @@ static void peg_append_live_candidate(StringBuilder *sb,
       snap->n_stage_history == 0) {
     return;
   }
-  const PegStageSnapshot *stage =
-      &snap->stage_history[snap->n_stage_history - 1];
   const Board *board = game_get_board(game);
   const LetterDistribution *ld = game_get_ld(game);
   StringBuilder *move_sb = string_builder_create();
   string_builder_add_move(move_sb, board, &snap->evaluating_move, ld, false);
-  string_builder_add_formatted_string(
-      sb, "Solving %s (candidate %d of %d) for %.1fs",
-      string_builder_peek(move_sb), snap->currently_evaluating_move_idx + 1,
-      stage->field_size, (double)(now_ns - snap->eval_start_ns) / 1e9);
+  string_builder_add_formatted_string(sb, "Currently working on %s:\n",
+                                      string_builder_peek(move_sb));
   string_builder_destroy(move_sb);
   const int n_draws = snap->draws_queued + snap->draws_running +
                       snap->draws_done + snap->draws_stopped;
   if (n_draws == 0) {
-    string_builder_add_string(sb, "\n");
     return;
   }
-  string_builder_add_formatted_string(sb, "; draws: %d done, %d running",
-                                      snap->draws_done, snap->draws_running);
-  if (snap->draws_queued > 0) {
-    string_builder_add_formatted_string(sb, ", %d queued", snap->draws_queued);
-  }
-  if (snap->draws_stopped > 0) {
-    string_builder_add_formatted_string(sb, ", %d stopped",
-                                        snap->draws_stopped);
-  }
-  string_builder_add_string(sb, "\n");
   const bool list_finished = n_draws <= PEG_STATUS_MAX_FINISHED_DRAW_ROWS;
   int n_rows = 0;
   for (int row_idx = 0; row_idx < snap->n_draw_rows; row_idx++) {
@@ -1533,7 +1518,7 @@ static void peg_append_stage_lines(StringBuilder *sb,
   for (int stage_idx = 0; stage_idx < n_history; stage_idx++) {
     const PegStageSnapshot *stage = &history[stage_idx];
     char *label = peg_capitalize(
-        stage->fidelity_plies == 0 ? string_duplicate("seed")
+        stage->fidelity_plies == 0 ? string_duplicate("greedy")
                                    : peg_fidelity_label(stage->fidelity_plies));
     const bool finished = stage->end_ns != 0;
     const int64_t end_ns = finished ? stage->end_ns : now_ns;
@@ -1555,7 +1540,7 @@ static char *peg_best_text(const PegRankedCand *cand, const Board *board,
   StringBuilder *text_sb = string_builder_create();
   string_builder_add_move(text_sb, board, &cand->move, ld, false);
   if (estimate) {
-    string_builder_add_formatted_string(text_sb, "  %.1f%% (greedy estimate)",
+    string_builder_add_formatted_string(text_sb, "  %.1f%% (greedy)",
                                         100.0 * cand->win_pct);
   } else if (cand->cut) {
     char *bound = peg_bound_text(cand->win_pct);
@@ -1598,8 +1583,8 @@ static char *peg_draws_text(const PegRankedCand *cand) {
 
 // The running solve's summary: how long it has run, each stage's time and
 // state, the current stage's progress with its finished, cut and pending
-// candidates, the best move so far (the seed's estimate until an endgame
-// stage finishes a candidate), and the orderings.
+// candidates, the orderings, and the best move so far (the greedy estimate
+// until an endgame stage finishes a candidate).
 static void peg_append_live_summary(StringBuilder *sb,
                                     const PegPollSnapshot *snap,
                                     const Game *game, int64_t now_ns,
@@ -1627,18 +1612,16 @@ static void peg_append_live_summary(StringBuilder *sb,
   }
   const bool estimate = from_baseline || fidelity == 0;
   if (n_entries > 0) {
+    peg_append_summary_line(sb, "Draws", peg_draws_text(&entries[0]));
     peg_append_summary_line(sb, "Best Move",
                             peg_best_text(&entries[0], game_get_board(game),
                                           game_get_ld(game), estimate));
-  }
-  if (n_entries > 0) {
-    peg_append_summary_line(sb, "Draws", peg_draws_text(&entries[0]));
   }
 }
 
 // The finished (or stopped) solve's summary: how it ended and when, each
 // stage's time, the progress of its last completed stage with how many of the
-// ranked plays were solved and cut, the best move, and the orderings.
+// ranked plays were solved and cut, the orderings, and the best move.
 static void peg_append_result_summary(StringBuilder *sb,
                                       const PegResult *result,
                                       const Game *game) {
@@ -1677,13 +1660,11 @@ static void peg_append_result_summary(StringBuilder *sb,
     }
   }
   if (result->n_top_cands > 0) {
+    peg_append_summary_line(sb, "Draws", peg_draws_text(&result->top_cands[0]));
     peg_append_summary_line(sb, "Best Move",
                             peg_best_text(&result->top_cands[0],
                                           game_get_board(game),
                                           game_get_ld(game), estimate));
-  }
-  if (result->n_top_cands > 0) {
-    peg_append_summary_line(sb, "Draws", peg_draws_text(&result->top_cands[0]));
   }
 }
 
@@ -1776,7 +1757,7 @@ peg_append_live_ranking(StringBuilder *sb, const PegPollSnapshot *snap,
       from_baseline || (stage != NULL && stage->fidelity_plies == 0);
   if (estimate) {
     string_builder_add_formatted_string(
-        sb, "Seed ranking (greedy estimates)%s\n",
+        sb, "Greedy ranking%s\n",
         from_baseline ? ", until a candidate finishes" : "");
   }
   const int n_top = n_entries < PEG_DISPLAY_ROWS ? n_entries : PEG_DISPLAY_ROWS;
