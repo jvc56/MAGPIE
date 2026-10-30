@@ -1767,6 +1767,35 @@ static const char *convert_help(const char **usages, const char **examples) {
          "xs/english-v1 in the configured data paths.";
 }
 
+// A hotkey letter reaches the first command that claims it, so a later one
+// (rrack, after rack) is typed by its shortest unambiguous name instead.
+static bool help_hotkey_reaches_arg(const Config *config,
+                                    const arg_token_t arg_token) {
+  const ParsedArg *parg = config_get_parg(config, arg_token);
+  if (!parg->is_hotkey) {
+    return false;
+  }
+  for (int token_idx = 0; token_idx < (int)arg_token; token_idx++) {
+    const ParsedArg *other_parg = config_get_parg(config, token_idx);
+    if (other_parg->is_hotkey && other_parg->name[0] == parg->name[0]) {
+      return false;
+    }
+  }
+  return true;
+}
+
+// The short name, when it differs from the full name, then the full name, each
+// with the prefix they are typed with.
+static void add_help_names(StringBuilder *sb, const char *prefix,
+                           const char *short_name, const char *name,
+                           const char *separator) {
+  if (!strings_equal(short_name, name)) {
+    string_builder_add_formatted_string(sb, "%s%s%s", prefix, short_name,
+                                        separator);
+  }
+  string_builder_add_formatted_string(sb, "%s%s", prefix, name);
+}
+
 void add_help_arg_to_string_builder(const Config *config, int token,
                                     StringBuilder *sb,
                                     const bool show_async_commands,
@@ -1774,7 +1803,8 @@ void add_help_arg_to_string_builder(const Config *config, int token,
   const char *examples[10] = {NULL};
   const char *usages[10] = {NULL};
   const char *text = "";
-  bool is_hotkey = false;
+  char hotkey_name[2] = {'\0', '\0'};
+  const char *prefix = "";
   const char *name = NULL;
   const char *shortest_unambiguous_name = NULL;
   if (show_async_commands) {
@@ -1805,9 +1835,15 @@ void add_help_arg_to_string_builder(const Config *config, int token,
   } else {
     arg_token_t arg_token = token;
     const ParsedArg *parg = config_get_parg(config, arg_token);
-    is_hotkey = parg->is_hotkey;
     name = parg->name;
     shortest_unambiguous_name = parg->shortest_unambiguous_name;
+    if (help_hotkey_reaches_arg(config, arg_token)) {
+      hotkey_name[0] = name[0];
+      shortest_unambiguous_name = hotkey_name;
+    }
+    if (!parg->is_command) {
+      prefix = "-";
+    }
     switch (arg_token) {
     case ARG_TOKEN_PAT_GEN:
     case ARG_TOKEN_PAT:
@@ -3126,13 +3162,7 @@ void add_help_arg_to_string_builder(const Config *config, int token,
     }
   }
   if (short_form) {
-    if (is_hotkey) {
-      string_builder_add_char(sb, name[0]);
-    } else {
-      string_builder_add_string(sb, shortest_unambiguous_name);
-    }
-    string_builder_add_char(sb, ',');
-    string_builder_add_string(sb, name);
+    add_help_names(sb, prefix, shortest_unambiguous_name, name, ",");
     string_builder_add_string(sb, " - ");
     const char *dot = strchr(text, '.');
     const int text_len = dot ? (int)(dot - text + 1) : (int)strlen(text);
@@ -3140,19 +3170,14 @@ void add_help_arg_to_string_builder(const Config *config, int token,
     return;
   }
 
-  if (is_hotkey) {
-    string_builder_add_formatted_string(sb, "%c, %s", name[0], name);
-  } else {
-    string_builder_add_formatted_string(sb, "%s, %s", shortest_unambiguous_name,
-                                        name);
-  }
+  add_help_names(sb, prefix, shortest_unambiguous_name, name, ", ");
 
   string_builder_add_formatted_string(sb, "\n\n%*sUsage:\n\n", HELP_INDENT, "");
 
   int usages_index = 0;
   while (usages[usages_index]) {
-    string_builder_add_formatted_string(sb, "%*s%s %s\n", HELP_INDENT + 2, "",
-                                        name, usages[usages_index]);
+    string_builder_add_formatted_string(sb, "%*s%s%s %s\n", HELP_INDENT + 2, "",
+                                        prefix, name, usages[usages_index]);
     usages_index++;
   }
 
@@ -3161,8 +3186,9 @@ void add_help_arg_to_string_builder(const Config *config, int token,
                                         "");
     int example_index = 0;
     while (examples[example_index]) {
-      string_builder_add_formatted_string(sb, "%*s%s %s\n", HELP_INDENT + 2, "",
-                                          name, examples[example_index]);
+      string_builder_add_formatted_string(sb, "%*s%s%s %s\n", HELP_INDENT + 2,
+                                          "", prefix, name,
+                                          examples[example_index]);
       example_index++;
     }
   }

@@ -1085,6 +1085,15 @@ static void test_config_help(void) {
                             ERROR_STATUS_CONFIG_LOAD_UNRECOGNIZED_ARG);
   assert_config_exec_status(config, "help -",
                             ERROR_STATUS_CONFIG_LOAD_UNRECOGNIZED_ARG);
+
+  // Every name shown is one that reaches the entry, as it is typed.
+  assert_help_has(config, "help", "rr,rrack - ");
+  assert_help_has(config, "help", "\nr,rack - ");
+  assert_help_has(config, "help", "\np1 - ");
+  assert_help_has(config, "help", "\n-nump,-numplays - ");
+  assert_help_has(config, "help numplays", "-nump, -numplays\n");
+  assert_help_has(config, "help numplays", "-numplays 150\n");
+  assert_help_has(config, "help rrack", "rr, rrack\n");
   config_destroy(config);
 }
 
