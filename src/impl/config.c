@@ -3170,10 +3170,35 @@ void add_help_arg_to_string_builder(const Config *config, int token,
   string_builder_add_formatted_string(sb, "\n%*s%s\n\n", HELP_INDENT, "", text);
 }
 
+// The async command the help argument names, which is any prefix of the
+// command's name from its short name on, or NUMBER_OF_ASYNC_COMMAND_TOKENS.
+// The async shgame is not looked up: help gives the shgame command for it.
+static async_token_t get_help_async_token(const char *help_arg) {
+  if (has_prefix(ASYNC_STOP_COMMAND_STRING_SHORT, help_arg) &&
+      has_prefix(help_arg, ASYNC_STOP_COMMAND_STRING)) {
+    return ASYNC_STOP_COMMAND_TOKEN;
+  }
+  if (has_prefix(ASYNC_STATUS_COMMAND_STRING_SHORT, help_arg) &&
+      has_prefix(help_arg, ASYNC_STATUS_COMMAND_STRING)) {
+    return ASYNC_STATUS_COMMAND_TOKEN;
+  }
+  return NUMBER_OF_ASYNC_COMMAND_TOKENS;
+}
+
 char *impl_help(Config *config, ErrorStack *error_stack) {
   const char *help_arg = config_get_parg_value(config, ARG_TOKEN_HELP, 0);
+  if (help_arg && help_arg[0] == '-' && help_arg[1] != '\0') {
+    help_arg++;
+  }
   arg_token_t help_arg_token = NUMBER_OF_ARG_TOKENS;
   if (help_arg) {
+    const async_token_t help_async_token = get_help_async_token(help_arg);
+    if (help_async_token != NUMBER_OF_ASYNC_COMMAND_TOKENS) {
+      StringBuilder *async_sb = string_builder_create();
+      add_help_arg_to_string_builder(config, help_async_token, async_sb, true,
+                                     false);
+      return string_builder_dump_and_destroy(async_sb, NULL);
+    }
     help_arg_token = get_token_from_string(config, help_arg, error_stack);
     if (!error_stack_is_empty(error_stack)) {
       return empty_string();
@@ -9756,8 +9781,11 @@ void config_load_parsed_args(Config *config,
   for (int i = 0; i < number_of_input_strs; i++) {
     const char *input_str = string_splitter_get_item(cmd_split_string, i);
     bool is_cmd = i == 0;
-    bool is_arg = string_length(input_str) > 1 && input_str[0] == '-' &&
-                  !isdigit(input_str[1]);
+    // 'help -numplays' asks about the option rather than setting it.
+    const bool is_help_subject =
+        i == 1 && config->exec_parg_token == ARG_TOKEN_HELP;
+    bool is_arg = !is_help_subject && string_length(input_str) > 1 &&
+                  input_str[0] == '-' && !isdigit(input_str[1]);
 
     if (is_arg || is_cmd) {
       if (current_parg) {

@@ -18,11 +18,13 @@
 #include "../src/ent/players_data.h"
 #include "../src/ent/rack.h"
 #include "../src/ent/sim_results.h"
+#include "../src/ent/thread_control.h"
 #include "../src/ent/trie.h"
 #include "../src/ent/validated_move.h"
 #include "../src/ent/wmp.h"
 #include "../src/impl/config.h"
 #include "../src/impl/contribute_tables.h"
+#include "../src/impl/exec.h"
 #include "../src/str/game_string.h"
 #include "../src/str/move_string.h"
 #include "../src/util/io_util.h"
@@ -1033,19 +1035,64 @@ void test_game_display(void) {
   display_whole_game(TESTDATA_FILEPATH "gcgs/success_long_game.gcg");
 }
 
-void test_config_anno(void) {
-  // Commit and challenge
-  Config *config = config_create_default_test();
-  assert_config_exec_status(config, "set -iterations 100",
-                            ERROR_STATUS_SUCCESS);
+// The output of a help command that must succeed. Caller owns the result.
+static char *get_help_output(Config *config, const char *command) {
+  // assert_config_exec_status leaves the status at started.
+  thread_control_set_status(config_get_thread_control(config),
+                            THREAD_CONTROL_STATUS_FINISHED);
+  ErrorStack *error_stack = error_stack_create();
+  char *output = NULL;
+  assert(run_str_api_command(config, error_stack, command, &output));
+  assert(error_stack_is_empty(error_stack));
+  error_stack_destroy(error_stack);
+  return output;
+}
 
-  // Test the help command
+static void assert_help_has(Config *config, const char *command,
+                            const char *expected_text) {
+  char *output = get_help_output(config, command);
+  if (!has_substring(output, expected_text)) {
+    printf("'%s' does not print '%s':\n%s\n", command, expected_text, output);
+    abort();
+  }
+  free(output);
+}
+
+static void test_config_help(void) {
+  Config *config = config_create_default_test();
   assert_config_exec_status(config, "help holp",
                             ERROR_STATUS_CONFIG_LOAD_UNRECOGNIZED_ARG);
   assert_config_exec_status(config, "help l",
                             ERROR_STATUS_CONFIG_LOAD_AMBIGUOUS_COMMAND);
   assert_config_exec_status(config, "help set", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "help", ERROR_STATUS_SUCCESS);
+
+  // The async commands are listed by help, so help knows them.
+  assert_help_has(config, "help stop", "Stops the currently running command.");
+  assert_help_has(config, "help sto", "Stops the currently running command.");
+  assert_help_has(config, "help status", "Prints the status");
+  assert_help_has(config, "help sta", "Prints the status");
+  assert_help_has(config, "help s", "Shows the current game.");
+  assert_config_exec_status(config, "help stopp",
+                            ERROR_STATUS_CONFIG_LOAD_UNRECOGNIZED_ARG);
+
+  // An option can be asked about as it is typed, and asking does not set it.
+  assert_help_has(config, "help -numplays", "Specifies the number of plays");
+  assert_help_has(config, "help numplays", "Specifies the number of plays");
+  assert_config_exec_status(config, "help -holp",
+                            ERROR_STATUS_CONFIG_LOAD_UNRECOGNIZED_ARG);
+  assert_config_exec_status(config, "help -numplays 3",
+                            ERROR_STATUS_CONFIG_LOAD_UNRECOGNIZED_ARG);
+  assert_config_exec_status(config, "help -",
+                            ERROR_STATUS_CONFIG_LOAD_UNRECOGNIZED_ARG);
+  config_destroy(config);
+}
+
+void test_config_anno(void) {
+  // Commit and challenge
+  Config *config = config_create_default_test();
+  assert_config_exec_status(config, "set -iterations 100",
+                            ERROR_STATUS_SUCCESS);
 
   const char *p1_name = "Alice Lastname-Jones";
   const char *p1_nickname = "Alice_Lastname-Jones";
@@ -3617,6 +3664,7 @@ void test_config(void) {
   test_game_display();
   test_narrow_glyphs();
   test_trie();
+  test_config_help();
   test_config_anno();
   test_config_anno_challenge();
   test_config_anno_endgame_rack();
