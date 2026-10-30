@@ -1138,16 +1138,16 @@ static void test_config_help(void) {
                             ERROR_STATUS_CONFIG_LOAD_UNRECOGNIZED_ARG);
 
   // Every name shown is one that reaches the entry, as it is typed.
-  assert_help_has(config, "help", "rr,rrack - ");
-  assert_help_has(config, "help", "\nr,rack - ");
-  assert_help_has(config, "help", "\np1 - ");
-  assert_help_has(config, "help", "\n-nump,-numplays - ");
+  assert_help_has(config, "help", "\n  rr, rrack ");
+  assert_help_has(config, "help", "\n  r, rack ");
+  assert_help_has(config, "help", "\n  p1 ");
   assert_help_has(config, "help numplays", "-nump, -numplays\n");
   assert_help_has(config, "help numplays", "-numplays 150\n");
   assert_help_has(config, "help rrack", "rr, rrack\n");
 
   // A sentence ends at the end of a word, not at a dot inside one.
-  assert_help_has(config, "help", "to settings.txt after every command.\n");
+  assert_help_has(config, "help session",
+                  "to settings.txt after every command.\n");
 
   // A command's help lists its own options and points to the rest.
   assert_help_has(config, "help simulate", "Simulation options\n");
@@ -1170,6 +1170,29 @@ static void test_config_help(void) {
   char *numplays_help = get_help_output(config, "help numplays");
   assert(!has_substring(numplays_help, "setoptions"));
   free(numplays_help);
+
+  // The index is every command by task, and no options.
+  char *index = get_help_output(config, "help");
+  assert(!has_substring(index, "-numplays"));
+  const int num_sections = help_table_get_num_command_sections();
+  for (int section_idx = 0; section_idx < num_sections; section_idx++) {
+    const HelpCommandSection *section =
+        help_table_get_command_section(section_idx);
+    assert(has_substring(index, section->title));
+    for (int command_idx = 0; command_idx < section->num_commands;
+         command_idx++) {
+      StringBuilder *command_sb = string_builder_create();
+      config_add_help_summary(config, section->commands[command_idx],
+                              command_sb);
+      assert(has_substring(index, string_builder_peek(command_sb)));
+      string_builder_destroy(command_sb);
+    }
+  }
+  assert(has_substring(index, "While a command runs"));
+  assert(has_substring(index, "Stops the currently running command."));
+  assert(has_substring(index, "help " HELP_TOPIC_ALL_OPTIONS));
+  assert(has_substring(index, "help setup"));
+  free(index);
 
   // Every group can be reached from where the table says it is.
   char *all_options = get_help_output(config, "help options");

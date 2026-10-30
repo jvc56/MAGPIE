@@ -309,18 +309,20 @@ magpie> g
 magpie> s
 ```
 
-To print more details about commands and settings, run the `help` command:
+To list the commands by task, run the `help` command:
 
 ```
 magpie> help
 ```
 
-To see details for a specific command or setting, provide the command or setting when invoking the help command:
+To see a command's usage and the options it uses, or what an option does and which commands use it, provide the command or option when invoking the help command:
 
 ```
 magpie> help autoplay
-magpie> help lex
+magpie> help numplays
 ```
+
+To list options rather than commands, ask for `help options`, or for `help setup`, `help tables`, `help display` or `help session` for the options shared across commands.
 
 ### Load and Save Settings
 
