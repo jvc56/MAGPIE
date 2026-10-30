@@ -15973,7 +15973,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->peg_nested_depth_set = false;
   config->peg_nested_strides_set = false;
   config->peg_show_outcomes = true;
-  config->peg_out_width = 100;
+  config->peg_out_width = 200;
   config->peg_out_lines = 1;
   config->peg_last_set_str = NULL;
   config->peg_last_moves_str = NULL;
