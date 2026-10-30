@@ -1,9 +1,13 @@
 #include "peg_embedding_test.h"
 
+#include "../src/compat/ctime.h"
 #include "../src/impl/cmd_api.h"
 #include "../src/util/string_util.h"
 #include "test_util.h"
 #include <assert.h>
+#include <stdbool.h>
+#include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -47,5 +51,116 @@ void test_peg_embedding(void) {
   assert(table && strings_equal(table + 1, text));
   free(text);
   free(structured);
+  magpie_destroy(mp);
+}
+
+// The g104730 position: 2 in the bag, every candidate solved at 3 plies, the
+// best (11C YITES) winning 26.4%. It passes through every phase status shows:
+// the greedy seed, the best seed candidate solved alone, then the rest at
+// once, one per thread.
+#define PEG_STATUS_OUTPUT_CGP                                                  \
+  "cgp 13R1/12MA1/12OB1/11OHIA/11FACE/9Q1LI1R/2VUG1SIDECAR1A/3PALEO1ERG2D/"    \
+  "4BOX2MI3I/6TENANT1ZO/10I2L1/7FOUND1O1/8UNGIRT1/2NyLONED4Y1/"                \
+  "AJEE1KAT3WEST EEHISTY/ 364/387 0 -lex CSW24"
+
+enum {
+  PEG_STATUS_DECILES = 10,
+  PEG_STATUS_PHASE_MAX = 128,
+};
+
+static const double peg_status_poll_seconds = 0.02;
+
+// Where a running status is: its phase, which names the stage and how many
+// candidates are solved at once (falling as the last ones finish), the tenth
+// of the stage's candidates finished, and whether the candidate solved alone
+// lists its draws yet. Snapshots are written when it changes.
+typedef struct PegStatusMilestone {
+  char phase[PEG_STATUS_PHASE_MAX];
+  int decile;
+  bool lists_draws;
+} PegStatusMilestone;
+
+// The rest of the summary line labelled `label`, up to its end, into value.
+static void peg_status_summary_value(const char *status, const char *label,
+                                     char *value, size_t value_size) {
+  value[0] = '\0';
+  const char *line = strstr(status, label);
+  if (line == NULL) {
+    return;
+  }
+  line += strlen(label);
+  while (*line == ' ') {
+    line++;
+  }
+  size_t length = 0;
+  while (line[length] != '\0' && line[length] != '\n' &&
+         length + 1 < value_size) {
+    length++;
+  }
+  memcpy(value, line, length);
+  value[length] = '\0';
+}
+
+static PegStatusMilestone peg_status_milestone(const char *status) {
+  PegStatusMilestone milestone;
+  peg_status_summary_value(status, "  Phase ", milestone.phase,
+                           sizeof(milestone.phase));
+  char progress[PEG_STATUS_PHASE_MAX];
+  peg_status_summary_value(status, "  Progress ", progress, sizeof(progress));
+  int cands_done = 0;
+  int field_size = 0;
+  milestone.decile = PEG_STATUS_DECILES;
+  milestone.lists_draws = has_substring(status, "\nDRAW ");
+  if (sscanf(progress, "%d of %d", &cands_done, &field_size) == 2 &&
+      field_size > 0) {
+    milestone.decile = cands_done * PEG_STATUS_DECILES / field_size;
+  }
+  return milestone;
+}
+
+static bool peg_status_milestones_equal(const PegStatusMilestone *milestone,
+                                        const PegStatusMilestone *other) {
+  return strings_equal(milestone->phase, other->phase) &&
+         milestone->decile == other->decile &&
+         milestone->lists_draws == other->lists_draws;
+}
+
+// Writes peg_output.txt: what status shows at each stage of a running PEG,
+// then what shpeg shows when it is done.
+void test_peg_status_output(void) {
+  Magpie *mp = magpie_create(DEFAULT_TEST_DATA_PATH);
+  assert(!magpie_has_error(mp));
+  assert(magpie_run_sync(mp, "set -lex CSW24 -threads 8") == MAGPIE_SUCCESS);
+  assert(magpie_run_sync(mp, PEG_STATUS_OUTPUT_CGP) == MAGPIE_SUCCESS);
+  FILE *output_file = fopen("peg_output.txt", "w");
+  assert(output_file != NULL);
+  const int64_t start_ns = ctimer_monotonic_ns();
+  assert(magpie_run_async_human_readable(mp, "peg") == MAGPIE_SUCCESS);
+  PegStatusMilestone last_milestone = {
+      .phase = "", .decile = -1, .lists_draws = false};
+  int num_snapshots = 0;
+  while (magpie_get_thread_status(mp) != MAGPIE_THREAD_STATUS_FINISHED) {
+    char *status = magpie_get_last_command_status_message(mp);
+    if (has_prefix("  Status          running", status)) {
+      const PegStatusMilestone milestone = peg_status_milestone(status);
+      if (!peg_status_milestones_equal(&milestone, &last_milestone)) {
+        last_milestone = milestone;
+        num_snapshots++;
+        (void)fprintf(output_file, "==== status at %.1fs ====\n%s\n",
+                      (double)(ctimer_monotonic_ns() - start_ns) / 1e9, status);
+      }
+    }
+    free(status);
+    ctime_nap(peg_status_poll_seconds);
+  }
+  assert(magpie_await(mp) == MAGPIE_SUCCESS);
+  assert(num_snapshots > 0);
+  assert(magpie_run_sync_human_readable(mp, "shpeg") == MAGPIE_SUCCESS);
+  char *shpeg = magpie_get_last_command_output(mp);
+  assert(has_substring(shpeg, "11C YITES"));
+  (void)fprintf(output_file, "==== shpeg at %.1fs ====\n%s",
+                (double)(ctimer_monotonic_ns() - start_ns) / 1e9, shpeg);
+  free(shpeg);
+  assert(fclose(output_file) == 0);
   magpie_destroy(mp);
 }

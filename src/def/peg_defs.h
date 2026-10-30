@@ -84,6 +84,11 @@ enum {
   // Max mover draws of the candidate in progress a snapshot lists: every
   // running one (one per thread), then finished ones.
   PEG_POLL_MAX_DRAW_ROWS = 64,
+  // Max candidates solved at once, one per thread, a snapshot lists.
+  PEG_POLL_MAX_CAND_ROWS = 64,
+  // Max solved candidates of the current endgame stage a snapshot lists, with
+  // their ranks, beside the top PEG_POLL_MAX_ENTRIES.
+  PEG_POLL_MAX_SOLVED_ROWS = 32,
 };
 
 // Smallest outcomes-cell content width the renderer ever wraps to: enough for

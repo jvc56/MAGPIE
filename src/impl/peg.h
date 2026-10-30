@@ -462,6 +462,7 @@ typedef struct PegStageSnapshot {
   int fidelity_plies;  // 0 = greedy; N = N-ply endgame
   int field_size;      // total candidates evaluated in this stage
   int cands_done;      // candidates that have finished so far
+  int cands_cut;       // of those, the ones an early cutoff stopped
   int64_t start_ns;    // monotonic ns when this stage started
   int64_t end_ns;      // monotonic ns when this stage ended; 0 = still running
   double best_win_pct; // best mover win% seen; -1.0 if none yet
@@ -635,6 +636,18 @@ typedef struct PegDrawStatus {
   int helpers; // idle threads lent to its endgame
 } PegDrawStatus;
 
+// A candidate solved at once with others, one per thread: the candidate, when
+// it started, how many of its draws it has solved of all it has, and the draw
+// it is solving (state PEG_DRAW_RUNNING), or none between draws
+// (PEG_DRAW_QUEUED).
+typedef struct PegCandStatus {
+  Move move;
+  int64_t start_ns;
+  int draws_done;
+  int draws_total;
+  PegDrawStatus draw;
+} PegCandStatus;
+
 // Compact per-candidate record kept for each completed non-greedy stage so the
 // status display can show one time column per stage.
 typedef struct {
@@ -677,8 +690,20 @@ typedef struct PegPollSnapshot {
   // stage's first PEG_POLL_MAX_ENTRIES.
   Move evaluating_move;
   // How many candidates are being solved at once, one per thread, as a
-  // cutoff stage solves all but its first; 0 otherwise.
+  // cutoff stage solves all but its first; 0 otherwise. Up to
+  // PEG_POLL_MAX_CAND_ROWS of them are listed, longest running first. Filled
+  // by peg_poll_read.
   int cands_running;
+  int n_cand_rows;
+  PegCandStatus cand_rows[PEG_POLL_MAX_CAND_ROWS];
+  // The best PEG_POLL_MAX_SOLVED_ROWS solved (uncut) candidates of the current
+  // endgame stage, best first, each with its rank among all the stage's
+  // finished candidates (1 = best). The top entries can miss them: cut
+  // bounds sort above a solved play's lower win%. Filled by peg_poll_read;
+  // none in the greedy seed.
+  int n_solved_rows;
+  PegRankedCand solved_rows[PEG_POLL_MAX_SOLVED_ROWS];
+  int solved_ranks[PEG_POLL_MAX_SOLVED_ROWS];
   // The mover draws of that candidate, when candidates are solved one at a
   // time: how many are in each state, the orderings the done ones won and
   // tied of all they had, and up to PEG_POLL_MAX_DRAW_ROWS of the draws

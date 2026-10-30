@@ -114,9 +114,10 @@ static void *poller_main(void *arg) {
 }
 
 // The status text of a 1-in-bag exhaustive solve whose first candidate,
-// `move`, is part way through its draws: the candidate and its time, each
-// draw's state and endgame, and the greedy ranking labelled as such; then the
-// same with too many draws to list the finished ones.
+// `move`, is part way through its draws: the summary, the candidate and its
+// time, each draw's state and endgame, and the greedy ranking labelled as
+// such; then the same with too many draws to list the finished ones; then
+// with candidates solved at once, one per thread.
 static void test_peg_status_string(const Game *game, const Move *move) {
   const int64_t now_ns = 1000LL * 1000 * 1000 * 1000;
   const int64_t second_ns = 1000LL * 1000 * 1000;
@@ -182,13 +183,20 @@ static void test_peg_status_string(const Game *game, const Move *move) {
   string_builder_add_move(move_sb, game_get_board(game), move,
                           game_get_ld(game), false);
   char *solving = get_formatted_string(
-      "solving %s (candidate 1 of 168) for 311.0s; draws: 2 done, 2 running\n",
+      "Solving %s (candidate 1 of 168) for 311.0s; draws: 2 done, 2 running\n",
       string_builder_peek(move_sb));
   string_builder_destroy(move_sb);
 
   char *status = peg_snapshot_get_status_string(snap, game, now_ns, NULL, 0);
-  assert(!has_substring(status, "outcomes"));
-  assert(has_substring(status, "0/168 (0%)"));
+  assert(has_prefix("  Status          running, 312.0s\n", status));
+  assert(has_substring(status, "  Phase           endgames to the end of the "
+                               "game, one candidate at a time\n"));
+  assert(has_substring(status, "  Progress        0 of 168 (0%)\n"));
+  assert(has_substring(status, "  Seed leader     "));
+  assert(has_substring(status, "100.0% (greedy estimate)\n"));
+  assert(has_substring(status, "  Finished        0 solved, 168 to go\n"));
+  assert(has_substring(status, "  Stages          seed 1.0s, end 311.0s\n"));
+  assert(!has_substring(status, "OUTCOMES"));
   assert(!has_substring(status, "draws 2/4"));
   assert(has_substring(status, solving));
   assert(has_substring(status, "won"));
@@ -198,8 +206,8 @@ static void test_peg_status_string(const Game *game, const Move *move) {
   assert(has_substring(status, "1.2G"));
   assert(has_substring(status, "311.0s"));
   assert(has_substring(status, "\n-/E "));
-  assert(has_substring(status, "ranking from stage 0 (greedy); stage 1 (eg to "
-                               "end) has not finished a candidate yet"));
+  assert(has_substring(status, "\nSeed ranking (greedy estimates), until a "
+                               "candidate finishes\nRANK  MOVE"));
   free(status);
 
   // With outcomes, the ranking has an outcomes column: each candidate's
@@ -215,7 +223,7 @@ static void test_peg_status_string(const Game *game, const Move *move) {
   char *cell = peg_build_outcomes_string_rows(rows, 2);
   assert(cell[0] != '\0');
   status = peg_snapshot_get_status_string(snap, game, now_ns, &outcomes, 1);
-  assert(has_substring(status, "spread  outcomes\n"));
+  assert(has_substring(status, "SPREAD  OUTCOMES\n"));
   char *cell_line = get_formatted_string("  %s\n", cell);
   assert(has_substring(status, cell_line));
   free(cell_line);
@@ -238,7 +246,98 @@ static void test_peg_status_string(const Game *game, const Move *move) {
   assert(!has_substring(status, "-12.5"));
   assert(has_substring(status, "5/14"));
   free(status);
+
+  // Solved at once, each candidate's row gives its draws solved of all it
+  // has, its time, and the draw its thread is solving with that endgame.
+  snap->currently_evaluating_move_idx = -1;
+  snap->eval_start_ns = 0;
+  snap->cands_running = 2;
+  snap->n_cand_rows = 2;
+  snap->cand_rows[0].move = *move;
+  snap->cand_rows[0].start_ns = now_ns - 5 * second_ns;
+  snap->cand_rows[0].draws_done = 3;
+  snap->cand_rows[0].draws_total = 8;
+  snap->cand_rows[0].draw = snap->draw_rows[2];
+  snap->cand_rows[1].move = *move;
+  snap->cand_rows[1].start_ns = now_ns - second_ns;
+  snap->cand_rows[1].draw.state = PEG_DRAW_QUEUED;
+  status = peg_snapshot_get_status_string(snap, game, now_ns, NULL, 0);
+  assert(has_substring(status, "  Phase           endgames to the end of the "
+                               "game, 2 candidates at once\n"));
+  assert(has_substring(status, "\nSolving 2 candidates at once, one per "
+                               "thread\nMOVE"));
+  assert(has_substring(status, "3/8"));
+  assert(has_substring(status, "5.0s"));
+  assert(has_substring(status, "1.2G"));
+  // Its endgame has 3 helpers: 4 threads. The second candidate is between
+  // draws, which the note under the table explains.
+  assert(has_substring(status, "DEPTH  MOVES  NODES  THREADS"));
+  assert(has_substring(status, "1.2G   4"));
+  assert(has_substring(status, "- under DEPTH to THREADS: no endgame progress "
+                               "to report right now\n"));
+  assert(!has_substring(status, "draws: 20 done"));
+  free(status);
   free(solving);
+  free(snap);
+}
+
+// The live ranking of an endgame stage: its first ten rows, a "..." row,
+// then a solved play ranked below them, which the top entries miss, at its
+// rank; a cut play whose bound rounds to zero at one decimal; and how many
+// more plays have finished.
+static void test_peg_status_ranking(const Game *game, const Move *move) {
+  const int64_t now_ns = 1000LL * 1000 * 1000 * 1000;
+  PegPollSnapshot *snap = calloc_or_die(1, sizeof(*snap));
+  snap->stage = 1;
+  snap->fidelity_plies = 3;
+  snap->n_stage_history = 2;
+  snap->stage_history[0].field_size = 60;
+  snap->stage_history[0].cands_done = 60;
+  snap->stage_history[0].start_ns = now_ns - 10LL * 1000 * 1000 * 1000;
+  snap->stage_history[0].end_ns = now_ns - 9LL * 1000 * 1000 * 1000;
+  snap->stage_history[1].fidelity_plies = 3;
+  snap->stage_history[1].field_size = 60;
+  snap->stage_history[1].cands_done = 50;
+  snap->stage_history[1].cands_cut = 48;
+  snap->stage_history[1].start_ns = now_ns - 9LL * 1000 * 1000 * 1000;
+  snap->n_entries = 12;
+  for (int entry_idx = 0; entry_idx < snap->n_entries; entry_idx++) {
+    PegRankedCand *entry = &snap->entries[entry_idx];
+    entry->move = *move;
+    entry->weight_sum = 72;
+    entry->spread_unknown = true;
+    entry->cut = entry_idx > 0;
+    entry->win_pct = entry_idx > 0 ? 0.25 : 19.0 / 72.0;
+    entry->win_count = entry_idx > 0 ? 0 : 19;
+  }
+  // 0.006%: one decimal would show "<=0.0".
+  snap->entries[9].win_pct = 0.00006;
+  snap->n_solved_rows = 2;
+  snap->solved_rows[0] = snap->entries[0];
+  snap->solved_ranks[0] = 1;
+  snap->solved_rows[1] = snap->entries[0];
+  snap->solved_rows[1].win_count = 10;
+  snap->solved_rows[1].win_pct = 10.0 / 72.0;
+  snap->solved_ranks[1] = 40;
+
+  char *status = peg_snapshot_get_status_string(snap, game, now_ns, NULL, 0);
+  assert(has_substring(status, "  Finished        2 solved, 48 cut, 10 to "
+                               "go\n"));
+  assert(has_substring(status, "\n  10  "));
+  assert(has_substring(status, "<=0.01"));
+  assert(!has_substring(status, "<=0.0 "));
+  assert(has_substring(status, "\n ...  "));
+  assert(has_substring(status, "\n  40  "));
+  assert(has_substring(status, "13.9"));
+  assert(!has_substring(status, "\n  11  "));
+  assert(has_substring(status, "      (39 more, all cut)\n"));
+  free(status);
+
+  // A solved play below the pinned ones is counted, not named.
+  snap->stage_history[1].cands_cut = 47;
+  status = peg_snapshot_get_status_string(snap, game, now_ns, NULL, 0);
+  assert(has_substring(status, "      (39 more, including 1 solved)\n"));
+  free(status);
   free(snap);
 }
 
@@ -406,6 +505,7 @@ void test_peg_poll(void) {
   peg_result_destroy(&few_result);
 
   test_peg_status_string(game, &final.entries[0].move);
+  test_peg_status_ranking(game, &final.entries[0].move);
 
   string_builder_destroy(poll_best);
   string_builder_destroy(solve_best);

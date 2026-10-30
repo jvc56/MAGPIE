@@ -897,6 +897,60 @@ static void test_peg_complete_threads_match(void) {
   config_destroy(config);
 }
 
+// A candidate the early cutoff flags on its last draw has solved every
+// ordering anyway, so it is solved, not cut, with its exact counts. In g104331
+// (1 in the bag, best 14A BRIEF at 2 wins of 8) many plays lose every
+// ordering before the bar rises high enough to cut them: they must show 0
+// wins and 0 ties of 8, as `peg only` gives them, never a "<=0.0" bound.
+static void test_peg_cut_on_last_draw_is_solved(void) {
+  Config *config = config_create_or_die("set -threads 4 -s1 score -s2 score");
+  load_and_exec_config_or_die(
+      config,
+      "cgp 4CYANiDS4/10PE3/8VLOGS2/10UM3/10TA3/2Q3HOTTY4/2IF1WAB7/L2AROHA6M/"
+      "E1OXEN8E/VIDIOTS7I/3N2E2LOIPEN/3G1TITmOUSE1I/6Z7E/6E2WICE2/"
+      "3LADRONE2RAJ BEFIKNR/ 322/359 0 -lex CSW24");
+  load_and_exec_config_or_die(config, "peg -pegplies 1");
+  const PegResult *result = config_get_peg_result(config);
+  const Game *game = config_get_game(config);
+  int zero_idx = -1;
+  for (int cand_idx = 0; cand_idx < result->n_top_cands; cand_idx++) {
+    const PegRankedCand *cand = &result->top_cands[cand_idx];
+    if (cand->cut) {
+      // A cut play's bound is above zero: a zero bound means it lost every
+      // ordering, which only a solved play can show.
+      assert(cand->win_pct > 0.0);
+      continue;
+    }
+    assert(cand->weight_sum == 8);
+    if (cand->win_count == 0 && cand->tie_count == 0 && zero_idx < 0 &&
+        move_get_type(&cand->move) == GAME_EVENT_TILE_PLACEMENT_MOVE &&
+        move_get_tiles_played(&cand->move) ==
+            move_get_tiles_length(&cand->move)) {
+      zero_idx = cand_idx;
+    }
+  }
+  assert(zero_idx > 0);
+  // The same play solved alone, which no cutoff can stop.
+  const Move *zero_move = &result->top_cands[zero_idx].move;
+  StringBuilder *move_sb = string_builder_create();
+  string_builder_add_move(move_sb, game_get_board(game), zero_move,
+                          game_get_ld(game), false);
+  char *move_text = string_duplicate(string_builder_peek(move_sb));
+  string_builder_destroy(move_sb);
+  *strchr(move_text, ' ') = '.';
+  char *command = get_formatted_string("peg only %s -pegplies 1", move_text);
+  load_and_exec_config_or_die(config, command);
+  free(command);
+  free(move_text);
+  result = config_get_peg_result(config);
+  assert(result->n_top_cands == 1);
+  assert(!result->top_cands[0].cut);
+  assert(result->top_cands[0].win_count == 0);
+  assert(result->top_cands[0].tie_count == 0);
+  assert(result->top_cands[0].weight_sum == 8);
+  config_destroy(config);
+}
+
 // pegonly moved from the persistent -pegonly option to a positional argument
 // on the peg command itself: `-pegonly` as a standalone option must no longer
 // parse, and the restriction it applies must not persist to a later `peg`
@@ -2383,6 +2437,7 @@ void test_peg(void) {
   test_peg_macondo_pond_slice();
   test_peg_main_cli();
   test_peg_complete_threads_match();
+  test_peg_cut_on_last_draw_is_solved();
   test_peg_pegonly_positional_arg();
   test_peg_new_game_drops_previous_peg();
   test_peg_protected_moves_positional();

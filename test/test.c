@@ -233,6 +233,7 @@ static TestEntry on_demand_test_table[] = {
     {"witundo", test_wit_cache_undo},
     {"witconfig", test_wit_cache_config},
     {"peginterrupt", test_peg_interrupted_candidate_outcomes},
+    {"pegstatus", test_peg_status_output},
     {"playchooserfixed", test_play_chooser_fixed_short_budget},
     {"analyze_sim", test_analyze_sim},
     {"simdetigp", test_autoplay_sim_determinism_igp},
