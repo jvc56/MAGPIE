@@ -3024,6 +3024,14 @@ static void add_help_entry_details(const HelpEntry *entry, StringBuilder *sb) {
                                       entry->text);
 }
 
+void config_add_help_summary(const Config *config, arg_token_t arg_token,
+                             StringBuilder *sb) {
+  HelpEntry entry = {0};
+  help_entry_fill(config, arg_token, false, &entry);
+  string_builder_add_formatted_string(
+      sb, "%.*s", help_entry_summary_length(&entry), entry.text);
+}
+
 static void add_help_arg_to_string_builder(const Config *config, int token,
                                            StringBuilder *sb,
                                            const bool show_async_commands,

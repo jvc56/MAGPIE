@@ -24,6 +24,7 @@
 #include "../impl/simmer.h"
 #include "../util/io_util.h"
 #include "../util/json.h"
+#include "../util/string_util.h"
 #include "endgame.h"
 #include "peg.h"
 #include <stdbool.h>
@@ -142,6 +143,11 @@ Config *config_create(const ConfigArgs *args, ErrorStack *error_stack);
 void config_destroy(Config *config);
 
 // Loading commands and execution
+// Adds the first sentence of the command or option's help, which is what a
+// list shows of it.
+void config_add_help_summary(const Config *config, arg_token_t arg_token,
+                             StringBuilder *sb);
+
 void config_load_command(Config *config, const char *cmd,
                          ErrorStack *error_stack);
 void config_execute_command(Config *config, ErrorStack *error_stack);

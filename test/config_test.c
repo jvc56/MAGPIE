@@ -1035,6 +1035,11 @@ void test_game_display(void) {
   display_whole_game(TESTDATA_FILEPATH "gcgs/success_long_game.gcg");
 }
 
+enum {
+  // The longest first sentence of a help text, which a list shows on one line.
+  HELP_SUMMARY_MAX_LENGTH = 100,
+};
+
 // The output of a help command that must succeed. Caller owns the result.
 static char *get_help_output(Config *config, const char *command) {
   // assert_config_exec_status leaves the status at started.
@@ -1094,6 +1099,22 @@ static void test_config_help(void) {
   assert_help_has(config, "help numplays", "-nump, -numplays\n");
   assert_help_has(config, "help numplays", "-numplays 150\n");
   assert_help_has(config, "help rrack", "rr, rrack\n");
+
+  // A sentence ends at the end of a word, not at a dot inside one.
+  assert_help_has(config, "help", "to settings.txt after every command.\n");
+
+  StringBuilder *summary_sb = string_builder_create();
+  for (int token_idx = 0; token_idx < NUMBER_OF_ARG_TOKENS; token_idx++) {
+    string_builder_clear(summary_sb);
+    config_add_help_summary(config, token_idx, summary_sb);
+    const size_t summary_length = string_builder_length(summary_sb);
+    if (summary_length == 0 || summary_length > HELP_SUMMARY_MAX_LENGTH) {
+      printf("help summary of token %d is %zu characters: %s\n", token_idx,
+             summary_length, string_builder_peek(summary_sb));
+      abort();
+    }
+  }
+  string_builder_destroy(summary_sb);
   config_destroy(config);
 }
 
