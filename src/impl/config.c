@@ -1198,7 +1198,7 @@ static void add_analyze_and_settings_help_arg(arg_token_t arg_token,
     examples[0] = "auto";
     examples[1] = "false";
     *text = "Specifies whether to use word maps as opposed to KWGs when "
-            "generating moves; they are 3-4 times faster but use more memory. "
+            "generating moves. They are 3-4 times faster but use more memory. "
             "auto (the default for the command line program and the "
             "library's magpie_create()) uses one when this machine has the "
             "disk and memory for it, building a missing one on first use for "
@@ -1258,7 +1258,7 @@ static void add_analyze_and_settings_help_arg(arg_token_t arg_token,
     usages[0] = "<true_or_false>";
     examples[0] = "true";
     *text = "Specifies whether analyze solves its endgame turns with a full "
-            "window, which reports their exact spreads and spread lost. False "
+            "window. That reports their exact spreads and spread lost. False "
             "by default: they are solved first-win, which proves each play's "
             "result -- win, draw or loss -- and grades a turn on the result "
             "alone, much faster.";
@@ -1267,8 +1267,8 @@ static void add_analyze_and_settings_help_arg(arg_token_t arg_token,
     usages[0] = "<bag_size>";
     examples[0] = "2";
     examples[1] = "0";
-    *text = "The largest bag, from 0 to 4 tiles, that analyze solves with "
-            "the pre-endgame solver; larger bags are simulated. 0 simulates "
+    *text = "The largest bag, from 0 to 4 tiles, that analyze solves with the "
+            "pre-endgame solver. Larger bags are simulated. 0 simulates "
             "every pre-endgame turn. Defaults to 1: a complete pre-endgame "
             "solve at 1 in the bag usually takes seconds to minutes, but at 2 "
             "or more it often takes well over 5 minutes, and a time limit "
@@ -1296,8 +1296,8 @@ static void add_pat_help_arg(arg_token_t arg_token, const char **usages,
     usages[0] = "<gen1_games>,<gen2_games>,... [<output_name>]";
     examples[0] = "50000,50000,50000";
     examples[1] = "20000,20000 english_pat";
-    *text = "Trains PAT weights (see the 'pat' option) by self-play: "
-            "each generation plays the given number of games, recording the "
+    *text = "Trains PAT weights (see the 'pat' option) by self-play. Each "
+            "generation plays the given number of games, recording the "
             "post-move premium-square access features of every move and the "
             "opponent's "
             "reply score, then refits the weights by ridge regression and "
@@ -1331,13 +1331,14 @@ static void add_pat_help_arg(arg_token_t arg_token, const char **usages,
     usages[0] = "<class>[,<class>...]";
     examples[0] = "tws,windows";
     examples[1] = "all";
-    *text = "Specifies which classes of the loaded PAT weights apply to "
-            "the player's own move generation (static play and the "
-            "candidates a simulation starts from): a comma-separated list "
-            "from tws, dws, tls, dls, qws, qls and windows, or 'all' (the "
-            "default). A class left out costs nothing to evaluate, as if "
-            "the weights scored it zero. 'patclasses' sets both players; "
-            "'patclasses1' and 'patclasses2' set one.";
+    *text =
+        "Specifies which classes of the loaded PAT weights apply to the "
+        "player's own move generation. That is static play and the candidates "
+        "a simulation starts from, and the classes are a comma-separated list "
+        "from tws, dws, tls, dls, qws, qls and windows, or 'all' (the "
+        "default). A class left out costs nothing to evaluate, as if "
+        "the weights scored it zero. 'patclasses' sets both players; "
+        "'patclasses1' and 'patclasses2' set one.";
     break;
   case ARG_TOKEN_PAT_CANDIDATES:
   case ARG_TOKEN_P1_PAT_CANDIDATES:
@@ -1346,7 +1347,7 @@ static void add_pat_help_arg(arg_token_t arg_token, const char **usages,
     examples[0] = "true";
     examples[1] = "false";
     *text = "Specifies whether the loaded PAT weights apply to the player's "
-            "own move generation: static play and the candidates a "
+            "own move generation. That is static play and the candidates a "
             "simulation starts from. Defaults to true. 'patcand' sets both "
             "players; 'patcand1' and 'patcand2' set one.";
     break;
@@ -1357,8 +1358,8 @@ static void add_pat_help_arg(arg_token_t arg_token, const char **usages,
     examples[0] = "true";
     examples[1] = "false";
     *text = "Specifies whether PAT applies in the rollouts of the player's "
-            "simulations, to both sides' plies (each with its own "
-            "weights). Defaults to true. 'patrollout' sets both players; "
+            "simulations. It applies to both sides' plies, each with its own "
+            "weights. Defaults to true. 'patrollout' sets both players; "
             "'patrollout1' and 'patrollout2' set one.";
     break;
   case ARG_TOKEN_PAT_ROLLOUT_CLASSES:
@@ -1367,9 +1368,9 @@ static void add_pat_help_arg(arg_token_t arg_token, const char **usages,
     usages[0] = "<class>[,<class>...]";
     examples[0] = "tws,windows";
     examples[1] = "all";
-    *text = "Specifies which PAT classes apply in the rollouts of the "
-            "player's simulations, independently of 'patclasses': for "
-            "example cheaper rollouts while the candidates use every "
+    *text = "Specifies which PAT classes apply in the rollouts of the player's "
+            "simulations. This is independent of 'patclasses': for example "
+            "cheaper rollouts while the candidates use every "
             "class. Defaults to tws,windows (qws,tws,windows on 21x21 "
             "boards), which keeps most of full PAT's value at a fraction "
             "of its cost; all uses every class. "
@@ -1378,8 +1379,8 @@ static void add_pat_help_arg(arg_token_t arg_token, const char **usages,
     break;
   case ARG_TOKEN_PAT_LABEL_PLIES:
     usages[0] = "<plies>";
-    *text = "Specifies how many plies of net result a PAT training "
-            "label spans: 1 is the opponent's reply score alone, and higher "
+    *text = "Specifies how many plies of net result a PAT training label "
+            "spans. 1 is the opponent's reply score alone, and higher "
             "values subtract what the observing player scores back and add "
             "what the opponent scores after that.";
     break;
@@ -1413,11 +1414,12 @@ static void add_player_solver_help_arg(arg_token_t arg_token,
     usages[0] = "<bag_size>";
     examples[0] = "0";
     examples[1] = "4";
-    *text = "Has player 1 or 2 solve the pre-endgame during autoplay while "
-            "the bag holds 1 to this many tiles (at most 4). 0 (the default) "
-            "turns it off, and so does -eplies1/-eplies2 0. The schedule is "
-            "-pegtopk1/2, -pegstride1/2, -pegpess1/2, -pegnested1/2, "
-            "-pegncaps, -pegndepth and -pegnstrides; no time limit applies.";
+    *text =
+        "Has player 1 or 2 solve the pre-endgame during autoplay. It does so "
+        "while the bag holds 1 to this many tiles (at most 4). 0 (the default) "
+        "turns it off, and so does -eplies1/-eplies2 0. The schedule is "
+        "-pegtopk1/2, -pegstride1/2, -pegpess1/2, -pegnested1/2, "
+        "-pegncaps, -pegndepth and -pegnstrides; no time limit applies.";
     break;
   case ARG_TOKEN_P1_PEG_TOP_K:
   case ARG_TOKEN_P2_PEG_TOP_K:
@@ -1453,27 +1455,30 @@ static void add_player_solver_help_arg(arg_token_t arg_token,
   case ARG_TOKEN_PEG_NESTED_CAND_CAPS:
     usages[0] = "<cap1>,<cap2>,...";
     examples[0] = "8,4,2";
-    *text = "Per-level candidate caps of the nested lookahead in the peg "
-            "command, analyze and both players' autoplay pre-endgame solves. "
+    *text = "Per-level candidate caps of the nested PEG lookahead. They apply "
+            "to the peg command, analyze and both players' autoplay "
+            "pre-endgame solves. "
             "Each must be >= 1. Defaults to 8,4,2 for autoplay and a timed "
             "peg, and to every candidate (up to 64) for a complete one.";
     break;
   case ARG_TOKEN_PEG_NESTED_DEPTH:
     usages[0] = "<depth>";
     examples[0] = "1";
-    *text = "How many nested pre-endgames deep the peg command, analyze and "
-            "both players' autoplay pre-endgame solves look before a greedy "
-            "rollout, from 1 to 24. Defaults to 1 for autoplay and a timed "
+    *text = "How many nested pre-endgames deep PEG looks before a greedy "
+            "rollout, from 1 to 24. This applies to the peg command, analyze "
+            "and both players' autoplay pre-endgame solves. Defaults to 1 for "
+            "autoplay and a timed "
             "peg, and to 24, as deep as a game can need, for a complete one.";
     break;
   case ARG_TOKEN_PEG_NESTED_STRIDES:
     usages[0] = "<bag1>,<bag2>,<bag3>,<bag4>";
     examples[0] = "1,1,5,7";
-    *text = "Scenario-sampling stride of an inner pre-endgame with a bag of "
-            "1, 2, 3 and 4 tiles, in the peg command, analyze and both "
-            "players' autoplay pre-endgame solves. Each must be >= 1. "
-            "Defaults to 1,1,5,7 for autoplay and a timed peg, and to 1 (every "
-            "scenario) for a complete one.";
+    *text =
+        "Scenario-sampling stride of an inner pre-endgame with a bag of 1, 2, "
+        "3 and 4 tiles. This applies to the peg command, analyze and both "
+        "players' autoplay pre-endgame solves. Each must be >= 1. "
+        "Defaults to 1,1,5,7 for autoplay and a timed peg, and to 1 (every "
+        "scenario) for a complete one.";
     break;
   default:
     break;
@@ -1488,7 +1493,8 @@ static const char *contribute_help(const char **usages, const char **examples) {
   usages[0] = "[<settings_path>]";
   examples[0] = "";
   examples[1] = "my_contribute.txt";
-  return "Contributes to birdtest: claims tasks, executes them with MAGPIE's "
+  return "Contributes to birdtest by running its server's tasks. It claims "
+         "tasks, executes them with MAGPIE's "
          "own command API, and submits the results, repeating until the "
          "server has no more work or the settings file's maxtasks is "
          "reached. Settings (server, apikey, uuid, threads, maxtasks, "
@@ -1522,8 +1528,9 @@ static const char *convert_help(const char **usages, const char **examples) {
   examples[5] = "text2wordmap NWL20";
   examples[6] = "kwg2witifneeded CSW24";
   examples[7] = "winpct CSW24_winpct_record CSW24_winpct";
-  return "Runs the convert command for the specified type with the given "
-         "input and output name, using different file extensions. The letter "
+  return "Converts a data file to another format. The type picks the "
+         "conversion, and the input and output share the given name with "
+         "different file extensions. The letter "
          "distribution defaults to the lexicon's distribution. Types include "
          "text2kwg, text2wordmap, dawg2wordmap, dawg2text, csv2klv, klv2csv, "
          "klvwmp2rit, rackequity2klv, kwg2wit, kwg2witifneeded, kwg2witv4 and "
@@ -1717,8 +1724,8 @@ static void help_entry_fill(const Config *config, int token,
       examples[2] = "-, 8G QI,8H QI";
       examples[3] = "ABC, 8G QI,8H QI";
       examples[4] = "8G.QI,8H.QI";
-      text = "Runs a Monte Carlo simulation for the current position, "
-             "preventing the BAI algorithm from pruning the specified moves. "
+      text = "Simulates the current position, preventing the BAI algorithm "
+             "from pruning the specified moves. "
              "The move list follows an optional opponent rack and a comma; "
              "with no rack before the comma, the opponent's currently known "
              "rack is used, and '-' forces a random opponent rack. Moves are "
@@ -1787,9 +1794,9 @@ static void help_entry_fill(const Config *config, int token,
       examples[4] = "only 11J.MEH,1F.VENeY,pass";
       examples[5] = "resume";
       text =
-          "Runs the pre-endgame (PEG) solver on the current position (1 to 4 "
-          "tiles in the bag, or up to 7 when every candidate leaves at most "
-          "4). "
+          "Runs the pre-endgame (PEG) solver on the current position. The bag "
+          "must hold 1 to 4 tiles, or up to 7 when every candidate leaves at "
+          "most 4. "
           "The first argument is the candidate set: leaves<N>, the moves that "
           "leave at most N tiles in the bag (leaves1 when it is not given); "
           "empty, which is leaves0; all, every move; only, exactly the moves "
@@ -1861,10 +1868,10 @@ static void help_entry_fill(const Config *config, int token,
       examples[2] = "testdata/";
       examples[3] = "Alice";
       examples[4] = "testdata/game.gcg Alice,Bob";
-      text = "Analyzes each turn of a GCG game: with a static evaluation when "
-             "-plies is 0, with the pre-endgame solver when 1 to -apegmaxbag "
-             "(1 by default) tiles are in the bag, with the endgame solver "
-             "when the bag is empty, and with simulation otherwise. With 0 "
+      text = "Analyzes each turn of a GCG game. A turn gets a static "
+             "evaluation when -plies is 0, the pre-endgame solver when 1 to "
+             "-apegmaxbag (1 by default) tiles are in the bag, the endgame "
+             "solver when the bag is empty, and simulation otherwise. With 0 "
              "args, analyzes the currently "
              "loaded game. With 1 "
              "arg, the argument is interpreted as a directory, a GCG file, or "
@@ -2016,10 +2023,11 @@ static void help_entry_fill(const Config *config, int token,
       examples[0] = "";
       examples[1] = "20";
       examples[2] = "all";
-      text = "Shows the PEG result as status shows a running PEG: a summary, "
-             "then the ranking's first 10 rows and the solved plays ranked "
-             "below them. Optionally takes how many rows to show first, or "
-             "'all' for every play.";
+      text =
+          "Shows the PEG result as status shows a running PEG. That is a "
+          "summary, then the ranking's first 10 rows and the solved plays "
+          "ranked below them. Optionally takes how many rows to show first, or "
+          "'all' for every play.";
       break;
     case ARG_TOKEN_SHOW_HEAT_MAP:
       usages[0] = "<play_index> [<ply> <type>]";
@@ -2182,7 +2190,7 @@ static void help_entry_fill(const Config *config, int token,
       usages[0] = "<leaves>";
       examples[0] = "CSW21";
       examples[1] = "TWL98";
-      text = "Specifies the leaves for the given player, This can can be used "
+      text = "Specifies the leaves for the given player. This can be used "
              "with the autoplay command to compare different leaves.";
       break;
     case ARG_TOKEN_P1_MOVE_SORT_TYPE:
@@ -2253,14 +2261,15 @@ static void help_entry_fill(const Config *config, int token,
       break;
     case ARG_TOKEN_ENDGAME_TIME_LIMIT:
       usages[0] = "<time_limit_seconds>";
-      text = "Specifies the time limit in seconds for the endgame solver, in "
-             "the endgame command and in analyze's endgame turns. A value of 0 "
+      text = "Specifies the time limit in seconds for the endgame solver. It "
+             "applies to the endgame command and analyze's endgame turns. A "
+             "value of 0 "
              "(the default) is unlimited.";
       break;
     case ARG_TOKEN_ENDGAME_BEST_REPLY:
       usages[0] = "<true/false>";
       examples[0] = "false";
-      text = "Endgame solver shortcuts next to the leaves: true (default) = "
+      text = "Endgame solver shortcuts next to the leaves. true (default) = "
              "find the side to move's best play there without generating its "
              "whole move list, and search it first one ply above the leaves; "
              "false = generate every list. Applies to endgame and pre-endgame "
@@ -2273,8 +2282,9 @@ static void help_entry_fill(const Config *config, int token,
     case ARG_TOKEN_PEG_TIME_LIMIT:
       usages[0] = "<time_limit_seconds>";
       text =
-          "Specifies the time limit in seconds for the pre-endgame solver, "
-          "in the peg command and in analyze's pre-endgame turns. A value of "
+          "Specifies the time limit in seconds for the pre-endgame solver. It "
+          "applies to the peg command and analyze's pre-endgame turns. A value "
+          "of "
           "0 (the default) is unlimited. The limit picks the strategy: with "
           "none and no -pegtopk, the solve is complete (every candidate "
           "solved with first-win endgames -pegplies deep, cut once it cannot "
@@ -2287,8 +2297,9 @@ static void help_entry_fill(const Config *config, int token,
       examples[0] = "6";
       examples[1] = "end";
       text =
-          "The endgame depth of the pre-endgame solver's complete solve (no "
-          "-pegtlim or -pegtopk, or -pegtopk all), in the peg command and in "
+          "The endgame depth of the pre-endgame solver's complete solve. That "
+          "is a solve with no -pegtlim or -pegtopk, or with -pegtopk all, in "
+          "the peg command and in "
           "analyze's pre-endgame turns. Each endgame once the bag is empty "
           "is searched this many plies deep, and a line still going there is "
           "finished by a greedy playout, so its results are estimates, which "
@@ -2321,8 +2332,8 @@ static void help_entry_fill(const Config *config, int token,
       usages[0] = "<stride>";
       examples[0] = "7";
       examples[1] = "1";
-      text = "PEG scenario-sampling stride for the halving stages (bag >= 3): "
-             "set > 1 to evaluate ~1/stride of the scenarios, reweighted to "
+      text = "PEG scenario-sampling stride for the halving stages (bag >= 3). "
+             "Set > 1 to evaluate ~1/stride of the scenarios, reweighted to "
              "preserve the expected aggregate (faster, approximate). Default "
              "(<= 1) is full enumeration. Ignored for bag <= 2.";
       break;
@@ -2349,7 +2360,7 @@ static void help_entry_fill(const Config *config, int token,
       usages[0] = "<true/false>";
       examples[0] = "false";
       text =
-          "PEG non-emptier leaf evaluation: true (default) = nested inner-peg "
+          "PEG non-emptier leaf evaluation. true (default) = nested inner-peg "
           "lookahead (solve the opponent's sub-pre-endgame; see -pegndepth, "
           "-pegncaps and -pegnstrides for its schedule); false = flat "
           "greedy/pessimistic rollout. Nested wins more decisions but costs "
@@ -2364,7 +2375,7 @@ static void help_entry_fill(const Config *config, int token,
       usages[0] = "<true/false>";
       examples[0] = "true";
       text =
-          "When true, adds a per-play outcomes column to the graded table: the "
+          "When true, adds a per-play outcomes column to the graded table. The "
           "largest of the winning / losing / tying draw lists is implied by "
           "the "
           "counts and the smaller ones are shown, comma-separated with "
@@ -2420,8 +2431,8 @@ static void help_entry_fill(const Config *config, int token,
       examples[0] = "1000000";
       examples[1] = "0";
       text = "Stops a command once it has generated moves this many times, "
-             "counted across all its threads: a work budget that, unlike a "
-             "time limit, is the same on any machine. The command keeps what "
+             "counted across all its threads. This work budget, unlike a time "
+             "limit, is the same on any machine. The command keeps what "
              "it has done and stops where it next checks for an interrupt, so "
              "it runs somewhat past the limit, never short of it. 0, the "
              "default, is no limit.";
@@ -2430,8 +2441,8 @@ static void help_entry_fill(const Config *config, int token,
       usages[0] = "<max_iterations>";
       examples[0] = "100";
       examples[1] = "1000";
-      text = "Specifies the maximum total number of iterations across all "
-             "simulated plays to perform before stopping.";
+      text = "Specifies the maximum total iterations across all simulated "
+             "plays to perform before stopping.";
       break;
     case ARG_TOKEN_STOP_COND_PCT:
       usages[0] = "<stop_cond_pct>";
@@ -2501,10 +2512,10 @@ static void help_entry_fill(const Config *config, int token,
       usages[0] = "<true_or_false>";
       examples[0] = "true";
       examples[1] = "false";
-      text = "Specifies whether simulations project each nonterminal "
-             "horizon's spread to the end of the game with the win "
-             "percentage table's expected swing for that bag and rack "
-             "state. The projection feeds the equity and the spread term "
+      text = "Specifies whether simulations project each nonterminal horizon's "
+             "spread to the end of the game. The projection uses the win "
+             "percentage table's expected swing for that bag and rack state. "
+             "The projection feeds the equity and the spread term "
              "of the utility blend.";
       break;
     case ARG_TOKEN_SIM_BAG_CYCLE:
@@ -2512,8 +2523,8 @@ static void help_entry_fill(const Config *config, int token,
       examples[0] = "true";
       examples[1] = "false";
       text = "Specifies whether each simulation sample plays every rotation of "
-             "its shuffled bag by the rack size, until the rotations wrap "
-             "around, and counts their mean as one sample. Every unseen tile "
+             "its shuffled bag. Rotations go by the rack size until they wrap "
+             "around, and their mean counts as one sample. Every unseen tile "
              "starts on the opponent's rack once per shuffle. Iterations and "
              "minimum iterations still count rollouts, and every play gets at "
              "least two cycles. On by default.";
@@ -2545,8 +2556,8 @@ static void help_entry_fill(const Config *config, int token,
       examples[0] = "true";
       examples[1] = "false";
       text = "Specifies whether analyze grades each turn into a discrete "
-             "mistake size (small/medium/large) and includes mistake counts "
-             "and the mistake index (MI) in its output. Off by default.";
+             "mistake size (small/medium/large). Its output then includes "
+             "mistake counts and the mistake index (MI). Off by default.";
       break;
     case ARG_TOKEN_ANALYZE_ENDGAME_SPREAD:
     case ARG_TOKEN_ANALYZE_PEG_MAX_BAG:
@@ -2657,7 +2668,7 @@ static void help_entry_fill(const Config *config, int token,
       usages[0] = "<points>";
       examples[0] = "100.0";
       text = "Scale (in spread points) of the logistic sigmoid that maps "
-             "rollout spread into [0, 1]: spread_sigmoid = "
+             "rollout spread into [0, 1]. spread_sigmoid = "
              "1/(1+exp(-spread/uspreadscale)). Controls the slope of the "
              "sigmoid -- the derivative at spread=0 is 1/(4*uspreadscale). "
              "At spread = +/-uspreadscale the sigmoid is ~0.731 / ~0.269. "
@@ -2745,8 +2756,8 @@ static void help_entry_fill(const Config *config, int token,
       usages[0] = "<true_or_false>";
       examples[0] = "true";
       examples[1] = "false";
-      text = "Specifies whether or not to display the game board to the right "
-             "of moves when showing moves or simulation results.";
+      text = "Specifies whether to display the game board to the right of "
+             "moves or simulation results.";
       break;
     case ARG_TOKEN_SHOW_PROMPT:
       usages[0] = "<true_or_false>";
@@ -2817,7 +2828,7 @@ static void help_entry_fill(const Config *config, int token,
     case ARG_TOKEN_P2_SIM_MARGIN_FORECAST:
       usages[0] = "<true_or_false>";
       text = "Specifies whether simulation projects the final margin (see "
-             "smargin) for player 1 or 2 during autoplay.";
+             "smargin) for player 1 or 2 in autoplay.";
       break;
     case ARG_TOKEN_MOVE_BUDGET:
     case ARG_TOKEN_P1_MOVE_BUDGET:
@@ -2826,7 +2837,7 @@ static void help_entry_fill(const Config *config, int token,
       examples[0] = "50000";
       examples[1] = "0";
       text = "Specifies the move generations a player may spend choosing one "
-             "move: its inference, simulation and solving together "
+             "move. That covers its inference, simulation and solving together "
              "(movebudget for both players, mb1 or mb2 for one). When it is "
              "spent the player plays its best move so far, even short of the "
              "simulation's minimum iterations. Unlike a time limit, a budget "
@@ -2837,9 +2848,8 @@ static void help_entry_fill(const Config *config, int token,
     case ARG_TOKEN_P1_SIM_BAG_CYCLE:
     case ARG_TOKEN_P2_SIM_BAG_CYCLE:
       usages[0] = "<true_or_false>";
-      text = "Specifies whether simulation cycles each sample's bag through "
-             "its rotations (see sbagcycle) for player 1 or 2 during "
-             "autoplay.";
+      text = "Specifies whether simulation cycles each sample's bag (see "
+             "sbagcycle) for player 1 or 2 in autoplay.";
       break;
     case ARG_TOKEN_P1_TIME_LIMIT:
     case ARG_TOKEN_P2_TIME_LIMIT:
@@ -2852,8 +2862,8 @@ static void help_entry_fill(const Config *config, int token,
       usages[0] = "<milliseconds>";
       examples[0] = "30000";
       examples[1] = "-1";
-      text = "Enables PlayChooser for player 1 or 2 during autoplay and sets "
-             "that player's total per-game clock in milliseconds. -1 "
+      text = "Enables PlayChooser for player 1 or 2 during autoplay. The value "
+             "is that player's total per-game clock in milliseconds. -1 "
              "disables PlayChooser for the player (the default); 0 enables "
              "it without a clock. A clocked player's games are not "
              "reproducible from the seed: how much search fits in the budget "
@@ -2898,8 +2908,9 @@ static void help_entry_fill(const Config *config, int token,
     case ARG_TOKEN_P1_INFERENCE_MARGIN:
     case ARG_TOKEN_P2_INFERENCE_MARGIN:
       usages[0] = "<inference_equity_margin>";
-      text = "Specifies the maximum equity loss for an opponent's play when "
-             "running an inference for player 1 or 2 during autoplay.";
+      text = "Specifies the inference margin for player 1 or 2 during "
+             "autoplay. That is the maximum equity loss for an opponent's play "
+             "when running an inference.";
       break;
     case ARG_TOKEN_P1_ENDGAME_PLIES:
     case ARG_TOKEN_P2_ENDGAME_PLIES:
@@ -2938,18 +2949,19 @@ static void help_entry_fill(const Config *config, int token,
     case ARG_TOKEN_DATA:
       usages[0] = "fetch [<base_url>]";
       examples[0] = "fetch";
-      text = "Downloads the data set this version of MAGPIE goes with (lexica, "
-             "leaves, layouts, letter distributions, win percentages; about "
-             "195 MB) into the first data path, as download_data.sh does, "
-             "checking every part against the SHA-256 MAGPIE pins for it. Does "
+      text = "Downloads the data set this version of MAGPIE goes with into the "
+             "first data path. It holds lexica, leaves, layouts, letter "
+             "distributions and win percentages, about 195 MB. Like "
+             "download_data.sh, this checks every part against the SHA-256 "
+             "MAGPIE pins for it. Does "
              "nothing if that data version is already there. <base_url> "
              "fetches the same parts from a mirror.";
       break;
     case ARG_TOKEN_BUILDERS:
       usages[0] = "";
-      text = "Prints, as JSON, the versions of the builders that derive one "
-             "data file from another (wordmap, rack info table, KLV) and the "
-             "instruction-set target this binary was compiled for. A "
+      text = "Prints, as JSON, this binary's builder versions and "
+             "instruction-set target. The builders derive one data file from "
+             "another (wordmap, rack info table, KLV). A "
              "derived file's bytes are only comparable between two builds "
              "that agree on these.";
       break;
@@ -2964,9 +2976,15 @@ static void help_entry_fill(const Config *config, int token,
 }
 
 // The length of the entry's first sentence, which is all a list shows of it.
+// A dot inside a word, as in settings.txt or 0.5, does not end the sentence.
 static int help_entry_summary_length(const HelpEntry *entry) {
-  const char *dot = strchr(entry->text, '.');
-  return dot ? (int)(dot - entry->text + 1) : (int)strlen(entry->text);
+  const char *text = entry->text;
+  for (const char *dot = strchr(text, '.'); dot; dot = strchr(dot + 1, '.')) {
+    if (dot[1] == ' ' || dot[1] == '\0') {
+      return (int)(dot - text + 1);
+    }
+  }
+  return (int)strlen(text);
 }
 
 static void add_help_entry_summary_line(const HelpEntry *entry,
