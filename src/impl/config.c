@@ -80,6 +80,7 @@
 #include "gameplay.h"
 #include "gcg.h"
 #include "get_gcg.h"
+#include "help_table.h"
 #include "inference.h"
 #include "move_gen.h"
 #include "peg.h"
@@ -104,6 +105,8 @@ enum {
   HELP_INDENT = 10,
   // The most usage or example lines a help entry has, plus its NULL ending.
   HELP_MAX_LINES = 10,
+  // Option names wider than this take a line of their own in a list.
+  HELP_OPTION_NAME_WIDTH = 30,
   // Upper bound on the number of per-stage counts the -pegtopk CLI arg accepts.
   // This caps only the parse buffer; the solver itself imposes no stage limit.
   CONFIG_PEG_MAX_STAGES = 16,
@@ -3060,326 +3063,472 @@ static async_token_t get_help_async_token(const char *help_arg) {
   return NUMBER_OF_ASYNC_COMMAND_TOKENS;
 }
 
+// An option row's names as they are typed, and its summary, which is the first
+// form's.
+static void add_help_option_row(const Config *config, const HelpOptionRow *row,
+                                const int indent, StringBuilder *names_sb,
+                                StringBuilder *sb) {
+  const arg_token_t forms[] = {row->both_players, row->player_one,
+                               row->player_two};
+  const size_t num_forms = sizeof(forms) / sizeof(forms[0]);
+  arg_token_t first_form = NUMBER_OF_ARG_TOKENS;
+  string_builder_clear(names_sb);
+  for (size_t form_idx = 0; form_idx < num_forms; form_idx++) {
+    if (forms[form_idx] == NUMBER_OF_ARG_TOKENS) {
+      continue;
+    }
+    string_builder_add_formatted_string(
+        names_sb, "%s-%s", first_form == NUMBER_OF_ARG_TOKENS ? "" : ", ",
+        config_get_parg(config, forms[form_idx])->name);
+    if (first_form == NUMBER_OF_ARG_TOKENS) {
+      first_form = forms[form_idx];
+    }
+  }
+  const char *names = string_builder_peek(names_sb);
+  if (string_builder_length(names_sb) > HELP_OPTION_NAME_WIDTH) {
+    string_builder_add_formatted_string(sb, "%*s%s\n%*s", indent, "", names,
+                                        indent + HELP_OPTION_NAME_WIDTH + 2,
+                                        "");
+  } else {
+    string_builder_add_formatted_string(sb, "%*s%-*s  ", indent, "",
+                                        HELP_OPTION_NAME_WIDTH, names);
+  }
+  config_add_help_summary(config, first_form, sb);
+  string_builder_add_char(sb, '\n');
+}
+
+static void add_help_option_group(const Config *config,
+                                  const help_option_group_t group_id,
+                                  const int indent, StringBuilder *sb) {
+  const HelpOptionGroup *group = help_table_get_option_group(group_id);
+  string_builder_add_formatted_string(sb, "%*s%s\n\n", indent, "",
+                                      group->title);
+  StringBuilder *names_sb = string_builder_create();
+  for (int row_idx = 0; row_idx < group->num_rows; row_idx++) {
+    add_help_option_row(config, &group->rows[row_idx], indent + 2, names_sb,
+                        sb);
+  }
+  string_builder_destroy(names_sb);
+  string_builder_add_char(sb, '\n');
+}
+
+// The options the help for a command lists, then where to find the rest of the
+// options it uses.
+static void add_help_command_groups(const Config *config,
+                                    const arg_token_t command,
+                                    StringBuilder *sb) {
+  bool has_pointers = false;
+  for (int group_idx = 0; group_idx < NUMBER_OF_HELP_OPTION_GROUPS;
+       group_idx++) {
+    if (help_table_command_lists_group(command, group_idx)) {
+      add_help_option_group(config, group_idx, HELP_INDENT, sb);
+    }
+    has_pointers =
+        has_pointers || help_table_command_points_to_group(command, group_idx);
+  }
+  if (!has_pointers) {
+    return;
+  }
+  string_builder_add_formatted_string(sb, "%*sAlso uses\n\n", HELP_INDENT, "");
+  for (int group_idx = 0; group_idx < NUMBER_OF_HELP_OPTION_GROUPS;
+       group_idx++) {
+    if (help_table_command_points_to_group(command, group_idx)) {
+      const HelpOptionGroup *group = help_table_get_option_group(group_idx);
+      string_builder_add_formatted_string(
+          sb, "%*s%-*s  help %s\n", HELP_INDENT + 2, "", HELP_OPTION_NAME_WIDTH,
+          group->title, group->help_subject);
+    }
+  }
+  string_builder_add_char(sb, '\n');
+}
+
+// The commands that use an option, or for a shared option where to find the
+// others like it.
+static void add_help_option_commands(const Config *config,
+                                     const arg_token_t option,
+                                     StringBuilder *sb) {
+  const help_option_group_t group_id = help_table_find_option_group(option);
+  const HelpOptionGroup *group = help_table_get_option_group(group_id);
+  if (group->is_shared) {
+    string_builder_add_formatted_string(sb, "%*s%s: help %s\n\n", HELP_INDENT,
+                                        "", group->title, group->help_subject);
+    return;
+  }
+  string_builder_add_formatted_string(sb, "%*sUsed by:", HELP_INDENT, "");
+  const char *separator = " ";
+  const int num_sections = help_table_get_num_command_sections();
+  for (int section_idx = 0; section_idx < num_sections; section_idx++) {
+    const HelpCommandSection *section =
+        help_table_get_command_section(section_idx);
+    for (int command_idx = 0; command_idx < section->num_commands;
+         command_idx++) {
+      const arg_token_t command = section->commands[command_idx];
+      // setoptions sets every option without using any of them.
+      if (command != ARG_TOKEN_SET &&
+          (help_table_command_lists_group(command, group_id) ||
+           help_table_command_points_to_group(command, group_id))) {
+        string_builder_add_formatted_string(
+            sb, "%s%s", separator, config_get_parg(config, command)->name);
+        separator = ", ";
+      }
+    }
+  }
+  string_builder_add_string(sb, "\n\n");
+}
+
+// Adds the option list a topic names, and returns whether it names one.
+static bool add_help_topic(const Config *config, const char *help_arg,
+                           StringBuilder *sb) {
+  const bool wants_all_options =
+      strings_equal(help_arg, HELP_TOPIC_ALL_OPTIONS);
+  bool is_topic = wants_all_options;
+  for (int group_idx = 0; group_idx < NUMBER_OF_HELP_OPTION_GROUPS;
+       group_idx++) {
+    const HelpOptionGroup *group = help_table_get_option_group(group_idx);
+    if (wants_all_options ||
+        (group->is_shared && strings_equal(help_arg, group->help_subject))) {
+      add_help_option_group(config, group_idx, 0, sb);
+      is_topic = true;
+    }
+  }
+  return is_topic;
+}
+
+// Adds the help for what the help command was given.
+static void add_help_subject(Config *config, const char *help_arg,
+                             StringBuilder *sb, ErrorStack *error_stack) {
+  const async_token_t async_token = get_help_async_token(help_arg);
+  if (async_token != NUMBER_OF_ASYNC_COMMAND_TOKENS) {
+    add_help_arg_to_string_builder(config, async_token, sb, true, false);
+    return;
+  }
+  if (add_help_topic(config, help_arg, sb)) {
+    return;
+  }
+  const arg_token_t arg_token =
+      get_token_from_string(config, help_arg, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  add_help_arg_to_string_builder(config, arg_token, sb, false, false);
+  if (config_get_parg(config, arg_token)->is_command) {
+    add_help_command_groups(config, arg_token, sb);
+  } else {
+    add_help_option_commands(config, arg_token, sb);
+  }
+}
+
+// Adds what the help command prints when it is given nothing.
+static void add_help_index(const Config *config, StringBuilder *sb) {
+  // Game Navigation Commands (alphabetical by name)
+  static const arg_token_t game_nav_cmds[] = {
+      ARG_TOKEN_GOTO,     /* goto */
+      ARG_TOKEN_NEXT,     /* next */
+      ARG_TOKEN_PREVIOUS, /* previous */
+  };
+  static const arg_token_t game_anno_cmds[] = {
+      ARG_TOKEN_CHALLENGE,    /* challenge */
+      ARG_TOKEN_CNOTE,        /* cnote */
+      ARG_TOKEN_COMMIT,       /* commit */
+      ARG_TOKEN_EXPORT,       /* export */
+      ARG_TOKEN_LOAD,         /* load */
+      ARG_TOKEN_NEW_GAME,     /* newgame */
+      ARG_TOKEN_NOTE,         /* note */
+      ARG_TOKEN_OVERTIME,     /* overtimepenalty */
+      ARG_TOKEN_P1_NAME,      /* p1 */
+      ARG_TOKEN_P2_NAME,      /* p2 */
+      ARG_TOKEN_RACK,         /* rack */
+      ARG_TOKEN_RANDOM_RACK,  /* rrack */
+      ARG_TOKEN_SWITCH_NAMES, /* switchnames */
+      ARG_TOKEN_TOP_COMMIT,   /* tcommit */
+      ARG_TOKEN_UNCHALLENGE,  /* unchallenge */
+  };
+  // Game Analysis Commands (alphabetical by name)
+  static const arg_token_t game_analysis_cmds[] = {
+      ARG_TOKEN_MOVES,                /* addmoves */
+      ARG_TOKEN_ANALYZE,              /* analyze */
+      ARG_TOKEN_ENDGAME,              /* endgame */
+      ARG_TOKEN_GEN,                  /* generate */
+      ARG_TOKEN_GEN_AND_SIM,          /* gsimulate */
+      ARG_TOKEN_SHOW_HEAT_MAP,        /* heatmap */
+      ARG_TOKEN_INFER,                /* infer */
+      ARG_TOKEN_LEAVE_GEN,            /* leavegen */
+      ARG_TOKEN_PEG,                  /* peg */
+      ARG_TOKEN_RACK_AND_GEN,         /* rg */
+      ARG_TOKEN_RACK_AND_GEN_AND_SIM, /* rgsimulate */
+      ARG_TOKEN_SHOW_ENDGAME,         /* shendgame */
+      ARG_TOKEN_SHOW_GAME,            /* shgame */
+      ARG_TOKEN_SHOW_PEG,             /* shpeg */
+      ARG_TOKEN_SHOW_INFERENCE,       /* shinference */
+      ARG_TOKEN_SHOW_MOVES,           /* shmoves */
+      ARG_TOKEN_SIM,                  /* simulate */
+      ARG_TOKEN_SNOPRUNE,             /* snoprune */
+      ARG_TOKEN_PAT_GEN,              /* patgen */
+  };
+  // Other Commands (alphabetical by name)
+  static const arg_token_t other_cmds[] = {
+      ARG_TOKEN_AUTOPLAY,    /* autoplay */
+      ARG_TOKEN_BUILDERS,    /* builders */
+      ARG_TOKEN_CGP,         /* cgp */
+      ARG_TOKEN_CONVERT,     /* convert */
+      ARG_TOKEN_CONTRIBUTE,  /* contribute */
+      ARG_TOKEN_CREATE_DATA, /* createdata */
+      ARG_TOKEN_DATA,        /* data */
+      ARG_TOKEN_HELP,        /* help */
+      ARG_TOKEN_SET,         /* setoptions */
+      ARG_TOKEN_VERSION,     /* version */
+  };
+  // Player Options (alphabetical by name)
+  static const arg_token_t player_opts[] = {
+      ARG_TOKEN_BINGO_BONUS,            /* bb */
+      ARG_TOKEN_BOARD_LAYOUT,           /* bdn */
+      ARG_TOKEN_CHALLENGE_BONUS,        /* cb */
+      ARG_TOKEN_P1_LEAVES,              /* k1 */
+      ARG_TOKEN_P2_LEAVES,              /* k2 */
+      ARG_TOKEN_P1_LEXICON,             /* l1 */
+      ARG_TOKEN_P2_LEXICON,             /* l2 */
+      ARG_TOKEN_LETTER_DISTRIBUTION,    /* ld */
+      ARG_TOKEN_LEAVES,                 /* leaves */
+      ARG_TOKEN_LEXICON,                /* lex */
+      ARG_TOKEN_P1_MOVE_RECORD_TYPE,    /* r1 */
+      ARG_TOKEN_P2_MOVE_RECORD_TYPE,    /* r2 */
+      ARG_TOKEN_USE_RIT,                /* rit */
+      ARG_TOKEN_P1_USE_RIT,             /* rit1 */
+      ARG_TOKEN_P2_USE_RIT,             /* rit2 */
+      ARG_TOKEN_USE_MMAP_FOR_RIT,       /* ritmmap */
+      ARG_TOKEN_P1_MOVE_SORT_TYPE,      /* s1 */
+      ARG_TOKEN_P2_MOVE_SORT_TYPE,      /* s2 */
+      ARG_TOKEN_PAT,                    /* pat */
+      ARG_TOKEN_P1_PAT,                 /* pat1 */
+      ARG_TOKEN_P2_PAT,                 /* pat2 */
+      ARG_TOKEN_PAT_CANDIDATES,         /* patcand */
+      ARG_TOKEN_P1_PAT_CANDIDATES,      /* patcand1 */
+      ARG_TOKEN_P2_PAT_CANDIDATES,      /* patcand2 */
+      ARG_TOKEN_PAT_CLASSES,            /* patclasses */
+      ARG_TOKEN_P1_PAT_CLASSES,         /* patclasses1 */
+      ARG_TOKEN_P2_PAT_CLASSES,         /* patclasses2 */
+      ARG_TOKEN_PAT_ROLLOUT,            /* patrollout */
+      ARG_TOKEN_P1_PAT_ROLLOUT,         /* patrollout1 */
+      ARG_TOKEN_P2_PAT_ROLLOUT,         /* patrollout2 */
+      ARG_TOKEN_PAT_ROLLOUT_CLASSES,    /* patrolloutclasses */
+      ARG_TOKEN_P1_PAT_ROLLOUT_CLASSES, /* patrolloutclasses1 */
+      ARG_TOKEN_P2_PAT_ROLLOUT_CLASSES, /* patrolloutclasses2 */
+      ARG_TOKEN_GAME_VARIANT,           /* var */
+      ARG_TOKEN_P1_USE_WMP,             /* w1 */
+      ARG_TOKEN_P2_USE_WMP,             /* w2 */
+      ARG_TOKEN_USE_WIT,                /* wit */
+      ARG_TOKEN_P1_USE_WIT,             /* wit1 */
+      ARG_TOKEN_P2_USE_WIT,             /* wit2 */
+      ARG_TOKEN_USE_WMP,                /* wmp */
+  };
+  // Game Analysis Options (alphabetical by name)
+  static const arg_token_t game_analysis_opts[] = {
+      ARG_TOKEN_ANALYZE_ENDGAME_SPREAD,  /* aegspread */
+      ARG_TOKEN_ANALYZE_PEG_MAX_BAG,     /* apegmaxbag */
+      ARG_TOKEN_CUTOFF,                  /* cutoff */
+      ARG_TOKEN_ENDGAME_BEST_REPLY,      /* ebestreply */
+      ARG_TOKEN_ENDGAME_PLIES,           /* eplies */
+      ARG_TOKEN_P1_ENDGAME_PLIES,        /* eplies1 */
+      ARG_TOKEN_P2_ENDGAME_PLIES,        /* eplies2 */
+      ARG_TOKEN_ENDGAME_TIME_LIMIT,      /* etlim */
+      ARG_TOKEN_ENDGAME_TOP_K,           /* etopk */
+      ARG_TOKEN_USE_GAME_PAIRS,          /* gp */
+      ARG_TOKEN_INFERENCE_MARGIN,        /* imargin */
+      ARG_TOKEN_P1_INFERENCE_MARGIN,     /* im1 */
+      ARG_TOKEN_P2_INFERENCE_MARGIN,     /* im2 */
+      ARG_TOKEN_MAX_ITERATIONS,          /* iterations */
+      ARG_TOKEN_P1_MAX_ITERATIONS,       /* i1 */
+      ARG_TOKEN_P2_MAX_ITERATIONS,       /* i2 */
+      ARG_TOKEN_P1_MIN_PLAY_ITERATIONS,  /* mi1 */
+      ARG_TOKEN_P2_MIN_PLAY_ITERATIONS,  /* mi2 */
+      ARG_TOKEN_MIN_PLAY_ITERATIONS,     /* minplayiterations */
+      ARG_TOKEN_SHOW_MISTAKES,           /* mistakes */
+      ARG_TOKEN_P1_MOVE_BUDGET,          /* mb1 */
+      ARG_TOKEN_P2_MOVE_BUDGET,          /* mb2 */
+      ARG_TOKEN_MOVEGEN_MARGIN,          /* mmargin */
+      ARG_TOKEN_MOVE_BUDGET,             /* movebudget */
+      ARG_TOKEN_MULTI_THREADING_MODE,    /* mtmode */
+      ARG_TOKEN_NUMBER_OF_PLAYS,         /* numplays */
+      ARG_TOKEN_NUMBER_OF_SMALL_PLAYS,   /* numsmallplays */
+      ARG_TOKEN_P1_NUM_PLAYS,            /* np1 */
+      ARG_TOKEN_P2_NUM_PLAYS,            /* np2 */
+      ARG_TOKEN_OVERTIME_PENALTY_POINTS, /* otpenalty */
+      ARG_TOKEN_OVERTIME_PERIOD,         /* otperiod */
+      ARG_TOKEN_P1_PLAY_CHOOSER_TIME,    /* pc1 */
+      ARG_TOKEN_P2_PLAY_CHOOSER_TIME,    /* pc2 */
+      ARG_TOKEN_P1_PEG_MAX_BAG,          /* pegbag1 */
+      ARG_TOKEN_P2_PEG_MAX_BAG,          /* pegbag2 */
+      ARG_TOKEN_PEG_NESTED_CAND_CAPS,    /* pegncaps */
+      ARG_TOKEN_PEG_NESTED_DEPTH,        /* pegndepth */
+      ARG_TOKEN_PEG_NESTED,              /* pegnested */
+      ARG_TOKEN_P1_PEG_NESTED,           /* pegnested1 */
+      ARG_TOKEN_P2_PEG_NESTED,           /* pegnested2 */
+      ARG_TOKEN_PEG_NESTED_STRIDES,      /* pegnstrides */
+      ARG_TOKEN_PEG_OUTCOMES,            /* pegoutcomes */
+      ARG_TOKEN_PEG_JSON,                /* pegjson */
+      ARG_TOKEN_PEG_OUT_LINES,           /* pegoutlines */
+      ARG_TOKEN_PEG_OUT_WIDTH,           /* pegoutwidth */
+      ARG_TOKEN_PEG_PESSIMISTIC,         /* pegpess */
+      ARG_TOKEN_P1_PEG_PESSIMISTIC,      /* pegpess1 */
+      ARG_TOKEN_P2_PEG_PESSIMISTIC,      /* pegpess2 */
+      ARG_TOKEN_PEG_PLIES,               /* pegplies */
+      ARG_TOKEN_PEG_STRIDE,              /* pegstride */
+      ARG_TOKEN_P1_PEG_STRIDE,           /* pegstride1 */
+      ARG_TOKEN_P2_PEG_STRIDE,           /* pegstride2 */
+      ARG_TOKEN_PEG_TIME_LIMIT,          /* pegtlim */
+      ARG_TOKEN_PEG_TOP_K,               /* pegtopk */
+      ARG_TOKEN_P1_PEG_TOP_K,            /* pegtopk1 */
+      ARG_TOKEN_P2_PEG_TOP_K,            /* pegtopk2 */
+      ARG_TOKEN_P1_SIM_PLIES,            /* pl1 */
+      ARG_TOKEN_P2_SIM_PLIES,            /* pl2 */
+      ARG_TOKEN_PLIES,                   /* plies */
+      ARG_TOKEN_PEG_NOPRUNE,             /* pnoprune */
+      ARG_TOKEN_STOP_COND_PCT,           /* scondition */
+      ARG_TOKEN_SIM_WITH_INFERENCE,      /* sinfer */
+      ARG_TOKEN_SIM_MARGIN_FORECAST,     /* smargin */
+      ARG_TOKEN_SIM_BAG_CYCLE,           /* sbagcycle */
+      ARG_TOKEN_USE_SMALL_PLAYS,         /* sp */
+      ARG_TOKEN_SAMPLING_RULE,           /* sr */
+      ARG_TOKEN_P1_STOP_COND_PCT,        /* sc1 */
+      ARG_TOKEN_P2_STOP_COND_PCT,        /* sc2 */
+      ARG_TOKEN_PAT_LABEL_PLIES,         /* patplies */
+      ARG_TOKEN_P1_SIM_WITH_INFERENCE,   /* si1 */
+      ARG_TOKEN_P2_SIM_WITH_INFERENCE,   /* si2 */
+      ARG_TOKEN_P1_SIM_MARGIN_FORECAST,  /* sm1 */
+      ARG_TOKEN_P2_SIM_MARGIN_FORECAST,  /* sm2 */
+      ARG_TOKEN_P1_SIM_BAG_CYCLE,        /* sbc1 */
+      ARG_TOKEN_P2_SIM_BAG_CYCLE,        /* sbc2 */
+      ARG_TOKEN_P1_SAMPLING_RULE,        /* sa1 */
+      ARG_TOKEN_P2_SAMPLING_RULE,        /* sa2 */
+      ARG_TOKEN_P1_THRESHOLD,            /* th1 */
+      ARG_TOKEN_P2_THRESHOLD,            /* th2 */
+      ARG_TOKEN_THRESHOLD,               /* threshold */
+      ARG_TOKEN_P1_TIME_LIMIT,           /* tl1 */
+      ARG_TOKEN_P2_TIME_LIMIT,           /* tl2 */
+      ARG_TOKEN_TIME_LIMIT,              /* tlim */
+      ARG_TOKEN_TT_FRACTION_OF_MEM,      /* ttfraction */
+      ARG_TOKEN_USE_HEAT_MAP,            /* useheatmap */
+      ARG_TOKEN_UTILITY_W_SPREAD,        /* uspread */
+      ARG_TOKEN_P1_UTILITY_W_SPREAD,     /* uspread1 */
+      ARG_TOKEN_P2_UTILITY_W_SPREAD,     /* uspread2 */
+      ARG_TOKEN_UTILITY_SPREAD_SCALE,    /* uspreadscale */
+      ARG_TOKEN_P1_UTILITY_SPREAD_SCALE, /* uspreadscale1 */
+      ARG_TOKEN_P2_UTILITY_SPREAD_SCALE, /* uspreadscale2 */
+      ARG_TOKEN_UTILITY_W_WINPCT,        /* uwin */
+      ARG_TOKEN_P1_UTILITY_W_WINPCT,     /* uwin1 */
+      ARG_TOKEN_P2_UTILITY_W_WINPCT,     /* uwin2 */
+      ARG_TOKEN_WRITE_BUFFER_SIZE,       /* wb */
+      ARG_TOKEN_WIN_PCT,                 /* winpct */
+  };
+  // Display Options (alphabetical by name)
+  static const arg_token_t display_opts[] = {
+      ARG_TOKEN_BOARD_BORDER,                /* boardborder */
+      ARG_TOKEN_BOARD_COLOR,                 /* boardcolor */
+      ARG_TOKEN_BOARD_COLUMN_LABEL,          /* boardcolumns */
+      ARG_TOKEN_BOARD_TILE_GLYPHS,           /* boardtiles */
+      ARG_TOKEN_HUMAN_READABLE,              /* hr */
+      ARG_TOKEN_MAX_NUMBER_OF_DISPLAY_PLAYS, /* maxnumdplays */
+      ARG_TOKEN_ON_TURN_COLOR,               /* onturncolor */
+      ARG_TOKEN_ON_TURN_MARKER,              /* onturnmarker */
+      ARG_TOKEN_ON_TURN_SCORE_STYLE,         /* onturnscore */
+      ARG_TOKEN_PRETTY,                      /* pretty */
+      ARG_TOKEN_PRINT_BOARDS,                /* printboards */
+      ARG_TOKEN_SHOW_BU,                     /* showbu */
+      ARG_TOKEN_SHPLIES,                     /* shplies */
+      ARG_TOKEN_SHOW_GAME_WITH_MOVES,        /* shwithmoves */
+  };
+  // Other Options (alphabetical by name)
+  static const arg_token_t other_opts[] = {
+      ARG_TOKEN_AUTOSAVE_GCG,      /* autosavegcg */
+      ARG_TOKEN_FG_REQUIRED,       /* fgrequired */
+      ARG_TOKEN_SETTINGS_VERSION,  /* fileversion */
+      ARG_TOKEN_EXEC_MODE,         /* mode */
+      ARG_TOKEN_MOVEGEN_LIMIT,     /* movegenlimit */
+      ARG_TOKEN_DATA_PATH,         /* path */
+      ARG_TOKEN_PRINT_INTERVAL,    /* pfrequency */
+      ARG_TOKEN_PRINT_ON_FINISH,   /* printonfinish */
+      ARG_TOKEN_SAVE_SETTINGS,     /* savesettings */
+      ARG_TOKEN_RANDOM_SEED,       /* seed */
+      ARG_TOKEN_SHOW_PROMPT,       /* shprompt */
+      ARG_TOKEN_NUMBER_OF_THREADS, /* threads */
+  };
+  int total_tokens = 0;
+  string_builder_add_string(sb, "Game Navigation Commands\n\n");
+  for (size_t i = 0; i < sizeof(game_nav_cmds) / sizeof(game_nav_cmds[0]);
+       i++) {
+    add_help_arg_to_string_builder(config, game_nav_cmds[i], sb, false, true);
+    total_tokens++;
+  }
+  string_builder_add_string(sb, "\nGame Annotation Commands\n\n");
+  for (size_t i = 0; i < sizeof(game_anno_cmds) / sizeof(game_anno_cmds[0]);
+       i++) {
+    add_help_arg_to_string_builder(config, game_anno_cmds[i], sb, false, true);
+    total_tokens++;
+  }
+  string_builder_add_string(sb, "\nGame Analysis Commands\n\n");
+  for (size_t i = 0;
+       i < sizeof(game_analysis_cmds) / sizeof(game_analysis_cmds[0]); i++) {
+    add_help_arg_to_string_builder(config, game_analysis_cmds[i], sb, false,
+                                   true);
+    total_tokens++;
+  }
+  string_builder_add_string(sb, "\nOther Commands\n\n");
+  for (size_t i = 0; i < sizeof(other_cmds) / sizeof(other_cmds[0]); i++) {
+    add_help_arg_to_string_builder(config, other_cmds[i], sb, false, true);
+    total_tokens++;
+  }
+  // Async Commands in alphabetical order: shgame, status, stop
+  string_builder_add_string(sb, "\nAsync Commands\n\n");
+  add_help_arg_to_string_builder(config, ASYNC_SHOW_GAME_COMMAND_TOKEN, sb,
+                                 true, true);
+  add_help_arg_to_string_builder(config, ASYNC_STATUS_COMMAND_TOKEN, sb, true,
+                                 true);
+  add_help_arg_to_string_builder(config, ASYNC_STOP_COMMAND_TOKEN, sb, true,
+                                 true);
+  string_builder_add_string(sb, "\nPlayer Options\n\n");
+  for (size_t i = 0; i < sizeof(player_opts) / sizeof(player_opts[0]); i++) {
+    add_help_arg_to_string_builder(config, player_opts[i], sb, false, true);
+    total_tokens++;
+  }
+  string_builder_add_string(sb, "\nGame Analysis Options\n\n");
+  for (size_t i = 0;
+       i < sizeof(game_analysis_opts) / sizeof(game_analysis_opts[0]); i++) {
+    add_help_arg_to_string_builder(config, game_analysis_opts[i], sb, false,
+                                   true);
+    total_tokens++;
+  }
+  string_builder_add_string(sb, "\nDisplay Options\n\n");
+  for (size_t i = 0; i < sizeof(display_opts) / sizeof(display_opts[0]); i++) {
+    add_help_arg_to_string_builder(config, display_opts[i], sb, false, true);
+    total_tokens++;
+  }
+  string_builder_add_string(sb, "\nOther Options\n\n");
+  for (size_t i = 0; i < sizeof(other_opts) / sizeof(other_opts[0]); i++) {
+    add_help_arg_to_string_builder(config, other_opts[i], sb, false, true);
+    total_tokens++;
+  }
+  assert(total_tokens == NUMBER_OF_ARG_TOKENS);
+  // total_tokens is read only by the assert above (compiled out in release).
+  (void)total_tokens;
+}
+
 char *impl_help(Config *config, ErrorStack *error_stack) {
   const char *help_arg = config_get_parg_value(config, ARG_TOKEN_HELP, 0);
   if (help_arg && help_arg[0] == '-' && help_arg[1] != '\0') {
     help_arg++;
   }
-  arg_token_t help_arg_token = NUMBER_OF_ARG_TOKENS;
-  if (help_arg) {
-    const async_token_t help_async_token = get_help_async_token(help_arg);
-    if (help_async_token != NUMBER_OF_ASYNC_COMMAND_TOKENS) {
-      StringBuilder *async_sb = string_builder_create();
-      add_help_arg_to_string_builder(config, help_async_token, async_sb, true,
-                                     false);
-      return string_builder_dump_and_destroy(async_sb, NULL);
-    }
-    help_arg_token = get_token_from_string(config, help_arg, error_stack);
-    if (!error_stack_is_empty(error_stack)) {
-      return empty_string();
-    }
-  }
-
   StringBuilder *sb = string_builder_create();
-  if (help_arg_token == NUMBER_OF_ARG_TOKENS) {
-    // Game Navigation Commands (alphabetical by name)
-    static const arg_token_t game_nav_cmds[] = {
-        ARG_TOKEN_GOTO,     /* goto */
-        ARG_TOKEN_NEXT,     /* next */
-        ARG_TOKEN_PREVIOUS, /* previous */
-    };
-    static const arg_token_t game_anno_cmds[] = {
-        ARG_TOKEN_CHALLENGE,    /* challenge */
-        ARG_TOKEN_CNOTE,        /* cnote */
-        ARG_TOKEN_COMMIT,       /* commit */
-        ARG_TOKEN_EXPORT,       /* export */
-        ARG_TOKEN_LOAD,         /* load */
-        ARG_TOKEN_NEW_GAME,     /* newgame */
-        ARG_TOKEN_NOTE,         /* note */
-        ARG_TOKEN_OVERTIME,     /* overtimepenalty */
-        ARG_TOKEN_P1_NAME,      /* p1 */
-        ARG_TOKEN_P2_NAME,      /* p2 */
-        ARG_TOKEN_RACK,         /* rack */
-        ARG_TOKEN_RANDOM_RACK,  /* rrack */
-        ARG_TOKEN_SWITCH_NAMES, /* switchnames */
-        ARG_TOKEN_TOP_COMMIT,   /* tcommit */
-        ARG_TOKEN_UNCHALLENGE,  /* unchallenge */
-    };
-    // Game Analysis Commands (alphabetical by name)
-    static const arg_token_t game_analysis_cmds[] = {
-        ARG_TOKEN_MOVES,                /* addmoves */
-        ARG_TOKEN_ANALYZE,              /* analyze */
-        ARG_TOKEN_ENDGAME,              /* endgame */
-        ARG_TOKEN_GEN,                  /* generate */
-        ARG_TOKEN_GEN_AND_SIM,          /* gsimulate */
-        ARG_TOKEN_SHOW_HEAT_MAP,        /* heatmap */
-        ARG_TOKEN_INFER,                /* infer */
-        ARG_TOKEN_LEAVE_GEN,            /* leavegen */
-        ARG_TOKEN_PEG,                  /* peg */
-        ARG_TOKEN_RACK_AND_GEN,         /* rg */
-        ARG_TOKEN_RACK_AND_GEN_AND_SIM, /* rgsimulate */
-        ARG_TOKEN_SHOW_ENDGAME,         /* shendgame */
-        ARG_TOKEN_SHOW_GAME,            /* shgame */
-        ARG_TOKEN_SHOW_PEG,             /* shpeg */
-        ARG_TOKEN_SHOW_INFERENCE,       /* shinference */
-        ARG_TOKEN_SHOW_MOVES,           /* shmoves */
-        ARG_TOKEN_SIM,                  /* simulate */
-        ARG_TOKEN_SNOPRUNE,             /* snoprune */
-        ARG_TOKEN_PAT_GEN,              /* patgen */
-    };
-    // Other Commands (alphabetical by name)
-    static const arg_token_t other_cmds[] = {
-        ARG_TOKEN_AUTOPLAY,    /* autoplay */
-        ARG_TOKEN_BUILDERS,    /* builders */
-        ARG_TOKEN_CGP,         /* cgp */
-        ARG_TOKEN_CONVERT,     /* convert */
-        ARG_TOKEN_CONTRIBUTE,  /* contribute */
-        ARG_TOKEN_CREATE_DATA, /* createdata */
-        ARG_TOKEN_DATA,        /* data */
-        ARG_TOKEN_HELP,        /* help */
-        ARG_TOKEN_SET,         /* setoptions */
-        ARG_TOKEN_VERSION,     /* version */
-    };
-    // Player Options (alphabetical by name)
-    static const arg_token_t player_opts[] = {
-        ARG_TOKEN_BINGO_BONUS,            /* bb */
-        ARG_TOKEN_BOARD_LAYOUT,           /* bdn */
-        ARG_TOKEN_CHALLENGE_BONUS,        /* cb */
-        ARG_TOKEN_P1_LEAVES,              /* k1 */
-        ARG_TOKEN_P2_LEAVES,              /* k2 */
-        ARG_TOKEN_P1_LEXICON,             /* l1 */
-        ARG_TOKEN_P2_LEXICON,             /* l2 */
-        ARG_TOKEN_LETTER_DISTRIBUTION,    /* ld */
-        ARG_TOKEN_LEAVES,                 /* leaves */
-        ARG_TOKEN_LEXICON,                /* lex */
-        ARG_TOKEN_P1_MOVE_RECORD_TYPE,    /* r1 */
-        ARG_TOKEN_P2_MOVE_RECORD_TYPE,    /* r2 */
-        ARG_TOKEN_USE_RIT,                /* rit */
-        ARG_TOKEN_P1_USE_RIT,             /* rit1 */
-        ARG_TOKEN_P2_USE_RIT,             /* rit2 */
-        ARG_TOKEN_USE_MMAP_FOR_RIT,       /* ritmmap */
-        ARG_TOKEN_P1_MOVE_SORT_TYPE,      /* s1 */
-        ARG_TOKEN_P2_MOVE_SORT_TYPE,      /* s2 */
-        ARG_TOKEN_PAT,                    /* pat */
-        ARG_TOKEN_P1_PAT,                 /* pat1 */
-        ARG_TOKEN_P2_PAT,                 /* pat2 */
-        ARG_TOKEN_PAT_CANDIDATES,         /* patcand */
-        ARG_TOKEN_P1_PAT_CANDIDATES,      /* patcand1 */
-        ARG_TOKEN_P2_PAT_CANDIDATES,      /* patcand2 */
-        ARG_TOKEN_PAT_CLASSES,            /* patclasses */
-        ARG_TOKEN_P1_PAT_CLASSES,         /* patclasses1 */
-        ARG_TOKEN_P2_PAT_CLASSES,         /* patclasses2 */
-        ARG_TOKEN_PAT_ROLLOUT,            /* patrollout */
-        ARG_TOKEN_P1_PAT_ROLLOUT,         /* patrollout1 */
-        ARG_TOKEN_P2_PAT_ROLLOUT,         /* patrollout2 */
-        ARG_TOKEN_PAT_ROLLOUT_CLASSES,    /* patrolloutclasses */
-        ARG_TOKEN_P1_PAT_ROLLOUT_CLASSES, /* patrolloutclasses1 */
-        ARG_TOKEN_P2_PAT_ROLLOUT_CLASSES, /* patrolloutclasses2 */
-        ARG_TOKEN_GAME_VARIANT,           /* var */
-        ARG_TOKEN_P1_USE_WMP,             /* w1 */
-        ARG_TOKEN_P2_USE_WMP,             /* w2 */
-        ARG_TOKEN_USE_WIT,                /* wit */
-        ARG_TOKEN_P1_USE_WIT,             /* wit1 */
-        ARG_TOKEN_P2_USE_WIT,             /* wit2 */
-        ARG_TOKEN_USE_WMP,                /* wmp */
-    };
-    // Game Analysis Options (alphabetical by name)
-    static const arg_token_t game_analysis_opts[] = {
-        ARG_TOKEN_ANALYZE_ENDGAME_SPREAD,  /* aegspread */
-        ARG_TOKEN_ANALYZE_PEG_MAX_BAG,     /* apegmaxbag */
-        ARG_TOKEN_CUTOFF,                  /* cutoff */
-        ARG_TOKEN_ENDGAME_BEST_REPLY,      /* ebestreply */
-        ARG_TOKEN_ENDGAME_PLIES,           /* eplies */
-        ARG_TOKEN_P1_ENDGAME_PLIES,        /* eplies1 */
-        ARG_TOKEN_P2_ENDGAME_PLIES,        /* eplies2 */
-        ARG_TOKEN_ENDGAME_TIME_LIMIT,      /* etlim */
-        ARG_TOKEN_ENDGAME_TOP_K,           /* etopk */
-        ARG_TOKEN_USE_GAME_PAIRS,          /* gp */
-        ARG_TOKEN_INFERENCE_MARGIN,        /* imargin */
-        ARG_TOKEN_P1_INFERENCE_MARGIN,     /* im1 */
-        ARG_TOKEN_P2_INFERENCE_MARGIN,     /* im2 */
-        ARG_TOKEN_MAX_ITERATIONS,          /* iterations */
-        ARG_TOKEN_P1_MAX_ITERATIONS,       /* i1 */
-        ARG_TOKEN_P2_MAX_ITERATIONS,       /* i2 */
-        ARG_TOKEN_P1_MIN_PLAY_ITERATIONS,  /* mi1 */
-        ARG_TOKEN_P2_MIN_PLAY_ITERATIONS,  /* mi2 */
-        ARG_TOKEN_MIN_PLAY_ITERATIONS,     /* minplayiterations */
-        ARG_TOKEN_SHOW_MISTAKES,           /* mistakes */
-        ARG_TOKEN_P1_MOVE_BUDGET,          /* mb1 */
-        ARG_TOKEN_P2_MOVE_BUDGET,          /* mb2 */
-        ARG_TOKEN_MOVEGEN_MARGIN,          /* mmargin */
-        ARG_TOKEN_MOVE_BUDGET,             /* movebudget */
-        ARG_TOKEN_MULTI_THREADING_MODE,    /* mtmode */
-        ARG_TOKEN_NUMBER_OF_PLAYS,         /* numplays */
-        ARG_TOKEN_NUMBER_OF_SMALL_PLAYS,   /* numsmallplays */
-        ARG_TOKEN_P1_NUM_PLAYS,            /* np1 */
-        ARG_TOKEN_P2_NUM_PLAYS,            /* np2 */
-        ARG_TOKEN_OVERTIME_PENALTY_POINTS, /* otpenalty */
-        ARG_TOKEN_OVERTIME_PERIOD,         /* otperiod */
-        ARG_TOKEN_P1_PLAY_CHOOSER_TIME,    /* pc1 */
-        ARG_TOKEN_P2_PLAY_CHOOSER_TIME,    /* pc2 */
-        ARG_TOKEN_P1_PEG_MAX_BAG,          /* pegbag1 */
-        ARG_TOKEN_P2_PEG_MAX_BAG,          /* pegbag2 */
-        ARG_TOKEN_PEG_NESTED_CAND_CAPS,    /* pegncaps */
-        ARG_TOKEN_PEG_NESTED_DEPTH,        /* pegndepth */
-        ARG_TOKEN_PEG_NESTED,              /* pegnested */
-        ARG_TOKEN_P1_PEG_NESTED,           /* pegnested1 */
-        ARG_TOKEN_P2_PEG_NESTED,           /* pegnested2 */
-        ARG_TOKEN_PEG_NESTED_STRIDES,      /* pegnstrides */
-        ARG_TOKEN_PEG_OUTCOMES,            /* pegoutcomes */
-        ARG_TOKEN_PEG_JSON,                /* pegjson */
-        ARG_TOKEN_PEG_OUT_LINES,           /* pegoutlines */
-        ARG_TOKEN_PEG_OUT_WIDTH,           /* pegoutwidth */
-        ARG_TOKEN_PEG_PESSIMISTIC,         /* pegpess */
-        ARG_TOKEN_P1_PEG_PESSIMISTIC,      /* pegpess1 */
-        ARG_TOKEN_P2_PEG_PESSIMISTIC,      /* pegpess2 */
-        ARG_TOKEN_PEG_PLIES,               /* pegplies */
-        ARG_TOKEN_PEG_STRIDE,              /* pegstride */
-        ARG_TOKEN_P1_PEG_STRIDE,           /* pegstride1 */
-        ARG_TOKEN_P2_PEG_STRIDE,           /* pegstride2 */
-        ARG_TOKEN_PEG_TIME_LIMIT,          /* pegtlim */
-        ARG_TOKEN_PEG_TOP_K,               /* pegtopk */
-        ARG_TOKEN_P1_PEG_TOP_K,            /* pegtopk1 */
-        ARG_TOKEN_P2_PEG_TOP_K,            /* pegtopk2 */
-        ARG_TOKEN_P1_SIM_PLIES,            /* pl1 */
-        ARG_TOKEN_P2_SIM_PLIES,            /* pl2 */
-        ARG_TOKEN_PLIES,                   /* plies */
-        ARG_TOKEN_PEG_NOPRUNE,             /* pnoprune */
-        ARG_TOKEN_STOP_COND_PCT,           /* scondition */
-        ARG_TOKEN_SIM_WITH_INFERENCE,      /* sinfer */
-        ARG_TOKEN_SIM_MARGIN_FORECAST,     /* smargin */
-        ARG_TOKEN_SIM_BAG_CYCLE,           /* sbagcycle */
-        ARG_TOKEN_USE_SMALL_PLAYS,         /* sp */
-        ARG_TOKEN_SAMPLING_RULE,           /* sr */
-        ARG_TOKEN_P1_STOP_COND_PCT,        /* sc1 */
-        ARG_TOKEN_P2_STOP_COND_PCT,        /* sc2 */
-        ARG_TOKEN_PAT_LABEL_PLIES,         /* patplies */
-        ARG_TOKEN_P1_SIM_WITH_INFERENCE,   /* si1 */
-        ARG_TOKEN_P2_SIM_WITH_INFERENCE,   /* si2 */
-        ARG_TOKEN_P1_SIM_MARGIN_FORECAST,  /* sm1 */
-        ARG_TOKEN_P2_SIM_MARGIN_FORECAST,  /* sm2 */
-        ARG_TOKEN_P1_SIM_BAG_CYCLE,        /* sbc1 */
-        ARG_TOKEN_P2_SIM_BAG_CYCLE,        /* sbc2 */
-        ARG_TOKEN_P1_SAMPLING_RULE,        /* sa1 */
-        ARG_TOKEN_P2_SAMPLING_RULE,        /* sa2 */
-        ARG_TOKEN_P1_THRESHOLD,            /* th1 */
-        ARG_TOKEN_P2_THRESHOLD,            /* th2 */
-        ARG_TOKEN_THRESHOLD,               /* threshold */
-        ARG_TOKEN_P1_TIME_LIMIT,           /* tl1 */
-        ARG_TOKEN_P2_TIME_LIMIT,           /* tl2 */
-        ARG_TOKEN_TIME_LIMIT,              /* tlim */
-        ARG_TOKEN_TT_FRACTION_OF_MEM,      /* ttfraction */
-        ARG_TOKEN_USE_HEAT_MAP,            /* useheatmap */
-        ARG_TOKEN_UTILITY_W_SPREAD,        /* uspread */
-        ARG_TOKEN_P1_UTILITY_W_SPREAD,     /* uspread1 */
-        ARG_TOKEN_P2_UTILITY_W_SPREAD,     /* uspread2 */
-        ARG_TOKEN_UTILITY_SPREAD_SCALE,    /* uspreadscale */
-        ARG_TOKEN_P1_UTILITY_SPREAD_SCALE, /* uspreadscale1 */
-        ARG_TOKEN_P2_UTILITY_SPREAD_SCALE, /* uspreadscale2 */
-        ARG_TOKEN_UTILITY_W_WINPCT,        /* uwin */
-        ARG_TOKEN_P1_UTILITY_W_WINPCT,     /* uwin1 */
-        ARG_TOKEN_P2_UTILITY_W_WINPCT,     /* uwin2 */
-        ARG_TOKEN_WRITE_BUFFER_SIZE,       /* wb */
-        ARG_TOKEN_WIN_PCT,                 /* winpct */
-    };
-    // Display Options (alphabetical by name)
-    static const arg_token_t display_opts[] = {
-        ARG_TOKEN_BOARD_BORDER,                /* boardborder */
-        ARG_TOKEN_BOARD_COLOR,                 /* boardcolor */
-        ARG_TOKEN_BOARD_COLUMN_LABEL,          /* boardcolumns */
-        ARG_TOKEN_BOARD_TILE_GLYPHS,           /* boardtiles */
-        ARG_TOKEN_HUMAN_READABLE,              /* hr */
-        ARG_TOKEN_MAX_NUMBER_OF_DISPLAY_PLAYS, /* maxnumdplays */
-        ARG_TOKEN_ON_TURN_COLOR,               /* onturncolor */
-        ARG_TOKEN_ON_TURN_MARKER,              /* onturnmarker */
-        ARG_TOKEN_ON_TURN_SCORE_STYLE,         /* onturnscore */
-        ARG_TOKEN_PRETTY,                      /* pretty */
-        ARG_TOKEN_PRINT_BOARDS,                /* printboards */
-        ARG_TOKEN_SHOW_BU,                     /* showbu */
-        ARG_TOKEN_SHPLIES,                     /* shplies */
-        ARG_TOKEN_SHOW_GAME_WITH_MOVES,        /* shwithmoves */
-    };
-    // Other Options (alphabetical by name)
-    static const arg_token_t other_opts[] = {
-        ARG_TOKEN_AUTOSAVE_GCG,      /* autosavegcg */
-        ARG_TOKEN_FG_REQUIRED,       /* fgrequired */
-        ARG_TOKEN_SETTINGS_VERSION,  /* fileversion */
-        ARG_TOKEN_EXEC_MODE,         /* mode */
-        ARG_TOKEN_MOVEGEN_LIMIT,     /* movegenlimit */
-        ARG_TOKEN_DATA_PATH,         /* path */
-        ARG_TOKEN_PRINT_INTERVAL,    /* pfrequency */
-        ARG_TOKEN_PRINT_ON_FINISH,   /* printonfinish */
-        ARG_TOKEN_SAVE_SETTINGS,     /* savesettings */
-        ARG_TOKEN_RANDOM_SEED,       /* seed */
-        ARG_TOKEN_SHOW_PROMPT,       /* shprompt */
-        ARG_TOKEN_NUMBER_OF_THREADS, /* threads */
-    };
-    int total_tokens = 0;
-    string_builder_add_string(sb, "Game Navigation Commands\n\n");
-    for (size_t i = 0; i < sizeof(game_nav_cmds) / sizeof(game_nav_cmds[0]);
-         i++) {
-      add_help_arg_to_string_builder(config, game_nav_cmds[i], sb, false, true);
-      total_tokens++;
-    }
-    string_builder_add_string(sb, "\nGame Annotation Commands\n\n");
-    for (size_t i = 0; i < sizeof(game_anno_cmds) / sizeof(game_anno_cmds[0]);
-         i++) {
-      add_help_arg_to_string_builder(config, game_anno_cmds[i], sb, false,
-                                     true);
-      total_tokens++;
-    }
-    string_builder_add_string(sb, "\nGame Analysis Commands\n\n");
-    for (size_t i = 0;
-         i < sizeof(game_analysis_cmds) / sizeof(game_analysis_cmds[0]); i++) {
-      add_help_arg_to_string_builder(config, game_analysis_cmds[i], sb, false,
-                                     true);
-      total_tokens++;
-    }
-    string_builder_add_string(sb, "\nOther Commands\n\n");
-    for (size_t i = 0; i < sizeof(other_cmds) / sizeof(other_cmds[0]); i++) {
-      add_help_arg_to_string_builder(config, other_cmds[i], sb, false, true);
-      total_tokens++;
-    }
-    // Async Commands in alphabetical order: shgame, status, stop
-    string_builder_add_string(sb, "\nAsync Commands\n\n");
-    add_help_arg_to_string_builder(config, ASYNC_SHOW_GAME_COMMAND_TOKEN, sb,
-                                   true, true);
-    add_help_arg_to_string_builder(config, ASYNC_STATUS_COMMAND_TOKEN, sb, true,
-                                   true);
-    add_help_arg_to_string_builder(config, ASYNC_STOP_COMMAND_TOKEN, sb, true,
-                                   true);
-    string_builder_add_string(sb, "\nPlayer Options\n\n");
-    for (size_t i = 0; i < sizeof(player_opts) / sizeof(player_opts[0]); i++) {
-      add_help_arg_to_string_builder(config, player_opts[i], sb, false, true);
-      total_tokens++;
-    }
-    string_builder_add_string(sb, "\nGame Analysis Options\n\n");
-    for (size_t i = 0;
-         i < sizeof(game_analysis_opts) / sizeof(game_analysis_opts[0]); i++) {
-      add_help_arg_to_string_builder(config, game_analysis_opts[i], sb, false,
-                                     true);
-      total_tokens++;
-    }
-    string_builder_add_string(sb, "\nDisplay Options\n\n");
-    for (size_t i = 0; i < sizeof(display_opts) / sizeof(display_opts[0]);
-         i++) {
-      add_help_arg_to_string_builder(config, display_opts[i], sb, false, true);
-      total_tokens++;
-    }
-    string_builder_add_string(sb, "\nOther Options\n\n");
-    for (size_t i = 0; i < sizeof(other_opts) / sizeof(other_opts[0]); i++) {
-      add_help_arg_to_string_builder(config, other_opts[i], sb, false, true);
-      total_tokens++;
-    }
-    assert(total_tokens == NUMBER_OF_ARG_TOKENS);
-    // total_tokens is read only by the assert above (compiled out in release).
-    (void)total_tokens;
+  if (help_arg) {
+    add_help_subject(config, help_arg, sb, error_stack);
   } else {
-    add_help_arg_to_string_builder(config, help_arg_token, sb, false, false);
+    add_help_index(config, sb);
+  }
+  if (!error_stack_is_empty(error_stack)) {
+    string_builder_destroy(sb);
+    return empty_string();
   }
   string_builder_add_string(sb, "\n");
-  char *result = string_builder_dump_and_destroy(sb, NULL);
-  return result;
+  return string_builder_dump_and_destroy(sb, NULL);
 }
 
 void execute_help(Config *config, ErrorStack *error_stack) {

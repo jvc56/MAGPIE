@@ -1149,6 +1149,58 @@ static void test_config_help(void) {
   // A sentence ends at the end of a word, not at a dot inside one.
   assert_help_has(config, "help", "to settings.txt after every command.\n");
 
+  // A command's help lists its own options and points to the rest.
+  assert_help_has(config, "help simulate", "Simulation options\n");
+  assert_help_has(config, "help simulate", "-plies, -pl1, -pl2");
+  assert_help_has(config, "help simulate", "Also uses\n");
+  assert_help_has(config, "help simulate", "help generate\n");
+  assert_help_has(config, "help analyze", "-apegmaxbag");
+  assert_help_has(config, "help analyze", "help peg\n");
+  assert_help_has(config, "help peg", "-pegtlim");
+  char *next_help = get_help_output(config, "help next");
+  assert(!has_substring(next_help, "Also uses"));
+  free(next_help);
+
+  // An option's help names the commands that use it, in any of its forms.
+  assert_help_has(config, "help plies", "Used by: ");
+  assert_help_has(config, "help pl1", "simulate, gsimulate, rgsimulate");
+  assert_help_has(config, "help -eplies", "endgame, analyze, autoplay");
+  // A shared option applies too widely, so it points to its topic.
+  assert_help_has(config, "help lex", "Game setup options: help setup\n");
+  char *numplays_help = get_help_output(config, "help numplays");
+  assert(!has_substring(numplays_help, "setoptions"));
+  free(numplays_help);
+
+  // Every group can be reached from where the table says it is.
+  char *all_options = get_help_output(config, "help options");
+  for (int group_idx = 0; group_idx < NUMBER_OF_HELP_OPTION_GROUPS;
+       group_idx++) {
+    const HelpOptionGroup *group = help_table_get_option_group(group_idx);
+    assert(has_substring(all_options, group->title));
+    char *group_command = get_formatted_string("help %s", group->help_subject);
+    assert_help_has(config, group_command, group->title);
+    assert_help_has(config, group_command, "-");
+    free(group_command);
+  }
+  // Every row of every group is listed, with its summary.
+  StringBuilder *row_sb = string_builder_create();
+  for (int group_idx = 0; group_idx < NUMBER_OF_HELP_OPTION_GROUPS;
+       group_idx++) {
+    const HelpOptionGroup *group = help_table_get_option_group(group_idx);
+    for (int row_idx = 0; row_idx < group->num_rows; row_idx++) {
+      const HelpOptionRow *row = &group->rows[row_idx];
+      string_builder_clear(row_sb);
+      config_add_help_summary(config,
+                              row->both_players != NUMBER_OF_ARG_TOKENS
+                                  ? row->both_players
+                                  : row->player_one,
+                              row_sb);
+      assert(has_substring(all_options, string_builder_peek(row_sb)));
+    }
+  }
+  string_builder_destroy(row_sb);
+  free(all_options);
+
   StringBuilder *summary_sb = string_builder_create();
   for (int token_idx = 0; token_idx < NUMBER_OF_ARG_TOKENS; token_idx++) {
     string_builder_clear(summary_sb);

@@ -4,6 +4,9 @@
 #include "../def/config_defs.h"
 #include <stdbool.h>
 
+// Given to help, lists every option group.
+#define HELP_TOPIC_ALL_OPTIONS "options"
+
 // The option groups, in the order help shows them.
 typedef enum {
   HELP_OPTIONS_SETUP,
