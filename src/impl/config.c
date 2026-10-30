@@ -102,6 +102,8 @@
 
 enum {
   HELP_INDENT = 10,
+  // The most usage or example lines a help entry has, plus its NULL ending.
+  HELP_MAX_LINES = 10,
   // Upper bound on the number of per-stage counts the -pegtopk CLI arg accepts.
   // This caps only the parse buffer; the solver itself imposes no stage limit.
   CONFIG_PEG_MAX_STAGES = 16,
@@ -1185,7 +1187,7 @@ arg_token_t get_token_from_string(Config *config, const char *arg_name,
 }
 
 // The help for the table options, analyze's PEG and endgame options and the
-// settings file's version (see add_help_arg_to_string_builder).
+// settings file's version (see help_entry_fill).
 static void add_analyze_and_settings_help_arg(arg_token_t arg_token,
                                               const char **usages,
                                               const char **examples,
@@ -1286,7 +1288,7 @@ static void add_analyze_and_settings_help_arg(arg_token_t arg_token,
   }
 }
 
-// The help for the PAT options (see add_help_arg_to_string_builder).
+// The help for the PAT options (see help_entry_fill).
 static void add_pat_help_arg(arg_token_t arg_token, const char **usages,
                              const char **examples, const char **text) {
   switch (arg_token) {
@@ -1387,7 +1389,7 @@ static void add_pat_help_arg(arg_token_t arg_token, const char **usages,
 }
 
 // The help for the players' autoplay endgame and pre-endgame options (see
-// add_help_arg_to_string_builder).
+// help_entry_fill).
 static void add_player_solver_help_arg(arg_token_t arg_token,
                                        const char **usages,
                                        const char **examples,
@@ -1479,8 +1481,8 @@ static void add_player_solver_help_arg(arg_token_t arg_token,
 }
 
 // Help
-// The contribute and convert commands' help, apart from
-// add_help_arg_to_string_builder to keep it under the function-size limit:
+// The contribute and convert commands' help, apart from help_entry_fill to
+// keep it under the function-size limit:
 // each fills usages and examples and returns the text.
 static const char *contribute_help(const char **usages, const char **examples) {
   usages[0] = "[<settings_path>]";
@@ -1581,18 +1583,28 @@ static void add_help_names(StringBuilder *sb, const char *prefix,
   string_builder_add_formatted_string(sb, "%s%s", prefix, name);
 }
 
-void add_help_arg_to_string_builder(const Config *config, int token,
-                                    StringBuilder *sb,
-                                    const bool show_async_commands,
-                                    const bool short_form) {
-  const char *examples[10] = {NULL};
-  const char *usages[10] = {NULL};
+// What help has to say about a command or option.
+typedef struct HelpEntry {
+  const char *usages[HELP_MAX_LINES];
+  const char *examples[HELP_MAX_LINES];
+  const char *text;
+  const char *name;
+  const char *short_name;
+  // What the name is typed after: the dash of an option.
+  const char *prefix;
+  // Holds short_name when that is a hotkey.
+  char hotkey_name[2];
+} HelpEntry;
+
+static void help_entry_fill(const Config *config, int token,
+                            const bool is_async_command, HelpEntry *entry) {
+  const char **usages = entry->usages;
+  const char **examples = entry->examples;
   const char *text = "";
-  char hotkey_name[2] = {'\0', '\0'};
-  const char *prefix = "";
   const char *name = NULL;
   const char *shortest_unambiguous_name = NULL;
-  if (show_async_commands) {
+  entry->prefix = "";
+  if (is_async_command) {
     async_token_t async_token = token;
     switch (async_token) {
     case ASYNC_STOP_COMMAND_TOKEN:
@@ -1623,11 +1635,11 @@ void add_help_arg_to_string_builder(const Config *config, int token,
     name = parg->name;
     shortest_unambiguous_name = parg->shortest_unambiguous_name;
     if (help_hotkey_reaches_arg(config, arg_token)) {
-      hotkey_name[0] = name[0];
-      shortest_unambiguous_name = hotkey_name;
+      entry->hotkey_name[0] = name[0];
+      shortest_unambiguous_name = entry->hotkey_name;
     }
     if (!parg->is_command) {
-      prefix = "-";
+      entry->prefix = "-";
     }
     switch (arg_token) {
     case ARG_TOKEN_PAT_GEN:
@@ -2946,39 +2958,65 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       break;
     }
   }
-  if (short_form) {
-    add_help_names(sb, prefix, shortest_unambiguous_name, name, ",");
-    string_builder_add_string(sb, " - ");
-    const char *dot = strchr(text, '.');
-    const int text_len = dot ? (int)(dot - text + 1) : (int)strlen(text);
-    string_builder_add_formatted_string(sb, "%.*s\n", text_len, text);
-    return;
-  }
+  entry->text = text;
+  entry->name = name;
+  entry->short_name = shortest_unambiguous_name;
+}
 
-  add_help_names(sb, prefix, shortest_unambiguous_name, name, ", ");
+// The length of the entry's first sentence, which is all a list shows of it.
+static int help_entry_summary_length(const HelpEntry *entry) {
+  const char *dot = strchr(entry->text, '.');
+  return dot ? (int)(dot - entry->text + 1) : (int)strlen(entry->text);
+}
+
+static void add_help_entry_summary_line(const HelpEntry *entry,
+                                        StringBuilder *sb) {
+  add_help_names(sb, entry->prefix, entry->short_name, entry->name, ",");
+  string_builder_add_string(sb, " - ");
+  string_builder_add_formatted_string(
+      sb, "%.*s\n", help_entry_summary_length(entry), entry->text);
+}
+
+static void add_help_entry_details(const HelpEntry *entry, StringBuilder *sb) {
+  add_help_names(sb, entry->prefix, entry->short_name, entry->name, ", ");
 
   string_builder_add_formatted_string(sb, "\n\n%*sUsage:\n\n", HELP_INDENT, "");
 
   int usages_index = 0;
-  while (usages[usages_index]) {
+  while (entry->usages[usages_index]) {
     string_builder_add_formatted_string(sb, "%*s%s%s %s\n", HELP_INDENT + 2, "",
-                                        prefix, name, usages[usages_index]);
+                                        entry->prefix, entry->name,
+                                        entry->usages[usages_index]);
     usages_index++;
   }
 
-  if (examples[0]) {
+  if (entry->examples[0]) {
     string_builder_add_formatted_string(sb, "\n%*sExamples:\n\n", HELP_INDENT,
                                         "");
     int example_index = 0;
-    while (examples[example_index]) {
+    while (entry->examples[example_index]) {
       string_builder_add_formatted_string(sb, "%*s%s%s %s\n", HELP_INDENT + 2,
-                                          "", prefix, name,
-                                          examples[example_index]);
+                                          "", entry->prefix, entry->name,
+                                          entry->examples[example_index]);
       example_index++;
     }
   }
 
-  string_builder_add_formatted_string(sb, "\n%*s%s\n\n", HELP_INDENT, "", text);
+  string_builder_add_formatted_string(sb, "\n%*s%s\n\n", HELP_INDENT, "",
+                                      entry->text);
+}
+
+static void add_help_arg_to_string_builder(const Config *config, int token,
+                                           StringBuilder *sb,
+                                           const bool show_async_commands,
+                                           const bool short_form) {
+  HelpEntry entry = {0};
+  help_entry_fill(config, token, show_async_commands, &entry);
+  if (short_form) {
+    add_help_entry_summary_line(&entry, sb);
+  } else {
+    add_help_entry_details(&entry, sb);
+  }
 }
 
 // The async command the help argument names, which is any prefix of the
