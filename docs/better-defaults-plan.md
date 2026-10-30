@@ -55,14 +55,22 @@ A time limit, or an explicit `-pegtopk`, runs the staged cascade, which
 always has an answer from its last completed stage. `config_fill_peg_args`
 makes the choice.
 
-**Progress against a known total (1a).** While a solve runs, `status` shows
-the candidate in progress and how long it has run, or, once a complete solve
-has its first candidate, how many candidates are being solved at once. It
-also shows the ranking's label (which stage and depth it comes from), a row
-for each draw in progress (its endgame depth, root moves done, nodes and
-helpers), and the finished draws' results. In interactive mode, `stop`,
-`status` and `shgame` (or `s`) are the only commands accepted while a
-command runs.
+**Progress against a known total (1a).** While a solve runs, `status`
+shows three sections:
+- **A summary:** status and time, phase, progress, the best play so far,
+  solved, cut and remaining candidates, the stages' times, and the
+  orderings.
+- **What is being solved:**
+  - The candidate in progress, with a row for each of its draws: its
+    endgame depth, root moves searched, nodes and threads.
+  - Or, once a complete solve has its first candidate, one row per
+    candidate being solved at once.
+- **The top 10 of the ranking,** with the solved plays ranked below them.
+
+`shpeg` gives the same summary and the whole ranking.
+[docs/peg-status-plan.md](peg-status-plan.md) has what is left. In
+interactive mode, `stop`, `status` and `shgame` (or `s`) are the only
+commands accepted while a command runs.
 
 **Ranking by results (1b).** Candidates rank by wins + ½ draws, counted
 exactly in labeled orderings: a win is worth 2, a draw 1 and a loss 0.
