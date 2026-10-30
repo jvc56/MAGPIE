@@ -2549,7 +2549,7 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       examples[0] = "100";
       examples[1] = "0";
       text = "Maximum whole-line width for the graded outcomes column "
-             "(default 100). The column wraps at token boundaries, indented "
+             "(default 200). The column wraps at token boundaries, indented "
              "under its header; the width is clamped up so a cell always fits "
              "its label plus one worst-case token. 0 = unbounded (no wrap).";
       break;
