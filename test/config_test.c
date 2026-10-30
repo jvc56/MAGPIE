@@ -1,6 +1,7 @@
 #include "config_test.h"
 
 #include "../src/compat/cfile.h"
+#include "../src/def/config_defs.h"
 #include "../src/def/game_defs.h"
 #include "../src/def/letter_distribution_defs.h"
 #include "../src/def/move_defs.h"
@@ -25,6 +26,7 @@
 #include "../src/impl/config.h"
 #include "../src/impl/contribute_tables.h"
 #include "../src/impl/exec.h"
+#include "../src/impl/help_table.h"
 #include "../src/str/game_string.h"
 #include "../src/str/move_string.h"
 #include "../src/util/io_util.h"
@@ -1063,7 +1065,51 @@ static void assert_help_has(Config *config, const char *command,
   free(output);
 }
 
+// Every option is in one group and every command in one section of the index,
+// so nothing goes missing from help.
+static void assert_help_table_is_complete(void) {
+  int times_seen[NUMBER_OF_ARG_TOKENS + 1] = {0};
+  for (int group_idx = 0; group_idx < NUMBER_OF_HELP_OPTION_GROUPS;
+       group_idx++) {
+    const HelpOptionGroup *group = help_table_get_option_group(group_idx);
+    assert(group->num_rows > 0);
+    for (int row_idx = 0; row_idx < group->num_rows; row_idx++) {
+      const HelpOptionRow *row = &group->rows[row_idx];
+      times_seen[row->both_players]++;
+      times_seen[row->player_one]++;
+      times_seen[row->player_two]++;
+    }
+  }
+  const int num_sections = help_table_get_num_command_sections();
+  for (int section_idx = 0; section_idx < num_sections; section_idx++) {
+    const HelpCommandSection *section =
+        help_table_get_command_section(section_idx);
+    for (int command_idx = 0; command_idx < section->num_commands;
+         command_idx++) {
+      const arg_token_t command = section->commands[command_idx];
+      times_seen[command]++;
+      assert(help_table_find_option_group(command) ==
+             NUMBER_OF_HELP_OPTION_GROUPS);
+      // A command with no row in the table fails here.
+      for (int group_idx = 0; group_idx < NUMBER_OF_HELP_OPTION_GROUPS;
+           group_idx++) {
+        assert(!(help_table_command_lists_group(command, group_idx) &&
+                 help_table_command_points_to_group(command, group_idx)));
+      }
+    }
+  }
+  for (int token_idx = 0; token_idx < NUMBER_OF_ARG_TOKENS; token_idx++) {
+    if (times_seen[token_idx] != 1) {
+      printf("token %d is in the help table %d times\n", token_idx,
+             times_seen[token_idx]);
+      abort();
+    }
+  }
+}
+
 static void test_config_help(void) {
+  assert_help_table_is_complete();
+
   Config *config = config_create_default_test();
   assert_config_exec_status(config, "help holp",
                             ERROR_STATUS_CONFIG_LOAD_UNRECOGNIZED_ARG);
