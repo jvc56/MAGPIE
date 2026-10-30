@@ -57,17 +57,19 @@ makes the choice.
 
 **Progress against a known total (1a).** While a solve runs, `status`
 shows three sections:
-- **A summary:** status and time, phase, progress, the best play so far,
-  solved, cut and remaining candidates, the stages' times, and the
-  orderings.
+- **A summary:** the status and total time, each stage's time and whether
+  it has finished, progress with the finished, cut and pending candidates
+  and their shares, the best move so far, and the orderings.
 - **What is being solved:**
   - The candidate in progress, with a row for each of its draws: its
-    endgame depth, root moves searched, nodes and threads.
+    endgame depth and root moves searched, or why there is no endgame to
+    show.
   - Or, once a complete solve has its first candidate, one row per
     candidate being solved at once.
 - **The top 10 of the ranking,** with the solved plays ranked below them.
 
-`shpeg` gives the same summary and the whole ranking.
+`shpeg` shows the finished solve the same way. `shpeg <number>` shows that
+many rows before the pinned solved plays, and `shpeg all` every play.
 [docs/peg-status-plan.md](peg-status-plan.md) has what is left. In
 interactive mode, `stop`, `status` and `shgame` (or `s`) are the only
 commands accepted while a command runs.

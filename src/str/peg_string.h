@@ -17,13 +17,17 @@
 // unbounded, no wrapping); the column wraps at token boundaries, indented under
 // its header. out_max_lines caps the wrapped lines per cell (0 = unlimited);
 // truncated cells end with "...". When non-NULL, trunc_note is printed just
-// above the "weighted bag orderings" line (used to point at the file holding
-// the full chart). When out_truncated is non-NULL, *out_truncated is set true
-// if any cell was truncated. Caller frees the returned string.
+// above the ranking (used to point at the file holding the full chart). When
+// out_truncated is non-NULL, *out_truncated is set true if any cell was
+// truncated.
+//
+// A finished result lists the ranking's first max_rows rows (0 = every play),
+// then up to PEG_DISPLAY_MAX_PINNED_ROWS solved plays ranked below them, as
+// status lists a running one's. Caller frees the returned string.
 char *peg_result_get_string(const PegResult *result, const Game *game,
-                            bool show_outcomes, PegPoll *poll, int out_width,
-                            int out_max_lines, const char *trunc_note,
-                            bool *out_truncated);
+                            bool show_outcomes, PegPoll *poll, int max_rows,
+                            int out_width, int out_max_lines,
+                            const char *trunc_note, bool *out_truncated);
 
 // Render one candidate's per-ordering W/L/T rows as the compact outcomes-cell
 // string (e.g. "W: DH/Ax2 DR/Hx2" or "W: C U Y, T: E"): the mover's drawn tiles

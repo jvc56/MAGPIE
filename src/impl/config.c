@@ -2178,7 +2178,15 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       break;
     case ARG_TOKEN_SHOW_PEG:
       usages[0] = "";
-      text = "Shows the PEG result.";
+      usages[1] = "<number>";
+      usages[2] = "all";
+      examples[0] = "";
+      examples[1] = "20";
+      examples[2] = "all";
+      text = "Shows the PEG result as status shows a running PEG: a summary, "
+             "then the ranking's first 10 rows and the solved plays ranked "
+             "below them. Optionally takes how many rows to show first, or "
+             "'all' for every play.";
       break;
     case ARG_TOKEN_SHOW_HEAT_MAP:
       usages[0] = "<play_index> [<ply> <type>]";
@@ -5264,41 +5272,42 @@ static char *config_write_peg_chart_file(const char *contents) {
   return path;
 }
 
-// Renders the peg result for display. When the outcomes column truncates any
-// cell at the configured width/line caps, writes the full (unlimited-lines)
-// chart to a data/pegcharts/ file and embeds its path above the table.
-static char *config_peg_display_table(const Config *config, PegPoll *poll) {
+// Renders the peg result for display, its ranking's first max_rows rows (0 =
+// every play). When the outcomes column truncates any cell at the configured
+// width/line caps, writes the full chart, every play with unlimited lines, to
+// a data/pegcharts/ file and embeds its path above the table.
+static char *config_peg_display_table(const Config *config, PegPoll *poll,
+                                      int max_rows) {
   const int width = config->peg_out_width;
   const int lines = config->peg_out_lines;
   bool truncated = false;
-  char *display =
-      peg_result_get_string(&config->peg_result, config->game,
-                            config->peg_show_outcomes, poll, width, lines,
-                            /*trunc_note=*/NULL, &truncated);
+  char *display = peg_result_get_string(
+      &config->peg_result, config->game, config->peg_show_outcomes, poll,
+      max_rows, width, lines, /*trunc_note=*/NULL, &truncated);
   if (!truncated) {
     return display;
   }
   free(display);
-  char *full = peg_result_get_string(&config->peg_result, config->game,
-                                     config->peg_show_outcomes, poll, width,
-                                     /*out_max_lines=*/0, NULL, NULL);
+  char *full = peg_result_get_string(
+      &config->peg_result, config->game, config->peg_show_outcomes, poll,
+      /*max_rows=*/0, width, /*out_max_lines=*/0, NULL, NULL);
   char *path = config_write_peg_chart_file(full);
   free(full);
   char *note =
       path != NULL
           ? get_formatted_string("untruncated chart written to: %s", path)
           : NULL;
-  char *out =
-      peg_result_get_string(&config->peg_result, config->game,
-                            config->peg_show_outcomes, poll, width, lines, note,
-                            /*out_truncated=*/NULL);
+  char *out = peg_result_get_string(&config->peg_result, config->game,
+                                    config->peg_show_outcomes, poll, max_rows,
+                                    width, lines, note, /*out_truncated=*/NULL);
   free(note);
   free(path);
   return out;
 }
 
-static char *config_peg_display(const Config *config, PegPoll *poll) {
-  char *table = config_peg_display_table(config, poll);
+static char *config_peg_display(const Config *config, PegPoll *poll,
+                                int max_rows) {
+  char *table = config_peg_display_table(config, poll, max_rows);
   if (!config->peg_json || !config->peg_poll) {
     return table;
   }
@@ -5321,7 +5330,7 @@ char *status_peg(Config *config) {
   if (config->peg_result.last_completed_stage < 0 && config->peg_poll == NULL) {
     return string_duplicate("peg results are not yet initialized.\n");
   }
-  return config_peg_display(config, config->peg_poll);
+  return config_peg_display(config, config->peg_poll, PEG_DISPLAY_ROWS);
 }
 
 // Autoplay
@@ -6185,13 +6194,31 @@ char *str_api_show_endgame(Config *config, ErrorStack *error_stack) {
 
 // Show PEG
 
+// Shows the PEG result as status shows a running one: the first rows of its
+// ranking, PEG_DISPLAY_ROWS of them or as many as the optional argument asks
+// ("all" for every play), then the solved plays ranked below them.
 char *impl_show_peg(const Config *config, ErrorStack *error_stack) {
   if (!config->game || config->peg_result.last_completed_stage < 0) {
     error_stack_push(error_stack, ERROR_STATUS_NO_PEG_TO_SHOW,
                      string_duplicate("no PEG results to show"));
     return empty_string();
   }
-  return config_peg_display(config, NULL);
+  int max_rows = PEG_DISPLAY_ROWS;
+  const char *rows_arg = config_get_parg_value(config, ARG_TOKEN_SHOW_PEG, 0);
+  if (rows_arg != NULL) {
+    if (strings_iequal(rows_arg, "all")) {
+      max_rows = 0;
+    } else {
+      string_to_int_or_push_error(
+          "number of PEG rows", rows_arg, 1, INT_MAX,
+          ERROR_STATUS_CONFIG_LOAD_INT_ARG_OUT_OF_BOUNDS, &max_rows,
+          error_stack);
+      if (!error_stack_is_empty(error_stack)) {
+        return empty_string();
+      }
+    }
+  }
+  return config_peg_display(config, NULL, max_rows);
 }
 
 void execute_show_peg(Config *config, ErrorStack *error_stack) {
@@ -14654,7 +14681,7 @@ void execute_peg(Config *config, ErrorStack *error_stack) {
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
-  char *result = config_peg_display(config, NULL);
+  char *result = config_peg_display(config, NULL, PEG_DISPLAY_ROWS);
   thread_control_print(config->thread_control, result);
   free(result);
 }
@@ -15697,7 +15724,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   cmd(ARG_TOKEN_SHOW_INFERENCE, "shinference", 0, 1, show_inference, generic,
       false);
   cmd(ARG_TOKEN_SHOW_ENDGAME, "shendgame", 0, 1, show_endgame, generic, false);
-  cmd(ARG_TOKEN_SHOW_PEG, "shpeg", 0, 0, show_peg, peg, false);
+  cmd(ARG_TOKEN_SHOW_PEG, "shpeg", 0, 1, show_peg, peg, false);
   cmd(ARG_TOKEN_SHOW_HEAT_MAP, "heatmap", 1, 3, show_heat_map, generic, false);
   cmd(ARG_TOKEN_MOVES, "addmoves", 1, 1, add_moves, generic, true);
   cmd(ARG_TOKEN_RACK, "rack", 1, 1, set_rack, generic, true);

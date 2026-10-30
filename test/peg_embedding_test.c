@@ -11,6 +11,54 @@
 #include <stdlib.h>
 #include <string.h>
 
+// shpeg's optional argument: how many of the ranking's first rows to show,
+// with the solved plays ranked below them pinned after a "..." row, or "all"
+// for every play. g104331 (1 in the bag) has many solved plays below its cut
+// ones.
+static void test_peg_show_rows(void) {
+  Magpie *mp = magpie_create(DEFAULT_TEST_DATA_PATH);
+  assert(!magpie_has_error(mp));
+  assert(magpie_run_sync(mp, "set -lex CSW24 -threads 4 -pegoutcomes false") ==
+         MAGPIE_SUCCESS);
+  assert(magpie_run_sync(
+             mp, "cgp 4CYANiDS4/10PE3/8VLOGS2/10UM3/10TA3/2Q3HOTTY4/2IF1WAB7/"
+                 "L2AROHA6M/E1OXEN8E/VIDIOTS7I/3N2E2LOIPEN/3G1TITmOUSE1I/"
+                 "6Z7E/6E2WICE2/3LADRONE2RAJ BEFIKNR/ 322/359 0 -lex "
+                 "CSW24") == MAGPIE_SUCCESS);
+  assert(magpie_run_sync(mp, "peg -pegplies 1") == MAGPIE_SUCCESS);
+
+  assert(magpie_run_sync(mp, "shpeg") == MAGPIE_SUCCESS);
+  char *output = magpie_get_last_command_output(mp);
+  assert(has_prefix("Status          ", output));
+  assert(has_substring(output, " (finished)\n  Seed          "));
+  assert(has_substring(output, "\nBest Move       14A BRIEF  25.0%"));
+  assert(has_substring(output, "\n  10  "));
+  assert(has_substring(output, "\n ...  "));
+  assert(has_substring(output, " more, including "));
+  free(output);
+
+  assert(magpie_run_sync(mp, "shpeg 3") == MAGPIE_SUCCESS);
+  output = magpie_get_last_command_output(mp);
+  assert(has_substring(output, "\n   3  "));
+  assert(!has_substring(output, "\n   4  "));
+  assert(has_substring(output, "\n ...  "));
+  free(output);
+
+  assert(magpie_run_sync(mp, "shpeg all") == MAGPIE_SUCCESS);
+  output = magpie_get_last_command_output(mp);
+  assert(!has_substring(output, "\n ...  "));
+  assert(!has_substring(output, " more"));
+  free(output);
+
+  assert(magpie_run_sync(mp, "shpeg 0") != MAGPIE_SUCCESS);
+  char *error = magpie_get_and_clear_error(mp);
+  free(error);
+  assert(magpie_run_sync(mp, "shpeg some") != MAGPIE_SUCCESS);
+  error = magpie_get_and_clear_error(mp);
+  free(error);
+  magpie_destroy(mp);
+}
+
 void test_peg_embedding(void) {
   Magpie *mp = magpie_create(DEFAULT_TEST_DATA_PATH);
   assert(!magpie_has_error(mp));
@@ -52,6 +100,7 @@ void test_peg_embedding(void) {
   free(text);
   free(structured);
   magpie_destroy(mp);
+  test_peg_show_rows();
 }
 
 // The g104730 position: 2 in the bag, every candidate solved at 3 plies, the
@@ -70,10 +119,11 @@ enum {
 
 static const double peg_status_poll_seconds = 0.02;
 
-// Where a running status is: its phase, which names the stage and how many
-// candidates are solved at once (falling as the last ones finish), the tenth
-// of the stage's candidates finished, and whether the candidate solved alone
-// lists its draws yet. Snapshots are written when it changes.
+// Where a running status is: its phase, which names the running stage and
+// how many candidates are worked on at once (falling as the last ones
+// finish), the tenth of the stage's candidates finished, and whether the
+// candidate solved alone lists its draws yet. Snapshots are written when it
+// changes.
 typedef struct PegStatusMilestone {
   char phase[PEG_STATUS_PHASE_MAX];
   int decile;
@@ -101,16 +151,44 @@ static void peg_status_summary_value(const char *status, const char *label,
   value[length] = '\0';
 }
 
+// Whether `status` is a running solve's: its first line is the status line,
+// ending "(running)".
+static bool peg_status_is_running(const char *status) {
+  const char *first_end = strchr(status, '\n');
+  const char *running = strstr(status, " (running)\n");
+  return has_prefix("Status          ", status) && first_end != NULL &&
+         running != NULL && running < first_end;
+}
+
 static PegStatusMilestone peg_status_milestone(const char *status) {
   PegStatusMilestone milestone;
-  peg_status_summary_value(status, "  Phase ", milestone.phase,
-                           sizeof(milestone.phase));
+  // The running stage's line under the status line, as
+  // "  3-ply         1.2s (running)".
+  char stage_label[PEG_STATUS_PHASE_MAX] = "";
+  const char *stage_lines = strchr(status, '\n');
+  const char *running =
+      stage_lines != NULL ? strstr(stage_lines, " (running)") : NULL;
+  if (running != NULL) {
+    const char *line = running;
+    while (line > status && line[-1] != '\n') {
+      line--;
+    }
+    (void)sscanf(line, "%127s", stage_label);
+  }
+  int n_at_once = 0;
+  const char *working = strstr(status, "\nCurrently working on ");
+  if (working != NULL) {
+    (void)sscanf(working, "\nCurrently working on %d", &n_at_once);
+  }
+  (void)snprintf(milestone.phase, sizeof(milestone.phase), "%s %d %d",
+                 stage_label, n_at_once,
+                 has_substring(status, "\nSolving ") ? 1 : 0);
   char progress[PEG_STATUS_PHASE_MAX];
-  peg_status_summary_value(status, "  Progress ", progress, sizeof(progress));
+  peg_status_summary_value(status, "\nProgress ", progress, sizeof(progress));
   int cands_done = 0;
   int field_size = 0;
   milestone.decile = PEG_STATUS_DECILES;
-  milestone.lists_draws = has_substring(status, "\nDRAW ");
+  milestone.lists_draws = has_substring(status, "\nDraw ");
   if (sscanf(progress, "%d of %d", &cands_done, &field_size) == 2 &&
       field_size > 0) {
     milestone.decile = cands_done * PEG_STATUS_DECILES / field_size;
@@ -141,7 +219,7 @@ void test_peg_status_output(void) {
   int num_snapshots = 0;
   while (magpie_get_thread_status(mp) != MAGPIE_THREAD_STATUS_FINISHED) {
     char *status = magpie_get_last_command_status_message(mp);
-    if (has_prefix("  Status          running", status)) {
+    if (peg_status_is_running(status)) {
       const PegStatusMilestone milestone = peg_status_milestone(status);
       if (!peg_status_milestones_equal(&milestone, &last_milestone)) {
         last_milestone = milestone;

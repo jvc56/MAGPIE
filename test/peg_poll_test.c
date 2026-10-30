@@ -188,26 +188,37 @@ static void test_peg_status_string(const Game *game, const Move *move) {
   string_builder_destroy(move_sb);
 
   char *status = peg_snapshot_get_status_string(snap, game, now_ns, NULL, 0);
-  assert(has_prefix("  Status          running, 312.0s\n", status));
-  assert(has_substring(status, "  Phase           endgames to the end of the "
-                               "game, one candidate at a time\n"));
-  assert(has_substring(status, "  Progress        0 of 168 (0%)\n"));
-  assert(has_substring(status, "  Seed leader     "));
+  assert(has_prefix("Status          312.0s (running)\n", status));
+  assert(has_substring(status, "\nProgress        0 of 168 (0%)\n"));
+  assert(has_substring(status, "\nBest Move       "));
   assert(has_substring(status, "100.0% (greedy estimate)\n"));
-  assert(has_substring(status, "  Finished        0 solved, 168 to go\n"));
-  assert(has_substring(status, "  Stages          seed 1.0s, end 311.0s\n"));
-  assert(!has_substring(status, "OUTCOMES"));
+  assert(has_prefix("Status          312.0s (running)\n"
+                    "  Seed          1.0s (finished)\n"
+                    "  End           311.0s (running)\n"
+                    "Progress        0 of 168 (0%)\n"
+                    "  Finished      0 (0.0%)\n"
+                    "  Cut           0 (0.0%)\n"
+                    "  Pending       168 (100.0%)\n"
+                    "Best Move       ",
+                    status));
+  assert(!has_substring(status, "Phase"));
+  assert(!has_substring(status, "Stages"));
+  assert(!has_substring(status, "Nodes"));
+  assert(!has_substring(status, "Threads"));
+  // The pass's draw leaves a tile in the bag: its thread works through
+  // the opponent's replies, not one endgame.
+  assert(has_substring(status, "nested"));
+  assert(!has_substring(status, "Outcomes"));
   assert(!has_substring(status, "draws 2/4"));
   assert(has_substring(status, solving));
   assert(has_substring(status, "won"));
   assert(has_substring(status, "lost"));
   assert(has_substring(status, "-12.5"));
   assert(has_substring(status, "5/14"));
-  assert(has_substring(status, "1.2G"));
   assert(has_substring(status, "311.0s"));
   assert(has_substring(status, "\n-/E "));
   assert(has_substring(status, "\nSeed ranking (greedy estimates), until a "
-                               "candidate finishes\nRANK  MOVE"));
+                               "candidate finishes\nRank  Move"));
   free(status);
 
   // With outcomes, the ranking has an outcomes column: each candidate's
@@ -223,7 +234,7 @@ static void test_peg_status_string(const Game *game, const Move *move) {
   char *cell = peg_build_outcomes_string_rows(rows, 2);
   assert(cell[0] != '\0');
   status = peg_snapshot_get_status_string(snap, game, now_ns, &outcomes, 1);
-  assert(has_substring(status, "SPREAD  OUTCOMES\n"));
+  assert(has_substring(status, "Spread  Outcomes\n"));
   char *cell_line = get_formatted_string("  %s\n", cell);
   assert(has_substring(status, cell_line));
   free(cell_line);
@@ -262,20 +273,22 @@ static void test_peg_status_string(const Game *game, const Move *move) {
   snap->cand_rows[1].start_ns = now_ns - second_ns;
   snap->cand_rows[1].draw.state = PEG_DRAW_QUEUED;
   status = peg_snapshot_get_status_string(snap, game, now_ns, NULL, 0);
-  assert(has_substring(status, "  Phase           endgames to the end of the "
-                               "game, 2 candidates at once\n"));
-  assert(has_substring(status, "\nSolving 2 candidates at once, one per "
-                               "thread\nMOVE"));
+  assert(has_substring(status, "\nCurrently working on 2 candidates:\nMove"));
   assert(has_substring(status, "3/8"));
   assert(has_substring(status, "5.0s"));
-  assert(has_substring(status, "1.2G"));
-  // Its endgame has 3 helpers: 4 threads. The second candidate is between
-  // draws, which the note under the table explains.
-  assert(has_substring(status, "DEPTH  MOVES  NODES  THREADS"));
-  assert(has_substring(status, "1.2G   4"));
-  assert(has_substring(status, "- under DEPTH to THREADS: no endgame progress "
-                               "to report right now\n"));
+  // Its endgame is at depth 23, 5 of 14 root moves searched. The second
+  // candidate has not started its first draw, so it has nothing to show.
+  assert(has_substring(status, "5/14"));
+  assert(!has_substring(status, "Threads"));
+  assert(!has_substring(status, "starting"));
+  assert(!has_substring(status, "between"));
+  assert(!has_substring(status, "no endgame progress"));
   assert(!has_substring(status, "draws: 20 done"));
+  free(status);
+  // Once it has solved a draw, it is between draws.
+  snap->cand_rows[1].draws_done = 2;
+  status = peg_snapshot_get_status_string(snap, game, now_ns, NULL, 0);
+  assert(has_substring(status, "between"));
   free(status);
   free(solving);
   free(snap);
@@ -321,8 +334,11 @@ static void test_peg_status_ranking(const Game *game, const Move *move) {
   snap->solved_ranks[1] = 40;
 
   char *status = peg_snapshot_get_status_string(snap, game, now_ns, NULL, 0);
-  assert(has_substring(status, "  Finished        2 solved, 48 cut, 10 to "
-                               "go\n"));
+  assert(has_substring(status, "\nProgress        50 of 60 (83%)\n"
+                               "  Finished      2 (3.3%)\n"
+                               "  Cut           48 (80.0%)\n"
+                               "  Pending       10 (16.7%)\n"
+                               "Best Move       "));
   assert(has_substring(status, "\n  10  "));
   assert(has_substring(status, "<=0.01"));
   assert(!has_substring(status, "<=0.0 "));

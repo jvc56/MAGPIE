@@ -647,8 +647,9 @@ static void write_per_turn_human_readable(
     string_builder_add_formatted_string(sb, "%s\n", sim_str);
     free(sim_str);
   } else if (is_peg) {
-    char *peg_str = peg_result_get_string(&ctx->peg_result, ctx->game, false,
-                                          NULL, -1, 0, NULL, NULL);
+    char *peg_str =
+        peg_result_get_string(&ctx->peg_result, ctx->game, false, NULL,
+                              PEG_DISPLAY_ROWS, -1, 0, NULL, NULL);
     if (peg_str) {
       string_builder_add_formatted_string(sb, "%s\n", peg_str);
       free(peg_str);

@@ -91,6 +91,13 @@ enum {
   PEG_POLL_MAX_SOLVED_ROWS = 32,
 };
 
+// The ranking rows status, shpeg and peg show by default, and the most
+// solved plays ranked below them that follow.
+enum {
+  PEG_DISPLAY_ROWS = 10,
+  PEG_DISPLAY_MAX_PINNED_ROWS = 10,
+};
+
 // Smallest outcomes-cell content width the renderer ever wraps to: enough for
 // the label plus one worst-case token (a 4-tile sequence with a 4-digit
 // weight) -- strlen("W: A/B/C/Dx1234").
