@@ -1,5 +1,6 @@
 #include "census_test.h"
 
+#include "../src/compat/cfile.h"
 #include "../src/def/equity_defs.h"
 #include "../src/def/game_history_defs.h"
 #include "../src/def/letter_distribution_defs.h"
@@ -19,6 +20,7 @@
 #include "../src/util/io_util.h"
 #include "../src/util/math_util.h"
 #include "test_constants.h"
+#include "test_platform.h"
 #include "test_util.h"
 #include <assert.h>
 #include <stdbool.h>
@@ -477,10 +479,62 @@ static void test_play_scores_match_movegen(void) {
   config_destroy(config);
 }
 
+// The census end to end on the A/B lexicon, whose lattice is 120 multisets:
+// the output matches a known-good table and does not depend on the thread
+// count.
+static void test_census_command(void) {
+  char *tmp_dir = test_platform_make_temporary_directory("magpie_census_");
+  char *lexica_dir = get_formatted_string("%s/lexica", tmp_dir);
+  assert(cfile_mkdir(lexica_dir) == 0);
+  char *set_cmd = get_formatted_string(
+      "set -path %s:%s -lex CSW21_ab -ld english_ab -wmp false", tmp_dir,
+      DEFAULT_TEST_DATA_PATH);
+  Config *config = config_create_or_die(set_cmd);
+
+  // 72 boards a generation cover each fill level of the window once.
+  load_and_exec_config_or_die(config,
+                              "census 2x72,80 ab_census_1 null -threads 1 "
+                              "-seed 3");
+  load_and_exec_config_or_die(config,
+                              "census 2x72,80 ab_census_3 null -threads 3 "
+                              "-seed 3");
+  char *csv_1_filename = get_formatted_string("%s/ab_census_1.csv", lexica_dir);
+  char *csv_3_filename = get_formatted_string("%s/ab_census_3.csv", lexica_dir);
+  char *csv_1 = get_string_from_file_or_die(csv_1_filename);
+  char *csv_3 = get_string_from_file_or_die(csv_3_filename);
+  char *expected_csv =
+      get_string_from_file_or_die("./test/fixtures/census_CSW21_ab.csv");
+  assert_strings_equal(csv_1, csv_3);
+  assert_strings_equal(csv_1, expected_csv);
+  free(expected_csv);
+  free(csv_3);
+  free(csv_1);
+  free(csv_3_filename);
+  free(csv_1_filename);
+
+  assert_config_exec_status(config, "census 0x5",
+                            ERROR_STATUS_CENSUS_MALFORMED_RECIPE);
+  assert_config_exec_status(config, "census 3x",
+                            ERROR_STATUS_CENSUS_MALFORMED_RECIPE);
+  assert_config_exec_status(config, "census 2,,4",
+                            ERROR_STATUS_CENSUS_MALFORMED_RECIPE);
+  assert_config_exec_status(config, "census 4x2y",
+                            ERROR_STATUS_CENSUS_MALFORMED_RECIPE);
+  assert_config_exec_status(config, "census 2 ab_census_x maybe",
+                            ERROR_STATUS_CENSUS_MALFORMED_RECIPE);
+
+  config_destroy(config);
+  free(set_cmd);
+  free(lexica_dir);
+  test_platform_remove_directory_tree(tmp_dir);
+  free(tmp_dir);
+}
+
 void test_census(void) {
   test_lattice_ranks_round_trip();
   test_add_table();
   test_apportion_matches_naive();
   test_blank_variants_match_naive();
   test_play_scores_match_movegen();
+  test_census_command();
 }
