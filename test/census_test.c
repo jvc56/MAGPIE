@@ -1,11 +1,25 @@
 #include "census_test.h"
 
+#include "../src/def/equity_defs.h"
+#include "../src/def/game_history_defs.h"
 #include "../src/def/letter_distribution_defs.h"
+#include "../src/def/move_defs.h"
+#include "../src/def/rack_defs.h"
 #include "../src/ent/equity.h"
+#include "../src/ent/game.h"
+#include "../src/ent/letter_distribution.h"
+#include "../src/ent/move.h"
+#include "../src/ent/player.h"
+#include "../src/ent/rack.h"
 #include "../src/ent/xoshiro.h"
 #include "../src/impl/census.h"
+#include "../src/impl/census_play_scores.h"
+#include "../src/impl/config.h"
+#include "../src/impl/move_gen.h"
 #include "../src/util/io_util.h"
 #include "../src/util/math_util.h"
+#include "test_constants.h"
+#include "test_util.h"
 #include <assert.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -320,9 +334,153 @@ static void test_blank_variants_match_naive(void) {
   prng_destroy(prng);
 }
 
+typedef struct PlacedBest {
+  uint32_t rank;
+  Equity score;
+} PlacedBest;
+
+// For random racks drawn from the board's unseen pool, play_scores[P] must be
+// the best score the move generator finds for a play placing exactly P, for
+// every P within the rack.
+static void assert_play_scores_match_movegen(Game *game,
+                                             const CensusLattice *lattice,
+                                             Equity *play_scores,
+                                             XoshiroPRNG *prng,
+                                             int number_of_racks) {
+  const LetterDistribution *ld = game_get_ld(game);
+  const int ld_size = ld_get_size(ld);
+  const uint32_t size = census_lattice_get_size(lattice);
+  uint8_t unseen[CENSUS_MAX_LETTERS];
+  census_get_unseen_tally(game, unseen);
+  for (uint32_t index = 0; index < size; index++) {
+    play_scores[index] = CENSUS_UNPLAYABLE;
+  }
+  const uint64_t number_of_plays =
+      census_play_scores_build(game, lattice, unseen, play_scores);
+  assert(number_of_plays > 0);
+
+  MachineLetter pool[200];
+  int pool_size = 0;
+  for (int ml = 0; ml < ld_size; ml++) {
+    for (int copy_idx = 0; copy_idx < unseen[ml]; copy_idx++) {
+      pool[pool_size++] = (MachineLetter)ml;
+    }
+  }
+  assert(pool_size >= RACK_SIZE);
+  const int player_index = game_get_player_on_turn_index(game);
+  Rack *rack = player_get_rack(game_get_player(game, player_index));
+  MoveList *move_list = move_list_create(100000);
+  for (int rack_idx = 0; rack_idx < number_of_racks; rack_idx++) {
+    // draw RACK_SIZE tiles from the pool without replacement
+    for (int draw_idx = 0; draw_idx < RACK_SIZE; draw_idx++) {
+      const int pick = draw_idx + (int)prng_get_random_number(
+                                      prng, (uint64_t)(pool_size - draw_idx));
+      const MachineLetter swap = pool[draw_idx];
+      pool[draw_idx] = pool[pick];
+      pool[pick] = swap;
+    }
+    uint8_t rack_tally[CENSUS_MAX_LETTERS];
+    memset(rack_tally, 0, sizeof(rack_tally));
+    rack_reset(rack);
+    for (int draw_idx = 0; draw_idx < RACK_SIZE; draw_idx++) {
+      rack_add_letter(rack, pool[draw_idx]);
+      rack_tally[pool[draw_idx]]++;
+    }
+    const MoveGenArgs move_gen_args = {
+        .game = game,
+        .move_list = move_list,
+        .move_record_type = MOVE_RECORD_ALL,
+        .move_sort_type = MOVE_SORT_SCORE,
+        .eq_margin_movegen = 0,
+        .target_equity = EQUITY_MAX_VALUE,
+    };
+    generate_moves(&move_gen_args);
+    // the best score by placed multiset; a rack has at most 2^RACK_SIZE
+    PlacedBest best_by_placed[1 << RACK_SIZE];
+    int number_of_placed = 0;
+    for (int move_idx = 0; move_idx < move_list_get_count(move_list);
+         move_idx++) {
+      const Move *move = move_list_get_move(move_list, move_idx);
+      if (move_get_type(move) != GAME_EVENT_TILE_PLACEMENT_MOVE) {
+        continue;
+      }
+      uint8_t placed_tally[CENSUS_MAX_LETTERS];
+      memset(placed_tally, 0, sizeof(placed_tally));
+      for (int tile_idx = 0; tile_idx < move_get_tiles_length(move);
+           tile_idx++) {
+        const MachineLetter tile = move_get_tile(move, tile_idx);
+        if (tile == PLAYED_THROUGH_MARKER) {
+          continue;
+        }
+        placed_tally[get_is_blanked(tile) ? BLANK_MACHINE_LETTER : tile]++;
+      }
+      const uint32_t rank = census_lattice_rank(lattice, placed_tally);
+      int found_idx = 0;
+      while (found_idx < number_of_placed &&
+             best_by_placed[found_idx].rank != rank) {
+        found_idx++;
+      }
+      if (found_idx == number_of_placed) {
+        best_by_placed[number_of_placed++] =
+            (PlacedBest){.rank = rank, .score = move_get_score(move)};
+      } else if (move_get_score(move) > best_by_placed[found_idx].score) {
+        best_by_placed[found_idx].score = move_get_score(move);
+      }
+    }
+    // every nonempty sub-multiset of the rack, as a mixed-radix counter over
+    // the rack's letters
+    uint8_t subrack[CENSUS_MAX_LETTERS];
+    memset(subrack, 0, sizeof(subrack));
+    while (true) {
+      int ml = 0;
+      while (ml < ld_size && subrack[ml] == rack_tally[ml]) {
+        subrack[ml] = 0;
+        ml++;
+      }
+      if (ml == ld_size) {
+        break;
+      }
+      subrack[ml]++;
+      const uint32_t index = census_lattice_rank(lattice, subrack);
+      Equity expected = CENSUS_UNPLAYABLE;
+      for (int found_idx = 0; found_idx < number_of_placed; found_idx++) {
+        if (best_by_placed[found_idx].rank == index) {
+          expected = best_by_placed[found_idx].score;
+        }
+      }
+      assert(play_scores[index] == expected);
+    }
+  }
+  move_list_destroy(move_list);
+  rack_reset(rack);
+}
+
+static void test_play_scores_match_movegen(void) {
+  Config *config = config_create_or_die("set -lex CSW21 -wmp false");
+  Game *game = config_game_create(config);
+  const int num_letters = ld_get_size(game_get_ld(game));
+  CensusLattice *lattice = create_lattice_or_die(num_letters, RACK_SIZE);
+  Equity *play_scores =
+      malloc_or_die(sizeof(Equity) * census_lattice_get_size(lattice));
+  XoshiroPRNG *prng = prng_create(11);
+  const char *cgps[] = {DOUG_V_EMELY_CGP, VS_ANDY_CGP, VS_FRENTZ_CGP,
+                        NOAH_VS_PETER_CGP, GUY_VS_BOT_CGP};
+  for (size_t cgp_idx = 0; cgp_idx < sizeof(cgps) / sizeof(cgps[0]);
+       cgp_idx++) {
+    load_cgp_or_die(game, cgps[cgp_idx]);
+    assert_play_scores_match_movegen(game, lattice, play_scores, prng, 40);
+  }
+  prng_destroy(prng);
+  free(play_scores);
+  census_lattice_destroy(lattice);
+  game_destroy(game);
+  config_destroy(config);
+}
+
 void test_census(void) {
   test_lattice_ranks_round_trip();
   test_add_table();
   test_apportion_matches_naive();
   test_blank_variants_match_naive();
+  test_play_scores_match_movegen();
 }
