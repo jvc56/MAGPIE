@@ -6,8 +6,11 @@
 #include "../src/def/letter_distribution_defs.h"
 #include "../src/def/move_defs.h"
 #include "../src/def/rack_defs.h"
+#include "../src/ent/dictionary_word.h"
 #include "../src/ent/equity.h"
 #include "../src/ent/game.h"
+#include "../src/ent/klv.h"
+#include "../src/ent/kwg.h"
 #include "../src/ent/letter_distribution.h"
 #include "../src/ent/move.h"
 #include "../src/ent/player.h"
@@ -16,6 +19,7 @@
 #include "../src/impl/census.h"
 #include "../src/impl/census_play_scores.h"
 #include "../src/impl/config.h"
+#include "../src/impl/kwg_maker.h"
 #include "../src/impl/move_gen.h"
 #include "../src/util/io_util.h"
 #include "../src/util/math_util.h"
@@ -481,7 +485,7 @@ static void test_play_scores_match_movegen(void) {
 
 // The census end to end on the A/B lexicon, whose lattice is 120 multisets:
 // the output matches a known-good table and does not depend on the thread
-// count.
+// count, and the blend of two tables is their weighted mean.
 static void test_census_command(void) {
   char *tmp_dir = test_platform_make_temporary_directory("magpie_census_");
   char *lexica_dir = get_formatted_string("%s/lexica", tmp_dir);
@@ -522,6 +526,45 @@ static void test_census_command(void) {
                             ERROR_STATUS_CENSUS_MALFORMED_RECIPE);
   assert_config_exec_status(config, "census 2 ab_census_x maybe",
                             ERROR_STATUS_CENSUS_MALFORMED_RECIPE);
+
+  load_and_exec_config_or_die(
+      config, "leaveblend ab_census_1 ab_census_1_gen_1 0.25 ab_blend");
+  assert_config_exec_status(config,
+                            "leaveblend ab_census_1 ab_census_1_gen_1 1.5 x",
+                            ERROR_STATUS_LEAVE_BLEND_INVALID_WEIGHT);
+  ErrorStack *error_stack = error_stack_create();
+  const char *data_paths = config_get_data_paths(config);
+  KLV *first = klv_create(data_paths, "ab_census_1", error_stack);
+  KLV *second = klv_create(data_paths, "ab_census_1_gen_1", error_stack);
+  KLV *blend = klv_create(data_paths, "ab_blend", error_stack);
+  assert(error_stack_is_empty(error_stack));
+  DictionaryWordList *leaves = dictionary_word_list_create();
+  kwg_write_words(klv_get_kwg(first),
+                  kwg_get_dawg_root_node_index(klv_get_kwg(first)), leaves,
+                  NULL);
+  // the leaves of 1 to RACK_SIZE - 1 tiles of A and B
+  assert(dictionary_word_list_get_count(leaves) == 27);
+  Rack leave;
+  rack_set_dist_size_and_reset(&leave, 3);
+  for (int leave_idx = 0; leave_idx < dictionary_word_list_get_count(leaves);
+       leave_idx++) {
+    const DictionaryWord *word =
+        dictionary_word_list_get_word(leaves, leave_idx);
+    rack_reset(&leave);
+    for (int letter_idx = 0; letter_idx < dictionary_word_get_length(word);
+         letter_idx++) {
+      rack_add_letter(&leave, dictionary_word_get_word(word)[letter_idx]);
+    }
+    const double expected = 0.75 * (double)klv_get_leave_value(first, &leave) +
+                            0.25 * (double)klv_get_leave_value(second, &leave);
+    const double actual = (double)klv_get_leave_value(blend, &leave);
+    assert(actual - expected <= 1.0 && expected - actual <= 1.0);
+  }
+  dictionary_word_list_destroy(leaves);
+  klv_destroy(blend);
+  klv_destroy(second);
+  klv_destroy(first);
+  error_stack_destroy(error_stack);
 
   config_destroy(config);
   free(set_cmd);
