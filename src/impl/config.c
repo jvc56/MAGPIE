@@ -8012,6 +8012,8 @@ typedef struct ConfigTablesInUse {
 
 static void config_tables_in_use_init(ConfigTablesInUse *in_use,
                                       const char *const lexicons[2],
+                                      // cppcheck-suppress constParameter ;
+                                      // the caller's strings are not const
                                       char *const rit_names[2]) {
   memset(in_use, 0, sizeof(*in_use));
   for (int player_idx = 0; player_idx < 2; player_idx++) {

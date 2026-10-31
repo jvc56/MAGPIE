@@ -1127,8 +1127,10 @@ static void peg_append_flat_ranking(StringBuilder *sb, const PegResult *result,
   row_cand[0] = -1;
   for (int cand_idx = 0; cand_idx < n_shown; cand_idx++) {
     const int rank = ranks != NULL ? ranks[cand_idx] : cand_idx + 1;
-    const int prev_rank =
-        cand_idx == 0 ? 0 : (ranks != NULL ? ranks[cand_idx - 1] : cand_idx);
+    int prev_rank = 0;
+    if (cand_idx > 0) {
+      prev_rank = ranks != NULL ? ranks[cand_idx - 1] : cand_idx;
+    }
     if (rank > prev_rank + 1 && cand_idx > 0) {
       row_cand[num_rows++] = -1;
     }
@@ -1376,7 +1378,7 @@ static void peg_append_live_candidate(StringBuilder *sb,
   const LetterDistribution *ld = game_get_ld(game);
   StringBuilder *move_sb = string_builder_create();
   string_builder_add_move(move_sb, board, &snap->evaluating_move, ld, false);
-  string_builder_add_formatted_string(sb, "Currently working on %s:\n",
+  string_builder_add_formatted_string(sb, "Currently working on %s\n",
                                       string_builder_peek(move_sb));
   string_builder_destroy(move_sb);
   const int n_draws = snap->draws_queued + snap->draws_running +
@@ -1485,8 +1487,8 @@ static void peg_append_live_cands(StringBuilder *sb,
 // One summary line: its label, padded, then `value`, which it frees.
 static void peg_append_summary_line(StringBuilder *sb, const char *label,
                                     char *value) {
-  string_builder_add_formatted_string(
-      sb, "%-*s%s\n", (int)PEG_SUMMARY_LABEL_WIDTH, label, value);
+  string_builder_add_formatted_string(sb, "%-*s%s\n", PEG_SUMMARY_LABEL_WIDTH,
+                                      label, value);
   free(value);
 }
 
@@ -1495,9 +1497,8 @@ static void peg_append_summary_line(StringBuilder *sb, const char *label,
 static void peg_append_summary_subline(StringBuilder *sb, const char *label,
                                        char *value) {
   string_builder_add_formatted_string(
-      sb, "%*s%-*s%s\n", (int)PEG_SUMMARY_SUBLINE_INDENT, "",
-      (int)(PEG_SUMMARY_LABEL_WIDTH - PEG_SUMMARY_SUBLINE_INDENT), label,
-      value);
+      sb, "%*s%-*s%s\n", PEG_SUMMARY_SUBLINE_INDENT, "",
+      PEG_SUMMARY_LABEL_WIDTH - PEG_SUMMARY_SUBLINE_INDENT, label, value);
   free(value);
 }
 

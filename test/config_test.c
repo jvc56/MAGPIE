@@ -7,6 +7,7 @@
 #include "../src/def/move_defs.h"
 #include "../src/def/players_data_defs.h"
 #include "../src/def/rack_defs.h"
+#include "../src/def/thread_control_defs.h"
 #include "../src/ent/bag.h"
 #include "../src/ent/board.h"
 #include "../src/ent/endgame_results.h"

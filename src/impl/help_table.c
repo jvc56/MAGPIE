@@ -3,6 +3,7 @@
 #include "../def/config_defs.h"
 #include "../util/io_util.h"
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 // Options are global and any command accepts any of them, so nothing in the

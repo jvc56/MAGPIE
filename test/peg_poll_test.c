@@ -6,6 +6,7 @@
 #include "../src/compat/memory_info.h"
 #include "../src/def/game_history_defs.h"
 #include "../src/def/letter_distribution_defs.h"
+#include "../src/def/peg_defs.h"
 #include "../src/ent/board.h"
 #include "../src/ent/equity.h"
 #include "../src/ent/game.h"

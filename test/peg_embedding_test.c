@@ -2,6 +2,7 @@
 
 #include "../src/compat/ctime.h"
 #include "../src/impl/cmd_api.h"
+#include "../src/util/io_util.h"
 #include "../src/util/string_util.h"
 #include "test_util.h"
 #include <assert.h>
@@ -184,10 +185,10 @@ static PegStatusMilestone peg_status_milestone(const char *status) {
   if (working != NULL) {
     // A move can start with a digit ("10C ITS"), so the count is the one
     // followed by " candidate".
-    char word[PEG_STATUS_PHASE_MAX] = "";
-    alone = sscanf(working, "\nCurrently working on %d %127s", &n_at_once,
-                   word) != 2 ||
-            !has_prefix("candidate", word);
+    char *after_count = NULL;
+    n_at_once = (int)strtol(working + strlen("\nCurrently working on "),
+                            &after_count, 10);
+    alone = !has_prefix(" candidate", after_count);
     if (alone) {
       n_at_once = 0;
     }
@@ -196,13 +197,15 @@ static PegStatusMilestone peg_status_milestone(const char *status) {
                  stage_label, n_at_once, alone ? 1 : 0);
   char progress[PEG_STATUS_PHASE_MAX];
   peg_status_summary_value(status, "\nProgress ", progress, sizeof(progress));
-  int cands_done = 0;
-  int field_size = 0;
   milestone.decile = PEG_STATUS_DECILES;
   milestone.lists_draws = has_substring(status, "\nDraw ");
-  if (sscanf(progress, "%d of %d", &cands_done, &field_size) == 2 &&
-      field_size > 0) {
-    milestone.decile = cands_done * PEG_STATUS_DECILES / field_size;
+  char *after_done = NULL;
+  const int cands_done = (int)strtol(progress, &after_done, 10);
+  if (has_prefix(" of ", after_done)) {
+    const int field_size = (int)strtol(after_done + strlen(" of "), NULL, 10);
+    if (field_size > 0) {
+      milestone.decile = cands_done * PEG_STATUS_DECILES / field_size;
+    }
   }
   return milestone;
 }
@@ -221,8 +224,7 @@ void test_peg_status_output(void) {
   assert(!magpie_has_error(mp));
   assert(magpie_run_sync(mp, "set -lex CSW24 -threads 8") == MAGPIE_SUCCESS);
   assert(magpie_run_sync(mp, PEG_STATUS_OUTPUT_CGP) == MAGPIE_SUCCESS);
-  FILE *output_file = fopen("peg_output.txt", "w");
-  assert(output_file != NULL);
+  FILE *output_file = fopen_or_die("peg_output.txt", "w");
   const int64_t start_ns = ctimer_monotonic_ns();
   assert(magpie_run_async_human_readable(mp, "peg") == MAGPIE_SUCCESS);
   PegStatusMilestone last_milestone = {
@@ -250,6 +252,6 @@ void test_peg_status_output(void) {
   (void)fprintf(output_file, "==== shpeg at %.1fs ====\n%s",
                 (double)(ctimer_monotonic_ns() - start_ns) / 1e9, shpeg);
   free(shpeg);
-  assert(fclose(output_file) == 0);
+  fclose_or_die(output_file);
   magpie_destroy(mp);
 }
