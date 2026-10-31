@@ -67,19 +67,38 @@ EXE := .exe
 OBJ_TARGET_PREFIX := $(TARGET_TRIPLE)-
 endif
 
-# Key every object (and its .d fragment) by the flags that change its contents:
-# build flavor, board dim, rack size. Switching any of them selects a different
-# obj subtree instead of relinking objects compiled with mismatched flags -- so
-# no `make clean` is needed between flavors, and switching back reuses the cached
-# objects. `clean` wipes the whole OBJ_ROOT.
+# The compiler, by family and major version (appleclang17, clang18, gcc13). An
+# LTO object holds its compiler's own intermediate code, which another
+# compiler, or an older version of the same one, cannot link. GCC does not
+# always name itself: Ubuntu's cc says only "cc (Ubuntu 13.1.0-...) 13.1.0"
+# above the Free Software Foundation's copyright. A compiler of no known
+# family still keys on its version.
+CC_VERSION_TEXT := $(shell $(CC) --version 2>/dev/null)
+CC_MAJOR := $(firstword $(subst ., ,$(shell $(CC) -dumpversion 2>/dev/null)))
+ifneq ($(findstring Apple clang,$(CC_VERSION_TEXT)),)
+OBJ_CC := appleclang$(CC_MAJOR)
+else ifneq ($(findstring clang,$(CC_VERSION_TEXT)),)
+OBJ_CC := clang$(CC_MAJOR)
+else ifneq ($(findstring GCC,$(CC_VERSION_TEXT))$(findstring gcc,$(CC_VERSION_TEXT))$(findstring Free Software Foundation,$(CC_VERSION_TEXT)),)
+OBJ_CC := gcc$(CC_MAJOR)
+else
+OBJ_CC := cc$(CC_MAJOR)
+endif
+
+# Key every object (and its .d fragment) by what changes its contents: build
+# flavor, compiler, board dim, rack size. Switching any of them selects a
+# different obj subtree instead of relinking objects compiled with mismatched
+# flags or by another compiler -- so no `make clean` is needed between them,
+# and switching back reuses the cached objects. `clean` wipes the whole
+# OBJ_ROOT.
 OBJ_ROOT := obj
 # portable_release additionally keys on its target: the whole point of that
 # flavor is that the target is fixed, so changing it has to recompile rather
 # than relink objects built for the old one.
 ifeq ($(BUILD),portable_release)
-OBJ_DIR := $(OBJ_ROOT)/$(OBJ_TARGET_PREFIX)$(BUILD)-$(PORTABLE_MARCH)-b$(BOARD_DIM)-r$(RACK_SIZE)
+OBJ_DIR := $(OBJ_ROOT)/$(OBJ_TARGET_PREFIX)$(BUILD)-$(PORTABLE_MARCH)-$(OBJ_CC)-b$(BOARD_DIM)-r$(RACK_SIZE)
 else
-OBJ_DIR := $(OBJ_ROOT)/$(OBJ_TARGET_PREFIX)$(BUILD)-b$(BOARD_DIM)-r$(RACK_SIZE)
+OBJ_DIR := $(OBJ_ROOT)/$(OBJ_TARGET_PREFIX)$(BUILD)-$(OBJ_CC)-b$(BOARD_DIM)-r$(RACK_SIZE)
 endif
 
 # Profile-guided optimization data. The default lives below OBJ_ROOT so it is
@@ -178,11 +197,44 @@ cflags.sanitize = -g -O1 -fno-omit-frame-pointer -fno-optimize-sibling-calls -U_
 cflags.thread := -g -O0 -Wall -Wno-trigraphs -Wextra -Wshadow -Wstrict-prototypes -Werror -fsanitize=thread
 cflags.vlg := -g -O0 -Wall -Wno-trigraphs -Wextra
 cflags.cov := -g -O0 -Wall -Wno-trigraphs -Wextra --coverage
-cflags.no_pgo_release := -O3 -flto -march=native -DNDEBUG -Wall -Wno-trigraphs
-cflags.portable_release := -O3 -flto -march=$(PORTABLE_MARCH) -DNDEBUG -Wall -Wno-trigraphs
-cflags.test_portable_release := -O3 -flto -march=$(PORTABLE_MARCH) -Wall -Wno-trigraphs
+# Every function of an optimized build starts on a 64-byte boundary. A
+# function's offset in its cache line, and on x86 in the instruction
+# decoder's windows, otherwise shifts with any edit that adds or removes code
+# before it, which can change its speed by a few percent without changing
+# its code. Measured against the default layout in #887: on an Intel
+# i7-9750H aligned builds ran 0.6% to 3.4% faster; on an Apple M2, from 1.6%
+# faster to 0.5% slower, by workload. Aligned, a change that moves code no
+# longer moves the timings of code it leaves alone.
+#
+# GCC aligns every function from -falign-functions, which its LTO link takes
+# too. With LTO, clang's -falign-functions misses functions made at the link
+# (a third of them on macOS), so clang's link also passes LLVM's
+# align-all-functions, in the form its linker takes: -mllvm for ld64 and
+# lld, -plugin-opt for the LTO plugin of GNU ld and gold. Probed only for the
+# optimized builds, with the compiler that will link.
+align_cflags := -falign-functions=64
+ALIGNED_BUILDS := no_pgo_release portable_release lib bai_stats pgo_generate pgo_use \
+                  test_no_pgo_release test_portable_release test_bai_stats \
+                  test_pgo_generate test_pgo_use
+ifneq ($(filter $(ALIGNED_BUILDS),$(BUILD)),)
+ifneq ($(findstring clang,$(CC_VERSION_TEXT)),)
+align_ldflags := $(shell for flag in -Wl,-mllvm,-align-all-functions=6 -Wl,-plugin-opt=-align-all-functions=6; do if printf 'int main(void) { return 0; }\n' | $(CC) -x c - -flto $$flag -o /dev/null >/dev/null 2>&1; then echo $$flag; break; fi; done)
+else
+align_ldflags := $(align_cflags)
+endif
+endif
+
+# The optimized builds carry debug information, so a profile of the binary
+# that runs attributes its time to source lines and to the functions inlined
+# there. It costs build time, not run time: it changes the code only a little
+# (clang's registers and instruction order in a few functions, GCC 13's LTO
+# partitioning) and not its speed. DWARF 4, since the binutils of older Linux
+# distributions, which perf reads source lines through, cannot read DWARF 5.
+cflags.no_pgo_release := -O3 -flto -march=native -DNDEBUG -Wall -Wno-trigraphs -gdwarf-4 $(align_cflags)
+cflags.portable_release := -O3 -flto -march=$(PORTABLE_MARCH) -DNDEBUG -Wall -Wno-trigraphs $(align_cflags)
+cflags.test_portable_release := -O3 -flto -march=$(PORTABLE_MARCH) -Wall -Wno-trigraphs $(align_cflags)
 # Test-specific flags: like no_pgo_release but without DNDEBUG (asserts always enabled in tests)
-cflags.test_no_pgo_release := -O3 -flto -march=native -Wall -Wno-trigraphs
+cflags.test_no_pgo_release := -O3 -flto -march=native -Wall -Wno-trigraphs -gdwarf-4 $(align_cflags)
 # no_pgo_release plus BAI scheduling instrumentation (src/ent/bai_sched_stats.h),
 # read by the on-demand baisched test. Production builds compile it out.
 cflags.bai_stats := $(cflags.no_pgo_release) -DBAI_SCHED_STATS
@@ -202,21 +254,21 @@ pgo_use_flags := -fprofile-instr-use=$(PGO_PROFILE) \
 cflags.pgo_use := $(cflags.no_pgo_release) $(pgo_use_flags)
 cflags.test_pgo_use := $(cflags.test_no_pgo_release) $(pgo_use_flags)
 # Shared library flavor: release optimization plus -fPIC, no sanitizers
-cflags.lib := -O3 -flto -march=native -DNDEBUG -Wall -Wno-trigraphs -fPIC
-cflags.profile := -O3 -g -march=native -DNDEBUG -Wall -Wno-trigraphs -fno-omit-frame-pointer -mllvm -inline-threshold=0
+cflags.lib := -O3 -flto -march=native -DNDEBUG -Wall -Wno-trigraphs -fPIC $(align_cflags)
 lflags.cov := --coverage
 
 ldflags.dev := -pthread $(FSAN_ARG)
 ldflags.sanitize := -pthread $(FSAN_ARG)
-ldflags.lib := -pthread
+ldflags.lib := -pthread $(align_ldflags)
 ldflags.thread := -pthread -fsanitize=thread
 ldflags.vlg := -pthread
-ldflags.no_pgo_release := -pthread -flto
-ldflags.portable_release := -pthread -flto
-ldflags.bai_stats := -pthread -flto
-ldflags.pgo_generate := -pthread -flto -fprofile-instr-generate $(PGO_LDFLAGS)
-ldflags.pgo_use := -pthread -flto -fprofile-instr-use=$(PGO_PROFILE) $(PGO_LDFLAGS)
-ldflags.profile := -pthread
+# GCC compiles an LTO build's code at the link, so the link takes the debug
+# flag too.
+ldflags.no_pgo_release := -pthread -flto -gdwarf-4 $(align_ldflags)
+ldflags.portable_release := -pthread -flto $(align_ldflags)
+ldflags.bai_stats := -pthread -flto -gdwarf-4 $(align_ldflags)
+ldflags.pgo_generate := -pthread -flto -gdwarf-4 -fprofile-instr-generate $(PGO_LDFLAGS) $(align_ldflags)
+ldflags.pgo_use := -pthread -flto -gdwarf-4 -fprofile-instr-use=$(PGO_PROFILE) $(PGO_LDFLAGS) $(align_ldflags)
 ldflags.cov := -pthread
 # The test builds link as the builds they test: without -pthread, a test that
 # starts a thread itself failed to link under test_no_pgo_release.
@@ -256,8 +308,26 @@ endif
 
 
 LFLAGS := ${lflags.${BUILD}}
-LDFLAGS  := ${ldflags.${BUILD}}
+# Expanded at each link, for the macOS LTO object path below.
+LDFLAGS  = ${ldflags.${BUILD}}
 LDLIBS   := -lm
+
+# On macOS the debug information stays in the object files, which the
+# executable points to. Clang's LTO link compiles its code into a temporary
+# object and deletes it afterwards, and the debug information of that code with
+# it, so keep that object beside the build's others, one per linked file. GCC
+# runs its own LTO, and its link driver misreads the option.
+ifndef WINDOWS
+ifeq ($(shell uname -s),Darwin)
+ifneq ($(filter -flto,${ldflags.${BUILD}}),)
+ifneq ($(filter -gdwarf-4,${ldflags.${BUILD}}),)
+ifneq ($(findstring clang,$(CC_VERSION_TEXT)),)
+LDFLAGS += -Wl,-object_path_lto,$(OBJ_DIR)/$(@F).lto.o
+endif
+endif
+endif
+endif
+endif
 
 # The HTTP compat layer resolves libcurl with dlopen at runtime rather than
 # linking it, so a machine without libcurl still runs every offline command.

@@ -99,6 +99,7 @@
 #include "wmp_maker_test.h"
 #include "wmp_move_gen_test.h"
 #include "wmp_test.h"
+#include "woadwage_test.h"
 #include "word_info_table_test.h"
 #include "word_map_embedding_test.h"
 #include "word_plus_floater_maker_test.h"
@@ -177,6 +178,7 @@ static TestEntry test_table[] = {
     {"apsolvers", test_autoplay_solvers},
     {"contribute", test_contribute},
     {"words", test_words},
+    {"woadwage", test_woadwage},
     {"wordprune", test_word_prune},
     {"kwgmaker", test_kwg_maker},
     {"cgp", test_cgp},

@@ -2,6 +2,7 @@
 
 #include "../src/def/equity_defs.h"
 #include "../src/def/game_defs.h"
+#include "../src/def/letter_distribution_defs.h"
 #include "../src/def/move_defs.h"
 #include "../src/ent/bag.h"
 #include "../src/ent/board.h"
@@ -234,6 +235,11 @@ enum {
   BEST_PLAY_MIN_CHECKS = 500,
   BEST_PLAY_MIN_DEEPEST = 4,
   BEST_PLAY_SIBLINGS = 3,
+  // test_tiles_played_in_lanes_random_paths: its positions, and how often at
+  // least a move's changed squares had to reveal a tile type over its checks.
+  TILES_PLAYED_NUM_POSITIONS = 3,
+  TILES_PLAYED_PATHS_PER_POSITION = 400,
+  TILES_PLAYED_MIN_REVEALED = 20,
   BEST_PLAY_MOVE_LIST_CAPACITY = 100000,
 };
 
@@ -492,6 +498,160 @@ static void test_best_play_random_paths(void) {
   config_destroy(config);
 }
 
+// The rack tile types side `side` plays on the current board, by a
+// MOVE_RECORD_TILES_PLAYED generation over the whole board, or with
+// `lane_hits` non-NULL over the anchors of `lanes` reaching those squares.
+static uint64_t side_tiles_played(Game *game, MoveList *move_list, int side,
+                                  uint64_t lanes, const uint32_t *lane_hits) {
+  const int on_turn = game_get_player_on_turn_index(game);
+  game_set_player_on_turn_index(game, side);
+  uint64_t tiles_played = 0;
+  const MoveGenArgs args = {
+      .game = game,
+      .move_list = move_list,
+      .move_record_type = MOVE_RECORD_TILES_PLAYED,
+      .move_sort_type = MOVE_SORT_SCORE,
+      .target_equity = EQUITY_MAX_VALUE,
+      .tiles_played_bv = &tiles_played,
+  };
+  if (lane_hits == NULL) {
+    generate_moves(&args);
+  } else {
+    generate_tiles_played_in_lanes(&args, lanes, lane_hits);
+  }
+  game_set_player_on_turn_index(game, on_turn);
+  return tiles_played;
+}
+
+// The rack tile types side `side` can play as a single tile (a designated
+// blank counts as the blank).
+static uint64_t side_single_tile_types(Game *game, MoveList *move_list,
+                                       int side) {
+  const int on_turn = game_get_player_on_turn_index(game);
+  game_set_player_on_turn_index(game, side);
+  const MoveGenArgs args = {
+      .game = game,
+      .move_list = move_list,
+      .move_record_type = MOVE_RECORD_ALL_SMALL,
+      .move_sort_type = MOVE_SORT_SCORE,
+      .target_equity = EQUITY_MAX_VALUE,
+  };
+  generate_moves(&args);
+  uint64_t tile_types = 0;
+  for (int move_idx = 0; move_idx < move_list->count; move_idx++) {
+    const SmallMove *small_move = move_list->small_moves[move_idx];
+    if (small_move_is_pass(small_move) ||
+        small_move_get_tiles_played(small_move) != 1) {
+      continue;
+    }
+    tile_types |= (uint64_t)1 << (small_move_tile_is_blank(small_move, 0)
+                                      ? BLANK_MACHINE_LETTER
+                                      : small_move_get_tile(small_move, 0));
+  }
+  game_set_player_on_turn_index(game, on_turn);
+  return tile_types;
+}
+
+// generate_tiles_played_in_lanes along random paths. Over every lane with
+// every square changed it is the whole-board generation. Over the last move's
+// changed squares (path_move_lists_last_move_hits), for each side: every tile
+// type it reports is playable, and a tile type that had no play before the
+// move but has one after has a single-tile play or one it reports -- what the
+// endgame's stuck-tile check relies on.
+static void test_tiles_played_in_lanes_random_paths(void) {
+  // Endgames where the opponent holds tiles with no play.
+  const char *positions[TILES_PLAYED_NUM_POSITIONS] = {
+      ("P1QAT2E7/OPA3FUTZ5/GUT4OI6/OR1C3IN6/1I1O2A1G6/1R1T1KA1L6/1I1I1EH1E1W4/"
+       "AS1JIBERS1H4/N1DA1AD3I4/N1R2B4R4/EGOTISM3L4/A1WO5NYM3/l1N2ELUDE5/"
+       "E1DEOXY2VULN2/d5EVOE5 AEIRST/CF 390/443 0"),
+      ("D6N5F1/I4J1O5ON/V1ENDARCH4XI/AGLY1PIE6N/G3WEBBY5E/AD4WO6T/TO4o7e/"
+       "ER4RIZ2UVAE/6TOEIER2N/1COUGHS1POA4/2INIA1US6/MULIE5ATOKE/I3DEAREST4/"
+       "L14/F14 AMRST/LQ 306/435 0"),
+      ("STEREOED3PAUA/5FlOATIER2/2G3LOX6/2L4C3NU2/2ID1TEENAGER2/2BOOH3Z1TIS1/"
+       "3W1AJI1Y1TAP1/FAIN1WOO1G2LI1/L2I5Y3V1/U2E11/R2SH10/R2TO10/I3B10/"
+       "E1DEsKMEN6/S4IURE6 AADMNV/CNQ 435/440 0"),
+  };
+  Config *config =
+      config_create_or_die("set -lex CSW21 -wmp false -rit false -wit false");
+  Game *game = config_game_create(config);
+  MoveList *move_list = move_list_create_small(100000);
+  const MoveGenArgs args = {
+      .game = game,
+      .move_list = move_list,
+      .move_record_type = MOVE_RECORD_ALL_SMALL,
+      .move_sort_type = MOVE_SORT_SCORE,
+      .target_equity = EQUITY_MAX_VALUE,
+  };
+  uint32_t every_square[PATH_MOVE_LISTS_NUM_LANES];
+  for (int lane = 0; lane < PATH_MOVE_LISTS_NUM_LANES; lane++) {
+    every_square[lane] = ~(uint32_t)0;
+  }
+  const uint64_t every_lane =
+      PATH_MOVE_LISTS_NUM_LANES >= 64
+          ? ~(uint64_t)0
+          : ((uint64_t)1 << PATH_MOVE_LISTS_NUM_LANES) - 1;
+  PathMoveLists *lists = path_move_lists_create();
+  uint64_t rng = 0x2545F4914F6CDD1DULL;
+  int num_revealed = 0;
+  for (int position_idx = 0; position_idx < TILES_PLAYED_NUM_POSITIONS;
+       position_idx++) {
+    load_cgp_or_die(game, positions[position_idx]);
+    bag_set_to_tiles(game_get_bag(game), NULL, 0);
+    Game *snapshot = game_duplicate(game);
+    for (int path_idx = 0; path_idx < TILES_PLAYED_PATHS_PER_POSITION;
+         path_idx++) {
+      path_move_lists_reset(lists);
+      game_set_player_on_turn_index(game, 0);
+      MoveUndo undos[BEST_PLAY_MAX_PATH_LENGTH];
+      int length = 0;
+      while (length < BEST_PLAY_MAX_PATH_LENGTH &&
+             game_get_game_end_reason(game) == GAME_END_REASON_NONE) {
+        uint64_t before[2];
+        for (int side = 0; side < 2; side++) {
+          before[side] = side_tiles_played(game, move_list, side, 0, NULL);
+        }
+        generate_moves(&args);
+        const int play_count = move_list->count - 1;
+        int pick = play_count;
+        if (play_count > 0 && next_random(&rng) % BEST_PLAY_PASS_ONE_IN != 0) {
+          pick = (int)(next_random(&rng) % (uint64_t)play_count);
+        }
+        const SmallMove chosen = *move_list->small_moves[pick];
+        make_path_move(game, lists, move_list, &chosen, &undos[length]);
+        length++;
+        for (int side = 0; side < 2; side++) {
+          const uint64_t after =
+              side_tiles_played(game, move_list, side, 0, NULL);
+          assert(side_tiles_played(game, move_list, side, every_lane,
+                                   every_square) == after);
+          const uint64_t in_lanes = side_tiles_played(
+              game, move_list, side, path_move_lists_last_move_lanes(lists),
+              path_move_lists_last_move_hits(lists));
+          assert((in_lanes & ~after) == 0);
+          const uint64_t revealed = after & ~before[side];
+          const uint64_t single = side_single_tile_types(game, move_list, side);
+          assert((revealed & ~(in_lanes | single)) == 0);
+          if ((revealed & ~single) != 0) {
+            num_revealed++;
+          }
+        }
+      }
+      while (length > 0) {
+        length--;
+        unplay_move_incremental(game, &undos[length]);
+        path_move_lists_pop(lists);
+      }
+      assert_games_are_equal(game, snapshot, true);
+    }
+    game_destroy(snapshot);
+  }
+  assert(num_revealed >= TILES_PLAYED_MIN_REVEALED);
+  path_move_lists_destroy(lists);
+  small_move_list_destroy(move_list);
+  game_destroy(game);
+  config_destroy(config);
+}
+
 // A pass-only path never regenerates; best_play must report no play when the
 // side has none, and agree with moves_at when it does.
 static void test_best_play_pass_path(int empty_side) {
@@ -552,4 +712,5 @@ void test_path_move_lists(void) {
   test_best_play_pass_path(1);
   test_best_play_pass_path(0);
   test_best_play_random_paths();
+  test_tiles_played_in_lanes_random_paths();
 }

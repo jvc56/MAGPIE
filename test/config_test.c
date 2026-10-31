@@ -3525,8 +3525,7 @@ static int config_endgame_value(Config *config) {
 // The endgame TT keeps a solve's values for the next solve, under keys that
 // hash only the board, the racks and the player on turn. After set -lex, an
 // NWL23 solve of this position read back CSW21's values and returned 51, where
-// NWL23's value is 37. The other way round, CSW21 returned 38 for 42. Every
-// word on this board is valid in both lexica.
+// NWL23's value is 43. Every word on this board is valid in both lexica.
 void test_config_lexicon_change_clears_endgame_tt(void) {
   Config *config = config_create_or_die("set -lex CSW21 -eplies 2 -threads 1");
   assert_config_exec_status(
@@ -3536,11 +3535,34 @@ void test_config_lexicon_change_clears_endgame_tt(void) {
       "A4UPO2EX1NA/6OR7/5WO8/4IRKSOmE1T2/5I1QUINOA2/5N1U4Y2/5G1A7/"
       "GRICES1DELISTED ADDEJRT/FNV 536/474 0",
       ERROR_STATUS_SUCCESS);
-  assert(config_endgame_value(config) == 42);
+  assert(config_endgame_value(config) == 47);
   assert_config_exec_status(config, "set -lex NWL23", ERROR_STATUS_SUCCESS);
-  assert(config_endgame_value(config) == 37);
+  assert(config_endgame_value(config) == 43);
   assert_config_exec_status(config, "set -lex CSW21", ERROR_STATUS_SUCCESS);
-  assert(config_endgame_value(config) == 42);
+  assert(config_endgame_value(config) == 47);
+  config_destroy(config);
+}
+
+// The bingo bonus is part of a play's score, and the endgame TT's keys don't
+// hash it. The player on turn here has only J and must pass, so the opponent's
+// bingo, O8 FEELING(S), comes one move below the root, inside the entries a
+// solve stores. After a solve with no bingo bonus, a solve with a bonus of 50
+// read those entries back and returned -82, where its value is -105.
+void test_config_bingo_bonus_change_clears_endgame_tt(void) {
+  Config *config =
+      config_create_or_die("set -lex NWL23 -eplies 2 -threads 1 -bb 0");
+  assert_config_exec_status(
+      config,
+      "cgp "
+      "2GRANTED5L/1XI5ABBOTCY/6FEG2WO1A/6EUOUAE2M/7O2D4/6OI2V1I2/1AN2MO3O1N2/"
+      "CH1QUIRT1DuDS2/HIOI2I3T1T2/3NAPE3R1A2/4UR4Y1R2/3WAI1Z7/4SLEEVEEn3/"
+      "5L1P7/7STARKENS J/EEFGILN 498/389 0",
+      ERROR_STATUS_SUCCESS);
+  assert(config_endgame_value(config) == -82);
+  assert_config_exec_status(config, "set -bb 50", ERROR_STATUS_SUCCESS);
+  assert(config_endgame_value(config) == -105);
+  assert_config_exec_status(config, "set -bb 0", ERROR_STATUS_SUCCESS);
+  assert(config_endgame_value(config) == -82);
   config_destroy(config);
 }
 
@@ -3846,6 +3868,7 @@ void test_config(void) {
   test_config_continue_on_coldstart();
   test_config_lexicon_change_rebuilds_games();
   test_config_lexicon_change_clears_endgame_tt();
+  test_config_bingo_bonus_change_clears_endgame_tt();
   test_config_load_replacing_lexical_data();
   test_config_game_event_results_follow_navigation();
   test_config_sim_with_inference_results_saved_to_game_event();

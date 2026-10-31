@@ -83,6 +83,7 @@
 #include "help_table.h"
 #include "inference.h"
 #include "move_gen.h"
+#include "move_gen_base.h"
 #include "peg.h"
 #include "play_chooser.h"
 #include "rack_draw.h"
@@ -215,6 +216,8 @@ struct Config {
   GameHistory *game_history_backup;
   MoveList *move_list;
   EndgameCtx *endgame_ctx;
+  // The bingo bonus the entries in endgame_ctx's TT were found under.
+  int endgame_tt_bingo_bonus;
   SimResults *sim_results;
   InferenceResults *inference_results;
   EndgameResults *endgame_results;
@@ -2132,7 +2135,10 @@ static void help_entry_fill(const Config *config, int token,
       usages[0] = "<game_variant>";
       examples[0] = "classic";
       examples[1] = "wordsmog";
-      text = "Specifies the game variant.";
+      examples[2] = "woadwage";
+      text = "Specifies the game variant: classic; wordsmog, where a word "
+             "is played as any anagram of a word; or woadwage, where a word "
+             "may also be two words run together.";
       break;
     case ARG_TOKEN_LETTER_DISTRIBUTION:
       usages[0] = "<letter_distribution>";
@@ -4302,6 +4308,17 @@ char *status_rack_and_gen_and_sim(Config *config) { return status_sim(config); }
 
 // Endgame
 
+// The endgame TT outlives a solve, so the next solve can reuse what it found.
+// Its keys hash the board, the racks and the player on turn, and nothing of
+// the words, tile values, board layout, variant or bingo bonus the values were
+// found under. After any of those change, a solve would read back values that
+// no longer hold, so the table is cleared.
+static void config_clear_endgame_tt(const Config *config) {
+  if (config->endgame_ctx) {
+    endgame_ctx_clear_transposition_table(config->endgame_ctx);
+  }
+}
+
 void config_fill_endgame_args(Config *config, EndgameArgs *endgame_args) {
   // -etlim, where 0 is unlimited, bounds the endgame command and analyze's
   // endgame turns alike.
@@ -4312,7 +4329,7 @@ void config_fill_endgame_args(Config *config, EndgameArgs *endgame_args) {
       /*per_ply_callback=*/NULL, /*per_ply_callback_data=*/NULL,
       /*before_search_callback=*/NULL, /*before_search_callback_data=*/NULL,
       /*per_root_move_callback=*/NULL, /*per_root_move_callback_data=*/NULL,
-      DUAL_LEXICON_MODE_IGNORANT, /*forced_pass_bypass=*/false,
+      DUAL_LEXICON_MODE_IGNORANT, /*forced_pass_bypass=*/true,
       /*incremental_movegen=*/true,
       /*disable_best_reply_shortcuts=*/!config->endgame_best_reply_shortcuts,
       /*enable_pv_display=*/true,
@@ -4336,6 +4353,14 @@ static void impl_endgame_with_pos_args(Config *config, const char *move_text,
     return;
   }
   config_init_game(config);
+  // A bingo scored below an entry is part of its value. The bonus is set by
+  // -bb and again by every contribute task, so it is checked here, before a
+  // solve reads the table, rather than wherever it is set.
+  const int bingo_bonus = game_get_bingo_bonus(config->game);
+  if (bingo_bonus != config->endgame_tt_bingo_bonus) {
+    config_clear_endgame_tt(config);
+    config->endgame_tt_bingo_bonus = bingo_bonus;
+  }
   EndgameArgs args;
   config_fill_endgame_args(config, &args);
   ValidatedMoves *actual = NULL;
@@ -9115,17 +9140,6 @@ static void config_load_lexicon_dependent_data_internal(
     }
   }
   free(updated_ld_name);
-}
-
-// The endgame TT outlives a solve, so the next solve can reuse what it found.
-// Its keys hash the board, the racks and the player on turn, and nothing of
-// the words, tile values, board layout or variant the values were found
-// under. After any of those change, a solve would read back values that no
-// longer hold, so the table is cleared.
-static void config_clear_endgame_tt(const Config *config) {
-  if (config->endgame_ctx) {
-    endgame_ctx_clear_transposition_table(config->endgame_ctx);
-  }
 }
 
 // The lexical data each player borrows. Data reloaded under a new name can
@@ -15897,6 +15911,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->game_history = game_history_create();
   config->game_history_backup = NULL;
   config->endgame_ctx = NULL;
+  config->endgame_tt_bingo_bonus = config->bingo_bonus;
   config->sim_results = sim_results_create(config->cutoff);
   config->inference_results = inference_results_create(NULL);
   config->endgame_results = endgame_results_create();

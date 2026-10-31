@@ -2,6 +2,7 @@
 
 #include "../def/board_defs.h"
 #include "../def/equity_defs.h"
+#include "../def/game_defs.h"
 #include "../def/game_history_defs.h"
 #include "../def/letter_distribution_defs.h"
 #include "../def/pat_defs.h"
@@ -593,8 +594,10 @@ static void pat_eval_context_load_units(
   }
 }
 
-void pat_eval_context_set_kwg(PATEvalContext *pat_eval_ctx, const KWG *kwg) {
+void pat_eval_context_set_kwg(PATEvalContext *pat_eval_ctx, const KWG *kwg,
+                              game_variant_t variant) {
   pat_eval_ctx->kwg = kwg;
+  pat_eval_ctx->woadwage = variant == GAME_VARIANT_WOADWAGE;
 }
 
 void pat_eval_context_load(PATEvalContext *pat_eval_ctx,
@@ -853,6 +856,7 @@ static Equity pat_eval_move_penalty_scaled(const PATEvalContext *pat_eval_ctx,
       .lanes = pat_eval_ctx->lanes,
       .run_kwg =
           pat_eval_ctx->weights->exact_fresh_runs ? pat_eval_ctx->kwg : NULL,
+      .woadwage = pat_eval_ctx->woadwage,
   };
   // Rescan only the units the move can reach (geometrically, or through
   // its own leave) and combine the whole set: the units in neither set

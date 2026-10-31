@@ -10,18 +10,26 @@
 #include "../util/string_util.h"
 #include "bag.h"
 #include "board.h"
+#include "cross_set_cache.h"
 #include "kwg.h"
 #include "kwg_alpha.h"
+#include "kwg_woadwage.h"
 #include "letter_distribution.h"
+#include "move_undo.h"
 #include "player.h"
 #include "players_data.h"
 #include "rack.h"
 #include "word_info_table.h"
+#include <assert.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <string.h>
 
 typedef struct MinimalGameBackup {
   Board *board;
+  // Whether this backup recorded the board's changes in the game's rollout
+  // board undo rather than copying the board.
+  bool board_recorded;
   Bag *bag;
   Rack *p0rack;
   Rack *p1rack;
@@ -62,12 +70,30 @@ struct Game {
   // instead of the player's full KWG. Not owned by Game.
   const KWG *override_kwgs[2];
   dual_lexicon_mode_t dual_lexicon_mode;
-  // Backups
+  // Backups. Each simulation backup is allocated the first time a backup
+  // reaches its depth: sims back up only the candidate move, and many games
+  // that enable them never back up at all.
   MinimalGameBackup *sim_game_backups[MAX_SEARCH_DEPTH];
+  // Whether simulation backups were ever enabled, so that unplays pop them
+  // rather than the GCG backup.
+  bool sim_backups_enabled;
   int backup_cursor;
   MinimalGameBackup *gcg_game_backup;
   backup_mode_t backup_mode;
+  // The record of the board squares changed since an open simulation backup,
+  // when the game records them (see game_enable_rollout_board_undo), and
+  // whether such a backup is open.
+  MoveUndo *rollout_board_undo;
+  bool rollout_board_undo_open;
+  // Classic cross sets by the words beside the empty square, or NULL. Not
+  // owned by the game; see game_set_cross_set_cache.
+  CrossSetCache *cross_set_cache;
 };
+
+// The odd multiplier of game_cross_set_cache_key's steps, and the symbol it
+// takes for the empty square, above every letter's (letter + 1).
+static const uint64_t CROSS_SET_KEY_MULTIPLIER = 0x9E3779B97F4A7C15ULL;
+static const uint64_t CROSS_SET_KEY_SEPARATOR = 0x101;
 
 game_variant_t game_get_variant(const Game *game) { return game->variant; }
 
@@ -79,6 +105,8 @@ game_variant_t get_game_variant_type_from_name(const char *variant_name) {
     game_variant = GAME_VARIANT_CLASSIC;
   } else if (strings_iequal(variant_name, GAME_VARIANT_WORDSMOG_NAME)) {
     game_variant = GAME_VARIANT_WORDSMOG;
+  } else if (strings_iequal(variant_name, GAME_VARIANT_WOADWAGE_NAME)) {
+    game_variant = GAME_VARIANT_WOADWAGE;
   }
   return game_variant;
 }
@@ -335,6 +363,180 @@ static inline void game_gen_alpha_cross_set(const Game *game, int row, int col,
   board_set_cross_score(board, row, col, dir, cross_set_index, score);
 }
 
+// Woadwage's cross set at (row, col): the letters that make a woadwage word
+// with the tiles beside the square. Woadwage move generation reads no
+// extension sets, so the square's own are left trivial for the shadow, which
+// does read them, in case classic ones were computed for this board.
+static inline void game_gen_woadwage_cross_set(const Game *game, int row,
+                                               int col, int dir,
+                                               int cross_set_index) {
+  if (!board_is_position_in_bounds(row, col)) {
+    return;
+  }
+
+  Board *board = game_get_board(game);
+  const int through_dir = board_toggle_dir(dir);
+  board_set_left_extension_set(board, row, col, through_dir, cross_set_index,
+                               TRIVIAL_CROSS_SET);
+  board_set_right_extension_set(board, row, col, through_dir, cross_set_index,
+                                TRIVIAL_CROSS_SET);
+
+  if (board_is_nonempty_or_bricked(board, row, col)) {
+    board_set_cross_set(board, row, col, dir, cross_set_index, 0);
+    board_set_cross_score(board, row, col, dir, cross_set_index, 0);
+    return;
+  }
+  if (board_are_left_and_right_empty(board, row, col)) {
+    board_set_cross_set(board, row, col, dir, cross_set_index,
+                        TRIVIAL_CROSS_SET);
+    board_set_cross_score(board, row, col, dir, cross_set_index, 0);
+    return;
+  }
+
+  const LetterDistribution *ld = game_get_ld(game);
+  const int left_col =
+      board_get_word_edge(board, row, col - 1, WORD_DIRECTION_LEFT);
+  const int right_col =
+      board_get_word_edge(board, row, col + 1, WORD_DIRECTION_RIGHT);
+  MachineLetter before[BOARD_DIM] = {0};
+  MachineLetter after[BOARD_DIM] = {0};
+  const int before_length = col - left_col;
+  const int after_length = right_col - col;
+  for (int letter_idx = 0; letter_idx < before_length; letter_idx++) {
+    before[letter_idx] = get_unblanked_machine_letter(
+        board_get_letter(board, row, left_col + letter_idx));
+  }
+  for (int letter_idx = 0; letter_idx < after_length; letter_idx++) {
+    after[letter_idx] = get_unblanked_machine_letter(
+        board_get_letter(board, row, col + 1 + letter_idx));
+  }
+  Equity score = 0;
+  if (before_length > 0) {
+    score += traverse_backwards_for_score(board, ld, row, col - 1);
+  }
+  if (after_length > 0) {
+    score += traverse_backwards_for_score(board, ld, row, right_col);
+  }
+
+  const KWG *kwg = get_kwg_for_cross_set(game, cross_set_index);
+  board_set_cross_set_with_blank(
+      board, row, col, dir, cross_set_index,
+      kwg_compute_woadwage_cross_set(kwg, before, before_length, after,
+                                     after_length));
+  board_set_cross_score(board, row, col, dir, cross_set_index, score);
+}
+
+// The values game_gen_classic_cross_set writes for the empty square at
+// (row, col) between the words that end at left_col and right_col, at least
+// one of them nonempty, read from the lexicon.
+static void game_compute_classic_cross_set(const KWG *kwg,
+                                           const LetterDistribution *ld,
+                                           const Board *board, int row, int col,
+                                           int left_col, int right_col,
+                                           CrossSetValues *values) {
+  const uint32_t kwg_root = kwg_get_root_node_index(kwg);
+  Equity score = 0;
+  uint64_t front_hook_set = 0;
+  uint64_t back_hook_set = 0;
+  uint32_t right_lnode_index = 0;
+  bool left_lpath_is_valid = false;
+  bool right_lpath_is_valid = false;
+  uint64_t leftside_leftx_set = 0;
+  uint64_t leftside_rightx_set = 0;
+  uint64_t rightside_leftx_set = 0;
+  uint64_t rightside_rightx_set = 0;
+
+  const bool nonempty_to_left = left_col < col;
+  if (nonempty_to_left) {
+    const uint32_t lnode_index =
+        traverse_backwards(kwg, board, row, col - 1, kwg_root, false, 0);
+    left_lpath_is_valid = lnode_index != 0;
+    score += traverse_backwards_for_score(board, ld, row, col - 1);
+    if (left_lpath_is_valid) {
+      kwg_get_letter_sets(kwg, lnode_index, &leftside_leftx_set);
+      const uint32_t s_index =
+          kwg_get_next_node_index(kwg, lnode_index, SEPARATION_MACHINE_LETTER);
+      if (s_index != 0) {
+        back_hook_set = kwg_get_letter_sets(kwg, s_index, &leftside_rightx_set);
+      }
+    }
+  }
+
+  const bool nonempty_to_right = right_col > col;
+  if (nonempty_to_right) {
+    right_lnode_index =
+        traverse_backwards(kwg, board, row, right_col, kwg_root, false, 0);
+    right_lpath_is_valid = right_lnode_index != 0;
+    score += traverse_backwards_for_score(board, ld, row, right_col);
+    if (right_lpath_is_valid) {
+      front_hook_set =
+          kwg_get_letter_sets(kwg, right_lnode_index, &rightside_leftx_set);
+      const uint32_t s_index = kwg_get_next_node_index(
+          kwg, right_lnode_index, SEPARATION_MACHINE_LETTER);
+      if (s_index != 0) {
+        kwg_get_letter_sets(kwg, s_index, &rightside_rightx_set);
+      }
+    }
+  }
+
+  uint64_t cross_set = 0;
+  if (nonempty_to_left && nonempty_to_right) {
+    if (left_lpath_is_valid && right_lpath_is_valid) {
+      // Visit only the arcs whose tiles are right extensions from the left
+      // side of the empty square.
+      const uint64_t list_tiles = kwg_get_sibling_tiles(kwg)[right_lnode_index];
+      for (uint64_t remaining = list_tiles & leftside_rightx_set;
+           remaining != 0; remaining &= remaining - 1) {
+        const uint64_t tile_bit = remaining & (~remaining + 1);
+        const uint32_t node =
+            kwg_list_node(kwg, right_lnode_index, list_tiles, tile_bit);
+        if (traverse_backwards(kwg, board, row, col - 1,
+                               kwg_node_arc_index_prefetch(node, kwg), true,
+                               left_col) != 0) {
+          cross_set |= tile_bit;
+        }
+      }
+    }
+  } else if (nonempty_to_left) {
+    cross_set = back_hook_set;
+  } else {
+    cross_set = front_hook_set;
+  }
+  values->cross_set = cross_set;
+  values->leftside_leftx_set = leftside_leftx_set;
+  values->leftside_rightx_set = leftside_rightx_set;
+  values->rightside_leftx_set = rightside_leftx_set;
+  values->rightside_rightx_set = rightside_rightx_set;
+  values->score = score;
+}
+
+// The key of the words beside the empty square at (row, col), from left_col
+// to right_col, with the lexicon and the cache's salt. Each letter, with its
+// blank flag, goes in by a multiply-add, a bijection of the hash so far, and a
+// separator marks the empty square, so words that differ in a letter or a
+// length always differ before the finalizer. A key is never 0, which marks
+// an empty entry.
+static uint64_t game_cross_set_cache_key(const CrossSetCache *cache,
+                                         const KWG *kwg, const Board *board,
+                                         int row, int col, int left_col,
+                                         int right_col) {
+  uint64_t key =
+      cache->salt * CROSS_SET_KEY_MULTIPLIER + (uint64_t)(uintptr_t)kwg;
+  for (int word_col = left_col; word_col <= right_col; word_col++) {
+    const uint64_t symbol =
+        word_col == col ? CROSS_SET_KEY_SEPARATOR
+                        : (uint64_t)board_get_letter(board, row, word_col) + 1;
+    key = key * CROSS_SET_KEY_MULTIPLIER + symbol;
+  }
+  // MurmurHash3's 64-bit finalizer.
+  key ^= key >> 33;
+  key *= UINT64_C(0xFF51AFD7ED558CCD);
+  key ^= key >> 33;
+  key *= UINT64_C(0xC4CEB9FE1A85EC53);
+  key ^= key >> 33;
+  return key | 1;
+}
+
 static inline void game_gen_classic_cross_set(const Game *game, int row,
                                               int col, int dir,
                                               int cross_set_index) {
@@ -357,7 +559,6 @@ static inline void game_gen_classic_cross_set(const Game *game, int row,
   }
 
   const KWG *kwg = get_kwg_for_cross_set(game, cross_set_index);
-  const uint32_t kwg_root = kwg_get_root_node_index(kwg);
   const LetterDistribution *ld = game_get_ld(game);
 
   const int through_dir = board_toggle_dir(dir);
@@ -381,108 +582,79 @@ static inline void game_gen_classic_cross_set(const Game *game, int row,
                            cross_set_index);
     }
   }
-  Equity score = 0;
-  uint64_t front_hook_set = 0;
-  uint64_t back_hook_set = 0;
-  uint32_t right_lnode_index = 0;
-  bool left_lpath_is_valid = false;
-  bool right_lpath_is_valid = false;
-  uint64_t leftside_rightx_set = 0;
 
-  const bool nonempty_to_left = left_col < col;
-  if (nonempty_to_left) {
-    uint64_t leftside_leftx_set = 0;
-    const uint32_t lnode_index =
-        traverse_backwards(kwg, board, row, col - 1, kwg_root, false, 0);
-    left_lpath_is_valid = lnode_index != 0;
-    score += traverse_backwards_for_score(board, ld, row, col - 1);
-    if (left_lpath_is_valid) {
-      kwg_get_letter_sets(kwg, lnode_index, &leftside_leftx_set);
-      const uint32_t s_index =
-          kwg_get_next_node_index(kwg, lnode_index, SEPARATION_MACHINE_LETTER);
-      if (s_index != 0) {
-        back_hook_set = kwg_get_letter_sets(kwg, s_index, &leftside_rightx_set);
-      }
+  // The values depend only on the words beside the square and the lexicon,
+  // so the game's cache, if it has one, answers for words it has seen.
+  CrossSetValues values;
+  const CrossSetCache *cache = game->cross_set_cache;
+  if (cache != NULL) {
+    const uint64_t key = game_cross_set_cache_key(cache, kwg, board, row, col,
+                                                  left_col, right_col);
+    CrossSetCacheEntry *entry = cross_set_cache_entry(cache, key);
+    if (entry->key == key) {
+      values = entry->values;
+#ifndef NDEBUG
+      CrossSetValues computed;
+      game_compute_classic_cross_set(kwg, ld, board, row, col, left_col,
+                                     right_col, &computed);
+      assert(computed.cross_set == values.cross_set &&
+             computed.leftside_leftx_set == values.leftside_leftx_set &&
+             computed.leftside_rightx_set == values.leftside_rightx_set &&
+             computed.rightside_leftx_set == values.rightside_leftx_set &&
+             computed.rightside_rightx_set == values.rightside_rightx_set &&
+             computed.score == values.score);
+#endif
+    } else {
+      game_compute_classic_cross_set(kwg, ld, board, row, col, left_col,
+                                     right_col, &values);
+      entry->key = key;
+      entry->values = values;
     }
-    board_set_left_extension_set_with_blank(
-        board, row, col - 1, through_dir, cross_set_index, leftside_leftx_set);
-    board_set_right_extension_set_with_blank(
-        board, row, col - 1, through_dir, cross_set_index, leftside_rightx_set);
+  } else {
+    game_compute_classic_cross_set(kwg, ld, board, row, col, left_col,
+                                   right_col, &values);
+  }
+
+  if (left_col < col) {
+    board_set_left_extension_set_with_blank(board, row, col - 1, through_dir,
+                                            cross_set_index,
+                                            values.leftside_leftx_set);
+    board_set_right_extension_set_with_blank(board, row, col - 1, through_dir,
+                                             cross_set_index,
+                                             values.leftside_rightx_set);
     // Mark the empty square left of the leftside played tiles with the leftx
     // set for this sequence of tiles. Move generation can use this to avoid
     // trying to play through tiles we can prove to be dead ends.
     if (left_col > 0) {
       board_set_left_extension_set_with_blank(board, row, left_col - 1,
                                               through_dir, cross_set_index,
-                                              leftside_leftx_set);
+                                              values.leftside_leftx_set);
     }
   }
-
-  const bool nonempty_to_right = right_col > col;
-  if (nonempty_to_right) {
-    uint64_t rightside_leftx_set = 0;
-    uint64_t rightside_rightx_set = 0;
-    right_lnode_index =
-        traverse_backwards(kwg, board, row, right_col, kwg_root, false, 0);
-    right_lpath_is_valid = right_lnode_index != 0;
-    score += traverse_backwards_for_score(board, ld, row, right_col);
-    if (right_lpath_is_valid) {
-      front_hook_set =
-          kwg_get_letter_sets(kwg, right_lnode_index, &rightside_leftx_set);
-      const uint32_t s_index = kwg_get_next_node_index(
-          kwg, right_lnode_index, SEPARATION_MACHINE_LETTER);
-      if (s_index != 0) {
-        kwg_get_letter_sets(kwg, s_index, &rightside_rightx_set);
-      }
-    }
+  if (right_col > col) {
     board_set_left_extension_set_with_blank(board, row, right_col, through_dir,
                                             cross_set_index,
-                                            rightside_leftx_set);
+                                            values.rightside_leftx_set);
     board_set_right_extension_set_with_blank(board, row, right_col, through_dir,
                                              cross_set_index,
-                                             rightside_rightx_set);
+                                             values.rightside_rightx_set);
     // Mark this empty square with the leftx set for rightside played tiles.
-    board_set_left_extension_set_with_blank(
-        board, row, col, through_dir, cross_set_index, rightside_leftx_set);
+    board_set_left_extension_set_with_blank(board, row, col, through_dir,
+                                            cross_set_index,
+                                            values.rightside_leftx_set);
   }
-
-  if (nonempty_to_left && nonempty_to_right) {
-    uint64_t letter_set = 0;
-    if (left_lpath_is_valid && right_lpath_is_valid) {
-      for (uint32_t i = right_lnode_index;; i++) {
-        const uint32_t node = kwg_node(kwg, i);
-        const uint32_t ml = kwg_node_tile(node);
-        // Only try letters that are possible in right extensions from the
-        // left side of the empty square.
-        if (board_is_letter_allowed_in_cross_set(leftside_rightx_set, ml)) {
-          const uint32_t next_node_index =
-              kwg_node_arc_index_prefetch(node, kwg);
-          if (traverse_backwards(kwg, board, row, col - 1, next_node_index,
-                                 true, left_col) != 0) {
-            letter_set |= get_cross_set_bit(ml);
-          }
-        }
-        if (kwg_node_is_end(node)) {
-          break;
-        }
-      }
-    }
-    board_set_cross_set_with_blank(board, row, col, dir, cross_set_index,
-                                   letter_set);
-  } else if (nonempty_to_left) {
-    board_set_cross_set_with_blank(board, row, col, dir, cross_set_index,
-                                   back_hook_set);
-  } else if (nonempty_to_right) {
-    board_set_cross_set_with_blank(board, row, col, dir, cross_set_index,
-                                   front_hook_set);
-  }
-  board_set_cross_score(board, row, col, dir, cross_set_index, score);
+  board_set_cross_set_with_blank(board, row, col, dir, cross_set_index,
+                                 values.cross_set);
+  board_set_cross_score(board, row, col, dir, cross_set_index, values.score);
 }
 
 void game_gen_cross_set(const Game *game, int row, int col, int dir,
                         int cross_set_index) {
-  if (game_get_variant(game) == GAME_VARIANT_CLASSIC) {
+  const game_variant_t variant = game_get_variant(game);
+  if (variant == GAME_VARIANT_CLASSIC) {
     game_gen_classic_cross_set(game, row, col, dir, cross_set_index);
+  } else if (variant == GAME_VARIANT_WOADWAGE) {
+    game_gen_woadwage_cross_set(game, row, col, dir, cross_set_index);
   } else {
     game_gen_alpha_cross_set(game, row, col, dir, cross_set_index);
   }
@@ -555,12 +727,7 @@ void game_set_backup_mode(Game *game, backup_mode_t backup_mode) {
   case BACKUP_MODE_OFF:
     break;
   case BACKUP_MODE_SIMULATION:
-    if (!game->sim_game_backups[0]) {
-      for (int i = 0; i < MAX_SEARCH_DEPTH; i++) {
-        game->sim_game_backups[i] = malloc_or_die(sizeof(MinimalGameBackup));
-        pre_allocate_single_game_backup(game->sim_game_backups[i], game);
-      }
-    }
+    game->sim_backups_enabled = true;
     break;
   case BACKUP_MODE_GCG:
     if (!game->gcg_game_backup) {
@@ -569,6 +736,21 @@ void game_set_backup_mode(Game *game, backup_mode_t backup_mode) {
     }
     break;
   }
+}
+
+void game_set_cross_set_cache(Game *game, CrossSetCache *cache) {
+  game->cross_set_cache = cache;
+}
+
+void game_enable_rollout_board_undo(Game *game) {
+  if (game->rollout_board_undo == NULL) {
+    game->rollout_board_undo = malloc_or_die(sizeof(MoveUndo));
+  }
+  game->rollout_board_undo_open = false;
+}
+
+MoveUndo *game_get_open_rollout_board_undo(const Game *game) {
+  return game->rollout_board_undo_open ? game->rollout_board_undo : NULL;
 }
 
 void game_update(Game *game, const GameArgs *game_args) {
@@ -618,9 +800,13 @@ Game *game_create(const GameArgs *game_args) {
   for (int i = 0; i < MAX_SEARCH_DEPTH; i++) {
     game->sim_game_backups[i] = NULL;
   }
+  game->sim_backups_enabled = false;
   game->backup_cursor = 0;
   game->backup_mode = BACKUP_MODE_OFF;
   game->gcg_game_backup = NULL;
+  game->rollout_board_undo = NULL;
+  game->cross_set_cache = NULL;
+  game->rollout_board_undo_open = false;
   return game;
 }
 
@@ -654,9 +840,13 @@ Game *game_duplicate(const Game *game) {
   for (int i = 0; i < MAX_SEARCH_DEPTH; i++) {
     new_game->sim_game_backups[i] = NULL;
   }
+  new_game->sim_backups_enabled = false;
   new_game->backup_cursor = 0;
   new_game->backup_mode = BACKUP_MODE_OFF;
   new_game->gcg_game_backup = NULL;
+  new_game->rollout_board_undo = NULL;
+  new_game->cross_set_cache = NULL;
+  new_game->rollout_board_undo_open = false;
   return new_game;
 }
 
@@ -683,6 +873,7 @@ void game_copy(Game *dst, const Game *src) {
   dst->dual_lexicon_mode = src->dual_lexicon_mode;
   dst->backup_cursor = 0;
   dst->backup_mode = BACKUP_MODE_OFF;
+  dst->rollout_board_undo_open = false;
 }
 
 // Backups do not restore the move list or
@@ -694,6 +885,12 @@ void game_backup(Game *game) {
     return;
     break;
   case BACKUP_MODE_SIMULATION:
+    if (!game->sim_game_backups[game->backup_cursor]) {
+      game->sim_game_backups[game->backup_cursor] =
+          malloc_or_die(sizeof(MinimalGameBackup));
+      pre_allocate_single_game_backup(
+          game->sim_game_backups[game->backup_cursor], game);
+    }
     state = game->sim_game_backups[game->backup_cursor];
     game->backup_cursor++;
     break;
@@ -701,7 +898,23 @@ void game_backup(Game *game) {
     state = game->gcg_game_backup;
     break;
   }
-  board_copy(state->board, game->board);
+  // The board's WIT cache is no Square, so a record of squares cannot restore
+  // it: a populated one is copied with the board.
+  state->board_recorded = game->backup_mode == BACKUP_MODE_SIMULATION &&
+                          game->rollout_board_undo != NULL &&
+                          !game->rollout_board_undo_open &&
+                          !board_get_wit_cache_populated(game->board);
+  if (state->board_recorded) {
+    MoveUndo *undo = game->rollout_board_undo;
+    move_undo_reset(undo);
+    undo->old_tiles_played = board_get_tiles_played(game->board);
+    memcpy(undo->old_number_of_row_anchors, game->board->number_of_row_anchors,
+           sizeof(undo->old_number_of_row_anchors));
+    undo->old_cross_sets_valid = board_get_cross_sets_valid(game->board);
+    game->rollout_board_undo_open = true;
+  } else {
+    board_copy(state->board, game->board);
+  }
   bag_copy(state->bag, game->bag);
   state->game_end_reason = game->game_end_reason;
   state->player_on_turn_index = game->player_on_turn_index;
@@ -721,7 +934,7 @@ void game_unplay_last_move(Game *game) {
   // Since there are two kinds of backups and a restore from backup can occur
   // with the backup mode off, we check which kind of backup to perform by
   // checking for sim backups first.
-  if (game->sim_game_backups[0]) {
+  if (game->sim_backups_enabled) {
     if (game->backup_cursor == 0) {
       log_fatal("cannot unplay last move without a game backup");
     }
@@ -744,7 +957,19 @@ void game_unplay_last_move(Game *game) {
   rack_copy(player_get_rack(player0), state->p0rack);
   rack_copy(player_get_rack(player1), state->p1rack);
   bag_copy(game->bag, state->bag);
-  board_copy(game->board, state->board);
+  if (state->board_recorded) {
+    // A WIT cache the moves populated describes their board, not this one.
+    const MoveUndo *undo = game->rollout_board_undo;
+    move_undo_restore_squares(undo, game->board);
+    board_clear_wit_cache(game->board);
+    board_set_tiles_played(game->board, undo->old_tiles_played);
+    memcpy(game->board->number_of_row_anchors, undo->old_number_of_row_anchors,
+           sizeof(game->board->number_of_row_anchors));
+    board_set_cross_sets_valid(game->board, undo->old_cross_sets_valid);
+    game->rollout_board_undo_open = false;
+  } else {
+    board_copy(game->board, state->board);
+  }
 }
 
 void single_game_backup_destroy(MinimalGameBackup *mgb) {
@@ -759,8 +984,8 @@ void backups_destroy(Game *game) {
   if (game->gcg_game_backup) {
     single_game_backup_destroy(game->gcg_game_backup);
   }
-  if (game->sim_game_backups[0]) {
-    for (int i = 0; i < MAX_SEARCH_DEPTH; i++) {
+  for (int i = 0; i < MAX_SEARCH_DEPTH; i++) {
+    if (game->sim_game_backups[i]) {
       single_game_backup_destroy(game->sim_game_backups[i]);
     }
   }
@@ -777,6 +1002,7 @@ void game_destroy(Game *game) {
   player_destroy(game->players[0]);
   player_destroy(game->players[1]);
   backups_destroy(game);
+  free(game->rollout_board_undo);
   free(game);
 }
 

@@ -317,7 +317,8 @@ void test_generate_nonstuck_cgps2(void) {
 }
 
 // Core A/B benchmark: solve each CGP twice (with and without
-// forced-pass bypass), comparing value and time pairwise.
+// forced-pass bypass), comparing value and time pairwise. Both solves use the
+// incremental move lists, as the endgame command does.
 static void run_ab_benchmark(const char *cgp_file, const char *label,
                              int old_ply, int new_ply, int max_positions) {
   FILE *fp = cfile_open(cgp_file, "re", false);
@@ -390,6 +391,7 @@ static void run_ab_benchmark(const char *cgp_file, const char *label,
                         .per_ply_callback = NULL,
                         .per_ply_callback_data = NULL,
                         .forced_pass_bypass = false,
+                        .incremental_movegen = true,
                         .enable_pv_display = false,
                         .seed = 42};
 
@@ -506,16 +508,17 @@ void test_benchmark_nonstuck_3v3(void) {
 //   plies        endgame plies      (default 4)
 //   threads      solver threads     (default 1  -> deterministic nodes)
 //   max          max positions      (default 100)
-//   incremental  1 = incremental move lists (default 0)
-//   interleave   1 = solve each position off and on, alternating order
-//                (default 0); incremental is then ignored
+//   bypass       1 = forced-pass bypass (default 1)
+//   incremental  1 = incremental move lists (default 1)
+//   interleave   1 = solve each position with the lists off and on,
+//                alternating order (default 0); incremental is then ignored
 //   tag          label for the run  (default "bench")
-// For example: egspeedbench:cgp=positions.txt,plies=5,threads=4,incremental=1
+// For example: egspeedbench:cgp=positions.txt,plies=5,threads=4,bypass=0
 // Every solve starts from a cleared TT, so no solve inherits an earlier one's
-// entries, and with the forced-pass bypass off, as the endgame, analyze and
-// autoplay commands solve. Each row ends with the solve's CPU time across all
-// of its threads (clock(), which is wall time on Windows), so a multi-threaded
-// run shows how much of the machine its speedup cost.
+// entries. The default, bypass=1, solves as the endgame, analyze, autoplay
+// and PEG solves do. Each row ends with the solve's CPU time
+// across all of its threads (clock(), which is wall time on Windows), so a
+// multi-threaded run shows how much of the machine its speedup cost.
 static int env_int(const char *name, int fallback) {
   const char *v = getenv(name);
   if (v == NULL || v[0] == '\0') {
@@ -539,6 +542,7 @@ typedef struct EndgameSpeedBenchArgs {
   int plies;
   int threads;
   int max_positions;
+  bool bypass;
   bool incremental;
   bool interleave;
 } EndgameSpeedBenchArgs;
@@ -554,6 +558,7 @@ static void run_endgame_speed_bench(const EndgameSpeedBenchArgs *bench_args) {
   const int plies = bench_args->plies;
   const int threads = bench_args->threads;
   const int max_positions = bench_args->max_positions;
+  const bool bypass = bench_args->bypass;
   const bool incremental = bench_args->incremental;
   // Interleaved A/B: solve every position with the incremental lists off and
   // on, back to back, alternating which goes first per position so neither
@@ -591,10 +596,10 @@ static void run_endgame_speed_bench(const EndgameSpeedBenchArgs *bench_args) {
   }
   (void)fclose(fp);
 
-  printf("BENCHCFG tag=%s lex=%s plies=%d threads=%d incremental=%d "
+  printf("BENCHCFG tag=%s lex=%s plies=%d threads=%d bypass=%d incremental=%d "
          "interleave=%d positions=%d file=%s\n",
-         tag, lex, plies, threads, (int)incremental, (int)interleave, num_cgps,
-         cgp_file);
+         tag, lex, plies, threads, (int)bypass, (int)incremental,
+         (int)interleave, num_cgps, cgp_file);
 
   // Index 0 = incremental off, 1 = on. Non-interleaved runs use only
   // cfg_totals[incremental].
@@ -633,7 +638,7 @@ static void run_endgame_speed_bench(const EndgameSpeedBenchArgs *bench_args) {
                           .use_heuristics = true,
                           .per_ply_callback = NULL,
                           .per_ply_callback_data = NULL,
-                          .forced_pass_bypass = false,
+                          .forced_pass_bypass = bypass,
                           .incremental_movegen = cfg != 0,
                           .enable_pv_display = false,
                           .seed = 42};
@@ -698,7 +703,8 @@ static EndgameSpeedBenchArgs endgame_speed_bench_default_args(void) {
                                  .plies = 4,
                                  .threads = 1,
                                  .max_positions = 100,
-                                 .incremental = false,
+                                 .bypass = true,
+                                 .incremental = true,
                                  .interleave = false};
 }
 
@@ -737,13 +743,15 @@ void endgame_speed_bench_run_spec(const char *spec) {
       args.threads = speed_bench_spec_int(item, "threads");
     } else if (has_prefix("max=", item)) {
       args.max_positions = speed_bench_spec_int(item, "max");
+    } else if (has_prefix("bypass=", item)) {
+      args.bypass = speed_bench_spec_int(item, "bypass") != 0;
     } else if (has_prefix("incremental=", item)) {
       args.incremental = speed_bench_spec_int(item, "incremental") != 0;
     } else if (has_prefix("interleave=", item)) {
       args.interleave = speed_bench_spec_int(item, "interleave") != 0;
     } else {
       log_fatal("egspeedbench spec takes cgp, lex, tag, plies, threads, max, "
-                "incremental and interleave, got '%s'",
+                "bypass, incremental and interleave, got '%s'",
                 item);
     }
   }
@@ -776,7 +784,7 @@ void endgame_speed_bench_run_spec(const char *spec) {
 //   MAGPIE_PO_THREADS solver threads (default 1)
 //   MAGPIE_PO_MAXMOVES per-playout move cap (default 40, safety)
 //   MAGPIE_PO_TAG    label           (default "playout")
-//   MAGPIE_PO_INCREMENTAL 1 = incremental move lists (default 0)
+//   MAGPIE_PO_INCREMENTAL 1 = incremental move lists (default 1)
 void test_endgame_playout_bench(void) {
   log_set_level(LOG_FATAL);
 
@@ -797,7 +805,7 @@ void test_endgame_playout_bench(void) {
   const int time_ms = env_int("MAGPIE_PO_TIMEMS", 100);
   const int max_plies = env_int("MAGPIE_PO_PLIES", 25);
   const int threads = env_int("MAGPIE_PO_THREADS", 1);
-  const bool incremental = env_int("MAGPIE_PO_INCREMENTAL", 0) != 0;
+  const bool incremental = env_int("MAGPIE_PO_INCREMENTAL", 1) != 0;
   const int max_moves = env_int("MAGPIE_PO_MAXMOVES", 40);
 
   FILE *fp = cfile_open(cgp_file, "re", false);
@@ -1032,6 +1040,7 @@ void test_endgame_move1(void) {
       .num_top_moves = 1,
       .use_heuristics = true,
       .forced_pass_bypass = true,
+      .incremental_movegen = true,
       .enable_pv_display = false,
       .soft_time_limit = soft,
       .hard_time_limit = hard,
@@ -1153,6 +1162,7 @@ void test_endgame_root_bench(void) {
         .num_top_moves = env_int("MAGPIE_ROOT_TOPK", 1),
         .use_heuristics = true,
         .forced_pass_bypass = true,
+        .incremental_movegen = true,
         .first_win = env_int("MAGPIE_ROOT_FIRSTWIN", 0) != 0,
         .hard_time_limit = env_double("MAGPIE_ROOT_SECONDS", 0),
         .seed = 42,

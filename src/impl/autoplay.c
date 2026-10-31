@@ -4,6 +4,7 @@
 #include "../compat/cpthread.h"
 #include "../compat/cpthread_defs.h"
 #include "../compat/ctime.h"
+#include "../compat/memory_info.h"
 #include "../def/autoplay_defs.h"
 #include "../def/equity_defs.h"
 #include "../def/game_history_defs.h"
@@ -17,6 +18,7 @@
 #include "../ent/bag.h"
 #include "../ent/board.h"
 #include "../ent/checkpoint.h"
+#include "../ent/cross_set_cache.h"
 #include "../ent/data_filepaths.h"
 #include "../ent/equity.h"
 #include "../ent/game.h"
@@ -46,6 +48,7 @@
 #include "autoplay_solvers.h"
 #include "gameplay.h"
 #include "move_gen.h"
+#include "move_gen_base.h"
 #include "pat_gen.h"
 #include "play_chooser.h"
 #include "rack_list.h"
@@ -833,6 +836,9 @@ typedef struct GameRunner {
   uint64_t game_number;
   uint64_t seed;
   Game *game;
+  // The classic cross sets of game (see cross_set_cache.h). Its lexica do not
+  // change while the runner lives, so it needs no salt.
+  CrossSetCache *cross_set_cache;
   // Used for inference args in autoplay with
   // inference
   Game *game_one_move_behind;
@@ -867,6 +873,9 @@ GameRunner *game_runner_create(AutoplayWorker *autoplay_worker) {
   GameRunner *game_runner = malloc_or_die(sizeof(GameRunner));
   game_runner->shared_data = autoplay_worker->shared_data;
   game_runner->game = game_create(args->game_args);
+  game_runner->cross_set_cache =
+      cross_set_cache_create(CROSS_SET_CACHE_INDEX_BITS);
+  game_set_cross_set_cache(game_runner->game, game_runner->cross_set_cache);
   game_runner->game_one_move_behind = NULL;
   if (args->p1_sim_args.use_inference || args->p2_sim_args.use_inference) {
     game_runner->game_one_move_behind = game_create(args->game_args);
@@ -886,6 +895,7 @@ void game_runner_destroy(GameRunner *game_runner) {
   }
   game_runner_destroy_play_choosers(game_runner);
   game_destroy(game_runner->game);
+  cross_set_cache_destroy(game_runner->cross_set_cache);
   game_destroy(game_runner->game_one_move_behind);
   free(game_runner);
 }

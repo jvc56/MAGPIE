@@ -30,6 +30,7 @@
 #include "endgame.h"
 #include "gameplay.h"
 #include "move_gen.h"
+#include "move_gen_base.h"
 #include "peg.h"
 #include "simmer.h"
 #include <math.h>
@@ -579,7 +580,7 @@ static bool play_chooser_run_endgame(
       /*per_ply_callback=*/NULL, /*per_ply_callback_data=*/NULL,
       /*before_search_callback=*/NULL, /*before_search_callback_data=*/NULL,
       /*per_root_move_callback=*/NULL, /*per_root_move_callback_data=*/NULL,
-      DUAL_LEXICON_MODE_IGNORANT, /*forced_pass_bypass=*/false,
+      DUAL_LEXICON_MODE_IGNORANT, /*forced_pass_bypass=*/true,
       /*incremental_movegen=*/true, /*disable_best_reply_shortcuts=*/false,
       /*enable_pv_display=*/false, /*soft_time_limit=*/budget_seconds * 0.9,
       /*hard_time_limit=*/budget_seconds, strategy->seed,
@@ -611,7 +612,14 @@ static bool play_chooser_run_endgame(
   const PVLine *pv_line =
       endgame_results_get_pvline(endgame_results, ENDGAME_RESULT_BEST);
   if (pv_line->num_moves == 0) {
-    return false;
+    // Choosing a play needs the line's first move. A value needs only a
+    // completed ply: a transposition table entry can settle the root with no
+    // line at all, as when a null-window resolve or a later decision finds
+    // the position already searched.
+    if (out_move != NULL ||
+        endgame_results_get_depth(endgame_results, ENDGAME_RESULT_BEST) < 1) {
+      return false;
+    }
   }
   if (out_move != NULL) {
     small_move_to_move(out_move, &pv_line->moves[0], game_get_board(game));
@@ -1078,10 +1086,15 @@ static void play_chooser_decide_challenge_endgame(PlayChooser *play_chooser,
     // null-window resolve below can take over cheaply. With a single thread,
     // honor the budget rather than spawning a second solver thread: solve
     // sequentially, splitting the window in half, with no cross-branch
-    // interrupt (each branch's sibling control points at itself).
-    const bool run_concurrent = total_threads > 1;
-    const int keep_threads = run_concurrent ? (total_threads + 1) / 2 : 1;
-    int challenge_threads = run_concurrent ? total_threads - keep_threads : 1;
+    // interrupt (each branch's sibling control points at itself). A set
+    // order (for tests) also solves sequentially, with every thread.
+    const play_chooser_challenge_order_t order = strategy->challenge_order;
+    const bool run_concurrent =
+        total_threads > 1 && order == PLAY_CHOOSER_CHALLENGE_ORDER_CONCURRENT;
+    const int keep_threads =
+        run_concurrent ? (total_threads + 1) / 2 : total_threads;
+    int challenge_threads =
+        run_concurrent ? total_threads - keep_threads : total_threads;
     if (challenge_threads < 1) {
       challenge_threads = 1;
     }
@@ -1133,9 +1146,22 @@ static void play_chooser_decide_challenge_endgame(PlayChooser *play_chooser,
                       &keep_branch);
       play_chooser_solve_endgame_branch(&challenge_branch);
       cpthread_join(keep_thread);
-    } else {
+    } else if (order == PLAY_CHOOSER_CHALLENGE_ORDER_CONCURRENT) {
       play_chooser_solve_endgame_branch(&keep_branch);
       play_chooser_solve_endgame_branch(&challenge_branch);
+    } else {
+      PlayChooserEndgameBranch *first_branch =
+          order == PLAY_CHOOSER_CHALLENGE_ORDER_KEEP_FIRST ? &keep_branch
+                                                           : &challenge_branch;
+      PlayChooserEndgameBranch *second_branch =
+          first_branch == &keep_branch ? &challenge_branch : &keep_branch;
+      play_chooser_solve_endgame_branch(first_branch);
+      // As though the first branch finished first: an exact value would
+      // interrupt the second before it began, leaving it to the null-window
+      // resolve below.
+      if (!first_branch->exact) {
+        play_chooser_solve_endgame_branch(second_branch);
+      }
     }
     thread_control_destroy(keep_thread_control);
     thread_control_destroy(challenge_thread_control);
@@ -1163,6 +1189,10 @@ static void play_chooser_decide_challenge_endgame(PlayChooser *play_chooser,
     challenge_valid = challenge_branch.valid;
   }
 
+  decision->keep_exact = keep_exact;
+  decision->keep_valid = keep_valid;
+  decision->challenge_exact = challenge_exact;
+  decision->challenge_valid = challenge_valid;
   if (keep_exact == challenge_exact) {
     // Either both values are exact (the verdict is exact) or both solves
     // ran out of time (compare the best estimates). A branch that produced no
@@ -1231,6 +1261,7 @@ static void play_chooser_decide_challenge_endgame(PlayChooser *play_chooser,
   } else {
     keep_value = resolve_value;
   }
+  decision->resolve_completed = resolved;
   if (!resolved) {
     // The null-window proof did not complete, so there is no valid comparison
     // between the two branches: challenge the phony by default.
@@ -1255,6 +1286,11 @@ void play_chooser_decide_challenge(PlayChooser *play_chooser,
   decision->should_challenge = false;
   decision->keep_value = 0.0;
   decision->challenge_value = 0.0;
+  decision->keep_exact = false;
+  decision->keep_valid = false;
+  decision->challenge_exact = false;
+  decision->challenge_valid = false;
+  decision->resolve_completed = false;
   const PlayChooserStrategy *strategy = &play_chooser->strategy;
   if (!strategy->enable_challenges ||
       move_get_type(opp_move) != GAME_EVENT_TILE_PLACEMENT_MOVE) {
@@ -1270,7 +1306,7 @@ void play_chooser_decide_challenge(PlayChooser *play_chooser,
       formed_words_create(game_get_board(keep_game), opp_move);
   formed_words_populate_validities(
       player_get_kwg(game_get_player(keep_game, chooser_index)), formed_words,
-      game_get_variant(keep_game) == GAME_VARIANT_WORDSMOG);
+      game_get_variant(keep_game));
   const int num_words = formed_words_get_num_words(formed_words);
   bool any_word_invalid = false;
   for (int word_idx = 0; word_idx < num_words; word_idx++) {
