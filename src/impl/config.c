@@ -71,6 +71,7 @@
 #include "../util/string_util.h"
 #include "analyze.h"
 #include "autoplay.h"
+#include "census_gen.h"
 #include "cgp.h"
 #include "contribute.h"
 #include "contribute_tables.h"
@@ -129,6 +130,7 @@ typedef enum {
   ARG_TOKEN_P1_NAME,
   ARG_TOKEN_P2_NAME,
   ARG_TOKEN_LEAVE_GEN,
+  ARG_TOKEN_CENSUS,
   ARG_TOKEN_PAT_GEN,
   ARG_TOKEN_CREATE_DATA,
   ARG_TOKEN_DATA_PATH,
@@ -1588,6 +1590,27 @@ static const char *contribute_help(const char **usages, const char **examples) {
          "not fit is skipped and the task runs without it.";
 }
 
+static const char *census_help(const char **usages, const char **examples) {
+  usages[0] = "<recipe> [<output_name>] [null|leaves]";
+  examples[0] = "3x256,2048";
+  examples[1] = "4x256 CSW24_census";
+  return "Generates leaves for the current lexicon with the census, which "
+         "values every leave exactly on each of many boards against the "
+         "leaves of the generation before. The recipe gives each "
+         "generation's board count, where KxN is K generations of N boards: "
+         "3x256,2048 is the best measured, and 4x256 is much faster and "
+         "almost as good. Each generation is written as "
+         "<output_name>_gen_<gen_number>, and the result as <output_name> "
+         "(default: <lexicon>_census). With null (the default) the boards are "
+         "played greedily by score and the first generation starts from "
+         "leaves of zero; with leaves they are played by the current leaves, "
+         "which the first generation starts from. The census values a full "
+         "rack as the best of its plays and its exchanges, so it assumes an "
+         "exchange is always allowed. Use the -seed and -threads options. "
+         "The census is about as strong as leavegen alone; the blend of the "
+         "two is stronger than either.";
+}
+
 static const char *convert_help(const char **usages, const char **examples) {
   usages[0] = "<type> <name_without_extension> [<letter_distribution>] "
               "[<klv_name>] [<wmp_name>]";
@@ -1860,6 +1883,9 @@ void add_help_arg_to_string_builder(const Config *config, int token,
           "hardware, this command could take days or weeks. Rack info tables "
           "are automatically disabled because they cache leave values that "
           "become stale during generation.";
+      break;
+    case ARG_TOKEN_CENSUS:
+      text = census_help(usages, examples);
       break;
     case ARG_TOKEN_CREATE_DATA:
       usages[0] = "<type> <output_name> [<letter_distribution>]";
@@ -3069,6 +3095,7 @@ char *impl_help(Config *config, ErrorStack *error_stack) {
     static const arg_token_t other_cmds[] = {
         ARG_TOKEN_AUTOPLAY,    /* autoplay */
         ARG_TOKEN_BUILDERS,    /* builders */
+        ARG_TOKEN_CENSUS,      /* census */
         ARG_TOKEN_CGP,         /* cgp */
         ARG_TOKEN_CONVERT,     /* convert */
         ARG_TOKEN_CONTRIBUTE,  /* contribute */
@@ -5389,6 +5416,51 @@ void impl_leave_gen(Config *config, ErrorStack *error_stack) {
                   min_rack_targets_str, games_before_force_draw_start,
                   /*forced_racks=*/NULL, /*num_forced_racks=*/0,
                   /*pat_gen_output_name=*/NULL, error_stack);
+}
+
+// Census
+
+void impl_census(Config *config, ErrorStack *error_stack) {
+  if (!config_has_game_data(config)) {
+    error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
+                     string_duplicate("cannot run a census without lexicon"));
+    return;
+  }
+  config_init_game(config);
+  const char *recipe = config_get_parg_value(config, ARG_TOKEN_CENSUS, 0);
+  const char *output_name = config_get_parg_value(config, ARG_TOKEN_CENSUS, 1);
+  const char *start = config_get_parg_value(config, ARG_TOKEN_CENSUS, 2);
+  bool null_start = true;
+  if (start) {
+    if (strings_equal(start, "leaves")) {
+      null_start = false;
+    } else if (!strings_equal(start, "null")) {
+      error_stack_push(
+          error_stack, ERROR_STATUS_CENSUS_MALFORMED_RECIPE,
+          get_formatted_string(
+              "the census starts from 'null' or 'leaves', not '%s'", start));
+      return;
+    }
+  }
+  char *default_output_name = NULL;
+  if (!output_name) {
+    default_output_name = get_formatted_string(
+        "%s_census",
+        kwg_get_name(player_get_kwg(game_get_player(config->game, 0))));
+    output_name = default_output_name;
+  }
+  const CensusGenArgs args = {
+      .game = config->game,
+      .recipe = recipe,
+      .output_name = output_name,
+      .data_paths = config->data_paths,
+      .seed = config_get_seed(config),
+      .number_of_threads = config_get_num_threads(config),
+      .null_start = null_start,
+      .thread_control = config->thread_control,
+  };
+  census_gen(&args, error_stack);
+  free(default_output_name);
 }
 
 // PAT Gen
@@ -13630,6 +13702,15 @@ char *str_api_leave_gen(Config *config, ErrorStack *error_stack) {
   return empty_string();
 }
 
+void execute_census(Config *config, ErrorStack *error_stack) {
+  impl_census(config, error_stack);
+}
+
+char *str_api_census(Config *config, ErrorStack *error_stack) {
+  impl_census(config, error_stack);
+  return empty_string();
+}
+
 void execute_pat_gen(Config *config, ErrorStack *error_stack) {
   impl_pat_gen(config, error_stack);
 }
@@ -14639,6 +14720,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   cmd(ARG_TOKEN_CONVERT, "convert", 2, 5, convert, generic, false);
   cmd(ARG_TOKEN_CONTRIBUTE, "contribute", 0, 1, contribute, generic, false);
   cmd(ARG_TOKEN_LEAVE_GEN, "leavegen", 2, 2, leave_gen, generic, false);
+  cmd(ARG_TOKEN_CENSUS, "census", 1, 3, census, generic, false);
   cmd(ARG_TOKEN_PAT_GEN, "patgen", 1, 2, pat_gen, generic, false);
   cmd(ARG_TOKEN_CREATE_DATA, "createdata", 2, 3, create_data, generic, false);
   cmd(ARG_TOKEN_NEXT, "next", 0, 0, next, generic, true);
@@ -15097,6 +15179,7 @@ void config_add_settings_to_string_builder(const Config *config,
     case ARG_TOKEN_CONTRIBUTE:
     case ARG_TOKEN_CONVERT:
     case ARG_TOKEN_LEAVE_GEN:
+    case ARG_TOKEN_CENSUS:
     case ARG_TOKEN_PAT_GEN:
     case ARG_TOKEN_CREATE_DATA:
     case ARG_TOKEN_ANALYZE:
