@@ -14,6 +14,7 @@
 #elif defined(_WIN32) || defined(_WIN64)
 #include <windows.h>
 #elif defined(__APPLE__) || defined(__MACH__)
+#include <mach/mach.h>
 #include <sys/param.h>
 #include <sys/sysctl.h>
 #include <sys/types.h>
@@ -176,8 +177,8 @@ static inline uint64_t get_search_memory_budget_base(void) {
 
 // The memory a new allocation can have without the system swapping, in
 // *available_bytes: MemAvailable on Linux, the available physical memory on
-// Windows. False where it cannot be found easily (macOS, browsers), which a
-// caller takes as unconstrained.
+// Windows, the free, inactive and purgeable pages on macOS. False where it
+// cannot be found (browsers), which a caller takes as unconstrained.
 static inline bool get_available_memory_bytes(int64_t *available_bytes) {
 #if defined(__EMSCRIPTEN__)
   (void)available_bytes;
@@ -191,6 +192,27 @@ static inline bool get_available_memory_bytes(int64_t *available_bytes) {
   *available_bytes = statex.ullAvailPhys > (DWORDLONG)INT64_MAX
                          ? INT64_MAX
                          : (int64_t)statex.ullAvailPhys;
+  return true;
+#elif defined(__APPLE__) || defined(__MACH__)
+  // Inactive and purgeable pages are reclaimed for a new allocation before
+  // anything is swapped out, so they count as available, as Activity Monitor
+  // counts them.
+  vm_statistics64_data_t stats = {0};
+  mach_msg_type_number_t count = HOST_VM_INFO64_COUNT;
+  if (host_statistics64(mach_host_self(), HOST_VM_INFO64,
+                        (host_info64_t)&stats, &count) != KERN_SUCCESS) {
+    return false;
+  }
+  vm_size_t page_size = 0;
+  if (host_page_size(mach_host_self(), &page_size) != KERN_SUCCESS) {
+    return false;
+  }
+  const uint64_t pages = (uint64_t)stats.free_count +
+                         (uint64_t)stats.inactive_count +
+                         (uint64_t)stats.purgeable_count;
+  *available_bytes = pages > (uint64_t)INT64_MAX / (uint64_t)page_size
+                         ? INT64_MAX
+                         : (int64_t)(pages * (uint64_t)page_size);
   return true;
 #elif defined(__linux__)
   FILE *file = fopen("/proc/meminfo", "r");

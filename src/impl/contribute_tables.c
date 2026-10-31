@@ -546,6 +546,83 @@ static bool evict_entry(const ContributeTableManifestEntry *entry) {
   return removed;
 }
 
+// Whether eviction has made enough room, after `freed_bytes` of listed
+// tables were deleted.
+typedef bool (*eviction_done_fn)(void *context, int64_t freed_bytes);
+
+// Deletes the tables the manifest at `manifest_path` lists and `keep` does
+// not, least recently used first, until `done` says there is room, and drops
+// them from the manifest. A table evict_entry will not delete is passed over.
+// Returns false, deleting nothing, if the manifest's lock cannot be had.
+static bool evict_least_recently_used(const char *manifest_path,
+                                      const ContributeTable *keep,
+                                      int keep_count, eviction_done_fn done,
+                                      void *done_context, StringList *evicted) {
+  const int lock = lock_manifest(manifest_path);
+  if (lock < 0) {
+    return false;
+  }
+  ContributeTableManifest *manifest =
+      contribute_table_manifest_read(manifest_path);
+  int *order = malloc_or_die(sizeof(int) * (size_t)(manifest->count + 1));
+  const int evictable =
+      contribute_table_manifest_evictable(manifest, keep, keep_count, order);
+  StringList *gone = string_list_create();
+  int64_t freed_bytes = 0;
+  for (int rank = 0; rank < evictable && !done(done_context, freed_bytes);
+       rank++) {
+    const ContributeTableManifestEntry *entry = &manifest->entries[order[rank]];
+    if (!evict_entry(entry)) {
+      continue;
+    }
+    freed_bytes += entry->bytes;
+    if (evicted) {
+      char *line = get_formatted_string("%s %s", entry->role, entry->name);
+      string_list_add_string(evicted, line);
+      free(line);
+    }
+    string_list_add_string(gone, entry->role);
+    string_list_add_string(gone, entry->name);
+  }
+  // Measured once more, so the caller sees the room the last deletion made.
+  (void)done(done_context, freed_bytes);
+  free(order);
+  const int gone_count = string_list_get_count(gone);
+  for (int gone_idx = 0; gone_idx + 1 < gone_count; gone_idx += 2) {
+    contribute_table_manifest_forget(
+        manifest, string_list_get_string(gone, gone_idx),
+        string_list_get_string(gone, gone_idx + 1));
+  }
+  if (gone_count > 0) {
+    (void)contribute_table_manifest_write(manifest, manifest_path);
+  }
+  string_list_destroy(gone);
+  contribute_table_manifest_destroy(manifest);
+  cfile_lock_close(lock);
+  return true;
+}
+
+// make_room's measure of room: the free space the filesystem reports.
+typedef struct DiskRoom {
+  const char *directory;
+  contribute_free_bytes_fn free_bytes_fn;
+  void *free_bytes_context;
+  int64_t reserve_bytes;
+  int64_t bytes;
+  int64_t *available;
+} DiskRoom;
+
+static bool disk_room_done(void *context, int64_t freed_bytes) {
+  (void)freed_bytes;
+  const DiskRoom *room = (const DiskRoom *)context;
+  int64_t free_bytes = 0;
+  if (room->free_bytes_fn(room->directory, room->free_bytes_context,
+                          &free_bytes)) {
+    *room->available = free_bytes - room->reserve_bytes;
+  }
+  return room->bytes <= *room->available;
+}
+
 bool contribute_tables_make_room(const char *manifest_path,
                                  const char *directory, int64_t bytes,
                                  int64_t reserve_bytes,
@@ -563,46 +640,51 @@ bool contribute_tables_make_room(const char *manifest_path,
   if (bytes < 0 || bytes <= *available) {
     return true;
   }
-  const int lock = lock_manifest(manifest_path);
-  if (lock < 0) {
+  DiskRoom room = {.directory = directory,
+                   .free_bytes_fn = free_bytes_fn,
+                   .free_bytes_context = free_bytes_context,
+                   .reserve_bytes = reserve_bytes,
+                   .bytes = bytes,
+                   .available = available};
+  if (!evict_least_recently_used(manifest_path, keep, keep_count,
+                                 disk_room_done, &room, evicted)) {
     return false;
   }
+  return bytes <= *available;
+}
+
+// trim_to's measure of room: what the listed tables still take.
+typedef struct ListedRoom {
+  int64_t listed_bytes;
+  int64_t cap_bytes;
+} ListedRoom;
+
+static bool listed_room_done(void *context, int64_t freed_bytes) {
+  const ListedRoom *room = (const ListedRoom *)context;
+  return room->listed_bytes - freed_bytes <= room->cap_bytes;
+}
+
+int64_t contribute_tables_trim_to(const char *manifest_path, int64_t cap_bytes,
+                                  const ContributeTable *keep, int keep_count,
+                                  StringList *evicted) {
   ContributeTableManifest *manifest =
       contribute_table_manifest_read(manifest_path);
-  int *order = malloc_or_die(sizeof(int) * (size_t)(manifest->count + 1));
-  const int evictable =
-      contribute_table_manifest_evictable(manifest, keep, keep_count, order);
-  StringList *gone = string_list_create();
-  for (int rank = 0; rank < evictable && bytes > *available; rank++) {
-    const ContributeTableManifestEntry *entry = &manifest->entries[order[rank]];
-    if (!evict_entry(entry)) {
-      continue;
-    }
-    if (evicted) {
-      char *line = get_formatted_string("%s %s", entry->role, entry->name);
-      string_list_add_string(evicted, line);
-      free(line);
-    }
-    string_list_add_string(gone, entry->role);
-    string_list_add_string(gone, entry->name);
-    if (free_bytes_fn(directory, free_bytes_context, &free_bytes)) {
-      *available = free_bytes - reserve_bytes;
-    }
+  ListedRoom room = {.listed_bytes = 0, .cap_bytes = cap_bytes};
+  for (int entry_idx = 0; entry_idx < manifest->count; entry_idx++) {
+    room.listed_bytes += manifest->entries[entry_idx].bytes;
   }
-  free(order);
-  const int gone_count = string_list_get_count(gone);
-  for (int gone_idx = 0; gone_idx + 1 < gone_count; gone_idx += 2) {
-    contribute_table_manifest_forget(
-        manifest, string_list_get_string(gone, gone_idx),
-        string_list_get_string(gone, gone_idx + 1));
-  }
-  if (gone_count > 0) {
-    (void)contribute_table_manifest_write(manifest, manifest_path);
-  }
-  string_list_destroy(gone);
   contribute_table_manifest_destroy(manifest);
-  cfile_lock_close(lock);
-  return bytes <= *available;
+  if (room.listed_bytes > cap_bytes) {
+    (void)evict_least_recently_used(manifest_path, keep, keep_count,
+                                    listed_room_done, &room, evicted);
+  }
+  manifest = contribute_table_manifest_read(manifest_path);
+  int64_t listed_bytes = 0;
+  for (int entry_idx = 0; entry_idx < manifest->count; entry_idx++) {
+    listed_bytes += manifest->entries[entry_idx].bytes;
+  }
+  contribute_table_manifest_destroy(manifest);
+  return listed_bytes;
 }
 
 void contribute_tables_record_built(const char *manifest_path, const char *role,
@@ -664,9 +746,14 @@ void contribute_tables_touch_used(const char *manifest_path,
 }
 
 char *contribute_tables_manifest_path(const char *data_paths) {
+  return contribute_tables_manifest_path_named(
+      data_paths, CONTRIBUTE_TABLE_MANIFEST_FILENAME);
+}
+
+char *contribute_tables_manifest_path_named(const char *data_paths,
+                                            const char *filename) {
   char *first = cpath_list_first(data_paths ? data_paths : ".");
-  char *path =
-      get_formatted_string("%s/%s", first, CONTRIBUTE_TABLE_MANIFEST_FILENAME);
+  char *path = get_formatted_string("%s/%s", first, filename);
   free(first);
   return path;
 }

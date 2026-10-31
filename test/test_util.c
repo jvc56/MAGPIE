@@ -1213,3 +1213,19 @@ error_code_t get_config_exec_status(Config *config, const char *cmd) {
   error_stack_destroy(error_stack);
   return error_code;
 }
+
+// Cuts the opponent's rack out of a fixture line ("<board> AB/CD ..." becomes
+// "<board> AB/ ...") in place.
+// cppcheck-suppress constParameterPointer
+void strip_cgp_opp_rack(char *line) {
+  char *space = strchr(line, ' ');
+  if (space == NULL) {
+    return;
+  }
+  char *slash = strchr(space + 1, '/');
+  char *end = slash ? strchr(slash, ' ') : NULL;
+  if (slash == NULL || end == NULL) {
+    return;
+  }
+  memmove(slash + 1, end, strlen(end) + 1);
+}

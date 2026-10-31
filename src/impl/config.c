@@ -80,12 +80,14 @@
 #include "gameplay.h"
 #include "gcg.h"
 #include "get_gcg.h"
+#include "help_table.h"
 #include "inference.h"
 #include "move_gen.h"
 #include "move_gen_base.h"
 #include "peg.h"
 #include "play_chooser.h"
 #include "rack_draw.h"
+#include "rack_info_table_maker.h"
 #include "simmer.h"
 #include <assert.h>
 #include <ctype.h>
@@ -102,221 +104,26 @@
 
 enum {
   HELP_INDENT = 10,
+  // The most usage or example lines a help entry has, plus its NULL ending.
+  HELP_MAX_LINES = 10,
+  // Option names wider than this take a line of their own in a list.
+  HELP_OPTION_NAME_WIDTH = 30,
+  HELP_COMMAND_NAME_WIDTH = 20,
   // Upper bound on the number of per-stage counts the -pegtopk CLI arg accepts.
   // This caps only the parse buffer; the solver itself imposes no stage limit.
   CONFIG_PEG_MAX_STAGES = 16,
+  // The pre-endgame solver's endgame depth when it keeps every candidate
+  // (-pegplies). On 41 positions with the player on turn 20 to 40 points
+  // behind, 2 plies picked the same best play as 3 on 33 of the 34 both
+  // finished in 15 minutes, but put its win% higher on 15 and never lower,
+  // by up to 12.5 points; the end of the game agreed with 3 plies on every
+  // one it could check. 3 plies took a median 2.7 times as long.
+  CONFIG_DEFAULT_PEG_PLIES = 3,
+  // The format -savesettings writes as -fileversion. Raise it whenever a
+  // default that settings files record changes, and list the setting in
+  // config_stale_settings.
+  CONFIG_SETTINGS_VERSION = 2,
 };
-
-typedef enum {
-  ARG_TOKEN_HELP,
-  ARG_TOKEN_SET,
-  ARG_TOKEN_CGP,
-  ARG_TOKEN_MOVES,
-  ARG_TOKEN_RACK,
-  ARG_TOKEN_RANDOM_RACK,
-  ARG_TOKEN_GEN,
-  ARG_TOKEN_SIM,
-  ARG_TOKEN_SNOPRUNE,
-  ARG_TOKEN_GEN_AND_SIM,
-  ARG_TOKEN_RACK_AND_GEN,
-  ARG_TOKEN_RACK_AND_GEN_AND_SIM,
-  ARG_TOKEN_INFER,
-  ARG_TOKEN_ENDGAME,
-  ARG_TOKEN_PEG,
-  ARG_TOKEN_AUTOPLAY,
-  ARG_TOKEN_CONVERT,
-  ARG_TOKEN_CONTRIBUTE,
-  ARG_TOKEN_P1_NAME,
-  ARG_TOKEN_P2_NAME,
-  ARG_TOKEN_LEAVE_GEN,
-  ARG_TOKEN_PAT_GEN,
-  ARG_TOKEN_CREATE_DATA,
-  ARG_TOKEN_DATA_PATH,
-  ARG_TOKEN_BINGO_BONUS,
-  ARG_TOKEN_CHALLENGE_BONUS,
-  ARG_TOKEN_BOARD_LAYOUT,
-  ARG_TOKEN_GAME_VARIANT,
-  ARG_TOKEN_LETTER_DISTRIBUTION,
-  ARG_TOKEN_LEXICON,
-  ARG_TOKEN_USE_WMP,
-  ARG_TOKEN_USE_RIT,
-  ARG_TOKEN_USE_MMAP_FOR_RIT,
-  ARG_TOKEN_USE_WIT,
-  ARG_TOKEN_LEAVES,
-  ARG_TOKEN_PAT,
-  ARG_TOKEN_PAT_CLASSES,
-  ARG_TOKEN_PAT_CANDIDATES,
-  ARG_TOKEN_PAT_ROLLOUT,
-  ARG_TOKEN_PAT_ROLLOUT_CLASSES,
-  ARG_TOKEN_P1_LEXICON,
-  ARG_TOKEN_P1_USE_WMP,
-  ARG_TOKEN_P1_USE_RIT,
-  ARG_TOKEN_P1_USE_WIT,
-  ARG_TOKEN_P1_LEAVES,
-  ARG_TOKEN_P1_PAT,
-  ARG_TOKEN_P1_PAT_CLASSES,
-  ARG_TOKEN_P1_PAT_CANDIDATES,
-  ARG_TOKEN_P1_PAT_ROLLOUT,
-  ARG_TOKEN_P1_PAT_ROLLOUT_CLASSES,
-  ARG_TOKEN_P1_MOVE_SORT_TYPE,
-  ARG_TOKEN_P1_MOVE_RECORD_TYPE,
-  ARG_TOKEN_P2_LEXICON,
-  ARG_TOKEN_P2_USE_WMP,
-  ARG_TOKEN_P2_USE_RIT,
-  ARG_TOKEN_P2_USE_WIT,
-  ARG_TOKEN_P2_LEAVES,
-  ARG_TOKEN_P2_PAT,
-  ARG_TOKEN_P2_PAT_CLASSES,
-  ARG_TOKEN_P2_PAT_CANDIDATES,
-  ARG_TOKEN_P2_PAT_ROLLOUT,
-  ARG_TOKEN_P2_PAT_ROLLOUT_CLASSES,
-  ARG_TOKEN_P2_MOVE_SORT_TYPE,
-  ARG_TOKEN_P2_MOVE_RECORD_TYPE,
-  ARG_TOKEN_WIN_PCT,
-  ARG_TOKEN_PLIES,
-  ARG_TOKEN_SHPLIES,
-  ARG_TOKEN_SHOW_BU,
-  ARG_TOKEN_ENDGAME_PLIES,
-  ARG_TOKEN_ENDGAME_TOP_K,
-  ARG_TOKEN_ENDGAME_TIME_LIMIT,
-  ARG_TOKEN_ENDGAME_BEST_REPLY,
-  ARG_TOKEN_PEG_TOP_K,
-  ARG_TOKEN_PEG_TIME_LIMIT,
-  ARG_TOKEN_PEG_STRIDE,
-  ARG_TOKEN_PEG_NOPRUNE,
-  ARG_TOKEN_PEG_PESSIMISTIC,
-  ARG_TOKEN_PEG_NESTED,
-  ARG_TOKEN_PEG_OUTCOMES,
-  ARG_TOKEN_PEG_JSON,
-  ARG_TOKEN_PEG_OUT_WIDTH,
-  ARG_TOKEN_PEG_OUT_LINES,
-  ARG_TOKEN_NUMBER_OF_PLAYS,
-  ARG_TOKEN_MAX_NUMBER_OF_DISPLAY_PLAYS,
-  ARG_TOKEN_NUMBER_OF_SMALL_PLAYS,
-  ARG_TOKEN_MAX_ITERATIONS,
-  ARG_TOKEN_MOVEGEN_LIMIT,
-  ARG_TOKEN_STOP_COND_PCT,
-  ARG_TOKEN_INFERENCE_MARGIN,
-  ARG_TOKEN_MOVEGEN_MARGIN,
-  ARG_TOKEN_MIN_PLAY_ITERATIONS,
-  ARG_TOKEN_USE_GAME_PAIRS,
-  ARG_TOKEN_USE_SMALL_PLAYS,
-  ARG_TOKEN_SIM_WITH_INFERENCE,
-  ARG_TOKEN_SIM_MARGIN_FORECAST,
-  ARG_TOKEN_SIM_BAG_CYCLE,
-  ARG_TOKEN_USE_HEAT_MAP,
-  ARG_TOKEN_WRITE_BUFFER_SIZE,
-  ARG_TOKEN_HUMAN_READABLE,
-  ARG_TOKEN_SHOW_MISTAKES,
-  ARG_TOKEN_RANDOM_SEED,
-  ARG_TOKEN_NUMBER_OF_THREADS,
-  ARG_TOKEN_PRINT_INTERVAL,
-  ARG_TOKEN_EXEC_MODE,
-  ARG_TOKEN_TT_FRACTION_OF_MEM,
-  ARG_TOKEN_TIME_LIMIT,
-  ARG_TOKEN_SAMPLING_RULE,
-  ARG_TOKEN_THRESHOLD,
-  ARG_TOKEN_CUTOFF,
-  ARG_TOKEN_UTILITY_W_WINPCT,
-  ARG_TOKEN_UTILITY_W_SPREAD,
-  ARG_TOKEN_UTILITY_SPREAD_SCALE,
-  ARG_TOKEN_LOAD,
-  ARG_TOKEN_NEW_GAME,
-  ARG_TOKEN_EXPORT,
-  ARG_TOKEN_COMMIT,
-  ARG_TOKEN_TOP_COMMIT,
-  ARG_TOKEN_CHALLENGE,
-  ARG_TOKEN_UNCHALLENGE,
-  ARG_TOKEN_OVERTIME,
-  ARG_TOKEN_SWITCH_NAMES,
-  ARG_TOKEN_SHOW_GAME,
-  ARG_TOKEN_SHOW_MOVES,
-  ARG_TOKEN_SHOW_INFERENCE,
-  ARG_TOKEN_SHOW_ENDGAME,
-  ARG_TOKEN_SHOW_PEG,
-  ARG_TOKEN_SHOW_HEAT_MAP,
-  ARG_TOKEN_NEXT,
-  ARG_TOKEN_PREVIOUS,
-  ARG_TOKEN_GOTO,
-  ARG_TOKEN_NOTE,
-  ARG_TOKEN_CNOTE,
-  ARG_TOKEN_PRINT_BOARDS,
-  ARG_TOKEN_BOARD_COLOR,
-  ARG_TOKEN_BOARD_TILE_GLYPHS,
-  ARG_TOKEN_BOARD_BORDER,
-  ARG_TOKEN_BOARD_COLUMN_LABEL,
-  ARG_TOKEN_ON_TURN_MARKER,
-  ARG_TOKEN_ON_TURN_COLOR,
-  ARG_TOKEN_ON_TURN_SCORE_STYLE,
-  ARG_TOKEN_PRETTY,
-  ARG_TOKEN_PRINT_ON_FINISH,
-  ARG_TOKEN_SHOW_PROMPT,
-  ARG_TOKEN_SAVE_SETTINGS,
-  ARG_TOKEN_AUTOSAVE_GCG,
-  ARG_TOKEN_FG_REQUIRED,
-  ARG_TOKEN_SHOW_GAME_WITH_MOVES,
-  ARG_TOKEN_P1_SIM_PLIES,
-  ARG_TOKEN_P2_SIM_PLIES,
-  ARG_TOKEN_P1_NUM_PLAYS,
-  ARG_TOKEN_P2_NUM_PLAYS,
-  ARG_TOKEN_P1_STOP_COND_PCT,
-  ARG_TOKEN_P2_STOP_COND_PCT,
-  ARG_TOKEN_P1_MAX_ITERATIONS,
-  ARG_TOKEN_P2_MAX_ITERATIONS,
-  ARG_TOKEN_P1_MIN_PLAY_ITERATIONS,
-  ARG_TOKEN_P2_MIN_PLAY_ITERATIONS,
-  ARG_TOKEN_PAT_LABEL_PLIES,
-  ARG_TOKEN_P1_SIM_WITH_INFERENCE,
-  ARG_TOKEN_P2_SIM_WITH_INFERENCE,
-  ARG_TOKEN_P1_SIM_MARGIN_FORECAST,
-  ARG_TOKEN_P2_SIM_MARGIN_FORECAST,
-  ARG_TOKEN_P1_SIM_BAG_CYCLE,
-  ARG_TOKEN_P2_SIM_BAG_CYCLE,
-  ARG_TOKEN_P1_TIME_LIMIT,
-  ARG_TOKEN_P2_TIME_LIMIT,
-  ARG_TOKEN_MOVE_BUDGET,
-  ARG_TOKEN_P1_MOVE_BUDGET,
-  ARG_TOKEN_P2_MOVE_BUDGET,
-  ARG_TOKEN_P1_PLAY_CHOOSER_TIME,
-  ARG_TOKEN_P2_PLAY_CHOOSER_TIME,
-  ARG_TOKEN_OVERTIME_PENALTY_POINTS,
-  ARG_TOKEN_OVERTIME_PERIOD,
-  ARG_TOKEN_P1_THRESHOLD,
-  ARG_TOKEN_P2_THRESHOLD,
-  ARG_TOKEN_P1_SAMPLING_RULE,
-  ARG_TOKEN_P2_SAMPLING_RULE,
-  ARG_TOKEN_P1_UTILITY_W_WINPCT,
-  ARG_TOKEN_P2_UTILITY_W_WINPCT,
-  ARG_TOKEN_P1_UTILITY_W_SPREAD,
-  ARG_TOKEN_P2_UTILITY_W_SPREAD,
-  ARG_TOKEN_P1_UTILITY_SPREAD_SCALE,
-  ARG_TOKEN_P2_UTILITY_SPREAD_SCALE,
-  ARG_TOKEN_P1_INFERENCE_MARGIN,
-  ARG_TOKEN_P2_INFERENCE_MARGIN,
-  ARG_TOKEN_P1_ENDGAME_PLIES,
-  ARG_TOKEN_P2_ENDGAME_PLIES,
-  ARG_TOKEN_P1_PEG_MAX_BAG,
-  ARG_TOKEN_P2_PEG_MAX_BAG,
-  ARG_TOKEN_P1_PEG_TOP_K,
-  ARG_TOKEN_P2_PEG_TOP_K,
-  ARG_TOKEN_P1_PEG_STRIDE,
-  ARG_TOKEN_P2_PEG_STRIDE,
-  ARG_TOKEN_P1_PEG_PESSIMISTIC,
-  ARG_TOKEN_P2_PEG_PESSIMISTIC,
-  ARG_TOKEN_P1_PEG_NESTED,
-  ARG_TOKEN_P2_PEG_NESTED,
-  ARG_TOKEN_PEG_NESTED_CAND_CAPS,
-  ARG_TOKEN_PEG_NESTED_DEPTH,
-  ARG_TOKEN_PEG_NESTED_STRIDES,
-  ARG_TOKEN_MULTI_THREADING_MODE,
-  ARG_TOKEN_ANALYZE,
-  ARG_TOKEN_VERSION,
-  ARG_TOKEN_BUILDERS,
-  ARG_TOKEN_DATA,
-  // This must always be the last
-  // token for the count to be accurate
-  NUMBER_OF_ARG_TOKENS
-} arg_token_t;
 
 typedef void (*command_exec_func_t)(Config *, ErrorStack *);
 typedef char *(*command_api_func_t)(Config *, ErrorStack *);
@@ -340,11 +147,17 @@ struct Config {
   char *data_paths;
   // See ConfigArgs.
   bool build_missing_wordmaps;
-  // PEG "never prune" move list (space-free UCGI, comma-separated), persisted
-  // across commands since pargs reset each parse. NULL = no protected moves.
-  // The "only solve" restriction is instead a per-invocation positional
-  // argument on the peg command itself (see ARG_TOKEN_PEG).
-  char *peg_noprune_str;
+  // Per table type and player: set to auto (-wmp, -rit, -wit auto), so the
+  // table is used when this machine has room for it. Only the WMP, RIT and
+  // WIT entries are used.
+  bool table_auto[NUMBER_OF_DATA][2];
+  // The last line config_choose_auto_tables printed, so it says it again only
+  // when what it decided changes.
+  char *auto_table_report;
+  // The last peg solve's positionals (the candidate set and the move list,
+  // NULL when not given), so that `peg resume` repeats them.
+  char *peg_last_set_str;
+  char *peg_last_moves_str;
   uint64_t max_iterations;
   // Each command's movegen budget (gen_start_movegen_limit); 0 is none.
   uint64_t movegen_limit;
@@ -357,8 +170,9 @@ struct Config {
   char *record_filepath;
   char *settings_filename;
   double tt_fraction_of_mem;
+  // The sim time limit. Each solver has its own, which no other reads; 0 is
+  // unlimited for all of them.
   double time_limit_seconds;
-  // 0 = fall back to time_limit_seconds.
   double endgame_time_limit_seconds;
   double peg_time_limit_seconds;
   uint64_t seed;
@@ -438,6 +252,9 @@ struct Config {
   // PEG scenario-sampling stride (halving stages, bag >= 3). 0 = solver
   // default.
   int peg_num_stages;
+  // The endgame depth of a solve that keeps every candidate (-pegplies); 0 =
+  // to the end of the game.
+  int peg_plies;
   int peg_scenario_stride;
   // AUTOPLAY_TYPE_LEAVE_GEN only: see AutoplayArgs.leavegen_max_games, which
   // this feeds via config_fill_autoplay_args. 0 = unbounded (the CLI
@@ -480,8 +297,15 @@ struct Config {
   bool ld_changed;
   // Show the blended utility (BU) column when printing sim results.
   bool show_bu;
-  // PEG pessimistic opponent model (-pegpess); else rational (the default).
+  // PEG pessimistic opponent model (-pegpess, the default); else rational.
   bool peg_pessimistic;
+  // Whether -pegncaps, -pegndepth and -pegnstrides were given. They set the
+  // nested schedule of both autoplay players (solver_settings) and of the peg
+  // command and analyze; until they are given, peg and analyze use the
+  // schedule that suits the solve (config_fill_peg_args).
+  bool peg_nested_cand_caps_set;
+  bool peg_nested_depth_set;
+  bool peg_nested_strides_set;
   // PEG nested inner-peg lookahead for non-emptier leaves (-pegnested). On by
   // default (depth 1); off restores the flat greedy/pessimistic rollout.
   bool peg_nested;
@@ -491,6 +315,14 @@ struct Config {
   bool human_readable;
   bool peg_json;
   bool show_mistakes;
+  // The largest bag analyze solves with PEG (-apegmaxbag); 0 = none.
+  int analyze_peg_max_bag;
+  // Whether -eplies was given; until then analyze searches its endgame
+  // turns to the end of the game.
+  bool endgame_plies_set;
+  // Whether analyze's endgame turns are solved with a full window, for their
+  // exact spreads (-aegspread), rather than first-win.
+  bool analyze_endgame_spread;
   bool use_small_plays;
   bool sim_with_inference;
   bool sim_margin_forecast;
@@ -853,6 +685,7 @@ bool config_continue_on_coldstart(const Config *config) {
   // commands
   return config->exec_parg_token == ARG_TOKEN_SET ||
          config->exec_parg_token == ARG_TOKEN_CGP ||
+         config->exec_parg_token == ARG_TOKEN_LOAD ||
          !config_exec_parg_is_set(config) ||
          config_get_parg_num_set_values(config, ARG_TOKEN_EXEC_MODE) > 0;
 }
@@ -923,16 +756,6 @@ static void config_reset_peg_results(Config *config) {
   config->peg_outcomes_board = NULL;
   ld_destroy(config->peg_outcomes_ld);
   config->peg_outcomes_ld = NULL;
-}
-
-// The -pnoprune moves name squares on one board, so a command that replaces
-// the position drops them, unless that same command sets new ones.
-static void config_clear_peg_noprune_unless_set(Config *config) {
-  if (config_get_parg_num_set_values(config, ARG_TOKEN_PEG_NOPRUNE) > 0) {
-    return;
-  }
-  free(config->peg_noprune_str);
-  config->peg_noprune_str = NULL;
 }
 
 void config_invalidate_everything(Config *config,
@@ -1370,7 +1193,109 @@ arg_token_t get_token_from_string(Config *config, const char *arg_name,
   return NUMBER_OF_ARG_TOKENS;
 }
 
-// The help for the PAT options (see add_help_arg_to_string_builder).
+// The help for the table options, analyze's PEG and endgame options and the
+// settings file's version (see help_entry_fill).
+static void add_analyze_and_settings_help_arg(arg_token_t arg_token,
+                                              const char **usages,
+                                              const char **examples,
+                                              const char **text) {
+  switch (arg_token) {
+  case ARG_TOKEN_USE_WMP:
+    usages[0] = "<auto_true_or_false>";
+    examples[0] = "auto";
+    examples[1] = "false";
+    *text = "Specifies whether to use word maps as opposed to KWGs when "
+            "generating moves. They are 3-4 times faster but use more memory. "
+            "auto (the default for the command line program and the "
+            "library's magpie_create()) uses one when this machine has the "
+            "disk and memory for it, building a missing one on first use for "
+            "data from 'data fetch', and otherwise plays without; true "
+            "requires one; false never uses one. The wordmap, word info table "
+            "and rack info table share the room, wordmaps first. Off for the "
+            "browser build and browser games.";
+    break;
+  case ARG_TOKEN_USE_RIT:
+    usages[0] = "<auto_true_or_false>";
+    examples[0] = "auto";
+    examples[1] = "false";
+    *text = "Specifies whether to use the precomputed rack info table when "
+            "generating moves. The table stores leave values for every "
+            "possible full rack, so a single hash lookup replaces repeated "
+            "KLV traversal: about 17% faster simulation with a wordmap. It "
+            "belongs to a lexicon played with a set of leaves, and is the "
+            "file <lexicon>.<leaves>.rit (or <lexicon>.rit for the lexicon's "
+            "own leaves), built with 'convert klvwmp2rit'. auto (the default "
+            "for the command line program and the library) uses one when "
+            "this machine has the disk and memory for it, building a missing "
+            "one on first use for data from 'data fetch' as it does the "
+            "wordmap, and otherwise plays without: it is 1.9 GB for English. "
+            "A table built from another lexicon or other leaves is left out "
+            "under auto. Tables built on first use are listed in "
+            "auto_tables.txt in the data directory and are the only ones "
+            "deleted: the least recently used, when a build needs the room "
+            "or they pass 8 GB together. true requires one, built from the "
+            "player's lexicon and leaves; false never uses one.";
+    break;
+  case ARG_TOKEN_USE_MMAP_FOR_RIT:
+    usages[0] = "<true_or_false>";
+    examples[0] = "true";
+    examples[1] = "false";
+    *text = "When true, the rack info table is memory-mapped instead of read "
+            "into allocated memory. This eliminates the startup cost of "
+            "loading the file and lets processes using the same data share "
+            "one copy, but pages are faulted on demand during play. Only "
+            "supported on little-endian architectures, where it is the "
+            "default for the command line program and the library.";
+    break;
+  case ARG_TOKEN_USE_WIT:
+    usages[0] = "<auto_true_or_false>";
+    examples[0] = "auto";
+    examples[1] = "false";
+    *text = "Specifies whether to use the precomputed word info table when "
+            "generating moves. The table stores, for each word, the letters "
+            "usable in longer words containing it as a substring, letting "
+            "movegen prune subracks that cannot fit: about 9% faster "
+            "simulation with a wordmap. auto (the default for the command "
+            "line program and the library) uses one when this machine has "
+            "the disk and memory for it, building a missing one on first use "
+            "for data from 'data fetch'; true requires one; false never uses "
+            "one. Built with 'convert kwg2wit'.";
+    break;
+  case ARG_TOKEN_ANALYZE_ENDGAME_SPREAD:
+    usages[0] = "<true_or_false>";
+    examples[0] = "true";
+    *text = "Specifies whether analyze solves its endgame turns with a full "
+            "window. That reports their exact spreads and spread lost. False "
+            "by default: they are solved first-win, which proves each play's "
+            "result -- win, draw or loss -- and grades a turn on the result "
+            "alone, much faster.";
+    break;
+  case ARG_TOKEN_ANALYZE_PEG_MAX_BAG:
+    usages[0] = "<bag_size>";
+    examples[0] = "2";
+    examples[1] = "0";
+    *text = "The largest bag, from 0 to 4 tiles, that analyze solves with the "
+            "pre-endgame solver. Larger bags are simulated. 0 simulates "
+            "every pre-endgame turn. Defaults to 1: a complete pre-endgame "
+            "solve at 1 in the bag usually takes seconds to minutes, but at 2 "
+            "or more it often takes well over 5 minutes, and a time limit "
+            "(-pegtlim) gives the quicker staged cascade instead.";
+    break;
+  case ARG_TOKEN_SETTINGS_VERSION:
+    usages[0] = "<version>";
+    examples[0] = "2";
+    *text = "Records the format of a saved settings file; -savesettings "
+            "writes it. A file saved by an older version recorded every "
+            "setting, including defaults that have since changed, so those "
+            "settings are dropped when it is loaded and the new defaults "
+            "apply.";
+    break;
+  default:
+    break;
+  }
+}
+
+// The help for the PAT options (see help_entry_fill).
 static void add_pat_help_arg(arg_token_t arg_token, const char **usages,
                              const char **examples, const char **text) {
   switch (arg_token) {
@@ -1378,8 +1303,8 @@ static void add_pat_help_arg(arg_token_t arg_token, const char **usages,
     usages[0] = "<gen1_games>,<gen2_games>,... [<output_name>]";
     examples[0] = "50000,50000,50000";
     examples[1] = "20000,20000 english_pat";
-    *text = "Trains PAT weights (see the 'pat' option) by self-play: "
-            "each generation plays the given number of games, recording the "
+    *text = "Trains PAT weights (see the 'pat' option) by self-play. Each "
+            "generation plays the given number of games, recording the "
             "post-move premium-square access features of every move and the "
             "opponent's "
             "reply score, then refits the weights by ridge regression and "
@@ -1413,13 +1338,14 @@ static void add_pat_help_arg(arg_token_t arg_token, const char **usages,
     usages[0] = "<class>[,<class>...]";
     examples[0] = "tws,windows";
     examples[1] = "all";
-    *text = "Specifies which classes of the loaded PAT weights apply to "
-            "the player's own move generation (static play and the "
-            "candidates a simulation starts from): a comma-separated list "
-            "from tws, dws, tls, dls, qws, qls and windows, or 'all' (the "
-            "default). A class left out costs nothing to evaluate, as if "
-            "the weights scored it zero. 'patclasses' sets both players; "
-            "'patclasses1' and 'patclasses2' set one.";
+    *text =
+        "Specifies which classes of the loaded PAT weights apply to the "
+        "player's own move generation. That is static play and the candidates "
+        "a simulation starts from, and the classes are a comma-separated list "
+        "from tws, dws, tls, dls, qws, qls and windows, or 'all' (the "
+        "default). A class left out costs nothing to evaluate, as if "
+        "the weights scored it zero. 'patclasses' sets both players; "
+        "'patclasses1' and 'patclasses2' set one.";
     break;
   case ARG_TOKEN_PAT_CANDIDATES:
   case ARG_TOKEN_P1_PAT_CANDIDATES:
@@ -1428,7 +1354,7 @@ static void add_pat_help_arg(arg_token_t arg_token, const char **usages,
     examples[0] = "true";
     examples[1] = "false";
     *text = "Specifies whether the loaded PAT weights apply to the player's "
-            "own move generation: static play and the candidates a "
+            "own move generation. That is static play and the candidates a "
             "simulation starts from. Defaults to true. 'patcand' sets both "
             "players; 'patcand1' and 'patcand2' set one.";
     break;
@@ -1439,8 +1365,8 @@ static void add_pat_help_arg(arg_token_t arg_token, const char **usages,
     examples[0] = "true";
     examples[1] = "false";
     *text = "Specifies whether PAT applies in the rollouts of the player's "
-            "simulations, to both sides' plies (each with its own "
-            "weights). Defaults to true. 'patrollout' sets both players; "
+            "simulations. It applies to both sides' plies, each with its own "
+            "weights. Defaults to true. 'patrollout' sets both players; "
             "'patrollout1' and 'patrollout2' set one.";
     break;
   case ARG_TOKEN_PAT_ROLLOUT_CLASSES:
@@ -1449,9 +1375,9 @@ static void add_pat_help_arg(arg_token_t arg_token, const char **usages,
     usages[0] = "<class>[,<class>...]";
     examples[0] = "tws,windows";
     examples[1] = "all";
-    *text = "Specifies which PAT classes apply in the rollouts of the "
-            "player's simulations, independently of 'patclasses': for "
-            "example cheaper rollouts while the candidates use every "
+    *text = "Specifies which PAT classes apply in the rollouts of the player's "
+            "simulations. This is independent of 'patclasses': for example "
+            "cheaper rollouts while the candidates use every "
             "class. Defaults to tws,windows (qws,tws,windows on 21x21 "
             "boards), which keeps most of full PAT's value at a fraction "
             "of its cost; all uses every class. "
@@ -1460,8 +1386,8 @@ static void add_pat_help_arg(arg_token_t arg_token, const char **usages,
     break;
   case ARG_TOKEN_PAT_LABEL_PLIES:
     usages[0] = "<plies>";
-    *text = "Specifies how many plies of net result a PAT training "
-            "label spans: 1 is the opponent's reply score alone, and higher "
+    *text = "Specifies how many plies of net result a PAT training label "
+            "spans. 1 is the opponent's reply score alone, and higher "
             "values subtract what the observing player scores back and add "
             "what the opponent scores after that.";
     break;
@@ -1471,7 +1397,7 @@ static void add_pat_help_arg(arg_token_t arg_token, const char **usages,
 }
 
 // The help for the players' autoplay endgame and pre-endgame options (see
-// add_help_arg_to_string_builder).
+// help_entry_fill).
 static void add_player_solver_help_arg(arg_token_t arg_token,
                                        const char **usages,
                                        const char **examples,
@@ -1495,11 +1421,12 @@ static void add_player_solver_help_arg(arg_token_t arg_token,
     usages[0] = "<bag_size>";
     examples[0] = "0";
     examples[1] = "4";
-    *text = "Has player 1 or 2 solve the pre-endgame during autoplay while "
-            "the bag holds 1 to this many tiles (at most 4). 0 (the default) "
-            "turns it off, and so does -eplies1/-eplies2 0. The schedule is "
-            "-pegtopk1/2, -pegstride1/2, -pegpess1/2, -pegnested1/2, "
-            "-pegncaps, -pegndepth and -pegnstrides; no time limit applies.";
+    *text =
+        "Has player 1 or 2 solve the pre-endgame during autoplay. It does so "
+        "while the bag holds 1 to this many tiles (at most 4). 0 (the default) "
+        "turns it off, and so does -eplies1/-eplies2 0. The schedule is "
+        "-pegtopk1/2, -pegstride1/2, -pegpess1/2, -pegnested1/2, "
+        "-pegncaps, -pegndepth and -pegnstrides; no time limit applies.";
     break;
   case ARG_TOKEN_P1_PEG_TOP_K:
   case ARG_TOKEN_P2_PEG_TOP_K:
@@ -1535,23 +1462,30 @@ static void add_player_solver_help_arg(arg_token_t arg_token,
   case ARG_TOKEN_PEG_NESTED_CAND_CAPS:
     usages[0] = "<cap1>,<cap2>,...";
     examples[0] = "8,4,2";
-    *text = "Per-level candidate caps of the nested lookahead in both "
-            "players' autoplay pre-endgame solves. Each must be >= 1. "
-            "Defaults to 8,4,2.";
+    *text = "Per-level candidate caps of the nested PEG lookahead. They apply "
+            "to the peg command, analyze and both players' autoplay "
+            "pre-endgame solves. "
+            "Each must be >= 1. Defaults to 8,4,2 for autoplay and a timed "
+            "peg, and to every candidate (up to 64) for a complete one.";
     break;
   case ARG_TOKEN_PEG_NESTED_DEPTH:
     usages[0] = "<depth>";
     examples[0] = "1";
-    *text = "How many nested pre-endgames deep both players' autoplay "
-            "pre-endgame solves look before a greedy rollout, from 1 to 4. "
-            "Defaults to 1.";
+    *text = "How many nested pre-endgames deep PEG looks before a greedy "
+            "rollout, from 1 to 24. This applies to the peg command, analyze "
+            "and both players' autoplay pre-endgame solves. Defaults to 1 for "
+            "autoplay and a timed "
+            "peg, and to 24, as deep as a game can need, for a complete one.";
     break;
   case ARG_TOKEN_PEG_NESTED_STRIDES:
     usages[0] = "<bag1>,<bag2>,<bag3>,<bag4>";
     examples[0] = "1,1,5,7";
-    *text = "Scenario-sampling stride of an inner pre-endgame with a bag of "
-            "1, 2, 3 and 4 tiles, in both players' autoplay pre-endgame "
-            "solves. Each must be >= 1. Defaults to 1,1,5,7.";
+    *text =
+        "Scenario-sampling stride of an inner pre-endgame with a bag of 1, 2, "
+        "3 and 4 tiles. This applies to the peg command, analyze and both "
+        "players' autoplay pre-endgame solves. Each must be >= 1. "
+        "Defaults to 1,1,5,7 for autoplay and a timed peg, and to 1 (every "
+        "scenario) for a complete one.";
     break;
   default:
     break;
@@ -1559,14 +1493,15 @@ static void add_player_solver_help_arg(arg_token_t arg_token,
 }
 
 // Help
-// The contribute and convert commands' help, apart from
-// add_help_arg_to_string_builder to keep it under the function-size limit:
+// The contribute and convert commands' help, apart from help_entry_fill to
+// keep it under the function-size limit:
 // each fills usages and examples and returns the text.
 static const char *contribute_help(const char **usages, const char **examples) {
   usages[0] = "[<settings_path>]";
   examples[0] = "";
   examples[1] = "my_contribute.txt";
-  return "Contributes to birdtest: claims tasks, executes them with MAGPIE's "
+  return "Contributes to birdtest by running its server's tasks. It claims "
+         "tasks, executes them with MAGPIE's "
          "own command API, and submits the results, repeating until the "
          "server has no more work or the settings file's maxtasks is "
          "reached. Settings (server, apikey, uuid, threads, maxtasks, "
@@ -1600,8 +1535,9 @@ static const char *convert_help(const char **usages, const char **examples) {
   examples[5] = "text2wordmap NWL20";
   examples[6] = "kwg2witifneeded CSW24";
   examples[7] = "winpct CSW24_winpct_record CSW24_winpct";
-  return "Runs the convert command for the specified type with the given "
-         "input and output name, using different file extensions. The letter "
+  return "Converts a data file to another format. The type picks the "
+         "conversion, and the input and output share the given name with "
+         "different file extensions. The letter "
          "distribution defaults to the lexicon's distribution. Types include "
          "text2kwg, text2wordmap, dawg2wordmap, dawg2text, csv2klv, klv2csv, "
          "klvwmp2rit, rackequity2klv, kwg2wit, kwg2witifneeded, kwg2witv4 and "
@@ -1632,17 +1568,57 @@ static const char *convert_help(const char **usages, const char **examples) {
          "xs/english-v1 in the configured data paths.";
 }
 
-void add_help_arg_to_string_builder(const Config *config, int token,
-                                    StringBuilder *sb,
-                                    const bool show_async_commands,
-                                    const bool short_form) {
-  const char *examples[10] = {NULL};
-  const char *usages[10] = {NULL};
+// A hotkey letter reaches the first command that claims it, so a later one
+// (rrack, after rack) is typed by its shortest unambiguous name instead.
+static bool help_hotkey_reaches_arg(const Config *config,
+                                    const arg_token_t arg_token) {
+  const ParsedArg *parg = config_get_parg(config, arg_token);
+  if (!parg->is_hotkey) {
+    return false;
+  }
+  for (int token_idx = 0; token_idx < (int)arg_token; token_idx++) {
+    const ParsedArg *other_parg = config_get_parg(config, token_idx);
+    if (other_parg->is_hotkey && other_parg->name[0] == parg->name[0]) {
+      return false;
+    }
+  }
+  return true;
+}
+
+// The short name, when it differs from the full name, then the full name, each
+// with the prefix they are typed with.
+static void add_help_names(StringBuilder *sb, const char *prefix,
+                           const char *short_name, const char *name,
+                           const char *separator) {
+  if (!strings_equal(short_name, name)) {
+    string_builder_add_formatted_string(sb, "%s%s%s", prefix, short_name,
+                                        separator);
+  }
+  string_builder_add_formatted_string(sb, "%s%s", prefix, name);
+}
+
+// What help has to say about a command or option.
+typedef struct HelpEntry {
+  const char *usages[HELP_MAX_LINES];
+  const char *examples[HELP_MAX_LINES];
+  const char *text;
+  const char *name;
+  const char *short_name;
+  // What the name is typed after: the dash of an option.
+  const char *prefix;
+  // Holds short_name when that is a hotkey.
+  char hotkey_name[2];
+} HelpEntry;
+
+static void help_entry_fill(const Config *config, int token,
+                            const bool is_async_command, HelpEntry *entry) {
+  const char **usages = entry->usages;
+  const char **examples = entry->examples;
   const char *text = "";
-  bool is_hotkey = false;
   const char *name = NULL;
   const char *shortest_unambiguous_name = NULL;
-  if (show_async_commands) {
+  entry->prefix = "";
+  if (is_async_command) {
     async_token_t async_token = token;
     switch (async_token) {
     case ASYNC_STOP_COMMAND_TOKEN:
@@ -1657,6 +1633,12 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       name = ASYNC_STATUS_COMMAND_STRING;
       shortest_unambiguous_name = ASYNC_STATUS_COMMAND_STRING_SHORT;
       break;
+    case ASYNC_SHOW_GAME_COMMAND_TOKEN:
+      usages[0] = "";
+      text = "Shows the game while a command runs, as shgame does.";
+      name = ASYNC_SHOW_GAME_COMMAND_STRING;
+      shortest_unambiguous_name = ASYNC_SHOW_GAME_COMMAND_STRING_SHORT;
+      break;
     case NUMBER_OF_ASYNC_COMMAND_TOKENS:
       log_fatal("encountered unexpected async command token in help command");
       break;
@@ -1664,9 +1646,15 @@ void add_help_arg_to_string_builder(const Config *config, int token,
   } else {
     arg_token_t arg_token = token;
     const ParsedArg *parg = config_get_parg(config, arg_token);
-    is_hotkey = parg->is_hotkey;
     name = parg->name;
     shortest_unambiguous_name = parg->shortest_unambiguous_name;
+    if (help_hotkey_reaches_arg(config, arg_token)) {
+      entry->hotkey_name[0] = name[0];
+      shortest_unambiguous_name = entry->hotkey_name;
+    }
+    if (!parg->is_command) {
+      entry->prefix = "-";
+    }
     switch (arg_token) {
     case ARG_TOKEN_PAT_GEN:
     case ARG_TOKEN_PAT:
@@ -1688,11 +1676,15 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       add_pat_help_arg(arg_token, usages, examples, &text);
       break;
     case ARG_TOKEN_HELP:
-      usages[0] = "[<command_or_arg>]";
+      usages[0] = "[<command_or_option>]";
       examples[0] = "";
       examples[1] = "infer";
-      text = "Prints a short description of all commands and arguments. Use "
-             "'help <command>' for full usage details.";
+      examples[2] = "numplays";
+      examples[3] = "options";
+      text =
+          "Prints the commands by task. Use 'help <command>' for a command's "
+          "usage and options, 'help <option>' for one option and the "
+          "commands that use it, and 'help options' for every option.";
       break;
     case ARG_TOKEN_SET:
       usages[0] = "<option1> <value1> <option2> <value2> ...";
@@ -1737,17 +1729,20 @@ void add_help_arg_to_string_builder(const Config *config, int token,
              "sim to use a completely random rack.";
       break;
     case ARG_TOKEN_SNOPRUNE:
-      usages[0] = "[[<opponent_known_rack>] <move1>[,<move2>,...]]";
+      usages[0] = "[[<opponent_known_rack>], <move1>[,<move2>,...]]";
       examples[0] = "";
-      examples[1] = "8G QI";
-      examples[2] = "- 8G QI,8H QI";
-      examples[3] = "ABC 8G QI,8H QI";
-      text = "Runs a Monte Carlo simulation for the current position, "
-             "preventing the BAI algorithm from pruning the specified moves. "
-             "An optional opponent rack may precede the comma-separated move "
-             "list; if omitted the opponent's currently known rack is used. "
-             "Use '-' to force a random opponent rack. Moves are "
-             "comma-separated and may contain spaces (e.g. '8G QI').";
+      examples[1] = ", 8G QI";
+      examples[2] = "-, 8G QI,8H QI";
+      examples[3] = "ABC, 8G QI,8H QI";
+      examples[4] = "8G.QI,8H.QI";
+      text = "Simulates the current position, preventing the BAI algorithm "
+             "from pruning the specified moves. "
+             "The move list follows an optional opponent rack and a comma; "
+             "with no rack before the comma, the opponent's currently known "
+             "rack is used, and '-' forces a random opponent rack. Moves are "
+             "comma-separated, with a space (8G QI) or, as peg takes them, a "
+             "period (8G.QI) after the coordinate; a list in the period "
+             "format needs no comma before it when there is no rack.";
       break;
     case ARG_TOKEN_GEN_AND_SIM:
       usages[0] = "[<opponent_known_rack>]";
@@ -1800,21 +1795,28 @@ void add_help_arg_to_string_builder(const Config *config, int token,
              "even when it falls outside the top-K.";
       break;
     case ARG_TOKEN_PEG:
-      usages[0] = "";
-      usages[1] = "<moves>";
-      usages[2] = "empty";
-      examples[0] = "11J.MEH,1F.VENeY";
-      examples[1] = "8D.WORD,pass";
-      examples[2] = "empty";
+      usages[0] = "[<candidate_set> [<moves>]]";
+      usages[1] = "only <moves>";
+      usages[2] = "resume";
+      examples[0] = "";
+      examples[1] = "all";
+      examples[2] = "empty 8D.WORD";
+      examples[3] = "leaves2 8D.WORD,11J.MEH";
+      examples[4] = "only 11J.MEH,1F.VENeY,pass";
+      examples[5] = "resume";
       text =
-          "Runs the pre-endgame (PEG) solver on the current position (1..4 "
-          "tiles in the bag). With no argument, evaluates every generated "
-          "move. An optional positional argument restricts the root "
-          "candidates: comma-separated space-free UCGI moves (coordinate and "
-          "tiles joined by a period, e.g. 11J.MEH, and pass as pass; "
-          "exchanges are not valid PEG moves), or the case-insensitive word "
-          "'empty' to restrict to every generated move that would empty the "
-          "bag (plays at least as many tiles as remain in the bag).";
+          "Runs the pre-endgame (PEG) solver on the current position. The bag "
+          "must hold 1 to 4 tiles, or up to 7 when every candidate leaves at "
+          "most 4. "
+          "The first argument is the candidate set: leaves<N>, the moves that "
+          "leave at most N tiles in the bag (leaves1 when it is not given); "
+          "empty, which is leaves0; all, every move; only, exactly the moves "
+          "that follow; or resume, which continues the last interrupted solve "
+          "from its checkpoint (kept only when -pegjson and -pegoutcomes are "
+          "both true). The optional second argument lists moves to add to the "
+          "set and keep through every stage: comma-separated space-free UCGI "
+          "moves, coordinate and tiles joined by a period (11J.MEH), and pass "
+          "as pass. Exchanges are not pre-endgame moves.";
       break;
     case ARG_TOKEN_AUTOPLAY:
       usages[0] = "<type1> <num_games>";
@@ -1877,8 +1879,12 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       examples[2] = "testdata/";
       examples[3] = "Alice";
       examples[4] = "testdata/game.gcg Alice,Bob";
-      text = "Analyzes each turn of a GCG game using simulation or endgame "
-             "solving. With 0 args, analyzes the currently loaded game. With 1 "
+      text = "Analyzes each turn of a GCG game. A turn gets a static "
+             "evaluation when -plies is 0, the pre-endgame solver when 1 to "
+             "-apegmaxbag (1 by default) tiles are in the bag, the endgame "
+             "solver when the bag is empty, and simulation otherwise. With 0 "
+             "args, analyzes the currently "
+             "loaded game. With 1 "
              "arg, the argument is interpreted as a directory, a GCG file, or "
              "a comma-delimited player name list for the current game. With 2 "
              "args, the first is a GCG file or directory and the second is a "
@@ -2023,7 +2029,16 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       break;
     case ARG_TOKEN_SHOW_PEG:
       usages[0] = "";
-      text = "Shows the PEG result.";
+      usages[1] = "<number>";
+      usages[2] = "all";
+      examples[0] = "";
+      examples[1] = "20";
+      examples[2] = "all";
+      text =
+          "Shows the PEG result as status shows a running PEG. That is a "
+          "summary, then the ranking's first 10 rows and the solved plays "
+          "ranked below them. Optionally takes how many rows to show first, or "
+          "'all' for every play.";
       break;
     case ARG_TOKEN_SHOW_HEAT_MAP:
       usages[0] = "<play_index> [<ply> <type>]";
@@ -2121,9 +2136,9 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       examples[0] = "classic";
       examples[1] = "wordsmog";
       examples[2] = "woadwage";
-      text = "Specifies the game variant: classic; wordsmog, where a word "
-             "is played as any anagram of a word; or woadwage, where a word "
-             "may also be two words run together.";
+      text = "Specifies the game variant: classic, wordsmog or woadwage. In "
+             "wordsmog, a word is played as any anagram of a word; in "
+             "woadwage, a word may also be two words run together.";
       break;
     case ARG_TOKEN_LETTER_DISTRIBUTION:
       usages[0] = "<letter_distribution>";
@@ -2139,45 +2154,10 @@ void add_help_arg_to_string_builder(const Config *config, int token,
              "'l1' or 'l2' options.";
       break;
     case ARG_TOKEN_USE_WMP:
-      usages[0] = "<true_or_false>";
-      examples[0] = "true";
-      examples[1] = "false";
-      text = "Specifies whether to use word maps as opposed to KWGs when "
-             "generating moves. Word maps are much faster but use more memory "
-             "and are on by default.";
-      break;
     case ARG_TOKEN_USE_RIT:
-      usages[0] = "<true_or_false>";
-      examples[0] = "true";
-      examples[1] = "false";
-      text = "Specifies whether to use the precomputed rack info table when "
-             "generating moves. The table stores leave values (and, in the "
-             "future, other per-rack data) for every possible full rack, "
-             "enabling a single hash lookup to replace repeated KLV traversal. "
-             "Each player loads the table named after their leaves, so "
-             "players with different leaves need a table for each, and a "
-             "table whose leave values are not the leaves' is refused. "
-             "Off by default because .rit files are large and must be built "
-             "with the klvwmp2rit convert command.";
-      break;
     case ARG_TOKEN_USE_MMAP_FOR_RIT:
-      usages[0] = "<true_or_false>";
-      examples[0] = "true";
-      examples[1] = "false";
-      text = "When true, the rack info table is memory-mapped instead of read "
-             "into allocated memory. This eliminates the startup cost of "
-             "loading the file but pages are faulted on demand during play. "
-             "Only supported on little-endian architectures.";
-      break;
     case ARG_TOKEN_USE_WIT:
-      usages[0] = "<true_or_false>";
-      examples[0] = "true";
-      examples[1] = "false";
-      text = "Specifies whether to use the precomputed word info table when "
-             "generating moves. The table stores, for each word, the letters "
-             "usable in longer words containing it as a substring, letting "
-             "movegen prune subracks that cannot fit. Off by default because "
-             ".wit files must be built with the kwg2wit convert command.";
+      add_analyze_and_settings_help_arg(arg_token, usages, examples, &text);
       break;
     case ARG_TOKEN_LEAVES:
       usages[0] = "<leaves>";
@@ -2197,24 +2177,24 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       break;
     case ARG_TOKEN_P1_USE_WMP:
     case ARG_TOKEN_P2_USE_WMP:
-      usages[0] = "<true_or_false>";
-      examples[0] = "true";
+      usages[0] = "<auto_true_or_false>";
+      examples[0] = "auto";
       examples[1] = "false";
       text = "Specifies whether to use word maps as opposed to KWGs when "
              "generating moves for the given player.";
       break;
     case ARG_TOKEN_P1_USE_RIT:
     case ARG_TOKEN_P2_USE_RIT:
-      usages[0] = "<true_or_false>";
-      examples[0] = "true";
+      usages[0] = "<auto_true_or_false>";
+      examples[0] = "auto";
       examples[1] = "false";
       text = "Specifies whether to use the precomputed rack info table when "
              "generating moves for the given player.";
       break;
     case ARG_TOKEN_P1_USE_WIT:
     case ARG_TOKEN_P2_USE_WIT:
-      usages[0] = "<true_or_false>";
-      examples[0] = "true";
+      usages[0] = "<auto_true_or_false>";
+      examples[0] = "auto";
       examples[1] = "false";
       text = "Specifies whether to use the precomputed word info table when "
              "generating moves for the given player.";
@@ -2224,7 +2204,7 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       usages[0] = "<leaves>";
       examples[0] = "CSW21";
       examples[1] = "TWL98";
-      text = "Specifies the leaves for the given player, This can can be used "
+      text = "Specifies the leaves for the given player. This can be used "
              "with the autoplay command to compare different leaves.";
       break;
     case ARG_TOKEN_P1_MOVE_SORT_TYPE:
@@ -2283,7 +2263,9 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       usages[0] = "<endgame_plies>";
       examples[0] = "4";
       examples[1] = "8";
-      text = "Specifies the number of plies to use for solving endgames.";
+      text = "Specifies the number of plies to use for solving endgames. "
+             "Defaults to 6 for the endgame command and to 25, the end of the "
+             "game, for analyze's endgame turns.";
       break;
     case ARG_TOKEN_ENDGAME_TOP_K:
       usages[0] = "<endgame_top_k>";
@@ -2293,13 +2275,15 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       break;
     case ARG_TOKEN_ENDGAME_TIME_LIMIT:
       usages[0] = "<time_limit_seconds>";
-      text = "Specifies the time limit in seconds for the endgame solver. A "
-             "value of 0 (the default) falls back to -tlim.";
+      text = "Specifies the time limit in seconds for the endgame solver. It "
+             "applies to the endgame command and analyze's endgame turns. A "
+             "value of 0 "
+             "(the default) is unlimited.";
       break;
     case ARG_TOKEN_ENDGAME_BEST_REPLY:
       usages[0] = "<true/false>";
       examples[0] = "false";
-      text = "Endgame solver shortcuts next to the leaves: true (default) = "
+      text = "Endgame solver shortcuts next to the leaves. true (default) = "
              "find the side to move's best play there without generating its "
              "whole move list, and search it first one ply above the leaves; "
              "false = generate every list. Applies to endgame and pre-endgame "
@@ -2311,8 +2295,31 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       break;
     case ARG_TOKEN_PEG_TIME_LIMIT:
       usages[0] = "<time_limit_seconds>";
-      text = "Specifies the time limit in seconds for the pre-endgame solver. "
-             "A value of 0 (the default) falls back to -tlim.";
+      text =
+          "Specifies the time limit in seconds for the pre-endgame solver. It "
+          "applies to the peg command and analyze's pre-endgame turns. A value "
+          "of "
+          "0 (the default) is unlimited. The limit picks the strategy: with "
+          "none and no -pegtopk, the solve is complete (every candidate "
+          "solved with first-win endgames -pegplies deep, cut once it cannot "
+          "reach the best, so spreads are not shown); with one, it is the "
+          "staged cascade (see -pegtopk), which always has an answer from its "
+          "last completed stage.";
+      break;
+    case ARG_TOKEN_PEG_PLIES:
+      usages[0] = "<plies|end>";
+      examples[0] = "6";
+      examples[1] = "end";
+      text =
+          "The endgame depth of the pre-endgame solver's complete solve. That "
+          "is a solve with no -pegtlim or -pegtopk, or with -pegtopk all, in "
+          "the peg command and in "
+          "analyze's pre-endgame turns. Each endgame once the bag is empty "
+          "is searched this many plies deep, and a line still going there is "
+          "finished by a greedy playout, so its results are estimates, which "
+          "can be wrong when a line turns after that depth. end (or 0) "
+          "searches every line to the end of the game, so its results are "
+          "proven, and can take minutes at 1 in the bag. Defaults to 3.";
       break;
     case ARG_TOKEN_PEG_TOP_K:
       usages[0] = "<count1>,<count2>,...";
@@ -2328,8 +2335,9 @@ void add_help_arg_to_string_builder(const Config *config, int token,
           "after "
           "stage 0, then narrows 16/8/4/2 across the halving stages). A single "
           "'all' (or 0) is the EXHAUSTIVE setting: keep every candidate and "
-          "solve each at full endgame depth in one deep stage, with full "
-          "scenario enumeration (ignores -pegstride). Realistic at 1-in-bag, "
+          "solve each in one deep stage, its endgames -pegplies deep, with "
+          "full scenario enumeration (ignores -pegstride). Realistic at "
+          "1-in-bag, "
           "astronomically slow at higher bag counts. Each count must be "
           "'all'/0 "
           "or an integer >= 2.";
@@ -2338,8 +2346,8 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       usages[0] = "<stride>";
       examples[0] = "7";
       examples[1] = "1";
-      text = "PEG scenario-sampling stride for the halving stages (bag >= 3): "
-             "set > 1 to evaluate ~1/stride of the scenarios, reweighted to "
+      text = "PEG scenario-sampling stride for the halving stages (bag >= 3). "
+             "Set > 1 to evaluate ~1/stride of the scenarios, reweighted to "
              "preserve the expected aggregate (faster, approximate). Default "
              "(<= 1) is full enumeration. Ignored for bag <= 2.";
       break;
@@ -2347,27 +2355,30 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       usages[0] = "<moves>";
       examples[0] = "11J.MEH";
       examples[1] = "8D.WORD,J11.BUM";
-      text = "Protects a set of moves from being pruned by the PEG cascade "
-             "(like the simmer's snoprune): each stage carries them to the "
-             "deepest fidelity even when their win%% rank falls below the cut. "
-             "Same space-free UCGI format as the peg command's move-list "
-             "positional argument. Use '-' to clear.";
+      text = "Removed. Give the moves to protect as the peg command's second "
+             "argument (peg leaves1 8D.WORD), which adds them to the "
+             "candidates and carries them through every stage for that one "
+             "solve.";
       break;
     case ARG_TOKEN_PEG_PESSIMISTIC:
       usages[0] = "<true/false>";
       examples[0] = "true";
-      text = "PEG opponent model: true = pessimistic (the opponent plays the "
-             "worst-for-the-mover reply, i.e. guaranteed-win analysis); false "
-             "(default) = rational (the opponent plays its best-equity reply).";
+      text = "PEG opponent model. true (the default) = pessimistic: wherever "
+             "the opponent replies, it tries every reply as if it could see "
+             "the mover's rack and the bag order and plays the worst one for "
+             "the mover, so a win% is a guaranteed lower bound. false = "
+             "rational: the opponent chooses from what it can see, and its "
+             "choice is scored on the actual racks.";
       break;
     case ARG_TOKEN_PEG_NESTED:
       usages[0] = "<true/false>";
       examples[0] = "false";
       text =
-          "PEG non-emptier leaf evaluation: true (default) = nested inner-peg "
-          "lookahead (solve the opponent's sub-pre-endgame, depth 1); false = "
-          "flat greedy/pessimistic rollout. Nested wins more decisions but "
-          "costs more per solve.";
+          "PEG non-emptier leaf evaluation. true (default) = nested inner-peg "
+          "lookahead (solve the opponent's sub-pre-endgame; see -pegndepth, "
+          "-pegncaps and -pegnstrides for its schedule); false = flat "
+          "greedy/pessimistic rollout. Nested wins more decisions but costs "
+          "more per solve.";
       break;
     case ARG_TOKEN_PEG_JSON:
       usages[0] = "<true/false>";
@@ -2378,7 +2389,7 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       usages[0] = "<true/false>";
       examples[0] = "true";
       text =
-          "When true, adds a per-play outcomes column to the graded table: the "
+          "When true, adds a per-play outcomes column to the graded table. The "
           "largest of the winning / losing / tying draw lists is implied by "
           "the "
           "counts and the smaller ones are shown, comma-separated with "
@@ -2389,14 +2400,14 @@ void add_help_arg_to_string_builder(const Config *config, int token,
           "multiset (FGHI) when order is irrelevant, or a slash-joined "
           "sequence "
           "(F/G/H/I) when it matters; each carries an xN labeled-ordering "
-          "weight. Default false.";
+          "weight. Default true.";
       break;
     case ARG_TOKEN_PEG_OUT_WIDTH:
       usages[0] = "<columns>";
       examples[0] = "100";
       examples[1] = "0";
       text = "Maximum whole-line width for the graded outcomes column "
-             "(default 100). The column wraps at token boundaries, indented "
+             "(default 200). The column wraps at token boundaries, indented "
              "under its header; the width is clamped up so a cell always fits "
              "its label plus one worst-case token. 0 = unbounded (no wrap).";
       break;
@@ -2434,8 +2445,8 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       examples[0] = "1000000";
       examples[1] = "0";
       text = "Stops a command once it has generated moves this many times, "
-             "counted across all its threads: a work budget that, unlike a "
-             "time limit, is the same on any machine. The command keeps what "
+             "counted across all its threads. This work budget, unlike a time "
+             "limit, is the same on any machine. The command keeps what "
              "it has done and stops where it next checks for an interrupt, so "
              "it runs somewhat past the limit, never short of it. 0, the "
              "default, is no limit.";
@@ -2444,8 +2455,8 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       usages[0] = "<max_iterations>";
       examples[0] = "100";
       examples[1] = "1000";
-      text = "Specifies the maximum total number of iterations across all "
-             "simulated plays to perform before stopping.";
+      text = "Specifies the maximum total iterations across all simulated "
+             "plays to perform before stopping.";
       break;
     case ARG_TOKEN_STOP_COND_PCT:
       usages[0] = "<stop_cond_pct>";
@@ -2515,10 +2526,10 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       usages[0] = "<true_or_false>";
       examples[0] = "true";
       examples[1] = "false";
-      text = "Specifies whether simulations project each nonterminal "
-             "horizon's spread to the end of the game with the win "
-             "percentage table's expected swing for that bag and rack "
-             "state. The projection feeds the equity and the spread term "
+      text = "Specifies whether simulations project each nonterminal horizon's "
+             "spread to the end of the game. The projection uses the win "
+             "percentage table's expected swing for that bag and rack state. "
+             "The projection feeds the equity and the spread term "
              "of the utility blend.";
       break;
     case ARG_TOKEN_SIM_BAG_CYCLE:
@@ -2526,8 +2537,8 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       examples[0] = "true";
       examples[1] = "false";
       text = "Specifies whether each simulation sample plays every rotation of "
-             "its shuffled bag by the rack size, until the rotations wrap "
-             "around, and counts their mean as one sample. Every unseen tile "
+             "its shuffled bag. Rotations go by the rack size until they wrap "
+             "around, and their mean counts as one sample. Every unseen tile "
              "starts on the opponent's rack once per shuffle. Iterations and "
              "minimum iterations still count rollouts, and every play gets at "
              "least two cycles. On by default.";
@@ -2559,8 +2570,13 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       examples[0] = "true";
       examples[1] = "false";
       text = "Specifies whether analyze grades each turn into a discrete "
-             "mistake size (small/medium/large) and includes mistake counts "
-             "and the mistake index (MI) in its output. Off by default.";
+             "mistake size (small/medium/large). Its output then includes "
+             "mistake counts and the mistake index (MI). Off by default.";
+      break;
+    case ARG_TOKEN_ANALYZE_ENDGAME_SPREAD:
+    case ARG_TOKEN_ANALYZE_PEG_MAX_BAG:
+    case ARG_TOKEN_SETTINGS_VERSION:
+      add_analyze_and_settings_help_arg(arg_token, usages, examples, &text);
       break;
     case ARG_TOKEN_RANDOM_SEED:
       usages[0] = "<random_seed>";
@@ -2572,7 +2588,8 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       usages[0] = "<number_of_threads>";
       examples[0] = "1";
       examples[1] = "4";
-      text = "Specifies the number of threads to use when running commands.";
+      text = "Specifies the number of threads to use when running commands. "
+             "PEG uses this many pool threads, plus the calling thread.";
       break;
     case ARG_TOKEN_PRINT_INTERVAL:
       usages[0] = "<print_interval>";
@@ -2603,8 +2620,11 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       usages[0] = "<time_limit>";
       examples[0] = "10";
       examples[1] = "0.05";
-      text = "Specifies the time limit in seconds for simulations. "
-             "Fractional values (e.g. 0.05 for 50 ms) are supported.";
+      text = "Specifies the time limit in seconds for simulations, 60 by "
+             "default; 0 is unlimited. It bounds only simulations: the endgame "
+             "and pre-endgame solvers have their own limits (-etlim, "
+             "-pegtlim), and inference has none. Fractional values (e.g. 0.05 "
+             "for 50 ms) are supported.";
       break;
     case ARG_TOKEN_SAMPLING_RULE:
       usages[0] = "<sampling_rule>";
@@ -2662,7 +2682,7 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       usages[0] = "<points>";
       examples[0] = "100.0";
       text = "Scale (in spread points) of the logistic sigmoid that maps "
-             "rollout spread into [0, 1]: spread_sigmoid = "
+             "rollout spread into [0, 1]. spread_sigmoid = "
              "1/(1+exp(-spread/uspreadscale)). Controls the slope of the "
              "sigmoid -- the derivative at spread=0 is 1/(4*uspreadscale). "
              "At spread = +/-uspreadscale the sigmoid is ~0.731 / ~0.269. "
@@ -2750,8 +2770,8 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       usages[0] = "<true_or_false>";
       examples[0] = "true";
       examples[1] = "false";
-      text = "Specifies whether or not to display the game board to the right "
-             "of moves when showing moves or simulation results.";
+      text = "Specifies whether to display the game board to the right of "
+             "moves or simulation results.";
       break;
     case ARG_TOKEN_SHOW_PROMPT:
       usages[0] = "<true_or_false>";
@@ -2822,7 +2842,7 @@ void add_help_arg_to_string_builder(const Config *config, int token,
     case ARG_TOKEN_P2_SIM_MARGIN_FORECAST:
       usages[0] = "<true_or_false>";
       text = "Specifies whether simulation projects the final margin (see "
-             "smargin) for player 1 or 2 during autoplay.";
+             "smargin) for player 1 or 2 in autoplay.";
       break;
     case ARG_TOKEN_MOVE_BUDGET:
     case ARG_TOKEN_P1_MOVE_BUDGET:
@@ -2831,7 +2851,7 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       examples[0] = "50000";
       examples[1] = "0";
       text = "Specifies the move generations a player may spend choosing one "
-             "move: its inference, simulation and solving together "
+             "move. That covers its inference, simulation and solving together "
              "(movebudget for both players, mb1 or mb2 for one). When it is "
              "spent the player plays its best move so far, even short of the "
              "simulation's minimum iterations. Unlike a time limit, a budget "
@@ -2842,9 +2862,8 @@ void add_help_arg_to_string_builder(const Config *config, int token,
     case ARG_TOKEN_P1_SIM_BAG_CYCLE:
     case ARG_TOKEN_P2_SIM_BAG_CYCLE:
       usages[0] = "<true_or_false>";
-      text = "Specifies whether simulation cycles each sample's bag through "
-             "its rotations (see sbagcycle) for player 1 or 2 during "
-             "autoplay.";
+      text = "Specifies whether simulation cycles each sample's bag (see "
+             "sbagcycle) for player 1 or 2 in autoplay.";
       break;
     case ARG_TOKEN_P1_TIME_LIMIT:
     case ARG_TOKEN_P2_TIME_LIMIT:
@@ -2857,8 +2876,8 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       usages[0] = "<milliseconds>";
       examples[0] = "30000";
       examples[1] = "-1";
-      text = "Enables PlayChooser for player 1 or 2 during autoplay and sets "
-             "that player's total per-game clock in milliseconds. -1 "
+      text = "Enables PlayChooser for player 1 or 2 during autoplay. The value "
+             "is that player's total per-game clock in milliseconds. -1 "
              "disables PlayChooser for the player (the default); 0 enables "
              "it without a clock. A clocked player's games are not "
              "reproducible from the seed: how much search fits in the budget "
@@ -2903,8 +2922,9 @@ void add_help_arg_to_string_builder(const Config *config, int token,
     case ARG_TOKEN_P1_INFERENCE_MARGIN:
     case ARG_TOKEN_P2_INFERENCE_MARGIN:
       usages[0] = "<inference_equity_margin>";
-      text = "Specifies the maximum equity loss for an opponent's play when "
-             "running an inference for player 1 or 2 during autoplay.";
+      text = "Specifies the inference margin for player 1 or 2 during "
+             "autoplay. That is the maximum equity loss for an opponent's play "
+             "when running an inference.";
       break;
     case ARG_TOKEN_P1_ENDGAME_PLIES:
     case ARG_TOKEN_P2_ENDGAME_PLIES:
@@ -2943,18 +2963,19 @@ void add_help_arg_to_string_builder(const Config *config, int token,
     case ARG_TOKEN_DATA:
       usages[0] = "fetch [<base_url>]";
       examples[0] = "fetch";
-      text = "Downloads the data set this version of MAGPIE goes with (lexica, "
-             "leaves, layouts, letter distributions, win percentages; about "
-             "195 MB) into the first data path, as download_data.sh does, "
-             "checking every part against the SHA-256 MAGPIE pins for it. Does "
+      text = "Downloads the data set this version of MAGPIE goes with into the "
+             "first data path. It holds lexica, leaves, layouts, letter "
+             "distributions and win percentages, about 195 MB. Like "
+             "download_data.sh, this checks every part against the SHA-256 "
+             "MAGPIE pins for it. Does "
              "nothing if that data version is already there. <base_url> "
              "fetches the same parts from a mirror.";
       break;
     case ARG_TOKEN_BUILDERS:
       usages[0] = "";
-      text = "Prints, as JSON, the versions of the builders that derive one "
-             "data file from another (wordmap, rack info table, KLV) and the "
-             "instruction-set target this binary was compiled for. A "
+      text = "Prints, as JSON, this binary's builder versions and "
+             "instruction-set target. The builders derive one data file from "
+             "another (wordmap, rack info table, KLV). A "
              "derived file's bytes are only comparable between two builds "
              "that agree on these.";
       break;
@@ -2963,355 +2984,310 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       break;
     }
   }
-  if (short_form) {
-    if (is_hotkey) {
-      string_builder_add_char(sb, name[0]);
-    } else {
-      string_builder_add_string(sb, shortest_unambiguous_name);
-    }
-    string_builder_add_char(sb, ',');
-    string_builder_add_string(sb, name);
-    string_builder_add_string(sb, " - ");
-    const char *dot = strchr(text, '.');
-    const int text_len = dot ? (int)(dot - text + 1) : (int)strlen(text);
-    string_builder_add_formatted_string(sb, "%.*s\n", text_len, text);
-    return;
-  }
+  entry->text = text;
+  entry->name = name;
+  entry->short_name = shortest_unambiguous_name;
+}
 
-  if (is_hotkey) {
-    string_builder_add_formatted_string(sb, "%c, %s", name[0], name);
-  } else {
-    string_builder_add_formatted_string(sb, "%s, %s", shortest_unambiguous_name,
-                                        name);
+// The length of the entry's first sentence, which is all a list shows of it.
+// A dot inside a word, as in settings.txt or 0.5, does not end the sentence.
+static int help_entry_summary_length(const HelpEntry *entry) {
+  const char *text = entry->text;
+  for (const char *dot = strchr(text, '.'); dot; dot = strchr(dot + 1, '.')) {
+    if (dot[1] == ' ' || dot[1] == '\0') {
+      return (int)(dot - text + 1);
+    }
   }
+  return (int)strlen(text);
+}
+
+// A command's line in the index.
+static void add_help_entry_row(const HelpEntry *entry, StringBuilder *sb) {
+  StringBuilder *names_sb = string_builder_create();
+  add_help_names(names_sb, entry->prefix, entry->short_name, entry->name, ", ");
+  string_builder_add_formatted_string(
+      sb, "  %-*s  %.*s\n", HELP_COMMAND_NAME_WIDTH,
+      string_builder_peek(names_sb), help_entry_summary_length(entry),
+      entry->text);
+  string_builder_destroy(names_sb);
+}
+
+static void add_help_entry_details(const HelpEntry *entry, StringBuilder *sb) {
+  add_help_names(sb, entry->prefix, entry->short_name, entry->name, ", ");
 
   string_builder_add_formatted_string(sb, "\n\n%*sUsage:\n\n", HELP_INDENT, "");
 
   int usages_index = 0;
-  while (usages[usages_index]) {
-    string_builder_add_formatted_string(sb, "%*s%s %s\n", HELP_INDENT + 2, "",
-                                        name, usages[usages_index]);
+  while (entry->usages[usages_index]) {
+    string_builder_add_formatted_string(sb, "%*s%s%s %s\n", HELP_INDENT + 2, "",
+                                        entry->prefix, entry->name,
+                                        entry->usages[usages_index]);
     usages_index++;
   }
 
-  if (examples[0]) {
+  if (entry->examples[0]) {
     string_builder_add_formatted_string(sb, "\n%*sExamples:\n\n", HELP_INDENT,
                                         "");
     int example_index = 0;
-    while (examples[example_index]) {
-      string_builder_add_formatted_string(sb, "%*s%s %s\n", HELP_INDENT + 2, "",
-                                          name, examples[example_index]);
+    while (entry->examples[example_index]) {
+      string_builder_add_formatted_string(sb, "%*s%s%s %s\n", HELP_INDENT + 2,
+                                          "", entry->prefix, entry->name,
+                                          entry->examples[example_index]);
       example_index++;
     }
   }
 
-  string_builder_add_formatted_string(sb, "\n%*s%s\n\n", HELP_INDENT, "", text);
+  string_builder_add_formatted_string(sb, "\n%*s%s\n\n", HELP_INDENT, "",
+                                      entry->text);
+}
+
+void config_add_help_summary(const Config *config, arg_token_t arg_token,
+                             StringBuilder *sb) {
+  HelpEntry entry = {0};
+  help_entry_fill(config, arg_token, false, &entry);
+  string_builder_add_formatted_string(
+      sb, "%.*s", help_entry_summary_length(&entry), entry.text);
+}
+
+static void add_help_arg_to_string_builder(const Config *config, int token,
+                                           StringBuilder *sb,
+                                           const bool is_async_command) {
+  HelpEntry entry = {0};
+  help_entry_fill(config, token, is_async_command, &entry);
+  add_help_entry_details(&entry, sb);
+}
+
+// The async command the help argument names, which is any prefix of the
+// command's name from its short name on, or NUMBER_OF_ASYNC_COMMAND_TOKENS.
+// The async shgame is not looked up: help gives the shgame command for it.
+static async_token_t get_help_async_token(const char *help_arg) {
+  if (has_prefix(ASYNC_STOP_COMMAND_STRING_SHORT, help_arg) &&
+      has_prefix(help_arg, ASYNC_STOP_COMMAND_STRING)) {
+    return ASYNC_STOP_COMMAND_TOKEN;
+  }
+  if (has_prefix(ASYNC_STATUS_COMMAND_STRING_SHORT, help_arg) &&
+      has_prefix(help_arg, ASYNC_STATUS_COMMAND_STRING)) {
+    return ASYNC_STATUS_COMMAND_TOKEN;
+  }
+  return NUMBER_OF_ASYNC_COMMAND_TOKENS;
+}
+
+// An option row's names as they are typed, and its summary, which is the first
+// form's.
+static void add_help_option_row(const Config *config, const HelpOptionRow *row,
+                                const int indent, StringBuilder *names_sb,
+                                StringBuilder *sb) {
+  const arg_token_t forms[] = {row->both_players, row->player_one,
+                               row->player_two};
+  const size_t num_forms = sizeof(forms) / sizeof(forms[0]);
+  arg_token_t first_form = NUMBER_OF_ARG_TOKENS;
+  string_builder_clear(names_sb);
+  for (size_t form_idx = 0; form_idx < num_forms; form_idx++) {
+    if (forms[form_idx] == NUMBER_OF_ARG_TOKENS) {
+      continue;
+    }
+    string_builder_add_formatted_string(
+        names_sb, "%s-%s", first_form == NUMBER_OF_ARG_TOKENS ? "" : ", ",
+        config_get_parg(config, forms[form_idx])->name);
+    if (first_form == NUMBER_OF_ARG_TOKENS) {
+      first_form = forms[form_idx];
+    }
+  }
+  const char *names = string_builder_peek(names_sb);
+  if (string_builder_length(names_sb) > HELP_OPTION_NAME_WIDTH) {
+    string_builder_add_formatted_string(sb, "%*s%s\n%*s", indent, "", names,
+                                        indent + HELP_OPTION_NAME_WIDTH + 2,
+                                        "");
+  } else {
+    string_builder_add_formatted_string(sb, "%*s%-*s  ", indent, "",
+                                        HELP_OPTION_NAME_WIDTH, names);
+  }
+  config_add_help_summary(config, first_form, sb);
+  string_builder_add_char(sb, '\n');
+}
+
+static void add_help_option_group(const Config *config,
+                                  const help_option_group_t group_id,
+                                  const int indent, StringBuilder *sb) {
+  const HelpOptionGroup *group = help_table_get_option_group(group_id);
+  string_builder_add_formatted_string(sb, "%*s%s\n\n", indent, "",
+                                      group->title);
+  StringBuilder *names_sb = string_builder_create();
+  for (int row_idx = 0; row_idx < group->num_rows; row_idx++) {
+    add_help_option_row(config, &group->rows[row_idx], indent + 2, names_sb,
+                        sb);
+  }
+  string_builder_destroy(names_sb);
+  string_builder_add_char(sb, '\n');
+}
+
+// The options the help for a command lists, then where to find the rest of the
+// options it uses.
+static void add_help_command_groups(const Config *config,
+                                    const arg_token_t command,
+                                    StringBuilder *sb) {
+  bool has_pointers = false;
+  for (int group_idx = 0; group_idx < NUMBER_OF_HELP_OPTION_GROUPS;
+       group_idx++) {
+    if (help_table_command_lists_group(command, group_idx)) {
+      add_help_option_group(config, group_idx, HELP_INDENT, sb);
+    }
+    has_pointers =
+        has_pointers || help_table_command_points_to_group(command, group_idx);
+  }
+  if (!has_pointers) {
+    return;
+  }
+  string_builder_add_formatted_string(sb, "%*sAlso uses\n\n", HELP_INDENT, "");
+  for (int group_idx = 0; group_idx < NUMBER_OF_HELP_OPTION_GROUPS;
+       group_idx++) {
+    if (help_table_command_points_to_group(command, group_idx)) {
+      const HelpOptionGroup *group = help_table_get_option_group(group_idx);
+      string_builder_add_formatted_string(
+          sb, "%*s%-*s  help %s\n", HELP_INDENT + 2, "", HELP_OPTION_NAME_WIDTH,
+          group->title, group->help_subject);
+    }
+  }
+  string_builder_add_char(sb, '\n');
+}
+
+// The commands that use an option, or for a shared option where to find the
+// others like it.
+static void add_help_option_commands(const Config *config,
+                                     const arg_token_t option,
+                                     StringBuilder *sb) {
+  const help_option_group_t group_id = help_table_find_option_group(option);
+  const HelpOptionGroup *group = help_table_get_option_group(group_id);
+  if (group->is_shared) {
+    string_builder_add_formatted_string(sb, "%*s%s: help %s\n\n", HELP_INDENT,
+                                        "", group->title, group->help_subject);
+    return;
+  }
+  string_builder_add_formatted_string(sb, "%*sUsed by:", HELP_INDENT, "");
+  const char *separator = " ";
+  const int num_sections = help_table_get_num_command_sections();
+  for (int section_idx = 0; section_idx < num_sections; section_idx++) {
+    const HelpCommandSection *section =
+        help_table_get_command_section(section_idx);
+    for (int command_idx = 0; command_idx < section->num_commands;
+         command_idx++) {
+      const arg_token_t command = section->commands[command_idx];
+      // setoptions sets every option without using any of them.
+      if (command != ARG_TOKEN_SET &&
+          (help_table_command_lists_group(command, group_id) ||
+           help_table_command_points_to_group(command, group_id))) {
+        string_builder_add_formatted_string(
+            sb, "%s%s", separator, config_get_parg(config, command)->name);
+        separator = ", ";
+      }
+    }
+  }
+  string_builder_add_string(sb, "\n\n");
+}
+
+// Adds the option list a topic names, and returns whether it names one.
+static bool add_help_topic(const Config *config, const char *help_arg,
+                           StringBuilder *sb) {
+  const bool wants_all_options =
+      strings_equal(help_arg, HELP_TOPIC_ALL_OPTIONS);
+  bool is_topic = wants_all_options;
+  for (int group_idx = 0; group_idx < NUMBER_OF_HELP_OPTION_GROUPS;
+       group_idx++) {
+    const HelpOptionGroup *group = help_table_get_option_group(group_idx);
+    if (wants_all_options ||
+        (group->is_shared && strings_equal(help_arg, group->help_subject))) {
+      add_help_option_group(config, group_idx, 0, sb);
+      is_topic = true;
+    }
+  }
+  return is_topic;
+}
+
+// Adds the help for what the help command was given.
+static void add_help_subject(Config *config, const char *help_arg,
+                             StringBuilder *sb, ErrorStack *error_stack) {
+  const async_token_t async_token = get_help_async_token(help_arg);
+  if (async_token != NUMBER_OF_ASYNC_COMMAND_TOKENS) {
+    add_help_arg_to_string_builder(config, async_token, sb, true);
+    return;
+  }
+  if (add_help_topic(config, help_arg, sb)) {
+    return;
+  }
+  const arg_token_t arg_token =
+      get_token_from_string(config, help_arg, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  add_help_arg_to_string_builder(config, arg_token, sb, false);
+  if (config_get_parg(config, arg_token)->is_command) {
+    add_help_command_groups(config, arg_token, sb);
+  } else {
+    add_help_option_commands(config, arg_token, sb);
+  }
+}
+
+static void add_help_index_row(const Config *config, const int token,
+                               const bool is_async_command, StringBuilder *sb) {
+  HelpEntry entry = {0};
+  help_entry_fill(config, token, is_async_command, &entry);
+  add_help_entry_row(&entry, sb);
+}
+
+// Adds what the help command prints when it is given nothing.
+static void add_help_index(const Config *config, StringBuilder *sb) {
+  string_builder_add_string(sb, "Commands by task. Use 'help <command>' for a "
+                                "command's usage and options.\n\n");
+  const int num_sections = help_table_get_num_command_sections();
+  for (int section_idx = 0; section_idx < num_sections; section_idx++) {
+    const HelpCommandSection *section =
+        help_table_get_command_section(section_idx);
+    string_builder_add_formatted_string(sb, "%s\n\n", section->title);
+    for (int command_idx = 0; command_idx < section->num_commands;
+         command_idx++) {
+      add_help_index_row(config, section->commands[command_idx], false, sb);
+    }
+    string_builder_add_char(sb, '\n');
+  }
+  string_builder_add_string(sb, "While a command runs\n\n");
+  add_help_index_row(config, ASYNC_SHOW_GAME_COMMAND_TOKEN, true, sb);
+  add_help_index_row(config, ASYNC_STATUS_COMMAND_TOKEN, true, sb);
+  add_help_index_row(config, ASYNC_STOP_COMMAND_TOKEN, true, sb);
+  string_builder_add_string(sb, "\nOptions\n\n");
+  string_builder_add_formatted_string(sb, "  %-*s  Every option.\n",
+                                      HELP_COMMAND_NAME_WIDTH,
+                                      "help " HELP_TOPIC_ALL_OPTIONS);
+  for (int group_idx = 0; group_idx < NUMBER_OF_HELP_OPTION_GROUPS;
+       group_idx++) {
+    const HelpOptionGroup *group = help_table_get_option_group(group_idx);
+    if (group->is_shared) {
+      char *topic_command =
+          get_formatted_string("help %s", group->help_subject);
+      string_builder_add_formatted_string(sb, "  %-*s  %s.\n",
+                                          HELP_COMMAND_NAME_WIDTH,
+                                          topic_command, group->title);
+      free(topic_command);
+    }
+  }
 }
 
 char *impl_help(Config *config, ErrorStack *error_stack) {
   const char *help_arg = config_get_parg_value(config, ARG_TOKEN_HELP, 0);
-  arg_token_t help_arg_token = NUMBER_OF_ARG_TOKENS;
-  if (help_arg) {
-    help_arg_token = get_token_from_string(config, help_arg, error_stack);
-    if (!error_stack_is_empty(error_stack)) {
-      return empty_string();
-    }
+  if (help_arg && help_arg[0] == '-' && help_arg[1] != '\0') {
+    help_arg++;
   }
-
   StringBuilder *sb = string_builder_create();
-  if (help_arg_token == NUMBER_OF_ARG_TOKENS) {
-    // Game Navigation Commands (alphabetical by name)
-    static const arg_token_t game_nav_cmds[] = {
-        ARG_TOKEN_GOTO,     /* goto */
-        ARG_TOKEN_NEXT,     /* next */
-        ARG_TOKEN_PREVIOUS, /* previous */
-    };
-    static const arg_token_t game_anno_cmds[] = {
-        ARG_TOKEN_CHALLENGE,    /* challenge */
-        ARG_TOKEN_CNOTE,        /* cnote */
-        ARG_TOKEN_COMMIT,       /* commit */
-        ARG_TOKEN_EXPORT,       /* export */
-        ARG_TOKEN_LOAD,         /* load */
-        ARG_TOKEN_NEW_GAME,     /* newgame */
-        ARG_TOKEN_NOTE,         /* note */
-        ARG_TOKEN_OVERTIME,     /* overtimepenalty */
-        ARG_TOKEN_P1_NAME,      /* p1 */
-        ARG_TOKEN_P2_NAME,      /* p2 */
-        ARG_TOKEN_RACK,         /* rack */
-        ARG_TOKEN_RANDOM_RACK,  /* rrack */
-        ARG_TOKEN_SWITCH_NAMES, /* switchnames */
-        ARG_TOKEN_TOP_COMMIT,   /* tcommit */
-        ARG_TOKEN_UNCHALLENGE,  /* unchallenge */
-    };
-    // Game Analysis Commands (alphabetical by name)
-    static const arg_token_t game_analysis_cmds[] = {
-        ARG_TOKEN_MOVES,                /* addmoves */
-        ARG_TOKEN_ANALYZE,              /* analyze */
-        ARG_TOKEN_ENDGAME,              /* endgame */
-        ARG_TOKEN_GEN,                  /* generate */
-        ARG_TOKEN_GEN_AND_SIM,          /* gsimulate */
-        ARG_TOKEN_SHOW_HEAT_MAP,        /* heatmap */
-        ARG_TOKEN_INFER,                /* infer */
-        ARG_TOKEN_LEAVE_GEN,            /* leavegen */
-        ARG_TOKEN_PEG,                  /* peg */
-        ARG_TOKEN_RACK_AND_GEN,         /* rg */
-        ARG_TOKEN_RACK_AND_GEN_AND_SIM, /* rgsimulate */
-        ARG_TOKEN_SHOW_ENDGAME,         /* shendgame */
-        ARG_TOKEN_SHOW_GAME,            /* shgame */
-        ARG_TOKEN_SHOW_PEG,             /* shpeg */
-        ARG_TOKEN_SHOW_INFERENCE,       /* shinference */
-        ARG_TOKEN_SHOW_MOVES,           /* shmoves */
-        ARG_TOKEN_SIM,                  /* simulate */
-        ARG_TOKEN_SNOPRUNE,             /* snoprune */
-        ARG_TOKEN_PAT_GEN,              /* patgen */
-    };
-    // Other Commands (alphabetical by name)
-    static const arg_token_t other_cmds[] = {
-        ARG_TOKEN_AUTOPLAY,    /* autoplay */
-        ARG_TOKEN_BUILDERS,    /* builders */
-        ARG_TOKEN_CGP,         /* cgp */
-        ARG_TOKEN_CONVERT,     /* convert */
-        ARG_TOKEN_CONTRIBUTE,  /* contribute */
-        ARG_TOKEN_CREATE_DATA, /* createdata */
-        ARG_TOKEN_DATA,        /* data */
-        ARG_TOKEN_HELP,        /* help */
-        ARG_TOKEN_SET,         /* setoptions */
-        ARG_TOKEN_VERSION,     /* version */
-    };
-    // Player Options (alphabetical by name)
-    static const arg_token_t player_opts[] = {
-        ARG_TOKEN_BINGO_BONUS,            /* bb */
-        ARG_TOKEN_BOARD_LAYOUT,           /* bdn */
-        ARG_TOKEN_CHALLENGE_BONUS,        /* cb */
-        ARG_TOKEN_P1_LEAVES,              /* k1 */
-        ARG_TOKEN_P2_LEAVES,              /* k2 */
-        ARG_TOKEN_P1_LEXICON,             /* l1 */
-        ARG_TOKEN_P2_LEXICON,             /* l2 */
-        ARG_TOKEN_LETTER_DISTRIBUTION,    /* ld */
-        ARG_TOKEN_LEAVES,                 /* leaves */
-        ARG_TOKEN_LEXICON,                /* lex */
-        ARG_TOKEN_P1_MOVE_RECORD_TYPE,    /* r1 */
-        ARG_TOKEN_P2_MOVE_RECORD_TYPE,    /* r2 */
-        ARG_TOKEN_USE_RIT,                /* rit */
-        ARG_TOKEN_P1_USE_RIT,             /* rit1 */
-        ARG_TOKEN_P2_USE_RIT,             /* rit2 */
-        ARG_TOKEN_USE_MMAP_FOR_RIT,       /* ritmmap */
-        ARG_TOKEN_P1_MOVE_SORT_TYPE,      /* s1 */
-        ARG_TOKEN_P2_MOVE_SORT_TYPE,      /* s2 */
-        ARG_TOKEN_PAT,                    /* pat */
-        ARG_TOKEN_P1_PAT,                 /* pat1 */
-        ARG_TOKEN_P2_PAT,                 /* pat2 */
-        ARG_TOKEN_PAT_CANDIDATES,         /* patcand */
-        ARG_TOKEN_P1_PAT_CANDIDATES,      /* patcand1 */
-        ARG_TOKEN_P2_PAT_CANDIDATES,      /* patcand2 */
-        ARG_TOKEN_PAT_CLASSES,            /* patclasses */
-        ARG_TOKEN_P1_PAT_CLASSES,         /* patclasses1 */
-        ARG_TOKEN_P2_PAT_CLASSES,         /* patclasses2 */
-        ARG_TOKEN_PAT_ROLLOUT,            /* patrollout */
-        ARG_TOKEN_P1_PAT_ROLLOUT,         /* patrollout1 */
-        ARG_TOKEN_P2_PAT_ROLLOUT,         /* patrollout2 */
-        ARG_TOKEN_PAT_ROLLOUT_CLASSES,    /* patrolloutclasses */
-        ARG_TOKEN_P1_PAT_ROLLOUT_CLASSES, /* patrolloutclasses1 */
-        ARG_TOKEN_P2_PAT_ROLLOUT_CLASSES, /* patrolloutclasses2 */
-        ARG_TOKEN_GAME_VARIANT,           /* var */
-        ARG_TOKEN_P1_USE_WMP,             /* w1 */
-        ARG_TOKEN_P2_USE_WMP,             /* w2 */
-        ARG_TOKEN_USE_WIT,                /* wit */
-        ARG_TOKEN_P1_USE_WIT,             /* wit1 */
-        ARG_TOKEN_P2_USE_WIT,             /* wit2 */
-        ARG_TOKEN_USE_WMP,                /* wmp */
-    };
-    // Game Analysis Options (alphabetical by name)
-    static const arg_token_t game_analysis_opts[] = {
-        ARG_TOKEN_CUTOFF,                  /* cutoff */
-        ARG_TOKEN_ENDGAME_BEST_REPLY,      /* ebestreply */
-        ARG_TOKEN_ENDGAME_PLIES,           /* eplies */
-        ARG_TOKEN_P1_ENDGAME_PLIES,        /* eplies1 */
-        ARG_TOKEN_P2_ENDGAME_PLIES,        /* eplies2 */
-        ARG_TOKEN_ENDGAME_TIME_LIMIT,      /* etlim */
-        ARG_TOKEN_ENDGAME_TOP_K,           /* etopk */
-        ARG_TOKEN_USE_GAME_PAIRS,          /* gp */
-        ARG_TOKEN_INFERENCE_MARGIN,        /* imargin */
-        ARG_TOKEN_P1_INFERENCE_MARGIN,     /* im1 */
-        ARG_TOKEN_P2_INFERENCE_MARGIN,     /* im2 */
-        ARG_TOKEN_MAX_ITERATIONS,          /* iterations */
-        ARG_TOKEN_P1_MAX_ITERATIONS,       /* i1 */
-        ARG_TOKEN_P2_MAX_ITERATIONS,       /* i2 */
-        ARG_TOKEN_P1_MIN_PLAY_ITERATIONS,  /* mi1 */
-        ARG_TOKEN_P2_MIN_PLAY_ITERATIONS,  /* mi2 */
-        ARG_TOKEN_MIN_PLAY_ITERATIONS,     /* minplayiterations */
-        ARG_TOKEN_SHOW_MISTAKES,           /* mistakes */
-        ARG_TOKEN_P1_MOVE_BUDGET,          /* mb1 */
-        ARG_TOKEN_P2_MOVE_BUDGET,          /* mb2 */
-        ARG_TOKEN_MOVEGEN_MARGIN,          /* mmargin */
-        ARG_TOKEN_MOVE_BUDGET,             /* movebudget */
-        ARG_TOKEN_MULTI_THREADING_MODE,    /* mtmode */
-        ARG_TOKEN_NUMBER_OF_PLAYS,         /* numplays */
-        ARG_TOKEN_NUMBER_OF_SMALL_PLAYS,   /* numsmallplays */
-        ARG_TOKEN_P1_NUM_PLAYS,            /* np1 */
-        ARG_TOKEN_P2_NUM_PLAYS,            /* np2 */
-        ARG_TOKEN_OVERTIME_PENALTY_POINTS, /* otpenalty */
-        ARG_TOKEN_OVERTIME_PERIOD,         /* otperiod */
-        ARG_TOKEN_P1_PLAY_CHOOSER_TIME,    /* pc1 */
-        ARG_TOKEN_P2_PLAY_CHOOSER_TIME,    /* pc2 */
-        ARG_TOKEN_P1_PEG_MAX_BAG,          /* pegbag1 */
-        ARG_TOKEN_P2_PEG_MAX_BAG,          /* pegbag2 */
-        ARG_TOKEN_PEG_NESTED_CAND_CAPS,    /* pegncaps */
-        ARG_TOKEN_PEG_NESTED_DEPTH,        /* pegndepth */
-        ARG_TOKEN_PEG_NESTED,              /* pegnested */
-        ARG_TOKEN_P1_PEG_NESTED,           /* pegnested1 */
-        ARG_TOKEN_P2_PEG_NESTED,           /* pegnested2 */
-        ARG_TOKEN_PEG_NESTED_STRIDES,      /* pegnstrides */
-        ARG_TOKEN_PEG_OUTCOMES,            /* pegoutcomes */
-        ARG_TOKEN_PEG_JSON,                /* pegjson */
-        ARG_TOKEN_PEG_OUT_LINES,           /* pegoutlines */
-        ARG_TOKEN_PEG_OUT_WIDTH,           /* pegoutwidth */
-        ARG_TOKEN_PEG_PESSIMISTIC,         /* pegpess */
-        ARG_TOKEN_P1_PEG_PESSIMISTIC,      /* pegpess1 */
-        ARG_TOKEN_P2_PEG_PESSIMISTIC,      /* pegpess2 */
-        ARG_TOKEN_PEG_STRIDE,              /* pegstride */
-        ARG_TOKEN_P1_PEG_STRIDE,           /* pegstride1 */
-        ARG_TOKEN_P2_PEG_STRIDE,           /* pegstride2 */
-        ARG_TOKEN_PEG_TIME_LIMIT,          /* pegtlim */
-        ARG_TOKEN_PEG_TOP_K,               /* pegtopk */
-        ARG_TOKEN_P1_PEG_TOP_K,            /* pegtopk1 */
-        ARG_TOKEN_P2_PEG_TOP_K,            /* pegtopk2 */
-        ARG_TOKEN_P1_SIM_PLIES,            /* pl1 */
-        ARG_TOKEN_P2_SIM_PLIES,            /* pl2 */
-        ARG_TOKEN_PLIES,                   /* plies */
-        ARG_TOKEN_PEG_NOPRUNE,             /* pnoprune */
-        ARG_TOKEN_STOP_COND_PCT,           /* scondition */
-        ARG_TOKEN_SIM_WITH_INFERENCE,      /* sinfer */
-        ARG_TOKEN_SIM_MARGIN_FORECAST,     /* smargin */
-        ARG_TOKEN_SIM_BAG_CYCLE,           /* sbagcycle */
-        ARG_TOKEN_USE_SMALL_PLAYS,         /* sp */
-        ARG_TOKEN_SAMPLING_RULE,           /* sr */
-        ARG_TOKEN_P1_STOP_COND_PCT,        /* sc1 */
-        ARG_TOKEN_P2_STOP_COND_PCT,        /* sc2 */
-        ARG_TOKEN_PAT_LABEL_PLIES,         /* patplies */
-        ARG_TOKEN_P1_SIM_WITH_INFERENCE,   /* si1 */
-        ARG_TOKEN_P2_SIM_WITH_INFERENCE,   /* si2 */
-        ARG_TOKEN_P1_SIM_MARGIN_FORECAST,  /* sm1 */
-        ARG_TOKEN_P2_SIM_MARGIN_FORECAST,  /* sm2 */
-        ARG_TOKEN_P1_SIM_BAG_CYCLE,        /* sbc1 */
-        ARG_TOKEN_P2_SIM_BAG_CYCLE,        /* sbc2 */
-        ARG_TOKEN_P1_SAMPLING_RULE,        /* sa1 */
-        ARG_TOKEN_P2_SAMPLING_RULE,        /* sa2 */
-        ARG_TOKEN_P1_THRESHOLD,            /* th1 */
-        ARG_TOKEN_P2_THRESHOLD,            /* th2 */
-        ARG_TOKEN_THRESHOLD,               /* threshold */
-        ARG_TOKEN_P1_TIME_LIMIT,           /* tl1 */
-        ARG_TOKEN_P2_TIME_LIMIT,           /* tl2 */
-        ARG_TOKEN_TIME_LIMIT,              /* tlim */
-        ARG_TOKEN_TT_FRACTION_OF_MEM,      /* ttfraction */
-        ARG_TOKEN_USE_HEAT_MAP,            /* useheatmap */
-        ARG_TOKEN_UTILITY_W_SPREAD,        /* uspread */
-        ARG_TOKEN_P1_UTILITY_W_SPREAD,     /* uspread1 */
-        ARG_TOKEN_P2_UTILITY_W_SPREAD,     /* uspread2 */
-        ARG_TOKEN_UTILITY_SPREAD_SCALE,    /* uspreadscale */
-        ARG_TOKEN_P1_UTILITY_SPREAD_SCALE, /* uspreadscale1 */
-        ARG_TOKEN_P2_UTILITY_SPREAD_SCALE, /* uspreadscale2 */
-        ARG_TOKEN_UTILITY_W_WINPCT,        /* uwin */
-        ARG_TOKEN_P1_UTILITY_W_WINPCT,     /* uwin1 */
-        ARG_TOKEN_P2_UTILITY_W_WINPCT,     /* uwin2 */
-        ARG_TOKEN_WRITE_BUFFER_SIZE,       /* wb */
-        ARG_TOKEN_WIN_PCT,                 /* winpct */
-    };
-    // Display Options (alphabetical by name)
-    static const arg_token_t display_opts[] = {
-        ARG_TOKEN_BOARD_BORDER,                /* boardborder */
-        ARG_TOKEN_BOARD_COLOR,                 /* boardcolor */
-        ARG_TOKEN_BOARD_COLUMN_LABEL,          /* boardcolumns */
-        ARG_TOKEN_BOARD_TILE_GLYPHS,           /* boardtiles */
-        ARG_TOKEN_HUMAN_READABLE,              /* hr */
-        ARG_TOKEN_MAX_NUMBER_OF_DISPLAY_PLAYS, /* maxnumdplays */
-        ARG_TOKEN_ON_TURN_COLOR,               /* onturncolor */
-        ARG_TOKEN_ON_TURN_MARKER,              /* onturnmarker */
-        ARG_TOKEN_ON_TURN_SCORE_STYLE,         /* onturnscore */
-        ARG_TOKEN_PRETTY,                      /* pretty */
-        ARG_TOKEN_PRINT_BOARDS,                /* printboards */
-        ARG_TOKEN_SHOW_BU,                     /* showbu */
-        ARG_TOKEN_SHPLIES,                     /* shplies */
-        ARG_TOKEN_SHOW_GAME_WITH_MOVES,        /* shwithmoves */
-    };
-    // Other Options (alphabetical by name)
-    static const arg_token_t other_opts[] = {
-        ARG_TOKEN_AUTOSAVE_GCG,      /* autosavegcg */
-        ARG_TOKEN_FG_REQUIRED,       /* fgrequired */
-        ARG_TOKEN_EXEC_MODE,         /* mode */
-        ARG_TOKEN_MOVEGEN_LIMIT,     /* movegenlimit */
-        ARG_TOKEN_DATA_PATH,         /* path */
-        ARG_TOKEN_PRINT_INTERVAL,    /* pfrequency */
-        ARG_TOKEN_PRINT_ON_FINISH,   /* printonfinish */
-        ARG_TOKEN_SAVE_SETTINGS,     /* savesettings */
-        ARG_TOKEN_RANDOM_SEED,       /* seed */
-        ARG_TOKEN_SHOW_PROMPT,       /* shprompt */
-        ARG_TOKEN_NUMBER_OF_THREADS, /* threads */
-    };
-    int total_tokens = 0;
-    string_builder_add_string(sb, "Game Navigation Commands\n\n");
-    for (size_t i = 0; i < sizeof(game_nav_cmds) / sizeof(game_nav_cmds[0]);
-         i++) {
-      add_help_arg_to_string_builder(config, game_nav_cmds[i], sb, false, true);
-      total_tokens++;
-    }
-    string_builder_add_string(sb, "\nGame Annotation Commands\n\n");
-    for (size_t i = 0; i < sizeof(game_anno_cmds) / sizeof(game_anno_cmds[0]);
-         i++) {
-      add_help_arg_to_string_builder(config, game_anno_cmds[i], sb, false,
-                                     true);
-      total_tokens++;
-    }
-    string_builder_add_string(sb, "\nGame Analysis Commands\n\n");
-    for (size_t i = 0;
-         i < sizeof(game_analysis_cmds) / sizeof(game_analysis_cmds[0]); i++) {
-      add_help_arg_to_string_builder(config, game_analysis_cmds[i], sb, false,
-                                     true);
-      total_tokens++;
-    }
-    string_builder_add_string(sb, "\nOther Commands\n\n");
-    for (size_t i = 0; i < sizeof(other_cmds) / sizeof(other_cmds[0]); i++) {
-      add_help_arg_to_string_builder(config, other_cmds[i], sb, false, true);
-      total_tokens++;
-    }
-    // Async Commands in alphabetical order: status, stop
-    string_builder_add_string(sb, "\nAsync Commands\n\n");
-    add_help_arg_to_string_builder(config, ASYNC_STATUS_COMMAND_TOKEN, sb, true,
-                                   true);
-    add_help_arg_to_string_builder(config, ASYNC_STOP_COMMAND_TOKEN, sb, true,
-                                   true);
-    string_builder_add_string(sb, "\nPlayer Options\n\n");
-    for (size_t i = 0; i < sizeof(player_opts) / sizeof(player_opts[0]); i++) {
-      add_help_arg_to_string_builder(config, player_opts[i], sb, false, true);
-      total_tokens++;
-    }
-    string_builder_add_string(sb, "\nGame Analysis Options\n\n");
-    for (size_t i = 0;
-         i < sizeof(game_analysis_opts) / sizeof(game_analysis_opts[0]); i++) {
-      add_help_arg_to_string_builder(config, game_analysis_opts[i], sb, false,
-                                     true);
-      total_tokens++;
-    }
-    string_builder_add_string(sb, "\nDisplay Options\n\n");
-    for (size_t i = 0; i < sizeof(display_opts) / sizeof(display_opts[0]);
-         i++) {
-      add_help_arg_to_string_builder(config, display_opts[i], sb, false, true);
-      total_tokens++;
-    }
-    string_builder_add_string(sb, "\nOther Options\n\n");
-    for (size_t i = 0; i < sizeof(other_opts) / sizeof(other_opts[0]); i++) {
-      add_help_arg_to_string_builder(config, other_opts[i], sb, false, true);
-      total_tokens++;
-    }
-    assert(total_tokens == NUMBER_OF_ARG_TOKENS);
-    // total_tokens is read only by the assert above (compiled out in release).
-    (void)total_tokens;
+  if (help_arg) {
+    add_help_subject(config, help_arg, sb, error_stack);
   } else {
-    add_help_arg_to_string_builder(config, help_arg_token, sb, false, false);
+    add_help_index(config, sb);
+  }
+  if (!error_stack_is_empty(error_stack)) {
+    string_builder_destroy(sb);
+    return empty_string();
   }
   string_builder_add_string(sb, "\n");
-  char *result = string_builder_dump_and_destroy(sb, NULL);
-  return result;
+  return string_builder_dump_and_destroy(sb, NULL);
 }
 
 void execute_help(Config *config, ErrorStack *error_stack) {
@@ -3372,7 +3348,6 @@ void impl_load_cgp(Config *config, ErrorStack *error_stack) {
     config_invalidate_everything(config, false);
     game_history_set_initial_cgp(config->game_history, cgp);
     update_game_history_with_config(config);
-    config_clear_peg_noprune_unless_set(config);
   }
   string_builder_destroy(cgp_builder);
 }
@@ -4085,6 +4060,37 @@ void impl_sim(Config *config, const arg_token_t known_opp_rack_arg_token,
   (void)gen_set_movegen_budget(previous);
 }
 
+// Rewrites a move list in the period format peg takes (8G.QI,8D.W.RD) to the
+// space format: in each comma-separated move without a space, the first
+// period separates the coordinate from the tiles, and later ones stay
+// played-through markers. Moves already in the space format are unchanged.
+static char *snoprune_moves_to_space_format(const char *moves_str) {
+  char *space_form = string_duplicate(moves_str);
+  bool in_spaced_move = false;
+  bool separator_found = false;
+  for (char *cursor = space_form; *cursor; cursor++) {
+    if (*cursor == ',') {
+      in_spaced_move = false;
+      separator_found = false;
+      continue;
+    }
+    if (separator_found || in_spaced_move) {
+      continue;
+    }
+    if (*cursor == ' ') {
+      // A space before any period: this move is in the space format, unless
+      // the space only leads the move.
+      const bool leading =
+          cursor == space_form || *(cursor - 1) == ',' || *(cursor - 1) == ' ';
+      in_spaced_move = !leading;
+    } else if (*cursor == '.') {
+      *cursor = ' ';
+      separator_found = true;
+    }
+  }
+  return space_form;
+}
+
 void impl_snoprune(Config *config, ErrorStack *error_stack) {
   if (!config_has_game_data(config)) {
     error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
@@ -4113,12 +4119,18 @@ void impl_snoprune(Config *config, ErrorStack *error_stack) {
   const char *moves_str = NULL;
   bool rack_provided = false;
 
-  if (snoprune_arg && !is_string_empty_or_whitespace(snoprune_arg)) {
+  const char *first_comma = snoprune_arg ? strchr(snoprune_arg, ',') : NULL;
+  const char *first_period = snoprune_arg ? strchr(snoprune_arg, '.') : NULL;
+  if (first_period && (!first_comma || first_period < first_comma)) {
+    // A period before the first comma: a rack holds none, so the argument
+    // is all moves, in the period format peg takes (8G.QI,8H.QI).
+    moves_str = snoprune_arg;
+  } else if (snoprune_arg && !is_string_empty_or_whitespace(snoprune_arg)) {
     // Format: [rack][optional whitespace],moves
     // The first comma separates the optional rack from the move list.
     // Example with rack:    "AB, H8 QI" or "-, H8 QI"
     // Example without rack: ", H8 QI"
-    const char *comma = strchr(snoprune_arg, ',');
+    const char *comma = first_comma;
     if (!comma) {
       error_stack_push(
           error_stack, ERROR_STATUS_CONFIG_LOAD_MALFORMED_RACK_ARG,
@@ -4171,9 +4183,11 @@ void impl_snoprune(Config *config, ErrorStack *error_stack) {
   }
 
   if (moves_str && !is_string_empty_or_whitespace(moves_str)) {
+    char *space_form = snoprune_moves_to_space_format(moves_str);
     ValidatedMoves *unpruned_vms = validated_moves_create(
-        config->game, game_get_player_on_turn_index(config->game), moves_str,
+        config->game, game_get_player_on_turn_index(config->game), space_form,
         true, true, error_stack);
+    free(space_form);
     if (!error_stack_is_empty(error_stack)) {
       validated_moves_destroy(unpruned_vms);
       return;
@@ -4306,9 +4320,8 @@ static void config_clear_endgame_tt(const Config *config) {
 }
 
 void config_fill_endgame_args(Config *config, EndgameArgs *endgame_args) {
-  // The time limits are 0 = unlimited, matching the plain "endgame" command's
-  // historical default. Callers that want -tlim to bound an unset -etlim (e.g.
-  // autoanalyze) must opt in explicitly via config_fill_analyze_args.
+  // -etlim, where 0 is unlimited, bounds the endgame command and analyze's
+  // endgame turns alike.
   endgame_args_fill(
       config->thread_control, config->game, config->tt_fraction_of_mem,
       config->endgame_plies, DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE,
@@ -4655,16 +4668,18 @@ static void config_load_solver_settings(Config *config,
       }
       config->solver_settings[player_index].peg_nested_num_cand_caps = n;
     }
+    config->peg_nested_cand_caps_set = true;
   }
   int depth = 0;
   if (config_get_parg_value(config, ARG_TOKEN_PEG_NESTED_DEPTH, 0)) {
-    config_load_int(config, ARG_TOKEN_PEG_NESTED_DEPTH, 1, PEG_MAX_BAG, &depth,
-                    error_stack);
+    config_load_int(config, ARG_TOKEN_PEG_NESTED_DEPTH, 1, PEG_MAX_NEST_DEPTH,
+                    &depth, error_stack);
     if (!error_stack_is_empty(error_stack)) {
       return;
     }
     config->solver_settings[0].peg_nested_max_depth = depth;
     config->solver_settings[1].peg_nested_max_depth = depth;
+    config->peg_nested_depth_set = true;
   }
   const char *strides =
       config_get_parg_value(config, ARG_TOKEN_PEG_NESTED_STRIDES, 0);
@@ -4682,6 +4697,7 @@ static void config_load_solver_settings(Config *config,
             values[bag - 1];
       }
     }
+    config->peg_nested_strides_set = true;
   }
   if (config_get_parg_value(config, ARG_TOKEN_ENDGAME_BEST_REPLY, 0)) {
     bool best_reply_shortcuts = true;
@@ -4747,12 +4763,75 @@ static void config_load_peg_stage_top_k(Config *config,
   config->peg_num_stages = n;
 }
 
-// Default inner-peg stage schedule when nesting is on: the inner cascade keeps
-// 8 candidates at its first stage, then 4, then 2 -- enough lookahead to
-// sharpen the non-emptier leaf decision without paying for a wide inner field.
+// -pegplies: a depth of 1 or more plies, or end (or 0), stored as 0, for the
+// end of the game.
+static void config_load_peg_plies(Config *config, ErrorStack *error_stack) {
+  const char *value = config_get_parg_value(config, ARG_TOKEN_PEG_PLIES, 0);
+  if (!value) {
+    return;
+  }
+  if (strings_iequal(value, "end")) {
+    config->peg_plies = 0;
+    return;
+  }
+  config_load_int(config, ARG_TOKEN_PEG_PLIES, 0, PEG_EXHAUSTIVE_PLIES,
+                  &config->peg_plies, error_stack);
+}
+
+// Default inner-peg stage schedule of a timed solve when nesting is on: the
+// inner cascade keeps 8 candidates at its first stage, then 4, then 2 --
+// enough lookahead to sharpen the non-emptier leaf decision without paying for
+// a wide inner field.
 static const int PEG_NESTED_DEFAULT_CAND_CAPS[] = {8, 4, 2};
 
+// The one stage of a complete solve: every candidate, solved in full.
+static const int PEG_COMPLETE_STAGE_COUNTS[] = {INT_MAX};
+
 void config_fill_peg_args(Config *config, PegArgs *peg_args) {
+  // The time limit picks the strategy. With none (the default) and no
+  // explicit -pegtopk, the solve is complete: after the greedy seed orders
+  // them, every candidate is solved with first-win endgames -pegplies deep
+  // (to the end of the game with -pegplies end), and cut only once it cannot
+  // reach the best. With a limit, or an explicit -pegtopk, it is the staged
+  // cascade, which always has an answer from its last completed stage.
+  const bool complete =
+      config->peg_time_limit_seconds == 0 && config->peg_num_stages == 0;
+  const int complete_plies =
+      config->peg_plies > 0 ? config->peg_plies : PEG_EXHAUSTIVE_PLIES;
+  const int *stage_top_k = NULL;
+  int num_stages = 0;
+  if (config->peg_num_stages > 0) {
+    stage_top_k = config->peg_stage_top_k;
+    num_stages = config->peg_num_stages;
+  } else if (complete) {
+    stage_top_k = PEG_COMPLETE_STAGE_COUNTS;
+    num_stages = 1;
+  }
+  // The nested schedule. A complete solve uses every inner candidate (up to
+  // PEG_NEST_FIELD_MAX), every inner scenario, inner endgames -pegplies deep
+  // like its outer ones, and nesting until the game resolves. The cascade
+  // keeps the cheaper schedule. Either way -pegncaps, -pegndepth and
+  // -pegnstrides, once given, decide.
+  const AutoplaySolverSettings *given = &config->solver_settings[0];
+  const int *nested_caps = PEG_NESTED_DEFAULT_CAND_CAPS;
+  int nested_n_caps = (int)(sizeof(PEG_NESTED_DEFAULT_CAND_CAPS) /
+                            sizeof(PEG_NESTED_DEFAULT_CAND_CAPS[0]));
+  if (config->peg_nested_cand_caps_set) {
+    nested_caps = given->peg_nested_cand_caps;
+    nested_n_caps = given->peg_nested_num_cand_caps;
+  } else if (complete) {
+    nested_caps = NULL;
+    nested_n_caps = 0;
+  }
+  int nested_depth = complete ? PEG_MAX_NEST_DEPTH : PEG_NESTED_DEFAULT_DEPTH;
+  if (config->peg_nested_depth_set) {
+    nested_depth = given->peg_nested_max_depth;
+  }
+  const int nested_stride = complete ? 1 : 0;
+  const int *nested_strides =
+      config->peg_nested_strides_set ? given->peg_nested_strides : NULL;
+  const int nested_n_strides =
+      config->peg_nested_strides_set ? AUTOPLAY_SOLVER_NUM_NESTED_STRIDES : 0;
   // Nested inner-peg lookahead for non-emptier leaves is on by default at depth
   // 1 with the default inner stage schedule and the bag-size default scenario
   // stride (0). -pegnested false restores the flat rollout. Emptier (bag-empty)
@@ -4762,24 +4841,29 @@ void config_fill_peg_args(Config *config, PegArgs *peg_args) {
   // config_peg installs them after this call.
   peg_args_fill(
       config->game, config->thread_control, config->num_threads,
-      /*time_budget_seconds=*/config->peg_time_limit_seconds != 0
-          ? config->peg_time_limit_seconds
-          : config->time_limit_seconds,
-      /*max_stage=*/0, /*greedy_seed_only=*/false,
-      /*stage_top_k=*/
-      config->peg_num_stages > 0 ? config->peg_stage_top_k : NULL,
-      config->peg_num_stages, /*inner_top_k=*/0,
+      /*time_budget_seconds=*/config->peg_time_limit_seconds,
+      /*max_stage=*/0, /*greedy_seed_only=*/false, stage_top_k, num_stages,
+      /*inner_top_k=*/0,
       config->peg_pessimistic ? PEG_OPP_PESSIMISTIC : PEG_OPP_RATIONAL,
       config->peg_scenario_stride, /*nested_enabled=*/config->peg_nested,
-      /*nested_cand_cap=*/0, PEG_NESTED_DEFAULT_CAND_CAPS,
-      (int)(sizeof(PEG_NESTED_DEFAULT_CAND_CAPS) /
-            sizeof(PEG_NESTED_DEFAULT_CAND_CAPS[0])),
-      /*nested_stride=*/0, /*nested_strides_by_bag=*/NULL,
-      /*nested_n_strides_by_bag=*/0, /*nested_emptier_ply_cap=*/0,
-      PEG_NESTED_DEFAULT_DEPTH,
+      /*nested_cand_cap=*/0, nested_caps, nested_n_caps, nested_stride,
+      nested_strides, nested_n_strides,
+      /*nested_emptier_ply_cap=*/complete ? complete_plies : 0, nested_depth,
+      /*nested_score_actual=*/true,
+      /*nested_pessimistic=*/config->peg_pessimistic,
       /*disable_best_reply_shortcuts=*/!config->endgame_best_reply_shortcuts,
+      /*first_win=*/complete, /*early_cutoff=*/complete,
+      /*opp_rack_known=*/true,
+      // The cascade's stages before the last decide by win%: solved first-win
+      // they took half the time or less for the same answer (pegcascade).
+      // Skipping stages that cut nothing and a final-stage cutoff saved
+      // nothing measurable, so they stay off.
+      /*first_win_intermediate=*/!complete, /*skip_noncutting_stages=*/false,
+      /*final_stage_cutoff=*/false,
       /*eval_bag_order=*/NULL,
-      /*eval_bag_order_len=*/0, /*only_moves=*/NULL, /*n_only_moves=*/0,
+      /*eval_bag_order_len=*/0,
+      /*limit_tiles_left=*/true, /*max_tiles_left=*/1, /*only_moves=*/NULL,
+      /*n_only_moves=*/0,
       /*protect_moves=*/NULL, /*n_protect_moves=*/0,
       /*include_per_scenario=*/config->peg_show_outcomes,
       /*on_stage_start=*/NULL, /*on_cand_done=*/NULL,
@@ -4787,6 +4871,9 @@ void config_fill_peg_args(Config *config, PegArgs *peg_args) {
       /*shared_endgame_tt=*/NULL, /*checkpoint=*/NULL, /*resume=*/false,
       peg_args);
   peg_args->tt_fraction_of_mem = config->tt_fraction_of_mem;
+  // A solve that keeps every candidate in one stage, the complete one or
+  // -pegtopk all, searches its endgames -pegplies deep.
+  peg_args->exhaustive_plies = config->peg_plies;
 }
 
 // Parses a space-free UCGI PEG move list (coordinate.tiles, comma-separated)
@@ -4833,59 +4920,29 @@ static ValidatedMoves *config_parse_peg_move_list(const Config *config,
   return vms;
 }
 
-// Generates the full root candidate move list for the current game state and
-// filters it down to the moves that would empty the bag: those playing at
-// least as many tiles as remain in the bag. Backs the peg command's "empty"
-// positional value. On success returns the owning MoveList (caller destroys
-// with move_list_destroy) and writes the filtered Move-pointer array (caller
-// free()s it) to *moves_out and the count to *n_out. If no generated move
-// empties the bag, pushes onto error_stack and returns NULL.
-static MoveList *
-config_generate_peg_bag_emptying_moves(const Config *config,
-                                       const Move ***moves_out, int *n_out,
-                                       ErrorStack *error_stack) {
-  MoveList *move_list = move_list_create(PEG_CAND_LIST_CAP);
-  const MoveGenArgs gen_args = {
-      .game = config->game,
-      .move_record_type = MOVE_RECORD_ALL,
-      .move_sort_type = MOVE_SORT_EQUITY,
-      .override_kwg = NULL,
-      .eq_margin_movegen = 0,
-      .target_equity = EQUITY_MAX_VALUE,
-      .move_list = move_list,
-      .tiles_played_bv = NULL,
-      .initial_tiles_bv = 0,
-  };
-  generate_moves(&gen_args);
-
-  // The PEG-effective bag size (matching peg_solve's own computation), not
-  // the raw bag_get_letters count: when the opponent's rack isn't fully
-  // known, those tiles sit in the raw bag too, but they are not part of the
-  // real bag peg_solve will enumerate.
-  const int bag_size = peg_compute_bag_size(config->game);
-  const int num_moves = move_list_get_count(move_list);
-  const Move **moves = malloc_or_die((size_t)num_moves * sizeof(Move *));
-  int num_kept = 0;
-  for (int move_idx = 0; move_idx < num_moves; move_idx++) {
-    const Move *move = move_list_get_move(move_list, move_idx);
-    if (peg_move_empties_bag(move, bag_size)) {
-      moves[num_kept++] = move;
+// Parses the leaves<N> candidate set (and "empty", which is leaves0): the
+// moves that leave at most N tiles in the bag. Case-insensitive.
+static bool config_parse_peg_leaves(const char *str, int *max_tiles_left) {
+  if (strings_iequal(str, "empty")) {
+    *max_tiles_left = 0;
+    return true;
+  }
+  if (!has_iprefix("leaves", str)) {
+    return false;
+  }
+  const char *digits = str + string_length("leaves");
+  if (*digits == '\0') {
+    return false;
+  }
+  int value = 0;
+  for (const char *cursor = digits; *cursor; cursor++) {
+    if (*cursor < '0' || *cursor > '9' || value > RACK_SIZE * 2) {
+      return false;
     }
+    value = value * 10 + (*cursor - '0');
   }
-  if (num_kept == 0) {
-    free(moves);
-    move_list_destroy(move_list);
-    error_stack_push(
-        error_stack, ERROR_STATUS_PEG_EMPTY_NO_MOVES,
-        get_formatted_string(
-            "pegonly 'empty' found no generated move that empties the "
-            "%d-tile bag",
-            bag_size));
-    return NULL;
-  }
-  *moves_out = moves;
-  *n_out = num_kept;
-  return move_list;
+  *max_tiles_left = value;
+  return true;
 }
 
 void config_peg(Config *config, ErrorStack *error_stack) {
@@ -4909,17 +4966,27 @@ void config_peg(Config *config, ErrorStack *error_stack) {
   config_fill_peg_args(config, &peg_args);
   peg_args.poll = config->peg_poll;
 
-  // Optional "only solve" set: evaluate exactly these moves as the
-  // candidates. This is a per-invocation positional argument on the peg
-  // command itself (not a persisted setting), so it is read straight off
-  // ARG_TOKEN_PEG rather than a config field. "empty" (case-insensitive)
-  // restricts to every generated move that would empty the bag; anything
-  // else is parsed as a space-free UCGI move list.
-  ValidatedMoves *only_vms = NULL;
-  MoveList *only_ml = NULL;
-  const Move **only_moves = NULL;
-  const char *peg_only_str = config_get_parg_value(config, ARG_TOKEN_PEG, 0);
-  const bool resume = peg_only_str && strings_equal(peg_only_str, "resume");
+  // The positionals: the candidate set, then the moves to add to it and
+  // protect (or, for "only", the moves that are the set). `peg resume` reuses
+  // the last solve's, so its checkpoint matches.
+  const char *set_str = config_get_parg_value(config, ARG_TOKEN_PEG, 0);
+  const char *moves_str = config_get_parg_value(config, ARG_TOKEN_PEG, 1);
+  const bool resume = set_str && strings_iequal(set_str, "resume");
+  if (resume && moves_str) {
+    error_stack_push(error_stack, ERROR_STATUS_PEG_RESUME_TAKES_NO_MOVES,
+                     string_duplicate("peg resume takes no moves: it resumes "
+                                      "the last solve with its own"));
+    return;
+  }
+  if (resume) {
+    set_str = config->peg_last_set_str;
+    moves_str = config->peg_last_moves_str;
+  } else {
+    free(config->peg_last_set_str);
+    free(config->peg_last_moves_str);
+    config->peg_last_set_str = set_str ? string_duplicate(set_str) : NULL;
+    config->peg_last_moves_str = moves_str ? string_duplicate(moves_str) : NULL;
+  }
   if (config->peg_json && config->peg_show_outcomes) {
     if (!config->peg_checkpoint) {
       config->peg_checkpoint = peg_checkpoint_create();
@@ -4927,49 +4994,66 @@ void config_peg(Config *config, ErrorStack *error_stack) {
     peg_args.checkpoint = config->peg_checkpoint;
     peg_args.resume = resume;
   }
-  if (!resume && peg_only_str && !is_string_empty_or_whitespace(peg_only_str) &&
-      !strings_equal(peg_only_str, "-")) {
-    if (strings_iequal(peg_only_str, "empty")) {
-      only_ml = config_generate_peg_bag_emptying_moves(
-          config, &only_moves, &peg_args.n_only_moves, error_stack);
-      if (!error_stack_is_empty(error_stack)) {
-        return;
-      }
+  bool only = false;
+  if (set_str) {
+    int max_tiles_left = 0;
+    if (strings_iequal(set_str, "all")) {
+      peg_args.limit_tiles_left = false;
+    } else if (strings_iequal(set_str, "only")) {
+      only = true;
+    } else if (config_parse_peg_leaves(set_str, &max_tiles_left)) {
+      peg_args.limit_tiles_left = true;
+      peg_args.max_tiles_left = max_tiles_left;
     } else {
-      only_vms =
-          config_parse_peg_move_list(config, peg_only_str, &only_moves,
-                                     &peg_args.n_only_moves, error_stack);
-      if (!error_stack_is_empty(error_stack)) {
-        return;
-      }
-    }
-    peg_args.only_moves = only_moves;
-  }
-
-  // Optional "never prune" set: protect these moves from each stage's top-K
-  // cut.
-  ValidatedMoves *protect_vms = NULL;
-  const Move **protect_moves = NULL;
-  if (config->peg_noprune_str) {
-    protect_vms = config_parse_peg_move_list(
-        config, config->peg_noprune_str, &protect_moves,
-        &peg_args.n_protect_moves, error_stack);
-    if (!error_stack_is_empty(error_stack)) {
-      free(only_moves);
-      validated_moves_destroy(only_vms);
-      move_list_destroy(only_ml);
+      error_stack_push(
+          error_stack, ERROR_STATUS_PEG_INVALID_CANDIDATE_SET,
+          get_formatted_string(
+              "peg's first argument is the candidate set -- all, empty, "
+              "leaves<N>, only or resume -- not '%s'. To add moves and "
+              "protect them, give them second (peg leaves1 %s); to solve "
+              "only them, peg only %s",
+              set_str, set_str, set_str));
       return;
     }
-    peg_args.protect_moves = protect_moves;
+  }
+  if (only && !moves_str) {
+    error_stack_push(error_stack, ERROR_STATUS_PEG_ONLY_NEEDS_MOVES,
+                     string_duplicate("peg only needs the moves to solve, "
+                                      "e.g. peg only 8D.WORD,11J.MEH"));
+    return;
+  }
+  ValidatedMoves *listed_vms = NULL;
+  const Move **listed_moves = NULL;
+  int n_listed = 0;
+  if (moves_str) {
+    listed_vms = config_parse_peg_move_list(config, moves_str, &listed_moves,
+                                            &n_listed, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+    for (int move_idx = 0; move_idx < n_listed; move_idx++) {
+      if (move_get_type(listed_moves[move_idx]) == GAME_EVENT_EXCHANGE) {
+        error_stack_push(error_stack, ERROR_STATUS_PEG_EXCHANGE_IN_MOVE_LIST,
+                         string_duplicate("an exchange is not a pre-endgame "
+                                          "move: the bag is too small"));
+        free(listed_moves);
+        validated_moves_destroy(listed_vms);
+        return;
+      }
+    }
+  }
+  if (only) {
+    peg_args.only_moves = listed_moves;
+    peg_args.n_only_moves = n_listed;
+  } else {
+    peg_args.protect_moves = listed_moves;
+    peg_args.n_protect_moves = n_listed;
   }
 
   peg_solve(&peg_args, &config->peg_result, error_stack);
 
-  free(only_moves);
-  validated_moves_destroy(only_vms);
-  move_list_destroy(only_ml);
-  free(protect_moves);
-  validated_moves_destroy(protect_vms);
+  free(listed_moves);
+  validated_moves_destroy(listed_vms);
 }
 
 void impl_peg(Config *config, ErrorStack *error_stack) {
@@ -5016,41 +5100,42 @@ static char *config_write_peg_chart_file(const char *contents) {
   return path;
 }
 
-// Renders the peg result for display. When the outcomes column truncates any
-// cell at the configured width/line caps, writes the full (unlimited-lines)
-// chart to a data/pegcharts/ file and embeds its path above the table.
-static char *config_peg_display_table(const Config *config, PegPoll *poll) {
+// Renders the peg result for display, its ranking's first max_rows rows (0 =
+// every play). When the outcomes column truncates any cell at the configured
+// width/line caps, writes the full chart, every play with unlimited lines, to
+// a data/pegcharts/ file and embeds its path above the table.
+static char *config_peg_display_table(const Config *config, PegPoll *poll,
+                                      int max_rows) {
   const int width = config->peg_out_width;
   const int lines = config->peg_out_lines;
   bool truncated = false;
-  char *display =
-      peg_result_get_string(&config->peg_result, config->game,
-                            config->peg_show_outcomes, poll, width, lines,
-                            /*trunc_note=*/NULL, &truncated);
+  char *display = peg_result_get_string(
+      &config->peg_result, config->game, config->peg_show_outcomes, poll,
+      max_rows, width, lines, /*trunc_note=*/NULL, &truncated);
   if (!truncated) {
     return display;
   }
   free(display);
-  char *full = peg_result_get_string(&config->peg_result, config->game,
-                                     config->peg_show_outcomes, poll, width,
-                                     /*out_max_lines=*/0, NULL, NULL);
+  char *full = peg_result_get_string(
+      &config->peg_result, config->game, config->peg_show_outcomes, poll,
+      /*max_rows=*/0, width, /*out_max_lines=*/0, NULL, NULL);
   char *path = config_write_peg_chart_file(full);
   free(full);
   char *note =
       path != NULL
           ? get_formatted_string("untruncated chart written to: %s", path)
           : NULL;
-  char *out =
-      peg_result_get_string(&config->peg_result, config->game,
-                            config->peg_show_outcomes, poll, width, lines, note,
-                            /*out_truncated=*/NULL);
+  char *out = peg_result_get_string(&config->peg_result, config->game,
+                                    config->peg_show_outcomes, poll, max_rows,
+                                    width, lines, note, /*out_truncated=*/NULL);
   free(note);
   free(path);
   return out;
 }
 
-static char *config_peg_display(const Config *config, PegPoll *poll) {
-  char *table = config_peg_display_table(config, poll);
+static char *config_peg_display(const Config *config, PegPoll *poll,
+                                int max_rows) {
+  char *table = config_peg_display_table(config, poll, max_rows);
   if (!config->peg_json || !config->peg_poll) {
     return table;
   }
@@ -5073,7 +5158,7 @@ char *status_peg(Config *config) {
   if (config->peg_result.last_completed_stage < 0 && config->peg_poll == NULL) {
     return string_duplicate("peg results are not yet initialized.\n");
   }
-  return config_peg_display(config, config->peg_poll);
+  return config_peg_display(config, config->peg_poll, PEG_DISPLAY_ROWS);
 }
 
 // Autoplay
@@ -5536,6 +5621,19 @@ char *str_api_show_game(Config *config, ErrorStack *error_stack) {
   return impl_show_game(config, error_stack);
 }
 
+// The game as shgame shows it, for shgame typed while a command runs. It only
+// reads the game: config_init_game would update it under the running command.
+// NULL when there is no game yet.
+char *config_show_game_while_running(const Config *config) {
+  if (!config->game) {
+    return NULL;
+  }
+  StringBuilder *game_string = string_builder_create();
+  string_builder_add_game(config->game, NULL, config->game_string_options,
+                          config->game_history, game_string);
+  return string_builder_dump_and_destroy(game_string, NULL);
+}
+
 // Show moves
 
 // Parses a board coordinate string in vertical ("d12") or horizontal ("12d")
@@ -5924,13 +6022,31 @@ char *str_api_show_endgame(Config *config, ErrorStack *error_stack) {
 
 // Show PEG
 
+// Shows the PEG result as status shows a running one: the first rows of its
+// ranking, PEG_DISPLAY_ROWS of them or as many as the optional argument asks
+// ("all" for every play), then the solved plays ranked below them.
 char *impl_show_peg(const Config *config, ErrorStack *error_stack) {
   if (!config->game || config->peg_result.last_completed_stage < 0) {
     error_stack_push(error_stack, ERROR_STATUS_NO_PEG_TO_SHOW,
                      string_duplicate("no PEG results to show"));
     return empty_string();
   }
-  return config_peg_display(config, NULL);
+  int max_rows = PEG_DISPLAY_ROWS;
+  const char *rows_arg = config_get_parg_value(config, ARG_TOKEN_SHOW_PEG, 0);
+  if (rows_arg != NULL) {
+    if (strings_iequal(rows_arg, "all")) {
+      max_rows = 0;
+    } else {
+      string_to_int_or_push_error(
+          "number of PEG rows", rows_arg, 1, INT_MAX,
+          ERROR_STATUS_CONFIG_LOAD_INT_ARG_OUT_OF_BOUNDS, &max_rows,
+          error_stack);
+      if (!error_stack_is_empty(error_stack)) {
+        return empty_string();
+      }
+    }
+  }
+  return config_peg_display(config, NULL, max_rows);
 }
 
 void execute_show_peg(Config *config, ErrorStack *error_stack) {
@@ -6169,7 +6285,6 @@ char *impl_new_game(Config *config, ErrorStack *error_stack) {
   // its moves would be committed by index onto the empty board, replayed by
   // heatmap against the new racks, and saved onto this game's first turn.
   config_invalidate_everything(config, false);
-  config_clear_peg_noprune_unless_set(config);
   update_game_history_with_config(config);
   if (user_provided_filename) {
     game_history_set_gcg_filename(config->game_history, user_provided_filename);
@@ -7723,6 +7838,311 @@ static const char *config_wordmap_unsupported_reason(const char *lexicon) {
   return NULL;
 }
 
+static char *contribute_size_text(int64_t bytes);
+
+// The bytes of the data file `name` of `type`, or -1 when there is none.
+static int64_t config_table_file_bytes(const Config *config, const char *name,
+                                       data_filepath_t type) {
+  ErrorStack *errors = error_stack_create();
+  char *path = data_filepaths_get_readable_filename(config->data_paths, name,
+                                                    type, errors);
+  int64_t bytes = -1;
+  CFileIdentity identity;
+  if (error_stack_is_empty(errors) && cfile_identity(path, &identity)) {
+    bytes = identity.size;
+  }
+  free(path);
+  error_stack_destroy(errors);
+  return bytes;
+}
+
+// What a table type (WMP, WIT or RIT) is on disk, to contribute's chooser,
+// and to the player.
+typedef struct ConfigTableKind {
+  data_filepath_t file_type;
+  contribute_table_role_t role;
+  const char *speedup;
+} ConfigTableKind;
+
+static ConfigTableKind config_table_kind(players_data_t type) {
+  switch (type) {
+  case PLAYERS_DATA_TYPE_WMP:
+    return (ConfigTableKind){DATA_FILEPATH_TYPE_WORDMAP, CONTRIBUTE_TABLE_WMP,
+                             "move generation 3-4 times faster"};
+  case PLAYERS_DATA_TYPE_WIT:
+    return (ConfigTableKind){DATA_FILEPATH_TYPE_WORD_INFO_TABLE,
+                             CONTRIBUTE_TABLE_WIT,
+                             "simulation about 9% faster"};
+  default:
+    return (ConfigTableKind){DATA_FILEPATH_TYPE_RACK_INFO_TABLE,
+                             CONTRIBUTE_TABLE_RIT,
+                             "simulation about 17% faster"};
+  }
+}
+
+// The words in the DAWG lists starting at `node_index`, memoized by list in
+// `memo` (-1 for a list not counted yet).
+static int64_t config_kwg_words_from(const KWG *kwg, uint32_t node_index,
+                                     int64_t *memo) {
+  if (node_index == 0) {
+    return 0;
+  }
+  if (memo[node_index] >= 0) {
+    return memo[node_index];
+  }
+  int64_t words = 0;
+  bool list_ended = false;
+  for (uint32_t list_idx = node_index; !list_ended; list_idx++) {
+    const uint32_t node = kwg_node(kwg, list_idx);
+    if (kwg_node_accepts(node)) {
+      words++;
+    }
+    words += config_kwg_words_from(kwg, kwg_node_arc_index(node), memo);
+    list_ended = kwg_node_is_end(node);
+  }
+  memo[node_index] = words;
+  return words;
+}
+
+// The words in lexicon `lexicon`, or -1 when its .kwg cannot be read.
+static int64_t config_lexicon_word_count(const Config *config,
+                                         const char *lexicon) {
+  ErrorStack *errors = error_stack_create();
+  KWG *kwg = kwg_create(config->data_paths, lexicon, errors);
+  int64_t words = -1;
+  if (error_stack_is_empty(errors)) {
+    const int num_nodes = kwg_get_number_of_nodes(kwg);
+    int64_t *memo = malloc_or_die(sizeof(int64_t) * (size_t)num_nodes);
+    for (int node_idx = 0; node_idx < num_nodes; node_idx++) {
+      memo[node_idx] = -1;
+    }
+    words = config_kwg_words_from(kwg, kwg_get_dawg_root_node_index(kwg), memo);
+    free(memo);
+  }
+  kwg_destroy(kwg);
+  error_stack_destroy(errors);
+  return words;
+}
+
+// The bytes a table of `type` (WMP, WIT or RIT) named `name`, for `lexicon`,
+// takes on disk: its file's, or an estimate when it is not built yet. A
+// wordmap runs to about 700 bytes a word (640-700 for the English and German
+// lexica, 420-520 for Catalan and French), a word info table to about 21
+// times its lexicon's .kwg (for English and French; less for German and
+// Polish, 33 for Catalan), and a rack info table to exactly what one for the
+// letter distribution `ld_name` writes. -1 when it cannot be told.
+static int64_t config_table_bytes(const Config *config, players_data_t type,
+                                  const char *name, const char *lexicon,
+                                  const char *ld_name) {
+  const int64_t bytes =
+      config_table_file_bytes(config, name, config_table_kind(type).file_type);
+  if (bytes >= 0) {
+    return bytes;
+  }
+  if (type == PLAYERS_DATA_TYPE_WMP) {
+    const int64_t words = config_lexicon_word_count(config, lexicon);
+    return words < 0 ? -1 : words * 700;
+  }
+  if (type == PLAYERS_DATA_TYPE_WIT) {
+    const int64_t kwg_bytes =
+        config_table_file_bytes(config, lexicon, DATA_FILEPATH_TYPE_KWG);
+    return kwg_bytes < 0 ? -1 : kwg_bytes * 21;
+  }
+  ErrorStack *errors = error_stack_create();
+  LetterDistribution *ld = ld_create(config->data_paths, ld_name, errors);
+  int64_t rit_bytes = -1;
+  if (error_stack_is_empty(errors)) {
+    rit_bytes = rack_info_table_file_bytes(ld);
+  }
+  ld_destroy(ld);
+  error_stack_destroy(errors);
+  return rit_bytes;
+}
+
+// Whether the filesystem `built_path` is written to lacks room for a table of
+// about `bytes` (-1 unknown): a third more than the estimate is asked for.
+static bool config_table_lacks_disk(const char *built_path, int64_t bytes) {
+  if (bytes < 0) {
+    return false;
+  }
+  int64_t free_bytes = 0;
+  char *directory = get_dirpath_from_filepath(built_path);
+  const bool lacks = cfile_free_bytes(directory, &free_bytes) &&
+                     free_bytes < bytes + bytes / 3;
+  free(directory);
+  return lacks;
+}
+
+// The disk an automatic build leaves free: the larger of this and 1% of the
+// filesystem. A personal machine's disk is not the program's, as a
+// contributor's is.
+#define CONFIG_AUTO_TABLE_DISK_RESERVE_BYTES 10000000000LL
+
+// The disk reserve on the filesystem holding `directory`: the larger of
+// CONFIG_AUTO_TABLE_DISK_RESERVE_BYTES and 1% of the filesystem. *free_bytes
+// gets the free space, or INT64_MAX when the filesystem will not say.
+static int64_t config_auto_table_disk_reserve(const char *directory,
+                                              int64_t *free_bytes) {
+  int64_t reserve = CONFIG_AUTO_TABLE_DISK_RESERVE_BYTES;
+  int64_t disk_total = 0;
+  *free_bytes = INT64_MAX;
+  if (directory && cfile_free_bytes(directory, free_bytes) &&
+      cfile_total_bytes(directory, &disk_total) && disk_total / 100 > reserve) {
+    reserve = disk_total / 100;
+  }
+  return reserve;
+}
+
+// The command line program's manifest of the tables it built on first use,
+// in the data directory: the only tables it ever deletes. contribute keeps
+// its own, so neither deletes what the other built.
+#define CONFIG_AUTO_TABLE_MANIFEST_FILENAME "auto_tables.txt"
+// The disk the tables built on first use may take together. Past it, the
+// least recently used go (and are built again if a lexicon needs them): a
+// user who tries several lexicons would otherwise keep a 1.9 GB rack info
+// table for each.
+#define CONFIG_AUTO_TABLE_CAP_BYTES 8000000000LL
+
+// The tables a lexicon load uses, which making room for a build never
+// deletes: each player's wordmap, word info table and rack info table.
+typedef struct ConfigTablesInUse {
+  ContributeTable tables[6];
+  int count;
+} ConfigTablesInUse;
+
+static void config_tables_in_use_init(ConfigTablesInUse *in_use,
+                                      const char *const lexicons[2],
+                                      // cppcheck-suppress constParameter ;
+                                      // the caller's strings are not const
+                                      char *const rit_names[2]) {
+  memset(in_use, 0, sizeof(*in_use));
+  for (int player_idx = 0; player_idx < 2; player_idx++) {
+    const contribute_table_role_t roles[3] = {
+        CONTRIBUTE_TABLE_WMP, CONTRIBUTE_TABLE_WIT, CONTRIBUTE_TABLE_RIT};
+    const char *names[3] = {lexicons[player_idx], lexicons[player_idx],
+                            rit_names[player_idx]};
+    for (int role_idx = 0; role_idx < 3; role_idx++) {
+      if (!names[role_idx]) {
+        continue;
+      }
+      ContributeTable *table = &in_use->tables[in_use->count++];
+      table->role = roles[role_idx];
+      table->name = names[role_idx];
+      table->lexicon = lexicons[player_idx];
+      table->bytes = -1;
+    }
+  }
+}
+
+// Says which tables built on first use were deleted, one line each.
+static void config_report_evicted_tables(const Config *config,
+                                         const StringList *evicted,
+                                         const char *why) {
+  for (int line_idx = 0; line_idx < string_list_get_count(evicted);
+       line_idx++) {
+    // Each line is "<role> <name>", as the manifest has them.
+    const char *line = string_list_get_string(evicted, line_idx);
+    const char *space = strchr(line, ' ');
+    const char *what = "table";
+    for (int role_idx = 0; space && role_idx < NUMBER_OF_CONTRIBUTE_TABLE_ROLES;
+         role_idx++) {
+      const char *role_name =
+          contribute_table_role_name((contribute_table_role_t)role_idx);
+      if (strncmp(line, role_name, (size_t)(space - line)) == 0 &&
+          role_name[space - line] == '\0') {
+        what = contribute_table_role_description(
+            (contribute_table_role_t)role_idx);
+      }
+    }
+    thread_control_print_formatted(
+        config->thread_control,
+        "deleted the %s %s, built on first use and unused the longest, %s\n",
+        what, space ? space + 1 : line, why);
+  }
+}
+
+// Whether there is room to build a table of about `bytes` at `built_path`.
+// Tables built on first use that the load does not use are deleted first,
+// least recently used first, while the build would cut into the disk reserve
+// config_choose_auto_tables keeps, as that choice counted on.
+static bool config_make_room_for_build(const Config *config,
+                                       const char *built_path, int64_t bytes,
+                                       const ConfigTablesInUse *in_use) {
+  char *manifest_path = contribute_tables_manifest_path_named(
+      config->data_paths, CONFIG_AUTO_TABLE_MANIFEST_FILENAME);
+  char *directory = get_dirpath_from_filepath(built_path);
+  int64_t free_bytes = 0;
+  const int64_t reserve =
+      config_auto_table_disk_reserve(directory, &free_bytes);
+  StringList *evicted = string_list_create();
+  int64_t available = 0;
+  (void)contribute_tables_make_room(
+      manifest_path, directory, bytes, reserve, in_use->tables, in_use->count,
+      contribute_tables_real_free_bytes, NULL, &available, evicted);
+  config_report_evicted_tables(config, evicted, "to make room");
+  string_list_destroy(evicted);
+  free(directory);
+  free(manifest_path);
+  return !config_table_lacks_disk(built_path, bytes);
+}
+
+// Records a table just built on first use at `built_path`, and keeps the
+// tables built that way within CONFIG_AUTO_TABLE_CAP_BYTES.
+static void config_record_first_use_build(const Config *config,
+                                          players_data_t type, const char *name,
+                                          const char *built_path,
+                                          const ConfigTablesInUse *in_use) {
+  char *manifest_path = contribute_tables_manifest_path_named(
+      config->data_paths, CONFIG_AUTO_TABLE_MANIFEST_FILENAME);
+  contribute_tables_record_built(
+      manifest_path, contribute_table_role_name(config_table_kind(type).role),
+      name, built_path);
+  StringList *evicted = string_list_create();
+  (void)contribute_tables_trim_to(manifest_path, CONFIG_AUTO_TABLE_CAP_BYTES,
+                                  in_use->tables, in_use->count, evicted);
+  config_report_evicted_tables(config, evicted,
+                               "to keep them within their disk cap");
+  string_list_destroy(evicted);
+  free(manifest_path);
+}
+
+// Says a table is about to be built on first use: what it is, for which
+// lexicon (and, for a rack info table, which leaves), and the disk it will
+// take and the memory its build peaks at.
+static void config_announce_table_build(const Config *config,
+                                        players_data_t type, const char *name,
+                                        const char *lexicon, const char *leaves,
+                                        const char *ld_name) {
+  const ConfigTableKind kind = config_table_kind(type);
+  const contribute_table_role_t role = kind.role;
+  char *what_for =
+      leaves ? get_formatted_string("%s with the leaves %s", lexicon, leaves)
+             : string_duplicate(lexicon);
+  const int64_t bytes =
+      config_table_bytes(config, type, name, lexicon, ld_name);
+  if (bytes < 0) {
+    thread_control_print_formatted(
+        config->thread_control,
+        "building the %s for %s, which makes %s (once; this can take a few "
+        "minutes)\n",
+        contribute_table_role_description(role), what_for, kind.speedup);
+    free(what_for);
+    return;
+  }
+  char *disk = contribute_size_text(bytes);
+  char *memory =
+      contribute_size_text(contribute_table_build_memory(role, bytes));
+  thread_control_print_formatted(
+      config->thread_control,
+      "building the %s for %s, which makes %s: about %s on disk, and up to %s "
+      "of memory while it builds (once; this can take a few minutes)\n",
+      contribute_table_role_description(role), what_for, kind.speedup, disk,
+      memory);
+  free(disk);
+  free(memory);
+  free(what_for);
+}
+
 // Makes the wordmap for player `player_index`'s lexicon `lexicon` available
 // to load, building it from the lexicon's .kwg if it is not on disk: wordmaps
 // are not downloaded (one is about thirty times the size of its lexicon), so
@@ -7730,10 +8150,12 @@ static const char *config_wordmap_unsupported_reason(const char *lexicon) {
 // the wordmap is there to load, or NULL when the player plays without one --
 // the lexicon has no wordmap support, the data directory cannot be written,
 // there is not room for it, or the build failed -- having said why in one
-// line. A NULL `lexicon` (no wordmap wanted) is returned as is.
-static const char *config_wordmap_for_first_use(Config *config,
-                                                int player_index,
-                                                const char *lexicon) {
+// line. A NULL `lexicon` (no wordmap wanted) is returned as is. `ld_name` is
+// the letter distribution the lexicon is loaded with.
+static const char *
+config_wordmap_for_first_use(Config *config, int player_index,
+                             const char *lexicon, const char *ld_name,
+                             const ConfigTablesInUse *in_use) {
   if (!lexicon) {
     return NULL;
   }
@@ -7756,7 +8178,6 @@ static const char *config_wordmap_for_first_use(Config *config,
   }
   const char *why_not = config_wordmap_unsupported_reason(lexicon);
   char *built_path = NULL;
-  char *kwg_path = NULL;
   if (!why_not) {
     built_path = data_filepaths_get_writable_filename(
         config->data_paths, lexicon, DATA_FILEPATH_TYPE_WORDMAP, errors);
@@ -7765,46 +8186,32 @@ static const char *config_wordmap_for_first_use(Config *config,
     }
     error_stack_reset(errors);
   }
-  if (!why_not) {
-    kwg_path = data_filepaths_get_readable_filename(
-        config->data_paths, lexicon, DATA_FILEPATH_TYPE_KWG, errors);
-    CFileIdentity kwg_identity;
-    int64_t free_bytes = 0;
-    char *directory = get_dirpath_from_filepath(built_path);
-    // A wordmap runs to about thirty times its lexicon's .kwg; ask for forty.
-    if (error_stack_is_empty(errors) &&
-        cfile_identity(kwg_path, &kwg_identity) &&
-        cfile_free_bytes(directory, &free_bytes) &&
-        free_bytes < kwg_identity.size * 40) {
-      why_not = "there is not enough disk space for it";
-    }
-    free(directory);
-    error_stack_reset(errors);
+  if (!why_not && !config_make_room_for_build(
+                      config, built_path,
+                      config_table_bytes(config, PLAYERS_DATA_TYPE_WMP, lexicon,
+                                         lexicon, ld_name),
+                      in_use)) {
+    why_not = "there is not enough disk space for it";
   }
   if (!why_not) {
-    thread_control_print_formatted(
-        config->thread_control,
-        "building the wordmap for %s, which makes move generation faster "
-        "(once; this can take a minute)\n",
-        lexicon);
-    char *ld_name = ld_get_default_name_from_lexicon_name(lexicon, errors);
-    if (error_stack_is_empty(errors)) {
-      const ConversionArgs args = {
-          .conversion_type_string = "dawg2wordmap",
-          .data_paths = config->data_paths,
-          .input_and_output_name = lexicon,
-          .ld_name = ld_name,
-          .num_threads = config_get_num_threads(config),
-      };
-      convert(&args, config->conversion_results, errors);
-    }
-    free(ld_name);
+    config_announce_table_build(config, PLAYERS_DATA_TYPE_WMP, lexicon, lexicon,
+                                NULL, ld_name);
+    const ConversionArgs args = {
+        .conversion_type_string = "dawg2wordmap",
+        .data_paths = config->data_paths,
+        .input_and_output_name = lexicon,
+        .ld_name = ld_name,
+        .num_threads = config_get_num_threads(config),
+    };
+    convert(&args, config->conversion_results, errors);
     if (!error_stack_is_empty(errors)) {
       why_not = "it could not be built";
       error_stack_print_and_reset(errors);
+    } else {
+      config_record_first_use_build(config, PLAYERS_DATA_TYPE_WMP, lexicon,
+                                    built_path, in_use);
     }
   }
-  free(kwg_path);
   free(built_path);
   error_stack_destroy(errors);
   if (why_not) {
@@ -7814,6 +8221,531 @@ static const char *config_wordmap_for_first_use(Config *config,
     return NULL;
   }
   return lexicon;
+}
+
+// Loads a table option's value into *use and *automatic: true or false, or
+// auto, which uses the table when this machine has room for it (and sets
+// *use, the setting's "wanted"). Leaves both when the option is absent.
+static void config_load_table_setting(const Config *config,
+                                      arg_token_t arg_token, bool *use,
+                                      bool *automatic,
+                                      ErrorStack *error_stack) {
+  const char *value = config_get_parg_value(config, arg_token, 0);
+  if (!value) {
+    return;
+  }
+  if (strings_iequal(value, "auto")) {
+    *use = true;
+    *automatic = true;
+    return;
+  }
+  config_load_bool(config, arg_token, use, error_stack);
+  if (error_stack_is_empty(error_stack)) {
+    *automatic = false;
+  }
+}
+
+// ----- Tables used when this machine has room (-wmp, -rit, -wit auto) -----
+
+// The rack info table for `lexicon` played with `leaves`. A rack info table
+// caches leave values, so it belongs to a (lexicon, leaves) pair, and is
+// named "<lexicon>.<leaves>" as contribute names it. The older name
+// "<lexicon>" (make prepare_data's CSW24.rit) still counts when the leaves
+// are the lexicon's default ones, which it was built from. The caller frees.
+static char *config_rack_info_table_name(const Config *config,
+                                         const char *lexicon,
+                                         const char *leaves) {
+  char *paired = get_formatted_string("%s.%s", lexicon, leaves);
+  if (config_table_file_bytes(config, paired,
+                              DATA_FILEPATH_TYPE_RACK_INFO_TABLE) >= 0) {
+    return paired;
+  }
+  char *default_leaves = get_default_klv_name(lexicon);
+  const bool default_pair = strings_equal(default_leaves, leaves);
+  free(default_leaves);
+  if (default_pair &&
+      config_table_file_bytes(config, lexicon,
+                              DATA_FILEPATH_TYPE_RACK_INFO_TABLE) >= 0) {
+    free(paired);
+    return string_duplicate(lexicon);
+  }
+  return paired;
+}
+
+// The memory the tables never take: the system's and other programs' share.
+#define CONFIG_AUTO_TABLE_MEMORY_RESERVE_BYTES 1000000000LL
+
+// Which tables set to auto this machine has room for: the disk to store (or
+// build) each, and the memory to hold them beside the search table a solve
+// allocates. It is contribute's decision (contribute_choose_tables), by value
+// per byte -- wordmaps, then word info tables, then rack info tables -- with
+// this machine's budget:
+// - disk: what is free on the data directory's filesystem, less the larger
+//   of 10 GB and 1% of it;
+// - memory: what is available, less a 1 GB reserve and the search table
+//   (-ttfraction of the physical memory), and never more than a quarter of
+//   the physical memory, so the decision does not change with whatever else
+//   is open. Where the available memory cannot be read, the quarter alone.
+// A table that is not on disk is built only where missing wordmaps are (the
+// command line program with fetched data); a rack info table is built from
+// its lexicon's wordmap, so it costs that wordmap's disk too when the
+// wordmap is missing. Clears the use flag of each auto table left out, and
+// writes a line saying what each player's lexicon got to *report (NULL when
+// no table is auto). rit_names hold each player's rack info table name, and
+// ld_name is the letter distribution the lexicons are loaded with.
+static void
+config_choose_auto_tables(Config *config, const char *const lexicons[2],
+                          char *const rit_names[2], const char *ld_name,
+                          bool use[NUMBER_OF_DATA][2], char **report) {
+  *report = NULL;
+  const players_data_t types[] = {PLAYERS_DATA_TYPE_WMP, PLAYERS_DATA_TYPE_WIT,
+                                  PLAYERS_DATA_TYPE_RIT};
+  const contribute_table_role_t roles[] = {
+      CONTRIBUTE_TABLE_WMP, CONTRIBUTE_TABLE_WIT, CONTRIBUTE_TABLE_RIT};
+  const data_filepath_t file_types[] = {DATA_FILEPATH_TYPE_WORDMAP,
+                                        DATA_FILEPATH_TYPE_WORD_INFO_TABLE,
+                                        DATA_FILEPATH_TYPE_RACK_INFO_TABLE};
+  enum { NUM_ROLES = 3, MAX_TABLES = 8 };
+  ContributeTable tables[MAX_TABLES];
+  int table_of[NUM_ROLES][2];
+  // Auto and wanted by this load (leave generation goes without a rack info
+  // table).
+  bool wanted[NUM_ROLES][2];
+  int count = 0;
+  bool any_auto = false;
+  for (int role_idx = 0; role_idx < NUM_ROLES; role_idx++) {
+    for (int player_idx = 0; player_idx < 2; player_idx++) {
+      table_of[role_idx][player_idx] = -1;
+      const players_data_t type = types[role_idx];
+      wanted[role_idx][player_idx] =
+          config->table_auto[type][player_idx] && use[type][player_idx];
+      if (!config->table_auto[type][player_idx] || !use[type][player_idx]) {
+        continue;
+      }
+      any_auto = true;
+      const char *name = type == PLAYERS_DATA_TYPE_RIT ? rit_names[player_idx]
+                                                       : lexicons[player_idx];
+      // Players with the same table share it.
+      for (int table_idx = 0; table_idx < count; table_idx++) {
+        if (tables[table_idx].role == roles[role_idx] &&
+            strings_equal(tables[table_idx].name, name)) {
+          table_of[role_idx][player_idx] = table_idx;
+        }
+      }
+      if (table_of[role_idx][player_idx] >= 0) {
+        continue;
+      }
+      const int64_t bytes =
+          config_table_file_bytes(config, name, file_types[role_idx]);
+      // A rack info table is built from its lexicon's wordmap.
+      const bool can_build =
+          config->build_missing_wordmaps &&
+          (type == PLAYERS_DATA_TYPE_WIT ||
+           !config_wordmap_unsupported_reason(lexicons[player_idx]));
+      if (bytes < 0 && !can_build) {
+        // Not there, and not built here: left out without a budget.
+        use[type][player_idx] = false;
+        continue;
+      }
+      ContributeTable *table = &tables[count];
+      memset(table, 0, sizeof(*table));
+      table->role = roles[role_idx];
+      table->name = name;
+      table->lexicon = lexicons[player_idx];
+      table->present = bytes >= 0;
+      table->requested = true;
+      table->bytes = bytes >= 0
+                         ? bytes
+                         : config_table_bytes(config, type, name,
+                                              lexicons[player_idx], ld_name);
+      const char *loaded_name =
+          players_data_get_data_name(config->players_data, type, player_idx);
+      table->loaded = loaded_name && strings_equal(loaded_name, name);
+      table_of[role_idx][player_idx] = count++;
+    }
+  }
+  if (!any_auto) {
+    return;
+  }
+  // The chooser takes a rack info table only with its lexicon's wordmap. One
+  // whose wordmap is not auto gets that wordmap added, unrequested: a missing
+  // table is built from it, so it is charged for when missing; a table on
+  // disk needs none, so it costs nothing.
+  const int rit_tables = count;
+  for (int table_idx = 0; table_idx < rit_tables; table_idx++) {
+    const ContributeTable *rit = &tables[table_idx];
+    if (rit->role != CONTRIBUTE_TABLE_RIT) {
+      continue;
+    }
+    bool has_wordmap = false;
+    for (int other_idx = 0; other_idx < count; other_idx++) {
+      if (tables[other_idx].role == CONTRIBUTE_TABLE_WMP &&
+          strings_equal(tables[other_idx].name, rit->lexicon)) {
+        has_wordmap = true;
+      }
+    }
+    if (has_wordmap) {
+      continue;
+    }
+    ContributeTable *wordmap = &tables[count++];
+    memset(wordmap, 0, sizeof(*wordmap));
+    wordmap->role = CONTRIBUTE_TABLE_WMP;
+    wordmap->name = rit->lexicon;
+    wordmap->lexicon = rit->lexicon;
+    wordmap->bytes = config_table_bytes(config, PLAYERS_DATA_TYPE_WMP,
+                                        rit->lexicon, rit->lexicon, ld_name);
+    wordmap->present = rit->present ||
+                       config_table_file_bytes(config, rit->lexicon,
+                                               DATA_FILEPATH_TYPE_WORDMAP) >= 0;
+  }
+  ErrorStack *errors = error_stack_create();
+  char *probe = data_filepaths_get_writable_filename(
+      config->data_paths, lexicons[0], DATA_FILEPATH_TYPE_WORDMAP, errors);
+  char *directory =
+      error_stack_is_empty(errors) ? get_dirpath_from_filepath(probe) : NULL;
+  free(probe);
+  error_stack_destroy(errors);
+  ContributeTableBudget budget = {
+      .free_disk_bytes = INT64_MAX,
+      .disk_reserve_bytes = CONFIG_AUTO_TABLE_DISK_RESERVE_BYTES,
+      .free_memory_bytes = INT64_MAX,
+      .memory_reserve_bytes = CONFIG_AUTO_TABLE_MEMORY_RESERVE_BYTES,
+  };
+  budget.disk_reserve_bytes =
+      config_auto_table_disk_reserve(directory, &budget.free_disk_bytes);
+  free(directory);
+  const int64_t physical = (int64_t)get_search_memory_budget_base();
+  const int64_t search_table =
+      (int64_t)(config->tt_fraction_of_mem * (double)physical);
+  int64_t available = INT64_MAX;
+  if (!get_available_memory_bytes(&available)) {
+    available = INT64_MAX;
+  }
+  const int64_t quarter = physical / 4 + budget.memory_reserve_bytes;
+  budget.free_memory_bytes =
+      available == INT64_MAX ? quarter : available - search_table;
+  if (budget.free_memory_bytes > quarter) {
+    budget.free_memory_bytes = quarter;
+  }
+  // Tables built on first use that this load does not use count as free
+  // disk: a build deletes them, least recently used first, to make room.
+  char *manifest_path = contribute_tables_manifest_path_named(
+      config->data_paths, CONFIG_AUTO_TABLE_MANIFEST_FILENAME);
+  ContributeTableManifest *manifest =
+      contribute_table_manifest_read(manifest_path);
+  int order[MAX_TABLES];
+  contribute_choose_tables(tables, count, &budget, manifest, order);
+  contribute_table_manifest_destroy(manifest);
+  contribute_tables_touch_used(manifest_path, tables, count);
+  free(manifest_path);
+
+  StringBuilder *line = string_builder_create();
+  for (int player_idx = 0; player_idx < 2; player_idx++) {
+    if (player_idx == 1 && strings_equal(lexicons[0], lexicons[1]) &&
+        strings_equal(rit_names[0], rit_names[1])) {
+      break;
+    }
+    StringBuilder *used = string_builder_create();
+    StringBuilder *skipped = string_builder_create();
+    for (int role_idx = 0; role_idx < NUM_ROLES; role_idx++) {
+      const players_data_t type = types[role_idx];
+      if (!wanted[role_idx][player_idx]) {
+        continue;
+      }
+      const int table_idx = table_of[role_idx][player_idx];
+      const char *what = contribute_table_role_description(roles[role_idx]);
+      // A rack info table is built from a wordmap, so a lexicon with no
+      // wordmap support has neither.
+      const char *unsupported =
+          type == PLAYERS_DATA_TYPE_WIT
+              ? NULL
+              : config_wordmap_unsupported_reason(lexicons[player_idx]);
+      if (table_idx < 0 && unsupported) {
+        string_builder_add_formatted_string(
+            skipped, "%sno %s (%s%s)",
+            string_builder_length(skipped) > 0 ? "; " : "", what,
+            type == PLAYERS_DATA_TYPE_RIT ? "it is built from a wordmap, and "
+                                          : "",
+            unsupported);
+        continue;
+      }
+      if (table_idx < 0) {
+        // Not on disk, and not built by itself here: say what builds it.
+        const char *leaves = players_data_get_data_name(
+            config->players_data, PLAYERS_DATA_TYPE_KLV, player_idx);
+        char *command =
+            type == PLAYERS_DATA_TYPE_RIT
+                ? get_formatted_string("convert klvwmp2rit %s %s %s %s",
+                                       rit_names[player_idx], ld_name,
+                                       leaves ? leaves : lexicons[player_idx],
+                                       lexicons[player_idx])
+                : get_formatted_string("convert %s %s",
+                                       type == PLAYERS_DATA_TYPE_WMP
+                                           ? "dawg2wordmap"
+                                           : "kwg2wit",
+                                       lexicons[player_idx]);
+        string_builder_add_formatted_string(
+            skipped, "%sno %s ('%s' builds one)",
+            string_builder_length(skipped) > 0 ? "; " : "", what, command);
+        free(command);
+        continue;
+      }
+      const ContributeTable *table = &tables[table_idx];
+      if (table->chosen) {
+        string_builder_add_formatted_string(
+            used, "%susing %s", string_builder_length(used) > 0 ? ", " : "",
+            what);
+        continue;
+      }
+      use[type][player_idx] = false;
+      if (table->skip == CONTRIBUTE_TABLE_NO_WORDMAP) {
+        // Taken only with the wordmap, which was skipped for want of room.
+        string_builder_add_formatted_string(
+            skipped, "%s%s not built (it requires a wordmap)",
+            string_builder_length(skipped) > 0 ? "; " : "", what);
+        continue;
+      }
+      char *needed = contribute_size_text(table->needed_bytes);
+      char *room = contribute_size_text(table->available_bytes);
+      string_builder_add_formatted_string(
+          skipped, "%s%s skipped: %s %s needed, %s free",
+          string_builder_length(skipped) > 0 ? "; " : "", what, needed,
+          table->skip == CONTRIBUTE_TABLE_NO_DISK ? "of disk" : "of memory",
+          room);
+      free(needed);
+      free(room);
+    }
+    string_builder_add_formatted_string(
+        line, "%s: %s%s%s\n", lexicons[player_idx],
+        string_builder_length(used) > 0 ? string_builder_peek(used)
+                                        : "no tables",
+        string_builder_length(skipped) > 0 ? "; " : "",
+        string_builder_peek(skipped));
+    string_builder_destroy(used);
+    string_builder_destroy(skipped);
+  }
+  *report = string_builder_dump_and_destroy(line, NULL);
+}
+
+// Makes the word info table for player `player_index`'s lexicon `lexicon`
+// available to load, building it from the lexicon's .kwg if it is not on
+// disk, as config_wordmap_for_first_use does for the wordmap: once, and about
+// twenty times the size of the lexicon. Returns `lexicon` when the table is
+// there to load, or NULL when the player plays without one -- the data
+// directory cannot be written, there is not room for it, or the build failed
+// -- having said why in one line. A NULL `lexicon` is returned as is.
+static const char *
+config_word_info_table_for_first_use(Config *config, int player_index,
+                                     const char *lexicon, const char *ld_name,
+                                     const ConfigTablesInUse *in_use) {
+  if (!lexicon) {
+    return NULL;
+  }
+  const char *loaded = players_data_get_data_name(
+      config->players_data, PLAYERS_DATA_TYPE_WIT, player_index);
+  if (loaded && strings_equal(loaded, lexicon)) {
+    return lexicon;
+  }
+  if (config_table_file_bytes(config, lexicon,
+                              DATA_FILEPATH_TYPE_WORD_INFO_TABLE) >= 0) {
+    return lexicon;
+  }
+  ErrorStack *errors = error_stack_create();
+  const char *why_not = NULL;
+  char *built_path = data_filepaths_get_writable_filename(
+      config->data_paths, lexicon, DATA_FILEPATH_TYPE_WORD_INFO_TABLE, errors);
+  if (!error_stack_is_empty(errors)) {
+    why_not = "its data directory cannot be written";
+  }
+  error_stack_reset(errors);
+  if (!why_not && !config_make_room_for_build(
+                      config, built_path,
+                      config_table_bytes(config, PLAYERS_DATA_TYPE_WIT, lexicon,
+                                         lexicon, ld_name),
+                      in_use)) {
+    why_not = "there is not enough disk space for it";
+  }
+  if (!why_not) {
+    config_announce_table_build(config, PLAYERS_DATA_TYPE_WIT, lexicon, lexicon,
+                                NULL, ld_name);
+    const ConversionArgs args = {
+        .conversion_type_string = "kwg2witifneeded",
+        .data_paths = config->data_paths,
+        .input_and_output_name = lexicon,
+        .ld_name = ld_name,
+        .num_threads = config_get_num_threads(config),
+    };
+    convert(&args, config->conversion_results, errors);
+    if (!error_stack_is_empty(errors)) {
+      why_not = "it could not be built";
+      error_stack_print_and_reset(errors);
+    } else {
+      config_record_first_use_build(config, PLAYERS_DATA_TYPE_WIT, lexicon,
+                                    built_path, in_use);
+    }
+  }
+  free(built_path);
+  error_stack_destroy(errors);
+  if (why_not) {
+    thread_control_print_formatted(config->thread_control,
+                                   "playing %s without a word info table: %s\n",
+                                   lexicon, why_not);
+    return NULL;
+  }
+  return lexicon;
+}
+
+// Makes the rack info table `rit_name` for player `player_index`'s lexicon
+// `lexicon` and leaves `leaves` available to load, building it from the
+// lexicon's wordmap and the leaves if it is not on disk, as
+// config_wordmap_for_first_use does for the wordmap: once, and about 1.9 GB
+// for English. Builds the wordmap first if that is missing too. Returns
+// `rit_name` when the table is there to load, or NULL when the player plays
+// without one, having said why in one line. A NULL `rit_name` is returned as
+// is.
+static const char *config_rack_info_table_for_first_use(
+    Config *config, int player_index, const char *rit_name, const char *lexicon,
+    const char *leaves, const char *ld_name, const ConfigTablesInUse *in_use) {
+  if (!rit_name) {
+    return NULL;
+  }
+  const char *loaded = players_data_get_data_name(
+      config->players_data, PLAYERS_DATA_TYPE_RIT, player_index);
+  if (loaded && strings_equal(loaded, rit_name)) {
+    return rit_name;
+  }
+  if (config_table_file_bytes(config, rit_name,
+                              DATA_FILEPATH_TYPE_RACK_INFO_TABLE) >= 0) {
+    return rit_name;
+  }
+  ErrorStack *errors = error_stack_create();
+  const char *why_not = NULL;
+  char *built_path = data_filepaths_get_writable_filename(
+      config->data_paths, rit_name, DATA_FILEPATH_TYPE_RACK_INFO_TABLE, errors);
+  if (!error_stack_is_empty(errors)) {
+    why_not = "its data directory cannot be written";
+  }
+  error_stack_reset(errors);
+  if (!why_not && !leaves) {
+    why_not = "there are no leaves to build it from";
+  }
+  if (!why_not && !config_make_room_for_build(
+                      config, built_path,
+                      config_table_bytes(config, PLAYERS_DATA_TYPE_RIT,
+                                         rit_name, lexicon, ld_name),
+                      in_use)) {
+    why_not = "there is not enough disk space for it";
+  }
+  if (!why_not &&
+      config_table_file_bytes(config, lexicon, DATA_FILEPATH_TYPE_WORDMAP) <
+          0 &&
+      !config_wordmap_for_first_use(config, player_index, lexicon, ld_name,
+                                    in_use)) {
+    why_not = "its wordmap could not be built";
+  }
+  if (!why_not) {
+    config_announce_table_build(config, PLAYERS_DATA_TYPE_RIT, rit_name,
+                                lexicon, leaves, ld_name);
+    const ConversionArgs args = {
+        .conversion_type_string = "klvwmp2rit",
+        .data_paths = config->data_paths,
+        .input_and_output_name = rit_name,
+        .ld_name = ld_name,
+        .klv_name = leaves,
+        .wmp_name = lexicon,
+        .num_threads = config_get_num_threads(config),
+    };
+    convert(&args, config->conversion_results, errors);
+    if (!error_stack_is_empty(errors)) {
+      why_not = "it could not be built";
+      error_stack_print_and_reset(errors);
+    } else {
+      config_record_first_use_build(config, PLAYERS_DATA_TYPE_RIT, rit_name,
+                                    built_path, in_use);
+    }
+  }
+  free(built_path);
+  error_stack_destroy(errors);
+  if (why_not) {
+    thread_control_print_formatted(config->thread_control,
+                                   "playing %s without a rack info table: %s\n",
+                                   lexicon, why_not);
+    return NULL;
+  }
+  return rit_name;
+}
+
+// A rack info table built from another lexicon or other leaves than its
+// player's holds other words and leave values, whether it records that or only
+// its values show it. One set to auto is dropped, said in a line, and its name
+// in *p1_rit_name or *p2_rit_name cleared; one set to true is an error.
+static void config_drop_mismatched_rack_info_tables(Config *config,
+                                                    const char **p1_rit_name,
+                                                    const char **p2_rit_name,
+                                                    ErrorStack *error_stack) {
+  const char **rit_names[2] = {p1_rit_name, p2_rit_name};
+  bool dropped = false;
+  for (int player_idx = 0; player_idx < 2; player_idx++) {
+    const bool inputs_match =
+        players_data_rit_matches_inputs(config->players_data, player_idx);
+    if (inputs_match &&
+        players_data_rit_matches_klv(config->players_data, player_idx)) {
+      continue;
+    }
+    const char *name = *rit_names[player_idx];
+    if (!config->table_auto[PLAYERS_DATA_TYPE_RIT][player_idx] &&
+        inputs_match) {
+      const char *leaves = players_data_get_data_name(
+          config->players_data, PLAYERS_DATA_TYPE_KLV, player_idx);
+      error_stack_push(
+          error_stack, ERROR_STATUS_RIT_KLV_MISMATCH,
+          get_formatted_string(
+              "rack info table '%s' was not built from leaves '%s' (player "
+              "%d); rebuild it with 'convert klvwmp2rit %s <letter "
+              "distribution> %s <lexicon>'\n",
+              name, leaves, player_idx + 1, name, leaves));
+      return;
+    }
+    if (!config->table_auto[PLAYERS_DATA_TYPE_RIT][player_idx]) {
+      error_stack_push(
+          error_stack, ERROR_STATUS_RIT_INPUTS_MISMATCH,
+          get_formatted_string(
+              "rack info table '%s' was not built from the lexicon and leaves "
+              "of player %d; delete the .rit file and rebuild it with "
+              "'convert klvwmp2rit'\n",
+              name, player_idx + 1));
+      return;
+    }
+    thread_control_print_formatted(
+        config->thread_control,
+        "playing without the rack info table %s: it was built from another "
+        "lexicon or other leaves (delete the .rit file to build it again)\n",
+        name);
+    *rit_names[player_idx] = NULL;
+    dropped = true;
+  }
+  if (dropped) {
+    // The other player's table, if any, is loaded already and kept.
+    players_data_set(config->players_data, PLAYERS_DATA_TYPE_RIT,
+                     config->data_paths, *p1_rit_name, *p2_rit_name,
+                     config->use_mmap_for_rit, error_stack);
+  }
+}
+
+// The letter distribution a lexicon load uses: `new_ld_name` if given, else
+// `lexicon`'s default when defaults are asked for or none is loaded, else the
+// loaded one's.
+static char *config_updated_ld_name(const Config *config,
+                                    const char *new_ld_name, bool use_default,
+                                    const char *lexicon,
+                                    ErrorStack *error_stack) {
+  if (new_ld_name) {
+    return string_duplicate(new_ld_name);
+  }
+  if (use_default || !config->ld) {
+    return ld_get_default_name_from_lexicon_name(lexicon, error_stack);
+  }
+  return string_duplicate(ld_get_name(config->ld));
 }
 
 static void config_load_lexicon_dependent_data_internal(
@@ -7878,93 +8810,67 @@ static void config_load_lexicon_dependent_data_internal(
     return;
   }
 
-  // Determine the status of the wmp for both players
-  // Start by assuming we are just using whatever the existing wmp settings
-  // are
-  bool p1_wmp_use_when_available = players_data_get_use_when_available(
-      config->players_data, PLAYERS_DATA_TYPE_WMP, 0);
-  bool p2_wmp_use_when_available = players_data_get_use_when_available(
-      config->players_data, PLAYERS_DATA_TYPE_WMP, 1);
-
-  if (use_wmp_has_value) {
-    config_load_bool(config, ARG_TOKEN_USE_WMP, &p1_wmp_use_when_available,
-                     error_stack);
-    if (!error_stack_is_empty(error_stack)) {
-      return;
+  // Each player's setting for each table: true, false, or auto -- use it
+  // when this machine has room (config->table_auto). wmp / w1 / w2, rit /
+  // rit1 / rit2 and wit / wit1 / wit2 follow one pattern: the per-player arg
+  // overrides the shared one. The settings persist; what a load uses is
+  // decided below, from them, every time.
+  const players_data_t table_types[] = {
+      PLAYERS_DATA_TYPE_WMP, PLAYERS_DATA_TYPE_RIT, PLAYERS_DATA_TYPE_WIT};
+  const arg_token_t shared_tokens[] = {ARG_TOKEN_USE_WMP, ARG_TOKEN_USE_RIT,
+                                       ARG_TOKEN_USE_WIT};
+  const arg_token_t player_tokens[][2] = {
+      {ARG_TOKEN_P1_USE_WMP, ARG_TOKEN_P2_USE_WMP},
+      {ARG_TOKEN_P1_USE_RIT, ARG_TOKEN_P2_USE_RIT},
+      {ARG_TOKEN_P1_USE_WIT, ARG_TOKEN_P2_USE_WIT}};
+  const bool shared_has_value[] = {use_wmp_has_value, use_rit_has_value,
+                                   use_wit_has_value};
+  const bool player_has_value[][2] = {
+      {p1_use_wmp_has_value, p2_use_wmp_has_value},
+      {p1_use_rit_has_value, p2_use_rit_has_value},
+      {p1_use_wit_has_value, p2_use_wit_has_value}};
+  bool use[NUMBER_OF_DATA][2] = {{false}};
+  for (int table_idx = 0; table_idx < 3; table_idx++) {
+    const players_data_t type = table_types[table_idx];
+    bool player_use[2];
+    bool player_auto[2];
+    for (int player_idx = 0; player_idx < 2; player_idx++) {
+      player_use[player_idx] = players_data_get_use_when_available(
+          config->players_data, type, player_idx);
+      player_auto[player_idx] = config->table_auto[type][player_idx];
     }
-    p2_wmp_use_when_available = p1_wmp_use_when_available;
-  }
-
-  // The "w1" and "w2" args override the "use_wmp" arg
-  if (p1_use_wmp_has_value) {
-    config_load_bool(config, ARG_TOKEN_P1_USE_WMP, &p1_wmp_use_when_available,
-                     error_stack);
-    if (!error_stack_is_empty(error_stack)) {
-      return;
+    if (shared_has_value[table_idx]) {
+      config_load_table_setting(config, shared_tokens[table_idx],
+                                &player_use[0], &player_auto[0], error_stack);
+      if (!error_stack_is_empty(error_stack)) {
+        return;
+      }
+      player_use[1] = player_use[0];
+      player_auto[1] = player_auto[0];
     }
-  }
-
-  if (p2_use_wmp_has_value) {
-    config_load_bool(config, ARG_TOKEN_P2_USE_WMP, &p2_wmp_use_when_available,
-                     error_stack);
-    if (!error_stack_is_empty(error_stack)) {
-      return;
-    }
-  }
-
-  players_data_set_use_when_available(config->players_data,
-                                      PLAYERS_DATA_TYPE_WMP, 0,
-                                      p1_wmp_use_when_available);
-  players_data_set_use_when_available(config->players_data,
-                                      PLAYERS_DATA_TYPE_WMP, 1,
-                                      p2_wmp_use_when_available);
-
-  // Determine the status of the rack info table for both players, mirroring
-  // the WMP arg pattern (rit / rit1 / rit2).
-  bool p1_rit_use_when_available = players_data_get_use_when_available(
-      config->players_data, PLAYERS_DATA_TYPE_RIT, 0);
-  bool p2_rit_use_when_available = players_data_get_use_when_available(
-      config->players_data, PLAYERS_DATA_TYPE_RIT, 1);
-
-  if (use_rit_has_value) {
-    config_load_bool(config, ARG_TOKEN_USE_RIT, &p1_rit_use_when_available,
-                     error_stack);
-    if (!error_stack_is_empty(error_stack)) {
-      return;
-    }
-    p2_rit_use_when_available = p1_rit_use_when_available;
-  }
-
-  // The "rit1" and "rit2" args override the "rit" arg.
-  if (p1_use_rit_has_value) {
-    config_load_bool(config, ARG_TOKEN_P1_USE_RIT, &p1_rit_use_when_available,
-                     error_stack);
-    if (!error_stack_is_empty(error_stack)) {
-      return;
-    }
-  }
-
-  if (p2_use_rit_has_value) {
-    config_load_bool(config, ARG_TOKEN_P2_USE_RIT, &p2_rit_use_when_available,
-                     error_stack);
-    if (!error_stack_is_empty(error_stack)) {
-      return;
+    for (int player_idx = 0; player_idx < 2; player_idx++) {
+      if (player_has_value[table_idx][player_idx]) {
+        config_load_table_setting(config, player_tokens[table_idx][player_idx],
+                                  &player_use[player_idx],
+                                  &player_auto[player_idx], error_stack);
+        if (!error_stack_is_empty(error_stack)) {
+          return;
+        }
+      }
+      players_data_set_use_when_available(config->players_data, type,
+                                          player_idx, player_use[player_idx]);
+      config->table_auto[type][player_idx] = player_auto[player_idx];
+      use[type][player_idx] = player_use[player_idx];
     }
   }
 
   // Rack info tables cache KLV-derived leave values. Leave generation updates
   // the KLV after every generation, so an RIT would become stale immediately.
+  // Only this load goes without: the settings stand.
   if (disable_rit) {
-    p1_rit_use_when_available = false;
-    p2_rit_use_when_available = false;
+    use[PLAYERS_DATA_TYPE_RIT][0] = false;
+    use[PLAYERS_DATA_TYPE_RIT][1] = false;
   }
-
-  players_data_set_use_when_available(config->players_data,
-                                      PLAYERS_DATA_TYPE_RIT, 0,
-                                      p1_rit_use_when_available);
-  players_data_set_use_when_available(config->players_data,
-                                      PLAYERS_DATA_TYPE_RIT, 1,
-                                      p2_rit_use_when_available);
 
   if (use_mmap_for_rit_has_value) {
     config_load_bool(config, ARG_TOKEN_USE_MMAP_FOR_RIT,
@@ -7973,46 +8879,6 @@ static void config_load_lexicon_dependent_data_internal(
       return;
     }
   }
-
-  // Determine the status of the word info table for both players, mirroring
-  // the WMP/RIT arg pattern (wit / wit1 / wit2).
-  bool p1_wit_use_when_available = players_data_get_use_when_available(
-      config->players_data, PLAYERS_DATA_TYPE_WIT, 0);
-  bool p2_wit_use_when_available = players_data_get_use_when_available(
-      config->players_data, PLAYERS_DATA_TYPE_WIT, 1);
-
-  if (use_wit_has_value) {
-    config_load_bool(config, ARG_TOKEN_USE_WIT, &p1_wit_use_when_available,
-                     error_stack);
-    if (!error_stack_is_empty(error_stack)) {
-      return;
-    }
-    p2_wit_use_when_available = p1_wit_use_when_available;
-  }
-
-  // The "wit1" and "wit2" args override the "wit" arg.
-  if (p1_use_wit_has_value) {
-    config_load_bool(config, ARG_TOKEN_P1_USE_WIT, &p1_wit_use_when_available,
-                     error_stack);
-    if (!error_stack_is_empty(error_stack)) {
-      return;
-    }
-  }
-
-  if (p2_use_wit_has_value) {
-    config_load_bool(config, ARG_TOKEN_P2_USE_WIT, &p2_wit_use_when_available,
-                     error_stack);
-    if (!error_stack_is_empty(error_stack)) {
-      return;
-    }
-  }
-
-  players_data_set_use_when_available(config->players_data,
-                                      PLAYERS_DATA_TYPE_WIT, 0,
-                                      p1_wit_use_when_available);
-  players_data_set_use_when_available(config->players_data,
-                                      PLAYERS_DATA_TYPE_WIT, 1,
-                                      p2_wit_use_when_available);
 
   // Both lexicons are not specified, so we don't
   // load any of the lexicon dependent data
@@ -8057,39 +8923,6 @@ static void config_load_lexicon_dependent_data_internal(
   players_data_set(config->players_data, PLAYERS_DATA_TYPE_KWG,
                    config->data_paths, updated_p1_lexicon_name,
                    updated_p2_lexicon_name, false, error_stack);
-
-  if (!error_stack_is_empty(error_stack)) {
-    return;
-  }
-
-  // Load lexica (in WMP format)
-
-  // For the wmp, we allow non-NULL -> NULL transitions.
-
-  const char *p1_wmp_name = NULL;
-  if (p1_wmp_use_when_available) {
-    p1_wmp_name = updated_p1_lexicon_name;
-  }
-
-  const char *p2_wmp_name = NULL;
-  if (p2_wmp_use_when_available) {
-    p2_wmp_name = updated_p2_lexicon_name;
-  }
-
-  if (config->build_missing_wordmaps) {
-    // Players with the same lexicon share its wordmap, so it is built, or
-    // found missing and reported, once rather than once per player.
-    const bool same_wordmap =
-        p1_wmp_name && p2_wmp_name && strings_equal(p1_wmp_name, p2_wmp_name);
-    p1_wmp_name = config_wordmap_for_first_use(config, 0, p1_wmp_name);
-    p2_wmp_name = same_wordmap
-                      ? p1_wmp_name
-                      : config_wordmap_for_first_use(config, 1, p2_wmp_name);
-  }
-
-  players_data_set(config->players_data, PLAYERS_DATA_TYPE_WMP,
-                   config->data_paths, p1_wmp_name, p2_wmp_name, false,
-                   error_stack);
 
   if (!error_stack_is_empty(error_stack)) {
     return;
@@ -8148,45 +8981,128 @@ static void config_load_lexicon_dependent_data_internal(
     return;
   }
 
-  // Load rack info tables (if enabled). A table stores leave values, so the
-  // .rit file shares the player's leaves name (by default the lexicon's) and
-  // players with different leaves load different tables. Non-NULL -> NULL
-  // transitions are allowed.
-  const char *p1_rit_name = NULL;
-  if (p1_rit_use_when_available) {
-    p1_rit_name = config->p1_rit_name_override
-                      ? config->p1_rit_name_override
-                      : players_data_get_data_name(config->players_data,
-                                                   PLAYERS_DATA_TYPE_KLV, 0);
+  // The tables. A rack info table is named for its (lexicon, leaves) pair
+  // (config_rack_info_table_name), unless a contribute task names it. Those
+  // set to auto are used if this machine has room for them, as
+  // config_choose_auto_tables decides, which says so in a line when what it
+  // decided changes.
+  const char *lexicons[2] = {updated_p1_lexicon_name, updated_p2_lexicon_name};
+  char *rit_names[2];
+  for (int player_idx = 0; player_idx < 2; player_idx++) {
+    const char *override = player_idx == 0 ? config->p1_rit_name_override
+                                           : config->p2_rit_name_override;
+    rit_names[player_idx] =
+        override
+            ? string_duplicate(override)
+            : config_rack_info_table_name(
+                  config, lexicons[player_idx],
+                  players_data_get_data_name(
+                      config->players_data, PLAYERS_DATA_TYPE_KLV, player_idx));
   }
-  const char *p2_rit_name = NULL;
-  if (p2_rit_use_when_available) {
-    p2_rit_name = config->p2_rit_name_override
-                      ? config->p2_rit_name_override
-                      : players_data_get_data_name(config->players_data,
-                                                   PLAYERS_DATA_TYPE_KLV, 1);
+  // The tables are built for the letter distribution loaded below.
+  char *table_ld_name = config_updated_ld_name(
+      config, new_ld_name, use_default, updated_p1_lexicon_name, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    free(table_ld_name);
+    free(rit_names[0]);
+    free(rit_names[1]);
+    return;
+  }
+  char *report = NULL;
+  config_choose_auto_tables(config, lexicons, rit_names, table_ld_name, use,
+                            &report);
+  ConfigTablesInUse in_use;
+  config_tables_in_use_init(&in_use, lexicons, rit_names);
+  if (report && !strings_equal(report, config->auto_table_report)) {
+    thread_control_print_formatted(config->thread_control, "%s", report);
+    free(config->auto_table_report);
+    config->auto_table_report = report;
+  } else {
+    free(report);
+  }
+
+  // The wordmaps. For the wmp, we allow non-NULL -> NULL transitions.
+  const char *p1_wmp_name =
+      use[PLAYERS_DATA_TYPE_WMP][0] ? updated_p1_lexicon_name : NULL;
+  const char *p2_wmp_name =
+      use[PLAYERS_DATA_TYPE_WMP][1] ? updated_p2_lexicon_name : NULL;
+  if (config->build_missing_wordmaps) {
+    // Players with the same lexicon share its wordmap, so it is built, or
+    // found missing and reported, once rather than once per player.
+    const bool same_wordmap =
+        p1_wmp_name && p2_wmp_name && strings_equal(p1_wmp_name, p2_wmp_name);
+    p1_wmp_name = config_wordmap_for_first_use(config, 0, p1_wmp_name,
+                                               table_ld_name, &in_use);
+    p2_wmp_name = same_wordmap
+                      ? p1_wmp_name
+                      : config_wordmap_for_first_use(config, 1, p2_wmp_name,
+                                                     table_ld_name, &in_use);
+  }
+  players_data_set(config->players_data, PLAYERS_DATA_TYPE_WMP,
+                   config->data_paths, p1_wmp_name, p2_wmp_name, false,
+                   error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    free(table_ld_name);
+    free(rit_names[0]);
+    free(rit_names[1]);
+    return;
+  }
+
+  // Load rack info tables (if enabled). Non-NULL -> NULL transitions are
+  // allowed; like the wordmap, one is built on first use where missing
+  // wordmaps are.
+  const char *p1_rit_name = use[PLAYERS_DATA_TYPE_RIT][0] ? rit_names[0] : NULL;
+  const char *p2_rit_name = use[PLAYERS_DATA_TYPE_RIT][1] ? rit_names[1] : NULL;
+  if (config->build_missing_wordmaps) {
+    const bool same_table =
+        p1_rit_name && p2_rit_name && strings_equal(p1_rit_name, p2_rit_name);
+    p1_rit_name = config_rack_info_table_for_first_use(
+        config, 0, p1_rit_name, updated_p1_lexicon_name,
+        players_data_get_data_name(config->players_data, PLAYERS_DATA_TYPE_KLV,
+                                   0),
+        table_ld_name, &in_use);
+    p2_rit_name =
+        same_table ? p1_rit_name
+                   : config_rack_info_table_for_first_use(
+                         config, 1, p2_rit_name, updated_p2_lexicon_name,
+                         players_data_get_data_name(config->players_data,
+                                                    PLAYERS_DATA_TYPE_KLV, 1),
+                         table_ld_name, &in_use);
   }
   players_data_set(config->players_data, PLAYERS_DATA_TYPE_RIT,
                    config->data_paths, p1_rit_name, p2_rit_name,
                    config->use_mmap_for_rit, error_stack);
+  if (error_stack_is_empty(error_stack)) {
+    config_drop_mismatched_rack_info_tables(config, &p1_rit_name, &p2_rit_name,
+                                            error_stack);
+  }
   if (!error_stack_is_empty(error_stack)) {
+    free(table_ld_name);
+    free(rit_names[0]);
+    free(rit_names[1]);
     return;
   }
-  players_data_validate_rack_info_tables(config->players_data, error_stack);
-  if (!error_stack_is_empty(error_stack)) {
-    return;
-  }
-
   // Load word info tables (if enabled). Like the WMP, the .wit file shares
-  // the lexicon name and non-NULL -> NULL transitions are allowed.
-  const char *p1_wit_name = NULL;
-  if (p1_wit_use_when_available) {
-    p1_wit_name = updated_p1_lexicon_name;
+  // the lexicon name and non-NULL -> NULL transitions are allowed; one set to
+  // auto is built on first use where missing wordmaps are.
+  const char *p1_wit_name =
+      use[PLAYERS_DATA_TYPE_WIT][0] ? updated_p1_lexicon_name : NULL;
+  const char *p2_wit_name =
+      use[PLAYERS_DATA_TYPE_WIT][1] ? updated_p2_lexicon_name : NULL;
+  if (config->build_missing_wordmaps) {
+    const bool same_table =
+        p1_wit_name && p2_wit_name && strings_equal(p1_wit_name, p2_wit_name);
+    p1_wit_name = config_word_info_table_for_first_use(config, 0, p1_wit_name,
+                                                       table_ld_name, &in_use);
+    p2_wit_name = same_table
+                      ? p1_wit_name
+                      : config_word_info_table_for_first_use(
+                            config, 1, p2_wit_name, table_ld_name, &in_use);
   }
-  const char *p2_wit_name = NULL;
-  if (p2_wit_use_when_available) {
-    p2_wit_name = updated_p2_lexicon_name;
-  }
+  // The tables in use name the rack info tables until here.
+  free(rit_names[0]);
+  free(rit_names[1]);
+  free(table_ld_name);
   players_data_set(config->players_data, PLAYERS_DATA_TYPE_WIT,
                    config->data_paths, p1_wit_name, p2_wit_name,
                    /*use_mmap_for_rit=*/false, error_stack);
@@ -8206,17 +9122,11 @@ static void config_load_lexicon_dependent_data_internal(
   if (config->ld) {
     existing_ld_name = ld_get_name(config->ld);
   }
-  char *updated_ld_name = NULL;
-  if (new_ld_name) {
-    updated_ld_name = string_duplicate(new_ld_name);
-  } else if (use_default || !existing_ld_name) {
-    updated_ld_name = ld_get_default_name_from_lexicon_name(
-        updated_p1_lexicon_name, error_stack);
-    if (!error_stack_is_empty(error_stack)) {
-      return;
-    }
-  } else {
-    updated_ld_name = string_duplicate(existing_ld_name);
+  char *updated_ld_name = config_updated_ld_name(
+      config, new_ld_name, use_default, updated_p1_lexicon_name, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    free(updated_ld_name);
+    return;
   }
 
   const bool lex_ld_is_compat =
@@ -8470,7 +9380,6 @@ void config_parse_gcg_string(Config *config, const char *gcg_string,
   // parsing, since a lexicon the GCG names frees the one the previous endgame
   // results still point at, even when the parse then fails.
   config_invalidate_everything(config, true);
-  config_clear_peg_noprune_unless_set(config);
   game_history_reset(game_history);
   GCGParser *gcg_parser =
       gcg_parser_create(gcg_string, game_history,
@@ -8680,8 +9589,11 @@ void config_load_parsed_args(Config *config,
   for (int i = 0; i < number_of_input_strs; i++) {
     const char *input_str = string_splitter_get_item(cmd_split_string, i);
     bool is_cmd = i == 0;
-    bool is_arg = string_length(input_str) > 1 && input_str[0] == '-' &&
-                  !isdigit(input_str[1]);
+    // 'help -numplays' asks about the option rather than setting it.
+    const bool is_help_subject =
+        i == 1 && config->exec_parg_token == ARG_TOKEN_HELP;
+    bool is_arg = !is_help_subject && string_length(input_str) > 1 &&
+                  input_str[0] == '-' && !isdigit(input_str[1]);
 
     if (is_arg || is_cmd) {
       if (current_parg) {
@@ -12254,10 +13166,13 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
     return;
   }
 
-  config_load_int(config, ARG_TOKEN_ENDGAME_PLIES, 1, MAX_VARIANT_LENGTH,
-                  &config->endgame_plies, error_stack);
-  if (!error_stack_is_empty(error_stack)) {
-    return;
+  if (config_get_parg_value(config, ARG_TOKEN_ENDGAME_PLIES, 0)) {
+    config_load_int(config, ARG_TOKEN_ENDGAME_PLIES, 1, MAX_VARIANT_LENGTH,
+                    &config->endgame_plies, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+    config->endgame_plies_set = true;
   }
 
   config_load_int(config, ARG_TOKEN_ENDGAME_TOP_K, 1, MAX_ENDGAME_DISPLAY_PVS,
@@ -12285,6 +13200,11 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
   }
 
   config_load_peg_stage_top_k(config, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
+  config_load_peg_plies(config, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
@@ -12333,15 +13253,14 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
   // PEG "never prune" list persists across commands (pargs reset each parse).
   // Update only when given this parse; an empty value or "-" clears the
   // restriction.
+  // -pnoprune was removed: the moves to protect are now the peg command's
+  // second argument, which lasts one solve rather than outliving the position.
   if (config_get_parg_num_set_values(config, ARG_TOKEN_PEG_NOPRUNE) > 0) {
-    const char *peg_noprune =
-        config_get_parg_value(config, ARG_TOKEN_PEG_NOPRUNE, 0);
-    free(config->peg_noprune_str);
-    config->peg_noprune_str = NULL;
-    if (peg_noprune && !is_string_empty_or_whitespace(peg_noprune) &&
-        !strings_equal(peg_noprune, "-")) {
-      config->peg_noprune_str = string_duplicate(peg_noprune);
-    }
+    error_stack_push(
+        error_stack, ERROR_STATUS_PEG_NOPRUNE_REMOVED,
+        string_duplicate("-pnoprune was removed: give the moves to protect as "
+                         "peg's second argument, e.g. peg leaves1 8D.WORD"));
+    return;
   }
 
   config_load_int(config, ARG_TOKEN_NUMBER_OF_PLAYS, 1, INT_MAX,
@@ -12498,6 +13417,17 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
     return;
   }
 
+  config_load_int(config, ARG_TOKEN_ANALYZE_PEG_MAX_BAG, 0, PEG_MAX_BAG,
+                  &config->analyze_peg_max_bag, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  config_load_bool(config, ARG_TOKEN_ANALYZE_ENDGAME_SPREAD,
+                   &config->analyze_endgame_spread, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
   // Print boards
 
   config_load_bool(config, ARG_TOKEN_PRINT_BOARDS, &config->print_boards,
@@ -12534,6 +13464,15 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
 
   config_load_bool(config, ARG_TOKEN_SAVE_SETTINGS, &config->save_settings,
                    error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
+  // Settings version: only checked. A saved file's stale settings are dropped
+  // before its line is run (config_upgrade_settings_line).
+  int settings_version = CONFIG_SETTINGS_VERSION;
+  config_load_int(config, ARG_TOKEN_SETTINGS_VERSION, 1,
+                  CONFIG_SETTINGS_VERSION, &settings_version, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
@@ -13579,7 +14518,7 @@ void execute_peg(Config *config, ErrorStack *error_stack) {
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
-  char *result = config_peg_display(config, NULL);
+  char *result = config_peg_display(config, NULL, PEG_DISPLAY_ROWS);
   thread_control_print(config->thread_control, result);
   free(result);
 }
@@ -13701,15 +14640,18 @@ static void config_fill_analyze_args(Config *config, AnalyzeArgs *analyze_args,
                        &analyze_args->sim_args);
   config_fill_endgame_args(config, &analyze_args->endgame_args);
   analyze_args->endgame_args.num_top_moves = 1;
-  // Unlike the plain "endgame" command, autoanalyze bounds an unset -etlim
-  // with -tlim so a single game's endgame turns can't run unbounded.
-  if (config->endgame_time_limit_seconds == 0) {
-    analyze_args->endgame_args.soft_time_limit = config->time_limit_seconds;
-    analyze_args->endgame_args.hard_time_limit = config->time_limit_seconds;
+  // Analyze's endgame turns are graded on the result, which a first-win solve
+  // to the end of the game proves; -aegspread keeps the full window for the
+  // spreads, and -eplies a depth of its own.
+  if (!config->endgame_plies_set) {
+    analyze_args->endgame_args.plies = MAX_SEARCH_DEPTH;
   }
+  analyze_args->endgame_args.first_win = !config->analyze_endgame_spread;
+  analyze_args->endgame_spread = config->analyze_endgame_spread;
   config_fill_peg_args(config, &analyze_args->peg_args);
   analyze_args->human_readable = config->human_readable;
   analyze_args->show_mistakes = config->show_mistakes;
+  analyze_args->peg_max_bag = config->analyze_peg_max_bag;
   analyze_args->max_num_display_plays = config->max_num_display_plays;
 }
 
@@ -14619,7 +15561,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   cmd(ARG_TOKEN_SHOW_INFERENCE, "shinference", 0, 1, show_inference, generic,
       false);
   cmd(ARG_TOKEN_SHOW_ENDGAME, "shendgame", 0, 1, show_endgame, generic, false);
-  cmd(ARG_TOKEN_SHOW_PEG, "shpeg", 0, 0, show_peg, peg, false);
+  cmd(ARG_TOKEN_SHOW_PEG, "shpeg", 0, 1, show_peg, peg, false);
   cmd(ARG_TOKEN_SHOW_HEAT_MAP, "heatmap", 1, 3, show_heat_map, generic, false);
   cmd(ARG_TOKEN_MOVES, "addmoves", 1, 1, add_moves, generic, true);
   cmd(ARG_TOKEN_RACK, "rack", 1, 1, set_rack, generic, true);
@@ -14634,7 +15576,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
       rack_and_gen_and_sim, false);
   cmd(ARG_TOKEN_INFER, "infer", 0, 5, infer, generic, false);
   cmd(ARG_TOKEN_ENDGAME, "endgame", 0, 2, endgame, endgame, false);
-  cmd(ARG_TOKEN_PEG, "peg", 0, 1, peg, peg, false);
+  cmd(ARG_TOKEN_PEG, "peg", 0, 2, peg, peg, false);
   cmd(ARG_TOKEN_AUTOPLAY, "autoplay", 2, 2, autoplay, autoplay, false);
   cmd(ARG_TOKEN_CONVERT, "convert", 2, 5, convert, generic, false);
   cmd(ARG_TOKEN_CONTRIBUTE, "contribute", 0, 1, contribute, generic, false);
@@ -14699,6 +15641,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_ENDGAME_BEST_REPLY, "ebestreply", 1, 1);
   arg(ARG_TOKEN_PEG_TOP_K, "pegtopk", 1, 1);
   arg(ARG_TOKEN_PEG_TIME_LIMIT, "pegtlim", 1, 1);
+  arg(ARG_TOKEN_PEG_PLIES, "pegplies", 1, 1);
   arg(ARG_TOKEN_PEG_STRIDE, "pegstride", 1, 1);
   arg(ARG_TOKEN_PEG_NOPRUNE, "pnoprune", 1, 1);
   arg(ARG_TOKEN_PEG_PESSIMISTIC, "pegpess", 1, 1);
@@ -14724,6 +15667,8 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_USE_HEAT_MAP, "useheatmap", 1, 1);
   arg(ARG_TOKEN_HUMAN_READABLE, "hr", 1, 1);
   arg(ARG_TOKEN_SHOW_MISTAKES, "mistakes", 1, 1);
+  arg(ARG_TOKEN_ANALYZE_PEG_MAX_BAG, "apegmaxbag", 1, 1);
+  arg(ARG_TOKEN_ANALYZE_ENDGAME_SPREAD, "aegspread", 1, 1);
   arg(ARG_TOKEN_WRITE_BUFFER_SIZE, "wb", 1, 1);
   arg(ARG_TOKEN_RANDOM_SEED, "seed", 1, 1);
   arg(ARG_TOKEN_NUMBER_OF_THREADS, "threads", 1, 1);
@@ -14803,6 +15748,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_PRINT_ON_FINISH, "printonfinish", 1, 1);
   arg(ARG_TOKEN_SHOW_PROMPT, "shprompt", 1, 1);
   arg(ARG_TOKEN_SAVE_SETTINGS, "savesettings", 1, 1);
+  arg(ARG_TOKEN_SETTINGS_VERSION, "fileversion", 1, 1);
   arg(ARG_TOKEN_AUTOSAVE_GCG, "autosavegcg", 1, 1);
   arg(ARG_TOKEN_FG_REQUIRED, "fgrequired", 1, 1);
   arg(ARG_TOKEN_SHOW_GAME_WITH_MOVES, "shwithmoves", 1, 1);
@@ -14845,21 +15791,28 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->shplies = CONFIG_DEFAULT_SHPLIES;
   config->show_bu = false;
   config->endgame_plies = 6;
+  config->endgame_plies_set = false;
+  config->analyze_endgame_spread = false;
   config->endgame_top_k = 1;
   config->endgame_best_reply_shortcuts = true;
   // -1 = no peg results yet; 0 stages = built-in schedule; 0 stride = solver
   // default; rational opponent; no only-solve / never-prune restrictions.
   config->peg_result.last_completed_stage = -1;
   config->peg_num_stages = 0;
+  config->peg_plies = CONFIG_DEFAULT_PEG_PLIES;
   config->leavegen_max_games = 0;
   config->leavegen_write_files = true;
   config->peg_scenario_stride = 0;
-  config->peg_pessimistic = false;
+  config->peg_pessimistic = true;
   config->peg_nested = true;
+  config->peg_nested_cand_caps_set = false;
+  config->peg_nested_depth_set = false;
+  config->peg_nested_strides_set = false;
   config->peg_show_outcomes = true;
-  config->peg_out_width = 100;
+  config->peg_out_width = 200;
   config->peg_out_lines = 1;
-  config->peg_noprune_str = NULL;
+  config->peg_last_set_str = NULL;
+  config->peg_last_moves_str = NULL;
   config->eq_margin_inference = int_to_equity(CONFIG_DEFAULT_EQ_MARGIN);
   config->eq_margin_movegen = int_to_equity(CONFIG_DEFAULT_EQ_MARGIN);
   config->min_play_iterations = CONFIG_DEFAULT_MIN_PLAY_ITERATIONS;
@@ -14889,6 +15842,11 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->peg_outcomes_board = NULL;
   config->peg_outcomes_ld = NULL;
   config->show_mistakes = false;
+  // A complete 3-ply solve at 1 in the bag took a median 16 s on 10 threads
+  // in ten positions, though one saved game ran past 15 minutes; at 2 to 4 in
+  // the bag even 2 plies ran past 5 minutes in 13 of 30, so analyze solves
+  // only 1-in-bag turns with PEG unless told otherwise.
+  config->analyze_peg_max_bag = 1;
   config->sim_with_inference = true;
   config->pat_label_plies = 1;
   config->sim_margin_forecast = false;
@@ -14942,6 +15900,27 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->game_variant = DEFAULT_GAME_VARIANT;
   config->ld = NULL;
   config->players_data = players_data_create(default_use_wmp);
+  // The command line program and the library's magpie_create() use each
+  // table when this machine has room for it; tests, browser games and
+  // contribute's task configurations state what they use.
+  const bool auto_tables = config_args && config_args->auto_tables;
+  for (int player_idx = 0; player_idx < 2; player_idx++) {
+    config->table_auto[PLAYERS_DATA_TYPE_WMP][player_idx] = auto_tables;
+    config->table_auto[PLAYERS_DATA_TYPE_RIT][player_idx] = auto_tables;
+    config->table_auto[PLAYERS_DATA_TYPE_WIT][player_idx] = auto_tables;
+    if (auto_tables) {
+      players_data_set_use_when_available(
+          config->players_data, PLAYERS_DATA_TYPE_WMP, player_idx, true);
+      players_data_set_use_when_available(
+          config->players_data, PLAYERS_DATA_TYPE_RIT, player_idx, true);
+      players_data_set_use_when_available(
+          config->players_data, PLAYERS_DATA_TYPE_WIT, player_idx, true);
+    }
+  }
+  // A mapped rack info table starts faster, is shared by the processes using
+  // its data directory, and gives the system pages it can reclaim.
+  config->use_mmap_for_rit = auto_tables && IS_LITTLE_ENDIAN;
+  config->auto_table_report = NULL;
   config->thread_control = thread_control_create();
   config->game = NULL;
   config->game_backup = NULL;
@@ -14992,7 +15971,9 @@ void config_destroy(Config *config) {
   ld_destroy(config->peg_outcomes_ld);
   peg_result_destroy(&config->peg_result);
   peg_poll_destroy(config->peg_poll);
-  free(config->peg_noprune_str);
+  free(config->peg_last_set_str);
+  free(config->auto_table_report);
+  free(config->peg_last_moves_str);
   free(config->p1_rit_name_override);
   free(config->p2_rit_name_override);
   for (int type = 0; type < NUMBER_OF_DATA; type++) {
@@ -15064,6 +16045,24 @@ static void config_add_int_list_setting_to_string_builder(const Config *config,
   for (int i = 0; i < count; i++) {
     string_builder_add_formatted_string(sb, i > 0 ? ",%d" : "%d", values[i]);
   }
+}
+
+// A table option as set: auto, or true or false -- never what the last load
+// used, which on another machine, or with more memory, could differ.
+static void config_add_table_setting_to_string_builder(const Config *config,
+                                                       StringBuilder *sb,
+                                                       arg_token_t arg_token,
+                                                       players_data_t type,
+                                                       int player_index) {
+  if (config->table_auto[type][player_index]) {
+    string_builder_add_formatted_string(sb, " -%s auto",
+                                        config->pargs[arg_token]->name);
+    return;
+  }
+  config_add_bool_setting_to_string_builder(
+      config, sb, arg_token,
+      players_data_get_use_when_available(config->players_data, type,
+                                          player_index));
 }
 
 void config_add_settings_to_string_builder(const Config *config,
@@ -15186,22 +16185,16 @@ void config_add_settings_to_string_builder(const Config *config,
                                      PLAYERS_DATA_TYPE_KWG, 0));
       break;
     case ARG_TOKEN_P1_USE_WMP:
-      config_add_bool_setting_to_string_builder(
-          config, sb, arg_token,
-          players_data_get_use_when_available(config->players_data,
-                                              PLAYERS_DATA_TYPE_WMP, 0));
+      config_add_table_setting_to_string_builder(config, sb, arg_token,
+                                                 PLAYERS_DATA_TYPE_WMP, 0);
       break;
     case ARG_TOKEN_P1_USE_RIT:
-      config_add_bool_setting_to_string_builder(
-          config, sb, arg_token,
-          players_data_get_use_when_available(config->players_data,
-                                              PLAYERS_DATA_TYPE_RIT, 0));
+      config_add_table_setting_to_string_builder(config, sb, arg_token,
+                                                 PLAYERS_DATA_TYPE_RIT, 0);
       break;
     case ARG_TOKEN_P1_USE_WIT:
-      config_add_bool_setting_to_string_builder(
-          config, sb, arg_token,
-          players_data_get_use_when_available(config->players_data,
-                                              PLAYERS_DATA_TYPE_WIT, 0));
+      config_add_table_setting_to_string_builder(config, sb, arg_token,
+                                                 PLAYERS_DATA_TYPE_WIT, 0);
       break;
     case ARG_TOKEN_P1_LEAVES:
       config_add_string_setting_to_string_builder(
@@ -15270,22 +16263,16 @@ void config_add_settings_to_string_builder(const Config *config,
                                      PLAYERS_DATA_TYPE_KWG, 1));
       break;
     case ARG_TOKEN_P2_USE_WMP:
-      config_add_bool_setting_to_string_builder(
-          config, sb, arg_token,
-          players_data_get_use_when_available(config->players_data,
-                                              PLAYERS_DATA_TYPE_WMP, 1));
+      config_add_table_setting_to_string_builder(config, sb, arg_token,
+                                                 PLAYERS_DATA_TYPE_WMP, 1);
       break;
     case ARG_TOKEN_P2_USE_RIT:
-      config_add_bool_setting_to_string_builder(
-          config, sb, arg_token,
-          players_data_get_use_when_available(config->players_data,
-                                              PLAYERS_DATA_TYPE_RIT, 1));
+      config_add_table_setting_to_string_builder(config, sb, arg_token,
+                                                 PLAYERS_DATA_TYPE_RIT, 1);
       break;
     case ARG_TOKEN_P2_USE_WIT:
-      config_add_bool_setting_to_string_builder(
-          config, sb, arg_token,
-          players_data_get_use_when_available(config->players_data,
-                                              PLAYERS_DATA_TYPE_WIT, 1));
+      config_add_table_setting_to_string_builder(config, sb, arg_token,
+                                                 PLAYERS_DATA_TYPE_WIT, 1);
       break;
     case ARG_TOKEN_P2_LEAVES:
       config_add_string_setting_to_string_builder(
@@ -15376,8 +16363,11 @@ void config_add_settings_to_string_builder(const Config *config,
                                                 config->show_bu);
       break;
     case ARG_TOKEN_ENDGAME_PLIES:
-      config_add_int_setting_to_string_builder(config, sb, arg_token,
-                                               config->endgame_plies);
+      // Written only once given, so analyze keeps its own depth until then.
+      if (config->endgame_plies_set) {
+        config_add_int_setting_to_string_builder(config, sb, arg_token,
+                                                 config->endgame_plies);
+      }
       break;
     case ARG_TOKEN_PEG_TOP_K:
       // Serialize the raw -pegtopk value (e.g. "32,16,8,4,2") if set, so the
@@ -15424,6 +16414,10 @@ void config_add_settings_to_string_builder(const Config *config,
     case ARG_TOKEN_PEG_TIME_LIMIT:
       config_add_double_setting_to_string_builder(
           config, sb, arg_token, config->peg_time_limit_seconds);
+      break;
+    case ARG_TOKEN_PEG_PLIES:
+      config_add_int_setting_to_string_builder(config, sb, arg_token,
+                                               config->peg_plies);
       break;
     case ARG_TOKEN_NUMBER_OF_PLAYS:
       config_add_int_setting_to_string_builder(config, sb, arg_token,
@@ -15550,21 +16544,29 @@ void config_add_settings_to_string_builder(const Config *config,
       break;
     // The nested knobs are one option for both players; player 1's values
     // stand for both, as the option sets both.
+    // Written only once given, so peg and analyze keep choosing their own
+    // schedule until then.
     case ARG_TOKEN_PEG_NESTED_CAND_CAPS:
-      config_add_int_list_setting_to_string_builder(
-          config, sb, arg_token,
-          config->solver_settings[0].peg_nested_cand_caps,
-          config->solver_settings[0].peg_nested_num_cand_caps);
+      if (config->peg_nested_cand_caps_set) {
+        config_add_int_list_setting_to_string_builder(
+            config, sb, arg_token,
+            config->solver_settings[0].peg_nested_cand_caps,
+            config->solver_settings[0].peg_nested_num_cand_caps);
+      }
       break;
     case ARG_TOKEN_PEG_NESTED_DEPTH:
-      config_add_int_setting_to_string_builder(
-          config, sb, arg_token,
-          config->solver_settings[0].peg_nested_max_depth);
+      if (config->peg_nested_depth_set) {
+        config_add_int_setting_to_string_builder(
+            config, sb, arg_token,
+            config->solver_settings[0].peg_nested_max_depth);
+      }
       break;
     case ARG_TOKEN_PEG_NESTED_STRIDES:
-      config_add_int_list_setting_to_string_builder(
-          config, sb, arg_token,
-          &config->solver_settings[0].peg_nested_strides[1], PEG_MAX_BAG);
+      if (config->peg_nested_strides_set) {
+        config_add_int_list_setting_to_string_builder(
+            config, sb, arg_token,
+            &config->solver_settings[0].peg_nested_strides[1], PEG_MAX_BAG);
+      }
       break;
     case ARG_TOKEN_MOVEGEN_MARGIN:
       if (config->eq_margin_movegen != 0) {
@@ -15649,6 +16651,14 @@ void config_add_settings_to_string_builder(const Config *config,
     case ARG_TOKEN_SHOW_MISTAKES:
       config_add_bool_setting_to_string_builder(config, sb, arg_token,
                                                 config->show_mistakes);
+      break;
+    case ARG_TOKEN_ANALYZE_PEG_MAX_BAG:
+      config_add_int_setting_to_string_builder(config, sb, arg_token,
+                                               config->analyze_peg_max_bag);
+      break;
+    case ARG_TOKEN_ANALYZE_ENDGAME_SPREAD:
+      config_add_bool_setting_to_string_builder(config, sb, arg_token,
+                                                config->analyze_endgame_spread);
       break;
     case ARG_TOKEN_RANDOM_SEED:
       // Do not save the seed in the settings.
@@ -15846,6 +16856,10 @@ void config_add_settings_to_string_builder(const Config *config,
       config_add_bool_setting_to_string_builder(config, sb, arg_token,
                                                 config->save_settings);
       break;
+    case ARG_TOKEN_SETTINGS_VERSION:
+      config_add_int_setting_to_string_builder(config, sb, arg_token,
+                                               CONFIG_SETTINGS_VERSION);
+      break;
     case ARG_TOKEN_AUTOSAVE_GCG:
       config_add_bool_setting_to_string_builder(config, sb, arg_token,
                                                 config->autosave_gcg);
@@ -15878,6 +16892,87 @@ bool config_command_turns_on_save_settings(Config *config, const char *cmd) {
   const bool turns_on = error_stack_is_empty(error_stack) && save_settings;
   error_stack_destroy(error_stack);
   return turns_on;
+}
+
+// A setting whose default changed in `version`: a settings file older than
+// that recorded the old default, which looks the same as a choice, so the
+// loader drops the setting and the new default applies.
+typedef struct StaleSetting {
+  int version;
+  arg_token_t arg_token;
+} StaleSetting;
+
+static const StaleSetting config_stale_settings[] = {
+    {2, ARG_TOKEN_PEG_PESSIMISTIC},      {2, ARG_TOKEN_P1_USE_WMP},
+    {2, ARG_TOKEN_P2_USE_WMP},           {2, ARG_TOKEN_P1_USE_RIT},
+    {2, ARG_TOKEN_P2_USE_RIT},           {2, ARG_TOKEN_P1_USE_WIT},
+    {2, ARG_TOKEN_P2_USE_WIT},           {2, ARG_TOKEN_USE_MMAP_FOR_RIT},
+    {2, ARG_TOKEN_PEG_NESTED_CAND_CAPS}, {2, ARG_TOKEN_PEG_NESTED_DEPTH},
+    {2, ARG_TOKEN_PEG_NESTED_STRIDES},   {2, ARG_TOKEN_ENDGAME_PLIES},
+};
+
+// The arg token whose full name is `name` (without its dash), or
+// NUMBER_OF_ARG_TOKENS.
+static arg_token_t config_arg_token_from_full_name(const Config *config,
+                                                   const char *name) {
+  for (arg_token_t arg_token = 0; arg_token < NUMBER_OF_ARG_TOKENS;
+       arg_token++) {
+    if (strings_equal(config->pargs[arg_token]->name, name)) {
+      return arg_token;
+    }
+  }
+  return NUMBER_OF_ARG_TOKENS;
+}
+
+static bool config_setting_is_stale(arg_token_t arg_token, int file_version) {
+  const int num_stale =
+      (int)(sizeof(config_stale_settings) / sizeof(config_stale_settings[0]));
+  for (int stale_idx = 0; stale_idx < num_stale; stale_idx++) {
+    if (config_stale_settings[stale_idx].arg_token == arg_token &&
+        config_stale_settings[stale_idx].version > file_version) {
+      return true;
+    }
+  }
+  return false;
+}
+
+char *config_upgrade_settings_line(const Config *config, const char *line) {
+  StringSplitter *items = split_string_by_whitespace(line, true);
+  const int num_items = string_splitter_get_number_of_items(items);
+  const char *version_name = config->pargs[ARG_TOKEN_SETTINGS_VERSION]->name;
+  int file_version = 1;
+  for (int item_idx = 0; item_idx + 1 < num_items; item_idx++) {
+    const char *item = string_splitter_get_item(items, item_idx);
+    if (item[0] == '-' && strings_equal(item + 1, version_name)) {
+      ErrorStack *error_stack = error_stack_create();
+      file_version = string_to_int(
+          string_splitter_get_item(items, item_idx + 1), error_stack);
+      if (!error_stack_is_empty(error_stack)) {
+        file_version = 1;
+      }
+      error_stack_destroy(error_stack);
+    }
+  }
+  StringBuilder *sb = string_builder_create();
+  int item_idx = 0;
+  while (item_idx < num_items) {
+    const char *item = string_splitter_get_item(items, item_idx);
+    const arg_token_t arg_token =
+        item[0] == '-' ? config_arg_token_from_full_name(config, item + 1)
+                       : NUMBER_OF_ARG_TOKENS;
+    if (arg_token != NUMBER_OF_ARG_TOKENS &&
+        config_setting_is_stale(arg_token, file_version)) {
+      item_idx += 1 + config->pargs[arg_token]->num_values;
+      continue;
+    }
+    if (string_builder_length(sb) > 0) {
+      string_builder_add_char(sb, ' ');
+    }
+    string_builder_add_string(sb, item);
+    item_idx++;
+  }
+  string_splitter_destroy(items);
+  return string_builder_dump_and_destroy(sb, NULL);
 }
 
 void save_config_settings(const Config *config, ErrorStack *error_stack) {

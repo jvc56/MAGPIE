@@ -1037,7 +1037,12 @@ void endgame_ctx_reset(EndgameCtx *es, EndgameResults *results,
   atomic_store(&es->adding_closed, 1);
   atomic_store(&es->live_workers, es->threads);
   atomic_store(&es->window_open_ns, (int64_t)0);
-  es->requested_plies = endgame_args->plies;
+  // The per-ply arrays (current_line, the PV, the undos) hold
+  // MAX_SEARCH_DEPTH entries, so a deeper request searches as deep as they
+  // allow.
+  es->requested_plies = endgame_args->plies < MAX_SEARCH_DEPTH
+                            ? endgame_args->plies
+                            : MAX_SEARCH_DEPTH;
   es->solving_player = game_get_player_on_turn_index(endgame_args->game);
   es->initial_small_move_arena_size =
       endgame_args->initial_small_move_arena_size;
@@ -5005,6 +5010,14 @@ void iterative_deepening(EndgameCtxWorker *worker, int plies) {
 
     // Store result in worker's local tracking
     int32_t pv_value = val - worker->solver->initial_spread;
+    // A fixed window (first-win) can be decided at the root by a stored
+    // bound, which keeps no line: keep the last depth's, whose first move has
+    // the same result.
+    if (pv.num_moves == 0 && worker->best_pv.num_moves > 0 &&
+        (worker->solver->first_win_optim ||
+         worker->solver->initial_window_optim)) {
+      pv = worker->best_pv;
+    }
     worker->best_pv_value = pv_value;
     pv.score = pv_value;
     worker->best_pv = pv;
@@ -5041,7 +5054,7 @@ void iterative_deepening(EndgameCtxWorker *worker, int plies) {
     // EBF time management is active only when soft_time_limit > 0.
     // Callers using only hard_time_limit rely on the external timer thread
     // and check_depth_deadline instead; soft_time_limit = 0 disables this
-    // block intentionally (e.g. baseline time_mode=0 via endgame_time.c).
+    // block intentionally.
     if (worker->ordinal == 0 && worker->solver->soft_time_limit > 0) {
       double elapsed = ctimer_elapsed_seconds(&ids_timer);
       double this_depth_time = elapsed - depth_start_time;

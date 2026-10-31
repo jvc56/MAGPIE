@@ -24,6 +24,8 @@
 #include "../impl/simmer.h"
 #include "../util/io_util.h"
 #include "../util/json.h"
+#include "../util/string_util.h"
+#include "endgame.h"
 #include "peg.h"
 #include <stdbool.h>
 #include <stdint.h>
@@ -40,6 +42,11 @@ typedef struct ConfigArgs {
   // users, tests and contribute's task configurations, which build the
   // wordmaps their jobs pin themselves, do not.
   bool build_missing_wordmaps;
+  // -wmp, -rit and -wit default to auto: each table is used when this
+  // machine has the disk and memory for it. The magpie executable and the
+  // library's magpie_create() do; tests, browser games and contribute's task
+  // configurations state what they use, with use_wmp for the wordmap.
+  bool auto_tables;
 } ConfigArgs;
 
 // Constructors and Destructors
@@ -136,10 +143,16 @@ Config *config_create(const ConfigArgs *args, ErrorStack *error_stack);
 void config_destroy(Config *config);
 
 // Loading commands and execution
+// Adds the first sentence of the command or option's help, which is what a
+// list shows of it.
+void config_add_help_summary(const Config *config, arg_token_t arg_token,
+                             StringBuilder *sb);
+
 void config_load_command(Config *config, const char *cmd,
                          ErrorStack *error_stack);
 void config_execute_command(Config *config, ErrorStack *error_stack);
 char *config_get_execute_status(Config *config);
+char *config_show_game_while_running(const Config *config);
 bool config_continue_on_coldstart(const Config *config);
 bool config_run_str_api_command(Config *config, ErrorStack *error_stack,
                                 char **output);
@@ -200,6 +213,8 @@ ThreadControl *config_get_thread_control(const Config *config);
 // Fills peg_args with the peg command's arguments (defaults plus any -peg*
 // settings), leaving the poll and only/protect move sets unset.
 void config_fill_peg_args(Config *config, PegArgs *peg_args);
+// The endgame command's arguments for the current position.
+void config_fill_endgame_args(Config *config, EndgameArgs *endgame_args);
 exec_mode_t config_get_exec_mode(const Config *config);
 Game *config_get_game(const Config *config);
 GameHistory *config_get_game_history(const Config *config);
@@ -265,6 +280,10 @@ bool config_command_turns_on_save_settings(Config *config, const char *cmd);
 // every command. No-op if config_get_save_settings(config) is false, which it
 // is unless savesettings was set to true.
 void save_config_settings(const Config *config, ErrorStack *error_stack);
+// A line of a saved settings file, with the settings dropped whose defaults
+// changed after the version the file records with -fileversion (1 when it
+// records none). The caller frees the result.
+char *config_upgrade_settings_line(const Config *config, const char *line);
 // The Config contribute's tasks run in, sharing the caller's thread control
 // and never saving settings, so the caller's session and settings file are
 // left as they were; and its destruction, which leaves the thread control to

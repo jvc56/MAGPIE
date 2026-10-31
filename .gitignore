@@ -24,6 +24,7 @@ cppcheck_*
 TODO
 *.DS_Store
 settings.txt
+peg_output.txt
 
 # Node.js / Playwright
 node_modules/
