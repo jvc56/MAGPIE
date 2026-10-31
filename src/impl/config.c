@@ -82,6 +82,7 @@
 #include "gcg.h"
 #include "get_gcg.h"
 #include "inference.h"
+#include "leave_blend.h"
 #include "move_gen.h"
 #include "move_gen_base.h"
 #include "peg.h"
@@ -131,6 +132,7 @@ typedef enum {
   ARG_TOKEN_P2_NAME,
   ARG_TOKEN_LEAVE_GEN,
   ARG_TOKEN_CENSUS,
+  ARG_TOKEN_LEAVE_BLEND,
   ARG_TOKEN_PAT_GEN,
   ARG_TOKEN_CREATE_DATA,
   ARG_TOKEN_DATA_PATH,
@@ -1611,6 +1613,26 @@ static const char *census_help(const char **usages, const char **examples) {
          "two is stronger than either.";
 }
 
+static const char *leave_blend_help(const char **usages,
+                                    const char **examples) {
+  usages[0] = "<first_leaves> <second_leaves> <weight> <output_name>";
+  examples[0] = "CSW24_census CSW24_gen_2 0.5 CSW24_blend";
+  return "Mixes two leave tables leave by leave, taking <weight> of the "
+         "second and the rest of the first. A leave only one table holds "
+         "keeps that table's value. The census and self-play (leavegen) "
+         "tables mixed at 0.5 measured stronger than either.";
+}
+
+// One case for both in add_help_arg_to_string_builder, which is at the
+// function size limit.
+static const char *census_or_leave_blend_help(int token, const char **usages,
+                                              const char **examples) {
+  if (token == ARG_TOKEN_CENSUS) {
+    return census_help(usages, examples);
+  }
+  return leave_blend_help(usages, examples);
+}
+
 static const char *convert_help(const char **usages, const char **examples) {
   usages[0] = "<type> <name_without_extension> [<letter_distribution>] "
               "[<klv_name>] [<wmp_name>]";
@@ -1885,7 +1907,8 @@ void add_help_arg_to_string_builder(const Config *config, int token,
           "become stale during generation.";
       break;
     case ARG_TOKEN_CENSUS:
-      text = census_help(usages, examples);
+    case ARG_TOKEN_LEAVE_BLEND:
+      text = census_or_leave_blend_help(token, usages, examples);
       break;
     case ARG_TOKEN_CREATE_DATA:
       usages[0] = "<type> <output_name> [<letter_distribution>]";
@@ -3102,6 +3125,7 @@ char *impl_help(Config *config, ErrorStack *error_stack) {
         ARG_TOKEN_CREATE_DATA, /* createdata */
         ARG_TOKEN_DATA,        /* data */
         ARG_TOKEN_HELP,        /* help */
+        ARG_TOKEN_LEAVE_BLEND, /* leaveblend */
         ARG_TOKEN_SET,         /* setoptions */
         ARG_TOKEN_VERSION,     /* version */
     };
@@ -5461,6 +5485,22 @@ void impl_census(Config *config, ErrorStack *error_stack) {
   };
   census_gen(&args, error_stack);
   free(default_output_name);
+}
+
+// Leave Blend
+
+void impl_leave_blend(const Config *config, ErrorStack *error_stack) {
+  const char *weight_str =
+      config_get_parg_value(config, ARG_TOKEN_LEAVE_BLEND, 2);
+  const double weight = string_to_double(weight_str, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  leave_blend(config->data_paths,
+              config_get_parg_value(config, ARG_TOKEN_LEAVE_BLEND, 0),
+              config_get_parg_value(config, ARG_TOKEN_LEAVE_BLEND, 1), weight,
+              config_get_parg_value(config, ARG_TOKEN_LEAVE_BLEND, 3),
+              error_stack);
 }
 
 // PAT Gen
@@ -13711,6 +13751,15 @@ char *str_api_census(Config *config, ErrorStack *error_stack) {
   return empty_string();
 }
 
+void execute_leave_blend(Config *config, ErrorStack *error_stack) {
+  impl_leave_blend(config, error_stack);
+}
+
+char *str_api_leave_blend(Config *config, ErrorStack *error_stack) {
+  impl_leave_blend(config, error_stack);
+  return empty_string();
+}
+
 void execute_pat_gen(Config *config, ErrorStack *error_stack) {
   impl_pat_gen(config, error_stack);
 }
@@ -14721,6 +14770,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   cmd(ARG_TOKEN_CONTRIBUTE, "contribute", 0, 1, contribute, generic, false);
   cmd(ARG_TOKEN_LEAVE_GEN, "leavegen", 2, 2, leave_gen, generic, false);
   cmd(ARG_TOKEN_CENSUS, "census", 1, 3, census, generic, false);
+  cmd(ARG_TOKEN_LEAVE_BLEND, "leaveblend", 4, 4, leave_blend, generic, false);
   cmd(ARG_TOKEN_PAT_GEN, "patgen", 1, 2, pat_gen, generic, false);
   cmd(ARG_TOKEN_CREATE_DATA, "createdata", 2, 3, create_data, generic, false);
   cmd(ARG_TOKEN_NEXT, "next", 0, 0, next, generic, true);
@@ -15180,6 +15230,7 @@ void config_add_settings_to_string_builder(const Config *config,
     case ARG_TOKEN_CONVERT:
     case ARG_TOKEN_LEAVE_GEN:
     case ARG_TOKEN_CENSUS:
+    case ARG_TOKEN_LEAVE_BLEND:
     case ARG_TOKEN_PAT_GEN:
     case ARG_TOKEN_CREATE_DATA:
     case ARG_TOKEN_ANALYZE:
