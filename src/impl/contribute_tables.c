@@ -465,7 +465,7 @@ int contribute_choose_tables(ContributeTable *tables, int count,
       if (dependency && table_build_memory(dependency) > build) {
         build = table_build_memory(dependency);
       }
-      if (build > memory) {
+      if (build > 0 && build > memory) {
         skip_table(table, CONTRIBUTE_TABLE_NO_MEMORY_TO_BUILD, build, memory);
         continue;
       }

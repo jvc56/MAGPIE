@@ -156,8 +156,8 @@ struct Config {
   // table is used when this machine has room for it. Only the WMP, RIT and
   // WIT entries are used.
   bool table_auto[NUMBER_OF_DATA][2];
-  // The last line config_choose_auto_tables printed, so it says it again only
-  // when what it decided changes.
+  // What config_choose_auto_tables last said it decided, so it says it again
+  // only when that changes, not with every move in the memory free.
   char *auto_table_report;
   // Per table type and player, the key of the table auto last left out
   // (config_table_left_out_key), so it is passed over, unread and unsaid,
@@ -7903,6 +7903,66 @@ static ConfigTableKind config_table_kind(players_data_t type) {
   }
 }
 
+// The player's lexicon and leaves, for the keys below. The caller frees.
+static char *config_player_inputs_text(const Config *config, int player_idx) {
+  const PlayersData *players_data = config->players_data;
+  return get_formatted_string(
+      "%s %s",
+      players_data_get_data_name(players_data, PLAYERS_DATA_TYPE_KWG,
+                                 player_idx),
+      players_data_get_data_name(players_data, PLAYERS_DATA_TYPE_KLV,
+                                 player_idx));
+}
+
+// What a table auto left out is known by: its name, the lexicon and leaves it
+// was for, and its file as it stands. A change to any of them is worth another
+// try. The caller frees.
+static char *config_table_left_out_key(const Config *config,
+                                       players_data_t type, int player_idx,
+                                       const char *name) {
+  ErrorStack *errors = error_stack_create();
+  char *path = data_filepaths_get_readable_filename(
+      config->data_paths, name, config_table_kind(type).file_type, errors);
+  CFileIdentity identity = {0};
+  if (error_stack_is_empty(errors)) {
+    (void)cfile_identity(path, &identity);
+  }
+  free(path);
+  error_stack_destroy(errors);
+  char *inputs = config_player_inputs_text(config, player_idx);
+  char *key = get_formatted_string(
+      "%s %s %" PRId64 " %" PRId64 " %ld", name, inputs, identity.size,
+      identity.mtime_seconds, identity.mtime_nanoseconds);
+  free(inputs);
+  return key;
+}
+
+// Remembers `name` as left out for each auto player, so a build that failed is
+// not tried and reported again on every command.
+static void config_remember_failed_build(Config *config, players_data_t type,
+                                         const char *name) {
+  for (int player_idx = 0; player_idx < 2; player_idx++) {
+    if (config->table_auto[type][player_idx]) {
+      free(config->table_left_out[type][player_idx]);
+      config->table_left_out[type][player_idx] =
+          config_table_left_out_key(config, type, player_idx, name);
+    }
+  }
+}
+
+// Whether `name` is the table auto last left out for the player, unchanged.
+static bool config_table_is_left_out(const Config *config, players_data_t type,
+                                     int player_idx, const char *name) {
+  const char *left_out = config->table_left_out[type][player_idx];
+  if (!left_out) {
+    return false;
+  }
+  char *key = config_table_left_out_key(config, type, player_idx, name);
+  const bool same = strings_equal(key, left_out);
+  free(key);
+  return same;
+}
+
 // The words in the DAWG lists starting at `node_index`, memoized by list in
 // `memo` (-1 for a list not counted yet).
 static int64_t config_kwg_words_from(const KWG *kwg, uint32_t node_index,
@@ -8230,6 +8290,7 @@ config_wordmap_for_first_use(Config *config, int player_index,
     if (!error_stack_is_empty(errors)) {
       why_not = "it could not be built";
       error_stack_print_and_reset(errors);
+      config_remember_failed_build(config, PLAYERS_DATA_TYPE_WMP, lexicon);
     } else {
       config_record_first_use_build(config, PLAYERS_DATA_TYPE_WMP, lexicon,
                                     built_path, in_use);
@@ -8295,53 +8356,6 @@ static char *config_rack_info_table_name(const Config *config,
   return paired;
 }
 
-// The player's lexicon and leaves, for the keys below. The caller frees.
-static char *config_player_inputs_text(const Config *config, int player_idx) {
-  const PlayersData *players_data = config->players_data;
-  return get_formatted_string(
-      "%s %s",
-      players_data_get_data_name(players_data, PLAYERS_DATA_TYPE_KWG,
-                                 player_idx),
-      players_data_get_data_name(players_data, PLAYERS_DATA_TYPE_KLV,
-                                 player_idx));
-}
-
-// What a table auto left out is known by: its name, the lexicon and leaves it
-// was for, and its file as it stands. A change to any of them is worth another
-// try. The caller frees.
-static char *config_table_left_out_key(const Config *config,
-                                       players_data_t type, int player_idx,
-                                       const char *name) {
-  ErrorStack *errors = error_stack_create();
-  char *path = data_filepaths_get_readable_filename(
-      config->data_paths, name, config_table_kind(type).file_type, errors);
-  CFileIdentity identity = {0};
-  if (error_stack_is_empty(errors)) {
-    (void)cfile_identity(path, &identity);
-  }
-  free(path);
-  error_stack_destroy(errors);
-  char *inputs = config_player_inputs_text(config, player_idx);
-  char *key = get_formatted_string(
-      "%s %s %" PRId64 " %" PRId64 " %ld", name, inputs, identity.size,
-      identity.mtime_seconds, identity.mtime_nanoseconds);
-  free(inputs);
-  return key;
-}
-
-// Whether `name` is the table auto last left out for the player, unchanged.
-static bool config_table_is_left_out(const Config *config, players_data_t type,
-                                     int player_idx, const char *name) {
-  const char *left_out = config->table_left_out[type][player_idx];
-  if (!left_out) {
-    return false;
-  }
-  char *key = config_table_left_out_key(config, type, player_idx, name);
-  const bool same = strings_equal(key, left_out);
-  free(key);
-  return same;
-}
-
 // The memory the tables never take: the system's and other programs' share.
 #define CONFIG_AUTO_TABLE_MEMORY_RESERVE_BYTES 1000000000LL
 
@@ -8360,14 +8374,18 @@ static bool config_table_is_left_out(const Config *config, players_data_t type,
 // command line program with fetched data); a rack info table is built from
 // its lexicon's wordmap, so it costs that wordmap's disk too when the
 // wordmap is missing. Clears the use flag of each auto table left out, and
-// writes a line saying what each player's lexicon got to *report (NULL when
-// no table is auto). rit_names hold each player's rack info table name, and
-// ld_name is the letter distribution the lexicons are loaded with.
-static void
-config_choose_auto_tables(Config *config, const char *const lexicons[2],
-                          char *const rit_names[2], const char *ld_name,
-                          bool use[NUMBER_OF_DATA][2], char **report) {
+// writes a line saying what each player's lexicon got to *report and what was
+// decided, without the sizes that move from load to load, to *decision (both
+// NULL when no table is auto). rit_names hold each player's rack info table
+// name, and ld_name is the letter distribution the lexicons are loaded with.
+static void config_choose_auto_tables(Config *config,
+                                      const char *const lexicons[2],
+                                      char *const rit_names[2],
+                                      const char *ld_name,
+                                      bool use[NUMBER_OF_DATA][2],
+                                      char **report, char **decision) {
   *report = NULL;
+  *decision = NULL;
   const players_data_t types[] = {PLAYERS_DATA_TYPE_WMP, PLAYERS_DATA_TYPE_WIT,
                                   PLAYERS_DATA_TYPE_RIT};
   const contribute_table_role_t roles[] = {
@@ -8516,6 +8534,26 @@ config_choose_auto_tables(Config *config, const char *const lexicons[2],
   contribute_tables_touch_used(manifest_path, tables, count);
   free(manifest_path);
 
+  // Both players, though the report below may speak for them as one.
+  StringBuilder *decided = string_builder_create();
+  string_builder_add_formatted_string(decided, "%s %s", lexicons[0],
+                                      lexicons[1]);
+  for (int player_idx = 0; player_idx < 2; player_idx++) {
+    for (int role_idx = 0; role_idx < CONFIG_AUTO_TABLE_ROLES; role_idx++) {
+      const int table_idx = table_of[role_idx][player_idx];
+      if (!wanted[role_idx][player_idx] || table_idx < 0) {
+        continue;
+      }
+      if (!tables[table_idx].chosen) {
+        use[types[role_idx]][player_idx] = false;
+      }
+      string_builder_add_formatted_string(
+          decided, " %s %d", tables[table_idx].name,
+          tables[table_idx].chosen ? -1 : (int)tables[table_idx].skip);
+    }
+  }
+  *decision = string_builder_dump_and_destroy(decided, NULL);
+
   StringBuilder *line = string_builder_create();
   for (int player_idx = 0; player_idx < 2; player_idx++) {
     if (player_idx == 1 && strings_equal(lexicons[0], lexicons[1]) &&
@@ -8574,7 +8612,6 @@ config_choose_auto_tables(Config *config, const char *const lexicons[2],
             what);
         continue;
       }
-      use[type][player_idx] = false;
       if (table->skip == CONTRIBUTE_TABLE_NO_WORDMAP) {
         // Taken only with the wordmap, which was skipped for want of room.
         string_builder_add_formatted_string(
@@ -8656,6 +8693,7 @@ config_word_info_table_for_first_use(Config *config, int player_index,
     if (!error_stack_is_empty(errors)) {
       why_not = "it could not be built";
       error_stack_print_and_reset(errors);
+      config_remember_failed_build(config, PLAYERS_DATA_TYPE_WIT, lexicon);
     } else {
       config_record_first_use_build(config, PLAYERS_DATA_TYPE_WIT, lexicon,
                                     built_path, in_use);
@@ -8719,6 +8757,7 @@ static const char *config_rack_info_table_for_first_use(
       !config_wordmap_for_first_use(config, player_index, lexicon, ld_name,
                                     in_use)) {
     why_not = "its wordmap could not be built";
+    config_remember_failed_build(config, PLAYERS_DATA_TYPE_RIT, rit_name);
   }
   if (!why_not) {
     config_announce_table_build(config, PLAYERS_DATA_TYPE_RIT, rit_name,
@@ -8736,6 +8775,7 @@ static const char *config_rack_info_table_for_first_use(
     if (!error_stack_is_empty(errors)) {
       why_not = "it could not be built";
       error_stack_print_and_reset(errors);
+      config_remember_failed_build(config, PLAYERS_DATA_TYPE_RIT, rit_name);
     } else {
       config_record_first_use_build(config, PLAYERS_DATA_TYPE_RIT, rit_name,
                                     built_path, in_use);
@@ -9232,17 +9272,19 @@ static void config_load_lexicon_dependent_data_internal(
     return;
   }
   char *report = NULL;
+  char *decision = NULL;
   config_choose_auto_tables(config, lexicons, rit_names, table_ld_name, use,
-                            &report);
+                            &report, &decision);
   ConfigTablesInUse in_use;
   config_tables_in_use_init(&in_use, lexicons, rit_names);
-  if (report && !strings_equal(report, config->auto_table_report)) {
+  if (report && !strings_equal(decision, config->auto_table_report)) {
     thread_control_print_formatted(config->thread_control, "%s", report);
     free(config->auto_table_report);
-    config->auto_table_report = report;
-  } else {
-    free(report);
+    config->auto_table_report = decision;
+    decision = NULL;
   }
+  free(report);
+  free(decision);
 
   // The wordmaps. For the wmp, we allow non-NULL -> NULL transitions.
   const char *p1_wmp_name =

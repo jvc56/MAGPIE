@@ -2876,6 +2876,24 @@ static void exec_capturing_output(Config *config, const char *command,
 // use builds its wordmap, word info table and rack info table, each with a
 // line naming it and the disk and memory it takes, and loads them; the next
 // use builds nothing.
+// What auto leaves out for want of room it leaves out for both players, though
+// players sharing a lexicon are reported as one.
+static void test_config_auto_tables_bind_both_players(void) {
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -wmp auto -wit auto -rit auto -ttfraction 0.99");
+  const PlayersData *players_data = config_get_players_data(config);
+  const players_data_t types[3] = {PLAYERS_DATA_TYPE_WMP, PLAYERS_DATA_TYPE_WIT,
+                                   PLAYERS_DATA_TYPE_RIT};
+  for (int type_idx = 0; type_idx < 3; type_idx++) {
+    const bool first =
+        players_data_get_data(players_data, types[type_idx], 0) != NULL;
+    const bool second =
+        players_data_get_data(players_data, types[type_idx], 1) != NULL;
+    assert(first == second);
+  }
+  config_destroy(config);
+}
+
 static void test_config_builds_missing_tables_on_first_use(void) {
   char *dir = test_platform_make_temporary_directory("magpie_first_use");
   char *lexica = get_formatted_string("%s/lexica", dir);
@@ -3910,6 +3928,7 @@ void test_config(void) {
   test_config_fg_required();
   test_config_upgrade_settings_line();
   test_config_table_auto_settings();
+  test_config_auto_tables_bind_both_players();
   test_config_builds_missing_tables_on_first_use();
   test_config_exchange_blank();
   test_config_utility_blend();
