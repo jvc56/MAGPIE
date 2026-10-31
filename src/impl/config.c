@@ -2136,9 +2136,9 @@ static void help_entry_fill(const Config *config, int token,
       examples[0] = "classic";
       examples[1] = "wordsmog";
       examples[2] = "woadwage";
-      text = "Specifies the game variant: classic; wordsmog, where a word "
-             "is played as any anagram of a word; or woadwage, where a word "
-             "may also be two words run together.";
+      text = "Specifies the game variant: classic, wordsmog or woadwage. In "
+             "wordsmog, a word is played as any anagram of a word; in "
+             "woadwage, a word may also be two words run together.";
       break;
     case ARG_TOKEN_LETTER_DISTRIBUTION:
       usages[0] = "<letter_distribution>";
@@ -8676,9 +8676,9 @@ static const char *config_rack_info_table_for_first_use(
 }
 
 // A rack info table built from another lexicon or other leaves than its
-// player's holds other words and leave values. One set to auto is dropped,
-// said in a line, and its name in *p1_rit_name or *p2_rit_name cleared; one
-// set to true is an error.
+// player's holds other words and leave values, whether it records that or only
+// its values show it. One set to auto is dropped, said in a line, and its name
+// in *p1_rit_name or *p2_rit_name cleared; one set to true is an error.
 static void config_drop_mismatched_rack_info_tables(Config *config,
                                                     const char **p1_rit_name,
                                                     const char **p2_rit_name,
@@ -8686,10 +8686,26 @@ static void config_drop_mismatched_rack_info_tables(Config *config,
   const char **rit_names[2] = {p1_rit_name, p2_rit_name};
   bool dropped = false;
   for (int player_idx = 0; player_idx < 2; player_idx++) {
-    if (players_data_rit_matches_inputs(config->players_data, player_idx)) {
+    const bool inputs_match =
+        players_data_rit_matches_inputs(config->players_data, player_idx);
+    if (inputs_match &&
+        players_data_rit_matches_klv(config->players_data, player_idx)) {
       continue;
     }
     const char *name = *rit_names[player_idx];
+    if (!config->table_auto[PLAYERS_DATA_TYPE_RIT][player_idx] &&
+        inputs_match) {
+      const char *leaves = players_data_get_data_name(
+          config->players_data, PLAYERS_DATA_TYPE_KLV, player_idx);
+      error_stack_push(
+          error_stack, ERROR_STATUS_RIT_KLV_MISMATCH,
+          get_formatted_string(
+              "rack info table '%s' was not built from leaves '%s' (player "
+              "%d); rebuild it with 'convert klvwmp2rit %s <letter "
+              "distribution> %s <lexicon>'\n",
+              name, leaves, player_idx + 1, name, leaves));
+      return;
+    }
     if (!config->table_auto[PLAYERS_DATA_TYPE_RIT][player_idx]) {
       error_stack_push(
           error_stack, ERROR_STATUS_RIT_INPUTS_MISMATCH,
@@ -9066,7 +9082,6 @@ static void config_load_lexicon_dependent_data_internal(
     free(rit_names[1]);
     return;
   }
-
   // Load word info tables (if enabled). Like the WMP, the .wit file shares
   // the lexicon name and non-NULL -> NULL transitions are allowed; one set to
   // auto is built on first use where missing wordmaps are.

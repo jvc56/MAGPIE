@@ -325,6 +325,8 @@ typedef enum {
   // A rack info table set to true was built from another lexicon or other
   // leaves than the player's.
   ERROR_STATUS_RIT_INPUTS_MISMATCH,
+  // A player's rack info table holds leave values other than their KLV's.
+  ERROR_STATUS_RIT_KLV_MISMATCH,
 } error_code_t;
 
 typedef enum {

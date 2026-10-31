@@ -98,6 +98,11 @@ void players_data_validate_word_info_tables(const PlayersData *players_data,
 // before version 13) cannot be checked, and matches.
 bool players_data_rit_matches_inputs(const PlayersData *players_data,
                                      int player_index);
+// Whether player `player_index`'s rack info table, if any, holds the leave
+// values that player's KLV gives. It stores leave values but not always which
+// KLV they came from, so this samples entries spread across it.
+bool players_data_rit_matches_klv(const PlayersData *players_data,
+                                  int player_index);
 // Destroys both players' data of this type and leaves the slots empty, so the
 // next players_data_set loads from disk even for a name that is already
 // loaded. The use-when-available flags are left as they are.

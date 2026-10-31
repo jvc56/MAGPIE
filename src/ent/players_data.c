@@ -1,13 +1,20 @@
 #include "players_data.h"
 
+#include "../def/bit_rack_defs.h"
+#include "../def/equity_defs.h"
+#include "../def/letter_distribution_defs.h"
 #include "../def/move_defs.h"
 #include "../def/players_data_defs.h"
+#include "../def/rack_defs.h"
 #include "../util/io_util.h"
 #include "../util/string_util.h"
+#include "bit_rack.h"
+#include "equity.h"
 #include "klv.h"
 #include "kwg.h"
 #include "pat.h"
 #include "pat_file.h"
+#include "rack.h"
 #include "rack_info_table.h"
 #include "wmp.h"
 #include "word_info_table.h"
@@ -511,6 +518,66 @@ bool players_data_rit_matches_inputs(const PlayersData *players_data,
   const bool klv_matches =
       rit->klv_hash == 0 || klv == NULL || rit->klv_hash == klv_get_hash(klv);
   return kwg_matches && klv_matches;
+}
+
+enum { RACK_INFO_TABLE_LEAVE_CHECK_ENTRIES = 1024 };
+
+// Whether the entry's best leave of one tile and of RACK_SIZE - 1 tiles are
+// the ones the KLV gives its rack.
+static bool rack_info_table_entry_matches_klv(const RackInfoTableEntry *entry,
+                                              const KLV *klv) {
+  const BitRack bit_rack = rack_info_table_entry_read_bit_rack(entry);
+  Rack full_rack;
+  rack_set_dist_size_and_reset(&full_rack, BIT_RACK_MAX_ALPHABET_SIZE);
+  for (int ml = 0; ml < BIT_RACK_MAX_ALPHABET_SIZE; ml++) {
+    rack_add_letters(&full_rack, (MachineLetter)ml,
+                     (int)bit_rack_get_letter(&bit_rack, ml));
+  }
+  Rack single;
+  rack_set_dist_size_and_reset(&single, BIT_RACK_MAX_ALPHABET_SIZE);
+  Equity best_single = EQUITY_INITIAL_VALUE;
+  Equity best_all_but_one = EQUITY_INITIAL_VALUE;
+  for (int ml = 0; ml < BIT_RACK_MAX_ALPHABET_SIZE; ml++) {
+    if (rack_get_letter(&full_rack, ml) == 0) {
+      continue;
+    }
+    rack_add_letter(&single, (MachineLetter)ml);
+    const Equity single_value = klv_get_leave_value(klv, &single);
+    rack_take_letter(&single, (MachineLetter)ml);
+    if (single_value > best_single) {
+      best_single = single_value;
+    }
+    rack_take_letter(&full_rack, (MachineLetter)ml);
+    const Equity all_but_one_value = klv_get_leave_value(klv, &full_rack);
+    rack_add_letter(&full_rack, (MachineLetter)ml);
+    if (all_but_one_value > best_all_but_one) {
+      best_all_but_one = all_but_one_value;
+    }
+  }
+  const Equity *best_leaves = rack_info_table_entry_get_best_leaves(entry);
+  return best_leaves[1] == best_single &&
+         best_leaves[RACK_SIZE - 1] == best_all_but_one;
+}
+
+bool players_data_rit_matches_klv(const PlayersData *players_data,
+                                  int player_index) {
+  const RackInfoTable *rit =
+      players_data_get_rack_info_table(players_data, player_index);
+  const KLV *klv = players_data_get_klv(players_data, player_index);
+  if (rit == NULL || klv == NULL || rit->num_entries == 0) {
+    return true;
+  }
+  // Two different leave tables disagree on the best leaves of almost every
+  // rack.
+  const uint32_t stride =
+      rit->num_entries / RACK_INFO_TABLE_LEAVE_CHECK_ENTRIES + 1;
+  for (uint32_t entry_index = 0; entry_index < rit->num_entries;
+       entry_index += stride) {
+    if (!rack_info_table_entry_matches_klv(&rit->entries[entry_index], klv)) {
+      return false;
+    }
+  }
+  return true;
 }
 
 void players_data_reload(PlayersData *players_data,

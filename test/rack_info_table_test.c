@@ -26,6 +26,7 @@
 #include "../src/impl/rack_draw.h"
 #include "../src/impl/rack_info_table_maker.h"
 #include "../src/util/io_util.h"
+#include "../src/util/string_util.h"
 #include "test_util.h"
 #include <assert.h>
 #include <stdint.h>
@@ -338,6 +339,103 @@ test_move_gen_reads_a_table_loaded_at_a_replaced_tables_address(void) {
   config_destroy(config);
 }
 
+static void write_rit_or_die(const RackInfoTable *rit, const char *name) {
+  ErrorStack *error_stack = error_stack_create();
+  char *filename = data_filepaths_get_writable_filename(
+      DEFAULT_TEST_DATA_PATH, name, DATA_FILEPATH_TYPE_RACK_INFO_TABLE,
+      error_stack);
+  assert(error_stack_is_empty(error_stack));
+  rack_info_table_write_to_file(rit, filename, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  free(filename);
+  error_stack_destroy(error_stack);
+}
+
+static void remove_test_data_file(const char *name,
+                                  data_filepath_t data_filepath_type) {
+  ErrorStack *error_stack = error_stack_create();
+  char *filename = data_filepaths_get_writable_filename(
+      DEFAULT_TEST_DATA_PATH, name, data_filepath_type, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  remove_or_die(filename);
+  free(filename);
+  error_stack_destroy(error_stack);
+}
+
+// Each player loads the table named after their lexicon and leaves, and a
+// table built from other leaves is refused rather than played with, or left
+// out under auto.
+static void test_rack_info_table_follows_leaves(void) {
+  const char *other_leaves_name = "CSW21_rit_test_leaves";
+  const char *other_rit_name = "CSW21.CSW21_rit_test_leaves";
+  Config *config =
+      config_create_or_die("set -lex CSW21 -ld english_ab -k1 CSW21 -k2 CSW21");
+  Game *game = config_game_create(config);
+  const Player *player = game_get_player(game, 0);
+  const LetterDistribution *ld = config_get_ld(config);
+  ErrorStack *error_stack = error_stack_create();
+  // CSW21's leaves with every leave of up to four As and two Bs worth 40.
+  KLV *other_leaves =
+      klv_create(config_get_data_paths(config), "CSW21", error_stack);
+  assert(error_stack_is_empty(error_stack));
+  for (int num_a = 0; num_a <= 4; num_a++) {
+    for (int num_b = 0; num_b <= 2; num_b++) {
+      const int size = num_a + num_b;
+      if (size == 0 || size == RACK_SIZE) {
+        continue;
+      }
+      char leave[RACK_SIZE + 1];
+      for (int i = 0; i < size; i++) {
+        leave[i] = i < num_a ? 'A' : 'B';
+      }
+      leave[size] = '\0';
+      set_klv_leave_value(other_leaves, ld, leave, int_to_equity(40));
+    }
+  }
+  klv_write(other_leaves, DEFAULT_TEST_DATA_PATH, other_leaves_name,
+            error_stack);
+  assert(error_stack_is_empty(error_stack));
+  RackInfoTable *matching =
+      make_rack_info_table(other_leaves, player_get_wmp(player), ld, 1, 1);
+  RackInfoTable *mismatched = make_rack_info_table(
+      player_get_klv(player), player_get_wmp(player), ld, 1, 1);
+
+  write_rit_or_die(matching, other_rit_name);
+  config_load_command(config,
+                      "set -k2 CSW21_rit_test_leaves -rit1 false -rit2 true",
+                      error_stack);
+  assert(error_stack_is_empty(error_stack));
+  const PlayersData *players_data = config_get_players_data(config);
+  assert(!players_data_get_rack_info_table(players_data, 0));
+  assert(players_data_get_rack_info_table(players_data, 1));
+  assert(strings_equal(
+      players_data_get_data_name(players_data, PLAYERS_DATA_TYPE_RIT, 1),
+      other_rit_name));
+
+  // The CSW21 leaves' table under the other leaves' name.
+  write_rit_or_die(mismatched, other_rit_name);
+  Config *fresh_config =
+      config_create_or_die("set -lex CSW21 -ld english_ab -k1 CSW21 -k2 CSW21");
+  config_load_command(fresh_config, "set -k2 CSW21_rit_test_leaves -rit2 true",
+                      error_stack);
+  assert(error_stack_top(error_stack) == ERROR_STATUS_RIT_KLV_MISMATCH);
+  error_stack_reset(error_stack);
+  config_load_command(fresh_config, "set -rit2 auto", error_stack);
+  assert(error_stack_is_empty(error_stack));
+  assert(!players_data_get_rack_info_table(
+      config_get_players_data(fresh_config), 1));
+
+  remove_test_data_file(other_rit_name, DATA_FILEPATH_TYPE_RACK_INFO_TABLE);
+  remove_test_data_file(other_leaves_name, DATA_FILEPATH_TYPE_KLV);
+  config_destroy(fresh_config);
+  rack_info_table_destroy(mismatched);
+  rack_info_table_destroy(matching);
+  klv_destroy(other_leaves);
+  error_stack_destroy(error_stack);
+  game_destroy(game);
+  config_destroy(config);
+}
+
 void test_rack_info_table(void) {
   // Use CSW21 with the english_ab distribution (50 A, 50 B, 0 blank).
   // This keeps the number of full racks small (8, for 0A+7B through 7A+0B)
@@ -465,4 +563,5 @@ void test_rack_info_table(void) {
   config_destroy(config);
 
   test_move_gen_reads_a_table_loaded_at_a_replaced_tables_address();
+  test_rack_info_table_follows_leaves();
 }
