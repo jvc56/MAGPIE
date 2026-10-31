@@ -63,14 +63,20 @@ fi
 ktraces_before=$(ls "$KTRACE_DIR" 2> /dev/null | grep '^instruments.*\.ktrace$')
 xctrace_pid=
 remove_new_ktraces() {
-  local path
+  local path others=
+  # xctrace's helper, DTServiceHub, keeps this recording's raw trace open
+  # after xctrace exits, so an open file is ours unless another recording is
+  # running. Deleting an open file frees its space once the helper closes it.
+  if pgrep -qf 'xctrace record' || pgrep -qx Instruments; then
+    others=1
+  fi
   for path in "$KTRACE_DIR"/instruments*.ktrace; do
     [ -e "$path" ] || continue
     if grep -qxF "$(basename "$path")" <<< "$ktraces_before"; then
       continue
     fi
-    # Still open: another recording is writing it.
-    if lsof -t "$path" > /dev/null 2>&1; then
+    # Still open while another recording runs: it may be writing it.
+    if [ -n "$others" ] && lsof -t "$path" > /dev/null 2>&1; then
       continue
     fi
     rm -f "$path"
