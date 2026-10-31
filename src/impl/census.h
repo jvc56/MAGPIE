@@ -6,9 +6,14 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+// The leave census was originally developed by Andy Kurnia in wolges; this is
+// a port. For the method and its measurements see:
+// https://github.com/andy-k/wolges/blob/main/lab/leavegen.txt
+// and for the implementation:
+// https://github.com/andy-k/wolges/blob/main/src/census.rs
+//
 // The census values every leave exactly on one board, then averages over
-// many boards. It was developed in wolges (src/census.rs, and lab/leavegen.txt
-// for the method and its measurements); this is a port.
+// many boards.
 //
 // Its catalog is the multiset lattice: every multiset of 0 to rack_size tiles
 // over num_letters tile kinds (the blank included), each given a rank by
