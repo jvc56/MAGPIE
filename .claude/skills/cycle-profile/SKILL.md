@@ -1,6 +1,6 @@
 ---
 name: cycle-profile
-description: Cycle-profile MAGPIE (or any native binary) on macOS with xctrace's CPU Profiler, and attribute its cycles to functions, inlined functions and source lines, with checks that catch misattribution. Also finds what the cycles wait on with CPU counters, sampling the branches that mispredict and the loads that miss. Use for any profiling, for before/after comparisons of an optimization, for picking optimization targets, and before quoting profile numbers in a PR. Use its scripts instead of writing new ones.
+description: Cycle-profile MAGPIE (or any native binary) on macOS with xctrace's CPU Profiler, and attribute its cycles to functions, inlined functions and source lines, with checks that catch misattribution. Also finds what the cycles wait on with CPU counters, sampling the branches that mispredict and the loads that miss, and profiles Metal GPU work (how busy the GPU really is, and GPU time by kernel) with Metal System Trace. Use for any profiling, for before/after comparisons of an optimization, for picking optimization targets, and before quoting profile numbers in a PR. Use its scripts instead of writing new ones.
 ---
 
 # Cycle profiling on macOS
@@ -11,6 +11,8 @@ Scripts, in `.claude/skills/cycle-profile/scripts/` from the repository root:
 - `dsym.sh`: makes a binary's dSYM and refuses a stale one.
 - `record.sh`: records one command and exports its samples.
 - `counters_template.py`: writes a template that records CPU Counters in one of Instruments' guided modes.
+- `metal_template.py`: writes a Metal System Trace template with the shader profiler on.
+- `gpu.py`: GPU busy time (`busy`) and GPU time by kernel (`shaders`) from a Metal System Trace; see section 6.
 - `xct.py`: attributes the samples, with these subcommands:
   - `self`: self cycles by innermost inlined function;
   - `compare`: base vs new, over one or more pairs;
@@ -31,6 +33,17 @@ On Linux, use `perf record` and `perf report`, as AGENTS.md describes; these scr
 1. Build a release binary: `make magpie_test BUILD=no_pgo_release` (or `magpie`). Release builds carry debug information and align functions to 64 bytes.
 2. Copy each binary you'll profile to its own name, such as `mt_base` or `mt_new`.
 3. Run `dsym.sh mt_new` right away, before any other build in that worktree.
+
+If dsymutil says "no debug symbols in executable", the build has no `-g`, or it links with LTO and the linker deleted the object holding the debug information. Main's Makefile does both (`-gdwarf-4` and `-object_path_lto`), but branches cut before it may not. On such a branch, override both on the command line rather than editing the Makefile:
+
+```
+make magpie_test BUILD=no_pgo_release -j \
+  cflags.no_pgo_release="-O3 -flto -march=native -DNDEBUG -Wall -Wno-trigraphs -g" \
+  cflags.test_no_pgo_release="-O3 -flto -march=native -Wall -Wno-trigraphs -g" \
+  ldflags.no_pgo_release="-pthread -flto -Wl,-object_path_lto,$PWD/lto.o"
+```
+
+Copy the flags from the Makefile's own lines, adding only `-g` and `-object_path_lto`, so the code is the one you mean to profile. Touch the sources first if they were built without `-g`. `lto.o` is overwritten by the next such link, so run `dsym.sh` before it.
 
 dsymutil reads the debug information from the object files the binary was linked from, and a later build overwrites them. A dSYM made after that still has the binary's UUID, but it can name the wrong function or line for any code that changed. `dsym.sh` treats any dsymutil warning as stale, because a fresh build gives none.
 
@@ -116,3 +129,31 @@ python3 $C/counters_template.py l1d_miss_sampling l1d.tracetemplate
 - **Code layout:** moving code shifts the alignment of hot loops, worth ±0.5% on its own. Release builds align functions, but loops inside them still move.
 - **Confirm a speedup by timing** the same fixed work in alternating order and checking identical output, nodes or results. A profile shows where the time went; the timing shows the gain.
 - **When quoting a profile in a PR,** name the workload, the pairs, and whether the shares come from fixed work.
+
+## 6. GPU work (Metal and MPSGraph)
+
+When a program runs work on the GPU, find out first whether the GPU or the CPU limits it. Time spent inside a synchronous GPU call can't tell you: MPSGraph's `runWithMTLCommandQueue` blocks while the CPU encodes the graph, while the call waits behind others, and while the GPU runs. In MAGPIE's cached value net, slots looked busy all of the time by that measure while the CPU was also doing 8 cores of work, and either could have been the limit.
+
+1. **How busy the GPU really is.** Record the fixed work with the stock template, then take the union of the process's GPU intervals:
+   ```
+   C=.claude/skills/cycle-profile/scripts
+   $C/record.sh OUT --template 'Metal System Trace' -- ./mt_new ARGS
+   python3 $C/gpu.py busy OUT.gpu.xml mt_new --skip 3
+   ```
+   `--skip` leaves out the start, when MPSGraph compiles each new shape; a first call can take hundreds of milliseconds.
+   - Near 100% of the window: the GPU limits throughput, and cutting CPU work can gain at most the idle share. Cut the GPU's work instead.
+   - Well below: the GPU waits on the CPU; the gaps' sizes say whether it waits on every call (small, regular gaps) or on stalls.
+2. **What the GPU spends its time on.** MPSGraph puts a whole graph in one compute encoder, so encoder labels don't name kernels. Record with the shader profiler on:
+   ```
+   python3 $C/metal_template.py shaders.tracetemplate
+   $C/record.sh OUT --template shaders.tracetemplate -- ./mt_new ARGS
+   python3 $C/gpu.py shaders OUT.shaders.xml mt_new --skip 3
+   ```
+   It gives each kernel's share, such as `gemm_*` for matrix multiplies, `sdpa_*` for fused attention and `reduce_*` for layer norms and softmax sums. The shares are what count: the profiler covers only part of the GPU time, and kernels overlap. A kernel's name can show it took a slow path; attention on sequence lengths that are not a multiple of 16 runs `sdpa_tile_fwd_16x16x16_doEdgeCheck`, otherwise `..._noEdgeCheck`.
+3. **The CPU side** is an ordinary cycle profile (sections 1–3) of the same run. With many threads, compare shares, and compare total cycles only for the same fixed work. MPSGraph's own CPU work shows as `<other: MetalPerformanceShadersGraph>`, `MPSNDArray`, `MPSCore` and `libobjc`.
+4. **Shapes.** MPSGraph compiles a graph for each new combination of input shapes. An input dimension that varies from call to call, such as a count of candidates, makes it compile over and over; GPU time per call jumps several times, and nothing else in the profile looks wrong. Round every varying dimension up to a step.
+5. **GPU counters** (occupancy, limiters, utilizations). `metal_template.py OUT --counters 'Performance Limiters'` selects a counter set; `--list` shows the sets and their numbers, which come from Instruments' own table. A trace shows the set it used in `xctrace export --input OUT.trace --toc` as `Counter Set:`. The values land in `metal-gpu-counter-intervals` (and `gpu-counter-value`), one row per counter per sample; `gpu-counter-info` names the counters sampled.
+   - On an M5 Max (AGXAcceleratorG17X) with Xcode 27.2, every set is accepted (the trace says `Counter Set: Performance Limiters`), but xctrace samples only "RT Unit Active", whose value stays 0. Check `gpu-counter-info` before reading anything into the values; on this Mac, use the shader breakdown instead.
+   - The script also sets `counterdevice` to the GPU's IORegistry id (`ioreg -r -c IOAccelerator -d 1`), as Instruments' Game Performance template does; the stock Metal System Trace template leaves it 0. On the M5 Max, the sampled counters were the same either way.
+6. **Confirm by timing**, as for CPU changes: alternate the builds, and expect run-to-run noise of ±10% on a laptop GPU, which drifts down as it warms.
+

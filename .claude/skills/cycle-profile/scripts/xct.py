@@ -85,6 +85,9 @@ class Profile:
                 w = row.find('weight')
                 unit = 'weight'
             bt = row.find('backtrace')
+            if bt is None:
+                # xctrace 27 exports the stack as a tagged-backtrace.
+                bt = row.find('tagged-backtrace')
             if w is None or bt is None:
                 continue
             if self.unit is None:
@@ -130,7 +133,7 @@ def parse_block(block):
         line = line.strip()
         if not line:
             continue
-        m = re.match(r'(\S+) \(in [^)]*\)', line)
+        m = re.match(r'(.+) \(in [^()]*\)', line)
         if not m:
             chain.append(('?', None))
             continue
