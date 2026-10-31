@@ -139,6 +139,22 @@ test("stop permits another analysis, invalid CGP preserves position, edits undo"
   await page.locator("#open-analysis-settings").click();
   await page.locator("#seconds").fill("120");
   await page.locator("#back-to-game").click();
+  // The simulation must still be running for the settings and Stop checks
+  // below, but its early stop (-threshold gk16) can end it as soon as one
+  // play is clearly best, which the midgame sample sometimes reaches first,
+  // on WebKit especially. Search the whole 120 seconds instead.
+  await page.evaluate(() => {
+    const post = Worker.prototype.postMessage;
+    Worker.prototype.postMessage = function (message, ...args) {
+      if (message?.type === "run") {
+        const commands = message.data.commands.map((command) =>
+          command.replace("-threshold gk16", "-threshold none"),
+        );
+        message = { ...message, data: { ...message.data, commands } };
+      }
+      return post.call(this, message, ...args);
+    };
+  });
   await page.locator('[data-mode="sim"]').click();
   await expect(page.locator("#status")).toHaveText("Simulating…", {
     timeout: 30000,
