@@ -314,6 +314,8 @@ typedef enum {
   ERROR_STATUS_DATA_FETCH_MANIFEST_INVALID,
   ERROR_STATUS_DATA_FETCH_FILE_MISMATCH,
   ERROR_STATUS_WMP_RESULT_TOO_LARGE,
+  // A player's rack info table holds leave values other than their KLV's.
+  ERROR_STATUS_RIT_KLV_MISMATCH,
 } error_code_t;
 
 typedef enum {
