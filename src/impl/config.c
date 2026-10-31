@@ -2154,6 +2154,9 @@ void add_help_arg_to_string_builder(const Config *config, int token,
              "generating moves. The table stores leave values (and, in the "
              "future, other per-rack data) for every possible full rack, "
              "enabling a single hash lookup to replace repeated KLV traversal. "
+             "Each player loads the table named after their leaves, so "
+             "players with different leaves need a table for each, and a "
+             "table whose leave values are not the leaves' is refused. "
              "Off by default because .rit files are large and must be built "
              "with the klvwmp2rit convert command.";
       break;
@@ -8149,21 +8152,31 @@ static void config_load_lexicon_dependent_data_internal(
     return;
   }
 
-  // Load rack info tables (if enabled). Like the WMP, the .rit file shares
-  // the lexicon name and non-NULL -> NULL transitions are allowed.
+  // Load rack info tables (if enabled). A table stores leave values, so the
+  // .rit file shares the player's leaves name (by default the lexicon's) and
+  // players with different leaves load different tables. Non-NULL -> NULL
+  // transitions are allowed.
   const char *p1_rit_name = NULL;
   if (p1_rit_use_when_available) {
-    p1_rit_name = config->p1_rit_name_override ? config->p1_rit_name_override
-                                               : updated_p1_lexicon_name;
+    p1_rit_name = config->p1_rit_name_override
+                      ? config->p1_rit_name_override
+                      : players_data_get_data_name(config->players_data,
+                                                   PLAYERS_DATA_TYPE_KLV, 0);
   }
   const char *p2_rit_name = NULL;
   if (p2_rit_use_when_available) {
-    p2_rit_name = config->p2_rit_name_override ? config->p2_rit_name_override
-                                               : updated_p2_lexicon_name;
+    p2_rit_name = config->p2_rit_name_override
+                      ? config->p2_rit_name_override
+                      : players_data_get_data_name(config->players_data,
+                                                   PLAYERS_DATA_TYPE_KLV, 1);
   }
   players_data_set(config->players_data, PLAYERS_DATA_TYPE_RIT,
                    config->data_paths, p1_rit_name, p2_rit_name,
                    config->use_mmap_for_rit, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  players_data_validate_rack_info_tables(config->players_data, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return;
   }

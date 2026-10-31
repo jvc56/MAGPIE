@@ -16,11 +16,22 @@
 #   OUT_PREFIX.time.xml, the time-profile table, which gives the binaries'
 #   load addresses;
 # - CPU Counters' bottlenecks mode: OUT_PREFIX.xml, the per-process metrics.
+# - 'Metal System Trace', or a template from metal_template.py:
+#   OUT_PREFIX.gpu.xml, the GPU intervals for gpu.py busy, and with the shader
+#   profiler OUT_PREFIX.shaders.xml for gpu.py shaders.
+#
+# xctrace writes a recording's raw kernel trace to the user temp folder, as
+# instruments*.ktrace, and deletes it once the .trace is written. A recording
+# that fails or is interrupted leaves it there, and a CPU Counters one can be
+# tens of GB. This script deletes the ones its recording leaves, and refuses
+# to start with less than MIN_FREE_GB free there.
 set -u
 if [ $# -lt 3 ]; then
-  sed -n '2,18p' "$0"
+  sed -n '2,27p' "$0"
   exit 2
 fi
+MIN_FREE_GB=20
+KTRACE_DIR=$(getconf DARWIN_USER_TEMP_DIR)
 OUT=$1
 shift
 TEMPLATE='CPU Profiler'
@@ -37,12 +48,58 @@ if [ $# -lt 2 ]; then
   exit 2
 fi
 shift
+free_gb=$(df -g "$KTRACE_DIR" | awk 'NR == 2 { print $4 }')
+if [ "$free_gb" -lt "$MIN_FREE_GB" ]; then
+  echo "record.sh: only ${free_gb} GB free for xctrace's raw trace in" \
+    "$KTRACE_DIR; a recording can take tens of GB. Look there for" \
+    "instruments*.ktrace left by earlier recordings." >&2
+  exit 1
+fi
 if [ -e "$OUT.trace" ]; then
   rm -rf "${OUT:?}.trace"
 fi
+
+# The raw traces from before this recording, which belong to others.
+ktraces_before=$(ls "$KTRACE_DIR" 2> /dev/null | grep '^instruments.*\.ktrace$')
+xctrace_pid=
+remove_new_ktraces() {
+  local path others=
+  # xctrace's helper, DTServiceHub, keeps this recording's raw trace open
+  # after xctrace exits, so an open file is ours unless another recording is
+  # running. Deleting an open file frees its space once the helper closes it.
+  if pgrep -qf 'xctrace record' || pgrep -qx Instruments; then
+    others=1
+  fi
+  for path in "$KTRACE_DIR"/instruments*.ktrace; do
+    [ -e "$path" ] || continue
+    if grep -qxF "$(basename "$path")" <<< "$ktraces_before"; then
+      continue
+    fi
+    # Still open while another recording runs: it may be writing it.
+    if [ -n "$others" ] && lsof -t "$path" > /dev/null 2>&1; then
+      continue
+    fi
+    rm -f "$path"
+  done
+}
+stop_recording() {
+  if [ -n "$xctrace_pid" ]; then
+    kill -INT "$xctrace_pid" 2> /dev/null
+    wait "$xctrace_pid" 2> /dev/null
+  fi
+  exit 130
+}
+trap remove_new_ktraces EXIT
+trap stop_recording INT TERM
+
+# In the background, so that an interrupt can stop xctrace before the
+# cleanup runs.
 xcrun xctrace record --template "$TEMPLATE" --output "$OUT.trace" \
   --target-stdout "$OUT.out" ${STDIN_ARGS[@]+"${STDIN_ARGS[@]}"} \
-  --launch -- "$@" > "$OUT.log" 2>&1
+  --launch -- "$@" > "$OUT.log" 2>&1 &
+xctrace_pid=$!
+wait "$xctrace_pid"
+xctrace_pid=
 toc=$(xcrun xctrace export --input "$OUT.trace" --toc 2> /dev/null)
 export_table() {
   xcrun xctrace export --input "$OUT.trace" \
@@ -53,7 +110,19 @@ export_table() {
     exit 1
   fi
 }
-if grep -q 'schema="cpu-profile"' <<< "$toc"; then
+if grep -q 'schema="metal-gpu-intervals"' <<< "$toc"; then
+  export_table metal-gpu-intervals "$OUT.gpu.xml"
+  echo "$OUT.gpu.xml"
+  if grep -q 'schema="metal-shader-profiler-intervals"' <<< "$toc"; then
+    export_table metal-shader-profiler-intervals "$OUT.shaders.xml"
+    if grep -q '<row>' "$OUT.shaders.xml"; then
+      echo "$OUT.shaders.xml"
+    else
+      rm -f "$OUT.shaders.xml"
+    fi
+  fi
+  exit 0
+elif grep -q 'schema="cpu-profile"' <<< "$toc"; then
   export_table cpu-profile "$OUT.xml"
 elif grep -q 'schema="pmi-sample"' <<< "$toc"; then
   export_table pmi-sample "$OUT.xml"
