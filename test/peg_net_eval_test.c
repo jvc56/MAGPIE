@@ -2386,7 +2386,7 @@ void peg_sim_mode(const StringSplitter *fields) {
     fprintf(output, "root,arm,rank,candidates,utility,win,equity,iterations,"
                     "ms,net1_calls,net1_ms,net2_calls,net2_ms,eg_calls,eg_ms,"
                     "eg_capped,move\n");
-    fprintf(cands_out, "root,arm,rank,samples,utility,win,equity\n");
+    fprintf(cands_out, "root,arm,rank,samples,utility,win,equity,move\n");
   }
   Config *config = peg_net_config_create();
   ErrorStack *errors = error_stack_create();
@@ -2600,9 +2600,9 @@ void peg_sim_mode(const StringSplitter *fields) {
             stat_get_mean(simmed_play_get_win_pct_stat(simmed_play));
         const double equity =
             stat_get_mean(simmed_play_get_equity_stat(simmed_play));
-        fprintf(cands_out, "%d,%d,%d,%llu,%.9g,%.9g,%.9g\n", root_id, arm, rank,
-                (unsigned long long)stat_get_num_samples(utility),
-                stat_get_mean(utility), win, equity);
+        fprintf(cands_out, "%d,%d,%d,%llu,%.9g,%.9g,%.9g,\"%s\"\n", root_id,
+                arm, rank, (unsigned long long)stat_get_num_samples(utility),
+                stat_get_mean(utility), win, equity, string_builder_peek(name));
         if (play_idx == best_index) {
           best_rank = rank;
           best_utility = stat_get_mean(utility);
