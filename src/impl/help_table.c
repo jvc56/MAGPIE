@@ -214,10 +214,8 @@ static const arg_token_t analyze_commands[] = {
 };
 
 static const arg_token_t batch_commands[] = {
-    ARG_TOKEN_AUTOPLAY,
-    ARG_TOKEN_LEAVE_GEN,
-    ARG_TOKEN_PAT_GEN,
-    ARG_TOKEN_CONTRIBUTE,
+    ARG_TOKEN_AUTOPLAY,    ARG_TOKEN_LEAVE_GEN, ARG_TOKEN_CENSUS,
+    ARG_TOKEN_LEAVE_BLEND, ARG_TOKEN_PAT_GEN,   ARG_TOKEN_CONTRIBUTE,
 };
 
 static const arg_token_t program_commands[] = {
@@ -313,6 +311,8 @@ static const HelpCommandGroups command_groups[] = {
      HELP_PAT_BIT | HELP_BATCH_POINTER_BITS},
     {ARG_TOKEN_LEAVE_GEN, 0,
      HELP_AUTOPLAY_BIT | HELP_PAT_BIT | HELP_BATCH_POINTER_BITS},
+    {ARG_TOKEN_CENSUS, 0, HELP_POSITION_BITS},
+    {ARG_TOKEN_LEAVE_BLEND, 0, HELP_SESSION_BIT},
     {ARG_TOKEN_PAT_GEN, HELP_PAT_BIT,
      HELP_AUTOPLAY_BIT | HELP_BATCH_POINTER_BITS},
     {ARG_TOKEN_CONTRIBUTE, 0, HELP_TABLES_BIT},

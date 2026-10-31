@@ -327,6 +327,11 @@ typedef enum {
   ERROR_STATUS_RIT_INPUTS_MISMATCH,
   // A player's rack info table holds leave values other than their KLV's.
   ERROR_STATUS_RIT_KLV_MISMATCH,
+  // Census errors
+  ERROR_STATUS_CENSUS_INVALID_LATTICE,
+  ERROR_STATUS_CENSUS_MALFORMED_RECIPE,
+  ERROR_STATUS_CENSUS_UNSUPPORTED_GAME,
+  ERROR_STATUS_LEAVE_BLEND_INVALID_WEIGHT,
 } error_code_t;
 
 typedef enum {
