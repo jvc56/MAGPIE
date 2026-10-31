@@ -61,6 +61,71 @@ static void test_peg_show_rows(void) {
   magpie_destroy(mp);
 }
 
+// Cut bounds fill the entries here and 32 plays solved above it fill the solved
+// rows, so nothing but being asked for keeps L5 GIRR, 87.5%, in what an
+// embedder is told.
+static void test_peg_protected_play_is_always_listed(void) {
+  Magpie *mp = magpie_create(DEFAULT_TEST_DATA_PATH);
+  assert(!magpie_has_error(mp));
+  assert(magpie_run_sync(mp, "set -lex CSW24 -threads 4 -pegjson true") ==
+         MAGPIE_SUCCESS);
+  assert(magpie_run_sync(mp,
+                         "cgp "
+                         "WINK3V2S4/3E3ADZE4/2TE2OI2P3C/2UN2UN2T3O/2MOB1T3A3R/"
+                         "1QI1A1R3G3M/2D1J1I3E3L/4ROVEN5E/4I1A7T/6L1YUkATAS/"
+                         "O3hOSIERY4/FAINE2DWEEB3/L1NEXT1P7/A6O7/G6L7 "
+                         "CGIRRSU/ 315/300 0 -lex CSW24") == MAGPIE_SUCCESS);
+  assert(magpie_run_sync(mp, "peg leaves1 L5.GIRR -pegplies 1 "
+                             "-pegoutcomes false") == MAGPIE_SUCCESS);
+  char *output = magpie_get_last_command_output(mp);
+  const char *solved = strstr(strstr(output, "peginfo {"), "\"solved\":[");
+  assert(solved);
+  const char *baseline = strstr(solved, "\"baseline\":[");
+  const char *played = strstr(solved, "\"move\":\"L5 GIRR\"");
+  assert(baseline && played && played < baseline);
+  const char *entries = strstr(output, "\"entries\":[");
+  const char *in_entries = strstr(entries, "\"move\":\"L5 GIRR\"");
+  assert(in_entries >= solved);
+  assert(has_prefix("\"move\":\"L5 GIRR\",\"score\":", played));
+  assert(strstr(played, "\"win\":87.500000") != NULL);
+  free(output);
+  magpie_destroy(mp);
+}
+
+// A pass after five scoreless turns ends the game, on every draw, with each
+// player paying for the tiles that draw left them. Both hold AEINRST, worth 7,
+// over a Q: with the Q in the bag the players pay the same, and otherwise the
+// opponent holds it and pays 9 more. So a 3-point lead wins all 8 draws, and a
+// 3-point deficit all but the Q's.
+static void test_peg_scoreless_end(void) {
+  Magpie *mp = magpie_create(DEFAULT_TEST_DATA_PATH);
+  assert(!magpie_has_error(mp));
+  assert(magpie_run_sync(mp, "set -lex CSW24 -threads 2") == MAGPIE_SUCCESS);
+  const char *board = "cgp 7C6D/7H4LAR/7I2P1ALA/7VOGUE1AG/6RERAN2M1/7S1BY2O1/"
+                      "8OY2Id1/5JEUX3NEW/3C1U2O3A1E/3O1M6N1B/3ZIP2OAK1E2/"
+                      "2TI1sTIFLERS2/2WED5F1T2/1HIDEOUT7/VEG1N2IDOL4 AEINRST/";
+  const char *scores[2] = {"372/369", "369/372"};
+  const char *results[2] = {"pass  8  0  0  100.0", "pass  7  0  1  87.5"};
+  const char *modes[4] = {"-pegpess true -pegnested true", "-pegpess false",
+                          "-pegpess true -pegnested false",
+                          "-pegpess true -pegnested true -pegtopk 2"};
+  for (int score_idx = 0; score_idx < 2; score_idx++) {
+    char *cgp =
+        get_formatted_string("%s %s 5 -lex CSW24", board, scores[score_idx]);
+    assert(magpie_run_sync(mp, cgp) == MAGPIE_SUCCESS);
+    free(cgp);
+    for (int mode_idx = 0; mode_idx < 4; mode_idx++) {
+      char *peg = get_formatted_string("peg only pass %s", modes[mode_idx]);
+      assert(magpie_run_sync(mp, peg) == MAGPIE_SUCCESS);
+      free(peg);
+      char *output = magpie_get_last_command_output(mp);
+      assert(has_substring(output, results[score_idx]));
+      free(output);
+    }
+  }
+  magpie_destroy(mp);
+}
+
 void test_peg_embedding(void) {
   Magpie *mp = magpie_create(DEFAULT_TEST_DATA_PATH);
   assert(!magpie_has_error(mp));
@@ -103,6 +168,8 @@ void test_peg_embedding(void) {
   free(structured);
   magpie_destroy(mp);
   test_peg_show_rows();
+  test_peg_protected_play_is_always_listed();
+  test_peg_scoreless_end();
 }
 
 // The g104730 position: 2 in the bag, every candidate solved at 3 plies, the
@@ -127,7 +194,8 @@ static const double peg_status_poll_seconds = 0.02;
 // candidate solved alone lists its draws yet. Snapshots are written when it
 // changes.
 typedef struct PegStatusMilestone {
-  char phase[PEG_STATUS_PHASE_MAX];
+  // A stage label and two numbers, each at most an int's 11 characters.
+  char phase[PEG_STATUS_PHASE_MAX + 2 * 12];
   int decile;
   bool lists_draws;
 } PegStatusMilestone;

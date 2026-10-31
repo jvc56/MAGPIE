@@ -1,6 +1,7 @@
 #ifndef RACK_INFO_TABLE_H
 #define RACK_INFO_TABLE_H
 
+#include "../compat/cfile.h"
 #include "../compat/cmap.h"
 #include "../compat/endian_conv.h"
 #include "../def/bit_rack_defs.h"
@@ -637,9 +638,10 @@ static inline void rack_info_table_load_from_stream(RackInfoTable *rit,
                                                     FILE *stream,
                                                     const char *filename,
                                                     ErrorStack *error_stack) {
-  uint8_t version;
+  // Too short for a header reads as version 0, which no table has.
+  uint8_t version = 0;
   if (fread(&version, sizeof(version), 1, stream) != 1) {
-    log_fatal("could not read rit version");
+    version = 0;
   }
   if (version < RIT_EARLIEST_SUPPORTED_VERSION) {
     error_stack_push(
@@ -651,9 +653,9 @@ static inline void rack_info_table_load_from_stream(RackInfoTable *rit,
   }
   rit->version = version;
 
-  uint8_t rack_size;
+  uint8_t rack_size = 0;
   if (fread(&rack_size, sizeof(rack_size), 1, stream) != 1) {
-    log_fatal("could not read rit rack size");
+    rack_size = 0;
   }
   if (rack_size != RACK_SIZE) {
     error_stack_push(error_stack, ERROR_STATUS_WMP_INCOMPATIBLE_BOARD_DIM,
@@ -665,19 +667,34 @@ static inline void rack_info_table_load_from_stream(RackInfoTable *rit,
   }
   rit->rack_size = rack_size;
 
-  uint8_t min_played;
-  if (fread(&min_played, sizeof(min_played), 1, stream) != 1) {
-    log_fatal("could not read rit playthrough min played size");
+  // The rest of the header, then a size check before anything is allocated: a
+  // truncated file's counts can ask for any amount.
+  uint8_t min_played = 0;
+  uint8_t padding = 0;
+  uint32_t counts[2] = {0, 0};
+  CFileIdentity identity;
+  bool complete = fread(&min_played, sizeof(min_played), 1, stream) == 1 &&
+                  fread(&padding, sizeof(padding), 1, stream) == 1 &&
+                  fread(counts, sizeof(uint32_t), 2, stream) == 2;
+  if (complete && cfile_identity(filename, &identity)) {
+    const uint64_t header_bytes = 4 * sizeof(uint8_t) + 2 * sizeof(uint32_t);
+    const uint64_t input_bytes = version >= RIT_FIRST_VERSION_WITH_INPUTS
+                                     ? RIT_INPUTS_UINT32S * sizeof(uint32_t)
+                                     : 0;
+    const uint64_t needed =
+        header_bytes + ((uint64_t)le32toh(counts[0]) + 1) * sizeof(uint32_t) +
+        (uint64_t)le32toh(counts[1]) * sizeof(RackInfoTableEntry) + input_bytes;
+    complete = needed <= (uint64_t)identity.size;
+  }
+  if (!complete) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_RW_READ_ERROR,
+        get_formatted_string("rit file is incomplete: %s\n", filename));
+    return;
   }
   rit->playthrough_min_played_size = min_played;
-
-  uint8_t padding;
-  if (fread(&padding, sizeof(padding), 1, stream) != 1) {
-    log_fatal("could not read rit header padding");
-  }
-
-  rit_read_uint32_or_die(&rit->num_buckets, stream);
-  rit_read_uint32_or_die(&rit->num_entries, stream);
+  rit->num_buckets = le32toh(counts[0]);
+  rit->num_entries = le32toh(counts[1]);
 
   rit->bucket_starts = (uint32_t *)malloc_or_die(
       ((size_t)rit->num_buckets + 1) * sizeof(uint32_t));

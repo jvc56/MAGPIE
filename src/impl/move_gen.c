@@ -3269,7 +3269,10 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
   // Decide up front whether WMP will be active. It is disabled for
   // ALL_SMALL/TILES_PLAYED (unsupported), when override_kwg is set (WMP data
   // corresponds to the original KWG, not the override), and on a
-  // BitRack-incompatible alphabet (the WMP keys on a BitRack). Passing NULL
+  // BitRack-incompatible alphabet (the WMP keys on a BitRack), and for
+  // wordsmog, whose words come from the alpha generator: the WMP's anchors, one
+  // per play length, would visit each spot once per length and record each
+  // play as many times. Passing NULL
   // when disabled lets wmp_move_gen_init early-return instead of building a
   // BitRack, clearing the length table, and seeding all anchor slots -- wasted
   // work on every endgame node, which always passes override_kwg. The seeded
@@ -3278,7 +3281,8 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
   const bool wmp_disabled = gen->move_record_type == MOVE_RECORD_ALL_SMALL ||
                             gen->move_record_type == MOVE_RECORD_TILES_PLAYED ||
                             override_kwg != NULL || !gen->bit_rack_compatible ||
-                            gen->is_woadwage;
+                            gen->is_woadwage ||
+                            game_get_variant(game) == GAME_VARIANT_WORDSMOG;
   wmp_move_gen_init(&gen->wmp_move_gen, &gen->ld, &gen->player_rack,
                     wmp_disabled ? NULL : player_get_wmp(player));
   // The subrack cache holds wmp_entry pointers derived from the WMP; a WMP

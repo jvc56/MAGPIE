@@ -24,6 +24,8 @@
 // A finished result lists the ranking's first max_rows rows (0 = every play),
 // then up to PEG_DISPLAY_MAX_PINNED_ROWS solved plays ranked below them, as
 // status lists a running one's. Caller frees the returned string.
+// `result` is NULL for a reader on another thread during a solve, which is
+// writing it: the live view of `poll` is all it can have.
 char *peg_result_get_string(const PegResult *result, const Game *game,
                             bool show_outcomes, PegPoll *poll, int max_rows,
                             int out_width, int out_max_lines,

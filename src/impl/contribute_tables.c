@@ -25,6 +25,9 @@ enum {
 };
 
 #define MANIFEST_LOCK_NAP_SECONDS 0.1
+// Marks the optional modification time on a manifest line. An absolute path
+// cannot start with it, and a path relative to some data directory never does.
+#define MANIFEST_MODIFIED_PREFIX "modified:"
 
 static const contribute_table_role_t contribute_table_priority[] = {
     CONTRIBUTE_TABLE_WMP, CONTRIBUTE_TABLE_WIT, CONTRIBUTE_TABLE_RIT};
@@ -106,6 +109,8 @@ void contribute_table_manifest_record(ContributeTableManifest *manifest,
     entry->last_used = now;
     free(entry->path);
     entry->path = string_duplicate(path);
+    entry->modified_seconds = 0;
+    entry->modified_nanoseconds = 0;
     return;
   }
   if (manifest->count == manifest->capacity) {
@@ -120,6 +125,8 @@ void contribute_table_manifest_record(ContributeTableManifest *manifest,
   entry->bytes = bytes;
   entry->last_used = now;
   entry->path = string_duplicate(path);
+  entry->modified_seconds = 0;
+  entry->modified_nanoseconds = 0;
 }
 
 bool contribute_table_manifest_touch(ContributeTableManifest *manifest,
@@ -179,6 +186,25 @@ static void manifest_add_line(ContributeTableManifest *manifest, char *line) {
     *space = '\0';
     cursor = space + 1;
   }
+  // The modification time is optional and comes as a token of its own, so a
+  // line from before it was recorded still reads.
+  int64_t modified_seconds = 0;
+  int64_t modified_nanoseconds = 0;
+  if (has_prefix(MANIFEST_MODIFIED_PREFIX, cursor)) {
+    char *token = cursor + strlen(MANIFEST_MODIFIED_PREFIX);
+    char *dot = strchr(token, '.');
+    char *space = strchr(token, ' ');
+    if (!dot || !space || dot > space) {
+      return;
+    }
+    *dot = '\0';
+    *space = '\0';
+    if (!parse_manifest_int64(token, &modified_seconds) ||
+        !parse_manifest_int64(dot + 1, &modified_nanoseconds)) {
+      return;
+    }
+    cursor = space + 1;
+  }
   const char *path = cursor;
   int64_t bytes = 0;
   int64_t last_used = 0;
@@ -189,6 +215,10 @@ static void manifest_add_line(ContributeTableManifest *manifest, char *line) {
   }
   contribute_table_manifest_record(manifest, fields[0], fields[3], bytes, path,
                                    last_used);
+  ContributeTableManifestEntry *entry =
+      &manifest->entries[manifest_find(manifest, fields[0], fields[3])];
+  entry->modified_seconds = modified_seconds;
+  entry->modified_nanoseconds = (long)modified_nanoseconds;
 }
 
 ContributeTableManifest *contribute_table_manifest_read(const char *path) {
@@ -234,12 +264,20 @@ bool contribute_table_manifest_write(const ContributeTableManifest *manifest,
               "directory, which it\n# deletes, least recently used first, when "
               "a task needs the space. It deletes\n# nothing this file does "
               "not list. One per line: role, bytes, last use (Unix\n# "
-              "seconds), name, path.\n") > 0;
+              "seconds), name, the file's modification time if known "
+              "(modified:<seconds>.<nanoseconds>),\n# path.\n") > 0;
   for (int entry_idx = 0; written && entry_idx < manifest->count; entry_idx++) {
     const ContributeTableManifestEntry *entry = &manifest->entries[entry_idx];
-    written =
-        fprintf(stream, "%s %" PRId64 " %" PRId64 " %s %s\n", entry->role,
-                entry->bytes, entry->last_used, entry->name, entry->path) > 0;
+    char *modified = entry->modified_seconds != 0
+                         ? get_formatted_string("%s%" PRId64 ".%ld ",
+                                                MANIFEST_MODIFIED_PREFIX,
+                                                entry->modified_seconds,
+                                                entry->modified_nanoseconds)
+                         : string_duplicate("");
+    written = fprintf(stream, "%s %" PRId64 " %" PRId64 " %s %s%s\n",
+                      entry->role, entry->bytes, entry->last_used, entry->name,
+                      modified, entry->path) > 0;
+    free(modified);
   }
   if (fclose(stream) != 0) {
     written = false;
@@ -533,6 +571,11 @@ static bool evict_entry(const ContributeTableManifestEntry *entry) {
   if (identity.size != entry->bytes) {
     return false;
   }
+  if (entry->modified_seconds != 0 &&
+      (identity.mtime_seconds != entry->modified_seconds ||
+       identity.mtime_nanoseconds != entry->modified_nanoseconds)) {
+    return false;
+  }
   char *lock_path = get_formatted_string("%s.lock", entry->path);
   const int lock = cfile_lock_open(lock_path);
   free(lock_path);
@@ -706,6 +749,10 @@ void contribute_tables_record_built(const char *manifest_path, const char *role,
                                    absolute_path ? absolute_path : path,
                                    (int64_t)time(NULL));
   free(absolute_path);
+  ContributeTableManifestEntry *entry =
+      &manifest->entries[manifest_find(manifest, role, name)];
+  entry->modified_seconds = identity.mtime_seconds;
+  entry->modified_nanoseconds = identity.mtime_nanoseconds;
   (void)contribute_table_manifest_write(manifest, manifest_path);
   contribute_table_manifest_destroy(manifest);
   cfile_lock_close(lock);

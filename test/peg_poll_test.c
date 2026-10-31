@@ -12,6 +12,7 @@
 #include "../src/ent/game.h"
 #include "../src/ent/letter_distribution.h"
 #include "../src/ent/move.h"
+#include "../src/impl/cmd_api.h"
 #include "../src/impl/config.h"
 #include "../src/impl/peg.h"
 #include "../src/str/move_string.h"
@@ -368,7 +369,40 @@ static void test_peg_status_ranking(const Game *game, const Move *move) {
   free(snap);
 }
 
+// status reads the poll and the result from another thread. It used to hold a
+// poll the next solve had freed, and a result the solve was writing, so read
+// it through every start and finish of a run of solves.
+static void test_status_through_restarted_solves(void) {
+  Magpie *mp = magpie_create(DEFAULT_TEST_DATA_PATH);
+  assert(!magpie_has_error(mp));
+  assert(magpie_run_sync(mp, "set -lex CSW24 -threads 2 -rit false -wit false "
+                             "-pegtlim 0.05 -pegjson true") == MAGPIE_SUCCESS);
+  // A small table for ThreadSanitizer's sake, which a bounded build refuses.
+  // cppcheck-suppress knownConditionTrueFalse
+  if (!search_memory_is_bounded()) {
+    assert(magpie_run_sync(mp, "set -ttfraction 0.001") == MAGPIE_SUCCESS);
+  }
+  assert(magpie_run_sync(mp, "cgp 4WILI3JANE/4A3AQUAE2/2C1N3K2Y3/2RUG3E2G3/"
+                             "2O1L3B1REV2/2U1EL2I1EEL2/2T1SI2A1S1Y2/"
+                             "R1O2PWNS1T4/E1N2I4A4/AH1MED4T4/GI1OPE4E4/"
+                             "IT1ZO2VOUDON2/N3D10/I3E10/COIFS10 BDFHMX?/ "
+                             "420/412 0 -lex CSW24") == MAGPIE_SUCCESS);
+  for (int solve_idx = 0; solve_idx < 6; solve_idx++) {
+    assert(magpie_run_async(mp, "peg") == MAGPIE_SUCCESS);
+    while (magpie_get_thread_status(mp) != MAGPIE_THREAD_STATUS_FINISHED) {
+      free(magpie_get_last_command_status_message(mp));
+    }
+    assert(magpie_await(mp) == MAGPIE_SUCCESS);
+    char *final_status = magpie_get_last_command_status_message(mp);
+    assert(final_status && has_substring(final_status, "peginfo {"));
+    assert(has_substring(final_status, "Best Move"));
+    free(final_status);
+  }
+  magpie_destroy(mp);
+}
+
 void test_peg_poll(void) {
+  test_status_through_restarted_solves();
   log_set_level(LOG_FATAL);
   Config *config =
       config_create_or_die("set -lex CSW24 -threads 4 -s1 score -s2 score");

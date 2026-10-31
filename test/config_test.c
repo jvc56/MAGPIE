@@ -2876,6 +2876,98 @@ static void exec_capturing_output(Config *config, const char *command,
 // use builds its wordmap, word info table and rack info table, each with a
 // line naming it and the disk and memory it takes, and loads them; the next
 // use builds nothing.
+// Keeps the first `bytes` of a file: a table a build or a disk cut short.
+static void truncate_test_file(const char *path, size_t bytes) {
+  FILE *stream = cfile_open(path, "rbe", false);
+  assert(stream);
+  uint8_t *contents = malloc_or_die(bytes);
+  const size_t read_bytes = fread(contents, 1, bytes, stream);
+  assert(read_bytes == bytes);
+  (void)fclose(stream);
+  stream = cfile_open(path, "wbe", false);
+  assert(stream);
+  const size_t written = fwrite(contents, 1, bytes, stream);
+  assert(written == bytes);
+  (void)fclose(stream);
+  free(contents);
+}
+
+// From a table built on first use to the disk cap deleting another, and on to
+// tables that turn out damaged: auto gets through it all without an error, and
+// says each thing once.
+static void test_config_auto_tables_from_build_to_eviction(void) {
+  char *dir = test_platform_make_temporary_directory("magpie_eviction");
+  char *lexica = get_formatted_string("%s/lexica", dir);
+  assert(cfile_mkdir(lexica) == 0);
+  const char *lexicon = "CSW21_abeviction";
+  char *kwg = get_formatted_string("%s/%s.kwg", lexica, lexicon);
+  char *klv = get_formatted_string("%s/%s.klv2", lexica, lexicon);
+  copy_test_file("testdata/lexica/CSW21_ab.kwg", kwg);
+  copy_test_file("testdata/lexica/CSW21_ab.klv2", klv);
+  // A table an earlier run built, which this one does not use.
+  char *old_table = get_formatted_string("%s/CSW21_old.CSW21_old.rit", lexica);
+  copy_test_file("testdata/lexica/CSW21_ab.klv2", old_table);
+  char *manifest_path = get_formatted_string("%s/auto_tables.txt", dir);
+  contribute_tables_record_built(manifest_path, "rit", "CSW21_old.CSW21_old",
+                                 old_table);
+  char *data_paths = get_formatted_string("%s:%s", dir, DEFAULT_TEST_DATA_PATH);
+  const ConfigArgs args = {.data_paths = data_paths,
+                           .settings_filename = DEFAULT_TEST_SETTINGS_FILENAME,
+                           .use_wmp = true,
+                           .auto_tables = true,
+                           .build_missing_wordmaps = true,
+                           .auto_table_cap_bytes = 1};
+  ErrorStack *error_stack = error_stack_create();
+  Config *config = config_create(&args, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  char *command = get_formatted_string(
+      "set -threads 1 -savesettings false -lex %s -ld english_ab", lexicon);
+  char output[8192];
+  exec_capturing_output(config, command, output, sizeof(output));
+  if (strstr(output, "skipped")) {
+    printf("config: skipped the eviction test: %s", output);
+  } else {
+    // Over the cap: the unused table goes, and those in use stay.
+    assert(strstr(output, "to keep them within their disk cap"));
+    assert(!cfile_access(old_table, CFILE_ACCESS_EXISTS));
+    char *wmp = get_formatted_string("%s/%s.wmp", lexica, lexicon);
+    char *rit = get_formatted_string("%s/%s.%s.rit", lexica, lexicon, lexicon);
+    assert(cfile_access(wmp, CFILE_ACCESS_EXISTS));
+    assert(cfile_access(rit, CFILE_ACCESS_EXISTS));
+
+    // A wordmap cut short is left out, and the rack info table that needs it
+    // cannot be built: each is said once, with no error, and not tried on
+    // the next command.
+    config_destroy(config);
+    const int removed = remove(rit);
+    assert(removed == 0);
+    (void)removed;
+    truncate_test_file(wmp, 100);
+    config = config_create(&args, error_stack);
+    assert(error_stack_is_empty(error_stack));
+    exec_capturing_output(config, command, output, sizeof(output));
+    assert(strstr(output, "playing without the wordmap"));
+    assert(strstr(output, "incomplete"));
+    assert(strstr(output, "without a rack info table"));
+    exec_capturing_output(config, "set -threads 1", output, sizeof(output));
+    assert(!strstr(output, "building"));
+    assert(!strstr(output, "without"));
+    free(rit);
+    free(wmp);
+  }
+  error_stack_destroy(error_stack);
+  config_destroy(config);
+  free(command);
+  free(data_paths);
+  free(manifest_path);
+  free(old_table);
+  free(klv);
+  free(kwg);
+  free(lexica);
+  test_platform_remove_directory_tree(dir);
+  free(dir);
+}
+
 // What auto leaves out for want of room it leaves out for both players, though
 // players sharing a lexicon are reported as one.
 static void test_config_auto_tables_bind_both_players(void) {
@@ -3930,6 +4022,7 @@ void test_config(void) {
   test_config_table_auto_settings();
   test_config_auto_tables_bind_both_players();
   test_config_builds_missing_tables_on_first_use();
+  test_config_auto_tables_from_build_to_eviction();
   test_config_exchange_blank();
   test_config_utility_blend();
   test_config_move_list_saved_to_game_event();

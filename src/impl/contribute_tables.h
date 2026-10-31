@@ -144,6 +144,10 @@ typedef struct ContributeTableManifestEntry {
   int64_t last_used;
   // Where it was written; the only file eviction ever removes for it.
   char *path;
+  // Its modification time when recorded, or 0 where a manifest line has none:
+  // a file of the same size written since is not the table recorded.
+  int64_t modified_seconds;
+  long modified_nanoseconds;
 } ContributeTableManifestEntry;
 
 typedef struct ContributeTableManifest {

@@ -254,6 +254,12 @@ struct PegPoll {
   // each PegCandOutcomes.rows is heap-allocated.
   PegCandOutcomes *outcomes;
   int n_outcomes;
+  // The solve's protected moves, copied as a read can outlast the solve, which
+  // the solved rows always hold, however low they rank.
+  Move *protected_moves;
+  int n_protected_moves;
+  // See peg_poll_arm.
+  bool armed;
   // The mover draws of the candidate in progress (peg_poll_start_scenarios),
   // and the solve's workers, whose endgames a read reports for the running
   // draws. workers is set only while they exist (peg_poll_attach_workers), and
@@ -328,6 +334,9 @@ PegPoll *peg_poll_create(void) {
   poll->s.stage = -1;
   poll->outcomes = NULL;
   poll->n_outcomes = 0;
+  poll->protected_moves = NULL;
+  poll->n_protected_moves = 0;
+  poll->armed = false;
   poll->draws = NULL;
   poll->n_draws = 0;
   poll->draws_cap = 0;
@@ -354,11 +363,47 @@ void peg_poll_reset(PegPoll *poll) {
   poll->n_outcomes = 0;
   poll->n_draws = 0;
   poll->n_finished = 0;
+  free(poll->protected_moves);
+  poll->protected_moves = NULL;
+  poll->n_protected_moves = 0;
+  poll->armed = false;
   for (int cand_idx = 0; cand_idx < poll->n_cands; cand_idx++) {
     poll->cands[cand_idx].start_ns = 0;
   }
   cpthread_mutex_unlock(&poll->mutex);
   peg_cand_outcomes_destroy_array(old, old_n);
+}
+
+void peg_poll_arm(PegPoll *poll) {
+  peg_poll_reset(poll);
+  cpthread_mutex_lock(&poll->mutex);
+  poll->armed = true;
+  cpthread_mutex_unlock(&poll->mutex);
+}
+
+bool peg_poll_is_armed(PegPoll *poll) {
+  cpthread_mutex_lock(&poll->mutex);
+  const bool armed = poll->armed;
+  cpthread_mutex_unlock(&poll->mutex);
+  return armed;
+}
+
+// Keeps a copy of the moves the solved rows always hold.
+static void peg_poll_set_protected(PegPoll *poll,
+                                   const Move *const *protect_moves,
+                                   int n_protect) {
+  if (poll == NULL || n_protect <= 0) {
+    return;
+  }
+  Move *copies = malloc_or_die((size_t)n_protect * sizeof(Move));
+  for (int protect_idx = 0; protect_idx < n_protect; protect_idx++) {
+    copies[protect_idx] = *protect_moves[protect_idx];
+  }
+  cpthread_mutex_lock(&poll->mutex);
+  free(poll->protected_moves);
+  poll->protected_moves = copies;
+  poll->n_protected_moves = n_protect;
+  cpthread_mutex_unlock(&poll->mutex);
 }
 
 void peg_poll_destroy(PegPoll *poll) {
@@ -369,6 +414,7 @@ void peg_poll_destroy(PegPoll *poll) {
   free(poll->draws);
   free(poll->cands);
   free(poll->finished);
+  free(poll->protected_moves);
   // No cpthread_mutex_destroy: project mutexes don't dynamically allocate.
   free(poll);
 }
@@ -597,9 +643,64 @@ static int peg_cand_compare(const PegRankedCand *a, const PegRankedCand *b) {
   return 0;
 }
 
+// Whether `move` is one the solved rows always hold.
+static bool peg_poll_move_protected(const PegPoll *poll, const Move *move) {
+  for (int protect_idx = 0; protect_idx < poll->n_protected_moves;
+       protect_idx++) {
+    if (peg_move_eq(move, &poll->protected_moves[protect_idx])) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// Puts `cand` in the solved rows in rank order, in place of the last row when
+// they are full.
+static void peg_poll_insert_solved(PegPollSnapshot *out,
+                                   const PegRankedCand *cand) {
+  int row_idx = out->n_solved_rows < PEG_POLL_MAX_SOLVED_ROWS
+                    ? out->n_solved_rows++
+                    : PEG_POLL_MAX_SOLVED_ROWS - 1;
+  while (row_idx > 0 &&
+         peg_cand_compare(&out->solved_rows[row_idx - 1], cand) > 0) {
+    out->solved_rows[row_idx] = out->solved_rows[row_idx - 1];
+    row_idx--;
+  }
+  out->solved_rows[row_idx] = *cand;
+}
+
+// Adds a protected candidate missing from the solved rows, in place of the
+// lowest unprotected one when they are full. Cut or not: the caller asked for
+// this play, and a bound is what there is to show for it.
+static void peg_poll_add_protected_solved(const PegPoll *poll,
+                                          PegPollSnapshot *out,
+                                          const PegRankedCand *cand) {
+  int row_idx = out->n_solved_rows - 1;
+  for (int check_idx = 0; check_idx < out->n_solved_rows; check_idx++) {
+    if (peg_move_eq(&out->solved_rows[check_idx].move, &cand->move)) {
+      return;
+    }
+  }
+  if (out->n_solved_rows < PEG_POLL_MAX_SOLVED_ROWS) {
+    peg_poll_insert_solved(out, cand);
+    return;
+  }
+  while (row_idx >= 0 &&
+         peg_poll_move_protected(poll, &out->solved_rows[row_idx].move)) {
+    row_idx--;
+  }
+  if (row_idx < 0) {
+    return;
+  }
+  for (; row_idx + 1 < PEG_POLL_MAX_SOLVED_ROWS; row_idx++) {
+    out->solved_rows[row_idx] = out->solved_rows[row_idx + 1];
+  }
+  peg_poll_insert_solved(out, cand);
+}
+
 // Fills out's solved rows from the stage's finished candidates: the best
-// uncut ones, best first, each ranked among all of them. Called under the
-// mutex.
+// uncut ones, best first, and every protected one, each ranked among all of
+// them. Called under the mutex.
 static void peg_poll_fill_solved(const PegPoll *poll, PegPollSnapshot *out) {
   if (out->fidelity_plies == 0) {
     return;
@@ -609,21 +710,19 @@ static void peg_poll_fill_solved(const PegPoll *poll, PegPollSnapshot *out) {
     if (cand->cut) {
       continue;
     }
-    int row_idx = out->n_solved_rows;
-    if (row_idx == PEG_POLL_MAX_SOLVED_ROWS) {
-      if (peg_cand_compare(cand, &out->solved_rows[row_idx - 1]) >= 0) {
-        continue;
-      }
-      row_idx--;
-    } else {
-      out->n_solved_rows++;
+    if (out->n_solved_rows < PEG_POLL_MAX_SOLVED_ROWS ||
+        peg_cand_compare(cand,
+                         &out->solved_rows[PEG_POLL_MAX_SOLVED_ROWS - 1]) < 0) {
+      peg_poll_insert_solved(out, cand);
     }
-    while (row_idx > 0 &&
-           peg_cand_compare(&out->solved_rows[row_idx - 1], cand) > 0) {
-      out->solved_rows[row_idx] = out->solved_rows[row_idx - 1];
-      row_idx--;
+  }
+  for (int finished_idx = 0;
+       poll->n_protected_moves > 0 && finished_idx < poll->n_finished;
+       finished_idx++) {
+    const PegRankedCand *cand = &poll->finished[finished_idx];
+    if (peg_poll_move_protected(poll, &cand->move)) {
+      peg_poll_add_protected_solved(poll, out, cand);
     }
-    out->solved_rows[row_idx] = *cand;
   }
   for (int row_idx = 0; row_idx < out->n_solved_rows; row_idx++) {
     int rank = 1;
@@ -1078,8 +1177,17 @@ static Game *peg_make_post_cand_game_into(Game **slot, const Game *template_src,
   }
   // Playing the cand in the template may have flagged GAME_END_REASON_STANDARD
   // (rack emptied in the no-draw world). We re-stock here, so clear the stale
-  // flag unless the rack is genuinely empty.
-  if (!rack_is_empty(mover_rack)) {
+  // flag unless the rack is genuinely empty. A scoreless ending does not depend
+  // on the draw: it stands, and costs each player the tiles this scenario left
+  // them, which the template could not know.
+  if (game_get_game_end_reason(game) == GAME_END_REASON_CONSECUTIVE_ZEROS) {
+    const LetterDistribution *ld = game_get_ld(game);
+    for (int player_idx = 0; player_idx < 2; player_idx++) {
+      Player *player = game_get_player(game, player_idx);
+      player_add_to_score(
+          player, calculate_end_rack_penalty(player_get_rack(player), ld));
+    }
+  } else if (!rack_is_empty(mover_rack)) {
     game_set_game_end_reason(game, GAME_END_REASON_NONE);
   }
   return game;
@@ -2307,6 +2415,13 @@ static double peg_inner_cascade(PegWorker *worker, Game *game, int depth,
 static int32_t peg_eval_leaf(PegEvalCtx *ctx, Game *game) {
   if (peg_eval_should_stop(ctx)) {
     return 0;
+  }
+  // The candidate ended the game (a sixth scoreless turn): the final score is
+  // the result, and there is nothing left for any model to search.
+  if (game_get_game_end_reason(game) == GAME_END_REASON_CONSECUTIVE_ZEROS) {
+    const Player *mover = game_get_player(game, ctx->mover_idx);
+    const Player *opponent = game_get_player(game, 1 - ctx->mover_idx);
+    return equity_to_int(player_get_score(mover) - player_get_score(opponent));
   }
   const bool emptier = bag_get_letters(game_get_bag(game)) == 0 &&
                        game_get_game_end_reason(game) == GAME_END_REASON_NONE;
@@ -4363,6 +4478,7 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
     // whatever movegen's equity sort happened to produce.
     peg_force_protected_move_ptrs_to_front(moves, n_cands, protect_moves,
                                            n_protect);
+    peg_poll_set_protected(args->poll, protect_moves, n_protect);
     peg_poll_begin_stage(args->poll, /*stage=*/0, /*fidelity_plies=*/0,
                          n_cands);
     if (args->on_stage_start != NULL) {

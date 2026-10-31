@@ -42,6 +42,9 @@ typedef struct ConfigArgs {
   // users, tests and contribute's task configurations, which build the
   // wordmaps their jobs pin themselves, do not.
   bool build_missing_wordmaps;
+  // The disk tables built on first use may take together before the least
+  // recently used are deleted, for a test to reach; 0 is the usual limit.
+  int64_t auto_table_cap_bytes;
   // -wmp, -rit and -wit default to auto: each table is used when this
   // machine has the disk and memory for it. The magpie executable and the
   // library's magpie_create() do; tests, browser games and contribute's task

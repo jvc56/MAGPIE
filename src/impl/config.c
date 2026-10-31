@@ -3,6 +3,8 @@
 #include "../compat/cfile.h"
 #include "../compat/chttp.h"
 #include "../compat/cpath.h"
+#include "../compat/cpthread.h"
+#include "../compat/cpthread_defs.h"
 #include "../compat/ctime.h"
 #include "../compat/endian_conv.h"
 #include "../compat/memory_info.h"
@@ -156,6 +158,7 @@ struct Config {
   // table is used when this machine has room for it. Only the WMP, RIT and
   // WIT entries are used.
   bool table_auto[NUMBER_OF_DATA][2];
+  int64_t auto_table_cap_bytes;
   // What config_choose_auto_tables last said it decided, so it says it again
   // only when that changes, not with every move in the memory free.
   char *auto_table_report;
@@ -235,6 +238,9 @@ struct Config {
   InferenceResults *inference_results;
   EndgameResults *endgame_results;
   PegPoll *peg_poll;
+  // Held by status while it draws the game, and by a solve while it updates the
+  // game and arms the poll: after that the solve leaves the game alone.
+  cpthread_mutex_t peg_status_mutex;
   AutoplayResults *autoplay_results;
   ConversionResults *conversion_results;
   GameStringOptions *game_string_options;
@@ -763,8 +769,7 @@ void config_reset_move_list_and_invalidate_sim_results(Config *config) {
 static void config_reset_peg_results(Config *config) {
   peg_result_destroy(&config->peg_result);
   config->peg_result.last_completed_stage = -1;
-  peg_poll_destroy(config->peg_poll);
-  config->peg_poll = NULL;
+  peg_poll_reset(config->peg_poll);
   board_destroy(config->peg_outcomes_board);
   config->peg_outcomes_board = NULL;
   ld_destroy(config->peg_outcomes_ld);
@@ -4970,9 +4975,6 @@ static bool config_parse_peg_leaves(const char *str, int *max_tiles_left) {
 void config_peg(Config *config, ErrorStack *error_stack) {
   // Free any prior ranking before overwriting it.
   peg_result_destroy(&config->peg_result);
-  // Fresh poll for this solve; destroy the previous one if it exists.
-  peg_poll_destroy(config->peg_poll);
-  config->peg_poll = peg_poll_create();
   board_destroy(config->peg_outcomes_board);
   ld_destroy(config->peg_outcomes_ld);
   config->peg_outcomes_board = NULL;
@@ -5092,7 +5094,12 @@ void impl_peg(Config *config, ErrorStack *error_stack) {
                      string_duplicate("cannot run peg without lexicon"));
     return;
   }
+  cpthread_mutex_lock(&config->peg_status_mutex);
   config_init_game(config);
+  // The poll stays for the config's life, as status reads it from another
+  // thread: each solve resets it rather than replacing it.
+  peg_poll_arm(config->peg_poll);
+  cpthread_mutex_unlock(&config->peg_status_mutex);
   config_peg(config, error_stack);
 }
 
@@ -5126,20 +5133,22 @@ static char *config_write_peg_chart_file(const char *contents) {
 // every play). When the outcomes column truncates any cell at the configured
 // width/line caps, writes the full chart, every play with unlimited lines, to
 // a data/pegcharts/ file and embeds its path above the table.
-static char *config_peg_display_table(const Config *config, PegPoll *poll,
+static char *config_peg_display_table(const Config *config,
+                                      const PegResult *result, PegPoll *poll,
                                       int max_rows) {
   const int width = config->peg_out_width;
   const int lines = config->peg_out_lines;
   bool truncated = false;
-  char *display = peg_result_get_string(
-      &config->peg_result, config->game, config->peg_show_outcomes, poll,
-      max_rows, width, lines, /*trunc_note=*/NULL, &truncated);
+  char *display =
+      peg_result_get_string(result, config->game, config->peg_show_outcomes,
+                            poll, max_rows, width, lines,
+                            /*trunc_note=*/NULL, &truncated);
   if (!truncated) {
     return display;
   }
   free(display);
   char *full = peg_result_get_string(
-      &config->peg_result, config->game, config->peg_show_outcomes, poll,
+      result, config->game, config->peg_show_outcomes, poll,
       /*max_rows=*/0, width, /*out_max_lines=*/0, NULL, NULL);
   char *path = config_write_peg_chart_file(full);
   free(full);
@@ -5147,7 +5156,7 @@ static char *config_peg_display_table(const Config *config, PegPoll *poll,
       path != NULL
           ? get_formatted_string("untruncated chart written to: %s", path)
           : NULL;
-  char *out = peg_result_get_string(&config->peg_result, config->game,
+  char *out = peg_result_get_string(result, config->game,
                                     config->peg_show_outcomes, poll, max_rows,
                                     width, lines, note, /*out_truncated=*/NULL);
   free(note);
@@ -5155,10 +5164,10 @@ static char *config_peg_display_table(const Config *config, PegPoll *poll,
   return out;
 }
 
-static char *config_peg_display(const Config *config, PegPoll *poll,
-                                int max_rows) {
-  char *table = config_peg_display_table(config, poll, max_rows);
-  if (!config->peg_json || !config->peg_poll) {
+static char *config_peg_display(const Config *config, const PegResult *result,
+                                PegPoll *poll, int max_rows) {
+  char *table = config_peg_display_table(config, result, poll, max_rows);
+  if (!config->peg_json || !peg_poll_is_armed(config->peg_poll)) {
     return table;
   }
   char *json = peg_poll_get_json(config->peg_poll, config->game);
@@ -5177,10 +5186,22 @@ char *config_get_peg_outcomes(Config *config, const char *move) {
 }
 
 char *status_peg(Config *config) {
-  if (config->peg_result.last_completed_stage < 0 && config->peg_poll == NULL) {
+  cpthread_mutex_lock(&config->peg_status_mutex);
+  if (!peg_poll_is_armed(config->peg_poll)) {
+    cpthread_mutex_unlock(&config->peg_status_mutex);
     return string_duplicate("peg results are not yet initialized.\n");
   }
-  return config_peg_display(config, config->peg_poll, PEG_DISPLAY_ROWS);
+  // While the command runs its thread is writing the result, and the poll is
+  // all another thread may read, even once the poll says the solve is done.
+  const thread_control_status_t status =
+      thread_control_get_status(config->thread_control);
+  const bool running = status == THREAD_CONTROL_STATUS_STARTED ||
+                       status == THREAD_CONTROL_STATUS_USER_INTERRUPT;
+  char *display =
+      config_peg_display(config, running ? NULL : &config->peg_result,
+                         config->peg_poll, PEG_DISPLAY_ROWS);
+  cpthread_mutex_unlock(&config->peg_status_mutex);
+  return display;
 }
 
 // Autoplay
@@ -6068,7 +6089,7 @@ char *impl_show_peg(const Config *config, ErrorStack *error_stack) {
       }
     }
   }
-  return config_peg_display(config, NULL, max_rows);
+  return config_peg_display(config, &config->peg_result, NULL, max_rows);
 }
 
 void execute_show_peg(Config *config, ErrorStack *error_stack) {
@@ -8181,7 +8202,7 @@ static void config_record_first_use_build(const Config *config,
       manifest_path, contribute_table_role_name(config_table_kind(type).role),
       name, built_path);
   StringList *evicted = string_list_create();
-  (void)contribute_tables_trim_to(manifest_path, CONFIG_AUTO_TABLE_CAP_BYTES,
+  (void)contribute_tables_trim_to(manifest_path, config->auto_table_cap_bytes,
                                   in_use->tables, in_use->count, evicted);
   config_report_evicted_tables(config, evicted,
                                "to keep them within their disk cap");
@@ -14800,7 +14821,8 @@ void execute_peg(Config *config, ErrorStack *error_stack) {
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
-  char *result = config_peg_display(config, NULL, PEG_DISPLAY_ROWS);
+  char *result =
+      config_peg_display(config, &config->peg_result, NULL, PEG_DISPLAY_ROWS);
   thread_control_print(config->thread_control, result);
   free(result);
 }
@@ -15789,9 +15811,13 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
         string_duplicate(config_args->settings_filename);
   }
   bool default_use_wmp = true;
+  config->auto_table_cap_bytes = CONFIG_AUTO_TABLE_CAP_BYTES;
   if (config_args) {
     default_use_wmp = config_args->use_wmp;
     config->build_missing_wordmaps = config_args->build_missing_wordmaps;
+    if (config_args->auto_table_cap_bytes > 0) {
+      config->auto_table_cap_bytes = config_args->auto_table_cap_bytes;
+    }
   }
   // Attempt to load fields that might fail first
   config->board_layout =
@@ -16080,6 +16106,8 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   // -1 = no peg results yet; 0 stages = built-in schedule; 0 stride = solver
   // default; rational opponent; no only-solve / never-prune restrictions.
   config->peg_result.last_completed_stage = -1;
+  config->peg_poll = peg_poll_create();
+  cpthread_mutex_init(&config->peg_status_mutex);
   config->peg_num_stages = 0;
   config->peg_plies = CONFIG_DEFAULT_PEG_PLIES;
   config->leavegen_max_games = 0;

@@ -1893,8 +1893,9 @@ char *peg_result_get_string(const PegResult *result, const Game *game,
     have_snap = true;
   }
 
-  // Live path: poll is set and the solve is still running.
-  if (have_snap && !snap.done) {
+  // Live path: poll is set and the solve is still running, or the caller has
+  // no result it may read yet.
+  if (have_snap && (!snap.done || result == NULL)) {
     // Each finished candidate's per-draw outcomes, fed live via the poll.
     PegCandOutcomes *live_oc = NULL;
     int live_n_oc = 0;

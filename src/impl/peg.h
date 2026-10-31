@@ -697,8 +697,9 @@ typedef struct PegPollSnapshot {
   int n_cand_rows;
   PegCandStatus cand_rows[PEG_POLL_MAX_CAND_ROWS];
   // The best PEG_POLL_MAX_SOLVED_ROWS solved (uncut) candidates of the current
-  // endgame stage, best first, each with its rank among all the stage's
-  // finished candidates (1 = best). The top entries can miss them: cut
+  // endgame stage, best first, in which every protected candidate that has
+  // finished takes a place, each with its rank among all the stage's finished
+  // candidates (1 = best). The top entries can miss them: cut
   // bounds sort above a solved play's lower win%. Filled by peg_poll_read;
   // none in the greedy seed.
   int n_solved_rows;
@@ -736,6 +737,12 @@ void peg_poll_destroy(PegPoll *poll);
 // poll across multiple peg_solve calls so per-solve progress (stage history,
 // cands_done) does not accumulate from prior solves.
 void peg_poll_reset(PegPoll *poll);
+// Resets the poll for a solve about to start, which peg_poll_is_armed then
+// reports until the next reset. A reader on another thread keeps a poll for its
+// owner's lifetime and asks this, so it never holds a poll that a new solve
+// has freed.
+void peg_poll_arm(PegPoll *poll);
+bool peg_poll_is_armed(PegPoll *poll);
 // Copy a consistent snapshot of the current live view into *out (under lock).
 void peg_poll_read(PegPoll *poll, PegPollSnapshot *out);
 
