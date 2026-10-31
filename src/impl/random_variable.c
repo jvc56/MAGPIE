@@ -407,6 +407,86 @@ void rv_normal_predetermined_reset(RandomVariables *rvs) {
   rv_normal_predetermined->index = 0;
 }
 
+typedef struct RVTable {
+  uint64_t num_samples;
+  double *samples;
+  uint64_t *draws;
+  cpthread_mutex_t mutex;
+} RVTable;
+
+static uint64_t rv_table_next_seed(RandomVariables *rvs, const uint64_t k) {
+  RVTable *rv_table = (RVTable *)rvs->data;
+  cpthread_mutex_lock(&rv_table->mutex);
+  const uint64_t seed = rv_table->draws[k]++;
+  cpthread_mutex_unlock(&rv_table->mutex);
+  return seed;
+}
+
+static uint64_t rv_table_peek_seed(RandomVariables *rvs, const uint64_t k,
+                                   const uint64_t ahead) {
+  RVTable *rv_table = (RVTable *)rvs->data;
+  cpthread_mutex_lock(&rv_table->mutex);
+  const uint64_t seed = rv_table->draws[k] + ahead;
+  cpthread_mutex_unlock(&rv_table->mutex);
+  return seed;
+}
+
+static double rv_table_sample(RandomVariables *rvs, const uint64_t k,
+                              const uint64_t reserved_seed,
+                              const int __attribute__((unused)) thread_index,
+                              const uint64_t
+                              __attribute__((unused)) sample_count,
+                              BAILogger __attribute__((unused)) * bai_logger) {
+  const uint64_t seed = reserved_seed != RVS_SEED_UNRESERVED
+                            ? reserved_seed
+                            : rv_table_next_seed(rvs, k);
+  const RVTable *rv_table = (const RVTable *)rvs->data;
+  return rv_table
+      ->samples[k * rv_table->num_samples + seed % rv_table->num_samples];
+}
+
+static bool rv_table_are_similar(RandomVariables __attribute__((unused)) * rvs,
+                                 const int __attribute__((unused)) i,
+                                 const int __attribute__((unused)) j) {
+  return false;
+}
+
+static void rv_table_destroy(RandomVariables *rvs) {
+  RVTable *rv_table = (RVTable *)rvs->data;
+  free(rv_table->samples);
+  free(rv_table);
+}
+
+static void rv_table_load(RandomVariables *rvs,
+                          const RandomVariablesArgs *rvs_args) {
+  RVTable *rv_table = (RVTable *)rvs->data;
+  rv_table->num_samples = rvs_args->num_samples;
+  const size_t count = (size_t)(rvs->num_rvs * rvs_args->num_samples);
+  rv_table->samples = realloc_or_die(rv_table->samples, count * sizeof(double));
+  memcpy(rv_table->samples, rvs_args->samples, count * sizeof(double));
+  rv_table->draws = rvs_args->table_draws;
+  memset(rv_table->draws, 0, (size_t)rvs->num_rvs * sizeof(uint64_t));
+}
+
+static void rv_table_create(RandomVariables *rvs,
+                            const RandomVariablesArgs *rvs_args) {
+  if (rvs_args->num_samples == 0 || rvs_args->table_draws == NULL) {
+    log_fatal("a table of random variables needs samples and draw counters");
+  }
+  rvs->sample_func = rv_table_sample;
+  rvs->similar_func = rv_table_are_similar;
+  rvs->destroy_data_func = rv_table_destroy;
+  rvs->get_best_arm_index_func = rv_unsupported_get_best_arm_index;
+  rvs->next_seed_func = rv_table_next_seed;
+  rvs->peek_seed_func = rv_table_peek_seed;
+  rvs->arms_share_seeds = true;
+  RVTable *rv_table = malloc_or_die(sizeof(RVTable));
+  rv_table->samples = NULL;
+  cpthread_mutex_init(&rv_table->mutex);
+  rvs->data = rv_table;
+  rv_table_load(rvs, rvs_args);
+}
+
 typedef struct SimmerWorker {
   Game *game;
   MoveList *move_list;
@@ -1076,6 +1156,9 @@ RandomVariables *rvs_create(const RandomVariablesArgs *rvs_args) {
   case RANDOM_VARIABLES_SIMMED_PLAYS:
     rv_sim_create(rvs, rvs_args->sim_args, rvs_args->sim_results);
     break;
+  case RANDOM_VARIABLES_TABLE:
+    rv_table_create(rvs, rvs_args);
+    break;
   }
   return rvs;
 }
@@ -1098,6 +1181,9 @@ void rvs_reset(RandomVariables *rvs, const RandomVariablesArgs *rvs_args) {
     break;
   case RANDOM_VARIABLES_SIMMED_PLAYS:
     rv_sim_reset(rvs, rvs_args->sim_args);
+    break;
+  case RANDOM_VARIABLES_TABLE:
+    rv_table_load(rvs, rvs_args);
     break;
   }
 }

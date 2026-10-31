@@ -27,6 +27,11 @@ typedef enum {
   RANDOM_VARIABLES_NORMAL,
   RANDOM_VARIABLES_NORMAL_PREDETERMINED,
   RANDOM_VARIABLES_SIMMED_PLAYS,
+  // Replays recorded samples: arm k's n-th sample is samples[k * num_samples
+  // + n] (n modulo num_samples past the last), and its seed is n, so every
+  // arm's n-th sample shares a seed as a sim's do and BAI's stopping test
+  // pairs them the same way.
+  RANDOM_VARIABLES_TABLE,
 } random_variables_t;
 
 typedef struct RandomVariablesArgs {
@@ -38,6 +43,9 @@ typedef struct RandomVariablesArgs {
   const double *means_and_vars;
   const SimArgs *sim_args;
   SimResults *sim_results;
+  // RANDOM_VARIABLES_TABLE: num_rvs counters, owned by the caller, that count
+  // each arm's samples drawn or reserved. Zeroed on create and reset.
+  uint64_t *table_draws;
 } RandomVariablesArgs;
 
 RandomVariables *rvs_create(const RandomVariablesArgs *rvs_args);
