@@ -16,6 +16,9 @@
 #   OUT_PREFIX.time.xml, the time-profile table, which gives the binaries'
 #   load addresses;
 # - CPU Counters' bottlenecks mode: OUT_PREFIX.xml, the per-process metrics.
+# - 'Metal System Trace', or a template from metal_template.py:
+#   OUT_PREFIX.gpu.xml, the GPU intervals for gpu.py busy, and with the shader
+#   profiler OUT_PREFIX.shaders.xml for gpu.py shaders.
 #
 # xctrace writes a recording's raw kernel trace to the user temp folder, as
 # instruments*.ktrace, and deletes it once the .trace is written. A recording
@@ -24,7 +27,7 @@
 # to start with less than MIN_FREE_GB free there.
 set -u
 if [ $# -lt 3 ]; then
-  sed -n '2,24p' "$0"
+  sed -n '2,27p' "$0"
   exit 2
 fi
 MIN_FREE_GB=20
@@ -101,7 +104,19 @@ export_table() {
     exit 1
   fi
 }
-if grep -q 'schema="cpu-profile"' <<< "$toc"; then
+if grep -q 'schema="metal-gpu-intervals"' <<< "$toc"; then
+  export_table metal-gpu-intervals "$OUT.gpu.xml"
+  echo "$OUT.gpu.xml"
+  if grep -q 'schema="metal-shader-profiler-intervals"' <<< "$toc"; then
+    export_table metal-shader-profiler-intervals "$OUT.shaders.xml"
+    if grep -q '<row>' "$OUT.shaders.xml"; then
+      echo "$OUT.shaders.xml"
+    else
+      rm -f "$OUT.shaders.xml"
+    fi
+  fi
+  exit 0
+elif grep -q 'schema="cpu-profile"' <<< "$toc"; then
   export_table cpu-profile "$OUT.xml"
 elif grep -q 'schema="pmi-sample"' <<< "$toc"; then
   export_table pmi-sample "$OUT.xml"
