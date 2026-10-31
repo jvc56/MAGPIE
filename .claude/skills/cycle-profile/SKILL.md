@@ -59,6 +59,8 @@ dsymutil reads the debug information from the object files the binary was linked
 - **Record:** `record.sh OUT -- ./mt_new ARGS` from the directory the command needs. MAGPIE needs `data/` there.
   - For the CLI fed on stdin, use `record.sh OUT --stdin CMDFILE -- ./magpie`.
   - The command's output goes to `OUT.out`, for comparing the builds' results.
+- **Disk space:** while it records, xctrace writes a raw trace to the user temp folder (`getconf DARWIN_USER_TEMP_DIR`), as `instruments*.ktrace`. A CPU Counters recording's can pass 25 GB. xctrace deletes it once the `.trace` is saved, but not after a failed or interrupted recording, and leftovers once filled this disk. `record.sh` deletes any its recording leaves, stops xctrace if the script is interrupted, and refuses to start with less than 20 GB free there.
+  - Delete a recording's `.trace` once its numbers are in a PR; CPU Counters bundles run to gigabytes too.
 
 ## 3. Attribute
 
