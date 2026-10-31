@@ -132,6 +132,19 @@ void peg3_exact_eval_mode(const StringSplitter *fields);
 // Resumes by root.
 void peg_sim_mode(const StringSplitter *fields);
 
+// pegnet:pegsimbai
+// MAGPIE's BAI replayed on a sim's recorded rollouts (PEG_SIM_SAMPLES): per
+// root, arm PEG_SIM_BAI_ARM's (default 3) rollouts become a table of random
+// variables (RANDOM_VARIABLES_TABLE: candidate c's n-th sample is its n-th
+// rollout in seed order, the same world for every candidate; past the last,
+// they start over), and each scheme's BAI runs on one thread with the GK16
+// threshold. Fields: samples file, output CSV, then schemes
+// NAME=RULE,SCOND,MIN,LIMIT (rule rr or tt, the stopping confidence in
+// percent, iterations per candidate first, the cap on all rollouts). Writes
+// per root and scheme: BAI's pick (static rank), its status, the rollouts and
+// each candidate's rollouts (semicolon-separated, by static rank).
+void peg_sim_bai_replay_mode(const StringSplitter *fields);
+
 // pegnet:pegbudget
 // Matched-budget 2PEG picks (pegbudget/PROTOCOL-ENGINE.txt). Fields:
 // positions prefix (2 tiles in the bag), output prefix, budgets in seconds

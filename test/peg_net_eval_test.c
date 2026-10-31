@@ -1,5 +1,6 @@
 #include "peg_net_eval_test.h"
 
+#include "../src/compat/cfile.h"
 #include "../src/compat/cpthread.h"
 #include "../src/compat/ctime.h"
 #include "../src/compat/endian_io.h"
@@ -13,6 +14,7 @@
 #include "../src/def/thread_control_defs.h"
 #include "../src/def/value_net_defs.h"
 #include "../src/ent/bag.h"
+#include "../src/ent/bai_result.h"
 #include "../src/ent/endgame_results.h"
 #include "../src/ent/equity.h"
 #include "../src/ent/game.h"
@@ -24,6 +26,7 @@
 #include "../src/ent/stats.h"
 #include "../src/ent/thread_control.h"
 #include "../src/ent/transposition_table.h"
+#include "../src/impl/bai.h"
 #include "../src/impl/cgp.h"
 #include "../src/impl/config.h"
 #include "../src/impl/endgame.h"
@@ -31,6 +34,7 @@
 #include "../src/impl/move_gen.h"
 #include "../src/impl/move_gen_base.h"
 #include "../src/impl/peg.h"
+#include "../src/impl/random_variable.h"
 #include "../src/impl/simmer.h"
 #include "../src/str/move_string.h"
 #include "../src/util/io_util.h"
@@ -2164,6 +2168,13 @@ static void peg_sim_trace_write(PegSimTrace *trace, int worker_index,
 // high word) and the rollout's wall microseconds, from its first hooked ply to
 // its end (0 when no ply was hooked). With it, every arm's rollouts take the
 // hook, the static arms' too (where it declines every ply: the same moves).
+enum {
+  // Little-endian uint32s per PEG_SIM_SAMPLES record, and records read at a
+  // time.
+  PEG_SIM_SAMPLE_WORDS = 7,
+  PEG_SIM_SAMPLE_READ_CHUNK = 65536,
+};
+
 typedef struct PegSimSamples {
   FILE *out;
   cpthread_mutex_t mutex;
@@ -2193,7 +2204,7 @@ static void peg_sim_sample_write(PegSimSamples *samples, int worker_index,
   }
   uint64_t utility_bits;
   memcpy(&utility_bits, &utility, sizeof(utility_bits));
-  const uint32_t record[7] = {
+  const uint32_t record[PEG_SIM_SAMPLE_WORDS] = {
       (uint32_t)samples->root,
       (uint32_t)(samples->arm * 256 + rank),
       (uint32_t)seed,
@@ -2203,7 +2214,7 @@ static void peg_sim_sample_write(PegSimSamples *samples, int worker_index,
       start != 0 ? (uint32_t)((now - start) / 1000) : 0,
   };
   cpthread_mutex_lock(&samples->mutex);
-  if (!fwrite_le_uint32s(record, 7, samples->out)) {
+  if (!fwrite_le_uint32s(record, PEG_SIM_SAMPLE_WORDS, samples->out)) {
     log_fatal("pegsim could not write a sample");
   }
   cpthread_mutex_unlock(&samples->mutex);
@@ -2315,6 +2326,38 @@ void peg_sim_mode(const StringSplitter *fields) {
     log_fatal("pegsim invalid candidates, iterations, plies, bag, arms or "
               "endgame plies");
   }
+  // PEG_SIM_PREFILTER=K: arms 1, 3 and 4 sim only the K candidates arm 0
+  // (which must run) ranks best. PEG_SIM_BAI=RULE,SCOND,MIN: arms 1, 3 and 4
+  // stop by BAI (rule rr or tt, the GK16 threshold at SCOND percent, MIN
+  // iterations per candidate first) instead of at iterations per candidate,
+  // which stays their cap.
+  const char *prefilter_env = getenv("PEG_SIM_PREFILTER");
+  const int prefilter = prefilter_env != NULL ? atoi(prefilter_env) : 0;
+  if (prefilter < 0 || (prefilter > 0 && !run_arm[0])) {
+    log_fatal("PEG_SIM_PREFILTER needs a count of at least 1 and arm 0");
+  }
+  const char *bai_env = getenv("PEG_SIM_BAI");
+  bai_sampling_rule_t bai_rule = BAI_SAMPLING_RULE_ROUND_ROBIN;
+  double bai_scond = 0;
+  uint64_t bai_min = 1;
+  if (bai_env != NULL) {
+    StringSplitter *bai_fields = split_string(bai_env, ',', true);
+    if (string_splitter_get_number_of_items(bai_fields) != 3) {
+      log_fatal("PEG_SIM_BAI must be RULE,SCOND,MIN");
+    }
+    const char *rule = string_splitter_get_item(bai_fields, 0);
+    if (strings_equal(rule, BAI_SAMPLING_RULE_TOP_TWO_IDS_STRING)) {
+      bai_rule = BAI_SAMPLING_RULE_TOP_TWO_IDS;
+    } else if (!strings_equal(rule, BAI_SAMPLING_RULE_ROUND_ROBIN_STRING)) {
+      log_fatal("PEG_SIM_BAI rule must be rr or tt");
+    }
+    bai_scond = strtod(string_splitter_get_item(bai_fields, 1), NULL);
+    bai_min = strtoull(string_splitter_get_item(bai_fields, 2), NULL, 10);
+    string_splitter_destroy(bai_fields);
+    if (bai_scond <= 0 || bai_scond >= 100 || bai_min < 1) {
+      log_fatal("PEG_SIM_BAI needs 0 < SCOND < 100 and MIN >= 1");
+    }
+  }
   // Roots already in the output are done.
   char *out_path = get_formatted_string("%s.sim.csv", prefix);
   int done_capacity = 64, num_done = 0;
@@ -2403,6 +2446,11 @@ void peg_sim_mode(const StringSplitter *fields) {
   MoveList *wide = move_list_create(PEG_WORLD_ALL_PLACEMENTS_CAP);
   Move *wide_moves = malloc_or_die(sizeof(Move) * PEG_WORLD_ALL_PLACEMENTS_CAP);
   MoveList *pool = move_list_create(max_candidates);
+  MoveList *sub_pool = move_list_create(max_candidates);
+  // Arm 0's ranking of the candidates (static ranks, best first).
+  int *static_order = malloc_or_die(sizeof(int) * (size_t)max_candidates);
+  double *static_utility =
+      malloc_or_die(sizeof(double) * (size_t)max_candidates);
   SimResults *results = sim_results_create(0.0);
   StringBuilder *name = string_builder_create();
   char *path = get_formatted_string("%s.positions.csv", data);
@@ -2454,6 +2502,18 @@ void peg_sim_mode(const StringSplitter *fields) {
       const double time_limit = arm == 2   ? arm_seconds[1]
                                 : arm == 5 ? arm_seconds[3]
                                            : 0.0;
+      const MoveList *sim_pool = pool;
+      if (prefilter > 0 && (arm == 1 || arm == 3 || arm == 4)) {
+        move_list_reset(sub_pool);
+        for (int idx = 0; idx < prefilter && idx < cands; idx++) {
+          move_list_add_move(sub_pool,
+                             move_list_get_move(pool, static_order[idx]));
+        }
+        sim_pool = sub_pool;
+      }
+      const int sim_cands = move_list_get_count(sim_pool);
+      const bool use_bai =
+          bai_env != NULL && (arm == 1 || arm == 3 || arm == 4);
       int64_t calls1_before, calls2_before, calls1_after, calls2_after;
       double ms1_before, ms2_before, ms1_after, ms2_after;
       peg_sim_chooser_totals(net, chooser, &calls1_before, &ms1_before,
@@ -2463,13 +2523,15 @@ void peg_sim_mode(const StringSplitter *fields) {
       SimArgs sim_args;
       const uint64_t max_iterations =
           timed ? UINT64_C(1000000000000000)
-                : (uint64_t)iterations * (uint64_t)cands;
-      sim_args_fill(plies, pool, cands, NULL, config_get_win_pcts(config), NULL,
-                    control, root, false, false, threads, 0, cands, plies,
-                    base_seed + (uint64_t)root_id, max_iterations, 1, 0.0,
-                    BAI_THRESHOLD_NONE, time_limit,
-                    BAI_SAMPLING_RULE_ROUND_ROBIN, 0.0, 1.0, 0.5, 100.0, false,
-                    NULL, &sim_args);
+                : (uint64_t)iterations * (uint64_t)sim_cands;
+      sim_args_fill(
+          plies, sim_pool, sim_cands, NULL, config_get_win_pcts(config), NULL,
+          control, root, false, false, threads, 0, sim_cands, plies,
+          base_seed + (uint64_t)root_id, max_iterations, use_bai ? bai_min : 1,
+          use_bai ? bai_scond : 0.0,
+          use_bai ? BAI_THRESHOLD_GK16 : BAI_THRESHOLD_NONE, time_limit,
+          use_bai ? bai_rule : BAI_SAMPLING_RULE_ROUND_ROBIN, 0.0, 1.0, 0.5,
+          100.0, false, NULL, &sim_args);
       sim_args.bag_cycle = false;
       sim_args.pat_rollout_disabled = true;
       if (hooks[arm].nets || hooks[arm].endgame != NULL ||
@@ -2488,7 +2550,7 @@ void peg_sim_mode(const StringSplitter *fields) {
         eg_capped_before += endgame.capped[worker];
       }
       const int64_t start = ctimer_monotonic_ns();
-      if (cands > 1) {
+      if (sim_cands > 1) {
         simulate_without_ctx(&sim_args, results, errors);
       }
       const double seconds = (double)(ctimer_monotonic_ns() - start) / 1e9;
@@ -2508,11 +2570,12 @@ void peg_sim_mode(const StringSplitter *fields) {
         eg_capped += endgame.capped[worker];
       }
       // Each simmed play's static rank, by its text.
-      int best_rank = 0;
+      int best_rank = sim_pool == pool ? 0 : static_order[0];
       double best_utility = NAN, best_win = NAN, best_equity = NAN;
       const int best_index =
-          cands > 1 ? sim_results_get_best_move_index(results) : -1;
-      for (int play_idx = 0; play_idx < (cands > 1 ? cands : 0); play_idx++) {
+          sim_cands > 1 ? sim_results_get_best_move_index(results) : -1;
+      for (int play_idx = 0; play_idx < (sim_cands > 1 ? sim_cands : 0);
+           play_idx++) {
         const SimmedPlay *simmed_play =
             sim_results_get_simmed_play(results, play_idx);
         string_builder_clear(name);
@@ -2546,6 +2609,28 @@ void peg_sim_mode(const StringSplitter *fields) {
           best_win = win;
           best_equity = equity;
         }
+        if (arm == 0) {
+          static_utility[rank] = stat_get_mean(utility);
+        }
+      }
+      if (arm == 0) {
+        // Best first; equal utilities in static order.
+        for (int idx = 0; idx < cands; idx++) {
+          static_order[idx] = idx;
+          if (cands == 1) {
+            static_utility[idx] = 0;
+          }
+        }
+        for (int idx = 1; idx < cands; idx++) {
+          const int moved = static_order[idx];
+          int slot = idx;
+          while (slot > 0 && static_utility[static_order[slot - 1]] <
+                                 static_utility[moved]) {
+            static_order[slot] = static_order[slot - 1];
+            slot--;
+          }
+          static_order[slot] = moved;
+        }
       }
       string_builder_clear(name);
       string_builder_add_move(name, game_get_board(root),
@@ -2555,8 +2640,9 @@ void peg_sim_mode(const StringSplitter *fields) {
           output,
           "%d,%d,%d,%d,%.9g,%.9g,%.9g,%llu,%.9g,%lld,%.9g,%lld,%.9g,%lld,"
           "%.9g,%lld,\"%s\"\n",
-          root_id, arm, best_rank, cands, best_utility, best_win, best_equity,
-          (unsigned long long)(cands > 1
+          root_id, arm, best_rank, sim_cands, best_utility, best_win,
+          best_equity,
+          (unsigned long long)(sim_cands > 1
                                    ? sim_results_get_iteration_count(results)
                                    : 0),
           1000.0 * seconds, (long long)(calls1_after - calls1_before),
@@ -2577,6 +2663,9 @@ void peg_sim_mode(const StringSplitter *fields) {
   string_builder_destroy(name);
   sim_results_destroy(results);
   move_list_destroy(pool);
+  move_list_destroy(sub_pool);
+  free(static_order);
+  free(static_utility);
   move_list_destroy(wide);
   free(wide_moves);
   error_stack_destroy(errors);
@@ -2591,6 +2680,197 @@ void peg_sim_mode(const StringSplitter *fields) {
     fclose(samples.out);
     free(samples.start_ns);
   }
+}
+
+// ---- MAGPIE's BAI replayed on recorded rollouts (pegsimbai) -----------------
+typedef struct PegSimRecordedSample {
+  uint64_t seed;
+  double utility;
+  int root;
+  int rank;
+} PegSimRecordedSample;
+
+static int peg_sim_recorded_sample_compare(const void *left,
+                                           const void *right) {
+  const PegSimRecordedSample *a = left;
+  const PegSimRecordedSample *b = right;
+  if (a->root != b->root) {
+    return a->root < b->root ? -1 : 1;
+  }
+  if (a->rank != b->rank) {
+    return a->rank < b->rank ? -1 : 1;
+  }
+  if (a->seed != b->seed) {
+    return a->seed < b->seed ? -1 : 1;
+  }
+  return 0;
+}
+
+// The recorded rollouts of one arm (PEG_SIM_SAMPLES layout), sorted by root,
+// candidate and seed; *count of them.
+static PegSimRecordedSample *peg_sim_read_samples(const char *path, int arm,
+                                                  size_t *count) {
+  FILE *in = fopen_or_die(path, "rb");
+  int64_t bytes;
+  const int64_t record_bytes = PEG_SIM_SAMPLE_WORDS * sizeof(uint32_t);
+  if (!cfile_stream_size(in, &bytes) || bytes % record_bytes != 0) {
+    log_fatal("pegsimbai cannot size %s", path);
+  }
+  const size_t records = (size_t)(bytes / record_bytes);
+  uint32_t *chunk = malloc_or_die(sizeof(uint32_t) * PEG_SIM_SAMPLE_WORDS *
+                                  PEG_SIM_SAMPLE_READ_CHUNK);
+  PegSimRecordedSample *samples =
+      malloc_or_die(sizeof(PegSimRecordedSample) * (records > 0 ? records : 1));
+  size_t kept = 0;
+  for (size_t done = 0; done < records;) {
+    const size_t take = records - done < PEG_SIM_SAMPLE_READ_CHUNK
+                            ? records - done
+                            : PEG_SIM_SAMPLE_READ_CHUNK;
+    if (!fread_le_uint32s(chunk, PEG_SIM_SAMPLE_WORDS * take, in)) {
+      log_fatal("pegsimbai could not read %s", path);
+    }
+    for (size_t idx = 0; idx < take; idx++) {
+      const uint32_t *record = &chunk[PEG_SIM_SAMPLE_WORDS * idx];
+      if ((int)(record[1] >> 8) != arm) {
+        continue;
+      }
+      const uint64_t bits = record[4] | ((uint64_t)record[5] << 32);
+      PegSimRecordedSample *sample = &samples[kept++];
+      sample->root = (int)record[0];
+      sample->rank = (int)(record[1] & 255);
+      sample->seed = record[2] | ((uint64_t)record[3] << 32);
+      memcpy(&sample->utility, &bits, sizeof(bits));
+    }
+    done += take;
+  }
+  free(chunk);
+  fclose(in);
+  qsort(samples, kept, sizeof(PegSimRecordedSample),
+        peg_sim_recorded_sample_compare);
+  *count = kept;
+  return samples;
+}
+
+void peg_sim_bai_replay_mode(const StringSplitter *fields) {
+  const int n_fields = string_splitter_get_number_of_items(fields);
+  if (n_fields < 4) {
+    log_fatal("pegsimbai needs a samples file, an output file and schemes "
+              "NAME=RULE,SCOND,MIN,LIMIT");
+  }
+  const char *arm_env = getenv("PEG_SIM_BAI_ARM");
+  const int arm = arm_env != NULL ? atoi(arm_env) : 3;
+  size_t count;
+  PegSimRecordedSample *samples =
+      peg_sim_read_samples(string_splitter_get_item(fields, 1), arm, &count);
+  FILE *out = fopen_exclusive_or_die(string_splitter_get_item(fields, 2), "w");
+  fprintf(out, "root,scheme,pick,status,rollouts,samples\n");
+  const int n_schemes = n_fields - 3;
+  char **names = malloc_or_die(sizeof(char *) * (size_t)n_schemes);
+  BAIOptions *options = malloc_or_die(sizeof(BAIOptions) * (size_t)n_schemes);
+  for (int scheme = 0; scheme < n_schemes; scheme++) {
+    const char *text = string_splitter_get_item(fields, 3 + scheme);
+    StringSplitter *named = split_string(text, '=', true);
+    if (string_splitter_get_number_of_items(named) != 2) {
+      log_fatal("pegsimbai scheme %s is not NAME=RULE,SCOND,MIN,LIMIT", text);
+    }
+    names[scheme] = string_duplicate(string_splitter_get_item(named, 0));
+    StringSplitter *parts =
+        split_string(string_splitter_get_item(named, 1), ',', true);
+    if (string_splitter_get_number_of_items(parts) != 4) {
+      log_fatal("pegsimbai scheme %s is not NAME=RULE,SCOND,MIN,LIMIT", text);
+    }
+    const char *rule = string_splitter_get_item(parts, 0);
+    const double scond = strtod(string_splitter_get_item(parts, 1), NULL);
+    options[scheme] = (BAIOptions){
+        .sampling_rule =
+            strings_equal(rule, BAI_SAMPLING_RULE_TOP_TWO_IDS_STRING)
+                ? BAI_SAMPLING_RULE_TOP_TWO_IDS
+                : BAI_SAMPLING_RULE_ROUND_ROBIN,
+        .threshold = BAI_THRESHOLD_GK16,
+        .delta = 1.0 - scond / 100.0,
+        .sample_minimum =
+            strtoull(string_splitter_get_item(parts, 2), NULL, 10),
+        .sample_limit = strtoull(string_splitter_get_item(parts, 3), NULL, 10),
+        .time_limit_seconds = 0,
+        .num_threads = 1,
+        .cutoff = 0,
+        .draws_per_sample = 1,
+    };
+    if ((!strings_equal(rule, BAI_SAMPLING_RULE_TOP_TWO_IDS_STRING) &&
+         !strings_equal(rule, BAI_SAMPLING_RULE_ROUND_ROBIN_STRING)) ||
+        scond <= 0 || scond >= 100 || options[scheme].sample_minimum < 1 ||
+        options[scheme].sample_limit < 1) {
+      log_fatal("pegsimbai scheme %s is invalid", text);
+    }
+    string_splitter_destroy(parts);
+    string_splitter_destroy(named);
+  }
+  ThreadControl *control = thread_control_create();
+  BAIResult *bai_result = bai_result_create();
+  StringBuilder *taken = string_builder_create();
+  int n_boards = 0;
+  for (size_t lo = 0; lo < count;) {
+    size_t hi = lo;
+    while (hi < count && samples[hi].root == samples[lo].root) {
+      hi++;
+    }
+    const int root_id = samples[lo].root;
+    const int n_cands = samples[hi - 1].rank + 1;
+    const size_t per_cand = (hi - lo) / (size_t)n_cands;
+    if (per_cand * (size_t)n_cands != hi - lo) {
+      log_fatal("pegsimbai root %d: unequal rollouts per candidate", root_id);
+    }
+    double *table = malloc_or_die(sizeof(double) * (hi - lo));
+    for (size_t idx = lo; idx < hi; idx++) {
+      const size_t offset = idx - lo;
+      if (samples[idx].rank != (int)(offset / per_cand) ||
+          samples[idx].seed != samples[lo + offset % per_cand].seed) {
+        log_fatal("pegsimbai root %d: candidates do not share worlds", root_id);
+      }
+      table[offset] = samples[idx].utility;
+    }
+    uint64_t *draws = malloc_or_die(sizeof(uint64_t) * (size_t)n_cands);
+    for (int scheme = 0; scheme < n_schemes; scheme++) {
+      const RandomVariablesArgs rv_args = {
+          .type = RANDOM_VARIABLES_TABLE,
+          .num_rvs = (uint64_t)n_cands,
+          .num_samples = per_cand,
+          .samples = table,
+          .table_draws = draws,
+      };
+      RandomVariables *rvs = rvs_create(&rv_args);
+      thread_control_set_status(control, THREAD_CONTROL_STATUS_STARTED);
+      bai(&options[scheme], rvs, control, NULL, bai_result);
+      uint64_t total = 0;
+      string_builder_clear(taken);
+      for (int cand = 0; cand < n_cands; cand++) {
+        string_builder_add_formatted_string(taken, "%s%llu",
+                                            cand > 0 ? ";" : "",
+                                            (unsigned long long)draws[cand]);
+        total += draws[cand];
+      }
+      fprintf(out, "%d,%s,%d,%d,%llu,%s\n", root_id, names[scheme],
+              bai_result_get_best_arm(bai_result),
+              (int)bai_result_get_status(bai_result), (unsigned long long)total,
+              string_builder_peek(taken));
+      rvs_destroy(rvs);
+    }
+    free(draws);
+    free(table);
+    n_boards++;
+    lo = hi;
+  }
+  printf("pegsimbai: %d boards, %d schemes\n", n_boards, n_schemes);
+  fclose(out);
+  string_builder_destroy(taken);
+  bai_result_destroy(bai_result);
+  thread_control_destroy(control);
+  for (int scheme = 0; scheme < n_schemes; scheme++) {
+    free(names[scheme]);
+  }
+  free(names);
+  free(options);
+  free(samples);
 }
 
 // pegbudget arms (codes in PREFIX.pegb.csv; b = the budget's index).

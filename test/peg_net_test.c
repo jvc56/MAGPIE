@@ -90,6 +90,8 @@ void peg_net_test_run_spec(const char *spec) {
     peg3_exact_eval_mode(fields);
   } else if (strings_equal(mode, "pegsim")) {
     peg_sim_mode(fields);
+  } else if (strings_equal(mode, "pegsimbai")) {
+    peg_sim_bai_replay_mode(fields);
   } else if (strings_equal(mode, "pegnpos")) {
     peg_positions_mode(fields);
   } else if (strings_equal(mode, "peg3oracle")) {
