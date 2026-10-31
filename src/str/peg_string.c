@@ -734,6 +734,18 @@ static char *peg_bound_text(double win_pct) {
   return get_formatted_string("<=%.*f", decimals, pct);
 }
 
+// A play's win% for a table: the most a cut play could reach, "-" for one a
+// time limit left unscored, or the win%. Caller frees.
+static char *peg_win_pct_text(bool cut, double win_pct) {
+  if (cut) {
+    return peg_bound_text(win_pct);
+  }
+  if (win_pct < 0.0) {
+    return string_duplicate("-");
+  }
+  return get_formatted_string("%.1f", 100.0 * win_pct);
+}
+
 // True when any of the first n candidates has a known mean spread.
 static bool peg_any_spread_known(const PegRankedCand *cands, int n) {
   for (int cand_idx = 0; cand_idx < n; cand_idx++) {
@@ -881,9 +893,7 @@ static void peg_append_graded_table(StringBuilder *sb, const PegResult *result,
                     : get_formatted_string("%" PRId64, cand->weight_sum -
                                                            cand->win_count -
                                                            cand->tie_count);
-      winc[n_rows] = cand->cut
-                         ? peg_bound_text(cand->win_pct)
-                         : get_formatted_string("%.1f", 100.0 * cand->win_pct);
+      winc[n_rows] = peg_win_pct_text(cand->cut, cand->win_pct);
       spreadc[n_rows] = cand->spread_unknown
                             ? string_duplicate("-")
                             : get_formatted_string("%+.1f", cand->mean_spread);
@@ -1192,10 +1202,8 @@ static void peg_append_flat_ranking(StringBuilder *sb, const PegResult *result,
                          cand->cut
                              ? string_duplicate("-")
                              : get_formatted_string("%" PRId64, loss_count));
-    string_grid_set_cell(
-        sg, row, winpct_col,
-        cand->cut ? peg_bound_text(cand->win_pct)
-                  : get_formatted_string("%.1f", 100.0 * cand->win_pct));
+    string_grid_set_cell(sg, row, winpct_col,
+                         peg_win_pct_text(cand->cut, cand->win_pct));
     if (spread_col >= 0) {
       string_grid_set_cell(
           sg, row, spread_col,
@@ -1540,7 +1548,9 @@ static char *peg_best_text(const PegRankedCand *cand, const Board *board,
                            const LetterDistribution *ld, bool estimate) {
   StringBuilder *text_sb = string_builder_create();
   string_builder_add_move(text_sb, board, &cand->move, ld, false);
-  if (estimate) {
+  if (!cand->cut && cand->win_pct < 0.0) {
+    string_builder_add_string(text_sb, "  not scored");
+  } else if (estimate) {
     string_builder_add_formatted_string(text_sb, "  %.1f%% (greedy)",
                                         100.0 * cand->win_pct);
   } else if (cand->cut) {

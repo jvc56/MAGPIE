@@ -165,8 +165,11 @@ finish in 3 minutes, one took 330 s and one ran past 15 minutes (2 plies:
   from the mover's view. Its choice is scored on the scenario's actual racks
   (`nested_score_actual`).
 - The complete solve nests to depth 24 (`PEG_MAX_NEST_DEPTH`), over every
-  inner candidate (up to `PEG_NEST_FIELD_MAX`, 64) and every inner scenario
-  (stride 1). Its inner endgames are `-pegplies` deep. The cascade keeps the
+  inner candidate (up to `PEG_NEST_FIELD_MAX`, 64) and every set of tiles an
+  inner draw can take, weighted by its orderings (stride 1). What a nested
+  draw leaves in the bag is one sorted order, so with two or more tiles left
+  there the order of those tiles is not enumerated. Its inner endgames are
+  `-pegplies` deep. The cascade keeps the
   cheaper schedule: depth 1, caps 8/4/2, and inner strides by bag size.
 - `-pegndepth`, `-pegncaps` and `-pegnstrides` apply to `peg` and `analyze`
   as well as autoplay. Once given, they override either schedule.

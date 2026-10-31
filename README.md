@@ -691,10 +691,11 @@ descriptions:
   **staged cascade**: stage 0 greedy-evaluates every candidate, and each
   halving stage keeps the best of them and re-ranks them at one more ply of
   endgame depth. It returns the best answer it has when the limit hits, from
-  the last completed stage. An explicit `-pegtopk` also runs the cascade.
+  the last completed stage; a play the limit left unscored shows `-`. An
+  explicit `-pegtopk` also runs the cascade.
 - `-pegtopk <count1>,<count2>,...` sets the cascade's per-stage counts
   (default `32,16,8,4,2`); `all` (or `0`) keeps every candidate in one deep
-  stage.
+  stage, and `default` undoes an earlier `-pegtopk`.
 - `-pegpess false` switches to a **rational** opponent, which chooses its
   reply from what it can see; its choice is then scored on the actual racks.
 - `-pegndepth`, `-pegncaps` and `-pegnstrides` set how far, how wide and how

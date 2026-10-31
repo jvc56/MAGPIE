@@ -224,6 +224,14 @@ static void test_peg_status_string(const Game *game, const Move *move) {
   assert(!has_substring(status, "estimate"));
   free(status);
 
+  // A time limit can leave every candidate unscored, which is not a -100%.
+  snap->baseline_entries[0].win_pct = -1.0;
+  status = peg_snapshot_get_status_string(snap, game, now_ns, NULL, 0);
+  assert(has_substring(status, "  not scored\n"));
+  assert(!has_substring(status, "-100.0"));
+  free(status);
+  snap->baseline_entries[0].win_pct = 1.0;
+
   // With outcomes, the ranking has an outcomes column: each candidate's
   // draws, here a win drawing A and a loss drawing E.
   PegPerScenario rows[2] = {0};

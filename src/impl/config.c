@@ -123,6 +123,11 @@ enum {
   // default that settings files record changes, and list the setting in
   // config_stale_settings.
   CONFIG_SETTINGS_VERSION = 2,
+  // The table types that can be auto (WMP, WIT, RIT), and the most tables a
+  // load weighs: two of each, and a wordmap each player's rack info table needs
+  // and neither player loads.
+  CONFIG_AUTO_TABLE_ROLES = 3,
+  CONFIG_AUTO_TABLE_MAX = 8,
 };
 
 typedef void (*command_exec_func_t)(Config *, ErrorStack *);
@@ -154,6 +159,14 @@ struct Config {
   // The last line config_choose_auto_tables printed, so it says it again only
   // when what it decided changes.
   char *auto_table_report;
+  // Per table type and player, the key of the table auto last left out
+  // (config_table_left_out_key), so it is passed over, unread and unsaid,
+  // until something about it changes.
+  char *table_left_out[NUMBER_OF_DATA][2];
+  // Per table type and player, the key of the table last checked against the
+  // player's lexicon and leaves (config_table_check_key), since hashing them
+  // on every command is the cost of a whole lexicon load.
+  char *table_checked[NUMBER_OF_DATA][2];
   // The last peg solve's positionals (the candidate set and the move list,
   // NULL when not given), so that `peg resume` repeats them.
   char *peg_last_set_str;
@@ -2333,7 +2346,9 @@ static void help_entry_fill(const Config *config, int token,
           "play; each count is how many top plays are then KEPT and re-ranked "
           "at the next ply of fidelity (e.g. 32,16,8,4,2 keeps the top 32 "
           "after "
-          "stage 0, then narrows 16/8/4/2 across the halving stages). A single "
+          "stage 0, then narrows 16/8/4/2 across the halving stages). "
+          "'default' goes back to no override, as if -pegtopk had not been "
+          "given. A single "
           "'all' (or 0) is the EXHAUSTIVE setting: keep every candidate and "
           "solve each in one deep stage, its endgames -pegplies deep, with "
           "full scenario enumeration (ignores -pegstride). Realistic at "
@@ -4719,6 +4734,12 @@ static void config_load_peg_stage_top_k(Config *config,
   if (!value) {
     return;
   }
+  // "default" undoes an earlier -pegtopk, which the settings would otherwise
+  // keep: "all" and 0 name the exhaustive stage, not the default.
+  if (strcmp(value, "default") == 0) {
+    config->peg_num_stages = 0;
+    return;
+  }
   StringSplitter *split = split_string(value, ',', true);
   const int n = string_splitter_get_number_of_items(split);
   if (n < 1 || n > CONFIG_PEG_MAX_STAGES) {
@@ -4808,7 +4829,7 @@ void config_fill_peg_args(Config *config, PegArgs *peg_args) {
     num_stages = 1;
   }
   // The nested schedule. A complete solve uses every inner candidate (up to
-  // PEG_NEST_FIELD_MAX), every inner scenario, inner endgames -pegplies deep
+  // PEG_NEST_FIELD_MAX), every inner draw, inner endgames -pegplies deep
   // like its outer ones, and nesting until the game resolves. The cascade
   // keeps the cheaper schedule. Either way -pegncaps, -pegndepth and
   // -pegnstrides, once given, decide.
@@ -7862,21 +7883,22 @@ typedef struct ConfigTableKind {
   data_filepath_t file_type;
   contribute_table_role_t role;
   const char *speedup;
+  const char *noun;
 } ConfigTableKind;
 
 static ConfigTableKind config_table_kind(players_data_t type) {
   switch (type) {
   case PLAYERS_DATA_TYPE_WMP:
     return (ConfigTableKind){DATA_FILEPATH_TYPE_WORDMAP, CONTRIBUTE_TABLE_WMP,
-                             "move generation 3-4 times faster"};
+                             "move generation 3-4 times faster", "wordmap"};
   case PLAYERS_DATA_TYPE_WIT:
     return (ConfigTableKind){DATA_FILEPATH_TYPE_WORD_INFO_TABLE,
-                             CONTRIBUTE_TABLE_WIT,
-                             "simulation about 9% faster"};
+                             CONTRIBUTE_TABLE_WIT, "simulation about 9% faster",
+                             "word info table"};
   default:
     return (ConfigTableKind){DATA_FILEPATH_TYPE_RACK_INFO_TABLE,
                              CONTRIBUTE_TABLE_RIT,
-                             "simulation about 17% faster"};
+                             "simulation about 17% faster", "rack info table"};
   }
 }
 
@@ -8305,15 +8327,14 @@ config_choose_auto_tables(Config *config, const char *const lexicons[2],
   const data_filepath_t file_types[] = {DATA_FILEPATH_TYPE_WORDMAP,
                                         DATA_FILEPATH_TYPE_WORD_INFO_TABLE,
                                         DATA_FILEPATH_TYPE_RACK_INFO_TABLE};
-  enum { NUM_ROLES = 3, MAX_TABLES = 8 };
-  ContributeTable tables[MAX_TABLES];
-  int table_of[NUM_ROLES][2];
+  ContributeTable tables[CONFIG_AUTO_TABLE_MAX];
+  int table_of[CONFIG_AUTO_TABLE_ROLES][2];
   // Auto and wanted by this load (leave generation goes without a rack info
   // table).
-  bool wanted[NUM_ROLES][2];
+  bool wanted[CONFIG_AUTO_TABLE_ROLES][2];
   int count = 0;
   bool any_auto = false;
-  for (int role_idx = 0; role_idx < NUM_ROLES; role_idx++) {
+  for (int role_idx = 0; role_idx < CONFIG_AUTO_TABLE_ROLES; role_idx++) {
     for (int player_idx = 0; player_idx < 2; player_idx++) {
       table_of[role_idx][player_idx] = -1;
       const players_data_t type = types[role_idx];
@@ -8433,7 +8454,7 @@ config_choose_auto_tables(Config *config, const char *const lexicons[2],
       config->data_paths, CONFIG_AUTO_TABLE_MANIFEST_FILENAME);
   ContributeTableManifest *manifest =
       contribute_table_manifest_read(manifest_path);
-  int order[MAX_TABLES];
+  int order[CONFIG_AUTO_TABLE_MAX];
   contribute_choose_tables(tables, count, &budget, manifest, order);
   contribute_table_manifest_destroy(manifest);
   contribute_tables_touch_used(manifest_path, tables, count);
@@ -8447,7 +8468,7 @@ config_choose_auto_tables(Config *config, const char *const lexicons[2],
     }
     StringBuilder *used = string_builder_create();
     StringBuilder *skipped = string_builder_create();
-    for (int role_idx = 0; role_idx < NUM_ROLES; role_idx++) {
+    for (int role_idx = 0; role_idx < CONFIG_AUTO_TABLE_ROLES; role_idx++) {
       const players_data_t type = types[role_idx];
       if (!wanted[role_idx][player_idx]) {
         continue;
@@ -8675,24 +8696,220 @@ static const char *config_rack_info_table_for_first_use(
   return rit_name;
 }
 
+// The player's lexicon and leaves, for the keys below. The caller frees.
+static char *config_player_inputs_text(const Config *config, int player_idx) {
+  const PlayersData *players_data = config->players_data;
+  return get_formatted_string(
+      "%s %s",
+      players_data_get_data_name(players_data, PLAYERS_DATA_TYPE_KWG,
+                                 player_idx),
+      players_data_get_data_name(players_data, PLAYERS_DATA_TYPE_KLV,
+                                 player_idx));
+}
+
+// What a table auto left out is known by: its name, the lexicon and leaves it
+// was for, and its file as it stands. A change to any of them is worth another
+// try. The caller frees.
+static char *config_table_left_out_key(const Config *config,
+                                       players_data_t type, int player_idx,
+                                       const char *name) {
+  ErrorStack *errors = error_stack_create();
+  char *path = data_filepaths_get_readable_filename(
+      config->data_paths, name, config_table_kind(type).file_type, errors);
+  CFileIdentity identity = {0};
+  if (error_stack_is_empty(errors)) {
+    (void)cfile_identity(path, &identity);
+  }
+  free(path);
+  error_stack_destroy(errors);
+  char *inputs = config_player_inputs_text(config, player_idx);
+  char *key = get_formatted_string(
+      "%s %s %" PRId64 " %" PRId64 " %ld", name, inputs, identity.size,
+      identity.mtime_seconds, identity.mtime_nanoseconds);
+  free(inputs);
+  return key;
+}
+
+// Says why `*names[player_idx]` goes unused, and clears it, and the other
+// player's if they share it under auto, remembering each so the next load
+// passes it over.
+static void config_leave_out_table(Config *config, players_data_t type,
+                                   const char **names[2], int player_idx,
+                                   const char *why) {
+  const char *name = *names[player_idx];
+  thread_control_print_formatted(config->thread_control,
+                                 "playing without the %s %s: %s\n",
+                                 config_table_kind(type).noun, name, why);
+  for (int other_idx = 0; other_idx < 2; other_idx++) {
+    if (!*names[other_idx] || !strings_equal(*names[other_idx], name) ||
+        !config->table_auto[type][other_idx]) {
+      continue;
+    }
+    free(config->table_left_out[type][other_idx]);
+    config->table_left_out[type][other_idx] =
+        config_table_left_out_key(config, type, other_idx, name);
+    if (other_idx != player_idx) {
+      *names[other_idx] = NULL;
+    }
+  }
+  *names[player_idx] = NULL;
+}
+
+// Clears each name that is the table auto last left out, and has not changed.
+static void config_skip_left_out_tables(const Config *config,
+                                        players_data_t type,
+                                        const char **names[2]) {
+  for (int player_idx = 0; player_idx < 2; player_idx++) {
+    const char *left_out = config->table_left_out[type][player_idx];
+    if (!*names[player_idx] || !left_out ||
+        !config->table_auto[type][player_idx]) {
+      continue;
+    }
+    char *key =
+        config_table_left_out_key(config, type, player_idx, *names[player_idx]);
+    if (strings_equal(key, left_out)) {
+      *names[player_idx] = NULL;
+    }
+    free(key);
+  }
+}
+
+// The player whose auto table cannot be loaded, tried alone, or -1.
+static int config_failing_auto_table(Config *config, players_data_t type,
+                                     const char **names[2], bool use_mmap) {
+  for (int player_idx = 0; player_idx < 2; player_idx++) {
+    if (!*names[player_idx] || !config->table_auto[type][player_idx]) {
+      continue;
+    }
+    ErrorStack *errors = error_stack_create();
+    players_data_set(config->players_data, type, config->data_paths,
+                     player_idx == 0 ? *names[0] : NULL,
+                     player_idx == 1 ? *names[1] : NULL, use_mmap, errors);
+    const bool failed = !error_stack_is_empty(errors);
+    error_stack_destroy(errors);
+    if (failed) {
+      return player_idx;
+    }
+  }
+  return -1;
+}
+
+// Loads the tables `names` gives. Auto means use it if it can be used, so one
+// that cannot be loaded, such as an old version or a damaged file, is left out
+// like one this machine has no room for; any other failure is an error.
+static void config_load_tables_or_leave_out(Config *config, players_data_t type,
+                                            const char **names[2],
+                                            bool use_mmap,
+                                            ErrorStack *error_stack) {
+  config_skip_left_out_tables(config, type, names);
+  while (true) {
+    players_data_set(config->players_data, type, config->data_paths, *names[0],
+                     *names[1], use_mmap, error_stack);
+    if (error_stack_is_empty(error_stack)) {
+      return;
+    }
+    const int failing =
+        config_failing_auto_table(config, type, names, use_mmap);
+    if (failing < 0) {
+      return;
+    }
+    char *error = error_stack_get_string_and_reset(error_stack);
+    config_leave_out_table(config, type, names, failing, trim(error));
+    free(error);
+  }
+}
+
+// What a table was checked with: the table loaded, and the player's lexicon
+// and leaves. The caller frees.
+static char *config_table_check_key(const Config *config, players_data_t type,
+                                    int player_idx) {
+  char *inputs = config_player_inputs_text(config, player_idx);
+  char *key = get_formatted_string(
+      "%p %s", players_data_get_data(config->players_data, type, player_idx),
+      inputs);
+  free(inputs);
+  return key;
+}
+
+static bool config_table_check_is_current(const Config *config,
+                                          players_data_t type, int player_idx) {
+  const char *checked = config->table_checked[type][player_idx];
+  if (!checked) {
+    return false;
+  }
+  char *key = config_table_check_key(config, type, player_idx);
+  const bool current = strings_equal(key, checked);
+  free(key);
+  return current;
+}
+
+static void config_record_table_check(Config *config, players_data_t type,
+                                      int player_idx) {
+  free(config->table_checked[type][player_idx]);
+  config->table_checked[type][player_idx] =
+      config_table_check_key(config, type, player_idx);
+}
+
+// A word info table built from another lexicon's KWG describes other words.
+// One set to auto is dropped, said in a line, and its name cleared; one set to
+// true is an error.
+static void config_drop_mismatched_word_info_tables(Config *config,
+                                                    const char **wit_names[2],
+                                                    ErrorStack *error_stack) {
+  bool dropped = false;
+  for (int player_idx = 0; player_idx < 2; player_idx++) {
+    if (config_table_check_is_current(config, PLAYERS_DATA_TYPE_WIT,
+                                      player_idx)) {
+      continue;
+    }
+    if (players_data_wit_matches_kwg(config->players_data, player_idx)) {
+      config_record_table_check(config, PLAYERS_DATA_TYPE_WIT, player_idx);
+      continue;
+    }
+    if (!*wit_names[player_idx]) {
+      continue;
+    }
+    if (!config->table_auto[PLAYERS_DATA_TYPE_WIT][player_idx]) {
+      players_data_validate_word_info_tables(config->players_data, error_stack);
+      return;
+    }
+    config_leave_out_table(
+        config, PLAYERS_DATA_TYPE_WIT, wit_names, player_idx,
+        "it was built from another lexicon (delete the .wit file to build it "
+        "again)");
+    dropped = true;
+  }
+  if (dropped) {
+    players_data_set(config->players_data, PLAYERS_DATA_TYPE_WIT,
+                     config->data_paths, *wit_names[0], *wit_names[1], false,
+                     error_stack);
+  }
+}
+
 // A rack info table built from another lexicon or other leaves than its
 // player's holds other words and leave values, whether it records that or only
 // its values show it. One set to auto is dropped, said in a line, and its name
-// in *p1_rit_name or *p2_rit_name cleared; one set to true is an error.
+// in rit_names cleared; one set to true is an error.
 static void config_drop_mismatched_rack_info_tables(Config *config,
-                                                    const char **p1_rit_name,
-                                                    const char **p2_rit_name,
+                                                    const char **rit_names[2],
                                                     ErrorStack *error_stack) {
-  const char **rit_names[2] = {p1_rit_name, p2_rit_name};
   bool dropped = false;
   for (int player_idx = 0; player_idx < 2; player_idx++) {
+    if (config_table_check_is_current(config, PLAYERS_DATA_TYPE_RIT,
+                                      player_idx)) {
+      continue;
+    }
     const bool inputs_match =
         players_data_rit_matches_inputs(config->players_data, player_idx);
     if (inputs_match &&
         players_data_rit_matches_klv(config->players_data, player_idx)) {
+      config_record_table_check(config, PLAYERS_DATA_TYPE_RIT, player_idx);
       continue;
     }
     const char *name = *rit_names[player_idx];
+    if (!name) {
+      continue;
+    }
     if (!config->table_auto[PLAYERS_DATA_TYPE_RIT][player_idx] &&
         inputs_match) {
       const char *leaves = players_data_get_data_name(
@@ -8716,18 +8933,16 @@ static void config_drop_mismatched_rack_info_tables(Config *config,
               name, player_idx + 1));
       return;
     }
-    thread_control_print_formatted(
-        config->thread_control,
-        "playing without the rack info table %s: it was built from another "
-        "lexicon or other leaves (delete the .rit file to build it again)\n",
-        name);
-    *rit_names[player_idx] = NULL;
+    config_leave_out_table(
+        config, PLAYERS_DATA_TYPE_RIT, rit_names, player_idx,
+        "it was built from another lexicon or other leaves (delete the .rit "
+        "file to build it again)");
     dropped = true;
   }
   if (dropped) {
     // The other player's table, if any, is loaded already and kept.
     players_data_set(config->players_data, PLAYERS_DATA_TYPE_RIT,
-                     config->data_paths, *p1_rit_name, *p2_rit_name,
+                     config->data_paths, *rit_names[0], *rit_names[1],
                      config->use_mmap_for_rit, error_stack);
   }
 }
@@ -9038,9 +9253,9 @@ static void config_load_lexicon_dependent_data_internal(
                       : config_wordmap_for_first_use(config, 1, p2_wmp_name,
                                                      table_ld_name, &in_use);
   }
-  players_data_set(config->players_data, PLAYERS_DATA_TYPE_WMP,
-                   config->data_paths, p1_wmp_name, p2_wmp_name, false,
-                   error_stack);
+  const char **wmp_names[2] = {&p1_wmp_name, &p2_wmp_name};
+  config_load_tables_or_leave_out(config, PLAYERS_DATA_TYPE_WMP, wmp_names,
+                                  false, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     free(table_ld_name);
     free(rit_names[0]);
@@ -9069,11 +9284,12 @@ static void config_load_lexicon_dependent_data_internal(
                                                     PLAYERS_DATA_TYPE_KLV, 1),
                          table_ld_name, &in_use);
   }
-  players_data_set(config->players_data, PLAYERS_DATA_TYPE_RIT,
-                   config->data_paths, p1_rit_name, p2_rit_name,
-                   config->use_mmap_for_rit, error_stack);
+  const char **loaded_rit_names[2] = {&p1_rit_name, &p2_rit_name};
+  config_load_tables_or_leave_out(config, PLAYERS_DATA_TYPE_RIT,
+                                  loaded_rit_names, config->use_mmap_for_rit,
+                                  error_stack);
   if (error_stack_is_empty(error_stack)) {
-    config_drop_mismatched_rack_info_tables(config, &p1_rit_name, &p2_rit_name,
+    config_drop_mismatched_rack_info_tables(config, loaded_rit_names,
                                             error_stack);
   }
   if (!error_stack_is_empty(error_stack)) {
@@ -9103,15 +9319,15 @@ static void config_load_lexicon_dependent_data_internal(
   free(rit_names[0]);
   free(rit_names[1]);
   free(table_ld_name);
-  players_data_set(config->players_data, PLAYERS_DATA_TYPE_WIT,
-                   config->data_paths, p1_wit_name, p2_wit_name,
-                   /*use_mmap_for_rit=*/false, error_stack);
+  const char **wit_names[2] = {&p1_wit_name, &p2_wit_name};
+  config_load_tables_or_leave_out(config, PLAYERS_DATA_TYPE_WIT, wit_names,
+                                  /*use_mmap=*/false, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
   // Every data type is now in place; a table that does not match its KWG
   // must not survive the set.
-  players_data_validate_word_info_tables(config->players_data, error_stack);
+  config_drop_mismatched_word_info_tables(config, wit_names, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
@@ -15921,6 +16137,8 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   // its data directory, and gives the system pages it can reclaim.
   config->use_mmap_for_rit = auto_tables && IS_LITTLE_ENDIAN;
   config->auto_table_report = NULL;
+  memset(config->table_left_out, 0, sizeof(config->table_left_out));
+  memset(config->table_checked, 0, sizeof(config->table_checked));
   config->thread_control = thread_control_create();
   config->game = NULL;
   config->game_backup = NULL;
@@ -15973,6 +16191,12 @@ void config_destroy(Config *config) {
   peg_poll_destroy(config->peg_poll);
   free(config->peg_last_set_str);
   free(config->auto_table_report);
+  for (int type = 0; type < NUMBER_OF_DATA; type++) {
+    for (int player_idx = 0; player_idx < 2; player_idx++) {
+      free(config->table_left_out[type][player_idx]);
+      free(config->table_checked[type][player_idx]);
+    }
+  }
   free(config->peg_last_moves_str);
   free(config->p1_rit_name_override);
   free(config->p2_rit_name_override);
@@ -16909,6 +17133,7 @@ static const StaleSetting config_stale_settings[] = {
     {2, ARG_TOKEN_P2_USE_WIT},           {2, ARG_TOKEN_USE_MMAP_FOR_RIT},
     {2, ARG_TOKEN_PEG_NESTED_CAND_CAPS}, {2, ARG_TOKEN_PEG_NESTED_DEPTH},
     {2, ARG_TOKEN_PEG_NESTED_STRIDES},   {2, ARG_TOKEN_ENDGAME_PLIES},
+    {2, ARG_TOKEN_PEG_OUT_WIDTH},
 };
 
 // The arg token whose full name is `name` (without its dash), or

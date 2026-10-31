@@ -93,6 +93,11 @@ void players_data_set_data(PlayersData *players_data,
                            void *data);
 void players_data_validate_word_info_tables(const PlayersData *players_data,
                                             ErrorStack *error_stack);
+// Whether player `player_index`'s word info table, if any, was built from that
+// player's KWG. A table that does not record one cannot be checked, and
+// matches.
+bool players_data_wit_matches_kwg(const PlayersData *players_data,
+                                  int player_index);
 // Whether player `player_index`'s rack info table, if any, was built from
 // that player's lexicon and leaves. A table that records neither (built
 // before version 13) cannot be checked, and matches.

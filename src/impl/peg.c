@@ -380,8 +380,11 @@ void peg_poll_destroy(PegPoll *poll) {
 // can be one of those jobs' endgames: it is for display only.
 static void peg_poll_read_worker_endgame(const PegWorker *worker,
                                          PegDrawStatus *draw) {
-  const EndgameCtx *eg_ctx = worker->eg_ctx;
-  if (eg_ctx == NULL || !endgame_injecting(eg_ctx)) {
+  EndgameCtx *eg_ctx = worker->eg_ctx;
+  uint64_t nodes = 0;
+  int live_workers = 0;
+  if (eg_ctx == NULL ||
+      !endgame_ctx_read_live_workers(eg_ctx, &nodes, &live_workers)) {
     return;
   }
   int ply2_done = 0;
@@ -389,8 +392,8 @@ static void peg_poll_read_worker_endgame(const PegWorker *worker,
   draw->in_endgame = true;
   endgame_ctx_get_progress(eg_ctx, &draw->depth, &draw->root_moves_done,
                            &draw->root_moves_total, &ply2_done, &ply2_total);
-  draw->nodes = endgame_ctx_get_nodes_searched(eg_ctx);
-  draw->helpers = endgame_live_workers(eg_ctx) - 1;
+  draw->nodes = nodes;
+  draw->helpers = live_workers - 1;
 }
 
 // Fills out's draws of the candidate in progress from the poll's: the counts
@@ -4366,11 +4369,14 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
       args->on_stage_start(/*stage_idx=*/0, n_cands, /*inner_d=*/0,
                            /*emptier_plies=*/0, args->user_data);
     }
-    // In a complete solve (the exact early cutoff) the seed only orders the
-    // candidates, so it uses the cheap greedy playout whatever the opponent
-    // model.
+    // The seed uses the cheap greedy playout, whatever the opponent model, in
+    // a complete solve (the exact early cutoff), where it only orders the
+    // candidates, and wherever nesting defines the opponent: the pessimistic
+    // playout tries every reply on every draw, so under a time limit it could
+    // spend the whole budget here, for a model the later stages replace.
     const bool seed_orders_only =
-        args->early_cutoff && args->first_win && exhaustive;
+        (args->early_cutoff && args->first_win && exhaustive) ||
+        (args->nested_enabled && args->nested_pessimistic);
     peg_eval_candidates(
         pool, workers, prepared_base, mover_idx, unseen, ld_size, bag_size,
         moves, n_cands, seed_orders_only ? PEG_OPP_RATIONAL : args->opp_model,
@@ -4746,7 +4752,11 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
         ctx.mover_idx = mover_idx;
         ctx.unseen = unseen;
         ctx.ld_size = ld_size;
-        ctx.opp_model = args->opp_model;
+        // At greedy fidelity, the seed's own playout: these rows then are the
+        // score they detail, and cheap, as the pessimistic one is not.
+        ctx.opp_model = capture_fidelity == 0 && seed_orders_only
+                            ? PEG_OPP_RATIONAL
+                            : args->opp_model;
         ctx.inner_top_k = args->inner_top_k;
         ctx.fidelity_plies = capture_fidelity;
         ctx.scenario_stride = scenario_stride;

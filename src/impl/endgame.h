@@ -376,6 +376,14 @@ void endgame_ctx_get_progress(const EndgameCtx *ctx, int *current_depth,
 // long single-root subtree evaluations.
 uint64_t endgame_ctx_get_nodes_searched(const EndgameCtx *ctx);
 
+// For a thread other than the solve's: reads the nodes searched and the
+// workers running while the solve's helper window is open, and returns whether
+// it was. The window is checked under the lock that frees lent workers, so
+// they stay valid for the read; a window checked first and read after does not
+// keep them.
+bool endgame_ctx_read_live_workers(EndgameCtx *ctx, uint64_t *nodes_searched,
+                                   int *live_workers);
+
 // Snapshot of the line currently being explored by worker `worker_index`
 // (0 = main worker; see conventions above). Writes up to `max_len` `tiny_move`
 // entries into `out_line` and returns the number written (0..max_len). The

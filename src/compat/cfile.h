@@ -136,6 +136,10 @@ typedef struct CFileIdentity {
 
 bool cfile_identity(const char *path, CFileIdentity *identity);
 
+// The full path of the existing file `path`, whatever the current directory
+// later is, or NULL if it cannot be found. The caller frees.
+char *cfile_absolute_path(const char *path);
+
 // The bytes this process may still write to the filesystem holding
 // `directory`, in *free_bytes (capped at INT64_MAX). Returns false if the
 // filesystem cannot be asked.

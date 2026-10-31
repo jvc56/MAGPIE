@@ -1054,6 +1054,26 @@ static void cfile_split_windows_time(LONGLONG ticks, int64_t *seconds,
 }
 #endif
 
+char *cfile_absolute_path(const char *path) {
+#if defined(_WIN32)
+  wchar_t *wide = cwin_wide(path);
+  if (!wide) {
+    return NULL;
+  }
+  const DWORD length = GetFullPathNameW(wide, 0, NULL, NULL);
+  wchar_t *full = length ? malloc(sizeof(wchar_t) * length) : NULL;
+  char *absolute = NULL;
+  if (full && GetFullPathNameW(wide, length, full, NULL) < length) {
+    absolute = cwin_narrow(full);
+  }
+  free(full);
+  free(wide);
+  return absolute;
+#else
+  return realpath(path, NULL);
+#endif
+}
+
 bool cfile_identity(const char *path, CFileIdentity *identity) {
   if (!path) {
     return false;

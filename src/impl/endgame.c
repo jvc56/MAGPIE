@@ -1246,6 +1246,18 @@ uint64_t endgame_ctx_get_nodes_searched(const EndgameCtx *ctx) {
   return total;
 }
 
+bool endgame_ctx_read_live_workers(EndgameCtx *ctx, uint64_t *nodes_searched,
+                                   int *live_workers) {
+  cpthread_mutex_lock(&ctx->add_mutex);
+  const bool open = atomic_load(&ctx->adding_closed) == 0;
+  if (open) {
+    *nodes_searched = endgame_ctx_get_nodes_searched(ctx);
+    *live_workers = endgame_active_worker_count(ctx);
+  }
+  cpthread_mutex_unlock(&ctx->add_mutex);
+  return open;
+}
+
 int endgame_ctx_get_current_line(const EndgameCtx *ctx, int worker_index,
                                  uint64_t *out_line, int max_len) {
   if (max_len <= 0 || worker_index < 0 ||

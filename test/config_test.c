@@ -2905,7 +2905,17 @@ static void test_config_builds_missing_tables_on_first_use(void) {
   const PlayersData *players_data = config_get_players_data(config);
   char *rit_name = get_formatted_string("%s.%s", lexicon, lexicon);
   if (strstr(output, "skipped")) {
-    // A machine with less disk than the reserve the tables leave free.
+    // A machine with less disk than the reserve the tables leave free, the
+    // larger of 10 GB and 1% of the disk. Any other skip is a failure.
+    int64_t free_bytes = 0;
+    int64_t total_bytes = 0;
+    assert(cfile_free_bytes(dir, &free_bytes));
+    assert(cfile_total_bytes(dir, &total_bytes));
+    const int64_t reserve_floor_bytes = 10000000000LL;
+    const int64_t reserve_bytes = total_bytes / 100 > reserve_floor_bytes
+                                      ? total_bytes / 100
+                                      : reserve_floor_bytes;
+    assert(free_bytes < reserve_bytes + reserve_floor_bytes);
     printf("config: skipped the first-use build: %s", output);
   } else {
     const char *built[] = {"building the wordmap",
@@ -2949,6 +2959,13 @@ static void test_config_builds_missing_tables_on_first_use(void) {
     assert(contribute_table_manifest_touch(manifest, "wmp", lexicon, 1));
     assert(contribute_table_manifest_touch(manifest, "wit", lexicon, 1));
     assert(contribute_table_manifest_touch(manifest, "rit", rit_name, 1));
+    // Eviction can run from any directory, so each path stands on its own.
+    for (int entry_idx = 0; entry_idx < manifest->count; entry_idx++) {
+      const char *entry_path = manifest->entries[entry_idx].path;
+      char *absolute_path = cfile_absolute_path(entry_path);
+      assert(strings_equal(absolute_path, entry_path));
+      free(absolute_path);
+    }
     contribute_table_manifest_destroy(manifest);
     free(manifest_path);
     char *contribute_manifest =
@@ -2983,6 +3000,41 @@ static void test_config_builds_missing_tables_on_first_use(void) {
     assert_config_exec_status(config, "set -rit true",
                               ERROR_STATUS_RIT_INPUTS_MISMATCH);
     assert_config_exec_status(config, "set -rit auto", ERROR_STATUS_SUCCESS);
+    // It is said once, not on every command.
+    exec_capturing_output(config, "set -threads 1", output, sizeof(output));
+    assert(!strstr(output, "playing without"));
+
+    // A file that cannot be loaded is left out under auto the same way, and
+    // an error under true: an old or damaged table must not stop every
+    // command.
+    const char *tables[2] = {rit_name, lexicon};
+    const char *table_types[2] = {"rit", "wit"};
+    const char *table_lines[2] = {"playing without the rack info table",
+                                  "playing without the word info table"};
+    for (int table_idx = 0; table_idx < 2; table_idx++) {
+      char *table_path = get_formatted_string(
+          "%s/%s.%s", lexica, tables[table_idx], table_types[table_idx]);
+      FILE *table_file = cfile_open(table_path, "wbe", false);
+      assert(table_file);
+      const char garbage[] = "not a table";
+      const size_t written = fwrite(garbage, 1, sizeof(garbage), table_file);
+      assert(written == sizeof(garbage));
+      (void)fclose(table_file);
+      free(table_path);
+      config_destroy(config);
+      error_stack = error_stack_create();
+      config = config_create(&args, error_stack);
+      assert(error_stack_is_empty(error_stack));
+      error_stack_destroy(error_stack);
+      exec_capturing_output(config, command, output, sizeof(output));
+      assert(strstr(output, table_lines[table_idx]));
+      exec_capturing_output(config, "set -threads 1", output, sizeof(output));
+      assert(!strstr(output, "playing without"));
+    }
+    players_data = config_get_players_data(config);
+    assert(!players_data_get_data_name(players_data, PLAYERS_DATA_TYPE_RIT, 0));
+    assert(!players_data_get_data_name(players_data, PLAYERS_DATA_TYPE_WIT, 0));
+    assert(players_data_get_data_name(players_data, PLAYERS_DATA_TYPE_WMP, 0));
 
     // A lexicon with no wordmap support says why it has no wordmap, and no
     // rack info table, which is built from one, instead of naming a convert

@@ -433,6 +433,15 @@ void players_data_set(PlayersData *players_data,
             players_data_type, data_paths, input_data_names[player_index],
             use_mmap, error_stack);
         if (!error_stack_is_empty(error_stack)) {
+          // Player 0's new data has no slot yet: pass it through theirs.
+          if (player_index == 1 && existing_data_indexes[0] < 0) {
+            const int data_index =
+                players_data_get_player_data_index(players_data_type, 0);
+            void *existing_data = players_data->data[data_index];
+            players_data->data[data_index] = data_pointers[0];
+            players_data_destroy_data(players_data, players_data_type, 0);
+            players_data->data[data_index] = existing_data;
+          }
           return;
         }
         data_pointers[player_index] = generic_players_data;
@@ -480,19 +489,27 @@ void players_data_evict(PlayersData *players_data,
 // each player's table with that player's KWG by hash, so a stale or mismatched
 // .wit fails to load rather than silently pruning legal plays. Tables built
 // from a bare word list carry no hash and are not checked.
+bool players_data_wit_matches_kwg(const PlayersData *players_data,
+                                  int player_index) {
+  const WordInfoTable *wit =
+      players_data_get_word_info_table(players_data, player_index);
+  const KWG *kwg = players_data_get_kwg(players_data, player_index);
+  if (wit == NULL || kwg == NULL) {
+    return true;
+  }
+  const uint64_t wit_kwg_hash = word_info_table_get_kwg_hash(wit);
+  return wit_kwg_hash == 0 || wit_kwg_hash == kwg_get_hash(kwg);
+}
+
 void players_data_validate_word_info_tables(const PlayersData *players_data,
                                             ErrorStack *error_stack) {
   for (int player_index = 0; player_index < 2; player_index++) {
+    if (players_data_wit_matches_kwg(players_data, player_index)) {
+      continue;
+    }
     const WordInfoTable *wit =
         players_data_get_word_info_table(players_data, player_index);
     const KWG *kwg = players_data_get_kwg(players_data, player_index);
-    if (wit == NULL || kwg == NULL) {
-      continue;
-    }
-    const uint64_t wit_kwg_hash = word_info_table_get_kwg_hash(wit);
-    if (wit_kwg_hash == 0 || wit_kwg_hash == kwg_get_hash(kwg)) {
-      continue;
-    }
     error_stack_push(
         error_stack, ERROR_STATUS_WIT_KWG_MISMATCH,
         get_formatted_string(

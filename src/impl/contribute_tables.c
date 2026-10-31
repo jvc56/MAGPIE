@@ -699,8 +699,13 @@ void contribute_tables_record_built(const char *manifest_path, const char *role,
   }
   ContributeTableManifest *manifest =
       contribute_table_manifest_read(manifest_path);
-  contribute_table_manifest_record(manifest, role, name, identity.size, path,
+  // Eviction may run from another directory, where a relative path would
+  // name some other file or none.
+  char *absolute_path = cfile_absolute_path(path);
+  contribute_table_manifest_record(manifest, role, name, identity.size,
+                                   absolute_path ? absolute_path : path,
                                    (int64_t)time(NULL));
+  free(absolute_path);
   (void)contribute_table_manifest_write(manifest, manifest_path);
   contribute_table_manifest_destroy(manifest);
   cfile_lock_close(lock);
