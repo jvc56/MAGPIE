@@ -65,6 +65,13 @@ typedef struct SimArgs {
   // (see sim_args_set_bag_cycle_bai_options). sim_args_fill clears it; the
   // config turns it on by default.
   bool bag_cycle;
+  // Whether the candidates get_top_simming_move hands the simulation always
+  // include a pass, the best exchange, the exchange that keeps only the
+  // one-point tiles and blanks, and the best one- and two-tile plays, besides
+  // the num_plays best plays. Where nearly every turn is a bingo, these moves
+  // decide who gets the last turn, and the best plays rarely include them.
+  // sim_args_fill clears it; the config sets it.
+  bool tempo_candidates;
 } SimArgs;
 
 // Unlike endgame_args_fill and peg_args_fill, this does NOT take a parameter
@@ -131,6 +138,7 @@ sim_args_fill(const int num_plies, const MoveList *move_list,
   sim_args->utility_spread_scale = utility_spread_scale;
   sim_args->use_margin_forecast = use_margin_forecast;
   sim_args->bag_cycle = false;
+  sim_args->tempo_candidates = false;
   // Start fresh, not resuming a prior SimResults. Only the TUI's analysis-
   // resume path sets this true; every other caller fills SimArgs through
   // here, so leaving it uninitialized let stack garbage spuriously trigger
