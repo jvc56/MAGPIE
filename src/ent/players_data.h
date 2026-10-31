@@ -93,6 +93,10 @@ void players_data_set_data(PlayersData *players_data,
                            void *data);
 void players_data_validate_word_info_tables(const PlayersData *players_data,
                                             ErrorStack *error_stack);
+// Pushes an error if a player's rack info table holds leave values other than
+// the ones that player's KLV gives.
+void players_data_validate_rack_info_tables(const PlayersData *players_data,
+                                            ErrorStack *error_stack);
 // Destroys both players' data of this type and leaves the slots empty, so the
 // next players_data_set loads from disk even for a name that is already
 // loaded. The use-when-available flags are left as they are.
