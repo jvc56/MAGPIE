@@ -28,6 +28,8 @@
 #include "../src/impl/config.h"
 #include "../src/impl/endgame.h"
 #include "../src/impl/gameplay.h"
+#include "../src/impl/move_gen.h"
+#include "../src/impl/move_gen_base.h"
 #include "../src/impl/peg.h"
 #include "../src/impl/simmer.h"
 #include "../src/str/move_string.h"
@@ -1954,6 +1956,10 @@ void peg3_exact_eval_mode(const StringSplitter *fields) {
 // 2^PEG_SIM_EG_TT_POWER entries (default 26 shared, 24 per worker) and are
 // cleared before each sim (one root and arm). A kept table makes a rollout's
 // result depend on the searches before it, so runs are not reproducible.
+// PEG_SIM_EG_MOVEGENS=N: each search gets a budget of N move generations and
+// plays its last completed depth's move when the budget runs out (the solver
+// then searches every depth up to plies); 0 counts each search's generations
+// (for PEG_SIM_TRACE) without stopping it. Unset: no budget.
 typedef struct PegSimRolloutEndgame {
   int plies;
   int workers;
@@ -1964,6 +1970,12 @@ typedef struct PegSimRolloutEndgame {
   double *ms;
   int n_tt;
   TranspositionTable **tt;
+  // Per worker: the move budget (NULL without PEG_SIM_EG_MOVEGENS), the
+  // searches it stopped short of plies and the last search's generations.
+  uint64_t movegen_limit;
+  MovegenBudget *budget;
+  int64_t *capped;
+  uint64_t *movegens;
 } PegSimRolloutEndgame;
 
 static PegSimRolloutEndgame peg_sim_endgame_create(int plies, int workers) {
@@ -1975,7 +1987,14 @@ static PegSimRolloutEndgame peg_sim_endgame_create(int plies, int workers) {
       .control = malloc_or_die(sizeof(ThreadControl *) * (size_t)workers),
       .calls = calloc_or_die((size_t)workers, sizeof(int64_t)),
       .ms = calloc_or_die((size_t)workers, sizeof(double)),
+      .capped = calloc_or_die((size_t)workers, sizeof(int64_t)),
+      .movegens = calloc_or_die((size_t)workers, sizeof(uint64_t)),
   };
+  const char *movegens_env = getenv("PEG_SIM_EG_MOVEGENS");
+  if (movegens_env != NULL) {
+    endgame.movegen_limit = strtoull(movegens_env, NULL, 10);
+    endgame.budget = malloc_or_die(sizeof(MovegenBudget) * (size_t)workers);
+  }
   for (int worker = 0; worker < workers; worker++) {
     endgame.results[worker] = endgame_results_create();
     endgame.control[worker] = thread_control_create();
@@ -2028,6 +2047,9 @@ static void peg_sim_endgame_destroy(PegSimRolloutEndgame *endgame) {
   free(endgame->control);
   free(endgame->calls);
   free(endgame->ms);
+  free(endgame->capped);
+  free(endgame->movegens);
+  free(endgame->budget);
   for (int idx = 0; idx < endgame->n_tt; idx++) {
     transposition_table_destroy(endgame->tt[idx]);
   }
@@ -2054,15 +2076,26 @@ static void peg_sim_endgame_move(PegSimRolloutEndgame *endgame, int worker,
                                         : endgame->tt[worker],
   };
   EndgameResults *results = endgame->results[worker];
+  MovegenBudget *budget = NULL;
+  if (endgame->budget != NULL) {
+    budget = &endgame->budget[worker];
+    movegen_budget_init(budget, endgame->movegen_limit);
+  }
+  MovegenBudget *previous = gen_set_movegen_budget(budget);
   endgame_solve_inline(&endgame->ctx[worker], &args, results);
+  (void)gen_set_movegen_budget(previous);
   const PVLine *pv = endgame_results_get_pvline(results, ENDGAME_RESULT_BEST);
+  const int depth = endgame_results_get_depth(results, ENDGAME_RESULT_BEST);
   if (endgame_results_get_status(results) != ENDGAME_RESULT_STATUS_FINISHED ||
-      endgame_results_get_depth(results, ENDGAME_RESULT_BEST) !=
-          endgame->plies ||
+      depth > endgame->plies ||
+      (depth < endgame->plies && endgame->movegen_limit == 0) ||
       pv->num_moves < 1) {
     log_fatal("pegsim rollout endgame search did not finish");
   }
   small_move_to_move(move, &pv->moves[0], game_get_board(game));
+  endgame->capped[worker] += depth < endgame->plies;
+  endgame->movegens[worker] =
+      budget != NULL ? movegen_budget_get_spent(budget) : 0;
   endgame->calls[worker]++;
   endgame->ms[worker] += (double)(ctimer_monotonic_ns() - start) / 1e6;
 }
@@ -2072,7 +2105,8 @@ static void peg_sim_endgame_move(PegSimRolloutEndgame *endgame, int worker,
 // bag, tiles on the board, side on turn, kind (E the endgame search, 1 or 2 a
 // chooser's pick, S static), the position key (board, both racks, side on
 // turn, scoreless turns: what a bag-empty search depends on), the on-turn
-// player's information key (peg_net_cache_key) and microseconds.
+// player's information key (peg_net_cache_key), microseconds and, for an
+// endgame search under PEG_SIM_EG_MOVEGENS, its move generations (else 0).
 typedef struct PegSimTrace {
   FILE *out;
   cpthread_mutex_t mutex;
@@ -2106,18 +2140,20 @@ static uint64_t peg_sim_position_key(const Game *game, int *tiles) {
 }
 
 static void peg_sim_trace_write(PegSimTrace *trace, int worker_index,
-                                const Game *game, char kind, int64_t start) {
+                                const Game *game, char kind, int64_t start,
+                                uint64_t movegens) {
   const double us = (double)(ctimer_monotonic_ns() - start) / 1e3;
   int tiles;
   const uint64_t position = peg_sim_position_key(game, &tiles);
   uint8_t key[PEG_NET_CACHE_KEY_BYTES];
   const uint64_t info = peg_net_cache_key(game, key);
   cpthread_mutex_lock(&trace->mutex);
-  fprintf(trace->out, "%d,%d,%d,%d,%d,%d,%c,%016llx,%016llx,%.1f\n",
+  fprintf(trace->out, "%d,%d,%d,%d,%d,%d,%c,%016llx,%016llx,%.1f,%llu\n",
           trace->root, trace->arm, worker_index,
           bag_get_letters(game_get_bag(game)), tiles,
           game_get_player_on_turn_index(game), kind,
-          (unsigned long long)position, (unsigned long long)info, us);
+          (unsigned long long)position, (unsigned long long)info, us,
+          (unsigned long long)movegens);
   cpthread_mutex_unlock(&trace->mutex);
 }
 
@@ -2208,7 +2244,9 @@ static bool peg_sim_rollout_move(void *context, int worker_index,
     kind = '2';
   }
   if (hook->trace != NULL) {
-    peg_sim_trace_write(hook->trace, worker_index, game, kind, start);
+    peg_sim_trace_write(hook->trace, worker_index, game, kind, start,
+                        kind == 'E' ? hook->endgame->movegens[worker_index]
+                                    : 0);
   }
   return kind != 'S';
 }
@@ -2304,7 +2342,7 @@ void peg_sim_mode(const StringSplitter *fields) {
   if (fresh) {
     fprintf(output, "root,arm,rank,candidates,utility,win,equity,iterations,"
                     "ms,net1_calls,net1_ms,net2_calls,net2_ms,eg_calls,eg_ms,"
-                    "move\n");
+                    "eg_capped,move\n");
     fprintf(cands_out, "root,arm,rank,samples,utility,win,equity\n");
   }
   Config *config = peg_net_config_create();
@@ -2345,7 +2383,8 @@ void peg_sim_mode(const StringSplitter *fields) {
   if (trace_path != NULL) {
     trace.out = fopen_exclusive_or_die(trace_path, "w");
     fprintf(trace.out,
-            "root,arm,worker,bag,tiles,on_turn,kind,position,info,us\n");
+            "root,arm,worker,bag,tiles,on_turn,kind,position,info,us,"
+            "movegens\n");
     cpthread_mutex_init(&trace.mutex);
     for (int arm = 0; arm < PEG_SIM_MAX_ARMS; arm++) {
       hooks[arm].trace = &trace;
@@ -2441,11 +2480,12 @@ void peg_sim_mode(const StringSplitter *fields) {
       if (samples.out != NULL) {
         sim_args.rollout_done_fn = peg_sim_rollout_done;
       }
-      int64_t eg_calls_before = 0;
+      int64_t eg_calls_before = 0, eg_capped_before = 0;
       double eg_ms_before = 0;
       for (int worker = 0; worker < threads; worker++) {
         eg_calls_before += endgame.calls[worker];
         eg_ms_before += endgame.ms[worker];
+        eg_capped_before += endgame.capped[worker];
       }
       const int64_t start = ctimer_monotonic_ns();
       if (cands > 1) {
@@ -2460,11 +2500,12 @@ void peg_sim_mode(const StringSplitter *fields) {
       arm_seconds[arm] = seconds;
       peg_sim_chooser_totals(net, chooser, &calls1_after, &ms1_after,
                              &calls2_after, &ms2_after);
-      int64_t eg_calls = -eg_calls_before;
+      int64_t eg_calls = -eg_calls_before, eg_capped = -eg_capped_before;
       double eg_ms = -eg_ms_before;
       for (int worker = 0; worker < threads; worker++) {
         eg_calls += endgame.calls[worker];
         eg_ms += endgame.ms[worker];
+        eg_capped += endgame.capped[worker];
       }
       // Each simmed play's static rank, by its text.
       int best_rank = 0;
@@ -2513,7 +2554,7 @@ void peg_sim_mode(const StringSplitter *fields) {
       fprintf(
           output,
           "%d,%d,%d,%d,%.9g,%.9g,%.9g,%llu,%.9g,%lld,%.9g,%lld,%.9g,%lld,"
-          "%.9g,\"%s\"\n",
+          "%.9g,%lld,\"%s\"\n",
           root_id, arm, best_rank, cands, best_utility, best_win, best_equity,
           (unsigned long long)(cands > 1
                                    ? sim_results_get_iteration_count(results)
@@ -2521,7 +2562,7 @@ void peg_sim_mode(const StringSplitter *fields) {
           1000.0 * seconds, (long long)(calls1_after - calls1_before),
           ms1_after - ms1_before, (long long)(calls2_after - calls2_before),
           ms2_after - ms2_before, (long long)eg_calls, eg_ms,
-          string_builder_peek(name));
+          (long long)eg_capped, string_builder_peek(name));
     }
     fflush(cands_out);
     fflush(output);
