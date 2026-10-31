@@ -8,6 +8,7 @@
 #include "../src/def/value_net_defs.h"
 #include "../src/ent/game.h"
 #include "../src/ent/move.h"
+#include "peg_net_util.h"
 #include "peg_world.h"
 #include <stdbool.h>
 #include <stdint.h>
@@ -164,12 +165,6 @@ typedef struct Peg1NetChooserSlot {
   float *inputs;
   float *inputs2;
   Game *swap;
-  // Open-addressing pick cache, cleared per root decision
-  // (peg1_net_chooser_reset).
-  uint8_t *keys;
-  Move *picks;
-  bool *used;
-  int cached;
   int64_t calls;
   int64_t hits;
   int64_t checks;
@@ -190,6 +185,8 @@ typedef struct Peg1NetChooser {
   Peg1UtilityWeights utility;
   bool check;
   bool cache;
+  // The slots' pick cache, cleared per root decision (peg1_net_chooser_reset).
+  PegNetPickCache *pick_cache;
   int slots;
   Peg1NetChooserSlot *slot;
 } Peg1NetChooser;

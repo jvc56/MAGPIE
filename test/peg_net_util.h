@@ -5,6 +5,7 @@
 // endgame and PEG calls, configs, the positions files, the net choosers' cache
 // keys.
 
+#include "../src/compat/cpthread.h"
 #include "../src/def/value_net_defs.h"
 #include "../src/ent/game.h"
 #include "../src/ent/move.h"
@@ -86,10 +87,35 @@ void default_peg_pick(const Game *game, int threads, PegPeg1Chooser chooser,
 enum {
   PEG_NET_CACHE_KEY_BYTES =
       BOARD_DIM * BOARD_DIM + VALUE_NET_TILE_TYPES + 2 * 4 + 2,
-  PEG_NET_CACHE_SLOTS = 4096,
+  PEG_NET_CACHE_SLOTS = 65536,
 };
 
 uint64_t peg_net_cache_key(const Game *game, uint8_t *key);
+
+// A chooser's pick cache, shared by its worker slots: a pick depends only on
+// its key, so any slot's pick serves every slot. Open addressing under one
+// mutex (a pick costs milliseconds), kept at most half full, cleared once per
+// root decision.
+typedef struct PegNetPickCache {
+  cpthread_mutex_t mutex;
+  uint8_t *keys;
+  Move *picks;
+  bool *used;
+  int cached;
+} PegNetPickCache;
+
+PegNetPickCache *peg_net_pick_cache_create(void);
+void peg_net_pick_cache_reset(PegNetPickCache *cache);
+void peg_net_pick_cache_destroy(PegNetPickCache *cache);
+
+// Whether the cache holds the pick for key (whose peg_net_cache_key hash is
+// hash), copied into move.
+bool peg_net_pick_cache_get(PegNetPickCache *cache, const uint8_t *key,
+                            uint64_t hash, Move *move);
+
+// Stores move as key's pick, unless the cache is half full or holds it.
+void peg_net_pick_cache_put(PegNetPickCache *cache, const uint8_t *key,
+                            uint64_t hash, const Move *move);
 
 // The rack info table is off: 2PEG searches sort by score, so it only adds
 // cold page faults on its 1.9 GB map (leave values are unchanged without it).

@@ -10,6 +10,7 @@
 #include "../src/ent/game.h"
 #include "../src/ent/move.h"
 #include "peg1_net.h"
+#include "peg_net_util.h"
 #include "peg_world.h"
 #include <stdbool.h>
 #include <stdint.h>
@@ -156,12 +157,6 @@ typedef struct Peg2NetChooserSlot {
   Move candidates[PEG_STATIC_POOL_SIZE];
   Move candidates2[PEG_STATIC_POOL_SIZE];
   Game *swap;
-  // Open-addressing pick cache (the peg_net_cache_key key), cleared per root
-  // decision (peg2_net_chooser_reset).
-  uint8_t *keys;
-  Move *picks;
-  bool *used;
-  int cached;
   int64_t calls;
   int64_t hits;
   int64_t checks;
@@ -186,6 +181,8 @@ typedef struct Peg2NetChooser {
   int top_k;
   bool check;
   bool cache;
+  // The slots' pick cache, cleared per root decision (peg2_net_chooser_reset).
+  PegNetPickCache *pick_cache;
   int slots;
   Peg2NetChooserSlot *slot;
 } Peg2NetChooser;

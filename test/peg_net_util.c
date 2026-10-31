@@ -1,6 +1,7 @@
 #include "peg_net_util.h"
 
 #include "../src/compat/cfile.h"
+#include "../src/compat/cpthread.h"
 #include "../src/compat/ctime.h"
 #include "../src/def/equity_defs.h"
 #include "../src/def/game_defs.h"
@@ -303,6 +304,70 @@ uint64_t peg_net_cache_key(const Game *game, uint8_t *key) {
     hash = (hash ^ key[idx]) * UINT64_C(1099511628211);
   }
   return hash;
+}
+
+PegNetPickCache *peg_net_pick_cache_create(void) {
+  PegNetPickCache *cache = malloc_or_die(sizeof(PegNetPickCache));
+  cpthread_mutex_init(&cache->mutex);
+  cache->keys =
+      malloc_or_die((size_t)PEG_NET_CACHE_SLOTS * PEG_NET_CACHE_KEY_BYTES);
+  cache->picks = malloc_or_die(sizeof(Move) * PEG_NET_CACHE_SLOTS);
+  cache->used = calloc_or_die(PEG_NET_CACHE_SLOTS, sizeof(bool));
+  cache->cached = 0;
+  return cache;
+}
+
+void peg_net_pick_cache_reset(PegNetPickCache *cache) {
+  memset(cache->used, 0, sizeof(bool) * PEG_NET_CACHE_SLOTS);
+  cache->cached = 0;
+}
+
+void peg_net_pick_cache_destroy(PegNetPickCache *cache) {
+  free(cache->keys);
+  free(cache->picks);
+  free(cache->used);
+  free(cache);
+}
+
+// The entry holding key, or the empty entry where it would go. The caller
+// holds the mutex.
+static int peg_net_pick_cache_entry(const PegNetPickCache *cache,
+                                    const uint8_t *key, uint64_t hash) {
+  int entry = (int)(hash % PEG_NET_CACHE_SLOTS);
+  while (cache->used[entry] &&
+         memcmp(&cache->keys[(size_t)entry * PEG_NET_CACHE_KEY_BYTES], key,
+                PEG_NET_CACHE_KEY_BYTES) != 0) {
+    entry = (entry + 1) % PEG_NET_CACHE_SLOTS;
+  }
+  return entry;
+}
+
+bool peg_net_pick_cache_get(PegNetPickCache *cache, const uint8_t *key,
+                            uint64_t hash, Move *move) {
+  cpthread_mutex_lock(&cache->mutex);
+  const int entry = peg_net_pick_cache_entry(cache, key, hash);
+  const bool hit = cache->used[entry];
+  if (hit) {
+    move_copy(move, &cache->picks[entry]);
+  }
+  cpthread_mutex_unlock(&cache->mutex);
+  return hit;
+}
+
+void peg_net_pick_cache_put(PegNetPickCache *cache, const uint8_t *key,
+                            uint64_t hash, const Move *move) {
+  cpthread_mutex_lock(&cache->mutex);
+  const int entry = peg_net_pick_cache_entry(cache, key, hash);
+  // Keep the table at most half full so probes stay short. Another slot may
+  // have stored the same pick meanwhile.
+  if (!cache->used[entry] && cache->cached < PEG_NET_CACHE_SLOTS / 2) {
+    memcpy(&cache->keys[(size_t)entry * PEG_NET_CACHE_KEY_BYTES], key,
+           PEG_NET_CACHE_KEY_BYTES);
+    move_copy(&cache->picks[entry], move);
+    cache->used[entry] = true;
+    cache->cached++;
+  }
+  cpthread_mutex_unlock(&cache->mutex);
 }
 
 Config *peg_net_config_create(void) {

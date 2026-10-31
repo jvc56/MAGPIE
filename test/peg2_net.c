@@ -573,32 +573,22 @@ Peg2NetChooser *peg2_net_chooser_create(const char *model_path,
   for (int slot_idx = 0; slot_idx < slots; slot_idx++) {
     chooser->slot[slot_idx].work = peg2_pick_scratch_create(game);
     chooser->slot[slot_idx].swap = game_duplicate(game);
-    chooser->slot[slot_idx].keys =
-        malloc_or_die((size_t)PEG_NET_CACHE_SLOTS * PEG_NET_CACHE_KEY_BYTES);
-    chooser->slot[slot_idx].picks =
-        malloc_or_die(sizeof(Move) * PEG_NET_CACHE_SLOTS);
-    chooser->slot[slot_idx].used =
-        calloc_or_die(PEG_NET_CACHE_SLOTS, sizeof(bool));
   }
+  chooser->pick_cache = peg_net_pick_cache_create();
   return chooser;
 }
 
 void peg2_net_chooser_reset(Peg2NetChooser *chooser) {
-  for (int slot_idx = 0; slot_idx < chooser->slots; slot_idx++) {
-    memset(chooser->slot[slot_idx].used, 0, sizeof(bool) * PEG_NET_CACHE_SLOTS);
-    chooser->slot[slot_idx].cached = 0;
-  }
+  peg_net_pick_cache_reset(chooser->pick_cache);
 }
 
 void peg2_net_chooser_destroy(Peg2NetChooser *chooser) {
   for (int slot_idx = 0; slot_idx < chooser->slots; slot_idx++) {
     peg2_pick_scratch_destroy(&chooser->slot[slot_idx].work);
     game_destroy(chooser->slot[slot_idx].swap);
-    free(chooser->slot[slot_idx].keys);
-    free(chooser->slot[slot_idx].picks);
-    free(chooser->slot[slot_idx].used);
   }
   free(chooser->slot);
+  peg_net_pick_cache_destroy(chooser->pick_cache);
   peg2_candidate_net_destroy(chooser->model);
   if (chooser->first != NULL) {
     peg2_candidate_net_destroy(chooser->first);
@@ -635,29 +625,15 @@ bool peg2_net_chooser_pick(Peg2NetChooser *chooser, int slot_idx,
   Peg2NetChooserSlot *slot = &chooser->slot[slot_idx];
   const int64_t start = ctimer_monotonic_ns();
   uint8_t key[PEG_NET_CACHE_KEY_BYTES];
-  int entry = -1;
-  bool hit = false;
-  if (chooser->cache) {
-    entry = (int)(peg_net_cache_key(game, key) % PEG_NET_CACHE_SLOTS);
-    while (slot->used[entry] &&
-           memcmp(&slot->keys[(size_t)entry * PEG_NET_CACHE_KEY_BYTES], key,
-                  PEG_NET_CACHE_KEY_BYTES) != 0) {
-      entry = (entry + 1) % PEG_NET_CACHE_SLOTS;
-    }
-    hit = slot->used[entry];
-  }
+  const uint64_t hash = chooser->cache ? peg_net_cache_key(game, key) : 0;
+  const bool hit = chooser->cache &&
+                   peg_net_pick_cache_get(chooser->pick_cache, key, hash, move);
   if (hit) {
-    move_copy(move, &slot->picks[entry]);
     slot->hits++;
   } else {
     peg2_net_chooser_choose(chooser, slot, game, slot->candidates, move);
-    // Keep the table at most half full so probes stay short.
-    if (chooser->cache && slot->cached < PEG_NET_CACHE_SLOTS / 2) {
-      memcpy(&slot->keys[(size_t)entry * PEG_NET_CACHE_KEY_BYTES], key,
-             PEG_NET_CACHE_KEY_BYTES);
-      move_copy(&slot->picks[entry], move);
-      slot->used[entry] = true;
-      slot->cached++;
+    if (chooser->cache) {
+      peg_net_pick_cache_put(chooser->pick_cache, key, hash, move);
     }
   }
   slot->ms += (double)(ctimer_monotonic_ns() - start) / 1e6;

@@ -465,19 +465,13 @@ Peg1NetChooser *peg1_net_chooser_create(const char *first, const char *second,
         malloc_or_die(sizeof(float) * PEG_STATIC_POOL_SIZE *
                       (net->second == NULL ? 1 : net->second->inputs));
     slot->swap = game_duplicate(game);
-    slot->keys =
-        malloc_or_die((size_t)PEG_NET_CACHE_SLOTS * PEG_NET_CACHE_KEY_BYTES);
-    slot->picks = malloc_or_die(sizeof(Move) * PEG_NET_CACHE_SLOTS);
-    slot->used = calloc_or_die(PEG_NET_CACHE_SLOTS, sizeof(bool));
   }
+  net->pick_cache = peg_net_pick_cache_create();
   return net;
 }
 
 void peg1_net_chooser_reset(Peg1NetChooser *net) {
-  for (int slot_idx = 0; slot_idx < net->slots; slot_idx++) {
-    memset(net->slot[slot_idx].used, 0, PEG_NET_CACHE_SLOTS * sizeof(bool));
-    net->slot[slot_idx].cached = 0;
-  }
+  peg_net_pick_cache_reset(net->pick_cache);
 }
 
 void peg1_net_chooser_destroy(Peg1NetChooser *net) {
@@ -488,11 +482,9 @@ void peg1_net_chooser_destroy(Peg1NetChooser *net) {
     free(slot->inputs);
     free(slot->inputs2);
     game_destroy(slot->swap);
-    free(slot->keys);
-    free(slot->picks);
-    free(slot->used);
   }
   free(net->slot);
+  peg_net_pick_cache_destroy(net->pick_cache);
   peg1_utility_net_destroy(net->first);
   if (net->second != NULL) {
     peg1_utility_net_destroy(net->second);
@@ -530,29 +522,15 @@ bool peg1_net_chooser_pick(Peg1NetChooser *net, int slot_idx, const Game *game,
   Peg1NetChooserSlot *slot = &net->slot[slot_idx];
   const int64_t start = ctimer_monotonic_ns();
   uint8_t key[PEG_NET_CACHE_KEY_BYTES];
-  int entry = -1;
-  bool hit = false;
-  if (net->cache) {
-    entry = (int)(peg_net_cache_key(game, key) % PEG_NET_CACHE_SLOTS);
-    while (slot->used[entry] &&
-           memcmp(&slot->keys[(size_t)entry * PEG_NET_CACHE_KEY_BYTES], key,
-                  PEG_NET_CACHE_KEY_BYTES) != 0) {
-      entry = (entry + 1) % PEG_NET_CACHE_SLOTS;
-    }
-    hit = slot->used[entry];
-  }
+  const uint64_t hash = net->cache ? peg_net_cache_key(game, key) : 0;
+  const bool hit =
+      net->cache && peg_net_pick_cache_get(net->pick_cache, key, hash, move);
   if (hit) {
-    move_copy(move, &slot->picks[entry]);
     slot->hits++;
   } else {
     peg1_net_chooser_choose(net, slot, game, move);
-    // Keep the table at most half full so probes stay short.
-    if (net->cache && slot->cached < PEG_NET_CACHE_SLOTS / 2) {
-      memcpy(&slot->keys[(size_t)entry * PEG_NET_CACHE_KEY_BYTES], key,
-             PEG_NET_CACHE_KEY_BYTES);
-      move_copy(&slot->picks[entry], move);
-      slot->used[entry] = true;
-      slot->cached++;
+    if (net->cache) {
+      peg_net_pick_cache_put(net->pick_cache, key, hash, move);
     }
   }
   slot->ms += (double)(ctimer_monotonic_ns() - start) / 1e6;
