@@ -2028,13 +2028,18 @@ static void peg_json_candidates(StringBuilder *sb, const PegRankedCand *rows,
       peg_json_decimal(sb, isfinite(row->mean_spread) ? row->mean_spread : 0.0,
                        6);
     }
-    string_builder_add_formatted_string(
-        sb,
-        ",\"wins\":%" PRId64 ",\"ties\":%" PRId64 ",\"losses\":%" PRId64
-        ",\"depth\":%d,\"cut\":%s}",
-        row->win_count, row->tie_count,
-        row->weight_sum - row->win_count - row->tie_count, depth,
-        row->cut ? "true" : "false");
+    // A cut play stopped partway, so it has a bound, not a count of each.
+    if (row->cut) {
+      string_builder_add_string(sb,
+                                ",\"wins\":null,\"ties\":null,\"losses\":null");
+    } else {
+      string_builder_add_formatted_string(
+          sb, ",\"wins\":%" PRId64 ",\"ties\":%" PRId64 ",\"losses\":%" PRId64,
+          row->win_count, row->tie_count,
+          row->weight_sum - row->win_count - row->tie_count);
+    }
+    string_builder_add_formatted_string(sb, ",\"depth\":%d,\"cut\":%s}", depth,
+                                        row->cut ? "true" : "false");
   }
   string_builder_add_string(sb, "]");
 }
@@ -2082,6 +2087,10 @@ char *peg_snapshot_get_json(const PegPollSnapshot *snapshot, const Game *game) {
   }
   string_builder_add_string(sb, ",\"entries\":");
   peg_json_candidates(sb, snapshot->entries, snapshot->n_entries,
+                      snapshot->fidelity_plies, game);
+  // Cut bounds can fill the entries and push out the plays that were solved.
+  string_builder_add_string(sb, ",\"solved\":");
+  peg_json_candidates(sb, snapshot->solved_rows, snapshot->n_solved_rows,
                       snapshot->fidelity_plies, game);
   string_builder_add_string(sb, ",\"baseline\":");
   peg_json_candidates(sb, snapshot->baseline_entries,

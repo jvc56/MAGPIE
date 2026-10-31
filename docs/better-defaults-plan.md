@@ -156,11 +156,15 @@ finish in 3 minutes, one took 330 s and one ran past 15 minutes (2 plies:
 
 **The opponent model (1e).**
 - `-pegpess` defaults to true, and with nesting it defines the opponent at
-  every stage (`PegArgs.nested_pessimistic`), not just stage 0. After a play
+  every endgame stage (`PegArgs.nested_pessimistic`). The greedy seed uses the
+  rational playout: its pessimistic one tries every reply on every draw, so
+  under a time limit it could use the whole budget. A result that ends on the
+  seed is labelled `(greedy)` and is not a lower bound. After a play
   that doesn't empty the bag, every opponent reply is tried on the scenario,
   as if the opponent knew the racks and the bag order. The scenario takes
   the worst result for the mover, and stops at the first reply that wins for
-  the opponent. This is Macondo's model, and it makes a win% a lower bound.
+  the opponent. This is Macondo's model, and it makes an endgame stage's win%
+  a lower bound.
 - The mover's next turn, when the bag still isn't empty, is a nested PEG
   from the mover's view. Its choice is scored on the scenario's actual racks
   (`nested_score_actual`).

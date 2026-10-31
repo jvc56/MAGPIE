@@ -2811,7 +2811,7 @@ static void peg_cand_worker_fn(void *arg, int worker_idx) {
     job->out->tie_count = 0;
     job->out->n_scenarios = 0;
     job->out->eval_seconds = 0;
-    job->out->spread_unknown = false;
+    job->out->spread_unknown = true;
     job->out->cut = false;
     return;
   }
@@ -2860,7 +2860,7 @@ static void peg_cand_worker_fn(void *arg, int worker_idx) {
     job->out->tie_count = 0;
     job->out->n_scenarios = 0;
     job->out->eval_seconds = 0;
-    job->out->spread_unknown = false;
+    job->out->spread_unknown = true;
     job->out->cut = false;
     return;
   }
@@ -4470,8 +4470,6 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
       // otherwise be scored last, making it the first thing a tight time
       // budget drops. Move it to the front so it's scored before that can
       // happen.
-      peg_force_protected_to_front(ranked, eval_count, protect_moves,
-                                   n_protect);
       if (deadline_ns != 0 && ctimer_monotonic_ns() >= deadline_ns) {
         break;
       }
@@ -4479,6 +4477,8 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
           THREAD_CONTROL_STATUS_USER_INTERRUPT) {
         break;
       }
+      peg_force_protected_to_front(ranked, eval_count, protect_moves,
+                                   n_protect);
       // Candidates that don't advance past this stage reached only
       // prev_fidelity (their last scoring). Record them before they fall out of
       // `ranked`. Saved n_graded so the capture can be undone if the stage ends
@@ -4659,8 +4659,11 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
         // freed exactly once across all three exits.
         peg_cand_outcomes_destroy_array(stage_outcomes, done_count);
         // This stage cleared the live poll at its start but contributed
-        // nothing, so restore the previous stage's ranking (still in `ranked`)
+        // nothing, so restore the previous stage's ranking (still in `ranked`,
+        // though protected plays were moved to the front for this stage)
         // instead of leaving the final snapshot empty.
+        stable_sort(ranked, (size_t)live_count, sizeof(PegRankedCand),
+                    peg_rank_cmp);
         peg_poll_replace(args->poll, ranked, live_count, stage_idx - 1,
                          prev_fidelity, live_count);
         break;
@@ -4727,7 +4730,8 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
     // dedicated single-cand capture pass. That fallback runs at greedy
     // fidelity: one candidate at greedy depth, not a deep re-evaluation, so it
     // is cheap.
-    if (args->include_per_scenario && out->n_top_cands > 0) {
+    if (args->include_per_scenario && out->n_top_cands > 0 &&
+        out->top_cands[0].win_pct >= 0.0) {
       const PegCandOutcomes *best_oc = NULL;
       for (int store_idx = 0; store_idx < oc_n; store_idx++) {
         if (peg_move_eq(&oc_store[store_idx].move, &out->top_cands[0].move)) {
@@ -4753,10 +4757,11 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
         ctx.unseen = unseen;
         ctx.ld_size = ld_size;
         // At greedy fidelity, the seed's own playout: these rows then are the
-        // score they detail, and cheap, as the pessimistic one is not.
-        ctx.opp_model = capture_fidelity == 0 && seed_orders_only
-                            ? PEG_OPP_RATIONAL
-                            : args->opp_model;
+        // score they detail, and cheap, so the limit need not cut them. Any
+        // other pass is not cheap, and keeps to the limit.
+        const bool cheap_capture = capture_fidelity == 0 && seed_orders_only;
+        ctx.opp_model = cheap_capture ? PEG_OPP_RATIONAL : args->opp_model;
+        ctx.deadline_ns = cheap_capture ? 0 : deadline_ns;
         ctx.inner_top_k = args->inner_top_k;
         ctx.fidelity_plies = capture_fidelity;
         ctx.scenario_stride = scenario_stride;
@@ -4774,8 +4779,12 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
         MachineLetter bag_remaining[PEG_SCENARIO_ARRAY_CAP + 1];
         peg_enum_splits(&ctx, /*ml=*/0, ctx.k_drawn, n_bag_remaining,
                         /*weight=*/1, mover_drawn, 0, bag_remaining, 0);
-        out->per_scenario = capture.rows;
-        out->n_per_scenario = capture.count;
+        if (ctx.interrupted) {
+          peg_scenario_rows_destroy(capture.rows, capture.count);
+        } else {
+          out->per_scenario = capture.rows;
+          out->n_per_scenario = capture.count;
+        }
       }
     }
 

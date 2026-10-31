@@ -8,6 +8,7 @@
 #include "../src/def/players_data_defs.h"
 #include "../src/def/rack_defs.h"
 #include "../src/ent/bit_rack.h"
+#include "../src/ent/board_layout.h"
 #include "../src/ent/data_filepaths.h"
 #include "../src/ent/equity.h"
 #include "../src/ent/game.h"
@@ -424,6 +425,32 @@ static void test_rack_info_table_follows_leaves(void) {
   assert(error_stack_is_empty(error_stack));
   assert(!players_data_get_rack_info_table(
       config_get_players_data(fresh_config), 1));
+
+  // A contributor's leaves file replaced under the same name reloads the
+  // leaves but keeps the table, which is checked again: what the name and the
+  // table's address were checked against no longer holds.
+  write_rit_or_die(matching, other_rit_name);
+  Config *contribute_config =
+      config_create_or_die("set -lex CSW21 -ld english_ab -k1 CSW21 -k2 CSW21");
+  char *layout = board_layout_get_default_name();
+  error_stack_reset(error_stack);
+  config_contribute_load_lexicon_and_variant(
+      contribute_config, "CSW21", "classic", "english_ab", layout, "CSW21",
+      "CSW21", other_leaves_name, other_leaves_name, true, true, other_rit_name,
+      other_rit_name, false, false, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  assert(players_data_get_rack_info_table(
+      config_get_players_data(contribute_config), 0));
+  klv_write(player_get_klv(player), DEFAULT_TEST_DATA_PATH, other_leaves_name,
+            error_stack);
+  assert(error_stack_is_empty(error_stack));
+  config_contribute_load_lexicon_and_variant(
+      contribute_config, "CSW21", "classic", "english_ab", layout, "CSW21",
+      "CSW21", other_leaves_name, other_leaves_name, true, true, other_rit_name,
+      other_rit_name, false, false, error_stack);
+  assert(error_stack_top(error_stack) == ERROR_STATUS_RIT_KLV_MISMATCH);
+  free(layout);
+  config_destroy(contribute_config);
 
   remove_test_data_file(other_rit_name, DATA_FILEPATH_TYPE_RACK_INFO_TABLE);
   remove_test_data_file(other_leaves_name, DATA_FILEPATH_TYPE_KLV);

@@ -184,7 +184,7 @@ export function parseResults(text, mode) {
     }
   } else if (mode === "peg") {
     const pattern = new RegExp(
-      `^\\s*(?:(full|greedy|\\d+-ply)\\s+)?(\\d+)\\s+(${MOVE})\\s+(\\d+)\\s+(\\d+)\\s+(\\d+)\\s+([\\d.]+)\\s+([+\\-\\d.]+)(?:\\s|$)`,
+      `^\\s*(?:(full|greedy|\\d+-ply)\\s+)?(\\d+)\\s+(${MOVE})\\s+(\\d+)\\s+(\\d+)\\s+(\\d+)\\s+([\\d.]+)(?:\\s+([+\\-\\d.]+))?(?:\\s|$)`,
     );
     for (const line of text.split("\n")) {
       const m = line.match(pattern);
@@ -196,7 +196,8 @@ export function parseResults(text, mode) {
           ties: +m[5],
           losses: +m[6],
           win: +m[7],
-          spread: +m[8],
+          // A complete solve ranks by results and has no spread column.
+          spread: Number.isFinite(+m[8]) && m[8] !== undefined ? +m[8] : null,
           depth: m[1] || "current",
         });
     }

@@ -2381,7 +2381,8 @@ static void help_entry_fill(const Config *config, int token,
       text = "PEG opponent model. true (the default) = pessimistic: wherever "
              "the opponent replies, it tries every reply as if it could see "
              "the mover's rack and the bag order and plays the worst one for "
-             "the mover, so a win% is a guaranteed lower bound. false = "
+             "the mover, so a win% from an endgame stage is a guaranteed lower "
+             "bound; the greedy seed ranks by the rational playout. false = "
              "rational: the opponent chooses from what it can see, and its "
              "choice is scored on the actual racks.";
       break;
@@ -8294,6 +8295,53 @@ static char *config_rack_info_table_name(const Config *config,
   return paired;
 }
 
+// The player's lexicon and leaves, for the keys below. The caller frees.
+static char *config_player_inputs_text(const Config *config, int player_idx) {
+  const PlayersData *players_data = config->players_data;
+  return get_formatted_string(
+      "%s %s",
+      players_data_get_data_name(players_data, PLAYERS_DATA_TYPE_KWG,
+                                 player_idx),
+      players_data_get_data_name(players_data, PLAYERS_DATA_TYPE_KLV,
+                                 player_idx));
+}
+
+// What a table auto left out is known by: its name, the lexicon and leaves it
+// was for, and its file as it stands. A change to any of them is worth another
+// try. The caller frees.
+static char *config_table_left_out_key(const Config *config,
+                                       players_data_t type, int player_idx,
+                                       const char *name) {
+  ErrorStack *errors = error_stack_create();
+  char *path = data_filepaths_get_readable_filename(
+      config->data_paths, name, config_table_kind(type).file_type, errors);
+  CFileIdentity identity = {0};
+  if (error_stack_is_empty(errors)) {
+    (void)cfile_identity(path, &identity);
+  }
+  free(path);
+  error_stack_destroy(errors);
+  char *inputs = config_player_inputs_text(config, player_idx);
+  char *key = get_formatted_string(
+      "%s %s %" PRId64 " %" PRId64 " %ld", name, inputs, identity.size,
+      identity.mtime_seconds, identity.mtime_nanoseconds);
+  free(inputs);
+  return key;
+}
+
+// Whether `name` is the table auto last left out for the player, unchanged.
+static bool config_table_is_left_out(const Config *config, players_data_t type,
+                                     int player_idx, const char *name) {
+  const char *left_out = config->table_left_out[type][player_idx];
+  if (!left_out) {
+    return false;
+  }
+  char *key = config_table_left_out_key(config, type, player_idx, name);
+  const bool same = strings_equal(key, left_out);
+  free(key);
+  return same;
+}
+
 // The memory the tables never take: the system's and other programs' share.
 #define CONFIG_AUTO_TABLE_MEMORY_RESERVE_BYTES 1000000000LL
 
@@ -8338,6 +8386,14 @@ config_choose_auto_tables(Config *config, const char *const lexicons[2],
     for (int player_idx = 0; player_idx < 2; player_idx++) {
       table_of[role_idx][player_idx] = -1;
       const players_data_t type = types[role_idx];
+      // A table left out as unusable has been reported, and takes no room.
+      if (config->table_auto[type][player_idx] && use[type][player_idx] &&
+          config_table_is_left_out(config, type, player_idx,
+                                   type == PLAYERS_DATA_TYPE_RIT
+                                       ? rit_names[player_idx]
+                                       : lexicons[player_idx])) {
+        use[type][player_idx] = false;
+      }
       wanted[role_idx][player_idx] =
           config->table_auto[type][player_idx] && use[type][player_idx];
       if (!config->table_auto[type][player_idx] || !use[type][player_idx]) {
@@ -8696,40 +8752,6 @@ static const char *config_rack_info_table_for_first_use(
   return rit_name;
 }
 
-// The player's lexicon and leaves, for the keys below. The caller frees.
-static char *config_player_inputs_text(const Config *config, int player_idx) {
-  const PlayersData *players_data = config->players_data;
-  return get_formatted_string(
-      "%s %s",
-      players_data_get_data_name(players_data, PLAYERS_DATA_TYPE_KWG,
-                                 player_idx),
-      players_data_get_data_name(players_data, PLAYERS_DATA_TYPE_KLV,
-                                 player_idx));
-}
-
-// What a table auto left out is known by: its name, the lexicon and leaves it
-// was for, and its file as it stands. A change to any of them is worth another
-// try. The caller frees.
-static char *config_table_left_out_key(const Config *config,
-                                       players_data_t type, int player_idx,
-                                       const char *name) {
-  ErrorStack *errors = error_stack_create();
-  char *path = data_filepaths_get_readable_filename(
-      config->data_paths, name, config_table_kind(type).file_type, errors);
-  CFileIdentity identity = {0};
-  if (error_stack_is_empty(errors)) {
-    (void)cfile_identity(path, &identity);
-  }
-  free(path);
-  error_stack_destroy(errors);
-  char *inputs = config_player_inputs_text(config, player_idx);
-  char *key = get_formatted_string(
-      "%s %s %" PRId64 " %" PRId64 " %ld", name, inputs, identity.size,
-      identity.mtime_seconds, identity.mtime_nanoseconds);
-  free(inputs);
-  return key;
-}
-
 // Says why `*names[player_idx]` goes unused, and clears it, and the other
 // player's if they share it under auto, remembering each so the next load
 // passes it over.
@@ -8755,28 +8777,11 @@ static void config_leave_out_table(Config *config, players_data_t type,
   *names[player_idx] = NULL;
 }
 
-// Clears each name that is the table auto last left out, and has not changed.
-static void config_skip_left_out_tables(const Config *config,
-                                        players_data_t type,
-                                        const char **names[2]) {
-  for (int player_idx = 0; player_idx < 2; player_idx++) {
-    const char *left_out = config->table_left_out[type][player_idx];
-    if (!*names[player_idx] || !left_out ||
-        !config->table_auto[type][player_idx]) {
-      continue;
-    }
-    char *key =
-        config_table_left_out_key(config, type, player_idx, *names[player_idx]);
-    if (strings_equal(key, left_out)) {
-      *names[player_idx] = NULL;
-    }
-    free(key);
-  }
-}
-
-// The player whose auto table cannot be loaded, tried alone, or -1.
+// The player whose auto table cannot be loaded, tried alone, or -1, with why
+// in *why, which the caller frees.
 static int config_failing_auto_table(Config *config, players_data_t type,
-                                     const char **names[2], bool use_mmap) {
+                                     const char **names[2], bool use_mmap,
+                                     char **why) {
   for (int player_idx = 0; player_idx < 2; player_idx++) {
     if (!*names[player_idx] || !config->table_auto[type][player_idx]) {
       continue;
@@ -8786,6 +8791,9 @@ static int config_failing_auto_table(Config *config, players_data_t type,
                      player_idx == 0 ? *names[0] : NULL,
                      player_idx == 1 ? *names[1] : NULL, use_mmap, errors);
     const bool failed = !error_stack_is_empty(errors);
+    if (failed) {
+      *why = error_stack_get_string_and_reset(errors);
+    }
     error_stack_destroy(errors);
     if (failed) {
       return player_idx;
@@ -8801,21 +8809,21 @@ static void config_load_tables_or_leave_out(Config *config, players_data_t type,
                                             const char **names[2],
                                             bool use_mmap,
                                             ErrorStack *error_stack) {
-  config_skip_left_out_tables(config, type, names);
   while (true) {
     players_data_set(config->players_data, type, config->data_paths, *names[0],
                      *names[1], use_mmap, error_stack);
     if (error_stack_is_empty(error_stack)) {
       return;
     }
+    char *why = NULL;
     const int failing =
-        config_failing_auto_table(config, type, names, use_mmap);
+        config_failing_auto_table(config, type, names, use_mmap, &why);
     if (failing < 0) {
       return;
     }
-    char *error = error_stack_get_string_and_reset(error_stack);
-    config_leave_out_table(config, type, names, failing, trim(error));
-    free(error);
+    error_stack_reset(error_stack);
+    config_leave_out_table(config, type, names, failing, trim(why));
+    free(why);
   }
 }
 
@@ -11211,6 +11219,19 @@ config_contribute_reload_changed_ld_and_layout(Config *config,
   }
 }
 
+// Forgets every table check and left-out table, for when the data they were
+// made against changes under the same name.
+static void config_forget_table_verdicts(Config *config) {
+  for (int type = 0; type < NUMBER_OF_DATA; type++) {
+    for (int player_idx = 0; player_idx < 2; player_idx++) {
+      free(config->table_left_out[type][player_idx]);
+      config->table_left_out[type][player_idx] = NULL;
+      free(config->table_checked[type][player_idx]);
+      config->table_checked[type][player_idx] = NULL;
+    }
+  }
+}
+
 // Players' lexical data is cached in memory by *name*: a load that finds a
 // KWG, KLV, wordmap or rack info table of the requested name already loaded
 // keeps it and never opens the file. What a task has verified, though, is the
@@ -11242,6 +11263,9 @@ static void config_contribute_evict_changed_data(Config *config) {
     }
     if (changed) {
       players_data_evict(config->players_data, type);
+      // What was checked or left out was against the old file, and a reload
+      // can keep the name and even the address.
+      config_forget_table_verdicts(config);
     }
   }
 }

@@ -485,6 +485,24 @@ void test_peg_poll(void) {
   assert(has_substring(json, "\"spread\":0.000000"));
   assert(has_substring(json, "\"seconds\":0.000"));
   free(json);
+  // A cut play has a bound, not counts, and solved plays are listed even when
+  // cut bounds fill the entries.
+  synthetic.entries[0].cut = true;
+  synthetic.entries[0].weight_sum = 8;
+  synthetic.entries[0].win_pct = 0.5;
+  synthetic.solved_rows[0] = synthetic.entries[0];
+  synthetic.solved_rows[0].cut = false;
+  synthetic.solved_rows[0].win_count = 3;
+  synthetic.n_solved_rows = 1;
+  json = peg_snapshot_get_json(&synthetic, game);
+  assert(has_substring(json, "\"wins\":null,\"ties\":null,\"losses\":null"));
+  assert(has_substring(json, "\"cut\":true"));
+  assert(has_substring(json, "\"solved\":[{"));
+  assert(has_substring(json, "\"wins\":3,\"ties\":0,\"losses\":5"));
+  free(json);
+  synthetic.entries[0].cut = false;
+  synthetic.entries[0].weight_sum = 0;
+  synthetic.n_solved_rows = 0;
   if (test_platform_has_host_locales()) {
     char *saved_locale = string_duplicate(setlocale(LC_NUMERIC, NULL));
     if (setlocale(LC_NUMERIC, "de_DE.UTF-8")) {

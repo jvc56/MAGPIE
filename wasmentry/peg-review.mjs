@@ -18,7 +18,8 @@ export function mergePegRows(previous, parsed, progress) {
       ...row,
       depth: depthLabel(row.depth),
     });
-  for (const row of progress.entries)
+  const evaluatedRows = [...progress.entries, ...(progress.solved ?? [])];
+  for (const row of evaluatedRows)
     rows.set(row.move, {
       ...rows.get(row.move),
       ...row,
@@ -35,7 +36,7 @@ export function mergePegRows(previous, parsed, progress) {
           row.depth === "current" ? depthLabel(progress.depth) : row.depth,
       });
   const field = new Set(progress.moves);
-  const evaluated = new Set(progress.entries.map((row) => row.move));
+  const evaluated = new Set(evaluatedRows.map((row) => row.move));
   const completeField =
     progress.stage > 0 && field.size >= progress.fieldSize;
   for (const row of rows.values()) {
