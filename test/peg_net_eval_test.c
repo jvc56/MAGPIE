@@ -2121,6 +2121,58 @@ static void peg_sim_trace_write(PegSimTrace *trace, int worker_index,
   cpthread_mutex_unlock(&trace->mutex);
 }
 
+// PEG_SIM_SAMPLES=PATH: every rollout of the sims, for replaying sampling rules
+// offline (a candidate's n-th rollout has the same world in every rule). Each
+// is seven little-endian uint32s: root, arm * 256 + the candidate's static
+// rank, the seed's low and high words, the utility's double bits (low word,
+// high word) and the rollout's wall microseconds, from its first hooked ply to
+// its end (0 when no ply was hooked). With it, every arm's rollouts take the
+// hook, the static arms' too (where it declines every ply: the same moves).
+typedef struct PegSimSamples {
+  FILE *out;
+  cpthread_mutex_t mutex;
+  int root;
+  int arm;
+  const MoveList *pool;
+  // Per worker, when its rollout's first hooked ply came, or 0.
+  int64_t *start_ns;
+} PegSimSamples;
+
+static void peg_sim_sample_write(PegSimSamples *samples, int worker_index,
+                                 const Move *candidate, uint64_t seed,
+                                 double utility) {
+  const int64_t start = samples->start_ns[worker_index];
+  const int64_t now = ctimer_monotonic_ns();
+  samples->start_ns[worker_index] = 0;
+  int rank = -1;
+  for (int idx = 0; idx < move_list_get_count(samples->pool) && rank < 0;
+       idx++) {
+    if (compare_moves_without_equity(
+            candidate, move_list_get_move(samples->pool, idx), true) == -1) {
+      rank = idx;
+    }
+  }
+  if (rank < 0) {
+    log_fatal("pegsim sample of a move not in the candidates");
+  }
+  uint64_t utility_bits;
+  memcpy(&utility_bits, &utility, sizeof(utility_bits));
+  const uint32_t record[7] = {
+      (uint32_t)samples->root,
+      (uint32_t)(samples->arm * 256 + rank),
+      (uint32_t)seed,
+      (uint32_t)(seed >> 32),
+      (uint32_t)utility_bits,
+      (uint32_t)(utility_bits >> 32),
+      start != 0 ? (uint32_t)((now - start) / 1000) : 0,
+  };
+  cpthread_mutex_lock(&samples->mutex);
+  if (!fwrite_le_uint32s(record, 7, samples->out)) {
+    log_fatal("pegsim could not write a sample");
+  }
+  cpthread_mutex_unlock(&samples->mutex);
+}
+
 // SimArgs.rollout_move_fn for pegsim. With nets, the 1PEG network chooses
 // with one tile in the bag and the 2PEG chooser with two (both from the
 // on-turn player's information: their rack, the board and the unseen counts);
@@ -2133,12 +2185,16 @@ typedef struct PegSimRolloutPolicy {
   Peg2NetChooser *chooser;
   PegSimRolloutEndgame *endgame;
   PegSimTrace *trace;
+  PegSimSamples *samples;
 } PegSimRolloutPolicy;
 
 static bool peg_sim_rollout_move(void *context, int worker_index,
                                  const Game *game, Move *move) {
   PegSimRolloutPolicy *hook = context;
   const int64_t start = hook->trace != NULL ? ctimer_monotonic_ns() : 0;
+  if (hook->samples != NULL && hook->samples->start_ns[worker_index] == 0) {
+    hook->samples->start_ns[worker_index] = ctimer_monotonic_ns();
+  }
   char kind = 'S';
   if (hook->endgame != NULL && !game_over(game) &&
       bag_get_letters(game_get_bag(game)) == 0) {
@@ -2155,6 +2211,14 @@ static bool peg_sim_rollout_move(void *context, int worker_index,
     peg_sim_trace_write(hook->trace, worker_index, game, kind, start);
   }
   return kind != 'S';
+}
+
+// SimArgs.rollout_done_fn for pegsim with PEG_SIM_SAMPLES.
+static void peg_sim_rollout_done(void *context, int worker_index,
+                                 const Move *candidate, uint64_t seed,
+                                 double utility) {
+  const PegSimRolloutPolicy *hook = context;
+  peg_sim_sample_write(hook->samples, worker_index, candidate, seed, utility);
 }
 
 enum {
@@ -2287,6 +2351,16 @@ void peg_sim_mode(const StringSplitter *fields) {
       hooks[arm].trace = &trace;
     }
   }
+  PegSimSamples samples = {.out = NULL};
+  const char *samples_path = getenv("PEG_SIM_SAMPLES");
+  if (samples_path != NULL) {
+    samples.out = fopen_exclusive_or_die(samples_path, "wb");
+    cpthread_mutex_init(&samples.mutex);
+    samples.start_ns = calloc_or_die((size_t)threads, sizeof(int64_t));
+    for (int arm = 0; arm < PEG_SIM_MAX_ARMS; arm++) {
+      hooks[arm].samples = &samples;
+    }
+  }
   MoveList *wide = move_list_create(PEG_WORLD_ALL_PLACEMENTS_CAP);
   Move *wide_moves = malloc_or_die(sizeof(Move) * PEG_WORLD_ALL_PLACEMENTS_CAP);
   MoveList *pool = move_list_create(max_candidates);
@@ -2331,6 +2405,12 @@ void peg_sim_mode(const StringSplitter *fields) {
       peg_sim_endgame_clear_tt(&endgame);
       trace.root = root_id;
       trace.arm = arm;
+      samples.root = root_id;
+      samples.arm = arm;
+      samples.pool = pool;
+      for (int worker = 0; worker < threads && samples.out != NULL; worker++) {
+        samples.start_ns[worker] = 0;
+      }
       const bool timed = arm == 2 || arm == 5;
       const double time_limit = arm == 2   ? arm_seconds[1]
                                 : arm == 5 ? arm_seconds[3]
@@ -2353,9 +2433,13 @@ void peg_sim_mode(const StringSplitter *fields) {
                     NULL, &sim_args);
       sim_args.bag_cycle = false;
       sim_args.pat_rollout_disabled = true;
-      if (hooks[arm].nets || hooks[arm].endgame != NULL) {
+      if (hooks[arm].nets || hooks[arm].endgame != NULL ||
+          samples.out != NULL) {
         sim_args.rollout_move_fn = peg_sim_rollout_move;
         sim_args.rollout_move_context = &hooks[arm];
+      }
+      if (samples.out != NULL) {
+        sim_args.rollout_done_fn = peg_sim_rollout_done;
       }
       int64_t eg_calls_before = 0;
       double eg_ms_before = 0;
@@ -2461,6 +2545,10 @@ void peg_sim_mode(const StringSplitter *fields) {
   config_destroy(config);
   if (trace.out != NULL) {
     fclose(trace.out);
+  }
+  if (samples.out != NULL) {
+    fclose(samples.out);
+    free(samples.start_ns);
   }
 }
 
