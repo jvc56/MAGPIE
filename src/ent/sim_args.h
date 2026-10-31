@@ -24,6 +24,14 @@
 typedef bool (*sim_rollout_move_fn)(void *context, int worker_index,
                                     const Game *game, Move *move);
 
+// Called after each rollout of a sim with a rollout_move_fn, with the same
+// context: the candidate the rollout sampled, the seed of its world (every
+// candidate's n-th rollout has the same seed) and its utility. For recording a
+// sim's samples.
+typedef void (*sim_rollout_done_fn)(void *context, int worker_index,
+                                    const Move *candidate, uint64_t seed,
+                                    double utility);
+
 typedef struct SimArgs {
   int num_plies;
   const Game *game;
@@ -80,6 +88,9 @@ typedef struct SimArgs {
   // bag_cycle. sim_args_fill clears it.
   sim_rollout_move_fn rollout_move_fn;
   void *rollout_move_context;
+  // Optional with rollout_move_fn; see sim_rollout_done_fn. sim_args_fill
+  // clears it.
+  sim_rollout_done_fn rollout_done_fn;
 } SimArgs;
 
 // Unlike endgame_args_fill and peg_args_fill, this does NOT take a parameter
@@ -148,6 +159,7 @@ sim_args_fill(const int num_plies, const MoveList *move_list,
   sim_args->bag_cycle = false;
   sim_args->rollout_move_fn = NULL;
   sim_args->rollout_move_context = NULL;
+  sim_args->rollout_done_fn = NULL;
   // Start fresh, not resuming a prior SimResults. Only the TUI's analysis-
   // resume path sets this true; every other caller fills SimArgs through
   // here, so leaving it uninitialized let stack garbage spuriously trigger

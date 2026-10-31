@@ -454,9 +454,10 @@ typedef struct Simmer {
   bool use_margin_forecast;
   // SimArgs.bag_cycle.
   bool bag_cycle;
-  // SimArgs.rollout_move_fn and its context.
+  // SimArgs.rollout_move_fn, its context and SimArgs.rollout_done_fn.
   sim_rollout_move_fn rollout_move_fn;
   void *rollout_move_context;
+  sim_rollout_done_fn rollout_done_fn;
   ThreadControl *thread_control;
   SimResults *sim_results;
   // The best moves the current simulation's playouts found, by rack, shared
@@ -769,6 +770,11 @@ rv_sim_sample_impl(RandomVariables *rvs, const uint64_t play_index,
   if (!simmer->bag_cycle) {
     utility = sim_rollout(simmer, simmer_worker, simmed_play, seed, 0, record,
                           rollout_hook);
+    if (rollout_hook && simmer->rollout_done_fn != NULL) {
+      simmer->rollout_done_fn(simmer->rollout_move_context,
+                              simmer_worker->worker_index,
+                              simmed_play_get_move(simmed_play), seed, utility);
+    }
     // A recorded sample is counted when its record is applied.
     if (!record) {
       sim_results_increment_iteration_count(sim_results);
@@ -833,6 +839,7 @@ static void simmer_set_rollout_move(RandomVariables *rvs, Simmer *simmer,
   }
   simmer->rollout_move_fn = sim_args->rollout_move_fn;
   simmer->rollout_move_context = sim_args->rollout_move_context;
+  simmer->rollout_done_fn = sim_args->rollout_done_fn;
   if (sim_args->rollout_move_fn != NULL) {
     rvs->sample_func = rv_sim_hooked_sample;
     rvs->sample_into_record_func = rv_sim_hooked_sample_into_record;
