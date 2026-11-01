@@ -26,6 +26,7 @@
 #include "../src/ent/stats.h"
 #include "../src/ent/thread_control.h"
 #include "../src/ent/transposition_table.h"
+#include "../src/ent/xoshiro.h"
 #include "../src/impl/bai.h"
 #include "../src/impl/cgp.h"
 #include "../src/impl/config.h"
@@ -2527,6 +2528,9 @@ void peg_sim_mode(const StringSplitter *fields) {
       const MoveList *sim_pool = pool;
       if (prefilter > 0 && (arm == 1 || arm == 3 || arm == 4)) {
         move_list_reset(sub_pool);
+        // The sim reads the mover's rack from its move list to tell which
+        // plays are similar (move_get_similarity_key).
+        move_list_set_rack(sub_pool, move_list_get_rack(pool));
         for (int idx = 0; idx < prefilter && idx < cands; idx++) {
           move_list_add_move(sub_pool,
                              move_list_get_move(pool, static_order[idx]));
@@ -2870,6 +2874,48 @@ static double *peg_sim_bai_table(const PegSimRecordedSample *samples, size_t lo,
   return table;
 }
 
+// Puts each candidate's row of table (per_cand samples in seed order, as
+// peg_sim_bai_table lays them out from first, candidate 0's samples) into the
+// order a live sim draws their seeds: every simmed play's seeds are the stream
+// of one PRNG seeded with the sim's seed.
+static void peg_sim_bai_stream_order(double *table, const int n_cands,
+                                     const size_t per_cand,
+                                     const PegSimRecordedSample *first,
+                                     const uint64_t sim_seed) {
+  size_t *order = malloc_or_die(sizeof(size_t) * per_cand);
+  XoshiroPRNG *prng = prng_create(sim_seed);
+  for (size_t ordinal = 0; ordinal < per_cand; ordinal++) {
+    const uint64_t drawn = prng_next(prng);
+    size_t low = 0;
+    size_t high = per_cand;
+    while (low < high) {
+      const size_t middle = low + (high - low) / 2;
+      if (first[middle].seed < drawn) {
+        low = middle + 1;
+      } else {
+        high = middle;
+      }
+    }
+    if (low == per_cand || first[low].seed != drawn) {
+      log_fatal("pegsimbai root %d: rollout %zu of the seed stream was not "
+                "recorded",
+                first[0].root, ordinal);
+    }
+    order[ordinal] = low;
+  }
+  prng_destroy(prng);
+  double *row = malloc_or_die(sizeof(double) * per_cand);
+  for (int cand = 0; cand < n_cands; cand++) {
+    double *cand_row = &table[(size_t)cand * per_cand];
+    for (size_t ordinal = 0; ordinal < per_cand; ordinal++) {
+      row[ordinal] = cand_row[order[ordinal]];
+    }
+    memcpy(cand_row, row, sizeof(double) * per_cand);
+  }
+  free(row);
+  free(order);
+}
+
 void peg_sim_bai_replay_mode(const StringSplitter *fields) {
   const int n_fields = string_splitter_get_number_of_items(fields);
   if (n_fields < 4) {
@@ -2878,6 +2924,16 @@ void peg_sim_bai_replay_mode(const StringSplitter *fields) {
   }
   const char *arm_env = getenv("PEG_SIM_BAI_ARM");
   const int arm = arm_env != NULL ? atoi(arm_env) : 3;
+  // PEG_SIM_BAI_STREAM=SEED: rollouts in the order a live sim with
+  // PEG_SIM_SEED=SEED draws them (see peg_sim_bai_stream_order) rather than
+  // in seed order.
+  const char *stream_env = getenv("PEG_SIM_BAI_STREAM");
+  const uint64_t stream_seed =
+      stream_env != NULL ? strtoull(stream_env, NULL, 10) : 0;
+  // PEG_SIM_BAI_THREADS: BAI's threads (default 1); results must not depend
+  // on it.
+  const char *threads_env = getenv("PEG_SIM_BAI_THREADS");
+  const int bai_threads = threads_env != NULL ? atoi(threads_env) : 1;
   const int n_schemes = n_fields - 3;
   PegSimBaiScheme *schemes =
       malloc_or_die(sizeof(PegSimBaiScheme) * (size_t)n_schemes);
@@ -2912,6 +2968,10 @@ void peg_sim_bai_replay_mode(const StringSplitter *fields) {
     int n_cands;
     size_t per_cand;
     double *table = peg_sim_bai_table(samples, lo, hi, &n_cands, &per_cand);
+    if (stream_env != NULL) {
+      peg_sim_bai_stream_order(table, n_cands, per_cand, &samples[lo],
+                               stream_seed + (uint64_t)root_id);
+    }
     // Candidates by the static arm's mean utility, best first, equal means in
     // static order (as PEG_SIM_PREFILTER orders them).
     int *static_order = malloc_or_die(sizeof(int) * (size_t)n_cands);
@@ -2988,6 +3048,7 @@ void peg_sim_bai_replay_mode(const StringSplitter *fields) {
         };
         RandomVariables *rvs = rvs_create(&rv_args);
         thread_control_set_status(control, THREAD_CONTROL_STATUS_STARTED);
+        schemes[scheme].options.num_threads = bai_threads;
         bai(&schemes[scheme].options, rvs, control, NULL, bai_result);
         rvs_destroy(rvs);
         pick = bai_result_get_best_arm(bai_result);

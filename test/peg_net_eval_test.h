@@ -137,11 +137,12 @@ void peg_sim_mode(const StringSplitter *fields);
 // root, arm PEG_SIM_BAI_ARM's (default 3) rollouts become a table of random
 // variables (RANDOM_VARIABLES_TABLE: candidate c's n-th sample is its n-th
 // rollout in seed order, the same world for every candidate; past the last,
-// they start over), and each scheme's BAI runs on one thread with the GK16
-// threshold. Fields: samples file, output CSV, then schemes
-// NAME=RULE,SCOND,MIN,LIMIT[,elim][,preK][,zZ][,capN] (rule rr or tt, the
-// stopping confidence in percent, iterations per candidate first, the cap on
-// all rollouts; elim sets BAIOptions.eliminate; preK limits BAI to the K
+// they start over; with PEG_SIM_BAI_STREAM=SEED, in the order a live sim with
+// PEG_SIM_SEED=SEED draws their seeds instead), and each scheme's BAI runs on
+// one thread with the GK16 threshold. Fields: samples file, output CSV, then
+// schemes NAME=RULE,SCOND,MIN,LIMIT[,elim][,preK][,zZ][,capN] (rule rr or tt,
+// the stopping confidence in percent, iterations per candidate first, the cap
+// on all rollouts; elim sets BAIOptions.eliminate; preK limits BAI to the K
 // candidates arm 0's recorded rollouts rank best, as PEG_SIM_PREFILTER does;
 // zZ eliminates at Z standard errors, BAIOptions.elimination_z; capN gives no
 // candidate more than N, BAIOptions.arm_sample_limit).
