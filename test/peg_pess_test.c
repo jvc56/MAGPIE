@@ -378,10 +378,10 @@ static PegPessOut peg_pess_base_case(PegPessSolver *s) {
       .skip_word_pruning = s->skip_word_pruning,
       .soft_time_limit = s->endgame_time,
       .hard_time_limit = s->endgame_time,
-      // Strict mid-search interruption: soft/hard_time_limit only gate between
-      // IDS depth iterations, so a single pathological iteration can run
-      // unbounded. external_deadline_ns is checked inside alpha-beta, giving a
-      // hard wall-clock cap per solve.
+      // Strict mid-search interruption: hard_time_limit lets the first IDS
+      // depth finish, so a single pathological iteration can run unbounded.
+      // external_deadline_ns also stops that one, giving a hard wall-clock cap
+      // per solve.
       .external_deadline_ns =
           s->endgame_time > 0.0
               ? ctimer_monotonic_ns() + (int64_t)(s->endgame_time * 1.0e9)

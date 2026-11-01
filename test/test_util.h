@@ -150,4 +150,8 @@ void assert_config_exec_status(Config *config, const char *cmd,
                                error_code_t expected_error_code);
 error_code_t get_config_exec_status(Config *config, const char *cmd);
 
+// Cuts the opponent's rack out of a CGP line ("<board> AB/CD ..." becomes
+// "<board> AB/ ...") in place, so a solve sees what the player sees.
+void strip_cgp_opp_rack(char *line);
+
 #endif

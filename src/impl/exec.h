@@ -3,6 +3,7 @@
 #define EXEC_H
 
 #include "../def/config_defs.h"
+#include "../def/exec_defs.h"
 #include "../util/io_util.h"
 #include "config.h"
 
@@ -15,6 +16,7 @@ bool run_str_api_command(Config *config, ErrorStack *error_stack,
 bool load_command_sync(Config *config, ErrorStack *error_stack,
                        const char *command);
 char *command_search_status(Config *config, bool should_exit);
+async_token_t parse_async_command(const char *command, StringBuilder *sb);
 void caches_destroy(void);
 void process_command_default(int argc, char *argv[]);
 void process_command_with_config_args(int argc, char *argv[],

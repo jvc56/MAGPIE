@@ -198,10 +198,16 @@ static inline void read_wmp_entries_from_stream(WMPEntry *entries, uint32_t n,
   }
 }
 
+// Too short to hold a header leaves version 0, which no wordmap has.
 static inline void read_header_from_stream(WMP *wmp, FILE *stream) {
-  read_byte_from_stream(&wmp->version, stream);
-  read_byte_from_stream(&wmp->board_dim, stream);
-  read_uint32_from_stream(&wmp->max_word_lookup_bytes, stream);
+  wmp->version = 0;
+  if (fread(&wmp->version, sizeof(uint8_t), 1, stream) != 1 ||
+      fread(&wmp->board_dim, sizeof(uint8_t), 1, stream) != 1 ||
+      fread(&wmp->max_word_lookup_bytes, sizeof(uint32_t), 1, stream) != 1) {
+    wmp->version = 0;
+    return;
+  }
+  wmp->max_word_lookup_bytes = le32toh(wmp->max_word_lookup_bytes);
 }
 
 static inline void read_wfl_blankless_words(WMPForLength *wfl, uint32_t len,
@@ -362,6 +368,75 @@ static inline void read_wmp_for_length(WMP *wmp, uint32_t len, FILE *stream) {
   wfl_build_word_index(wfl);
 }
 
+// Moves past `count` items of `item_bytes` each, which the bytes left must
+// hold.
+static inline bool wmp_stream_skip(FILE *stream, uint64_t count,
+                                   uint64_t item_bytes, int64_t *bytes_left) {
+  const uint64_t bytes = count * item_bytes;
+  if (bytes > (uint64_t)*bytes_left) {
+    return false;
+  }
+  *bytes_left -= (int64_t)bytes;
+  // Whole tables can pass the 2 GB a long seek is limited to.
+  uint64_t unseen = bytes;
+  while (unseen > 0) {
+    const long step = unseen > 0x40000000 ? 0x40000000 : (long)unseen;
+    if (fseek(stream, step, SEEK_CUR) != 0) {
+      return false;
+    }
+    unseen -= (uint64_t)step;
+  }
+  return true;
+}
+
+// Reads a section's count: the number of `count_bonus` less than the items of
+// `item_bytes` each that follow it, and moves past them.
+static inline bool wmp_stream_skip_section(FILE *stream, uint64_t item_bytes,
+                                           uint64_t count_bonus,
+                                           int64_t *bytes_left,
+                                           uint32_t *count) {
+  if (*bytes_left < (int64_t)sizeof(uint32_t) ||
+      fread(count, sizeof(uint32_t), 1, stream) != 1) {
+    return false;
+  }
+  *bytes_left -= (int64_t)sizeof(uint32_t);
+  *count = le32toh(*count);
+  return wmp_stream_skip(stream, (uint64_t)*count + count_bonus, item_bytes,
+                         bytes_left);
+}
+
+// Whether the sections a wordmap's header promises are all in its `file_bytes`
+// bytes, walked by their counts before any is allocated: a truncated file's
+// counts can ask for any amount. Leaves the stream where it found it.
+static inline bool wmp_stream_is_complete(FILE *stream, int64_t file_bytes) {
+  const long start = ftell(stream);
+  if (start < 0 || file_bytes < start) {
+    return false;
+  }
+  int64_t bytes_left = file_bytes - start;
+  bool complete = true;
+  for (uint32_t len = 2; complete && len <= BOARD_DIM; len++) {
+    uint32_t count = 0;
+    // Word buckets, word entries, word letters, blank buckets, blank entries,
+    // double blank buckets and double blank entries, as read_wmp_for_length
+    // reads them.
+    complete = wmp_stream_skip_section(stream, sizeof(uint32_t), 1, &bytes_left,
+                                       &count) &&
+               wmp_stream_skip_section(stream, sizeof(WMPEntry), 0, &bytes_left,
+                                       &count) &&
+               wmp_stream_skip_section(stream, len, 0, &bytes_left, &count) &&
+               wmp_stream_skip_section(stream, sizeof(uint32_t), 1, &bytes_left,
+                                       &count) &&
+               wmp_stream_skip_section(stream, sizeof(WMPEntry), 0, &bytes_left,
+                                       &count) &&
+               wmp_stream_skip_section(stream, sizeof(uint32_t), 1, &bytes_left,
+                                       &count) &&
+               wmp_stream_skip_section(stream, sizeof(WMPEntry), 0, &bytes_left,
+                                       &count);
+  }
+  return fseek(stream, start, SEEK_SET) == 0 && complete;
+}
+
 static inline void wmp_load_from_filename_with_stream(WMP *wmp,
                                                       const char *wmp_name,
                                                       const char *wmp_filename,
@@ -393,6 +468,14 @@ static inline void wmp_load_from_filename_with_stream(WMP *wmp,
             "wmp maximum word lookup size of %u bytes exceeds the supported "
             "limit of %d bytes: %s\n",
             wmp->max_word_lookup_bytes, WMP_RESULT_BUFFER_SIZE, wmp_filename));
+    return;
+  }
+  CFileIdentity identity;
+  if (cfile_identity(wmp_filename, &identity) &&
+      !wmp_stream_is_complete(stream, identity.size)) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_RW_READ_ERROR,
+        get_formatted_string("wmp file is incomplete: %s\n", wmp_filename));
     return;
   }
   // IMPORTANT: the name must only be set once there are no more possible

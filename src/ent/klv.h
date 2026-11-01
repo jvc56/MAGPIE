@@ -53,6 +53,19 @@ static inline uint64_t klv_get_instance_fingerprint(const KLV *klv) {
 
 static inline const KWG *klv_get_kwg(const KLV *klv) { return klv->kwg; }
 
+// FNV-1a over the leave values and the graph that indexes them: identifies
+// the leaves a derived table (a rack info table) was built from, as
+// kwg_get_hash identifies a word graph. Unlike the instance fingerprint, two
+// loads of the same file hash the same.
+static inline uint64_t klv_get_hash(const KLV *klv) {
+  uint64_t hash = kwg_get_hash(klv->kwg);
+  hash = fnv64a_step(hash, (uint64_t)klv->number_of_leaves);
+  for (uint32_t leave_idx = 0; leave_idx < klv->number_of_leaves; leave_idx++) {
+    hash = fnv64a_step(hash, (uint64_t)(uint32_t)klv->leave_values[leave_idx]);
+  }
+  return hash;
+}
+
 static inline uint32_t klv_get_number_of_leaves(const KLV *klv) {
   return klv->number_of_leaves;
 }

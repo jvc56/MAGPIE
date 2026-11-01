@@ -309,18 +309,20 @@ magpie> g
 magpie> s
 ```
 
-To print more details about commands and settings, run the `help` command:
+To list the commands by task, run the `help` command:
 
 ```
 magpie> help
 ```
 
-To see details for a specific command or setting, provide the command or setting when invoking the help command:
+To see a command's usage and the options it uses, or what an option does and which commands use it, provide the command or option when invoking the help command:
 
 ```
 magpie> help autoplay
-magpie> help lex
+magpie> help numplays
 ```
+
+To list options rather than commands, ask for `help options`, or for `help setup`, `help tables`, `help display` or `help session` for the options shared across commands.
 
 ### Load and Save Settings
 
@@ -390,6 +392,22 @@ which produces `bin/libmagpie.so` (`bin/libmagpie.dylib` on macOS) exporting onl
 The API is command-oriented: callers create an opaque `Magpie` handle, pass it the same command strings the console accepts, and read the resulting output back as a string. Output is machine readable by default; the `*_human_readable` function variants format it for display instead. Commands can run synchronously (`magpie_run_sync`) or on a background thread (`magpie_run_async`), with `magpie_get_last_command_status_message` for mid-run progress, `magpie_stop_current_command` to interrupt, and `magpie_await` to collect the result. All returned strings are owned by the caller and freed with `magpie_free_string`.
 
 See `examples/generate_moves.c` for a minimal C client (build it with `make examples`) and `examples/magpie.py` for a Python ctypes wrapper with an interactive REPL.
+
+### Defaults
+
+Word maps (WMP), rack info tables (RIT) and word info tables (WIT) only make move generation faster; none of them changes which move is chosen. PAT changes static equity, so it changes moves.
+
+The command line program and the library's `magpie_create()` set `-wmp`, `-wit` and `-rit` to `auto`: each table is used when this machine has the disk to store it and the memory to hold it, beside the search table a solve allocates, and is otherwise left out, with a line saying why. They share the room by value per byte: wordmaps first (3-4x faster on their own), then word info tables (about 9% on a simulation), then rack info tables (about 17%, but 1.9 GB for English). A missing table is built on first use for data from `data fetch`, with a line saying what is being built, the disk it will take and the memory its build peaks at; a rack info table is built from its lexicon's wordmap, so a missing wordmap counts against its room too. For other data, the line names the `convert` command that builds a missing table. The tables built this way are listed in `auto_tables.txt` in the data directory, and are the only ones MAGPIE ever deletes: when a build needs the room, or when together they pass 8 GB, the ones used least recently go (and are built again when a lexicon needs them). A rack info table records the lexicon and leaves it was built from; one built from others is left out under `auto` and is an error under `true`. `true` requires a table, and `false` never uses one. The settings file records `auto` as `auto`, not what one machine decided.
+
+| | WMP (`-wmp`) | RIT (`-rit`) | WIT (`-wit`) | PAT (`-pat`) |
+|---|---|---|---|---|
+| Command line program | auto | auto | auto | Off |
+| Library, `magpie_create()` | auto | auto | auto | Off |
+| Library, `magpie_create_with_options()` | auto, or off | auto, or off | auto, or off | Off |
+| Browser build | Off until the page installs a word map | Off | Off | Off |
+| `contribute` tasks | Each task chooses, and a table is skipped when the machine has no room for it | Each task chooses | Each task chooses | Never loaded |
+
+A rack info table caches the leave values of one set of leaves, so it is named for its lexicon and leaves: `<lexicon>.<leaves>.rit`, or `<lexicon>.rit` for the lexicon's own leaves.
 
 ## Data
 
@@ -626,7 +644,8 @@ magpie> infer
 
 The `peg` command solves a pre-endgame (1 to 4 tiles in the bag): for each
 candidate move it enumerates the possible bag/opponent-rack orderings, solves
-the resulting endgames, and reports each move's win percentage and spread.
+the resulting endgames, and reports each move's wins, draws, losses and win
+percentage.
 
 Load a position with `cgp` and run `peg`:
 
@@ -635,85 +654,67 @@ magpie> cgp 15/3Q7U3/3U2TAURINE2/1CHANSONS2W3/2AI6JO3/DIRL1PO3IN3/E1D2EF3V4/F1I2
 magpie> peg
 ```
 
-By default the solver generates all root moves and assumes a **rational**
-opponent (it replies with its best-equity move). An optional positional
-argument restricts the search to a fixed set of root candidates instead of
-generating all moves. Moves are comma-separated UCGI with no spaces —
-coordinate and tiles joined by a period, pass as `pass` (exchanges are not
-valid PEG moves):
+By default the solve is **complete** and counts only results: a win by 1 is as
+good as a win by 100. Every candidate is solved, each endgame searched 3 plies
+deep (`-pegplies`), and a candidate is cut once its losses and draws show it
+cannot reach the best one. A line still going at that depth is finished by a
+greedy playout, so the results are estimates; `-pegplies end` searches every
+endgame to the end of the game, which makes the best move and its win% exact.
+Cut candidates show the most they could have reached (`<=`), and spreads are
+not shown. The opponent is **pessimistic**: wherever it replies, it plays as if
+it could see your rack and the bag order. Tiles the opponent is known to hold,
+on its rack in the position or returned there after a challenged-off phony, are
+kept on its rack in every scenario.
+
+The first argument chooses the candidates, and an optional second one lists
+moves to add to them and keep through every stage. Moves are comma-separated
+UCGI with no spaces -- coordinate and tiles joined by a period, pass as
+`pass`:
 
 ```
-magpie> peg 13L.ONYX,13L.OXY
+magpie> peg                          # plays that leave at most 1 tile in the bag
+magpie> peg all                      # every move
+magpie> peg empty                    # every play that empties the bag
+magpie> peg leaves2 13L.ONYX         # plays that leave at most 2 tiles, plus 13L ONYX
+magpie> peg only 13L.ONYX,13L.OXY    # exactly these moves
 ```
 
-The case-insensitive word `empty` restricts the search to every generated
-move that would empty the bag (plays at least as many tiles as remain in the
-bag):
+A bag of 5 to 7 tiles is accepted when every candidate leaves at most 4 of
+them.
 
-```
-magpie> peg empty
-```
+Several settings tune the search further; see `help peg` for full
+descriptions:
 
-Several settings tune the search further; see `help peg`, `help pnoprune`,
-etc. for full descriptions:
+- `-pegplies <plies|end>` sets how deep the complete solve searches each
+  endgame (default 3); `end` searches to the end of the game.
+- `-pegtlim <seconds>` gives the solve a time limit, which switches it to the
+  **staged cascade**: stage 0 greedy-evaluates every candidate, and each
+  halving stage keeps the best of them and re-ranks them at one more ply of
+  endgame depth. It returns the best answer it has when the limit hits, from
+  the last completed stage; a play the limit left unscored shows `-`. An
+  explicit `-pegtopk` also runs the cascade.
+- `-pegtopk <count1>,<count2>,...` sets the cascade's per-stage counts
+  (default `32,16,8,4,2`); `all` (or `0`) keeps every candidate in one deep
+  stage, and `default` undoes an earlier `-pegtopk`.
+- `-pegpess false` switches to a **rational** opponent, which chooses its
+  reply from what it can see; its choice is then scored on the actual racks.
+- `-pegndepth`, `-pegncaps` and `-pegnstrides` set how far, how wide and how
+  densely the nested pre-endgames of later turns are searched. A complete
+  solve nests until the game resolves, over every candidate and scenario.
+- `-pegstride <n>` samples ~1/n of the scenarios for bag >= 3 in the cascade
+  (faster, approximate).
+- `-threads <n>` is a pure speedup at the same answer (only which
+  candidates are cut, and the bounds they show, can vary).
 
-- `-pegpess true` switches to the **pessimistic** opponent model (the opponent
-  plays the worst-for-you reply) — i.e. guaranteed-win analysis.
-- `-pnoprune <moves>` protects moves from being cut by the halving cascade so
-  they are evaluated at full fidelity even if their win% rank falls below the cut.
-- `-pegtopk <count1>,<count2>,...` overrides the per-stage halving counts
-  (default `32,16,8,4,2`). Stage 0 always greedy-evaluates *every* candidate
-  play; each count is how many top plays are then kept and re-ranked at the next
-  ply of fidelity (so the default keeps the top 32 after stage 0, then narrows
-  16/8/4/2 across the halving stages). A single `all` (or `0`) is the
-  **exhaustive** setting: it keeps every candidate and solves each at full
-  endgame depth in one deep stage, with full scenario enumeration (it ignores
-  `-pegstride`).
-- `-pegstride <n>` samples ~1/n of the scenarios for bag >= 3 (faster, approximate).
-
-Use `-` to clear `pnoprune`.
-
-#### Speed vs. accuracy
-
-The same `peg` command spans a spectrum from a fast in-game estimate to an
-exhaustive analysis, controlled by a few knobs:
-
-- **Scenario coverage — `-pegstride`.** Stride `1` (the default) enumerates
-  *every* bag/opponent-rack ordering. `-pegstride <n>` instead samples ~1/n of
-  them (reweighted to preserve the expected aggregate), trading accuracy for
-  speed; it applies only at bag ≥ 3 (bag ≤ 2 is always fully enumerated). A
-  larger stride is the single biggest speedup.
-- **Search depth — `-pegtopk`.** A longer/wider schedule carries more candidates
-  into the deeper, higher-fidelity stages (where bag-emptying leaves are solved
-  further), so it is more accurate but slower; a shorter/narrower schedule is
-  faster and coarser. Stage 0 always greedy-scores *every* move, so even an
-  interrupted run returns a ranked answer.
-- **Time — `-tlim <seconds>`.** The solver returns the best answer it has when
-  the limit hits (stage 0 finishes first, then each halving stage refines). With
-  no limit it runs the full schedule to completion.
-- **Cores — `-threads <n>`.** Pure speedup at the same accuracy.
-
-So a quick in-game read might sample scenarios under a time cap, while an
-exhaustive study enumerates everything and solves to game end. The most thorough
-setting is `-pegtopk all`: after the greedy stage 0 it runs a single deep stage
-that keeps *every* candidate, enumerates *every* scenario (no stride), and solves
-each bag-emptying leaf at full endgame depth — no narrowing, no truncation:
-
-```
-magpie> peg -pegstride 7 -tlim 5    # fast: sampled, 5s cap
-magpie> peg                         # default: full enumeration, halving cascade, uncapped time
-magpie> peg -pegtopk all            # exhaustive: every play, full-depth endgame, no caps
-```
-
-(`-pegtopk all` — or `0` — forces full enumeration regardless of `-pegstride`;
-with no `-tlim` it is uncapped in time.) How far this extreme is practical
-depends on the bag: at **1-in-bag**, exhaustively solving every candidate is
-realistic for most positions given enough time; at **4-in-bag** it can take
-effectively forever — but you can still configure and run it.
-
-The leaf evaluation is an exact `endgame_solve` for bag-emptying scenarios but a
-greedy playout (averaged over the leftover-bag orderings) for the rest, so even
-the exhaustive end is a very strong estimate rather than a literal proof.
+At the default 3 plies, a 1-in-bag solve took a median 3.5 seconds on 10
+threads in ten positions, at most 22. The ten 1-in-the-bag games in
+`example_pegs/` took from under a second to 7 minutes, except one where every
+play wins every draw, so nothing can be cut, which ran past 15 minutes;
+`-pegplies 2` is a few times faster. To the end of the game (`-pegplies
+end`), it often takes several minutes, more when the opponent holds a blank,
+and at 2 to 4 in the bag well over twenty minutes; a time limit gives a quick,
+approximate answer instead. `analyze` solves 1-in-bag
+turns with PEG and simulates larger bags; `-apegmaxbag` raises the limit.
 
 ### Comparing lexica
 

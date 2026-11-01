@@ -35,6 +35,12 @@ typedef struct AnalyzeArgs {
   bool human_readable;
   bool show_mistakes;
   int max_num_display_plays;
+  // The largest bag solved with PEG, PEG_MIN_BAG..PEG_MAX_BAG; larger bags are
+  // simulated, and 0 simulates every pre-endgame turn.
+  int peg_max_bag;
+  // Endgame turns are solved with a full window (exact spreads); otherwise
+  // first-win, which proves only each play's result.
+  bool endgame_spread;
   const char *config_settings_str; // non-owning; set by caller, freed by caller
 } AnalyzeArgs;
 

@@ -200,7 +200,11 @@ void players_data_set_data(PlayersData *players_data,
   int data_index =
       players_data_get_player_data_index(players_data_type, player_index);
   players_data->data[data_index] = data;
-  players_data->use_when_available[data_index] = !!data;
+  // Loaded data is in use. No data leaves the setting as it was: a lexicon
+  // with no wordmap must not turn the wordmap off for the next lexicon.
+  if (data) {
+    players_data->use_when_available[data_index] = true;
+  }
 }
 
 void *players_data_create_data(players_data_t players_data_type,
@@ -429,6 +433,15 @@ void players_data_set(PlayersData *players_data,
             players_data_type, data_paths, input_data_names[player_index],
             use_mmap, error_stack);
         if (!error_stack_is_empty(error_stack)) {
+          // Player 0's new data has no slot yet: pass it through theirs.
+          if (player_index == 1 && existing_data_indexes[0] < 0) {
+            const int data_index =
+                players_data_get_player_data_index(players_data_type, 0);
+            void *existing_data = players_data->data[data_index];
+            players_data->data[data_index] = data_pointers[0];
+            players_data_destroy_data(players_data, players_data_type, 0);
+            players_data->data[data_index] = existing_data;
+          }
           return;
         }
         data_pointers[player_index] = generic_players_data;
@@ -466,7 +479,6 @@ void players_data_evict(PlayersData *players_data,
     if (player_index == 0 || !data_is_shared) {
       players_data_destroy_data(players_data, players_data_type, player_index);
     }
-    // Not players_data_set_data, which would also clear use_when_available.
     players_data->data[data_index] = NULL;
   }
   players_data_set_is_shared(players_data, players_data_type, false);
@@ -477,19 +489,27 @@ void players_data_evict(PlayersData *players_data,
 // each player's table with that player's KWG by hash, so a stale or mismatched
 // .wit fails to load rather than silently pruning legal plays. Tables built
 // from a bare word list carry no hash and are not checked.
+bool players_data_wit_matches_kwg(const PlayersData *players_data,
+                                  int player_index) {
+  const WordInfoTable *wit =
+      players_data_get_word_info_table(players_data, player_index);
+  const KWG *kwg = players_data_get_kwg(players_data, player_index);
+  if (wit == NULL || kwg == NULL) {
+    return true;
+  }
+  const uint64_t wit_kwg_hash = word_info_table_get_kwg_hash(wit);
+  return wit_kwg_hash == 0 || wit_kwg_hash == kwg_get_hash(kwg);
+}
+
 void players_data_validate_word_info_tables(const PlayersData *players_data,
                                             ErrorStack *error_stack) {
   for (int player_index = 0; player_index < 2; player_index++) {
+    if (players_data_wit_matches_kwg(players_data, player_index)) {
+      continue;
+    }
     const WordInfoTable *wit =
         players_data_get_word_info_table(players_data, player_index);
     const KWG *kwg = players_data_get_kwg(players_data, player_index);
-    if (wit == NULL || kwg == NULL) {
-      continue;
-    }
-    const uint64_t wit_kwg_hash = word_info_table_get_kwg_hash(wit);
-    if (wit_kwg_hash == 0 || wit_kwg_hash == kwg_get_hash(kwg)) {
-      continue;
-    }
     error_stack_push(
         error_stack, ERROR_STATUS_WIT_KWG_MISMATCH,
         get_formatted_string(
@@ -499,6 +519,22 @@ void players_data_validate_word_info_tables(const PlayersData *players_data,
             word_info_table_get_name(wit)));
     return;
   }
+}
+
+bool players_data_rit_matches_inputs(const PlayersData *players_data,
+                                     int player_index) {
+  const RackInfoTable *rit =
+      players_data_get_rack_info_table(players_data, player_index);
+  if (rit == NULL) {
+    return true;
+  }
+  const KWG *kwg = players_data_get_kwg(players_data, player_index);
+  const KLV *klv = players_data_get_klv(players_data, player_index);
+  const bool kwg_matches =
+      rit->kwg_hash == 0 || kwg == NULL || rit->kwg_hash == kwg_get_hash(kwg);
+  const bool klv_matches =
+      rit->klv_hash == 0 || klv == NULL || rit->klv_hash == klv_get_hash(klv);
+  return kwg_matches && klv_matches;
 }
 
 enum { RACK_INFO_TABLE_LEAVE_CHECK_ENTRIES = 1024 };
@@ -540,37 +576,25 @@ static bool rack_info_table_entry_matches_klv(const RackInfoTableEntry *entry,
          best_leaves[RACK_SIZE - 1] == best_all_but_one;
 }
 
-void players_data_validate_rack_info_tables(const PlayersData *players_data,
-                                            ErrorStack *error_stack) {
-  for (int player_index = 0; player_index < 2; player_index++) {
-    const RackInfoTable *rit =
-        players_data_get_rack_info_table(players_data, player_index);
-    const KLV *klv = players_data_get_klv(players_data, player_index);
-    if (rit == NULL || klv == NULL || rit->num_entries == 0) {
-      continue;
-    }
-    // A table stores leave values but not which KLV they came from, so check
-    // entries spread across it: two different leave tables disagree on the
-    // best leaves of almost every rack.
-    const uint32_t stride =
-        rit->num_entries / RACK_INFO_TABLE_LEAVE_CHECK_ENTRIES + 1;
-    for (uint32_t entry_index = 0; entry_index < rit->num_entries;
-         entry_index += stride) {
-      if (rack_info_table_entry_matches_klv(&rit->entries[entry_index], klv)) {
-        continue;
-      }
-      error_stack_push(
-          error_stack, ERROR_STATUS_RIT_KLV_MISMATCH,
-          get_formatted_string(
-              "rack info table '%s' was not built from leaves '%s' (player "
-              "%d); rebuild it with 'convert klvwmp2rit %s <letter "
-              "distribution> %s <lexicon>'\n",
-              rack_info_table_get_name(rit), klv_get_name(klv),
-              player_index + 1, rack_info_table_get_name(rit),
-              klv_get_name(klv)));
-      return;
+bool players_data_rit_matches_klv(const PlayersData *players_data,
+                                  int player_index) {
+  const RackInfoTable *rit =
+      players_data_get_rack_info_table(players_data, player_index);
+  const KLV *klv = players_data_get_klv(players_data, player_index);
+  if (rit == NULL || klv == NULL || rit->num_entries == 0) {
+    return true;
+  }
+  // Two different leave tables disagree on the best leaves of almost every
+  // rack.
+  const uint32_t stride =
+      rit->num_entries / RACK_INFO_TABLE_LEAVE_CHECK_ENTRIES + 1;
+  for (uint32_t entry_index = 0; entry_index < rit->num_entries;
+       entry_index += stride) {
+    if (!rack_info_table_entry_matches_klv(&rit->entries[entry_index], klv)) {
+      return false;
     }
   }
+  return true;
 }
 
 void players_data_reload(PlayersData *players_data,

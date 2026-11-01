@@ -913,6 +913,9 @@ function renderResults() {
         );
       } else if (mode === "sim" && (key === "win" || key === "equity")) {
         td.textContent = format(row[key], 1);
+      } else if (mode === "peg" && key === "win" && row.cut) {
+        // A cut play's win% is the most it could have reached.
+        td.textContent = `≤${format(row.win, 2)}`;
       } else
         td.textContent = ["equity", "win", "spread"].includes(key)
           ? format(row[key], mode === "endgame" ? 0 : 2)

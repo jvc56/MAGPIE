@@ -21,6 +21,7 @@
 #include "../src/util/fileproxy.h"
 #include "../src/util/io_util.h"
 #include "../src/util/string_util.h"
+#include "test_platform.h"
 #include "test_util.h"
 #include <assert.h>
 #include <inttypes.h>
@@ -388,6 +389,43 @@ static void test_blank_expansion_matches_reference(void) {
   wmp_destroy(wmp);
 }
 
+// The first `bytes` of the wordmap `from` as a file of its own.
+static void write_truncated_wmp(const char *from, const char *to,
+                                size_t bytes) {
+  FILE *in = fopen_or_die(from, "rb");
+  FILE *out = fopen_or_die(to, "wb");
+  uint8_t *contents = malloc_or_die(bytes);
+  const size_t read_bytes = fread(contents, 1, bytes, in);
+  assert(read_bytes == bytes);
+  const size_t written = fwrite(contents, 1, bytes, out);
+  assert(written == bytes);
+  free(contents);
+  fclose_or_die(in);
+  fclose_or_die(out);
+}
+
+// A truncated wordmap is an error, not an abort: its counts can ask for any
+// amount of memory, and a short read used to be fatal.
+static void test_truncated_wmp_is_an_error(void) {
+  char *dir = test_platform_make_temporary_directory("magpie_wmp_truncated");
+  char *path = get_formatted_string("%s/truncated.wmp", dir);
+  const size_t sizes[] = {1, 3, 6, 10, 1000, 100000};
+  ErrorStack *error_stack = error_stack_create();
+  for (size_t size_idx = 0; size_idx < sizeof(sizes) / sizeof(sizes[0]);
+       size_idx++) {
+    write_truncated_wmp("testdata/lexica/CSW21.wmp", path, sizes[size_idx]);
+    WMP *wmp = calloc_or_die(1, sizeof(WMP));
+    wmp_load_from_filename(wmp, "truncated", path, error_stack);
+    assert(!error_stack_is_empty(error_stack));
+    error_stack_reset(error_stack);
+    wmp_destroy(wmp);
+  }
+  error_stack_destroy(error_stack);
+  free(path);
+  test_platform_remove_directory_tree(dir);
+  free(dir);
+}
+
 void check_all_wmp_result_sizes_fit_in_buffer(void) {
   Config *config = config_create_or_die("");
   ErrorStack *error_stack = error_stack_create();
@@ -473,4 +511,5 @@ void test_wmp(void) {
   test_inline_slot_patterns();
   test_blank_expansion_matches_reference();
   check_all_wmp_result_sizes_fit_in_buffer();
+  test_truncated_wmp_is_an_error();
 }

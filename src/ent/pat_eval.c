@@ -398,6 +398,9 @@ static void pat_eval_context_load_units(
     return;
   }
   pat_eval_ctx->opponent_rack_size = opponent_rack_size;
+  // Without a word list until pat_eval_context_set_kwg gives it one.
+  pat_eval_ctx->kwg = NULL;
+  pat_eval_ctx->woadwage = false;
   pat_eval_ctx->active_classes_mask = 0;
   for (int premium_class = 0; premium_class < PAT_NUM_PREMIUM_CLASSES;
        premium_class++) {

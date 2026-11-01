@@ -366,6 +366,18 @@ void convert_from_text_with_dwl(const LetterDistribution *ld,
 // Unlike the ordinary readable-file search, do not skip an existing file that
 // cannot be opened. In particular, an unreadable future-version file must not
 // be mistaken for a missing file and replaced by an output-path override.
+// kwg_get_hash of the lexicon `lexicon`'s word graph, or 0 when it cannot be
+// loaded: a rack info table built from its wordmap records it.
+static uint64_t convert_lexicon_kwg_hash(const char *data_paths,
+                                         const char *lexicon) {
+  ErrorStack *errors = error_stack_create();
+  KWG *kwg = kwg_create(data_paths, lexicon, errors);
+  const uint64_t hash = error_stack_is_empty(errors) ? kwg_get_hash(kwg) : 0;
+  kwg_destroy(kwg);
+  error_stack_destroy(errors);
+  return hash;
+}
+
 static char *get_existing_wit_filename(const char *data_paths, const char *name,
                                        ErrorStack *error_stack) {
   if (data_paths == NULL) {
@@ -580,6 +592,11 @@ void convert_with_names(const LetterDistribution *ld,
       const uint8_t playthrough_min_played_size = 1;
       RackInfoTable *rit = make_rack_info_table(klv, wmp, ld, num_threads,
                                                 playthrough_min_played_size);
+      // What it is built from, so a load for another lexicon or other leaves
+      // refuses it. A lexicon whose word graph is not on disk goes unrecorded.
+      rit->klv_hash = klv_get_hash(klv);
+      rit->kwg_hash = convert_lexicon_kwg_hash(
+          data_paths, wmp_name ? wmp_name : input_name);
       rack_info_table_write_to_file(rit, rit_output_filename, error_stack);
       if (!error_stack_is_empty(error_stack)) {
         error_stack_push(

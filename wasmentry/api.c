@@ -22,7 +22,9 @@ int wasm_magpie_init(const char *data_paths) {
   if (wasm_magpie) {
     magpie_destroy(wasm_magpie);
   }
-  wasm_magpie = magpie_create(data_paths);
+  // The page installs the wordmap; the browser holds no rack or word info
+  // table.
+  wasm_magpie = magpie_create_with_options(data_paths, NULL, false);
   return wasm_magpie && magpie_run_sync(wasm_magpie, "set -pegjson true") ==
                             MAGPIE_SUCCESS
              ? 0
