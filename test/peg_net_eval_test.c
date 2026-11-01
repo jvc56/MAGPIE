@@ -2327,10 +2327,10 @@ void peg_sim_mode(const StringSplitter *fields) {
               "endgame plies");
   }
   // PEG_SIM_PREFILTER=K: arms 1, 3 and 4 sim only the K candidates arm 0
-  // (which must run) ranks best. PEG_SIM_BAI=RULE,SCOND,MIN: arms 1, 3 and 4
-  // stop by BAI (rule rr or tt, the GK16 threshold at SCOND percent, MIN
-  // iterations per candidate first) instead of at iterations per candidate,
-  // which stays their cap.
+  // (which must run) ranks best. PEG_SIM_BAI=RULE,SCOND,MIN[,elim]: arms 1,
+  // 3 and 4 stop by BAI (rule rr or tt, the GK16 threshold at SCOND percent,
+  // MIN iterations per candidate first, with elim BAIOptions.eliminate)
+  // instead of at iterations per candidate, which stays their cap.
   const char *prefilter_env = getenv("PEG_SIM_PREFILTER");
   const int prefilter = prefilter_env != NULL ? atoi(prefilter_env) : 0;
   if (prefilter < 0 || (prefilter > 0 && !run_arm[0])) {
@@ -2340,10 +2340,15 @@ void peg_sim_mode(const StringSplitter *fields) {
   bai_sampling_rule_t bai_rule = BAI_SAMPLING_RULE_ROUND_ROBIN;
   double bai_scond = 0;
   uint64_t bai_min = 1;
+  bool bai_eliminate = false;
   if (bai_env != NULL) {
     StringSplitter *bai_fields = split_string(bai_env, ',', true);
-    if (string_splitter_get_number_of_items(bai_fields) != 3) {
-      log_fatal("PEG_SIM_BAI must be RULE,SCOND,MIN");
+    const int n_bai_fields = string_splitter_get_number_of_items(bai_fields);
+    if (n_bai_fields == 4 &&
+        strings_equal(string_splitter_get_item(bai_fields, 3), "elim")) {
+      bai_eliminate = true;
+    } else if (n_bai_fields != 3) {
+      log_fatal("PEG_SIM_BAI must be RULE,SCOND,MIN[,elim]");
     }
     const char *rule = string_splitter_get_item(bai_fields, 0);
     if (strings_equal(rule, BAI_SAMPLING_RULE_TOP_TWO_IDS_STRING)) {
@@ -2534,6 +2539,7 @@ void peg_sim_mode(const StringSplitter *fields) {
           100.0, false, NULL, &sim_args);
       sim_args.bag_cycle = false;
       sim_args.pat_rollout_disabled = true;
+      sim_args.bai_options.eliminate = use_bai && bai_eliminate;
       if (hooks[arm].nets || hooks[arm].endgame != NULL ||
           samples.out != NULL) {
         sim_args.rollout_move_fn = peg_sim_rollout_move;
@@ -2755,7 +2761,7 @@ void peg_sim_bai_replay_mode(const StringSplitter *fields) {
   const int n_fields = string_splitter_get_number_of_items(fields);
   if (n_fields < 4) {
     log_fatal("pegsimbai needs a samples file, an output file and schemes "
-              "NAME=RULE,SCOND,MIN,LIMIT");
+              "NAME=RULE,SCOND,MIN,LIMIT[,elim]");
   }
   const char *arm_env = getenv("PEG_SIM_BAI_ARM");
   const int arm = arm_env != NULL ? atoi(arm_env) : 3;
@@ -2771,13 +2777,19 @@ void peg_sim_bai_replay_mode(const StringSplitter *fields) {
     const char *text = string_splitter_get_item(fields, 3 + scheme);
     StringSplitter *named = split_string(text, '=', true);
     if (string_splitter_get_number_of_items(named) != 2) {
-      log_fatal("pegsimbai scheme %s is not NAME=RULE,SCOND,MIN,LIMIT", text);
+      log_fatal("pegsimbai scheme %s is not NAME=RULE,SCOND,MIN,LIMIT[,elim]",
+                text);
     }
     names[scheme] = string_duplicate(string_splitter_get_item(named, 0));
     StringSplitter *parts =
         split_string(string_splitter_get_item(named, 1), ',', true);
-    if (string_splitter_get_number_of_items(parts) != 4) {
-      log_fatal("pegsimbai scheme %s is not NAME=RULE,SCOND,MIN,LIMIT", text);
+    const int n_parts = string_splitter_get_number_of_items(parts);
+    const bool eliminate =
+        n_parts == 5 &&
+        strings_equal(string_splitter_get_item(parts, 4), "elim");
+    if (n_parts != 4 && !eliminate) {
+      log_fatal("pegsimbai scheme %s is not NAME=RULE,SCOND,MIN,LIMIT[,elim]",
+                text);
     }
     const char *rule = string_splitter_get_item(parts, 0);
     const double scond = strtod(string_splitter_get_item(parts, 1), NULL);
@@ -2795,6 +2807,7 @@ void peg_sim_bai_replay_mode(const StringSplitter *fields) {
         .num_threads = 1,
         .cutoff = 0,
         .draws_per_sample = 1,
+        .eliminate = eliminate,
     };
     if ((!strings_equal(rule, BAI_SAMPLING_RULE_TOP_TWO_IDS_STRING) &&
          !strings_equal(rule, BAI_SAMPLING_RULE_ROUND_ROBIN_STRING)) ||

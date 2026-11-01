@@ -139,8 +139,9 @@ void peg_sim_mode(const StringSplitter *fields);
 // rollout in seed order, the same world for every candidate; past the last,
 // they start over), and each scheme's BAI runs on one thread with the GK16
 // threshold. Fields: samples file, output CSV, then schemes
-// NAME=RULE,SCOND,MIN,LIMIT (rule rr or tt, the stopping confidence in
-// percent, iterations per candidate first, the cap on all rollouts). Writes
+// NAME=RULE,SCOND,MIN,LIMIT[,elim] (rule rr or tt, the stopping confidence in
+// percent, iterations per candidate first, the cap on all rollouts; elim sets
+// BAIOptions.eliminate). Writes
 // per root and scheme: BAI's pick (static rank), its status, the rollouts and
 // each candidate's rollouts (semicolon-separated, by static rank).
 void peg_sim_bai_replay_mode(const StringSplitter *fields);
