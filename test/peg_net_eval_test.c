@@ -2501,6 +2501,9 @@ void peg_sim_mode(const StringSplitter *fields) {
     for (int rank = 0; rank < n_placements && rank < max_candidates; rank++) {
       move_list_add_move(pool, &wide_moves[rank]);
     }
+    // The sim reads the mover's rack from its move list to tell which plays
+    // are similar (move_get_similarity_key); move generation set wide's.
+    move_list_set_rack(pool, move_list_get_rack(wide));
     const int cands = move_list_get_count(pool);
     if (cands == 0) {
       log_fatal("pegsim root %d has no placement", root_id);
@@ -2528,8 +2531,6 @@ void peg_sim_mode(const StringSplitter *fields) {
       const MoveList *sim_pool = pool;
       if (prefilter > 0 && (arm == 1 || arm == 3 || arm == 4)) {
         move_list_reset(sub_pool);
-        // The sim reads the mover's rack from its move list to tell which
-        // plays are similar (move_get_similarity_key).
         move_list_set_rack(sub_pool, move_list_get_rack(pool));
         // In arm 0's order, the order of BAI's arms in pegsimbai's replays
         // (move_list_add_move would keep a heap by equity instead).
