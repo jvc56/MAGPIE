@@ -556,7 +556,8 @@ void players_data_validate_rack_info_tables(const PlayersData *players_data,
         rit->num_entries / RACK_INFO_TABLE_LEAVE_CHECK_ENTRIES + 1;
     for (uint32_t entry_index = 0; entry_index < rit->num_entries;
          entry_index += stride) {
-      if (rack_info_table_entry_matches_klv(&rit->entries[entry_index], klv)) {
+      if (rack_info_table_entry_matches_klv(
+              rack_info_table_get_entry(rit, entry_index), klv)) {
         continue;
       }
       error_stack_push(
