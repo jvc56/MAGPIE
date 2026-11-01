@@ -230,6 +230,10 @@ typedef struct EndgameArgs {
   // caller (e.g. PEG) impose a wall-clock budget that propagates through
   // alpha-beta, not just between IDS depth iterations. 0 = no deadline.
   int64_t external_deadline_ns;
+  // When non-NULL, read as often as the deadline, from every thread of the
+  // solve: true ends the solve as the deadline would.
+  bool (*stop_fn)(const void *stop_data);
+  const void *stop_data;
   // If non-NULL, the solver additionally computes an exact (non-pruned)
   // value for this specific move in the same search that finds the best
   // move, instead of requiring a second endgame_solve call. Must be a legal
@@ -303,6 +307,8 @@ static inline void endgame_args_fill(
   endgame_args->initial_alpha = initial_alpha;
   endgame_args->initial_beta = initial_beta;
   endgame_args->external_deadline_ns = external_deadline_ns;
+  endgame_args->stop_fn = NULL;
+  endgame_args->stop_data = NULL;
   endgame_args->actual_move = actual_move;
 }
 

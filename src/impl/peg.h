@@ -129,9 +129,10 @@ typedef struct PegArgs {
   // across cands and across scenarios within a cand.
   int num_threads;
 
-  // Browser-only aggregate TT budget as a fraction of
-  // get_search_memory_budget_base(). Zero retains platform defaults; browser
-  // callers supply the selected budget. Ignored on native builds.
+  // The endgame table's memory as a fraction of
+  // get_search_memory_budget_base(), PEG_TT_FRACTION_NO_TABLE for none. Zero
+  // retains the platform default. On browsers it is the aggregate budget the
+  // solve fits its table within. Unused when shared_endgame_tt is set.
   double tt_fraction_of_mem;
 
   // The endgame depth of an exhaustive solve, whose one stage keeps every
@@ -551,6 +552,9 @@ typedef struct PegResult {
   // peg_solve. Index i = stage i; n_stage_history grows as stages complete.
   int n_stage_history;
   PegStageSnapshot stage_history[PEG_POLL_MAX_STAGES];
+
+  // How many times a nested search handed the rest of its loop to idle threads.
+  int n_lends;
 } PegResult;
 
 // Per-scenario detail row.
@@ -592,8 +596,9 @@ typedef struct PegCandOutcomes {
 // completion via cands_done in the stage history. `done` flips true when the
 // solve finishes.
 
-// Where one mover draw of the candidate in progress stands, when candidates are
-// solved one at a time (PegStageSnapshot.scenarios_total > 0). A draw is one
+// Where one mover draw of the candidate in progress stands, when the poll
+// follows candidates in order (PegStageSnapshot.scenarios_total > 0): the first
+// not yet published. Later ones can be under way. A draw is one
 // scenario job: the candidate with those tiles drawn, over every ordering of
 // the rest of the bag.
 typedef enum {
@@ -763,6 +768,12 @@ void peg_cand_outcomes_destroy_array(PegCandOutcomes *arr, int n);
 // "empty" positional value) can match exactly the bag size peg_solve itself
 // will compute, rather than the raw (unadjusted) bag_get_letters count.
 int peg_compute_bag_size(const Game *game);
+
+// The fraction of get_search_memory_budget_base() for the endgame table of a
+// solve with n_workers scratch workers, given PegArgs.tt_fraction_of_mem, where
+// at most max_tables minimum-size tables fit a bounded budget. 0 for no table.
+double peg_endgame_table_fraction(double tt_fraction_of_mem, int n_workers,
+                                  int max_tables);
 
 // How many of a `bag_size`-tile bag's tiles `move` leaves in it: a tile
 // placement draws as many as it plays, while a pass leaves the whole bag, and

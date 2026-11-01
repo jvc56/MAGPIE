@@ -1,6 +1,7 @@
 #include "peg_test.h"
 
 #include "../src/compat/ctime.h"
+#include "../src/compat/memory_info.h"
 #include "../src/def/equity_defs.h"
 #include "../src/def/game_history_defs.h"
 #include "../src/def/letter_distribution_defs.h"
@@ -19,12 +20,14 @@
 #include "../src/impl/config.h"
 #include "../src/impl/move_gen.h"
 #include "../src/impl/peg.h"
+#include "../src/impl/peg_move_gen.h"
 #include "../src/str/move_string.h"
 #include "../src/str/peg_string.h"
 #include "../src/util/io_util.h"
 #include "../src/util/string_util.h"
 #include "test_util.h"
 #include <assert.h>
+#include <limits.h>
 #include <stdatomic.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -894,6 +897,102 @@ static void test_peg_complete_threads_match(void) {
   assert(best[0].tie_count == best[1].tie_count);
   assert(best[0].weight_sum == best[1].weight_sum);
   assert(best[0].win_count == 38 && best[0].tie_count == 4);
+  config_destroy(config);
+}
+
+// With few candidates and several threads the workers run out of queued work
+// inside a nested search, and idle ones take over part of its loops. The
+// solve's results must be the one-thread solve's.
+static void test_peg_nested_lending_matches(void) {
+  Config *config = config_create_or_die("set -threads 1 -s1 score -s2 score");
+  load_and_exec_config_or_die(
+      config, "cgp 1T13/1W3Q9/VERB1U9/1E1OPIUM5C1/1LAWIN1I5O1/1Y3A1E5R1/"
+              "7V4NO1/NOTArIZE1C2UN1/6ODAH2LA1/3TAHA2I2LED/2JUT4R2A1O/"
+              "3G5P4D/3R3BrIEFING/3I5L4E/3K2DESYNES1M AEFGSTX/ 370/341 0 "
+              "-lex CSW21");
+  const char *threads[] = {"1", "8"};
+  PegRankedCand best[2];
+  int n_lends[2];
+  for (int run_idx = 0; run_idx < 2; run_idx++) {
+    char *command = get_formatted_string(
+        "peg only 10I.XI,9A.AXE -pegplies 1 -threads %s", threads[run_idx]);
+    load_and_exec_config_or_die(config, command);
+    free(command);
+    const PegResult *result = config_get_peg_result(config);
+    best[run_idx] = result->top_cands[0];
+    n_lends[run_idx] = result->n_lends;
+  }
+  printf("[peg_lending] wins=%d lends=%d,%d\n", (int)best[1].win_count,
+         n_lends[0], n_lends[1]);
+  assert(n_lends[0] == 0);
+  assert(n_lends[1] > 0);
+  assert(best[0].win_count == best[1].win_count);
+  assert(best[0].tie_count == best[1].tie_count);
+  assert(best[0].weight_sum == best[1].weight_sum);
+  config_destroy(config);
+}
+
+// A list that fills grows and generates again, so no play is dropped, however
+// small it started: the pass, with the lowest equity here, most of all.
+static void test_peg_generate_all_moves(void) {
+  Config *config = config_create_or_die("set -threads 1 -s1 score -s2 score");
+  load_and_exec_config_or_die(
+      config, "cgp 13R1/12MA1/12OB1/11OHIA/11FACE/9Q1LI1R/2VUG1SIDECAR1A/"
+              "3PALEO1ERG2D/4BOX2MI3I/6TENANT1ZO/10I2L1/7FOUND1O1/8UNGIRT1/"
+              "2NyLONED4Y1/AJEE1KAT3WEST EEHISTY/ 364/387 0 -lex CSW24");
+  MoveList *full = move_list_create(PEG_CAND_LIST_CAP);
+  MoveList *small = move_list_create(1);
+  MoveGenArgs gen_args = {
+      .game = config_get_game(config),
+      .move_record_type = MOVE_RECORD_ALL,
+      .move_sort_type = MOVE_SORT_EQUITY,
+      .eq_margin_movegen = 0,
+      .target_equity = EQUITY_MAX_VALUE,
+      .move_list = full,
+  };
+  generate_moves(&gen_args);
+  const int num_moves = move_list_get_count(full);
+  assert(num_moves > 2);
+  gen_args.move_list = small;
+  peg_generate_all_moves(&gen_args);
+  assert(move_list_get_count(small) == num_moves);
+  assert(move_list_get_capacity(small) > num_moves);
+  bool has_pass = false;
+  for (int move_idx = 0; move_idx < num_moves; move_idx++) {
+    has_pass = has_pass || move_get_type(move_list_get_move(small, move_idx)) ==
+                               GAME_EVENT_PASS;
+  }
+  assert(has_pass);
+  move_list_destroy(small);
+  move_list_destroy(full);
+  config_destroy(config);
+}
+
+// Where a native solve's table size comes from, and a solve with no table.
+static void test_peg_table_fraction(void) {
+  assert(peg_endgame_table_fraction(PEG_TT_FRACTION_NO_TABLE, 13, INT_MAX) ==
+         0.0);
+  if (!search_memory_is_bounded()) {
+    assert(peg_endgame_table_fraction(0.01, 13, INT_MAX) == 0.01);
+    assert(peg_endgame_table_fraction(0.6, 1, INT_MAX) == 0.6);
+    // Left unset, it follows the workers: one worker gets 5%.
+    assert(peg_endgame_table_fraction(0, 1, INT_MAX) == 0.05);
+    assert(peg_endgame_table_fraction(0, 13, INT_MAX) == 0.25 / 13 * 8);
+  }
+  Config *config = config_create_or_die("set -threads 2 -s1 score -s2 score");
+  load_and_exec_config_or_die(
+      config, "cgp 13R1/12MA1/12OB1/11OHIA/11FACE/9Q1LI1R/2VUG1SIDECAR1A/"
+              "3PALEO1ERG2D/4BOX2MI3I/6TENANT1ZO/10I2L1/7FOUND1O1/8UNGIRT1/"
+              "2NyLONED4Y1/AJEE1KAT3WEST EEHISTY/ 364/387 0 -lex CSW24");
+  const char *const fractions[] = {"0", "0.01"};
+  for (int run_idx = 0; run_idx < 2; run_idx++) {
+    char *command = get_formatted_string(
+        "peg only 11C.YITES -pegplies 1 -ttfraction %s", fractions[run_idx]);
+    load_and_exec_config_or_die(config, command);
+    free(command);
+    const PegRankedCand *best = &config_get_peg_result(config)->top_cands[0];
+    assert(best->win_count == 38 && best->tie_count == 4);
+  }
   config_destroy(config);
 }
 
@@ -2437,6 +2536,9 @@ void test_peg(void) {
   test_peg_macondo_pond_slice();
   test_peg_main_cli();
   test_peg_complete_threads_match();
+  test_peg_nested_lending_matches();
+  test_peg_generate_all_moves();
+  test_peg_table_fraction();
   test_peg_cut_on_last_draw_is_solved();
   test_peg_pegonly_positional_arg();
   test_peg_new_game_drops_previous_peg();

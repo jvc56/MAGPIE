@@ -33,7 +33,7 @@ enum {
 
 // Solver internals: fixed capacities and depth ceilings for peg.c.
 enum {
-  // Candidate move-list capacity for the root generate_moves.
+  // Initial capacity of the root candidate list, which grows as it fills.
   PEG_CAND_LIST_CAP = 16384,
   // Greedy playout depth ceiling (a PEG playout terminates well before this).
   PEG_PLAYOUT_MAX_PLIES = 40,
@@ -53,18 +53,24 @@ enum {
   PEG_EXHAUSTIVE_PLIES = MAX_SEARCH_DEPTH,
   // Fixed endgame seed for deterministic leaf solves.
   PEG_ENDGAME_SEED = 1,
-  // Pessimistic playout: capacity of the opponent reply list. The adversarial
-  // 1-ply lookahead tries every generated reply (a late-game PEG position has
-  // far fewer than this), so the opponent's true worst-for-mover reply -- which
-  // includes the rational best-equity one -- is always considered.
+  // Pessimistic playout: initial capacity of the opponent reply list, which
+  // grows as it fills. The adversarial 1-ply lookahead tries every generated
+  // reply, so the opponent's true worst-for-mover reply -- which includes the
+  // rational best-equity one -- is always considered.
   PEG_PESSIMISTIC_OPP_LIST_CAP = 1024,
   // Max recursion depth of the inline nested-PEG lookahead (one frame per
   // non-emptier ply). Bounds the per-level scratch stack and caps how far an
   // exhaustive nested solve can recurse through passes/exchanges before the
   // lookahead budget is spent. Comfortably above any realistic fidelity.
   PEG_MAX_NEST_DEPTH = 24,
-  // Candidate list capacity for a nested-PEG level's move generation.
+  // Initial candidate list capacity for a nested-PEG level's move generation,
+  // which grows as it fills.
   PEG_NEST_CAND_LIST_CAP = 4096,
+  // How long a nested loop runs before it takes threads that are not idle yet
+  // (where a stage allows it), in nanoseconds.
+  PEG_NEST_BUSY_LEND_NS = 250 * 1000 * 1000,
+  // How many lends of a nested loop one thread's stack can hold.
+  PEG_NEST_MAX_LEND_DEPTH = 16,
   // Max candidate field an inner-peg cascade carries (the first stage cap is
   // clamped to this); the staged narrowing keeps the working set tiny.
   PEG_NEST_FIELD_MAX = 64,
@@ -104,6 +110,9 @@ enum {
 enum {
   PEG_OUTCOMES_MIN_CELL = 15,
 };
+
+// PegArgs.tt_fraction_of_mem for a solve without an endgame table.
+#define PEG_TT_FRACTION_NO_TABLE (-1.0)
 
 // PEG work-stealing pool capacities (peg_pool.c).
 enum {

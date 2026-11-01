@@ -228,6 +228,8 @@ struct EndgameCtx {
   // check_depth_deadline takes min(this, depth_deadline_ns) so a caller's
   // wall-clock budget always wins over the EBF-projected per-depth budget.
   int64_t external_deadline_ns;
+  bool (*stop_fn)(const void *stop_data); // see EndgameArgs
+  const void *stop_data;
   // The move's budget, from the thread that started the solve: every worker,
   // the late ones too, charges it, and check_depth_deadline stops on it.
   MovegenBudget *movegen_budget;
@@ -1075,6 +1077,8 @@ void endgame_ctx_reset(EndgameCtx *es, EndgameResults *results,
   es->soft_time_limit = endgame_args->soft_time_limit;
   es->hard_time_limit = endgame_args->hard_time_limit;
   es->external_deadline_ns = endgame_args->external_deadline_ns;
+  es->stop_fn = endgame_args->stop_fn;
+  es->stop_data = endgame_args->stop_data;
   bool create_separate_kwgs =
       (es->dual_lexicon_mode == DUAL_LEXICON_MODE_INFORMED) && !shared_kwg;
 
@@ -3554,6 +3558,11 @@ check_depth_deadline(EndgameCtxWorker *worker) {
   // A spent movegen budget ends the solve as a deadline would: the last
   // completed depth stands.
   if (gen_movegen_budget_spent()) {
+    atomic_store(&worker->solver->search_complete, 1);
+    return true;
+  }
+  if (worker->solver->stop_fn != NULL &&
+      worker->solver->stop_fn(worker->solver->stop_data)) {
     atomic_store(&worker->solver->search_complete, 1);
     return true;
   }

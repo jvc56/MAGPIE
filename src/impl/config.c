@@ -4944,7 +4944,9 @@ void config_fill_peg_args(Config *config, PegArgs *peg_args) {
       /*on_scenario_done=*/NULL, /*user_data=*/NULL, /*poll=*/NULL,
       /*shared_endgame_tt=*/NULL, /*checkpoint=*/NULL, /*resume=*/false,
       peg_args);
-  peg_args->tt_fraction_of_mem = config->tt_fraction_of_mem;
+  peg_args->tt_fraction_of_mem = config->tt_fraction_of_mem > 0
+                                     ? config->tt_fraction_of_mem
+                                     : PEG_TT_FRACTION_NO_TABLE;
   // A solve that keeps every candidate in one stage, the complete one or
   // -pegtopk all, searches its endgames -pegplies deep.
   peg_args->exhaustive_plies = config->peg_plies;
