@@ -64,19 +64,19 @@ typedef enum {
 
 // The memory a table takes, from the size of its file. Building one peaks at
 // about 710 MB for CSW24's 179 MB wordmap, 310 MB for its 122 MB word info
-// table and 2.4 GB for its 1.9 GB rack info table (measured on the builds
-// birdtest's workers run; the RIT figure is the one its build line states),
-// so a build's peak is taken as its file's size times these ratios, in
-// thousandths. Held while playing, each is loaded or mapped whole: its file's
-// size. When the server states no size, CSW24's are assumed -- the largest a
-// job uses -- since running out of memory, unlike disk, is not something a
-// build finds out gracefully.
+// table (measured on the builds birdtest's workers run) and 2.09 GB for its
+// 1.53 GB rack info table (peak memory footprint of magpie_convert klvwmp2rit
+// on macOS arm64, RIT version 13), so a build's peak is taken as its file's
+// size times these ratios, in thousandths. Held while playing, each is loaded
+// or mapped whole: its file's size. When the server states no size, CSW24's are
+// assumed -- the largest a job uses -- since running out of memory, unlike
+// disk, is not something a build finds out gracefully.
 #define CONTRIBUTE_WMP_BUILD_PERMILLE 3966
 #define CONTRIBUTE_WIT_BUILD_PERMILLE 2541
-#define CONTRIBUTE_RIT_BUILD_PERMILLE 1273
+#define CONTRIBUTE_RIT_BUILD_PERMILLE 1368
 #define CONTRIBUTE_WMP_ASSUMED_BYTES 178929167LL
 #define CONTRIBUTE_WIT_ASSUMED_BYTES 121972344LL
-#define CONTRIBUTE_RIT_ASSUMED_BYTES 1885416048LL
+#define CONTRIBUTE_RIT_ASSUMED_BYTES 1527046964LL
 
 // The memory building a table of `role` and `bytes` (-1 unknown) peaks at,
 // and the memory holding it takes.

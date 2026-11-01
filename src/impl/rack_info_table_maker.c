@@ -134,9 +134,8 @@ typedef struct {
   Rack *leave;
   LeaveMap *leave_map;
   RackInfoTableEntry *entry;
-  // 32-bit leave values computed during recursion, packed to 24-bit at end.
+  // 32-bit leave values computed during recursion, packed at the end.
   Equity leaves_temp[RACK_INFO_TABLE_LEAVES_PER_ENTRY];
-  bool leave_out_of_range;
   // Track the overall best exchange across all leave sizes.
   Equity best_exchange_equity;
   int best_exchange_tiles_exchanged;
@@ -158,10 +157,6 @@ static void compute_entry_recursive(EntryComputeState *state,
         value = klv_get_indexed_leave_value(state->klv, word_index - 1);
       }
       state->leaves_temp[state->leave_map->current_index] = value;
-      if (value < RACK_INFO_TABLE_LEAVE_MIN ||
-          value > RACK_INFO_TABLE_LEAVE_MAX) {
-        state->leave_out_of_range = true;
-      }
 
       // Update best_leaves per leave_size.
       const int leave_size_for_best =
@@ -311,6 +306,7 @@ static void compute_entry_for_rack(const KLV *klv, const WMP *wmp,
                                    const LetterDistribution *ld,
                                    uint8_t playthrough_min_played_size,
                                    const BitRack *bit_rack,
+                                   const RackInfoTable *rit,
                                    RackInfoTableEntry *entry) {
   const int ld_size = ld_get_size(ld);
 
@@ -329,8 +325,8 @@ static void compute_entry_for_rack(const KLV *klv, const WMP *wmp,
   leave_map_init(&player_rack, &leave_map);
   // The non-RIT path seeds leaves[full_mask] (keep full rack, play 0
   // tiles) with EQUITY_INITIAL_VALUE = INT32_MIN + 1 as a sentinel; that
-  // value doesn't fit in the 24-bit packed representation, so the RIT
-  // leaves that slot at 0 instead. No consumer reads leaves[full_mask]
+  // value doesn't fit in the packed representation, so the RIT leaves that
+  // slot at 0 instead. No consumer reads leaves[full_mask]
   // on the RIT-enabled path (shadow_record and exchange enumeration both
   // require tiles_played >= 1), and ap_rit CI verifies RIT vs no-RIT
   // games are byte-identical across 5000 game pairs.
@@ -340,7 +336,6 @@ static void compute_entry_for_rack(const KLV *klv, const WMP *wmp,
   rack_set_dist_size(&leave, ld_size);
   rack_reset(&leave);
 
-  memset(entry->leaves_packed, 0, RACK_INFO_TABLE_LEAVES_PACKED_BYTES);
   memset(entry->playthrough_union, 0,
          RACK_INFO_TABLE_UNIONS_PER_ENTRY * sizeof(uint32_t));
   memset(entry->multi_pt_tp7_bitvec, 0,
@@ -380,14 +375,12 @@ static void compute_entry_for_rack(const KLV *klv, const WMP *wmp,
   const uint32_t root = kwg_get_dawg_root_node_index(klv_get_kwg(klv));
   compute_entry_recursive(&state, root, 0, 0);
 
-  // Pack 32-bit leave values to 24-bit in the entry.
-  if (state.leave_out_of_range) {
-    log_fatal("leave value out of 24-bit range during RIT construction");
-  }
-  for (int leave_idx = 0; leave_idx < RACK_INFO_TABLE_LEAVES_PER_ENTRY;
-       leave_idx++) {
-    rack_info_table_entry_pack_leave(entry, leave_idx,
-                                     state.leaves_temp[leave_idx]);
+  // Every value is a KLV value or 0, and the table's leave format was sized
+  // to hold all of those, so packing can only fail on a bug.
+  if (!rack_info_table_entry_pack_leaves(rit, entry, state.leaves_temp)) {
+    log_fatal("leave value outside the rack info table's %d-bit range from "
+              "%d during RIT construction",
+              rit->leave_bits, rit->leave_base);
   }
 
   // Populate inline bingo words (nonplaythrough full-rack anagrams).
@@ -680,8 +673,7 @@ typedef struct {
   const uint32_t *result; // size = num_word_lengths for this tp
   int num_word_lengths;
   int target_cfg_idx;
-  const RackInfoTable *rit;
-  RackInfoTableEntry *entries;
+  RackInfoTable *rit;
 } SupersetWalkState;
 
 // Phase 2 leaf action: we have a 7-tile rack `current_rack` (S +
@@ -694,8 +686,8 @@ static void superset_walk_leaf(const SupersetWalkState *state,
   if (const_entry == NULL) {
     return;
   }
-  const size_t entry_idx = (size_t)(const_entry - state->rit->entries);
-  RackInfoTableEntry *entry = &state->entries[entry_idx];
+  RackInfoTableEntry *entry = rack_info_table_get_mutable_entry(
+      state->rit, rack_info_table_get_entry_index(state->rit, const_entry));
   switch (state->target_cfg_idx) {
   case 0: // tp=6
     for (int k = 0; k < state->num_word_lengths; k++) {
@@ -745,8 +737,7 @@ static void superset_walk_recursive(const SupersetWalkState *state,
 static void phase2_distribute_temp_table(const TempSubrackTable *temp_table,
                                          int cfg_idx,
                                          const LetterDistribution *ld,
-                                         const RackInfoTable *rit,
-                                         RackInfoTableEntry *entries) {
+                                         RackInfoTable *rit) {
   const MultiPtTpConfig *cfg = &MULTI_PT_TP_CONFIGS[cfg_idx];
   const int letters_to_add = RACK_SIZE - cfg->subrack_size;
   for (uint32_t i = 0; i < temp_table->num_entries; i++) {
@@ -766,7 +757,6 @@ static void phase2_distribute_temp_table(const TempSubrackTable *temp_table,
     state.num_word_lengths = cfg->num_word_lengths;
     state.target_cfg_idx = cfg_idx;
     state.rit = rit;
-    state.entries = entries;
     BitRack current = temp_entry->subrack;
     superset_walk_recursive(&state, &current, letters_to_add, 0);
   }
@@ -774,8 +764,7 @@ static void phase2_distribute_temp_table(const TempSubrackTable *temp_table,
 
 static void populate_multi_pt_bitvecs(const WMP *wmp,
                                       const LetterDistribution *ld,
-                                      const RackInfoTable *rit,
-                                      RackInfoTableEntry *entries) {
+                                      RackInfoTable *rit) {
   TempSubrackTable *temp_tables[NUM_MULTI_PT_TP_CONFIGS];
   for (int cfg_idx = 0; cfg_idx < NUM_MULTI_PT_TP_CONFIGS; cfg_idx++) {
     const MultiPtTpConfig *cfg = &MULTI_PT_TP_CONFIGS[cfg_idx];
@@ -783,8 +772,7 @@ static void populate_multi_pt_bitvecs(const WMP *wmp,
   }
   phase1_accumulate_temp_tables(wmp, temp_tables);
   for (int cfg_idx = 0; cfg_idx < NUM_MULTI_PT_TP_CONFIGS; cfg_idx++) {
-    phase2_distribute_temp_table(temp_tables[cfg_idx], cfg_idx, ld, rit,
-                                 entries);
+    phase2_distribute_temp_table(temp_tables[cfg_idx], cfg_idx, ld, rit);
     temp_subrack_table_destroy(temp_tables[cfg_idx]);
   }
 }
@@ -799,7 +787,7 @@ typedef struct {
   const LetterDistribution *ld;
   uint8_t playthrough_min_played_size;
   const BitRack *all_racks;
-  RackInfoTableEntry *entries;
+  RackInfoTable *rit;
   const uint32_t *entry_indices;
   uint32_t start;
   uint32_t end;
@@ -809,10 +797,11 @@ static void *compute_entries_thread(void *arg) {
   const EntryComputeArg *a = (const EntryComputeArg *)arg;
   for (uint32_t rack_idx = a->start; rack_idx < a->end; rack_idx++) {
     const uint32_t entry_idx = a->entry_indices[rack_idx];
-    RackInfoTableEntry *entry = &a->entries[entry_idx];
+    RackInfoTableEntry *entry =
+        rack_info_table_get_mutable_entry(a->rit, entry_idx);
     compute_entry_for_rack(a->klv, a->wmp, a->ld,
                            a->playthrough_min_played_size,
-                           &a->all_racks[rack_idx], entry);
+                           &a->all_racks[rack_idx], a->rit, entry);
   }
   return NULL;
 }
@@ -820,6 +809,32 @@ static void *compute_entries_thread(void *arg) {
 // ============================================================================
 // Main construction function
 // ============================================================================
+
+// Every leave value a table stores is one of the KLV's values or 0 (a leave
+// the KLV lacks, and the empty and full-rack slots), so the KLV alone
+// fixes the narrowest leave format that holds them all.
+static void set_leave_format_from_klv(RackInfoTable *rit, const KLV *klv) {
+  Equity min_value = 0;
+  Equity max_value = 0;
+  const uint32_t number_of_leaves = klv_get_number_of_leaves(klv);
+  for (uint32_t leave_idx = 0; leave_idx < number_of_leaves; leave_idx++) {
+    const Equity value = klv_get_indexed_leave_value(klv, leave_idx);
+    if (value < min_value) {
+      min_value = value;
+    }
+    if (value > max_value) {
+      max_value = value;
+    }
+  }
+  const int leave_bits =
+      rack_info_table_leave_bits_for_range(min_value, max_value);
+  if (leave_bits == 0) {
+    log_fatal("leave values from %d to %d span more than %d bits, too wide "
+              "for a rack info table",
+              min_value, max_value, RIT_LEAVE_MAX_BITS);
+  }
+  rack_info_table_set_leave_format(rit, leave_bits, min_value);
+}
 
 RackInfoTable *make_rack_info_table(const KLV *klv, const WMP *wmp,
                                     const LetterDistribution *ld,
@@ -836,21 +851,22 @@ RackInfoTable *make_rack_info_table(const KLV *klv, const WMP *wmp,
     effective_min = (uint8_t)(RACK_SIZE + 1);
   }
 
+  RackInfoTable *rit = (RackInfoTable *)calloc_or_die(1, sizeof(RackInfoTable));
+  rit->instance_id = rack_info_table_next_instance_id();
+  rit->version = RIT_VERSION;
+  rit->rack_size = (uint8_t)RACK_SIZE;
+  rit->playthrough_min_played_size = effective_min;
+  rit->name = NULL;
+  set_leave_format_from_klv(rit, klv);
+
   // 1. Count total racks
   const uint32_t total_racks = count_all_racks(ld);
   if (total_racks == 0) {
-    RackInfoTable *rit =
-        (RackInfoTable *)calloc_or_die(1, sizeof(RackInfoTable));
-    rit->instance_id = rack_info_table_next_instance_id();
-    rit->version = RIT_VERSION;
-    rit->rack_size = (uint8_t)RACK_SIZE;
-    rit->playthrough_min_played_size = effective_min;
     rit->num_buckets = RIT_MIN_BUCKETS;
     rit->num_entries = 0;
     rit->bucket_starts =
         (uint32_t *)calloc_or_die(RIT_MIN_BUCKETS + 1, sizeof(uint32_t));
-    rit->entries = NULL;
-    rit->name = NULL;
+    rit->records = NULL;
     return rit;
   }
 
@@ -883,9 +899,12 @@ RackInfoTable *make_rack_info_table(const KLV *klv, const WMP *wmp,
   }
   bucket_starts[num_buckets] = offset;
 
-  // 5. Allocate entries and assign racks to buckets
-  RackInfoTableEntry *entries =
-      malloc_or_die((size_t)total_racks * sizeof(RackInfoTableEntry));
+  // 5. Allocate records and assign racks to buckets
+  rit->num_buckets = num_buckets;
+  rit->num_entries = total_racks;
+  rit->bucket_starts = bucket_starts;
+  rit->records =
+      (uint8_t *)calloc_or_die((size_t)total_racks, rit->record_stride);
 
   uint32_t *entry_indices = malloc_or_die(total_racks * sizeof(uint32_t));
   memset(bucket_counts, 0, num_buckets * sizeof(uint32_t));
@@ -895,8 +914,9 @@ RackInfoTable *make_rack_info_table(const KLV *klv, const WMP *wmp,
         bit_rack_get_bucket_index(&all_racks[rack_idx], num_buckets);
     const uint32_t entry_idx = bucket_starts[bucket] + bucket_counts[bucket]++;
     entry_indices[rack_idx] = entry_idx;
-    rack_info_table_entry_write_bit_rack(&entries[entry_idx],
-                                         &all_racks[rack_idx]);
+    rack_info_table_entry_write_bit_rack(
+        rack_info_table_get_mutable_entry(rit, entry_idx),
+        &all_racks[rack_idx]);
   }
 
   free(bucket_counts);
@@ -909,7 +929,7 @@ RackInfoTable *make_rack_info_table(const KLV *klv, const WMP *wmp,
         .ld = ld,
         .playthrough_min_played_size = effective_min,
         .all_racks = all_racks,
-        .entries = entries,
+        .rit = rit,
         .entry_indices = entry_indices,
         .start = 0,
         .end = total_racks,
@@ -936,7 +956,7 @@ RackInfoTable *make_rack_info_table(const KLV *klv, const WMP *wmp,
           .ld = ld,
           .playthrough_min_played_size = effective_min,
           .all_racks = all_racks,
-          .entries = entries,
+          .rit = rit,
           .entry_indices = entry_indices,
           .start = start,
           .end = start + this_chunk,
@@ -957,25 +977,13 @@ RackInfoTable *make_rack_info_table(const KLV *klv, const WMP *wmp,
   free(entry_indices);
   free(all_racks);
 
-  // 7. Build the RackInfoTable
-  RackInfoTable *rit = (RackInfoTable *)calloc_or_die(1, sizeof(RackInfoTable));
-  rit->instance_id = rack_info_table_next_instance_id();
-  rit->version = RIT_VERSION;
-  rit->rack_size = (uint8_t)RACK_SIZE;
-  rit->playthrough_min_played_size = effective_min;
-  rit->num_buckets = num_buckets;
-  rit->num_entries = total_racks;
-  rit->bucket_starts = bucket_starts;
-  rit->entries = entries;
-  rit->name = NULL;
-
-  // 8. Populate the multi-playthrough bitvecs by flipping the walk:
+  // 7. Populate the multi-playthrough bitvecs by flipping the walk:
   // iterate WMP blankless words of length 6..15 and OR bits into the RIT
   // entry for every canonical 5-, 6-, and 7-tile submultiset of each
   // word. Requires rit to be a valid lookup target, which is why this
-  // runs after step 7.
+  // runs after every entry's bit rack is in place (step 5).
   if (wmp != NULL) {
-    populate_multi_pt_bitvecs(wmp, ld, rit, entries);
+    populate_multi_pt_bitvecs(wmp, ld, rit);
   }
 
   return rit;

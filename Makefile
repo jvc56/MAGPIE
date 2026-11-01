@@ -545,15 +545,23 @@ pgo_toolchain_check:
 		echo '*** PGO needs llvm-profdata (llvm-profdata, llvm-profdata-20 .. -15, or xcrun on macOS); pass LLVM_PROFDATA=<path>.'; exit 1; \
 	fi
 
+# The on-disk RIT layout version this source reads (first byte of a .rit).
+RIT_FILE_VERSION := $(shell sed -n 's/^ *RIT_VERSION = \([0-9][0-9]*\),.*/\1/p' src/ent/rack_info_table.h)
+
 # Validate or upgrade the production WIT with the native C converter. This
 # separate uninstrumented executable cannot load stale tables through engine
 # configuration, and a conversion error exits nonzero before training begins.
+# A production RIT left by an older layout is rebuilt rather than reused.
 prepare_data:
 	$(MAKE) magpie_convert BUILD=no_pgo_release
 	./$(BIN_DIR)/magpie_convert kwg2witifneeded CSW24 ./data
-	@if test -f data/lexica/CSW24.rit; then \
+	@if test -f data/lexica/CSW24.rit && \
+		test "$$(od -An -tu1 -N1 data/lexica/CSW24.rit | tr -d ' ')" = "$(RIT_FILE_VERSION)"; then \
 		echo 'Using existing data/lexica/CSW24.rit'; \
 	else \
+		if test -f data/lexica/CSW24.rit; then \
+			echo 'Rebuilding data/lexica/CSW24.rit: not RIT version $(RIT_FILE_VERSION)'; \
+		fi; \
 		./$(BIN_DIR)/magpie_convert klvwmp2rit CSW24 ./data; \
 	fi
 

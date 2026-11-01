@@ -3458,10 +3458,10 @@ void gen_look_up_leaves_and_record_exchanges(MoveGen *gen) {
   rack_reset(&gen->leave);
 
   if (gen->rit_entry != NULL) {
-    // Fast path: unpack the RIT's 24-bit packed leave values to 32-bit
+    // Fast path: unpack the RIT's packed leave values to 32-bit Equity
     // in the leave map so play-time leave_map_get_current_value calls
     // and wmp_move_gen's subrack reads return the right value.
-    rack_info_table_entry_unpack_leaves(gen->rit_entry,
+    rack_info_table_entry_unpack_leaves(rit, gen->rit_entry,
                                         gen->leave_map.leave_values);
     // Load best_leaves directly from the RIT entry, avoiding the
     // 2^RACK_SIZE canonical subset walk. Only fall back to the walk

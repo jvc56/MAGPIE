@@ -93,12 +93,20 @@
 // inner check loop O(num_playthrough_tiles) of register-only
 // `(length_bitvec >> ml) & 1` tests after a single uint32 load.
 
+// Leave values are stored per record ahead of its RackInfoTableEntry, as
+// RACK_INFO_TABLE_LEAVES_PER_ENTRY unsigned offsets from the table's
+// leave_base, each leave_bits wide, packed little-endian (value i occupies
+// bits [i * leave_bits, (i + 1) * leave_bits) of the leave block). The width
+// is the fewest bits that hold the span of the KLV the table was built from:
+// 17 for the standard English leaves, 18 for the super leaves. The block is
+// padded to a multiple of 8 bytes so the entry that follows it stays aligned,
+// and the unpacker's 8-byte reads past the last value land in that entry.
+//
+//   record: [leave block: leave_bytes][RackInfoTableEntry]
 enum {
   RACK_INFO_TABLE_LEAVES_PER_ENTRY = (1 << RACK_SIZE),
-  RACK_INFO_TABLE_LEAVES_PACKED_BYTES = (RACK_INFO_TABLE_LEAVES_PER_ENTRY * 3),
-  RACK_INFO_TABLE_LEAVE_SIGN_BIT = (1 << 23),
-  RACK_INFO_TABLE_LEAVE_MIN = -(1 << 23),
-  RACK_INFO_TABLE_LEAVE_MAX = (1 << 23) - 1,
+  RIT_LEAVE_MIN_BITS = 1,
+  RIT_LEAVE_MAX_BITS = 24,
   RACK_INFO_TABLE_UNIONS_PER_ENTRY = (RACK_SIZE + 1),
   RACK_INFO_TABLE_NONPLAYTHROUGH_BEST_LEAVES_PER_ENTRY = (RACK_SIZE + 1),
   RACK_INFO_TABLE_BEST_LEAVES_PER_ENTRY = (RACK_SIZE + 1),
@@ -116,15 +124,17 @@ enum {
   RIT_MULTI_PT_TP6_MAX_WORD_LENGTH =
       RIT_MULTI_PT_TP6_MIN_WORD_LENGTH + RIT_MULTI_PT_TP6_NUM_WORD_LENGTHS - 1,
   // Bump RIT_VERSION whenever the on-disk layout changes incompatibly.
-  RIT_VERSION = 12,
-  RIT_EARLIEST_SUPPORTED_VERSION = 11,
+  // 13: leave values moved out of the entry into a variable-width block
+  // ahead of it, and the header gained leave_bits and leave_base.
+  RIT_VERSION = 13,
+  RIT_EARLIEST_SUPPORTED_VERSION = 13,
+  RIT_HEADER_BYTES = 16,
   RIT_MAX_INLINE_BINGO_WORDS = 1,
 };
 
+// The fixed-size part of a record. Its leave values sit in the leave block
+// immediately before it; read them with rack_info_table_entry_unpack_leaves.
 typedef struct RackInfoTableEntry {
-  // Leave values packed as 24-bit signed little-endian integers.
-  // Unpacked to 32-bit Equity in a batch at load time.
-  uint8_t leaves_packed[RACK_INFO_TABLE_LEAVES_PACKED_BYTES];
   uint32_t playthrough_union[RACK_INFO_TABLE_UNIONS_PER_ENTRY];
   Equity nonplaythrough_best_leave_values
       [RACK_INFO_TABLE_NONPLAYTHROUGH_BEST_LEAVES_PER_ENTRY];
@@ -158,11 +168,20 @@ typedef struct RackInfoTable {
   // playthrough_union[leave_size] slot populated; other slots stay at 0.
   // Setting min > RACK_SIZE means "no coverage at all".
   uint8_t playthrough_min_played_size;
+  // Width of each packed leave value, in [RIT_LEAVE_MIN_BITS,
+  // RIT_LEAVE_MAX_BITS], and the value a packed 0 stands for.
+  uint8_t leave_bits;
+  Equity leave_base;
+  // Bytes of the leave block at the start of each record (a multiple of 8),
+  // and the size of a whole record: leave_bytes + sizeof(RackInfoTableEntry).
+  uint32_t leave_bytes;
+  uint32_t record_stride;
   uint32_t num_buckets;
   uint32_t num_entries;
   uint32_t *bucket_starts;
-  RackInfoTableEntry *entries;
-  // mmap state: when is_mmapped is true, bucket_starts and entries point
+  // num_entries records of record_stride bytes each.
+  uint8_t *records;
+  // mmap state: when is_mmapped is true, bucket_starts and records point
   // into the mapped region and must not be free'd individually.
   bool is_mmapped;
   CMap map;
@@ -185,31 +204,127 @@ rack_info_table_get_instance_id(const RackInfoTable *rit) {
   return rit->instance_id;
 }
 
-// Unpack all 128 packed 24-bit leave values to 32-bit Equity in a batch.
-// Sign-extends from bit 23. Designed to be auto-vectorized.
-static inline void
-rack_info_table_entry_unpack_leaves(const RackInfoTableEntry *entry,
-                                    Equity *dest) {
-  const uint8_t *src = entry->leaves_packed;
+// Bytes of a leave block holding RACK_INFO_TABLE_LEAVES_PER_ENTRY values of
+// `leave_bits` bits, rounded up to a multiple of 8.
+static inline uint32_t rack_info_table_leave_bytes_for_bits(int leave_bits) {
+  const uint32_t total_bits =
+      (uint32_t)RACK_INFO_TABLE_LEAVES_PER_ENTRY * (uint32_t)leave_bits;
+  return ((total_bits + 63) / 64) * 8;
+}
+
+// The fewest bits, at least RIT_LEAVE_MIN_BITS, that hold every value in
+// [min_value, max_value] as an offset from min_value. Returns 0 if the span
+// needs more than RIT_LEAVE_MAX_BITS.
+static inline int rack_info_table_leave_bits_for_range(Equity min_value,
+                                                       Equity max_value) {
+  const uint64_t span = (uint64_t)((int64_t)max_value - (int64_t)min_value);
+  int bits = RIT_LEAVE_MIN_BITS;
+  while (bits <= RIT_LEAVE_MAX_BITS && (span >> bits) != 0) {
+    bits++;
+  }
+  return bits <= RIT_LEAVE_MAX_BITS ? bits : 0;
+}
+
+static inline bool rit_leave_bits_valid(int leave_bits) {
+  return leave_bits >= RIT_LEAVE_MIN_BITS && leave_bits <= RIT_LEAVE_MAX_BITS;
+}
+
+static inline void rack_info_table_set_leave_format(RackInfoTable *rit,
+                                                    int leave_bits,
+                                                    Equity leave_base) {
+  rit->leave_bits = (uint8_t)leave_bits;
+  rit->leave_base = leave_base;
+  rit->leave_bytes = rack_info_table_leave_bytes_for_bits(leave_bits);
+  rit->record_stride = rit->leave_bytes + (uint32_t)sizeof(RackInfoTableEntry);
+}
+
+static inline const RackInfoTableEntry *
+rack_info_table_get_entry(const RackInfoTable *rit, uint32_t entry_idx) {
+  return (const RackInfoTableEntry *)(rit->records +
+                                      (size_t)entry_idx * rit->record_stride +
+                                      rit->leave_bytes);
+}
+
+static inline RackInfoTableEntry *
+rack_info_table_get_mutable_entry(RackInfoTable *rit, uint32_t entry_idx) {
+  return (RackInfoTableEntry *)(rit->records +
+                                (size_t)entry_idx * rit->record_stride +
+                                rit->leave_bytes);
+}
+
+static inline uint32_t
+rack_info_table_get_entry_index(const RackInfoTable *rit,
+                                const RackInfoTableEntry *entry) {
+  const size_t offset =
+      (size_t)((const uint8_t *)entry - rit->records) - rit->leave_bytes;
+  return (uint32_t)(offset / rit->record_stride);
+}
+
+// Reads the 8 bytes at `src` as a little-endian uint64.
+static inline uint64_t rit_load_le64(const uint8_t *src) {
+  uint64_t word;
+  memcpy(&word, src, sizeof(word));
+  return le64toh(word);
+}
+
+// Unpacks a leave block of `leave_bits`-bit values. Called with a constant
+// width for the common widths so the shifts and offsets fold into
+// constants. Every 8-byte read starts inside the block and may run up to 7
+// bytes past it, into the record's entry.
+static inline void rit_unpack_leave_block(const uint8_t *src, int leave_bits,
+                                          Equity leave_base, Equity *dest) {
+  const uint64_t mask = (1ULL << leave_bits) - 1;
   for (int i = 0; i < RACK_INFO_TABLE_LEAVES_PER_ENTRY; i++) {
-    const int offset = i * 3;
-    int32_t val = (int32_t)src[offset] | ((int32_t)src[offset + 1] << 8) |
-                  ((int32_t)src[offset + 2] << 16);
-    // Sign extend from bit 23 (branchless).
-    val =
-        (val ^ RACK_INFO_TABLE_LEAVE_SIGN_BIT) - RACK_INFO_TABLE_LEAVE_SIGN_BIT;
-    dest[i] = (Equity)val;
+    const uint32_t bit_pos = (uint32_t)i * (uint32_t)leave_bits;
+    const uint64_t word = rit_load_le64(src + (bit_pos >> 3));
+    dest[i] = leave_base + (Equity)((word >> (bit_pos & 7)) & mask);
   }
 }
 
-// Pack a single 32-bit Equity to 3 bytes in the packed leaves array.
-static inline void rack_info_table_entry_pack_leave(RackInfoTableEntry *entry,
-                                                    int index, Equity value) {
-  const int offset = index * 3;
-  const uint32_t uval = (uint32_t)value;
-  entry->leaves_packed[offset] = (uint8_t)(uval & 0xFF);
-  entry->leaves_packed[offset + 1] = (uint8_t)((uval >> 8) & 0xFF);
-  entry->leaves_packed[offset + 2] = (uint8_t)((uval >> 16) & 0xFF);
+// Unpacks the entry's RACK_INFO_TABLE_LEAVES_PER_ENTRY leave values, indexed
+// by LeaveMap bitmask, into dest.
+static inline void rack_info_table_entry_unpack_leaves(
+    const RackInfoTable *rit, const RackInfoTableEntry *entry, Equity *dest) {
+  const uint8_t *src = (const uint8_t *)entry - rit->leave_bytes;
+  switch (rit->leave_bits) {
+  case 17:
+    rit_unpack_leave_block(src, 17, rit->leave_base, dest);
+    break;
+  case 18:
+    rit_unpack_leave_block(src, 18, rit->leave_base, dest);
+    break;
+  default:
+    rit_unpack_leave_block(src, rit->leave_bits, rit->leave_base, dest);
+    break;
+  }
+}
+
+// Packs RACK_INFO_TABLE_LEAVES_PER_ENTRY leave values into the leave block
+// ahead of `entry`. Every value must lie in [leave_base, leave_base +
+// 2^leave_bits - 1]; returns false, writing nothing, if one does not.
+static inline bool rack_info_table_entry_pack_leaves(const RackInfoTable *rit,
+                                                     RackInfoTableEntry *entry,
+                                                     const Equity *values) {
+  const int leave_bits = rit->leave_bits;
+  const uint64_t max_offset = (1ULL << leave_bits) - 1;
+  // Built in a buffer with 8 bytes of slack so each value can be ORed in
+  // with one 8-byte read-modify-write.
+  uint8_t
+      block[(RACK_INFO_TABLE_LEAVES_PER_ENTRY * RIT_LEAVE_MAX_BITS) / 8 + 8];
+  memset(block, 0, sizeof(block));
+  for (int i = 0; i < RACK_INFO_TABLE_LEAVES_PER_ENTRY; i++) {
+    const int64_t offset = (int64_t)values[i] - (int64_t)rit->leave_base;
+    if (offset < 0 || (uint64_t)offset > max_offset) {
+      return false;
+    }
+    const uint32_t bit_pos = (uint32_t)i * (uint32_t)leave_bits;
+    uint64_t word = rit_load_le64(block + (bit_pos >> 3));
+    word |= (uint64_t)offset << (bit_pos & 7);
+    word = htole64(word);
+    memcpy(block + (bit_pos >> 3), &word, sizeof(word));
+  }
+  memcpy((uint8_t *)entry - rit->leave_bytes, block, rit->leave_bytes);
+  return true;
 }
 
 static inline const char *rack_info_table_get_name(const RackInfoTable *rit) {
@@ -272,7 +387,7 @@ rack_info_table_lookup(const RackInfoTable *rit, const BitRack *bit_rack) {
   const uint32_t start = rit->bucket_starts[bucket_idx];
   const uint32_t end = rit->bucket_starts[bucket_idx + 1];
   for (uint32_t entry_idx = start; entry_idx < end; entry_idx++) {
-    const RackInfoTableEntry *entry = &rit->entries[entry_idx];
+    const RackInfoTableEntry *entry = rack_info_table_get_entry(rit, entry_idx);
     const BitRack entry_bit_rack = rack_info_table_entry_read_bit_rack(entry);
     if (bit_rack_equals(&entry_bit_rack, bit_rack)) {
       return entry;
@@ -388,7 +503,7 @@ static inline void rack_info_table_destroy(RackInfoTable *rit) {
     cmap_close(&rit->map);
   } else {
     free(rit->bucket_starts);
-    free(rit->entries);
+    free(rit->records);
   }
   free(rit);
 }
@@ -401,12 +516,14 @@ static inline void rack_info_table_destroy(RackInfoTable *rit) {
 //   1 byte:  version (RIT_VERSION)
 //   1 byte:  rack_size (matches RACK_SIZE)
 //   1 byte:  playthrough_min_played_size
-//   1 byte:  zero padding (keeps the following u32 aligned)
+//   1 byte:  leave_bits
 //   4 bytes: num_buckets
 //   4 bytes: num_entries
+//   4 bytes: leave_base (Equity)
 //   (num_buckets + 1) * 4 bytes: bucket_starts
-//   num_entries entries, each sizeof(RackInfoTableEntry) bytes:
-//     (1 << RACK_SIZE) * 3 bytes: leaves_packed (24-bit signed LE)
+//   num_entries records, each record_stride bytes:
+//     leave_bytes: leave block (see the comment above the first enum)
+//     sizeof(RackInfoTableEntry) bytes, the entry:
 //     (RACK_SIZE + 1) * 4 bytes: playthrough_union (uint32_t)
 //     (RACK_SIZE + 1) * 4 bytes: nonplaythrough_best_leave_values (Equity)
 //     (RACK_SIZE + 1) * 4 bytes: best_leaves (Equity, per-leave-size max)
@@ -449,17 +566,16 @@ static inline bool rit_write_uint32s(const uint32_t *values, size_t n,
 #endif
 }
 
-static inline bool rit_write_entries(const RackInfoTableEntry *entries,
-                                     uint32_t n, FILE *stream) {
+static inline bool rit_write_records(const RackInfoTable *rit, FILE *stream) {
 #if IS_LITTLE_ENDIAN
-  return rit_fwrite(entries, sizeof(RackInfoTableEntry), n, stream);
+  return rit_fwrite(rit->records, rit->record_stride, rit->num_entries, stream);
 #else
   bool ok = true;
-  for (uint32_t i = 0; ok && i < n; i++) {
-    const RackInfoTableEntry *entry = &entries[i];
-    // Packed 24-bit leaves are stored as raw bytes — no endian swap.
-    ok = ok && rit_fwrite(entry->leaves_packed, sizeof(uint8_t),
-                          RACK_INFO_TABLE_LEAVES_PACKED_BYTES, stream);
+  for (uint32_t i = 0; ok && i < rit->num_entries; i++) {
+    const RackInfoTableEntry *entry = rack_info_table_get_entry(rit, i);
+    // The leave block is little-endian bytes on every host — no swap.
+    ok = ok && rit_fwrite((const uint8_t *)entry - rit->leave_bytes,
+                          sizeof(uint8_t), rit->leave_bytes, stream);
     for (int union_idx = 0; ok && union_idx < RACK_INFO_TABLE_UNIONS_PER_ENTRY;
          union_idx++) {
       ok = rit_write_uint32(entry->playthrough_union[union_idx], stream);
@@ -513,14 +629,15 @@ static inline void rack_info_table_write_to_file(const RackInfoTable *rit,
     return;
   }
   const uint8_t header[4] = {rit->version, rit->rack_size,
-                             rit->playthrough_min_played_size, 0};
+                             rit->playthrough_min_played_size, rit->leave_bits};
   errno = 0;
   bool written = rit_fwrite(header, sizeof(uint8_t), sizeof(header), stream) &&
                  rit_write_uint32(rit->num_buckets, stream) &&
                  rit_write_uint32(rit->num_entries, stream) &&
+                 rit_write_uint32((uint32_t)rit->leave_base, stream) &&
                  rit_write_uint32s(rit->bucket_starts,
                                    (size_t)rit->num_buckets + 1, stream) &&
-                 rit_write_entries(rit->entries, rit->num_entries, stream);
+                 rit_write_records(rit, stream);
   int error_number = written ? 0 : errno;
   // A full disk often shows only here, when the buffered tail is flushed.
   if (fclose(stream) != 0) {
@@ -564,39 +681,40 @@ static inline void rit_read_uint32s_or_die(uint32_t *out, size_t n,
 #endif
 }
 
-static inline void rit_read_entries_or_die(RackInfoTableEntry *entries,
-                                           uint32_t n, FILE *stream) {
-  if (fread(entries, sizeof(RackInfoTableEntry), n, stream) != n) {
-    log_fatal("could not read entries from rit stream");
+static inline void rit_read_records_or_die(RackInfoTable *rit, FILE *stream) {
+  if (fread(rit->records, rit->record_stride, rit->num_entries, stream) !=
+      rit->num_entries) {
+    log_fatal("could not read records from rit stream");
   }
 #if !IS_LITTLE_ENDIAN
-  for (uint32_t i = 0; i < n; i++) {
-    // leaves_packed are raw bytes — no endian swap needed.
+  for (uint32_t i = 0; i < rit->num_entries; i++) {
+    // The leave block is little-endian bytes on every host — no swap.
+    RackInfoTableEntry *entry = rack_info_table_get_mutable_entry(rit, i);
     for (int union_idx = 0; union_idx < RACK_INFO_TABLE_UNIONS_PER_ENTRY;
          union_idx++) {
-      entries[i].playthrough_union[union_idx] =
-          le32toh(entries[i].playthrough_union[union_idx]);
+      entry->playthrough_union[union_idx] =
+          le32toh(entry->playthrough_union[union_idx]);
     }
     for (int leave_idx = 0;
          leave_idx < RACK_INFO_TABLE_NONPLAYTHROUGH_BEST_LEAVES_PER_ENTRY;
          leave_idx++) {
-      entries[i].nonplaythrough_best_leave_values[leave_idx] = (Equity)le32toh(
-          (uint32_t)entries[i].nonplaythrough_best_leave_values[leave_idx]);
+      entry->nonplaythrough_best_leave_values[leave_idx] = (Equity)le32toh(
+          (uint32_t)entry->nonplaythrough_best_leave_values[leave_idx]);
     }
     for (int bl_idx = 0; bl_idx < RACK_INFO_TABLE_BEST_LEAVES_PER_ENTRY;
          bl_idx++) {
-      entries[i].best_leaves[bl_idx] =
-          (Equity)le32toh((uint32_t)entries[i].best_leaves[bl_idx]);
+      entry->best_leaves[bl_idx] =
+          (Equity)le32toh((uint32_t)entry->best_leaves[bl_idx]);
     }
     for (int len_idx = 0; len_idx < RIT_MULTI_PT_TP7_NUM_WORD_LENGTHS;
          len_idx++) {
-      entries[i].multi_pt_tp7_bitvec[len_idx] =
-          le32toh(entries[i].multi_pt_tp7_bitvec[len_idx]);
+      entry->multi_pt_tp7_bitvec[len_idx] =
+          le32toh(entry->multi_pt_tp7_bitvec[len_idx]);
     }
     for (int len_idx = 0; len_idx < RIT_MULTI_PT_TP6_NUM_WORD_LENGTHS;
          len_idx++) {
-      entries[i].multi_pt_tp6_bitvec[len_idx] =
-          le32toh(entries[i].multi_pt_tp6_bitvec[len_idx]);
+      entry->multi_pt_tp6_bitvec[len_idx] =
+          le32toh(entry->multi_pt_tp6_bitvec[len_idx]);
     }
     // bit_rack_bytes are already stored little-endian
     // nonplaythrough_has_word_of_length_bitmask is a single byte, no swap
@@ -616,7 +734,8 @@ static inline void rack_info_table_load_from_stream(RackInfoTable *rit,
     error_stack_push(
         error_stack, ERROR_STATUS_WMP_UNSUPPORTED_VERSION,
         get_formatted_string(
-            "detected rit version %d but only %d or greater is supported: %s\n",
+            "detected rit version %d but only %d or greater is supported: "
+            "%s; rebuild it with 'convert klvwmp2rit'\n",
             version, RIT_EARLIEST_SUPPORTED_VERSION, filename));
     return;
   }
@@ -642,22 +761,33 @@ static inline void rack_info_table_load_from_stream(RackInfoTable *rit,
   }
   rit->playthrough_min_played_size = min_played;
 
-  uint8_t padding;
-  if (fread(&padding, sizeof(padding), 1, stream) != 1) {
-    log_fatal("could not read rit header padding");
+  uint8_t leave_bits;
+  if (fread(&leave_bits, sizeof(leave_bits), 1, stream) != 1) {
+    log_fatal("could not read rit leave bits");
+  }
+  if (!rit_leave_bits_valid(leave_bits)) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_RW_READ_ERROR,
+        get_formatted_string("rit leave width %d is outside [%d, %d]: %s\n",
+                             leave_bits, RIT_LEAVE_MIN_BITS, RIT_LEAVE_MAX_BITS,
+                             filename));
+    return;
   }
 
   rit_read_uint32_or_die(&rit->num_buckets, stream);
   rit_read_uint32_or_die(&rit->num_entries, stream);
+  uint32_t leave_base;
+  rit_read_uint32_or_die(&leave_base, stream);
+  rack_info_table_set_leave_format(rit, leave_bits, (Equity)leave_base);
 
   rit->bucket_starts = (uint32_t *)malloc_or_die(
       ((size_t)rit->num_buckets + 1) * sizeof(uint32_t));
   rit_read_uint32s_or_die(rit->bucket_starts, (size_t)rit->num_buckets + 1,
                           stream);
 
-  rit->entries = (RackInfoTableEntry *)malloc_or_die(
-      (size_t)rit->num_entries * sizeof(RackInfoTableEntry));
-  rit_read_entries_or_die(rit->entries, rit->num_entries, stream);
+  rit->records =
+      (uint8_t *)malloc_or_die((size_t)rit->num_entries * rit->record_stride);
+  rit_read_records_or_die(rit, stream);
 }
 
 static inline void rack_info_table_load(RackInfoTable *rit, const char *name,
@@ -674,7 +804,7 @@ static inline void rack_info_table_load(RackInfoTable *rit, const char *name,
   }
 }
 
-// mmap-based load (little-endian only). Points bucket_starts and entries
+// mmap-based load (little-endian only). Points bucket_starts and records
 // directly into the mapped file, eliminating the fread startup cost.
 static inline void rack_info_table_load_mmap(RackInfoTable *rit,
                                              const char *name,
@@ -702,7 +832,7 @@ static inline void rack_info_table_load_mmap(RackInfoTable *rit,
   }
   const size_t file_size = map.size;
 
-  if (file_size < 12) {
+  if (file_size < RIT_HEADER_BYTES) {
     cmap_close(&map);
     error_stack_push(
         error_stack, ERROR_STATUS_RW_READ_ERROR,
@@ -712,14 +842,15 @@ static inline void rack_info_table_load_mmap(RackInfoTable *rit,
 
   const uint8_t *data = (const uint8_t *)map.data;
 
-  // Parse the 12-byte header.
+  // Parse the header.
   uint8_t version = data[0];
   if (version < RIT_EARLIEST_SUPPORTED_VERSION) {
     cmap_close(&map);
     error_stack_push(
         error_stack, ERROR_STATUS_WMP_UNSUPPORTED_VERSION,
         get_formatted_string(
-            "detected rit version %d but only %d or greater is supported: %s\n",
+            "detected rit version %d but only %d or greater is supported: "
+            "%s; rebuild it with 'convert klvwmp2rit'\n",
             version, RIT_EARLIEST_SUPPORTED_VERSION, filename));
     return;
   }
@@ -737,15 +868,27 @@ static inline void rack_info_table_load_mmap(RackInfoTable *rit,
   }
   rit->rack_size = rack_size;
   rit->playthrough_min_played_size = data[2];
-  // data[3] is padding
+  const uint8_t leave_bits = data[3];
+  if (!rit_leave_bits_valid(leave_bits)) {
+    cmap_close(&map);
+    error_stack_push(
+        error_stack, ERROR_STATUS_RW_READ_ERROR,
+        get_formatted_string("rit leave width %d is outside [%d, %d]: %s\n",
+                             leave_bits, RIT_LEAVE_MIN_BITS, RIT_LEAVE_MAX_BITS,
+                             filename));
+    return;
+  }
 
   memcpy(&rit->num_buckets, data + 4, sizeof(uint32_t));
   memcpy(&rit->num_entries, data + 8, sizeof(uint32_t));
+  uint32_t leave_base;
+  memcpy(&leave_base, data + 12, sizeof(uint32_t));
+  rack_info_table_set_leave_format(rit, leave_bits, (Equity)leave_base);
 
   // Bounds-check each section against the remaining mapped region. Use
   // division against the available space so corrupt num_buckets/num_entries
   // values cannot overflow the size_t multiplication.
-  const size_t bucket_starts_offset = 12;
+  const size_t bucket_starts_offset = RIT_HEADER_BYTES;
   const size_t num_bucket_start_slots = (size_t)rit->num_buckets + 1;
   if (num_bucket_start_slots >
       (file_size - bucket_starts_offset) / sizeof(uint32_t)) {
@@ -756,9 +899,9 @@ static inline void rack_info_table_load_mmap(RackInfoTable *rit,
     return;
   }
   const size_t bucket_starts_size = num_bucket_start_slots * sizeof(uint32_t);
-  const size_t entries_offset = bucket_starts_offset + bucket_starts_size;
+  const size_t records_offset = bucket_starts_offset + bucket_starts_size;
   if ((size_t)rit->num_entries >
-      (file_size - entries_offset) / sizeof(RackInfoTableEntry)) {
+      (file_size - records_offset) / rit->record_stride) {
     cmap_close(&map);
     error_stack_push(
         error_stack, ERROR_STATUS_RW_READ_ERROR,
@@ -767,7 +910,7 @@ static inline void rack_info_table_load_mmap(RackInfoTable *rit,
   }
 
   rit->bucket_starts = (uint32_t *)(data + bucket_starts_offset);
-  rit->entries = (RackInfoTableEntry *)(data + entries_offset);
+  rit->records = (uint8_t *)(data + records_offset);
 
   rit->is_mmapped = true;
   rit->map = map;

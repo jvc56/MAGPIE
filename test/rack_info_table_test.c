@@ -57,19 +57,22 @@ static void assert_rits_equal(const RackInfoTable *a, const RackInfoTable *b) {
   assert(a->version == b->version);
   assert(a->rack_size == b->rack_size);
   assert(a->playthrough_min_played_size == b->playthrough_min_played_size);
+  assert(a->leave_bits == b->leave_bits);
+  assert(a->leave_base == b->leave_base);
+  assert(a->record_stride == b->record_stride);
   assert(a->num_buckets == b->num_buckets);
   assert(a->num_entries == b->num_entries);
   for (uint32_t bucket_idx = 0; bucket_idx <= a->num_buckets; bucket_idx++) {
     assert(a->bucket_starts[bucket_idx] == b->bucket_starts[bucket_idx]);
   }
   for (uint32_t entry_idx = 0; entry_idx < a->num_entries; entry_idx++) {
-    const RackInfoTableEntry *ea = &a->entries[entry_idx];
-    const RackInfoTableEntry *eb = &b->entries[entry_idx];
-    // Compare packed 24-bit leaves by unpacking both.
+    const RackInfoTableEntry *ea = rack_info_table_get_entry(a, entry_idx);
+    const RackInfoTableEntry *eb = rack_info_table_get_entry(b, entry_idx);
+    // Compare packed leaves by unpacking both.
     Equity leaves_a[RACK_INFO_TABLE_LEAVES_PER_ENTRY];
     Equity leaves_b[RACK_INFO_TABLE_LEAVES_PER_ENTRY];
-    rack_info_table_entry_unpack_leaves(ea, leaves_a);
-    rack_info_table_entry_unpack_leaves(eb, leaves_b);
+    rack_info_table_entry_unpack_leaves(a, ea, leaves_a);
+    rack_info_table_entry_unpack_leaves(b, eb, leaves_b);
     for (int leaf_idx = 0; leaf_idx < RACK_INFO_TABLE_LEAVES_PER_ENTRY;
          leaf_idx++) {
       assert(leaves_a[leaf_idx] == leaves_b[leaf_idx]);
@@ -234,7 +237,7 @@ static void verify_unions_against_wmp(const RackInfoTable *rit, const WMP *wmp,
 
   uint32_t expected_unions[RACK_INFO_TABLE_UNIONS_PER_ENTRY];
   for (uint32_t entry_idx = 0; entry_idx < rit->num_entries; entry_idx++) {
-    const RackInfoTableEntry *entry = &rit->entries[entry_idx];
+    const RackInfoTableEntry *entry = rack_info_table_get_entry(rit, entry_idx);
     const BitRack rack_bit_rack = rack_info_table_entry_read_bit_rack(entry);
     compute_expected_unions(wmp, ld, &rack_bit_rack, expected_unions);
 
@@ -425,7 +428,78 @@ static void test_rack_info_table_follows_leaves(void) {
   config_destroy(config);
 }
 
+// Packs and unpacks one record at every leave width, with values at both
+// ends of each width's range and a pattern that sets every bit position, and
+// checks the bytes after the leave block are left alone.
+static void test_rack_info_table_leave_packing(void) {
+  assert(rack_info_table_leave_bits_for_range(0, 0) == 1);
+  assert(rack_info_table_leave_bits_for_range(0, 1) == 1);
+  assert(rack_info_table_leave_bits_for_range(0, 2) == 2);
+  assert(rack_info_table_leave_bits_for_range(-41654, 74572) == 17);
+  assert(rack_info_table_leave_bits_for_range(-51953, 137829) == 18);
+  assert(rack_info_table_leave_bits_for_range(-(1 << 23), (1 << 23) - 1) == 24);
+  assert(rack_info_table_leave_bits_for_range(-(1 << 23), 1 << 23) == 0);
+  assert(rack_info_table_leave_bytes_for_bits(17) == 272);
+  assert(rack_info_table_leave_bytes_for_bits(18) == 288);
+
+  const Equity base = -12345;
+  for (int bits = RIT_LEAVE_MIN_BITS; bits <= RIT_LEAVE_MAX_BITS; bits++) {
+    RackInfoTable rit = {0};
+    rack_info_table_set_leave_format(&rit, bits, base);
+    assert(rit.leave_bytes % 8 == 0);
+    assert(rit.record_stride ==
+           rit.leave_bytes + (uint32_t)sizeof(RackInfoTableEntry));
+    uint8_t *record = calloc_or_die(1, rit.record_stride);
+    rit.records = record;
+    rit.num_entries = 1;
+    RackInfoTableEntry *entry = rack_info_table_get_mutable_entry(&rit, 0);
+    memset(entry, 0xA5, sizeof(*entry));
+    assert(rack_info_table_get_entry_index(&rit, entry) == 0);
+
+    const int64_t max_offset = (1LL << bits) - 1;
+    Equity values[RACK_INFO_TABLE_LEAVES_PER_ENTRY];
+    for (int i = 0; i < RACK_INFO_TABLE_LEAVES_PER_ENTRY; i++) {
+      int64_t offset;
+      if (i % 3 == 0) {
+        offset = max_offset;
+      } else if (i % 3 == 1) {
+        offset = 0;
+      } else {
+        offset = ((int64_t)i * 2654435761LL) & max_offset;
+      }
+      values[i] = (Equity)(base + offset);
+    }
+    assert(rack_info_table_entry_pack_leaves(&rit, entry, values));
+    Equity unpacked[RACK_INFO_TABLE_LEAVES_PER_ENTRY];
+    rack_info_table_entry_unpack_leaves(&rit, entry, unpacked);
+    for (int i = 0; i < RACK_INFO_TABLE_LEAVES_PER_ENTRY; i++) {
+      assert(unpacked[i] == values[i]);
+    }
+    const uint8_t *entry_bytes = (const uint8_t *)entry;
+    for (size_t byte_idx = 0; byte_idx < sizeof(*entry); byte_idx++) {
+      assert(entry_bytes[byte_idx] == 0xA5);
+    }
+
+    // A value outside the range is refused and leaves the block as it was.
+    Equity out_of_range[RACK_INFO_TABLE_LEAVES_PER_ENTRY];
+    memcpy(out_of_range, values, sizeof(values));
+    for (int i = 0; i < RACK_INFO_TABLE_LEAVES_PER_ENTRY; i++) {
+      out_of_range[i] = base;
+    }
+    out_of_range[127] = (Equity)(base + max_offset + 1);
+    assert(!rack_info_table_entry_pack_leaves(&rit, entry, out_of_range));
+    out_of_range[127] = base - 1;
+    assert(!rack_info_table_entry_pack_leaves(&rit, entry, out_of_range));
+    rack_info_table_entry_unpack_leaves(&rit, entry, unpacked);
+    for (int i = 0; i < RACK_INFO_TABLE_LEAVES_PER_ENTRY; i++) {
+      assert(unpacked[i] == values[i]);
+    }
+    free(record);
+  }
+}
+
 void test_rack_info_table(void) {
+  test_rack_info_table_leave_packing();
   // Use CSW21 with the english_ab distribution (50 A, 50 B, 0 blank).
   // This keeps the number of full racks small (8, for 0A+7B through 7A+0B)
   // while still exercising the full build path with a real KLV and WMP.
@@ -487,7 +561,7 @@ void test_rack_info_table(void) {
   // Index 0 (empty leave) must be 0.
   {
     Equity unpacked[RACK_INFO_TABLE_LEAVES_PER_ENTRY];
-    rack_info_table_entry_unpack_leaves(entry, unpacked);
+    rack_info_table_entry_unpack_leaves(rit, entry, unpacked);
     assert(unpacked[0] == 0);
   }
 
@@ -495,13 +569,14 @@ void test_rack_info_table(void) {
   // RIT's playthrough slot 0 matches an independent WMP query for the
   // full rack.
   for (uint32_t entry_idx = 0; entry_idx < rit->num_entries; entry_idx++) {
-    const RackInfoTableEntry *stored = &rit->entries[entry_idx];
+    const RackInfoTableEntry *stored =
+        rack_info_table_get_entry(rit, entry_idx);
     const BitRack entry_bit_rack = rack_info_table_entry_read_bit_rack(stored);
     const RackInfoTableEntry *found =
         rack_info_table_lookup(rit, &entry_bit_rack);
     assert(found == stored);
     Equity unpacked_leaves[RACK_INFO_TABLE_LEAVES_PER_ENTRY];
-    rack_info_table_entry_unpack_leaves(found, unpacked_leaves);
+    rack_info_table_entry_unpack_leaves(rit, found, unpacked_leaves);
     assert(unpacked_leaves[0] == 0);
   }
   verify_unions_against_wmp(rit, wmp, ld);
