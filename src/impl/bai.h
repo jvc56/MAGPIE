@@ -255,6 +255,10 @@ typedef struct BAISyncData {
   int64_t *paired_prefix;
   int64_t *paired_prefix_squares;
   int64_t *paired_cross;
+  // With BAIOptions.eliminate, whether each arm is out (see
+  // bai_update_elimination) and how many are; NULL otherwise.
+  bool *eliminated;
+  int num_eliminated;
   cpthread_mutex_t mutex;
   ThreadControl *thread_control;
   BAIResult *bai_result;
@@ -434,6 +438,9 @@ static inline BAISyncData *bai_sync_data_create(BAIResult *bai_result,
   bai_sync_data->paired_prefix = NULL;
   bai_sync_data->paired_prefix_squares = NULL;
   bai_sync_data->paired_cross = NULL;
+  // bai() allocates it when arms can be eliminated.
+  bai_sync_data->eliminated = NULL;
+  bai_sync_data->num_eliminated = 0;
   cpthread_mutex_init(&bai_sync_data->mutex);
   cpthread_cond_init(&bai_sync_data->work_available);
   bai_sync_data->thread_control = thread_control;
@@ -500,6 +507,7 @@ static inline void bai_sync_data_destroy(BAISyncData *bai_sync_data) {
   free(bai_sync_data->paired_prefix);
   free(bai_sync_data->paired_prefix_squares);
   free(bai_sync_data->paired_cross);
+  free(bai_sync_data->eliminated);
   free(bai_sync_data->arm_data);
   free(bai_sync_data);
 }
@@ -787,20 +795,106 @@ static inline void bai_update_threshold(BAISyncData *bai_sync_data,
   bai_result_set_status(bai_sync_data->bai_result, BAI_RESULT_STATUS_THRESHOLD);
 }
 
+// Assumes the caller has locked the bai sync data mutex. The stopping test
+// with elimination, in place of bai_update_threshold: an arm the best arm
+// beats by the GK16 threshold is out, and the sim stops when every arm other
+// than the best is out or similar to it. Arms only leave between folds, from
+// the committed statistics, so which arms are out never depends on how the
+// worker threads interleave. The best arm is the highest mean of all arms
+// (bai_update_astar_while_locked), as the sim's chosen play is; an arm that is
+// out and becomes the best again, as the others' means fall, comes back.
+static inline void bai_update_elimination(BAISyncData *bai_sync_data,
+                                          RandomVariables *rvs,
+                                          const double delta) {
+  const double bai_threshold = log(
+      (log((double)bai_sync_data->num_total_samples_completed) + 1) / delta);
+  const int astar_index = bai_sync_data->astar_index;
+  bool *eliminated = bai_sync_data->eliminated;
+  if (eliminated[astar_index]) {
+    eliminated[astar_index] = false;
+    bai_sync_data->num_eliminated--;
+  }
+  const BAIArmDatum *astar_arm_datum = &bai_sync_data->arm_data[astar_index];
+  bool contested = false;
+  for (int arm_index = 0; arm_index < bai_sync_data->num_arms; arm_index++) {
+    if (arm_index == astar_index || eliminated[arm_index] ||
+        rvs_are_similar(rvs, astar_index, arm_index)) {
+      continue;
+    }
+    const BAIArmDatum *arm_datum = &bai_sync_data->arm_data[arm_index];
+    const double arm_z =
+        bai_sync_data->paired_values != NULL
+            ? bai_paired_z(bai_sync_data, astar_index, arm_index)
+            : bai_arm_z_with_counts(astar_arm_datum,
+                                    (double)astar_arm_datum->num_samples,
+                                    arm_datum, (double)arm_datum->num_samples);
+    if (arm_z > bai_threshold) {
+      eliminated[arm_index] = true;
+      bai_sync_data->num_eliminated++;
+    } else {
+      contested = true;
+    }
+  }
+  if (!contested) {
+    bai_result_set_status(bai_sync_data->bai_result,
+                          BAI_RESULT_STATUS_THRESHOLD);
+  }
+}
+
+// Assumes the caller has locked the bai sync data mutex, or is the only
+// thread running. Lays out num_slots round-robin slots starting at global
+// sample requested: arm after arm in index order, or, once arms have been
+// eliminated, each slot to the arm still in with the fewest samples handed
+// out (the lowest index on a tie), which is the same order while their
+// counts are level.
+static inline void bai_round_robin_arms(BAISyncData *bai_sync_data,
+                                        const uint64_t requested,
+                                        const int num_slots, int *arm_indices) {
+  if (bai_sync_data->num_eliminated == 0) {
+    for (int slot = 0; slot < num_slots; slot++) {
+      arm_indices[slot] = (int)((requested + (uint64_t)slot) %
+                                (uint64_t)bai_sync_data->num_arms);
+    }
+    return;
+  }
+  for (int slot = 0; slot < num_slots; slot++) {
+    int next_index = -1;
+    for (int arm_index = 0; arm_index < bai_sync_data->num_arms; arm_index++) {
+      if (bai_sync_data->eliminated[arm_index]) {
+        continue;
+      }
+      if (next_index < 0 ||
+          bai_sync_data->arm_data[arm_index].num_scheduled <
+              bai_sync_data->arm_data[next_index].num_scheduled) {
+        next_index = arm_index;
+      }
+    }
+    arm_indices[slot] = next_index;
+    bai_sync_data->arm_data[next_index].num_scheduled++;
+  }
+  // The caller counts the slots it lays out.
+  for (int slot = 0; slot < num_slots; slot++) {
+    bai_sync_data->arm_data[arm_indices[slot]].num_scheduled--;
+  }
+}
+
 // Assumes the caller has locked the bai sync data mutex, or is the only
 // thread running. The top-two challenger: the arm minimizing Z + log(N)
 // against astar, as in the sequential rule, but with every arm weighted by the
 // samples handed out to it (num_scheduled) rather than only those committed.
-// Returns astar when every other arm is similar to it.
+// Eliminated arms are never the challenger. Returns astar when every other arm
+// is similar to it or out.
 static inline int bai_schedule_challenger(const BAISyncData *bai_sync_data,
                                           RandomVariables *rvs,
                                           const int astar_index) {
   const BAIArmDatum *astar_arm_datum = &bai_sync_data->arm_data[astar_index];
   const double astar_num_scheduled = (double)astar_arm_datum->num_scheduled;
+  const bool *eliminated = bai_sync_data->eliminated;
   int challenger_index = -1;
   double challenger_value = 0.0;
   for (int arm_index = 0; arm_index < bai_sync_data->num_arms; arm_index++) {
     if (arm_index == astar_index ||
+        (eliminated != NULL && eliminated[arm_index]) ||
         rvs_are_similar(rvs, astar_index, arm_index)) {
       continue;
     }
@@ -1023,10 +1117,8 @@ static inline void bai_schedule_round_while_locked(BAISampleArgs *args) {
   round->num_completed = 0;
   if (bai_sync_data->initial_phase ||
       args->sampling_rule == BAI_SAMPLING_RULE_ROUND_ROBIN) {
-    for (int slot = 0; slot < num_samples; slot++) {
-      round->arm_indices[slot] = (int)((requested + (uint64_t)slot) %
-                                       (uint64_t)bai_sync_data->num_arms);
-    }
+    bai_round_robin_arms(bai_sync_data, requested, num_samples,
+                         round->arm_indices);
     round->claim_batch = BAI_SCHEDULE_ROUND_ROBIN_CLAIM_BATCH;
   } else {
     bai_schedule_top_two_arms(args, num_samples, round->arm_indices);
@@ -1251,8 +1343,12 @@ static inline void bai_commit_round_while_locked_impl(BAISampleArgs *args,
                           BAI_RESULT_STATUS_WIN_PCT_CUTOFF);
     return;
   }
-  bai_update_threshold(bai_sync_data, args->rvs, args->threshold,
-                       args->sampling_rule, args->delta);
+  if (bai_sync_data->eliminated != NULL) {
+    bai_update_elimination(bai_sync_data, args->rvs, args->delta);
+  } else {
+    bai_update_threshold(bai_sync_data, args->rvs, args->threshold,
+                         args->sampling_rule, args->delta);
+  }
 }
 
 static inline void bai_commit_round_while_locked(BAISampleArgs *args,
@@ -1455,11 +1551,9 @@ static inline bool bai_speculation_expected_arms(BAISampleArgs *args,
                                                  int *arm_indices) {
   BAISyncData *bai_sync_data = args->bai_sync_data;
   if (bai_next_round_is_round_robin(args)) {
-    const uint64_t requested = bai_sync_data->num_total_samples_requested;
-    for (int slot = 0; slot < BAI_SPECULATION_SLOTS; slot++) {
-      arm_indices[slot] = (int)((requested + (uint64_t)slot) %
-                                (uint64_t)bai_sync_data->num_arms);
-    }
+    bai_round_robin_arms(bai_sync_data,
+                         bai_sync_data->num_total_samples_requested,
+                         BAI_SPECULATION_SLOTS, arm_indices);
     return true;
   }
   // The top-two rule reads every arm's mean, so every arm needs a committed
@@ -1980,6 +2074,11 @@ static inline void bai(const BAIOptions *bai_options, RandomVariables *rvs,
   if (bai_options->threshold != BAI_THRESHOLD_NONE &&
       rvs_arms_share_seeds(rvs) && sync_data->num_arms > 1) {
     bai_sync_data_enable_paired(sync_data);
+  }
+  if (bai_options->eliminate && bai_options->threshold != BAI_THRESHOLD_NONE &&
+      sync_data->num_arms > 1) {
+    sync_data->eliminated =
+        calloc_or_die((size_t)sync_data->num_arms, sizeof(bool));
   }
 #ifdef BAI_SCHED_STATS
   sync_data->sched_start_ns = sched_start_ns;

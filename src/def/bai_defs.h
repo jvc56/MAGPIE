@@ -57,6 +57,11 @@ typedef struct BAIOptions {
   // draws (see BAI_SCHEDULE_ROUND_SIZE), so samples that average many draws
   // still get an adaptive schedule at small budgets.
   uint64_t draws_per_sample;
+  // With a threshold, an arm that the best arm beats by the stopping
+  // threshold stops being sampled (see bai_update_elimination), so the rest
+  // of the budget goes to the arms still in contention. The sim stops when
+  // every other arm is out. Ignored without a threshold.
+  bool eliminate;
 } BAIOptions;
 
 #endif

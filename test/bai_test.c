@@ -25,6 +25,9 @@
 
 enum {
   NUM_UNIQUE_MEANS = 10000,
+  // test_bai_elimination: samples per arm in its table, and the table's seed.
+  ELIMINATION_TEST_SAMPLES = 4000,
+  ELIMINATION_TEST_SEED = 29,
   // How long a test waits on a thread before calling it hung. The work takes
   // seconds, but the sanitizer builds and Wine run it many times slower, so
   // this catches a hang, never a slow machine.
@@ -855,6 +858,97 @@ void test_bai_round_size(void) {
   assert(bai_round_size(1000) == 1);
 }
 
+// A table of samples whose arms share luck at each ordinal, as a sim's do:
+// arm a's n-th sample is its mean, plus noise common to every arm at n, plus
+// its own noise.
+static double *elimination_test_table(const double *means, const int num_arms,
+                                      const int num_samples) {
+  double *table =
+      malloc_or_die(sizeof(double) * (size_t)num_arms * (size_t)num_samples);
+  XoshiroPRNG *prng = prng_create(ELIMINATION_TEST_SEED);
+  for (int ordinal = 0; ordinal < num_samples; ordinal++) {
+    const double common =
+        0.3 * ((double)prng_get_random_number(prng, 1000) / 1000.0 - 0.5);
+    for (int arm_index = 0; arm_index < num_arms; arm_index++) {
+      const double own =
+          0.3 * ((double)prng_get_random_number(prng, 1000) / 1000.0 - 0.5);
+      table[(size_t)arm_index * (size_t)num_samples + (size_t)ordinal] =
+          means[arm_index] + common + own;
+    }
+  }
+  prng_destroy(prng);
+  return table;
+}
+
+// Runs one BAI over the table, writing each arm's samples handed out.
+static void elimination_test_run(const double *table, const int num_arms,
+                                 const int num_samples, BAIOptions *options,
+                                 BAIResult *bai_result, uint64_t *draws) {
+  const RandomVariablesArgs rv_args = {
+      .type = RANDOM_VARIABLES_TABLE,
+      .num_rvs = (uint64_t)num_arms,
+      .num_samples = (uint64_t)num_samples,
+      .samples = table,
+      .table_draws = draws,
+  };
+  RandomVariables *rvs = rvs_create(&rv_args);
+  ThreadControl *thread_control = thread_control_create();
+  bai_wrapper(options, rvs, thread_control, NULL, bai_result);
+  thread_control_destroy(thread_control);
+  rvs_destroy(rvs);
+}
+
+// With elimination, arms the best beats by the threshold stop being sampled:
+// the sim finds the best arm on fewer samples than without, spends little on
+// the clearly worse arms, and its result and allocation do not depend on the
+// thread count.
+void test_bai_elimination(void) {
+  const double means[] = {0.2, 0.25, 0.5, 0.55, 0.3, 0.1};
+  const int num_arms = sizeof(means) / sizeof(means[0]);
+  double *table =
+      elimination_test_table(means, num_arms, ELIMINATION_TEST_SAMPLES);
+  BAIResult *bai_result = bai_result_create();
+  for (int rule_idx = 0; rule_idx < num_sampling_rules; rule_idx++) {
+    BAIOptions options = {
+        .sampling_rule = sampling_rules[rule_idx],
+        .threshold = BAI_THRESHOLD_GK16,
+        .delta = 0.01,
+        .sample_minimum = 20,
+        .sample_limit = (uint64_t)num_arms * ELIMINATION_TEST_SAMPLES / 2,
+        .num_threads = 1,
+        .eliminate = true,
+    };
+    uint64_t draws[sizeof(means) / sizeof(means[0])];
+    elimination_test_run(table, num_arms, ELIMINATION_TEST_SAMPLES, &options,
+                         bai_result, draws);
+    assert(bai_result_get_status(bai_result) == BAI_RESULT_STATUS_THRESHOLD);
+    assert(bai_result_get_best_arm(bai_result) == 3);
+    const uint64_t eliminating_samples = bai_result_get_num_samples(bai_result);
+    // The arm furthest behind is out long before the runner-up.
+    assert(draws[5] < draws[2]);
+    assert(draws[2] <= draws[3]);
+    options.num_threads = 11;
+    uint64_t threaded_draws[sizeof(means) / sizeof(means[0])];
+    elimination_test_run(table, num_arms, ELIMINATION_TEST_SAMPLES, &options,
+                         bai_result, threaded_draws);
+    assert(bai_result_get_best_arm(bai_result) == 3);
+    assert(bai_result_get_num_samples(bai_result) == eliminating_samples);
+    for (int arm_index = 0; arm_index < num_arms; arm_index++) {
+      assert(threaded_draws[arm_index] == draws[arm_index]);
+    }
+    options.num_threads = 1;
+    options.eliminate = false;
+    elimination_test_run(table, num_arms, ELIMINATION_TEST_SAMPLES, &options,
+                         bai_result, draws);
+    assert(bai_result_get_best_arm(bai_result) == 3);
+    if (sampling_rules[rule_idx] == BAI_SAMPLING_RULE_ROUND_ROBIN) {
+      assert(eliminating_samples < bai_result_get_num_samples(bai_result));
+    }
+  }
+  bai_result_destroy(bai_result);
+  free(table);
+}
+
 void test_bai(void) {
   const char *bai_seed = getenv("BAI_SEED");
   if (bai_seed) {
@@ -865,6 +959,7 @@ void test_bai(void) {
     test_bai_round_size();
     test_bai_paired_z();
     test_bai_paired_z_correlated();
+    test_bai_elimination();
     const int num_threads[] = {1, 11};
     const int num_thread_tests = sizeof(num_threads) / sizeof(int);
     for (int i = 0; i < num_thread_tests; i++) {
