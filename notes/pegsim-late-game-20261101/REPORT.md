@@ -169,6 +169,10 @@ hit the 15 s endgame cap; such a solve keeps its last completed depth.
 
 ## Reproducing
 
+`dataset/` holds the 512 boards at 7 in the bag with every arm's per-candidate
+values and the judge results, the 2-in-bag label set, and the nets (see
+`dataset/README.md`).
+
 The 1PEG/2PEG model files are not in the repo. `NETS` is
 `peg1-first:peg1-second:4:0.5:100:peg2-model:peg2-first:16:0`.
 
