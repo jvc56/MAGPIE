@@ -28,6 +28,8 @@ enum {
   // test_bai_elimination: samples per arm in its table, and the table's seed.
   ELIMINATION_TEST_SAMPLES = 4000,
   ELIMINATION_TEST_SEED = 29,
+  // test_bai_racing: the per-arm sample limit.
+  RACING_TEST_ARM_LIMIT = 400,
   // How long a test waits on a thread before calling it hung. The work takes
   // seconds, but the sanitizer builds and Wine run it many times slower, so
   // this catches a hang, never a slow machine.
@@ -949,6 +951,129 @@ void test_bai_elimination(void) {
   free(table);
 }
 
+// Each arm's mean over its first num_samples samples in the table.
+static double racing_test_mean(const double *table, const int arm_index,
+                               const uint64_t num_samples) {
+  double sum = 0;
+  for (uint64_t ordinal = 0; ordinal < num_samples; ordinal++) {
+    sum += table[(size_t)arm_index * ELIMINATION_TEST_SAMPLES + ordinal];
+  }
+  return sum / (double)num_samples;
+}
+
+// Racing: round-robin elimination at a fixed z with a per-arm sample limit.
+// Arms that separate are eliminated far sooner than by the GK16 threshold; two
+// arms too close to separate both stop at the limit and the sim ends on the
+// sample limit; the limit alone stops every arm at it, and never cuts the
+// initial phase short. Nothing depends on the thread count.
+void test_bai_racing(void) {
+  const double means[] = {0.2, 0.25, 0.5, 0.505, 0.3, 0.1};
+  const int num_arms = sizeof(means) / sizeof(means[0]);
+  double *table =
+      elimination_test_table(means, num_arms, ELIMINATION_TEST_SAMPLES);
+  BAIResult *bai_result = bai_result_create();
+  BAIOptions options = {
+      .sampling_rule = BAI_SAMPLING_RULE_ROUND_ROBIN,
+      .threshold = BAI_THRESHOLD_GK16,
+      .delta = 0.01,
+      .sample_minimum = 20,
+      .sample_limit = (uint64_t)num_arms * ELIMINATION_TEST_SAMPLES / 2,
+      .num_threads = 1,
+      .eliminate = true,
+      .elimination_z = 2.0,
+      .arm_sample_limit = RACING_TEST_ARM_LIMIT,
+  };
+  uint64_t draws[sizeof(means) / sizeof(means[0])];
+  uint64_t threaded_draws[sizeof(means) / sizeof(means[0])];
+  elimination_test_run(table, num_arms, ELIMINATION_TEST_SAMPLES, &options,
+                       bai_result, draws);
+  // Arms 2 and 3 are 0.005 apart: neither leads by two standard errors within
+  // the limit.
+  assert(bai_result_get_status(bai_result) == BAI_RESULT_STATUS_SAMPLE_LIMIT);
+  assert(draws[2] == RACING_TEST_ARM_LIMIT);
+  assert(draws[3] == RACING_TEST_ARM_LIMIT);
+  uint64_t total = 0;
+  for (int arm_index = 0; arm_index < num_arms; arm_index++) {
+    total += draws[arm_index];
+    if (arm_index != 2 && arm_index != 3) {
+      assert(draws[arm_index] < RACING_TEST_ARM_LIMIT / 2);
+    }
+  }
+  assert(bai_result_get_num_samples(bai_result) == total);
+  const int expected_best =
+      racing_test_mean(table, 2, RACING_TEST_ARM_LIMIT) >
+              racing_test_mean(table, 3, RACING_TEST_ARM_LIMIT)
+          ? 2
+          : 3;
+  assert(bai_result_get_best_arm(bai_result) == expected_best);
+  options.num_threads = 11;
+  elimination_test_run(table, num_arms, ELIMINATION_TEST_SAMPLES, &options,
+                       bai_result, threaded_draws);
+  assert(bai_result_get_status(bai_result) == BAI_RESULT_STATUS_SAMPLE_LIMIT);
+  assert(bai_result_get_best_arm(bai_result) == expected_best);
+  assert(bai_result_get_num_samples(bai_result) == total);
+  for (int arm_index = 0; arm_index < num_arms; arm_index++) {
+    assert(threaded_draws[arm_index] == draws[arm_index]);
+  }
+
+  // Arms that separate: racing finds the best on fewer samples than GK16
+  // elimination, the same with any thread count.
+  double separated[sizeof(means) / sizeof(means[0])];
+  memcpy(separated, means, sizeof(means));
+  separated[3] = 0.55;
+  double *separated_table =
+      elimination_test_table(separated, num_arms, ELIMINATION_TEST_SAMPLES);
+  options.num_threads = 1;
+  options.arm_sample_limit = 1000;
+  elimination_test_run(separated_table, num_arms, ELIMINATION_TEST_SAMPLES,
+                       &options, bai_result, draws);
+  assert(bai_result_get_status(bai_result) == BAI_RESULT_STATUS_THRESHOLD);
+  assert(bai_result_get_best_arm(bai_result) == 3);
+  const uint64_t racing_samples = bai_result_get_num_samples(bai_result);
+  options.num_threads = 11;
+  elimination_test_run(separated_table, num_arms, ELIMINATION_TEST_SAMPLES,
+                       &options, bai_result, threaded_draws);
+  assert(bai_result_get_best_arm(bai_result) == 3);
+  assert(bai_result_get_num_samples(bai_result) == racing_samples);
+  for (int arm_index = 0; arm_index < num_arms; arm_index++) {
+    assert(threaded_draws[arm_index] == draws[arm_index]);
+  }
+  options.num_threads = 1;
+  options.elimination_z = 0;
+  elimination_test_run(separated_table, num_arms, ELIMINATION_TEST_SAMPLES,
+                       &options, bai_result, draws);
+  assert(bai_result_get_best_arm(bai_result) == 3);
+  assert(racing_samples < bai_result_get_num_samples(bai_result));
+
+  // The limit alone, with no elimination and no threshold: every arm stops at
+  // it, and a limit below the minimum is the minimum.
+  const uint64_t arm_limits[] = {RACING_TEST_ARM_LIMIT, 10};
+  for (int limit_idx = 0; limit_idx < 2; limit_idx++) {
+    options.eliminate = false;
+    options.threshold = BAI_THRESHOLD_NONE;
+    options.arm_sample_limit = arm_limits[limit_idx];
+    const uint64_t expected = arm_limits[limit_idx] > options.sample_minimum
+                                  ? arm_limits[limit_idx]
+                                  : options.sample_minimum;
+    const int threads[] = {1, 11};
+    for (int thread_idx = 0; thread_idx < 2; thread_idx++) {
+      options.num_threads = threads[thread_idx];
+      elimination_test_run(table, num_arms, ELIMINATION_TEST_SAMPLES, &options,
+                           bai_result, draws);
+      assert(bai_result_get_status(bai_result) ==
+             BAI_RESULT_STATUS_SAMPLE_LIMIT);
+      assert(bai_result_get_num_samples(bai_result) ==
+             (uint64_t)num_arms * expected);
+      for (int arm_index = 0; arm_index < num_arms; arm_index++) {
+        assert(draws[arm_index] == expected);
+      }
+    }
+  }
+  bai_result_destroy(bai_result);
+  free(separated_table);
+  free(table);
+}
+
 void test_bai(void) {
   const char *bai_seed = getenv("BAI_SEED");
   if (bai_seed) {
@@ -960,6 +1085,7 @@ void test_bai(void) {
     test_bai_paired_z();
     test_bai_paired_z_correlated();
     test_bai_elimination();
+    test_bai_racing();
     const int num_threads[] = {1, 11};
     const int num_thread_tests = sizeof(num_threads) / sizeof(int);
     for (int i = 0; i < num_thread_tests; i++) {

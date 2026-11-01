@@ -152,6 +152,8 @@ sim_args_fill(const int num_plies, const MoveList *move_list,
   sim_args->bai_options.num_arm_avoid_prune = 0;
   sim_args->bai_options.draws_per_sample = 1;
   sim_args->bai_options.eliminate = false;
+  sim_args->bai_options.elimination_z = 0;
+  sim_args->bai_options.arm_sample_limit = 0;
   // Pure win% (no spread contribution) is (1.0, 0.0, 100.0).
   sim_args->utility_w_winpct = utility_w_winpct;
   sim_args->utility_w_spread = utility_w_spread;

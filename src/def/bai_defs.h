@@ -60,8 +60,17 @@ typedef struct BAIOptions {
   // With a threshold, an arm that the best arm beats by the stopping
   // threshold stops being sampled (see bai_update_elimination), so the rest
   // of the budget goes to the arms still in contention. The sim stops when
-  // every other arm is out. Ignored without a threshold.
+  // every other arm is out. Ignored without a threshold or elimination_z.
   bool eliminate;
+  // With eliminate, a fixed threshold in place of the GK16 one: an arm is out
+  // once the best arm's mean leads it by more than elimination_z standard
+  // errors of their difference. 0 keeps the GK16 threshold. With the
+  // round-robin rule and arm_sample_limit, this is racing.
+  double elimination_z;
+  // Under the round-robin rule, the most samples any one arm is given (never
+  // fewer than sample_minimum); 0 for no limit. Once every arm still in has
+  // this many, the sim stops on the sample limit.
+  uint64_t arm_sample_limit;
 } BAIOptions;
 
 #endif
