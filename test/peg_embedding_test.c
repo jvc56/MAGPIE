@@ -68,7 +68,6 @@ static void test_peg_show_rows(void) {
 static void test_peg_protected_play_is_always_listed(void) {
   // This solves every candidate, which is minutes without a wordmap, and a
   // bounded build has no room for this lexicon's.
-  // cppcheck-suppress knownConditionTrueFalse
   if (search_memory_is_bounded()) {
     return;
   }
