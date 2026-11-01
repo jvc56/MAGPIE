@@ -1,6 +1,7 @@
 #include "peg_embedding_test.h"
 
 #include "../src/compat/ctime.h"
+#include "../src/compat/memory_info.h"
 #include "../src/impl/cmd_api.h"
 #include "../src/util/io_util.h"
 #include "../src/util/string_util.h"
@@ -65,6 +66,12 @@ static void test_peg_show_rows(void) {
 // rows, so nothing but being asked for keeps L5 GIRR, 87.5%, in what an
 // embedder is told.
 static void test_peg_protected_play_is_always_listed(void) {
+  // This solves every candidate, which is minutes without a wordmap, and a
+  // bounded build has no room for this lexicon's.
+  // cppcheck-suppress knownConditionTrueFalse
+  if (search_memory_is_bounded()) {
+    return;
+  }
   Magpie *mp = magpie_create(DEFAULT_TEST_DATA_PATH);
   assert(!magpie_has_error(mp));
   assert(magpie_run_sync(mp, "set -lex CSW24 -threads 4 -pegjson true") ==

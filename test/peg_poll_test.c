@@ -391,6 +391,7 @@ static void test_status_through_restarted_solves(void) {
     assert(magpie_run_async(mp, "peg") == MAGPIE_SUCCESS);
     while (magpie_get_thread_status(mp) != MAGPIE_THREAD_STATUS_FINISHED) {
       free(magpie_get_last_command_status_message(mp));
+      ctime_nap(0.001);
     }
     assert(magpie_await(mp) == MAGPIE_SUCCESS);
     char *final_status = magpie_get_last_command_status_message(mp);
