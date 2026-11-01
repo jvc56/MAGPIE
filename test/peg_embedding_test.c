@@ -16,11 +16,12 @@
 // shpeg's optional argument: how many of the ranking's first rows to show,
 // with the solved plays ranked below them pinned after a "..." row, or "all"
 // for every play. g104331 (1 in the bag) has many solved plays below its cut
-// ones.
+// ones, on one thread: with more, some of those draw a cut as their last draws
+// race.
 static void test_peg_show_rows(void) {
   Magpie *mp = magpie_create(DEFAULT_TEST_DATA_PATH);
   assert(!magpie_has_error(mp));
-  assert(magpie_run_sync(mp, "set -lex CSW24 -threads 4 -pegoutcomes false") ==
+  assert(magpie_run_sync(mp, "set -lex CSW24 -threads 1 -pegoutcomes false") ==
          MAGPIE_SUCCESS);
   assert(magpie_run_sync(
              mp, "cgp 4CYANiDS4/10PE3/8VLOGS2/10UM3/10TA3/2Q3HOTTY4/2IF1WAB7/"

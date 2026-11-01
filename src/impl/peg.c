@@ -1583,8 +1583,8 @@ static bool peg_stop_cancelled(const void *data) {
 // even when a stage has only a couple of candidates.
 typedef struct PegScenarioJob {
   const Game *template_src;
-  int mover_idx;
   const uint8_t *unseen;
+  int mover_idx;
   int ld_size;
   int k_drawn;
   int n_bag_remaining;
@@ -1595,17 +1595,19 @@ typedef struct PegScenarioJob {
   int inner_top_k;
   int fidelity_plies;
   int injection_cap;
+  int cand_idx;
+  // The row of the poll that lists this job's candidate among those solved at
+  // once: that of the thread that took the candidate, whichever runs this draw.
+  int cand_poll_worker_idx;
   int64_t deadline_ns;
   ThreadControl *thread_control;
   PegWorker *workers;
-  int cand_idx;
   const PegProgress *progress; // optional; cand_idx is the cand rank
   // Optional per-ordering capture (PegArgs.include_per_scenario). When
   // do_capture is set, the worker records this split's orderings into its own
   // job-local `cap` (no cross-job sharing, so no locking); the reducer
   // concatenates per candidate afterwards and frees cap.rows. `ld` formats the
   // captured tile strings.
-  bool do_capture;
   const LetterDistribution *ld;
   PegScenarioCapture cap;
   // Result (filled by the worker, reduced per-cand afterwards).
@@ -1616,9 +1618,11 @@ typedef struct PegScenarioJob {
   int64_t win_count;
   int64_t tie_count;
   int n_scenarios;
+  bool do_capture;
   // Populated only when on_cand_done is active. A scenario-parallel candidate
   // finishes when its last scenario job finishes.
   bool completed;
+  bool draw_spread_unknown; // see draw_idx
   int64_t completed_ns;
   // Optional: the candidate's early cutoff (NULL = none), and the poll whose
   // current stage counts its solved scenario jobs (NULL = none).
@@ -1636,15 +1640,12 @@ typedef struct PegScenarioJob {
   int draw_worker_idx;
   int64_t draw_start_ns;
   int64_t draw_end_ns;
-  bool draw_spread_unknown;
   // When a thread picked this job up and put it down.
   int64_t run_start_ns;
   int64_t run_end_ns;
   // The poll that lists this job's candidate among those solved at once, one
-  // per thread, with the draw it is solving (NULL = none), and the row it is
-  // on: that of the thread that took the candidate, whichever runs this draw.
+  // per thread, with the draw it is solving (NULL = none).
   PegPoll *cand_poll;
-  int cand_poll_worker_idx;
 } PegScenarioJob;
 
 // A growable list of scenario jobs (collect mode). Not recursive, so defined
@@ -4524,9 +4525,6 @@ double peg_endgame_table_fraction(double tt_fraction_of_mem, int n_workers,
   if (tt_fraction_of_mem == PEG_TT_FRACTION_NO_TABLE) {
     return 0.0;
   }
-  if (tt_fraction_of_mem > 0 && !search_memory_is_bounded()) {
-    return tt_fraction_of_mem;
-  }
   // First what each worker's own table would be, as when every worker had one.
   // Shallow PEG endgames need little, and the total across workers stays well
   // under the 50%-RAM ceiling. A bounded budget divides among at most the
@@ -4545,6 +4543,8 @@ double peg_endgame_table_fraction(double tt_fraction_of_mem, int n_workers,
         &worker_fraction);
     assert(fits); // max_tables tables fit at the minimum size by construction.
     (void)fits;
+  } else if (tt_fraction_of_mem > 0) {
+    return tt_fraction_of_mem;
   }
   // Then one table shared by every worker, no larger than those tables
   // combined. A single worker gets exactly its own table.
@@ -5164,9 +5164,10 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
         // and the rest are solved at once (see PegLiveStage).
         const bool at_once = cutoff_on && pool != NULL;
         const bool in_order = pool != NULL && !at_once;
-        const int n_alone = in_order ? 0 : (at_once ? 1 : eval_count);
+        int n_alone = at_once ? 1 : eval_count;
         done_count = 0;
         if (in_order) {
+          n_alone = 0;
           peg_live_solve_in_order(&live, pool, eval_count);
           done_count = peg_live_complete_first(&live, ranked, 0, eval_count);
         }

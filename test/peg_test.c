@@ -968,17 +968,21 @@ static void test_peg_generate_all_moves(void) {
   config_destroy(config);
 }
 
-// Where a native solve's table size comes from, and a solve with no table.
+// Where a solve's table size comes from.
 static void test_peg_table_fraction(void) {
   assert(peg_endgame_table_fraction(PEG_TT_FRACTION_NO_TABLE, 13, INT_MAX) ==
          0.0);
-  if (!search_memory_is_bounded()) {
-    assert(peg_endgame_table_fraction(0.01, 13, INT_MAX) == 0.01);
-    assert(peg_endgame_table_fraction(0.6, 1, INT_MAX) == 0.6);
-    // Left unset, it follows the workers: one worker gets 5%.
-    assert(peg_endgame_table_fraction(0, 1, INT_MAX) == 0.05);
-    assert(peg_endgame_table_fraction(0, 13, INT_MAX) == 0.25 / 13 * 8);
+  if (search_memory_is_bounded()) {
+    return;
   }
+  assert(peg_endgame_table_fraction(0.01, 13, INT_MAX) == 0.01);
+  assert(peg_endgame_table_fraction(0.6, 1, INT_MAX) == 0.6);
+  // Left unset, it follows the workers: one worker gets 5%.
+  assert(peg_endgame_table_fraction(0, 1, INT_MAX) == 0.05);
+  assert(peg_endgame_table_fraction(0, 13, INT_MAX) == 0.25 / 13 * 8);
+}
+
+static void test_peg_without_table(void) {
   Config *config = config_create_or_die("set -threads 2 -s1 score -s2 score");
   load_and_exec_config_or_die(
       config, "cgp 13R1/12MA1/12OB1/11OHIA/11FACE/9Q1LI1R/2VUG1SIDECAR1A/"
@@ -1000,9 +1004,10 @@ static void test_peg_table_fraction(void) {
 // ordering anyway, so it is solved, not cut, with its exact counts. In g104331
 // (1 in the bag, best 14A BRIEF at 2 wins of 8) many plays lose every
 // ordering before the bar rises high enough to cut them: they must show 0
-// wins and 0 ties of 8, as `peg only` gives them, never a "<=0.0" bound.
+// wins and 0 ties of 8, as `peg only` gives them, never a "<=0.0" bound. On one
+// thread, where which draw comes last does not depend on the threads' timing.
 static void test_peg_cut_on_last_draw_is_solved(void) {
-  Config *config = config_create_or_die("set -threads 4 -s1 score -s2 score");
+  Config *config = config_create_or_die("set -threads 1 -s1 score -s2 score");
   load_and_exec_config_or_die(
       config,
       "cgp 4CYANiDS4/10PE3/8VLOGS2/10UM3/10TA3/2Q3HOTTY4/2IF1WAB7/L2AROHA6M/"
@@ -2539,6 +2544,7 @@ void test_peg(void) {
   test_peg_nested_lending_matches();
   test_peg_generate_all_moves();
   test_peg_table_fraction();
+  test_peg_without_table();
   test_peg_cut_on_last_draw_is_solved();
   test_peg_pegonly_positional_arg();
   test_peg_new_game_drops_previous_peg();
