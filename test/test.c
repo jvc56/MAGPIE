@@ -21,6 +21,7 @@
 #include "board_test.h"
 #include "browser_game_test.h"
 #include "builder_hash_test.h"
+#include "census_test.h"
 #include "cgp_test.h"
 #include "checkpoint_test.h"
 #include "cmd_api_test.h"
@@ -181,6 +182,7 @@ static TestEntry test_table[] = {
     {"wordprune", test_word_prune},
     {"kwgmaker", test_kwg_maker},
     {"cgp", test_cgp},
+    {"census", test_census},
     {"rl", test_rack_list},
     {"rlfr", test_rack_list_forced_racks},
     {"ch", test_checkpoint},
