@@ -2525,9 +2525,11 @@ void peg_sim_mode(const StringSplitter *fields) {
         samples.start_ns[worker] = 0;
       }
       const bool timed = arm == 2 || arm == 5;
-      const double time_limit = arm == 2   ? arm_seconds[1]
-                                : arm == 5 ? arm_seconds[3]
-                                           : 0.0;
+      // With a prefilter, arm 3's decision includes arm 0's sim.
+      const double time_limit =
+          arm == 2   ? arm_seconds[1]
+          : arm == 5 ? arm_seconds[3] + (prefilter > 0 ? arm_seconds[0] : 0.0)
+                     : 0.0;
       const MoveList *sim_pool = pool;
       if (prefilter > 0 && (arm == 1 || arm == 3 || arm == 4)) {
         move_list_reset(sub_pool);
