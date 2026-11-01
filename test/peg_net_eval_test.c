@@ -2531,9 +2531,12 @@ void peg_sim_mode(const StringSplitter *fields) {
         // The sim reads the mover's rack from its move list to tell which
         // plays are similar (move_get_similarity_key).
         move_list_set_rack(sub_pool, move_list_get_rack(pool));
+        // In arm 0's order, the order of BAI's arms in pegsimbai's replays
+        // (move_list_add_move would keep a heap by equity instead).
         for (int idx = 0; idx < prefilter && idx < cands; idx++) {
-          move_list_add_move(sub_pool,
-                             move_list_get_move(pool, static_order[idx]));
+          move_copy(sub_pool->moves[idx],
+                    move_list_get_move(pool, static_order[idx]));
+          sub_pool->count = idx + 1;
         }
         sim_pool = sub_pool;
       }
