@@ -362,7 +362,10 @@ static int peg_judge_all_worlds(const Game *root, const int *unseen,
 
 // The sampled worlds: the root's actual deal (weight actual_weight, 0 or 1)
 // and samples uniformly random deals of the unseen tiles (weight 1), the same
-// for every pick of the root. Returns the number of worlds.
+// for every pick of the root. A loaded CGP's bag is in an order drawn from the
+// config's time-based seed, so the actual deal keeps the root's opponent rack
+// and takes its bag order from a shuffle seeded by splitmix64(seed), apart
+// from the samples' stream. Returns the number of worlds.
 static int peg_judge_sampled_worlds(const Game *root, const int *unseen,
                                     int bag_size, int samples, uint64_t seed,
                                     int actual_weight, PegJudgeWorld *worlds) {
@@ -379,6 +382,25 @@ static int peg_judge_sampled_worlds(const Game *root, const int *unseen,
   }
   worlds[0].actual = true;
   worlds[0].weight = actual_weight;
+  MachineLetter *actual = worlds[0].bag;
+  for (int idx = 1; idx < bag_size; idx++) {
+    const MachineLetter moved = actual[idx];
+    int slot = idx;
+    while (slot > 0 && actual[slot - 1] > moved) {
+      actual[slot] = actual[slot - 1];
+      slot--;
+    }
+    actual[slot] = moved;
+  }
+  XoshiroPRNG *actual_prng = prng_create(splitmix64(seed));
+  for (int idx = bag_size - 1; idx > 0; idx--) {
+    const int other =
+        (int)prng_get_random_number(actual_prng, (uint64_t)idx + 1);
+    const MachineLetter tmp = actual[idx];
+    actual[idx] = actual[other];
+    actual[other] = tmp;
+  }
+  prng_destroy(actual_prng);
   XoshiroPRNG *prng = prng_create(seed);
   for (int world_idx = 1; world_idx <= samples; world_idx++) {
     for (int idx = n_unseen - 1; idx > 0; idx--) {
