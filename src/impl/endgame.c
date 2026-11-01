@@ -1152,15 +1152,17 @@ void endgame_ctx_reset(EndgameCtx *es, EndgameResults *results,
         es->transposition_table = NULL;
       } else if (es->tt_fraction_of_mem != endgame_args->tt_fraction_of_mem) {
         transposition_table_destroy(es->transposition_table);
-        es->transposition_table =
-            transposition_table_create(endgame_args->tt_fraction_of_mem);
+        es->transposition_table = transposition_table_create_with_threads(
+            endgame_args->tt_fraction_of_mem, TT_MIN_SIZE_POWER,
+            endgame_args->num_threads);
       }
     } else {
       // Transitioning from external to owned. Don't destroy the external TT.
       es->transposition_table = NULL;
       if (endgame_args->tt_fraction_of_mem > 0) {
-        es->transposition_table =
-            transposition_table_create(endgame_args->tt_fraction_of_mem);
+        es->transposition_table = transposition_table_create_with_threads(
+            endgame_args->tt_fraction_of_mem, TT_MIN_SIZE_POWER,
+            endgame_args->num_threads);
       }
     }
     es->tt_fraction_of_mem = endgame_args->tt_fraction_of_mem;
