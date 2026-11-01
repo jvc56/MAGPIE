@@ -2327,10 +2327,13 @@ void peg_sim_mode(const StringSplitter *fields) {
               "endgame plies");
   }
   // PEG_SIM_PREFILTER=K: arms 1, 3 and 4 sim only the K candidates arm 0
-  // (which must run) ranks best. PEG_SIM_BAI=RULE,SCOND,MIN[,elim]: arms 1,
-  // 3 and 4 stop by BAI (rule rr or tt, the GK16 threshold at SCOND percent,
-  // MIN iterations per candidate first, with elim BAIOptions.eliminate)
-  // instead of at iterations per candidate, which stays their cap.
+  // (which must run) ranks best. PEG_SIM_BAI=RULE,SCOND,MIN[,elim][,zZ][,capN]:
+  // arms 1, 3 and 4 stop by BAI (rule rr or tt, the GK16 threshold at SCOND
+  // percent, MIN iterations per candidate first, with elim
+  // BAIOptions.eliminate, with zZ elimination at Z standard errors in place of
+  // GK16's threshold, with capN at most N iterations per candidate) instead of
+  // at iterations per candidate, which stays their cap. rr,99,100,elim,z2,
+  // cap1000 is racing.
   const char *prefilter_env = getenv("PEG_SIM_PREFILTER");
   const int prefilter = prefilter_env != NULL ? atoi(prefilter_env) : 0;
   if (prefilter < 0 || (prefilter > 0 && !run_arm[0])) {
@@ -2341,14 +2344,26 @@ void peg_sim_mode(const StringSplitter *fields) {
   double bai_scond = 0;
   uint64_t bai_min = 1;
   bool bai_eliminate = false;
+  double bai_elimination_z = 0;
+  uint64_t bai_arm_limit = 0;
   if (bai_env != NULL) {
     StringSplitter *bai_fields = split_string(bai_env, ',', true);
     const int n_bai_fields = string_splitter_get_number_of_items(bai_fields);
-    if (n_bai_fields == 4 &&
-        strings_equal(string_splitter_get_item(bai_fields, 3), "elim")) {
-      bai_eliminate = true;
-    } else if (n_bai_fields != 3) {
-      log_fatal("PEG_SIM_BAI must be RULE,SCOND,MIN[,elim]");
+    if (n_bai_fields < 3) {
+      log_fatal("PEG_SIM_BAI must be RULE,SCOND,MIN[,elim][,zZ][,capN]");
+    }
+    for (int field = 3; field < n_bai_fields; field++) {
+      const char *flag = string_splitter_get_item(bai_fields, field);
+      if (strings_equal(flag, "elim")) {
+        bai_eliminate = true;
+      } else if (flag[0] == 'z' && strtod(flag + 1, NULL) > 0) {
+        bai_elimination_z = strtod(flag + 1, NULL);
+      } else if (strncmp(flag, "cap", 3) == 0 &&
+                 strtoull(flag + 3, NULL, 10) > 0) {
+        bai_arm_limit = strtoull(flag + 3, NULL, 10);
+      } else {
+        log_fatal("PEG_SIM_BAI must be RULE,SCOND,MIN[,elim][,zZ][,capN]");
+      }
     }
     const char *rule = string_splitter_get_item(bai_fields, 0);
     if (strings_equal(rule, BAI_SAMPLING_RULE_TOP_TWO_IDS_STRING)) {
@@ -2359,8 +2374,10 @@ void peg_sim_mode(const StringSplitter *fields) {
     bai_scond = strtod(string_splitter_get_item(bai_fields, 1), NULL);
     bai_min = strtoull(string_splitter_get_item(bai_fields, 2), NULL, 10);
     string_splitter_destroy(bai_fields);
-    if (bai_scond <= 0 || bai_scond >= 100 || bai_min < 1) {
-      log_fatal("PEG_SIM_BAI needs 0 < SCOND < 100 and MIN >= 1");
+    if (bai_scond <= 0 || bai_scond >= 100 || bai_min < 1 ||
+        (bai_elimination_z > 0 && !bai_eliminate)) {
+      log_fatal("PEG_SIM_BAI needs 0 < SCOND < 100, MIN >= 1, and elim with "
+                "zZ");
     }
   }
   // Roots already in the output are done.
@@ -2540,6 +2557,8 @@ void peg_sim_mode(const StringSplitter *fields) {
       sim_args.bag_cycle = false;
       sim_args.pat_rollout_disabled = true;
       sim_args.bai_options.eliminate = use_bai && bai_eliminate;
+      sim_args.bai_options.elimination_z = use_bai ? bai_elimination_z : 0;
+      sim_args.bai_options.arm_sample_limit = use_bai ? bai_arm_limit : 0;
       if (hooks[arm].nets || hooks[arm].endgame != NULL ||
           samples.out != NULL) {
         sim_args.rollout_move_fn = peg_sim_rollout_move;
@@ -2766,8 +2785,8 @@ typedef struct PegSimBaiScheme {
 } PegSimBaiScheme;
 
 static PegSimBaiScheme peg_sim_bai_scheme_parse(const char *text) {
-  const char *usage =
-      "pegsimbai scheme %s is not NAME=RULE,SCOND,MIN,LIMIT[,elim][,preK]";
+  const char *usage = "pegsimbai scheme %s is not "
+                      "NAME=RULE,SCOND,MIN,LIMIT[,elim][,preK][,zZ][,capN]";
   StringSplitter *named = split_string(text, '=', true);
   if (string_splitter_get_number_of_items(named) != 2) {
     log_fatal(usage, text);
@@ -2807,6 +2826,11 @@ static PegSimBaiScheme peg_sim_bai_scheme_parse(const char *text) {
       scheme.options.eliminate = true;
     } else if (strncmp(flag, "pre", 3) == 0 && atoi(flag + 3) > 0) {
       scheme.prefilter = atoi(flag + 3);
+    } else if (flag[0] == 'z' && strtod(flag + 1, NULL) > 0) {
+      scheme.options.elimination_z = strtod(flag + 1, NULL);
+    } else if (strncmp(flag, "cap", 3) == 0 &&
+               strtoull(flag + 3, NULL, 10) > 0) {
+      scheme.options.arm_sample_limit = strtoull(flag + 3, NULL, 10);
     } else {
       log_fatal(usage, text);
     }
@@ -2814,7 +2838,8 @@ static PegSimBaiScheme peg_sim_bai_scheme_parse(const char *text) {
   if ((!strings_equal(rule, BAI_SAMPLING_RULE_TOP_TWO_IDS_STRING) &&
        !strings_equal(rule, BAI_SAMPLING_RULE_ROUND_ROBIN_STRING)) ||
       scond <= 0 || scond >= 100 || scheme.options.sample_minimum < 1 ||
-      scheme.options.sample_limit < 1) {
+      scheme.options.sample_limit < 1 ||
+      (scheme.options.elimination_z > 0 && !scheme.options.eliminate)) {
     log_fatal("pegsimbai scheme %s is invalid", text);
   }
   string_splitter_destroy(parts);
@@ -2849,7 +2874,7 @@ void peg_sim_bai_replay_mode(const StringSplitter *fields) {
   const int n_fields = string_splitter_get_number_of_items(fields);
   if (n_fields < 4) {
     log_fatal("pegsimbai needs a samples file, an output file and schemes "
-              "NAME=RULE,SCOND,MIN,LIMIT[,elim][,preK]");
+              "NAME=RULE,SCOND,MIN,LIMIT[,elim][,preK][,zZ][,capN]");
   }
   const char *arm_env = getenv("PEG_SIM_BAI_ARM");
   const int arm = arm_env != NULL ? atoi(arm_env) : 3;
