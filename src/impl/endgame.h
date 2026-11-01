@@ -183,6 +183,9 @@ typedef struct EndgameArgs {
   // After each completed depth, if elapsed > soft_time_limit, stop.
   // If elapsed < soft_time_limit, estimate next depth time via EBF.
   // If estimated completion > hard_time_limit, stop to bank remaining time.
+  // Once a depth has finished, a depth still running at hard_time_limit stops
+  // there. The first depth finishes regardless, so there is a move to return;
+  // only external_deadline_ns can cut that one short.
   double soft_time_limit;
   double hard_time_limit;
   uint64_t seed;

@@ -221,7 +221,8 @@ struct EndgameCtx {
   // Signal for threads to stop early (0=running, 1=done)
   atomic_int search_complete;
   // Per-depth deadline: absolute CLOCK_MONOTONIC nanoseconds; 0 = disabled.
-  // Thread 0 sets this after each completed depth (from EBF estimate).
+  // Thread 0 sets this after each completed depth, to when hard_time_limit runs
+  // out or, nearer that limit, from the EBF estimate if that is sooner.
   // All worker threads check it periodically and bail if exceeded.
   _Atomic int64_t depth_deadline_ns;
   // Caller-supplied absolute deadline (CLOCK_MONOTONIC ns). 0 = disabled.
@@ -4814,6 +4815,20 @@ static void adopt_unfinished_depth_best(const EndgameCtxWorker *worker) {
       worker->unfinished_best_pv.score, worker->completed_depth);
 }
 
+// When hard_time_limit runs out, as an absolute CLOCK_MONOTONIC time, or 0 for
+// a solve without one. This reads the timer itself, not the cached
+// seconds_elapsed: that field is only refreshed when something renders status,
+// so a scripted solve that never polls would see 0 there.
+static int64_t solver_hard_deadline_ns(const EndgameCtx *solver) {
+  if (solver->hard_time_limit <= 0) {
+    return 0;
+  }
+  const double remaining =
+      solver->hard_time_limit -
+      endgame_results_get_timer_elapsed_seconds(solver->results);
+  return ctimer_monotonic_ns() + (int64_t)(remaining * 1e9);
+}
+
 void iterative_deepening(EndgameCtxWorker *worker, int plies) {
 
   int32_t alpha = -LARGE_VALUE;
@@ -5074,10 +5089,13 @@ void iterative_deepening(EndgameCtxWorker *worker, int plies) {
     // precheck prunes very heavily at shallow depths, making d1 anomalously
     // fast. Starting at d4 (which uses the d2/d4 ratio) gives a stable base.
     const int min_depth_for_time_mgmt = 4;
+    // The hard limit stops the depths to come partway through. It is armed
+    // only once a depth has finished, so a solve always has a move to return.
+    if (worker->ordinal == 0 && worker->solver->hard_time_limit > 0) {
+      atomic_store(&worker->solver->depth_deadline_ns,
+                   solver_hard_deadline_ns(worker->solver));
+    }
     // EBF time management is active only when soft_time_limit > 0.
-    // Callers using only hard_time_limit rely on the external timer thread
-    // and check_depth_deadline instead; soft_time_limit = 0 disables this
-    // block intentionally.
     if (worker->ordinal == 0 && worker->solver->soft_time_limit > 0) {
       double elapsed = ctimer_elapsed_seconds(&ids_timer);
       double this_depth_time = elapsed - depth_start_time;
@@ -5116,22 +5134,20 @@ void iterative_deepening(EndgameCtxWorker *worker, int plies) {
             atomic_store(&worker->solver->search_complete, 1);
             break;
           }
-          // Mid-depth bail: set a per-depth deadline so workers abort if a
-          // depth runs far beyond its EBF estimate.  Only activate in the
-          // final stretch (elapsed >= 75% of hard limit).  Below that
-          // threshold the solver still has many depths ahead of it and the
-          // EBF estimate is likely noisy at shallow depths; bailing early
-          // would drop back to a shallower result unnecessarily.  Above 75%,
-          // we are near the last depth we will attempt, so a runaway depth
-          // directly starves subsequent turns.  Clear any stale deadline when
-          // we are below the threshold so workers don't fire spuriously.
-          if (elapsed >= 0.75 * worker->solver->hard_time_limit) {
-            int64_t now_ns = ctimer_monotonic_ns();
-            int64_t budget_ns = (int64_t)(estimated_next * 1.5e9);
-            atomic_store(&worker->solver->depth_deadline_ns,
-                         now_ns + budget_ns);
-          } else {
-            atomic_store(&worker->solver->depth_deadline_ns, 0);
+          // Mid-depth bail: move the deadline up so workers abort if a depth
+          // runs far beyond its EBF estimate.  Only activate in the final
+          // stretch (elapsed >= 75% of hard limit).  Below that threshold the
+          // solver still has many depths ahead of it and the EBF estimate is
+          // likely noisy at shallow depths; bailing early would drop back to a
+          // shallower result unnecessarily.  Above 75%, we are near the last
+          // depth we will attempt, so a runaway depth directly starves
+          // subsequent turns.
+          const int64_t ebf_deadline_ns =
+              ctimer_monotonic_ns() + (int64_t)(estimated_next * 1.5e9);
+          if (elapsed >= 0.75 * worker->solver->hard_time_limit &&
+              ebf_deadline_ns <
+                  atomic_load(&worker->solver->depth_deadline_ns)) {
+            atomic_store(&worker->solver->depth_deadline_ns, ebf_deadline_ns);
           }
         }
       }
@@ -5183,19 +5199,10 @@ static void display_pass_end(EndgameCtx *solver) {
 // default) run the pass to completion. Returns false, with the search left
 // stopped, when no time is left.
 static bool display_pass_begin(EndgameCtx *solver) {
-  int64_t deadline_ns = 0;
-  if (solver->hard_time_limit > 0) {
-    // Read the timer itself, not the cached seconds_elapsed: that field is
-    // only refreshed when something renders status, so a scripted solve that
-    // never polls would see 0 here and hand this pass a fresh full budget.
-    const double remaining =
-        solver->hard_time_limit -
-        endgame_results_get_timer_elapsed_seconds(solver->results);
-    if (remaining <= 0) {
-      display_pass_end(solver);
-      return false;
-    }
-    deadline_ns = ctimer_monotonic_ns() + (int64_t)(remaining * 1e9);
+  const int64_t deadline_ns = solver_hard_deadline_ns(solver);
+  if (deadline_ns != 0 && deadline_ns <= ctimer_monotonic_ns()) {
+    display_pass_end(solver);
+    return false;
   }
   atomic_store(&solver->depth_deadline_ns, deadline_ns);
   atomic_store(&solver->search_complete, 0);
