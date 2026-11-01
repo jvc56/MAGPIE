@@ -85,7 +85,13 @@ int peg3_play_drawing_turns(Game *game, Peg1NetChooser *net,
 // plies, tt fraction per thread, 1PEG first, second|-, shortlist, w_spread,
 // scale, 2PEG model, 2PEG first|-, stage N, top K. PEG_JUDGE_THREADS (default
 // 1) threads share each pick's worlds; PEG_EXACT_CAP_S caps each world's exact
-// solve. Writes PREFIX.oracle.csv (one row per root and distinct pick: the
+// solve. PEG_JUDGE_SAMPLES=K scores K random deals plus the actual one
+// (weight 0, or 1 with PEG_JUDGE_ACTUAL_WEIGHT=1) in place of every world.
+// PEG_JUDGE_SIM=CANDS,ITERS,PLIES plays the drawing turns by a static sim for
+// the player on turn (the best CANDS placements, ITERS rollouts each of PLIES
+// plies, one thread, seeded from PEG_JUDGE_SEED, the root, the world and the
+// turn) in place of the nets, which are then loaded but unused.
+// Writes PREFIX.oracle.csv (one row per root and distinct pick: the
 // codes that chose it, weighted win% (W=1, T=.5), mean final spread, counts,
 // and the actual world's final) and PREFIX.worlds.csv (every world's bag,
 // weight and final). Resumes by root.

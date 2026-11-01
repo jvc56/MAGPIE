@@ -2,8 +2,10 @@
 
 #include "../src/compat/cpthread.h"
 #include "../src/compat/ctime.h"
+#include "../src/def/bai_defs.h"
 #include "../src/def/game_defs.h"
 #include "../src/def/letter_distribution_defs.h"
+#include "../src/def/sim_defs.h"
 #include "../src/def/thread_control_defs.h"
 #include "../src/def/value_net_defs.h"
 #include "../src/ent/bag.h"
@@ -12,12 +14,16 @@
 #include "../src/ent/move.h"
 #include "../src/ent/player.h"
 #include "../src/ent/rack.h"
+#include "../src/ent/sim_args.h"
+#include "../src/ent/sim_results.h"
 #include "../src/ent/thread_control.h"
 #include "../src/ent/transposition_table.h"
+#include "../src/ent/win_pct.h"
 #include "../src/ent/xoshiro.h"
 #include "../src/impl/config.h"
 #include "../src/impl/endgame.h"
 #include "../src/impl/gameplay.h"
+#include "../src/impl/simmer.h"
 #include "../src/str/move_string.h"
 #include "../src/util/io_util.h"
 #include "../src/util/string_util.h"
@@ -220,7 +226,10 @@ int peg3_play_drawing_turns(Game *game, Peg1NetChooser *net,
 // PEG_JUDGE_SAMPLES = K > 0 the worlds are instead K uniformly random deals
 // of the unseen tiles (bag order and the opponent's rack; the same K for every
 // pick of a root, from PEG_JUDGE_SEED + root), weight 1 each, plus the root's
-// actual deal at weight 0 (reported, not averaged); bags up to RACK_SIZE.
+// actual deal at weight 0 (reported, not averaged; weight 1 with
+// PEG_JUDGE_ACTUAL_WEIGHT=1); bags up to RACK_SIZE. With
+// PEG_JUDGE_SIM=CANDS,ITERS,PLIES the drawing turns are played by a static sim
+// instead of the nets (peg_judge_sim_drawing_turns).
 enum {
   PEG_JUDGE_MAX_WORLDS = 720,
   PEG_JUDGE_MAX_PICKS = 16,
@@ -239,8 +248,18 @@ typedef struct PegJudgeWorld {
   int static_turns;
 } PegJudgeWorld;
 
+// The static sim that plays the drawing turns with PEG_JUDGE_SIM.
+typedef struct PegJudgeSim {
+  int candidates;
+  int iterations;
+  int plies;
+  WinPct *win_pcts;
+  uint64_t seed;
+} PegJudgeSim;
+
 typedef struct PegJudgeWorker {
   const Game *root;
+  int root_id;
   const Move *pick;
   int bag_size;
   PegJudgeWorld *worlds;
@@ -252,6 +271,12 @@ typedef struct PegJudgeWorker {
   Game *game;
   MoveList *static_list;
   PegExactSolver exact;
+  // NULL unless PEG_JUDGE_SIM; then the sim's candidates and results.
+  const PegJudgeSim *sim;
+  MoveList *sim_wide;
+  Move *sim_wide_moves;
+  MoveList *sim_pool;
+  SimResults *sim_results;
 } PegJudgeWorker;
 
 // Distinct orderings of a multiset of up to PEG_JUDGE_MAX_BAG tiles.
@@ -335,12 +360,12 @@ static int peg_judge_all_worlds(const Game *root, const int *unseen,
   return n_worlds;
 }
 
-// The sampled worlds: the root's actual deal (weight 0) and samples uniformly
-// random deals of the unseen tiles (weight 1), the same for every pick of the
-// root. Returns the number of worlds.
+// The sampled worlds: the root's actual deal (weight actual_weight, 0 or 1)
+// and samples uniformly random deals of the unseen tiles (weight 1), the same
+// for every pick of the root. Returns the number of worlds.
 static int peg_judge_sampled_worlds(const Game *root, const int *unseen,
                                     int bag_size, int samples, uint64_t seed,
-                                    PegJudgeWorld *worlds) {
+                                    int actual_weight, PegJudgeWorld *worlds) {
   MachineLetter tiles[2 * RACK_SIZE];
   int n_unseen = 0;
   for (int ml = 0; ml < VALUE_NET_TILE_TYPES; ml++) {
@@ -353,6 +378,7 @@ static int peg_judge_sampled_worlds(const Game *root, const int *unseen,
     log_fatal("peg3oracle root bag does not hold %d tiles", bag_size);
   }
   worlds[0].actual = true;
+  worlds[0].weight = actual_weight;
   XoshiroPRNG *prng = prng_create(seed);
   for (int world_idx = 1; world_idx <= samples; world_idx++) {
     for (int idx = n_unseen - 1; idx > 0; idx--) {
@@ -394,6 +420,69 @@ static void peg_judge_set_world(const Game *root, const int *unseen,
   bag_set_to_tiles(game_get_bag(world), bag_tiles, bag_size);
 }
 
+// Plays the turns that still draw by a static sim for the player on turn, set
+// as pegsim's arm 0 sims a root: the best `candidates` placements by equity,
+// `iterations` rollouts each of `plies` plies, round robin, no BAI stop, no
+// inference, no bag cycling, rollout PAT off, utility (1, 0.5, 100). The sim
+// draws the opponent's rack and the bag from the unseen tiles itself
+// (sim_rollout returns the opponent's rack to the bag first), so the player on
+// turn knows neither. Each sim runs on one thread, seeded by the judge seed,
+// the root, the world and the turn, so a world's result does not depend on
+// the judge's thread count. One placement is played without a sim; a player
+// with none plays static top 1 (a pass), counted in static_turns.
+static void peg_judge_sim_drawing_turns(PegJudgeWorker *worker, int world_idx,
+                                        int *static_turns) {
+  const PegJudgeSim *sim = worker->sim;
+  Game *game = worker->game;
+  ErrorStack *errors = error_stack_create();
+  int turns = 0;
+  while (!game_over(game) && bag_get_letters(game_get_bag(game)) > 0 &&
+         turns < PEG_NET_MAX_TURNS) {
+    Move next;
+    const int n_placements = peg_world_all_placements(game, worker->sim_wide,
+                                                      worker->sim_wide_moves);
+    move_list_reset(worker->sim_pool);
+    for (int rank = 0; rank < n_placements && rank < sim->candidates; rank++) {
+      move_list_add_move(worker->sim_pool, &worker->sim_wide_moves[rank]);
+    }
+    move_list_set_rack(worker->sim_pool, move_list_get_rack(worker->sim_wide));
+    const int cands = move_list_get_count(worker->sim_pool);
+    if (cands == 0) {
+      move_copy(&next, top_equity_move(game, worker->static_list));
+      (*static_turns)++;
+    } else if (cands == 1) {
+      move_copy(&next, &worker->sim_wide_moves[0]);
+    } else {
+      const uint64_t seed = splitmix64(
+          sim->seed ^ splitmix64(((uint64_t)worker->root_id << 24) ^
+                                 ((uint64_t)world_idx << 8) ^ (uint64_t)turns));
+      ThreadControl *control = thread_control_create();
+      thread_control_set_status(control, THREAD_CONTROL_STATUS_STARTED);
+      SimArgs sim_args;
+      sim_args_fill(sim->plies, worker->sim_pool, cands, NULL, sim->win_pcts,
+                    NULL, control, game, false, false, /*num_threads=*/1, 0,
+                    cands, sim->plies, seed,
+                    (uint64_t)sim->iterations * (uint64_t)cands, 1, 0.0,
+                    BAI_THRESHOLD_NONE, 0.0, BAI_SAMPLING_RULE_ROUND_ROBIN, 0.0,
+                    1.0, 0.5, 100.0, false, NULL, &sim_args);
+      sim_args.bag_cycle = false;
+      sim_args.pat_rollout_disabled = true;
+      simulate_without_ctx(&sim_args, worker->sim_results, errors);
+      if (!error_stack_is_empty(errors)) {
+        error_stack_print_and_reset(errors);
+        log_fatal("peg3oracle playout sim failed on root %d", worker->root_id);
+      }
+      thread_control_destroy(control);
+      const int best = sim_results_get_best_move_index(worker->sim_results);
+      move_copy(&next, simmed_play_get_move(sim_results_get_simmed_play(
+                           worker->sim_results, best)));
+    }
+    play_move(&next, game, NULL);
+    turns++;
+  }
+  error_stack_destroy(errors);
+}
+
 static void *peg_judge_worker(void *arg) {
   PegJudgeWorker *worker = arg;
   const int seat = game_get_player_on_turn_index(worker->root);
@@ -410,9 +499,13 @@ static void *peg_judge_worker(void *arg) {
     play_move(worker->pick, worker->game, NULL);
     double reply_ms = 0;
     world->static_turns = 0;
-    (void)peg3_play_drawing_turns(
-        worker->game, worker->net, worker->chooser, worker->slot_idx,
-        PEG2_REPLY_NET, worker->static_list, &reply_ms, &world->static_turns);
+    if (worker->sim != NULL) {
+      peg_judge_sim_drawing_turns(worker, world_idx, &world->static_turns);
+    } else {
+      (void)peg3_play_drawing_turns(
+          worker->game, worker->net, worker->chooser, worker->slot_idx,
+          PEG2_REPLY_NET, worker->static_list, &reply_ms, &world->static_turns);
+    }
     double final = spread_for_player(worker->game, seat);
     world->proven = true;
     world->capped = false;
@@ -494,12 +587,24 @@ void peg_judge_mode(const StringSplitter *fields) {
   const char *seed_env = getenv("PEG_JUDGE_SEED");
   const uint64_t sample_seed =
       seed_env != NULL ? strtoull(seed_env, NULL, 10) : 0;
+  const char *actual_env = getenv("PEG_JUDGE_ACTUAL_WEIGHT");
+  const int actual_weight = actual_env != NULL ? atoi(actual_env) : 0;
+  const char *sim_env = getenv("PEG_JUDGE_SIM");
+  PegJudgeSim sim = {.seed = sample_seed};
+  if (sim_env != NULL && sscanf(sim_env, "%d,%d,%d", &sim.candidates,
+                                &sim.iterations, &sim.plies) != 3) {
+    log_fatal("PEG_JUDGE_SIM must be CANDS,ITERS,PLIES");
+  }
   if (plies < 1 || plies > 25 || tt_fraction <= 0 ||
       tt_fraction * threads > 0.4 || threads > PEG_JUDGE_MAX_THREADS ||
       bag_size < 1 ||
       bag_size > (samples > 0 ? PEG_JUDGE_MAX_BAG : PEG_JUDGE_MAX_ENUM_BAG) ||
-      samples < 0 || samples + 1 > PEG_JUDGE_MAX_WORLDS) {
-    log_fatal("peg3oracle invalid plies, tt fraction, threads, bag or samples");
+      samples < 0 || samples + 1 > PEG_JUDGE_MAX_WORLDS || actual_weight < 0 ||
+      actual_weight > 1 || (actual_weight > 0 && samples == 0) ||
+      (sim_env != NULL && (sim.candidates < 2 || sim.iterations < 1 ||
+                           sim.plies < 1 || sim.plies > MAX_PLIES))) {
+    log_fatal("peg3oracle invalid plies, tt fraction, threads, bag, samples, "
+              "actual weight or sim");
   }
   // The picks: root, code and move text per row.
   int num_picks = 0, pick_capacity = 64;
@@ -561,6 +666,15 @@ void peg_judge_mode(const StringSplitter *fields) {
                         : "root,pick,b0,b1,b2,weight,actual,final,proven\n");
   }
   Config *config = peg_net_config_create();
+  ErrorStack *errors = error_stack_create();
+  if (sim_env != NULL) {
+    config_load_win_pcts(config, errors);
+    if (!error_stack_is_empty(errors)) {
+      error_stack_print_and_reset(errors);
+      log_fatal("peg3oracle could not load the win percentages");
+    }
+    sim.win_pcts = config_get_win_pcts(config);
+  }
   Game *root = config_get_game(config);
   Peg1NetChooser *net = peg1_net_chooser_create(
       string_splitter_get_item(fields, 6), string_splitter_get_item(fields, 7),
@@ -585,6 +699,15 @@ void peg_judge_mode(const StringSplitter *fields) {
         .static_list = move_list_create(1),
         .exact = peg_exact_create(plies, tt_fraction),
     };
+    if (sim_env != NULL) {
+      workers[thread_idx].sim = &sim;
+      workers[thread_idx].sim_wide =
+          move_list_create(PEG_WORLD_ALL_PLACEMENTS_CAP);
+      workers[thread_idx].sim_wide_moves =
+          malloc_or_die(sizeof(Move) * PEG_WORLD_ALL_PLACEMENTS_CAP);
+      workers[thread_idx].sim_pool = move_list_create(sim.candidates);
+      workers[thread_idx].sim_results = sim_results_create(0.0);
+    }
   }
   PegJudgeWorld *worlds =
       malloc_or_die(sizeof(PegJudgeWorld) * PEG_JUDGE_MAX_WORLDS);
@@ -593,7 +716,6 @@ void peg_judge_mode(const StringSplitter *fields) {
   Move *wide_moves = malloc_or_die(sizeof(Move) * PEG_WORLD_ALL_PLACEMENTS_CAP);
   StringBuilder *name = string_builder_create();
   StringBuilder *codes = string_builder_create();
-  ErrorStack *errors = error_stack_create();
   char *path = get_formatted_string("%s.positions.csv", data);
   FILE *positions = fopen_or_die(path, "r");
   free(path);
@@ -653,7 +775,7 @@ void peg_judge_mode(const StringSplitter *fields) {
           samples > 0
               ? peg_judge_sampled_worlds(root, unseen, bag_size, samples,
                                          sample_seed + (uint64_t)root_id,
-                                         worlds)
+                                         actual_weight, worlds)
               : peg_judge_all_worlds(root, unseen, bag_size,
                                      move_get_tiles_played(&pick) >= bag_size,
                                      worlds);
@@ -662,6 +784,7 @@ void peg_judge_mode(const StringSplitter *fields) {
       const int64_t start = ctimer_monotonic_ns();
       for (int thread_idx = 0; thread_idx < threads; thread_idx++) {
         workers[thread_idx].root = root;
+        workers[thread_idx].root_id = root_id;
         workers[thread_idx].pick = &pick;
         workers[thread_idx].bag_size = bag_size;
         workers[thread_idx].worlds = worlds;
@@ -734,6 +857,12 @@ void peg_judge_mode(const StringSplitter *fields) {
     game_destroy(workers[thread_idx].game);
     move_list_destroy(workers[thread_idx].static_list);
     peg_exact_destroy(&workers[thread_idx].exact);
+    if (sim_env != NULL) {
+      move_list_destroy(workers[thread_idx].sim_wide);
+      free(workers[thread_idx].sim_wide_moves);
+      move_list_destroy(workers[thread_idx].sim_pool);
+      sim_results_destroy(workers[thread_idx].sim_results);
+    }
   }
   for (int idx = 0; idx < num_picks; idx++) {
     free(pick_text[idx]);
