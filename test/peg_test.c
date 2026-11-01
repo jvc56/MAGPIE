@@ -1706,7 +1706,8 @@ typedef struct PegDiscardStageContext {
 
 // Interrupt the second halving stage after its first candidate finishes. The
 // solver must discard that one-candidate stage and keep every published result,
-// including its captured outcomes, at the preceding fidelity.
+// including its captured outcomes, at the preceding fidelity. This takes one
+// thread: on more, the second candidate can finish first, completing the stage.
 static void peg_test_interrupt_discarded_stage(
     int stage_idx, int cand_rank, const Move *cand, double win_pct,
     double mean_spread, int scen_done, int64_t completed_ns, bool reordered,
@@ -1730,7 +1731,7 @@ static void test_peg_discarded_stage_outcomes(void) {
       "cgp 15/3Q7U3/3U2TAURINE2/1CHANSONS2W3/2AI6JO3/DIRL1PO3IN3/E1D2EF3V4/"
       "F1I2p1TRAIK3/O1L2T4E4/ABy1PIT2BRIG2/ME1MOZELLE5/1GRADE1O1NOH3/"
       "WE3R1V7/AT5E7/G6D7 ENOSTXY/ACEISUY 356/378 0 -lex NWL20";
-  Config *config = config_create_or_die("set -threads 4 -s1 score -s2 score");
+  Config *config = config_create_or_die("set -threads 1 -s1 score -s2 score");
   load_and_exec_config_or_die(config, cgp);
   Game *game = config_get_game(config);
   ThreadControl *thread_control = config_get_thread_control(config);
@@ -1754,7 +1755,7 @@ static void test_peg_discarded_stage_outcomes(void) {
   memset(&args, 0, sizeof(args));
   args.game = game;
   args.thread_control = thread_control;
-  args.num_threads = 4;
+  args.num_threads = 1;
   args.time_budget_seconds = 10.0;
   args.stage_top_k = stage_top_k;
   args.num_stages = 2;

@@ -589,7 +589,7 @@ static void test_endgame_stop_fn(void) {
   config_destroy(config);
 }
 
-static double run_time_limited_endgame(Config *config, double time_limit,
+static double run_time_limited_endgame(const Config *config, double time_limit,
                                        EndgameResults *results) {
   EndgameCtx *ctx = NULL;
   EndgameArgs args = {0};
