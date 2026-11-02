@@ -4,14 +4,17 @@
 // RIT/BAI/cache variants traverse identical positions and the numbers
 // are directly comparable.
 //
-// Usage: ./bin/magpie_test simbench
-// Env vars:
-//   SIMBENCH_PLIES  sim depth (default 2)
-//   SIMBENCH_MI     -minplayiterations (default 100000)
-//   SIMBENCH_RIT    "true" / "false" — toggles the RIT file (default true)
-//   SIMBENCH_TLIM   seconds per turn (default 2)
-//   SIMBENCH_THREADS worker threads (default detected hardware concurrency)
-//   SIMBENCH_WIT    "true" / "false" — toggles the WIT file (default false)
+// Run as simbench for the defaults, or simbench:<key>=<value>,... to change
+// them:
+//   plies    sim depth                      (default 2)
+//   threads  worker threads                 (default detected hardware
+//            concurrency)
+//   tlim     seconds per turn               (default 2)
+//   mi       -minplayiterations             (default 100000)
+//   wmp      -wmp                           (default true)
+//   rit      -rit                           (default true)
+//   wit      -wit                           (default true)
+// For example: simbench:plies=4,threads=16,wit=false
 
 #include "sim_benchmark_test.h"
 
@@ -21,12 +24,34 @@
 #include "../src/impl/config.h"
 #include "../src/impl/play_chooser.h"
 #include "../src/util/io_util.h"
+#include "../src/util/string_util.h"
 #include "test_util.h"
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
-void test_sim_benchmark(void) {
+typedef struct SimBenchArgs {
+  int plies;
+  int threads;
+  const char *tlim;
+  const char *mi;
+  const char *wmp;
+  const char *rit;
+  const char *wit;
+} SimBenchArgs;
+
+static SimBenchArgs sim_bench_default_args(void) {
+  return (SimBenchArgs){.plies = 2,
+                        .threads = get_num_cores(),
+                        .tlim = "2",
+                        .mi = "100000",
+                        .wmp = "true",
+                        .rit = "true",
+                        .wit = "true"};
+}
+
+static void run_sim_benchmark(const SimBenchArgs *args) {
   Timer timer;
   ctimer_start(&timer);
 
@@ -37,28 +62,14 @@ void test_sim_benchmark(void) {
   // variants now traverse identical positions.
   autoplay_set_bench_static_move(true);
 
-  const char *plies_env = getenv("SIMBENCH_PLIES");
-  const int plies = (plies_env != NULL) ? (int)strtol(plies_env, NULL, 10) : 2;
-  const char *mi_env = getenv("SIMBENCH_MI");
-  const char *mi = (mi_env != NULL) ? mi_env : "100000";
-  const char *rit_env = getenv("SIMBENCH_RIT");
-  const char *rit = (rit_env != NULL) ? rit_env : "true";
-  const char *wmp_env = getenv("SIMBENCH_WMP");
-  const char *wmp = (wmp_env != NULL) ? wmp_env : "true";
-  const char *wit_env = getenv("SIMBENCH_WIT");
-  const char *wit = (wit_env != NULL) ? wit_env : "false";
-  const char *tlim_env = getenv("SIMBENCH_TLIM");
-  const char *tlim = (tlim_env != NULL) ? tlim_env : "2";
-  const char *threads_env = getenv("SIMBENCH_THREADS");
-  const int threads = threads_env != NULL ? (int)strtol(threads_env, NULL, 10)
-                                          : get_num_cores();
   char cmd[256];
   (void)snprintf(cmd, sizeof(cmd),
                  "set -lex CSW24 -wmp %s -rit %s -wit %s -s1 equity "
                  "-s2 equity "
                  "-r1 all -r2 all -numplays 15 -plies %d -threads %d "
                  "-tlim %s -seed 42 -sr tt -minplayiterations %s",
-                 wmp, rit, wit, plies, threads, tlim, mi);
+                 args->wmp, args->rit, args->wit, args->plies, args->threads,
+                 args->tlim, args->mi);
   Config *config = config_create_or_die(cmd);
 
   load_and_exec_config_or_die(config, "autoplay games 1");
@@ -66,10 +77,58 @@ void test_sim_benchmark(void) {
   ctimer_stop(&timer);
   const double elapsed = ctimer_elapsed_seconds(&timer);
   const uint64_t iters = autoplay_get_total_sim_iterations();
-  printf("plies=%d: %.1fs, iters=%llu (%.0f iters/sec)\n", plies, elapsed,
-         (unsigned long long)iters, (double)iters / elapsed);
+  printf("plies=%d: %.1fs, iters=%llu (%.0f iters/sec)\n", args->plies,
+         elapsed, (unsigned long long)iters, (double)iters / elapsed);
 
   config_destroy(config);
+}
+
+void test_sim_benchmark(void) {
+  const SimBenchArgs args = sim_bench_default_args();
+  run_sim_benchmark(&args);
+}
+
+// The integer after "<key>=" in item.
+static int sim_bench_spec_int(const char *item, const char *key) {
+  ErrorStack *error_stack = error_stack_create();
+  const int value = string_to_int(item + strlen(key) + 1, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    log_fatal("simbench %s must be an integer, got '%s'", key, item);
+  }
+  error_stack_destroy(error_stack);
+  return value;
+}
+
+// "<key>=<value>[,<key>=<value>...]", with the keys listed above.
+void sim_benchmark_run_spec(const char *spec) {
+  SimBenchArgs args = sim_bench_default_args();
+  StringSplitter *items = split_string(spec, ',', true);
+  const int num_items = string_splitter_get_number_of_items(items);
+  for (int item_idx = 0; item_idx < num_items; item_idx++) {
+    const char *item = string_splitter_get_item(items, item_idx);
+    if (has_prefix("plies=", item)) {
+      args.plies = sim_bench_spec_int(item, "plies");
+    } else if (has_prefix("threads=", item)) {
+      args.threads = sim_bench_spec_int(item, "threads");
+    } else if (has_prefix("tlim=", item)) {
+      args.tlim = item + strlen("tlim=");
+    } else if (has_prefix("mi=", item)) {
+      args.mi = item + strlen("mi=");
+    } else if (has_prefix("wmp=", item)) {
+      args.wmp = item + strlen("wmp=");
+    } else if (has_prefix("rit=", item)) {
+      args.rit = item + strlen("rit=");
+    } else if (has_prefix("wit=", item)) {
+      args.wit = item + strlen("wit=");
+    } else {
+      log_fatal("simbench spec takes plies, threads, tlim, mi, wmp, rit and "
+                "wit, got '%s'",
+                item);
+    }
+  }
+  // The strings in args point into items, so it outlives the run.
+  run_sim_benchmark(&args);
+  string_splitter_destroy(items);
 }
 
 void test_play_chooser_benchmark(void) {
