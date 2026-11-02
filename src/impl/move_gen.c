@@ -1751,7 +1751,7 @@ void go_on_alpha(MoveGen *gen, int current_col, MachineLetter L, int leftstrip,
 
 static inline __attribute__((always_inline)) void
 shadow_record_impl(MoveGen *gen, bool wmp_active, uint32_t allowed_lengths) {
-  const Equity *best_leaves = gen->best_leaves;
+  const Equity *shadow_equities = gen->shadow_equity_by_tiles_played;
   if (wmp_active) {
     const int final_length =
         gen->tiles_played + gen->wmp_move_gen.num_tiles_played_through;
@@ -1854,12 +1854,13 @@ shadow_record_impl(MoveGen *gen, bool wmp_active, uint32_t allowed_lengths) {
         return;
       }
       if (gen->number_of_tiles_in_bag > 0) {
-        best_leaves = wmp_move_gen_get_nonplaythrough_best_leave_values(
-            &gen->wmp_move_gen);
+        shadow_equities = gen->shadow_nonplaythrough_equity_by_tiles_played;
         const int leave_size =
             gen->number_of_letters_on_rack - gen->tiles_played;
         (void)leave_size;
-        assert(best_leaves[leave_size] <= gen->best_leaves[leave_size]);
+        assert(wmp_move_gen_get_nonplaythrough_best_leave_values(
+                   &gen->wmp_move_gen)[leave_size] <=
+               gen->best_leaves[leave_size]);
       }
     }
   }
@@ -1885,10 +1886,7 @@ shadow_record_impl(MoveGen *gen, bool wmp_active, uint32_t allowed_lengths) {
       gen->shadow_perpendicular_additional_score + bingo_bonus;
   Equity equity = score;
   if (gen->move_sort_type == MOVE_SORT_EQUITY) {
-    equity += static_eval_get_shadow_equity(
-        &gen->ld, &gen->opponent_rack, best_leaves,
-        gen->full_rack_descending_tile_scores, gen->number_of_tiles_in_bag,
-        gen->number_of_letters_on_rack, gen->tiles_played);
+    equity += shadow_equities[gen->tiles_played];
     // The PAT term is <= 0, so the bound would stay valid without
     // it, but then every anchor's bound is loose by roughly the position's
     // baseline penalty and anchors survive the cutoff on a penalty all of
@@ -3538,7 +3536,41 @@ void gen_look_up_leaves_and_record_exchanges(MoveGen *gen) {
   }
 }
 
+// The non-score part of shadow's equity bound depends only on how many tiles
+// a play uses, so it is computed once per generation instead of at every
+// bound, where its bag and rack-score branches mispredicted.
+static void gen_set_shadow_equities(MoveGen *gen) {
+  if (gen->move_sort_type != MOVE_SORT_EQUITY) {
+    return;
+  }
+  const int number_of_letters_on_rack =
+      rack_get_total_letters(&gen->player_rack);
+  for (int tiles_played = 0; tiles_played <= number_of_letters_on_rack;
+       tiles_played++) {
+    gen->shadow_equity_by_tiles_played[tiles_played] =
+        static_eval_get_shadow_equity(
+            &gen->ld, &gen->opponent_rack, gen->best_leaves,
+            gen->full_rack_descending_tile_scores, gen->number_of_tiles_in_bag,
+            number_of_letters_on_rack, tiles_played);
+  }
+  if (!wmp_move_gen_is_active(&gen->wmp_move_gen) ||
+      gen->number_of_tiles_in_bag == 0) {
+    return;
+  }
+  const Equity *nonplaythrough_best_leaves =
+      wmp_move_gen_get_nonplaythrough_best_leave_values(&gen->wmp_move_gen);
+  for (int tiles_played = 0; tiles_played <= number_of_letters_on_rack;
+       tiles_played++) {
+    gen->shadow_nonplaythrough_equity_by_tiles_played[tiles_played] =
+        static_eval_get_shadow_equity(
+            &gen->ld, &gen->opponent_rack, nonplaythrough_best_leaves,
+            gen->full_rack_descending_tile_scores, gen->number_of_tiles_in_bag,
+            number_of_letters_on_rack, tiles_played);
+  }
+}
+
 void gen_shadow(MoveGen *gen) {
+  gen_set_shadow_equities(gen);
   // Set the leave_map index to 2^number_of_letters - 1, which represents
   // using (playing) zero tiles and keeping
   // gen->player_rack->number_of_letters tiles.

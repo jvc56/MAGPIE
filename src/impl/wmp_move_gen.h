@@ -597,10 +597,19 @@ static inline void wmp_move_gen_reset_playthrough(WMPMoveGen *wmp_move_gen) {
 static inline MachineLetter
 wmp_move_gen_single_playthrough_letter(const WMPMoveGen *wmp_move_gen) {
   const uint64_t low = bit_rack_get_low_64(&wmp_move_gen->playthrough_bit_rack);
-  if (low != 0) {
 #if defined(__has_builtin) && __has_builtin(__builtin_ctzll)
-    return (MachineLetter)(__builtin_ctzll(low) / BIT_RACK_BITS_PER_LETTER);
+  // Both halves are indexed and one selected: branching on which half holds
+  // the letter mispredicted. The top bit keeps the count defined for an empty
+  // half, whose index is then discarded.
+  const uint64_t high =
+      bit_rack_get_high_64(&wmp_move_gen->playthrough_bit_rack);
+  const int low_ml =
+      __builtin_ctzll(low | (UINT64_C(1) << 63)) / BIT_RACK_BITS_PER_LETTER;
+  const int high_ml = 16 + __builtin_ctzll(high | (UINT64_C(1) << 63)) /
+                               BIT_RACK_BITS_PER_LETTER;
+  return (MachineLetter)(low != 0 ? low_ml : high_ml);
 #else
+  if (low != 0) {
     int ml = 0;
     uint64_t v = low;
     while ((v & 0xFU) == 0) {
@@ -608,13 +617,9 @@ wmp_move_gen_single_playthrough_letter(const WMPMoveGen *wmp_move_gen) {
       ml++;
     }
     return (MachineLetter)ml;
-#endif
   }
   const uint64_t high =
       bit_rack_get_high_64(&wmp_move_gen->playthrough_bit_rack);
-#if defined(__has_builtin) && __has_builtin(__builtin_ctzll)
-  return (MachineLetter)(16 + __builtin_ctzll(high) / BIT_RACK_BITS_PER_LETTER);
-#else
   int ml = 16;
   uint64_t v = high;
   while ((v & 0xFU) == 0) {
