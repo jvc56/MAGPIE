@@ -1974,18 +1974,22 @@ static inline void shadow_record_small(MoveGen *gen) {
   }
 }
 
+// Inserts into the descending list without a data-dependent loop: the slots
+// past the list are zero, so the whole array stays sorted, and inserting into
+// it is a fixed-width max of each slot with the smaller of its left neighbour
+// and the new value. The search loop this replaces mispredicted on its exit.
 static inline void
 insert_unrestricted_effective_letter_multiplier(MoveGen *gen,
                                                 uint8_t multiplier) {
-  int insert_index = gen->num_unrestricted_multipliers;
-  for (; insert_index > 0 &&
-         gen->descending_effective_letter_multipliers[insert_index - 1] <
-             multiplier;
-       insert_index--) {
-    gen->descending_effective_letter_multipliers[insert_index] =
-        gen->descending_effective_letter_multipliers[insert_index - 1];
+  uint16_t *muls = gen->descending_effective_letter_multipliers;
+  uint16_t old_muls[WORD_ALIGNING_RACK_SIZE];
+  memcpy(old_muls, muls, sizeof(old_muls));
+  muls[0] = old_muls[0] > multiplier ? old_muls[0] : multiplier;
+  for (int mul_idx = 1; mul_idx < WORD_ALIGNING_RACK_SIZE; mul_idx++) {
+    const uint16_t left =
+        old_muls[mul_idx - 1] < multiplier ? old_muls[mul_idx - 1] : multiplier;
+    muls[mul_idx] = old_muls[mul_idx] > left ? old_muls[mul_idx] : left;
   }
-  gen->descending_effective_letter_multipliers[insert_index] = multiplier;
 }
 
 // Recalculate and reinsert all unrestricted effective letter multipliers,
@@ -1996,12 +2000,11 @@ static inline void maybe_recalculate_effective_multipliers(MoveGen *gen) {
   }
   gen->last_word_multiplier = gen->shadow_word_multiplier;
 
-  const int original_num_unrestricted_multipliers =
-      gen->num_unrestricted_multipliers;
-  gen->num_unrestricted_multipliers = 0;
+  // The insert treats the whole array as the sorted list, so clear it first.
+  memset(gen->descending_effective_letter_multipliers, 0,
+         sizeof(gen->descending_effective_letter_multipliers));
   for (int multiplier_idx = 0;
-       multiplier_idx < original_num_unrestricted_multipliers;
-       multiplier_idx++) {
+       multiplier_idx < gen->num_unrestricted_multipliers; multiplier_idx++) {
     const uint8_t xw_multiplier =
         gen->unrestricted_multipliers[multiplier_idx].multiplier;
     const uint8_t col = gen->unrestricted_multipliers[multiplier_idx].column;
@@ -2012,7 +2015,6 @@ static inline void maybe_recalculate_effective_multipliers(MoveGen *gen) {
         gen->shadow_word_multiplier * letter_multiplier + xw_multiplier;
     insert_unrestricted_effective_letter_multiplier(
         gen, effective_letter_multiplier);
-    gen->num_unrestricted_multipliers++;
   }
 }
 
@@ -3109,17 +3111,23 @@ void shadow_by_orientation(MoveGen *gen) {
         gen->board, gen->current_row_index, gen->dir, gen->cross_index);
     gen->pat_lane_penalty_bound = pat_eval_lane_penalty_bound(
         &gen->pat_eval_ctx, gen->dir, gen->current_row_index);
+    // Gathering the anchors into a mask first replaces a branch per square,
+    // which mispredicted, with one per anchor.
+    uint32_t anchor_cols = 0;
     for (int col = 0; col < BOARD_DIM; col++) {
-      if (gen_cache_get_is_anchor(gen, col)) {
-        shadow_play_for_anchor(gen, col);
+      anchor_cols |= (uint32_t)gen_cache_get_is_anchor(gen, col) << col;
+    }
+    while (anchor_cols != 0) {
+      const int col = wmp_move_gen_get_lowest_set_bit(anchor_cols);
+      anchor_cols &= anchor_cols - 1;
+      shadow_play_for_anchor(gen, col);
 
-        gen->last_anchor_col = col;
-        // The next anchor to search after a playthrough tile should
-        // leave a gap of one square so that it will not search backwards
-        // into the square adjacent to the playthrough tile.
-        if (!gen_cache_is_empty(gen, col)) {
-          gen->last_anchor_col++;
-        }
+      gen->last_anchor_col = col;
+      // The next anchor to search after a playthrough tile should
+      // leave a gap of one square so that it will not search backwards
+      // into the square adjacent to the playthrough tile.
+      if (!gen_cache_is_empty(gen, col)) {
+        gen->last_anchor_col++;
       }
     }
   }

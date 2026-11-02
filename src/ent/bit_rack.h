@@ -258,16 +258,16 @@ static inline void bit_rack_set_letter_count(BitRack *bit_rack,
 #endif
 }
 
+// Which half holds a letter is selected arithmetically: as a branch it
+// mispredicted, since letters fall on either side of the split.
 static inline void bit_rack_add_letter(BitRack *bit_rack, MachineLetter ml) {
   const int shift = ml * BIT_RACK_BITS_PER_LETTER;
 #if USE_INT128_INTRINSIC
   *bit_rack += (unsigned __int128)1 << shift;
 #else
-  if (shift < 64) {
-    bit_rack->low += (uint64_t)1 << shift;
-  } else {
-    bit_rack->high += (uint64_t)1 << (shift - 64);
-  }
+  const uint64_t in_high = (uint64_t)(shift >= 64);
+  bit_rack->low += (1 - in_high) << (shift & 63);
+  bit_rack->high += in_high << (shift & 63);
 #endif
 }
 
@@ -276,11 +276,9 @@ static inline void bit_rack_take_letter(BitRack *bit_rack, MachineLetter ml) {
 #if USE_INT128_INTRINSIC
   *bit_rack -= (unsigned __int128)1 << shift;
 #else
-  if (shift < 64) {
-    bit_rack->low -= (uint64_t)1 << shift;
-  } else {
-    bit_rack->high -= (uint64_t)1 << (shift - 64);
-  }
+  const uint64_t in_high = (uint64_t)(shift >= 64);
+  bit_rack->low -= (1 - in_high) << (shift & 63);
+  bit_rack->high -= in_high << (shift & 63);
 #endif
 }
 
