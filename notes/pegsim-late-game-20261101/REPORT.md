@@ -9,7 +9,8 @@ to be merged into main as it stands.
 
 At 7 tiles in the bag, a sim whose rollouts choose their plays with the 1PEG
 and 2PEG nets at 1 and 2 tiles in the bag, and with a 2-ply endgame search
-once the bag is empty, picks better moves than MAGPIE's static sim:
+once the bag is empty, picks moves that our judge rates higher than MAGPIE's
+static sim's:
 
 - **+0.78 judged win%** [+0.43, +1.16] with the same 16,000 rollouts, and
   **+0.63** [+0.26, +1.04] when the static sim gets the same wall time
@@ -23,8 +24,13 @@ once the bag is empty, picks better moves than MAGPIE's static sim:
   6 candidates, keeps the quality at about a tenth of the cost: 5.5 s instead
   of 57 s per decision on 10 threads.
 
-A check that plays the rest of the game without the nets is running (see
-*Pending*).
+**But the gain didn't survive a judge without the nets.** Every result above
+was judged by playouts that use the nets at 1-2 in the bag, close to the new
+sim's own rollout policy. When the rest of the game was played by static sims
+instead, on 1,024 fresh boards, the new sim did no better than a static sim
+given the same time: -0.12
+win% [-0.37, +0.16], spread -0.50 [-0.96, -0.01] (see *Playouts without the
+nets*).
 
 ## Setup
 
@@ -140,20 +146,41 @@ The live check also found three harness bugs, all fixed before the final run:
 The similarity bug affects only BAI-stopped sims, so the earlier
 fixed-iteration studies stand.
 
-## Pending: autoplay from 7-in-bag positions
+## Playouts without the nets
 
 Every verdict above comes from the judge, whose playouts use the nets at 1-2 in
-the bag, so the nets judged continuations like their own. The current run
-removes the nets from the continuation:
+the bag, so the nets judged continuations like their own. This run removed the
+nets from the continuation (pre-registered, 2026-11-01):
 - **Positions:** 1,024 fresh 7-in-bag positions.
 - **Picks:** racing D (prefilter 6) vs a static sim given D's whole decision
-  time.
+  time (F).
 - **Playouts:** where the picks differ, both moves are played out in the same
   32 deals: the actual one plus 31 random ones.
 - **Continuation:** every later drawing turn of either player is chosen by a
   one-thread static sim (`PEG_JUDGE_SIM=16,1000,25`), which sees neither rack
   nor bag; endgames are exact.
 - **Primary test:** D - F win%, lower 95% bound > 0.
+
+| Measure | D - F |
+|---|---|
+| Win% (primary) | -0.12 [-0.37, +0.16], not confirmed |
+| Spread | -0.50 [-0.96, -0.01] |
+| Actual deal only | win% +0.24 [-0.78, +1.22] |
+| Differing boards | 330 of 1,024; D better on 73, worse on 105 |
+
+- **Cost:** 9.6 s mean (5.5 s median) per decision for D at 10 threads; F got
+  1.0M rollouts on average in the same time.
+- **Not the endgame cap:** about 20% of playouts hit the 15 s cap. Using only
+  deals where both endgames were proven gives -0.11 [-0.42, +0.18].
+- **Where the loss is (post hoc):** on the 242 boards where F kept the static
+  sim's pick and D moved off it. Where D's own sim put its pick at least 3
+  win% ahead of F's, D's pick did better (+0.61 mean on 113 boards); below
+  that it did worse.
+
+This run differs from the equal-time run above in more than the judge: fresh
+boards, racing instead of full D, and a smaller budget for F. Re-judging these
+660 moves in the same 32 deals with the nets judge would show whether the judge
+explains the difference.
 
 Whole-game autoplay would be a weak test of this change. Only about 1 game in
 4 reaches exactly 7 tiles in the bag, and the two sims pick differently on a
