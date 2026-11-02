@@ -24,13 +24,18 @@ static sim's:
   6 candidates, keeps the quality at about a tenth of the cost: 5.5 s instead
   of 57 s per decision on 10 threads.
 
-**But the gain didn't survive a judge without the nets.** Every result above
-was judged by playouts that use the nets at 1-2 in the bag, close to the new
-sim's own rollout policy. When the rest of the game was played by static sims
-instead, on 1,024 fresh boards, the new sim did no better than a static sim
-given the same time: -0.12
-win% [-0.37, +0.16], spread -0.50 [-0.96, -0.01] (see *Playouts without the
-nets*).
+**But the gain depends on how the rest of the game is played.** Every result
+above was judged by playouts that use the nets at 1-2 in the bag, close to the
+new sim's own rollout policy. On 1,024 fresh boards, with the same moves in the
+same deals:
+- **Later turns played by static sims:** the new sim did no better than a static
+  sim given the same time: -0.12 win% [-0.37, +0.16].
+- **Later turns played by the nets judge:** it gained +0.59 [+0.40, +0.82].
+- **The gap between the two judges** is +0.71 [+0.44, +0.99].
+
+So the new sim's picks are better for a player that goes on to use the nets at
+1-2 in the bag and an exact endgame, and no better for one that goes on to use
+static sims (see *Playouts without the nets*).
 
 ## Setup
 
@@ -178,9 +183,24 @@ nets from the continuation (pre-registered, 2026-11-01):
   that it did worse.
 
 This run differs from the equal-time run above in more than the judge: fresh
-boards, racing instead of full D, and a smaller budget for F. Re-judging these
-660 moves in the same 32 deals with the nets judge would show whether the judge
-explains the difference.
+boards, racing instead of full D, and a smaller budget for F. A second
+pre-registered run separated these. It played the same 660 moves in the same
+32 deals with the nets judge:
+
+| D - F | Static-sim continuation | Nets judge | Difference |
+|---|---|---|---|
+| Win% | -0.12 [-0.37, +0.16] | +0.59 [+0.40, +0.82] | **+0.71** [+0.44, +0.99] |
+| Spread | -0.50 [-0.96, -0.01] | +0.88 [+0.52, +1.24] | +1.38 [+1.03, +1.75] |
+| D better / worse | 73 / 105 | 124 / 57 | |
+
+Under the nets judge these boards reproduce the equal-time run's +0.63. So
+neither the fresh boards, racing, nor F's budget explains the gap; the
+continuation does. This hasn't separated which part of the nets judge's
+continuation matters: the nets at 1-2 in the bag, or static plays (rather than
+sims) at 3 or more.
+
+The fair test is game pairs where each player keeps its own method on every
+later turn. Neither judge does that.
 
 Whole-game autoplay would be a weak test of this change. Only about 1 game in
 4 reaches exactly 7 tiles in the bag, and the two sims pick differently on a
