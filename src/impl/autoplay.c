@@ -1029,6 +1029,10 @@ const Move *game_runner_get_top_simming_move(AutoplayWorker *autoplay_worker,
         &autoplay_worker->target_played_tiles,
         &autoplay_worker->target_known_rack,
         &autoplay_worker->nontarget_known_rack);
+    if (move_get_type(&game_runner->previous_move) ==
+        GAME_EVENT_TILE_PLACEMENT_MOVE) {
+      infer_args->target_move = &game_runner->previous_move;
+    }
   }
 
   ErrorStack *error_stack = autoplay_worker->error_stack;

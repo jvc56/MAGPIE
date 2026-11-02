@@ -1,7 +1,9 @@
 #include "infer_test.h"
 
+#include "../src/def/game_history_defs.h"
 #include "../src/def/inference_defs.h"
 #include "../src/def/letter_distribution_defs.h"
+#include "../src/def/move_defs.h"
 #include "../src/def/rack_defs.h"
 #include "../src/def/thread_control_defs.h"
 #include "../src/ent/alias_method.h"
@@ -14,6 +16,7 @@
 #include "../src/ent/klv.h"
 #include "../src/ent/leave_rack.h"
 #include "../src/ent/letter_distribution.h"
+#include "../src/ent/move.h"
 #include "../src/ent/player.h"
 #include "../src/ent/rack.h"
 #include "../src/ent/stats.h"
@@ -1332,8 +1335,12 @@ assert_infer_cutoff_matches(const Config *config, bool use_game_history,
     error_stack_destroy(error_stack);
   }
   assert_inference_results_equal(results[0], results[1], ld_size);
-  const uint64_t num_accepted = stat_get_num_unique_samples(
+  const uint64_t num_accepted_racks = stat_get_num_unique_samples(
       inference_results_get_equity_values(results[0], INFERENCE_TYPE_RACK));
+  const uint64_t num_accepted_leaves = stat_get_num_unique_samples(
+      inference_results_get_equity_values(results[0], INFERENCE_TYPE_LEAVE));
+  const uint64_t num_accepted =
+      num_accepted_racks > 0 ? num_accepted_racks : num_accepted_leaves;
   inference_results_destroy(results[0]);
   inference_results_destroy(results[1]);
   return num_accepted;
@@ -1524,6 +1531,114 @@ static void test_infer_same_results_for_any_number_of_threads(void) {
   inference_results_destroy(expected_exchange_results);
 }
 
+// When 13 tiles are unseen to the observer (7 on the target's rack and 6 in
+// the bag), exchanges are illegal because the bag has fewer than RACK_SIZE
+// tiles. MoveGen must see those 6 bag tiles rather than 6 + tiles_to_infer,
+// or it will generate phantom exchanges on clunky racks and reject the true
+// leave at zero equity margin.
+static void test_infer_preendgame_no_phantom_exchange(void) {
+  // Swap the U on player 0's rack with an I from the 6-tile bag so player 0
+  // holds IILOOQR (Q without U) and 6 tiles remain in the bag (13 unseen to
+  // player 1's EEINTTX).
+  const char *cgp_13_unseen_q_no_u =
+      "cgp 2CHIGOE3T3/3O6NAE2/3M6END2/1PAY6UG1G1/2B7MO1L1/1VODKA5i1OD/"
+      "2R2TANNERS1RE/OUTA2ZA3T1IF/2I1CRoWDIE2A1/2V6FEEBS1/1NEWISHLY1LEA2/"
+      "JA13/15/15/15 IILOOQR/EEINTTX 297/456 0 -lex CSW21;";
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -wmp true -s1 equity -s2 equity -r1 all -r2 all "
+      "-numplays 1 -threads 1 -ima 0");
+  load_and_exec_config_or_die(config, cgp_13_unseen_q_no_u);
+
+  Game *game = config_get_game(config);
+  const LetterDistribution *ld = game_get_ld(game);
+  const int ld_size = ld_get_size(ld);
+  MoveList *move_list = move_list_create(1);
+  const Move *top_move = get_top_equity_move(game, move_list);
+  assert(move_get_type(top_move) == GAME_EVENT_TILE_PLACEMENT_MOVE);
+  const Equity target_score = move_get_score(top_move);
+
+  Rack target_played_tiles;
+  rack_set_dist_size_and_reset(&target_played_tiles, ld_size);
+  const int tiles_length = move_get_tiles_length(top_move);
+  for (int tile_idx = 0; tile_idx < tiles_length; tile_idx++) {
+    const MachineLetter ml = move_get_tile(top_move, tile_idx);
+    if (ml != PLAYED_THROUGH_MARKER) {
+      rack_add_letter(&target_played_tiles, get_unblanked_machine_letter(ml));
+    }
+  }
+  move_list_destroy(move_list);
+
+  Rack target_known_rack;
+  rack_set_dist_size_and_reset(&target_known_rack, ld_size);
+  Rack nontarget_known_rack;
+  rack_set_dist_size_and_reset(&nontarget_known_rack, ld_size);
+  rack_set_to_string(ld, &nontarget_known_rack, "EEINTTX");
+
+  InferenceResults *results[2] = {inference_results_create(NULL),
+                                  inference_results_create(NULL)};
+  for (int cutoff_idx = 0; cutoff_idx < 2; cutoff_idx++) {
+    ErrorStack *error_stack = error_stack_create();
+    thread_control_set_status(config_get_thread_control(config),
+                              THREAD_CONTROL_STATUS_STARTED);
+    config_infer(config, false, 0, target_score, 0, &target_played_tiles,
+                 &target_known_rack, &nontarget_known_rack, cutoff_idx == 1,
+                 results[cutoff_idx], error_stack);
+    assert(error_stack_is_empty(error_stack));
+    error_stack_destroy(error_stack);
+  }
+  assert_inference_results_equal(results[0], results[1], ld_size);
+  assert(stat_get_num_samples(inference_results_get_equity_values(
+             results[0], INFERENCE_TYPE_LEAVE)) > 0);
+
+  inference_results_destroy(results[0]);
+  inference_results_destroy(results[1]);
+  config_destroy(config);
+}
+
+// On an empty board, MoveGen applies placement_adjustment (the -0.7 pt vowel
+// hotspot penalty adjacent to double-letter squares) to candidate opening
+// moves. When the target move itself is known (e.g. from game history or
+// autoplay), evaluate_possible_leave must apply the same placement_adjustment
+// to the target move's equity cutoff.
+static void test_infer_opening_placement_adjustment_parity(void) {
+  const char *gcg_header = "#character-encoding UTF-8\n"
+                           "#player1 Tim Tim Weiss\n"
+                           "#player2 Josh Josh Castellano\n";
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -wmp true -s1 equity -s2 equity -r1 all -r2 all "
+      "-numplays 1 -threads 1 -ima 0");
+  load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
+
+  // 8H RIN places I on 8I (between the 7I and 9I double-letter squares,
+  // incurring -0.7 pts placement_adjustment), whereas 8G RIN places R on 8G,
+  // I on 8H, and N on 8I (0 penalty) for the same 6 points and the same leave.
+  // At -ima 0, 8G RIN strictly dominates 8H RIN on every rack by 0.7 pts.
+  load_game_history_with_gcg_string(config, gcg_header,
+                                    ">Tim: RIN 8H RIN +6 6");
+  game_play_to_end_or_die(config_get_game_history(config),
+                          config_get_game(config));
+  assert(assert_infer_cutoff_matches(config, true, 0, "H", "") == 0);
+
+  // With a 0.7-point margin, the penalized 8H RIN placement has the exact
+  // same target_equity_cutoff as the unpenalized 8G RIN placement at -ima 0
+  // and accepts the same 3 unique leaves (?HIR, ?HNR, HINR).
+  load_and_exec_config_or_die(config, "set -ima 0.7");
+  const uint64_t accepted_with_margin =
+      assert_infer_cutoff_matches(config, true, 0, "H", "");
+  assert(accepted_with_margin == 3);
+
+  load_and_exec_config_or_die(config, "set -ima 0");
+  load_game_history_with_gcg_string(config, gcg_header,
+                                    ">Tim: RIN 8G RIN +6 6");
+  game_play_to_end_or_die(config_get_game_history(config),
+                          config_get_game(config));
+  const uint64_t accepted_unpenalized =
+      assert_infer_cutoff_matches(config, true, 0, "H", "");
+  assert(accepted_unpenalized == accepted_with_margin);
+
+  config_destroy(config);
+}
+
 void test_infer(void) {
   test_leave_rack_reset();
   test_trivial_random_probability();
@@ -1536,6 +1651,8 @@ void test_infer(void) {
   test_infer_empty_game_history();
   test_infer_exchange_margin();
   test_infer_exchange_cutoff_matches();
+  test_infer_preendgame_no_phantom_exchange();
+  test_infer_opening_placement_adjustment_parity();
   for (int i = 0; i < 2; i++) {
     const bool use_game_history = i == 1;
     test_infer_nonerror_cases(1, use_game_history);
