@@ -34,8 +34,7 @@ static void test_peg_fit_solve_exact(void) {
     for (int class_idx = 1; class_idx < PEG_FIT_NUMBER_OF_CLASSES;
          class_idx++) {
       // Every position has the base class and some of the others.
-      if (class_idx != PEG_FIT_BASE_CLASS &&
-          (pos_idx + class_idx) % 3 == 0) {
+      if (class_idx != PEG_FIT_BASE_CLASS && (pos_idx + class_idx) % 3 == 0) {
         continue;
       }
       position->has_class[class_idx] = true;
@@ -46,8 +45,7 @@ static void test_peg_fit_solve_exact(void) {
   PegFitResult result;
   peg_fit_solve(positions, PEG_FIT_TEST_POSITIONS, &result);
   for (int class_idx = 0; class_idx < PEG_FIT_NUMBER_OF_CLASSES; class_idx++) {
-    assert(result.observations[class_idx] ==
-           expected_observations[class_idx]);
+    assert(result.observations[class_idx] == expected_observations[class_idx]);
     if (class_idx == 0) {
       // No position has class 0, so its term stays 0.
       assert(result.terms[class_idx] == 0);
@@ -117,15 +115,15 @@ static void test_peg_fit_command(void) {
   char *tmp_dir = test_platform_make_temporary_directory("magpie_peg_fit_");
   char *strategy_dir = get_formatted_string("%s/strategy", tmp_dir);
   assert(cfile_mkdir(strategy_dir) == 0);
-  char *set_cmd = get_formatted_string(
-      "set -path %s:%s -lex CSW21 -wmp true", tmp_dir, DEFAULT_TEST_DATA_PATH);
+  char *set_cmd = get_formatted_string("set -path %s:%s -lex CSW21 -wmp true",
+                                       tmp_dir, DEFAULT_TEST_DATA_PATH);
   Config *config = config_create_or_die(set_cmd);
 
   // With static endgames the table does not depend on the thread count.
-  load_and_exec_config_or_die(
-      config, "pegfit 6 2 0 fit_static_1 -threads 1 -seed 7");
-  load_and_exec_config_or_die(
-      config, "pegfit 6 2 0 fit_static_3 -threads 3 -seed 7");
+  load_and_exec_config_or_die(config,
+                              "pegfit 6 2 0 fit_static_1 -threads 1 -seed 7");
+  load_and_exec_config_or_die(config,
+                              "pegfit 6 2 0 fit_static_3 -threads 3 -seed 7");
   char *static_1_filename = get_table_filename(strategy_dir, "fit_static_1");
   char *static_3_filename = get_table_filename(strategy_dir, "fit_static_3");
   char *static_1 = get_string_from_file_or_die(static_1_filename);
