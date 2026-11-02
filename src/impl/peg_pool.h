@@ -16,6 +16,7 @@
 // nested submissions don't deadlock as long as queue items make forward
 // progress without waiting on the same worker.
 typedef struct PegPool PegPool;
+typedef struct PegPoolBatch PegPoolBatch;
 
 // Generic work-item signature. `worker_idx` is the pool's thread index used
 // for cache keying (movegen / endgame caches keyed by this number).
@@ -48,6 +49,12 @@ int peg_pool_queue_count(PegPool *pool);
 // scheduling heuristic.
 int peg_pool_idle_workers(PegPool *pool);
 
+// Snapshot of the cores doing nothing: the idle workers, and the threads asleep
+// until the rest of a batch they submitted finishes. Those take no queued work,
+// so this is for work that brings its own thread, e.g. an injected ABDADA
+// worker. Racy, like peg_pool_idle_workers.
+int peg_pool_spare_cores(PegPool *pool);
+
 // Override the no-progress watchdog budget (seconds); 0 disables it. Use when
 // the pool runs legitimately long tasks (e.g. deep endgame solves) that would
 // otherwise trip the watchdog despite making progress.
@@ -73,5 +80,13 @@ void peg_pool_submit_and_wait(PegPool *pool, PegPoolFn fn, void *const *args,
 void peg_pool_submit_and_wait_reentrant(PegPool *pool, PegPoolFn fn,
                                         void *const *args, int n,
                                         int helper_worker_idx);
+
+// Queues a batch like peg_pool_submit_and_wait, without waiting for it, so a
+// caller can queue what comes next while it runs. Every batch queued this way
+// must be waited for with peg_pool_wait, which frees it. The pool must not be
+// NULL, and the batch's items run as peg_pool_submit_and_wait's do.
+PegPoolBatch *peg_pool_submit(PegPool *pool, PegPoolFn fn, void *const *args,
+                              int n);
+void peg_pool_wait(PegPool *pool, PegPoolBatch *batch, int helper_worker_idx);
 
 #endif

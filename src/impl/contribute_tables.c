@@ -25,6 +25,9 @@ enum {
 };
 
 #define MANIFEST_LOCK_NAP_SECONDS 0.1
+// Marks the optional modification time on a manifest line. An absolute path
+// cannot start with it, and a path relative to some data directory never does.
+#define MANIFEST_MODIFIED_PREFIX "modified:"
 
 static const contribute_table_role_t contribute_table_priority[] = {
     CONTRIBUTE_TABLE_WMP, CONTRIBUTE_TABLE_WIT, CONTRIBUTE_TABLE_RIT};
@@ -106,6 +109,8 @@ void contribute_table_manifest_record(ContributeTableManifest *manifest,
     entry->last_used = now;
     free(entry->path);
     entry->path = string_duplicate(path);
+    entry->modified_seconds = 0;
+    entry->modified_nanoseconds = 0;
     return;
   }
   if (manifest->count == manifest->capacity) {
@@ -120,6 +125,8 @@ void contribute_table_manifest_record(ContributeTableManifest *manifest,
   entry->bytes = bytes;
   entry->last_used = now;
   entry->path = string_duplicate(path);
+  entry->modified_seconds = 0;
+  entry->modified_nanoseconds = 0;
 }
 
 bool contribute_table_manifest_touch(ContributeTableManifest *manifest,
@@ -179,6 +186,25 @@ static void manifest_add_line(ContributeTableManifest *manifest, char *line) {
     *space = '\0';
     cursor = space + 1;
   }
+  // The modification time is optional and comes as a token of its own, so a
+  // line from before it was recorded still reads.
+  int64_t modified_seconds = 0;
+  int64_t modified_nanoseconds = 0;
+  if (has_prefix(MANIFEST_MODIFIED_PREFIX, cursor)) {
+    char *token = cursor + strlen(MANIFEST_MODIFIED_PREFIX);
+    char *dot = strchr(token, '.');
+    char *space = strchr(token, ' ');
+    if (!dot || !space || dot > space) {
+      return;
+    }
+    *dot = '\0';
+    *space = '\0';
+    if (!parse_manifest_int64(token, &modified_seconds) ||
+        !parse_manifest_int64(dot + 1, &modified_nanoseconds)) {
+      return;
+    }
+    cursor = space + 1;
+  }
   const char *path = cursor;
   int64_t bytes = 0;
   int64_t last_used = 0;
@@ -189,6 +215,10 @@ static void manifest_add_line(ContributeTableManifest *manifest, char *line) {
   }
   contribute_table_manifest_record(manifest, fields[0], fields[3], bytes, path,
                                    last_used);
+  ContributeTableManifestEntry *entry =
+      &manifest->entries[manifest_find(manifest, fields[0], fields[3])];
+  entry->modified_seconds = modified_seconds;
+  entry->modified_nanoseconds = (long)modified_nanoseconds;
 }
 
 ContributeTableManifest *contribute_table_manifest_read(const char *path) {
@@ -234,12 +264,20 @@ bool contribute_table_manifest_write(const ContributeTableManifest *manifest,
               "directory, which it\n# deletes, least recently used first, when "
               "a task needs the space. It deletes\n# nothing this file does "
               "not list. One per line: role, bytes, last use (Unix\n# "
-              "seconds), name, path.\n") > 0;
+              "seconds), name, the file's modification time if known "
+              "(modified:<seconds>.<nanoseconds>),\n# path.\n") > 0;
   for (int entry_idx = 0; written && entry_idx < manifest->count; entry_idx++) {
     const ContributeTableManifestEntry *entry = &manifest->entries[entry_idx];
-    written =
-        fprintf(stream, "%s %" PRId64 " %" PRId64 " %s %s\n", entry->role,
-                entry->bytes, entry->last_used, entry->name, entry->path) > 0;
+    char *modified = entry->modified_seconds != 0
+                         ? get_formatted_string("%s%" PRId64 ".%ld ",
+                                                MANIFEST_MODIFIED_PREFIX,
+                                                entry->modified_seconds,
+                                                entry->modified_nanoseconds)
+                         : string_duplicate("");
+    written = fprintf(stream, "%s %" PRId64 " %" PRId64 " %s %s%s\n",
+                      entry->role, entry->bytes, entry->last_used, entry->name,
+                      modified, entry->path) > 0;
+    free(modified);
   }
   if (fclose(stream) != 0) {
     written = false;
@@ -465,7 +503,7 @@ int contribute_choose_tables(ContributeTable *tables, int count,
       if (dependency && table_build_memory(dependency) > build) {
         build = table_build_memory(dependency);
       }
-      if (build > memory) {
+      if (build > 0 && build > memory) {
         skip_table(table, CONTRIBUTE_TABLE_NO_MEMORY_TO_BUILD, build, memory);
         continue;
       }
@@ -533,6 +571,11 @@ static bool evict_entry(const ContributeTableManifestEntry *entry) {
   if (identity.size != entry->bytes) {
     return false;
   }
+  if (entry->modified_seconds != 0 &&
+      (identity.mtime_seconds != entry->modified_seconds ||
+       identity.mtime_nanoseconds != entry->modified_nanoseconds)) {
+    return false;
+  }
   char *lock_path = get_formatted_string("%s.lock", entry->path);
   const int lock = cfile_lock_open(lock_path);
   free(lock_path);
@@ -544,6 +587,83 @@ static bool evict_entry(const ContributeTableManifestEntry *entry) {
   const bool removed = remove(entry->path) == 0;
   cfile_lock_close(lock);
   return removed;
+}
+
+// Whether eviction has made enough room, after `freed_bytes` of listed
+// tables were deleted.
+typedef bool (*eviction_done_fn)(void *context, int64_t freed_bytes);
+
+// Deletes the tables the manifest at `manifest_path` lists and `keep` does
+// not, least recently used first, until `done` says there is room, and drops
+// them from the manifest. A table evict_entry will not delete is passed over.
+// Returns false, deleting nothing, if the manifest's lock cannot be had.
+static bool evict_least_recently_used(const char *manifest_path,
+                                      const ContributeTable *keep,
+                                      int keep_count, eviction_done_fn done,
+                                      void *done_context, StringList *evicted) {
+  const int lock = lock_manifest(manifest_path);
+  if (lock < 0) {
+    return false;
+  }
+  ContributeTableManifest *manifest =
+      contribute_table_manifest_read(manifest_path);
+  int *order = malloc_or_die(sizeof(int) * (size_t)(manifest->count + 1));
+  const int evictable =
+      contribute_table_manifest_evictable(manifest, keep, keep_count, order);
+  StringList *gone = string_list_create();
+  int64_t freed_bytes = 0;
+  for (int rank = 0; rank < evictable && !done(done_context, freed_bytes);
+       rank++) {
+    const ContributeTableManifestEntry *entry = &manifest->entries[order[rank]];
+    if (!evict_entry(entry)) {
+      continue;
+    }
+    freed_bytes += entry->bytes;
+    if (evicted) {
+      char *line = get_formatted_string("%s %s", entry->role, entry->name);
+      string_list_add_string(evicted, line);
+      free(line);
+    }
+    string_list_add_string(gone, entry->role);
+    string_list_add_string(gone, entry->name);
+  }
+  // Measured once more, so the caller sees the room the last deletion made.
+  (void)done(done_context, freed_bytes);
+  free(order);
+  const int gone_count = string_list_get_count(gone);
+  for (int gone_idx = 0; gone_idx + 1 < gone_count; gone_idx += 2) {
+    contribute_table_manifest_forget(
+        manifest, string_list_get_string(gone, gone_idx),
+        string_list_get_string(gone, gone_idx + 1));
+  }
+  if (gone_count > 0) {
+    (void)contribute_table_manifest_write(manifest, manifest_path);
+  }
+  string_list_destroy(gone);
+  contribute_table_manifest_destroy(manifest);
+  cfile_lock_close(lock);
+  return true;
+}
+
+// make_room's measure of room: the free space the filesystem reports.
+typedef struct DiskRoom {
+  const char *directory;
+  contribute_free_bytes_fn free_bytes_fn;
+  void *free_bytes_context;
+  int64_t reserve_bytes;
+  int64_t bytes;
+  int64_t *available;
+} DiskRoom;
+
+static bool disk_room_done(void *context, int64_t freed_bytes) {
+  (void)freed_bytes;
+  const DiskRoom *room = (const DiskRoom *)context;
+  int64_t free_bytes = 0;
+  if (room->free_bytes_fn(room->directory, room->free_bytes_context,
+                          &free_bytes)) {
+    *room->available = free_bytes - room->reserve_bytes;
+  }
+  return room->bytes <= *room->available;
 }
 
 bool contribute_tables_make_room(const char *manifest_path,
@@ -563,46 +683,51 @@ bool contribute_tables_make_room(const char *manifest_path,
   if (bytes < 0 || bytes <= *available) {
     return true;
   }
-  const int lock = lock_manifest(manifest_path);
-  if (lock < 0) {
+  DiskRoom room = {.directory = directory,
+                   .free_bytes_fn = free_bytes_fn,
+                   .free_bytes_context = free_bytes_context,
+                   .reserve_bytes = reserve_bytes,
+                   .bytes = bytes,
+                   .available = available};
+  if (!evict_least_recently_used(manifest_path, keep, keep_count,
+                                 disk_room_done, &room, evicted)) {
     return false;
   }
+  return bytes <= *available;
+}
+
+// trim_to's measure of room: what the listed tables still take.
+typedef struct ListedRoom {
+  int64_t listed_bytes;
+  int64_t cap_bytes;
+} ListedRoom;
+
+static bool listed_room_done(void *context, int64_t freed_bytes) {
+  const ListedRoom *room = (const ListedRoom *)context;
+  return room->listed_bytes - freed_bytes <= room->cap_bytes;
+}
+
+int64_t contribute_tables_trim_to(const char *manifest_path, int64_t cap_bytes,
+                                  const ContributeTable *keep, int keep_count,
+                                  StringList *evicted) {
   ContributeTableManifest *manifest =
       contribute_table_manifest_read(manifest_path);
-  int *order = malloc_or_die(sizeof(int) * (size_t)(manifest->count + 1));
-  const int evictable =
-      contribute_table_manifest_evictable(manifest, keep, keep_count, order);
-  StringList *gone = string_list_create();
-  for (int rank = 0; rank < evictable && bytes > *available; rank++) {
-    const ContributeTableManifestEntry *entry = &manifest->entries[order[rank]];
-    if (!evict_entry(entry)) {
-      continue;
-    }
-    if (evicted) {
-      char *line = get_formatted_string("%s %s", entry->role, entry->name);
-      string_list_add_string(evicted, line);
-      free(line);
-    }
-    string_list_add_string(gone, entry->role);
-    string_list_add_string(gone, entry->name);
-    if (free_bytes_fn(directory, free_bytes_context, &free_bytes)) {
-      *available = free_bytes - reserve_bytes;
-    }
+  ListedRoom room = {.listed_bytes = 0, .cap_bytes = cap_bytes};
+  for (int entry_idx = 0; entry_idx < manifest->count; entry_idx++) {
+    room.listed_bytes += manifest->entries[entry_idx].bytes;
   }
-  free(order);
-  const int gone_count = string_list_get_count(gone);
-  for (int gone_idx = 0; gone_idx + 1 < gone_count; gone_idx += 2) {
-    contribute_table_manifest_forget(
-        manifest, string_list_get_string(gone, gone_idx),
-        string_list_get_string(gone, gone_idx + 1));
-  }
-  if (gone_count > 0) {
-    (void)contribute_table_manifest_write(manifest, manifest_path);
-  }
-  string_list_destroy(gone);
   contribute_table_manifest_destroy(manifest);
-  cfile_lock_close(lock);
-  return bytes <= *available;
+  if (room.listed_bytes > cap_bytes) {
+    (void)evict_least_recently_used(manifest_path, keep, keep_count,
+                                    listed_room_done, &room, evicted);
+  }
+  manifest = contribute_table_manifest_read(manifest_path);
+  int64_t listed_bytes = 0;
+  for (int entry_idx = 0; entry_idx < manifest->count; entry_idx++) {
+    listed_bytes += manifest->entries[entry_idx].bytes;
+  }
+  contribute_table_manifest_destroy(manifest);
+  return listed_bytes;
 }
 
 void contribute_tables_record_built(const char *manifest_path, const char *role,
@@ -617,8 +742,17 @@ void contribute_tables_record_built(const char *manifest_path, const char *role,
   }
   ContributeTableManifest *manifest =
       contribute_table_manifest_read(manifest_path);
-  contribute_table_manifest_record(manifest, role, name, identity.size, path,
+  // Eviction may run from another directory, where a relative path would
+  // name some other file or none.
+  char *absolute_path = cfile_absolute_path(path);
+  contribute_table_manifest_record(manifest, role, name, identity.size,
+                                   absolute_path ? absolute_path : path,
                                    (int64_t)time(NULL));
+  free(absolute_path);
+  ContributeTableManifestEntry *entry =
+      &manifest->entries[manifest_find(manifest, role, name)];
+  entry->modified_seconds = identity.mtime_seconds;
+  entry->modified_nanoseconds = identity.mtime_nanoseconds;
   (void)contribute_table_manifest_write(manifest, manifest_path);
   contribute_table_manifest_destroy(manifest);
   cfile_lock_close(lock);
@@ -664,9 +798,14 @@ void contribute_tables_touch_used(const char *manifest_path,
 }
 
 char *contribute_tables_manifest_path(const char *data_paths) {
+  return contribute_tables_manifest_path_named(
+      data_paths, CONTRIBUTE_TABLE_MANIFEST_FILENAME);
+}
+
+char *contribute_tables_manifest_path_named(const char *data_paths,
+                                            const char *filename) {
   char *first = cpath_list_first(data_paths ? data_paths : ".");
-  char *path =
-      get_formatted_string("%s/%s", first, CONTRIBUTE_TABLE_MANIFEST_FILENAME);
+  char *path = get_formatted_string("%s/%s", first, filename);
   free(first);
   return path;
 }

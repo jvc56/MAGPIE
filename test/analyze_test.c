@@ -438,10 +438,13 @@ void test_analyze(void) {
 }
 
 // Slow test: plies=2 simulation on a real GCG. Invoked only when explicitly
-// requested (e.g., ./bin/magpie_test analyze_sim).
+// requested (e.g., ./bin/magpie_test analyze_sim). The game's pre-endgame
+// turn (1 in the bag) gets a PEG time limit: untimed, analyze solves it
+// completely, which on one thread takes minutes, and far longer under the
+// sanitizers.
 void test_analyze_sim(void) {
   Config *config = config_create_or_die(
-      "set -lex CSW21 -plies 2 -hr true -iter 50 -numplays 5");
+      "set -lex CSW21 -plies 2 -hr true -iter 50 -numplays 5 -pegtlim 5");
   assert_config_exec_status(config, "analyze testdata/gcgs/success.gcg",
                             ERROR_STATUS_SUCCESS);
   config_destroy(config);

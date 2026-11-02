@@ -1,6 +1,7 @@
 #ifndef RACK_INFO_TABLE_H
 #define RACK_INFO_TABLE_H
 
+#include "../compat/cfile.h"
 #include "../compat/cmap.h"
 #include "../compat/endian_conv.h"
 #include "../def/bit_rack_defs.h"
@@ -116,8 +117,12 @@ enum {
   RIT_MULTI_PT_TP6_MAX_WORD_LENGTH =
       RIT_MULTI_PT_TP6_MIN_WORD_LENGTH + RIT_MULTI_PT_TP6_NUM_WORD_LENGTHS - 1,
   // Bump RIT_VERSION whenever the on-disk layout changes incompatibly.
-  RIT_VERSION = 12,
+  RIT_VERSION = 13,
   RIT_EARLIEST_SUPPORTED_VERSION = 11,
+  // From this version a table ends with what it was built from (kwg_hash,
+  // klv_hash). The table before it is laid out as in version 12, and a
+  // loader that predates the trailer reads the table and ignores it.
+  RIT_FIRST_VERSION_WITH_INPUTS = 13,
   RIT_MAX_INLINE_BINGO_WORDS = 1,
 };
 
@@ -169,6 +174,12 @@ typedef struct RackInfoTable {
   // Which load this is: unique for the life of the process, never 0 (see
   // rack_info_table_next_instance_id).
   uint64_t instance_id;
+  // What the table was built from, 0 where not recorded (before version 13):
+  // kwg_get_hash of its lexicon's KWG and klv_get_hash of its leaves. A table
+  // built from another lexicon or other leaves holds other words and leave
+  // values, and is not loaded for these (players_data_rit_matches_inputs).
+  uint64_t kwg_hash;
+  uint64_t klv_hash;
 } RackInfoTable;
 
 // A number no other table this process creates or loads will have, never 0.
@@ -449,6 +460,23 @@ static inline bool rit_write_uint32s(const uint32_t *values, size_t n,
 #endif
 }
 
+// The inputs trailer (RIT_FIRST_VERSION_WITH_INPUTS): kwg_hash, then
+// klv_hash, each as two little-endian uint32s, low half first.
+enum { RIT_INPUTS_UINT32S = 4 };
+
+static inline bool rit_write_inputs(const RackInfoTable *rit, FILE *stream) {
+  const uint32_t halves[RIT_INPUTS_UINT32S] = {
+      (uint32_t)rit->kwg_hash, (uint32_t)(rit->kwg_hash >> 32),
+      (uint32_t)rit->klv_hash, (uint32_t)(rit->klv_hash >> 32)};
+  return rit_write_uint32s(halves, RIT_INPUTS_UINT32S, stream);
+}
+
+static inline void rit_set_inputs_from_halves(RackInfoTable *rit,
+                                              const uint32_t *halves) {
+  rit->kwg_hash = (uint64_t)halves[0] | ((uint64_t)halves[1] << 32);
+  rit->klv_hash = (uint64_t)halves[2] | ((uint64_t)halves[3] << 32);
+}
+
 static inline bool rit_write_entries(const RackInfoTableEntry *entries,
                                      uint32_t n, FILE *stream) {
 #if IS_LITTLE_ENDIAN
@@ -520,7 +548,9 @@ static inline void rack_info_table_write_to_file(const RackInfoTable *rit,
                  rit_write_uint32(rit->num_entries, stream) &&
                  rit_write_uint32s(rit->bucket_starts,
                                    (size_t)rit->num_buckets + 1, stream) &&
-                 rit_write_entries(rit->entries, rit->num_entries, stream);
+                 rit_write_entries(rit->entries, rit->num_entries, stream) &&
+                 (rit->version < RIT_FIRST_VERSION_WITH_INPUTS ||
+                  rit_write_inputs(rit, stream));
   int error_number = written ? 0 : errno;
   // A full disk often shows only here, when the buffered tail is flushed.
   if (fclose(stream) != 0) {
@@ -608,9 +638,10 @@ static inline void rack_info_table_load_from_stream(RackInfoTable *rit,
                                                     FILE *stream,
                                                     const char *filename,
                                                     ErrorStack *error_stack) {
-  uint8_t version;
+  // Too short for a header reads as version 0, which no table has.
+  uint8_t version = 0;
   if (fread(&version, sizeof(version), 1, stream) != 1) {
-    log_fatal("could not read rit version");
+    version = 0;
   }
   if (version < RIT_EARLIEST_SUPPORTED_VERSION) {
     error_stack_push(
@@ -622,9 +653,9 @@ static inline void rack_info_table_load_from_stream(RackInfoTable *rit,
   }
   rit->version = version;
 
-  uint8_t rack_size;
+  uint8_t rack_size = 0;
   if (fread(&rack_size, sizeof(rack_size), 1, stream) != 1) {
-    log_fatal("could not read rit rack size");
+    rack_size = 0;
   }
   if (rack_size != RACK_SIZE) {
     error_stack_push(error_stack, ERROR_STATUS_WMP_INCOMPATIBLE_BOARD_DIM,
@@ -636,19 +667,34 @@ static inline void rack_info_table_load_from_stream(RackInfoTable *rit,
   }
   rit->rack_size = rack_size;
 
-  uint8_t min_played;
-  if (fread(&min_played, sizeof(min_played), 1, stream) != 1) {
-    log_fatal("could not read rit playthrough min played size");
+  // The rest of the header, then a size check before anything is allocated: a
+  // truncated file's counts can ask for any amount.
+  uint8_t min_played = 0;
+  uint8_t padding = 0;
+  uint32_t counts[2] = {0, 0};
+  CFileIdentity identity;
+  bool complete = fread(&min_played, sizeof(min_played), 1, stream) == 1 &&
+                  fread(&padding, sizeof(padding), 1, stream) == 1 &&
+                  fread(counts, sizeof(uint32_t), 2, stream) == 2;
+  if (complete && cfile_identity(filename, &identity)) {
+    const uint64_t header_bytes = 4 * sizeof(uint8_t) + 2 * sizeof(uint32_t);
+    const uint64_t input_bytes = version >= RIT_FIRST_VERSION_WITH_INPUTS
+                                     ? RIT_INPUTS_UINT32S * sizeof(uint32_t)
+                                     : 0;
+    const uint64_t needed =
+        header_bytes + ((uint64_t)le32toh(counts[0]) + 1) * sizeof(uint32_t) +
+        (uint64_t)le32toh(counts[1]) * sizeof(RackInfoTableEntry) + input_bytes;
+    complete = needed <= (uint64_t)identity.size;
+  }
+  if (!complete) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_RW_READ_ERROR,
+        get_formatted_string("rit file is incomplete: %s\n", filename));
+    return;
   }
   rit->playthrough_min_played_size = min_played;
-
-  uint8_t padding;
-  if (fread(&padding, sizeof(padding), 1, stream) != 1) {
-    log_fatal("could not read rit header padding");
-  }
-
-  rit_read_uint32_or_die(&rit->num_buckets, stream);
-  rit_read_uint32_or_die(&rit->num_entries, stream);
+  rit->num_buckets = le32toh(counts[0]);
+  rit->num_entries = le32toh(counts[1]);
 
   rit->bucket_starts = (uint32_t *)malloc_or_die(
       ((size_t)rit->num_buckets + 1) * sizeof(uint32_t));
@@ -658,6 +704,12 @@ static inline void rack_info_table_load_from_stream(RackInfoTable *rit,
   rit->entries = (RackInfoTableEntry *)malloc_or_die(
       (size_t)rit->num_entries * sizeof(RackInfoTableEntry));
   rit_read_entries_or_die(rit->entries, rit->num_entries, stream);
+
+  if (version >= RIT_FIRST_VERSION_WITH_INPUTS) {
+    uint32_t halves[RIT_INPUTS_UINT32S];
+    rit_read_uint32s_or_die(halves, RIT_INPUTS_UINT32S, stream);
+    rit_set_inputs_from_halves(rit, halves);
+  }
 }
 
 static inline void rack_info_table_load(RackInfoTable *rit, const char *name,
@@ -768,6 +820,23 @@ static inline void rack_info_table_load_mmap(RackInfoTable *rit,
 
   rit->bucket_starts = (uint32_t *)(data + bucket_starts_offset);
   rit->entries = (RackInfoTableEntry *)(data + entries_offset);
+
+  if (version >= RIT_FIRST_VERSION_WITH_INPUTS) {
+    const size_t inputs_offset =
+        entries_offset + (size_t)rit->num_entries * sizeof(RackInfoTableEntry);
+    const size_t inputs_size = RIT_INPUTS_UINT32S * sizeof(uint32_t);
+    if (file_size - inputs_offset < inputs_size) {
+      cmap_close(&map);
+      error_stack_push(
+          error_stack, ERROR_STATUS_RW_READ_ERROR,
+          get_formatted_string("rit file truncated or corrupt: %s", filename));
+      return;
+    }
+    // Mapping is little-endian only, so the halves are read as they lie.
+    uint32_t halves[RIT_INPUTS_UINT32S];
+    memcpy(halves, data + inputs_offset, inputs_size);
+    rit_set_inputs_from_halves(rit, halves);
+  }
 
   rit->is_mmapped = true;
   rit->map = map;

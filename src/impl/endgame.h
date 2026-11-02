@@ -183,6 +183,9 @@ typedef struct EndgameArgs {
   // After each completed depth, if elapsed > soft_time_limit, stop.
   // If elapsed < soft_time_limit, estimate next depth time via EBF.
   // If estimated completion > hard_time_limit, stop to bank remaining time.
+  // Once a depth has finished, a depth still running at hard_time_limit stops
+  // there. The first depth finishes regardless, so there is a move to return;
+  // only external_deadline_ns can cut that one short.
   double soft_time_limit;
   double hard_time_limit;
   uint64_t seed;
@@ -230,6 +233,10 @@ typedef struct EndgameArgs {
   // caller (e.g. PEG) impose a wall-clock budget that propagates through
   // alpha-beta, not just between IDS depth iterations. 0 = no deadline.
   int64_t external_deadline_ns;
+  // When non-NULL, read as often as the deadline, from every thread of the
+  // solve: true ends the solve as the deadline would.
+  bool (*stop_fn)(const void *stop_data);
+  const void *stop_data;
   // If non-NULL, the solver additionally computes an exact (non-pruned)
   // value for this specific move in the same search that finds the best
   // move, instead of requiring a second endgame_solve call. Must be a legal
@@ -303,6 +310,8 @@ static inline void endgame_args_fill(
   endgame_args->initial_alpha = initial_alpha;
   endgame_args->initial_beta = initial_beta;
   endgame_args->external_deadline_ns = external_deadline_ns;
+  endgame_args->stop_fn = NULL;
+  endgame_args->stop_data = NULL;
   endgame_args->actual_move = actual_move;
 }
 
@@ -375,6 +384,14 @@ void endgame_ctx_get_progress(const EndgameCtx *ctx, int *current_depth,
 // intended for "is the engine alive / nodes per second" UI heartbeats during
 // long single-root subtree evaluations.
 uint64_t endgame_ctx_get_nodes_searched(const EndgameCtx *ctx);
+
+// For a thread other than the solve's: reads the nodes searched and the
+// workers running while the solve's helper window is open, and returns whether
+// it was. The window is checked under the lock that frees lent workers, so
+// they stay valid for the read; a window checked first and read after does not
+// keep them.
+bool endgame_ctx_read_live_workers(EndgameCtx *ctx, uint64_t *nodes_searched,
+                                   int *live_workers);
 
 // Snapshot of the line currently being explored by worker `worker_index`
 // (0 = main worker; see conventions above). Writes up to `max_len` `tiny_move`

@@ -785,7 +785,48 @@ void test_settings_file_off_by_default(void) {
   remove_or_die(DEFAULT_TEST_SETTINGS_FILENAME);
 }
 
+// While a command runs: any prefix of stop, status or shgame, and "s" alone
+// for shgame.
+void test_parse_async_command(void) {
+  StringBuilder *sb = string_builder_create();
+  const char *show_game_inputs[] = {"s", "S", "sh", "shg", "shgame"};
+  for (size_t input_idx = 0;
+       input_idx < sizeof(show_game_inputs) / sizeof(show_game_inputs[0]);
+       input_idx++) {
+    assert(parse_async_command(show_game_inputs[input_idx], sb) ==
+           ASYNC_SHOW_GAME_COMMAND_TOKEN);
+    assert(string_builder_length(sb) == 0);
+  }
+  assert(parse_async_command("sto", sb) == ASYNC_STOP_COMMAND_TOKEN);
+  assert(parse_async_command("stop", sb) == ASYNC_STOP_COMMAND_TOKEN);
+  assert(parse_async_command("sta", sb) == ASYNC_STATUS_COMMAND_TOKEN);
+  assert(parse_async_command("status", sb) == ASYNC_STATUS_COMMAND_TOKEN);
+  assert(string_builder_length(sb) == 0);
+  assert(parse_async_command("st", sb) == NUMBER_OF_ASYNC_COMMAND_TOKENS);
+  assert(strings_equal(string_builder_peek(sb),
+                       "ambiguous async command 'st' could be: stop, status"));
+  assert(parse_async_command("sim", sb) == NUMBER_OF_ASYNC_COMMAND_TOKENS);
+  assert(string_builder_length(sb) == 0);
+  string_builder_destroy(sb);
+
+  // shgame while a command runs only reads the game: none until one exists.
+  Config *config = config_create_default_test();
+  assert(!config_show_game_while_running(config));
+  load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
+  char *game_string = config_show_game_while_running(config);
+  ErrorStack *error_stack = error_stack_create();
+  char *shgame_string = NULL;
+  assert(run_str_api_command(config, error_stack, "shgame", &shgame_string));
+  assert(error_stack_is_empty(error_stack));
+  assert(game_string && strings_equal(game_string, shgame_string));
+  free(shgame_string);
+  free(game_string);
+  error_stack_destroy(error_stack);
+  config_destroy(config);
+}
+
 void test_command(void) {
+  test_parse_async_command();
   test_exec_single_command();
   test_command_execution();
   test_exec_async_command();

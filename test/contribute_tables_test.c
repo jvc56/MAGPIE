@@ -503,6 +503,66 @@ static void test_room_is_made_from_the_manifest_alone(void) {
   }
 }
 
+// The tables a manifest lists are kept within a cap by deleting the least
+// recently used, never the task's own, and only as many as it takes.
+static void test_listed_tables_are_trimmed_to_a_cap(void) {
+  (void)cfile_mkdir(TABLES_TEST_DIR);
+  const char *old_path = TABLES_TEST_DIR "/CAPOLD.rit";
+  const char *newer_path = TABLES_TEST_DIR "/CAPNEWER.wmp";
+  const char *own_path = TABLES_TEST_DIR "/CAPOWN.wmp";
+  write_bytes(old_path, 300);
+  write_bytes(newer_path, 200);
+  write_bytes(own_path, 100);
+  ContributeTableManifest *manifest =
+      contribute_table_manifest_read(TABLES_TEST_MANIFEST);
+  while (manifest->count > 0) {
+    contribute_table_manifest_forget(manifest, manifest->entries[0].role,
+                                     manifest->entries[0].name);
+  }
+  contribute_table_manifest_record(manifest, "rit", "CAPOLD", 300, old_path,
+                                   10);
+  contribute_table_manifest_record(manifest, "wmp", "CAPNEWER", 200, newer_path,
+                                   30);
+  contribute_table_manifest_record(manifest, "wmp", "CAPOWN", 100, own_path, 1);
+  assert(contribute_table_manifest_write(manifest, TABLES_TEST_MANIFEST));
+  contribute_table_manifest_destroy(manifest);
+  ContributeTable keep =
+      table(CONTRIBUTE_TABLE_WMP, "CAPOWN", "CAPOWN", 1, true);
+  StringList *evicted = string_list_create();
+
+  // Within the cap: nothing goes.
+  int64_t listed =
+      contribute_tables_trim_to(TABLES_TEST_MANIFEST, 600, &keep, 1, evicted);
+  assert(listed == 600 && string_list_get_count(evicted) == 0);
+
+  // 250 over: the least recently used goes, and that is enough.
+  listed =
+      contribute_tables_trim_to(TABLES_TEST_MANIFEST, 350, &keep, 1, evicted);
+  assert(listed == 300);
+  assert(string_list_get_count(evicted) == 1);
+  assert_strings_equal(string_list_get_string(evicted, 0), "rit CAPOLD");
+  assert(!file_exists(old_path) && file_exists(newer_path));
+
+  // Below what the task's own take: everything else goes, and they stay.
+  listed =
+      contribute_tables_trim_to(TABLES_TEST_MANIFEST, 50, &keep, 1, evicted);
+  assert(listed == 100);
+  assert(!file_exists(newer_path) && file_exists(own_path));
+
+  string_list_destroy(evicted);
+  (void)remove(own_path);
+  (void)remove(TABLES_TEST_MANIFEST);
+  char *lock = get_formatted_string("%s.lock", TABLES_TEST_MANIFEST);
+  (void)remove(lock);
+  free(lock);
+  const char *locks[] = {TABLES_TEST_DIR "/CAPOLD.rit.lock",
+                         TABLES_TEST_DIR "/CAPNEWER.wmp.lock"};
+  for (size_t lock_idx = 0; lock_idx < sizeof(locks) / sizeof(locks[0]);
+       lock_idx++) {
+    (void)remove(locks[lock_idx]);
+  }
+}
+
 // `diskreserve` and `memreserve` are numbers of GB, fractions allowed, 2 and
 // 1 when unstated; a value that is not one is refused, naming the line and
 // never quoting it.
@@ -949,12 +1009,56 @@ static void test_a_task_runs_without_the_tables_it_has_no_room_for(void) {
   free(rit_path);
 }
 
+// A manifest records the file it built: a line round trips with its time and
+// its spaces, and a file of the same size written since is not that file.
+static void test_manifest_records_the_file(void) {
+  const char *path = TABLES_TEST_DIR "/a table.rit";
+  write_bytes(path, 100);
+  (void)remove(TABLES_TEST_MANIFEST);
+  contribute_tables_record_built(TABLES_TEST_MANIFEST, "rit", "RECORDED", path);
+  ContributeTableManifest *manifest =
+      contribute_table_manifest_read(TABLES_TEST_MANIFEST);
+  assert(manifest->count == 1);
+  ContributeTableManifestEntry *entry = &manifest->entries[0];
+  CFileIdentity identity;
+  assert(cfile_identity(path, &identity));
+  assert(entry->modified_seconds == identity.mtime_seconds);
+  assert(entry->modified_nanoseconds == identity.mtime_nanoseconds);
+  assert(strstr(entry->path, "a table.rit"));
+  entry->modified_seconds -= 1;
+  assert(contribute_table_manifest_write(manifest, TABLES_TEST_MANIFEST));
+  contribute_table_manifest_destroy(manifest);
+
+  StringList *evicted = string_list_create();
+  int64_t listed =
+      contribute_tables_trim_to(TABLES_TEST_MANIFEST, 0, NULL, 0, evicted);
+  assert(listed == 100 && file_exists(path));
+  assert(string_list_get_count(evicted) == 0);
+
+  // Written with no time, as before it was recorded: size alone decides.
+  manifest = contribute_table_manifest_read(TABLES_TEST_MANIFEST);
+  manifest->entries[0].modified_seconds = 0;
+  manifest->entries[0].modified_nanoseconds = 0;
+  assert(contribute_table_manifest_write(manifest, TABLES_TEST_MANIFEST));
+  contribute_table_manifest_destroy(manifest);
+  listed = contribute_tables_trim_to(TABLES_TEST_MANIFEST, 0, NULL, 0, evicted);
+  assert(listed == 0 && !file_exists(path));
+  string_list_destroy(evicted);
+  (void)remove(TABLES_TEST_MANIFEST);
+  char *lock = get_formatted_string("%s.lock", TABLES_TEST_MANIFEST);
+  (void)remove(lock);
+  free(lock);
+  (void)remove(TABLES_TEST_DIR "/a table.rit.lock");
+}
+
 void test_contribute_tables(void) {
   test_the_chooser_keeps_the_tables_worth_most();
   test_the_chooser_weighs_memory_too();
   test_tables_built_for_other_jobs_count_as_free();
   test_the_manifest_round_trips();
   test_room_is_made_from_the_manifest_alone();
+  test_listed_tables_are_trimmed_to_a_cap();
+  test_manifest_records_the_file();
   test_the_reserve_settings();
   test_a_task_runs_without_the_tables_it_has_no_room_for();
 }

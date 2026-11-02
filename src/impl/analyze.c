@@ -69,11 +69,11 @@ typedef enum {
   ANALYSIS_TYPE_ENDGAME,
 } analysis_type_t;
 
-// Discrete mistake-size grading, standard across post-game Scrabble analysis
-// tools. Pre-endgame turns (sim or PEG, i.e. win% is available) are graded on
-// win% lost (WPL); endgame turns are graded on point spread lost, since exact
-// win/loss is already known there. Static-analysis turns (no win% available)
-// are always MISTAKE_NONE.
+// Discrete mistake-size grading. Pre-endgame turns (sim or PEG, i.e. win% is
+// available) are graded on win% lost (WPL); endgame turns, solved to the end
+// of the game so each play's result is proven, on the result alone: a win
+// turned into a draw or a loss, or a draw into a loss. Static-analysis turns
+// (no win% available) are always MISTAKE_NONE.
 typedef enum {
   MISTAKE_NONE,
   MISTAKE_SMALL,
@@ -84,9 +84,6 @@ typedef enum {
 #define MISTAKE_WPL_SMALL_MIN 0.5
 #define MISTAKE_WPL_MEDIUM_MIN 3.0
 #define MISTAKE_WPL_LARGE_MIN 7.0
-#define MISTAKE_PTS_SMALL_MIN 1.0
-#define MISTAKE_PTS_MEDIUM_MIN 7.0
-#define MISTAKE_PTS_LARGE_MIN 15.0
 
 // Per-move data for best or actual play, used to print them side by side.
 // rank_idx is the 0-based rank in the final sorted move list; -1 when
@@ -122,6 +119,9 @@ typedef struct TurnResult {
   bool was_endgame;
   bool was_peg;
   bool used_inference;
+  // An endgame turn solved first-win: its endgame_spread fields hold only the
+  // sign of the result (+1 win, 0 draw, -1 loss), not the spread.
+  bool spread_unknown;
 } TurnResult;
 
 // Result of analyze_gen_moves_with_actual: the effective actual move and its
@@ -160,30 +160,19 @@ static double compute_win_pct_lost(const TurnResult *tr) {
   return tr->best.win_pct - tr->actual.win_pct;
 }
 
-// Grades a turn into a discrete mistake size. Endgame turns are graded on
-// point spread lost, with any play that turns a winning best-play spread
-// into a non-winning actual-play spread always graded large regardless of
-// point size (this is "blowing a winning position"). Pre-endgame turns
-// (sim/PEG) are graded on WPL. Static-analysis turns (no win% available)
-// are always MISTAKE_NONE.
+// Grades a turn into a discrete mistake size. Endgame turns are graded on the
+// result alone: a play that turns the best play's win into a draw or a loss,
+// or its draw into a loss, is large, and anything that keeps the result is no
+// mistake, however many points it costs. Pre-endgame turns (sim/PEG) are
+// graded on WPL. Static-analysis turns (no win% available) are always
+// MISTAKE_NONE.
 static mistake_size_t compute_mistake_size(const TurnResult *tr) {
   if (tr->was_endgame) {
     const int best_spread = tr->best.endgame_spread;
     const int actual_spread = tr->actual.endgame_spread;
-    if (best_spread > 0 && actual_spread <= 0) {
-      return MISTAKE_LARGE;
-    }
-    const double points_lost = best_spread - actual_spread;
-    if (points_lost < MISTAKE_PTS_SMALL_MIN) {
-      return MISTAKE_NONE;
-    }
-    if (points_lost < MISTAKE_PTS_MEDIUM_MIN) {
-      return MISTAKE_SMALL;
-    }
-    if (points_lost < MISTAKE_PTS_LARGE_MIN) {
-      return MISTAKE_MEDIUM;
-    }
-    return MISTAKE_LARGE;
+    const int best_result = (best_spread > 0) - (best_spread < 0);
+    const int actual_result = (actual_spread > 0) - (actual_spread < 0);
+    return actual_result < best_result ? MISTAKE_LARGE : MISTAKE_NONE;
   }
   if (tr->actual.win_pct < 0.0) {
     return MISTAKE_NONE; // static analysis: no meaningful win% difference
@@ -427,6 +416,42 @@ static void add_move_comparison_row(StringGrid *move_sg, int row,
 
 // Fills rows 1 (Best), 2 (Actual), and 3 (Diff) of a 4-row move comparison
 // grid. Row 0 (header) must be filled by the caller.
+// "W", "D" or "L" for a first-win endgame result's sign.
+static const char *analyze_result_label(int result) {
+  if (result > 0) {
+    return "W";
+  }
+  return result < 0 ? "L" : "D";
+}
+
+// The spread cell of an endgame turn's row (NULL for another turn): the
+// spread, or for a first-win turn, which knows only results, W, D or L.
+static char *analyze_endgame_spread_cell(const TurnResultMove *trm,
+                                         bool is_endgame, bool show_results) {
+  if (!is_endgame) {
+    return NULL;
+  }
+  if (show_results) {
+    return string_duplicate(analyze_result_label(trm->endgame_spread));
+  }
+  return get_formatted_string("%d", trm->endgame_spread);
+}
+
+// The diff row's spread cell: the spread lost, or "-" for a first-win turn.
+static char *analyze_endgame_spread_diff_cell(const TurnResultMove *best,
+                                              const TurnResultMove *actual,
+                                              bool is_endgame,
+                                              bool show_results) {
+  if (!is_endgame) {
+    return NULL;
+  }
+  if (show_results) {
+    return string_duplicate("-");
+  }
+  return get_formatted_string("%d",
+                              best->endgame_spread - actual->endgame_spread);
+}
+
 static void add_move_comparison_rows(StringGrid *move_sg, const TurnResult *tr,
                                      const Board *board,
                                      const LetterDistribution *ld,
@@ -445,6 +470,8 @@ static void add_move_comparison_rows(StringGrid *move_sg, const TurnResult *tr,
   const mistake_size_t mistake_size = compute_mistake_size(tr);
 
   StringBuilder *sb = string_builder_create();
+  // A first-win endgame turn knows each play's result, not its spread.
+  const bool show_results = is_endgame && tr->spread_unknown;
 
   // Best row (row 1): best is always rank 1.
   string_builder_add_move(sb, board, &best_trm->move, ld, false);
@@ -457,7 +484,7 @@ static void add_move_comparison_rows(StringGrid *move_sg, const TurnResult *tr,
       move_sg, 1, "Best", string_duplicate("1"), best_move_str, best_leave_str,
       get_formatted_string("%d",
                            equity_to_int(move_get_score(&best_trm->move))),
-      is_endgame ? get_formatted_string("%d", best_trm->endgame_spread) : NULL,
+      analyze_endgame_spread_cell(best_trm, is_endgame, show_results),
       best_trm->win_pct >= 0.0 ? get_formatted_string("%.2f", best_trm->win_pct)
                                : string_duplicate("-"),
       best_trm->win_pct >= 0.0 ? get_formatted_string("%.2f", best_trm->equity)
@@ -478,8 +505,7 @@ static void add_move_comparison_rows(StringGrid *move_sg, const TurnResult *tr,
       string_duplicate(tr->actual.display_move), actual_leave_str,
       get_formatted_string("%d",
                            equity_to_int(move_get_score(&actual_trm->move))),
-      is_endgame ? get_formatted_string("%d", actual_trm->endgame_spread)
-                 : NULL,
+      analyze_endgame_spread_cell(actual_trm, is_endgame, show_results),
       actual_trm->win_pct >= 0.0
           ? get_formatted_string("%.2f", actual_trm->win_pct)
           : string_duplicate("-"),
@@ -497,9 +523,8 @@ static void add_move_comparison_rows(StringGrid *move_sg, const TurnResult *tr,
   add_move_comparison_row(
       move_sg, 3, "Diff", string_duplicate("-"), string_duplicate("-"),
       string_duplicate("-"), get_formatted_string("%d", score_diff),
-      is_endgame ? get_formatted_string("%d", best_trm->endgame_spread -
-                                                  actual_trm->endgame_spread)
-                 : NULL,
+      analyze_endgame_spread_diff_cell(best_trm, actual_trm, is_endgame,
+                                       show_results),
       get_formatted_string("%.2f", win_pct_lost),
       get_formatted_string("%.2f", equity_lost),
       is_endgame ? string_duplicate("-")
@@ -622,8 +647,9 @@ static void write_per_turn_human_readable(
     string_builder_add_formatted_string(sb, "%s\n", sim_str);
     free(sim_str);
   } else if (is_peg) {
-    char *peg_str = peg_result_get_string(&ctx->peg_result, ctx->game, false,
-                                          NULL, -1, 0, NULL, NULL);
+    char *peg_str =
+        peg_result_get_string(&ctx->peg_result, ctx->game, false, NULL,
+                              PEG_DISPLAY_ROWS, -1, 0, NULL, NULL);
     if (peg_str) {
       string_builder_add_formatted_string(sb, "%s\n", peg_str);
       free(peg_str);
@@ -1305,8 +1331,33 @@ static void analyze_with_endgame(const GameEvent *event,
 
   const PVLine *best_pvline =
       endgame_results_get_pvline(ctx->endgame_results, ENDGAME_RESULT_BEST);
-
-  if (best_pvline->num_moves == 0) {
+  // A first-win solve decided at the root by a stored bound keeps no line.
+  // When the play made has the best result, it is as good a best play as
+  // any; otherwise the turn is solved again with a full window for one.
+  bool played_is_best = false;
+  if (best_pvline->num_moves == 0 && args->endgame_args.first_win &&
+      endgame_results_get_actual_move_found(ctx->endgame_results)) {
+    const int best_spread = endgame_results_get_spread(
+        ctx->endgame_results, ENDGAME_RESULT_BEST, ctx->game);
+    const int actual_spread = endgame_results_get_spread(
+        ctx->endgame_results, ENDGAME_RESULT_ACTUAL, ctx->game);
+    played_is_best = (actual_spread > 0) - (actual_spread < 0) >=
+                     (best_spread > 0) - (best_spread < 0);
+    if (!played_is_best) {
+      args->endgame_args.first_win = false;
+      args->endgame_args.actual_move = &actual_move_or_pass_if_phony;
+      endgame_solve(&ctx->endgame_ctx, &args->endgame_args,
+                    ctx->endgame_results, error_stack);
+      args->endgame_args.actual_move = NULL;
+      args->endgame_args.first_win = true;
+      if (!error_stack_is_empty(error_stack)) {
+        return;
+      }
+      best_pvline =
+          endgame_results_get_pvline(ctx->endgame_results, ENDGAME_RESULT_BEST);
+    }
+  }
+  if (best_pvline->num_moves == 0 && !played_is_best) {
     log_fatal("endgame solver failed to find any moves for the position");
   }
   if (!endgame_results_get_actual_move_found(ctx->endgame_results)) {
@@ -1314,18 +1365,31 @@ static void analyze_with_endgame(const GameEvent *event,
   }
 
   Move best_move;
-  small_move_to_move(&best_move, &best_pvline->moves[0],
-                     game_get_board(ctx->game));
+  if (played_is_best) {
+    best_move = actual_move_or_pass_if_phony;
+  } else {
+    small_move_to_move(&best_move, &best_pvline->moves[0],
+                       game_get_board(ctx->game));
+  }
   const bool actual_is_best =
       compare_moves_without_equity(&best_move, &actual_move_or_pass_if_phony,
                                    true) == -1;
 
+  // A first-win solve proves each play's result but not its spread: keep
+  // only the result's sign, and no equity.
+  const bool spread_unknown = !args->endgame_spread;
+  turn_result->spread_unknown = spread_unknown;
+  int best_endgame_spread = endgame_results_get_spread(
+      ctx->endgame_results, ENDGAME_RESULT_BEST, ctx->game);
+  if (spread_unknown) {
+    best_endgame_spread = (best_endgame_spread > 0) - (best_endgame_spread < 0);
+  }
   set_turn_result_endgame_move(
       &turn_result->best, &best_move,
-      endgame_results_get_value(ctx->endgame_results, ENDGAME_RESULT_BEST),
-      endgame_results_get_spread(ctx->endgame_results, ENDGAME_RESULT_BEST,
-                                 ctx->game),
-      0);
+      spread_unknown ? 0
+                     : endgame_results_get_value(ctx->endgame_results,
+                                                 ENDGAME_RESULT_BEST),
+      best_endgame_spread, 0);
 
   if (actual_is_best) {
     // Actual move is optimal; best is a copy of actual.
@@ -1341,8 +1405,12 @@ static void analyze_with_endgame(const GameEvent *event,
     // The actual move's value comes from the same solve as best (see
     // EndgameArgs.actual_move above), so the two spreads are directly
     // comparable with no sign flip or off-by-one-ply caveat.
-    const int actual_endgame_spread = endgame_results_get_spread(
+    int actual_endgame_spread = endgame_results_get_spread(
         ctx->endgame_results, ENDGAME_RESULT_ACTUAL, ctx->game);
+    if (spread_unknown) {
+      actual_endgame_spread =
+          (actual_endgame_spread > 0) - (actual_endgame_spread < 0);
+    }
     const int spread_diff =
         turn_result->best.endgame_spread - actual_endgame_spread;
     if (spread_diff == 0) {
@@ -1357,8 +1425,9 @@ static void analyze_with_endgame(const GameEvent *event,
     } else {
       set_turn_result_endgame_move(
           &turn_result->actual, &actual_move_or_pass_if_phony,
-          endgame_results_get_value(ctx->endgame_results,
-                                    ENDGAME_RESULT_ACTUAL),
+          spread_unknown ? 0
+                         : endgame_results_get_value(ctx->endgame_results,
+                                                     ENDGAME_RESULT_ACTUAL),
           actual_endgame_spread, -1);
     }
     populate_best_display_move(turn_result, game_get_board(ctx->game), ld);
@@ -1436,7 +1505,10 @@ static void analyze_with_peg(const GameEvent *event, TurnResult *turn_result,
 
   turn_result->actual.move = actual_move_or_pass_if_phony;
   turn_result->actual.win_pct = actual_cand->win_pct * 100.0;
-  turn_result->actual.equity = actual_cand->mean_spread;
+  // A first-win solve knows each play's result but not its spread, so it
+  // reports no equity, and no equity loss, for the turn.
+  turn_result->actual.equity =
+      actual_cand->spread_unknown ? 0.0 : actual_cand->mean_spread;
   turn_result->actual.rank_idx = actual_rank_idx;
 
   if (actual_rank_idx == 0) {
@@ -1445,7 +1517,10 @@ static void analyze_with_peg(const GameEvent *event, TurnResult *turn_result,
   } else {
     turn_result->best.move = best_cand->move;
     turn_result->best.win_pct = best_cand->win_pct * 100.0;
-    turn_result->best.equity = best_cand->mean_spread;
+    turn_result->best.equity =
+        best_cand->spread_unknown || actual_cand->spread_unknown
+            ? 0.0
+            : best_cand->mean_spread;
     turn_result->best.rank_idx = 0;
     populate_best_display_move(turn_result, game_get_board(ctx->game), ld);
   }
@@ -1584,7 +1659,7 @@ void analyze_game(AnalyzeArgs *analyze_args, AnalyzeCtx **analyze_ctx,
                           vertical_opening_is_transposable, error_stack);
     } else if (mover_rack_size == RACK_SIZE &&
                unseen_for_peg >= RACK_SIZE + PEG_MIN_BAG &&
-               unseen_for_peg <= RACK_SIZE + PEG_MAX_BAG) {
+               unseen_for_peg <= RACK_SIZE + analyze_args->peg_max_bag) {
       analyze_with_peg(event, &turn_result, game_history, ld, report_path, ctx,
                        analyze_args, is_first_analyzed_turn, error_stack);
     } else if (bag_letters == 0) {

@@ -16,20 +16,22 @@
 // Work-stealing pool
 // ---------------------------------------------------------------------------
 //
-// Workers loop on a shared FIFO queue protected by a mutex + condition
-// variable. Callers submit a "batch" of work items (each is a function
-// pointer + opaque arg) and then call submit_and_wait to block until every
-// item in the batch has run. While blocked, the waiter drains queue items
-// itself (help-while-waiting) so deeply nested submissions can't deadlock.
+// Workers loop on two FIFO queues protected by a mutex + condition variable,
+// taking re-entrant items first, since they finish work already started.
+// Callers submit a "batch" of work items (each is a function pointer + opaque
+// arg) and then call submit_and_wait to block until every item in the batch has
+// run. While blocked, the waiter drains queue items itself (help-while-waiting)
+// so deeply nested submissions can't deadlock.
 //
-// Queue grows on demand (push doubles capacity if full). Items carry a
+// Queues grow on demand (push doubles capacity if full). Items carry a
 // pointer back to their batch's pending counter + completion CV.
 
-typedef struct PegPoolBatch {
+struct PegPoolBatch {
   atomic_int pending; // remaining items in this batch
+  int total;          // items submitted
   cpthread_mutex_t mutex;
   cpthread_cond_t cv; // signaled when pending hits 0
-} PegPoolBatch;
+};
 
 typedef struct PegPoolItem {
   PegPoolFn fn;
@@ -48,6 +50,13 @@ typedef struct PegPoolItem {
   MovegenBudget *movegen_budget;
 } PegPoolItem;
 
+typedef struct PegPoolQueue {
+  PegPoolItem *items; // ring buffer
+  int head;           // next pop index
+  int count;          // items currently queued
+  int cap;            // allocated capacity
+} PegPoolQueue;
+
 typedef struct PegPoolWorkerCtx {
   struct PegPool *pool;
   int worker_idx;
@@ -58,11 +67,8 @@ struct PegPool {
   int thread_index_offset;
   cpthread_t *threads;
   PegPoolWorkerCtx *worker_ctxs;
-  // Ring-ish queue. Simpler: linear buffer with head/tail; grow on overflow.
-  PegPoolItem *queue;
-  int q_head;  // next pop index
-  int q_count; // items currently queued
-  int q_cap;   // allocated capacity
+  PegPoolQueue outer;     // items only a thread between jobs may run
+  PegPoolQueue reentrant; // items any thread may run
   cpthread_mutex_t q_mutex;
   cpthread_cond_t q_cv_nonempty;
   bool shutdown;
@@ -71,6 +77,9 @@ struct PegPool {
   // caller decide when to hand spare cores to other work (e.g. inject an
   // ABDADA worker into a long-running endgame solve).
   atomic_int idle_workers;
+  // Threads asleep in submit_and_wait until the rest of their batch finishes,
+  // whose cores are idle too, although they cannot take queued work.
+  atomic_int blocked_waiters;
   // No-progress watchdog budget (seconds); 0 disables. Seeded from
   // PEG_POOL_STUCK_TIMEOUT_S at create; override via the setter.
   int stuck_timeout_s;
@@ -78,28 +87,59 @@ struct PegPool {
 
 static void pp_batch_init(PegPoolBatch *batch, int n) {
   atomic_init(&batch->pending, n);
+  batch->total = n;
   cpthread_mutex_init(&batch->mutex);
   cpthread_cond_init(&batch->cv);
 }
 
-// Push one item onto the queue. Caller must NOT hold q_mutex.
+static void pp_queue_init(PegPoolQueue *queue) {
+  queue->cap = PEG_POOL_QUEUE_INIT_CAP;
+  queue->items = malloc_or_die((size_t)queue->cap * sizeof(PegPoolItem));
+  queue->head = 0;
+  queue->count = 0;
+}
+
+static void pp_queue_push(PegPoolQueue *queue, PegPoolItem item) {
+  if (queue->count == queue->cap) {
+    // Grow: copy items into a new linearized buffer.
+    int new_cap = queue->cap * 2;
+    PegPoolItem *new_items =
+        malloc_or_die((size_t)new_cap * sizeof(PegPoolItem));
+    for (int queue_idx = 0; queue_idx < queue->count; queue_idx++) {
+      new_items[queue_idx] =
+          queue->items[(queue->head + queue_idx) % queue->cap];
+    }
+    free(queue->items);
+    queue->items = new_items;
+    queue->cap = new_cap;
+    queue->head = 0;
+  }
+  queue->items[(queue->head + queue->count) % queue->cap] = item;
+  queue->count++;
+}
+
+static PegPoolItem pp_queue_pop(PegPoolQueue *queue) {
+  const PegPoolItem item = queue->items[queue->head];
+  queue->head = (queue->head + 1) % queue->cap;
+  queue->count--;
+  return item;
+}
+
+// The next item any thread between jobs may run, of those queued. Caller holds
+// q_mutex, and has checked that one is queued.
+static PegPoolItem pp_pop_any_locked(PegPool *pool) {
+  return pool->reentrant.count > 0 ? pp_queue_pop(&pool->reentrant)
+                                   : pp_queue_pop(&pool->outer);
+}
+
+static bool pp_any_queued_locked(const PegPool *pool) {
+  return pool->reentrant.count > 0 || pool->outer.count > 0;
+}
+
+// Push one item onto its queue. Caller must NOT hold q_mutex.
 static void pp_push(PegPool *pool, PegPoolItem item) {
   cpthread_mutex_lock(&pool->q_mutex);
-  if (pool->q_count == pool->q_cap) {
-    // Grow: copy items into a new linearized buffer.
-    int new_cap = pool->q_cap * 2;
-    PegPoolItem *new_q = malloc_or_die((size_t)new_cap * sizeof(PegPoolItem));
-    for (int queue_idx = 0; queue_idx < pool->q_count; queue_idx++) {
-      new_q[queue_idx] = pool->queue[(pool->q_head + queue_idx) % pool->q_cap];
-    }
-    free(pool->queue);
-    pool->queue = new_q;
-    pool->q_cap = new_cap;
-    pool->q_head = 0;
-  }
-  int tail = (pool->q_head + pool->q_count) % pool->q_cap;
-  pool->queue[tail] = item;
-  pool->q_count++;
+  pp_queue_push(item.reentrant ? &pool->reentrant : &pool->outer, item);
   cpthread_cond_signal(&pool->q_cv_nonempty);
   cpthread_mutex_unlock(&pool->q_mutex);
 }
@@ -107,66 +147,45 @@ static void pp_push(PegPool *pool, PegPoolItem item) {
 // Try to pop one item without blocking. Returns true if popped.
 static bool pp_try_pop(PegPool *pool, PegPoolItem *out) {
   cpthread_mutex_lock(&pool->q_mutex);
-  if (pool->q_count == 0) {
-    cpthread_mutex_unlock(&pool->q_mutex);
-    return false;
+  const bool popped = pp_any_queued_locked(pool);
+  if (popped) {
+    *out = pp_pop_any_locked(pool);
   }
-  *out = pool->queue[pool->q_head];
-  pool->q_head = (pool->q_head + 1) % pool->q_cap;
-  pool->q_count--;
   cpthread_mutex_unlock(&pool->q_mutex);
-  return true;
+  return popped;
 }
 
-// Pop the first re-entrant-safe item, scanning from the head and leaving any
-// leading non-re-entrant (outer) items in place. Used by a waiter that is
-// itself executing a job: it may only help with re-entrant items, never start
-// an outer job that would clobber the in-progress one. O(q_count) under the
-// lock; the queue is small in practice (bounded fan-out per submit).
+// Pop the next re-entrant-safe item. Used by a waiter that is itself executing
+// a job: it may only help with re-entrant items, never start an outer job that
+// would clobber the in-progress one.
 static bool pp_try_pop_reentrant(PegPool *pool, PegPoolItem *out) {
   cpthread_mutex_lock(&pool->q_mutex);
-  for (int scan_idx = 0; scan_idx < pool->q_count; scan_idx++) {
-    const int slot_idx = (pool->q_head + scan_idx) % pool->q_cap;
-    if (!pool->queue[slot_idx].reentrant) {
-      continue;
-    }
-    *out = pool->queue[slot_idx];
-    // Compact: shift the items after slot_idx back by one to fill the gap,
-    // preserving FIFO order among the remaining items.
-    for (int shift_idx = scan_idx; shift_idx < pool->q_count - 1; shift_idx++) {
-      const int dst_slot = (pool->q_head + shift_idx) % pool->q_cap;
-      const int src_slot = (pool->q_head + shift_idx + 1) % pool->q_cap;
-      pool->queue[dst_slot] = pool->queue[src_slot];
-    }
-    pool->q_count--;
-    cpthread_mutex_unlock(&pool->q_mutex);
-    return true;
+  const bool popped = pool->reentrant.count > 0;
+  if (popped) {
+    *out = pp_queue_pop(&pool->reentrant);
   }
   cpthread_mutex_unlock(&pool->q_mutex);
-  return false;
+  return popped;
 }
 
 // Block until an item is available or shutdown is set. Returns false on
 // shutdown with no item.
 static bool pp_pop_or_shutdown(PegPool *pool, PegPoolItem *out) {
   cpthread_mutex_lock(&pool->q_mutex);
-  if (pool->q_count == 0 && !pool->shutdown) {
+  if (!pp_any_queued_locked(pool) && !pool->shutdown) {
     // Count this worker as idle for exactly the span it blocks on the queue.
     atomic_fetch_add(&pool->idle_workers, 1);
-    while (pool->q_count == 0 && !pool->shutdown) {
+    while (!pp_any_queued_locked(pool) && !pool->shutdown) {
       cpthread_cond_wait(&pool->q_cv_nonempty, &pool->q_mutex);
     }
     atomic_fetch_sub(&pool->idle_workers, 1);
   }
-  if (pool->q_count == 0) {
-    cpthread_mutex_unlock(&pool->q_mutex);
-    return false;
+  const bool popped = pp_any_queued_locked(pool);
+  if (popped) {
+    *out = pp_pop_any_locked(pool);
   }
-  *out = pool->queue[pool->q_head];
-  pool->q_head = (pool->q_head + 1) % pool->q_cap;
-  pool->q_count--;
   cpthread_mutex_unlock(&pool->q_mutex);
-  return true;
+  return popped;
 }
 
 // Run an item and decrement its batch's pending counter, signaling the
@@ -211,21 +230,29 @@ static void *pp_worker_main(void *arg) {
   return NULL;
 }
 
-// Submit a contiguous array of items as one batch and wait for all to
-// complete. The calling thread helps drain the queue while waiting so
-// nested submissions don't deadlock. `helper_worker_idx` is the thread
-// index used for cache keying when the helper runs items; pass the
-// calling worker's idx if you're inside a worker, else any idx outside
-// [thread_index_offset, thread_index_offset + num_workers).
-static void pp_submit_and_wait(PegPool *pool, PegPoolItem *items, int n,
-                               int helper_worker_idx, bool reentrant) {
-  PegPoolBatch batch;
-  pp_batch_init(&batch, n);
+// Queues `n` (fn, args[i]) items as one batch.
+static void pp_push_batch(PegPool *pool, PegPoolBatch *batch, PegPoolFn fn,
+                          void *const *args, int n, bool reentrant) {
+  MovegenBudget *movegen_budget = gen_get_movegen_budget();
   for (int item_idx = 0; item_idx < n; item_idx++) {
-    items[item_idx].batch = &batch;
-    items[item_idx].reentrant = reentrant;
-    pp_push(pool, items[item_idx]);
+    const PegPoolItem item = {
+        .fn = fn,
+        .arg = args[item_idx],
+        .batch = batch,
+        .reentrant = reentrant,
+        .movegen_budget = movegen_budget,
+    };
+    pp_push(pool, item);
   }
+}
+
+// Waits for a queued batch to complete. The calling thread helps drain the
+// queue while waiting so nested submissions don't deadlock.
+// `helper_worker_idx` is the thread index used for cache keying when the helper
+// runs items; pass the calling worker's idx if you're inside a worker, else any
+// idx outside [thread_index_offset, thread_index_offset + num_workers).
+static void pp_wait_batch(PegPool *pool, PegPoolBatch *batch,
+                          int helper_worker_idx, bool reentrant) {
   // Help-while-waiting. Exit MUST go through the locked batch.mutex
   // check — otherwise we could observe pending == 0 via atomic_load
   // while a decrementer (with prev == 1) is still mid-broadcast, and
@@ -238,7 +265,7 @@ static void pp_submit_and_wait(PegPool *pool, PegPoolItem *items, int n,
   // (default 60s). Split into 6 iterations, so each timed wake-up is
   // timeout/6 seconds. PEG_POOL_STUCK_TIMEOUT_S=0 disables the watchdog —
   // the calling thread still helps drain the queue but never aborts.
-  const int n_total = n;
+  const int n_total = batch->total;
   const int debug_on = getenv("PEG_POOL_DEBUG") != NULL;
   // Per-pool budget (seconds); the env still seeds the default at create, but a
   // caller can disable the watchdog for legitimately long work (e.g. deep PEG
@@ -269,9 +296,9 @@ static void pp_submit_and_wait(PegPool *pool, PegPoolItem *items, int n,
     // If pending == 0 here, we're guaranteed that any decrementer with
     // prev == 1 has already released the lock (since they hold it across
     // the sub+broadcast+unlock window).
-    cpthread_mutex_lock(&batch.mutex);
-    if (atomic_load(&batch.pending) == 0) {
-      cpthread_mutex_unlock(&batch.mutex);
+    cpthread_mutex_lock(&batch->mutex);
+    if (atomic_load(&batch->pending) == 0) {
+      cpthread_mutex_unlock(&batch->mutex);
       break;
     }
     TimeSpec ts;
@@ -280,11 +307,13 @@ static void pp_submit_and_wait(PegPool *pool, PegPoolItem *items, int n,
     // A wake re-checks pending at the loop top; a timeout drives the
     // diagnostic watchdog below. Any other failure ends the process rather
     // than spinning here forever with no diagnostic.
-    const bool woken = cpthread_cond_timedwait(&batch.cv, &batch.mutex, &ts);
+    atomic_fetch_add(&pool->blocked_waiters, 1);
+    const bool woken = cpthread_cond_timedwait(&batch->cv, &batch->mutex, &ts);
+    atomic_fetch_sub(&pool->blocked_waiters, 1);
     if (!woken) {
-      const int p_after = atomic_load(&batch.pending);
+      const int p_after = atomic_load(&batch->pending);
       cpthread_mutex_lock(&pool->q_mutex);
-      const int q_count = pool->q_count;
+      const int q_count = pool->outer.count + pool->reentrant.count;
       const bool q_shutdown = pool->shutdown;
       cpthread_mutex_unlock(&pool->q_mutex);
       if (watchdog_on && (debug_on || p_after == last_logged_pending)) {
@@ -303,11 +332,11 @@ static void pp_submit_and_wait(PegPool *pool, PegPoolItem *items, int n,
                       " q_count=%d, no progress for %ds\n",
                       p_after, n_total, q_count, stuck_timeout_s);
         (void)fflush(stderr);
-        cpthread_mutex_unlock(&batch.mutex);
+        cpthread_mutex_unlock(&batch->mutex);
         abort();
       }
     }
-    cpthread_mutex_unlock(&batch.mutex);
+    cpthread_mutex_unlock(&batch->mutex);
   }
 }
 
@@ -318,12 +347,11 @@ PegPool *peg_pool_create(int num_workers, int thread_index_offset) {
   PegPool *pool = malloc_or_die(sizeof(*pool));
   pool->num_workers = num_workers;
   pool->thread_index_offset = thread_index_offset;
-  pool->q_cap = PEG_POOL_QUEUE_INIT_CAP;
-  pool->queue = malloc_or_die((size_t)pool->q_cap * sizeof(PegPoolItem));
-  pool->q_head = 0;
-  pool->q_count = 0;
+  pp_queue_init(&pool->outer);
+  pp_queue_init(&pool->reentrant);
   pool->shutdown = false;
   atomic_init(&pool->idle_workers, 0);
+  atomic_init(&pool->blocked_waiters, 0);
   const char *to_env = getenv("PEG_POOL_STUCK_TIMEOUT_S");
   pool->stuck_timeout_s = to_env ? (int)strtol(to_env, NULL, 10) : 60;
   cpthread_mutex_init(&pool->q_mutex);
@@ -359,7 +387,8 @@ void peg_pool_destroy(PegPool *pool) {
   }
   free(pool->threads);
   free(pool->worker_ctxs);
-  free(pool->queue);
+  free(pool->outer.items);
+  free(pool->reentrant.items);
   free(pool);
 }
 
@@ -376,7 +405,7 @@ int peg_pool_queue_count(PegPool *pool) {
     return 0;
   }
   cpthread_mutex_lock(&pool->q_mutex);
-  const int n = pool->q_count;
+  const int n = pool->outer.count + pool->reentrant.count;
   cpthread_mutex_unlock(&pool->q_mutex);
   return n;
 }
@@ -386,6 +415,13 @@ int peg_pool_idle_workers(PegPool *pool) {
     return 0;
   }
   return atomic_load(&pool->idle_workers);
+}
+
+int peg_pool_spare_cores(PegPool *pool) {
+  if (!pool) {
+    return 0;
+  }
+  return atomic_load(&pool->idle_workers) + atomic_load(&pool->blocked_waiters);
 }
 
 void peg_pool_set_stuck_timeout_seconds(PegPool *pool, int seconds) {
@@ -409,15 +445,10 @@ static void pp_submit_batch(PegPool *pool, PegPoolFn fn, void *const *args,
     }
     return;
   }
-  PegPoolItem *items = malloc_or_die((size_t)n * sizeof(*items));
-  for (int item_idx = 0; item_idx < n; item_idx++) {
-    items[item_idx].fn = fn;
-    items[item_idx].arg = args[item_idx];
-    items[item_idx].batch = NULL;
-    items[item_idx].movegen_budget = gen_get_movegen_budget();
-  }
-  pp_submit_and_wait(pool, items, n, helper_worker_idx, reentrant);
-  free(items);
+  PegPoolBatch batch;
+  pp_batch_init(&batch, n);
+  pp_push_batch(pool, &batch, fn, args, n, reentrant);
+  pp_wait_batch(pool, &batch, helper_worker_idx, reentrant);
 }
 
 void peg_pool_submit_and_wait(PegPool *pool, PegPoolFn fn, void *const *args,
@@ -429,4 +460,17 @@ void peg_pool_submit_and_wait_reentrant(PegPool *pool, PegPoolFn fn,
                                         void *const *args, int n,
                                         int helper_worker_idx) {
   pp_submit_batch(pool, fn, args, n, helper_worker_idx, true);
+}
+
+PegPoolBatch *peg_pool_submit(PegPool *pool, PegPoolFn fn, void *const *args,
+                              int n) {
+  PegPoolBatch *batch = malloc_or_die(sizeof(*batch));
+  pp_batch_init(batch, n);
+  pp_push_batch(pool, batch, fn, args, n, /*reentrant=*/false);
+  return batch;
+}
+
+void peg_pool_wait(PegPool *pool, PegPoolBatch *batch, int helper_worker_idx) {
+  pp_wait_batch(pool, batch, helper_worker_idx, /*reentrant=*/false);
+  free(batch);
 }

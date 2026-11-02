@@ -142,16 +142,15 @@ void test_autoplay_leavegen(void) {
   // The minimum leave count should be achieved quickly, so if this takes too
   // long, we know it failed.
   // CSW21_ab has no RIT. Pretend one was enabled by an earlier command and
-  // verify that leavegen disables it before attempting to load lexical data.
+  // verify that leavegen goes without it rather than attempting to load it.
+  // The setting itself stands for later commands.
   players_data_set_use_when_available(players_data, PLAYERS_DATA_TYPE_RIT, 0,
                                       true);
   players_data_set_use_when_available(players_data, PLAYERS_DATA_TYPE_RIT, 1,
                                       true);
   load_and_exec_config_or_die_timed(ab_config, "leavegen 1 0 -seed 3", 60);
-  assert(!players_data_get_use_when_available(players_data,
-                                              PLAYERS_DATA_TYPE_RIT, 0));
-  assert(!players_data_get_use_when_available(players_data,
-                                              PLAYERS_DATA_TYPE_RIT, 1));
+  assert(!players_data_get_rack_info_table(players_data, 0));
+  assert(!players_data_get_rack_info_table(players_data, 1));
 
   // Explicit shared and per-player RIT options are also ignored by leavegen.
   load_and_exec_config_or_die_timed(ab_config, "leavegen 1 0 -seed 3 -rit true",
@@ -180,10 +179,8 @@ void test_autoplay_leavegen(void) {
   free(expected_gen_2_csv);
   free(expected_gen_3_csv);
 
-  assert(!players_data_get_use_when_available(players_data,
-                                              PLAYERS_DATA_TYPE_RIT, 0));
-  assert(!players_data_get_use_when_available(players_data,
-                                              PLAYERS_DATA_TYPE_RIT, 1));
+  assert(!players_data_get_rack_info_table(players_data, 0));
+  assert(!players_data_get_rack_info_table(players_data, 1));
 
   config_destroy(ab_config);
 }

@@ -549,6 +549,101 @@ static void run_lent_helper_abdada_case(bool use_inline) {
   config_destroy(config);
 }
 
+static bool always_stop(const void *stop_data) {
+  (void)stop_data;
+  return true;
+}
+
+// A stop_fn ends a solve as a deadline would, with no depth to report when it
+// says so from the start.
+static void test_endgame_stop_fn(void) {
+  Config *config =
+      config_create_or_die("set -s1 score -s2 score -threads 1 -eplies 8");
+  load_and_exec_config_or_die(
+      config,
+      "cgp "
+      "GATELEGs1POGOED/R4MOOLI3X1/AA10U2/YU4BREDRIN2/1TITULE3E1IN1/1E4N3c1BOK/"
+      "1C2O4CHARD1/QI1FLAWN2E1OE1/IS2E1HIN1A1W2/1MOTIVATE1T1S2/1S2N5S4/"
+      "3PERJURY5/15/15/15 FV/AADIZ 442/388 0 -lex CSW21");
+  EndgameCtx *ctx = NULL;
+  EndgameResults *results = config_get_endgame_results(config);
+  EndgameArgs args = {0};
+  args.thread_control = config_get_thread_control(config);
+  args.game = config_get_game(config);
+  args.plies = 8;
+  args.tt_fraction_of_mem = 0.0001;
+  args.initial_small_move_arena_size = DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
+  args.num_threads = 1;
+  args.use_heuristics = true;
+  args.forced_pass_bypass = true;
+  args.incremental_movegen = true;
+  args.num_top_moves = 1;
+  args.seed = 42;
+  args.stop_fn = always_stop;
+  ErrorStack *error_stack = error_stack_create();
+  endgame_solve(&ctx, &args, results, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  assert(endgame_results_get_depth(results, ENDGAME_RESULT_BEST) < args.plies);
+  error_stack_destroy(error_stack);
+  endgame_ctx_destroy(ctx);
+  config_destroy(config);
+}
+
+static double run_time_limited_endgame(const Config *config, double time_limit,
+                                       EndgameResults *results) {
+  EndgameCtx *ctx = NULL;
+  EndgameArgs args = {0};
+  args.thread_control = config_get_thread_control(config);
+  args.game = config_get_game(config);
+  args.plies = MAX_SEARCH_DEPTH;
+  args.tt_fraction_of_mem = 0.0001;
+  args.initial_small_move_arena_size = DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
+  args.num_threads = 2;
+  args.use_heuristics = true;
+  args.forced_pass_bypass = true;
+  args.incremental_movegen = true;
+  args.enable_pv_display = true;
+  args.num_top_moves = 1;
+  args.seed = 42;
+  args.soft_time_limit = time_limit;
+  args.hard_time_limit = time_limit;
+  Timer timer;
+  ctimer_start(&timer);
+  ErrorStack *error_stack = error_stack_create();
+  endgame_solve(&ctx, &args, results, error_stack);
+  const double seconds = ctimer_elapsed_seconds(&timer);
+  assert(error_stack_is_empty(error_stack));
+  error_stack_destroy(error_stack);
+  endgame_ctx_destroy(ctx);
+  return seconds;
+}
+
+// The time limit is the only stop here. Depth 3 of this position takes about
+// 28 s on two threads even in an optimized build, so a solve that looks at the
+// clock only between depths misses the bound, and a limit too short for any
+// depth still returns a move from depth 1.
+static void test_endgame_time_limit_stops_depth(void) {
+  Config *config = config_create_or_die("set -s1 score -s2 score -threads 2");
+  load_and_exec_config_or_die(
+      config, "cgp "
+              "5LEX1AFFORD/3SNOWIER1Y3/2V8T3/1DO6J1T3/1AG6OKE3/1U7YE3N/1B8T3E/"
+              "ERICA2GARTH2V/1I2MIAOW1L3U/PE6AZIONES/OS8n4/L6DINGBATS/I14/"
+              "COULEE9/E3HARN7 ADEIIU?/MNPQRT 369/399 0 -lex CSW21");
+  EndgameResults *results = config_get_endgame_results(config);
+  const double time_limits[] = {1.0, 0.000001};
+  for (size_t limit_idx = 0;
+       limit_idx < sizeof(time_limits) / sizeof(time_limits[0]); limit_idx++) {
+    const double seconds =
+        run_time_limited_endgame(config, time_limits[limit_idx], results);
+    assert(seconds < 15.0);
+    assert(endgame_results_get_depth(results, ENDGAME_RESULT_BEST) >= 1);
+    assert(
+        endgame_results_get_pvline(results, ENDGAME_RESULT_BEST)->num_moves >=
+        1);
+  }
+  config_destroy(config);
+}
+
 static void test_lent_helper_runs_abdada(void) {
   run_lent_helper_abdada_case(/*use_inline=*/false);
   run_lent_helper_abdada_case(/*use_inline=*/true);
@@ -2777,6 +2872,8 @@ void test_endgame(void) {
   test_stuck_playout_tails();
   test_unfinished_depth_best();
   test_lent_helper_runs_abdada();
+  test_endgame_stop_fn();
+  test_endgame_time_limit_stops_depth();
   // Cheap (sub-second) regression of the VIA mover-must-bingo case. The full
   // VIA depth/stress sweeps (viamover / viaopp / viastress) are on-demand only
   // — viamover re-solves plies 1..3 with display (~14s) and viastress runs 100

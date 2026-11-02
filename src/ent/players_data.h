@@ -93,10 +93,21 @@ void players_data_set_data(PlayersData *players_data,
                            void *data);
 void players_data_validate_word_info_tables(const PlayersData *players_data,
                                             ErrorStack *error_stack);
-// Pushes an error if a player's rack info table holds leave values other than
-// the ones that player's KLV gives.
-void players_data_validate_rack_info_tables(const PlayersData *players_data,
-                                            ErrorStack *error_stack);
+// Whether player `player_index`'s word info table, if any, was built from that
+// player's KWG. A table that does not record one cannot be checked, and
+// matches.
+bool players_data_wit_matches_kwg(const PlayersData *players_data,
+                                  int player_index);
+// Whether player `player_index`'s rack info table, if any, was built from
+// that player's lexicon and leaves. A table that records neither (built
+// before version 13) cannot be checked, and matches.
+bool players_data_rit_matches_inputs(const PlayersData *players_data,
+                                     int player_index);
+// Whether player `player_index`'s rack info table, if any, holds the leave
+// values that player's KLV gives. It stores leave values but not always which
+// KLV they came from, so this samples entries spread across it.
+bool players_data_rit_matches_klv(const PlayersData *players_data,
+                                  int player_index);
 // Destroys both players' data of this type and leaves the slots empty, so the
 // next players_data_set loads from disk even for a name that is already
 // loaded. The use-when-available flags are left as they are.

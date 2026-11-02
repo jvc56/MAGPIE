@@ -1,5 +1,6 @@
 #include "peg_pool_test.h"
 
+#include "../src/compat/ctime.h"
 #include "../src/impl/peg_pool.h"
 #include "../src/util/io_util.h"
 #include <assert.h>
@@ -173,9 +174,99 @@ static void test_peg_pool_null_inline(void) {
   assert(atomic_load(&bad_idx) == 0); // all ran inline with the helper idx
 }
 
+// Batches queued without waiting all run, and can be waited for in any order.
+static void test_peg_pool_queued_batches(void) {
+  enum { NUM_BATCHES = 3, BATCH_SIZE = 200 };
+  const int num_workers = 3;
+  PegPool *pool = peg_pool_create(num_workers, 0);
+  peg_pool_set_stuck_timeout_seconds(pool, 0);
+  atomic_long sums[NUM_BATCHES];
+  atomic_int bad_idx;
+  atomic_init(&bad_idx, 0);
+  AddItem items[NUM_BATCHES][BATCH_SIZE];
+  void *args[NUM_BATCHES][BATCH_SIZE];
+  PegPoolBatch *batches[NUM_BATCHES];
+  for (int batch_idx = 0; batch_idx < NUM_BATCHES; batch_idx++) {
+    atomic_init(&sums[batch_idx], 0);
+    for (int item_idx = 0; item_idx < BATCH_SIZE; item_idx++) {
+      items[batch_idx][item_idx] = (AddItem){.sum = &sums[batch_idx],
+                                             .value = batch_idx + 1,
+                                             .offset = 0,
+                                             .num_workers = num_workers,
+                                             .helper_idx = num_workers,
+                                             .bad_idx = &bad_idx};
+      args[batch_idx][item_idx] = &items[batch_idx][item_idx];
+    }
+    batches[batch_idx] =
+        peg_pool_submit(pool, add_fn, args[batch_idx], BATCH_SIZE);
+  }
+  for (int batch_idx = NUM_BATCHES - 1; batch_idx >= 0; batch_idx--) {
+    peg_pool_wait(pool, batches[batch_idx], num_workers);
+    assert(atomic_load(&sums[batch_idx]) == (long)(batch_idx + 1) * BATCH_SIZE);
+  }
+  assert(atomic_load(&bad_idx) == 0);
+  // An empty batch is already done.
+  peg_pool_wait(pool, peg_pool_submit(pool, add_fn, NULL, 0), num_workers);
+  peg_pool_destroy(pool);
+}
+
+// A thread asleep on the rest of its batch leaves its core spare, though it
+// takes no queued work: it is not idle.
+typedef struct {
+  PegPool *pool;
+  atomic_int submitter_idx;
+  atomic_int started;
+  atomic_bool release;
+} BlockedWaiter;
+
+// Holds until both of the batch's items have a thread, so one thread cannot run
+// them both. The thread that submitted them then goes to sleep on the batch,
+// and the other holds until the test has seen that.
+static void blocked_inner_fn(void *arg, int worker_idx) {
+  BlockedWaiter *blocked = (BlockedWaiter *)arg;
+  atomic_fetch_add(&blocked->started, 1);
+  while (atomic_load(&blocked->started) < 2) {
+    ctime_nap(0.001);
+  }
+  while (worker_idx != atomic_load(&blocked->submitter_idx) &&
+         !atomic_load(&blocked->release)) {
+    ctime_nap(0.001);
+  }
+}
+
+static void blocked_outer_fn(void *arg, int worker_idx) {
+  BlockedWaiter *blocked = (BlockedWaiter *)arg;
+  atomic_store(&blocked->submitter_idx, worker_idx);
+  void *inner_args[2] = {blocked, blocked};
+  peg_pool_submit_and_wait_reentrant(blocked->pool, blocked_inner_fn,
+                                     inner_args, 2, worker_idx);
+}
+
+static void test_peg_pool_spare_cores(void) {
+  assert(peg_pool_spare_cores(NULL) == 0);
+  PegPool *pool = peg_pool_create(2, 0);
+  peg_pool_set_stuck_timeout_seconds(pool, 0);
+  BlockedWaiter blocked = {.pool = pool};
+  atomic_init(&blocked.submitter_idx, -1);
+  atomic_init(&blocked.started, 0);
+  atomic_init(&blocked.release, false);
+  void *outer_args[1] = {&blocked};
+  PegPoolBatch *batch = peg_pool_submit(pool, blocked_outer_fn, outer_args, 1);
+  while (peg_pool_spare_cores(pool) == 0 || peg_pool_idle_workers(pool) > 0) {
+    ctime_nap(0.001);
+  }
+  assert(peg_pool_idle_workers(pool) == 0);
+  assert(peg_pool_spare_cores(pool) == 1);
+  atomic_store(&blocked.release, true);
+  peg_pool_wait(pool, batch, 2);
+  peg_pool_destroy(pool);
+}
+
 void test_peg_pool(void) {
   test_peg_pool_basic();
   test_peg_pool_nested();
   test_peg_pool_single_worker();
   test_peg_pool_null_inline();
+  test_peg_pool_queued_batches();
+  test_peg_pool_spare_cores();
 }

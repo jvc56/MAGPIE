@@ -1,11 +1,13 @@
 #include "config_test.h"
 
 #include "../src/compat/cfile.h"
+#include "../src/def/config_defs.h"
 #include "../src/def/game_defs.h"
 #include "../src/def/letter_distribution_defs.h"
 #include "../src/def/move_defs.h"
 #include "../src/def/players_data_defs.h"
 #include "../src/def/rack_defs.h"
+#include "../src/def/thread_control_defs.h"
 #include "../src/ent/bag.h"
 #include "../src/ent/board.h"
 #include "../src/ent/endgame_results.h"
@@ -18,10 +20,14 @@
 #include "../src/ent/players_data.h"
 #include "../src/ent/rack.h"
 #include "../src/ent/sim_results.h"
+#include "../src/ent/thread_control.h"
 #include "../src/ent/trie.h"
 #include "../src/ent/validated_move.h"
 #include "../src/ent/wmp.h"
 #include "../src/impl/config.h"
+#include "../src/impl/contribute_tables.h"
+#include "../src/impl/exec.h"
+#include "../src/impl/help_table.h"
 #include "../src/str/game_string.h"
 #include "../src/str/move_string.h"
 #include "../src/util/io_util.h"
@@ -34,6 +40,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #define TEST_GCG_FILENAME "a.gcg"
 
@@ -1031,19 +1038,213 @@ void test_game_display(void) {
   display_whole_game(TESTDATA_FILEPATH "gcgs/success_long_game.gcg");
 }
 
-void test_config_anno(void) {
-  // Commit and challenge
-  Config *config = config_create_default_test();
-  assert_config_exec_status(config, "set -iterations 100",
-                            ERROR_STATUS_SUCCESS);
+enum {
+  // The longest first sentence of a help text, which a list shows on one line.
+  HELP_SUMMARY_MAX_LENGTH = 100,
+};
 
-  // Test the help command
+// The output of a help command that must succeed. Caller owns the result.
+static char *get_help_output(Config *config, const char *command) {
+  // assert_config_exec_status leaves the status at started.
+  thread_control_set_status(config_get_thread_control(config),
+                            THREAD_CONTROL_STATUS_FINISHED);
+  ErrorStack *error_stack = error_stack_create();
+  char *output = NULL;
+  assert(run_str_api_command(config, error_stack, command, &output));
+  assert(error_stack_is_empty(error_stack));
+  error_stack_destroy(error_stack);
+  return output;
+}
+
+static void assert_help_has(Config *config, const char *command,
+                            const char *expected_text) {
+  char *output = get_help_output(config, command);
+  if (!has_substring(output, expected_text)) {
+    printf("'%s' does not print '%s':\n%s\n", command, expected_text, output);
+    abort();
+  }
+  free(output);
+}
+
+// Every option is in one group and every command in one section of the index,
+// so nothing goes missing from help.
+static void assert_help_table_is_complete(void) {
+  int times_seen[NUMBER_OF_ARG_TOKENS + 1] = {0};
+  for (int group_idx = 0; group_idx < NUMBER_OF_HELP_OPTION_GROUPS;
+       group_idx++) {
+    const HelpOptionGroup *group = help_table_get_option_group(group_idx);
+    assert(group->num_rows > 0);
+    for (int row_idx = 0; row_idx < group->num_rows; row_idx++) {
+      const HelpOptionRow *row = &group->rows[row_idx];
+      times_seen[row->both_players]++;
+      times_seen[row->player_one]++;
+      times_seen[row->player_two]++;
+    }
+  }
+  const int num_sections = help_table_get_num_command_sections();
+  for (int section_idx = 0; section_idx < num_sections; section_idx++) {
+    const HelpCommandSection *section =
+        help_table_get_command_section(section_idx);
+    for (int command_idx = 0; command_idx < section->num_commands;
+         command_idx++) {
+      const arg_token_t command = section->commands[command_idx];
+      times_seen[command]++;
+      assert(help_table_find_option_group(command) ==
+             NUMBER_OF_HELP_OPTION_GROUPS);
+      // A command with no row in the table fails here.
+      for (int group_idx = 0; group_idx < NUMBER_OF_HELP_OPTION_GROUPS;
+           group_idx++) {
+        assert(!(help_table_command_lists_group(command, group_idx) &&
+                 help_table_command_points_to_group(command, group_idx)));
+      }
+    }
+  }
+  for (int token_idx = 0; token_idx < NUMBER_OF_ARG_TOKENS; token_idx++) {
+    if (times_seen[token_idx] != 1) {
+      printf("token %d is in the help table %d times\n", token_idx,
+             times_seen[token_idx]);
+      abort();
+    }
+  }
+}
+
+static void test_config_help(void) {
+  assert_help_table_is_complete();
+
+  Config *config = config_create_default_test();
   assert_config_exec_status(config, "help holp",
                             ERROR_STATUS_CONFIG_LOAD_UNRECOGNIZED_ARG);
   assert_config_exec_status(config, "help l",
                             ERROR_STATUS_CONFIG_LOAD_AMBIGUOUS_COMMAND);
   assert_config_exec_status(config, "help set", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "help", ERROR_STATUS_SUCCESS);
+
+  // The async commands are listed by help, so help knows them.
+  assert_help_has(config, "help stop", "Stops the currently running command.");
+  assert_help_has(config, "help sto", "Stops the currently running command.");
+  assert_help_has(config, "help status", "Prints the status");
+  assert_help_has(config, "help sta", "Prints the status");
+  assert_help_has(config, "help s", "Shows the current game.");
+  assert_config_exec_status(config, "help stopp",
+                            ERROR_STATUS_CONFIG_LOAD_UNRECOGNIZED_ARG);
+
+  // An option can be asked about as it is typed, and asking does not set it.
+  assert_help_has(config, "help -numplays", "Specifies the number of plays");
+  assert_help_has(config, "help numplays", "Specifies the number of plays");
+  assert_config_exec_status(config, "help -holp",
+                            ERROR_STATUS_CONFIG_LOAD_UNRECOGNIZED_ARG);
+  assert_config_exec_status(config, "help -numplays 3",
+                            ERROR_STATUS_CONFIG_LOAD_UNRECOGNIZED_ARG);
+  assert_config_exec_status(config, "help -",
+                            ERROR_STATUS_CONFIG_LOAD_UNRECOGNIZED_ARG);
+
+  // Every name shown is one that reaches the entry, as it is typed.
+  assert_help_has(config, "help", "\n  rr, rrack ");
+  assert_help_has(config, "help", "\n  r, rack ");
+  assert_help_has(config, "help", "\n  p1 ");
+  assert_help_has(config, "help numplays", "-nump, -numplays\n");
+  assert_help_has(config, "help numplays", "-numplays 150\n");
+  assert_help_has(config, "help rrack", "rr, rrack\n");
+
+  // A sentence ends at the end of a word, not at a dot inside one.
+  assert_help_has(config, "help session",
+                  "to settings.txt after every command.\n");
+
+  // A command's help lists its own options and points to the rest.
+  assert_help_has(config, "help simulate", "Simulation options\n");
+  assert_help_has(config, "help simulate", "-plies, -pl1, -pl2");
+  assert_help_has(config, "help simulate", "Also uses\n");
+  assert_help_has(config, "help simulate", "help generate\n");
+  assert_help_has(config, "help analyze", "-apegmaxbag");
+  assert_help_has(config, "help analyze", "help peg\n");
+  assert_help_has(config, "help peg", "-pegtlim");
+  char *next_help = get_help_output(config, "help next");
+  assert(!has_substring(next_help, "Also uses"));
+  free(next_help);
+
+  // An option's help names the commands that use it, in any of its forms.
+  assert_help_has(config, "help plies", "Used by: ");
+  assert_help_has(config, "help pl1", "simulate, gsimulate, rgsimulate");
+  assert_help_has(config, "help -eplies", "endgame, analyze, autoplay");
+  // A shared option applies too widely, so it points to its topic.
+  assert_help_has(config, "help lex", "Game setup options: help setup\n");
+  char *numplays_help = get_help_output(config, "help numplays");
+  assert(!has_substring(numplays_help, "setoptions"));
+  free(numplays_help);
+
+  // The index is every command by task, and no options.
+  char *index = get_help_output(config, "help");
+  assert(!has_substring(index, "-numplays"));
+  const int num_sections = help_table_get_num_command_sections();
+  for (int section_idx = 0; section_idx < num_sections; section_idx++) {
+    const HelpCommandSection *section =
+        help_table_get_command_section(section_idx);
+    assert(has_substring(index, section->title));
+    for (int command_idx = 0; command_idx < section->num_commands;
+         command_idx++) {
+      StringBuilder *command_sb = string_builder_create();
+      config_add_help_summary(config, section->commands[command_idx],
+                              command_sb);
+      assert(has_substring(index, string_builder_peek(command_sb)));
+      string_builder_destroy(command_sb);
+    }
+  }
+  assert(has_substring(index, "While a command runs"));
+  assert(has_substring(index, "Stops the currently running command."));
+  assert(has_substring(index, "help " HELP_TOPIC_ALL_OPTIONS));
+  assert(has_substring(index, "help setup"));
+  free(index);
+
+  // Every group can be reached from where the table says it is.
+  char *all_options = get_help_output(config, "help options");
+  for (int group_idx = 0; group_idx < NUMBER_OF_HELP_OPTION_GROUPS;
+       group_idx++) {
+    const HelpOptionGroup *group = help_table_get_option_group(group_idx);
+    assert(has_substring(all_options, group->title));
+    char *group_command = get_formatted_string("help %s", group->help_subject);
+    assert_help_has(config, group_command, group->title);
+    assert_help_has(config, group_command, "-");
+    free(group_command);
+  }
+  // Every row of every group is listed, with its summary.
+  StringBuilder *row_sb = string_builder_create();
+  for (int group_idx = 0; group_idx < NUMBER_OF_HELP_OPTION_GROUPS;
+       group_idx++) {
+    const HelpOptionGroup *group = help_table_get_option_group(group_idx);
+    for (int row_idx = 0; row_idx < group->num_rows; row_idx++) {
+      const HelpOptionRow *row = &group->rows[row_idx];
+      string_builder_clear(row_sb);
+      config_add_help_summary(config,
+                              row->both_players != NUMBER_OF_ARG_TOKENS
+                                  ? row->both_players
+                                  : row->player_one,
+                              row_sb);
+      assert(has_substring(all_options, string_builder_peek(row_sb)));
+    }
+  }
+  string_builder_destroy(row_sb);
+  free(all_options);
+
+  StringBuilder *summary_sb = string_builder_create();
+  for (int token_idx = 0; token_idx < NUMBER_OF_ARG_TOKENS; token_idx++) {
+    string_builder_clear(summary_sb);
+    config_add_help_summary(config, token_idx, summary_sb);
+    const size_t summary_length = string_builder_length(summary_sb);
+    if (summary_length == 0 || summary_length > HELP_SUMMARY_MAX_LENGTH) {
+      printf("help summary of token %d is %zu characters: %s\n", token_idx,
+             summary_length, string_builder_peek(summary_sb));
+      abort();
+    }
+  }
+  string_builder_destroy(summary_sb);
+  config_destroy(config);
+}
+
+void test_config_anno(void) {
+  // Commit and challenge
+  Config *config = config_create_default_test();
+  assert_config_exec_status(config, "set -iterations 100",
+                            ERROR_STATUS_SUCCESS);
 
   const char *p1_name = "Alice Lastname-Jones";
   const char *p1_nickname = "Alice_Lastname-Jones";
@@ -2590,6 +2791,396 @@ void test_config_fg_required(void) {
   config_destroy(config);
 }
 
+void test_config_upgrade_settings_line(void) {
+  Config *config = config_create_default_test();
+  // An old file (no -fileversion) drops the settings whose defaults
+  // changed, with their values, and keeps everything else.
+  char *upgraded = config_upgrade_settings_line(
+      config, "set -lex CSW21 -w1 true -rit1 false -tlim 60 -pegpess false "
+              "-wit2 false -threads 4");
+  assert_strings_equal(upgraded, "set -lex CSW21 -tlim 60 -threads 4");
+  free(upgraded);
+  // A current file is left as it is.
+  upgraded = config_upgrade_settings_line(
+      config, "set -fileversion 2 -w1 true -pegpess false");
+  assert_strings_equal(upgraded, "set -fileversion 2 -w1 true -pegpess false");
+  free(upgraded);
+  // Saved settings record the current version, and load.
+  StringBuilder *sb = string_builder_create();
+  config_add_settings_to_string_builder(config, sb);
+  assert(strstr(string_builder_peek(sb), " -fileversion 2") != NULL);
+  string_builder_destroy(sb);
+  assert_config_exec_status(config, "set -fileversion 2", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "set -fileversion 3",
+                            ERROR_STATUS_CONFIG_LOAD_INT_ARG_OUT_OF_BOUNDS);
+  config_destroy(config);
+}
+
+// -wmp, -rit and -wit take auto beside true and false, and a settings file
+// records auto as auto rather than what this machine's load decided.
+void test_config_table_auto_settings(void) {
+  Config *config = config_create_default_test();
+  assert_config_exec_status(config, "set -lex CSW21 -wmp auto -wit auto",
+                            ERROR_STATUS_SUCCESS);
+  StringBuilder *sb = string_builder_create();
+  config_add_settings_to_string_builder(config, sb);
+  assert(strstr(string_builder_peek(sb), " -w1 auto") != NULL);
+  assert(strstr(string_builder_peek(sb), " -w2 auto") != NULL);
+  assert(strstr(string_builder_peek(sb), " -wit1 auto") != NULL);
+  assert(strstr(string_builder_peek(sb), " -rit1 false") != NULL);
+  string_builder_destroy(sb);
+  assert_config_exec_status(config, "set -w2 true -wit false",
+                            ERROR_STATUS_SUCCESS);
+  sb = string_builder_create();
+  config_add_settings_to_string_builder(config, sb);
+  assert(strstr(string_builder_peek(sb), " -w1 auto") != NULL);
+  assert(strstr(string_builder_peek(sb), " -w2 true") != NULL);
+  assert(strstr(string_builder_peek(sb), " -wit1 false") != NULL);
+  string_builder_destroy(sb);
+  assert_config_exec_status(config, "set -wmp maybe",
+                            ERROR_STATUS_CONFIG_LOAD_MALFORMED_BOOL_ARG);
+  config_destroy(config);
+}
+
+// Copies a file byte for byte.
+static void copy_test_file(const char *from, const char *to) {
+  FILE *in = cfile_open(from, "rbe", false);
+  assert(in);
+  FILE *out = cfile_open(to, "wbe", false);
+  assert(out);
+  int byte = 0;
+  while ((byte = fgetc(in)) != EOF) {
+    (void)fputc(byte, out);
+  }
+  (void)fclose(in);
+  (void)fclose(out);
+}
+
+// Runs `command` on `config`, writing what it prints to `output` (`size`
+// bytes, terminated).
+static void exec_capturing_output(Config *config, const char *command,
+                                  char *output, size_t size) {
+  FILE *captured = tmpfile();
+  assert(captured);
+  io_set_stream_out(captured);
+  load_and_exec_config_or_die(config, command);
+  io_reset_stream_out();
+  const int seek_result = fseek(captured, 0, SEEK_SET);
+  assert(seek_result == 0);
+  const size_t length = fread(output, 1, size - 1, captured);
+  output[length] = '\0';
+  (void)fclose(captured);
+}
+
+// Where missing tables are built (data from `data fetch`), a lexicon's first
+// use builds its wordmap, word info table and rack info table, each with a
+// line naming it and the disk and memory it takes, and loads them; the next
+// use builds nothing.
+// Keeps the first `bytes` of a file: a table a build or a disk cut short.
+static void truncate_test_file(const char *path, size_t bytes) {
+  FILE *stream = cfile_open(path, "rbe", false);
+  assert(stream);
+  uint8_t *contents = malloc_or_die(bytes);
+  const size_t read_bytes = fread(contents, 1, bytes, stream);
+  assert(read_bytes == bytes);
+  (void)fclose(stream);
+  stream = cfile_open(path, "wbe", false);
+  assert(stream);
+  const size_t written = fwrite(contents, 1, bytes, stream);
+  assert(written == bytes);
+  (void)fclose(stream);
+  free(contents);
+}
+
+// From a table built on first use to the disk cap deleting another, and on to
+// tables that turn out damaged: auto gets through it all without an error, and
+// says each thing once.
+static void test_config_auto_tables_from_build_to_eviction(void) {
+  char *dir = test_platform_make_temporary_directory("magpie_eviction");
+  char *lexica = get_formatted_string("%s/lexica", dir);
+  assert(cfile_mkdir(lexica) == 0);
+  const char *lexicon = "CSW21_abeviction";
+  char *kwg = get_formatted_string("%s/%s.kwg", lexica, lexicon);
+  char *klv = get_formatted_string("%s/%s.klv2", lexica, lexicon);
+  copy_test_file("testdata/lexica/CSW21_ab.kwg", kwg);
+  copy_test_file("testdata/lexica/CSW21_ab.klv2", klv);
+  // A table an earlier run built, which this one does not use.
+  char *old_table = get_formatted_string("%s/CSW21_old.CSW21_old.rit", lexica);
+  copy_test_file("testdata/lexica/CSW21_ab.klv2", old_table);
+  char *manifest_path = get_formatted_string("%s/auto_tables.txt", dir);
+  contribute_tables_record_built(manifest_path, "rit", "CSW21_old.CSW21_old",
+                                 old_table);
+  char *data_paths = get_formatted_string("%s:%s", dir, DEFAULT_TEST_DATA_PATH);
+  const ConfigArgs args = {.data_paths = data_paths,
+                           .settings_filename = DEFAULT_TEST_SETTINGS_FILENAME,
+                           .use_wmp = true,
+                           .auto_tables = true,
+                           .build_missing_wordmaps = true,
+                           .auto_table_cap_bytes = 1};
+  ErrorStack *error_stack = error_stack_create();
+  Config *config = config_create(&args, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  char *command = get_formatted_string(
+      "set -threads 1 -savesettings false -lex %s -ld english_ab", lexicon);
+  char output[8192];
+  exec_capturing_output(config, command, output, sizeof(output));
+  if (strstr(output, "skipped")) {
+    printf("config: skipped the eviction test: %s", output);
+  } else {
+    // Over the cap: the unused table goes, and those in use stay.
+    assert(strstr(output, "to keep them within their disk cap"));
+    assert(!cfile_access(old_table, CFILE_ACCESS_EXISTS));
+    char *wmp = get_formatted_string("%s/%s.wmp", lexica, lexicon);
+    char *rit = get_formatted_string("%s/%s.%s.rit", lexica, lexicon, lexicon);
+    assert(cfile_access(wmp, CFILE_ACCESS_EXISTS));
+    assert(cfile_access(rit, CFILE_ACCESS_EXISTS));
+
+    // A wordmap cut short is left out, and the rack info table that needs it
+    // cannot be built: each is said once, with no error, and not tried on
+    // the next command.
+    config_destroy(config);
+    const int removed = remove(rit);
+    assert(removed == 0);
+    (void)removed;
+    truncate_test_file(wmp, 100);
+    config = config_create(&args, error_stack);
+    assert(error_stack_is_empty(error_stack));
+    exec_capturing_output(config, command, output, sizeof(output));
+    assert(strstr(output, "playing without the wordmap"));
+    assert(strstr(output, "incomplete"));
+    assert(strstr(output, "without a rack info table"));
+    exec_capturing_output(config, "set -threads 1", output, sizeof(output));
+    assert(!strstr(output, "building"));
+    assert(!strstr(output, "without"));
+    free(rit);
+    free(wmp);
+  }
+  error_stack_destroy(error_stack);
+  config_destroy(config);
+  free(command);
+  free(data_paths);
+  free(manifest_path);
+  free(old_table);
+  free(klv);
+  free(kwg);
+  free(lexica);
+  test_platform_remove_directory_tree(dir);
+  free(dir);
+}
+
+// What auto leaves out for want of room it leaves out for both players, though
+// players sharing a lexicon are reported as one.
+static void test_config_auto_tables_bind_both_players(void) {
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -wmp auto -wit auto -rit auto -ttfraction 0.99");
+  const PlayersData *players_data = config_get_players_data(config);
+  const players_data_t types[3] = {PLAYERS_DATA_TYPE_WMP, PLAYERS_DATA_TYPE_WIT,
+                                   PLAYERS_DATA_TYPE_RIT};
+  for (int type_idx = 0; type_idx < 3; type_idx++) {
+    const bool first =
+        players_data_get_data(players_data, types[type_idx], 0) != NULL;
+    const bool second =
+        players_data_get_data(players_data, types[type_idx], 1) != NULL;
+    assert(first == second);
+  }
+  config_destroy(config);
+}
+
+static void test_config_builds_missing_tables_on_first_use(void) {
+  char *dir = test_platform_make_temporary_directory("magpie_first_use");
+  char *lexica = get_formatted_string("%s/lexica", dir);
+  assert(cfile_mkdir(lexica) == 0);
+  // A lexicon name no other data directory has tables for.
+  const char *lexicon = "CSW21_abfirstuse";
+  char *kwg = get_formatted_string("%s/%s.kwg", lexica, lexicon);
+  char *klv = get_formatted_string("%s/%s.klv2", lexica, lexicon);
+  copy_test_file("testdata/lexica/CSW21_ab.kwg", kwg);
+  copy_test_file("testdata/lexica/CSW21_ab.klv2", klv);
+  char *data_paths = get_formatted_string("%s:%s", dir, DEFAULT_TEST_DATA_PATH);
+  const ConfigArgs args = {.data_paths = data_paths,
+                           .settings_filename = DEFAULT_TEST_SETTINGS_FILENAME,
+                           .use_wmp = true,
+                           .auto_tables = true,
+                           .build_missing_wordmaps = true};
+  ErrorStack *error_stack = error_stack_create();
+  Config *config = config_create(&args, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  error_stack_destroy(error_stack);
+  char *command = get_formatted_string(
+      "set -threads 1 -savesettings false -lex %s -ld english_ab", lexicon);
+
+  char output[4096];
+  exec_capturing_output(config, command, output, sizeof(output));
+
+  const PlayersData *players_data = config_get_players_data(config);
+  char *rit_name = get_formatted_string("%s.%s", lexicon, lexicon);
+  if (strstr(output, "skipped")) {
+    // A machine with less disk than the reserve the tables leave free, the
+    // larger of 10 GB and 1% of the disk. Any other skip is a failure.
+    int64_t free_bytes = 0;
+    int64_t total_bytes = 0;
+    assert(cfile_free_bytes(dir, &free_bytes));
+    assert(cfile_total_bytes(dir, &total_bytes));
+    const int64_t reserve_floor_bytes = 10000000000LL;
+    const int64_t reserve_bytes = total_bytes / 100 > reserve_floor_bytes
+                                      ? total_bytes / 100
+                                      : reserve_floor_bytes;
+    assert(free_bytes < reserve_bytes + reserve_floor_bytes);
+    printf("config: skipped the first-use build: %s", output);
+  } else {
+    const char *built[] = {"building the wordmap",
+                           "building the word info table",
+                           "building the rack info table"};
+    for (int line_idx = 0; line_idx < 3; line_idx++) {
+      const char *line = strstr(output, built[line_idx]);
+      assert(line);
+      assert(strstr(line, " on disk, and up to "));
+    }
+    assert(strstr(output, "using wordmap, using word info table, using rack "
+                          "info table"));
+    assert(strings_equal(
+        players_data_get_data_name(players_data, PLAYERS_DATA_TYPE_WMP, 0),
+        lexicon));
+    assert(strings_equal(
+        players_data_get_data_name(players_data, PLAYERS_DATA_TYPE_WIT, 0),
+        lexicon));
+    assert(strings_equal(
+        players_data_get_data_name(players_data, PLAYERS_DATA_TYPE_RIT, 0),
+        rit_name));
+    // Loaded again from disk by a new config: nothing is built.
+    config_destroy(config);
+    error_stack = error_stack_create();
+    config = config_create(&args, error_stack);
+    assert(error_stack_is_empty(error_stack));
+    error_stack_destroy(error_stack);
+    exec_capturing_output(config, command, output, sizeof(output));
+    assert(!strstr(output, "building"));
+    assert(strings_equal(
+        players_data_get_data_name(config_get_players_data(config),
+                                   PLAYERS_DATA_TYPE_RIT, 0),
+        rit_name));
+
+    // What was built is in the program's own manifest, the only tables it
+    // ever deletes, and not in contribute's.
+    char *manifest_path = get_formatted_string("%s/auto_tables.txt", dir);
+    ContributeTableManifest *manifest =
+        contribute_table_manifest_read(manifest_path);
+    assert(manifest->count == 3);
+    assert(contribute_table_manifest_touch(manifest, "wmp", lexicon, 1));
+    assert(contribute_table_manifest_touch(manifest, "wit", lexicon, 1));
+    assert(contribute_table_manifest_touch(manifest, "rit", rit_name, 1));
+    // Eviction can run from any directory, so each path stands on its own.
+    for (int entry_idx = 0; entry_idx < manifest->count; entry_idx++) {
+      const char *entry_path = manifest->entries[entry_idx].path;
+      char *absolute_path = cfile_absolute_path(entry_path);
+      assert(strings_equal(absolute_path, entry_path));
+      free(absolute_path);
+    }
+    contribute_table_manifest_destroy(manifest);
+    free(manifest_path);
+    char *contribute_manifest =
+        get_formatted_string("%s/%s", dir, CONTRIBUTE_TABLE_MANIFEST_FILENAME);
+    assert(!cfile_access(contribute_manifest, CFILE_ACCESS_EXISTS));
+    free(contribute_manifest);
+
+    // The rack info table records the lexicon and leaves it was built from.
+    // One that records others is dropped under auto, said in a line, and is
+    // an error under true.
+    char *rit_path = get_formatted_string("%s/%s.rit", lexica, rit_name);
+    FILE *rit_file = cfile_open(rit_path, "r+be", false);
+    assert(rit_file);
+    const int seek_result = fseek(rit_file, -8, SEEK_END);
+    assert(seek_result == 0);
+    const uint8_t other_leaves_hash[8] = {0x5a, 0x5a, 0x5a, 0x5a,
+                                          0x5a, 0x5a, 0x5a, 0x5a};
+    const size_t patched =
+        fwrite(other_leaves_hash, 1, sizeof(other_leaves_hash), rit_file);
+    assert(patched == sizeof(other_leaves_hash));
+    (void)fclose(rit_file);
+    free(rit_path);
+    config_destroy(config);
+    error_stack = error_stack_create();
+    config = config_create(&args, error_stack);
+    assert(error_stack_is_empty(error_stack));
+    error_stack_destroy(error_stack);
+    exec_capturing_output(config, command, output, sizeof(output));
+    assert(strstr(output, "playing without the rack info table"));
+    assert(!players_data_get_data_name(config_get_players_data(config),
+                                       PLAYERS_DATA_TYPE_RIT, 0));
+    assert_config_exec_status(config, "set -rit true",
+                              ERROR_STATUS_RIT_INPUTS_MISMATCH);
+    assert_config_exec_status(config, "set -rit auto", ERROR_STATUS_SUCCESS);
+    // It is said once, not on every command.
+    exec_capturing_output(config, "set -threads 1", output, sizeof(output));
+    assert(!strstr(output, "playing without"));
+
+    // A file that cannot be loaded is left out under auto the same way, and
+    // an error under true: an old or damaged table must not stop every
+    // command.
+    const char *tables[2] = {rit_name, lexicon};
+    const char *table_types[2] = {"rit", "wit"};
+    const char *table_lines[2] = {"playing without the rack info table",
+                                  "playing without the word info table"};
+    for (int table_idx = 0; table_idx < 2; table_idx++) {
+      char *table_path = get_formatted_string(
+          "%s/%s.%s", lexica, tables[table_idx], table_types[table_idx]);
+      FILE *table_file = cfile_open(table_path, "wbe", false);
+      assert(table_file);
+      const char garbage[] = "not a table";
+      const size_t written = fwrite(garbage, 1, sizeof(garbage), table_file);
+      assert(written == sizeof(garbage));
+      (void)fclose(table_file);
+      free(table_path);
+      config_destroy(config);
+      error_stack = error_stack_create();
+      config = config_create(&args, error_stack);
+      assert(error_stack_is_empty(error_stack));
+      error_stack_destroy(error_stack);
+      exec_capturing_output(config, command, output, sizeof(output));
+      assert(strstr(output, table_lines[table_idx]));
+      exec_capturing_output(config, "set -threads 1", output, sizeof(output));
+      assert(!strstr(output, "playing without"));
+    }
+    players_data = config_get_players_data(config);
+    assert(!players_data_get_data_name(players_data, PLAYERS_DATA_TYPE_RIT, 0));
+    assert(!players_data_get_data_name(players_data, PLAYERS_DATA_TYPE_WIT, 0));
+    assert(players_data_get_data_name(players_data, PLAYERS_DATA_TYPE_WMP, 0));
+
+    // A lexicon with no wordmap support says why it has no wordmap, and no
+    // rack info table, which is built from one, instead of naming a convert
+    // command that cannot build them.
+    const char *unsupported = "CSW21_ab_superfirstuse";
+    char *unsupported_kwg =
+        get_formatted_string("%s/%s.kwg", lexica, unsupported);
+    char *unsupported_klv =
+        get_formatted_string("%s/%s.klv2", lexica, unsupported);
+    copy_test_file("testdata/lexica/CSW21_ab.kwg", unsupported_kwg);
+    copy_test_file("testdata/lexica/CSW21_ab.klv2", unsupported_klv);
+    char *unsupported_command =
+        get_formatted_string("set -lex %s -ld english_ab -k1 %s -k2 %s",
+                             unsupported, unsupported, unsupported);
+    exec_capturing_output(config, unsupported_command, output, sizeof(output));
+    assert(strstr(output, "no wordmap (wordmaps do not support this board "
+                          "size)"));
+    assert(strstr(output, "no rack info table (it is built from a wordmap, "
+                          "and wordmaps do not support this board size)"));
+    assert(!strstr(output, "dawg2wordmap"));
+    assert(!strstr(output, "klvwmp2rit"));
+    free(unsupported_command);
+    free(unsupported_klv);
+    free(unsupported_kwg);
+  }
+  free(rit_name);
+  free(command);
+  config_destroy(config);
+  free(data_paths);
+  free(klv);
+  free(kwg);
+  free(lexica);
+  test_platform_remove_directory_tree(dir);
+  free(dir);
+}
+
 void test_config_exchange_blank(void) {
   Config *config = config_create_default_test();
   assert_config_exec_status(config, "set -lex CSW21", ERROR_STATUS_SUCCESS);
@@ -2986,6 +3577,25 @@ void test_config_new_game_drops_previous_analysis(void) {
 // previous game's events, or an empty board, and reject the move as not
 // connected; the previous game's endgame results stayed valid, pointing at the
 // lexicon the cgp's -lex freed.
+// Started with set, cgp or load, magpie keeps running commands afterwards;
+// started with another command, it exits once that command finishes.
+static void test_config_continue_on_coldstart(void) {
+  Config *config = config_create_default_test();
+  ErrorStack *error_stack = error_stack_create();
+  const char *continuing_cmds[] = {"set -threads 2", "cgp " EMPTY_CGP,
+                                   "load " TEST_GCG_FILENAME};
+  for (int cmd_idx = 0; cmd_idx < 3; cmd_idx++) {
+    config_load_command(config, continuing_cmds[cmd_idx], error_stack);
+    assert(error_stack_is_empty(error_stack));
+    assert(config_continue_on_coldstart(config));
+  }
+  config_load_command(config, "shgame", error_stack);
+  assert(error_stack_is_empty(error_stack));
+  assert(!config_continue_on_coldstart(config));
+  error_stack_destroy(error_stack);
+  config_destroy(config);
+}
+
 void test_config_cgp_starts_new_history(void) {
   Config *config = config_create_or_die("set -s1 score -s2 score -threads 2");
   assert_config_exec_status(config, "load testdata/gcgs/success_standard.gcg",
@@ -3390,6 +4000,7 @@ void test_config(void) {
   test_game_display();
   test_narrow_glyphs();
   test_trie();
+  test_config_help();
   test_config_anno();
   test_config_anno_challenge();
   test_config_anno_endgame_rack();
@@ -3407,6 +4018,11 @@ void test_config(void) {
   test_config_wmp();
   test_config_note_move_interpolation();
   test_config_fg_required();
+  test_config_upgrade_settings_line();
+  test_config_table_auto_settings();
+  test_config_auto_tables_bind_both_players();
+  test_config_builds_missing_tables_on_first_use();
+  test_config_auto_tables_from_build_to_eviction();
   test_config_exchange_blank();
   test_config_utility_blend();
   test_config_move_list_saved_to_game_event();
@@ -3414,6 +4030,7 @@ void test_config(void) {
   test_config_sim_results_saved_to_game_event();
   test_config_new_game_drops_previous_analysis();
   test_config_cgp_starts_new_history();
+  test_config_continue_on_coldstart();
   test_config_lexicon_change_rebuilds_games();
   test_config_lexicon_change_clears_endgame_tt();
   test_config_bingo_bonus_change_clears_endgame_tt();

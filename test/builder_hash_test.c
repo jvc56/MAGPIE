@@ -41,7 +41,7 @@
 #define PINNED_WMP_SHA256                                                      \
   "7bb854bf2bf30cd0cb9bdc280bf5ebe9a5b7968f198bba9cad5b4e113b9af47f"
 #define PINNED_RIT_SHA256                                                      \
-  "b064d7729ba9117890595bdaa72e005314955b36f2377c97e5eb25a705211037"
+  "f9382a5ba2c8bb761ee83766e2e733f4126290e919ff08c5461a1ddba6383e26"
 #define PINNED_WIT_SHA256                                                      \
   "a5677f57982fd8b89aed8acce09c76cea2ae90659c8da70a822d8ed1b265397c"
 
@@ -62,7 +62,7 @@
 // a pair that has moved apart is a server and a fleet that disagree.
 enum {
   PINNED_WMP_BUILDER_VERSION = 1,
-  PINNED_RIT_BUILDER_VERSION = 1,
+  PINNED_RIT_BUILDER_VERSION = 2,
   PINNED_KLV_BUILDER_VERSION = 1,
   PINNED_WIT_BUILDER_VERSION = 1,
 };

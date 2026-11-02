@@ -48,7 +48,8 @@ Magpie *magpie_create_with_options(const char *data_paths,
   mp->error = error_stack_create();
   const ConfigArgs args = {.data_paths = data_paths,
                            .settings_filename = settings_filename,
-                           .use_wmp = use_wmp};
+                           .use_wmp = use_wmp,
+                           .auto_tables = use_wmp};
   mp->config = config_create(&args, mp->error);
   mp->output = empty_string();
   mp->async_thread_joinable = false;
@@ -57,7 +58,7 @@ Magpie *magpie_create_with_options(const char *data_paths,
 }
 
 Magpie *magpie_create(const char *data_paths) {
-  return magpie_create_with_options(data_paths, NULL, false);
+  return magpie_create_with_options(data_paths, NULL, true);
 }
 
 // Joins a finished async worker thread if one exists. Returns true if a

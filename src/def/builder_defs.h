@@ -27,7 +27,9 @@
 // A format version bump implies a builder bump. The reverse does not hold,
 // which is the entire reason these exist separately.
 #define WMP_BUILDER_VERSION 1
-#define RIT_BUILDER_VERSION 1
+// 2: a rack info table ends with the hashes of the lexicon and leaves it was
+// built from (RIT version 13), so a load refuses one built from others.
+#define RIT_BUILDER_VERSION 2
 
 // The word info table: a per-substring letter mask move generation prunes
 // with, built from the .kwg alone. Checked the same way as the other two: a

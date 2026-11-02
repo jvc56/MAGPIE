@@ -63,12 +63,17 @@ typedef enum {
 // Creates a Magpie instance loading data from the ':'-separated paths in
 // data_paths. Never returns NULL; if creation fails, the returned handle
 // carries the error (check with magpie_has_error) and all subsequent
-// commands return MAGPIE_DID_NOT_RUN.
+// commands return MAGPIE_DID_NOT_RUN. Its wordmap, word info table and rack
+// info table settings are auto, as in the command line program: each table
+// on disk is used when this machine has the memory for it (see -wmp, -wit,
+// -rit), which can take a few hundred MB, and the 1.9 GB rack info table,
+// of this process's memory.
 Magpie *magpie_create(const char *data_paths);
 
 // Like magpie_create, with explicit control over the settings filename
-// (NULL for the default) and whether word map (WMP) files are used for
-// move generation.
+// (NULL for the default) and the tables: use_wmp true sets the wordmap, word
+// info table and rack info table to auto, as magpie_create does; false turns
+// all three off (a command can still turn them on).
 Magpie *magpie_create_with_options(const char *data_paths,
                                    const char *settings_filename, bool use_wmp);
 

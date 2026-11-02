@@ -44,6 +44,20 @@ test("candidate preview follows board coordinates and preserves played-through t
   expect(previewMove(position, "(exch E)")).toEqual([]);
 });
 
+test("PEG results parse with or without a spread column", { tag: "@unit" }, () => {
+  expect(parseResults("   1  8H CAT  40  0  32  55.6  \n", "peg")[0]).toMatchObject({
+    move: "8H CAT",
+    wins: 40,
+    win: 55.6,
+    spread: null,
+  });
+  expect(parseResults("   1  8H CAT  40  0  32  55.6  +2.5  \n", "peg")[0]).toMatchObject({
+    win: 55.6,
+    spread: 2.5,
+  });
+  expect(parseResults("   1  8H CAT  40  0  32  55.6  -  \n", "peg")[0].spread).toBe(null);
+});
+
 test("result adapters preserve pass, empty leaves, uncertainty and endgame continuations", { tag: "@unit" }, () => {
   const sim = parseResults(
     "1: 8H RETAINS 66 0 54.2 0.3 42.7 0.2 66.0 512",
@@ -124,5 +138,6 @@ test("PEG protects the union of manual plays and the recorded play", { tag: "@un
     protectedMoves: ["D1 A.", "pass", "D1 A."],
     playedMove: "pass",
   });
-  expect(commands.at(-1)).toContain("-pnoprune D1.AQ,pass");
+  expect(commands.at(-1)).toMatch(/^peg leaves1 D1\.AQ,pass /);
+  expect(commands.at(-1)).not.toContain("-pnoprune");
 });

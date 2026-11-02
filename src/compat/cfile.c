@@ -1054,6 +1054,26 @@ static void cfile_split_windows_time(LONGLONG ticks, int64_t *seconds,
 }
 #endif
 
+char *cfile_absolute_path(const char *path) {
+#if defined(_WIN32)
+  wchar_t *wide = cwin_wide(path);
+  if (!wide) {
+    return NULL;
+  }
+  const DWORD length = GetFullPathNameW(wide, 0, NULL, NULL);
+  wchar_t *full = length ? malloc(sizeof(wchar_t) * length) : NULL;
+  char *absolute = NULL;
+  if (full && GetFullPathNameW(wide, length, full, NULL) < length) {
+    absolute = cwin_narrow(full);
+  }
+  free(full);
+  free(wide);
+  return absolute;
+#else
+  return realpath(path, NULL);
+#endif
+}
+
 bool cfile_identity(const char *path, CFileIdentity *identity) {
   if (!path) {
     return false;
@@ -1147,6 +1167,38 @@ bool cfile_free_bytes(const char *directory, int64_t *free_bytes) {
   *free_bytes = block_size != 0 && blocks > (uint64_t)INT64_MAX / block_size
                     ? INT64_MAX
                     : (int64_t)(blocks * block_size);
+#endif
+  return true;
+}
+
+bool cfile_total_bytes(const char *directory, int64_t *total_bytes) {
+  if (!directory) {
+    return false;
+  }
+#if defined(_WIN32)
+  ULARGE_INTEGER total;
+  wchar_t *wide = cwin_wide(directory);
+  if (!wide) {
+    return false;
+  }
+  const BOOL queried = GetDiskFreeSpaceExW(wide, NULL, &total, NULL);
+  free(wide);
+  if (!queried) {
+    return false;
+  }
+  *total_bytes = total.QuadPart > (ULONGLONG)INT64_MAX
+                     ? INT64_MAX
+                     : (int64_t)total.QuadPart;
+#else
+  struct statvfs info;
+  if (statvfs(directory, &info) != 0) {
+    return false;
+  }
+  const uint64_t block_size = info.f_frsize ? info.f_frsize : info.f_bsize;
+  const uint64_t blocks = (uint64_t)info.f_blocks;
+  *total_bytes = block_size != 0 && blocks > (uint64_t)INT64_MAX / block_size
+                     ? INT64_MAX
+                     : (int64_t)(blocks * block_size);
 #endif
   return true;
 }

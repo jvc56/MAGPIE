@@ -935,6 +935,44 @@ void distinct_lexica_test(bool w1) {
   config_destroy(config);
 }
 
+// Wordsmog's words come from the alpha generator, so a wordmap changes
+// nothing: its anchors used to record each play once per play length, which is
+// fatal in the move list.
+static void wordsmog_with_wordmap_test(void) {
+  int counts[2];
+  for (int use_wmp = 0; use_wmp < 2; use_wmp++) {
+    char *set = get_formatted_string(
+        "set -lex CSW21 -wmp %s -var wordsmog -s1 equity -s2 equity -r1 all "
+        "-r2 all -numplays 500",
+        use_wmp ? "true" : "false");
+    Config *config = config_create_or_die(set);
+    free(set);
+    load_and_exec_config_or_die(
+        config, "cgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 / 0/0 0");
+    Game *game = config_get_game(config);
+    MoveList *move_list = move_list_create(500);
+    rack_set_to_string(game_get_ld(game),
+                       player_get_rack(game_get_player(game, 0)), "AEINRST");
+    const MoveGenArgs args = {
+        .game = game,
+        .move_list = move_list,
+        .move_record_type = MOVE_RECORD_ALL,
+        .move_sort_type = MOVE_SORT_EQUITY,
+        .override_kwg = NULL,
+        .eq_margin_movegen = 0,
+        .target_equity = EQUITY_MAX_VALUE,
+        .tiles_played_bv = NULL,
+        .initial_tiles_bv = 0,
+    };
+    generate_moves_for_game(&args);
+    counts[use_wmp] = move_list_get_count(move_list);
+    move_list_destroy(move_list);
+    config_destroy(config);
+  }
+  assert(counts[0] > 0);
+  assert(counts[0] == counts[1]);
+}
+
 void wordsmog_test(void) {
   Config *config = config_create_or_die(
       "set -lex CSW21_alpha -wmp false -s1 equity -s2 equity "
@@ -2029,6 +2067,7 @@ void test_move_gen(void) {
   distinct_lexica_test(true);
   consistent_tiebreaking_test();
   wordsmog_test();
+  wordsmog_with_wordmap_test();
   movegen_game_update_test();
   movegen_var_bingo_bonus_test();
   movegen_only_one_player_wmp();

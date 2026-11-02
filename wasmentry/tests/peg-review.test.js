@@ -54,9 +54,11 @@ test("PEG streams stages and candidates before completion and preserves them in 
       if (message.type === "run") {
         message.data.commands = message.data.commands.map(command => {
           if (!command.startsWith("peg ")) return command;
-          const played = command.match(/-pnoprune (\S+)/)[1];
-          return command.replace(/^peg /, `peg ${played},pass `)
-            .replace(/-pegtlim \S+/, "-pegtlim 0") + " -pegtopk 2,2";
+          const played = command.match(/^peg leaves1 (\S+) /)[1];
+          // The rational opponent keeps the greedy stage quick at 3 in the
+          // bag; the pessimistic one tries every reply on every draw.
+          return command.replace(/^peg leaves1 \S+ /, `peg only ${played},pass `)
+            .replace(/-pegtlim \S+/, "-pegtlim 0") + " -pegtopk 2,2 -pegpess false";
         });
       }
       return post.call(this, message, ...args);
@@ -141,6 +143,32 @@ test("completed full-depth PEG results precede unfinished shallower candidates",
 });
 
 
+test("a complete PEG's solved plays outrank what cut bounds push out of the entries", { tag: "@unit" }, () => {
+  const rows = mergePegRows(
+    [{ move: "A1 CAT", win: 38.9, depth: "greedy" }],
+    [],
+    {
+      done: true,
+      stage: 1,
+      depth: 40,
+      fieldSize: 2,
+      stages: [],
+      moves: ["A1 CAT", "B1 DOG"],
+      evaluating: null,
+      baseline: [],
+      entries: [
+        { move: "B1 DOG", win: 84.7, wins: null, ties: null, losses: null, cut: true, depth: 40 },
+      ],
+      solved: [
+        { move: "A1 CAT", win: 55.6, wins: 40, ties: 0, losses: 32, cut: false, depth: 40 },
+      ],
+    },
+  );
+  const played = rows.find((row) => row.move === "A1 CAT");
+  expect(played).toMatchObject({ win: 55.6, depth: "40-ply", state: "Evaluated" });
+  expect(rows.find((row) => row.move === "B1 DOG")).toMatchObject({ cut: true, wins: null });
+});
+
 test("manually adding an existing candidate keeps it through PEG stages", async ({page}) => {
   test.setTimeout(60000);
   await page.addInitScript(() => {
@@ -150,8 +178,8 @@ test("manually adding an existing candidate keeps it through PEG stages", async 
         message.data.commands = message.data.commands.map(command => {
           if (!command.startsWith("peg ")) return command;
           window.pegCommand = command;
-          const protectedMoves = command.match(/-pnoprune (\S+)/)[1];
-          return command.replace(/^peg /, `peg ${protectedMoves},pass `)
+          const protectedMoves = command.match(/^peg leaves1 (\S+) /)[1];
+          return command.replace(/^peg leaves1 \S+ /, `peg only ${protectedMoves},pass `)
             .replace(/-pegtlim \S+/, "-pegtlim 2") + " -pegtopk 2 -pegstride 8";
         });
       }
@@ -173,7 +201,7 @@ test("manually adding an existing candidate keeps it through PEG stages", async 
   await expect(page.locator("#status")).toHaveText("Play added");
   await page.locator("[data-mode=peg]").click();
   await expect(page.locator("#stop")).toBeDisabled({timeout:45000});
-  expect(await page.evaluate(() => window.pegCommand)).toMatch(/-pnoprune [^ ]+,[^ ]+/);
+  expect(await page.evaluate(() => window.pegCommand)).toMatch(/^peg leaves1 [^ ]+,[^ ]+ /);
   const row = page.locator("#results tbody tr").filter({has:page.locator("button").filter({hasText:label})});
   await expect(row).toHaveCount(1);
   await expect(row).not.toHaveClass(/peg-pruned/);
