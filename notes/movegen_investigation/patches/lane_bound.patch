@@ -1,0 +1,358 @@
+diff --git a/src/impl/move_gen.c b/src/impl/move_gen.c
+index 2b86a98..c88bdc1 100644
+--- a/src/impl/move_gen.c
++++ b/src/impl/move_gen.c
+@@ -3094,12 +3094,262 @@ void shadow_play_for_anchor_small(MoveGen *gen, int col) {
+       gen->dir, gen->highest_shadow_score, gen->highest_shadow_score);
+ }
+ 
++#include <mach/mach_time.h>
++
++// ---- lane bound prototype (instrumentation) ----
++typedef struct LBPlacement {
++  int k, through_count;
++  uint32_t through_letters;
++  Equity fixed;            // W*through + sum cross_score*wm (+ nothing else)
++  uint16_t e[RACK_SIZE];   // sorted desc effective multipliers
++} LBPlacement;
++typedef void (*LBVisit)(void *ctx, const LBPlacement *pl);
++
++static void lb_eval_span(const MoveGen *gen, int k, int through_count,
++                         uint32_t through_letters, Equity through_score, int W, Equity cross_const,
++                         const uint8_t *lm, const uint8_t *wm, const uint8_t *cr,
++                         LBVisit visit, void *ctx) {
++  LBPlacement pl;
++  pl.k = k; pl.through_count = through_count; pl.through_letters = through_letters;
++  pl.fixed = W * through_score + cross_const;
++  for (int i = 0; i < RACK_SIZE; i++) pl.e[i] = 0;
++  for (int i = 0; i < k; i++) {
++    uint16_t v = (uint16_t)(W * lm[i] + lm[i] * wm[i] * cr[i]);
++    int j = i;
++    while (j > 0 && pl.e[j - 1] < v) { pl.e[j] = pl.e[j - 1]; j--; }
++    pl.e[j] = v;
++  }
++  (void)gen;
++  visit(ctx, &pl);
++}
++
++// Enumerates every placement in the lane. blocked_mask: empty squares that
++// cannot take a tile.
++static void lb_enumerate(const MoveGen *gen, const Square *sq, int max_tiles,
++                         uint32_t blocked_mask, LBVisit visit, void *ctx) {
++  for (int start = 0; start < BOARD_DIM; start++) {
++    if (start > 0 && square_get_letter(&sq[start - 1]) != ALPHABET_EMPTY_SQUARE_MARKER) continue;
++    int k = 0, through_count = 0, W = 1, any_cross = 0;
++    Equity through_score = 0, cross_const = 0;
++    uint32_t through_letters = 0;
++    uint8_t lm[RACK_SIZE], wm[RACK_SIZE], cr[RACK_SIZE];
++    for (int col = start; ; col++) {
++      if (col < BOARD_DIM && square_get_letter(&sq[col]) != ALPHABET_EMPTY_SQUARE_MARKER) {
++        through_score += gen->tile_scores[square_get_letter(&sq[col])];
++        through_count++;
++        through_letters |= 1U << get_unblanked_machine_letter(square_get_letter(&sq[col]));
++        continue;
++      }
++      // col is empty or off board: the word may end at col - 1.
++      if (k >= 1 && (through_count > 0 || any_cross)) {
++        lb_eval_span(gen, k, through_count, through_letters, through_score, W, cross_const, lm, wm, cr, visit, ctx);
++      }
++      if (col >= BOARD_DIM || k == max_tiles || (blocked_mask >> col) & 1) break;
++      const BonusSquare b = square_get_bonus_square(&sq[col]);
++      lm[k] = bonus_square_get_letter_multiplier(b);
++      wm[k] = bonus_square_get_word_multiplier(b);
++      cr[k] = square_get_is_cross_word(&sq[col]);
++      any_cross |= cr[k];
++      cross_const += square_get_cross_score(&sq[col]) * wm[k];
++      W *= wm[k];
++      k++;
++    }
++  }
++}
++
++static Equity lb_rest(const MoveGen *gen, int k) {
++  Equity eq = (k == RACK_SIZE) ? gen->bingo_bonus : 0;
++  eq += static_eval_get_shadow_equity(&gen->ld, &gen->opponent_rack, gen->best_leaves,
++        gen->full_rack_descending_tile_scores, gen->number_of_tiles_in_bag,
++        rack_get_total_letters(&gen->player_rack), k);
++  return eq;
++}
++
++static bool lb_length_ok(const MoveGen *gen, int k, int through_count) {
++  if (through_count > 0 || k < MINIMUM_WORD_LENGTH || !wmp_move_gen_is_active(&gen->wmp_move_gen)) return true;
++  return wmp_move_gen_nonplaythrough_word_of_length_exists(&gen->wmp_move_gen, k);
++}
++
++typedef struct LBV1Ctx { const MoveGen *gen; Equity best; } LBV1Ctx;
++static void lb_v1_visit(void *vctx, const LBPlacement *pl) {
++  LBV1Ctx *c = vctx;
++  if (!lb_length_ok(c->gen, pl->k, pl->through_count)) return;
++  Equity sc = pl->fixed;
++  for (int i = 0; i < pl->k; i++) sc += c->gen->full_rack_descending_tile_scores[i] * pl->e[i];
++  sc += lb_rest(c->gen, pl->k);
++  if (sc > c->best) c->best = sc;
++}
++
++typedef struct LBEnv {
++  uint16_t e[2][RACK_SIZE + 1][RACK_SIZE];
++  Equity fixed[2][RACK_SIZE + 1];
++  bool any[2][RACK_SIZE + 1];
++} LBEnv;
++static void lb_env_visit(void *vctx, const LBPlacement *pl) {
++  LBEnv *env = vctx;
++  const int t = pl->through_count > 0;
++  if (!env->any[t][pl->k]) { env->any[t][pl->k] = true; env->fixed[t][pl->k] = pl->fixed; }
++  else if (pl->fixed > env->fixed[t][pl->k]) env->fixed[t][pl->k] = pl->fixed;
++  for (int i = 0; i < RACK_SIZE; i++) if (pl->e[i] > env->e[t][pl->k][i]) env->e[t][pl->k][i] = pl->e[i];
++}
++
++static bool lb_rit_ok(const MoveGen *gen, const LBPlacement *pl) {
++  if (gen->rit_entry == NULL || pl->through_count == 0) return true;
++  const int k = pl->k;
++  if (pl->through_count == 1) {
++    if (!rack_info_table_has_playthrough_coverage(gen->rack_info_table, k)) return true;
++    const uint32_t u = rack_info_table_entry_get_playthrough_union(gen->rit_entry, RACK_SIZE - k);
++    return (u & pl->through_letters) != 0;
++  }
++  if (rack_get_letter(&gen->player_rack, BLANK_MACHINE_LETTER) != 0) return true;
++  uint32_t bv = 0;
++  if (!wmp_move_gen_get_multi_pt_bitvec_for_tiles_played(gen->rit_entry, k, k + pl->through_count, &bv)) return true;
++  return (pl->through_letters & ~bv) == 0;
++}
++typedef struct LBV3Ctx { const MoveGen *gen; Equity best; } LBV3Ctx;
++static void lb_v3_visit(void *vctx, const LBPlacement *pl) {
++  LBV3Ctx *c = vctx;
++  if (!lb_length_ok(c->gen, pl->k, pl->through_count)) return;
++  if (!lb_rit_ok(c->gen, pl)) return;
++  Equity sc = pl->fixed;
++  for (int i = 0; i < pl->k; i++) sc += c->gen->full_rack_descending_tile_scores[i] * pl->e[i];
++  sc += lb_rest(c->gen, pl->k);
++  if (sc > c->best) c->best = sc;
++}
++static Equity lane_bound_v3(const MoveGen *gen, const Square *sq) {
++  uint32_t blocked = 0;
++  for (int col = 0; col < BOARD_DIM; col++) {
++    if (square_get_letter(&sq[col]) == ALPHABET_EMPTY_SQUARE_MARKER &&
++        (square_get_cross_set(&sq[col]) & gen->rack_cross_set) == 0) blocked |= 1U << col;
++  }
++  LBV3Ctx c = {gen, EQUITY_MIN_VALUE};
++  lb_enumerate(gen, sq, rack_get_total_letters(&gen->player_rack), blocked, lb_v3_visit, &c);
++  return c.best;
++}
++enum { LB_MAX_GROUPS = 256 };
++typedef struct LBGroup {
++  uint8_t k, through_count;
++  uint32_t through_letters;
++  Equity fixed;
++  uint16_t e[RACK_SIZE];
++} LBGroup;
++typedef struct LBGroups { int n; LBGroup g[LB_MAX_GROUPS]; int overflow; } LBGroups;
++static void lb_groups_visit(void *vctx, const LBPlacement *pl) {
++  LBGroups *gs = vctx;
++  // Groups only need to separate placements the RIT checks can tell apart:
++  // non-through by k; one through tile by (k, letter); several by (k, count, set).
++  const uint8_t tc = (uint8_t)pl->through_count;
++  for (int i = 0; i < gs->n; i++) {
++    LBGroup *g = &gs->g[i];
++    if (g->k == pl->k && g->through_count == tc && g->through_letters == pl->through_letters) {
++      if (pl->fixed > g->fixed) g->fixed = pl->fixed;
++      for (int j = 0; j < RACK_SIZE; j++) if (pl->e[j] > g->e[j]) g->e[j] = pl->e[j];
++      return;
++    }
++  }
++  if (gs->n == LB_MAX_GROUPS) { gs->overflow++; return; }
++  LBGroup *g = &gs->g[gs->n++];
++  g->k = (uint8_t)pl->k; g->through_count = tc; g->through_letters = pl->through_letters;
++  g->fixed = pl->fixed; memcpy(g->e, pl->e, sizeof(g->e));
++}
++static uint64_t lb_groups_total, lb_groups_lanes, lb_groups_overflow;
++static void lane_groups_build(const MoveGen *gen, const Square *sq, LBGroups *gs) {
++  gs->n = 0; gs->overflow = 0;
++  uint32_t blocked = 0;
++  for (int col = 0; col < BOARD_DIM; col++) {
++    if (square_get_letter(&sq[col]) == ALPHABET_EMPTY_SQUARE_MARKER &&
++        (square_get_cross_set(&sq[col]) & ~(uint64_t)1) == 0) blocked |= 1U << col;
++  }
++  lb_enumerate(gen, sq, RACK_SIZE, blocked, lb_groups_visit, gs);
++  lb_groups_total += gs->n; lb_groups_lanes++; lb_groups_overflow += gs->overflow;
++}
++static Equity lane_bound_v5(const MoveGen *gen, const LBGroups *gs) {
++  Equity best = EQUITY_MIN_VALUE;
++  const int n = rack_get_total_letters(&gen->player_rack);
++  for (int i = 0; i < gs->n; i++) {
++    const LBGroup *g = &gs->g[i];
++    if (g->k > n) continue;
++    LBPlacement pl; pl.k = g->k; pl.through_count = g->through_count; pl.through_letters = g->through_letters;
++    if (!lb_length_ok(gen, g->k, g->through_count)) continue;
++    if (!lb_rit_ok(gen, &pl)) continue;
++    Equity sc = g->fixed;
++    for (int j = 0; j < g->k; j++) sc += gen->full_rack_descending_tile_scores[j] * g->e[j];
++    sc += lb_rest(gen, g->k);
++    if (sc > best) best = sc;
++  }
++  return best;
++}
++static Equity lane_bound_v1(const MoveGen *gen, const Square *sq) {
++  uint32_t blocked = 0;
++  for (int col = 0; col < BOARD_DIM; col++) {
++    if (square_get_letter(&sq[col]) == ALPHABET_EMPTY_SQUARE_MARKER &&
++        (square_get_cross_set(&sq[col]) & gen->rack_cross_set) == 0) blocked |= 1U << col;
++  }
++  LBV1Ctx c = {gen, EQUITY_MIN_VALUE};
++  lb_enumerate(gen, sq, rack_get_total_letters(&gen->player_rack), blocked, lb_v1_visit, &c);
++  return c.best;
++}
++
++static void lane_env_build(const MoveGen *gen, const Square *sq, LBEnv *env) {
++  memset(env, 0, sizeof(*env));
++  uint32_t blocked = 0;
++  for (int col = 0; col < BOARD_DIM; col++) {
++    if (square_get_letter(&sq[col]) == ALPHABET_EMPTY_SQUARE_MARKER &&
++        (square_get_cross_set(&sq[col]) & ~(uint64_t)1) == 0) blocked |= 1U << col;
++  }
++  lb_enumerate(gen, sq, RACK_SIZE, blocked, lb_env_visit, env);
++}
++
++static Equity lane_bound_v2(const MoveGen *gen, const LBEnv *env) {
++  Equity best = EQUITY_MIN_VALUE;
++  const int n = rack_get_total_letters(&gen->player_rack);
++  for (int t = 0; t < 2; t++) for (int k = 1; k <= n; k++) {
++    if (!env->any[t][k]) continue;
++    if (t == 0 && !lb_length_ok(gen, k, 0)) continue;
++    Equity sc = env->fixed[t][k];
++    for (int i = 0; i < k; i++) sc += gen->full_rack_descending_tile_scores[i] * env->e[t][k][i];
++    sc += lb_rest(gen, k);
++    if (sc > best) best = sc;
++  }
++  return best;
++}
++
++static uint64_t lb_skip_ticks[4], lb_skip_unexp_ticks[4], lb_violations[4], lb_v5_combine_ticks, lb_cost_ticks[3], lb_measured_gens, lb_best_lanes;
++static uint64_t lb_lanes_skipped[4], lb_lanes_total;
++
++#include <stdio.h>
++#include <stdlib.h>
++static uint64_t instr_lane_time[2 * BOARD_DIM];
++static uint8_t instr_lane_expanded[2 * BOARD_DIM];
++static uint64_t instr_total, instr_unexpanded, instr_gens, instr_lanes, instr_lanes_unexp;
++static uint64_t instr_gap_ticks[8];
++static Equity instr_lane_bound[2 * BOARD_DIM];
++static void instr_print(void) {
++  const char *names[8] = {"<1", "1-2", "2-5", "5-10", "10-20", "20-40", ">=40", "nocut"};
++  fprintf(stderr, "LB measured gens %llu lanes %llu best_lanes %llu\n", lb_measured_gens, lb_lanes_total, lb_best_lanes);
++  const char *vn[4] = {"V1 exact+rack", "V2 envelope", "V3 V1+RIT", "V5 groups+RIT"};
++  fprintf(stderr, "LB V5 groups per lane %.1f overflow %llu combine cost %.1f%% of shadow ticks\n",
++          (double)lb_groups_total / lb_groups_lanes, lb_groups_overflow, 100.0 * lb_v5_combine_ticks / instr_total);
++  for (int v = 0; v < 4; v++) {
++    fprintf(stderr, "LB %s: skips %.1f%% of all shadow ticks, %.1f%% of unexpanded-lane ticks, %.1f%% of lanes; violations %llu; cost %.1f%% of shadow ticks\n",
++      vn[v], 100.0 * lb_skip_ticks[v] / instr_total, 100.0 * lb_skip_unexp_ticks[v] / instr_unexpanded,
++      100.0 * lb_lanes_skipped[v] / lb_lanes_total, lb_violations[v], 100.0 * (v < 2 ? lb_cost_ticks[v] : 0) / instr_total);
++  }
++  fprintf(stderr, "LB V2 per-gen combine cost %.1f%% of shadow ticks (env build excluded)\n", 100.0 * lb_cost_ticks[2] / instr_total);
++  for (int b = 0; b < 8; b++) {
++    fprintf(stderr, "GAP %-6s %.1f%% of unexpanded lane ticks\n", names[b], 100.0 * instr_gap_ticks[b] / instr_unexpanded);
++  }
++  fprintf(stderr, "INSTR gens %llu shadow_ticks %llu unexpanded_lane_ticks %llu (%.1f%%) lanes %llu unexpanded %llu (%.1f%%)\n",
++          instr_gens, instr_total, instr_unexpanded, 100.0 * instr_unexpanded / instr_total,
++          instr_lanes, instr_lanes_unexp, 100.0 * instr_lanes_unexp / instr_lanes);
++}
+ void shadow_by_orientation(MoveGen *gen) {
+   for (int row = 0; row < BOARD_DIM; row++) {
+     gen->current_row_index = row;
+     if (gen->row_number_of_anchors_cache[BOARD_DIM * gen->dir + row] == 0) {
+       continue;
+     }
++    const uint64_t instr_t0 = mach_absolute_time();
+     gen->last_anchor_col = INITIAL_LAST_ANCHOR_COL;
+     gen->row_squares =
+         board_get_row_cache(gen->board_lanes, gen->current_row_index, gen->dir);
+@@ -3122,6 +3372,7 @@ void shadow_by_orientation(MoveGen *gen) {
+         }
+       }
+     }
++    instr_lane_time[BOARD_DIM * gen->dir + row] += mach_absolute_time() - instr_t0;
+   }
+ }
+ 
+@@ -3832,6 +4083,7 @@ gen_record_scoring_plays_impl(MoveGen *gen, bool lazy) {
+     if (better_play_has_been_found(gen, anchor.highest_possible_equity)) {
+       break;
+     }
++    instr_lane_expanded[BOARD_DIM * anchor.dir + anchor.row] = 1;
+     gen->current_anchor_col = anchor.col;
+     // Don't recopy the row cache if we're working on the same board lane
+     // as the previous anchor. When anchors have been sorted by descending
+@@ -4572,12 +4824,74 @@ void generate_moves(const MoveGenArgs *args) {
+       skipped_lanes = gen_seed_carried_best_move(
+           gen, args->best_move_carry, lane_hashes, &gen->player_rack);
+     }
++    memset(instr_lane_time, 0, sizeof(instr_lane_time));
++    memset(instr_lane_expanded, 0, sizeof(instr_lane_expanded));
+     gen_shadow(gen);
++    for (int lane = 0; lane < 2 * BOARD_DIM; lane++) instr_lane_bound[lane] = EQUITY_MIN_VALUE;
++    for (int ai = 0; ai < gen->anchor_heap.count; ai++) {
++      const Anchor *a = &gen->anchor_heap.anchors[ai];
++      const int lane = BOARD_DIM * a->dir + a->row;
++      if (a->highest_possible_equity > instr_lane_bound[lane]) instr_lane_bound[lane] = a->highest_possible_equity;
++    }
+     if (gen->threshold_exceeded) {
+       gen_record_pass(gen);
+       return;
+     }
++    Equity instr_cutoff_after_shadow = 0; (void)instr_cutoff_after_shadow;
+     gen_record_scoring_plays(gen);
++    {
++      const Equity cutoff = gen_get_cutoff_equity_or_score(gen);
++      if (board_get_tiles_played(gen->board) > 0 && cutoff != EQUITY_MAX_VALUE && cutoff != EQUITY_INITIAL_VALUE) {
++        lb_measured_gens++;
++        const Move *best_move = gen_get_readonly_best_move(gen);
++        int best_lane = -1;
++        if (move_get_type(best_move) == GAME_EVENT_TILE_PLACEMENT_MOVE) {
++          best_lane = BOARD_DIM * move_get_dir(best_move) +
++              (move_get_dir(best_move) == BOARD_HORIZONTAL_DIRECTION ? move_get_row_start(best_move) : move_get_col_start(best_move));
++          lb_best_lanes++;
++        }
++        for (int lane = 0; lane < 2 * BOARD_DIM; lane++) {
++          if (gen->row_number_of_anchors_cache[lane] == 0) continue;
++          const Square *sq = board_get_row_cache(gen->board_lanes, lane % BOARD_DIM, lane / BOARD_DIM);
++          lb_lanes_total++;
++          uint64_t t0 = mach_absolute_time();
++          const Equity b1 = lane_bound_v1(gen, sq);
++          uint64_t t1 = mach_absolute_time();
++          LBEnv env; lane_env_build(gen, sq, &env);
++          uint64_t t2 = mach_absolute_time();
++          const Equity b2 = lane_bound_v2(gen, &env);
++          uint64_t t3 = mach_absolute_time();
++          lb_cost_ticks[0] += t1 - t0; lb_cost_ticks[1] += t3 - t1; lb_cost_ticks[2] += t3 - t2;
++          static LBGroups gs; lane_groups_build(gen, sq, &gs);
++          uint64_t t4 = mach_absolute_time();
++          const Equity b5 = lane_bound_v5(gen, &gs);
++          lb_v5_combine_ticks += mach_absolute_time() - t4;
++          const Equity bs[4] = {b1, b2, lane_bound_v3(gen, sq), b5};
++          for (int v = 0; v < 4; v++) {
++            if (lane == best_lane && bs[v] < move_get_equity(best_move)) lb_violations[v]++;
++            if (bs[v] < cutoff) {
++              lb_lanes_skipped[v]++;
++              lb_skip_ticks[v] += instr_lane_time[lane];
++              if (!instr_lane_expanded[lane]) lb_skip_unexp_ticks[v] += instr_lane_time[lane];
++            }
++          }
++        }
++      }
++      static bool registered = false;
++      if (!registered) { atexit(instr_print); registered = true; }
++      instr_gens++;
++      for (int lane = 0; lane < 2 * BOARD_DIM; lane++) {
++        if (gen->row_number_of_anchors_cache[lane] == 0) continue;
++        instr_lanes++;
++        instr_total += instr_lane_time[lane];
++        if (!instr_lane_expanded[lane]) { instr_unexpanded += instr_lane_time[lane]; instr_lanes_unexp++;
++          int b;
++          if (cutoff == EQUITY_MAX_VALUE || cutoff == EQUITY_INITIAL_VALUE || instr_lane_bound[lane] == EQUITY_MIN_VALUE) b = 7;
++          else { const double gap = (double)(cutoff - instr_lane_bound[lane]) / 1000.0;
++            b = gap < 1 ? 0 : gap < 2 ? 1 : gap < 5 ? 2 : gap < 10 ? 3 : gap < 20 ? 4 : gap < 40 ? 5 : 6; }
++          instr_gap_ticks[b] += instr_lane_time[lane]; }
++      }
++    }
+     if (carry_best_moves) {
+       gen_remember_best_move(gen, args->best_move_carry, lane_hashes,
+                              skipped_lanes, &gen->player_rack);

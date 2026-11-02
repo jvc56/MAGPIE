@@ -1,6 +1,6 @@
 # Move generation, RIT and WIT investigation (2026-11-01)
 
-Notes from one working session, kept so the work can continue elsewhere. Nothing here changes the engine; the patches in `patches/` are throwaway instrumentation.
+Notes from one working session, kept so the work can continue elsewhere. Nothing here changes the engine; the patches in `patches/` are throwaway instrumentation. Sections 1–6 were measured on an M2. Section 7 is a follow-up on an M5 Max; the shadow changes it describes are in #928.
 
 ## Setup
 
@@ -129,6 +129,62 @@ Per move generation: 329 bound records and 307 right steps (static), 248 and 231
 - **Conclusion:** caching shadow results across regular move generations doesn't pay. At best it's about a third of sim work, keyed on letter set, and a hit still needs per-rack scoring. Estimated 2–4%, not pursued.
 - **Existing caches:** `LaneShadowCache` and the endgame's incremental path lists exploit reuse in endgames, where racks are subsets of fixed racks. They don't apply here, and `LaneShadowCache` is disabled when a WIT is loaded. The sim carry (`best_move_carry.h`) keys by rack and lane hash, not by anchor.
 
+## 7. Follow-up: shadow's cost, what cut it, and a lane-level bound (M5 Max)
+
+Machine: Apple M5 Max, 48 GB. The workloads are the static and sim ones above, except that static uses `-gp false` and 10,000 games (443k turns, about 4.1 s user). Data and tables were rebuilt the same way. On this machine, shadow (`gen_shadow`, inclusive) is 41.8% of static cycles.
+
+### Why shadow costs what it does
+
+The CPU Counters bottleneck mode, from `.claude/skills/cycle-profile`, splits static autoplay's issue slots into 30.7% useful, **40.8% discarded** (mostly mispredicted branches), 13.1% processing stalls and 15.4% delivery stalls. Sampling mispredicts by line showed which shadow branches to remove. These were the largest, as shares of all mispredicts:
+
+| Branch | Share |
+|---|---|
+| exit of the insertion loop in `insert_unrestricted_effective_letter_multiplier` | 4.8% |
+| the per-square anchor test in `shadow_by_orientation` | 2.8% |
+| the loop and test in `maybe_recalculate_effective_multipliers` | 3.1% |
+| the touched-slot walks in `wmp_move_gen_reset_anchors` and `_add_anchors`, and first-touch detection in `_maybe_update_anchor` | about 5.2% |
+| the low/high half branch in `bit_rack_add_letter` | 2.2% |
+
+### What cut it (#928)
+
+Four branch removals, with output identical in every run. Each figure is the mean user time of 3 alternating pairs:
+
+| Workload | Base | New | Change |
+|---|---|---|---|
+| static, WMP/RIT/WIT on | 4.125 s | 3.757 s | −8.9% |
+| static, WMP/RIT/WIT off (3,000 games) | 5.603 s | 5.565 s | −0.7% |
+| sim | 2.667 s | 2.635 s | −1.2% |
+
+Shadow's own cycles fell about 16% from the three shadow changes. The BitRack change cut total mispredicts by 3.1%. Run-to-run noise in static user time is about ±2%, so use at least 3 alternating pairs.
+
+### Tried and not kept
+
+- **Fixed trip count for the multiplier rebuild:** +3.3%. Clang emits the insert as a 4-lane NEON op plus scalar stores at mixed widths, and the next insert's 16-byte load can't be forwarded from them.
+- **Forcing `shadow_record_wmp` inline:** −2.4% in one run and +1.4% in the next, within noise.
+- **Stepping over runs of board tiles at once** in `shadow_play_right` and `shadow_start_playthrough`:
+  - Precomputing prefix sums for every lane each turn cost 3.3% of cycles, for a net +3.2%.
+  - Recording each run on its first walk was neutral, and total mispredicts didn't change (30,421 vs 30,458 samples). The branch that mispredicts there is whether the next square holds a tile at all, not the loop over the tiles.
+
+### Skipping whole lanes with a cheap bound
+
+`patches/lane_bound.patch` (applies to `main`) times shadow per lane and marks the lanes where any anchor is expanded. For lanes where none is, it also measures how far the lane's best anchor bound sits below the final cutoff.
+
+- **Ceiling:** 46.3% of static shadow time is in lanes where no anchor is ever expanded (62% of lanes). In sims it is 37.8%.
+- **Gap:** for static, weighted by shadow time, 38% of that waste is within 10 points of the cutoff, 23% is 10–20 points below it, 32% is 20 or more below, and 7% recorded no bound.
+
+The patch evaluates several candidate per-lane upper bounds, and reports what share of shadow time each would skip (a lane's bound below the final cutoff). It also counts violations: lanes holding the best move found whose bound is below that move's equity. There were none in any variant, over about 280k move generations in total.
+
+| Bound | Static: shadow time skipped | Sim: shadow time skipped |
+|---|---|---|
+| V1: every placement, rack-aware blocked squares, nonplaythrough word lengths | 18.4% | 5.5% |
+| V2: envelope of sorted multipliers per tile count, ignores the rack | 13.8% | 3.7% |
+| V3: V1 plus the RIT's playthrough unions and multi-playthrough bitvecs | **30.5%** | 9.6% |
+| V5: V2, grouped by (tile count, through-tile count, through-letter set), plus the RIT checks | 25.7% | 7.7% |
+
+The RIT word-existence checks matter most, since they rule out bingos through board tiles. V1 and V3 enumerate every placement, so they cost about as much as shadow. V5 is the cacheable form, with 10.6 groups per lane. Its per-turn combine measured 17–21% of shadow time unoptimized. Rebuilding a lane's groups costs about one lane's shadow, and about a third of lanes change each static turn.
+
+**Conclusion:** not worth building. Static would save roughly 2% of total time after costs, before the overhead of interleaving lane shadowing with anchor expansion. Sims would save nothing, because the per-turn combine costs more than the 7.7% it skips.
+
 ## Next steps
 
 1. **Exact-fit check before anchor expansion.**
@@ -139,6 +195,8 @@ Per move generation: 329 bound records and 307 right steps (static), 248 and 231
 2. **Positional masks in the WIT**, if the exact check costs too much: about 8 MB, roughly double today's pruning.
 3. **Cache the KWG hash** used by WIT validation, for per-command latency.
 4. **Confirm any timing gain on a large-memory machine.**
+5. **Mispredicts outside shadow.** After #928, `wordmap_gen_check_playthrough_and_crosses` and `wordmap_gen_record_subrack` hold about 21% of static's mispredicts, the largest remaining sites. Shadow's remaining mispredicts are real board and rack decisions, such as whether a square holds a tile or whether the word multiplier changed.
+6. **Don't revisit lazy lane shadowing** without a new idea for a bound that is both tight and cheap (section 7).
 
 ## Reproducing the instrumentation
 
@@ -153,4 +211,14 @@ python3 notes/movegen_investigation/tools/eval_filters.py CSW24.txt /tmp/static_
 git checkout src/impl/move_gen.c
 ```
 
-The two patches don't stack, so apply one at a time. The `ANCHOR` and `SHADOW` lines report reuse; the `INSTR` lines (counters patch) report per-run totals.
+For the lane-bound measurements (section 7):
+
+```
+git apply notes/movegen_investigation/patches/lane_bound.patch
+make magpie BUILD=no_pgo_release
+bin/magpie <STATIC command, with -gp false> 2>&1 >/dev/null | grep -E 'INSTR|GAP|LB'
+bin/magpie < notes/movegen_investigation/tools/sim_fixed.cmd 2>&1 >/dev/null | grep -E 'INSTR|GAP|LB'
+git checkout src/impl/move_gen.c
+```
+
+It uses `mach_absolute_time`, so it builds on macOS only. Its `cost` figures include the timer's own overhead. The patches don't stack, so apply one at a time. The `ANCHOR` and `SHADOW` lines report reuse; the `INSTR` lines (counters patch) report per-run totals.
