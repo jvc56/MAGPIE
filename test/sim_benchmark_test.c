@@ -77,8 +77,8 @@ static void run_sim_benchmark(const SimBenchArgs *args) {
   ctimer_stop(&timer);
   const double elapsed = ctimer_elapsed_seconds(&timer);
   const uint64_t iters = autoplay_get_total_sim_iterations();
-  printf("plies=%d: %.1fs, iters=%llu (%.0f iters/sec)\n", args->plies,
-         elapsed, (unsigned long long)iters, (double)iters / elapsed);
+  printf("plies=%d: %.1fs, iters=%llu (%.0f iters/sec)\n", args->plies, elapsed,
+         (unsigned long long)iters, (double)iters / elapsed);
 
   config_destroy(config);
 }
