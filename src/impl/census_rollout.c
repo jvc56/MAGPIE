@@ -16,6 +16,7 @@
 #include "../ent/klv.h"
 #include "../ent/letter_distribution.h"
 #include "../ent/move.h"
+#include "../ent/peg_adjust.h"
 #include "../ent/player.h"
 #include "../ent/rack.h"
 #include "../ent/static_eval.h"
@@ -286,18 +287,6 @@ static void census_rollout_anchor_zones(const Square *squares,
 static void raise_best(Equity *best, Equity value) {
   const Equity old = *best;
   *best = value > old ? value : old;
-}
-
-// By tiles played, the pre-endgame adjustment of a play from this bag, as
-// static_eval_get_nonopening_move_equity adds it.
-static void peg_by_tiles_played_for_bag(int number_of_tiles_in_bag,
-                                        Equity *by_tiles_played) {
-  by_tiles_played[0] = 0;
-  for (int tiles_played = 1; tiles_played <= RACK_SIZE; tiles_played++) {
-    const int index = number_of_tiles_in_bag - tiles_played + RACK_SIZE;
-    by_tiles_played[tiles_played] =
-        index < PEG_ADJUST_VALUES_LENGTH ? peg_adjust_values[index] : 0;
-  }
 }
 
 static void census_rollout_table_destroy(CensusRolloutTable *table) {
@@ -1118,8 +1107,14 @@ static void census_rollout_gather_rack(CensusRolloutWorker *worker,
                                        const Game *game, const Rack *rack,
                                        const CensusRolloutBoard *board) {
   const int bag = bag_get_letters(game_get_bag(game));
+  // By tiles played, the pre-endgame adjustment of a play from this bag, as
+  // move generation adds it. The census serves only players without a table
+  // (see census_rollout_serves), so these are all 0.
   Equity peg_by_tiles_played[RACK_SIZE + 1];
-  peg_by_tiles_played_for_bag(bag, peg_by_tiles_played);
+  peg_adjust_fill_by_tiles_played(
+      player_get_peg_adjust(
+          game_get_player(game, game_get_player_on_turn_index(game))),
+      bag, peg_by_tiles_played);
   // Bags that give no play an adjustment share the root bests.
   const int bag_class = bag >= PEG_ADJUST_VALUES_LENGTH ? 0 : bag;
   uint64_t key;
@@ -1238,7 +1233,10 @@ static bool census_rollout_skips(CensusRolloutWorker *worker,
 // Whether the census serves a generation from game: a play's equity must be
 // its score, its leave's value, and the pre-endgame adjustment, which for a
 // given bag depends only on how many tiles the play places (Quackle's
-// leftInBagPlusSeven index). With PAT on, it has another term.
+// leftInBagPlusSeven index). With PAT on, it has another term. A player with
+// a pre-endgame adjustment table is not served either: the table is per
+// player and the root cache's key (bag and rack) does not tell the players
+// apart.
 static bool census_rollout_serves(const Game *game) {
   if (bag_get_letters(game_get_bag(game)) == 0 ||
       board_get_tiles_played(game_get_board(game)) == 0) {
@@ -1246,7 +1244,8 @@ static bool census_rollout_serves(const Game *game) {
   }
   const Player *player =
       game_get_player(game, game_get_player_on_turn_index(game));
-  return player_get_pat(player) == NULL || player_get_pat_disabled(player);
+  return (player_get_pat(player) == NULL || player_get_pat_disabled(player)) &&
+         player_get_peg_adjust(player) == NULL;
 }
 
 const Move *census_rollout_get_best_move(CensusRolloutWorker *worker,
