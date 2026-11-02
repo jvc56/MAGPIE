@@ -348,6 +348,10 @@ void run_test(const char *subtest) {
     sim_benchmark_run_spec(subtest + strlen("simbench:"));
     return;
   }
+  if (has_prefix("pcbench:", subtest)) {
+    play_chooser_benchmark_run_spec(subtest + strlen("pcbench:"));
+    return;
+  }
   log_fatal("unrecognized test: %s\n", subtest);
 }
 

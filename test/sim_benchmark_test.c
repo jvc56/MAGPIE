@@ -88,12 +88,13 @@ void test_sim_benchmark(void) {
   run_sim_benchmark(&args);
 }
 
-// The integer after "<key>=" in item.
-static int sim_bench_spec_int(const char *item, const char *key) {
+// The integer after "<key>=" in item, a setting of the benchmark bench.
+static int bench_spec_int(const char *bench, const char *item,
+                          const char *key) {
   ErrorStack *error_stack = error_stack_create();
   const int value = string_to_int(item + strlen(key) + 1, error_stack);
   if (!error_stack_is_empty(error_stack)) {
-    log_fatal("simbench %s must be an integer, got '%s'", key, item);
+    log_fatal("%s %s must be an integer, got '%s'", bench, key, item);
   }
   error_stack_destroy(error_stack);
   return value;
@@ -107,9 +108,9 @@ void sim_benchmark_run_spec(const char *spec) {
   for (int item_idx = 0; item_idx < num_items; item_idx++) {
     const char *item = string_splitter_get_item(items, item_idx);
     if (has_prefix("plies=", item)) {
-      args.plies = sim_bench_spec_int(item, "plies");
+      args.plies = bench_spec_int("simbench", item, "plies");
     } else if (has_prefix("threads=", item)) {
-      args.threads = sim_bench_spec_int(item, "threads");
+      args.threads = bench_spec_int("simbench", item, "threads");
     } else if (has_prefix("tlim=", item)) {
       args.tlim = item + strlen("tlim=");
     } else if (has_prefix("mi=", item)) {
@@ -131,17 +132,36 @@ void sim_benchmark_run_spec(const char *spec) {
   string_splitter_destroy(items);
 }
 
-void test_play_chooser_benchmark(void) {
-  const char *games_env = getenv("PCBENCH_GAMES");
-  const int games = games_env != NULL ? (int)strtol(games_env, NULL, 10) : 4;
-  const char *clock_env = getenv("PCBENCH_CLOCK_MS");
-  const int clock_ms =
-      clock_env != NULL ? (int)strtol(clock_env, NULL, 10) : 5000;
-  const char *threads_env = getenv("PCBENCH_THREADS");
-  const int threads = threads_env != NULL ? (int)strtol(threads_env, NULL, 10)
-                                          : get_num_cores();
-  const char *wit_env = getenv("PCBENCH_WIT");
-  const char *wit = wit_env != NULL ? wit_env : "false";
+// Play chooser benchmark: autoplays games under a game clock, with each
+// turn's move pinned to top static equity as in simbench, and reports how
+// much search work the play chooser's sims, PEG solves and endgame solves
+// complete.
+//
+// Run as pcbench for the defaults, or pcbench:<key>=<value>,... to change
+// them:
+//   games     games to play                  (default 4)
+//   clock_ms  each player's clock, in ms     (default 5000)
+//   threads   worker threads                 (default detected hardware
+//             concurrency)
+//   wit       -wit                           (default true)
+// For example: pcbench:games=2,threads=16,wit=false
+typedef struct PlayChooserBenchArgs {
+  int games;
+  int clock_ms;
+  int threads;
+  const char *wit;
+} PlayChooserBenchArgs;
+
+static PlayChooserBenchArgs play_chooser_bench_default_args(void) {
+  return (PlayChooserBenchArgs){
+      .games = 4, .clock_ms = 5000, .threads = get_num_cores(), .wit = "true"};
+}
+
+static void run_play_chooser_benchmark(const PlayChooserBenchArgs *args) {
+  const int games = args->games;
+  const int clock_ms = args->clock_ms;
+  const int threads = args->threads;
+  const char *wit = args->wit;
 
   char settings[512];
   (void)snprintf(
@@ -210,4 +230,35 @@ void test_play_chooser_benchmark(void) {
   free(peg_events);
 
   config_destroy(config);
+}
+
+void test_play_chooser_benchmark(void) {
+  const PlayChooserBenchArgs args = play_chooser_bench_default_args();
+  run_play_chooser_benchmark(&args);
+}
+
+// "<key>=<value>[,<key>=<value>...]", with the keys listed above
+// PlayChooserBenchArgs.
+void play_chooser_benchmark_run_spec(const char *spec) {
+  PlayChooserBenchArgs args = play_chooser_bench_default_args();
+  StringSplitter *items = split_string(spec, ',', true);
+  const int num_items = string_splitter_get_number_of_items(items);
+  for (int item_idx = 0; item_idx < num_items; item_idx++) {
+    const char *item = string_splitter_get_item(items, item_idx);
+    if (has_prefix("games=", item)) {
+      args.games = bench_spec_int("pcbench", item, "games");
+    } else if (has_prefix("clock_ms=", item)) {
+      args.clock_ms = bench_spec_int("pcbench", item, "clock_ms");
+    } else if (has_prefix("threads=", item)) {
+      args.threads = bench_spec_int("pcbench", item, "threads");
+    } else if (has_prefix("wit=", item)) {
+      args.wit = item + strlen("wit=");
+    } else {
+      log_fatal("pcbench spec takes games, clock_ms, threads and wit, got '%s'",
+                item);
+    }
+  }
+  // The strings in args point into items, so it outlives the run.
+  run_play_chooser_benchmark(&args);
+  string_splitter_destroy(items);
 }
