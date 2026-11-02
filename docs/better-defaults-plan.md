@@ -494,7 +494,10 @@ All three are speed structures: none changes which move is chosen.
     10 GB and 1% of it;
   - memory: available memory, less a 1 GB reserve and the search table
     (`-ttfraction` of physical memory), capped at a quarter of physical
-    memory. Where available memory can't be read, the quarter alone.
+    memory. Where available memory can't be read, the quarter alone. A
+    build's peak is weighed the same way but for the search table, which a
+    build ends before a solve allocates. Without this split, a Mac with 7 GB
+    never built a wordmap it had room to build and to hold.
 - **macOS** reports available memory (free, inactive and purgeable pages),
   in src/compat.
 - **First-use builds.** A missing wordmap, word info table or rack info table
