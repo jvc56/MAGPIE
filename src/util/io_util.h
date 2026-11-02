@@ -332,6 +332,12 @@ typedef enum {
   ERROR_STATUS_CENSUS_MALFORMED_RECIPE,
   ERROR_STATUS_CENSUS_UNSUPPORTED_GAME,
   ERROR_STATUS_LEAVE_BLEND_INVALID_WEIGHT,
+  // A pre-endgame adjustment file has a malformed row, an index out of range
+  // or an index given twice.
+  ERROR_STATUS_PEG_ADJUST_INVALID_ROW,
+  // pegfit was asked to fit while the players have different pre-endgame
+  // adjustments loaded.
+  ERROR_STATUS_PEG_FIT_DIFFERENT_TABLES,
 } error_code_t;
 
 typedef enum {

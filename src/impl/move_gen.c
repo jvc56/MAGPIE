@@ -31,6 +31,7 @@
 #include "../ent/move.h"
 #include "../ent/pat.h"
 #include "../ent/pat_eval.h"
+#include "../ent/peg_adjust.h"
 #include "../ent/player.h"
 #include "../ent/rack.h"
 #include "../ent/rack_info_table.h"
@@ -544,7 +545,8 @@ static inline Equity get_move_equity_for_sort_type_wmp(MoveGen *gen,
         gen->opening_move_word_penalties, gen->opening_move_letter_penalties,
         pat_eval_context_get_active_classes(&gen->pat_eval_ctx),
         &gen->pat_eval_ctx, gen->board_number_of_tiles_played,
-        gen->number_of_tiles_in_bag, leave_value);
+        gen->number_of_tiles_in_bag, leave_value,
+        gen->peg_adjust_by_tiles_played[move_get_tiles_played(move)]);
   case MOVE_SORT_SCORE:
     return move_get_score(move);
   default:
@@ -568,8 +570,8 @@ static inline Equity get_move_equity_for_sort_type_wmp(MoveGen *gen,
 // anchor's tiles_to_play: every word for a size-k subrack plays exactly k
 // tiles, so it is what set_play_for_record_wmp writes into the Move. If a WMP
 // anchor ever emitted plays of varying length, the pre-endgame adjustment
-// (bag_plus_rack_size < PEG_ADJUST_VALUES_LENGTH) would be the only place
-// this went wrong, and it would do so silently.
+// (peg_adjust_by_tiles_played) would be the only place this went wrong, and
+// it would do so silently.
 static inline bool get_wmp_equity_without_move(const MoveGen *gen, Equity score,
                                                Equity leave_value,
                                                Equity *equity) {
@@ -582,8 +584,9 @@ static inline bool get_wmp_equity_without_move(const MoveGen *gen, Equity score,
       return false;
     }
     *equity = static_eval_get_nonopening_move_equity(
-        &gen->ld, &gen->leave, &gen->opponent_rack, gen->max_tiles_to_play,
-        gen->number_of_tiles_in_bag, score, leave_value);
+        &gen->ld, &gen->leave, &gen->opponent_rack, gen->number_of_tiles_in_bag,
+        score, leave_value,
+        gen->peg_adjust_by_tiles_played[gen->max_tiles_to_play]);
     return true;
   default:
     log_fatal("unhandled move sort type: %d", gen->move_sort_type);
@@ -678,7 +681,9 @@ update_best_move_or_insert_into_movelist_wmp(MoveGen *gen, int start_col,
                     gen->opening_move_letter_penalties,
                     pat_eval_context_get_active_classes(&gen->pat_eval_ctx),
                     NULL, gen->board_number_of_tiles_played,
-                    gen->number_of_tiles_in_bag, leave_value);
+                    gen->number_of_tiles_in_bag, leave_value,
+                    gen->peg_adjust_by_tiles_played[move_get_tiles_played(
+                        current_move)]);
       move_equity_or_score = gen_pat_contender_equity(
           gen, current_move, &gen->leave, equity_without_pat);
     } else {
@@ -905,23 +910,24 @@ bool wordmap_gen_check_playthrough_and_crosses(MoveGen *gen, int word_idx,
 // which the anchor-level check already bounded; adding a leave there would
 // skip subracks that still hold plays above the cutoff. This is an equity
 // upper bound independent of the anchor's highest_possible_score, so any
-// positive equity term added to the real evaluation must be added here too:
-// anchor_pat_bound (see gen_wmp_anchor_pat_bound) folds in the PAT term's
-// contribution, which includes the largest utility correction the anchor's
-// plays can get and so can be positive; the opening placement_adjustment
-// (always <= 0) is soundly
-// omitted; see static_eval_get_shadow_equity. The candidate mask applies the
-// same bound (see wordmap_gen_candidate_subracks).
+// positive equity term added to the real evaluation must be added here too.
+// anchor_term_bound folds in two: the PAT term's contribution (see
+// gen_wmp_anchor_pat_bound), which includes the largest utility correction
+// the anchor's plays can get and so can be positive, and the pre-endgame
+// adjustment, which every play of the anchor shares since they all use
+// anchor->tiles_to_play tiles. The opening placement_adjustment (always <= 0)
+// is soundly omitted; see static_eval_get_shadow_equity. The candidate mask
+// applies the same bound (see wordmap_gen_candidate_subracks).
 static inline __attribute__((always_inline)) bool
 wordmap_gen_leave_prunes_subrack(const MoveGen *gen, const Anchor *anchor,
-                                 int subrack_idx, Equity anchor_pat_bound) {
+                                 int subrack_idx, Equity anchor_term_bound) {
   if (!gen->wmp_prune_subracks_by_leave) {
     return false;
   }
   const Equity leave_value =
       wmp_move_gen_get_leave_value(&gen->wmp_move_gen, subrack_idx);
   return better_play_has_been_found(
-      gen, leave_value + anchor->highest_possible_score + anchor_pat_bound);
+      gen, leave_value + anchor->highest_possible_score + anchor_term_bound);
 }
 
 // Probes the WMP for one canonical subrack of the current anchor and records
@@ -935,7 +941,7 @@ wordmap_gen_leave_prunes_subrack(const MoveGen *gen, const Anchor *anchor,
 // with WIT off).
 static inline __attribute__((always_inline)) bool
 wordmap_gen_record_subrack(MoveGen *gen, const Anchor *anchor, int subrack_idx,
-                           bool lazy, Equity anchor_pat_bound) {
+                           bool lazy, Equity anchor_term_bound) {
   WMPMoveGen *wgen = &gen->wmp_move_gen;
   // record_wmp_play prices every play below with wgen->leave_value. Only
   // equity sort with tiles in the bag reads the subrack's leave, and that is
@@ -945,7 +951,7 @@ wordmap_gen_record_subrack(MoveGen *gen, const Anchor *anchor, int subrack_idx,
     wgen->leave_value = wmp_move_gen_get_leave_value(wgen, subrack_idx);
   }
   if (wordmap_gen_leave_prunes_subrack(gen, anchor, subrack_idx,
-                                       anchor_pat_bound)) {
+                                       anchor_term_bound)) {
     return false;
   }
   if (!wmp_move_gen_get_subrack_words(wgen, subrack_idx, lazy,
@@ -998,7 +1004,7 @@ wordmap_gen_record_subrack(MoveGen *gen, const Anchor *anchor, int subrack_idx,
 static inline __attribute__((always_inline)) uint64_t
 wordmap_gen_candidate_subracks(const MoveGen *gen, const Anchor *anchor,
                                int first_idx, int count, bool lazy,
-                               Equity anchor_pat_bound,
+                               Equity anchor_term_bound,
                                uint64_t *filter_misses) {
   const bool prune_by_leave = gen->wmp_prune_subracks_by_leave &&
                               better_play_has_been_found(gen, EQUITY_MIN_VALUE);
@@ -1007,7 +1013,7 @@ wordmap_gen_candidate_subracks(const MoveGen *gen, const Anchor *anchor,
   // it can be positive.
   return wmp_move_gen_get_candidate_subracks(
       &gen->wmp_move_gen, first_idx, count, lazy, prune_by_leave,
-      anchor->highest_possible_score + anchor_pat_bound,
+      anchor->highest_possible_score + anchor_term_bound,
       gen_get_cutoff_equity_or_score(gen), filter_misses);
 }
 
@@ -1036,12 +1042,12 @@ static __attribute__((noinline)) uint64_t wordmap_gen_allowed_subracks(
 static __attribute__((noinline)) void
 wordmap_gen_resolve_filter_misses(MoveGen *gen, const Anchor *anchor,
                                   int first_idx, uint64_t misses,
-                                  Equity anchor_pat_bound) {
+                                  Equity anchor_term_bound) {
   while (misses != 0) {
     const int subrack_idx = first_idx + wmp_move_gen_get_lowest_set_bit(misses);
     misses &= misses - 1;
     if (!wordmap_gen_leave_prunes_subrack(gen, anchor, subrack_idx,
-                                          anchor_pat_bound)) {
+                                          anchor_term_bound)) {
       wmp_move_gen_resolve_filter_miss(&gen->wmp_move_gen, subrack_idx);
     }
   }
@@ -1166,9 +1172,11 @@ wordmap_gen(MoveGen *gen, const Anchor *anchor, bool lazy) {
   const bool has_forbidden =
       bit_rack_mask_has_letters(forbidden_subrack_low, forbidden_subrack_high);
   // Upper bound on the PAT term of every move from this anchor (zero when
-  // the term is off). See wordmap_gen_leave_prunes_subrack.
-  const Equity anchor_pat_bound =
-      gen_wmp_anchor_pat_bound(gen, anchor->dir, anchor->row, anchor);
+  // the term is off), plus their shared pre-endgame adjustment. See
+  // wordmap_gen_leave_prunes_subrack.
+  const Equity anchor_term_bound =
+      gen_wmp_anchor_pat_bound(gen, anchor->dir, anchor->row, anchor) +
+      gen->peg_adjust_by_tiles_played[anchor->tiles_to_play];
   for (int first_idx = 0; first_idx < num_subrack_combinations;
        first_idx += WMP_MOVE_GEN_SUBRACKS_PER_MASK) {
     const int remaining = num_subrack_combinations - first_idx;
@@ -1177,7 +1185,7 @@ wordmap_gen(MoveGen *gen, const Anchor *anchor, bool lazy) {
                           : WMP_MOVE_GEN_SUBRACKS_PER_MASK;
     uint64_t filter_misses = 0;
     uint64_t candidates = wordmap_gen_candidate_subracks(
-        gen, anchor, first_idx, count, lazy, anchor_pat_bound, &filter_misses);
+        gen, anchor, first_idx, count, lazy, anchor_term_bound, &filter_misses);
     if (has_forbidden) {
       const uint64_t allowed = wordmap_gen_allowed_subracks(
           wgen, first_idx, count, forbidden_subrack_low,
@@ -1191,17 +1199,17 @@ wordmap_gen(MoveGen *gen, const Anchor *anchor, bool lazy) {
       const uint64_t misses_below = filter_misses & ((1ULL << bit_idx) - 1);
       if (misses_below != 0) {
         wordmap_gen_resolve_filter_misses(gen, anchor, first_idx, misses_below,
-                                          anchor_pat_bound);
+                                          anchor_term_bound);
         filter_misses ^= misses_below;
       }
       if (wordmap_gen_record_subrack(gen, anchor, first_idx + bit_idx, lazy,
-                                     anchor_pat_bound)) {
+                                     anchor_term_bound)) {
         return;
       }
     }
     if (filter_misses != 0) {
       wordmap_gen_resolve_filter_misses(gen, anchor, first_idx, filter_misses,
-                                        anchor_pat_bound);
+                                        anchor_term_bound);
     }
   }
 }
@@ -3316,6 +3324,9 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
 
   gen->bingo_bonus = game_get_bingo_bonus(game);
   gen->number_of_tiles_in_bag = bag_get_letters(game_get_bag(game));
+  peg_adjust_fill_by_tiles_played(player_get_peg_adjust(player),
+                                  gen->number_of_tiles_in_bag,
+                                  gen->peg_adjust_by_tiles_played);
   gen->wmp_prune_subracks_by_leave = (gen->number_of_tiles_in_bag > 0) &&
                                      (gen->move_sort_type == MOVE_SORT_EQUITY);
   gen->kwgs_are_shared = game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KWG);
@@ -3555,7 +3566,8 @@ static void gen_set_shadow_equities(MoveGen *gen) {
         static_eval_get_shadow_equity(
             &gen->ld, &gen->opponent_rack, gen->best_leaves,
             gen->full_rack_descending_tile_scores, gen->number_of_tiles_in_bag,
-            number_of_letters_on_rack, tiles_played);
+            number_of_letters_on_rack, tiles_played,
+            gen->peg_adjust_by_tiles_played[tiles_played]);
   }
   if (!wmp_move_gen_is_active(&gen->wmp_move_gen) ||
       gen->number_of_tiles_in_bag == 0) {
@@ -3569,7 +3581,8 @@ static void gen_set_shadow_equities(MoveGen *gen) {
         static_eval_get_shadow_equity(
             &gen->ld, &gen->opponent_rack, nonplaythrough_best_leaves,
             gen->full_rack_descending_tile_scores, gen->number_of_tiles_in_bag,
-            number_of_letters_on_rack, tiles_played);
+            number_of_letters_on_rack, tiles_played,
+            gen->peg_adjust_by_tiles_played[tiles_played]);
   }
 }
 
@@ -4288,7 +4301,8 @@ static Equity gen_get_carried_move_equity(const MoveGen *gen, const Move *move,
       gen->opening_move_word_penalties, gen->opening_move_letter_penalties,
       pat_eval_context_get_active_classes(&gen->pat_eval_ctx),
       &gen->pat_eval_ctx, gen->board_number_of_tiles_played,
-      gen->number_of_tiles_in_bag, leave_value);
+      gen->number_of_tiles_in_bag, leave_value,
+      gen->peg_adjust_by_tiles_played[move_get_tiles_played(move)]);
 }
 
 // Whether this generation can start from remembered moves and remember its

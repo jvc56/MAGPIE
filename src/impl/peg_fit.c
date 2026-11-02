@@ -16,8 +16,8 @@
 #include "../ent/equity.h"
 #include "../ent/game.h"
 #include "../ent/move.h"
+#include "../ent/peg_adjust.h"
 #include "../ent/player.h"
-#include "../ent/static_eval.h"
 #include "../ent/thread_control.h"
 #include "../ent/transposition_table.h"
 #include "../util/io_util.h"
@@ -45,6 +45,8 @@ enum {
 
 typedef struct PegFitShared {
   const PegFitArgs *args;
+  // The pre-endgame adjustments both players play with, or NULL for none.
+  const PegAdjust *table;
   TranspositionTable *endgame_tt;
   atomic_int next_game;
   cpthread_mutex_t mutex;
@@ -74,14 +76,6 @@ static uint64_t peg_fit_mix_seed(uint64_t seed, uint64_t first,
   mixed *= 0x94D049BB133111EBULL;
   mixed ^= mixed >> 29;
   return mixed;
-}
-
-// The adjustment static equity gives a tile placement of tiles_played tiles
-// with number_of_tiles_in_bag tiles in the bag.
-static Equity peg_fit_get_playing_value(int number_of_tiles_in_bag,
-                                        int tiles_played) {
-  const int index = number_of_tiles_in_bag - tiles_played + RACK_SIZE;
-  return index < PEG_ADJUST_VALUES_LENGTH ? peg_adjust_values[index] : 0;
 }
 
 static void peg_fit_generate_all_moves(const Game *game, MoveList **move_list) {
@@ -207,8 +201,9 @@ static void peg_fit_analyze_position(PegFitWorker *worker, int game_idx,
     const int move_class = peg_fit_get_move_class(move, number_of_tiles_in_bag);
     Equity static_equity = move_get_equity(move);
     if (move_class != PEG_FIT_BASE_CLASS) {
-      static_equity -= peg_fit_get_playing_value(number_of_tiles_in_bag,
-                                                 move_get_tiles_played(move));
+      static_equity -= peg_adjust_get_placement_value(
+          worker->shared->table, number_of_tiles_in_bag,
+          move_get_tiles_played(move));
     }
     if (!position.has_class[move_class]) {
       number_of_classes++;
@@ -396,9 +391,11 @@ static void peg_fit_write_table(const PegFitArgs *args,
   StringBuilder *sb = string_builder_create();
   string_builder_add_formatted_string(
       sb,
-      "# Pre-endgame adjustments fitted by pegfit: %d games, %d positions, "
-      "%d rollouts per class, endgame plies %d, seed %llu.\n"
+      "# Pre-endgame adjustments fitted by pegfit: playing table %s, %d "
+      "games, %d positions, %d rollouts per class, endgame plies %d, seed "
+      "%llu.\n"
       "# index,value (points)\n",
+      shared->table != NULL ? peg_adjust_get_name(shared->table) : "none",
       args->number_of_games, shared->number_of_positions,
       args->rollouts_per_class, args->endgame_plies,
       (unsigned long long)args->seed);
@@ -433,9 +430,9 @@ static void peg_fit_print_result(const PegFitArgs *args,
       string_builder_add_formatted_string(sb, "%5d", class_idx);
     }
     const double playing_value =
-        class_idx == PEG_FIT_BASE_CLASS
+        class_idx == PEG_FIT_BASE_CLASS || shared->table == NULL
             ? 0
-            : equity_to_double(peg_adjust_values[class_idx]);
+            : equity_to_double(peg_adjust_get_value(shared->table, class_idx));
     string_builder_add_formatted_string(
         sb, "  %6.2f  %5.2f  %9d  %7.2f\n", result->terms[class_idx],
         result->standard_errors[class_idx], result->observations[class_idx],
@@ -449,6 +446,7 @@ static void peg_fit_print_result(const PegFitArgs *args,
 void peg_fit(const PegFitArgs *args, ErrorStack *error_stack) {
   PegFitShared shared = {
       .args = args,
+      .table = player_get_peg_adjust(game_get_player(args->game, 0)),
       .endgame_tt = NULL,
       .positions = malloc_or_die(sizeof(PegFitPosition) *
                                  PEG_FIT_INITIAL_POSITIONS_CAPACITY),

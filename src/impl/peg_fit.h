@@ -33,7 +33,9 @@ enum {
 };
 
 typedef struct PegFitArgs {
-  // The game whose rules, lexicon and leaves self-play uses. Not modified.
+  // The game whose rules, lexicon, leaves and pre-endgame adjustments
+  // self-play uses; both players must have the same adjustments, if any.
+  // Not modified.
   const Game *game;
   int number_of_games;
   int rollouts_per_class;

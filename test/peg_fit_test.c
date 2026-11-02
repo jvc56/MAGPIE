@@ -12,6 +12,7 @@
 #include <math.h>
 #include <stdbool.h>
 #include <stdlib.h>
+#include <string.h>
 
 enum {
   PEG_FIT_TEST_POSITIONS = 60,
@@ -115,8 +116,10 @@ static void test_peg_fit_command(void) {
   char *tmp_dir = test_platform_make_temporary_directory("magpie_peg_fit_");
   char *strategy_dir = get_formatted_string("%s/strategy", tmp_dir);
   assert(cfile_mkdir(strategy_dir) == 0);
-  char *set_cmd = get_formatted_string("set -path %s:%s -lex CSW21 -wmp true",
-                                       tmp_dir, DEFAULT_TEST_DATA_PATH);
+  // test/fixtures holds Quackle's table.
+  char *set_cmd = get_formatted_string(
+      "set -path %s:./test/fixtures:%s -lex CSW21 -wmp true", tmp_dir,
+      DEFAULT_TEST_DATA_PATH);
   Config *config = config_create_or_die(set_cmd);
 
   // With static endgames the table does not depend on the thread count.
@@ -137,6 +140,17 @@ static void test_peg_fit_command(void) {
   char *solved = get_string_from_file_or_die(solved_filename);
   assert_table_rows(solved);
 
+  // Self-play with a table fits against equities without it, and names it.
+  load_and_exec_config_or_die(config, "pegfit 2 1 0 fit_quackle -threads 2 "
+                                      "-pegadjust quackle_pegadjust");
+  char *quackle_filename = get_table_filename(strategy_dir, "fit_quackle");
+  char *quackle = get_string_from_file_or_die(quackle_filename);
+  assert(strstr(quackle, "playing table quackle_pegadjust") != NULL);
+  assert_table_rows(quackle);
+  assert_config_exec_status(config, "pegfit 1 1 0 -pegadjust2 none",
+                            ERROR_STATUS_PEG_FIT_DIFFERENT_TABLES);
+  load_and_exec_config_or_die(config, "set -pegadjust none");
+
   assert_config_exec_status(config, "pegfit 0 1 0",
                             ERROR_STATUS_CONFIG_LOAD_MALFORMED_INT_ARG);
   assert_config_exec_status(config, "pegfit 1 x 0",
@@ -144,6 +158,8 @@ static void test_peg_fit_command(void) {
   assert_config_exec_status(config, "pegfit 1 1 99",
                             ERROR_STATUS_CONFIG_LOAD_MALFORMED_INT_ARG);
 
+  free(quackle);
+  free(quackle_filename);
   free(solved);
   free(solved_filename);
   free(static_3);

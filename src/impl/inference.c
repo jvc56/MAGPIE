@@ -189,7 +189,8 @@ static void find_best_exchange_leave(const Inference *inference, Rack *leave,
 
 // Sets best_exchange_leave to the tiles the target keeps in its best exchange
 // of target_number_of_tiles_exchanged tiles and returns that exchange's
-// equity, computed the way move generation computes it.
+// equity, computed the way move generation computes it: an exchange leaves
+// the bag as it is, so it gets no pre-endgame adjustment.
 static Equity get_best_exchange_equity(const Inference *inference) {
   const int keep_size = RACK_SIZE - inference->target_number_of_tiles_exchanged;
   Rack leave;
@@ -200,8 +201,7 @@ static Equity get_best_exchange_equity(const Inference *inference) {
   return static_eval_get_nonopening_move_equity(
       game_get_ld(game), inference->best_exchange_leave,
       player_get_rack(game_get_player(game, 1 - inference->target_index)),
-      inference->target_number_of_tiles_exchanged,
-      bag_get_letters(game_get_bag(game)), 0, best_value);
+      bag_get_letters(game_get_bag(game)), 0, best_value, 0);
 }
 
 // A rack is consistent with the target's move when no move beats it by more
