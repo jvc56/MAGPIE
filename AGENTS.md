@@ -75,6 +75,17 @@ compile; the cross-compile is the real check. The Windows compiler is the pinned
 
 **format.py is NOT just clang-format** — it reorders includes (self-header first, blank line, then all others contiguous) before running `clang-format-20`. No config files.
 
+## Releasing
+
+```bash
+python3 scripts/release.py --dry-run  # asks the questions, changes nothing
+python3 scripts/release.py            # the whole release, from origin/main
+```
+
+The script needs an authenticated `gh`, and asks for the new version (unless main is already ahead of the latest release) and for feedback on the notes, which the `claude` CLI drafts and revises when it is installed. Then it can be left alone: it saves the notes as a draft release, merges a PR bumping `MAGPIE_VERSION` once CI passes, tags that commit, and publishes the draft once `release-{windows,macos,linux}.yml` have uploaded every file. Allow several hours. It stops only for a failed workflow, offering to rerun the failed jobs. Running it again resumes from the state on GitHub. The docstring has the details.
+
+A tag push alone still runs the workflows, which then create a prerelease with stub notes. Use the script instead.
+
 ## C Standard
 
 C99 with two C11 exceptions: `_Atomic`/`<stdatomic.h>` and `static_assert`. Do not introduce other C11+ features without asking.
