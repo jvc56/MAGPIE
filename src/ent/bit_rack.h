@@ -186,8 +186,10 @@ static inline void bit_rack_add_letter_to_mask(uint64_t *low_mask,
 static inline bool bit_rack_intersects_mask(const BitRack *bit_rack,
                                             uint64_t low_mask,
                                             uint64_t high_mask) {
-  return (bit_rack_get_low_64(bit_rack) & low_mask) != 0 ||
-         (bit_rack_get_high_64(bit_rack) & high_mask) != 0;
+  // One test of both halves: short-circuiting them was a branch, which
+  // mispredicted.
+  return ((bit_rack_get_low_64(bit_rack) & low_mask) |
+          (bit_rack_get_high_64(bit_rack) & high_mask)) != 0;
 }
 
 // True if any letter's lane is set in the mask. Sits on move generation's
@@ -201,7 +203,8 @@ static inline bool bit_rack_equals(const BitRack *a, const BitRack *b) {
 #if USE_INT128_INTRINSIC
   return *a == *b;
 #else
-  return (a->high == b->high) && (a->low == b->low);
+  // One test of both halves, as in bit_rack_intersects_mask.
+  return ((a->high ^ b->high) | (a->low ^ b->low)) == 0;
 #endif
 }
 
@@ -258,16 +261,16 @@ static inline void bit_rack_set_letter_count(BitRack *bit_rack,
 #endif
 }
 
+// Which half holds a letter is selected arithmetically: as a branch it
+// mispredicted, since letters fall on either side of the split.
 static inline void bit_rack_add_letter(BitRack *bit_rack, MachineLetter ml) {
   const int shift = ml * BIT_RACK_BITS_PER_LETTER;
 #if USE_INT128_INTRINSIC
   *bit_rack += (unsigned __int128)1 << shift;
 #else
-  if (shift < 64) {
-    bit_rack->low += (uint64_t)1 << shift;
-  } else {
-    bit_rack->high += (uint64_t)1 << (shift - 64);
-  }
+  const uint64_t in_high = (uint64_t)(shift >= 64);
+  bit_rack->low += (1 - in_high) << (shift & 63);
+  bit_rack->high += in_high << (shift & 63);
 #endif
 }
 
@@ -276,11 +279,9 @@ static inline void bit_rack_take_letter(BitRack *bit_rack, MachineLetter ml) {
 #if USE_INT128_INTRINSIC
   *bit_rack -= (unsigned __int128)1 << shift;
 #else
-  if (shift < 64) {
-    bit_rack->low -= (uint64_t)1 << shift;
-  } else {
-    bit_rack->high -= (uint64_t)1 << (shift - 64);
-  }
+  const uint64_t in_high = (uint64_t)(shift >= 64);
+  bit_rack->low -= (1 - in_high) << (shift & 63);
+  bit_rack->high -= in_high << (shift & 63);
 #endif
 }
 

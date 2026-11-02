@@ -326,6 +326,12 @@ typedef struct MoveGen {
   // WMP-only storage at the end keeps every existing hot field's offset.
   // Reset/touch it only for active WMP positions whose rack has a blank.
   WMPBlankWordCache blank_word_cache;
+  // MOVE_SORT_EQUITY only: the non-score part of shadow's equity bound, by
+  // tiles played, set once per generation (see gen_set_shadow_equities). The
+  // nonplaythrough table, with the WMP's tighter best leaves, is set only
+  // while the WMP is active and the bag is not empty.
+  Equity shadow_equity_by_tiles_played[RACK_SIZE + 1];
+  Equity shadow_nonplaythrough_equity_by_tiles_played[RACK_SIZE + 1];
 } MoveGen;
 
 // Cache getter functions
