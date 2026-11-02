@@ -253,7 +253,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: windows-data
-          key: windows-data-files-32
+          key: windows-data-files-33
           enableCrossOsArchive: true
           fail-on-cache-miss: true
       - name: Put the data in place

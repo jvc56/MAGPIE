@@ -176,7 +176,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: windows-data
-          key: windows-data-files-32
+          key: windows-data-files-33
           enableCrossOsArchive: true
           lookup-only: true
 
@@ -188,7 +188,7 @@ jobs:
           path: |
             data/*
             testdata/*
-          key: downloaded-data-files-32
+          key: downloaded-data-files-33
 
       - name: Download data files and convert lexica
         if: steps.windows-data.outputs.cache-hit != 'true' && steps.cache-datafiles.outputs.cache-hit != 'true'
@@ -205,7 +205,7 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: windows-data
-          key: windows-data-files-32
+          key: windows-data-files-33
           enableCrossOsArchive: true
 
   # L3: the x64 test binary under Wine, which catches most runtime problems
@@ -229,7 +229,7 @@ jobs:
           path: |
             data/*
             testdata/*
-          key: downloaded-data-files-32
+          key: downloaded-data-files-33
 
       - name: Download data files and convert lexica
         if: steps.cache-datafiles.outputs.cache-hit != 'true'
@@ -322,7 +322,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: windows-data
-          key: windows-data-files-32
+          key: windows-data-files-33
           enableCrossOsArchive: true
           fail-on-cache-miss: true
 
@@ -466,7 +466,7 @@ jobs:
           path: |
             data/*
             testdata/*
-          key: downloaded-data-files-32
+          key: downloaded-data-files-33
 
       - name: Download data files and convert lexica
         if: steps.cache-datafiles.outputs.cache-hit != 'true'
@@ -529,7 +529,7 @@ jobs:
           path: |
             data/*
             testdata/*
-          key: downloaded-data-files-32
+          key: downloaded-data-files-33
 
       - name: Download data files and convert lexica
         if: steps.cache-datafiles.outputs.cache-hit != 'true'
@@ -610,7 +610,7 @@ jobs:
           path: |
             data/*
             testdata/*
-          key: downloaded-data-files-32
+          key: downloaded-data-files-33
 
       - name: Download data files and convert lexica
         if: steps.cache-datafiles.outputs.cache-hit != 'true'
@@ -643,7 +643,7 @@ jobs:
           path: |
             data/*
             testdata/*
-          key: downloaded-data-files-32
+          key: downloaded-data-files-33
 
       - name: Download data files and convert lexica
         if: steps.cache-datafiles.outputs.cache-hit != 'true'
