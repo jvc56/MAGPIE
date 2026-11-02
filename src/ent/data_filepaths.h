@@ -30,6 +30,7 @@ typedef enum {
   DATA_FILEPATH_TYPE_DAWG_PACKED,
   DATA_FILEPATH_TYPE_WORD_INFO_TABLE,
   DATA_FILEPATH_TYPE_PAT,
+  DATA_FILEPATH_TYPE_PEG_ADJUST,
 } data_filepath_t;
 
 char *get_filepath(const char *data_path, const char *data_name,

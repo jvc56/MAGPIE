@@ -68,6 +68,7 @@
 #include "path_move_lists_test.h"
 #include "peg_cascade_bench_test.h"
 #include "peg_embedding_test.h"
+#include "peg_fit_test.h"
 #include "peg_oracle_test.h"
 #include "peg_pess_test.h"
 #include "peg_poll_test.h"
@@ -217,6 +218,7 @@ static TestEntry test_table[] = {
     {"peg", test_peg},
     {"pegpessdraw", test_peg_pessfull_draw_regression},
     {"pegtopkall", test_peg_pegtopk_all},
+    {"pegfit", test_peg_fit},
     {"playchooser", test_play_chooser},
     {NULL, NULL} // Sentinel value to mark end of array
 };
