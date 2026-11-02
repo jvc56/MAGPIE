@@ -436,9 +436,10 @@ int contribute_choose_tables(ContributeTable *tables, int count,
     disk_left +=
         contribute_table_manifest_evictable_bytes(manifest, tables, count);
   }
-  const int64_t memory =
+  const int64_t build_memory =
+      capped(budget->build_memory_bytes) - capped(budget->memory_reserve_bytes);
+  int64_t memory_left =
       capped(budget->free_memory_bytes) - capped(budget->memory_reserve_bytes);
-  int64_t memory_left = memory;
   for (int table_idx = 0; table_idx < count; table_idx++) {
     tables[table_idx].chosen = false;
     skip_table(&tables[table_idx], CONTRIBUTE_TABLE_KEPT, 0, 0);
@@ -503,8 +504,9 @@ int contribute_choose_tables(ContributeTable *tables, int count,
       if (dependency && table_build_memory(dependency) > build) {
         build = table_build_memory(dependency);
       }
-      if (build > 0 && build > memory) {
-        skip_table(table, CONTRIBUTE_TABLE_NO_MEMORY_TO_BUILD, build, memory);
+      if (build > 0 && build > build_memory) {
+        skip_table(table, CONTRIBUTE_TABLE_NO_MEMORY_TO_BUILD, build,
+                   build_memory);
         continue;
       }
       // Memory to hold, beside what is chosen already.

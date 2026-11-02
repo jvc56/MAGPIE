@@ -8501,6 +8501,9 @@ static char *config_rack_info_table_name(const Config *config,
 //   (-ttfraction of the physical memory), and never more than a quarter of
 //   the physical memory, so the decision does not change with whatever else
 //   is open. Where the available memory cannot be read, the quarter alone.
+//   A build's peak is weighed the same way but for the search table: the
+//   build is over before a solve allocates it, and one allocated already is
+//   not in what is available.
 // A table that is not on disk is built only where missing wordmaps are (the
 // command line program with fetched data); a rack info table is built from
 // its lexicon's wordmap, so it costs that wordmap's disk too when the
@@ -8635,6 +8638,7 @@ static void config_choose_auto_tables(Config *config,
       .free_disk_bytes = INT64_MAX,
       .disk_reserve_bytes = CONFIG_AUTO_TABLE_DISK_RESERVE_BYTES,
       .free_memory_bytes = INT64_MAX,
+      .build_memory_bytes = INT64_MAX,
       .memory_reserve_bytes = CONFIG_AUTO_TABLE_MEMORY_RESERVE_BYTES,
   };
   budget.disk_reserve_bytes =
@@ -8653,6 +8657,7 @@ static void config_choose_auto_tables(Config *config,
   if (budget.free_memory_bytes > quarter) {
     budget.free_memory_bytes = quarter;
   }
+  budget.build_memory_bytes = available < quarter ? available : quarter;
   // Tables built on first use that this load does not use count as free
   // disk: a build deletes them, least recently used first, to make room.
   char *manifest_path = contribute_tables_manifest_path_named(
@@ -11170,11 +11175,13 @@ static void config_contribute_prepare_tables(
       .free_disk_bytes = INT64_MAX,
       .disk_reserve_bytes = contribute_get_disk_reserve_bytes(state),
       .free_memory_bytes = INT64_MAX,
+      .build_memory_bytes = INT64_MAX,
       .memory_reserve_bytes = contribute_get_memory_reserve_bytes(state),
   };
   if (!get_available_memory_bytes(&budget.free_memory_bytes)) {
     budget.free_memory_bytes = INT64_MAX;
   }
+  budget.build_memory_bytes = budget.free_memory_bytes;
   int64_t free_bytes = INT64_MAX;
   ErrorStack *errors = error_stack_create();
   char *first_path = data_filepaths_get_writable_filename(

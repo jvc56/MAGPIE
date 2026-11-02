@@ -74,6 +74,7 @@ static void assert_chosen_in(ContributeTable *tables, int count,
       .free_disk_bytes = free_mb * MB,
       .disk_reserve_bytes = reserve_mb * MB,
       .free_memory_bytes = memory_mb < 0 ? INT64_MAX : memory_mb * MB,
+      .build_memory_bytes = memory_mb < 0 ? INT64_MAX : memory_mb * MB,
       .memory_reserve_bytes = 0,
   };
   const int chosen =
@@ -284,11 +285,31 @@ static void test_the_chooser_weighs_memory_too(void) {
       .free_disk_bytes = INT64_MAX,
       .disk_reserve_bytes = 0,
       .free_memory_bytes = 3000LL * MB,
+      .build_memory_bytes = 3000LL * MB,
       .memory_reserve_bytes = 1000LL * MB,
   };
   assert(contribute_choose_tables(tables, count, &budget, NULL, order) == 2);
   assert(tables[2].skip == CONTRIBUTE_TABLE_NO_MEMORY_TO_BUILD);
   assert(tables[2].available_bytes == 2000LL * MB);
+
+  // Building and holding are weighed apart, each with the reserve off the
+  // top. Here the memory held for a search leaves too little to build the
+  // wordmap in, had the build not had its own budget, but enough to hold it.
+  count = csw24_player(tables);
+  const ContributeTableBudget search_budget = {
+      .free_disk_bytes = INT64_MAX,
+      .disk_reserve_bytes = 0,
+      .free_memory_bytes = 1300LL * MB,
+      .build_memory_bytes = 2000LL * MB,
+      .memory_reserve_bytes = 1000LL * MB,
+  };
+  assert(contribute_choose_tables(tables, count, &search_budget, NULL, order) ==
+         1);
+  assert(tables[0].chosen);
+  assert(tables[1].skip == CONTRIBUTE_TABLE_NO_MEMORY_TO_HOLD);
+  assert(tables[1].available_bytes == 121LL * MB);
+  assert(tables[2].skip == CONTRIBUTE_TABLE_NO_MEMORY_TO_BUILD);
+  assert(tables[2].available_bytes == 1000LL * MB);
 }
 
 // Tables built for other jobs count as free space, since the build that

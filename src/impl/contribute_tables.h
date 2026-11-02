@@ -91,8 +91,12 @@ typedef struct ContributeTableBudget {
   // Free on the filesystem builds are written to.
   int64_t free_disk_bytes;
   int64_t disk_reserve_bytes;
-  // Available memory (MemAvailable on Linux).
+  // Available memory (MemAvailable on Linux) for holding tables.
   int64_t free_memory_bytes;
+  // Available memory for a build's peak, which can differ from the above: a
+  // build ends before anything counted out of free_memory_bytes for later
+  // needs it.
+  int64_t build_memory_bytes;
   int64_t memory_reserve_bytes;
 } ContributeTableBudget;
 
