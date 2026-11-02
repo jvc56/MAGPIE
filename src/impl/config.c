@@ -1019,7 +1019,7 @@ char *str_api_fatal(Config *config,
 // the table rather than ending the run; one that does not fit in the memory
 // beyond `memreserve`, to build or to hold, is skipped the same way; the
 // claim's derived files carry their sizes (`bytes`).
-#define MAGPIE_VERSION "0.1.3"
+#define MAGPIE_VERSION "0.1.4"
 
 const char *config_get_magpie_version(void) { return MAGPIE_VERSION; }
 
