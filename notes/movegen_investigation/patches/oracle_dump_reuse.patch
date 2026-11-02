@@ -1,0 +1,265 @@
+diff --git a/src/impl/move_gen.c b/src/impl/move_gen.c
+index fb6dd310..c903b257 100644
+--- a/src/impl/move_gen.c
++++ b/src/impl/move_gen.c
+@@ -38,6 +38,94 @@
+ #include "../ent/thread_control.h"
+ #include "../ent/wmp.h"
+ #include "../ent/word_info_table.h"
++
++#include <stdio.h>
++#include <stdlib.h>
++// Oracle experiment: ORACLE=record:<file> writes one bit per expanded WMP
++// anchor (1 = some placement passed); ORACLE=skipall|skippt|skipnonpt:<file>
++// replays the same games and skips the unproductive anchors of that kind.
++static int oracle_mode = -1; // 0 none, 1 record, 2 skip all, 3 skip pt, 4 skip nonpt
++static FILE *oracle_file;
++static uint8_t oracle_byte;
++static int oracle_bit;
++uint64_t oracle_pass_counter;
++static uint64_t oracle_skipped, oracle_seen;
++static FILE *dump_file;
++static void __attribute__((destructor)) oracle_close(void) {
++  if (dump_file) fclose(dump_file);
++  if (oracle_mode == 1 && oracle_bit > 0) fputc(oracle_byte, oracle_file);
++  if (oracle_file) fclose(oracle_file);
++  if (oracle_mode > 0) fprintf(stderr, "ORACLE anchors %llu skipped %llu\n", (unsigned long long)oracle_seen, (unsigned long long)oracle_skipped);
++}
++static void oracle_init(void) {
++  const char *env = getenv("ORACLE");
++  oracle_mode = 0;
++  if (env == NULL) return;
++  const char *colon = strchr(env, ':');
++  if (colon == NULL) return;
++  if (strncmp(env, "record", 6) == 0) oracle_mode = 1;
++  else if (strncmp(env, "skipall", 7) == 0) oracle_mode = 2;
++  else if (strncmp(env, "skipnonpt", 9) == 0) oracle_mode = 4;
++  else if (strncmp(env, "skippt", 6) == 0) oracle_mode = 3;
++  oracle_file = fopen(colon + 1, oracle_mode == 1 ? "wb" : "rb");
++  if (oracle_file == NULL) { fprintf(stderr, "oracle: cannot open %s\n", colon + 1); exit(1); }
++}
++static inline int oracle_read_bit(void) {
++  if (oracle_bit == 0) { int c = fgetc(oracle_file); oracle_byte = (uint8_t)(c == EOF ? 0xFF : c); }
++  const int b = (oracle_byte >> oracle_bit) & 1;
++  oracle_bit = (oracle_bit + 1) & 7;
++  return b;
++}
++int dump_wit_rejected;
++uint64_t sr_records, sr_right_steps;
++static uint64_t sr_lanes, sr_work, sr_lane_rep, sr_lane_rep_work, sr_full_rep, sr_full_rep_work, sr_gens;
++static uint64_t *sr_set_lane, *sr_set_full, *sr_set_k1, *sr_set_k3;
++static uint64_t sr_k1_rep, sr_k1_rep_work, sr_k3_rep, sr_k3_rep_work, sr_restrict_steps;
++static uint64_t *ar_set_full, *ar_set_ls, *ar_set_geo; static uint64_t ar_anchors, ar_work, ar_full_rep, ar_full_work, ar_ls_rep, ar_ls_work, ar_geo_rep, ar_geo_work, ar_width_sum;
++enum { SR_BITS = 25 };
++static int sr_insert(uint64_t *set, uint64_t key) { // returns 1 if already present
++  if (key == 0) key = 1;
++  uint64_t i = (key * 0x9E3779B97F4A7C15ULL) >> (64 - SR_BITS);
++  for (;;) {
++    if (set[i] == key) return 1;
++    if (set[i] == 0) { set[i] = key; return 0; }
++    i = (i + 1) & ((1ULL << SR_BITS) - 1);
++  }
++}
++static void __attribute__((destructor)) sr_dump(void) {
++  if (sr_lanes == 0) return;
++  fprintf(stderr, "SHADOW gens %llu lanes %llu work %llu (records %llu, right steps %llu)\n", (unsigned long long)sr_gens, (unsigned long long)sr_lanes, (unsigned long long)sr_work, (unsigned long long)sr_records, (unsigned long long)sr_right_steps);
++  fprintf(stderr, "SHADOW lane-only repeats: %.1f%% of lanes, %.1f%% of work\n", 100.0 * sr_lane_rep / sr_lanes, 100.0 * sr_lane_rep_work / sr_work);
++  fprintf(stderr, "SHADOW lane+rack repeats: %.1f%% of lanes, %.1f%% of work\n", 100.0 * sr_full_rep / sr_lanes, 100.0 * sr_full_rep_work / sr_work);
++  fprintf(stderr, "SHADOW lane+letterset+size repeats: %.1f%% of lanes, %.1f%% of work\n", 100.0 * sr_k1_rep / sr_lanes, 100.0 * sr_k1_rep_work / sr_work);
++  fprintf(stderr, "SHADOW lane+letterset repeats: %.1f%% of lanes, %.1f%% of work\n", 100.0 * sr_k3_rep / sr_lanes, 100.0 * sr_k3_rep_work / sr_work);
++  fprintf(stderr, "SHADOW right steps that restrict a tile: %.1f%%\n", 100.0 * sr_restrict_steps / sr_right_steps);
++  fprintf(stderr, "ANCHOR anchors %llu, mean window %.1f squares\n", (unsigned long long)ar_anchors, (double)ar_width_sum / ar_anchors);
++  fprintf(stderr, "ANCHOR window only repeats: %.1f%% of anchors, %.1f%% of work\n", 100.0 * ar_geo_rep / ar_anchors, 100.0 * ar_geo_work / ar_work);
++  fprintf(stderr, "ANCHOR window+letterset+size repeats: %.1f%% of anchors, %.1f%% of work\n", 100.0 * ar_ls_rep / ar_anchors, 100.0 * ar_ls_work / ar_work);
++  fprintf(stderr, "ANCHOR window+rack repeats: %.1f%% of anchors, %.1f%% of work\n", 100.0 * ar_full_rep / ar_anchors, 100.0 * ar_full_work / ar_work);
++}
++static FILE *dump_file; static int dump_every; static uint64_t dump_counter; static int dump_init_done;
++static void dump_anchor(const MoveGen *gen, const Anchor *a, int productive) {
++  if (!dump_init_done) {
++    dump_init_done = 1;
++    const char *env = getenv("DUMP");
++    if (env) { dump_file = fopen(env, "w"); const char *e = getenv("DUMP_EVERY"); dump_every = e ? atoi(e) : 10; }
++  }
++  if (dump_file == NULL || a->playthrough_blocks == 0) return;
++  if (dump_counter++ % (uint64_t)dump_every != 0) return;
++  fprintf(dump_file, "%d %d %d %d %d %d %d |", a->word_length, a->leftmost_start_col, a->rightmost_start_col, a->tiles_to_play, a->playthrough_blocks, productive, dump_wit_rejected);
++  for (int col = 0; col < BOARD_DIM; col++) fprintf(dump_file, " %d", get_unblanked_machine_letter(gen_cache_get_letter(gen, col)));
++  fprintf(dump_file, " |");
++  for (int col = 0; col < BOARD_DIM; col++) fprintf(dump_file, " %llx", (unsigned long long)gen_cache_get_cross_set(gen, col));
++  fprintf(dump_file, " |");
++  for (int ml = 0; ml < ld_get_size(&gen->ld); ml++) fprintf(dump_file, " %d", rack_get_letter(&gen->player_rack, ml));
++  fprintf(dump_file, "\n");
++}
++static inline void oracle_write_bit(int b) {
++  oracle_byte |= (uint8_t)(b << oracle_bit);
++  if (++oracle_bit == 8) { fputc(oracle_byte, oracle_file); oracle_byte = 0; oracle_bit = 0; }
++}
+ #include "../util/io_util.h"
+ #include "move_gen_base.h"
+ #include "movegen_woadwage.h"
+@@ -881,6 +969,7 @@ bool wordmap_gen_check_playthrough_and_crosses(MoveGen *gen, int word_idx,
+       }
+       gen->playthrough_marked[letter_idx] = word_letter;
+     }
++    oracle_pass_counter++;
+     return true;
+   }
+   // A zero mask means this anchor has no fixed letters. Check only crosses.
+@@ -896,6 +985,7 @@ bool wordmap_gen_check_playthrough_and_crosses(MoveGen *gen, int word_idx,
+     }
+     gen->playthrough_marked[letter_idx] = word_letter;
+   }
++  oracle_pass_counter++;
+   return true;
+ }
+ 
+@@ -1127,6 +1217,7 @@ wordmap_gen(MoveGen *gen, const Anchor *anchor, bool lazy) {
+         (uint32_t)((1U << ld_get_size(&gen->ld)) - 1) & ~1U;
+     const uint32_t addable = wgen->playthrough_addable & letter_universe;
+     if (addable == 0) {
++      dump_wit_rejected = 1;
+       return;
+     }
+     const uint32_t rack_present =
+@@ -1145,6 +1236,7 @@ wordmap_gen(MoveGen *gen, const Anchor *anchor, bool lazy) {
+     }
+     if (gen->number_of_letters_on_rack - forbidden_count <
+         anchor->tiles_to_play) {
++      dump_wit_rejected = 1;
+       return;
+     }
+   }
+@@ -1935,6 +2027,7 @@ static __attribute__((noinline)) void shadow_record_recursive(MoveGen *gen) {
+ }
+ 
+ static inline void shadow_record(MoveGen *gen, uint32_t allowed_lengths) {
++  sr_records++;
+   if (wmp_move_gen_is_active(&gen->wmp_move_gen)) {
+     shadow_record_wmp(gen, allowed_lengths);
+   } else {
+@@ -2255,6 +2348,7 @@ static inline void shadow_play_right(MoveGen *gen, bool is_unique,
+     }
+     gen->current_right_col++;
+     gen->tiles_played++;
++    sr_right_steps++;
+ 
+     const uint64_t cross_set =
+         gen_cache_get_cross_set(gen, gen->current_right_col);
+@@ -2297,6 +2391,7 @@ static inline void shadow_play_right(MoveGen *gen, bool is_unique,
+     gen->shadow_word_multiplier *= this_word_multiplier;
+ 
+     if (is_single_bit_set(possible_letters_here)) {
++      sr_restrict_steps++;
+       if (!restricted_any_tiles) {
+         // First restriction in this rightward shadow: save the rack and
+         // descending tile scores so they can be restored on exit.
+@@ -2450,6 +2545,7 @@ static inline void shadow_play_right_small(MoveGen *gen, bool is_unique) {
+          gen->tiles_played < gen->number_of_letters_on_rack) {
+     gen->current_right_col++;
+     gen->tiles_played++;
++    sr_right_steps++;
+ 
+     const uint64_t cross_set =
+         gen_cache_get_cross_set(gen, gen->current_right_col);
+@@ -3094,7 +3190,31 @@ void shadow_play_for_anchor_small(MoveGen *gen, int col) {
+       gen->dir, gen->highest_shadow_score, gen->highest_shadow_score);
+ }
+ 
++static uint64_t gen_hash_lane(const Square *lane_squares);
++static uint64_t ar_window_key(const MoveGen *gen, int col, int *width) {
++  const int n = gen->number_of_letters_on_rack > 0 ? gen->number_of_letters_on_rack : rack_get_total_letters(&gen->player_rack);
++  int lo_bound = gen->last_anchor_col == INITIAL_LAST_ANCHOR_COL ? 0 : gen->last_anchor_col + 1;
++  if (lo_bound < 0) lo_bound = 0;
++  int lo = col, empties = 0;
++  while (lo - 1 >= lo_bound) { if (gen_cache_is_empty(gen, lo - 1)) { if (empties == n) break; empties++; } lo--; }
++  int hi = col; empties = gen_cache_is_empty(gen, col) ? 1 : 0;
++  while (hi + 1 < BOARD_DIM) { if (gen_cache_is_empty(gen, hi + 1)) { if (empties == n) break; empties++; } hi++; }
++  if (lo > 0) lo--;
++  if (hi < BOARD_DIM - 1) hi++;
++  *width = hi - lo + 1;
++  uint64_t h = 0x9E3779B97F4A7C15ULL ^ ((uint64_t)lo << 8) ^ ((uint64_t)hi << 16) ^ ((uint64_t)col << 24) ^ ((uint64_t)gen->dir << 32) ^ ((uint64_t)(gen->last_anchor_col + 2) << 40);
++  for (int c = lo; c <= hi; c++) {
++    const Square *sq = &gen->row_squares[c];
++    const uint64_t w1 = (uint64_t)(uint32_t)square_get_cross_score(sq) | ((uint64_t)square_get_letter(sq) << 32) | ((uint64_t)square_get_bonus_square(sq).raw << 40) | ((uint64_t)square_get_anchor(sq) << 48) | ((uint64_t)square_get_is_cross_word(sq) << 49);
++    h = (h ^ w1) * 0xFF51AFD7ED558CCDULL; h ^= h >> 29;
++    h = (h ^ square_get_cross_set(sq)) * 0xC4CEB9FE1A85EC53ULL; h ^= h >> 31;
++    h = (h ^ gen_cache_get_left_extension_set(gen, c)) * 0xFF51AFD7ED558CCDULL; h ^= h >> 29;
++    h = (h ^ gen_cache_get_right_extension_set(gen, c)) * 0xC4CEB9FE1A85EC53ULL; h ^= h >> 31;
++  }
++  return h | 1;
++}
+ void shadow_by_orientation(MoveGen *gen) {
++  if (gen->dir == 0) sr_gens++;
+   for (int row = 0; row < BOARD_DIM; row++) {
+     gen->current_row_index = row;
+     if (gen->row_number_of_anchors_cache[BOARD_DIM * gen->dir + row] == 0) {
+@@ -3109,9 +3229,31 @@ void shadow_by_orientation(MoveGen *gen) {
+         gen->board, gen->current_row_index, gen->dir, gen->cross_index);
+     gen->pat_lane_penalty_bound = pat_eval_lane_penalty_bound(
+         &gen->pat_eval_ctx, gen->dir, gen->current_row_index);
++    if (sr_set_lane == NULL) { sr_set_lane = calloc((size_t)1 << SR_BITS, 8); sr_set_full = calloc((size_t)1 << SR_BITS, 8); sr_set_k1 = calloc((size_t)1 << SR_BITS, 8); sr_set_k3 = calloc((size_t)1 << SR_BITS, 8); }
++    uint64_t sr_key_lane = gen_hash_lane(gen->row_squares) * 0xFF51AFD7ED558CCDULL + (uint64_t)gen->dir;
++    sr_key_lane ^= sr_key_lane >> 31;
++    uint64_t sr_key_full = sr_key_lane;
++    for (int ml = 0; ml < ld_get_size(&gen->ld); ml++) { sr_key_full = (sr_key_full ^ (uint64_t)rack_get_letter(&gen->player_rack, ml)) * 0xC4CEB9FE1A85EC53ULL; sr_key_full ^= sr_key_full >> 29; }
++    sr_key_full = (sr_key_full ^ (uint64_t)(gen->number_of_tiles_in_bag > 0) ^ ((uint64_t)gen->player_index << 1) ^ ((uint64_t)(uintptr_t)gen->kwg << 2)) * 0x9E3779B97F4A7C15ULL;
++    uint64_t sr_key_k3 = (sr_key_lane ^ gen->rack_cross_set) * 0xC4CEB9FE1A85EC53ULL; sr_key_k3 ^= sr_key_k3 >> 31;
++    uint64_t sr_key_k1 = (sr_key_k3 ^ (uint64_t)gen->number_of_letters_on_rack ^ ((uint64_t)(gen->number_of_tiles_in_bag > 0) << 8)) * 0x9E3779B97F4A7C15ULL; sr_key_k1 ^= sr_key_k1 >> 29;
++    const uint64_t sr_before = sr_records + sr_right_steps;
+     for (int col = 0; col < BOARD_DIM; col++) {
+       if (gen_cache_get_is_anchor(gen, col)) {
++        if (ar_set_full == NULL) { ar_set_full = calloc((size_t)1 << SR_BITS, 8); ar_set_ls = calloc((size_t)1 << SR_BITS, 8); ar_set_geo = calloc((size_t)1 << SR_BITS, 8); }
++        int ar_width;
++        const uint64_t ar_geo = ar_window_key(gen, col, &ar_width);
++        uint64_t ar_ls = (ar_geo ^ gen->rack_cross_set) * 0x9E3779B97F4A7C15ULL; ar_ls ^= ar_ls >> 31;
++        ar_ls = (ar_ls ^ (uint64_t)rack_get_total_letters(&gen->player_rack) ^ ((uint64_t)(gen->number_of_tiles_in_bag > 0) << 8)) * 0xFF51AFD7ED558CCDULL; ar_ls ^= ar_ls >> 29;
++        uint64_t ar_full = ar_ls;
++        for (int ml = 0; ml < ld_get_size(&gen->ld); ml++) { ar_full = (ar_full ^ (uint64_t)rack_get_letter(&gen->player_rack, ml)) * 0xC4CEB9FE1A85EC53ULL; ar_full ^= ar_full >> 29; }
++        const uint64_t ar_before = sr_records + sr_right_steps;
+         shadow_play_for_anchor(gen, col);
++        const uint64_t ar_w = sr_records + sr_right_steps - ar_before + 1;
++        ar_anchors++; ar_work += ar_w; ar_width_sum += (uint64_t)ar_width;
++        if (sr_insert(ar_set_geo, ar_geo)) { ar_geo_rep++; ar_geo_work += ar_w; }
++        if (sr_insert(ar_set_ls, ar_ls)) { ar_ls_rep++; ar_ls_work += ar_w; }
++        if (sr_insert(ar_set_full, ar_full)) { ar_full_rep++; ar_full_work += ar_w; }
+ 
+         gen->last_anchor_col = col;
+         // The next anchor to search after a playthrough tile should
+@@ -3122,6 +3264,12 @@ void shadow_by_orientation(MoveGen *gen) {
+         }
+       }
+     }
++    const uint64_t sr_w = sr_records + sr_right_steps - sr_before + 1;
++    sr_lanes++; sr_work += sr_w;
++    if (sr_insert(sr_set_lane, sr_key_lane)) { sr_lane_rep++; sr_lane_rep_work += sr_w; }
++    if (sr_insert(sr_set_full, sr_key_full)) { sr_full_rep++; sr_full_rep_work += sr_w; }
++    if (sr_insert(sr_set_k1, sr_key_k1)) { sr_k1_rep++; sr_k1_rep_work += sr_w; }
++    if (sr_insert(sr_set_k3, sr_key_k3)) { sr_k3_rep++; sr_k3_rep_work += sr_w; }
+   }
+ }
+ 
+@@ -3861,7 +4009,23 @@ gen_record_scoring_plays_impl(MoveGen *gen, bool lazy) {
+       recursive_gen_alpha(gen, anchor.col, anchor.col, anchor.col,
+                           gen->dir == BOARD_HORIZONTAL_DIRECTION, 0, 1, 0);
+     } else if (wmp_move_gen_is_active(&gen->wmp_move_gen)) {
+-      wordmap_gen(gen, &anchor, lazy);
++      if (__builtin_expect(oracle_mode < 0, 0)) oracle_init();
++      if (oracle_mode == 0) {
++        wordmap_gen(gen, &anchor, lazy);
++      } else if (oracle_mode == 1) {
++        const uint64_t before = oracle_pass_counter;
++        dump_wit_rejected = 0;
++        wordmap_gen(gen, &anchor, lazy);
++        oracle_write_bit(oracle_pass_counter != before);
++        dump_anchor(gen, &anchor, oracle_pass_counter != before);
++        oracle_seen++;
++      } else {
++        const int productive = oracle_read_bit();
++        const bool pt = anchor.playthrough_blocks > 0;
++        const bool skip = !productive && (oracle_mode == 2 || (oracle_mode == 3 && pt) || (oracle_mode == 4 && !pt));
++        oracle_seen++;
++        if (skip) { oracle_skipped++; } else { wordmap_gen(gen, &anchor, lazy); }
++      }
+     } else {
+       recursive_gen(gen, anchor.col, kwg_root_node_index, anchor.col,
+                     anchor.col, gen->dir == BOARD_HORIZONTAL_DIRECTION, 0, 1,

@@ -1,0 +1,138 @@
+diff --git a/src/impl/move_gen.c b/src/impl/move_gen.c
+index 2b86a984..96b2de19 100644
+--- a/src/impl/move_gen.c
++++ b/src/impl/move_gen.c
+@@ -38,6 +38,13 @@
+ #include "../ent/thread_control.h"
+ #include "../ent/wmp.h"
+ #include "../ent/word_info_table.h"
++
++#include <stdio.h>
++uint64_t instr_c[32];
++static const char *instr_n[] = {"gen_calls","heap_anchors","anchors_expanded","anchors_bingo_fast","anchors_pt","anchors_wit_rejected","anchors_with_pass","anchors_pt_with_pass","subrack_probes","probes_with_words","words_returned","checks","checks_pt","fail_board_letter","fail_cross","checks_pass","plays_recorded","best_updates","fail_cross_pos0","fail_cross_late"};
++static void __attribute__((destructor)) instr_dump(void) {
++  for (int i = 0; i < 20; i++) fprintf(stderr, "INSTR %-22s %llu\n", instr_n[i], (unsigned long long)instr_c[i]);
++}
+ #include "../util/io_util.h"
+ #include "move_gen_base.h"
+ #include "movegen_woadwage.h"
+@@ -711,6 +718,7 @@ update_best_move_or_insert_into_movelist_wmp(MoveGen *gen, int start_col,
+ #endif
+   }
+   if (need_to_update_best_move_equity_or_score) {
++    instr_c[17]++;
+     gen_update_cutoff_equity_or_score(gen);
+   }
+ 
+@@ -721,6 +729,7 @@ update_best_move_or_insert_into_movelist_wmp(MoveGen *gen, int start_col,
+ }
+ 
+ void record_wmp_play(MoveGen *gen, int start_col, Equity leave_value) {
++  instr_c[16]++;
+   const WMPMoveGen *wgen = &gen->wmp_move_gen;
+   const Equity bingo_bonus =
+       gen->max_tiles_to_play == RACK_SIZE ? gen->bingo_bonus : 0;
+@@ -844,7 +853,9 @@ bool wordmap_gen_check_playthrough_and_crosses(MoveGen *gen, int word_idx,
+                                                uint32_t playthrough_positions) {
+   const WMPMoveGen *wgen = &gen->wmp_move_gen;
+   const MachineLetter *word = wmp_move_gen_get_word(wgen, word_idx);
++  instr_c[11]++;
+   if (playthrough_positions != 0) {
++    instr_c[12]++;
+     // WMP words are anagrams of the rack plus the playthrough tiles, but most
+     // anagrams do not put those tiles at the board's fixed positions. Check
+     // every fixed position before spending time on cross sets at empty
+@@ -864,6 +875,7 @@ bool wordmap_gen_check_playthrough_and_crosses(MoveGen *gen, int word_idx,
+       assert(
+           !bonus_square_is_brick(gen_cache_get_bonus_square(gen, board_col)));
+       if (board_letter != word[letter_idx]) {
++        instr_c[13]++;
+         return false;
+       }
+       gen->playthrough_marked[letter_idx] = PLAYED_THROUGH_MARKER;
+@@ -877,10 +889,12 @@ bool wordmap_gen_check_playthrough_and_crosses(MoveGen *gen, int word_idx,
+       const MachineLetter word_letter = word[letter_idx];
+       if (!board_is_letter_allowed_in_cross_set(
+               gen_cache_get_cross_set(gen, board_col), word_letter)) {
++        instr_c[14]++;
+         return false;
+       }
+       gen->playthrough_marked[letter_idx] = word_letter;
+     }
++    instr_c[15]++;
+     return true;
+   }
+   // A zero mask means this anchor has no fixed letters. Check only crosses.
+@@ -892,10 +906,13 @@ bool wordmap_gen_check_playthrough_and_crosses(MoveGen *gen, int word_idx,
+     if (!board_is_letter_allowed_in_cross_set(
+             gen_cache_get_cross_set(gen, start_col + letter_idx),
+             word_letter)) {
++      instr_c[14]++;
++      if (letter_idx == 0) { instr_c[18]++; } else { instr_c[19]++; }
+       return false;
+     }
+     gen->playthrough_marked[letter_idx] = word_letter;
+   }
++  instr_c[15]++;
+   return true;
+ }
+ 
+@@ -948,10 +965,13 @@ wordmap_gen_record_subrack(MoveGen *gen, const Anchor *anchor, int subrack_idx,
+                                        anchor_pat_bound)) {
+     return false;
+   }
++  instr_c[8]++;
+   if (!wmp_move_gen_get_subrack_words(wgen, subrack_idx, lazy,
+                                       &gen->blank_word_cache)) {
+     return false;
+   }
++  instr_c[9]++;
++  instr_c[10] += (uint64_t)wgen->num_words;
+   if (gen->number_of_tiles_in_bag == 0) {
+     wgen->leave_value = 0;
+     for (int ml = 0; ml < ld_get_size(&gen->ld); ml++) {
+@@ -1073,6 +1093,7 @@ wordmap_gen(MoveGen *gen, const Anchor *anchor, bool lazy) {
+       anchor->playthrough_blocks == 0) {
+     const int num_bingos = gen->rit_entry->num_bingo_words;
+     if (num_bingos > 0) {
++      instr_c[3]++;
+       wgen->word_length = RACK_SIZE;
+       wgen->tiles_to_play = RACK_SIZE;
+       // Leave value is 0 for bingo (all tiles played), leave is empty.
+@@ -1127,6 +1148,7 @@ wordmap_gen(MoveGen *gen, const Anchor *anchor, bool lazy) {
+         (uint32_t)((1U << ld_get_size(&gen->ld)) - 1) & ~1U;
+     const uint32_t addable = wgen->playthrough_addable & letter_universe;
+     if (addable == 0) {
++      instr_c[5]++;
+       return;
+     }
+     const uint32_t rack_present =
+@@ -1145,6 +1167,7 @@ wordmap_gen(MoveGen *gen, const Anchor *anchor, bool lazy) {
+     }
+     if (gen->number_of_letters_on_rack - forbidden_count <
+         anchor->tiles_to_play) {
++      instr_c[5]++;
+       return;
+     }
+   }
+@@ -3819,6 +3842,8 @@ gen_record_scoring_plays_impl(MoveGen *gen, bool lazy) {
+   if (gen->is_wordsmog) {
+     rack_reset(&gen->full_player_rack);
+   }
++  instr_c[0]++;
++  instr_c[1] += (uint64_t)gen->anchor_heap.count;
+   while (gen->anchor_heap.count > 0) {
+     if (gen->threshold_exceeded) {
+       break;
+@@ -3861,7 +3886,11 @@ gen_record_scoring_plays_impl(MoveGen *gen, bool lazy) {
+       recursive_gen_alpha(gen, anchor.col, anchor.col, anchor.col,
+                           gen->dir == BOARD_HORIZONTAL_DIRECTION, 0, 1, 0);
+     } else if (wmp_move_gen_is_active(&gen->wmp_move_gen)) {
++      instr_c[2]++;
++      if (anchor.playthrough_blocks > 0) { instr_c[4]++; }
++      const uint64_t pass_before = instr_c[15];
+       wordmap_gen(gen, &anchor, lazy);
++      if (instr_c[15] != pass_before) { instr_c[6]++; if (anchor.playthrough_blocks > 0) { instr_c[7]++; } }
+     } else {
+       recursive_gen(gen, anchor.col, kwg_root_node_index, anchor.col,
+                     anchor.col, gen->dir == BOARD_HORIZONTAL_DIRECTION, 0, 1,
