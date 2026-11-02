@@ -6,6 +6,7 @@
 #include "../ent/game.h"
 #include "../ent/game_history.h"
 #include "../ent/inference_results.h"
+#include "../ent/move.h"
 #include "../ent/rack.h"
 #include "../ent/thread_control.h"
 #include "../util/io_util.h"
@@ -19,6 +20,7 @@ typedef struct InferenceArgs {
   int target_num_exch;
   int leave_list_capacity;
   Equity equity_margin;
+  const Move *target_move;
   Rack *target_played_tiles;
   Rack *target_known_rack;
   Rack *nontarget_known_rack;
@@ -43,6 +45,7 @@ infer_args_fill(InferenceArgs *args, int leave_list_capacity, Equity eq_margin,
   args->target_num_exch = target_num_exch;
   args->leave_list_capacity = leave_list_capacity;
   args->equity_margin = eq_margin;
+  args->target_move = NULL;
   args->target_played_tiles = target_played_tiles;
   args->target_known_rack = target_known_rack;
   args->nontarget_known_rack = nontarget_known_rack;

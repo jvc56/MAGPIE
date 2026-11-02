@@ -2,6 +2,7 @@
 
 #include "../compat/cpthread.h"
 #include "../compat/cpthread_defs.h"
+#include "../def/board_defs.h"
 #include "../def/equity_defs.h"
 #include "../def/game_history_defs.h"
 #include "../def/inference_defs.h"
@@ -10,6 +11,7 @@
 #include "../def/thread_control_defs.h"
 #include "../ent/alias_method.h"
 #include "../ent/bag.h"
+#include "../ent/board.h"
 #include "../ent/equity.h"
 #include "../ent/game.h"
 #include "../ent/game_history.h"
@@ -59,6 +61,10 @@ typedef struct Inference {
   int target_index;
   // Target player score
   Equity target_score;
+  // Opening placement adjustment for the target move, or 0 when not applicable
+  Equity target_placement_adjustment;
+  // Number of tiles played by the target
+  int target_tiles_played;
   // Number of tiles exchanged by the target
   int target_number_of_tiles_exchanged;
   // Maximum equity loss the target can
@@ -220,7 +226,14 @@ void evaluate_possible_leave(Inference *inference) {
     target_equity_cutoff =
         get_best_exchange_equity(inference) + inference->equity_margin;
   } else {
-    target_equity_cutoff = inference->target_score + current_leave_value +
+    const Game *game = inference->game;
+    const Equity nonopening_equity = static_eval_get_nonopening_move_equity(
+        game_get_ld(game), inference->current_target_leave,
+        player_get_rack(game_get_player(game, 1 - inference->target_index)),
+        inference->target_tiles_played, bag_get_letters(game_get_bag(game)),
+        inference->target_score, current_leave_value);
+    target_equity_cutoff = nonopening_equity +
+                           inference->target_placement_adjustment +
                            inference->equity_margin;
   }
 
@@ -353,12 +366,52 @@ void complete_inference_setup(Inference *inference, const InferenceArgs *args) {
                                  args->target_played_tiles);
 
   // Set the bag_as_rack to the bag
-  const Bag *bag = game_get_bag(inference->game);
+  Bag *bag = game_get_bag(inference->game);
   int bag_letters_array[MAX_ALPHABET_SIZE];
   memset(bag_letters_array, 0, sizeof(bag_letters_array));
   bag_increment_unseen_count(bag, bag_letters_array);
   for (int i = 0; i < MAX_ALPHABET_SIZE; i++) {
     rack_add_letters(inference->bag_as_rack, i, bag_letters_array[i]);
+  }
+
+  // MoveGen reads only the count of tiles in game->bag (not their identities)
+  // and checks bag_get_letters(bag) + rack_get_total_letters(&opponent_rack) >=
+  // 2 * RACK_SIZE for exchange legality. After drawing temp_target_rack and
+  // nontarget_known_rack, total_unseen_count is the number of tiles unseen to
+  // the observer (the target's rack plus the bag). Adjust game->bag so MoveGen
+  // sees the true pre-move bag count (0 when all unseen tiles are on the
+  // target's rack, and total_unseen_count - nontarget_known_count when the
+  // observer's rack is known).
+  const int target_known_and_played =
+      rack_get_total_letters(inference->current_target_rack);
+  const int current_bag_count = bag_get_letters(bag);
+  const int total_unseen_count = target_known_and_played + current_bag_count;
+  const int nontarget_known_count =
+      rack_get_total_letters(args->nontarget_known_rack);
+  const int target_bag_count = total_unseen_count > RACK_SIZE
+                                   ? total_unseen_count - nontarget_known_count
+                                   : 0;
+  for (int draw_idx = current_bag_count; draw_idx > target_bag_count;
+       draw_idx--) {
+    bag_draw_random_letter(bag, args->target_index);
+  }
+  for (int add_idx = current_bag_count; add_idx < target_bag_count; add_idx++) {
+    bag_add_letter(bag, BLANK_MACHINE_LETTER, args->target_index);
+  }
+
+  inference->target_tiles_played =
+      rack_get_total_letters(args->target_played_tiles);
+  inference->target_placement_adjustment = 0;
+  const Board *board = game_get_board(inference->game);
+  if (args->target_num_exch == 0 && args->target_move != NULL &&
+      move_get_type(args->target_move) == GAME_EVENT_TILE_PLACEMENT_MOVE &&
+      board_get_tiles_played(board) == 0) {
+    Equity word_penalties[2 * BOARD_DIM];
+    Equity letter_penalties[2 * BOARD_DIM];
+    board_copy_opening_penalties(board, word_penalties, letter_penalties);
+    inference->target_placement_adjustment =
+        placement_adjustment(game_get_ld(inference->game), args->target_move,
+                             word_penalties, letter_penalties, 0);
   }
 }
 
@@ -707,6 +760,8 @@ void populate_inference_args_with_game_history(InferenceArgs *args,
   args->target_index = game_event_get_player_index(target_move_event);
   args->target_score = game_event_get_move_score(target_move_event);
   args->target_num_exch = 0;
+  args->target_move =
+      (move_get_type(move) == GAME_EVENT_TILE_PLACEMENT_MOVE) ? move : NULL;
   if (move_get_type(move) == GAME_EVENT_EXCHANGE) {
     args->target_num_exch = move_get_tiles_played(move);
     rack_reset(args->target_played_tiles);
