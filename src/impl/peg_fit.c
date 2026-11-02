@@ -68,8 +68,8 @@ typedef struct PegFitWorker {
 
 static uint64_t peg_fit_mix_seed(uint64_t seed, uint64_t first,
                                  uint64_t second) {
-  uint64_t mixed = seed ^ (first * 0x9E3779B97F4A7C15ULL) ^
-                   (second * 0xBF58476D1CE4E5B9ULL);
+  uint64_t mixed =
+      seed ^ (first * 0x9E3779B97F4A7C15ULL) ^ (second * 0xBF58476D1CE4E5B9ULL);
   mixed ^= mixed >> 31;
   mixed *= 0x94D049BB133111EBULL;
   mixed ^= mixed >> 29;
@@ -84,8 +84,7 @@ static Equity peg_fit_get_playing_value(int number_of_tiles_in_bag,
   return index < PEG_ADJUST_VALUES_LENGTH ? peg_adjust_values[index] : 0;
 }
 
-static void peg_fit_generate_all_moves(const Game *game,
-                                       MoveList **move_list) {
+static void peg_fit_generate_all_moves(const Game *game, MoveList **move_list) {
   while (true) {
     const MoveGenArgs args = {
         .game = game,
@@ -180,9 +179,8 @@ static void peg_fit_add_position(PegFitShared *shared,
   cpthread_mutex_lock(&shared->mutex);
   if (shared->number_of_positions == shared->positions_capacity) {
     shared->positions_capacity *= 2;
-    shared->positions =
-        realloc_or_die(shared->positions, sizeof(PegFitPosition) *
-                                              shared->positions_capacity);
+    shared->positions = realloc_or_die(
+        shared->positions, sizeof(PegFitPosition) * shared->positions_capacity);
   }
   shared->positions[shared->number_of_positions++] = *position;
   shared->rollouts_played +=
@@ -235,11 +233,12 @@ static void peg_fit_analyze_position(PegFitWorker *worker, int game_idx,
       const uint64_t seed = peg_fit_mix_seed(
           args->seed, ((uint64_t)game_idx << 8) | (uint64_t)turn,
           (uint64_t)rollout_idx);
-      total +=
-          equity_to_double(peg_fit_rollout(worker, &best_moves[class_idx], seed));
+      total += equity_to_double(
+          peg_fit_rollout(worker, &best_moves[class_idx], seed));
     }
-    position.value[class_idx] = total / args->rollouts_per_class -
-                                equity_to_double(best_static_equities[class_idx]);
+    position.value[class_idx] =
+        total / args->rollouts_per_class -
+        equity_to_double(best_static_equities[class_idx]);
   }
   peg_fit_add_position(worker->shared, &position, number_of_classes);
 }
