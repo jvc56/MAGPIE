@@ -6,7 +6,8 @@ for the exact sampling, player budgets, prior mixture, and metrics.
 
 Twenty paired game prefixes per policy produced 187 observed leaves: 60 static,
 62 PAT, and 65 two-ply. All were placements; this run provides no exchange-quality
-evidence. Leave sizes ranged from one to six tiles. There were 14, 13, and 15
+evidence. A separate [exchange-focused run](infbench-exchange-results-20261102.md)
+measures discarded-tile prediction. Leave sizes ranged from one to six tiles. There were 14, 13, and 15
 preendgame observations (bag size 1–6), respectively. Requested second observations
 were sometimes unavailable before the bag emptied. Seeds and the mode grid were
 fixed before this run; no parameters were optimized. The comparisons below are

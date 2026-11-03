@@ -2,7 +2,9 @@
 
 #include "../src/compat/ctime.h"
 #include "../src/def/game_history_defs.h"
+#include "../src/def/inference_defs.h"
 #include "../src/def/letter_distribution_defs.h"
+#include "../src/def/rack_defs.h"
 #include "../src/def/thread_control_defs.h"
 #include "../src/ent/alias_method.h"
 #include "../src/ent/bag.h"
@@ -18,6 +20,7 @@
 #include "../src/ent/player.h"
 #include "../src/ent/rack.h"
 #include "../src/ent/sim_results.h"
+#include "../src/ent/stats.h"
 #include "../src/ent/thread_control.h"
 #include "../src/impl/cgp.h"
 #include "../src/impl/config.h"
@@ -197,24 +200,14 @@ static InferBenchPrediction infbench_posterior(const InferenceResults *results,
   return prediction;
 }
 
-static InferBenchScore infbench_score(const InferBenchPrediction *prediction,
-                                      const InferBenchPrediction *prior,
-                                      const Rack *truth, const KLV *klv,
-                                      const LetterDistribution *ld) {
-  InferBenchScore score = {.observations = 1};
+static InferBenchScore
+infbench_feature_score(const InferBenchPrediction *prediction,
+                       const InferBenchPrediction *prior, const Rack *truth,
+                       const KLV *klv, const LetterDistribution *ld) {
+  InferBenchScore score = {
+      .observations = 1, .raw_nll = NAN, .prior_gain = NAN};
+  score.metrics[0] = NAN;
   score.empty = prediction->mass == 0;
-  score.excluded = prediction->true_probability == 0;
-  score.raw_nll =
-      score.excluded ? INFINITY : -log(prediction->true_probability);
-  // An empty posterior falls back explicitly to the prior. Log loss uses
-  // the declared mixture; feature MSE uses the actual posterior mean.
-  const double prior_fraction = score.empty ? 1 : INFBENCH_PRIOR_MIX;
-  const double probability =
-      ((1 - prior_fraction) * prediction->true_probability) +
-      (prior_fraction * prior->true_probability);
-  assert(probability > 0);
-  score.metrics[0] = -log(probability);
-  score.prior_gain = log(probability / prior->true_probability);
   const double feature_prior_fraction = score.empty ? 1 : 0;
   const double expected_klv = ((1 - feature_prior_fraction) * prediction->klv) +
                               (feature_prior_fraction * prior->klv);
@@ -240,6 +233,52 @@ static InferBenchScore infbench_score(const InferBenchPrediction *prediction,
   return score;
 }
 
+static InferBenchScore infbench_score(const InferBenchPrediction *prediction,
+                                      const InferBenchPrediction *prior,
+                                      const Rack *truth, const KLV *klv,
+                                      const LetterDistribution *ld) {
+  InferBenchScore score =
+      infbench_feature_score(prediction, prior, truth, klv, ld);
+  score.excluded = prediction->true_probability == 0;
+  score.raw_nll =
+      score.excluded ? INFINITY : -log(prediction->true_probability);
+  // An empty posterior falls back explicitly to the prior. Log loss uses
+  // the declared mixture; feature MSE uses the actual posterior mean.
+  const double prior_fraction = score.empty ? 1 : INFBENCH_PRIOR_MIX;
+  const double probability =
+      ((1 - prior_fraction) * prediction->true_probability) +
+      (prior_fraction * prior->true_probability);
+  assert(probability > 0);
+  score.metrics[0] = -log(probability);
+  score.prior_gain = log(probability / prior->true_probability);
+  return score;
+}
+
+// Exchange feature marginals already cover every accepted candidate rack.
+// Do not infer joint exchanged-set probability from these marginals.
+static InferBenchPrediction
+infbench_exchanged_posterior(InferenceResults *results, int ld_size) {
+  InferBenchPrediction prediction = {.true_probability = NAN};
+  const Stat *equities =
+      inference_results_get_equity_values(results, INFERENCE_TYPE_EXCHANGED);
+  const double total_weight = stat_get_total_weight(equities);
+  if (total_weight == 0) {
+    return prediction;
+  }
+  prediction.mass = 1;
+  prediction.klv = stat_get_mean(equities);
+  for (int ml = 0; ml < ld_size; ml++) {
+    for (int count = 1; count <= RACK_SIZE; count++) {
+      prediction.counts[ml] +=
+          count *
+          inference_results_get_weight_subtotal(
+              results, INFERENCE_TYPE_EXCHANGED, ml, count) /
+          total_weight;
+    }
+  }
+  return prediction;
+}
+
 static void infbench_played_tiles(const Move *move, Rack *played) {
   rack_reset(played);
   const bool exchange = move_get_type(move) == GAME_EVENT_EXCHANGE;
@@ -254,7 +293,8 @@ static void infbench_played_tiles(const Move *move, Rack *played) {
 
 static void infbench_observe(const Config *config, const Move *move, int policy,
                              int pair_idx, int game_idx, int turn,
-                             InferBenchScore totals[INFBENCH_MODES]) {
+                             InferBenchScore totals[INFBENCH_MODES],
+                             InferBenchScore exchanged_totals[INFBENCH_MODES]) {
   const Game *game = config_get_game(config);
   const LetterDistribution *ld = game_get_ld(game);
   const KLV *klv = player_get_klv(game_get_player(game, 0));
@@ -262,6 +302,7 @@ static void infbench_observe(const Config *config, const Move *move, int policy,
   Rack played;
   rack_set_dist_size_and_reset(&played, ld_get_size(ld));
   infbench_played_tiles(move, &played);
+  const Rack exchanged_truth = played;
   Rack truth = *player_get_rack(game_get_player(game, 0));
   rack_subtract_using_floor_zero(&truth, &played);
   assert(rack_get_total_letters(&truth) ==
@@ -280,6 +321,10 @@ static void infbench_observe(const Config *config, const Move *move, int policy,
   Timer prior_timer;
   ctimer_start(&prior_timer);
   const InferBenchPrediction prior = infbench_prior(&unseen, &truth, klv);
+  InferBenchPrediction exchanged_prior = {0};
+  if (exchange) {
+    exchanged_prior = infbench_prior(&unseen, &exchanged_truth, klv);
+  }
   const double prior_seconds = ctimer_elapsed_seconds(&prior_timer);
   assert(prior.true_probability > 0);
   Rack known;
@@ -313,6 +358,14 @@ static void infbench_observe(const Config *config, const Move *move, int policy,
          string_builder_peek(description), prior.true_probability,
          prior_seconds, cgp);
   free(cgp);
+  if (exchange) {
+    string_builder_clear(description);
+    string_builder_add_rack(description, &exchanged_truth, ld, true);
+    printf(
+        "INFBENCH exchanged_truth policy=%s pair=%d game=%d turn=%d rack=%s\n",
+        infbench_policies[policy], pair_idx, game_idx, turn,
+        string_builder_peek(description));
+  }
   string_builder_destroy(description);
   for (int mode_idx = 0; mode_idx < INFBENCH_MODES; mode_idx++) {
     Timer timer;
@@ -347,6 +400,23 @@ static void infbench_observe(const Config *config, const Move *move, int policy,
            score.prior_gain, score.metrics[1], score.metrics[2],
            score.metrics[3], score.metrics[4], score.excluded, score.empty,
            score.seconds);
+    if (exchange) {
+      const InferBenchPrediction exchanged_prediction =
+          mode_idx == 0
+              ? exchanged_prior
+              : infbench_exchanged_posterior(results, ld_get_size(ld));
+      InferBenchScore exchanged_score = infbench_feature_score(
+          &exchanged_prediction, &exchanged_prior, &exchanged_truth, klv, ld);
+      exchanged_score.seconds = score.seconds;
+      infbench_add_score(&exchanged_totals[mode_idx], &exchanged_score);
+      printf("INFBENCH exchanged_decision policy=%s pair=%d game=%d turn=%d "
+             "mode=%s klv_mse=%.9f vowel_mse=%.9f score_mse=%.9f tile_mse=%.9f "
+             "empty=%d\n",
+             infbench_policies[policy], pair_idx, game_idx, turn,
+             infbench_modes[mode_idx].name, exchanged_score.metrics[1],
+             exchanged_score.metrics[2], exchanged_score.metrics[3],
+             exchanged_score.metrics[4], exchanged_score.empty);
+    }
     (void)fflush(stdout);
   }
   error_stack_destroy(errors);
@@ -437,6 +507,58 @@ void test_infer_bench_metrics(void) {
   assert(fabs(score.metrics[3] - 0.25) < 1e-12);
   assert(fabs(score.metrics[4] - 0.125) < 1e-12);
   assert(!score.empty && !score.excluded);
+  // Exchange marginals must match the exact joint example above, including
+  // duplicate A's, in both weighted and draw-count modes.
+  for (int weighted_idx = 0; weighted_idx < 2; weighted_idx++) {
+    inference_results_reset(results, 0, ld_get_size(ld));
+    Stat *equities =
+        inference_results_get_equity_values(results, INFERENCE_TYPE_EXCHANGED);
+    if (weighted_idx == 1) {
+      stat_push_weighted(equities, truth_klv, 3, 0.75);
+      stat_push_weighted(equities, other_klv, 1, 0.25);
+    } else {
+      stat_push(equities, truth_klv, 3);
+      stat_push(equities, other_klv, 1);
+    }
+    for (int ml = 0; ml < ld_get_size(ld); ml++) {
+      const int truth_count = rack_get_letter(&truth, ml);
+      const int other_count = rack_get_letter(&other, ml);
+      if (truth_count > 0) {
+        if (weighted_idx == 1) {
+          inference_results_add_to_letter_weight_subtotal(
+              results, INFERENCE_TYPE_EXCHANGED, ml, truth_count, 0.75);
+        } else {
+          inference_results_add_to_letter_subtotal(
+              results, INFERENCE_TYPE_EXCHANGED, ml, truth_count,
+              INFERENCE_SUBTOTAL_DRAW, 3);
+        }
+      }
+      if (other_count > 0) {
+        if (weighted_idx == 1) {
+          inference_results_add_to_letter_weight_subtotal(
+              results, INFERENCE_TYPE_EXCHANGED, ml, other_count, 0.25);
+        } else {
+          inference_results_add_to_letter_subtotal(
+              results, INFERENCE_TYPE_EXCHANGED, ml, other_count,
+              INFERENCE_SUBTOTAL_DRAW, 1);
+        }
+      }
+    }
+    const InferBenchPrediction exchanged =
+        infbench_exchanged_posterior(results, ld_get_size(ld));
+    const InferBenchScore exchanged_score =
+        infbench_feature_score(&exchanged, &prior, &truth, klv, ld);
+    assert(isnan(exchanged.true_probability));
+    assert(isnan(exchanged_score.raw_nll) && isnan(exchanged_score.metrics[0]));
+    for (int metric_idx = 1; metric_idx < INFBENCH_METRICS; metric_idx++) {
+      assert(fabs(exchanged_score.metrics[metric_idx] -
+                  score.metrics[metric_idx]) < 1e-12);
+    }
+  }
+  inference_results_reset(results, 0, ld_get_size(ld));
+  const InferBenchPrediction empty_exchange =
+      infbench_exchanged_posterior(results, ld_get_size(ld));
+  assert(empty_exchange.mass == 0);
   alias_method_reset(am);
   const InferBenchPrediction empty = infbench_posterior(results, &truth, klv);
   const InferBenchScore fallback =
@@ -454,7 +576,9 @@ void test_infer_bench_metrics(void) {
 
 static void infbench_game(Config *config, int policy, int pair_idx,
                           int game_idx, int positions, unsigned int seed,
-                          InferBenchScore scores[INFBENCH_MODES]) {
+                          InferBenchScore scores[INFBENCH_MODES],
+                          InferBenchScore exchanged_scores[INFBENCH_MODES],
+                          bool exchanges_only) {
   Game *game = config_get_game(config);
   game_reset(game);
   game_seed(game, seed);
@@ -467,6 +591,7 @@ static void infbench_game(Config *config, int policy, int pair_idx,
   // Sample at target decisions 4, 10, 16, ...; defer passes and bingos to
   // the next nontrivial leave. No filtering on inferred probability or regret.
   while (!game_over(game) && observations < positions &&
+         (!exchanges_only || bag_get_letters(game_get_bag(game)) > 0) &&
          turn < INFBENCH_MAX_TURNS) {
     Move chosen;
     if (policy == 2 && game_get_player_on_turn_index(game) == 0 &&
@@ -487,12 +612,15 @@ static void infbench_game(Config *config, int policy, int pair_idx,
       const int leave_size =
           rack_get_total_letters(player_get_rack(game_get_player(game, 0))) -
           move_get_tiles_played(&chosen);
-      if (decisions >= 4 + 6 * observations && leave_size > 0 &&
-          bag_get_letters(game_get_bag(game)) > 0 &&
-          (type == GAME_EVENT_TILE_PLACEMENT_MOVE ||
-           type == GAME_EVENT_EXCHANGE)) {
+      const bool sample =
+          exchanges_only
+              ? type == GAME_EVENT_EXCHANGE
+              : (decisions >= 4 + 6 * observations && leave_size > 0 &&
+                 (type == GAME_EVENT_TILE_PLACEMENT_MOVE ||
+                  type == GAME_EVENT_EXCHANGE));
+      if (sample && bag_get_letters(game_get_bag(game)) > 0) {
         infbench_observe(config, &chosen, policy, pair_idx, game_idx, turn,
-                         scores);
+                         scores, exchanged_scores);
         observations++;
       }
     }
@@ -509,32 +637,41 @@ static void infbench_game(Config *config, int policy, int pair_idx,
 static void
 infbench_summary(int policy, const InferBenchScore *scores,
                  InferBenchMoments deltas[INFBENCH_MODES][INFBENCH_METRICS],
-                 const LetterDistribution *ld) {
+                 const LetterDistribution *ld, bool exchanged) {
+  const char *summary_record = exchanged ? "exchanged_summary" : "summary";
+  const char *tile_record = exchanged ? "exchanged_tile" : "tile";
+  const char *delta_record = exchanged ? "exchanged_delta" : "delta";
+  if (scores[0].observations == 0) {
+    printf("INFBENCH %s policy=%s n=0\n", summary_record,
+           infbench_policies[policy]);
+    return;
+  }
   for (int mode_idx = 0; mode_idx < INFBENCH_MODES; mode_idx++) {
     const InferBenchScore *score = &scores[mode_idx];
     const double count = score->observations;
     if (count == 0) {
       log_fatal("infbench collected no observations");
     }
-    printf(
-        "INFBENCH summary policy=%s mode=%s n=%d raw_nll=%.9g mixed_nll=%.9f "
-        "gain_nats=%.9f klv_mse=%.9f vowel_mse=%.9f score_mse=%.9f "
-        "tile_mse=%.9f excluded_rate=%.6f empty_rate=%.6f seconds=%.6f\n",
-        infbench_policies[policy], infbench_modes[mode_idx].name,
-        score->observations, score->raw_nll / count, score->metrics[0] / count,
-        score->prior_gain / count, score->metrics[1] / count,
-        score->metrics[2] / count, score->metrics[3] / count,
-        score->metrics[4] / count, score->excluded / count,
-        score->empty / count, score->seconds / count);
+    printf("INFBENCH %s policy=%s mode=%s n=%d raw_nll=%.9g mixed_nll=%.9f "
+           "gain_nats=%.9f klv_mse=%.9f vowel_mse=%.9f score_mse=%.9f "
+           "tile_mse=%.9f excluded_rate=%.6f empty_rate=%.6f seconds=%.6f\n",
+           summary_record, infbench_policies[policy],
+           infbench_modes[mode_idx].name, score->observations,
+           score->raw_nll / count, score->metrics[0] / count,
+           score->prior_gain / count, score->metrics[1] / count,
+           score->metrics[2] / count, score->metrics[3] / count,
+           score->metrics[4] / count, exchanged ? NAN : score->excluded / count,
+           score->empty / count, score->seconds / count);
     for (int ml = 0; ml < ld_get_size(ld); ml++) {
-      printf("INFBENCH tile policy=%s mode=%s tile=%s mse=%.9f\n",
+      printf("INFBENCH %s policy=%s mode=%s tile=%s mse=%.9f\n", tile_record,
              infbench_policies[policy], infbench_modes[mode_idx].name,
              ld_ml_to_hl(ld, ml), score->tile_mse[ml] / count);
     }
     if (mode_idx == 0) {
       continue;
     }
-    for (int metric_idx = 0; metric_idx < INFBENCH_METRICS; metric_idx++) {
+    for (int metric_idx = exchanged ? 1 : 0; metric_idx < INFBENCH_METRICS;
+         metric_idx++) {
       const InferBenchMoments *moment = &deltas[mode_idx][metric_idx];
       const double mean = moment->sum / moment->count;
       double half_width = NAN;
@@ -544,12 +681,35 @@ infbench_summary(int policy, const InferBenchScore *scores,
                         (moment->count - 1));
         half_width = 1.96 * sqrt(variance / moment->count);
       }
-      printf("INFBENCH delta policy=%s mode=%s control=%s metric=%s pairs=%d "
+      printf("INFBENCH %s policy=%s mode=%s control=%s metric=%s pairs=%d "
              "mean=%.9f normal95_half_width=%.9f\n",
-             infbench_policies[policy], infbench_modes[mode_idx].name,
+             delta_record, infbench_policies[policy],
+             infbench_modes[mode_idx].name,
              infbench_modes[infbench_modes[mode_idx].control].name,
              infbench_metric_names[metric_idx], moment->count, mean,
              half_width);
+    }
+  }
+}
+
+static void infbench_accumulate_pair(
+    const InferBenchScore scores[INFBENCH_MODES],
+    InferBenchScore totals[INFBENCH_MODES],
+    InferBenchMoments deltas[INFBENCH_MODES][INFBENCH_METRICS]) {
+  for (int mode_idx = 0; mode_idx < INFBENCH_MODES; mode_idx++) {
+    infbench_add_score(&totals[mode_idx], &scores[mode_idx]);
+    if (scores[mode_idx].observations == 0) {
+      continue;
+    }
+    const InferBenchScore *control = &scores[infbench_modes[mode_idx].control];
+    for (int metric_idx = 0; metric_idx < INFBENCH_METRICS; metric_idx++) {
+      const double difference = (scores[mode_idx].metrics[metric_idx] -
+                                 control->metrics[metric_idx]) /
+                                scores[mode_idx].observations;
+      InferBenchMoments *moment = &deltas[mode_idx][metric_idx];
+      moment->sum += difference;
+      moment->squares += difference * difference;
+      moment->count++;
     }
   }
 }
@@ -558,18 +718,25 @@ void infer_bench_run_spec(const char *spec) {
   int pairs = INFBENCH_DEFAULT_PAIRS;
   int positions = INFBENCH_DEFAULT_POSITIONS;
   unsigned int seed = INFBENCH_DEFAULT_SEED;
+  bool exchanges_only = false;
   if (spec != NULL) {
     StringSplitter *fields = split_string(spec, ':', true);
-    if (string_splitter_get_number_of_items(fields) != 3) {
+    const int num_fields = string_splitter_get_number_of_items(fields);
+    if (num_fields < 3 || num_fields > 4) {
       string_splitter_destroy(fields);
-      log_fatal("usage: infbench:PAIRS:POSITIONS_PER_GAME:SEED");
+      log_fatal("usage: infbench:PAIRS:POSITIONS_PER_GAME:SEED[:exchanges]");
     }
     ErrorStack *errors = error_stack_create();
     pairs = string_to_int(string_splitter_get_item(fields, 0), errors);
     positions = string_to_int(string_splitter_get_item(fields, 1), errors);
     const uint64_t parsed_seed =
         string_to_uint64(string_splitter_get_item(fields, 2), errors);
-    const bool invalid = !error_stack_is_empty(errors) || pairs < 1 ||
+    if (num_fields == 4) {
+      exchanges_only =
+          strings_equal(string_splitter_get_item(fields, 3), "exchanges");
+    }
+    const bool invalid = (num_fields == 4 && !exchanges_only) ||
+                         !error_stack_is_empty(errors) || pairs < 1 ||
                          pairs > 10000 || positions < 1 || positions > 20 ||
                          parsed_seed > UINT_MAX;
     error_stack_destroy(errors);
@@ -583,38 +750,31 @@ void infer_bench_run_spec(const char *spec) {
   printf("INFBENCH settings pairs=%d positions_per_game=%d seed=%u lex=CSW21 "
          "inference_threads=%d sim_threads=1 sim_plies=2 sim_candidates=15 "
          "sim_iterations=%d sim_minplay=10 sim_sampling=rr sim_pat=false "
-         "prior_mix=%.6f feature_mse=raw_posterior empty_fallback=prior\n",
+         "prior_mix=%.6f feature_mse=raw_posterior empty_fallback=prior "
+         "sampling=%s\n",
          pairs, positions, seed, INFBENCH_THREADS, INFBENCH_SIM_ITERS,
-         INFBENCH_PRIOR_MIX);
+         INFBENCH_PRIOR_MIX, exchanges_only ? "exchanges" : "scheduled");
   for (int policy = 0; policy < INFBENCH_POLICIES; policy++) {
     Config *config = infbench_config(policy, seed);
     InferBenchScore totals[INFBENCH_MODES] = {0};
+    InferBenchScore exchanged_totals[INFBENCH_MODES] = {0};
+    InferBenchMoments exchanged_deltas[INFBENCH_MODES][INFBENCH_METRICS] = {0};
     InferBenchMoments deltas[INFBENCH_MODES][INFBENCH_METRICS] = {0};
     for (int pair_idx = 0; pair_idx < pairs; pair_idx++) {
       InferBenchScore pair_scores[INFBENCH_MODES] = {0};
+      InferBenchScore exchanged_pair_scores[INFBENCH_MODES] = {0};
       for (int game_idx = 0; game_idx < 2; game_idx++) {
         infbench_game(config, policy, pair_idx, game_idx, positions,
-                      seed + (unsigned int)pair_idx, pair_scores);
+                      seed + (unsigned int)pair_idx, pair_scores,
+                      exchanged_pair_scores, exchanges_only);
       }
-      for (int mode_idx = 0; mode_idx < INFBENCH_MODES; mode_idx++) {
-        infbench_add_score(&totals[mode_idx], &pair_scores[mode_idx]);
-        if (pair_scores[mode_idx].observations == 0) {
-          continue;
-        }
-        const InferBenchScore *control =
-            &pair_scores[infbench_modes[mode_idx].control];
-        for (int metric_idx = 0; metric_idx < INFBENCH_METRICS; metric_idx++) {
-          const double difference = (pair_scores[mode_idx].metrics[metric_idx] -
-                                     control->metrics[metric_idx]) /
-                                    pair_scores[mode_idx].observations;
-          InferBenchMoments *moment = &deltas[mode_idx][metric_idx];
-          moment->sum += difference;
-          moment->squares += difference * difference;
-          moment->count++;
-        }
-      }
+      infbench_accumulate_pair(pair_scores, totals, deltas);
+      infbench_accumulate_pair(exchanged_pair_scores, exchanged_totals,
+                               exchanged_deltas);
     }
-    infbench_summary(policy, totals, deltas, config_get_ld(config));
+    infbench_summary(policy, totals, deltas, config_get_ld(config), false);
+    infbench_summary(policy, exchanged_totals, exchanged_deltas,
+                     config_get_ld(config), true);
     config_destroy(config);
   }
 }

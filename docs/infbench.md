@@ -10,6 +10,8 @@ make magpie_test BUILD=no_pgo_release
 ./bin/magpie_test infbench > infbench.log
 # Explicit game pairs, requested observations per game, and seed:
 ./bin/magpie_test infbench:20:2:20261102 > infbench.log
+# Scan games for exchanges, with a generous quota (including exchange-all):
+./bin/magpie_test infbench:20:20:20261102:exchanges > exchanges.log
 # Compact results (other MAGPIE output also appears in the log):
 rg '^INFBENCH (settings|summary|delta)' infbench.log
 ```
@@ -44,6 +46,13 @@ nonempty. Stop a game after collecting the requested observations or reaching
 its end; report shortfalls rather than inventing replacements. Thus this is a
 specified sample of early/midgame and sometimes preendgame moves, not an unbiased
 sample of all turns. Exchanges are included when encountered, not forced.
+
+The optional `:exchanges` suffix instead collects the first requested number of
+natural exchanges by player 0 in each game, stopping when the bag empties or the
+game ends. It includes exchanges of all seven tiles (an empty kept leave). It
+does not force exchanges or replace games without exchanges. Both kept-leave
+and discarded-tile predictions are scored on these observations. This selects
+a different population from the scheduled sample above.
 
 The fixed grid is:
 
@@ -108,3 +117,28 @@ The grid is fixed rather than tuned on the reported sample. To select defaults,
 use separate tuning seeds and a held-out run, and assess downstream game-pair
 playing strength as a separate experiment. Changing lexica, KLV/PAT data,
 simulation budget, or the sampling schedule changes the benchmark population.
+
+## Exchanged-tile accuracy
+
+Whenever a sampled move is an exchange, `exchanged_truth`, `exchanged_decision`,
+`exchanged_summary`, `exchanged_tile`, and `exchanged_delta` records separately
+score the tiles discarded. The kept-leave records continue to score only the
+retained tiles before replenishment. A summary with `n=0` means no exchange was
+observed for that policy.
+
+Exchanged-tile metrics include KLV, vowel-count, total face-score, and per-tile
+count MSE, plus the sum of per-tile MSE. The prediction uses the complete
+exchange statistics: weighted KLV mean and tile-count marginals for softmax,
+and draw-count-weighted statistics for hard inference. KLV here is the table
+value of the discarded multiset, a descriptive feature rather than its value
+to the player. The baseline is a random subset of the observed exchange size
+from unseen tiles; actual exchanged identities are used only for scoring.
+Empty predictions fall back to this baseline. Paired deltas use the same
+controls and game-pair averaging as kept-leave metrics.
+
+Exact exchanged-set log loss and exclusion rate are **not available** from the
+stored marginal statistics. Their summary fields are `nan`, and no exchanged
+log-loss delta is emitted. Marginal probabilities are not multiplied together
+to invent a joint probability. Inference runs once per mode for both reports;
+exchange timing repeats that common cost, rather than adding a second run.
+Prior timing includes construction of both kept and exchanged priors.
