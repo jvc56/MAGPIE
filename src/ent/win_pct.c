@@ -1,5 +1,6 @@
 #include "win_pct.h"
 
+#include "../def/config_defs.h"
 #include "../util/fileproxy.h"
 #include "../util/io_util.h"
 #include "../util/string_util.h"
@@ -174,6 +175,14 @@ void win_pct_destroy(WinPct *wp) {
   free(wp->name);
   free(wp->win_pcts);
   free(wp);
+}
+
+char *win_pct_get_default_name(const char *ld_name) {
+  char *ld_name_lowercase = to_lower_case(ld_name);
+  char *name =
+      get_formatted_string("%s%s", DEFAULT_WIN_PCT_PREFIX, ld_name_lowercase);
+  free(ld_name_lowercase);
+  return name;
 }
 
 WinPct *win_pct_create(const char *data_paths, const char *win_pct_name,

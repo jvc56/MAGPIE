@@ -1,6 +1,5 @@
 #include "pat_utility.h"
 
-#include "../def/config_defs.h"
 #include "../def/pat_defs.h"
 #include "../def/rack_defs.h"
 #include "../util/io_util.h"
@@ -87,8 +86,7 @@ void pat_prepare_utility(PATWeights *pat, const char *data_paths,
   if (pat->utility_adjust <= 0.0) {
     return;
   }
-  char *win_pct_name =
-      get_formatted_string("%s%s", DEFAULT_WIN_PCT_PREFIX, ld_get_name(ld));
+  char *win_pct_name = win_pct_get_default_name(ld_get_name(ld));
   if (pat->utility_table != NULL &&
       strings_equal(pat->utility_win_pct_name, win_pct_name)) {
     free(win_pct_name);

@@ -3903,15 +3903,14 @@ void config_fill_sim_args(const Config *config, Rack *known_opp_rack,
 }
 
 // The win percentage table the config should use: the one named by
-// -winpct, else DEFAULT_WIN_PCT_PREFIX plus the letter distribution's
-// name. NULL when neither is known yet. Caller owns the result.
+// -winpct, else the letter distribution's default table. NULL when neither
+// is known yet. Caller owns the result.
 static char *config_win_pct_target_name(const Config *config) {
   if (config->win_pct_explicit_name) {
     return string_duplicate(config->win_pct_explicit_name);
   }
   if (config->ld) {
-    return get_formatted_string("%s%s", DEFAULT_WIN_PCT_PREFIX,
-                                ld_get_name(config->ld));
+    return win_pct_get_default_name(ld_get_name(config->ld));
   }
   return NULL;
 }
