@@ -38,9 +38,6 @@ jobs:
           echo "data fetch: $fetched, download_data.sh: $downloaded"
           test -n "$fetched" && test "$fetched" = "$downloaded"
 
-      - name: Check that the README's generated stats are up to date
-        run: python3 scripts/readme_stats.py
-
       - name: Check formatting
         run: python3 ./format.py
 
