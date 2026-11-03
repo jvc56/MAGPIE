@@ -7,12 +7,11 @@
 // optimization never changes which racks are inferred, only how fast.
 #define INFERENCE_CUTOFF_MIN_EXCHANGE_LEAVE_SIZE 3
 
-// The fewest unknown tiles on the target's rack for which an inference values
-// its racks with the board's census play scores: with fewer there are too few
-// racks to pay for building them. Measured on CSW24 self-play positions, the
-// census is the faster from 5 tiles on 1 to 18 threads, and from 4 on up to
-// 10 threads, but not on 18.
-#define INFERENCE_CENSUS_MIN_TILES_TO_INFER 5
+// Use per-rack move generation for one to three unknown tiles and census
+// play scores for four or more. On the NWL23 single-worker benchmark census
+// is 2.46x faster at four tiles, but 2.24x slower at three. See
+// docs/static-temperature-validation-20261103.md for the measured workload.
+#define INFERENCE_CENSUS_MIN_TILES_TO_INFER 4
 
 // The positions of the walk over possible leaves that a worker claims at a
 // time when the census values them: each takes about a microsecond, so

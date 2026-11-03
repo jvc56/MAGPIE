@@ -65,6 +65,7 @@ The fixed grid is:
 | `soft5t2`, `soft5t5` | 5 | 2, 5 |
 | `soft10t2`, `soft10t5` | 10 | 2, 5 |
 | `soft20t2`, `soft20t5` | 20 | 2, 5 |
+| `softnocutofft8` | 10,000 (effectively unlimited) | 8 |
 
 The prior is the exact multivariate hypergeometric distribution for a leave of
 that size drawn from unseen tiles, conditioned on revealed played tiles for
@@ -95,6 +96,12 @@ leave size, exchanges, or stage without rerunning inference.
   KLV is averaged over leaves, not evaluated on expected tile counts.
 - `tile_mse`: sum of squared errors in expected counts over all tile types,
   including blanks. `tile` summary records give each type's MSE separately.
+- `duplicate_mse`: squared error of the expected number of extra copies beyond
+  the first of each tile type, including blanks (AE = 0, AA = 1, AAA = 2).
+  Average this feature over whole leaves, not over expected tile counts: a
+  50/50 mixture of AA and EE predicts one duplicate, despite having the same
+  tile-count means as AE. Also reported for exchanged tiles and calibration.
+  One-tile and empty leaves necessarily have zero duplicate-count error.
 - `excluded` / `excluded_rate`: actual leave has zero posterior probability.
 - `empty` / `empty_rate`: no representable posterior mass. Feature predictions
   fall back to the prior in these cases; no observations are dropped.
@@ -166,3 +173,30 @@ binaries, and compare inference `seconds` separately from game generation.
 For training/validation calibration by leave size, game stage, and move type,
 including exact PAT evaluation for one- through four-tile placements, see
 [softmax calibration](softmax-calibration.md).
+
+## Static temperature validation
+
+The experimental PAT inference evaluator and PAT calibration modes have been
+removed. Neural scoring was an external experiment and is not integrated.
+Historical reports describe superseded experiments.
+
+```sh
+./bin/magpie_test infbench:100:20:2026300100:static1 > static1.log
+python3 scripts/summarize_static_temperature.py static1.log --output static1.json
+```
+
+Use `static1` through `static6` for placements with that many kept unknown tiles.
+`static7` samples natural exchanges, where the entire pre-exchange rack is
+hidden; its leave metrics concern the kept subset, whose size is printed.
+Exchanged-tile feature errors are printed separately (no joint exchanged-set
+NLL is available). All modes use NWL23, 64 static candidates, 4,000 two-ply
+simulation iterations, static rollouts, one simulation and inference thread,
+WMP, and paired games. They compare T3/5/7/8/9/10/15 on identical observations
+with a 10,000-point margin, effectively no cutoff. Temperature order rotates.
+
+Every temperature runs a fresh production inference context; elapsed time covers
+`infer`, excluding game generation, feature scoring, prior enumeration, and
+context destruction. The summary reports average, nearest-rank p95, and maximum
+time, six quality metrics, and paired NLL differences versus T8 with a normal
+95% interval clustered by game pair. Run without other CPU jobs for isolated
+latency; explicitly label timings collected under concurrent jobs.

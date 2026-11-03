@@ -1,3 +1,5 @@
+> Historical experiment: PAT inference support has been removed. Current validation uses static evaluation; see [infbench](infbench.md).
+
 # Exact PAT inference with cached board features and census bounds
 
 This opt-in evaluator accelerates PAT softmax experiments without changing the

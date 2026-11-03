@@ -1,8 +1,11 @@
 # Softmax inference
 
-`set -inftemp 2 -imargin 10` enables softmax weighting with a temperature of
-2 points and an admission margin of 10 points. The default temperature is zero,
-which preserves the existing inference behavior and draw-count sampling.
+Inference uses static score-plus-leave evaluation with temperature 8 points
+(T8) by default. The default 10,000-point admission margin is effectively no
+cutoff. PAT and neural inference experiments have been removed.
+
+`set -inftemp 2 -imargin 10` selects temperature 2 and admission margin 10.
+Setting temperature zero enables the legacy hard-margin, draw-count weighting.
 `-inftemp1` and `-inftemp2` override the temperature for each autoplay player;
 setting `-inftemp` also sets both players' temperatures.
 
@@ -31,7 +34,7 @@ For admitted racks, anchor pruning uses the observed equity so it retains moves
 needed to compute regret. Empty-bag weighted inference uses a full search because
 its admission exception also accepts moves above the margin.
 
-When at least five tiles are unknown, eligible positions use census play scores
+When at least four tiles are unknown, eligible positions use census play scores
 to evaluate candidate racks. Empty boards include the legacy vowel placement
 adjustment in each table entry before selecting its maximum; blank substitution
 changes face score but preserves the represented letter's vowel penalty. This

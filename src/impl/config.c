@@ -100,6 +100,7 @@
 #include <limits.h>
 #include <math.h>
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -2556,8 +2557,9 @@ static void help_entry_fill(const Config *config, int token,
     case ARG_TOKEN_P2_INFERENCE_TEMP:
       usages[0] = "<temperature>";
       examples[0] = "2.0";
-      text = "Sets the softmax inference temperature in points (zero disables "
-             "weighting).";
+      text =
+          "Sets the softmax inference temperature in points (default 8; zero "
+          "disables weighting).";
       break;
     case ARG_TOKEN_INFERENCE_MARGIN:
       usages[0] = "<inference_equity_margin>";
@@ -10189,6 +10191,8 @@ enum {
   CONFIG_DEFAULT_STOP_COND_PCT = 99,
   CONFIG_DEFAULT_TIME_LIMIT_SECONDS = 60,
   CONFIG_DEFAULT_EQ_MARGIN = 5,
+  CONFIG_DEFAULT_INFERENCE_MARGIN = 10000,
+  CONFIG_DEFAULT_INFERENCE_TEMPERATURE = 8,
 };
 #define CONFIG_DEFAULT_MAX_ITERATIONS 1000000000000ULL
 #define CONFIG_DEFAULT_UTILITY_W_WINPCT 1.0
@@ -11661,7 +11665,10 @@ static void config_contribute_reset_player_settings(Config *config,
   *(p1 ? &config->p1_sampling_rule : &config->p2_sampling_rule) =
       BAI_SAMPLING_RULE_TOP_TWO_IDS;
   *(p1 ? &config->p1_eq_margin_inference : &config->p2_eq_margin_inference) =
-      int_to_equity(CONFIG_DEFAULT_EQ_MARGIN);
+      int_to_equity(CONFIG_DEFAULT_INFERENCE_MARGIN);
+  *(p1 ? &config->p1_inference_temperature
+       : &config->p2_inference_temperature) =
+      int_to_equity(CONFIG_DEFAULT_INFERENCE_TEMPERATURE);
   *(p1 ? &config->p1_utility_w_winpct : &config->p2_utility_w_winpct) =
       CONFIG_DEFAULT_UTILITY_W_WINPCT;
   *(p1 ? &config->p1_utility_w_spread : &config->p2_utility_w_spread) =
@@ -16321,10 +16328,13 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->peg_out_lines = 1;
   config->peg_last_set_str = NULL;
   config->peg_last_moves_str = NULL;
-  config->inference_temperature = 0;
-  config->p1_inference_temperature = 0;
-  config->p2_inference_temperature = 0;
-  config->eq_margin_inference = int_to_equity(CONFIG_DEFAULT_EQ_MARGIN);
+  config->inference_temperature =
+      int_to_equity(CONFIG_DEFAULT_INFERENCE_TEMPERATURE);
+  config->p1_inference_temperature =
+      int_to_equity(CONFIG_DEFAULT_INFERENCE_TEMPERATURE);
+  config->p2_inference_temperature =
+      int_to_equity(CONFIG_DEFAULT_INFERENCE_TEMPERATURE);
+  config->eq_margin_inference = int_to_equity(CONFIG_DEFAULT_INFERENCE_MARGIN);
   config->eq_margin_movegen = int_to_equity(CONFIG_DEFAULT_EQ_MARGIN);
   config->min_play_iterations = CONFIG_DEFAULT_MIN_PLAY_ITERATIONS;
   config->max_iterations = CONFIG_DEFAULT_MAX_ITERATIONS;
@@ -16999,7 +17009,8 @@ void config_add_settings_to_string_builder(const Config *config,
       }
       break;
     case ARG_TOKEN_INFERENCE_TEMP:
-      if (config->inference_temperature != 0) {
+      if (config->inference_temperature !=
+          int_to_equity(CONFIG_DEFAULT_INFERENCE_TEMPERATURE)) {
         config_add_double_setting_to_string_builder(
             config, sb, arg_token,
             equity_to_double(config->inference_temperature));
@@ -17020,21 +17031,22 @@ void config_add_settings_to_string_builder(const Config *config,
       }
       break;
     case ARG_TOKEN_INFERENCE_MARGIN:
-      if (config->eq_margin_inference != 0) {
+      if (config->eq_margin_inference !=
+          int_to_equity(CONFIG_DEFAULT_INFERENCE_MARGIN)) {
         config_add_double_setting_to_string_builder(
             config, sb, arg_token,
             equity_to_double(config->eq_margin_inference));
       }
       break;
     case ARG_TOKEN_P1_INFERENCE_MARGIN:
-      if (config->p1_eq_margin_inference != 0) {
+      if (config->p1_eq_margin_inference != config->eq_margin_inference) {
         config_add_double_setting_to_string_builder(
             config, sb, arg_token,
             equity_to_double(config->p1_eq_margin_inference));
       }
       break;
     case ARG_TOKEN_P2_INFERENCE_MARGIN:
-      if (config->p2_eq_margin_inference != 0) {
+      if (config->p2_eq_margin_inference != config->eq_margin_inference) {
         config_add_double_setting_to_string_builder(
             config, sb, arg_token,
             equity_to_double(config->p2_eq_margin_inference));

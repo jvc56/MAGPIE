@@ -1,3 +1,5 @@
+> Historical experiment: PAT inference support has been removed. See [current static validation](static-temperature-validation-20261103.md).
+
 # PAT64 softmax experiment — November 3, 2026
 
 This test-only experiment interprets PAT64 as rescoring the best 64 static

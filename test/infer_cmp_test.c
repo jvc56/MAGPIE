@@ -245,7 +245,7 @@ static void test_infer_census_matches_movegen(bool softmax) {
 
   Config *config = config_create_or_die(
       "set -lex CSW24 -wmp true -s1 equity -s2 equity -r1 all -r2 all "
-      "-numplays 1 -threads 10 -ima 5");
+      "-numplays 1 -threads 10 -ima 5 -inftemp 0");
   if (softmax) {
     load_and_exec_config_or_die(config, "set -inftemp 2");
   }

@@ -1,3 +1,5 @@
+> Historical experiment: PAT inference support has been removed. Current validation uses static evaluation; see [infbench](infbench.md).
+
 # Softmax calibration by move type, leave size, and game stage
 
 This on-demand experiment fits the best tested margin/temperature settings by

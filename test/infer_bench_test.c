@@ -1,17 +1,13 @@
 #include "infer_bench_test.h"
 
 #include "../src/compat/ctime.h"
-#include "../src/def/board_defs.h"
 #include "../src/def/game_history_defs.h"
 #include "../src/def/inference_defs.h"
 #include "../src/def/letter_distribution_defs.h"
-#include "../src/def/move_defs.h"
-#include "../src/def/pat_defs.h"
 #include "../src/def/rack_defs.h"
 #include "../src/def/thread_control_defs.h"
 #include "../src/ent/alias_method.h"
 #include "../src/ent/bag.h"
-#include "../src/ent/board.h"
 #include "../src/ent/encoded_rack.h"
 #include "../src/ent/equity.h"
 #include "../src/ent/game.h"
@@ -21,19 +17,15 @@
 #include "../src/ent/letter_distribution.h"
 #include "../src/ent/move.h"
 #include "../src/ent/pat.h"
-#include "../src/ent/pat_eval.h"
 #include "../src/ent/player.h"
 #include "../src/ent/rack.h"
 #include "../src/ent/sim_results.h"
-#include "../src/ent/static_eval.h"
 #include "../src/ent/stats.h"
 #include "../src/ent/thread_control.h"
 #include "../src/impl/cgp.h"
 #include "../src/impl/config.h"
 #include "../src/impl/gameplay.h"
 #include "../src/impl/inference.h"
-#include "../src/impl/move_gen.h"
-#include "../src/impl/pat_inference.h"
 #include "../src/str/move_string.h"
 #include "../src/str/rack_string.h"
 #include "../src/util/io_util.h"
@@ -52,18 +44,14 @@
 
 enum {
   INFBENCH_POLICIES = 3,
-  INFBENCH_MODES = 11,
-  INFBENCH_METRICS = 5,
+  INFBENCH_MODES = 12,
+  INFBENCH_METRICS = 6,
   INFBENCH_DEFAULT_PAIRS = 4,
   INFBENCH_DEFAULT_POSITIONS = 2,
   INFBENCH_DEFAULT_SEED = 20261102,
   INFBENCH_THREADS = 4,
   INFBENCH_MAX_TURNS = 200,
   INFBENCH_SIM_ITERS = 1000,
-  INFBENCH_PAT_NONE = 0,
-  INFBENCH_PAT_VERIFY = 1,
-  INFBENCH_PAT_FAST = 2,
-  INFBENCH_PAT_REFERENCE = 3,
 };
 
 // All finite comparisons use the same declared mixture. Raw log loss is
@@ -71,7 +59,8 @@ enum {
 static const double INFBENCH_PRIOR_MIX = 0.01;
 static const char *const infbench_policies[] = {"static", "pat", "sim2"};
 static const char *const infbench_metric_names[] = {
-    "mixed_nll", "klv_mse", "vowel_mse", "score_mse", "tile_mse"};
+    "mixed_nll", "klv_mse",  "vowel_mse",
+    "score_mse", "tile_mse", "duplicate_mse"};
 
 typedef struct InferBenchMode {
   const char *name;
@@ -81,15 +70,18 @@ typedef struct InferBenchMode {
 } InferBenchMode;
 
 static const InferBenchMode infbench_modes[INFBENCH_MODES] = {
-    {"prior", 0, 0, 0},     {"hard0", 0, 0, 0},     {"hard5", 5, 0, 0},
-    {"hard10", 10, 0, 0},   {"hard20", 20, 0, 0},   {"soft5t2", 5, 2, 2},
-    {"soft5t5", 5, 5, 2},   {"soft10t2", 10, 2, 3}, {"soft10t5", 10, 5, 3},
-    {"soft20t2", 20, 2, 4}, {"soft20t5", 20, 5, 4},
+    {"prior", 0, 0, 0},     {"hard0", 0, 0, 0},
+    {"hard5", 5, 0, 0},     {"hard10", 10, 0, 0},
+    {"hard20", 20, 0, 0},   {"soft5t2", 5, 2, 2},
+    {"soft5t5", 5, 5, 2},   {"soft10t2", 10, 2, 3},
+    {"soft10t5", 10, 5, 3}, {"soft20t2", 20, 2, 4},
+    {"soft20t5", 20, 5, 4}, {"softnocutofft8", 10000, 8, 4},
 };
 
 typedef struct InferBenchPrediction {
   double true_probability;
   double klv;
+  double duplicates;
   double counts[MAX_ALPHABET_SIZE];
   double mass;
 } InferBenchPrediction;
@@ -127,6 +119,18 @@ static void infbench_add_score(InferBenchScore *total,
   total->empty += score->empty;
 }
 
+// Extra copies beyond the first of each tile type, including blanks.
+static int infbench_duplicates(const Rack *rack) {
+  int duplicates = 0;
+  for (int ml = 0; ml < rack_get_dist_size(rack); ml++) {
+    const int count = rack_get_letter(rack, ml);
+    if (count > 1) {
+      duplicates += count - 1;
+    }
+  }
+  return duplicates;
+}
+
 // Exact draw-count prior. Unlike inference this needs no move generation.
 // The recursion is solely for E[KLV]; tile-count means are analytic.
 static double infbench_prior_klv(const Rack *unseen, Rack *leave,
@@ -162,6 +166,11 @@ static InferBenchPrediction infbench_prior(const Rack *unseen,
     true_ways *=
         (double)choose(rack_get_letter(unseen, ml), rack_get_letter(truth, ml));
     prediction.counts[ml] = (double)size * rack_get_letter(unseen, ml) / total;
+    // E[max(count - 1, 0)] = E[count] - P(count > 0).
+    const double absent_probability =
+        (double)choose(total - rack_get_letter(unseen, ml), size) /
+        combinations;
+    prediction.duplicates += prediction.counts[ml] - (1 - absent_probability);
   }
   prediction.true_probability = true_ways / combinations;
   Rack leave;
@@ -178,6 +187,7 @@ static void infbench_add_mass(InferBenchPrediction *prediction,
     return;
   }
   rack_decode(encoded, rack);
+  prediction->duplicates += probability * infbench_duplicates(rack);
   prediction->mass += probability;
   if (racks_are_equal(rack, truth)) {
     prediction->true_probability += probability;
@@ -226,6 +236,10 @@ infbench_feature_score(const InferBenchPrediction *prediction,
   const double klv_error =
       expected_klv - equity_to_double(klv_get_leave_value(klv, truth));
   score.metrics[1] = klv_error * klv_error;
+  const double duplicate_error =
+      ((1 - feature_prior_fraction) * prediction->duplicates) +
+      (feature_prior_fraction * prior->duplicates) - infbench_duplicates(truth);
+  score.metrics[5] = duplicate_error * duplicate_error;
   double vowel_error = 0;
   double tile_score_error = 0;
   for (int ml = 0; ml < ld_get_size(ld); ml++) {
@@ -281,11 +295,12 @@ infbench_exchanged_posterior(InferenceResults *results, int ld_size) {
   prediction.klv = stat_get_mean(equities);
   for (int ml = 0; ml < ld_size; ml++) {
     for (int count = 1; count <= RACK_SIZE; count++) {
-      prediction.counts[ml] +=
-          count *
+      const double probability =
           inference_results_get_weight_subtotal(
               results, INFERENCE_TYPE_EXCHANGED, ml, count) /
           total_weight;
+      prediction.counts[ml] += count * probability;
+      prediction.duplicates += (count - 1) * probability;
     }
   }
   return prediction;
@@ -407,13 +422,14 @@ static void infbench_observe(const Config *config, const Move *move, int policy,
     infbench_add_score(&totals[mode_idx], &score);
     printf("INFBENCH decision policy=%s pair=%d game=%d turn=%d mode=%s "
            "raw_nll=%.9g mixed_nll=%.9f gain_nats=%.9f klv_mse=%.9f "
-           "vowel_mse=%.9f score_mse=%.9f tile_mse=%.9f excluded=%d empty=%d "
+           "vowel_mse=%.9f score_mse=%.9f tile_mse=%.9f duplicate_mse=%.9f "
+           "excluded=%d empty=%d "
            "seconds=%.6f\n",
            infbench_policies[policy], pair_idx, game_idx, turn,
            infbench_modes[mode_idx].name, score.raw_nll, score.metrics[0],
            score.prior_gain, score.metrics[1], score.metrics[2],
-           score.metrics[3], score.metrics[4], score.excluded, score.empty,
-           score.seconds);
+           score.metrics[3], score.metrics[4], score.metrics[5], score.excluded,
+           score.empty, score.seconds);
     if (exchange) {
       const InferBenchPrediction exchanged_prediction =
           mode_idx == 0
@@ -425,11 +441,12 @@ static void infbench_observe(const Config *config, const Move *move, int policy,
       infbench_add_score(&exchanged_totals[mode_idx], &exchanged_score);
       printf("INFBENCH exchanged_decision policy=%s pair=%d game=%d turn=%d "
              "mode=%s klv_mse=%.9f vowel_mse=%.9f score_mse=%.9f tile_mse=%.9f "
-             "empty=%d\n",
+             "duplicate_mse=%.9f empty=%d\n",
              infbench_policies[policy], pair_idx, game_idx, turn,
              infbench_modes[mode_idx].name, exchanged_score.metrics[1],
              exchanged_score.metrics[2], exchanged_score.metrics[3],
-             exchanged_score.metrics[4], exchanged_score.empty);
+             exchanged_score.metrics[4], exchanged_score.metrics[5],
+             exchanged_score.empty);
     }
     (void)fflush(stdout);
   }
@@ -497,6 +514,7 @@ void test_infer_bench_metrics(void) {
   assert(rack_get_letter(&consumed, letter_a) == 1);
   const InferBenchPrediction prior = infbench_prior(&unseen, &truth, klv);
   assert(fabs(prior.true_probability - (2.0 / 3.0)) < 1e-12);
+  assert(fabs(prior.duplicates - (1.0 / 3.0)) < 1e-12);
   const double truth_klv = equity_to_double(klv_get_leave_value(klv, &truth));
   const double other_klv = equity_to_double(klv_get_leave_value(klv, &other));
   assert(fabs(prior.klv - (((2 * truth_klv) + other_klv) / 3)) < 1e-12);
@@ -520,6 +538,8 @@ void test_infer_bench_metrics(void) {
   assert(fabs(score.metrics[2] - 0.0625) < 1e-12);
   assert(fabs(score.metrics[3] - 0.25) < 1e-12);
   assert(fabs(score.metrics[4] - 0.125) < 1e-12);
+  assert(fabs(prediction.duplicates - 0.25) < 1e-12);
+  assert(fabs(score.metrics[5] - 0.0625) < 1e-12);
   assert(!score.empty && !score.excluded);
   // Exchange marginals must match the exact joint example above, including
   // duplicate A's, in both weighted and draw-count modes.
@@ -584,528 +604,123 @@ void test_infer_bench_metrics(void) {
     assert(fabs(fallback.metrics[metric_idx] -
                 prior_score.metrics[metric_idx]) < 1e-12);
   }
+  // Marginal tile means cannot distinguish AE from a mixture of AA and EE.
+  rack_set_to_string(ld, &truth, "AE");
+  rack_set_to_string(ld, &other, "AA");
+  alias_method_add_weighted_rack(am, &other, 1, 0.5);
+  rack_set_to_string(ld, &other, "EE");
+  alias_method_add_weighted_rack(am, &other, 1, 0.5);
+  const bool duplicate_tables_generated = alias_method_generate_tables(am);
+  assert(duplicate_tables_generated);
+  const InferBenchPrediction duplicate_prediction =
+      infbench_posterior(results, &truth, klv);
+  const InferBenchScore duplicate_score =
+      infbench_feature_score(&duplicate_prediction, &prior, &truth, klv, ld);
+  assert(fabs(duplicate_score.metrics[4]) < 1e-12);
+  assert(fabs(duplicate_prediction.duplicates - 1) < 1e-12);
+  assert(fabs(duplicate_score.metrics[5] - 1) < 1e-12);
+  rack_set_to_string(ld, &other, "AAA??");
+  assert(infbench_duplicates(&other) == 3);
   inference_results_destroy(results);
   config_destroy(config);
 }
 
-static double infbench_pat_best(Game *game, MoveList *moves, double *seconds) {
-  Timer timer;
-  ctimer_start(&timer);
-  Player *player = game_get_player(game, 0);
-  player_set_pat_usage(player, false, 0);
-  const double best =
-      equity_to_double(move_get_equity(get_top_equity_move(game, moves)));
-  player_set_pat_usage(player, true, 0);
-  *seconds += ctimer_elapsed_seconds(&timer);
-  return best;
-}
-
-// Test-only one-tile posterior: enumerate every available letter, rescore
-// the top 64 static moves with PAT, and always include the observed move.
-static void infbench_pat64_observe(const Config *config, const Move *observed,
-                                   int pair_idx, int game_idx, int turn) {
-  Game *game = game_duplicate(config_get_game(config));
+// Run the production static evaluator on identical observations. Rotate the
+// temperature order to distribute cache/order effects across configurations.
+static void infbench_temperature_observe(const Config *config,
+                                         const Move *observed, int pair_idx,
+                                         int game_idx, int turn) {
+  static const int temperatures[] = {3, 5, 7, 8, 9, 10, 15};
+  const Game *game = config_get_game(config);
   const LetterDistribution *ld = game_get_ld(game);
-  const Player *player = game_get_player(game, 0);
-  const KLV *klv = player_get_klv(player);
-  const PATWeights *pat = player_get_pat(player);
-  assert(pat != NULL && player_get_pat_disabled(player));
+  const KLV *klv = player_get_klv(game_get_player(game, 0));
   Rack played;
   rack_set_dist_size_and_reset(&played, ld_get_size(ld));
   infbench_played_tiles(observed, &played);
-  Rack truth = *player_get_rack(player);
+  Rack truth = *player_get_rack(game_get_player(game, 0));
   rack_subtract_using_floor_zero(&truth, &played);
-  assert(rack_get_total_letters(&truth) == 1);
-  Rack unseen = truth;
+  const bool exchange = move_get_type(observed) == GAME_EVENT_EXCHANGE;
+  const Rack exchanged_truth = played;
+  Rack unseen = exchange ? *player_get_rack(game_get_player(game, 0)) : truth;
   int bag_counts[MAX_ALPHABET_SIZE] = {0};
   bag_increment_unseen_count(game_get_bag(game), bag_counts);
   for (int ml = 0; ml < ld_get_size(ld); ml++) {
     rack_add_letters(&unseen, ml, bag_counts[ml]);
   }
   const InferBenchPrediction prior = infbench_prior(&unseen, &truth, klv);
-  InferBenchPrediction predictions[3] = {0};
-  double shortlist_seconds = 0;
-  double direct_seconds = 0;
-  int differing_best = 0;
-  int candidate_racks = 0;
-  MoveList *direct_moves = move_list_create(1);
-  Equity word_penalties[2 * BOARD_DIM];
-  Equity letter_penalties[2 * BOARD_DIM];
-  board_copy_opening_penalties(game_get_board(game), word_penalties,
-                               letter_penalties);
-  MoveList *moves = move_list_create(64);
-  PATEvalContext *pat_context = malloc_or_die(sizeof(PATEvalContext));
-  Timer timer;
-  ctimer_start(&timer);
-  for (int ml = 0; ml < ld_get_size(ld); ml++) {
-    const int count = rack_get_letter(&unseen, ml);
-    if (count == 0) {
-      continue;
-    }
-    Rack leave;
-    rack_set_dist_size_and_reset(&leave, ld_get_size(ld));
-    rack_add_letter(&leave, ml);
-    rack_copy(player_get_rack(player), &played);
-    rack_add_letter(player_get_rack(player), ml);
-    double direct_best = 0;
-    if (ml % 2 == 0) {
-      direct_best = infbench_pat_best(game, direct_moves, &direct_seconds);
-    }
-    Timer path_timer;
-    ctimer_start(&path_timer);
-    pat_eval_context_load(
-        pat_context, pat, board_get_readonly_lanes(game_get_board(game), 0), ld,
-        player_get_rack(player), PAT_CLASS_MASK_ALL,
-        rack_get_total_letters(player_get_rack(game_get_player(game, 1))));
-    pat_eval_context_set_kwg(pat_context, player_get_kwg(player),
-                             game_get_variant(game));
-    pat_eval_context_set_utility(
-        pat_context,
-        equity_to_int(player_get_score(player) -
-                      player_get_score(game_get_player(game, 1))),
-        bag_get_letters(game_get_bag(game)));
-    const MoveGenArgs gen_args = {.game = game,
-                                  .move_list = moves,
-                                  .move_record_type = MOVE_RECORD_ALL,
-                                  .move_sort_type = MOVE_SORT_EQUITY,
-                                  .target_equity = EQUITY_MAX_VALUE};
-    generate_moves(&gen_args);
-    double observed_values[3];
-    double best[3];
-    for (int mode_idx = 0; mode_idx < 3; mode_idx++) {
-      observed_values[mode_idx] = equity_to_double(static_eval_get_move_equity(
-          ld, klv, observed, &leave, player_get_rack(game_get_player(game, 1)),
-          word_penalties, letter_penalties,
-          mode_idx ? pat_eval_context_get_active_classes(pat_context) : 0,
-          mode_idx ? pat_context : NULL,
-          board_get_tiles_played(game_get_board(game)),
-          bag_get_letters(game_get_bag(game))));
-      best[mode_idx] = observed_values[mode_idx];
-    }
-    for (int move_idx = 0; move_idx < move_list_get_count(moves); move_idx++) {
-      const Move *candidate = move_list_get_move(moves, move_idx);
-      Rack used;
-      rack_set_dist_size_and_reset(&used, ld_get_size(ld));
-      infbench_played_tiles(candidate, &used);
-      Rack candidate_leave = *player_get_rack(player);
-      rack_subtract_using_floor_zero(&candidate_leave, &used);
-      best[0] = fmax(best[0], equity_to_double(move_get_equity(candidate)));
-      best[1] =
-          fmax(best[1],
-               equity_to_double(static_eval_get_move_equity(
-                   ld, klv, candidate, &candidate_leave,
-                   player_get_rack(game_get_player(game, 1)), word_penalties,
-                   letter_penalties,
-                   pat_eval_context_get_active_classes(pat_context),
-                   pat_context, board_get_tiles_played(game_get_board(game)),
-                   bag_get_letters(game_get_bag(game)))));
-    }
-    shortlist_seconds += ctimer_elapsed_seconds(&path_timer);
-    if (ml % 2 != 0) {
-      direct_best = infbench_pat_best(game, direct_moves, &direct_seconds);
-    }
-    best[2] = fmax(observed_values[2], direct_best);
-    assert(best[2] + 0.0011 >= best[1]);
-    differing_best += fabs(best[2] - best[1]) > 0.0011;
-    candidate_racks++;
-    for (int mode_idx = 0; mode_idx < 3; mode_idx++) {
-      const double regret = fmax(0, best[mode_idx] - observed_values[mode_idx]);
-      if (regret > 20) {
-        continue;
-      }
-      const double weight = count * exp(-regret / 5);
-      InferBenchPrediction *prediction = &predictions[mode_idx];
-      prediction->mass += weight;
-      prediction->counts[ml] += weight;
-      prediction->klv +=
-          weight * equity_to_double(klv_get_leave_value(klv, &leave));
-      if (racks_are_equal(&leave, &truth)) {
-        prediction->true_probability += weight;
-      }
-    }
+  InferBenchPrediction exchanged_prior = {0};
+  if (exchange) {
+    exchanged_prior = infbench_prior(&unseen, &exchanged_truth, klv);
+    rack_reset(&played);
   }
-  // Independently verify the enumerated static control against production.
   Rack known;
   rack_set_dist_size_and_reset(&known, ld_get_size(ld));
-  Rack observer = *player_get_rack(game_get_player(config_get_game(config), 1));
-  InferenceArgs reference_args;
-  infer_args_fill(&reference_args, 0, int_to_equity(20), NULL,
-                  config_get_game(config), 1, 0, 0,
-                  config_get_thread_control(config), false, true, 0,
-                  move_get_score(observed), 0, &played, &known, &observer);
-  reference_args.temperature = int_to_equity(5);
-  reference_args.target_move = observed;
-  reference_args.use_census_play_scores = false;
-  InferenceResults *reference_results = inference_results_create(NULL);
-  ErrorStack *reference_errors = error_stack_create();
-  thread_control_set_status(reference_args.thread_control,
-                            THREAD_CONTROL_STATUS_STARTED);
-  infer_without_ctx(&reference_args, reference_results, reference_errors);
-  assert(error_stack_is_empty(reference_errors));
-  const InferBenchPrediction reference =
-      infbench_posterior(reference_results, &truth, klv);
-  const InferBenchScore reference_score =
-      infbench_score(&reference, &prior, &truth, klv, ld);
-  error_stack_destroy(reference_errors);
-  inference_results_destroy(reference_results);
-  for (int mode_idx = 0; mode_idx < 4; mode_idx++) {
-    InferBenchPrediction prediction =
-        mode_idx == 0 ? prior : predictions[mode_idx - 1];
-    if (mode_idx > 0 && prediction.mass > 0) {
-      prediction.klv /= prediction.mass;
-      prediction.true_probability /= prediction.mass;
-      for (int ml = 0; ml < ld_get_size(ld); ml++) {
-        prediction.counts[ml] /= prediction.mass;
-      }
-      prediction.mass = 1;
-    }
-    const InferBenchScore score =
-        infbench_score(&prediction, &prior, &truth, klv, ld);
-    if (mode_idx == 1) {
-      for (int metric_idx = 0; metric_idx < INFBENCH_METRICS; metric_idx++) {
-        assert(fabs(score.metrics[metric_idx] -
-                    reference_score.metrics[metric_idx]) < 1e-7);
-      }
-    }
-    printf("PATBENCH pair=%d game=%d turn=%d mode=%s nll=%.9f klv_mse=%.9f "
-           "vowel_mse=%.9f score_mse=%.9f tile_mse=%.9f excluded=%d empty=%d "
-           "seconds=%.6f\n",
-           pair_idx, game_idx, turn,
-           mode_idx == 0   ? "prior"
-           : mode_idx == 1 ? "static20t5"
-           : mode_idx == 2 ? "pat64_20t5"
-                           : "patbest_20t5",
-           score.metrics[0], score.metrics[1], score.metrics[2],
-           score.metrics[3], score.metrics[4], score.excluded, score.empty,
-           ctimer_elapsed_seconds(&timer));
-  }
-  printf("PATTIMING pair=%d game=%d turn=%d racks=%d differing=%d "
-         "shortlist_seconds=%.9f direct_seconds=%.9f\n",
-         pair_idx, game_idx, turn, candidate_racks, differing_best,
-         shortlist_seconds, direct_seconds);
-  move_list_destroy(direct_moves);
-  free(pat_context);
-  move_list_destroy(moves);
-  game_destroy(game);
-}
-
-enum {
-  CAL_MARGIN_COUNT = 4,
-  CAL_TEMP_COUNT = 5,
-  CAL_MODE_COUNT = CAL_MARGIN_COUNT * CAL_TEMP_COUNT
-};
-static const int calibration_margins[CAL_MARGIN_COUNT] = {10, 20, 40, 80};
-static const int calibration_temperatures[CAL_TEMP_COUNT] = {0, 2, 5, 10, 20};
-
-typedef struct CalibrationContext {
-  Game *game;
-  const Move *observed;
-  const LetterDistribution *ld;
-  const KLV *klv;
-  Rack truth;
-  Rack unseen;
-  Rack played;
-  Rack leave;
-  MoveList *moves;
-  PATEvalContext *pat;
-  Equity word_penalties[2 * BOARD_DIM];
-  Equity letter_penalties[2 * BOARD_DIM];
-  InferBenchPrediction predictions[2][CAL_MODE_COUNT];
-  double seconds[2];
-  int racks;
-  int hybrid_mode;
-  PATInference *hybrid;
-  double hybrid_seconds;
-  double hybrid_setup_seconds;
-} CalibrationContext;
-
-static void calibration_evaluate_rack(CalibrationContext *ctx, double ways) {
-  Player *player = game_get_player(ctx->game, 0);
-  rack_copy(player_get_rack(player), &ctx->played);
-  for (int ml = 0; ml < ld_get_size(ctx->ld); ml++) {
-    rack_add_letters(player_get_rack(player), ml,
-                     rack_get_letter(&ctx->leave, ml));
-  }
-  for (int model = 0; model < 2; model++) {
-    Timer timer;
-    ctimer_start(&timer);
-    double best;
-    double observed;
-    if (model == 1 && ctx->hybrid_mode == INFBENCH_PAT_FAST) {
-      const PATInferenceEvaluation evaluation = pat_inference_evaluate(
-          ctx->hybrid, ctx->observed, &ctx->leave, int_to_equity(80));
-      best = equity_to_double(evaluation.best);
-      observed = equity_to_double(evaluation.observed);
-    } else {
-      player_set_pat_usage(player, model == 0, 0);
-      best = equity_to_double(
-          move_get_equity(get_top_equity_move(ctx->game, ctx->moves)));
-      PATEvalContext *pat = NULL;
-      uint32_t classes = 0;
-      if (model == 1) {
-        pat = ctx->pat;
-        pat_eval_context_load(
-            pat, player_get_pat(player),
-            board_get_readonly_lanes(game_get_board(ctx->game), 0), ctx->ld,
-            player_get_rack(player), PAT_CLASS_MASK_ALL,
-            rack_get_total_letters(
-                player_get_rack(game_get_player(ctx->game, 1))));
-        pat_eval_context_set_kwg(pat, player_get_kwg(player),
-                                 game_get_variant(ctx->game));
-        pat_eval_context_set_utility(
-            pat,
-            equity_to_int(player_get_score(player) -
-                          player_get_score(game_get_player(ctx->game, 1))),
-            bag_get_letters(game_get_bag(ctx->game)));
-        classes = pat_eval_context_get_active_classes(pat);
-      }
-      observed = equity_to_double(static_eval_get_move_equity(
-          ctx->ld, ctx->klv, ctx->observed, &ctx->leave,
-          player_get_rack(game_get_player(ctx->game, 1)), ctx->word_penalties,
-          ctx->letter_penalties, classes, pat,
-          board_get_tiles_played(game_get_board(ctx->game)),
-          bag_get_letters(game_get_bag(ctx->game))));
-    }
-    const double regret = fmax(0, best - observed);
-    ctx->seconds[model] += ctimer_elapsed_seconds(&timer);
-    if (model == 1 && ctx->hybrid_mode == INFBENCH_PAT_VERIFY) {
-      Timer hybrid_timer;
-      ctimer_start(&hybrid_timer);
-      const int margin = calibration_margins[ctx->racks % CAL_MARGIN_COUNT];
-      const PATInferenceEvaluation evaluation = pat_inference_evaluate(
-          ctx->hybrid, ctx->observed, &ctx->leave, int_to_equity(margin));
-      ctx->hybrid_seconds += ctimer_elapsed_seconds(&hybrid_timer);
-      assert(fabs(equity_to_double(evaluation.observed) - observed) < 0.0001);
-      if (evaluation.resolution == PAT_INFERENCE_EXACT) {
-        assert(fabs(equity_to_double(evaluation.best) - best) < 0.0001);
-      } else if (evaluation.resolution == PAT_INFERENCE_ZERO_REGRET) {
-        assert(best <= observed + 0.0001);
-      } else {
-        assert(best > observed + margin);
-      }
-    }
-    for (int margin_idx = 0; margin_idx < CAL_MARGIN_COUNT; margin_idx++) {
-      if (regret > calibration_margins[margin_idx] + 0.000001) {
-        continue;
-      }
-      for (int temp_idx = 0; temp_idx < CAL_TEMP_COUNT; temp_idx++) {
-        const int temperature = calibration_temperatures[temp_idx];
-        const double weight =
-            ways * (temperature == 0 ? 1 : exp(-regret / temperature));
-        InferBenchPrediction *prediction =
-            &ctx->predictions[model][margin_idx * CAL_TEMP_COUNT + temp_idx];
-        prediction->mass += weight;
-        prediction->klv +=
-            weight *
-            equity_to_double(klv_get_leave_value(ctx->klv, &ctx->leave));
-        if (racks_are_equal(&ctx->leave, &ctx->truth)) {
-          prediction->true_probability += weight;
-        }
-        for (int ml = 0; ml < ld_get_size(ctx->ld); ml++) {
-          prediction->counts[ml] += weight * rack_get_letter(&ctx->leave, ml);
-        }
-      }
-    }
-  }
-  ctx->racks++;
-}
-
-static void calibration_enumerate(CalibrationContext *ctx, int ml,
-                                  int remaining, double ways) {
-  if (remaining == 0) {
-    calibration_evaluate_rack(ctx, ways);
-    return;
-  }
-  if (ml == ld_get_size(ctx->ld)) {
-    return;
-  }
-  const int available = rack_get_letter(&ctx->unseen, ml);
-  const int maximum = available < remaining ? available : remaining;
-  for (int count = 0; count <= maximum; count++) {
-    rack_add_letters(&ctx->leave, ml, count);
-    calibration_enumerate(ctx, ml + 1, remaining - count,
-                          ways * (double)choose(available, count));
-    rack_take_letters(&ctx->leave, ml, count);
-  }
-}
-
-static void calibration_print(const InferBenchScore *score, int pair_idx,
-                              int game_idx, int turn, int leave, int bag,
-                              bool exchange, const char *model, int margin,
-                              int temperature) {
-  printf("CALIBRATION pair=%d game=%d turn=%d leave=%d bag=%d exchange=%d "
-         "model=%s margin=%d temperature=%d nll=%.9f klv_mse=%.9f "
-         "vowel_mse=%.9f score_mse=%.9f tile_mse=%.9f excluded=%d empty=%d\n",
-         pair_idx, game_idx, turn, leave, bag, exchange, model, margin,
-         temperature, score->metrics[0], score->metrics[1], score->metrics[2],
-         score->metrics[3], score->metrics[4], score->excluded, score->empty);
-}
-
-static void calibration_observe(const Config *config, const Move *observed,
-                                int pair_idx, int game_idx, int turn,
-                                bool timing_only, int hybrid_mode) {
-  CalibrationContext *ctx = calloc_or_die(1, sizeof(CalibrationContext));
-  ctx->game = game_duplicate(config_get_game(config));
-  ctx->hybrid_mode = hybrid_mode;
-  ctx->observed = observed;
-  ctx->ld = game_get_ld(ctx->game);
-  ctx->klv = player_get_klv(game_get_player(ctx->game, 0));
-  rack_set_dist_size_and_reset(&ctx->played, ld_get_size(ctx->ld));
-  infbench_played_tiles(observed, &ctx->played);
-  ctx->truth = *player_get_rack(game_get_player(ctx->game, 0));
-  rack_subtract_using_floor_zero(&ctx->truth, &ctx->played);
-  const bool exchange = move_get_type(observed) == GAME_EVENT_EXCHANGE;
-  ctx->unseen =
-      exchange ? *player_get_rack(game_get_player(ctx->game, 0)) : ctx->truth;
-  int bag_counts[MAX_ALPHABET_SIZE] = {0};
-  bag_increment_unseen_count(game_get_bag(ctx->game), bag_counts);
-  for (int ml = 0; ml < ld_get_size(ctx->ld); ml++) {
-    rack_add_letters(&ctx->unseen, ml, bag_counts[ml]);
-  }
-  const int leave_size = rack_get_total_letters(&ctx->truth);
-  const int bag = bag_get_letters(game_get_bag(ctx->game));
-  const InferBenchPrediction prior =
-      infbench_prior(&ctx->unseen, &ctx->truth, ctx->klv);
-  const InferBenchScore prior_score =
-      infbench_score(&prior, &prior, &ctx->truth, ctx->klv, ctx->ld);
-  calibration_print(&prior_score, pair_idx, game_idx, turn, leave_size, bag,
-                    exchange, "prior", 0, 0);
-  const bool enumerate = !timing_only && !exchange && leave_size <= 4;
-  if (enumerate) {
-    ctx->moves = move_list_create(1);
-    ctx->pat = malloc_or_die(sizeof(PATEvalContext));
-    rack_set_dist_size_and_reset(&ctx->leave, ld_get_size(ctx->ld));
-    board_copy_opening_penalties(game_get_board(ctx->game), ctx->word_penalties,
-                                 ctx->letter_penalties);
-    if (hybrid_mode == INFBENCH_PAT_VERIFY ||
-        hybrid_mode == INFBENCH_PAT_FAST) {
-      ErrorStack *setup_errors = error_stack_create();
-      Timer setup_timer;
-      ctimer_start(&setup_timer);
-      ctx->hybrid =
-          pat_inference_create(ctx->game, leave_size >= 4, setup_errors);
-      ctx->hybrid_setup_seconds = ctimer_elapsed_seconds(&setup_timer);
-      assert(error_stack_is_empty(setup_errors) && ctx->hybrid != NULL);
-      error_stack_destroy(setup_errors);
-    }
-    calibration_enumerate(ctx, 0, leave_size, 1);
-  }
-  Rack known;
-  rack_set_dist_size_and_reset(&known, ld_get_size(ctx->ld));
-  Rack observer = *player_get_rack(game_get_player(config_get_game(config), 1));
-  if (exchange) {
-    rack_reset(&ctx->played);
-  }
+  Rack observer = *player_get_rack(game_get_player(game, 1));
   InferenceArgs args;
-  infer_args_fill(&args, 0, 0, NULL, config_get_game(config), 1, 0, 0,
+  infer_args_fill(&args, 0, 0, NULL, game, 1, 0, 0,
                   config_get_thread_control(config), false, true, 0,
                   move_get_score(observed),
-                  exchange ? move_get_tiles_played(observed) : 0, &ctx->played,
+                  exchange ? move_get_tiles_played(observed) : 0, &played,
                   &known, &observer);
   args.target_move = observed;
-  InferenceResults *results = inference_results_create(NULL);
-  InferenceCtx *inference_ctx = NULL;
-  ErrorStack *errors = error_stack_create();
-  for (int iteration = 0; iteration < (timing_only ? 2 : CAL_MODE_COUNT);
-       iteration++) {
-    const int mode =
-        timing_only ? ((iteration + turn) % 2 == 0 ? 7 : 17) : iteration;
-    args.equity_margin =
-        int_to_equity(calibration_margins[mode / CAL_TEMP_COUNT]);
-    args.temperature =
-        int_to_equity(calibration_temperatures[mode % CAL_TEMP_COUNT]);
-    InferBenchScore reference = {0};
-    // One production parity check per enumerated observation; all modes for
-    // larger leaves and exchanges, where census avoids rack-by-rack movegen.
-    if (!enumerate || mode == 7) {
-      thread_control_set_status(args.thread_control,
-                                THREAD_CONTROL_STATUS_STARTED);
-      Timer inference_timer;
-      ctimer_start(&inference_timer);
-      infer(&args, &inference_ctx, results, errors);
-      if (timing_only) {
-        printf("CALINFER_TIME pair=%d game=%d turn=%d leave=%d exchange=%d "
-               "margin=%d seconds=%.9f\n",
-               pair_idx, game_idx, turn, leave_size, exchange,
-               calibration_margins[mode / CAL_TEMP_COUNT],
-               ctimer_elapsed_seconds(&inference_timer));
-      }
-      assert(error_stack_is_empty(errors));
-      const InferBenchPrediction prediction =
-          infbench_posterior(results, &ctx->truth, ctx->klv);
-      reference =
-          infbench_score(&prediction, &prior, &ctx->truth, ctx->klv, ctx->ld);
+  // Far above any legal equity difference, without risking integer overflow.
+  args.equity_margin = int_to_equity(10000);
+  for (int iteration = 0; iteration < 7; iteration++) {
+    const int temperature = temperatures[(iteration + turn + pair_idx) % 7];
+    args.temperature = int_to_equity(temperature);
+    InferenceResults *results = inference_results_create(NULL);
+    InferenceCtx *ctx = NULL;
+    ErrorStack *errors = error_stack_create();
+    thread_control_set_status(args.thread_control,
+                              THREAD_CONTROL_STATUS_STARTED);
+    Timer timer;
+    ctimer_start(&timer);
+    infer(&args, &ctx, results, errors);
+    const double seconds = ctimer_elapsed_seconds(&timer);
+    assert(error_stack_is_empty(errors));
+    const InferBenchPrediction prediction =
+        infbench_posterior(results, &truth, klv);
+    const InferBenchScore score =
+        infbench_score(&prediction, &prior, &truth, klv, ld);
+    printf("STATICCAL pair=%d game=%d turn=%d leave=%d bag=%d exchange=%d "
+           "temperature=%d "
+           "nll=%.9f klv_mse=%.9f vowel_mse=%.9f score_mse=%.9f "
+           "tile_mse=%.9f duplicate_mse=%.9f seconds=%.9f\n",
+           pair_idx, game_idx, turn, rack_get_total_letters(&truth),
+           bag_get_letters(game_get_bag(game)), exchange, temperature,
+           score.metrics[0], score.metrics[1], score.metrics[2],
+           score.metrics[3], score.metrics[4], score.metrics[5], seconds);
+    if (exchange) {
+      const InferBenchPrediction exchanged_prediction =
+          infbench_exchanged_posterior(results, ld_get_size(ld));
+      const InferBenchScore exchanged_score = infbench_feature_score(
+          &exchanged_prediction, &exchanged_prior, &exchanged_truth, klv, ld);
+      printf("STATICCAL_EXCHANGED pair=%d game=%d turn=%d temperature=%d "
+             "klv_mse=%.9f vowel_mse=%.9f score_mse=%.9f tile_mse=%.9f "
+             "duplicate_mse=%.9f\n",
+             pair_idx, game_idx, turn, temperature, exchanged_score.metrics[1],
+             exchanged_score.metrics[2], exchanged_score.metrics[3],
+             exchanged_score.metrics[4], exchanged_score.metrics[5]);
     }
-    for (int model = 0; model < (enumerate ? 2 : 1); model++) {
-      InferBenchScore score = reference;
-      if (enumerate) {
-        InferBenchPrediction prediction = ctx->predictions[model][mode];
-        if (prediction.mass > 0) {
-          prediction.klv /= prediction.mass;
-          prediction.true_probability /= prediction.mass;
-          for (int ml = 0; ml < ld_get_size(ctx->ld); ml++) {
-            prediction.counts[ml] /= prediction.mass;
-          }
-          prediction.mass = 1;
-        }
-        score =
-            infbench_score(&prediction, &prior, &ctx->truth, ctx->klv, ctx->ld);
-        if (model == 0 && mode == 7) {
-          for (int metric_idx = 0; metric_idx < INFBENCH_METRICS;
-               metric_idx++) {
-            assert(fabs(score.metrics[metric_idx] -
-                        reference.metrics[metric_idx]) < 1e-6);
-          }
-        }
-      }
-      calibration_print(&score, pair_idx, game_idx, turn, leave_size, bag,
-                        exchange, model == 0 ? "static" : "pat",
-                        calibration_margins[mode / CAL_TEMP_COUNT],
-                        calibration_temperatures[mode % CAL_TEMP_COUNT]);
-    }
+    (void)fflush(stdout);
+    inference_ctx_destroy(ctx);
+    inference_results_destroy(results);
+    error_stack_destroy(errors);
   }
-  printf("CALTIMING pair=%d game=%d turn=%d leave=%d racks=%d "
-         "static_seconds=%.6f pat_seconds=%.6f\n",
-         pair_idx, game_idx, turn, leave_size, ctx->racks, ctx->seconds[0],
-         ctx->seconds[1]);
-  if (ctx->hybrid != NULL) {
-    const PATInferenceStats stats = pat_inference_get_stats(ctx->hybrid);
-    printf("PATHYBRID pair=%d game=%d turn=%d leave=%d racks=%llu exact=%llu "
-           "zero=%llu rejected=%llu setup=%.9f hybrid=%.9f reference=%.9f\n",
-           pair_idx, game_idx, turn, leave_size,
-           (unsigned long long)stats.racks,
-           (unsigned long long)stats.exact_searches,
-           (unsigned long long)stats.zero_regrets,
-           (unsigned long long)stats.rejected, ctx->hybrid_setup_seconds,
-           hybrid_mode == INFBENCH_PAT_VERIFY ? ctx->hybrid_seconds
-                                              : ctx->seconds[1],
-           hybrid_mode == INFBENCH_PAT_VERIFY ? ctx->seconds[1] : 0);
-    pat_inference_destroy(ctx->hybrid);
-  }
-  inference_ctx_destroy(inference_ctx);
-  inference_results_destroy(results);
-  error_stack_destroy(errors);
-  if (ctx->moves != NULL) {
-    move_list_destroy(ctx->moves);
-  }
-  free(ctx->pat);
-  game_destroy(ctx->game);
-  free(ctx);
 }
 
 static void infbench_game(Config *config, int policy, int pair_idx,
                           int game_idx, int positions, unsigned int seed,
                           InferBenchScore scores[INFBENCH_MODES],
                           InferBenchScore exchanged_scores[INFBENCH_MODES],
-                          bool exchanges_only, bool use_census, bool one_pat,
-                          bool calibrate, bool timing_only, int hybrid_mode) {
+                          bool exchanges_only, bool use_census,
+                          int temperature_size) {
   Game *game = config_get_game(config);
   game_reset(game);
   game_seed(game, seed);
   game_set_starting_player_index(game, game_idx);
   draw_starting_racks(game);
   MoveList *moves = move_list_create(1);
-  bool sampled[RACK_SIZE + 1][3] = {0};
   int decisions = 0;
   int observations = 0;
   int turn = 0;
@@ -1133,30 +748,25 @@ static void infbench_game(Config *config, int policy, int pair_idx,
       const int leave_size =
           rack_get_total_letters(player_get_rack(game_get_player(game, 0))) -
           move_get_tiles_played(&chosen);
-      const int bag_count = bag_get_letters(game_get_bag(game));
-      const int stage = bag_count <= 14 ? 0 : bag_count <= 42 ? 1 : 2;
-      const bool sample =
-          hybrid_mode != INFBENCH_PAT_NONE
-              ? (type == GAME_EVENT_TILE_PLACEMENT_MOVE && leave_size > 0 &&
-                 leave_size <= 4 && !sampled[leave_size][stage])
-          : calibrate
-              ? (type == GAME_EVENT_EXCHANGE ||
-                 (!exchanges_only && type == GAME_EVENT_TILE_PLACEMENT_MOVE &&
-                  leave_size > 0 && !sampled[leave_size][stage]))
-          : one_pat
-              ? (leave_size == 1 && type == GAME_EVENT_TILE_PLACEMENT_MOVE)
-          : exchanges_only
-              ? type == GAME_EVENT_EXCHANGE
-              : (decisions >= 4 + 6 * observations && leave_size > 0 &&
+      bool sample;
+      if (temperature_size > 0) {
+        if (temperature_size == 7) {
+          sample = type == GAME_EVENT_EXCHANGE;
+        } else {
+          sample = type == GAME_EVENT_TILE_PLACEMENT_MOVE &&
+                   leave_size == temperature_size;
+        }
+      } else if (exchanges_only) {
+        sample = type == GAME_EVENT_EXCHANGE;
+      } else {
+        sample = decisions >= 4 + 6 * observations && leave_size > 0 &&
                  (type == GAME_EVENT_TILE_PLACEMENT_MOVE ||
-                  type == GAME_EVENT_EXCHANGE));
+                  type == GAME_EVENT_EXCHANGE);
+      }
       if (sample && bag_get_letters(game_get_bag(game)) > 0) {
-        if (calibrate) {
-          calibration_observe(config, &chosen, pair_idx, game_idx, turn,
-                              timing_only, hybrid_mode);
-          sampled[leave_size][stage] = true;
-        } else if (one_pat) {
-          infbench_pat64_observe(config, &chosen, pair_idx, game_idx, turn);
+        if (temperature_size > 0) {
+          infbench_temperature_observe(config, &chosen, pair_idx, game_idx,
+                                       turn);
         } else {
           infbench_observe(config, &chosen, policy, pair_idx, game_idx, turn,
                            scores, exchanged_scores, use_census);
@@ -1194,14 +804,16 @@ infbench_summary(int policy, const InferBenchScore *scores,
     }
     printf("INFBENCH %s policy=%s mode=%s n=%d raw_nll=%.9g mixed_nll=%.9f "
            "gain_nats=%.9f klv_mse=%.9f vowel_mse=%.9f score_mse=%.9f "
-           "tile_mse=%.9f excluded_rate=%.6f empty_rate=%.6f seconds=%.6f\n",
+           "tile_mse=%.9f duplicate_mse=%.9f excluded_rate=%.6f "
+           "empty_rate=%.6f seconds=%.6f\n",
            summary_record, infbench_policies[policy],
            infbench_modes[mode_idx].name, score->observations,
            score->raw_nll / count, score->metrics[0] / count,
            score->prior_gain / count, score->metrics[1] / count,
            score->metrics[2] / count, score->metrics[3] / count,
-           score->metrics[4] / count, exchanged ? NAN : score->excluded / count,
-           score->empty / count, score->seconds / count);
+           score->metrics[4] / count, score->metrics[5] / count,
+           exchanged ? NAN : score->excluded / count, score->empty / count,
+           score->seconds / count);
     for (int ml = 0; ml < ld_get_size(ld); ml++) {
       printf("INFBENCH %s policy=%s mode=%s tile=%s mse=%.9f\n", tile_record,
              infbench_policies[policy], infbench_modes[mode_idx].name,
@@ -1259,10 +871,7 @@ void infer_bench_run_spec(const char *spec) {
   int positions = INFBENCH_DEFAULT_POSITIONS;
   unsigned int seed = INFBENCH_DEFAULT_SEED;
   bool exchanges_only = false;
-  bool one_pat = false;
-  bool calibrate = false;
-  bool timing_only = false;
-  int hybrid_mode = INFBENCH_PAT_NONE;
+  int temperature_size = 0;
   bool use_census = true;
   if (spec != NULL) {
     StringSplitter *fields = split_string(spec, ':', true);
@@ -1270,9 +879,8 @@ void infer_bench_run_spec(const char *spec) {
     if (num_fields < 3 || num_fields > 5) {
       string_splitter_destroy(fields);
       log_fatal("usage: "
-                "infbench:PAIRS:POSITIONS_PER_GAME:SEED[:exchanges|onepat|"
-                "calibrate|calexchanges|margintiming|pathybrid|pathybridfast|"
-                "patreference][:movegen]");
+                "infbench:PAIRS:POSITIONS_PER_GAME:SEED[:exchanges|static1.."
+                "static6][:movegen]");
     }
     ErrorStack *errors = error_stack_create();
     pairs = string_to_int(string_splitter_get_item(fields, 0), errors);
@@ -1281,31 +889,19 @@ void infer_bench_run_spec(const char *spec) {
         string_to_uint64(string_splitter_get_item(fields, 2), errors);
     if (num_fields >= 4) {
       const char *mode_name = string_splitter_get_item(fields, 3);
-      if (strings_equal(mode_name, "pathybrid")) {
-        hybrid_mode = INFBENCH_PAT_VERIFY;
-      } else if (strings_equal(mode_name, "pathybridfast")) {
-        hybrid_mode = INFBENCH_PAT_FAST;
-      } else if (strings_equal(mode_name, "patreference")) {
-        hybrid_mode = INFBENCH_PAT_REFERENCE;
+      if (strlen(mode_name) == 7 && strncmp(mode_name, "static", 6) == 0 &&
+          mode_name[6] >= '1' && mode_name[6] <= '7') {
+        temperature_size = mode_name[6] - '0';
       }
-      timing_only =
-          strings_equal(string_splitter_get_item(fields, 3), "margintiming");
-      calibrate =
-          hybrid_mode != INFBENCH_PAT_NONE || timing_only ||
-          (strings_equal(string_splitter_get_item(fields, 3), "calibrate") ||
-           strings_equal(string_splitter_get_item(fields, 3), "calexchanges"));
-      one_pat = strings_equal(string_splitter_get_item(fields, 3), "onepat");
-      exchanges_only =
-          (strings_equal(string_splitter_get_item(fields, 3), "exchanges") ||
-           strings_equal(string_splitter_get_item(fields, 3), "calexchanges"));
+      exchanges_only = strings_equal(mode_name, "exchanges");
     }
     if (num_fields == 5) {
       use_census =
           !strings_equal(string_splitter_get_item(fields, 4), "movegen");
     }
     const bool invalid =
-        (num_fields >= 4 && !exchanges_only && !one_pat && !calibrate) ||
-        (num_fields == 5 && (use_census || one_pat || calibrate)) ||
+        (num_fields >= 4 && !exchanges_only && temperature_size == 0) ||
+        (num_fields == 5 && (use_census || temperature_size > 0)) ||
         !error_stack_is_empty(errors) || pairs < 1 || pairs > 10000 ||
         positions < 1 || positions > 20 || parsed_seed > UINT_MAX;
     error_stack_destroy(errors);
@@ -1316,21 +912,34 @@ void infer_bench_run_spec(const char *spec) {
     }
     seed = (unsigned int)parsed_seed;
   }
-  printf("INFBENCH settings pairs=%d positions_per_game=%d seed=%u lex=CSW21 "
-         "inference_threads=%d sim_threads=1 sim_plies=2 sim_candidates=15 "
-         "sim_iterations=%d sim_minplay=10 sim_sampling=rr sim_pat=false "
-         "prior_mix=%.6f feature_mse=raw_posterior empty_fallback=prior "
-         "sampling=%s census=%d\n",
-         pairs, positions, seed, INFBENCH_THREADS, INFBENCH_SIM_ITERS,
-         INFBENCH_PRIOR_MIX,
-         calibrate        ? "calibrate"
-         : one_pat        ? "onepat"
-         : exchanges_only ? "exchanges"
-                          : "scheduled",
-         use_census);
-  for (int policy = (one_pat || calibrate) ? 2 : 0; policy < INFBENCH_POLICIES;
+  if (temperature_size == 0) {
+    printf("INFBENCH settings pairs=%d positions_per_game=%d seed=%u lex=CSW21 "
+           "inference_threads=%d sim_threads=1 sim_plies=2 sim_candidates=15 "
+           "sim_iterations=%d sim_minplay=10 sim_sampling=rr sim_pat=false "
+           "prior_mix=%.6f feature_mse=raw_posterior empty_fallback=prior "
+           "sampling=%s census=%d\n",
+           pairs, positions, seed, INFBENCH_THREADS, INFBENCH_SIM_ITERS,
+           INFBENCH_PRIOR_MIX, exchanges_only ? "exchanges" : "scheduled",
+           use_census);
+  }
+  for (int policy = temperature_size > 0 ? 2 : 0; policy < INFBENCH_POLICIES;
        policy++) {
     Config *config = infbench_config(policy, seed);
+    if (temperature_size > 0) {
+      load_and_exec_config_or_die(config,
+                                  "set -lex NWL23 -leaves NWL23 -numplays 64 "
+                                  "-iterations 4000 -patcand1 "
+                                  "false -patcand2 false -patrollout false");
+      for (int player_idx = 0; player_idx < 2; player_idx++) {
+        assert(strings_equal(klv_get_name(player_get_klv(game_get_player(
+                                 config_get_game(config), player_idx))),
+                             "NWL23"));
+      }
+      printf("STATICCAL_SETTINGS lex=NWL23 klv=NWL23 candidates=64 "
+             "iterations=4000 "
+             "threads=1 leave=%d seed=%u pairs=%d margin=10000\n",
+             temperature_size, seed, pairs);
+    }
     InferBenchScore totals[INFBENCH_MODES] = {0};
     InferBenchScore exchanged_totals[INFBENCH_MODES] = {0};
     InferBenchMoments exchanged_deltas[INFBENCH_MODES][INFBENCH_METRICS] = {0};
@@ -1342,7 +951,7 @@ void infer_bench_run_spec(const char *spec) {
         infbench_game(config, policy, pair_idx, game_idx, positions,
                       seed + (unsigned int)pair_idx, pair_scores,
                       exchanged_pair_scores, exchanges_only, use_census,
-                      one_pat, calibrate, timing_only, hybrid_mode);
+                      temperature_size);
       }
       infbench_accumulate_pair(pair_scores, totals, deltas);
       infbench_accumulate_pair(exchanged_pair_scores, exchanged_totals,

@@ -25,6 +25,7 @@
 #include "../src/impl/config.h"
 #include "../src/impl/gameplay.h"
 #include "../src/impl/inference.h"
+#include "../src/impl/move_gen.h"
 #include "../src/util/io_util.h"
 #include "../src/util/math_util.h"
 #include "../src/util/string_util.h"
@@ -1359,7 +1360,8 @@ void test_infer_exchange_cutoff_matches(void) {
       "cgp 2CHIGOE3T3/3O6NAE2/3M6END2/2AY6UG1G1/2B7MO1L1/1VODKA5i1OD/"
       "2R2TANNERS1RE/OUTA2ZA3T1IF/2I1CRoWDIE2A1/2V6FEEBS1/1NEWISHLY1LEA2/"
       "JA13/15/15/15 ILOOPQR/EEINTTX 0/0 0 -lex CSW21;";
-  const char *margins[] = {"5", "0", "5 -inftemp 2", "5 -inftemp 0.001", NULL};
+  const char *margins[] = {"5 -inftemp 0", "0 -inftemp 0", "5 -inftemp 2",
+                           "5 -inftemp 0.001", NULL};
   uint64_t num_accepted = 0;
   for (int margin_idx = 0; margins[margin_idx]; margin_idx++) {
     char *settings = get_formatted_string(
@@ -1496,13 +1498,33 @@ static void infer_for_threads_test(InferenceCtx **ctx, const Config *config,
   assert(status == ERROR_STATUS_SUCCESS);
 }
 
+// Census does not call move generation once per candidate rack. Keep the
+// worker-accounting contract covered explicitly on a three-unknown-tile
+// placement, which uses per-rack move generation.
+static void test_infer_movegen_accounting(void) {
+  const int thread_counts[] = {1, 3};
+  for (int thread_idx = 0; thread_idx < 2; thread_idx++) {
+    Config *config = create_config_for_threads_test(thread_counts[thread_idx]);
+    InferenceResults *results = inference_results_create(NULL);
+    gen_start_counting_movegens();
+    const uint64_t before = gen_get_movegen_count();
+    infer_for_threads_test(NULL, config, false, results);
+    const uint64_t movegens = gen_get_movegen_count() - before;
+    gen_stop_counting_movegens();
+    const AliasMethod *alias = inference_results_get_alias_method(results);
+    assert(alias->num_items > 0);
+    assert(movegens >= alias->num_items);
+    inference_results_destroy(results);
+    config_destroy(config);
+  }
+}
+
 // Each possible leave is evaluated by exactly one of the workers, whichever
 // claims it, so the inference counts the same leaves at any number of threads.
 static void test_infer_same_results_for_any_number_of_threads(bool weighted) {
   Config *config = create_config_for_threads_test(1);
-  if (weighted) {
-    load_and_exec_config_or_die(config, "set -inftemp 2 -ima 10");
-  }
+  load_and_exec_config_or_die(config, weighted ? "set -inftemp 2 -ima 10"
+                                               : "set -inftemp 0");
   InferenceResults *expected_play_results = inference_results_create(NULL);
   InferenceResults *expected_exchange_results = inference_results_create(NULL);
   infer_for_threads_test(NULL, config, false, expected_play_results);
@@ -1519,9 +1541,8 @@ static void test_infer_same_results_for_any_number_of_threads(bool weighted) {
   for (int thread_count_idx = 0; thread_count_idx < num_thread_counts;
        thread_count_idx++) {
     config = create_config_for_threads_test(thread_counts[thread_count_idx]);
-    if (weighted) {
-      load_and_exec_config_or_die(config, "set -inftemp 2 -ima 10");
-    }
+    load_and_exec_config_or_die(config, weighted ? "set -inftemp 2 -ima 10"
+                                                 : "set -inftemp 0");
     // The second and third inferences reuse the context's workers, as
     // simulations do.
     InferenceCtx *ctx = NULL;
@@ -1556,9 +1577,8 @@ static void test_infer_preendgame_no_phantom_exchange(bool weighted) {
   Config *config = config_create_or_die(
       "set -lex CSW21 -wmp true -s1 equity -s2 equity -r1 all -r2 all "
       "-numplays 1 -threads 1 -ima 0");
-  if (weighted) {
-    load_and_exec_config_or_die(config, "set -inftemp 2");
-  }
+  load_and_exec_config_or_die(config,
+                              weighted ? "set -inftemp 2" : "set -inftemp 0");
   load_and_exec_config_or_die(config, cgp_13_unseen_q_no_u);
 
   Game *game = config_get_game(config);
@@ -1619,9 +1639,8 @@ static void test_infer_opening_placement_adjustment_parity(bool weighted) {
   Config *config = config_create_or_die(
       "set -lex CSW21 -wmp true -s1 equity -s2 equity -r1 all -r2 all "
       "-numplays 1 -threads 1 -ima 0");
-  if (weighted) {
-    load_and_exec_config_or_die(config, "set -inftemp 2");
-  }
+  load_and_exec_config_or_die(config,
+                              weighted ? "set -inftemp 2" : "set -inftemp 0");
   load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
 
   // 8H RIN places I on 8I (between the 7I and 9I double-letter squares,
@@ -1706,6 +1725,7 @@ static void test_softmax_weights(void) {
 
 void test_infer(void) {
   test_softmax_weights();
+  test_infer_movegen_accounting();
   test_leave_rack_reset();
   test_trivial_random_probability();
   test_infer_rack_overflow();

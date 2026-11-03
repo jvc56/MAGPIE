@@ -8,7 +8,6 @@
 #include "../ent/kwg.h"
 #include "../ent/lane_shadow_cache.h"
 #include "../ent/move.h"
-#include "../ent/pat_eval.h"
 #include "../ent/thread_control.h"
 #include "move_gen_base.h"
 #include <stdbool.h>
@@ -139,13 +138,6 @@ void gen_reset_slots_high_water(void);
 // so far is using a reduced wordlist kwg (done with wordprune) for endgame
 // solving.
 void generate_moves(const MoveGenArgs *args);
-
-// BEST by equity only. The caller supplies PAT state prepared for this exact
-// board, rack, model, score, bag, and opponent size. Copies it without
-// rescanning board features; ordinary move generation pays no cache maintenance
-// cost.
-void generate_moves_with_pat_context(const MoveGenArgs *args,
-                                     const PATEvalContext *pat);
 
 // The MOVE_RECORD_ALL_SMALL plays of the lanes whose bit is set in
 // `lane_mask` (bit dir * BOARD_DIM + row_or_col: the BOARD_DIM horizontal
