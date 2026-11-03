@@ -961,6 +961,12 @@ MAGPIE implements or builds on the following work:
 - Steven A. Gordon. _A Faster Scrabble Move Generation Algorithm._ Software:
   Practice and Experience 24(2), 1994. The GADDAG, which move generation
   searches.
+- Alejandro González Romero, René Alquézar Mancho, Arturo Ramírez Flores,
+  Francisco González Acuña and Ian García Olmedo. _El método de anagramas:
+  un rápido y novedoso algoritmo para generar jugadas de Scrabble._ Research
+  in Computing Science 147(6), 2018, pp. 41–55.
+  [Paper](https://rcs.cic.ipn.mx/2018_147_6/El%20metodo%20de%20anagramas_%20un%20rapido%20y%20novedoso%20algoritmo%20para%20generar%20jugadas%20de%20scrabble.pdf).
+  The anagram-based move generation that inspired MAGPIE's word map (WMP).
 - Jean-Christophe Weill. _The ABDADA Distributed Minimax Search Algorithm._
   ICCA Journal 19(1), 1996; also in the proceedings of ACM CSC '96,
   [doi:10.1145/228329.228345](https://doi.org/10.1145/228329.228345). The
