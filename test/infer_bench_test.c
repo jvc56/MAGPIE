@@ -583,6 +583,18 @@ void test_infer_bench_metrics(void) {
   config_destroy(config);
 }
 
+static double infbench_pat_best(Game *game, MoveList *moves, double *seconds) {
+  Timer timer;
+  ctimer_start(&timer);
+  Player *player = game_get_player(game, 0);
+  player_set_pat_usage(player, false, 0);
+  const double best =
+      equity_to_double(move_get_equity(get_top_equity_move(game, moves)));
+  player_set_pat_usage(player, true, 0);
+  *seconds += ctimer_elapsed_seconds(&timer);
+  return best;
+}
+
 // Test-only one-tile posterior: enumerate every available letter, rescore
 // the top 64 static moves with PAT, and always include the observed move.
 static void infbench_pat64_observe(const Config *config, const Move *observed,
@@ -606,7 +618,12 @@ static void infbench_pat64_observe(const Config *config, const Move *observed,
     rack_add_letters(&unseen, ml, bag_counts[ml]);
   }
   const InferBenchPrediction prior = infbench_prior(&unseen, &truth, klv);
-  InferBenchPrediction predictions[2] = {0};
+  InferBenchPrediction predictions[3] = {0};
+  double shortlist_seconds = 0;
+  double direct_seconds = 0;
+  int differing_best = 0;
+  int candidate_racks = 0;
+  MoveList *direct_moves = move_list_create(1);
   Equity word_penalties[2 * BOARD_DIM];
   Equity letter_penalties[2 * BOARD_DIM];
   board_copy_opening_penalties(game_get_board(game), word_penalties,
@@ -625,21 +642,32 @@ static void infbench_pat64_observe(const Config *config, const Move *observed,
     rack_add_letter(&leave, ml);
     rack_copy(player_get_rack(player), &played);
     rack_add_letter(player_get_rack(player), ml);
+    double direct_best = 0;
+    if (ml % 2 == 0) {
+      direct_best = infbench_pat_best(game, direct_moves, &direct_seconds);
+    }
+    Timer path_timer;
+    ctimer_start(&path_timer);
     pat_eval_context_load(
         pat_context, pat, board_get_readonly_lanes(game_get_board(game), 0), ld,
         player_get_rack(player), PAT_CLASS_MASK_ALL,
         rack_get_total_letters(player_get_rack(game_get_player(game, 1))));
     pat_eval_context_set_kwg(pat_context, player_get_kwg(player),
                              game_get_variant(game));
+    pat_eval_context_set_utility(
+        pat_context,
+        equity_to_int(player_get_score(player) -
+                      player_get_score(game_get_player(game, 1))),
+        bag_get_letters(game_get_bag(game)));
     const MoveGenArgs gen_args = {.game = game,
                                   .move_list = moves,
                                   .move_record_type = MOVE_RECORD_ALL,
                                   .move_sort_type = MOVE_SORT_EQUITY,
                                   .target_equity = EQUITY_MAX_VALUE};
     generate_moves(&gen_args);
-    double observed_values[2];
-    double best[2];
-    for (int mode_idx = 0; mode_idx < 2; mode_idx++) {
+    double observed_values[3];
+    double best[3];
+    for (int mode_idx = 0; mode_idx < 3; mode_idx++) {
       observed_values[mode_idx] = equity_to_double(static_eval_get_move_equity(
           ld, klv, observed, &leave, player_get_rack(game_get_player(game, 1)),
           word_penalties, letter_penalties,
@@ -667,7 +695,15 @@ static void infbench_pat64_observe(const Config *config, const Move *observed,
                    pat_context, board_get_tiles_played(game_get_board(game)),
                    bag_get_letters(game_get_bag(game)))));
     }
-    for (int mode_idx = 0; mode_idx < 2; mode_idx++) {
+    shortlist_seconds += ctimer_elapsed_seconds(&path_timer);
+    if (ml % 2 != 0) {
+      direct_best = infbench_pat_best(game, direct_moves, &direct_seconds);
+    }
+    best[2] = fmax(observed_values[2], direct_best);
+    assert(best[2] + 0.0011 >= best[1]);
+    differing_best += fabs(best[2] - best[1]) > 0.0011;
+    candidate_racks++;
+    for (int mode_idx = 0; mode_idx < 3; mode_idx++) {
       const double regret = fmax(0, best[mode_idx] - observed_values[mode_idx]);
       if (regret > 20) {
         continue;
@@ -707,7 +743,7 @@ static void infbench_pat64_observe(const Config *config, const Move *observed,
       infbench_score(&reference, &prior, &truth, klv, ld);
   error_stack_destroy(reference_errors);
   inference_results_destroy(reference_results);
-  for (int mode_idx = 0; mode_idx < 3; mode_idx++) {
+  for (int mode_idx = 0; mode_idx < 4; mode_idx++) {
     InferBenchPrediction prediction =
         mode_idx == 0 ? prior : predictions[mode_idx - 1];
     if (mode_idx > 0 && prediction.mass > 0) {
@@ -732,11 +768,17 @@ static void infbench_pat64_observe(const Config *config, const Move *observed,
            pair_idx, game_idx, turn,
            mode_idx == 0   ? "prior"
            : mode_idx == 1 ? "static20t5"
-                           : "pat64_20t5",
+           : mode_idx == 2 ? "pat64_20t5"
+                           : "patbest_20t5",
            score.metrics[0], score.metrics[1], score.metrics[2],
            score.metrics[3], score.metrics[4], score.excluded, score.empty,
            ctimer_elapsed_seconds(&timer));
   }
+  printf("PATTIMING pair=%d game=%d turn=%d racks=%d differing=%d "
+         "shortlist_seconds=%.9f direct_seconds=%.9f\n",
+         pair_idx, game_idx, turn, candidate_racks, differing_best,
+         shortlist_seconds, direct_seconds);
+  move_list_destroy(direct_moves);
   free(pat_context);
   move_list_destroy(moves);
   game_destroy(game);
