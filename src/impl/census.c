@@ -1,15 +1,30 @@
 #include "census.h"
 
+#include "../compat/catomic.h"
 #include "../compat/cpthread.h"
 #include "../compat/cpthread_defs.h"
 #include "../def/letter_distribution_defs.h"
 #include "../ent/equity.h"
+#include "../ent/klv.h"
+#include "../ent/kwg.h"
 #include "../util/io_util.h"
+#include <stdatomic.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+
+enum {
+  // The played groups a thread of census_expected_best claims at a time,
+  // but for those of at most SCATTER_SINGLE_CLAIM_MAX_SIZE tiles, claimed one
+  // at a time: each of them scatters to many racks.
+  SCATTER_CHUNK = 256,
+  SCATTER_SINGLE_CLAIM_MAX_SIZE = 3,
+  // census_expected_best splits its walk over drawable racks after this many
+  // letters, so that the subtree drawing none of them is a small share.
+  EXPECTED_BEST_SPLIT_LETTERS = 12,
+};
 
 struct CensusLattice {
   int num_letters;
@@ -152,6 +167,87 @@ uint32_t census_lattice_rank(const CensusLattice *lattice,
   return (uint32_t)lattice->size_offsets[size] + within;
 }
 
+uint32_t census_lattice_rank_sparse(const CensusLattice *lattice,
+                                    const MachineLetter *letters,
+                                    const uint8_t *counts,
+                                    int number_of_letters) {
+  int size = 0;
+  for (int letter_idx = 0; letter_idx < number_of_letters; letter_idx++) {
+    size += counts[letter_idx];
+  }
+  if (size > lattice->rack_size) {
+    return CENSUS_UNRANKED;
+  }
+  // An absent letter's term is 0, and so is every term of the last letter.
+  uint32_t within = 0;
+  int remaining = size;
+  for (int letter_idx = 0; letter_idx < number_of_letters; letter_idx++) {
+    within += lattice_rank_term(lattice, letters[letter_idx], remaining,
+                                counts[letter_idx]);
+    remaining -= counts[letter_idx];
+  }
+  return (uint32_t)lattice->size_offsets[size] + within;
+}
+
+uint32_t census_lattice_rank_term(const CensusLattice *lattice,
+                                  MachineLetter ml, int unplaced, int count) {
+  return lattice_rank_term(lattice, ml, unplaced, count);
+}
+
+typedef struct LeavesFromKlv {
+  const CensusLattice *lattice;
+  const KLV *klv;
+  const KWG *kwg;
+  Equity *leave;
+  uint8_t tally[CENSUS_MAX_LETTERS];
+  // the KLV index of the next leave, in the order of the walk
+  uint32_t word_index;
+} LeavesFromKlv;
+
+// Visits the leaves under the sibling list at node_index in the KLV's order,
+// which numbers each leave by how many come before it.
+static void leaves_from_klv_walk(LeavesFromKlv *walk, uint32_t node_index) {
+  for (;; node_index++) {
+    const uint32_t node = kwg_node(walk->kwg, node_index);
+    const MachineLetter ml = kwg_node_tile(node);
+    walk->tally[ml]++;
+    if (kwg_node_accepts(node)) {
+      const uint32_t index = census_lattice_rank(walk->lattice, walk->tally);
+      if (index != CENSUS_UNRANKED) {
+        walk->leave[index] =
+            klv_get_indexed_leave_value(walk->klv, walk->word_index);
+      }
+      walk->word_index++;
+    }
+    const uint32_t arc_index = kwg_node_arc_index(node);
+    if (arc_index != 0) {
+      leaves_from_klv_walk(walk, arc_index);
+    }
+    walk->tally[ml]--;
+    if (kwg_node_is_end(node)) {
+      return;
+    }
+  }
+}
+
+void census_leaves_from_klv(const CensusLattice *lattice, const KLV *klv,
+                            Equity *leave) {
+  const uint32_t lattice_size = census_lattice_get_size(lattice);
+  for (uint32_t index = 0; index < lattice_size; index++) {
+    leave[index] = 0;
+  }
+  LeavesFromKlv walk = {.lattice = lattice,
+                        .klv = klv,
+                        .kwg = klv_get_kwg(klv),
+                        .leave = leave,
+                        .word_index = 0};
+  memset(walk.tally, 0, sizeof(walk.tally));
+  const uint32_t root_node_index = kwg_get_dawg_root_node_index(walk.kwg);
+  if (root_node_index != 0) {
+    leaves_from_klv_walk(&walk, root_node_index);
+  }
+}
+
 void census_lattice_unrank(const CensusLattice *lattice, uint32_t index,
                            uint8_t *tally) {
   const int num_letters = lattice->num_letters;
@@ -268,6 +364,8 @@ typedef struct BlankRun {
 typedef struct BlankVariantContext {
   const CensusLattice *lattice;
   Equity *play_scores;
+  // Whether other threads raise play_scores too.
+  bool shared;
   Equity real_score;
   const CensusPlacedTile *placed;
   int number_of_placed;
@@ -291,7 +389,9 @@ static void record_blank_variants_recursive(BlankVariantContext *context,
         lattice_rank_term(context->lattice, BLANK_MACHINE_LETTER, size,
                           blanks_total);
     const Equity value = context->real_score - drop_total;
-    if (value > context->play_scores[rank]) {
+    if (context->shared) {
+      catomic_max_int32(&context->play_scores[rank], value);
+    } else if (value > context->play_scores[rank]) {
       context->play_scores[rank] = value;
     }
     return;
@@ -321,29 +421,39 @@ static void record_blank_variants_recursive(BlankVariantContext *context,
   }
 }
 
-static int compare_placed_tiles(const void *first, const void *second) {
-  const CensusPlacedTile *first_tile = (const CensusPlacedTile *)first;
-  const CensusPlacedTile *second_tile = (const CensusPlacedTile *)second;
-  if (first_tile->ml != second_tile->ml) {
-    return first_tile->ml < second_tile->ml ? -1 : 1;
+static inline bool placed_tile_precedes(const CensusPlacedTile *first,
+                                        const CensusPlacedTile *second) {
+  if (first->ml != second->ml) {
+    return first->ml < second->ml;
   }
-  if (first_tile->blank_drop != second_tile->blank_drop) {
-    return first_tile->blank_drop < second_tile->blank_drop ? -1 : 1;
-  }
-  return 0;
+  return first->blank_drop < second->blank_drop;
 }
 
-void census_record_blank_variants(const CensusLattice *lattice,
-                                  Equity *play_scores, Equity real_score,
-                                  CensusPlacedTile *placed,
+// Sorts the placed tiles by letter, then by blank drop. There are at most
+// rack_size of them, too few for qsort's calls to pay.
+static void sort_placed_tiles(CensusPlacedTile *placed, int number_of_placed) {
+  for (int placed_idx = 1; placed_idx < number_of_placed; placed_idx++) {
+    const CensusPlacedTile tile = placed[placed_idx];
+    int insert_idx = placed_idx;
+    while (insert_idx > 0 &&
+           placed_tile_precedes(&tile, &placed[insert_idx - 1])) {
+      placed[insert_idx] = placed[insert_idx - 1];
+      insert_idx--;
+    }
+    placed[insert_idx] = tile;
+  }
+}
+
+static void record_blank_variants(const CensusLattice *lattice,
+                                  Equity *play_scores, bool shared,
+                                  Equity real_score, CensusPlacedTile *placed,
                                   int number_of_placed,
                                   const uint8_t *unseen_tally, int num_blanks) {
   const int rack_size = lattice->rack_size;
   if (number_of_placed == 0 || number_of_placed > rack_size) {
     return;
   }
-  qsort(placed, (size_t)number_of_placed, sizeof(CensusPlacedTile),
-        compare_placed_tiles);
+  sort_placed_tiles(placed, number_of_placed);
   BlankRun runs[CENSUS_MAX_LETTERS];
   int number_of_runs = 0;
   int total_forced = 0;
@@ -371,6 +481,7 @@ void census_record_blank_variants(const CensusLattice *lattice,
   }
   BlankVariantContext context = {.lattice = lattice,
                                  .play_scores = play_scores,
+                                 .shared = shared,
                                  .real_score = real_score,
                                  .placed = placed,
                                  .number_of_placed = number_of_placed,
@@ -378,6 +489,25 @@ void census_record_blank_variants(const CensusLattice *lattice,
                                  .number_of_runs = number_of_runs};
   record_blank_variants_recursive(&context, number_of_runs - 1,
                                   num_blanks - total_forced, 0, 0, 0, 0);
+}
+
+void census_record_blank_variants(const CensusLattice *lattice,
+                                  Equity *play_scores, Equity real_score,
+                                  CensusPlacedTile *placed,
+                                  int number_of_placed,
+                                  const uint8_t *unseen_tally, int num_blanks) {
+  record_blank_variants(lattice, play_scores, false, real_score, placed,
+                        number_of_placed, unseen_tally, num_blanks);
+}
+
+void census_record_blank_variants_shared(const CensusLattice *lattice,
+                                         Equity *play_scores, Equity real_score,
+                                         CensusPlacedTile *placed,
+                                         int number_of_placed,
+                                         const uint8_t *unseen_tally,
+                                         int num_blanks) {
+  record_blank_variants(lattice, play_scores, true, real_score, placed,
+                        number_of_placed, unseen_tally, num_blanks);
 }
 
 // Apportion
@@ -424,8 +554,11 @@ typedef struct ScatterContext {
 
 // Raises best[P + K] to play_scores[P] + leave[K], for the whole of K placed
 // and its letters and P's before ml summing to keep_terms and rack_terms.
+// shared is a constant wherever this is inlined, so that each of
+// scatter_keep_plain and scatter_keep_shared compiles without the test.
 static inline void scatter_leaf(const ScatterContext *context, int ml,
-                                uint32_t keep_terms, uint32_t rack_terms) {
+                                uint32_t keep_terms, uint32_t rack_terms,
+                                bool shared) {
   const uint32_t *played_tail =
       context->played_tails +
       (size_t)context->keep_size * (size_t)(context->num_letters + 1);
@@ -433,21 +566,35 @@ static inline void scatter_leaf(const ScatterContext *context, int ml,
       context->full_rack_start + rack_terms + played_tail[ml];
   const Equity candidate =
       context->played_value + context->leave[context->keep_start + keep_terms];
+  Equity *best = &context->best[rack_index];
+  if (shared) {
+    catomic_max_int32(best, candidate);
+    return;
+  }
   // Unconditionally: whether a play beats the rack's best so far is a coin
   // flip, and a mispredicted branch discards the leaves' loads in flight.
-  Equity *best = &context->best[rack_index];
   const Equity current = *best;
   *best = candidate > current ? candidate : current;
 }
+
+static void scatter_keep_plain(const ScatterContext *context, int ml,
+                               int remaining, uint32_t keep_terms,
+                               uint32_t rack_terms);
+static void scatter_keep_shared(const ScatterContext *context, int ml,
+                                int remaining, uint32_t keep_terms,
+                                uint32_t rack_terms);
 
 // Draws the kept tiles K, `remaining` of them (at least one) from letter ml
 // on, beside the played tiles P, and raises best[P + K] to play_scores[P] +
 // leave[K]. keep_terms and rack_terms are the rank terms (see CensusLattice)
 // of K's and of P + K's letters before ml. Each step places the copies of one
 // letter of K, so a letter K skips costs nothing but its share of P's terms,
-// and the step that places K's last tiles records the rack in place.
-static void scatter_keep(const ScatterContext *context, int ml, int remaining,
-                         uint32_t keep_terms, uint32_t rack_terms) {
+// and the step that places K's last tiles records the rack in place. With
+// shared, other threads raise best too, and each raise is an atomic max;
+// shared is a constant in each of the two functions this is inlined into.
+static inline void scatter_keep(const ScatterContext *context, int ml,
+                                int remaining, uint32_t keep_terms,
+                                uint32_t rack_terms, bool shared) {
   const int num_letters = context->num_letters;
   const int kept = context->keep_size - remaining;
   const uint32_t *played_tail =
@@ -480,24 +627,43 @@ static void scatter_keep(const ScatterContext *context, int ml, int remaining,
       const uint32_t next_rack_terms =
           rack_terms + skipped + rack_letter_terms[count];
       if (count == remaining) {
-        scatter_leaf(context, next + 1, next_keep_terms, next_rack_terms);
+        scatter_leaf(context, next + 1, next_keep_terms, next_rack_terms,
+                     shared);
+      } else if (shared) {
+        scatter_keep_shared(context, next + 1, remaining - count,
+                            next_keep_terms, next_rack_terms);
       } else {
-        scatter_keep(context, next + 1, remaining - count, next_keep_terms,
-                     next_rack_terms);
+        scatter_keep_plain(context, next + 1, remaining - count,
+                           next_keep_terms, next_rack_terms);
       }
     }
   }
 }
 
-// For each played group P a word reaches, pushes play_scores[P] + leave[K] onto
-// every full rack P + K the pool can deal. best must hold the max over subsets
-// of leave, the value of exchanging toward each keep.
-static void scatter_words(const CensusLattice *lattice,
+static void scatter_keep_plain(const ScatterContext *context, int ml,
+                               int remaining, uint32_t keep_terms,
+                               uint32_t rack_terms) {
+  scatter_keep(context, ml, remaining, keep_terms, rack_terms, false);
+}
+
+static void scatter_keep_shared(const ScatterContext *context, int ml,
+                                int remaining, uint32_t keep_terms,
+                                uint32_t rack_terms) {
+  scatter_keep(context, ml, remaining, keep_terms, rack_terms, true);
+}
+
+// For each played group P from chunk_start to chunk_end that a word reaches,
+// pushes play_scores[P] + leave[K] onto every full rack P + K the pool can
+// deal. best must hold the max over subsets of leave, the value of exchanging
+// toward each keep. With shared, other threads raise best too, so each raise
+// is an atomic max.
+static void scatter_chunk(const CensusLattice *lattice,
                           const Equity *play_scores, const Equity *leave,
-                          const uint8_t *unseen_tally, Equity *best) {
+                          const uint8_t *unseen_tally, Equity *best,
+                          bool shared, uint32_t chunk_start,
+                          uint32_t chunk_end) {
   const int num_letters = lattice->num_letters;
   const int rack_size = lattice->rack_size;
-  const uint32_t lattice_size = census_lattice_get_size(lattice);
   uint8_t played_tally[CENSUS_MAX_LETTERS] = {0};
   uint8_t played_before[CENSUS_MAX_LETTERS] = {0};
   uint32_t played_tails[(CENSUS_MAX_LETTERS + 1) * (CENSUS_MAX_LETTERS + 1)] = {
@@ -517,7 +683,8 @@ static void scatter_words(const CensusLattice *lattice,
                             .played_tails = played_tails,
                             .available = available,
                             .suffix_capacity = suffix_capacity};
-  for (uint32_t played_index = 1; played_index < lattice_size; played_index++) {
+  for (uint32_t played_index = chunk_start; played_index < chunk_end;
+       played_index++) {
     const Equity played_value = play_scores[played_index];
     if (played_value <= 0) {
       continue;
@@ -555,11 +722,21 @@ static void scatter_words(const CensusLattice *lattice,
     context.keep_size = keep_size;
     context.keep_start = (uint32_t)lattice->size_offsets[keep_size];
     if (keep_size == 0) {
-      scatter_leaf(&context, 0, 0, 0);
+      scatter_leaf(&context, 0, 0, 0, shared);
+    } else if (shared) {
+      scatter_keep_shared(&context, 0, keep_size, 0, 0);
     } else {
-      scatter_keep(&context, 0, keep_size, 0, 0);
+      scatter_keep_plain(&context, 0, keep_size, 0, 0);
     }
   }
+}
+
+// scatter_chunk over every played group, by one thread.
+static void scatter_words(const CensusLattice *lattice,
+                          const Equity *play_scores, const Equity *leave,
+                          const uint8_t *unseen_tally, Equity *best) {
+  scatter_chunk(lattice, play_scores, leave, unseen_tally, best, false, 1,
+                census_lattice_get_size(lattice));
 }
 
 typedef struct LetterCount {
@@ -572,6 +749,9 @@ typedef struct ApportionContext {
   int num_letters;
   const uint32_t *suffix_capacity;
   CensusSums *sums;
+  // When set, the drawable full racks' weighted bests add up here instead of
+  // apportioning to sums.
+  CensusSums *total;
   bool best_from_rack_best;
   const Equity *rack_best;
   // the nonzero letters of the rack being drawn
@@ -643,7 +823,10 @@ static void enumerate_drawable(ApportionContext *context, int ml, int remaining,
       best_split(context, number_of_letters, 0, 0, &best);
     }
     const double best_double = (double)best;
-    if (context->args->superset_sum) {
+    if (context->total != NULL) {
+      context->total->num += weight * best_double;
+      context->total->den += weight;
+    } else if (context->args->superset_sum) {
       // seed the superset sum at the full rack
       context->sums[index].num = weight * best_double;
       context->sums[index].den = weight;
@@ -689,6 +872,224 @@ static void sum_over_supersets(ApportionContext *context) {
   }
 }
 
+// A subtree of enumerate_drawable's walk, from letter ml with `remaining`
+// tiles left to draw, the tiles before ml drawn with that weight and index.
+typedef struct DrawUnit {
+  int ml;
+  int remaining;
+  double weight;
+  uint32_t index;
+} DrawUnit;
+
+// Splits enumerate_drawable's walk at split_ml into the subtrees it visits
+// there, in the order it visits them.
+static void collect_draw_units(const ApportionContext *context, int ml,
+                               int remaining, double weight, uint32_t index,
+                               int split_ml, DrawUnit *units,
+                               int *number_of_units) {
+  if (remaining == 0 || ml == split_ml) {
+    units[(*number_of_units)++] = (DrawUnit){
+        .ml = ml, .remaining = remaining, .weight = weight, .index = index};
+    return;
+  }
+  if (ml == context->num_letters ||
+      (int)context->suffix_capacity[ml] < remaining) {
+    return;
+  }
+  collect_draw_units(context, ml + 1, remaining, weight, index, split_ml, units,
+                     number_of_units);
+  const int unseen = context->args->unseen_tally[ml];
+  const int capacity = unseen < remaining ? unseen : remaining;
+  double binomial = 1.0;
+  uint32_t drawn_index = index;
+  for (int count = 1; count <= capacity; count++) {
+    binomial = binomial * (double)(unseen - count + 1) / (double)count;
+    drawn_index =
+        census_add_table_add(context->args->add_table, drawn_index, ml);
+    collect_draw_units(context, ml + 1, remaining - count, weight * binomial,
+                       drawn_index, split_ml, units, number_of_units);
+  }
+}
+
+typedef struct ExpectedBestWorker {
+  const CensusApportionArgs *args;
+  const ApportionContext *context;
+  Equity *rack_best;
+  int thread_index;
+  int number_of_threads;
+  _Atomic uint32_t *next_chunk;
+  _Atomic uint32_t *next_small;
+  _Atomic int *next_unit;
+  const DrawUnit *units;
+  int number_of_units;
+  CensusSums *unit_sums;
+  cpthread_t cpthread_id;
+} ExpectedBestWorker;
+
+static void *expected_best_copy_worker(void *uncasted_worker) {
+  const ExpectedBestWorker *worker =
+      (const ExpectedBestWorker *)uncasted_worker;
+  const uint64_t size = census_lattice_get_size(worker->args->lattice);
+  const uint64_t start = size * (uint64_t)worker->thread_index /
+                         (uint64_t)worker->number_of_threads;
+  const uint64_t end = size * (uint64_t)(worker->thread_index + 1) /
+                       (uint64_t)worker->number_of_threads;
+  memcpy(worker->rack_best + start,
+         worker->args->leave_max_over_subsets + start,
+         sizeof(Equity) * (size_t)(end - start));
+  return NULL;
+}
+
+static void *expected_best_scatter_worker(void *uncasted_worker) {
+  const ExpectedBestWorker *worker =
+      (const ExpectedBestWorker *)uncasted_worker;
+  const CensusApportionArgs *args = worker->args;
+  const uint32_t lattice_size = census_lattice_get_size(args->lattice);
+  const bool shared = worker->number_of_threads > 1;
+  const uint32_t small_end = census_lattice_get_size_start(
+      args->lattice, SCATTER_SINGLE_CLAIM_MAX_SIZE + 1 <
+                             census_lattice_get_rack_size(args->lattice)
+                         ? SCATTER_SINGLE_CLAIM_MAX_SIZE + 1
+                         : census_lattice_get_rack_size(args->lattice));
+  while (true) {
+    const uint32_t played_index =
+        atomic_fetch_add_explicit(worker->next_small, 1, memory_order_relaxed);
+    if (played_index >= small_end) {
+      break;
+    }
+    if (played_index > 0) {
+      scatter_chunk(args->lattice, args->play_scores, args->leave,
+                    args->unseen_tally, worker->rack_best, shared, played_index,
+                    played_index + 1);
+    }
+  }
+  while (true) {
+    const uint32_t chunk_start =
+        small_end + atomic_fetch_add_explicit(worker->next_chunk, SCATTER_CHUNK,
+                                              memory_order_relaxed);
+    if (chunk_start >= lattice_size) {
+      return NULL;
+    }
+    const uint32_t chunk_end = lattice_size - chunk_start > SCATTER_CHUNK
+                                   ? chunk_start + SCATTER_CHUNK
+                                   : lattice_size;
+    scatter_chunk(args->lattice, args->play_scores, args->leave,
+                  args->unseen_tally, worker->rack_best, shared, chunk_start,
+                  chunk_end);
+  }
+}
+
+static void *expected_best_sum_worker(void *uncasted_worker) {
+  const ExpectedBestWorker *worker =
+      (const ExpectedBestWorker *)uncasted_worker;
+  ApportionContext context = *worker->context;
+  while (true) {
+    const int unit_idx =
+        atomic_fetch_add_explicit(worker->next_unit, 1, memory_order_relaxed);
+    if (unit_idx >= worker->number_of_units) {
+      return NULL;
+    }
+    const DrawUnit *unit = &worker->units[unit_idx];
+    CensusSums *unit_sum = &worker->unit_sums[unit_idx];
+    unit_sum->num = 0;
+    unit_sum->den = 0;
+    context.total = unit_sum;
+    enumerate_drawable(&context, unit->ml, unit->remaining, unit->weight,
+                       unit->index, 0);
+  }
+}
+
+// Runs one phase on every worker's thread, the first in the calling thread.
+static void expected_best_run_phase(ExpectedBestWorker *workers,
+                                    int number_of_threads,
+                                    void *(*phase)(void *)) {
+  for (int thread_idx = 1; thread_idx < number_of_threads; thread_idx++) {
+    cpthread_create(&workers[thread_idx].cpthread_id, phase,
+                    &workers[thread_idx]);
+  }
+  phase(&workers[0]);
+  for (int thread_idx = 1; thread_idx < number_of_threads; thread_idx++) {
+    cpthread_join(workers[thread_idx].cpthread_id);
+  }
+}
+
+void census_expected_best(const CensusApportionArgs *args, Equity *rack_best,
+                          CensusSums *total, int number_of_threads) {
+  const CensusLattice *lattice = args->lattice;
+  const int num_letters = lattice->num_letters;
+  const int rack_size = lattice->rack_size;
+  if (number_of_threads < 1) {
+    number_of_threads = 1;
+  }
+  uint32_t suffix_capacity[CENSUS_MAX_LETTERS + 1];
+  suffix_capacity[num_letters] = 0;
+  for (int ml = num_letters - 1; ml >= 0; ml--) {
+    const uint32_t capped = args->unseen_tally[ml] < rack_size
+                                ? args->unseen_tally[ml]
+                                : (uint32_t)rack_size;
+    suffix_capacity[ml] = suffix_capacity[ml + 1] + capped;
+  }
+  const ApportionContext context = {.args = args,
+                                    .num_letters = num_letters,
+                                    .suffix_capacity = suffix_capacity,
+                                    .sums = NULL,
+                                    .total = NULL,
+                                    .best_from_rack_best = true,
+                                    .rack_best = rack_best};
+  // The walk over drawable racks, split into its subtrees after the first
+  // EXPECTED_BEST_SPLIT_LETTERS letters. Each subtree's sum is added in the
+  // walk's order, so the total does not depend on the number of threads.
+  const int split_ml = num_letters < EXPECTED_BEST_SPLIT_LETTERS
+                           ? num_letters
+                           : EXPECTED_BEST_SPLIT_LETTERS;
+  // a unit draws at most rack_size tiles from the letters before split_ml
+  const size_t max_units =
+      (size_t)lattice_choose(lattice, split_ml + rack_size, rack_size);
+  DrawUnit *units = malloc_or_die(sizeof(DrawUnit) * max_units);
+  int number_of_units = 0;
+  collect_draw_units(&context, 0, rack_size, 1.0, 0, split_ml, units,
+                     &number_of_units);
+  CensusSums *unit_sums =
+      malloc_or_die(sizeof(CensusSums) * (size_t)(number_of_units + 1));
+  _Atomic uint32_t next_chunk;
+  atomic_init(&next_chunk, 0);
+  _Atomic uint32_t next_small;
+  atomic_init(&next_small, 0);
+  _Atomic int next_unit;
+  atomic_init(&next_unit, 0);
+  ExpectedBestWorker *workers =
+      malloc_or_die(sizeof(ExpectedBestWorker) * (size_t)number_of_threads);
+  for (int thread_idx = 0; thread_idx < number_of_threads; thread_idx++) {
+    workers[thread_idx] = (ExpectedBestWorker){
+        .args = args,
+        .context = &context,
+        .rack_best = rack_best,
+        .thread_index = thread_idx,
+        .number_of_threads = number_of_threads,
+        .next_chunk = &next_chunk,
+        .next_small = &next_small,
+        .next_unit = &next_unit,
+        .units = units,
+        .number_of_units = number_of_units,
+        .unit_sums = unit_sums,
+    };
+  }
+  expected_best_run_phase(workers, number_of_threads,
+                          expected_best_copy_worker);
+  expected_best_run_phase(workers, number_of_threads,
+                          expected_best_scatter_worker);
+  expected_best_run_phase(workers, number_of_threads, expected_best_sum_worker);
+  total->num = 0;
+  total->den = 0;
+  for (int unit_idx = 0; unit_idx < number_of_units; unit_idx++) {
+    total->num += unit_sums[unit_idx].num;
+    total->den += unit_sums[unit_idx].den;
+  }
+  free(workers);
+  free(unit_sums);
+  free(units);
+}
+
 void census_apportion(const CensusApportionArgs *args, CensusSums *sums,
                       Equity *rack_best) {
   const CensusLattice *lattice = args->lattice;
@@ -724,6 +1125,7 @@ void census_apportion(const CensusApportionArgs *args, CensusSums *sums,
                               .num_letters = num_letters,
                               .suffix_capacity = suffix_capacity,
                               .sums = sums,
+                              .total = NULL,
                               .best_from_rack_best =
                                   max_over_subsets || scatter_active,
                               .rack_best = rack_best};

@@ -1,10 +1,13 @@
 #include "compat_test.h"
 
+#include "../src/compat/catomic.h"
 #include "../src/compat/cdir.h"
 #include "../src/compat/cfile.h"
 #include "../src/compat/cmap.h"
 #include "../src/compat/cmemfile.h"
 #include "../src/compat/cpath.h"
+#include "../src/compat/cpthread.h"
+#include "../src/compat/cpthread_defs.h"
 #include "../src/compat/cterm.h"
 #include "../src/compat/ctime.h"
 #include "../src/util/fileproxy.h"
@@ -563,6 +566,82 @@ static void test_nap_lasts_at_least_the_request(void) {
   assert(ctimer_monotonic_ns() - started_at_ns < 1000000000);
 }
 
+enum {
+  ATOMIC_MAX_THREADS = 4,
+  ATOMIC_MAX_SLOTS = 64,
+  ATOMIC_MAX_RAISES = 200000,
+};
+
+typedef struct AtomicMaxThread {
+  int32_t *slots;
+  bool locked;
+  uint32_t seed;
+  cpthread_t cpthread_id;
+} AtomicMaxThread;
+
+// The value and slot of a thread's raise_idx-th raise.
+static int32_t atomic_max_raise(uint32_t seed, int raise_idx, int *slot_idx) {
+  uint32_t state = seed * 2654435761U + (uint32_t)raise_idx * 40503U;
+  state ^= state >> 13;
+  state *= 2246822519U;
+  state ^= state >> 16;
+  *slot_idx = (int)(state % ATOMIC_MAX_SLOTS);
+  return (int32_t)(state >> 6) - (1 << 25);
+}
+
+static void *atomic_max_thread(void *uncasted_thread) {
+  const AtomicMaxThread *thread = (const AtomicMaxThread *)uncasted_thread;
+  for (int raise_idx = 0; raise_idx < ATOMIC_MAX_RAISES; raise_idx++) {
+    int slot_idx;
+    const int32_t value = atomic_max_raise(thread->seed, raise_idx, &slot_idx);
+    if (thread->locked) {
+      catomic_max_int32_locked(&thread->slots[slot_idx], value);
+    } else {
+      catomic_max_int32(&thread->slots[slot_idx], value);
+    }
+  }
+  return NULL;
+}
+
+// Threads raising the same slots at once leave each the largest value any of
+// them raised it to, by the lock-free path and by the locked one.
+static void test_atomic_max(void) {
+  int32_t expected[ATOMIC_MAX_SLOTS];
+  for (int slot_idx = 0; slot_idx < ATOMIC_MAX_SLOTS; slot_idx++) {
+    expected[slot_idx] = INT32_MIN;
+  }
+  for (int thread_idx = 0; thread_idx < ATOMIC_MAX_THREADS; thread_idx++) {
+    for (int raise_idx = 0; raise_idx < ATOMIC_MAX_RAISES; raise_idx++) {
+      int slot_idx;
+      const int32_t value =
+          atomic_max_raise((uint32_t)thread_idx + 1, raise_idx, &slot_idx);
+      if (value > expected[slot_idx]) {
+        expected[slot_idx] = value;
+      }
+    }
+  }
+  for (int locked = 0; locked <= 1; locked++) {
+    int32_t slots[ATOMIC_MAX_SLOTS];
+    for (int slot_idx = 0; slot_idx < ATOMIC_MAX_SLOTS; slot_idx++) {
+      slots[slot_idx] = INT32_MIN;
+    }
+    AtomicMaxThread threads[ATOMIC_MAX_THREADS];
+    for (int thread_idx = 0; thread_idx < ATOMIC_MAX_THREADS; thread_idx++) {
+      threads[thread_idx] = (AtomicMaxThread){.slots = slots,
+                                              .locked = locked == 1,
+                                              .seed = (uint32_t)thread_idx + 1};
+      cpthread_create(&threads[thread_idx].cpthread_id, atomic_max_thread,
+                      &threads[thread_idx]);
+    }
+    for (int thread_idx = 0; thread_idx < ATOMIC_MAX_THREADS; thread_idx++) {
+      cpthread_join(threads[thread_idx].cpthread_id);
+    }
+    for (int slot_idx = 0; slot_idx < ATOMIC_MAX_SLOTS; slot_idx++) {
+      assert(slots[slot_idx] == expected[slot_idx]);
+    }
+  }
+}
+
 void test_compat(void) {
   test_binary_round_trip();
   test_text_line_endings();
@@ -578,4 +657,5 @@ void test_compat(void) {
   test_wide_glyphs();
   test_nap_lasts_at_least_the_request();
   test_write_access_and_read_only_targets();
+  test_atomic_max();
 }

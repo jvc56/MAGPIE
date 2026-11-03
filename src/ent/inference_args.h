@@ -14,6 +14,11 @@
 typedef struct InferenceArgs {
   bool use_game_history;
   bool use_inference_cutoff_optimization;
+  // Value the racks with the board's census play scores, built once, instead
+  // of a move generation for each rack, where that gives the same values (see
+  // inference_can_use_census in inference.c). The racks inferred are the same
+  // either way.
+  bool use_census_play_scores;
   GameHistory *game_history;
   int target_index;
   Equity target_score;
@@ -51,6 +56,7 @@ infer_args_fill(InferenceArgs *args, int leave_list_capacity, Equity eq_margin,
   args->nontarget_known_rack = nontarget_known_rack;
   args->use_game_history = use_game_history;
   args->use_inference_cutoff_optimization = use_inference_cutoff_optimization;
+  args->use_census_play_scores = true;
   args->game_history = game_history;
   args->game = game;
   args->num_threads = num_threads;
