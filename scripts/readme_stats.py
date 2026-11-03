@@ -97,18 +97,22 @@ def stats_block() -> List[str]:
     version = define(VERSION_FILE, "MAGPIE_VERSION")
     data_version = define(DATA_VERSION_FILE, "DATA_FETCH_VERSION")
     builders = builder_versions()
+    columns = (
+        ("Version", version),
+        ("Data set", f"`data-{data_version}`"),
+        ("Commands", str(command_count())),
+        ("Test suites in CI", at_least(test_suite_count(), TEST_SUITE_ROUNDING)),
+        ("Lines of C", at_least(line_count(SOURCE_DIRS), LINE_ROUNDING)),
+        ("Lines of tests", at_least(line_count(TEST_DIRS), LINE_ROUNDING)),
+        (
+            "Builder versions",
+            " · ".join(f"{name.upper()} {value}" for name, value in builders.items()),
+        ),
+    )
     return [
-        "| | |",
-        "|---|---|",
-        f"| Version | {version} |",
-        f"| Data set | `data-{data_version}` (`data fetch`) |",
-        f"| Commands | {command_count()} (`help` lists them by task) |",
-        f"| Unit test suites run by CI | {at_least(test_suite_count(), TEST_SUITE_ROUNDING)} |",
-        f"| Lines of C | {at_least(line_count(SOURCE_DIRS), LINE_ROUNDING)} in the program, "
-        f"{at_least(line_count(TEST_DIRS), LINE_ROUNDING)} in its tests |",
-        "| Builder versions | "
-        + " · ".join(f"{name.upper()} {value}" for name, value in builders.items())
-        + " |",
+        "| " + " | ".join(label for label, _ in columns) + " |",
+        "|" + "---|" * len(columns),
+        "| " + " | ".join(value for _, value in columns) + " |",
     ]
 
 
