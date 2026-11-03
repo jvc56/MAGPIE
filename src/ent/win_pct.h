@@ -10,6 +10,11 @@ typedef struct WinPct WinPct;
 WinPct *win_pct_create(const char *data_paths, const char *win_pct_name,
                        ErrorStack *error_stack);
 void win_pct_destroy(WinPct *wp);
+// The table used when none is named: DEFAULT_WIN_PCT_PREFIX plus the letter
+// distribution's name, lowercased as ld_create lowercases it to find the
+// distribution's file, so that a GCG's "#tile-distribution English" finds
+// winpct_english. Caller owns the result.
+char *win_pct_get_default_name(const char *ld_name);
 const char *win_pct_get_name(const WinPct *wp);
 // The largest bag size the table covers.
 unsigned int win_pct_get_max_bag(const WinPct *wp);

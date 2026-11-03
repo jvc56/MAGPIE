@@ -2773,6 +2773,47 @@ void test_config_note_move_interpolation(void) {
   string_builder_destroy(expected_sb);
 
   config_destroy(config);
+
+  // After an endgame, with nothing generated or simulated, $N names the first
+  // play of the endgame's N-th line.
+  config = config_create_or_die("set -s1 score -s2 score -threads 2 -etopk 3");
+  assert_config_exec_status(config, "load testdata/gcgs/success_standard.gcg",
+                            ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "goto end", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "prev", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "prev", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "prev", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "endgame", ERROR_STATUS_SUCCESS);
+  const EndgameResults *endgame_results = config_get_endgame_results(config);
+  const int num_pvs = endgame_results_get_num_pvs(endgame_results);
+  assert(num_pvs >= 2);
+  expected_sb = string_builder_create();
+  string_builder_add_string(expected_sb, "best was ");
+  for (int pv_idx = 0; pv_idx < 2; pv_idx++) {
+    if (pv_idx > 0) {
+      string_builder_add_string(expected_sb, ", then ");
+    }
+    Move move;
+    small_move_to_move(
+        &move,
+        &endgame_results_get_multi_pvline(endgame_results, pv_idx)->moves[0],
+        game_get_board(config_get_game(config)));
+    string_builder_add_move(expected_sb,
+                            game_get_board(config_get_game(config)), &move,
+                            config_get_ld(config), false);
+  }
+  assert_config_exec_status(config, "note best was $1, then $2",
+                            ERROR_STATUS_SUCCESS);
+  gh = config_get_game_history(config);
+  assert_strings_equal(game_history_get_note_for_most_recent_event(gh),
+                       string_builder_peek(expected_sb));
+  string_builder_destroy(expected_sb);
+  cmd_sb = string_builder_create();
+  string_builder_add_formatted_string(cmd_sb, "note $%d", num_pvs + 1);
+  assert_config_exec_status(config, string_builder_peek(cmd_sb),
+                            ERROR_STATUS_NOTE_MOVE_INDEX_OUT_OF_RANGE);
+  string_builder_destroy(cmd_sb);
+  config_destroy(config);
 }
 
 void test_config_fg_required(void) {

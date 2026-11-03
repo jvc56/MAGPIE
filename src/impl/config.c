@@ -2017,7 +2017,8 @@ static void help_entry_fill(const Config *config, int token,
              "commit arguments are identical to the commit command (except the "
              "optional rack-after-exchange is not supported). The note follows "
              "the commit arguments and may use $N to interpolate the N-th move "
-             "from the current move list by its 1-indexed position.";
+             "from the current move list by its 1-indexed position, or after "
+             "an endgame, the first play of its N-th line.";
       break;
     case ARG_TOKEN_TOP_COMMIT:
       usages[0] = "[<rack>]";
@@ -2148,7 +2149,8 @@ static void help_entry_fill(const Config *config, int token,
       text = "Specifies the note for the most recently added move. If there is "
              "an existing note it will be overwritten. Use $N (e.g. $1, $2) to "
              "interpolate the N-th move from the current move list by its "
-             "1-indexed position.";
+             "1-indexed position, or after an endgame, the first play of its "
+             "N-th line.";
       break;
     case ARG_TOKEN_P1_NAME:
       usages[0] = "<player_name_with_possible_whitespace>";
@@ -3903,15 +3905,14 @@ void config_fill_sim_args(const Config *config, Rack *known_opp_rack,
 }
 
 // The win percentage table the config should use: the one named by
-// -winpct, else DEFAULT_WIN_PCT_PREFIX plus the letter distribution's
-// name. NULL when neither is known yet. Caller owns the result.
+// -winpct, else the letter distribution's default table. NULL when neither
+// is known yet. Caller owns the result.
 static char *config_win_pct_target_name(const Config *config) {
   if (config->win_pct_explicit_name) {
     return string_duplicate(config->win_pct_explicit_name);
   }
   if (config->ld) {
-    return get_formatted_string("%s%s", DEFAULT_WIN_PCT_PREFIX,
-                                ld_get_name(config->ld));
+    return win_pct_get_default_name(ld_get_name(config->ld));
   }
   return NULL;
 }
@@ -7146,10 +7147,44 @@ char *str_api_commit(Config *config, ErrorStack *error_stack) {
 
 // Commit with note
 
+// The number of moves a note's $N can name: a live simulation's plays, else
+// the generated moves, else the lines of the endgame solved for this
+// position, of which $N names the first play. 0 when there are none.
+static int note_interpolation_get_num_moves(const Config *config) {
+  if (sim_results_get_valid_for_current_game_state(config->sim_results)) {
+    return sim_results_get_number_of_plays(config->sim_results);
+  }
+  if (config->move_list && move_list_get_count(config->move_list) > 0) {
+    return move_list_get_count(config->move_list);
+  }
+  if (endgame_results_get_valid_for_current_game_state(
+          config->endgame_results)) {
+    return endgame_results_get_num_pvs(config->endgame_results);
+  }
+  return 0;
+}
+
+// Copies the move a note's $N names, from the source that
+// note_interpolation_get_num_moves counted, where move_idx is N - 1.
+static void note_interpolation_get_move(const Config *config,
+                                        const int move_idx, Move *move) {
+  if (sim_results_get_valid_for_current_game_state(config->sim_results)) {
+    move_copy(move, simmed_play_get_move(sim_results_get_display_simmed_play(
+                        config->sim_results, move_idx)));
+  } else if (config->move_list && move_list_get_count(config->move_list) > 0) {
+    move_copy(move, move_list_get_move(config->move_list, move_idx));
+  } else {
+    const PVLine *pv_line =
+        endgame_results_get_multi_pvline(config->endgame_results, move_idx);
+    small_move_to_move(move, &pv_line->moves[0], game_get_board(config->game));
+  }
+}
+
 // Builds a new heap-allocated string from raw_note with every $N reference
-// replaced by the string representation of the N-th move (1-indexed) in the
-// current move list. Returns NULL and pushes an error if any $N reference is
-// invalid; otherwise returns the caller-owned interpolated string.
+// replaced by the string representation of the N-th move (1-indexed) of the
+// current moves (see note_interpolation_get_num_moves). Returns NULL and
+// pushes an error if any $N reference is invalid; otherwise returns the
+// caller-owned interpolated string.
 static char *build_interpolated_note(const Config *config, const char *raw_note,
                                      ErrorStack *error_stack) {
   StringBuilder *sb = string_builder_create();
@@ -7162,14 +7197,7 @@ static char *build_interpolated_note(const Config *config, const char *raw_note,
         move_idx = move_idx * 10 + (*p - '0');
         p++;
       }
-      const bool use_sim =
-          sim_results_get_valid_for_current_game_state(config->sim_results);
-      int num_moves = 0;
-      if (use_sim) {
-        num_moves = sim_results_get_number_of_plays(config->sim_results);
-      } else if (config->move_list) {
-        num_moves = move_list_get_count(config->move_list);
-      }
+      const int num_moves = note_interpolation_get_num_moves(config);
       if (num_moves == 0) {
         error_stack_push(
             error_stack, ERROR_STATUS_NOTE_NO_MOVES_TO_INTERPOLATE,
@@ -7184,11 +7212,9 @@ static char *build_interpolated_note(const Config *config, const char *raw_note,
         string_builder_destroy(sb);
         return NULL;
       }
-      const Move *move =
-          use_sim ? simmed_play_get_move(sim_results_get_display_simmed_play(
-                        config->sim_results, move_idx - 1))
-                  : move_list_get_move(config->move_list, move_idx - 1);
-      string_builder_add_move(sb, game_get_board(config->game), move,
+      Move move;
+      note_interpolation_get_move(config, move_idx - 1, &move);
+      string_builder_add_move(sb, game_get_board(config->game), &move,
                               config->ld, false);
     } else {
       string_builder_add_char(sb, *p);
