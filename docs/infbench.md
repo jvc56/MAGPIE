@@ -162,3 +162,7 @@ speed comparisons. `settings` records include `census=0` or `census=1` (permissi
 to use census, not a guarantee that every observation qualifies). Quality metrics
 must agree between the paths. Run timing comparisons sequentially with optimized
 binaries, and compare inference `seconds` separately from game generation.
+
+For training/validation calibration by leave size, game stage, and move type,
+including exact PAT evaluation for one- through four-tile placements, see
+[softmax calibration](softmax-calibration.md).

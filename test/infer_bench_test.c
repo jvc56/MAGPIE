@@ -784,17 +784,268 @@ static void infbench_pat64_observe(const Config *config, const Move *observed,
   game_destroy(game);
 }
 
+enum {
+  CAL_MARGIN_COUNT = 4,
+  CAL_TEMP_COUNT = 5,
+  CAL_MODE_COUNT = CAL_MARGIN_COUNT * CAL_TEMP_COUNT
+};
+static const int calibration_margins[CAL_MARGIN_COUNT] = {10, 20, 40, 80};
+static const int calibration_temperatures[CAL_TEMP_COUNT] = {0, 2, 5, 10, 20};
+
+typedef struct CalibrationContext {
+  Game *game;
+  const Move *observed;
+  const LetterDistribution *ld;
+  const KLV *klv;
+  Rack truth;
+  Rack unseen;
+  Rack played;
+  Rack leave;
+  MoveList *moves;
+  PATEvalContext *pat;
+  Equity word_penalties[2 * BOARD_DIM];
+  Equity letter_penalties[2 * BOARD_DIM];
+  InferBenchPrediction predictions[2][CAL_MODE_COUNT];
+  double seconds[2];
+  int racks;
+} CalibrationContext;
+
+static void calibration_evaluate_rack(CalibrationContext *ctx, double ways) {
+  Player *player = game_get_player(ctx->game, 0);
+  rack_copy(player_get_rack(player), &ctx->played);
+  for (int ml = 0; ml < ld_get_size(ctx->ld); ml++) {
+    rack_add_letters(player_get_rack(player), ml,
+                     rack_get_letter(&ctx->leave, ml));
+  }
+  for (int model = 0; model < 2; model++) {
+    Timer timer;
+    ctimer_start(&timer);
+    player_set_pat_usage(player, model == 0, 0);
+    const double best = equity_to_double(
+        move_get_equity(get_top_equity_move(ctx->game, ctx->moves)));
+    PATEvalContext *pat = NULL;
+    uint32_t classes = 0;
+    if (model == 1) {
+      pat = ctx->pat;
+      pat_eval_context_load(
+          pat, player_get_pat(player),
+          board_get_readonly_lanes(game_get_board(ctx->game), 0), ctx->ld,
+          player_get_rack(player), PAT_CLASS_MASK_ALL,
+          rack_get_total_letters(
+              player_get_rack(game_get_player(ctx->game, 1))));
+      pat_eval_context_set_kwg(pat, player_get_kwg(player),
+                               game_get_variant(ctx->game));
+      pat_eval_context_set_utility(
+          pat,
+          equity_to_int(player_get_score(player) -
+                        player_get_score(game_get_player(ctx->game, 1))),
+          bag_get_letters(game_get_bag(ctx->game)));
+      classes = pat_eval_context_get_active_classes(pat);
+    }
+    const double observed = equity_to_double(static_eval_get_move_equity(
+        ctx->ld, ctx->klv, ctx->observed, &ctx->leave,
+        player_get_rack(game_get_player(ctx->game, 1)), ctx->word_penalties,
+        ctx->letter_penalties, classes, pat,
+        board_get_tiles_played(game_get_board(ctx->game)),
+        bag_get_letters(game_get_bag(ctx->game))));
+    const double regret = fmax(0, best - observed);
+    ctx->seconds[model] += ctimer_elapsed_seconds(&timer);
+    for (int margin_idx = 0; margin_idx < CAL_MARGIN_COUNT; margin_idx++) {
+      if (regret > calibration_margins[margin_idx] + 0.000001) {
+        continue;
+      }
+      for (int temp_idx = 0; temp_idx < CAL_TEMP_COUNT; temp_idx++) {
+        const int temperature = calibration_temperatures[temp_idx];
+        const double weight =
+            ways * (temperature == 0 ? 1 : exp(-regret / temperature));
+        InferBenchPrediction *prediction =
+            &ctx->predictions[model][margin_idx * CAL_TEMP_COUNT + temp_idx];
+        prediction->mass += weight;
+        prediction->klv +=
+            weight *
+            equity_to_double(klv_get_leave_value(ctx->klv, &ctx->leave));
+        if (racks_are_equal(&ctx->leave, &ctx->truth)) {
+          prediction->true_probability += weight;
+        }
+        for (int ml = 0; ml < ld_get_size(ctx->ld); ml++) {
+          prediction->counts[ml] += weight * rack_get_letter(&ctx->leave, ml);
+        }
+      }
+    }
+  }
+  ctx->racks++;
+}
+
+static void calibration_enumerate(CalibrationContext *ctx, int ml,
+                                  int remaining, double ways) {
+  if (remaining == 0) {
+    calibration_evaluate_rack(ctx, ways);
+    return;
+  }
+  if (ml == ld_get_size(ctx->ld)) {
+    return;
+  }
+  const int available = rack_get_letter(&ctx->unseen, ml);
+  const int maximum = available < remaining ? available : remaining;
+  for (int count = 0; count <= maximum; count++) {
+    rack_add_letters(&ctx->leave, ml, count);
+    calibration_enumerate(ctx, ml + 1, remaining - count,
+                          ways * (double)choose(available, count));
+    rack_take_letters(&ctx->leave, ml, count);
+  }
+}
+
+static void calibration_print(const InferBenchScore *score, int pair_idx,
+                              int game_idx, int turn, int leave, int bag,
+                              bool exchange, const char *model, int margin,
+                              int temperature) {
+  printf("CALIBRATION pair=%d game=%d turn=%d leave=%d bag=%d exchange=%d "
+         "model=%s margin=%d temperature=%d nll=%.9f klv_mse=%.9f "
+         "vowel_mse=%.9f score_mse=%.9f tile_mse=%.9f excluded=%d empty=%d\n",
+         pair_idx, game_idx, turn, leave, bag, exchange, model, margin,
+         temperature, score->metrics[0], score->metrics[1], score->metrics[2],
+         score->metrics[3], score->metrics[4], score->excluded, score->empty);
+}
+
+static void calibration_observe(const Config *config, const Move *observed,
+                                int pair_idx, int game_idx, int turn,
+                                bool timing_only) {
+  CalibrationContext *ctx = calloc_or_die(1, sizeof(CalibrationContext));
+  ctx->game = game_duplicate(config_get_game(config));
+  ctx->observed = observed;
+  ctx->ld = game_get_ld(ctx->game);
+  ctx->klv = player_get_klv(game_get_player(ctx->game, 0));
+  rack_set_dist_size_and_reset(&ctx->played, ld_get_size(ctx->ld));
+  infbench_played_tiles(observed, &ctx->played);
+  ctx->truth = *player_get_rack(game_get_player(ctx->game, 0));
+  rack_subtract_using_floor_zero(&ctx->truth, &ctx->played);
+  const bool exchange = move_get_type(observed) == GAME_EVENT_EXCHANGE;
+  ctx->unseen =
+      exchange ? *player_get_rack(game_get_player(ctx->game, 0)) : ctx->truth;
+  int bag_counts[MAX_ALPHABET_SIZE] = {0};
+  bag_increment_unseen_count(game_get_bag(ctx->game), bag_counts);
+  for (int ml = 0; ml < ld_get_size(ctx->ld); ml++) {
+    rack_add_letters(&ctx->unseen, ml, bag_counts[ml]);
+  }
+  const int leave_size = rack_get_total_letters(&ctx->truth);
+  const int bag = bag_get_letters(game_get_bag(ctx->game));
+  const InferBenchPrediction prior =
+      infbench_prior(&ctx->unseen, &ctx->truth, ctx->klv);
+  const InferBenchScore prior_score =
+      infbench_score(&prior, &prior, &ctx->truth, ctx->klv, ctx->ld);
+  calibration_print(&prior_score, pair_idx, game_idx, turn, leave_size, bag,
+                    exchange, "prior", 0, 0);
+  const bool enumerate = !timing_only && !exchange && leave_size <= 4;
+  if (enumerate) {
+    ctx->moves = move_list_create(1);
+    ctx->pat = malloc_or_die(sizeof(PATEvalContext));
+    rack_set_dist_size_and_reset(&ctx->leave, ld_get_size(ctx->ld));
+    board_copy_opening_penalties(game_get_board(ctx->game), ctx->word_penalties,
+                                 ctx->letter_penalties);
+    calibration_enumerate(ctx, 0, leave_size, 1);
+  }
+  Rack known;
+  rack_set_dist_size_and_reset(&known, ld_get_size(ctx->ld));
+  Rack observer = *player_get_rack(game_get_player(config_get_game(config), 1));
+  if (exchange) {
+    rack_reset(&ctx->played);
+  }
+  InferenceArgs args;
+  infer_args_fill(&args, 0, 0, NULL, config_get_game(config), 1, 0, 0,
+                  config_get_thread_control(config), false, true, 0,
+                  move_get_score(observed),
+                  exchange ? move_get_tiles_played(observed) : 0, &ctx->played,
+                  &known, &observer);
+  args.target_move = observed;
+  InferenceResults *results = inference_results_create(NULL);
+  InferenceCtx *inference_ctx = NULL;
+  ErrorStack *errors = error_stack_create();
+  for (int iteration = 0; iteration < (timing_only ? 2 : CAL_MODE_COUNT);
+       iteration++) {
+    const int mode =
+        timing_only ? ((iteration + turn) % 2 == 0 ? 7 : 17) : iteration;
+    args.equity_margin =
+        int_to_equity(calibration_margins[mode / CAL_TEMP_COUNT]);
+    args.temperature =
+        int_to_equity(calibration_temperatures[mode % CAL_TEMP_COUNT]);
+    InferBenchScore reference = {0};
+    // One production parity check per enumerated observation; all modes for
+    // larger leaves and exchanges, where census avoids rack-by-rack movegen.
+    if (!enumerate || mode == 7) {
+      thread_control_set_status(args.thread_control,
+                                THREAD_CONTROL_STATUS_STARTED);
+      Timer inference_timer;
+      ctimer_start(&inference_timer);
+      infer(&args, &inference_ctx, results, errors);
+      if (timing_only) {
+        printf("CALINFER_TIME pair=%d game=%d turn=%d leave=%d exchange=%d "
+               "margin=%d seconds=%.9f\n",
+               pair_idx, game_idx, turn, leave_size, exchange,
+               calibration_margins[mode / CAL_TEMP_COUNT],
+               ctimer_elapsed_seconds(&inference_timer));
+      }
+      assert(error_stack_is_empty(errors));
+      const InferBenchPrediction prediction =
+          infbench_posterior(results, &ctx->truth, ctx->klv);
+      reference =
+          infbench_score(&prediction, &prior, &ctx->truth, ctx->klv, ctx->ld);
+    }
+    for (int model = 0; model < (enumerate ? 2 : 1); model++) {
+      InferBenchScore score = reference;
+      if (enumerate) {
+        InferBenchPrediction prediction = ctx->predictions[model][mode];
+        if (prediction.mass > 0) {
+          prediction.klv /= prediction.mass;
+          prediction.true_probability /= prediction.mass;
+          for (int ml = 0; ml < ld_get_size(ctx->ld); ml++) {
+            prediction.counts[ml] /= prediction.mass;
+          }
+          prediction.mass = 1;
+        }
+        score =
+            infbench_score(&prediction, &prior, &ctx->truth, ctx->klv, ctx->ld);
+        if (model == 0 && mode == 7) {
+          for (int metric_idx = 0; metric_idx < INFBENCH_METRICS;
+               metric_idx++) {
+            assert(fabs(score.metrics[metric_idx] -
+                        reference.metrics[metric_idx]) < 1e-6);
+          }
+        }
+      }
+      calibration_print(&score, pair_idx, game_idx, turn, leave_size, bag,
+                        exchange, model == 0 ? "static" : "pat",
+                        calibration_margins[mode / CAL_TEMP_COUNT],
+                        calibration_temperatures[mode % CAL_TEMP_COUNT]);
+    }
+  }
+  printf("CALTIMING pair=%d game=%d turn=%d leave=%d racks=%d "
+         "static_seconds=%.6f pat_seconds=%.6f\n",
+         pair_idx, game_idx, turn, leave_size, ctx->racks, ctx->seconds[0],
+         ctx->seconds[1]);
+  inference_ctx_destroy(inference_ctx);
+  inference_results_destroy(results);
+  error_stack_destroy(errors);
+  if (ctx->moves != NULL) {
+    move_list_destroy(ctx->moves);
+  }
+  free(ctx->pat);
+  game_destroy(ctx->game);
+  free(ctx);
+}
+
 static void infbench_game(Config *config, int policy, int pair_idx,
                           int game_idx, int positions, unsigned int seed,
                           InferBenchScore scores[INFBENCH_MODES],
                           InferBenchScore exchanged_scores[INFBENCH_MODES],
-                          bool exchanges_only, bool use_census, bool one_pat) {
+                          bool exchanges_only, bool use_census, bool one_pat,
+                          bool calibrate, bool timing_only) {
   Game *game = config_get_game(config);
   game_reset(game);
   game_seed(game, seed);
   game_set_starting_player_index(game, game_idx);
   draw_starting_racks(game);
   MoveList *moves = move_list_create(1);
+  bool sampled[RACK_SIZE + 1][3] = {0};
   int decisions = 0;
   int observations = 0;
   int turn = 0;
@@ -822,15 +1073,26 @@ static void infbench_game(Config *config, int policy, int pair_idx,
       const int leave_size =
           rack_get_total_letters(player_get_rack(game_get_player(game, 0))) -
           move_get_tiles_played(&chosen);
+      const int bag_count = bag_get_letters(game_get_bag(game));
+      const int stage = bag_count <= 14 ? 0 : bag_count <= 42 ? 1 : 2;
       const bool sample =
-          one_pat ? (leave_size == 1 && type == GAME_EVENT_TILE_PLACEMENT_MOVE)
+          calibrate
+              ? (type == GAME_EVENT_EXCHANGE ||
+                 (!exchanges_only && type == GAME_EVENT_TILE_PLACEMENT_MOVE &&
+                  leave_size > 0 && !sampled[leave_size][stage]))
+          : one_pat
+              ? (leave_size == 1 && type == GAME_EVENT_TILE_PLACEMENT_MOVE)
           : exchanges_only
               ? type == GAME_EVENT_EXCHANGE
               : (decisions >= 4 + 6 * observations && leave_size > 0 &&
                  (type == GAME_EVENT_TILE_PLACEMENT_MOVE ||
                   type == GAME_EVENT_EXCHANGE));
       if (sample && bag_get_letters(game_get_bag(game)) > 0) {
-        if (one_pat) {
+        if (calibrate) {
+          calibration_observe(config, &chosen, pair_idx, game_idx, turn,
+                              timing_only);
+          sampled[leave_size][stage] = true;
+        } else if (one_pat) {
           infbench_pat64_observe(config, &chosen, pair_idx, game_idx, turn);
         } else {
           infbench_observe(config, &chosen, policy, pair_idx, game_idx, turn,
@@ -935,6 +1197,8 @@ void infer_bench_run_spec(const char *spec) {
   unsigned int seed = INFBENCH_DEFAULT_SEED;
   bool exchanges_only = false;
   bool one_pat = false;
+  bool calibrate = false;
+  bool timing_only = false;
   bool use_census = true;
   if (spec != NULL) {
     StringSplitter *fields = split_string(spec, ':', true);
@@ -951,19 +1215,26 @@ void infer_bench_run_spec(const char *spec) {
     const uint64_t parsed_seed =
         string_to_uint64(string_splitter_get_item(fields, 2), errors);
     if (num_fields >= 4) {
+      timing_only =
+          strings_equal(string_splitter_get_item(fields, 3), "margintiming");
+      calibrate =
+          timing_only ||
+          (strings_equal(string_splitter_get_item(fields, 3), "calibrate") ||
+           strings_equal(string_splitter_get_item(fields, 3), "calexchanges"));
       one_pat = strings_equal(string_splitter_get_item(fields, 3), "onepat");
       exchanges_only =
-          strings_equal(string_splitter_get_item(fields, 3), "exchanges");
+          (strings_equal(string_splitter_get_item(fields, 3), "exchanges") ||
+           strings_equal(string_splitter_get_item(fields, 3), "calexchanges"));
     }
     if (num_fields == 5) {
       use_census =
           !strings_equal(string_splitter_get_item(fields, 4), "movegen");
     }
-    const bool invalid = (num_fields >= 4 && !exchanges_only && !one_pat) ||
-                         (num_fields == 5 && use_census) ||
-                         !error_stack_is_empty(errors) || pairs < 1 ||
-                         pairs > 10000 || positions < 1 || positions > 20 ||
-                         parsed_seed > UINT_MAX;
+    const bool invalid =
+        (num_fields >= 4 && !exchanges_only && !one_pat && !calibrate) ||
+        (num_fields == 5 && (use_census || one_pat || calibrate)) ||
+        !error_stack_is_empty(errors) || pairs < 1 || pairs > 10000 ||
+        positions < 1 || positions > 20 || parsed_seed > UINT_MAX;
     error_stack_destroy(errors);
     string_splitter_destroy(fields);
     if (invalid) {
@@ -979,11 +1250,13 @@ void infer_bench_run_spec(const char *spec) {
          "sampling=%s census=%d\n",
          pairs, positions, seed, INFBENCH_THREADS, INFBENCH_SIM_ITERS,
          INFBENCH_PRIOR_MIX,
-         one_pat          ? "onepat"
+         calibrate        ? "calibrate"
+         : one_pat        ? "onepat"
          : exchanges_only ? "exchanges"
                           : "scheduled",
          use_census);
-  for (int policy = one_pat ? 2 : 0; policy < INFBENCH_POLICIES; policy++) {
+  for (int policy = (one_pat || calibrate) ? 2 : 0; policy < INFBENCH_POLICIES;
+       policy++) {
     Config *config = infbench_config(policy, seed);
     InferBenchScore totals[INFBENCH_MODES] = {0};
     InferBenchScore exchanged_totals[INFBENCH_MODES] = {0};
@@ -996,7 +1269,7 @@ void infer_bench_run_spec(const char *spec) {
         infbench_game(config, policy, pair_idx, game_idx, positions,
                       seed + (unsigned int)pair_idx, pair_scores,
                       exchanged_pair_scores, exchanges_only, use_census,
-                      one_pat);
+                      one_pat, calibrate, timing_only);
       }
       infbench_accumulate_pair(pair_scores, totals, deltas);
       infbench_accumulate_pair(exchanged_pair_scores, exchanged_totals,
