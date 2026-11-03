@@ -22,8 +22,8 @@
 
 MAGPIE is a crossword game playing and analysis program. It generates and
 simulates moves, infers what an opponent kept, solves pre-endgames and
-endgames, annotates and analyzes whole games, and plays itself to compare
-strategies and to train the values it plays by.
+endgames, annotates and analyzes whole games, and plays itself to compare and tune
+strategies.
 
 MAGPIE started as a C rewrite of [Macondo](https://github.com/domino14/macondo)
 but has since incorporated a variety of new features, algorithms, and data
@@ -38,7 +38,6 @@ structures. See [Acknowledgements](#acknowledgements).
 - [Self-play and training](#self-play-and-training)
 - [Lookup tables](#lookup-tables)
 - [Data](#data)
-- [PAT](#pat)
 - [Scripting and embedding](#scripting-and-embedding)
 - [Contributing](#contributing)
 - [Acknowledgements](#acknowledgements)
@@ -47,10 +46,8 @@ structures. See [Acknowledgements](#acknowledgements).
 
 ## Features
 
-- **Move generation**: lists every play a rack can make, ranked by its score
-  plus the value of the tiles it keeps.
-- **Simulation**: plays the best candidates forward over many possible draws
-  to find the one most likely to win.
+- **Move generation**: lists every play a rack can make for a given position.
+- **Simulation**: plays moves forward over many possible draws.
 - **Inference**: works out what the opponent probably kept, from the play
   they just made.
 - **Pre-endgame solving**: with 1 to 4 tiles left in the bag, finds the play
@@ -61,14 +58,12 @@ structures. See [Acknowledgements](#acknowledgements).
   or GCG files, steps through them, records plays and notes, and reviews every
   turn of a game.
 - **Autoplay**: has MAGPIE play itself, to measure which of two strategies,
-  leave values or lexica is stronger, including under a clock.
+  leave values or lexica is stronger.
 - **Leave generation**: works out how much each set of kept tiles is worth,
   for any lexicon.
-- **Positional evaluation (PAT)**: optionally accounts for what a play opens
-  on the board, with weights MAGPIE can train.
 - **A C library** for building MAGPIE into other programs.
 - Boards of 15x15 and 21x21, and lexica in English, French, German, Catalan,
-  Dutch and Polish.
+  Dutch, Polish, and more.
 
 ## Installing MAGPIE
 
@@ -106,7 +101,7 @@ it finds the data there wherever you start it from afterwards. Uninstall it from
 1. From the [Releases](https://github.com/jvc56/MAGPIE/releases) page, download
    `magpie-<version>-windows-x64.exe` (most PCs) or
    `magpie-<version>-windows-arm64.exe` (Windows on ARM, such as Snapdragon
-   laptops), and put it in a folder of its own, say `Documents\MAGPIE`.
+   laptops), and put it in its own folder.
 2. Double-click the `.exe`. The release is not code-signed, so the first time
    Windows shows **Windows protected your PC**: click **More info**, then
    **Run anyway**. (If your antivirus flags the file, please
@@ -120,9 +115,10 @@ run `.\magpie-<version>-windows-x64.exe`, with commands as arguments if you
 like.
 
 <details>
-<summary>Checking the download</summary>
+<summary>Checking the download (optional)</summary>
 
-Every file is published with a `.sha256` file beside it. In PowerShell:
+Checking the download is optional. Every file is published with a `.sha256`
+file beside it. In PowerShell:
 
 ```
 Get-FileHash .\magpie-<version>-windows-x64.exe -Algorithm SHA256
@@ -136,8 +132,8 @@ The hash printed must match the one in the `.sha256` file.
 
 macOS 11 or later, on Apple silicon or Intel, runs MAGPIE as one universal
 executable, either installed or with nothing else to install. Either way,
-MAGPIE downloads its data into `~/.magpie/data` and finds it there whichever
-folder it starts in.
+MAGPIE downloads its data into `~/.magpie/data` and finds it there regardless
+of which folder it starts in.
 
 **To install it**, download `magpie-<version>-macos.pkg` from the
 [Releases](https://github.com/jvc56/MAGPIE/releases) page and open it. The
@@ -164,9 +160,10 @@ run, MAGPIE offers to download its data into `~/.magpie/data`.
    `~/.magpie/data`: answer `y`.
 
 <details>
-<summary>Checking the download, and uninstalling</summary>
+<summary>Checking the download (optional), and uninstalling</summary>
 
-Every file is published with a `.sha256` file beside it. In Terminal:
+Checking the download is optional. Every file is published with a `.sha256`
+file beside it. In Terminal:
 
 ```
 shasum -a 256 magpie-<version>-macos-universal.zip
@@ -197,7 +194,10 @@ Fedora 36 and newer), runs MAGPIE as one executable without building it.
    repository instead.
 
 <details>
-<summary>Checking the download</summary>
+<summary>Checking the download (optional)</summary>
+
+Checking the download is optional. Every file is published with a `.sha256`
+file beside it:
 
 ```
 sha256sum -c magpie-<version>-linux-x64.tar.gz.sha256
@@ -211,7 +211,7 @@ MAGPIE builds natively on Linux (x86_64 or arm64) and macOS (Apple silicon or
 Intel). You need a C compiler (GCC or Clang), `make`, `bash`, `curl`, `tar` and `git`.
 For the fastest build it also needs Clang 15 or newer and `llvm-profdata`,
 for profile-guided optimization; without them it builds a plain optimized
-MAGPIE and says so.
+MAGPIE.
 
 Clone the repository and run the setup script, which switches the clone to
 `main`, pulls, downloads the data, builds the wordmaps and builds
@@ -244,14 +244,15 @@ downloads or updates it at any time:
 magpie> data fetch
 ```
 
-Each part is checked against a SHA-256 pinned in MAGPIE. The first time you use
+The first time you use
 a lexicon, MAGPIE builds that lexicon's wordmap, which takes a few seconds and
 makes move generation faster afterwards. See [Lookup tables](#lookup-tables).
 
 ## Quick start
 
-Start MAGPIE with no arguments (`./bin/magpie` in a source build, `magpie` once
-installed) and it waits for commands at a `magpie>` prompt. Then:
+Start MAGPIE with no arguments (`./bin/magpie` in a source build or `magpie` if it
+was installed as an executable) and it waits for commands at a `magpie>` prompt. Here
+are some example commands:
 
 ```
 magpie> set -lex CSW24
@@ -268,14 +269,12 @@ of them once the simulation finishes, and lists every command by task.
 ## Analyzing or Annotating a Game
 
 This section explains how MAGPIE's commands work, then walks through the
-commands for setting up, studying and recording a game, in the order you would
-usually use them.
+commands for setting up, studying and recording a game.
 
 ### Commands, settings and help
 
-MAGPIE reads commands at the `magpie>` prompt. A command does something, and
-can take arguments. Settings, which start with `-`, change how commands work:
-any number of them can follow any command, and they stay in force until
+MAGPIE reads commands at the `magpie>` prompt. Settings, which start with `-`, change how commands work:
+any number of them can follow any command, and they persist between commands until
 changed. `set` changes settings without doing anything else.
 
 ```
@@ -293,7 +292,7 @@ have shortcuts, shown in parentheses in the tables below: `g` for `generate`,
 `s` for `shgame`.
 
 `help` lists every command by task. `help <command>` gives a command's usage
-and the settings it uses, and `help <setting>` what a setting does and which
+and the settings it uses, and `help <setting>` shows what a setting does and which
 commands use it. `help options` lists every setting, and `help setup`,
 `help tables`, `help display` and `help session` the ones shared across
 commands.
@@ -304,9 +303,10 @@ magpie> help simulate
 magpie> help plies
 ```
 
-While a command runs, the prompt still accepts `status` (`sta`), which prints
-its progress, `stop` (`sto`), which ends it with the results so far, and
-`shgame` (`s`):
+In the default asynchronous mode, while a command runs, the prompt still
+accepts `status` (`sta`), which prints its progress, `stop` (`sto`), which
+ends it with the results so far, and `shgame` (`s`). In
+[sync mode](#sync-mode), `status` and `stop` are ignored.
 
 ```
 magpie> gs
@@ -325,20 +325,19 @@ without `-savesettings true`.
 
 ### Setting up a game
 
-| Command | What it does |
-|---|---|
-| `set -lex <lexicon>` | Sets the lexicon, and with it the default letter distribution. |
-| `newgame` (`new`) `<name>` | Starts a new game, saved as `<name>.gcg`. |
-| `load` (`lo`) `<source>` | Loads a game from cross-tables, woogles.io, a GCG URL or a local GCG file. |
-| `cgp` (`cg`) `<cgp>` | Loads a position written as a CGP. |
-| `p1`, `p2` `<name>` | Names the first and second players. |
-| `switchnames` (`sw`) | Swaps the players' names. |
-| `rack` (`r`) `<tiles>` | Sets the rack of the player on turn; `?` is a blank. |
-| `rrack` (`rr`) | Gives the player on turn a random rack. |
+| Command                    | What it does                                                               |
+| -------------------------- | -------------------------------------------------------------------------- |
+| `set -lex <lexicon>`       | Sets the lexicon, and with it the default letter distribution.             |
+| `newgame` (`new`) `<name>` | Starts a new game, saved as `<name>.gcg`.                                  |
+| `load` (`lo`) `<source>`   | Loads a game from cross-tables, woogles.io, a GCG URL or a local GCG file. |
+| `cgp` (`cg`) `<cgp>`       | Loads a position written as a CGP.                                         |
+| `p1`, `p2` `<name>`        | Names the first and second players.                                        |
+| `switchnames` (`sw`)       | Swaps the players' names.                                                  |
+| `rack` (`r`) `<tiles>`     | Sets the rack of the player on turn; `?` or `.` is a blank.                |
+| `rrack` (`rr`)             | Gives the player on turn a random rack.                                    |
 
-To annotate a game as you go, start a new one. A name is needed, because
-MAGPIE saves the game after every change (see `help fgrequired` and
-`help autosavegcg`):
+To annotate a game as you go, start a new one. By default a name is needed,
+because MAGPIE saves the game after every change (see `help autosavegcg`):
 
 ```
 magpie> set -lex CSW24
@@ -347,6 +346,8 @@ magpie> p1 Adam Logan
 magpie> p2 Nigel Richards
 magpie> r EEIJNP?
 ```
+
+To let `newgame` start a game without a name, set `-fgrequired false`.
 
 To study a game already played, load it. The source can be a cross-tables game
 ID or URL, a woogles.io game ID or URL, the URL of a GCG file, or a local GCG
@@ -367,12 +368,12 @@ magpie> cgp 15/3Q7U3/3U2TAURINE2/1CHANSONS2W3/2AI6JO3/DIRL1PO3IN3/E1D2EF3V4/F1I2
 
 ### Navigating
 
-| Command | What it does |
-|---|---|
-| `goto` (`go`) `<turn>\|start\|end` | Goes to the position after the given turn. |
-| `next` (`n`) | Goes one move forward, skipping challenge bonus events. |
-| `previous` (`p`) | Goes one move back. |
-| `shgame` (`s`) | Shows the board, racks, scores, unseen tiles and the last event. |
+| Command                            | What it does                                                     |
+| ---------------------------------- | ---------------------------------------------------------------- |
+| `goto` (`go`) `<turn>\|start\|end` | Goes to the position after the given turn.                       |
+| `next` (`n`)                       | Goes one move forward, skipping challenge bonus events.          |
+| `previous` (`p`)                   | Goes one move back.                                              |
+| `shgame` (`s`)                     | Shows the board, racks, scores, unseen tiles and the last event. |
 
 ```
 magpie> goto start
@@ -387,12 +388,12 @@ that point.
 
 ### Generating moves
 
-| Command | What it does |
-|---|---|
-| `generate` (`g`) | Generates the moves for the rack on turn, ranked by static equity. |
-| `rg` `<rack>` | Sets the rack, then generates. |
-| `addmoves` (`a`) `<move>, <move>, ...` | Adds moves of your own to the list. |
-| `shmoves` (`shm`) | Shows the move list, or the sim results when there are some. |
+| Command                                | What it does                                                       |
+| -------------------------------------- | ------------------------------------------------------------------ |
+| `generate` (`g`)                       | Generates the moves for the rack on turn, ranked by static equity. |
+| `rg` `<rack>`                          | Sets the rack, then generates.                                     |
+| `addmoves` (`a`) `<move>, <move>, ...` | Adds moves of your own to the list.                                |
+| `shmoves` (`shm`)                      | Shows the move list, or the sim results when there are some.       |
 
 ```
 magpie> r EEIJNP?
@@ -405,18 +406,17 @@ magpie> shm JEEP
 
 `shmoves` takes a count, a coordinate, a word prefix, a coordinate and a
 prefix together, or `-` for exchanges and passes. `-numplays` sets how many
-moves generation keeps. Static equity is the score plus the value of the leave,
-and, when PAT weights are loaded, a positional term (see [PAT](#pat)).
+moves generation keeps.
 
 ### Simulating
 
-| Command | What it does |
-|---|---|
-| `simulate` (`sim`) `[<opponent rack>]` | Simulates the moves in the list. |
-| `gsimulate` (`gs`) | Generates, then simulates. |
-| `rgsimulate` (`rgs`) `<rack>` | Sets the rack, generates, then simulates. |
-| `snoprune` (`sn`) `<moves>` | Simulates without ever pruning the given moves. |
-| `heatmap` (`hea`) `<play> [<ply> <type>]` | Shows where a simulated play's rollouts placed tiles. |
+| Command                                          | What it does                                          |
+| ------------------------------------------------ | ----------------------------------------------------- |
+| `simulate` (`sim`) `[<opponent rack>]`           | Simulates the moves in the list.                      |
+| `gsimulate` (`gs`)                               | Generates, then simulates.                            |
+| `rgsimulate` (`rgs`) `<rack>`                    | Sets the rack, generates, then simulates.             |
+| `snoprune` (`sn`) `<moves>`                      | Simulates without ever pruning the given moves.       |
+| `heatmap` (`hea`) `<play> [<ply>] [all\|bingos]` | Shows where a simulated play's rollouts placed tiles. |
 
 ```
 magpie> gs
@@ -433,16 +433,29 @@ known rack from the game history unless given one; `-` forces a random one.
 With `-sinfer true`, the default, it first infers what the opponent kept and
 draws their racks from that.
 
-`status` and `stop` check on and end a running simulation. To record heat
-maps, set `-useheatmap true` before simulating; `heatmap 1` then shows the
-first play's.
+In asynchronous mode, `status` and `stop` check on and end a running
+simulation.
+
+To record heat maps, set `-useheatmap true` before simulating. `heatmap` then
+takes the play's rank in the sim results, optionally which rollout ply to show
+(1 by default), and optionally the type: `all` (the default) counts every tile
+placed on that ply, `bingos` only the tiles of bingos. The type can be shortened
+to any prefix, such as `b`.
+
+```
+magpie> heatmap 1
+magpie> heatmap 1 3
+magpie> heatmap 1 bingos
+magpie> heatmap 1 3 all
+magpie> heatmap 2 4 b
+```
 
 ### Inferring the opponent's rack
 
-| Command | What it does |
-|---|---|
-| `infer` (`in`) | Infers what the opponent kept after their previous play. |
-| `shinference` (`shi`) | Shows the last inference again. |
+| Command               | What it does                                             |
+| --------------------- | -------------------------------------------------------- |
+| `infer` (`in`)        | Infers what the opponent kept after their previous play. |
+| `shinference` (`shi`) | Shows the last inference again.                          |
 
 ```
 magpie> load 54938
@@ -478,7 +491,7 @@ Depth  Rank  Move         W  T   L   Win%  Spread  Time  Outcomes
 6-ply     3  A7 LADE     72  0   0  100.0   +29.2  0.8s  always wins
 ```
 
-By default the solve is **complete** and counts only results: a win by 1 is as
+By default the `peg` command only cares about wins, ties, or losses: a win by 1 is as
 good as a win by 100. Every candidate is solved, each endgame searched 3 plies
 deep (`-pegplies`), and a candidate is cut once its losses and draws show it
 cannot reach the best one. A line still going at that depth is finished by a
@@ -488,11 +501,12 @@ Cut candidates show the most they could have reached (`<=`), and spreads are
 not shown. The opponent is **pessimistic**: wherever it replies, it plays as if
 it could see your rack and the bag order. Tiles the opponent is known to hold,
 on its rack in the position or returned there after a challenged-off phony, are
-kept on its rack in every scenario.
+kept on its rack in every scenario. This means that by default, the `peg` will
+only look for guaranteed wins.
 
 The first argument chooses the candidates, and an optional second one lists
 moves to add to them and keep through every stage. Moves are comma-separated
-UCGI with no spaces -- coordinate and tiles joined by a period, pass as
+with no spaces -- coordinate and tiles joined by a period, pass as
 `pass`:
 
 ```
@@ -529,21 +543,13 @@ The settings that matter most (`help peg` describes them all):
 - `-threads <n>` is a pure speedup at the same answer (only which
   candidates are cut, and the bounds they show, can vary).
 
-At the default 3 plies, a 1-in-bag solve took a median 3.5 seconds on 10
-threads in ten positions, at most 22, though a position where every play wins
-every draw, so that nothing can be cut, can take far longer; `-pegplies 2` is a
-few times faster. To the end of the game (`-pegplies end`), it often takes
-several minutes, more when the opponent holds a blank,
-and at 2 to 4 in the bag well over twenty minutes; a time limit gives a quick,
-approximate answer instead.
-
 ### Endgames
 
-| Command | What it does |
-|---|---|
-| `endgame` (`en`) | Solves the endgame on turn: the bag is empty and both racks are known. |
-| `endgame <position> <tiles>`, `endgame pass` | Also evaluates the given move, even outside the top results. |
-| `shendgame` (`she`) | Shows the last endgame result again. |
+| Command                                      | What it does                                                           |
+| -------------------------------------------- | ---------------------------------------------------------------------- |
+| `endgame` (`en`)                             | Solves the endgame on turn: the bag is empty and both racks are known. |
+| `endgame <position> <tiles>`, `endgame pass` | Also evaluates the given move, even outside the top results.           |
+| `shendgame` (`she`)                          | Shows the last endgame result again.                                   |
 
 ```
 magpie> load 54938
@@ -564,16 +570,16 @@ default).
 
 ### Recording plays, notes and challenges
 
-| Command | What it does |
-|---|---|
-| `commit` (`c`) | Commits a move: by its number in the list, by position and tiles, `ex <tiles>`, or `pass`. |
-| `tcommit` (`t`) `[<rack>]` | Commits the best move: by win% when there are sim results, otherwise, or when given a rack, by static equity. |
-| `note` (`no`) `<text>` | Notes the most recently added move. |
-| `cnote` (`cn`) `<move> <text>` | Commits a move and notes it in one command. |
-| `challenge` (`ch`) | Challenges the previous play. |
-| `unchallenge` (`un`) | Removes the challenge bonus from the previous play. |
-| `overtimepenalty` (`ov`) `<player> <points>` | Adds an overtime penalty, once the game is over. |
-| `export` (`e`) `[<file>]` | Saves the game as a GCG file. |
+| Command                                      | What it does                                                                                                  |
+| -------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `commit` (`c`)                               | Commits a move: by its number in the list, by position and tiles, `ex <tiles>`, or `pass`.                    |
+| `tcommit` (`t`) `[<rack>]`                   | Commits the best move: by win% when there are sim results, otherwise, or when given a rack, by static equity. |
+| `note` (`no`) `<text>`                       | Adds a note to the most recently added move.                                                                  |
+| `cnote` (`cn`) `<move> <text>`               | Commits a move and adds a note to it in one command.                                                          |
+| `challenge` (`ch`)                           | Challenges the previous play.                                                                                 |
+| `unchallenge` (`un`)                         | Removes the challenge bonus from the previous play.                                                           |
+| `overtimepenalty` (`ov`) `<player> <points>` | Adds an overtime penalty, once the game is over.                                                              |
+| `export` (`e`) `[<file>]`                    | Saves the game as a GCG file.                                                                                 |
 
 ```
 magpie> c 1
@@ -586,9 +592,9 @@ magpie> unchal
 magpie> e logan_vs_richards_annotated
 ```
 
-Lowercase letters are blanks. A note can name moves from the current move list
-by number: `$1` is the first. `challenge` removes the previous play if it
-formed a phony and otherwise adds the challenge bonus; `unchallenge` takes the
+Lowercase letters are blanks. A note can use interpolation to name moves from the current move list
+by number: `$1` is the first, `$2` is the second, and so on. `challenge` removes the previous play if it
+formed a phony and otherwise adds the challenge bonus. The `challenge` command preserves the subsequent game history and updates the scores accordingly. The `unchallenge` command takes the
 bonus off again without affecting later moves. With `-autosavegcg true`, the
 default, the game is saved after every change, so `export` is only needed to
 save it under another name.
@@ -612,32 +618,10 @@ magpie> analyze my_game.gcg Alice     # only Alice's turns
 `-aegspread true` solves endgame turns with a full window, so that spread, not
 just the result, is exact.
 
-### Worked example
-
-Loading a cross-tables game, studying it, and saving a copy with a note
-added:
-
-```
-magpie> set -threads 8
-magpie> load 54938            # NWL23, which the GCG names
-magpie> goto 3
-magpie> infer                 # what did Seth keep after his play on turn 3?
-magpie> goto 21
-magpie> peg -pegtlim 10       # Emmett to play, two tiles in the bag
-magpie> goto 22
-magpie> endgame -etopk 3      # Seth to play, the bag empty
-magpie> n                     # step over Seth's play, B6 QI
-magpie> note the endgame solver prefers 15D KYE
-magpie> e 54938_annotated
-```
-
-`note` writes the note on the move just before the current position, here
-Seth's B6 QI, replacing any note it had.
-
 ## Self-play and training
 
 These commands have MAGPIE play itself, to measure which of two strategies,
-leave values or lexica is stronger, and to train the values it plays by. They
+leave values or lexica is stronger, and to train new values it can use later. They
 can run for hours or days.
 
 ### Autoplay
@@ -683,7 +667,7 @@ Games with a clocked player are **not reproducible from the seed**. How much
 search fits in the budget varies with machine load, thread count, and build, so
 the same `-seed` will not replay the same moves, and the overtime penalty itself
 varies between runs. This is inherent to timed play rather than a defect, but it
-is worth knowing because the rest of autoplay *is* seed-deterministic. The
+is worth knowing because the rest of autoplay _is_ seed-deterministic. The
 intended output is the aggregate: win percentage, spread, and penalty points
 over enough games. Individual games are not meant to be replayed.
 
@@ -767,12 +751,9 @@ magpie> autoplay games 10000 -l1 CSW50 -l2 CSW60 -leaves CSW21 -gp true -hr true
 The leave values that static equity uses can be generated for any lexicon in
 two ways, and blended:
 
-- `leavegen` plays generations of self-play games and values each leave from
-  them:
-  `leavegen 100,200,500,1000,1000,1000 100000000`. Depending on your hardware,
-  this can take days or weeks.
+- `leavegen` plays generations of self-play games and derives leave values from each of them. Depending on your hardware, this can take days or weeks.
 - `census` values every leave exactly on each of many boards against the
-  leaves of the generation before: `census 3x256,2048`.
+  leaves of the generation before.
 - `leaveblend` mixes two leave tables leave by leave. The census is about as
   strong as `leavegen` alone; the blend of the two is stronger than either.
 
@@ -783,52 +764,14 @@ Evaluate the result with autoplay and game pairs. `help leavegen`,
 
 `contribute` lends this machine to [birdtest](https://github.com/jvc56/birdtest)
 by running its server's tasks: it claims tasks, runs them, and submits the
-results until the server has no more work.
-With no settings it contributes anonymously to https://birdtest.org on all but
-one core. `help contribute` describes the settings file.
-
-## Lookup tables
-
-Word maps (WMP), rack info tables (RIT) and word info tables (WIT) only make
-move generation faster; none of them changes which move is chosen. PAT changes
-static equity, so it changes moves.
-
-The command line program and the library's `magpie_create()` set `-wmp`,
-`-wit` and `-rit` to `auto`: each table is used when this machine has the disk
-to store it and the memory to hold it, beside the search table a solve
-allocates, and is otherwise left out, with a line saying why. They share the
-room by value per byte: wordmaps first (3-4x faster on their own), then word
-info tables (about 9% on a simulation), then rack info tables (about 17%, but
-1.9 GB for English). A missing table is built on first use for data from
-`data fetch`, with a line saying what is being built, the disk it will take and
-the memory its build peaks at; a rack info table is built from its lexicon's
-wordmap, so a missing wordmap counts against its room too. For other data, the
-line names the `convert` command that builds a missing table. The tables built
-this way are listed in `auto_tables.txt` in the data directory, and are the
-only ones MAGPIE ever deletes: when a build needs the room, or when together
-they pass 8 GB, the ones used least recently go (and are built again when a
-lexicon needs them). A rack info table records the lexicon and leaves it was
-built from; one built from others is left out under `auto` and is an error
-under `true`. `true` requires a table, and `false` never uses one. The settings
-file records `auto` as `auto`, not what one machine decided.
-
-| | WMP (`-wmp`) | RIT (`-rit`) | WIT (`-wit`) | PAT (`-pat`) |
-|---|---|---|---|---|
-| Command line program | auto | auto | auto | Off |
-| Library, `magpie_create()` | auto | auto | auto | Off |
-| Library, `magpie_create_with_options()` | auto, or off | auto, or off | auto, or off | Off |
-| Browser build | Off until the page installs a word map | Off | Off | Off |
-| `contribute` tasks | Each task chooses, and a table is skipped when the machine has no room for it | Each task chooses | Each task chooses | Never loaded |
-
-A rack info table caches the leave values of one set of leaves, so it is named
-for its lexicon and leaves: `<lexicon>.<leaves>.rit`, or `<lexicon>.rit` for
-the lexicon's own leaves. [docs/data-formats.md](docs/data-formats.md) covers
-building them by hand.
+results until the server has no more work. Learn more at https://birdtest.org.
 
 ## Data
 
-MAGPIE's data lives in a `data` directory, whose four subdirectories `data
-fetch` and `download_data.sh` fill; `peg` adds a fifth, `pegcharts`. All lexical, board layout, and
+MAGPIE gets its data from the
+[MAGPIE-DATA](https://github.com/jvc56/MAGPIE-DATA) repository. It lives in a
+`data` directory, whose four subdirectories `data fetch` and
+`download_data.sh` fill from MAGPIE-DATA; `peg` adds a fifth, `pegcharts`. All lexical, board layout, and
 strategy data must be saved in their respective directories for MAGPIE to find
 them. When specifying input data in MAGPIE, always use the basename without
 the file extension. `-path` sets the data directories, in order of precedence.
@@ -836,9 +779,9 @@ the file extension. `-path` sets the data directories, in order of precedence.
 ### layouts
 
 This directory contains the layout files which specify the start square and
-bonus squares for the board: `standard15` and `standard21`. The start square is
-denoted by the `row, column` integers on the first row, followed by the board
-layout bonus square. Only the following bonus squares are valid:
+bonus squares for the board. By default, it contains `standard15` and `standard21`. The start square is
+denoted by the 0-indexed `row, column` integers on the first row, followed by the board
+layout bonus squares. Only the following bonus squares are valid:
 
 - ` ` (no bonus)
 - `'` (double letter)
@@ -919,65 +862,10 @@ The recorder splits games into two independent samples, and `convert winpct`
 chooses how much to smooth by predicting each sample from the other; it prints
 that comparison.
 
-This directory also contains PAT weights, `<lexicon>.pat` for the 15x15 board
-and `<lexicon>_super21.pat` for the 21x21 board (see [PAT](#pat)).
-
 ### pegcharts
 
 `peg` writes each solve's untruncated chart here, as
 `outcomes_<timestamp>.txt`.
-
-## PAT
-
-PAT (positional adjustment term) adds a learned term to static equity for what
-a move leaves on the board: premium squares, hooks and word windows it opens to
-the opponent, weighted by the tiles still unseen, plus an opening-length table
-and a utility correction that reweights points by the current margin and stage
-(read off the distribution's `winpct_<letter_distribution>` table). It applies
-while tiles remain in the bag.
-
-PAT is off unless weights are loaded:
-
-```
-magpie> set -lex CSW24 -pat CSW24
-```
-
-`-pat` sets both players and `-pat1`/`-pat2` set one; `none` unloads. The other
-PAT settings also come in a form for both players and per-player forms ending
-in 1 or 2:
-
-| Setting | Default | Meaning |
-|---|---|---|
-| `patcand` | `true` | Use PAT in the player's own move generation: static play and the candidates a simulation starts from. |
-| `patclasses` | `all` | Which PAT classes that move generation uses: a comma-separated list from `tws`, `dws`, `tls`, `dls`, `qws`, `qls` and `windows`. |
-| `patrollout` | `true` | Use PAT in the rollouts of the player's simulations (both sides' plies, each with its own weights). |
-| `patrolloutclasses` | `tws,windows` (`qws,tws,windows` on 21x21) | Which PAT classes the rollouts use; `all` uses every class. |
-
-Rollouts default to a cheaper subset of classes, because they generate many
-more positions than candidate selection does. The defaults keep most of full
-PAT's value at a fraction of its cost. These numbers are from CSW24 static
-self-play with the shipped weights; "vs full PAT" is full PAT's spread per game
-pair against the subset, head to head:
-
-| Board | Classes | Time vs no PAT | vs full PAT |
-|---|---|---|---|
-| 15x15 | `tws` | 1.35x | +2.03 ± 0.28 |
-| 15x15 | **`tws,windows`** (default) | 1.45x | +1.25 ± 0.27 |
-| 15x15 | `all` | 2.66x | — |
-| 21x21 | `tws` | 1.24x | +6.04 ± 0.70 |
-| 21x21 | `tws,windows` | 1.37x | +2.18 ± 0.67 |
-| 21x21 | **`qws,tws,windows`** (default) | 1.35x | +1.64 ± 0.67 |
-| 21x21 | `all` | 1.94x | — |
-
-For example, full PAT everywhere, rollouts included:
-
-```
-magpie> set -lex CSW24 -pat CSW24 -patrolloutclasses all
-```
-
-`patgen` trains the weights by self-play, refitting them by ridge regression
-each generation. `test/pat_build.sh` and `test/pat_build_super.sh` run the whole
-process that trains and validates a lexicon's weights.
 
 ## Scripting and embedding
 
@@ -997,7 +885,8 @@ prompt instead.
 
 At the interactive prompt, MAGPIE runs in asynchronous mode by default, which
 accepts `status` and `stop` while a command runs. With `-mode sync`, the
-prompt instead waits for each command to finish before reading the next:
+prompt instead waits for each command to finish before reading the next, and
+ignores `status` and `stop`:
 
 ```
 ./bin/magpie set -mode sync
@@ -1038,7 +927,7 @@ interactive REPL.
 
 ## Contributing
 
-Issues and pull requests are welcome. [AGENTS.md](AGENTS.md) describes the
+Issues and pull requests are welcome! [AGENTS.md](AGENTS.md) describes the
 code's conventions and every check CI runs (formatting, cppcheck, clang-tidy,
 portability, the Windows cross-compile and the unit tests), with the commands
 to run them locally. Build the tests with `make magpie_test` and run a suite
@@ -1057,8 +946,7 @@ data structures, and the leave census.
 
 Thanks to:
 
-- everyone who has [contributed](https://github.com/jvc56/MAGPIE/graphs/contributors)
-  code, positions and testing;
+- everyone who has [contributed](https://github.com/jvc56/MAGPIE/graphs/contributors);
 - Marc Jourdan, who kindly provided the code for the best-arm identification
   paper below;
 - [cross-tables](https://www.cross-tables.com) and
@@ -1070,32 +958,32 @@ Thanks to:
 
 MAGPIE implements or builds on the following work:
 
-- Marc Jourdan, Rémy Degenne and Emilie Kaufmann. *Dealing with Unknown
-  Variances in Best-Arm Identification.* ALT 2023.
+- Marc Jourdan, Rémy Degenne and Emilie Kaufmann. _Dealing with Unknown
+  Variances in Best-Arm Identification._ ALT 2023.
   [arXiv:2210.00974](https://arxiv.org/abs/2210.00974). The simulation's
   best-arm identification.
-- Wei You, Chao Qin, Zihao Wang and Shuoguang Yang. *Information-Directed
-  Selection for Top-Two Algorithms.* COLT 2023.
+- Wei You, Chao Qin, Zihao Wang and Shuoguang Yang. _Information-Directed
+  Selection for Top-Two Algorithms._ COLT 2023.
   [arXiv:2205.12086](https://arxiv.org/abs/2205.12086), with code in
   [topk_colt23](https://github.com/zihaophys/topk_colt23). The simulation's
   top-two sampling rules.
-- Steven A. Gordon. *A Faster Scrabble Move Generation Algorithm.* Software:
+- Steven A. Gordon. _A Faster Scrabble Move Generation Algorithm._ Software:
   Practice and Experience 24(2), 1994. The GADDAG, which move generation
   searches.
-- Jean-Christophe Weill. *The ABDADA Distributed Minimax Search Algorithm.*
+- Jean-Christophe Weill. _The ABDADA Distributed Minimax Search Algorithm._
   ICCA Journal 19(1), 1996. The parallel endgame search.
-- Albert L. Zobrist. *A New Hashing Method with Application for Game Playing.*
+- Albert L. Zobrist. _A New Hashing Method with Application for Game Playing._
   Technical Report 88, University of Wisconsin, 1970. The endgame and
   pre-endgame transposition tables' keys.
-- David Blackman and Sebastiano Vigna. *Scrambled Linear Pseudorandom Number
-  Generators.* ACM Transactions on Mathematical Software 47(4), 2021. The
+- David Blackman and Sebastiano Vigna. _Scrambled Linear Pseudorandom Number
+  Generators._ ACM Transactions on Mathematical Software 47(4), 2021. The
   xoshiro random number generator.
-- Guy L. Steele Jr., Doug Lea and Christine H. Flood. *Fast Splittable
-  Pseudorandom Number Generators.* OOPSLA 2014.
+- Guy L. Steele Jr., Doug Lea and Christine H. Flood. _Fast Splittable
+  Pseudorandom Number Generators._ OOPSLA 2014.
   [doi:10.1145/2714064.2660195](https://doi.org/10.1145/2714064.2660195).
   SplitMix, which seeds xoshiro.
-- B. P. Welford. *Note on a Method for Calculating Corrected Sums of Squares
-  and Products.* Technometrics 4(3), 1962. The running means and variances of
+- B. P. Welford. _Note on a Method for Calculating Corrected Sums of Squares
+  and Products._ Technometrics 4(3), 1962. The running means and variances of
   simulation statistics.
 
 ## Citing MAGPIE
