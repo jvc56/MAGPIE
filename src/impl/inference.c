@@ -262,12 +262,12 @@ void evaluate_possible_leave(Inference *inference) {
       !(inference->temperature > 0 && rack_is_empty(inference->bag_as_rack));
   // Accepted racks need the best equity above the observed play, even when
   // that equity is below the admission cutoff.
+  const Equity anchor_cutoff =
+      inference->temperature > 0 ? observed_equity : target_equity_cutoff;
   const Move *top_move = get_top_equity_move_for_inferences(
       inference->game, inference->move_list,
       use_cutoff ? target_equity_cutoff : EQUITY_MAX_VALUE,
-      use_cutoff ? (inference->temperature > 0 ? observed_equity
-                                               : target_equity_cutoff)
-                 : EQUITY_MAX_VALUE);
+      use_cutoff ? anchor_cutoff : EQUITY_MAX_VALUE);
 
   const bool recordable = target_equity_cutoff >= move_get_equity(top_move) ||
                           rack_is_empty(inference->bag_as_rack);

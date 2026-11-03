@@ -249,7 +249,7 @@ int get_letter_subtotal_index(MachineLetter letter, int number_of_letters,
 
 static inline int get_letter_weight_subtotal_index(MachineLetter letter,
                                                    int number_of_letters) {
-  return (int)((letter * (RACK_SIZE)) + (number_of_letters - 1));
+  return (letter * RACK_SIZE) + (number_of_letters - 1);
 }
 
 uint64_t inference_results_get_subtotal(const InferenceResults *results,
