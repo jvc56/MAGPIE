@@ -47,6 +47,7 @@
 #include "history_replay_test.h"
 #include "infer_bench_test.h"
 #include "infer_cmp_test.h"
+#include "infer_match_test.h"
 #include "infer_test.h"
 #include "klv_test.h"
 #include "kwg_alpha_test.h"
@@ -318,6 +319,10 @@ void run_all(void) {
 }
 
 void run_test(const char *subtest) {
+  if (has_prefix("infmatch:", subtest)) {
+    infer_match_run_spec(subtest + strlen("infmatch:"));
+    return;
+  }
   if (has_prefix("infbench:", subtest)) {
     infer_bench_run_spec(subtest + strlen("infbench:"));
     return;
