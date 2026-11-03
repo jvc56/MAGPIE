@@ -27,6 +27,9 @@ int inference_results_get_target_number_of_tiles_exchanged(
     const InferenceResults *results);
 Equity inference_results_get_target_score(const InferenceResults *results);
 Equity inference_results_get_equity_margin(const InferenceResults *results);
+double inference_results_get_elapsed_seconds(const InferenceResults *results);
+void inference_results_set_elapsed_seconds(InferenceResults *results,
+                                           double seconds);
 Equity inference_results_get_temperature(const InferenceResults *results);
 void inference_results_set_temperature(InferenceResults *results,
                                        Equity temperature);

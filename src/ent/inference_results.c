@@ -35,6 +35,7 @@ struct InferenceResults {
   Equity target_score;
   Equity equity_margin;
   Equity temperature;
+  double elapsed_seconds;
   Rack target_played_tiles;
   Rack target_known_unplayed_tiles;
   Rack bag_as_rack;
@@ -50,6 +51,7 @@ InferenceResults *inference_results_create(AliasMethod *alias_method) {
   memset(results->weight_subtotals, 0, sizeof(results->weight_subtotals));
   results->has_weights = false;
   results->temperature = 0;
+  results->elapsed_seconds = 0;
   results->leave_rack_list = NULL;
   if (alias_method) {
     results->alias_method = alias_method;
@@ -99,6 +101,7 @@ inference_results_duplicate(const InferenceResults *inference_results) {
   new_results->target_score = inference_results->target_score;
   new_results->equity_margin = inference_results->equity_margin;
   new_results->temperature = inference_results->temperature;
+  new_results->elapsed_seconds = inference_results->elapsed_seconds;
   new_results->target_played_tiles = inference_results->target_played_tiles;
   new_results->target_known_unplayed_tiles =
       inference_results->target_known_unplayed_tiles;
@@ -134,6 +137,7 @@ void inference_results_reset(InferenceResults *results, int leave_list_capacity,
     results->has_weights = false;
   }
   results->temperature = 0;
+  results->elapsed_seconds = 0;
   if (leave_list_capacity > 0) {
     if (!results->leave_rack_list) {
       results->leave_rack_list = leave_rack_list_create(leave_list_capacity);
@@ -184,6 +188,15 @@ Equity inference_results_get_target_score(const InferenceResults *results) {
 
 Equity inference_results_get_equity_margin(const InferenceResults *results) {
   return results->equity_margin;
+}
+
+double inference_results_get_elapsed_seconds(const InferenceResults *results) {
+  return results->elapsed_seconds;
+}
+
+void inference_results_set_elapsed_seconds(InferenceResults *results,
+                                           double seconds) {
+  results->elapsed_seconds = seconds;
 }
 
 Equity inference_results_get_temperature(const InferenceResults *results) {

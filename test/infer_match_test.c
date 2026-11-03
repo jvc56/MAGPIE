@@ -79,11 +79,13 @@ typedef struct MatchSeatStats {
   int turns;
   int static_fallbacks;
   int inference_attempts;
+  int inference_skips;
+  int emergency_passes;
   int inferred_sims;
   int clock_stops;
 } MatchSeatStats;
 
-static double match_game(Config *config, unsigned int seed, int game_idx,
+static double match_game(const Config *config, unsigned int seed, int game_idx,
                          double game_seconds, bool null_match) {
   Game *game = config_get_game(config);
   game_reset(game);
@@ -114,16 +116,27 @@ static double match_game(Config *config, unsigned int seed, int game_idx,
     MatchSeatStats *stat = &stats[seat];
     stat->turns++;
     const double remaining = fmax(0, game_seconds - stat->elapsed);
-    const bool use_inference = seat == 0 && !null_match && turn > 0 &&
-                               move_get_type(&previous_move) != GAME_EVENT_PASS;
+    const double reserve = fmin(1.0, game_seconds * 0.1);
+    const double search_remaining = fmax(0, remaining - reserve);
+    const bool inference_eligible =
+        seat == 0 && !null_match && turn > 0 &&
+        move_get_type(&previous_move) != GAME_EVENT_PASS;
+    const bool use_inference = inference_eligible && search_remaining >= 3.0;
+    if (inference_eligible && !use_inference) {
+      stat->inference_skips++;
+    }
     Timer timer;
     ctimer_start(&timer);
     Move chosen;
     if (remaining < 0.05) {
+      // No new search when the emergency reserve is exhausted.
+      move_set_as_pass(&chosen);
+      stat->emergency_passes++;
+    } else if (search_remaining < 0.05) {
       move_copy(&chosen, get_top_equity_move(game, moves));
       stat->static_fallbacks++;
     } else {
-      MatchDeadline deadline = {.finished = false, .seconds = remaining};
+      MatchDeadline deadline = {.finished = false, .seconds = search_remaining};
       cpthread_mutex_init(&deadline.mutex);
       cpthread_cond_init(&deadline.condition);
       movegen_budget_init(&deadline.budget, UINT64_C(1) << 60);
@@ -157,7 +170,8 @@ static double match_game(Config *config, unsigned int seed, int game_idx,
       // debited along with simulation, reducing subsequent search budgets.
       const double turns_left = fmax(
           2, (bag_get_letters(game_get_bag(game)) + (2.0 * RACK_SIZE)) / 8.0);
-      const double sim_seconds = fmax(0.001, (remaining - 0.003) / turns_left);
+      const double sim_seconds =
+          fmax(0.001, (search_remaining - 0.003) / turns_left);
       SimArgs args;
       sim_args_fill(2, moves, MATCH_CANDIDATES, &empty,
                     config_get_win_pcts(config), inferences, control, game,
@@ -198,6 +212,19 @@ static double match_game(Config *config, unsigned int seed, int game_idx,
       cpthread_join(timer_thread);
     }
     stat->elapsed += ctimer_elapsed_seconds(&timer);
+    if (use_inference && move_list_get_count(moves) > 1) {
+      printf("INFMATCH_INFERENCE seed=%u game=%d turn=%d exchange=%d "
+             "seconds=%.9f\n",
+             seed, game_idx, turn,
+             move_get_type(&previous_move) == GAME_EVENT_EXCHANGE,
+             inference_results_get_elapsed_seconds(inferences));
+    }
+    // Fail the experiment instead of accepting a move computed over budget.
+    if (stat->elapsed > game_seconds) {
+      log_fatal("infmatch clock overrun: seed=%u game=%d seat=%d elapsed=%.6f "
+                "cap=%.6f",
+                seed, game_idx, seat, stat->elapsed, game_seconds);
+    }
     game_copy(previous, game);
     move_copy(&previous_move, &chosen);
     play_move(&chosen, game, NULL);
@@ -206,15 +233,19 @@ static double match_game(Config *config, unsigned int seed, int game_idx,
   const double spread =
       equity_to_double(player_get_score(game_get_player(game, 0)) -
                        player_get_score(game_get_player(game, 1)));
-  printf("INFMATCH_GAME seed=%u game=%d spread=%.3f turns=%d soft_seconds=%.6f "
-         "control_seconds=%.6f soft_iterations=%llu control_iterations=%llu "
-         "soft_fallbacks=%d control_fallbacks=%d infer_attempts=%d "
-         "inferred_sims=%d soft_clock_stops=%d control_clock_stops=%d\n",
-         seed, game_idx, spread, turn, stats[0].elapsed, stats[1].elapsed,
-         (unsigned long long)stats[0].iterations,
-         (unsigned long long)stats[1].iterations, stats[0].static_fallbacks,
-         stats[1].static_fallbacks, stats[0].inference_attempts,
-         stats[0].inferred_sims, stats[0].clock_stops, stats[1].clock_stops);
+  printf(
+      "INFMATCH_GAME seed=%u game=%d spread=%.3f turns=%d soft_seconds=%.6f "
+      "control_seconds=%.6f soft_iterations=%llu control_iterations=%llu "
+      "soft_fallbacks=%d control_fallbacks=%d infer_attempts=%d "
+      "inferred_sims=%d soft_clock_stops=%d control_clock_stops=%d "
+      "infer_skips=%d soft_emergency_passes=%d control_emergency_passes=%d\n",
+      seed, game_idx, spread, turn, stats[0].elapsed, stats[1].elapsed,
+      (unsigned long long)stats[0].iterations,
+      (unsigned long long)stats[1].iterations, stats[0].static_fallbacks,
+      stats[1].static_fallbacks, stats[0].inference_attempts,
+      stats[0].inferred_sims, stats[0].clock_stops, stats[1].clock_stops,
+      stats[0].inference_skips, stats[0].emergency_passes,
+      stats[1].emergency_passes);
   if (fflush(stdout) != 0) {
     log_fatal("infmatch output flush failed");
   }
@@ -273,8 +304,10 @@ void infer_match_run_spec(const char *spec) {
   }
   printf("INFMATCH_SETTINGS milliseconds=%d seed=%llu stride=%d null=%d "
          "lex=CSW24 threads=1 bag_cycle=1 rit=1 wit=1 margin=20 temperature=5 "
-         "candidates=15 plies=2\n",
-         milliseconds, (unsigned long long)seed, stride, null_match);
+         "candidates=15 plies=2 reserve_seconds=%.6f "
+         "inference_min_search_seconds=3\n",
+         milliseconds, (unsigned long long)seed, stride, null_match,
+         fmin(1.0, milliseconds / 10000.0));
   if (fflush(stdout) != 0) {
     log_fatal("infmatch output flush failed");
   }

@@ -25,13 +25,17 @@ def write_json(path, value):
 
 
 def summarize(directory, started):
-    games, pairs = [], []
+    games, pairs, inference_seconds = [], [], []
     for path in sorted(directory.glob('worker-*.log')):
         for line in path.read_text(errors='replace').splitlines():
             if line.startswith('INFMATCH_GAME '):
                 row = dict(re.findall(r'(\w+)=([^ ]+)', line))
                 if 'control_clock_stops' in row:
                     games.append(row)
+            elif line.startswith('INFMATCH_INFERENCE '):
+                row = dict(re.findall(r'(\w+)=([^ ]+)', line))
+                if 'seconds' in row:
+                    inference_seconds.append(float(row['seconds']))
             elif line.startswith('INFMATCH_PAIR '):
                 row = dict(re.findall(r'(\w+)=([^ ]+)', line))
                 if 'spread' in row:
@@ -40,6 +44,10 @@ def summarize(directory, started):
               'elapsed_seconds': time.monotonic() - started,
               'completed_games_in_logs': len(games), 'completed_pairs': len(pairs),
               'games_in_primary_analysis': 2 * len(pairs)}
+    if inference_seconds:
+        result['inference_seconds_max'] = max(inference_seconds)
+        result['inference_seconds_mean'] = statistics.mean(inference_seconds)
+        result['timed_inference_calls'] = len(inference_seconds)
     if pairs:
         seeds = [row['seed'] for row in pairs]
         if len(set(seeds)) != len(seeds):
@@ -56,8 +64,11 @@ def summarize(directory, started):
     if games:
         for key in ('soft_seconds', 'control_seconds', 'soft_iterations', 'control_iterations',
                     'soft_fallbacks', 'control_fallbacks', 'infer_attempts', 'inferred_sims',
-                    'soft_clock_stops', 'control_clock_stops'):
-            result[key + '_mean'] = statistics.mean(float(row[key]) for row in games)
+                    'soft_clock_stops', 'control_clock_stops', 'infer_skips',
+                    'soft_emergency_passes', 'control_emergency_passes'):
+            result[key + '_mean'] = statistics.mean(float(row.get(key, 0)) for row in games)
+        for side in ('soft', 'control'):
+            result[side + '_seconds_max'] = max(float(row[side + '_seconds']) for row in games)
     return result
 
 
@@ -67,7 +78,7 @@ def main():
     parser.add_argument('--directory', required=True, type=Path)
     parser.add_argument('--stop-at', required=True)
     parser.add_argument('--workers', type=int, default=18)
-    parser.add_argument('--budget-ms', type=int, default=10000)
+    parser.add_argument('--budget-ms', type=int, default=15000)
     parser.add_argument('--seed', type=int, default=2026110300)
     args = parser.parse_args()
     deadline = datetime.fromisoformat(args.stop_at)
@@ -89,6 +100,9 @@ def main():
                 'softmax_margin': 20, 'softmax_temperature': 5,
                 'control_inference': False, 'PAT': False, 'game_pairs': True,
                 'inference_charged_to_game_clock': True,
+                'reserve_seconds': min(1.0, args.budget_ms / 10000),
+                'inference_min_search_seconds': 3.0,
+                'overrun_policy': 'abort_experiment_before_playing_late_move',
                 'pilot_in_primary_analysis': False}
     write_json(directory/'manifest.json', manifest)
     stopping = False
