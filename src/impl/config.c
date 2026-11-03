@@ -3035,10 +3035,10 @@ static void help_entry_fill(const Config *config, int token,
       examples[0] = "fetch";
       text = "Downloads the data set this version of MAGPIE goes with into the "
              "first data path. It holds lexica, leaves, layouts, letter "
-             "distributions and win percentages, about 195 MB. Like "
-             "download_data.sh, this checks every part against the SHA-256 "
-             "MAGPIE pins for it. Does "
-             "nothing if that data version is already there. <base_url> "
+             "distributions and win percentages, about 195 MB. Unlike "
+             "scripts/download_data.sh, this checks every part against the "
+             "SHA-256 MAGPIE pins for it. Does nothing if that data version is "
+             "already there. <base_url> "
              "fetches the same parts from a mirror.";
       break;
     case ARG_TOKEN_BUILDERS:
@@ -8005,7 +8005,7 @@ char *get_default_klv_name(const char *lexicon_name) {
 
 // Whether a wordmap can be built for `lexicon`: not for the 21x21 board, not
 // for a lexicon made for it (_super), and not for Polish, as
-// convert_lexica.sh skips them; and returns why not, or NULL.
+// scripts/convert_lexica.sh skips them; and returns why not, or NULL.
 static const char *config_wordmap_unsupported_reason(const char *lexicon) {
   // NOLINTNEXTLINE(misc-redundant-expression)
   if (BOARD_DIM != DEFAULT_BOARD_DIM || strstr(lexicon, "_super") != NULL) {
@@ -10695,8 +10695,8 @@ config_contribute_build_pinned_wordmap(Config *config, ContributeState *state,
 // pins no hash for is refused: birdtest pins one for every player that asks
 // for a wordmap (or a rack info table, which is built from one), so a claim
 // without it is a server bug, and a wordmap nothing checked could describe a
-// lexicon that is no longer on this disk -- download_data.sh replaces a .kwg
-// in place and leaves the old .wmp beside it.
+// lexicon that is no longer on this disk -- scripts/download_data.sh replaces
+// a .kwg in place and leaves the old .wmp beside it.
 //
 // `ld_name` is the letter distribution the job pins. It is passed rather than
 // inferred from the lexicon's name because a wordmap is built against a letter
@@ -11360,11 +11360,11 @@ static char *contribute_file_identity(const Config *config, const char *name,
 
 // The letter distribution and the board layout are loaded again only when
 // their *name* changes, like the players' data below -- so a distribution or
-// layout file replaced on disk mid-run (download_data.sh, a new tarball) was
-// verified by digest against the job's pin and then never read: the one in
-// memory was played. Each is small; one whose file is not the file this path
-// last read is read again. Called after the load, which has read any whose
-// name changed.
+// layout file replaced on disk mid-run (scripts/download_data.sh, a new
+// tarball) was verified by digest against the job's pin and then never read:
+// the one in memory was played. Each is small; one whose file is not the file
+// this path last read is read again. Called after the load, which has read any
+// whose name changed.
 static void
 config_contribute_reload_changed_ld_and_layout(Config *config,
                                                ErrorStack *error_stack) {

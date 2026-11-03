@@ -7,7 +7,7 @@
 // `data fetch`: downloads MAGPIE's data into a data directory with nothing but
 // MAGPIE itself (no bash, curl or tar, which a Windows user does not have).
 //
-// It fetches the same versioned tarball download_data.sh does, from
+// It fetches the same versioned tarball scripts/download_data.sh does, from
 // MAGPIE-DATA, in the same chunks, checks each chunk against the size and
 // SHA-256 pinned in data_fetch.c, and unpacks it into the directory. Each
 // file is written in one step, so an interrupted fetch leaves no partial
@@ -16,8 +16,8 @@
 // Windows cannot make links without privilege, and no loader depends on a
 // file being a link.
 
-// The data version this MAGPIE goes with: download_data.sh's DATA_VERSION,
-// which CI checks it matches.
+// The data version this MAGPIE goes with: scripts/download_data.sh's
+// DATA_VERSION, which CI checks it matches.
 #define DATA_FETCH_VERSION "20260925"
 
 // Where the chunks are published, each at <base url>/data-<version>.tgz.<aa..>.
@@ -56,8 +56,8 @@ typedef enum {
   DATA_FETCH_STATE_INCOMPLETE,
   // Data fetched for another MAGPIE, of another data version.
   DATA_FETCH_STATE_OUTDATED,
-  // Data put there some other way (download_data.sh, by hand), which records
-  // no version.
+  // Data put there some other way (scripts/download_data.sh, by hand), which
+  // records no version.
   DATA_FETCH_STATE_UNVERSIONED,
   // Data version DATA_FETCH_VERSION, fetched.
   DATA_FETCH_STATE_CURRENT,

@@ -64,9 +64,9 @@ else installed and download MAGPIE's data (about 195 MB) on first run.
 
 **Building from source gives the best performance.** The published
 executables are built for a fixed, widely supported instruction set so that
-they run on any machine of their platform. `./scripts/setup.sh` instead builds for
-the exact processor that compiles it and adds profile-guided optimization. You
-can build from source natively on Linux (x86_64 or arm64) and macOS (Apple
+they run on any machine of their platform. `./scripts/setup.sh` instead builds
+for the exact processor that compiles it and adds profile-guided optimization.
+You can build from source natively on Linux (x86_64 or arm64) and macOS (Apple
 silicon or Intel). There is no native Windows build: the Windows executables
 are cross-compiled from Linux or macOS. On a Windows PC, you can build and run
 the Linux version inside WSL. See [Compile from source](#compile-from-source).
@@ -181,8 +181,8 @@ Fedora 36 and newer), runs MAGPIE as one executable without building it.
 2. `cd` to its folder and run `./magpie`. MAGPIE looks for its data in a `data`
    folder there, then in one beside the executable, and offers to download it
    into the first: answer `y`. The download uses libcurl (`libcurl.so.4`), which
-   most systems have; without it, run `./scripts/download_data.sh` from a clone of this
-   repository instead.
+   most systems have; without it, run `./scripts/download_data.sh` from a clone
+   of this repository instead.
 
 <details>
 <summary>Checking the download (optional)</summary>
@@ -215,9 +215,9 @@ cd MAGPIE
 ./bin/magpie
 ```
 
-To update, run `./scripts/setup.sh` again. Other builds (portable builds, 21x21 boards,
-the Windows and universal macOS executables, focused profiles for long-running
-jobs) are covered in [docs/building.md](docs/building.md).
+To update, run `./scripts/setup.sh` again. Other builds (portable builds, 21x21
+boards, the Windows and universal macOS executables, focused profiles for
+long-running jobs) are covered in [docs/building.md](docs/building.md).
 
 ### In the browser
 
@@ -762,9 +762,9 @@ results until the server has no more work. Learn more at https://birdtest.org.
 MAGPIE gets its data from the
 [MAGPIE-DATA](https://github.com/jvc56/MAGPIE-DATA) repository. It lives in a
 `data` directory, whose four subdirectories `data fetch` and
-`download_data.sh` fill from MAGPIE-DATA; `peg` adds a fifth, `pegcharts`. All lexical, board layout, and
-strategy data must be saved in their respective directories for MAGPIE to find
-them. When specifying input data in MAGPIE, always use the basename without
+`scripts/download_data.sh` fill from MAGPIE-DATA; `peg` adds a fifth,
+`pegcharts`. All lexical, board layout, and strategy data must be saved in
+their respective directories for MAGPIE to find them. When specifying input data in MAGPIE, always use the basename without
 the file extension. `-path` sets the data directories, in order of precedence.
 
 ### layouts

@@ -31,11 +31,11 @@ jobs:
       - name: Check that platform-specific code stays in src/compat
         run: python3 scripts/check_portability.py
 
-      - name: Check that data fetch and download_data.sh fetch the same data
+      - name: Check that data fetch and scripts/download_data.sh fetch the same data
         run: |
           fetched=$(sed -n 's/^#define DATA_FETCH_VERSION "\(.*\)"/\1/p' src/impl/data_fetch.h)
           downloaded=$(sed -n 's/^DATA_VERSION="\(.*\)"/\1/p' scripts/download_data.sh)
-          echo "data fetch: $fetched, download_data.sh: $downloaded"
+          echo "data fetch: $fetched, scripts/download_data.sh: $downloaded"
           test -n "$fetched" && test "$fetched" = "$downloaded"
 
       - name: Check formatting
@@ -341,7 +341,7 @@ jobs:
         run: ./bin/magpie_test.exe ${{ matrix.shard == 'peg' && needs.windows-build.outputs.peg_tests || needs.windows-build.outputs.rest_tests }}
 
   # cppcheck's first pass, a share of the files per job (see
-  # shard_cppcheck.py). A shard always passes unless it breaks: the cppcheck
+  # scripts/shard_cppcheck.py). A shard always passes unless it breaks: the cppcheck
   # job below reports the findings.
   cppcheck-shard:
     runs-on: ubuntu-latest
@@ -352,8 +352,8 @@ jobs:
     steps:
       - uses: actions/checkout@v3
 
-      # The built binary with its cfg/ beside it, which is all cppcheck.sh
-      # needs to skip the build: about 5 MB, where the source and build trees
+      # The built binary with its cfg/ beside it, which is all
+      # scripts/cppcheck.sh needs to skip the build: about 5 MB, where the source and build trees
       # were 133.
       - name: Cache cppcheck binary
         uses: actions/cache@v4
@@ -386,7 +386,7 @@ jobs:
           path: cppcheck-shard-results/
           retention-days: 1
 
-  # Runs cppcheck.sh over the shards' merged results. It analyzes no file a
+  # Runs scripts/cppcheck.sh over the shards' merged results. It analyzes no file a
   # shard checked, reports every file's findings, and runs the whole-program
   # checks, which only see the files in one run, and the _WIN32 pass.
   cppcheck:
@@ -408,7 +408,7 @@ jobs:
           key: cppcheck-2.17.1-bin
 
       # cppcheck's own incremental results (--cppcheck-build-dir in
-      # cppcheck.sh). It keys each file's by a hash of the file as
+      # scripts/cppcheck.sh). It keys each file's by a hash of the file as
       # preprocessed, so with its headers, and of the options, analyzes only
       # the files whose hash changed, and reports the rest's findings from the
       # cache. About 1.5 MB, saved under a new key by every successful run of

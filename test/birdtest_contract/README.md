@@ -92,7 +92,7 @@ tokens, ids and timings are the ones that crossed the wire, so a recapture
 changes them -- and the JSON is pretty-printed with two-space indentation.
 
 Recapture with a real stack and a real MAGPIE (a `portable_release` build and a
-`download_data.sh` install):
+`scripts/download_data.sh` install):
 
     MAGPIE_ROOT=../MAGPIE scripts/e2e_magpie_native.sh --cases capture --capture-out contract-fixtures
 

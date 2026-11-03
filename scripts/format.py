@@ -22,7 +22,8 @@ IGNORED_DIRECTORIES = [
 ]
 
 # Files ignored like src/compat, for the same reason: the test suite's platform
-# layer, whose includes depend on the platform (see check_portability.py).
+# layer, whose includes depend on the platform (see
+# scripts/check_portability.py).
 IGNORED_FILES = [
     os.path.normpath('test/test_platform.c'),
 ]
