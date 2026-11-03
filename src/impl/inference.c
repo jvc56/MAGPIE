@@ -366,6 +366,13 @@ Inference *inference_create(const Game *game, const InferenceArgs *args,
                             const InferenceResults *results) {
   Inference *inference = malloc_or_die(sizeof(Inference));
   inference->game = game_duplicate(game);
+  // The inference's game holds every tile the target cannot see in the bag,
+  // so its bag is not the bag the target played from, and pre-endgame
+  // adjustments, which depend on the bag, would be applied at the wrong
+  // index. Inference leaves them out.
+  for (int player_index = 0; player_index < 2; player_index++) {
+    player_set_peg_adjust(game_get_player(inference->game, player_index), NULL);
+  }
   inference->move_list = move_list_create(1);
   inference->klv =
       player_get_klv(game_get_player(inference->game, args->target_index));

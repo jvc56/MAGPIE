@@ -7,6 +7,8 @@
 #include "../util/string_util.h"
 #include "data_filepaths.h"
 #include "equity.h"
+#include <ctype.h>
+#include <math.h>
 #include <stdbool.h>
 #include <stdlib.h>
 
@@ -42,6 +44,17 @@ static void push_row_error(ErrorStack *error_stack, const char *filename,
                            filename, row_number, reason));
 }
 
+// Whether field holds nothing but whitespace, which the number parsers would
+// read as 0.
+static bool field_is_blank(const char *field) {
+  for (; *field != '\0'; field++) {
+    if (!isspace((unsigned char)*field)) {
+      return false;
+    }
+  }
+  return true;
+}
+
 // Reads one "index,value" row into values, marking its index as given.
 static void parse_row(const char *row, const char *filename, int row_number,
                       Equity values[PEG_ADJUST_VALUES_LENGTH],
@@ -49,6 +62,13 @@ static void parse_row(const char *row, const char *filename, int row_number,
                       ErrorStack *error_stack) {
   StringSplitter *fields = split_string(row, ',', false);
   if (string_splitter_get_number_of_items(fields) != 2) {
+    push_row_error(error_stack, filename, row_number,
+                   "expected two fields, an index and a value");
+    string_splitter_destroy(fields);
+    return;
+  }
+  if (field_is_blank(string_splitter_get_item(fields, 0)) ||
+      field_is_blank(string_splitter_get_item(fields, 1))) {
     push_row_error(error_stack, filename, row_number,
                    "expected two fields, an index and a value");
     string_splitter_destroy(fields);
@@ -71,6 +91,14 @@ static void parse_row(const char *row, const char *filename, int row_number,
   string_splitter_destroy(fields);
   if (!error_stack_is_empty(error_stack)) {
     push_row_error(error_stack, filename, row_number, "invalid value");
+    return;
+  }
+  if (!isfinite(value) || fabs(value) > PEG_ADJUST_MAX_ABS_VALUE) {
+    char *reason = get_formatted_string(
+        "value must be a number of points from %g to %g",
+        -PEG_ADJUST_MAX_ABS_VALUE, PEG_ADJUST_MAX_ABS_VALUE);
+    push_row_error(error_stack, filename, row_number, reason);
+    free(reason);
     return;
   }
   if (given[index]) {

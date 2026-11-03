@@ -18,8 +18,8 @@
 typedef struct PegAdjust PegAdjust;
 
 // Reads <data path>/strategy/<name>.csv. Each row is "index,value", the
-// value in points; an index left out is 0. Blank rows and rows starting
-// with '#' are skipped.
+// value in points, finite and at most PEG_ADJUST_MAX_ABS_VALUE either way;
+// an index left out is 0. Blank rows and rows starting with '#' are skipped.
 PegAdjust *peg_adjust_create(const char *data_paths, const char *name,
                              ErrorStack *error_stack);
 // A table of the given values (in millipoints), named name.
