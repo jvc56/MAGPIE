@@ -120,8 +120,10 @@ static double match_game(const Config *config, unsigned int seed, int game_idx,
     const double search_remaining = fmax(0, remaining - reserve);
     const bool inference_eligible =
         seat == 0 && !null_match && turn > 0 &&
-        move_get_type(&previous_move) != GAME_EVENT_PASS;
-    const bool use_inference = inference_eligible && search_remaining >= 3.0;
+        move_get_type(&previous_move) != GAME_EVENT_PASS &&
+        (move_get_type(&previous_move) != GAME_EVENT_EXCHANGE ||
+         bag_get_letters(game_get_bag(previous)) <= 30);
+    const bool use_inference = inference_eligible && search_remaining >= 0.3;
     if (inference_eligible && !use_inference) {
       stat->inference_skips++;
     }
@@ -157,14 +159,14 @@ static double match_game(const Config *config, unsigned int seed, int game_idx,
       }
       rack_copy(&observer, player_get_rack(game_get_player(game, seat)));
       InferenceArgs infer_args;
-      infer_args_fill(&infer_args, 0, int_to_equity(20), NULL, previous, 1, 0,
-                      0, control, false, true, 1 - seat,
+      infer_args_fill(&infer_args, 0, int_to_equity(10000), NULL, previous, 1,
+                      0, 0, control, false, true, 1 - seat,
                       move_get_score(&previous_move),
                       move_get_type(&previous_move) == GAME_EVENT_EXCHANGE
                           ? move_get_tiles_played(&previous_move)
                           : 0,
                       &played, &known, &observer);
-      infer_args.temperature = int_to_equity(5);
+      infer_args.temperature = int_to_equity(8);
       infer_args.target_move = &previous_move;
       // Reallocate the remaining clock after every turn. Inference time is
       // debited along with simulation, reducing subsequent search budgets.
@@ -286,7 +288,8 @@ void infer_match_run_spec(const char *spec) {
   string_splitter_destroy(fields);
   error_stack_destroy(errors);
   Config *config = config_create_or_die(
-      "set -lex CSW24 -wmp true -rit true -ritmmap true -wit true -s1 equity "
+      "set -lex CSW24 -leaves CSW24 -wmp true -rit true -ritmmap true -wit "
+      "true -s1 equity "
       "-s2 equity "
       "-r1 all -r2 all -patcand1 false -patcand2 false -patrollout false "
       "-threads 1 -numplays 15 -savesettings false -autosavegcg false");
@@ -302,12 +305,13 @@ void infer_match_run_spec(const char *spec) {
     assert(player_get_rack_info_table(player) != NULL);
     assert(player_get_word_info_table(player) != NULL);
   }
-  printf("INFMATCH_SETTINGS milliseconds=%d seed=%llu stride=%d null=%d "
-         "lex=CSW24 threads=1 bag_cycle=1 rit=1 wit=1 margin=20 temperature=5 "
-         "candidates=15 plies=2 reserve_seconds=%.6f "
-         "inference_min_search_seconds=3\n",
-         milliseconds, (unsigned long long)seed, stride, null_match,
-         fmin(1.0, milliseconds / 10000.0));
+  printf(
+      "INFMATCH_SETTINGS milliseconds=%d seed=%llu stride=%d null=%d "
+      "lex=CSW24 threads=1 bag_cycle=1 rit=1 wit=1 margin=10000 temperature=8 "
+      "candidates=15 plies=2 reserve_seconds=%.6f "
+      "inference_min_search_seconds=0.3 exchange_max_bag=30\n",
+      milliseconds, (unsigned long long)seed, stride, null_match,
+      fmin(1.0, milliseconds / 10000.0));
   if (fflush(stdout) != 0) {
     log_fatal("infmatch output flush failed");
   }

@@ -76,32 +76,38 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--binary', required=True, type=Path)
     parser.add_argument('--directory', required=True, type=Path)
-    parser.add_argument('--stop-at', required=True)
+    target = parser.add_mutually_exclusive_group(required=True)
+    target.add_argument('--stop-at')
+    target.add_argument('--pairs', type=int)
     parser.add_argument('--workers', type=int, default=18)
     parser.add_argument('--budget-ms', type=int, default=15000)
     parser.add_argument('--seed', type=int, default=2026110300)
     args = parser.parse_args()
-    deadline = datetime.fromisoformat(args.stop_at)
-    if deadline.tzinfo is None or deadline.timestamp() <= time.time():
+    deadline = datetime.fromisoformat(args.stop_at) if args.stop_at else None
+    if deadline is not None and (deadline.tzinfo is None or deadline.timestamp() <= time.time()):
         parser.error('--stop-at must be a future timezone-aware timestamp')
     if args.workers < 1 or args.budget_ms < 1:
         parser.error('positive worker count and game budget required')
+    if args.pairs is not None and args.pairs < args.workers:
+        parser.error('--pairs must be at least the worker count')
     directory = args.directory.resolve()
     directory.mkdir(parents=True, exist_ok=True)
     if list(directory.glob('worker-*.log')):
         parser.error('directory already contains match logs; refusing to overwrite')
     binary = args.binary.resolve()
-    manifest = {'start_utc': datetime.now(timezone.utc).isoformat(), 'stop_at': deadline.isoformat(),
+    manifest = {'start_utc': datetime.now(timezone.utc).isoformat(), 'stop_at': deadline.isoformat() if deadline else None,
+                'target_pairs': args.pairs,
                 'workers': args.workers, 'game_budget_ms_per_player': args.budget_ms,
                 'seed': args.seed, 'binary': str(binary),
                 'binary_sha256': hashlib.sha256(binary.read_bytes()).hexdigest(),
                 'lexicon': 'CSW24', 'wmp': True, 'rit': True, 'wit': True,
                 'bag_cycle': True, 'sim_plies': 2, 'candidates': 15,
-                'softmax_margin': 20, 'softmax_temperature': 5,
+                'softmax_margin': 10000, 'softmax_temperature': 8,
                 'control_inference': False, 'PAT': False, 'game_pairs': True,
                 'inference_charged_to_game_clock': True,
                 'reserve_seconds': min(1.0, args.budget_ms / 10000),
-                'inference_min_search_seconds': 3.0,
+                'inference_min_search_seconds': 0.3,
+                'exchange_max_bag': 30,
                 'overrun_policy': 'abort_experiment_before_playing_late_move',
                 'pilot_in_primary_analysis': False}
     write_json(directory/'manifest.json', manifest)
@@ -118,20 +124,25 @@ def main():
     try:
         for worker in range(args.workers):
             log = open(directory/f'worker-{worker:02d}.log', 'w')
-            spec = f'infmatch:100000:{args.budget_ms}:{args.seed+worker}:{args.workers}:0'
+            pair_count = (args.pairs // args.workers + (worker < args.pairs % args.workers)) if args.pairs else 100000
+            spec = f'infmatch:{pair_count}:{args.budget_ms}:{args.seed+worker}:{args.workers}:0'
             proc = subprocess.Popen([str(binary), spec], stdout=log, stderr=subprocess.STDOUT,
                                     cwd=Path(__file__).resolve().parents[1])
             jobs.append((proc, log))
         write_json(directory/'processes.json', {'runner_pid': __import__('os').getpid(),
                                                'worker_pids': [p.pid for p, _ in jobs]})
-        while not stopping and time.time() < deadline.timestamp():
+        while not stopping and (deadline is None or time.time() < deadline.timestamp()):
             for proc, _ in jobs:
-                if proc.poll() is not None:
-                    raise RuntimeError(f'worker {proc.pid} exited unexpectedly: {proc.returncode}')
+                code = proc.poll()
+                if code is not None and (code != 0 or args.pairs is None):
+                    raise RuntimeError(f'worker {proc.pid} exited unexpectedly: {code}')
+            if all(proc.poll() == 0 for proc, _ in jobs):
+                reason = 'complete'
+                break
             summary = summarize(directory, started)
             summary['status'] = 'running'
             write_json(directory/'summary.json', summary)
-            time.sleep(min(15, max(0, deadline.timestamp()-time.time())))
+            time.sleep(min(15, max(0, deadline.timestamp()-time.time())) if deadline else 15)
         if stopping:
             reason = 'interrupted'
     except Exception as error:
