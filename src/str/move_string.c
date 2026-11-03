@@ -492,6 +492,62 @@ void string_builder_add_move_list(
   string_builder_destroy(tmp_sb);
 }
 
+void string_builder_add_threats(StringBuilder *string_builder,
+                                const MoveList *threats, const Board *board,
+                                const LetterDistribution *ld,
+                                const Rack *unseen) {
+  string_builder_add_formatted_string(
+      string_builder, "Unseen tiles (%d): ", rack_get_total_letters(unseen));
+  string_builder_add_rack(string_builder, unseen, ld, false);
+  string_builder_add_string(string_builder, "\n\n");
+
+  const int num_threats = move_list_get_count(threats);
+  if (num_threats == 0) {
+    string_builder_add_string(string_builder,
+                              "No play can be made from the unseen tiles.\n");
+    return;
+  }
+  const int num_cols = 4;
+  StringGrid *string_grid = string_grid_create(num_threats + 1, num_cols, 1);
+  string_grid_set_cell(string_grid, 0, 0, string_duplicate(""));
+  string_grid_set_cell(string_grid, 0, 1, string_duplicate("Move"));
+  string_grid_set_cell(string_grid, 0, 2, string_duplicate("Sc"));
+  string_grid_set_cell(string_grid, 0, 3, string_duplicate("Tiles"));
+  StringBuilder *tmp_sb = string_builder_create();
+  Rack tiles;
+  for (int threat_idx = 0; threat_idx < num_threats; threat_idx++) {
+    const Move *move = move_list_get_move(threats, threat_idx);
+    const int row = threat_idx + 1;
+    string_grid_set_cell(string_grid, row, 0,
+                         get_formatted_string("%d: ", threat_idx + 1));
+
+    string_builder_add_move(tmp_sb, board, move, ld, false);
+    string_grid_set_cell(string_grid, row, 1,
+                         string_builder_dump(tmp_sb, NULL));
+    string_builder_clear(tmp_sb);
+
+    string_grid_set_cell(
+        string_grid, row, 2,
+        get_formatted_string("%d", equity_to_int(move_get_score(move))));
+
+    rack_set_dist_size_and_reset(&tiles, ld_get_size(ld));
+    for (int tile_idx = 0; tile_idx < move_get_tiles_length(move); tile_idx++) {
+      const MachineLetter ml = move_get_tile(move, tile_idx);
+      if (ml == PLAYED_THROUGH_MARKER) {
+        continue;
+      }
+      rack_add_letter(&tiles, get_is_blanked(ml) ? BLANK_MACHINE_LETTER : ml);
+    }
+    string_builder_add_rack(tmp_sb, &tiles, ld, false);
+    string_grid_set_cell(string_grid, row, 3,
+                         string_builder_dump(tmp_sb, NULL));
+    string_builder_clear(tmp_sb);
+  }
+  string_builder_add_string_grid(string_builder, string_grid, false);
+  string_grid_destroy(string_grid);
+  string_builder_destroy(tmp_sb);
+}
+
 char *move_list_get_string(const MoveList *move_list, const Board *board,
                            const LetterDistribution *ld,
                            int max_num_display_plays, int filter_row,

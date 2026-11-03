@@ -385,6 +385,7 @@ that point.
 | `rg` `<rack>`                          | Sets the rack, then generates.                                     |
 | `addmoves` (`a`) `<move>, <move>, ...` | Adds moves of your own to the list.                                |
 | `shmoves` (`shm`)                      | Shows the move list, or the sim results when there are some.       |
+| `threats` `[<count>]`                  | Lists the opponent's highest-scoring plays from the unseen tiles.  |
 
 ```
 magpie> r EEIJNP?
@@ -398,6 +399,18 @@ magpie> shm JEEP
 `shmoves` takes a count, a coordinate, a word prefix, a coordinate and a
 prefix together, or `-` for exchanges and passes. `-numplays` sets how many
 moves generation keeps.
+
+`threats` shows what the opponent could score next. It generates plays for the
+player not on turn from every tile the player on turn cannot see, the
+opponent's rack and the bag, playing up to a rack of them, and lists the highest
+scores first: `-numplays` of them, or as many as you ask for. It works with
+any number of tiles in the bag; once the bag is empty and the opponent's rack
+is known, it lists that rack's plays.
+
+```
+magpie> threats
+magpie> threats 20
+```
 
 ### Simulating
 

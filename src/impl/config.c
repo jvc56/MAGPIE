@@ -88,6 +88,7 @@
 #include "leave_blend.h"
 #include "move_gen.h"
 #include "move_gen_base.h"
+#include "move_gen_threats.h"
 #include "peg.h"
 #include "play_chooser.h"
 #include "rack_draw.h"
@@ -2086,6 +2087,16 @@ static void help_entry_fill(const Config *config, int token,
     case ARG_TOKEN_SHOW_INFERENCE:
       usages[0] = "";
       text = "Shows the inference result.";
+      break;
+    case ARG_TOKEN_THREATS:
+      usages[0] = "[<number_of_threats>]";
+      examples[0] = "";
+      examples[1] = "20";
+      text = "Shows the opponent's highest-scoring next plays from the unseen "
+             "tiles. These are the tiles the player on turn cannot see, the "
+             "opponent's rack and the bag, and a play uses at most a rack of "
+             "them, blanks included. Shows -numplays plays unless given a "
+             "number.";
       break;
     case ARG_TOKEN_SHOW_ENDGAME:
       usages[0] = "[<pv_index>]";
@@ -6102,6 +6113,53 @@ void execute_show_inference(Config *config, ErrorStack *error_stack) {
 
 char *str_api_show_inference(Config *config, ErrorStack *error_stack) {
   return impl_show_inference(config, error_stack);
+}
+
+// Threats
+
+char *impl_threats(Config *config, ErrorStack *error_stack) {
+  if (!config_has_game_data(config)) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
+        string_duplicate("cannot generate threats without lexicon"));
+    return empty_string();
+  }
+  config_init_game(config);
+
+  int num_threats = config->num_plays;
+  const char *num_threats_str =
+      config_get_parg_value(config, ARG_TOKEN_THREATS, 0);
+  if (num_threats_str) {
+    string_to_int_or_push_error("number of threats", num_threats_str, 1,
+                                INT_MAX,
+                                ERROR_STATUS_CONFIG_LOAD_INT_ARG_OUT_OF_BOUNDS,
+                                &num_threats, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return empty_string();
+    }
+  }
+
+  Rack unseen;
+  threats_get_unseen_tiles(config->game, &unseen);
+  MoveList *threats = move_list_create(num_threats);
+  generate_threats(config->game, &unseen, threats);
+  StringBuilder *sb = string_builder_create();
+  string_builder_add_threats(sb, threats, game_get_board(config->game),
+                             config->ld, &unseen);
+  move_list_destroy(threats);
+  return string_builder_dump_and_destroy(sb, NULL);
+}
+
+void execute_threats(Config *config, ErrorStack *error_stack) {
+  char *result = impl_threats(config, error_stack);
+  if (error_stack_is_empty(error_stack)) {
+    thread_control_print(config->thread_control, result);
+  }
+  free(result);
+}
+
+char *str_api_threats(Config *config, ErrorStack *error_stack) {
+  return impl_threats(config, error_stack);
 }
 
 // Show endgame
@@ -16027,6 +16085,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   cmd(ARG_TOKEN_SHOW_GAME, "shgame", 0, 0, show_game, generic, true);
   cmd(ARG_TOKEN_SHOW_MOVES, "shmoves", 0, 2, show_moves_or_sim_results, generic,
       false);
+  cmd(ARG_TOKEN_THREATS, "threats", 0, 1, threats, generic, false);
   cmd(ARG_TOKEN_SHOW_INFERENCE, "shinference", 0, 1, show_inference, generic,
       false);
   cmd(ARG_TOKEN_SHOW_ENDGAME, "shendgame", 0, 1, show_endgame, generic, false);
@@ -16598,6 +16657,7 @@ void config_add_settings_to_string_builder(const Config *config,
     case ARG_TOKEN_SHOW_ENDGAME:
     case ARG_TOKEN_SHOW_PEG:
     case ARG_TOKEN_SHOW_HEAT_MAP:
+    case ARG_TOKEN_THREATS:
     case ARG_TOKEN_NEXT:
     case ARG_TOKEN_PREVIOUS:
     case ARG_TOKEN_GOTO:
