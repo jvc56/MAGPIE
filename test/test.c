@@ -45,6 +45,7 @@
 #include "gzip_reader_test.h"
 #include "heat_map_test.h"
 #include "history_replay_test.h"
+#include "infer_bench_test.h"
 #include "infer_cmp_test.h"
 #include "infer_test.h"
 #include "klv_test.h"
@@ -154,6 +155,7 @@ static TestEntry test_table[] = {
     {"gameplay", test_gameplay},
     {"stats", test_stats},
     {"infer", test_infer},
+    {"infbenchmetrics", test_infer_bench_metrics},
     {"rv", test_random_variable},
     {"am", test_alias_method},
     {"hm", test_heat_map},
@@ -254,6 +256,7 @@ static TestEntry on_demand_test_table[] = {
     {"viaopp", test_via_opp_must_block_every_depth},
     {"viastress", test_via_interrupted_reasonable_under_time_pressure},
     {"infercmp", test_infer_cmp},
+    {"infbench", test_infer_bench},
     {"genstuck", test_generate_stuck_cgps},
     {"gennonstuck", test_generate_nonstuck_cgps},
     {"gennonstuck2", test_generate_nonstuck_cgps2},
@@ -315,6 +318,10 @@ void run_all(void) {
 }
 
 void run_test(const char *subtest) {
+  if (has_prefix("infbench:", subtest)) {
+    infer_bench_run_spec(subtest + strlen("infbench:"));
+    return;
+  }
   if (has_prefix("xsdata:", subtest)) {
     test_xs_data_paths(subtest + strlen("xsdata:"));
     return;
