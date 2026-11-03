@@ -1,9 +1,12 @@
 #include "census.h"
 
+#include "../compat/catomic.h"
 #include "../compat/cpthread.h"
 #include "../compat/cpthread_defs.h"
 #include "../def/letter_distribution_defs.h"
 #include "../ent/equity.h"
+#include "../ent/klv.h"
+#include "../ent/kwg.h"
 #include "../util/io_util.h"
 #include <stdbool.h>
 #include <stddef.h>
@@ -152,6 +155,65 @@ uint32_t census_lattice_rank(const CensusLattice *lattice,
   return (uint32_t)lattice->size_offsets[size] + within;
 }
 
+uint32_t census_lattice_rank_term(const CensusLattice *lattice,
+                                  MachineLetter ml, int unplaced, int count) {
+  return lattice_rank_term(lattice, ml, unplaced, count);
+}
+
+typedef struct LeavesFromKlv {
+  const CensusLattice *lattice;
+  const KLV *klv;
+  const KWG *kwg;
+  Equity *leave;
+  uint8_t tally[CENSUS_MAX_LETTERS];
+  // the KLV index of the next leave, in the order of the walk
+  uint32_t word_index;
+} LeavesFromKlv;
+
+// Visits the leaves under the sibling list at node_index in the KLV's order,
+// which numbers each leave by how many come before it.
+static void leaves_from_klv_walk(LeavesFromKlv *walk, uint32_t node_index) {
+  for (;; node_index++) {
+    const uint32_t node = kwg_node(walk->kwg, node_index);
+    const MachineLetter ml = kwg_node_tile(node);
+    walk->tally[ml]++;
+    if (kwg_node_accepts(node)) {
+      const uint32_t index = census_lattice_rank(walk->lattice, walk->tally);
+      if (index != CENSUS_UNRANKED) {
+        walk->leave[index] =
+            klv_get_indexed_leave_value(walk->klv, walk->word_index);
+      }
+      walk->word_index++;
+    }
+    const uint32_t arc_index = kwg_node_arc_index(node);
+    if (arc_index != 0) {
+      leaves_from_klv_walk(walk, arc_index);
+    }
+    walk->tally[ml]--;
+    if (kwg_node_is_end(node)) {
+      return;
+    }
+  }
+}
+
+void census_leaves_from_klv(const CensusLattice *lattice, const KLV *klv,
+                            Equity *leave) {
+  const uint32_t lattice_size = census_lattice_get_size(lattice);
+  for (uint32_t index = 0; index < lattice_size; index++) {
+    leave[index] = 0;
+  }
+  LeavesFromKlv walk = {.lattice = lattice,
+                        .klv = klv,
+                        .kwg = klv_get_kwg(klv),
+                        .leave = leave,
+                        .word_index = 0};
+  memset(walk.tally, 0, sizeof(walk.tally));
+  const uint32_t root_node_index = kwg_get_dawg_root_node_index(walk.kwg);
+  if (root_node_index != 0) {
+    leaves_from_klv_walk(&walk, root_node_index);
+  }
+}
+
 void census_lattice_unrank(const CensusLattice *lattice, uint32_t index,
                            uint8_t *tally) {
   const int num_letters = lattice->num_letters;
@@ -268,6 +330,8 @@ typedef struct BlankRun {
 typedef struct BlankVariantContext {
   const CensusLattice *lattice;
   Equity *play_scores;
+  // Whether other threads raise play_scores too.
+  bool shared;
   Equity real_score;
   const CensusPlacedTile *placed;
   int number_of_placed;
@@ -291,7 +355,9 @@ static void record_blank_variants_recursive(BlankVariantContext *context,
         lattice_rank_term(context->lattice, BLANK_MACHINE_LETTER, size,
                           blanks_total);
     const Equity value = context->real_score - drop_total;
-    if (value > context->play_scores[rank]) {
+    if (context->shared) {
+      catomic_max_int32(&context->play_scores[rank], value);
+    } else if (value > context->play_scores[rank]) {
       context->play_scores[rank] = value;
     }
     return;
@@ -321,29 +387,39 @@ static void record_blank_variants_recursive(BlankVariantContext *context,
   }
 }
 
-static int compare_placed_tiles(const void *first, const void *second) {
-  const CensusPlacedTile *first_tile = (const CensusPlacedTile *)first;
-  const CensusPlacedTile *second_tile = (const CensusPlacedTile *)second;
-  if (first_tile->ml != second_tile->ml) {
-    return first_tile->ml < second_tile->ml ? -1 : 1;
+static inline bool placed_tile_precedes(const CensusPlacedTile *first,
+                                        const CensusPlacedTile *second) {
+  if (first->ml != second->ml) {
+    return first->ml < second->ml;
   }
-  if (first_tile->blank_drop != second_tile->blank_drop) {
-    return first_tile->blank_drop < second_tile->blank_drop ? -1 : 1;
-  }
-  return 0;
+  return first->blank_drop < second->blank_drop;
 }
 
-void census_record_blank_variants(const CensusLattice *lattice,
-                                  Equity *play_scores, Equity real_score,
-                                  CensusPlacedTile *placed,
+// Sorts the placed tiles by letter, then by blank drop. There are at most
+// rack_size of them, too few for qsort's calls to pay.
+static void sort_placed_tiles(CensusPlacedTile *placed, int number_of_placed) {
+  for (int placed_idx = 1; placed_idx < number_of_placed; placed_idx++) {
+    const CensusPlacedTile tile = placed[placed_idx];
+    int insert_idx = placed_idx;
+    while (insert_idx > 0 &&
+           placed_tile_precedes(&tile, &placed[insert_idx - 1])) {
+      placed[insert_idx] = placed[insert_idx - 1];
+      insert_idx--;
+    }
+    placed[insert_idx] = tile;
+  }
+}
+
+static void record_blank_variants(const CensusLattice *lattice,
+                                  Equity *play_scores, bool shared,
+                                  Equity real_score, CensusPlacedTile *placed,
                                   int number_of_placed,
                                   const uint8_t *unseen_tally, int num_blanks) {
   const int rack_size = lattice->rack_size;
   if (number_of_placed == 0 || number_of_placed > rack_size) {
     return;
   }
-  qsort(placed, (size_t)number_of_placed, sizeof(CensusPlacedTile),
-        compare_placed_tiles);
+  sort_placed_tiles(placed, number_of_placed);
   BlankRun runs[CENSUS_MAX_LETTERS];
   int number_of_runs = 0;
   int total_forced = 0;
@@ -371,6 +447,7 @@ void census_record_blank_variants(const CensusLattice *lattice,
   }
   BlankVariantContext context = {.lattice = lattice,
                                  .play_scores = play_scores,
+                                 .shared = shared,
                                  .real_score = real_score,
                                  .placed = placed,
                                  .number_of_placed = number_of_placed,
@@ -378,6 +455,25 @@ void census_record_blank_variants(const CensusLattice *lattice,
                                  .number_of_runs = number_of_runs};
   record_blank_variants_recursive(&context, number_of_runs - 1,
                                   num_blanks - total_forced, 0, 0, 0, 0);
+}
+
+void census_record_blank_variants(const CensusLattice *lattice,
+                                  Equity *play_scores, Equity real_score,
+                                  CensusPlacedTile *placed,
+                                  int number_of_placed,
+                                  const uint8_t *unseen_tally, int num_blanks) {
+  record_blank_variants(lattice, play_scores, false, real_score, placed,
+                        number_of_placed, unseen_tally, num_blanks);
+}
+
+void census_record_blank_variants_shared(const CensusLattice *lattice,
+                                         Equity *play_scores, Equity real_score,
+                                         CensusPlacedTile *placed,
+                                         int number_of_placed,
+                                         const uint8_t *unseen_tally,
+                                         int num_blanks) {
+  record_blank_variants(lattice, play_scores, true, real_score, placed,
+                        number_of_placed, unseen_tally, num_blanks);
 }
 
 // Apportion

@@ -4,9 +4,12 @@
 #include "../compat/cpthread_defs.h"
 #include "../def/board_defs.h"
 #include "../def/equity_defs.h"
+#include "../def/game_defs.h"
 #include "../def/game_history_defs.h"
 #include "../def/inference_defs.h"
+#include "../def/klv_defs.h"
 #include "../def/letter_distribution_defs.h"
+#include "../def/players_data_defs.h"
 #include "../def/rack_defs.h"
 #include "../def/thread_control_defs.h"
 #include "../ent/alias_method.h"
@@ -18,6 +21,7 @@
 #include "../ent/inference_args.h"
 #include "../ent/inference_results.h"
 #include "../ent/klv.h"
+#include "../ent/kwg.h"
 #include "../ent/leave_rack.h"
 #include "../ent/letter_distribution.h"
 #include "../ent/move.h"
@@ -32,6 +36,9 @@
 #include "../util/io_util.h"
 #include "../util/math_util.h"
 #include "../util/string_util.h"
+#include "census.h"
+#include "census_opening.h"
+#include "census_play_scores.h"
 #include "gameplay.h"
 #include "move_gen.h"
 #include "move_gen_base.h"
@@ -40,6 +47,7 @@
 #include <math.h>
 #include <stdatomic.h>
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -76,10 +84,13 @@ typedef struct Inference {
   bool use_infer_cutoff_optimization;
   // Every worker walks every possible leave in the same order;
   // current_rack_index is the position of the walk. A worker evaluates only
-  // the leave at the position it has claimed from shared_next_rack_index,
-  // which hands each position to exactly one worker.
+  // the leaves at the claim_size positions from claimed_rack_index, which it
+  // has claimed from shared_next_rack_index, which hands each position to
+  // exactly one worker. A claim of more than one position saves the workers'
+  // contention for the counter when each leave is quick to evaluate.
   uint64_t current_rack_index;
   uint64_t claimed_rack_index;
+  uint64_t claim_size;
   int num_threads;
   int print_interval;
   _Atomic uint64_t *shared_next_rack_index;
@@ -106,6 +117,14 @@ typedef struct Inference {
   // Game used by the inference to generate moves
   Game *game;
   InferenceResults *results;
+  // The board's census play scores (see census_play_scores_build), owned by
+  // the context and only read by the workers, or NULL when each rack's best
+  // move comes from a move generation.
+  const CensusLattice *census_lattice;
+  const Equity *census_play_scores;
+  // The KLV's leave values by lattice rank (census_leaves_from_klv), owned by
+  // the context, when census_play_scores is set.
+  const Equity *census_leave_values;
 } Inference;
 
 struct InferenceCtx {
@@ -116,6 +135,18 @@ struct InferenceCtx {
   Stat **leave_stats;
   Stat **exchanged_stats;
   Stat **rack_stats;
+  // The census play scores' lattice and buffers, kept between inferences so
+  // that they are allocated once; the workers point at them while an
+  // inference uses them.
+  CensusLattice *census_lattice;
+  // The play scores, which every worker's thread builds into.
+  Equity *census_play_scores;
+  // The leave values by lattice rank of census_leave_klv, as it was when they
+  // were read, which the next inference of that KLV reuses.
+  Equity *census_leave_values;
+  const KLV *census_leave_klv;
+  uint64_t census_leave_klv_fingerprint;
+  uint64_t census_leave_klv_mutation_counter;
 };
 
 void inference_destroy(Inference *inference) {
@@ -191,11 +222,17 @@ static void record_valid_leave_weighted(const Rack *rack,
 // Finds the best leave of exactly keep_size tiles drawn from the target's
 // full rack (current_target_leave): the highest KLV value, the first found in
 // this enumeration order on ties. Enumerates each multiset of tiles once.
+// node_index and word_index locate the leave so far in the KLV, which each
+// letter added walks one step further, as generate_exchange_moves does.
 static void find_best_exchange_leave(const Inference *inference, Rack *leave,
                                      int start_ml, int remaining,
+                                     uint32_t node_index, uint32_t word_index,
                                      Equity *best_value) {
   if (remaining == 0) {
-    const Equity value = klv_get_leave_value(inference->klv, leave);
+    Equity value = 0;
+    if (word_index != KLV_UNFOUND_INDEX) {
+      value = klv_get_indexed_leave_value(inference->klv, word_index - 1);
+    }
     if (value > *best_value) {
       *best_value = value;
       rack_copy(inference->best_exchange_leave, leave);
@@ -205,28 +242,262 @@ static void find_best_exchange_leave(const Inference *inference, Rack *leave,
   for (int ml = start_ml; ml < inference->ld_size; ml++) {
     if (rack_get_letter(leave, ml) <
         rack_get_letter(inference->current_target_leave, ml)) {
+      uint32_t sibling_word_index;
+      const uint32_t sibling_node_index =
+          increment_node_to_ml(inference->klv, node_index, word_index,
+                               &sibling_word_index, (MachineLetter)ml);
+      uint32_t child_word_index;
+      const uint32_t child_node_index =
+          follow_arc(inference->klv, sibling_node_index, sibling_word_index,
+                     &child_word_index);
       rack_add_letter(leave, ml);
-      find_best_exchange_leave(inference, leave, ml, remaining - 1, best_value);
+      find_best_exchange_leave(inference, leave, ml, remaining - 1,
+                               child_node_index, child_word_index, best_value);
       rack_take_letter(leave, ml);
     }
   }
 }
 
-// Sets best_exchange_leave to the tiles the target keeps in its best exchange
-// of target_number_of_tiles_exchanged tiles and returns that exchange's
-// equity, computed the way move generation computes it.
-static Equity get_best_exchange_equity(const Inference *inference) {
-  const int keep_size = RACK_SIZE - inference->target_number_of_tiles_exchanged;
-  Rack leave;
-  rack_set_dist_size_and_reset(&leave, inference->ld_size);
-  Equity best_value = EQUITY_MIN_VALUE;
-  find_best_exchange_leave(inference, &leave, 0, keep_size, &best_value);
+// Writes the distinct letters of a rack of at most RACK_SIZE tiles, in
+// increasing order, and their counts, and returns how many there are. Every
+// letter is written and only those on the rack are kept, without a branch on
+// each, so letters and counts hold RACK_SIZE + 1.
+static int census_distinct_letters(const Rack *rack, int ld_size,
+                                   MachineLetter *letters, uint8_t *counts) {
+  int number_of_letters = 0;
+  for (int ml = 0; ml < ld_size; ml++) {
+    const int count = rack_get_letter(rack, ml);
+    letters[number_of_letters] = (MachineLetter)ml;
+    counts[number_of_letters] = (uint8_t)count;
+    number_of_letters += count > 0;
+  }
+  return number_of_letters;
+}
+
+// klv_get_leave_value of the rack, from the census leave values when the
+// inference has them.
+static Equity inference_get_leave_value(const Inference *inference,
+                                        const Rack *rack) {
+  if (inference->census_leave_values == NULL) {
+    return klv_get_leave_value(inference->klv, rack);
+  }
+  const CensusLattice *lattice = inference->census_lattice;
+  int remaining = rack_get_total_letters(rack);
+  uint32_t terms = 0;
+  for (int ml = 0; ml < inference->ld_size; ml++) {
+    const int count = rack_get_letter(rack, ml);
+    terms +=
+        census_lattice_rank_term(lattice, (MachineLetter)ml, remaining, count);
+    remaining -= count;
+  }
+  return inference
+      ->census_leave_values[census_lattice_get_size_start(
+                                lattice, rack_get_total_letters(rack)) +
+                            terms];
+}
+
+// find_best_exchange_leave from the census leave values, in the same order:
+// letter letter_idx of the rack's distinct letters keeps from as many copies
+// as it can down to none, the letters before it chosen in chosen, and
+// remaining tiles still to keep. terms sums the rank terms of the letters
+// chosen, which the rank of a leave of keep_size tiles takes in increasing
+// order of its letters.
+static void census_find_best_exchange_leave(
+    const Inference *inference, const MachineLetter *letters,
+    const uint8_t *counts, int number_of_letters, int keep_size, int letter_idx,
+    int remaining, uint32_t terms, uint8_t *chosen, uint8_t *best_chosen,
+    Equity *best_value) {
+  const CensusLattice *lattice = inference->census_lattice;
+  if (remaining == 0) {
+    const Equity value =
+        inference->census_leave_values[census_lattice_get_size_start(
+                                           lattice, keep_size) +
+                                       terms];
+    if (value > *best_value) {
+      *best_value = value;
+      for (int chosen_idx = 0; chosen_idx < number_of_letters; chosen_idx++) {
+        best_chosen[chosen_idx] =
+            chosen_idx < letter_idx ? chosen[chosen_idx] : 0;
+      }
+    }
+    return;
+  }
+  if (letter_idx == number_of_letters) {
+    return;
+  }
+  const int most =
+      counts[letter_idx] < remaining ? counts[letter_idx] : remaining;
+  for (int kept_count = most; kept_count >= 0; kept_count--) {
+    chosen[letter_idx] = (uint8_t)kept_count;
+    census_find_best_exchange_leave(
+        inference, letters, counts, number_of_letters, keep_size,
+        letter_idx + 1, remaining - kept_count,
+        terms + census_lattice_rank_term(lattice, letters[letter_idx],
+                                         remaining, kept_count),
+        chosen, best_chosen, best_value);
+  }
+}
+
+// The equity of the target's exchange of target_number_of_tiles_exchanged
+// tiles that keeps best_exchange_leave, worth leave_value, computed the way
+// move generation computes it.
+static Equity get_exchange_equity(const Inference *inference,
+                                  Equity leave_value) {
   const Game *game = inference->game;
   return static_eval_get_nonopening_move_equity(
       game_get_ld(game), inference->best_exchange_leave,
       player_get_rack(game_get_player(game, 1 - inference->target_index)),
       inference->target_number_of_tiles_exchanged,
-      bag_get_letters(game_get_bag(game)), 0, best_value);
+      bag_get_letters(game_get_bag(game)), 0, leave_value);
+}
+
+// Sets best_exchange_leave to the tiles the target keeps in its best exchange
+// of target_number_of_tiles_exchanged tiles and returns that exchange's
+// equity.
+static Equity get_best_exchange_equity(const Inference *inference) {
+  const int keep_size = RACK_SIZE - inference->target_number_of_tiles_exchanged;
+  Rack leave;
+  rack_set_dist_size_and_reset(&leave, inference->ld_size);
+  Equity best_value = EQUITY_MIN_VALUE;
+  if (inference->census_leave_values != NULL) {
+    MachineLetter letters[RACK_SIZE + 1];
+    uint8_t counts[RACK_SIZE + 1];
+    const int number_of_letters = census_distinct_letters(
+        inference->current_target_leave, inference->ld_size, letters, counts);
+    uint8_t chosen[RACK_SIZE];
+    uint8_t best_chosen[RACK_SIZE] = {0};
+    census_find_best_exchange_leave(inference, letters, counts,
+                                    number_of_letters, keep_size, 0, keep_size,
+                                    0, chosen, best_chosen, &best_value);
+    rack_reset(inference->best_exchange_leave);
+    for (int letter_idx = 0; letter_idx < number_of_letters; letter_idx++) {
+      rack_add_letters(inference->best_exchange_leave, letters[letter_idx],
+                       best_chosen[letter_idx]);
+    }
+  } else {
+    find_best_exchange_leave(
+        inference, &leave, 0, keep_size,
+        kwg_get_dawg_root_node_index(klv_get_kwg(inference->klv)), 0,
+        &best_value);
+  }
+  return get_exchange_equity(inference, best_value);
+}
+
+// The equity of the best move of the target's full rack, as
+// get_top_equity_move_for_inferences finds it, from the census play scores
+// instead of a move generation. Once it finds a move above the cutoff, it
+// returns that move's equity instead.
+//
+// It values every split of the rack into the tiles a move uses and the tiles
+// it keeps the way generate_moves values the move it stands for: a play of
+// the used tiles, at the best score the census found for them, and an
+// exchange of them when exchanges are legal. The splits are counted like an
+// odometer over the copies of each distinct letter kept, the lowest letter
+// changing fastest. A multiset's rank adds a term for each letter, set by the
+// tiles at that letter or after it, so each split only recomputes the sums
+// of the letters at or below the one that changed.
+static Equity get_top_equity_from_census(const Inference *inference,
+                                         Equity cutoff) {
+  const Game *game = inference->game;
+  const LetterDistribution *ld = game_get_ld(game);
+  const CensusLattice *lattice = inference->census_lattice;
+  MachineLetter letters[RACK_SIZE + 1];
+  uint8_t counts[RACK_SIZE + 1];
+  const int number_of_letters = census_distinct_letters(
+      inference->current_target_rack, inference->ld_size, letters, counts);
+  const Rack *opp_rack =
+      player_get_rack(game_get_player(game, 1 - inference->target_index));
+  const int number_of_tiles_in_bag = bag_get_letters(game_get_bag(game));
+  // The same test as gen_look_up_leaves_and_record_exchanges.
+  const bool add_exchange =
+      number_of_tiles_in_bag + rack_get_total_letters(opp_rack) >=
+      RACK_SIZE * 2;
+  // The tiles kept, which only the endgame adjustment reads.
+  Rack kept;
+  rack_set_dist_size_and_reset(&kept, inference->ld_size);
+
+  // For each letter, the copies kept, and over it and the letters after it,
+  // the tiles kept and used and the sums of their rank terms.
+  uint8_t kept_counts[RACK_SIZE + 1] = {0};
+  int tiles_kept[RACK_SIZE + 1];
+  int tiles_played[RACK_SIZE + 1];
+  uint32_t kept_terms[RACK_SIZE + 1];
+  uint32_t played_terms[RACK_SIZE + 1];
+  tiles_kept[number_of_letters] = 0;
+  tiles_played[number_of_letters] = 0;
+  kept_terms[number_of_letters] = 0;
+  played_terms[number_of_letters] = 0;
+
+  Equity best_equity = EQUITY_PASS_VALUE;
+  int changed_idx = number_of_letters - 1;
+  while (true) {
+    // The sums carried in locals, so that each letter does not wait on the
+    // store of the one after it.
+    int kept_sum = tiles_kept[changed_idx + 1];
+    int played_sum = tiles_played[changed_idx + 1];
+    uint32_t kept_terms_sum = kept_terms[changed_idx + 1];
+    uint32_t played_terms_sum = played_terms[changed_idx + 1];
+    for (int letter_idx = changed_idx; letter_idx >= 0; letter_idx--) {
+      const int kept_count = kept_counts[letter_idx];
+      const int played_count = counts[letter_idx] - kept_count;
+      kept_sum += kept_count;
+      played_sum += played_count;
+      kept_terms_sum += census_lattice_rank_term(lattice, letters[letter_idx],
+                                                 kept_sum, kept_count);
+      played_terms_sum += census_lattice_rank_term(lattice, letters[letter_idx],
+                                                   played_sum, played_count);
+      tiles_kept[letter_idx] = kept_sum;
+      tiles_played[letter_idx] = played_sum;
+      kept_terms[letter_idx] = kept_terms_sum;
+      played_terms[letter_idx] = played_terms_sum;
+    }
+    // Keeping every tile is a pass, valued below every move.
+    if (tiles_played[0] > 0) {
+      if (number_of_tiles_in_bag == 0) {
+        rack_reset(&kept);
+        for (int letter_idx = 0; letter_idx < number_of_letters; letter_idx++) {
+          rack_add_letters(&kept, letters[letter_idx], kept_counts[letter_idx]);
+        }
+      }
+      const Equity leave_value =
+          inference->census_leave_values[census_lattice_get_size_start(
+                                             lattice, tiles_kept[0]) +
+                                         kept_terms[0]];
+      const Equity play_score =
+          inference->census_play_scores[census_lattice_get_size_start(
+                                            lattice, tiles_played[0]) +
+                                        played_terms[0]];
+      // Whether the tiles make a play is as good as random, so the play is
+      // valued either way and dropped by a select, not a branch.
+      const Equity play_equity = static_eval_get_nonopening_move_equity(
+          ld, &kept, opp_rack, tiles_played[0], number_of_tiles_in_bag,
+          play_score, leave_value);
+      best_equity = play_score != CENSUS_UNPLAYABLE && play_equity > best_equity
+                        ? play_equity
+                        : best_equity;
+      if (add_exchange) {
+        const Equity exchange_equity = static_eval_get_nonopening_move_equity(
+            ld, &kept, opp_rack, tiles_played[0], number_of_tiles_in_bag, 0,
+            leave_value);
+        best_equity =
+            exchange_equity > best_equity ? exchange_equity : best_equity;
+      }
+      if (best_equity > cutoff) {
+        return best_equity;
+      }
+    }
+    int letter_idx = 0;
+    while (letter_idx < number_of_letters &&
+           kept_counts[letter_idx] == counts[letter_idx]) {
+      kept_counts[letter_idx] = 0;
+      letter_idx++;
+    }
+    if (letter_idx == number_of_letters) {
+      return best_equity;
+    }
+    kept_counts[letter_idx]++;
+    changed_idx = letter_idx;
+  }
 }
 
 // A rack is consistent with the target's move when no move beats it by more
@@ -237,7 +508,7 @@ static Equity get_best_exchange_equity(const Inference *inference) {
 // are ordinary moves under this rule.
 void evaluate_possible_leave(Inference *inference) {
   const Equity current_leave_value =
-      klv_get_leave_value(inference->klv, inference->current_target_leave);
+      inference_get_leave_value(inference, inference->current_target_leave);
   const bool is_exchange = inference->target_number_of_tiles_exchanged > 0;
 
   Equity observed_equity;
@@ -264,12 +535,20 @@ void evaluate_possible_leave(Inference *inference) {
   // that equity is below the admission cutoff.
   const Equity anchor_cutoff =
       inference->temperature > 0 ? observed_equity : target_equity_cutoff;
-  const Move *top_move = get_top_equity_move_for_inferences(
-      inference->game, inference->move_list,
-      use_cutoff ? target_equity_cutoff : EQUITY_MAX_VALUE,
-      use_cutoff ? anchor_cutoff : EQUITY_MAX_VALUE);
+  // Census exhausts every split for an admitted rack, so softmax receives
+  // its exact best equity. Rejected racks can stop at the admission cutoff.
+  Equity top_equity;
+  if (inference->census_play_scores != NULL) {
+    top_equity = get_top_equity_from_census(
+        inference, use_cutoff ? target_equity_cutoff : EQUITY_MAX_VALUE);
+  } else {
+    top_equity = move_get_equity(get_top_equity_move_for_inferences(
+        inference->game, inference->move_list,
+        use_cutoff ? target_equity_cutoff : EQUITY_MAX_VALUE,
+        use_cutoff ? anchor_cutoff : EQUITY_MAX_VALUE));
+  }
 
-  const bool recordable = target_equity_cutoff >= move_get_equity(top_move) ||
+  const bool recordable = target_equity_cutoff >= top_equity ||
                           rack_is_empty(inference->bag_as_rack);
   if (!recordable) {
     return;
@@ -278,8 +557,7 @@ void evaluate_possible_leave(Inference *inference) {
   const uint64_t number_of_draws_for_leave = get_number_of_draws_for_rack(
       inference->bag_as_rack, inference->current_target_leave);
   if (inference->temperature > 0) {
-    const double loss =
-        fmax(0.0, (double)move_get_equity(top_move) - observed_equity);
+    const double loss = fmax(0.0, (double)top_equity - observed_equity);
     const double weight =
         (double)number_of_draws_for_leave * exp(-loss / inference->temperature);
     if (is_exchange) {
@@ -294,14 +572,14 @@ void evaluate_possible_leave(Inference *inference) {
                                      best_exchange_leave);
       record_valid_leave_weighted(best_exchange_leave, inference->results,
                                   INFERENCE_TYPE_LEAVE,
-                                  equity_to_double(klv_get_leave_value(
-                                      inference->klv, best_exchange_leave)),
+                                  equity_to_double(inference_get_leave_value(
+                                      inference, best_exchange_leave)),
                                   number_of_draws_for_leave, weight);
       record_valid_leave_weighted(
           inference->current_target_exchanged, inference->results,
           INFERENCE_TYPE_EXCHANGED,
-          equity_to_double(klv_get_leave_value(
-              inference->klv, inference->current_target_exchanged)),
+          equity_to_double(inference_get_leave_value(
+              inference, inference->current_target_exchanged)),
           number_of_draws_for_leave, weight);
       LeaveRackList *lrl =
           inference_results_get_leave_rack_list(inference->results);
@@ -345,15 +623,14 @@ void evaluate_possible_leave(Inference *inference) {
                                    best_exchange_leave);
     record_valid_leave(best_exchange_leave, inference->results,
                        INFERENCE_TYPE_LEAVE,
-                       equity_to_double(klv_get_leave_value(
-                           inference->klv, best_exchange_leave)),
+                       equity_to_double(inference_get_leave_value(
+                           inference, best_exchange_leave)),
                        number_of_draws_for_leave);
-    record_valid_leave(
-        inference->current_target_exchanged, inference->results,
-        INFERENCE_TYPE_EXCHANGED,
-        equity_to_double(klv_get_leave_value(
-            inference->klv, inference->current_target_exchanged)),
-        number_of_draws_for_leave);
+    record_valid_leave(inference->current_target_exchanged, inference->results,
+                       INFERENCE_TYPE_EXCHANGED,
+                       equity_to_double(inference_get_leave_value(
+                           inference, inference->current_target_exchanged)),
+                       number_of_draws_for_leave);
     LeaveRackList *lrl =
         inference_results_get_leave_rack_list(inference->results);
     if (lrl) {
@@ -527,6 +804,10 @@ Inference *inference_create(const Game *game, const InferenceArgs *args,
       player_get_rack(game_get_player(inference->game, args->target_index));
   inference->bag_as_rack = rack_create(inference->ld_size);
 
+  inference->census_lattice = NULL;
+  inference->census_play_scores = NULL;
+  inference->census_leave_values = NULL;
+  inference->claim_size = 1;
   inference->results =
       inference_results_create(inference_results_get_alias_method(results));
   inference_results_reset(inference->results, inference->leave_list_capacity,
@@ -598,11 +879,13 @@ bool should_print_info(const Inference *inference) {
          inference->current_rack_index % inference->print_interval == 0;
 }
 
-// Claims the next unclaimed position of the walk. The positions are handed out
-// in increasing order, so the claim is never behind the claiming worker.
-static uint64_t claim_next_rack_index(Inference *inference) {
-  return atomic_fetch_add_explicit(inference->shared_next_rack_index, 1,
-                                   memory_order_relaxed);
+// Claims the next claim_size unclaimed positions of the walk. The positions
+// are handed out in increasing order, so the claim is never behind the
+// claiming worker.
+static void claim_next_racks(Inference *inference) {
+  inference->claimed_rack_index =
+      atomic_fetch_add_explicit(inference->shared_next_rack_index,
+                                inference->claim_size, memory_order_relaxed);
 }
 
 void iterate_through_all_possible_leaves(Inference *inference,
@@ -613,13 +896,16 @@ void iterate_through_all_possible_leaves(Inference *inference,
     return;
   }
   if (tiles_to_infer == 0) {
-    if (inference->current_rack_index == inference->claimed_rack_index) {
+    if (inference->current_rack_index >= inference->claimed_rack_index) {
       evaluate_possible_leave(inference);
       if (should_print_info(inference)) {
         print_ucgi_inference_current_rack(inference->current_rack_index,
                                           inference->thread_control);
       }
-      inference->claimed_rack_index = claim_next_rack_index(inference);
+      if (inference->current_rack_index + 1 ==
+          inference->claimed_rack_index + inference->claim_size) {
+        claim_next_racks(inference);
+      }
     }
     inference->current_rack_index++;
     return;
@@ -637,7 +923,7 @@ void iterate_through_all_possible_leaves(Inference *inference,
 void *infer_worker(void *uncasted_inference) {
   Inference *inference = (Inference *)uncasted_inference;
   (void)gen_set_movegen_budget(inference->movegen_budget);
-  inference->claimed_rack_index = claim_next_rack_index(inference);
+  claim_next_racks(inference);
   iterate_through_all_possible_leaves(
       inference,
       (RACK_SIZE)-rack_get_total_letters(inference->current_target_rack),
@@ -923,11 +1209,189 @@ void inference_ctx_set_inferences(InferenceCtx *ctx, const InferenceArgs *args,
   }
 }
 
+static void inference_ctx_free_census(InferenceCtx *ctx) {
+  free(ctx->census_play_scores);
+  ctx->census_play_scores = NULL;
+  free(ctx->census_leave_values);
+  ctx->census_leave_values = NULL;
+  ctx->census_leave_klv = NULL;
+  census_lattice_destroy(ctx->census_lattice);
+  ctx->census_lattice = NULL;
+}
+
+// Whether the census play scores value every rack of the inference exactly as
+// get_top_equity_move_for_inferences does, and there are enough racks to pay
+// for building them. The opening builder includes placement adjustments;
+// neither builder includes PAT (which inferences leave out anyway). The census
+// spells classic words with the first player's word graph, which must then be
+// the target's, and generate_moves plays for the player on turn.
+static bool inference_can_use_census(const Inference *inference,
+                                     const InferenceArgs *args) {
+  const Game *game = inference->game;
+  const int tiles_to_infer =
+      RACK_SIZE - rack_get_total_letters(inference->current_target_rack);
+  return args->use_census_play_scores &&
+         tiles_to_infer >= INFERENCE_CENSUS_MIN_TILES_TO_INFER &&
+         !rack_is_empty(inference->bag_as_rack) && inference->klv != NULL &&
+         game_get_variant(game) == GAME_VARIANT_CLASSIC &&
+         game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KWG) &&
+         game_get_player_on_turn_index(game) == inference->target_index &&
+         inference->ld_size <= CENSUS_MAX_LETTERS;
+}
+
+// One thread's share of building the census play scores: its slice of the
+// lattice to reset, then the units it claims.
+typedef struct CensusBuildWorker {
+  const Game *game;
+  const CensusLattice *lattice;
+  const uint8_t *unseen_tally;
+  Equity *play_scores;
+  int number_of_workers;
+  int thread_index;
+  _Atomic int *next_unit;
+  cpthread_t cpthread_id;
+} CensusBuildWorker;
+
+static void *census_reset_worker(void *uncasted_worker) {
+  const CensusBuildWorker *worker = (const CensusBuildWorker *)uncasted_worker;
+  const uint64_t lattice_size = census_lattice_get_size(worker->lattice);
+  const uint32_t start =
+      (uint32_t)(lattice_size * (uint64_t)worker->thread_index /
+                 (uint64_t)worker->number_of_workers);
+  const uint32_t end =
+      (uint32_t)(lattice_size * (uint64_t)(worker->thread_index + 1) /
+                 (uint64_t)worker->number_of_workers);
+  for (uint32_t index = start; index < end; index++) {
+    worker->play_scores[index] = CENSUS_UNPLAYABLE;
+  }
+  return NULL;
+}
+
+static void *census_build_worker(void *uncasted_worker) {
+  const CensusBuildWorker *worker = (const CensusBuildWorker *)uncasted_worker;
+  if (board_get_tiles_played(game_get_board(worker->game)) == 0) {
+    census_opening_build_claimed(
+        worker->game, worker->lattice, worker->unseen_tally,
+        worker->play_scores,
+        worker->number_of_workers > 1
+            ? census_lattice_get_num_letters(worker->lattice)
+            : 1,
+        worker->next_unit);
+    return NULL;
+  }
+  census_play_scores_build_claimed(
+      worker->game, worker->lattice, worker->unseen_tally, worker->play_scores,
+      worker->number_of_workers > 1
+          ? census_lattice_get_num_letters(worker->lattice)
+          : 1,
+      worker->next_unit, CENSUS_ALL_LANES);
+  return NULL;
+}
+
+// Runs one phase of the build on every worker's thread, the first in the
+// calling thread.
+static void census_run_build_phase(CensusBuildWorker *workers,
+                                   int number_of_workers,
+                                   void *(*phase)(void *)) {
+  for (int thread_index = 1; thread_index < number_of_workers; thread_index++) {
+    cpthread_create(&workers[thread_index].cpthread_id, phase,
+                    &workers[thread_index]);
+  }
+  phase(&workers[0]);
+  for (int thread_index = 1; thread_index < number_of_workers; thread_index++) {
+    cpthread_join(workers[thread_index].cpthread_id);
+  }
+}
+
+// Builds the board's census play scores for the workers when
+// inference_can_use_census allows it, and otherwise has them generate moves.
+// Every worker's thread builds the units it claims into the same play
+// scores.
+static void inference_ctx_set_census_play_scores(InferenceCtx *ctx,
+                                                 const InferenceArgs *args) {
+  const Inference *first = ctx->worker_inferences[0];
+  bool use_census = inference_can_use_census(first, args);
+  if (use_census &&
+      (ctx->census_lattice == NULL ||
+       census_lattice_get_num_letters(ctx->census_lattice) != first->ld_size)) {
+    inference_ctx_free_census(ctx);
+    ErrorStack *error_stack = error_stack_create();
+    ctx->census_lattice =
+        census_lattice_create(first->ld_size, RACK_SIZE, error_stack);
+    error_stack_destroy(error_stack);
+    if (ctx->census_lattice != NULL &&
+        census_lattice_get_size(ctx->census_lattice) <=
+            INFERENCE_CENSUS_MAX_LATTICE_SIZE) {
+      ctx->census_play_scores = malloc_or_die(
+          sizeof(Equity) * census_lattice_get_size(ctx->census_lattice));
+    }
+  }
+  use_census = use_census && ctx->census_play_scores != NULL;
+  if (use_census && (ctx->census_leave_values == NULL ||
+                     ctx->census_leave_klv != first->klv ||
+                     ctx->census_leave_klv_fingerprint !=
+                         klv_get_instance_fingerprint(first->klv) ||
+                     ctx->census_leave_klv_mutation_counter !=
+                         klv_get_mutation_counter(first->klv))) {
+    if (ctx->census_leave_values == NULL) {
+      ctx->census_leave_values = malloc_or_die(
+          sizeof(Equity) * census_lattice_get_size(ctx->census_lattice));
+    }
+    census_leaves_from_klv(ctx->census_lattice, first->klv,
+                           ctx->census_leave_values);
+    ctx->census_leave_klv = first->klv;
+    ctx->census_leave_klv_fingerprint =
+        klv_get_instance_fingerprint(first->klv);
+    ctx->census_leave_klv_mutation_counter =
+        klv_get_mutation_counter(first->klv);
+  }
+  if (use_census) {
+    // The pool every rack the inference values is drawn from: the target's
+    // known tiles and what the observer has not seen. Not the board's unseen
+    // tiles, which can differ from it when the bag has been set up by hand,
+    // and are more tiles to spell words from.
+    uint8_t unseen_tally[CENSUS_MAX_LETTERS];
+    for (int ml = 0; ml < first->ld_size; ml++) {
+      unseen_tally[ml] =
+          (uint8_t)(rack_get_letter(first->bag_as_rack, ml) +
+                    rack_get_letter(first->current_target_rack, ml));
+    }
+    _Atomic int next_unit;
+    atomic_init(&next_unit, 0);
+    CensusBuildWorker *workers =
+        malloc_or_die(sizeof(CensusBuildWorker) * (size_t)ctx->num_workers);
+    for (int thread_index = 0; thread_index < ctx->num_workers;
+         thread_index++) {
+      workers[thread_index] = (CensusBuildWorker){
+          .game = first->game,
+          .lattice = ctx->census_lattice,
+          .unseen_tally = unseen_tally,
+          .play_scores = ctx->census_play_scores,
+          .number_of_workers = ctx->num_workers,
+          .thread_index = thread_index,
+          .next_unit = &next_unit,
+      };
+    }
+    census_run_build_phase(workers, ctx->num_workers, census_reset_worker);
+    census_run_build_phase(workers, ctx->num_workers, census_build_worker);
+    free(workers);
+  }
+  for (int thread_index = 0; thread_index < ctx->num_workers; thread_index++) {
+    Inference *inference = ctx->worker_inferences[thread_index];
+    inference->census_lattice = use_census ? ctx->census_lattice : NULL;
+    inference->census_play_scores = use_census ? ctx->census_play_scores : NULL;
+    inference->census_leave_values =
+        use_census ? ctx->census_leave_values : NULL;
+    inference->claim_size = use_census ? INFERENCE_CENSUS_CLAIM_SIZE : 1;
+  }
+}
+
 void inference_ctx_destroy(InferenceCtx *ctx) {
   if (!ctx) {
     return;
   }
   game_destroy(ctx->game);
+  inference_ctx_free_census(ctx);
   for (int i = 0; i < ctx->num_workers; i++) {
     inference_destroy(ctx->worker_inferences[i]);
   }
@@ -970,6 +1434,7 @@ void infer_with_initialized_ctx(InferenceArgs *args, InferenceCtx *ctx,
   }
 
   inference_ctx_set_inferences(ctx, args, results);
+  inference_ctx_set_census_play_scores(ctx, args);
 
   infer_manager(ctx, results);
 

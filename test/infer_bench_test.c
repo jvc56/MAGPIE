@@ -294,7 +294,8 @@ static void infbench_played_tiles(const Move *move, Rack *played) {
 static void infbench_observe(const Config *config, const Move *move, int policy,
                              int pair_idx, int game_idx, int turn,
                              InferBenchScore totals[INFBENCH_MODES],
-                             InferBenchScore exchanged_totals[INFBENCH_MODES]) {
+                             InferBenchScore exchanged_totals[INFBENCH_MODES],
+                             bool use_census) {
   const Game *game = config_get_game(config);
   const LetterDistribution *ld = game_get_ld(game);
   const KLV *klv = player_get_klv(game_get_player(game, 0));
@@ -342,6 +343,7 @@ static void infbench_observe(const Config *config, const Move *move, int policy,
       config_get_thread_control(config), false, true, 0, move_get_score(move),
       exchange ? move_get_tiles_played(move) : 0, &played, &known, &observer);
   args.target_move = move;
+  args.use_census_play_scores = use_census;
   StringBuilder *description = string_builder_create();
   string_builder_add_move_description(description, move, ld);
   printf("INFBENCH observation policy=%s pair=%d game=%d turn=%d bag=%d "
@@ -578,7 +580,7 @@ static void infbench_game(Config *config, int policy, int pair_idx,
                           int game_idx, int positions, unsigned int seed,
                           InferBenchScore scores[INFBENCH_MODES],
                           InferBenchScore exchanged_scores[INFBENCH_MODES],
-                          bool exchanges_only) {
+                          bool exchanges_only, bool use_census) {
   Game *game = config_get_game(config);
   game_reset(game);
   game_seed(game, seed);
@@ -620,7 +622,7 @@ static void infbench_game(Config *config, int policy, int pair_idx,
                   type == GAME_EVENT_EXCHANGE));
       if (sample && bag_get_letters(game_get_bag(game)) > 0) {
         infbench_observe(config, &chosen, policy, pair_idx, game_idx, turn,
-                         scores, exchanged_scores);
+                         scores, exchanged_scores, use_census);
         observations++;
       }
     }
@@ -719,23 +721,30 @@ void infer_bench_run_spec(const char *spec) {
   int positions = INFBENCH_DEFAULT_POSITIONS;
   unsigned int seed = INFBENCH_DEFAULT_SEED;
   bool exchanges_only = false;
+  bool use_census = true;
   if (spec != NULL) {
     StringSplitter *fields = split_string(spec, ':', true);
     const int num_fields = string_splitter_get_number_of_items(fields);
-    if (num_fields < 3 || num_fields > 4) {
+    if (num_fields < 3 || num_fields > 5) {
       string_splitter_destroy(fields);
-      log_fatal("usage: infbench:PAIRS:POSITIONS_PER_GAME:SEED[:exchanges]");
+      log_fatal("usage: "
+                "infbench:PAIRS:POSITIONS_PER_GAME:SEED[:exchanges[:movegen]]");
     }
     ErrorStack *errors = error_stack_create();
     pairs = string_to_int(string_splitter_get_item(fields, 0), errors);
     positions = string_to_int(string_splitter_get_item(fields, 1), errors);
     const uint64_t parsed_seed =
         string_to_uint64(string_splitter_get_item(fields, 2), errors);
-    if (num_fields == 4) {
+    if (num_fields >= 4) {
       exchanges_only =
           strings_equal(string_splitter_get_item(fields, 3), "exchanges");
     }
-    const bool invalid = (num_fields == 4 && !exchanges_only) ||
+    if (num_fields == 5) {
+      use_census =
+          !strings_equal(string_splitter_get_item(fields, 4), "movegen");
+    }
+    const bool invalid = (num_fields >= 4 && !exchanges_only) ||
+                         (num_fields == 5 && use_census) ||
                          !error_stack_is_empty(errors) || pairs < 1 ||
                          pairs > 10000 || positions < 1 || positions > 20 ||
                          parsed_seed > UINT_MAX;
@@ -751,9 +760,10 @@ void infer_bench_run_spec(const char *spec) {
          "inference_threads=%d sim_threads=1 sim_plies=2 sim_candidates=15 "
          "sim_iterations=%d sim_minplay=10 sim_sampling=rr sim_pat=false "
          "prior_mix=%.6f feature_mse=raw_posterior empty_fallback=prior "
-         "sampling=%s\n",
+         "sampling=%s census=%d\n",
          pairs, positions, seed, INFBENCH_THREADS, INFBENCH_SIM_ITERS,
-         INFBENCH_PRIOR_MIX, exchanges_only ? "exchanges" : "scheduled");
+         INFBENCH_PRIOR_MIX, exchanges_only ? "exchanges" : "scheduled",
+         use_census);
   for (int policy = 0; policy < INFBENCH_POLICIES; policy++) {
     Config *config = infbench_config(policy, seed);
     InferBenchScore totals[INFBENCH_MODES] = {0};
@@ -766,7 +776,7 @@ void infer_bench_run_spec(const char *spec) {
       for (int game_idx = 0; game_idx < 2; game_idx++) {
         infbench_game(config, policy, pair_idx, game_idx, positions,
                       seed + (unsigned int)pair_idx, pair_scores,
-                      exchanged_pair_scores, exchanges_only);
+                      exchanged_pair_scores, exchanges_only, use_census);
       }
       infbench_accumulate_pair(pair_scores, totals, deltas);
       infbench_accumulate_pair(exchanged_pair_scores, exchanged_totals,

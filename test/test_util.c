@@ -68,6 +68,14 @@ void assert_equal_at_equity_resolution(double a, double b) {
 
 bool within_epsilon(double a, double b) { return fabs(a - b) < TEST_EPSILON; }
 
+// Weighted totals can exceed a billion on opening positions. Different worker
+// groupings can then differ by more than an absolute 1e-6 just from summation.
+// Keep the absolute tolerance for small values and allow 1e-12 relative error.
+static bool within_weight_epsilon(double first, double second) {
+  const double scale = fmax(fabs(first), fabs(second));
+  return fabs(first - second) <= fmax(TEST_EPSILON, 1e-12 * scale);
+}
+
 void assert_inference_results_equal(InferenceResults *results_a,
                                     InferenceResults *results_b, int ld_size) {
   for (int type_idx = 0; type_idx < NUMBER_OF_INFER_TYPES; type_idx++) {
@@ -76,8 +84,8 @@ void assert_inference_results_equal(InferenceResults *results_a,
         inference_results_get_equity_values(results_a, inference_stat_type);
     const Stat *stat_b =
         inference_results_get_equity_values(results_b, inference_stat_type);
-    assert(within_epsilon(stat_get_total_weight(stat_a),
-                          stat_get_total_weight(stat_b)));
+    assert(within_weight_epsilon(stat_get_total_weight(stat_a),
+                                 stat_get_total_weight(stat_b)));
     assert(stat_get_num_samples(stat_a) == stat_get_num_samples(stat_b));
     assert(stat_get_num_unique_samples(stat_a) ==
            stat_get_num_unique_samples(stat_b));
@@ -86,7 +94,7 @@ void assert_inference_results_equal(InferenceResults *results_a,
     }
     for (int ml = 0; ml < ld_size; ml++) {
       for (int num_letters = 1; num_letters <= RACK_SIZE; num_letters++) {
-        assert(within_epsilon(
+        assert(within_weight_epsilon(
             inference_results_get_weight_subtotal(
                 results_a, inference_stat_type, ml, num_letters),
             inference_results_get_weight_subtotal(

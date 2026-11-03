@@ -1,7 +1,9 @@
 #ifndef CENSUS_H
 #define CENSUS_H
 
+#include "../def/letter_distribution_defs.h"
 #include "../ent/equity.h"
+#include "../ent/klv.h"
 #include "../util/io_util.h"
 #include <stdbool.h>
 #include <stdint.h>
@@ -51,9 +53,20 @@ uint32_t census_lattice_get_full_rack_start(const CensusLattice *lattice);
 // CENSUS_UNRANKED if it holds more than rack_size tiles.
 uint32_t census_lattice_rank(const CensusLattice *lattice,
                              const uint8_t *tally);
+// The term letter ml adds to the rank of a multiset holding count copies of
+// it and unplaced tiles at it or after it: a multiset's rank is
+// census_lattice_get_size_start of its size plus the terms of its letters,
+// which lets a walk that adds letters in decreasing order rank as it goes.
+uint32_t census_lattice_rank_term(const CensusLattice *lattice,
+                                  MachineLetter ml, int unplaced, int count);
 // The tally of the multiset of rank `index`.
 void census_lattice_unrank(const CensusLattice *lattice, uint32_t index,
                            uint8_t *tally);
+
+// Sets leave[index] to the KLV's value of every multiset of the lattice (0 for
+// one it does not hold), in one walk of its word graph.
+void census_leaves_from_klv(const CensusLattice *lattice, const KLV *klv,
+                            Equity *leave);
 
 // add(index, ml) is the rank of multiset(index) with one more ml, for every
 // index below the full racks. Every hot loop walks the lattice through this
@@ -95,6 +108,14 @@ void census_record_blank_variants(const CensusLattice *lattice,
                                   CensusPlacedTile *placed,
                                   int number_of_placed,
                                   const uint8_t *unseen_tally, int num_blanks);
+// census_record_blank_variants into play scores that other threads raise
+// with it too, each raised by an atomic max (catomic_max_int32).
+void census_record_blank_variants_shared(const CensusLattice *lattice,
+                                         Equity *play_scores, Equity real_score,
+                                         CensusPlacedTile *placed,
+                                         int number_of_placed,
+                                         const uint8_t *unseen_tally,
+                                         int num_blanks);
 
 // The max over subsets: dst[S] = the largest src[T] over every T within S.
 void census_max_over_subsets(const CensusLattice *lattice,

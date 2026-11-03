@@ -12,6 +12,8 @@ make magpie_test BUILD=no_pgo_release
 ./bin/magpie_test infbench:20:2:20261102 > infbench.log
 # Scan games for exchanges, with a generous quota (including exchange-all):
 ./bin/magpie_test infbench:20:20:20261102:exchanges > exchanges.log
+# Disable census to compare the same observations with per-rack move generation:
+./bin/magpie_test infbench:20:20:20261102:exchanges:movegen > exchanges-movegen.log
 # Compact results (other MAGPIE output also appears in the log):
 rg '^INFBENCH (settings|summary|delta)' infbench.log
 ```
@@ -142,3 +144,21 @@ log-loss delta is emitted. Marginal probabilities are not multiplied together
 to invent a joint probability. Inference runs once per mode for both reports;
 exchange timing repeats that common cost, rather than adding a second run.
 Prior timing includes construction of both kept and exchanged priors.
+
+## Census inference performance
+
+Inference defaults to census play scores when at least five tiles are unknown
+and the position satisfies the exactness conditions (a classic board, shared
+word graph, and the target on turn). Other positions use per-rack move generation.
+Empty boards use an opening builder that includes vowel placement penalties. The census builds board play scores
+once per inference; it does not change which candidate racks are considered.
+Played tiles and explicitly known target tiles remain fixed in every candidate.
+For softmax, accepted candidates are fully evaluated to retain the exact best
+alternative equity needed for weighting. Early termination only discards racks
+outside the margin.
+
+The optional `:movegen` suffix after `:exchanges` disables census for controlled
+speed comparisons. `settings` records include `census=0` or `census=1` (permission
+to use census, not a guarantee that every observation qualifies). Quality metrics
+must agree between the paths. Run timing comparisons sequentially with optimized
+binaries, and compare inference `seconds` separately from game generation.

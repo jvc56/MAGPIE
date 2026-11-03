@@ -30,3 +30,10 @@ Cutoff inference can still reject a rack as soon as a move exceeds the margin.
 For admitted racks, anchor pruning uses the observed equity so it retains moves
 needed to compute regret. Empty-bag weighted inference uses a full search because
 its admission exception also accepts moves above the margin.
+
+When at least five tiles are unknown, eligible positions use census play scores
+to evaluate candidate racks. Empty boards include the legacy vowel placement
+adjustment in each table entry before selecting its maximum; blank substitution
+changes face score but preserves the represented letter's vowel penalty. This
+accelerates inference without changing admission or softmax weights. See the
+[performance and parity report](census-inference-performance.md).

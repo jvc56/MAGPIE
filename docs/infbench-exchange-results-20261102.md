@@ -2,7 +2,9 @@
 
 Exploratory optimized run of `infbench:20:20:20261102:exchanges`, with the same
 CSW21 inputs and fixed two-ply budget as the [initial kept-leave report](infbench-results-20261102.md).
-See [metric definitions](infbench.md#exchanged-tile-accuracy).
+See [metric definitions](infbench.md#exchanged-tile-accuracy). The later
+[census optimization](census-inference-performance.md) reproduces these metrics
+within `1e-8`, including opening exchanges.
 Each policy played 20 game pairs, retaining natural exchanges by player 0
 and discarding non-exchange turns. The quota was 20 exchanges per game; no game
 reached it, so all exchanges before the bag emptied or game ended were scored.
