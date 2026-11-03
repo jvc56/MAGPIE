@@ -962,13 +962,18 @@ MAGPIE implements or builds on the following work:
   Practice and Experience 24(2), 1994. The GADDAG, which move generation
   searches.
 - Jean-Christophe Weill. _The ABDADA Distributed Minimax Search Algorithm._
-  ICCA Journal 19(1), 1996. The parallel endgame search.
+  ICCA Journal 19(1), 1996; also in the proceedings of ACM CSC '96,
+  [doi:10.1145/228329.228345](https://doi.org/10.1145/228329.228345). The
+  parallel endgame search.
 - Albert L. Zobrist. _A New Hashing Method with Application for Game Playing._
-  Technical Report 88, University of Wisconsin, 1970. The endgame and
-  pre-endgame transposition tables' keys.
+  Technical Report 88, University of Wisconsin, 1970.
+  [minds.wisconsin.edu](https://minds.wisconsin.edu/handle/1793/57624). The
+  endgame and pre-endgame transposition tables' keys.
 - David Blackman and Sebastiano Vigna. _Scrambled Linear Pseudorandom Number
-  Generators._ ACM Transactions on Mathematical Software 47(4), 2021. The
-  xoshiro random number generator.
+  Generators._ ACM Transactions on Mathematical Software 47(4), 2021.
+  [doi:10.1145/3460772](https://doi.org/10.1145/3460772),
+  [arXiv:1805.01407](https://arxiv.org/abs/1805.01407). The xoshiro random
+  number generator.
 - Guy L. Steele Jr., Doug Lea and Christine H. Flood. _Fast Splittable
   Pseudorandom Number Generators._ OOPSLA 2014.
   [doi:10.1145/2714064.2660195](https://doi.org/10.1145/2714064.2660195).
