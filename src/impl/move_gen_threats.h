@@ -21,7 +21,8 @@ void threats_get_unseen_tiles(const Game *game, Rack *unseen);
 // records a play once whichever of the unseen tiles make it: a letter played
 // more times than the unseen tiles hold it is played by blanks, which go
 // where the letter scores least, so each play has the highest score the
-// unseen tiles allow it.
+// unseen tiles allow it. The search follows the classic rules, not those of
+// another game variant.
 void generate_threats(const Game *game, const Rack *unseen, MoveList *threats);
 
 #endif

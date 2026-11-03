@@ -108,6 +108,9 @@
 #include <time.h>
 
 enum {
+  // The most plays threats lists, whatever -numplays is: it allocates a move
+  // for each up front.
+  CONFIG_MAX_THREATS = 100,
   HELP_INDENT = 10,
   // The most usage or example lines a help entry has, plus its NULL ending.
   HELP_MAX_LINES = 10,
@@ -2095,8 +2098,8 @@ static void help_entry_fill(const Config *config, int token,
       text = "Shows the opponent's highest-scoring next plays from the unseen "
              "tiles. These are the tiles the player on turn cannot see, the "
              "opponent's rack and the bag, and a play uses at most a rack of "
-             "them, blanks included. Shows -numplays plays unless given a "
-             "number.";
+             "them, blanks included. Shows -numplays plays, or as many as "
+             "given, up to 100. Supports only the classic game variant.";
       break;
     case ARG_TOKEN_SHOW_ENDGAME:
       usages[0] = "[<pv_index>]";
@@ -6125,13 +6128,24 @@ char *impl_threats(Config *config, ErrorStack *error_stack) {
     return empty_string();
   }
   config_init_game(config);
+  // The threat search follows the classic rules: in wordsmog or woadwage it
+  // would list plays the variant forbids and miss others it allows.
+  if (game_get_variant(config->game) != GAME_VARIANT_CLASSIC) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_THREATS_UNSUPPORTED_GAME,
+        string_duplicate("threats supports only the classic game variant"));
+    return empty_string();
+  }
 
   int num_threats = config->num_plays;
+  if (num_threats > CONFIG_MAX_THREATS) {
+    num_threats = CONFIG_MAX_THREATS;
+  }
   const char *num_threats_str =
       config_get_parg_value(config, ARG_TOKEN_THREATS, 0);
   if (num_threats_str) {
     string_to_int_or_push_error("number of threats", num_threats_str, 1,
-                                INT_MAX,
+                                CONFIG_MAX_THREATS,
                                 ERROR_STATUS_CONFIG_LOAD_INT_ARG_OUT_OF_BOUNDS,
                                 &num_threats, error_stack);
     if (!error_stack_is_empty(error_stack)) {

@@ -403,9 +403,10 @@ moves generation keeps.
 `threats` shows what the opponent could score next. It generates plays for the
 player not on turn from every tile the player on turn cannot see, the
 opponent's rack and the bag, playing up to a rack of them, and lists the highest
-scores first: `-numplays` of them, or as many as you ask for. It works with
-any number of tiles in the bag; once the bag is empty and the opponent's rack
-is known, it lists that rack's plays.
+scores first: `-numplays` of them, or as many as you ask for, up to 100. It
+works with any number of tiles in the bag; once the bag is empty and the
+opponent's rack is known, it lists that rack's plays. It supports only the
+classic game variant.
 
 ```
 magpie> threats

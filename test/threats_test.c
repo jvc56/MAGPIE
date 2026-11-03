@@ -246,6 +246,19 @@ static void test_threats_command(void) {
                                ERROR_STATUS_CONFIG_LOAD_INT_ARG_OUT_OF_BOUNDS);
   free(output);
 
+  // At most 100, whether asked for or from -numplays.
+  output = run_threats_command(config, "threats 100", ERROR_STATUS_SUCCESS);
+  assert(count_lines_starting_with_rank(output) == 100);
+  free(output);
+  output = run_threats_command(config, "threats 101",
+                               ERROR_STATUS_CONFIG_LOAD_INT_ARG_OUT_OF_BOUNDS);
+  free(output);
+  load_and_exec_config_or_die(config, "set -numplays 150");
+  output = run_threats_command(config, "threats", ERROR_STATUS_SUCCESS);
+  assert(count_lines_starting_with_rank(output) == 100);
+  free(output);
+  load_and_exec_config_or_die(config, "set -numplays 4");
+
   // The unseen tiles are the opponent's rack and the bag: everything but
   // the board and the rack of the player on turn.
   const Game *game = config_get_game(config);
@@ -255,6 +268,12 @@ static void test_threats_command(void) {
   const int tiles_on_board = 5;
   assert(rack_get_total_letters(&unseen) ==
          ld_get_total_tiles(ld) - tiles_on_board - RACK_SIZE);
+
+  // The search follows the classic rules, so other variants are refused.
+  load_and_exec_config_or_die(config, "set -var wordsmog");
+  output = run_threats_command(config, "threats",
+                               ERROR_STATUS_THREATS_UNSUPPORTED_GAME);
+  free(output);
   config_destroy(config);
 }
 
