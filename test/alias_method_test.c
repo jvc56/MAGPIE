@@ -9,6 +9,7 @@
 #include "../src/impl/config.h"
 #include "test_util.h"
 #include <assert.h>
+#include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -44,7 +45,9 @@ void test_alias_method_dist(const Config *config, AliasMethod *am,
     num_entries++;
   }
 
-  assert(alias_method_generate_tables(am));
+  const bool generated = alias_method_generate_tables(am);
+
+  assert(generated);
 
   const int total_samples = 10000;
 
@@ -91,8 +94,10 @@ static void test_alias_method_order_independent(const Config *config) {
     rack_set_to_string(ld, &rack, rack_strs[reverse_idx]);
     alias_method_add_rack(backward, &rack, counts[reverse_idx]);
   }
-  assert(alias_method_generate_tables(forward));
-  assert(alias_method_generate_tables(backward));
+  const bool forward_generated = alias_method_generate_tables(forward);
+  assert(forward_generated);
+  const bool backward_generated = alias_method_generate_tables(backward);
+  assert(backward_generated);
   XoshiroPRNG *forward_prng = prng_create(7);
   XoshiroPRNG *backward_prng = prng_create(7);
   for (int sample_idx = 0; sample_idx < 1000; sample_idx++) {
@@ -106,6 +111,25 @@ static void test_alias_method_order_independent(const Config *config) {
   alias_method_destroy(backward);
 }
 
+static void test_alias_method_zero_weight(const Config *config) {
+  AliasMethod *am = alias_method_create();
+  Rack rack;
+  rack_set_dist_size_and_reset(&rack, ld_get_size(config_get_ld(config)));
+  rack_set_to_string(config_get_ld(config), &rack, "AE");
+  alias_method_add_weighted_rack(am, &rack, 10, 0);
+  const bool zero_weight_generated = alias_method_generate_tables(am);
+  assert(!zero_weight_generated);
+  XoshiroPRNG *prng = prng_create(7);
+  assert(!alias_method_sample(am, prng, &rack));
+  alias_method_reset(am);
+  alias_method_add_weighted_rack(am, &rack, 10, 0.5);
+  const bool positive_weight_generated = alias_method_generate_tables(am);
+  assert(positive_weight_generated);
+  assert(alias_method_sample(am, prng, &rack));
+  prng_destroy(prng);
+  alias_method_destroy(am);
+}
+
 void test_alias_method(void) {
   Config *config =
       config_create_or_die("set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 "
@@ -113,7 +137,9 @@ void test_alias_method(void) {
   AliasMethod *am = alias_method_create();
   XoshiroPRNG *prng = prng_create(0);
 
-  assert(!alias_method_generate_tables(am));
+  const bool empty_generated = alias_method_generate_tables(am);
+
+  assert(!empty_generated);
   assert(!alias_method_sample(am, prng, NULL));
 
   test_alias_method_dist(config, am,
@@ -180,5 +206,6 @@ void test_alias_method(void) {
   alias_method_destroy(am);
   prng_destroy(prng);
   test_alias_method_order_independent(config);
+  test_alias_method_zero_weight(config);
   config_destroy(config);
 }

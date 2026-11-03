@@ -27,6 +27,9 @@ int inference_results_get_target_number_of_tiles_exchanged(
     const InferenceResults *results);
 Equity inference_results_get_target_score(const InferenceResults *results);
 Equity inference_results_get_equity_margin(const InferenceResults *results);
+Equity inference_results_get_temperature(const InferenceResults *results);
+void inference_results_set_temperature(InferenceResults *results,
+                                       Equity temperature);
 void inference_results_set_valid_for_current_game_state(
     InferenceResults *results, bool valid);
 bool inference_results_get_valid_for_current_game_state(
@@ -54,6 +57,15 @@ uint64_t inference_results_get_subtotal_sum_with_minimum(
     const InferenceResults *results, inference_stat_t inference_stat_type,
     MachineLetter letter, int minimum_number_of_letters,
     int subtotal_index_offset);
+double inference_results_get_weight_subtotal(
+    const InferenceResults *results, inference_stat_t inference_stat_type,
+    MachineLetter letter, int number_of_letters);
+void inference_results_add_to_letter_weight_subtotal(
+    InferenceResults *results, inference_stat_t inference_stat_type,
+    MachineLetter letter, int number_of_letters, double weight_delta);
+double inference_results_get_weight_subtotal_sum_with_minimum(
+    const InferenceResults *results, inference_stat_t inference_stat_type,
+    MachineLetter letter, int minimum_number_of_letters);
 LeaveRackList *inference_results_get_leave_rack_list(
     const InferenceResults *inference_results);
 AliasMethod *

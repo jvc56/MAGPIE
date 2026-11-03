@@ -959,7 +959,8 @@ const Move *get_top_move_for_player_on_turn(Game *game, MoveList *move_list,
 }
 
 Move *get_top_equity_move_for_inferences(Game *game, MoveList *move_list,
-                                         Equity target_equity) {
+                                         Equity target_equity,
+                                         Equity anchor_equity_cutoff) {
   const MoveGenArgs args = {.game = game,
                             .move_list = move_list,
                             .move_record_type = MOVE_RECORD_BEST,
@@ -967,6 +968,8 @@ Move *get_top_equity_move_for_inferences(Game *game, MoveList *move_list,
                             .override_kwg = NULL,
                             .eq_margin_movegen = 0,
                             .target_equity = target_equity,
+                            .anchor_equity_cutoff = anchor_equity_cutoff,
+                            .has_anchor_equity_cutoff = true,
                             // Inference thresholds are built from score plus
                             // leave; the PAT term would misalign
                             // recorded equities with them.

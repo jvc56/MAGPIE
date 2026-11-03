@@ -16,12 +16,15 @@
 
 #define SUBTOTALS_SIZE                                                         \
   (MAX_ALPHABET_SIZE * (RACK_SIZE) * NUMBER_OF_INFERENCE_SUBTOTALS)
+#define WEIGHT_SUBTOTALS_SIZE (MAX_ALPHABET_SIZE * (RACK_SIZE))
 
 struct InferenceResults {
   // Indexed by inference_stat_t
   Stat *equity_values[NUMBER_OF_INFER_TYPES];
   // Indexed by inference_stat_t
   uint64_t subtotals[NUMBER_OF_INFER_TYPES][SUBTOTALS_SIZE];
+  double weight_subtotals[NUMBER_OF_INFER_TYPES][WEIGHT_SUBTOTALS_SIZE];
+  bool has_weights;
   LeaveRackList *leave_rack_list;
   AliasMethod *alias_method;
   bool alias_method_created_internally;
@@ -31,6 +34,7 @@ struct InferenceResults {
   int target_number_of_tiles_exchanged;
   Equity target_score;
   Equity equity_margin;
+  Equity temperature;
   Rack target_played_tiles;
   Rack target_known_unplayed_tiles;
   Rack bag_as_rack;
@@ -43,6 +47,9 @@ InferenceResults *inference_results_create(AliasMethod *alias_method) {
   for (int i = 0; i < NUMBER_OF_INFER_TYPES; i++) {
     results->equity_values[i] = stat_create(false);
   }
+  memset(results->weight_subtotals, 0, sizeof(results->weight_subtotals));
+  results->has_weights = false;
+  results->temperature = 0;
   results->leave_rack_list = NULL;
   if (alias_method) {
     results->alias_method = alias_method;
@@ -75,6 +82,14 @@ inference_results_duplicate(const InferenceResults *inference_results) {
   }
   memcpy(new_results->subtotals, inference_results->subtotals,
          sizeof(new_results->subtotals));
+  new_results->has_weights = inference_results->has_weights;
+  if (inference_results->has_weights) {
+    memcpy(new_results->weight_subtotals, inference_results->weight_subtotals,
+           sizeof(new_results->weight_subtotals));
+  } else {
+    memset(new_results->weight_subtotals, 0,
+           sizeof(new_results->weight_subtotals));
+  }
   new_results->leave_rack_list =
       leave_rack_list_duplicate(inference_results->leave_rack_list);
   new_results->alias_method = NULL;
@@ -83,6 +98,7 @@ inference_results_duplicate(const InferenceResults *inference_results) {
       inference_results->target_number_of_tiles_exchanged;
   new_results->target_score = inference_results->target_score;
   new_results->equity_margin = inference_results->equity_margin;
+  new_results->temperature = inference_results->temperature;
   new_results->target_played_tiles = inference_results->target_played_tiles;
   new_results->target_known_unplayed_tiles =
       inference_results->target_known_unplayed_tiles;
@@ -113,6 +129,11 @@ void inference_results_reset(InferenceResults *results, int leave_list_capacity,
     stat_reset(results->equity_values[i]);
   }
   memset(results->subtotals, 0, sizeof(results->subtotals));
+  if (results->has_weights) {
+    memset(results->weight_subtotals, 0, sizeof(results->weight_subtotals));
+    results->has_weights = false;
+  }
+  results->temperature = 0;
   if (leave_list_capacity > 0) {
     if (!results->leave_rack_list) {
       results->leave_rack_list = leave_rack_list_create(leave_list_capacity);
@@ -163,6 +184,15 @@ Equity inference_results_get_target_score(const InferenceResults *results) {
 
 Equity inference_results_get_equity_margin(const InferenceResults *results) {
   return results->equity_margin;
+}
+
+Equity inference_results_get_temperature(const InferenceResults *results) {
+  return results->temperature;
+}
+
+void inference_results_set_temperature(InferenceResults *results,
+                                       Equity temperature) {
+  results->temperature = temperature;
 }
 
 // Always sets to false if interrupted
@@ -217,6 +247,11 @@ int get_letter_subtotal_index(MachineLetter letter, int number_of_letters,
                subtotal_type);
 }
 
+static inline int get_letter_weight_subtotal_index(MachineLetter letter,
+                                                   int number_of_letters) {
+  return (int)((letter * (RACK_SIZE)) + (number_of_letters - 1));
+}
+
 uint64_t inference_results_get_subtotal(const InferenceResults *results,
                                         inference_stat_t inference_stat_type,
                                         MachineLetter letter,
@@ -246,6 +281,44 @@ uint64_t inference_results_get_subtotal_sum_with_minimum(
   return sum;
 }
 
+double inference_results_get_weight_subtotal(
+    const InferenceResults *results, inference_stat_t inference_stat_type,
+    MachineLetter letter, int number_of_letters) {
+  if (!results->has_weights) {
+    return (double)inference_results_get_subtotal(results, inference_stat_type,
+                                                  letter, number_of_letters,
+                                                  INFERENCE_SUBTOTAL_DRAW);
+  }
+  return results->weight_subtotals[(int)inference_stat_type]
+                                  [get_letter_weight_subtotal_index(
+                                      letter, number_of_letters)];
+}
+
+void inference_results_add_to_letter_weight_subtotal(
+    InferenceResults *results, inference_stat_t inference_stat_type,
+    MachineLetter letter, int number_of_letters, double weight_delta) {
+  results->has_weights = true;
+  results
+      ->weight_subtotals[inference_stat_type][get_letter_weight_subtotal_index(
+          letter, number_of_letters)] += weight_delta;
+}
+
+double inference_results_get_weight_subtotal_sum_with_minimum(
+    const InferenceResults *results, inference_stat_t inference_stat_type,
+    MachineLetter letter, int minimum_number_of_letters) {
+  if (!results->has_weights) {
+    return (double)inference_results_get_subtotal_sum_with_minimum(
+        results, inference_stat_type, letter, minimum_number_of_letters,
+        INFERENCE_SUBTOTAL_DRAW);
+  }
+  double sum = 0.0;
+  for (int count = minimum_number_of_letters; count <= (RACK_SIZE); count++) {
+    sum += inference_results_get_weight_subtotal(results, inference_stat_type,
+                                                 letter, count);
+  }
+  return sum;
+}
+
 void inference_results_add_subtotals(InferenceResults *result_being_added,
                                      InferenceResults *result_being_updated) {
   for (int i = 0; i < NUMBER_OF_INFER_TYPES; i++) {
@@ -254,12 +327,50 @@ void inference_results_add_subtotals(InferenceResults *result_being_added,
           result_being_added->subtotals[i][j];
     }
   }
+  if (result_being_added->has_weights) {
+    result_being_updated->has_weights = true;
+    for (int stat_type_idx = 0; stat_type_idx < NUMBER_OF_INFER_TYPES;
+         stat_type_idx++) {
+      for (int idx = 0; idx < WEIGHT_SUBTOTALS_SIZE; idx++) {
+        result_being_updated->weight_subtotals[stat_type_idx][idx] +=
+            result_being_added->weight_subtotals[stat_type_idx][idx];
+      }
+    }
+  }
 }
 
 void inference_results_set_stat_for_letter(InferenceResults *inference_results,
                                            inference_stat_t inference_stat_type,
                                            Stat *stat, MachineLetter letter) {
   stat_reset(stat);
+  if (inference_results->has_weights) {
+    for (int count = 1; count <= (RACK_SIZE); count++) {
+      const uint64_t number_of_draws_with_exactly_count_of_letter =
+          inference_results_get_subtotal(inference_results, inference_stat_type,
+                                         letter, count,
+                                         INFERENCE_SUBTOTAL_DRAW);
+      if (number_of_draws_with_exactly_count_of_letter > 0) {
+        const double weight_with_exactly_count_of_letter =
+            inference_results_get_weight_subtotal(
+                inference_results, inference_stat_type, letter, count);
+        stat_push_weighted(stat, count,
+                           number_of_draws_with_exactly_count_of_letter,
+                           weight_with_exactly_count_of_letter);
+      }
+    }
+    const Stat *equity_values = inference_results_get_equity_values(
+        inference_results, inference_stat_type);
+    const uint64_t number_of_draws_without_letter =
+        stat_get_num_samples(equity_values) - stat_get_num_samples(stat);
+    double weight_without_letter =
+        stat_get_total_weight(equity_values) - stat_get_total_weight(stat);
+    if (weight_without_letter < 0.0) {
+      weight_without_letter = 0.0;
+    }
+    stat_push_weighted(stat, 0, number_of_draws_without_letter,
+                       weight_without_letter);
+    return;
+  }
   for (int i = 1; i <= (RACK_SIZE); i++) {
     uint64_t number_of_draws_with_exactly_i_of_letter =
         inference_results_get_subtotal(inference_results, inference_stat_type,

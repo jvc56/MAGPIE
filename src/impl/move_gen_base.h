@@ -187,6 +187,7 @@ typedef struct MoveGen {
 
   // Inference cutoff fields
   Equity target_equity_cutoff;
+  Equity anchor_equity_cutoff;
   bool stop_on_threshold;
   bool threshold_exceeded;
 

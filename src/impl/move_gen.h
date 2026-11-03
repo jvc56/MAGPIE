@@ -29,6 +29,13 @@ typedef struct MoveGenArgs {
   // is above it exactly when the best move is. EQUITY_MAX_VALUE, for every
   // other caller, turns this off.
   Equity target_equity;
+  // Optional lower bound for WMP anchor pruning when distinct from
+  // target_equity (e.g., softmax inference sets target_equity to the tail
+  // cutoff E_obs + M_tail for early exit and anchor_equity_cutoff to E_obs so
+  // anchors in [E_obs, E_obs + M_tail] are not skipped). Ignored unless
+  // has_anchor_equity_cutoff is true.
+  Equity anchor_equity_cutoff;
+  bool has_anchor_equity_cutoff;
 
   MoveList *move_list;
   // Output: bitvector of machine letters that appear in any valid move.

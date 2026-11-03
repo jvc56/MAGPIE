@@ -1013,6 +1013,7 @@ const Move *game_runner_get_top_simming_move(AutoplayWorker *autoplay_worker,
     // created. It does not need to be modified after initial creation as it
     // will always be empty because autoplay does not support challenged phonies
     // (yet).
+    const Equity temperature = infer_args->temperature;
     infer_args_fill(
         infer_args, infer_args->leave_list_capacity, infer_args->equity_margin,
         infer_args->game_history, game_runner->game_one_move_behind,
@@ -1029,6 +1030,7 @@ const Move *game_runner_get_top_simming_move(AutoplayWorker *autoplay_worker,
         &autoplay_worker->target_played_tiles,
         &autoplay_worker->target_known_rack,
         &autoplay_worker->nontarget_known_rack);
+    infer_args->temperature = temperature;
     if (move_get_type(&game_runner->previous_move) ==
         GAME_EVENT_TILE_PLACEMENT_MOVE) {
       infer_args->target_move = &game_runner->previous_move;

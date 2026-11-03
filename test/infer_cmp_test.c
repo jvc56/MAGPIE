@@ -74,7 +74,7 @@ static void test_infer_cutoff_optimization(bool use_wmp) {
 
   char *config_str = get_formatted_string(
       "set -lex CSW21 -wmp %s -s1 equity -s2 equity -r1 all -r2 all "
-      "-numplays 1 -threads %d -ima 5",
+      "-numplays 1 -threads %d -ima 5 -inftemp 2",
       use_wmp ? "true" : "false", NUM_THREADS);
   Config *config = config_create_or_die(config_str);
   free(config_str);

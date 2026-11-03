@@ -1,5 +1,6 @@
 #include "infer_test.h"
 
+#include "../src/def/equity_defs.h"
 #include "../src/def/game_history_defs.h"
 #include "../src/def/inference_defs.h"
 #include "../src/def/letter_distribution_defs.h"
@@ -30,6 +31,7 @@
 #include "test_constants.h"
 #include "test_util.h"
 #include <assert.h>
+#include <math.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -92,6 +94,7 @@ error_code_t infer_for_test(InferenceCtx **ctx, const Config *config,
       config_get_thread_control(config), false, true, target_index,
       int_to_equity(target_score), target_num_exch, &target_played_tiles,
       &target_known_rack, &nontarget_known_rack);
+  args.temperature = config_get_inference_temperature(config);
   if (!ctx) {
     infer_without_ctx(&args, inference_results, error_stack);
   } else {
@@ -1356,7 +1359,7 @@ void test_infer_exchange_cutoff_matches(void) {
       "cgp 2CHIGOE3T3/3O6NAE2/3M6END2/2AY6UG1G1/2B7MO1L1/1VODKA5i1OD/"
       "2R2TANNERS1RE/OUTA2ZA3T1IF/2I1CRoWDIE2A1/2V6FEEBS1/1NEWISHLY1LEA2/"
       "JA13/15/15/15 ILOOPQR/EEINTTX 0/0 0 -lex CSW21;";
-  const char *margins[] = {"5", "0", NULL};
+  const char *margins[] = {"5", "0", "5 -inftemp 2", "5 -inftemp 0.001", NULL};
   uint64_t num_accepted = 0;
   for (int margin_idx = 0; margins[margin_idx]; margin_idx++) {
     char *settings = get_formatted_string(
@@ -1411,6 +1414,7 @@ assert_inference_results_count_the_same(InferenceResults *results,
                                         InferenceResults *expected) {
   const int ld_size =
       rack_get_dist_size(inference_results_get_bag_as_rack(expected));
+  assert_inference_results_equal(results, expected, ld_size);
   for (int infer_type_idx = 0; infer_type_idx < NUMBER_OF_INFER_TYPES;
        infer_type_idx++) {
     const Stat *stat = inference_results_get_equity_values(
@@ -1494,8 +1498,11 @@ static void infer_for_threads_test(InferenceCtx **ctx, const Config *config,
 
 // Each possible leave is evaluated by exactly one of the workers, whichever
 // claims it, so the inference counts the same leaves at any number of threads.
-static void test_infer_same_results_for_any_number_of_threads(void) {
+static void test_infer_same_results_for_any_number_of_threads(bool weighted) {
   Config *config = create_config_for_threads_test(1);
+  if (weighted) {
+    load_and_exec_config_or_die(config, "set -inftemp 2 -ima 10");
+  }
   InferenceResults *expected_play_results = inference_results_create(NULL);
   InferenceResults *expected_exchange_results = inference_results_create(NULL);
   infer_for_threads_test(NULL, config, false, expected_play_results);
@@ -1506,12 +1513,15 @@ static void test_infer_same_results_for_any_number_of_threads(void) {
   assert(stat_get_num_unique_samples(inference_results_get_equity_values(
              expected_exchange_results, INFERENCE_TYPE_EXCHANGED)) > 0);
 
-  const int thread_counts[] = {2, 16};
+  const int thread_counts[] = {4, 16};
   const int num_thread_counts =
       (int)(sizeof(thread_counts) / sizeof(thread_counts[0]));
   for (int thread_count_idx = 0; thread_count_idx < num_thread_counts;
        thread_count_idx++) {
     config = create_config_for_threads_test(thread_counts[thread_count_idx]);
+    if (weighted) {
+      load_and_exec_config_or_die(config, "set -inftemp 2 -ima 10");
+    }
     // The second and third inferences reuse the context's workers, as
     // simulations do.
     InferenceCtx *ctx = NULL;
@@ -1535,7 +1545,7 @@ static void test_infer_same_results_for_any_number_of_threads(void) {
 // tiles. MoveGen must see those 6 bag tiles rather than 6 + tiles_to_infer,
 // or it will generate phantom exchanges on clunky racks and reject the true
 // leave at zero equity margin.
-static void test_infer_preendgame_no_phantom_exchange(void) {
+static void test_infer_preendgame_no_phantom_exchange(bool weighted) {
   // Swap the U on player 0's rack with an I from the 6-tile bag so player 0
   // holds IILOOQR (Q without U) and 6 tiles remain in the bag (13 unseen to
   // player 1's EEINTTX).
@@ -1546,6 +1556,9 @@ static void test_infer_preendgame_no_phantom_exchange(void) {
   Config *config = config_create_or_die(
       "set -lex CSW21 -wmp true -s1 equity -s2 equity -r1 all -r2 all "
       "-numplays 1 -threads 1 -ima 0");
+  if (weighted) {
+    load_and_exec_config_or_die(config, "set -inftemp 2");
+  }
   load_and_exec_config_or_die(config, cgp_13_unseen_q_no_u);
 
   Game *game = config_get_game(config);
@@ -1599,13 +1612,16 @@ static void test_infer_preendgame_no_phantom_exchange(void) {
 // moves. When the target move itself is known (e.g. from game history or
 // autoplay), evaluate_possible_leave must apply the same placement_adjustment
 // to the target move's equity cutoff.
-static void test_infer_opening_placement_adjustment_parity(void) {
+static void test_infer_opening_placement_adjustment_parity(bool weighted) {
   const char *gcg_header = "#character-encoding UTF-8\n"
                            "#player1 Tim Tim Weiss\n"
                            "#player2 Josh Josh Castellano\n";
   Config *config = config_create_or_die(
       "set -lex CSW21 -wmp true -s1 equity -s2 equity -r1 all -r2 all "
       "-numplays 1 -threads 1 -ima 0");
+  if (weighted) {
+    load_and_exec_config_or_die(config, "set -inftemp 2");
+  }
   load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
 
   // 8H RIN places I on 8I (between the 7I and 9I double-letter squares,
@@ -1638,7 +1654,58 @@ static void test_infer_opening_placement_adjustment_parity(void) {
   config_destroy(config);
 }
 
+// Independently enumerate each admitted leave's best move and verify the
+// posterior against its regret, including the draw-count prior.
+static void test_softmax_weights(void) {
+  Config *config = create_config_for_threads_test(1);
+  load_and_exec_config_or_die(config, "set -inftemp 2 -ima 10 -numplays 10000");
+  assert(config_get_inference_temperature(config) == int_to_equity(2));
+  assert(config_get_p1_inference_temperature(config) == int_to_equity(2));
+  load_and_exec_config_or_die(config, "set -inftemp1 3 -inftemp2 4");
+  assert(config_get_p1_inference_temperature(config) == int_to_equity(3));
+  assert(config_get_p2_inference_temperature(config) == int_to_equity(4));
+  InferenceResults *results = inference_results_create(NULL);
+  infer_for_threads_test(NULL, config, false, results);
+  assert(inference_results_get_temperature(results) == int_to_equity(2));
+  const LeaveRackList *leaves = inference_results_get_leave_rack_list(results);
+  assert(leave_rack_list_get_count(leaves) > 1);
+  Game *game = config_get_game(config);
+  const LetterDistribution *ld = game_get_ld(game);
+  Rack played;
+  rack_set_dist_size_and_reset(&played, ld_get_size(ld));
+  rack_set_to_string(ld, &played, "HUJA");
+  Rack leave;
+  rack_set_dist_size_and_reset(&leave, ld_get_size(ld));
+  MoveList *moves = move_list_create(1);
+  double min_likelihood = 1;
+  double max_likelihood = 0;
+  for (int leave_idx = 0; leave_idx < leave_rack_list_get_count(leaves);
+       leave_idx++) {
+    const LeaveRack *entry = leave_rack_list_get_rack(leaves, leave_idx);
+    leave_rack_get_leave(entry, &leave);
+    Rack *full_rack = player_get_rack(game_get_player(game, 0));
+    rack_copy(full_rack, &leave);
+    rack_add(full_rack, &played);
+    const Move *best = get_top_equity_move_for_inferences(
+        game, moves, EQUITY_MAX_VALUE, EQUITY_MAX_VALUE);
+    const Equity observed =
+        int_to_equity(20) +
+        klv_get_leave_value(player_get_klv(game_get_player(game, 0)), &leave);
+    const double regret = fmax(0.0, (double)move_get_equity(best) - observed);
+    const double likelihood =
+        leave_rack_get_weight(entry) / leave_rack_get_draws(entry);
+    assert(within_epsilon(likelihood, exp(-regret / int_to_equity(2))));
+    min_likelihood = fmin(min_likelihood, likelihood);
+    max_likelihood = fmax(max_likelihood, likelihood);
+  }
+  assert(min_likelihood < max_likelihood);
+  move_list_destroy(moves);
+  inference_results_destroy(results);
+  config_destroy(config);
+}
+
 void test_infer(void) {
+  test_softmax_weights();
   test_leave_rack_reset();
   test_trivial_random_probability();
   test_infer_rack_overflow();
@@ -1650,13 +1717,16 @@ void test_infer(void) {
   test_infer_empty_game_history();
   test_infer_exchange_margin();
   test_infer_exchange_cutoff_matches();
-  test_infer_preendgame_no_phantom_exchange();
-  test_infer_opening_placement_adjustment_parity();
+  test_infer_preendgame_no_phantom_exchange(false);
+  test_infer_preendgame_no_phantom_exchange(true);
+  test_infer_opening_placement_adjustment_parity(false);
+  test_infer_opening_placement_adjustment_parity(true);
   for (int i = 0; i < 2; i++) {
     const bool use_game_history = i == 1;
     test_infer_nonerror_cases(1, use_game_history);
     test_infer_nonerror_cases(2, use_game_history);
     test_infer_nonerror_cases(7, use_game_history);
   }
-  test_infer_same_results_for_any_number_of_threads();
+  test_infer_same_results_for_any_number_of_threads(false);
+  test_infer_same_results_for_any_number_of_threads(true);
 }

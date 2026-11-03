@@ -37,6 +37,7 @@
 #include "move_gen_base.h"
 #include "rack_draw.h"
 #include <assert.h>
+#include <math.h>
 #include <stdatomic.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -71,6 +72,7 @@ typedef struct Inference {
   // lose while still being considered
   // the top move.
   Equity equity_margin;
+  Equity temperature;
   bool use_infer_cutoff_optimization;
   // Every worker walks every possible leave in the same order;
   // current_rack_index is the position of the walk. A worker evaluates only
@@ -169,6 +171,23 @@ void record_valid_leave(const Rack *rack, InferenceResults *results,
                                   number_of_draws_for_leave);
 }
 
+static void record_valid_leave_weighted(const Rack *rack,
+                                        InferenceResults *results,
+                                        inference_stat_t stat_type,
+                                        double leave_value, uint64_t draws,
+                                        double weight) {
+  stat_push_weighted(inference_results_get_equity_values(results, stat_type),
+                     leave_value, draws, weight);
+  increment_subtotals_for_results(rack, results, stat_type, draws);
+  for (int ml = 0; ml < rack_get_dist_size(rack); ml++) {
+    const int count = rack_get_letter(rack, ml);
+    if (count > 0) {
+      inference_results_add_to_letter_weight_subtotal(results, stat_type, ml,
+                                                      count, weight);
+    }
+  }
+}
+
 // Finds the best leave of exactly keep_size tiles drawn from the target's
 // full rack (current_target_leave): the highest KLV value, the first found in
 // this enumeration order on ties. Enumerates each multiset of tiles once.
@@ -221,29 +240,34 @@ void evaluate_possible_leave(Inference *inference) {
       klv_get_leave_value(inference->klv, inference->current_target_leave);
   const bool is_exchange = inference->target_number_of_tiles_exchanged > 0;
 
-  Equity target_equity_cutoff;
+  Equity observed_equity;
   if (is_exchange) {
-    target_equity_cutoff =
-        get_best_exchange_equity(inference) + inference->equity_margin;
+    observed_equity = get_best_exchange_equity(inference);
   } else {
     const Game *game = inference->game;
-    const Equity nonopening_equity = static_eval_get_nonopening_move_equity(
-        game_get_ld(game), inference->current_target_leave,
-        player_get_rack(game_get_player(game, 1 - inference->target_index)),
-        inference->target_tiles_played, bag_get_letters(game_get_bag(game)),
-        inference->target_score, current_leave_value);
-    target_equity_cutoff = nonopening_equity +
-                           inference->target_placement_adjustment +
-                           inference->equity_margin;
+    observed_equity =
+        static_eval_get_nonopening_move_equity(
+            game_get_ld(game), inference->current_target_leave,
+            player_get_rack(game_get_player(game, 1 - inference->target_index)),
+            inference->target_tiles_played, bag_get_letters(game_get_bag(game)),
+            inference->target_score, current_leave_value) +
+        inference->target_placement_adjustment;
   }
-
-  // With the cutoff optimization, move generation stops at the first move
-  // above the cutoff and skips anchors that cannot reach it, so the move it
-  // returns is above the cutoff exactly when the best move is.
+  const Equity target_equity_cutoff =
+      observed_equity + inference->equity_margin;
+  // Empty-bag racks are always admitted, so their posterior needs a full
+  // search.
+  const bool use_cutoff =
+      inference->use_infer_cutoff_optimization &&
+      !(inference->temperature > 0 && rack_is_empty(inference->bag_as_rack));
+  // Accepted racks need the best equity above the observed play, even when
+  // that equity is below the admission cutoff.
   const Move *top_move = get_top_equity_move_for_inferences(
       inference->game, inference->move_list,
-      inference->use_infer_cutoff_optimization ? target_equity_cutoff
-                                               : EQUITY_MAX_VALUE);
+      use_cutoff ? target_equity_cutoff : EQUITY_MAX_VALUE,
+      use_cutoff ? (inference->temperature > 0 ? observed_equity
+                                               : target_equity_cutoff)
+                 : EQUITY_MAX_VALUE);
 
   const bool recordable = target_equity_cutoff >= move_get_equity(top_move) ||
                           rack_is_empty(inference->bag_as_rack);
@@ -253,6 +277,62 @@ void evaluate_possible_leave(Inference *inference) {
 
   const uint64_t number_of_draws_for_leave = get_number_of_draws_for_rack(
       inference->bag_as_rack, inference->current_target_leave);
+  if (inference->temperature > 0) {
+    const double loss =
+        fmax(0.0, (double)move_get_equity(top_move) - observed_equity);
+    const double weight =
+        (double)number_of_draws_for_leave * exp(-loss / inference->temperature);
+    if (is_exchange) {
+      record_valid_leave_weighted(inference->current_target_leave,
+                                  inference->results, INFERENCE_TYPE_RACK,
+                                  equity_to_double(current_leave_value),
+                                  number_of_draws_for_leave, weight);
+      const Rack *best_exchange_leave = inference->best_exchange_leave;
+      rack_copy(inference->current_target_exchanged,
+                inference->current_target_leave);
+      rack_subtract_using_floor_zero(inference->current_target_exchanged,
+                                     best_exchange_leave);
+      record_valid_leave_weighted(best_exchange_leave, inference->results,
+                                  INFERENCE_TYPE_LEAVE,
+                                  equity_to_double(klv_get_leave_value(
+                                      inference->klv, best_exchange_leave)),
+                                  number_of_draws_for_leave, weight);
+      record_valid_leave_weighted(
+          inference->current_target_exchanged, inference->results,
+          INFERENCE_TYPE_EXCHANGED,
+          equity_to_double(klv_get_leave_value(
+              inference->klv, inference->current_target_exchanged)),
+          number_of_draws_for_leave, weight);
+      LeaveRackList *lrl =
+          inference_results_get_leave_rack_list(inference->results);
+      if (lrl) {
+        leave_rack_list_insert_weighted_rack(
+            best_exchange_leave, inference->current_target_exchanged,
+            (int)number_of_draws_for_leave, current_leave_value, weight, lrl);
+      }
+      alias_method_add_weighted_rack(
+          inference_results_get_alias_method(inference->results),
+          best_exchange_leave, (int)number_of_draws_for_leave, weight);
+      rack_reset(inference->current_target_exchanged);
+    } else {
+      record_valid_leave_weighted(inference->current_target_leave,
+                                  inference->results, INFERENCE_TYPE_LEAVE,
+                                  equity_to_double(current_leave_value),
+                                  number_of_draws_for_leave, weight);
+      alias_method_add_weighted_rack(
+          inference_results_get_alias_method(inference->results),
+          inference->current_target_leave, (int)number_of_draws_for_leave,
+          weight);
+      LeaveRackList *lrl =
+          inference_results_get_leave_rack_list(inference->results);
+      if (lrl) {
+        leave_rack_list_insert_weighted_rack(
+            inference->current_target_leave, NULL,
+            (int)number_of_draws_for_leave, current_leave_value, weight, lrl);
+      }
+    }
+    return;
+  }
   if (is_exchange) {
     record_valid_leave(inference->current_target_leave, inference->results,
                        INFERENCE_TYPE_RACK,
@@ -429,6 +509,7 @@ Inference *inference_create(const Game *game, const InferenceArgs *args,
   inference->target_score = args->target_score;
   inference->target_number_of_tiles_exchanged = args->target_num_exch;
   inference->equity_margin = args->equity_margin;
+  inference->temperature = args->temperature;
   // Disable cutoff optimization for exchanges with large leaves
   // as benchmarks show it hurts performance for small exchanges
   const int leave_size = RACK_SIZE - args->target_num_exch;
@@ -470,6 +551,7 @@ void inference_reset(Inference *inference, const Game *game,
   inference->target_score = args->target_score;
   inference->target_number_of_tiles_exchanged = args->target_num_exch;
   inference->equity_margin = args->equity_margin;
+  inference->temperature = args->temperature;
   // Disable cutoff optimization for exchanges with large leaves
   const int leave_size = RACK_SIZE - args->target_num_exch;
   const bool is_small_exchange =
@@ -892,6 +974,7 @@ void infer_with_initialized_ctx(InferenceArgs *args, InferenceCtx *ctx,
   infer_manager(ctx, results);
 
   const Inference *wi = ctx->worker_inferences[0];
+  inference_results_set_temperature(results, wi->temperature);
   inference_results_finalize(
       args->target_played_tiles, wi->current_target_leave, wi->bag_as_rack,
       results, wi->target_score, wi->target_number_of_tiles_exchanged,
