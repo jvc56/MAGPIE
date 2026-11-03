@@ -86,7 +86,7 @@ def main():
                 'binary_sha256': hashlib.sha256(binary.read_bytes()).hexdigest(),
                 'lexicon': 'CSW24', 'wmp': True, 'rit': True, 'wit': True,
                 'bag_cycle': True, 'sim_plies': 2, 'candidates': 15,
-                'softmax_margin': 10, 'softmax_temperature': 2,
+                'softmax_margin': 20, 'softmax_temperature': 5,
                 'control_inference': False, 'PAT': False, 'game_pairs': True,
                 'inference_charged_to_game_clock': True,
                 'pilot_in_primary_analysis': False}

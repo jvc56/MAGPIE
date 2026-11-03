@@ -1,7 +1,7 @@
 # Equal-clock softmax versus no-inference match
 
 `infmatch:PAIRS:GAME_MS:SEED:STRIDE:NULL` is an on-demand test harness. Player 0
-uses softmax inference at margin 10 / temperature 2; player 1 samples uninformed
+uses softmax inference at margin 20 / temperature 5; player 1 samples uninformed
 opponent racks. With `NULL=1`, both disable inference for harness smoke tests.
 Both players simulate: CSW24, 15 equity candidates, two plies, top-two IDS,
 30-rollout initialization, bag cycling, WMP/RIT/WIT enabled, PAT disabled, and
@@ -28,12 +28,16 @@ use completed pairs, with ties counting half a win.
 
 - 18 concurrent workers, one simulation/inference thread each.
 - 10,000 ms per player per game.
-- Main seed 2026110300, stride 18; pilots use separate seeds.
+- Main seed 2026111300, stride 18; pilots use separate seeds.
 - Fixed stop: November 3, 7:00 AM Pacific (15:00 UTC).
 - No stopping based on observed wins; incomplete pairs at the deadline are excluded.
-- Output: `data/benchmarks/softmax-overnight-20261102/nightly/`.
+- Output: `data/benchmarks/softmax-overnight-20261102/nightly-20t5/`.
 
-The 18-worker calibration completed 72 games / 36 pairs in 73.245 seconds.
+The original 10/2 run is retained separately in `nightly/` and is not pooled
+with the 20/5 run. The switch was requested based on the earlier leaf-prediction
+benchmark, not match outcomes. The new run uses disjoint seeds.
+
+The 18-worker 10/2 calibration completed 72 games / 36 pairs in 73.245 seconds.
 Neither player had a clock stop or clock-driven static fallback. Mean time per
 game was 8.823 s for softmax and 8.727 s for control; unused allowance is expected
 when a game ends or deterministic endgame rollouts finish quickly. Softmax used
@@ -58,7 +62,7 @@ Build with `make magpie_test BUILD=no_pgo_release` and prepare RIT/WIT with
 python3 scripts/run_inference_match.py \
   --binary /absolute/path/to/frozen/magpie_test \
   --directory data/benchmarks/softmax-overnight-20261102/nightly \
-  --stop-at 2026-11-03T07:00:00-08:00 --workers 18 --budget-ms 10000
+  --stop-at 2026-11-03T07:00:00-08:00 --workers 18 --budget-ms 10000 --seed 2026111300
 ```
 
 `manifest.json` records the settings, `worker-*.log` contains per-game telemetry

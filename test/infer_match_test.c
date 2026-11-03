@@ -144,14 +144,14 @@ static double match_game(Config *config, unsigned int seed, int game_idx,
       }
       rack_copy(&observer, player_get_rack(game_get_player(game, seat)));
       InferenceArgs infer_args;
-      infer_args_fill(&infer_args, 0, int_to_equity(10), NULL, previous, 1, 0,
+      infer_args_fill(&infer_args, 0, int_to_equity(20), NULL, previous, 1, 0,
                       0, control, false, true, 1 - seat,
                       move_get_score(&previous_move),
                       move_get_type(&previous_move) == GAME_EVENT_EXCHANGE
                           ? move_get_tiles_played(&previous_move)
                           : 0,
                       &played, &known, &observer);
-      infer_args.temperature = int_to_equity(2);
+      infer_args.temperature = int_to_equity(5);
       infer_args.target_move = &previous_move;
       // Reallocate the remaining clock after every turn. Inference time is
       // debited along with simulation, reducing subsequent search budgets.
@@ -272,7 +272,7 @@ void infer_match_run_spec(const char *spec) {
     assert(player_get_word_info_table(player) != NULL);
   }
   printf("INFMATCH_SETTINGS milliseconds=%d seed=%llu stride=%d null=%d "
-         "lex=CSW24 threads=1 bag_cycle=1 rit=1 wit=1 margin=10 temperature=2 "
+         "lex=CSW24 threads=1 bag_cycle=1 rit=1 wit=1 margin=20 temperature=5 "
          "candidates=15 plies=2\n",
          milliseconds, (unsigned long long)seed, stride, null_match);
   if (fflush(stdout) != 0) {
