@@ -2,23 +2,14 @@
 
 **Macondo Accordant Game Program and Inference Engine**
 
-[![ci](https://github.com/jvc56/MAGPIE/actions/workflows/run-tests.yml/badge.svg?branch=main)](https://github.com/jvc56/MAGPIE/actions/workflows/run-tests.yml?query=branch%3Amain)
-[![WASM tests](https://github.com/jvc56/MAGPIE/actions/workflows/test-wasm.yml/badge.svg?branch=main)](https://github.com/jvc56/MAGPIE/actions/workflows/test-wasm.yml?query=branch%3Amain)
-[![XS codecs](https://github.com/jvc56/MAGPIE/actions/workflows/test-xs-codecs.yml/badge.svg?branch=main)](https://github.com/jvc56/MAGPIE/actions/workflows/test-xs-codecs.yml?query=branch%3Amain)
-[![Release Windows](https://github.com/jvc56/MAGPIE/actions/workflows/release-windows.yml/badge.svg)](https://github.com/jvc56/MAGPIE/actions/workflows/release-windows.yml)
-[![Release macOS](https://github.com/jvc56/MAGPIE/actions/workflows/release-macos.yml/badge.svg)](https://github.com/jvc56/MAGPIE/actions/workflows/release-macos.yml)
-[![Release Linux](https://github.com/jvc56/MAGPIE/actions/workflows/release-linux.yml/badge.svg)](https://github.com/jvc56/MAGPIE/actions/workflows/release-linux.yml)
+<table align="center"><tr>
+<td align="center"><a href="#windows"><img alt="Windows" src="https://img.shields.io/badge/Windows-x64%20%7C%20ARM-0078D4?style=for-the-badge&logo=data:image/svg%2bxml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCI+PHBhdGggZmlsbD0id2hpdGUiIGQ9Ik0wIDBoMTEuNHYxMS40SDB6TTEyLjYgMEgyNHYxMS40SDEyLjZ6TTAgMTIuNmgxMS40VjI0SDB6TTEyLjYgMTIuNkgyNFYyNEgxMi42eiIvPjwvc3ZnPg=="></a><br><a href="https://github.com/jvc56/MAGPIE/actions/workflows/release-windows.yml"><img alt="Windows build" src="https://img.shields.io/github/actions/workflow/status/jvc56/MAGPIE/release-windows.yml?label=build&style=flat-square"></a></td>
+<td align="center"><a href="#macos"><img alt="macOS" src="https://img.shields.io/badge/macOS-universal-000000?style=for-the-badge&logo=apple&logoColor=white"></a><br><a href="https://github.com/jvc56/MAGPIE/actions/workflows/release-macos.yml"><img alt="macOS build" src="https://img.shields.io/github/actions/workflow/status/jvc56/MAGPIE/release-macos.yml?label=build&style=flat-square"></a></td>
+<td align="center"><a href="#linux"><img alt="Linux" src="https://img.shields.io/badge/Linux-x64%20%7C%20arm64-FCC624?style=for-the-badge&logo=linux&logoColor=black"></a><br><a href="https://github.com/jvc56/MAGPIE/actions/workflows/release-linux.yml"><img alt="Linux build" src="https://img.shields.io/github/actions/workflow/status/jvc56/MAGPIE/release-linux.yml?label=build&style=flat-square"></a></td>
+<td align="center"><a href="https://magpie.birdtest.org"><img alt="Browser" src="https://img.shields.io/badge/Browser-magpie.birdtest.org-654FF0?style=for-the-badge&logo=webassembly&logoColor=white"></a><br><a href="https://github.com/jvc56/MAGPIE/actions/workflows/test-wasm.yml?query=branch%3Amain"><img alt="WASM tests" src="https://img.shields.io/github/actions/workflow/status/jvc56/MAGPIE/test-wasm.yml?label=wasm&branch=main&style=flat-square"></a></td>
+</tr></table>
 
-[![Latest release](https://img.shields.io/github/v/release/jvc56/MAGPIE)](https://github.com/jvc56/MAGPIE/releases/latest)
-[![Release date](https://img.shields.io/github/release-date/jvc56/MAGPIE)](https://github.com/jvc56/MAGPIE/releases/latest)
-[![Downloads](https://img.shields.io/github/downloads/jvc56/MAGPIE/total)](https://github.com/jvc56/MAGPIE/releases)
-[![Platforms](https://img.shields.io/badge/platforms-Windows%20%7C%20macOS%20%7C%20Linux-blue)](#installing-magpie)
-[![C99](https://img.shields.io/badge/language-C99-blue)](AGENTS.md#c-standard)
-[![License](https://img.shields.io/github/license/jvc56/MAGPIE)](LICENSE.md)
-[![Last commit](https://img.shields.io/github/last-commit/jvc56/MAGPIE)](https://github.com/jvc56/MAGPIE/commits/main)
-[![Commit activity](https://img.shields.io/github/commit-activity/m/jvc56/MAGPIE)](https://github.com/jvc56/MAGPIE/pulse)
-[![Contributors](https://img.shields.io/github/contributors/jvc56/MAGPIE)](https://github.com/jvc56/MAGPIE/graphs/contributors)
-[![Stars](https://img.shields.io/github/stars/jvc56/MAGPIE)](https://github.com/jvc56/MAGPIE)
+<p align="center"><a href="https://github.com/jvc56/MAGPIE/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/jvc56/MAGPIE?style=flat-square&label=latest"></a> <a href="https://github.com/jvc56/MAGPIE/releases"><img alt="Downloads" src="https://img.shields.io/github/downloads/jvc56/MAGPIE/total?style=flat-square"></a> <a href="https://github.com/jvc56/MAGPIE/actions/workflows/run-tests.yml?query=branch%3Amain"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/jvc56/MAGPIE/run-tests.yml?label=ci&branch=main&style=flat-square"></a> <a href="LICENSE.md"><img alt="License" src="https://img.shields.io/github/license/jvc56/MAGPIE?style=flat-square"></a></p>
 
 MAGPIE is a crossword game playing and analysis program. It generates and
 simulates moves, infers what an opponent kept, solves pre-endgames and
