@@ -3178,7 +3178,8 @@ static inline void set_descending_tile_scores(MoveGen *gen) {
          sizeof(gen->descending_tile_scores));
 }
 
-void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
+static inline __attribute__((always_inline)) void
+gen_load_position_base(MoveGen *gen, const MoveGenArgs *args) {
   const Game *game = args->game;
   gen->move_record_type = args->move_record_type;
   gen->move_sort_type = args->move_sort_type;
@@ -3363,6 +3364,23 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
                                          gen->row_number_of_anchors_cache);
   gen->board_lanes = board_get_readonly_lanes(gen->board, gen->cross_index);
 
+  gen->is_wordsmog = game_get_variant(game) == GAME_VARIANT_WORDSMOG;
+  gen->threshold_exceeded = false;
+  gen->stop_on_threshold = args->target_equity != EQUITY_MAX_VALUE;
+  // A word info table's prune and wordsmog's letters are shadow inputs that
+  // the cache's keys do not hold.
+  gen->lane_shadow_cache = gen->move_record_type == MOVE_RECORD_BEST_SMALL &&
+                                   gen->word_info_table == NULL &&
+                                   !gen->is_wordsmog
+                               ? args->lane_shadow_cache
+                               : NULL;
+}
+
+void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
+  gen_load_position_base(gen, args);
+  const Game *game = args->game;
+  const Player *player = game_get_player(game, gen->player_index);
+  const Player *opponent = game_get_player(game, 1 - gen->player_index);
   // opening_move_word/letter_penalties is read only by gen_get_static_equity
   // (the equity-recording paths). The endgame's small-record movegen types
   // never read it, so skip the per-node 240-byte copy for them.
@@ -3399,17 +3417,6 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
   } else {
     pat_eval_context_disable(&gen->pat_eval_ctx);
   }
-
-  gen->is_wordsmog = game_get_variant(game) == GAME_VARIANT_WORDSMOG;
-  gen->threshold_exceeded = false;
-  gen->stop_on_threshold = args->target_equity != EQUITY_MAX_VALUE;
-  // A word info table's prune and wordsmog's letters are shadow inputs that
-  // the cache's keys do not hold.
-  gen->lane_shadow_cache = gen->move_record_type == MOVE_RECORD_BEST_SMALL &&
-                                   gen->word_info_table == NULL &&
-                                   !gen->is_wordsmog
-                               ? args->lane_shadow_cache
-                               : NULL;
 }
 
 void gen_look_up_leaves_and_record_exchanges(MoveGen *gen) {
@@ -4482,10 +4489,8 @@ static void gen_remember_best_move(const MoveGen *gen, BestMoveCarry *carry,
                       searched_lanes, gen->number_of_tiles_in_bag);
 }
 
-void generate_moves(const MoveGenArgs *args) {
-  MoveGen *gen = get_movegen();
-  gen_count_movegen(gen);
-  gen_load_position(gen, args);
+static inline __attribute__((always_inline)) void
+gen_generate_loaded_moves(MoveGen *gen, const MoveGenArgs *args) {
   if (gen->move_record_type == MOVE_RECORD_ALL_SMALL ||
       gen->move_record_type == MOVE_RECORD_TILES_PLAYED) {
     if (gen->move_record_type == MOVE_RECORD_TILES_PLAYED) {
@@ -4631,4 +4636,24 @@ void generate_moves(const MoveGenArgs *args) {
     }
   }
   gen_record_pass(gen);
+}
+
+void generate_moves(const MoveGenArgs *args) {
+  MoveGen *gen = get_movegen();
+  gen_count_movegen(gen);
+  gen_load_position(gen, args);
+  gen_generate_loaded_moves(gen, args);
+}
+
+void generate_moves_with_pat_context(const MoveGenArgs *args,
+                                     const PATEvalContext *pat) {
+  assert(args->move_record_type == MOVE_RECORD_BEST);
+  assert(args->move_sort_type == MOVE_SORT_EQUITY);
+  MoveGen *gen = get_movegen();
+  gen_count_movegen(gen);
+  gen_load_position_base(gen, args);
+  board_copy_opening_penalties(gen->board, gen->opening_move_word_penalties,
+                               gen->opening_move_letter_penalties);
+  gen->pat_eval_ctx = *pat;
+  gen_generate_loaded_moves(gen, args);
 }

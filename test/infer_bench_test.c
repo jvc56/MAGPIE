@@ -33,6 +33,7 @@
 #include "../src/impl/gameplay.h"
 #include "../src/impl/inference.h"
 #include "../src/impl/move_gen.h"
+#include "../src/impl/pat_inference.h"
 #include "../src/str/move_string.h"
 #include "../src/str/rack_string.h"
 #include "../src/util/io_util.h"
@@ -59,6 +60,10 @@ enum {
   INFBENCH_THREADS = 4,
   INFBENCH_MAX_TURNS = 200,
   INFBENCH_SIM_ITERS = 1000,
+  INFBENCH_PAT_NONE = 0,
+  INFBENCH_PAT_VERIFY = 1,
+  INFBENCH_PAT_FAST = 2,
+  INFBENCH_PAT_REFERENCE = 3,
 };
 
 // All finite comparisons use the same declared mixture. Raw log loss is
@@ -808,6 +813,10 @@ typedef struct CalibrationContext {
   InferBenchPrediction predictions[2][CAL_MODE_COUNT];
   double seconds[2];
   int racks;
+  int hybrid_mode;
+  PATInference *hybrid;
+  double hybrid_seconds;
+  double hybrid_setup_seconds;
 } CalibrationContext;
 
 static void calibration_evaluate_rack(CalibrationContext *ctx, double ways) {
@@ -820,36 +829,61 @@ static void calibration_evaluate_rack(CalibrationContext *ctx, double ways) {
   for (int model = 0; model < 2; model++) {
     Timer timer;
     ctimer_start(&timer);
-    player_set_pat_usage(player, model == 0, 0);
-    const double best = equity_to_double(
-        move_get_equity(get_top_equity_move(ctx->game, ctx->moves)));
-    PATEvalContext *pat = NULL;
-    uint32_t classes = 0;
-    if (model == 1) {
-      pat = ctx->pat;
-      pat_eval_context_load(
-          pat, player_get_pat(player),
-          board_get_readonly_lanes(game_get_board(ctx->game), 0), ctx->ld,
-          player_get_rack(player), PAT_CLASS_MASK_ALL,
-          rack_get_total_letters(
-              player_get_rack(game_get_player(ctx->game, 1))));
-      pat_eval_context_set_kwg(pat, player_get_kwg(player),
-                               game_get_variant(ctx->game));
-      pat_eval_context_set_utility(
-          pat,
-          equity_to_int(player_get_score(player) -
-                        player_get_score(game_get_player(ctx->game, 1))),
-          bag_get_letters(game_get_bag(ctx->game)));
-      classes = pat_eval_context_get_active_classes(pat);
+    double best;
+    double observed;
+    if (model == 1 && ctx->hybrid_mode == INFBENCH_PAT_FAST) {
+      const PATInferenceEvaluation evaluation = pat_inference_evaluate(
+          ctx->hybrid, ctx->observed, &ctx->leave, int_to_equity(80));
+      best = equity_to_double(evaluation.best);
+      observed = equity_to_double(evaluation.observed);
+    } else {
+      player_set_pat_usage(player, model == 0, 0);
+      best = equity_to_double(
+          move_get_equity(get_top_equity_move(ctx->game, ctx->moves)));
+      PATEvalContext *pat = NULL;
+      uint32_t classes = 0;
+      if (model == 1) {
+        pat = ctx->pat;
+        pat_eval_context_load(
+            pat, player_get_pat(player),
+            board_get_readonly_lanes(game_get_board(ctx->game), 0), ctx->ld,
+            player_get_rack(player), PAT_CLASS_MASK_ALL,
+            rack_get_total_letters(
+                player_get_rack(game_get_player(ctx->game, 1))));
+        pat_eval_context_set_kwg(pat, player_get_kwg(player),
+                                 game_get_variant(ctx->game));
+        pat_eval_context_set_utility(
+            pat,
+            equity_to_int(player_get_score(player) -
+                          player_get_score(game_get_player(ctx->game, 1))),
+            bag_get_letters(game_get_bag(ctx->game)));
+        classes = pat_eval_context_get_active_classes(pat);
+      }
+      observed = equity_to_double(static_eval_get_move_equity(
+          ctx->ld, ctx->klv, ctx->observed, &ctx->leave,
+          player_get_rack(game_get_player(ctx->game, 1)), ctx->word_penalties,
+          ctx->letter_penalties, classes, pat,
+          board_get_tiles_played(game_get_board(ctx->game)),
+          bag_get_letters(game_get_bag(ctx->game))));
     }
-    const double observed = equity_to_double(static_eval_get_move_equity(
-        ctx->ld, ctx->klv, ctx->observed, &ctx->leave,
-        player_get_rack(game_get_player(ctx->game, 1)), ctx->word_penalties,
-        ctx->letter_penalties, classes, pat,
-        board_get_tiles_played(game_get_board(ctx->game)),
-        bag_get_letters(game_get_bag(ctx->game))));
     const double regret = fmax(0, best - observed);
     ctx->seconds[model] += ctimer_elapsed_seconds(&timer);
+    if (model == 1 && ctx->hybrid_mode == INFBENCH_PAT_VERIFY) {
+      Timer hybrid_timer;
+      ctimer_start(&hybrid_timer);
+      const int margin = calibration_margins[ctx->racks % CAL_MARGIN_COUNT];
+      const PATInferenceEvaluation evaluation = pat_inference_evaluate(
+          ctx->hybrid, ctx->observed, &ctx->leave, int_to_equity(margin));
+      ctx->hybrid_seconds += ctimer_elapsed_seconds(&hybrid_timer);
+      assert(fabs(equity_to_double(evaluation.observed) - observed) < 0.0001);
+      if (evaluation.resolution == PAT_INFERENCE_EXACT) {
+        assert(fabs(equity_to_double(evaluation.best) - best) < 0.0001);
+      } else if (evaluation.resolution == PAT_INFERENCE_ZERO_REGRET) {
+        assert(best <= observed + 0.0001);
+      } else {
+        assert(best > observed + margin);
+      }
+    }
     for (int margin_idx = 0; margin_idx < CAL_MARGIN_COUNT; margin_idx++) {
       if (regret > calibration_margins[margin_idx] + 0.000001) {
         continue;
@@ -909,9 +943,10 @@ static void calibration_print(const InferBenchScore *score, int pair_idx,
 
 static void calibration_observe(const Config *config, const Move *observed,
                                 int pair_idx, int game_idx, int turn,
-                                bool timing_only) {
+                                bool timing_only, int hybrid_mode) {
   CalibrationContext *ctx = calloc_or_die(1, sizeof(CalibrationContext));
   ctx->game = game_duplicate(config_get_game(config));
+  ctx->hybrid_mode = hybrid_mode;
   ctx->observed = observed;
   ctx->ld = game_get_ld(ctx->game);
   ctx->klv = player_get_klv(game_get_player(ctx->game, 0));
@@ -942,6 +977,17 @@ static void calibration_observe(const Config *config, const Move *observed,
     rack_set_dist_size_and_reset(&ctx->leave, ld_get_size(ctx->ld));
     board_copy_opening_penalties(game_get_board(ctx->game), ctx->word_penalties,
                                  ctx->letter_penalties);
+    if (hybrid_mode == INFBENCH_PAT_VERIFY ||
+        hybrid_mode == INFBENCH_PAT_FAST) {
+      ErrorStack *setup_errors = error_stack_create();
+      Timer setup_timer;
+      ctimer_start(&setup_timer);
+      ctx->hybrid =
+          pat_inference_create(ctx->game, leave_size >= 4, setup_errors);
+      ctx->hybrid_setup_seconds = ctimer_elapsed_seconds(&setup_timer);
+      assert(error_stack_is_empty(setup_errors) && ctx->hybrid != NULL);
+      error_stack_destroy(setup_errors);
+    }
     calibration_enumerate(ctx, 0, leave_size, 1);
   }
   Rack known;
@@ -1022,6 +1068,20 @@ static void calibration_observe(const Config *config, const Move *observed,
          "static_seconds=%.6f pat_seconds=%.6f\n",
          pair_idx, game_idx, turn, leave_size, ctx->racks, ctx->seconds[0],
          ctx->seconds[1]);
+  if (ctx->hybrid != NULL) {
+    const PATInferenceStats stats = pat_inference_get_stats(ctx->hybrid);
+    printf("PATHYBRID pair=%d game=%d turn=%d leave=%d racks=%llu exact=%llu "
+           "zero=%llu rejected=%llu setup=%.9f hybrid=%.9f reference=%.9f\n",
+           pair_idx, game_idx, turn, leave_size,
+           (unsigned long long)stats.racks,
+           (unsigned long long)stats.exact_searches,
+           (unsigned long long)stats.zero_regrets,
+           (unsigned long long)stats.rejected, ctx->hybrid_setup_seconds,
+           hybrid_mode == INFBENCH_PAT_VERIFY ? ctx->hybrid_seconds
+                                              : ctx->seconds[1],
+           hybrid_mode == INFBENCH_PAT_VERIFY ? ctx->seconds[1] : 0);
+    pat_inference_destroy(ctx->hybrid);
+  }
   inference_ctx_destroy(inference_ctx);
   inference_results_destroy(results);
   error_stack_destroy(errors);
@@ -1038,7 +1098,7 @@ static void infbench_game(Config *config, int policy, int pair_idx,
                           InferBenchScore scores[INFBENCH_MODES],
                           InferBenchScore exchanged_scores[INFBENCH_MODES],
                           bool exchanges_only, bool use_census, bool one_pat,
-                          bool calibrate, bool timing_only) {
+                          bool calibrate, bool timing_only, int hybrid_mode) {
   Game *game = config_get_game(config);
   game_reset(game);
   game_seed(game, seed);
@@ -1076,7 +1136,10 @@ static void infbench_game(Config *config, int policy, int pair_idx,
       const int bag_count = bag_get_letters(game_get_bag(game));
       const int stage = bag_count <= 14 ? 0 : bag_count <= 42 ? 1 : 2;
       const bool sample =
-          calibrate
+          hybrid_mode != INFBENCH_PAT_NONE
+              ? (type == GAME_EVENT_TILE_PLACEMENT_MOVE && leave_size > 0 &&
+                 leave_size <= 4 && !sampled[leave_size][stage])
+          : calibrate
               ? (type == GAME_EVENT_EXCHANGE ||
                  (!exchanges_only && type == GAME_EVENT_TILE_PLACEMENT_MOVE &&
                   leave_size > 0 && !sampled[leave_size][stage]))
@@ -1090,7 +1153,7 @@ static void infbench_game(Config *config, int policy, int pair_idx,
       if (sample && bag_get_letters(game_get_bag(game)) > 0) {
         if (calibrate) {
           calibration_observe(config, &chosen, pair_idx, game_idx, turn,
-                              timing_only);
+                              timing_only, hybrid_mode);
           sampled[leave_size][stage] = true;
         } else if (one_pat) {
           infbench_pat64_observe(config, &chosen, pair_idx, game_idx, turn);
@@ -1199,6 +1262,7 @@ void infer_bench_run_spec(const char *spec) {
   bool one_pat = false;
   bool calibrate = false;
   bool timing_only = false;
+  int hybrid_mode = INFBENCH_PAT_NONE;
   bool use_census = true;
   if (spec != NULL) {
     StringSplitter *fields = split_string(spec, ':', true);
@@ -1206,8 +1270,9 @@ void infer_bench_run_spec(const char *spec) {
     if (num_fields < 3 || num_fields > 5) {
       string_splitter_destroy(fields);
       log_fatal("usage: "
-                "infbench:PAIRS:POSITIONS_PER_GAME:SEED[:exchanges|onepat[:"
-                "movegen]]");
+                "infbench:PAIRS:POSITIONS_PER_GAME:SEED[:exchanges|onepat|"
+                "calibrate|calexchanges|margintiming|pathybrid|pathybridfast|"
+                "patreference][:movegen]");
     }
     ErrorStack *errors = error_stack_create();
     pairs = string_to_int(string_splitter_get_item(fields, 0), errors);
@@ -1215,10 +1280,18 @@ void infer_bench_run_spec(const char *spec) {
     const uint64_t parsed_seed =
         string_to_uint64(string_splitter_get_item(fields, 2), errors);
     if (num_fields >= 4) {
+      const char *mode_name = string_splitter_get_item(fields, 3);
+      if (strings_equal(mode_name, "pathybrid")) {
+        hybrid_mode = INFBENCH_PAT_VERIFY;
+      } else if (strings_equal(mode_name, "pathybridfast")) {
+        hybrid_mode = INFBENCH_PAT_FAST;
+      } else if (strings_equal(mode_name, "patreference")) {
+        hybrid_mode = INFBENCH_PAT_REFERENCE;
+      }
       timing_only =
           strings_equal(string_splitter_get_item(fields, 3), "margintiming");
       calibrate =
-          timing_only ||
+          hybrid_mode != INFBENCH_PAT_NONE || timing_only ||
           (strings_equal(string_splitter_get_item(fields, 3), "calibrate") ||
            strings_equal(string_splitter_get_item(fields, 3), "calexchanges"));
       one_pat = strings_equal(string_splitter_get_item(fields, 3), "onepat");
@@ -1269,7 +1342,7 @@ void infer_bench_run_spec(const char *spec) {
         infbench_game(config, policy, pair_idx, game_idx, positions,
                       seed + (unsigned int)pair_idx, pair_scores,
                       exchanged_pair_scores, exchanges_only, use_census,
-                      one_pat, calibrate, timing_only);
+                      one_pat, calibrate, timing_only, hybrid_mode);
       }
       infbench_accumulate_pair(pair_scores, totals, deltas);
       infbench_accumulate_pair(exchanged_pair_scores, exchanged_totals,

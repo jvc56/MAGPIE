@@ -191,9 +191,7 @@ at least five tiles are unknown, including exchanges.
 
 PAT cannot be substituted into the existing single-score-per-played-multiset
 census exactly: placement geometry and candidate-rack-dependent unseen counts
-can change which move is best. A future exact hybrid could use conservative
-census/PAT bounds to settle easy racks and invoke exact PAT movegen only for
-ambiguous ones. Retaining candidate placements/features or sharing only
-rack-independent board setup are other possibilities. A shared PAT context
-that ignores the candidate rack would be an approximation requiring a separate
-quality evaluation. None of these census/PAT optimizations was implemented here.
+can change which move is best. The subsequent [exact PAT hybrid](pat-inference-hybrid.md)
+caches board setup, uses conservative census/PAT bounds to settle easy racks,
+and invokes exact PAT movegen for ambiguous racks. It is opt-in for experiments;
+the calibration results above were collected with the original exact PAT path.

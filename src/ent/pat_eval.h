@@ -165,6 +165,13 @@ void pat_eval_context_disable(PATEvalContext *pat_eval_ctx);
 // carry no correction; every load or disable clears it.
 void pat_eval_context_set_utility(PATEvalContext *pat_eval_ctx, int margin,
                                   int bag);
+// Reuse board geometry, weighted feature maps, and utility tables after only
+// the player's rack changes. Board, model, opponent size, and game state must
+// remain unchanged. board_unseen is pat_compute_unseen_counts with no rack
+// removed. All rack-dependent scans and bounds are refreshed.
+void pat_eval_context_reload_rack(PATEvalContext *pat_eval_ctx,
+                                  const Rack *player_rack,
+                                  const uint8_t *board_unseen);
 // Sets the lexicon that resolves hooks a move creates, and the variant whose
 // words it spells.
 void pat_eval_context_set_kwg(PATEvalContext *pat_eval_ctx, const KWG *kwg,

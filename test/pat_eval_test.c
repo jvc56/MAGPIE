@@ -17,6 +17,7 @@
 #include "../src/ent/move.h"
 #include "../src/ent/pat.h"
 #include "../src/ent/pat_eval.h"
+#include "../src/ent/pat_features.h"
 #include "../src/ent/pat_lexicon.h"
 #include "../src/ent/player.h"
 #include "../src/ent/players_data.h"
@@ -435,7 +436,80 @@ void test_pat_rollout_default_classes(void) {
   players_data_destroy(players_data);
 }
 
+static void test_pat_eval_rack_reload(void) {
+  Config *config = config_create_or_die("set -lex CSW21 -s1 equity -r1 all");
+  load_and_exec_config_or_die(config, PAT_EVAL_Q_CGP);
+  Game *game = config_get_game(config);
+  const LetterDistribution *ld = game_get_ld(game);
+  const Player *player = game_get_player(game, 0);
+  PATWeights *pat = pat_test_create_prepared("reload", game);
+  pat_set_weight(pat, PAT_FEATURE_HOOK_START, PAT_EVAL_TEST_HOOK_WEIGHT);
+  pat_set_combine_gamma(pat, 0.5);
+  pat_set_own_asset_discount(pat, 0.5);
+  pat_set_stage_scale(pat, PAT_STAGE_EARLY, 0.7);
+  PATEvalContext *cached = malloc_or_die(sizeof(PATEvalContext));
+  PATEvalContext *fresh = malloc_or_die(sizeof(PATEvalContext));
+  const Square *lanes = board_get_readonly_lanes(game_get_board(game), 0);
+  uint8_t board_unseen[MAX_ALPHABET_SIZE];
+  pat_compute_unseen_counts(lanes, ld, NULL, board_unseen);
+  const char *racks[] = {"IIAEORS", "AEIRST?", "AAEEEIO", "?QJUAEZ", "IIAEORS"};
+  pat_eval_context_load(cached, pat, lanes, ld, player_get_rack(player),
+                        PAT_CLASS_MASK_ALL, RACK_SIZE);
+  pat_eval_context_set_kwg(cached, player_get_kwg(player),
+                           game_get_variant(game));
+  MoveList *moves = move_list_create(64);
+  for (unsigned int rack_idx = 0; rack_idx < sizeof(racks) / sizeof(racks[0]);
+       rack_idx++) {
+    rack_set_to_string(ld, player_get_rack(player), racks[rack_idx]);
+    pat_eval_context_reload_rack(cached, player_get_rack(player), board_unseen);
+    pat_eval_context_load(fresh, pat, lanes, ld, player_get_rack(player),
+                          PAT_CLASS_MASK_ALL, RACK_SIZE);
+    pat_eval_context_set_kwg(fresh, player_get_kwg(player),
+                             game_get_variant(game));
+    assert(cached->pre_penalty == fresh->pre_penalty);
+    assert(cached->term_scale == fresh->term_scale);
+    for (int ml = 0; ml < MAX_ALPHABET_SIZE; ml++) {
+      assert(cached->unseen_counts[ml] == fresh->unseen_counts[ml]);
+    }
+    for (int dir = 0; dir < 2; dir++) {
+      for (int lane = 0; lane < BOARD_DIM; lane++) {
+        assert(pat_eval_lane_penalty_bound(cached, dir, lane) ==
+               pat_eval_lane_penalty_bound(fresh, dir, lane));
+      }
+    }
+    const MoveGenArgs args = {.game = game,
+                              .move_list = moves,
+                              .move_record_type = MOVE_RECORD_ALL,
+                              .move_sort_type = MOVE_SORT_EQUITY,
+                              .target_equity = EQUITY_MAX_VALUE,
+                              .disable_pat = true};
+    generate_moves(&args);
+    for (int move_idx = 0; move_idx < move_list_get_count(moves); move_idx++) {
+      const Move *move = move_list_get_move(moves, move_idx);
+      Rack leave = *player_get_rack(player);
+      if (move_get_type(move) == GAME_EVENT_TILE_PLACEMENT_MOVE) {
+        for (int tile_idx = 0; tile_idx < move_get_tiles_length(move);
+             tile_idx++) {
+          const MachineLetter tile = move_get_tile(move, tile_idx);
+          if (tile != PLAYED_THROUGH_MARKER) {
+            rack_take_letter(&leave, get_is_blanked(tile) ? BLANK_MACHINE_LETTER
+                                                          : tile);
+          }
+        }
+      }
+      assert(pat_eval_move_penalty(cached, move, &leave) ==
+             pat_eval_move_penalty(fresh, move, &leave));
+    }
+  }
+  move_list_destroy(moves);
+  free(cached);
+  free(fresh);
+  pat_destroy(pat);
+  config_destroy(config);
+}
+
 void test_pat_eval(void) {
+  test_pat_eval_rack_reload();
   test_pat_eval_hand_position();
   test_pat_eval_class_masks();
   test_pat_eval_empty_bag();

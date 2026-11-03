@@ -384,99 +384,13 @@ static void pat_drop_unweighted_units(PATEvalContext *pat_eval_ctx,
   pat_eval_ctx->num_dd = kept;
 }
 
-static void pat_eval_context_load_units(
-    PATEvalContext *pat_eval_ctx, const PATWeights *weights,
-    const Square *lanes, const LetterDistribution *ld, const Rack *player_rack,
-    bool drop_unweighted_units, uint32_t enabled_classes_mask,
-    int opponent_rack_size) {
-  pat_eval_ctx->weights = weights;
-  // Inert until pat_eval_context_set_utility says otherwise.
-  pat_eval_ctx->utility_row = NULL;
-  pat_eval_ctx->utility_bound = 0;
-  pat_eval_ctx->utility_non_placement = 0;
-  if (!weights) {
-    return;
-  }
-  pat_eval_ctx->opponent_rack_size = opponent_rack_size;
-  // Without a word list until pat_eval_context_set_kwg gives it one.
-  pat_eval_ctx->kwg = NULL;
-  pat_eval_ctx->woadwage = false;
-  pat_eval_ctx->active_classes_mask = 0;
-  for (int premium_class = 0; premium_class < PAT_NUM_PREMIUM_CLASSES;
-       premium_class++) {
-    if (pat_class_is_weighted(weights, premium_class, enabled_classes_mask)) {
-      pat_eval_ctx->active_classes_mask |= 1U << premium_class;
-    }
-  }
-  pat_eval_ctx->ld = ld;
-  pat_eval_ctx->lanes = lanes;
-  pat_compute_unseen_counts(lanes, ld, player_rack,
-                            pat_eval_ctx->unseen_counts);
-  pat_eval_ctx->num_premium = pat_find_premium_squares(
-      lanes, pat_eval_ctx->premium_rows, pat_eval_ctx->premium_cols,
-      pat_eval_ctx->premium_classes);
-  pat_eval_ctx->num_dd = pat_find_dd(
-      lanes, pat_eval_ctx->dd_dirs, pat_eval_ctx->dd_lanes,
-      pat_eval_ctx->dd_los, pat_eval_ctx->dd_his, pat_eval_ctx->dd_tiers);
-  if (drop_unweighted_units) {
-    pat_drop_unweighted_units(pat_eval_ctx, weights, enabled_classes_mask);
-  }
-  pat_eval_ctx->num_units =
-      pat_eval_ctx->num_premium * 2 + pat_eval_ctx->num_dd;
+static void pat_eval_context_refresh_units(PATEvalContext *pat_eval_ctx,
+                                           const Rack *player_rack) {
+  const PATWeights *weights = pat_eval_ctx->weights;
   memset(pat_eval_ctx->unit_mask_by_row, 0,
          sizeof(pat_eval_ctx->unit_mask_by_row));
   memset(pat_eval_ctx->unit_mask_by_col, 0,
          sizeof(pat_eval_ctx->unit_mask_by_col));
-  static_assert(PAT_MAX_SCAN_UNITS <= PAT_MASK_WORDS * 64,
-                "unit masks must cover every scan unit");
-  static_assert(PAT_MAX_SCAN_UNITS <= UINT16_MAX,
-                "unit order entries must hold every unit index");
-  pat_eval_ctx->board_is_empty = true;
-  for (int row = 0; row < BOARD_DIM && pat_eval_ctx->board_is_empty; row++) {
-    const Square *lane =
-        board_get_row_cache(lanes, row, BOARD_HORIZONTAL_DIRECTION);
-    for (int col = 0; col < BOARD_DIM; col++) {
-      if (square_get_letter(&lane[col]) != ALPHABET_EMPTY_SQUARE_MARKER) {
-        pat_eval_ctx->board_is_empty = false;
-        break;
-      }
-    }
-  }
-  {
-    int total_unseen = 0;
-    for (int ml = 0; ml < MAX_ALPHABET_SIZE; ml++) {
-      total_unseen += pat_eval_ctx->unseen_counts[ml];
-    }
-    int bag_count = total_unseen - opponent_rack_size;
-    if (bag_count < 0) {
-      bag_count = 0;
-    }
-    pat_eval_ctx->term_scale =
-        weights->stage_scale[pat_stage_for_bag(bag_count)];
-  }
-  pat_eval_ctx->score_channels = !drop_unweighted_units;
-  for (int bin_idx = 0; bin_idx < PAT_HOOK_BIN_COUNT; bin_idx++) {
-    if (weights->weights[PAT_FEATURE_HOOK_SCORE_START + bin_idx] != 0) {
-      pat_eval_ctx->score_channels = true;
-    }
-  }
-  for (int unit_group = 0; unit_group < PAT_NUM_UNIT_GROUPS; unit_group++) {
-    uint8_t group_features[PAT_NUM_FEATURES];
-    const int num_group_features =
-        pat_unit_group_features(unit_group, group_features);
-    int num_weighted = 0;
-    for (int group_idx = 0; group_idx < num_group_features; group_idx++) {
-      const int feature_index = group_features[group_idx];
-      if (weights->weights[feature_index] != 0) {
-        pat_eval_ctx->group_feature_index[unit_group][num_weighted] =
-            (uint8_t)feature_index;
-        pat_eval_ctx->group_feature_weight[unit_group][num_weighted] =
-            weights->weights[feature_index];
-        num_weighted++;
-      }
-    }
-    pat_eval_ctx->group_num_features[unit_group] = (uint8_t)num_weighted;
-  }
   for (int unit_index = 0; unit_index < pat_eval_ctx->num_units; unit_index++) {
     int32_t unit_features[PAT_NUM_FEATURES];
     memset(unit_features, 0, sizeof(unit_features));
@@ -595,6 +509,123 @@ static void pat_eval_context_load_units(
         pat_eval_scaled(pat_eval_ctx,
                         pat_units_penalty_bound(pat_eval_ctx, col_bound_units));
   }
+}
+
+static void pat_eval_context_load_units(
+    PATEvalContext *pat_eval_ctx, const PATWeights *weights,
+    const Square *lanes, const LetterDistribution *ld, const Rack *player_rack,
+    bool drop_unweighted_units, uint32_t enabled_classes_mask,
+    int opponent_rack_size) {
+  pat_eval_ctx->weights = weights;
+  // Inert until pat_eval_context_set_utility says otherwise.
+  pat_eval_ctx->utility_row = NULL;
+  pat_eval_ctx->utility_bound = 0;
+  pat_eval_ctx->utility_non_placement = 0;
+  if (!weights) {
+    return;
+  }
+  pat_eval_ctx->opponent_rack_size = opponent_rack_size;
+  // Without a word list until pat_eval_context_set_kwg gives it one.
+  pat_eval_ctx->kwg = NULL;
+  pat_eval_ctx->woadwage = false;
+  pat_eval_ctx->active_classes_mask = 0;
+  for (int premium_class = 0; premium_class < PAT_NUM_PREMIUM_CLASSES;
+       premium_class++) {
+    if (pat_class_is_weighted(weights, premium_class, enabled_classes_mask)) {
+      pat_eval_ctx->active_classes_mask |= 1U << premium_class;
+    }
+  }
+  pat_eval_ctx->ld = ld;
+  pat_eval_ctx->lanes = lanes;
+  pat_compute_unseen_counts(lanes, ld, player_rack,
+                            pat_eval_ctx->unseen_counts);
+  pat_eval_ctx->num_premium = pat_find_premium_squares(
+      lanes, pat_eval_ctx->premium_rows, pat_eval_ctx->premium_cols,
+      pat_eval_ctx->premium_classes);
+  pat_eval_ctx->num_dd = pat_find_dd(
+      lanes, pat_eval_ctx->dd_dirs, pat_eval_ctx->dd_lanes,
+      pat_eval_ctx->dd_los, pat_eval_ctx->dd_his, pat_eval_ctx->dd_tiers);
+  if (drop_unweighted_units) {
+    pat_drop_unweighted_units(pat_eval_ctx, weights, enabled_classes_mask);
+  }
+  pat_eval_ctx->num_units =
+      pat_eval_ctx->num_premium * 2 + pat_eval_ctx->num_dd;
+  static_assert(PAT_MAX_SCAN_UNITS <= PAT_MASK_WORDS * 64,
+                "unit masks must cover every scan unit");
+  static_assert(PAT_MAX_SCAN_UNITS <= UINT16_MAX,
+                "unit order entries must hold every unit index");
+  pat_eval_ctx->board_is_empty = true;
+  for (int row = 0; row < BOARD_DIM && pat_eval_ctx->board_is_empty; row++) {
+    const Square *lane =
+        board_get_row_cache(lanes, row, BOARD_HORIZONTAL_DIRECTION);
+    for (int col = 0; col < BOARD_DIM; col++) {
+      if (square_get_letter(&lane[col]) != ALPHABET_EMPTY_SQUARE_MARKER) {
+        pat_eval_ctx->board_is_empty = false;
+        break;
+      }
+    }
+  }
+  {
+    int total_unseen = 0;
+    for (int ml = 0; ml < MAX_ALPHABET_SIZE; ml++) {
+      total_unseen += pat_eval_ctx->unseen_counts[ml];
+    }
+    int bag_count = total_unseen - opponent_rack_size;
+    if (bag_count < 0) {
+      bag_count = 0;
+    }
+    pat_eval_ctx->term_scale =
+        weights->stage_scale[pat_stage_for_bag(bag_count)];
+  }
+  pat_eval_ctx->score_channels = !drop_unweighted_units;
+  for (int bin_idx = 0; bin_idx < PAT_HOOK_BIN_COUNT; bin_idx++) {
+    if (weights->weights[PAT_FEATURE_HOOK_SCORE_START + bin_idx] != 0) {
+      pat_eval_ctx->score_channels = true;
+    }
+  }
+  for (int unit_group = 0; unit_group < PAT_NUM_UNIT_GROUPS; unit_group++) {
+    uint8_t group_features[PAT_NUM_FEATURES];
+    const int num_group_features =
+        pat_unit_group_features(unit_group, group_features);
+    int num_weighted = 0;
+    for (int group_idx = 0; group_idx < num_group_features; group_idx++) {
+      const int feature_index = group_features[group_idx];
+      if (weights->weights[feature_index] != 0) {
+        pat_eval_ctx->group_feature_index[unit_group][num_weighted] =
+            (uint8_t)feature_index;
+        pat_eval_ctx->group_feature_weight[unit_group][num_weighted] =
+            weights->weights[feature_index];
+        num_weighted++;
+      }
+    }
+    pat_eval_ctx->group_num_features[unit_group] = (uint8_t)num_weighted;
+  }
+  pat_eval_context_refresh_units(pat_eval_ctx, player_rack);
+}
+
+void pat_eval_context_reload_rack(PATEvalContext *pat_eval_ctx,
+                                  const Rack *player_rack,
+                                  const uint8_t *board_unseen) {
+  if (!pat_eval_ctx->weights) {
+    return;
+  }
+  memset(pat_eval_ctx->unseen_counts, 0, sizeof(pat_eval_ctx->unseen_counts));
+  for (int ml = 0; ml < ld_get_size(pat_eval_ctx->ld); ml++) {
+    const int held = rack_get_letter(player_rack, ml);
+    pat_eval_ctx->unseen_counts[ml] =
+        board_unseen[ml] > held ? board_unseen[ml] - held : 0;
+  }
+  int total_unseen = 0;
+  for (int ml = 0; ml < MAX_ALPHABET_SIZE; ml++) {
+    total_unseen += pat_eval_ctx->unseen_counts[ml];
+  }
+  int bag = total_unseen - pat_eval_ctx->opponent_rack_size;
+  if (bag < 0) {
+    bag = 0;
+  }
+  pat_eval_ctx->term_scale =
+      pat_eval_ctx->weights->stage_scale[pat_stage_for_bag(bag)];
+  pat_eval_context_refresh_units(pat_eval_ctx, player_rack);
 }
 
 void pat_eval_context_set_kwg(PATEvalContext *pat_eval_ctx, const KWG *kwg,
