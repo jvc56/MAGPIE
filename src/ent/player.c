@@ -165,6 +165,10 @@ const PegAdjust *player_get_peg_adjust(const Player *player) {
   return player->peg_adjust;
 }
 
+void player_set_peg_adjust(Player *player, const PegAdjust *peg_adjust) {
+  player->peg_adjust = peg_adjust;
+}
+
 uint32_t player_get_pat_disabled_classes_mask(const Player *player) {
   return player->pat_disabled_classes_mask;
 }

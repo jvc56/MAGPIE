@@ -103,7 +103,8 @@ typedef struct BestMoveCarry {
 } BestMoveCarry;
 
 // Whether every move gets the same equity from either bag: the bag's only
-// term is peg_adjust_values, which no play from a bag that full reaches.
+// term is the player's pre-endgame adjustment (see peg_adjust.h), which no
+// play from a bag that full reaches.
 static inline bool best_move_carry_bags_give_same_equities(int tiles_in_bag,
                                                            int other_in_bag) {
   return tiles_in_bag == other_in_bag ||
