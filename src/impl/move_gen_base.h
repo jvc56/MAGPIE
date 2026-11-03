@@ -332,6 +332,10 @@ typedef struct MoveGen {
   // while the WMP is active and the bag is not empty.
   Equity shadow_equity_by_tiles_played[RACK_SIZE + 1];
   Equity shadow_nonplaythrough_equity_by_tiles_played[RACK_SIZE + 1];
+  // The pre-endgame adjustment of a tile placement, by tiles played, set once
+  // per generation from the player's table and the bag (see peg_adjust.h);
+  // all 0 when the player has no table.
+  Equity peg_adjust_by_tiles_played[RACK_SIZE + 1];
 } MoveGen;
 
 // Cache getter functions
@@ -375,6 +379,16 @@ static inline uint64_t gen_cache_get_right_extension_set(const MoveGen *gen,
   return square_get_right_extension_set(&gen->row_squares[col]);
 }
 
+// A move's pre-endgame adjustment. Only tile placements get one: an exchange
+// leaves the bag as it is (see peg_adjust.h).
+static inline Equity gen_get_peg_adjustment(const MoveGen *gen,
+                                            const Move *move) {
+  if (move_get_type(move) != GAME_EVENT_TILE_PLACEMENT_MOVE) {
+    return 0;
+  }
+  return gen->peg_adjust_by_tiles_played[move_get_tiles_played(move)];
+}
+
 static inline Equity gen_get_static_equity(const MoveGen *gen,
                                            const Move *move) {
   return static_eval_get_move_equity_with_leave_value(
@@ -382,8 +396,8 @@ static inline Equity gen_get_static_equity(const MoveGen *gen,
       gen->opening_move_word_penalties, gen->opening_move_letter_penalties,
       pat_eval_context_get_active_classes(&gen->pat_eval_ctx),
       &gen->pat_eval_ctx, gen->board_number_of_tiles_played,
-      gen->number_of_tiles_in_bag,
-      leave_map_get_current_value(&gen->leave_map));
+      gen->number_of_tiles_in_bag, leave_map_get_current_value(&gen->leave_map),
+      gen_get_peg_adjustment(gen, move));
 }
 
 // Best-move recording computes the PAT term lazily: a candidate whose
@@ -405,7 +419,8 @@ static inline Equity gen_get_static_equity_without_pat(const MoveGen *gen,
       gen->opening_move_word_penalties, gen->opening_move_letter_penalties,
       pat_eval_context_get_active_classes(&gen->pat_eval_ctx), NULL,
       gen->board_number_of_tiles_played, gen->number_of_tiles_in_bag,
-      leave_map_get_current_value(&gen->leave_map));
+      leave_map_get_current_value(&gen->leave_map),
+      gen_get_peg_adjustment(gen, move));
 }
 
 static inline const Move *gen_get_readonly_best_move(const MoveGen *gen) {

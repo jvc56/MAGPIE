@@ -7,6 +7,7 @@
 #include "klv.h"
 #include "kwg.h"
 #include "pat.h"
+#include "peg_adjust.h"
 #include "rack_info_table.h"
 #include "wmp.h"
 #include "word_info_table.h"
@@ -33,6 +34,8 @@ WordInfoTable *players_data_get_word_info_table(const PlayersData *players_data,
                                                 int player_index);
 PATWeights *players_data_get_pat(const PlayersData *players_data,
                                  int player_index);
+PegAdjust *players_data_get_peg_adjust(const PlayersData *players_data,
+                                       int player_index);
 uint32_t
 players_data_get_pat_disabled_classes_mask(const PlayersData *players_data,
                                            int player_index);

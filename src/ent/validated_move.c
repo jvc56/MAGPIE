@@ -20,6 +20,7 @@
 #include "move.h"
 #include "pat.h"
 #include "pat_eval.h"
+#include "peg_adjust.h"
 #include "player.h"
 #include "rack.h"
 #include "static_eval.h"
@@ -502,7 +503,13 @@ void validated_move_load(ValidatedMove *vm, const Game *game, int player_index,
               board_get_opening_move_letter_penalties(board),
               pat_eval_context_get_active_classes(&pat_eval_ctx), &pat_eval_ctx,
               board_get_tiles_played(board),
-              bag_get_letters(game_get_bag(game))));
+              bag_get_letters(game_get_bag(game)),
+              move_get_type(vm->move) == GAME_EVENT_TILE_PLACEMENT_MOVE
+                  ? peg_adjust_get_placement_value(
+                        player_get_peg_adjust(player),
+                        bag_get_letters(game_get_bag(game)),
+                        move_get_tiles_played(vm->move))
+                  : 0));
     } else {
       move_set_equity(vm->move, score);
     }

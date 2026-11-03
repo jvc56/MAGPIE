@@ -1,0 +1,14 @@
+# Quackle's pre-endgame adjustments, which MAGPIE once had commented out.
+# index,value (points); index 0 is never reached
+1,-8
+2,0
+3,-0.5
+4,-2
+5,-3.5
+6,-2
+7,2
+8,10
+9,7
+10,4
+11,-1
+12,-2

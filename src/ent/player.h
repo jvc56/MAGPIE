@@ -5,6 +5,7 @@
 #include "klv.h"
 #include "kwg.h"
 #include "pat.h"
+#include "peg_adjust.h"
 #include "players_data.h"
 #include "rack.h"
 #include "rack_info_table.h"
@@ -33,6 +34,11 @@ const PATWeights *player_get_pat(const Player *player);
 uint32_t player_get_pat_disabled_classes_mask(const Player *player);
 // Whether this player's move generation leaves PAT out.
 bool player_get_pat_disabled(const Player *player);
+// The player's pre-endgame adjustments, or NULL for none.
+const PegAdjust *player_get_peg_adjust(const Player *player);
+// Overrides the adjustments players_data gave the player until the next
+// player_update.
+void player_set_peg_adjust(Player *player, const PegAdjust *peg_adjust);
 
 void player_set_score(Player *player, Equity score);
 void player_set_move_sort_type(Player *player, move_sort_t move_sort_type);
