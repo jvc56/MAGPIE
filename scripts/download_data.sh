@@ -13,8 +13,8 @@ BRANCH="main"
 # Base URL for raw files
 BASE_URL="https://github.com/${REPO_OWNER}/${REPO_NAME}/raw/${BRANCH}/versioned-tarballs"
 
-# Get script directory (where MAGPIE is located)
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# The MAGPIE directory, the parent of this scripts directory
+MAGPIE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 # Function to download and extract a tarball (handles chunking automatically)
 download_and_extract() {
@@ -55,11 +55,11 @@ download_and_extract() {
         done
 
         # Reassemble and extract
-        cat "${temp_dir}"/${name}.tgz.* | tar -xzf - -C "$SCRIPT_DIR"
+        cat "${temp_dir}"/${name}.tgz.* | tar -xzf - -C "$MAGPIE_DIR"
         rm -rf "$temp_dir"
     else
         echo "Downloading single ${name} tarball..."
-        curl -sfL "${tarball_base}" | tar -xzf - -C "$SCRIPT_DIR"
+        curl -sfL "${tarball_base}" | tar -xzf - -C "$MAGPIE_DIR"
     fi
 }
 

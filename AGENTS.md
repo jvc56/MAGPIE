@@ -5,8 +5,8 @@ Crossword game engine in C (C99 with some C11). Move generation, Monte Carlo sim
 ## Initial Setup (fresh clone)
 
 ```bash
-./download_data.sh             # downloads data/ and testdata/ from MAGPIE-DATA repo
-./convert_lexica.sh            # converts .kwg → .txt → .wmp (builds MAGPIE first)
+./scripts/download_data.sh     # downloads data/ and testdata/ from MAGPIE-DATA repo
+./scripts/convert_lexica.sh    # converts .kwg → .txt → .wmp (builds MAGPIE first)
 ```
 
 `data/` and `testdata/` are gitignored. Missing file errors = run these scripts.
@@ -53,12 +53,12 @@ CI runs on every push. These must all pass: **cppcheck**, **clang-tidy**, **clan
 CI uses **cppcheck 2.17.1**, **clang-tidy-18**, **clang-format-20** (Ubuntu 24.04). Local versions will differ.
 
 ```bash
-python3 format.py --write      # ALWAYS run before pushing
-./cppcheck.sh                  # builds cppcheck 2.17.1 on first run, cached after
-./tidy.sh                      # clang-tidy (or: ./tidy.sh clang-tidy-18)
-python3 find_circ_deps.py      # circular dependencies (requires: pip install networkx)
-python3 check_portability.py   # platform-specific code stays in src/compat
-python3 check_windows_compile.py # every file compiles for Windows (needs llvm-mingw on PATH)
+python3 scripts/format.py --write        # ALWAYS run before pushing
+./scripts/cppcheck.sh                    # builds cppcheck 2.17.1 on first run, cached after
+./scripts/tidy.sh                        # clang-tidy (or: ./scripts/tidy.sh clang-tidy-18)
+python3 scripts/find_circ_deps.py        # circular dependencies (requires: pip install networkx)
+python3 scripts/check_portability.py     # platform-specific code stays in src/compat
+python3 scripts/check_windows_compile.py # every file compiles for Windows (needs llvm-mingw on PATH)
 ```
 
 **Platform code lives in `src/compat`.** Outside it, include only ISO C headers

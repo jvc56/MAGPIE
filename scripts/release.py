@@ -248,11 +248,11 @@ def choose_version(main_version: str, latest: str, requested: Optional[str]) -> 
 def run_local_checks(worktree: str) -> None:
     """CI's quick lints. A missing tool only skips one: CI will run it."""
     checks = (
-        ("formatting", "format.py", shutil.which("clang-format-20")),
-        ("portability", "check_portability.py", True),
+        ("formatting", "scripts/format.py", shutil.which("clang-format-20")),
+        ("portability", "scripts/check_portability.py", True),
         (
             "circular dependencies",
-            "find_circ_deps.py",
+            "scripts/find_circ_deps.py",
             importlib.util.find_spec("networkx"),
         ),
     )

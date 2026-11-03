@@ -19,9 +19,9 @@ include, directly or not, which on this tree splits within a few percent of
 measured check times, and dealt heaviest first to the lightest shard.
 
 Usage:
-  python3 shard_cppcheck.py list INDEX COUNT DIR...
+  python3 scripts/shard_cppcheck.py list INDEX COUNT DIR...
       Prints shard INDEX's (1 to COUNT) files, one per line, for --file-list.
-  python3 shard_cppcheck.py collect BUILD_DIR OUT_DIR
+  python3 scripts/shard_cppcheck.py collect BUILD_DIR OUT_DIR
       Copies the results of the files the last run in BUILD_DIR checked (the
       ones its files.txt names) into OUT_DIR.
 """

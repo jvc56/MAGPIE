@@ -26,20 +26,20 @@ jobs:
           sudo apt-get install -y clang-format-20
 
       - name: Check circular dependencies
-        run: python3 find_circ_deps.py
+        run: python3 scripts/find_circ_deps.py
 
       - name: Check that platform-specific code stays in src/compat
-        run: python3 check_portability.py
+        run: python3 scripts/check_portability.py
 
       - name: Check that data fetch and download_data.sh fetch the same data
         run: |
           fetched=$(sed -n 's/^#define DATA_FETCH_VERSION "\(.*\)"/\1/p' src/impl/data_fetch.h)
-          downloaded=$(sed -n 's/^DATA_VERSION="\(.*\)"/\1/p' download_data.sh)
+          downloaded=$(sed -n 's/^DATA_VERSION="\(.*\)"/\1/p' scripts/download_data.sh)
           echo "data fetch: $fetched, download_data.sh: $downloaded"
           test -n "$fetched" && test "$fetched" = "$downloaded"
 
       - name: Check formatting
-        run: python3 ./format.py
+        run: python3 scripts/format.py
 
   # The Windows executables, for the test jobs, which wait for nothing else
   # (windows-cross-compile's checks run beside this), and the tests' split
@@ -155,13 +155,13 @@ jobs:
       - name: Compile every C file for x64 and arm64 Windows
         run: |
           export PATH="$HOME/llvm-mingw/$LLVM_MINGW/bin:$PATH"
-          python3 check_windows_compile.py --cc x86_64-w64-mingw32-clang --cc aarch64-w64-mingw32-clang
+          python3 scripts/check_windows_compile.py --cc x86_64-w64-mingw32-clang --cc aarch64-w64-mingw32-clang
 
       - name: Lint src/compat's Windows branches with clang-tidy
         run: |
           sudo apt-get update
           sudo apt-get install -y clang-tidy-18
-          MINGW_SYSROOT="$HOME/llvm-mingw/$LLVM_MINGW" ./tidy.sh clang-tidy-18 windows
+          MINGW_SYSROOT="$HOME/llvm-mingw/$LLVM_MINGW" ./scripts/tidy.sh clang-tidy-18 windows
 
   # The data cache with its symlinks turned into copies, for Windows runners:
   # the tarballs' 27 symlinks would not survive a restore there. Built once
@@ -192,7 +192,7 @@ jobs:
 
       - name: Download data files and convert lexica
         if: steps.windows-data.outputs.cache-hit != 'true' && steps.cache-datafiles.outputs.cache-hit != 'true'
-        run: ./download_data.sh && ./convert_lexica.sh
+        run: ./scripts/download_data.sh && ./scripts/convert_lexica.sh
 
       - name: Copy the data without symlinks
         if: steps.windows-data.outputs.cache-hit != 'true'
@@ -233,7 +233,7 @@ jobs:
 
       - name: Download data files and convert lexica
         if: steps.cache-datafiles.outputs.cache-hit != 'true'
-        run: ./download_data.sh && ./convert_lexica.sh
+        run: ./scripts/download_data.sh && ./scripts/convert_lexica.sh
 
       - name: Download the x64 executables
         uses: actions/download-artifact@v4
@@ -369,16 +369,16 @@ jobs:
           path: |
             cppcheck_build
             cppcheck_build-windows
-          key: cppcheck-results-2.17.1-${{ hashFiles('cppcheck.sh') }}-${{ github.run_id }}
-          restore-keys: cppcheck-results-2.17.1-${{ hashFiles('cppcheck.sh') }}-
+          key: cppcheck-results-2.17.1-${{ hashFiles('scripts/cppcheck.sh') }}-${{ github.run_id }}
+          restore-keys: cppcheck-results-2.17.1-${{ hashFiles('scripts/cppcheck.sh') }}-
 
       - name: Run cppcheck on this shard
         env:
           CPPCHECK_SHARD: ${{ matrix.shard }}/${{ strategy.job-total }}
-        run: ./cppcheck.sh
+        run: ./scripts/cppcheck.sh
 
       - name: Collect this shard's results
-        run: python3 shard_cppcheck.py collect cppcheck_build cppcheck-shard-results
+        run: python3 scripts/shard_cppcheck.py collect cppcheck_build cppcheck-shard-results
 
       - uses: actions/upload-artifact@v4
         with:
@@ -421,8 +421,8 @@ jobs:
           path: |
             cppcheck_build
             cppcheck_build-windows
-          key: cppcheck-results-2.17.1-${{ hashFiles('cppcheck.sh') }}-${{ github.run_id }}
-          restore-keys: cppcheck-results-2.17.1-${{ hashFiles('cppcheck.sh') }}-
+          key: cppcheck-results-2.17.1-${{ hashFiles('scripts/cppcheck.sh') }}-${{ github.run_id }}
+          restore-keys: cppcheck-results-2.17.1-${{ hashFiles('scripts/cppcheck.sh') }}-
 
       - uses: actions/download-artifact@v4
         with:
@@ -436,7 +436,7 @@ jobs:
           cp cppcheck-shard-results/*/* cppcheck_build/
 
       - name: Run cppcheck static analysis
-        run: ./cppcheck.sh
+        run: ./scripts/cppcheck.sh
 
   clang-tidy:
     runs-on: ubuntu-latest
@@ -446,7 +446,7 @@ jobs:
       - name: Run clang-tidy static analysis
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang-tidy-18 && ./tidy.sh clang-tidy-18
+          sudo apt-get install -y clang-tidy-18 && ./scripts/tidy.sh clang-tidy-18
 
   unit-tests-no-pgo-release:
     runs-on: ubuntu-latest
@@ -470,7 +470,7 @@ jobs:
 
       - name: Download data files and convert lexica
         if: steps.cache-datafiles.outputs.cache-hit != 'true'
-        run: ./download_data.sh && ./convert_lexica.sh
+        run: ./scripts/download_data.sh && ./scripts/convert_lexica.sh
 
       - name: Build no-PGO release test binary
         run: make magpie_test BUILD=no_pgo_release
@@ -533,7 +533,7 @@ jobs:
 
       - name: Download data files and convert lexica
         if: steps.cache-datafiles.outputs.cache-hit != 'true'
-        run: ./download_data.sh && ./convert_lexica.sh
+        run: ./scripts/download_data.sh && ./scripts/convert_lexica.sh
 
       - name: Build no-PGO release binary for RIT construction
         if: matrix.shard == 'ap_rit'
@@ -614,7 +614,7 @@ jobs:
 
       - name: Download data files and convert lexica
         if: steps.cache-datafiles.outputs.cache-hit != 'true'
-        run: ./download_data.sh && ./convert_lexica.sh
+        run: ./scripts/download_data.sh && ./scripts/convert_lexica.sh
 
       - name: Build and run super no-PGO release tests
         run: |
@@ -647,7 +647,7 @@ jobs:
 
       - name: Download data files and convert lexica
         if: steps.cache-datafiles.outputs.cache-hit != 'true'
-        run: ./download_data.sh && ./convert_lexica.sh
+        run: ./scripts/download_data.sh && ./scripts/convert_lexica.sh
 
       - name: Build WASM tests
         run: make -f Makefile-wasm magpie_wasm_test

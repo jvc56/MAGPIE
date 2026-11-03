@@ -562,7 +562,7 @@ static bool expected_data_matches(ContributeState *state,
         thread_control_print_formatted_err(
             thread_control,
             "  this comes from MAGPIE-DATA data-%s or later; run "
-            "./download_data.sh to update\n",
+            "./scripts/download_data.sh to update\n",
             tarball_date);
       }
     }
@@ -1144,8 +1144,9 @@ static void print_shutdown(const ContributeState *state,
     if (date) {
       thread_control_print_formatted_err(
           thread_control,
-          "Run ./download_data.sh from your MAGPIE directory to install "
-          "MAGPIE-DATA data-%s or later, then start contribute again.\n",
+          "Run ./scripts/download_data.sh from your MAGPIE directory to "
+          "install MAGPIE-DATA data-%s or later, then start contribute "
+          "again.\n",
           date);
     }
   }

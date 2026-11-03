@@ -39,7 +39,7 @@ jobs:
 
       - name: Download data files and convert lexica
         if: steps.cache-datafiles.outputs.cache-hit != 'true'
-        run: ./download_data.sh && ./convert_lexica.sh
+        run: ./scripts/download_data.sh && ./scripts/convert_lexica.sh
 
       - name: Build WASM
         run: make clean && make -f Makefile-wasm magpie_wasm
