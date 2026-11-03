@@ -12,10 +12,11 @@ so that it can be left alone afterwards:
     release. It is always newer than every release and every tag.
  3. Draft the release notes and ask for feedback until they are accepted.
  4. Save them as a draft release, which nobody else can see.
- 5. Open a PR that bumps MAGPIE_VERSION, wait for CI on it, and merge it. The
-    bump commit is what gets tagged: CI ran on exactly that commit and the
-    notes describe exactly its history, however far main moves meanwhile. If
-    main already has the version, its head is tagged instead, after CI.
+ 5. Open a PR that bumps MAGPIE_VERSION, and with it the README's generated
+    stats, wait for CI on it, and merge it. The bump commit is what gets
+    tagged: CI ran on exactly that commit and the notes describe exactly its
+    history, however far main moves meanwhile. If main already has the
+    version, its head is tagged instead, after CI.
  6. Push the tag. release-{windows,macos,linux}.yml build and test on every
     architecture, then upload to the draft.
  7. Check that every file arrived, then publish the draft as the latest
@@ -250,6 +251,7 @@ def run_local_checks(worktree: str) -> None:
     checks = (
         ("formatting", "format.py", shutil.which("clang-format-20")),
         ("portability", "check_portability.py", True),
+        ("README stats", os.path.join("scripts", "readme_stats.py"), True),
         (
             "circular dependencies",
             "find_circ_deps.py",
@@ -505,6 +507,8 @@ def wait_for_workflows(branch: str, commit: str, required: Sequence[str]) -> Non
 def open_version_pr(version: str, base_commit: str, branch: str) -> dict:
     with worktree_at(base_commit) as worktree:
         write_version(worktree, version)
+        run(sys.executable, os.path.join("scripts", "readme_stats.py"), "--write",
+            cwd=worktree)
         run("git", "commit", "--quiet", "-am", f"Version {version}", cwd=worktree)
         commit = run("git", "rev-parse", "HEAD", cwd=worktree)
         # The script's own branch: a closed attempt's copy can go.

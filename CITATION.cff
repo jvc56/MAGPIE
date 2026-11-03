@@ -1,0 +1,25 @@
+cff-version: 1.2.0
+message: "If you use MAGPIE, please cite it as below."
+title: "MAGPIE: Macondo Accordant Game Program and Inference Engine"
+type: software
+abstract: >-
+  A crossword game playing and analysis program: move generation, Monte Carlo
+  simulation, inference, pre-endgame and endgame solving, game analysis,
+  autoplay and leave generation.
+authors:
+  - given-names: Joshua
+    family-names: Castellano
+  - given-names: John
+    family-names: O'Laughlin
+  - given-names: César
+    family-names: Del Solar
+  - given-names: Emmett
+    family-names: Brosowsky
+repository-code: "https://github.com/jvc56/MAGPIE"
+license: GPL-3.0
+keywords:
+  - crossword game
+  - Scrabble
+  - Monte Carlo simulation
+  - endgame solver
+  - best-arm identification
