@@ -1,7 +1,5 @@
 #include "census_sim.h"
 
-#include "../compat/cpthread.h"
-#include "../compat/cpthread_defs.h"
 #include "../compat/ctime.h"
 #include "../def/board_defs.h"
 #include "../def/rack_defs.h"
@@ -67,7 +65,6 @@ typedef struct CensusSimBuildWorker {
   int thread_index;
   int number_of_threads;
   _Atomic int *next_unit;
-  cpthread_t cpthread_id;
 } CensusSimBuildWorker;
 
 static void *census_sim_fill_worker(void *uncasted_worker) {
@@ -109,20 +106,6 @@ static void *census_sim_lanes_worker(void *uncasted_worker) {
   return NULL;
 }
 
-// Runs one phase on every worker's thread, the first in the calling thread.
-static void census_sim_run_phase(CensusSimBuildWorker *workers,
-                                 int number_of_threads,
-                                 void *(*phase)(void *)) {
-  for (int thread_idx = 1; thread_idx < number_of_threads; thread_idx++) {
-    cpthread_create(&workers[thread_idx].cpthread_id, phase,
-                    &workers[thread_idx]);
-  }
-  phase(&workers[0]);
-  for (int thread_idx = 1; thread_idx < number_of_threads; thread_idx++) {
-    cpthread_join(workers[thread_idx].cpthread_id);
-  }
-}
-
 // Sets play_scores to the max of 0 and the number_kept arrays of kept, then
 // raises it by the plays of the lanes in `lanes` on game's board, on the
 // sim's threads.
@@ -148,8 +131,10 @@ static void census_sim_build(const CensusSim *sim, const Game *game,
         .next_unit = &next_unit,
     };
   }
-  census_sim_run_phase(workers, number_of_threads, census_sim_fill_worker);
-  census_sim_run_phase(workers, number_of_threads, census_sim_lanes_worker);
+  census_run_phase(workers, sizeof(CensusSimBuildWorker), number_of_threads,
+                   census_sim_fill_worker);
+  census_run_phase(workers, sizeof(CensusSimBuildWorker), number_of_threads,
+                   census_sim_lanes_worker);
 }
 
 void census_sim_set_position(CensusSim *sim, const Game *game) {

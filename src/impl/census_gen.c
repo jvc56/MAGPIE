@@ -591,8 +591,6 @@ void census_gen(const CensusGenArgs *args, ErrorStack *error_stack) {
     worker->rack_best = malloc_or_die(sizeof(Equity) * lattice_size);
     worker->sums = malloc_or_die(sizeof(CensusSums) * lattice_size);
   }
-  cpthread_t *threads =
-      malloc_or_die(sizeof(cpthread_t) * (size_t)number_of_threads);
 
   thread_control_print_formatted(
       args->thread_control,
@@ -623,13 +621,8 @@ void census_gen(const CensusGenArgs *args, ErrorStack *error_stack) {
     memset(shared.sum, 0, sizeof(double) * lattice_size);
     memset(shared.count, 0, sizeof(uint32_t) * lattice_size);
 
-    for (int thread_idx = 0; thread_idx < number_of_threads; thread_idx++) {
-      cpthread_create(&threads[thread_idx], census_worker_run,
-                      &workers[thread_idx]);
-    }
-    for (int thread_idx = 0; thread_idx < number_of_threads; thread_idx++) {
-      cpthread_join(threads[thread_idx]);
-    }
+    census_run_phase(workers, sizeof(CensusWorker), number_of_threads,
+                     census_worker_run);
     if (shared.failed) {
       error_stack_push(error_stack, ERROR_STATUS_CENSUS_UNSUPPORTED_GAME,
                        shared.failure);
@@ -693,7 +686,6 @@ void census_gen(const CensusGenArgs *args, ErrorStack *error_stack) {
     }
   }
 
-  free(threads);
   for (int thread_idx = 0; thread_idx < number_of_threads; thread_idx++) {
     CensusWorker *worker = &workers[thread_idx];
     game_destroy(worker->game);

@@ -231,3 +231,29 @@ Final vs f864d387:
     1.26x), results identical at 50000 iterations
 The sim test's test_sim_top_two_consistency fails about 2 runs in 10 at
 the base d4061269 too (10 threads, top-two sampling): flaky before this.
+
+=====================================================================
+SHARED CODE WITH LEAVEGEN, INFERENCE AND CENSUS_SIM (later on 2026-11-03)
+=====================================================================
+- census_run_phase (census.{c,h}): runs a phase on n workers, the first on
+  the calling thread. It replaces four copies of that runner (inference's
+  census_run_build_phase, census.c's expected_best_run_phase, census_sim's
+  census_sim_run_phase, the census rollout's build runner) and the
+  create/join loops of leavegen's board workers (census_gen.c) and the add
+  table. Leavegen's output (census 2x8, seed 11, 1 and 4 threads) is
+  byte-identical to the base d4061269's.
+- CensusRackSplitter / census_rack_splits (census.{c,h}): a rack's splits
+  into played and kept with their lattice indexes, in inference's order
+  (an odometer over the copies kept, first letter fastest). The census
+  rollout's gather takes them all at once; inference's
+  get_top_equity_from_census takes 8 at a time
+  (INFERENCE_CENSUS_SPLIT_BATCH), since it stops at the first split past
+  its cutoff. Taking them all at once made census inference 22% slower
+  (0.445 s vs 0.365 s in infercmp); batches of 8 from an out-of-line
+  function, 3% slower; inline in census.h, even (0.359-0.369 s vs
+  0.365-0.380 s). infercmp parity holds. The census rollout's timing is
+  unchanged (2-ply +0.2%, 6-ply -0.1%).
+- census_lattice_get_rank_terms is gone: nothing uses it now.
+- Threats (#944, jvc56's): its move_gen_threats.c repeats the census
+  play-scores search; a suggested review comment is in
+  ~/sources/nov03-simcensus/pr944-comment.md (not posted).

@@ -4,6 +4,7 @@
 #include "../compat/cpthread.h"
 #include "../compat/cpthread_defs.h"
 #include "../def/letter_distribution_defs.h"
+#include "../def/rack_defs.h"
 #include "../ent/equity.h"
 #include "../ent/klv.h"
 #include "../ent/kwg.h"
@@ -189,8 +190,38 @@ uint32_t census_lattice_rank_sparse(const CensusLattice *lattice,
   return (uint32_t)lattice->size_offsets[size] + within;
 }
 
-const uint32_t *census_lattice_get_rank_terms(const CensusLattice *lattice) {
-  return lattice->rank_terms;
+void census_rack_splitter_init(CensusRackSplitter *splitter,
+                               const CensusLattice *lattice,
+                               const MachineLetter *letters,
+                               const uint8_t *counts, int number_of_letters) {
+  splitter->letters = letters;
+  splitter->counts = counts;
+  splitter->number_of_letters = number_of_letters;
+  splitter->rank_terms = lattice->rank_terms;
+  splitter->stride = lattice->rack_size + 1;
+  for (int size = 0; size <= RACK_SIZE; size++) {
+    splitter->size_starts[size] =
+        size <= lattice->rack_size ? (uint32_t)lattice->size_offsets[size] : 0;
+  }
+  memset(splitter->kept, 0, sizeof(splitter->kept));
+  splitter->kept_after[number_of_letters] = 0;
+  splitter->played_after[number_of_letters] = 0;
+  splitter->kept_terms[number_of_letters] = 0;
+  splitter->played_terms[number_of_letters] = 0;
+  splitter->changed_idx = number_of_letters - 1;
+}
+
+int census_rack_splits(const CensusLattice *lattice,
+                       const MachineLetter *letters, const uint8_t *counts,
+                       int number_of_letters, uint32_t *played_indexes,
+                       uint32_t *kept_indexes, uint8_t *tiles_played,
+                       uint8_t (*kept_counts)[RACK_SIZE]) {
+  CensusRackSplitter splitter;
+  census_rack_splitter_init(&splitter, lattice, letters, counts,
+                            number_of_letters);
+  return census_rack_splitter_next(&splitter, CENSUS_MAX_RACK_SPLITS,
+                                   played_indexes, kept_indexes, tiles_played,
+                                   kept_counts);
 }
 
 uint32_t census_lattice_rank_term(const CensusLattice *lattice,
@@ -321,8 +352,6 @@ CensusAddTable *census_add_table_create(const CensusLattice *lattice,
       (rows + (uint32_t)number_of_threads - 1) / (uint32_t)number_of_threads;
   AddTableWorker *workers =
       malloc_or_die(sizeof(AddTableWorker) * (size_t)number_of_threads);
-  cpthread_t *threads =
-      malloc_or_die(sizeof(cpthread_t) * (size_t)number_of_threads);
   for (int thread_idx = 0; thread_idx < number_of_threads; thread_idx++) {
     uint32_t start_row = (uint32_t)thread_idx * rows_per_thread;
     uint32_t end_row = start_row + rows_per_thread;
@@ -336,13 +365,9 @@ CensusAddTable *census_add_table_create(const CensusLattice *lattice,
                                            .add_table = add_table,
                                            .start_row = start_row,
                                            .end_row = end_row};
-    cpthread_create(&threads[thread_idx], add_table_worker,
-                    &workers[thread_idx]);
   }
-  for (int thread_idx = 0; thread_idx < number_of_threads; thread_idx++) {
-    cpthread_join(threads[thread_idx]);
-  }
-  free(threads);
+  census_run_phase(workers, sizeof(AddTableWorker), number_of_threads,
+                   add_table_worker);
   free(workers);
   return add_table;
 }
@@ -955,7 +980,6 @@ typedef struct ExpectedBestWorker {
   const DrawUnit *units;
   int number_of_units;
   CensusSums *unit_sums;
-  cpthread_t cpthread_id;
 } ExpectedBestWorker;
 
 static void *expected_best_copy_worker(void *uncasted_worker) {
@@ -1031,18 +1055,23 @@ static void *expected_best_sum_worker(void *uncasted_worker) {
   }
 }
 
-// Runs one phase on every worker's thread, the first in the calling thread.
-static void expected_best_run_phase(ExpectedBestWorker *workers,
-                                    int number_of_threads,
-                                    void *(*phase)(void *)) {
-  for (int thread_idx = 1; thread_idx < number_of_threads; thread_idx++) {
-    cpthread_create(&workers[thread_idx].cpthread_id, phase,
-                    &workers[thread_idx]);
+void census_run_phase(void *workers, size_t worker_size, int number_of_workers,
+                      void *(*phase)(void *)) {
+  if (number_of_workers < 1) {
+    return;
   }
-  phase(&workers[0]);
-  for (int thread_idx = 1; thread_idx < number_of_threads; thread_idx++) {
-    cpthread_join(workers[thread_idx].cpthread_id);
+  cpthread_t *threads =
+      malloc_or_die(sizeof(cpthread_t) * (size_t)number_of_workers);
+  char *worker_bytes = workers;
+  for (int worker_idx = 1; worker_idx < number_of_workers; worker_idx++) {
+    cpthread_create(&threads[worker_idx], phase,
+                    worker_bytes + (size_t)worker_idx * worker_size);
   }
+  phase(workers);
+  for (int worker_idx = 1; worker_idx < number_of_workers; worker_idx++) {
+    cpthread_join(threads[worker_idx]);
+  }
+  free(threads);
 }
 
 void census_expected_best(const CensusApportionArgs *args, Equity *rack_best,
@@ -1106,11 +1135,12 @@ void census_expected_best(const CensusApportionArgs *args, Equity *rack_best,
         .unit_sums = unit_sums,
     };
   }
-  expected_best_run_phase(workers, number_of_threads,
-                          expected_best_copy_worker);
-  expected_best_run_phase(workers, number_of_threads,
-                          expected_best_scatter_worker);
-  expected_best_run_phase(workers, number_of_threads, expected_best_sum_worker);
+  census_run_phase(workers, sizeof(ExpectedBestWorker), number_of_threads,
+                   expected_best_copy_worker);
+  census_run_phase(workers, sizeof(ExpectedBestWorker), number_of_threads,
+                   expected_best_scatter_worker);
+  census_run_phase(workers, sizeof(ExpectedBestWorker), number_of_threads,
+                   expected_best_sum_worker);
   total->num = 0;
   total->den = 0;
   for (int unit_idx = 0; unit_idx < number_of_units; unit_idx++) {

@@ -1,7 +1,5 @@
 #include "census_rollout.h"
 
-#include "../compat/cpthread.h"
-#include "../compat/cpthread_defs.h"
 #include "../def/board_defs.h"
 #include "../def/equity_defs.h"
 #include "../def/letter_distribution_defs.h"
@@ -36,9 +34,6 @@ enum {
   CENSUS_ROLLOUT_MAX_CANDIDATES = 64,
   CENSUS_ROLLOUT_MAX_UNITS = CENSUS_ROLLOUT_NUM_LANES * BOARD_DIM,
   CENSUS_ROLLOUT_NO_UNIT = -1,
-  // A rack's splits into played and kept: at most every nonempty subset of
-  // its tiles.
-  CENSUS_ROLLOUT_MAX_SPLITS = 1 << RACK_SIZE,
   // Racks whose root-table bests a worker remembers (a power of two).
   CENSUS_ROLLOUT_ROOT_SLOTS = 1 << 13,
   // A rank's run of entries in a table: its first entry in the low bits, its
@@ -646,22 +641,14 @@ static void census_rollout_build_tables(CensusRollout *census) {
   atomic_int next_board;
   atomic_init(&next_board, 0);
   CensusRolloutBuildWork work[CENSUS_ROLLOUT_MAX_BUILD_THREADS];
-  cpthread_t threads[CENSUS_ROLLOUT_MAX_BUILD_THREADS];
   for (int thread_idx = 0; thread_idx < number_of_threads; thread_idx++) {
     work[thread_idx] =
         (CensusRolloutBuildWork){.census = census,
                                  .builder = &census->builders[thread_idx],
                                  .next_board = &next_board};
   }
-  // This thread builds too, as the first builder.
-  for (int thread_idx = 1; thread_idx < number_of_threads; thread_idx++) {
-    cpthread_create(&threads[thread_idx], census_rollout_build_thread,
-                    &work[thread_idx]);
-  }
-  census_rollout_build_boards(&work[0]);
-  for (int thread_idx = 1; thread_idx < number_of_threads; thread_idx++) {
-    cpthread_join(threads[thread_idx]);
-  }
+  census_run_phase(work, sizeof(CensusRolloutBuildWork), number_of_threads,
+                   census_rollout_build_thread);
   census->build_stats.root_entries += census->root.table.number_of_entries;
   for (int candidate_idx = 0; candidate_idx < census->number_of_candidates;
        candidate_idx++) {
@@ -729,9 +716,8 @@ void census_rollout_worker_set_candidate(CensusRolloutWorker *worker,
 }
 
 // The rack's best in each unit of the two tables: root_bests by the root's
-// units, candidate_bests by the candidate's. The splits come from an odometer
-// whose first letter turns fastest; a letter's rank term reads only the
-// counts at or after it, so each split re-ranks only the letters it moved.
+// units, candidate_bests by the candidate's, from every split of the rack
+// (census_rack_splits).
 static void census_rollout_gather(const CensusRollout *census, const Rack *rack,
                                   const CensusRolloutTable *root_table,
                                   const CensusRolloutTable *candidate_table,
@@ -750,92 +736,32 @@ static void census_rollout_gather(const CensusRollout *census, const Rack *rack,
   if (!use_root && !use_candidate) {
     return;
   }
-  const uint32_t *rank_terms = census_lattice_get_rank_terms(census->lattice);
-  const int stride = RACK_SIZE + 1;
-  int letters[RACK_SIZE];
-  int counts[RACK_SIZE];
+  MachineLetter letters[RACK_SIZE] = {0};
+  uint8_t counts[RACK_SIZE] = {0};
   int number_of_letters = 0;
   const int dist_size = rack_get_dist_size(rack);
   for (int ml = 0; ml < dist_size; ml++) {
     const int count = rack_get_letter(rack, ml);
     if (count > 0) {
-      letters[number_of_letters] = ml;
-      counts[number_of_letters] = count;
+      letters[number_of_letters] = (MachineLetter)ml;
+      counts[number_of_letters] = (uint8_t)count;
       number_of_letters++;
     }
   }
-  uint32_t size_starts[RACK_SIZE + 1];
-  for (int size = 0; size <= RACK_SIZE; size++) {
-    size_starts[size] = census_lattice_get_size_start(census->lattice, size);
-  }
-  // By letter index: the played and kept counts, and the counts and rank
-  // terms of the letters at or after it.
-  int played[RACK_SIZE + 1] = {0};
-  int kept[RACK_SIZE + 1];
-  int played_after[RACK_SIZE + 1] = {0};
-  uint32_t played_terms[RACK_SIZE + 1] = {0};
-  int kept_after[RACK_SIZE + 1];
-  uint32_t kept_terms[RACK_SIZE + 1];
-  kept_after[number_of_letters] = 0;
-  kept_terms[number_of_letters] = 0;
-  for (int letter_idx = number_of_letters - 1; letter_idx >= 0; letter_idx--) {
-    kept[letter_idx] = counts[letter_idx];
-    kept_after[letter_idx] = kept_after[letter_idx + 1] + counts[letter_idx];
-    kept_terms[letter_idx] =
-        kept_terms[letter_idx + 1] +
-        rank_terms[(letters[letter_idx] * stride + kept_after[letter_idx]) *
-                       stride +
-                   counts[letter_idx]];
-  }
   // Every split's played and kept ranks first, from small tables only, so
-  // that the lattice-sized loads below are independent of each other and
-  // overlap instead of each waiting behind the odometer's mispredicts.
-  uint32_t split_played[CENSUS_ROLLOUT_MAX_SPLITS];
-  uint32_t split_kept[CENSUS_ROLLOUT_MAX_SPLITS];
-  int split_tiles[CENSUS_ROLLOUT_MAX_SPLITS];
-  int number_of_splits = 0;
-  while (true) {
-    int moved = 0;
-    while (moved < number_of_letters && played[moved] == counts[moved]) {
-      played[moved] = 0;
-      kept[moved] = counts[moved];
-      moved++;
-    }
-    if (moved == number_of_letters) {
-      break;
-    }
-    played[moved]++;
-    kept[moved]--;
-    // The played letters below the one that moved are absent, and an absent
-    // letter's term is 0; the kept ones below it are whole again.
-    played_after[moved] = played_after[moved + 1] + played[moved];
-    played_terms[moved] =
-        played_terms[moved + 1] +
-        rank_terms[(letters[moved] * stride + played_after[moved]) * stride +
-                   played[moved]];
-    for (int letter_idx = moved; letter_idx >= 0; letter_idx--) {
-      if (letter_idx < moved) {
-        played_after[letter_idx] = played_after[moved];
-        played_terms[letter_idx] = played_terms[moved];
-      }
-      kept_after[letter_idx] = kept_after[letter_idx + 1] + kept[letter_idx];
-      kept_terms[letter_idx] =
-          kept_terms[letter_idx + 1] +
-          rank_terms[(letters[letter_idx] * stride + kept_after[letter_idx]) *
-                         stride +
-                     kept[letter_idx]];
-    }
-    split_played[number_of_splits] =
-        size_starts[played_after[0]] + played_terms[0];
-    split_kept[number_of_splits] = size_starts[kept_after[0]] + kept_terms[0];
-    split_tiles[number_of_splits] = played_after[0];
-    number_of_splits++;
-  }
-  uint32_t root_firsts[CENSUS_ROLLOUT_MAX_SPLITS];
-  uint32_t root_lasts[CENSUS_ROLLOUT_MAX_SPLITS];
-  uint32_t candidate_firsts[CENSUS_ROLLOUT_MAX_SPLITS];
-  uint32_t candidate_lasts[CENSUS_ROLLOUT_MAX_SPLITS];
-  Equity leave_values[CENSUS_ROLLOUT_MAX_SPLITS];
+  // that the lookups below are independent of each other and overlap
+  // instead of each waiting behind the walk's mispredicts.
+  uint32_t split_played[CENSUS_MAX_RACK_SPLITS];
+  uint32_t split_kept[CENSUS_MAX_RACK_SPLITS];
+  uint8_t split_tiles[CENSUS_MAX_RACK_SPLITS];
+  const int number_of_splits =
+      census_rack_splits(census->lattice, letters, counts, number_of_letters,
+                         split_played, split_kept, split_tiles, NULL);
+  uint32_t root_firsts[CENSUS_MAX_RACK_SPLITS];
+  uint32_t root_lasts[CENSUS_MAX_RACK_SPLITS];
+  uint32_t candidate_firsts[CENSUS_MAX_RACK_SPLITS];
+  uint32_t candidate_lasts[CENSUS_MAX_RACK_SPLITS];
+  Equity leave_values[CENSUS_MAX_RACK_SPLITS];
   for (int split_idx = 0; split_idx < number_of_splits; split_idx++) {
     const uint32_t played_index = split_played[split_idx];
     root_firsts[split_idx] = 0;

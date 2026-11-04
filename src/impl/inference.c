@@ -369,13 +369,9 @@ static Equity get_best_exchange_equity(const Inference *inference) {
 // returns that move's equity instead.
 //
 // It values every split of the rack into the tiles a move uses and the tiles
-// it keeps the way generate_moves values the move it stands for: a play of
-// the used tiles, at the best score the census found for them, and an
-// exchange of them when exchanges are legal. The splits are counted like an
-// odometer over the copies of each distinct letter kept, the lowest letter
-// changing fastest. A multiset's rank adds a term for each letter, set by the
-// tiles at that letter or after it, so each split only recomputes the sums
-// of the letters at or below the one that changed.
+// it keeps (census_rack_splits, in its order) the way generate_moves values
+// the move it stands for: a play of the used tiles, at the best score the
+// census found for them, and an exchange of them when exchanges are legal.
 static Equity get_top_equity_from_census(const Inference *inference,
                                          Equity cutoff) {
   const Game *game = inference->game;
@@ -395,70 +391,45 @@ static Equity get_top_equity_from_census(const Inference *inference,
   // The tiles kept, which only the endgame adjustment reads.
   Rack kept;
   rack_set_dist_size_and_reset(&kept, inference->ld_size);
-
-  // For each letter, the copies kept, and over it and the letters after it,
-  // the tiles kept and used and the sums of their rank terms.
-  uint8_t kept_counts[RACK_SIZE + 1] = {0};
-  int tiles_kept[RACK_SIZE + 1];
-  int tiles_played[RACK_SIZE + 1];
-  uint32_t kept_terms[RACK_SIZE + 1];
-  uint32_t played_terms[RACK_SIZE + 1];
-  tiles_kept[number_of_letters] = 0;
-  tiles_played[number_of_letters] = 0;
-  kept_terms[number_of_letters] = 0;
-  played_terms[number_of_letters] = 0;
-
+  CensusRackSplitter splitter;
+  census_rack_splitter_init(&splitter, lattice, letters, counts,
+                            number_of_letters);
+  uint32_t played_indexes[INFERENCE_CENSUS_SPLIT_BATCH];
+  uint32_t kept_indexes[INFERENCE_CENSUS_SPLIT_BATCH];
+  uint8_t tiles_played[INFERENCE_CENSUS_SPLIT_BATCH];
+  uint8_t kept_counts[INFERENCE_CENSUS_SPLIT_BATCH][RACK_SIZE] = {{0}};
   Equity best_equity = EQUITY_PASS_VALUE;
-  int changed_idx = number_of_letters - 1;
   while (true) {
-    // The sums carried in locals, so that each letter does not wait on the
-    // store of the one after it.
-    int kept_sum = tiles_kept[changed_idx + 1];
-    int played_sum = tiles_played[changed_idx + 1];
-    uint32_t kept_terms_sum = kept_terms[changed_idx + 1];
-    uint32_t played_terms_sum = played_terms[changed_idx + 1];
-    for (int letter_idx = changed_idx; letter_idx >= 0; letter_idx--) {
-      const int kept_count = kept_counts[letter_idx];
-      const int played_count = counts[letter_idx] - kept_count;
-      kept_sum += kept_count;
-      played_sum += played_count;
-      kept_terms_sum += census_lattice_rank_term(lattice, letters[letter_idx],
-                                                 kept_sum, kept_count);
-      played_terms_sum += census_lattice_rank_term(lattice, letters[letter_idx],
-                                                   played_sum, played_count);
-      tiles_kept[letter_idx] = kept_sum;
-      tiles_played[letter_idx] = played_sum;
-      kept_terms[letter_idx] = kept_terms_sum;
-      played_terms[letter_idx] = played_terms_sum;
+    const int number_of_splits = census_rack_splitter_next(
+        &splitter, INFERENCE_CENSUS_SPLIT_BATCH, played_indexes, kept_indexes,
+        tiles_played, number_of_tiles_in_bag == 0 ? kept_counts : NULL);
+    if (number_of_splits == 0) {
+      return best_equity;
     }
-    // Keeping every tile is a pass, valued below every move.
-    if (tiles_played[0] > 0) {
+    for (int split_idx = 0; split_idx < number_of_splits; split_idx++) {
       if (number_of_tiles_in_bag == 0) {
         rack_reset(&kept);
         for (int letter_idx = 0; letter_idx < number_of_letters; letter_idx++) {
-          rack_add_letters(&kept, letters[letter_idx], kept_counts[letter_idx]);
+          rack_add_letters(&kept, letters[letter_idx],
+                           kept_counts[split_idx][letter_idx]);
         }
       }
       const Equity leave_value =
-          inference->census_leave_values[census_lattice_get_size_start(
-                                             lattice, tiles_kept[0]) +
-                                         kept_terms[0]];
+          inference->census_leave_values[kept_indexes[split_idx]];
       const Equity play_score =
-          inference->census_play_scores[census_lattice_get_size_start(
-                                            lattice, tiles_played[0]) +
-                                        played_terms[0]];
+          inference->census_play_scores[played_indexes[split_idx]];
       // Whether the tiles make a play is as good as random, so the play is
       // valued either way and dropped by a select, not a branch.
       const Equity play_equity = static_eval_get_nonopening_move_equity(
-          ld, &kept, opp_rack, tiles_played[0], number_of_tiles_in_bag,
+          ld, &kept, opp_rack, tiles_played[split_idx], number_of_tiles_in_bag,
           play_score, leave_value);
       best_equity = play_score != CENSUS_UNPLAYABLE && play_equity > best_equity
                         ? play_equity
                         : best_equity;
       if (add_exchange) {
         const Equity exchange_equity = static_eval_get_nonopening_move_equity(
-            ld, &kept, opp_rack, tiles_played[0], number_of_tiles_in_bag, 0,
-            leave_value);
+            ld, &kept, opp_rack, tiles_played[split_idx],
+            number_of_tiles_in_bag, 0, leave_value);
         best_equity =
             exchange_equity > best_equity ? exchange_equity : best_equity;
       }
@@ -466,17 +437,6 @@ static Equity get_top_equity_from_census(const Inference *inference,
         return best_equity;
       }
     }
-    int letter_idx = 0;
-    while (letter_idx < number_of_letters &&
-           kept_counts[letter_idx] == counts[letter_idx]) {
-      kept_counts[letter_idx] = 0;
-      letter_idx++;
-    }
-    if (letter_idx == number_of_letters) {
-      return best_equity;
-    }
-    kept_counts[letter_idx]++;
-    changed_idx = letter_idx;
   }
 }
 
@@ -1166,7 +1126,6 @@ typedef struct CensusBuildWorker {
   int number_of_workers;
   int thread_index;
   _Atomic int *next_unit;
-  cpthread_t cpthread_id;
 } CensusBuildWorker;
 
 static void *census_reset_worker(void *uncasted_worker) {
@@ -1193,21 +1152,6 @@ static void *census_build_worker(void *uncasted_worker) {
           : 1,
       worker->next_unit, CENSUS_ALL_LANES);
   return NULL;
-}
-
-// Runs one phase of the build on every worker's thread, the first in the
-// calling thread.
-static void census_run_build_phase(CensusBuildWorker *workers,
-                                   int number_of_workers,
-                                   void *(*phase)(void *)) {
-  for (int thread_index = 1; thread_index < number_of_workers; thread_index++) {
-    cpthread_create(&workers[thread_index].cpthread_id, phase,
-                    &workers[thread_index]);
-  }
-  phase(&workers[0]);
-  for (int thread_index = 1; thread_index < number_of_workers; thread_index++) {
-    cpthread_join(workers[thread_index].cpthread_id);
-  }
 }
 
 // Builds the board's census play scores for the workers when
@@ -1279,8 +1223,10 @@ static void inference_ctx_set_census_play_scores(InferenceCtx *ctx,
           .next_unit = &next_unit,
       };
     }
-    census_run_build_phase(workers, ctx->num_workers, census_reset_worker);
-    census_run_build_phase(workers, ctx->num_workers, census_build_worker);
+    census_run_phase(workers, sizeof(CensusBuildWorker), ctx->num_workers,
+                     census_reset_worker);
+    census_run_phase(workers, sizeof(CensusBuildWorker), ctx->num_workers,
+                     census_build_worker);
     free(workers);
   }
   for (int thread_index = 0; thread_index < ctx->num_workers; thread_index++) {
