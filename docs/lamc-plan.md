@@ -689,7 +689,121 @@ the results with LAMC's totals: searches, rounds, plays evaluated, search
 rollouts and time, and how often the chosen play was outside the static
 top plays.
 
-<!-- RESULTS -->
+### Results
+
+All replay numbers are regret in percentage points of win percentage:
+LAMC's minus the standard sim's, with its standard error, so negative favors
+LAMC. Both choose from the same recorded samples at the same budget; the
+standard sim takes the top 15 plays by static equity. Rollouts are 2 plies,
+CSW21, single rollouts (no bag cycling), no inference; each position's
+universe is its top 100 plays by static equity. "Set regret" is the best
+play LAMC (or the standard sim) handed the final stage, against the best
+play recorded; "rank correlation" is Spearman's, of the surrogate's means
+or of static equity with the true win percentages, over all 100 plays.
+
+**Midgame (30 or more tiles in the bag), 384 positions, 250 recorded
+samples per play for the methods and 250 for the truth.** Static equity's
+top 15 almost always holds the best play: its set regret is 0.007 points.
+There is nothing for a wider search to find, and every rollout the search
+spends is lost to the final choice.
+
+| Variant | 1,000 rollouts | 3,000 rollouts | Set regret | Rank correlation |
+|---|---|---|---|---|
+| Equity mean, all candidates, no static floor, explore 0.5 | +0.18 (0.05) | +0.11 (0.04) | 0.111 | 0.721 (static 0.746) |
+| The same, static floor of 10 | +0.07 (0.03) | +0.004 (0.007) | 0.007 | 0.721 |
+| The defaults (floor 10, explore 0.3, signal variance fit) | +0.04 (0.02) | +0.005 (0.006) | 0.007 | 0.718 |
+
+The surrogate ranks midgame plays slightly *worse* than static equity, so
+the floor is what keeps LAMC from harm there, and the bag limit keeps it out
+of the midgame by default.
+
+**Late game (1 to 20 tiles in the bag).** Here static equity's top 15
+misses the best play more often (set regret about 0.3 to 0.4 points), and the
+surrogate with an equity prior mean ranks plays *better* than static equity.
+
+All three sets below are fresh: none of their positions was used for
+tuning.
+
+| Positions (samples per play) | Variant | 1,000 | 3,000 | 10,000 | Set regret, standard / LAMC | Rank correlation, LAMC / static |
+|---|---|---|---|---|---|---|
+| 768 (250) | Equity mean, all candidates, no floor, explore 0.5 | +0.03 (0.04) | +0.01 (0.03) | | 0.289 / 0.276 | |
+| 384 (800) | The same | | -0.10 (0.12) | -0.12 (0.12) | 0.411 / 0.302 | 0.584 / 0.531 |
+| 384 (800) | The same, static floor of 10 | | -0.21 (0.11) | -0.22 (0.11) | 0.411 / 0.197 | 0.584 / 0.531 |
+| 384 (800) | Constant mean, all candidates, no floor | | -0.01 (0.14) | -0.02 (0.14) | 0.411 / 0.396 | 0.502 / 0.531 |
+| 768 (400 / 700) | The defaults | | -0.06 (0.03) | -0.09 (0.03) | 0.417 / 0.334 | 0.586 / 0.544 |
+
+The last row is the best estimate: on 768 fresh late positions, LAMC with
+its defaults lowers regret by 0.06 points of win percentage at 3,000
+rollouts (1.8 standard errors from zero) and 0.09 at 10,000 (2.6). At
+10,000 the set regrets are 0.411 and 0.324 and the rank correlations 0.588
+and 0.547. Its candidate sets are better
+(0.33 against 0.42 points of set regret), but the final stage recovers only
+part of that. The gain is small: 0.06 to 0.09 points of win percentage per late
+decision, so with about three such decisions a game, 0.2 to 0.3 points of win
+rate per game, far below what the game pairs below can measure.
+
+**What the tuning found** (late game, 384 positions used for tuning, 250
+samples; the differences are within noise one by one, but consistent):
+
+- **Prior mean.** A constant prior mean makes the surrogate rank worse than
+  static equity (0.502 against 0.531 on the fresh late set) and LAMC no
+  better than the standard sim. The prior mean linear in static equity is
+  the one change that made the surrogate useful.
+- **Proposals.** With the equity prior mean and candidates from all plays,
+  `acquire` beat `ascent` (the slides' gradient step) at 3,000 rollouts:
+  -0.10 (0.13) against -0.05 (0.13) on 384 positions, and -0.29 (0.29)
+  against -0.17 (0.27) on 96. A gradient of a surrogate fit to a few noisy
+  samples per play is mostly noise.
+- **Features.** At 3,000 rollouts: the default set -0.19 (0.11); rack
+  features only (score, leave, tiles, type, bagafter, leaveshape,
+  leavedups) -0.12 (0.11); board features only (score, leave, type,
+  location, direction, premium, perimeter) 0.00 (0.10); score, leave and
+  equity only -0.02 (0.12); the default set with leavedups -0.17 (0.10). The
+  rack features carry most of the gain and the board features add to them;
+  neither alone, nor the equity terms alone, does much.
+- **Sample reuse.** Counting the search's samples in the final choice cut
+  regret by 0.06 to 0.08 points at 1,000 rollouts in each of five variants.
+- **Explore share.** At 1,000 rollouts: 0.2 +0.20 (0.13), 0.3 about -0.04,
+  0.5 -0.10 (0.12) late, but 0.3 beat 0.5 in the midgame. At 3,000 the
+  search stops on stable kept plays before its share runs out.
+- **Static plays in the first pool.** At 3,000 rollouts, taking 12 of the
+  16 by static equity instead of 4 cut set regret from 0.30 to 0.21 and
+  regret from -0.10 to -0.21 against the standard sim; at 1,000 it made no
+  clear difference.
+- Length scale (1.5 or 3), `-lamcbeta` (1 or 2) and pool shape (16 keep 4 or
+  24 keep 6) made no clear difference.
+
+**Game pairs.** <!-- GAMES -->
+
+**Speed.** <!-- SPEED -->
+
+### What to do next
+
+1. **Measure it in games where it acts.** LAMC changes only the last few
+   turns of a game, so whole-game pairs need tens of thousands of games to
+   see it. Game pairs started from late positions (bag of 20 or fewer),
+   at a real time limit, would measure the same thing with far fewer.
+2. **Find where the gain stops.** The bag limit of 20 is where the evidence
+   is; positions with 21 to 29 tiles were not tested.
+3. **Compare with PEG** in the positions PEG solves, as the plan says: the
+   exact answer is the best test of the late-game gain.
+4. **A better prior mean.** The prior mean linear in static equity is what
+   made the surrogate useful; a stronger static evaluator (PAT, or the CNN
+   evaluator from the talk) as the prior mean is the most direct next gain.
+5. **Per-feature length scales.** The ablation shows the rack features
+   matter most and the board features help only with them. Per-feature
+   length scales, fit by marginal likelihood or stored by name as the plan
+   proposed, should let the surrogate weight them accordingly.
+6. **Late-game features.** Static equity misranks late plays for reasons
+   the features only partly see: whether a play empties the bag, what the
+   opponent can go out with, and what a play leaves for the last draw.
+7. **Let BAI count the search's samples.** The final sim resumes from them
+   for its statistics, but BAI's own stopping rule starts from zero, so it
+   may sample the search's best plays more than it needs to.
+8. **Phase 2 starts from here.** The replay harness, the subset view and
+   the registry carry over unchanged. The late game, where the rollout
+   policy is most likely wrong, is where to test adaptive responses first.
+
 
 ---
 
