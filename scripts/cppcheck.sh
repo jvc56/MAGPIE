@@ -70,11 +70,11 @@ CHECK_TARGETS=("${SOURCE_DIRS[@]}")
 # only shard INDEX's files, then stops. CI copies the shards' results into one
 # build dir and runs this script unsharded, which takes every file's results
 # from there, then runs the whole-program checks and the _WIN32 pass (see
-# shard_cppcheck.py).
+# scripts/shard_cppcheck.py).
 if [ -n "${CPPCHECK_SHARD}" ]; then
     SHARD_FILE_LIST=$(mktemp) || { echo "Error: Failed to create the shard's file list. Exiting."; exit 1; }
     trap 'rm -f "${SHARD_FILE_LIST}"' EXIT
-    python3 shard_cppcheck.py list "${CPPCHECK_SHARD%/*}" "${CPPCHECK_SHARD#*/}" "${SOURCE_DIRS[@]}" >"${SHARD_FILE_LIST}" || { echo "Error: Failed to list shard ${CPPCHECK_SHARD}'s files. Exiting."; exit 1; }
+    python3 scripts/shard_cppcheck.py list "${CPPCHECK_SHARD%/*}" "${CPPCHECK_SHARD#*/}" "${SOURCE_DIRS[@]}" >"${SHARD_FILE_LIST}" || { echo "Error: Failed to list shard ${CPPCHECK_SHARD}'s files. Exiting."; exit 1; }
     CHECK_TARGETS=("--file-list=${SHARD_FILE_LIST}")
     echo "Checking shard ${CPPCHECK_SHARD}: $(wc -l <"${SHARD_FILE_LIST}") files."
 fi

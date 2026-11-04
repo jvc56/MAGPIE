@@ -58,9 +58,8 @@ used for production work.
 
 WMP, RIT, WIT and WPF construction all run in C. Make and shell scripts
 coordinate builds and downloads; none of these table generators requires
-Python. Repository Python utilities serve other purposes, including formatting,
-dependency checks and the separate `create_normal_data.py` statistical-test
-fixture helper.
+Python. Repository Python utilities serve other purposes, such as formatting
+and dependency checks.
 
 The 15-square CSW24 positional section covers all 7,140 two-to-four-letter
 bases and uses 102,050,416 bytes (97.32 MiB) of shared mask memory. Both kinds

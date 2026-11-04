@@ -20,18 +20,19 @@ a banned function only counts as a call: `stat(` and `(stat)(` are calls,
 This is a lint that catches the usual slips early and says where they are,
 not a proof: a macro that renames a call, a function pointer, or a compat
 header that includes a platform header for its own use gets past it. The
-Windows cross-compile (check_windows_compile.py, and the Windows builds in
+Windows cross-compile (scripts/check_windows_compile.py, and the Windows builds in
 CI) is what shows the code builds there.
 
 Usage:
-  python3 check_portability.py
+  python3 scripts/check_portability.py
 """
 
 import os
 import re
 import sys
 
-ROOT = os.path.dirname(os.path.abspath(__file__))
+# The repository root, the parent of this scripts directory.
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SCAN_DIRS = ["src", "cmd", "tools", "test"]
 COMPAT_DIR = os.path.join("src", "compat")
 # The test suite's platform layer (see the docstring).

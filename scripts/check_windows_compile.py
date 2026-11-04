@@ -6,7 +6,7 @@ MinGW-w64 cross compiler (llvm-mingw in CI) and the warning flags of the dev
 build, -Werror included. Every file must compile: there are no exceptions.
 
 Usage:
-  python3 check_windows_compile.py [--cc CC]...
+  python3 scripts/check_windows_compile.py [--cc CC]...
 
 --cc may be given more than once (CI passes the x86_64 and aarch64
 compilers); a file counts as compiling only if it compiles with every one.
@@ -18,7 +18,8 @@ import os
 import subprocess
 import sys
 
-ROOT = os.path.dirname(os.path.abspath(__file__))
+# The repository root, the parent of this scripts directory.
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SCAN_DIRS = ["src", "cmd", "tools", "test"]
 DEFAULT_CC = "x86_64-w64-mingw32-clang"
 CFLAGS = [

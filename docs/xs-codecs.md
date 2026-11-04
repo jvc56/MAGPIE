@@ -83,9 +83,10 @@ git -C /tmp/magpie-xs-data checkout c4216b80098e8c7e88262cb5d04d0bc033bc4d46
 ./bin/magpie_test xsdata:/tmp/magpie-xs-data/data
 ```
 
-**Do not expect `download_data.sh`'s existing versioned archives to contain
-XS.** The dedicated CI job checks out the merged commit directly. Native tests
-load and verify all six pinned assets without an external validation script.
+**Do not expect `scripts/download_data.sh`'s existing versioned archives to
+contain XS.** The dedicated CI job checks out the merged commit directly.
+Native tests load and verify all six pinned assets without an external
+validation script.
 
 ## Common wire primitives
 

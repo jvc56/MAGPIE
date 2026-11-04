@@ -7,8 +7,8 @@
 COMMAND_PAIRS=(
     "git checkout main" "Switching to main branch..."
     "git pull" "Pulling latest changes from remote..."
-    "./download_data.sh" "Downloading lexical data..."
-    "./convert_lexica.sh"        "Building lexical data..."
+    "./scripts/download_data.sh" "Downloading lexical data..."
+    "./scripts/convert_lexica.sh" "Building lexical data..."
     "make clean && make release" "Building the magpie executable..."
 )
 

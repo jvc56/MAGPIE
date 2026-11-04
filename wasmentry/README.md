@@ -9,7 +9,7 @@ The existing `test-worker.html` remains available for diagnostics.
 Install Emscripten (pinned to 6.0.12 in release-build.json and CI) and activate its environment, then:
 
 ```sh
-./download_data.sh
+./scripts/download_data.sh
 make -f Makefile-wasm magpie_wasm
 python3 wasmentry/serve_preview.py --directory .
 ```

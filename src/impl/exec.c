@@ -604,8 +604,8 @@ void process_command_default(int argc, char *argv[]) {
   }
   // Data from `data fetch` comes without wordmaps, which are thirty times the
   // size of their lexica, so a lexicon's is built the first time it is used.
-  // Data put there otherwise (download_data.sh, then convert_lexica.sh) is
-  // left as it is.
+  // Data put there otherwise (scripts/download_data.sh, then
+  // scripts/convert_lexica.sh) is left as it is.
   const ConfigArgs config_args = {.data_paths = data_path,
                                   .use_wmp = true,
                                   .auto_tables = true,

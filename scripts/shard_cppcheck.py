@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Splits cppcheck.sh's first pass into shards for CI, and collects results.
+"""Splits scripts/cppcheck.sh's first pass into CI shards, and collects results.
 
 CI checks a share of the files in each of several jobs, copies each job's
-results into one --cppcheck-build-dir, and runs cppcheck.sh over everything
-from it. That run takes every file's results from the merged directory (they
-are keyed by a hash of the file as preprocessed, as in any incremental run)
-and runs the whole-program checks, which only see files in the same run, over
-all of them. A file a shard misses is analyzed there, so a shard can only
+results into one --cppcheck-build-dir, and runs scripts/cppcheck.sh over
+everything from it. That run takes every file's results from the merged
+directory (they are keyed by a hash of the file as preprocessed, as in any
+incremental run) and runs the whole-program checks, which only see files in
+the same run, over all of them. A file a shard misses is analyzed there, so a shard can only
 make the run slower, never miss a finding.
 
 The files are the .c files under the given directories, in the order
@@ -19,9 +19,9 @@ include, directly or not, which on this tree splits within a few percent of
 measured check times, and dealt heaviest first to the lightest shard.
 
 Usage:
-  python3 shard_cppcheck.py list INDEX COUNT DIR...
+  python3 scripts/shard_cppcheck.py list INDEX COUNT DIR...
       Prints shard INDEX's (1 to COUNT) files, one per line, for --file-list.
-  python3 shard_cppcheck.py collect BUILD_DIR OUT_DIR
+  python3 scripts/shard_cppcheck.py collect BUILD_DIR OUT_DIR
       Copies the results of the files the last run in BUILD_DIR checked (the
       ones its files.txt names) into OUT_DIR.
 """

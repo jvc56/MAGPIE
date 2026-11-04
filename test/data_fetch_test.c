@@ -284,8 +284,8 @@ static void make_directory(const char *path) {
 
 // Unpacking over an earlier extraction replaces its links rather than
 // writing through them, as tar does: a data directory made by
-// download_data.sh (GNU tar makes real links) or a developer's links into
-// another checkout keep what they point to.
+// scripts/download_data.sh (GNU tar makes real links) or a developer's links
+// into another checkout keep what they point to.
 static void test_existing_links_are_replaced(const char *root) {
   char *outside = get_formatted_string("%s/elsewhere", root);
   char *outside_file = get_formatted_string("%s/victim.txt", outside);
