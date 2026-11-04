@@ -7,6 +7,7 @@
 #include "../ent/game_history.h"
 #include "../ent/inference_args.h"
 #include "../ent/inference_results.h"
+#include "../ent/lamc_args.h"
 #include "../ent/rack.h"
 #include "../ent/sim_results.h"
 #include "../ent/thread_control.h"
@@ -69,6 +70,9 @@ typedef struct SimArgs {
   // (see census_rollout.h): the same moves, found faster. sim_args_fill
   // clears it.
   bool use_census_rollout;
+  // Whether and how Locally Adaptive Monte Carlo chooses the plays the sim
+  // simulates (see lamc.h). sim_args_fill turns it off; callers set it after.
+  LamcArgs lamc_args;
 } SimArgs;
 
 // Unlike endgame_args_fill and peg_args_fill, this does NOT take a parameter
@@ -136,6 +140,7 @@ sim_args_fill(const int num_plies, const MoveList *move_list,
   sim_args->use_margin_forecast = use_margin_forecast;
   sim_args->bag_cycle = false;
   sim_args->use_census_rollout = false;
+  lamc_args_set_defaults(&sim_args->lamc_args);
   // Start fresh, not resuming a prior SimResults. Only the TUI's analysis-
   // resume path sets this true; every other caller fills SimArgs through
   // here, so leaving it uninitialized let stack garbage spuriously trigger
