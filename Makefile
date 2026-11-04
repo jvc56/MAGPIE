@@ -171,7 +171,7 @@ OBJ_CMD := $(CMD:$(CMD_DIR)/%.c=$(OBJ_DIR)/$(CMD_DIR)/%.o)
 TUI_OBJ_SRC := $(SRC:$(SRC_DIR)/%.c=$(TUI_OBJ_DIR)/$(SRC_DIR)/%.o)
 TUI_OBJ_TUI := $(TUI:$(TUI_DIR)/%.c=$(TUI_OBJ_DIR)/$(TUI_DIR)/%.o)
 # miniaudio (vendor/miniaudio), which plays the TUI's sound effects.
-TUI_MINIAUDIO_OBJ := $(TUI_OBJ_DIR)/vendor/miniaudio/miniaudio.o
+TUI_MINIAUDIO_OBJ := $(TUI_OBJ_DIR)/vendor/miniaudio/miniaudio_impl.o
 PGO_TRAIN_OBJ := $(OBJ_DIR)/$(TOOLS_DIR)/pgo_train.o
 CONVERT_OBJ := $(OBJ_DIR)/$(TOOLS_DIR)/convert.o
 
@@ -606,7 +606,7 @@ $(TUI_OBJ_DIR)/$(SRC_DIR)/%.o: $(SRC_DIR)/%.c | $(TUI_OBJ_DIR) $(TUI_OBJ_DIR)/$(
 
 # Third-party code, built with the TUI's optimization but none of its
 # warnings.
-$(TUI_MINIAUDIO_OBJ): vendor/miniaudio/miniaudio.c | $(TUI_OBJ_DIR)
+$(TUI_MINIAUDIO_OBJ): vendor/miniaudio/miniaudio_impl.c | $(TUI_OBJ_DIR)
 	@mkdir -p $(dir $@)
 	$(CC) $(TUI_OPT) $(TUI_LTO) -march=native -g $(TUI_NDEBUG) $(TUI_ALIGN_CFLAGS) $(TUI_SAN) -w -MMD -MP -c $< -o $@
 
