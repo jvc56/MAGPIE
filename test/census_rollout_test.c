@@ -13,12 +13,14 @@
 #include "../src/impl/gameplay.h"
 #include "../src/impl/move_gen.h"
 #include "../src/util/io_util.h"
+#include "../src/util/string_util.h"
 #include "test_constants.h"
 #include "test_util.h"
 #include <assert.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 enum {
   // Each position's candidates, the rollouts of each, and the plies of a
@@ -203,12 +205,12 @@ static void test_census_rollout_sim_matches_plain(void) {
   if (BOARD_DIM != 15) {
     return;
   }
-  char command[256];
-  snprintf(command, sizeof(command),
-           "set -lex CSW21 -wmp true -threads 1 -plies 2 -numplays 8 -it %d "
-           "-scond none -patrollout false -sinfer false",
-           CENSUS_ROLLOUT_TEST_SIM_ITERATIONS);
+  char *command = get_formatted_string(
+      "set -lex CSW21 -wmp true -threads 1 -plies 2 -numplays 8 -it %d "
+      "-scond none -patrollout false -sinfer false",
+      CENSUS_ROLLOUT_TEST_SIM_ITERATIONS);
   Config *config = config_create_or_die(command);
+  free(command);
   load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
   MoveList *move_list = move_list_create(1);
   play_to_bag_size(config_get_game(config), move_list, 7, 40);
@@ -255,12 +257,12 @@ void test_census_rollout(void) {
 // Single-threaded sims of four positions of a CSW24 game, with and without
 // the census: the same results, and the time each takes.
 void test_census_rollout_bench(void) {
-  char command[256];
-  snprintf(command, sizeof(command),
-           "set -lex CSW24 -wmp true -threads 1 -plies %d -numplays 8 -it %d "
-           "-scond none -patrollout false -sinfer false",
-           CENSUS_ROLLOUT_BENCH_PLIES, CENSUS_ROLLOUT_BENCH_ITERATIONS);
+  char *command = get_formatted_string(
+      "set -lex CSW24 -wmp true -threads 1 -plies %d -numplays 8 -it %d "
+      "-scond none -patrollout false -sinfer false",
+      CENSUS_ROLLOUT_BENCH_PLIES, CENSUS_ROLLOUT_BENCH_ITERATIONS);
   Config *config = config_create_or_die(command);
+  free(command);
   load_and_exec_config_or_die(config,
                               "load testdata/gcgs/success_long_game.gcg");
   const int turns[] = {14, 18, 22, 26};
@@ -269,8 +271,9 @@ void test_census_rollout_bench(void) {
   double census_total = 0;
   SimSnapshot snapshots[2];
   for (int turn_idx = 0; turn_idx < number_of_turns; turn_idx++) {
-    snprintf(command, sizeof(command), "goto %d", turns[turn_idx]);
-    load_and_exec_config_or_die(config, command);
+    char *goto_command = get_formatted_string("goto %d", turns[turn_idx]);
+    load_and_exec_config_or_die(config, goto_command);
+    free(goto_command);
     load_and_exec_config_or_die(config, "gen");
     double seconds[2];
     for (int census_on = 0; census_on < 2; census_on++) {

@@ -217,7 +217,10 @@ static uint32_t census_rollout_changed_cols(const Square *now,
   return changed;
 }
 
+// The columns from low to high. Both are columns, so neither shift is
+// negative or past BOARD_DIM, which is below 32.
 static uint32_t cols_between(int low, int high) {
+  // NOLINTNEXTLINE(clang-analyzer-core.BitwiseShift)
   return ((UINT32_C(1) << (high + 1)) - 1) & ~((UINT32_C(1) << low) - 1);
 }
 
