@@ -585,7 +585,7 @@ static void replay_ranks(const double *values, const int count, double *ranks) {
     int rank = 0;
     for (int other = 0; other < count; other++) {
       if (values[other] < values[idx] ||
-          (values[other] == values[idx] && other < idx)) {
+          (other < idx && values[other] == values[idx])) {
         rank++;
       }
     }
