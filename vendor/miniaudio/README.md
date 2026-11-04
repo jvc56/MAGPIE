@@ -11,7 +11,7 @@ loaded at run time, so building needs no audio libraries.
 
 - `miniaudio_tui.h`: the options magpie_tui builds it with (only the
   low-level playback device API). Include it instead of `miniaudio.h`.
-- `miniaudio.c`: the implementation, compiled once.
+- `miniaudio_impl.c`: the implementation, compiled once.
 
 To update, replace `miniaudio.h` with the new release's and update the version
 and blob above.
