@@ -3409,13 +3409,12 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
   gen->is_wordsmog = game_get_variant(game) == GAME_VARIANT_WORDSMOG;
   gen->threshold_exceeded = false;
   gen->stop_on_threshold = args->target_equity != EQUITY_MAX_VALUE;
-  // A word info table's prune and wordsmog's letters are shadow inputs that
-  // the cache's keys do not hold.
-  gen->lane_shadow_cache = gen->move_record_type == MOVE_RECORD_BEST_SMALL &&
-                                   gen->word_info_table == NULL &&
-                                   !gen->is_wordsmog
-                               ? args->lane_shadow_cache
-                               : NULL;
+  // Wordsmog is left out. A word info table is not a shadow input here: only
+  // the full shadow reads it, and these generations run the small one.
+  gen->lane_shadow_cache =
+      gen->move_record_type == MOVE_RECORD_BEST_SMALL && !gen->is_wordsmog
+          ? args->lane_shadow_cache
+          : NULL;
 }
 
 void gen_look_up_leaves_and_record_exchanges(MoveGen *gen) {

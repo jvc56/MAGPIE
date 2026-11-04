@@ -2,14 +2,20 @@
 
 #include "../src/def/equity_defs.h"
 #include "../src/def/move_defs.h"
+#include "../src/def/players_data_defs.h"
+#include "../src/ent/board.h"
 #include "../src/ent/equity.h"
 #include "../src/ent/game.h"
+#include "../src/ent/lane_shadow_cache.h"
 #include "../src/ent/move.h"
 #include "../src/ent/player.h"
+#include "../src/ent/players_data.h"
 #include "../src/ent/rack.h"
+#include "../src/ent/word_info_table.h"
 #include "../src/impl/config.h"
 #include "../src/impl/gameplay.h"
 #include "../src/impl/move_gen.h"
+#include "../src/impl/word_info_table_maker.h"
 #include "../src/util/io_util.h"
 #include "../src/util/string_util.h"
 #include "test_util.h"
@@ -35,6 +41,10 @@ enum {
   SELF_PLAY_CANDIDATE_MOVES = 6,
   BONUS_KINDS = 3,
   SELF_PLAY_BASE_SEED = 1000,
+  // The lane shadow cache check: its self-play games, and its caches' 2^16
+  // entries (4 MB each), more than the lanes those games record.
+  LANE_SHADOW_TEST_GAMES = 4,
+  LANE_SHADOW_TEST_INDEX_BITS = 16,
 };
 
 typedef struct BestSmallStats {
@@ -253,6 +263,152 @@ static void check_self_play_games(const char *lexicon, MoveList *all_small,
   config_destroy(config);
 }
 
+// One best-play generation of the player on turn of `game`, through `cache`
+// when it is not NULL.
+static SmallMove best_small_play(const Game *game, LaneShadowCache *cache,
+                                 MoveList *best_small, Equity bonus) {
+  const MoveGenArgs args = {
+      .game = game,
+      .move_list = best_small,
+      .move_record_type = MOVE_RECORD_BEST_SMALL,
+      .move_sort_type = MOVE_SORT_SCORE,
+      .eq_margin_movegen = 0,
+      .target_equity = EQUITY_MAX_VALUE,
+      .best_small_out_bonus = bonus,
+      .best_small_canonical_ties = true,
+      .lane_shadow_cache = cache,
+  };
+  generate_moves(&args);
+  assert(move_list_get_count(best_small) == 1);
+  return *best_small->small_moves[0];
+}
+
+static void assert_same_small_play(const SmallMove *first,
+                                   const SmallMove *second) {
+  assert(first->tiny_move == second->tiny_move);
+  assert(small_move_get_score(first) == small_move_get_score(second));
+}
+
+// The same positions with a word info table (`game`) and without one
+// (`reference`): for the player on turn, without and with the out bonus, the
+// play without a cache, through game's cache twice (recording its lanes, then
+// finding them) and through the reference's cache.
+static void check_lane_shadow_cache_position(
+    const Game *game, const Game *reference, LaneShadowCache *cache,
+    LaneShadowCache *reference_cache, MoveList *best_small, int *checks) {
+  const int player_idx = game_get_player_on_turn_index(game);
+  if (rack_get_total_letters(
+          player_get_rack(game_get_player(game, player_idx))) == 0) {
+    return;
+  }
+  const Equity bonuses[] = {
+      0, calculate_end_rack_points(
+             player_get_rack(game_get_player(game, 1 - player_idx)),
+             game_get_ld(game))};
+  for (size_t bonus_idx = 0; bonus_idx < sizeof(bonuses) / sizeof(Equity);
+       bonus_idx++) {
+    const Equity bonus = bonuses[bonus_idx];
+    const SmallMove uncached = best_small_play(game, NULL, best_small, bonus);
+    for (int pass_idx = 0; pass_idx < 2; pass_idx++) {
+      const SmallMove cached = best_small_play(game, cache, best_small, bonus);
+      assert_same_small_play(&cached, &uncached);
+    }
+    const SmallMove reference_play =
+        best_small_play(reference, reference_cache, best_small, bonus);
+    assert_same_small_play(&reference_play, &uncached);
+    (*checks)++;
+  }
+}
+
+// With a word info table loaded, best-play generations use the lane shadow
+// cache, which a loaded table once turned off, and record exactly the shadows
+// they record without one: the small shadow they run reads no word info
+// table, so the cache's keys hold all of its inputs. The table is built in
+// memory, as witsweep builds its own, and the games' boards hold its block
+// rows, which only the full shadow reads.
+static void check_lane_shadow_cache_with_word_info_table(MoveList *best_small) {
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -wmp false -wit false -s1 equity -s2 equity -r1 all "
+      "-r2 all -numplays 1");
+  PlayersData *players_data = config_get_players_data(config);
+  assert(players_data_get_word_info_table(players_data, 0) == NULL);
+  WordInfoTable *wit =
+      make_word_info_table_from_kwg(players_data_get_kwg(players_data, 0), 1);
+  // A game reads the table of its players' data when it is created.
+  players_data_set_data(players_data, PLAYERS_DATA_TYPE_WIT, 0, wit);
+  players_data_set_data(players_data, PLAYERS_DATA_TYPE_WIT, 1, wit);
+  Game *game = config_game_create(config);
+  players_data_set_data(players_data, PLAYERS_DATA_TYPE_WIT, 0, NULL);
+  players_data_set_data(players_data, PLAYERS_DATA_TYPE_WIT, 1, NULL);
+  Game *reference = config_game_create(config);
+  assert(player_get_word_info_table(game_get_player(game, 0)) == wit);
+  assert(player_get_word_info_table(game_get_player(reference, 0)) == NULL);
+  LaneShadowCache *cache =
+      lane_shadow_cache_create(LANE_SHADOW_TEST_INDEX_BITS);
+  LaneShadowCache *reference_cache =
+      lane_shadow_cache_create(LANE_SHADOW_TEST_INDEX_BITS);
+  lane_shadow_cache_set_salt(cache, 1);
+  lane_shadow_cache_set_salt(reference_cache, 1);
+  MoveList *top_move = move_list_create(1);
+  int checks = 0;
+  int boards_with_rows = 0;
+  for (int game_idx = 0; game_idx < LANE_SHADOW_TEST_GAMES; game_idx++) {
+    game_reset(game);
+    game_reset(reference);
+    const uint64_t seed = SELF_PLAY_BASE_SEED + (uint64_t)game_idx;
+    game_seed(game, seed);
+    game_seed(reference, seed);
+    draw_starting_racks(game);
+    draw_starting_racks(reference);
+    while (!game_over(game)) {
+      boards_with_rows +=
+          board_get_wit_cache_populated(game_get_board(game)) ? 1 : 0;
+      const int on_turn_idx = game_get_player_on_turn_index(game);
+      for (int offset = 0; offset < 2; offset++) {
+        game_set_player_on_turn_index(game, (on_turn_idx + offset) % 2);
+        game_set_player_on_turn_index(reference, (on_turn_idx + offset) % 2);
+        check_lane_shadow_cache_position(game, reference, cache,
+                                         reference_cache, best_small, &checks);
+      }
+      game_set_player_on_turn_index(game, on_turn_idx);
+      game_set_player_on_turn_index(reference, on_turn_idx);
+      const Move move = *get_top_equity_move(reference, top_move);
+      play_move(&move, game, NULL);
+      play_move(&move, reference, NULL);
+    }
+    assert(game_over(reference));
+  }
+  int recorded = 0;
+  for (int entry_idx = 0; entry_idx < (1 << LANE_SHADOW_TEST_INDEX_BITS);
+       entry_idx++) {
+    const LaneShadowEntry *entry = &cache->entries[entry_idx];
+    const LaneShadowEntry *reference_entry =
+        &reference_cache->entries[entry_idx];
+    assert(entry->key == reference_entry->key);
+    assert(entry->count == reference_entry->count);
+    for (int anchor_idx = 0; anchor_idx < entry->count; anchor_idx++) {
+      assert(entry->cols[anchor_idx] == reference_entry->cols[anchor_idx]);
+      assert(entry->last_anchor_cols[anchor_idx] ==
+             reference_entry->last_anchor_cols[anchor_idx]);
+      assert(entry->bounds[anchor_idx] == reference_entry->bounds[anchor_idx]);
+    }
+    recorded += entry->key != 0 ? 1 : 0;
+  }
+  printf("best_small: %d generations through the lane shadow cache with a word "
+         "info table, %d lanes recorded, the same as without the table; %d "
+         "boards held its block rows\n",
+         checks, recorded, boards_with_rows);
+  assert(recorded > 0);
+  assert(boards_with_rows > 0);
+  move_list_destroy(top_move);
+  lane_shadow_cache_destroy(reference_cache);
+  lane_shadow_cache_destroy(cache);
+  game_destroy(reference);
+  game_destroy(game);
+  word_info_table_destroy(wit);
+  config_destroy(config);
+}
+
 static void check_cgp(Config *config, const char *cgp, MoveList *all_small,
                       MoveList *best_small, BestSmallStats *stats) {
   char *command = get_formatted_string("cgp %s", cgp);
@@ -301,6 +457,8 @@ void test_best_small(void) {
          stats.checks, stats.multiway_ties, stats.out_bonus_wins,
          stats.pass_results);
   assert(stats.multiway_ties > 0);
+
+  check_lane_shadow_cache_with_word_info_table(best_small);
 
   config_destroy(config);
   small_move_list_destroy(best_small);
