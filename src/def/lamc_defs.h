@@ -26,7 +26,7 @@ typedef enum {
 enum {
   LAMC_DEFAULT_POOL_SIZE = 16,
   LAMC_DEFAULT_KEEP = 4,
-  LAMC_DEFAULT_SEED_PLAYS = 4,
+  LAMC_DEFAULT_SEED_PLAYS = 12,
   LAMC_DEFAULT_SHALLOW_SAMPLES = 4,
   LAMC_DEFAULT_MAX_ROUNDS = 12,
   LAMC_DEFAULT_STABLE_ROUNDS = 3,
@@ -42,6 +42,10 @@ enum {
   LAMC_MAX_EVALUATED = 2048,
   // A bag limit at least this large never stops a search.
   LAMC_MAX_BAG = 1000,
+  // The replay found gains with at most this many tiles in the bag, and
+  // losses or nothing with more (see docs/lamc-plan.md).
+  LAMC_DEFAULT_MAX_BAG = 20,
+  LAMC_DEFAULT_STATIC_FINALISTS = 10,
 };
 
 #define LAMC_DEFAULT_EXPLORE_SHARE 0.3

@@ -2693,7 +2693,8 @@ static void help_entry_fill(const Config *config, int token,
       usages[0] = "<number_of_plays>";
       examples[0] = "4";
       text = "Specifies how many of LAMC's first pool are the best plays by "
-             "static equity. The rest are spread over the feature space.";
+             "static equity. The rest are spread over the feature space. 12 "
+             "by default.";
       break;
     case ARG_TOKEN_LAMC_SHALLOW:
       usages[0] = "<number_of_samples>";
@@ -2760,8 +2761,8 @@ static void help_entry_fill(const Config *config, int token,
       examples[0] = "ascent";
       examples[1] = "acquire";
       text = "Specifies how LAMC proposes new plays: ascent or acquire. "
-             "Ascent, the default, steps up the gradient of its prediction "
-             "from each play it drops. Acquire takes the plays with the "
+             "Ascent steps up the gradient of its prediction from each play "
+             "it drops. Acquire, the default, takes the plays with the "
              "highest upper confidence bound.";
       break;
     case ARG_TOKEN_LAMC_KERNEL:
@@ -2793,34 +2794,36 @@ static void help_entry_fill(const Config *config, int token,
       usages[0] = "<true_or_false>";
       examples[0] = "true";
       text = "Specifies whether LAMC's Gaussian process has a prior mean "
-             "linear in static equity. Otherwise the prior mean is constant.";
+             "linear in static equity. Otherwise the prior mean is constant. "
+             "On by default.";
       break;
     case ARG_TOKEN_LAMC_FINAL_ALL:
       usages[0] = "<true_or_false>";
       examples[0] = "true";
       text = "Specifies whether LAMC hands the simulation its best predicted "
              "plays of all plays. Otherwise they come from the plays it "
-             "sampled.";
+             "sampled. On by default.";
       break;
     case ARG_TOKEN_LAMC_MAX_BAG:
       usages[0] = "<number_of_tiles>";
       examples[0] = "20";
       text = "Specifies the most tiles in the bag at which LAMC searches. "
-             "With more, the simulation takes the top plays by static "
-             "equity as usual. 1000, the default, always searches.";
+             "With more, the simulation takes the top plays by static equity "
+             "as usual. 20 by default; 1000 always searches.";
       break;
     case ARG_TOKEN_LAMC_REUSE:
       usages[0] = "<true_or_false>";
       examples[0] = "true";
       text = "Specifies whether the simulation of LAMC's plays continues the "
              "samples the search took of them. Otherwise it starts over with "
-             "other seeds.";
+             "other seeds. On by default.";
       break;
     case ARG_TOKEN_LAMC_STATIC_FINALISTS:
       usages[0] = "<number_of_plays>";
       examples[0] = "8";
-      text = "Specifies how many top plays by static equity LAMC always hands "
-             "the simulation. The rest of its plays are its best predicted.";
+      text = "Specifies how many top plays by static equity LAMC always "
+             "hands the simulation. The rest of its plays are its best "
+             "predicted. 10 by default.";
       break;
     case ARG_TOKEN_P1_LAMC:
     case ARG_TOKEN_P2_LAMC:

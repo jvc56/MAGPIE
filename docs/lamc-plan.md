@@ -5,10 +5,12 @@ Source: Morris Greenberg, "The Past, Present, and Future of Scrabble Engines"
 "Future part 1: Locally Adaptive Monte Carlo for Comprehensive Search" and
 "Future part 2: Locally Adaptive Monte Carlo on Plies". This document plans
 both parts as two phases of work in MAGPIE. It describes the code as of
-753d44d5 on main. Nothing here is implemented yet.
+753d44d5 on main.
 
-Every option name, file name and default below is a proposal. Each phase
-ends with tests that decide whether its work ships.
+Phase 1 is implemented, off by default, on the `lamc-phase1` branch. What
+was built, how it differs from the plan, and what the tests found are in
+[Phase 1 as built](#phase-1-as-built). Phase 2 is not started. Elsewhere,
+option names, file names and defaults are the plan's proposals.
 
 ## Contents
 
@@ -18,6 +20,7 @@ ends with tests that decide whether its work ships.
 - [Ground rules for both phases](#ground-rules-for-both-phases)
 - [The play embedding](#the-play-embedding): the shared, modular feature space
 - [Phase 1: adaptive search over the turn's plays](#phase-1-adaptive-search-over-the-turns-plays)
+- [Phase 1 as built](#phase-1-as-built): the code, the tests and the results
 - [Phase 2: adaptive search at every ply](#phase-2-adaptive-search-at-every-ply)
 - [Risks and open questions](#risks-and-open-questions)
 - [Future work](#future-work)
@@ -545,6 +548,148 @@ Phase 1 ships behind `-lamc` when all hold:
 
 Making it the default (PR 1g) also requires the equal-time result to be a
 gain.
+
+---
+
+## Phase 1 as built
+
+### Summary
+
+<!-- SUMMARY -->
+
+### The code
+
+| File | Contents |
+|---|---|
+| `src/def/play_feature_defs.h` | `play_feature_t`, feature kinds, the default feature set |
+| `src/ent/play_feature.h` | `PlayFeatureCtx`, what extraction reads |
+| `src/impl/play_feature_registry.c/.h` | The switches on `play_feature_t`, lookup by name, parsing `-lamcfeatures` |
+| `src/impl/play_feature_equity.c`, `_rack.c`, `_board.c` | The extract functions, by family |
+| `src/util/dense_linalg.c/.h` | Cholesky factorization and triangular solves |
+| `src/impl/gp.c/.h` | The Gaussian process: Matern 5/2 or squared exponential kernel, fit, predict, gradient of the mean, log marginal likelihood |
+| `src/def/lamc_defs.h`, `src/ent/lamc_args.h` | Kernel and proposal enums, defaults, `LamcArgs` (a field of `SimArgs`) |
+| `src/impl/lamc.c/.h` | The search: universe, embedding, rounds, fit, proposals, candidates |
+| `src/impl/random_variable.c/.h` | Two new types: `RANDOM_VARIABLES_SUBSET`, a view of some arms of another random variable that can accumulate their samples, and `RANDOM_VARIABLES_TABLE`, which replays recorded samples |
+| `src/ent/sim_results.c/.h` | `sim_results_reset_from_plays`, which seeds a sim with plays' statistics and seed streams from another |
+| `src/impl/simmer.c` | The hook: after inference, before the standard sim |
+| `test/lamc_test.c` | The `lamc` CI test and the `lamcreplay` and `lamcautoplay` on-demand tests |
+
+The features are a plain enum. Every property of a feature is a function
+that switches on it with no `default`, so `-Wswitch` (on with `-Wall`, an
+error under `-Werror`) names every switch a new or removed feature leaves
+unhandled. The registry is the only file that knows the features; the
+embedding, the GP and the search see columns of numbers.
+
+### How a search runs
+
+With `-lamc true` (or `-lamc1`/`-lamc2` in autoplay), and the bag holding at
+least one tile and at most `-lamcmaxbag` (20). Defaults are in parentheses;
+they are the best settings the replay found.
+
+1. **Universe.** Every play by static equity, at most `-lamcuniverse`
+   (400), within `-lamcfloor` (30) points of the best. If there are no more
+   than the sim would simulate anyway, the search does not run.
+2. **Embedding.** Each active feature's columns (`-lamcfeatures`; the
+   default set is every feature but `equity` and `leavedups`), then every
+   continuous column standardized across the universe. Static equity,
+   standardized, is kept apart for the prior mean.
+3. **First pool.** `-lamcseed` (12) plays by static equity, then the rest of
+   `-lamcpool` (16) by farthest-point sampling in the embedding.
+4. **Rounds.** Each pool play gets `-lamcshallow` (4) samples: BAI with
+   round robin, no threshold, over a subset view of a sim over the universe,
+   so the round's samples use the sim's threads and its deterministic
+   scheduling. The view adds each sample to per-play sums in BAI's fixed
+   point, so the statistics do not depend on thread timing. A play's samples
+   continue its own seed stream, so no draw repeats across rounds. Search
+   samples are single rollouts unless `-lamccycle` makes them bag cycles.
+5. **Fit.** The prior mean, linear in static equity (`-lamcequitymean`, on)
+   or constant, is fit by least squares weighted by each play's precision;
+   the GP fits the residuals. Each play's noise is a pooled per-sample
+   variance over its sample count. Each fit chooses its length scale among
+   0.5, 1, 2 and 4 times `-lamclength` (1.5), and its signal variance among
+   0.1, 0.3 and 1 times the residuals' excess variance, by marginal
+   likelihood. A small signal variance leaves the predictions on the prior
+   mean when the samples show nothing beyond it.
+6. **Keep and propose.** The top `-lamckeep` (4) by the surrogate stay; the
+   rest of the pool is new plays, by `acquire` (the highest upper confidence
+   bounds, `-lamcbeta` (1) standard deviations; the default) or `ascent` (a
+   step of `-lamcradius` up the gradient of the mean from each dropped play,
+   snapped to the nearest unevaluated play, as in the slides).
+7. **Stop** after `-lamcrounds` (12) rounds, when the kept plays are the
+   same for `-lamcstable` (3) rounds, or when the next round would pass the
+   `-lamcexplore` (0.3) share of the sim's rollouts or time.
+8. **Candidates.** The first `-lamcfinalstatic` (10) are the top static
+   plays; the rest are the best by the surrogate's mean, among all plays
+   (`-lamcfinalall`, on) or among the evaluated ones. There are as many as
+   the sim would simulate, unless `-lamcfinal` says otherwise.
+9. **The sim** of the candidates runs as usual, with what is left of the
+   rollouts and time. With `-lamcreuse` (on), it resumes from the search's
+   samples of the candidates (their statistics and seed streams); otherwise
+   it starts over with other seeds, so that plays the search favored for
+   lucky draws do not get those draws again.
+
+With LAMC off, a sim pays one test of a flag per sim, and nothing per
+sample.
+
+### Differences from the plan
+
+- **No hyperparameter file.** One length scale for every column, with each
+  fit choosing among its multiples, instead of per-feature length scales
+  stored by name. The ablation below suggests the next step: per-feature
+  scales, or dropping features that do not help.
+- **The final BAI question is settled by resuming.** BAI keeps its own arm
+  statistics from zero, but `sim_results_reset_from_plays` starts the sim's
+  plays from the search's statistics and seed streams, and the sim picks its
+  play from those, so the search's samples count (`-lamcreuse`).
+- **One `SimResults` for the search, over the universe,** instead of one that
+  grows: every play in the universe has its seed stream from the start, so
+  nothing needs appending.
+- **Added after the first results:** the prior mean linear in static equity,
+  candidates among all plays, the floor of static candidates, sample reuse
+  and the bag limit. Each answered a failure the replay showed.
+- **Tests.** One harness, `lamcreplay`, does the work of the planned
+  `lamcsurrogate`, `lamcablate` and `lamcoracle`. Not done: the PEG
+  comparison, the exchange-5 position from the slides, `-lamctrace`, and
+  the status line for `shmoves`.
+
+### The tests
+
+**`lamc` (CI).** Cholesky and solves against known factors; the GP
+interpolates without noise, returns to its prior far from the data, has
+gradients matching finite differences, and finds the maximum of a bowl, for
+both kernels; every feature, through the registry, writes exactly its
+columns, finite and deterministic, without changing the game, with
+categorical columns one-hot; feature sets parse and reject unknown,
+repeated and empty names, through the config too; and LAMC sims, in four
+configurations, give identical results on 1 and 4 threads while spending
+their share of the budget.
+
+**`lamcreplay` (on demand).** Records every play's rollouts in a set of
+positions once, then has the standard sim and LAMC variants choose plays
+from the recordings at equal budgets. Each play's first half of samples is
+what the methods draw; the second half estimates its true win percentage.
+Reports, per variant and budget, against the standard sim (the top
+`LAMC_REPLAY_PLAYS` by static equity, sampled evenly):
+
+- **regret:** the true win percentage of the best play recorded, less that
+  of the chosen play, in percentage points, averaged over positions, and
+  the paired difference with its standard error;
+- **set regret:** the same for the best play among the candidates, which
+  measures the candidate set apart from the final choice;
+- **rank correlation:** Spearman's, between the true win percentages and the
+  surrogate's means, and between them and static equity.
+
+Its settings come from the environment (see the comment in the test):
+positions, stage (`mid`, 30 or more tiles in the bag, or `late`, 1 to 20),
+budgets, recorded samples, universe size, threads, sample reuse, a game
+offset for fresh positions, and the variants as `|`-separated option lists.
+
+**`lamcautoplay` (on demand).** Autoplay with the given settings, printing
+the results with LAMC's totals: searches, rounds, plays evaluated, search
+rollouts and time, and how often the chosen play was outside the static
+top plays.
+
+<!-- RESULTS -->
 
 ---
 

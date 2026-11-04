@@ -344,7 +344,8 @@ static uint64_t lamc_test_sim(const int num_threads, const char *extra) {
       "set -lex CSW21 -wmp true -s1 equity -s2 equity -r1 all -r2 all "
       "-numplays 6 -plies 2 -threads %d -iterations 1200 "
       "-minplayiterations 10 -scond none -tlim 0 -seed 42 -lamc true "
-      "-lamcpool 8 -lamckeep 2 -lamcshallow 3 -lamcexplore 0.4 "
+      "-lamcpool 8 -lamckeep 2 -lamcshallow 3 -lamcexplore 0.4 -lamcmaxbag "
+      "1000 "
       "-savesettings false -hr false %s",
       num_threads, extra);
   Config *config = config_create_or_die(settings);
