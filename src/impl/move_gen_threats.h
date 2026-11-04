@@ -22,13 +22,13 @@ void threats_get_unseen_tiles(const Game *game, Rack *unseen);
 // unseen tiles also hold, so that the play fits.
 //
 // generate_moves needs the rack it plays from to be a rack, of at most
-// RACK_SIZE tiles; the unseen tiles can be the whole bag. This searches the
-// opponent's lexicon on the opponent's cross-sets like generate_moves, but
-// records a play once whichever of the unseen tiles make it: a letter played
-// more times than the unseen tiles hold it is played by blanks, which go
-// where the letter scores least, so each play has the highest score the
-// unseen tiles allow it. The search follows the classic rules, not those of
-// another game variant.
+// RACK_SIZE tiles; the unseen tiles can be the whole bag. This searches with
+// census_play_scores_search, in the opponent's lexicon on the opponent's
+// cross-sets, which finds a play once whichever of the unseen tiles make it: a
+// letter played more times than the unseen tiles hold it is played by blanks,
+// which go where the letter scores least, so each play has the highest score
+// the unseen tiles allow it. The search follows the classic rules, not those
+// of another game variant.
 void generate_threats(const Game *game, const Rack *unseen, const Rack *known,
                       MoveList *threats);
 
