@@ -16,6 +16,7 @@
 #include "../src/impl/move_gen.h"
 #include "../src/impl/move_gen_threats.h"
 #include "../src/util/io_util.h"
+#include "../src/util/string_util.h"
 #include "test_constants.h"
 #include "test_util.h"
 #include <assert.h>
@@ -283,29 +284,49 @@ static void assert_threats_shown(const char *output, int shown, int total) {
 static void test_threats_command(void) {
   Config *config = config_create_or_die(
       "set -lex CSW21 -numplays 4 -maxnumdplays 3 -hr true");
+  // The opponent's rack, AEILOUY, is known.
   load_and_exec_config_or_die(config, "cgp " DOUG_V_EMELY_CGP);
 
-  // As many threats as are shown, -maxnumdplays or as asked for, whatever
+  // -maxnumdplays threats, or as many as asked for up to 100, whatever
   // -numplays is, shown as shmoves shows moves.
   char *output = run_threats_command(config, "threats", ERROR_STATUS_SUCCESS);
   assert_threats_shown(output, 3, 3);
-  free(output);
+  char *default_output = output;
   output = run_threats_command(config, "threats 10", ERROR_STATUS_SUCCESS);
   assert_threats_shown(output, 10, 10);
   free(output);
   output = run_threats_command(config, "threats 0",
                                ERROR_STATUS_CONFIG_LOAD_INT_ARG_OUT_OF_BOUNDS);
   free(output);
-
-  // At most 100 threats, however many are asked for.
-  output = run_threats_command(config, "threats 150", ERROR_STATUS_SUCCESS);
+  output = run_threats_command(config, "threats - 150", ERROR_STATUS_SUCCESS);
   assert_threats_shown(output, 100, 100);
   free(output);
+  // A count comes last.
+  output = run_threats_command(config, "threats 5 5",
+                               ERROR_STATUS_THREATS_EXTRANEOUS_ARG);
+  free(output);
 
-  // A filter looks among the top 100 and, as in shmoves, shows every threat
-  // that matches it.
-  output = run_threats_command(config, "threats 8H", ERROR_STATUS_SUCCESS);
-  assert(strstr(output, "of 100 plays") != NULL);
+  // As in simulate, the known rack is the game's unless one is given, and -
+  // is none.
+  output = run_threats_command(config, "threats AEILOUY", ERROR_STATUS_SUCCESS);
+  assert_strings_equal(output, default_output);
+  free(output);
+  output = run_threats_command(config, "threats -", ERROR_STATUS_SUCCESS);
+  assert_threats_shown(output, 3, 3);
+  assert(!strings_equal(output, default_output));
+  free(output);
+  output = run_threats_command(config, "threats Q 2", ERROR_STATUS_SUCCESS);
+  assert_threats_shown(output, 2, 2);
+  assert(strstr(output, "Q") != NULL);
+  free(output);
+  free(default_output);
+  // The rack must come from the unseen tiles, which hold one Z, and have at
+  // most a rack's worth of tiles.
+  output = run_threats_command(config, "threats ZZ",
+                               ERROR_STATUS_THREATS_OPP_RACK_NOT_IN_BAG);
+  free(output);
+  output = run_threats_command(config, "threats ABCDEFGH",
+                               ERROR_STATUS_CONFIG_LOAD_MALFORMED_RACK_ARG);
   free(output);
 
   // The unseen tiles are the opponent's rack and the bag: everything but

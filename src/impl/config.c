@@ -2094,23 +2094,26 @@ static void help_entry_fill(const Config *config, int token,
     case ARG_TOKEN_THREATS:
       usages[0] = "";
       usages[1] = "<number>";
-      usages[2] = "<coord>";
-      usages[3] = "<prefix>";
-      usages[4] = "<coord> <prefix>";
+      usages[2] = "<opponent_known_rack>";
+      usages[3] = "<opponent_known_rack> <number>";
+      usages[4] = "-";
+      usages[5] = "- <number>";
       examples[0] = "";
-      examples[1] = "10";
-      examples[2] = "D12";
-      examples[3] = "MUZ";
-      examples[4] = "8B MUZ";
+      examples[1] = "70";
+      examples[2] = "ABC";
+      examples[3] = "ABC 10";
+      examples[4] = "-";
+      examples[5] = "- 50";
       text = "Shows the opponent's highest-scoring next plays from the unseen "
              "tiles. These are the tiles the player on turn cannot see, the "
              "opponent's rack and the bag, and a play uses at most a rack of "
-             "them, blanks included, and only plays the opponent's known "
-             "tiles leave room for. Shows them as shmoves shows moves, with "
-             "the same arguments, without the leave and equity columns, and "
-             "generates as many as it shows: -maxnumdplays, or the number "
-             "given, up to 100. With a coordinate or prefix, it looks among "
-             "the top 100. Supports only the classic game variant.";
+             "them, blanks included. Only plays a rack holding the opponent's "
+             "known tiles allows are shown. Those are the given rack, none "
+             "for '-', or by default, as for simulate, the opponent's known "
+             "rack from the game history. Shows -maxnumdplays threats, or the "
+             "number given, up to 100, as shmoves shows moves but without the "
+             "leave and equity columns. Supports only the classic game "
+             "variant.";
       break;
     case ARG_TOKEN_SHOW_ENDGAME:
       usages[0] = "[<pv_index>]";
@@ -6176,39 +6179,84 @@ char *impl_threats(Config *config, ErrorStack *error_stack) {
     return empty_string();
   }
 
-  // The arguments choose which threats to show, as shmoves' choose which
-  // moves.
-  MoveDisplayArgs display_args;
-  config_load_move_display_args(config, ARG_TOKEN_THREATS, &display_args,
-                                error_stack);
-  if (!error_stack_is_empty(error_stack)) {
-    return empty_string();
+  // An optional known opponent rack, or - for none, then an optional count;
+  // the first argument is a count when it is all digits.
+  const char *arg0 = config_get_parg_value(config, ARG_TOKEN_THREATS, 0);
+  const char *arg1 = config_get_parg_value(config, ARG_TOKEN_THREATS, 1);
+  const char *known_rack_str = NULL;
+  const char *num_threats_str = NULL;
+  if (arg0 && is_all_digits_or_empty(arg0)) {
+    num_threats_str = arg0;
+    if (arg1) {
+      error_stack_push(
+          error_stack, ERROR_STATUS_THREATS_EXTRANEOUS_ARG,
+          get_formatted_string("extraneous argument '%s' after the number of "
+                               "threats; give the opponent's rack first",
+                               arg1));
+      return empty_string();
+    }
+  } else {
+    known_rack_str = arg0;
+    num_threats_str = arg1;
   }
 
-  // As many threats as are shown: the count asked for, or -maxnumdplays.
-  // A filter looks for its threats among the most there can be.
-  const bool has_filter =
-      display_args.filter_row >= 0 || display_args.filter_col >= 0 ||
-      display_args.prefix_len > 0 || display_args.exclude_tile_placement_moves;
-  int num_threats = CONFIG_MAX_THREATS;
-  if (!has_filter && display_args.max_num_display_plays < num_threats) {
-    num_threats = display_args.max_num_display_plays;
+  // As many threats as are shown: the count given, or -maxnumdplays.
+  int num_threats = config->max_num_display_plays;
+  if (num_threats_str) {
+    string_to_int_or_push_error("number of threats", num_threats_str, 1,
+                                INT_MAX,
+                                ERROR_STATUS_CONFIG_LOAD_INT_ARG_OUT_OF_BOUNDS,
+                                &num_threats, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return empty_string();
+    }
   }
+  if (num_threats > CONFIG_MAX_THREATS) {
+    num_threats = CONFIG_MAX_THREATS;
+  }
+
   Rack unseen;
   threats_get_unseen_tiles(config->game, &unseen);
-  // The opponent's rack in the game holds the tiles of it that are known.
-  const Rack *known_opponent_tiles = player_get_rack(game_get_player(
-      config->game, 1 - game_get_player_on_turn_index(config->game)));
+  // The known part of the opponent's rack: the one given, none for -, or as
+  // simulate does, the opponent's rack in the game, which holds the tiles of
+  // it that are known.
+  Rack known;
+  if (!known_rack_str) {
+    rack_copy(&known, player_get_rack(game_get_player(
+                          config->game,
+                          1 - game_get_player_on_turn_index(config->game))));
+  } else {
+    rack_set_dist_size_and_reset(&known, ld_get_size(config->ld));
+    if (!strings_equal(known_rack_str, "-")) {
+      load_rack_or_push_to_error_stack(
+          known_rack_str, config->ld,
+          ERROR_STATUS_CONFIG_LOAD_MALFORMED_RACK_ARG, &known, error_stack);
+      if (!error_stack_is_empty(error_stack)) {
+        return empty_string();
+      }
+      for (int ml_idx = 0; ml_idx < rack_get_dist_size(&known); ml_idx++) {
+        const MachineLetter ml = (MachineLetter)ml_idx;
+        if (rack_get_letter(&known, ml) > rack_get_letter(&unseen, ml)) {
+          error_stack_push(
+              error_stack, ERROR_STATUS_THREATS_OPP_RACK_NOT_IN_BAG,
+              get_formatted_string("opponent rack '%s' is not among the "
+                                   "unseen tiles",
+                                   known_rack_str));
+          return empty_string();
+        }
+      }
+    }
+  }
+
   MoveList *threats = move_list_create(num_threats);
-  generate_threats(config->game, &unseen, known_opponent_tiles, threats);
+  generate_threats(config->game, &unseen, &known, threats);
 
   char *board_string = config_get_board_beside_moves(config);
   char *result = move_list_get_string(
-      threats, game_get_board(config->game), config->ld,
-      display_args.max_num_display_plays, display_args.filter_row,
-      display_args.filter_col, display_args.prefix_mls, display_args.prefix_len,
-      display_args.exclude_tile_placement_moves, !config->human_readable,
-      /*show_leave_and_equity=*/false, board_string);
+      threats, game_get_board(config->game), config->ld, num_threats,
+      /*filter_row=*/-1, /*filter_col=*/-1, /*prefix_mls=*/NULL,
+      /*prefix_len=*/0, /*exclude_tile_placement_moves=*/false,
+      !config->human_readable, /*show_leave_and_equity=*/false, board_string);
   free(board_string);
   move_list_destroy(threats);
   return result;

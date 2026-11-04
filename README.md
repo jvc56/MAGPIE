@@ -385,7 +385,7 @@ that point.
 | `rg` `<rack>`                          | Sets the rack, then generates.                                     |
 | `addmoves` (`a`) `<move>, <move>, ...` | Adds moves of your own to the list.                                |
 | `shmoves` (`shm`)                      | Shows the move list, or the sim results when there are some.       |
-| `threats`                              | Lists the opponent's highest-scoring plays from the unseen tiles.  |
+| `threats` `[<rack>\|-] [<count>]`      | Lists the opponent's highest-scoring plays from the unseen tiles.  |
 
 ```
 magpie> r EEIJNP?
@@ -402,20 +402,21 @@ moves generation keeps.
 
 `threats` shows what the opponent could score next: the highest-scoring plays
 the player not on turn could make from every tile the player on turn cannot
-see, the opponent's rack and the bag, playing up to a rack of them. When some
-of the opponent's tiles are known, as after a `cgp` that gives their rack, it
-lists only the plays a rack holding those tiles could make. It shows
-them as `shmoves` shows moves, with the same count, coordinate and prefix
-arguments, and only the `Move` and `Sc` columns. It generates as many as it
-shows, `-maxnumdplays` or the count you give, up to 100; with a coordinate or
-prefix, it looks among the top 100. It works with any number of tiles in the bag; once the bag is empty
-and the opponent's rack is known, it lists that rack's plays. It supports only
-the classic game variant.
+see, the opponent's rack and the bag, playing up to a rack of them. Like
+`simulate`, it takes the opponent's known rack from the game unless given one;
+it then lists only the plays a rack holding those tiles could make, and `-`
+means none of their rack is known. It shows `-maxnumdplays` threats, or as many
+as you ask for, up to 100, as `shmoves` shows moves but with only the `Move`
+and `Sc` columns. It works with any number of tiles in the bag, and supports
+only the classic game variant.
 
 ```
 magpie> threats
-magpie> threats 30
-magpie> threats 8D
+magpie> threats 70
+magpie> threats ABC
+magpie> threats ABC 10
+magpie> threats -
+magpie> threats - 50
 ```
 
 ### Simulating
