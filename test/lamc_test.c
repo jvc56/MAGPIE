@@ -7,6 +7,7 @@
 #include "../src/compat/cpthread.h"
 #include "../src/compat/ctime.h"
 #include "../src/compat/memory_info.h"
+#include "../src/def/bai_defs.h"
 #include "../src/def/game_history_defs.h"
 #include "../src/def/lamc_defs.h"
 #include "../src/def/move_defs.h"
@@ -37,6 +38,7 @@
 #include "test_util.h"
 #include <assert.h>
 #include <math.h>
+#include <stdatomic.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -75,6 +77,60 @@ static void test_dense_linalg(void) {
   }
   double indefinite[4] = {1, 2, 2, 1};
   assert(!dense_cholesky(indefinite, 2));
+}
+
+static void test_table_and_subset(void) {
+  // Three arms of four samples each.
+  const double samples[12] = {0.1, 0.2, 0.3, 0.4, 1.0, 2.0,
+                              3.0, 4.0, -1,  -2,  -3,  -4};
+  const RandomVariablesArgs table_args = {
+      .type = RANDOM_VARIABLES_TABLE,
+      .num_rvs = 3,
+      .num_samples = 4,
+      .samples = samples,
+  };
+  RandomVariables *table = rvs_create(&table_args);
+  assert(rvs_sample(table, 1, 0, NULL) == 1.0);
+  assert(rvs_sample(table, 1, 0, NULL) == 2.0);
+  assert(rvs_sample(table, 0, 0, NULL) == 0.1);
+
+  // A view of arms 2 and 0, in that order, that accumulates their samples.
+  atomic_uint_least64_t counts[3];
+  atomic_int_least64_t sums[3];
+  atomic_int_least64_t squares[3];
+  for (int arm = 0; arm < 3; arm++) {
+    atomic_init(&counts[arm], 0);
+    atomic_init(&sums[arm], 0);
+    atomic_init(&squares[arm], 0);
+  }
+  RVSubsetStats stats = {.counts = counts, .sums = sums, .squares = squares};
+  const int arms[2] = {2, 0};
+  const RandomVariablesArgs subset_args = {
+      .type = RANDOM_VARIABLES_SUBSET,
+      .num_rvs = 2,
+      .base_rvs = table,
+      .arm_indices = arms,
+      .subset_stats = &stats,
+  };
+  RandomVariables *subset = rvs_create(&subset_args);
+  assert(rvs_get_num_rvs(subset) == 2);
+  assert(rvs_sample(subset, 0, 0, NULL) == -1.0);
+  assert(rvs_sample(subset, 0, 0, NULL) == -2.0);
+  // Arm 0 of the base continues where it left off.
+  assert(rvs_sample(subset, 1, 0, NULL) == 0.2);
+  assert(atomic_load(&counts[2]) == 2);
+  assert(atomic_load(&counts[0]) == 1);
+  assert(atomic_load(&counts[1]) == 0);
+  assert(fabs((double)atomic_load(&sums[2]) / BAI_FIXED_POINT_SCALE + 3.0) <
+         1e-9);
+  assert(fabs((double)atomic_load(&squares[2]) / BAI_FIXED_POINT_SCALE - 5.0) <
+         1e-9);
+  rvs_destroy(subset);
+
+  // A reset table starts every arm over.
+  rvs_reset(table, &table_args);
+  assert(rvs_sample(table, 2, 0, NULL) == -1.0);
+  rvs_destroy(table);
 }
 
 static double lamc_test_bowl(const double x, const double y) {
@@ -327,8 +383,8 @@ static uint64_t lamc_test_sim(const int num_threads, const char *extra) {
 static void test_lamc_sim(void) {
   const char *const variants[] = {
       "", "-lamcproposal acquire", "-lamccycle true -sbagcycle false",
-      "-lamcreuse true -lamcequitymean true -lamcfinalall true "
-      "-lamcfinalstatic 3"};
+      ("-lamcreuse true -lamcequitymean true -lamcfinalall true "
+       "-lamcfinalstatic 3")};
   for (int variant_idx = 0; variant_idx < 4; variant_idx++) {
     const uint64_t one = lamc_test_sim(1, variants[variant_idx]);
     const uint64_t several = lamc_test_sim(4, variants[variant_idx]);
@@ -338,6 +394,7 @@ static void test_lamc_sim(void) {
 
 void test_lamc(void) {
   test_dense_linalg();
+  test_table_and_subset();
   test_gp_kernel(GP_KERNEL_MATERN52);
   test_gp_kernel(GP_KERNEL_SQUARED_EXPONENTIAL);
   test_play_features();

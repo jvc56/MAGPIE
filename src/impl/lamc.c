@@ -35,9 +35,16 @@ enum {
   // Each fit chooses its length scale among this many multiples of the
   // configured one, by marginal likelihood.
   LAMC_NUM_LENGTH_SCALE_MULTIPLES = 4,
+  // And its signal variance among this many multiples of the estimate.
+  LAMC_NUM_SIGNAL_MULTIPLES = 3,
   // A sample limit above this is no limit (the config default is 10^12).
   LAMC_UNLIMITED_SAMPLES = 1000000000,
 };
+
+// Small multiples of the signal variance let a fit fall back on the prior
+// mean when the samples are too noisy to show anything beyond it.
+static const double lamc_signal_multiples[LAMC_NUM_SIGNAL_MULTIPLES] = {
+    0.1, 0.3, 1.0};
 
 static const double
     lamc_length_scale_multiples[LAMC_NUM_LENGTH_SCALE_MULTIPLES] = {0.5, 1.0,
@@ -558,23 +565,33 @@ static void lamc_fit(LamcCtx *ctx, const LamcArgs *args) {
       .prior_mean = 0.0,
   };
   int best_multiple = -1;
+  int best_signal = -1;
   double best_likelihood = -INFINITY;
-  for (int multiple_idx = 0; multiple_idx < LAMC_NUM_LENGTH_SCALE_MULTIPLES;
-       multiple_idx++) {
-    for (int column = 0; column < num_columns; column++) {
-      ctx->fit_inverse_length_scales[column] =
-          ctx->inverse_length_scales[column] /
-          lamc_length_scale_multiples[multiple_idx];
-    }
-    if (gp_fit(ctx->gp, &params, ctx->gp_points, ctx->gp_values, ctx->gp_noise,
-               num_evaluated) &&
-        gp_get_log_marginal_likelihood(ctx->gp) > best_likelihood) {
-      best_likelihood = gp_get_log_marginal_likelihood(ctx->gp);
-      best_multiple = multiple_idx;
+  for (int signal_idx = 0; signal_idx < LAMC_NUM_SIGNAL_MULTIPLES;
+       signal_idx++) {
+    params.signal_variance =
+        signal_variance * lamc_signal_multiples[signal_idx];
+    for (int multiple_idx = 0; multiple_idx < LAMC_NUM_LENGTH_SCALE_MULTIPLES;
+         multiple_idx++) {
+      for (int column = 0; column < num_columns; column++) {
+        ctx->fit_inverse_length_scales[column] =
+            ctx->inverse_length_scales[column] /
+            lamc_length_scale_multiples[multiple_idx];
+      }
+      if (gp_fit(ctx->gp, &params, ctx->gp_points, ctx->gp_values,
+                 ctx->gp_noise, num_evaluated) &&
+          gp_get_log_marginal_likelihood(ctx->gp) > best_likelihood) {
+        best_likelihood = gp_get_log_marginal_likelihood(ctx->gp);
+        best_multiple = multiple_idx;
+        best_signal = signal_idx;
+      }
     }
   }
   const double multiple =
       best_multiple >= 0 ? lamc_length_scale_multiples[best_multiple] : 1.0;
+  params.signal_variance =
+      signal_variance *
+      (best_signal >= 0 ? lamc_signal_multiples[best_signal] : 1.0);
   for (int column = 0; column < num_columns; column++) {
     ctx->fit_inverse_length_scales[column] =
         ctx->inverse_length_scales[column] / multiple;
