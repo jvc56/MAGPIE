@@ -555,7 +555,39 @@ gain.
 
 ### Summary
 
-<!-- SUMMARY -->
+Phase 1 works, and it helps only a little and only late in the game.
+
+- **What it does.** `-lamc true` (or `-lamc1`/`-lamc2` in autoplay) has a
+  search over every play within 30 points of the best choose the plays a
+  sim simulates, as the slides propose, then simulates them as usual with
+  the rest of the budget. It is off by default, and with it off the sim is
+  unchanged.
+- **Where it helps.** On recorded rollouts of 768 fresh positions with 1 to
+  20 tiles in the bag, it lowers regret against the standard sim (the top
+  15 by static equity) by 0.06 points of win percentage at 3,000 rollouts
+  (1.8 standard errors) and 0.09 at 10,000 (2.6). Its surrogate ranks those
+  plays better than static equity does (rank correlation 0.59 against
+  0.54).
+- **Where it does not.** With 30 or more tiles in the bag, static equity's
+  top 15 nearly always holds the best play, the surrogate ranks plays
+  slightly worse than static equity, and the search's rollouts are lost to
+  the final choice. So by default LAMC searches only with 20 or fewer tiles
+  in the bag, and always hands the sim static equity's top 10.
+- **In games.** 1,500 game pairs at 3,000 rollouts are neutral (50.2%,
+  -0.04 points of spread per pair, SE 0.84), as they must be: a gain of a
+  few tenths of a point of win rate needs on the order of 100,000 games.
+- **What made it work.** A prior mean linear in static equity (without it
+  the surrogate is no better than static equity), acquisition by upper
+  confidence bound rather than the slides' gradient step, keeping static
+  equity's best plays in the pool and among the candidates, and letting the
+  sim continue the search's samples.
+
+Against the plan's acceptance criteria: the `lamc` test passes (with the
+sanitizers), and every file builds with `BOARD_DIM=21` and for Windows;
+LAMC off gives byte-identical autoplay results to main at the same speed;
+the GP beats static equity at ranking late plays but not midgame ones;
+regret is lower in the late game; and the game pairs do not show a gain. So
+it stays behind `-lamc` and should not become a default.
 
 ### The code
 
@@ -694,7 +726,10 @@ top plays.
 All replay numbers are regret in percentage points of win percentage:
 LAMC's minus the standard sim's, with its standard error, so negative favors
 LAMC. Both choose from the same recorded samples at the same budget; the
-standard sim takes the top 15 plays by static equity. Rollouts are 2 plies,
+standard sim takes the top 15 plays by static equity. In the replay both
+the standard sim and LAMC's final stage sample their plays evenly, where the
+real sim uses BAI, so the replay compares candidate choice and budget, not
+BAI's allocation. Rollouts are 2 plies,
 CSW21, single rollouts (no bag cycling), no inference; each position's
 universe is its top 100 plays by static equity. "Set regret" is the best
 play LAMC (or the standard sim) handed the final stage, against the best
@@ -742,6 +777,19 @@ part of that. The gain is small: 0.06 to 0.09 points of win percentage per late
 decision, so with about three such decisions a game, 0.2 to 0.3 points of win
 rate per game, far below what the game pairs below can measure.
 
+To repeat the last row at 3,000 rollouts (an empty variant is the defaults;
+`make magpie_test BUILD=no_pgo_release` first; about 20 minutes on 12
+cores):
+
+```bash
+LAMC_REPLAY_FIRST_GAME=300000 LAMC_REPLAY_STAGE=late LAMC_REPLAY_REUSE=1 \
+LAMC_REPLAY_POSITIONS=768 LAMC_REPLAY_SAMPLES=400 LAMC_REPLAY_BUDGETS=3000 \
+LAMC_REPLAY_VARIANTS="" ./bin/magpie_test lamcreplay
+```
+
+For 10,000 rollouts, record 700 samples per play: the standard sim takes
+about 670 of each of its 15 plays.
+
 **What the tuning found** (late game, 384 positions used for tuning, 250
 samples; the differences are within noise one by one, but consistent):
 
@@ -773,9 +821,41 @@ samples; the differences are within noise one by one, but consistent):
 - Length scale (1.5 or 3), `-lamcbeta` (1 or 2) and pool shape (16 keep 4 or
   24 keep 6) made no clear difference.
 
-**Game pairs.** <!-- GAMES -->
+**Game pairs.** LAMC with its defaults (`-lamc1 true`) against the standard
+sim, both simming 15 plays at 2 plies with 3,000 rollouts, no threshold,
+no inference, CSW21, one thread per game (`-mtmode pgp`), seed 12: 1,500
+pairs (3,000 games). LAMC scored 50.22% (1,506.5 to 1,493.5), "better with
+confidence 58.7%", and -0.04 points of spread per pair (SE 0.84; 95%
+interval -1.7 to +1.6). The 1,688 games of pairs that diverged scored 50.39%.
+LAMC searched 6,246 times (about two searches a game per LAMC player),
+5.4 rounds and 67 plays each, 339 rollouts per search, and the sim chose a
+play outside the static top 15 in 377 of them (6%). So the games are
+neutral, as they must be at this size: a gain of 0.2 to 0.3 points of win
+rate needs on the order of 100,000 games to see. Use `lamcautoplay` to
+repeat this:
 
-**Speed.** <!-- SPEED -->
+```bash
+LAMC_AUTOPLAY_SETTINGS="-pl1 2 -pl2 2 -np1 15 -np2 15 -i1 3000 -i2 3000 \
+  -mi1 10 -mi2 10 -sc1 none -sc2 none -tl1 0 -tl2 0 -sinfer false \
+  -lamc1 true -threads 12 -mtmode pgp" \
+LAMC_AUTOPLAY_COMMAND="autoplay games 1500 -gp true -seed 12" \
+./bin/magpie_test lamcautoplay
+```
+
+**Speed.** 160 game pairs, both players simming at 3,000 rollouts on 12
+cores (`-mtmode pgp`), timed one after another on an idle machine:
+
+| Binary | Seconds |
+|---|---|
+| main (753d44d5) | 322, 304 |
+| This branch, LAMC off | 310, 305 |
+| This branch, `-lamc true` for both players | 308 |
+
+LAMC off gives byte-identical results to main, at the same speed. With it on,
+games take the same time: the search spends part of the sim's rollouts, and
+its own work (movegen of every play, features, a dozen small GP fits a
+round) is small beside them. In the 3,000-game run a search took 168 ms on
+average including its 339 rollouts, with 12 games running at once.
 
 ### What to do next
 
