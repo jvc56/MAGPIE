@@ -150,41 +150,67 @@ registry, and nothing outside a dimension's own code knows what it computes.
 
 ### What a dimension is
 
-A dimension (a *feature*) is one entry in a table. It may contribute several
-columns (the PAT bins, a learned rack vector).
+A dimension (a *feature*) is one value of a plain enum. It may contribute
+several columns (the PAT bins, a learned rack vector).
 
 ```c
-// src/def/play_feature_defs.h: the one list of features. Adding a feature
-// adds a line; removing one deletes its line.
-#define PLAY_FEATURE_LIST(X)                                                  \
-  X(SCORE, "score")                                                           \
-  X(LEAVE_VALUE, "leave")                                                     \
-  X(TILES_PLAYED, "tiles")                                                    \
-  ...
-
+// src/def/play_feature_defs.h
 typedef enum {
-#define PLAY_FEATURE_ENUM(id, name) PLAY_FEATURE_##id,
-  PLAY_FEATURE_LIST(PLAY_FEATURE_ENUM)
-#undef PLAY_FEATURE_ENUM
+  PLAY_FEATURE_SCORE,
+  PLAY_FEATURE_LEAVE_VALUE,
+  PLAY_FEATURE_TILES_PLAYED,
+  ...
   NUMBER_OF_PLAY_FEATURES,
 } play_feature_t;
-
-// src/ent/play_feature.h
-typedef struct PlayFeatureDesc {
-  const char *name;           // config and display name
-  int num_columns;            // columns this feature adds to the embedding
-  play_feature_kind_t kind;   // continuous, or categorical (not differentiated)
-  play_feature_cost_t cost;   // cheap, moderate, expensive: shown in timings
-  // Once per position, before any extract; may be NULL.
-  void (*prepare)(PlayFeatureCtx *ctx);
-  // Writes num_columns raw values for move.
-  void (*extract)(const PlayFeatureCtx *ctx, const Move *move, double *out);
-} PlayFeatureDesc;
 ```
+
+Everything about a feature is answered by a function that switches on
+`play_feature_t`, all in `src/impl/play_feature_registry.c`:
+
+```c
+const char *play_feature_get_name(play_feature_t feature);
+int play_feature_get_num_columns(play_feature_t feature);
+play_feature_kind_t play_feature_get_kind(play_feature_t feature);
+play_feature_cost_t play_feature_get_cost(play_feature_t feature);
+// Once per position, before any extraction.
+void play_feature_prepare(play_feature_t feature, PlayFeatureCtx *ctx);
+// Writes num_columns raw values for each of the moves.
+void play_feature_extract(play_feature_t feature, const PlayFeatureCtx *ctx,
+                          const MoveList *moves, double *out);
+```
+
+None of these switches has a `default`. Every feature has a case, and
+`NUMBER_OF_PLAY_FEATURES` has one that breaks out of the switch to a
+`log_fatal` after it, as `contribute_tables.c` and `players_data.c` do:
+
+```c
+const char *play_feature_get_name(const play_feature_t feature) {
+  switch (feature) {
+  case PLAY_FEATURE_SCORE:
+    return "score";
+  case PLAY_FEATURE_LEAVE_VALUE:
+    return "leave";
+  ...
+  case NUMBER_OF_PLAY_FEATURES:
+    break;
+  }
+  log_fatal("unknown play feature %d", (int)feature);
+  return NULL;
+}
+```
+
+`-Wall` turns on `-Wswitch`, and the dev and sanitize builds add `-Werror`,
+so a feature missing from any switch fails the build. A new feature cannot
+be half-registered, and a removed one cannot linger in a switch.
+
+`play_feature_extract` switches once per feature per position, and each case
+calls that feature's own function, which loops over the moves. The switch is
+not on the per-play path.
 
 `PlayFeatureCtx` holds what extractors read: the game, the player on turn,
 the KLV, PAT weights, the unseen tile counts, and a per-feature scratch area
-that `prepare` fills. Extractors do not write to the game.
+that `prepare` fills. Extractors do not write to the game. A feature with
+nothing to prepare has a `prepare` case that only breaks.
 
 The embedding builder (`src/ent/play_embedding.c`) runs `prepare` for each
 active feature, calls `extract` for every play, and then standardizes every
@@ -197,7 +223,9 @@ and left unscaled.
 ### Selecting dimensions
 
 - `-lamcfeatures score,leave,tiles,...` names the active set by feature
-  name. An unknown name is a config error that lists the known names.
+  name. Parsing loops from 0 to `NUMBER_OF_PLAY_FEATURES`, comparing
+  `play_feature_get_name`, so it needs no table of its own. An unknown name is
+  a config error that lists the known names.
 - The default set is one string constant in `play_feature_defs.h`, so
   changing the defaults is a one-line PR.
 - Phase 2's per-ply search has its own `-lamcplyfeatures`, so the turn search
@@ -215,25 +243,29 @@ the status mechanism.
 
 To **add** one:
 
-1. Add an `X(...)` line to `PLAY_FEATURE_LIST`.
-2. Write its `prepare` and `extract` in the matching group file:
-   `play_feature_equity.c`, `play_feature_board.c`,
+1. Add one value to `play_feature_t`, before `NUMBER_OF_PLAY_FEATURES`.
+2. Build. The compiler names every switch in `play_feature_registry.c` that
+   lacks the new case; give it one in each.
+3. Write its extract function (and its prepare function, if it has one) in
+   the matching group file: `play_feature_equity.c`, `play_feature_board.c`,
    `play_feature_rack.c`, or a new file for a new group.
-3. Add a semantic unit test for it (below). The contract tests cover it
+4. Add a semantic unit test for it (below). The contract tests cover it
    without any change.
-4. Run the `lamcablate` on-demand test (Phase 1 testing) and put its
+5. Run the `lamcablate` on-demand test (Phase 1 testing) and put its
    numbers in the PR.
 
-To **remove** one, delete its line, its functions and its semantic test. Configs
-that name it fail with the unknown-name error, which says what to fix.
+To **remove** one, delete its enum value. The compiler then names each case
+label that refers to it; delete those cases, its functions and its semantic
+test. Configs that name it fail with the unknown-name error, which says what
+to fix.
 
-To **update** one, change its extractor and its test. Nothing else reads its
-values.
+To **update** one, change its extract function and its test. Nothing else
+reads its values.
 
 ### Tests every feature gets for free
 
-One test, `playfeatures`, iterates the registry so that a new feature is
-covered the moment it is registered:
+One test, `playfeatures`, loops over every `play_feature_t` value, so a new
+feature is covered the moment it is added:
 
 - Deterministic: two extractions of the same play in the same position are
   bit-identical.
@@ -367,10 +399,10 @@ stages share it. LAMC never takes more rollouts than the standard sim would.
 
 | File | Contents |
 |---|---|
-| `src/def/play_feature_defs.h` | Feature list (X-macro), kinds, cost tiers, default set |
-| `src/ent/play_feature.h` | `PlayFeatureDesc`, `PlayFeatureCtx` |
-| `src/impl/play_feature_equity.c`, `_board.c`, `_rack.c` | Extractors, by family |
-| `src/impl/play_feature_registry.c/.h` | The table, lookup by name, parsing `-lamcfeatures` |
+| `src/def/play_feature_defs.h` | `play_feature_t`, kinds, cost tiers, default set |
+| `src/ent/play_feature.h` | `PlayFeatureCtx` |
+| `src/impl/play_feature_equity.c`, `_board.c`, `_rack.c` | Extract functions, by family |
+| `src/impl/play_feature_registry.c/.h` | The switches on `play_feature_t`, lookup by name, parsing `-lamcfeatures` |
 | `src/ent/play_embedding.c/.h` | N x D matrix, standardization, nearest-neighbor search |
 | `src/util/dense_linalg.c/.h` | Cholesky, triangular solves, jitter on failure |
 | `src/impl/gp.c/.h` | Kernels (pluggable by enum), fit, predict, gradient of the mean, hyperparameter file |
