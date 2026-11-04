@@ -108,8 +108,8 @@
 #include <time.h>
 
 enum {
-  // The most plays threats generates, whatever -numplays is: it allocates a
-  // move for each up front.
+  // The most plays threats generates, however many are asked for: it
+  // allocates a move for each up front.
   CONFIG_MAX_THREATS = 100,
   HELP_INDENT = 10,
   // The most usage or example lines a help entry has, plus its NULL ending.
@@ -2105,10 +2105,11 @@ static void help_entry_fill(const Config *config, int token,
       text = "Shows the opponent's highest-scoring next plays from the unseen "
              "tiles. These are the tiles the player on turn cannot see, the "
              "opponent's rack and the bag, and a play uses at most a rack of "
-             "them, blanks included. Generates -numplays plays, up to 100, and "
-             "shows them as shmoves shows moves, with the same arguments, "
-             "without the leave and equity columns. Supports only the classic "
-             "game variant.";
+             "them, blanks included. Shows them as shmoves shows moves, with "
+             "the same arguments, without the leave and equity columns, and "
+             "generates as many as it shows: -maxnumdplays, or the number "
+             "given, up to 100. With a coordinate or prefix, it looks among "
+             "the top 100. Supports only the classic game variant.";
       break;
     case ARG_TOKEN_SHOW_ENDGAME:
       usages[0] = "[<pv_index>]";
@@ -6183,9 +6184,14 @@ char *impl_threats(Config *config, ErrorStack *error_stack) {
     return empty_string();
   }
 
-  int num_threats = config->num_plays;
-  if (num_threats > CONFIG_MAX_THREATS) {
-    num_threats = CONFIG_MAX_THREATS;
+  // As many threats as are shown: the count asked for, or -maxnumdplays.
+  // A filter looks for its threats among the most there can be.
+  const bool has_filter =
+      display_args.filter_row >= 0 || display_args.filter_col >= 0 ||
+      display_args.prefix_len > 0 || display_args.exclude_tile_placement_moves;
+  int num_threats = CONFIG_MAX_THREATS;
+  if (!has_filter && display_args.max_num_display_plays < num_threats) {
+    num_threats = display_args.max_num_display_plays;
   }
   Rack unseen;
   threats_get_unseen_tiles(config->game, &unseen);

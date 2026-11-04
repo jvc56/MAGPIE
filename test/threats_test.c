@@ -234,27 +234,28 @@ static void test_threats_command(void) {
       "set -lex CSW21 -numplays 4 -maxnumdplays 3 -hr true");
   load_and_exec_config_or_die(config, "cgp " DOUG_V_EMELY_CGP);
 
-  // -numplays threats, shown as shmoves shows moves: as many as the display
-  // setting allows, or as asked for.
+  // As many threats as are shown, -maxnumdplays or as asked for, whatever
+  // -numplays is, shown as shmoves shows moves.
   char *output = run_threats_command(config, "threats", ERROR_STATUS_SUCCESS);
-  assert_threats_shown(output, 3, 4);
-  free(output);
-  output = run_threats_command(config, "threats 2", ERROR_STATUS_SUCCESS);
-  assert_threats_shown(output, 2, 4);
+  assert_threats_shown(output, 3, 3);
   free(output);
   output = run_threats_command(config, "threats 10", ERROR_STATUS_SUCCESS);
-  assert_threats_shown(output, 4, 4);
+  assert_threats_shown(output, 10, 10);
   free(output);
   output = run_threats_command(config, "threats 0",
                                ERROR_STATUS_CONFIG_LOAD_INT_ARG_OUT_OF_BOUNDS);
   free(output);
 
-  // At most 100 threats, whatever -numplays is.
-  load_and_exec_config_or_die(config, "set -numplays 150");
+  // At most 100 threats, however many are asked for.
   output = run_threats_command(config, "threats 150", ERROR_STATUS_SUCCESS);
   assert_threats_shown(output, 100, 100);
   free(output);
-  load_and_exec_config_or_die(config, "set -numplays 4");
+
+  // A filter looks among the top 100 and, as in shmoves, shows every threat
+  // that matches it.
+  output = run_threats_command(config, "threats 8H", ERROR_STATUS_SUCCESS);
+  assert(strstr(output, "of 100 plays") != NULL);
+  free(output);
 
   // The unseen tiles are the opponent's rack and the bag: everything but
   // the board and the rack of the player on turn.

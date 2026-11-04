@@ -400,12 +400,13 @@ magpie> shm JEEP
 prefix together, or `-` for exchanges and passes. `-numplays` sets how many
 moves generation keeps.
 
-`threats` shows what the opponent could score next. It generates `-numplays`
-plays (at most 100) for the player not on turn from every tile the player on
-turn cannot see, the opponent's rack and the bag, playing up to a rack of
-them. It shows them highest score first, as `shmoves` shows moves, with the
-same count, coordinate and prefix arguments, and only the `Move` and `Sc`
-columns. It works with any number of tiles in the bag; once the bag is empty
+`threats` shows what the opponent could score next: the highest-scoring plays
+the player not on turn could make from every tile the player on turn cannot
+see, the opponent's rack and the bag, playing up to a rack of them. It shows
+them as `shmoves` shows moves, with the same count, coordinate and prefix
+arguments, and only the `Move` and `Sc` columns. It generates as many as it
+shows, `-maxnumdplays` or the count you give, up to 100; with a coordinate or
+prefix, it looks among the top 100. It works with any number of tiles in the bag; once the bag is empty
 and the opponent's rack is known, it lists that rack's plays. It supports only
 the classic game variant.
 
