@@ -217,45 +217,42 @@ static char *run_threats_command(Config *config, const char *command,
   return output;
 }
 
-static int count_lines_starting_with_rank(const char *output) {
-  int count = 0;
-  for (const char *line = output; line != NULL && *line != '\0';) {
-    const char *end = strchr(line, '\n');
-    if (line[0] >= '1' && line[0] <= '9' && strchr(line, ':') != NULL &&
-        (end == NULL || strchr(line, ':') < end)) {
-      count++;
-    }
-    line = end ? end + 1 : NULL;
-  }
-  return count;
+// Asserts the output ends as shmoves' does, "Showing <shown> of <total> plays",
+// with the same columns but for the leave and equity.
+static void assert_threats_shown(const char *output, int shown, int total) {
+  char *expected = get_formatted_string("Showing %d of %d plays", shown, total);
+  assert(strstr(output, expected) != NULL);
+  free(expected);
+  assert(strstr(output, " Move ") != NULL);
+  assert(strstr(output, " Sc ") != NULL);
+  assert(strstr(output, " Lv ") == NULL);
+  assert(strstr(output, " StEq ") == NULL);
 }
 
 static void test_threats_command(void) {
-  Config *config = config_create_or_die("set -lex CSW21 -numplays 4");
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -numplays 4 -maxnumdplays 3 -hr true");
   load_and_exec_config_or_die(config, "cgp " DOUG_V_EMELY_CGP);
 
-  // -numplays threats by default, as many as asked for otherwise.
+  // -numplays threats, shown as shmoves shows moves: as many as the display
+  // setting allows, or as asked for.
   char *output = run_threats_command(config, "threats", ERROR_STATUS_SUCCESS);
-  assert(strstr(output, "Unseen tiles (") != NULL);
-  assert(count_lines_starting_with_rank(output) == 4);
+  assert_threats_shown(output, 3, 4);
   free(output);
   output = run_threats_command(config, "threats 2", ERROR_STATUS_SUCCESS);
-  assert(count_lines_starting_with_rank(output) == 2);
+  assert_threats_shown(output, 2, 4);
+  free(output);
+  output = run_threats_command(config, "threats 10", ERROR_STATUS_SUCCESS);
+  assert_threats_shown(output, 4, 4);
   free(output);
   output = run_threats_command(config, "threats 0",
                                ERROR_STATUS_CONFIG_LOAD_INT_ARG_OUT_OF_BOUNDS);
   free(output);
 
-  // At most 100, whether asked for or from -numplays.
-  output = run_threats_command(config, "threats 100", ERROR_STATUS_SUCCESS);
-  assert(count_lines_starting_with_rank(output) == 100);
-  free(output);
-  output = run_threats_command(config, "threats 101",
-                               ERROR_STATUS_CONFIG_LOAD_INT_ARG_OUT_OF_BOUNDS);
-  free(output);
+  // At most 100 threats, whatever -numplays is.
   load_and_exec_config_or_die(config, "set -numplays 150");
-  output = run_threats_command(config, "threats", ERROR_STATUS_SUCCESS);
-  assert(count_lines_starting_with_rank(output) == 100);
+  output = run_threats_command(config, "threats 150", ERROR_STATUS_SUCCESS);
+  assert_threats_shown(output, 100, 100);
   free(output);
   load_and_exec_config_or_die(config, "set -numplays 4");
 

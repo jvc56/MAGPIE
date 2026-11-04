@@ -664,7 +664,7 @@ static void write_per_turn_human_readable(
   } else {
     char *ml_str = move_list_get_string(
         ctx->move_list, game_get_board(ctx->game), ld, max_num_display_plays,
-        -1, -1, NULL, 0, false, false, NULL);
+        -1, -1, NULL, 0, false, false, true, NULL);
     if (ml_str) {
       string_builder_add_formatted_string(sb, "%s\n", ml_str);
       free(ml_str);

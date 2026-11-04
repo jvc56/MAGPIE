@@ -38,26 +38,21 @@ bool move_matches_filters(const Move *move, int filter_row, int filter_col,
                           bool exclude_tile_placement_moves,
                           const Board *board);
 
+// show_leave_and_equity false leaves out the leave (Lv) and static equity
+// (StEq) columns, for a list whose moves have neither, such as threats.
 void string_builder_add_move_list(
     StringBuilder *string_builder, const MoveList *move_list,
     const Board *board, const LetterDistribution *ld, int max_num_display_plays,
     int filter_row, int filter_col, const MachineLetter *prefix_mls,
     int prefix_len, bool exclude_tile_placement_moves, bool use_ucgi_format,
-    const char *game_board_string);
-
-// The plays generate_threats found, ranked by score, after the unseen tiles
-// they come from: each one's rank, the play, its score and the unseen tiles it
-// plays, with ? for a blank.
-void string_builder_add_threats(StringBuilder *string_builder,
-                                const MoveList *threats, const Board *board,
-                                const LetterDistribution *ld,
-                                const Rack *unseen);
+    bool show_leave_and_equity, const char *game_board_string);
 
 char *move_list_get_string(const MoveList *move_list, const Board *board,
                            const LetterDistribution *ld,
                            int max_num_display_plays, int filter_row,
                            int filter_col, const MachineLetter *prefix_mls,
                            int prefix_len, bool exclude_tile_placement_moves,
-                           bool use_ucgi_format, const char *game_board_string);
+                           bool use_ucgi_format, bool show_leave_and_equity,
+                           const char *game_board_string);
 
 #endif
