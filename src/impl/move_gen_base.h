@@ -188,6 +188,9 @@ typedef struct MoveGen {
   // Inference cutoff fields
   Equity target_equity_cutoff;
   bool stop_on_threshold;
+  // By lane, the anchor columns whose plays this generation does not search,
+  // or NULL (MoveGenArgs.skip_anchor_cols).
+  const uint32_t *skip_anchor_cols;
   bool threshold_exceeded;
 
   MachineLetter strip[(MOVE_MAX_TILES)];

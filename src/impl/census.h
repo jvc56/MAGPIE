@@ -242,6 +242,22 @@ void census_record_blank_variants_shared(const CensusLattice *lattice,
 void census_run_phase(void *workers, size_t worker_size, int number_of_workers,
                       void *(*phase)(void *));
 
+// The ranks a sparse play-scores build raised from CENSUS_UNPLAYABLE (see
+// census_record_blank_variants_touched).
+typedef struct CensusTouched {
+  uint32_t *ranks;
+  uint32_t count;
+  uint32_t capacity;
+} CensusTouched;
+
+// census_record_blank_variants that also records into touched the rank of
+// every play score it raises from CENSUS_UNPLAYABLE, so that a sparse build
+// resets only what it wrote.
+void census_record_blank_variants_touched(
+    const CensusLattice *lattice, Equity *play_scores, CensusTouched *touched,
+    Equity real_score, CensusPlacedTile *placed, int number_of_placed,
+    const uint8_t *unseen_tally, int num_blanks);
+
 // The max over subsets: dst[S] = the largest src[T] over every T within S.
 void census_max_over_subsets(const CensusLattice *lattice,
                              const CensusAddTable *add_table, const Equity *src,

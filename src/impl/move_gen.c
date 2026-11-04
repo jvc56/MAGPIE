@@ -3115,10 +3115,18 @@ void shadow_by_orientation(MoveGen *gen) {
     for (int col = 0; col < BOARD_DIM; col++) {
       anchor_cols |= (uint32_t)gen_cache_get_is_anchor(gen, col) << col;
     }
+    const uint32_t skipped_cols =
+        gen->skip_anchor_cols != NULL
+            ? gen->skip_anchor_cols[BOARD_DIM * gen->dir + row]
+            : 0;
     while (anchor_cols != 0) {
       const int col = wmp_move_gen_get_lowest_set_bit(anchor_cols);
       anchor_cols &= anchor_cols - 1;
-      shadow_play_for_anchor(gen, col);
+      // A skipped anchor still bounds the next one's plays on the left, so
+      // that exactly its own plays go unsearched.
+      if ((skipped_cols & ((uint32_t)1 << col)) == 0) {
+        shadow_play_for_anchor(gen, col);
+      }
 
       gen->last_anchor_col = col;
       // The next anchor to search after a playthrough tile should
@@ -3179,6 +3187,7 @@ static inline void set_descending_tile_scores(MoveGen *gen) {
 }
 
 void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
+  gen->skip_anchor_cols = args->skip_anchor_cols;
   const Game *game = args->game;
   gen->move_record_type = args->move_record_type;
   gen->move_sort_type = args->move_sort_type;
@@ -4479,6 +4488,33 @@ static void gen_remember_best_move(const MoveGen *gen, BestMoveCarry *carry,
                       searched_lanes, gen->number_of_tiles_in_bag);
 }
 
+// Drops the anchors of the lanes in skip_lanes (MoveGenArgs.skip_lanes).
+static void gen_skip_lanes(MoveGen *gen, uint64_t skip_lanes) {
+  for (uint64_t remaining = skip_lanes; remaining != 0;
+       remaining &= remaining - 1) {
+    gen->row_number_of_anchors_cache[__builtin_ctzll(remaining)] = 0;
+  }
+}
+
+void gen_hash_game_lanes(const Game *game, int player_index,
+                         uint64_t *lane_hashes) {
+  const Board *board = game_get_board(game);
+  const int cross_index = board_get_cross_set_index(
+      game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KWG), player_index);
+  uint8_t row_number_of_anchors[2 * BOARD_DIM];
+  board_load_number_of_row_anchors_cache(board, row_number_of_anchors);
+  const Square *lanes = board_get_readonly_lanes(board, cross_index);
+  for (int dir = 0; dir < 2; dir++) {
+    for (int row = 0; row < BOARD_DIM; row++) {
+      const int lane = BOARD_DIM * dir + row;
+      lane_hashes[lane] = 0;
+      if (row_number_of_anchors[lane] != 0) {
+        lane_hashes[lane] = gen_hash_lane(board_get_row_cache(lanes, row, dir));
+      }
+    }
+  }
+}
+
 void generate_moves(const MoveGenArgs *args) {
   MoveGen *gen = get_movegen();
   gen_count_movegen(gen);
@@ -4615,6 +4651,9 @@ void generate_moves(const MoveGenArgs *args) {
       }
       skipped_lanes = gen_seed_carried_best_move(
           gen, args->best_move_carry, lane_hashes, &gen->player_rack);
+    }
+    if (args->skip_lanes != 0) {
+      gen_skip_lanes(gen, args->skip_lanes);
     }
     gen_shadow(gen);
     if (gen->threshold_exceeded) {

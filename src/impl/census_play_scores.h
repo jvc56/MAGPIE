@@ -44,4 +44,12 @@ census_play_scores_build_claimed(const Game *game, const CensusLattice *lattice,
 // Every lane: a lane is a row in one direction, lane dir * BOARD_DIM + row.
 #define CENSUS_ALL_LANES ((UINT64_C(1) << (BOARD_DIM * 2)) - 1)
 
+// census_play_scores_build for the plays of one anchor, the one at col of
+// lane, alone: the plays the generator finds from it, its leftmost anchor,
+// on one thread. touched, if set, receives the ranks of the play scores it
+// raises from CENSUS_UNPLAYABLE (see census_record_blank_variants_touched).
+uint64_t census_play_scores_build_anchor(
+    const Game *game, const CensusLattice *lattice, const uint8_t *unseen_tally,
+    Equity *play_scores, CensusTouched *touched, int lane, int col);
+
 #endif

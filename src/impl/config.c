@@ -348,6 +348,7 @@ struct Config {
   bool sim_with_inference;
   bool sim_margin_forecast;
   bool sim_bag_cycle;
+  bool sim_census_rollout;
   bool use_heat_map;
   bool print_boards;
   // A config contribute's tasks run in (config_create_for_contribute): its
@@ -2613,6 +2614,18 @@ static void help_entry_fill(const Config *config, int token,
              "minimum iterations still count rollouts, and every play gets at "
              "least two cycles. On by default.";
       break;
+    case ARG_TOKEN_SIM_CENSUS_ROLLOUT:
+      usages[0] = "<true_or_false>";
+      examples[0] = "true";
+      examples[1] = "false";
+      text = "Specifies whether a census of the position steers the "
+             "rollouts' move generation. Before the rollouts, it scores "
+             "every rack's best play in each anchor of the position and of "
+             "each candidate's board; each rollout move generation then "
+             "skips the anchors it knows to be worse. The moves are the "
+             "same, found faster. The census leaves out PAT, so a sim with "
+             "it needs patrollout set to false. Off by default.";
+      break;
     case ARG_TOKEN_USE_HEAT_MAP:
       usages[0] = "<true_or_false>";
       examples[0] = "true";
@@ -3898,6 +3911,7 @@ void config_fill_sim_args(const Config *config, Rack *known_opp_rack,
       config->utility_w_spread, config->utility_spread_scale,
       config->sim_margin_forecast, &inference_args, sim_args);
   sim_args->bag_cycle = config->sim_bag_cycle;
+  sim_args->use_census_rollout = config->sim_census_rollout;
   if (config->game) {
     config_set_sim_args_pat_rollout(
         config, game_get_player_on_turn_index(config->game), sim_args);
@@ -12225,6 +12239,7 @@ void config_contribute_reset_shared_settings(Config *config) {
   // config_contribute_reset_player_settings gives.
   config->sim_margin_forecast = false;
   config->sim_bag_cycle = true;
+  config->sim_census_rollout = false;
 }
 
 // Applies the run-wide settings a task request states, on top of
@@ -14299,6 +14314,12 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
     return;
   }
 
+  config_load_bool(config, ARG_TOKEN_SIM_CENSUS_ROLLOUT,
+                   &config->sim_census_rollout, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
   if (config_get_parg_value(config, ARG_TOKEN_TIME_LIMIT, 0) != NULL) {
     config->p1_time_limit_seconds = config->time_limit_seconds;
     config->p2_time_limit_seconds = config->time_limit_seconds;
@@ -16135,6 +16156,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_SIM_WITH_INFERENCE, "sinfer", 1, 1);
   arg(ARG_TOKEN_SIM_MARGIN_FORECAST, "smargin", 1, 1);
   arg(ARG_TOKEN_SIM_BAG_CYCLE, "sbagcycle", 1, 1);
+  arg(ARG_TOKEN_SIM_CENSUS_ROLLOUT, "scensus", 1, 1);
   arg(ARG_TOKEN_USE_HEAT_MAP, "useheatmap", 1, 1);
   arg(ARG_TOKEN_HUMAN_READABLE, "hr", 1, 1);
   arg(ARG_TOKEN_SHOW_MISTAKES, "mistakes", 1, 1);
@@ -17108,6 +17130,10 @@ void config_add_settings_to_string_builder(const Config *config,
     case ARG_TOKEN_SIM_BAG_CYCLE:
       config_add_bool_setting_to_string_builder(config, sb, arg_token,
                                                 config->sim_bag_cycle);
+      break;
+    case ARG_TOKEN_SIM_CENSUS_ROLLOUT:
+      config_add_bool_setting_to_string_builder(config, sb, arg_token,
+                                                config->sim_census_rollout);
       break;
     case ARG_TOKEN_P1_SIM_BAG_CYCLE:
       config_add_bool_setting_to_string_builder(config, sb, arg_token,
