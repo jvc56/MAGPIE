@@ -262,6 +262,7 @@ static TestEntry on_demand_test_table[] = {
     {"infercmp", test_infer_cmp},
     {"censusrolloutbench", test_census_rollout_bench},
     {"lamcreplay", test_lamc_replay},
+    {"lamcautoplay", test_lamc_autoplay},
     {"genstuck", test_generate_stuck_cgps},
     {"gennonstuck", test_generate_nonstuck_cgps},
     {"gennonstuck2", test_generate_nonstuck_cgps2},

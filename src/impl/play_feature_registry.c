@@ -3,7 +3,6 @@
 #include "../def/play_feature_defs.h"
 #include "../ent/bag.h"
 #include "../ent/game.h"
-#include "../ent/letter_distribution.h"
 #include "../ent/move.h"
 #include "../ent/player.h"
 #include "../ent/rack.h"

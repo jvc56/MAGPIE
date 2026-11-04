@@ -23,6 +23,7 @@
 #include "../def/move_defs.h"
 #include "../def/pat_defs.h"
 #include "../def/peg_defs.h"
+#include "../def/play_feature_defs.h"
 #include "../def/players_data_defs.h"
 #include "../def/rack_defs.h"
 #include "../def/sim_defs.h"
@@ -2800,6 +2801,26 @@ static void help_entry_fill(const Config *config, int token,
       text = "Specifies whether LAMC hands the simulation its best predicted "
              "plays of all plays. Otherwise they come from the plays it "
              "sampled.";
+      break;
+    case ARG_TOKEN_LAMC_MAX_BAG:
+      usages[0] = "<number_of_tiles>";
+      examples[0] = "20";
+      text = "Specifies the most tiles in the bag at which LAMC searches. "
+             "With more, the simulation takes the top plays by static "
+             "equity as usual. 1000, the default, always searches.";
+      break;
+    case ARG_TOKEN_LAMC_REUSE:
+      usages[0] = "<true_or_false>";
+      examples[0] = "true";
+      text = "Specifies whether the simulation of LAMC's plays continues the "
+             "samples the search took of them. Otherwise it starts over with "
+             "other seeds.";
+      break;
+    case ARG_TOKEN_LAMC_STATIC_FINALISTS:
+      usages[0] = "<number_of_plays>";
+      examples[0] = "8";
+      text = "Specifies how many top plays by static equity LAMC always hands "
+             "the simulation. The rest of its plays are its best predicted.";
       break;
     case ARG_TOKEN_P1_LAMC:
     case ARG_TOKEN_P2_LAMC:
@@ -13953,6 +13974,12 @@ static void config_load_lamc(Config *config, ErrorStack *error_stack) {
                    error_stack);
   config_load_bool(config, ARG_TOKEN_LAMC_FINAL_ALL, &args->finalists_from_all,
                    error_stack);
+  config_load_int(config, ARG_TOKEN_LAMC_MAX_BAG, 0, LAMC_MAX_BAG,
+                  &args->max_bag, error_stack);
+  config_load_bool(config, ARG_TOKEN_LAMC_REUSE, &args->reuse_samples,
+                   error_stack);
+  config_load_int(config, ARG_TOKEN_LAMC_STATIC_FINALISTS, 0,
+                  LAMC_MAX_POOL_SIZE, &args->static_finalists, error_stack);
   config_load_double(config, ARG_TOKEN_LAMC_LENGTH, 0.01, 100.0,
                      &args->length_scale, error_stack);
   config_load_double(config, ARG_TOKEN_LAMC_RADIUS, 0.0, 100.0,
@@ -16636,6 +16663,9 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_LAMC_BETA, "lamcbeta", 1, 1);
   arg(ARG_TOKEN_LAMC_EQUITY_MEAN, "lamcequitymean", 1, 1);
   arg(ARG_TOKEN_LAMC_FINAL_ALL, "lamcfinalall", 1, 1);
+  arg(ARG_TOKEN_LAMC_MAX_BAG, "lamcmaxbag", 1, 1);
+  arg(ARG_TOKEN_LAMC_REUSE, "lamcreuse", 1, 1);
+  arg(ARG_TOKEN_LAMC_STATIC_FINALISTS, "lamcfinalstatic", 1, 1);
   arg(ARG_TOKEN_USE_HEAT_MAP, "useheatmap", 1, 1);
   arg(ARG_TOKEN_HUMAN_READABLE, "hr", 1, 1);
   arg(ARG_TOKEN_SHOW_MISTAKES, "mistakes", 1, 1);
@@ -17078,6 +17108,9 @@ void config_add_settings_to_string_builder(const Config *config,
     case ARG_TOKEN_LAMC_BETA:
     case ARG_TOKEN_LAMC_EQUITY_MEAN:
     case ARG_TOKEN_LAMC_FINAL_ALL:
+    case ARG_TOKEN_LAMC_MAX_BAG:
+    case ARG_TOKEN_LAMC_REUSE:
+    case ARG_TOKEN_LAMC_STATIC_FINALISTS:
     case ARG_TOKEN_P1_LAMC:
     case ARG_TOKEN_P2_LAMC:
     case ARG_TOKEN_HELP:

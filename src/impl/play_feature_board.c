@@ -8,7 +8,7 @@
 #include "../ent/bonus_square.h"
 #include "../ent/game.h"
 #include "../ent/move.h"
-#include "play_feature_registry.h"
+#include "../ent/play_feature.h"
 #include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>

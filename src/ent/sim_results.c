@@ -429,6 +429,24 @@ void sim_results_reset(const MoveList *move_list, SimResults *sim_results,
   cpthread_mutex_unlock(&sim_results->display_mutex);
 }
 
+void sim_results_reset_from_plays(SimResults *sim_results,
+                                  const MoveList *move_list,
+                                  const SimResults *source,
+                                  const int *source_indices, int num_plies,
+                                  uint64_t seed, bool use_heat_map) {
+  sim_results_reset(move_list, sim_results, num_plies, seed, use_heat_map);
+  const int num_plays = move_list_get_count(move_list);
+  for (int play_idx = 0; play_idx < num_plays; play_idx++) {
+    if (source_indices[play_idx] < 0) {
+      continue;
+    }
+    SimmedPlay *dst = sim_results->simmed_plays[play_idx];
+    const SimmedPlay *src = source->simmed_plays[source_indices[play_idx]];
+    simmed_play_copy(dst, src, num_plies);
+    prng_copy(dst->prng, src->prng);
+  }
+}
+
 SimResults *sim_results_create(const double cutoff) {
   SimResults *sim_results = malloc_or_die(sizeof(SimResults));
   sim_results->num_simmed_plays = 0;

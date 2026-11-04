@@ -3,5 +3,6 @@
 
 void test_lamc(void);
 void test_lamc_replay(void);
+void test_lamc_autoplay(void);
 
 #endif

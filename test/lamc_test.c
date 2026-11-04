@@ -5,15 +5,15 @@
 #include "lamc_test.h"
 
 #include "../src/compat/cpthread.h"
+#include "../src/compat/ctime.h"
 #include "../src/compat/memory_info.h"
-#include "../src/def/bai_defs.h"
 #include "../src/def/game_history_defs.h"
 #include "../src/def/lamc_defs.h"
 #include "../src/def/move_defs.h"
 #include "../src/def/play_feature_defs.h"
 #include "../src/def/thread_control_defs.h"
+#include "../src/ent/autoplay_results.h"
 #include "../src/ent/bag.h"
-#include "../src/ent/bai_result.h"
 #include "../src/ent/equity.h"
 #include "../src/ent/game.h"
 #include "../src/ent/lamc_args.h"
@@ -177,7 +177,7 @@ static void test_play_features(void) {
       "set -lex CSW21 -wmp true -s1 equity -s2 equity -r1 all -r2 all");
   load_and_exec_config_or_die(config, "cgp " JOSH2_CGP);
   Game *game = config_get_game(config);
-  Game *game_copy = game_duplicate(game);
+  Game *game_before = game_duplicate(game);
   MoveList *moves = move_list_create(LAMC_TEST_MOVE_LIST_CAPACITY);
   const MoveGenArgs gen_args = {
       .game = game,
@@ -234,7 +234,7 @@ static void test_play_features(void) {
         }
       }
     }
-    assert_games_are_equal(game, game_copy, true);
+    assert_games_are_equal(game, game_before, true);
   }
 
   // A few meanings, checked directly.
@@ -272,7 +272,7 @@ static void test_play_features(void) {
          ERROR_STATUS_LAMC_BAD_FEATURE_SET);
 
   move_list_destroy(moves);
-  game_destroy(game_copy);
+  game_destroy(game_before);
   config_destroy(config);
 }
 
@@ -325,9 +325,11 @@ static uint64_t lamc_test_sim(const int num_threads, const char *extra) {
 }
 
 static void test_lamc_sim(void) {
-  const char *const variants[] = {"", "-lamcproposal acquire",
-                                  "-lamccycle true -sbagcycle false"};
-  for (int variant_idx = 0; variant_idx < 3; variant_idx++) {
+  const char *const variants[] = {
+      "", "-lamcproposal acquire", "-lamccycle true -sbagcycle false",
+      "-lamcreuse true -lamcequitymean true -lamcfinalall true "
+      "-lamcfinalstatic 3"};
+  for (int variant_idx = 0; variant_idx < 4; variant_idx++) {
     const uint64_t one = lamc_test_sim(1, variants[variant_idx]);
     const uint64_t several = lamc_test_sim(4, variants[variant_idx]);
     assert(one == several);
@@ -356,6 +358,8 @@ void test_lamc(void) {
 //   LAMC_REPLAY_SAMPLES    samples per play for the methods (default 150)
 //   LAMC_REPLAY_THREADS    threads (default: the cores)
 //   LAMC_REPLAY_STAGE      late for 1 to 20 tiles in the bag (default: mid)
+//   LAMC_REPLAY_REUSE      1 for final choices that count the search's samples
+//   LAMC_REPLAY_FIRST_GAME games to skip, for a fresh set of positions
 //   LAMC_REPLAY_VARIANTS   |-separated LAMC option lists, each one variant
 
 typedef struct ReplayPosition {
@@ -372,6 +376,8 @@ typedef struct ReplayShared {
   int samples_per_play;
   int baseline_plays;
   int num_threads;
+  // Whether the variant's final choice counts the search's samples too.
+  bool reuse_samples;
   SimArgs base_sim_args;
   ThreadControl *thread_control;
   // The variant being evaluated, and the budget.
@@ -385,6 +391,8 @@ typedef struct ReplayShared {
   int *variant_outside;
   int *variant_rounds;
   int *variant_evaluated;
+  double *surrogate_correlation;
+  double *static_correlation;
 } ReplayShared;
 
 typedef struct ReplayWorker {
@@ -483,6 +491,98 @@ static int replay_choose(RandomVariables *table, const int *plays,
   return best;
 }
 
+// Like replay_choose, but each play's mean also counts the samples the search
+// already took of it, which come first in its row of the table.
+static int replay_choose_reusing(const ReplayPosition *position,
+                                 const int samples_per_play,
+                                 RandomVariables *table, const LamcCtx *ctx,
+                                 const int *plays, const int num_plays,
+                                 const uint64_t count) {
+  int best = 0;
+  double best_mean = -INFINITY;
+  for (int idx = 0; idx < num_plays; idx++) {
+    const uint64_t taken = lamc_get_play_samples(ctx, plays[idx]);
+    for (uint64_t sample = 0; sample < count; sample++) {
+      rvs_sample(table, (uint64_t)plays[idx], 0, NULL);
+    }
+    const uint64_t total = taken + count;
+    double sum = 0;
+    for (uint64_t sample = 0; sample < total; sample++) {
+      sum +=
+          position->samples[(uint64_t)plays[idx] * samples_per_play + sample];
+    }
+    const double mean = total > 0 ? sum / (double)total : 0.0;
+    if (mean > best_mean) {
+      best_mean = mean;
+      best = idx;
+    }
+  }
+  return best;
+}
+
+// The rank of each value among values, 0 for the smallest, ties broken by
+// index.
+static void replay_ranks(const double *values, const int count, double *ranks) {
+  for (int idx = 0; idx < count; idx++) {
+    int rank = 0;
+    for (int other = 0; other < count; other++) {
+      if (values[other] < values[idx] ||
+          (values[other] == values[idx] && other < idx)) {
+        rank++;
+      }
+    }
+    ranks[idx] = rank;
+  }
+}
+
+static double replay_correlation(const double *a, const double *b,
+                                 const int count) {
+  double mean_a = 0;
+  double mean_b = 0;
+  for (int idx = 0; idx < count; idx++) {
+    mean_a += a[idx];
+    mean_b += b[idx];
+  }
+  mean_a /= count;
+  mean_b /= count;
+  double covariance = 0;
+  double variance_a = 0;
+  double variance_b = 0;
+  for (int idx = 0; idx < count; idx++) {
+    covariance += (a[idx] - mean_a) * (b[idx] - mean_b);
+    variance_a += (a[idx] - mean_a) * (a[idx] - mean_a);
+    variance_b += (b[idx] - mean_b) * (b[idx] - mean_b);
+  }
+  return variance_a > 0 && variance_b > 0
+             ? covariance / sqrt(variance_a * variance_b)
+             : 0.0;
+}
+
+// The Spearman correlations with the plays' true win percentages of the
+// surrogate's means and of static equity (the universe's order).
+static void replay_rank_correlations(const ReplayPosition *position,
+                                     LamcCtx *ctx, double *surrogate,
+                                     double *static_equity) {
+  const int count = position->num_plays;
+  double *values = malloc_or_die(sizeof(double) * count);
+  double *truth_ranks = malloc_or_die(sizeof(double) * count);
+  double *other_ranks = malloc_or_die(sizeof(double) * count);
+  replay_ranks(position->truth, count, truth_ranks);
+  for (int play_idx = 0; play_idx < count; play_idx++) {
+    values[play_idx] = lamc_get_predicted_mean(ctx, play_idx);
+  }
+  replay_ranks(values, count, other_ranks);
+  *surrogate = replay_correlation(truth_ranks, other_ranks, count);
+  for (int play_idx = 0; play_idx < count; play_idx++) {
+    values[play_idx] = -play_idx;
+  }
+  replay_ranks(values, count, other_ranks);
+  *static_equity = replay_correlation(truth_ranks, other_ranks, count);
+  free(values);
+  free(truth_ranks);
+  free(other_ranks);
+}
+
 static double replay_set_regret(const ReplayPosition *position,
                                 const int *plays, const int num_plays) {
   double best = -INFINITY;
@@ -547,6 +647,9 @@ static void *replay_evaluate_worker(void *data) {
     shared->variant_rounds[pos_idx] = lamc_search(ctx, args, table, &limits);
     const int num_evaluated = lamc_get_num_evaluated(ctx);
     shared->variant_evaluated[pos_idx] = num_evaluated;
+    replay_rank_correlations(position, ctx,
+                             &shared->surrogate_correlation[pos_idx],
+                             &shared->static_correlation[pos_idx]);
     const int wanted = args->num_finalists > 0 ? args->num_finalists : baseline;
     const int num_finalists = lamc_select_candidates(ctx, args, wanted);
     for (int rank = 0; rank < num_finalists; rank++) {
@@ -555,7 +658,11 @@ static void *replay_evaluate_worker(void *data) {
     const uint64_t spent = lamc_get_search_rollouts(ctx);
     const uint64_t left = shared->budget > spent ? shared->budget - spent : 0;
     const int variant_choice =
-        replay_choose(table, plays, num_finalists, left / num_finalists);
+        shared->reuse_samples
+            ? replay_choose_reusing(position, shared->samples_per_play, table,
+                                    ctx, plays, num_finalists,
+                                    left / num_finalists)
+            : replay_choose(table, plays, num_finalists, left / num_finalists);
     shared->variant_regret[pos_idx] =
         true_best - position->truth[plays[variant_choice]];
     shared->variant_set_regret[pos_idx] =
@@ -604,9 +711,10 @@ static void replay_mean_and_se(const double *values, const int count,
 // fewer than 30 tiles; late positions stop once it has at most 1 to 20, which
 // also varies.
 static void replay_make_positions(const Game *base, ReplayPosition *positions,
-                                  const int num_positions, const bool late) {
+                                  const int num_positions, const bool late,
+                                  const uint64_t first_game) {
   int made = 0;
-  for (uint64_t game_idx = 1; made < num_positions; game_idx++) {
+  for (uint64_t game_idx = first_game + 1; made < num_positions; game_idx++) {
     Game *game = game_duplicate(base);
     game_reset(game);
     game_seed(game, 7919ULL * game_idx);
@@ -669,12 +777,14 @@ void test_lamc_replay(void) {
   shared.samples_per_play = samples_per_play;
   shared.baseline_plays = baseline_plays;
   shared.num_threads = num_threads;
+  shared.reuse_samples = replay_env_int("LAMC_REPLAY_REUSE", 0) != 0;
   shared.thread_control = config_get_thread_control(config);
   shared.positions = calloc_or_die(num_positions, sizeof(ReplayPosition));
   config_fill_sim_args(config, NULL, NULL, NULL, NULL, &shared.base_sim_args);
   const char *stage = getenv("LAMC_REPLAY_STAGE");
   replay_make_positions(config_get_game(config), shared.positions,
-                        num_positions, stage && strings_equal(stage, "late"));
+                        num_positions, stage && strings_equal(stage, "late"),
+                        (uint64_t)replay_env_int("LAMC_REPLAY_FIRST_GAME", 0));
   printf("LAMC replay: %d positions, %d plays each at most, %d samples per "
          "play, %d threads\n",
          num_positions, universe, samples_per_play, num_threads);
@@ -690,6 +800,8 @@ void test_lamc_replay(void) {
   shared.variant_outside = malloc_or_die(sizeof(int) * num_positions);
   shared.variant_rounds = malloc_or_die(sizeof(int) * num_positions);
   shared.variant_evaluated = malloc_or_die(sizeof(int) * num_positions);
+  shared.surrogate_correlation = malloc_or_die(sizeof(double) * num_positions);
+  shared.static_correlation = malloc_or_die(sizeof(double) * num_positions);
   double *differences = malloc_or_die(sizeof(double) * num_positions);
 
   const int num_budgets = string_splitter_get_number_of_items(budget_items);
@@ -740,6 +852,12 @@ void test_lamc_replay(void) {
                          &standard_set_mean, &unused_se);
       replay_mean_and_se(shared.variant_set_regret, num_positions,
                          &variant_set_mean, &unused_se);
+      double surrogate_mean;
+      double static_mean;
+      replay_mean_and_se(shared.surrogate_correlation, num_positions,
+                         &surrogate_mean, &unused_se);
+      replay_mean_and_se(shared.static_correlation, num_positions, &static_mean,
+                         &unused_se);
       int outside = 0;
       double rounds = 0;
       double evaluated = 0;
@@ -750,12 +868,14 @@ void test_lamc_replay(void) {
       }
       printf("LAMCREPLAY budget=%llu variant='%s' standard=%.3f(%.3f) "
              "lamc=%.3f(%.3f) diff=%+.3f(%.3f) setregret std=%.3f lamc=%.3f "
-             "outside=%d rounds=%.1f evaluated=%.1f\n",
+             "outside=%d rounds=%.1f evaluated=%.1f spearman lamc=%.3f "
+             "static=%.3f\n",
              (unsigned long long)shared.budget, variant, 100 * standard_mean,
              100 * standard_se, 100 * variant_mean, 100 * variant_se,
              100 * difference_mean, 100 * difference_se,
              100 * standard_set_mean, 100 * variant_set_mean, outside,
-             rounds / num_positions, evaluated / num_positions);
+             rounds / num_positions, evaluated / num_positions, surrogate_mean,
+             static_mean);
       (void)fflush(stdout);
     }
   }
@@ -773,8 +893,46 @@ void test_lamc_replay(void) {
   free(shared.variant_outside);
   free(shared.variant_rounds);
   free(shared.variant_evaluated);
+  free(shared.surrogate_correlation);
+  free(shared.static_correlation);
   free(differences);
   string_splitter_destroy(budget_items);
   string_splitter_destroy(variant_items);
+  config_destroy(config);
+}
+
+// Autoplay with LAMC, printing its totals with the results. The settings are
+// LAMC_AUTOPLAY_SETTINGS (a set command's options) and LAMC_AUTOPLAY_COMMAND
+// (default: autoplay games 100 -gp true -seed 1).
+void test_lamc_autoplay(void) {
+  const char *settings_env = getenv("LAMC_AUTOPLAY_SETTINGS");
+  const char *command_env = getenv("LAMC_AUTOPLAY_COMMAND");
+  char *settings = get_formatted_string(
+      "set -lex CSW21 -wmp true -s1 equity -s2 equity -r1 all -r2 all "
+      "-savesettings false -autosavegcg false %s",
+      settings_env ? settings_env : "");
+  Config *config = config_create_or_die(settings);
+  free(settings);
+  lamc_totals_reset();
+  Timer timer;
+  ctimer_start(&timer);
+  load_and_exec_config_or_die(
+      config,
+      command_env ? command_env : "autoplay games 100 -gp true -seed 1");
+  const double seconds = ctimer_elapsed_seconds(&timer);
+  char *results = autoplay_results_to_string(
+      config_get_autoplay_results(config), true, true);
+  const LamcTotals totals = lamc_get_totals();
+  const double searches = totals.searches > 0 ? (double)totals.searches : 1.0;
+  printf("%s\nLAMCAUTOPLAY seconds=%.1f searches=%llu rounds=%.2f "
+         "evaluated=%.1f search_rollouts=%.1f search_ms=%.2f "
+         "finalists_outside=%.2f chosen_outside=%llu\n",
+         results, seconds, (unsigned long long)totals.searches,
+         (double)totals.rounds / searches, (double)totals.evaluated / searches,
+         (double)totals.explore_rollouts / searches,
+         (double)totals.explore_microseconds / 1000.0 / searches,
+         (double)totals.finalists_outside_static / searches,
+         (unsigned long long)totals.chosen_outside_static);
+  free(results);
   config_destroy(config);
 }

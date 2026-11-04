@@ -4,10 +4,9 @@
 #include "../ent/lamc_args.h"
 #include "../ent/move.h"
 #include "../ent/sim_args.h"
+#include "../ent/sim_results.h"
 #include "../ent/thread_control.h"
-#include "../util/io_util.h"
 #include "random_variable.h"
-#include <stdbool.h>
 #include <stdint.h>
 
 // Locally Adaptive Monte Carlo: chooses the plays a sim simulates by searching
@@ -55,12 +54,17 @@ int lamc_get_num_evaluated(const LamcCtx *ctx);
 // The built play (its index) at the rank-th best surrogate mean of the
 // evaluated plays.
 int lamc_get_ranked_play(const LamcCtx *ctx, int rank);
-// Chooses up to count candidates after a search: the best by the surrogate's
-// mean among the evaluated plays, or among all plays if the args say so.
-// Returns how many it chose.
+// Chooses up to count candidates after a search: the args' number of top
+// plays by static equity, then the best by the surrogate's mean among the
+// evaluated plays, or among all plays if the args say so. Returns how many it
+// chose.
 int lamc_select_candidates(LamcCtx *ctx, const LamcArgs *args, int count);
+// The surrogate's mean at the built play play_idx after a search.
+double lamc_get_predicted_mean(LamcCtx *ctx, int play_idx);
 // The built play (its index) of the rank-th candidate.
 int lamc_get_candidate(const LamcCtx *ctx, int rank);
+// The samples the last search took of the built play play_idx.
+uint64_t lamc_get_play_samples(const LamcCtx *ctx, int play_idx);
 // The rollouts the last search took.
 uint64_t lamc_get_search_rollouts(const LamcCtx *ctx);
 
@@ -86,6 +90,12 @@ typedef struct LamcReport {
 // The search's rollouts and time are in the report.
 const MoveList *lamc_choose_candidates(const SimArgs *sim_args, LamcCtx **ctx,
                                        int baseline_plays, LamcReport *report);
+
+// Resets sim_results to the candidates of the last lamc_choose_candidates,
+// each carrying the samples the search took of it, so that the sim of the
+// candidates can resume from them instead of starting over.
+void lamc_reset_final_results(LamcCtx *ctx, const SimArgs *sim_args,
+                              SimResults *sim_results);
 
 // Totals over every search since the last reset, for experiments: the
 // searches, their rollouts, and how often the sim then chose a play outside

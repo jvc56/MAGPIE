@@ -4,9 +4,9 @@
 #include "../ent/equity.h"
 #include "../ent/klv.h"
 #include "../ent/move.h"
+#include "../ent/play_feature.h"
 #include "../ent/rack.h"
 #include "gameplay.h"
-#include "play_feature_registry.h"
 
 void play_feature_extract_score(const PlayFeatureCtx __attribute__((unused)) *
                                     ctx,

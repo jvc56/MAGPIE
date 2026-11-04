@@ -29,6 +29,8 @@ typedef struct LamcArgs {
   int max_universe;
   // The most plays evaluated: the surrogate's capacity.
   int max_evaluated;
+  // The search runs only when the bag holds at most this many tiles.
+  int max_bag;
   // The plays handed to the sim; 0 hands it as many as it would simulate
   // without LAMC.
   int num_finalists;
@@ -40,6 +42,11 @@ typedef struct LamcArgs {
   // Whether candidates come from every play by the surrogate's mean, not only
   // the evaluated ones.
   bool finalists_from_all;
+  // The candidates always include this many top plays by static equity.
+  int static_finalists;
+  // Whether the sim of the candidates continues the samples the search took
+  // of them, instead of starting over with other seeds.
+  bool reuse_samples;
   lamc_proposal_t proposal;
   gp_kernel_t kernel;
   // The surrogate's length scale, in standard deviations of each feature. Fits
@@ -67,10 +74,13 @@ static inline void lamc_args_set_defaults(LamcArgs *args) {
   args->equity_floor = LAMC_DEFAULT_EQUITY_FLOOR;
   args->max_universe = LAMC_DEFAULT_MAX_UNIVERSE;
   args->max_evaluated = LAMC_DEFAULT_MAX_EVALUATED;
+  args->max_bag = LAMC_MAX_BAG;
   args->num_finalists = 0;
   args->explore_bag_cycle = false;
   args->equity_prior_mean = false;
   args->finalists_from_all = false;
+  args->static_finalists = 0;
+  args->reuse_samples = false;
   args->proposal = LAMC_PROPOSAL_ASCENT;
   args->kernel = GP_KERNEL_MATERN52;
   args->length_scale = LAMC_DEFAULT_LENGTH_SCALE;

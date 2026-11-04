@@ -176,9 +176,11 @@ void simulate(SimArgs *sim_args, SimCtx **sim_ctx, SimResults *sim_results,
   const uint64_t original_lamc_sample_limit =
       sim_args->bai_options.sample_limit;
   const double original_time_limit = sim_args->bai_options.time_limit_seconds;
+  const bool original_resume_results = sim_args->resume_results;
   bool searched = false;
-  if (sim_args->lamc_args.enabled &&
-      !bag_is_empty(game_get_bag(sim_args->game))) {
+  const int bag_tiles = bag_get_letters(game_get_bag(sim_args->game));
+  if (sim_args->lamc_args.enabled && bag_tiles > 0 &&
+      bag_tiles <= sim_args->lamc_args.max_bag) {
     LamcReport lamc_report;
     const MoveList *candidates = lamc_choose_candidates(
         sim_args, &(*sim_ctx)->lamc_ctx,
@@ -186,7 +188,17 @@ void simulate(SimArgs *sim_args, SimCtx **sim_ctx, SimResults *sim_results,
     if (candidates != NULL) {
       searched = true;
       sim_args->move_list = candidates;
-      sim_args->seed = original_seed ^ SIM_LAMC_SEED_SALT;
+      if (sim_args->lamc_args.reuse_samples) {
+        // The sim resumes from the search's samples of its candidates, so
+        // what simulate sets up for a fresh sim is set here.
+        lamc_reset_final_results((*sim_ctx)->lamc_ctx, sim_args, sim_results);
+        sim_results_set_rack(sim_results, move_list_get_rack(candidates));
+        sim_results_set_known_opp_rack(sim_results, sim_args->known_opp_rack);
+        sim_results_set_num_infer_leaves(sim_results, num_infer_leaves);
+        sim_args->resume_results = true;
+      } else {
+        sim_args->seed = original_seed ^ SIM_LAMC_SEED_SALT;
+      }
       const uint64_t minimum_left = (uint64_t)move_list_get_count(candidates) *
                                     sim_args->bai_options.sample_minimum;
       sim_args->bai_options.sample_limit =
@@ -261,6 +273,7 @@ void simulate(SimArgs *sim_args, SimCtx **sim_ctx, SimResults *sim_results,
     sim_args->seed = original_seed;
     sim_args->bai_options.sample_limit = original_lamc_sample_limit;
     sim_args->bai_options.time_limit_seconds = original_time_limit;
+    sim_args->resume_results = original_resume_results;
   }
 }
 

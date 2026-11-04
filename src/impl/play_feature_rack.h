@@ -2,7 +2,7 @@
 #define PLAY_FEATURE_RACK_H
 
 #include "../ent/move.h"
-#include "play_feature_registry.h"
+#include "../ent/play_feature.h"
 
 // Tiles placed, or exchanged.
 void play_feature_extract_tiles_played(const PlayFeatureCtx *ctx,

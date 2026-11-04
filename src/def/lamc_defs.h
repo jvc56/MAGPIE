@@ -40,6 +40,8 @@ enum {
   LAMC_MAX_ROUNDS = 1000,
   LAMC_MAX_UNIVERSE = 100000,
   LAMC_MAX_EVALUATED = 2048,
+  // A bag limit at least this large never stops a search.
+  LAMC_MAX_BAG = 1000,
 };
 
 #define LAMC_DEFAULT_EXPLORE_SHARE 0.3

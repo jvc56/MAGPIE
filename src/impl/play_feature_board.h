@@ -2,7 +2,7 @@
 #define PLAY_FEATURE_BOARD_H
 
 #include "../ent/move.h"
-#include "play_feature_registry.h"
+#include "../ent/play_feature.h"
 
 // The row and column of the middle of the tiles placed; the board's center
 // for an exchange or a pass.

@@ -2,7 +2,7 @@
 #define PLAY_FEATURE_EQUITY_H
 
 #include "../ent/move.h"
-#include "play_feature_registry.h"
+#include "../ent/play_feature.h"
 
 // The play's score, in points.
 void play_feature_extract_score(const PlayFeatureCtx *ctx, const Move *move,

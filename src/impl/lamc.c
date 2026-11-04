@@ -12,10 +12,10 @@
 #include "../ent/game.h"
 #include "../ent/lamc_args.h"
 #include "../ent/move.h"
+#include "../ent/play_feature.h"
 #include "../ent/player.h"
 #include "../ent/sim_args.h"
 #include "../ent/sim_results.h"
-#include "../ent/stats.h"
 #include "../ent/thread_control.h"
 #include "../util/io_util.h"
 #include "bai.h"
@@ -767,21 +767,35 @@ int lamc_get_ranked_play(const LamcCtx *ctx, const int rank) {
 
 int lamc_select_candidates(LamcCtx *ctx, const LamcArgs *args,
                            const int count) {
+  // The candidates are first the top plays by static equity, the universe's
+  // first, then the rest by the surrogate's mean: among every play, or among
+  // the evaluated ones.
+  for (int play_idx = 0; play_idx < ctx->num_universe; play_idx++) {
+    ctx->is_proposed[play_idx] = false;
+    if (args->finalists_from_all) {
+      lamc_predict(ctx, play_idx, &ctx->universe_means[play_idx], NULL);
+    }
+  }
+  int num_candidates = 0;
+  const int num_static =
+      args->static_finalists < count ? args->static_finalists : count;
+  for (int play_idx = 0; play_idx < num_static && play_idx < ctx->num_universe;
+       play_idx++) {
+    ctx->is_proposed[play_idx] = true;
+    ctx->candidates[num_candidates++] = play_idx;
+  }
   if (!args->finalists_from_all) {
-    const int num_candidates =
-        count < ctx->num_evaluated ? count : ctx->num_evaluated;
-    for (int rank = 0; rank < num_candidates; rank++) {
-      ctx->candidates[rank] = lamc_get_ranked_play(ctx, rank);
+    for (int rank = 0; rank < ctx->num_evaluated && num_candidates < count;
+         rank++) {
+      const int play_idx = lamc_get_ranked_play(ctx, rank);
+      if (!ctx->is_proposed[play_idx]) {
+        ctx->is_proposed[play_idx] = true;
+        ctx->candidates[num_candidates++] = play_idx;
+      }
     }
     return num_candidates;
   }
-  for (int play_idx = 0; play_idx < ctx->num_universe; play_idx++) {
-    lamc_predict(ctx, play_idx, &ctx->universe_means[play_idx], NULL);
-    ctx->is_proposed[play_idx] = false;
-  }
-  const int num_candidates =
-      count < ctx->num_universe ? count : ctx->num_universe;
-  for (int rank = 0; rank < num_candidates; rank++) {
+  while (num_candidates < count) {
     int best = -1;
     for (int play_idx = 0; play_idx < ctx->num_universe; play_idx++) {
       if (!ctx->is_proposed[play_idx] &&
@@ -790,14 +804,27 @@ int lamc_select_candidates(LamcCtx *ctx, const LamcArgs *args,
         best = play_idx;
       }
     }
+    if (best < 0) {
+      break;
+    }
     ctx->is_proposed[best] = true;
-    ctx->candidates[rank] = best;
+    ctx->candidates[num_candidates++] = best;
   }
   return num_candidates;
 }
 
+double lamc_get_predicted_mean(LamcCtx *ctx, const int play_idx) {
+  double mean;
+  lamc_predict(ctx, play_idx, &mean, NULL);
+  return mean;
+}
+
 int lamc_get_candidate(const LamcCtx *ctx, const int rank) {
   return ctx->candidates[rank];
+}
+
+uint64_t lamc_get_play_samples(const LamcCtx *ctx, const int play_idx) {
+  return atomic_load(&ctx->sample_counts[play_idx]);
 }
 
 uint64_t lamc_get_search_rollouts(const LamcCtx *ctx) {
@@ -822,7 +849,7 @@ int lamc_search(LamcCtx *ctx, const LamcArgs *args, RandomVariables *base_rvs,
   ctx->rollouts_per_sample =
       limits->rollouts_per_sample > 0 ? limits->rollouts_per_sample : 1;
   lamc_init_pool(ctx, args);
-  int previous_top[LAMC_MAX_KEEP];
+  int previous_top[LAMC_MAX_KEEP] = {0};
   const int top_count = args->keep < LAMC_MAX_KEEP ? args->keep : LAMC_MAX_KEEP;
   int num_top = 0;
   int stable = 0;
@@ -952,11 +979,12 @@ const MoveList *lamc_choose_candidates(const SimArgs *sim_args,
     ctx->finalists = move_list_create(num_finalists);
   }
   const int count = lamc_select_candidates(ctx, args, num_finalists);
+  // In rank order, so that the finalists line up with the candidates.
   move_list_reset(ctx->finalists);
   for (int rank = 0; rank < count; rank++) {
     const int play_idx = lamc_get_candidate(ctx, rank);
-    move_list_add_move(ctx->finalists,
-                       move_list_get_move(ctx->universe, play_idx));
+    move_list_add_move_to_sorted_list(
+        ctx->finalists, move_list_get_move(ctx->universe, play_idx));
     if (play_idx >= baseline_plays) {
       report->finalists_outside_static++;
     }
@@ -977,6 +1005,18 @@ const MoveList *lamc_choose_candidates(const SimArgs *sim_args,
   atomic_fetch_add(&lamc_total_finalists_outside_static,
                    (uint64_t)report->finalists_outside_static);
   return ctx->finalists;
+}
+
+void lamc_reset_final_results(LamcCtx *ctx, const SimArgs *sim_args,
+                              SimResults *sim_results) {
+  const int count = move_list_get_count(ctx->finalists);
+  for (int rank = 0; rank < count; rank++) {
+    const int play_idx = lamc_get_candidate(ctx, rank);
+    ctx->next_pool[rank] = ctx->is_evaluated[play_idx] ? play_idx : -1;
+  }
+  sim_results_reset_from_plays(
+      sim_results, ctx->finalists, ctx->explore_results, ctx->next_pool,
+      sim_args->num_plies, sim_args->seed, sim_args->use_heat_map);
 }
 
 void lamc_note_choice(const LamcCtx *ctx, const Move *chosen,
