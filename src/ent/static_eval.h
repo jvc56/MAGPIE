@@ -14,13 +14,14 @@
 #include "../ent/pat_eval.h"
 #include "../ent/rack.h"
 
-#ifdef CRL_QUACKLE_PEG
-// Experimental (census rollout lab): Quackle's values below, in millipoints,
-// so that a build can check that the lazy census adds nonzero pre-endgame
-// adjustments as the static evaluation does.
+#ifdef QUACKLE_PEG_VALUES
+// Experimental: a build with -DQUACKLE_PEG_VALUES uses Quackle's values
+// below, in millipoints, so that it can check that code adding pre-endgame
+// adjustments itself (the census rollout) adds nonzero ones as the static
+// evaluation does.
 static const Equity peg_adjust_values[PEG_ADJUST_VALUES_LENGTH] = {
-    0, -8000, 0, -500, -2000, -3500, -2000, 2000, 10000, 7000, 4000, -1000,
-    -2000};
+    0,    -8000, 0,    -500, -2000, -3500, -2000,
+    2000, 10000, 7000, 4000, -1000, -2000};
 #else
 static const Equity peg_adjust_values[PEG_ADJUST_VALUES_LENGTH] = {0};
 #endif

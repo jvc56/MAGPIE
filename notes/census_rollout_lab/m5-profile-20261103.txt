@@ -1,0 +1,176 @@
+CENSUS ROLLOUT LAB: M5 MAX PROFILE OF THE LAZY CENSUS PATH, 2026-11-03
+
+Workload: CRL_PROFILE=lazy|plain CRL_RITMMAP=0 CRL_TURNS=14,18,22,26 CRL_PLIES=2
+CRL_IT=50000, single thread, 200,001 iterations, on censussim-multiply f6b654ac
+built with -DCRL_NO_QUERY_TIMERS (a local switch that compiles the per-query
+ctimer calls out of both lazy and plain; the timers cost about 1%).
+Data: CSW24.klv2 from MAGPIE-DATA f5242ae; CSW24.rit rebuilt and byte-identical
+to the Nov 2 one. A short verified run (CRL_E2E, 3000 it) gave 0 differences.
+
+TIMING: lazy 3.66-3.76 s, plain 6.68-6.97 s (1.84x).
+
+CYCLES (xctrace, two alternating pairs, both agree):
+  plain 29.8G, lazy 16.3G (-45%).
+  generate_moves: plain 26.2G, lazy 8.1G.
+  lazy's own work, as a share of lazy's cycles:
+    gather (crl_lazy_gather + crl_raise)      18.2%  (3.0G)
+    skips outside the gather                  5.2%   (crl_lazy_skips, crl_anchor_zones, crl_changed_cols)
+    lane hashing (gen_hash_lane)              3.6%   (plain runs without the carry, so it never hashes)
+    sim-start table builds (rv_sim_create)    7.0%   (main thread; 0.25 s of 3.8 s)
+    crl_lazy_query itself                     1.2%
+
+ISSUE SLOTS (bottlenecks mode, whole process):
+           useful  discarded  processing  delivery
+  lazy     31.2%   33.5%      21.2%       14.0%
+  plain    38.8%   33.3%      15.6%       12.2%
+
+MISPREDICTS (discarded_sampling; 10,000 events per sample):
+  lazy 23,179 samples (232M), plain 39,651 (397M). On this M5, counters 5 and 7
+  (23,179 / 23,178) are all and conditional branch mispredicts, and counter 6
+  (370, mostly bag_shuffle, rack_copy) memory-order flushes: the counts don't fit
+  the skill's stated order.
+  The gather + crl_raise cause 28.6% of lazy's mispredicts (66M):
+    crl_raise compare (lab.c:352 `value > *best`)     8.8%
+    root entry loop exit (1341)                       6.3%
+    odometer exit (1300)                              4.4%
+    candidate entry loop exit (1345)                  4.3%
+    empty-split skip (1335)                           3.6%
+  Movegen's own top mispredict, wordmap_gen_check_playthrough_and_crosses,
+  is 12.6% of lazy's and 21.3% of plain's.
+
+L1D MISSES (l1d_miss_sampling):
+  Load misses: lazy 78.2k samples, plain 77.3k: about the same count in 55% of the
+  cycles, which is lazy's higher processing-stall share.
+  The gather causes 20.7% of lazy's load misses and 37.9% of its TLB misses:
+    root offsets[played_index] (1331)   6.9% of load misses
+    leave lookup (1339)                 2.6%
+    candidate offsets (1333)            2.4%
+    entry units/scores (1342-1347)      about 6.7%
+  gen_hash_lane 5.2% and crl_changed_cols 4.8% of load misses (board squares).
+
+WHY THE GATHER IS SLOW
+  Each split of the rack (up to 127 for 7 tiles) makes three random loads into
+  lattice-sized arrays: the root table's offsets, the candidate's offsets and
+  lazy.leave. The English lattice has 4,114,349 multisets of up to 7 tiles, so
+  each array is 15.7 MB: 47 MB per gather against a 16 MB L2 shared by six cores,
+  and each candidate has its own 15.7 MB offsets. On a root-cache hit, the gather
+  still walks crl_empty_table, a calloc'd 15.7 MB array of zeros, at random.
+
+CANDIDATES, RANKED BY WHAT THE COUNTERS SUPPORT (none tried yet)
+  1. Gather memory: skip the root table entirely on a cache hit (no empty-table
+     walk); read the rack's leaves from its RIT entry instead of lazy.leave;
+     index offsets by the rack's own subracks or a compact map of the nonempty
+     P instead of the global rank; or compute every split's index first and
+     load in a second pass, so the loads overlap instead of serializing behind
+     mispredicts.
+  2. crl_raise: a branch-free max. Re-run discarded_sampling to check the
+     mispredicts don't just move to the loop exits.
+  3. Odometer, empty-split skip and entry loops: table-driven enumeration per
+     rack shape (15 count patterns for 7 tiles).
+  4. Sim-start builds: 7% of this workload; parallel across candidates.
+  5. Lane hashing: hash only the lanes the last move touched.
+
+=====================================================================
+6-PLY, AND HOW MUCH EACH SERVED PLY PAYS (added later on 2026-11-03)
+=====================================================================
+Workload: as above with CRL_PLIES=6 CRL_IT=20000 (80,006 iterations).
+Timing: lazy 7.40-7.44 s, plain 8.73-8.75 s (1.18x).
+Cycles (two alternating pairs): plain 38.7G, lazy 33.0G (-14.8% / -15.0%).
+  gather + crl_raise cost 7.1 points of plain's total, about half of what
+  lazy saves. Issue slots: lazy 31.0 useful / 38.7 discarded / 17.5
+  processing / 12.8 delivery; plain 35.6 / 37.3 / 15.0 / 12.1.
+  Mispredicts: lazy 54.4k samples; gather + raise 11.2% of them.
+
+Max-ply sweep: test/census_rollout_lab_test.c's profile driver now reads
+CRL_MAX_PLY (default 3). -1 builds the tables but serves nothing. Two 6-ply
+sweeps in opposite orders agreed within 0.06 s.
+  max_ply          -1     0     1     2     3     4     5    (plain)
+  6-ply  s       9.06  8.29  7.85  7.56  7.44  7.40  7.37   8.78
+  2-ply  s       7.11  5.05  3.74  3.76  3.75     -     -   6.81
+Each served ply saves (6-ply): ply 0 0.77 s, ply 1 0.45, ply 2 0.29,
+ply 3 0.12, ply 4 about 0.03, ply 5 about 0.03. Every ply still pays; serving
+plies 4-5 too gains about 0.7%. The table builds cost about 0.3 s per four
+sims whatever the depth (8% of lazy's 2-ply time, 4% at 6-ply).
+Why depth hurts: the saving per served generation falls from about 9.6 us at
+ply 0 to about 1.5 us at ply 3 (fewer known anchors as lanes dirty), while the
+gather costs about 1.6 us every time (3.0G cycles / ~400k generations at
+2-ply). So at ply 3 the gather eats about half the gross saving, and a cheaper
+gather pays off most at the deep plies, where it could make serving plies
+4-5 worth more.
+
+=====================================================================
+GATHER FIXES (tried later on 2026-11-03; all exact)
+=====================================================================
+Each fix built alone behind a switch, against the same base (g0 = the lab
+with CRL_MAX_PLY and no per-query timers), timed on the fixed profile work in
+forward/reverse order, two rounds (four runs each):
+                                    2-ply     6-ply
+  skip empty tables (A)             -0.8%     -0.3%   (small, kept: free)
+  branch-free crl_raise (B)         -4.9%     -2.1%   (kept)
+  leaves from the RIT entry (C)      0.0%     -0.2%   (dropped)
+  A+B+C                             -5.8%     -3.0%
+  A+B (one pass)                    -6.0%     -2.3%
+  A+B + two-pass gather (kept)      -7.3%     -3.4%
+Lazy vs plain now: 1.99x at 2-ply (was 1.84x), 1.23x at 6-ply (was 1.19x).
+Cycles (two alternating pairs, 2-ply): 16.2G -> 15.0G (-7.4% / -7.5%); the
+gather + crl_raise fell from 17.6% to 13.0% of the base's cycles, about 7.1k
+to 4.9k cycles per gather.
+
+- B: crl_raise now compiles to csel. Mispredicts fell from 23,155 samples to
+  20,351 (-12%); the gather's other branches fell too, so they did not move.
+- C (dead end): the leave line's L1D and TLB misses went away, but TLB misses
+  on the gather's entry loads rose and the total rose 17% (14.9k -> 17.4k
+  samples): most likely the per-query lookup into the 1.9 GB RIT displaces the
+  translations the gather needs. Timing flat; removed.
+- Two-pass gather: the odometer first writes every split's played rank, kept
+  rank and tile count (small tables only); then one pass loads every split's
+  offsets and leave, independently; then the entry loops. The lattice-sized
+  loads overlap instead of waiting behind the odometer's mispredicts.
+- Verified: CRL_E2E single-thread at 2- and 6-ply (3000 it) and 10 threads at
+  2,6-ply (20000 it, 28.6M anchor values): 0 differences, 0 out of bounds.
+
+=====================================================================
+RESTRUCTURE (later on 2026-11-03): THE CENSUS OUT OF THE LAB
+=====================================================================
+The lab file mixed the algorithm with its oracle and timing modes, behind a
+global crl_active switch read by the sim. Now:
+- src/impl/census_rollout.{c,h} (prefix census_rollout_): the algorithm
+  alone, with no globals. A CensusRollout holds a sim's tables and options
+  (census_rollout_prepare at sim start; only read by workers after); a
+  CensusRolloutWorker holds a thread's caches and notices a new sim through
+  a counter (no worker registry or lock). No per-query timers. Accessors for
+  the lab: last served/steered, known anchors and values, root-cache counts,
+  and the board geometry (lane squares, anchor cols, changed cols, zones,
+  move signature). Defaults: plies 0-3, any bag with tiles, no carry.
+- Sims: -scensus true|false (SimArgs.use_census_rollout), owned by the
+  simmer. The census and rollout PAT do not mix: simulate() refuses
+  -scensus true while the rollouts use PAT (ERROR_STATUS_SIM_CENSUS_WITH_PAT;
+  set -patrollout false), and the census also steers no generation of a
+  player whose PAT is on.
+- random_variable.h: SimRolloutHooks / rv_sim_set_rollout_hooks, a generic
+  seam for experiments (worker state, prepare, before/after candidate,
+  best_move, carry_buckets). Replaces crl_active and crl_carry_buckets in
+  src. Free when off: the default sim times the same as before (6.756 s
+  both, 2-ply profile work).
+- test/census_rollout_lab.{c,h}: the record/replay oracle, timing modes,
+  worker registry, stats, and verification, through the hooks; the lazy mode
+  wraps the census API. Build timing is the whole prepare (CrlLazyStats
+  build_ns); the lazy mode's generation_ns includes the census. The E2E
+  table lost its separate census and gather columns. CRL_NO_QUERY_TIMERS
+  still compiles the lab's per-query timers out.
+- Renames in src: MoveGen.lab_skip_anchor_cols -> skip_anchor_cols,
+  gen_apply_lab_skips_and_floor -> gen_apply_skips_and_floor, the
+  CRL_QUACKLE_PEG build switch -> QUACKLE_PEG_VALUES; the "Experimental
+  (census rollout lab)" comments now say what uses each hook.
+- New driver: CRL_SCENSUS=1 checks a -scensus true sim against the same sim
+  without it, play by play (rollouts, exact equity and win% means, node
+  count), and times both. 2-ply 50000 it: same results, 2.02x; 6-ply 20000
+  it: same, 1.26x.
+Checked: single-thread verified E2E counts identical to before the
+restructure (370468, 379259, ...); 10-thread counts vary run to run in the
+old binary too; lazy 3.339 s vs 3.343 s before; CLI with -pat CSW24:
+census + rollout PAT is refused, census with rollout PAT off gives the same
+sim. format.py clean; cppcheck's remaining findings are census_sim's (#939);
+clang-tidy on census_rollout.c and the lab: no findings beyond the macOS
+environment's (endian.h, best_move_carry.h under -D__linux__); the driver
+test file's findings predate this (atoi, fflush, widening).

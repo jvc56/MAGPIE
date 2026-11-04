@@ -365,9 +365,9 @@ typedef struct BlankRun {
   uint8_t forced;
 } BlankRun;
 
-// Experimental (census rollout lab): when set, the ranks of the play scores
-// that a build on this thread raises from CENSUS_UNPLAYABLE, so that a sparse
-// build resets only what it wrote. Not thread safe; NULL otherwise.
+// For the census rollout's sparse builds: when set, the ranks of the play
+// scores that a build on this thread raises from CENSUS_UNPLAYABLE, so that a
+// sparse build resets only what it wrote. Not thread safe; NULL otherwise.
 static CensusTouched *census_touched = NULL;
 
 void census_set_touched(CensusTouched *touched) { census_touched = touched; }
@@ -408,9 +408,9 @@ static void record_blank_variants_recursive(BlankVariantContext *context,
         if (census_touched->count == census_touched->capacity) {
           census_touched->capacity =
               census_touched->capacity ? census_touched->capacity * 2 : 4096;
-          census_touched->ranks = realloc_or_die(
-              census_touched->ranks,
-              sizeof(uint32_t) * census_touched->capacity);
+          census_touched->ranks =
+              realloc_or_die(census_touched->ranks,
+                             sizeof(uint32_t) * census_touched->capacity);
         }
         census_touched->ranks[census_touched->count++] = rank;
       }

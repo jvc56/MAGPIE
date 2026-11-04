@@ -72,8 +72,9 @@ typedef struct MoveGenArgs {
   // shadows read more than the key holds. NULL (the default) shadows every
   // lane.
   LaneShadowCache *lane_shadow_cache;
-  // Experimental (census rollout lab), MOVE_RECORD_BEST by equity only: the
-  // lanes (bit dir * BOARD_DIM + row_or_col) whose anchors are not searched,
+  // For the census rollout (census_rollout.h) and experiments,
+  // MOVE_RECORD_BEST by equity only: the lanes (bit dir * BOARD_DIM +
+  // row_or_col) whose anchors are not searched,
   // and, with use_floor_equity, an equity that some move of a searched lane
   // is known to reach, below which anchors are dropped as an inference
   // target drops them. The caller vouches that no skipped lane holds a move
@@ -81,18 +82,18 @@ typedef struct MoveGenArgs {
   uint64_t skip_lanes;
   bool use_floor_equity;
   Equity floor_equity;
-  // Experimental (census rollout lab), MOVE_RECORD_BEST by equity only: by
-  // lane, the columns of anchors whose plays are not searched (each play is
+  // For the census rollout, MOVE_RECORD_BEST by equity only: by lane, the
+  // columns of anchors whose plays are not searched (each play is
   // its leftmost anchor's), or NULL. The caller vouches for them as for
   // skip_lanes.
   const uint16_t *skip_anchor_cols;
-  // Experimental (census rollout lab): the lane hashes gen_hash_game_lanes
+  // The lane hashes gen_hash_game_lanes
   // gives for this game, so that the carry need not hash the lanes again, or
   // NULL.
   const uint64_t *lane_hashes;
 } MoveGenArgs;
 
-// Experimental (census rollout lab): the hash of each lane of the game's
+// The hash of each lane of the game's
 // board as the best-move carry computes it (0 for a lane without anchors),
 // with player_index's cross sets.
 void gen_hash_game_lanes(const Game *game, int player_index,

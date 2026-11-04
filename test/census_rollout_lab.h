@@ -1,15 +1,13 @@
 #ifndef CENSUS_ROLLOUT_LAB_H
 #define CENSUS_ROLLOUT_LAB_H
 
-#include "../ent/best_move_carry.h"
-#include "../ent/game.h"
-#include "../ent/move.h"
 #include <stdbool.h>
 #include <stdint.h>
 
 // An experiment, not a feature: what a census-built cache of each lane's best
 // play for every rack would save a simulation's rollouts, priced before any
-// such cache is built.
+// such cache is built, and the census rollout (census_rollout.h) measured
+// and verified against it.
 //
 // A lane holds the same plays at the same scores while its squares stay as
 // they were, so a census of a board, taken lane by lane, gives every rack's
@@ -27,6 +25,9 @@
 // again with one variant's skips and floor, timing its rollout generations;
 // the timing modes time the sim's own generations, with and without the
 // best-move carry. Every replayed generation must choose the recorded move.
+//
+// The lab takes over the sims' rollouts through rv_sim_set_rollout_hooks
+// while its mode is not CRL_MODE_OFF.
 
 typedef enum {
   CRL_MODE_OFF,
@@ -34,9 +35,8 @@ typedef enum {
   CRL_MODE_TIME_PLAIN,
   CRL_MODE_RECORD,
   CRL_MODE_REPLAY,
-  // A real lazy census: per-anchor play scores of the root and of each
-  // candidate's changed anchors, gathered for each rack drawn, steering the
-  // carry's generation.
+  // The census rollout, with the lab's options, timed and optionally
+  // verified.
   CRL_MODE_LAZY,
 } crl_mode_t;
 
@@ -64,11 +64,9 @@ static inline int crl_anchor_variant(int board) {
   return CRL_NUM_LANE_VARIANTS + board;
 }
 
-// Whether the rollouts go through the lab: read on the sim's hot path.
-extern bool crl_active;
-
 // The buckets of the best-move carry the next sim creates or resets, a
-// power of two, or 0 for SIM_BEST_MOVE_CARRY_BUCKETS.
+// power of two, or 0 for SIM_BEST_MOVE_CARRY_BUCKETS. Set it before
+// crl_set_mode.
 extern int crl_carry_buckets;
 
 // Replay modes use variant and, with replay_with_carry, the best-move carry
@@ -90,33 +88,17 @@ void crl_new_sim(void);
 void crl_clear_records(void);
 void crl_reset_stats(void);
 
-// A sim worker's state in the lab: what its rollouts read and count, so
-// that workers on different threads share nothing they write. A sim worker
-// creates one and destroys it with itself.
-typedef struct CrlWorker CrlWorker;
-CrlWorker *crl_worker_create(void);
-void crl_worker_destroy(CrlWorker *worker);
-
-// At the start of a sim, on the thread that starts it, before any rollout:
-// the lazy census builds the play scores of the position and of each
-// candidate's board here, which every worker then only reads.
-void crl_prepare_sim(const Game *game, const MoveList *candidates);
-
-// In sim_rollout: the game before the candidate is played, and after.
-void crl_before_candidate(CrlWorker *worker, const Game *game);
-void crl_after_candidate(CrlWorker *worker, const Game *game,
-                         const Move *candidate);
-
-// The lazy census's options: it serves the eligible generations of rollout
-// plies up to max_ply (with low_bag, any bag with tiles, the pre-endgame
-// adjustments added by tiles played; else bags of PEG_ADJUST_VALUES_LENGTH
-// tiles or more), and with verify also generates each one plainly (untimed)
-// and counts the moves that differ as mismatches.
+// The census rollout's options in the lazy mode: it serves the eligible
+// generations of rollout plies up to max_ply (with low_bag, any bag with
+// tiles; else bags of PEG_ADJUST_VALUES_LENGTH tiles or more), and with
+// verify the lab also generates each one plainly and from every play
+// (untimed), counting the moves that differ, and checks the census's anchor
+// values against every play.
 void crl_set_lazy_options(int max_ply, bool verify, bool low_bag);
 
 typedef struct CrlLazyStats {
-  int64_t root_build_ns;
-  int64_t candidate_build_ns;
+  // The census builds at the sims' starts.
+  int64_t build_ns;
   int candidate_builds;
   uint64_t root_entries;
   uint64_t candidate_entries;
@@ -126,18 +108,14 @@ typedef struct CrlLazyStats {
 
 const CrlLazyStats *crl_get_lazy_stats(void);
 
-// Whether the lazy census steers the carry's generations (the default) or
-// plain ones.
+// Whether the census rollout's generations use the best-move carry (the
+// default) or are plain.
 void crl_set_lazy_carry(bool with_carry);
-// In sim_rollout: the best move of the player on turn, ply 0 being the reply
-// to the candidate.
-const Move *crl_get_best_move(CrlWorker *worker, Game *game,
-                              MoveList *move_list, BestMoveCarry *carry,
-                              int ply);
 
 typedef struct CrlPlyStats {
   uint64_t queries;
   uint64_t eligible;
+  // The time of the generations, census included in the lazy mode.
   int64_t generation_ns;
   uint64_t mismatches;
   uint64_t replay_hits;
@@ -160,10 +138,8 @@ typedef struct CrlPlyStats {
   uint64_t best_untouched[CRL_NUM_BOARDS];
   uint64_t anchor_self_check_violations[CRL_NUM_BOARDS];
   uint64_t variant_searched_anchors[CRL_NUM_VARIANTS];
-  // Lazy census: the time of the gathers within hash_ns, and, verifying,
-  // the generations whose plain move or census-steered move is not the best
-  // of every play.
-  int64_t gather_ns;
+  // Lazy census, verifying: the generations whose plain move or
+  // census-steered move is not the best of every play.
   uint64_t plain_vs_exhaustive;
   uint64_t census_vs_exhaustive;
   // Verifying: the known anchors whose census values were checked against

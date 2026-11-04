@@ -2,9 +2,11 @@
 #define RANDOM_VARIABLE_H
 
 #include "../def/bai_defs.h"
+#include "../ent/best_move_carry.h"
 #include "../ent/game.h"
 #include "../ent/game_history.h"
 #include "../ent/inference_results.h"
+#include "../ent/move.h"
 #include "../ent/rack.h"
 #include "../ent/sim_args.h"
 #include "../ent/sim_results.h"
@@ -20,6 +22,33 @@ typedef struct RandomVariables RandomVariables;
 // letters unseen by the player on turn (the bag and the opponent's rack)
 // divided by RACK_SIZE, rounded up, and at least 1.
 int rv_sim_bag_cycle_rotations(const Game *game);
+
+// An experiment's own move generation for sim rollouts, in place of the
+// sim's. Each sim worker keeps a state the hooks create for it, and the hooks
+// see the start of each sim and each rollout's candidate. A NULL hook leaves
+// that step as it is; best_move NULL generates as the sim does.
+typedef struct SimRolloutHooks {
+  void *context;
+  void *(*create_worker)(void *context);
+  void (*destroy_worker)(void *context, void *worker);
+  // At the start of a sim, on the thread that starts it, before any rollout.
+  void (*prepare)(void *context, const Game *game, const MoveList *candidates);
+  // In a rollout: the game before its candidate is played, and after.
+  void (*before_candidate)(void *worker, const Game *game);
+  void (*after_candidate)(void *worker, const Game *game,
+                          const Move *candidate);
+  // The best move of the player on turn, ply 0 being the reply to the
+  // candidate; carry is the sim's best-move carry.
+  const Move *(*best_move)(void *worker, Game *game, MoveList *move_list,
+                           BestMoveCarry *carry, int ply);
+  // The buckets of the sim's best-move carry, a power of two, or 0 for
+  // SIM_BEST_MOVE_CARRY_BUCKETS.
+  int carry_buckets;
+} SimRolloutHooks;
+
+// The hooks the sims created or reset from now on use, or NULL for none.
+// For experiments and tests; set it with no sim running.
+void rv_sim_set_rollout_hooks(const SimRolloutHooks *hooks);
 
 typedef enum {
   RANDOM_VARIABLES_UNIFORM,

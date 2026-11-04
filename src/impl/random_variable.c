@@ -24,7 +24,7 @@
 #include "../str/sim_string.h"
 #include "../util/io_util.h"
 #include "bai_logger.h"
-#include "census_rollout_lab.h"
+#include "census_rollout.h"
 #include "gameplay.h"
 #include <math.h>
 #include <stdatomic.h>
@@ -416,8 +416,12 @@ typedef struct SimmerWorker {
   // salted anew for each simulation, whose lexica may not be the last one's.
   CrossSetCache *cross_set_cache;
   uint64_t cross_set_salt;
-  // The census rollout lab's state for this worker's rollouts.
-  CrlWorker *crl_worker;
+  // The census rollout's state for this worker's rollouts, made by the first
+  // sim that uses the census (see SimArgs.use_census_rollout).
+  CensusRolloutWorker *census_rollout_worker;
+  // The rollout hooks' state for this worker, and the hooks that made it.
+  void *hook_worker;
+  const SimRolloutHooks *hook_owner;
 } SimmerWorker;
 
 // The step of a simulation worker's cross set salt: odd, so a worker's
@@ -458,7 +462,25 @@ typedef struct Simmer {
   // The best moves the current simulation's playouts found, by rack, shared
   // by all of its workers.
   BestMoveCarry *best_move_carry;
+  // The rollout hooks this sim uses, or NULL (see rv_sim_set_rollout_hooks).
+  const SimRolloutHooks *rollout_hooks;
+  // Whether this sim's rollouts are steered by the census, which the first
+  // sim that uses it makes (SimArgs.use_census_rollout).
+  bool use_census_rollout;
+  CensusRollout *census_rollout;
 } Simmer;
+
+static const SimRolloutHooks *sim_rollout_hooks = NULL;
+
+void rv_sim_set_rollout_hooks(const SimRolloutHooks *hooks) {
+  sim_rollout_hooks = hooks;
+}
+
+static int sim_carry_buckets(const SimRolloutHooks *hooks) {
+  return hooks != NULL && hooks->carry_buckets > 0
+             ? hooks->carry_buckets
+             : SIM_BEST_MOVE_CARRY_BUCKETS;
+}
 
 // A worker's copy of the game plays the sim's rollouts, so both of its
 // players take the simming player's rollout PAT settings.
@@ -489,7 +511,9 @@ SimmerWorker *simmer_create_worker(const SimArgs *sim_args) {
   game_set_cross_set_cache(simmer_worker->game, simmer_worker->cross_set_cache);
   simmer_worker->move_list = move_list_create(1);
   simmer_worker->prng = prng_create(0);
-  simmer_worker->crl_worker = crl_worker_create();
+  simmer_worker->census_rollout_worker = NULL;
+  simmer_worker->hook_worker = NULL;
+  simmer_worker->hook_owner = NULL;
   return simmer_worker;
 }
 
@@ -501,6 +525,23 @@ void simmer_reset_worker(SimmerWorker *simmer_worker, const SimArgs *sim_args) {
   simmer_worker_set_rollout_pat(simmer_worker, sim_args);
 }
 
+// Gives the worker hooks' state for hooks, destroying any other hooks' state.
+static void simmer_worker_set_hooks(SimmerWorker *simmer_worker,
+                                    const SimRolloutHooks *hooks) {
+  if (simmer_worker->hook_owner == hooks) {
+    return;
+  }
+  const SimRolloutHooks *owner = simmer_worker->hook_owner;
+  if (owner != NULL && owner->destroy_worker != NULL) {
+    owner->destroy_worker(owner->context, simmer_worker->hook_worker);
+  }
+  simmer_worker->hook_worker = NULL;
+  if (hooks != NULL && hooks->create_worker != NULL) {
+    simmer_worker->hook_worker = hooks->create_worker(hooks->context);
+  }
+  simmer_worker->hook_owner = hooks;
+}
+
 void simmer_worker_destroy(SimmerWorker *simmer_worker) {
   if (!simmer_worker) {
     return;
@@ -509,7 +550,8 @@ void simmer_worker_destroy(SimmerWorker *simmer_worker) {
   cross_set_cache_destroy(simmer_worker->cross_set_cache);
   move_list_destroy(simmer_worker->move_list);
   prng_destroy(simmer_worker->prng);
-  crl_worker_destroy(simmer_worker->crl_worker);
+  census_rollout_worker_destroy(simmer_worker->census_rollout_worker);
+  simmer_worker_set_hooks(simmer_worker, NULL);
   free(simmer_worker);
 }
 
@@ -579,13 +621,19 @@ static double sim_rollout(const Simmer *simmer, SimmerWorker *simmer_worker,
                                          &candidate_rack);
   }
   // play move
-  if (crl_active) {
-    crl_before_candidate(simmer_worker->crl_worker, game);
+  const SimRolloutHooks *hooks = simmer->rollout_hooks;
+  if (hooks != NULL && hooks->before_candidate != NULL) {
+    hooks->before_candidate(simmer_worker->hook_worker, game);
   }
   play_move(simmed_play_get_move(simmed_play), game, NULL);
-  if (crl_active) {
-    crl_after_candidate(simmer_worker->crl_worker, game,
-                        simmed_play_get_move(simmed_play));
+  if (hooks != NULL && hooks->after_candidate != NULL) {
+    hooks->after_candidate(simmer_worker->hook_worker, game,
+                           simmed_play_get_move(simmed_play));
+  }
+  if (simmer->use_census_rollout) {
+    census_rollout_worker_set_candidate(simmer_worker->census_rollout_worker,
+                                        simmer->census_rollout,
+                                        simmed_play_get_move(simmed_play));
   }
   sim_results_increment_node_count(sim_results);
   game_set_backup_mode(game, BACKUP_MODE_OFF);
@@ -599,12 +647,18 @@ static double sim_rollout(const Simmer *simmer, SimmerWorker *simmer_worker,
       break;
     }
 
-    const Move *best_play =
-        crl_active ? crl_get_best_move(simmer_worker->crl_worker, game,
-                                       move_list, simmer->best_move_carry,
-                                       ply)
-                   : get_top_equity_move_with_carry(game, move_list,
-                                                    simmer->best_move_carry);
+    const Move *best_play;
+    if (hooks != NULL && hooks->best_move != NULL) {
+      best_play = hooks->best_move(simmer_worker->hook_worker, game, move_list,
+                                   simmer->best_move_carry, ply);
+    } else if (simmer->use_census_rollout) {
+      best_play = census_rollout_get_best_move(
+          simmer_worker->census_rollout_worker, simmer->census_rollout, game,
+          move_list, simmer->best_move_carry, ply);
+    } else {
+      best_play = get_top_equity_move_with_carry(game, move_list,
+                                                 simmer->best_move_carry);
+    }
     rack_copy(&spare_rack, player_get_rack(player_on_turn));
 
     // On the final ply the resulting cross-sets are never read (no further move
@@ -847,7 +901,42 @@ void rv_sim_destroy(RandomVariables *rvs) {
   }
   free(simmer->workers);
   best_move_carry_destroy(simmer->best_move_carry);
+  census_rollout_destroy(simmer->census_rollout);
   free(simmer);
+}
+
+// At the start of a sim: the rollout hooks it uses, and the census it is
+// steered by, built for its position and candidates.
+static void simmer_prepare_rollouts(Simmer *simmer, const SimArgs *sim_args) {
+  simmer->rollout_hooks = sim_rollout_hooks;
+  for (int thread_index = 0; thread_index < simmer->num_threads;
+       thread_index++) {
+    simmer_worker_set_hooks(simmer->workers[thread_index],
+                            simmer->rollout_hooks);
+  }
+  const SimRolloutHooks *hooks = simmer->rollout_hooks;
+  if (hooks != NULL && hooks->prepare != NULL) {
+    hooks->prepare(hooks->context, sim_args->game, sim_args->move_list);
+  }
+  // Hooks that generate the rollouts' moves take the census's place.
+  simmer->use_census_rollout = sim_args->use_census_rollout &&
+                               (hooks == NULL || hooks->best_move == NULL);
+  if (!simmer->use_census_rollout) {
+    return;
+  }
+  if (simmer->census_rollout == NULL) {
+    const CensusRolloutOptions options = census_rollout_default_options();
+    simmer->census_rollout = census_rollout_create(&options);
+  }
+  census_rollout_prepare(simmer->census_rollout, sim_args->game,
+                         sim_args->move_list);
+  for (int thread_index = 0; thread_index < simmer->num_threads;
+       thread_index++) {
+    SimmerWorker *simmer_worker = simmer->workers[thread_index];
+    if (simmer_worker->census_rollout_worker == NULL) {
+      simmer_worker->census_rollout_worker = census_rollout_worker_create();
+    }
+  }
 }
 
 // True when the sim args request a resume and the existing results are
@@ -912,9 +1001,9 @@ RandomVariables *rv_sim_create(RandomVariables *rvs, const SimArgs *sim_args,
        thread_index++) {
     simmer->workers[thread_index] = simmer_create_worker(sim_args);
   }
-  simmer->best_move_carry = best_move_carry_create(
-      crl_carry_buckets > 0 ? crl_carry_buckets : SIM_BEST_MOVE_CARRY_BUCKETS,
-      true);
+  simmer->best_move_carry =
+      best_move_carry_create(sim_carry_buckets(sim_rollout_hooks), true);
+  simmer->census_rollout = NULL;
 
   simmer->win_pcts = sim_args->win_pcts;
   simmer->use_inference = sim_args->use_inference;
@@ -936,9 +1025,7 @@ RandomVariables *rv_sim_create(RandomVariables *rvs, const SimArgs *sim_args,
                       sim_args->seed, sim_args->use_heat_map);
   }
   simmer->sim_results = sim_results;
-  if (crl_active) {
-    crl_prepare_sim(sim_args->game, sim_args->move_list);
-  }
+  simmer_prepare_rollouts(simmer, sim_args);
 
   rvs->data = simmer;
   return rvs;
@@ -976,8 +1063,7 @@ void rv_sim_reset(RandomVariables *rvs, const SimArgs *sim_args) {
        thread_index++) {
     simmer_reset_worker(simmer->workers[thread_index], sim_args);
   }
-  const int carry_buckets =
-      crl_carry_buckets > 0 ? crl_carry_buckets : SIM_BEST_MOVE_CARRY_BUCKETS;
+  const int carry_buckets = sim_carry_buckets(sim_rollout_hooks);
   if (simmer->best_move_carry->num_buckets != carry_buckets) {
     best_move_carry_destroy(simmer->best_move_carry);
     simmer->best_move_carry = best_move_carry_create(carry_buckets, true);
@@ -1001,9 +1087,7 @@ void rv_sim_reset(RandomVariables *rvs, const SimArgs *sim_args) {
                       sim_args->num_plies, sim_args->seed,
                       sim_args->use_heat_map);
   }
-  if (crl_active) {
-    crl_prepare_sim(sim_args->game, sim_args->move_list);
-  }
+  simmer_prepare_rollouts(simmer, sim_args);
 }
 
 RandomVariables *rvs_create(const RandomVariablesArgs *rvs_args) {

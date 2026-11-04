@@ -17,11 +17,12 @@
 #include "../src/ent/sim_results.h"
 #include "../src/impl/census.h"
 #include "../src/impl/census_play_scores.h"
-#include "../src/impl/census_rollout_lab.h"
+#include "../src/impl/census_rollout.h"
 #include "../src/impl/config.h"
 #include "../src/impl/gameplay.h"
 #include "../src/impl/move_gen.h"
 #include "../src/util/io_util.h"
+#include "census_rollout_lab.h"
 #include "test_util.h"
 #include <assert.h>
 #include <stdbool.h>
@@ -32,6 +33,7 @@
 
 enum {
   CRL_TEST_MAX_TURNS = 16,
+  CRL_TEST_MAX_SIM_PLAYS = 64,
   CRL_TEST_MAX_PLIES = 8,
   CRL_TEST_TOPK = 4,
 };
@@ -48,7 +50,7 @@ static int env_int_list(const char *name, const char *default_value,
   char buffer[256];
   snprintf(buffer, sizeof(buffer), "%s", value ? value : default_value);
   int count = 0;
-  for (char *token = strtok(buffer, ","); token && count < max_values;
+  for (const char *token = strtok(buffer, ","); token && count < max_values;
        token = strtok(NULL, ",")) {
     values[count++] = atoi(token);
   }
@@ -118,11 +120,12 @@ static void print_record_stats(const CrlPlyStats *stats, int plies) {
   printf("  hash_ns\n");
   for (int ply = 0; ply < plies; ply++) {
     const CrlPlyStats *s = &stats[ply];
-    printf("CRL   %-4d %8llu %5.1f%% %7.2f", ply, (unsigned long long)s->queries,
-           100 * ratio(s->eligible, s->queries),
+    printf("CRL   %-4d %8llu %5.1f%% %7.2f", ply,
+           (unsigned long long)s->queries, 100 * ratio(s->eligible, s->queries),
            ratio(s->lanes_with_anchors, s->eligible));
     for (int board = 0; board < CRL_NUM_BOARDS; board++) {
-      printf("  %10.2f %6.1f%% %4llu", ratio(s->dirty_lanes[board], s->eligible),
+      printf("  %10.2f %6.1f%% %4llu",
+             ratio(s->dirty_lanes[board], s->eligible),
              100 * ratio(s->best_in_clean_lane[board], s->eligible),
              (unsigned long long)s->self_check_violations[board]);
     }
@@ -154,15 +157,17 @@ static void print_record_stats(const CrlPlyStats *stats, int plies) {
     const CrlPlyStats *s = &stats[ply];
     printf("CRL   %-4d %7.2f", ply, ratio(s->anchors, s->eligible));
     for (int board = 0; board < CRL_NUM_BOARDS; board++) {
-      printf("  %11.2f %6.1f%% %6.1f%% %4llu %10.2f %9.2f",
-             ratio(s->clean_anchors_in_dirty_lanes[board], s->eligible),
-             100 * ratio(s->best_in_known_anchor[board], s->eligible),
-             100 * ratio(s->best_untouched[board], s->eligible),
-             (unsigned long long)s->anchor_self_check_violations[board],
-             ratio(s->variant_searched_anchors[crl_variant(board, CRL_NUM_TOPK - 1)],
-                   s->eligible),
-             ratio(s->variant_searched_anchors[crl_anchor_variant(board)],
-                   s->eligible));
+      printf(
+          "  %11.2f %6.1f%% %6.1f%% %4llu %10.2f %9.2f",
+          ratio(s->clean_anchors_in_dirty_lanes[board], s->eligible),
+          100 * ratio(s->best_in_known_anchor[board], s->eligible),
+          100 * ratio(s->best_untouched[board], s->eligible),
+          (unsigned long long)s->anchor_self_check_violations[board],
+          ratio(
+              s->variant_searched_anchors[crl_variant(board, CRL_NUM_TOPK - 1)],
+              s->eligible),
+          ratio(s->variant_searched_anchors[crl_anchor_variant(board)],
+                s->eligible));
     }
     printf("\n");
   }
@@ -287,8 +292,8 @@ static void time_lane_census_build(Game *game, int number_of_candidates) {
   const uint32_t full_start = census_lattice_get_full_rack_start(lattice);
   const uint32_t full_count = size - full_start;
   Equity *leave = malloc_or_die(sizeof(Equity) * size);
-  census_leaves_from_klv(
-      lattice, player_get_klv(game_get_player(game, 0)), leave);
+  census_leaves_from_klv(lattice, player_get_klv(game_get_player(game, 0)),
+                         leave);
   Equity *play_scores = malloc_or_die(sizeof(Equity) * size);
   Equity *rack_best = malloc_or_die(sizeof(Equity) * size);
   Equity *topk = malloc_or_die(sizeof(Equity) * full_count * CRL_TEST_TOPK);
@@ -494,8 +499,8 @@ static void unit_scores_destroy(UnitScores *unit_scores) {
 // Every unit's best score plus leave for the rack: the best over the rack's
 // splits into a played multiset P and a kept one K. Returns the entries read.
 static int unit_scores_gather(const UnitScores *unit_scores,
-                              const CensusLattice *lattice,
-                              const Equity *leave, const MachineLetter *letters,
+                              const CensusLattice *lattice, const Equity *leave,
+                              const MachineLetter *letters,
                               const uint8_t *counts, int number_of_letters,
                               Equity *unit_bests) {
   for (int unit = 0; unit < unit_scores->number_of_units; unit++) {
@@ -521,8 +526,8 @@ static int unit_scores_gather(const UnitScores *unit_scores,
     }
     played[letter_idx]++;
     kept[letter_idx]--;
-    const uint32_t played_index = census_lattice_rank_sparse(
-        lattice, letters, played, number_of_letters);
+    const uint32_t played_index =
+        census_lattice_rank_sparse(lattice, letters, played, number_of_letters);
     const uint32_t first = unit_scores->offsets[played_index];
     const uint32_t last = unit_scores->offsets[played_index + 1];
     if (first == last) {
@@ -557,11 +562,12 @@ static int unit_scores_find(const UnitScores *unit_scores, int lane, int col) {
 // every play of the same racks on the same board: each rack's best must match
 // movegen's, and no unit's best may be below that of its plays of two or more
 // tiles (the census counts a play of one tile in both of its lanes).
-static void time_census_gather(Game *game, int number_of_racks) {
+static void time_census_gather(const Game *game, int number_of_racks) {
   const LetterDistribution *ld = game_get_ld(game);
   const int ld_size = ld_get_size(ld);
   ErrorStack *error_stack = error_stack_create();
-  CensusLattice *lattice = census_lattice_create(ld_size, RACK_SIZE, error_stack);
+  CensusLattice *lattice =
+      census_lattice_create(ld_size, RACK_SIZE, error_stack);
   error_stack_destroy(error_stack);
   const uint32_t size = census_lattice_get_size(lattice);
   Equity *leave = malloc_or_die(sizeof(Equity) * size);
@@ -627,8 +633,7 @@ static void time_census_gather(Game *game, int number_of_racks) {
     for (int rack_idx = 0; rack_idx < number_of_racks; rack_idx++) {
       entries += (uint64_t)unit_scores_gather(
           unit_scores, lattice, leave, &rack_letters[rack_idx * RACK_SIZE],
-          &rack_counts[rack_idx * RACK_SIZE], rack_sizes[rack_idx],
-          unit_bests);
+          &rack_counts[rack_idx * RACK_SIZE], rack_sizes[rack_idx], unit_bests);
       checksum += unit_bests[rack_idx % unit_scores->number_of_units];
     }
     const double gather_ns =
@@ -645,10 +650,9 @@ static void time_census_gather(Game *game, int number_of_racks) {
         rack_add_letters(rack, rack_letters[rack_idx * RACK_SIZE + letter_idx],
                          rack_counts[rack_idx * RACK_SIZE + letter_idx]);
       }
-      unit_scores_gather(unit_scores, lattice, leave,
-                         &rack_letters[rack_idx * RACK_SIZE],
-                         &rack_counts[rack_idx * RACK_SIZE],
-                         rack_sizes[rack_idx], unit_bests);
+      unit_scores_gather(
+          unit_scores, lattice, leave, &rack_letters[rack_idx * RACK_SIZE],
+          &rack_counts[rack_idx * RACK_SIZE], rack_sizes[rack_idx], unit_bests);
       const MoveGenArgs args = {.game = checked,
                                 .move_list = move_list,
                                 .move_record_type = MOVE_RECORD_ALL,
@@ -677,16 +681,16 @@ static void time_census_gather(Game *game, int number_of_racks) {
         }
         const int dir = move_get_dir(move);
         const bool vertical = board_is_dir_vertical(dir);
-        const int lane = BOARD_DIM * dir + (vertical ? move_get_col_start(move)
-                                                     : move_get_row_start(move));
+        const int lane =
+            BOARD_DIM * dir +
+            (vertical ? move_get_col_start(move) : move_get_row_start(move));
         const int move_start =
             vertical ? move_get_row_start(move) : move_get_col_start(move);
         const int move_end = move_start + move_get_tiles_length(move) - 1;
         int col = -1;
         if (by_anchor) {
-          const uint32_t span =
-              (((uint32_t)1 << (move_end + 1)) - 1) &
-              ~(((uint32_t)1 << move_start) - 1);
+          const uint32_t span = (((uint32_t)1 << (move_end + 1)) - 1) &
+                                ~(((uint32_t)1 << move_start) - 1);
           const uint32_t held = anchor_cols[lane] & span;
           col = held != 0 ? __builtin_ctz(held) : -1;
         }
@@ -761,9 +765,8 @@ static void time_lazy_census(Config *config, const int *turns,
            "bags of %s\n",
            plies, iterations, max_ply,
            low_bag ? "1 tile or more" : "13 tiles or more");
-    printf("CRL e2e: %-4s %-4s %9s %9s %9s %9s %9s %9s %9s %8s\n", "turn",
-           "bag", "carry s", "lazy s", "speedup", "gen", "census", "builds",
-           "served", "mism");
+    printf("CRL e2e: %-4s %-4s %9s %9s %9s %9s %9s %9s %8s\n", "turn", "bag",
+           "carry s", "lazy s", "speedup", "gen", "builds", "served", "mism");
     double carry_total = 0;
     double lazy_total = 0;
     for (int turn_idx = 0; turn_idx < number_of_turns; turn_idx++) {
@@ -773,8 +776,6 @@ static void time_lazy_census(Config *config, const int *turns,
       const int bag = bag_get_letters(game_get_bag(config_get_game(config)));
       double seconds[2] = {0, 0};
       int64_t generation_ns = 0;
-      int64_t census_ns = 0;
-      int64_t gather_ns = 0;
       uint64_t served = 0;
       uint64_t queries = 0;
       CrlLazyStats lazy_stats = {0};
@@ -791,8 +792,7 @@ static void time_lazy_census(Config *config, const int *turns,
           crl_reset_stats();
           const int64_t start = ctimer_monotonic_ns();
           load_and_exec_config_or_die(config, "sim -seed 7");
-          const double elapsed =
-              (double)(ctimer_monotonic_ns() - start) / 1e9;
+          const double elapsed = (double)(ctimer_monotonic_ns() - start) / 1e9;
           crl_set_mode(CRL_MODE_OFF, 0, false);
           printf("CRL e2e: %4d carry again %.3f s (first run %.3f s)\n",
                  turns[turn_idx], elapsed, seconds[0]);
@@ -806,8 +806,7 @@ static void time_lazy_census(Config *config, const int *turns,
           crl_reset_stats();
           const int64_t start = ctimer_monotonic_ns();
           load_and_exec_config_or_die(config, "sim -seed 7");
-          const double elapsed =
-              (double)(ctimer_monotonic_ns() - start) / 1e9;
+          const double elapsed = (double)(ctimer_monotonic_ns() - start) / 1e9;
           crl_set_mode(CRL_MODE_OFF, 0, false);
           printf("CRL e2e: %4d plain (no carry) %.3f s: carry %.2fx, lazy "
                  "%.2fx of it\n",
@@ -818,14 +817,11 @@ static void time_lazy_census(Config *config, const int *turns,
         if ((run == 0 && !env_int("CRL_WARMUP", 1)) ||
             (run == 3 && !env_int("CRL_VERIFY", 1))) {
           if (run == 3) {
-            printf("CRL e2e: %4d %4d %9.3f %9.3f %8.2fx %8.3fs %8.3fs %8.3fs "
-                   "%8.1f%% %8s\n",
+            printf("CRL e2e: %4d %4d %9.3f %9.3f %8.2fx %8.3fs %8.3fs %8.1f%% "
+                   "%8s\n",
                    turns[turn_idx], bag, seconds[0], seconds[1],
                    seconds[0] / seconds[1], (double)generation_ns / 1e9,
-                   (double)census_ns / 1e9,
-                   (double)(lazy_stats.root_build_ns +
-                            lazy_stats.candidate_build_ns) /
-                       1e9,
+                   (double)lazy_stats.build_ns / 1e9,
                    100.0 * (double)served / (double)(queries ? queries : 1),
                    "-");
             printf("CRL e2e: root bests cached for %.1f%% of racks\n",
@@ -854,8 +850,6 @@ static void time_lazy_census(Config *config, const int *turns,
           for (int ply = 0; ply < CRL_MAX_PLIES; ply++) {
             const CrlPlyStats *stats = crl_get_ply_stats(ply);
             generation_ns += stats->generation_ns;
-            census_ns += stats->hash_ns;
-            gather_ns += stats->gather_ns;
             served += stats->replay_hits;
             queries += stats->queries;
           }
@@ -881,22 +875,16 @@ static void time_lazy_census(Config *config, const int *turns,
                  (unsigned long long)census_vs_exhaustive,
                  (unsigned long long)anchor_value_violations,
                  (unsigned long long)anchors_checked);
-          printf("CRL e2e: gather %.3f s of census, %.2f us a served "
-                 "query, root bests cached for %.1f%% of racks\n",
-                 (double)gather_ns / 1e9,
-                 (double)gather_ns / 1e3 / (double)(served ? served : 1),
+          printf("CRL e2e: root bests cached for %.1f%% of racks\n",
                  100.0 * (double)lazy_stats.root_gather_hits /
                      (double)(lazy_stats.root_gather_lookups
                                   ? lazy_stats.root_gather_lookups
                                   : 1));
-          printf("CRL e2e: %4d %4d %9.3f %9.3f %8.2fx %8.3fs %8.3fs %8.3fs "
-                 "%8.1f%% %8llu\n",
+          printf("CRL e2e: %4d %4d %9.3f %9.3f %8.2fx %8.3fs %8.3fs %8.1f%% "
+                 "%8llu\n",
                  turns[turn_idx], bag, seconds[0], seconds[1],
                  seconds[0] / seconds[1], (double)generation_ns / 1e9,
-                 (double)census_ns / 1e9,
-                 (double)(lazy_stats.root_build_ns +
-                          lazy_stats.candidate_build_ns) /
-                     1e9,
+                 (double)lazy_stats.build_ns / 1e9,
                  100.0 * (double)served / (double)(queries ? queries : 1),
                  (unsigned long long)mismatches);
         }
@@ -941,8 +929,8 @@ static void time_timed_sims(Config *config, const int *turns,
     load_and_exec_config_or_die(config, command);
     printf("CRL timed: plies %d, %.0f s on %d threads, carry buckets %d / "
            "%d\n",
-           plies_list[plies_idx], seconds, threads,
-           SIM_BEST_MOVE_CARRY_BUCKETS, big_buckets);
+           plies_list[plies_idx], seconds, threads, SIM_BEST_MOVE_CARRY_BUCKETS,
+           big_buckets);
     printf("CRL timed: %-4s %-4s", "turn", "bag");
     for (int variant_idx = 0; variant_idx < NUMBER_OF_VARIANTS; variant_idx++) {
       printf(" %22s", variants[variant_idx].name);
@@ -960,7 +948,7 @@ static void time_timed_sims(Config *config, const int *turns,
         const TimedVariant *variant = &variants[variant_idx];
         crl_carry_buckets = variant->carry_buckets;
         crl_set_mode(variant->mode, 0, false);
-        crl_set_lazy_options(3, false, true);
+        crl_set_lazy_options(env_int("CRL_MAX_PLY", 3), false, true);
         crl_set_lazy_carry(variant->lazy_carry);
         crl_clear_records();
         crl_new_sim();
@@ -971,15 +959,14 @@ static void time_timed_sims(Config *config, const int *turns,
         load_and_exec_config_or_die(config, command);
         crl_set_mode(CRL_MODE_OFF, 0, false);
         crl_carry_buckets = 0;
-        iterations[variant_idx] = sim_results_get_iteration_count(
-            config_get_sim_results(config));
+        iterations[variant_idx] =
+            sim_results_get_iteration_count(config_get_sim_results(config));
         totals[variant_idx] += (double)iterations[variant_idx];
       }
       printf("CRL timed: %4d %4d", turns[turn_idx], bag);
       for (int variant_idx = 0; variant_idx < NUMBER_OF_VARIANTS;
            variant_idx++) {
-        printf(" %12llu (%5.2fx)",
-               (unsigned long long)iterations[variant_idx],
+        printf(" %12llu (%5.2fx)", (unsigned long long)iterations[variant_idx],
                (double)iterations[variant_idx] / (double)iterations[0]);
       }
       printf("\n");
@@ -1018,7 +1005,7 @@ static void run_profile_work(Config *config, const int *turns,
                    : plain_mode ? CRL_MODE_TIME_PLAIN
                                 : CRL_MODE_OFF,
                    0, false);
-      crl_set_lazy_options(3, false, true);
+      crl_set_lazy_options(env_int("CRL_MAX_PLY", 3), false, true);
       crl_set_lazy_carry(false);
       crl_clear_records();
       crl_new_sim();
@@ -1027,12 +1014,102 @@ static void run_profile_work(Config *config, const int *turns,
       load_and_exec_config_or_die(config, "sim -seed 7 -threads 1");
       total_ns += ctimer_monotonic_ns() - start;
       crl_set_mode(CRL_MODE_OFF, 0, false);
-      total_iterations += sim_results_get_iteration_count(
-          config_get_sim_results(config));
+      total_iterations +=
+          sim_results_get_iteration_count(config_get_sim_results(config));
     }
   }
   printf("CRL profile: mode %s, %llu iterations in %.3f s\n", mode,
          (unsigned long long)total_iterations, (double)total_ns / 1e9);
+}
+
+// A sim's results, play by play, for comparing two sims of the same work.
+typedef struct SimSnapshot {
+  int number_of_plays;
+  uint64_t node_count;
+  uint64_t signatures[CRL_TEST_MAX_SIM_PLAYS];
+  uint64_t rollouts[CRL_TEST_MAX_SIM_PLAYS];
+  double equity_means[CRL_TEST_MAX_SIM_PLAYS];
+  double win_pct_means[CRL_TEST_MAX_SIM_PLAYS];
+} SimSnapshot;
+
+static void take_sim_snapshot(const SimResults *sim_results,
+                              SimSnapshot *snapshot) {
+  snapshot->number_of_plays = sim_results_get_number_of_plays(sim_results);
+  assert(snapshot->number_of_plays <= CRL_TEST_MAX_SIM_PLAYS);
+  snapshot->node_count = sim_results_get_node_count(sim_results);
+  for (int play_idx = 0; play_idx < snapshot->number_of_plays; play_idx++) {
+    const SimmedPlay *simmed_play =
+        sim_results_get_simmed_play(sim_results, play_idx);
+    snapshot->signatures[play_idx] =
+        census_rollout_move_signature(simmed_play_get_move(simmed_play));
+    snapshot->rollouts[play_idx] = simmed_play_get_num_rollouts(simmed_play);
+    snapshot->equity_means[play_idx] =
+        simmed_play_get_exact_equity_mean(simmed_play);
+    snapshot->win_pct_means[play_idx] =
+        simmed_play_get_exact_win_pct_mean(simmed_play);
+  }
+}
+
+static bool sim_snapshots_equal(const SimSnapshot *a, const SimSnapshot *b) {
+  if (a->number_of_plays != b->number_of_plays ||
+      a->node_count != b->node_count) {
+    return false;
+  }
+  for (int play_idx = 0; play_idx < a->number_of_plays; play_idx++) {
+    if (a->signatures[play_idx] != b->signatures[play_idx] ||
+        a->rollouts[play_idx] != b->rollouts[play_idx] ||
+        a->equity_means[play_idx] != b->equity_means[play_idx] ||
+        a->win_pct_means[play_idx] != b->win_pct_means[play_idx]) {
+      return false;
+    }
+  }
+  return true;
+}
+
+// The census as sims use it (-scensus true): single-threaded with a fixed
+// seed, a sim with it must give the same results as one without it, to the
+// last rollout, since every census-steered move is the plain one. Also times
+// both.
+static void check_sim_census(Config *config, const int *turns,
+                             int number_of_turns, const int *plies_list,
+                             int number_of_plies, int iterations) {
+  char command[256];
+  printf("CRL scensus: %-5s %-4s %-4s %9s %9s %9s %s\n", "plies", "turn", "bag",
+         "off s", "on s", "speedup", "results");
+  double off_total = 0;
+  double on_total = 0;
+  for (int plies_idx = 0; plies_idx < number_of_plies; plies_idx++) {
+    snprintf(command, sizeof(command), "set -plies %d -it %d",
+             plies_list[plies_idx], iterations);
+    load_and_exec_config_or_die(config, command);
+    for (int turn_idx = 0; turn_idx < number_of_turns; turn_idx++) {
+      snprintf(command, sizeof(command), "goto %d", turns[turn_idx]);
+      load_and_exec_config_or_die(config, command);
+      load_and_exec_config_or_die(config, "gen");
+      SimSnapshot snapshots[2];
+      double seconds[2];
+      for (int census_on = 0; census_on < 2; census_on++) {
+        const int64_t start = ctimer_monotonic_ns();
+        load_and_exec_config_or_die(config, census_on
+                                                ? "sim -seed 7 -scensus true"
+                                                : "sim -seed 7 -scensus false");
+        seconds[census_on] = (double)(ctimer_monotonic_ns() - start) / 1e9;
+        take_sim_snapshot(config_get_sim_results(config),
+                          &snapshots[census_on]);
+      }
+      const bool same = sim_snapshots_equal(&snapshots[0], &snapshots[1]);
+      printf("CRL scensus: %-5d %-4d %-4d %9.3f %9.3f %8.2fx %s\n",
+             plies_list[plies_idx], turns[turn_idx],
+             bag_get_letters(game_get_bag(config_get_game(config))), seconds[0],
+             seconds[1], seconds[0] / seconds[1], same ? "same" : "DIFFER");
+      assert(same);
+      off_total += seconds[0];
+      on_total += seconds[1];
+    }
+  }
+  load_and_exec_config_or_die(config, "set -scensus false");
+  printf("CRL scensus: total off %.3f s, on %.3f s: %.2fx\n", off_total,
+         on_total, off_total / on_total);
 }
 
 void test_census_rollout_lab(void) {
@@ -1056,6 +1133,12 @@ void test_census_rollout_lab(void) {
                               "load testdata/gcgs/success_long_game.gcg");
 
   crl_set_lazy_carry(env_int("CRL_LAZY_CARRY", 1) != 0);
+  if (env_int("CRL_SCENSUS", 0)) {
+    check_sim_census(config, turns, number_of_turns, plies_list,
+                     number_of_plies, iterations);
+    config_destroy(config);
+    return;
+  }
   if (getenv("CRL_PROFILE") != NULL) {
     run_profile_work(config, turns, number_of_turns, plies_list,
                      number_of_plies, iterations, getenv("CRL_PROFILE"));
@@ -1063,9 +1146,8 @@ void test_census_rollout_lab(void) {
     return;
   }
   if (env_int("CRL_TIMED", 0)) {
-    time_timed_sims(config, turns, number_of_turns, plies_list,
-                    number_of_plies, (double)env_int("CRL_TLIM", 14),
-                    env_int("CRL_THREADS", 10),
+    time_timed_sims(config, turns, number_of_turns, plies_list, number_of_plies,
+                    (double)env_int("CRL_TLIM", 14), env_int("CRL_THREADS", 10),
                     env_int("CRL_BIG_BUCKETS", 16384));
     config_destroy(config);
     return;
@@ -1132,10 +1214,9 @@ void test_census_rollout_lab(void) {
       {"cand k=4 floor only", CRL_MODE_REPLAY, crl_variant(CRL_BOARD_CAND, 2),
        false, CRL_REPLAY_FLOOR},
       {"cand k=4", CRL_MODE_REPLAY, crl_variant(CRL_BOARD_CAND, 2), false, 0},
-      {"cand k=all skips only", CRL_MODE_REPLAY,
-       crl_variant(CRL_BOARD_CAND, 4), false, CRL_REPLAY_SKIPS},
-      {"cand k=all", CRL_MODE_REPLAY, crl_variant(CRL_BOARD_CAND, 4), false,
-       0},
+      {"cand k=all skips only", CRL_MODE_REPLAY, crl_variant(CRL_BOARD_CAND, 4),
+       false, CRL_REPLAY_SKIPS},
+      {"cand k=all", CRL_MODE_REPLAY, crl_variant(CRL_BOARD_CAND, 4), false, 0},
       {"plain (again)", CRL_MODE_TIME_PLAIN, 0, false, 0},
       {"carry (again)", CRL_MODE_TIME_CARRY, 0, false, 0},
   };
@@ -1144,9 +1225,10 @@ void test_census_rollout_lab(void) {
   };
   const bool controls = env_int("CRL_CONTROLS", 0) != 0;
   const LabRun *lab_runs = controls ? control_runs : runs;
-  const int number_of_runs =
-      controls ? (int)(sizeof(control_runs) / sizeof(control_runs[0]))
-               : (int)(sizeof(runs) / sizeof(runs[0]));
+  int number_of_runs = (int)(sizeof(runs) / sizeof(runs[0]));
+  if (controls) {
+    number_of_runs = (int)(sizeof(control_runs) / sizeof(control_runs[0]));
+  }
   assert(number_of_runs <= MAX_RUNS);
 
   // Every run of a position replays the same draws.

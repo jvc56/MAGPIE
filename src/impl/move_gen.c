@@ -3116,8 +3116,8 @@ void shadow_by_orientation(MoveGen *gen) {
       anchor_cols |= (uint32_t)gen_cache_get_is_anchor(gen, col) << col;
     }
     const uint32_t skipped_cols =
-        gen->lab_skip_anchor_cols != NULL
-            ? gen->lab_skip_anchor_cols[BOARD_DIM * gen->dir + row]
+        gen->skip_anchor_cols != NULL
+            ? gen->skip_anchor_cols[BOARD_DIM * gen->dir + row]
             : 0;
     while (anchor_cols != 0) {
       const int col = wmp_move_gen_get_lowest_set_bit(anchor_cols);
@@ -3187,7 +3187,7 @@ static inline void set_descending_tile_scores(MoveGen *gen) {
 }
 
 void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
-  gen->lab_skip_anchor_cols = args->skip_anchor_cols;
+  gen->skip_anchor_cols = args->skip_anchor_cols;
   const Game *game = args->game;
   gen->move_record_type = args->move_record_type;
   gen->move_sort_type = args->move_sort_type;
@@ -4488,13 +4488,12 @@ static void gen_remember_best_move(const MoveGen *gen, BestMoveCarry *carry,
                       searched_lanes, gen->number_of_tiles_in_bag);
 }
 
-// Experimental (census rollout lab): drops the anchors of args->skip_lanes
-// and, with args->use_floor_equity, every WMP anchor whose bound is below
+// Drops the anchors of args->skip_lanes and, with args->use_floor_equity,
+// every WMP anchor whose bound is below
 // args->floor_equity, which a move of a searched lane reaches. A carried
 // move's equity already set as the cutoff is a move too, so the higher of
 // the two is a floor that the generation's best move reaches.
-static void gen_apply_lab_skips_and_floor(MoveGen *gen,
-                                          const MoveGenArgs *args) {
+static void gen_apply_skips_and_floor(MoveGen *gen, const MoveGenArgs *args) {
   for (int lane = 0; lane < 2 * BOARD_DIM; lane++) {
     if (args->skip_lanes & ((uint64_t)1 << lane)) {
       gen->row_number_of_anchors_cache[lane] = 0;
@@ -4669,7 +4668,7 @@ void generate_moves(const MoveGenArgs *args) {
           gen, args->best_move_carry, lane_hashes, &gen->player_rack);
     }
     if (args->skip_lanes != 0 || args->use_floor_equity) {
-      gen_apply_lab_skips_and_floor(gen, args);
+      gen_apply_skips_and_floor(gen, args);
     }
     gen_shadow(gen);
     if (gen->threshold_exceeded) {

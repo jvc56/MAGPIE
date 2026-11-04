@@ -334,13 +334,11 @@ void census_get_unseen_tally(const Game *game, uint8_t *unseen_tally) {
   }
 }
 
-static uint64_t play_scores_build(const Game *game,
-                                  const CensusLattice *lattice,
-                                  const uint8_t *unseen_tally,
-                                  Equity *play_scores, bool shared,
-                                  int second_tile_groups,
-                                  _Atomic int *next_unit, uint64_t lane_mask,
-                                  const uint16_t *anchor_filters) {
+static uint64_t
+play_scores_build(const Game *game, const CensusLattice *lattice,
+                  const uint8_t *unseen_tally, Equity *play_scores, bool shared,
+                  int second_tile_groups, _Atomic int *next_unit,
+                  uint64_t lane_mask, const uint16_t *anchor_filters) {
   const Board *board = game_get_board(game);
   const LetterDistribution *ld = game_get_ld(game);
   const int ld_size = ld_get_size(ld);
@@ -401,8 +399,7 @@ static uint64_t play_scores_build(const Game *game,
       if (!square_get_anchor(&gen.row_squares[col])) {
         continue;
       }
-      if (anchor_filters != NULL &&
-          ((anchor_filters[lane] >> col) & 1U) == 0) {
+      if (anchor_filters != NULL && ((anchor_filters[lane] >> col) & 1U) == 0) {
         // Not built, but still the left bound of the next anchor's plays.
         last_anchor_col = col;
         if (!play_scores_gen_is_empty(&gen, col)) {

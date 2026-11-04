@@ -54,7 +54,7 @@ uint64_t census_play_scores_build_lanes(const Game *game,
                                         Equity *play_scores,
                                         uint64_t lane_mask);
 
-// Experimental (census rollout lab): census_play_scores_build_lanes for the
+// census_play_scores_build_lanes for the
 // plays of one anchor, the one at col of lane, alone: the plays the
 // generator finds from it, its leftmost anchor.
 uint64_t census_play_scores_build_anchor(const Game *game,

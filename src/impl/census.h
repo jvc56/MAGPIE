@@ -67,7 +67,7 @@ uint32_t census_lattice_rank_sparse(const CensusLattice *lattice,
 // which lets a walk that adds letters in decreasing order rank as it goes.
 uint32_t census_lattice_rank_term(const CensusLattice *lattice,
                                   MachineLetter ml, int unplaced, int count);
-// Experimental (census rollout lab): the table census_lattice_rank_term
+// The table census_lattice_rank_term
 // reads, rank_terms[(ml * (rack_size + 1) + unplaced) * (rack_size + 1) +
 // count], for ranking incrementally.
 const uint32_t *census_lattice_get_rank_terms(const CensusLattice *lattice);
@@ -130,7 +130,7 @@ void census_record_blank_variants_shared(const CensusLattice *lattice,
                                          const uint8_t *unseen_tally,
                                          int num_blanks);
 
-// Experimental (census rollout lab): the ranks a sparse play-scores build
+// The ranks a sparse play-scores build
 // raised from CENSUS_UNPLAYABLE (see census_set_touched).
 typedef struct CensusTouched {
   uint32_t *ranks;
@@ -138,12 +138,13 @@ typedef struct CensusTouched {
   uint32_t capacity;
 } CensusTouched;
 
-// Experimental (census rollout lab), one thread only: records into touched
+// One thread only: records into touched
 // every play score a non-shared build raises from CENSUS_UNPLAYABLE, until
 // set to NULL.
 void census_set_touched(CensusTouched *touched);
 
-// Experimental (census rollout lab): raises best[R] to play_scores[P] +
+// For experiments (the census rollout lab test): raises best[R] to
+// play_scores[P] +
 // leave[K] for every full rack R = P + K the pool can deal, over every P with
 // play_scores[P] > 0, on one thread. best is read and written at the full
 // racks only.
