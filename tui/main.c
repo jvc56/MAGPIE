@@ -935,6 +935,7 @@ int main(int argc, char *argv[]) {
   if (loaded.sim_candidates_set) {
     game_state.sim_candidates = loaded.sim_candidates;
   }
+  game_state.sim_census = loaded.sim_census_set ? loaded.sim_census : true;
   session.pixel_supported = notcurses_canpixel(nc);
   session.font_available = game_state.glyph_cache != NULL;
   // If the user's saved scale=2 can't be honored on this machine, fall

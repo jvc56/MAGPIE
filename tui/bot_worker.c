@@ -552,6 +552,7 @@ static bool run_sim(TuiGameState *state, double budget_sec, Move *out_move) {
   args.known_opp_rack = NULL;
   args.win_pcts = state->win_pcts;
   args.use_inference = false;
+  args.use_census_rollout = state->sim_census;
   args.use_heat_map = false;
   args.inference_results = NULL;
   args.num_threads = num_threads;
@@ -1476,6 +1477,7 @@ static void analysis_resume_sim(TuiGameState *state, TuiHistoryEntry *entry,
   args.known_opp_rack = NULL;
   args.win_pcts = state->win_pcts;
   args.use_inference = false;
+  args.use_census_rollout = state->sim_census;
   args.use_heat_map = false;
   args.inference_results = NULL;
   args.num_threads = num_threads;
