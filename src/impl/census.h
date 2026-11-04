@@ -2,10 +2,12 @@
 #define CENSUS_H
 
 #include "../def/letter_distribution_defs.h"
+#include "../def/rack_defs.h"
 #include "../ent/equity.h"
 #include "../ent/klv.h"
 #include "../util/io_util.h"
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 // The leave census was originally developed by Andy Kurnia in wolges; this is
@@ -25,6 +27,8 @@
 
 enum {
   CENSUS_MAX_LETTERS = 64,
+  // A rack's splits into played and kept tiles, at most (census_rack_splits).
+  CENSUS_MAX_RACK_SPLITS = 1 << RACK_SIZE,
 };
 
 // The rank of a tally the lattice does not hold.
@@ -53,6 +57,121 @@ uint32_t census_lattice_get_full_rack_start(const CensusLattice *lattice);
 // CENSUS_UNRANKED if it holds more than rack_size tiles.
 uint32_t census_lattice_rank(const CensusLattice *lattice,
                              const uint8_t *tally);
+// census_lattice_rank of the multiset with counts[idx] copies of
+// letters[idx], for number_of_letters letters in increasing order, every
+// other letter absent: the same rank, in time set by number_of_letters
+// rather than the lattice's num_letters.
+uint32_t census_lattice_rank_sparse(const CensusLattice *lattice,
+                                    const MachineLetter *letters,
+                                    const uint8_t *counts,
+                                    int number_of_letters);
+// A rack's splits into the tiles a play uses and the tiles it keeps: every
+// way to keep from none to all of the copies of each letter, except keeping
+// every tile. The rack's distinct letters are letters, in increasing order,
+// with counts copies of each, at most RACK_SIZE tiles in all. The splits come
+// as an odometer over the copies kept counts them, the first letter changing
+// fastest, starting from keeping none. The indexes come from small tables
+// only, so a caller can then read lattice-sized tables at many splits'
+// indexes with the loads overlapping; a caller that may stop early takes
+// them a few at a time.
+typedef struct CensusRackSplitter {
+  const MachineLetter *letters;
+  const uint8_t *counts;
+  int number_of_letters;
+  // The lattice's rank terms (census_lattice_rank_term) and size starts.
+  const uint32_t *rank_terms;
+  int stride;
+  uint32_t size_starts[RACK_SIZE + 1];
+  // The copies kept of each letter, and over it and the letters after it,
+  // the tiles kept and played and the sums of their rank terms; the letter
+  // the next split changes, or -1 once every split has been given.
+  uint8_t kept[RACK_SIZE + 1];
+  int kept_after[RACK_SIZE + 1];
+  int played_after[RACK_SIZE + 1];
+  uint32_t kept_terms[RACK_SIZE + 1];
+  uint32_t played_terms[RACK_SIZE + 1];
+  int changed_idx;
+} CensusRackSplitter;
+
+void census_rack_splitter_init(CensusRackSplitter *splitter,
+                               const CensusLattice *lattice,
+                               const MachineLetter *letters,
+                               const uint8_t *counts, int number_of_letters);
+
+// The next splits, at most max_splits of them: for each, the lattice index of
+// the tiles played and of the tiles kept, the number of tiles played, and, if
+// kept_counts is not NULL, the copies kept of each letter. Returns how many
+// it wrote, 0 once every split has been given. Inline, so that a caller's
+// walk keeps its sums in registers.
+static inline int census_rack_splitter_next(CensusRackSplitter *splitter,
+                                            int max_splits,
+                                            uint32_t *played_indexes,
+                                            uint32_t *kept_indexes,
+                                            uint8_t *tiles_played,
+                                            uint8_t (*kept_counts)[RACK_SIZE]) {
+  const MachineLetter *letters = splitter->letters;
+  const uint8_t *counts = splitter->counts;
+  const int number_of_letters = splitter->number_of_letters;
+  const uint32_t *rank_terms = splitter->rank_terms;
+  const int stride = splitter->stride;
+  uint8_t *kept = splitter->kept;
+  int number_of_splits = 0;
+  // A multiset's rank adds a term for each letter, set by the tiles at that
+  // letter or after it, so each split recomputes only the letters at or
+  // below the one that changed.
+  while (splitter->changed_idx >= 0 && number_of_splits < max_splits) {
+    const int changed_idx = splitter->changed_idx;
+    // The sums carried in locals, so that each letter does not wait on the
+    // store of the one after it.
+    int kept_sum = splitter->kept_after[changed_idx + 1];
+    int played_sum = splitter->played_after[changed_idx + 1];
+    uint32_t kept_terms_sum = splitter->kept_terms[changed_idx + 1];
+    uint32_t played_terms_sum = splitter->played_terms[changed_idx + 1];
+    for (int letter_idx = changed_idx; letter_idx >= 0; letter_idx--) {
+      const int kept_count = kept[letter_idx];
+      const int played_count = counts[letter_idx] - kept_count;
+      const int letter_base = letters[letter_idx] * stride;
+      kept_sum += kept_count;
+      played_sum += played_count;
+      kept_terms_sum +=
+          rank_terms[(letter_base + kept_sum) * stride + kept_count];
+      played_terms_sum +=
+          rank_terms[(letter_base + played_sum) * stride + played_count];
+      splitter->kept_after[letter_idx] = kept_sum;
+      splitter->played_after[letter_idx] = played_sum;
+      splitter->kept_terms[letter_idx] = kept_terms_sum;
+      splitter->played_terms[letter_idx] = played_terms_sum;
+    }
+    // Keeping every tile is no split.
+    if (played_sum > 0) {
+      played_indexes[number_of_splits] =
+          splitter->size_starts[played_sum] + played_terms_sum;
+      kept_indexes[number_of_splits] =
+          splitter->size_starts[kept_sum] + kept_terms_sum;
+      tiles_played[number_of_splits] = (uint8_t)played_sum;
+      if (kept_counts != NULL) {
+        for (int letter_idx = 0; letter_idx < number_of_letters; letter_idx++) {
+          kept_counts[number_of_splits][letter_idx] = kept[letter_idx];
+        }
+      }
+      number_of_splits++;
+    }
+    int letter_idx = 0;
+    while (letter_idx < number_of_letters &&
+           kept[letter_idx] == counts[letter_idx]) {
+      kept[letter_idx] = 0;
+      letter_idx++;
+    }
+    if (letter_idx == number_of_letters) {
+      splitter->changed_idx = -1;
+    } else {
+      kept[letter_idx]++;
+      splitter->changed_idx = letter_idx;
+    }
+  }
+  return number_of_splits;
+}
+
 // The term letter ml adds to the rank of a multiset holding count copies of
 // it and unplaced tiles at it or after it: a multiset's rank is
 // census_lattice_get_size_start of its size plus the terms of its letters,
@@ -117,6 +236,28 @@ void census_record_blank_variants_shared(const CensusLattice *lattice,
                                          const uint8_t *unseen_tally,
                                          int num_blanks);
 
+// Runs phase on each of number_of_workers workers, worker_size bytes apart
+// from workers, each on a thread of its own, the first in the calling
+// thread, and returns once every one has.
+void census_run_phase(void *workers, size_t worker_size, int number_of_workers,
+                      void *(*phase)(void *));
+
+// The ranks a sparse play-scores build raised from CENSUS_UNPLAYABLE (see
+// census_record_blank_variants_touched).
+typedef struct CensusTouched {
+  uint32_t *ranks;
+  uint32_t count;
+  uint32_t capacity;
+} CensusTouched;
+
+// census_record_blank_variants that also records into touched the rank of
+// every play score it raises from CENSUS_UNPLAYABLE, so that a sparse build
+// resets only what it wrote.
+void census_record_blank_variants_touched(
+    const CensusLattice *lattice, Equity *play_scores, CensusTouched *touched,
+    Equity real_score, CensusPlacedTile *placed, int number_of_placed,
+    const uint8_t *unseen_tally, int num_blanks);
+
 // The max over subsets: dst[S] = the largest src[T] over every T within S.
 void census_max_over_subsets(const CensusLattice *lattice,
                              const CensusAddTable *add_table, const Equity *src,
@@ -162,5 +303,14 @@ typedef struct CensusApportionArgs {
 // sums must start at zero; rack_best is scratch, one entry per multiset.
 void census_apportion(const CensusApportionArgs *args, CensusSums *sums,
                       Equity *rack_best);
+
+// The expected best of a full rack drawn from the pool: total->num is the sum
+// over the full racks R the pool can deal of w(R) * best(R), and total->den
+// the sum of w(R), with best and w as census_apportion has them. Reads
+// play_scores, leave, leave_max_over_subsets (which must be set), unseen_tally
+// and add_table from args; rack_best is scratch, one entry per multiset. The
+// total is the same on any number of threads.
+void census_expected_best(const CensusApportionArgs *args, Equity *rack_best,
+                          CensusSums *total, int number_of_threads);
 
 #endif

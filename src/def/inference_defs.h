@@ -18,6 +18,11 @@
 // claiming one at a time would have the workers contend for the counter.
 #define INFERENCE_CENSUS_CLAIM_SIZE 64
 
+// The splits of a rack the census path ranks at a time: enough for their
+// lookups to overlap, few enough that a rack it stops at early pays little
+// for the splits after (see CensusRackSplitter).
+#define INFERENCE_CENSUS_SPLIT_BATCH 8
+
 // The most multisets a census lattice may hold for an inference to build its
 // play scores, one Equity each: English (27 letters, 7 tiles) has 5,379,616.
 #define INFERENCE_CENSUS_MAX_LATTICE_SIZE (1U << 24)

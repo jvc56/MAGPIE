@@ -375,7 +375,7 @@ void string_builder_add_move_list(
     const Board *board, const LetterDistribution *ld, int max_num_display_plays,
     int filter_row, int filter_col, const MachineLetter *prefix_mls,
     int prefix_len, bool exclude_tile_placement_moves, bool use_ucgi_format,
-    const char *game_board_string) {
+    bool show_leave_and_equity, const char *game_board_string) {
   const bool has_filter = filter_row >= 0 || filter_col >= 0 ||
                           prefix_len > 0 || exclude_tile_placement_moves;
   const int num_moves = move_list_get_count(move_list);
@@ -402,7 +402,7 @@ void string_builder_add_move_list(
   if (!use_ucgi_format) {
     num_rows += 1;
   }
-  const int num_cols = 5;
+  const int num_cols = show_leave_and_equity ? 5 : 3;
   StringGrid *string_grid = string_grid_create(num_rows, num_cols, 1);
 
   int curr_row = 0;
@@ -412,12 +412,16 @@ void string_builder_add_move_list(
                          string_duplicate(""));
     string_grid_set_cell(string_grid, curr_row, curr_col++,
                          string_duplicate("Move"));
-    string_grid_set_cell(string_grid, curr_row, curr_col++,
-                         string_duplicate("Lv"));
+    if (show_leave_and_equity) {
+      string_grid_set_cell(string_grid, curr_row, curr_col++,
+                           string_duplicate("Lv"));
+    }
     string_grid_set_cell(string_grid, curr_row, curr_col++,
                          string_duplicate("Sc"));
-    string_grid_set_cell(string_grid, curr_row, curr_col++,
-                         string_duplicate("StEq"));
+    if (show_leave_and_equity) {
+      string_grid_set_cell(string_grid, curr_row, curr_col++,
+                           string_duplicate("StEq"));
+    }
     curr_row++;
   }
 
@@ -449,12 +453,13 @@ void string_builder_add_move_list(
 
     // The rack from which the move is made should always
     // be set, but in case it isn't, skip leave display
-    if (rack_dist_size > 0) {
-      string_builder_add_move_leave(tmp_sb, rack, move, ld);
-      string_grid_set_cell(string_grid, curr_row, curr_col++,
-                           string_builder_dump(tmp_sb, NULL));
-      string_builder_clear(tmp_sb);
-    } else {
+    if (show_leave_and_equity) {
+      if (rack_dist_size > 0) {
+        string_builder_add_move_leave(tmp_sb, rack, move, ld);
+        string_grid_set_cell(string_grid, curr_row, curr_col,
+                             string_builder_dump(tmp_sb, NULL));
+        string_builder_clear(tmp_sb);
+      }
       curr_col++;
     }
 
@@ -462,14 +467,16 @@ void string_builder_add_move_list(
         string_grid, curr_row, curr_col++,
         get_formatted_string("%d", equity_to_int(move_get_score(move))));
 
-    double move_equity;
-    if (move_get_type(move) == GAME_EVENT_PASS) {
-      move_equity = EQUITY_PASS_DISPLAY_DOUBLE;
-    } else {
-      move_equity = equity_to_double(move_get_equity(move));
+    if (show_leave_and_equity) {
+      double move_equity;
+      if (move_get_type(move) == GAME_EVENT_PASS) {
+        move_equity = EQUITY_PASS_DISPLAY_DOUBLE;
+      } else {
+        move_equity = equity_to_double(move_get_equity(move));
+      }
+      string_grid_set_cell(string_grid, curr_row, curr_col++,
+                           get_formatted_string("%.2f", move_equity));
     }
-    string_grid_set_cell(string_grid, curr_row, curr_col++,
-                         get_formatted_string("%.2f", move_equity));
 
     curr_row++;
   }
@@ -497,13 +504,13 @@ char *move_list_get_string(const MoveList *move_list, const Board *board,
                            int max_num_display_plays, int filter_row,
                            int filter_col, const MachineLetter *prefix_mls,
                            int prefix_len, bool exclude_tile_placement_moves,
-                           bool use_ucgi_format,
+                           bool use_ucgi_format, bool show_leave_and_equity,
                            const char *game_board_string) {
   StringBuilder *sb = string_builder_create();
   string_builder_add_move_list(sb, move_list, board, ld, max_num_display_plays,
                                filter_row, filter_col, prefix_mls, prefix_len,
                                exclude_tile_placement_moves, use_ucgi_format,
-                               game_board_string);
+                               show_leave_and_equity, game_board_string);
   char *move_list_string = string_builder_dump_and_destroy(sb, NULL);
   return move_list_string;
 }

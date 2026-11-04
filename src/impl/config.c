@@ -88,6 +88,7 @@
 #include "leave_blend.h"
 #include "move_gen.h"
 #include "move_gen_base.h"
+#include "move_gen_threats.h"
 #include "peg.h"
 #include "play_chooser.h"
 #include "rack_draw.h"
@@ -108,6 +109,9 @@
 #include <time.h>
 
 enum {
+  // The most plays threats generates, however many are asked for: it
+  // allocates a move for each up front.
+  CONFIG_MAX_THREATS = 100,
   HELP_INDENT = 10,
   // The most usage or example lines a help entry has, plus its NULL ending.
   HELP_MAX_LINES = 10,
@@ -352,6 +356,7 @@ struct Config {
   bool sim_with_inference;
   bool sim_margin_forecast;
   bool sim_bag_cycle;
+  bool sim_census_rollout;
   bool use_heat_map;
   bool print_boards;
   // A config contribute's tasks run in (config_create_for_contribute): its
@@ -2033,7 +2038,8 @@ static void help_entry_fill(const Config *config, int token,
              "commit arguments are identical to the commit command (except the "
              "optional rack-after-exchange is not supported). The note follows "
              "the commit arguments and may use $N to interpolate the N-th move "
-             "from the current move list by its 1-indexed position.";
+             "from the current move list by its 1-indexed position, or after "
+             "an endgame, the first play of its N-th line.";
       break;
     case ARG_TOKEN_TOP_COMMIT:
       usages[0] = "[<rack>]";
@@ -2102,6 +2108,30 @@ static void help_entry_fill(const Config *config, int token,
       usages[0] = "";
       text = "Shows the inference result.";
       break;
+    case ARG_TOKEN_THREATS:
+      usages[0] = "";
+      usages[1] = "<number>";
+      usages[2] = "<opponent_known_rack>";
+      usages[3] = "<opponent_known_rack> <number>";
+      usages[4] = "-";
+      usages[5] = "- <number>";
+      examples[0] = "";
+      examples[1] = "70";
+      examples[2] = "ABC";
+      examples[3] = "ABC 10";
+      examples[4] = "-";
+      examples[5] = "- 50";
+      text = "Shows the opponent's highest-scoring next plays from the unseen "
+             "tiles. These are the tiles the player on turn cannot see, the "
+             "opponent's rack and the bag, and a play uses at most a rack of "
+             "them, blanks included. Only plays a rack holding the opponent's "
+             "known tiles allows are shown. Those are the given rack, none "
+             "for '-', or by default, as for simulate, the opponent's known "
+             "rack from the game history. Shows -maxnumdplays threats, or the "
+             "number given, up to 100, as shmoves shows moves but without the "
+             "leave and equity columns. Supports only the classic game "
+             "variant.";
+      break;
     case ARG_TOKEN_SHOW_ENDGAME:
       usages[0] = "[<pv_index>]";
       text = "Shows the endgame solver result. If a PV index is given, "
@@ -2164,7 +2194,8 @@ static void help_entry_fill(const Config *config, int token,
       text = "Specifies the note for the most recently added move. If there is "
              "an existing note it will be overwritten. Use $N (e.g. $1, $2) to "
              "interpolate the N-th move from the current move list by its "
-             "1-indexed position.";
+             "1-indexed position, or after an endgame, the first play of its "
+             "N-th line.";
       break;
     case ARG_TOKEN_P1_NAME:
       usages[0] = "<player_name_with_possible_whitespace>";
@@ -2635,6 +2666,18 @@ static void help_entry_fill(const Config *config, int token,
              "starts on the opponent's rack once per shuffle. Iterations and "
              "minimum iterations still count rollouts, and every play gets at "
              "least two cycles. On by default.";
+      break;
+    case ARG_TOKEN_SIM_CENSUS_ROLLOUT:
+      usages[0] = "<true_or_false>";
+      examples[0] = "true";
+      examples[1] = "false";
+      text = "Specifies whether a census of the position steers the "
+             "rollouts' move generation. Before the rollouts, it scores "
+             "every rack's best play in each anchor of the position and of "
+             "each candidate's board; each rollout move generation then "
+             "skips the anchors it knows to be worse. The moves are the "
+             "same, found faster. The census leaves out PAT, so a sim with "
+             "it needs patrollout set to false. Off by default.";
       break;
     case ARG_TOKEN_USE_HEAT_MAP:
       usages[0] = "<true_or_false>";
@@ -3922,6 +3965,7 @@ void config_fill_sim_args(const Config *config, Rack *known_opp_rack,
       config->utility_w_spread, config->utility_spread_scale,
       config->sim_margin_forecast, &inference_args, sim_args);
   sim_args->bag_cycle = config->sim_bag_cycle;
+  sim_args->use_census_rollout = config->sim_census_rollout;
   if (config->game) {
     config_set_sim_args_pat_rollout(
         config, game_get_player_on_turn_index(config->game), sim_args);
@@ -3929,15 +3973,14 @@ void config_fill_sim_args(const Config *config, Rack *known_opp_rack,
 }
 
 // The win percentage table the config should use: the one named by
-// -winpct, else DEFAULT_WIN_PCT_PREFIX plus the letter distribution's
-// name. NULL when neither is known yet. Caller owns the result.
+// -winpct, else the letter distribution's default table. NULL when neither
+// is known yet. Caller owns the result.
 static char *config_win_pct_target_name(const Config *config) {
   if (config->win_pct_explicit_name) {
     return string_duplicate(config->win_pct_explicit_name);
   }
   if (config->ld) {
-    return get_formatted_string("%s%s", DEFAULT_WIN_PCT_PREFIX,
-                                ld_get_name(config->ld));
+    return win_pct_get_default_name(ld_get_name(config->ld));
   }
   return NULL;
 }
@@ -5933,6 +5976,111 @@ static bool config_resolve_current_moves(const Config *config,
   return true;
 }
 
+// Which of a move list shmoves and threats show, from the command's
+// arguments (see shmoves' help): how many, and those at a square, starting
+// with some letters, or exchanges and passes only.
+typedef struct MoveDisplayArgs {
+  int max_num_display_plays;
+  int filter_row;
+  int filter_col;
+  bool exclude_tile_placement_moves;
+  MachineLetter prefix_mls[BOARD_DIM];
+  int prefix_len;
+} MoveDisplayArgs;
+
+static void config_load_move_display_args(const Config *config,
+                                          arg_token_t arg_token,
+                                          MoveDisplayArgs *display_args,
+                                          ErrorStack *error_stack) {
+  display_args->max_num_display_plays = config->max_num_display_plays;
+  display_args->filter_row = -1;
+  display_args->filter_col = -1;
+  display_args->exclude_tile_placement_moves = false;
+  display_args->prefix_len = 0;
+
+  const char *arg0 = config_get_parg_value(config, arg_token, 0);
+  const char *arg1 = config_get_parg_value(config, arg_token, 1);
+  const char *prefix_str = NULL;
+  if (arg0) {
+    int coord_row;
+    int coord_col;
+    bool is_coord = parse_move_coord(arg0, &coord_row, &coord_col, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+    if (is_coord) {
+      if (coord_row < 0 || coord_row >= BOARD_DIM || coord_col < 0 ||
+          coord_col >= BOARD_DIM) {
+        error_stack_push(
+            error_stack, ERROR_STATUS_CONFIG_LOAD_MOVE_COORDS_OUT_OF_BOUNDS,
+            get_formatted_string("move filter coordinate '%s' is out of bounds",
+                                 arg0));
+        return;
+      }
+      display_args->filter_row = coord_row;
+      display_args->filter_col = coord_col;
+      if (arg1) {
+        prefix_str = arg1;
+      }
+    } else if (strings_equal(arg0, "-")) {
+      display_args->exclude_tile_placement_moves = true;
+      if (arg1) {
+        prefix_str = arg1;
+      }
+    } else {
+      // Check if arg0 is all digits (a max count)
+      bool all_digits = true;
+      for (int i = 0; arg0[i]; i++) {
+        if (!isdigit((unsigned char)arg0[i])) {
+          all_digits = false;
+          break;
+        }
+      }
+      if (all_digits) {
+        string_to_int_or_push_error(
+            "max num display plays", arg0, 1, INT_MAX,
+            ERROR_STATUS_CONFIG_LOAD_INT_ARG_OUT_OF_BOUNDS,
+            &display_args->max_num_display_plays, error_stack);
+        if (!error_stack_is_empty(error_stack)) {
+          return;
+        }
+      } else {
+        prefix_str = arg0;
+      }
+    }
+  }
+
+  if (prefix_str) {
+    display_args->prefix_len = ld_str_to_mls(
+        config->ld, prefix_str, false, display_args->prefix_mls, BOARD_DIM);
+    if (display_args->prefix_len < 0) {
+      error_stack_push(
+          error_stack, ERROR_STATUS_CONFIG_LOAD_MALFORMED_RACK_ARG,
+          get_formatted_string("invalid prefix letters '%s'", prefix_str));
+    }
+  }
+}
+
+// The game shown beside a move list when show_game_with_moves is set, or NULL.
+// The caller frees it.
+static char *config_get_board_beside_moves(const Config *config) {
+  if (!config->show_game_with_moves) {
+    return NULL;
+  }
+  StringBuilder *game_sb = string_builder_create();
+  string_builder_add_game(config->game, NULL, config->game_string_options,
+                          config->game_history, game_sb);
+  char *game_board_string = string_builder_dump_and_destroy(game_sb, NULL);
+  // The board string starts with a leading '\n'; skip it so the board's
+  // column-header line aligns with the moves header row.
+  if (game_board_string[0] != '\n') {
+    return game_board_string;
+  }
+  char *board_string = string_duplicate(game_board_string + 1);
+  free(game_board_string);
+  return board_string;
+}
+
 char *impl_show_moves_or_sim_results(const Config *config,
                                      ErrorStack *error_stack) {
   if (!config_has_game_data(config)) {
@@ -5956,107 +6104,30 @@ char *impl_show_moves_or_sim_results(const Config *config,
   }
   const bool use_sim_results = display_sim_results != NULL;
 
-  const char *arg0 = config_get_parg_value(config, ARG_TOKEN_SHOW_MOVES, 0);
-  const char *arg1 = config_get_parg_value(config, ARG_TOKEN_SHOW_MOVES, 1);
-
-  int max_num_display_plays = config->max_num_display_plays;
-  int filter_row = -1;
-  int filter_col = -1;
-  bool exclude_tile_placement_moves = false;
-  const char *prefix_str = NULL;
-
-  if (arg0) {
-    int coord_row;
-    int coord_col;
-    bool is_coord = parse_move_coord(arg0, &coord_row, &coord_col, error_stack);
-    if (!error_stack_is_empty(error_stack)) {
-      return empty_string();
-    }
-    if (is_coord) {
-      if (coord_row < 0 || coord_row >= BOARD_DIM || coord_col < 0 ||
-          coord_col >= BOARD_DIM) {
-        error_stack_push(
-            error_stack, ERROR_STATUS_CONFIG_LOAD_MOVE_COORDS_OUT_OF_BOUNDS,
-            get_formatted_string("move filter coordinate '%s' is out of bounds",
-                                 arg0));
-        return empty_string();
-      }
-      filter_row = coord_row;
-      filter_col = coord_col;
-      if (arg1) {
-        prefix_str = arg1;
-      }
-    } else if (strings_equal(arg0, "-")) {
-      exclude_tile_placement_moves = true;
-      if (arg1) {
-        prefix_str = arg1;
-      }
-    } else {
-      // Check if arg0 is all digits (a max count)
-      bool all_digits = true;
-      for (int i = 0; arg0[i]; i++) {
-        if (!isdigit((unsigned char)arg0[i])) {
-          all_digits = false;
-          break;
-        }
-      }
-      if (all_digits) {
-        string_to_int_or_push_error(
-            "max num display plays", arg0, 1, INT_MAX,
-            ERROR_STATUS_CONFIG_LOAD_INT_ARG_OUT_OF_BOUNDS,
-            &max_num_display_plays, error_stack);
-        if (!error_stack_is_empty(error_stack)) {
-          return empty_string();
-        }
-      } else {
-        prefix_str = arg0;
-      }
-    }
+  MoveDisplayArgs display_args;
+  config_load_move_display_args(config, ARG_TOKEN_SHOW_MOVES, &display_args,
+                                error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return empty_string();
   }
-
-  MachineLetter prefix_mls[BOARD_DIM];
-  int prefix_len = 0;
-  if (prefix_str) {
-    prefix_len =
-        ld_str_to_mls(config->ld, prefix_str, false, prefix_mls, BOARD_DIM);
-    if (prefix_len < 0) {
-      error_stack_push(
-          error_stack, ERROR_STATUS_CONFIG_LOAD_MALFORMED_RACK_ARG,
-          get_formatted_string("invalid prefix letters '%s'", prefix_str));
-      return empty_string();
-    }
-  }
-
-  char *game_board_string = NULL;
-  const char *board_display_start = NULL;
-  if (config->show_game_with_moves) {
-    StringBuilder *game_sb = string_builder_create();
-    string_builder_add_game(config->game, NULL, config->game_string_options,
-                            config->game_history, game_sb);
-    game_board_string = string_builder_dump_and_destroy(game_sb, NULL);
-    // The board string starts with a leading '\n'; skip it so the board's
-    // column-header line aligns with the moves header row.
-    board_display_start = game_board_string;
-    if (board_display_start && *board_display_start == '\n') {
-      board_display_start++;
-    }
-  }
-
+  char *board_string = config_get_board_beside_moves(config);
   char *result = NULL;
   if (use_sim_results) {
     result = sim_results_get_string(
-        config->game, display_sim_results, max_num_display_plays,
-        config->shplies, filter_row, filter_col, prefix_mls, prefix_len,
-        exclude_tile_placement_moves, !config->human_readable, config->show_bu,
-        board_display_start);
+        config->game, display_sim_results, display_args.max_num_display_plays,
+        config->shplies, display_args.filter_row, display_args.filter_col,
+        display_args.prefix_mls, display_args.prefix_len,
+        display_args.exclude_tile_placement_moves, !config->human_readable,
+        config->show_bu, board_string);
   } else {
     result = move_list_get_string(
         display_move_list, game_get_board(config->game), config->ld,
-        max_num_display_plays, filter_row, filter_col, prefix_mls, prefix_len,
-        exclude_tile_placement_moves, !config->human_readable,
-        board_display_start);
+        display_args.max_num_display_plays, display_args.filter_row,
+        display_args.filter_col, display_args.prefix_mls,
+        display_args.prefix_len, display_args.exclude_tile_placement_moves,
+        !config->human_readable, /*show_leave_and_equity=*/true, board_string);
   }
-  free(game_board_string);
+  free(board_string);
   return result;
 }
 
@@ -6129,6 +6200,120 @@ void execute_show_inference(Config *config, ErrorStack *error_stack) {
 
 char *str_api_show_inference(Config *config, ErrorStack *error_stack) {
   return impl_show_inference(config, error_stack);
+}
+
+// Threats
+
+char *impl_threats(Config *config, ErrorStack *error_stack) {
+  if (!config_has_game_data(config)) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
+        string_duplicate("cannot generate threats without lexicon"));
+    return empty_string();
+  }
+  config_init_game(config);
+  // The threat search follows the classic rules: in wordsmog or woadwage it
+  // would list plays the variant forbids and miss others it allows.
+  if (game_get_variant(config->game) != GAME_VARIANT_CLASSIC) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_THREATS_UNSUPPORTED_GAME,
+        string_duplicate("threats supports only the classic game variant"));
+    return empty_string();
+  }
+
+  // An optional known opponent rack, or - for none, then an optional count;
+  // the first argument is a count when it is all digits.
+  const char *arg0 = config_get_parg_value(config, ARG_TOKEN_THREATS, 0);
+  const char *arg1 = config_get_parg_value(config, ARG_TOKEN_THREATS, 1);
+  const char *known_rack_str = NULL;
+  const char *num_threats_str = NULL;
+  if (arg0 && is_all_digits_or_empty(arg0)) {
+    num_threats_str = arg0;
+    if (arg1) {
+      error_stack_push(
+          error_stack, ERROR_STATUS_THREATS_EXTRANEOUS_ARG,
+          get_formatted_string("extraneous argument '%s' after the number of "
+                               "threats; give the opponent's rack first",
+                               arg1));
+      return empty_string();
+    }
+  } else {
+    known_rack_str = arg0;
+    num_threats_str = arg1;
+  }
+
+  // As many threats as are shown: the count given, or -maxnumdplays.
+  int num_threats = config->max_num_display_plays;
+  if (num_threats_str) {
+    string_to_int_or_push_error("number of threats", num_threats_str, 1,
+                                INT_MAX,
+                                ERROR_STATUS_CONFIG_LOAD_INT_ARG_OUT_OF_BOUNDS,
+                                &num_threats, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return empty_string();
+    }
+  }
+  if (num_threats > CONFIG_MAX_THREATS) {
+    num_threats = CONFIG_MAX_THREATS;
+  }
+
+  Rack unseen;
+  threats_get_unseen_tiles(config->game, &unseen);
+  // The known part of the opponent's rack: the one given, none for -, or as
+  // simulate does, the opponent's rack in the game, which holds the tiles of
+  // it that are known.
+  Rack known;
+  if (!known_rack_str) {
+    rack_copy(&known, player_get_rack(game_get_player(
+                          config->game,
+                          1 - game_get_player_on_turn_index(config->game))));
+  } else {
+    rack_set_dist_size_and_reset(&known, ld_get_size(config->ld));
+    if (!strings_equal(known_rack_str, "-")) {
+      load_rack_or_push_to_error_stack(
+          known_rack_str, config->ld,
+          ERROR_STATUS_CONFIG_LOAD_MALFORMED_RACK_ARG, &known, error_stack);
+      if (!error_stack_is_empty(error_stack)) {
+        return empty_string();
+      }
+      for (int ml_idx = 0; ml_idx < rack_get_dist_size(&known); ml_idx++) {
+        const MachineLetter ml = (MachineLetter)ml_idx;
+        if (rack_get_letter(&known, ml) > rack_get_letter(&unseen, ml)) {
+          error_stack_push(
+              error_stack, ERROR_STATUS_THREATS_OPP_RACK_NOT_IN_BAG,
+              get_formatted_string("opponent rack '%s' is not among the "
+                                   "unseen tiles",
+                                   known_rack_str));
+          return empty_string();
+        }
+      }
+    }
+  }
+
+  MoveList *threats = move_list_create(num_threats);
+  generate_threats(config->game, &unseen, &known, threats);
+
+  char *board_string = config_get_board_beside_moves(config);
+  char *result = move_list_get_string(
+      threats, game_get_board(config->game), config->ld, num_threats,
+      /*filter_row=*/-1, /*filter_col=*/-1, /*prefix_mls=*/NULL,
+      /*prefix_len=*/0, /*exclude_tile_placement_moves=*/false,
+      !config->human_readable, /*show_leave_and_equity=*/false, board_string);
+  free(board_string);
+  move_list_destroy(threats);
+  return result;
+}
+
+void execute_threats(Config *config, ErrorStack *error_stack) {
+  char *result = impl_threats(config, error_stack);
+  if (error_stack_is_empty(error_stack)) {
+    thread_control_print(config->thread_control, result);
+  }
+  free(result);
+}
+
+char *str_api_threats(Config *config, ErrorStack *error_stack) {
+  return impl_threats(config, error_stack);
 }
 
 // Show endgame
@@ -7174,10 +7359,44 @@ char *str_api_commit(Config *config, ErrorStack *error_stack) {
 
 // Commit with note
 
+// The number of moves a note's $N can name: a live simulation's plays, else
+// the generated moves, else the lines of the endgame solved for this
+// position, of which $N names the first play. 0 when there are none.
+static int note_interpolation_get_num_moves(const Config *config) {
+  if (sim_results_get_valid_for_current_game_state(config->sim_results)) {
+    return sim_results_get_number_of_plays(config->sim_results);
+  }
+  if (config->move_list && move_list_get_count(config->move_list) > 0) {
+    return move_list_get_count(config->move_list);
+  }
+  if (endgame_results_get_valid_for_current_game_state(
+          config->endgame_results)) {
+    return endgame_results_get_num_pvs(config->endgame_results);
+  }
+  return 0;
+}
+
+// Copies the move a note's $N names, from the source that
+// note_interpolation_get_num_moves counted, where move_idx is N - 1.
+static void note_interpolation_get_move(const Config *config,
+                                        const int move_idx, Move *move) {
+  if (sim_results_get_valid_for_current_game_state(config->sim_results)) {
+    move_copy(move, simmed_play_get_move(sim_results_get_display_simmed_play(
+                        config->sim_results, move_idx)));
+  } else if (config->move_list && move_list_get_count(config->move_list) > 0) {
+    move_copy(move, move_list_get_move(config->move_list, move_idx));
+  } else {
+    const PVLine *pv_line =
+        endgame_results_get_multi_pvline(config->endgame_results, move_idx);
+    small_move_to_move(move, &pv_line->moves[0], game_get_board(config->game));
+  }
+}
+
 // Builds a new heap-allocated string from raw_note with every $N reference
-// replaced by the string representation of the N-th move (1-indexed) in the
-// current move list. Returns NULL and pushes an error if any $N reference is
-// invalid; otherwise returns the caller-owned interpolated string.
+// replaced by the string representation of the N-th move (1-indexed) of the
+// current moves (see note_interpolation_get_num_moves). Returns NULL and
+// pushes an error if any $N reference is invalid; otherwise returns the
+// caller-owned interpolated string.
 static char *build_interpolated_note(const Config *config, const char *raw_note,
                                      ErrorStack *error_stack) {
   StringBuilder *sb = string_builder_create();
@@ -7190,14 +7409,7 @@ static char *build_interpolated_note(const Config *config, const char *raw_note,
         move_idx = move_idx * 10 + (*p - '0');
         p++;
       }
-      const bool use_sim =
-          sim_results_get_valid_for_current_game_state(config->sim_results);
-      int num_moves = 0;
-      if (use_sim) {
-        num_moves = sim_results_get_number_of_plays(config->sim_results);
-      } else if (config->move_list) {
-        num_moves = move_list_get_count(config->move_list);
-      }
+      const int num_moves = note_interpolation_get_num_moves(config);
       if (num_moves == 0) {
         error_stack_push(
             error_stack, ERROR_STATUS_NOTE_NO_MOVES_TO_INTERPOLATE,
@@ -7212,11 +7424,9 @@ static char *build_interpolated_note(const Config *config, const char *raw_note,
         string_builder_destroy(sb);
         return NULL;
       }
-      const Move *move =
-          use_sim ? simmed_play_get_move(sim_results_get_display_simmed_play(
-                        config->sim_results, move_idx - 1))
-                  : move_list_get_move(config->move_list, move_idx - 1);
-      string_builder_add_move(sb, game_get_board(config->game), move,
+      Move move;
+      note_interpolation_get_move(config, move_idx - 1, &move);
+      string_builder_add_move(sb, game_get_board(config->game), &move,
                               config->ld, false);
     } else {
       string_builder_add_char(sb, *p);
@@ -12232,6 +12442,7 @@ void config_contribute_reset_shared_settings(Config *config) {
   // config_contribute_reset_player_settings gives.
   config->sim_margin_forecast = false;
   config->sim_bag_cycle = true;
+  config->sim_census_rollout = false;
 }
 
 // Applies the run-wide settings a task request states, on top of
@@ -14306,6 +14517,12 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
     return;
   }
 
+  config_load_bool(config, ARG_TOKEN_SIM_CENSUS_ROLLOUT,
+                   &config->sim_census_rollout, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
   if (config_get_parg_value(config, ARG_TOKEN_TIME_LIMIT, 0) != NULL) {
     config->p1_time_limit_seconds = config->time_limit_seconds;
     config->p2_time_limit_seconds = config->time_limit_seconds;
@@ -16066,6 +16283,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   cmd(ARG_TOKEN_SHOW_GAME, "shgame", 0, 0, show_game, generic, true);
   cmd(ARG_TOKEN_SHOW_MOVES, "shmoves", 0, 2, show_moves_or_sim_results, generic,
       false);
+  cmd(ARG_TOKEN_THREATS, "threats", 0, 2, threats, generic, false);
   cmd(ARG_TOKEN_SHOW_INFERENCE, "shinference", 0, 1, show_inference, generic,
       false);
   cmd(ARG_TOKEN_SHOW_ENDGAME, "shendgame", 0, 1, show_endgame, generic, false);
@@ -16177,6 +16395,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_SIM_WITH_INFERENCE, "sinfer", 1, 1);
   arg(ARG_TOKEN_SIM_MARGIN_FORECAST, "smargin", 1, 1);
   arg(ARG_TOKEN_SIM_BAG_CYCLE, "sbagcycle", 1, 1);
+  arg(ARG_TOKEN_SIM_CENSUS_ROLLOUT, "scensus", 1, 1);
   arg(ARG_TOKEN_USE_HEAT_MAP, "useheatmap", 1, 1);
   arg(ARG_TOKEN_HUMAN_READABLE, "hr", 1, 1);
   arg(ARG_TOKEN_SHOW_MISTAKES, "mistakes", 1, 1);
@@ -16646,6 +16865,7 @@ void config_add_settings_to_string_builder(const Config *config,
     case ARG_TOKEN_SHOW_ENDGAME:
     case ARG_TOKEN_SHOW_PEG:
     case ARG_TOKEN_SHOW_HEAT_MAP:
+    case ARG_TOKEN_THREATS:
     case ARG_TOKEN_NEXT:
     case ARG_TOKEN_PREVIOUS:
     case ARG_TOKEN_GOTO:
@@ -17179,6 +17399,10 @@ void config_add_settings_to_string_builder(const Config *config,
     case ARG_TOKEN_SIM_BAG_CYCLE:
       config_add_bool_setting_to_string_builder(config, sb, arg_token,
                                                 config->sim_bag_cycle);
+      break;
+    case ARG_TOKEN_SIM_CENSUS_ROLLOUT:
+      config_add_bool_setting_to_string_builder(config, sb, arg_token,
+                                                config->sim_census_rollout);
       break;
     case ARG_TOKEN_P1_SIM_BAG_CYCLE:
       config_add_bool_setting_to_string_builder(config, sb, arg_token,

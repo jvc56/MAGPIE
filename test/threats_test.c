@@ -1,0 +1,399 @@
+#include "threats_test.h"
+
+#include "../src/def/board_defs.h"
+#include "../src/def/equity_defs.h"
+#include "../src/def/game_history_defs.h"
+#include "../src/def/letter_distribution_defs.h"
+#include "../src/def/move_defs.h"
+#include "../src/def/rack_defs.h"
+#include "../src/ent/equity.h"
+#include "../src/ent/game.h"
+#include "../src/ent/letter_distribution.h"
+#include "../src/ent/move.h"
+#include "../src/ent/player.h"
+#include "../src/ent/rack.h"
+#include "../src/impl/config.h"
+#include "../src/impl/move_gen.h"
+#include "../src/impl/move_gen_threats.h"
+#include "../src/util/io_util.h"
+#include "../src/util/string_util.h"
+#include "test_constants.h"
+#include "test_util.h"
+#include <assert.h>
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
+
+enum {
+  // Enough for every play any of these tests can find.
+  THREATS_TEST_MOVE_LIST_CAPACITY = 400000,
+};
+
+// A play by where it goes and what it spells, without which tiles are blanks:
+// the same placement made with blanks in other places is the same threat.
+typedef struct Placement {
+  uint8_t row;
+  uint8_t col;
+  uint8_t dir;
+  uint8_t length;
+  MachineLetter tiles[BOARD_DIM];
+  Equity score;
+} Placement;
+
+typedef struct Placements {
+  Placement *placements;
+  int count;
+  int capacity;
+} Placements;
+
+static void placements_add_move(Placements *placements, const Move *move) {
+  if (move_get_type(move) != GAME_EVENT_TILE_PLACEMENT_MOVE) {
+    return;
+  }
+  if (placements->count == placements->capacity) {
+    placements->capacity = placements->capacity * 2 + 1024;
+    placements->placements =
+        realloc_or_die(placements->placements,
+                       sizeof(Placement) * (size_t)placements->capacity);
+  }
+  Placement *placement = &placements->placements[placements->count++];
+  memset(placement, 0, sizeof(Placement));
+  placement->row = (uint8_t)move_get_row_start(move);
+  placement->col = (uint8_t)move_get_col_start(move);
+  placement->dir = (uint8_t)move_get_dir(move);
+  placement->length = (uint8_t)move_get_tiles_length(move);
+  for (int tile_idx = 0; tile_idx < placement->length; tile_idx++) {
+    placement->tiles[tile_idx] =
+        get_unblanked_machine_letter(move_get_tile(move, tile_idx));
+  }
+  placement->score = move_get_score(move);
+}
+
+static int compare_placement_keys(const Placement *a, const Placement *b) {
+  const size_t key_size = offsetof(Placement, score);
+  return memcmp(a, b, key_size);
+}
+
+// By placement, then from the highest score.
+static int compare_placements(const void *a, const void *b) {
+  const Placement *placement_a = a;
+  const Placement *placement_b = b;
+  const int key_order = compare_placement_keys(placement_a, placement_b);
+  if (key_order != 0) {
+    return key_order;
+  }
+  if (placement_a->score != placement_b->score) {
+    return placement_a->score > placement_b->score ? -1 : 1;
+  }
+  return 0;
+}
+
+// Sorts the placements and keeps each one once, at its highest score.
+static void placements_keep_best(Placements *placements) {
+  if (placements->count == 0) {
+    return;
+  }
+  qsort(placements->placements, (size_t)placements->count, sizeof(Placement),
+        compare_placements);
+  int kept = 0;
+  for (int placement_idx = 0; placement_idx < placements->count;
+       placement_idx++) {
+    if (kept > 0 &&
+        compare_placement_keys(&placements->placements[kept - 1],
+                               &placements->placements[placement_idx]) == 0) {
+      continue;
+    }
+    placements->placements[kept++] = placements->placements[placement_idx];
+  }
+  placements->count = kept;
+}
+
+// Adds every play generate_moves finds for the opponent of the player on turn
+// in `game` with each rack of rack_size tiles the pool can make, choosing
+// how many of each letter from `ml` up.
+static void add_plays_of_every_rack(Game *opponent_game, const Rack *pool,
+                                    Rack *rack, MachineLetter ml,
+                                    int tiles_left, MoveList *move_list,
+                                    Placements *placements) {
+  if (ml == rack_get_dist_size(pool)) {
+    if (tiles_left > 0) {
+      return;
+    }
+    Rack *opponent_rack = player_get_rack(game_get_player(
+        opponent_game, game_get_player_on_turn_index(opponent_game)));
+    rack_copy(opponent_rack, rack);
+    const MoveGenArgs args = {
+        .game = opponent_game,
+        .move_list = move_list,
+        .move_record_type = MOVE_RECORD_ALL,
+        .move_sort_type = MOVE_SORT_SCORE,
+        .target_equity = EQUITY_MAX_VALUE,
+    };
+    generate_moves(&args);
+    assert(move_list_get_count(move_list) < THREATS_TEST_MOVE_LIST_CAPACITY);
+    for (int move_idx = 0; move_idx < move_list_get_count(move_list);
+         move_idx++) {
+      placements_add_move(placements, move_list_get_move(move_list, move_idx));
+    }
+    return;
+  }
+  const int available = rack_get_letter(pool, ml);
+  for (int count = 0; count <= available && count <= tiles_left; count++) {
+    add_plays_of_every_rack(opponent_game, pool, rack, ml + 1,
+                            tiles_left - count, move_list, placements);
+    rack_add_letter(rack, ml);
+  }
+  for (int count = 0; count <= available && count <= tiles_left; count++) {
+    rack_take_letter(rack, ml);
+  }
+}
+
+static void set_rack_or_die(const LetterDistribution *ld, Rack *rack,
+                            const char *rack_str) {
+  rack_set_dist_size_and_reset(rack, ld_get_size(ld));
+  if (rack_str[0] != '\0') {
+    const int letters_set = rack_set_to_string(ld, rack, rack_str);
+    assert(letters_set == (int)strlen(rack_str));
+  }
+}
+
+// The threats from `pool` with the opponent's `known` tiles are exactly the
+// plays generate_moves finds for the opponent from some rack the pool can
+// make that holds the known tiles, each at the best score any of those racks
+// gives it.
+static void assert_threats_match_every_rack(const Game *game,
+                                            const char *pool_str,
+                                            const char *known_str) {
+  const LetterDistribution *ld = game_get_ld(game);
+  Rack pool;
+  set_rack_or_die(ld, &pool, pool_str);
+  Rack known;
+  set_rack_or_die(ld, &known, known_str);
+
+  MoveList *move_list = move_list_create(THREATS_TEST_MOVE_LIST_CAPACITY);
+  generate_threats(game, &pool, &known, move_list);
+  assert(move_list_get_count(move_list) < THREATS_TEST_MOVE_LIST_CAPACITY);
+  Placements threats = {0};
+  for (int move_idx = 0; move_idx < move_list_get_count(move_list);
+       move_idx++) {
+    const Move *move = move_list_get_move(move_list, move_idx);
+    // Sorted by score, from the highest.
+    if (move_idx > 0) {
+      assert(move_get_score(move) <=
+             move_get_score(move_list_get_move(move_list, move_idx - 1)));
+    }
+    placements_add_move(&threats, move);
+  }
+  const int num_threats = threats.count;
+  placements_keep_best(&threats);
+  // Each placement is a threat once.
+  assert(threats.count == num_threats);
+
+  Game *opponent_game = game_duplicate(game);
+  game_set_player_on_turn_index(opponent_game,
+                                1 - game_get_player_on_turn_index(game));
+  int rack_size = rack_get_total_letters(&pool);
+  if (rack_size > RACK_SIZE) {
+    rack_size = RACK_SIZE;
+  }
+  // Every rack is the known tiles and the rest from what the pool has left.
+  Rack rack;
+  rack_copy(&rack, &known);
+  Rack rest_of_pool;
+  rack_copy(&rest_of_pool, &pool);
+  const bool pool_has_known = rack_subtract(&rest_of_pool, &known);
+  assert(pool_has_known);
+  Placements plays = {0};
+  add_plays_of_every_rack(opponent_game, &rest_of_pool, &rack, 0,
+                          rack_size - rack_get_total_letters(&known), move_list,
+                          &plays);
+  placements_keep_best(&plays);
+
+  assert(plays.count > 0);
+  assert(threats.count == plays.count);
+  for (int placement_idx = 0; placement_idx < plays.count; placement_idx++) {
+    assert(compare_placements(&threats.placements[placement_idx],
+                              &plays.placements[placement_idx]) == 0);
+  }
+
+  free(threats.placements);
+  free(plays.placements);
+  game_destroy(opponent_game);
+  move_list_destroy(move_list);
+}
+
+// Whether some threat from `pool` with the opponent's `known` tiles places
+// exactly the tiles `tiles_str` (with ? for a blank).
+static bool threats_include_tiles(const Game *game, const char *pool_str,
+                                  const char *known_str,
+                                  const char *tiles_str) {
+  const LetterDistribution *ld = game_get_ld(game);
+  Rack pool;
+  set_rack_or_die(ld, &pool, pool_str);
+  Rack known;
+  set_rack_or_die(ld, &known, known_str);
+  Rack tiles;
+  set_rack_or_die(ld, &tiles, tiles_str);
+  MoveList *move_list = move_list_create(THREATS_TEST_MOVE_LIST_CAPACITY);
+  generate_threats(game, &pool, &known, move_list);
+  bool found = false;
+  Rack placed;
+  for (int move_idx = 0; move_idx < move_list_get_count(move_list) && !found;
+       move_idx++) {
+    const Move *move = move_list_get_move(move_list, move_idx);
+    rack_set_dist_size_and_reset(&placed, ld_get_size(ld));
+    for (int tile_idx = 0; tile_idx < move_get_tiles_length(move); tile_idx++) {
+      const MachineLetter ml = move_get_tile(move, tile_idx);
+      if (ml != PLAYED_THROUGH_MARKER) {
+        rack_add_letter(&placed,
+                        get_is_blanked(ml) ? BLANK_MACHINE_LETTER : ml);
+      }
+    }
+    found = racks_are_equal(&placed, &tiles);
+  }
+  move_list_destroy(move_list);
+  return found;
+}
+
+static char *run_threats_command(Config *config, const char *command,
+                                 error_code_t expected_status) {
+  ErrorStack *error_stack = error_stack_create();
+  config_load_command(config, command, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  char *output = NULL;
+  config_run_str_api_command(config, error_stack, &output);
+  assert(error_stack_top(error_stack) == expected_status);
+  error_stack_destroy(error_stack);
+  return output;
+}
+
+// Asserts the output ends as shmoves' does, "Showing <shown> of <total> plays",
+// with the same columns but for the leave and equity.
+static void assert_threats_shown(const char *output, int shown, int total) {
+  char *expected = get_formatted_string("Showing %d of %d plays", shown, total);
+  assert(strstr(output, expected) != NULL);
+  free(expected);
+  assert(strstr(output, " Move ") != NULL);
+  assert(strstr(output, " Sc ") != NULL);
+  assert(strstr(output, " Lv ") == NULL);
+  assert(strstr(output, " StEq ") == NULL);
+}
+
+static void test_threats_command(void) {
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -numplays 4 -maxnumdplays 3 -hr true");
+  // The opponent's rack, AEILOUY, is known.
+  load_and_exec_config_or_die(config, "cgp " DOUG_V_EMELY_CGP);
+
+  // -maxnumdplays threats, or as many as asked for up to 100, whatever
+  // -numplays is, shown as shmoves shows moves.
+  char *output = run_threats_command(config, "threats", ERROR_STATUS_SUCCESS);
+  assert_threats_shown(output, 3, 3);
+  char *default_output = output;
+  output = run_threats_command(config, "threats 10", ERROR_STATUS_SUCCESS);
+  assert_threats_shown(output, 10, 10);
+  free(output);
+  output = run_threats_command(config, "threats 0",
+                               ERROR_STATUS_CONFIG_LOAD_INT_ARG_OUT_OF_BOUNDS);
+  free(output);
+  output = run_threats_command(config, "threats - 150", ERROR_STATUS_SUCCESS);
+  assert_threats_shown(output, 100, 100);
+  free(output);
+  // A count comes last.
+  output = run_threats_command(config, "threats 5 5",
+                               ERROR_STATUS_THREATS_EXTRANEOUS_ARG);
+  free(output);
+
+  // As in simulate, the known rack is the game's unless one is given, and -
+  // is none.
+  output = run_threats_command(config, "threats AEILOUY", ERROR_STATUS_SUCCESS);
+  assert_strings_equal(output, default_output);
+  free(output);
+  output = run_threats_command(config, "threats -", ERROR_STATUS_SUCCESS);
+  assert_threats_shown(output, 3, 3);
+  assert(!strings_equal(output, default_output));
+  free(output);
+  output = run_threats_command(config, "threats Q 2", ERROR_STATUS_SUCCESS);
+  assert_threats_shown(output, 2, 2);
+  assert(strstr(output, "Q") != NULL);
+  free(output);
+  free(default_output);
+  // The rack must come from the unseen tiles, which hold one Z, and have at
+  // most a rack's worth of tiles.
+  output = run_threats_command(config, "threats ZZ",
+                               ERROR_STATUS_THREATS_OPP_RACK_NOT_IN_BAG);
+  free(output);
+  output = run_threats_command(config, "threats ABCDEFGH",
+                               ERROR_STATUS_CONFIG_LOAD_MALFORMED_RACK_ARG);
+  free(output);
+
+  // The unseen tiles are the opponent's rack and the bag: everything but
+  // the board and the rack of the player on turn.
+  const Game *game = config_get_game(config);
+  Rack unseen;
+  threats_get_unseen_tiles(game, &unseen);
+  const LetterDistribution *ld = game_get_ld(game);
+  const int tiles_on_board = 5;
+  assert(rack_get_total_letters(&unseen) ==
+         ld_get_total_tiles(ld) - tiles_on_board - RACK_SIZE);
+
+  // The search follows the classic rules, so other variants are refused.
+  load_and_exec_config_or_die(config, "set -var wordsmog");
+  output = run_threats_command(config, "threats",
+                               ERROR_STATUS_THREATS_UNSUPPORTED_GAME);
+  free(output);
+  config_destroy(config);
+}
+
+// Positions from CGPs, which are 15x15.
+static void test_threats_in_positions(void) {
+  if (BOARD_DIM != 15) {
+    return;
+  }
+  Config *config = config_create_or_die("set -lex CSW21");
+  Game *game = config_game_create(config);
+  load_cgp_or_die(game, DOUG_V_EMELY_CGP);
+  assert_threats_match_every_rack(game, "AEILOUY", "");
+  assert_threats_match_every_rack(game, "ADEGIL?Z", "");
+  assert_threats_match_every_rack(game, "ADEGIL?Z", "GZ");
+  load_cgp_or_die(game, VS_ANDY_CGP);
+  assert_threats_match_every_rack(game, "DENQRUW", "");
+  assert_threats_match_every_rack(game, "AEEIRST?", "");
+  assert_threats_match_every_rack(game, "AEEIRST?", "?E");
+  game_destroy(game);
+  config_destroy(config);
+  test_threats_command();
+}
+
+void test_threats(void) {
+  Config *config = config_create_or_die("set -lex CSW21");
+  Game *game = config_game_create(config);
+
+  // The opening: from exactly a rack, from more than a rack with two blanks,
+  // and from fewer tiles than a rack, where a blank must stand for a letter
+  // the pool also holds.
+  assert_threats_match_every_rack(game, "AEINST?", "");
+  assert_threats_match_every_rack(game, "EEIRST??Q", "");
+  assert_threats_match_every_rack(game, "EESS?", "");
+
+  // With known tiles the opponent holds them, so only plays whose other
+  // tiles fit in the rest of the rack. From ABEINRST, RETINAS is out of reach
+  // of a rack holding A, B and N, which leaves room for four of its tiles,
+  // but not of one holding A, N and R.
+  assert(!threats_include_tiles(game, "ABEINRST", "ABN", "AEINRST"));
+  assert(threats_include_tiles(game, "ABEINRST", "ANR", "AEINRST"));
+  assert_threats_match_every_rack(game, "ABEINRST", "ABN");
+  assert_threats_match_every_rack(game, "ABEINRST", "ANR");
+  // A known blank can stand for a letter the pool also holds: with only the
+  // blank known, a bingo from AEINRST? must play it.
+  assert(!threats_include_tiles(game, "AEINRST?", "?", "AEINRST"));
+  assert(threats_include_tiles(game, "AEINRST?", "?", "AEINRS?"));
+  assert_threats_match_every_rack(game, "AEINRST?", "?");
+  assert_threats_match_every_rack(game, "EEIRST??Q", "?Q");
+  game_destroy(game);
+  config_destroy(config);
+
+  test_threats_in_positions();
+}

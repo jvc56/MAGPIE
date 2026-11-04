@@ -21,6 +21,7 @@
 #include "board_test.h"
 #include "browser_game_test.h"
 #include "builder_hash_test.h"
+#include "census_rollout_test.h"
 #include "census_test.h"
 #include "cgp_test.h"
 #include "checkpoint_test.h"
@@ -94,6 +95,7 @@
 #include "stats_test.h"
 #include "string_util_test.h"
 #include "table_bench_test.h"
+#include "threats_test.h"
 #include "transposition_table_test.h"
 #include "validated_move_test.h"
 #include "win_pct_test.h"
@@ -150,6 +152,7 @@ static TestEntry test_table[] = {
     {"vm", test_validated_move},
     {"shadow", test_shadow},
     {"movegen", test_move_gen},
+    {"threats", test_threats},
     {"bestsmall", test_best_small},
     {"eq", test_equity},
     {"eqadj", test_equity_adjustments},
@@ -187,6 +190,7 @@ static TestEntry test_table[] = {
     {"kwgmaker", test_kwg_maker},
     {"cgp", test_cgp},
     {"census", test_census},
+    {"censusrollout", test_census_rollout},
     {"rl", test_rack_list},
     {"rlfr", test_rack_list_forced_racks},
     {"ch", test_checkpoint},
@@ -258,6 +262,7 @@ static TestEntry on_demand_test_table[] = {
     {"viastress", test_via_interrupted_reasonable_under_time_pressure},
     {"infercmp", test_infer_cmp},
     {"infbench", test_infer_bench},
+    {"censusrolloutbench", test_census_rollout_bench},
     {"genstuck", test_generate_stuck_cgps},
     {"gennonstuck", test_generate_nonstuck_cgps},
     {"gennonstuck2", test_generate_nonstuck_cgps2},

@@ -79,7 +79,20 @@ typedef struct MoveGenArgs {
   // shadows read more than the key holds. NULL (the default) shadows every
   // lane.
   LaneShadowCache *lane_shadow_cache;
+  // For the census rollout (census_rollout.h), MOVE_RECORD_BEST by equity
+  // only: the lanes (bit dir * BOARD_DIM + row_or_col) whose anchors are not
+  // searched, and by lane the columns of the anchors whose plays are not
+  // searched (each play is its leftmost anchor's), or NULL. The caller
+  // vouches that no skipped anchor holds a move at or above the best move's
+  // equity. 0 and NULL change nothing.
+  uint64_t skip_lanes;
+  const uint32_t *skip_anchor_cols;
 } MoveGenArgs;
+
+// The hash of each lane of the game's board as the best-move carry computes
+// it (0 for a lane without anchors), with player_index's cross sets.
+void gen_hash_game_lanes(const Game *game, int player_index,
+                         uint64_t *lane_hashes);
 
 void gen_destroy_cache(void);
 

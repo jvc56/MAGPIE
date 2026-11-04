@@ -18,29 +18,12 @@
 #include <stdint.h>
 #include <string.h>
 
-// A placed tile's part of the play's score: its face value times its letter
-// multiplier, and the word multiplier of its square if it forms a cross word
-// (0 if not). Blanking it drops the score by letter_score times the main
-// word's multiplier plus cross_word_multiplier.
-typedef struct PlayScoresPlacedTile {
-  MachineLetter ml;
-  Equity letter_score;
-  int cross_word_multiplier;
-} PlayScoresPlacedTile;
-
 typedef struct PlayScoresGen {
-  const CensusLattice *lattice;
-  // One of the two is set (see BlankVariantContext in census.c).
-  Equity *play_scores;
-  // Whether other threads build into play_scores too.
-  bool shared;
-  const uint8_t *unseen_tally;
+  census_play_recorder_func_t record;
+  void *record_context;
   const KWG *kwg;
-  const Square *row_squares;
   const LetterDistribution *ld;
   Equity bingo_bonus;
-  int num_blanks;
-  int dir;
   int current_anchor_col;
   int last_anchor_col;
   uint64_t anchor_right_extension_set;
@@ -49,10 +32,13 @@ typedef struct PlayScoresGen {
   int tiles_left;
   // every letter the pool can place, all of them if it holds a blank
   uint64_t rack_cross_set;
-  int tiles_played;
-  PlayScoresPlacedTile placed[RACK_SIZE];
+  // The play so far: its lane, its leftmost column (the anchor's until it
+  // extends left), its placed tiles and their count. The rightmost column is
+  // the anchor's while the play extends left, and the recorded square's after.
+  CensusPlay play;
+  CensusPlayTile tiles[RACK_SIZE];
   uint64_t number_of_plays;
-  // The letters the tile placed after tiles_played others may be, which
+  // The letters the tile placed after play.tiles_played others may be, which
   // splits a build into units (census_play_scores_build_claimed): all of
   // them in a serial build.
   uint64_t placeable_masks[RACK_SIZE];
@@ -111,7 +97,7 @@ static inline uint64_t play_scores_gen_group_mask(int group, int groups,
 
 static inline MachineLetter play_scores_gen_get_letter(const PlayScoresGen *gen,
                                                        int col) {
-  return square_get_letter(&gen->row_squares[col]);
+  return square_get_letter(&gen->play.lane[col]);
 }
 
 static inline bool play_scores_gen_is_empty(const PlayScoresGen *gen, int col) {
@@ -126,33 +112,21 @@ play_scores_gen_board_letter_score(const PlayScoresGen *gen, MachineLetter ml) {
   return ld_get_score(gen->ld, ml);
 }
 
-static void play_scores_gen_record(PlayScoresGen *gen, Equity main_word_score,
-                                   int word_multiplier, Equity cross_score) {
-  if (gen->tiles_played == 1 && !gen->record_single_tile_plays) {
+static void play_scores_gen_record(PlayScoresGen *gen, int rightstrip,
+                                   Equity main_word_score, int word_multiplier,
+                                   Equity cross_score) {
+  if (gen->play.tiles_played == 1 && !gen->record_single_tile_plays) {
     return;
   }
   gen->number_of_plays++;
   Equity score = main_word_score * word_multiplier + cross_score;
-  if (gen->tiles_played == RACK_SIZE) {
+  if (gen->play.tiles_played == RACK_SIZE) {
     score += gen->bingo_bonus;
   }
-  CensusPlacedTile placed[RACK_SIZE];
-  for (int placed_idx = 0; placed_idx < gen->tiles_played; placed_idx++) {
-    const PlayScoresPlacedTile *tile = &gen->placed[placed_idx];
-    placed[placed_idx] = (CensusPlacedTile){
-        .ml = (uint8_t)tile->ml,
-        .blank_drop = tile->letter_score *
-                      (word_multiplier + tile->cross_word_multiplier)};
-  }
-  if (gen->shared) {
-    census_record_blank_variants_shared(gen->lattice, gen->play_scores, score,
-                                        placed, gen->tiles_played,
-                                        gen->unseen_tally, gen->num_blanks);
-    return;
-  }
-  census_record_blank_variants(gen->lattice, gen->play_scores, score, placed,
-                               gen->tiles_played, gen->unseen_tally,
-                               gen->num_blanks);
+  gen->play.rightstrip = rightstrip;
+  gen->play.word_multiplier = word_multiplier;
+  gen->play.score = score;
+  gen->record(&gen->play, gen->record_context);
 }
 
 static void play_scores_gen_go_on(PlayScoresGen *gen, int current_col,
@@ -164,14 +138,14 @@ static void play_scores_gen_go_on(PlayScoresGen *gen, int current_col,
 // graph node has the children list_tiles.
 static inline uint64_t play_scores_gen_placeable(const PlayScoresGen *gen,
                                                  int col, uint64_t list_tiles) {
-  const Square *square = &gen->row_squares[col];
+  const Square *square = &gen->play.lane[col];
   uint64_t possible_letters_here =
       square_get_cross_set(square) & square_get_left_extension_set(square);
-  if (gen->tiles_played == 0 && col == gen->current_anchor_col + 1) {
+  if (gen->play.tiles_played == 0 && col == gen->current_anchor_col + 1) {
     possible_letters_here &= gen->anchor_right_extension_set;
   }
   return possible_letters_here & list_tiles & gen->rack_cross_set &
-         gen->placeable_masks[gen->tiles_played] & ~(uint64_t)1;
+         gen->placeable_masks[gen->play.tiles_played] & ~(uint64_t)1;
 }
 
 // Places ml, one of play_scores_gen_placeable's letters, on the empty square
@@ -183,7 +157,7 @@ static inline void play_scores_gen_place(PlayScoresGen *gen, int col,
                                          int word_multiplier,
                                          Equity cross_score) {
   // A real tile when the pool has one, else a blank: each word is spelled
-  // once, and census_record_blank_variants fills in its other spellings.
+  // once, and the recorder chooses its blanks.
   MachineLetter rack_ml = ml;
   if (gen->rack[ml] == 0) {
     if (gen->rack[BLANK_MACHINE_LETTER] == 0) {
@@ -223,7 +197,7 @@ static void play_scores_gen_recursive(PlayScoresGen *gen, int col,
                           main_word_score, word_multiplier, cross_score);
     return;
   }
-  if (gen->tiles_left == 0 || gen->tiles_played == RACK_SIZE) {
+  if (gen->tiles_left == 0 || gen->play.tiles_played == RACK_SIZE) {
     return;
   }
   const uint64_t list_tiles = kwg_get_sibling_tiles(gen->kwg)[node_index];
@@ -240,10 +214,10 @@ static void play_scores_gen_go_on(PlayScoresGen *gen, int current_col,
                                   MachineLetter ml, uint32_t new_node_index,
                                   bool accepts, Equity main_word_score,
                                   int word_multiplier, Equity cross_score) {
-  const Square *square = &gen->row_squares[current_col];
+  const Square *square = &gen->play.lane[current_col];
   const bool square_is_empty = play_scores_gen_is_empty(gen, current_col);
-  // The score counts every placed tile at face value, a blank's included;
-  // census_record_blank_variants takes the blanks' values back off.
+  // The score counts every placed tile at face value, a blank's included; the
+  // recorder takes the blanks' values back off.
   Equity letter_score;
   int this_word_multiplier = 1;
   bool placed_here = false;
@@ -258,11 +232,12 @@ static void play_scores_gen_go_on(PlayScoresGen *gen, int current_col,
                      this_word_multiplier;
       cross_word_multiplier = this_word_multiplier;
     }
-    gen->placed[gen->tiles_played] =
-        (PlayScoresPlacedTile){.ml = ml,
-                               .letter_score = letter_score,
-                               .cross_word_multiplier = cross_word_multiplier};
-    gen->tiles_played++;
+    gen->tiles[gen->play.tiles_played] =
+        (CensusPlayTile){.ml = ml,
+                         .col = current_col,
+                         .letter_score = letter_score,
+                         .cross_word_multiplier = cross_word_multiplier};
+    gen->play.tiles_played++;
     placed_here = true;
   } else {
     letter_score = play_scores_gen_board_letter_score(gen, ml);
@@ -271,11 +246,12 @@ static void play_scores_gen_go_on(PlayScoresGen *gen, int current_col,
   word_multiplier *= this_word_multiplier;
 
   if (current_col <= gen->current_anchor_col) {
+    gen->play.leftstrip = current_col;
     const bool no_letter_directly_left =
         current_col == 0 || play_scores_gen_is_empty(gen, current_col - 1);
-    if (accepts && no_letter_directly_left && gen->tiles_played > 0) {
-      play_scores_gen_record(gen, main_word_score, word_multiplier,
-                             cross_score);
+    if (accepts && no_letter_directly_left && gen->play.tiles_played > 0) {
+      play_scores_gen_record(gen, gen->current_anchor_col, main_word_score,
+                             word_multiplier, cross_score);
     }
     if (new_node_index != 0) {
       if (current_col > 0 && current_col - 1 != gen->last_anchor_col) {
@@ -283,12 +259,15 @@ static void play_scores_gen_go_on(PlayScoresGen *gen, int current_col,
                                   main_word_score, word_multiplier,
                                   cross_score);
       }
-      if (gen->tiles_played != 0 ||
+      if (gen->play.tiles_played != 0 ||
           (gen->anchor_right_extension_set & gen->rack_cross_set) != 0) {
         const uint32_t separation_node_index = kwg_get_next_node_index(
             gen->kwg, new_node_index, SEPARATION_MACHINE_LETTER);
         if (separation_node_index != 0 && no_letter_directly_left &&
             gen->current_anchor_col < BOARD_DIM - 1) {
+          // The search to the left moved the play's left end; the plays to
+          // the right start here.
+          gen->play.leftstrip = current_col;
           play_scores_gen_recursive(gen, gen->current_anchor_col + 1,
                                     separation_node_index, main_word_score,
                                     word_multiplier, cross_score);
@@ -299,8 +278,8 @@ static void play_scores_gen_go_on(PlayScoresGen *gen, int current_col,
     const bool no_letter_directly_right =
         current_col == BOARD_DIM - 1 ||
         play_scores_gen_is_empty(gen, current_col + 1);
-    if (accepts && no_letter_directly_right && gen->tiles_played > 0) {
-      play_scores_gen_record(gen, main_word_score, word_multiplier,
+    if (accepts && no_letter_directly_right && gen->play.tiles_played > 0) {
+      play_scores_gen_record(gen, current_col, main_word_score, word_multiplier,
                              cross_score);
     }
     if (new_node_index != 0 && current_col < BOARD_DIM - 1) {
@@ -309,7 +288,7 @@ static void play_scores_gen_go_on(PlayScoresGen *gen, int current_col,
     }
   }
   if (placed_here) {
-    gen->tiles_played--;
+    gen->play.tiles_played--;
   }
 }
 
@@ -334,26 +313,27 @@ void census_get_unseen_tally(const Game *game, uint8_t *unseen_tally) {
   }
 }
 
-static uint64_t play_scores_build(const Game *game,
-                                  const CensusLattice *lattice,
-                                  const uint8_t *unseen_tally,
-                                  Equity *play_scores, bool shared,
-                                  int second_tile_groups,
-                                  _Atomic int *next_unit, uint64_t lane_mask) {
+// census_play_scores_search over the units this thread claims from next_unit
+// (see census_play_scores_build_claimed), on the lanes of lane_mask, and, with
+// anchor_filters, only on the anchors it sets by lane.
+static uint64_t play_scores_search(const Game *game, int player_index,
+                                   const uint8_t *unseen_tally,
+                                   census_play_recorder_func_t record,
+                                   void *record_context, int second_tile_groups,
+                                   _Atomic int *next_unit, uint64_t lane_mask,
+                                   const uint32_t *anchor_filters) {
   const Board *board = game_get_board(game);
   const LetterDistribution *ld = game_get_ld(game);
   const int ld_size = ld_get_size(ld);
-  const int player_index = 0;
   const Player *player = game_get_player(game, player_index);
   const int cross_index = board_get_cross_set_index(
       game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KWG), player_index);
 
   PlayScoresGen gen;
   memset(&gen, 0, sizeof(gen));
-  gen.lattice = lattice;
-  gen.play_scores = play_scores;
-  gen.shared = shared;
-  gen.unseen_tally = unseen_tally;
+  gen.record = record;
+  gen.record_context = record_context;
+  gen.play.tiles = gen.tiles;
   gen.kwg = player_get_kwg(player);
   gen.ld = ld;
   gen.bingo_bonus = game_get_bingo_bonus(game);
@@ -366,8 +346,7 @@ static uint64_t play_scores_build(const Game *game,
       gen.rack_cross_set |= (uint64_t)1 << ml;
     }
   }
-  gen.num_blanks = gen.rack[BLANK_MACHINE_LETTER];
-  if (gen.num_blanks > 0) {
+  if (gen.rack[BLANK_MACHINE_LETTER] > 0) {
     gen.rack_cross_set = TRIVIAL_CROSS_SET;
   }
 
@@ -393,11 +372,21 @@ static uint64_t play_scores_build(const Game *game,
     if (row_number_of_anchors[lane] == 0 || ((lane_mask >> lane) & 1) == 0) {
       continue;
     }
-    gen.dir = lane / BOARD_DIM;
-    gen.row_squares = board_get_row_cache(lanes, lane % BOARD_DIM, gen.dir);
+    gen.play.dir = lane / BOARD_DIM;
+    gen.play.lane_index = lane % BOARD_DIM;
+    gen.play.lane =
+        board_get_row_cache(lanes, gen.play.lane_index, gen.play.dir);
     int last_anchor_col = BOARD_DIM;
     for (int col = 0; col < BOARD_DIM; col++) {
-      if (!square_get_anchor(&gen.row_squares[col])) {
+      if (!square_get_anchor(&gen.play.lane[col])) {
+        continue;
+      }
+      if (anchor_filters != NULL && ((anchor_filters[lane] >> col) & 1U) == 0) {
+        // Not built, but still the left bound of the next anchor's plays.
+        last_anchor_col = col;
+        if (!play_scores_gen_is_empty(&gen, col)) {
+          last_anchor_col++;
+        }
         continue;
       }
       PlayScoresAnchor *anchor = &anchors[number_of_anchors++];
@@ -410,7 +399,7 @@ static uint64_t play_scores_build(const Game *game,
       if (!anchor->on_tile) {
         gen.current_anchor_col = col;
         gen.anchor_right_extension_set =
-            square_get_right_extension_set(&gen.row_squares[col]);
+            square_get_right_extension_set(&gen.play.lane[col]);
         if (gen.tiles_left > 0) {
           anchor->first_tiles =
               play_scores_gen_placeable(&gen, col, root_list_tiles);
@@ -448,14 +437,15 @@ static uint64_t play_scores_build(const Game *game,
       anchor_idx++;
     }
     const PlayScoresAnchor *anchor = &anchors[anchor_idx];
-    gen.dir = anchor->lane / BOARD_DIM;
-    gen.row_squares =
-        board_get_row_cache(lanes, anchor->lane % BOARD_DIM, gen.dir);
+    gen.play.dir = anchor->lane / BOARD_DIM;
+    gen.play.lane_index = anchor->lane % BOARD_DIM;
+    gen.play.lane =
+        board_get_row_cache(lanes, gen.play.lane_index, gen.play.dir);
     gen.current_anchor_col = anchor->col;
     gen.last_anchor_col = anchor->last_anchor_col;
     gen.anchor_right_extension_set =
-        square_get_right_extension_set(&gen.row_squares[anchor->col]);
-    gen.tiles_played = 0;
+        square_get_right_extension_set(&gen.play.lane[anchor->col]);
+    gen.play.tiles_played = 0;
     const uint64_t group_mask =
         play_scores_gen_group_mask(group, second_tile_groups, ld_size);
     if (anchor->on_tile) {
@@ -482,14 +472,83 @@ static uint64_t play_scores_build(const Game *game,
   return gen.number_of_plays;
 }
 
+uint64_t census_play_scores_search(const Game *game, int player_index,
+                                   const uint8_t *unseen_tally,
+                                   census_play_recorder_func_t record,
+                                   void *record_context) {
+  _Atomic int next_unit;
+  atomic_init(&next_unit, 0);
+  return play_scores_search(game, player_index, unseen_tally, record,
+                            record_context, 1, &next_unit, CENSUS_ALL_LANES,
+                            NULL);
+}
+
+// What the census's recorder raises: the play scores of the lattice, over the
+// pool unseen_tally, with num_blanks blanks to spell with. With shared, other
+// threads raise them too; with touched set, a sparse build lists the scores
+// it raises.
+typedef struct PlayScoresRecordContext {
+  const CensusLattice *lattice;
+  Equity *play_scores;
+  const uint8_t *unseen_tally;
+  int num_blanks;
+  bool shared;
+  CensusTouched *touched;
+} PlayScoresRecordContext;
+
+static PlayScoresRecordContext
+play_scores_record_context(const CensusLattice *lattice,
+                           const uint8_t *unseen_tally, Equity *play_scores,
+                           bool shared, CensusTouched *touched) {
+  const int num_blanks = unseen_tally[BLANK_MACHINE_LETTER] < RACK_SIZE
+                             ? unseen_tally[BLANK_MACHINE_LETTER]
+                             : RACK_SIZE;
+  return (PlayScoresRecordContext){.lattice = lattice,
+                                   .play_scores = play_scores,
+                                   .unseen_tally = unseen_tally,
+                                   .num_blanks = num_blanks,
+                                   .shared = shared,
+                                   .touched = touched};
+}
+
+// Raises play_scores for the multiset the play places, and for each of its
+// spellings with blanks.
+static void play_scores_record(const CensusPlay *play, void *context) {
+  const PlayScoresRecordContext *record_context = context;
+  CensusPlacedTile placed[RACK_SIZE];
+  for (int tile_idx = 0; tile_idx < play->tiles_played; tile_idx++) {
+    placed[tile_idx] = (CensusPlacedTile){
+        .ml = (uint8_t)play->tiles[tile_idx].ml,
+        .blank_drop = census_play_blank_drop(play, tile_idx)};
+  }
+  if (record_context->shared) {
+    census_record_blank_variants_shared(
+        record_context->lattice, record_context->play_scores, play->score,
+        placed, play->tiles_played, record_context->unseen_tally,
+        record_context->num_blanks);
+    return;
+  }
+  if (record_context->touched != NULL) {
+    census_record_blank_variants_touched(
+        record_context->lattice, record_context->play_scores,
+        record_context->touched, play->score, placed, play->tiles_played,
+        record_context->unseen_tally, record_context->num_blanks);
+    return;
+  }
+  census_record_blank_variants(record_context->lattice,
+                               record_context->play_scores, play->score, placed,
+                               play->tiles_played, record_context->unseen_tally,
+                               record_context->num_blanks);
+}
+
 uint64_t census_play_scores_build(const Game *game,
                                   const CensusLattice *lattice,
                                   const uint8_t *unseen_tally,
                                   Equity *play_scores) {
-  _Atomic int next_unit;
-  atomic_init(&next_unit, 0);
-  return play_scores_build(game, lattice, unseen_tally, play_scores, false, 1,
-                           &next_unit, CENSUS_ALL_LANES);
+  PlayScoresRecordContext record_context = play_scores_record_context(
+      lattice, unseen_tally, play_scores, false, NULL);
+  return census_play_scores_search(game, 0, unseen_tally, play_scores_record,
+                                   &record_context);
 }
 
 uint64_t
@@ -497,6 +556,23 @@ census_play_scores_build_claimed(const Game *game, const CensusLattice *lattice,
                                  const uint8_t *unseen_tally,
                                  Equity *play_scores, int second_tile_groups,
                                  _Atomic int *next_unit, uint64_t lane_mask) {
-  return play_scores_build(game, lattice, unseen_tally, play_scores, true,
-                           second_tile_groups, next_unit, lane_mask);
+  PlayScoresRecordContext record_context = play_scores_record_context(
+      lattice, unseen_tally, play_scores, true, NULL);
+  return play_scores_search(game, 0, unseen_tally, play_scores_record,
+                            &record_context, second_tile_groups, next_unit,
+                            lane_mask, NULL);
+}
+
+uint64_t census_play_scores_build_anchor(
+    const Game *game, const CensusLattice *lattice, const uint8_t *unseen_tally,
+    Equity *play_scores, CensusTouched *touched, int lane, int col) {
+  uint32_t anchor_filters[BOARD_DIM * 2] = {0};
+  anchor_filters[lane] = UINT32_C(1) << col;
+  _Atomic int next_unit;
+  atomic_init(&next_unit, 0);
+  PlayScoresRecordContext record_context = play_scores_record_context(
+      lattice, unseen_tally, play_scores, false, touched);
+  return play_scores_search(game, 0, unseen_tally, play_scores_record,
+                            &record_context, 1, &next_unit, (uint64_t)1 << lane,
+                            anchor_filters);
 }

@@ -32,13 +32,17 @@
 #include "test_platform.h"
 #include "test_util.h"
 #include <assert.h>
+#include <math.h>
 #include <stdatomic.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 
-enum { CENSUS_BUILD_THREADS = 3 };
+enum {
+  // The threads that share a claimed build's units.
+  CLAIMED_BUILD_THREADS = 3,
+};
 
 static CensusLattice *create_lattice_or_die(int num_letters, int rack_size) {
   ErrorStack *error_stack = error_stack_create();
@@ -89,19 +93,21 @@ static void test_lattice_ranks_round_trip(void) {
        index += 997) {
     census_lattice_unrank(lattice, index, tally);
     assert(census_lattice_rank(lattice, tally) == index);
-    // Incremental rank terms must also handle absent letters.
+    // the same multiset as its letters and counts, with an absent letter
+    // among them
     const int num_letters = census_lattice_get_num_letters(lattice);
-    int remaining = 0;
+    MachineLetter letters[CENSUS_MAX_LETTERS] = {0};
+    uint8_t counts[CENSUS_MAX_LETTERS] = {0};
+    int number_of_letters = 0;
     for (int ml = 0; ml < num_letters; ml++) {
-      remaining += tally[ml];
+      if (tally[ml] > 0 || ml == num_letters / 2) {
+        letters[number_of_letters] = (MachineLetter)ml;
+        counts[number_of_letters] = tally[ml];
+        number_of_letters++;
+      }
     }
-    uint32_t rank = census_lattice_get_size_start(lattice, remaining);
-    for (int ml = 0; ml < num_letters; ml++) {
-      rank += census_lattice_rank_term(lattice, (MachineLetter)ml, remaining,
-                                       tally[ml]);
-      remaining -= tally[ml];
-    }
-    assert(rank == index);
+    assert(census_lattice_rank_sparse(lattice, letters, counts,
+                                      number_of_letters) == index);
   }
   memset(tally, 0, sizeof(tally));
   tally[3] = 8;
@@ -561,6 +567,67 @@ static void test_leaves_from_klv(void) {
   config_destroy(config);
 }
 
+// The expected best of a drawn rack is the same on any number of threads, and
+// is census_apportion's sum at the empty multiset, which every drawn rack
+// adds to.
+static void test_expected_best_matches_apportion(void) {
+  Config *config = config_create_or_die("set -lex CSW21 -wmp false");
+  Game *game = config_game_create(config);
+  const int num_letters = ld_get_size(game_get_ld(game));
+  CensusLattice *lattice = create_lattice_or_die(num_letters, RACK_SIZE);
+  const uint32_t size = census_lattice_get_size(lattice);
+  CensusAddTable *add_table = census_add_table_create(lattice, 8);
+  Equity *leave = malloc_or_die(sizeof(Equity) * size);
+  Equity *leave_max_over_subsets = malloc_or_die(sizeof(Equity) * size);
+  Equity *play_scores = malloc_or_die(sizeof(Equity) * size);
+  Equity *rack_best = malloc_or_die(sizeof(Equity) * size);
+  CensusSums *sums = malloc_or_die(sizeof(CensusSums) * size);
+  census_leaves_from_klv(lattice, player_get_klv(game_get_player(game, 0)),
+                         leave);
+  census_max_over_subsets(lattice, add_table, leave, leave_max_over_subsets);
+  const char *cgps[] = {DOUG_V_EMELY_CGP, VS_ANDY_CGP, NOAH_VS_PETER_CGP};
+  for (size_t cgp_idx = 0; cgp_idx < sizeof(cgps) / sizeof(cgps[0]);
+       cgp_idx++) {
+    load_cgp_or_die(game, cgps[cgp_idx]);
+    uint8_t unseen[CENSUS_MAX_LETTERS];
+    census_get_unseen_tally(game, unseen);
+    for (uint32_t index = 0; index < size; index++) {
+      play_scores[index] = 0;
+    }
+    census_play_scores_build(game, lattice, unseen, play_scores);
+    const CensusApportionArgs args = {
+        .lattice = lattice,
+        .add_table = add_table,
+        .play_scores = play_scores,
+        .leave = leave,
+        .leave_max_over_subsets = leave_max_over_subsets,
+        .unseen_tally = unseen,
+        .null_leave = false,
+        .superset_sum = true,
+        .scatter = true,
+    };
+    CensusSums serial;
+    census_expected_best(&args, rack_best, &serial, 1);
+    CensusSums threaded;
+    census_expected_best(&args, rack_best, &threaded, 4);
+    assert(serial.num == threaded.num);
+    assert(serial.den == threaded.den);
+    memset(sums, 0, sizeof(CensusSums) * size);
+    census_apportion(&args, sums, rack_best);
+    assert(fabs(serial.den - sums[0].den) <= 1e-9 * sums[0].den);
+    assert(fabs(serial.num - sums[0].num) <= 1e-9 * fabs(sums[0].num));
+  }
+  free(sums);
+  free(rack_best);
+  free(play_scores);
+  free(leave_max_over_subsets);
+  free(leave);
+  census_add_table_destroy(add_table);
+  census_lattice_destroy(lattice);
+  game_destroy(game);
+  config_destroy(config);
+}
+
 typedef struct ClaimedBuildThread {
   const Game *game;
   const CensusLattice *lattice;
@@ -625,8 +692,8 @@ static void test_play_scores_claimed_units_match_serial(void) {
       for (uint32_t index = 0; index < size; index++) {
         shared[index] = CENSUS_UNPLAYABLE;
       }
-      ClaimedBuildThread threads[CENSUS_BUILD_THREADS];
-      for (int thread_idx = 0; thread_idx < CENSUS_BUILD_THREADS;
+      ClaimedBuildThread threads[CLAIMED_BUILD_THREADS];
+      for (int thread_idx = 0; thread_idx < CLAIMED_BUILD_THREADS;
            thread_idx++) {
         threads[thread_idx] = (ClaimedBuildThread){
             .game = game,
@@ -641,7 +708,7 @@ static void test_play_scores_claimed_units_match_serial(void) {
                         &threads[thread_idx]);
       }
       uint64_t plays = 0;
-      for (int thread_idx = 0; thread_idx < CENSUS_BUILD_THREADS;
+      for (int thread_idx = 0; thread_idx < CLAIMED_BUILD_THREADS;
            thread_idx++) {
         cpthread_join(threads[thread_idx].cpthread_id);
         plays += threads[thread_idx].number_of_plays;
@@ -754,5 +821,6 @@ void test_census(void) {
   test_play_scores_match_movegen();
   test_play_scores_claimed_units_match_serial();
   test_leaves_from_klv();
+  test_expected_best_matches_apportion();
   test_census_command();
 }

@@ -61,6 +61,12 @@ void test_win_pct(void) {
   load_and_exec_config_or_die(config, "set -winpct default");
   win_pct = load_config_win_pcts_or_die(config);
   assert(strings_equal(win_pct_get_name(win_pct), "winpct_english"));
+
+  // A distribution named in another case, as a GCG's #tile-distribution
+  // English names it, still finds its table, as it finds its own file.
+  load_and_exec_config_or_die(config, "set -ld English");
+  win_pct = load_config_win_pcts_or_die(config);
+  assert(strings_equal(win_pct_get_name(win_pct), "winpct_english"));
   config_destroy(config);
 }
 

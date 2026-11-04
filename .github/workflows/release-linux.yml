@@ -170,16 +170,23 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       # The Windows runners' copy of the data, which has its symlinks turned
-      # into files and so restores on any operating system.
+      # into files and so restores on any operating system. run-tests.yml
+      # saves it, in parallel with this workflow, so a push that changes its
+      # key can get here first; the data is then made as run-tests.yml makes
+      # it, rather than failing the release on a race.
       - name: Get the data cache
+        id: data-cache
         uses: actions/cache/restore@v4
         with:
           path: windows-data
           key: windows-data-files-33
           enableCrossOsArchive: true
-          fail-on-cache-miss: true
       - name: Put the data in place
+        if: steps.data-cache.outputs.cache-hit == 'true'
         run: mv windows-data/data windows-data/testdata .
+      - name: Download the data and convert lexica
+        if: steps.data-cache.outputs.cache-hit != 'true'
+        run: ./download_data.sh && ./convert_lexica.sh
       - uses: actions/download-artifact@v4
         with:
           name: release-${{ matrix.name }}

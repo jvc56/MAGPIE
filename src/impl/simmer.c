@@ -81,6 +81,20 @@ static void sim_args_set_bag_cycle_bai_options(SimArgs *sim_args) {
   sim_args->bai_options.draws_per_sample = rotations;
 }
 
+// Whether the sim's rollouts use PAT: on unless the rollout PAT settings
+// leave it out, for either player that has PAT weights.
+static bool sim_rollout_pat_is_on(const SimArgs *sim_args) {
+  if (sim_args->pat_rollout_disabled) {
+    return false;
+  }
+  for (int player_index = 0; player_index < 2; player_index++) {
+    if (player_get_pat(game_get_player(sim_args->game, player_index)) != NULL) {
+      return true;
+    }
+  }
+  return false;
+}
+
 void simulate(SimArgs *sim_args, SimCtx **sim_ctx, SimResults *sim_results,
               ErrorStack *error_stack) {
   if (!sim_args->move_list || move_list_get_count(sim_args->move_list) == 0) {
@@ -112,6 +126,17 @@ void simulate(SimArgs *sim_args, SimCtx **sim_ctx, SimResults *sim_results,
                        err_msg);
       return;
     }
+  }
+
+  // The census rollout's equities leave out PAT's term, so the two do not
+  // mix: a sim steered by the census plays its rollouts without PAT.
+  if (sim_args->use_census_rollout && sim_rollout_pat_is_on(sim_args)) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_SIM_CENSUS_WITH_PAT,
+        string_duplicate("cannot steer rollouts with the census while their "
+                         "PAT is on: set patrollout to false, or scensus to "
+                         "false"));
+    return;
   }
 
   if (*sim_ctx == NULL) {

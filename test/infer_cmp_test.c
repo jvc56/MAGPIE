@@ -8,6 +8,7 @@
 #include "../src/def/thread_control_defs.h"
 #include "../src/ent/alias_method.h"
 #include "../src/ent/bag.h"
+#include "../src/ent/board.h"
 #include "../src/ent/equity.h"
 #include "../src/ent/game.h"
 #include "../src/ent/inference_args.h"

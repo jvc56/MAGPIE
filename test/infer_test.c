@@ -1498,22 +1498,28 @@ static void infer_for_threads_test(InferenceCtx **ctx, const Config *config,
   assert(status == ERROR_STATUS_SUCCESS);
 }
 
-// Census does not call move generation once per candidate rack. Keep the
-// worker-accounting contract covered explicitly on a three-unknown-tile
-// placement, which uses per-rack move generation.
+// The census path does not generate moves once per possible rack, so the
+// contribution count's lower bound leaves inference out; the per-rack path
+// still counts one generation per rack on every worker. This placement leaves
+// three unknown tiles, which take the per-rack path.
 static void test_infer_movegen_accounting(void) {
   const int thread_counts[] = {1, 3};
-  for (int thread_idx = 0; thread_idx < 2; thread_idx++) {
-    Config *config = create_config_for_threads_test(thread_counts[thread_idx]);
+  const int number_of_thread_counts =
+      (int)(sizeof(thread_counts) / sizeof(thread_counts[0]));
+  for (int thread_count_idx = 0; thread_count_idx < number_of_thread_counts;
+       thread_count_idx++) {
+    Config *config =
+        create_config_for_threads_test(thread_counts[thread_count_idx]);
     InferenceResults *results = inference_results_create(NULL);
     gen_start_counting_movegens();
     const uint64_t before = gen_get_movegen_count();
     infer_for_threads_test(NULL, config, false, results);
     const uint64_t movegens = gen_get_movegen_count() - before;
     gen_stop_counting_movegens();
-    const AliasMethod *alias = inference_results_get_alias_method(results);
-    assert(alias->num_items > 0);
-    assert(movegens >= alias->num_items);
+    const AliasMethod *alias_method =
+        inference_results_get_alias_method(results);
+    assert(alias_method->num_items > 0);
+    assert(movegens >= alias_method->num_items);
     inference_results_destroy(results);
     config_destroy(config);
   }
