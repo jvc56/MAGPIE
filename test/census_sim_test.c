@@ -295,22 +295,15 @@ static void time_census_sim_turns(const Config *config) {
 
 typedef struct CensusSimMatchWorker {
   const Game *game;
-  int number_of_candidates;
-  int min_bag;
-  int number_of_pairs;
-  int number_of_workers;
   _Atomic int *next_pair;
+  cpthread_t cpthread_id;
   // results, from the census player's side
   double spread_sum;
   double spread_sum_of_squares;
   // over pairs, the mean of the pair's two spreads
   double pair_sum;
   double pair_sum_of_squares;
-  int pairs;
   double wins;
-  int games;
-  int census_moves;
-  int changed_moves;
   // per census move, the chosen move's expected opponent reply, and its own
   // score and leave, less the static choice's
   double reply_change_sum;
@@ -321,9 +314,16 @@ typedef struct CensusSimMatchWorker {
   double opponent_points;
   double baseline_census_seat_points;
   double baseline_opponent_seat_points;
-  int opponent_moves;
   double seconds_valuing;
-  cpthread_t cpthread_id;
+  int number_of_candidates;
+  int min_bag;
+  int number_of_pairs;
+  int number_of_workers;
+  int pairs;
+  int games;
+  int census_moves;
+  int changed_moves;
+  int opponent_moves;
 } CensusSimMatchWorker;
 
 // Plays one game from seed, the census player as census_index (none if it is
@@ -355,8 +355,8 @@ static Equity play_census_game(CensusSimMatchWorker *worker, Game *game,
       census_sim_set_position(sim, game);
       int best_idx = 0;
       Equity best_value = EQUITY_MIN_VALUE;
-      Equity values[CENSUS_SIM_MAX_CANDIDATES];
-      Equity replies[CENSUS_SIM_MAX_CANDIDATES];
+      Equity values[CENSUS_SIM_MAX_CANDIDATES] = {0};
+      Equity replies[CENSUS_SIM_MAX_CANDIDATES] = {0};
       for (int move_idx = 0; move_idx < count; move_idx++) {
         values[move_idx] = census_sim_value_move(
             sim, game, &candidates[move_idx], scratch, &replies[move_idx]);
