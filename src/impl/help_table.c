@@ -67,6 +67,7 @@ static const HelpOptionRow sim_rows[] = {
     HELP_ROW(CUTOFF),
     HELP_ROW(WIN_PCT),
     HELP_ROW(USE_HEAT_MAP),
+    HELP_ROW(SIM_CENSUS_ROLLOUT),
 };
 
 static const HelpOptionRow inference_rows[] = {

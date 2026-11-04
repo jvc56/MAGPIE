@@ -24,6 +24,7 @@
 #include "../str/sim_string.h"
 #include "../util/io_util.h"
 #include "bai_logger.h"
+#include "census_rollout.h"
 #include "gameplay.h"
 #include <math.h>
 #include <stdatomic.h>
@@ -415,6 +416,9 @@ typedef struct SimmerWorker {
   // salted anew for each simulation, whose lexica may not be the last one's.
   CrossSetCache *cross_set_cache;
   uint64_t cross_set_salt;
+  // The census rollout's state for this worker's rollouts, made by the first
+  // sim that uses the census (see SimArgs.use_census_rollout).
+  CensusRolloutWorker *census_rollout_worker;
 } SimmerWorker;
 
 // The step of a simulation worker's cross set salt: odd, so a worker's
@@ -455,6 +459,10 @@ typedef struct Simmer {
   // The best moves the current simulation's playouts found, by rack, shared
   // by all of its workers.
   BestMoveCarry *best_move_carry;
+  // Whether this sim's rollouts are steered by the census, which the first
+  // sim that uses it makes (SimArgs.use_census_rollout).
+  bool use_census_rollout;
+  CensusRollout *census_rollout;
 } Simmer;
 
 // A worker's copy of the game plays the sim's rollouts, so both of its
@@ -486,6 +494,7 @@ SimmerWorker *simmer_create_worker(const SimArgs *sim_args) {
   game_set_cross_set_cache(simmer_worker->game, simmer_worker->cross_set_cache);
   simmer_worker->move_list = move_list_create(1);
   simmer_worker->prng = prng_create(0);
+  simmer_worker->census_rollout_worker = NULL;
   return simmer_worker;
 }
 
@@ -505,6 +514,7 @@ void simmer_worker_destroy(SimmerWorker *simmer_worker) {
   cross_set_cache_destroy(simmer_worker->cross_set_cache);
   move_list_destroy(simmer_worker->move_list);
   prng_destroy(simmer_worker->prng);
+  census_rollout_worker_destroy(simmer_worker->census_rollout_worker);
   free(simmer_worker);
 }
 
@@ -575,6 +585,11 @@ static double sim_rollout(const Simmer *simmer, SimmerWorker *simmer_worker,
   }
   // play move
   play_move(simmed_play_get_move(simmed_play), game, NULL);
+  if (simmer->use_census_rollout) {
+    census_rollout_worker_set_candidate(simmer_worker->census_rollout_worker,
+                                        simmer->census_rollout,
+                                        simmed_play_get_move(simmed_play));
+  }
   sim_results_increment_node_count(sim_results);
   game_set_backup_mode(game, BACKUP_MODE_OFF);
   // further plies will NOT be backed up.
@@ -587,8 +602,13 @@ static double sim_rollout(const Simmer *simmer, SimmerWorker *simmer_worker,
       break;
     }
 
-    const Move *best_play = get_top_equity_move_with_carry(
-        game, move_list, simmer->best_move_carry);
+    const Move *best_play =
+        simmer->use_census_rollout
+            ? census_rollout_get_best_move(simmer_worker->census_rollout_worker,
+                                           simmer->census_rollout, game,
+                                           move_list, ply)
+            : get_top_equity_move_with_carry(game, move_list,
+                                             simmer->best_move_carry);
     rack_copy(&spare_rack, player_get_rack(player_on_turn));
 
     // On the final ply the resulting cross-sets are never read (no further move
@@ -831,7 +851,31 @@ void rv_sim_destroy(RandomVariables *rvs) {
   }
   free(simmer->workers);
   best_move_carry_destroy(simmer->best_move_carry);
+  census_rollout_destroy(simmer->census_rollout);
   free(simmer);
+}
+
+// At the start of a sim steered by the census: the census of its position and
+// candidates, built on the sim's threads, and a census worker for each of its
+// workers.
+static void simmer_prepare_census_rollout(Simmer *simmer,
+                                          const SimArgs *sim_args) {
+  simmer->use_census_rollout = sim_args->use_census_rollout;
+  if (!simmer->use_census_rollout) {
+    return;
+  }
+  if (simmer->census_rollout == NULL) {
+    simmer->census_rollout = census_rollout_create(simmer->num_threads);
+  }
+  census_rollout_prepare(simmer->census_rollout, sim_args->game,
+                         sim_args->move_list);
+  for (int thread_index = 0; thread_index < simmer->num_threads;
+       thread_index++) {
+    SimmerWorker *simmer_worker = simmer->workers[thread_index];
+    if (simmer_worker->census_rollout_worker == NULL) {
+      simmer_worker->census_rollout_worker = census_rollout_worker_create();
+    }
+  }
 }
 
 // True when the sim args request a resume and the existing results are
@@ -919,6 +963,8 @@ RandomVariables *rv_sim_create(RandomVariables *rvs, const SimArgs *sim_args,
                       sim_args->seed, sim_args->use_heat_map);
   }
   simmer->sim_results = sim_results;
+  simmer->census_rollout = NULL;
+  simmer_prepare_census_rollout(simmer, sim_args);
 
   rvs->data = simmer;
   return rvs;
@@ -975,6 +1021,7 @@ void rv_sim_reset(RandomVariables *rvs, const SimArgs *sim_args) {
                       sim_args->num_plies, sim_args->seed,
                       sim_args->use_heat_map);
   }
+  simmer_prepare_census_rollout(simmer, sim_args);
 }
 
 RandomVariables *rvs_create(const RandomVariablesArgs *rvs_args) {
