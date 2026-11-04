@@ -925,7 +925,9 @@ static void simmer_prepare_rollouts(Simmer *simmer, const SimArgs *sim_args) {
     return;
   }
   if (simmer->census_rollout == NULL) {
-    const CensusRolloutOptions options = census_rollout_default_options();
+    CensusRolloutOptions options = census_rollout_default_options();
+    // The sim's threads would wait for the builds anyway.
+    options.build_threads = simmer->num_threads;
     simmer->census_rollout = census_rollout_create(&options);
   }
   census_rollout_prepare(simmer->census_rollout, sim_args->game,

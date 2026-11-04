@@ -441,8 +441,8 @@ static UnitScores *unit_scores_create(const Game *game,
         play_scores[index] = CENSUS_UNPLAYABLE;
       }
       if (by_anchor) {
-        census_play_scores_build_anchor(game, lattice, pool, play_scores, lane,
-                                        col);
+        census_play_scores_build_anchor(game, lattice, pool, play_scores, NULL,
+                                        lane, col);
       } else {
         census_play_scores_build_lanes(game, lattice, pool, play_scores,
                                        (uint64_t)1 << lane);
@@ -1133,6 +1133,7 @@ void test_census_rollout_lab(void) {
                               "load testdata/gcgs/success_long_game.gcg");
 
   crl_set_lazy_carry(env_int("CRL_LAZY_CARRY", 1) != 0);
+  crl_set_build_threads(env_int("CRL_BUILD_THREADS", 1));
   if (env_int("CRL_SCENSUS", 0)) {
     check_sim_census(config, turns, number_of_turns, plies_list,
                      number_of_plies, iterations);

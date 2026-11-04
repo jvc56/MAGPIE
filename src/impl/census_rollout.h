@@ -47,12 +47,16 @@ typedef struct CensusRolloutOptions {
   // Whether the census's generations use the sim's best-move carry. Without
   // the carry they are faster: its buckets thrash once racks stop recurring.
   bool with_carry;
+  // The threads that build a sim's tables at its start, the root's and each
+  // candidate's: each holds a lattice-sized scratch table.
+  int build_threads;
 } CensusRolloutOptions;
 
 static inline CensusRolloutOptions census_rollout_default_options(void) {
   return (CensusRolloutOptions){.max_ply = CENSUS_ROLLOUT_DEFAULT_MAX_PLY,
                                 .low_bag = true,
-                                .with_carry = false};
+                                .with_carry = false,
+                                .build_threads = 1};
 }
 
 // The census of one sim at a time: built by census_rollout_prepare, then only

@@ -111,6 +111,9 @@ const CrlLazyStats *crl_get_lazy_stats(void);
 // Whether the census rollout's generations use the best-move carry (the
 // default) or are plain.
 void crl_set_lazy_carry(bool with_carry);
+// The threads that build the census's tables at each sim's start (1 by
+// default).
+void crl_set_build_threads(int build_threads);
 
 typedef struct CrlPlyStats {
   uint64_t queries;

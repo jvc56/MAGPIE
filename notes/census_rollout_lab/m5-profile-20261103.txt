@@ -174,3 +174,60 @@ sim. format.py clean; cppcheck's remaining findings are census_sim's (#939);
 clang-tidy on census_rollout.c and the lab: no findings beyond the macOS
 environment's (endian.h, best_move_carry.h under -D__linux__); the driver
 test file's findings predate this (atoi, fflush, widening).
+
+=====================================================================
+FOUR MORE EXPERIMENTS (later on 2026-11-03; each exact before timing)
+=====================================================================
+Base: f864d387. Each built behind a switch against the same base, verified
+(E2E single-thread 2- and 6-ply counts identical, -scensus identical
+results, E2E on 10 threads), and timed on the fixed profile work in
+forward/reverse order, four runs each.
+
+Measured first: the lattice has 5,379,616 multisets (4,272,048 of size 7),
+so each dense offsets array was 21.5 MB; a root table uses 330k distinct
+played ranks at turn 14 and 1-15k later, a candidate's fewer. Candidate
+builds cost twice the root's (0.188 s vs 0.093 s at turn 14) and about
+20 ms even late, when they hold a few thousand entries: the fixed cost of
+memsetting, prefix-summing and copying a 21.5 MB array per table.
+
+1. Re-hash only changed lanes (DROPPED): the rollout's board undo record
+   holds every square changed since the position (the census's root), so a
+   lane none of whose squares it holds keeps the root's hash. But the
+   candidate and a ply or two touch most lanes with anchors: hashing fell
+   only from 1.81% to 1.68% of cycles. 2-ply -0.1%, 6-ply +0.5%. Hashing
+   against the candidate's board instead is unsound: the record keeps a
+   square once, so a square the candidate changed and a ply changed again
+   would be missed.
+2. Table-driven splits per count pattern (DROPPED): each split's ranks
+   from a fixed-length loop over the rack's letters (127 patterns, under
+   64 KB). Mispredicts unchanged (19,634 vs 19,600 samples): since the
+   two-pass gather, the odometer's exits were not where the gather
+   mispredicted. More loads: 2-ply +1.2%, 6-ply 0.0%.
+3. Smaller offset tables (KEPT, as a rank bitmap): an open-addressing hash
+   of the ranks with entries was 5.0% / 2.1% SLOWER (its probe branch
+   mispredicts; builds 22% cheaper). A bitmap of the ranks with entries
+   (672 KB), the set bits before each word (336 KB) and one first|count
+   word per rank with entries finds a rank's run with three loads and a
+   popcount, no branch; entries are radix-sorted by rank instead of
+   counted into a lattice-sized array. 2-ply -1.6/-2.0%, 6-ply
+   -1.0/-1.2%; builds 1.14G -> 0.89G cycles; gather about the same; peak
+   memory 2.54 -> 2.34 GB.
+4. Parallel builds (KEPT): the census_set_touched global is gone (touched
+   travels through census_play_scores_build_anchor and
+   census_record_blank_variants_touched), each build thread has its own
+   scratch, and boards' tables are claimed from an atomic counter, root
+   first. Option build_threads; sims use their own thread count; the lab
+   defaults to 1 (CRL_BUILD_THREADS). Single-thread work with 8 build
+   threads: 2-ply -5.4%, 6-ply -3.2% vs base (bitmap included). 10-thread
+   sims, 2-ply 50000 it: census 0.627 s -> 0.490 s with 10 build threads.
+   Peak memory with 8 builders 2.50 GB.
+
+Final vs f864d387:
+  single thread, 1 build thread: 2-ply -1.8%, 6-ply -1.0%
+  single thread, 8 build threads: 2-ply -5.5%, 6-ply -2.2%
+  10-thread sims (lab E2E, 2-ply): census 0.720 s -> 0.509 s; vs the
+    default sim 1.17x -> 1.65x
+  -scensus, single thread: 2.05x at 2-ply, 1.28x at 6-ply (was 2.02x,
+    1.26x), results identical at 50000 iterations
+The sim test's test_sim_top_two_consistency fails about 2 runs in 10 at
+the base d4061269 too (10 threads, top-two sampling): flaky before this.

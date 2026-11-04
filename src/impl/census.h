@@ -130,18 +130,21 @@ void census_record_blank_variants_shared(const CensusLattice *lattice,
                                          const uint8_t *unseen_tally,
                                          int num_blanks);
 
-// The ranks a sparse play-scores build
-// raised from CENSUS_UNPLAYABLE (see census_set_touched).
+// The ranks a sparse play-scores build raised from CENSUS_UNPLAYABLE (see
+// census_record_blank_variants_touched).
 typedef struct CensusTouched {
   uint32_t *ranks;
   uint32_t count;
   uint32_t capacity;
 } CensusTouched;
 
-// One thread only: records into touched
-// every play score a non-shared build raises from CENSUS_UNPLAYABLE, until
-// set to NULL.
-void census_set_touched(CensusTouched *touched);
+// census_record_blank_variants that also records into touched the rank of
+// every play score it raises from CENSUS_UNPLAYABLE, so that a sparse build
+// resets only what it wrote.
+void census_record_blank_variants_touched(
+    const CensusLattice *lattice, Equity *play_scores, CensusTouched *touched,
+    Equity real_score, CensusPlacedTile *placed, int number_of_placed,
+    const uint8_t *unseen_tally, int num_blanks);
 
 // For experiments (the census rollout lab test): raises best[R] to
 // play_scores[P] +

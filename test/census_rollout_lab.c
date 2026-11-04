@@ -100,7 +100,8 @@ typedef struct CensusRolloutLab {
 static CensusRolloutLab lab = {
     .census_options = {.max_ply = CENSUS_ROLLOUT_DEFAULT_MAX_PLY,
                        .low_bag = false,
-                       .with_carry = true}};
+                       .with_carry = true,
+                       .build_threads = 1}};
 
 crl_mode_t crl_get_mode(void) { return lab.mode; }
 
@@ -785,6 +786,10 @@ void crl_set_lazy_carry(bool with_carry) {
   lab.census_options.with_carry = with_carry;
 }
 
+void crl_set_build_threads(int build_threads) {
+  lab.census_options.build_threads = build_threads;
+}
+
 const CrlLazyStats *crl_get_lazy_stats(void) {
   if (lab.census != NULL) {
     const CensusRolloutBuildStats *build_stats =
@@ -811,7 +816,7 @@ const CrlLazyStats *crl_get_lazy_stats(void) {
 static bool crl_census_options_equal(const CensusRolloutOptions *a,
                                      const CensusRolloutOptions *b) {
   return a->max_ply == b->max_ply && a->low_bag == b->low_bag &&
-         a->with_carry == b->with_carry;
+         a->with_carry == b->with_carry && a->build_threads == b->build_threads;
 }
 
 static void crl_prepare(void *context, const Game *game,

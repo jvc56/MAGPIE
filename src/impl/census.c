@@ -365,13 +365,6 @@ typedef struct BlankRun {
   uint8_t forced;
 } BlankRun;
 
-// For the census rollout's sparse builds: when set, the ranks of the play
-// scores that a build on this thread raises from CENSUS_UNPLAYABLE, so that a
-// sparse build resets only what it wrote. Not thread safe; NULL otherwise.
-static CensusTouched *census_touched = NULL;
-
-void census_set_touched(CensusTouched *touched) { census_touched = touched; }
-
 typedef struct BlankVariantContext {
   const CensusLattice *lattice;
   Equity *play_scores;
@@ -382,6 +375,9 @@ typedef struct BlankVariantContext {
   int number_of_placed;
   const BlankRun *runs;
   int number_of_runs;
+  // If set, the ranks of the play scores this build raises from
+  // CENSUS_UNPLAYABLE, so that a sparse build resets only what it wrote.
+  CensusTouched *touched;
 } BlankVariantContext;
 
 // Chooses the blanks of runs run_idx and before; the runs after are chosen.
@@ -403,16 +399,14 @@ static void record_blank_variants_recursive(BlankVariantContext *context,
     if (context->shared) {
       catomic_max_int32(&context->play_scores[rank], value);
     } else if (value > context->play_scores[rank]) {
-      if (census_touched != NULL &&
-          context->play_scores[rank] == CENSUS_UNPLAYABLE) {
-        if (census_touched->count == census_touched->capacity) {
-          census_touched->capacity =
-              census_touched->capacity ? census_touched->capacity * 2 : 4096;
-          census_touched->ranks =
-              realloc_or_die(census_touched->ranks,
-                             sizeof(uint32_t) * census_touched->capacity);
+      CensusTouched *touched = context->touched;
+      if (touched != NULL && context->play_scores[rank] == CENSUS_UNPLAYABLE) {
+        if (touched->count == touched->capacity) {
+          touched->capacity = touched->capacity ? touched->capacity * 2 : 4096;
+          touched->ranks = realloc_or_die(touched->ranks,
+                                          sizeof(uint32_t) * touched->capacity);
         }
-        census_touched->ranks[census_touched->count++] = rank;
+        touched->ranks[touched->count++] = rank;
       }
       context->play_scores[rank] = value;
     }
@@ -468,7 +462,8 @@ static void sort_placed_tiles(CensusPlacedTile *placed, int number_of_placed) {
 
 static void record_blank_variants(const CensusLattice *lattice,
                                   Equity *play_scores, bool shared,
-                                  Equity real_score, CensusPlacedTile *placed,
+                                  CensusTouched *touched, Equity real_score,
+                                  CensusPlacedTile *placed,
                                   int number_of_placed,
                                   const uint8_t *unseen_tally, int num_blanks) {
   const int rack_size = lattice->rack_size;
@@ -508,7 +503,8 @@ static void record_blank_variants(const CensusLattice *lattice,
                                  .placed = placed,
                                  .number_of_placed = number_of_placed,
                                  .runs = runs,
-                                 .number_of_runs = number_of_runs};
+                                 .number_of_runs = number_of_runs,
+                                 .touched = touched};
   record_blank_variants_recursive(&context, number_of_runs - 1,
                                   num_blanks - total_forced, 0, 0, 0, 0);
 }
@@ -518,8 +514,16 @@ void census_record_blank_variants(const CensusLattice *lattice,
                                   CensusPlacedTile *placed,
                                   int number_of_placed,
                                   const uint8_t *unseen_tally, int num_blanks) {
-  record_blank_variants(lattice, play_scores, false, real_score, placed,
+  record_blank_variants(lattice, play_scores, false, NULL, real_score, placed,
                         number_of_placed, unseen_tally, num_blanks);
+}
+
+void census_record_blank_variants_touched(
+    const CensusLattice *lattice, Equity *play_scores, CensusTouched *touched,
+    Equity real_score, CensusPlacedTile *placed, int number_of_placed,
+    const uint8_t *unseen_tally, int num_blanks) {
+  record_blank_variants(lattice, play_scores, false, touched, real_score,
+                        placed, number_of_placed, unseen_tally, num_blanks);
 }
 
 void census_record_blank_variants_shared(const CensusLattice *lattice,
@@ -528,7 +532,7 @@ void census_record_blank_variants_shared(const CensusLattice *lattice,
                                          int number_of_placed,
                                          const uint8_t *unseen_tally,
                                          int num_blanks) {
-  record_blank_variants(lattice, play_scores, true, real_score, placed,
+  record_blank_variants(lattice, play_scores, true, NULL, real_score, placed,
                         number_of_placed, unseen_tally, num_blanks);
 }
 

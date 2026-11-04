@@ -1,5 +1,7 @@
 #include "census_rollout.h"
 
+#include "../compat/cpthread.h"
+#include "../compat/cpthread_defs.h"
 #include "../def/board_defs.h"
 #include "../def/equity_defs.h"
 #include "../def/letter_distribution_defs.h"
@@ -23,6 +25,7 @@
 #include "census_play_scores.h"
 #include "gameplay.h"
 #include "move_gen.h"
+#include <stdatomic.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -38,18 +41,37 @@ enum {
   CENSUS_ROLLOUT_MAX_SPLITS = 1 << RACK_SIZE,
   // Racks whose root-table bests a worker remembers (a power of two).
   CENSUS_ROLLOUT_ROOT_SLOTS = 1 << 13,
+  // A rank's run of entries in a table: its first entry in the low bits, its
+  // count of entries above them.
+  CENSUS_ROLLOUT_RUN_COUNT_SHIFT = 24,
+  CENSUS_ROLLOUT_RUN_MAX_COUNT = (1 << (32 - CENSUS_ROLLOUT_RUN_COUNT_SHIFT)),
+  // The threads that build a sim's tables, at most.
+  CENSUS_ROLLOUT_MAX_BUILD_THREADS = 16,
+  // The radix sort of a table's entries by rank: two digits.
+  CENSUS_ROLLOUT_RADIX_BITS = 12,
+  CENSUS_ROLLOUT_RADIX_SIZE = 1 << CENSUS_ROLLOUT_RADIX_BITS,
 };
 
 // A census board's per-anchor play scores: for every placed multiset P, the
-// anchors (units) it is played from and its best score from each.
+// anchors (units) it is played from and its best score from each, as entries
+// ordered by P's lattice rank. The tables are sparse (a few percent of the
+// lattice's ranks have entries), so a rank's run is found from a bitmap of
+// the ranks with entries rather than a lattice-sized array.
 typedef struct CensusRolloutTable {
   int number_of_units;
   int16_t unit_of[CENSUS_ROLLOUT_NUM_LANES][BOARD_DIM];
-  uint32_t *offsets;
   uint16_t *units;
   Equity *scores;
   uint32_t number_of_entries;
   uint32_t entries_capacity;
+  // The compact table: a bit for every rank, set for those with entries; by
+  // 64-bit word, the set bits before it; and for each set bit, in rank order,
+  // its rank's first entry and count of entries (see
+  // CENSUS_ROLLOUT_RUN_COUNT_SHIFT).
+  uint64_t *present;
+  uint32_t *word_runs;
+  uint32_t *runs;
+  uint32_t runs_capacity;
 } CensusRolloutTable;
 
 typedef struct CensusRolloutBoard {
@@ -63,11 +85,19 @@ typedef struct CensusRolloutBoard {
   // The anchors whose bests are the root table's: every anchor of the root,
   // and those of a candidate's board that the candidate leaves as they were.
   uint16_t from_root[CENSUS_ROLLOUT_NUM_LANES];
-  // The other anchors' scores.
+  // The other anchors' scores, and the anchors they are built for.
   CensusRolloutTable table;
+  uint16_t build_cols[CENSUS_ROLLOUT_NUM_LANES];
   // Its place among the candidates, which index each worker's lane memo.
   int index;
 } CensusRolloutBoard;
+
+// What a thread builds a table with.
+typedef struct CensusRolloutBuilder {
+  // Lattice-sized, CENSUS_UNPLAYABLE between builds.
+  Equity *scratch;
+  CensusTouched touched;
+} CensusRolloutBuilder;
 
 struct CensusRollout {
   CensusRolloutOptions options;
@@ -75,9 +105,8 @@ struct CensusRollout {
   // By lattice rank, the leave value of the multiset.
   Equity *leave;
   const KLV *leave_klv;
-  // Lattice-sized, CENSUS_UNPLAYABLE between builds.
-  Equity *scratch;
-  CensusTouched touched;
+  // One per thread that builds tables.
+  CensusRolloutBuilder builders[CENSUS_ROLLOUT_MAX_BUILD_THREADS];
   CensusRolloutBoard root;
   CensusRolloutBoard candidates[CENSUS_ROLLOUT_MAX_CANDIDATES];
   int number_of_candidates;
@@ -253,7 +282,9 @@ static void peg_by_tiles_played_for_bag(int number_of_tiles_in_bag,
 }
 
 static void census_rollout_table_destroy(CensusRolloutTable *table) {
-  free(table->offsets);
+  free(table->present);
+  free(table->word_runs);
+  free(table->runs);
   free(table->units);
   free(table->scores);
 }
@@ -281,8 +312,11 @@ void census_rollout_destroy(CensusRollout *census) {
   game_destroy(census->candidate_game);
   census_lattice_destroy(census->lattice);
   free(census->leave);
-  free(census->scratch);
-  free(census->touched.ranks);
+  for (int builder_idx = 0; builder_idx < CENSUS_ROLLOUT_MAX_BUILD_THREADS;
+       builder_idx++) {
+    free(census->builders[builder_idx].scratch);
+    free(census->builders[builder_idx].touched.ranks);
+  }
   free(census);
 }
 
@@ -310,10 +344,6 @@ static void census_rollout_ensure_lattice(CensusRollout *census,
   }
   const uint32_t size = census_lattice_get_size(census->lattice);
   census->leave = malloc_or_die(sizeof(Equity) * size);
-  census->scratch = malloc_or_die(sizeof(Equity) * size);
-  for (uint32_t index = 0; index < size; index++) {
-    census->scratch[index] = CENSUS_UNPLAYABLE;
-  }
 }
 
 static void census_rollout_table_append(CensusRolloutTable *table,
@@ -334,13 +364,129 @@ static void census_rollout_table_append(CensusRolloutTable *table,
   table->number_of_entries++;
 }
 
+// The entries of rank in a compact table, from first to last: none when its
+// bit is clear, without a branch.
+static void census_rollout_table_find(const CensusRolloutTable *table,
+                                      uint32_t rank, uint32_t *first,
+                                      uint32_t *last) {
+  const uint32_t word_idx = rank >> 6;
+  const int bit = (int)(rank & 63);
+  const uint64_t word = table->present[word_idx];
+  const uint32_t run_idx =
+      table->word_runs[word_idx] +
+      (uint32_t)__builtin_popcountll(word & ((UINT64_C(1) << bit) - 1));
+  const uint32_t run = table->runs[run_idx];
+  const uint32_t present = (uint32_t)(word >> bit) & 1;
+  *first = run & ((UINT32_C(1) << CENSUS_ROLLOUT_RUN_COUNT_SHIFT) - 1);
+  *last = *first + present * (run >> CENSUS_ROLLOUT_RUN_COUNT_SHIFT);
+}
+
+// One digit of an LSD radix sort of the entries by rank, from one set of
+// arrays into the other.
+static void census_rollout_radix_pass(uint32_t number_of_entries, int shift,
+                                      const uint32_t *from_ranks,
+                                      const uint16_t *from_units,
+                                      const Equity *from_scores,
+                                      uint32_t *to_ranks, uint16_t *to_units,
+                                      Equity *to_scores) {
+  uint32_t starts[CENSUS_ROLLOUT_RADIX_SIZE] = {0};
+  for (uint32_t entry = 0; entry < number_of_entries; entry++) {
+    starts[(from_ranks[entry] >> shift) & (CENSUS_ROLLOUT_RADIX_SIZE - 1)]++;
+  }
+  uint32_t total = 0;
+  for (int digit = 0; digit < CENSUS_ROLLOUT_RADIX_SIZE; digit++) {
+    const uint32_t count = starts[digit];
+    starts[digit] = total;
+    total += count;
+  }
+  for (uint32_t entry = 0; entry < number_of_entries; entry++) {
+    const uint32_t position = starts[(from_ranks[entry] >> shift) &
+                                     (CENSUS_ROLLOUT_RADIX_SIZE - 1)]++;
+    to_ranks[position] = from_ranks[entry];
+    to_units[position] = from_units[entry];
+    to_scores[position] = from_scores[entry];
+  }
+}
+
+// Orders the table's entries by rank and indexes each rank's run of them.
+static void census_rollout_table_compact(CensusRolloutTable *table,
+                                         const CensusLattice *lattice,
+                                         uint32_t *ranks) {
+  const uint32_t number_of_entries = table->number_of_entries;
+  if (number_of_entries >= (UINT32_C(1) << CENSUS_ROLLOUT_RUN_COUNT_SHIFT)) {
+    log_fatal("census rollout: too many entries for a compact table");
+  }
+  uint32_t *sorted_ranks =
+      malloc_or_die(sizeof(uint32_t) * (number_of_entries + 1));
+  uint16_t *sorted_units =
+      malloc_or_die(sizeof(uint16_t) * (number_of_entries + 1));
+  Equity *sorted_scores =
+      malloc_or_die(sizeof(Equity) * (number_of_entries + 1));
+  census_rollout_radix_pass(number_of_entries, 0, ranks, table->units,
+                            table->scores, sorted_ranks, sorted_units,
+                            sorted_scores);
+  census_rollout_radix_pass(number_of_entries, CENSUS_ROLLOUT_RADIX_BITS,
+                            sorted_ranks, sorted_units, sorted_scores, ranks,
+                            table->units, table->scores);
+  free(sorted_scores);
+  free(sorted_units);
+  free(sorted_ranks);
+  const uint32_t size = census_lattice_get_size(lattice);
+  const uint32_t number_of_words = size / 64 + 1;
+  if (table->present == NULL) {
+    table->present = malloc_or_die(sizeof(uint64_t) * number_of_words);
+    table->word_runs = malloc_or_die(sizeof(uint32_t) * number_of_words);
+  }
+  memset(table->present, 0, sizeof(uint64_t) * number_of_words);
+  uint32_t number_of_runs = 0;
+  uint32_t first = 0;
+  while (first < number_of_entries) {
+    const uint32_t rank = ranks[first];
+    uint32_t last = first + 1;
+    while (last < number_of_entries && ranks[last] == rank) {
+      last++;
+    }
+    if (last - first >= CENSUS_ROLLOUT_RUN_MAX_COUNT) {
+      log_fatal("census rollout: too many anchors for a rank");
+    }
+    // One run beyond the last, for a lookup past every set bit.
+    if (number_of_runs + 1 >= table->runs_capacity) {
+      table->runs_capacity =
+          table->runs_capacity ? table->runs_capacity * 2 : 1024;
+      table->runs =
+          realloc_or_die(table->runs, sizeof(uint32_t) * table->runs_capacity);
+    }
+    table->present[rank >> 6] |= UINT64_C(1) << (rank & 63);
+    table->runs[number_of_runs++] =
+        first | ((last - first) << CENSUS_ROLLOUT_RUN_COUNT_SHIFT);
+    first = last;
+  }
+  if (table->runs_capacity == 0) {
+    table->runs_capacity = 1024;
+    table->runs = malloc_or_die(sizeof(uint32_t) * table->runs_capacity);
+  }
+  table->runs[number_of_runs] = 0;
+  uint32_t runs_before = 0;
+  for (uint32_t word_idx = 0; word_idx < number_of_words; word_idx++) {
+    table->word_runs[word_idx] = runs_before;
+    runs_before += (uint32_t)__builtin_popcountll(table->present[word_idx]);
+  }
+}
+
 // Builds the play scores of the anchors in build_cols, by lane, of the board,
 // over its pool, sparsely: each anchor's build resets only what it wrote.
-static void census_rollout_table_build(CensusRollout *census,
+static void census_rollout_table_build(const CensusRollout *census,
+                                       CensusRolloutBuilder *builder,
                                        CensusRolloutTable *table,
                                        const Game *game,
                                        const uint16_t *build_cols) {
-  const uint32_t size = census_lattice_get_size(census->lattice);
+  if (builder->scratch == NULL) {
+    const uint32_t size = census_lattice_get_size(census->lattice);
+    builder->scratch = malloc_or_die(sizeof(Equity) * size);
+    for (uint32_t index = 0; index < size; index++) {
+      builder->scratch[index] = CENSUS_UNPLAYABLE;
+    }
+  }
   uint8_t pool[CENSUS_MAX_LETTERS];
   census_get_unseen_tally(game, pool);
   table->number_of_units = 0;
@@ -363,49 +509,22 @@ static void census_rollout_table_build(CensusRollout *census,
       const int col = __builtin_ctz(remaining);
       const int unit = table->number_of_units++;
       table->unit_of[lane][col] = (int16_t)unit;
-      census->touched.count = 0;
-      census_set_touched(&census->touched);
+      builder->touched.count = 0;
       census_play_scores_build_anchor(game, census->lattice, pool,
-                                      census->scratch, lane, col);
-      census_set_touched(NULL);
-      for (uint32_t touched_idx = 0; touched_idx < census->touched.count;
+                                      builder->scratch, &builder->touched, lane,
+                                      col);
+      for (uint32_t touched_idx = 0; touched_idx < builder->touched.count;
            touched_idx++) {
-        const uint32_t rank = census->touched.ranks[touched_idx];
-        const Equity score = census->scratch[rank];
+        const uint32_t rank = builder->touched.ranks[touched_idx];
+        const Equity score = builder->scratch[rank];
         if (score > 0) {
           census_rollout_table_append(table, rank, unit, score, &ranks);
         }
-        census->scratch[rank] = CENSUS_UNPLAYABLE;
+        builder->scratch[rank] = CENSUS_UNPLAYABLE;
       }
     }
   }
-  if (table->offsets == NULL) {
-    table->offsets = malloc_or_die(sizeof(uint32_t) * ((size_t)size + 1));
-  }
-  memset(table->offsets, 0, sizeof(uint32_t) * ((size_t)size + 1));
-  for (uint32_t entry = 0; entry < table->number_of_entries; entry++) {
-    table->offsets[ranks[entry] + 1]++;
-  }
-  for (uint32_t index = 0; index < size; index++) {
-    table->offsets[index + 1] += table->offsets[index];
-  }
-  // Order the entries by rank, through a copy.
-  uint16_t *units =
-      malloc_or_die(sizeof(uint16_t) * (table->number_of_entries + 1));
-  Equity *scores =
-      malloc_or_die(sizeof(Equity) * (table->number_of_entries + 1));
-  uint32_t *fill = malloc_or_die(sizeof(uint32_t) * ((size_t)size + 1));
-  memcpy(fill, table->offsets, sizeof(uint32_t) * ((size_t)size + 1));
-  for (uint32_t entry = 0; entry < table->number_of_entries; entry++) {
-    const uint32_t slot = fill[ranks[entry]]++;
-    units[slot] = table->units[entry];
-    scores[slot] = table->scores[entry];
-  }
-  memcpy(table->units, units, sizeof(uint16_t) * table->number_of_entries);
-  memcpy(table->scores, scores, sizeof(Equity) * table->number_of_entries);
-  free(fill);
-  free(scores);
-  free(units);
+  census_rollout_table_compact(table, census->lattice, ranks);
   free(ranks);
 }
 
@@ -435,18 +554,14 @@ static void census_rollout_set_root(CensusRollout *census, const Game *game) {
   CensusRolloutBoard *root = &census->root;
   census_rollout_board_load(root, game);
   for (int lane = 0; lane < CENSUS_ROLLOUT_NUM_LANES; lane++) {
-    root->from_root[lane] = 0;
-  }
-  census_rollout_table_build(census, &root->table, game, root->anchor_cols);
-  for (int lane = 0; lane < CENSUS_ROLLOUT_NUM_LANES; lane++) {
     root->from_root[lane] = root->anchor_cols[lane];
+    root->build_cols[lane] = root->anchor_cols[lane];
   }
-  census->build_stats.root_entries += root->table.number_of_entries;
   census->number_of_candidates = 0;
 }
 
-// Builds the board after candidate, played on game, and the play scores of
-// its anchors that the candidate changes.
+// Loads the board after candidate, played on game, and the anchors whose play
+// scores its table holds: those the candidate changes.
 static void census_rollout_add_candidate(CensusRollout *census,
                                          const Game *game,
                                          const Move *candidate) {
@@ -466,7 +581,6 @@ static void census_rollout_add_candidate(CensusRollout *census,
   census->number_of_candidates++;
   census_rollout_board_load(board, board_game);
   board->signature = census_rollout_move_signature(candidate);
-  uint16_t build_cols[CENSUS_ROLLOUT_NUM_LANES];
   for (int lane = 0; lane < CENSUS_ROLLOUT_NUM_LANES; lane++) {
     board->from_root[lane] = 0;
     if (board->hashes[lane] == root->hashes[lane]) {
@@ -485,12 +599,76 @@ static void census_rollout_add_candidate(CensusRollout *census,
         }
       }
     }
-    build_cols[lane] =
+    board->build_cols[lane] =
         board->anchor_cols[lane] & (uint16_t)~board->from_root[lane];
   }
-  census_rollout_table_build(census, &board->table, board_game, build_cols);
-  census->build_stats.candidate_builds++;
-  census->build_stats.candidate_entries += board->table.number_of_entries;
+}
+
+// A thread that builds tables: the root's (index 0) and the candidates', each
+// claimed whole from next_board.
+typedef struct CensusRolloutBuildWork {
+  CensusRollout *census;
+  CensusRolloutBuilder *builder;
+  atomic_int *next_board;
+} CensusRolloutBuildWork;
+
+static void census_rollout_build_boards(const CensusRolloutBuildWork *work) {
+  CensusRollout *census = work->census;
+  const int number_of_boards = 1 + census->number_of_candidates;
+  for (int board_idx = atomic_fetch_add(work->next_board, 1);
+       board_idx < number_of_boards;
+       board_idx = atomic_fetch_add(work->next_board, 1)) {
+    CensusRolloutBoard *board =
+        board_idx == 0 ? &census->root : &census->candidates[board_idx - 1];
+    census_rollout_table_build(census, work->builder, &board->table,
+                               board->game, board->build_cols);
+  }
+}
+
+static void *census_rollout_build_thread(void *arg) {
+  census_rollout_build_boards((const CensusRolloutBuildWork *)arg);
+  return NULL;
+}
+
+// Builds every board's table, on up to options.build_threads threads.
+static void census_rollout_build_tables(CensusRollout *census) {
+  const int number_of_boards = 1 + census->number_of_candidates;
+  int number_of_threads = census->options.build_threads;
+  if (number_of_threads > number_of_boards) {
+    number_of_threads = number_of_boards;
+  }
+  if (number_of_threads > CENSUS_ROLLOUT_MAX_BUILD_THREADS) {
+    number_of_threads = CENSUS_ROLLOUT_MAX_BUILD_THREADS;
+  }
+  if (number_of_threads < 1) {
+    number_of_threads = 1;
+  }
+  atomic_int next_board;
+  atomic_init(&next_board, 0);
+  CensusRolloutBuildWork work[CENSUS_ROLLOUT_MAX_BUILD_THREADS];
+  cpthread_t threads[CENSUS_ROLLOUT_MAX_BUILD_THREADS];
+  for (int thread_idx = 0; thread_idx < number_of_threads; thread_idx++) {
+    work[thread_idx] =
+        (CensusRolloutBuildWork){.census = census,
+                                 .builder = &census->builders[thread_idx],
+                                 .next_board = &next_board};
+  }
+  // This thread builds too, as the first builder.
+  for (int thread_idx = 1; thread_idx < number_of_threads; thread_idx++) {
+    cpthread_create(&threads[thread_idx], census_rollout_build_thread,
+                    &work[thread_idx]);
+  }
+  census_rollout_build_boards(&work[0]);
+  for (int thread_idx = 1; thread_idx < number_of_threads; thread_idx++) {
+    cpthread_join(threads[thread_idx]);
+  }
+  census->build_stats.root_entries += census->root.table.number_of_entries;
+  for (int candidate_idx = 0; candidate_idx < census->number_of_candidates;
+       candidate_idx++) {
+    census->build_stats.candidate_builds++;
+    census->build_stats.candidate_entries +=
+        census->candidates[candidate_idx].table.number_of_entries;
+  }
 }
 
 void census_rollout_prepare(CensusRollout *census, const Game *game,
@@ -501,6 +679,7 @@ void census_rollout_prepare(CensusRollout *census, const Game *game,
     census_rollout_add_candidate(census, game,
                                  move_list_get_move(candidates, move_idx));
   }
+  census_rollout_build_tables(census);
   census->sim_number++;
 }
 
@@ -565,7 +744,7 @@ static void census_rollout_gather(const CensusRollout *census, const Rack *rack,
     candidate_bests[unit] = CENSUS_ROLLOUT_NO_PLAY;
   }
   // An empty table (the root's on a remembered rack) has no entries to read,
-  // so skip its offsets: they are lattice-sized and read at random.
+  // so skip its lookups.
   const bool use_root = root_table->number_of_entries > 0;
   const bool use_candidate = candidate_table->number_of_entries > 0;
   if (!use_root && !use_candidate) {
@@ -659,13 +838,20 @@ static void census_rollout_gather(const CensusRollout *census, const Rack *rack,
   Equity leave_values[CENSUS_ROLLOUT_MAX_SPLITS];
   for (int split_idx = 0; split_idx < number_of_splits; split_idx++) {
     const uint32_t played_index = split_played[split_idx];
-    root_firsts[split_idx] = use_root ? root_table->offsets[played_index] : 0;
-    root_lasts[split_idx] =
-        use_root ? root_table->offsets[played_index + 1] : 0;
-    candidate_firsts[split_idx] =
-        use_candidate ? candidate_table->offsets[played_index] : 0;
-    candidate_lasts[split_idx] =
-        use_candidate ? candidate_table->offsets[played_index + 1] : 0;
+    root_firsts[split_idx] = 0;
+    root_lasts[split_idx] = 0;
+    candidate_firsts[split_idx] = 0;
+    candidate_lasts[split_idx] = 0;
+    if (use_root) {
+      census_rollout_table_find(root_table, played_index,
+                                &root_firsts[split_idx],
+                                &root_lasts[split_idx]);
+    }
+    if (use_candidate) {
+      census_rollout_table_find(candidate_table, played_index,
+                                &candidate_firsts[split_idx],
+                                &candidate_lasts[split_idx]);
+    }
     leave_values[split_idx] = census->leave[split_kept[split_idx]] +
                               peg_by_tiles_played[split_tiles[split_idx]];
   }
