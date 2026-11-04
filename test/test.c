@@ -93,6 +93,7 @@
 #include "stats_test.h"
 #include "string_util_test.h"
 #include "table_bench_test.h"
+#include "threats_test.h"
 #include "transposition_table_test.h"
 #include "validated_move_test.h"
 #include "win_pct_test.h"
@@ -149,6 +150,7 @@ static TestEntry test_table[] = {
     {"vm", test_validated_move},
     {"shadow", test_shadow},
     {"movegen", test_move_gen},
+    {"threats", test_threats},
     {"bestsmall", test_best_small},
     {"eq", test_equity},
     {"eqadj", test_equity_adjustments},
