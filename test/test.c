@@ -22,6 +22,7 @@
 #include "browser_game_test.h"
 #include "builder_hash_test.h"
 #include "census_sim_test.h"
+#include "census_rollout_lab_test.h"
 #include "census_test.h"
 #include "cgp_test.h"
 #include "checkpoint_test.h"
@@ -225,6 +226,7 @@ static TestEntry test_table[] = {
 // Tests that only run when explicitly requested (not included in run_all)
 static TestEntry on_demand_test_table[] = {
     {"censussim", test_census_sim},
+    {"censusrollout", test_census_rollout_lab},
     {"xsdata", test_xs_data},
     {"pathmovelists", test_path_move_lists},
     {"egincremental", test_incremental_movegen_identical},

@@ -3115,10 +3115,18 @@ void shadow_by_orientation(MoveGen *gen) {
     for (int col = 0; col < BOARD_DIM; col++) {
       anchor_cols |= (uint32_t)gen_cache_get_is_anchor(gen, col) << col;
     }
+    const uint32_t skipped_cols =
+        gen->lab_skip_anchor_cols != NULL
+            ? gen->lab_skip_anchor_cols[BOARD_DIM * gen->dir + row]
+            : 0;
     while (anchor_cols != 0) {
       const int col = wmp_move_gen_get_lowest_set_bit(anchor_cols);
       anchor_cols &= anchor_cols - 1;
-      shadow_play_for_anchor(gen, col);
+      // A skipped anchor still bounds the next one's plays on the left, so
+      // that exactly its own plays go unsearched.
+      if ((skipped_cols & ((uint32_t)1 << col)) == 0) {
+        shadow_play_for_anchor(gen, col);
+      }
 
       gen->last_anchor_col = col;
       // The next anchor to search after a playthrough tile should
@@ -3179,6 +3187,7 @@ static inline void set_descending_tile_scores(MoveGen *gen) {
 }
 
 void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
+  gen->lab_skip_anchor_cols = args->skip_anchor_cols;
   const Game *game = args->game;
   gen->move_record_type = args->move_record_type;
   gen->move_sort_type = args->move_sort_type;
@@ -4479,6 +4488,44 @@ static void gen_remember_best_move(const MoveGen *gen, BestMoveCarry *carry,
                       searched_lanes, gen->number_of_tiles_in_bag);
 }
 
+// Experimental (census rollout lab): drops the anchors of args->skip_lanes
+// and, with args->use_floor_equity, every WMP anchor whose bound is below
+// args->floor_equity, which a move of a searched lane reaches. A carried
+// move's equity already set as the cutoff is a move too, so the higher of
+// the two is a floor that the generation's best move reaches.
+static void gen_apply_lab_skips_and_floor(MoveGen *gen,
+                                          const MoveGenArgs *args) {
+  for (int lane = 0; lane < 2 * BOARD_DIM; lane++) {
+    if (args->skip_lanes & ((uint64_t)1 << lane)) {
+      gen->row_number_of_anchors_cache[lane] = 0;
+    }
+  }
+  if (args->use_floor_equity &&
+      (gen->target_equity_cutoff == EQUITY_MAX_VALUE ||
+       args->floor_equity > gen->target_equity_cutoff)) {
+    gen->target_equity_cutoff = args->floor_equity;
+  }
+}
+
+void gen_hash_game_lanes(const Game *game, int player_index,
+                         uint64_t *lane_hashes) {
+  const Board *board = game_get_board(game);
+  const int cross_index = board_get_cross_set_index(
+      game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KWG), player_index);
+  uint8_t row_number_of_anchors[2 * BOARD_DIM];
+  board_load_number_of_row_anchors_cache(board, row_number_of_anchors);
+  const Square *lanes = board_get_readonly_lanes(board, cross_index);
+  for (int dir = 0; dir < 2; dir++) {
+    for (int row = 0; row < BOARD_DIM; row++) {
+      const int lane = BOARD_DIM * dir + row;
+      lane_hashes[lane] = 0;
+      if (row_number_of_anchors[lane] != 0) {
+        lane_hashes[lane] = gen_hash_lane(board_get_row_cache(lanes, row, dir));
+      }
+    }
+  }
+}
+
 void generate_moves(const MoveGenArgs *args) {
   MoveGen *gen = get_movegen();
   gen_count_movegen(gen);
@@ -4610,11 +4657,19 @@ void generate_moves(const MoveGenArgs *args) {
       // lanes keep their hashes.
       if (!gen_pat_is_active(gen) &&
           best_move_carry_skips_lanes(args->best_move_carry)) {
-        gen_hash_lanes(gen, lane_hash_storage);
+        if (args->lane_hashes != NULL) {
+          memcpy(lane_hash_storage, args->lane_hashes,
+                 sizeof(lane_hash_storage));
+        } else {
+          gen_hash_lanes(gen, lane_hash_storage);
+        }
         lane_hashes = lane_hash_storage;
       }
       skipped_lanes = gen_seed_carried_best_move(
           gen, args->best_move_carry, lane_hashes, &gen->player_rack);
+    }
+    if (args->skip_lanes != 0 || args->use_floor_equity) {
+      gen_apply_lab_skips_and_floor(gen, args);
     }
     gen_shadow(gen);
     if (gen->threshold_exceeded) {

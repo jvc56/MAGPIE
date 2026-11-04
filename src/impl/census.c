@@ -189,6 +189,10 @@ uint32_t census_lattice_rank_sparse(const CensusLattice *lattice,
   return (uint32_t)lattice->size_offsets[size] + within;
 }
 
+const uint32_t *census_lattice_get_rank_terms(const CensusLattice *lattice) {
+  return lattice->rank_terms;
+}
+
 uint32_t census_lattice_rank_term(const CensusLattice *lattice,
                                   MachineLetter ml, int unplaced, int count) {
   return lattice_rank_term(lattice, ml, unplaced, count);
@@ -361,6 +365,13 @@ typedef struct BlankRun {
   uint8_t forced;
 } BlankRun;
 
+// Experimental (census rollout lab): when set, the ranks of the play scores
+// that a build on this thread raises from CENSUS_UNPLAYABLE, so that a sparse
+// build resets only what it wrote. Not thread safe; NULL otherwise.
+static CensusTouched *census_touched = NULL;
+
+void census_set_touched(CensusTouched *touched) { census_touched = touched; }
+
 typedef struct BlankVariantContext {
   const CensusLattice *lattice;
   Equity *play_scores;
@@ -392,6 +403,17 @@ static void record_blank_variants_recursive(BlankVariantContext *context,
     if (context->shared) {
       catomic_max_int32(&context->play_scores[rank], value);
     } else if (value > context->play_scores[rank]) {
+      if (census_touched != NULL &&
+          context->play_scores[rank] == CENSUS_UNPLAYABLE) {
+        if (census_touched->count == census_touched->capacity) {
+          census_touched->capacity =
+              census_touched->capacity ? census_touched->capacity * 2 : 4096;
+          census_touched->ranks = realloc_or_die(
+              census_touched->ranks,
+              sizeof(uint32_t) * census_touched->capacity);
+        }
+        census_touched->ranks[census_touched->count++] = rank;
+      }
       context->play_scores[rank] = value;
     }
     return;
@@ -737,6 +759,12 @@ static void scatter_words(const CensusLattice *lattice,
                           const uint8_t *unseen_tally, Equity *best) {
   scatter_chunk(lattice, play_scores, leave, unseen_tally, best, false, 1,
                 census_lattice_get_size(lattice));
+}
+
+void census_scatter_rack_best(const CensusLattice *lattice,
+                              const Equity *play_scores, const Equity *leave,
+                              const uint8_t *unseen_tally, Equity *best) {
+  scatter_words(lattice, play_scores, leave, unseen_tally, best);
 }
 
 typedef struct LetterCount {

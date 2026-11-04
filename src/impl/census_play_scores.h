@@ -54,6 +54,15 @@ uint64_t census_play_scores_build_lanes(const Game *game,
                                         Equity *play_scores,
                                         uint64_t lane_mask);
 
+// Experimental (census rollout lab): census_play_scores_build_lanes for the
+// plays of one anchor, the one at col of lane, alone: the plays the
+// generator finds from it, its leftmost anchor.
+uint64_t census_play_scores_build_anchor(const Game *game,
+                                         const CensusLattice *lattice,
+                                         const uint8_t *unseen_tally,
+                                         Equity *play_scores, int lane,
+                                         int col);
+
 // The lanes whose squares differ between the boards of two games of the same
 // lexicon: the lanes whose plays census_play_scores_build_lanes must find
 // again after a move.

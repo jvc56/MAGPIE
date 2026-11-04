@@ -1,0 +1,215 @@
+CENSUS ROLLOUT LAB: HANDOFF FROM THE M4 MINI TO THE M5 MAX, 2026-11-03
+Written by the Claude Code session on the M4 Mac mini, for John O'Laughlin (olaugh).
+
+The M4 has no Xcode (Command Line Tools only) and 9 GB free, so it can't run
+xctrace. The next step, profiling the lazy census path with CPU counters
+(branch mispredicts first), moves to the M5 Max.
+
+=====================================================================
+WHAT THIS IS
+=====================================================================
+A prototype of John's idea: fill the sim rollouts' move generation from a
+census of the position, for both sides and every rack, and generate plays only
+where something the rollout played has dirtied the census's space.
+
+Where it ended up (all exact: every census-steered generation picks plain
+movegen's move):
+- A lazy per-anchor census. At the start of each sim, before any worker runs,
+  it builds per-anchor play-score tables (for every placed multiset P, the
+  anchors it is played from and its best score in each) for the position and,
+  for each candidate, only the anchors that candidate changes.
+- Each rollout generation gathers its rack's best in every anchor from those
+  tables (score + leave + pre-endgame adjustment by tiles played) and skips
+  every anchor known to be worse than the best known one.
+- An anchor is known when its lane is unchanged since the candidate's board,
+  or when its zone (what its plays can cover or border with the rack's tiles)
+  misses every changed square on both boards.
+- It serves rollout plies 0-3, any bag with tiles (not the endgame), with PAT
+  off in rollouts.
+
+=====================================================================
+GET THE CODE
+=====================================================================
+Branch censussim-multiply on origin (jvc56/MAGPIE). It is one commit on top
+of PR #939's head d4061269 ("Infer with census play scores; exhaustive one-ply
+census sim"), which is origin's census-inference branch. The commit also holds
+this note, as notes/census_rollout_lab/handoff-20261103.txt.
+
+  git fetch origin censussim-multiply
+  git switch censussim-multiply
+
+The commit is lab code (14 files, about 3,200 lines); no PR was opened.
+- src/impl/census_rollout_lab.{c,h}: the lab (record/replay oracle, timing
+  modes, the lazy census with per-worker state).
+- test/census_rollout_lab_test.{c,h}: the on-demand test "censusrollout", with
+  every driver selected by environment variables (below).
+- Hooks:
+  - MoveGenArgs.skip_lanes, skip_anchor_cols, use_floor_equity, lane_hashes,
+    and a per-row anchor skip in shadow_by_orientation;
+  - census_play_scores_build_anchor;
+  - a sparse touched-rank list in census.c (census_set_touched);
+  - crl_* calls in random_variable.c (prepare in rv_sim_create/reset, a
+    per-SimmerWorker CrlWorker);
+  - an optional carry size (crl_carry_buckets);
+  - a CRL_QUACKLE_PEG build switch in static_eval.h for nonzero pre-endgame
+    values.
+- Not PR-ready:
+  - the hooks are not free when off (AGENTS.md);
+  - it uses __builtin_ctz and __builtin_popcount outside src/compat;
+  - nothing has been through format.py, cppcheck or tidy.
+
+=====================================================================
+DATA
+=====================================================================
+CSW24 with the census-blended leaves (data-20260925 was rebuilt in place on
+2026-11-02, MAGPIE-DATA f5242ae9), and CSW24.wmp, CSW24.wit and CSW24.rit.
+
+The RIT stores leave values, so it must come from the census-blended
+CSW24.klv2. `make prepare_data` keeps an existing RIT, so a RIT from before
+2026-11-02 stays stale. Rebuild it:
+
+  bin/magpie convert klvwmp2rit CSW24 english CSW24 CSW24 -threads 10
+  bin/magpie convert dawg2wordmap CSW24 -threads 10
+  bin/magpie convert kwg2wit CSW24
+
+=====================================================================
+RUNNING IT
+=====================================================================
+make magpie_test BUILD=no_pgo_release, then bin/magpie_test censusrollout with:
+- CRL_TIMED=1 CRL_TLIM=14 CRL_THREADS=10 CRL_RITMMAP=0 CRL_TURNS=6,14,18,22,26 CRL_PLIES=2,6
+  Iterations completed in 14 s (about a game-in-3-minutes move) on all threads,
+  for: carry (as shipped), plain (no carry), carry with CRL_BIG_BUCKETS
+  (16384), lazy + carry, lazy + plain, and carry again as a drift control.
+- CRL_E2E=1 ... CRL_IT=N [CRL_THREADS=N] [CRL_VERIFY=0] [CRL_WARMUP=0] [CRL_PLAIN=1] [CRL_LOW_BAG=0|1] [CRL_MAX_PLY=3]
+  Fixed iterations: carry vs lazy wall time, and a verified run. The verified
+  run checks each census-steered move against plain movegen and against the
+  best of every play, and checks every gathered anchor value against every
+  play.
+- CRL_PROFILE=lazy|plain|carry CRL_RITMMAP=0 CRL_TURNS=14,18,22,26 CRL_PLIES=2 CRL_IT=50000
+  Fixed single-threaded work for a profiler: one sim per position in one mode,
+  and nothing else. On the M4: lazy 4.1 s, plain 7.5 s for 200,001
+  iterations. The lazy and plain runs play the same rollouts (identical moves),
+  so their totals compare.
+- Default (no env), CRL_CONTROLS=1, CRL_GATHER=1, CRL_BUILD=1
+  The single-threaded record/replay oracle (lane vs anchor variants, top-k
+  lists), the identity, skips-only and floor-only controls, the gather
+  benchmark with exactness checks, and the eager-build timing.
+
+Always use CRL_RITMMAP=0 for timing. With an mmapped RIT and no warm-up, the
+first sim run pays RIT page faults; that biased one comparison on the M4 until
+it was caught.
+
+=====================================================================
+RESULTS SO FAR (M4, CSW24, success_long_game.gcg turns 6-26, 8 candidates, PAT off in rollouts, inference off)
+=====================================================================
+Timed, 14 s on 10 threads, iterations vs the shipped sim (carry). The shipped
+sim does about 2.2M iterations at 2-ply and 0.7M at 6-ply per move. The drift
+control agreed within 1%.
+
+  bag  2-ply: plain  lazy+carry  lazy+plain   6-ply: plain  lazy+carry  lazy+plain
+   81        1.05x     1.49x       1.59x             1.05x     1.07x       1.13x
+   55        1.03x     1.75x       1.86x             1.05x     1.19x       1.26x
+   44        1.05x     1.96x       2.11x             1.05x     1.25x       1.34x
+   32        1.06x     1.79x       1.92x             1.05x     1.19x       1.26x
+   24        1.05x     1.94x       2.09x             1.04x     1.28x       1.33x
+
+- At this scale the shipped best-move carry is about 5% SLOWER than no carry.
+  Its 1024 buckets of ~12 KB thrash once racks stop recurring, and 16384
+  buckets barely help. This is independent of the census: switching the carry
+  off for long sims may be a free 5%.
+- The lazy census does better without the carry (+7%).
+- The single-threaded record/replay showed why depth hurts:
+  - per-candidate census boards leave 0 dirty lanes on rollout ply 0;
+  - the reply then dirties about 9 lanes, and each later move about 4 more;
+  - at plies 0..5 the best move is in a known anchor 99, 47, 35, 25, 17 and 13%
+    of the time.
+  Per-anchor validity beats per-lane by about 10-15% at every depth.
+- Exactness:
+  - 0 mismatches in every verified run (single and 10 threads, about 1.8M
+    replayed generations);
+  - 0 of 17M gathered anchor values out of bounds.
+  - With Quackle's nonzero pre-endgame values (build with
+    DEPFLAGS='-MMD -MP -DCRL_QUACKLE_PEG'), the census values stay exact (0 of
+    1.7M out of bounds). But plain movegen on this pre-#931 base disagrees with
+    the best of every play in hundreds of generations, so verifying the chosen
+    moves end to end needs a rebase onto #931.
+    peg_adjust_fill_by_tiles_played there is the hook the gather wants.
+
+=====================================================================
+THE TASK FOR THE M5: PROFILE THE LAZY CENSUS PATH
+=====================================================================
+John asked for a profile, to see what can be addressed in branch prediction
+misses and the like. Follow .claude/skills/cycle-profile/SKILL.md; the commands:
+
+  make magpie_test BUILD=no_pgo_release
+  cp bin/magpie_test mt_lazy && .claude/skills/cycle-profile/scripts/dsym.sh mt_lazy
+  S=.claude/skills/cycle-profile/scripts
+  export CRL_RITMMAP=0 CRL_TURNS=14,18,22,26 CRL_PLIES=2 CRL_IT=50000
+  CRL_PROFILE=lazy  $S/record.sh lazy1  -- ./mt_lazy censusrollout
+  CRL_PROFILE=plain $S/record.sh plain1 -- ./mt_lazy censusrollout
+  python3 $S/xct.py self lazy1.xml mt_lazy.dSYM --top 30
+  python3 $S/xct.py lines crl_lazy_gather lazy1.xml mt_lazy.dSYM
+  python3 $S/counters_template.py bottlenecks bottlenecks.tracetemplate
+  python3 $S/counters_template.py discarded_sampling discarded.tracetemplate
+  python3 $S/counters_template.py l1d_miss_sampling l1d.tracetemplate
+  CRL_PROFILE=lazy $S/record.sh lazyb --template bottlenecks.tracetemplate -- ./mt_lazy censusrollout
+  python3 $S/xct.py bottlenecks lazyb.xml
+  CRL_PROFILE=lazy $S/record.sh lazyd --template discarded.tracetemplate -- ./mt_lazy censusrollout
+  python3 $S/xct.py pmi lazyd.xml mt_lazy.dSYM
+
+Then compare plain's run with lazy's for the same work. The 14 s timed runs
+use 10 threads; profile single-threaded fixed work first.
+
+What `sample` showed on the M4 (function level only, which the skill warns can
+misattribute stalls). Lazy profile workload, about 5,000 main-thread samples:
+- generate_moves 23%;
+- crl_lazy_gather 19%;
+- _platform_memmove 8%, from sim_rollout (222) and game_backup (157), which is
+  the sim's own bookkeeping that the carry baseline pays too;
+- sim_rollout 5%;
+- the shadow functions about 10% together;
+- gen_hash_game_lanes 4%;
+- mach_absolute_time 2%, which is the lab's own per-query timers. Compile
+  those out of the lazy path before trusting small shares.
+
+Candidates for counters to confirm or kill. Don't fix them blind; the skill's
+history shows mispredict fixes that only moved the mispredicts:
+- crl_lazy_gather:
+  - the split odometer's data-dependent loop exits;
+  - "skip splits with no entries";
+  - the variable-length per-split entry loops;
+  - crl_raise's compare.
+  Ideas: a table-driven enumeration per rack shape (there are 15 count
+  patterns for 7 tiles), and reading the rack's leaves from its RIT entry
+  instead of 127 leave[] lookups.
+- crl_lazy_skips: the lane memo checks, the zones walk for changed lanes, the
+  skip-mask loops.
+- movegen with skip_anchor_cols: whether skipping anchors changes shadow's
+  branch behavior.
+
+=====================================================================
+DEAD ENDS (WITH NUMBERS; DON'T RETRY WITHOUT A NEW IDEA)
+=====================================================================
+- Eager per-lane top-k tables built with #939's rack-best scatter: 0.1-2.1 s
+  for the root plus up to 0.9 s per candidate, single thread. That's 150k-800k
+  iterations to break even.
+- A cutoff floor (the best known value as movegen's target): 0 gain. All the
+  gain is in the skips.
+- A top-1 lane cache: no gain; a skip needs the second value.
+- Presence bitmaps in front of the gather: 0 gain, and they cost build time.
+- Incremental ranks in the gather: small gain (kept).
+- Caching each rack's root bests across candidates: hits 59-74% at 4k
+  iterations, 13-52% at 200k (kept).
+
+=====================================================================
+OPEN QUESTIONS FOR JOHN
+=====================================================================
+- PAT in rollouts (patrollout defaults to true): with it on, neither the carry
+  nor the census can skip lanes or anchors. PAT's terms are bounded above, so
+  the census still gives upper bounds, but it has no attained floor to skip
+  against. Is patrollout off acceptable for these sims, or does this need a
+  PAT-aware design?
+- Rebase onto #931 for nonzero pre-endgame tables.
+- The table builds are single-threaded at sim start (0.3 s at bag 81); they
+  could run in parallel across candidates.
+- Game-in-25-minutes check (about 115 s a move) not run yet.

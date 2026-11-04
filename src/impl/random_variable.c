@@ -24,6 +24,7 @@
 #include "../str/sim_string.h"
 #include "../util/io_util.h"
 #include "bai_logger.h"
+#include "census_rollout_lab.h"
 #include "gameplay.h"
 #include <math.h>
 #include <stdatomic.h>
@@ -415,6 +416,8 @@ typedef struct SimmerWorker {
   // salted anew for each simulation, whose lexica may not be the last one's.
   CrossSetCache *cross_set_cache;
   uint64_t cross_set_salt;
+  // The census rollout lab's state for this worker's rollouts.
+  CrlWorker *crl_worker;
 } SimmerWorker;
 
 // The step of a simulation worker's cross set salt: odd, so a worker's
@@ -486,6 +489,7 @@ SimmerWorker *simmer_create_worker(const SimArgs *sim_args) {
   game_set_cross_set_cache(simmer_worker->game, simmer_worker->cross_set_cache);
   simmer_worker->move_list = move_list_create(1);
   simmer_worker->prng = prng_create(0);
+  simmer_worker->crl_worker = crl_worker_create();
   return simmer_worker;
 }
 
@@ -505,6 +509,7 @@ void simmer_worker_destroy(SimmerWorker *simmer_worker) {
   cross_set_cache_destroy(simmer_worker->cross_set_cache);
   move_list_destroy(simmer_worker->move_list);
   prng_destroy(simmer_worker->prng);
+  crl_worker_destroy(simmer_worker->crl_worker);
   free(simmer_worker);
 }
 
@@ -574,7 +579,14 @@ static double sim_rollout(const Simmer *simmer, SimmerWorker *simmer_worker,
                                          &candidate_rack);
   }
   // play move
+  if (crl_active) {
+    crl_before_candidate(simmer_worker->crl_worker, game);
+  }
   play_move(simmed_play_get_move(simmed_play), game, NULL);
+  if (crl_active) {
+    crl_after_candidate(simmer_worker->crl_worker, game,
+                        simmed_play_get_move(simmed_play));
+  }
   sim_results_increment_node_count(sim_results);
   game_set_backup_mode(game, BACKUP_MODE_OFF);
   // further plies will NOT be backed up.
@@ -587,8 +599,12 @@ static double sim_rollout(const Simmer *simmer, SimmerWorker *simmer_worker,
       break;
     }
 
-    const Move *best_play = get_top_equity_move_with_carry(
-        game, move_list, simmer->best_move_carry);
+    const Move *best_play =
+        crl_active ? crl_get_best_move(simmer_worker->crl_worker, game,
+                                       move_list, simmer->best_move_carry,
+                                       ply)
+                   : get_top_equity_move_with_carry(game, move_list,
+                                                    simmer->best_move_carry);
     rack_copy(&spare_rack, player_get_rack(player_on_turn));
 
     // On the final ply the resulting cross-sets are never read (no further move
@@ -896,8 +912,9 @@ RandomVariables *rv_sim_create(RandomVariables *rvs, const SimArgs *sim_args,
        thread_index++) {
     simmer->workers[thread_index] = simmer_create_worker(sim_args);
   }
-  simmer->best_move_carry =
-      best_move_carry_create(SIM_BEST_MOVE_CARRY_BUCKETS, true);
+  simmer->best_move_carry = best_move_carry_create(
+      crl_carry_buckets > 0 ? crl_carry_buckets : SIM_BEST_MOVE_CARRY_BUCKETS,
+      true);
 
   simmer->win_pcts = sim_args->win_pcts;
   simmer->use_inference = sim_args->use_inference;
@@ -919,6 +936,9 @@ RandomVariables *rv_sim_create(RandomVariables *rvs, const SimArgs *sim_args,
                       sim_args->seed, sim_args->use_heat_map);
   }
   simmer->sim_results = sim_results;
+  if (crl_active) {
+    crl_prepare_sim(sim_args->game, sim_args->move_list);
+  }
 
   rvs->data = simmer;
   return rvs;
@@ -956,6 +976,12 @@ void rv_sim_reset(RandomVariables *rvs, const SimArgs *sim_args) {
        thread_index++) {
     simmer_reset_worker(simmer->workers[thread_index], sim_args);
   }
+  const int carry_buckets =
+      crl_carry_buckets > 0 ? crl_carry_buckets : SIM_BEST_MOVE_CARRY_BUCKETS;
+  if (simmer->best_move_carry->num_buckets != carry_buckets) {
+    best_move_carry_destroy(simmer->best_move_carry);
+    simmer->best_move_carry = best_move_carry_create(carry_buckets, true);
+  }
   best_move_carry_reset(simmer->best_move_carry);
 
   simmer->win_pcts = sim_args->win_pcts;
@@ -974,6 +1000,9 @@ void rv_sim_reset(RandomVariables *rvs, const SimArgs *sim_args) {
     sim_results_reset(sim_args->move_list, simmer->sim_results,
                       sim_args->num_plies, sim_args->seed,
                       sim_args->use_heat_map);
+  }
+  if (crl_active) {
+    crl_prepare_sim(sim_args->game, sim_args->move_list);
   }
 }
 

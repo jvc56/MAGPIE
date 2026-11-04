@@ -339,7 +339,8 @@ static uint64_t play_scores_build(const Game *game,
                                   const uint8_t *unseen_tally,
                                   Equity *play_scores, bool shared,
                                   int second_tile_groups,
-                                  _Atomic int *next_unit, uint64_t lane_mask) {
+                                  _Atomic int *next_unit, uint64_t lane_mask,
+                                  const uint16_t *anchor_filters) {
   const Board *board = game_get_board(game);
   const LetterDistribution *ld = game_get_ld(game);
   const int ld_size = ld_get_size(ld);
@@ -398,6 +399,15 @@ static uint64_t play_scores_build(const Game *game,
     int last_anchor_col = BOARD_DIM;
     for (int col = 0; col < BOARD_DIM; col++) {
       if (!square_get_anchor(&gen.row_squares[col])) {
+        continue;
+      }
+      if (anchor_filters != NULL &&
+          ((anchor_filters[lane] >> col) & 1U) == 0) {
+        // Not built, but still the left bound of the next anchor's plays.
+        last_anchor_col = col;
+        if (!play_scores_gen_is_empty(&gen, col)) {
+          last_anchor_col++;
+        }
         continue;
       }
       PlayScoresAnchor *anchor = &anchors[number_of_anchors++];
@@ -489,7 +499,7 @@ uint64_t census_play_scores_build(const Game *game,
   _Atomic int next_unit;
   atomic_init(&next_unit, 0);
   return play_scores_build(game, lattice, unseen_tally, play_scores, false, 1,
-                           &next_unit, CENSUS_ALL_LANES);
+                           &next_unit, CENSUS_ALL_LANES, NULL);
 }
 
 uint64_t
@@ -498,7 +508,7 @@ census_play_scores_build_claimed(const Game *game, const CensusLattice *lattice,
                                  Equity *play_scores, int second_tile_groups,
                                  _Atomic int *next_unit, uint64_t lane_mask) {
   return play_scores_build(game, lattice, unseen_tally, play_scores, true,
-                           second_tile_groups, next_unit, lane_mask);
+                           second_tile_groups, next_unit, lane_mask, NULL);
 }
 
 uint64_t census_play_scores_build_lanes(const Game *game,
@@ -509,7 +519,20 @@ uint64_t census_play_scores_build_lanes(const Game *game,
   _Atomic int next_unit;
   atomic_init(&next_unit, 0);
   return play_scores_build(game, lattice, unseen_tally, play_scores, false, 1,
-                           &next_unit, lane_mask);
+                           &next_unit, lane_mask, NULL);
+}
+
+uint64_t census_play_scores_build_anchor(const Game *game,
+                                         const CensusLattice *lattice,
+                                         const uint8_t *unseen_tally,
+                                         Equity *play_scores, int lane,
+                                         int col) {
+  uint16_t anchor_filters[BOARD_DIM * 2] = {0};
+  anchor_filters[lane] = (uint16_t)(1U << col);
+  _Atomic int next_unit;
+  atomic_init(&next_unit, 0);
+  return play_scores_build(game, lattice, unseen_tally, play_scores, false, 1,
+                           &next_unit, (uint64_t)1 << lane, anchor_filters);
 }
 
 uint64_t census_play_scores_changed_lanes(const Game *before,
