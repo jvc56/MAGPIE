@@ -1389,10 +1389,11 @@ static char *games_request(const char *job_type, int num_games,
 // - a simulation iteration of a play generates once per ply -- counted only
 //   on a game's first turns, where the bag is too full for a playout to end
 //   the game early;
-// - an inference generates once per leave it found.
+// Inference leaves are reported separately: census can evaluate them without
+// generating moves, so their count is not a lower bound on move generations.
 //
-// *turns is the number of positions; *simulated and *inferred the parts of
-// the bound from simulations and inferences.
+// *turns is the number of positions; *simulated is the simulation part of
+// the bound; *inferred confirms inference ran but is not added to the bound.
 static uint64_t movegens_accounted_for(const char *result_json, int plies,
                                        int *turns, uint64_t *simulated,
                                        uint64_t *inferred) {
@@ -1428,7 +1429,7 @@ static uint64_t movegens_accounted_for(const char *result_json, int plies,
   assert(error_stack_is_empty(error_stack));
   json_destroy(result);
   error_stack_destroy(error_stack);
-  return (uint64_t)*turns + *simulated + *inferred;
+  return (uint64_t)*turns + *simulated;
 }
 
 // The positions in a games result decided by a solver.
@@ -1452,11 +1453,9 @@ static int solved_positions(const char *result_json) {
   return solved;
 }
 
-// Every job type's move generations are counted, on every thread that made
-// them -- the simulation threads of either threading mode, which exit (and
-// release their generators to the pool) before the count is read, an
-// inference's, a solver's -- checked against what the task's own result
-// says was done.
+// Check counting across job types and worker threads against work reported
+// in the task result. Census leaves are not move-generation calls; the
+// inference tests separately cover per-rack generation accounting on workers.
 static void test_every_job_type_counts_its_move_generations(void) {
   // Static games: exactly one generation a turn, so a captured position per
   // generation. (birdtest's game-pairs fixture, 96 for four static games, is
@@ -1498,7 +1497,8 @@ static void test_every_job_type_counts_its_move_generations(void) {
   }
   free(simmer);
 
-  // Inference: each leave found was a generation of its own.
+  // Inference ran, but census leaves need not generate any moves. The
+  // lower bound still accounts for the turns and simulation work.
   char *inferrer = simming_csw21_player(true);
   char *request = games_request("games", 1, "igp", inferrer, inferrer);
   uint64_t movegens = 0;
