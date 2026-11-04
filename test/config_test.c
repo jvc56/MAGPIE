@@ -2841,18 +2841,25 @@ void test_config_upgrade_settings_line(void) {
               "-wit2 false -threads 4");
   assert_strings_equal(upgraded, "set -lex CSW21 -tlim 60 -threads 4");
   free(upgraded);
+  // A version 2 file drops -scensus, whose default became auto in version 3,
+  // and keeps the settings version 2 already had.
+  upgraded = config_upgrade_settings_line(
+      config, "set -fileversion 2 -w1 true -scensus false -pegpess false");
+  assert_strings_equal(upgraded, "set -fileversion 2 -w1 true -pegpess false");
+  free(upgraded);
   // A current file is left as it is.
   upgraded = config_upgrade_settings_line(
-      config, "set -fileversion 2 -w1 true -pegpess false");
-  assert_strings_equal(upgraded, "set -fileversion 2 -w1 true -pegpess false");
+      config, "set -fileversion 3 -w1 true -scensus false -pegpess false");
+  assert_strings_equal(
+      upgraded, "set -fileversion 3 -w1 true -scensus false -pegpess false");
   free(upgraded);
   // Saved settings record the current version, and load.
   StringBuilder *sb = string_builder_create();
   config_add_settings_to_string_builder(config, sb);
-  assert(strstr(string_builder_peek(sb), " -fileversion 2") != NULL);
+  assert(strstr(string_builder_peek(sb), " -fileversion 3") != NULL);
   string_builder_destroy(sb);
-  assert_config_exec_status(config, "set -fileversion 2", ERROR_STATUS_SUCCESS);
-  assert_config_exec_status(config, "set -fileversion 3",
+  assert_config_exec_status(config, "set -fileversion 3", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "set -fileversion 4",
                             ERROR_STATUS_CONFIG_LOAD_INT_ARG_OUT_OF_BOUNDS);
   config_destroy(config);
 }

@@ -69,6 +69,11 @@ typedef struct SimArgs {
   // (see census_rollout.h): the same moves, found faster. sim_args_fill
   // clears it.
   bool use_census_rollout;
+  // Whether use_census_rollout is auto (-scensus auto): simulate sets it for
+  // each sim, to whether the census supports the game and fits in this
+  // machine's memory while rollout PAT is off (census_rollout_auto_chooses).
+  // sim_args_fill clears it.
+  bool census_rollout_auto;
 } SimArgs;
 
 // Unlike endgame_args_fill and peg_args_fill, this does NOT take a parameter
@@ -136,6 +141,7 @@ sim_args_fill(const int num_plies, const MoveList *move_list,
   sim_args->use_margin_forecast = use_margin_forecast;
   sim_args->bag_cycle = false;
   sim_args->use_census_rollout = false;
+  sim_args->census_rollout_auto = false;
   // Start fresh, not resuming a prior SimResults. Only the TUI's analysis-
   // resume path sets this true; every other caller fills SimArgs through
   // here, so leaving it uninitialized let stack garbage spuriously trigger

@@ -1,7 +1,9 @@
 #include "census_rollout.h"
 
+#include "../compat/memory_info.h"
 #include "../def/board_defs.h"
 #include "../def/equity_defs.h"
+#include "../def/game_defs.h"
 #include "../def/letter_distribution_defs.h"
 #include "../def/move_defs.h"
 #include "../def/players_data_defs.h"
@@ -302,6 +304,96 @@ static void census_rollout_table_destroy(CensusRolloutTable *table) {
 static void census_rollout_board_destroy(CensusRolloutBoard *board) {
   game_destroy(board->game);
   census_rollout_table_destroy(&board->table);
+}
+
+bool census_rollout_supports(const Game *game) {
+  const KLV *klv = player_get_klv(game_get_player(game, 0));
+  const int number_of_letters = ld_get_size(game_get_ld(game));
+  return game_get_variant(game) == GAME_VARIANT_CLASSIC &&
+         game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KWG) &&
+         game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KLV) && klv != NULL &&
+         number_of_letters >= 1 && number_of_letters <= CENSUS_MAX_LETTERS;
+}
+
+uint64_t census_rollout_memory_bytes(const Game *game, int number_of_threads,
+                                     int number_of_candidates) {
+  if (!census_rollout_supports(game)) {
+    return 0;
+  }
+  ErrorStack *error_stack = error_stack_create();
+  CensusLattice *lattice = census_lattice_create(ld_get_size(game_get_ld(game)),
+                                                 RACK_SIZE, error_stack);
+  error_stack_destroy(error_stack);
+  if (lattice == NULL) {
+    return 0;
+  }
+  const uint64_t lattice_size = census_lattice_get_size(lattice);
+  census_lattice_destroy(lattice);
+  if (number_of_threads < 1) {
+    number_of_threads = 1;
+  }
+  if (number_of_candidates > CENSUS_ROLLOUT_MAX_CANDIDATES) {
+    number_of_candidates = CENSUS_ROLLOUT_MAX_CANDIDATES;
+  }
+  if (number_of_candidates < 0) {
+    number_of_candidates = 0;
+  }
+  const uint64_t number_of_boards = 1 + (uint64_t)number_of_candidates;
+  uint64_t build_threads = (uint64_t)number_of_threads;
+  if (build_threads > number_of_boards) {
+    build_threads = number_of_boards;
+  }
+  if (build_threads > CENSUS_ROLLOUT_MAX_BUILD_THREADS) {
+    build_threads = CENSUS_ROLLOUT_MAX_BUILD_THREADS;
+  }
+  uint64_t root_units = 0;
+  for (int lane = 0; lane < CENSUS_ROLLOUT_NUM_LANES; lane++) {
+    root_units += (uint64_t)__builtin_popcount(
+        census_rollout_anchor_cols(census_rollout_lane_squares(game, lane)));
+  }
+  // The leave values, and each build thread's scratch play scores.
+  const uint64_t lattice_tables =
+      sizeof(Equity) * lattice_size * (1 + build_threads);
+  // A board's table: on CSW24, from 1 MB to 5 MB a board, the most on an
+  // open early board, against a lattice of 5.4M ranks. A byte a rank bounds
+  // them, and a byte a rank again allows for each build thread's sort.
+  const uint64_t board_tables =
+      lattice_size * (number_of_boards + build_threads);
+  // Each worker's cache of a rack's bests in the position's anchors.
+  const uint64_t worker_caches =
+      (uint64_t)number_of_threads *
+      (sizeof(CensusRolloutWorker) +
+       sizeof(Equity) * root_units * CENSUS_ROLLOUT_ROOT_SLOTS);
+  return lattice_tables + board_tables + worker_caches;
+}
+
+bool census_rollout_fits_in_memory(uint64_t census_bytes,
+                                   uint64_t physical_bytes,
+                                   int64_t available_bytes) {
+  if (census_bytes > physical_bytes / 4) {
+    return false;
+  }
+  if (available_bytes < 0) {
+    return true;
+  }
+  return (uint64_t)available_bytes >= CENSUS_ROLLOUT_MEMORY_RESERVE_BYTES &&
+         census_bytes <=
+             (uint64_t)available_bytes - CENSUS_ROLLOUT_MEMORY_RESERVE_BYTES;
+}
+
+bool census_rollout_auto_chooses(const Game *game, int number_of_threads,
+                                 int number_of_candidates) {
+  const uint64_t census_bytes = census_rollout_memory_bytes(
+      game, number_of_threads, number_of_candidates);
+  if (census_bytes == 0) {
+    return false;
+  }
+  int64_t available_bytes = -1;
+  if (!get_available_memory_bytes(&available_bytes)) {
+    available_bytes = -1;
+  }
+  return census_rollout_fits_in_memory(
+      census_bytes, get_search_memory_budget_base(), available_bytes);
 }
 
 CensusRollout *census_rollout_create(int number_of_build_threads) {

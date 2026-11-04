@@ -21,6 +21,7 @@
 #include "../util/io_util.h"
 #include "../util/string_util.h"
 #include "bai.h"
+#include "census_rollout.h"
 #include "inference.h"
 #include "move_gen.h"
 #include "rack_draw.h"
@@ -128,7 +129,16 @@ void simulate(SimArgs *sim_args, SimCtx **sim_ctx, SimResults *sim_results,
   }
 
   // The census rollout's equities leave out PAT's term, so the two do not
-  // mix: a sim steered by the census plays its rollouts without PAT.
+  // mix: a sim steered by the census plays its rollouts without PAT. Auto
+  // steers only a sim whose rollouts go without PAT, from a bag with tiles
+  // (the census serves no generation from an empty bag).
+  if (sim_args->census_rollout_auto) {
+    sim_args->use_census_rollout =
+        !sim_rollout_pat_is_on(sim_args) &&
+        !bag_is_empty(game_get_bag(sim_args->game)) &&
+        census_rollout_auto_chooses(sim_args->game, sim_args->num_threads,
+                                    move_list_get_count(sim_args->move_list));
+  }
   if (sim_args->use_census_rollout && sim_rollout_pat_is_on(sim_args)) {
     error_stack_push(
         error_stack, ERROR_STATUS_SIM_CENSUS_WITH_PAT,

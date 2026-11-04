@@ -5,6 +5,7 @@
 #include "../ent/game.h"
 #include "../ent/move.h"
 #include <stdbool.h>
+#include <stdint.h>
 
 // A census of a sim's position that steers its rollouts' move generation.
 //
@@ -32,6 +33,38 @@ enum {
   // lattice-sized scratch table.
   CENSUS_ROLLOUT_MAX_BUILD_THREADS = 16,
 };
+
+// The memory -scensus auto leaves to the system and other programs, as the
+// tables -wmp, -wit and -rit auto choose do.
+#define CENSUS_ROLLOUT_MEMORY_RESERVE_BYTES 1000000000ULL
+
+// Whether the census can steer the game's rollouts: a classic game whose
+// players share a word graph and leaves, since the census reads the first
+// player's, in an alphabet a census lattice holds.
+bool census_rollout_supports(const Game *game);
+
+// The memory, in bytes, that the census of a sim of number_of_candidates
+// candidates from the game's position takes on number_of_threads threads,
+// estimated from above: its leave and scratch tables, a table for the
+// position and each candidate, and each worker's cache of the position's
+// anchors. 0 if census_rollout_supports does not hold.
+uint64_t census_rollout_memory_bytes(const Game *game, int number_of_threads,
+                                     int number_of_candidates);
+
+// Whether a census of census_bytes fits in this machine's memory, as
+// -scensus auto decides: within a quarter of physical_bytes, and within
+// available_bytes less a reserve of CENSUS_ROLLOUT_MEMORY_RESERVE_BYTES for
+// the system and other programs. A negative available_bytes (where it cannot
+// be read) leaves the quarter alone.
+bool census_rollout_fits_in_memory(uint64_t census_bytes,
+                                   uint64_t physical_bytes,
+                                   int64_t available_bytes);
+
+// For -scensus auto: whether the census steers this sim, from what
+// census_rollout_supports, census_rollout_memory_bytes and
+// census_rollout_fits_in_memory say about this machine.
+bool census_rollout_auto_chooses(const Game *game, int number_of_threads,
+                                 int number_of_candidates);
 
 // The census of one sim at a time: built by census_rollout_prepare, then only
 // read by the sim's workers.

@@ -48,7 +48,8 @@ typedef struct ConfigArgs {
   // -wmp, -rit and -wit default to auto: each table is used when this
   // machine has the disk and memory for it. The magpie executable and the
   // library's magpie_create() do; tests, browser games and contribute's task
-  // configurations state what they use, with use_wmp for the wordmap.
+  // configurations state what they use, with use_wmp for the wordmap. So does
+  // -scensus, which steers sims' rollouts when this machine has the memory.
   bool auto_tables;
 } ConfigArgs;
 

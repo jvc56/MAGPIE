@@ -13,6 +13,7 @@
 #include "../src/impl/gameplay.h"
 #include "../src/impl/move_gen.h"
 #include "../src/util/io_util.h"
+#include "../src/util/string_util.h"
 #include "test_constants.h"
 #include "test_util.h"
 #include <assert.h>
@@ -20,6 +21,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 enum {
   // Each position's candidates, the rollouts of each, and the plies of a
@@ -247,10 +249,86 @@ static void test_census_rollout_refuses_pat(void) {
   config_destroy(config);
 }
 
+// -scensus auto: the memory it weighs, the games it serves, and sims that
+// give the plain results, PAT or not, saved as auto.
+static void test_census_rollout_auto(void) {
+  // Within a quarter of the physical memory, and what is available less the
+  // reserve; an unknown available leaves the quarter alone.
+  const uint64_t gigabyte = 1000000000ULL;
+  assert(census_rollout_fits_in_memory(gigabyte, 16 * gigabyte,
+                                       (int64_t)(8 * gigabyte)));
+  assert(!census_rollout_fits_in_memory(gigabyte, 3 * gigabyte,
+                                        (int64_t)(8 * gigabyte)));
+  assert(!census_rollout_fits_in_memory(gigabyte, 16 * gigabyte,
+                                        (int64_t)(gigabyte + gigabyte / 2)));
+  assert(!census_rollout_fits_in_memory(gigabyte, 16 * gigabyte,
+                                        (int64_t)(gigabyte / 2)));
+  assert(census_rollout_fits_in_memory(gigabyte, 16 * gigabyte,
+                                       (int64_t)(2 * gigabyte)));
+  assert(census_rollout_fits_in_memory(gigabyte, 4 * gigabyte, -1));
+  assert(!census_rollout_fits_in_memory(gigabyte + 1, 4 * gigabyte, -1));
+
+  if (BOARD_DIM != 15) {
+    return;
+  }
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -pat CSW21 -wmp true -threads 1 -plies 2 -numplays 8 "
+      "-it 300 -scond none -sinfer false -patrollout false");
+  load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
+  MoveList *move_list = move_list_create(1);
+  play_to_bag_size(config_get_game(config), move_list, 7, 40);
+  const Game *game = config_get_game(config);
+  assert(census_rollout_supports(game));
+  // English: a lattice of 5.4M ranks, its leave and scratch tables 21.5 MB
+  // each. The estimate grows with the threads and the candidates, up to
+  // CENSUS_ROLLOUT_MAX_CANDIDATES of them.
+  const uint64_t one_thread = census_rollout_memory_bytes(game, 1, 64);
+  assert(one_thread > 200000000ULL && one_thread < 600000000ULL);
+  assert(census_rollout_memory_bytes(game, 12, 64) > one_thread);
+  assert(census_rollout_memory_bytes(game, 1, 8) < one_thread);
+  assert(census_rollout_memory_bytes(game, 1, 100) == one_thread);
+
+  // Auto gives the plain sim's results, with rollout PAT off and on: with it
+  // on, auto leaves the census out rather than refusing.
+  load_and_exec_config_or_die(config, "gen");
+  SimSnapshot plain_snapshot;
+  SimSnapshot auto_snapshot;
+  sim_and_snapshot(config, "sim -seed 7 -scensus false", &plain_snapshot);
+  sim_and_snapshot(config, "sim -seed 7 -scensus auto", &auto_snapshot);
+  assert_sim_snapshots_equal(&plain_snapshot, &auto_snapshot);
+  load_and_exec_config_or_die(config, "set -patrollout true");
+  SimResults *sim_results = sim_results_create(0);
+  assert(config_simulate_and_return_status(config, NULL, NULL, sim_results) ==
+         ERROR_STATUS_SUCCESS);
+  sim_results_destroy(sim_results);
+
+  // Saved as auto, not as what this machine decided.
+  StringBuilder *sb = string_builder_create();
+  config_add_settings_to_string_builder(config, sb);
+  assert(strstr(string_builder_peek(sb), " -scensus auto") != NULL);
+  string_builder_destroy(sb);
+  load_and_exec_config_or_die(config, "set -scensus false");
+  sb = string_builder_create();
+  config_add_settings_to_string_builder(config, sb);
+  assert(strstr(string_builder_peek(sb), " -scensus false") != NULL);
+  string_builder_destroy(sb);
+  move_list_destroy(move_list);
+  config_destroy(config);
+
+  // The census reads the first player's word graph and leaves, so it serves
+  // no game whose players differ in them.
+  config = config_create_or_die("set -l1 NWL20 -l2 CSW21 -wmp false");
+  load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
+  assert(!census_rollout_supports(config_get_game(config)));
+  assert(census_rollout_memory_bytes(config_get_game(config), 1, 8) == 0);
+  config_destroy(config);
+}
+
 void test_census_rollout(void) {
   test_census_rollout_moves_match_plain();
   test_census_rollout_sim_matches_plain();
   test_census_rollout_refuses_pat();
+  test_census_rollout_auto();
 }
 
 // Single-threaded sims of four positions of a CSW24 game, with and without

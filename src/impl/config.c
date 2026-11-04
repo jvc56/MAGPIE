@@ -130,7 +130,7 @@ enum {
   // The format -savesettings writes as -fileversion. Raise it whenever a
   // default that settings files record changes, and list the setting in
   // config_stale_settings.
-  CONFIG_SETTINGS_VERSION = 2,
+  CONFIG_SETTINGS_VERSION = 3,
   // The table types that can be auto (WMP, WIT, RIT), and the most tables a
   // load weighs: two of each, and a wordmap each player's rack info table needs
   // and neither player loads.
@@ -352,7 +352,11 @@ struct Config {
   bool sim_with_inference;
   bool sim_margin_forecast;
   bool sim_bag_cycle;
+  // -scensus: true or false, or auto (sim_census_rollout_auto, with
+  // sim_census_rollout set), which steers a sim's rollouts with the census
+  // when it fits in this machine's memory (census_rollout_auto_chooses).
   bool sim_census_rollout;
+  bool sim_census_rollout_auto;
   bool use_heat_map;
   bool print_boards;
   // A config contribute's tasks run in (config_create_for_contribute): its
@@ -2643,16 +2647,23 @@ static void help_entry_fill(const Config *config, int token,
              "least two cycles. On by default.";
       break;
     case ARG_TOKEN_SIM_CENSUS_ROLLOUT:
-      usages[0] = "<true_or_false>";
-      examples[0] = "true";
+      usages[0] = "<auto_true_or_false>";
+      examples[0] = "auto";
       examples[1] = "false";
       text = "Specifies whether a census of the position steers the "
              "rollouts' move generation. Before the rollouts, it scores "
              "every rack's best play in each anchor of the position and of "
              "each candidate's board; each rollout move generation then "
              "skips the anchors it knows to be worse. The moves are the "
-             "same, found faster. The census leaves out PAT, so a sim with "
-             "it needs patrollout set to false. Off by default.";
+             "same, found faster. It takes memory: about 0.2 to 0.4 GB for "
+             "English on 1 thread and 0.5 GB on 12, with 64 or more "
+             "candidates. auto (the default for the command line program "
+             "and the library) uses it for a sim when this machine has the "
+             "memory for it (within a quarter of the physical memory, and "
+             "what is available less 1 GB), the bag has tiles, the players "
+             "share a lexicon and leaves in a classic game, and the "
+             "rollouts go without PAT; true always uses it, and needs "
+             "patrollout set to false; false never uses it.";
       break;
     case ARG_TOKEN_USE_HEAT_MAP:
       usages[0] = "<true_or_false>";
@@ -3940,6 +3951,7 @@ void config_fill_sim_args(const Config *config, Rack *known_opp_rack,
       config->sim_margin_forecast, &inference_args, sim_args);
   sim_args->bag_cycle = config->sim_bag_cycle;
   sim_args->use_census_rollout = config->sim_census_rollout;
+  sim_args->census_rollout_auto = config->sim_census_rollout_auto;
   if (config->game) {
     config_set_sim_args_pat_rollout(
         config, game_get_player_on_turn_index(config->game), sim_args);
@@ -8648,9 +8660,10 @@ config_wordmap_for_first_use(Config *config, int player_index,
   return lexicon;
 }
 
-// Loads a table option's value into *use and *automatic: true or false, or
-// auto, which uses the table when this machine has room for it (and sets
-// *use, the setting's "wanted"). Leaves both when the option is absent.
+// Loads a table option's value (or -scensus's) into *use and *automatic: true
+// or false, or auto, which uses the table when this machine has room for it
+// (and sets *use, the setting's "wanted"). Leaves both when the option is
+// absent.
 static void config_load_table_setting(const Config *config,
                                       arg_token_t arg_token, bool *use,
                                       bool *automatic,
@@ -12410,6 +12423,7 @@ void config_contribute_reset_shared_settings(Config *config) {
   config->sim_margin_forecast = false;
   config->sim_bag_cycle = true;
   config->sim_census_rollout = false;
+  config->sim_census_rollout_auto = false;
 }
 
 // Applies the run-wide settings a task request states, on top of
@@ -14484,8 +14498,9 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
     return;
   }
 
-  config_load_bool(config, ARG_TOKEN_SIM_CENSUS_ROLLOUT,
-                   &config->sim_census_rollout, error_stack);
+  config_load_table_setting(config, ARG_TOKEN_SIM_CENSUS_ROLLOUT,
+                            &config->sim_census_rollout,
+                            &config->sim_census_rollout_auto, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
@@ -16586,6 +16601,10 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   // A mapped rack info table starts faster, is shared by the processes using
   // its data directory, and gives the system pages it can reclaim.
   config->use_mmap_for_rit = auto_tables && IS_LITTLE_ENDIAN;
+  // The census steers sims' rollouts when this machine has the memory for
+  // it, wherever the tables are auto.
+  config->sim_census_rollout = auto_tables;
+  config->sim_census_rollout_auto = auto_tables;
   config->auto_table_report = NULL;
   memset(config->table_left_out, 0, sizeof(config->table_left_out));
   memset(config->table_checked, 0, sizeof(config->table_checked));
@@ -17304,8 +17323,15 @@ void config_add_settings_to_string_builder(const Config *config,
                                                 config->sim_bag_cycle);
       break;
     case ARG_TOKEN_SIM_CENSUS_ROLLOUT:
-      config_add_bool_setting_to_string_builder(config, sb, arg_token,
-                                                config->sim_census_rollout);
+      // Auto as auto, as the table options are saved: what it decides
+      // depends on the machine.
+      if (config->sim_census_rollout_auto) {
+        string_builder_add_formatted_string(sb, " -%s auto",
+                                            config->pargs[arg_token]->name);
+      } else {
+        config_add_bool_setting_to_string_builder(config, sb, arg_token,
+                                                  config->sim_census_rollout);
+      }
       break;
     case ARG_TOKEN_P1_SIM_BAG_CYCLE:
       config_add_bool_setting_to_string_builder(config, sb, arg_token,
@@ -17590,7 +17616,7 @@ static const StaleSetting config_stale_settings[] = {
     {2, ARG_TOKEN_P2_USE_WIT},           {2, ARG_TOKEN_USE_MMAP_FOR_RIT},
     {2, ARG_TOKEN_PEG_NESTED_CAND_CAPS}, {2, ARG_TOKEN_PEG_NESTED_DEPTH},
     {2, ARG_TOKEN_PEG_NESTED_STRIDES},   {2, ARG_TOKEN_ENDGAME_PLIES},
-    {2, ARG_TOKEN_PEG_OUT_WIDTH},
+    {2, ARG_TOKEN_PEG_OUT_WIDTH},        {3, ARG_TOKEN_SIM_CENSUS_ROLLOUT},
 };
 
 // The arg token whose full name is `name` (without its dash), or
