@@ -68,9 +68,9 @@ typedef struct MoveGenArgs {
   // MOVE_RECORD_BEST_SMALL only: lane shadows that earlier generations
   // recorded (see lane_shadow_cache.h). A lane the cache holds adds the
   // anchors recorded for it instead of being shadowed, and every other lane
-  // is recorded. Not used with a word info table or in wordsmog, whose
-  // shadows read more than the key holds. NULL (the default) shadows every
-  // lane.
+  // is recorded. Not used in wordsmog. A word info table does not matter:
+  // only the full shadow and WMP generation read it, not the small shadow and
+  // generator these generations run. NULL (the default) shadows every lane.
   LaneShadowCache *lane_shadow_cache;
   // For the census rollout (census_rollout.h), MOVE_RECORD_BEST by equity
   // only: the lanes (bit dir * BOARD_DIM + row_or_col) whose anchors are not
