@@ -31,7 +31,6 @@
 #include <string.h>
 
 enum {
-  CENSUS_ROLLOUT_MAX_CANDIDATES = 64,
   CENSUS_ROLLOUT_MAX_UNITS = CENSUS_ROLLOUT_NUM_LANES * BOARD_DIM,
   CENSUS_ROLLOUT_NO_UNIT = -1,
   // Racks whose root-table bests a worker remembers (a power of two).
@@ -78,7 +77,6 @@ typedef struct CensusRolloutTable {
 
 typedef struct CensusRolloutBoard {
   Game *game;
-  uint64_t signature;
   uint64_t hashes[CENSUS_ROLLOUT_NUM_LANES];
   uint32_t anchor_cols[CENSUS_ROLLOUT_NUM_LANES];
   // For a full rack, the zone of each anchor (see
@@ -112,14 +110,29 @@ struct CensusRollout {
   // One per thread that builds tables.
   CensusRolloutBuilder builders[CENSUS_ROLLOUT_MAX_BUILD_THREADS];
   CensusRolloutBoard root;
-  CensusRolloutBoard candidates[CENSUS_ROLLOUT_MAX_CANDIDATES];
+  // The sim's candidates' boards, and their signatures in the same order, for
+  // finding a rollout's board. Both grow with the largest sim so far.
+  CensusRolloutBoard *candidates;
+  uint64_t *signatures;
   int number_of_candidates;
+  int candidates_capacity;
   // The board a candidate is played on, while building.
   Game *candidate_game;
   // The sims prepared so far: a worker forgets what it remembered when this
   // changes.
   uint64_t sim_number;
 };
+
+// The last changed version of a candidate's lane seen in a rollout (its hash
+// and the rack size its zones were for) and what it gave: the anchors it has,
+// and those whose plays are as they were on the candidate's board. A lane
+// that hashes the same holds the same squares.
+typedef struct CensusRolloutLaneMemo {
+  uint64_t hash;
+  int rack_tiles;
+  uint32_t anchors;
+  uint32_t known;
+} CensusRolloutLaneMemo;
 
 struct CensusRolloutWorker {
   // The census board of the rollout this worker is playing.
@@ -136,15 +149,9 @@ struct CensusRolloutWorker {
   int root_cache_units;
   Equity root_bests[CENSUS_ROLLOUT_MAX_UNITS];
   Equity candidate_bests[CENSUS_ROLLOUT_MAX_UNITS];
-  // By candidate and lane, the last changed version of the lane seen in a
-  // rollout (its hash and the rack size its zones were for) and what it
-  // gave: the anchors it has, and those whose plays are as they were on the
-  // candidate's board. A lane that hashes the same holds the same squares.
-  uint64_t memo_hashes[CENSUS_ROLLOUT_MAX_CANDIDATES][CENSUS_ROLLOUT_NUM_LANES];
-  int memo_rack_tiles[CENSUS_ROLLOUT_MAX_CANDIDATES][CENSUS_ROLLOUT_NUM_LANES];
-  uint32_t memo_anchors[CENSUS_ROLLOUT_MAX_CANDIDATES]
-                       [CENSUS_ROLLOUT_NUM_LANES];
-  uint32_t memo_known[CENSUS_ROLLOUT_MAX_CANDIDATES][CENSUS_ROLLOUT_NUM_LANES];
+  // By candidate, then lane, for memo_capacity candidates.
+  CensusRolloutLaneMemo (*memos)[CENSUS_ROLLOUT_NUM_LANES];
+  int memo_capacity;
   // Whether the last generation was served, and steered (see
   // census_rollout_worker_last_served).
   bool last_served;
@@ -315,10 +322,12 @@ void census_rollout_destroy(CensusRollout *census) {
     return;
   }
   census_rollout_board_destroy(&census->root);
-  for (int candidate_idx = 0; candidate_idx < CENSUS_ROLLOUT_MAX_CANDIDATES;
+  for (int candidate_idx = 0; candidate_idx < census->candidates_capacity;
        candidate_idx++) {
     census_rollout_board_destroy(&census->candidates[candidate_idx]);
   }
+  free(census->candidates);
+  free(census->signatures);
   game_destroy(census->candidate_game);
   census_lattice_destroy(census->lattice);
   free(census->leave);
@@ -566,9 +575,6 @@ static void census_rollout_set_root(CensusRollout *census, const Game *game) {
 static void census_rollout_add_candidate(CensusRollout *census,
                                          const Game *game,
                                          const Move *candidate) {
-  if (census->number_of_candidates == CENSUS_ROLLOUT_MAX_CANDIDATES) {
-    return;
-  }
   if (census->candidate_game == NULL) {
     census->candidate_game = game_duplicate(game);
   } else {
@@ -581,7 +587,7 @@ static void census_rollout_add_candidate(CensusRollout *census,
   board->index = census->number_of_candidates;
   census->number_of_candidates++;
   census_rollout_board_load(board, board_game);
-  board->signature = census_rollout_move_signature(candidate);
+  census->signatures[board->index] = census_rollout_move_signature(candidate);
   for (int lane = 0; lane < CENSUS_ROLLOUT_NUM_LANES; lane++) {
     board->from_root[lane] = 0;
     if (board->hashes[lane] == root->hashes[lane]) {
@@ -657,10 +663,27 @@ static void census_rollout_build_tables(CensusRollout *census) {
                    census_rollout_build_thread);
 }
 
+// Makes room for count candidates' boards, keeping those already loaded.
+static void census_rollout_reserve_candidates(CensusRollout *census,
+                                              int count) {
+  if (count <= census->candidates_capacity) {
+    return;
+  }
+  census->candidates = realloc_or_die(
+      census->candidates, sizeof(CensusRolloutBoard) * (size_t)count);
+  memset(&census->candidates[census->candidates_capacity], 0,
+         sizeof(CensusRolloutBoard) *
+             (size_t)(count - census->candidates_capacity));
+  census->signatures =
+      realloc_or_die(census->signatures, sizeof(uint64_t) * (size_t)count);
+  census->candidates_capacity = count;
+}
+
 void census_rollout_prepare(CensusRollout *census, const Game *game,
                             const MoveList *candidates) {
   census_rollout_set_root(census, game);
   const int count = move_list_get_count(candidates);
+  census_rollout_reserve_candidates(census, count);
   for (int move_idx = 0; move_idx < count; move_idx++) {
     census_rollout_add_candidate(census, game,
                                  move_list_get_move(candidates, move_idx));
@@ -678,6 +701,7 @@ void census_rollout_worker_destroy(CensusRolloutWorker *worker) {
     return;
   }
   free(worker->root_cache);
+  free(worker->memos);
   free(worker);
 }
 
@@ -686,7 +710,15 @@ void census_rollout_worker_destroy(CensusRolloutWorker *worker) {
 static void census_rollout_worker_start_sim(CensusRolloutWorker *worker,
                                             const CensusRollout *census) {
   memset(worker->root_keys, 0, sizeof(worker->root_keys));
-  memset(worker->memo_hashes, 0, sizeof(worker->memo_hashes));
+  if (worker->memo_capacity < census->number_of_candidates) {
+    free(worker->memos);
+    worker->memo_capacity = census->number_of_candidates;
+    worker->memos =
+        malloc_or_die(sizeof(*worker->memos) * (size_t)worker->memo_capacity);
+  }
+  // A hash of 0 matches no lane (see census_rollout_skips).
+  memset(worker->memos, 0,
+         sizeof(*worker->memos) * (size_t)census->number_of_candidates);
   const int root_units = census->root.table.number_of_units;
   if (worker->root_cache_units < root_units) {
     free(worker->root_cache);
@@ -707,7 +739,7 @@ void census_rollout_worker_set_candidate(CensusRolloutWorker *worker,
   worker->current = NULL;
   for (int candidate_idx = 0; candidate_idx < census->number_of_candidates;
        candidate_idx++) {
-    if (census->candidates[candidate_idx].signature == signature) {
+    if (census->signatures[candidate_idx] == signature) {
       worker->current = &census->candidates[candidate_idx];
       return;
     }
@@ -863,10 +895,10 @@ static bool census_rollout_skips(CensusRolloutWorker *worker,
     if (hashes[lane] == board->hashes[lane]) {
       anchors_now[lane] = board->anchor_cols[lane];
       known[lane] = anchors_now[lane];
-    } else if (worker->memo_hashes[board->index][lane] == hashes[lane] &&
-               worker->memo_rack_tiles[board->index][lane] == rack_tiles) {
-      anchors_now[lane] = worker->memo_anchors[board->index][lane];
-      known[lane] = worker->memo_known[board->index][lane];
+    } else if (worker->memos[board->index][lane].hash == hashes[lane] &&
+               worker->memos[board->index][lane].rack_tiles == rack_tiles) {
+      anchors_now[lane] = worker->memos[board->index][lane].anchors;
+      known[lane] = worker->memos[board->index][lane].known;
     } else {
       const Square *squares = census_rollout_lane_squares(game, lane);
       anchors_now[lane] = census_rollout_anchor_cols(squares);
@@ -883,10 +915,11 @@ static bool census_rollout_skips(CensusRolloutWorker *worker,
           known[lane] |= (UINT32_C(1) << col);
         }
       }
-      worker->memo_hashes[board->index][lane] = hashes[lane];
-      worker->memo_rack_tiles[board->index][lane] = rack_tiles;
-      worker->memo_anchors[board->index][lane] = anchors_now[lane];
-      worker->memo_known[board->index][lane] = known[lane];
+      worker->memos[board->index][lane] =
+          (CensusRolloutLaneMemo){.hash = hashes[lane],
+                                  .rack_tiles = rack_tiles,
+                                  .anchors = anchors_now[lane],
+                                  .known = known[lane]};
     }
     for (uint32_t remaining = known[lane]; remaining != 0;
          remaining &= remaining - 1) {
