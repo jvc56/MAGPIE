@@ -1,6 +1,8 @@
 #include "census_test.h"
 
 #include "../src/compat/cfile.h"
+#include "../src/compat/cpthread.h"
+#include "../src/compat/cpthread_defs.h"
 #include "../src/def/equity_defs.h"
 #include "../src/def/game_history_defs.h"
 #include "../src/def/letter_distribution_defs.h"
@@ -27,10 +29,17 @@
 #include "test_platform.h"
 #include "test_util.h"
 #include <assert.h>
+#include <math.h>
+#include <stdatomic.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+
+enum {
+  // The threads that share a claimed build's units.
+  CLAIMED_BUILD_THREADS = 3,
+};
 
 static CensusLattice *create_lattice_or_die(int num_letters, int rack_size) {
   ErrorStack *error_stack = error_stack_create();
@@ -81,6 +90,21 @@ static void test_lattice_ranks_round_trip(void) {
        index += 997) {
     census_lattice_unrank(lattice, index, tally);
     assert(census_lattice_rank(lattice, tally) == index);
+    // the same multiset as its letters and counts, with an absent letter
+    // among them
+    const int num_letters = census_lattice_get_num_letters(lattice);
+    MachineLetter letters[CENSUS_MAX_LETTERS] = {0};
+    uint8_t counts[CENSUS_MAX_LETTERS] = {0};
+    int number_of_letters = 0;
+    for (int ml = 0; ml < num_letters; ml++) {
+      if (tally[ml] > 0 || ml == num_letters / 2) {
+        letters[number_of_letters] = (MachineLetter)ml;
+        counts[number_of_letters] = tally[ml];
+        number_of_letters++;
+      }
+    }
+    assert(census_lattice_rank_sparse(lattice, letters, counts,
+                                      number_of_letters) == index);
   }
   memset(tally, 0, sizeof(tally));
   tally[3] = 8;
@@ -486,6 +510,185 @@ static void test_play_scores_match_movegen(void) {
 // The census end to end on the A/B lexicon, whose lattice is 120 multisets:
 // the output matches a known-good table and does not depend on the thread
 // count, and the blend of two tables is their weighted mean.
+// The leaves from one walk of the KLV are its values, multiset by multiset,
+// 0 for those it does not hold.
+static void test_leaves_from_klv(void) {
+  Config *config = config_create_or_die("set -lex CSW21 -wmp false");
+  Game *game = config_game_create(config);
+  const LetterDistribution *ld = game_get_ld(game);
+  const int num_letters = ld_get_size(ld);
+  const KLV *klv = player_get_klv(game_get_player(game, 0));
+  CensusLattice *lattice = create_lattice_or_die(num_letters, RACK_SIZE);
+  const uint32_t lattice_size = census_lattice_get_size(lattice);
+  Equity *leave = malloc_or_die(sizeof(Equity) * lattice_size);
+  census_leaves_from_klv(lattice, klv, leave);
+  uint8_t tally[CENSUS_MAX_LETTERS];
+  Rack leave_rack;
+  rack_set_dist_size_and_reset(&leave_rack, num_letters);
+  int number_held = 0;
+  for (uint32_t index = 0; index < lattice_size; index += 13) {
+    census_lattice_unrank(lattice, index, tally);
+    rack_reset(&leave_rack);
+    for (int ml = 0; ml < num_letters; ml++) {
+      rack_add_letters(&leave_rack, (MachineLetter)ml, tally[ml]);
+    }
+    assert(leave[index] == klv_get_leave_value(klv, &leave_rack));
+    if (leave[index] != 0) {
+      number_held++;
+    }
+  }
+  assert(number_held > 0);
+  free(leave);
+  census_lattice_destroy(lattice);
+  game_destroy(game);
+  config_destroy(config);
+}
+
+// The expected best of a drawn rack is the same on any number of threads, and
+// is census_apportion's sum at the empty multiset, which every drawn rack
+// adds to.
+static void test_expected_best_matches_apportion(void) {
+  Config *config = config_create_or_die("set -lex CSW21 -wmp false");
+  Game *game = config_game_create(config);
+  const int num_letters = ld_get_size(game_get_ld(game));
+  CensusLattice *lattice = create_lattice_or_die(num_letters, RACK_SIZE);
+  const uint32_t size = census_lattice_get_size(lattice);
+  CensusAddTable *add_table = census_add_table_create(lattice, 8);
+  Equity *leave = malloc_or_die(sizeof(Equity) * size);
+  Equity *leave_max_over_subsets = malloc_or_die(sizeof(Equity) * size);
+  Equity *play_scores = malloc_or_die(sizeof(Equity) * size);
+  Equity *rack_best = malloc_or_die(sizeof(Equity) * size);
+  CensusSums *sums = malloc_or_die(sizeof(CensusSums) * size);
+  census_leaves_from_klv(lattice, player_get_klv(game_get_player(game, 0)),
+                         leave);
+  census_max_over_subsets(lattice, add_table, leave, leave_max_over_subsets);
+  const char *cgps[] = {DOUG_V_EMELY_CGP, VS_ANDY_CGP, NOAH_VS_PETER_CGP};
+  for (size_t cgp_idx = 0; cgp_idx < sizeof(cgps) / sizeof(cgps[0]);
+       cgp_idx++) {
+    load_cgp_or_die(game, cgps[cgp_idx]);
+    uint8_t unseen[CENSUS_MAX_LETTERS];
+    census_get_unseen_tally(game, unseen);
+    for (uint32_t index = 0; index < size; index++) {
+      play_scores[index] = 0;
+    }
+    census_play_scores_build(game, lattice, unseen, play_scores);
+    const CensusApportionArgs args = {
+        .lattice = lattice,
+        .add_table = add_table,
+        .play_scores = play_scores,
+        .leave = leave,
+        .leave_max_over_subsets = leave_max_over_subsets,
+        .unseen_tally = unseen,
+        .null_leave = false,
+        .superset_sum = true,
+        .scatter = true,
+    };
+    CensusSums serial;
+    census_expected_best(&args, rack_best, &serial, 1);
+    CensusSums threaded;
+    census_expected_best(&args, rack_best, &threaded, 4);
+    assert(serial.num == threaded.num);
+    assert(serial.den == threaded.den);
+    memset(sums, 0, sizeof(CensusSums) * size);
+    census_apportion(&args, sums, rack_best);
+    assert(fabs(serial.den - sums[0].den) <= 1e-9 * sums[0].den);
+    assert(fabs(serial.num - sums[0].num) <= 1e-9 * fabs(sums[0].num));
+  }
+  free(sums);
+  free(rack_best);
+  free(play_scores);
+  free(leave_max_over_subsets);
+  free(leave);
+  census_add_table_destroy(add_table);
+  census_lattice_destroy(lattice);
+  game_destroy(game);
+  config_destroy(config);
+}
+
+typedef struct ClaimedBuildThread {
+  const Game *game;
+  const CensusLattice *lattice;
+  const uint8_t *unseen_tally;
+  Equity *play_scores;
+  int second_tile_groups;
+  _Atomic int *next_unit;
+  uint64_t number_of_plays;
+  cpthread_t cpthread_id;
+} ClaimedBuildThread;
+
+static void *claimed_build_thread(void *uncasted_thread) {
+  ClaimedBuildThread *thread = (ClaimedBuildThread *)uncasted_thread;
+  thread->number_of_plays = census_play_scores_build_claimed(
+      thread->game, thread->lattice, thread->unseen_tally, thread->play_scores,
+      thread->second_tile_groups, thread->next_unit, CENSUS_ALL_LANES);
+  return NULL;
+}
+
+// Threads sharing a build's units and its play scores find every play of the
+// serial build once: the play scores they leave are the serial build's, and
+// their plays add up to its.
+static void test_play_scores_claimed_units_match_serial(void) {
+  Config *config = config_create_or_die("set -lex CSW21 -wmp false");
+  Game *game = config_game_create(config);
+  const int num_letters = ld_get_size(game_get_ld(game));
+  CensusLattice *lattice = create_lattice_or_die(num_letters, RACK_SIZE);
+  const uint32_t size = census_lattice_get_size(lattice);
+  Equity *serial = malloc_or_die(sizeof(Equity) * size);
+  Equity *shared = malloc_or_die(sizeof(Equity) * size);
+  const char *cgps[] = {EMPTY_CGP, DOUG_V_EMELY_CGP, VS_ANDY_CGP, VS_FRENTZ_CGP,
+                        NOAH_VS_PETER_CGP};
+  // up to one group for each letter, as an inference splits its builds
+  const int groups[] = {1, 2, 8, num_letters};
+  for (size_t cgp_idx = 0; cgp_idx < sizeof(cgps) / sizeof(cgps[0]);
+       cgp_idx++) {
+    load_cgp_or_die(game, cgps[cgp_idx]);
+    uint8_t unseen[CENSUS_MAX_LETTERS];
+    census_get_unseen_tally(game, unseen);
+    for (uint32_t index = 0; index < size; index++) {
+      serial[index] = CENSUS_UNPLAYABLE;
+    }
+    const uint64_t serial_plays =
+        census_play_scores_build(game, lattice, unseen, serial);
+    for (size_t group_idx = 0; group_idx < sizeof(groups) / sizeof(groups[0]);
+         group_idx++) {
+      _Atomic int next_unit;
+      atomic_init(&next_unit, 0);
+      for (uint32_t index = 0; index < size; index++) {
+        shared[index] = CENSUS_UNPLAYABLE;
+      }
+      ClaimedBuildThread threads[CLAIMED_BUILD_THREADS];
+      for (int thread_idx = 0; thread_idx < CLAIMED_BUILD_THREADS;
+           thread_idx++) {
+        threads[thread_idx] = (ClaimedBuildThread){
+            .game = game,
+            .lattice = lattice,
+            .unseen_tally = unseen,
+            .play_scores = shared,
+            .second_tile_groups = groups[group_idx],
+            .next_unit = &next_unit,
+        };
+        cpthread_create(&threads[thread_idx].cpthread_id, claimed_build_thread,
+                        &threads[thread_idx]);
+      }
+      uint64_t plays = 0;
+      for (int thread_idx = 0; thread_idx < CLAIMED_BUILD_THREADS;
+           thread_idx++) {
+        cpthread_join(threads[thread_idx].cpthread_id);
+        plays += threads[thread_idx].number_of_plays;
+      }
+      assert(plays == serial_plays);
+      for (uint32_t index = 0; index < size; index++) {
+        assert(shared[index] == serial[index]);
+      }
+    }
+  }
+  free(shared);
+  free(serial);
+  census_lattice_destroy(lattice);
+  game_destroy(game);
+  config_destroy(config);
+}
+
 static void test_census_command(void) {
   char *tmp_dir = test_platform_make_temporary_directory("magpie_census_");
   char *lexica_dir = get_formatted_string("%s/lexica", tmp_dir);
@@ -579,5 +782,8 @@ void test_census(void) {
   test_apportion_matches_naive();
   test_blank_variants_match_naive();
   test_play_scores_match_movegen();
+  test_play_scores_claimed_units_match_serial();
+  test_leaves_from_klv();
+  test_expected_best_matches_apportion();
   test_census_command();
 }

@@ -24,6 +24,7 @@
 #include "../src/impl/config.h"
 #include "../src/impl/gameplay.h"
 #include "../src/impl/inference.h"
+#include "../src/impl/move_gen.h"
 #include "../src/util/io_util.h"
 #include "../src/util/math_util.h"
 #include "../src/util/string_util.h"
@@ -1492,6 +1493,33 @@ static void infer_for_threads_test(InferenceCtx **ctx, const Config *config,
   assert(status == ERROR_STATUS_SUCCESS);
 }
 
+// The census path does not generate moves once per possible rack, so the
+// contribution count's lower bound leaves inference out; the per-rack path
+// still counts one generation per rack on every worker. This placement leaves
+// three unknown tiles, which take the per-rack path.
+static void test_infer_movegen_accounting(void) {
+  const int thread_counts[] = {1, 3};
+  const int number_of_thread_counts =
+      (int)(sizeof(thread_counts) / sizeof(thread_counts[0]));
+  for (int thread_count_idx = 0; thread_count_idx < number_of_thread_counts;
+       thread_count_idx++) {
+    Config *config =
+        create_config_for_threads_test(thread_counts[thread_count_idx]);
+    InferenceResults *results = inference_results_create(NULL);
+    gen_start_counting_movegens();
+    const uint64_t before = gen_get_movegen_count();
+    infer_for_threads_test(NULL, config, false, results);
+    const uint64_t movegens = gen_get_movegen_count() - before;
+    gen_stop_counting_movegens();
+    const AliasMethod *alias_method =
+        inference_results_get_alias_method(results);
+    assert(alias_method->num_items > 0);
+    assert(movegens >= alias_method->num_items);
+    inference_results_destroy(results);
+    config_destroy(config);
+  }
+}
+
 // Each possible leave is evaluated by exactly one of the workers, whichever
 // claims it, so the inference counts the same leaves at any number of threads.
 static void test_infer_same_results_for_any_number_of_threads(void) {
@@ -1658,5 +1686,6 @@ void test_infer(void) {
     test_infer_nonerror_cases(2, use_game_history);
     test_infer_nonerror_cases(7, use_game_history);
   }
+  test_infer_movegen_accounting();
   test_infer_same_results_for_any_number_of_threads();
 }
