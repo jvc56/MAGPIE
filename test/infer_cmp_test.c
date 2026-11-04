@@ -1,13 +1,16 @@
 #include "infer_cmp_test.h"
 
+#include "../src/compat/ctime.h"
 #include "../src/def/game_history_defs.h"
 #include "../src/def/inference_defs.h"
 #include "../src/def/letter_distribution_defs.h"
 #include "../src/def/rack_defs.h"
 #include "../src/def/thread_control_defs.h"
 #include "../src/ent/bag.h"
+#include "../src/ent/board.h"
 #include "../src/ent/equity.h"
 #include "../src/ent/game.h"
+#include "../src/ent/inference_args.h"
 #include "../src/ent/inference_results.h"
 #include "../src/ent/letter_distribution.h"
 #include "../src/ent/move.h"
@@ -15,9 +18,12 @@
 #include "../src/ent/thread_control.h"
 #include "../src/impl/config.h"
 #include "../src/impl/gameplay.h"
+#include "../src/impl/inference.h"
 #include "../src/util/io_util.h"
 #include "test_constants.h"
 #include "test_util.h"
+#include <assert.h>
+#include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -185,7 +191,141 @@ static void test_infer_cutoff_optimization(bool use_wmp) {
   config_destroy(config);
 }
 
+// Infers the target's leave from its move with the census play scores or with
+// a move generation for each rack, and returns the seconds it took. The census
+// inferences share one context, so that it is reused across positions.
+static double infer_with_census_setting(
+    const Config *config, InferenceCtx **ctx, bool use_census, int target_index,
+    Equity target_score, int target_num_exch, Rack *target_played_tiles,
+    InferenceResults *results, ErrorStack *error_stack) {
+  const int ld_size = ld_get_size(config_get_ld(config));
+  Rack target_known_rack;
+  rack_set_dist_size_and_reset(&target_known_rack, ld_size);
+  Rack nontarget_known_rack;
+  rack_set_dist_size_and_reset(&nontarget_known_rack, ld_size);
+  thread_control_set_status(config_get_thread_control(config),
+                            THREAD_CONTROL_STATUS_STARTED);
+  InferenceArgs args;
+  infer_args_fill(&args, config_get_num_plays(config),
+                  config_get_eq_margin_inference(config), NULL,
+                  config_get_game(config), config_get_num_threads(config), 0,
+                  config_get_print_interval(config),
+                  config_get_thread_control(config), false, true, target_index,
+                  target_score, target_num_exch, target_played_tiles,
+                  &target_known_rack, &nontarget_known_rack);
+  args.use_census_play_scores = use_census;
+  Timer timer;
+  ctimer_start(&timer);
+  if (use_census) {
+    infer(&args, ctx, results, error_stack);
+  } else {
+    infer_without_ctx(&args, results, error_stack);
+  }
+  ctimer_stop(&timer);
+  return ctimer_elapsed_seconds(&timer);
+}
+
+// Test that inferring with the census play scores admits the same racks as
+// inferring with a move generation for each rack, on the positions of
+// self-play games where the census is used: exchanges and plays of at most
+// RACK_SIZE - INFERENCE_CENSUS_MIN_TILES_TO_INFER tiles.
+static void test_infer_census_matches_movegen(void) {
+  const int MIN_INFERENCES = 24;
+  const int MIN_EXCHANGES = 2;
+  const int MAX_GAMES = 100;
+
+  Config *config = config_create_or_die(
+      "set -lex CSW24 -wmp true -s1 equity -s2 equity -r1 all -r2 all "
+      "-numplays 1 -threads 10 -ima 5");
+  const int ld_size = ld_get_size(config_get_ld(config));
+  load_and_exec_config_or_die(
+      config, "cgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 / 0/0 0 -lex "
+              "CSW24;");
+  Game *game = config_get_game(config);
+
+  InferenceResults *census_results = inference_results_create(NULL);
+  InferenceResults *movegen_results = inference_results_create(NULL);
+  InferenceCtx *census_ctx = NULL;
+  ErrorStack *error_stack = error_stack_create();
+  MoveList *move_list = move_list_create(1);
+
+  int games_completed = 0;
+  int inferences = 0;
+  int exchanges = 0;
+  double census_seconds = 0;
+  double movegen_seconds = 0;
+  const uint64_t base_seed = 7;
+
+  while ((inferences < MIN_INFERENCES || exchanges < MIN_EXCHANGES) &&
+         games_completed < MAX_GAMES) {
+    game_reset(game);
+    game_seed(game, base_seed + games_completed);
+    draw_starting_racks(game);
+    while (!game_over(game)) {
+      const int player_on_turn = game_get_player_on_turn_index(game);
+      const Move *top_move = get_top_equity_move(game, move_list);
+      const game_event_t move_type = move_get_type(top_move);
+      const int tiles_played = move_get_tiles_played(top_move);
+      const bool census_applies =
+          board_get_tiles_played(game_get_board(game)) > 0 &&
+          (move_type == GAME_EVENT_EXCHANGE ||
+           (move_type == GAME_EVENT_TILE_PLACEMENT_MOVE &&
+            RACK_SIZE - tiles_played >= INFERENCE_CENSUS_MIN_TILES_TO_INFER));
+      if (census_applies && bag_get_letters(game_get_bag(game)) >= RACK_SIZE) {
+        int num_exch = 0;
+        Rack target_played_tiles;
+        rack_set_dist_size_and_reset(&target_played_tiles, ld_size);
+        if (move_type == GAME_EVENT_EXCHANGE) {
+          num_exch = tiles_played;
+        } else {
+          for (int tile_idx = 0; tile_idx < move_get_tiles_length(top_move);
+               tile_idx++) {
+            const MachineLetter ml = move_get_tile(top_move, tile_idx);
+            if (ml == PLAYED_THROUGH_MARKER) {
+              continue;
+            }
+            rack_add_letter(&target_played_tiles,
+                            get_is_blanked(ml) ? BLANK_MACHINE_LETTER : ml);
+          }
+        }
+        census_seconds += infer_with_census_setting(
+            config, &census_ctx, true, player_on_turn, move_get_score(top_move),
+            num_exch, &target_played_tiles, census_results, error_stack);
+        assert(error_stack_is_empty(error_stack));
+        movegen_seconds += infer_with_census_setting(
+            config, &census_ctx, false, player_on_turn,
+            move_get_score(top_move), num_exch, &target_played_tiles,
+            movegen_results, error_stack);
+        assert(error_stack_is_empty(error_stack));
+        assert_inference_results_equal(census_results, movegen_results,
+                                       ld_size);
+        inferences++;
+        if (move_type == GAME_EVENT_EXCHANGE) {
+          exchanges++;
+        }
+      }
+      play_move(top_move, game, NULL);
+    }
+    games_completed++;
+  }
+  assert(inferences >= MIN_INFERENCES);
+  assert(exchanges >= MIN_EXCHANGES);
+
+  printf("Census inference test: %d games, %d inferences (%d exchanges), "
+         "census %.3fs, move generation %.3fs\n",
+         games_completed, inferences, exchanges, census_seconds,
+         movegen_seconds);
+
+  move_list_destroy(move_list);
+  error_stack_destroy(error_stack);
+  inference_ctx_destroy(census_ctx);
+  inference_results_destroy(census_results);
+  inference_results_destroy(movegen_results);
+  config_destroy(config);
+}
+
 void test_infer_cmp(void) {
+  test_infer_census_matches_movegen();
   // Test cutoff optimization for both WMP and KWG modes
   test_infer_cutoff_optimization(true);  // WMP
   test_infer_cutoff_optimization(false); // KWG

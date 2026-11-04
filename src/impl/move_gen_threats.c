@@ -32,9 +32,10 @@ typedef struct ThreatRecorder {
 } ThreatRecorder;
 
 // The placed tile that loses least as a blank, among the tiles not yet blanks
-// whose letters `eligible` marks, the leftmost of equals. False when there is
-// none.
+// whose letters `eligible` marks (by the play's letter index, letter_of_tile),
+// the leftmost of equals. False when there is none.
 static bool threat_find_cheapest_natural(const CensusPlay *play,
+                                         const int *letter_of_tile,
                                          const bool *is_blank,
                                          const bool *eligible,
                                          int *cheapest_tile_idx) {
@@ -42,16 +43,16 @@ static bool threat_find_cheapest_natural(const CensusPlay *play,
   Equity cheapest_drop = EQUITY_MAX_VALUE;
   int cheapest_col = BOARD_DIM;
   for (int tile_idx = 0; tile_idx < play->tiles_played; tile_idx++) {
-    const CensusPlayTile *tile = &play->tiles[tile_idx];
-    if (is_blank[tile_idx] || !eligible[tile->ml]) {
+    if (is_blank[tile_idx] || !eligible[letter_of_tile[tile_idx]]) {
       continue;
     }
     const Equity drop = census_play_blank_drop(play, tile_idx);
+    const int col = play->tiles[tile_idx].col;
     if (!found || drop < cheapest_drop ||
-        (drop == cheapest_drop && tile->col < cheapest_col)) {
+        (drop == cheapest_drop && col < cheapest_col)) {
       found = true;
       cheapest_drop = drop;
-      cheapest_col = tile->col;
+      cheapest_col = col;
       *cheapest_tile_idx = tile_idx;
     }
   }
@@ -75,41 +76,65 @@ static void threat_record(const CensusPlay *play, void *context) {
           TRIVIAL_CROSS_SET) {
     return;
   }
-
-  bool is_blank[RACK_SIZE] = {false};
-  uint16_t naturals_used[MAX_ALPHABET_SIZE] = {0};
-  for (int tile_idx = 0; tile_idx < play->tiles_played; tile_idx++) {
-    naturals_used[play->tiles[tile_idx].ml]++;
+  // The play's score counts every tile at face value, and blanks only take
+  // value off, so once the list is full a play scoring less than its worst
+  // threat cannot join it.
+  const MoveList *threats = recorder->threats;
+  if (move_list_get_count(threats) == move_list_get_capacity(threats) &&
+      play->score < move_get_equity(move_list_get_move(threats, 0))) {
+    return;
   }
 
+  // The play's distinct letters, the naturals it places of each, and each
+  // tile's letter among them.
+  MachineLetter letters[RACK_SIZE];
+  int naturals_used[RACK_SIZE] = {0};
+  int letter_of_tile[RACK_SIZE];
+  int number_of_letters = 0;
+  for (int tile_idx = 0; tile_idx < play->tiles_played; tile_idx++) {
+    const MachineLetter ml = play->tiles[tile_idx].ml;
+    int letter_idx = 0;
+    while (letter_idx < number_of_letters && letters[letter_idx] != ml) {
+      letter_idx++;
+    }
+    if (letter_idx == number_of_letters) {
+      letters[number_of_letters++] = ml;
+    }
+    letter_of_tile[tile_idx] = letter_idx;
+    naturals_used[letter_idx]++;
+  }
+
+  bool is_blank[RACK_SIZE] = {false};
+  bool eligible[RACK_SIZE] = {false};
   Equity score = play->score;
-  bool eligible[MAX_ALPHABET_SIZE] = {false};
   int blanks_used = 0;
-  for (int ml_idx = 1; ml_idx < MAX_ALPHABET_SIZE; ml_idx++) {
-    if (naturals_used[ml_idx] <= recorder->naturals[ml_idx]) {
+  for (int letter_idx = 0; letter_idx < number_of_letters; letter_idx++) {
+    const int naturals = recorder->naturals[letters[letter_idx]];
+    if (naturals_used[letter_idx] <= naturals) {
       continue;
     }
-    eligible[ml_idx] = true;
-    while (naturals_used[ml_idx] > recorder->naturals[ml_idx]) {
+    eligible[letter_idx] = true;
+    while (naturals_used[letter_idx] > naturals) {
       // The play places the letter at least once for each blank it takes.
       int tile_idx = 0;
-      const bool found =
-          threat_find_cheapest_natural(play, is_blank, eligible, &tile_idx);
+      const bool found = threat_find_cheapest_natural(
+          play, letter_of_tile, is_blank, eligible, &tile_idx);
       assert(found);
       (void)found;
       is_blank[tile_idx] = true;
       score -= census_play_blank_drop(play, tile_idx);
-      naturals_used[ml_idx]--;
+      naturals_used[letter_idx]--;
       blanks_used++;
     }
-    eligible[ml_idx] = false;
+    eligible[letter_idx] = false;
   }
 
   int unknown_tiles = 0;
-  for (int ml_idx = 1; ml_idx < MAX_ALPHABET_SIZE; ml_idx++) {
-    if (naturals_used[ml_idx] > recorder->known[ml_idx]) {
-      unknown_tiles += naturals_used[ml_idx] - recorder->known[ml_idx];
-      eligible[ml_idx] = true;
+  for (int letter_idx = 0; letter_idx < number_of_letters; letter_idx++) {
+    const int known = recorder->known[letters[letter_idx]];
+    if (naturals_used[letter_idx] > known) {
+      unknown_tiles += naturals_used[letter_idx] - known;
+      eligible[letter_idx] = true;
     }
   }
   const int known_blanks = recorder->known[BLANK_MACHINE_LETTER];
@@ -119,21 +144,22 @@ static void threat_record(const CensusPlay *play, void *context) {
   while (unknown_tiles > recorder->unknown_slots &&
          blanks_used < known_blanks) {
     int tile_idx = 0;
-    if (!threat_find_cheapest_natural(play, is_blank, eligible, &tile_idx)) {
+    if (!threat_find_cheapest_natural(play, letter_of_tile, is_blank, eligible,
+                                      &tile_idx)) {
       break;
     }
-    const MachineLetter ml = play->tiles[tile_idx].ml;
+    const int letter_idx = letter_of_tile[tile_idx];
     is_blank[tile_idx] = true;
     score -= census_play_blank_drop(play, tile_idx);
-    naturals_used[ml]--;
-    eligible[ml] = naturals_used[ml] > recorder->known[ml];
+    naturals_used[letter_idx]--;
+    eligible[letter_idx] =
+        naturals_used[letter_idx] > recorder->known[letters[letter_idx]];
     blanks_used++;
     unknown_tiles--;
   }
   if (unknown_tiles > recorder->unknown_slots) {
     return;
   }
-
   MachineLetter tiles[BOARD_DIM];
   for (int col = play->leftstrip; col <= play->rightstrip; col++) {
     tiles[col] = PLAYED_THROUGH_MARKER;

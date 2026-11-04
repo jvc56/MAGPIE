@@ -21,6 +21,7 @@
 #include "board_test.h"
 #include "browser_game_test.h"
 #include "builder_hash_test.h"
+#include "census_rollout_test.h"
 #include "census_test.h"
 #include "cgp_test.h"
 #include "checkpoint_test.h"
@@ -186,6 +187,7 @@ static TestEntry test_table[] = {
     {"kwgmaker", test_kwg_maker},
     {"cgp", test_cgp},
     {"census", test_census},
+    {"censusrollout", test_census_rollout},
     {"rl", test_rack_list},
     {"rlfr", test_rack_list_forced_racks},
     {"ch", test_checkpoint},
@@ -256,6 +258,7 @@ static TestEntry on_demand_test_table[] = {
     {"viaopp", test_via_opp_must_block_every_depth},
     {"viastress", test_via_interrupted_reasonable_under_time_pressure},
     {"infercmp", test_infer_cmp},
+    {"censusrolloutbench", test_census_rollout_bench},
     {"genstuck", test_generate_stuck_cgps},
     {"gennonstuck", test_generate_nonstuck_cgps},
     {"gennonstuck2", test_generate_nonstuck_cgps2},
