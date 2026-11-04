@@ -21,6 +21,7 @@
 #include "board_test.h"
 #include "browser_game_test.h"
 #include "builder_hash_test.h"
+#include "census_sim_test.h"
 #include "census_test.h"
 #include "cgp_test.h"
 #include "checkpoint_test.h"
@@ -254,6 +255,8 @@ static TestEntry on_demand_test_table[] = {
     {"viaopp", test_via_opp_must_block_every_depth},
     {"viastress", test_via_interrupted_reasonable_under_time_pressure},
     {"infercmp", test_infer_cmp},
+    {"censussim", test_census_sim},
+    {"censussimtime", test_census_sim_time},
     {"genstuck", test_generate_stuck_cgps},
     {"gennonstuck", test_generate_nonstuck_cgps},
     {"gennonstuck2", test_generate_nonstuck_cgps2},

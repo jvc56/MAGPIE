@@ -500,3 +500,50 @@ census_play_scores_build_claimed(const Game *game, const CensusLattice *lattice,
   return play_scores_build(game, lattice, unseen_tally, play_scores, true,
                            second_tile_groups, next_unit, lane_mask);
 }
+
+uint64_t census_play_scores_build_lanes(const Game *game,
+                                        const CensusLattice *lattice,
+                                        const uint8_t *unseen_tally,
+                                        Equity *play_scores,
+                                        uint64_t lane_mask) {
+  _Atomic int next_unit;
+  atomic_init(&next_unit, 0);
+  return play_scores_build(game, lattice, unseen_tally, play_scores, false, 1,
+                           &next_unit, lane_mask);
+}
+
+// Whether two squares hold the same plays at the same scores: the same
+// letter, cross set, cross score, cross word flag and anchor. A square's
+// bonus is the same on every board, and its extension sets only prune.
+static bool play_scores_squares_match(const Square *first,
+                                      const Square *second) {
+  return square_get_letter(first) == square_get_letter(second) &&
+         square_get_cross_set(first) == square_get_cross_set(second) &&
+         square_get_cross_score(first) == square_get_cross_score(second) &&
+         square_get_is_cross_word(first) == square_get_is_cross_word(second) &&
+         square_get_anchor(first) == square_get_anchor(second);
+}
+
+uint64_t census_play_scores_changed_lanes(const Game *before,
+                                          const Game *after) {
+  const int cross_index = board_get_cross_set_index(
+      game_get_data_is_shared(before, PLAYERS_DATA_TYPE_KWG), 0);
+  const Square *before_lanes =
+      board_get_readonly_lanes(game_get_board(before), cross_index);
+  const Square *after_lanes =
+      board_get_readonly_lanes(game_get_board(after), cross_index);
+  uint64_t changed = 0;
+  for (int lane = 0; lane < BOARD_DIM * 2; lane++) {
+    const Square *before_row =
+        board_get_row_cache(before_lanes, lane % BOARD_DIM, lane / BOARD_DIM);
+    const Square *after_row =
+        board_get_row_cache(after_lanes, lane % BOARD_DIM, lane / BOARD_DIM);
+    for (int col = 0; col < BOARD_DIM; col++) {
+      if (!play_scores_squares_match(&before_row[col], &after_row[col])) {
+        changed |= (uint64_t)1 << lane;
+        break;
+      }
+    }
+  }
+  return changed;
+}

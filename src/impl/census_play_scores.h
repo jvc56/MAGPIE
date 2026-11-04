@@ -44,4 +44,20 @@ census_play_scores_build_claimed(const Game *game, const CensusLattice *lattice,
 // Every lane: a lane is a row in one direction, lane dir * BOARD_DIM + row.
 #define CENSUS_ALL_LANES ((UINT64_C(1) << (BOARD_DIM * 2)) - 1)
 
+// census_play_scores_build for the plays of the lanes in lane_mask alone. A
+// lane's plays depend only on its squares (as board_get_row_cache has them),
+// the word graph and the pool, so the build of every lane is the max of
+// the builds of any lanes that partition them.
+uint64_t census_play_scores_build_lanes(const Game *game,
+                                        const CensusLattice *lattice,
+                                        const uint8_t *unseen_tally,
+                                        Equity *play_scores,
+                                        uint64_t lane_mask);
+
+// The lanes whose squares differ between the boards of two games of the same
+// lexicon: the lanes whose plays census_play_scores_build_lanes must find
+// again after a move.
+uint64_t census_play_scores_changed_lanes(const Game *before,
+                                          const Game *after);
+
 #endif
