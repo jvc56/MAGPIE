@@ -44,6 +44,10 @@ typedef struct ThreatGen {
   // How many of each letter the unseen tiles hold, not counting blanks.
   uint16_t naturals[MAX_ALPHABET_SIZE];
   int blanks;
+  // The tiles of the opponent's rack that are known, blanks included, and how
+  // many more it holds from the rest of the unseen tiles.
+  uint16_t known[MAX_ALPHABET_SIZE];
+  int unknown_slots;
   // The letters the unseen tiles can play: every letter when they hold a
   // blank.
   uint64_t playable_letters;
@@ -63,60 +67,116 @@ static Equity threat_tile_score(const ThreatGen *tg, MachineLetter ml) {
   return ld_get_score(tg->ld, ml);
 }
 
-// Records the play in strip[leftstrip..rightstrip]. Where it places a letter
-// more times than the unseen tiles have naturals of it, the excess are
-// blanks, put on the squares where the letter adds least to the score.
+// What a natural tile of `ml` at `col` adds to the play's score: its score
+// times the letter multiplier, in the main word, which the whole play's word
+// multiplier multiplies, and in the cross word it makes there, if any, which
+// that square's word multiplier multiplies. A blank there adds none of it.
+static Equity threat_tile_value(const ThreatGen *tg, int col, MachineLetter ml,
+                                int word_multiplier) {
+  const BonusSquare bonus = square_get_bonus_square(&tg->lane[col]);
+  int multiplier = word_multiplier;
+  if (square_get_is_cross_word(&tg->lane[col])) {
+    multiplier += bonus_square_get_word_multiplier(bonus);
+  }
+  return ld_get_score(tg->ld, ml) * bonus_square_get_letter_multiplier(bonus) *
+         multiplier;
+}
+
+// The square of tiles[leftstrip..rightstrip] whose natural tile adds least to
+// the score, among the letters `eligible` marks. False when there is none.
+static bool threat_find_cheapest_natural(const ThreatGen *tg,
+                                         const MachineLetter *tiles,
+                                         int leftstrip, int rightstrip,
+                                         const bool *eligible,
+                                         int word_multiplier,
+                                         int *cheapest_col) {
+  bool found = false;
+  Equity cheapest_value = EQUITY_MAX_VALUE;
+  for (int col = leftstrip; col <= rightstrip; col++) {
+    const MachineLetter ml = tiles[col];
+    if (ml == PLAYED_THROUGH_MARKER || get_is_blanked(ml) || !eligible[ml]) {
+      continue;
+    }
+    const Equity value = threat_tile_value(tg, col, ml, word_multiplier);
+    if (!found || value < cheapest_value) {
+      found = true;
+      cheapest_value = value;
+      *cheapest_col = col;
+    }
+  }
+  return found;
+}
+
+// Records the play in strip[leftstrip..rightstrip], if the opponent can hold
+// its tiles, as the best-scoring choice of which of them are blanks.
+//
+// Where it places a letter more times than the unseen tiles have naturals of
+// it, the excess are blanks. The opponent's rack is their known tiles and
+// unknown_slots more from the rest of the unseen tiles, so the play's tiles
+// that are not known must fit in those slots. A known blank the play does not
+// already use can stand for a natural that is not known, taking the place of
+// an unknown tile. Every blank goes where its letter adds least to the score.
 static void threat_record(ThreatGen *tg, int leftstrip, int rightstrip) {
   MachineLetter tiles[BOARD_DIM];
   int word_multiplier = 1;
+  uint16_t naturals_used[MAX_ALPHABET_SIZE] = {0};
   for (int col = leftstrip; col <= rightstrip; col++) {
     tiles[col] = tg->strip[col];
     if (tiles[col] != PLAYED_THROUGH_MARKER) {
       word_multiplier *= bonus_square_get_word_multiplier(
           square_get_bonus_square(&tg->lane[col]));
+      naturals_used[tiles[col]]++;
     }
   }
 
-  // A tile placed at a square adds its score times the letter multiplier to
-  // the main word, which the whole play's word multiplier multiplies, and to
-  // the cross word it makes there, which that square's word multiplier
-  // multiplies. A blank takes all of that away.
-  if (tg->blanks_needed > 0) {
-    bool blanks_assigned[MAX_ALPHABET_SIZE] = {false};
-    for (int col = leftstrip; col <= rightstrip; col++) {
-      const MachineLetter ml = tiles[col];
-      if (ml == PLAYED_THROUGH_MARKER || get_is_blanked(ml) ||
-          blanks_assigned[ml] || tg->placed[ml] <= tg->naturals[ml]) {
-        continue;
-      }
-      blanks_assigned[ml] = true;
-      for (int excess = tg->placed[ml] - tg->naturals[ml]; excess > 0;
-           excess--) {
-        // The letter's first square is `col`, and the play has a square of it
-        // for every blank it takes, so one is always found.
-        int cheapest_col = col;
-        Equity cheapest_value = EQUITY_MAX_VALUE;
-        for (int other_col = col; other_col <= rightstrip; other_col++) {
-          if (tiles[other_col] != ml) {
-            continue;
-          }
-          const BonusSquare bonus =
-              square_get_bonus_square(&tg->lane[other_col]);
-          int multiplier = word_multiplier;
-          if (square_get_is_cross_word(&tg->lane[other_col])) {
-            multiplier += bonus_square_get_word_multiplier(bonus);
-          }
-          const Equity value = ld_get_score(tg->ld, ml) *
-                               bonus_square_get_letter_multiplier(bonus) *
-                               multiplier;
-          if (value < cheapest_value) {
-            cheapest_col = other_col;
-            cheapest_value = value;
-          }
-        }
-        tiles[cheapest_col] = get_blanked_machine_letter(ml);
-      }
+  bool eligible[MAX_ALPHABET_SIZE] = {false};
+  int blanks_used = 0;
+  for (int ml_idx = 1; ml_idx < MAX_ALPHABET_SIZE; ml_idx++) {
+    const MachineLetter ml = (MachineLetter)ml_idx;
+    if (naturals_used[ml] <= tg->naturals[ml]) {
+      continue;
     }
+    eligible[ml] = true;
+    while (naturals_used[ml] > tg->naturals[ml]) {
+      // The play places the letter at least once for each blank it takes.
+      int col = leftstrip;
+      const bool found = threat_find_cheapest_natural(
+          tg, tiles, leftstrip, rightstrip, eligible, word_multiplier, &col);
+      assert(found);
+      (void)found;
+      tiles[col] = get_blanked_machine_letter(ml);
+      naturals_used[ml]--;
+      blanks_used++;
+    }
+    eligible[ml] = false;
+  }
+
+  int unknown_tiles = 0;
+  for (int ml_idx = 1; ml_idx < MAX_ALPHABET_SIZE; ml_idx++) {
+    if (naturals_used[ml_idx] > tg->known[ml_idx]) {
+      unknown_tiles += naturals_used[ml_idx] - tg->known[ml_idx];
+      eligible[ml_idx] = true;
+    }
+  }
+  if (blanks_used > tg->known[BLANK_MACHINE_LETTER]) {
+    unknown_tiles += blanks_used - tg->known[BLANK_MACHINE_LETTER];
+  }
+  while (unknown_tiles > tg->unknown_slots &&
+         blanks_used < tg->known[BLANK_MACHINE_LETTER]) {
+    int col = leftstrip;
+    if (!threat_find_cheapest_natural(tg, tiles, leftstrip, rightstrip,
+                                      eligible, word_multiplier, &col)) {
+      break;
+    }
+    const MachineLetter ml = tiles[col];
+    tiles[col] = get_blanked_machine_letter(ml);
+    naturals_used[ml]--;
+    eligible[ml] = naturals_used[ml] > tg->known[ml];
+    blanks_used++;
+    unknown_tiles--;
+  }
+  if (unknown_tiles > tg->unknown_slots) {
+    return;
   }
 
   Equity main_word_score = 0;
@@ -278,7 +338,8 @@ void threats_get_unseen_tiles(const Game *game, Rack *unseen) {
   }
 }
 
-void generate_threats(const Game *game, const Rack *unseen, MoveList *threats) {
+void generate_threats(const Game *game, const Rack *unseen, const Rack *known,
+                      MoveList *threats) {
   move_list_reset(threats);
   const Board *board = game_get_board(game);
   assert(board_get_cross_sets_valid(board));
@@ -300,6 +361,19 @@ void generate_threats(const Game *game, const Rack *unseen, MoveList *threats) {
       tg.playable_letters |= (uint64_t)1 << ml;
     }
   }
+  // The opponent holds a full rack, or every unseen tile when fewer are left.
+  int opponent_rack_size = rack_get_total_letters(unseen);
+  if (opponent_rack_size > RACK_SIZE) {
+    opponent_rack_size = RACK_SIZE;
+  }
+  tg.unknown_slots = opponent_rack_size;
+  for (int ml_idx = 0; ml_idx < rack_get_dist_size(known); ml_idx++) {
+    const MachineLetter ml = (MachineLetter)ml_idx;
+    assert(rack_get_letter(known, ml) <= rack_get_letter(unseen, ml));
+    tg.known[ml] = rack_get_letter(known, ml);
+    tg.unknown_slots -= tg.known[ml];
+  }
+  assert(tg.unknown_slots >= 0);
   if (tg.playable_letters != 0) {
     const Square *lanes = board_get_readonly_lanes(board, cross_index);
     const uint32_t root_node_index = kwg_get_root_node_index(tg.kwg);

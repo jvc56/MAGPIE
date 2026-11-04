@@ -2105,7 +2105,8 @@ static void help_entry_fill(const Config *config, int token,
       text = "Shows the opponent's highest-scoring next plays from the unseen "
              "tiles. These are the tiles the player on turn cannot see, the "
              "opponent's rack and the bag, and a play uses at most a rack of "
-             "them, blanks included. Shows them as shmoves shows moves, with "
+             "them, blanks included, and only plays the opponent's known "
+             "tiles leave room for. Shows them as shmoves shows moves, with "
              "the same arguments, without the leave and equity columns, and "
              "generates as many as it shows: -maxnumdplays, or the number "
              "given, up to 100. With a coordinate or prefix, it looks among "
@@ -6195,8 +6196,11 @@ char *impl_threats(Config *config, ErrorStack *error_stack) {
   }
   Rack unseen;
   threats_get_unseen_tiles(config->game, &unseen);
+  // The opponent's rack in the game holds the tiles of it that are known.
+  const Rack *known_opponent_tiles = player_get_rack(game_get_player(
+      config->game, 1 - game_get_player_on_turn_index(config->game)));
   MoveList *threats = move_list_create(num_threats);
-  generate_threats(config->game, &unseen, threats);
+  generate_threats(config->game, &unseen, known_opponent_tiles, threats);
 
   char *board_string = config_get_board_beside_moves(config);
   char *result = move_list_get_string(

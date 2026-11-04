@@ -15,6 +15,12 @@ void threats_get_unseen_tiles(const Game *game, Rack *unseen);
 // RACK_SIZE tiles of it, as many as `threats` has capacity for, sorted by
 // score from highest. A play's equity is its score.
 //
+// `known` is the part of the opponent's rack that is known, which `unseen`
+// includes: their rack is those tiles and enough others from the rest of the
+// unseen tiles to fill it, so a play is listed only if its tiles that are not
+// known fit in the rest of the rack. A known blank can stand for a letter the
+// unseen tiles also hold, so that the play fits.
+//
 // generate_moves needs the rack it plays from to be a rack, of at most
 // RACK_SIZE tiles; the unseen tiles can be the whole bag. This searches the
 // opponent's lexicon on the opponent's cross-sets like generate_moves, but
@@ -23,6 +29,7 @@ void threats_get_unseen_tiles(const Game *game, Rack *unseen);
 // where the letter scores least, so each play has the highest score the
 // unseen tiles allow it. The search follows the classic rules, not those of
 // another game variant.
-void generate_threats(const Game *game, const Rack *unseen, MoveList *threats);
+void generate_threats(const Game *game, const Rack *unseen, const Rack *known,
+                      MoveList *threats);
 
 #endif

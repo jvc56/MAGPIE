@@ -402,7 +402,9 @@ moves generation keeps.
 
 `threats` shows what the opponent could score next: the highest-scoring plays
 the player not on turn could make from every tile the player on turn cannot
-see, the opponent's rack and the bag, playing up to a rack of them. It shows
+see, the opponent's rack and the bag, playing up to a rack of them. When some
+of the opponent's tiles are known, as after a `cgp` that gives their rack, it
+lists only the plays a rack holding those tiles could make. It shows
 them as `shmoves` shows moves, with the same count, coordinate and prefix
 arguments, and only the `Move` and `Sc` columns. It generates as many as it
 shows, `-maxnumdplays` or the count you give, up to 100; with a coordinate or
