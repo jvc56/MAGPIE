@@ -11,16 +11,6 @@
 // interior width so Up/Down arrow can walk visual rows.
 enum { LOAD_POSITION_WRAP_W = 73 };
 
-// Settings rows for Antialias / Subscript / Border are hidden when
-// the board isn't rendering at 2x — they're 2x-only settings. The
-// renderer in game_render.c filters identically; this predicate
-// mirrors it so up/down navigation can skip past hidden rows.
-// Forward-declared lambda style: we capture the relevant state by
-// re-evaluating each call rather than threading args in.
-#define SETTINGS_2X_ONLY(idx)                                                  \
-  ((idx) == TUI_SETTINGS_AA || (idx) == TUI_SETTINGS_SUBSCRIPTS ||             \
-   (idx) == TUI_SETTINGS_BORDER)
-
 // UI state for the main loop: which modal is open, each modal's focus /
 // return target, the setup dialogs' in-progress values, and the Load
 // position / Load game text buffers. One instance lives in main().
@@ -70,7 +60,6 @@ typedef struct {
   int quit_confirm_focus;
   TuiModalState quit_confirm_return;
   LexiconList *lexicon_list;
-  int lexicon_focus;
   bool frame_dirty;
 } TuiUiState;
 

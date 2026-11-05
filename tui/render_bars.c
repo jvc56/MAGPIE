@@ -309,11 +309,30 @@ void render_command_palette(struct ncplane *plane, const Theme *theme,
 }
 void render_command_bar(struct ncplane *plane, const Theme *theme,
                         const TuiGameState *state, const Layout *L,
-                        TuiModalState modal) {
+                        TuiModalState modal, const char *modal_help) {
   if (L->command_bar_row < 0) {
     return;
   }
   const int row = L->command_bar_row;
+  if (modal != TUI_MODAL_NONE) {
+    // While a dialog is open the command bar can't take input, so the
+    // row becomes the dialog's help line: a description of its focused
+    // row, if it has one.
+    theme_apply_bg(plane, theme->bg);
+    ncplane_set_styles(plane, 0);
+    for (unsigned col = 0; col < L->plane_cols; col++) {
+      ncplane_putstr_yx(plane, row, (int)col, " ");
+    }
+    if (modal_help != NULL) {
+      theme_apply_fg(plane, theme->dim_fg);
+      ncplane_putstr_yx(plane, row, 1, modal_help);
+    }
+    struct notcurses *nc = ncplane_notcurses(plane);
+    if (nc != NULL) {
+      notcurses_cursor_disable(nc);
+    }
+    return;
+  }
   const bool focused = state != NULL && state->focused_panel == 0;
   const ThemeRgb bar_bg = focused ? theme->panel_focus_border_bg : theme->bg;
   theme_apply_fg(plane, theme->fg);
@@ -600,9 +619,9 @@ void render_status_bar(struct ncplane *plane, const Theme *theme,
   // Esc cancels a half-typed slash command before it opens the menu.
   const char *hint = state->slash_active ? " Esc cancel " : " Esc menu ";
   switch (modal) {
+  case TUI_MODAL_STARTUP_MENU:
   case TUI_MODAL_MAIN_MENU:
   case TUI_MODAL_TIME_PICKER:
-  case TUI_MODAL_LEXICON_PICKER:
   case TUI_MODAL_QUIT_CONFIRM:
     hint = " \xe2\x86\x91\xe2\x86\x93 navigate \xc2\xb7 Enter confirm \xc2"
            "\xb7 Esc back ";
@@ -610,6 +629,16 @@ void render_status_bar(struct ncplane *plane, const Theme *theme,
   case TUI_MODAL_SETTINGS:
     hint = " \xe2\x86\x91\xe2\x86\x93 navigate \xc2\xb7 \xe2\x86\x90\xe2"
            "\x86\x92 adjust \xc2\xb7 Esc back ";
+    break;
+  case TUI_MODAL_WATCH_SETUP:
+  case TUI_MODAL_PLAY_SETUP:
+  case TUI_MODAL_ANNOTATE_SETUP:
+    hint = " \xe2\x86\x91\xe2\x86\x93 navigate \xc2\xb7 \xe2\x86\x90\xe2"
+           "\x86\x92 adjust \xc2\xb7 Enter start \xc2\xb7 Esc back ";
+    break;
+  case TUI_MODAL_LOAD_POSITION:
+  case TUI_MODAL_LOAD_GAME:
+    hint = " Enter load \xc2\xb7 Esc cancel ";
     break;
   case TUI_MODAL_NONE:
   default:
