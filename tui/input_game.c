@@ -406,8 +406,15 @@ bool tui_input_game(TuiGameState *state, TuiUiState *ui,
           tui_copy_position_cgp(state);
           break;
         case TUI_SLASH_RESUME:
+        case TUI_SLASH_SIM:
           pthread_mutex_lock(&state->mutex);
-          tui_analysis_worker_start(state, state->history_cursor);
+          tui_analysis_worker_start(state, state->history_cursor,
+                                    cmd->id == TUI_SLASH_SIM);
+          pthread_mutex_unlock(&state->mutex);
+          break;
+        case TUI_SLASH_KIBITZ:
+          pthread_mutex_lock(&state->mutex);
+          tui_analysis_kibitz(state, state->history_cursor);
           pthread_mutex_unlock(&state->mutex);
           break;
         case TUI_SLASH_STOP:
