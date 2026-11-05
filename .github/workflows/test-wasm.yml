@@ -1,9 +1,19 @@
 name: Test WASM Build
 
+# Pushes to main, and pull requests into main. A pull request stacked on
+# another branch runs once it targets main, when its branch is next pushed.
+# workflow_dispatch runs it on any branch by hand.
 on:
   push:
     branches: [main]
   pull_request:
+    branches: [main]
+  workflow_dispatch:
+# One run per pull request (or branch) at a time: a new push cancels the run
+# it replaces, except on main, whose every run finishes.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   build:

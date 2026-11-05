@@ -9,10 +9,9 @@ name: Release Linux
 # - a pushed vX.Y.Z tag runs every job, publish included. The tag must match
 #   MAGPIE_VERSION in src/impl/config.c, or the build job fails first.
 # - a push to any branch that changes this file runs every job but publish,
-#   so a change to the workflow is tested before it merges. This is a branch
-#   push rather than pull_request because the test job restores the
-#   windows-data cache, which run-tests.yml saves on the branch, and a
-#   pull_request run can only restore caches from the base branch.
+#   so a change to the workflow is tested before it merges. The test job
+#   restores the windows-data cache, which run-tests.yml saves on main, or
+#   makes the data when a branch has changed the cache's key.
 # - workflow_dispatch runs every job but publish, on any ref, tags included.
 # Only publish can write to the repository.
 
@@ -171,9 +170,9 @@ jobs:
       - uses: actions/checkout@v4
       # The Windows runners' copy of the data, which has its symlinks turned
       # into files and so restores on any operating system. run-tests.yml
-      # saves it, in parallel with this workflow, so a push that changes its
-      # key can get here first; the data is then made as run-tests.yml makes
-      # it, rather than failing the release on a race.
+      # saves it on main, so a branch that changes its key has none, and a
+      # push to main can get here before run-tests.yml saves it; the data is
+      # then made as run-tests.yml makes it, rather than failing the release.
       - name: Get the data cache
         id: data-cache
         uses: actions/cache/restore@v4
