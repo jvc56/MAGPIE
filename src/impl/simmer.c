@@ -22,6 +22,7 @@
 #include "../util/string_util.h"
 #include "bai.h"
 #include "inference.h"
+#include "lamc.h"
 #include "move_gen.h"
 #include "rack_draw.h"
 #include "random_variable.h"
@@ -35,6 +36,13 @@ enum {
   SIM_BAG_CYCLE_MIN_CYCLES = 2,
 };
 
+// After a LAMC search, the sim of its candidates draws from seeds this far
+// from the search's, so that the plays the search favored for lucky draws do
+// not get the same draws again.
+#define SIM_LAMC_SEED_SALT 0x9E3779B97F4A7C15ULL
+// The least time a sim of LAMC's candidates gets, in seconds.
+#define SIM_LAMC_MIN_TIME_LEFT 0.01
+
 // The sim context allows zero-alloc autoplay sims by maintaining the
 // dynamically allocated sim structs in between sim calls. The following
 // options are allowed to change in between sim calls:
@@ -47,6 +55,7 @@ enum {
 struct SimCtx {
   RandomVariables *rvs;
   InferenceCtx *inference_ctx;
+  LamcCtx *lamc_ctx;
 };
 
 void sim_ctx_destroy(SimCtx *sim_ctx) {
@@ -55,6 +64,7 @@ void sim_ctx_destroy(SimCtx *sim_ctx) {
   }
   rvs_destroy(sim_ctx->rvs);
   inference_ctx_destroy(sim_ctx->inference_ctx);
+  lamc_ctx_destroy(sim_ctx->lamc_ctx);
   free(sim_ctx);
 }
 
@@ -142,6 +152,7 @@ void simulate(SimArgs *sim_args, SimCtx **sim_ctx, SimResults *sim_results,
     *sim_ctx = malloc_or_die(sizeof(SimCtx));
     (*sim_ctx)->rvs = NULL;
     (*sim_ctx)->inference_ctx = NULL;
+    (*sim_ctx)->lamc_ctx = NULL;
   }
 
   uint64_t num_infer_leaves = 0;
@@ -156,6 +167,53 @@ void simulate(SimArgs *sim_args, SimCtx **sim_ctx, SimResults *sim_results,
     num_infer_leaves =
         stat_get_num_unique_samples(inference_results_get_equity_values(
             sim_args->inference_results, INFERENCE_TYPE_LEAVE));
+  }
+
+  // A LAMC search picks the plays to simulate, from every play in the
+  // position, and leaves the sim what is left of its rollouts and time.
+  const MoveList *original_move_list = sim_args->move_list;
+  const uint64_t original_seed = sim_args->seed;
+  const uint64_t original_lamc_sample_limit =
+      sim_args->bai_options.sample_limit;
+  const double original_time_limit = sim_args->bai_options.time_limit_seconds;
+  const bool original_resume_results = sim_args->resume_results;
+  bool searched = false;
+  const int bag_tiles = bag_get_letters(game_get_bag(sim_args->game));
+  if (sim_args->lamc_args.enabled && bag_tiles > 0 &&
+      bag_tiles <= sim_args->lamc_args.max_bag) {
+    LamcReport lamc_report;
+    const MoveList *candidates = lamc_choose_candidates(
+        sim_args, &(*sim_ctx)->lamc_ctx,
+        move_list_get_count(sim_args->move_list), &lamc_report);
+    if (candidates != NULL) {
+      searched = true;
+      sim_args->move_list = candidates;
+      if (sim_args->lamc_args.reuse_samples) {
+        // The sim resumes from the search's samples of its candidates, so
+        // what simulate sets up for a fresh sim is set here.
+        lamc_reset_final_results((*sim_ctx)->lamc_ctx, sim_args, sim_results);
+        sim_results_set_rack(sim_results, move_list_get_rack(candidates));
+        sim_results_set_known_opp_rack(sim_results, sim_args->known_opp_rack);
+        sim_results_set_num_infer_leaves(sim_results, num_infer_leaves);
+        sim_args->resume_results = true;
+      } else {
+        sim_args->seed = original_seed ^ SIM_LAMC_SEED_SALT;
+      }
+      const uint64_t minimum_left = (uint64_t)move_list_get_count(candidates) *
+                                    sim_args->bai_options.sample_minimum;
+      sim_args->bai_options.sample_limit =
+          original_lamc_sample_limit >
+                  lamc_report.explore_rollouts + minimum_left
+              ? original_lamc_sample_limit - lamc_report.explore_rollouts
+              : minimum_left;
+      if (original_time_limit > 0) {
+        const double time_left =
+            original_time_limit - lamc_report.explore_seconds;
+        sim_args->bai_options.time_limit_seconds =
+            time_left > SIM_LAMC_MIN_TIME_LEFT ? time_left
+                                               : SIM_LAMC_MIN_TIME_LEFT;
+      }
+    }
   }
 
   // If the bag is empty, set sample_limit to the number of moves and
@@ -207,6 +265,16 @@ void simulate(SimArgs *sim_args, SimCtx **sim_ctx, SimResults *sim_results,
   sim_args->bai_options.sample_minimum = original_sample_minimum;
   sim_args->bai_options.draws_per_sample = original_draws_per_sample;
   sim_args->num_plies = original_num_plies;
+  if (searched) {
+    lamc_note_choice((*sim_ctx)->lamc_ctx,
+                     sim_results_get_best_move(sim_results),
+                     move_list_get_count(original_move_list));
+    sim_args->move_list = original_move_list;
+    sim_args->seed = original_seed;
+    sim_args->bai_options.sample_limit = original_lamc_sample_limit;
+    sim_args->bai_options.time_limit_seconds = original_time_limit;
+    sim_args->resume_results = original_resume_results;
+  }
 }
 
 void simulate_without_ctx(SimArgs *sim_args, SimResults *sim_results,

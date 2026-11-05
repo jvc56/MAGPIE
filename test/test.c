@@ -51,6 +51,7 @@
 #include "klv_test.h"
 #include "kwg_alpha_test.h"
 #include "kwg_maker_test.h"
+#include "lamc_test.h"
 #include "leave_map_test.h"
 #include "leaves_test.h"
 #include "letter_distribution_test.h"
@@ -167,6 +168,7 @@ static TestEntry test_table[] = {
     {"gzipreader", test_gzip_reader},
     {"datafetch", test_data_fetch},
     {"bai", test_bai},
+    {"lamc", test_lamc},
     {"baiutil", test_bai_utility},
     {"command", test_command},
     {"embedding", test_embedding_lifecycle},
@@ -259,6 +261,8 @@ static TestEntry on_demand_test_table[] = {
     {"viastress", test_via_interrupted_reasonable_under_time_pressure},
     {"infercmp", test_infer_cmp},
     {"censusrolloutbench", test_census_rollout_bench},
+    {"lamcreplay", test_lamc_replay},
+    {"lamcautoplay", test_lamc_autoplay},
     {"genstuck", test_generate_stuck_cgps},
     {"gennonstuck", test_generate_nonstuck_cgps},
     {"gennonstuck2", test_generate_nonstuck_cgps2},

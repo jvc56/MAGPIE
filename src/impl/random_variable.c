@@ -3,6 +3,7 @@
 #include "../compat/cpthread.h"
 #include "../compat/cpthread_defs.h"
 #include "../compat/memory_info.h"
+#include "../def/bai_defs.h"
 #include "../def/game_defs.h"
 #include "../def/rack_defs.h"
 #include "../ent/alias_method.h"
@@ -1024,6 +1025,172 @@ void rv_sim_reset(RandomVariables *rvs, const SimArgs *sim_args) {
   simmer_prepare_census_rollout(simmer, sim_args);
 }
 
+typedef struct RVTable {
+  uint64_t num_samples;
+  double *samples;
+  uint64_t *cursors;
+  cpthread_mutex_t mutex;
+} RVTable;
+
+static double rv_table_sample(RandomVariables *rvs, const uint64_t k,
+                              const uint64_t
+                              __attribute__((unused)) reserved_seed,
+                              const int __attribute__((unused)) thread_index,
+                              const uint64_t
+                              __attribute__((unused)) sample_count,
+                              BAILogger __attribute__((unused)) * bai_logger) {
+  RVTable *table = (RVTable *)rvs->data;
+  cpthread_mutex_lock(&table->mutex);
+  const uint64_t index = table->cursors[k]++;
+  cpthread_mutex_unlock(&table->mutex);
+  if (index >= table->num_samples) {
+    log_fatal("ran out of table samples for arm %llu", (unsigned long long)k);
+  }
+  return table->samples[k * table->num_samples + index];
+}
+
+static bool rv_table_are_similar(RandomVariables __attribute__((unused)) * rvs,
+                                 const int __attribute__((unused)) i,
+                                 const int __attribute__((unused)) j) {
+  return false;
+}
+
+static void rv_table_destroy(RandomVariables *rvs) {
+  RVTable *table = (RVTable *)rvs->data;
+  free(table->samples);
+  free(table->cursors);
+  free(table);
+}
+
+static void rv_table_reset(RandomVariables *rvs) {
+  RVTable *table = (RVTable *)rvs->data;
+  for (uint64_t arm = 0; arm < rvs->num_rvs; arm++) {
+    table->cursors[arm] = 0;
+  }
+}
+
+static void rv_table_create(RandomVariables *rvs, const double *samples,
+                            const uint64_t num_samples) {
+  rvs->sample_func = rv_table_sample;
+  rvs->similar_func = rv_table_are_similar;
+  rvs->destroy_data_func = rv_table_destroy;
+  rvs->get_best_arm_index_func = rv_unsupported_get_best_arm_index;
+  RVTable *table = malloc_or_die(sizeof(RVTable));
+  table->num_samples = num_samples;
+  table->samples = malloc_or_die(sizeof(double) * rvs->num_rvs * num_samples);
+  memcpy(table->samples, samples, sizeof(double) * rvs->num_rvs * num_samples);
+  table->cursors = malloc_or_die(sizeof(uint64_t) * rvs->num_rvs);
+  cpthread_mutex_init(&table->mutex);
+  rvs->data = table;
+  rv_table_reset(rvs);
+}
+
+typedef struct RVSubset {
+  RandomVariables *base;
+  const int *arm_indices;
+  RVSubsetStats *stats;
+} RVSubset;
+
+static double rv_subset_record(const RVSubset *subset, const uint64_t base_arm,
+                               const double value) {
+  if (subset->stats) {
+    const RVSubsetStats *stats = subset->stats;
+    atomic_fetch_add(&stats->counts[base_arm], 1);
+    atomic_fetch_add(&stats->sums[base_arm],
+                     (int64_t)llround(value * (double)BAI_FIXED_POINT_SCALE));
+    atomic_fetch_add(
+        &stats->squares[base_arm],
+        (int64_t)llround(value * value * (double)BAI_FIXED_POINT_SCALE));
+  }
+  return value;
+}
+
+static uint64_t rv_subset_base_arm(const RandomVariables *rvs,
+                                   const uint64_t k) {
+  const RVSubset *subset = (const RVSubset *)rvs->data;
+  return (uint64_t)subset->arm_indices[k];
+}
+
+static double rv_subset_sample(RandomVariables *rvs, const uint64_t k,
+                               const uint64_t reserved_seed,
+                               const int thread_index,
+                               const uint64_t sample_count,
+                               BAILogger *bai_logger) {
+  const RVSubset *subset = (const RVSubset *)rvs->data;
+  RandomVariables *base = subset->base;
+  const uint64_t base_arm = rv_subset_base_arm(rvs, k);
+  return rv_subset_record(subset, base_arm,
+                          base->sample_func(base, base_arm, reserved_seed,
+                                            thread_index, sample_count,
+                                            bai_logger));
+}
+
+static double rv_subset_sample_into_record(
+    RandomVariables *rvs, const uint64_t k, const uint64_t reserved_seed,
+    const int thread_index, const uint64_t sample_count, BAILogger *bai_logger,
+    void *record) {
+  const RVSubset *subset = (const RVSubset *)rvs->data;
+  RandomVariables *base = subset->base;
+  const uint64_t base_arm = rv_subset_base_arm(rvs, k);
+  return rv_subset_record(
+      subset, base_arm,
+      base->sample_into_record_func(base, base_arm, reserved_seed, thread_index,
+                                    sample_count, bai_logger, record));
+}
+
+static void rv_subset_apply_record(const RandomVariables *rvs, const uint64_t k,
+                                   const void *record) {
+  const RandomVariables *base = ((const RVSubset *)rvs->data)->base;
+  base->apply_record_func(base, rv_subset_base_arm(rvs, k), record);
+}
+
+static uint64_t rv_subset_next_seed(RandomVariables *rvs, const uint64_t k) {
+  return rvs_next_seed(((RVSubset *)rvs->data)->base,
+                       rv_subset_base_arm(rvs, k));
+}
+
+static uint64_t rv_subset_peek_seed(RandomVariables *rvs, const uint64_t k,
+                                    const uint64_t ahead) {
+  return rvs_peek_seed(((RVSubset *)rvs->data)->base,
+                       rv_subset_base_arm(rvs, k), ahead);
+}
+
+static bool rv_subset_are_similar(RandomVariables *rvs, const int i,
+                                  const int j) {
+  return rvs_are_similar(((RVSubset *)rvs->data)->base,
+                         (int)rv_subset_base_arm(rvs, (uint64_t)i),
+                         (int)rv_subset_base_arm(rvs, (uint64_t)j));
+}
+
+static void rv_subset_destroy(RandomVariables *rvs) { free(rvs->data); }
+
+static void rv_subset_point_at_base(RandomVariables *rvs,
+                                    const RandomVariablesArgs *rvs_args) {
+  RVSubset *subset = (RVSubset *)rvs->data;
+  RandomVariables *base = rvs_args->base_rvs;
+  subset->base = base;
+  subset->arm_indices = rvs_args->arm_indices;
+  subset->stats = rvs_args->subset_stats;
+  rvs->arms_share_seeds = base->arms_share_seeds;
+  rvs->next_seed_func = base->next_seed_func ? rv_subset_next_seed : NULL;
+  rvs->peek_seed_func = base->peek_seed_func ? rv_subset_peek_seed : NULL;
+  rvs->sample_into_record_func =
+      base->sample_into_record_func ? rv_subset_sample_into_record : NULL;
+  rvs->apply_record_func =
+      base->apply_record_func ? rv_subset_apply_record : NULL;
+  rvs->sample_record_size = base->sample_record_size;
+}
+
+static void rv_subset_create(RandomVariables *rvs,
+                             const RandomVariablesArgs *rvs_args) {
+  rvs->sample_func = rv_subset_sample;
+  rvs->similar_func = rv_subset_are_similar;
+  rvs->destroy_data_func = rv_subset_destroy;
+  rvs->get_best_arm_index_func = rv_unsupported_get_best_arm_index;
+  rvs->data = malloc_or_die(sizeof(RVSubset));
+  rv_subset_point_at_base(rvs, rvs_args);
+}
+
 RandomVariables *rvs_create(const RandomVariablesArgs *rvs_args) {
   RandomVariables *rvs = malloc_or_die(sizeof(RandomVariables));
   rvs->next_seed_func = NULL;
@@ -1056,6 +1223,12 @@ RandomVariables *rvs_create(const RandomVariablesArgs *rvs_args) {
   case RANDOM_VARIABLES_SIMMED_PLAYS:
     rv_sim_create(rvs, rvs_args->sim_args, rvs_args->sim_results);
     break;
+  case RANDOM_VARIABLES_SUBSET:
+    rv_subset_create(rvs, rvs_args);
+    break;
+  case RANDOM_VARIABLES_TABLE:
+    rv_table_create(rvs, rvs_args->samples, rvs_args->num_samples);
+    break;
   }
   return rvs;
 }
@@ -1078,6 +1251,12 @@ void rvs_reset(RandomVariables *rvs, const RandomVariablesArgs *rvs_args) {
     break;
   case RANDOM_VARIABLES_SIMMED_PLAYS:
     rv_sim_reset(rvs, rvs_args->sim_args);
+    break;
+  case RANDOM_VARIABLES_SUBSET:
+    rv_subset_point_at_base(rvs, rvs_args);
+    break;
+  case RANDOM_VARIABLES_TABLE:
+    rv_table_reset(rvs);
     break;
   }
 }

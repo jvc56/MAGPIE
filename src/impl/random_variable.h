@@ -11,6 +11,7 @@
 #include "../ent/thread_control.h"
 #include "bai_logger.h"
 #include "inference.h"
+#include <stdatomic.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -27,7 +28,26 @@ typedef enum {
   RANDOM_VARIABLES_NORMAL,
   RANDOM_VARIABLES_NORMAL_PREDETERMINED,
   RANDOM_VARIABLES_SIMMED_PLAYS,
+  // A view of some of another random variables' arms: arm k is the base's
+  // arm arm_indices[k]. Samples, seeds and records go to the base, so an
+  // arm's samples continue its own seed sequence from one view to the next.
+  // Locally Adaptive Monte Carlo (lamc.h) samples a pool of simmed plays
+  // this way.
+  RANDOM_VARIABLES_SUBSET,
+  // Arm k's i-th sample is samples[k * num_samples + i]: recorded samples,
+  // replayed. Running out of an arm's samples is fatal.
+  RANDOM_VARIABLES_TABLE,
 } random_variables_t;
+
+// Per base arm: the count, sum and sum of squares of the samples a subset view
+// took, the sums in BAI's fixed point (BAI_FIXED_POINT_SCALE), so that they do
+// not depend on the order threads finish samples in. The caller owns the
+// arrays, sized for the base's arms, and clears them.
+typedef struct RVSubsetStats {
+  atomic_uint_least64_t *counts;
+  atomic_int_least64_t *sums;
+  atomic_int_least64_t *squares;
+} RVSubsetStats;
 
 typedef struct RandomVariablesArgs {
   random_variables_t type;
@@ -38,6 +58,13 @@ typedef struct RandomVariablesArgs {
   const double *means_and_vars;
   const SimArgs *sim_args;
   SimResults *sim_results;
+  // RANDOM_VARIABLES_SUBSET only: the base and the num_rvs arm indices into
+  // it, which the caller owns and keeps unchanged while the view is in use.
+  RandomVariables *base_rvs;
+  const int *arm_indices;
+  // RANDOM_VARIABLES_SUBSET only: where to accumulate the samples taken, or
+  // NULL.
+  RVSubsetStats *subset_stats;
 } RandomVariablesArgs;
 
 RandomVariables *rvs_create(const RandomVariablesArgs *rvs_args);
