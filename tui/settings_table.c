@@ -14,6 +14,8 @@
 #include <strings.h>
 
 enum {
+  ANALYSIS_TIME_MAX = 24 * 3600,
+  THREADS_MAX = 256,
   SIM_PLIES_MAX = 1024,
   SIM_CANDIDATES_MIN = 2,
   SIM_CANDIDATES_MAX = 1024,
@@ -31,6 +33,8 @@ static const char *const blank_choices[] = {"lowercase", "uppercase"};
 static const char *const rack_sort_choices[] = {"alpha+?", "?+alpha",
                                                 "vow+con+?", "?+vow+con"};
 static const char *const spoiler_choices[] = {"shown", "hidden"};
+// Indexed by TuiAutoAnalyze.
+static const char *const auto_analyze_choices[] = {"off", "kibitz", "sim"};
 // Indexed by ThemeName.
 static const char *const theme_choices[] = {"dark", "light", "dim",
                                             "high_contrast"};
@@ -70,6 +74,15 @@ static const TuiSettingDef setting_defs[] = {
      "How many candidate moves each simulation compares.", TUI_SETTING_KIND_INT,
      NULL, 0, SIM_CANDIDATES_MIN, SIM_CANDIDATES_MAX, SIM_CANDIDATES_STEP,
      "moves", NULL},
+    {TUI_SETTING_AUTO_ANALYZE, 5, "autoanalyze", "Auto-analyze",
+     "Analyze each turn you select in History: rank its moves (kibitz), or "
+     "simulate it (solving endgames and pre-endgames instead).",
+     TUI_SETTING_KIND_CHOICE, CHOICES(auto_analyze_choices), 0, 2, 1, NULL,
+     NULL},
+    {TUI_SETTING_ANALYSIS_TIME, 5, "analysistime", "Time limit",
+     "Stop a sim or solve after this many seconds; none runs until you "
+     "stop it.",
+     TUI_SETTING_KIND_INT, NULL, 0, 0, ANALYSIS_TIME_MAX, 10, "s", "none"},
     {TUI_SETTING_THEME, TUI_SETTING_PANEL_GENERAL, "theme", "Theme",
      "Colors for the whole interface.", TUI_SETTING_KIND_CHOICE,
      CHOICES(theme_choices), 0, THEME_COUNT - 1, 1, NULL, NULL},
@@ -77,6 +90,10 @@ static const TuiSettingDef setting_defs[] = {
      "Load the rack info table: faster move generation, more memory. "
      "Applies from the next game.",
      TUI_SETTING_KIND_BOOL, NULL, 0, 0, 1, 1, NULL, NULL},
+    {TUI_SETTING_THREADS, TUI_SETTING_PANEL_GENERAL, "threads", "Threads",
+     "Threads for sims and solves; auto uses every core but one, leaving "
+     "it for the display.",
+     TUI_SETTING_KIND_INT, NULL, 0, 0, THREADS_MAX, 1, "threads", "auto"},
 };
 
 #undef CHOICES
@@ -160,6 +177,12 @@ int tui_setting_get(const TuiGameState *state, TuiSettingId id) {
     return state->sim_plies;
   case TUI_SETTING_SIM_CANDIDATES:
     return state->sim_candidates;
+  case TUI_SETTING_AUTO_ANALYZE:
+    return state->auto_analyze;
+  case TUI_SETTING_ANALYSIS_TIME:
+    return state->analysis_time_limit;
+  case TUI_SETTING_THREADS:
+    return state->thread_limit;
   case TUI_SETTING_THEME:
     return (int)state->theme;
   case TUI_SETTING_RIT:
@@ -208,8 +231,9 @@ void tui_setting_format(const TuiSettingDef *def, int value, char *out,
   if (def->kind == TUI_SETTING_KIND_INT) {
     if (value == 0 && def->zero_label != NULL) {
       (void)snprintf(out, out_size, "%s", def->zero_label);
-    } else if (def->unit != NULL && strcmp(def->unit, "px") == 0) {
-      (void)snprintf(out, out_size, "%dpx", value);
+    } else if (def->unit != NULL &&
+               (strcmp(def->unit, "px") == 0 || strcmp(def->unit, "s") == 0)) {
+      (void)snprintf(out, out_size, "%d%s", value, def->unit);
     } else {
       (void)snprintf(out, out_size, "%d", value);
     }
@@ -383,6 +407,21 @@ static void apply_setting(TuiGameState *state, TuiSession *session,
     state->sim_candidates = value;
     cfg->sim_candidates = value;
     cfg->sim_candidates_set = true;
+    break;
+  case TUI_SETTING_AUTO_ANALYZE:
+    state->auto_analyze = value;
+    cfg->auto_analyze = value;
+    cfg->auto_analyze_set = true;
+    break;
+  case TUI_SETTING_ANALYSIS_TIME:
+    state->analysis_time_limit = value;
+    cfg->analysis_time_limit = value;
+    cfg->analysis_time_limit_set = true;
+    break;
+  case TUI_SETTING_THREADS:
+    state->thread_limit = value;
+    cfg->thread_limit = value;
+    cfg->thread_limit_set = true;
     break;
   case TUI_SETTING_THEME:
     state->theme = (ThemeName)value;
