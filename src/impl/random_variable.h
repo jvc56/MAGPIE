@@ -14,12 +14,17 @@
 #include <stddef.h>
 #include <stdint.h>
 
-typedef struct RandomVariables RandomVariables;
-
 // The rotations a bag-cycled sample (SimArgs.bag_cycle) plays from game: the
 // letters unseen by the player on turn (the bag and the opponent's rack)
 // divided by RACK_SIZE, rounded up, and at least 1.
 int rv_sim_bag_cycle_rotations(const Game *game);
+
+typedef struct RandomVariables RandomVariables;
+
+// The memory, in bytes, that a sim's random variables hold for the census
+// that steered their last sim: none once a sim goes without the census, which
+// releases it.
+uint64_t rv_sim_census_rollout_held_bytes(const RandomVariables *rvs);
 
 typedef enum {
   RANDOM_VARIABLES_UNIFORM,

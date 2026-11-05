@@ -354,7 +354,8 @@ struct Config {
   bool sim_bag_cycle;
   // -scensus: true or false, or auto (sim_census_rollout_auto, with
   // sim_census_rollout set), which steers a sim's rollouts with the census
-  // when it fits in this machine's memory (census_rollout_auto_chooses).
+  // when it fits in this machine's memory and the sim's rollouts pay for its
+  // build (census_rollout_auto_fits, census_rollout_prepare_if_it_pays).
   bool sim_census_rollout;
   bool sim_census_rollout_auto;
   bool use_heat_map;
@@ -2655,14 +2656,19 @@ static void help_entry_fill(const Config *config, int token,
              "every rack's best play in each anchor of the position and of "
              "each candidate's board; each rollout move generation then "
              "skips the anchors it knows to be worse. The moves are the "
-             "same, found faster. It takes memory: about 0.2 to 0.4 GB for "
-             "English on 1 thread and 0.5 GB on 12, with 64 or more "
-             "candidates. auto (the default for the command line program "
-             "and the library) uses it for a sim when this machine has the "
-             "memory for it (within a quarter of the physical memory, and "
-             "what is available less 1 GB), the bag has tiles, the players "
-             "share a lexicon and leaves in a classic game, and the "
-             "rollouts go without PAT; true always uses it, and needs "
+             "same, found faster once the census is built, which takes "
+             "time and memory, the most on an open board with a full bag: "
+             "for English with 100 candidates, up to 15 seconds and 0.6 GB "
+             "on 1 thread, and 3 seconds and 0.9 GB on 12. auto (the "
+             "default for the command line program and the library) uses "
+             "it for a sim when this machine has the memory for it (within "
+             "a quarter of the physical memory, and what is available less "
+             "1 GB), the sim's fewest rollouts (its iterations without a "
+             "stopping condition, otherwise its minimum iterations for each "
+             "play) save more time than the build takes, the bag has "
+             "tiles, the players share a lexicon and leaves in a classic "
+             "game, and the rollouts go without PAT; the sim's Census line "
+             "says whether it did. true always uses it, and needs "
              "patrollout set to false; false never uses it.";
       break;
     case ARG_TOKEN_USE_HEAT_MAP:

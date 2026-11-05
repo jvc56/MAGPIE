@@ -71,8 +71,9 @@ typedef struct SimArgs {
   bool use_census_rollout;
   // Whether use_census_rollout is auto (-scensus auto): simulate sets it for
   // each sim, to whether the census supports the game and fits in this
-  // machine's memory while rollout PAT is off (census_rollout_auto_chooses).
-  // sim_args_fill clears it.
+  // machine's memory while rollout PAT is off (census_rollout_auto_fits), and
+  // the census then steers the sim only if its fewest rollouts pay for the
+  // build (census_rollout_prepare_if_it_pays). sim_args_fill clears it.
   bool census_rollout_auto;
 } SimArgs;
 

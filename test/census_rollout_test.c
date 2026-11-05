@@ -6,12 +6,16 @@
 #include "../src/def/move_defs.h"
 #include "../src/ent/bag.h"
 #include "../src/ent/game.h"
+#include "../src/ent/letter_distribution.h"
 #include "../src/ent/move.h"
+#include "../src/ent/player.h"
+#include "../src/ent/rack.h"
 #include "../src/ent/sim_results.h"
 #include "../src/impl/census_rollout.h"
 #include "../src/impl/config.h"
 #include "../src/impl/gameplay.h"
 #include "../src/impl/move_gen.h"
+#include "../src/impl/simmer.h"
 #include "../src/util/io_util.h"
 #include "../src/util/string_util.h"
 #include "test_constants.h"
@@ -317,8 +321,39 @@ static void test_census_rollout_refuses_pat(void) {
   config_destroy(config);
 }
 
-// -scensus auto: the memory it weighs, the games it serves, and sims that
-// give the plain results, PAT or not, saved as auto.
+// A sim of the config's position on sim_ctx and the sim_results it keeps, as
+// the sim command runs one: whether the census steered it, its results equal
+// to a plain sim's.
+static bool census_rollout_sim_steers(Config *config, SimCtx **sim_ctx,
+                                      SimResults *sim_results,
+                                      const char *census_setting) {
+  SimSnapshot plain_snapshot;
+  sim_and_snapshot(config, "sim -seed 7 -scensus false", &plain_snapshot);
+  char *command =
+      get_formatted_string("set -seed 7 -scensus %s", census_setting);
+  load_and_exec_config_or_die(config, command);
+  free(command);
+  // The sim command's default: the opponent's rack as it is known.
+  const Game *game = config_get_game(config);
+  Rack known_opp_rack;
+  rack_set_dist_size_and_reset(&known_opp_rack, ld_get_size(game_get_ld(game)));
+  rack_copy(&known_opp_rack,
+            player_get_rack(game_get_player(
+                game, 1 - game_get_player_on_turn_index(game))));
+  ErrorStack *error_stack = error_stack_create();
+  config_simulate(config, sim_ctx, &known_opp_rack, sim_results, NULL, 0,
+                  error_stack);
+  assert(error_stack_is_empty(error_stack));
+  error_stack_destroy(error_stack);
+  SimSnapshot snapshot;
+  take_sim_snapshot(sim_results, &snapshot);
+  assert_sim_snapshots_equal(&plain_snapshot, &snapshot);
+  return sim_results_get_census_rollout(sim_results);
+}
+
+// -scensus auto: the memory it weighs, the builds it judges worth their
+// cost, the games it serves, and sims that give the plain results, PAT or
+// not, saved as auto.
 static void test_census_rollout_auto(void) {
   // Within a quarter of the physical memory, and what is available less the
   // reserve; an unknown available leaves the quarter alone.
@@ -336,6 +371,19 @@ static void test_census_rollout_auto(void) {
   assert(census_rollout_fits_in_memory(gigabyte, 4 * gigabyte, -1));
   assert(!census_rollout_fits_in_memory(gigabyte + 1, 4 * gigabyte, -1));
 
+  // 1000 entries over 10 anchors predict 10000 for 100 candidate anchors,
+  // which 60 entries a ply pay for in 84 rollouts of 2 plies or more (only
+  // 2 count), and not in 83, or in 166 rollouts of 1 ply.
+  const int per_ply = CENSUS_ROLLOUT_AUTO_ENTRIES_PER_PLY;
+  const uint64_t paying_rollouts = 10000 / (2 * per_ply) + 1;
+  assert(census_rollout_build_pays(1000, 10, 100, paying_rollouts, 2));
+  assert(census_rollout_build_pays(1000, 10, 100, paying_rollouts, 5));
+  assert(!census_rollout_build_pays(1000, 10, 100, paying_rollouts - 1, 5));
+  assert(!census_rollout_build_pays(1000, 10, 100, 2 * paying_rollouts - 2, 1));
+  // Candidates that change no anchor cost nothing to build.
+  assert(census_rollout_build_pays(1000, 10, 0, 0, 2));
+  assert(!census_rollout_build_pays(1000, 10, 100, paying_rollouts, 0));
+
   if (BOARD_DIM != 15) {
     return;
   }
@@ -348,26 +396,42 @@ static void test_census_rollout_auto(void) {
   const Game *game = config_get_game(config);
   assert(census_rollout_supports(game));
   // English: a lattice of 5.4M ranks, its leave and scratch tables 21.5 MB
-  // each. The estimate grows with the threads and the candidates, up to
-  // CENSUS_ROLLOUT_MAX_CANDIDATES of them.
+  // each. The estimate grows with the threads and the candidates, every
+  // candidate taking a table.
   const uint64_t one_thread = census_rollout_memory_bytes(game, 1, 64);
   assert(one_thread > 200000000ULL && one_thread < 600000000ULL);
   assert(census_rollout_memory_bytes(game, 12, 64) > one_thread);
   assert(census_rollout_memory_bytes(game, 1, 8) < one_thread);
-  assert(census_rollout_memory_bytes(game, 1, 100) == one_thread);
+  assert(census_rollout_memory_bytes(game, 1, 100) > one_thread);
 
-  // Auto gives the plain sim's results, with rollout PAT off and on: with it
-  // on, auto leaves the census out rather than refusing.
+  // With 40 tiles in the bag, 300 rollouts do not pay for the candidates'
+  // tables, so auto plays the sim without the census, keeping what it built.
   load_and_exec_config_or_die(config, "gen");
-  SimSnapshot plain_snapshot;
-  SimSnapshot auto_snapshot;
-  sim_and_snapshot(config, "sim -seed 7 -scensus false", &plain_snapshot);
-  sim_and_snapshot(config, "sim -seed 7 -scensus auto", &auto_snapshot);
-  assert_sim_snapshots_equal(&plain_snapshot, &auto_snapshot);
-  load_and_exec_config_or_die(config, "set -patrollout true");
+  SimCtx *sim_ctx = NULL;
   SimResults *sim_results = sim_results_create(0);
-  assert(config_simulate_and_return_status(config, NULL, NULL, sim_results) ==
-         ERROR_STATUS_SUCCESS);
+  assert(census_rollout_sim_steers(config, &sim_ctx, sim_results, "true"));
+  const uint64_t held_bytes = sim_ctx_census_rollout_held_bytes(sim_ctx);
+  // What it holds is within what it was estimated to take.
+  assert(held_bytes > 0 &&
+         held_bytes <= census_rollout_memory_bytes(game, 1, 8));
+  assert(!census_rollout_sim_steers(config, &sim_ctx, sim_results, "auto"));
+  assert(sim_ctx_census_rollout_held_bytes(sim_ctx) > 0);
+  // A sim without the census releases it.
+  assert(!census_rollout_sim_steers(config, &sim_ctx, sim_results, "false"));
+  assert(sim_ctx_census_rollout_held_bytes(sim_ctx) == 0);
+
+  // With 10 tiles in the bag, the tables are small and the same 300 rollouts
+  // pay for them, so auto steers the sim. It needs this machine to have
+  // about 1.1 GB available: the census and the reserve auto leaves.
+  play_to_bag_size(config_get_game(config), move_list, 7, 10);
+  load_and_exec_config_or_die(config, "gen");
+  assert(census_rollout_sim_steers(config, &sim_ctx, sim_results, "auto"));
+  // A second sim reuses the census, whose memory auto counts as free.
+  assert(census_rollout_sim_steers(config, &sim_ctx, sim_results, "auto"));
+  // With rollout PAT on, auto leaves the census out rather than refusing.
+  load_and_exec_config_or_die(config, "set -patrollout true");
+  assert(!census_rollout_sim_steers(config, &sim_ctx, sim_results, "auto"));
+  sim_ctx_destroy(sim_ctx);
   sim_results_destroy(sim_results);
 
   // Saved as auto, not as what this machine decided.
