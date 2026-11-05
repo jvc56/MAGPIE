@@ -30,6 +30,10 @@ enum {
   CENSUS_ROLLOUT_TEST_ROLLOUTS = 12,
   CENSUS_ROLLOUT_TEST_PLIES = CENSUS_ROLLOUT_MAX_PLY + 2,
   CENSUS_ROLLOUT_TEST_BUILD_THREADS = 4,
+  // A sim's candidates, past any fixed count the census might keep, and the
+  // last of them whose rollouts are checked.
+  CENSUS_ROLLOUT_TEST_MANY_CANDIDATES = 100,
+  CENSUS_ROLLOUT_TEST_CHECKED_CANDIDATES = 8,
   // The sims compared with and without the census.
   CENSUS_ROLLOUT_TEST_SIM_ITERATIONS = 300,
   CENSUS_ROLLOUT_TEST_MAX_PLAYS = 16,
@@ -200,6 +204,70 @@ static void sim_and_snapshot(Config *config, const char *sim_command,
   take_sim_snapshot(config_get_sim_results(config), snapshot);
 }
 
+// A census grows to a sim's candidates however many there are: after a sim
+// of a few candidates, one of many steers the rollouts of its last candidates,
+// each move still the plain one.
+static void test_census_rollout_steers_many_candidates(void) {
+  if (BOARD_DIM != 15) {
+    return;
+  }
+  Config *config = config_create_or_die("set -lex CSW21 -wmp true");
+  Game *game = config_game_create(config);
+  Game *rollout = game_duplicate(game);
+  MoveList *move_list = move_list_create(1);
+  MoveList *census_moves = move_list_create(1);
+  MoveList *few_candidates = move_list_create(CENSUS_ROLLOUT_TEST_CANDIDATES);
+  MoveList *candidates = move_list_create(CENSUS_ROLLOUT_TEST_MANY_CANDIDATES);
+  CensusRollout *census = census_rollout_create(1);
+  CensusRolloutWorker *worker = census_rollout_worker_create();
+  play_to_bag_size(game, move_list, 100, census_rollout_test_bag_sizes[0]);
+  generate_candidates(game, few_candidates);
+  census_rollout_prepare(census, game, few_candidates);
+  census_rollout_worker_set_candidate(worker, census,
+                                      move_list_get_move(few_candidates, 0));
+  generate_candidates(game, candidates);
+  const int number_of_candidates = move_list_get_count(candidates);
+  assert(number_of_candidates == CENSUS_ROLLOUT_TEST_MANY_CANDIDATES);
+  census_rollout_prepare(census, game, candidates);
+  const int opponent_index = 1 - game_get_player_on_turn_index(game);
+  Move census_move;
+  uint64_t steered = 0;
+  for (int candidate_idx =
+           number_of_candidates - CENSUS_ROLLOUT_TEST_CHECKED_CANDIDATES;
+       candidate_idx < number_of_candidates; candidate_idx++) {
+    const Move *candidate = move_list_get_move(candidates, candidate_idx);
+    for (int rollout_idx = 0; rollout_idx < CENSUS_ROLLOUT_TEST_ROLLOUTS;
+         rollout_idx++) {
+      game_copy(rollout, game);
+      return_rack_to_bag(rollout, opponent_index);
+      game_seed(rollout, 1000 + (uint64_t)(candidate_idx * 100 + rollout_idx));
+      set_random_rack(rollout, opponent_index, NULL);
+      play_move(candidate, rollout, NULL);
+      census_rollout_worker_set_candidate(worker, census, candidate);
+      for (int ply = 0; ply < CENSUS_ROLLOUT_TEST_PLIES && !game_over(rollout);
+           ply++) {
+        move_copy(&census_move,
+                  census_rollout_get_best_move(worker, census, rollout,
+                                               census_moves, ply));
+        steered += census_rollout_worker_last_steered(worker);
+        const Move *plain = get_top_equity_move(rollout, move_list);
+        assert_moves_are_equal(&census_move, plain);
+        play_move(plain, rollout, NULL);
+      }
+    }
+  }
+  assert(steered > 0);
+  census_rollout_worker_destroy(worker);
+  census_rollout_destroy(census);
+  move_list_destroy(candidates);
+  move_list_destroy(few_candidates);
+  move_list_destroy(census_moves);
+  move_list_destroy(move_list);
+  game_destroy(rollout);
+  game_destroy(game);
+  config_destroy(config);
+}
+
 // A single-threaded sim gives the same results with the census as without
 // it, since every census-steered move is the plain one.
 static void test_census_rollout_sim_matches_plain(void) {
@@ -326,6 +394,7 @@ static void test_census_rollout_auto(void) {
 
 void test_census_rollout(void) {
   test_census_rollout_moves_match_plain();
+  test_census_rollout_steers_many_candidates();
   test_census_rollout_sim_matches_plain();
   test_census_rollout_refuses_pat();
   test_census_rollout_auto();
