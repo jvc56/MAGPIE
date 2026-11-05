@@ -16,14 +16,23 @@ SECONDARY_DARK = (60, 60, 60)  # Slightly lighter gray for depth
 LETTER_COLOR = (255, 255, 255)  # White letter
 ACCENT_COLOR = (58, 127, 159)  # Subtle blue accent from input field border
 
-def create_rounded_rect_mask(size, radius):
-    """Create a rounded rectangle mask"""
-    mask = Image.new('L', size, 0)
-    draw = ImageDraw.Draw(mask)
-
-    # Draw rounded rectangle
-    draw.rounded_rectangle([(0, 0), size], radius, fill=255)
-    return mask
+def create_squircle_mask(size, exponent=5.0, supersample=4):
+    """Mask for Apple's continuous-corner icon shape, approximated by the
+    superellipse |x|^n + |y|^n = 1. Drawn large and scaled down so the edge
+    is antialiased."""
+    big = size * supersample
+    half = big / 2
+    points = []
+    steps = 2048
+    for i in range(steps):
+        t = 2 * math.pi * i / steps
+        c, s = math.cos(t), math.sin(t)
+        x = math.copysign(abs(c) ** (2 / exponent), c)
+        y = math.copysign(abs(s) ** (2 / exponent), s)
+        points.append((half + x * half, half + y * half))
+    mask = Image.new('L', (big, big), 0)
+    ImageDraw.Draw(mask).polygon(points, fill=255)
+    return mask.resize((size, size), Image.LANCZOS)
 
 def create_icon():
     """Generate the modern Letterbox app icon following Apple guidelines"""
@@ -32,35 +41,14 @@ def create_icon():
     img = Image.new('RGBA', (SIZE, SIZE), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
 
-    # Icon design: Simple overlapping shapes with transparency
-    margin = 102  # Match macOS icon size guidelines
+    # Icon design: a dark tile on Apple's macOS icon grid (824x824 body with
+    # ~100px of transparent margin). No outline: macOS draws its own edge and
+    # shadow, and a drawn-in border looks wrong in the Dock and app switcher.
+    margin = 100
     icon_size = SIZE - (margin * 2)
-    corner_radius = int(icon_size * 0.225)  # Apple-like corner radius (~22.5% of size)
-
-    # Layer 1: Simple flat outline
-    outline_width = 20
-    outline_color = (180, 180, 180, 255)  # Light gray
-
-    # Draw the outer outline first as a filled shape
-    outline_layer = Image.new('RGBA', (SIZE, SIZE), (0, 0, 0, 0))
-    outline_draw = ImageDraw.Draw(outline_layer)
-    outline_draw.rounded_rectangle(
-        [(margin, margin), (SIZE - margin, SIZE - margin)],
-        corner_radius,
-        fill=outline_color
-    )
-    img = Image.alpha_composite(img, outline_layer)
-
-    # Draw the background tile on top, inset by the outline width
-    bg_layer = Image.new('RGBA', (SIZE, SIZE), (0, 0, 0, 0))
-    bg_draw = ImageDraw.Draw(bg_layer)
-    bg_draw.rounded_rectangle(
-        [(margin + outline_width, margin + outline_width),
-         (SIZE - margin - outline_width, SIZE - margin - outline_width)],
-        corner_radius - outline_width,
-        fill=PRIMARY_DARK
-    )
-    img = Image.alpha_composite(img, bg_layer)
+    tile = Image.new('RGBA', (icon_size, icon_size), PRIMARY_DARK + (255,))
+    img.paste(tile, (margin, margin), create_squircle_mask(icon_size))
+    draw = ImageDraw.Draw(img)
 
     # Layer 3: Letter "L" - the core visual element
     # Use Jost Bold font (should be bundled with app)

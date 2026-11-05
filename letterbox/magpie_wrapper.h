@@ -73,6 +73,9 @@ WordList* letterbox_find_anagrams_with_blank(const KWG *kwg, const LetterDistrib
 WordList* letterbox_find_anagrams_with_two_blanks(const KWG *kwg, const LetterDistribution *ld,
                                                   const char *letters);
 
+// Number of tiles of the given letter in the bag ('?' for blanks)
+int letterbox_get_tile_count(const LetterDistribution *ld, char letter);
+
 #ifdef __cplusplus
 }
 #endif

@@ -1,6 +1,7 @@
 #include "word_list_dialog.h"
 #include "letterbox_window.h"
 #include "magpie_wrapper.h"
+#include "letterbox_common.h"
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QFormLayout>
@@ -108,22 +109,7 @@ QString WordListDialog::formatAlphagramPreview(const AlphagramSet& set)
 
 std::string WordListDialog::sortVowelsFirst(const std::string& word)
 {
-    std::string vowels;
-    std::string consonants;
-
-    for (char c : word) {
-        char upper = toupper(c);
-        if (upper == 'A' || upper == 'E' || upper == 'I' || upper == 'O' || upper == 'U') {
-            vowels += upper;
-        } else {
-            consonants += upper;
-        }
-    }
-
-    std::sort(vowels.begin(), vowels.end());
-    std::sort(consonants.begin(), consonants.end());
-
-    return vowels + consonants;
+    return letterbox::sortVowelsFirst(word);
 }
 
 void WordListDialog::updatePreview()
