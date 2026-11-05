@@ -9,9 +9,10 @@ on:
     branches: [main]
   workflow_dispatch:
 # One run per pull request (or branch) at a time: a new push cancels the run
-# it replaces, except on main, whose every run finishes.
+# it replaces. On main every commit has a group of its own, so each one's run
+# finishes, and none waits for another or is dropped for a newer commit.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || (github.ref == 'refs/heads/main' && github.sha) || github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 env:
   # The pinned Windows toolchain, for windows-build and windows-cross-compile,
