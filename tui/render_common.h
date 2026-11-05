@@ -46,6 +46,13 @@ void draw_box_styled_ex(struct ncplane *plane, const Theme *theme, int top_row,
 void format_alphagram_for_sort(const char *in, const LetterDistribution *ld,
                                TuiRackSort sort, char *out, size_t out_size);
 void format_clock(int seconds, char *buf, size_t buf_size);
+// The text of tile `ml` (0 = the blank, "?") filling a text-mode tile:
+// one cell when `halfwidth`, else two. A one-letter tile is its letter
+// (the full-width form when the distribution has one, else a space and
+// the letter); a multi-letter tile fills both cells with its letters —
+// "QU", "NY", and L·L as "ĿL" (Unicode's Catalan L-with-middle-dot).
+void tile_face_cells(const LetterDistribution *ld, MachineLetter ml,
+                     bool halfwidth, char *out, size_t out_size);
 void format_count_compact(uint64_t n, char *buf, size_t bufsz);
 const char *language_for_lexicon(const char *name);
 PremiumMarker premium_marker_for_cell(const Theme *theme, BonusSquare bs,
