@@ -20,7 +20,8 @@ option names, file names and defaults are the plan's proposals.
 - [Ground rules for both phases](#ground-rules-for-both-phases)
 - [The play embedding](#the-play-embedding): the shared, modular feature space
 - [Phase 1: adaptive search over the turn's plays](#phase-1-adaptive-search-over-the-turns-plays)
-- [Phase 1 as built](#phase-1-as-built): the code, the tests and the results
+- [Phase 1 as built](#phase-1-as-built): the code, the tests, the results
+  and the [open questions](#open-questions)
 - [Phase 2: adaptive search at every ply](#phase-2-adaptive-search-at-every-ply)
 - [Risks and open questions](#risks-and-open-questions)
 - [Future work](#future-work)
@@ -740,7 +741,8 @@ or of static equity with the true win percentages, over all 100 plays.
 samples per play for the methods and 250 for the truth.** Static equity's
 top 15 almost always holds the best play: its set regret is 0.007 points.
 There is nothing for a wider search to find, and every rollout the search
-spends is lost to the final choice.
+spends is lost to the final choice. These are the positions the floor and
+the explore share were chosen on; no fresh midgame set was run.
 
 | Variant | 1,000 rollouts | 3,000 rollouts | Set regret | Rank correlation |
 |---|---|---|---|---|
@@ -772,8 +774,9 @@ its defaults lowers regret by 0.06 points of win percentage at 3,000
 rollouts (1.8 standard errors from zero) and 0.09 at 10,000 (2.6). At
 10,000 the set regrets are 0.411 and 0.324 and the rank correlations 0.588
 and 0.547. Its candidate sets are better
-(0.33 against 0.42 points of set regret), but the final stage recovers only
-part of that. The gain is small: 0.06 to 0.09 points of win percentage per late
+(0.33 against 0.42 points of set regret at 3,000), and the final stage turns
+0.06 of that 0.08 into lower regret at 3,000 and all of it (0.09) at
+10,000. The gain is small: 0.06 to 0.09 points of win percentage per late
 decision, so with about three such decisions a game, 0.2 to 0.3 points of win
 rate per game, far below what the game pairs below can measure.
 
@@ -797,11 +800,12 @@ samples; the differences are within noise one by one, but consistent):
   static equity (0.502 against 0.531 on the fresh late set) and LAMC no
   better than the standard sim. The prior mean linear in static equity is
   the one change that made the surrogate useful.
-- **Proposals.** With the equity prior mean and candidates from all plays,
-  `acquire` beat `ascent` (the slides' gradient step) at 3,000 rollouts:
-  -0.10 (0.13) against -0.05 (0.13) on 384 positions, and -0.29 (0.29)
-  against -0.17 (0.27) on 96. A gradient of a surrogate fit to a few noisy
-  samples per play is mostly noise.
+- **Proposals.** With the equity prior mean, `acquire` beat `ascent` (the
+  slides' gradient step) at 3,000 rollouts: -0.10 (0.13) against -0.05
+  (0.13) on 384 positions, both with candidates from all plays, and -0.29
+  (0.29) against -0.17 (0.27) on 96, where `acquire` took its candidates
+  from the evaluated plays and `ascent` from all. A gradient of a surrogate
+  fit to a few noisy samples per play is mostly noise.
 - **Features.** At 3,000 rollouts: the default set -0.19 (0.11); rack
   features only (score, leave, tiles, type, bagafter, leaveshape,
   leavedups) -0.12 (0.11); board features only (score, leave, type,
@@ -818,8 +822,12 @@ samples; the differences are within noise one by one, but consistent):
   16 by static equity instead of 4 cut set regret from 0.30 to 0.21 and
   regret from -0.10 to -0.21 against the standard sim; at 1,000 it made no
   clear difference.
-- Length scale (1.5 or 3), `-lamcbeta` (1 or 2) and pool shape (16 keep 4 or
-  24 keep 6) made no clear difference.
+- **Pool shape.** A pool of 24 keeping 6, with 16 static plays in the first
+  pool, did worse than 16 keeping 4 with 12: +0.17 (0.13) against -0.04
+  (0.13) at 1,000 rollouts and -0.01 (0.13) against -0.19 (0.11) at 3,000.
+  Larger pools spend the search's share in fewer rounds.
+- Length scale (1.5 or 3) and `-lamcbeta` (1 or 2) made no clear
+  difference.
 
 **Game pairs.** LAMC with its defaults (`-lamc1 true`) against the standard
 sim, both simming 15 plays at 2 plies with 3,000 rollouts, no threshold,
@@ -857,6 +865,241 @@ its own work (movegen of every play, features, a dozen small GP fits a
 round) is small beside them. In the 3,000-game run a search took 168 ms on
 average including its 339 rollouts, with 12 games running at once.
 
+### Every run
+
+This is the record of every replay and game run that finished, in the
+order they ran, so later work can check a claim above or pick up a thread
+without rerunning. The summaries above quote from it.
+
+**Reading the replay tables.** Every number is in percentage points of win
+percentage. "Standard" and "LAMC" are mean regret over the positions, with
+its standard error; "Difference" is LAMC's minus the standard sim's, paired
+by position, with its standard error, so negative favors LAMC. "Set regret"
+is the standard sim's and LAMC's, for the plays handed to the final stage.
+"Outside" counts the positions where LAMC chose a play outside static
+equity's top 15. "Rounds" and "Evaluated" are per search, on average.
+Every run used CSW21, 2 plies, single rollouts, no inference, and a universe
+of each position's top 100 plays by static equity with no equity floor (so
+the live defaults of 400 plays within 30 points were never replayed).
+
+Variants are named by the options they add to the defaults of the time:
+
+| Name | Options |
+|---|---|
+| mean | `-lamcequitymean true` |
+| all | `-lamcfinalall true` |
+| acquire | `-lamcproposal acquire` |
+| seed *n* | `-lamcseed n` |
+| explore *x* | `-lamcexplore x` |
+| floor *n* | `-lamcfinalstatic n` |
+| features *list* | `-lamcfeatures list`; "rack" is score, leave, tiles, type, bagafter, leaveshape, leavedups; "board" is score, leave, type, location, direction, premium, perimeter |
+
+Until `be3d3a03` the defaults were: constant prior mean, `ascent`,
+candidates from the evaluated plays, 4 static plays in the first pool,
+explore 0.3, no static floor, and no fit of the signal variance. Sample
+reuse is the replay's `LAMC_REPLAY_REUSE`; it was off until run 5.
+
+Position sets come from games of top static equity plays. Each set starts at
+a game number, so sets with different starting games share no positions:
+
+| Set | Starting game | Used for |
+|---|---|---|
+| Midgame (30 or more tiles in the bag) | 1 | Tuning |
+| Late (1 to 20 tiles in the bag) | 1 | Tuning |
+| Late, fresh A | 100,000 | Checking |
+| Late, fresh B | 200,000 | Checking |
+| Late, fresh C | 300,000 | The final numbers |
+
+Two early runs are left out: a 24-position smoke test, and a run whose
+variants inherited each other's options through the shared config (the bug
+fixed by giving each variant a fresh config).
+
+**Run 1.** 96 midgame positions, 150 samples per play, defaults of the time,
+no reuse. The 3,000-rollout budget ran out of recorded samples.
+
+| Variant | Budget | Standard | LAMC | Difference | Set regret | Outside | Rounds | Evaluated |
+|---|---|---|---|---|---|---|---|---|
+| Defaults | 1,000 | 0.346 (0.086) | 0.529 (0.111) | +0.183 (0.096) | 0.081 / 0.232 | 7 | 4.8 | 61.9 |
+| acquire | 1,000 | 0.346 (0.086) | 0.726 (0.148) | +0.380 (0.131) | 0.081 / 0.396 | 8 | 4.9 | 62.9 |
+| features score, leave, equity | 1,000 | 0.346 (0.086) | 0.648 (0.139) | +0.302 (0.116) | 0.081 / 0.407 | 5 | 4.7 | 60.8 |
+
+The first version lost to the standard sim, and acquisition alone made it
+worse. This is what led to the equity prior mean.
+
+**Run 2.** The same 96 midgame positions, 250 samples per play, no reuse.
+
+| Variant | Budget | Standard | LAMC | Difference | Set regret | Outside | Rounds | Evaluated |
+|---|---|---|---|---|---|---|---|---|
+| Defaults | 1,000 | 0.294 (0.073) | 0.455 (0.084) | +0.160 (0.077) | 0.080 / 0.186 | 5 | 4.8 | 61.0 |
+| mean | 1,000 | 0.294 (0.073) | 0.363 (0.107) | +0.069 (0.107) | 0.080 / 0.140 | 6 | 4.1 | 53.5 |
+| mean, all | 1,000 | 0.294 (0.073) | 0.511 (0.142) | +0.217 (0.124) | 0.080 / 0.209 | 4 | 4.1 | 53.5 |
+| mean, acquire | 1,000 | 0.294 (0.073) | 0.428 (0.107) | +0.134 (0.098) | 0.080 / 0.118 | 2 | 4.2 | 54.0 |
+| mean, explore 0.15 | 1,000 | 0.294 (0.073) | 0.395 (0.122) | +0.101 (0.117) | 0.080 / 0.234 | 5 | 2.0 | 28.0 |
+| mean, seed 12 | 1,000 | 0.294 (0.073) | 0.449 (0.107) | +0.155 (0.095) | 0.080 / 0.133 | 2 | 4.2 | 54.8 |
+| Defaults | 3,000 | 0.194 (0.059) | 0.358 (0.103) | +0.164 (0.095) | 0.080 / 0.259 | 6 | 6.6 | 82.9 |
+| mean | 3,000 | 0.194 (0.059) | 0.334 (0.122) | +0.140 (0.101) | 0.080 / 0.214 | 5 | 4.5 | 57.5 |
+| mean, all | 3,000 | 0.194 (0.059) | 0.313 (0.122) | +0.119 (0.100) | 0.080 / 0.208 | 4 | 4.5 | 57.5 |
+| mean, acquire | 3,000 | 0.194 (0.059) | 0.315 (0.123) | +0.122 (0.101) | 0.080 / 0.208 | 4 | 4.6 | 58.9 |
+| mean, explore 0.15 | 3,000 | 0.194 (0.059) | 0.207 (0.066) | +0.014 (0.043) | 0.080 / 0.091 | 4 | 4.4 | 56.4 |
+| mean, seed 12 | 3,000 | 0.194 (0.059) | 0.200 (0.061) | +0.006 (0.022) | 0.080 / 0.080 | 0 | 4.7 | 60.0 |
+
+Nothing beat the standard sim in the midgame. The variants that came closest
+were the ones that stayed closest to static equity (fewer search rollouts,
+more static plays in the pool). This is what led to trying late positions.
+
+**Run 3.** 96 late positions, 250 samples per play, no reuse.
+
+| Variant | Budget | Standard | LAMC | Difference | Set regret | Outside | Rounds | Evaluated |
+|---|---|---|---|---|---|---|---|---|
+| Defaults | 1,000 | 0.745 (0.321) | 0.933 (0.202) | +0.188 (0.361) | 0.473 / 0.615 | 15 | 4.8 | 61.8 |
+| mean | 1,000 | 0.745 (0.321) | 0.802 (0.159) | +0.057 (0.340) | 0.473 / 0.421 | 16 | 4.4 | 56.5 |
+| mean, all | 1,000 | 0.745 (0.321) | 0.659 (0.140) | -0.086 (0.272) | 0.473 / 0.273 | 12 | 4.4 | 56.5 |
+| mean, acquire | 1,000 | 0.745 (0.321) | 0.743 (0.166) | -0.002 (0.264) | 0.473 / 0.294 | 9 | 4.5 | 57.9 |
+| mean, explore 0.15 | 1,000 | 0.745 (0.321) | 0.909 (0.196) | +0.164 (0.339) | 0.473 / 0.609 | 16 | 2.0 | 28.0 |
+| mean, seed 12 | 1,000 | 0.745 (0.321) | 0.811 (0.166) | +0.065 (0.279) | 0.473 / 0.298 | 11 | 4.4 | 57.4 |
+| Defaults | 3,000 | 0.684 (0.319) | 0.802 (0.203) | +0.118 (0.345) | 0.473 / 0.628 | 18 | 6.9 | 86.5 |
+| mean | 3,000 | 0.684 (0.319) | 0.697 (0.163) | +0.012 (0.287) | 0.473 / 0.415 | 12 | 5.3 | 67.6 |
+| mean, all | 3,000 | 0.684 (0.319) | 0.512 (0.140) | -0.173 (0.272) | 0.473 / 0.288 | 9 | 5.3 | 67.6 |
+| mean, acquire | 3,000 | 0.684 (0.319) | 0.395 (0.120) | -0.289 (0.293) | 0.473 / 0.228 | 9 | 5.5 | 70.2 |
+| mean, explore 0.15 | 3,000 | 0.684 (0.319) | 0.983 (0.343) | +0.298 (0.130) | 0.473 / 0.664 | 10 | 5.0 | 64.4 |
+| mean, seed 12 | 3,000 | 0.684 (0.319) | 0.402 (0.108) | -0.283 (0.279) | 0.473 / 0.262 | 8 | 5.4 | 68.8 |
+
+The first sign of a late-game gain: static equity's top 15 misses the best
+play by 0.47 points here, against 0.08 in the midgame.
+
+**Run 4.** 384 late tuning positions, 250 samples per play, no reuse.
+
+| Variant | Budget | Standard | LAMC | Difference | Set regret | Outside | Rounds | Evaluated |
+|---|---|---|---|---|---|---|---|---|
+| mean, all, acquire | 1,000 | 0.689 (0.133) | 0.722 (0.088) | +0.033 (0.118) | 0.392 / 0.276 | 38 | 4.5 | 57.5 |
+| mean, acquire | 1,000 | 0.689 (0.133) | 0.711 (0.088) | +0.022 (0.118) | 0.392 / 0.276 | 38 | 4.5 | 57.5 |
+| mean, all, acquire, seed 12 | 1,000 | 0.689 (0.133) | 0.714 (0.098) | +0.025 (0.129) | 0.392 / 0.305 | 36 | 4.5 | 57.5 |
+| mean, all, acquire, explore 0.5 | 1,000 | 0.689 (0.133) | 0.767 (0.101) | +0.078 (0.133) | 0.392 / 0.298 | 31 | 5.5 | 69.5 |
+| mean, all, acquire, `-lamcshallow 8` | 1,000 | 0.689 (0.133) | 0.662 (0.081) | -0.027 (0.124) | 0.392 / 0.236 | 39 | 2.0 | 28.0 |
+| mean, all | 1,000 | 0.689 (0.133) | 0.815 (0.113) | +0.126 (0.136) | 0.392 / 0.393 | 40 | 4.4 | 56.3 |
+| mean, all, acquire, `-lamcbeta 2` | 1,000 | 0.689 (0.133) | 0.720 (0.088) | +0.031 (0.118) | 0.392 / 0.277 | 37 | 4.5 | 57.5 |
+| mean, all, acquire | 3,000 | 0.546 (0.127) | 0.445 (0.088) | -0.102 (0.129) | 0.392 / 0.298 | 35 | 5.5 | 69.5 |
+| mean, acquire | 3,000 | 0.546 (0.127) | 0.445 (0.088) | -0.102 (0.129) | 0.392 / 0.298 | 35 | 5.5 | 69.5 |
+| mean, all, acquire, seed 12 | 3,000 | 0.546 (0.127) | 0.339 (0.057) | -0.208 (0.113) | 0.392 / 0.212 | 33 | 5.5 | 69.4 |
+| mean, all, acquire, explore 0.5 | 3,000 | 0.546 (0.127) | 0.445 (0.088) | -0.102 (0.129) | 0.392 / 0.298 | 35 | 5.5 | 69.5 |
+| mean, all, acquire, `-lamcshallow 8` | 3,000 | 0.546 (0.127) | 0.431 (0.072) | -0.115 (0.130) | 0.392 / 0.221 | 39 | 5.3 | 67.6 |
+| mean, all | 3,000 | 0.546 (0.127) | 0.492 (0.092) | -0.054 (0.126) | 0.392 / 0.318 | 32 | 5.2 | 67.0 |
+| mean, all, acquire, `-lamcbeta 2` | 3,000 | 0.546 (0.127) | 0.444 (0.087) | -0.103 (0.129) | 0.392 / 0.298 | 36 | 5.4 | 69.2 |
+
+At 3,000 rollouts the search ends on stable kept plays before it reaches its
+explore share, which is why several rows are identical.
+
+**Run 5.** The same 384 late positions at 1,000 rollouts, every variant with
+mean, all, acquire and seed 12, each with and without sample reuse.
+
+| Features | Difference, no reuse | Difference, reuse | Set regret |
+|---|---|---|---|
+| Default set | +0.025 (0.129) | -0.036 (0.131) | 0.392 / 0.305 |
+| score, leave, equity | +0.140 (0.136) | +0.061 (0.134) | 0.392 / 0.374 |
+| Default set and equity | +0.065 (0.131) | +0.003 (0.134) | 0.392 / 0.319 |
+| rack | +0.089 (0.132) | +0.016 (0.129) | 0.392 / 0.346 |
+| board | +0.111 (0.122) | +0.030 (0.118) | 0.392 / 0.361 |
+
+Reuse lowered regret by 0.06 to 0.08 in every row, which is why it became a
+sim option and later a default.
+
+**Run 6.** The same 384 late positions, with reuse; every variant adds to
+mean, all, acquire and seed 12 (the first row).
+
+| Variant | Budget | Standard | LAMC | Difference | Set regret | Outside | Rounds | Evaluated |
+|---|---|---|---|---|---|---|---|---|
+| (base) | 1,000 | 0.689 (0.133) | 0.653 (0.099) | -0.036 (0.131) | 0.392 / 0.305 | 38 | 4.5 | 57.5 |
+| features score, leave, equity | 1,000 | 0.689 (0.133) | 0.750 (0.107) | +0.061 (0.134) | 0.392 / 0.374 | 39 | 4.4 | 56.9 |
+| features rack | 1,000 | 0.689 (0.133) | 0.705 (0.105) | +0.016 (0.129) | 0.392 / 0.346 | 38 | 4.5 | 57.5 |
+| features board | 1,000 | 0.689 (0.133) | 0.719 (0.099) | +0.030 (0.118) | 0.392 / 0.361 | 37 | 4.5 | 57.6 |
+| features default and leavedups | 1,000 | 0.689 (0.133) | 0.695 (0.121) | +0.006 (0.116) | 0.392 / 0.362 | 36 | 4.5 | 57.5 |
+| `-lamcpool 24 -lamckeep 6`, seed 16 | 1,000 | 0.689 (0.133) | 0.858 (0.143) | +0.169 (0.125) | 0.392 / 0.493 | 45 | 3.0 | 60.0 |
+| `-lamclength 3` | 1,000 | 0.689 (0.133) | 0.699 (0.101) | +0.010 (0.128) | 0.392 / 0.331 | 40 | 4.5 | 57.5 |
+| explore 0.2 | 1,000 | 0.689 (0.133) | 0.892 (0.140) | +0.203 (0.126) | 0.392 / 0.550 | 41 | 3.0 | 40.0 |
+| explore 0.5 | 1,000 | 0.689 (0.133) | 0.592 (0.082) | -0.097 (0.116) | 0.392 / 0.212 | 33 | 5.5 | 69.4 |
+| (base) | 3,000 | 0.546 (0.127) | 0.359 (0.060) | -0.188 (0.113) | 0.392 / 0.212 | 33 | 5.5 | 69.4 |
+| features score, leave, equity | 3,000 | 0.546 (0.127) | 0.523 (0.093) | -0.023 (0.120) | 0.392 / 0.352 | 35 | 5.3 | 67.7 |
+| features rack | 3,000 | 0.546 (0.127) | 0.423 (0.072) | -0.123 (0.107) | 0.392 / 0.248 | 38 | 5.4 | 69.3 |
+| features board | 3,000 | 0.546 (0.127) | 0.547 (0.113) | +0.001 (0.098) | 0.392 / 0.376 | 35 | 5.5 | 69.8 |
+| features default and leavedups | 3,000 | 0.546 (0.127) | 0.374 (0.061) | -0.173 (0.103) | 0.392 / 0.214 | 35 | 5.4 | 69.1 |
+| `-lamcpool 24 -lamckeep 6`, seed 16 | 3,000 | 0.546 (0.127) | 0.535 (0.097) | -0.011 (0.129) | 0.392 / 0.354 | 39 | 4.9 | 88.6 |
+| `-lamclength 3` | 3,000 | 0.546 (0.127) | 0.348 (0.052) | -0.199 (0.113) | 0.392 / 0.201 | 35 | 5.5 | 69.4 |
+| explore 0.2 | 3,000 | 0.546 (0.127) | 0.359 (0.060) | -0.188 (0.113) | 0.392 / 0.212 | 33 | 5.5 | 69.4 |
+| explore 0.5 | 3,000 | 0.546 (0.127) | 0.359 (0.060) | -0.188 (0.113) | 0.392 / 0.212 | 33 | 5.5 | 69.4 |
+
+**Run 7.** Late, fresh A: 768 positions, 250 samples per play, with reuse;
+the base is mean, all, acquire, seed 12 and explore 0.5, with no static
+floor.
+
+| Variant | Budget | Standard | LAMC | Difference | Set regret | Outside | Rounds | Evaluated |
+|---|---|---|---|---|---|---|---|---|
+| (base) | 1,000 | 0.611 (0.060) | 0.642 (0.062) | +0.031 (0.038) | 0.289 / 0.276 | 49 | 5.4 | 68.6 |
+| `-lamclength 3` | 1,000 | 0.611 (0.060) | 0.627 (0.062) | +0.016 (0.037) | 0.289 / 0.262 | 50 | 5.4 | 68.6 |
+| (base) | 3,000 | 0.433 (0.048) | 0.447 (0.053) | +0.014 (0.033) | 0.289 / 0.276 | 39 | 5.4 | 68.6 |
+| `-lamclength 3` | 3,000 | 0.433 (0.048) | 0.431 (0.052) | -0.002 (0.032) | 0.289 / 0.262 | 41 | 5.4 | 68.6 |
+
+The gain of -0.19 on the tuning set did not hold on fresh positions. This is
+what led to the static floor.
+
+**Run 8.** The 384 midgame tuning positions, 250 samples per play, with
+reuse; the base is mean, all, acquire, seed 12 and explore 0.5. The rows
+marked "signal variance fit" ran after that fit was added, which moved the
+surrogate's rank correlation from 0.721 to 0.725 (0.718 with explore 0.3;
+static equity: 0.746).
+
+| Variant | Budget | Standard | LAMC | Difference | Set regret | Outside | Rounds | Evaluated |
+|---|---|---|---|---|---|---|---|---|
+| (base) | 1,000 | 0.254 (0.029) | 0.433 (0.056) | +0.179 (0.047) | 0.007 / 0.111 | 10 | 4.7 | 60.7 |
+| `-lamclength 3` | 1,000 | 0.254 (0.029) | 0.430 (0.056) | +0.176 (0.047) | 0.007 / 0.111 | 10 | 4.7 | 60.7 |
+| floor 8 | 1,000 | 0.254 (0.029) | 0.323 (0.034) | +0.069 (0.026) | 0.007 / 0.007 | 2 | 4.7 | 60.7 |
+| floor 10 | 1,000 | 0.254 (0.029) | 0.323 (0.034) | +0.069 (0.026) | 0.007 / 0.007 | 2 | 4.7 | 60.7 |
+| floor 12 | 1,000 | 0.254 (0.029) | 0.333 (0.036) | +0.079 (0.024) | 0.007 / 0.007 | 2 | 4.7 | 60.7 |
+| (base), signal variance fit | 1,000 | 0.254 (0.029) | 0.406 (0.050) | +0.152 (0.041) | 0.007 / 0.088 | 7 | 4.7 | 60.1 |
+| floor 10, signal variance fit | 1,000 | 0.254 (0.029) | 0.320 (0.034) | +0.066 (0.026) | 0.007 / 0.007 | 0 | 4.7 | 60.1 |
+| floor 10, explore 0.3, signal variance fit | 1,000 | 0.254 (0.029) | 0.290 (0.031) | +0.037 (0.019) | 0.007 / 0.007 | 0 | 4.2 | 54.8 |
+| (base) | 3,000 | 0.129 (0.017) | 0.236 (0.045) | +0.108 (0.041) | 0.007 / 0.111 | 8 | 4.7 | 60.7 |
+| `-lamclength 3` | 3,000 | 0.129 (0.017) | 0.238 (0.046) | +0.109 (0.041) | 0.007 / 0.111 | 8 | 4.7 | 60.7 |
+| floor 8, 10 or 12 | 3,000 | 0.129 (0.017) | 0.133 (0.017) | +0.004 (0.007) | 0.007 / 0.007 | 0 | 4.7 | 60.7 |
+| (base), signal variance fit | 3,000 | 0.129 (0.017) | 0.218 (0.039) | +0.089 (0.035) | 0.007 / 0.088 | 7 | 4.7 | 60.1 |
+| floor 10, with or without explore 0.3, signal variance fit | 3,000 | 0.129 (0.017) | 0.133 (0.017) | +0.005 (0.006) | 0.007 / 0.007 | 0 | 4.7 | 60.1 |
+
+**Run 9.** Late, fresh B: 384 positions, 800 samples per play, with reuse;
+the base is mean, all, acquire, seed 12 and explore 0.5. The rank
+correlation was 0.584 with the equity prior mean and 0.502 with a constant
+one; static equity's was 0.531.
+
+| Variant | Budget | Standard | LAMC | Difference | Set regret | Outside | Rounds | Evaluated |
+|---|---|---|---|---|---|---|---|---|
+| (base) | 3,000 | 0.508 (0.123) | 0.404 (0.077) | -0.104 (0.122) | 0.411 / 0.302 | 38 | 5.4 | 68.8 |
+| floor 10 | 3,000 | 0.508 (0.123) | 0.298 (0.057) | -0.209 (0.111) | 0.411 / 0.197 | 24 | 5.4 | 68.8 |
+| floor 12 | 3,000 | 0.508 (0.123) | 0.307 (0.057) | -0.201 (0.110) | 0.411 / 0.204 | 23 | 5.4 | 68.8 |
+| Constant mean | 3,000 | 0.508 (0.123) | 0.500 (0.075) | -0.007 (0.139) | 0.411 / 0.396 | 68 | 6.8 | 85.3 |
+| (base) | 10,000 | 0.461 (0.122) | 0.342 (0.075) | -0.119 (0.122) | 0.411 / 0.302 | 38 | 5.4 | 68.8 |
+| floor 10 | 10,000 | 0.461 (0.122) | 0.238 (0.053) | -0.224 (0.110) | 0.411 / 0.197 | 25 | 5.4 | 68.8 |
+| floor 12 | 10,000 | 0.461 (0.122) | 0.245 (0.054) | -0.217 (0.110) | 0.411 / 0.204 | 24 | 5.4 | 68.8 |
+| Constant mean | 10,000 | 0.461 (0.122) | 0.443 (0.070) | -0.019 (0.138) | 0.411 / 0.396 | 62 | 6.8 | 85.3 |
+
+**Run 10.** Late, fresh C: 768 positions, the defaults as committed (explore
+0.3 and 0.5 gave identical results). 400 samples per play at 3,000 rollouts;
+the 10,000-rollout budget ran out of samples, so it was rerun on the same
+positions with 700.
+
+| Budget | Standard | LAMC | Difference | Set regret | Outside | Rounds | Evaluated | Rank correlation, LAMC / static |
+|---|---|---|---|---|---|---|---|---|
+| 3,000 | 0.524 (0.074) | 0.463 (0.061) | -0.060 (0.033) | 0.417 / 0.334 | 43 | 5.3 | 67.4 | 0.586 / 0.544 |
+| 10,000 | 0.470 (0.072) | 0.383 (0.057) | -0.087 (0.033) | 0.411 / 0.324 | 47 | 5.3 | 67.4 | 0.588 / 0.547 |
+
+**Games.** Both with `-lamc1 true` against the standard sim, at the settings
+in [Results](#results).
+
+| Run | Pairs | LAMC's score | Spread per pair (SE) | Searches | Rounds | Plays evaluated | Search rollouts | Search time | Candidates outside the static top 15, per search | Choices outside it |
+|---|---|---|---|---|---|---|---|---|---|---|
+| Pilot, seed 11 | 160 | 50.31% | -2.20 (2.69) | 662 | 5.29 | 65.6 | 331 | 147 ms | 1.04 | 39 (5.9%) |
+| Seed 12 | 1,500 | 50.22% | -0.04 (0.84) | 6,246 | 5.42 | 67.1 | 339 | 168 ms | 1.06 | 377 (6.0%) |
+
+The speed runs (160 pairs, seed 11) of LAMC off and of main gave identical
+results, as they should.
+
 ### What to do next
 
 1. **Measure it in games where it acts.** LAMC changes only the last few
@@ -884,6 +1127,80 @@ average including its 339 rollouts, with 12 games running at once.
    the registry carry over unchanged. The late game, where the rollout
    policy is most likely wrong, is where to test adaptive responses first.
 
+### Open questions
+
+What Phase 1 did not settle. Each question says what the runs showed and
+what would answer it.
+
+1. **Is the late-game gain real in games?** On fresh positions the replay
+   shows 0.06 to 0.09 points of win percentage per late decision, about two
+   standard errors from zero, and whole-game pairs cannot see a gain that
+   small. Game pairs started from late positions, or a comparison with PEG,
+   would answer it (items 1 and 3 of [What to do next](#what-to-do-next)).
+2. **Is it the surrogate, or only a wider look?** LAMC hands the sim plays
+   from beyond static equity's top 15. No run compared it with a standard
+   sim that simply takes more static plays (the top 30, say) at the same
+   budget, or with candidates chosen by the prior mean alone, without
+   search rollouts. If either matches LAMC, the GP is not what helps. Each
+   is one replay run.
+3. **Why does the surrogate rank midgame plays worse than static equity?**
+   With a prior mean linear in static equity and a fitted signal variance,
+   the surrogate should fall back to static equity's order when the samples
+   show nothing more. Its rank correlation is still 0.72 against 0.75.
+   Possible causes:
+   - the prior mean's slope is fit to noisy means of a few samples each;
+   - the smallest signal variance on offer (0.1 times the excess) is not
+     small enough;
+   - one length scale for every column lets weak features add noise.
+
+   Measuring the rank correlation with each changed in turn, starting with
+   the signal variance forced to zero, would find which.
+4. **Does the replay predict the live sim?** The replay samples the final
+   stage evenly, where the sim uses BAI. It never used a stopping
+   threshold, a time limit, inference, bag cycling, more than 2 plies or a
+   lexicon other than CSW21. It never used the live universe either: the
+   live default is up to 400 plays within 30 points, and the replay took
+   the top 100. The `lamcautoplay` runs used the live sim, but only at 3,000
+   rollouts with no threshold and no inference. Any of these could shrink
+   the gain or grow it.
+5. **Does BAI's stopping rule work on resumed statistics?** With reuse, the
+   sim's plays start from the search's statistics, but BAI's own counts
+   start from zero, so its threshold test does not see the search's
+   samples. No run used a threshold, so whether this wastes rollouts or
+   stops too early is unknown.
+6. **Where does the gain end?** It was measured with 1 to 20 tiles in the
+   bag and is absent with 30 or more. 21 to 29 tiles were never tested.
+   Nor was the split within 1 to 20: the gain could all come from the
+   positions where a play can empty the bag. Replay sets by bag size would
+   answer both.
+7. **How much of the tuning is noise?** The defaults were chosen on 384
+   late and 384 midgame positions. On fresh positions, the late gain
+   shrank from 0.19 to 0.06. The final late numbers come from a set never
+   used for tuning; the midgame numbers come from the tuning set. Each
+   default was picked
+   from comparisons within each other's standard errors. A sweep of the
+   main settings on a fresh set, with paired differences between variants
+   rather than against the standard sim, would show which defaults matter.
+8. **Are the GP's uncertainties calibrated?** Acquisition ranks plays by
+   the mean plus a multiple of the standard deviation. The noise model
+   treats samples as independent, though common random numbers correlate
+   them. Nothing checked whether the predicted standard deviations match
+   the errors. `-lamcbeta` 1 and 2 did alike, which says little either way.
+9. **Should the search spend more at large budgets?** At 3,000 and 10,000
+   rollouts it stops on stable kept plays after about 340 rollouts, 11% and
+   3% of the budget, so explore shares above that change nothing. More
+   rounds, a larger pool, or more samples per play at large budgets were
+   not tested.
+10. **Which features matter, one by one?** The ablation compared groups,
+    each within a standard error of the others. Whether `leavedups`,
+    `equity`, `perimeter` or `premium` helps alone is unknown. Per-feature
+    length scales fit by marginal likelihood (item 5 of What to do next)
+    would read the answer from the searches' own samples.
+11. **Is Phase 2 worth starting on this evidence?** Phase 1's gain is small
+    and confined to the late game. Phase 2 adapts the rollout policy,
+    which is a different lever: the late game is also where that policy
+    (the top static play) is most likely wrong. The answer to question 1
+    bears on whether a per-ply search will repay its cost.
 
 ---
 
@@ -1116,6 +1433,9 @@ also reported, as a measure of quality per rollout.
 ---
 
 ## Risks and open questions
+
+These are the risks as planned. What Phase 1 found about them, and the
+questions it raised, are in [Open questions](#open-questions).
 
 - **The space may carry little signal beyond equity.** Then the GP is no
   better than sorting by equity and Phase 1 is wasted rollouts. The
