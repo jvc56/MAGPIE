@@ -620,6 +620,7 @@ void render_status_bar(struct ncplane *plane, const Theme *theme,
   case TUI_MODAL_MAIN_MENU:
   case TUI_MODAL_TIME_PICKER:
   case TUI_MODAL_QUIT_CONFIRM:
+  case TUI_MODAL_ANALYSIS_MENU:
     hint = " \xe2\x86\x91\xe2\x86\x93 navigate \xc2\xb7 Enter confirm \xc2"
            "\xb7 Esc back ";
     break;
@@ -638,6 +639,13 @@ void render_status_bar(struct ncplane *plane, const Theme *theme,
     hint = " Enter load \xc2\xb7 Esc cancel ";
     break;
   case TUI_MODAL_NONE:
+    // The analysis panel's badge: Enter (or Space) opens its menu.
+    if (!state->slash_active && state->focused_panel == TUI_FOCUS_ANALYSIS &&
+        state->analysis_cursor < 0) {
+      hint = " \xe2\x86\x91\xe2\x86\x93 navigate \xc2\xb7 Enter analyze "
+             "\xc2\xb7 Esc menu ";
+      break;
+    }
     // History focused and browsing (not editing): the arrows walk the
     // turns and Enter opens the selected one, when it can be edited.
     if (!state->slash_active && state->focused_panel == TUI_FOCUS_HISTORY &&
