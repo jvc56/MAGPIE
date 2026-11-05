@@ -2,6 +2,10 @@
 #include "alphagram_box.h"
 #include "word_list_dialog.h"
 #include "completion_stats_dialog.h"
+#include "word_wall.h"
+#include "study_log.h"
+#include <QActionGroup>
+#include "letterbox_common.h"
 #include <QFile>
 #include <QTextStream>
 #include <QScrollArea>
@@ -106,6 +110,11 @@ LetterboxWindow::LetterboxWindow(QWidget *parent)
     if (!alphagrams.empty()) {
         updateDisplay();
     }
+
+    // Restore the last used mode
+    if (settings.value("mode").toString() == "wordwalls") {
+        setMode(true);
+    }
 }
 
 LetterboxWindow::~LetterboxWindow()
@@ -120,8 +129,12 @@ void LetterboxWindow::setupUI()
     setWindowTitle("Letterbox");
     resize(800, 800);
 
-    centralWidget = new QWidget(this);
-    setCentralWidget(centralWidget);
+    // The Letterbox study view and the Word Walls quiz are pages of a stack
+    modeStack = new QStackedWidget(this);
+    setCentralWidget(modeStack);
+
+    centralWidget = new QWidget(modeStack);
+    modeStack->addWidget(centralWidget);
 
     // Dark theme background
     centralWidget->setStyleSheet("background-color: #2b2b2b;");
@@ -256,7 +269,7 @@ void LetterboxWindow::setupUI()
     inputField = new QLineEdit(this);
     inputField->setPlaceholderText("·······");  // Default placeholder with middle dots
     inputField->setAlignment(Qt::AlignCenter);
-    inputField->setStyleSheet("QLineEdit { padding: 15px; font-family: 'Jost', sans-serif; font-size: 20px; font-weight: bold; margin: 2px 0px; background-color: rgb(40, 40, 40); color: white; border: 2px solid #3a7f9f; text-transform: uppercase; }");
+    inputField->setStyleSheet(letterbox::inputFieldStyleSheet());
 
     // Install event filter to intercept Cmd-Z before the text field gets it
     inputField->installEventFilter(this);
@@ -417,22 +430,7 @@ void LetterboxWindow::setupUI()
 
 std::string LetterboxWindow::sortVowelsFirst(const std::string& word)
 {
-    std::string vowels;
-    std::string consonants;
-
-    for (char c : word) {
-        char upper = toupper(c);
-        if (upper == 'A' || upper == 'E' || upper == 'I' || upper == 'O' || upper == 'U') {
-            vowels += upper;
-        } else {
-            consonants += upper;
-        }
-    }
-
-    std::sort(vowels.begin(), vowels.end());
-    std::sort(consonants.begin(), consonants.end());
-
-    return vowels + consonants;
+    return letterbox::sortVowelsFirst(word);
 }
 
 void LetterboxWindow::loadWordList()
@@ -594,8 +592,31 @@ QString LetterboxWindow::formatAlphagramSet(const AlphagramSet& set, bool showAl
     return html;
 }
 
+void LetterboxWindow::logStudyEvent(const QString& event, QJsonObject fields)
+{
+    fields["list"] = QFileInfo(currentListFilepath).completeBaseName();
+    fields["index"] = currentIndex;
+    if (currentIndex >= 0 && currentIndex < static_cast<int>(alphagrams.size())) {
+        fields["a"] = QString::fromStdString(alphagrams[currentIndex].alphagram);
+    }
+    studylog::write("letterbox", event, fields);
+}
+
 void LetterboxWindow::updateDisplay()
 {
+    // Log each set the first time it's shown (updateDisplay also runs on redraws)
+    const QString setKey = currentListFilepath + "#" + QString::number(currentIndex);
+    if (setKey != lastLoggedSet && currentIndex < static_cast<int>(alphagrams.size())) {
+        lastLoggedSet = setKey;
+        QJsonArray words;
+        for (const auto& entry : alphagrams[currentIndex].words) {
+            words.append(QString::fromStdString(entry.word));
+        }
+        logStudyEvent("set_start", QJsonObject{{"listName", currentListName},
+                                               {"listSize", static_cast<int>(alphagrams.size())},
+                                               {"w", words}});
+    }
+
     auto renderStartTime = std::chrono::high_resolution_clock::now();
     auto t0 = renderStartTime;
 
@@ -897,6 +918,11 @@ void LetterboxWindow::onTextChanged(const QString& text)
     for (auto& entry : set.words) {
         if (!entry.revealed && QString::fromStdString(entry.word) == upper) {
             entry.revealed = true;
+            bool setDone = true;
+            for (const auto& e : set.words) {
+                setDone = setDone && e.revealed;
+            }
+            logStudyEvent("reveal", QJsonObject{{"w", upper}, {"setDone", setDone}});
 
             // Clear undo state when revealing a word
             lastMissedIndex = -1;
@@ -986,9 +1012,18 @@ void LetterboxWindow::markStudied()
 
 void LetterboxWindow::skipCurrentAlphagram()
 {
+    if (inWordWallMode()) return;
     if (currentIndex >= alphagrams.size()) return;
 
     AlphagramSet& set = alphagrams[currentIndex];
+
+    QJsonArray missedWords;
+    for (const auto& entry : set.words) {
+        if (!entry.revealed) {
+            missedWords.append(QString::fromStdString(entry.word));
+        }
+    }
+    logStudyEvent("mark_missed", QJsonObject{{"missed", missedWords}});
 
     // Mark all unrevealed words as missed
     for (auto& entry : set.words) {
@@ -1027,6 +1062,7 @@ void LetterboxWindow::skipCurrentAlphagram()
 
 void LetterboxWindow::undoMarkAsMissed()
 {
+    if (inWordWallMode()) return;
     // Check if undo is currently available
     if (!undoAction || !undoAction->isEnabled()) {
         return;
@@ -1039,6 +1075,8 @@ void LetterboxWindow::undoMarkAsMissed()
 
     // Go back to the missed alphagram
     currentIndex = lastMissedIndex;
+    logStudyEvent("undo_missed");
+    lastLoggedSet.clear();  // The set is shown again, so log a fresh set_start
     AlphagramSet& set = alphagrams[currentIndex];
 
     // Reset all words to unrevealed and not missed
@@ -1094,8 +1132,93 @@ void LetterboxWindow::setupMenuBar()
     undoShortcut->setContext(Qt::ApplicationShortcut);
     connect(undoShortcut, &QShortcut::activated, this, &LetterboxWindow::undoMarkAsMissed);
 
+    // Word Walls menu
+    QMenu* wordWallsMenu = menuBar->addMenu("Word Walls");
+    QAction* newQuizAction = new QAction("New Word Walls Quiz...", this);
+    newQuizAction->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_N));
+    connect(newQuizAction, &QAction::triggered, this, &LetterboxWindow::newWordWallQuiz);
+    wordWallsMenu->addAction(newQuizAction);
+
+    QAction* editListAction = new QAction("Edit List...", this);
+    editListAction->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_E));
+    connect(editListAction, &QAction::triggered, this, [this]() {
+        if (!ensureWordWall()) {
+            return;
+        }
+        setMode(true);
+        wordWall->editList();
+    });
+    wordWallsMenu->addAction(editListAction);
+
+    // Active lists with progress, rebuilt each time the menu opens
+    QMenu* recentWordWallsMenu = wordWallsMenu->addMenu("Recent Lists");
+    connect(recentWordWallsMenu, &QMenu::aboutToShow, this, [this, recentWordWallsMenu]() {
+        recentWordWallsMenu->clear();
+        const QString currentPath = wordWall ? wordWall->currentListPath() : QString();
+        QLocale locale;
+        for (const WordWallListSummary& summary : WordWallWidget::recentLists()) {
+            if (!summary.active) {
+                continue;
+            }
+            const int percent = summary.total > 0 ? static_cast<int>(100 * summary.position / summary.total) : 0;
+            QString text = QString("%1 \u2014 %2 / %3 (%4%)")
+                               .arg(summary.name)
+                               .arg(locale.toString(summary.position))
+                               .arg(locale.toString(summary.total))
+                               .arg(percent);
+            if (summary.missed > 0) {
+                text += QString(" \u00B7 %1 missed").arg(locale.toString(summary.missed));
+            }
+            QAction* action = recentWordWallsMenu->addAction(text);
+            action->setCheckable(true);
+            action->setChecked(summary.path == currentPath);
+            const QString path = summary.path;
+            connect(action, &QAction::triggered, this, [this, path]() {
+                if (!ensureWordWall()) {
+                    return;
+                }
+                wordWall->openList(path);
+                setMode(true);
+            });
+        }
+        if (recentWordWallsMenu->isEmpty()) {
+            recentWordWallsMenu->addAction("No active lists")->setEnabled(false);
+        }
+    });
+    wordWallsMenu->addSeparator();
+
+    QAction* pauseAction = new QAction("Pause", this);
+    pauseAction->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_P));
+    connect(pauseAction, &QAction::triggered, this, [this]() {
+        if (inWordWallMode()) wordWall->togglePause();
+    });
+    wordWallsMenu->addAction(pauseAction);
+
+    QAction* giveUpAction = new QAction("Give Up", this);
+    giveUpAction->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_G));
+    connect(giveUpAction, &QAction::triggered, this, [this]() {
+        if (inWordWallMode()) wordWall->giveUp();
+    });
+    wordWallsMenu->addAction(giveUpAction);
+
     // View menu
     QMenu* viewMenu = menuBar->addMenu("View");
+
+    QActionGroup* modeGroup = new QActionGroup(this);
+    letterboxModeAction = new QAction("Letterbox", modeGroup);
+    letterboxModeAction->setCheckable(true);
+    letterboxModeAction->setChecked(true);
+    letterboxModeAction->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_1));
+    connect(letterboxModeAction, &QAction::triggered, this, &LetterboxWindow::showLetterboxMode);
+    viewMenu->addAction(letterboxModeAction);
+
+    wordWallModeAction = new QAction("Word Walls", modeGroup);
+    wordWallModeAction->setCheckable(true);
+    wordWallModeAction->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_2));
+    connect(wordWallModeAction, &QAction::triggered, this, &LetterboxWindow::showWordWallMode);
+    viewMenu->addAction(wordWallModeAction);
+
+    viewMenu->addSeparator();
 
     QAction* fullscreenAction = new QAction("Toggle Fullscreen", this);
     fullscreenAction->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_F));  // Cmd-F on macOS
@@ -1140,6 +1263,75 @@ void LetterboxWindow::setupMenuBar()
     hoverDebugAction->setChecked(false);  // Disabled by default
     connect(hoverDebugAction, &QAction::triggered, this, &LetterboxWindow::toggleHoverDebugInfo);
     debugMenu->addAction(hoverDebugAction);
+}
+
+bool LetterboxWindow::inWordWallMode() const
+{
+    return wordWall && modeStack->currentWidget() == wordWall;
+}
+
+bool LetterboxWindow::ensureWordWall()
+{
+    if (wordWall) {
+        return true;
+    }
+    if (!kwg || !ld) {
+        return false;
+    }
+    // csw24_features.tsv lives next to csw24-pb.txt, beside the .app bundle
+    QDir dir(QCoreApplication::applicationDirPath());
+    dir.cdUp();  // Contents
+    dir.cdUp();  // Letterbox.app
+    dir.cdUp();  // letterbox directory
+    wordWall = new WordWallWidget(allAlphagrams, playabilityScores, dir.absolutePath() + "/csw24_features.tsv",
+                                  kwg, ld, modeStack);
+    modeStack->addWidget(wordWall);
+    connect(wordWall, &WordWallWidget::listNameChanged, this, [this]() {
+        if (inWordWallMode()) {
+            setMode(true);
+        }
+    });
+    wordWall->loadSavedState();
+    return true;
+}
+
+void LetterboxWindow::setMode(bool wordWalls)
+{
+    if (wordWalls && !ensureWordWall()) {
+        return;
+    }
+    modeStack->setCurrentWidget(wordWalls ? static_cast<QWidget*>(wordWall) : centralWidget);
+    letterboxModeAction->setChecked(!wordWalls);
+    wordWallModeAction->setChecked(wordWalls);
+    QSettings("Letterbox", "Letterbox").setValue("mode", wordWalls ? "wordwalls" : "letterbox");
+
+    if (wordWalls) {
+        const QString name = wordWall->listName();
+        setWindowTitle(name.isEmpty() ? "Word Walls - Letterbox" : name + " - Word Walls - Letterbox");
+        wordWall->focusInput();
+    } else {
+        updateWindowTitle();
+        inputField->setFocus();
+    }
+}
+
+void LetterboxWindow::showLetterboxMode()
+{
+    setMode(false);
+}
+
+void LetterboxWindow::showWordWallMode()
+{
+    setMode(true);
+}
+
+void LetterboxWindow::newWordWallQuiz()
+{
+    if (!ensureWordWall()) {
+        return;
+    }
+    setMode(true);
+    wordWall->newQuiz();
 }
 
 void LetterboxWindow::toggleFullscreen()
@@ -1281,6 +1473,9 @@ bool LetterboxWindow::eventFilter(QObject *obj, QEvent *event)
     // Intercept Cmd-Z on the input field and handle it ourselves
     if (obj == inputField && event->type() == QEvent::KeyPress) {
         QKeyEvent *keyEvent = static_cast<QKeyEvent*>(event);
+        QJsonObject keyFields = studylog::keyFields(keyEvent);
+        keyFields["before"] = inputField->text();
+        logStudyEvent("key", keyFields);
         // Check for Cmd-Z (Ctrl on macOS is actually Command key)
         if (keyEvent->matches(QKeySequence::Undo)) {
             // Trigger our undo action if it's enabled
@@ -1509,6 +1704,11 @@ QString LetterboxWindow::sortExtensionsByPlayability(const QString& extensions, 
 
 void LetterboxWindow::createCustomWordList()
 {
+    if (inWordWallMode()) {
+        newWordWallQuiz();
+        return;
+    }
+
     // Open dialog with all alphagrams
     WordListDialog dialog(allAlphagrams, playabilityScores, kwg, ld, this);
 
@@ -1800,6 +2000,10 @@ void LetterboxWindow::updateRecentListsMenu()
                 action->setData(filepath);  // Store filepath in action
                 connect(action, &QAction::triggered, this, [this, filepath]() {
                     loadSavedListFromFile(filepath);
+                    // A Letterbox list: leave Word Walls to show it
+                    if (inWordWallMode()) {
+                        setMode(false);
+                    }
                 });
                 recentListsMenu->addAction(action);
             }

@@ -77,6 +77,21 @@ LetterDistribution* letterbox_get_ld(Config *config) {
     return config_get_ld(config);
 }
 
+int letterbox_get_tile_count(const LetterDistribution *ld, char letter) {
+    if (!ld) {
+        return 0;
+    }
+    if (letter == '?') {
+        return ld_get_dist(ld, BLANK_MACHINE_LETTER);
+    }
+    const char hl[2] = {letter, '\0'};
+    const MachineLetter ml = ld_hl_to_ml(ld, hl);
+    if (ml == INVALID_LETTER) {
+        return 0;
+    }
+    return ld_get_dist(ld, ml);
+}
+
 WordList* word_list_create(void) {
     WordList *list = malloc(sizeof(WordList));
     list->words = NULL;

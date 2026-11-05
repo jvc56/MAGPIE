@@ -37,7 +37,9 @@ SOURCES += \
     alphagram_box.cpp \
     word_list_dialog.cpp \
     completion_stats_dialog.cpp \
-    hover_aware_text_browser.cpp
+    hover_aware_text_browser.cpp \
+    word_wall.cpp \
+    study_log.cpp
 
 HEADERS += \
     magpie_wrapper.h \
@@ -45,7 +47,10 @@ HEADERS += \
     alphagram_box.h \
     word_list_dialog.h \
     completion_stats_dialog.h \
-    hover_aware_text_browser.h
+    hover_aware_text_browser.h \
+    letterbox_common.h \
+    word_wall.h \
+    study_log.h
 
 # Resources (fonts)
 RESOURCES += letterbox.qrc

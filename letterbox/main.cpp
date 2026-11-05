@@ -2,6 +2,8 @@
 #include <QApplication>
 #include <QFontDatabase>
 #include <QDebug>
+#include <QScreen>
+#include <QWindow>
 
 #ifdef Q_OS_MACOS
 extern "C" {
@@ -41,6 +43,18 @@ int main(int argc, char *argv[])
     }
 
     LetterboxWindow window;
+
+    // Fill the screen's usable area (below the menu bar, beside the dock) with
+    // the title bar showing, like Rectangle's Maximize. The native window is
+    // created first so its frame (title bar) size is known.
+    window.winId();
+    if (QScreen* screen = window.screen()) {
+        QMargins frame = window.windowHandle()->frameMargins();
+        if (frame.isNull()) {
+            frame = QMargins(0, 28, 0, 0);  // Typical macOS title bar
+        }
+        window.setGeometry(screen->availableGeometry().marginsRemoved(frame));
+    }
     window.show();
 
     return app.exec();

@@ -22,6 +22,8 @@
 #include <QHash>
 #include <QGraphicsOpacityEffect>
 #include <QPropertyAnimation>
+#include <QStackedWidget>
+#include <QJsonObject>
 
 extern "C" {
     #include "magpie_wrapper.h"
@@ -41,6 +43,8 @@ struct HookExtensionCache {
     int computeTimeMicros;
     bool cached;
 };
+
+class WordWallWidget;
 
 struct AlphagramSet {
     std::string alphagram;  // Vowels-first sorted
@@ -76,6 +80,9 @@ private slots:
     void onScrollChanged(int value);
     void onSidebarHtmlReady();
     void onHideTimer();
+    void showLetterboxMode();
+    void showWordWallMode();
+    void newWordWallQuiz();
 
 protected:
     void resizeEvent(QResizeEvent *event) override;
@@ -84,6 +91,11 @@ protected:
 private:
     void setupUI();
     void setupMenuBar();
+    bool inWordWallMode() const;
+    void setMode(bool wordWalls);
+    bool ensureWordWall();
+    // Logs a Letterbox study event tagged with the current list and set
+    void logStudyEvent(const QString& event, QJsonObject fields = {});
     void updateDisplay();
     void updateProgress();
     void updateDebugInfo();
@@ -158,6 +170,14 @@ private:
     int scaledInputSize;
     int scaledQueueCurrentSize;
     int scaledQueueUpcomingSize;
+
+    QString lastLoggedSet;  // List and index of the last set logged as shown
+
+    // Mode switching (Letterbox study view vs. Word Walls grid quiz)
+    QStackedWidget* modeStack = nullptr;
+    WordWallWidget* wordWall = nullptr;
+    QAction* letterboxModeAction = nullptr;
+    QAction* wordWallModeAction = nullptr;
 
     // UI elements
     QWidget* centralWidget;
