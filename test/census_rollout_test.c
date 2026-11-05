@@ -420,10 +420,12 @@ static void test_census_rollout_auto(void) {
   assert(!census_rollout_sim_steers(config, &sim_ctx, sim_results, "false"));
   assert(sim_ctx_census_rollout_held_bytes(sim_ctx) == 0);
 
-  // With 10 tiles in the bag, the tables are small and the same 300 rollouts
-  // pay for them, so auto steers the sim. It needs this machine to have
-  // about 1.1 GB available: the census and the reserve auto leaves.
+  // With 10 tiles in the bag, the tables are small, and 2000 rollouts pay
+  // for them many times over (the position's moves differ by platform, so
+  // the margin is wide), so auto steers the sim. It needs this machine to
+  // have about 1.1 GB available: the census and the reserve auto leaves.
   play_to_bag_size(config_get_game(config), move_list, 7, 10);
+  load_and_exec_config_or_die(config, "set -it 2000");
   load_and_exec_config_or_die(config, "gen");
   assert(census_rollout_sim_steers(config, &sim_ctx, sim_results, "auto"));
   // A second sim reuses the census, whose memory auto counts as free.
