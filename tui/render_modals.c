@@ -419,6 +419,22 @@ void tui_game_render_analysis_menu(struct ncplane *plane, const Theme *theme,
                   /*zone_widths=*/NULL, TUI_ANALYSIS_MENU_ITEM_COUNT, focus,
                   32);
 }
+void tui_game_render_phony_confirm(struct ncplane *plane, const Theme *theme,
+                                   int focus, const char *lexicon,
+                                   const char *words) {
+  if (plane == NULL || theme == NULL) {
+    return;
+  }
+  char title[112];
+  (void)snprintf(title, sizeof(title), "Not in %s: %s", lexicon, words);
+  const int title_width = (int)strlen(title) + 6;
+  const char *items[TUI_PHONY_CONFIRM_ITEM_COUNT];
+  items[TUI_PHONY_CONFIRM_UNDO] = "Undo";
+  items[TUI_PHONY_CONFIRM_KEEP] = "Keep the play";
+  render_modal(plane, theme, title, items, /*shortcuts=*/NULL,
+               TUI_PHONY_CONFIRM_ITEM_COUNT, focus,
+               title_width > 28 ? title_width : 28);
+}
 void tui_game_render_startup_menu(struct ncplane *plane, const Theme *theme,
                                   int focus) {
   if (plane == NULL || theme == NULL) {
@@ -1352,6 +1368,15 @@ const char *tui_modal_help(TuiModalState modal, int focus) {
       return "Stop the running analysis; its results stay on the turn.";
     case TUI_ANALYSIS_MENU_BACK:
       return "Close this menu.";
+    default:
+      return NULL;
+    }
+  case TUI_MODAL_PHONY_CONFIRM:
+    switch (focus) {
+    case TUI_PHONY_CONFIRM_UNDO:
+      return "Back to the move, to fix it.";
+    case TUI_PHONY_CONFIRM_KEEP:
+      return "Play it as entered; History marks the phonies.";
     default:
       return NULL;
     }
