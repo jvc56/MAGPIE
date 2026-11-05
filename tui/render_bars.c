@@ -334,20 +334,21 @@ static void render_set_palette(struct ncplane *plane, const Theme *theme,
     // the current one marked.
     const char *typed = buf + words->start[2];
     const int typed_len = words->len[2];
-    const int current = tui_setting_get(state, chosen->id);
-    char values[128];
-    tui_setting_describe_values(chosen, values, sizeof(values));
-    for (int value_idx = chosen->min;
-         value_idx <= chosen->max && row_count < MAX_ROWS; value_idx++) {
-      char name[32];
-      tui_setting_format(chosen, value_idx, name, sizeof(name));
+    char current[TUI_SETTING_VALUE_NAME_MAX];
+    tui_setting_format(chosen, tui_setting_get(state, chosen->id), current,
+                       sizeof(current));
+    static TuiSettingValues values;
+    tui_setting_values(chosen, &values);
+    for (int value_idx = 0; value_idx < values.count && row_count < MAX_ROWS;
+         value_idx++) {
+      const char *name = values.names[value_idx];
       if ((int)strlen(name) < typed_len ||
           strncasecmp(name, typed, (size_t)typed_len) != 0) {
         continue;
       }
       (void)snprintf(lines[row_count][0], 128, "/set %s %s", chosen->key, name);
       (void)snprintf(lines[row_count][1], 128, "%s",
-                     value_idx == current ? "(current)" : "");
+                     strcmp(name, current) == 0 ? "(current)" : "");
       cells[row_count][0] =
           (PaletteCell){lines[row_count][0], KEY_COL,
                         5 + (int)strlen(chosen->key) + 1 + typed_len};
