@@ -3616,16 +3616,39 @@ static inline uint64_t lane_shadow_mix(uint64_t value) {
   return value;
 }
 
+// The bits of the word lane_shadow_key reads from a square that it keys on:
+// the cross score, letter and bonus square, and the anchor and cross word
+// flags. Not the tile's owner, the flags byte's unused bits or the padding
+// after it, none of which the shadow reads. Boards are allocated
+// uninitialized, and nothing sets the unused bits, the padding or an unowned
+// square's player, so two boards with the same tiles can differ in them;
+// leaving them out gives a lane one key on every board.
+static inline uint64_t lane_shadow_field_mask(void) {
+  Square fields;
+  memset(&fields, 0, sizeof(fields));
+  fields.cross_score = -1;
+  fields.letter = UINT8_MAX;
+  fields.bonus_square.raw = UINT8_MAX;
+  fields.anchor = 1;
+  fields.is_cross_word = 1;
+  uint64_t mask;
+  memcpy(&mask, (const char *)&fields + offsetof(Square, cross_score),
+         sizeof(mask));
+  return mask;
+}
+
 // The key of a lane's squares as the small shadow reads them, with
 // context_key: each square's cross set, and the word holding its cross
-// score, letter, bonus square and flags. The extension sets follow from the
-// letters and the lexicon, which context_key holds. The two words go in
-// separate chains of multiply-adds; each step is a bijection of its chain so
-// far (the multiplier is odd), so lanes that differ in one word always differ
-// in a chain. One finalizer then mixes both chains and context_key into the
-// top bits that index the cache. A key is never 0, which marks no lane.
+// score, letter, bonus square and flags, less field_mask's complement (see
+// lane_shadow_field_mask). The extension sets follow from the letters and the
+// lexicon, which context_key holds. The two words go in separate chains of
+// multiply-adds; each step is a bijection of its chain so far (the multiplier
+// is odd), so lanes that differ in one word always differ in a chain. One
+// finalizer then mixes both chains and context_key into the top bits that
+// index the cache. A key is never 0, which marks no lane.
 static inline uint64_t lane_shadow_key(const Square *lane_squares,
-                                       uint64_t context_key) {
+                                       uint64_t context_key,
+                                       uint64_t field_mask) {
   uint64_t cross_sets = UINT64_C(0x9E3779B97F4A7C15);
   uint64_t fields = UINT64_C(0xC2B2AE3D27D4EB4F);
   for (int col = 0; col < BOARD_DIM; col++) {
@@ -3635,7 +3658,7 @@ static inline uint64_t lane_shadow_key(const Square *lane_squares,
            sizeof(field_word));
     cross_sets = cross_sets * LANE_HASH_MULTIPLIER +
                  square_get_cross_set(&lane_squares[col]);
-    fields = fields * LANE_HASH_MULTIPLIER + field_word;
+    fields = fields * LANE_HASH_MULTIPLIER + (field_word & field_mask);
   }
   const uint64_t rotated_fields = (fields << 32) | (fields >> 32);
   return lane_shadow_mix(cross_sets ^ rotated_fields ^ context_key) | 1;
@@ -3708,6 +3731,7 @@ static void shadow_lanes_small_cached(MoveGen *gen, uint64_t lane_mask) {
   const uint64_t row_context_key = lane_shadow_context_key(gen);
   const uint64_t context_keys[2] = {
       row_context_key, row_context_key ^ UINT64_C(0x9E3779B97F4A7C15)};
+  const uint64_t field_mask = lane_shadow_field_mask();
   uint64_t lanes = 0;
   for (int lane = 0; lane < 2 * BOARD_DIM; lane++) {
     lanes |= (uint64_t)(gen->row_number_of_anchors_cache[lane] != 0) << lane;
@@ -3720,7 +3744,7 @@ static void shadow_lanes_small_cached(MoveGen *gen, uint64_t lane_mask) {
     keys[lane] =
         lane_shadow_key(board_get_row_cache(gen->board_lanes, lane % BOARD_DIM,
                                             lane / BOARD_DIM),
-                        context_keys[lane / BOARD_DIM]);
+                        context_keys[lane / BOARD_DIM], field_mask);
     __builtin_prefetch(lane_shadow_cache_entry(cache, keys[lane]));
   }
   for (uint64_t remaining = lanes; remaining != 0; remaining &= remaining - 1) {

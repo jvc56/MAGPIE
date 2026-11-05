@@ -4,6 +4,7 @@
 #include "../src/def/move_defs.h"
 #include "../src/def/players_data_defs.h"
 #include "../src/ent/board.h"
+#include "../src/ent/bonus_square.h"
 #include "../src/ent/equity.h"
 #include "../src/ent/game.h"
 #include "../src/ent/lane_shadow_cache.h"
@@ -289,6 +290,27 @@ static void assert_same_small_play(const SmallMove *first,
   assert(small_move_get_score(first) == small_move_get_score(second));
 }
 
+// Sets the bits of every square of board that no square field holds and the
+// shadow does not read: the tile's owner, the flags byte's unused bits and
+// the padding after that byte. A board allocated uninitialized leaves them
+// holding whatever its memory held, so two boards with the same tiles can
+// differ in them.
+static void scribble_unread_square_bits(Board *board) {
+  const size_t padding_start =
+      offsetof(Square, bonus_square) + sizeof(BonusSquare) + 1;
+  for (size_t square_idx = 0;
+       square_idx < sizeof(board->squares) / sizeof(Square); square_idx++) {
+    Square *square = &board->squares[square_idx];
+    square->player_idx = 1;
+    square->_pad = 0xF;
+    unsigned char *bytes = (unsigned char *)square;
+    for (size_t byte_idx = padding_start; byte_idx < sizeof(Square);
+         byte_idx++) {
+      bytes[byte_idx] = UINT8_MAX;
+    }
+  }
+}
+
 // The same positions with a word info table (`game`) and without one
 // (`reference`): for the player on turn, without and with the out bonus, the
 // play without a cache, through game's cache twice (recording its lanes, then
@@ -355,6 +377,8 @@ static void check_lane_shadow_cache_with_word_info_table(MoveList *best_small) {
   for (int game_idx = 0; game_idx < LANE_SHADOW_TEST_GAMES; game_idx++) {
     game_reset(game);
     game_reset(reference);
+    // The caches must agree whatever those bits hold.
+    scribble_unread_square_bits(game_get_board(reference));
     const uint64_t seed = SELF_PLAY_BASE_SEED + (uint64_t)game_idx;
     game_seed(game, seed);
     game_seed(reference, seed);
