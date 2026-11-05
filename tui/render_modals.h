@@ -38,18 +38,12 @@ void tui_game_render_annotate_setup(struct ncplane *plane, const Theme *theme,
 // Main menu modal (Esc); items are TuiMenuItem.
 void tui_game_render_menu(struct ncplane *plane, const Theme *theme, int focus);
 
-// Startup menu modal; items are TuiStartupItem.
-// The analysis panel's menu; rows are TuiAnalysisMenuItem. `disabled`
-// dims the items that can't run now; `sim_continues` labels the first
-// item "Continue sim" instead of "Simulate".
 // Annotation's phony dialog, titled with the words `lexicon` lacks.
 void tui_game_render_phony_confirm(struct ncplane *plane, const Theme *theme,
                                    int focus, const char *lexicon,
                                    const char *words);
-void tui_game_render_analysis_menu(struct ncplane *plane, const Theme *theme,
-                                   int focus, const bool *disabled,
-                                   bool sim_continues);
 
+// Startup menu modal; items are TuiStartupItem.
 void tui_game_render_startup_menu(struct ncplane *plane, const Theme *theme,
                                   int focus);
 
