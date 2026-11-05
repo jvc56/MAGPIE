@@ -2,6 +2,7 @@
 
 #include "config.h"
 #include "game_state.h"
+#include "settings_table.h"
 #include "tui_ui_state.h"
 #include <stdint.h>
 #include <stdio.h>
@@ -21,8 +22,8 @@ bool tui_reinit_game_state_if_needed(TuiGameState *state, TuiSession *session,
   (void)snprintf(new_lexicon, sizeof(new_lexicon), "%s",
                  state->pending_lexicon);
   const bool new_load_rit = state->pending_load_rit;
-  const int saved_sim_plies = state->sim_plies;
-  const int saved_sim_candidates = state->sim_candidates;
+  int saved_settings[TUI_SETTING_COUNT];
+  tui_settings_snapshot(state, saved_settings);
   tui_game_state_destroy(state);
   char reinit_error[256] = {0};
   if (!tui_game_state_init(new_lexicon, (uint64_t)time(NULL), new_load_rit,
@@ -36,8 +37,7 @@ bool tui_reinit_game_state_if_needed(TuiGameState *state, TuiSession *session,
     (void)snprintf(session->chosen_lexicon, sizeof(session->chosen_lexicon),
                    "%s", new_lexicon);
   }
-  state->sim_plies = saved_sim_plies;
-  state->sim_candidates = saved_sim_candidates;
+  tui_settings_restore(state, session, saved_settings);
   *reinitialized = true;
   return true;
 }
