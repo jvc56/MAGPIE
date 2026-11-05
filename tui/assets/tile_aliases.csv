@@ -1,0 +1,19 @@
+# Other ways to type a tile's letters. A row reads `typed` as `letters`
+# in the letter distribution it names and that distribution's variants
+# (catalan_super). The letters can be a whole tile (Ł is L·L) or its
+# start (Ŀ, then L, is L·L). Case doesn't matter for ASCII letters;
+# list both cases of any other letter.
+#
+# letter distribution,typed,letters
+#
+# Catalan. "." and "-" stand in for the middle dot of L·L, as in L.L
+# and L-L. Ł and Ý are how DISC writes L·L and NY in one character,
+# and Ŀ is Unicode's L with middle dot.
+catalan,.,·
+catalan,-,·
+catalan,Ŀ,L·
+catalan,ŀ,L·
+catalan,Ł,L·L
+catalan,ł,L·L
+catalan,Ý,NY
+catalan,ý,NY
