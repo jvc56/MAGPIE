@@ -11,10 +11,10 @@ name: Release Windows
 #   MAGPIE_VERSION in src/impl/config.c, or the build job fails first.
 # - a push to any branch that changes this file or the installer's script
 #   runs every job but publish, so a change to either is tested before it
-#   merges. This is a branch push rather than pull_request because the test
-#   job restores the windows-data cache, which run-tests.yml saves on the
-#   branch, and a pull_request run can only restore caches from the base
-#   branch.
+#   merges. The test job restores the windows-data cache, which run-tests.yml
+#   saves on main. A branch that changes the cache's key has no copy until
+#   run-tests.yml runs on it, so run that there by hand (workflow_dispatch)
+#   first.
 # - workflow_dispatch runs every job but publish, on any ref, tags included.
 # Only publish can write to the repository.
 
