@@ -33,7 +33,70 @@ enum {
   // The threads that build a sim's tables, at most: each holds a
   // lattice-sized scratch table.
   CENSUS_ROLLOUT_MAX_BUILD_THREADS = 16,
+  // For -scensus auto (see census_rollout_build_pays): the table entries
+  // whose build one rollout ply's steering pays for, and the plies of a
+  // rollout that pay. On CSW24 an entry takes about 0.3 us to build, and
+  // steering saves about 22 us in each of a rollout's first two plies, and
+  // little in the later ones.
+  CENSUS_ROLLOUT_AUTO_ENTRIES_PER_PLY = 60,
+  CENSUS_ROLLOUT_AUTO_PAYING_PLIES = 2,
+  // For -scensus auto (see census_rollout_build_may_pay): a table holds at
+  // least one entry an anchor for every 2^shift full racks the unseen letters
+  // make. On CSW24 the position's tables hold from 1 in 670 (mid-game) to 1
+  // in 60 (an open early board).
+  CENSUS_ROLLOUT_AUTO_FEWEST_ENTRIES_SHIFT = 10,
 };
+
+// The memory -scensus auto leaves to the system and other programs, as the
+// tables -wmp, -wit and -rit auto choose do.
+#define CENSUS_ROLLOUT_MEMORY_RESERVE_BYTES 1000000000ULL
+
+// Whether the census can steer the game's rollouts: a classic game whose
+// players share a word graph and leaves, since the census reads the first
+// player's, in an alphabet a census lattice holds.
+bool census_rollout_supports(const Game *game);
+
+// The memory, in bytes, that the census of a sim of number_of_candidates
+// candidates from the game's position takes on number_of_threads threads,
+// estimated from above: its leave and scratch tables, a table for the
+// position and each candidate, and each worker's cache of the position's
+// anchors. 0 if census_rollout_supports does not hold.
+uint64_t census_rollout_memory_bytes(const Game *game, int number_of_threads,
+                                     int number_of_candidates);
+
+// Whether a census of census_bytes fits in this machine's memory, as
+// -scensus auto decides: within a quarter of physical_bytes, and within
+// available_bytes less a reserve of CENSUS_ROLLOUT_MEMORY_RESERVE_BYTES for
+// the system and other programs. A negative available_bytes (where it cannot
+// be read) leaves the quarter alone.
+bool census_rollout_fits_in_memory(uint64_t census_bytes,
+                                   uint64_t physical_bytes,
+                                   int64_t available_bytes);
+
+// For -scensus auto: whether the census of this sim fits in this machine's
+// memory, from what census_rollout_supports, census_rollout_memory_bytes and
+// census_rollout_fits_in_memory say, held_bytes being what a census already
+// holds for the sim (which it reuses).
+bool census_rollout_auto_fits(const Game *game, int number_of_threads,
+                              int number_of_candidates, uint64_t held_bytes);
+
+// For -scensus auto: whether the candidates' tables are worth building.
+// Their entries are predicted from the position's table, at its root_entries
+// per root_anchors for each of the candidate_anchors their tables are built
+// for, and they are worth building when that takes less time than steering
+// saves in rollouts rollouts of plies plies, counting up to
+// CENSUS_ROLLOUT_AUTO_PAYING_PLIES plies of each.
+bool census_rollout_build_pays(uint64_t root_entries, int root_anchors,
+                               int candidate_anchors, uint64_t rollouts,
+                               int plies);
+
+// For -scensus auto, before building anything: whether the candidates' tables
+// may be worth building (see census_rollout_build_pays), from the fewest
+// entries they are likely to hold, one for every
+// 2^CENSUS_ROLLOUT_AUTO_FEWEST_ENTRIES_SHIFT of the full_racks the unseen
+// letters make, in each of the candidate_anchors.
+bool census_rollout_build_may_pay(uint64_t full_racks, int candidate_anchors,
+                                  uint64_t rollouts, int plies);
 
 // The census of one sim at a time: built by census_rollout_prepare, then only
 // read by the sim's workers.
@@ -50,6 +113,19 @@ void census_rollout_destroy(CensusRollout *census);
 void census_rollout_prepare(CensusRollout *census, const Game *game,
                             const MoveList *candidates);
 
+// For -scensus auto: census_rollout_prepare when the build pays for itself.
+// For a sim of at least rollouts rollouts of plies plies, it builds the
+// position's table if census_rollout_build_may_pay holds, then the
+// candidates' if census_rollout_build_pays holds. Returns whether it built
+// them; if not, the census steers none of the sim's rollouts.
+bool census_rollout_prepare_if_it_pays(CensusRollout *census, const Game *game,
+                                       const MoveList *candidates,
+                                       uint64_t rollouts, int plies);
+
+// The memory, in bytes, that a census holds: what census_rollout_memory_bytes
+// estimates, as allocated.
+uint64_t census_rollout_held_bytes(const CensusRollout *census);
+
 // A sim worker's state: what its rollouts read and remember, so that workers
 // on different threads share nothing they write. A worker serves any census;
 // it forgets what it remembered when the census it is given prepares a new
@@ -58,6 +134,7 @@ typedef struct CensusRolloutWorker CensusRolloutWorker;
 
 CensusRolloutWorker *census_rollout_worker_create(void);
 void census_rollout_worker_destroy(CensusRolloutWorker *worker);
+uint64_t census_rollout_worker_held_bytes(const CensusRolloutWorker *worker);
 
 // In a rollout, after its candidate is played: the census board the
 // rollout's generations are steered from.

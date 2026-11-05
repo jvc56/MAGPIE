@@ -136,6 +136,10 @@ double sim_results_get_utility_w_spread(const SimResults *sim_results);
 uint64_t sim_results_get_num_infer_leaves(const SimResults *sim_results);
 void sim_results_set_num_infer_leaves(SimResults *sim_results,
                                       uint64_t num_infer_leaves);
+// Whether the census steered the last sim's rollouts (see -scensus).
+bool sim_results_get_census_rollout(const SimResults *sim_results);
+void sim_results_set_census_rollout(SimResults *sim_results,
+                                    bool census_rollout);
 
 void sim_results_lock_simmed_plays(SimResults *sim_results);
 void sim_results_unlock_simmed_plays(SimResults *sim_results);

@@ -3,6 +3,7 @@
 #include "../compat/cpthread.h"
 #include "../compat/cpthread_defs.h"
 #include "../compat/memory_info.h"
+#include "../def/bai_defs.h"
 #include "../def/game_defs.h"
 #include "../def/rack_defs.h"
 #include "../ent/alias_method.h"
@@ -855,20 +856,80 @@ void rv_sim_destroy(RandomVariables *rvs) {
   free(simmer);
 }
 
+// Frees the census and its workers, which a sim without the census does not
+// read, so that they do not hold their memory through it.
+static void simmer_release_census_rollout(Simmer *simmer) {
+  census_rollout_destroy(simmer->census_rollout);
+  simmer->census_rollout = NULL;
+  for (int thread_index = 0; thread_index < simmer->num_threads;
+       thread_index++) {
+    SimmerWorker *simmer_worker = simmer->workers[thread_index];
+    census_rollout_worker_destroy(simmer_worker->census_rollout_worker);
+    simmer_worker->census_rollout_worker = NULL;
+  }
+}
+
+uint64_t rv_sim_census_rollout_held_bytes(const RandomVariables *rvs) {
+  const Simmer *simmer = (const Simmer *)rvs->data;
+  uint64_t bytes = census_rollout_held_bytes(simmer->census_rollout);
+  for (int thread_index = 0; thread_index < simmer->num_threads;
+       thread_index++) {
+    bytes += census_rollout_worker_held_bytes(
+        simmer->workers[thread_index]->census_rollout_worker);
+  }
+  return bytes;
+}
+
+// The fewest rollouts the sim plays, short of a time limit or a stop: its
+// sample limit without a stopping threshold, and otherwise its sample minimum
+// for every play, up to the limit. A bag-cycled sample is a cycle of
+// draws_per_sample rollouts.
+static uint64_t simmer_min_rollouts(const SimArgs *sim_args) {
+  const BAIOptions *bai_options = &sim_args->bai_options;
+  uint64_t samples = bai_options->sample_limit;
+  if (bai_options->threshold != BAI_THRESHOLD_NONE) {
+    const uint64_t minimum_samples =
+        (uint64_t)move_list_get_count(sim_args->move_list) *
+        bai_options->sample_minimum;
+    if (minimum_samples < samples) {
+      samples = minimum_samples;
+    }
+  }
+  if (bai_options->draws_per_sample > 1) {
+    samples *= bai_options->draws_per_sample;
+  }
+  return samples;
+}
+
 // At the start of a sim steered by the census: the census of its position and
 // candidates, built on the sim's threads, and a census worker for each of its
-// workers.
+// workers. Under -scensus auto, the census steers the sim only when its
+// fewest rollouts pay for the candidates' tables; when they do not, it keeps
+// what it holds for a later sim. A sim without the census releases it.
 static void simmer_prepare_census_rollout(Simmer *simmer,
                                           const SimArgs *sim_args) {
   simmer->use_census_rollout = sim_args->use_census_rollout;
   if (!simmer->use_census_rollout) {
+    simmer_release_census_rollout(simmer);
+    sim_results_set_census_rollout(simmer->sim_results, false);
     return;
   }
   if (simmer->census_rollout == NULL) {
     simmer->census_rollout = census_rollout_create(simmer->num_threads);
   }
-  census_rollout_prepare(simmer->census_rollout, sim_args->game,
-                         sim_args->move_list);
+  if (sim_args->census_rollout_auto) {
+    simmer->use_census_rollout = census_rollout_prepare_if_it_pays(
+        simmer->census_rollout, sim_args->game, sim_args->move_list,
+        simmer_min_rollouts(sim_args), sim_args->num_plies);
+  } else {
+    census_rollout_prepare(simmer->census_rollout, sim_args->game,
+                           sim_args->move_list);
+  }
+  sim_results_set_census_rollout(simmer->sim_results,
+                                 simmer->use_census_rollout);
+  if (!simmer->use_census_rollout) {
+    return;
+  }
   for (int thread_index = 0; thread_index < simmer->num_threads;
        thread_index++) {
     SimmerWorker *simmer_worker = simmer->workers[thread_index];

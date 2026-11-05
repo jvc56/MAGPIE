@@ -276,7 +276,7 @@ bool string_builder_add_sim_stats_with_display_lock(
           ? (double)sim_results_get_node_count(sim_results) / elapsed_time
           : 0.0;
 
-  StringGrid *summary_sg = string_grid_create(7, 2, 1);
+  StringGrid *summary_sg = string_grid_create(8, 2, 1);
 
   curr_row = 0;
 
@@ -307,6 +307,13 @@ bool string_builder_add_sim_stats_with_display_lock(
       summary_sg, curr_row, 1,
       get_formatted_string("%" PRIu64,
                            sim_results_get_num_infer_leaves(sim_results)));
+  curr_row++;
+
+  string_grid_set_cell(summary_sg, curr_row, 0, string_duplicate("Census:"));
+  string_grid_set_cell(
+      summary_sg, curr_row, 1,
+      string_duplicate(sim_results_get_census_rollout(sim_results) ? "on"
+                                                                   : "off"));
   curr_row++;
 
   string_grid_set_cell(summary_sg, curr_row, 0, string_duplicate("Wp Cutoff:"));
