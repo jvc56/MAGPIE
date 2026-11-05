@@ -219,6 +219,43 @@ static bool badge_opens_menu(const TuiGameState *state, uint32_t key) {
   }
 }
 
+// Opens the history-cell editor on entry `target` (MOVE field, or RACK for
+// `key` Down outside play-vs-computer) and parses its buffers. Caller holds
+// state->mutex.
+static void open_history_editor(TuiGameState *state, int target, uint32_t key) {
+  const TuiHistoryEntry *e = &state->history[target];
+  // On the pending entry, seed the buffers only when nothing has
+  // been typed yet — preserves any in-flight text the user had left
+  // in the buffer. A committed entry always opens on its stored text.
+  if (state->edit_move_len == 0 || !e->pending) {
+    tui_game_state_seed_edit_move(state, e->move_str);
+  }
+  if (state->edit_rack_len == 0 || !e->pending) {
+    (void)snprintf(state->edit_rack_buf, sizeof(state->edit_rack_buf), "%s",
+                   e->rack_str);
+    state->edit_rack_len = (int)strlen(state->edit_rack_buf);
+    state->edit_rack_cursor = state->edit_rack_len;
+    // Committed rack text on the entry is treated as
+    // user-authored: don't snap it back to "match the
+    // move's inferred letters" on the next keystroke.
+    state->edit_rack_user_modified = e->rack_str[0] != '\0';
+  }
+  if (!e->pending) {
+    state->edit_rack_carryover[0] = '\0';
+  }
+  state->edit_history_idx = target;
+  // ↓ lands on the RACK row (mirrors the inside-edit
+  // semantics where ↓ in MOVE switches to RACK). Everything
+  // else opens the MOVE field. In play-vs-computer the rack
+  // row is read-only (racks come from the bag), so ↓ opens
+  // MOVE like everything else.
+  state->edit_field =
+      (key == NCKEY_DOWN && state->app_mode != TUI_APP_MODE_PLAY_VS_COMPUTER)
+          ? TUI_EDIT_FIELD_RACK
+          : TUI_EDIT_FIELD_MOVE;
+  tui_game_state_parse_edit_buf(state);
+}
+
 bool tui_input_game(TuiGameState *state, TuiUiState *ui, TuiSession *session,
                     uint32_t key, ncinput input) {
   // Opening the history-cell editor from the History cursor: Enter on
@@ -234,38 +271,7 @@ bool tui_input_game(TuiGameState *state, TuiUiState *ui, TuiSession *session,
       (state->history[state->history_cursor].pending ? pending_open_key
                                                      : enter_key)) {
     pthread_mutex_lock(&state->mutex);
-    const int target = state->history_cursor;
-    const TuiHistoryEntry *e = &state->history[target];
-    // On the pending entry, seed the buffers only when nothing has
-    // been typed yet — preserves any in-flight text the user had left
-    // in the buffer. A committed entry always opens on its stored text.
-    if (state->edit_move_len == 0 || !e->pending) {
-      tui_game_state_seed_edit_move(state, e->move_str);
-    }
-    if (state->edit_rack_len == 0 || !e->pending) {
-      (void)snprintf(state->edit_rack_buf, sizeof(state->edit_rack_buf), "%s",
-                     e->rack_str);
-      state->edit_rack_len = (int)strlen(state->edit_rack_buf);
-      state->edit_rack_cursor = state->edit_rack_len;
-      // Committed rack text on the entry is treated as
-      // user-authored: don't snap it back to "match the
-      // move's inferred letters" on the next keystroke.
-      state->edit_rack_user_modified = e->rack_str[0] != '\0';
-    }
-    if (!e->pending) {
-      state->edit_rack_carryover[0] = '\0';
-    }
-    state->edit_history_idx = target;
-    // ↓ lands on the RACK row (mirrors the inside-edit
-    // semantics where ↓ in MOVE switches to RACK). Everything
-    // else opens the MOVE field. In play-vs-computer the rack
-    // row is read-only (racks come from the bag), so ↓ opens
-    // MOVE like everything else.
-    state->edit_field =
-        (key == NCKEY_DOWN && state->app_mode != TUI_APP_MODE_PLAY_VS_COMPUTER)
-            ? TUI_EDIT_FIELD_RACK
-            : TUI_EDIT_FIELD_MOVE;
-    tui_game_state_parse_edit_buf(state);
+    open_history_editor(state, state->history_cursor, key);
     pthread_mutex_unlock(&state->mutex);
     return true;
   }
@@ -326,6 +332,24 @@ bool tui_input_game(TuiGameState *state, TuiUiState *ui, TuiSession *session,
     state->slash_len = 0;
     state->slash_cursor = 0;
     state->slash_buf[0] = '\0';
+    pthread_mutex_unlock(&state->mutex);
+  } else if (key == '-' && !state->slash_active &&
+             state->app_mode != TUI_APP_MODE_WATCH) {
+    // Global "-" starts an exchange from any panel: focuses History on
+    // the turn being entered (the pending last one, when it's the user's
+    // to enter) and opens its MOVE field holding "-", ready for tiles.
+    pthread_mutex_lock(&state->mutex);
+    const int target = state->history_count - 1;
+    if (target >= 0 && state->history[target].pending &&
+        tui_history_entry_editable(state, target)) {
+      state->focused_panel = TUI_FOCUS_HISTORY;
+      state->history_cursor = target;
+      open_history_editor(state, target, key);
+      (void)snprintf(state->edit_move_buf, sizeof(state->edit_move_buf), "-");
+      state->edit_move_len = 1;
+      state->edit_move_cursor = 1;
+      tui_game_state_parse_edit_buf(state);
+    }
     pthread_mutex_unlock(&state->mutex);
   } else if ((key == 'c' || key == 'C') && !state->slash_active) {
     // Global copy hotkey: current position → clipboard as CGP.

@@ -87,6 +87,13 @@ TuiTypedLetterAction tui_move_entry_resolve_tile(const TuiGameState *gs, int ml,
   if (gs->ld == NULL || ml <= 0) {
     return TUI_TYPED_LETTER_REJECT;
   }
+  // An exchange's letters ("ex AB", "- AB") are tiles going back to the
+  // bag: never blanks, with or without Shift, and not checked against the
+  // rack here (the parser rejects tiles the rack doesn't hold).
+  if (tui_game_state_edit_move_is_exchange(gs)) {
+    tui_tile_token(gs->ld, ml, /*blank=*/false, out_token, token_size);
+    return TUI_TYPED_LETTER_PLACE;
+  }
   const bool pvc = gs->app_mode == TUI_APP_MODE_PLAY_VS_COMPUTER;
   // Occupied landing square: a matching tile is playthrough spelling
   // (take the BOARD tile's notation case — lowercase when it's a
@@ -714,6 +721,18 @@ void tui_tag_move_owners(Board *board, const Move *move, int player_idx) {
 // playthrough-letter lookup read the pre-play board.
 static void format_history_move(const TuiGameState *gs, const Move *move,
                                 char *out, size_t out_size) {
+  if (move_get_type(move) == GAME_EVENT_EXCHANGE) {
+    // "-ABCD", the compact form the bot's exchanges take too.
+    StringBuilder *sb = string_builder_create();
+    string_builder_add_char(sb, '-');
+    for (int i = 0; i < move_get_tiles_played(move); i++) {
+      string_builder_add_user_visible_letter(sb, gs->ld,
+                                             move_get_tile(move, i));
+    }
+    (void)snprintf(out, out_size, "%s", string_builder_peek(sb));
+    string_builder_destroy(sb);
+    return;
+  }
   const Board *brd = game_get_board(gs->game);
   Move display_move;
   move_copy(&display_move, move);
@@ -787,10 +806,12 @@ bool tui_pvc_commit_preview_move(TuiGameState *gs) {
     return false;
   }
   tui_game_state_parse_edit_buf(gs);
+  const bool placement = gs->edit_move_kind == TUI_EDIT_MOVE_KIND_PLACEMENT;
   if (!gs->edit_preview_move_valid || gs->edit_preview_move == NULL ||
       gs->edit_move_score < 0 ||
-      gs->edit_move_kind != TUI_EDIT_MOVE_KIND_PLACEMENT) {
-    return false; // not a legal placement yet — keep editing
+      (!placement && gs->edit_move_kind != TUI_EDIT_MOVE_KIND_EXCHANGE &&
+       gs->edit_move_kind != TUI_EDIT_MOVE_KIND_PASS)) {
+    return false; // not a legal move yet — keep editing
   }
   const int idx = gs->edit_history_idx;
   if (idx < 0 || idx >= gs->history_count) {
@@ -809,11 +830,11 @@ bool tui_pvc_commit_preview_move(TuiGameState *gs) {
 
   // Word validity per the session's challenge rule. The engine's
   // FormedWords lists every word the play makes; any invalid one
-  // makes the whole play a phony.
+  // makes the whole play a phony. Exchanges and passes form none.
   bool phony = false;
   char invalid_words[48];
   invalid_words[0] = '\0';
-  if (gs->app_mode == TUI_APP_MODE_PLAY_VS_COMPUTER) {
+  if (placement) {
     const Player *player = game_get_player(gs->game, player_idx);
     FormedWords *fw =
         formed_words_create(game_get_board(gs->game), gs->edit_preview_move);
@@ -895,7 +916,11 @@ bool tui_pvc_commit_preview_move(TuiGameState *gs) {
   const int post =
       equity_to_int(player_get_score(game_get_player(gs->game, player_idx)));
   int bonus = 0;
-  if (!phony && game_over(gs->game)) {
+  // Only going out earns the opponent's rack; a game ended by
+  // scoreless turns (an exchange or pass can end one) already has
+  // the engine's rack penalties in both scores.
+  if (!phony && game_over(gs->game) &&
+      game_get_game_end_reason(gs->game) == GAME_END_REASON_STANDARD) {
     const Rack *opp =
         player_get_rack(game_get_player(gs->game, 1 - player_idx));
     if (opp != NULL && !rack_is_empty(opp)) {
