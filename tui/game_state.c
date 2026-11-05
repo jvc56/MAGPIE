@@ -282,6 +282,7 @@ bool tui_game_state_init(const char *lexicon, uint64_t seed, bool load_rit,
   out_state->premium_labels = TUI_PREMIUM_LABELS_UPPERCASE;
   out_state->board_scale = 1;
   out_state->antialias = true;
+  out_state->sound = true;
   out_state->score_subscripts = TUI_SCORE_SUBSCRIPTS_OFF;
   out_state->rack_sort = TUI_RACK_SORT_ALPHA;
   atomic_store(&out_state->render_version, (uint64_t)1);

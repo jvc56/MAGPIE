@@ -20,6 +20,7 @@
 #include "bot_worker.h"
 #include "config.h"
 #include "game_state.h"
+#include "sound.h"
 #include "tile_input.h"
 #include "tui_history_edit.h"
 #include <stdatomic.h>
@@ -887,6 +888,9 @@ bool tui_pvc_commit_preview_move(TuiGameState *gs) {
                    invalid_words);
     (void)snprintf(e->void_refused, sizeof(e->void_refused), "%s",
                    invalid_words);
+    if (gs->sound) {
+      tui_sound_play(TUI_SOUND_PHONY, 0);
+    }
     clock_gettime(CLOCK_MONOTONIC, &gs->notice_expires_at);
     gs->notice_expires_at.tv_sec += 4;
     tui_board_builder_cancel(gs);
@@ -973,6 +977,9 @@ bool tui_pvc_commit_preview_move(TuiGameState *gs) {
   if (phony) {
     (void)snprintf(gs->notice_buf, sizeof(gs->notice_buf),
                    "challenged off (%s) - turn lost", invalid_words);
+    if (gs->sound) {
+      tui_sound_play(TUI_SOUND_PHONY, 0);
+    }
     clock_gettime(CLOCK_MONOTONIC, &gs->notice_expires_at);
     gs->notice_expires_at.tv_sec += 4;
   }
