@@ -1437,6 +1437,38 @@ static void add_pat_help_arg(arg_token_t arg_token, const char **usages,
   }
 }
 
+// The help for the inference options (see help_entry_fill).
+static void add_inference_help_arg(arg_token_t arg_token, const char **usages,
+                                   const char **examples, const char **text) {
+  switch (arg_token) {
+  case ARG_TOKEN_INFERENCE_TEMP:
+  case ARG_TOKEN_P1_INFERENCE_TEMP:
+  case ARG_TOKEN_P2_INFERENCE_TEMP:
+    usages[0] = "<temperature>";
+    examples[0] = "2.0";
+    *text = "Sets the softmax inference temperature in points (default 8; zero "
+            "disables weighting).";
+    break;
+  case ARG_TOKEN_INFERENCE_MARGIN:
+    usages[0] = "<inference_equity_margin>";
+    examples[0] = "1";
+    examples[1] = "2.4";
+    examples[2] = "10.0";
+    *text = "Specifies the maximum equity loss for an opponent's play when "
+            "running an inference.";
+    break;
+  case ARG_TOKEN_P1_INFERENCE_MARGIN:
+  case ARG_TOKEN_P2_INFERENCE_MARGIN:
+    usages[0] = "<inference_equity_margin>";
+    *text = "Specifies the inference margin for player 1 or 2 during "
+            "autoplay. That is the maximum equity loss for an opponent's play "
+            "when running an inference.";
+    break;
+  default:
+    break;
+  }
+}
+
 // The help for the players' autoplay endgame and pre-endgame options (see
 // help_entry_fill).
 static void add_player_solver_help_arg(arg_token_t arg_token,
@@ -2586,19 +2618,10 @@ static void help_entry_fill(const Config *config, int token,
     case ARG_TOKEN_INFERENCE_TEMP:
     case ARG_TOKEN_P1_INFERENCE_TEMP:
     case ARG_TOKEN_P2_INFERENCE_TEMP:
-      usages[0] = "<temperature>";
-      examples[0] = "2.0";
-      text =
-          "Sets the softmax inference temperature in points (default 8; zero "
-          "disables weighting).";
-      break;
     case ARG_TOKEN_INFERENCE_MARGIN:
-      usages[0] = "<inference_equity_margin>";
-      examples[0] = "1";
-      examples[1] = "2.4";
-      examples[2] = "10.0";
-      text = "Specifies the maximum equity loss for an opponent's play when "
-             "running an inference.";
+    case ARG_TOKEN_P1_INFERENCE_MARGIN:
+    case ARG_TOKEN_P2_INFERENCE_MARGIN:
+      add_inference_help_arg(arg_token, usages, examples, &text);
       break;
     case ARG_TOKEN_MOVEGEN_MARGIN:
       usages[0] = "<movegen_equity_margin>";
@@ -3054,13 +3077,6 @@ static void help_entry_fill(const Config *config, int token,
       usages[0] = "<sampling_rule>";
       text = "Specifies the BAI sampling rule for simulation for player 1 or 2 "
              "during autoplay.";
-      break;
-    case ARG_TOKEN_P1_INFERENCE_MARGIN:
-    case ARG_TOKEN_P2_INFERENCE_MARGIN:
-      usages[0] = "<inference_equity_margin>";
-      text = "Specifies the inference margin for player 1 or 2 during "
-             "autoplay. That is the maximum equity loss for an opponent's play "
-             "when running an inference.";
       break;
     case ARG_TOKEN_P1_ENDGAME_PLIES:
     case ARG_TOKEN_P2_ENDGAME_PLIES:
