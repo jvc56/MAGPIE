@@ -13,6 +13,7 @@ void stat_reset(Stat *stat);
 
 uint64_t stat_get_num_unique_samples(const Stat *stat);
 uint64_t stat_get_num_samples(const Stat *stat);
+double stat_get_total_weight(const Stat *stat);
 double stat_get_mean(const Stat *stat);
 double stat_get_variance(const Stat *stat);
 double stat_get_stdev(const Stat *stat);
@@ -20,6 +21,8 @@ double stat_get_sem(const Stat *stat);
 double stat_get_margin_of_error(const Stat *stat, double zval);
 
 void stat_push(Stat *stat, double value, uint64_t num_samples);
+void stat_push_weighted(Stat *stat, double value, uint64_t num_samples,
+                        double weight);
 
 void stats_combine(Stat **stats, int number_of_stats, Stat *combined_stat);
 

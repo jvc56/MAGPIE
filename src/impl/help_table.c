@@ -72,6 +72,7 @@ static const HelpOptionRow sim_rows[] = {
 
 static const HelpOptionRow inference_rows[] = {
     HELP_PLAYER_ROW(INFERENCE_MARGIN, INFERENCE_MARGIN),
+    HELP_PLAYER_ROW(INFERENCE_TEMP, INFERENCE_TEMP),
 };
 
 static const HelpOptionRow endgame_rows[] = {

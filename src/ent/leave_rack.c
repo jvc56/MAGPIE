@@ -4,6 +4,7 @@
 #include "encoded_rack.h"
 #include "equity.h"
 #include "rack.h"
+#include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -12,6 +13,7 @@ struct LeaveRack {
   EncodedRack exchanged;
   int draws;
   Equity equity;
+  double weight;
 };
 
 // Used by the inference_results
@@ -41,6 +43,10 @@ int leave_rack_get_draws(const LeaveRack *leave_rack) {
 
 Equity leave_rack_get_equity(const LeaveRack *leave_rack) {
   return leave_rack->equity;
+}
+
+double leave_rack_get_weight(const LeaveRack *leave_rack) {
+  return leave_rack->weight;
 }
 
 int leave_rack_list_get_count(const LeaveRackList *leave_rack_list) {
@@ -131,10 +137,22 @@ void leave_rack_list_reset(LeaveRackList *lrl, int capacity) {
   lrl->capacity = capacity;
 }
 
+static inline bool leave_rack_has_less_weight(const LeaveRack *rack_a,
+                                              const LeaveRack *rack_b) {
+  if (rack_a->weight < rack_b->weight) {
+    return true;
+  }
+  if (rack_a->weight > rack_b->weight) {
+    return false;
+  }
+  return rack_a->draws < rack_b->draws;
+}
+
 void up_heapify_leave_rack(LeaveRackList *lrl, int index) {
   LeaveRack *temp;
   int parent_node = (index - 1) / 2;
-  if (lrl->leave_racks[parent_node]->draws > lrl->leave_racks[index]->draws) {
+  if (leave_rack_has_less_weight(lrl->leave_racks[index],
+                                 lrl->leave_racks[parent_node])) {
     temp = lrl->leave_racks[parent_node];
     lrl->leave_racks[parent_node] = lrl->leave_racks[index];
     lrl->leave_racks[index] = temp;
@@ -155,14 +173,14 @@ void down_heapify_leave_rack(LeaveRackList *lrl, int parent_node) {
     right = -1;
   }
 
-  if (left != -1 &&
-      lrl->leave_racks[left]->draws < lrl->leave_racks[parent_node]->draws) {
+  if (left != -1 && leave_rack_has_less_weight(lrl->leave_racks[left],
+                                               lrl->leave_racks[parent_node])) {
     min = left;
   } else {
     min = parent_node;
   }
-  if (right != -1 &&
-      lrl->leave_racks[right]->draws < lrl->leave_racks[min]->draws) {
+  if (right != -1 && leave_rack_has_less_weight(lrl->leave_racks[right],
+                                                lrl->leave_racks[min])) {
     min = right;
   }
 
@@ -196,9 +214,20 @@ void leave_rack_list_insert_leave_rack(const LeaveRack *leave_rack,
 void leave_rack_list_insert_rack(const Rack *leave, const Rack *exchanged,
                                  int number_of_draws_for_leave, Equity equity,
                                  LeaveRackList *lrl) {
+  leave_rack_list_insert_weighted_rack(leave, exchanged,
+                                       number_of_draws_for_leave, equity,
+                                       (double)number_of_draws_for_leave, lrl);
+}
+
+void leave_rack_list_insert_weighted_rack(const Rack *leave,
+                                          const Rack *exchanged,
+                                          int number_of_draws_for_leave,
+                                          Equity equity, double weight,
+                                          LeaveRackList *lrl) {
   rack_encode(leave, &lrl->spare_leave_rack->leave);
   lrl->spare_leave_rack->draws = number_of_draws_for_leave;
   lrl->spare_leave_rack->equity = equity;
+  lrl->spare_leave_rack->weight = weight;
   if (exchanged && !rack_is_empty(exchanged)) {
     rack_encode(exchanged, &lrl->spare_leave_rack->exchanged);
   }

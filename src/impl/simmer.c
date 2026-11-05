@@ -1,5 +1,6 @@
 #include "simmer.h"
 
+#include "../compat/ctime.h"
 #include "../def/equity_defs.h"
 #include "../def/game_defs.h"
 #include "../def/inference_defs.h"
@@ -167,8 +168,12 @@ void simulate(SimArgs *sim_args, SimCtx **sim_ctx, SimResults *sim_results,
 
   uint64_t num_infer_leaves = 0;
   if (sim_args->use_inference) {
+    Timer inference_timer;
+    ctimer_start(&inference_timer);
     infer(&sim_args->inference_args, &((*sim_ctx)->inference_ctx),
           sim_args->inference_results, error_stack);
+    inference_results_set_elapsed_seconds(
+        sim_args->inference_results, ctimer_elapsed_seconds(&inference_timer));
     if (!error_stack_is_empty(error_stack) ||
         thread_control_get_status(sim_args->thread_control) !=
             THREAD_CONTROL_STATUS_STARTED) {

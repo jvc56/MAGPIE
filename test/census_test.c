@@ -8,6 +8,7 @@
 #include "../src/def/letter_distribution_defs.h"
 #include "../src/def/move_defs.h"
 #include "../src/def/rack_defs.h"
+#include "../src/ent/board.h"
 #include "../src/ent/dictionary_word.h"
 #include "../src/ent/equity.h"
 #include "../src/ent/game.h"
@@ -17,8 +18,10 @@
 #include "../src/ent/move.h"
 #include "../src/ent/player.h"
 #include "../src/ent/rack.h"
+#include "../src/ent/static_eval.h"
 #include "../src/ent/xoshiro.h"
 #include "../src/impl/census.h"
+#include "../src/impl/census_opening.h"
 #include "../src/impl/census_play_scores.h"
 #include "../src/impl/config.h"
 #include "../src/impl/kwg_maker.h"
@@ -372,11 +375,10 @@ typedef struct PlacedBest {
 // For random racks drawn from the board's unseen pool, play_scores[P] must be
 // the best score the move generator finds for a play placing exactly P, for
 // every P within the rack.
-static void assert_play_scores_match_movegen(Game *game,
-                                             const CensusLattice *lattice,
-                                             Equity *play_scores,
-                                             XoshiroPRNG *prng,
-                                             int number_of_racks) {
+static void
+assert_play_scores_match_movegen(Game *game, const CensusLattice *lattice,
+                                 Equity *play_scores, XoshiroPRNG *prng,
+                                 int number_of_racks, bool opening_adjusted) {
   const LetterDistribution *ld = game_get_ld(game);
   const int ld_size = ld_get_size(ld);
   const uint32_t size = census_lattice_get_size(lattice);
@@ -385,8 +387,13 @@ static void assert_play_scores_match_movegen(Game *game,
   for (uint32_t index = 0; index < size; index++) {
     play_scores[index] = CENSUS_UNPLAYABLE;
   }
+  _Atomic int next_unit;
+  atomic_init(&next_unit, 0);
   const uint64_t number_of_plays =
-      census_play_scores_build(game, lattice, unseen, play_scores);
+      opening_adjusted
+          ? census_opening_build_claimed(game, lattice, unseen, play_scores, 1,
+                                         &next_unit)
+          : census_play_scores_build(game, lattice, unseen, play_scores);
   assert(number_of_plays > 0);
 
   MachineLetter pool[200];
@@ -415,6 +422,12 @@ static void assert_play_scores_match_movegen(Game *game,
     for (int draw_idx = 0; draw_idx < RACK_SIZE; draw_idx++) {
       rack_add_letter(rack, pool[draw_idx]);
       rack_tally[pool[draw_idx]]++;
+    }
+    if (opening_adjusted && rack_idx < 2) {
+      rack_set_to_string(ld, rack, rack_idx == 0 ? "??AEIRS" : "AEEIIOU");
+      for (int ml = 0; ml < ld_size; ml++) {
+        rack_tally[ml] = (uint8_t)rack_get_letter(rack, ml);
+      }
     }
     const MoveGenArgs move_gen_args = {
         .game = game,
@@ -445,6 +458,13 @@ static void assert_play_scores_match_movegen(Game *game,
         placed_tally[get_is_blanked(tile) ? BLANK_MACHINE_LETTER : tile]++;
       }
       const uint32_t rank = census_lattice_rank(lattice, placed_tally);
+      Equity score = move_get_score(move);
+      if (opening_adjusted) {
+        const Board *board = game_get_board(game);
+        score += placement_adjustment(
+            ld, move, board_get_opening_move_word_penalties(board),
+            board_get_opening_move_letter_penalties(board), 0);
+      }
       int found_idx = 0;
       while (found_idx < number_of_placed &&
              best_by_placed[found_idx].rank != rank) {
@@ -452,9 +472,9 @@ static void assert_play_scores_match_movegen(Game *game,
       }
       if (found_idx == number_of_placed) {
         best_by_placed[number_of_placed++] =
-            (PlacedBest){.rank = rank, .score = move_get_score(move)};
-      } else if (move_get_score(move) > best_by_placed[found_idx].score) {
-        best_by_placed[found_idx].score = move_get_score(move);
+            (PlacedBest){.rank = rank, .score = score};
+      } else if (score > best_by_placed[found_idx].score) {
+        best_by_placed[found_idx].score = score;
       }
     }
     // every nonempty sub-multiset of the rack, as a mixed-radix counter over
@@ -498,8 +518,11 @@ static void test_play_scores_match_movegen(void) {
   for (size_t cgp_idx = 0; cgp_idx < sizeof(cgps) / sizeof(cgps[0]);
        cgp_idx++) {
     load_cgp_or_die(game, cgps[cgp_idx]);
-    assert_play_scores_match_movegen(game, lattice, play_scores, prng, 40);
+    assert_play_scores_match_movegen(game, lattice, play_scores, prng, 40,
+                                     false);
   }
+  load_cgp_or_die(game, EMPTY_CGP);
+  assert_play_scores_match_movegen(game, lattice, play_scores, prng, 40, true);
   prng_destroy(prng);
   free(play_scores);
   census_lattice_destroy(lattice);
@@ -611,6 +634,7 @@ typedef struct ClaimedBuildThread {
   const uint8_t *unseen_tally;
   Equity *play_scores;
   int second_tile_groups;
+  bool opening_adjusted;
   _Atomic int *next_unit;
   uint64_t number_of_plays;
   cpthread_t cpthread_id;
@@ -618,6 +642,12 @@ typedef struct ClaimedBuildThread {
 
 static void *claimed_build_thread(void *uncasted_thread) {
   ClaimedBuildThread *thread = (ClaimedBuildThread *)uncasted_thread;
+  if (thread->opening_adjusted) {
+    thread->number_of_plays = census_opening_build_claimed(
+        thread->game, thread->lattice, thread->unseen_tally,
+        thread->play_scores, thread->second_tile_groups, thread->next_unit);
+    return NULL;
+  }
   thread->number_of_plays = census_play_scores_build_claimed(
       thread->game, thread->lattice, thread->unseen_tally, thread->play_scores,
       thread->second_tile_groups, thread->next_unit, CENSUS_ALL_LANES);
@@ -635,8 +665,8 @@ static void test_play_scores_claimed_units_match_serial(void) {
   const uint32_t size = census_lattice_get_size(lattice);
   Equity *serial = malloc_or_die(sizeof(Equity) * size);
   Equity *shared = malloc_or_die(sizeof(Equity) * size);
-  const char *cgps[] = {EMPTY_CGP, DOUG_V_EMELY_CGP, VS_ANDY_CGP, VS_FRENTZ_CGP,
-                        NOAH_VS_PETER_CGP};
+  const char *cgps[] = {EMPTY_CGP,     DOUG_V_EMELY_CGP,  VS_ANDY_CGP,
+                        VS_FRENTZ_CGP, NOAH_VS_PETER_CGP, EMPTY_CGP};
   // up to one group for each letter, as an inference splits its builds
   const int groups[] = {1, 2, 8, num_letters};
   for (size_t cgp_idx = 0; cgp_idx < sizeof(cgps) / sizeof(cgps[0]);
@@ -647,8 +677,14 @@ static void test_play_scores_claimed_units_match_serial(void) {
     for (uint32_t index = 0; index < size; index++) {
       serial[index] = CENSUS_UNPLAYABLE;
     }
+    const bool opening_adjusted = cgp_idx + 1 == sizeof(cgps) / sizeof(cgps[0]);
+    _Atomic int serial_unit;
+    atomic_init(&serial_unit, 0);
     const uint64_t serial_plays =
-        census_play_scores_build(game, lattice, unseen, serial);
+        opening_adjusted
+            ? census_opening_build_claimed(game, lattice, unseen, serial, 1,
+                                           &serial_unit)
+            : census_play_scores_build(game, lattice, unseen, serial);
     for (size_t group_idx = 0; group_idx < sizeof(groups) / sizeof(groups[0]);
          group_idx++) {
       _Atomic int next_unit;
@@ -665,6 +701,7 @@ static void test_play_scores_claimed_units_match_serial(void) {
             .unseen_tally = unseen,
             .play_scores = shared,
             .second_tile_groups = groups[group_idx],
+            .opening_adjusted = opening_adjusted,
             .next_unit = &next_unit,
         };
         cpthread_create(&threads[thread_idx].cpthread_id, claimed_build_thread,
