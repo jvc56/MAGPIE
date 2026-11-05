@@ -3,10 +3,13 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <string.h>
+#include <strings.h>
 
 static const TuiSlashCommand slash_commands[] = {
     {TUI_SLASH_COPY, "copy", "Copy current position to clipboard as CGP",
      "Copy position (CGP)"},
+    {TUI_SLASH_COPY_GCG, "copygcg",
+     "Copy the game so far to the clipboard as GCG", "Copy game (GCG)"},
     {TUI_SLASH_EXIT, "exit", "Quit MAGPIE TUI (alias for /quit)", NULL},
     {TUI_SLASH_KIBITZ, "gen", "Alias for /kibitz", NULL},
     {TUI_SLASH_KIBITZ, "generate", "Alias for /kibitz", NULL},
@@ -17,6 +20,8 @@ static const TuiSlashCommand slash_commands[] = {
     {TUI_SLASH_RESUME, "resume",
      "Continue the selected turn's saved analysis (finished games)",
      "Resume saved analysis"},
+    {TUI_SLASH_SAVE, "save", "Save the game as GCG: /save [file]",
+     "Save game (GCG)"},
     {TUI_SLASH_SET, "set", "Change a setting: /set <name> <value>", NULL},
     {TUI_SLASH_SETTINGS, "settings", "Open settings", NULL},
     {TUI_SLASH_SIM, "sim", "Simulate the selected turn (continues a saved sim)",
@@ -48,7 +53,7 @@ const TuiSlashCommand *tui_slash_commands(int *count) {
 bool tui_slash_command_matches(const TuiSlashCommand *cmd, const char *typed,
                                int len) {
   return (int)strlen(cmd->name) >= len &&
-         strncmp(cmd->name, typed, (size_t)len) == 0;
+         strncasecmp(cmd->name, typed, (size_t)len) == 0;
 }
 
 void tui_slash_split(const char *buf, int len, TuiSlashWords *words) {

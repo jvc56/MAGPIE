@@ -3,6 +3,7 @@
 #include "../src/ent/game.h"
 #include "../src/impl/cgp.h"
 #include "game_state.h"
+#include "gcg_export.h"
 #include <pthread.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -66,6 +67,15 @@ static void tui_copy_to_clipboard(const char *text) {
 // computer's tiles; once the game is over the full position is
 // copied. Takes gs->mutex itself, and releases it before writing the
 // clipboard so a slow pbcopy can't stall the bot or the renderer.
+void tui_copy_game_gcg(TuiGameState *gs) {
+  pthread_mutex_lock(&gs->mutex);
+  char *gcg = tui_gcg_export(gs);
+  tui_game_state_notice(gs, "Copied GCG");
+  pthread_mutex_unlock(&gs->mutex);
+  tui_copy_to_clipboard(gcg);
+  free(gcg);
+}
+
 void tui_copy_position_cgp(TuiGameState *gs) {
   pthread_mutex_lock(&gs->mutex);
   char *cgp = gs->game != NULL ? game_get_cgp(gs->game, true) : NULL;
