@@ -3,10 +3,14 @@
 #include "../src/compat/ctime.h"
 #include "../src/def/board_defs.h"
 #include "../src/def/equity_defs.h"
+#include "../src/def/letter_distribution_defs.h"
 #include "../src/def/move_defs.h"
+#include "../src/def/rack_defs.h"
+#include "../src/def/static_eval_defs.h"
 #include "../src/ent/bag.h"
 #include "../src/ent/game.h"
 #include "../src/ent/move.h"
+#include "../src/ent/rack.h"
 #include "../src/ent/sim_results.h"
 #include "../src/impl/census_rollout.h"
 #include "../src/impl/config.h"
@@ -38,6 +42,10 @@ enum {
   // The benchmark: its sims' plies and iterations, on one thread.
   CENSUS_ROLLOUT_BENCH_PLIES = 2,
   CENSUS_ROLLOUT_BENCH_ITERATIONS = 20000,
+  // The root cache key test's racks: of the blank and the first four letters,
+  // C(RACK_SIZE + 5, 5) of them, 792 at RACK_SIZE 7 and 1287 at 8.
+  CENSUS_ROLLOUT_TEST_KEY_TYPES = 5,
+  CENSUS_ROLLOUT_TEST_KEY_MAX_RACKS = 4096,
 };
 
 // The bags of the positions: a full one, where the census is built from the
@@ -315,7 +323,102 @@ static void test_census_rollout_refuses_pat(void) {
   config_destroy(config);
 }
 
+// The two words a root cache entry is keyed by.
+typedef struct RootCacheKey {
+  uint64_t key;
+  uint64_t check;
+} RootCacheKey;
+
+static int compare_root_cache_keys(const void *first, const void *second) {
+  const RootCacheKey *first_key = first;
+  const RootCacheKey *second_key = second;
+  if (first_key->key != second_key->key) {
+    return first_key->key < second_key->key ? -1 : 1;
+  }
+  if (first_key->check != second_key->check) {
+    return first_key->check < second_key->check ? -1 : 1;
+  }
+  return 0;
+}
+
+static void set_rack_counts(Rack *rack, const uint8_t *counts) {
+  rack_reset(rack);
+  for (int type_idx = 0; type_idx < CENSUS_ROLLOUT_TEST_KEY_TYPES; type_idx++) {
+    rack_add_letters(rack, (MachineLetter)type_idx, counts[type_idx]);
+  }
+}
+
+// No two of the racks of at most RACK_SIZE tiles of the blank and the first
+// four letters, in any bag class, share both of the root cache's words. A
+// class mixed in next to the blank's count once let a class and a blank count
+// trade off: class 2 with a blank and class 3 without, the other tiles the
+// same, shared both words, as did every even class and the next one.
+static void test_census_rollout_root_cache_keys(void) {
+  Rack *first = rack_create(MAX_ALPHABET_SIZE);
+  Rack *second = rack_create(MAX_ALPHABET_SIZE);
+  uint64_t first_key;
+  uint64_t first_check;
+  uint64_t second_key;
+  uint64_t second_check;
+  for (int bag_class = 0; bag_class + 1 < PEG_ADJUST_VALUES_LENGTH;
+       bag_class += 2) {
+    const uint8_t with_blank[CENSUS_ROLLOUT_TEST_KEY_TYPES] = {1, 2, 1, 1, 2};
+    const uint8_t without_blank[CENSUS_ROLLOUT_TEST_KEY_TYPES] = {0, 2, 1, 1,
+                                                                  2};
+    set_rack_counts(first, with_blank);
+    set_rack_counts(second, without_blank);
+    census_rollout_root_cache_key(bag_class, first, &first_key, &first_check);
+    census_rollout_root_cache_key(bag_class + 1, second, &second_key,
+                                  &second_check);
+    assert(first_key != second_key || first_check != second_check);
+  }
+
+  RootCacheKey *keys =
+      malloc_or_die(sizeof(RootCacheKey) * CENSUS_ROLLOUT_TEST_KEY_MAX_RACKS *
+                    PEG_ADJUST_VALUES_LENGTH);
+  int number_of_keys = 0;
+  uint8_t counts[CENSUS_ROLLOUT_TEST_KEY_TYPES] = {0};
+  while (true) {
+    int tiles = 0;
+    for (int type_idx = 0; type_idx < CENSUS_ROLLOUT_TEST_KEY_TYPES;
+         type_idx++) {
+      tiles += counts[type_idx];
+    }
+    if (tiles <= RACK_SIZE) {
+      set_rack_counts(first, counts);
+      for (int bag_class = 0; bag_class < PEG_ADJUST_VALUES_LENGTH;
+           bag_class++) {
+        assert(number_of_keys <
+               CENSUS_ROLLOUT_TEST_KEY_MAX_RACKS * PEG_ADJUST_VALUES_LENGTH);
+        RootCacheKey *entry = &keys[number_of_keys++];
+        census_rollout_root_cache_key(bag_class, first, &entry->key,
+                                      &entry->check);
+      }
+    }
+    // The next counts, odometer style, each at most RACK_SIZE.
+    int type_idx = 0;
+    while (type_idx < CENSUS_ROLLOUT_TEST_KEY_TYPES &&
+           counts[type_idx] == RACK_SIZE) {
+      counts[type_idx] = 0;
+      type_idx++;
+    }
+    if (type_idx == CENSUS_ROLLOUT_TEST_KEY_TYPES) {
+      break;
+    }
+    counts[type_idx]++;
+  }
+  qsort(keys, (size_t)number_of_keys, sizeof(RootCacheKey),
+        compare_root_cache_keys);
+  for (int key_idx = 1; key_idx < number_of_keys; key_idx++) {
+    assert(compare_root_cache_keys(&keys[key_idx - 1], &keys[key_idx]) != 0);
+  }
+  free(keys);
+  rack_destroy(second);
+  rack_destroy(first);
+}
+
 void test_census_rollout(void) {
+  test_census_rollout_root_cache_keys();
   test_census_rollout_moves_match_plain();
   test_census_rollout_steers_many_candidates();
   test_census_rollout_sim_matches_plain();
