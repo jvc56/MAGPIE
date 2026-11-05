@@ -178,6 +178,9 @@ typedef struct {
   bool sim_plies_set;
   int sim_candidates;
   bool sim_candidates_set;
+  // Whether sims steer their rollouts with a census of the position.
+  bool sim_census;
+  bool sim_census_set;
   // Spoiler-free History review.
   bool hide_spoilers;
   bool hide_spoilers_set;

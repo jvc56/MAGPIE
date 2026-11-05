@@ -134,6 +134,8 @@ bool tui_config_load(TuiConfig *config) {
   config->rack_sort_set = false;
   config->sim_plies_set = false;
   config->sim_candidates_set = false;
+  config->sim_census = true;
+  config->sim_census_set = false;
   config->hide_spoilers_set = false;
   config->auto_analyze_set = false;
   config->analysis_time_limit_set = false;
@@ -270,6 +272,14 @@ bool tui_config_load(TuiConfig *config) {
           config->sim_candidates = (int)parsed;
           config->sim_candidates_set = true;
         }
+      }
+    } else if (strcmp(trimmed, "sim_census") == 0) {
+      if (strcmp(value, "true") == 0 || strcmp(value, "1") == 0) {
+        config->sim_census = true;
+        config->sim_census_set = true;
+      } else if (strcmp(value, "false") == 0 || strcmp(value, "0") == 0) {
+        config->sim_census = false;
+        config->sim_census_set = true;
       }
     } else if (strcmp(trimmed, "auto_analyze") == 0 ||
                strcmp(trimmed, "analysis_time_limit") == 0 ||
@@ -568,6 +578,10 @@ bool tui_config_save(const TuiConfig *config) {
   }
   if (config->sim_candidates_set) {
     (void)fprintf(file, "sim_candidates = %d\n", config->sim_candidates);
+  }
+  if (config->sim_census_set) {
+    (void)fprintf(file, "sim_census = %s\n",
+                  config->sim_census ? "true" : "false");
   }
 
   if (fclose(file) != 0) {

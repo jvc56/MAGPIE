@@ -799,8 +799,12 @@ void render_status_bar(struct ncplane *plane, const Theme *theme,
   case TUI_MODAL_QUIT_CONFIRM:
   case TUI_MODAL_PANEL_MENU:
   case TUI_MODAL_PHONY_CONFIRM:
+  case TUI_MODAL_PASS_CONFIRM:
     hint = " \xe2\x86\x91\xe2\x86\x93 navigate \xc2\xb7 Enter confirm \xc2"
            "\xb7 Esc back ";
+    break;
+  case TUI_MODAL_EXCHANGE:
+    hint = " letter or Space pick \xc2\xb7 Enter exchange \xc2\xb7 Esc cancel ";
     break;
   case TUI_MODAL_SETTINGS:
     hint = " \xe2\x86\x91\xe2\x86\x93 navigate \xc2\xb7 \xe2\x86\x90\xe2"

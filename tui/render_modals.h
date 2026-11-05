@@ -4,6 +4,7 @@
 #include "config.h"
 #include "game_state.h"
 #include "theme.h"
+#include "tui_ui_state.h"
 #include "tui_ui_types.h"
 #include <notcurses/notcurses.h>
 #include <stdbool.h>
@@ -93,6 +94,14 @@ void tui_game_render_time_picker(struct ncplane *plane, const Theme *theme,
 // Default focus is 0 (No) so the safer option is Enter-confirmable;
 // Y / N shortcuts trigger their action regardless of current focus.
 void tui_game_render_quit_confirm(struct ncplane *plane, const Theme *theme,
+                                  int focus);
+
+// The exchange picker (TUI_MODAL_EXCHANGE) from ui's exchange_* fields.
+void tui_game_render_exchange(struct ncplane *plane, const Theme *theme,
+                              const TuiUiState *ui);
+
+// "Pass your turn?" with No (focus 0) and Pass (1).
+void tui_game_render_pass_confirm(struct ncplane *plane, const Theme *theme,
                                   int focus);
 
 // Settings dialog, or a panel menu's settings section: `row_count` rows

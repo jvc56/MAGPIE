@@ -8,8 +8,10 @@
 #include "../src/ent/rack.h"
 #include "frame_dump.h"
 #include "game_state.h"
+#include "move_entry.h"
 #include "pixel_compose.h"
 #include "render_common.h"
+#include "render_hit_test.h"
 #include "render_layout.h"
 #include "render_planes.h"
 #include "render_view.h"
@@ -248,6 +250,42 @@ static void render_rack_panel_pixel(struct ncplane *plane, const Theme *theme,
     planes->rack = NULL;
   }
 }
+// The user's Exchange and Pass buttons, right-aligned on the Rack panel's
+// top border, shown on their turn against the computer. Exchange is
+// dimmed when the bag is too low to exchange; clicking it says so.
+static void draw_rack_buttons(struct ncplane *plane, const Theme *theme,
+                              const TuiGameState *state, const Layout *L) {
+  static const char exchange_label[] = " Exchange ";
+  static const char pass_label[] = " Pass ";
+  TuiHitMaps *hit = tui_hit_maps();
+  hit->rack_buttons_row = -1;
+  if (tui_pvc_move_unavailable_reason(state, false) != NULL) {
+    return;
+  }
+  const bool can_exchange =
+      tui_pvc_move_unavailable_reason(state, true) == NULL;
+  // Two cells in from the corner, a cell apart, clear of the title
+  // ("[2] Rack (7)" ends by column 14).
+  const int pass_right = L->board_width - 3;
+  const int pass_left = pass_right - (int)strlen(pass_label) + 1;
+  const int exchange_right = pass_left - 2;
+  const int exchange_left = exchange_right - (int)strlen(exchange_label) + 1;
+  if (exchange_left < 15) {
+    return;
+  }
+  theme_apply_bg(plane, theme->modal_bg);
+  theme_apply_fg(plane, can_exchange ? theme->modal_fg : theme->dim_fg);
+  ncplane_putstr_yx(plane, L->rack_top, exchange_left, exchange_label);
+  theme_apply_fg(plane, theme->modal_fg);
+  ncplane_putstr_yx(plane, L->rack_top, pass_left, pass_label);
+  theme_apply_bg(plane, theme->bg);
+  hit->rack_buttons_row = L->rack_top;
+  hit->rack_exchange_left = exchange_left;
+  hit->rack_exchange_right = exchange_right;
+  hit->rack_pass_left = pass_left;
+  hit->rack_pass_right = pass_right;
+}
+
 void render_rack_panel(struct ncplane *plane, const Theme *theme,
                        const TuiGameState *state, const Layout *L) {
   TuiGridPlanes *planes = tui_grid_planes();
@@ -267,6 +305,7 @@ void render_rack_panel(struct ncplane *plane, const Theme *theme,
                  rack_get_total_letters(rack));
   draw_box_styled(plane, theme, L->rack_top, 0, box_height, L->board_width,
                   title, TUI_FOCUS_RACK, rack_focused);
+  draw_rack_buttons(plane, theme, state, L);
   const LetterDistribution *ld = state->ld;
 
   const int cell_w = L->board_cell_w;
