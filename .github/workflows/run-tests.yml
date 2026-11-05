@@ -1,5 +1,19 @@
 name: ci
-on: [push]
+# Pushes to main, and pull requests into main. A pull request stacked on
+# another branch runs once it targets main, when its branch is next pushed.
+# workflow_dispatch runs it on any branch by hand.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+# One run per pull request (or branch) at a time: a new push cancels the run
+# it replaces. On main every commit has a group of its own, so each one's run
+# finishes, and none waits for another or is dropped for a newer commit.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || (github.ref == 'refs/heads/main' && github.sha) || github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 env:
   # The pinned Windows toolchain, for windows-build and windows-cross-compile,
   # with the SHA-256 of its release tarball (also the digest GitHub reports
@@ -446,7 +460,8 @@ jobs:
       - name: Run clang-tidy static analysis
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang-tidy-18 && ./tidy.sh clang-tidy-18
+          sudo apt-get install -y clang-tidy-18 libnotcurses-dev libfreetype-dev zlib1g-dev pkg-config
+          MAGPIE_TIDY_REQUIRE_TUI=1 ./tidy.sh clang-tidy-18
 
   unit-tests-no-pgo-release:
     runs-on: ubuntu-latest

@@ -1090,6 +1090,27 @@ static void census_rollout_gather(const CensusRollout *census, const Rack *rack,
   }
 }
 
+void census_rollout_root_cache_key(int bag_class, const Rack *rack,
+                                   uint64_t *key, uint64_t *check) {
+  // The class goes through a multiply before the rack's counts do. Combined
+  // with the first count, the blank's, before any multiply, it reached the
+  // words only through class ^ blanks and class + blanks, so a class and a
+  // blank count could trade off: class 2 with a blank and class 3 without, or
+  // class 0 with two blanks and class 2 without, the other tiles the same,
+  // shared both words.
+  uint64_t key_word = (UINT64_C(0xCBF29CE484222325) ^ (uint64_t)bag_class) *
+                      UINT64_C(0x100000001B3);
+  uint64_t check_word = (UINT64_C(0x84222325CBF29CE4) + (uint64_t)bag_class) *
+                        UINT64_C(0x9E3779B97F4A7C15);
+  for (int ml = 0; ml < rack_get_dist_size(rack); ml++) {
+    key_word = (key_word ^ rack_get_letter(rack, ml)) * UINT64_C(0x100000001B3);
+    check_word = (check_word + rack_get_letter(rack, ml) + 1) *
+                 UINT64_C(0x9E3779B97F4A7C15);
+  }
+  *key = key_word | 1;
+  *check = check_word;
+}
+
 // The rack's bests in every anchor of both tables, the root's from the
 // worker's memory when the rack has been gathered this sim.
 static void census_rollout_gather_rack(CensusRolloutWorker *worker,
@@ -1101,14 +1122,9 @@ static void census_rollout_gather_rack(CensusRolloutWorker *worker,
   peg_by_tiles_played_for_bag(bag, peg_by_tiles_played);
   // Bags that give no play an adjustment share the root bests.
   const int bag_class = bag >= PEG_ADJUST_VALUES_LENGTH ? 0 : bag;
-  uint64_t key = UINT64_C(0xCBF29CE484222325) ^ (uint64_t)bag_class;
-  uint64_t check = UINT64_C(0x84222325CBF29CE4) + (uint64_t)bag_class;
-  for (int ml = 0; ml < rack_get_dist_size(rack); ml++) {
-    key = (key ^ rack_get_letter(rack, ml)) * UINT64_C(0x100000001B3);
-    check =
-        (check + rack_get_letter(rack, ml) + 1) * UINT64_C(0x9E3779B97F4A7C15);
-  }
-  key |= 1;
+  uint64_t key;
+  uint64_t check;
+  census_rollout_root_cache_key(bag_class, rack, &key, &check);
   const int slot = (int)(key & (CENSUS_ROLLOUT_ROOT_SLOTS - 1));
   Equity *cached =
       &worker->root_cache[(size_t)slot * (size_t)worker->root_cache_units];
