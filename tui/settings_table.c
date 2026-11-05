@@ -75,6 +75,10 @@ static const TuiSettingDef setting_defs[] = {
      "How many candidate moves each simulation compares.", TUI_SETTING_KIND_INT,
      NULL, 0, SIM_CANDIDATES_MIN, SIM_CANDIDATES_MAX, SIM_CANDIDATES_STEP,
      "moves", NULL},
+    {TUI_SETTING_SIM_CENSUS, 5, "simcensus", "Sim census",
+     "Steer each simulation's rollouts with a census of the position: the "
+     "same moves, found faster.",
+     TUI_SETTING_KIND_BOOL, NULL, 0, 0, 1, 1, NULL, NULL},
     {TUI_SETTING_AUTO_ANALYZE, 5, "autoanalyze", "Auto-analyze",
      "Analyze each turn you select in History: rank its moves (kibitz), or "
      "simulate it (solving endgames and pre-endgames instead).",
@@ -206,6 +210,8 @@ int tui_setting_get(const TuiGameState *state, TuiSettingId id) {
     return state->sim_plies;
   case TUI_SETTING_SIM_CANDIDATES:
     return state->sim_candidates;
+  case TUI_SETTING_SIM_CENSUS:
+    return state->sim_census ? 1 : 0;
   case TUI_SETTING_AUTO_ANALYZE:
     return state->auto_analyze;
   case TUI_SETTING_ANALYSIS_TIME:
@@ -501,6 +507,11 @@ static void apply_setting(TuiGameState *state, TuiSession *session,
     state->sim_candidates = value;
     cfg->sim_candidates = value;
     cfg->sim_candidates_set = true;
+    break;
+  case TUI_SETTING_SIM_CENSUS:
+    state->sim_census = value != 0;
+    cfg->sim_census = state->sim_census;
+    cfg->sim_census_set = true;
     break;
   case TUI_SETTING_AUTO_ANALYZE:
     state->auto_analyze = value;
