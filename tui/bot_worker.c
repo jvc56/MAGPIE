@@ -20,6 +20,7 @@
 #include "../src/ent/sim_args.h"
 #include "../src/ent/sim_results.h"
 #include "../src/ent/thread_control.h"
+#include "../src/ent/validated_move.h"
 #include "../src/impl/cgp.h"
 #include "../src/impl/endgame.h"
 #include "../src/impl/gameplay.h"
@@ -1418,6 +1419,40 @@ static MoveList *sim_candidates_with_played(const Game *position,
   return candidates;
 }
 
+// Write the move played on `entry`'s turn into `out_move`, validated
+// against `position`, the position it was played from: the GCG move a
+// loaded game carries, else the move History records. False when there
+// is none to offer, as for a play that was challenged off.
+static bool entry_played_move(const TuiHistoryEntry *entry,
+                              const Game *position, Move *out_move) {
+  if (entry->loaded_move != NULL) {
+    move_copy(out_move, entry->loaded_move);
+    return true;
+  }
+  if (entry->challenged_off || entry->move_str[0] == '\0') {
+    return false;
+  }
+  char engine_move[64];
+  tui_history_move_to_engine(entry->move_str, engine_move, sizeof(engine_move));
+  if (engine_move[0] == '\0') {
+    return false;
+  }
+  ErrorStack *err = error_stack_create();
+  ValidatedMoves *vms = validated_moves_create(
+      position, game_get_player_on_turn_index(position), engine_move,
+      /*allow_phonies=*/true, /*allow_playthrough=*/true, err);
+  const bool found = error_stack_is_empty(err) && vms != NULL &&
+                     validated_moves_get_number_of_moves(vms) > 0;
+  if (found) {
+    move_copy(out_move, validated_moves_get_move(vms, 0));
+  }
+  if (vms != NULL) {
+    validated_moves_destroy(vms);
+  }
+  error_stack_destroy(err);
+  return found;
+}
+
 // Simulate a turn: continue sampling its saved sim when it has one, else
 // start a fresh sim on the top candidates (plus the played move). The
 // live display pointer is swapped to the results for the duration (the
@@ -1432,9 +1467,12 @@ static void analysis_resume_sim(TuiGameState *state, TuiHistoryEntry *entry,
       state->sim_candidates > 0 ? state->sim_candidates : SIM_CANDIDATES;
   SimResults *results =
       fresh ? sim_results_create(0.005) : entry->sim_results_saved;
-  MoveList *candidates = fresh ? sim_candidates_with_played(
-                                     position, entry->loaded_move, fresh_cands)
-                               : move_list_from_sim_results(results);
+  Move played;
+  const bool have_played = fresh && entry_played_move(entry, position, &played);
+  MoveList *candidates =
+      fresh ? sim_candidates_with_played(position, have_played ? &played : NULL,
+                                         fresh_cands)
+            : move_list_from_sim_results(results);
   if (candidates == NULL || move_list_get_count(candidates) < 2) {
     pthread_mutex_lock(&state->mutex);
     tui_game_state_notice(state, fresh ? "nothing to sim: fewer than 2 moves"
