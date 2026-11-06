@@ -250,12 +250,77 @@ static void render_analysis_header_fade(struct ncplane *plane,
   }
 }
 
+// Sort an engine-notation exchange's letters ("ex DBA" → "ex ABD") so
+// two exchanges of the same tiles compare equal whatever order each
+// listed them in. Other moves are left alone.
+static void sort_exchange_letters(char *engine_move) {
+  if (strncmp(engine_move, "ex ", 3) != 0) {
+    return;
+  }
+  char *letters = engine_move + 3;
+  const size_t len = strlen(letters);
+  for (size_t idx = 1; idx < len; idx++) {
+    const char ch = letters[idx];
+    size_t pos = idx;
+    while (pos > 0 && letters[pos - 1] > ch) {
+      letters[pos] = letters[pos - 1];
+      pos--;
+    }
+    letters[pos] = ch;
+  }
+}
+
+// Index of the row holding the move played on the History cursor's
+// turn, or -1: on the live turn, on a turn still being decided, in
+// spoiler-free review (which hides the played move), and when no row
+// holds it. Call before analysis_fit_move truncates any row's move.
+static int analysis_played_row(const TuiGameState *state,
+                               const AnalysisRow *rows, int count) {
+  if (state == NULL || state->history_cursor < 0 ||
+      state->history_cursor >= state->history_count ||
+      tui_history_spoiler(state, state->history_cursor) != TUI_SPOILER_NONE) {
+    return -1;
+  }
+  const TuiHistoryEntry *entry = &state->history[state->history_cursor];
+  if (entry->pending || entry->move_str[0] == '\0') {
+    return -1;
+  }
+  // Rows and History write exchanges and playthroughs differently, so
+  // compare the engine notation of each.
+  char played[sizeof(entry->move_str) + 8];
+  tui_history_move_to_engine(entry->move_str, played, sizeof(played));
+  sort_exchange_letters(played);
+  if (played[0] == '\0') {
+    return -1;
+  }
+  for (int row_idx = 0; row_idx < count; row_idx++) {
+    char candidate[sizeof(rows[row_idx].move) + 8];
+    tui_history_move_to_engine(rows[row_idx].move, candidate,
+                               sizeof(candidate));
+    sort_exchange_letters(candidate);
+    if (strcmp(played, candidate) == 0) {
+      return row_idx;
+    }
+  }
+  return -1;
+}
+
+// The color of the player who played the History cursor's turn, for
+// its played move's row.
+static ThemeRgb analysis_played_color(const Theme *theme,
+                                      const TuiGameState *state) {
+  return state->history[state->history_cursor].player_idx == 1
+             ? theme->on_turn_fg_p2
+             : theme->on_turn_fg;
+}
+
 // Compact layout for a panel too narrow for the standard columns: the
 // spread column is dropped, and rank, the space after it, and the leave
 // column are added back in priority order as they fit, beside an integer
 // win% (or W/T/L) under a "win%" header.
 static void render_analysis_rows_compact(struct ncplane *plane,
                                          const Theme *theme, const Layout *L,
+                                         const TuiGameState *state,
                                          AnalysisRow *rows, int visible,
                                          bool primary_bold, int title_end_col,
                                          int interior_right, int max_move_w,
@@ -271,6 +336,7 @@ static void render_analysis_rows_compact(struct ncplane *plane,
   // every visible row below 100% we size the slot at 3 ("XX%") and
   // get a free column for rank, space, or leave. W/T/L primaries
   // stay 1 col.
+  const int played_idx = analysis_played_row(state, rows, visible);
   int compact_primary_w = 0;
   for (int i = 0; i < visible; i++) {
     if (!rows[i].valid) {
@@ -410,7 +476,9 @@ static void render_analysis_rows_compact(struct ncplane *plane,
     char *move_text = rows[i].move;
     analysis_fit_move(move_text, move_budget);
     if (move_budget > 0 && move_text[0] != '\0') {
-      theme_apply_fg(plane, theme->fg);
+      theme_apply_fg(plane, i == played_idx
+                                ? analysis_played_color(theme, state)
+                                : theme->fg);
       render_move_styled(plane, row, compact_move_col, move_text,
                          /*hide_parens=*/true,
                          /*hide_playthrough_parens=*/false);
@@ -553,13 +621,11 @@ static int render_analysis_headers(struct ncplane *plane, const Theme *theme,
 // Draws candidate rows[data_i] on screen row `row`: the rank (or cursor
 // chip), move, leave, score, per-ply averages, primary, and secondary,
 // bolding column bests, and records the row's click rectangle.
-static void render_analysis_row(struct ncplane *plane, const Theme *theme,
-                                const TuiGameState *state, AnalysisRow *rows,
-                                const AnalysisColumns *columns,
-                                bool primary_bold, TuiHitMaps *hit, int row,
-                                const char *rank_fmt,
-                                const AnalysisBests *bests,
-                                int effective_cursor, int data_i) {
+static void render_analysis_row(
+    struct ncplane *plane, const Theme *theme, const TuiGameState *state,
+    AnalysisRow *rows, const AnalysisColumns *columns, bool primary_bold,
+    TuiHitMaps *hit, int row, const char *rank_fmt, const AnalysisBests *bests,
+    int effective_cursor, int played_idx, int data_i) {
   char rank_str[8];
   (void)snprintf(rank_str, sizeof(rank_str), rank_fmt, data_i + 1);
 
@@ -712,7 +778,9 @@ static void render_analysis_row(struct ncplane *plane, const Theme *theme,
       ncplane_set_styles(plane, 0);
       theme_apply_bg(plane, theme->bg);
     } else {
-      theme_apply_fg(plane, theme->fg);
+      theme_apply_fg(plane, data_i == played_idx
+                                ? analysis_played_color(theme, state)
+                                : theme->fg);
       render_move_styled(plane, row, columns->move_col, move_text,
                          /*hide_parens=*/true,
                          /*hide_playthrough_parens=*/false);
@@ -1041,9 +1109,9 @@ static void render_analysis_rows(struct ncplane *plane, const Theme *theme,
   const int standard_need =
       rank_w + max_move_w + 1 + primary_w + primary_secondary_gap + secondary_w;
   if (standard_need > interior_width) {
-    render_analysis_rows_compact(plane, theme, L, rows, visible, primary_bold,
-                                 title_end_col, interior_right, max_move_w,
-                                 max_leave_w, rank_digits);
+    render_analysis_rows_compact(plane, theme, L, state, rows, visible,
+                                 primary_bold, title_end_col, interior_right,
+                                 max_move_w, max_leave_w, rank_digits);
     return;
   }
 
@@ -1190,9 +1258,6 @@ static void render_analysis_rows(struct ncplane *plane, const Theme *theme,
   if (scroll_offset < 0) {
     scroll_offset = 0;
   }
-  if (state != NULL) {
-    state->analysis_scroll_offset = scroll_offset;
-  }
   // Docking: only when the cursor is in MOVE column AND the
   // anchored move's rank sits outside the currently-scrolled
   // window. With cursor-follow scroll the auto-scroll keeps the
@@ -1206,11 +1271,38 @@ static void render_analysis_rows(struct ncplane *plane, const Theme *theme,
       state != NULL &&
       state->analysis_cursor_column == TUI_ANALYSIS_COLUMN_MOVE &&
       cursor_outside_window && view_h >= 2;
+  // The move played on the History cursor's turn docks the same way
+  // when it ranks outside the window, unless the cursor's move holds
+  // the dock. Its divider and row take the window's last two rows, so
+  // scroll to keep the cursor above them; that can bring the played
+  // move into view, which needs no dock.
+  const int played_idx = analysis_played_row(
+      state, rows, state != NULL ? state->last_rendered_analysis_row_count : 0);
+  bool played_dock =
+      !dock_active && played_idx >= 0 && view_h >= 3 &&
+      (played_idx < scroll_offset || played_idx >= scroll_offset + view_h);
+  if (played_dock) {
+    if (effective_cursor >= scroll_offset + view_h - 2) {
+      scroll_offset = effective_cursor - (view_h - 2) + 1;
+    }
+    played_dock =
+        played_idx < scroll_offset || played_idx >= scroll_offset + view_h;
+  }
+  if (state != NULL) {
+    state->analysis_scroll_offset = scroll_offset;
+  }
+  const bool any_dock = dock_active || played_dock;
+  const int docked_idx = dock_active ? effective_cursor : played_idx;
 
   // Number of painted rows for this frame: capped by view_h and
-  // by how many ranks remain after the scroll offset.
-  const int painted_rows =
+  // by how many ranks remain after the scroll offset. A played-move
+  // dock above the scrolled-to end of a short list still gets its
+  // divider and row.
+  int painted_rows =
       total_rows - scroll_offset < view_h ? total_rows - scroll_offset : view_h;
+  if (played_dock && painted_rows < view_h) {
+    painted_rows = painted_rows + 2 < view_h ? painted_rows + 2 : view_h;
+  }
 
   theme_apply_bg(plane, theme->bg);
   int row = list_top;
@@ -1221,7 +1313,7 @@ static void render_analysis_rows(struct ncplane *plane, const Theme *theme,
     // effective_cursor) and the slot immediately above it is
     // rendered as a divider line rather than a row.
     int data_i = scroll_offset + slot;
-    if (dock_active) {
+    if (any_dock) {
       if (slot == painted_rows - 2) {
         // Divider line — uses the dim_fg color so it reads as
         // a subdued separator, not a heavy rule.
@@ -1235,7 +1327,7 @@ static void render_analysis_rows(struct ncplane *plane, const Theme *theme,
         continue;
       }
       if (slot == painted_rows - 1) {
-        data_i = effective_cursor;
+        data_i = docked_idx;
       }
     }
     if (data_i < 0 || data_i >= state->last_rendered_analysis_row_count ||
@@ -1244,7 +1336,8 @@ static void render_analysis_rows(struct ncplane *plane, const Theme *theme,
       continue;
     }
     render_analysis_row(plane, theme, state, rows, &columns, primary_bold, hit,
-                        row, rank_fmt, &bests, effective_cursor, data_i);
+                        row, rank_fmt, &bests, effective_cursor, played_idx,
+                        data_i);
 
     row++;
   }
