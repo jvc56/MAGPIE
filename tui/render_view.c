@@ -11,6 +11,7 @@
 #include "../src/ent/player.h"
 #include "../src/ent/rack.h"
 #include "../src/ent/sim_results.h"
+#include "analysis_rows.h"
 #include "config.h"
 #include "game_state.h"
 #include "tui_ui_types.h"
@@ -196,7 +197,12 @@ const Move *pick_analysis_preview_move(const TuiGameState *state,
   // sim_results_saved (a deep clone of the SimResults captured at
   // finalize time), whose display_simmed_plays order matches the
   // analysis_snapshot.rows order the user is reading.
-  const TuiHistoryEntry *hist_entry = pick_history_view(state);
+  // While "/resume" is recomputing the cursored turn, the panel shows
+  // the live (ticking) results rather than the entry's saved ones, and
+  // a fresh sim's results only land on the entry once it stops, so
+  // preview from the live results as the panel does.
+  const TuiHistoryEntry *hist_entry =
+      resume_active_for_cursor(state) ? NULL : pick_history_view(state);
   if (hist_entry != NULL && hist_entry->analysis_snapshot.valid &&
       hist_entry->analysis_snapshot.is_static) {
     // A "/kibitz" ranking is on screen; preview its rows.
@@ -251,10 +257,13 @@ const Move *pick_analysis_preview_move(const TuiGameState *state,
     }
     return NULL;
   }
-  // No history cursor — preview from live state. Endgame snapshot
-  // takes precedence when the bag is empty and a solve has landed.
+  // No history cursor (or one whose turn "/resume" is recomputing) —
+  // preview from live state, read against the position the analysis
+  // runs on. Endgame snapshot takes precedence when the bag is empty
+  // and a solve has landed.
+  const Game *src_game = analysis_source_game(state);
   const bool bag_empty =
-      state->game != NULL && bag_get_letters(game_get_bag(state->game)) == 0;
+      src_game != NULL && bag_get_letters(game_get_bag(src_game)) == 0;
   if (bag_empty && state->endgame_snapshot.valid &&
       idx < state->endgame_snapshot.num_entries &&
       state->endgame_snapshot.moves != NULL) {
@@ -288,7 +297,7 @@ const Move *pick_analysis_preview_move(const TuiGameState *state,
   }
   sim_results_unlock_display_infos(results);
   if (out_player_idx != NULL) {
-    *out_player_idx = game_get_player_on_turn_index(state->game);
+    *out_player_idx = game_get_player_on_turn_index(src_game);
   }
   return out_move;
 }
