@@ -15,6 +15,7 @@
 #include "../src/ent/endgame_results.h"
 #include "../src/ent/equity.h"
 #include "../src/ent/game.h"
+#include "../src/ent/inference_results.h"
 #include "../src/ent/letter_distribution.h"
 #include "../src/ent/move.h"
 #include "../src/ent/player.h"
@@ -1914,5 +1915,101 @@ void tui_history_entry_release(TuiHistoryEntry *entry) {
     free(entry->static_moves_saved);
     entry->static_moves_saved = NULL;
     entry->static_moves_saved_count = 0;
+  }
+  if (entry->inference != NULL) {
+    inference_results_destroy(entry->inference);
+    entry->inference = NULL;
+  }
+  entry->inference_summary.valid = false;
+  if (entry->other_analysis_snapshot != NULL) {
+    free(entry->other_analysis_snapshot);
+    entry->other_analysis_snapshot = NULL;
+  }
+  if (entry->other_sim_results_saved != NULL) {
+    sim_results_destroy(entry->other_sim_results_saved);
+    entry->other_sim_results_saved = NULL;
+  }
+  entry->analysis_inferred = false;
+}
+
+bool tui_sim_inference_on(const TuiGameState *state) {
+  return state->infer && state->sim_inference;
+}
+
+// Swaps two snapshots through a small buffer: each is too large to copy
+// through the stack whole.
+static void swap_analysis_snapshots(TuiAnalysisSnapshot *first,
+                                    TuiAnalysisSnapshot *second) {
+  unsigned char buffer[4096];
+  unsigned char *first_bytes = (unsigned char *)first;
+  unsigned char *second_bytes = (unsigned char *)second;
+  size_t offset = 0;
+  while (offset < sizeof(TuiAnalysisSnapshot)) {
+    const size_t remaining = sizeof(TuiAnalysisSnapshot) - offset;
+    const size_t chunk =
+        remaining < sizeof(buffer) ? remaining : sizeof(buffer);
+    memcpy(buffer, first_bytes + offset, chunk);
+    memcpy(first_bytes + offset, second_bytes + offset, chunk);
+    memcpy(second_bytes + offset, buffer, chunk);
+    offset += chunk;
+  }
+}
+
+void tui_history_entry_show_inference_variant(TuiHistoryEntry *entry,
+                                              bool inferred) {
+  if (entry->inference == NULL || entry->analysis_inferred == inferred) {
+    return;
+  }
+  entry->analysis_inferred = inferred;
+  const bool shown_is_sim =
+      entry->analysis_snapshot.valid && entry->analysis_snapshot.is_sim;
+  const bool other_is_sim = entry->other_analysis_snapshot != NULL &&
+                            entry->other_analysis_snapshot->valid &&
+                            entry->other_analysis_snapshot->is_sim;
+  // Only sims come in the two variants; anything else on show (a
+  // kibitz ranking, say) stays put unless a sim of the other variant
+  // is waiting to take its place.
+  if (!shown_is_sim && !other_is_sim) {
+    return;
+  }
+  if (entry->other_analysis_snapshot == NULL) {
+    entry->other_analysis_snapshot =
+        calloc(1, sizeof(*entry->other_analysis_snapshot));
+    if (entry->other_analysis_snapshot == NULL) {
+      return;
+    }
+  }
+  swap_analysis_snapshots(&entry->analysis_snapshot,
+                          entry->other_analysis_snapshot);
+  SimResults *shown_results = entry->sim_results_saved;
+  entry->sim_results_saved = entry->other_sim_results_saved;
+  entry->other_sim_results_saved = shown_results;
+}
+
+void tui_game_state_show_inference_variants(TuiGameState *state, int skip_idx) {
+  const bool inferred = tui_sim_inference_on(state);
+  for (int entry_idx = 0; entry_idx < state->history_count; entry_idx++) {
+    if (entry_idx == skip_idx || state->history[entry_idx].pending) {
+      continue;
+    }
+    tui_history_entry_show_inference_variant(&state->history[entry_idx],
+                                             inferred);
+  }
+}
+
+void tui_history_entry_attach_inference(const TuiGameState *state,
+                                        TuiHistoryEntry *entry,
+                                        InferenceResults *inference,
+                                        const TuiInferenceSummary *summary) {
+  if (entry->inference != NULL) {
+    inference_results_destroy(entry->inference);
+  }
+  entry->inference = inference;
+  entry->inference_summary = *summary;
+  // Whatever the turn already shows was simmed without it.
+  entry->analysis_inferred = false;
+  if (!entry->pending) {
+    tui_history_entry_show_inference_variant(entry,
+                                             tui_sim_inference_on(state));
   }
 }
