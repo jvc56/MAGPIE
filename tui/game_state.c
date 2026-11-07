@@ -1208,6 +1208,41 @@ void tui_history_move_to_engine(const char *display, char *out,
   canonicalize_history_move(display, out, out_size);
 }
 
+// Sets `entry`'s saved position (board, on-turn rack, CGP and bag size)
+// to the engine's, the position its turn is played from. The replay
+// sets racks without drawing them, so the engine's bag is too full; the
+// bag size comes from loading the CGP into `scratch`, which derives the
+// bag from the board and racks.
+static void refresh_entry_position(const TuiGameState *state,
+                                   TuiHistoryEntry *entry, Game *scratch) {
+  char *cgp = game_get_cgp(state->game, true);
+  if (cgp == NULL) {
+    return;
+  }
+  (void)snprintf(entry->cgp_before, sizeof(entry->cgp_before), "%s", cgp);
+  free(cgp);
+  if (entry->board_before != NULL) {
+    board_destroy(entry->board_before);
+  }
+  entry->board_before = board_duplicate(game_get_board(state->game));
+  if (entry->rack_before != NULL) {
+    rack_destroy(entry->rack_before);
+    entry->rack_before = NULL;
+  }
+  const Rack *rack =
+      player_get_rack(game_get_player(state->game, entry->player_idx));
+  if (rack_get_total_letters(rack) > 0) {
+    entry->rack_before = rack_duplicate(rack);
+  }
+  ErrorStack *err = error_stack_create();
+  game_load_cgp(scratch, entry->cgp_before, err);
+  entry->bag_before_known = error_stack_is_empty(err);
+  if (entry->bag_before_known) {
+    entry->bag_before = tui_position_effective_bag(scratch);
+  }
+  error_stack_destroy(err);
+}
+
 // Shared replay core. Resets the engine and applies committed
 // turns in [0, up_to) (up_to < 0 means "all of history"). When
 // record_errors is true, clears every entry's error_str first and
@@ -1240,6 +1275,13 @@ static void replay_history_prefix(TuiGameState *state, int up_to,
   const int ld_size = ld_get_size(state->ld);
   int drawn[MACHINE_LETTER_MAX_VALUE];
   memset(drawn, 0, sizeof(drawn));
+  // An annotated turn's position is saved when the turn opens, before
+  // its rack is entered, and an edit to an earlier turn changes it, so
+  // each replayed turn refreshes it. Elsewhere it was saved with both
+  // racks as dealt, which the replay doesn't know.
+  Game *scratch = record_errors && state->app_mode == TUI_APP_MODE_ANNOTATE
+                      ? game_duplicate(state->game)
+                      : NULL;
   for (int idx = 0; idx < limit; idx++) {
     TuiHistoryEntry *e = &state->history[idx];
     if (e->pending) {
@@ -1346,6 +1388,10 @@ static void replay_history_prefix(TuiGameState *state, int up_to,
         (void)snprintf(e->error_str, sizeof(e->error_str), "%s", overrun_msg);
       }
       break;
+    }
+    if (scratch != NULL &&
+        game_get_player_on_turn_index(state->game) == e->player_idx) {
+      refresh_entry_position(state, e, scratch);
     }
     // Normalize display notation → engine canonical, validate. A play
     // that was challenged off cost its player the turn and left the
@@ -1482,6 +1528,9 @@ static void replay_history_prefix(TuiGameState *state, int up_to,
       validated_moves_destroy(vms);
     }
     error_stack_destroy(err);
+  }
+  if (scratch != NULL) {
+    game_destroy(scratch);
   }
 }
 

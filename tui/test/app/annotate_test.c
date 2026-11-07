@@ -121,6 +121,27 @@ static void test_exchange_then_pass(TuiGameState *state) {
             "turn 3 starts from the exchanger's leave");
 }
 
+// A placed turn's saved position, which /sim starts from, holds the rack
+// entered after the turn opened.
+static void test_placement_position_has_rack(TuiGameState *state) {
+  start_annotation(state);
+  type_text(state, "8D GRAZE");
+  press(state, NCKEY_ENTER);
+  // The rack starts with the tiles played; add the leave.
+  check_str(state->edit_rack_buf, "AEGRZ", "rack starts with the tiles played");
+  type_text(state, "OT");
+  press(state, NCKEY_ENTER);
+  check_int(state->history_count, 2, "placement appends turn 2");
+  const TuiHistoryEntry *entry = &state->history[0];
+  check(strstr(entry->cgp_before, " AEGORTZ/") != NULL,
+        "placement turn's position has its rack");
+  check(entry->rack_before != NULL &&
+            rack_get_total_letters(entry->rack_before) == 7,
+        "placement turn shows its rack");
+  check(entry->bag_before_known, "placement turn's bag is known");
+  check_int(entry->bag_before, 86, "placement turn's bag");
+}
+
 int main(void) {
   TuiGameState *state = calloc(1, sizeof(*state));
   if (state == NULL) {
@@ -134,6 +155,7 @@ int main(void) {
     return 1;
   }
   test_exchange_then_pass(state);
+  test_placement_position_has_rack(state);
   tui_game_state_destroy(state);
   free(state);
   if (failures > 0) {
