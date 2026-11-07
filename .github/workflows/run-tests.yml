@@ -504,6 +504,15 @@ jobs:
       - name: Build and run TUI unit tests
         run: make magpie_tui_test BUILD=no_pgo_release && ./bin/magpie_tui_test
 
+      # Built with clang, as the TUI is everywhere else: GCC's
+      # -Wformat-truncation rejects its snprintf into fixed cells under
+      # -Werror. Without LTO, so any linker will do.
+      - name: Build and run TUI app tests
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang libnotcurses-dev libfreetype-dev zlib1g-dev pkg-config
+          make magpie_tui_app_test BUILD=no_pgo_release CC=clang TUI_LTO= && ./bin/magpie_tui_app_test
+
   unit-tests-dev:
     name: unit-tests-dev (${{ matrix.shard }})
     runs-on: ubuntu-latest
