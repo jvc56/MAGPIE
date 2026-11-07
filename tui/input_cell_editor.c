@@ -447,22 +447,43 @@ static bool cell_editor_commit(TuiGameState *state, int idx, bool field_move) {
       }
     }
   }
-  // If the rack commit followed a *legal* placement, advance
-  // the annotation to the next turn: play the move on the
-  // engine, tag tile owners so placed tiles render in their
+  // If the rack commit followed a *legal* placement, exchange or
+  // pass, advance the annotation to the next turn: play the move on
+  // the engine, tag tile owners so placed tiles render in their
   // player's permanent color, append a fresh pending entry
   // for the OTHER player, and re-open the editor on it. If
   // the play wasn't legal (score < 0, partial, bare word,
   // invalid), fall through to the existing "just exit edit
   // mode" behavior — the user keeps editing the same turn.
-  // Exchanges and passes take that path too: the engine's
-  // exchange draws replacement tiles, which the annotator owns.
+  const bool placement = state->edit_move_kind == TUI_EDIT_MOVE_KIND_PLACEMENT;
+  const bool exchange_or_pass =
+      state->edit_move_kind == TUI_EDIT_MOVE_KIND_EXCHANGE ||
+      state->edit_move_kind == TUI_EDIT_MOVE_KIND_PASS;
   if (field_move == false && state->edit_preview_move_valid &&
       state->edit_preview_move != NULL && state->edit_move_score >= 0 &&
-      state->edit_move_kind == TUI_EDIT_MOVE_KIND_PLACEMENT) {
-    if (phony_gate(state, idx, TUI_PHONY_ACTION_ENTER)) {
+      (placement || exchange_or_pass)) {
+    if (placement && phony_gate(state, idx, TUI_PHONY_ACTION_ENTER)) {
       pthread_mutex_unlock(&state->mutex);
       return true;
+    }
+    if (exchange_or_pass) {
+      // An exchange or pass is played by the history replay instead:
+      // play_move_without_drawing_tiles refills an exchanger's rack
+      // from the bag, while the replay keeps the leave the annotator
+      // recorded and puts the exchanged tiles back in the bag. The
+      // replay leaves the engine after this turn, with the next player
+      // on turn. A turn it rejects stays open for editing, its error
+      // shown inline.
+      if (idx < state->history_count) {
+        state->history[idx].pending = false;
+      }
+      tui_game_state_revalidate_history(state);
+      if (idx < state->history_count &&
+          state->history[idx].error_str[0] != '\0') {
+        state->edit_history_idx = -1;
+        pthread_mutex_unlock(&state->mutex);
+        return true;
+      }
     }
     const int playing_idx =
         (idx < state->history_count) ? state->history[idx].player_idx : 0;
@@ -473,12 +494,14 @@ static bool cell_editor_commit(TuiGameState *state, int idx, bool field_move) {
     // player's rack holds only their leave; the next turn's
     // editor sees that leave when sync_player_rack_to_editor
     // checks the live rack, and shows it in the pill.
-    play_move_without_drawing_tiles(state->edit_preview_move, state->game);
+    if (placement) {
+      play_move_without_drawing_tiles(state->edit_preview_move, state->game);
+    }
     // Tag the placed-tile squares with the player_idx so the
     // per-cell pixel plane picks the correct tile_bg color.
     // Mirrors the bot-worker path at bot_worker.c:918-933.
-    if (move_get_type(state->edit_preview_move) ==
-        GAME_EVENT_TILE_PLACEMENT_MOVE) {
+    if (placement && move_get_type(state->edit_preview_move) ==
+                         GAME_EVENT_TILE_PLACEMENT_MOVE) {
       const int dir = move_get_dir(state->edit_preview_move);
       int r = move_get_row_start(state->edit_preview_move);
       int c = move_get_col_start(state->edit_preview_move);
