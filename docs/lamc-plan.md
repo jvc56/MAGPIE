@@ -1122,10 +1122,108 @@ results, as they should.
    opponent can go out with, and what a play leaves for the last draw.
 7. **Let BAI count the search's samples.** The final sim resumes from them
    for its statistics, but BAI's own stopping rule starts from zero, so it
-   may sample the search's best plays more than it needs to.
+   may sample the search's best plays more than it needs to. See
+   [Letting BAI count the search's samples](#letting-bai-count-the-searchs-samples).
 8. **Phase 2 starts from here.** The replay harness, the subset view and
    the registry carry over unchanged. The late game, where the rollout
    policy is most likely wrong, is where to test adaptive responses first.
+
+### Letting BAI count the search's samples
+
+With `-lamcreuse`, the final sim starts its plays from the search's
+statistics and seed streams (`sim_results_reset_from_plays`), and the sim
+ranks plays from those. BAI does not: `bai()` has no input for starting
+statistics, and `bai_sync_data_create` zeroes every arm. Two things follow.
+
+- **Wasted rollouts.** BAI's sampling rule and stopping test ignore what
+  the search already learned, so it spends rollouts on gaps the search
+  settled, and its best arm can disagree with the sim's ranking.
+- **Broken pairing.** Every play's n-th sample uses the same seed (common
+  random numbers), and the paired stopping test (`bai_paired_z`) pairs
+  samples by BAI's own per-arm count. On resume the two disagree: for a play
+  with 48 search samples and one with 4, BAI's first pair is seeds 49 and 5.
+  The covariance it estimates is then near zero, and the paired test falls
+  back to roughly the unpaired one, losing the variance reduction exactly
+  when the search ran first. This matters only with a threshold, the only
+  case that enables pairing.
+
+**The fix: BAI takes a starting state.** Seeding the per-arm counts, sums
+and sums of squares fixes the first problem. The second needs each search
+sample's value by its position in the play's seed stream, because the
+paired test sums products of two arms' samples at matching ordinals: sums
+per arm cannot give those, and as a lagging arm catches up, BAI needs the
+leading arm's individual values at the new ordinals. The cost is one double
+per search sample, bounded by the explore share: about 900 at 3,000
+rollouts. BAI already allocates arms × `BAI_PAIRED_MAX_ORDINALS` (1,024)
+doubles when pairing is on.
+
+**Design.**
+
+1. **`BAIArmStart`.** A per-arm starting state: the count, the fixed-point
+   sum and sum of squares, and the values by ordinal (or NULL). `BAIOptions`
+   gets a pointer to an array of them, one per arm, NULL by default. With
+   it set, `bai()` loads each arm's accumulators and, when pairing is on,
+   records each starting value through `bai_paired_record_while_locked` in
+   ordinal order before any worker starts, so prefix sums and cross sums
+   come out exactly as if BAI had taken those samples itself. Values past
+   `BAI_PAIRED_MAX_ORDINALS` are dropped as they are today.
+2. **What the start counts toward.** It does not count toward
+   `sample_limit` or the reported sample count: the sim already subtracts
+   the search's rollouts from the budget. It counts toward
+   `sample_minimum`: the initial phase tops each arm up to the minimum
+   rather than adding the minimum on top. It counts in the means, variances,
+   best arm and stopping test.
+3. **The search keeps the values.** The subset view already accumulates
+   counts, sums and squares in BAI's fixed point (`RVSubsetStats`), the
+   same quantity and quantization BAI uses, so those seed the arms
+   directly. It also logs each value at the sample's position in its play's
+   seed stream, in a per-play array of `-lamcrounds` × `-lamcshallow`
+   doubles allocated once per `LamcCtx` (400 × 48 × 8 bytes, about 150 KB,
+   at the defaults). The position has to come from the seed, not the order
+   samples finish, which differs across threads.
+4. **The handoff.** `lamc_reset_final_results` already maps finalists to
+   search plays (`next_pool`). It also fills a `BAIArmStart` per finalist,
+   empty for a finalist the search never sampled, and `simulate` passes the
+   array in `BAIOptions`.
+5. **Free when off.** With LAMC off, or reuse off, the pointer is NULL:
+   one test per `bai()` call, nothing per sample, no new fields the
+   standard path writes. The log exists only in `LamcCtx`.
+
+The TUI's resume path has the same mismatch and could use the same start
+later. That is a separate PR.
+
+**PRs.**
+
+| PR | Contents | Behavior change |
+|---|---|---|
+| 1h | `BAIArmStart` in `bai()`, with unit tests on normal random variables | None (unused) |
+| 1i | The search's value log and the handoff, behind `-lamcbaistart` (off) | Only with `-lamc true -lamcreuse true -lamcbaistart true` |
+| 1j | If the runs below show a gain: `-lamcbaistart` on, or the option removed | Only with `-lamc true` |
+
+**Tests (CI).**
+
+- A `bai()` started from n samples per arm and run for m more gives the same
+  accumulators, paired prefix and cross sums, best arm and stopping point
+  as one fed the same n + m samples from nothing. This covers unequal
+  starting counts, an arm with none, and starts past
+  `BAI_PAIRED_MAX_ORDINALS`.
+- A NULL start is bit-identical to today.
+- A start does not change how many samples `sample_limit` allows.
+- Each logged value equals what a fresh `SimmedPlay` with the same seed
+  returns at that position, on 1 and 4 threads.
+- The `lamc` determinism tests run with a threshold and `-lamcbaistart
+  true`, and give identical results on 1 and 4 threads.
+
+**Runs.** This answers [open question 5](#open-questions). The replay
+cannot, since it samples evenly with no threshold, so the runs are live:
+`lamcautoplay` from late positions (bag of 20 or fewer), with the default
+threshold, `-lamcbaistart` off against on.
+
+- Rollouts per searched turn and how often the threshold stops the sim
+  early. The start should stop sooner at equal regret.
+- Game pairs at equal time, where saved rollouts become strength.
+- Off must match the current branch exactly. Free-when-off is checked by
+  the speed run against main.
 
 ### Open questions
 
@@ -1167,7 +1265,10 @@ what would answer it.
    sim's plays start from the search's statistics, but BAI's own counts
    start from zero, so its threshold test does not see the search's
    samples. No run used a threshold, so whether this wastes rollouts or
-   stops too early is unknown.
+   stops too early is unknown. Resumed plays also lose the paired test's
+   seed alignment.
+   [Letting BAI count the search's samples](#letting-bai-count-the-searchs-samples)
+   plans the fix and the runs that answer this.
 6. **Where does the gain end?** It was measured with 1 to 20 tiles in the
    bag and is absent with 30 or more. 21 to 29 tiles were never tested.
    Nor was the split within 1 to 20: the gain could all come from the
