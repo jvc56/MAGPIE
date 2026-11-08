@@ -142,6 +142,29 @@ static void test_placement_position_has_rack(TuiGameState *state) {
   check_int(entry->bag_before, 86, "placement turn's bag");
 }
 
+// A turn with only its rack entered can be kibitzed and simmed before
+// its play is entered.
+static void test_rack_only_turn_can_be_analyzed(TuiGameState *state) {
+  start_annotation(state);
+  check_str(tui_analysis_unavailable_reason(state, 0, TUI_ANALYSIS_KIBITZ),
+            "enter this turn's rack first", "kibitz before the rack");
+  press(state, NCKEY_ENTER);
+  type_text(state, "AEOGRTZ");
+  press(state, NCKEY_ENTER);
+  const TuiHistoryEntry *entry = &state->history[0];
+  check(entry->pending, "rack-only turn stays open");
+  check(strstr(entry->cgp_before, " AEGORTZ/") != NULL,
+        "rack-only turn's position has its rack");
+  check_int(
+      rack_get_total_letters(player_get_rack(game_get_player(state->game, 0))),
+      0, "engine rack left as it was");
+  const char *sim_reason =
+      tui_analysis_unavailable_reason(state, 0, TUI_ANALYSIS_SIM);
+  check(sim_reason == NULL, "rack-only turn can be simmed");
+  check(tui_analysis_kibitz(state, 0), "rack-only turn is kibitzed");
+  check(entry->analysis_snapshot.num_rows > 1, "kibitz ranks several plays");
+}
+
 int main(void) {
   TuiGameState *state = calloc(1, sizeof(*state));
   if (state == NULL) {
@@ -156,6 +179,7 @@ int main(void) {
   }
   test_exchange_then_pass(state);
   test_placement_position_has_rack(state);
+  test_rack_only_turn_can_be_analyzed(state);
   tui_game_state_destroy(state);
   free(state);
   if (failures > 0) {

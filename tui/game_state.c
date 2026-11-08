@@ -1208,16 +1208,36 @@ void tui_history_move_to_engine(const char *display, char *out,
   canonicalize_history_move(display, out, out_size);
 }
 
+// Drops `entry`'s saved analysis, which was of a position it no longer
+// has.
+static void clear_entry_analysis(TuiHistoryEntry *entry) {
+  memset(&entry->analysis_snapshot, 0, sizeof(entry->analysis_snapshot));
+  if (entry->sim_results_saved != NULL) {
+    sim_results_destroy(entry->sim_results_saved);
+    entry->sim_results_saved = NULL;
+  }
+  free(entry->endgame_moves_saved);
+  entry->endgame_moves_saved = NULL;
+  entry->endgame_moves_saved_count = 0;
+  free(entry->static_moves_saved);
+  entry->static_moves_saved = NULL;
+  entry->static_moves_saved_count = 0;
+}
+
 // Sets `entry`'s saved position (board, on-turn rack, CGP and bag size)
-// to the engine's, the position its turn is played from. The replay
-// sets racks without drawing them, so the engine's bag is too full; the
-// bag size comes from loading the CGP into `scratch`, which derives the
-// bag from the board and racks.
+// to the engine's, the position its turn is played from, and drops its
+// analysis if that changes the position. The replay sets racks without
+// drawing them, so the engine's bag is too full; the bag size comes from
+// loading the CGP into `scratch`, which derives the bag from the board
+// and racks.
 static void refresh_entry_position(const TuiGameState *state,
                                    TuiHistoryEntry *entry, Game *scratch) {
   char *cgp = game_get_cgp(state->game, true);
   if (cgp == NULL) {
     return;
+  }
+  if (strcmp(entry->cgp_before, cgp) != 0) {
+    clear_entry_analysis(entry);
   }
   (void)snprintf(entry->cgp_before, sizeof(entry->cgp_before), "%s", cgp);
   free(cgp);
@@ -1241,6 +1261,21 @@ static void refresh_entry_position(const TuiGameState *state,
     entry->bag_before = tui_position_effective_bag(scratch);
   }
   error_stack_destroy(err);
+}
+
+// refresh_entry_position for a turn not played yet, with the rack
+// entered so far. The engine holds that rack only while the position is
+// saved: the editor reads the player's leave from it.
+static void refresh_pending_entry_position(const TuiGameState *state,
+                                           TuiHistoryEntry *entry,
+                                           Game *scratch) {
+  Rack *rack = player_get_rack(game_get_player(state->game, entry->player_idx));
+  Rack *leave = rack_duplicate(rack);
+  if (rack_set_to_string(state->ld, rack, entry->rack_str) > 0) {
+    refresh_entry_position(state, entry, scratch);
+  }
+  rack_copy(rack, leave);
+  rack_destroy(leave);
 }
 
 // Shared replay core. Resets the engine and applies committed
@@ -1277,14 +1312,20 @@ static void replay_history_prefix(TuiGameState *state, int up_to,
   memset(drawn, 0, sizeof(drawn));
   // An annotated turn's position is saved when the turn opens, before
   // its rack is entered, and an edit to an earlier turn changes it, so
-  // each replayed turn refreshes it. Elsewhere it was saved with both
-  // racks as dealt, which the replay doesn't know.
+  // each replayed turn refreshes it, including a turn still being
+  // entered once it has a rack, so it can be analyzed before its play
+  // is. Elsewhere it was saved with both racks as dealt, which the
+  // replay doesn't know.
   Game *scratch = record_errors && state->app_mode == TUI_APP_MODE_ANNOTATE
                       ? game_duplicate(state->game)
                       : NULL;
   for (int idx = 0; idx < limit; idx++) {
     TuiHistoryEntry *e = &state->history[idx];
     if (e->pending) {
+      if (scratch != NULL && e->rack_str[0] != '\0' &&
+          game_get_player_on_turn_index(state->game) == e->player_idx) {
+        refresh_pending_entry_position(state, e, scratch);
+      }
       continue;
     }
     // Seed the on-turn player's rack from the entry's rack_str.

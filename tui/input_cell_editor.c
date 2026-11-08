@@ -618,6 +618,11 @@ static bool cell_editor_commit(TuiGameState *state, int idx, bool field_move) {
   // Exit edit mode but keep the buffers around so a
   // re-open lands on whatever the user was typing.
   state->edit_history_idx = -1;
+  // A rack entered without a play still saves the turn's position, so
+  // it can be analyzed.
+  if (!field_move && state->app_mode == TUI_APP_MODE_ANNOTATE) {
+    tui_game_state_revalidate_history(state);
+  }
   pthread_mutex_unlock(&state->mutex);
   return true;
 }
