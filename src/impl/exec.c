@@ -344,10 +344,11 @@ static bool run_queued_commands(Config *config, ErrorStack *error_stack,
 
 void sync_command_scan_loop(Config *config, ErrorStack *error_stack,
                             const char *initial_command_string) {
-  // The settings file is left alone unless the command line asks for it with
-  // -savesettings true, so a settings.txt in the working directory cannot
-  // change what a run does on its own.
-  if (config_command_turns_on_save_settings(config, initial_command_string)) {
+  // The settings file holds only settings that last a whole game, such as
+  // the lexicon and the display settings. A command line that sets
+  // -savesettings false leaves it alone.
+  if (config_get_save_settings(config) &&
+      !config_command_turns_off_save_settings(config, initial_command_string)) {
     // To suppress 'finished' for internal load settings commands
     config_set_loaded_settings(config, false);
     load_config_settings(config, error_stack);

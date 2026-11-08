@@ -2834,33 +2834,90 @@ void test_config_fg_required(void) {
 
 void test_config_upgrade_settings_line(void) {
   Config *config = config_create_default_test();
-  // An old file (no -fileversion) drops the settings whose defaults
-  // changed, with their values, and keeps everything else.
+  // An old file (no -fileversion), which recorded every setting, keeps only
+  // the settings a file keeps now, without those whose defaults changed.
   char *upgraded = config_upgrade_settings_line(
-      config, "set -lex CSW21 -w1 true -rit1 false -tlim 60 -pegpess false "
-              "-wit2 false -threads 4");
-  assert_strings_equal(upgraded, "set -lex CSW21 -tlim 60 -threads 4");
+      config, "set -lex CSW21 -w1 true -rit1 false -tlim 60 -pegoutwidth 100 "
+              "-hr false -wit2 false -threads 4");
+  assert_strings_equal(upgraded, "set -lex CSW21 -hr false");
   free(upgraded);
-  // A version 2 file drops -scensus, whose default became auto in version 3,
-  // and keeps the settings version 2 already had.
+  // A version 2 file keeps -pegoutwidth, which version 2 already had.
   upgraded = config_upgrade_settings_line(
-      config, "set -fileversion 2 -w1 true -scensus false -pegpess false");
-  assert_strings_equal(upgraded, "set -fileversion 2 -w1 true -pegpess false");
+      config, "set -fileversion 2 -pegoutwidth 100 -scensus false -hr false");
+  assert_strings_equal(upgraded,
+                       "set -fileversion 2 -pegoutwidth 100 -hr false");
   free(upgraded);
-  // A current file is left as it is.
+  // A current file drops only the settings a file does not keep, such as
+  // plies and endgame plies.
   upgraded = config_upgrade_settings_line(
-      config, "set -fileversion 3 -w1 true -scensus false -pegpess false");
-  assert_strings_equal(
-      upgraded, "set -fileversion 3 -w1 true -scensus false -pegpess false");
+      config, "set -fileversion 3 -pegoutwidth 100 -plies 3 -l1 CSW21 "
+              "-eplies 4 -bb 40");
+  assert_strings_equal(upgraded,
+                       "set -fileversion 3 -pegoutwidth 100 -l1 CSW21 -bb 40");
   free(upgraded);
   // Saved settings record the current version, and load.
   StringBuilder *sb = string_builder_create();
-  config_add_settings_to_string_builder(config, sb);
+  config_add_saved_settings_to_string_builder(config, sb);
   assert(strstr(string_builder_peek(sb), " -fileversion 3") != NULL);
+  assert_config_exec_status(config, string_builder_peek(sb),
+                            ERROR_STATUS_SUCCESS);
   string_builder_destroy(sb);
   assert_config_exec_status(config, "set -fileversion 3", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "set -fileversion 4",
                             ERROR_STATUS_CONFIG_LOAD_INT_ARG_OUT_OF_BOUNDS);
+  config_destroy(config);
+}
+
+// Saved settings keep what holds for a whole game -- the lexica, the letter
+// distribution, the rules and the display -- and leave out what a command
+// tunes, such as plies and endgame plies, while the full settings keep both.
+static void test_config_saved_settings(void) {
+  Config *config = config_create_default_test();
+  assert_config_exec_status(
+      config,
+      "set -lex CSW21 -ld english -bb 40 -hr false -maxnumdplays 20 "
+      "-boardcolor none -plies 3 -eplies 4 -numplays 30 -threads 2 -it 500",
+      ERROR_STATUS_SUCCESS);
+  StringBuilder *saved = string_builder_create();
+  config_add_saved_settings_to_string_builder(config, saved);
+  const char *saved_str = string_builder_peek(saved);
+  const char *kept[] = {" -l1 CSW21",        " -l2 CSW21",       " -k1 CSW21",
+                        " -ld english",      " -bb 40",          " -hr false",
+                        " -maxnumdplays 20", " -boardcolor none"};
+  for (size_t kept_idx = 0; kept_idx < sizeof(kept) / sizeof(kept[0]);
+       kept_idx++) {
+    assert(strstr(saved_str, kept[kept_idx]) != NULL);
+  }
+  const char *dropped[] = {" -plies ",   " -eplies ",      " -numplays ",
+                           " -threads ", " -it ",          " -w1 ",
+                           " -seed ",    " -savesettings "};
+  for (size_t dropped_idx = 0;
+       dropped_idx < sizeof(dropped) / sizeof(dropped[0]); dropped_idx++) {
+    assert(strstr(saved_str, dropped[dropped_idx]) == NULL);
+  }
+  StringBuilder *all = string_builder_create();
+  config_add_settings_to_string_builder(config, all);
+  assert(strstr(string_builder_peek(all), " -plies 3") != NULL);
+  assert(strstr(string_builder_peek(all), " -eplies 4") != NULL);
+  string_builder_destroy(all);
+
+  // A fresh config loaded from the saved settings has the saved settings and
+  // the defaults of the rest.
+  Config *reloaded = config_create_default_test();
+  assert_config_exec_status(reloaded, saved_str, ERROR_STATUS_SUCCESS);
+  StringBuilder *reloaded_saved = string_builder_create();
+  config_add_saved_settings_to_string_builder(reloaded, reloaded_saved);
+  assert_strings_equal(string_builder_peek(reloaded_saved), saved_str);
+  string_builder_destroy(reloaded_saved);
+  Config *defaults = config_create_default_test();
+  assert(config_get_plies(config) == 3);
+  assert(config_get_endgame_plies(config) == 4);
+  assert(config_get_plies(reloaded) == config_get_plies(defaults));
+  assert(config_get_endgame_plies(reloaded) ==
+         config_get_endgame_plies(defaults));
+  config_destroy(defaults);
+  string_builder_destroy(saved);
+  config_destroy(reloaded);
   config_destroy(config);
 }
 
@@ -4067,6 +4124,7 @@ void test_config(void) {
   test_config_note_move_interpolation();
   test_config_fg_required();
   test_config_upgrade_settings_line();
+  test_config_saved_settings();
   test_config_table_auto_settings();
   test_config_auto_tables_bind_both_players();
   test_config_builds_missing_tables_on_first_use();

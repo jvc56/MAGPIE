@@ -1,6 +1,5 @@
 #include "command_test.h"
 
-#include "../src/compat/cfile.h"
 #include "../src/compat/cpthread.h"
 #include "../src/compat/cpthread_defs.h"
 #include "../src/compat/ctime.h"
@@ -29,6 +28,9 @@ typedef struct ProcessArgs {
   const char *output_substr;
   int expected_outerror_line_count;
   const char *outerror_substr;
+  // Whether the run keeps the savesettings default rather than turning it
+  // off when the command does not set it.
+  bool default_save_settings;
   bool finished;
   cpthread_mutex_t finished_mutex;
 } ProcessArgs;
@@ -53,6 +55,7 @@ ProcessArgs *process_args_create(const char *arg_string,
   process_args->output_substr = output_substr;
   process_args->expected_outerror_line_count = expected_outerror_line_count;
   process_args->outerror_substr = outerror_substr;
+  process_args->default_save_settings = false;
   process_args->finished = false;
   cpthread_mutex_init(&process_args->finished_mutex);
   return process_args;
@@ -421,15 +424,24 @@ void test_command_execution(void) {
   config_destroy(config);
 }
 
-void test_process_command(const char *arg_string, const char *output_substr,
-                          int expected_outerror_line_count,
-                          const char *outerror_substr) {
+// Runs MAGPIE on `arg_string`. Unless `default_save_settings` is true or the
+// command sets -savesettings itself, the run neither loads nor saves the test
+// settings file, so one test's settings never reach another.
+static void run_process_command(const char *arg_string,
+                                const char *output_substr,
+                                int expected_outerror_line_count,
+                                const char *outerror_substr,
+                                bool default_save_settings) {
 
   char *test_output_filename = get_test_filename("output");
   char *test_outerror_filename = get_test_filename("outerror");
 
-  char *arg_string_with_exec =
-      get_formatted_string("./bin/magpie %s", arg_string);
+  const char *disable_save_settings = "";
+  if (!default_save_settings && !has_substring(arg_string, "-saves")) {
+    disable_save_settings = " -savesettings false";
+  }
+  char *arg_string_with_exec = get_formatted_string(
+      "./bin/magpie %s%s", arg_string, disable_save_settings);
 
   // Reset the contents of output
   fclose_or_die(fopen_or_die(test_output_filename, "w"));
@@ -485,6 +497,13 @@ void test_process_command(const char *arg_string, const char *output_substr,
   command_test_reset_stream_err();
 }
 
+void test_process_command(const char *arg_string, const char *output_substr,
+                          int expected_outerror_line_count,
+                          const char *outerror_substr) {
+  run_process_command(arg_string, output_substr, expected_outerror_line_count,
+                      outerror_substr, false);
+}
+
 void test_exec_single_command(void) {
   char *plies_error_substr = get_formatted_string(
       "error %d", ERROR_STATUS_CONFIG_LOAD_MALFORMED_INT_ARG);
@@ -499,9 +518,10 @@ void test_exec_single_command(void) {
 
 void *test_process_command_async(void *uncasted_process_args) {
   ProcessArgs *process_args = (ProcessArgs *)uncasted_process_args;
-  test_process_command(process_args->arg_string, process_args->output_substr,
-                       process_args->expected_outerror_line_count,
-                       process_args->outerror_substr);
+  run_process_command(process_args->arg_string, process_args->output_substr,
+                      process_args->expected_outerror_line_count,
+                      process_args->outerror_substr,
+                      process_args->default_save_settings);
   set_process_args_finished(process_args, true);
   return NULL;
 }
@@ -657,7 +677,8 @@ void test_exec_sync_command(void) {
   command_test_reset_stream_in();
 }
 
-void run_short_autoplay(const char *initial_cmd) {
+static void run_short_autoplay_with_save_settings(const char *initial_cmd,
+                                                  bool default_save_settings) {
   // Run the executable with a single command that doesn't change any settings
   // so that when the process finishes it will write to settings.txt file again
   // with the same settings
@@ -672,6 +693,7 @@ void run_short_autoplay(const char *initial_cmd) {
 
   ProcessArgs *process_args =
       process_args_create(initial_cmd, "autoplay games 2", 0, "");
+  process_args->default_save_settings = default_save_settings;
 
   cpthread_t cmd_execution_thread;
   cpthread_create(&cmd_execution_thread, test_process_command_async,
@@ -691,6 +713,10 @@ void run_short_autoplay(const char *initial_cmd) {
   process_args_destroy(process_args);
   free(test_input_filename);
   command_test_reset_stream_in();
+}
+
+void run_short_autoplay(const char *initial_cmd) {
+  run_short_autoplay_with_save_settings(initial_cmd, false);
 }
 
 void run_short_autoplay_with_terminate_command(const char *initial_cmd,
@@ -749,8 +775,20 @@ void test_save_settings(void) {
                      "-savesettings true -hr false");
 
   char *save1 = get_string_from_file_or_die(DEFAULT_TEST_SETTINGS_FILENAME);
+  // The settings that hold for a whole game are saved; those a command
+  // tunes, and savesettings itself, are not.
+  assert(has_substring(save1, " -l1 CSW21"));
+  assert(has_substring(save1, " -bb 73"));
+  assert(has_substring(save1, " -hr false"));
+  assert(has_substring(save1, " -fileversion "));
+  assert(!has_substring(save1, " -plies "));
+  assert(!has_substring(save1, " -eplies "));
+  assert(!has_substring(save1, " -threads "));
+  assert(!has_substring(save1, " -gp "));
+  assert(!has_substring(save1, " -savesettings "));
 
-  run_short_autoplay("set -savesettings true");
+  // Game pairs are not saved, so the second run asks for them again.
+  run_short_autoplay("set -savesettings true -gp true");
 
   char *save2 = get_string_from_file_or_die(DEFAULT_TEST_SETTINGS_FILENAME);
 
@@ -762,26 +800,39 @@ void test_save_settings(void) {
   free(save2);
 }
 
-// Unless the command line sets -savesettings true, MAGPIE neither writes the
-// settings file nor reads it.
-void test_settings_file_off_by_default(void) {
+// MAGPIE loads and saves the settings file unless the command line sets
+// -savesettings false, and loads only the settings the file keeps.
+void test_settings_file_on_by_default(void) {
   delete_file(DEFAULT_TEST_SETTINGS_FILENAME);
-  run_short_autoplay("set -mode sync -lex CSW21 -bb 73 -gp true -hr false");
-  assert(!cfile_access(DEFAULT_TEST_SETTINGS_FILENAME, CFILE_ACCESS_EXISTS));
+  run_short_autoplay_with_save_settings(
+      "set -mode sync -lex CSW21 -bb 73 -gp true -hr false -eplies 4", true);
+  char *saved = get_string_from_file_or_die(DEFAULT_TEST_SETTINGS_FILENAME);
+  assert(has_substring(saved, " -bb 73"));
+  assert(!has_substring(saved, " -eplies "));
+  free(saved);
 
   // A settings file that fails to load shows whether it was read.
   FILE *settings_file = fopen_or_die(DEFAULT_TEST_SETTINGS_FILENAME, "w");
+  fprintf_or_die(settings_file, "set -bb 2h3\n");
+  fclose_or_die(settings_file);
+  char *bingo_bonus_error_substr = get_formatted_string(
+      "error %d", ERROR_STATUS_CONFIG_LOAD_MALFORMED_INT_ARG);
+  run_process_command("infer 1 MUZAKY 58 -numplays 20 -threads 4 -lex CSW21 "
+                      "-printonfinish true",
+                      NULL, 2, bingo_bonus_error_substr, true);
+  test_process_command("infer 1 MUZAKY 58 -numplays 20 -threads 4 -lex CSW21 "
+                       "-printonfinish true -savesettings false",
+                       "Total target racks", 0, NULL);
+  free(bingo_bonus_error_substr);
+
+  // A setting the file does not keep, as an older MAGPIE saved them, is
+  // dropped when the file is loaded.
+  settings_file = fopen_or_die(DEFAULT_TEST_SETTINGS_FILENAME, "w");
   fprintf_or_die(settings_file, "set -plies 2h3\n");
   fclose_or_die(settings_file);
-  char *plies_error_substr = get_formatted_string(
-      "error %d", ERROR_STATUS_CONFIG_LOAD_MALFORMED_INT_ARG);
-  test_process_command("infer 1 MUZAKY 58 -numplays 20 -threads 4 -lex CSW21 "
-                       "-printonfinish true",
-                       "Total target racks", 0, NULL);
-  test_process_command("infer 1 MUZAKY 58 -numplays 20 -threads 4 -lex CSW21 "
-                       "-printonfinish true -savesettings true",
-                       NULL, 2, plies_error_substr);
-  free(plies_error_substr);
+  run_process_command("infer 1 MUZAKY 58 -numplays 20 -threads 4 -lex CSW21 "
+                      "-printonfinish true",
+                      "Total target racks", 0, NULL, true);
   remove_or_die(DEFAULT_TEST_SETTINGS_FILENAME);
 }
 
@@ -834,7 +885,7 @@ void test_command(void) {
   test_exec_sync_command();
   test_exec_quit_aliases();
   test_save_settings();
-  test_settings_file_off_by_default();
+  test_settings_file_on_by_default();
   command_test_reset_stream_out();
   command_test_reset_stream_err();
   command_test_reset_stream_in();

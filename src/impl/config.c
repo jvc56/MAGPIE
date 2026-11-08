@@ -1318,7 +1318,7 @@ static void add_analyze_and_settings_help_arg(arg_token_t arg_token,
             "writes it. A file saved by an older version recorded every "
             "setting, including defaults that have since changed, so those "
             "settings are dropped when it is loaded and the new defaults "
-            "apply.";
+            "apply, as are the settings a settings file no longer keeps.";
     break;
   default:
     break;
@@ -2911,10 +2911,14 @@ static void help_entry_fill(const Config *config, int token,
       usages[0] = "<true_or_false>";
       examples[0] = "true";
       examples[1] = "false";
-      text = "Specifies whether or not to save the current settings to "
-             "settings.txt after every command. It is false by default. The "
-             "saved settings are loaded on a startup that sets this to true, "
-             "and ignored on any other.";
+      text = "Specifies whether or not to save settings to settings.txt "
+             "after every command. It is true by default. Only the settings "
+             "that hold for a whole game are saved: the lexica, leaves, "
+             "letter distribution, board, bonuses and the display settings. "
+             "Settings that a command or an analysis tunes, such as plies, "
+             "endgame plies, iterations and threads, are never saved. The "
+             "saved settings are loaded on a startup that does not set this "
+             "to false.";
       break;
     case ARG_TOKEN_AUTOSAVE_GCG:
       usages[0] = "<true_or_false>";
@@ -16580,7 +16584,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->print_on_finish = false;
   config->show_game_with_moves = true;
   config->show_prompt = true;
-  config->save_settings = false;
+  config->save_settings = true;
   config->autosave_gcg = true;
   config->fg_required = true;
   config->loaded_settings = true;
@@ -16764,11 +16768,67 @@ static void config_add_table_setting_to_string_builder(const Config *config,
                                           player_index));
 }
 
-void config_add_settings_to_string_builder(const Config *config,
-                                           StringBuilder *sb) {
+// The settings a settings file keeps: those that hold for a whole game or
+// session -- the rules, the lexica and the data that goes with them, and how
+// things are displayed. Settings a command or an analysis tunes (plies,
+// endgame plies, iterations, threads, seeds, the tables, ...) start from
+// their defaults on every run.
+static const arg_token_t config_saved_settings[] = {
+    ARG_TOKEN_BINGO_BONUS,
+    ARG_TOKEN_CHALLENGE_BONUS,
+    ARG_TOKEN_BOARD_LAYOUT,
+    ARG_TOKEN_GAME_VARIANT,
+    ARG_TOKEN_LETTER_DISTRIBUTION,
+    ARG_TOKEN_LEXICON,
+    ARG_TOKEN_P1_LEXICON,
+    ARG_TOKEN_P2_LEXICON,
+    ARG_TOKEN_LEAVES,
+    ARG_TOKEN_P1_LEAVES,
+    ARG_TOKEN_P2_LEAVES,
+    ARG_TOKEN_WIN_PCT,
+    ARG_TOKEN_SHPLIES,
+    ARG_TOKEN_SHOW_BU,
+    ARG_TOKEN_PEG_OUT_WIDTH,
+    ARG_TOKEN_PEG_OUT_LINES,
+    ARG_TOKEN_MAX_NUMBER_OF_DISPLAY_PLAYS,
+    ARG_TOKEN_HUMAN_READABLE,
+    ARG_TOKEN_PRINT_BOARDS,
+    ARG_TOKEN_BOARD_COLOR,
+    ARG_TOKEN_BOARD_TILE_GLYPHS,
+    ARG_TOKEN_BOARD_BORDER,
+    ARG_TOKEN_BOARD_COLUMN_LABEL,
+    ARG_TOKEN_ON_TURN_MARKER,
+    ARG_TOKEN_ON_TURN_COLOR,
+    ARG_TOKEN_ON_TURN_SCORE_STYLE,
+    ARG_TOKEN_PRETTY,
+    ARG_TOKEN_PRINT_ON_FINISH,
+    ARG_TOKEN_SHOW_GAME_WITH_MOVES,
+    ARG_TOKEN_SHOW_PROMPT,
+    ARG_TOKEN_AUTOSAVE_GCG,
+    ARG_TOKEN_FG_REQUIRED,
+    ARG_TOKEN_SETTINGS_VERSION,
+};
+
+static bool config_setting_is_saved(arg_token_t arg_token) {
+  const int num_saved =
+      (int)(sizeof(config_saved_settings) / sizeof(config_saved_settings[0]));
+  for (int saved_idx = 0; saved_idx < num_saved; saved_idx++) {
+    if (config_saved_settings[saved_idx] == arg_token) {
+      return true;
+    }
+  }
+  return false;
+}
+
+static void config_add_settings_to_string_builder_internal(const Config *config,
+                                                           StringBuilder *sb,
+                                                           bool saved_only) {
   string_builder_add_string(sb, config->pargs[ARG_TOKEN_SET]->name);
   for (arg_token_t arg_token = 0; arg_token < NUMBER_OF_ARG_TOKENS;
        arg_token++) {
+    if (saved_only && !config_setting_is_saved(arg_token)) {
+      continue;
+    }
     switch (arg_token) {
     case ARG_TOKEN_HELP:
     case ARG_TOKEN_VERSION:
@@ -17588,7 +17648,17 @@ void config_add_settings_to_string_builder(const Config *config,
   }
 }
 
-bool config_command_turns_on_save_settings(Config *config, const char *cmd) {
+void config_add_settings_to_string_builder(const Config *config,
+                                           StringBuilder *sb) {
+  config_add_settings_to_string_builder_internal(config, sb, false);
+}
+
+void config_add_saved_settings_to_string_builder(const Config *config,
+                                                 StringBuilder *sb) {
+  config_add_settings_to_string_builder_internal(config, sb, true);
+}
+
+bool config_command_turns_off_save_settings(Config *config, const char *cmd) {
   if (is_string_empty_or_whitespace(cmd)) {
     return false;
   }
@@ -17596,15 +17666,15 @@ bool config_command_turns_on_save_settings(Config *config, const char *cmd) {
   StringSplitter *cmd_split_string = split_string_by_whitespace(cmd, true);
   string_splitter_trim_char(cmd_split_string, ';');
   config_load_parsed_args(config, cmd_split_string, cmd, error_stack);
-  bool save_settings = false;
+  bool save_settings = true;
   if (error_stack_is_empty(error_stack)) {
     config_load_bool(config, ARG_TOKEN_SAVE_SETTINGS, &save_settings,
                      error_stack);
   }
   string_splitter_destroy(cmd_split_string);
-  const bool turns_on = error_stack_is_empty(error_stack) && save_settings;
+  const bool turns_off = error_stack_is_empty(error_stack) && !save_settings;
   error_stack_destroy(error_stack);
-  return turns_on;
+  return turns_off;
 }
 
 // A setting whose default changed in `version`: a settings file older than
@@ -17675,7 +17745,8 @@ char *config_upgrade_settings_line(const Config *config, const char *line) {
         item[0] == '-' ? config_arg_token_from_full_name(config, item + 1)
                        : NUMBER_OF_ARG_TOKENS;
     if (arg_token != NUMBER_OF_ARG_TOKENS &&
-        config_setting_is_stale(arg_token, file_version)) {
+        (!config_setting_is_saved(arg_token) ||
+         config_setting_is_stale(arg_token, file_version))) {
       item_idx += 1 + config->pargs[arg_token]->num_values;
       continue;
     }
@@ -17694,7 +17765,7 @@ void save_config_settings(const Config *config, ErrorStack *error_stack) {
     return;
   }
   StringBuilder *sb = string_builder_create();
-  config_add_settings_to_string_builder(config, sb);
+  config_add_saved_settings_to_string_builder(config, sb);
   write_string_to_file(config_get_settings_filename(config), "wb",
                        string_builder_peek(sb), error_stack);
   string_builder_destroy(sb);

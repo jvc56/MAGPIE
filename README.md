@@ -308,11 +308,16 @@ sto
 magpie>
 ```
 
-By default MAGPIE forgets its settings when it exits. Start it with
-`-savesettings true` (for example `./bin/magpie set -savesettings true`) to
-load them from `settings.txt` in the current directory on startup and save
-them there after every successful command. MAGPIE ignores `settings.txt` on any startup
-without `-savesettings true`.
+After every successful command typed at the prompt, MAGPIE saves the
+settings that hold for a whole game to `settings.txt` in the current
+directory, and loads them from there on the next startup. These are the
+lexica, leaves and win percentage table, the letter distribution, board
+layout, game variant and bonuses, and the display settings (such as
+`-hr`, `-maxnumdplays`, `-shplies` and the board options). Settings that a
+command tunes, such as `-plies`, `-eplies`, `-it`, `-numplays` and
+`-threads`, are never saved, so each run starts them from their defaults.
+Start MAGPIE with `-savesettings false` to neither load nor save
+`settings.txt`.
 
 ### Setting up a game
 

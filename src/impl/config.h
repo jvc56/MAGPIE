@@ -275,19 +275,27 @@ void config_parse_gcg_string(Config *config, const char *gcg_string,
                              GameHistory *game_history,
                              ErrorStack *error_stack);
 // Settings
+// Every setting, as a set command that restores them.
 void config_add_settings_to_string_builder(const Config *config,
                                            StringBuilder *sb);
-// Whether `cmd` sets savesettings to true. It is only parsed, not applied,
+// Only the settings a settings file keeps: those that hold for a whole game,
+// such as the lexica, the letter distribution and the display settings, and
+// not those a command tunes, such as plies and endgame plies.
+void config_add_saved_settings_to_string_builder(const Config *config,
+                                                 StringBuilder *sb);
+// Whether `cmd` sets savesettings to false. It is only parsed, not applied,
 // so a malformed `cmd` is reported when it is run, not here.
-bool config_command_turns_on_save_settings(Config *config, const char *cmd);
-// Writes config's current settings to config_get_settings_filename(config)
-// (settings.txt by default), the same file the REPL loop keeps in sync after
-// every command. No-op if config_get_save_settings(config) is false, which it
-// is unless savesettings was set to true.
+bool config_command_turns_off_save_settings(Config *config, const char *cmd);
+// Writes config's saved settings (see
+// config_add_saved_settings_to_string_builder) to
+// config_get_settings_filename(config) (settings.txt by default), the same
+// file the REPL loop keeps in sync after every command. No-op if
+// config_get_save_settings(config) is false.
 void save_config_settings(const Config *config, ErrorStack *error_stack);
-// A line of a saved settings file, with the settings dropped whose defaults
-// changed after the version the file records with -fileversion (1 when it
-// records none). The caller frees the result.
+// A line of a saved settings file, with the settings dropped that a settings
+// file does not keep, and those whose defaults changed after the version the
+// file records with -fileversion (1 when it records none). The caller frees
+// the result.
 char *config_upgrade_settings_line(const Config *config, const char *line);
 // The Config contribute's tasks run in, sharing the caller's thread control
 // and never saving settings, so the caller's session and settings file are
