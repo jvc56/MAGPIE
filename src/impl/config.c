@@ -390,7 +390,6 @@ struct Config {
   char *contribute_layout_identity;
   bool autosave_gcg;
   bool fg_required;
-  bool loaded_settings;
   // Plies of net result a PAT training label spans.
   int pat_label_plies;
   bool p1_sim_with_inference;
@@ -639,14 +638,6 @@ bool config_get_use_mmap_for_rit(const Config *config) {
 
 bool config_get_fg_required(const Config *config) {
   return config->fg_required;
-}
-
-bool config_get_loaded_settings(const Config *config) {
-  return config->loaded_settings;
-}
-
-void config_set_loaded_settings(Config *config, const bool value) {
-  config->loaded_settings = value;
 }
 
 PlayersData *config_get_players_data(const Config *config) {
@@ -1318,7 +1309,7 @@ static void add_analyze_and_settings_help_arg(arg_token_t arg_token,
             "writes it. A file saved by an older version recorded every "
             "setting, including defaults that have since changed, so those "
             "settings are dropped when it is loaded and the new defaults "
-            "apply.";
+            "apply, as are the settings a settings file no longer keeps.";
     break;
   default:
     break;
@@ -2911,10 +2902,15 @@ static void help_entry_fill(const Config *config, int token,
       usages[0] = "<true_or_false>";
       examples[0] = "true";
       examples[1] = "false";
-      text = "Specifies whether or not to save the current settings to "
-             "settings.txt after every command. It is false by default. The "
-             "saved settings are loaded on a startup that sets this to true, "
-             "and ignored on any other.";
+      text = "Specifies whether or not to save settings to settings.txt "
+             "after every command. It is true by default. Only the settings "
+             "that hold for a whole game are saved: the lexica, leaves, "
+             "letter distribution, board, bonuses and the display settings. "
+             "Settings that a command or an analysis tunes, such as plies, "
+             "endgame plies, iterations and threads, are never saved. The "
+             "saved settings are loaded on a startup that does not set this "
+             "to false; a saved setting that is unknown or fails to load is "
+             "skipped with a warning.";
       break;
     case ARG_TOKEN_AUTOSAVE_GCG:
       usages[0] = "<true_or_false>";
@@ -14791,8 +14787,10 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
   // checked, only if something needs it.
   const char *new_win_pct_name =
       config_get_parg_value(config, ARG_TOKEN_WIN_PCT, 0);
+  // The table named before, put back if the new one fails to load, so a
+  // bad -winpct is not left behind for the next sim to fail on.
+  char *previous_win_pct_explicit_name = config->win_pct_explicit_name;
   if (new_win_pct_name != NULL) {
-    free(config->win_pct_explicit_name);
     config->win_pct_explicit_name =
         strings_equal(new_win_pct_name, DEFAULT_WIN_PCT_ARG)
             ? NULL
@@ -14801,9 +14799,17 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
   if (config->win_pct_explicit_name != NULL) {
     config_ensure_win_pcts(config, error_stack);
     if (!error_stack_is_empty(error_stack)) {
+      if (new_win_pct_name != NULL) {
+        free(config->win_pct_explicit_name);
+        config->win_pct_explicit_name = previous_win_pct_explicit_name;
+      }
       return;
     }
-  } else if (config->win_pcts != NULL) {
+  }
+  if (new_win_pct_name != NULL) {
+    free(previous_win_pct_explicit_name);
+  }
+  if (config->win_pct_explicit_name == NULL && config->win_pcts != NULL) {
     char *target_name = config_win_pct_target_name(config);
     ErrorStack *coverage_errors = error_stack_create();
     config_check_win_pct_coverage(config, coverage_errors);
@@ -14960,7 +14966,7 @@ void config_execute_command(Config *config, ErrorStack *error_stack) {
     config_get_parg_exec_func(config, config->exec_parg_token)(config,
                                                                error_stack);
     config_report_movegen_limit(config, gen_stop_movegen_limit());
-    if (config->print_on_finish && config->loaded_settings) {
+    if (config->print_on_finish) {
       char *finished_msg = get_status_finished_str(config);
       thread_control_print(config_get_thread_control(config), finished_msg);
       free(finished_msg);
@@ -16580,10 +16586,9 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->print_on_finish = false;
   config->show_game_with_moves = true;
   config->show_prompt = true;
-  config->save_settings = false;
+  config->save_settings = true;
   config->autosave_gcg = true;
   config->fg_required = true;
-  config->loaded_settings = true;
   config->game_variant = DEFAULT_GAME_VARIANT;
   config->ld = NULL;
   config->players_data = players_data_create(default_use_wmp);
@@ -16764,11 +16769,67 @@ static void config_add_table_setting_to_string_builder(const Config *config,
                                           player_index));
 }
 
-void config_add_settings_to_string_builder(const Config *config,
-                                           StringBuilder *sb) {
+// The settings a settings file keeps: those that hold for a whole game or
+// session -- the rules, the lexica and the data that goes with them, and how
+// things are displayed. Settings a command or an analysis tunes (plies,
+// endgame plies, iterations, threads, seeds, the tables, ...) start from
+// their defaults on every run.
+static const arg_token_t config_saved_settings[] = {
+    ARG_TOKEN_BINGO_BONUS,
+    ARG_TOKEN_CHALLENGE_BONUS,
+    ARG_TOKEN_BOARD_LAYOUT,
+    ARG_TOKEN_GAME_VARIANT,
+    ARG_TOKEN_LETTER_DISTRIBUTION,
+    ARG_TOKEN_LEXICON,
+    ARG_TOKEN_P1_LEXICON,
+    ARG_TOKEN_P2_LEXICON,
+    ARG_TOKEN_LEAVES,
+    ARG_TOKEN_P1_LEAVES,
+    ARG_TOKEN_P2_LEAVES,
+    ARG_TOKEN_WIN_PCT,
+    ARG_TOKEN_SHPLIES,
+    ARG_TOKEN_SHOW_BU,
+    ARG_TOKEN_PEG_OUT_WIDTH,
+    ARG_TOKEN_PEG_OUT_LINES,
+    ARG_TOKEN_MAX_NUMBER_OF_DISPLAY_PLAYS,
+    ARG_TOKEN_HUMAN_READABLE,
+    ARG_TOKEN_PRINT_BOARDS,
+    ARG_TOKEN_BOARD_COLOR,
+    ARG_TOKEN_BOARD_TILE_GLYPHS,
+    ARG_TOKEN_BOARD_BORDER,
+    ARG_TOKEN_BOARD_COLUMN_LABEL,
+    ARG_TOKEN_ON_TURN_MARKER,
+    ARG_TOKEN_ON_TURN_COLOR,
+    ARG_TOKEN_ON_TURN_SCORE_STYLE,
+    ARG_TOKEN_PRETTY,
+    ARG_TOKEN_PRINT_ON_FINISH,
+    ARG_TOKEN_SHOW_GAME_WITH_MOVES,
+    ARG_TOKEN_SHOW_PROMPT,
+    ARG_TOKEN_AUTOSAVE_GCG,
+    ARG_TOKEN_FG_REQUIRED,
+    ARG_TOKEN_SETTINGS_VERSION,
+};
+
+static bool config_setting_is_saved(arg_token_t arg_token) {
+  const int num_saved =
+      (int)(sizeof(config_saved_settings) / sizeof(config_saved_settings[0]));
+  for (int saved_idx = 0; saved_idx < num_saved; saved_idx++) {
+    if (config_saved_settings[saved_idx] == arg_token) {
+      return true;
+    }
+  }
+  return false;
+}
+
+static void config_add_settings_to_string_builder_internal(const Config *config,
+                                                           StringBuilder *sb,
+                                                           bool saved_only) {
   string_builder_add_string(sb, config->pargs[ARG_TOKEN_SET]->name);
   for (arg_token_t arg_token = 0; arg_token < NUMBER_OF_ARG_TOKENS;
        arg_token++) {
+    if (saved_only && !config_setting_is_saved(arg_token)) {
+      continue;
+    }
     switch (arg_token) {
     case ARG_TOKEN_HELP:
     case ARG_TOKEN_VERSION:
@@ -17588,7 +17649,17 @@ void config_add_settings_to_string_builder(const Config *config,
   }
 }
 
-bool config_command_turns_on_save_settings(Config *config, const char *cmd) {
+void config_add_settings_to_string_builder(const Config *config,
+                                           StringBuilder *sb) {
+  config_add_settings_to_string_builder_internal(config, sb, false);
+}
+
+void config_add_saved_settings_to_string_builder(const Config *config,
+                                                 StringBuilder *sb) {
+  config_add_settings_to_string_builder_internal(config, sb, true);
+}
+
+bool config_command_turns_off_save_settings(Config *config, const char *cmd) {
   if (is_string_empty_or_whitespace(cmd)) {
     return false;
   }
@@ -17596,15 +17667,15 @@ bool config_command_turns_on_save_settings(Config *config, const char *cmd) {
   StringSplitter *cmd_split_string = split_string_by_whitespace(cmd, true);
   string_splitter_trim_char(cmd_split_string, ';');
   config_load_parsed_args(config, cmd_split_string, cmd, error_stack);
-  bool save_settings = false;
+  bool save_settings = true;
   if (error_stack_is_empty(error_stack)) {
     config_load_bool(config, ARG_TOKEN_SAVE_SETTINGS, &save_settings,
                      error_stack);
   }
   string_splitter_destroy(cmd_split_string);
-  const bool turns_on = error_stack_is_empty(error_stack) && save_settings;
+  const bool turns_off = error_stack_is_empty(error_stack) && !save_settings;
   error_stack_destroy(error_stack);
-  return turns_on;
+  return turns_off;
 }
 
 // A setting whose default changed in `version`: a settings file older than
@@ -17650,8 +17721,37 @@ static bool config_setting_is_stale(arg_token_t arg_token, int file_version) {
   return false;
 }
 
-char *config_upgrade_settings_line(const Config *config, const char *line) {
-  StringSplitter *items = split_string_by_whitespace(line, true);
+// The settings that load together: a lexicon goes with its letter
+// distribution and leaves, and loading them stops at the first that fails,
+// so they are tried in a scratch config before they are applied.
+static const arg_token_t config_lexicon_settings[] = {
+    ARG_TOKEN_LETTER_DISTRIBUTION, ARG_TOKEN_LEXICON, ARG_TOKEN_P1_LEXICON,
+    ARG_TOKEN_P2_LEXICON,          ARG_TOKEN_LEAVES,  ARG_TOKEN_P1_LEAVES,
+    ARG_TOKEN_P2_LEAVES,
+};
+
+static bool config_setting_is_lexicon_setting(arg_token_t arg_token) {
+  const int num_lexicon = (int)(sizeof(config_lexicon_settings) /
+                                sizeof(config_lexicon_settings[0]));
+  for (int lexicon_idx = 0; lexicon_idx < num_lexicon; lexicon_idx++) {
+    if (config_lexicon_settings[lexicon_idx] == arg_token) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// Whether a settings file item names a setting rather than giving a value,
+// by the rule the command parser uses: a dash followed by anything but a
+// digit, so that a negative number is a value.
+static bool config_settings_item_is_name(const char *item) {
+  return string_length(item) > 1 && item[0] == '-' &&
+         !isdigit((unsigned char)item[1]);
+}
+
+// The -fileversion a settings file line records, or 1 when it records none.
+static int config_settings_line_version(const Config *config,
+                                        const StringSplitter *items) {
   const int num_items = string_splitter_get_number_of_items(items);
   const char *version_name = config->pargs[ARG_TOKEN_SETTINGS_VERSION]->name;
   int file_version = 1;
@@ -17667,26 +17767,175 @@ char *config_upgrade_settings_line(const Config *config, const char *line) {
       error_stack_destroy(error_stack);
     }
   }
+  return file_version;
+}
+
+// Items [first_idx, end_idx) of `items`, joined by spaces.
+static char *config_settings_join_items(const StringSplitter *items,
+                                        int first_idx, int end_idx) {
   StringBuilder *sb = string_builder_create();
-  int item_idx = 0;
-  while (item_idx < num_items) {
-    const char *item = string_splitter_get_item(items, item_idx);
-    const arg_token_t arg_token =
-        item[0] == '-' ? config_arg_token_from_full_name(config, item + 1)
-                       : NUMBER_OF_ARG_TOKENS;
-    if (arg_token != NUMBER_OF_ARG_TOKENS &&
-        config_setting_is_stale(arg_token, file_version)) {
-      item_idx += 1 + config->pargs[arg_token]->num_values;
-      continue;
-    }
-    if (string_builder_length(sb) > 0) {
+  for (int item_idx = first_idx; item_idx < end_idx; item_idx++) {
+    if (item_idx > first_idx) {
       string_builder_add_char(sb, ' ');
     }
-    string_builder_add_string(sb, item);
-    item_idx++;
+    string_builder_add_string(sb, string_splitter_get_item(items, item_idx));
+  }
+  return string_builder_dump_and_destroy(sb, NULL);
+}
+
+// Splits a settings file line into what to load: the lexicon settings
+// together, as one string of settings (empty when the line has none), and
+// each other setting on its own in `settings`, so that a value that fails to
+// load loses only itself. A setting is a name and the values up to the next
+// name. Settings the file does not keep, those whose defaults changed after
+// the line's -fileversion, and -fileversion itself are dropped. Unknown names
+// (only a current full name is known) and lines that are not set commands
+// are dropped with a warning.
+static void config_settings_line_split(Config *config, const char *line,
+                                       StringBuilder *lexicon_settings,
+                                       StringList *settings,
+                                       StringList *warnings) {
+  StringSplitter *items = split_string_by_whitespace(line, true);
+  const int num_items = string_splitter_get_number_of_items(items);
+  if (num_items == 0) {
+    string_splitter_destroy(items);
+    return;
+  }
+  ErrorStack *command_error_stack = error_stack_create();
+  const arg_token_t command_token = get_token_from_string(
+      config, string_splitter_get_item(items, 0), command_error_stack);
+  error_stack_destroy(command_error_stack);
+  if (command_token != ARG_TOKEN_SET) {
+    char *warning = get_formatted_string(
+        "ignored a line that is not a set command: %s", line);
+    string_list_add_string(warnings, warning);
+    free(warning);
+    string_splitter_destroy(items);
+    return;
+  }
+  const int file_version = config_settings_line_version(config, items);
+  int item_idx = 1;
+  while (item_idx < num_items) {
+    const char *name_item = string_splitter_get_item(items, item_idx);
+    int end_idx = item_idx + 1;
+    while (end_idx < num_items &&
+           !config_settings_item_is_name(
+               string_splitter_get_item(items, end_idx))) {
+      end_idx++;
+    }
+    char *setting = config_settings_join_items(items, item_idx, end_idx);
+    const arg_token_t arg_token =
+        config_settings_item_is_name(name_item)
+            ? config_arg_token_from_full_name(config, name_item + 1)
+            : NUMBER_OF_ARG_TOKENS;
+    if (arg_token == NUMBER_OF_ARG_TOKENS) {
+      char *warning =
+          config_settings_item_is_name(name_item)
+              ? get_formatted_string("ignored unknown setting %s", setting)
+              : get_formatted_string("ignored '%s', which follows no setting",
+                                     setting);
+      string_list_add_string(warnings, warning);
+      free(warning);
+    } else if (config_setting_is_saved(arg_token) &&
+               !config_setting_is_stale(arg_token, file_version) &&
+               arg_token != ARG_TOKEN_SETTINGS_VERSION) {
+      if (config_setting_is_lexicon_setting(arg_token)) {
+        if (string_builder_length(lexicon_settings) > 0) {
+          string_builder_add_char(lexicon_settings, ' ');
+        }
+        string_builder_add_string(lexicon_settings, setting);
+      } else {
+        string_list_add_string(settings, setting);
+      }
+    }
+    free(setting);
+    item_idx = end_idx;
   }
   string_splitter_destroy(items);
-  return string_builder_dump_and_destroy(sb, NULL);
+}
+
+// Loads `settings` into a scratch config with config's data paths, so that
+// settings which can fail part way are checked before they are applied.
+static void config_try_settings(const Config *config, const char *settings,
+                                ErrorStack *error_stack) {
+  const ConfigArgs args = {.data_paths = config->data_paths,
+                           .settings_filename = config->settings_filename,
+                           .use_wmp = false};
+  Config *scratch = config_create(&args, error_stack);
+  if (!scratch) {
+    return;
+  }
+  scratch->save_settings = false;
+  if (error_stack_is_empty(error_stack)) {
+    char *cmd = get_formatted_string(
+        "%s %s", config->pargs[ARG_TOKEN_SET]->name, settings);
+    config_load_command(scratch, cmd, error_stack);
+    free(cmd);
+  }
+  config_destroy(scratch);
+}
+
+// Applies `settings`, first trying them in a scratch config when
+// `try_first`, or adds a warning naming them and why they failed.
+static void config_apply_settings(Config *config, const char *settings,
+                                  bool try_first, StringList *warnings) {
+  ErrorStack *error_stack = error_stack_create();
+  if (try_first) {
+    config_try_settings(config, settings, error_stack);
+  }
+  if (error_stack_is_empty(error_stack)) {
+    char *cmd = get_formatted_string(
+        "%s %s", config->pargs[ARG_TOKEN_SET]->name, settings);
+    config_load_command(config, cmd, error_stack);
+    free(cmd);
+  }
+  if (!error_stack_is_empty(error_stack)) {
+    // One line per warning: the errors, which are one per line, are joined.
+    char *errors = error_stack_get_string_and_reset(error_stack);
+    StringSplitter *error_lines = split_string_by_newline(errors, true);
+    const int num_error_lines =
+        string_splitter_get_number_of_items(error_lines);
+    StringBuilder *warning_sb = string_builder_create();
+    string_builder_add_formatted_string(warning_sb, "ignored %s: ", settings);
+    for (int line_idx = 0; line_idx < num_error_lines; line_idx++) {
+      if (line_idx > 0) {
+        string_builder_add_string(warning_sb, "; ");
+      }
+      string_builder_add_string(
+          warning_sb, string_splitter_get_item(error_lines, line_idx));
+    }
+    string_list_add_string(warnings, string_builder_peek(warning_sb));
+    string_builder_destroy(warning_sb);
+    string_splitter_destroy(error_lines);
+    free(errors);
+  }
+  error_stack_destroy(error_stack);
+}
+
+void config_load_settings(Config *config, const char *settings_string,
+                          StringList *warnings) {
+  StringSplitter *lines = split_string_by_newline(settings_string, true);
+  const int num_lines = string_splitter_get_number_of_items(lines);
+  for (int line_idx = 0; line_idx < num_lines; line_idx++) {
+    StringBuilder *lexicon_settings = string_builder_create();
+    StringList *settings = string_list_create();
+    config_settings_line_split(config,
+                               string_splitter_get_item(lines, line_idx),
+                               lexicon_settings, settings, warnings);
+    if (string_builder_length(lexicon_settings) > 0) {
+      config_apply_settings(config, string_builder_peek(lexicon_settings), true,
+                            warnings);
+    }
+    const int num_settings = string_list_get_count(settings);
+    for (int setting_idx = 0; setting_idx < num_settings; setting_idx++) {
+      config_apply_settings(config,
+                            string_list_get_string(settings, setting_idx),
+                            false, warnings);
+    }
+    string_list_destroy(settings);
+    string_builder_destroy(lexicon_settings);
+  }
+  string_splitter_destroy(lines);
 }
 
 void save_config_settings(const Config *config, ErrorStack *error_stack) {
@@ -17694,7 +17943,7 @@ void save_config_settings(const Config *config, ErrorStack *error_stack) {
     return;
   }
   StringBuilder *sb = string_builder_create();
-  config_add_settings_to_string_builder(config, sb);
+  config_add_saved_settings_to_string_builder(config, sb);
   write_string_to_file(config_get_settings_filename(config), "wb",
                        string_builder_peek(sb), error_stack);
   string_builder_destroy(sb);
