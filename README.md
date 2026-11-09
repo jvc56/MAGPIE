@@ -316,8 +316,10 @@ layout, game variant and bonuses, and the display settings (such as
 `-hr`, `-maxnumdplays`, `-shplies` and the board options). Settings that a
 command tunes, such as `-plies`, `-eplies`, `-it`, `-numplays` and
 `-threads`, are never saved, so each run starts them from their defaults.
-Start MAGPIE with `-savesettings false` to neither load nor save
-`settings.txt`.
+A setting MAGPIE does not know (as from an older or newer version) or
+cannot load (such as a lexicon that is no longer in the data) is skipped
+with a warning, and the rest of the file still loads. Start MAGPIE with
+`-savesettings false` to neither load nor save `settings.txt`.
 
 ### Setting up a game
 

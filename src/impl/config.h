@@ -200,8 +200,6 @@ bool config_get_save_settings(const Config *config);
 // Whether a rack info table this config loads is memory-mapped (-ritmmap).
 bool config_get_use_mmap_for_rit(const Config *config);
 bool config_get_fg_required(const Config *config);
-bool config_get_loaded_settings(const Config *config);
-void config_set_loaded_settings(Config *config, const bool value);
 double config_get_tt_fraction_of_mem(const Config *config);
 double config_get_utility_w_winpct(const Config *config);
 double config_get_utility_w_spread(const Config *config);
@@ -292,11 +290,16 @@ bool config_command_turns_off_save_settings(Config *config, const char *cmd);
 // file the REPL loop keeps in sync after every command. No-op if
 // config_get_save_settings(config) is false.
 void save_config_settings(const Config *config, ErrorStack *error_stack);
-// A line of a saved settings file, with the settings dropped that a settings
-// file does not keep, and those whose defaults changed after the version the
-// file records with -fileversion (1 when it records none). The caller frees
-// the result.
-char *config_upgrade_settings_line(const Config *config, const char *line);
+// Loads the contents of a saved settings file. Each setting is loaded on its
+// own, except the letter distribution, lexica and leaves, which are loaded
+// together after a trial in a scratch config, so a value that fails to load
+// loses only itself (or its lexicon group) and leaves the rest applied. A
+// setting the file does not keep, or whose default changed after the file's
+// -fileversion, is dropped. Each unknown setting, line that is not a set
+// command, and setting that failed to load is dropped and described in
+// `warnings`.
+void config_load_settings(Config *config, const char *settings_string,
+                          StringList *warnings);
 // The Config contribute's tasks run in, sharing the caller's thread control
 // and never saving settings, so the caller's session and settings file are
 // left as they were; and its destruction, which leaves the thread control to

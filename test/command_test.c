@@ -811,22 +811,34 @@ void test_settings_file_on_by_default(void) {
   assert(!has_substring(saved, " -eplies "));
   free(saved);
 
-  // A settings file that fails to load shows whether it was read.
+  // A value that fails to load is left out with a warning, which also shows
+  // whether the file was read; the command still runs.
   FILE *settings_file = fopen_or_die(DEFAULT_TEST_SETTINGS_FILENAME, "w");
   fprintf_or_die(settings_file, "set -bb 2h3\n");
   fclose_or_die(settings_file);
-  char *bingo_bonus_error_substr = get_formatted_string(
-      "error %d", ERROR_STATUS_CONFIG_LOAD_MALFORMED_INT_ARG);
+  char *bingo_bonus_warning = get_formatted_string(
+      "%s: ignored -bb 2h3: (error %d)", DEFAULT_TEST_SETTINGS_FILENAME,
+      ERROR_STATUS_CONFIG_LOAD_MALFORMED_INT_ARG);
   run_process_command("infer 1 MUZAKY 58 -numplays 20 -threads 4 -lex CSW21 "
                       "-printonfinish true",
-                      NULL, 2, bingo_bonus_error_substr, true);
+                      "Total target racks", 1, bingo_bonus_warning, true);
   test_process_command("infer 1 MUZAKY 58 -numplays 20 -threads 4 -lex CSW21 "
                        "-printonfinish true -savesettings false",
                        "Total target racks", 0, NULL);
-  free(bingo_bonus_error_substr);
+  free(bingo_bonus_warning);
+
+  // A setting this MAGPIE does not know, as from a newer or much older one,
+  // is left out with a warning, and the rest of the file still loads.
+  settings_file = fopen_or_die(DEFAULT_TEST_SETTINGS_FILENAME, "w");
+  fprintf_or_die(settings_file, "setoptions -oldsetting 3 -bb 2h3 -cb 7\n");
+  fclose_or_die(settings_file);
+  run_process_command("infer 1 MUZAKY 58 -numplays 20 -threads 4 -lex CSW21 "
+                      "-printonfinish true",
+                      "Total target racks", 2,
+                      "ignored unknown setting -oldsetting 3", true);
 
   // A setting the file does not keep, as an older MAGPIE saved them, is
-  // dropped when the file is loaded.
+  // dropped quietly when the file is loaded.
   settings_file = fopen_or_die(DEFAULT_TEST_SETTINGS_FILENAME, "w");
   fprintf_or_die(settings_file, "set -plies 2h3\n");
   fclose_or_die(settings_file);

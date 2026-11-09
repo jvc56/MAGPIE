@@ -2832,36 +2832,118 @@ void test_config_fg_required(void) {
   config_destroy(config);
 }
 
-void test_config_upgrade_settings_line(void) {
-  Config *config = config_create_default_test();
-  // An old file (no -fileversion), which recorded every setting, keeps only
-  // the settings a file keeps now, without those whose defaults changed.
-  char *upgraded = config_upgrade_settings_line(
-      config, "set -lex CSW21 -w1 true -rit1 false -tlim 60 -pegoutwidth 100 "
-              "-hr false -wit2 false -threads 4");
-  assert_strings_equal(upgraded, "set -lex CSW21 -hr false");
-  free(upgraded);
-  // A version 2 file keeps -pegoutwidth, which version 2 already had.
-  upgraded = config_upgrade_settings_line(
-      config, "set -fileversion 2 -pegoutwidth 100 -scensus false -hr false");
-  assert_strings_equal(upgraded,
-                       "set -fileversion 2 -pegoutwidth 100 -hr false");
-  free(upgraded);
-  // A current file drops only the settings a file does not keep, such as
-  // plies and endgame plies.
-  upgraded = config_upgrade_settings_line(
-      config, "set -fileversion 3 -pegoutwidth 100 -plies 3 -l1 CSW21 "
-              "-eplies 4 -bb 40");
-  assert_strings_equal(upgraded,
-                       "set -fileversion 3 -pegoutwidth 100 -l1 CSW21 -bb 40");
-  free(upgraded);
-  // Saved settings record the current version, and load.
+// The saved settings of `config`, for checking what a settings file loaded.
+static char *saved_settings_string(const Config *config) {
   StringBuilder *sb = string_builder_create();
   config_add_saved_settings_to_string_builder(config, sb);
-  assert(strstr(string_builder_peek(sb), " -fileversion 3") != NULL);
-  assert_config_exec_status(config, string_builder_peek(sb),
-                            ERROR_STATUS_SUCCESS);
-  string_builder_destroy(sb);
+  return string_builder_dump_and_destroy(sb, NULL);
+}
+
+// Loads `settings_string` as a settings file into `config` and checks that
+// the warnings, in order, start with `expected_warning_prefixes`.
+static void assert_load_settings(Config *config, const char *settings_string,
+                                 const char *const *expected_warning_prefixes,
+                                 int num_expected_warnings) {
+  StringList *warnings = string_list_create();
+  config_load_settings(config, settings_string, warnings);
+  const int num_warnings = string_list_get_count(warnings);
+  if (num_warnings != num_expected_warnings) {
+    printf("expected %d settings warnings, got %d:\n", num_expected_warnings,
+           num_warnings);
+    for (int warning_idx = 0; warning_idx < num_warnings; warning_idx++) {
+      printf("%s\n", string_list_get_string(warnings, warning_idx));
+    }
+    assert(0);
+  }
+  for (int warning_idx = 0; warning_idx < num_warnings; warning_idx++) {
+    const char *warning = string_list_get_string(warnings, warning_idx);
+    if (!has_prefix(expected_warning_prefixes[warning_idx], warning)) {
+      printf("settings warning '%s' does not start with '%s'\n", warning,
+             expected_warning_prefixes[warning_idx]);
+      assert(0);
+    }
+  }
+  string_list_destroy(warnings);
+}
+
+// A settings file loads each setting on its own: what it does not keep, or
+// does not know, or cannot load, is left out and the rest still loads.
+void test_config_load_settings(void) {
+  Config *config = config_create_default_test();
+
+  // An old file (no -fileversion), which recorded every setting, loads only
+  // the settings a file keeps now, without those whose defaults changed
+  // (-pegoutwidth, in version 2). A negative value goes with its setting.
+  assert_load_settings(
+      config,
+      "setoptions -lex CSW21 -w1 true -rit1 false -tlim 60 -pegoutwidth 100 "
+      "-pc1 -1.000000000000000 -hr false -wit2 false -threads 4 -bb 40",
+      NULL, 0);
+  char *saved = saved_settings_string(config);
+  assert(has_substring(saved, " -l1 CSW21"));
+  assert(has_substring(saved, " -bb 40"));
+  assert(has_substring(saved, " -hr false"));
+  assert(has_substring(saved, " -pegoutwidth 200"));
+  free(saved);
+  assert(config_get_num_threads(config) == 1);
+
+  // A version 2 file keeps -pegoutwidth, and a current one drops only the
+  // settings a file does not keep, such as plies and endgame plies.
+  assert_load_settings(config,
+                       "setoptions -fileversion 2 -pegoutwidth 100 -scensus "
+                       "false\nsetoptions -fileversion 3 -plies 3 -eplies 4 "
+                       "-cb 9",
+                       NULL, 0);
+  saved = saved_settings_string(config);
+  assert(has_substring(saved, " -pegoutwidth 100"));
+  assert(has_substring(saved, " -cb 9"));
+  free(saved);
+  assert(config_get_plies(config) != 3);
+  assert(config_get_endgame_plies(config) != 4);
+
+  // An unknown setting is dropped with its values, a value that fails to
+  // load loses only its own setting, and a line that is not a set command
+  // is not run.
+  const char *const unknown_warnings[] = {
+      "ignored unknown setting -oldsetting 3 4", "ignored -bb 2h3: (error",
+      "ignored '7'",
+      "ignored a line that is not a set command: autoplay games 5"};
+  assert_load_settings(
+      config,
+      "setoptions -oldsetting 3 4 -bb 2h3 -cb 5 "
+      "-maxnumdplays 20\nsetoptions 7 -bb 45\nautoplay games 5",
+      unknown_warnings, 4);
+  saved = saved_settings_string(config);
+  assert(has_substring(saved, " -bb 45"));
+  assert(has_substring(saved, " -cb 5"));
+  assert(has_substring(saved, " -maxnumdplays 20"));
+  free(saved);
+
+  // The lexicon settings load together, after a trial: a missing lexicon
+  // leaves the lexicon, leaves and distribution as they were.
+  const char *const lexicon_warnings[] = {"ignored -ld english -l1 NOSUCHLEX"};
+  assert_load_settings(
+      config, "setoptions -ld english -l1 NOSUCHLEX -k1 CSW21 -hr true",
+      lexicon_warnings, 1);
+  saved = saved_settings_string(config);
+  assert(has_substring(saved, " -l1 CSW21"));
+  assert(has_substring(saved, " -k1 CSW21"));
+  assert(has_substring(saved, " -hr true"));
+  free(saved);
+
+  // A win percentage table that fails to load is not left named.
+  const char *const win_pct_warnings[] = {"ignored -winpct NOSUCHTABLE"};
+  assert_load_settings(config, "setoptions -winpct NOSUCHTABLE",
+                       win_pct_warnings, 1);
+  saved = saved_settings_string(config);
+  assert(!has_substring(saved, " -winpct "));
+  free(saved);
+
+  // Saved settings record the current version, and load without warnings.
+  saved = saved_settings_string(config);
+  assert(has_substring(saved, " -fileversion 3"));
+  assert_load_settings(config, saved, NULL, 0);
+  free(saved);
   assert_config_exec_status(config, "set -fileversion 3", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "set -fileversion 4",
                             ERROR_STATUS_CONFIG_LOAD_INT_ARG_OUT_OF_BOUNDS);
@@ -4123,7 +4205,7 @@ void test_config(void) {
   test_config_wmp();
   test_config_note_move_interpolation();
   test_config_fg_required();
-  test_config_upgrade_settings_line();
+  test_config_load_settings();
   test_config_saved_settings();
   test_config_table_auto_settings();
   test_config_auto_tables_bind_both_players();
