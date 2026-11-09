@@ -2839,6 +2839,9 @@ static char *saved_settings_string(const Config *config) {
   return string_builder_dump_and_destroy(sb, NULL);
 }
 
+// The expected warnings of a settings file that loads without any.
+static const char *const no_settings_warnings[] = {""};
+
 // Loads `settings_string` as a settings file into `config` and checks that
 // the warnings, in order, start with `expected_warning_prefixes`.
 static void assert_load_settings(Config *config, const char *settings_string,
@@ -2878,7 +2881,7 @@ void test_config_load_settings(void) {
       config,
       "setoptions -lex CSW21 -w1 true -rit1 false -tlim 60 -pegoutwidth 100 "
       "-pc1 -1.000000000000000 -hr false -wit2 false -threads 4 -bb 40",
-      NULL, 0);
+      no_settings_warnings, 0);
   char *saved = saved_settings_string(config);
   assert(has_substring(saved, " -l1 CSW21"));
   assert(has_substring(saved, " -bb 40"));
@@ -2893,7 +2896,7 @@ void test_config_load_settings(void) {
                        "setoptions -fileversion 2 -pegoutwidth 100 -scensus "
                        "false\nsetoptions -fileversion 3 -plies 3 -eplies 4 "
                        "-cb 9",
-                       NULL, 0);
+                       no_settings_warnings, 0);
   saved = saved_settings_string(config);
   assert(has_substring(saved, " -pegoutwidth 100"));
   assert(has_substring(saved, " -cb 9"));
@@ -2942,7 +2945,7 @@ void test_config_load_settings(void) {
   // Saved settings record the current version, and load without warnings.
   saved = saved_settings_string(config);
   assert(has_substring(saved, " -fileversion 3"));
-  assert_load_settings(config, saved, NULL, 0);
+  assert_load_settings(config, saved, no_settings_warnings, 0);
   free(saved);
   assert_config_exec_status(config, "set -fileversion 3", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "set -fileversion 4",
