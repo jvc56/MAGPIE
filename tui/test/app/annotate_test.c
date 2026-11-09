@@ -157,12 +157,38 @@ static void test_rack_only_turn_can_be_analyzed(TuiGameState *state) {
         "rack-only turn's position has its rack");
   check_int(
       rack_get_total_letters(player_get_rack(game_get_player(state->game, 0))),
-      0, "engine rack left as it was");
+      7, "Rack panel shows the rack entered");
   const char *sim_reason =
       tui_analysis_unavailable_reason(state, 0, TUI_ANALYSIS_SIM);
   check(sim_reason == NULL, "rack-only turn can be simmed");
   check(tui_analysis_kibitz(state, 0), "rack-only turn is kibitzed");
   check(entry->analysis_snapshot.num_rows > 1, "kibitz ranks several plays");
+
+  // Choosing the top play enters it as the turn's play.
+  char top_play[sizeof(entry->analysis_snapshot.rows[0].move)];
+  (void)snprintf(top_play, sizeof(top_play), "%s",
+                 entry->analysis_snapshot.rows[0].move);
+  check(tui_cell_editor_enter_play(state, 0, top_play),
+        "the chosen play is entered");
+  check(!entry->pending, "the turn is committed");
+  check_str(entry->error_str, "", "the chosen play's error");
+  check_int(state->history_count, 2, "the chosen play appends turn 2");
+  check_int(state->edit_history_idx, 1, "editor moves to turn 2");
+  check(entry->analysis_snapshot.num_rows > 1, "the turn keeps its kibitz");
+}
+
+// An exchange chosen from the analysis, which shows it as "(exch ...)",
+// is entered as typed exchanges are.
+static void test_chosen_exchange_is_entered(TuiGameState *state) {
+  start_annotation(state);
+  press(state, NCKEY_ENTER);
+  type_text(state, "ECCDLSV");
+  press(state, NCKEY_ENTER);
+  check(tui_cell_editor_enter_play(state, 0, "(exch CCDLV)"),
+        "the chosen exchange is entered");
+  check_str(state->history[0].move_str, "-CCDLV", "the chosen exchange");
+  check_str(state->history[0].error_str, "", "the chosen exchange's error");
+  check_int(state->history_count, 2, "the chosen exchange appends turn 2");
 }
 
 int main(void) {
@@ -180,6 +206,7 @@ int main(void) {
   test_exchange_then_pass(state);
   test_placement_position_has_rack(state);
   test_rack_only_turn_can_be_analyzed(state);
+  test_chosen_exchange_is_entered(state);
   tui_game_state_destroy(state);
   free(state);
   if (failures > 0) {

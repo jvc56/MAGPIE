@@ -1264,17 +1264,23 @@ static void refresh_entry_position(const TuiGameState *state,
 }
 
 // refresh_entry_position for a turn not played yet, with the rack
-// entered so far. The engine holds that rack only while the position is
-// saved: the editor reads the player's leave from it.
+// entered so far. On the last turn the engine keeps that rack, so the
+// Rack panel, pills and Bag show it, as they do while it is typed.
+// Before a later turn, the engine gets the player's leave back, which
+// that turn's replay carries on from.
 static void refresh_pending_entry_position(const TuiGameState *state,
                                            TuiHistoryEntry *entry,
-                                           Game *scratch) {
+                                           Game *scratch, bool last_turn) {
   Rack *rack = player_get_rack(game_get_player(state->game, entry->player_idx));
   Rack *leave = rack_duplicate(rack);
-  if (rack_set_to_string(state->ld, rack, entry->rack_str) > 0) {
+  const bool rack_set =
+      rack_set_to_string(state->ld, rack, entry->rack_str) > 0;
+  if (rack_set) {
     refresh_entry_position(state, entry, scratch);
   }
-  rack_copy(rack, leave);
+  if (!rack_set || !last_turn) {
+    rack_copy(rack, leave);
+  }
   rack_destroy(leave);
 }
 
@@ -1324,7 +1330,8 @@ static void replay_history_prefix(TuiGameState *state, int up_to,
     if (e->pending) {
       if (scratch != NULL && e->rack_str[0] != '\0' &&
           game_get_player_on_turn_index(state->game) == e->player_idx) {
-        refresh_pending_entry_position(state, e, scratch);
+        refresh_pending_entry_position(state, e, scratch,
+                                       idx == state->history_count - 1);
       }
       continue;
     }

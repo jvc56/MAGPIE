@@ -16,6 +16,7 @@
 #include "render_common.h"
 #include "tile_input.h"
 #include "tui_history_edit.h"
+#include "tui_ui_types.h"
 #include <notcurses/notcurses.h>
 #include <pthread.h>
 #include <stdbool.h>
@@ -625,6 +626,65 @@ static bool cell_editor_commit(TuiGameState *state, int idx, bool field_move) {
   }
   pthread_mutex_unlock(&state->mutex);
   return true;
+}
+
+// Writes `move`, as the analysis panel shows it ("8D GRA(Z)E",
+// "(exch CCDLV)", "pass"), the way it is typed into the MOVE field.
+static void analysis_move_as_typed(const char *move, char *out,
+                                   size_t out_size) {
+  const char *exch_prefix = "(exch ";
+  if (strncmp(move, exch_prefix, strlen(exch_prefix)) == 0) {
+    const char *tiles = move + strlen(exch_prefix);
+    const char *close_paren = strchr(tiles, ')');
+    const int tiles_len =
+        close_paren != NULL ? (int)(close_paren - tiles) : (int)strlen(tiles);
+    (void)snprintf(out, out_size, "-%.*s", tiles_len, tiles);
+    return;
+  }
+  if (strcmp(move, "(Pass)") == 0) {
+    (void)snprintf(out, out_size, "pass");
+    return;
+  }
+  (void)snprintf(out, out_size, "%s", move);
+}
+
+bool tui_cell_editor_enter_play(TuiGameState *state, int idx,
+                                const char *move) {
+  pthread_mutex_lock(&state->mutex);
+  if (state->app_mode != TUI_APP_MODE_ANNOTATE || idx < 0 ||
+      idx >= state->history_count || !state->history[idx].pending ||
+      state->history[idx].rack_str[0] == '\0') {
+    pthread_mutex_unlock(&state->mutex);
+    return false;
+  }
+  char typed[sizeof(state->edit_move_buf)];
+  analysis_move_as_typed(move, typed, sizeof(typed));
+  // Fill the turn's editor as if the play had been typed over its saved
+  // rack, then commit it as Enter on the move and then the rack do.
+  state->edit_history_idx = idx;
+  state->edit_field = TUI_EDIT_FIELD_MOVE;
+  tui_game_state_seed_edit_move(state, typed);
+  (void)snprintf(state->edit_rack_buf, sizeof(state->edit_rack_buf), "%s",
+                 state->history[idx].rack_str);
+  state->edit_rack_len = (int)strlen(state->edit_rack_buf);
+  state->edit_rack_cursor = state->edit_rack_len;
+  state->edit_rack_user_modified = true;
+  state->edit_rack_carryover[0] = '\0';
+  state->edit_leave_buf[0] = '\0';
+  state->edit_leave_len = 0;
+  state->edit_leave_cursor = 0;
+  state->focused_panel = TUI_FOCUS_HISTORY;
+  pthread_mutex_unlock(&state->mutex);
+  (void)cell_editor_advance_to_rack(state, idx);
+  (void)cell_editor_commit(state, idx, /*field_move=*/false);
+  pthread_mutex_lock(&state->mutex);
+  const bool entered =
+      idx < state->history_count && !state->history[idx].pending;
+  if (!entered) {
+    tui_game_state_notice(state, "couldn't enter that play");
+  }
+  pthread_mutex_unlock(&state->mutex);
+  return entered;
 }
 
 // Inserts a printable key at the cursor of the active field (MOVE, RACK,
