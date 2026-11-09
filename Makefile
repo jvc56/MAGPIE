@@ -453,7 +453,10 @@ endif
 
 TUI_ENGINE_CFLAGS := $(TUI_OPT) $(TUI_LTO) -march=native -g $(TUI_NDEBUG) -Wall -Wno-trigraphs -DBOARD_DIM=$(BOARD_DIM) -DRACK_SIZE=$(RACK_SIZE) $(TUI_ALIGN_CFLAGS) $(TUI_SAN) -MMD -MP
 TUI_CFLAGS := $(TUI_OPT) $(TUI_LTO) -march=native -g $(TUI_NDEBUG) -Wall -Wno-trigraphs -Wextra -Wshadow -Wstrict-prototypes -Werror -DBOARD_DIM=$(BOARD_DIM) -DRACK_SIZE=$(RACK_SIZE) $(TUI_ALIGN_CFLAGS) $(TUI_SAN) -MMD -MP
-TUI_LDFLAGS := -pthread $(TUI_LTO) $(TUI_ALIGN_LDFLAGS) $(TUI_SAN)
+# The link's align-all-functions is for functions made at an LTO link.
+# Without LTO (TUI_LTO=), -falign-functions aligns every function, and
+# GNU ld rejects the -plugin-opt form with no LTO plugin loaded.
+TUI_LDFLAGS := -pthread $(TUI_LTO) $(if $(TUI_LTO),$(TUI_ALIGN_LDFLAGS)) $(TUI_SAN)
 
 # The release TUI is profile-guided like `make release`: magpie_tui trains
 # magpie_pgo_train on TUI_PGO_WORKLOAD (static, the release's workload) and
