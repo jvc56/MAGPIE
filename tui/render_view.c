@@ -11,6 +11,7 @@
 #include "../src/ent/player.h"
 #include "../src/ent/rack.h"
 #include "../src/ent/sim_results.h"
+#include "analysis_rows.h"
 #include "config.h"
 #include "game_state.h"
 #include "tui_ui_types.h"
@@ -196,7 +197,12 @@ const Move *pick_analysis_preview_move(const TuiGameState *state,
   // sim_results_saved (a deep clone of the SimResults captured at
   // finalize time), whose display_simmed_plays order matches the
   // analysis_snapshot.rows order the user is reading.
+  // A turn being annotated, analyzed from its rack, previews its saved
+  // analysis the same way.
   const TuiHistoryEntry *hist_entry = pick_history_view(state);
+  if (hist_entry == NULL) {
+    hist_entry = cursor_saved_analysis_entry(state);
+  }
   if (hist_entry != NULL && hist_entry->analysis_snapshot.valid &&
       hist_entry->analysis_snapshot.is_static) {
     // A "/kibitz" ranking is on screen; preview its rows.

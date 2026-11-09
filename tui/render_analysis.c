@@ -1283,15 +1283,9 @@ void render_analysis_panel(struct ncplane *plane, const Theme *theme,
   // (with its frozen title meta) instead of the live solve. The
   // live (in-flight pending) turn still falls through to the live
   // path so the user sees the bot's progress in real time.
-  const TuiAnalysisSnapshot *snap = NULL;
-  if (!resume_active_for_cursor(state) && state->history_cursor >= 0 &&
-      state->history_cursor < state->history_count) {
-    const TuiHistoryEntry *cursor_entry =
-        &state->history[state->history_cursor];
-    if (!cursor_entry->pending && cursor_entry->analysis_snapshot.valid) {
-      snap = &cursor_entry->analysis_snapshot;
-    }
-  }
+  const TuiHistoryEntry *saved_entry = cursor_saved_analysis_entry(state);
+  const TuiAnalysisSnapshot *snap =
+      saved_entry != NULL ? &saved_entry->analysis_snapshot : NULL;
 
   // Pick mode: when replaying a snapshot, use whatever mode it
   // captured. Otherwise, endgame when the analyzed position's bag has

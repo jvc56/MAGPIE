@@ -8,6 +8,7 @@
 #include "../../../src/ent/game.h"
 #include "../../../src/ent/player.h"
 #include "../../../src/ent/rack.h"
+#include "../../analysis_rows.h"
 #include "../../bot_worker.h"
 #include "../../game_state.h"
 #include "../../input_cell_editor.h"
@@ -164,10 +165,15 @@ static void test_rack_only_turn_can_be_analyzed(TuiGameState *state) {
   check(tui_analysis_kibitz(state, 0), "rack-only turn is kibitzed");
   check(entry->analysis_snapshot.num_rows > 1, "kibitz ranks several plays");
 
+  state->history_cursor = 0;
+  populate_frame_analysis_rows(state);
+  check(state->last_rendered_analysis_row_count > 1,
+        "the Plays panel shows the kibitz");
+
   // Choosing the top play enters it as the turn's play.
-  char top_play[sizeof(entry->analysis_snapshot.rows[0].move)];
+  char top_play[sizeof(state->last_rendered_analysis_rows[0].move)];
   (void)snprintf(top_play, sizeof(top_play), "%s",
-                 entry->analysis_snapshot.rows[0].move);
+                 state->last_rendered_analysis_rows[0].move);
   check(tui_cell_editor_enter_play(state, 0, top_play),
         "the chosen play is entered");
   check(!entry->pending, "the turn is committed");
