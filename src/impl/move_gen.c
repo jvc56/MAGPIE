@@ -721,7 +721,9 @@ update_best_move_or_insert_into_movelist_wmp(MoveGen *gen, int start_col,
   }
 }
 
-void record_wmp_play(MoveGen *gen, int start_col, Equity leave_value) {
+// The score of the word in playthrough_marked played at start_col.
+static inline __attribute__((always_inline)) Equity
+wmp_play_score(const MoveGen *gen, int start_col) {
   const WMPMoveGen *wgen = &gen->wmp_move_gen;
   const Equity bingo_bonus =
       gen->max_tiles_to_play == RACK_SIZE ? gen->bingo_bonus : 0;
@@ -757,9 +759,12 @@ void record_wmp_play(MoveGen *gen, int start_col, Equity leave_value) {
       playthrough_score_total += gen->tile_scores[ml];
     }
   }
-  const Equity score =
-      (played_score_total + playthrough_score_total) * word_multiplier +
-      hooked_cross_total + played_cross_total + bingo_bonus;
+  return (played_score_total + playthrough_score_total) * word_multiplier +
+         hooked_cross_total + played_cross_total + bingo_bonus;
+}
+
+void record_wmp_play(MoveGen *gen, int start_col, Equity leave_value) {
+  const Equity score = wmp_play_score(gen, start_col);
   update_best_move_or_insert_into_movelist_wmp(gen, start_col, score,
                                                leave_value);
 }
@@ -938,16 +943,64 @@ static inline void wordmap_gen_mark_word(MoveGen *gen,
 // omitted; see static_eval_get_shadow_equity. The candidate mask applies the
 // same bound (see wordmap_gen_candidate_subracks).
 static inline __attribute__((always_inline)) bool
-wordmap_gen_leave_prunes_subrack(const MoveGen *gen, const Anchor *anchor,
-                                 int subrack_idx, Equity anchor_pat_bound) {
-  if (!gen->wmp_prune_subracks_by_leave) {
+wordmap_gen_leave_prunes_subrack(const MoveGen *gen, int subrack_idx,
+                                 const int64_t *score_bounds) {
+  if (!gen->wmp_prune_subracks_by_leave ||
+      !better_play_has_been_found(gen, EQUITY_MIN_VALUE)) {
     return false;
   }
-  const Equity leave_value =
-      wmp_move_gen_get_leave_value(&gen->wmp_move_gen, subrack_idx);
-  return better_play_has_been_found(
-      gen, leave_value + anchor->highest_possible_score + anchor_pat_bound);
+  const WMPMoveGen *wgen = &gen->wmp_move_gen;
+  const SubrackInfo *subrack_info =
+      &wgen->nonplaythrough_infos[subracks_get_combination_offset(
+                                      wgen->tiles_to_play) +
+                                  subrack_idx];
+  return wmp_move_gen_subrack_leave_kept(subrack_info, score_bounds,
+                                         gen_get_cutoff_equity_or_score(gen)) ==
+         0;
 }
+
+// The anchor's score bound and score bases, each with the PAT bound added,
+// as the candidate mask and the leave prune take them (see
+// wmp_move_gen_subrack_leave_kept).
+static inline void wordmap_gen_load_score_bounds(const MoveGen *gen,
+                                                 const Anchor *anchor,
+                                                 Equity anchor_pat_bound,
+                                                 int64_t *score_bounds) {
+  const Equity *heap_score_bases =
+      gen->wmp_move_gen.heap_score_bases[anchor->insertion_idx];
+  score_bounds[0] = (int64_t)anchor->highest_possible_score + anchor_pat_bound;
+  for (int base_idx = 0; base_idx < WMP_SCORE_BASE_COUNT; base_idx++) {
+    score_bounds[base_idx + 1] =
+        (int64_t)heap_score_bases[base_idx] + anchor_pat_bound;
+  }
+}
+
+#ifndef NDEBUG
+// Whether the anchor's score bounds hold for the marked word at start_col,
+// with every tile scored at its face value: the claim
+// wmp_move_gen_update_anchor_score_bases makes. A subrack with a blank is not
+// checked: the word's letters are not all its tiles, so this score is not one
+// of its plays'. The blankless subracks cover the claim.
+static bool wordmap_gen_score_bounds_hold(const MoveGen *gen,
+                                          const Anchor *anchor, int subrack_idx,
+                                          int start_col,
+                                          const int64_t *score_bounds) {
+  const WMPMoveGen *wgen = &gen->wmp_move_gen;
+  const SubrackInfo *subrack_info =
+      &wgen->nonplaythrough_infos[subracks_get_combination_offset(
+                                      wgen->tiles_to_play) +
+                                  subrack_idx];
+  if (bit_rack_get_letter(&subrack_info->subrack, BLANK_MACHINE_LETTER) > 0) {
+    return true;
+  }
+  // Every bound carries the anchor's PAT bound, so the score takes it too.
+  const int64_t pat_bound = score_bounds[0] - anchor->highest_possible_score;
+  const int64_t score = (int64_t)wmp_play_score(gen, start_col) + pat_bound;
+  return wmp_move_gen_subrack_leave_kept(subrack_info, score_bounds,
+                                         score + subrack_info->leave_value) ==
+         1;
+}
+#endif
 
 // Probes the WMP for one canonical subrack of the current anchor and records
 // every play its words allow. Returns true once the recording threshold has
@@ -960,7 +1013,7 @@ wordmap_gen_leave_prunes_subrack(const MoveGen *gen, const Anchor *anchor,
 // with WIT off).
 static inline __attribute__((always_inline)) bool
 wordmap_gen_record_subrack(MoveGen *gen, const Anchor *anchor, int subrack_idx,
-                           bool lazy, Equity anchor_pat_bound,
+                           bool lazy, const int64_t *score_bounds,
                            uint32_t *letter_cols, bool *letter_cols_loaded) {
   WMPMoveGen *wgen = &gen->wmp_move_gen;
   // record_wmp_play prices every play below with wgen->leave_value. Only
@@ -970,8 +1023,7 @@ wordmap_gen_record_subrack(MoveGen *gen, const Anchor *anchor, int subrack_idx,
   if (gen->wmp_prune_subracks_by_leave) {
     wgen->leave_value = wmp_move_gen_get_leave_value(wgen, subrack_idx);
   }
-  if (wordmap_gen_leave_prunes_subrack(gen, anchor, subrack_idx,
-                                       anchor_pat_bound)) {
+  if (wordmap_gen_leave_prunes_subrack(gen, subrack_idx, score_bounds)) {
     return false;
   }
   if (!wmp_move_gen_get_subrack_words(wgen, subrack_idx, lazy,
@@ -1008,6 +1060,8 @@ wordmap_gen_record_subrack(MoveGen *gen, const Anchor *anchor, int subrack_idx,
       fit_cols &= fit_cols - 1;
       wordmap_gen_mark_word(gen, word, wgen->word_length, start_col,
                             wgen->playthrough_positions);
+      assert(wordmap_gen_score_bounds_hold(gen, anchor, subrack_idx, start_col,
+                                           score_bounds));
       record_wmp_plays_for_word(gen, subrack_idx, start_col, 0, 0);
       if (gen->threshold_exceeded) {
         return true;
@@ -1033,18 +1087,16 @@ wordmap_gen_record_subrack(MoveGen *gen, const Anchor *anchor, int subrack_idx,
 // never reaches EQUITY_MAX_VALUE. So wordmap_gen_leave_prunes_subrack would
 // skip the subrack when the walk reaches it.
 static inline __attribute__((always_inline)) uint64_t
-wordmap_gen_candidate_subracks(const MoveGen *gen, const Anchor *anchor,
-                               int first_idx, int count, bool lazy,
-                               Equity anchor_pat_bound,
+wordmap_gen_candidate_subracks(const MoveGen *gen, int first_idx, int count,
+                               bool lazy, const int64_t *score_bounds,
                                uint64_t *filter_misses) {
   const bool prune_by_leave = gen->wmp_prune_subracks_by_leave &&
                               better_play_has_been_found(gen, EQUITY_MIN_VALUE);
-  // The PAT bound joins the anchor's score bound, exactly as in
+  // The score bounds carry the PAT bound, exactly as in
   // wordmap_gen_leave_prunes_subrack; dropping it would be unsound, since
   // it can be positive.
   return wmp_move_gen_get_candidate_subracks(
-      &gen->wmp_move_gen, first_idx, count, lazy, prune_by_leave,
-      anchor->highest_possible_score + anchor_pat_bound,
+      &gen->wmp_move_gen, first_idx, count, lazy, prune_by_leave, score_bounds,
       gen_get_cutoff_equity_or_score(gen), filter_misses);
 }
 
@@ -1071,14 +1123,12 @@ static __attribute__((noinline)) uint64_t wordmap_gen_allowed_subracks(
 // of line to keep the walk in generate_moves small; it has work only while a
 // lazily resolved rack still has unresolved subracks of the anchor's size.
 static __attribute__((noinline)) void
-wordmap_gen_resolve_filter_misses(MoveGen *gen, const Anchor *anchor,
-                                  int first_idx, uint64_t misses,
-                                  Equity anchor_pat_bound) {
+wordmap_gen_resolve_filter_misses(MoveGen *gen, int first_idx, uint64_t misses,
+                                  const int64_t *score_bounds) {
   while (misses != 0) {
     const int subrack_idx = first_idx + wmp_move_gen_get_lowest_set_bit(misses);
     misses &= misses - 1;
-    if (!wordmap_gen_leave_prunes_subrack(gen, anchor, subrack_idx,
-                                          anchor_pat_bound)) {
+    if (!wordmap_gen_leave_prunes_subrack(gen, subrack_idx, score_bounds)) {
       wmp_move_gen_resolve_filter_miss(&gen->wmp_move_gen, subrack_idx);
     }
   }
@@ -1215,6 +1265,8 @@ wordmap_gen(MoveGen *gen, const Anchor *anchor, bool lazy) {
   // the term is off). See wordmap_gen_leave_prunes_subrack.
   const Equity anchor_pat_bound =
       gen_wmp_anchor_pat_bound(gen, anchor->dir, anchor->row, anchor);
+  int64_t score_bounds[WMP_SCORE_BOUND_COUNT];
+  wordmap_gen_load_score_bounds(gen, anchor, anchor_pat_bound, score_bounds);
   for (int first_idx = 0; first_idx < num_subrack_combinations;
        first_idx += WMP_MOVE_GEN_SUBRACKS_PER_MASK) {
     const int remaining = num_subrack_combinations - first_idx;
@@ -1223,7 +1275,7 @@ wordmap_gen(MoveGen *gen, const Anchor *anchor, bool lazy) {
                           : WMP_MOVE_GEN_SUBRACKS_PER_MASK;
     uint64_t filter_misses = 0;
     uint64_t candidates = wordmap_gen_candidate_subracks(
-        gen, anchor, first_idx, count, lazy, anchor_pat_bound, &filter_misses);
+        gen, first_idx, count, lazy, score_bounds, &filter_misses);
     if (has_forbidden) {
       const uint64_t allowed = wordmap_gen_allowed_subracks(
           wgen, first_idx, count, forbidden_subrack_low,
@@ -1236,19 +1288,19 @@ wordmap_gen(MoveGen *gen, const Anchor *anchor, bool lazy) {
       candidates &= candidates - 1;
       const uint64_t misses_below = filter_misses & ((1ULL << bit_idx) - 1);
       if (misses_below != 0) {
-        wordmap_gen_resolve_filter_misses(gen, anchor, first_idx, misses_below,
-                                          anchor_pat_bound);
+        wordmap_gen_resolve_filter_misses(gen, first_idx, misses_below,
+                                          score_bounds);
         filter_misses ^= misses_below;
       }
       if (wordmap_gen_record_subrack(gen, anchor, first_idx + bit_idx, lazy,
-                                     anchor_pat_bound, letter_cols,
+                                     score_bounds, letter_cols,
                                      &letter_cols_loaded)) {
         return;
       }
     }
     if (filter_misses != 0) {
-      wordmap_gen_resolve_filter_misses(gen, anchor, first_idx, filter_misses,
-                                        anchor_pat_bound);
+      wordmap_gen_resolve_filter_misses(gen, first_idx, filter_misses,
+                                        score_bounds);
     }
   }
 }
@@ -1950,6 +2002,30 @@ shadow_record_impl(MoveGen *gen, bool wmp_active, uint32_t allowed_lengths) {
     const int word_length =
         gen->wmp_move_gen.num_tiles_played_through + gen->tiles_played;
     if (word_length >= MINIMUM_WORD_LENGTH) {
+      // The tiles this bound places are the rack's less the ones it has no
+      // square for, which are the ones past its unrestricted squares'
+      // multipliers.
+      const int num_unrestricted = gen->num_unrestricted_multipliers;
+      Equity shadow_tile_score_sum = gen->rack_tile_score_sum;
+      for (int i = 0; i < RACK_SIZE; i++) {
+        shadow_tile_score_sum -=
+            i >= num_unrestricted ? gen->descending_tile_scores[i] : 0;
+      }
+      assert(
+          num_unrestricted == 0 ||
+          gen->descending_effective_letter_multipliers[num_unrestricted - 1] !=
+              0);
+      assert(num_unrestricted == RACK_SIZE ||
+             gen->descending_effective_letter_multipliers[num_unrestricted] ==
+                 0);
+      const int smallest_multiplier =
+          num_unrestricted > 0
+              ? gen->descending_effective_letter_multipliers[num_unrestricted -
+                                                             1]
+              : WMP_SCORE_BASE_COUNT;
+      wmp_move_gen_update_anchor_score_bases(
+          &gen->wmp_move_gen, gen->tiles_played, score, shadow_tile_score_sum,
+          smallest_multiplier);
       wmp_move_gen_maybe_update_anchor(&gen->wmp_move_gen, gen->tiles_played,
                                        word_length, gen->current_left_col,
                                        score, equity);
@@ -3631,6 +3707,10 @@ static void gen_set_shadow_equities(MoveGen *gen) {
 
 void gen_shadow(MoveGen *gen) {
   gen_set_shadow_equities(gen);
+  gen->rack_tile_score_sum = 0;
+  for (int i = 0; i < RACK_SIZE; i++) {
+    gen->rack_tile_score_sum += gen->full_rack_descending_tile_scores[i];
+  }
   // Set the leave_map index to 2^number_of_letters - 1, which represents
   // using (playing) zero tiles and keeping
   // gen->player_rack->number_of_letters tiles.
@@ -4627,6 +4707,8 @@ void generate_moves(const MoveGenArgs *args) {
           wgen->nonplaythrough_infos[i].subrack = subrack_entry->subracks[i];
           wgen->nonplaythrough_infos[i].leave_value =
               subrack_entry->leave_values[i];
+          wgen->nonplaythrough_infos[i].tile_score_sum =
+              subrack_entry->tile_score_sums[i];
           wgen->nonplaythrough_infos[i].wmp_entry =
               subrack_entry->wmp_entries[i];
         }
@@ -4659,6 +4741,8 @@ void generate_moves(const MoveGenArgs *args) {
           subrack_entry->subracks[i] = wgen->nonplaythrough_infos[i].subrack;
           subrack_entry->leave_values[i] =
               wgen->nonplaythrough_infos[i].leave_value;
+          subrack_entry->tile_score_sums[i] =
+              wgen->nonplaythrough_infos[i].tile_score_sum;
           subrack_entry->wmp_entries[i] =
               wgen->nonplaythrough_infos[i].wmp_entry;
         }
