@@ -258,16 +258,16 @@ typedef struct MoveGen {
   // (including between leavegen generations), leave-derived caches must be
   // invalidated even though the KLV pointer is unchanged.
   uint64_t klv_mutation_counter_at_load;
-  // Instance fingerprints of the KLV and WMP captured at the last
-  // gen_load_position call. The MoveGen cache is pooled per thread and
+  // The KLV's instance id and the WMP's instance fingerprint captured at the
+  // last gen_load_position call. The MoveGen cache is pooled per thread and
   // outlives the Configs the engine creates and destroys; when a Config is
   // freed and another loaded, the allocator can hand the new KLV/WMP the freed
-  // one's struct address (ABA) -- even for the same lexicon -- while its
-  // internal arrays are reallocated elsewhere. A KLV/WMP pointer (or lexicon
-  // name) comparison reads "unchanged" and keeps stale leave_values / dangling
-  // wmp_entry pointers cached. The fingerprint hashes the internal array
-  // addresses, so it changes whenever the backing data is reloaded.
-  uint64_t klv_instance_fp_at_load;
+  // one's struct address (ABA). A KLV/WMP pointer (or lexicon name) comparison
+  // reads "unchanged" and keeps stale leave_values / dangling wmp_entry
+  // pointers cached. The KLV's id is unique to each load (the allocator can
+  // reuse its arrays' addresses as well, see klv_next_instance_id); the WMP's
+  // fingerprint hashes the internal array addresses and entry counts.
+  uint64_t klv_instance_id_at_load;
   uint64_t wmp_instance_fp_at_load;
   const RackInfoTable *rack_info_table;
   // The rack_info_table's instance id when it was loaded here, for the same

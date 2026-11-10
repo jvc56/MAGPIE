@@ -1725,15 +1725,16 @@ void wmp_blank_possibilities_bananas_5(void) {
 }
 
 // Regression guard for the move_gen subrack/KLV cache invalidation. A loaded
-// WMP/KLV exposes an instance fingerprint that gen_load_position uses to
-// invalidate the per-thread caches when a Config's WMP/KLV is freed and a new
-// one is loaded at the same struct address -- a pointer or lexicon-name
-// comparison cannot detect that reuse. The fingerprint must therefore (a) be
-// stable across calls for one instance and (b) differ between two independent
-// loads of the *same* lexicon. This is deterministic on every platform because
-// both instances are alive at once, so their internal arrays are necessarily
-// at distinct addresses; if the fingerprint were ever reverted to a
-// pointer/name basis, the distinct-instance assertions below would fail.
+// WMP exposes an instance fingerprint and a loaded KLV an instance id that
+// gen_load_position uses to invalidate the per-thread caches when a Config's
+// WMP/KLV is freed and a new one is loaded at the same struct address -- a
+// pointer or lexicon-name comparison cannot detect that reuse. Each must
+// therefore (a) be stable across calls for one instance and (b) differ between
+// two independent loads of the *same* lexicon. For the WMP this is
+// deterministic on every platform because both instances are alive at once, so
+// their internal arrays are necessarily at distinct addresses. The KLV's id
+// must also differ for a KLV loaded after another was freed, whose struct and
+// arrays the allocator may place exactly where the freed one's were.
 void test_move_gen_instance_fingerprint(void) {
   ErrorStack *error_stack = error_stack_create();
 
@@ -1749,11 +1750,17 @@ void test_move_gen_instance_fingerprint(void) {
 
   KLV *klv_a = klv_create_or_die(DEFAULT_TEST_DATA_PATH, "CSW21");
   KLV *klv_b = klv_create_or_die(DEFAULT_TEST_DATA_PATH, "CSW21");
-  const uint64_t klv_fp_a = klv_get_instance_fingerprint(klv_a);
-  assert(klv_fp_a == klv_get_instance_fingerprint(klv_a));
-  assert(klv_fp_a != klv_get_instance_fingerprint(klv_b));
+  const uint64_t klv_id_a = klv_get_instance_id(klv_a);
+  const uint64_t klv_id_b = klv_get_instance_id(klv_b);
+  assert(klv_id_a != 0);
+  assert(klv_id_a == klv_get_instance_id(klv_a));
+  assert(klv_id_a != klv_id_b);
   klv_destroy(klv_a);
   klv_destroy(klv_b);
+  KLV *klv_c = klv_create_or_die(DEFAULT_TEST_DATA_PATH, "NWL20");
+  assert(klv_get_instance_id(klv_c) != klv_id_a);
+  assert(klv_get_instance_id(klv_c) != klv_id_b);
+  klv_destroy(klv_c);
 
   error_stack_destroy(error_stack);
 }

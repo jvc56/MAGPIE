@@ -142,7 +142,7 @@ struct InferenceCtx {
   // were read, which the next inference of that KLV reuses.
   Equity *census_leave_values;
   const KLV *census_leave_klv;
-  uint64_t census_leave_klv_fingerprint;
+  uint64_t census_leave_klv_instance_id;
   uint64_t census_leave_klv_mutation_counter;
 };
 
@@ -1178,12 +1178,12 @@ static void inference_ctx_set_census_play_scores(InferenceCtx *ctx,
     }
   }
   use_census = use_census && ctx->census_play_scores != NULL;
-  if (use_census && (ctx->census_leave_values == NULL ||
-                     ctx->census_leave_klv != first->klv ||
-                     ctx->census_leave_klv_fingerprint !=
-                         klv_get_instance_fingerprint(first->klv) ||
-                     ctx->census_leave_klv_mutation_counter !=
-                         klv_get_mutation_counter(first->klv))) {
+  if (use_census &&
+      (ctx->census_leave_values == NULL ||
+       ctx->census_leave_klv != first->klv ||
+       ctx->census_leave_klv_instance_id != klv_get_instance_id(first->klv) ||
+       ctx->census_leave_klv_mutation_counter !=
+           klv_get_mutation_counter(first->klv))) {
     if (ctx->census_leave_values == NULL) {
       ctx->census_leave_values = malloc_or_die(
           sizeof(Equity) * census_lattice_get_size(ctx->census_lattice));
@@ -1191,8 +1191,7 @@ static void inference_ctx_set_census_play_scores(InferenceCtx *ctx,
     census_leaves_from_klv(ctx->census_lattice, first->klv,
                            ctx->census_leave_values);
     ctx->census_leave_klv = first->klv;
-    ctx->census_leave_klv_fingerprint =
-        klv_get_instance_fingerprint(first->klv);
+    ctx->census_leave_klv_instance_id = klv_get_instance_id(first->klv);
     ctx->census_leave_klv_mutation_counter =
         klv_get_mutation_counter(first->klv);
   }
