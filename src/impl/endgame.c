@@ -4415,11 +4415,18 @@ int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
   // tile, which no play of its whole rack places.
   OutReplyBound out_reply;
   out_reply.ready = false;
+  // One ply above the leaves the bound holds when the opponent holds one
+  // tile: the leaf's playout then goes out with the best drop, and no deeper
+  // value for the opponent is lower.
   const bool out_reply_active =
       arena_alloced && !is_root &&
       !(opp_stuck_frac > 0.0F &&
         on_turn_idx == worker->solver->solving_player) &&
-      depth >= 2;
+      (depth >= 2 ||
+       (depth == 1 && worker->solver->use_heuristics &&
+        rack_get_total_letters(player_get_rack(game_get_player(
+            worker->game_copy,
+            1 - game_get_player_on_turn_index(worker->game_copy)))) == 1));
 
   // ABDADA two-phase iteration:
   // Pass 0: search all moves with exclusion (defer busy nodes).
