@@ -2,6 +2,7 @@
 
 #include "../compat/cpthread.h"
 #include "../compat/cpthread_defs.h"
+#include "../def/bit_rack_defs.h"
 #include "../def/board_defs.h"
 #include "../def/cross_set_defs.h"
 #include "../def/equity_defs.h"
