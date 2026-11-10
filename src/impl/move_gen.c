@@ -3840,8 +3840,9 @@ static void shadow_lanes_small_cached(MoveGen *gen, uint64_t lane_mask) {
     lanes |= (uint64_t)(gen->row_number_of_anchors_cache[lane] != 0) << lane;
   }
   lanes &= lane_mask;
-  // Every lane's key first, so that the loads of their entries overlap.
-  uint64_t keys[2 * BOARD_DIM];
+  // Every lane's key first, so that the loads of their entries overlap. The
+  // keys stay in gen for the anchors' plays (see gen_anchor_play_key).
+  uint64_t *keys = gen->lane_shadow_keys;
   for (uint64_t remaining = lanes; remaining != 0; remaining &= remaining - 1) {
     const int lane = lowest_set_bit_index_64(remaining);
     keys[lane] =
@@ -3981,11 +3982,102 @@ gen_record_scoring_plays_unordered(MoveGen *gen, bool record_small) {
   }
 }
 
+// The key of the best play of anchor, in a lane this generation shadowed
+// through the lane shadow cache: the lane's key, which holds everything the
+// search of the anchor reads but the lane's row, the anchor's column and how
+// ties are broken. Never 0.
+static inline uint64_t gen_anchor_play_key(const MoveGen *gen,
+                                           const Anchor *anchor) {
+  const uint64_t lane_key =
+      gen->lane_shadow_keys[BOARD_DIM * anchor->dir + anchor->row];
+  const uint64_t place =
+      (((uint64_t)anchor->row * BOARD_DIM + anchor->col) << 1) +
+      (uint64_t)gen->best_small_canonical_ties + 1;
+  return lane_shadow_mix(lane_key + place * LANE_HASH_MULTIPLIER) | 1;
+}
+
+// Offers an anchor's best play to the generation's best, as recording the
+// anchor's plays one by one would: see MOVE_RECORD_BEST_SMALL in
+// update_best_move_or_insert_into_movelist.
+static inline void gen_offer_anchor_play(MoveGen *gen,
+                                         const AnchorPlayEntry *play) {
+  if (play->tiny_move == 0) {
+    return;
+  }
+  SmallMove *best = gen->move_list->small_moves[0];
+  if (play->value > gen->best_move_equity_or_score ||
+      (play->value == gen->best_move_equity_or_score &&
+       gen->best_small_canonical_ties && play->tiny_move > best->tiny_move)) {
+    best->tiny_move = play->tiny_move;
+    best->metadata.score = play->score;
+    best->metadata.play_length = play->play_length;
+    best->metadata.tiles_played = play->tiles_played;
+    best->metadata.estimated_value = 0;
+    gen->move_list->count = 1;
+    gen->best_move_equity_or_score = play->value;
+    gen_update_cutoff_equity_or_score(gen);
+  }
+  if (gen->stop_on_threshold && play->value > gen->target_equity_cutoff) {
+    gen->threshold_exceeded = true;
+  }
+}
+
+// Searches the anchor the generator is set up for, with the generation's
+// best so far set aside, so that what it finds is the anchor's own best play;
+// remembers that in entry under key, and then offers it to the generation's
+// best. With held, the entry already holds the key, and must hold what the
+// search finds.
+static void gen_search_and_remember_anchor_play(MoveGen *gen,
+                                                const Anchor *anchor,
+                                                uint32_t kwg_root_node_index,
+                                                AnchorPlayEntry *entry,
+                                                uint64_t key, bool held) {
+  MoveList *move_list = gen->move_list;
+  const SmallMove best_so_far = *move_list->small_moves[0];
+  const int count_so_far = move_list->count;
+  const Equity value_so_far = gen->best_move_equity_or_score;
+  const Equity cutoff_so_far = gen->cutoff_equity_or_score;
+  move_list->count = 0;
+  gen->best_move_equity_or_score = EQUITY_INITIAL_VALUE;
+  gen->cutoff_equity_or_score = EQUITY_INITIAL_VALUE;
+  recursive_gen_small(gen, anchor->col, kwg_root_node_index, anchor->col,
+                      anchor->col, gen->dir == BOARD_HORIZONTAL_DIRECTION, 0, 1,
+                      0);
+  AnchorPlayEntry found = {.key = key};
+  if (move_list->count != 0) {
+    const SmallMove *play = move_list->small_moves[0];
+    found.tiny_move = play->tiny_move;
+    found.value = gen->best_move_equity_or_score;
+    found.score = play->metadata.score;
+    found.play_length = play->metadata.play_length;
+    found.tiles_played = play->metadata.tiles_played;
+  }
+  // The search may have swapped the list's best and spare moves; whichever
+  // is the best now takes the best so far back.
+  *move_list->small_moves[0] = best_so_far;
+  move_list->count = count_so_far;
+  gen->best_move_equity_or_score = value_so_far;
+  gen->cutoff_equity_or_score = cutoff_so_far;
+  assert(!held || (entry->tiny_move == found.tiny_move &&
+                   entry->value == found.value && entry->score == found.score &&
+                   entry->play_length == found.play_length &&
+                   entry->tiles_played == found.tiles_played));
+  if (!held) {
+    *entry = found;
+  }
+  gen_offer_anchor_play(gen, &found);
+}
+
 static inline __attribute__((always_inline)) void
 gen_record_scoring_plays_impl(MoveGen *gen, bool lazy) {
   if (gen->threshold_exceeded) {
     return;
   }
+  // The anchors' remembered plays answer for the plain small generator only.
+  LaneShadowCache *anchor_play_cache =
+      gen->move_record_type == MOVE_RECORD_BEST_SMALL && !gen->is_woadwage
+          ? gen->lane_shadow_cache
+          : NULL;
   // Reset the reused generator fields
   gen->tiles_played = 0;
 
@@ -4011,6 +4103,21 @@ gen_record_scoring_plays_impl(MoveGen *gen, bool lazy) {
     if (better_play_has_been_found(gen, anchor.highest_possible_equity)) {
       break;
     }
+    AnchorPlayEntry *anchor_play = NULL;
+    uint64_t anchor_play_key = 0;
+    bool anchor_play_held = false;
+    if (anchor_play_cache != NULL) {
+      anchor_play_key = gen_anchor_play_key(gen, &anchor);
+      anchor_play =
+          lane_shadow_cache_anchor_play(anchor_play_cache, anchor_play_key);
+      anchor_play_held = anchor_play->key == anchor_play_key;
+#ifdef NDEBUG
+      if (anchor_play_held) {
+        gen_offer_anchor_play(gen, anchor_play);
+        continue;
+      }
+#endif
+    }
     gen->current_anchor_col = anchor.col;
     // Don't recopy the row cache if we're working on the same board lane
     // as the previous anchor. When anchors have been sorted by descending
@@ -4032,6 +4139,12 @@ gen_record_scoring_plays_impl(MoveGen *gen, bool lazy) {
     gen->current_anchor_highest_possible_score = anchor.highest_possible_score;
     if (gen->is_woadwage) {
       woadwage_gen_anchor(gen);
+    } else if (anchor_play != NULL) {
+      // Without NDEBUG a held anchor is searched again, and must be found as
+      // it is held.
+      gen_search_and_remember_anchor_play(gen, &anchor, kwg_root_node_index,
+                                          anchor_play, anchor_play_key,
+                                          anchor_play_held);
     } else if (gen->move_record_type == MOVE_RECORD_BEST_SMALL) {
       recursive_gen_small(gen, anchor.col, kwg_root_node_index, anchor.col,
                           anchor.col, gen->dir == BOARD_HORIZONTAL_DIRECTION, 0,

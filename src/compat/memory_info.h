@@ -83,6 +83,19 @@ enum {
 };
 #endif
 
+// Entries of the anchor plays an endgame worker's lane shadow cache holds, as
+// a power of two: natively 2^18 entries of 32 bytes, 8 MiB a worker; in the
+// browser 2^13, 256 KiB a worker.
+#ifdef __EMSCRIPTEN__
+enum {
+  ENDGAME_ANCHOR_PLAY_CACHE_INDEX_BITS = 13,
+};
+#else
+enum {
+  ENDGAME_ANCHOR_PLAY_CACHE_INDEX_BITS = 18,
+};
+#endif
+
 // Entries of the cross set cache (cross_set_cache.h) of an endgame worker, a
 // simulation worker or an autoplay game, as a power of two: natively 2^14
 // entries of 64 bytes, 1 MiB each, which answers about 99% of an endgame's or

@@ -338,6 +338,9 @@ typedef struct MoveGen {
   // while the WMP is active and the bag is not empty.
   Equity shadow_equity_by_tiles_played[RACK_SIZE + 1];
   Equity shadow_nonplaythrough_equity_by_tiles_played[RACK_SIZE + 1];
+  // With a lane_shadow_cache: the key of each lane this generation shadowed
+  // (see shadow_lanes_small_cached), rows and then columns.
+  uint64_t lane_shadow_keys[2 * BOARD_DIM];
 } MoveGen;
 
 // Cache getter functions

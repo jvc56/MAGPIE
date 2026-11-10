@@ -1480,7 +1480,8 @@ static EndgameCtxWorker *endgame_ctx_create_worker(EndgameCtx *solver,
   solver_worker->playout_tail_cache =
       calloc_or_die(PLAYOUT_TAIL_CACHE_SIZE, sizeof(PlayoutTailEntry));
   solver_worker->lane_shadow_cache =
-      lane_shadow_cache_create(ENDGAME_LANE_SHADOW_CACHE_INDEX_BITS);
+      lane_shadow_cache_create(ENDGAME_LANE_SHADOW_CACHE_INDEX_BITS,
+                               ENDGAME_ANCHOR_PLAY_CACHE_INDEX_BITS);
   lane_shadow_cache_set_salt(solver_worker->lane_shadow_cache,
                              solver_worker->stuck_tiles_salt);
   solver_worker->cross_set_cache =

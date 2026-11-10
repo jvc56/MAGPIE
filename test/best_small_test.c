@@ -1,9 +1,12 @@
 #include "best_small_test.h"
 
+#include "../src/def/board_defs.h"
 #include "../src/def/equity_defs.h"
+#include "../src/def/letter_distribution_defs.h"
 #include "../src/def/move_defs.h"
 #include "../src/ent/equity.h"
 #include "../src/ent/game.h"
+#include "../src/ent/lane_shadow_cache.h"
 #include "../src/ent/move.h"
 #include "../src/ent/player.h"
 #include "../src/ent/rack.h"
@@ -29,6 +32,11 @@
 // still be a play of the best rank.
 
 enum {
+  // The lane shadow cache's anchor plays (check_twin_lane_boards).
+  TWIN_LANE_FULL_RACKS_PER_BOARD = 18,
+  TWIN_LANE_SEED = 2000,
+  TWIN_LANE_CACHE_INDEX_BITS = 12,
+  TWIN_LANE_PASSES = 2,
   ALL_SMALL_CAPACITY = 250000,
   SELF_PLAY_GAMES_PER_LEXICON = 6,
   SELF_PLAY_MAX_MOVES = 120,
@@ -261,11 +269,190 @@ static void check_cgp(Config *config, const char *cgp, MoveList *all_small,
   check_both_players(config_get_game(config), all_small, best_small, stats);
 }
 
+// The plays a lane shadow cache remembers for anchors (see AnchorPlayEntry in
+// lane_shadow_cache.h) are keyed by the lane's squares, and also by which lane
+// it is, by the anchor's column and by how ties are broken. Each of these
+// boards holds the same squares in two lanes, where a key without the lane
+// answers one lane with the other's play.
+typedef struct TwinLaneBoard {
+  const char *board;
+  // The two lanes with the same squares: rows, or columns when vertical.
+  bool vertical;
+  int first_lane;
+  int second_lane;
+} TwinLaneBoard;
+
+static const TwinLaneBoard twin_lane_boards[] = {
+    // The columns of LEVEL's two Ls.
+    {"15/15/15/15/15/15/15/5LEVEL5/15/15/15/15/15/15/15", true, 5, 9},
+    // The rows of ROTATOR's two Rs.
+    {"15/15/15/15/7R7/7O7/7T7/7A7/7T7/7O7/7R7/15/15/15/15", false, 4, 10},
+    // The rows of CIVIC's two Cs. The rows of its two Is are not the same:
+    // above LEVEL and below it, their cross sets differ.
+    {"15/15/15/15/15/7C7/7I7/5LEVEL5/7I7/7C7/15/15/15/15/15", false, 5, 9},
+};
+
+typedef struct TwinLaneStats {
+  int checks;
+  int twin_lane_plays;
+  int tie_rule_changes;
+} TwinLaneStats;
+
+// Takes the rack's tile number tile_idx, in letter order, off it.
+static void rack_take_tile_at(Rack *rack, int tile_idx) {
+  MachineLetter ml = 0;
+  int tiles_before = (int)rack_get_letter(rack, ml);
+  while (tiles_before <= tile_idx) {
+    ml++;
+    tiles_before += (int)rack_get_letter(rack, ml);
+  }
+  rack_take_letter(rack, ml);
+}
+
+// The best play of the player on turn, through cache unless it is NULL: on
+// the whole board when lane is negative, and otherwise in that lane alone
+// (rows and then columns). A pass when there is no play.
+static SmallMove best_small_through_cache(const Game *game,
+                                          LaneShadowCache *cache,
+                                          MoveList *best_small, int lane,
+                                          bool canonical_ties) {
+  const MoveGenArgs args = {
+      .game = game,
+      .move_list = best_small,
+      .move_record_type = MOVE_RECORD_BEST_SMALL,
+      .move_sort_type = MOVE_SORT_SCORE,
+      .eq_margin_movegen = 0,
+      .target_equity = EQUITY_MAX_VALUE,
+      .best_small_out_bonus = 0,
+      .best_small_canonical_ties = canonical_ties,
+      .lane_shadow_cache = cache,
+  };
+  if (lane < 0) {
+    generate_moves(&args);
+    assert(move_list_get_count(best_small) == 1);
+    return *best_small->small_moves[0];
+  }
+  SmallMove play;
+  small_move_set_as_pass(&play);
+  if (generate_best_small_move_in_lanes(&args, UINT64_C(1) << lane, NULL, 0)) {
+    play = *best_small->small_moves[0];
+  }
+  return play;
+}
+
+static void assert_small_plays_equal(const SmallMove *first,
+                                     const SmallMove *second) {
+  assert(first->tiny_move == second->tiny_move);
+  assert(small_move_get_score(first) == small_move_get_score(second));
+  assert(small_move_get_tiles_played(first) ==
+         small_move_get_tiles_played(second));
+  assert(small_move_get_play_length(first) ==
+         small_move_get_play_length(second));
+}
+
+// On the board and in every lane, under both tie rules, the play found
+// through the cache must be the play found without it. The second pass asks
+// again once the cache holds every anchor under both rules.
+static void check_twin_lane_position(const Game *game,
+                                     const TwinLaneBoard *twin_lanes,
+                                     LaneShadowCache *cache,
+                                     MoveList *best_small,
+                                     TwinLaneStats *stats) {
+  for (int pass_idx = 0; pass_idx < TWIN_LANE_PASSES; pass_idx++) {
+    SmallMove lane_plays[2][2 * BOARD_DIM];
+    for (int canonical_ties = 0; canonical_ties < 2; canonical_ties++) {
+      for (int lane = -1; lane < 2 * BOARD_DIM; lane++) {
+        const SmallMove expected = best_small_through_cache(
+            game, NULL, best_small, lane, canonical_ties != 0);
+        const SmallMove play = best_small_through_cache(
+            game, cache, best_small, lane, canonical_ties != 0);
+        assert_small_plays_equal(&play, &expected);
+        stats->checks++;
+        if (lane >= 0) {
+          lane_plays[canonical_ties][lane] = expected;
+        }
+      }
+    }
+    if (pass_idx != 0) {
+      continue;
+    }
+    for (int lane = 0; lane < 2 * BOARD_DIM; lane++) {
+      if (lane_plays[0][lane].tiny_move != lane_plays[1][lane].tiny_move) {
+        stats->tie_rule_changes++;
+      }
+    }
+    const int first_lane =
+        (twin_lanes->vertical ? BOARD_DIM : 0) + twin_lanes->first_lane;
+    const int second_lane =
+        (twin_lanes->vertical ? BOARD_DIM : 0) + twin_lanes->second_lane;
+    const SmallMove *first_play = &lane_plays[1][first_lane];
+    const SmallMove *second_play = &lane_plays[1][second_lane];
+    // The same squares hold the same play, in another place.
+    assert(small_move_get_score(first_play) ==
+           small_move_get_score(second_play));
+    assert(small_move_is_pass(first_play) == small_move_is_pass(second_play));
+    if (!small_move_is_pass(first_play)) {
+      assert(first_play->tiny_move != second_play->tiny_move);
+      stats->twin_lane_plays++;
+    }
+  }
+}
+
+static void check_twin_lane_boards(MoveList *best_small) {
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -wmp false -s1 equity -s2 equity -r1 all -r2 all "
+      "-numplays 1");
+  // One cache for every board and rack, as an endgame has one for every
+  // position of a solve.
+  LaneShadowCache *cache = lane_shadow_cache_create(TWIN_LANE_CACHE_INDEX_BITS,
+                                                    TWIN_LANE_CACHE_INDEX_BITS);
+  lane_shadow_cache_set_salt(cache, 1);
+  TwinLaneStats stats = {0};
+  for (size_t board_idx = 0;
+       board_idx < sizeof(twin_lane_boards) / sizeof(TwinLaneBoard);
+       board_idx++) {
+    const TwinLaneBoard *twin_lanes = &twin_lane_boards[board_idx];
+    char *command = get_formatted_string("cgp %s / 0/0 0", twin_lanes->board);
+    load_and_exec_config_or_die(config, command);
+    free(command);
+    Game *game = config_get_game(config);
+    uint64_t random_state = TWIN_LANE_SEED + (uint64_t)board_idx;
+    game_seed(game, random_state);
+    const int player_idx = game_get_player_on_turn_index(game);
+    Rack *rack = player_get_rack(game_get_player(game, player_idx));
+    const int twin_lane_plays_before = stats.twin_lane_plays;
+    for (int rack_idx = 0; rack_idx < TWIN_LANE_FULL_RACKS_PER_BOARD;
+         rack_idx++) {
+      // A full rack, and then what is left of it as its tiles go one by one:
+      // an endgame's racks are subsets of one rack.
+      set_random_rack(game, player_idx, NULL);
+      Rack full_rack;
+      rack_copy(&full_rack, rack);
+      while (!rack_is_empty(rack)) {
+        check_twin_lane_position(game, twin_lanes, cache, best_small, &stats);
+        rack_take_tile_at(rack, (int)(next_random(&random_state) %
+                                      (uint64_t)rack_get_total_letters(rack)));
+      }
+      // The next rack's draw returns this one to the bag, whole.
+      rack_copy(rack, &full_rack);
+    }
+    assert(stats.twin_lane_plays > twin_lane_plays_before);
+  }
+  printf("best_small: %d checks through a lane shadow cache, %d racks with a "
+         "play in both of two lanes with the same squares, %d lanes whose "
+         "best play the tie rule changes\n",
+         stats.checks, stats.twin_lane_plays, stats.tie_rule_changes);
+  assert(stats.tie_rule_changes > 0);
+  lane_shadow_cache_destroy(cache);
+  config_destroy(config);
+}
+
 void test_best_small(void) {
   BestSmallStats stats = {0};
   MoveList *all_small = move_list_create_small(ALL_SMALL_CAPACITY);
   MoveList *best_small = move_list_create_small(1);
 
+  check_twin_lane_boards(best_small);
   check_self_play_games("CSW21", all_small, best_small, &stats);
   check_self_play_games("NWL20", all_small, best_small, &stats);
   const int self_play_positions = stats.positions;
