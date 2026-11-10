@@ -950,13 +950,12 @@ wordmap_gen_leave_prunes_subrack(const MoveGen *gen, int subrack_idx,
     return false;
   }
   const WMPMoveGen *wgen = &gen->wmp_move_gen;
-  const SubrackInfo *subrack_info =
-      &wgen->nonplaythrough_infos[subracks_get_combination_offset(
-                                      wgen->tiles_to_play) +
-                                  subrack_idx];
-  return wmp_move_gen_subrack_leave_kept(subrack_info, score_bounds,
-                                         gen_get_cutoff_equity_or_score(gen)) ==
-         0;
+  const int info_idx =
+      subracks_get_combination_offset(wgen->tiles_to_play) + subrack_idx;
+  return wmp_move_gen_subrack_leave_kept(
+             wgen->nonplaythrough_leave_values[info_idx],
+             wgen->nonplaythrough_tile_score_sums[info_idx], score_bounds,
+             gen_get_cutoff_equity_or_score(gen)) == 0;
 }
 
 // The anchor's score bound and score bases, each with the PAT bound added,
@@ -986,19 +985,19 @@ static bool wordmap_gen_score_bounds_hold(const MoveGen *gen,
                                           int start_col,
                                           const int64_t *score_bounds) {
   const WMPMoveGen *wgen = &gen->wmp_move_gen;
-  const SubrackInfo *subrack_info =
-      &wgen->nonplaythrough_infos[subracks_get_combination_offset(
-                                      wgen->tiles_to_play) +
-                                  subrack_idx];
-  if (bit_rack_get_letter(&subrack_info->subrack, BLANK_MACHINE_LETTER) > 0) {
+  const int info_idx =
+      subracks_get_combination_offset(wgen->tiles_to_play) + subrack_idx;
+  if (bit_rack_get_letter(&wgen->nonplaythrough_infos[info_idx].subrack,
+                          BLANK_MACHINE_LETTER) > 0) {
     return true;
   }
   // Every bound carries the anchor's PAT bound, so the score takes it too.
   const int64_t pat_bound = score_bounds[0] - anchor->highest_possible_score;
   const int64_t score = (int64_t)wmp_play_score(gen, start_col) + pat_bound;
-  return wmp_move_gen_subrack_leave_kept(subrack_info, score_bounds,
-                                         score + subrack_info->leave_value) ==
-         1;
+  const Equity leave_value = wgen->nonplaythrough_leave_values[info_idx];
+  return wmp_move_gen_subrack_leave_kept(
+             leave_value, wgen->nonplaythrough_tile_score_sums[info_idx],
+             score_bounds, score + leave_value) == 1;
 }
 #endif
 
@@ -4705,13 +4704,14 @@ void generate_moves(const MoveGenArgs *args) {
                sizeof(wgen->count_by_size));
         for (int i = 0; i < MOVEGEN_SUBRACK_CACHE_ENTRIES; i++) {
           wgen->nonplaythrough_infos[i].subrack = subrack_entry->subracks[i];
-          wgen->nonplaythrough_infos[i].leave_value =
-              subrack_entry->leave_values[i];
-          wgen->nonplaythrough_infos[i].tile_score_sum =
-              subrack_entry->tile_score_sums[i];
           wgen->nonplaythrough_infos[i].wmp_entry =
               subrack_entry->wmp_entries[i];
         }
+        memcpy(wgen->nonplaythrough_leave_values, subrack_entry->leave_values,
+               sizeof(subrack_entry->leave_values));
+        memcpy(wgen->nonplaythrough_tile_score_sums,
+               subrack_entry->tile_score_sums,
+               sizeof(subrack_entry->tile_score_sums));
       }
       if (leaves_are_populated) {
         wgen->nonplaythrough_wmp_entry_cache = subrack_entry->wmp_entries;
@@ -4739,13 +4739,14 @@ void generate_moves(const MoveGenArgs *args) {
                sizeof(wgen->count_by_size));
         for (int i = 0; i < MOVEGEN_SUBRACK_CACHE_ENTRIES; i++) {
           subrack_entry->subracks[i] = wgen->nonplaythrough_infos[i].subrack;
-          subrack_entry->leave_values[i] =
-              wgen->nonplaythrough_infos[i].leave_value;
-          subrack_entry->tile_score_sums[i] =
-              wgen->nonplaythrough_infos[i].tile_score_sum;
           subrack_entry->wmp_entries[i] =
               wgen->nonplaythrough_infos[i].wmp_entry;
         }
+        memcpy(subrack_entry->leave_values, wgen->nonplaythrough_leave_values,
+               sizeof(subrack_entry->leave_values));
+        memcpy(subrack_entry->tile_score_sums,
+               wgen->nonplaythrough_tile_score_sums,
+               sizeof(subrack_entry->tile_score_sums));
       }
     }
 
