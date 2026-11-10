@@ -838,12 +838,17 @@ static uint64_t occupancy_playable_tiles_bv(const Board *board,
 // every tile type the cross-set scan leaves undecided had no play there, the
 // generation covers only the anchors whose plays can reach a square the last
 // move changed.
+// `lists`, when non-NULL, are the incremental lists at this position. The
+// opponent's plays here are then those of their nearest list up the path that
+// still stand, which are read in place, and those spanning a square a move
+// made since has changed, which are all the generation then covers; it is
+// skipped when the standing plays place every undecided tile type.
 static float compute_opp_stuck_fraction(
     Game *game, MoveList *move_list, const KWG *pruned_kwg, int opp_idx,
     uint64_t *tiles_played_bv_out, EndgameCtx *solver,
     const SmallMove *opp_plays, int opp_play_count,
     const BoardOccupancy *occupancy, StuckTilesEntry *cache, uint64_t cache_key,
-    const StuckTilesHint *hint) {
+    const StuckTilesHint *hint, const PathMoveLists *lists) {
   int saved_on_turn = game_get_player_on_turn_index(game);
   StuckTilesEntry *cache_entry =
       cache != NULL && cache_key != 0
@@ -944,7 +949,7 @@ static float compute_opp_stuck_fraction(
     }
     return 0.0F;
   }
-  const MoveGenArgs tp_args = {
+  MoveGenArgs tp_args = {
       .game = game,
       .move_list = move_list,
       .move_record_type = MOVE_RECORD_TILES_PLAYED,
@@ -962,6 +967,16 @@ static float compute_opp_stuck_fraction(
   if (hint != NULL && cross_sets_valid &&
       (rack_tiles_bv & ~opp_tiles_bv & hint->playable_before) == 0) {
     generate_tiles_played_in_lanes(&tp_args, hint->lanes, hint->lane_hits);
+  } else if (lists != NULL && cross_sets_valid) {
+    uint64_t touched;
+    uint32_t hits[PATH_MOVE_LISTS_NUM_LANES];
+    opp_tiles_bv |= path_move_lists_standing_tile_types(
+        lists, saved_on_turn == opp_idx, opp_rack,
+        rack_tiles_bv & ~opp_tiles_bv, &touched, hits);
+    if (opp_tiles_bv != rack_tiles_bv && touched != 0) {
+      tp_args.initial_tiles_bv = opp_tiles_bv;
+      generate_tiles_played_in_lanes(&tp_args, touched, hits);
+    }
   } else {
     generate_moves(&tp_args);
   }
@@ -989,7 +1004,7 @@ static float compute_initial_stuck_fraction(const EndgameCtx *solver,
   MoveList *tmp_ml = move_list_create_small(ENDGAME_MOVELIST_INITIAL_CAPACITY);
   float frac = compute_opp_stuck_fraction(
       root_game, tmp_ml, solver_get_pruned_kwg(solver, opp_idx), opp_idx, NULL,
-      NULL, NULL, 0, NULL, NULL, 0, NULL);
+      NULL, NULL, 0, NULL, NULL, 0, NULL, NULL);
   small_move_list_destroy(tmp_ml);
   game_destroy(root_game);
   return frac;
@@ -3068,7 +3083,7 @@ static float worker_opp_stuck_fraction(EndgameCtxWorker *worker,
       worker->game_copy, worker->move_list,
       solver_get_pruned_kwg(solver, opp_idx), opp_idx, &playable, solver,
       opp_plays, opp_play_count, occupancy, worker->stuck_tiles_cache,
-      stuck_tiles_key(worker, node_key), hint_or_null);
+      stuck_tiles_key(worker, node_key), hint_or_null, lists);
   // An interrupted check's tile types are incomplete.
   if (lists != NULL && !iterative_deepening_should_stop(solver)) {
     worker->stuck_tiles_playable[lists->length] = playable;

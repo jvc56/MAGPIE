@@ -238,6 +238,21 @@ bool path_move_lists_best_play_alone(PathMoveLists *lists,
                                      const MoveGenArgs *best_small_args,
                                      SmallMove *out_best);
 
+// The tile types among `wanted` (a bit per machine letter, the blank's bit 0)
+// that the plays of one side still standing at the current path position
+// place. The side is the one to move there (`side_is_on_turn`) or the other
+// one, and `rack` is its rack there. The plays are read from the nearest list
+// of that side up the path that is built, down to its root list: one stands
+// when the rack still holds its tiles and it spans no square a move made
+// since has changed for its lane. `touched` and the PATH_MOVE_LISTS_NUM_LANES
+// entries of `hits` get those moves' lanes and squares, so the side's plays
+// here are the standing ones and those that
+// generate_tiles_played_in_lanes(args, *touched, hits) finds.
+uint64_t path_move_lists_standing_tile_types(const PathMoveLists *lists,
+                                             bool side_is_on_turn,
+                                             const Rack *rack, uint64_t wanted,
+                                             uint64_t *touched, uint32_t *hits);
+
 // Per lane, the squares `move` would change for the lane's plays if played on
 // `board` (see move_lane_hits in path_move_lists.c), written to the
 // PATH_MOVE_LISTS_NUM_LANES entries of `hits`: a play spanning none of its
