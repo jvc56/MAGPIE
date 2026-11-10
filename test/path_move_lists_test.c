@@ -246,6 +246,10 @@ enum {
   TILES_PLAYED_NUM_POSITIONS = 3,
   TILES_PLAYED_PATHS_PER_POSITION = 400,
   TILES_PLAYED_MIN_REVEALED = 20,
+  // How many picks path_move_lists_penalized_best_play is compared over, at
+  // least, in each of the two tests that check it.
+  PENALIZED_MIN_PICKS = 1000,
+  PENALIZED_SCALES = 3,
   // How often a tile type's only plays had to be standing ones, at least.
   TILES_PLAYED_MIN_STANDING = 250,
   BEST_PLAY_MOVE_LIST_CAPACITY = 100000,
@@ -402,6 +406,63 @@ static void assert_best_play_matches(PathMoveLists *lists,
   free(derived_pointers);
 }
 
+// Weights for path_move_lists_penalized_best_play, different for most tile
+// types.
+static void set_tile_weights(int *tile_weights) {
+  for (int ml = 0; ml < MAX_ALPHABET_SIZE; ml++) {
+    tile_weights[ml] = 2 + (ml * 5) % 7;
+  }
+}
+
+// At the current path position, path_move_lists_penalized_best_play must
+// pick the first play of a scratch generation with the highest score less its
+// tiles' weights times the scale, for the scales 0 and 1 and one that
+// `variety` selects. Adds the picks compared to *num_picks.
+static void assert_penalized_best_play_matches(PathMoveLists *lists,
+                                               const MoveGenArgs *args,
+                                               const int *tile_weights,
+                                               int variety, int *num_picks) {
+  const float scales[PENALIZED_SCALES] = {0.0F, 1.0F,
+                                          (float)(variety % 16) / 8.0F};
+  for (int scale_idx = 0; scale_idx < PENALIZED_SCALES; scale_idx++) {
+    const float scale = scales[scale_idx];
+    SmallMove picked;
+    int picked_adjusted = 0;
+    const bool found = path_move_lists_penalized_best_play(
+        lists, args, tile_weights, scale, &picked, &picked_adjusted);
+    generate_moves(args);
+    const MoveList *scratch = args->move_list;
+    const SmallMove *expected = NULL;
+    int expected_adjusted = 0;
+    for (int move_idx = 0; move_idx < scratch->count; move_idx++) {
+      const SmallMove *candidate = scratch->small_moves[move_idx];
+      if (small_move_is_pass(candidate)) {
+        continue;
+      }
+      int weight = 0;
+      const int tiles_played = small_move_get_tiles_played(candidate);
+      for (int tile_idx = 0; tile_idx < tiles_played; tile_idx++) {
+        weight += tile_weights[small_move_tile_is_blank(candidate, tile_idx)
+                                   ? BLANK_MACHINE_LETTER
+                                   : small_move_get_tile(candidate, tile_idx)];
+      }
+      const int adjusted =
+          (int)small_move_get_score(candidate) - (int)((float)weight * scale);
+      if (expected == NULL || adjusted > expected_adjusted) {
+        expected = candidate;
+        expected_adjusted = adjusted;
+      }
+    }
+    assert(found == (expected != NULL));
+    if (expected != NULL) {
+      assert(picked.tiny_move == expected->tiny_move);
+      assert(small_move_get_score(&picked) == small_move_get_score(expected));
+      assert(picked_adjusted == expected_adjusted);
+      (*num_picks)++;
+    }
+  }
+}
+
 // Makes `chosen` along the path: pushes it on the lists, plays it, and brings
 // the cross-sets up to date for the next generation.
 static void make_path_move(Game *game, PathMoveLists *lists,
@@ -532,6 +593,9 @@ static void test_best_play_random_paths(void) {
   int num_split_lanes = 0;
   int num_reply_whole_rack = 0;
   int num_reply_partial = 0;
+  int num_penalized = 0;
+  int tile_weights[MAX_ALPHABET_SIZE];
+  set_tile_weights(tile_weights);
   int deepest = 0;
   bool saw_filter_case = false;
   for (int position_idx = 0; position_idx < BEST_PLAY_NUM_POSITIONS;
@@ -594,6 +658,8 @@ static void test_best_play_random_paths(void) {
         if (length >= 2 && lists->played[length - 2]) {
           saw_filter_case = true;
         }
+        assert_penalized_best_play_matches(
+            lists, &args, tile_weights, path_idx + 3 * length, &num_penalized);
         assert_best_play_matches(lists, &args, best_move_list, &rng,
                                  &num_checks, &num_split_lanes);
         if (length > deepest) {
@@ -618,6 +684,7 @@ static void test_best_play_random_paths(void) {
   assert(num_split_lanes > 0);
   assert(num_reply_whole_rack >= REPLY_LANES_MIN_WHOLE_RACK);
   assert(num_reply_partial >= REPLY_LANES_MIN_PARTIAL);
+  assert(num_penalized >= PENALIZED_MIN_PICKS);
   path_move_lists_destroy(lists);
   small_move_list_destroy(best_move_list);
   small_move_list_destroy(move_list);
@@ -764,6 +831,9 @@ static void test_tiles_played_in_lanes_random_paths(void) {
   uint64_t rng = 0x2545F4914F6CDD1DULL;
   int num_revealed = 0;
   int num_standing = 0;
+  int num_penalized = 0;
+  int tile_weights[MAX_ALPHABET_SIZE];
+  set_tile_weights(tile_weights);
   for (int position_idx = 0; position_idx < TILES_PLAYED_NUM_POSITIONS;
        position_idx++) {
     load_cgp_or_die(game, positions[position_idx]);
@@ -796,14 +866,18 @@ static void test_tiles_played_in_lanes_random_paths(void) {
         make_path_move(game, lists, move_list, &chosen, &undos[length]);
         length++;
         // Three positions in four get their list, where the lists up the path
-        // allow it, so that the standing plays are read from a list at every
-        // distance up the path, the root lists included.
-        if (game_get_game_end_reason(game) == GAME_END_REASON_NONE &&
-            (path_idx + length) % 4 != 0 &&
-            (length <= 2 ||
-             path_move_lists_slot_is_current(lists, length - 2))) {
-          const SmallMove *derived = NULL;
-          path_move_lists_moves_at(lists, &args, &derived);
+        // allow it, so that the standing plays and the penalized pick are read
+        // from a list at every distance up the path, the root lists included.
+        if (game_get_game_end_reason(game) == GAME_END_REASON_NONE) {
+          assert_penalized_best_play_matches(lists, &args, tile_weights,
+                                             path_idx + 3 * length,
+                                             &num_penalized);
+          if ((path_idx + length) % 4 != 0 &&
+              (length <= 2 ||
+               path_move_lists_slot_is_current(lists, length - 2))) {
+            const SmallMove *derived = NULL;
+            path_move_lists_moves_at(lists, &args, &derived);
+          }
         }
         for (int side = 0; side < 2; side++) {
           const uint64_t after =
@@ -835,6 +909,7 @@ static void test_tiles_played_in_lanes_random_paths(void) {
   }
   assert(num_revealed >= TILES_PLAYED_MIN_REVEALED);
   assert(num_standing >= TILES_PLAYED_MIN_STANDING);
+  assert(num_penalized >= PENALIZED_MIN_PICKS);
   path_move_lists_destroy(lists);
   small_move_list_destroy(move_list);
   game_destroy(game);

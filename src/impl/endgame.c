@@ -199,6 +199,9 @@ struct EndgameCtx {
   // Each tile type's face value, by machine letter, for the sums of the tiles
   // moves place.
   int tile_face_values[MAX_ALPHABET_SIZE];
+  // What compute_conservation_bonus charges for placing a tile of each type,
+  // before the stuck fraction scales it.
+  int conservation_tile_weights[MAX_ALPHABET_SIZE];
   dual_lexicon_mode_t dual_lexicon_mode;
   double soft_time_limit;
   double hard_time_limit;
@@ -1084,6 +1087,9 @@ void endgame_ctx_reset(EndgameCtx *es, EndgameResults *results,
   const LetterDistribution *ld = game_get_ld(endgame_args->game);
   for (int ml = 0; ml < ld_get_size(ld); ml++) {
     es->tile_face_values[ml] = equity_to_int(ld_get_score(ld, ml));
+    es->conservation_tile_weights[ml] =
+        CONSERVATION_TILE_WEIGHT +
+        CONSERVATION_VALUE_WEIGHT * es->tile_face_values[ml];
   }
 
   kwg_destroy(es->pruned_kwgs[0]);
@@ -3402,6 +3408,9 @@ static int32_t negamax_greedy_leaf_playout(EndgameCtxWorker *worker,
     // worker->move_list.
     bool in_place = false;
     const SmallMove *plays = NULL;
+    // The one play of a step that asked the incremental lists for its pick
+    // alone.
+    SmallMove picked_play;
     if (stm_rack_p->number_of_letters == 1) {
       // Single-tile fast path: cross-set scan instead of KWG traversal.
       // Its move is still pushed when following the path, without a
@@ -3460,6 +3469,49 @@ static int32_t negamax_greedy_leaf_playout(EndgameCtxWorker *worker,
         in_place = true;
         plays = leaf_plays;
         nplays = leaf_play_count + 1;
+      } else if (follow_path && stm_idx_p == solving_player) {
+        // The solving player's pick is the play that scores most less its
+        // conservation bonus, which the lists find among the plays of a list
+        // up the path without deriving this position's: the step's plays are
+        // that one and the pass.
+        in_place = true;
+        plays = &picked_play;
+        int picked_adjusted;
+        nplays = path_move_lists_penalized_best_play(
+                     worker->path_lists, &pargs,
+                     worker->solver->conservation_tile_weights, opp_stuck_frac,
+                     &picked_play, &picked_adjusted)
+                     ? 2
+                     : 1;
+#ifndef NDEBUG
+        // The pick of the list a generation from scratch gives: its first
+        // play of the highest score less its conservation bonus.
+        generate_moves(&pargs);
+        const SmallMove *expected_play = NULL;
+        int expected_adjusted = 0;
+        for (int play_idx = 0; play_idx < worker->move_list->count;
+             play_idx++) {
+          const SmallMove *small_move =
+              worker->move_list->small_moves[play_idx];
+          if (small_move_is_pass(small_move)) {
+            continue;
+          }
+          const int adjusted =
+              small_move_get_score(small_move) -
+              compute_conservation_bonus(
+                  small_move, worker->solver->tile_face_values, opp_stuck_frac);
+          if (expected_play == NULL || adjusted > expected_adjusted) {
+            expected_play = small_move;
+            expected_adjusted = adjusted;
+          }
+        }
+        assert((expected_play != NULL) == (nplays == 2));
+        assert(expected_play == NULL ||
+               (expected_play->tiny_move == picked_play.tiny_move &&
+                small_move_get_score(expected_play) ==
+                    small_move_get_score(&picked_play) &&
+                expected_adjusted == picked_adjusted));
+#endif
       } else if (follow_path &&
                  (worker->path_lists->length <= 2 ||
                   path_move_lists_slot_is_current(
