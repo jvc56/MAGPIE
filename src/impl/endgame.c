@@ -3913,9 +3913,46 @@ static void publish_live_top_k_pv(EndgameCtxWorker *worker, uint64_t root_tiny,
 // played tiles (placeholder = placed + full = 2*placed) and can index the rack
 // hash table out of bounds -- e.g. outplaying four S's yields placeholder[S] =
 // 8 into an 8-slot (0..RACK_SIZE) row. Use an empty leftover for outplays.
-static uint64_t play_small_move_and_hash(EndgameCtxWorker *worker,
-                                         const SmallMove *small_move,
-                                         uint64_t node_key, MoveUndo *undo) {
+//
+// In two steps, for the callers that look the child up before playing it:
+// small_move_child_key loads spare_move and returns the key, which comes from
+// the move alone, and play_keyed_small_move plays what spare_move holds.
+static uint64_t small_move_child_key(EndgameCtxWorker *worker,
+                                     const SmallMove *small_move,
+                                     uint64_t node_key) {
+  const Game *worker_game = worker->game_copy;
+  small_move_to_move(worker->move_list->spare_move, small_move,
+                     game_get_board(worker_game));
+  if (!worker->solver->transposition_table_optim) {
+    return 0;
+  }
+  const int on_turn_idx = game_get_player_on_turn_index(worker_game);
+  const Rack *stm_rack =
+      player_get_rack(game_get_player(worker_game, on_turn_idx));
+  // The rack still holds the move's tiles (which also covers an outplay,
+  // whose leftover is empty), and the scoreless count is the one the play
+  // will leave: a pass adds one, a play that leaves tiles resets it, and
+  // play_move_endgame_outplay leaves it alone.
+  const int last_scoreless_turns =
+      game_get_consecutive_scoreless_turns(worker_game);
+  int scoreless_turns = last_scoreless_turns;
+  if (small_move_is_pass(small_move)) {
+    scoreless_turns++;
+  } else if (small_move_get_tiles_played(small_move) !=
+             rack_get_total_letters(stm_rack)) {
+    scoreless_turns = 0;
+  }
+  return zobrist_add_unplayed_move(
+      worker->solver->transposition_table->zobrist, node_key,
+      worker->move_list->spare_move, stm_rack,
+      on_turn_idx == worker->solver->solving_player, scoreless_turns,
+      last_scoreless_turns);
+}
+
+static void play_keyed_small_move(EndgameCtxWorker *worker,
+                                  const SmallMove *small_move,
+                                  uint64_t node_key, uint64_t child_key,
+                                  MoveUndo *undo) {
   Game *worker_game = worker->game_copy;
   const int on_turn_idx = game_get_player_on_turn_index(worker_game);
   const Player *player_on_turn = game_get_player(worker_game, on_turn_idx);
@@ -3923,22 +3960,15 @@ static uint64_t play_small_move_and_hash(EndgameCtxWorker *worker,
   const bool is_outplay = small_move_get_tiles_played(small_move) ==
                           rack_get_total_letters(stm_rack);
 
-  small_move_to_move(worker->move_list->spare_move, small_move,
-                     game_get_board(worker_game));
   if (worker->path_lists != NULL) {
     path_move_lists_push(worker->path_lists, game_get_board(worker_game),
                          worker->move_list->spare_move);
   }
 
-  Rack outplay_leftover;
-  if (is_outplay) {
-    rack_set_dist_size_and_reset(&outplay_leftover,
-                                 rack_get_dist_size(stm_rack));
-  }
-  const Rack *move_leftover_rack = is_outplay ? &outplay_leftover : stm_rack;
-
+#ifndef NDEBUG
   const int last_consecutive_scoreless_turns =
       game_get_consecutive_scoreless_turns(worker_game);
+#endif
 
   if (is_outplay) {
     play_move_endgame_outplay(worker->move_list->spare_move, worker_game, undo);
@@ -3951,16 +3981,85 @@ static uint64_t play_small_move_and_hash(EndgameCtxWorker *worker,
   }
   push_played_move(worker, undo);
 
-  uint64_t child_key = 0;
+#ifndef NDEBUG
   if (worker->solver->transposition_table_optim) {
-    child_key =
-        zobrist_add_move(worker->solver->transposition_table->zobrist, node_key,
-                         worker->move_list->spare_move, move_leftover_rack,
-                         on_turn_idx == worker->solver->solving_player,
-                         game_get_consecutive_scoreless_turns(worker_game),
-                         last_consecutive_scoreless_turns);
+    // The key from the position the play left.
+    Rack outplay_leftover;
+    if (is_outplay) {
+      rack_set_dist_size_and_reset(&outplay_leftover,
+                                   rack_get_dist_size(stm_rack));
+    }
+    assert(child_key ==
+           zobrist_add_move(worker->solver->transposition_table->zobrist,
+                            node_key, worker->move_list->spare_move,
+                            is_outplay ? &outplay_leftover : stm_rack,
+                            on_turn_idx == worker->solver->solving_player,
+                            game_get_consecutive_scoreless_turns(worker_game),
+                            last_consecutive_scoreless_turns));
   }
+#else
+  (void)node_key;
+  (void)child_key;
+#endif
+}
+
+static uint64_t play_small_move_and_hash(EndgameCtxWorker *worker,
+                                         const SmallMove *small_move,
+                                         uint64_t node_key, MoveUndo *undo) {
+  const uint64_t child_key = small_move_child_key(worker, small_move, node_key);
+  play_keyed_small_move(worker, small_move, node_key, child_key, undo);
   return child_key;
+}
+
+// What abdada_negamax does with a leaf's table entry (see there), for a leaf
+// not yet played: child_key and child_spread are the leaf's key and its
+// spread for its side to move, alpha and beta its window. Returns whether the
+// leaf would return from the table, and then its value and whether the entry
+// is impure. Reads only, so that a caller can still search the leaf.
+static inline bool leaf_child_table_value(const EndgameCtxWorker *worker,
+                                          uint64_t child_key,
+                                          int32_t child_spread, int32_t alpha,
+                                          int32_t beta, bool pv_node,
+                                          int32_t *value, bool *impure) {
+  const TTEntry tt_entry = transposition_table_lookup(
+      worker->solver->transposition_table, leaf_tt_key(worker, child_key));
+  if (!ttentry_valid(tt_entry)) {
+    return false;
+  }
+  const bool pure = ttentry_depth(tt_entry) == TT_PURE_DEPTH;
+  if (ttentry_depth(tt_entry) > 0 && !pure) {
+    // A deeper search's value: the leaf takes only its move.
+    return false;
+  }
+  const int16_t score =
+      (int16_t)((int16_t)child_spread + ttentry_score(tt_entry));
+  const uint8_t flag = ttentry_flag(tt_entry);
+  if (flag == TT_EXACT) {
+    if (pv_node) {
+      return false;
+    }
+  } else {
+    if (flag == TT_LOWER) {
+      alpha = MAX(alpha, score);
+    } else if (flag == TT_UPPER) {
+      beta = MIN(beta, score);
+    }
+    if (alpha < beta) {
+      return false;
+    }
+  }
+  *value = score;
+  *impure = !pure;
+  return true;
+}
+
+// Whether a child's node can be counted without entering it, twice over for
+// a child searched again: nothing has asked the search to stop, and its
+// deadline check is not due.
+static inline bool child_node_needs_no_checks(EndgameCtxWorker *worker) {
+  return worker->nodes_since_deadline_check + 2 <
+             DEPTH_DEADLINE_CHECK_INTERVAL &&
+         !iterative_deepening_should_stop(worker->solver);
 }
 
 // A node one ply above the leaves nearly always cuts off on its first move,
@@ -4081,7 +4180,10 @@ int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
                                      player_get_score(other_player));
   uint64_t tt_move = INVALID_TINY_MOVE;
 
-  if (worker->solver->transposition_table_optim) {
+  // Nothing is ever stored for a position whose game has ended: it returns
+  // its spread below.
+  if (worker->solver->transposition_table_optim &&
+      game_get_game_end_reason(worker->game_copy) == GAME_END_REASON_NONE) {
     // A depth-0 node's entry is its leaf value, stored under leaf_tt_key.
     const uint64_t probe_key =
         depth == 0 ? leaf_tt_key(worker, node_key) : node_key;
@@ -4454,6 +4556,16 @@ int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
             worker->game_copy,
             1 - game_get_player_on_turn_index(worker->game_copy)))) == 1));
 
+  // See the children valued without being played, in the loop below.
+  const bool child_shortcuts =
+      arena_alloced && !is_root && depth - 1 < ABDADA_MIN_DEPTH;
+  const bool leaf_children_from_table =
+      child_shortcuts && depth == 1 &&
+      worker->solver->transposition_table_optim;
+  const int stm_rack_size =
+      rack_get_total_letters(player_get_rack(player_on_turn));
+  int32_t opp_out_bonus = -1;
+
   // ABDADA two-phase iteration:
   // Pass 0: search all moves with exclusion (defer busy nodes).
   // Pass 1+: retry only deferred moves without exclusion.
@@ -4502,6 +4614,10 @@ int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
           tail_sorted = true;
         }
       }
+
+      // The child's key, once it is known.
+      uint64_t child_key = 0;
+      bool child_key_ready = false;
 
       // ABDADA: determine if this move should be searched exclusively
       // First move (idx == 0) is never exclusive
@@ -4556,94 +4672,167 @@ int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
       // Calculate undo index for incremental backup
       int undo_index = worker->solver->requested_plies - depth;
 
-      // Live-progress: publish this move into the per-thread "current line"
-      // buffer before recursing so a polling reader can see what the engine
-      // is currently exploring even during a long single-root subtree where
-      // no other signal updates. The slot store is a relaxed atomic; the
-      // length store uses release ordering so the reader (acquire on length)
-      // sees the tiny_move write.
-      atomic_store_explicit(&worker->current_line[undo_index],
-                            small_move->tiny_move, memory_order_relaxed);
-      atomic_store_explicit(&worker->current_line_len, undo_index + 1,
-                            memory_order_release);
-
-      const uint64_t child_key = play_small_move_and_hash(
-          worker, small_move, node_key, &worker->move_undos[undo_index]);
-
-      // Per-root-move aspiration: at root after depth 1, each move gets its
-      // own aspiration window centered on its estimated_value from the previous
-      // ID iteration. This gives accurate values for all root moves (needed for
-      // multi-PV) while still benefiting from narrow windows.
-      const bool use_root_aspiration =
-          exact_all_root_moves && depth >= 2 &&
-          worker->solver->iterative_deepening_optim &&
-          !worker->solver->first_win_optim &&
-          !worker->solver->initial_window_optim;
-
+      // Two kinds of child need no board, and are valued here as their own
+      // node would value them, node count included, without being played:
+      // an outplay, whose game ends at the mover's spread with the move's
+      // score and the opponent's tiles, and a leaf the table already holds.
+      // Only below the depths ABDADA marks nodes at, and only when the
+      // child's node would have nothing else to do (see
+      // child_node_needs_no_checks).
       int32_t value = 0;
-      if (use_root_aspiration) {
-        int32_t est = small_move_get_estimated_value(small_move);
-        int32_t window = ASPIRATION_WINDOW;
-        int32_t move_alpha = MAX(alpha, est - window);
-        int32_t move_beta = MIN(beta, est + window);
-        // Ensure valid window
-        if (move_alpha >= move_beta) {
-          move_alpha = alpha;
-          move_beta = beta;
-        }
-
-        while (true) {
-          value = abdada_negamax(worker, child_key, depth - 1, -move_beta,
-                                 -move_alpha, &child_pv, pv_node,
-                                 child_exclusive, opp_stuck_frac);
-          if (value == ON_EVALUATION || value == ABDADA_INTERRUPTED) {
-            break;
+      bool child_valued = false;
+      if (child_shortcuts && !small_move_is_pass(small_move)) {
+        if (small_move_get_tiles_played(small_move) == stm_rack_size) {
+          if (child_node_needs_no_checks(worker)) {
+            if (opp_out_bonus < 0) {
+              opp_out_bonus = equity_to_int(
+                  calculate_end_rack_points(player_get_rack(other_player),
+                                            game_get_ld(worker->game_copy)));
+            }
+            worker->local_nodes_searched++;
+            worker->nodes_since_deadline_check++;
+            child_pv.negamax_depth = 0;
+            value =
+                -(on_turn_spread + (int32_t)small_move_get_score(small_move) +
+                  opp_out_bonus);
+            child_valued = true;
+            if (!((idx == 0 && !first_reply_searched) ||
+                  !worker->solver->negascout_optim || exact_all_root_moves) &&
+                alpha < -value && -value < beta) {
+              // The null-window search's value falls inside the window, and
+              // the full-window search that follows visits the node again.
+              worker->local_nodes_searched++;
+              worker->nodes_since_deadline_check++;
+            }
           }
-          if (-value <= move_alpha && move_alpha > alpha) {
-            // Aspiration fail-low: widen alpha toward global alpha
-            window *= 2;
-            move_alpha =
-                (window >= LARGE_VALUE / 2) ? alpha : MAX(alpha, est - window);
-            pvline_clear(&child_pv);
-          } else if (-value >= move_beta && move_beta < beta) {
-            // Aspiration fail-high: widen beta toward global beta
-            window *= 2;
-            move_beta =
-                (window >= LARGE_VALUE / 2) ? beta : MIN(beta, est + window);
-            pvline_clear(&child_pv);
+        } else if (leaf_children_from_table) {
+          child_key = small_move_child_key(worker, small_move, node_key);
+          child_key_ready = true;
+          const int32_t child_spread =
+              -(on_turn_spread + (int32_t)small_move_get_score(small_move));
+          int32_t table_value = 0;
+          bool table_impure = false;
+          bool from_table;
+          if ((idx == 0 && !first_reply_searched) ||
+              !worker->solver->negascout_optim || exact_all_root_moves) {
+            from_table = leaf_child_table_value(worker, child_key, child_spread,
+                                                -beta, -alpha, pv_node,
+                                                &table_value, &table_impure);
           } else {
-            break;
+            // A value inside the window is searched again, as a PV node,
+            // which the entry does not answer: that child is played.
+            from_table = leaf_child_table_value(worker, child_key, child_spread,
+                                                -alpha - 1, -alpha, false,
+                                                &table_value, &table_impure) &&
+                         !(alpha < -table_value && -table_value < beta);
+          }
+          if (from_table && child_node_needs_no_checks(worker)) {
+            worker->local_nodes_searched++;
+            worker->nodes_since_deadline_check++;
+            if (table_impure) {
+              worker->impure_events++;
+            }
+            value = table_value;
+            child_valued = true;
           }
         }
-      } else if ((idx == 0 && !first_reply_searched) ||
-                 !worker->solver->negascout_optim || exact_all_root_moves) {
-        value =
-            abdada_negamax(worker, child_key, depth - 1, -beta, -alpha,
-                           &child_pv, pv_node, child_exclusive, opp_stuck_frac);
-      } else {
-        value =
-            abdada_negamax(worker, child_key, depth - 1, -alpha - 1, -alpha,
-                           &child_pv, false, child_exclusive, opp_stuck_frac);
-        if (value != ABDADA_INTERRUPTED && value != ON_EVALUATION &&
-            alpha < -value && -value < beta) {
-          // re-search with wider window (not exclusive since we need the value)
-          value = abdada_negamax(worker, child_key, depth - 1, -beta, -alpha,
-                                 &child_pv, pv_node, false, opp_stuck_frac);
-        }
       }
-      unplay_played_move(worker, &worker->move_undos[undo_index]);
-      if (worker->path_lists != NULL) {
-        path_move_lists_pop(worker->path_lists);
-      }
-      // Cross-sets need no recompute here: any lazy cross-set update in the
-      // child's subtree was saved into this undo (or a descendant's undo that
-      // was already restored), so the square restore reverted them exactly.
+      if (!child_valued) {
+        // Live-progress: publish this move into the per-thread "current line"
+        // buffer before recursing so a polling reader can see what the engine
+        // is currently exploring even during a long single-root subtree where
+        // no other signal updates. The slot store is a relaxed atomic; the
+        // length store uses release ordering so the reader (acquire on length)
+        // sees the tiny_move write.
+        atomic_store_explicit(&worker->current_line[undo_index],
+                              small_move->tiny_move, memory_order_relaxed);
+        atomic_store_explicit(&worker->current_line_len, undo_index + 1,
+                              memory_order_release);
 
-      // Live-progress: pop the line back to the parent's depth. The entry at
-      // undo_index is left as-is (overwritten by the next sibling's push).
-      // Release pairs with the reader's acquire on length.
-      atomic_store_explicit(&worker->current_line_len, undo_index,
-                            memory_order_release);
+        if (child_key_ready) {
+          play_keyed_small_move(worker, small_move, node_key, child_key,
+                                &worker->move_undos[undo_index]);
+        } else {
+          child_key = play_small_move_and_hash(worker, small_move, node_key,
+                                               &worker->move_undos[undo_index]);
+        }
+
+        // Per-root-move aspiration: at root after depth 1, each move gets its
+        // own aspiration window centered on its estimated_value from the
+        // previous ID iteration. This gives accurate values for all root moves
+        // (needed for multi-PV) while still benefiting from narrow windows.
+        const bool use_root_aspiration =
+            exact_all_root_moves && depth >= 2 &&
+            worker->solver->iterative_deepening_optim &&
+            !worker->solver->first_win_optim &&
+            !worker->solver->initial_window_optim;
+
+        if (use_root_aspiration) {
+          int32_t est = small_move_get_estimated_value(small_move);
+          int32_t window = ASPIRATION_WINDOW;
+          int32_t move_alpha = MAX(alpha, est - window);
+          int32_t move_beta = MIN(beta, est + window);
+          // Ensure valid window
+          if (move_alpha >= move_beta) {
+            move_alpha = alpha;
+            move_beta = beta;
+          }
+
+          while (true) {
+            value = abdada_negamax(worker, child_key, depth - 1, -move_beta,
+                                   -move_alpha, &child_pv, pv_node,
+                                   child_exclusive, opp_stuck_frac);
+            if (value == ON_EVALUATION || value == ABDADA_INTERRUPTED) {
+              break;
+            }
+            if (-value <= move_alpha && move_alpha > alpha) {
+              // Aspiration fail-low: widen alpha toward global alpha
+              window *= 2;
+              move_alpha = (window >= LARGE_VALUE / 2)
+                               ? alpha
+                               : MAX(alpha, est - window);
+              pvline_clear(&child_pv);
+            } else if (-value >= move_beta && move_beta < beta) {
+              // Aspiration fail-high: widen beta toward global beta
+              window *= 2;
+              move_beta =
+                  (window >= LARGE_VALUE / 2) ? beta : MIN(beta, est + window);
+              pvline_clear(&child_pv);
+            } else {
+              break;
+            }
+          }
+        } else if ((idx == 0 && !first_reply_searched) ||
+                   !worker->solver->negascout_optim || exact_all_root_moves) {
+          value = abdada_negamax(worker, child_key, depth - 1, -beta, -alpha,
+                                 &child_pv, pv_node, child_exclusive,
+                                 opp_stuck_frac);
+        } else {
+          value =
+              abdada_negamax(worker, child_key, depth - 1, -alpha - 1, -alpha,
+                             &child_pv, false, child_exclusive, opp_stuck_frac);
+          if (value != ABDADA_INTERRUPTED && value != ON_EVALUATION &&
+              alpha < -value && -value < beta) {
+            // re-search with wider window (not exclusive since we need the
+            // value)
+            value = abdada_negamax(worker, child_key, depth - 1, -beta, -alpha,
+                                   &child_pv, pv_node, false, opp_stuck_frac);
+          }
+        }
+        unplay_played_move(worker, &worker->move_undos[undo_index]);
+        if (worker->path_lists != NULL) {
+          path_move_lists_pop(worker->path_lists);
+        }
+        // Cross-sets need no recompute here: any lazy cross-set update in the
+        // child's subtree was saved into this undo (or a descendant's undo that
+        // was already restored), so the square restore reverted them exactly.
+
+        // Live-progress: pop the line back to the parent's depth. The entry at
+        // undo_index is left as-is (overwritten by the next sibling's push).
+        // Release pairs with the reader's acquire on length.
+        atomic_store_explicit(&worker->current_line_len, undo_index,
+                              memory_order_release);
+      }
 
       if (value == ABDADA_INTERRUPTED) {
         all_done = true;
