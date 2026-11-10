@@ -28,6 +28,10 @@ enum {
   // A subrack's score is bounded by the anchor's score bound and by each
   // score base (see wmp_move_gen_subrack_leave_kept).
   WMP_SCORE_BOUND_COUNT = WMP_SCORE_BASE_COUNT + 1,
+  // The leave check of wmp_move_gen_get_leave_kept_subracks works on this
+  // many subracks at a time. It is the number of bytes in a 64-bit word, not
+  // RACK_SIZE + 1: the check writes one result byte per subrack and gathers a
+  // word of them into mask bits with one multiplication.
   WMP_LEAVE_KEPT_GROUP_SIZE = 8,
   MAX_WMP_MOVE_GEN_ANCHORS =
       ((RACK_SIZE + 1) * (MAX_POSSIBLE_PLAYTHROUGH_BLOCKS + 1)),
