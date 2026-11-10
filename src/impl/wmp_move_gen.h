@@ -28,6 +28,7 @@ enum {
   // A subrack's score is bounded by the anchor's score bound and by each
   // score base (see wmp_move_gen_subrack_leave_kept).
   WMP_SCORE_BOUND_COUNT = WMP_SCORE_BASE_COUNT + 1,
+  WMP_LEAVE_KEPT_GROUP_SIZE = 8,
   MAX_WMP_MOVE_GEN_ANCHORS =
       ((RACK_SIZE + 1) * (MAX_POSSIBLE_PLAYTHROUGH_BLOCKS + 1)),
   WMP_ANCHOR_MASK_WORDS = (MAX_WMP_MOVE_GEN_ANCHORS + 63) / 64,
@@ -62,9 +63,6 @@ static inline void wmp_blank_word_cache_reset(WMPBlankWordCache *cache) {
 typedef struct SubrackInfo {
   BitRack subrack;
   const WMPEntry *wmp_entry;
-  Equity leave_value;
-  // The sum of the subrack's tile scores, with a blank scoring zero.
-  Equity tile_score_sum;
 } SubrackInfo;
 
 // A nonplaythrough subrack's wmp_entry has three states: unresolved (this
@@ -88,6 +86,15 @@ typedef struct WMPMoveGen {
   int num_tiles_played_through_copy;
 
   SubrackInfo nonplaythrough_infos[1 << RACK_SIZE];
+  // The nonplaythrough subracks' leave values and the sums of their tile
+  // scores, with a blank scoring zero, indexed as nonplaythrough_infos is.
+  // They are apart from it and side by side for the leave check of
+  // wmp_move_gen_get_leave_kept_subracks, which reads them in whole groups
+  // and so past the last subrack.
+  Equity
+      nonplaythrough_leave_values[(1 << RACK_SIZE) + WMP_LEAVE_KEPT_GROUP_SIZE];
+  Equity nonplaythrough_tile_score_sums[(1 << RACK_SIZE) +
+                                        WMP_LEAVE_KEPT_GROUP_SIZE];
   SubrackInfo playthrough_infos[1 << RACK_SIZE];
   Equity nonplaythrough_best_leave_values[RACK_SIZE + 1];
   bool nonplaythrough_has_word_of_length[RACK_SIZE + 1];
@@ -233,8 +240,9 @@ static inline void wmp_move_gen_enumerate_compact_nonplaythrough_subracks(
     SubrackInfo *subrack_info =
         wmp_move_gen->nonplaythrough_infos + insert_index;
     subrack_info->subrack = *current;
-    subrack_info->leave_value = leave_map_get_current_value(leave_map);
-    subrack_info->tile_score_sum = tile_score_sum;
+    wmp_move_gen->nonplaythrough_leave_values[insert_index] =
+        leave_map_get_current_value(leave_map);
+    wmp_move_gen->nonplaythrough_tile_score_sums[insert_index] = tile_score_sum;
     wmp_move_gen->count_by_size[count]++;
     return;
   }
@@ -471,10 +479,11 @@ wmp_move_gen_check_nonplaythroughs_of_size(WMPMoveGen *wmp_move_gen, int size,
     if (!check_leaves) {
       continue;
     }
-    if (subrack_info->leave_value >
+    const Equity leave_value =
+        wmp_move_gen->nonplaythrough_leave_values[offset + idx_for_size];
+    if (leave_value >
         wmp_move_gen->nonplaythrough_best_leave_values[leave_size]) {
-      wmp_move_gen->nonplaythrough_best_leave_values[leave_size] =
-          subrack_info->leave_value;
+      wmp_move_gen->nonplaythrough_best_leave_values[leave_size] = leave_value;
     }
   }
 }
@@ -876,26 +885,73 @@ wmp_move_gen_get_nonplaythrough_subrack(const WMPMoveGen *wmp_move_gen,
   return &wmp_move_gen->nonplaythrough_infos[offset + idx_for_size].subrack;
 }
 
-// 1 when the subrack's leave plus its score bound reaches leave_cutoff, else
+// 1 when a subrack's leave plus its score bound reaches leave_cutoff, else
 // 0. score_bounds[0] is the anchor's score bound, and score_bounds[m] for a
 // multiplier m >= 1 is the anchor's score base for it (see
 // wmp_move_gen_update_anchor_score_bases), which bounds the score with m times
 // the subrack's own tile scores. The subrack's bound is the least of them.
 static inline __attribute__((always_inline)) uint64_t
-wmp_move_gen_subrack_leave_kept(const SubrackInfo *nonplaythrough_info,
+wmp_move_gen_subrack_leave_kept(Equity leave_value, Equity tile_score_sum,
                                 const int64_t *score_bounds,
                                 int64_t leave_cutoff) {
   int64_t subrack_score_bound = score_bounds[0];
   for (int multiplier = 1; multiplier < WMP_SCORE_BOUND_COUNT; multiplier++) {
     const int64_t tile_bound =
-        score_bounds[multiplier] +
-        (int64_t)multiplier * nonplaythrough_info->tile_score_sum;
+        score_bounds[multiplier] + (int64_t)multiplier * tile_score_sum;
     subrack_score_bound =
         tile_bound < subrack_score_bound ? tile_bound : subrack_score_bound;
   }
-  const int64_t leave_bound =
-      (int64_t)nonplaythrough_info->leave_value + subrack_score_bound;
+  const int64_t leave_bound = (int64_t)leave_value + subrack_score_bound;
   return (uint64_t)(leave_bound >= leave_cutoff);
+}
+
+// Bit i of the result is wmp_move_gen_subrack_leave_kept for subrack i of the
+// count whose leave values and tile score sums are given, for a cutoff an
+// equity can reach.
+//
+// A subrack is kept when its leave plus each of its score bounds reaches the
+// cutoff, so each bound gives a threshold for the leave plus the tile scores
+// times the bound's multiplier. The thresholds are found once, and the
+// subracks are then compared in groups with no dependence between them, which
+// the compiler turns into vector compares. Each result is a byte, and a
+// multiplication gathers a group's bytes into bits.
+static inline __attribute__((always_inline)) uint64_t
+wmp_move_gen_get_leave_kept_subracks(const Equity *leave_values,
+                                     const Equity *tile_score_sums, int count,
+                                     const int64_t *score_bounds,
+                                     int64_t leave_cutoff) {
+  // A threshold below every Equity keeps every subrack either way. One above
+  // every Equity would drop them all and may keep one here, which is safe.
+  int32_t thresholds[WMP_SCORE_BOUND_COUNT];
+  for (int multiplier = 0; multiplier < WMP_SCORE_BOUND_COUNT; multiplier++) {
+    const int64_t threshold = leave_cutoff - score_bounds[multiplier];
+    thresholds[multiplier] =
+        threshold < INT32_MIN
+            ? INT32_MIN
+            : (threshold > INT32_MAX ? INT32_MAX : (int32_t)threshold);
+  }
+  uint8_t kept_bytes[WMP_MOVE_GEN_SUBRACKS_PER_MASK];
+  const int padded_count = (count + WMP_LEAVE_KEPT_GROUP_SIZE - 1) &
+                           ~(WMP_LEAVE_KEPT_GROUP_SIZE - 1);
+  for (int i = 0; i < padded_count; i++) {
+    int32_t weighted_leave = leave_values[i];
+    uint8_t kept = (uint8_t)(weighted_leave >= thresholds[0]);
+    for (int multiplier = 1; multiplier < WMP_SCORE_BOUND_COUNT; multiplier++) {
+      weighted_leave += tile_score_sums[i];
+      kept &= (uint8_t)(weighted_leave >= thresholds[multiplier]);
+    }
+    kept_bytes[i] = kept;
+  }
+  uint64_t leave_kept = 0;
+  for (int i = 0; i < padded_count; i += WMP_LEAVE_KEPT_GROUP_SIZE) {
+    uint64_t group;
+    memcpy(&group, &kept_bytes[i], sizeof(group));
+    // Byte k of the group, 0 or 1, lands on bit 56 + k of the product.
+    leave_kept |= ((group * 0x0102040810204080ULL) >> 56) << i;
+  }
+  return count == WMP_MOVE_GEN_SUBRACKS_PER_MASK
+             ? leave_kept
+             : leave_kept & (((uint64_t)1 << count) - 1);
 }
 
 // Bit i of the result marks subrack first_idx + i of the current anchor's size
@@ -937,32 +993,30 @@ wmp_move_gen_get_candidate_subracks(const WMPMoveGen *wmp_move_gen,
       wmp_move_gen->word_length > wmp_move_gen->tiles_to_play;
   const SubrackInfo *nonplaythrough_infos =
       &wmp_move_gen->nonplaythrough_infos[offset];
-  // With no prune every subrack passes, whatever its leave value holds: the
-  // leave sum is 64 bits wide and cannot fall below INT64_MIN.
-  const int64_t leave_cutoff = prune_by_leave ? (int64_t)cutoff : INT64_MIN;
+  // With no prune every subrack passes, whatever its leave value holds.
+  const uint64_t all_subracks = count == WMP_MOVE_GEN_SUBRACKS_PER_MASK
+                                    ? ~(uint64_t)0
+                                    : ((uint64_t)1 << count) - 1;
+  const uint64_t leave_kept =
+      prune_by_leave
+          ? wmp_move_gen_get_leave_kept_subracks(
+                &wmp_move_gen->nonplaythrough_leave_values[offset],
+                &wmp_move_gen->nonplaythrough_tile_score_sums[offset], count,
+                score_bounds, cutoff)
+          : all_subracks;
   uint64_t candidates = 0;
   if (!lazy && !is_playthrough) {
     for (int bit_idx = 0; bit_idx < count; bit_idx++) {
-      const uint64_t may_record =
-          (uint64_t)(nonplaythrough_infos[bit_idx].wmp_entry != NULL);
-      const uint64_t leave_kept = wmp_move_gen_subrack_leave_kept(
-          &nonplaythrough_infos[bit_idx], score_bounds, leave_cutoff);
-      candidates |= (may_record & leave_kept) << bit_idx;
+      candidates |= (uint64_t)(nonplaythrough_infos[bit_idx].wmp_entry != NULL)
+                    << bit_idx;
     }
     *filter_misses = 0;
-    return candidates;
+    return candidates & leave_kept;
   }
   const SubrackInfo *lookup_infos =
       is_playthrough ? &wmp_move_gen->playthrough_infos[offset]
                      : nonplaythrough_infos;
   const WMPForLength *wfl = &wmp_move_gen->wmp->wfls[wmp_move_gen->word_length];
-  uint64_t leave_kept = 0;
-  for (int bit_idx = 0; bit_idx < count; bit_idx++) {
-    leave_kept |=
-        wmp_move_gen_subrack_leave_kept(&nonplaythrough_infos[bit_idx],
-                                        score_bounds, leave_cutoff)
-        << bit_idx;
-  }
   // A playthrough anchor's lookup decides alone, so every subrack kept is
   // looked up. On the lazy nonplaythrough path, only the unresolved ones are,
   // and a resolved one is a candidate when its entry is not NULL.
@@ -1137,6 +1191,6 @@ static inline Equity
 wmp_move_gen_get_leave_value(const WMPMoveGen *wmp_move_gen, int subrack_idx) {
   const int offset =
       subracks_get_combination_offset(wmp_move_gen->tiles_to_play);
-  return wmp_move_gen->nonplaythrough_infos[offset + subrack_idx].leave_value;
+  return wmp_move_gen->nonplaythrough_leave_values[offset + subrack_idx];
 }
 #endif

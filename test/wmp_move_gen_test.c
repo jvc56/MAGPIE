@@ -424,7 +424,7 @@ static void assert_nonplaythrough_subrack_enumeration(
               &expected_leave_map, &expected_leave, (MachineLetter)ml);
         }
       }
-      assert(info->leave_value ==
+      assert(wmg.nonplaythrough_leave_values[offset + idx_for_size] ==
              int_to_equity(leave_map_get_current_index(&expected_leave_map)));
       num_enumerated++;
     }
