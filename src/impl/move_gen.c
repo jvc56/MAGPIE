@@ -3349,20 +3349,20 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
   const KLV *new_klv = player_get_klv(player);
   const uint64_t new_klv_mutation_counter =
       (new_klv != NULL) ? klv_get_mutation_counter(new_klv) : 0;
-  const uint64_t new_klv_instance_fp =
-      (new_klv != NULL) ? klv_get_instance_fingerprint(new_klv) : 0;
+  const uint64_t new_klv_instance_id =
+      (new_klv != NULL) ? klv_get_instance_id(new_klv) : 0;
   // Invalidate when the KLV pointer changes (player swap, lexicon change), the
-  // KLV instance fingerprint changes (catches a reloaded KLV the allocator
-  // placed at the freed KLV's address -- ABA -- which the pointer comparison
-  // misses because the move_gen cache outlives the Config that owned the old
-  // KLV), OR the same KLV's leave_values have been mutated in place. The
+  // KLV instance id changes (catches a reloaded KLV the allocator placed at
+  // the freed KLV's address -- ABA -- which the pointer comparison misses
+  // because the move_gen cache outlives the Config that owned the old KLV),
+  // OR the same KLV's leave_values have been mutated in place. The
   // mutation-counter path catches both leavegen's bulk updates and test-only
   // set_klv_leave_value calls between generate_moves invocations, which would
   // otherwise leave stale leave_values cached in the subrack cache and
   // anchor-cache upper-bound entries.
   const bool klv_changed =
       (new_klv != gen->klv) ||
-      (new_klv_instance_fp != gen->klv_instance_fp_at_load) ||
+      (new_klv_instance_id != gen->klv_instance_id_at_load) ||
       (new_klv_mutation_counter != gen->klv_mutation_counter_at_load);
   if (klv_changed) {
     for (int i = 0; i < MOVEGEN_SUBRACK_CACHE_SIZE; i++) {
@@ -3374,7 +3374,7 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
   }
   gen->klv = new_klv;
   gen->klv_mutation_counter_at_load = new_klv_mutation_counter;
-  gen->klv_instance_fp_at_load = new_klv_instance_fp;
+  gen->klv_instance_id_at_load = new_klv_instance_id;
   // The RIT keys on a BitRack, so it is unusable for a BitRack-incompatible
   // alphabet; treat it as absent (the WMP is gated the same way below).
   const RackInfoTable *new_rit =

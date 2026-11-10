@@ -32,23 +32,24 @@ typedef struct KLV {
   // and invalidate when it has changed, even when the KLV pointer itself
   // hasn't moved.
   uint64_t mutation_counter;
+  // Which load or build this is: unique for the life of the process, never 0
+  // (see klv_next_instance_id).
+  uint64_t instance_id;
 } KLV;
 
 static inline const char *klv_get_name(const KLV *klv) { return klv->name; }
 
-// A value unique to this loaded KLV instance: a hash of the base addresses and
-// size of its freshly-allocated leave_values/word_counts arrays. Two different
-// loads (even of the same lexicon) produce different fingerprints, so MoveGen
-// caches that hold leave-derived data can detect that the backing KLV has been
-// replaced even when a new KLV is allocated at a freed one's address (ABA),
-// which the pointer comparison cannot see.
-static inline uint64_t klv_get_instance_fingerprint(const KLV *klv) {
-  uint64_t hash = FNV_64_OFFSET_BASIS;
-  hash = fnv64a_step(hash, (uintptr_t)klv->leave_values);
-  hash = fnv64a_step(hash, (uintptr_t)klv->word_counts);
-  hash = fnv64a_step(hash, (uintptr_t)klv->kwg);
-  hash = fnv64a_step(hash, (uint64_t)klv->number_of_leaves);
-  return hash;
+// A number no other KLV this process loads or builds will have, never 0.
+// MoveGen caches leave values across move generations, and its per-thread
+// instances outlive the Config that owned the KLV, so it has to tell a
+// replaced KLV from the one it cached. No address can: the allocator hands a
+// freed KLV's struct and arrays to the next KLV of the same size, and every
+// KLV of one letter distribution has the same size, so the leaves of one
+// lexicon were read for the next (NWL20's in a CSW21 game).
+uint64_t klv_next_instance_id(void);
+
+static inline uint64_t klv_get_instance_id(const KLV *klv) {
+  return klv->instance_id;
 }
 
 static inline const KWG *klv_get_kwg(const KLV *klv) { return klv->kwg; }
@@ -259,6 +260,7 @@ static inline KLV *klv_create(const char *data_paths, const char *klv_name,
   KLV *klv = NULL;
   if (error_stack_is_empty(error_stack)) {
     klv = calloc_or_die(1, sizeof(KLV));
+    klv->instance_id = klv_next_instance_id();
     klv_load(klv_name, klv_filename, klv, error_stack);
   }
   free(klv_filename);
@@ -273,6 +275,8 @@ static inline KLV *klv_create(const char *data_paths, const char *klv_name,
 static inline KLV *klv_create_zeroed_from_kwg(KWG *kwg, int number_of_leaves,
                                               const char *klv_name) {
   KLV *klv = malloc_or_die(sizeof(KLV));
+  klv->mutation_counter = 0;
+  klv->instance_id = klv_next_instance_id();
   klv->kwg = kwg;
   klv->name = string_duplicate(klv_name);
   klv->number_of_leaves = number_of_leaves;
