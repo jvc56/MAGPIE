@@ -22,6 +22,12 @@
 enum {
   MAX_POSSIBLE_PLAYTHROUGH_BLOCKS = ((BOARD_DIM / 2) + 1),
   // Block count zero also occupies a row in the anchor table.
+  // An anchor keeps one score base for each of the multipliers 1 to this
+  // (see wmp_move_gen_update_anchor_score_bases).
+  WMP_SCORE_BASE_COUNT = 2,
+  // A subrack's score is bounded by the anchor's score bound and by each
+  // score base (see wmp_move_gen_subrack_leave_kept).
+  WMP_SCORE_BOUND_COUNT = WMP_SCORE_BASE_COUNT + 1,
   MAX_WMP_MOVE_GEN_ANCHORS =
       ((RACK_SIZE + 1) * (MAX_POSSIBLE_PLAYTHROUGH_BLOCKS + 1)),
   WMP_ANCHOR_MASK_WORDS = (MAX_WMP_MOVE_GEN_ANCHORS + 63) / 64,
@@ -57,6 +63,8 @@ typedef struct SubrackInfo {
   BitRack subrack;
   const WMPEntry *wmp_entry;
   Equity leave_value;
+  // The sum of the subrack's tile scores, with a blank scoring zero.
+  Equity tile_score_sum;
 } SubrackInfo;
 
 // A nonplaythrough subrack's wmp_entry has three states: unresolved (this
@@ -91,6 +99,13 @@ typedef struct WMPMoveGen {
   // both reset and emission sparse while preserving the full scan's ascending
   // slot order (and therefore deterministic tie order).
   uint64_t touched_anchor_masks[WMP_ANCHOR_MASK_WORDS];
+  // Each anchor slot's score bases, and those of the anchors emitted to the
+  // heap, indexed by the anchor's insertion_idx. See
+  // wmp_move_gen_update_anchor_score_bases.
+  Equity anchor_score_bases[MAX_WMP_MOVE_GEN_ANCHORS][WMP_SCORE_BASE_COUNT];
+  Equity heap_score_bases[ANCHOR_HEAP_CAPACITY][WMP_SCORE_BASE_COUNT];
+  // The scores of the rack's tiles, for the subracks' tile score sums.
+  const LetterDistribution *ld;
   int playthrough_blocks;
   int playthrough_blocks_copy;
 
@@ -159,6 +174,7 @@ static inline void wmp_move_gen_init(WMPMoveGen *wmp_move_gen,
                                      const LetterDistribution *ld,
                                      const Rack *player_rack, const WMP *wmp) {
   wmp_move_gen->wmp = wmp;
+  wmp_move_gen->ld = ld;
   wmp_move_gen->nonplaythrough_wmp_entry_cache = NULL;
   if (wmp == NULL || player_rack == NULL || ld == NULL) {
     return;
@@ -209,7 +225,8 @@ static inline uint8_t subracks_get_combination_offset(int size) {
 static inline void wmp_move_gen_enumerate_compact_nonplaythrough_subracks(
     WMPMoveGen *wmp_move_gen, BitRack *current,
     const MachineLetter *rack_letters, const uint8_t *rack_letter_counts,
-    int num_rack_letters, int rack_letter_idx, int count, LeaveMap *leave_map) {
+    const Equity *rack_letter_scores, int num_rack_letters, int rack_letter_idx,
+    int count, Equity tile_score_sum, LeaveMap *leave_map) {
   if (rack_letter_idx >= num_rack_letters) {
     const int insert_index = subracks_get_combination_offset(count) +
                              wmp_move_gen->count_by_size[count];
@@ -217,22 +234,27 @@ static inline void wmp_move_gen_enumerate_compact_nonplaythrough_subracks(
         wmp_move_gen->nonplaythrough_infos + insert_index;
     subrack_info->subrack = *current;
     subrack_info->leave_value = leave_map_get_current_value(leave_map);
+    subrack_info->tile_score_sum = tile_score_sum;
     wmp_move_gen->count_by_size[count]++;
     return;
   }
 
   const MachineLetter ml = rack_letters[rack_letter_idx];
   const int max_num_this = rack_letter_counts[rack_letter_idx];
+  const Equity letter_score = rack_letter_scores[rack_letter_idx];
   for (int i = 0; i < max_num_this; i++) {
     wmp_move_gen_enumerate_compact_nonplaythrough_subracks(
         wmp_move_gen, current, rack_letters, rack_letter_counts,
-        num_rack_letters, rack_letter_idx + 1, count + i, leave_map);
+        rack_letter_scores, num_rack_letters, rack_letter_idx + 1, count + i,
+        tile_score_sum + i * letter_score, leave_map);
     bit_rack_add_letter(current, ml);
     leave_map_complement_add_letter(leave_map, ml, i);
   }
   wmp_move_gen_enumerate_compact_nonplaythrough_subracks(
-      wmp_move_gen, current, rack_letters, rack_letter_counts, num_rack_letters,
-      rack_letter_idx + 1, count + max_num_this, leave_map);
+      wmp_move_gen, current, rack_letters, rack_letter_counts,
+      rack_letter_scores, num_rack_letters, rack_letter_idx + 1,
+      count + max_num_this, tile_score_sum + max_num_this * letter_score,
+      leave_map);
   for (int i = max_num_this - 1; i >= 0; i--) {
     bit_rack_take_letter(current, ml);
     leave_map_complement_take_letter(leave_map, ml, i);
@@ -244,6 +266,7 @@ wmp_move_gen_enumerate_nonplaythrough_subracks(WMPMoveGen *wmp_move_gen,
                                                LeaveMap *leave_map) {
   MachineLetter rack_letters[RACK_SIZE] = {0};
   uint8_t rack_letter_counts[RACK_SIZE] = {0};
+  Equity rack_letter_scores[RACK_SIZE] = {0};
   int num_rack_letters = 0;
   for (int ml = BLANK_MACHINE_LETTER; ml < BIT_RACK_MAX_ALPHABET_SIZE; ml++) {
     const int count = bit_rack_get_letter(&wmp_move_gen->player_bit_rack, ml);
@@ -251,13 +274,15 @@ wmp_move_gen_enumerate_nonplaythrough_subracks(WMPMoveGen *wmp_move_gen,
       assert(num_rack_letters < RACK_SIZE);
       rack_letters[num_rack_letters] = (MachineLetter)ml;
       rack_letter_counts[num_rack_letters] = (uint8_t)count;
+      rack_letter_scores[num_rack_letters] =
+          ld_get_score(wmp_move_gen->ld, (MachineLetter)ml);
       num_rack_letters++;
     }
   }
   BitRack empty = bit_rack_create_empty();
   wmp_move_gen_enumerate_compact_nonplaythrough_subracks(
-      wmp_move_gen, &empty, rack_letters, rack_letter_counts, num_rack_letters,
-      0, 0, leave_map);
+      wmp_move_gen, &empty, rack_letters, rack_letter_counts,
+      rack_letter_scores, num_rack_letters, 0, 0, 0, leave_map);
 }
 
 static inline void
@@ -673,6 +698,50 @@ static inline void wmp_move_gen_maybe_update_anchor(WMPMoveGen *wmp_move_gen,
                                        : anchor->highest_possible_score;
 }
 
+// A score base bounds the scores of an anchor's plays by the tiles they play:
+// for every play of the anchor,
+//
+//   score <= score_bases[base_idx] + (base_idx + 1) * (sum of its tile scores)
+//
+// The shadow's bound for one placement puts the rack's best tiles on its
+// squares, each tile's score times its square's effective multiplier. A play
+// there with other tiles scores less by at least the difference of the tile
+// score sums times the smallest of those multipliers: sorted by score, the
+// play's tiles are each no better than the shadow's. So for a multiplier no
+// greater than the smallest one,
+//
+//   score <= bound - multiplier * (shadow's tile score sum)
+//                  + multiplier * (play's tile score sum)
+//
+// and a greater multiplier only adds to the last term. The base for a
+// multiplier is the largest value of the first two terms over the anchor's
+// placements, with the multiplier capped at each placement's smallest one.
+// The tiles the shadow restricted to one square are in every play of the
+// placement, and are counted in both sums.
+//
+// Call this before wmp_move_gen_maybe_update_anchor: a slot whose score bound
+// is still the reset value has no placement yet, and its bases, which are
+// not reset, are replaced.
+static inline void wmp_move_gen_update_anchor_score_bases(
+    WMPMoveGen *wmp_move_gen, int tiles_played, Equity score,
+    Equity shadow_tile_score_sum, int smallest_multiplier) {
+  const int slot_idx =
+      wmp_move_gen_anchor_index(wmp_move_gen->playthrough_blocks, tiles_played);
+  Equity *score_bases = wmp_move_gen->anchor_score_bases[slot_idx];
+  const bool is_first_placement =
+      wmp_move_gen->anchors[slot_idx].highest_possible_score ==
+      EQUITY_MIN_VALUE;
+  for (int base_idx = 0; base_idx < WMP_SCORE_BASE_COUNT; base_idx++) {
+    const int multiplier =
+        smallest_multiplier < base_idx + 1 ? smallest_multiplier : base_idx + 1;
+    const Equity score_base = score - multiplier * shadow_tile_score_sum;
+    score_bases[base_idx] =
+        is_first_placement || score_base > score_bases[base_idx]
+            ? score_base
+            : score_bases[base_idx];
+  }
+}
+
 static inline void wmp_move_gen_set_playthrough_bit_rack(
     WMPMoveGen *wmp_move_gen, const Anchor *anchor, const Square *row_cache,
     const uint32_t *const *wit_row_lane, const uint8_t *wit_len_lane,
@@ -807,12 +876,25 @@ wmp_move_gen_get_nonplaythrough_subrack(const WMPMoveGen *wmp_move_gen,
   return &wmp_move_gen->nonplaythrough_infos[offset + idx_for_size].subrack;
 }
 
-// 1 when the subrack's leave plus score_bound reaches leave_cutoff, else 0.
+// 1 when the subrack's leave plus its score bound reaches leave_cutoff, else
+// 0. score_bounds[0] is the anchor's score bound, and score_bounds[m] for a
+// multiplier m >= 1 is the anchor's score base for it (see
+// wmp_move_gen_update_anchor_score_bases), which bounds the score with m times
+// the subrack's own tile scores. The subrack's bound is the least of them.
 static inline __attribute__((always_inline)) uint64_t
 wmp_move_gen_subrack_leave_kept(const SubrackInfo *nonplaythrough_info,
-                                Equity score_bound, int64_t leave_cutoff) {
+                                const int64_t *score_bounds,
+                                int64_t leave_cutoff) {
+  int64_t subrack_score_bound = score_bounds[0];
+  for (int multiplier = 1; multiplier < WMP_SCORE_BOUND_COUNT; multiplier++) {
+    const int64_t tile_bound =
+        score_bounds[multiplier] +
+        (int64_t)multiplier * nonplaythrough_info->tile_score_sum;
+    subrack_score_bound =
+        tile_bound < subrack_score_bound ? tile_bound : subrack_score_bound;
+  }
   const int64_t leave_bound =
-      (int64_t)nonplaythrough_info->leave_value + score_bound;
+      (int64_t)nonplaythrough_info->leave_value + subrack_score_bound;
   return (uint64_t)(leave_bound >= leave_cutoff);
 }
 
@@ -845,8 +927,9 @@ wmp_move_gen_subrack_leave_kept(const SubrackInfo *nonplaythrough_info,
 static inline __attribute__((always_inline)) uint64_t
 wmp_move_gen_get_candidate_subracks(const WMPMoveGen *wmp_move_gen,
                                     int first_idx, int count, bool lazy,
-                                    bool prune_by_leave, Equity score_bound,
-                                    Equity cutoff, uint64_t *filter_misses) {
+                                    bool prune_by_leave,
+                                    const int64_t *score_bounds, Equity cutoff,
+                                    uint64_t *filter_misses) {
   assert(count <= WMP_MOVE_GEN_SUBRACKS_PER_MASK);
   const int offset =
       subracks_get_combination_offset(wmp_move_gen->tiles_to_play) + first_idx;
@@ -863,7 +946,7 @@ wmp_move_gen_get_candidate_subracks(const WMPMoveGen *wmp_move_gen,
       const uint64_t may_record =
           (uint64_t)(nonplaythrough_infos[bit_idx].wmp_entry != NULL);
       const uint64_t leave_kept = wmp_move_gen_subrack_leave_kept(
-          &nonplaythrough_infos[bit_idx], score_bound, leave_cutoff);
+          &nonplaythrough_infos[bit_idx], score_bounds, leave_cutoff);
       candidates |= (may_record & leave_kept) << bit_idx;
     }
     *filter_misses = 0;
@@ -875,9 +958,10 @@ wmp_move_gen_get_candidate_subracks(const WMPMoveGen *wmp_move_gen,
   const WMPForLength *wfl = &wmp_move_gen->wmp->wfls[wmp_move_gen->word_length];
   uint64_t leave_kept = 0;
   for (int bit_idx = 0; bit_idx < count; bit_idx++) {
-    leave_kept |= wmp_move_gen_subrack_leave_kept(
-                      &nonplaythrough_infos[bit_idx], score_bound, leave_cutoff)
-                  << bit_idx;
+    leave_kept |=
+        wmp_move_gen_subrack_leave_kept(&nonplaythrough_infos[bit_idx],
+                                        score_bounds, leave_cutoff)
+        << bit_idx;
   }
   // A playthrough anchor's lookup decides alone, so every subrack kept is
   // looked up. On the lazy nonplaythrough path, only the unresolved ones are,
@@ -1026,6 +1110,9 @@ static inline void wmp_move_gen_add_anchors(WMPMoveGen *wmp_move_gen, int row,
           anchor->highest_possible_equity >= inference_cutoff_equity) {
         assert(anchor->word_length >= MINIMUM_WORD_LENGTH);
         assert(anchor->word_length <= wmp_move_gen->wmp->board_dim);
+        memcpy(wmp_move_gen->heap_score_bases[anchor_heap->count],
+               wmp_move_gen->anchor_score_bases[slot_idx],
+               sizeof(wmp_move_gen->anchor_score_bases[slot_idx]));
         anchor_heap_add_unheaped_wmp_anchor(
             anchor_heap, row, col, last_anchor_col, anchor->leftmost_start_col,
             anchor->rightmost_start_col, dir, anchor->highest_possible_equity,

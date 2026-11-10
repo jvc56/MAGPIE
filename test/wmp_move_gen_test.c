@@ -1170,8 +1170,9 @@ static void test_playthrough_preparation_after_rejection(void) {
       wmp_move_gen_build_playthrough_subracks(&wmg);
       // The candidate mask may drop only subracks that have no words.
       uint64_t filter_misses = 1;
+      const int64_t score_bounds[WMP_SCORE_BOUND_COUNT] = {0};
       const uint64_t candidates = wmp_move_gen_get_candidate_subracks(
-          &wmg, 0, count, true, false, 0, 0, &filter_misses);
+          &wmg, 0, count, true, false, score_bounds, 0, &filter_misses);
       assert(filter_misses == 0);
       for (int idx = count - 1; idx >= 0; idx--) {
         BitRack expected =

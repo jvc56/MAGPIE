@@ -75,6 +75,7 @@ typedef struct SubrackEnumCacheEntry {
   // Flat array indexed by subracks_get_combination_offset(size) + idx_for_size.
   BitRack subracks[MOVEGEN_SUBRACK_CACHE_ENTRIES];
   Equity leave_values[MOVEGEN_SUBRACK_CACHE_ENTRIES];
+  Equity tile_score_sums[MOVEGEN_SUBRACK_CACHE_ENTRIES];
   // Lazily populated wmp_entry pointers per subrack, also rack-determined:
   // WMP_ENTRY_UNRESOLVED, a resolved miss (NULL), or a resolved entry.
   // Invalidated when the WMP pointer changes.
@@ -131,6 +132,8 @@ typedef struct MoveGen {
   // subrack can still beat the cutoff: only when the bag is not empty and
   // the sort is by equity.
   bool wmp_prune_subracks_by_leave;
+  // The sum of the rack's tile scores, for the WMP anchors' score bases.
+  Equity rack_tile_score_sum;
   int player_index;
   Equity bingo_bonus;
   // MOVE_RECORD_BEST_SMALL only: added to the ranking value (not the recorded
