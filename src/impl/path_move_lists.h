@@ -4,6 +4,7 @@
 #include "../def/board_defs.h"
 #include "../def/game_defs.h"
 #include "../def/letter_distribution_defs.h"
+#include "../def/rack_defs.h"
 #include "../ent/board.h"
 #include "../ent/move.h"
 #include "move_gen.h"
@@ -43,6 +44,14 @@ typedef struct PathListSlot {
   int count;
   int capacity;
   int lane_begin[PATH_MOVE_LISTS_NUM_LANES + 1];
+  // The plays by tiles placed and, among those of as many, by descending
+  // score, each as its score above its index in moves: built when first asked
+  // for (see path_move_lists_best_play_alone) and dropped when the list is
+  // rebuilt. The plays of k tiles are [tiles_begin[k], tiles_begin[k + 1]).
+  uint64_t *by_score;
+  int by_score_capacity;
+  bool by_score_valid;
+  int tiles_begin[RACK_SIZE + 2];
 } PathListSlot;
 
 // The legal-play lists of both sides of an endgame search, maintained
@@ -218,6 +227,16 @@ path_move_lists_pending_lanes(const PathMoveLists *lists) {
 bool path_move_lists_best_play(PathMoveLists *lists,
                                const MoveGenArgs *best_small_args,
                                SmallMove *out_best);
+
+// path_move_lists_best_play for a position that shares its lanes with no
+// sibling (the leaf under a first reply, whose parent searches no other
+// move): the same play, found without the per-lane bests the siblings would
+// share. The side's list two moves up is read in descending score order,
+// stopping at the first of its plays that still stands, and the lanes either
+// later move touched are generated against that play.
+bool path_move_lists_best_play_alone(PathMoveLists *lists,
+                                     const MoveGenArgs *best_small_args,
+                                     SmallMove *out_best);
 
 // Per lane, the squares `move` would change for the lane's plays if played on
 // `board` (see move_lane_hits in path_move_lists.c), written to the

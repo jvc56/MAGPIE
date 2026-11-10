@@ -415,6 +415,9 @@ struct EndgameCtxWorker {
   int completed_depth;     // Depth this thread completed
   int n_initial_moves;     // Number of root moves (thread-local to avoid races)
   bool in_first_root_move; // True when thread 0 is inside root move idx==0
+  // True while the first reply's child is searched: the leaf whose parent
+  // searches no other move (see pick_first_reply_before_list).
+  bool leaf_is_alone;
   // Counter for throttling per-depth deadline checks in abdada_negamax
   uint64_t nodes_since_deadline_check;
   // The playout_tail_cache key and the solving player's spread of each
@@ -1461,6 +1464,7 @@ static EndgameCtxWorker *endgame_ctx_create_worker(EndgameCtx *solver,
   memset(solver_worker->move_undos, 0, sizeof(solver_worker->move_undos));
   solver_worker->num_played_moves = 0;
   solver_worker->first_deferred_move = 0;
+  solver_worker->leaf_is_alone = false;
   memset(solver_worker->occupancy_valid, 0,
          sizeof(solver_worker->occupancy_valid));
   solver_worker->sort_scratch = NULL;
@@ -2992,7 +2996,11 @@ static int playout_first_step_from_lists(EndgameCtxWorker *worker,
         .lane_shadow_cache = worker->lane_shadow_cache,
     };
     SmallMove found;
-    if (path_move_lists_best_play(worker->path_lists, &best_args, &found)) {
+    // The leaf under a first reply has no sibling to share lane bests with.
+    if (worker->leaf_is_alone ? path_move_lists_best_play_alone(
+                                    worker->path_lists, &best_args, &found)
+                              : path_move_lists_best_play(worker->path_lists,
+                                                          &best_args, &found)) {
       best = found;
     }
   }
@@ -4164,9 +4172,11 @@ int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
                           memory_order_release);
     const uint64_t child_key = play_small_move_and_hash(
         worker, &first_reply, node_key, &worker->move_undos[undo_index]);
+    worker->leaf_is_alone = true;
     const int32_t value =
         abdada_negamax(worker, child_key, depth - 1, -beta, -alpha, &child_pv,
                        pv_node, false, opp_stuck_frac);
+    worker->leaf_is_alone = false;
     unplay_played_move(worker, &worker->move_undos[undo_index]);
     if (worker->path_lists != NULL) {
       path_move_lists_pop(worker->path_lists);
