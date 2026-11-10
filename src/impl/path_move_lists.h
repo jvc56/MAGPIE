@@ -219,4 +219,34 @@ bool path_move_lists_best_play(PathMoveLists *lists,
                                const MoveGenArgs *best_small_args,
                                SmallMove *out_best);
 
+// Per lane, the squares `move` would change for the lane's plays if played on
+// `board` (see move_lane_hits in path_move_lists.c), written to the
+// PATH_MOVE_LISTS_NUM_LANES entries of `hits`: a play spanning none of its
+// lane's is a play after the move too, score included. Returns the lanes with
+// any.
+uint64_t path_move_lists_move_hits(const Board *board, const Move *move,
+                                   uint32_t *hits);
+
+// The best plays of every lane for the side that replies to the side to move,
+// on the current board: what path_move_lists_best_play shares among the
+// positions one move below this one, found here before any of those moves is
+// made (and left for those positions to use). `reply_args` is the
+// MOVE_RECORD_BEST_SMALL generation the replying side would run, its game
+// holding that side on turn for the length of the call. Returns NULL when the
+// replying side's list at its last turn, one move up the path, is not built
+// (or a reply would be past the longest path), and the
+// PATH_MOVE_LISTS_NUM_LANES lanes otherwise, valid until the next call to
+// either function one move below.
+const LaneBestPlays *
+path_move_lists_reply_lane_bests(PathMoveLists *lists,
+                                 const MoveGenArgs *reply_args);
+
+// What path_move_lists_reply_lane_bests returns, found without the lists:
+// each lane's best plays among `move_list`, a MOVE_RECORD_ALL_SMALL generation
+// for a side holding `side_to_move_tiles` tiles, written to the
+// PATH_MOVE_LISTS_NUM_LANES entries of `lanes`.
+void path_move_lists_lane_bests_of_list(const MoveList *move_list,
+                                        int side_to_move_tiles,
+                                        LaneBestPlays *lanes);
+
 #endif
