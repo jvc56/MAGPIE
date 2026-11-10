@@ -423,6 +423,11 @@ void path_move_lists_set_current(PathMoveLists *lists,
   lists->slot_stamps[lists->length] = lists->stamps[lists->length - 1];
 }
 
+uint64_t path_move_lists_move_hits(const Board *board, const Move *move,
+                                   uint32_t *hits) {
+  return move_lane_hits(board, move, hits);
+}
+
 void path_move_lists_push(PathMoveLists *lists, const Board *board,
                           const Move *move) {
   assert(lists->length < PATH_MOVE_LISTS_MAX_PATH);
@@ -608,6 +613,53 @@ static void fill_sibling_lanes(PathMoveLists *lists,
       }
       lane_best_consider(best, &parent->moves[move_idx], side_to_move_tiles);
     }
+  }
+}
+
+const LaneBestPlays *
+path_move_lists_reply_lane_bests(PathMoveLists *lists,
+                                 const MoveGenArgs *reply_args) {
+  // The replying side's positions are one move down the path.
+  const int length = lists->length + 1;
+  if (length >= PATH_MOVE_LISTS_MAX_PATH ||
+      (length > 2 && !path_move_lists_slot_is_current(lists, length - 2))) {
+    return NULL;
+  }
+  const Game *game = reply_args->game;
+  const int side_to_move_tiles = rack_get_total_letters(player_get_rack(
+      game_get_player(game, game_get_player_on_turn_index(game))));
+  const uint64_t prefix_stamp =
+      length >= 2 ? lists->stamps[length - 2] : lists->root_stamp;
+  if (lists->sibling_stamp[length] != prefix_stamp) {
+    lists->sibling_stamp[length] = prefix_stamp;
+    lists->sibling_valid[length] = 0;
+  }
+  const uint64_t missing = all_lanes_mask() & ~lists->sibling_valid[length];
+  if (missing != 0) {
+    // No move is made yet, so no lane is that move's own: fill them all as a
+    // position one move down would fill the lanes its move left alone.
+    lists->length = length;
+    fill_sibling_lanes(lists, reply_args, missing, side_to_move_tiles);
+    lists->length = length - 1;
+    lists->sibling_valid[length] |= missing;
+  }
+  return lists->sibling_lanes[length];
+}
+
+void path_move_lists_lane_bests_of_list(const MoveList *move_list,
+                                        int side_to_move_tiles,
+                                        LaneBestPlays *lanes) {
+  for (int lane = 0; lane < PATH_MOVE_LISTS_NUM_LANES; lane++) {
+    lanes[lane].has_whole_rack = false;
+    lanes[lane].has_partial = false;
+  }
+  for (int move_idx = 0; move_idx < move_list->count; move_idx++) {
+    const SmallMove *small_move = move_list->small_moves[move_idx];
+    if (small_move_is_pass(small_move)) {
+      continue;
+    }
+    lane_best_consider(&lanes[lane_of_small_move(small_move)], small_move,
+                       side_to_move_tiles);
   }
 }
 

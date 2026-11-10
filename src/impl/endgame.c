@@ -2448,6 +2448,190 @@ static int compute_conservation_bonus(const SmallMove *small_move,
                opp_stuck_frac);
 }
 
+enum {
+  // The opponent's going-out plays a node keeps to bound its moves with.
+  OUT_REPLY_MAX_PLAYS = 8,
+  // How many of a single tile's drops are looked for.
+  OUT_REPLY_SINGLE_DROPS = 3,
+};
+
+// What a node needs to bound its moves by the opponent's going out in reply:
+// the opponent's best whole-rack plays on the node's board, best first, each
+// with its lane and the lane positions it spans.
+typedef struct OutReplyBound {
+  bool ready;
+  int count;
+  int32_t score[OUT_REPLY_MAX_PLAYS];
+  uint8_t lane[OUT_REPLY_MAX_PLAYS];
+  uint32_t span[OUT_REPLY_MAX_PLAYS];
+  // The node's spread less twice the side to move's rack: what a move adds
+  // its score and twice its tiles to, and the opponent's reply takes its
+  // score from.
+  int32_t base;
+  int rack_size;
+} OutReplyBound;
+
+static void out_reply_bound_add(OutReplyBound *bound, int32_t score, int lane,
+                                uint32_t span) {
+  int slot = bound->count;
+  if (slot == OUT_REPLY_MAX_PLAYS) {
+    if (score <= bound->score[slot - 1]) {
+      return;
+    }
+    slot--;
+  } else {
+    bound->count++;
+  }
+  while (slot > 0 && bound->score[slot - 1] < score) {
+    bound->score[slot] = bound->score[slot - 1];
+    bound->lane[slot] = bound->lane[slot - 1];
+    bound->span[slot] = bound->span[slot - 1];
+    slot--;
+  }
+  bound->score[slot] = score;
+  bound->lane[slot] = (uint8_t)lane;
+  bound->span[slot] = span;
+}
+
+// Finds the opponent's going-out plays on the node's board. With one tile
+// they are its best drops, each on its own square: a drop spans its square in
+// its row's lane, and out_reply_bound tests the column's too. With more they
+// are each lane's best whole-rack play: from the incremental lists when they
+// hold the opponent's list to derive them from, and from a generation of the
+// opponent's plays otherwise, so the bound is the same with the lists off.
+static void out_reply_bound_init(OutReplyBound *bound, EndgameCtxWorker *worker,
+                                 int32_t on_turn_spread,
+                                 const BoardOccupancy *occupancy) {
+  Game *game = worker->game_copy;
+  const LetterDistribution *ld = game_get_ld(game);
+  const int on_turn = game_get_player_on_turn_index(game);
+  const int opp = 1 - on_turn;
+  const Rack *rack = player_get_rack(game_get_player(game, on_turn));
+  const Rack *opp_rack = player_get_rack(game_get_player(game, opp));
+  bound->ready = true;
+  bound->count = 0;
+  bound->rack_size = rack_get_total_letters(rack);
+  bound->base =
+      on_turn_spread - equity_to_int(calculate_end_rack_points(rack, ld));
+  const int opp_tiles = rack_get_total_letters(opp_rack);
+  if (opp_tiles == 0) {
+    return;
+  }
+  update_deferred_moves(worker);
+  if (opp_tiles == 1) {
+    const Board *board = game_get_board(game);
+    const int cross_set_index = board_get_cross_set_index(
+        game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KWG), opp);
+    MachineLetter tile = 0;
+    for (int ml = 0; ml < ld_get_size(ld); ml++) {
+      if (rack_get_letter(opp_rack, ml) > 0) {
+        tile = (MachineLetter)ml;
+        break;
+      }
+    }
+    SquareSet squares;
+    squares.rows = (UINT32_C(1) << BOARD_DIM) - 1;
+    for (int row = 0; row < BOARD_DIM; row++) {
+      squares.cols[row] = (UINT32_C(1) << BOARD_DIM) - 1;
+    }
+    for (int drop_idx = 0; drop_idx < OUT_REPLY_SINGLE_DROPS; drop_idx++) {
+      SingleDrop drop;
+      if (!find_best_single_drop(board, occupancy, ld, cross_set_index, tile,
+                                 tile == BLANK_MACHINE_LETTER, &squares,
+                                 &drop)) {
+        break;
+      }
+      out_reply_bound_add(bound, equity_to_int(drop.score), drop.row,
+                          UINT32_C(1) << drop.col);
+      squares.cols[drop.row] &= ~(UINT32_C(1) << drop.col);
+    }
+    return;
+  }
+  const MoveGenArgs reply_args = {
+      .best_small_out_bonus = 0,
+      .best_small_canonical_ties = true,
+      .game = game,
+      .move_list = worker->move_list,
+      .move_record_type = MOVE_RECORD_BEST_SMALL,
+      .move_sort_type = MOVE_SORT_SCORE,
+      .override_kwg = solver_get_pruned_kwg(worker->solver, opp),
+      .eq_margin_movegen = 0,
+      .target_equity = EQUITY_MAX_VALUE,
+      .lane_shadow_cache = worker->lane_shadow_cache,
+  };
+  LaneBestPlays generated_lanes[PATH_MOVE_LISTS_NUM_LANES];
+  game_set_player_on_turn_index(game, opp);
+  const LaneBestPlays *lanes =
+      worker->path_lists == NULL
+          ? NULL
+          : path_move_lists_reply_lane_bests(worker->path_lists, &reply_args);
+  if (lanes == NULL) {
+    MoveGenArgs all_small_args = reply_args;
+    all_small_args.move_record_type = MOVE_RECORD_ALL_SMALL;
+    generate_moves(&all_small_args);
+    path_move_lists_lane_bests_of_list(worker->move_list, opp_tiles,
+                                       generated_lanes);
+    lanes = generated_lanes;
+  }
+  game_set_player_on_turn_index(game, on_turn);
+  for (int lane = 0; lane < PATH_MOVE_LISTS_NUM_LANES; lane++) {
+    if (!lanes[lane].has_whole_rack) {
+      continue;
+    }
+    const SmallMove *play = &lanes[lane].whole_rack;
+    const int start = small_move_is_vertical(play)
+                          ? small_move_get_row_start(play)
+                          : small_move_get_col_start(play);
+    const int length = small_move_get_play_length(play);
+    out_reply_bound_add(bound, (int32_t)small_move_get_score(play), lane,
+                        ((UINT32_C(1) << length) - 1) << start);
+  }
+}
+
+// A move that does not go out is worth at most what is left when the opponent
+// goes out in reply: the move's score, less the reply's and twice the tiles
+// the move keeps. Any of the opponent's whole-rack plays that the move leaves
+// standing will do, and a play stands when it spans none of the squares the
+// move changes for its lane (see path_move_lists_move_hits). Returns
+// LARGE_VALUE when no such play is known, and gives up as soon as the bound
+// is above alpha, where it decides nothing.
+static int32_t out_reply_bound(const OutReplyBound *bound,
+                               const EndgameCtxWorker *worker,
+                               const SmallMove *play_sm, int32_t alpha) {
+  const int32_t after_move =
+      bound->base + (int32_t)small_move_get_score(play_sm) +
+      2 * compute_played_tiles_face_value(play_sm,
+                                          worker->solver->tile_face_values);
+  if (after_move - bound->score[0] > alpha) {
+    return LARGE_VALUE;
+  }
+  const Board *board = game_get_board(worker->game_copy);
+  Move play;
+  small_move_to_move(&play, play_sm, board);
+  uint32_t hits[PATH_MOVE_LISTS_NUM_LANES];
+  path_move_lists_move_hits(board, &play, hits);
+  for (int play_idx = 0; play_idx < bound->count; play_idx++) {
+    const int32_t value = after_move - bound->score[play_idx];
+    if (value > alpha) {
+      break;
+    }
+    const int lane = bound->lane[play_idx];
+    const uint32_t span = bound->span[play_idx];
+    if ((hits[lane] & span) != 0) {
+      continue;
+    }
+    if (lane < BOARD_DIM && (span & (span - 1)) == 0) {
+      // A single square, possibly a one-tile drop: its column must stand too.
+      const int col = __builtin_ctz(span);
+      if (((hits[BOARD_DIM + col] >> lane) & 1) != 0) {
+        continue;
+      }
+    }
+    return value;
+  }
+  return LARGE_VALUE;
+}
+
 // Whether another worker may be searching this solve's tree alongside this one,
 // which is when ABDADA's bookkeeping pays. solver->threads alone does not say:
 // endgame_add_worker lends helpers to a running solve and raises only
@@ -4226,6 +4410,16 @@ int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
     keep_one_bound_init(&keep_one, worker->game_copy, on_turn_spread,
                         occupancy);
   }
+  // See out_reply_bound. Found only once a first move has failed to cut off,
+  // and not for the solving player's moves while the opponent holds a stuck
+  // tile, which no play of its whole rack places.
+  OutReplyBound out_reply;
+  out_reply.ready = false;
+  const bool out_reply_active =
+      arena_alloced && !is_root &&
+      !(opp_stuck_frac > 0.0F &&
+        on_turn_idx == worker->solver->solving_player) &&
+      depth >= 2;
 
   // ABDADA two-phase iteration:
   // Pass 0: search all moves with exclusion (defer busy nodes).
@@ -4298,6 +4492,26 @@ int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
           }
           best_value = MAX(best_value, bound);
           continue;
+        }
+      }
+      if (out_reply_active && idx > 0) {
+        if (!out_reply.ready) {
+          out_reply_bound_init(&out_reply, worker, on_turn_spread, occupancy);
+        }
+        // A pass that ends the game is never replied to.
+        if (out_reply.count > 0 &&
+            small_move_get_tiles_played(small_move) != out_reply.rack_size &&
+            (!small_move_is_pass(small_move) ||
+             game_get_consecutive_scoreless_turns(worker->game_copy) == 0)) {
+          const int32_t bound =
+              out_reply_bound(&out_reply, worker, small_move, alpha);
+          if (bound <= alpha) {
+            if (deferred != NULL) {
+              deferred[idx] = false;
+            }
+            best_value = MAX(best_value, bound);
+            continue;
+          }
         }
       }
 
