@@ -177,9 +177,16 @@ async function run(commands) {
         }
         await pause(100);
       }
+      // The status is USER_INTERRUPT from the moment Stop is requested, while
+      // the command is still winding down and a PEG can still start helper
+      // threads. Joining it now would block this thread, which is the one
+      // that starts pthread workers and takes finished ones back: a helper
+      // started with no pooled worker left would never run, and the join would
+      // never return. Keep yielding until the command has finished.
+      while (!fatal && api.thread() === 2) await pause(5);
       checkEngine();
-      // wasm_get_output joins the worker, including after USER_INTERRUPT.
-      // Keep the batch locked until that join completes.
+      // wasm_get_output joins the finished command's thread. Keep the batch
+      // locked until that join completes.
       const text = readString(api.output);
       if (text?.includes("peginfo ")) pegReadable = true;
       const error = readString(api.error);
