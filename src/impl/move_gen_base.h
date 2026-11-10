@@ -773,6 +773,69 @@ static inline int lowest_set_bit_index_64(uint64_t bitset) {
 #endif
 }
 
+// Index of the highest set bit of a nonzero bitset, following
+// lowest_set_bit_index's guarded-intrinsic pattern.
+static inline int highest_set_bit_index(uint32_t bitset) {
+#if defined(__has_builtin) && __has_builtin(__builtin_clz)
+  return 31 - __builtin_clz(bitset);
+#else
+  int index = 31;
+  while ((bitset & ((uint32_t)1 << index)) == 0) {
+    index--;
+  }
+  return index;
+#endif
+}
+
+enum {
+  // The entries before and after a lane's empty columns in the list that
+  // anchor_span_reach reads: one more than the tiles a rack holds.
+  LANE_SPAN_PAD = RACK_SIZE + 1,
+};
+
+// The lane positions a play from the anchor at `col` can span: right of
+// `limit` (the anchor's leftward limit, or -1 for none), and on either side
+// of the anchor no further than `spare` of the lane's empty squares, plus
+// the tiles it plays through, and short of any empty square in `blocked`,
+// where no rack tile fits. empty_cols lists the lane's empty columns in
+// order, after LANE_SPAN_PAD entries of -1 and before as many of BOARD_DIM,
+// so that the first empty square each way that the rack has no tile left for
+// is read without a bounds check; empties_left counts the empty squares left
+// of the anchor, and anchor_is_empty is 1 if its square is empty and 0 if
+// not.
+static inline uint32_t anchor_span_reach(const int8_t *empty_cols,
+                                         int empties_left, int anchor_is_empty,
+                                         uint32_t blocked, int col, int limit,
+                                         int spare) {
+  const uint32_t right_of_col = ~(((uint32_t)2 << col) - 1);
+  const uint32_t left_of_col = ((uint32_t)1 << col) - 1;
+  // The nearest empty square each way that the rack cannot fill: one past
+  // the tiles it has, or a blocked one.
+  int right_stop =
+      empty_cols[LANE_SPAN_PAD + empties_left + anchor_is_empty + spare];
+  int left_stop = empty_cols[LANE_SPAN_PAD + empties_left - 1 - spare];
+  const uint32_t right_blocked = blocked & right_of_col;
+  const uint32_t left_blocked = blocked & left_of_col;
+  if (right_blocked != 0) {
+    const int blocked_col = lowest_set_bit_index(right_blocked);
+    if (blocked_col < right_stop) {
+      right_stop = blocked_col;
+    }
+  }
+  if (left_blocked != 0) {
+    const int blocked_col = highest_set_bit_index(left_blocked);
+    if (blocked_col > left_stop) {
+      left_stop = blocked_col;
+    }
+  }
+  const int right = right_stop - 1;
+  int left = left_stop + 1;
+  if (left <= limit) {
+    left = limit + 1;
+  }
+  return (((uint32_t)2 << right) - 1) & ~(((uint32_t)1 << left) - 1);
+}
+
 static inline bool play_is_nonempty_and_nonduplicate(int tiles_played,
                                                      bool is_unique) {
   return (tiles_played > 1) || ((tiles_played == 1) && is_unique);
