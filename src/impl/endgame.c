@@ -5864,6 +5864,14 @@ bool endgame_add_worker(EndgameCtx *solver) {
     cpthread_mutex_unlock(&solver->add_mutex);
     return false;
   }
+  // Decline once the solve has been told to stop: its workers leave at their
+  // next check, so a thread started now would be started only to be joined.
+  // With the window open the thread control is this solve's.
+  if (thread_control_get_status(solver->thread_control) ==
+      THREAD_CONTROL_STATUS_USER_INTERRUPT) {
+    cpthread_mutex_unlock(&solver->add_mutex);
+    return false;
+  }
   const int ordinal = atomic_load(&solver->live_workers);
   if (ordinal >= solver->arr_cap) {
     cpthread_mutex_unlock(&solver->add_mutex);
