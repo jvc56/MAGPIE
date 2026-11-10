@@ -994,8 +994,7 @@ static bool wordmap_gen_score_bounds_hold(const MoveGen *gen,
     return true;
   }
   // Every bound carries the anchor's PAT bound, so the score takes it too.
-  const int64_t pat_bound =
-      score_bounds[0] - (Equity)anchor->highest_possible_score;
+  const int64_t pat_bound = score_bounds[0] - anchor->highest_possible_score;
   const int64_t score = (int64_t)wmp_play_score(gen, start_col) + pat_bound;
   return wmp_move_gen_subrack_leave_kept(subrack_info, score_bounds,
                                          score + subrack_info->leave_value) ==
