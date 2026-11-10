@@ -4578,6 +4578,17 @@ int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
   // first few moves and never pay for a full sort. Root move lists
   // (!arena_alloced) arrive pre-sorted.
   bool tail_sorted = !arena_alloced;
+  // The slots before this one hold their final moves.
+  int ordered_count = 0;
+  // One ply above the leaves, a child the table holds is valued without
+  // being played (see below), and the table is asked before anything else is
+  // done for the child. So that the answer is in cache by then, each move's
+  // slot is ordered, its child's key computed and the key's bucket prefetched
+  // one move ahead. The order is the one the moves would get at their own
+  // turns: nothing rewrites this node's estimates while its leaves are
+  // searched.
+  uint64_t ahead_key = 0;
+  int ahead_idx = -1;
   while (!all_done) {
     all_done = true;
 
@@ -4590,13 +4601,16 @@ int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
 
       // Lazy move ordering, pass 0 only: later passes revisit positions
       // recorded in deferred[], so the array must not be reordered then.
-      if (!tail_sorted && pass == 0) {
+      const int order_through =
+          (leaf_children_from_table && idx + 1 < nplays) ? idx + 1 : idx;
+      while (!tail_sorted && pass == 0 && ordered_count <= order_through) {
+        const int slot = ordered_count++;
         SmallMove *moves_base =
             (SmallMove *)(worker->small_move_arena->memory + arena_offset);
-        if (idx < LAZY_SELECTION_LIMIT) {
-          int best_est_idx = idx;
-          int32_t best_est = small_move_get_estimated_value(&moves_base[idx]);
-          for (int scan = idx + 1; scan < nplays; scan++) {
+        if (slot < LAZY_SELECTION_LIMIT) {
+          int best_est_idx = slot;
+          int32_t best_est = small_move_get_estimated_value(&moves_base[slot]);
+          for (int scan = slot + 1; scan < nplays; scan++) {
             const int32_t est =
                 small_move_get_estimated_value(&moves_base[scan]);
             if (est > best_est) {
@@ -4604,20 +4618,41 @@ int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
               best_est_idx = scan;
             }
           }
-          if (best_est_idx != idx) {
-            SmallMove tmp = moves_base[idx];
-            moves_base[idx] = moves_base[best_est_idx];
+          if (best_est_idx != slot) {
+            SmallMove tmp = moves_base[slot];
+            moves_base[slot] = moves_base[best_est_idx];
             moves_base[best_est_idx] = tmp;
           }
         } else {
-          sort_small_moves_by_estimate(worker, moves_base + idx, nplays - idx);
+          sort_small_moves_by_estimate(worker, moves_base + slot,
+                                       nplays - slot);
           tail_sorted = true;
         }
       }
-
-      // The child's key, once it is known.
+      // This move's key, if the move before it looked ahead, and the next
+      // move's. Computing a key leaves that move in spare_move.
       uint64_t child_key = 0;
       bool child_key_ready = false;
+      bool spare_move_loaded = false;
+      if (leaf_children_from_table) {
+        if (ahead_idx == idx) {
+          child_key = ahead_key;
+          child_key_ready = true;
+        }
+        if (idx + 1 < nplays) {
+          const SmallMove *next_move =
+              (const SmallMove *)(worker->small_move_arena->memory +
+                                  arena_offset) +
+              idx + 1;
+          if (!small_move_is_pass(next_move) &&
+              small_move_get_tiles_played(next_move) != stm_rack_size) {
+            ahead_key = small_move_child_key(worker, next_move, node_key);
+            ahead_idx = idx + 1;
+            transposition_table_prefetch(worker->solver->transposition_table,
+                                         leaf_tt_key(worker, ahead_key));
+          }
+        }
+      }
 
       // ABDADA: determine if this move should be searched exclusively
       // First move (idx == 0) is never exclusive
@@ -4706,8 +4741,11 @@ int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
             }
           }
         } else if (leaf_children_from_table) {
-          child_key = small_move_child_key(worker, small_move, node_key);
-          child_key_ready = true;
+          if (!child_key_ready) {
+            child_key = small_move_child_key(worker, small_move, node_key);
+            child_key_ready = true;
+            spare_move_loaded = true;
+          }
           const int32_t child_spread =
               -(on_turn_spread + (int32_t)small_move_get_score(small_move));
           int32_t table_value = 0;
@@ -4750,6 +4788,10 @@ int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
                               memory_order_release);
 
         if (child_key_ready) {
+          if (!spare_move_loaded) {
+            small_move_to_move(worker->move_list->spare_move, small_move,
+                               game_get_board(worker->game_copy));
+          }
           play_keyed_small_move(worker, small_move, node_key, child_key,
                                 &worker->move_undos[undo_index]);
         } else {
