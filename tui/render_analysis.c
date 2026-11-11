@@ -318,9 +318,16 @@ static int analysis_played_row(const TuiGameState *state,
 }
 
 // The color of the player who played the History cursor's turn, for
-// its played move's row.
+// its played move's row. Only a row analysis_played_row returned is
+// that row, and it returns none without a state or with the cursor
+// off the History, so the default color is never used: the check is
+// there because the callers allow a NULL state.
 static ThemeRgb analysis_played_color(const Theme *theme,
                                       const TuiGameState *state) {
+  if (state == NULL || state->history_cursor < 0 ||
+      state->history_cursor >= state->history_count) {
+    return theme->fg;
+  }
   return state->history[state->history_cursor].player_idx == 1
              ? theme->on_turn_fg_p2
              : theme->on_turn_fg;
