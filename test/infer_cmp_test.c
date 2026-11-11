@@ -6,8 +6,8 @@
 #include "../src/def/letter_distribution_defs.h"
 #include "../src/def/rack_defs.h"
 #include "../src/def/thread_control_defs.h"
+#include "../src/ent/alias_method.h"
 #include "../src/ent/bag.h"
-#include "../src/ent/board.h"
 #include "../src/ent/equity.h"
 #include "../src/ent/game.h"
 #include "../src/ent/inference_args.h"
@@ -27,6 +27,13 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
+
+enum {
+  CENSUS_MIN_INFERENCES = 24,
+  CENSUS_MIN_EXCHANGES = 2,
+  CENSUS_MAX_GAMES = 100,
+};
 
 // Run inference with and without cutoff optimization and verify results match
 static void run_inference_comparison(const Config *config, int target_index,
@@ -40,22 +47,25 @@ static void run_inference_comparison(const Config *config, int target_index,
   Rack nontarget_known_rack;
   rack_set_dist_size_and_reset(&nontarget_known_rack, ld_size);
 
-  // Run inference WITH cutoff optimization
-  thread_control_set_status(config_get_thread_control(config),
-                            THREAD_CONTROL_STATUS_STARTED);
-  config_infer(config, false, target_index, target_score, target_num_exch,
-               target_played_tiles, &target_known_rack, &nontarget_known_rack,
-               true, results_with_cutoff, error_stack);
+  InferenceArgs args;
+  infer_args_fill(&args, config_get_num_plays(config),
+                  config_get_eq_margin_inference(config), NULL,
+                  config_get_game(config), config_get_num_threads(config), 0,
+                  config_get_print_interval(config),
+                  config_get_thread_control(config), false, true, target_index,
+                  target_score, target_num_exch, target_played_tiles,
+                  &target_known_rack, &nontarget_known_rack);
+  args.temperature = config_get_inference_temperature(config);
+  // Keep this comparison on move generation; census parity is checked below.
+  args.use_census_play_scores = false;
+  thread_control_set_status(args.thread_control, THREAD_CONTROL_STATUS_STARTED);
+  infer_without_ctx(&args, results_with_cutoff, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
-
-  // Run inference WITHOUT cutoff optimization
-  thread_control_set_status(config_get_thread_control(config),
-                            THREAD_CONTROL_STATUS_STARTED);
-  config_infer(config, false, target_index, target_score, target_num_exch,
-               target_played_tiles, &target_known_rack, &nontarget_known_rack,
-               false, results_without_cutoff, error_stack);
+  args.use_inference_cutoff_optimization = false;
+  thread_control_set_status(args.thread_control, THREAD_CONTROL_STATUS_STARTED);
+  infer_without_ctx(&args, results_without_cutoff, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
@@ -80,7 +90,7 @@ static void test_infer_cutoff_optimization(bool use_wmp) {
 
   char *config_str = get_formatted_string(
       "set -lex CSW21 -wmp %s -s1 equity -s2 equity -r1 all -r2 all "
-      "-numplays 1 -threads %d -ima 5",
+      "-numplays 1 -threads %d -ima 5 -inftemp 2",
       use_wmp ? "true" : "false", NUM_THREADS);
   Config *config = config_create_or_die(config_str);
   free(config_str);
@@ -138,11 +148,12 @@ static void test_infer_cutoff_optimization(bool use_wmp) {
           num_exch = tiles_played;
         } else {
           // For scoring plays, extract the tiles played
-          for (int i = 0; i < tiles_played; i++) {
-            const MachineLetter ml = move_get_tile(top_move, i);
+          for (int tile_idx = 0; tile_idx < move_get_tiles_length(top_move);
+               tile_idx++) {
+            const MachineLetter ml = move_get_tile(top_move, tile_idx);
             if (ml != PLAYED_THROUGH_MARKER) {
               rack_add_letter(&target_played_tiles,
-                              get_unblanked_machine_letter(ml));
+                              get_is_blanked(ml) ? BLANK_MACHINE_LETTER : ml);
             }
           }
         }
@@ -214,6 +225,7 @@ static double infer_with_census_setting(
                   target_score, target_num_exch, target_played_tiles,
                   &target_known_rack, &nontarget_known_rack);
   args.use_census_play_scores = use_census;
+  args.temperature = config_get_inference_temperature(config);
   Timer timer;
   ctimer_start(&timer);
   if (use_census) {
@@ -229,14 +241,14 @@ static double infer_with_census_setting(
 // inferring with a move generation for each rack, on the positions of
 // self-play games where the census is used: exchanges and plays of at most
 // RACK_SIZE - INFERENCE_CENSUS_MIN_TILES_TO_INFER tiles.
-static void test_infer_census_matches_movegen(void) {
-  const int MIN_INFERENCES = 24;
-  const int MIN_EXCHANGES = 2;
-  const int MAX_GAMES = 100;
+static void test_infer_census_matches_movegen(bool softmax) {
 
   Config *config = config_create_or_die(
       "set -lex CSW24 -wmp true -s1 equity -s2 equity -r1 all -r2 all "
-      "-numplays 1 -threads 10 -ima 5");
+      "-numplays 1 -threads 10 -ima 5 -inftemp 0");
+  if (softmax) {
+    load_and_exec_config_or_die(config, "set -inftemp 2");
+  }
   const int ld_size = ld_get_size(config_get_ld(config));
   load_and_exec_config_or_die(
       config, "cgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 / 0/0 0 -lex "
@@ -256,8 +268,9 @@ static void test_infer_census_matches_movegen(void) {
   double movegen_seconds = 0;
   const uint64_t base_seed = 7;
 
-  while ((inferences < MIN_INFERENCES || exchanges < MIN_EXCHANGES) &&
-         games_completed < MAX_GAMES) {
+  while ((inferences < CENSUS_MIN_INFERENCES ||
+          exchanges < CENSUS_MIN_EXCHANGES) &&
+         games_completed < CENSUS_MAX_GAMES) {
     game_reset(game);
     game_seed(game, base_seed + games_completed);
     draw_starting_racks(game);
@@ -267,7 +280,6 @@ static void test_infer_census_matches_movegen(void) {
       const game_event_t move_type = move_get_type(top_move);
       const int tiles_played = move_get_tiles_played(top_move);
       const bool census_applies =
-          board_get_tiles_played(game_get_board(game)) > 0 &&
           (move_type == GAME_EVENT_EXCHANGE ||
            (move_type == GAME_EVENT_TILE_PLACEMENT_MOVE &&
             RACK_SIZE - tiles_played >= INFERENCE_CENSUS_MIN_TILES_TO_INFER));
@@ -299,6 +311,21 @@ static void test_infer_census_matches_movegen(void) {
         assert(error_stack_is_empty(error_stack));
         assert_inference_results_equal(census_results, movegen_results,
                                        ld_size);
+        const AliasMethod *census_alias =
+            inference_results_get_alias_method(census_results);
+        const AliasMethod *movegen_alias =
+            inference_results_get_alias_method(movegen_results);
+        assert(census_alias->num_items == movegen_alias->num_items);
+        for (uint32_t item_idx = 0; item_idx < census_alias->num_items;
+             item_idx++) {
+          const AliasMethodItem *census_item = &census_alias->items[item_idx];
+          const AliasMethodItem *movegen_item = &movegen_alias->items[item_idx];
+          assert(memcmp(&census_item->rack, &movegen_item->rack,
+                        sizeof(census_item->rack)) == 0);
+          assert(census_item->count == movegen_item->count);
+          assert(census_item->alias == movegen_item->alias);
+          assert(census_item->probability == movegen_item->probability);
+        }
         inferences++;
         if (move_type == GAME_EVENT_EXCHANGE) {
           exchanges++;
@@ -308,12 +335,13 @@ static void test_infer_census_matches_movegen(void) {
     }
     games_completed++;
   }
-  assert(inferences >= MIN_INFERENCES);
-  assert(exchanges >= MIN_EXCHANGES);
+  assert(inferences >= CENSUS_MIN_INFERENCES);
+  assert(exchanges >= CENSUS_MIN_EXCHANGES);
 
-  printf("Census inference test: %d games, %d inferences (%d exchanges), "
+  printf("Census inference test (softmax=%d): %d games, %d inferences (%d "
+         "exchanges), "
          "census %.3fs, move generation %.3fs\n",
-         games_completed, inferences, exchanges, census_seconds,
+         softmax, games_completed, inferences, exchanges, census_seconds,
          movegen_seconds);
 
   move_list_destroy(move_list);
@@ -325,7 +353,8 @@ static void test_infer_census_matches_movegen(void) {
 }
 
 void test_infer_cmp(void) {
-  test_infer_census_matches_movegen();
+  test_infer_census_matches_movegen(false);
+  test_infer_census_matches_movegen(true);
   // Test cutoff optimization for both WMP and KWG modes
   test_infer_cutoff_optimization(true);  // WMP
   test_infer_cutoff_optimization(false); // KWG

@@ -3166,7 +3166,7 @@ void shadow_play_for_anchor(MoveGen *gen, int col) {
     // empty touched mask is already a no-op.
     wmp_move_gen_add_anchors(&gen->wmp_move_gen, gen->current_row_index, col,
                              gen->last_anchor_col, gen->dir,
-                             gen->target_equity_cutoff, &gen->anchor_heap);
+                             gen->anchor_equity_cutoff, &gen->anchor_heap);
     return;
   }
   if (gen->max_tiles_to_play == 0) {
@@ -3317,6 +3317,9 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
   const KWG *override_kwg = args->override_kwg;
   gen->eq_margin_movegen = args->eq_margin_movegen;
   gen->target_equity_cutoff = args->target_equity;
+  gen->anchor_equity_cutoff = args->has_anchor_equity_cutoff
+                                  ? args->anchor_equity_cutoff
+                                  : args->target_equity;
   gen->best_small_out_bonus = args->best_small_out_bonus;
   gen->best_small_canonical_ties = args->best_small_canonical_ties;
 
@@ -4675,9 +4678,9 @@ static uint64_t gen_seed_carried_best_move(MoveGen *gen, BestMoveCarry *carry,
   }
   if (seeded) {
     gen_update_cutoff_equity_or_score(gen);
-    // With no target, target_equity_cutoff is read only by
+    // With no target, anchor_equity_cutoff is read only by
     // wmp_move_gen_add_anchors, which drops anchors whose bound is below it.
-    gen->target_equity_cutoff =
+    gen->anchor_equity_cutoff =
         move_get_equity(gen_get_readonly_best_move(gen));
   }
   for (int lane = 0; lane < BEST_MOVE_CARRY_NUM_LANES; lane++) {

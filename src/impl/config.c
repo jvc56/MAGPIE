@@ -101,6 +101,7 @@
 #include <limits.h>
 #include <math.h>
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -297,6 +298,7 @@ struct Config {
   int peg_out_width;
   int peg_out_lines;
   Equity eq_margin_inference;
+  Equity inference_temperature;
   Equity eq_margin_movegen;
   int num_threads;
   int print_interval;
@@ -313,7 +315,9 @@ struct Config {
   bai_sampling_rule_t p1_sampling_rule;
   bai_sampling_rule_t p2_sampling_rule;
   Equity p1_eq_margin_inference;
+  Equity p1_inference_temperature;
   Equity p2_eq_margin_inference;
+  Equity p2_inference_temperature;
   multi_threading_mode_t multi_threading_mode;
   // PEG per-stage candidate counts (halving stages 1..N), parsed from -pegtopk.
   // peg_num_stages == 0 means "use the solver's built-in default schedule".
@@ -684,6 +688,18 @@ int config_get_num_threads(const Config *config) { return config->num_threads; }
 
 int config_get_print_interval(const Config *config) {
   return config->print_interval;
+}
+
+Equity config_get_inference_temperature(const Config *config) {
+  return config->inference_temperature;
+}
+
+Equity config_get_p1_inference_temperature(const Config *config) {
+  return config->p1_inference_temperature;
+}
+
+Equity config_get_p2_inference_temperature(const Config *config) {
+  return config->p2_inference_temperature;
 }
 
 Equity config_get_eq_margin_inference(const Config *config) {
@@ -1411,6 +1427,38 @@ static void add_pat_help_arg(arg_token_t arg_token, const char **usages,
             "spans. 1 is the opponent's reply score alone, and higher "
             "values subtract what the observing player scores back and add "
             "what the opponent scores after that.";
+    break;
+  default:
+    break;
+  }
+}
+
+// The help for the inference options (see help_entry_fill).
+static void add_inference_help_arg(arg_token_t arg_token, const char **usages,
+                                   const char **examples, const char **text) {
+  switch (arg_token) {
+  case ARG_TOKEN_INFERENCE_TEMP:
+  case ARG_TOKEN_P1_INFERENCE_TEMP:
+  case ARG_TOKEN_P2_INFERENCE_TEMP:
+    usages[0] = "<temperature>";
+    examples[0] = "2.0";
+    *text = "Sets the softmax inference temperature in points (default 8; zero "
+            "disables weighting).";
+    break;
+  case ARG_TOKEN_INFERENCE_MARGIN:
+    usages[0] = "<inference_equity_margin>";
+    examples[0] = "1";
+    examples[1] = "2.4";
+    examples[2] = "10.0";
+    *text = "Specifies the maximum equity loss for an opponent's play when "
+            "running an inference.";
+    break;
+  case ARG_TOKEN_P1_INFERENCE_MARGIN:
+  case ARG_TOKEN_P2_INFERENCE_MARGIN:
+    usages[0] = "<inference_equity_margin>";
+    *text = "Specifies the inference margin for player 1 or 2 during "
+            "autoplay. That is the maximum equity loss for an opponent's play "
+            "when running an inference.";
     break;
   default:
     break;
@@ -2563,13 +2611,13 @@ static void help_entry_fill(const Config *config, int token,
              "ranging from 0 to 100 exclusive. A higher confidence level "
              "improves the accuracy of the results, but takes longer to run.";
       break;
+    case ARG_TOKEN_INFERENCE_TEMP:
+    case ARG_TOKEN_P1_INFERENCE_TEMP:
+    case ARG_TOKEN_P2_INFERENCE_TEMP:
     case ARG_TOKEN_INFERENCE_MARGIN:
-      usages[0] = "<inference_equity_margin>";
-      examples[0] = "1";
-      examples[1] = "2.4";
-      examples[2] = "10.0";
-      text = "Specifies the maximum equity loss for an opponent's play when "
-             "running an inference.";
+    case ARG_TOKEN_P1_INFERENCE_MARGIN:
+    case ARG_TOKEN_P2_INFERENCE_MARGIN:
+      add_inference_help_arg(arg_token, usages, examples, &text);
       break;
     case ARG_TOKEN_MOVEGEN_MARGIN:
       usages[0] = "<movegen_equity_margin>";
@@ -3042,13 +3090,6 @@ static void help_entry_fill(const Config *config, int token,
       usages[0] = "<sampling_rule>";
       text = "Specifies the BAI sampling rule for simulation for player 1 or 2 "
              "during autoplay.";
-      break;
-    case ARG_TOKEN_P1_INFERENCE_MARGIN:
-    case ARG_TOKEN_P2_INFERENCE_MARGIN:
-      usages[0] = "<inference_equity_margin>";
-      text = "Specifies the inference margin for player 1 or 2 during "
-             "autoplay. That is the maximum equity loss for an opponent's play "
-             "when running an inference.";
       break;
     case ARG_TOKEN_P1_ENDGAME_PLIES:
     case ARG_TOKEN_P2_ENDGAME_PLIES:
@@ -3677,6 +3718,7 @@ void config_fill_infer_args(const Config *config, bool use_game_history,
                   use_game_history, use_infer_cutoff_optimization, target_index,
                   target_score, target_num_exch, target_played_tiles,
                   target_known_rack, nontarget_known_rack);
+  args->temperature = config->inference_temperature;
 }
 
 // Use target_index < 0 to infer using the game history
@@ -5399,6 +5441,7 @@ void config_fill_autoplay_args(const Config *config,
                     NULL, num_worker_threads_per_sim, 0, config->print_interval,
                     config->thread_control, false, true, 0, 0, 0, NULL, NULL,
                     NULL);
+    p1_inference_args.temperature = config->p1_inference_temperature;
   }
   InferenceArgs p2_inference_args = {0};
   if (config->p2_sim_with_inference) {
@@ -5406,6 +5449,7 @@ void config_fill_autoplay_args(const Config *config,
                     NULL, num_worker_threads_per_sim, 0, config->print_interval,
                     config->thread_control, false, true, 0, 0, 0, NULL, NULL,
                     NULL);
+    p2_inference_args.temperature = config->p2_inference_temperature;
   }
 
   // Autoplay with sims must populate the following SimArgs fields that are left
@@ -10388,6 +10432,8 @@ enum {
   CONFIG_DEFAULT_STOP_COND_PCT = 99,
   CONFIG_DEFAULT_TIME_LIMIT_SECONDS = 60,
   CONFIG_DEFAULT_EQ_MARGIN = 5,
+  CONFIG_DEFAULT_INFERENCE_MARGIN = 10000,
+  CONFIG_DEFAULT_INFERENCE_TEMPERATURE = 8,
 };
 #define CONFIG_DEFAULT_MAX_ITERATIONS 1000000000000ULL
 #define CONFIG_DEFAULT_UTILITY_W_WINPCT 1.0
@@ -11860,7 +11906,10 @@ static void config_contribute_reset_player_settings(Config *config,
   *(p1 ? &config->p1_sampling_rule : &config->p2_sampling_rule) =
       BAI_SAMPLING_RULE_TOP_TWO_IDS;
   *(p1 ? &config->p1_eq_margin_inference : &config->p2_eq_margin_inference) =
-      int_to_equity(CONFIG_DEFAULT_EQ_MARGIN);
+      int_to_equity(CONFIG_DEFAULT_INFERENCE_MARGIN);
+  *(p1 ? &config->p1_inference_temperature
+       : &config->p2_inference_temperature) =
+      int_to_equity(CONFIG_DEFAULT_INFERENCE_TEMPERATURE);
   *(p1 ? &config->p1_utility_w_winpct : &config->p2_utility_w_winpct) =
       CONFIG_DEFAULT_UTILITY_W_WINPCT;
   *(p1 ? &config->p1_utility_w_spread : &config->p2_utility_w_spread) =
@@ -14651,6 +14700,38 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
         double_to_equity(p2_eq_margin_inference_double);
   }
 
+  if (config_get_parg_value(config, ARG_TOKEN_INFERENCE_TEMP, 0)) {
+    double temperature = 0;
+    config_load_double(config, ARG_TOKEN_INFERENCE_TEMP, 0, EQUITY_MAX_DOUBLE,
+                       &temperature, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+    config->inference_temperature = double_to_equity(temperature);
+    config->p1_inference_temperature = config->inference_temperature;
+    config->p2_inference_temperature = config->inference_temperature;
+  }
+
+  if (config_get_parg_value(config, ARG_TOKEN_P1_INFERENCE_TEMP, 0)) {
+    double temperature = 0;
+    config_load_double(config, ARG_TOKEN_P1_INFERENCE_TEMP, 0,
+                       EQUITY_MAX_DOUBLE, &temperature, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+    config->p1_inference_temperature = double_to_equity(temperature);
+  }
+
+  if (config_get_parg_value(config, ARG_TOKEN_P2_INFERENCE_TEMP, 0)) {
+    double temperature = 0;
+    config_load_double(config, ARG_TOKEN_P2_INFERENCE_TEMP, 0,
+                       EQUITY_MAX_DOUBLE, &temperature, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+    config->p2_inference_temperature = double_to_equity(temperature);
+  }
+
   config_load_solver_settings(config, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return;
@@ -16347,6 +16428,9 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_MOVEGEN_LIMIT, "movegenlimit", 1, 1);
   arg(ARG_TOKEN_MIN_PLAY_ITERATIONS, "minplayiterations", 1, 1);
   arg(ARG_TOKEN_STOP_COND_PCT, "scondition", 1, 1);
+  arg(ARG_TOKEN_INFERENCE_TEMP, "inftemp", 1, 1);
+  arg(ARG_TOKEN_P1_INFERENCE_TEMP, "inftemp1", 1, 1);
+  arg(ARG_TOKEN_P2_INFERENCE_TEMP, "inftemp2", 1, 1);
   arg(ARG_TOKEN_INFERENCE_MARGIN, "imargin", 1, 1);
   arg(ARG_TOKEN_MOVEGEN_MARGIN, "mmargin", 1, 1);
   arg(ARG_TOKEN_USE_GAME_PAIRS, "gp", 1, 1);
@@ -16506,7 +16590,13 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->peg_out_lines = 1;
   config->peg_last_set_str = NULL;
   config->peg_last_moves_str = NULL;
-  config->eq_margin_inference = int_to_equity(CONFIG_DEFAULT_EQ_MARGIN);
+  config->inference_temperature =
+      int_to_equity(CONFIG_DEFAULT_INFERENCE_TEMPERATURE);
+  config->p1_inference_temperature =
+      int_to_equity(CONFIG_DEFAULT_INFERENCE_TEMPERATURE);
+  config->p2_inference_temperature =
+      int_to_equity(CONFIG_DEFAULT_INFERENCE_TEMPERATURE);
+  config->eq_margin_inference = int_to_equity(CONFIG_DEFAULT_INFERENCE_MARGIN);
   config->eq_margin_movegen = int_to_equity(CONFIG_DEFAULT_EQ_MARGIN);
   config->min_play_iterations = CONFIG_DEFAULT_MIN_PLAY_ITERATIONS;
   config->max_iterations = CONFIG_DEFAULT_MAX_ITERATIONS;
@@ -17240,22 +17330,45 @@ static void config_add_settings_to_string_builder_internal(const Config *config,
                                                     config->p2_stop_cond_pct);
       }
       break;
+    case ARG_TOKEN_INFERENCE_TEMP:
+      if (config->inference_temperature !=
+          int_to_equity(CONFIG_DEFAULT_INFERENCE_TEMPERATURE)) {
+        config_add_double_setting_to_string_builder(
+            config, sb, arg_token,
+            equity_to_double(config->inference_temperature));
+      }
+      break;
+    case ARG_TOKEN_P1_INFERENCE_TEMP:
+      if (config->p1_inference_temperature != config->inference_temperature) {
+        config_add_double_setting_to_string_builder(
+            config, sb, arg_token,
+            equity_to_double(config->p1_inference_temperature));
+      }
+      break;
+    case ARG_TOKEN_P2_INFERENCE_TEMP:
+      if (config->p2_inference_temperature != config->inference_temperature) {
+        config_add_double_setting_to_string_builder(
+            config, sb, arg_token,
+            equity_to_double(config->p2_inference_temperature));
+      }
+      break;
     case ARG_TOKEN_INFERENCE_MARGIN:
-      if (config->eq_margin_inference != 0) {
+      if (config->eq_margin_inference !=
+          int_to_equity(CONFIG_DEFAULT_INFERENCE_MARGIN)) {
         config_add_double_setting_to_string_builder(
             config, sb, arg_token,
             equity_to_double(config->eq_margin_inference));
       }
       break;
     case ARG_TOKEN_P1_INFERENCE_MARGIN:
-      if (config->p1_eq_margin_inference != 0) {
+      if (config->p1_eq_margin_inference != config->eq_margin_inference) {
         config_add_double_setting_to_string_builder(
             config, sb, arg_token,
             equity_to_double(config->p1_eq_margin_inference));
       }
       break;
     case ARG_TOKEN_P2_INFERENCE_MARGIN:
-      if (config->p2_eq_margin_inference != 0) {
+      if (config->p2_eq_margin_inference != config->eq_margin_inference) {
         config_add_double_setting_to_string_builder(
             config, sb, arg_token,
             equity_to_double(config->p2_eq_margin_inference));

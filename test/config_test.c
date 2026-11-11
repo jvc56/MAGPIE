@@ -4186,7 +4186,32 @@ void test_narrow_glyphs(void) {
   game_string_options_destroy(gso);
 }
 
+static void test_config_inference_temperature(void) {
+  Config *config = config_create_default_test();
+  assert(config_get_inference_temperature(config) == int_to_equity(8));
+  load_and_exec_config_or_die(config,
+                              "set -inftemp 2.5 -inftemp1 0 -inftemp2 4 "
+                              "-imargin 27 -im1 0 -im2 12");
+  assert(config_get_inference_temperature(config) == double_to_equity(2.5));
+  assert(config_get_p1_inference_temperature(config) == 0);
+  assert(config_get_p2_inference_temperature(config) == int_to_equity(4));
+  StringBuilder *settings = string_builder_create();
+  config_add_settings_to_string_builder(config, settings);
+  Config *restored = config_create_default_test();
+  load_and_exec_config_or_die(restored, string_builder_peek(settings));
+  assert(config_get_inference_temperature(restored) == double_to_equity(2.5));
+  assert(config_get_p1_inference_temperature(restored) == 0);
+  assert(config_get_p2_inference_temperature(restored) == int_to_equity(4));
+  assert(config_get_eq_margin_inference(restored) == int_to_equity(27));
+  assert(config_get_p1_eq_margin_inference(restored) == 0);
+  assert(config_get_p2_eq_margin_inference(restored) == int_to_equity(12));
+  string_builder_destroy(settings);
+  config_destroy(restored);
+  config_destroy(config);
+}
+
 void test_config(void) {
+  test_config_inference_temperature();
   test_game_display();
   test_narrow_glyphs();
   test_trie();
