@@ -309,10 +309,11 @@ static MoveGenArgs best_small_args_for(const Game *game, MoveList *move_list,
   return best_args;
 }
 
-// Every best_play answer at the current path position must agree with the
-// argmax of the materialized list, of a scratch ALL_SMALL generation, and of a
-// scratch BEST_SMALL generation. Counts in *num_split_lanes the lanes the
-// materialized list both regenerated anchors of and carried anchors of.
+// Every best_play and best_play_alone answer at the current path position
+// must agree with the argmax of the materialized list, of a scratch ALL_SMALL
+// generation, and of a scratch BEST_SMALL generation. Counts in
+// *num_split_lanes the lanes the materialized list both regenerated anchors
+// of and carried anchors of.
 static void assert_best_play_matches(PathMoveLists *lists,
                                      const MoveGenArgs *args,
                                      MoveList *best_move_list, uint64_t *rng,
@@ -323,14 +324,26 @@ static void assert_best_play_matches(PathMoveLists *lists,
   const int bonuses[BEST_PLAY_BONUS_VARIANTS] = {
       0, 1, (int)(next_random(rng) % 40), (int)(next_random(rng) % 120)};
 
-  // best_play first: it must not need (or disturb) the current slot.
+  // best_play and best_play_alone first: neither may need (or disturb) the
+  // current slot. They take turns going first, since they share the lists'
+  // scratch.
   SmallMove best_plays[BEST_PLAY_BONUS_VARIANTS];
   bool found[BEST_PLAY_BONUS_VARIANTS];
+  SmallMove alone_plays[BEST_PLAY_BONUS_VARIANTS];
+  bool alone_found[BEST_PLAY_BONUS_VARIANTS];
   for (int variant = 0; variant < BEST_PLAY_BONUS_VARIANTS; variant++) {
     const MoveGenArgs best_args =
         best_small_args_for(game, best_move_list, bonuses[variant]);
+    if (variant % 2 == 0) {
+      alone_found[variant] = path_move_lists_best_play_alone(
+          lists, &best_args, &alone_plays[variant]);
+    }
     found[variant] =
         path_move_lists_best_play(lists, &best_args, &best_plays[variant]);
+    if (variant % 2 != 0) {
+      alone_found[variant] = path_move_lists_best_play_alone(
+          lists, &best_args, &alone_plays[variant]);
+    }
   }
 
   const SmallMove *derived = NULL;
@@ -364,9 +377,13 @@ static void assert_best_play_matches(PathMoveLists *lists,
         argmax_of_plays(derived_pointers, count, bonuses[variant],
                         side_to_move_tiles, &from_derived, &derived_adjusted);
     assert(found[variant] == expected_found);
+    assert(alone_found[variant] == expected_found);
     assert(derived_found == expected_found);
     if (expected_found) {
       assert(best_plays[variant].tiny_move == expected.tiny_move);
+      assert(alone_plays[variant].tiny_move == expected.tiny_move);
+      assert(small_move_get_score(&alone_plays[variant]) ==
+             small_move_get_score(&expected));
       assert(from_derived.tiny_move == expected.tiny_move);
       assert(derived_adjusted == expected_adjusted);
     }
@@ -760,8 +777,8 @@ static void test_tiles_played_in_lanes_random_paths(void) {
   config_destroy(config);
 }
 
-// A pass-only path never regenerates; best_play must report no play when the
-// side has none, and agree with moves_at when it does.
+// A pass-only path never regenerates; best_play and best_play_alone must
+// report no play when the side has none, and agree with moves_at when it does.
 static void test_best_play_pass_path(int empty_side) {
   Config *config =
       config_create_or_die("set -lex NWL20 -wmp false -rit false -wit false");
@@ -800,6 +817,11 @@ static void test_best_play_pass_path(int empty_side) {
     const MoveGenArgs best_args = best_small_args_for(game, best_move_list, 10);
     SmallMove best_play;
     const bool found = path_move_lists_best_play(lists, &best_args, &best_play);
+    SmallMove alone_play;
+    const bool alone_found =
+        path_move_lists_best_play_alone(lists, &best_args, &alone_play);
+    assert(alone_found == found);
+    assert(!found || alone_play.tiny_move == best_play.tiny_move);
     const SmallMove *derived = NULL;
     const int count = path_move_lists_moves_at(lists, &args, &derived);
     assert(found == (count > 0));
