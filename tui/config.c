@@ -136,6 +136,10 @@ bool tui_config_load(TuiConfig *config) {
   config->sim_candidates_set = false;
   config->sim_census = true;
   config->sim_census_set = false;
+  config->infer = false;
+  config->infer_set = false;
+  config->sim_inference = false;
+  config->sim_inference_set = false;
   config->hide_spoilers_set = false;
   config->auto_analyze_set = false;
   config->analysis_time_limit_set = false;
@@ -273,13 +277,24 @@ bool tui_config_load(TuiConfig *config) {
           config->sim_candidates_set = true;
         }
       }
-    } else if (strcmp(trimmed, "sim_census") == 0) {
+    } else if (strcmp(trimmed, "sim_census") == 0 ||
+               strcmp(trimmed, "infer") == 0 ||
+               strcmp(trimmed, "sim_inference") == 0) {
+      bool *flag = &config->sim_census;
+      bool *flag_set = &config->sim_census_set;
+      if (strcmp(trimmed, "infer") == 0) {
+        flag = &config->infer;
+        flag_set = &config->infer_set;
+      } else if (strcmp(trimmed, "sim_inference") == 0) {
+        flag = &config->sim_inference;
+        flag_set = &config->sim_inference_set;
+      }
       if (strcmp(value, "true") == 0 || strcmp(value, "1") == 0) {
-        config->sim_census = true;
-        config->sim_census_set = true;
+        *flag = true;
+        *flag_set = true;
       } else if (strcmp(value, "false") == 0 || strcmp(value, "0") == 0) {
-        config->sim_census = false;
-        config->sim_census_set = true;
+        *flag = false;
+        *flag_set = true;
       }
     } else if (strcmp(trimmed, "auto_analyze") == 0 ||
                strcmp(trimmed, "analysis_time_limit") == 0 ||
@@ -582,6 +597,13 @@ bool tui_config_save(const TuiConfig *config) {
   if (config->sim_census_set) {
     (void)fprintf(file, "sim_census = %s\n",
                   config->sim_census ? "true" : "false");
+  }
+  if (config->infer_set) {
+    (void)fprintf(file, "infer = %s\n", config->infer ? "true" : "false");
+  }
+  if (config->sim_inference_set) {
+    (void)fprintf(file, "sim_inference = %s\n",
+                  config->sim_inference ? "true" : "false");
   }
 
   if (fclose(file) != 0) {

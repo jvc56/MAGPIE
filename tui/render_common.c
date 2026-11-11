@@ -221,7 +221,9 @@ void draw_box_styled_ex(struct ncplane *plane, const Theme *theme, int top_row,
     theme_apply_fg(plane, theme->fg);
     theme_apply_bg(plane, border_bg);
     ncplane_putstr_yx(plane, top_row, col, title);
-    col += (int)strlen(title);
+    // Cells, not bytes: a title may hold "·" or "…".
+    const int title_width = ncstrwidth(title, NULL, NULL);
+    col += title_width > 0 ? title_width : (int)strlen(title);
     // Trailing pad.
     ncplane_putstr_yx(plane, top_row, col, " ");
   }
