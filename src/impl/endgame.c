@@ -4153,6 +4153,17 @@ static uint64_t play_small_move_and_hash(EndgameCtxWorker *worker,
                                          const SmallMove *small_move,
                                          uint64_t node_key, MoveUndo *undo) {
   const uint64_t child_key = small_move_child_key(worker, small_move, node_key);
+  // The child's lookup is the first thing it does, and the table is far too
+  // large to be in cache: its bucket loads while the board is updated. A
+  // child whose game has ended looks nothing up.
+  if (worker->solver->transposition_table_optim &&
+      small_move_get_tiles_played(small_move) !=
+          rack_get_total_letters(player_get_rack(game_get_player(
+              worker->game_copy,
+              game_get_player_on_turn_index(worker->game_copy))))) {
+    transposition_table_prefetch(worker->solver->transposition_table,
+                                 child_key);
+  }
   play_keyed_small_move(worker, small_move, node_key, child_key, undo);
   return child_key;
 }
