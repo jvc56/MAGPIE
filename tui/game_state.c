@@ -1534,6 +1534,15 @@ static void replay_history_prefix(TuiGameState *state, int up_to,
       Bag *bag = game_get_bag(state->game);
       const int draw_idx =
           game_get_player_draw_index(state->game, e->player_idx);
+      // The engine also put the exchanged tiles in the bag. The replay
+      // sets racks without drawing them, so the bag never gave those
+      // tiles out and has no room for them: take them out again, before
+      // the refill goes back in.
+      for (int tile_idx = 0; tile_idx < move_get_tiles_played(applied_move);
+           tile_idx++) {
+        (void)bag_draw_letter(bag, move_get_tile(applied_move, tile_idx),
+                              draw_idx);
+      }
       for (int ml = 0; ml < ld_size && ml < MAX_ALPHABET_SIZE; ml++) {
         while ((int)rack_get_letter(rack, (MachineLetter)ml) >
                exchange_leave[ml]) {

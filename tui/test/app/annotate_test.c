@@ -5,7 +5,9 @@
 // data/).
 // Build and run: make magpie_tui_app_test && ./bin/magpie_tui_app_test
 
+#include "../../../src/ent/bag.h"
 #include "../../../src/ent/game.h"
+#include "../../../src/ent/letter_distribution.h"
 #include "../../../src/ent/player.h"
 #include "../../../src/ent/rack.h"
 #include "../../analysis_rows.h"
@@ -42,6 +44,17 @@ static void check_str(const char *got, const char *want, const char *what) {
   if (strcmp(got, want) != 0) {
     (void)fprintf(stderr, "FAIL: %s: got \"%s\", want \"%s\"\n", what, got,
                   want);
+    failures++;
+  }
+}
+
+// The engine's bag holds no more tiles than the distribution has.
+static void check_bag_fits(const TuiGameState *state, const char *what) {
+  const int in_bag = bag_get_letters(game_get_bag(state->game));
+  const int total = ld_get_total_tiles(state->ld);
+  if (in_bag > total) {
+    (void)fprintf(stderr, "FAIL: %s: %d tiles in a bag of %d\n", what, in_bag,
+                  total);
     failures++;
   }
 }
@@ -108,6 +121,7 @@ static void test_exchange_then_pass(TuiGameState *state) {
   check(reason == NULL ||
             strcmp(reason, "this turn has no position to analyze") != 0,
         "exchange turn can be simmed");
+  check_bag_fits(state, "bag after the first player's exchange");
 
   // Turn 2: the second player, whose rack wasn't entered, passes.
   type_text(state, "pass");
@@ -120,6 +134,24 @@ static void test_exchange_then_pass(TuiGameState *state) {
   check_int(state->edit_history_idx, 2, "editor moves to turn 3");
   check_str(state->edit_rack_buf, "ES",
             "turn 3 starts from the exchanger's leave");
+}
+
+// The second player draws from the other end of the bag, and exchanged
+// tiles go back in at the exchanger's end.
+static void test_second_player_exchange(TuiGameState *state) {
+  start_annotation(state);
+  type_text(state, "pass");
+  press(state, NCKEY_ENTER);
+  press(state, NCKEY_ENTER);
+  type_text(state, "-CCDLV");
+  press(state, NCKEY_ENTER);
+  type_text(state, "ES");
+  press(state, NCKEY_ENTER);
+  check_int(state->history_count, 3, "second player's exchange appends turn 3");
+  check_int(state->history[1].player_idx, 1, "the exchanger is player 2");
+  check(!state->history[1].pending, "second player's exchange is committed");
+  check_str(state->history[1].error_str, "", "second player's exchange error");
+  check_bag_fits(state, "bag after the second player's exchange");
 }
 
 // A placed turn's saved position, which /sim starts from, holds the rack
@@ -210,6 +242,7 @@ int main(void) {
     return 1;
   }
   test_exchange_then_pass(state);
+  test_second_player_exchange(state);
   test_placement_position_has_rack(state);
   test_rack_only_turn_can_be_analyzed(state);
   test_chosen_exchange_is_entered(state);
