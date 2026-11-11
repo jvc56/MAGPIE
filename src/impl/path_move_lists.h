@@ -34,6 +34,18 @@ typedef struct PackedCounts {
   uint64_t words[PATH_MOVE_LISTS_COUNT_WORDS];
 } PackedCounts;
 
+// The plays of a list that place one multiset of tiles (see
+// path_move_lists_penalized_best_play): [begin, end) of by_tiles, by
+// descending score. weight is the sum of their tiles' weights and top_score
+// the score of the first.
+typedef struct PathPlayGroup {
+  PackedCounts used;
+  int begin;
+  int end;
+  int weight;
+  int top_score;
+} PathPlayGroup;
+
 // One materialized list: plays partitioned by lane (lane L spans
 // [lane_begin[L], lane_begin[L + 1])), each play's placed-tile multiset packed
 // alongside for the rack filter. The trailing pass of a generation is not
@@ -52,6 +64,18 @@ typedef struct PathListSlot {
   int by_score_capacity;
   bool by_score_valid;
   int tiles_begin[RACK_SIZE + 2];
+  // Whether groups and by_tiles hold this list's plays (dropped when the list
+  // is rebuilt), built with the tile weights by_tiles_weights.
+  bool by_tiles_valid;
+  // The plays by the tiles they place and, among those of the same tiles, by
+  // descending score and then list order, each as its score above its index
+  // in moves; its second half is scratch.
+  uint64_t *by_tiles;
+  uint16_t *group_ids;
+  int by_tiles_capacity;
+  PathPlayGroup *groups;
+  int group_count;
+  const int *by_tiles_weights;
 } PathListSlot;
 
 // The legal-play lists of both sides of an endgame search, maintained
@@ -237,6 +261,25 @@ bool path_move_lists_best_play(PathMoveLists *lists,
 bool path_move_lists_best_play_alone(PathMoveLists *lists,
                                      const MoveGenArgs *best_small_args,
                                      SmallMove *out_best);
+
+// The play of the list moves_at would return here that scores highest less a
+// penalty for the tiles it places, the first such in the list's order, found
+// without building the list. The penalty is the sum of the placed tiles'
+// `tile_weights` (by machine letter, a designated blank counting as the
+// blank) times `scale`, truncated to an integer. The plays are read from the
+// nearest list of the side to move that is built, up the path (down to its
+// root list), grouped by the tiles they place: a group whose tiles the rack no
+// longer holds is skipped whole, and the others are read by descending score
+// up to their first play that stands. The anchors that can reach a square
+// changed since that list are regenerated (`args` as for moves_at). Returns
+// false iff the side has no play, and otherwise sets *out_best and its
+// penalized score *out_adjusted. Nothing is stored in the slot of the current
+// length.
+bool path_move_lists_penalized_best_play(PathMoveLists *lists,
+                                         const MoveGenArgs *args,
+                                         const int *tile_weights, float scale,
+                                         SmallMove *out_best,
+                                         int *out_adjusted);
 
 // The tile types among `wanted` (a bit per machine letter, the blank's bit 0)
 // that the plays of one side still standing at the current path position

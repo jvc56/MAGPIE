@@ -27,6 +27,12 @@ enum {
   PATH_MOVE_LISTS_INITIAL_CAPACITY = 1024,
   // slot_order_by_score counts scores below this into a bucket each.
   PATH_MOVE_LISTS_SCORE_BUCKETS = 512,
+  // A list's plays come from one rack, so they place at most this many
+  // different multisets of tiles.
+  PATH_MOVE_LISTS_MAX_GROUPS = 1 << RACK_SIZE,
+  // slot_group_by_tiles's hash table of them, a quarter full at most.
+  PATH_MOVE_LISTS_GROUP_TABLE_BITS = RACK_SIZE + 2,
+  PATH_MOVE_LISTS_GROUP_TABLE_SIZE = 1 << PATH_MOVE_LISTS_GROUP_TABLE_BITS,
 };
 
 // High bit of every 4-bit field: the borrow sentinel of counts_subset.
@@ -248,6 +254,7 @@ static void slot_fill_from_move_list(PathListSlot *slot,
   }
   slot->count = writer.count;
   slot->by_score_valid = false;
+  slot->by_tiles_valid = false;
   while (lane < PATH_MOVE_LISTS_NUM_LANES) {
     slot->lane_begin[++lane] = count;
   }
@@ -387,6 +394,7 @@ static void slot_rebuild(PathListSlot *out, const PathListSlot *parent,
   }
   out->count = writer.count;
   out->by_score_valid = false;
+  out->by_tiles_valid = false;
   out->lane_begin[PATH_MOVE_LISTS_NUM_LANES] = writer.count;
 }
 
@@ -449,6 +457,152 @@ static void slot_order_by_score(PathListSlot *slot) {
   slot->by_score_valid = true;
 }
 
+static inline uint32_t packed_counts_hash(const PackedCounts *counts) {
+  uint64_t hash = 0;
+  for (int word_idx = 0; word_idx < PATH_MOVE_LISTS_COUNT_WORDS; word_idx++) {
+    hash = (hash ^ counts->words[word_idx]) * 0x9E3779B97F4A7C15ULL;
+  }
+  return (uint32_t)(hash >> (64 - PATH_MOVE_LISTS_GROUP_TABLE_BITS));
+}
+
+static inline bool packed_counts_equal(const PackedCounts *counts,
+                                       const PackedCounts *other) {
+  uint64_t difference = 0;
+  for (int word_idx = 0; word_idx < PATH_MOVE_LISTS_COUNT_WORDS; word_idx++) {
+    difference |= counts->words[word_idx] ^ other->words[word_idx];
+  }
+  return difference == 0;
+}
+
+// The sum of `tile_weights` over the tiles counted in `used`.
+static int packed_counts_weight(const PackedCounts *used,
+                                const int *tile_weights) {
+  int weight = 0;
+  for (int word_idx = 0; word_idx < PATH_MOVE_LISTS_COUNT_WORDS; word_idx++) {
+    uint64_t fields = used->words[word_idx];
+    while (fields != 0) {
+      const int field_idx = __builtin_ctzll(fields) / 4;
+      const int number_of_ml = (int)((fields >> (4 * field_idx)) & 0xF);
+      weight += number_of_ml * tile_weights[16 * word_idx + field_idx];
+      fields &= ~((uint64_t)0xF << (4 * field_idx));
+    }
+  }
+  return weight;
+}
+
+// The sum of `tile_weights` over the tiles a small move places, a designated
+// blank counting as the blank.
+static inline int small_move_weight(const SmallMove *small_move,
+                                    const int *tile_weights) {
+  int weight = 0;
+  for (int tile_idx = 0; tile_idx < SMALL_MOVE_MAX_TILES; tile_idx++) {
+    const MachineLetter tile = small_move_get_tile(small_move, tile_idx);
+    if (tile == 0) {
+      break;
+    }
+    weight += tile_weights[small_move_tile_is_blank(small_move, tile_idx)
+                               ? BLANK_MACHINE_LETTER
+                               : tile];
+  }
+  return weight;
+}
+
+// Builds slot->groups and slot->by_tiles: the plays grouped by the tiles they
+// place, the groups in the order the list first shows them, and each group's
+// plays by descending score and then list order.
+static void slot_group_by_tiles(PathListSlot *slot, const int *tile_weights) {
+  if (slot->by_tiles_capacity < slot->capacity) {
+    slot->by_tiles = realloc_or_die(slot->by_tiles, 2 * (size_t)slot->capacity *
+                                                        sizeof(uint64_t));
+    slot->group_ids = realloc_or_die(slot->group_ids,
+                                     (size_t)slot->capacity * sizeof(uint16_t));
+    slot->by_tiles_capacity = slot->capacity;
+  }
+  if (slot->groups == NULL) {
+    slot->groups =
+        malloc_or_die(PATH_MOVE_LISTS_MAX_GROUPS * sizeof(PathPlayGroup));
+  }
+  const int count = slot->count;
+  const SmallMove *moves = slot->moves;
+  const PackedCounts *used = slot->used;
+  uint64_t *by_tiles = slot->by_tiles;
+  uint64_t *scratch = by_tiles + slot->by_tiles_capacity;
+  uint16_t *group_ids = slot->group_ids;
+  PathPlayGroup *groups = slot->groups;
+  int16_t table[PATH_MOVE_LISTS_GROUP_TABLE_SIZE];
+  memset(table, -1, sizeof(table));
+  int score_begin[PATH_MOVE_LISTS_SCORE_BUCKETS + 1] = {0};
+  int group_count = 0;
+  for (int move_idx = 0; move_idx < count; move_idx++) {
+    uint32_t place = packed_counts_hash(&used[move_idx]);
+    while (table[place] >= 0 &&
+           !packed_counts_equal(&groups[table[place]].used, &used[move_idx])) {
+      place = (place + 1) & (PATH_MOVE_LISTS_GROUP_TABLE_SIZE - 1);
+    }
+    if (table[place] < 0) {
+      assert(group_count < PATH_MOVE_LISTS_MAX_GROUPS);
+      table[place] = (int16_t)group_count;
+      groups[group_count].used = used[move_idx];
+      groups[group_count].end = 0;
+      group_count++;
+    }
+    const int group_idx = table[place];
+    group_ids[move_idx] = (uint16_t)group_idx;
+    // The group's size, until the groups are laid out below.
+    groups[group_idx].end++;
+    const int score = small_move_get_score(&moves[move_idx]);
+    const int bucket = score >= PATH_MOVE_LISTS_SCORE_BUCKETS
+                           ? 0
+                           : PATH_MOVE_LISTS_SCORE_BUCKETS - 1 - score;
+    score_begin[bucket + 1]++;
+  }
+  for (int bucket = 1; bucket <= PATH_MOVE_LISTS_SCORE_BUCKETS; bucket++) {
+    score_begin[bucket] += score_begin[bucket - 1];
+  }
+  const int overflow = score_begin[1];
+  for (int move_idx = 0; move_idx < count; move_idx++) {
+    const int score = small_move_get_score(&moves[move_idx]);
+    const int bucket = score >= PATH_MOVE_LISTS_SCORE_BUCKETS
+                           ? 0
+                           : PATH_MOVE_LISTS_SCORE_BUCKETS - 1 - score;
+    scratch[score_begin[bucket]++] =
+        ((uint64_t)score << 32) | (uint64_t)(uint32_t)move_idx;
+  }
+  // The plays at or above the last bucket's score share its first bucket, in
+  // list order: put them by descending score, keeping that order among equal
+  // scores. There are none in an endgame.
+  for (int key_idx = 1; key_idx < overflow; key_idx++) {
+    const uint64_t key = scratch[key_idx];
+    int place = key_idx;
+    while (place > 0 && (scratch[place - 1] >> 32) < (key >> 32)) {
+      scratch[place] = scratch[place - 1];
+      place--;
+    }
+    scratch[place] = key;
+  }
+  int next[PATH_MOVE_LISTS_MAX_GROUPS];
+  int group_begin = 0;
+  for (int group_idx = 0; group_idx < group_count; group_idx++) {
+    PathPlayGroup *group = &groups[group_idx];
+    next[group_idx] = group_begin;
+    group->begin = group_begin;
+    group_begin += group->end;
+    group->end = group_begin;
+    group->weight = packed_counts_weight(&group->used, tile_weights);
+  }
+  for (int key_idx = 0; key_idx < count; key_idx++) {
+    const uint64_t key = scratch[key_idx];
+    by_tiles[next[group_ids[(uint32_t)key]]++] = key;
+  }
+  for (int group_idx = 0; group_idx < group_count; group_idx++) {
+    groups[group_idx].top_score =
+        (int)(by_tiles[groups[group_idx].begin] >> 32);
+  }
+  slot->group_count = group_count;
+  slot->by_tiles_weights = tile_weights;
+  slot->by_tiles_valid = true;
+}
+
 PathMoveLists *path_move_lists_create(void) {
   PathMoveLists *lists = calloc_or_die(1, sizeof(PathMoveLists));
   return lists;
@@ -458,6 +612,9 @@ static void slot_free(PathListSlot *slot) {
   free(slot->moves);
   free(slot->used);
   free(slot->by_score);
+  free(slot->by_tiles);
+  free(slot->group_ids);
+  free(slot->groups);
 }
 
 void path_move_lists_destroy(PathMoveLists *lists) {
@@ -546,6 +703,154 @@ int path_move_lists_moves_at(PathMoveLists *lists, const MoveGenArgs *args,
   lists->slot_stamps[length] = lists->stamps[length - 1];
   *out_moves = out->moves;
   return out->count;
+}
+
+// The nearest list of the side to move that is built, up the path from the
+// current position: sets *first_move to the first move played since it was
+// (0 for the side's root list).
+static PathListSlot *nearest_built_list(PathMoveLists *lists, int *first_move) {
+  const int length = lists->length;
+  int source = length - 2;
+  while (source >= 1 && !path_move_lists_slot_is_current(lists, source)) {
+    source -= 2;
+  }
+  if (source >= 1) {
+    *first_move = source;
+    return &lists->slots[source];
+  }
+  *first_move = 0;
+  return &lists->roots[length & 1];
+}
+
+bool path_move_lists_penalized_best_play(PathMoveLists *lists,
+                                         const MoveGenArgs *args,
+                                         const int *tile_weights, float scale,
+                                         SmallMove *out_best,
+                                         int *out_adjusted) {
+  const int length = lists->length;
+  assert(length >= 1);
+  int first_move;
+  PathListSlot *slot = nearest_built_list(lists, &first_move);
+  uint64_t touched = 0;
+  memset(lists->lane_hits, 0, sizeof(lists->lane_hits));
+  for (int move_idx = first_move; move_idx < length; move_idx++) {
+    if (lists->masks[move_idx] == 0) {
+      continue;
+    }
+    touched |= lists->masks[move_idx];
+    for (int lane = 0; lane < PATH_MOVE_LISTS_NUM_LANES; lane++) {
+      lists->lane_hits[lane] |= lists->hits[move_idx][lane];
+    }
+  }
+  // The best regenerated play: the first of the highest penalized score, in
+  // the generation's order.
+  const SmallMove *regen_best = NULL;
+  int regen_adjusted = 0;
+  int regen_lane = 0;
+  if (touched != 0) {
+    generate_small_moves_in_lanes(args, touched, lists->lane_hits,
+                                  lists->lane_end, lists->lane_anchors,
+                                  lists->lane_generated);
+    const MoveList *move_list = args->move_list;
+    for (uint64_t lanes = touched; lanes != 0; lanes &= lanes - 1) {
+      const int lane = __builtin_ctzll(lanes);
+      const int regen_end = lists->lane_end[lane];
+      for (int regen_idx = lane == 0 ? 0 : lists->lane_end[lane - 1];
+           regen_idx < regen_end; regen_idx++) {
+        const SmallMove *regenerated = move_list->small_moves[regen_idx];
+        const int adjusted =
+            (int)small_move_get_score(regenerated) -
+            (int)((float)small_move_weight(regenerated, tile_weights) * scale);
+        if (regen_best == NULL || adjusted > regen_adjusted) {
+          regen_best = regenerated;
+          regen_adjusted = adjusted;
+          regen_lane = lane;
+        }
+      }
+    }
+  }
+  if (!slot->by_tiles_valid || slot->by_tiles_weights != tile_weights) {
+    slot_group_by_tiles(slot, tile_weights);
+  }
+  const Game *game = args->game;
+  const Rack *rack = player_get_rack(
+      game_get_player(game, game_get_player_on_turn_index(game)));
+  const PackedCounts avail = pack_rack(rack);
+  const SmallMove *moves = slot->moves;
+  const uint64_t *by_tiles = slot->by_tiles;
+  // The best play of the list that stands: of the highest penalized score,
+  // and the first such in the list.
+  int source_idx = -1;
+  int source_adjusted = 0;
+  const int group_count = slot->group_count;
+  for (int group_idx = 0; group_idx < group_count; group_idx++) {
+    const PathPlayGroup *group = &slot->groups[group_idx];
+    if (!counts_subset(&group->used, &avail)) {
+      continue;
+    }
+    const int penalty = (int)((float)group->weight * scale);
+    for (int key_idx = group->begin; key_idx < group->end; key_idx++) {
+      const uint64_t key = by_tiles[key_idx];
+      const int adjusted = (int)(key >> 32) - penalty;
+      const int move_idx = (int)(uint32_t)key;
+      // The group's plays from here on score no more, and those that score
+      // the same come later in the list: once one cannot be the pick, none
+      // can. A regenerated play of the same penalized score may still come
+      // after this one.
+      if ((regen_best != NULL && adjusted < regen_adjusted) ||
+          (source_idx >= 0 &&
+           (adjusted < source_adjusted ||
+            (adjusted == source_adjusted && move_idx > source_idx)))) {
+        break;
+      }
+      const SmallMove *small_move = &moves[move_idx];
+      const int lane = lane_of_small_move(small_move);
+      if (((touched >> lane) & 1) != 0) {
+        const uint32_t span = small_move_span(small_move);
+        const uint32_t anchors = lists->lane_anchors[lane];
+        const uint32_t generated = lists->lane_generated[lane];
+        if ((span & lists->lane_hits[lane]) != 0 || generated == anchors ||
+            ((generated >> span_anchor(span, anchors)) & 1) != 0) {
+          continue;
+        }
+      }
+      source_idx = move_idx;
+      source_adjusted = adjusted;
+      break;
+    }
+  }
+  if (source_idx < 0 && regen_best == NULL) {
+    return false;
+  }
+  bool source_wins;
+  if (source_idx < 0) {
+    source_wins = false;
+  } else if (regen_best == NULL || source_adjusted != regen_adjusted) {
+    // The scan keeps no play below the best regenerated one.
+    assert(regen_best == NULL || source_adjusted > regen_adjusted);
+    source_wins = true;
+  } else {
+    // The same penalized score: the play that comes first in the list
+    // moves_at would build, by lane and then by anchor, which a play that
+    // stands never shares with a regenerated one.
+    const SmallMove *source_play = &moves[source_idx];
+    const int source_lane = lane_of_small_move(source_play);
+    if (source_lane != regen_lane) {
+      source_wins = source_lane < regen_lane;
+    } else {
+      const uint32_t anchors = lists->lane_anchors[regen_lane];
+      source_wins = span_anchor(small_move_span(source_play), anchors) <
+                    span_anchor(small_move_span(regen_best), anchors);
+    }
+  }
+  if (source_wins) {
+    *out_best = moves[source_idx];
+    *out_adjusted = source_adjusted;
+  } else {
+    *out_best = *regen_best;
+    *out_adjusted = regen_adjusted;
+  }
+  return true;
 }
 
 uint64_t path_move_lists_standing_tile_types(const PathMoveLists *lists,
