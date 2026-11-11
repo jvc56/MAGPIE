@@ -349,6 +349,14 @@ void run_test(const char *subtest) {
     endgame_speed_bench_run_spec(subtest + strlen("egspeedbench:"));
     return;
   }
+  if (has_prefix("simbench:", subtest)) {
+    sim_benchmark_run_spec(subtest + strlen("simbench:"));
+    return;
+  }
+  if (has_prefix("pcbench:", subtest)) {
+    play_chooser_benchmark_run_spec(subtest + strlen("pcbench:"));
+    return;
+  }
   log_fatal("unrecognized test: %s\n", subtest);
 }
 
