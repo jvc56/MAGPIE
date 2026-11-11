@@ -548,6 +548,70 @@ int path_move_lists_moves_at(PathMoveLists *lists, const MoveGenArgs *args,
   return out->count;
 }
 
+uint64_t path_move_lists_standing_tile_types(const PathMoveLists *lists,
+                                             bool side_is_on_turn,
+                                             const Rack *rack, uint64_t wanted,
+                                             uint64_t *touched,
+                                             uint32_t *hits) {
+  const int length = lists->length;
+  // The side is on turn at every second position up from here.
+  const int nearest = side_is_on_turn ? length : length - 1;
+  int source = nearest;
+  while (source >= 1 && !path_move_lists_slot_is_current(lists, source)) {
+    source -= 2;
+  }
+  const PathListSlot *slot =
+      source >= 1 ? &lists->slots[source] : &lists->roots[nearest & 1];
+  const int first_move = source >= 1 ? source : 0;
+  *touched = 0;
+  memset(hits, 0, PATH_MOVE_LISTS_NUM_LANES * sizeof(uint32_t));
+  for (int move_idx = first_move; move_idx < length; move_idx++) {
+    if (lists->masks[move_idx] == 0) {
+      continue;
+    }
+    *touched |= lists->masks[move_idx];
+    for (int lane = 0; lane < PATH_MOVE_LISTS_NUM_LANES; lane++) {
+      hits[lane] |= lists->hits[move_idx][lane];
+    }
+  }
+  // Every field of a wanted tile type, to pick out the plays that place one.
+  PackedCounts wanted_fields;
+  memset(&wanted_fields, 0, sizeof(wanted_fields));
+  for (uint64_t types = wanted; types != 0; types &= types - 1) {
+    const int ml = __builtin_ctzll(types);
+    wanted_fields.words[ml / 16] |= (uint64_t)0xF << (4 * (ml % 16));
+  }
+  const PackedCounts avail = pack_rack(rack);
+  uint64_t found = 0;
+  for (int move_idx = 0; move_idx < slot->count && found != wanted;
+       move_idx++) {
+    const PackedCounts *used = &slot->used[move_idx];
+    uint64_t any_wanted = 0;
+    for (int word_idx = 0; word_idx < PATH_MOVE_LISTS_COUNT_WORDS; word_idx++) {
+      any_wanted |= used->words[word_idx] & wanted_fields.words[word_idx];
+    }
+    if (any_wanted == 0 || !counts_subset(used, &avail)) {
+      continue;
+    }
+    const SmallMove *small_move = &slot->moves[move_idx];
+    if ((small_move_span(small_move) & hits[lane_of_small_move(small_move)]) !=
+        0) {
+      continue;
+    }
+    for (int word_idx = 0; word_idx < PATH_MOVE_LISTS_COUNT_WORDS; word_idx++) {
+      uint64_t fields = used->words[word_idx] & wanted_fields.words[word_idx];
+      while (fields != 0) {
+        const int field = __builtin_ctzll(fields) / 4;
+        const uint64_t field_bits = (uint64_t)0xF << (4 * field);
+        fields &= ~field_bits;
+        wanted_fields.words[word_idx] &= ~field_bits;
+        found |= (uint64_t)1 << (16 * word_idx + field);
+      }
+    }
+  }
+  return found;
+}
+
 // The running argmax of path_move_lists_best_play. A play outranks the current
 // best when its adjusted score is higher, or equal with a larger tiny_move.
 typedef struct BestScan {

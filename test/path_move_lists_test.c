@@ -246,6 +246,8 @@ enum {
   TILES_PLAYED_NUM_POSITIONS = 3,
   TILES_PLAYED_PATHS_PER_POSITION = 400,
   TILES_PLAYED_MIN_REVEALED = 20,
+  // How often a tile type's only plays had to be standing ones, at least.
+  TILES_PLAYED_MIN_STANDING = 250,
   BEST_PLAY_MOVE_LIST_CAPACITY = 100000,
 };
 
@@ -677,12 +679,55 @@ static uint64_t side_single_tile_types(Game *game, MoveList *move_list,
   return tile_types;
 }
 
+// The tile types side `side` plays on the current board, `playable`, are
+// those its standing plays place (path_move_lists_standing_tile_types), those
+// of the plays from the anchors that reach a square changed since
+// (generate_tiles_played_in_lanes over the lanes and squares it reports), and
+// those of its single-tile plays, `single`. Counts in *num_standing the
+// positions where only standing plays placed some tile type.
+static void assert_standing_tile_types(const PathMoveLists *lists, Game *game,
+                                       MoveList *move_list, int side,
+                                       uint64_t playable, uint64_t single,
+                                       int *num_standing) {
+  const Rack *rack = player_get_rack(game_get_player(game, side));
+  uint64_t rack_types = 0;
+  for (int ml = 0; ml < rack_get_dist_size(rack); ml++) {
+    if (rack_get_letter(rack, ml) > 0) {
+      rack_types |= (uint64_t)1 << ml;
+    }
+  }
+  const bool side_is_on_turn = side == game_get_player_on_turn_index(game);
+  uint64_t touched = 0;
+  uint32_t hits[PATH_MOVE_LISTS_NUM_LANES];
+  const uint64_t standing = path_move_lists_standing_tile_types(
+      lists, side_is_on_turn, rack, rack_types, &touched, hits);
+  assert((standing & ~playable) == 0);
+  const uint64_t in_lanes =
+      touched == 0 ? 0
+                   : side_tiles_played(game, move_list, side, touched, hits);
+  assert((standing | in_lanes | single) == playable);
+  if ((standing & ~(in_lanes | single)) != 0) {
+    (*num_standing)++;
+  }
+  // Asked about fewer tile types, it answers the same about those.
+  const uint64_t wanted = rack_types & ~single;
+  uint64_t wanted_touched = 0;
+  uint32_t wanted_hits[PATH_MOVE_LISTS_NUM_LANES];
+  assert(path_move_lists_standing_tile_types(
+             lists, side_is_on_turn, rack, wanted, &wanted_touched,
+             wanted_hits) == (standing & wanted));
+  assert(wanted_touched == touched);
+  assert(memcmp(wanted_hits, hits, sizeof(hits)) == 0);
+}
+
 // generate_tiles_played_in_lanes along random paths. Over every lane with
 // every square changed it is the whole-board generation. Over the last move's
 // changed squares (path_move_lists_last_move_hits), for each side: every tile
 // type it reports is playable, and a tile type that had no play before the
 // move but has one after has a single-tile play or one it reports -- what the
-// endgame's stuck-tile check relies on.
+// endgame's stuck-tile check relies on. So is what
+// path_move_lists_standing_tile_types reports, with the lists built at some
+// positions and not at others (see assert_standing_tile_types).
 static void test_tiles_played_in_lanes_random_paths(void) {
   // Endgames where the opponent holds tiles with no play.
   const char *positions[TILES_PLAYED_NUM_POSITIONS] = {
@@ -718,6 +763,7 @@ static void test_tiles_played_in_lanes_random_paths(void) {
   PathMoveLists *lists = path_move_lists_create();
   uint64_t rng = 0x2545F4914F6CDD1DULL;
   int num_revealed = 0;
+  int num_standing = 0;
   for (int position_idx = 0; position_idx < TILES_PLAYED_NUM_POSITIONS;
        position_idx++) {
     load_cgp_or_die(game, positions[position_idx]);
@@ -726,6 +772,11 @@ static void test_tiles_played_in_lanes_random_paths(void) {
     for (int path_idx = 0; path_idx < TILES_PLAYED_PATHS_PER_POSITION;
          path_idx++) {
       path_move_lists_reset(lists);
+      for (int side = 0; side < 2; side++) {
+        game_set_player_on_turn_index(game, side);
+        generate_moves(&args);
+        path_move_lists_set_root(lists, side, move_list);
+      }
       game_set_player_on_turn_index(game, 0);
       MoveUndo undos[BEST_PLAY_MAX_PATH_LENGTH];
       int length = 0;
@@ -744,6 +795,16 @@ static void test_tiles_played_in_lanes_random_paths(void) {
         const SmallMove chosen = *move_list->small_moves[pick];
         make_path_move(game, lists, move_list, &chosen, &undos[length]);
         length++;
+        // Three positions in four get their list, where the lists up the path
+        // allow it, so that the standing plays are read from a list at every
+        // distance up the path, the root lists included.
+        if (game_get_game_end_reason(game) == GAME_END_REASON_NONE &&
+            (path_idx + length) % 4 != 0 &&
+            (length <= 2 ||
+             path_move_lists_slot_is_current(lists, length - 2))) {
+          const SmallMove *derived = NULL;
+          path_move_lists_moves_at(lists, &args, &derived);
+        }
         for (int side = 0; side < 2; side++) {
           const uint64_t after =
               side_tiles_played(game, move_list, side, 0, NULL);
@@ -759,6 +820,8 @@ static void test_tiles_played_in_lanes_random_paths(void) {
           if ((revealed & ~single) != 0) {
             num_revealed++;
           }
+          assert_standing_tile_types(lists, game, move_list, side, after,
+                                     single, &num_standing);
         }
       }
       while (length > 0) {
@@ -771,6 +834,7 @@ static void test_tiles_played_in_lanes_random_paths(void) {
     game_destroy(snapshot);
   }
   assert(num_revealed >= TILES_PLAYED_MIN_REVEALED);
+  assert(num_standing >= TILES_PLAYED_MIN_STANDING);
   path_move_lists_destroy(lists);
   small_move_list_destroy(move_list);
   game_destroy(game);
