@@ -22,4 +22,11 @@ typedef enum {
 // commit with the phonies; otherwise the editor returns to the move.
 void tui_cell_editor_phony_resolve(TuiGameState *state, bool keep);
 
+// Enters `move`, a play as the analysis panel shows it, as annotated
+// turn `idx`'s play and commits it, as typing it over the turn's rack and
+// pressing Enter would; the editor moves on to the next turn. Only for a
+// turn not played yet whose rack is entered. Returns whether the play
+// was entered.
+bool tui_cell_editor_enter_play(TuiGameState *state, int idx, const char *move);
+
 #endif

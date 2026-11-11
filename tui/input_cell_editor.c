@@ -16,6 +16,7 @@
 #include "render_common.h"
 #include "tile_input.h"
 #include "tui_history_edit.h"
+#include "tui_ui_types.h"
 #include <notcurses/notcurses.h>
 #include <pthread.h>
 #include <stdbool.h>
@@ -447,22 +448,43 @@ static bool cell_editor_commit(TuiGameState *state, int idx, bool field_move) {
       }
     }
   }
-  // If the rack commit followed a *legal* placement, advance
-  // the annotation to the next turn: play the move on the
-  // engine, tag tile owners so placed tiles render in their
+  // If the rack commit followed a *legal* placement, exchange or
+  // pass, advance the annotation to the next turn: play the move on
+  // the engine, tag tile owners so placed tiles render in their
   // player's permanent color, append a fresh pending entry
   // for the OTHER player, and re-open the editor on it. If
   // the play wasn't legal (score < 0, partial, bare word,
   // invalid), fall through to the existing "just exit edit
   // mode" behavior — the user keeps editing the same turn.
-  // Exchanges and passes take that path too: the engine's
-  // exchange draws replacement tiles, which the annotator owns.
+  const bool placement = state->edit_move_kind == TUI_EDIT_MOVE_KIND_PLACEMENT;
+  const bool exchange_or_pass =
+      state->edit_move_kind == TUI_EDIT_MOVE_KIND_EXCHANGE ||
+      state->edit_move_kind == TUI_EDIT_MOVE_KIND_PASS;
   if (field_move == false && state->edit_preview_move_valid &&
       state->edit_preview_move != NULL && state->edit_move_score >= 0 &&
-      state->edit_move_kind == TUI_EDIT_MOVE_KIND_PLACEMENT) {
-    if (phony_gate(state, idx, TUI_PHONY_ACTION_ENTER)) {
+      (placement || exchange_or_pass)) {
+    if (placement && phony_gate(state, idx, TUI_PHONY_ACTION_ENTER)) {
       pthread_mutex_unlock(&state->mutex);
       return true;
+    }
+    if (exchange_or_pass) {
+      // An exchange or pass is played by the history replay instead:
+      // play_move_without_drawing_tiles refills an exchanger's rack
+      // from the bag, while the replay keeps the leave the annotator
+      // recorded and puts the exchanged tiles back in the bag. The
+      // replay leaves the engine after this turn, with the next player
+      // on turn. A turn it rejects stays open for editing, its error
+      // shown inline.
+      if (idx < state->history_count) {
+        state->history[idx].pending = false;
+      }
+      tui_game_state_revalidate_history(state);
+      if (idx < state->history_count &&
+          state->history[idx].error_str[0] != '\0') {
+        state->edit_history_idx = -1;
+        pthread_mutex_unlock(&state->mutex);
+        return true;
+      }
     }
     const int playing_idx =
         (idx < state->history_count) ? state->history[idx].player_idx : 0;
@@ -473,12 +495,14 @@ static bool cell_editor_commit(TuiGameState *state, int idx, bool field_move) {
     // player's rack holds only their leave; the next turn's
     // editor sees that leave when sync_player_rack_to_editor
     // checks the live rack, and shows it in the pill.
-    play_move_without_drawing_tiles(state->edit_preview_move, state->game);
+    if (placement) {
+      play_move_without_drawing_tiles(state->edit_preview_move, state->game);
+    }
     // Tag the placed-tile squares with the player_idx so the
     // per-cell pixel plane picks the correct tile_bg color.
     // Mirrors the bot-worker path at bot_worker.c:918-933.
-    if (move_get_type(state->edit_preview_move) ==
-        GAME_EVENT_TILE_PLACEMENT_MOVE) {
+    if (placement && move_get_type(state->edit_preview_move) ==
+                         GAME_EVENT_TILE_PLACEMENT_MOVE) {
       const int dir = move_get_dir(state->edit_preview_move);
       int r = move_get_row_start(state->edit_preview_move);
       int c = move_get_col_start(state->edit_preview_move);
@@ -595,8 +619,72 @@ static bool cell_editor_commit(TuiGameState *state, int idx, bool field_move) {
   // Exit edit mode but keep the buffers around so a
   // re-open lands on whatever the user was typing.
   state->edit_history_idx = -1;
+  // A rack entered without a play still saves the turn's position, so
+  // it can be analyzed.
+  if (!field_move && state->app_mode == TUI_APP_MODE_ANNOTATE) {
+    tui_game_state_revalidate_history(state);
+  }
   pthread_mutex_unlock(&state->mutex);
   return true;
+}
+
+// Writes `move`, as the analysis panel shows it ("8D GRA(Z)E",
+// "(exch CCDLV)", "pass"), the way it is typed into the MOVE field.
+static void analysis_move_as_typed(const char *move, char *out,
+                                   size_t out_size) {
+  const char *exch_prefix = "(exch ";
+  if (strncmp(move, exch_prefix, strlen(exch_prefix)) == 0) {
+    const char *tiles = move + strlen(exch_prefix);
+    const char *close_paren = strchr(tiles, ')');
+    const int tiles_len =
+        close_paren != NULL ? (int)(close_paren - tiles) : (int)strlen(tiles);
+    (void)snprintf(out, out_size, "-%.*s", tiles_len, tiles);
+    return;
+  }
+  if (strcmp(move, "(Pass)") == 0) {
+    (void)snprintf(out, out_size, "pass");
+    return;
+  }
+  (void)snprintf(out, out_size, "%s", move);
+}
+
+bool tui_cell_editor_enter_play(TuiGameState *state, int idx,
+                                const char *move) {
+  pthread_mutex_lock(&state->mutex);
+  if (state->app_mode != TUI_APP_MODE_ANNOTATE || idx < 0 ||
+      idx >= state->history_count || !state->history[idx].pending ||
+      state->history[idx].rack_str[0] == '\0') {
+    pthread_mutex_unlock(&state->mutex);
+    return false;
+  }
+  char typed[sizeof(state->edit_move_buf)];
+  analysis_move_as_typed(move, typed, sizeof(typed));
+  // Fill the turn's editor as if the play had been typed over its saved
+  // rack, then commit it as Enter on the move and then the rack do.
+  state->edit_history_idx = idx;
+  state->edit_field = TUI_EDIT_FIELD_MOVE;
+  tui_game_state_seed_edit_move(state, typed);
+  (void)snprintf(state->edit_rack_buf, sizeof(state->edit_rack_buf), "%s",
+                 state->history[idx].rack_str);
+  state->edit_rack_len = (int)strlen(state->edit_rack_buf);
+  state->edit_rack_cursor = state->edit_rack_len;
+  state->edit_rack_user_modified = true;
+  state->edit_rack_carryover[0] = '\0';
+  state->edit_leave_buf[0] = '\0';
+  state->edit_leave_len = 0;
+  state->edit_leave_cursor = 0;
+  state->focused_panel = TUI_FOCUS_HISTORY;
+  pthread_mutex_unlock(&state->mutex);
+  (void)cell_editor_advance_to_rack(state, idx);
+  (void)cell_editor_commit(state, idx, /*field_move=*/false);
+  pthread_mutex_lock(&state->mutex);
+  const bool entered =
+      idx < state->history_count && !state->history[idx].pending;
+  if (!entered) {
+    tui_game_state_notice(state, "couldn't enter that play");
+  }
+  pthread_mutex_unlock(&state->mutex);
+  return entered;
 }
 
 // Inserts a printable key at the cursor of the active field (MOVE, RACK,

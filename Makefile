@@ -453,7 +453,10 @@ endif
 
 TUI_ENGINE_CFLAGS := $(TUI_OPT) $(TUI_LTO) -march=native -g $(TUI_NDEBUG) -Wall -Wno-trigraphs -DBOARD_DIM=$(BOARD_DIM) -DRACK_SIZE=$(RACK_SIZE) $(TUI_ALIGN_CFLAGS) $(TUI_SAN) -MMD -MP
 TUI_CFLAGS := $(TUI_OPT) $(TUI_LTO) -march=native -g $(TUI_NDEBUG) -Wall -Wno-trigraphs -Wextra -Wshadow -Wstrict-prototypes -Werror -DBOARD_DIM=$(BOARD_DIM) -DRACK_SIZE=$(RACK_SIZE) $(TUI_ALIGN_CFLAGS) $(TUI_SAN) -MMD -MP
-TUI_LDFLAGS := -pthread $(TUI_LTO) $(TUI_ALIGN_LDFLAGS) $(TUI_SAN)
+# The link's align-all-functions is for functions made at an LTO link.
+# Without LTO (TUI_LTO=), -falign-functions aligns every function, and
+# GNU ld rejects the -plugin-opt form with no LTO plugin loaded.
+TUI_LDFLAGS := -pthread $(TUI_LTO) $(if $(TUI_LTO),$(TUI_ALIGN_LDFLAGS)) $(TUI_SAN)
 
 # The release TUI is profile-guided like `make release`: magpie_tui trains
 # magpie_pgo_train on TUI_PGO_WORKLOAD (static, the release's workload) and
@@ -575,6 +578,21 @@ TUI_TESTED_OBJ := $(TUI_OBJ_DIR)/$(TUI_DIR)/tile_input.o
 
 magpie_tui_test: $(TUI_OBJ_SRC) $(TUI_TESTED_OBJ) $(TUI_TEST_OBJ) | $(BIN_DIR)
 	$(CC) $(TUI_LDFLAGS) $^ $(LDLIBS) -o $(BIN_DIR)/$@
+
+# Tests that drive the TUI's input handling on a game state. They link every
+# TUI module but main, so they need notcurses and freetype as magpie_tui does.
+# Run from the repo root.
+TUI_APP_TEST_SRC := $(wildcard $(TUI_DIR)/test/app/*.c)
+TUI_APP_TEST_OBJ := $(TUI_APP_TEST_SRC:$(TUI_DIR)/%.c=$(TUI_OBJ_DIR)/$(TUI_DIR)/%.o)
+TUI_APP_TESTED_OBJ := $(filter-out $(TUI_OBJ_DIR)/$(TUI_DIR)/main.o,$(TUI_OBJ_TUI)) $(TUI_MINIAUDIO_OBJ)
+
+magpie_tui_app_test: $(TUI_OBJ_SRC) $(TUI_APP_TESTED_OBJ) $(TUI_APP_TEST_OBJ) | $(BIN_DIR)
+	$(CC) $(TUI_LDFLAGS) $^ $(LDLIBS) $(NOTCURSES_LDLIBS) $(FREETYPE_LDLIBS) -lz -o $(BIN_DIR)/$@
+
+# Before the rule for test/, which make 3.81 would otherwise pick first.
+$(TUI_OBJ_DIR)/$(TUI_DIR)/test/app/%.o: $(TUI_DIR)/test/app/%.c | $(TUI_OBJ_DIR)/$(TUI_DIR)
+	@mkdir -p $(dir $@)
+	$(CC) $(TUI_CFLAGS) $(NOTCURSES_CFLAGS) $(FREETYPE_CFLAGS) -c $< -o $@
 
 $(TUI_OBJ_DIR)/$(TUI_DIR)/test/%.o: $(TUI_DIR)/test/%.c | $(TUI_OBJ_DIR)/$(TUI_DIR)
 	@mkdir -p $(dir $@)

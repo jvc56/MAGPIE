@@ -37,6 +37,18 @@ bool resume_active_for_cursor(const TuiGameState *state) {
   return atomic_load(&mut->endgame_results_active) &&
          atomic_load(&mut->endgame_results_turn_idx) == state->history_cursor;
 }
+const TuiHistoryEntry *cursor_saved_analysis_entry(const TuiGameState *state) {
+  if (state->history_cursor < 0 ||
+      state->history_cursor >= state->history_count ||
+      resume_active_for_cursor(state)) {
+    return NULL;
+  }
+  const TuiHistoryEntry *entry = &state->history[state->history_cursor];
+  if (entry->pending && state->app_mode != TUI_APP_MODE_ANNOTATE) {
+    return NULL;
+  }
+  return entry->analysis_snapshot.valid ? entry : NULL;
+}
 // The game the analysis panel should read positions from: the
 // resume worker's reconstructed past position while a "/resume" is
 // running, the live game otherwise.
@@ -346,15 +358,9 @@ void populate_frame_analysis_rows(TuiGameState *state) {
   // While the "/resume" worker is recomputing the cursored turn, the
   // live (ticking) results take precedence over the entry's frozen
   // snapshot.
-  const bool resuming_cursor = resume_active_for_cursor(state);
-  const TuiAnalysisSnapshot *snap = NULL;
-  if (!resuming_cursor && state->history_cursor >= 0 &&
-      state->history_cursor < state->history_count) {
-    const TuiHistoryEntry *e = &state->history[state->history_cursor];
-    if (!e->pending && e->analysis_snapshot.valid) {
-      snap = &e->analysis_snapshot;
-    }
-  }
+  const TuiHistoryEntry *saved_entry = cursor_saved_analysis_entry(state);
+  const TuiAnalysisSnapshot *snap =
+      saved_entry != NULL ? &saved_entry->analysis_snapshot : NULL;
   if (snap != NULL) {
     const int n =
         snap->num_rows < ANALYSIS_ROW_CAP ? snap->num_rows : ANALYSIS_ROW_CAP;

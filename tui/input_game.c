@@ -2,6 +2,7 @@
 
 #include "commands.h"
 #include "game_state.h"
+#include "input_cell_editor.h"
 #include "input_settings.h"
 #include "move_entry.h"
 #include "panel_menu.h"
@@ -391,6 +392,24 @@ bool tui_input_game(TuiGameState *state, TuiUiState *ui, TuiSession *session,
     pthread_mutex_lock(&state->mutex);
     tui_board_entry_begin_keyboard(state);
     pthread_mutex_unlock(&state->mutex);
+  } else if (state->focused_panel == TUI_FOCUS_ANALYSIS &&
+             (key == NCKEY_ENTER || key == '\r' || key == '\n') &&
+             state->app_mode == TUI_APP_MODE_ANNOTATE) {
+    // Enter on a play in the analysis of a turn being annotated enters
+    // it as that turn's play.
+    pthread_mutex_lock(&state->mutex);
+    const int row_idx = state->analysis_cursor;
+    const int turn_idx = state->history_cursor;
+    char move[sizeof(state->last_rendered_analysis_rows[0].move)];
+    move[0] = '\0';
+    if (row_idx >= 0 && row_idx < state->last_rendered_analysis_row_count) {
+      (void)snprintf(move, sizeof(move), "%s",
+                     state->last_rendered_analysis_rows[row_idx].move);
+    }
+    pthread_mutex_unlock(&state->mutex);
+    if (move[0] != '\0') {
+      (void)tui_cell_editor_enter_play(state, turn_idx, move);
+    }
   } else if (state->focused_panel == TUI_FOCUS_ANALYSIS &&
              (key == NCKEY_UP || key == NCKEY_DOWN || key == NCKEY_LEFT ||
               key == NCKEY_RIGHT || key == 'k' || key == 'K' || key == 'j' ||

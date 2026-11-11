@@ -1208,6 +1208,82 @@ void tui_history_move_to_engine(const char *display, char *out,
   canonicalize_history_move(display, out, out_size);
 }
 
+// Drops `entry`'s saved analysis, which was of a position it no longer
+// has.
+static void clear_entry_analysis(TuiHistoryEntry *entry) {
+  memset(&entry->analysis_snapshot, 0, sizeof(entry->analysis_snapshot));
+  if (entry->sim_results_saved != NULL) {
+    sim_results_destroy(entry->sim_results_saved);
+    entry->sim_results_saved = NULL;
+  }
+  free(entry->endgame_moves_saved);
+  entry->endgame_moves_saved = NULL;
+  entry->endgame_moves_saved_count = 0;
+  free(entry->static_moves_saved);
+  entry->static_moves_saved = NULL;
+  entry->static_moves_saved_count = 0;
+}
+
+// Sets `entry`'s saved position (board, on-turn rack, CGP and bag size)
+// to the engine's, the position its turn is played from, and drops its
+// analysis if that changes the position. The replay sets racks without
+// drawing them, so the engine's bag is too full; the bag size comes from
+// loading the CGP into `scratch`, which derives the bag from the board
+// and racks.
+static void refresh_entry_position(const TuiGameState *state,
+                                   TuiHistoryEntry *entry, Game *scratch) {
+  char *cgp = game_get_cgp(state->game, true);
+  if (cgp == NULL) {
+    return;
+  }
+  if (strcmp(entry->cgp_before, cgp) != 0) {
+    clear_entry_analysis(entry);
+  }
+  (void)snprintf(entry->cgp_before, sizeof(entry->cgp_before), "%s", cgp);
+  free(cgp);
+  if (entry->board_before != NULL) {
+    board_destroy(entry->board_before);
+  }
+  entry->board_before = board_duplicate(game_get_board(state->game));
+  if (entry->rack_before != NULL) {
+    rack_destroy(entry->rack_before);
+    entry->rack_before = NULL;
+  }
+  const Rack *rack =
+      player_get_rack(game_get_player(state->game, entry->player_idx));
+  if (rack_get_total_letters(rack) > 0) {
+    entry->rack_before = rack_duplicate(rack);
+  }
+  ErrorStack *err = error_stack_create();
+  game_load_cgp(scratch, entry->cgp_before, err);
+  entry->bag_before_known = error_stack_is_empty(err);
+  if (entry->bag_before_known) {
+    entry->bag_before = tui_position_effective_bag(scratch);
+  }
+  error_stack_destroy(err);
+}
+
+// refresh_entry_position for a turn not played yet, with the rack
+// entered so far. On the last turn the engine keeps that rack, so the
+// Rack panel, pills and Bag show it, as they do while it is typed.
+// Before a later turn, the engine gets the player's leave back, which
+// that turn's replay carries on from.
+static void refresh_pending_entry_position(const TuiGameState *state,
+                                           TuiHistoryEntry *entry,
+                                           Game *scratch, bool last_turn) {
+  Rack *rack = player_get_rack(game_get_player(state->game, entry->player_idx));
+  Rack *leave = rack_duplicate(rack);
+  const bool rack_set =
+      rack_set_to_string(state->ld, rack, entry->rack_str) > 0;
+  if (rack_set) {
+    refresh_entry_position(state, entry, scratch);
+  }
+  if (!rack_set || !last_turn) {
+    rack_copy(rack, leave);
+  }
+  rack_destroy(leave);
+}
+
 // Shared replay core. Resets the engine and applies committed
 // turns in [0, up_to) (up_to < 0 means "all of history"). When
 // record_errors is true, clears every entry's error_str first and
@@ -1240,9 +1316,23 @@ static void replay_history_prefix(TuiGameState *state, int up_to,
   const int ld_size = ld_get_size(state->ld);
   int drawn[MACHINE_LETTER_MAX_VALUE];
   memset(drawn, 0, sizeof(drawn));
+  // An annotated turn's position is saved when the turn opens, before
+  // its rack is entered, and an edit to an earlier turn changes it, so
+  // each replayed turn refreshes it, including a turn still being
+  // entered once it has a rack, so it can be analyzed before its play
+  // is. Elsewhere it was saved with both racks as dealt, which the
+  // replay doesn't know.
+  Game *scratch = record_errors && state->app_mode == TUI_APP_MODE_ANNOTATE
+                      ? game_duplicate(state->game)
+                      : NULL;
   for (int idx = 0; idx < limit; idx++) {
     TuiHistoryEntry *e = &state->history[idx];
     if (e->pending) {
+      if (scratch != NULL && e->rack_str[0] != '\0' &&
+          game_get_player_on_turn_index(state->game) == e->player_idx) {
+        refresh_pending_entry_position(state, e, scratch,
+                                       idx == state->history_count - 1);
+      }
       continue;
     }
     // Seed the on-turn player's rack from the entry's rack_str.
@@ -1347,6 +1437,10 @@ static void replay_history_prefix(TuiGameState *state, int up_to,
       }
       break;
     }
+    if (scratch != NULL &&
+        game_get_player_on_turn_index(state->game) == e->player_idx) {
+      refresh_entry_position(state, e, scratch);
+    }
     // Normalize display notation → engine canonical, validate. A play
     // that was challenged off cost its player the turn and left the
     // board and rack as they were, which is a pass.
@@ -1440,6 +1534,15 @@ static void replay_history_prefix(TuiGameState *state, int up_to,
       Bag *bag = game_get_bag(state->game);
       const int draw_idx =
           game_get_player_draw_index(state->game, e->player_idx);
+      // The engine also put the exchanged tiles in the bag. The replay
+      // sets racks without drawing them, so the bag never gave those
+      // tiles out and has no room for them: take them out again, before
+      // the refill goes back in.
+      for (int tile_idx = 0; tile_idx < move_get_tiles_played(applied_move);
+           tile_idx++) {
+        (void)bag_draw_letter(bag, move_get_tile(applied_move, tile_idx),
+                              draw_idx);
+      }
       for (int ml = 0; ml < ld_size && ml < MAX_ALPHABET_SIZE; ml++) {
         while ((int)rack_get_letter(rack, (MachineLetter)ml) >
                exchange_leave[ml]) {
@@ -1482,6 +1585,9 @@ static void replay_history_prefix(TuiGameState *state, int up_to,
       validated_moves_destroy(vms);
     }
     error_stack_destroy(err);
+  }
+  if (scratch != NULL) {
+    game_destroy(scratch);
   }
 }
 

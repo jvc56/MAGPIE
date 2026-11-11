@@ -1812,7 +1812,14 @@ const char *tui_analysis_unavailable_reason(const TuiGameState *state,
     return "select a turn in History first";
   }
   const TuiHistoryEntry *entry = &state->history[turn_idx];
-  if (entry->pending || entry->cgp_before[0] == '\0') {
+  // A turn being annotated can be analyzed once its rack is entered,
+  // before its play is: the history replay saves its position then.
+  if (entry->pending && state->app_mode == TUI_APP_MODE_ANNOTATE &&
+      entry->rack_str[0] == '\0') {
+    return "enter this turn's rack first";
+  }
+  if ((entry->pending && state->app_mode != TUI_APP_MODE_ANNOTATE) ||
+      entry->cgp_before[0] == '\0') {
     return "this turn has no position to analyze";
   }
   if (action == TUI_ANALYSIS_SOLVE) {
