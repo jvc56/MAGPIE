@@ -5,6 +5,7 @@
 #include "../src/def/game_defs.h"
 #include "../src/def/letter_distribution_defs.h"
 #include "../src/def/move_defs.h"
+#include "../src/def/rack_defs.h"
 #include "../src/ent/bag.h"
 #include "../src/ent/board.h"
 #include "../src/ent/endgame_results.h"
@@ -19,6 +20,7 @@
 #include "../src/impl/endgame.h"
 #include "../src/impl/gameplay.h"
 #include "../src/impl/move_gen.h"
+#include "../src/impl/move_gen_base.h"
 #include "../src/impl/path_move_lists.h"
 #include "../src/util/io_util.h"
 #include "test_util.h"
@@ -973,6 +975,77 @@ static void test_best_play_pass_path(int empty_side) {
   config_destroy(config);
 }
 
+// anchor_span_reach from the lane's `empty` bits, a rack tile at a time.
+static uint32_t anchor_span_reach_by_steps(uint32_t empty, uint32_t blocked,
+                                           int col, int limit, int spare) {
+  const uint32_t right_of_col = ~(((uint32_t)2 << col) - 1);
+  const uint32_t left_of_col = ((uint32_t)1 << col) - 1;
+  uint32_t right_empties = empty & right_of_col;
+  uint32_t left_empties = empty & left_of_col;
+  for (int tile_idx = 0; tile_idx < spare; tile_idx++) {
+    right_empties &= right_empties - 1;
+    if (left_empties != 0) {
+      left_empties &= ~((uint32_t)1 << highest_set_bit_index(left_empties));
+    }
+  }
+  right_empties |= blocked & right_of_col;
+  left_empties |= blocked & left_of_col;
+  const int right = right_empties != 0 ? lowest_set_bit_index(right_empties) - 1
+                                       : BOARD_DIM - 1;
+  int left = left_empties != 0 ? highest_set_bit_index(left_empties) + 1 : 0;
+  if (left <= limit) {
+    left = limit + 1;
+  }
+  return (((uint32_t)2 << right) - 1) & ~(((uint32_t)1 << left) - 1);
+}
+
+enum {
+  SPAN_REACH_NUM_LANES = 5000,
+  SPAN_REACH_DENSE_BLOCKS_ONE_IN = 4,
+};
+
+// anchor_span_reach reads where a play must stop from the list of the lane's
+// empty columns. Over random lanes, and every anchor column, leftward limit
+// and rack size, that is where taking the rack's tiles off the lane's empty
+// squares one at a time stops.
+static void test_anchor_span_reach(void) {
+  uint64_t rng = 0xD1B54A32D192ED03ULL;
+  const uint32_t lane_squares = ((uint32_t)1 << BOARD_DIM) - 1;
+  for (int lane_idx = 0; lane_idx < SPAN_REACH_NUM_LANES; lane_idx++) {
+    const uint32_t empty = (uint32_t)next_random(&rng) & lane_squares;
+    // Usually a quarter of the empty squares take no rack tile, sometimes
+    // half.
+    uint32_t blocked = empty & (uint32_t)next_random(&rng);
+    if (lane_idx % SPAN_REACH_DENSE_BLOCKS_ONE_IN != 0) {
+      blocked &= (uint32_t)next_random(&rng);
+    }
+    int8_t empty_cols[LANE_SPAN_PAD + BOARD_DIM + LANE_SPAN_PAD];
+    int empties_left_of[BOARD_DIM];
+    memset(empty_cols, -1, LANE_SPAN_PAD);
+    int lane_empties = 0;
+    for (int col = 0; col < BOARD_DIM; col++) {
+      empties_left_of[col] = lane_empties;
+      if (((empty >> col) & 1) != 0) {
+        empty_cols[LANE_SPAN_PAD + lane_empties] = (int8_t)col;
+        lane_empties++;
+      }
+    }
+    memset(&empty_cols[LANE_SPAN_PAD + lane_empties], BOARD_DIM, LANE_SPAN_PAD);
+    for (int col = 0; col < BOARD_DIM; col++) {
+      const int anchor_is_empty = (int)((empty >> col) & 1);
+      for (int limit = -1; limit <= col; limit++) {
+        for (int rack_tiles = 1; rack_tiles <= RACK_SIZE; rack_tiles++) {
+          const int spare = rack_tiles - anchor_is_empty;
+          assert(anchor_span_reach(empty_cols, empties_left_of[col],
+                                   anchor_is_empty, blocked, col, limit,
+                                   spare) ==
+                 anchor_span_reach_by_steps(empty, blocked, col, limit, spare));
+        }
+      }
+    }
+  }
+}
+
 void test_path_move_lists(void) {
   test_pass_path(1);
   test_pass_path(0);
@@ -982,4 +1055,5 @@ void test_path_move_lists(void) {
   test_best_play_pass_path(0);
   test_best_play_random_paths();
   test_tiles_played_in_lanes_random_paths();
+  test_anchor_span_reach();
 }

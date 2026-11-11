@@ -4216,50 +4216,6 @@ void gen_record_pass(MoveGen *gen) {
   }
 }
 
-// Index of the highest set bit of a nonzero bitset, following
-// lowest_set_bit_index's guarded-intrinsic pattern.
-static inline int highest_set_bit_index(uint32_t bitset) {
-#if defined(__has_builtin) && __has_builtin(__builtin_clz)
-  return 31 - __builtin_clz(bitset);
-#else
-  int index = 31;
-  while ((bitset & ((uint32_t)1 << index)) == 0) {
-    index--;
-  }
-  return index;
-#endif
-}
-
-// The lane positions a play from the anchor at `col` can span: right of
-// `limit` (the anchor's leftward limit, or -1 for none), and on either side
-// of the anchor no further than `spare` of the lane's `empty` squares, plus
-// the tiles it plays through, and short of any empty square in `blocked`,
-// where no rack tile fits.
-static inline uint32_t anchor_span_reach(uint32_t empty, uint32_t blocked,
-                                         int col, int limit, int spare) {
-  const uint32_t right_of_col = ~(((uint32_t)2 << col) - 1);
-  const uint32_t left_of_col = ((uint32_t)1 << col) - 1;
-  uint32_t right_empties = empty & right_of_col;
-  uint32_t left_empties = empty & left_of_col;
-  for (int tile_idx = 0; tile_idx < spare; tile_idx++) {
-    right_empties &= right_empties - 1;
-    if (left_empties != 0) {
-      left_empties &= ~((uint32_t)1 << highest_set_bit_index(left_empties));
-    }
-  }
-  // The nearest empty square each way that the rack cannot fill: one past
-  // the tiles it has, or a blocked one.
-  right_empties |= blocked & right_of_col;
-  left_empties |= blocked & left_of_col;
-  const int right = right_empties != 0 ? lowest_set_bit_index(right_empties) - 1
-                                       : BOARD_DIM - 1;
-  int left = left_empties != 0 ? highest_set_bit_index(left_empties) + 1 : 0;
-  if (left <= limit) {
-    left = limit + 1;
-  }
-  return (((uint32_t)2 << right) - 1) & ~(((uint32_t)1 << left) - 1);
-}
-
 // Records, by the generation's record type, the plays of lane `row` of the
 // current gen->dir from the anchors whose plays may span a position in `hit`,
 // scanning the anchors in board order (see generate_small_moves_in_lanes).
@@ -4272,27 +4228,37 @@ static void gen_record_lane_plays_reaching(MoveGen *gen, int row,
                                            uint32_t *generated) {
   gen_load_lane(gen, row);
   const uint64_t rack_cross_set = gen->rack_cross_set;
+  assert(rack_tiles >= 1 && rack_tiles <= RACK_SIZE);
   uint32_t lane_anchors = 0;
   uint32_t empty = 0;
   uint32_t blocked = 0;
+  // What anchor_span_reach reads: the lane's empty columns, padded each way,
+  // and how many of them lie left of each column.
+  int8_t empty_cols[LANE_SPAN_PAD + BOARD_DIM + LANE_SPAN_PAD];
+  uint8_t empties_left_of[BOARD_DIM];
+  memset(empty_cols, -1, LANE_SPAN_PAD);
+  int lane_empties = 0;
+  // Every column does the same work whatever it holds, so that the scan has
+  // no branch on the lane's squares.
   for (int col = 0; col < BOARD_DIM; col++) {
-    const uint32_t col_bit = (uint32_t)1 << col;
-    if (gen_cache_get_is_anchor(gen, col)) {
-      lane_anchors |= col_bit;
+    const uint32_t is_anchor = gen_cache_get_is_anchor(gen, col) ? 1 : 0;
+    const uint32_t is_empty = gen_cache_is_empty(gen, col) ? 1 : 0;
+    // Read as recursive_gen_small reads it: a cross-set of bit 0 alone
+    // admits no tile.
+    uint64_t possible_letters_here = gen_cache_get_cross_set(gen, col);
+    if (possible_letters_here == 1) {
+      possible_letters_here = 0;
     }
-    if (gen_cache_is_empty(gen, col)) {
-      empty |= col_bit;
-      // Read as recursive_gen_small reads it: a cross-set of bit 0 alone
-      // admits no tile.
-      uint64_t possible_letters_here = gen_cache_get_cross_set(gen, col);
-      if (possible_letters_here == 1) {
-        possible_letters_here = 0;
-      }
-      if ((possible_letters_here & rack_cross_set) == 0) {
-        blocked |= col_bit;
-      }
-    }
+    const uint32_t is_blocked =
+        is_empty & ((possible_letters_here & rack_cross_set) == 0 ? 1 : 0);
+    lane_anchors |= is_anchor << col;
+    empty |= is_empty << col;
+    blocked |= is_blocked << col;
+    empties_left_of[col] = (uint8_t)lane_empties;
+    empty_cols[LANE_SPAN_PAD + lane_empties] = (int8_t)col;
+    lane_empties += (int)is_empty;
   }
+  memset(&empty_cols[LANE_SPAN_PAD + lane_empties], BOARD_DIM, LANE_SPAN_PAD);
   uint32_t lane_generated = 0;
   int last_anchor_col = INITIAL_LAST_ANCHOR_COL;
   for (uint32_t remaining = lane_anchors; remaining != 0;
@@ -4301,12 +4267,32 @@ static void gen_record_lane_plays_reaching(MoveGen *gen, int row,
     const uint32_t anchor_bit = (uint32_t)1 << col;
     const int limit =
         last_anchor_col == INITIAL_LAST_ANCHOR_COL ? -1 : last_anchor_col;
-    const int spare = rack_tiles - ((empty & anchor_bit) != 0 ? 1 : 0);
+    const int anchor_is_empty = (int)((empty >> col) & 1);
+    const int spare = rack_tiles - anchor_is_empty;
     // A blocked anchor square anchors no play; one in `hit` is reached.
-    if ((blocked & anchor_bit) == 0 &&
-        ((hit & anchor_bit) != 0 ||
-         (anchor_span_reach(empty, blocked, col, limit, spare) & hit) != 0)) {
-      lane_generated |= anchor_bit;
+    if ((blocked & anchor_bit) == 0) {
+      const uint32_t reach =
+          anchor_span_reach(empty_cols, empties_left_of[col], anchor_is_empty,
+                            blocked, col, limit, spare);
+      if (((reach | anchor_bit) & hit) != 0) {
+        lane_generated |= anchor_bit;
+      }
+    }
+    last_anchor_col = col;
+    last_anchor_col += 1 - anchor_is_empty;
+  }
+  *anchors = lane_anchors;
+  *generated = lane_generated;
+  if (lane_generated == 0) {
+    return;
+  }
+
+  last_anchor_col = INITIAL_LAST_ANCHOR_COL;
+  for (uint32_t remaining = lane_anchors; remaining != 0;
+       remaining &= remaining - 1) {
+    const int col = lowest_set_bit_index(remaining);
+    const uint32_t anchor_bit = (uint32_t)1 << col;
+    if ((lane_generated & anchor_bit) != 0) {
       gen->current_anchor_col = col;
       gen->last_anchor_col = last_anchor_col;
       gen->anchor_right_extension_set =
@@ -4324,8 +4310,6 @@ static void gen_record_lane_plays_reaching(MoveGen *gen, int row,
       last_anchor_col++;
     }
   }
-  *anchors = lane_anchors;
-  *generated = lane_generated;
 }
 
 void generate_small_moves_in_lanes(const MoveGenArgs *args, uint64_t lane_mask,
