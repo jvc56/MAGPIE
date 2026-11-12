@@ -1421,8 +1421,9 @@ static void add_pat_help_arg(arg_token_t arg_token, const char **usages,
   }
 }
 
-// The help for the players' autoplay endgame and pre-endgame options (see
-// help_entry_fill).
+// The help for the players' autoplay endgame and pre-endgame options, and for
+// the pre-endgame adjustments (see help_entry_fill, which is at the function
+// size limit).
 static void add_player_solver_help_arg(arg_token_t arg_token,
                                        const char **usages,
                                        const char **examples,
@@ -1511,6 +1512,26 @@ static void add_player_solver_help_arg(arg_token_t arg_token,
         "players' autoplay pre-endgame solves. Each must be >= 1. "
         "Defaults to 1,1,5,7 for autoplay and a timed peg, and to 1 (every "
         "scenario) for a complete one.";
+    break;
+  case ARG_TOKEN_PEG_ADJUST:
+    usages[0] = "<adjustments>";
+    examples[0] = "CSW24_pegadjust";
+    examples[1] = "none";
+    *text = "Specifies the pre-endgame adjustments for both players. The "
+            "'pegadjust1' and 'pegadjust2' options override it. The "
+            "adjustments, read from <data path>/strategy/<adjustments>.csv, "
+            "are amounts added to the static equity of a tile placement by "
+            "the tiles in the bag less the tiles played plus the rack size. "
+            "Use 'none' to unload. They are off by default.";
+    break;
+  case ARG_TOKEN_P1_PEG_ADJUST:
+  case ARG_TOKEN_P2_PEG_ADJUST:
+    usages[0] = "<adjustments>";
+    examples[0] = "CSW24_pegadjust";
+    examples[1] = "none";
+    *text = "Specifies the pre-endgame adjustments for the given player. "
+            "This can be used with the autoplay command to compare two "
+            "tables. Use 'none' to unload.";
     break;
   default:
     break;
@@ -1767,26 +1788,6 @@ static void help_entry_fill(const Config *config, int token,
     case ARG_TOKEN_P2_PAT_ROLLOUT_CLASSES:
     case ARG_TOKEN_PAT_LABEL_PLIES:
       add_pat_help_arg(arg_token, usages, examples, &text);
-      break;
-    case ARG_TOKEN_PEG_ADJUST:
-      usages[0] = "<adjustments>";
-      examples[0] = "CSW24_pegadjust";
-      examples[1] = "none";
-      text = "Specifies the pre-endgame adjustments for both players. The "
-             "'pegadjust1' and 'pegadjust2' options override it. The "
-             "adjustments, read from <data path>/strategy/<adjustments>.csv, "
-             "are amounts added to the static equity of a tile placement by "
-             "the tiles in the bag less the tiles played plus the rack size. "
-             "Use 'none' to unload. They are off by default.";
-      break;
-    case ARG_TOKEN_P1_PEG_ADJUST:
-    case ARG_TOKEN_P2_PEG_ADJUST:
-      usages[0] = "<adjustments>";
-      examples[0] = "CSW24_pegadjust";
-      examples[1] = "none";
-      text = "Specifies the pre-endgame adjustments for the given player. "
-             "This can be used with the autoplay command to compare two "
-             "tables. Use 'none' to unload.";
       break;
     case ARG_TOKEN_HELP:
       usages[0] = "[<command_or_option>]";
@@ -3117,6 +3118,9 @@ static void help_entry_fill(const Config *config, int token,
     case ARG_TOKEN_PEG_NESTED_CAND_CAPS:
     case ARG_TOKEN_PEG_NESTED_DEPTH:
     case ARG_TOKEN_PEG_NESTED_STRIDES:
+    case ARG_TOKEN_PEG_ADJUST:
+    case ARG_TOKEN_P1_PEG_ADJUST:
+    case ARG_TOKEN_P2_PEG_ADJUST:
       add_player_solver_help_arg(arg_token, usages, examples, &text);
       break;
     case ARG_TOKEN_MULTI_THREADING_MODE:
