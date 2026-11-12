@@ -1019,8 +1019,11 @@ char *str_api_fatal(Config *config,
 // it (`derived_skipped`); a full disk during a rack info table's build skips
 // the table rather than ending the run; one that does not fit in the memory
 // beyond `memreserve`, to build or to hold, is skipped the same way; the
-// claim's derived files carry their sizes (`bytes`).
-#define MAGPIE_VERSION "0.1.4"
+// claim's derived files carry their sizes (`bytes`). 0.1.5: an opening-rack
+// request may state each rack's `candidates`, the moves a later pass ranks in
+// place of every play -- birdtest's reanalysis of a rack's first-pass
+// leaders, which only a build that reads them can run.
+#define MAGPIE_VERSION "0.1.5"
 
 const char *config_get_magpie_version(void) { return MAGPIE_VERSION; }
 
