@@ -22,6 +22,12 @@ typedef struct SimArgs {
   Rack *known_opp_rack;
   WinPct *win_pcts;
   bool use_inference;
+  // Whether, with use_inference, inference_results already holds the
+  // inference of the opponent's previous move in this position, so the sim
+  // samples the opponent's racks from it as given instead of running
+  // inference_args first. Lets a caller show an inference and then sim with
+  // it, or resume a sim, without inferring again. sim_args_fill clears it.
+  bool use_precomputed_inference;
   bool use_heat_map;
   InferenceResults *inference_results;
   InferenceArgs inference_args;
@@ -106,6 +112,7 @@ sim_args_fill(const int num_plies, const MoveList *move_list,
   sim_args->thread_control = thread_control;
   sim_args->game = game;
   sim_args->use_inference = sim_with_inference;
+  sim_args->use_precomputed_inference = false;
   sim_args->use_heat_map = use_heat_map;
   sim_args->num_threads = num_threads;
   sim_args->print_interval = print_interval;

@@ -79,6 +79,14 @@ static const TuiSettingDef setting_defs[] = {
      "Steer each simulation's rollouts with a census of the position: the "
      "same moves, found faster.",
      TUI_SETTING_KIND_BOOL, NULL, 0, 0, 1, 1, NULL, NULL},
+    {TUI_SETTING_INFER, 5, "infer", "Inference",
+     "After the opponent's play or exchange (not a bingo or the opening "
+     "play), infer the tiles they kept and show it above the analysis.",
+     TUI_SETTING_KIND_BOOL, NULL, 0, 0, 1, 1, NULL, NULL},
+    {TUI_SETTING_SIM_INFERENCE, 5, "siminfer", "Sim inference",
+     "Draw the opponent's racks from the inference in sims, the computer's "
+     "own included. Each turn keeps both sims; switch to compare.",
+     TUI_SETTING_KIND_BOOL, NULL, 0, 0, 1, 1, NULL, NULL},
     {TUI_SETTING_AUTO_ANALYZE, 5, "autoanalyze", "Auto-analyze",
      "Analyze each turn you select in History: rank its moves (kibitz), or "
      "simulate it (solving endgames and pre-endgames instead).",
@@ -212,6 +220,10 @@ int tui_setting_get(const TuiGameState *state, TuiSettingId id) {
     return state->sim_candidates;
   case TUI_SETTING_SIM_CENSUS:
     return state->sim_census ? 1 : 0;
+  case TUI_SETTING_INFER:
+    return state->infer ? 1 : 0;
+  case TUI_SETTING_SIM_INFERENCE:
+    return state->sim_inference ? 1 : 0;
   case TUI_SETTING_AUTO_ANALYZE:
     return state->auto_analyze;
   case TUI_SETTING_ANALYSIS_TIME:
@@ -452,6 +464,21 @@ bool tui_setting_parse(const TuiSettingDef *def, const char *text,
   return false;
 }
 
+// After Inference or Sim inference changes: shows the sim it now asks
+// for on every turn. A running analysis sim is told to stop; it swaps
+// its own turn once it has saved, and auto-analyze then sims the turn's
+// newly shown kind.
+static void show_inference_variants_now(TuiGameState *state) {
+  int skip_idx = -1;
+  if (atomic_load(&state->analysis_running)) {
+    atomic_store(&state->analysis_stop, true);
+    skip_idx = state->analysis_resume_turn_idx;
+  }
+  tui_game_state_show_inference_variants(state, skip_idx);
+  state->inference_variant_version++;
+  atomic_fetch_add(&state->render_version, 1);
+}
+
 // Applies `value` (already in range) to the running game and records it
 // in the config. Caller holds state->mutex.
 static void apply_setting(TuiGameState *state, TuiSession *session,
@@ -512,6 +539,18 @@ static void apply_setting(TuiGameState *state, TuiSession *session,
     state->sim_census = value != 0;
     cfg->sim_census = state->sim_census;
     cfg->sim_census_set = true;
+    break;
+  case TUI_SETTING_INFER:
+    state->infer = value != 0;
+    cfg->infer = state->infer;
+    cfg->infer_set = true;
+    show_inference_variants_now(state);
+    break;
+  case TUI_SETTING_SIM_INFERENCE:
+    state->sim_inference = value != 0;
+    cfg->sim_inference = state->sim_inference;
+    cfg->sim_inference_set = true;
+    show_inference_variants_now(state);
     break;
   case TUI_SETTING_AUTO_ANALYZE:
     state->auto_analyze = value;

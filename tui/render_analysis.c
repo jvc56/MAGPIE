@@ -1,7 +1,9 @@
 #include "render_analysis.h"
 
+#include "../src/def/letter_distribution_defs.h"
 #include "../src/ent/bag.h"
 #include "../src/ent/game.h"
+#include "../src/ent/letter_distribution.h"
 #include "../src/ent/sim_results.h"
 #include "../src/impl/endgame.h"
 #include "analysis_rows.h"
@@ -40,7 +42,17 @@ enum {
   AVG_GAP_W = 1,
   // Gap between the move text and the leave column.
   LEAVE_GAP_L = 2,
+  // The inference summary's three lines and the rule under them, and
+  // the fewest candidate rows the panel keeps below it.
+  INFERENCE_BLOCK_ROWS = 4,
+  INFERENCE_MIN_LIST_ROWS = 4,
+  // At most this many letters listed as over- and as underrepresented.
+  INFERENCE_MAX_LETTERS = 5,
 };
+
+// A letter is over- or underrepresented on the inferred leave when its
+// expected count differs from a random leave's by at least this much.
+static const double INFERENCE_LETTER_DELTA_MIN = 0.1;
 
 // Rendered width of a move: the panel draws moves with hide_parens, so
 // parentheses take no cells.
@@ -250,12 +262,84 @@ static void render_analysis_header_fade(struct ncplane *plane,
   }
 }
 
+// Sort an engine-notation exchange's letters ("ex DBA" → "ex ABD") so
+// two exchanges of the same tiles compare equal whatever order each
+// listed them in. Other moves are left alone.
+static void sort_exchange_letters(char *engine_move) {
+  if (strncmp(engine_move, "ex ", 3) != 0) {
+    return;
+  }
+  char *letters = engine_move + 3;
+  const size_t len = strlen(letters);
+  for (size_t idx = 1; idx < len; idx++) {
+    const char ch = letters[idx];
+    size_t pos = idx;
+    while (pos > 0 && letters[pos - 1] > ch) {
+      letters[pos] = letters[pos - 1];
+      pos--;
+    }
+    letters[pos] = ch;
+  }
+}
+
+// Index of the row holding the move played on the History cursor's
+// turn, or -1: on the live turn, on a turn still being decided, in
+// spoiler-free review (which hides the played move), and when no row
+// holds it. Call before analysis_fit_move truncates any row's move.
+static int analysis_played_row(const TuiGameState *state,
+                               const AnalysisRow *rows, int count) {
+  if (state == NULL || state->history_cursor < 0 ||
+      state->history_cursor >= state->history_count ||
+      tui_history_spoiler(state, state->history_cursor) != TUI_SPOILER_NONE) {
+    return -1;
+  }
+  const TuiHistoryEntry *entry = &state->history[state->history_cursor];
+  if (entry->pending || entry->move_str[0] == '\0') {
+    return -1;
+  }
+  // Rows and History write exchanges and playthroughs differently, so
+  // compare the engine notation of each.
+  char played[sizeof(entry->move_str) + 8];
+  tui_history_move_to_engine(entry->move_str, played, sizeof(played));
+  sort_exchange_letters(played);
+  if (played[0] == '\0') {
+    return -1;
+  }
+  for (int row_idx = 0; row_idx < count; row_idx++) {
+    char candidate[sizeof(rows[row_idx].move) + 8];
+    tui_history_move_to_engine(rows[row_idx].move, candidate,
+                               sizeof(candidate));
+    sort_exchange_letters(candidate);
+    if (strcmp(played, candidate) == 0) {
+      return row_idx;
+    }
+  }
+  return -1;
+}
+
+// The color of the player who played the History cursor's turn, for
+// its played move's row. Only a row analysis_played_row returned is
+// that row, and it returns none without a state or with the cursor
+// off the History, so the default color is never used: the check is
+// there because the callers allow a NULL state.
+static ThemeRgb analysis_played_color(const Theme *theme,
+                                      const TuiGameState *state) {
+  if (state == NULL || state->history_cursor < 0 ||
+      state->history_cursor >= state->history_count) {
+    return theme->fg;
+  }
+  return state->history[state->history_cursor].player_idx == 1
+             ? theme->on_turn_fg_p2
+             : theme->on_turn_fg;
+}
+
 // Compact layout for a panel too narrow for the standard columns: the
 // spread column is dropped, and rank, the space after it, and the leave
 // column are added back in priority order as they fit, beside an integer
 // win% (or W/T/L) under a "win%" header.
 static void render_analysis_rows_compact(struct ncplane *plane,
                                          const Theme *theme, const Layout *L,
+                                         const TuiGameState *state,
                                          AnalysisRow *rows, int visible,
                                          bool primary_bold, int title_end_col,
                                          int interior_right, int max_move_w,
@@ -271,6 +355,7 @@ static void render_analysis_rows_compact(struct ncplane *plane,
   // every visible row below 100% we size the slot at 3 ("XX%") and
   // get a free column for rank, space, or leave. W/T/L primaries
   // stay 1 col.
+  const int played_idx = analysis_played_row(state, rows, visible);
   int compact_primary_w = 0;
   for (int i = 0; i < visible; i++) {
     if (!rows[i].valid) {
@@ -410,7 +495,9 @@ static void render_analysis_rows_compact(struct ncplane *plane,
     char *move_text = rows[i].move;
     analysis_fit_move(move_text, move_budget);
     if (move_budget > 0 && move_text[0] != '\0') {
-      theme_apply_fg(plane, theme->fg);
+      theme_apply_fg(plane, i == played_idx
+                                ? analysis_played_color(theme, state)
+                                : theme->fg);
       render_move_styled(plane, row, compact_move_col, move_text,
                          /*hide_parens=*/true,
                          /*hide_playthrough_parens=*/false);
@@ -553,13 +640,11 @@ static int render_analysis_headers(struct ncplane *plane, const Theme *theme,
 // Draws candidate rows[data_i] on screen row `row`: the rank (or cursor
 // chip), move, leave, score, per-ply averages, primary, and secondary,
 // bolding column bests, and records the row's click rectangle.
-static void render_analysis_row(struct ncplane *plane, const Theme *theme,
-                                const TuiGameState *state, AnalysisRow *rows,
-                                const AnalysisColumns *columns,
-                                bool primary_bold, TuiHitMaps *hit, int row,
-                                const char *rank_fmt,
-                                const AnalysisBests *bests,
-                                int effective_cursor, int data_i) {
+static void render_analysis_row(
+    struct ncplane *plane, const Theme *theme, const TuiGameState *state,
+    AnalysisRow *rows, const AnalysisColumns *columns, bool primary_bold,
+    TuiHitMaps *hit, int row, const char *rank_fmt, const AnalysisBests *bests,
+    int effective_cursor, int played_idx, int data_i) {
   char rank_str[8];
   (void)snprintf(rank_str, sizeof(rank_str), rank_fmt, data_i + 1);
 
@@ -712,7 +797,9 @@ static void render_analysis_row(struct ncplane *plane, const Theme *theme,
       ncplane_set_styles(plane, 0);
       theme_apply_bg(plane, theme->bg);
     } else {
-      theme_apply_fg(plane, theme->fg);
+      theme_apply_fg(plane, data_i == played_idx
+                                ? analysis_played_color(theme, state)
+                                : theme->fg);
       render_move_styled(plane, row, columns->move_col, move_text,
                          /*hide_parens=*/true,
                          /*hide_playthrough_parens=*/false);
@@ -1041,9 +1128,9 @@ static void render_analysis_rows(struct ncplane *plane, const Theme *theme,
   const int standard_need =
       rank_w + max_move_w + 1 + primary_w + primary_secondary_gap + secondary_w;
   if (standard_need > interior_width) {
-    render_analysis_rows_compact(plane, theme, L, rows, visible, primary_bold,
-                                 title_end_col, interior_right, max_move_w,
-                                 max_leave_w, rank_digits);
+    render_analysis_rows_compact(plane, theme, L, state, rows, visible,
+                                 primary_bold, title_end_col, interior_right,
+                                 max_move_w, max_leave_w, rank_digits);
     return;
   }
 
@@ -1190,9 +1277,6 @@ static void render_analysis_rows(struct ncplane *plane, const Theme *theme,
   if (scroll_offset < 0) {
     scroll_offset = 0;
   }
-  if (state != NULL) {
-    state->analysis_scroll_offset = scroll_offset;
-  }
   // Docking: only when the cursor is in MOVE column AND the
   // anchored move's rank sits outside the currently-scrolled
   // window. With cursor-follow scroll the auto-scroll keeps the
@@ -1206,11 +1290,38 @@ static void render_analysis_rows(struct ncplane *plane, const Theme *theme,
       state != NULL &&
       state->analysis_cursor_column == TUI_ANALYSIS_COLUMN_MOVE &&
       cursor_outside_window && view_h >= 2;
+  // The move played on the History cursor's turn docks the same way
+  // when it ranks outside the window, unless the cursor's move holds
+  // the dock. Its divider and row take the window's last two rows, so
+  // scroll to keep the cursor above them; that can bring the played
+  // move into view, which needs no dock.
+  const int played_idx = analysis_played_row(
+      state, rows, state != NULL ? state->last_rendered_analysis_row_count : 0);
+  bool played_dock =
+      !dock_active && played_idx >= 0 && view_h >= 3 &&
+      (played_idx < scroll_offset || played_idx >= scroll_offset + view_h);
+  if (played_dock) {
+    if (effective_cursor >= scroll_offset + view_h - 2) {
+      scroll_offset = effective_cursor - (view_h - 2) + 1;
+    }
+    played_dock =
+        played_idx < scroll_offset || played_idx >= scroll_offset + view_h;
+  }
+  if (state != NULL) {
+    state->analysis_scroll_offset = scroll_offset;
+  }
+  const bool any_dock = dock_active || played_dock;
+  const int docked_idx = dock_active ? effective_cursor : played_idx;
 
   // Number of painted rows for this frame: capped by view_h and
-  // by how many ranks remain after the scroll offset.
-  const int painted_rows =
+  // by how many ranks remain after the scroll offset. A played-move
+  // dock above the scrolled-to end of a short list still gets its
+  // divider and row.
+  int painted_rows =
       total_rows - scroll_offset < view_h ? total_rows - scroll_offset : view_h;
+  if (played_dock && painted_rows < view_h) {
+    painted_rows = painted_rows + 2 < view_h ? painted_rows + 2 : view_h;
+  }
 
   theme_apply_bg(plane, theme->bg);
   int row = list_top;
@@ -1221,7 +1332,7 @@ static void render_analysis_rows(struct ncplane *plane, const Theme *theme,
     // effective_cursor) and the slot immediately above it is
     // rendered as a divider line rather than a row.
     int data_i = scroll_offset + slot;
-    if (dock_active) {
+    if (any_dock) {
       if (slot == painted_rows - 2) {
         // Divider line — uses the dim_fg color so it reads as
         // a subdued separator, not a heavy rule.
@@ -1235,7 +1346,7 @@ static void render_analysis_rows(struct ncplane *plane, const Theme *theme,
         continue;
       }
       if (slot == painted_rows - 1) {
-        data_i = effective_cursor;
+        data_i = docked_idx;
       }
     }
     if (data_i < 0 || data_i >= state->last_rendered_analysis_row_count ||
@@ -1244,7 +1355,8 @@ static void render_analysis_rows(struct ncplane *plane, const Theme *theme,
       continue;
     }
     render_analysis_row(plane, theme, state, rows, &columns, primary_bold, hit,
-                        row, rank_fmt, &bests, effective_cursor, data_i);
+                        row, rank_fmt, &bests, effective_cursor, played_idx,
+                        data_i);
 
     row++;
   }
@@ -1267,6 +1379,156 @@ static void render_analysis_rows(struct ncplane *plane, const Theme *theme,
     atomic_store(&state->analysis_scrollbar_view, 0);
   }
 }
+// The History entry for the turn the panel shows, when it has an
+// inference to show: the History cursor's turn, else the computer's
+// turn in progress. NULL otherwise, or with Inference off.
+static const TuiHistoryEntry *shown_inference_entry(const TuiGameState *state) {
+  if (!state->infer) {
+    return NULL;
+  }
+  const TuiHistoryEntry *entry = NULL;
+  if (state->history_cursor >= 0 &&
+      state->history_cursor < state->history_count) {
+    entry = &state->history[state->history_cursor];
+  } else if (state->history_count > 0 &&
+             state->history[state->history_count - 1].pending) {
+    entry = &state->history[state->history_count - 1];
+  }
+  return entry != NULL && entry->inference_summary.valid ? entry : NULL;
+}
+
+// Writes `text` at (row, *col) in the plane's current colors when it
+// fits before `right`, advancing *col. Returns whether it fit.
+static bool put_clipped(struct ncplane *plane, int row, int *col, int right,
+                        const char *text) {
+  const int width = ncstrwidth(text, NULL, NULL);
+  if (width < 0 || *col + width - 1 > right) {
+    return false;
+  }
+  ncplane_putstr_yx(plane, row, *col, text);
+  *col += width;
+  return true;
+}
+
+// Lists, after `label`, up to INFERENCE_MAX_LETTERS letters whose
+// inferred count most exceeds a random leave's (`sign` 1) or falls
+// short of it (`sign` -1), as "E+0.8". Returns whether any were listed.
+static bool put_letter_deltas(struct ncplane *plane, const Theme *theme,
+                              const LetterDistribution *ld,
+                              const TuiInferenceSummary *summary, int sign,
+                              const char *label, int row, int *col, int right) {
+  const int ld_size = ld_get_size(ld);
+  bool listed[MAX_ALPHABET_SIZE] = {false};
+  bool any = false;
+  for (int listed_count = 0; listed_count < INFERENCE_MAX_LETTERS;
+       listed_count++) {
+    int best_ml = -1;
+    double best_delta = INFERENCE_LETTER_DELTA_MIN;
+    for (int ml = 0; ml < ld_size; ml++) {
+      const double delta =
+          sign * (summary->letter_mean[ml] - summary->letter_random[ml]);
+      if (!listed[ml] && delta >= best_delta) {
+        best_ml = ml;
+        best_delta = delta;
+      }
+    }
+    if (best_ml < 0) {
+      break;
+    }
+    listed[best_ml] = true;
+    if (!any) {
+      theme_apply_fg(plane, theme->dim_fg);
+      if (!put_clipped(plane, row, col, right, label)) {
+        return false;
+      }
+      any = true;
+    }
+    char *letter = ld_ml_to_hl(ld, (MachineLetter)best_ml);
+    char delta_text[16];
+    (void)snprintf(delta_text, sizeof(delta_text), "%+.1f ", sign * best_delta);
+    theme_apply_fg(plane, theme->fg);
+    ncplane_set_styles(plane, NCSTYLE_BOLD);
+    const bool fit = put_clipped(plane, row, col, right, letter);
+    ncplane_set_styles(plane, 0);
+    free(letter);
+    theme_apply_fg(plane, theme->dim_fg);
+    if (!fit || !put_clipped(plane, row, col, right, delta_text)) {
+      return any;
+    }
+  }
+  return any;
+}
+
+// Writes "label value (avg random) " for one of the summary's measures.
+static void put_measure(struct ncplane *plane, const Theme *theme, int row,
+                        int *col, int right, const char *label,
+                        const char *format, double value, double random) {
+  char value_text[24];
+  char random_text[32];
+  (void)snprintf(value_text, sizeof(value_text), format, value);
+  char random_value[24];
+  (void)snprintf(random_value, sizeof(random_value), format, random);
+  (void)snprintf(random_text, sizeof(random_text), " (avg %s)  ", random_value);
+  theme_apply_fg(plane, theme->dim_fg);
+  if (!put_clipped(plane, row, col, right, label)) {
+    return;
+  }
+  theme_apply_fg(plane, theme->fg);
+  if (!put_clipped(plane, row, col, right, value_text)) {
+    return;
+  }
+  theme_apply_fg(plane, theme->dim_fg);
+  (void)put_clipped(plane, row, col, right, random_text);
+}
+
+// Draws the inference summary on rows top..top+2, between columns
+// left and right, with a rule on row top+3: what the opponent kept,
+// the letters over- and underrepresented on it, and how its leave
+// value, face value, and vowels compare with a random leave's.
+static void render_inference_block(struct ncplane *plane, const Theme *theme,
+                                   const TuiGameState *state,
+                                   const TuiInferenceSummary *summary, int top,
+                                   int left, int right) {
+  theme_apply_bg(plane, theme->bg);
+  int col = left;
+  char racks[16];
+  format_count_compact(summary->racks, racks, sizeof(racks));
+  char header[128];
+  (void)snprintf(header, sizeof(header),
+                 "Inferred: kept %d after %s \xc2\xb7 %s racks", summary->kept,
+                 summary->after_move, racks);
+  theme_apply_fg(plane, summary->target_player_idx == 1 ? theme->on_turn_fg_p2
+                                                        : theme->on_turn_fg);
+  (void)put_clipped(plane, top, &col, right, header);
+
+  col = left;
+  if (put_letter_deltas(plane, theme, state->ld, summary, 1, "more ", top + 1,
+                        &col, right)) {
+    (void)put_clipped(plane, top + 1, &col, right, " ");
+  }
+  if (!put_letter_deltas(plane, theme, state->ld, summary, -1, "fewer ",
+                         top + 1, &col, right) &&
+      col == left) {
+    theme_apply_fg(plane, theme->dim_fg);
+    (void)put_clipped(plane, top + 1, &col, right,
+                      "letters as drawn at random");
+  }
+
+  col = left;
+  put_measure(plane, theme, top + 2, &col, right, "leave ", "%+.1f",
+              summary->leave_value, summary->leave_value_random);
+  put_measure(plane, theme, top + 2, &col, right, "tiles ", "%.1f",
+              summary->face_value, summary->face_value_random);
+  put_measure(plane, theme, top + 2, &col, right, "vowels ", "%.1f",
+              summary->vowels, summary->vowels_random);
+
+  theme_apply_fg(plane, theme->dim_fg);
+  for (int rule_col = left; rule_col <= right; rule_col++) {
+    // ─ (U+2500 BOX DRAWINGS LIGHT HORIZONTAL)
+    ncplane_putstr_yx(plane, top + 3, rule_col, "\xe2\x94\x80");
+  }
+}
+
 void render_analysis_panel(struct ncplane *plane, const Theme *theme,
                            TuiGameState *state, const Layout *L) {
   if (!L->has_analysis) {
@@ -1435,6 +1697,18 @@ void render_analysis_panel(struct ncplane *plane, const Theme *theme,
   } else {
     (void)snprintf(title, sizeof(title), "Plays");
   }
+  // On a turn with an inference, say whether the sim on show drew the
+  // opponent's racks from it or at random.
+  const TuiHistoryEntry *inference_entry = shown_inference_entry(state);
+  const bool sim_title =
+      !use_static && !use_peg && !use_endgame && strncmp(title, "Sim", 3) == 0;
+  if (inference_entry != NULL && sim_title) {
+    const bool inferred = snap != NULL ? inference_entry->analysis_inferred
+                                       : state->live_sim_inferred;
+    const size_t title_len = strlen(title);
+    (void)snprintf(title + title_len, sizeof(title) - title_len, " \xc2\xb7 %s",
+                   inferred ? "inferred" : "random");
+  }
   // play_only_fallback: not a saved snapshot, not endgame, not an
   // active sim — we're showing just the played move (or "(no
   // analysis yet)" if even that's missing). Used below to drop
@@ -1465,20 +1739,37 @@ void render_analysis_panel(struct ncplane *plane, const Theme *theme,
 
   const int interior_left = L->analysis_left + 1;
   const int interior_right = L->analysis_right - 1;
-  const int interior_top = L->analysis_top + 1;
+  int interior_top = L->analysis_top + 1;
   const int interior_bottom = L->analysis_bottom - 1;
+  // Column of the cell just after the title's closing " ". draw_box
+  // paints " " + title + " " starting at left_col + 2 (see ~ line
+  // 620), so the next free cell on the top border is at:
+  //   analysis_left + 2 + 1 + width(title) + 1 = analysis_left +
+  //   width(title) + 4, width counting cells.
+  const int title_width = ncstrwidth(title, NULL, NULL);
+  int title_end_col = L->analysis_left +
+                      (title_width > 0 ? title_width : (int)strlen(title)) + 3;
+  // The inference summary goes above the candidates when there's room
+  // for both. Its rule then stands in for the top border: the list's
+  // layout starts there, and the header strip can sit on it.
+  Layout list_layout = *L;
+  if (inference_entry != NULL &&
+      interior_bottom - interior_top + 1 >=
+          INFERENCE_BLOCK_ROWS + INFERENCE_MIN_LIST_ROWS) {
+    render_inference_block(plane, theme, state,
+                           &inference_entry->inference_summary, interior_top,
+                           interior_left, interior_right);
+    list_layout.analysis_top = interior_top + INFERENCE_BLOCK_ROWS - 1;
+    interior_top = list_layout.analysis_top + 1;
+    title_end_col = L->analysis_left;
+  }
+  L = &list_layout;
   // Fill into the full interior — render_analysis_rows will decide
   // whether the header strip lives on the top border (sharing a row
   // with the title) or on the first interior row, and place data
   // rows accordingly.
   const int max_visible = interior_bottom - interior_top + 1;
   const int list_top_for_empty = interior_top;
-  // Column of the cell just after the title's closing " ". draw_box
-  // paints " " + title + " " starting at left_col + 2 (see ~ line
-  // 620), so the next free cell on the top border is at:
-  //   analysis_left + 2 + 1 + strlen(title) + 1 = analysis_left + len(title)
-  //   + 4.
-  const int title_end_col = L->analysis_left + (int)strlen(title) + 3;
 
   // Rows for this frame were prepared by populate_frame_analysis_rows
   // (called from tui_game_render before any panel renders). The

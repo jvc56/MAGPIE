@@ -1535,6 +1535,87 @@ void test_sim_with_inference_cutoff(void) {
   config_destroy(config);
 }
 
+// Sims the position after an exchange of 6 as simulate_after_exchange does,
+// but with inference args that can't be inferred from (an exchange that
+// scored), so the sim succeeds only by taking the inference the config's
+// inference results already hold. Returns the sim's error status.
+static error_code_t simulate_after_exchange_with_bad_inference_args(
+    Config *config, bool use_precomputed_inference, SimResults *sim_results) {
+  load_and_exec_config_or_die(config, "set -seed 10");
+  const int ld_size = ld_get_size(config_get_ld(config));
+  Rack target_played_tiles;
+  rack_set_dist_size_and_reset(&target_played_tiles, ld_size);
+  Rack nontarget_known_tiles;
+  rack_set_dist_size_and_reset(&nontarget_known_tiles, ld_size);
+  Rack target_known_inference_tiles;
+  rack_set_dist_size_and_reset(&target_known_inference_tiles, ld_size);
+  SimArgs sim_args;
+  config_fill_sim_args(config, NULL, &target_played_tiles,
+                       &nontarget_known_tiles, &target_known_inference_tiles,
+                       &sim_args);
+  assert(sim_args.use_inference);
+  assert(!sim_args.use_precomputed_inference);
+  sim_args.use_precomputed_inference = use_precomputed_inference;
+  sim_args.inference_args.use_game_history = false;
+  sim_args.inference_args.target_num_exch = 6;
+  sim_args.inference_args.target_score = int_to_equity(10);
+  ErrorStack *error_stack = error_stack_create();
+  thread_control_set_status(config_get_thread_control(config),
+                            THREAD_CONTROL_STATUS_STARTED);
+  simulate_without_ctx(&sim_args, sim_results, error_stack);
+  const error_code_t status = error_stack_top(error_stack);
+  error_stack_destroy(error_stack);
+  return status;
+}
+
+// A sim told its inference is precomputed samples from the inference results
+// as given, without inferring again, and comes out as the sim that inferred
+// them did.
+void test_sim_with_precomputed_inference(void) {
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -wmp true -s1 equity -s2 equity -r1 all -r2 all "
+      "-numplays 4 -plies 2 -threads 1 -iter 200 -scond none -sinfer true "
+      "-ima 5");
+  load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
+  assert(test_parse_gcg("exchange_with_seven_in_bag", config,
+                        config_get_game_history(config)) ==
+         ERROR_STATUS_SUCCESS);
+  game_play_to_end_or_die(config_get_game_history(config),
+                          config_get_game(config));
+  load_and_exec_config_or_die(config, "gen");
+  ErrorStack *error_stack = error_stack_create();
+  config_load_win_pcts(config, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  error_stack_destroy(error_stack);
+
+  SimResults *inferred =
+      sim_results_create(convert_user_cutoff_to_cutoff(0.005));
+  SimResults *precomputed =
+      sim_results_create(convert_user_cutoff_to_cutoff(0.005));
+  // The first sim infers, leaving its inference in the config's results.
+  simulate_after_exchange(config, true, inferred);
+  assert(sim_results_get_num_infer_leaves(inferred) > 0);
+  // Inferring from the bad args fails, so the next sim can't be inferring.
+  const error_code_t inferring_status =
+      simulate_after_exchange_with_bad_inference_args(config, false,
+                                                      precomputed);
+  assert(inferring_status != ERROR_STATUS_SUCCESS);
+  // That failure came at the args check, before the inference results were
+  // reset, so they still hold the first sim's inference.
+  const error_code_t precomputed_status =
+      simulate_after_exchange_with_bad_inference_args(config, true,
+                                                      precomputed);
+  assert(precomputed_status == ERROR_STATUS_SUCCESS);
+  assert(sim_results_get_num_infer_leaves(precomputed) ==
+         sim_results_get_num_infer_leaves(inferred));
+  assert(sim_results_get_iteration_count(precomputed) ==
+         sim_results_get_iteration_count(inferred));
+  assert_simmed_plays_identical(inferred, precomputed);
+  sim_results_destroy(inferred);
+  sim_results_destroy(precomputed);
+  config_destroy(config);
+}
+
 // A resumed sim continues accumulating onto the existing samples, and a
 // duplicated SimResults resumes exactly as the original would: the duplicate
 // copies each play's PRNG state rather than reseeding it.
@@ -1594,6 +1675,7 @@ void test_sim(void) {
     perf_test_multithread_sim();
     test_sim_with_inference();
     test_sim_with_inference_cutoff();
+    test_sim_with_precomputed_inference();
     test_sim_round_robin_consistency();
     test_sim_top_two_consistency();
     test_sim_one_ply();

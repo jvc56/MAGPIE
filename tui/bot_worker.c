@@ -7,12 +7,15 @@
 #include "../src/def/letter_distribution_defs.h"
 #include "../src/def/move_defs.h"
 #include "../src/def/peg_defs.h"
+#include "../src/def/rack_defs.h"
 #include "../src/def/thread_control_defs.h"
 #include "../src/ent/bag.h"
 #include "../src/ent/board.h"
 #include "../src/ent/endgame_results.h"
 #include "../src/ent/equity.h"
 #include "../src/ent/game.h"
+#include "../src/ent/inference_args.h"
+#include "../src/ent/inference_results.h"
 #include "../src/ent/letter_distribution.h"
 #include "../src/ent/move.h"
 #include "../src/ent/player.h"
@@ -20,9 +23,11 @@
 #include "../src/ent/sim_args.h"
 #include "../src/ent/sim_results.h"
 #include "../src/ent/thread_control.h"
+#include "../src/ent/validated_move.h"
 #include "../src/impl/cgp.h"
 #include "../src/impl/endgame.h"
 #include "../src/impl/gameplay.h"
+#include "../src/impl/inference.h"
 #include "../src/impl/move_gen.h"
 #include "../src/impl/peg.h"
 #include "../src/impl/simmer.h"
@@ -34,6 +39,7 @@
 #include "config.h"
 #include "game_state.h"
 #include "sound.h"
+#include "turn_inference.h"
 #include <pthread.h>
 #include <stdatomic.h>
 #include <stdint.h>
@@ -47,6 +53,10 @@ enum {
   // "/kibitz" lists at most this many moves, best static equity first.
   KIBITZ_MAX_MOVES = 100,
   SIM_PLIES = 4,
+  // An inference keeps racks whose best play was within this many points
+  // of the play made (the CLI's default), and lists this many leaves.
+  INFERENCE_EQUITY_MARGIN = 5,
+  INFERENCE_LEAVE_LIST_CAPACITY = 16,
   // Rollouts every candidate gets before the sim may stop. BAI stops once
   // the leader's mean win% is within the cutoff of 0 or 100%, and after
   // one rollout per candidate some candidate often reads 100%: the sim
@@ -507,10 +517,201 @@ static MoveList *generate_top_candidates(const Game *game, int n) {
   return list;
 }
 
+// Write the move played on `entry`'s turn into `out_move`, validated
+// against `position`, the position it was played from: the GCG move a
+// loaded game carries, else the move History records. False when there
+// is none to offer, as for a play that was challenged off.
+static bool entry_played_move(const TuiHistoryEntry *entry,
+                              const Game *position, Move *out_move) {
+  if (entry->loaded_move != NULL) {
+    move_copy(out_move, entry->loaded_move);
+    return true;
+  }
+  if (entry->challenged_off || entry->move_str[0] == '\0') {
+    return false;
+  }
+  char engine_move[64];
+  tui_history_move_to_engine(entry->move_str, engine_move, sizeof(engine_move));
+  if (engine_move[0] == '\0') {
+    return false;
+  }
+  ErrorStack *err = error_stack_create();
+  ValidatedMoves *vms = validated_moves_create(
+      position, game_get_player_on_turn_index(position), engine_move,
+      /*allow_phonies=*/true, /*allow_playthrough=*/true, err);
+  const bool found = error_stack_is_empty(err) && vms != NULL &&
+                     validated_moves_get_number_of_moves(vms) > 0;
+  if (found) {
+    move_copy(out_move, validated_moves_get_move(vms, 0));
+  }
+  if (vms != NULL) {
+    validated_moves_destroy(vms);
+  }
+  error_stack_destroy(err);
+  return found;
+}
+
+// Infers the leave the opponent kept on the move before History turn
+// `turn_idx`, as seen by the player on turn there holding `mover_rack`,
+// and attaches it to the turn, unless Inference is off, the turn already
+// has one, or none applies: that move was a bingo or the opening play
+// (or see tui_turn_inference_applies). Takes state->mutex itself, so call
+// it without; `stop` interrupts it. Returns whether the turn has an
+// inference afterward.
+static bool infer_turn(TuiGameState *state, int turn_idx,
+                       const Rack *mover_rack, _Atomic bool *stop) {
+  pthread_mutex_lock(&state->mutex);
+  if (turn_idx < 0 || turn_idx >= state->history_count) {
+    pthread_mutex_unlock(&state->mutex);
+    return false;
+  }
+  if (state->history[turn_idx].inference != NULL || !state->infer ||
+      !tui_turn_inference_applies(state, turn_idx) ||
+      rack_is_empty(mover_rack)) {
+    const bool has_inference = state->history[turn_idx].inference != NULL;
+    pthread_mutex_unlock(&state->mutex);
+    return has_inference;
+  }
+  // The position the opponent played from, with them on turn as
+  // player 0 (the saved CGP lists the on-turn player first).
+  const TuiHistoryEntry *prev = &state->history[turn_idx - 1];
+  Game *position = game_duplicate(state->game);
+  ErrorStack *err = error_stack_create();
+  game_load_cgp(position, prev->cgp_before, err);
+  Move played;
+  bool usable =
+      error_stack_is_empty(err) && entry_played_move(prev, position, &played);
+  error_stack_destroy(err);
+  const int target_player_idx = prev->player_idx;
+  char after_move[sizeof(prev->move_str)];
+  (void)snprintf(after_move, sizeof(after_move), "%s", prev->move_str);
+  const int num_threads = engine_threads(state);
+  pthread_mutex_unlock(&state->mutex);
+
+  const game_event_t played_type =
+      usable ? move_get_type(&played) : GAME_EVENT_PASS;
+  const Rack *target_rack = player_get_rack(game_get_player(position, 0));
+  const int rack_total = rack_is_empty(target_rack)
+                             ? RACK_SIZE
+                             : rack_get_total_letters(target_rack);
+  usable = usable &&
+           (played_type == GAME_EVENT_TILE_PLACEMENT_MOVE ||
+            played_type == GAME_EVENT_EXCHANGE) &&
+           move_get_tiles_played(&played) < rack_total &&
+           board_get_tiles_played(game_get_board(position)) > 0;
+  if (!usable) {
+    game_destroy(position);
+    return false;
+  }
+
+  const int ld_size = ld_get_size(game_get_ld(position));
+  Rack target_played_tiles;
+  rack_set_dist_size_and_reset(&target_played_tiles, ld_size);
+  int target_num_exch = 0;
+  if (played_type == GAME_EVENT_EXCHANGE) {
+    target_num_exch = move_get_tiles_played(&played);
+  } else {
+    for (int tile_idx = 0; tile_idx < move_get_tiles_length(&played);
+         tile_idx++) {
+      const MachineLetter tile = move_get_tile(&played, tile_idx);
+      if (tile != PLAYED_THROUGH_MARKER) {
+        rack_add_letter(&target_played_tiles,
+                        get_is_blanked(tile) ? BLANK_MACHINE_LETTER : tile);
+      }
+    }
+  }
+  Rack target_known_rack;
+  rack_set_dist_size_and_reset(&target_known_rack, ld_size);
+  Rack nontarget_known_rack;
+  rack_set_dist_size_and_reset(&nontarget_known_rack, ld_size);
+  rack_copy(&nontarget_known_rack, mover_rack);
+
+  ThreadControl *tc = thread_control_create();
+  thread_control_set_status(tc, THREAD_CONTROL_STATUS_STARTED);
+  Watchdog wd = {.tc = tc, .bot_stop = stop, .finished = false};
+  pthread_t wd_thread;
+  const bool wd_started =
+      (pthread_create(&wd_thread, NULL, watchdog_main, &wd) == 0);
+  InferenceArgs args;
+  infer_args_fill(&args, INFERENCE_LEAVE_LIST_CAPACITY,
+                  int_to_equity(INFERENCE_EQUITY_MARGIN), NULL, position,
+                  num_threads, 0, 0, tc, /*use_game_history=*/false,
+                  /*use_inference_cutoff_optimization=*/true,
+                  /*target_index=*/0,
+                  played_type == GAME_EVENT_EXCHANGE ? 0
+                                                     : move_get_score(&played),
+                  target_num_exch, &target_played_tiles, &target_known_rack,
+                  &nontarget_known_rack);
+  args.target_move =
+      played_type == GAME_EVENT_TILE_PLACEMENT_MOVE ? &played : NULL;
+  InferenceResults *results = inference_results_create(NULL);
+  err = error_stack_create();
+  infer_without_ctx(&args, results, err);
+  const bool inferred =
+      error_stack_is_empty(err) && !inference_results_get_interrupted(results);
+  error_stack_destroy(err);
+  atomic_store(&wd.finished, true);
+  if (wd_started) {
+    pthread_join(wd_thread, NULL);
+  }
+  thread_control_destroy(tc);
+
+  TuiInferenceSummary summary;
+  if (inferred) {
+    tui_inference_summary_fill(results, game_get_ld(position),
+                               player_get_klv(game_get_player(position, 0)),
+                               target_player_idx, after_move, &summary);
+  }
+  game_destroy(position);
+  if (!inferred || !summary.valid) {
+    inference_results_destroy(results);
+    return false;
+  }
+  pthread_mutex_lock(&state->mutex);
+  bool attached = false;
+  if (turn_idx < state->history_count &&
+      state->history[turn_idx].inference == NULL) {
+    tui_history_entry_attach_inference(state, &state->history[turn_idx],
+                                       results, &summary);
+    attached = true;
+    atomic_fetch_add(&state->render_version, 1);
+  }
+  pthread_mutex_unlock(&state->mutex);
+  if (!attached) {
+    inference_results_destroy(results);
+  }
+  return attached;
+}
+
 // Run a Monte Carlo simulation against the current position with a
 // time budget. Returns true and writes the chosen move on success.
 // Falls back to equity-best on any internal failure.
 static bool run_sim(TuiGameState *state, double budget_sec, Move *out_move) {
+  // With Inference on, first infer the opponent's leave from their last
+  // move, on the clock of this turn's budget.
+  pthread_mutex_lock(&state->mutex);
+  const int turn_idx = state->history_count - 1;
+  Rack mover_rack;
+  rack_set_dist_size(&mover_rack, ld_get_size(state->ld));
+  rack_copy(&mover_rack,
+            player_get_rack(game_get_player(
+                state->game, game_get_player_on_turn_index(state->game))));
+  pthread_mutex_unlock(&state->mutex);
+  struct timespec infer_start;
+  clock_gettime(CLOCK_MONOTONIC, &infer_start);
+  const bool has_inference =
+      infer_turn(state, turn_idx, &mover_rack, &state->bot_stop);
+  budget_sec -= seconds_since(&infer_start);
+  if (budget_sec < (double)MIN_BUDGET_MS / 1000.0) {
+    budget_sec = (double)MIN_BUDGET_MS / 1000.0;
+  }
+  pthread_mutex_lock(&state->mutex);
+  InferenceResults *inference = has_inference && tui_sim_inference_on(state)
+                                    ? state->history[turn_idx].inference
+                                    : NULL;
+  state->live_sim_inferred = inference != NULL;
+  pthread_mutex_unlock(&state->mutex);
+
   const int requested_cands =
       state->sim_candidates > 0 ? state->sim_candidates : SIM_CANDIDATES;
   MoveList *candidates = generate_top_candidates(state->game, requested_cands);
@@ -551,10 +752,11 @@ static bool run_sim(TuiGameState *state, double budget_sec, Move *out_move) {
   args.num_plays = move_list_get_count(candidates);
   args.known_opp_rack = NULL;
   args.win_pcts = state->win_pcts;
-  args.use_inference = false;
+  args.use_inference = inference != NULL;
+  args.use_precomputed_inference = true;
   args.use_census_rollout = state->sim_census;
   args.use_heat_map = false;
-  args.inference_results = NULL;
+  args.inference_results = inference;
   args.num_threads = num_threads;
   args.print_interval = 0;
   args.max_num_display_plays = s_cands;
@@ -1211,6 +1413,13 @@ static void *bot_thread_main(void *arg) {
         }
         finalized->sim_results_saved =
             sim_results_duplicate(state->sim_results);
+        // Show the kind of sim Sim inference asks for now, which may
+        // not be the kind this one was.
+        if (finalized->inference != NULL) {
+          finalized->analysis_inferred = state->live_sim_inferred;
+          tui_history_entry_show_inference_variant(finalized,
+                                                   tui_sim_inference_on(state));
+        }
       } else if (!finalized->analysis_snapshot.is_sim &&
                  state->endgame_snapshot.valid &&
                  state->endgame_snapshot.num_entries > 0 &&
@@ -1426,15 +1635,30 @@ static MoveList *sim_candidates_with_played(const Game *position,
 // on.
 static void analysis_resume_sim(TuiGameState *state, TuiHistoryEntry *entry,
                                 int turn_idx, Game *position) {
+  // Infer the opponent's leave first, so the sim can draw from it, and
+  // show the turn's sim of the kind Sim inference asks for: that's the
+  // one this sim continues.
+  infer_turn(state, turn_idx,
+             player_get_rack(game_get_player(
+                 position, game_get_player_on_turn_index(position))),
+             &state->analysis_stop);
+  pthread_mutex_lock(&state->mutex);
+  const bool use_inference =
+      tui_sim_inference_on(state) && entry->inference != NULL;
+  tui_history_entry_show_inference_variant(entry, use_inference);
+  pthread_mutex_unlock(&state->mutex);
   const bool fresh = entry->sim_results_saved == NULL;
   const int fresh_plies = state->sim_plies > 0 ? state->sim_plies : SIM_PLIES;
   const int fresh_cands =
       state->sim_candidates > 0 ? state->sim_candidates : SIM_CANDIDATES;
   SimResults *results =
       fresh ? sim_results_create(0.005) : entry->sim_results_saved;
-  MoveList *candidates = fresh ? sim_candidates_with_played(
-                                     position, entry->loaded_move, fresh_cands)
-                               : move_list_from_sim_results(results);
+  Move played;
+  const bool have_played = fresh && entry_played_move(entry, position, &played);
+  MoveList *candidates =
+      fresh ? sim_candidates_with_played(position, have_played ? &played : NULL,
+                                         fresh_cands)
+            : move_list_from_sim_results(results);
   if (candidates == NULL || move_list_get_count(candidates) < 2) {
     pthread_mutex_lock(&state->mutex);
     tui_game_state_notice(state, fresh ? "nothing to sim: fewer than 2 moves"
@@ -1454,6 +1678,7 @@ static void analysis_resume_sim(TuiGameState *state, TuiHistoryEntry *entry,
   SimResults *live_results = state->sim_results;
   const int prev_turn_idx = atomic_load(&state->sim_results_turn_idx);
   state->sim_results = results;
+  state->live_sim_inferred = use_inference;
   state->analysis_game = position;
   atomic_store(&state->sim_results_turn_idx, turn_idx);
   atomic_store(&state->sim_results_active, true);
@@ -1476,10 +1701,11 @@ static void analysis_resume_sim(TuiGameState *state, TuiHistoryEntry *entry,
   args.num_plays = move_list_get_count(candidates);
   args.known_opp_rack = NULL;
   args.win_pcts = state->win_pcts;
-  args.use_inference = false;
+  args.use_inference = use_inference;
+  args.use_precomputed_inference = true;
   args.use_census_rollout = state->sim_census;
   args.use_heat_map = false;
-  args.inference_results = NULL;
+  args.inference_results = use_inference ? entry->inference : NULL;
   args.num_threads = num_threads;
   args.print_interval = 0;
   args.max_num_display_plays = fresh ? move_list_get_count(candidates)
@@ -1520,6 +1746,13 @@ static void analysis_resume_sim(TuiGameState *state, TuiHistoryEntry *entry,
   // (the capture reads state->sim_results — currently the entry's own
   // results — and formats against analysis_game).
   tui_capture_analysis_snapshot(state, &entry->analysis_snapshot);
+  // Sim inference may have flipped while this ran; the other turns
+  // swapped then, and this one swaps now that it has saved.
+  if (entry->inference != NULL) {
+    entry->analysis_inferred = use_inference;
+    tui_history_entry_show_inference_variant(entry,
+                                             tui_sim_inference_on(state));
+  }
   state->sim_results = live_results;
   atomic_store(&state->sim_results_turn_idx, prev_turn_idx);
   char done_notice[64];

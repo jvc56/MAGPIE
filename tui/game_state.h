@@ -1,6 +1,7 @@
 #ifndef TUI_GAME_STATE_H
 #define TUI_GAME_STATE_H
 
+#include "../src/def/letter_distribution_defs.h"
 #include "config.h"
 #include "theme.h"
 #include "tile_input.h"
@@ -140,6 +141,33 @@ typedef struct {
   bool valid;
 } TuiAnalysisSnapshot;
 
+// What an inference of the opponent's leave says, against a random
+// leave of the same size drawn from the tiles unseen to the player on
+// turn. Filled once when the inference finishes (turn_inference.h); the
+// Analysis panel shows it above the candidates.
+typedef struct {
+  // Index of the player whose leave was inferred, and the move it was
+  // inferred from, as History shows it.
+  int target_player_idx;
+  char after_move[48];
+  // Tiles they kept, and how many racks the inference found that play
+  // consistent with (weighted by their draws).
+  int kept;
+  uint64_t racks;
+  // Expected count of each letter on the kept leave, inferred and random.
+  double letter_mean[MAX_ALPHABET_SIZE];
+  double letter_random[MAX_ALPHABET_SIZE];
+  // Expected leave value (points), total face value of the kept tiles,
+  // and vowel count, inferred and random.
+  double leave_value;
+  double leave_value_random;
+  double face_value;
+  double face_value_random;
+  double vowels;
+  double vowels_random;
+  bool valid;
+} TuiInferenceSummary;
+
 // Title metadata for the live PEG panel, refreshed by the render
 // thread's row builder from the same peg_poll_read snapshot the rows
 // came from (so the title always matches the rows on screen). Render
@@ -269,6 +297,20 @@ typedef struct {
   // cursors onto the "Plays" row. NULL for live-game entries
   // (those preview from sim_results_saved / endgame_moves_saved).
   struct Move *loaded_move;
+  // The inference of the opponent's leave this turn was played
+  // against, from their previous move (see turn_inference.h). Owned;
+  // NULL when none ran or none applies.
+  struct InferenceResults *inference;
+  TuiInferenceSummary inference_summary;
+  // On a turn with an inference, a sim can draw the opponent's racks
+  // from it or at random, and the turn keeps one of each. Whether
+  // analysis_snapshot and sim_results_saved hold the inferred one;
+  // the other waits in other_analysis_snapshot / other_sim_results_saved
+  // (owned, NULL until used). tui_history_entry_show_inference_variant
+  // swaps them to show the one Sim inference asks for.
+  bool analysis_inferred;
+  TuiAnalysisSnapshot *other_analysis_snapshot;
+  struct SimResults *other_sim_results_saved;
   // Opponent's rack at the moment this turn began. Snapshotted so
   // that the History cursor can rewind the off-turn player's pill
   // alongside the on-turn rack panel and board. NULL until
@@ -552,6 +594,18 @@ typedef struct {
   // SimArgs.use_census_rollout). The TUI's games load no PAT, which the
   // census refuses.
   bool sim_census;
+  // Whether to infer the opponent's leave after each play or exchange
+  // that isn't a bingo or the opening play, and show it in Analysis;
+  // and whether sims (the computer's own too) draw the opponent's
+  // racks from it. tui_sim_inference_on combines them.
+  bool infer;
+  bool sim_inference;
+  // Whether the sim now writing to sim_results draws from an
+  // inference, for the Analysis title. Set when a sim starts.
+  bool live_sim_inferred;
+  // Bumped each time Inference or Sim inference flips which sim a turn
+  // shows, so auto-analyze sims the newly shown kind.
+  int inference_variant_version;
   // Renderer publishes the count of visible analysis rows here so
   // main.c can bound cursor++ without re-computing the layout.
   _Atomic int analysis_visible_rows;
@@ -918,6 +972,30 @@ void tui_game_state_reset_game(TuiGameState *state, uint64_t seed);
 // results and endgame moves, the loaded move) and clear the pointers so
 // the slot can be reused.
 void tui_history_entry_release(TuiHistoryEntry *entry);
+
+// Whether sims draw the opponent's racks from the inference: both
+// Inference and Sim inference are on.
+bool tui_sim_inference_on(const TuiGameState *state);
+
+// Shows `entry`'s inferred sim (true) or its random-rack sim (false),
+// swapping them when the other is on show. No-op for a turn without an
+// inference. Caller holds state->mutex.
+void tui_history_entry_show_inference_variant(TuiHistoryEntry *entry,
+                                              bool inferred);
+
+// Shows the variant tui_sim_inference_on asks for on every played turn
+// except `skip_idx` (pass -1 to skip none): the turn an analysis sim is
+// writing to, which swaps itself once it has saved. Caller holds
+// state->mutex.
+void tui_game_state_show_inference_variants(TuiGameState *state, int skip_idx);
+
+// Hands `inference` (owned from here) and its summary to `entry`. The
+// analysis the turn already has predates it, so it counts as the
+// random-rack variant. Caller holds state->mutex.
+void tui_history_entry_attach_inference(const TuiGameState *state,
+                                        TuiHistoryEntry *entry,
+                                        struct InferenceResults *inference,
+                                        const TuiInferenceSummary *summary);
 
 // Why the game can't carry on from history entry `idx`, or NULL when
 // it can: it must be a played turn with a saved position.

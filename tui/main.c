@@ -681,19 +681,24 @@ static void dispatch_input(struct notcurses *nc, struct ncplane *std_plane,
 }
 
 // Auto-analyze: when the History cursor lands on a different turn while
-// reviewing (no computer game in progress), stops the running analysis
-// and starts the setting's: kibitz, or a sim (a solve on endgame and
-// pre-endgame turns). `*last_cursor` tracks the cursor between calls.
-static void auto_analyze_on_cursor_move(TuiGameState *state, int *last_cursor) {
+// reviewing (no computer game in progress), or the turn shows the other
+// kind of sim after Sim inference flips, stops the running analysis and
+// starts the setting's: kibitz, or a sim (a solve on endgame and
+// pre-endgame turns). `*last_cursor` and `*last_variant_version` track
+// the cursor and state->inference_variant_version between calls.
+static void auto_analyze_on_cursor_move(TuiGameState *state, int *last_cursor,
+                                        int *last_variant_version) {
   pthread_mutex_lock(&state->mutex);
   const int cursor = state->history_cursor;
   const int mode = state->auto_analyze;
   const bool reviewing = !state->bot_started || tui_game_state_play_over(state);
+  const int variant_version = state->inference_variant_version;
   pthread_mutex_unlock(&state->mutex);
-  if (cursor == *last_cursor) {
+  if (cursor == *last_cursor && variant_version == *last_variant_version) {
     return;
   }
   *last_cursor = cursor;
+  *last_variant_version = variant_version;
   if (mode == TUI_AUTO_ANALYZE_OFF || !reviewing || cursor < 0) {
     return;
   }
@@ -936,6 +941,8 @@ int main(int argc, char *argv[]) {
     game_state.sim_candidates = loaded.sim_candidates;
   }
   game_state.sim_census = loaded.sim_census_set ? loaded.sim_census : true;
+  game_state.infer = loaded.infer_set && loaded.infer;
+  game_state.sim_inference = loaded.sim_inference_set && loaded.sim_inference;
   session.pixel_supported = notcurses_canpixel(nc);
   session.font_available = game_state.glyph_cache != NULL;
   // If the user's saved scale=2 can't be honored on this machine, fall
@@ -984,6 +991,7 @@ int main(int argc, char *argv[]) {
   bool input_dirty_pending = false;
   // History cursor auto-analyze last acted on (it starts on the badge).
   int auto_analyze_cursor = -1;
+  int auto_analyze_variant_version = 0;
   uint64_t rendered_version = ~(uint64_t)0;
   long rendered_wall_sec = -1;
   while (ui.running) {
@@ -1139,7 +1147,8 @@ int main(int argc, char *argv[]) {
       }
       dispatch_input(nc, std_plane, &game_state, &ui, &session, key, input);
       open_phony_confirm(&game_state, &ui);
-      auto_analyze_on_cursor_move(&game_state, &auto_analyze_cursor);
+      auto_analyze_on_cursor_move(&game_state, &auto_analyze_cursor,
+                                  &auto_analyze_variant_version);
     } while (ui.running);
 
     // If this frame's input drain dirtied the frame, render it ASAP instead
