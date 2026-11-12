@@ -3213,7 +3213,7 @@ static int compare_move_strings(const void *a, const void *b) {
 // The moves of `config`'s move list as the server stores them: each one as a
 // ranked play reports its "move" (move_get_string), sorted, in a new array of
 // new strings the caller frees with free_move_strings.
-static char **move_list_strings(Config *config, int *count) {
+static char **move_list_strings(const Config *config, int *count) {
   const MoveList *ml = config_get_move_list(config);
   const Game *game = config_get_game(config);
   *count = move_list_get_count(ml);
