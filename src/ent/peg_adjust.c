@@ -14,16 +14,22 @@
 
 struct PegAdjust {
   char *name;
-  Equity values[PEG_ADJUST_VALUES_LENGTH];
+  // One more than the table's last index. The values from there on are 0.
+  int number_of_values;
+  Equity values[PEG_ADJUST_MAX_VALUES_LENGTH];
 };
 
-PegAdjust *
-peg_adjust_create_from_values(const char *name,
-                              const Equity values[PEG_ADJUST_VALUES_LENGTH]) {
+PegAdjust *peg_adjust_create_from_values(const char *name, const Equity *values,
+                                         int number_of_values) {
+  if (number_of_values < 0 || number_of_values > PEG_ADJUST_MAX_VALUES_LENGTH) {
+    log_fatal("a pre-endgame adjustment table has 0 to %d values, not %d",
+              PEG_ADJUST_MAX_VALUES_LENGTH, number_of_values);
+  }
   PegAdjust *peg_adjust = malloc_or_die(sizeof(PegAdjust));
   peg_adjust->name = string_duplicate(name);
-  for (int index = 0; index < PEG_ADJUST_VALUES_LENGTH; index++) {
-    peg_adjust->values[index] = values[index];
+  peg_adjust->number_of_values = number_of_values;
+  for (int index = 0; index < PEG_ADJUST_MAX_VALUES_LENGTH; index++) {
+    peg_adjust->values[index] = index < number_of_values ? values[index] : 0;
   }
   return peg_adjust;
 }
@@ -55,11 +61,12 @@ static bool field_is_blank(const char *field) {
   return true;
 }
 
-// Reads one "index,value" row into values, marking its index as given.
+// Reads one "index,value" row into values, marking its index as given and
+// raising number_of_values to cover it.
 static void parse_row(const char *row, const char *filename, int row_number,
-                      Equity values[PEG_ADJUST_VALUES_LENGTH],
-                      bool given[PEG_ADJUST_VALUES_LENGTH],
-                      ErrorStack *error_stack) {
+                      Equity values[PEG_ADJUST_MAX_VALUES_LENGTH],
+                      bool given[PEG_ADJUST_MAX_VALUES_LENGTH],
+                      int *number_of_values, ErrorStack *error_stack) {
   StringSplitter *fields = split_string(row, ',', false);
   if (string_splitter_get_number_of_items(fields) != 2) {
     push_row_error(error_stack, filename, row_number,
@@ -81,8 +88,11 @@ static void parse_row(const char *row, const char *filename, int row_number,
     string_splitter_destroy(fields);
     return;
   }
-  if (index < 0 || index >= PEG_ADJUST_VALUES_LENGTH) {
-    push_row_error(error_stack, filename, row_number, "index out of range");
+  if (index < 0 || index >= PEG_ADJUST_MAX_VALUES_LENGTH) {
+    char *reason = get_formatted_string("index must be from 0 to %d",
+                                        PEG_ADJUST_MAX_VALUES_LENGTH - 1);
+    push_row_error(error_stack, filename, row_number, reason);
+    free(reason);
     string_splitter_destroy(fields);
     return;
   }
@@ -107,6 +117,9 @@ static void parse_row(const char *row, const char *filename, int row_number,
   }
   given[index] = true;
   values[index] = double_to_equity(value);
+  if (index >= *number_of_values) {
+    *number_of_values = index + 1;
+  }
 }
 
 PegAdjust *peg_adjust_create(const char *data_paths, const char *name,
@@ -123,8 +136,9 @@ PegAdjust *peg_adjust_create(const char *data_paths, const char *name,
     free(filename);
     return NULL;
   }
-  Equity values[PEG_ADJUST_VALUES_LENGTH] = {0};
-  bool given[PEG_ADJUST_VALUES_LENGTH] = {false};
+  Equity values[PEG_ADJUST_MAX_VALUES_LENGTH] = {0};
+  bool given[PEG_ADJUST_MAX_VALUES_LENGTH] = {false};
+  int number_of_values = 0;
   StringSplitter *rows = split_string_by_newline(contents, false);
   const int number_of_rows = string_splitter_get_number_of_items(rows);
   for (int row_idx = 0;
@@ -133,7 +147,8 @@ PegAdjust *peg_adjust_create(const char *data_paths, const char *name,
     char *row = string_duplicate(string_splitter_get_item(rows, row_idx));
     trim_whitespace(row);
     if (row[0] != '\0' && row[0] != '#') {
-      parse_row(row, filename, row_idx + 1, values, given, error_stack);
+      parse_row(row, filename, row_idx + 1, values, given, &number_of_values,
+                error_stack);
     }
     free(row);
   }
@@ -143,11 +158,15 @@ PegAdjust *peg_adjust_create(const char *data_paths, const char *name,
   if (!error_stack_is_empty(error_stack)) {
     return NULL;
   }
-  return peg_adjust_create_from_values(name, values);
+  return peg_adjust_create_from_values(name, values, number_of_values);
 }
 
 const char *peg_adjust_get_name(const PegAdjust *peg_adjust) {
   return peg_adjust->name;
+}
+
+int peg_adjust_get_number_of_values(const PegAdjust *peg_adjust) {
+  return peg_adjust->number_of_values;
 }
 
 Equity peg_adjust_get_value(const PegAdjust *peg_adjust, int index) {
@@ -161,7 +180,7 @@ Equity peg_adjust_get_placement_value(const PegAdjust *peg_adjust,
     return 0;
   }
   const int index = number_of_tiles_in_bag - tiles_played + RACK_SIZE;
-  if (index >= PEG_ADJUST_VALUES_LENGTH) {
+  if (index >= peg_adjust->number_of_values) {
     return 0;
   }
   return peg_adjust->values[index];
@@ -175,4 +194,14 @@ void peg_adjust_fill_by_tiles_played(const PegAdjust *peg_adjust,
     by_tiles_played[tiles_played] = peg_adjust_get_placement_value(
         peg_adjust, number_of_tiles_in_bag, tiles_played);
   }
+}
+
+int peg_adjust_get_bag_class(const PegAdjust *peg_adjust,
+                             int number_of_tiles_in_bag) {
+  int number_of_values = PEG_ADJUST_STANDARD_VALUES_LENGTH;
+  if (peg_adjust && peg_adjust->number_of_values > number_of_values) {
+    number_of_values = peg_adjust->number_of_values;
+  }
+  return number_of_tiles_in_bag < number_of_values ? number_of_tiles_in_bag
+                                                   : number_of_values;
 }

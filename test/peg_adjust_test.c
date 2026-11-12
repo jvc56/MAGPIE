@@ -46,8 +46,14 @@
 
 enum {
   PEG_ADJUST_TEST_GAMES = 4,
-  // Only positions from this bag size down can reach the table.
-  PEG_ADJUST_TEST_MAX_BAG = PEG_ADJUST_VALUES_LENGTH - 1,
+  // Quackle's table has a value for each index up to 12.
+  PEG_ADJUST_TEST_QUACKLE_LENGTH = 13,
+  // The length of the long tables, which reach the plays that leave up to two
+  // racks in the bag.
+  PEG_ADJUST_TEST_LONG_LENGTH = (RACK_SIZE * 3) + 1,
+  // Lookups and bag classes are checked for the bags below this one, which
+  // is past the reach of the longest table.
+  PEG_ADJUST_TEST_BAG_LIMIT = PEG_ADJUST_MAX_VALUES_LENGTH + RACK_SIZE,
   PEG_ADJUST_TEST_MOVE_LIST_CAPACITY = 1024,
   // The capacity of the top-n recording checked against all moves.
   PEG_ADJUST_TEST_TOP_N = 10,
@@ -67,13 +73,18 @@ enum {
 // Tables that stress the bounds differently: values of both signs, values
 // that only raise equities (which a bound must include), values that only
 // lower them (which must not overflow a sentinel), the largest values a file
-// may hold, of both signs and all negative.
+// may hold, of both signs and all negative. These have the standard length.
+// The last two are long (see PEG_ADJUST_TEST_LONG_LENGTH), so that bags above
+// the standard length get adjustments too: values of both signs, and the most
+// negative values.
 typedef enum {
   PEG_ADJUST_PATTERN_ALTERNATING,
   PEG_ADJUST_PATTERN_POSITIVE,
   PEG_ADJUST_PATTERN_NEGATIVE,
   PEG_ADJUST_PATTERN_EXTREME,
   PEG_ADJUST_PATTERN_FLOOR,
+  PEG_ADJUST_PATTERN_LONG_ALTERNATING,
+  PEG_ADJUST_PATTERN_LONG_FLOOR,
   NUMBER_OF_PEG_ADJUST_PATTERNS,
 } peg_adjust_pattern_t;
 
@@ -101,26 +112,44 @@ static void assert_peg_adjust_file_error(const char *dir, const char *name,
   error_stack_destroy(error_stack);
 }
 
-static void
-assert_peg_adjust_values(const PegAdjust *peg_adjust,
-                         const double expected[PEG_ADJUST_VALUES_LENGTH]) {
-  for (int index = 0; index < PEG_ADJUST_VALUES_LENGTH; index++) {
+// The table's value at index, given that its values are the first
+// number_of_values of expected, in points.
+static Equity get_expected_value(const double *expected, int number_of_values,
+                                 int index) {
+  return index < number_of_values ? double_to_equity(expected[index]) : 0;
+}
+
+// peg_adjust has the first number_of_values values of expected and no more,
+// and gives each tile placement the value at its index: the bag less the
+// tiles played, plus RACK_SIZE.
+static void assert_peg_adjust_values(const PegAdjust *peg_adjust,
+                                     const double *expected,
+                                     int number_of_values) {
+  assert(peg_adjust_get_number_of_values(peg_adjust) == number_of_values);
+  for (int index = 0; index < PEG_ADJUST_MAX_VALUES_LENGTH; index++) {
     assert(peg_adjust_get_value(peg_adjust, index) ==
-           double_to_equity(expected[index]));
+           get_expected_value(expected, number_of_values, index));
+  }
+  for (int bag = 1; bag < PEG_ADJUST_TEST_BAG_LIMIT; bag++) {
+    for (int tiles_played = 1; tiles_played <= RACK_SIZE; tiles_played++) {
+      assert(peg_adjust_get_placement_value(peg_adjust, bag, tiles_played) ==
+             get_expected_value(expected, number_of_values,
+                                bag - tiles_played + RACK_SIZE));
+    }
   }
 }
 
 // Loads <dir>/strategy/<name>.csv, written with contents, and checks its
-// values.
-static void
-assert_peg_adjust_file_values(const char *dir, const char *name,
-                              const char *contents,
-                              const double expected[PEG_ADJUST_VALUES_LENGTH]) {
+// length and values.
+static void assert_peg_adjust_file_values(const char *dir, const char *name,
+                                          const char *contents,
+                                          const double *expected,
+                                          int number_of_values) {
   write_peg_adjust_file(dir, name, contents);
   ErrorStack *error_stack = error_stack_create();
   PegAdjust *peg_adjust = peg_adjust_create(dir, name, error_stack);
   assert(error_stack_is_empty(error_stack));
-  assert_peg_adjust_values(peg_adjust, expected);
+  assert_peg_adjust_values(peg_adjust, expected, number_of_values);
   peg_adjust_destroy(peg_adjust);
   error_stack_destroy(error_stack);
 }
@@ -131,20 +160,22 @@ static void test_peg_adjust_file(void) {
                                             "quackle_pegadjust", error_stack);
   assert(error_stack_is_empty(error_stack));
   assert_strings_equal(peg_adjust_get_name(peg_adjust), "quackle_pegadjust");
-  const double quackle[PEG_ADJUST_VALUES_LENGTH] = {
+  const double quackle[PEG_ADJUST_TEST_QUACKLE_LENGTH] = {
       0, -8, 0, -0.5, -2, -3.5, -2, 2, 10, 7, 4, -1, -2};
-  assert_peg_adjust_values(peg_adjust, quackle);
+  assert_peg_adjust_values(peg_adjust, quackle, PEG_ADJUST_TEST_QUACKLE_LENGTH);
 
   // A placement's index is the bag less the tiles played, plus RACK_SIZE.
   assert(peg_adjust_get_placement_value(peg_adjust, 1, 1) ==
-         double_to_equity(2));
+         peg_adjust_get_value(peg_adjust, RACK_SIZE));
   assert(peg_adjust_get_placement_value(peg_adjust, 1, RACK_SIZE) ==
          double_to_equity(-8));
   assert(peg_adjust_get_placement_value(peg_adjust, 5, 1) ==
-         double_to_equity(-1));
-  // Plays that leave PEG_ADJUST_VALUES_LENGTH - RACK_SIZE or more tiles in
-  // the bag, plays from an empty bag and players without a table get none.
-  assert(peg_adjust_get_placement_value(peg_adjust, 7, 1) == 0);
+         peg_adjust_get_value(peg_adjust, RACK_SIZE + 4));
+  // Plays that reach an index past the table's last, plays from an empty bag
+  // and players without a table get none.
+  assert(peg_adjust_get_placement_value(
+             peg_adjust, PEG_ADJUST_TEST_QUACKLE_LENGTH - RACK_SIZE + 1, 1) ==
+         0);
   assert(peg_adjust_get_placement_value(peg_adjust, 0, 1) == 0);
   assert(peg_adjust_get_placement_value(NULL, 1, 1) == 0);
   Equity by_tiles_played[RACK_SIZE + 1];
@@ -158,23 +189,47 @@ static void test_peg_adjust_file(void) {
   error_stack_destroy(error_stack);
 
   char *dir = test_platform_make_temporary_directory("peg_adjust_test");
-  // Blank lines and spaces are allowed, and an index left out is 0.
-  const double partial[PEG_ADJUST_VALUES_LENGTH] = {
-      0, -8, 0, -0.5, -2, -3.5, -2, 2, 10, 7, 4, -1, 0};
+  // Blank lines and spaces are allowed, and the table ends at the highest
+  // index given.
+  const double partial[] = {0, -8, 0, -0.5, -2, -3.5, -2, 2, 10, 7, 4, -1};
   assert_peg_adjust_file_values(dir, "partial",
                                 "# index,value\n"
                                 "1,-8\n2,0\n3,-0.5\n4,-2\n5,-3.5\n6,-2\n"
                                 "\n   \n"
                                 "7,2\n8,10\n  9 , 7 \n10,4\n11,-1\n",
-                                partial);
+                                partial, 12);
   // Windows line endings, signs, bare decimal points and the largest values.
-  const double edges[PEG_ADJUST_VALUES_LENGTH] = {0, 0,    3,     0.5, 0, 0, 0,
-                                                  0, 1000, -1000, 0,   0, 0};
+  // An index left out below the highest is 0.
+  const double edges[] = {0, 0, 3, 0.5, 0, 0, 0, 0, 1000, -1000};
   assert_peg_adjust_file_values(
-      dir, "edges", "# crlf\r\n+2,3\r\n3,.5\r\n8,1000\r\n9,-1000.0\r\n", edges);
-  const double empty[PEG_ADJUST_VALUES_LENGTH] = {0};
-  assert_peg_adjust_file_values(dir, "empty", "", empty);
-  assert_peg_adjust_file_values(dir, "comments", "# nothing\n#1,5\n", empty);
+      dir, "edges", "# crlf\r\n+2,3\r\n3,.5\r\n8,1000\r\n9,-1000.0\r\n", edges,
+      10);
+  const double empty[1] = {0};
+  assert_peg_adjust_file_values(dir, "empty", "", empty, 0);
+  assert_peg_adjust_file_values(dir, "comments", "# nothing\n#1,5\n", empty, 0);
+  // A table is as long as its file makes it. The rows may come in any order,
+  // and a last row of 0 counts.
+  double long_table[PEG_ADJUST_TEST_LONG_LENGTH] = {0};
+  long_table[PEG_ADJUST_STANDARD_VALUES_LENGTH] = -4;
+  long_table[PEG_ADJUST_TEST_LONG_LENGTH - 2] = 3.5;
+  char *long_contents = get_formatted_string(
+      "%d,0\n%d,3.5\n%d,-4\n", PEG_ADJUST_TEST_LONG_LENGTH - 1,
+      PEG_ADJUST_TEST_LONG_LENGTH - 2, PEG_ADJUST_STANDARD_VALUES_LENGTH);
+  assert_peg_adjust_file_values(dir, "long", long_contents, long_table,
+                                PEG_ADJUST_TEST_LONG_LENGTH);
+  free(long_contents);
+  // The largest index a file may give, and the one past it.
+  double largest[PEG_ADJUST_MAX_VALUES_LENGTH] = {0};
+  largest[PEG_ADJUST_MAX_VALUES_LENGTH - 1] = 2;
+  char *largest_contents =
+      get_formatted_string("%d,2\n", PEG_ADJUST_MAX_VALUES_LENGTH - 1);
+  assert_peg_adjust_file_values(dir, "largest_index", largest_contents, largest,
+                                PEG_ADJUST_MAX_VALUES_LENGTH);
+  free(largest_contents);
+  char *too_large_contents =
+      get_formatted_string("%d,2\n", PEG_ADJUST_MAX_VALUES_LENGTH);
+  assert_peg_adjust_file_error(dir, "large_index", too_large_contents);
+  free(too_large_contents);
 
   assert_peg_adjust_file_error(dir, "three_fields", "1,2,3\n");
   assert_peg_adjust_file_error(dir, "trailing_comma", "1,2,\n");
@@ -193,7 +248,6 @@ static void test_peg_adjust_file(void) {
   assert_peg_adjust_file_error(dir, "too_large", "1,1000.5\n");
   assert_peg_adjust_file_error(dir, "too_small", "1,-1000.5\n");
   assert_peg_adjust_file_error(dir, "negative_index", "-1,2\n");
-  assert_peg_adjust_file_error(dir, "large_index", "13,2\n");
   assert_peg_adjust_file_error(dir, "overflowing_index",
                                "99999999999999999999,2\n");
   assert_peg_adjust_file_error(dir, "twice", "1,2\n1,3\n");
@@ -204,6 +258,55 @@ static void test_peg_adjust_file(void) {
                                "1,2\n");
   test_platform_remove_directory_tree(dir);
   free(dir);
+}
+
+// Each bag below number_of_values has a class of its own and the rest share
+// one, and bags of one class give every tile placement the same adjustment.
+static void assert_peg_adjust_bag_classes(const PegAdjust *peg_adjust,
+                                          int number_of_values) {
+  for (int bag = 0; bag < PEG_ADJUST_TEST_BAG_LIMIT; bag++) {
+    assert(peg_adjust_get_bag_class(peg_adjust, bag) ==
+           (bag < number_of_values ? bag : number_of_values));
+    for (int other_bag = 0; other_bag < bag; other_bag++) {
+      if (peg_adjust_get_bag_class(peg_adjust, other_bag) !=
+          peg_adjust_get_bag_class(peg_adjust, bag)) {
+        continue;
+      }
+      for (int tiles_played = 1; tiles_played <= RACK_SIZE; tiles_played++) {
+        assert(peg_adjust_get_placement_value(peg_adjust, bag, tiles_played) ==
+               peg_adjust_get_placement_value(peg_adjust, other_bag,
+                                              tiles_played));
+      }
+    }
+  }
+}
+
+static void test_peg_adjust_bag_class(void) {
+  // Without a table every bag gives the same equities. The bags are classed
+  // as a table of the standard length classes them.
+  assert_peg_adjust_bag_classes(NULL, PEG_ADJUST_STANDARD_VALUES_LENGTH);
+  Equity values[PEG_ADJUST_MAX_VALUES_LENGTH];
+  for (int index = 0; index < PEG_ADJUST_MAX_VALUES_LENGTH; index++) {
+    values[index] = int_to_equity(index + 1);
+  }
+  const int lengths[] = {0,
+                         RACK_SIZE,
+                         PEG_ADJUST_STANDARD_VALUES_LENGTH,
+                         PEG_ADJUST_STANDARD_VALUES_LENGTH + 1,
+                         PEG_ADJUST_TEST_LONG_LENGTH,
+                         PEG_ADJUST_MAX_VALUES_LENGTH};
+  for (size_t length_idx = 0; length_idx < sizeof(lengths) / sizeof(lengths[0]);
+       length_idx++) {
+    const int number_of_values = lengths[length_idx];
+    PegAdjust *peg_adjust =
+        peg_adjust_create_from_values("classes", values, number_of_values);
+    // A shorter table than the standard is classed as the standard one is.
+    assert_peg_adjust_bag_classes(
+        peg_adjust, number_of_values > PEG_ADJUST_STANDARD_VALUES_LENGTH
+                        ? number_of_values
+                        : PEG_ADJUST_STANDARD_VALUES_LENGTH);
+    peg_adjust_destroy(peg_adjust);
+  }
 }
 
 static void assert_peg_adjust_names(const PlayersData *players_data,
@@ -470,12 +573,17 @@ static void assert_peg_adjust_equities(const Game *game,
 }
 
 static PegAdjust *create_pattern_table(peg_adjust_pattern_t pattern, int sign) {
-  Equity values[PEG_ADJUST_VALUES_LENGTH];
-  for (int index = 0; index < PEG_ADJUST_VALUES_LENGTH; index++) {
+  const bool is_long = pattern == PEG_ADJUST_PATTERN_LONG_ALTERNATING ||
+                       pattern == PEG_ADJUST_PATTERN_LONG_FLOOR;
+  const int number_of_values =
+      is_long ? PEG_ADJUST_TEST_LONG_LENGTH : PEG_ADJUST_STANDARD_VALUES_LENGTH;
+  Equity values[PEG_ADJUST_TEST_LONG_LENGTH];
+  for (int index = 0; index < number_of_values; index++) {
     const int alternating = index % 2 == 0 ? 1 : -1;
     double points = 0;
     switch (pattern) {
     case PEG_ADJUST_PATTERN_ALTERNATING:
+    case PEG_ADJUST_PATTERN_LONG_ALTERNATING:
       points = alternating * 15 * index;
       break;
     case PEG_ADJUST_PATTERN_POSITIVE:
@@ -488,6 +596,7 @@ static PegAdjust *create_pattern_table(peg_adjust_pattern_t pattern, int sign) {
       points = alternating * PEG_ADJUST_MAX_ABS_VALUE;
       break;
     case PEG_ADJUST_PATTERN_FLOOR:
+    case PEG_ADJUST_PATTERN_LONG_FLOOR:
       points = -PEG_ADJUST_MAX_ABS_VALUE;
       break;
     case NUMBER_OF_PEG_ADJUST_PATTERNS:
@@ -496,7 +605,7 @@ static PegAdjust *create_pattern_table(peg_adjust_pattern_t pattern, int sign) {
     }
     values[index] = double_to_equity(sign * points);
   }
-  return peg_adjust_create_from_values("pattern", values);
+  return peg_adjust_create_from_values("pattern", values, number_of_values);
 }
 
 static void test_peg_adjust_movegen(const char *set_cmd) {
@@ -513,7 +622,9 @@ static void test_peg_adjust_movegen(const char *set_cmd) {
       draw_starting_racks(game);
       while (!game_over(game)) {
         const int bag = bag_get_letters(game_get_bag(game));
-        if (bag > 0 && bag <= PEG_ADJUST_TEST_MAX_BAG) {
+        // Only positions with fewer tiles in the bag than the table has
+        // values can reach it.
+        if (bag > 0 && bag < peg_adjust_get_number_of_values(peg_adjust)) {
           assert_peg_adjust_equities(game, players_data, peg_adjust, decoy);
           positions++;
         }
@@ -543,11 +654,12 @@ static void assert_bonus_decides(const Game *game, PlayersData *players_data,
                                  int first_index, int last_index) {
   const int player_index = game_get_player_on_turn_index(game);
   const int bag = bag_get_letters(game_get_bag(game));
-  Equity values[PEG_ADJUST_VALUES_LENGTH] = {0};
+  Equity values[PEG_ADJUST_TEST_LONG_LENGTH] = {0};
   for (int index = first_index; index <= last_index; index++) {
     values[index] = int_to_equity(PEG_ADJUST_TEST_BONUS);
   }
-  PegAdjust *bonus = peg_adjust_create_from_values("bonus", values);
+  PegAdjust *bonus =
+      peg_adjust_create_from_values("bonus", values, last_index + 1);
   set_peg_adjust(players_data, game, player_index, bonus);
   MoveList *all_moves = generate_all_moves(game);
   bool exists = false;
@@ -579,11 +691,17 @@ static void test_peg_adjust_bonus(const char *set_cmd) {
     draw_starting_racks(game);
     while (!game_over(game)) {
       const int bag = bag_get_letters(game_get_bag(game));
-      if (bag > 0 && bag <= PEG_ADJUST_TEST_MAX_BAG) {
-        // Leaving 1 to 5 tiles in the bag, then emptying it.
+      if (bag > 0 && bag < PEG_ADJUST_STANDARD_VALUES_LENGTH) {
+        // Leaving 1 to RACK_SIZE - 2 tiles in the bag, then emptying it.
         assert_bonus_decides(game, players_data, RACK_SIZE + 1,
-                             PEG_ADJUST_VALUES_LENGTH - 1);
+                             PEG_ADJUST_STANDARD_VALUES_LENGTH - 1);
         assert_bonus_decides(game, players_data, 1, RACK_SIZE);
+      }
+      if (bag > 0 && bag < PEG_ADJUST_TEST_LONG_LENGTH) {
+        // Leaving more tiles in the bag, which only a long table reaches.
+        assert_bonus_decides(game, players_data,
+                             PEG_ADJUST_STANDARD_VALUES_LENGTH,
+                             PEG_ADJUST_TEST_LONG_LENGTH - 1);
       }
       play_top_n_equity_move(game, 0);
     }
@@ -607,14 +725,18 @@ static void assert_carry_matches(Game *game, MoveList *plain_list,
 // remembers at one bag must not decide a generation at another. Simulation
 // uses the carry for its rollouts: each candidate is played and the next two
 // plies are compared. The same board and rack are also generated at the bag
-// as it is and with the opponent's rack returned to it.
+// as it is and with the opponent's rack returned to it. The table is both
+// players', or only the first player's: the bags that share what is
+// remembered are the mover's table's to say.
 static void test_peg_adjust_carry_pattern(const char *set_cmd,
-                                          peg_adjust_pattern_t pattern) {
+                                          peg_adjust_pattern_t pattern,
+                                          int players_with_table) {
   Config *config = config_create_or_die(set_cmd);
   PlayersData *players_data = config_get_players_data(config);
   PegAdjust *peg_adjust = create_pattern_table(pattern, 1);
   Game *game = config_game_create(config);
-  for (int player_index = 0; player_index < 2; player_index++) {
+  for (int player_index = 0; player_index < players_with_table;
+       player_index++) {
     set_peg_adjust(players_data, game, player_index, peg_adjust);
   }
   MoveList *candidates = move_list_create(PEG_ADJUST_TEST_TOP_N);
@@ -628,7 +750,7 @@ static void test_peg_adjust_carry_pattern(const char *set_cmd,
     draw_starting_racks(game);
     while (!game_over(game)) {
       const int bag = bag_get_letters(game_get_bag(game));
-      if (bag > 0 && bag <= PEG_ADJUST_TEST_MAX_BAG) {
+      if (bag > 0 && bag < peg_adjust_get_number_of_values(peg_adjust)) {
         best_move_carry_reset(carry);
         const int opponent_index = 1 - game_get_player_on_turn_index(game);
         for (int repeat = 0; repeat < 2; repeat++) {
@@ -775,10 +897,16 @@ static void test_peg_adjust_inference(const char *set_cmd) {
 
 // A remembered move scored without its adjustment starts the generation
 // from too high an equity when its adjustment is negative and the true best
-// move's is no better, as under the table of the most negative values.
+// move's is no better, as under the table of the most negative values. Under
+// a long table the bags above the standard length differ too, and a lane's
+// bound remembered at one of them is too low at another.
 static void test_peg_adjust_carry(const char *set_cmd) {
-  test_peg_adjust_carry_pattern(set_cmd, PEG_ADJUST_PATTERN_ALTERNATING);
-  test_peg_adjust_carry_pattern(set_cmd, PEG_ADJUST_PATTERN_FLOOR);
+  test_peg_adjust_carry_pattern(set_cmd, PEG_ADJUST_PATTERN_ALTERNATING, 2);
+  test_peg_adjust_carry_pattern(set_cmd, PEG_ADJUST_PATTERN_FLOOR, 2);
+  test_peg_adjust_carry_pattern(set_cmd, PEG_ADJUST_PATTERN_LONG_ALTERNATING,
+                                2);
+  test_peg_adjust_carry_pattern(set_cmd, PEG_ADJUST_PATTERN_LONG_FLOOR, 2);
+  test_peg_adjust_carry_pattern(set_cmd, PEG_ADJUST_PATTERN_LONG_FLOOR, 1);
 }
 
 // Runs every movegen check under set_cmd.
@@ -791,6 +919,7 @@ static void test_peg_adjust_config_movegen(const char *set_cmd) {
 
 void test_peg_adjust(void) {
   test_peg_adjust_file();
+  test_peg_adjust_bag_class();
   test_peg_adjust_config();
   // The PAT term's bound joins the adjustment in the WMP prune bound.
   const char *set_cmds[] = {

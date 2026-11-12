@@ -1116,7 +1116,7 @@ static void census_rollout_gather_rack(CensusRolloutWorker *worker,
           game_get_player(game, game_get_player_on_turn_index(game))),
       bag, peg_by_tiles_played);
   // Bags that give no play an adjustment share the root bests.
-  const int bag_class = bag >= PEG_ADJUST_VALUES_LENGTH ? 0 : bag;
+  const int bag_class = bag >= PEG_ADJUST_STANDARD_VALUES_LENGTH ? 0 : bag;
   uint64_t key;
   uint64_t check;
   census_rollout_root_cache_key(bag_class, rack, &key, &check);

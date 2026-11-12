@@ -502,7 +502,7 @@ static void test_census_rollout_root_cache_keys(void) {
   uint64_t first_check;
   uint64_t second_key;
   uint64_t second_check;
-  for (int bag_class = 0; bag_class + 1 < PEG_ADJUST_VALUES_LENGTH;
+  for (int bag_class = 0; bag_class + 1 < PEG_ADJUST_STANDARD_VALUES_LENGTH;
        bag_class += 2) {
     const uint8_t with_blank[CENSUS_ROLLOUT_TEST_KEY_TYPES] = {1, 2, 1, 1, 2};
     const uint8_t without_blank[CENSUS_ROLLOUT_TEST_KEY_TYPES] = {0, 2, 1, 1,
@@ -517,7 +517,7 @@ static void test_census_rollout_root_cache_keys(void) {
 
   RootCacheKey *keys =
       malloc_or_die(sizeof(RootCacheKey) * CENSUS_ROLLOUT_TEST_KEY_MAX_RACKS *
-                    PEG_ADJUST_VALUES_LENGTH);
+                    PEG_ADJUST_STANDARD_VALUES_LENGTH);
   int number_of_keys = 0;
   uint8_t counts[CENSUS_ROLLOUT_TEST_KEY_TYPES] = {0};
   while (true) {
@@ -528,10 +528,10 @@ static void test_census_rollout_root_cache_keys(void) {
     }
     if (tiles <= RACK_SIZE) {
       set_rack_counts(first, counts);
-      for (int bag_class = 0; bag_class < PEG_ADJUST_VALUES_LENGTH;
+      for (int bag_class = 0; bag_class < PEG_ADJUST_STANDARD_VALUES_LENGTH;
            bag_class++) {
-        assert(number_of_keys <
-               CENSUS_ROLLOUT_TEST_KEY_MAX_RACKS * PEG_ADJUST_VALUES_LENGTH);
+        assert(number_of_keys < CENSUS_ROLLOUT_TEST_KEY_MAX_RACKS *
+                                    PEG_ADJUST_STANDARD_VALUES_LENGTH);
         RootCacheKey *entry = &keys[number_of_keys++];
         census_rollout_root_cache_key(bag_class, first, &entry->key,
                                       &entry->check);

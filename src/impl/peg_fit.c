@@ -8,7 +8,6 @@
 #include "../def/game_history_defs.h"
 #include "../def/move_defs.h"
 #include "../def/rack_defs.h"
-#include "../def/static_eval_defs.h"
 #include "../def/thread_control_defs.h"
 #include "../ent/bag.h"
 #include "../ent/data_filepaths.h"
@@ -97,14 +96,16 @@ static void peg_fit_generate_all_moves(const Game *game, MoveList **move_list) {
   }
 }
 
-static int peg_fit_get_move_class(const Move *move,
-                                  int number_of_tiles_in_bag) {
+// The move's class in a fit of number_of_values values: the table index a
+// tile placement reaches, or the base class, number_of_values.
+static int peg_fit_get_move_class(const Move *move, int number_of_tiles_in_bag,
+                                  int number_of_values) {
   if (move_get_type(move) != GAME_EVENT_TILE_PLACEMENT_MOVE) {
-    return PEG_FIT_BASE_CLASS;
+    return number_of_values;
   }
   const int index =
       number_of_tiles_in_bag - move_get_tiles_played(move) + RACK_SIZE;
-  return index < PEG_ADJUST_VALUES_LENGTH ? index : PEG_FIT_BASE_CLASS;
+  return index < number_of_values ? index : number_of_values;
 }
 
 static Equity peg_fit_get_spread(const Game *game, int player_index) {
@@ -188,8 +189,8 @@ static void peg_fit_analyze_position(PegFitWorker *worker, int game_idx,
   const Game *game = worker->game;
   const int number_of_tiles_in_bag = bag_get_letters(game_get_bag(game));
   peg_fit_generate_all_moves(game, &worker->all_moves);
-  Move best_moves[PEG_FIT_NUMBER_OF_CLASSES];
-  Equity best_static_equities[PEG_FIT_NUMBER_OF_CLASSES];
+  Move best_moves[PEG_FIT_MAX_NUMBER_OF_CLASSES];
+  Equity best_static_equities[PEG_FIT_MAX_NUMBER_OF_CLASSES];
   PegFitPosition position = {.game_index = game_idx, .turn = turn};
   int number_of_classes = 0;
   const int number_of_moves = move_list_get_count(worker->all_moves);
@@ -198,9 +199,12 @@ static void peg_fit_analyze_position(PegFitWorker *worker, int game_idx,
     if (move_get_type(move) == GAME_EVENT_PASS) {
       continue;
     }
-    const int move_class = peg_fit_get_move_class(move, number_of_tiles_in_bag);
+    const int move_class = peg_fit_get_move_class(move, number_of_tiles_in_bag,
+                                                  args->number_of_values);
+    // Without the playing table, which may reach plays the fit leaves in the
+    // base class.
     Equity static_equity = move_get_equity(move);
-    if (move_class != PEG_FIT_BASE_CLASS) {
+    if (move_get_type(move) == GAME_EVENT_TILE_PLACEMENT_MOVE) {
       static_equity -= peg_adjust_get_placement_value(
           worker->shared->table, number_of_tiles_in_bag,
           move_get_tiles_played(move));
@@ -217,7 +221,7 @@ static void peg_fit_analyze_position(PegFitWorker *worker, int game_idx,
   if (number_of_classes < 2) {
     return;
   }
-  for (int class_idx = 0; class_idx < PEG_FIT_NUMBER_OF_CLASSES; class_idx++) {
+  for (int class_idx = 0; class_idx <= args->number_of_values; class_idx++) {
     if (!position.has_class[class_idx]) {
       continue;
     }
@@ -279,7 +283,7 @@ static void *peg_fit_worker_run(void *arg) {
     while (!game_over(game) && !peg_fit_interrupted(shared)) {
       const int number_of_tiles_in_bag = bag_get_letters(game_get_bag(game));
       if (number_of_tiles_in_bag > 0 &&
-          number_of_tiles_in_bag < PEG_ADJUST_VALUES_LENGTH) {
+          number_of_tiles_in_bag < args->number_of_values) {
         peg_fit_analyze_position(worker, game_idx, turn);
       }
       play_move(get_top_equity_move(game, worker->best_move), game, NULL);
@@ -291,13 +295,17 @@ static void *peg_fit_worker_run(void *arg) {
 }
 
 void peg_fit_solve(const PegFitPosition *positions, int number_of_positions,
-                   PegFitResult *result) {
+                   int number_of_values, PegFitResult *result) {
+  const int number_of_classes = number_of_values + 1;
   double *position_terms =
       calloc_or_die((size_t)number_of_positions + 1, sizeof(double));
-  for (int class_idx = 0; class_idx < PEG_FIT_NUMBER_OF_CLASSES; class_idx++) {
+  for (int class_idx = 0; class_idx < PEG_FIT_MAX_NUMBER_OF_CLASSES;
+       class_idx++) {
     result->terms[class_idx] = 0;
     result->standard_errors[class_idx] = 0;
     result->observations[class_idx] = 0;
+  }
+  for (int class_idx = 0; class_idx < number_of_classes; class_idx++) {
     for (int pos_idx = 0; pos_idx < number_of_positions; pos_idx++) {
       if (positions[pos_idx].has_class[class_idx]) {
         result->observations[class_idx]++;
@@ -312,8 +320,7 @@ void peg_fit_solve(const PegFitPosition *positions, int number_of_positions,
       const PegFitPosition *position = &positions[pos_idx];
       double total = 0;
       int count = 0;
-      for (int class_idx = 0; class_idx < PEG_FIT_NUMBER_OF_CLASSES;
-           class_idx++) {
+      for (int class_idx = 0; class_idx < number_of_classes; class_idx++) {
         if (position->has_class[class_idx]) {
           total += position->value[class_idx] - result->terms[class_idx];
           count++;
@@ -322,7 +329,7 @@ void peg_fit_solve(const PegFitPosition *positions, int number_of_positions,
       position_terms[pos_idx] = count > 0 ? total / count : 0;
     }
     double largest_change = 0;
-    for (int class_idx = 0; class_idx < PEG_FIT_BASE_CLASS; class_idx++) {
+    for (int class_idx = 0; class_idx < number_of_values; class_idx++) {
       if (result->observations[class_idx] == 0) {
         continue;
       }
@@ -345,7 +352,7 @@ void peg_fit_solve(const PegFitPosition *positions, int number_of_positions,
     }
   }
   // Each class term's standard error, from its residuals.
-  for (int class_idx = 0; class_idx < PEG_FIT_NUMBER_OF_CLASSES; class_idx++) {
+  for (int class_idx = 0; class_idx < number_of_classes; class_idx++) {
     const int count = result->observations[class_idx];
     if (count < 2) {
       continue;
@@ -399,7 +406,7 @@ static void peg_fit_write_table(const PegFitArgs *args,
       args->number_of_games, shared->number_of_positions,
       args->rollouts_per_class, args->endgame_plies,
       (unsigned long long)args->seed);
-  for (int class_idx = 1; class_idx < PEG_FIT_BASE_CLASS; class_idx++) {
+  for (int class_idx = 1; class_idx < args->number_of_values; class_idx++) {
     string_builder_add_formatted_string(sb, "%d,%.2f\n", class_idx,
                                         result->terms[class_idx]);
   }
@@ -423,14 +430,15 @@ static void peg_fit_print_result(const PegFitArgs *args,
       shared->games_completed, shared->number_of_positions,
       (long long)shared->rollouts_played,
       ctimer_elapsed_seconds(&shared->timer));
-  for (int class_idx = 1; class_idx < PEG_FIT_NUMBER_OF_CLASSES; class_idx++) {
-    if (class_idx == PEG_FIT_BASE_CLASS) {
+  const int base_class = args->number_of_values;
+  for (int class_idx = 1; class_idx <= base_class; class_idx++) {
+    if (class_idx == base_class) {
       string_builder_add_string(sb, " base");
     } else {
       string_builder_add_formatted_string(sb, "%5d", class_idx);
     }
     const double playing_value =
-        class_idx == PEG_FIT_BASE_CLASS || shared->table == NULL
+        class_idx == base_class || shared->table == NULL
             ? 0
             : equity_to_double(peg_adjust_get_value(shared->table, class_idx));
     string_builder_add_formatted_string(
@@ -499,7 +507,8 @@ void peg_fit(const PegFitArgs *args, ErrorStack *error_stack) {
     qsort(shared.positions, (size_t)shared.number_of_positions,
           sizeof(PegFitPosition), peg_fit_compare_positions);
     PegFitResult result;
-    peg_fit_solve(shared.positions, shared.number_of_positions, &result);
+    peg_fit_solve(shared.positions, shared.number_of_positions,
+                  args->number_of_values, &result);
     peg_fit_print_result(args, &shared, &result);
     peg_fit_write_table(args, &shared, &result, error_stack);
   }

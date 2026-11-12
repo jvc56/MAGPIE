@@ -25,6 +25,7 @@
 #include "../def/players_data_defs.h"
 #include "../def/rack_defs.h"
 #include "../def/sim_defs.h"
+#include "../def/static_eval_defs.h"
 #include "../def/thread_control_defs.h"
 #include "../def/validated_move_defs.h"
 #include "../ent/autoplay_results.h"
@@ -1522,7 +1523,8 @@ static void add_player_solver_help_arg(arg_token_t arg_token,
             "adjustments, read from <data path>/strategy/<adjustments>.csv, "
             "are amounts added to the static equity of a tile placement by "
             "the tiles in the bag less the tiles played plus the rack size. "
-            "Use 'none' to unload. They are off by default.";
+            "A table reaches as far as its file's highest index. Use 'none' "
+            "to unload. They are off by default.";
     break;
   case ARG_TOKEN_P1_PEG_ADJUST:
   case ARG_TOKEN_P2_PEG_ADJUST:
@@ -1601,15 +1603,19 @@ static const char *leave_blend_help(const char **usages,
 }
 
 static const char *peg_fit_help(const char **usages, const char **examples) {
-  usages[0] = "<games> <rollouts> <endgame_plies> [<output_name>]";
+  usages[0] = "<games> <rollouts> <endgame_plies> [<output_name> "
+              "[<tiles_left>]]";
   examples[0] = "1000 16 2";
   examples[1] = "4000 128 0 CSW24_static";
+  examples[2] = "4000 16 0 CSW24_static_long 12";
   return "Fits pre-endgame adjustments to static play's outcomes. They "
          "adjust a tile placement's static equity by the tiles it leaves in "
          "the bag, or, if it empties the bag, by the tiles it leaves on the "
-         "mover's rack. Static self-play gives the positions with 1 to 12 "
-         "tiles in the bag (two racks less two). In each, the best play of "
-         "each count by static equity without the adjustments is played out "
+         "mover's rack. The table reaches the plays that leave up to "
+         "<tiles_left> tiles in the bag (default: the rack size less two), "
+         "and static self-play gives the positions: those with tiles in the "
+         "bag, at most a rack more than <tiles_left>. In each, the best play "
+         "of each count by static equity without the adjustments is played out "
          "to the end <rollouts> times, with the same draws for every count, "
          "and the fit is the least squares one of each play's outcome less "
          "its static equity as a position term plus a count term. With "
@@ -5889,6 +5895,20 @@ void impl_peg_fit(Config *config, ErrorStack *error_stack) {
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
+  // The most tiles a fitted play leaves in the bag, which sets the table's
+  // length.
+  int tiles_left = PEG_ADJUST_STANDARD_VALUES_LENGTH - RACK_SIZE - 1;
+  const char *tiles_left_arg =
+      config_get_parg_value(config, ARG_TOKEN_PEG_FIT, 4);
+  if (tiles_left_arg) {
+    string_to_int_or_push_error("tiles left", tiles_left_arg, 0,
+                                PEG_ADJUST_MAX_VALUES_LENGTH - RACK_SIZE - 1,
+                                ERROR_STATUS_CONFIG_LOAD_MALFORMED_INT_ARG,
+                                &tiles_left, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+  }
   // Self-play fits the one table both players play with.
   if (players_data_get_peg_adjust(config->players_data, 0) !=
       players_data_get_peg_adjust(config->players_data, 1)) {
@@ -5912,6 +5932,7 @@ void impl_peg_fit(Config *config, ErrorStack *error_stack) {
       .number_of_games = number_of_games,
       .rollouts_per_class = rollouts_per_class,
       .endgame_plies = endgame_plies,
+      .number_of_values = RACK_SIZE + tiles_left + 1,
       .tt_fraction_of_mem = config->tt_fraction_of_mem,
       .output_name = output_name,
       .data_paths = config->data_paths,
@@ -16561,7 +16582,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   cmd(ARG_TOKEN_CENSUS, "census", 1, 3, census, generic, false);
   cmd(ARG_TOKEN_LEAVE_BLEND, "leaveblend", 4, 4, leave_blend, generic, false);
   cmd(ARG_TOKEN_PAT_GEN, "patgen", 1, 2, pat_gen, generic, false);
-  cmd(ARG_TOKEN_PEG_FIT, "pegfit", 3, 4, peg_fit, generic, false);
+  cmd(ARG_TOKEN_PEG_FIT, "pegfit", 3, 5, peg_fit, generic, false);
   cmd(ARG_TOKEN_CREATE_DATA, "createdata", 2, 3, create_data, generic, false);
   cmd(ARG_TOKEN_NEXT, "next", 0, 0, next, generic, true);
   cmd(ARG_TOKEN_PREVIOUS, "previous", 0, 0, previous, generic, true);

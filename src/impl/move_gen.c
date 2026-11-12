@@ -4647,16 +4647,16 @@ static uint64_t gen_get_skippable_lanes(const MoveGen *gen,
 // moves are found among the plays the generator would record, at the equity
 // it would record them with, and compare_moves breaks ties, so the
 // generation's best move is unchanged. Given lane_hashes, the lanes' bounds
-// that are moves of their lanes are such moves too, and it also drops the
-// lanes gen_get_skippable_lanes finds, by clearing their anchor counts.
-// Returns those lanes.
+// for bag_class that are moves of their lanes are such moves too, and it also
+// drops the lanes gen_get_skippable_lanes finds, by clearing their anchor
+// counts. Returns those lanes.
 static uint64_t gen_seed_carried_best_move(MoveGen *gen, BestMoveCarry *carry,
                                            const uint64_t *lane_hashes,
-                                           const Rack *rack) {
+                                           int bag_class, const Rack *rack) {
   CarriedRackFind found;
   const bool can_skip_lanes = lane_hashes != NULL;
   if (!best_move_carry_find(carry, rack, gen->player_index, lane_hashes,
-                            gen->number_of_tiles_in_bag, &found)) {
+                            bag_class, &found)) {
     return 0;
   }
   bool seeded = false;
@@ -4705,11 +4705,11 @@ static uint64_t gen_seed_carried_best_move(MoveGen *gen, BestMoveCarry *carry,
 }
 
 // Remembers the generation's best move for its rack, and given lane_hashes as
-// the bound of each lane it searched. Plays of one tile are not carried to
-// other boards: the generator records each in only one direction, and which
-// one depends on the board.
+// the bound, for bag_class, of each lane it searched. Plays of one tile are
+// not carried to other boards: the generator records each in only one
+// direction, and which one depends on the board.
 static void gen_remember_best_move(const MoveGen *gen, BestMoveCarry *carry,
-                                   const uint64_t *lane_hashes,
+                                   const uint64_t *lane_hashes, int bag_class,
                                    uint64_t skipped_lanes, const Rack *rack) {
   const Move *best_move = gen_get_readonly_best_move(gen);
   if (move_get_equity(best_move) == EQUITY_INITIAL_VALUE) {
@@ -4748,7 +4748,7 @@ static void gen_remember_best_move(const MoveGen *gen, BestMoveCarry *carry,
   }
   best_move_carry_add(carry, rack, gen->player_index,
                       carry_move ? &carried : NULL, best_move, lane_hashes,
-                      searched_lanes, gen->number_of_tiles_in_bag);
+                      searched_lanes, bag_class);
 }
 
 // Drops the anchors of the lanes in skip_lanes (MoveGenArgs.skip_lanes).
@@ -4907,6 +4907,9 @@ void generate_moves(const MoveGenArgs *args) {
     const bool carry_best_moves = gen_can_carry_best_moves(gen, args);
     uint64_t lane_hash_storage[2 * BOARD_DIM];
     const uint64_t *lane_hashes = NULL;
+    // The lanes' bounds are kept by the mover's class for the bag: with a
+    // pre-endgame adjustment a move's equity depends on the bag.
+    int bag_class = 0;
     uint64_t skipped_lanes = 0;
     if (carry_best_moves) {
       // With PAT a move's equity reads more of the board than its own lane,
@@ -4917,9 +4920,14 @@ void generate_moves(const MoveGenArgs *args) {
           best_move_carry_skips_lanes(args->best_move_carry)) {
         gen_hash_lanes(gen, lane_hash_storage);
         lane_hashes = lane_hash_storage;
+        bag_class =
+            peg_adjust_get_bag_class(player_get_peg_adjust(game_get_player(
+                                         args->game, gen->player_index)),
+                                     gen->number_of_tiles_in_bag);
       }
-      skipped_lanes = gen_seed_carried_best_move(
-          gen, args->best_move_carry, lane_hashes, &gen->player_rack);
+      skipped_lanes =
+          gen_seed_carried_best_move(gen, args->best_move_carry, lane_hashes,
+                                     bag_class, &gen->player_rack);
     }
     if (args->skip_lanes != 0) {
       gen_skip_lanes(gen, args->skip_lanes);
@@ -4931,7 +4939,7 @@ void generate_moves(const MoveGenArgs *args) {
     }
     gen_record_scoring_plays(gen);
     if (carry_best_moves) {
-      gen_remember_best_move(gen, args->best_move_carry, lane_hashes,
+      gen_remember_best_move(gen, args->best_move_carry, lane_hashes, bag_class,
                              skipped_lanes, &gen->player_rack);
     }
   }
