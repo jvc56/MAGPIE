@@ -198,7 +198,8 @@ void peg_adjust_fill_by_tiles_played(const PegAdjust *peg_adjust,
 
 int peg_adjust_get_bag_class(const PegAdjust *peg_adjust,
                              int number_of_tiles_in_bag) {
-  int number_of_values = PEG_ADJUST_STANDARD_VALUES_LENGTH;
+  // At least 1, which keeps the empty bag apart from the bags with tiles.
+  int number_of_values = 1;
   if (peg_adjust && peg_adjust->number_of_values > number_of_values) {
     number_of_values = peg_adjust->number_of_values;
   }

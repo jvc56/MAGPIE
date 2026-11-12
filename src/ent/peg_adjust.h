@@ -58,9 +58,10 @@ void peg_adjust_fill_by_tiles_played(const PegAdjust *peg_adjust,
 // every tile placement the same adjustment from both. A play takes at most
 // RACK_SIZE tiles, so its index is at least the tiles in the bag, and no play
 // from a bag holding as many tiles as the table has values gets an
-// adjustment: those bags share a class, and each smaller bag has its own. A
-// table shorter than the standard length, and no table, class the bags as a
-// table of the standard length does.
+// adjustment: those bags share a class, and each smaller bag has its own.
+// Without a table every bag that holds tiles shares one. The empty bag, where
+// a play's equity has the endgame's terms instead, has its own class whatever
+// the table.
 int peg_adjust_get_bag_class(const PegAdjust *peg_adjust,
                              int number_of_tiles_in_bag);
 

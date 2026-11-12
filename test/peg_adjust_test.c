@@ -282,14 +282,15 @@ static void assert_peg_adjust_bag_classes(const PegAdjust *peg_adjust,
 }
 
 static void test_peg_adjust_bag_class(void) {
-  // Without a table every bag gives the same equities. The bags are classed
-  // as a table of the standard length classes them.
-  assert_peg_adjust_bag_classes(NULL, PEG_ADJUST_STANDARD_VALUES_LENGTH);
+  // Without a table no play gets an adjustment: the bags that hold tiles
+  // share a class, which the empty bag stays out of.
+  assert_peg_adjust_bag_classes(NULL, 1);
   Equity values[PEG_ADJUST_MAX_VALUES_LENGTH];
   for (int index = 0; index < PEG_ADJUST_MAX_VALUES_LENGTH; index++) {
     values[index] = int_to_equity(index + 1);
   }
   const int lengths[] = {0,
+                         1,
                          RACK_SIZE,
                          PEG_ADJUST_STANDARD_VALUES_LENGTH,
                          PEG_ADJUST_STANDARD_VALUES_LENGTH + 1,
@@ -300,11 +301,10 @@ static void test_peg_adjust_bag_class(void) {
     const int number_of_values = lengths[length_idx];
     PegAdjust *peg_adjust =
         peg_adjust_create_from_values("classes", values, number_of_values);
-    // A shorter table than the standard is classed as the standard one is.
-    assert_peg_adjust_bag_classes(
-        peg_adjust, number_of_values > PEG_ADJUST_STANDARD_VALUES_LENGTH
-                        ? number_of_values
-                        : PEG_ADJUST_STANDARD_VALUES_LENGTH);
+    // The table's own length decides, shorter than the standard or not. A
+    // table with no value classes the bags as no table does.
+    assert_peg_adjust_bag_classes(peg_adjust,
+                                  number_of_values > 1 ? number_of_values : 1);
     peg_adjust_destroy(peg_adjust);
   }
 }
@@ -727,7 +727,9 @@ static void assert_carry_matches(Game *game, MoveList *plain_list,
 // plies are compared. The same board and rack are also generated at the bag
 // as it is and with the opponent's rack returned to it. The table is both
 // players', or only the first player's: the bags that share what is
-// remembered are the mover's table's to say.
+// remembered are the mover's table's to say. Or it is neither's, and only
+// says which bags are checked: without a table every bag that holds tiles
+// shares what is remembered.
 static void test_peg_adjust_carry_pattern(const char *set_cmd,
                                           peg_adjust_pattern_t pattern,
                                           int players_with_table) {
@@ -899,7 +901,8 @@ static void test_peg_adjust_inference(const char *set_cmd) {
 // from too high an equity when its adjustment is negative and the true best
 // move's is no better, as under the table of the most negative values. Under
 // a long table the bags above the standard length differ too, and a lane's
-// bound remembered at one of them is too low at another.
+// bound remembered at one of them is too low at another. Without a table a
+// lane's bound holds at every bag.
 static void test_peg_adjust_carry(const char *set_cmd) {
   test_peg_adjust_carry_pattern(set_cmd, PEG_ADJUST_PATTERN_ALTERNATING, 2);
   test_peg_adjust_carry_pattern(set_cmd, PEG_ADJUST_PATTERN_FLOOR, 2);
@@ -907,6 +910,8 @@ static void test_peg_adjust_carry(const char *set_cmd) {
                                 2);
   test_peg_adjust_carry_pattern(set_cmd, PEG_ADJUST_PATTERN_LONG_FLOOR, 2);
   test_peg_adjust_carry_pattern(set_cmd, PEG_ADJUST_PATTERN_LONG_FLOOR, 1);
+  test_peg_adjust_carry_pattern(set_cmd, PEG_ADJUST_PATTERN_LONG_ALTERNATING,
+                                0);
 }
 
 // Runs every movegen check under set_cmd.

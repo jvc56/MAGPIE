@@ -2,6 +2,7 @@
 #define CENSUS_ROLLOUT_H
 
 #include "../def/board_defs.h"
+#include "../ent/equity.h"
 #include "../ent/game.h"
 #include "../ent/move.h"
 #include "../ent/rack.h"
@@ -156,9 +157,12 @@ bool census_rollout_worker_last_served(const CensusRolloutWorker *worker);
 bool census_rollout_worker_last_steered(const CensusRolloutWorker *worker);
 
 // The two words a worker remembers a rack's bests in the position's anchors
-// by, for a bag class: 0 for the bags that give no play a pre-endgame
-// adjustment, else the bag. Exposed for its test.
-void census_rollout_root_cache_key(int bag_class, const Rack *rack,
-                                   uint64_t *key, uint64_t *check);
+// by, given peg_by_tiles_played, the mover's pre-endgame adjustments from the
+// bag as peg_adjust_fill_by_tiles_played sets them (entries 1 to RACK_SIZE
+// are read): the bests are the same wherever the rack and they are. Exposed
+// for its test.
+void census_rollout_root_cache_key(const Equity *peg_by_tiles_played,
+                                   const Rack *rack, uint64_t *key,
+                                   uint64_t *check);
 
 #endif
