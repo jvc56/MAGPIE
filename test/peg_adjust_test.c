@@ -807,14 +807,14 @@ void test_peg_adjust(void) {
   }
   // The rack info table has its own exchange path, and the word info table
   // its own bounds. They are in the data directory where make prepare_data
-  // has built them, for the standard board.
-#if BOARD_DIM == DEFAULT_BOARD_DIM
+  // has built them, for the standard board. (DEFAULT_BOARD_DIM is an enum
+  // constant, which a preprocessor #if reads as 0.)
+  // NOLINTNEXTLINE(misc-redundant-expression)
+  const bool is_standard_board = BOARD_DIM == DEFAULT_BOARD_DIM;
   const bool have_tables =
+      is_standard_board &&
       cfile_access("./data/lexica/CSW24.rit", CFILE_ACCESS_READ) &&
       cfile_access("./data/lexica/CSW24.wit", CFILE_ACCESS_READ);
-#else
-  const bool have_tables = false;
-#endif
   if (have_tables) {
     test_peg_adjust_config_movegen(
         "set -lex CSW24 -wmp true -rit true -wit true -s1 equity -s2 equity "
