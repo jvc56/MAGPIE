@@ -1019,8 +1019,11 @@ char *str_api_fatal(Config *config,
 // it (`derived_skipped`); a full disk during a rack info table's build skips
 // the table rather than ending the run; one that does not fit in the memory
 // beyond `memreserve`, to build or to hold, is skipped the same way; the
-// claim's derived files carry their sizes (`bytes`).
-#define MAGPIE_VERSION "0.1.4"
+// claim's derived files carry their sizes (`bytes`). 0.1.5: an opening-rack
+// request may state each rack's `candidates`, the moves a later pass ranks in
+// place of every play -- birdtest's reanalysis of a rack's first-pass
+// leaders, which only a build that reads them can run.
+#define MAGPIE_VERSION "0.1.5"
 
 const char *config_get_magpie_version(void) { return MAGPIE_VERSION; }
 
@@ -12770,8 +12773,83 @@ static char *config_contribute_games(Config *config, const JsonValue *request,
       autoplay_results_get_json(config->autoplay_results, game_pairs));
 }
 
+// A candidate move as the server sends it, in the form a ranked play's "move"
+// is reported (move_get_string), rewritten where the move parser reads it
+// differently: an exchange is reported "(exch ABC)" and parsed "ex ABC". A
+// placement ("8H HADJI", "H8 HADJI") and a pass read the same both ways.
+// Returns a new string the caller frees.
+static char *contribute_candidate_to_parsable(const char *candidate) {
+  static const char exch_prefix[] = "(exch ";
+  const size_t prefix_length = sizeof(exch_prefix) - 1;
+  const size_t length = string_length(candidate);
+  if (length > prefix_length + 1 &&
+      strncmp(candidate, exch_prefix, prefix_length) == 0 &&
+      candidate[length - 1] == ')') {
+    return get_formatted_string("ex %.*s", (int)(length - prefix_length - 1),
+                                candidate + prefix_length);
+  }
+  return string_duplicate(candidate);
+}
+
+// The rack's move list is the candidates the server sent, each validated
+// against the empty board and the rack just drawn: a move the rack cannot
+// make, a phony, or one listed twice is the server's error, refused rather
+// than ranked. The list is not regenerated, so the simulation that follows
+// ranks exactly these (up to the player's num_plays).
+static bool contribute_load_candidates(Config *config, const char *rack_str,
+                                       const JsonValue *candidates,
+                                       ErrorStack *error_stack) {
+  const int count = json_array_length(candidates);
+  if (!json_is_array(candidates) || count < 1) {
+    error_stack_push(error_stack, ERROR_STATUS_CONTRIBUTE_SERVER_ERROR,
+                     get_formatted_string(
+                         "server sent no candidates for rack '%s'", rack_str));
+    return false;
+  }
+  const int player_index = game_get_player_on_turn_index(config->game);
+  config_recreate_move_list(config, count, MOVE_LIST_TYPE_DEFAULT);
+  for (int i = 0; i < count; i++) {
+    const char *candidate = json_array_get_string(candidates, i);
+    if (!candidate || is_string_empty_or_whitespace(candidate)) {
+      error_stack_push(
+          error_stack, ERROR_STATUS_CONTRIBUTE_SERVER_ERROR,
+          get_formatted_string(
+              "candidate %d for rack '%s' is not a nonempty string", i,
+              rack_str));
+      return false;
+    }
+    char *parsable = contribute_candidate_to_parsable(candidate);
+    ErrorStack *move_errors = error_stack_create();
+    ValidatedMoves *vms =
+        validated_moves_create(config->game, player_index, parsable,
+                               /*allow_phonies=*/false,
+                               /*allow_playthrough=*/false, move_errors);
+    const bool valid = error_stack_is_empty(move_errors) &&
+                       validated_moves_get_number_of_moves(vms) == 1;
+    const bool repeated =
+        valid && move_list_move_exists(config->move_list,
+                                       validated_moves_get_move(vms, 0));
+    if (valid && !repeated) {
+      validated_moves_add_to_sorted_move_list(vms, config->move_list);
+    }
+    validated_moves_destroy(vms);
+    error_stack_destroy(move_errors);
+    free(parsable);
+    if (!valid || repeated) {
+      error_stack_push(
+          error_stack, ERROR_STATUS_CONTRIBUTE_SERVER_ERROR,
+          get_formatted_string(
+              "candidate '%s' for rack '%s' is %s", candidate, rack_str,
+              repeated ? "listed twice" : "not a valid play of the rack"));
+      return false;
+    }
+  }
+  return true;
+}
+
 bool config_contribute_generate_for_rack(Config *config, const char *rack_str,
                                          uint64_t seed, bool simming,
+                                         const JsonValue *candidates,
                                          ErrorStack *error_stack) {
   config_init_game(config);
   game_reset(config->game);
@@ -12793,6 +12871,18 @@ bool config_contribute_generate_for_rack(Config *config, const char *rack_str,
   // Simulating needs a move list to simulate over; the CLI's "simulate"
   // command relies on the user already having run "generate", but a task
   // request has no such prior step to reuse.
+  if (candidates) {
+    // Only a simulation ranks a fixed set: a static player's ranking of its
+    // candidates is their order by equity, which the server already has.
+    if (!simming) {
+      error_stack_push(
+          error_stack, ERROR_STATUS_CONTRIBUTE_SERVER_ERROR,
+          string_duplicate("server sent candidates for a static player"));
+      return false;
+    }
+    return contribute_load_candidates(config, rack_str, candidates,
+                                      error_stack);
+  }
   if (!simming) {
     impl_move_gen(config, error_stack);
     return error_stack_is_empty(error_stack);
@@ -12822,13 +12912,12 @@ bool config_contribute_generate_for_rack(Config *config, const char *rack_str,
 // executor used to derive one from the rack's letters, which was the same on
 // every machine but not the server's to choose; every task now states a seed,
 // this one included, so what a simulation samples is a function of the task.
-static bool
-config_contribute_analyze_rack_searching(Config *config, const char *rack_str,
-                                         uint64_t seed, const JsonValue *player,
-                                         bool simming, StringBuilder *sb,
-                                         ErrorStack *error_stack) {
+static bool config_contribute_analyze_rack_searching(
+    Config *config, const char *rack_str, uint64_t seed,
+    const JsonValue *player, bool simming, const JsonValue *candidates,
+    StringBuilder *sb, ErrorStack *error_stack) {
   if (!config_contribute_generate_for_rack(config, rack_str, seed, simming,
-                                           error_stack)) {
+                                           candidates, error_stack)) {
     return false;
   }
   if (simming) {
@@ -12876,20 +12965,20 @@ config_contribute_analyze_rack_searching(Config *config, const char *rack_str,
 
 // One rack's analysis, within the player's movegen budget for it if it has
 // one: the rack is the opening-rack job's move.
-static bool config_contribute_analyze_rack(Config *config, const char *rack_str,
-                                           uint64_t seed,
-                                           const JsonValue *player,
-                                           bool simming, StringBuilder *sb,
-                                           ErrorStack *error_stack) {
+static bool
+config_contribute_analyze_rack(Config *config, const char *rack_str,
+                               uint64_t seed, const JsonValue *player,
+                               bool simming, const JsonValue *candidates,
+                               StringBuilder *sb, ErrorStack *error_stack) {
   if (config->movegen_budget == 0) {
     return config_contribute_analyze_rack_searching(
-        config, rack_str, seed, player, simming, sb, error_stack);
+        config, rack_str, seed, player, simming, candidates, sb, error_stack);
   }
   MovegenBudget budget;
   movegen_budget_init(&budget, config->movegen_budget);
   MovegenBudget *previous = gen_set_movegen_budget(&budget);
   const bool ok = config_contribute_analyze_rack_searching(
-      config, rack_str, seed, player, simming, sb, error_stack);
+      config, rack_str, seed, player, simming, candidates, sb, error_stack);
   (void)gen_set_movegen_budget(previous);
   return ok;
 }
@@ -12918,6 +13007,23 @@ static char *config_contribute_opening_rack(Config *config,
     error_stack_push(
         error_stack, ERROR_STATUS_CONTRIBUTE_SERVER_ERROR,
         string_duplicate("server sent an opening rack task with no racks"));
+    return NULL;
+  }
+  // Optional, and when present an array parallel to the racks: element i is
+  // the moves rack i ranks instead of every play (a later pass over a rack's
+  // first-pass leaders). Null means none, as absent does.
+  const JsonValue *candidates =
+      json_object_get(request, CONTRIBUTE_KEY_CANDIDATES);
+  if (candidates && json_is_null(candidates)) {
+    candidates = NULL;
+  }
+  if (candidates && (!json_is_array(candidates) ||
+                     json_array_length(candidates) != rack_count)) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_CONTRIBUTE_SERVER_ERROR,
+        get_formatted_string("server sent candidates that are not an array "
+                             "with one element per rack (%d racks)",
+                             rack_count));
     return NULL;
   }
   // Required, as it is for games and leave generation: rack i of the batch is
@@ -13017,8 +13123,10 @@ static char *config_contribute_opening_rack(Config *config,
     if (i > 0) {
       string_builder_add_string(sb, ",");
     }
-    if (!config_contribute_analyze_rack(config, rack_str, seed + (uint64_t)i,
-                                        player, simming, sb, error_stack)) {
+    if (!config_contribute_analyze_rack(
+            config, rack_str, seed + (uint64_t)i, player, simming,
+            candidates ? json_array_get(candidates, i) : NULL, sb,
+            error_stack)) {
       string_builder_destroy(sb);
       return NULL;
     }

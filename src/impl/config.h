@@ -123,10 +123,13 @@ bool config_contribute_validate_common(const JsonValue *request,
 // those entry points, which ignore the per-player settings a request applies.
 // The first half of analysing one opening rack: the empty board, the rack
 // drawn, and the moves to rank generated -- every play up to num_plays for a
-// simulating player, whatever its recorder. False, with the error pushed, on
-// an unusable rack.
+// simulating player, whatever its recorder. With `candidates` (a JSON array
+// of move strings, or NULL for none), exactly those moves instead, validated
+// against the rack and the lexicon: no move generation. False, with the error
+// pushed, on an unusable rack or candidate.
 bool config_contribute_generate_for_rack(Config *config, const char *rack_str,
                                          uint64_t seed, bool simming,
+                                         const JsonValue *candidates,
                                          ErrorStack *error_stack);
 
 void config_contribute_use_player_settings_for_analysis(Config *config,
