@@ -58,15 +58,15 @@ typedef struct DataFetchChunk {
 // DATA_FETCH_VERSION (sha256sum data-<version>.tgz.*).
 static const DataFetchChunk data_fetch_chunks[] = {
     {"aa", 41943040,
-     "89c71adfee7cd75a0f911f8c72b425a739c42a015683508b6bd4b5dfcbc2e8d1"},
+     "e09627b9c8248c4678959e692c4f8fdba3d98f54d6515f660f38993653f45712"},
     {"ab", 41943040,
-     "93542c90bbea64c43f0bb249c17d07421b9ab18652554f41963c60dbda158799"},
+     "b6cd379927ea04e0aed60826bc62f9c6da383d7dc12f712f21452f4be77f253a"},
     {"ac", 41943040,
-     "cf5a99f0801e65844ff7149203cbde62d65fdff6f09e3da27ada9df9dcb379ad"},
+     "a29e9561e75c292a114ec6e4840df4cde4ff0cc19c180f245788f021b2ed6c3c"},
     {"ad", 41943040,
-     "725e58b79c967f1b87f4f017b392afa891dbad5bef63348b554ab3e84c9ba68c"},
-    {"ae", 24456957,
-     "c059b42b8e79f01108108905098dde119436d0de75cf6c1353558d87dfe6a4d5"},
+     "b313ab6e2c4076642106946727220416e9226fc9011caabc11e9c80ace13e3ae"},
+    {"ae", 24460467,
+     "137e0a9aa227f3dd63fbfcdd4758ddbd242028af84074ba52149c112d2770a53"},
 };
 
 static void data_fetch_report(data_fetch_report_t report, void *context,
