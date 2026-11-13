@@ -19,7 +19,6 @@
 #include "../ent/peg_adjust.h"
 #include "../ent/player.h"
 #include "../ent/rack.h"
-#include "../ent/static_eval.h"
 #include "../util/io_util.h"
 #include "census.h"
 #include "census_play_scores.h"

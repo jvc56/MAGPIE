@@ -577,7 +577,7 @@ static PegAdjust *create_pattern_table(peg_adjust_pattern_t pattern, int sign) {
                        pattern == PEG_ADJUST_PATTERN_LONG_FLOOR;
   const int number_of_values =
       is_long ? PEG_ADJUST_TEST_LONG_LENGTH : PEG_ADJUST_STANDARD_VALUES_LENGTH;
-  Equity values[PEG_ADJUST_TEST_LONG_LENGTH];
+  Equity values[PEG_ADJUST_TEST_LONG_LENGTH] = {0};
   for (int index = 0; index < number_of_values; index++) {
     const int alternating = index % 2 == 0 ? 1 : -1;
     double points = 0;
