@@ -67,6 +67,7 @@
 #include "pat_test.h"
 #include "pat_utility_test.h"
 #include "path_move_lists_test.h"
+#include "peg_adjust_test.h"
 #include "peg_cascade_bench_test.h"
 #include "peg_embedding_test.h"
 #include "peg_fit_test.h"
@@ -155,6 +156,7 @@ static TestEntry test_table[] = {
     {"bestsmall", test_best_small},
     {"eq", test_equity},
     {"eqadj", test_equity_adjustments},
+    {"pegadjust", test_peg_adjust},
     {"gameplay", test_gameplay},
     {"stats", test_stats},
     {"infer", test_infer},

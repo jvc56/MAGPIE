@@ -320,15 +320,15 @@ static void census_find_best_exchange_leave(
 
 // The equity of the target's exchange of target_number_of_tiles_exchanged
 // tiles that keeps best_exchange_leave, worth leave_value, computed the way
-// move generation computes it.
+// move generation computes it: an exchange leaves the bag as it is, so it
+// gets no pre-endgame adjustment.
 static Equity get_exchange_equity(const Inference *inference,
                                   Equity leave_value) {
   const Game *game = inference->game;
   return static_eval_get_nonopening_move_equity(
       game_get_ld(game), inference->best_exchange_leave,
       player_get_rack(game_get_player(game, 1 - inference->target_index)),
-      inference->target_number_of_tiles_exchanged,
-      bag_get_letters(game_get_bag(game)), 0, leave_value);
+      bag_get_letters(game_get_bag(game)), 0, leave_value, 0);
 }
 
 // Sets best_exchange_leave to the tiles the target keeps in its best exchange
@@ -421,15 +421,14 @@ static Equity get_top_equity_from_census(const Inference *inference,
       // Whether the tiles make a play is as good as random, so the play is
       // valued either way and dropped by a select, not a branch.
       const Equity play_equity = static_eval_get_nonopening_move_equity(
-          ld, &kept, opp_rack, tiles_played[split_idx], number_of_tiles_in_bag,
-          play_score, leave_value);
+          ld, &kept, opp_rack, number_of_tiles_in_bag, play_score, leave_value,
+          0);
       best_equity = play_score != CENSUS_UNPLAYABLE && play_equity > best_equity
                         ? play_equity
                         : best_equity;
       if (add_exchange) {
         const Equity exchange_equity = static_eval_get_nonopening_move_equity(
-            ld, &kept, opp_rack, tiles_played[split_idx],
-            number_of_tiles_in_bag, 0, leave_value);
+            ld, &kept, opp_rack, number_of_tiles_in_bag, 0, leave_value, 0);
         best_equity =
             exchange_equity > best_equity ? exchange_equity : best_equity;
       }
@@ -460,8 +459,8 @@ void evaluate_possible_leave(Inference *inference) {
     const Equity nonopening_equity = static_eval_get_nonopening_move_equity(
         game_get_ld(game), inference->current_target_leave,
         player_get_rack(game_get_player(game, 1 - inference->target_index)),
-        inference->target_tiles_played, bag_get_letters(game_get_bag(game)),
-        inference->target_score, current_leave_value);
+        bag_get_letters(game_get_bag(game)), inference->target_score,
+        current_leave_value, 0);
     target_equity_cutoff = nonopening_equity +
                            inference->target_placement_adjustment +
                            inference->equity_margin;
@@ -654,6 +653,13 @@ Inference *inference_create(const Game *game, const InferenceArgs *args,
                             const InferenceResults *results) {
   Inference *inference = malloc_or_die(sizeof(Inference));
   inference->game = game_duplicate(game);
+  // Inference leaves pre-endgame adjustments out, as it did before they were
+  // loadable: the equities it computes itself (the target's move, the census
+  // plays and the best exchange) pass none, so the moves it generates must
+  // get none either.
+  for (int player_index = 0; player_index < 2; player_index++) {
+    player_set_peg_adjust(game_get_player(inference->game, player_index), NULL);
+  }
   inference->move_list = move_list_create(1);
   inference->klv =
       player_get_klv(game_get_player(inference->game, args->target_index));

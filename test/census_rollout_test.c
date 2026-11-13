@@ -1,17 +1,22 @@
 #include "census_rollout_test.h"
 
+#include "../src/compat/cfile.h"
 #include "../src/compat/ctime.h"
 #include "../src/def/board_defs.h"
 #include "../src/def/equity_defs.h"
 #include "../src/def/letter_distribution_defs.h"
 #include "../src/def/move_defs.h"
+#include "../src/def/players_data_defs.h"
 #include "../src/def/rack_defs.h"
 #include "../src/def/static_eval_defs.h"
 #include "../src/ent/bag.h"
+#include "../src/ent/equity.h"
 #include "../src/ent/game.h"
 #include "../src/ent/letter_distribution.h"
 #include "../src/ent/move.h"
+#include "../src/ent/peg_adjust.h"
 #include "../src/ent/player.h"
+#include "../src/ent/players_data.h"
 #include "../src/ent/rack.h"
 #include "../src/ent/sim_results.h"
 #include "../src/impl/census_rollout.h"
@@ -22,6 +27,7 @@
 #include "../src/util/io_util.h"
 #include "../src/util/string_util.h"
 #include "test_constants.h"
+#include "test_platform.h"
 #include "test_util.h"
 #include <assert.h>
 #include <stdbool.h>
@@ -29,6 +35,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+// Quackle's table, in test/fixtures/strategy.
+#define CENSUS_ROLLOUT_TEST_FIXTURES_PATH "./test/fixtures"
 
 enum {
   // Each position's candidates, the rollouts of each, and the plies of a
@@ -51,12 +60,29 @@ enum {
   // C(RACK_SIZE + 5, 5) of them, 792 at RACK_SIZE 7 and 1287 at 8.
   CENSUS_ROLLOUT_TEST_KEY_TYPES = 5,
   CENSUS_ROLLOUT_TEST_KEY_MAX_RACKS = 4096,
+  // The root cache key test's adjustments: those of every bag under a table
+  // of the greatest length, and the two a millipoint from none for each
+  // number of tiles played.
+  CENSUS_ROLLOUT_TEST_KEY_ADJUSTMENTS =
+      PEG_ADJUST_MAX_VALUES_LENGTH + (2 * RACK_SIZE),
+  // The test tables: the points their values step by from an index to the
+  // next, the length of the long one, which reaches the plays that leave up
+  // to two racks in the bag, and how many tables one mover is given in turn.
+  CENSUS_ROLLOUT_TEST_TABLE_STEP = 15,
+  CENSUS_ROLLOUT_TEST_LONG_LENGTH = (RACK_SIZE * 3) + 1,
+  CENSUS_ROLLOUT_TEST_SWITCHED_TABLES = 4,
 };
 
 // The bags of the positions: a full one, where the census is built from the
 // most anchors, and emptier ones, down to bags whose plays get pre-endgame
 // adjustments.
 static const int census_rollout_test_bag_sizes[] = {70, 45, 25, 10};
+
+// The bags of the positions that test the players' tables, from one the long
+// table has no value for down to bags whose every play gets an adjustment,
+// and the bags of the sims that do.
+static const int census_rollout_test_table_bag_sizes[] = {26, 18, 12, 8};
+static const int census_rollout_test_sim_table_bag_sizes[] = {18, 10};
 
 // Plays a static game from seed until the bag holds at most bag_tiles tiles.
 static void play_to_bag_size(Game *game, MoveList *move_list, uint64_t seed,
@@ -82,16 +108,58 @@ static void generate_candidates(Game *game, MoveList *candidates) {
   move_list_sort_moves(candidates);
 }
 
+// A table whose values swing a play's equity with the tiles it places by more
+// than scores and leaves usually differ: CENSUS_ROLLOUT_TEST_TABLE_STEP
+// points an index, above 0 at the odd indices and below it at the even ones
+// with first_sign 1, the other way round with -1. No two indices share a
+// value.
+static PegAdjust *create_swinging_table(int number_of_values, int first_sign) {
+  Equity values[PEG_ADJUST_MAX_VALUES_LENGTH] = {0};
+  for (int index = 0; index < number_of_values; index++) {
+    const int sign = index % 2 == 1 ? first_sign : -first_sign;
+    values[index] =
+        int_to_equity(sign * CENSUS_ROLLOUT_TEST_TABLE_STEP * index);
+  }
+  return peg_adjust_create_from_values("swinging", values, number_of_values);
+}
+
+// Gives a player of game a pre-endgame adjustment table, or none with NULL,
+// through the config's players data, which must be given NULL again before
+// it and the table are destroyed.
+static void set_peg_adjust(const Config *config, const Game *game,
+                           int player_index, PegAdjust *peg_adjust) {
+  PlayersData *players_data = config_get_players_data(config);
+  players_data_set_data(players_data, PLAYERS_DATA_TYPE_PEG_ADJUST,
+                        player_index, peg_adjust);
+  player_update(players_data, game_get_player(game, player_index));
+}
+
+// Whether the table of game's player on turn has a value for a tile
+// placement from the bag.
+static bool mover_table_reaches_bag(const Game *game) {
+  const PegAdjust *peg_adjust = player_get_peg_adjust(
+      game_get_player(game, game_get_player_on_turn_index(game)));
+  const int bag = bag_get_letters(game_get_bag(game));
+  return peg_adjust != NULL && bag > 0 &&
+         bag < peg_adjust_get_number_of_values(peg_adjust);
+}
+
 // Rollouts as a sim plays them: the opponent draws a random rack, the
 // candidate is played, and each ply plays the best move. Every census-steered
 // move must be the move a plain generation finds, from a census built on one
-// thread and from one built on several.
-static void test_census_rollout_moves_match_plain(void) {
-  if (BOARD_DIM != 15) {
-    return;
-  }
+// thread and from one built on several. The players have the pre-endgame
+// adjustment tables given, NULL for none. With shared_racks every candidate's
+// rollouts deal the opponent the same racks, as a sim's do, so that a worker
+// meets a rack again from each bag the candidates leave.
+static void assert_census_rollout_moves_match_plain(PegAdjust *first_table,
+                                                    PegAdjust *second_table,
+                                                    const int *bag_sizes,
+                                                    int number_of_positions,
+                                                    bool shared_racks) {
   Config *config = config_create_or_die("set -lex CSW21 -wmp true");
   Game *game = config_game_create(config);
+  set_peg_adjust(config, game, 0, first_table);
+  set_peg_adjust(config, game, 1, second_table);
   Game *rollout = game_duplicate(game);
   MoveList *move_list = move_list_create(1);
   MoveList *census_moves = move_list_create(1);
@@ -104,13 +172,11 @@ static void test_census_rollout_moves_match_plain(void) {
   Move census_move;
   uint64_t served = 0;
   uint64_t steered = 0;
-  const int number_of_positions =
-      (int)(sizeof(census_rollout_test_bag_sizes) /
-            sizeof(census_rollout_test_bag_sizes[0]));
+  uint64_t steered_with_adjustments = 0;
   for (int position_idx = 0; position_idx < number_of_positions;
        position_idx++) {
     play_to_bag_size(game, move_list, 100 + (uint64_t)position_idx,
-                     census_rollout_test_bag_sizes[position_idx]);
+                     bag_sizes[position_idx]);
     if (game_over(game)) {
       continue;
     }
@@ -126,7 +192,8 @@ static void test_census_rollout_moves_match_plain(void) {
         game_copy(rollout, game);
         return_rack_to_bag(rollout, opponent_index);
         game_seed(rollout,
-                  1000 + (uint64_t)(candidate_idx * 100 + rollout_idx));
+                  1000 + (uint64_t)((shared_racks ? 0 : candidate_idx * 100) +
+                                    rollout_idx));
         set_random_rack(rollout, opponent_index, NULL);
         play_move(candidate, rollout, NULL);
         census_rollout_worker_set_candidate(serial_worker, serial_census,
@@ -140,6 +207,10 @@ static void test_census_rollout_moves_match_plain(void) {
                                                  rollout, census_moves, ply));
           served += census_rollout_worker_last_served(serial_worker);
           steered += census_rollout_worker_last_steered(serial_worker);
+          if (census_rollout_worker_last_steered(serial_worker) &&
+              mover_table_reaches_bag(rollout)) {
+            steered_with_adjustments++;
+          }
           assert_moves_are_equal(
               &census_move,
               census_rollout_get_best_move(threaded_worker, threaded_census,
@@ -151,13 +222,164 @@ static void test_census_rollout_moves_match_plain(void) {
       }
     }
   }
-  // The census did the steering, not just the plain generation.
+  // The census did the steering, not just the plain generation, and where a
+  // player has a table, of generations whose plays it adjusts.
   assert(served > 0);
   assert(steered > 0);
+  assert(steered_with_adjustments > 0 ||
+         (first_table == NULL && second_table == NULL));
   census_rollout_worker_destroy(threaded_worker);
   census_rollout_worker_destroy(serial_worker);
   census_rollout_destroy(threaded_census);
   census_rollout_destroy(serial_census);
+  move_list_destroy(candidates);
+  move_list_destroy(census_moves);
+  move_list_destroy(move_list);
+  game_destroy(rollout);
+  set_peg_adjust(config, game, 0, NULL);
+  set_peg_adjust(config, game, 1, NULL);
+  game_destroy(game);
+  config_destroy(config);
+}
+
+static void test_census_rollout_moves_match_plain(void) {
+  if (BOARD_DIM != 15) {
+    return;
+  }
+  assert_census_rollout_moves_match_plain(
+      NULL, NULL, census_rollout_test_bag_sizes,
+      (int)(sizeof(census_rollout_test_bag_sizes) /
+            sizeof(census_rollout_test_bag_sizes[0])),
+      false);
+}
+
+// The census serves a player with a pre-endgame adjustment table as one
+// without: the same table for both players, a table for one of them, two
+// tables that pull opposite ways, and a long one whose values the bags above
+// the standard length reach. Without a table, a rack the candidates share is
+// remembered across the bags they leave, which give its plays the same
+// equities.
+static void test_census_rollout_moves_match_plain_with_tables(void) {
+  if (BOARD_DIM != 15) {
+    return;
+  }
+  PegAdjust *table =
+      create_swinging_table(PEG_ADJUST_STANDARD_VALUES_LENGTH, 1);
+  PegAdjust *opposite_table =
+      create_swinging_table(PEG_ADJUST_STANDARD_VALUES_LENGTH, -1);
+  PegAdjust *long_table =
+      create_swinging_table(CENSUS_ROLLOUT_TEST_LONG_LENGTH, 1);
+  const int *bag_sizes = census_rollout_test_table_bag_sizes;
+  const int number_of_positions =
+      (int)(sizeof(census_rollout_test_table_bag_sizes) /
+            sizeof(census_rollout_test_table_bag_sizes[0]));
+  assert_census_rollout_moves_match_plain(NULL, NULL, bag_sizes,
+                                          number_of_positions, true);
+  assert_census_rollout_moves_match_plain(table, table, bag_sizes,
+                                          number_of_positions, true);
+  assert_census_rollout_moves_match_plain(table, NULL, bag_sizes,
+                                          number_of_positions, true);
+  assert_census_rollout_moves_match_plain(table, opposite_table, bag_sizes,
+                                          number_of_positions, true);
+  assert_census_rollout_moves_match_plain(long_table, long_table, bag_sizes,
+                                          number_of_positions, true);
+  peg_adjust_destroy(long_table);
+  peg_adjust_destroy(opposite_table);
+  peg_adjust_destroy(table);
+}
+
+// The root cache tells the movers' tables apart. Through one worker, the same
+// rack on the same board from the same bag is generated under a table, its
+// opposite, a long one and none, twice over, so that each is met again after
+// the others: every census move is the plain move under the table at hand.
+// The tables swing the equities enough for their best plays to differ, so
+// one's remembered bests would misplace another's.
+static void test_census_rollout_tells_tables_apart(void) {
+  if (BOARD_DIM != 15) {
+    return;
+  }
+  Config *config = config_create_or_die("set -lex CSW21 -wmp true");
+  Game *game = config_game_create(config);
+  Game *rollout = game_duplicate(game);
+  MoveList *move_list = move_list_create(1);
+  MoveList *census_moves = move_list_create(1);
+  MoveList *candidates = move_list_create(CENSUS_ROLLOUT_TEST_CANDIDATES);
+  CensusRollout *census = census_rollout_create(1);
+  CensusRolloutWorker *worker = census_rollout_worker_create();
+  PegAdjust *tables[CENSUS_ROLLOUT_TEST_SWITCHED_TABLES] = {
+      create_swinging_table(PEG_ADJUST_STANDARD_VALUES_LENGTH, 1),
+      create_swinging_table(PEG_ADJUST_STANDARD_VALUES_LENGTH, -1),
+      create_swinging_table(CENSUS_ROLLOUT_TEST_LONG_LENGTH, 1),
+      NULL,
+  };
+  Move census_move;
+  Move first_table_move;
+  uint64_t steered = 0;
+  uint64_t differing = 0;
+  const int number_of_positions =
+      (int)(sizeof(census_rollout_test_table_bag_sizes) /
+            sizeof(census_rollout_test_table_bag_sizes[0]));
+  for (int position_idx = 0; position_idx < number_of_positions;
+       position_idx++) {
+    play_to_bag_size(game, move_list, 100 + (uint64_t)position_idx,
+                     census_rollout_test_table_bag_sizes[position_idx]);
+    if (game_over(game)) {
+      continue;
+    }
+    generate_candidates(game, candidates);
+    census_rollout_prepare(census, game, candidates);
+    const int opponent_index = 1 - game_get_player_on_turn_index(game);
+    for (int candidate_idx = 0; candidate_idx < move_list_get_count(candidates);
+         candidate_idx++) {
+      const Move *candidate = move_list_get_move(candidates, candidate_idx);
+      for (int rollout_idx = 0; rollout_idx < CENSUS_ROLLOUT_TEST_ROLLOUTS;
+           rollout_idx++) {
+        game_copy(rollout, game);
+        return_rack_to_bag(rollout, opponent_index);
+        game_seed(rollout, 1000 + (uint64_t)rollout_idx);
+        set_random_rack(rollout, opponent_index, NULL);
+        play_move(candidate, rollout, NULL);
+        census_rollout_worker_set_candidate(worker, census, candidate);
+        for (int ply = 0; ply <= CENSUS_ROLLOUT_MAX_PLY && !game_over(rollout);
+             ply++) {
+          const int mover_index = game_get_player_on_turn_index(rollout);
+          for (int visit_idx = 0;
+               visit_idx < 2 * CENSUS_ROLLOUT_TEST_SWITCHED_TABLES;
+               visit_idx++) {
+            const int table_idx =
+                visit_idx % CENSUS_ROLLOUT_TEST_SWITCHED_TABLES;
+            set_peg_adjust(config, rollout, mover_index, tables[table_idx]);
+            move_copy(&census_move,
+                      census_rollout_get_best_move(worker, census, rollout,
+                                                   census_moves, ply));
+            steered += census_rollout_worker_last_steered(worker);
+            const Move *plain = get_top_equity_move(rollout, move_list);
+            assert_moves_are_equal(&census_move, plain);
+            if (table_idx == 0) {
+              move_copy(&first_table_move, plain);
+            } else if (compare_moves_without_equity(&first_table_move, plain,
+                                                    true) != -1) {
+              differing++;
+            }
+          }
+          // The last table is none: the rollout goes on with the plain move
+          // of a player without one.
+          play_move(get_top_equity_move(rollout, move_list), rollout, NULL);
+        }
+      }
+    }
+  }
+  assert(steered > 0);
+  assert(differing > 0);
+  for (int player_index = 0; player_index < 2; player_index++) {
+    set_peg_adjust(config, game, player_index, NULL);
+  }
+  for (int table_idx = 0; table_idx < CENSUS_ROLLOUT_TEST_SWITCHED_TABLES;
+       table_idx++) {
+    peg_adjust_destroy(tables[table_idx]);
+  }
+  census_rollout_worker_destroy(worker);
+  census_rollout_destroy(census);
   move_list_destroy(candidates);
   move_list_destroy(census_moves);
   move_list_destroy(move_list);
@@ -280,28 +502,101 @@ static void test_census_rollout_steers_many_candidates(void) {
 }
 
 // A single-threaded sim gives the same results with the census as without
-// it, since every census-steered move is the plain one.
-static void test_census_rollout_sim_matches_plain(void) {
-  if (BOARD_DIM != 15) {
-    return;
-  }
+// it, since every census-steered move is the plain one: a sim of the position
+// a static game reaches with at most bag_tiles tiles in the bag, under
+// options, which name the players' pre-endgame adjustment tables if they
+// have any.
+static void assert_census_rollout_sim_matches_plain(const char *options,
+                                                    int bag_tiles) {
   char *command = get_formatted_string(
       "set -lex CSW21 -wmp true -threads 1 -plies 2 -numplays 8 -it %d "
-      "-scond none -patrollout false -sinfer false",
-      CENSUS_ROLLOUT_TEST_SIM_ITERATIONS);
+      "-scond none -patrollout false -sinfer false%s",
+      CENSUS_ROLLOUT_TEST_SIM_ITERATIONS, options);
   Config *config = config_create_or_die(command);
   free(command);
   load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
   MoveList *move_list = move_list_create(1);
-  play_to_bag_size(config_get_game(config), move_list, 7, 40);
+  play_to_bag_size(config_get_game(config), move_list, 7, bag_tiles);
   load_and_exec_config_or_die(config, "gen");
   SimSnapshot plain_snapshot;
   SimSnapshot census_snapshot;
   sim_and_snapshot(config, "sim -seed 7 -scensus false", &plain_snapshot);
+  assert(!sim_results_get_census_rollout(config_get_sim_results(config)));
   sim_and_snapshot(config, "sim -seed 7 -scensus true", &census_snapshot);
+  assert(sim_results_get_census_rollout(config_get_sim_results(config)));
   assert_sim_snapshots_equal(&plain_snapshot, &census_snapshot);
   move_list_destroy(move_list);
   config_destroy(config);
+}
+
+static void test_census_rollout_sim_matches_plain(void) {
+  if (BOARD_DIM != 15) {
+    return;
+  }
+  assert_census_rollout_sim_matches_plain("", 40);
+}
+
+// Writes a table's values to <dir>/strategy/<name>.csv for a config to load.
+static void write_table_file(const char *dir, const char *name,
+                             const PegAdjust *peg_adjust) {
+  StringBuilder *contents = string_builder_create();
+  for (int index = 0; index < peg_adjust_get_number_of_values(peg_adjust);
+       index++) {
+    string_builder_add_formatted_string(
+        contents, "%d,%d\n", index,
+        equity_to_int(peg_adjust_get_value(peg_adjust, index)));
+  }
+  char *strategy_dir = get_formatted_string("%s/strategy", dir);
+  (void)cfile_mkdir(strategy_dir);
+  char *filename = get_formatted_string("%s/%s.csv", strategy_dir, name);
+  ErrorStack *error_stack = error_stack_create();
+  write_string_to_file(filename, "w", string_builder_peek(contents),
+                       error_stack);
+  assert(error_stack_is_empty(error_stack));
+  error_stack_destroy(error_stack);
+  free(filename);
+  free(strategy_dir);
+  string_builder_destroy(contents);
+}
+
+// With tables loaded as a user loads them, from bags their values reach:
+// Quackle's table for both players, a table for one player only, and a long
+// one against a standard one.
+static void test_census_rollout_sim_matches_plain_with_tables(void) {
+  if (BOARD_DIM != 15) {
+    return;
+  }
+  char *dir = test_platform_make_temporary_directory("census_rollout_tables");
+  PegAdjust *table =
+      create_swinging_table(PEG_ADJUST_STANDARD_VALUES_LENGTH, 1);
+  PegAdjust *long_table =
+      create_swinging_table(CENSUS_ROLLOUT_TEST_LONG_LENGTH, 1);
+  write_table_file(dir, "swinging", table);
+  write_table_file(dir, "long", long_table);
+  peg_adjust_destroy(long_table);
+  peg_adjust_destroy(table);
+  const char *table_options[] = {
+      "-pegadjust quackle_pegadjust",
+      "-pegadjust1 swinging",
+      "-pegadjust1 long -pegadjust2 swinging",
+  };
+  const int number_of_options =
+      (int)(sizeof(table_options) / sizeof(table_options[0]));
+  const int number_of_bags =
+      (int)(sizeof(census_rollout_test_sim_table_bag_sizes) /
+            sizeof(census_rollout_test_sim_table_bag_sizes[0]));
+  for (int option_idx = 0; option_idx < number_of_options; option_idx++) {
+    char *options = get_formatted_string(
+        " -path %s:%s:%s %s", dir, CENSUS_ROLLOUT_TEST_FIXTURES_PATH,
+        DEFAULT_TEST_DATA_PATH, table_options[option_idx]);
+    for (int bag_idx = 0; bag_idx < number_of_bags; bag_idx++) {
+      assert_census_rollout_sim_matches_plain(
+          options, census_rollout_test_sim_table_bag_sizes[bag_idx]);
+    }
+    free(options);
+  }
+  test_platform_remove_directory_tree(dir);
+  free(dir);
 }
 
 // The census leaves out PAT's term, so a sim refuses it while its rollouts
@@ -491,10 +786,14 @@ static void set_rack_counts(Rack *rack, const uint8_t *counts) {
 }
 
 // No two of the racks of at most RACK_SIZE tiles of the blank and the first
-// four letters, in any bag class, share both of the root cache's words. A
+// four letters, under any two of the test's adjustments, share both of the
+// root cache's words. The adjustments are those a table with a value of its
+// own at every index gives the plays from each bag, the last bag's all 0,
+// and those a millipoint from all 0 for one number of tiles played. A bag
 // class mixed in next to the blank's count once let a class and a blank count
 // trade off: class 2 with a blank and class 3 without, the other tiles the
-// same, shared both words, as did every even class and the next one.
+// same, shared both words, as did every even class and the next one. The
+// last adjustment, the count's neighbour now, is tried in the class's place.
 static void test_census_rollout_root_cache_keys(void) {
   Rack *first = rack_create(MAX_ALPHABET_SIZE);
   Rack *second = rack_create(MAX_ALPHABET_SIZE);
@@ -502,22 +801,46 @@ static void test_census_rollout_root_cache_keys(void) {
   uint64_t first_check;
   uint64_t second_key;
   uint64_t second_check;
-  for (int bag_class = 0; bag_class + 1 < PEG_ADJUST_VALUES_LENGTH;
-       bag_class += 2) {
+  for (int value = 0; value + 1 < PEG_ADJUST_STANDARD_VALUES_LENGTH;
+       value += 2) {
     const uint8_t with_blank[CENSUS_ROLLOUT_TEST_KEY_TYPES] = {1, 2, 1, 1, 2};
     const uint8_t without_blank[CENSUS_ROLLOUT_TEST_KEY_TYPES] = {0, 2, 1, 1,
                                                                   2};
+    Equity first_adjustments[RACK_SIZE + 1] = {0};
+    Equity second_adjustments[RACK_SIZE + 1] = {0};
+    first_adjustments[RACK_SIZE] = value;
+    second_adjustments[RACK_SIZE] = value + 1;
     set_rack_counts(first, with_blank);
     set_rack_counts(second, without_blank);
-    census_rollout_root_cache_key(bag_class, first, &first_key, &first_check);
-    census_rollout_root_cache_key(bag_class + 1, second, &second_key,
+    census_rollout_root_cache_key(first_adjustments, first, &first_key,
+                                  &first_check);
+    census_rollout_root_cache_key(second_adjustments, second, &second_key,
                                   &second_check);
     assert(first_key != second_key || first_check != second_check);
   }
 
+  Equity adjustments[CENSUS_ROLLOUT_TEST_KEY_ADJUSTMENTS][RACK_SIZE + 1];
+  int number_of_adjustments = 0;
+  PegAdjust *table = create_swinging_table(PEG_ADJUST_MAX_VALUES_LENGTH, 1);
+  for (int bag = 1; bag <= PEG_ADJUST_MAX_VALUES_LENGTH; bag++) {
+    peg_adjust_fill_by_tiles_played(table, bag,
+                                    adjustments[number_of_adjustments]);
+    number_of_adjustments++;
+  }
+  peg_adjust_destroy(table);
+  for (int tiles_played = 1; tiles_played <= RACK_SIZE; tiles_played++) {
+    for (int millipoints = -1; millipoints <= 1; millipoints += 2) {
+      peg_adjust_fill_by_tiles_played(NULL, 1,
+                                      adjustments[number_of_adjustments]);
+      adjustments[number_of_adjustments][tiles_played] = millipoints;
+      number_of_adjustments++;
+    }
+  }
+  assert(number_of_adjustments == CENSUS_ROLLOUT_TEST_KEY_ADJUSTMENTS);
+
   RootCacheKey *keys =
       malloc_or_die(sizeof(RootCacheKey) * CENSUS_ROLLOUT_TEST_KEY_MAX_RACKS *
-                    PEG_ADJUST_VALUES_LENGTH);
+                    CENSUS_ROLLOUT_TEST_KEY_ADJUSTMENTS);
   int number_of_keys = 0;
   uint8_t counts[CENSUS_ROLLOUT_TEST_KEY_TYPES] = {0};
   while (true) {
@@ -528,13 +851,14 @@ static void test_census_rollout_root_cache_keys(void) {
     }
     if (tiles <= RACK_SIZE) {
       set_rack_counts(first, counts);
-      for (int bag_class = 0; bag_class < PEG_ADJUST_VALUES_LENGTH;
-           bag_class++) {
-        assert(number_of_keys <
-               CENSUS_ROLLOUT_TEST_KEY_MAX_RACKS * PEG_ADJUST_VALUES_LENGTH);
+      for (int adjustments_idx = 0;
+           adjustments_idx < CENSUS_ROLLOUT_TEST_KEY_ADJUSTMENTS;
+           adjustments_idx++) {
+        assert(number_of_keys < CENSUS_ROLLOUT_TEST_KEY_MAX_RACKS *
+                                    CENSUS_ROLLOUT_TEST_KEY_ADJUSTMENTS);
         RootCacheKey *entry = &keys[number_of_keys++];
-        census_rollout_root_cache_key(bag_class, first, &entry->key,
-                                      &entry->check);
+        census_rollout_root_cache_key(adjustments[adjustments_idx], first,
+                                      &entry->key, &entry->check);
       }
     }
     // The next counts, odometer style, each at most RACK_SIZE.
@@ -562,8 +886,11 @@ static void test_census_rollout_root_cache_keys(void) {
 void test_census_rollout(void) {
   test_census_rollout_root_cache_keys();
   test_census_rollout_moves_match_plain();
+  test_census_rollout_moves_match_plain_with_tables();
+  test_census_rollout_tells_tables_apart();
   test_census_rollout_steers_many_candidates();
   test_census_rollout_sim_matches_plain();
+  test_census_rollout_sim_matches_plain_with_tables();
   test_census_rollout_refuses_pat();
   test_census_rollout_auto();
 }

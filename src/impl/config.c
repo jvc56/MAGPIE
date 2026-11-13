@@ -25,6 +25,7 @@
 #include "../def/players_data_defs.h"
 #include "../def/rack_defs.h"
 #include "../def/sim_defs.h"
+#include "../def/static_eval_defs.h"
 #include "../def/thread_control_defs.h"
 #include "../def/validated_move_defs.h"
 #include "../ent/autoplay_results.h"
@@ -1421,8 +1422,9 @@ static void add_pat_help_arg(arg_token_t arg_token, const char **usages,
   }
 }
 
-// The help for the players' autoplay endgame and pre-endgame options (see
-// help_entry_fill).
+// The help for the players' autoplay endgame and pre-endgame options, and for
+// the pre-endgame adjustments (see help_entry_fill, which is at the function
+// size limit).
 static void add_player_solver_help_arg(arg_token_t arg_token,
                                        const char **usages,
                                        const char **examples,
@@ -1512,6 +1514,27 @@ static void add_player_solver_help_arg(arg_token_t arg_token,
         "Defaults to 1,1,5,7 for autoplay and a timed peg, and to 1 (every "
         "scenario) for a complete one.";
     break;
+  case ARG_TOKEN_PEG_ADJUST:
+    usages[0] = "<adjustments>";
+    examples[0] = "CSW24_pegadjust";
+    examples[1] = "none";
+    *text = "Specifies the pre-endgame adjustments for both players. The "
+            "'pegadjust1' and 'pegadjust2' options override it. The "
+            "adjustments, read from <data path>/strategy/<adjustments>.csv, "
+            "are amounts added to the static equity of a tile placement by "
+            "the tiles in the bag less the tiles played plus the rack size. "
+            "A table reaches as far as its file's highest index. Use 'none' "
+            "to unload. They are off by default.";
+    break;
+  case ARG_TOKEN_P1_PEG_ADJUST:
+  case ARG_TOKEN_P2_PEG_ADJUST:
+    usages[0] = "<adjustments>";
+    examples[0] = "CSW24_pegadjust";
+    examples[1] = "none";
+    *text = "Specifies the pre-endgame adjustments for the given player. "
+            "This can be used with the autoplay command to compare two "
+            "tables. Use 'none' to unload.";
+    break;
   default:
     break;
   }
@@ -1580,23 +1603,30 @@ static const char *leave_blend_help(const char **usages,
 }
 
 static const char *peg_fit_help(const char **usages, const char **examples) {
-  usages[0] = "<games> <rollouts> <endgame_plies> [<output_name>]";
+  usages[0] = "<games> <rollouts> <endgame_plies> [<output_name> "
+              "[<tiles_left>]]";
   examples[0] = "1000 16 2";
   examples[1] = "4000 128 0 CSW24_static";
+  examples[2] = "4000 16 0 CSW24_static_long 12";
   return "Fits pre-endgame adjustments to static play's outcomes. They "
          "adjust a tile placement's static equity by the tiles it leaves in "
          "the bag, or, if it empties the bag, by the tiles it leaves on the "
-         "mover's rack. Static self-play gives the positions with 1 to 12 "
-         "tiles in the bag (two racks less two). In each, the best play of "
-         "each count by static equity without the adjustments is played out "
+         "mover's rack. The table reaches the plays that leave up to "
+         "<tiles_left> tiles in the bag (default: the rack size less two), "
+         "and static self-play gives the positions: those with tiles in the "
+         "bag, at most a rack more than <tiles_left>. In each, the best play "
+         "of each count by static equity without the adjustments is played out "
          "to the end <rollouts> times, with the same draws for every count, "
          "and the fit is the least squares one of each play's outcome less "
          "its static equity as a position term plus a count term. With "
          "<endgame_plies> above 0, play stops when the bag is empty and the "
          "endgame is solved that many plies deep. That is much slower than "
-         "static play, and it values tempo more. The table is written as "
-         "data/strategy/<output_name>.csv (default: <lexicon>_pegadjust). Use "
-         "the -seed, -threads and -ttfraction options.";
+         "static play, and it values tempo more. Self-play uses the "
+         "loaded pre-endgame adjustments (see 'pegadjust'), which both "
+         "players must share. The table is written as "
+         "data/strategy/<output_name>.csv (default: <lexicon>_pegadjust) and "
+         "can be loaded with 'pegadjust'. Use the -seed, -threads and "
+         "-ttfraction options.";
 }
 
 // One case for all three in add_help_arg_to_string_builder, which is at the
@@ -3094,6 +3124,9 @@ static void help_entry_fill(const Config *config, int token,
     case ARG_TOKEN_PEG_NESTED_CAND_CAPS:
     case ARG_TOKEN_PEG_NESTED_DEPTH:
     case ARG_TOKEN_PEG_NESTED_STRIDES:
+    case ARG_TOKEN_PEG_ADJUST:
+    case ARG_TOKEN_P1_PEG_ADJUST:
+    case ARG_TOKEN_P2_PEG_ADJUST:
       add_player_solver_help_arg(arg_token, usages, examples, &text);
       break;
     case ARG_TOKEN_MULTI_THREADING_MODE:
@@ -3894,6 +3927,53 @@ static bool config_parse_bool_arg(const char *value, const char *name,
     return false;
   }
   return true;
+}
+
+// Loads the pre-endgame adjustments, which are opt-in and per player like
+// the PAT weights: the "pegadjust1" and "pegadjust2" options override
+// "pegadjust", "none" unloads, and an unset option keeps what is loaded.
+static void config_load_peg_adjust(Config *config, ErrorStack *error_stack) {
+  const arg_token_t player_tokens[2] = {ARG_TOKEN_P1_PEG_ADJUST,
+                                        ARG_TOKEN_P2_PEG_ADJUST};
+  const char *both_name =
+      config_get_parg_value(config, ARG_TOKEN_PEG_ADJUST, 0);
+  const char *new_names[2];
+  bool any_set = false;
+  for (int player_index = 0; player_index < 2; player_index++) {
+    new_names[player_index] = both_name;
+    if (config_get_parg_num_set_values(config, player_tokens[player_index]) >
+        0) {
+      new_names[player_index] =
+          config_get_parg_value(config, player_tokens[player_index], 0);
+    }
+    if (new_names[player_index]) {
+      any_set = true;
+    }
+  }
+  if (!any_set) {
+    return;
+  }
+  // Copies, since loading may free the table an existing name belongs to.
+  char *updated_names[2];
+  const char *names_or_null[2];
+  for (int player_index = 0; player_index < 2; player_index++) {
+    const char *name = new_names[player_index];
+    if (!name) {
+      name = players_data_get_data_name(
+          config->players_data, PLAYERS_DATA_TYPE_PEG_ADJUST, player_index);
+    }
+    updated_names[player_index] = string_duplicate_allow_null(name);
+    names_or_null[player_index] = updated_names[player_index];
+    if (names_or_null[player_index] &&
+        strings_iequal(names_or_null[player_index], "none")) {
+      names_or_null[player_index] = NULL;
+    }
+  }
+  players_data_set(config->players_data, PLAYERS_DATA_TYPE_PEG_ADJUST,
+                   config->data_paths, names_or_null[0], names_or_null[1],
+                   false, error_stack);
+  free(updated_names[0]);
+  free(updated_names[1]);
 }
 
 // Loads one player's PAT usage options (patcand, patclasses, patrollout and
@@ -5815,6 +5895,29 @@ void impl_peg_fit(Config *config, ErrorStack *error_stack) {
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
+  // The most tiles a fitted play leaves in the bag, which sets the table's
+  // length.
+  int tiles_left = PEG_ADJUST_STANDARD_VALUES_LENGTH - RACK_SIZE - 1;
+  const char *tiles_left_arg =
+      config_get_parg_value(config, ARG_TOKEN_PEG_FIT, 4);
+  if (tiles_left_arg) {
+    string_to_int_or_push_error("tiles left", tiles_left_arg, 0,
+                                PEG_ADJUST_MAX_VALUES_LENGTH - RACK_SIZE - 1,
+                                ERROR_STATUS_CONFIG_LOAD_MALFORMED_INT_ARG,
+                                &tiles_left, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+  }
+  // Self-play fits the one table both players play with.
+  if (players_data_get_peg_adjust(config->players_data, 0) !=
+      players_data_get_peg_adjust(config->players_data, 1)) {
+    error_stack_push(error_stack, ERROR_STATUS_PEG_FIT_DIFFERENT_TABLES,
+                     string_duplicate("cannot fit pre-endgame adjustments "
+                                      "when the players have different "
+                                      "adjustments loaded"));
+    return;
+  }
   config_init_game(config);
   const char *output_name = config_get_parg_value(config, ARG_TOKEN_PEG_FIT, 3);
   char *default_output_name = NULL;
@@ -5829,6 +5932,7 @@ void impl_peg_fit(Config *config, ErrorStack *error_stack) {
       .number_of_games = number_of_games,
       .rollouts_per_class = rollouts_per_class,
       .endgame_plies = endgame_plies,
+      .number_of_values = RACK_SIZE + tiles_left + 1,
       .tt_fraction_of_mem = config->tt_fraction_of_mem,
       .output_name = output_name,
       .data_paths = config->data_paths,
@@ -15067,6 +15171,11 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
     }
   }
 
+  config_load_peg_adjust(config, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
   // How each player uses its PAT weights. The global option sets both
   // players and the per-player one overrides it; unset means "keep what is
   // set", and a fresh config's defaults come from players_data_create.
@@ -16473,7 +16582,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   cmd(ARG_TOKEN_CENSUS, "census", 1, 3, census, generic, false);
   cmd(ARG_TOKEN_LEAVE_BLEND, "leaveblend", 4, 4, leave_blend, generic, false);
   cmd(ARG_TOKEN_PAT_GEN, "patgen", 1, 2, pat_gen, generic, false);
-  cmd(ARG_TOKEN_PEG_FIT, "pegfit", 3, 4, peg_fit, generic, false);
+  cmd(ARG_TOKEN_PEG_FIT, "pegfit", 3, 5, peg_fit, generic, false);
   cmd(ARG_TOKEN_CREATE_DATA, "createdata", 2, 3, create_data, generic, false);
   cmd(ARG_TOKEN_NEXT, "next", 0, 0, next, generic, true);
   cmd(ARG_TOKEN_PREVIOUS, "previous", 0, 0, previous, generic, true);
@@ -16499,6 +16608,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_PAT_CANDIDATES, "patcand", 1, 1);
   arg(ARG_TOKEN_PAT_ROLLOUT, "patrollout", 1, 1);
   arg(ARG_TOKEN_PAT_ROLLOUT_CLASSES, "patrolloutclasses", 1, 1);
+  arg(ARG_TOKEN_PEG_ADJUST, "pegadjust", 1, 1);
   arg(ARG_TOKEN_P1_LEXICON, "l1", 1, 1);
   arg(ARG_TOKEN_P1_USE_WMP, "w1", 1, 1);
   arg(ARG_TOKEN_P1_USE_RIT, "rit1", 1, 1);
@@ -16509,6 +16619,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_P1_PAT_CANDIDATES, "patcand1", 1, 1);
   arg(ARG_TOKEN_P1_PAT_ROLLOUT, "patrollout1", 1, 1);
   arg(ARG_TOKEN_P1_PAT_ROLLOUT_CLASSES, "patrolloutclasses1", 1, 1);
+  arg(ARG_TOKEN_P1_PEG_ADJUST, "pegadjust1", 1, 1);
   arg(ARG_TOKEN_P1_MOVE_SORT_TYPE, "s1", 1, 1);
   arg(ARG_TOKEN_P1_MOVE_RECORD_TYPE, "r1", 1, 1);
   arg(ARG_TOKEN_P2_LEXICON, "l2", 1, 1);
@@ -16521,6 +16632,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_P2_PAT_CANDIDATES, "patcand2", 1, 1);
   arg(ARG_TOKEN_P2_PAT_ROLLOUT, "patrollout2", 1, 1);
   arg(ARG_TOKEN_P2_PAT_ROLLOUT_CLASSES, "patrolloutclasses2", 1, 1);
+  arg(ARG_TOKEN_P2_PEG_ADJUST, "pegadjust2", 1, 1);
   arg(ARG_TOKEN_P2_MOVE_SORT_TYPE, "s2", 1, 1);
   arg(ARG_TOKEN_P2_MOVE_RECORD_TYPE, "r2", 1, 1);
   arg(ARG_TOKEN_WIN_PCT, "winpct", 1, 1);
@@ -17138,6 +17250,7 @@ static void config_add_settings_to_string_builder_internal(const Config *config,
     case ARG_TOKEN_PAT_CANDIDATES:
     case ARG_TOKEN_PAT_ROLLOUT:
     case ARG_TOKEN_PAT_ROLLOUT_CLASSES:
+    case ARG_TOKEN_PEG_ADJUST:
       // Set these values on a per-player basis
       break;
     case ARG_TOKEN_USE_MMAP_FOR_RIT:
@@ -17175,6 +17288,15 @@ static void config_add_settings_to_string_builder_internal(const Config *config,
             config, sb, arg_token,
             players_data_get_data_name(config->players_data,
                                        PLAYERS_DATA_TYPE_PAT, 0));
+      }
+      break;
+    case ARG_TOKEN_P1_PEG_ADJUST:
+      // Omitted when no table is loaded; unloaded is the default.
+      if (players_data_get_peg_adjust(config->players_data, 0)) {
+        config_add_string_setting_to_string_builder(
+            config, sb, arg_token,
+            players_data_get_data_name(config->players_data,
+                                       PLAYERS_DATA_TYPE_PEG_ADJUST, 0));
       }
       break;
     case ARG_TOKEN_P1_PAT_CLASSES: {
@@ -17253,6 +17375,15 @@ static void config_add_settings_to_string_builder_internal(const Config *config,
             config, sb, arg_token,
             players_data_get_data_name(config->players_data,
                                        PLAYERS_DATA_TYPE_PAT, 1));
+      }
+      break;
+    case ARG_TOKEN_P2_PEG_ADJUST:
+      // Omitted when no table is loaded; unloaded is the default.
+      if (players_data_get_peg_adjust(config->players_data, 1)) {
+        config_add_string_setting_to_string_builder(
+            config, sb, arg_token,
+            players_data_get_data_name(config->players_data,
+                                       PLAYERS_DATA_TYPE_PEG_ADJUST, 1));
       }
       break;
     case ARG_TOKEN_P2_PAT_CLASSES: {

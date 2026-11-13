@@ -8,7 +8,6 @@
 #include "../def/move_defs.h"
 #include "../def/players_data_defs.h"
 #include "../def/rack_defs.h"
-#include "../def/static_eval_defs.h"
 #include "../ent/bag.h"
 #include "../ent/board.h"
 #include "../ent/equity.h"
@@ -16,9 +15,9 @@
 #include "../ent/klv.h"
 #include "../ent/letter_distribution.h"
 #include "../ent/move.h"
+#include "../ent/peg_adjust.h"
 #include "../ent/player.h"
 #include "../ent/rack.h"
-#include "../ent/static_eval.h"
 #include "../util/io_util.h"
 #include "census.h"
 #include "census_play_scores.h"
@@ -143,8 +142,8 @@ struct CensusRolloutWorker {
   uint64_t sim_number;
   // Each rack's bests in the root table's anchors, which hold for the whole
   // sim whatever the candidate: every candidate's rollouts deal the opponent
-  // the same racks. Keyed by two independent hashes of the rack and the bag's
-  // adjustment class.
+  // the same racks. Keyed by two independent hashes of the rack and the
+  // mover's pre-endgame adjustments from the bag.
   uint64_t root_keys[CENSUS_ROLLOUT_ROOT_SLOTS];
   uint64_t root_checks[CENSUS_ROLLOUT_ROOT_SLOTS];
   Equity *root_cache;
@@ -286,18 +285,6 @@ static void census_rollout_anchor_zones(const Square *squares,
 static void raise_best(Equity *best, Equity value) {
   const Equity old = *best;
   *best = value > old ? value : old;
-}
-
-// By tiles played, the pre-endgame adjustment of a play from this bag, as
-// static_eval_get_nonopening_move_equity adds it.
-static void peg_by_tiles_played_for_bag(int number_of_tiles_in_bag,
-                                        Equity *by_tiles_played) {
-  by_tiles_played[0] = 0;
-  for (int tiles_played = 1; tiles_played <= RACK_SIZE; tiles_played++) {
-    const int index = number_of_tiles_in_bag - tiles_played + RACK_SIZE;
-    by_tiles_played[tiles_played] =
-        index < PEG_ADJUST_VALUES_LENGTH ? peg_adjust_values[index] : 0;
-  }
 }
 
 static void census_rollout_table_destroy(CensusRolloutTable *table) {
@@ -1090,18 +1077,22 @@ static void census_rollout_gather(const CensusRollout *census, const Rack *rack,
   }
 }
 
-void census_rollout_root_cache_key(int bag_class, const Rack *rack,
-                                   uint64_t *key, uint64_t *check) {
-  // The class goes through a multiply before the rack's counts do. Combined
-  // with the first count, the blank's, before any multiply, it reached the
-  // words only through class ^ blanks and class + blanks, so a class and a
-  // blank count could trade off: class 2 with a blank and class 3 without, or
-  // class 0 with two blanks and class 2 without, the other tiles the same,
-  // shared both words.
-  uint64_t key_word = (UINT64_C(0xCBF29CE484222325) ^ (uint64_t)bag_class) *
-                      UINT64_C(0x100000001B3);
-  uint64_t check_word = (UINT64_C(0x84222325CBF29CE4) + (uint64_t)bag_class) *
-                        UINT64_C(0x9E3779B97F4A7C15);
+void census_rollout_root_cache_key(const Equity *peg_by_tiles_played,
+                                   const Rack *rack, uint64_t *key,
+                                   uint64_t *check) {
+  // Each adjustment goes through a multiply before the next value does, as
+  // each of the rack's counts does. A bag class once combined with the first
+  // count, the blank's, before any multiply reached the words only through
+  // class ^ blanks and class + blanks, so the two could trade off: class 2
+  // with a blank and class 3 without, the other tiles the same, shared both
+  // words.
+  uint64_t key_word = UINT64_C(0xCBF29CE484222325);
+  uint64_t check_word = UINT64_C(0x84222325CBF29CE4);
+  for (int tiles_played = 1; tiles_played <= RACK_SIZE; tiles_played++) {
+    const uint64_t adjustment = (uint32_t)peg_by_tiles_played[tiles_played];
+    key_word = (key_word ^ adjustment) * UINT64_C(0x100000001B3);
+    check_word = (check_word + adjustment + 1) * UINT64_C(0x9E3779B97F4A7C15);
+  }
   for (int ml = 0; ml < rack_get_dist_size(rack); ml++) {
     key_word = (key_word ^ rack_get_letter(rack, ml)) * UINT64_C(0x100000001B3);
     check_word = (check_word + rack_get_letter(rack, ml) + 1) *
@@ -1118,13 +1109,20 @@ static void census_rollout_gather_rack(CensusRolloutWorker *worker,
                                        const Game *game, const Rack *rack,
                                        const CensusRolloutBoard *board) {
   const int bag = bag_get_letters(game_get_bag(game));
+  // By tiles played, the pre-endgame adjustment of a play from this bag, as
+  // move generation adds it: the mover's table's, all 0 without a table and
+  // from a bag no value of the table reaches.
   Equity peg_by_tiles_played[RACK_SIZE + 1];
-  peg_by_tiles_played_for_bag(bag, peg_by_tiles_played);
-  // Bags that give no play an adjustment share the root bests.
-  const int bag_class = bag >= PEG_ADJUST_VALUES_LENGTH ? 0 : bag;
+  peg_adjust_fill_by_tiles_played(
+      player_get_peg_adjust(
+          game_get_player(game, game_get_player_on_turn_index(game))),
+      bag, peg_by_tiles_played);
+  // The root bests are remembered by the rack and these adjustments, which
+  // are all of the mover and the bag that reaches them: a rack shares them
+  // across the bags and the players whose adjustments are the same.
   uint64_t key;
   uint64_t check;
-  census_rollout_root_cache_key(bag_class, rack, &key, &check);
+  census_rollout_root_cache_key(peg_by_tiles_played, rack, &key, &check);
   const int slot = (int)(key & (CENSUS_ROLLOUT_ROOT_SLOTS - 1));
   Equity *cached =
       &worker->root_cache[(size_t)slot * (size_t)worker->root_cache_units];
@@ -1237,8 +1235,11 @@ static bool census_rollout_skips(CensusRolloutWorker *worker,
 
 // Whether the census serves a generation from game: a play's equity must be
 // its score, its leave's value, and the pre-endgame adjustment, which for a
-// given bag depends only on how many tiles the play places (Quackle's
-// leftInBagPlusSeven index). With PAT on, it has another term.
+// given bag and table depends only on how many tiles the play places
+// (Quackle's leftInBagPlusSeven index). With PAT on, it has another term. A
+// player with a pre-endgame adjustment table is served like one without: the
+// gather adds the mover's adjustments, and the root cache is keyed by them
+// (see census_rollout_gather_rack).
 static bool census_rollout_serves(const Game *game) {
   if (bag_get_letters(game_get_bag(game)) == 0 ||
       board_get_tiles_played(game_get_board(game)) == 0) {
