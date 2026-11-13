@@ -381,6 +381,17 @@ static void test_path_lists(void) {
   first = cpath_list_first("");
   assert(strings_equal(first, ""));
   free(first);
+  // A path put before a list is the list's first path, and the rest follow.
+  char *joined = cpath_list_prepend("first", "second:third");
+  assert_path_list(joined, 3,
+                   (const char *const[]){"first", "second", "third"});
+  free(joined);
+  joined = cpath_list_prepend("only", "");
+  assert(strings_equal(joined, "only"));
+  free(joined);
+  joined = cpath_list_prepend("only", NULL);
+  assert(strings_equal(joined, "only"));
+  free(joined);
   assert(strings_equal(cpath_basename("dir/sub/name.gcg"), "name.gcg"));
   assert(strings_equal(cpath_basename("name.gcg"), "name.gcg"));
   assert(cpath_is_separator('/'));

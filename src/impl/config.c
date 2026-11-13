@@ -1022,8 +1022,11 @@ char *str_api_fatal(Config *config,
 // claim's derived files carry their sizes (`bytes`). 0.1.5: an opening-rack
 // request may state each rack's `candidates`, the moves a later pass ranks in
 // place of every play -- birdtest's reanalysis of a rack's first-pass
-// leaders, which only a build that reads them can run.
-#define MAGPIE_VERSION "0.1.5"
+// leaders, which only a build that reads them can run. 0.1.6: a file a job
+// pins that this contributor does not have is fetched from the server (the
+// claim's expected files carry `bytes` and `sources`) rather than declined
+// -- so a job whose pinned files no tarball carries any more can be run.
+#define MAGPIE_VERSION "0.1.6"
 
 const char *config_get_magpie_version(void) { return MAGPIE_VERSION; }
 
@@ -1544,7 +1547,10 @@ static const char *contribute_help(const char **usages, const char **examples) {
          "space beyond diskreserve GB (default 2), deleting those built for "
          "other jobs first, least recently used first, and built and held "
          "only in the memory beyond memreserve GB (default 1); one that does "
-         "not fit is skipped and the task runs without it.";
+         "not fit is skipped and the task runs without it. A data file a job "
+         "requires that the data directory does not have, or has with other "
+         "contents, is fetched from the server into the data directory's "
+         "birdtest folder, never over the data's own files.";
 }
 
 static const char *census_help(const char **usages, const char **examples) {
@@ -13503,6 +13509,29 @@ void config_destroy_for_contribute(Config *task_config) {
   config_destroy(task_config);
 }
 
+// Points the task config at the data paths the claimed task runs with: the
+// contributor's own, or -- when a file the job pins was fetched from the
+// server -- the directory it was fetched into and then the contributor's
+// (contribute_verify_expected_data). They change from one job to the next.
+//
+// What is in memory is kept or dropped by the file it would be read from now
+// (config_contribute_evict_changed_data, and the same for the distribution
+// and the layout), so data whose name resolves to another file under the new
+// paths is read again. The win percentage table is the one thing held by
+// name alone, so it is dropped here.
+static void config_contribute_use_data_paths(Config *task_config,
+                                             const char *data_paths) {
+  if (strings_equal(task_config->data_paths, data_paths)) {
+    return;
+  }
+  free(task_config->data_paths);
+  task_config->data_paths = string_duplicate(data_paths);
+  autoplay_results_set_data_paths(task_config->autoplay_results,
+                                  task_config->data_paths);
+  win_pct_destroy(task_config->win_pcts);
+  task_config->win_pcts = NULL;
+}
+
 bool config_contribute_execute(Config *task_config, const char *job_type,
                                const JsonValue *request, int threads,
                                ContributeState *state, char **result_json,
@@ -13584,6 +13613,10 @@ void impl_contribute(Config *config, const char *settings_path,
       continue;
     }
 
+    const char *task_data_paths = contribute_get_task_data_paths(state);
+    config_contribute_use_data_paths(
+        task_config,
+        task_data_paths ? task_data_paths : config_get_data_paths(config));
     char *result_json = NULL;
     uint64_t movegens = 0;
     if (!config_contribute_execute(task_config, job_type, request,
