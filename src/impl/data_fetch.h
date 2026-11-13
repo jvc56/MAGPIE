@@ -46,6 +46,11 @@ void data_fetch(const char *base_url, const char *data_dir,
 void data_fetch_unpack_archive(const char *archive_path, const char *data_dir,
                                ErrorStack *error_stack);
 
+// Creates `directory` and every directory on the way to it, splitting it at
+// either separator on Windows. Returns whether it is there afterwards, with
+// errno set if not.
+bool data_fetch_make_directories(const char *directory);
+
 // What a data directory holds, as far as starting MAGPIE goes.
 typedef enum {
   // No data: no board layout, which every game needs. What tells a first run

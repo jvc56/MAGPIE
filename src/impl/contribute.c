@@ -2,6 +2,7 @@
 
 #include "../compat/cfile.h"
 #include "../compat/chttp.h"
+#include "../compat/cpath.h"
 #include "../compat/cpthread.h"
 #include "../compat/cpthread_defs.h"
 #include "../compat/ctime.h"
@@ -19,6 +20,7 @@
 #include "../util/json.h"
 #include "../util/string_util.h"
 #include "contribute_tables.h"
+#include "data_fetch.h"
 #include <inttypes.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -338,6 +340,15 @@ struct ContributeState {
   // When the task's time started, on the monotonic clock: what its finished,
   // stopped or failed line says it took.
   int64_t task_started_ns;
+  // The data paths the claimed task runs with when they are not the
+  // contributor's own: a directory of pinned input files fetched from the
+  // server, then the contributor's. NULL when the contributor's own data is
+  // what the job pins. See contribute_verify_expected_data.
+  char *task_data_paths;
+  // How a pinned input file is fetched: over HTTP from the server, unless a
+  // test has put something in its place.
+  contribute_input_fetch_t input_fetch;
+  void *input_fetch_context;
 };
 
 // ---------------------------------------------------------------------------
@@ -480,34 +491,266 @@ void contribute_check_expected_data(const JsonValue *assignment,
   }
 }
 
-// Checks every file the claimed task will load against the digest the job
-// pins, writing the mismatches into `missing` as the JSON array the decline
-// carries. Returns true when everything matches.
+// ---------------------------------------------------------------------------
+// Pinned input files this contributor does not have
+// ---------------------------------------------------------------------------
 //
-// The check runs before the heartbeat starts: hashing is milliseconds, and a
+// A job pins bytes. A contributor usually has them from a MAGPIE-DATA
+// tarball, and for a long time that was the only place: a file that did not
+// match was a decline, with the advice to install the tarball it came from.
+// Then a tarball was rebuilt under the name it already had (data-20260925,
+// 2026-11-02, with new leaves for every lexicon), the jobs went on pinning
+// the files it replaced, and that advice reinstalled the very file the worker
+// had just been declined for. So the assignment now says where each file can
+// be fetched (`sources`, and its size, `bytes`), and a file that does not
+// match is fetched, checked against the digest the job pins, and kept.
+//
+// Kept apart from the contributor's own data: a fetched CSW24.klv2 written
+// over data/lexica/CSW24.klv2 would change what every other MAGPIE command of
+// theirs plays with. It goes into a directory of its own inside the data
+// directory, laid out as a data directory is, and the task runs with that
+// directory ahead of the contributor's in its data paths -- so the file keeps
+// its name, the tables built from it are written beside it rather than over
+// the contributor's, and everything the job pins that the contributor does
+// have is still read from where it is.
+
+#define CONTRIBUTE_INPUT_DIRECTORY "birdtest"
+
+// A source this build can fetch: a path on the server the claim came from.
+// The string is the server's and becomes part of a URL, so anything outside
+// a plain path and query is refused; a source of any other kind (another
+// host, which a later server may list) is one this build skips.
+static bool input_source_is_usable(const char *source) {
+  if (!source || source[0] != '/' || source[1] == '/' || strstr(source, "..")) {
+    return false;
+  }
+  for (const char *c = source; *c; c++) {
+    const bool allowed = (*c >= 'a' && *c <= 'z') || (*c >= 'A' && *c <= 'Z') ||
+                         (*c >= '0' && *c <= '9') || *c == '_' || *c == '-' ||
+                         *c == '.' || *c == '/' || *c == '?' || *c == '=' ||
+                         *c == '&';
+    if (!allowed) {
+      return false;
+    }
+  }
+  return true;
+}
+
+static bool input_file_is_fetchable(const JsonValue *file) {
+  if (!data_filepaths_is_safe_name(json_get_string_or_null(file, "name"))) {
+    return false;
+  }
+  const JsonValue *sources = json_object_get(file, "sources");
+  for (int i = 0; i < json_array_length(sources); i++) {
+    if (input_source_is_usable(json_array_get_string(sources, i))) {
+      return true;
+    }
+  }
+  return false;
+}
+
+static char *fetch_input_over_http(void *context, const char *source,
+                                   size_t *length, char **why) {
+  ContributeState *state = (ContributeState *)context;
+  ErrorStack *errors = error_stack_create();
+  ChttpResponse response;
+  http_client_get(state->http_client, source, &response, errors);
+  char *body = NULL;
+  if (!error_stack_is_empty(errors)) {
+    *why = error_stack_get_string_and_reset(errors);
+  } else if (response.status_code != 200) {
+    *why = get_formatted_string("the server answered HTTP %ld",
+                                response.status_code);
+    chttp_response_destroy(&response);
+  } else {
+    // The response's own buffer, taken rather than copied.
+    body = response.body;
+    *length = response.body_length;
+    response.body = NULL;
+    chttp_response_destroy(&response);
+  }
+  error_stack_destroy(errors);
+  return body;
+}
+
+void contribute_set_input_fetch(ContributeState *state,
+                                contribute_input_fetch_t fetch, void *context) {
+  state->input_fetch = fetch;
+  state->input_fetch_context = context;
+}
+
+const char *contribute_get_task_data_paths(const ContributeState *state) {
+  return state ? state->task_data_paths : NULL;
+}
+
+char *contribute_input_directory(const char *data_paths,
+                                 const char *fetched_files) {
+  char *digest = sha256_hash_bytes(fetched_files, strlen(fetched_files));
+  char *first = cpath_list_first(data_paths ? data_paths : ".");
+  char *directory =
+      get_formatted_string("%s/" CONTRIBUTE_INPUT_DIRECTORY "/%.16s",
+                           first[0] ? first : ".", digest);
+  free(first);
+  free(digest);
+  return directory;
+}
+
+// The directories a file at `path` needs, made. False with errno set if they
+// are not there afterwards.
+static bool make_directories_for(const char *path) {
+  size_t length = strlen(path);
+  while (length > 0 && !cpath_is_separator(path[length - 1])) {
+    length--;
+  }
+  char *directory = get_formatted_string("%.*s", (int)length, path);
+  const bool made = data_fetch_make_directories(directory);
+  free(directory);
+  return made;
+}
+
+// Writes `body` to `path` in one step, so a task -- this process's or another
+// sharing the data directory -- reads the whole file or none of it.
+static bool write_input_file(const char *path, const char *body,
+                             size_t length) {
+  if (!make_directories_for(path)) {
+    return false;
+  }
+  CFileAtomicWrite atomic_write;
+  FILE *stream = cfile_atomic_replace_begin(&atomic_write, path);
+  if (!stream) {
+    return false;
+  }
+  const bool written = fwrite(body, 1, length, stream) == length;
+  return cfile_atomic_write_end(&atomic_write, written);
+}
+
+// Makes the file the assignment's `file` entry pins be at `path`, inside the
+// directory of fetched input files: there already with the pinned digest, or
+// fetched from the first of its sources that sends those bytes. Returns
+// whether it is there; if not, *why says what went wrong (the caller frees).
+static bool input_file_fetched(ContributeState *state, const JsonValue *file,
+                               const char *path, ThreadControl *thread_control,
+                               char **why) {
+  const char *expected_digest = json_get_string_or_null(file, "sha256");
+  ErrorStack *errors = error_stack_create();
+  char *kept = hash_with_cache(state, path, errors);
+  error_stack_destroy(errors);
+  const bool already_there = kept && strings_equal(kept, expected_digest);
+  free(kept);
+  if (already_there) {
+    return true;
+  }
+
+  // The claim's time is running from here, as it is for a leave task's KLV
+  // fetched mid-task: a lexicon over a slow link, or a wait for the server's
+  // rate limit, must not let the claim lapse before the task has begun.
+  if (state->claim_token && !state->heartbeat.running) {
+    heartbeat_start(&state->heartbeat, state->http_client, state->claim_token);
+  }
+
+  const int64_t expected_bytes = json_get_int64_or(file, "bytes", -1);
+  const JsonValue *sources = json_object_get(file, "sources");
+  bool fetched = false;
+  for (int i = 0; i < json_array_length(sources) && !fetched; i++) {
+    const char *source = json_array_get_string(sources, i);
+    if (!input_source_is_usable(source)) {
+      continue;
+    }
+    free(*why);
+    *why = NULL;
+    size_t length = 0;
+    char *body =
+        state->input_fetch(state->input_fetch_context, source, &length, why);
+    if (!body) {
+      continue;
+    }
+    // What is kept is what the job pins, whatever sent it: the size first,
+    // which costs nothing, then the digest.
+    char *digest = NULL;
+    if (expected_bytes >= 0 && (int64_t)length != expected_bytes) {
+      *why = get_formatted_string("the server sent %zu bytes, and the file "
+                                  "is %" PRId64,
+                                  length, expected_bytes);
+    } else {
+      digest = sha256_hash_bytes(body, length);
+      if (!strings_equal(digest, expected_digest)) {
+        *why = get_formatted_string("the server sent a file with sha256 %.8s",
+                                    digest);
+      } else if (!write_input_file(path, body, length)) {
+        *why = get_formatted_string("could not write %s", path);
+      } else {
+        fetched = true;
+      }
+    }
+    free(digest);
+    free(body);
+  }
+  if (fetched) {
+    const char *display_path = json_get_string_or_null(file, "path");
+    thread_control_print_formatted(
+        thread_control,
+        "fetched %s from the server (sha256 %.8s, which the job requires), "
+        "kept as %s\n",
+        display_path ? display_path : json_get_string_or_null(file, "name"),
+        expected_digest, path);
+  } else if (!*why) {
+    *why = string_duplicate("the server names nowhere this MAGPIE can fetch "
+                            "it from");
+  }
+  return fetched;
+}
+
+// What the check of one expected file against the contributor's own data
+// found.
+typedef struct ExpectedFileCheck {
+  // Where the name resolves in the contributor's data paths; NULL if nowhere.
+  char *path;
+  // Its digest; NULL if it could not be read.
+  char *actual;
+  bool matched;
+} ExpectedFileCheck;
+
+// Checks every file the claimed task will load against the digest the job
+// pins, writing the ones this worker does not have and cannot get into
+// `missing` as the JSON array the decline carries. Returns true when the task
+// has every file -- and then contribute_get_task_data_paths says where it
+// reads them from.
+//
+// Each file is first looked for in the contributor's own data (`data_paths`).
+// If any is missing or has other bytes, and the server says where every such
+// file can be fetched, they are fetched into a directory of their own (see
+// above) that the task then reads ahead of the contributor's. A file that
+// cannot be fetched -- an older server, a file it does not hold, a download
+// that fails or is not the pinned bytes -- is a gap, as it always was.
+//
+// The check runs before the task starts: hashing is milliseconds, and a
 // decline should not look like a worker that started and died. The claim has
 // already checked that `expected_data` is there, names sha256, and lists only
 // files with a role, name and digest, each role one this build knows
 // (contribute_check_expected_data).
-static bool expected_data_matches(ContributeState *state,
-                                  const char *data_paths,
-                                  ThreadControl *thread_control,
-                                  StringBuilder *missing) {
+bool contribute_verify_expected_data(ContributeState *state,
+                                     const char *data_paths,
+                                     ThreadControl *thread_control,
+                                     StringBuilder *missing) {
+  free(state->task_data_paths);
+  state->task_data_paths = NULL;
   const JsonValue *expected =
       json_object_get(state->assignment, "expected_data");
   const JsonValue *files = json_object_get(expected, "files");
   const int count = json_array_length(files);
-  bool all_matched = true;
-  bool first_missing = true;
   ErrorStack *errors = error_stack_create();
+  ExpectedFileCheck *checks = (ExpectedFileCheck *)calloc_or_die(
+      count > 0 ? (size_t)count : 1, sizeof(ExpectedFileCheck));
 
+  // The contributor's own data first.
+  int mismatched = 0;
+  bool all_fetchable = true;
+  StringBuilder *fetched_files = string_builder_create();
   for (int i = 0; i < count; i++) {
     const JsonValue *file = json_array_get(files, i);
     const char *role = json_get_string_or_null(file, "role");
     const char *name = json_get_string_or_null(file, "name");
     const char *expected_digest = json_get_string_or_null(file, "sha256");
-    const char *tarball_date = json_get_string_or_null(file, "tarball_date");
-    const char *display_path = json_get_string_or_null(file, "path");
     // Every entry has its three fields and a known role: the claim refused
     // the assignment otherwise.
     data_filepath_t type = DATA_FILEPATH_TYPE_KWG;
@@ -516,21 +759,67 @@ static bool expected_data_matches(ContributeState *state,
     // The name is the server's, and becomes a path: one that could leave the
     // data directory is never resolved, and so never hashed and reported
     // back. It is simply a file this worker does not have.
-    char *path = NULL;
-    char *actual = NULL;
+    ExpectedFileCheck *check = &checks[i];
     if (data_filepaths_is_safe_name(name)) {
-      path =
+      check->path =
           data_filepaths_get_readable_filename(data_paths, name, type, errors);
       if (error_stack_is_empty(errors)) {
-        actual = hash_with_cache(state, path, errors);
+        check->actual = hash_with_cache(state, check->path, errors);
       }
       error_stack_reset(errors);
     }
+    check->matched =
+        check->actual && strings_equal(check->actual, expected_digest);
+    if (!check->matched) {
+      mismatched++;
+      all_fetchable = all_fetchable && input_file_is_fetchable(file);
+      string_builder_add_formatted_string(fetched_files, "%s\t%s\t%s\n", role,
+                                          name, expected_digest);
+    }
+  }
 
-    if (actual && strings_equal(actual, expected_digest)) {
-      free(actual);
-      free(path);
+  // Then the server, for what the contributor's data does not have. One
+  // directory per set of fetched files: two jobs that need the same file from
+  // the server share it and the tables built from it, and two that pin
+  // different bytes under one name never write over each other's.
+  char *fetched_list = string_builder_dump_and_destroy(fetched_files, NULL);
+  char *directory = mismatched > 0 && all_fetchable
+                        ? contribute_input_directory(data_paths, fetched_list)
+                        : NULL;
+  free(fetched_list);
+
+  bool all_matched = true;
+  bool first_missing = true;
+  for (int i = 0; i < count; i++) {
+    ExpectedFileCheck *check = &checks[i];
+    if (check->matched) {
       continue;
+    }
+    const JsonValue *file = json_array_get(files, i);
+    const char *role = json_get_string_or_null(file, "role");
+    const char *name = json_get_string_or_null(file, "name");
+    const char *expected_digest = json_get_string_or_null(file, "sha256");
+    const char *tarball_date = json_get_string_or_null(file, "tarball_date");
+    const char *display_path = json_get_string_or_null(file, "path");
+    const bool fetchable = input_file_is_fetchable(file);
+    // With a file the server cannot send among them, the task is declined
+    // whatever else is fetched, so nothing is; and the ones that could have
+    // been are not what this worker is missing.
+    if (fetchable && !directory) {
+      continue;
+    }
+    char *why_not_fetched = NULL;
+    if (fetchable) {
+      data_filepath_t type = DATA_FILEPATH_TYPE_KWG;
+      (void)role_to_filepath_type(role, &type);
+      char *fetched_path = get_filepath(directory, name, type);
+      const bool have = input_file_fetched(state, file, fetched_path,
+                                           thread_control, &why_not_fetched);
+      free(fetched_path);
+      if (have) {
+        free(why_not_fetched);
+        continue;
+      }
     }
 
     all_matched = false;
@@ -538,8 +827,8 @@ static bool expected_data_matches(ContributeState *state,
       string_builder_add_string(missing, ",");
     }
     first_missing = false;
-    char *entry =
-        contribute_missing_file_json(role, name, expected_digest, actual);
+    char *entry = contribute_missing_file_json(role, name, expected_digest,
+                                               check->actual);
     string_builder_add_string(missing, entry);
     free(entry);
 
@@ -547,18 +836,26 @@ static bool expected_data_matches(ContributeState *state,
     // logs again only when the file or the expectation changes. The resolved
     // absolute path is printed because "your english.csv does not match" is
     // unactionable when the contributor has two of them.
-    char *gap = actual ? get_formatted_string(
-                             "  %-24s has sha256 %.8s, jobs require %.8s (%s)",
-                             display_path ? display_path : name, actual,
-                             expected_digest, path ? path : "unresolved")
-                       : get_formatted_string(
-                             "  %-24s not found in any data path (%s)",
-                             display_path ? display_path : name, data_paths);
-    char *log_key =
-        get_formatted_string("%s|%s", path ? path : name, expected_digest);
+    char *gap =
+        check->actual
+            ? get_formatted_string(
+                  "  %-24s has sha256 %.8s, jobs require %.8s (%s)",
+                  display_path ? display_path : name, check->actual,
+                  expected_digest, check->path ? check->path : "unresolved")
+            : get_formatted_string("  %-24s not found in any data path (%s)",
+                                   display_path ? display_path : name,
+                                   data_paths);
+    char *log_key = get_formatted_string(
+        "%s|%s", check->path ? check->path : name, expected_digest);
     if (!already_logged(state, log_key)) {
       thread_control_print_formatted_err(thread_control, "%s\n", gap);
-      if (tarball_date) {
+      if (why_not_fetched) {
+        // The tarball is not named: the server offered the file itself, so
+        // the tarball it was first seen in may no longer carry it.
+        thread_control_print_formatted_err(
+            thread_control, "  it could not be fetched from the server: %s\n",
+            why_not_fetched);
+      } else if (tarball_date) {
         thread_control_print_formatted_err(
             thread_control,
             "  this comes from MAGPIE-DATA data-%s or later; run "
@@ -569,10 +866,26 @@ static bool expected_data_matches(ContributeState *state,
     string_list_add_string(state->data_gaps, gap);
     free(log_key);
     free(gap);
-    free(actual);
-    free(path);
+    free(why_not_fetched);
   }
 
+  if (all_matched && directory) {
+    // Where the tables a task builds are written, whichever file was fetched:
+    // the first data path is the one builds go to.
+    char *lexica_file =
+        get_filepath(directory, "lexicon", DATA_FILEPATH_TYPE_KWG);
+    // Without it a build fails with its own message, and the task with it.
+    (void)make_directories_for(lexica_file);
+    free(lexica_file);
+    state->task_data_paths = cpath_list_prepend(directory, data_paths);
+  }
+
+  for (int i = 0; i < count; i++) {
+    free(checks[i].path);
+    free(checks[i].actual);
+  }
+  free(checks);
+  free(directory);
   error_stack_destroy(errors);
   return all_matched;
 }
@@ -917,6 +1230,8 @@ ContributeState *contribute_state_create(const char *settings_path,
   // ending the run with its error.
   http_client_set_abort_check(state->http_client, interrupted_check,
                               thread_control);
+  state->input_fetch = fetch_input_over_http;
+  state->input_fetch_context = state;
   memset(&state->heartbeat, 0, sizeof(state->heartbeat));
   state->claim_token = NULL;
   state->claimed_job_id = NULL;
@@ -1012,6 +1327,8 @@ static void release_claim(ContributeState *state) {
   json_destroy(state->assignment);
   state->assignment = NULL;
   state->derived_skipped = 0;
+  free(state->task_data_paths);
+  state->task_data_paths = NULL;
 }
 
 // A job name from the server, as printed: control characters (a terminal
@@ -1357,10 +1674,13 @@ contribute_claim_task(ContributeState **state_ptr, const char *settings_path,
   // Verified before the heartbeat starts: hashing is milliseconds, and a
   // decline should not look like a worker that started and died.
   StringBuilder *missing = string_builder_create();
-  const bool data_ok =
-      expected_data_matches(state, data_paths, thread_control, missing);
+  const bool data_ok = contribute_verify_expected_data(state, data_paths,
+                                                       thread_control, missing);
   char *missing_json = string_builder_dump_and_destroy(missing, NULL);
   if (!data_ok) {
+    // Started if a file was being fetched; the claim is about to be handed
+    // back, and a heartbeat for it after that is refused.
+    heartbeat_stop(&state->heartbeat);
     decline_over_http(state, "missing_data", missing_json, error_stack);
     free(missing_json);
     remember_unsupported(state, state->claimed_job_id);
@@ -1370,7 +1690,10 @@ contribute_claim_task(ContributeState **state_ptr, const char *settings_path,
   }
   free(missing_json);
 
-  heartbeat_start(&state->heartbeat, state->http_client, state->claim_token);
+  // Running already if a pinned file was fetched (input_file_fetched).
+  if (!state->heartbeat.running) {
+    heartbeat_start(&state->heartbeat, state->http_client, state->claim_token);
+  }
   state->started++;
   state->task_number = state->started;
   print_task_line(thread_control, "started", state->task_number,
@@ -1763,6 +2086,7 @@ void contribute_state_destroy(ContributeState *state) {
     return;
   }
   free(state->last_failure);
+  free(state->task_data_paths);
   for (int i = 0; i < state->deferred_count; i++) {
     free(state->deferred[i].job_id);
   }

@@ -108,11 +108,9 @@ static bool data_fetch_is_safe_path(const char *path) {
   }
 }
 
-// Creates `directory` and every directory on the way to it, splitting it at
-// either separator on Windows. Works back from the end, so a part that
-// already exists and cannot be made (a drive, "\\server\share") is never
-// made.
-static bool data_fetch_make_directories(const char *directory) {
+// Works back from the end, so a part that already exists and cannot be made
+// (a drive, "\\server\share") is never made.
+bool data_fetch_make_directories(const char *directory) {
   if (!directory[0]) {
     errno = ENOENT;
     return false;

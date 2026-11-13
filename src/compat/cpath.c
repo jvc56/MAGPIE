@@ -99,6 +99,29 @@ int cpath_split_list(const char *list, char ***paths) {
   return count;
 }
 
+char *cpath_list_prepend(const char *path, const char *list) {
+#if defined(_WIN32)
+  const char separator = ';';
+#else
+  const char separator = ':';
+#endif
+  const size_t path_length = strlen(path);
+  const size_t list_length = list ? strlen(list) : 0;
+  char *joined = malloc(path_length + 1 + list_length + 1);
+  if (!joined) {
+    return NULL;
+  }
+  memcpy(joined, path, path_length);
+  size_t length = path_length;
+  if (list_length > 0) {
+    joined[length++] = separator;
+    memcpy(joined + length, list, list_length);
+    length += list_length;
+  }
+  joined[length] = '\0';
+  return joined;
+}
+
 void cpath_list_destroy(char **paths, int count) {
   if (!paths) {
     return;
