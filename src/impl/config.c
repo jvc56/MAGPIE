@@ -90,6 +90,7 @@
 #include "move_gen_base.h"
 #include "move_gen_threats.h"
 #include "peg.h"
+#include "peg_fit.h"
 #include "play_chooser.h"
 #include "rack_draw.h"
 #include "rack_info_table_maker.h"
@@ -1578,12 +1579,36 @@ static const char *leave_blend_help(const char **usages,
          "tables mixed at 0.5 measured stronger than either.";
 }
 
-// One case for both in add_help_arg_to_string_builder, which is at the
+static const char *peg_fit_help(const char **usages, const char **examples) {
+  usages[0] = "<games> <rollouts> <endgame_plies> [<output_name>]";
+  examples[0] = "1000 16 2";
+  examples[1] = "4000 128 0 CSW24_static";
+  return "Fits pre-endgame adjustments to static play's outcomes. They "
+         "adjust a tile placement's static equity by the tiles it leaves in "
+         "the bag, or, if it empties the bag, by the tiles it leaves on the "
+         "mover's rack. Static self-play gives the positions with 1 to 12 "
+         "tiles in the bag (two racks less two). In each, the best play of "
+         "each count by static equity without the adjustments is played out "
+         "to the end <rollouts> times, with the same draws for every count, "
+         "and the fit is the least squares one of each play's outcome less "
+         "its static equity as a position term plus a count term. With "
+         "<endgame_plies> above 0, play stops when the bag is empty and the "
+         "endgame is solved that many plies deep. That is much slower than "
+         "static play, and it values tempo more. The table is written as "
+         "data/strategy/<output_name>.csv (default: <lexicon>_pegadjust). Use "
+         "the -seed, -threads and -ttfraction options.";
+}
+
+// One case for all three in add_help_arg_to_string_builder, which is at the
 // function size limit.
-static const char *census_or_leave_blend_help(int token, const char **usages,
-                                              const char **examples) {
+static const char *census_leave_blend_or_peg_fit_help(int token,
+                                                      const char **usages,
+                                                      const char **examples) {
   if (token == ARG_TOKEN_CENSUS) {
     return census_help(usages, examples);
+  }
+  if (token == ARG_TOKEN_PEG_FIT) {
+    return peg_fit_help(usages, examples);
   }
   return leave_blend_help(usages, examples);
 }
@@ -1930,7 +1955,8 @@ static void help_entry_fill(const Config *config, int token,
       break;
     case ARG_TOKEN_CENSUS:
     case ARG_TOKEN_LEAVE_BLEND:
-      text = census_or_leave_blend_help(token, usages, examples);
+    case ARG_TOKEN_PEG_FIT:
+      text = census_leave_blend_or_peg_fit_help(token, usages, examples);
       break;
     case ARG_TOKEN_CREATE_DATA:
       usages[0] = "<type> <output_name> [<letter_distribution>]";
@@ -5754,6 +5780,64 @@ void impl_pat_gen(Config *config, ErrorStack *error_stack) {
   config_autoplay(config, config->autoplay_results, AUTOPLAY_TYPE_PAT_GEN,
                   games_per_gen_str, 0, /*forced_racks=*/NULL,
                   /*num_forced_racks=*/0, output_name, error_stack);
+}
+
+// Pre-endgame fit
+
+void impl_peg_fit(Config *config, ErrorStack *error_stack) {
+  if (!config_has_game_data(config)) {
+    error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
+                     string_duplicate("cannot fit pre-endgame adjustments "
+                                      "without lexicon"));
+    return;
+  }
+  int number_of_games;
+  string_to_int_or_push_error(
+      "games", config_get_parg_value(config, ARG_TOKEN_PEG_FIT, 0), 1, INT_MAX,
+      ERROR_STATUS_CONFIG_LOAD_MALFORMED_INT_ARG, &number_of_games,
+      error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  int rollouts_per_class;
+  string_to_int_or_push_error(
+      "rollouts", config_get_parg_value(config, ARG_TOKEN_PEG_FIT, 1), 1,
+      INT_MAX, ERROR_STATUS_CONFIG_LOAD_MALFORMED_INT_ARG, &rollouts_per_class,
+      error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  int endgame_plies;
+  string_to_int_or_push_error(
+      "endgame plies", config_get_parg_value(config, ARG_TOKEN_PEG_FIT, 2), 0,
+      MAX_VARIANT_LENGTH, ERROR_STATUS_CONFIG_LOAD_MALFORMED_INT_ARG,
+      &endgame_plies, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  config_init_game(config);
+  const char *output_name = config_get_parg_value(config, ARG_TOKEN_PEG_FIT, 3);
+  char *default_output_name = NULL;
+  if (!output_name) {
+    default_output_name = get_formatted_string(
+        "%s_pegadjust",
+        kwg_get_name(player_get_kwg(game_get_player(config->game, 0))));
+    output_name = default_output_name;
+  }
+  const PegFitArgs args = {
+      .game = config->game,
+      .number_of_games = number_of_games,
+      .rollouts_per_class = rollouts_per_class,
+      .endgame_plies = endgame_plies,
+      .tt_fraction_of_mem = config->tt_fraction_of_mem,
+      .output_name = output_name,
+      .data_paths = config->data_paths,
+      .seed = config_get_seed(config),
+      .number_of_threads = config_get_num_threads(config),
+      .thread_control = config->thread_control,
+  };
+  peg_fit(&args, error_stack);
+  free(default_output_name);
 }
 
 // Create
@@ -15369,6 +15453,15 @@ char *str_api_pat_gen(Config *config, ErrorStack *error_stack) {
   return empty_string();
 }
 
+void execute_peg_fit(Config *config, ErrorStack *error_stack) {
+  impl_peg_fit(config, error_stack);
+}
+
+char *str_api_peg_fit(Config *config, ErrorStack *error_stack) {
+  impl_peg_fit(config, error_stack);
+  return empty_string();
+}
+
 void execute_create_data(Config *config, ErrorStack *error_stack) {
   impl_create_data(config, error_stack);
 }
@@ -16380,6 +16473,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   cmd(ARG_TOKEN_CENSUS, "census", 1, 3, census, generic, false);
   cmd(ARG_TOKEN_LEAVE_BLEND, "leaveblend", 4, 4, leave_blend, generic, false);
   cmd(ARG_TOKEN_PAT_GEN, "patgen", 1, 2, pat_gen, generic, false);
+  cmd(ARG_TOKEN_PEG_FIT, "pegfit", 3, 4, peg_fit, generic, false);
   cmd(ARG_TOKEN_CREATE_DATA, "createdata", 2, 3, create_data, generic, false);
   cmd(ARG_TOKEN_NEXT, "next", 0, 0, next, generic, true);
   cmd(ARG_TOKEN_PREVIOUS, "previous", 0, 0, previous, generic, true);
@@ -16967,6 +17061,7 @@ static void config_add_settings_to_string_builder_internal(const Config *config,
     case ARG_TOKEN_CENSUS:
     case ARG_TOKEN_LEAVE_BLEND:
     case ARG_TOKEN_PAT_GEN:
+    case ARG_TOKEN_PEG_FIT:
     case ARG_TOKEN_CREATE_DATA:
     case ARG_TOKEN_ANALYZE:
     case ARG_TOKEN_LOAD:
