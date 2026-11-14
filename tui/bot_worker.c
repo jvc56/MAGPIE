@@ -479,7 +479,7 @@ static bool find_equity_best(const Game *game, MoveList *scratch,
 
 // Generate up to N top candidates by equity into a fresh capacity-N
 // MoveList. Returns the list (caller must destroy via
-// moves_for_move_list_destroy + free) or NULL when no moves exist.
+// move_list_destroy) or NULL when no moves exist.
 //
 // We call generate_moves() directly rather than
 // generate_moves_for_game(): the latter overrides move_record_type
@@ -500,8 +500,7 @@ static MoveList *generate_top_candidates(const Game *game, int n) {
   };
   generate_moves(&args);
   if (move_list_get_count(list) == 0) {
-    moves_for_move_list_destroy(list);
-    free(list);
+    move_list_destroy(list);
     return NULL;
   }
   return list;
@@ -520,8 +519,7 @@ static bool run_sim(TuiGameState *state, double budget_sec, Move *out_move) {
   // Single-candidate position: no point simming a one-horse race.
   if (move_list_get_count(candidates) <= 1) {
     move_copy(out_move, move_list_get_move(candidates, 0));
-    moves_for_move_list_destroy(candidates);
-    free(candidates);
+    move_list_destroy(candidates);
     return true;
   }
 
@@ -611,8 +609,7 @@ static bool run_sim(TuiGameState *state, double budget_sec, Move *out_move) {
 
   error_stack_destroy(err);
   thread_control_destroy(tc);
-  moves_for_move_list_destroy(candidates);
-  free(candidates);
+  move_list_destroy(candidates);
   return got_move;
 }
 
@@ -1353,8 +1350,7 @@ static void *bot_thread_main(void *arg) {
   }
 
   move_destroy(chosen);
-  moves_for_move_list_destroy(fallback_list);
-  free(fallback_list);
+  move_list_destroy(fallback_list);
   return NULL;
 }
 
@@ -1441,8 +1437,7 @@ static void analysis_resume_sim(TuiGameState *state, TuiHistoryEntry *entry,
                                        : "resume failed: empty saved sim");
     pthread_mutex_unlock(&state->mutex);
     if (candidates != NULL) {
-      moves_for_move_list_destroy(candidates);
-      free(candidates);
+      move_list_destroy(candidates);
     }
     if (fresh) {
       sim_results_destroy(results);
@@ -1529,8 +1524,7 @@ static void analysis_resume_sim(TuiGameState *state, TuiHistoryEntry *entry,
   tui_game_state_notice(state, done_notice);
   pthread_mutex_unlock(&state->mutex);
 
-  moves_for_move_list_destroy(candidates);
-  free(candidates);
+  move_list_destroy(candidates);
 }
 
 // Re-solve a saved endgame turn with the session's warm transposition
@@ -1783,8 +1777,7 @@ bool tui_analysis_kibitz(TuiGameState *state, int turn_idx) {
               move_list_get_move(moves, move_idx));
   }
   entry->static_moves_saved_count = snap->num_rows;
-  moves_for_move_list_destroy(moves);
-  free(moves);
+  move_list_destroy(moves);
   game_destroy(position);
   atomic_fetch_add(&state->render_version, 1);
   return true;
