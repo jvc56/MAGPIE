@@ -1764,7 +1764,7 @@ static void test_pat_default_weights(void) {
                          "CSW21");
   }
   // The default is not saved: it follows the lexicon.
-  config_add_settings_to_string_builder(config, settings);
+  config_add_saved_settings_to_string_builder(config, settings);
   assert(strstr(string_builder_peek(settings), "-pat1") == NULL);
   // The weights follow the lexicon.
   load_and_exec_config_or_die(config, "set -lex NWL20");
@@ -1780,10 +1780,17 @@ static void test_pat_default_weights(void) {
   assert_strings_equal(
       players_data_get_data_name(players_data, PLAYERS_DATA_TYPE_PAT, 1),
       "CSW21");
+  // A settings file keeps a named choice, and a config that loads it has
+  // the choice again.
   string_builder_clear(settings);
-  config_add_settings_to_string_builder(config, settings);
+  config_add_saved_settings_to_string_builder(config, settings);
   assert(strstr(string_builder_peek(settings), "-pat1 none") != NULL);
   assert(strstr(string_builder_peek(settings), "-pat2") == NULL);
+  Config *reloaded = config_create_or_die("set -pat default");
+  load_and_exec_config_or_die(reloaded, string_builder_peek(settings));
+  assert(players_data_get_pat(config_get_players_data(reloaded), 0) == NULL);
+  assert(players_data_get_pat(config_get_players_data(reloaded), 1) != NULL);
+  config_destroy(reloaded);
   // Named weights stay through a change of lexicon.
   load_and_exec_config_or_die(config, "set -pat CSW21 -lex NWL20");
   for (int player_index = 0; player_index < 2; player_index++) {
@@ -1792,7 +1799,7 @@ static void test_pat_default_weights(void) {
                          "CSW21");
   }
   string_builder_clear(settings);
-  config_add_settings_to_string_builder(config, settings);
+  config_add_saved_settings_to_string_builder(config, settings);
   assert(strstr(string_builder_peek(settings), "-pat1 CSW21") != NULL);
   assert(strstr(string_builder_peek(settings), "-pat2 CSW21") != NULL);
   // And 'default' hands them back to it.

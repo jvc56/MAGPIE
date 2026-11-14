@@ -17170,6 +17170,9 @@ static const arg_token_t config_saved_settings[] = {
     ARG_TOKEN_LEAVES,
     ARG_TOKEN_P1_LEAVES,
     ARG_TOKEN_P2_LEAVES,
+    ARG_TOKEN_PAT,
+    ARG_TOKEN_P1_PAT,
+    ARG_TOKEN_P2_PAT,
     ARG_TOKEN_WIN_PCT,
     ARG_TOKEN_SHPLIES,
     ARG_TOKEN_SHOW_BU,
@@ -17354,7 +17357,7 @@ static void config_add_settings_to_string_builder_internal(const Config *config,
       break;
     case ARG_TOKEN_P1_PAT:
       // Omitted unless an option named the weights: the default follows the
-      // lexicon.
+      // lexicon. A named choice is kept by a settings file, 'none' included.
       if (config->pat_is_explicit[0]) {
         config_add_string_setting_to_string_builder(
             config, sb, arg_token,
@@ -17449,7 +17452,7 @@ static void config_add_settings_to_string_builder_internal(const Config *config,
       break;
     case ARG_TOKEN_P2_PAT:
       // Omitted unless an option named the weights: the default follows the
-      // lexicon.
+      // lexicon. A named choice is kept by a settings file, 'none' included.
       if (config->pat_is_explicit[1]) {
         config_add_string_setting_to_string_builder(
             config, sb, arg_token,
@@ -18143,12 +18146,21 @@ static bool config_setting_is_stale(arg_token_t arg_token, int file_version) {
 }
 
 // The settings that load together: a lexicon goes with its letter
-// distribution and leaves, and loading them stops at the first that fails,
-// so they are tried in a scratch config before they are applied.
+// distribution, leaves and PAT weights, and loading them stops at the first
+// that fails, so they are tried in a scratch config before they are applied.
+// A lexicon loaded apart from a saved 'pat none' would load its default
+// weights first.
 static const arg_token_t config_lexicon_settings[] = {
-    ARG_TOKEN_LETTER_DISTRIBUTION, ARG_TOKEN_LEXICON, ARG_TOKEN_P1_LEXICON,
-    ARG_TOKEN_P2_LEXICON,          ARG_TOKEN_LEAVES,  ARG_TOKEN_P1_LEAVES,
+    ARG_TOKEN_LETTER_DISTRIBUTION,
+    ARG_TOKEN_LEXICON,
+    ARG_TOKEN_P1_LEXICON,
+    ARG_TOKEN_P2_LEXICON,
+    ARG_TOKEN_LEAVES,
+    ARG_TOKEN_P1_LEAVES,
     ARG_TOKEN_P2_LEAVES,
+    ARG_TOKEN_PAT,
+    ARG_TOKEN_P1_PAT,
+    ARG_TOKEN_P2_PAT,
 };
 
 static bool config_setting_is_lexicon_setting(arg_token_t arg_token) {
