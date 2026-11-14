@@ -16,6 +16,7 @@
 #include "../ent/letter_distribution.h"
 #include "../ent/move.h"
 #include "../ent/pat_board_cache.h"
+#include "../ent/peg_adjust.h"
 #include "../ent/player.h"
 #include "../ent/rack.h"
 #include "../ent/sim_args.h"
@@ -496,11 +497,27 @@ static void simmer_worker_set_rollout_pat(SimmerWorker *simmer_worker,
   }
 }
 
+// The rollouts model the opponent as playing by the simming player's
+// pre-endgame adjustments, whichever table the opponent itself plays by: both
+// players of a worker's copy of the game take the table of the player on
+// turn, and none if that player has none.
+static void
+simmer_worker_set_rollout_peg_adjust(const SimmerWorker *simmer_worker,
+                                     const SimArgs *sim_args) {
+  const PegAdjust *peg_adjust = player_get_peg_adjust(game_get_player(
+      sim_args->game, game_get_player_on_turn_index(sim_args->game)));
+  for (int player_index = 0; player_index < 2; player_index++) {
+    player_set_peg_adjust(game_get_player(simmer_worker->game, player_index),
+                          peg_adjust);
+  }
+}
+
 SimmerWorker *simmer_create_worker(const SimArgs *sim_args) {
   SimmerWorker *simmer_worker = malloc_or_die(sizeof(SimmerWorker));
   simmer_worker->game = game_duplicate(sim_args->game);
   simmer_worker->pat_board_cache = NULL;
   simmer_worker_set_rollout_pat(simmer_worker, sim_args);
+  simmer_worker_set_rollout_peg_adjust(simmer_worker, sim_args);
   game_set_backup_mode(simmer_worker->game, BACKUP_MODE_SIMULATION);
   // A rollout plays its candidate and plies, then unplays them all at once,
   // so recording the squares they change beats copying the board twice.
@@ -525,6 +542,7 @@ void simmer_reset_worker(SimmerWorker *simmer_worker, const SimArgs *sim_args) {
   cross_set_cache_set_salt(simmer_worker->cross_set_cache,
                            simmer_worker->cross_set_salt);
   simmer_worker_set_rollout_pat(simmer_worker, sim_args);
+  simmer_worker_set_rollout_peg_adjust(simmer_worker, sim_args);
 }
 
 void simmer_worker_destroy(SimmerWorker *simmer_worker) {

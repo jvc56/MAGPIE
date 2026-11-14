@@ -1548,8 +1548,10 @@ static void add_player_solver_help_arg(arg_token_t arg_token,
             "adjustments, read from <data path>/strategy/<adjustments>.csv, "
             "are amounts added to the static equity of a tile placement by "
             "the tiles in the bag less the tiles played plus the rack size. "
-            "A table reaches as far as its file's highest index. Use 'none' "
-            "to unload. They are off by default.";
+            "A table reaches as far as its file's highest index. In a "
+            "player's simulations, both sides' plies in the rollouts use "
+            "that player's adjustments. Use 'none' to unload. They are off "
+            "by default.";
     break;
   case ARG_TOKEN_P1_PEG_ADJUST:
   case ARG_TOKEN_P2_PEG_ADJUST:
@@ -1558,7 +1560,8 @@ static void add_player_solver_help_arg(arg_token_t arg_token,
     examples[1] = "none";
     *text = "Specifies the pre-endgame adjustments for the given player. "
             "This can be used with the autoplay command to compare two "
-            "tables. Use 'none' to unload.";
+            "tables. In the player's simulations, both sides' plies in "
+            "the rollouts use them. Use 'none' to unload.";
     break;
   default:
     break;

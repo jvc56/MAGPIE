@@ -23,6 +23,7 @@
 #include "../src/ent/player.h"
 #include "../src/ent/players_data.h"
 #include "../src/ent/rack.h"
+#include "../src/ent/sim_results.h"
 #include "../src/ent/stats.h"
 #include "../src/ent/thread_control.h"
 #include "../src/ent/validated_move.h"
@@ -30,6 +31,7 @@
 #include "../src/impl/gameplay.h"
 #include "../src/impl/inference.h"
 #include "../src/impl/move_gen.h"
+#include "../src/impl/simmer.h"
 #include "../src/str/move_string.h"
 #include "../src/util/io_util.h"
 #include "../src/util/string_util.h"
@@ -68,6 +70,13 @@ enum {
   PEG_ADJUST_TEST_INFERENCES = 6,
   PEG_ADJUST_TEST_INFERENCE_MIN_TILES = 4,
   PEG_ADJUST_TEST_INFERENCE_LEAVES = 10,
+  // Sims run at each position of this many games with at most this many
+  // tiles in the bag, where most replies to a candidate are within a
+  // table's reach: of this many candidates, with this many rollouts each.
+  PEG_ADJUST_TEST_SIM_GAMES = 4,
+  PEG_ADJUST_TEST_SIM_MAX_BAG = RACK_SIZE + 2,
+  PEG_ADJUST_TEST_SIM_CANDIDATES = 6,
+  PEG_ADJUST_TEST_SIM_PLAY_ROLLOUTS = 20,
 };
 
 // Tables that stress the bounds differently: values of both signs, values
@@ -897,6 +906,136 @@ static void test_peg_adjust_inference(const char *set_cmd) {
   config_destroy(config);
 }
 
+// Sims the config's position and candidates with mover_table for the player
+// on turn and opponent_table for the other, then unloads both. The sim's
+// workers are new ones if sim_ctx is NULL or has run no sim yet, and
+// otherwise those of its earlier sims, reset. A context writes every sim's
+// results where its first sim's went, so it goes with one sim_results.
+static void simulate_with_tables(Config *config, SimCtx **sim_ctx,
+                                 PegAdjust *mover_table,
+                                 PegAdjust *opponent_table,
+                                 SimResults *sim_results) {
+  PlayersData *players_data = config_get_players_data(config);
+  const Game *game = config_get_game(config);
+  const int mover_index = game_get_player_on_turn_index(game);
+  set_peg_adjust(players_data, game, mover_index, mover_table);
+  set_peg_adjust(players_data, game, 1 - mover_index, opponent_table);
+  const error_code_t status =
+      config_simulate_and_return_status(config, sim_ctx, NULL, sim_results);
+  assert(status == ERROR_STATUS_SUCCESS);
+  for (int player_index = 0; player_index < 2; player_index++) {
+    set_peg_adjust(players_data, game, player_index, NULL);
+  }
+}
+
+// Whether two sims of the same candidates differ in the opponent's replies
+// to one of them, the first ply of its rollouts: in how many there are or in
+// their mean score.
+static bool sim_replies_differ(const SimResults *first,
+                               const SimResults *second) {
+  const int number_of_plays = sim_results_get_number_of_plays(first);
+  assert(number_of_plays == sim_results_get_number_of_plays(second));
+  for (int play_idx = 0; play_idx < number_of_plays; play_idx++) {
+    const Stat *first_scores = simmed_play_get_score_stat(
+        sim_results_get_simmed_play(first, play_idx), 0);
+    const Stat *second_scores = simmed_play_get_score_stat(
+        sim_results_get_simmed_play(second, play_idx), 0);
+    if (stat_get_num_samples(first_scores) !=
+            stat_get_num_samples(second_scores) ||
+        stat_get_mean(first_scores) != stat_get_mean(second_scores)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// A sim models the opponent as playing by the simming player's table,
+// whichever table the opponent has. With the same candidates, a sim gives the
+// same results with a table for both players, for the simming player only,
+// and for the simming player against another table; and the same results
+// with a table for the opponent only as with none. This holds for new
+// workers and for the reset workers of an earlier sim. The replies do depend
+// on the table that plays them: with the table for both players they differ
+// from the replies with none. The sims' rollouts are steered by the census
+// if use_census.
+static void test_peg_adjust_sim(bool use_census) {
+  char *set_cmd = get_formatted_string(
+      "set -lex CSW21 -wmp true -threads 1 -plies 2 -numplays %d "
+      "-iterations %d -minplayiterations %d -scond none -patrollout false "
+      "-sinfer false -seed 7 -scensus %s",
+      PEG_ADJUST_TEST_SIM_CANDIDATES,
+      PEG_ADJUST_TEST_SIM_CANDIDATES * PEG_ADJUST_TEST_SIM_PLAY_ROLLOUTS,
+      PEG_ADJUST_TEST_SIM_PLAY_ROLLOUTS, use_census ? "true" : "false");
+  Config *config = config_create_or_die(set_cmd);
+  free(set_cmd);
+  load_and_exec_config_or_die(config, "new");
+  PegAdjust *table = create_pattern_table(PEG_ADJUST_PATTERN_ALTERNATING, 1);
+  PegAdjust *other_table =
+      create_pattern_table(PEG_ADJUST_PATTERN_ALTERNATING, -1);
+  // The sims of each of the first three results share a context, so all but
+  // the first of them reset its workers. Those of the last create theirs.
+  SimCtx *neither_ctx = NULL;
+  SimCtx *both_ctx = NULL;
+  SimCtx *one_sided_ctx = NULL;
+  SimResults *neither = sim_results_create(0);
+  SimResults *both = sim_results_create(0);
+  SimResults *one_sided = sim_results_create(0);
+  SimResults *one_sided_new = sim_results_create(0);
+  Game *game = config_get_game(config);
+  MoveList *best_list = move_list_create(1);
+  bool mover_seen[2] = {false, false};
+  int positions = 0;
+  int positions_with_other_replies = 0;
+  for (int game_idx = 0; game_idx < PEG_ADJUST_TEST_SIM_GAMES; game_idx++) {
+    game_reset(game);
+    game_seed(game, (uint64_t)game_idx + 4000);
+    draw_starting_racks(game);
+    while (!game_over(game)) {
+      const int bag = bag_get_letters(game_get_bag(game));
+      if (bag > 0 && bag <= PEG_ADJUST_TEST_SIM_MAX_BAG) {
+        // The candidates of every sim of the position: its best plays
+        // without a table.
+        load_and_exec_config_or_die(config, "gen");
+        simulate_with_tables(config, &neither_ctx, NULL, NULL, neither);
+        assert(sim_results_get_census_rollout(neither) == use_census);
+        simulate_with_tables(config, &both_ctx, table, table, both);
+        assert(sim_results_get_census_rollout(both) == use_census);
+        simulate_with_tables(config, &one_sided_ctx, table, NULL, one_sided);
+        assert_sim_results_equal(both, one_sided);
+        simulate_with_tables(config, &one_sided_ctx, table, other_table,
+                             one_sided);
+        assert_sim_results_equal(both, one_sided);
+        simulate_with_tables(config, &one_sided_ctx, NULL, table, one_sided);
+        assert_sim_results_equal(neither, one_sided);
+        simulate_with_tables(config, NULL, table, other_table, one_sided_new);
+        assert_sim_results_equal(both, one_sided_new);
+        simulate_with_tables(config, NULL, NULL, table, one_sided_new);
+        assert_sim_results_equal(neither, one_sided_new);
+        if (sim_replies_differ(neither, both)) {
+          positions_with_other_replies++;
+        }
+        mover_seen[game_get_player_on_turn_index(game)] = true;
+        positions++;
+      }
+      play_move(get_top_equity_move(game, best_list), game, NULL);
+    }
+  }
+  assert(positions >= PEG_ADJUST_TEST_SIM_GAMES);
+  assert(mover_seen[0] && mover_seen[1]);
+  assert(positions_with_other_replies > 0);
+  move_list_destroy(best_list);
+  sim_results_destroy(one_sided_new);
+  sim_results_destroy(one_sided);
+  sim_results_destroy(both);
+  sim_results_destroy(neither);
+  sim_ctx_destroy(one_sided_ctx);
+  sim_ctx_destroy(both_ctx);
+  sim_ctx_destroy(neither_ctx);
+  peg_adjust_destroy(other_table);
+  peg_adjust_destroy(table);
+  config_destroy(config);
+}
+
 // A remembered move scored without its adjustment starts the generation
 // from too high an equity when its adjustment is negative and the true best
 // move's is no better, as under the table of the most negative values. Under
@@ -953,5 +1092,11 @@ void test_peg_adjust(void) {
     test_peg_adjust_config_movegen(
         "set -lex CSW24 -wmp true -rit true -wit true -s1 equity -s2 equity "
         "-r1 all -r2 all -numplays 1");
+  }
+  // The census, which reads the table for its rollouts itself, serves the
+  // standard board.
+  test_peg_adjust_sim(false);
+  if (is_standard_board) {
+    test_peg_adjust_sim(true);
   }
 }
