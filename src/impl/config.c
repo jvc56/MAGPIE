@@ -230,6 +230,10 @@ struct Config {
   // The table named by -winpct, owned; NULL means the default for the
   // current letter distribution (see config_win_pct_target_name).
   char *win_pct_explicit_name;
+  // Whether a pat option named the player's PAT weights, or 'none'. Until
+  // one does, the player's weights are its lexicon's (see
+  // config_default_pat_name).
+  bool pat_is_explicit[2];
   BoardLayout *board_layout;
   LetterDistribution *ld;
   PlayersData *players_data;
@@ -1347,7 +1351,11 @@ static void add_pat_help_arg(arg_token_t arg_token, const char **usages,
     examples[1] = "none";
     *text = "Specifies the PAT weights for both players, unless "
             "overridden by the 'pat1' or 'pat2' options. Use 'none' to "
-            "unload. PAT weights are off by default.";
+            "unload. By default a player uses the weights named after its "
+            "lexicon, when the data has them and the board is the standard "
+            "size, and none otherwise; once an option names a player's "
+            "weights or 'none', they stay as given until 'default' "
+            "returns them to the lexicon's.";
     break;
   case ARG_TOKEN_P1_PAT:
   case ARG_TOKEN_P2_PAT:
@@ -8460,6 +8468,22 @@ static int64_t config_table_file_bytes(const Config *config, const char *name,
   return bytes;
 }
 
+// The PAT weights a player gets when no pat option has named any: those
+// named after its lexicon, when a file of them is on the data paths, and
+// otherwise none (NULL). Those are weights for the standard board, so a
+// build for another size has no default. The caller owns the name.
+static char *config_default_pat_name(const Config *config, int player_index) {
+  const char *lexicon_name = players_data_get_data_name(
+      config->players_data, PLAYERS_DATA_TYPE_KWG, player_index);
+  // NOLINTNEXTLINE(misc-redundant-expression)
+  if (BOARD_DIM != DEFAULT_BOARD_DIM || lexicon_name == NULL ||
+      config_table_file_bytes(config, lexicon_name, DATA_FILEPATH_TYPE_PAT) <
+          0) {
+    return NULL;
+  }
+  return string_duplicate(lexicon_name);
+}
+
 // What a table type (WMP, WIT or RIT) is on disk, to contribute's chooser,
 // and to the player.
 typedef struct ConfigTableKind {
@@ -15155,56 +15179,63 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
     free(target_name);
   }
 
-  // Set the PAT weights - opt-in and per-player. The "pat1" and
-  // "pat2" args override the "pat" arg; "none" unloads. Unlike leaves, an
-  // unset arg means "keep whatever is currently loaded", which for a fresh
-  // config is nothing.
-  const char *new_pat_name = config_get_parg_value(config, ARG_TOKEN_PAT, 0);
-  const char *new_p1_pat_name = new_pat_name;
-  const char *new_p2_pat_name = new_pat_name;
+  // Set the PAT weights, per player. The "pat1" and "pat2" args override
+  // the "pat" arg, and "none" unloads. A player no pat arg has named gets
+  // its lexicon's weights when there are any (see config_default_pat_name);
+  // one that an arg has named keeps what it was given until "default"
+  // hands it back to its lexicon.
+  const char *new_pat_names[2];
+  new_pat_names[0] = config_get_parg_value(config, ARG_TOKEN_PAT, 0);
+  new_pat_names[1] = new_pat_names[0];
   if (config_get_parg_num_set_values(config, ARG_TOKEN_P1_PAT) > 0) {
-    new_p1_pat_name = config_get_parg_value(config, ARG_TOKEN_P1_PAT, 0);
+    new_pat_names[0] = config_get_parg_value(config, ARG_TOKEN_P1_PAT, 0);
   }
   if (config_get_parg_num_set_values(config, ARG_TOKEN_P2_PAT) > 0) {
-    new_p2_pat_name = config_get_parg_value(config, ARG_TOKEN_P2_PAT, 0);
+    new_pat_names[1] = config_get_parg_value(config, ARG_TOKEN_P2_PAT, 0);
   }
-  if (new_p1_pat_name || new_p2_pat_name) {
-    char *updated_p1_pat_name = NULL;
-    if (new_p1_pat_name) {
-      updated_p1_pat_name = string_duplicate(new_p1_pat_name);
+  // Copies, since loading may free the weights an existing name belongs to.
+  char *updated_pat_names[2];
+  const char *pat_names_or_null[2];
+  bool pat_names_changed = false;
+  for (int player_index = 0; player_index < 2; player_index++) {
+    const char *existing_name = players_data_get_data_name(
+        config->players_data, PLAYERS_DATA_TYPE_PAT, player_index);
+    if (new_pat_names[player_index]) {
+      config->pat_is_explicit[player_index] =
+          !strings_iequal(new_pat_names[player_index], "default");
+    }
+    if (new_pat_names[player_index] && config->pat_is_explicit[player_index]) {
+      updated_pat_names[player_index] =
+          string_duplicate(new_pat_names[player_index]);
+      pat_names_changed = true;
+    } else if (config->pat_is_explicit[player_index]) {
+      updated_pat_names[player_index] =
+          string_duplicate_allow_null(existing_name);
     } else {
-      const char *existing_p1_pat_name = players_data_get_data_name(
-          config->players_data, PLAYERS_DATA_TYPE_PAT, 0);
-      if (existing_p1_pat_name) {
-        updated_p1_pat_name = string_duplicate(existing_p1_pat_name);
+      updated_pat_names[player_index] =
+          config_default_pat_name(config, player_index);
+      const char *default_name = updated_pat_names[player_index];
+      if ((default_name == NULL) != (existing_name == NULL) ||
+          (default_name != NULL &&
+           !strings_equal(default_name, existing_name))) {
+        pat_names_changed = true;
       }
     }
-    char *updated_p2_pat_name = NULL;
-    if (new_p2_pat_name) {
-      updated_p2_pat_name = string_duplicate(new_p2_pat_name);
-    } else {
-      const char *existing_p2_pat_name = players_data_get_data_name(
-          config->players_data, PLAYERS_DATA_TYPE_PAT, 1);
-      if (existing_p2_pat_name) {
-        updated_p2_pat_name = string_duplicate(existing_p2_pat_name);
-      }
+    pat_names_or_null[player_index] = updated_pat_names[player_index];
+    if (pat_names_or_null[player_index] &&
+        strings_iequal(pat_names_or_null[player_index], "none")) {
+      pat_names_or_null[player_index] = NULL;
     }
-    const char *p1_pat_name_or_null = updated_p1_pat_name;
-    if (p1_pat_name_or_null && strings_iequal(p1_pat_name_or_null, "none")) {
-      p1_pat_name_or_null = NULL;
-    }
-    const char *p2_pat_name_or_null = updated_p2_pat_name;
-    if (p2_pat_name_or_null && strings_iequal(p2_pat_name_or_null, "none")) {
-      p2_pat_name_or_null = NULL;
-    }
+  }
+  if (pat_names_changed) {
     players_data_set(config->players_data, PLAYERS_DATA_TYPE_PAT,
-                     config->data_paths, p1_pat_name_or_null,
-                     p2_pat_name_or_null, false, error_stack);
-    free(updated_p1_pat_name);
-    free(updated_p2_pat_name);
-    if (!error_stack_is_empty(error_stack)) {
-      return;
-    }
+                     config->data_paths, pat_names_or_null[0],
+                     pat_names_or_null[1], false, error_stack);
+  }
+  free(updated_pat_names[0]);
+  free(updated_pat_names[1]);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
   }
 
   config_load_peg_adjust(config, error_stack);
@@ -17139,6 +17170,9 @@ static const arg_token_t config_saved_settings[] = {
     ARG_TOKEN_LEAVES,
     ARG_TOKEN_P1_LEAVES,
     ARG_TOKEN_P2_LEAVES,
+    ARG_TOKEN_PAT,
+    ARG_TOKEN_P1_PAT,
+    ARG_TOKEN_P2_PAT,
     ARG_TOKEN_WIN_PCT,
     ARG_TOKEN_SHPLIES,
     ARG_TOKEN_SHOW_BU,
@@ -17322,12 +17356,15 @@ static void config_add_settings_to_string_builder_internal(const Config *config,
                                      PLAYERS_DATA_TYPE_KLV, 0));
       break;
     case ARG_TOKEN_P1_PAT:
-      // Omitted when no weights are loaded; unloaded is the default.
-      if (players_data_get_pat(config->players_data, 0)) {
+      // Omitted unless an option named the weights: the default follows the
+      // lexicon. A named choice is kept by a settings file, 'none' included.
+      if (config->pat_is_explicit[0]) {
         config_add_string_setting_to_string_builder(
             config, sb, arg_token,
-            players_data_get_data_name(config->players_data,
-                                       PLAYERS_DATA_TYPE_PAT, 0));
+            players_data_get_pat(config->players_data, 0)
+                ? players_data_get_data_name(config->players_data,
+                                             PLAYERS_DATA_TYPE_PAT, 0)
+                : "none");
       }
       break;
     case ARG_TOKEN_P1_PEG_ADJUST:
@@ -17414,12 +17451,15 @@ static void config_add_settings_to_string_builder_internal(const Config *config,
                                      PLAYERS_DATA_TYPE_KLV, 1));
       break;
     case ARG_TOKEN_P2_PAT:
-      // Omitted when no weights are loaded; unloaded is the default.
-      if (players_data_get_pat(config->players_data, 1)) {
+      // Omitted unless an option named the weights: the default follows the
+      // lexicon. A named choice is kept by a settings file, 'none' included.
+      if (config->pat_is_explicit[1]) {
         config_add_string_setting_to_string_builder(
             config, sb, arg_token,
-            players_data_get_data_name(config->players_data,
-                                       PLAYERS_DATA_TYPE_PAT, 1));
+            players_data_get_pat(config->players_data, 1)
+                ? players_data_get_data_name(config->players_data,
+                                             PLAYERS_DATA_TYPE_PAT, 1)
+                : "none");
       }
       break;
     case ARG_TOKEN_P2_PEG_ADJUST:
@@ -18106,12 +18146,21 @@ static bool config_setting_is_stale(arg_token_t arg_token, int file_version) {
 }
 
 // The settings that load together: a lexicon goes with its letter
-// distribution and leaves, and loading them stops at the first that fails,
-// so they are tried in a scratch config before they are applied.
+// distribution, leaves and PAT weights, and loading them stops at the first
+// that fails, so they are tried in a scratch config before they are applied.
+// A lexicon loaded apart from a saved 'pat none' would load its default
+// weights first.
 static const arg_token_t config_lexicon_settings[] = {
-    ARG_TOKEN_LETTER_DISTRIBUTION, ARG_TOKEN_LEXICON, ARG_TOKEN_P1_LEXICON,
-    ARG_TOKEN_P2_LEXICON,          ARG_TOKEN_LEAVES,  ARG_TOKEN_P1_LEAVES,
+    ARG_TOKEN_LETTER_DISTRIBUTION,
+    ARG_TOKEN_LEXICON,
+    ARG_TOKEN_P1_LEXICON,
+    ARG_TOKEN_P2_LEXICON,
+    ARG_TOKEN_LEAVES,
+    ARG_TOKEN_P1_LEAVES,
     ARG_TOKEN_P2_LEAVES,
+    ARG_TOKEN_PAT,
+    ARG_TOKEN_P1_PAT,
+    ARG_TOKEN_P2_PAT,
 };
 
 static bool config_setting_is_lexicon_setting(arg_token_t arg_token) {

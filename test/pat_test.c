@@ -1742,6 +1742,77 @@ static void test_pat_path_parity(void) {
   pat_path_parity_run(2000.0);
 }
 
+// A player no pat option has named gets its lexicon's weights, on the
+// standard board and when the data has them; a named player keeps what it
+// was given, through a change of lexicon, until 'default'.
+static void test_pat_default_weights(void) {
+  Config *config = config_create_or_die("set -pat default -lex CSW21");
+  const PlayersData *players_data = config_get_players_data(config);
+  StringBuilder *settings = string_builder_create();
+  // NOLINTNEXTLINE(misc-redundant-expression)
+  if (BOARD_DIM != DEFAULT_BOARD_DIM) {
+    assert(players_data_get_pat(players_data, 0) == NULL);
+    assert(players_data_get_pat(players_data, 1) == NULL);
+    string_builder_destroy(settings);
+    config_destroy(config);
+    return;
+  }
+  for (int player_index = 0; player_index < 2; player_index++) {
+    assert(players_data_get_pat(players_data, player_index) != NULL);
+    assert_strings_equal(players_data_get_data_name(
+                             players_data, PLAYERS_DATA_TYPE_PAT, player_index),
+                         "CSW21");
+  }
+  // The default is not saved: it follows the lexicon.
+  config_add_saved_settings_to_string_builder(config, settings);
+  assert(strstr(string_builder_peek(settings), "-pat1") == NULL);
+  // The weights follow the lexicon.
+  load_and_exec_config_or_die(config, "set -lex NWL20");
+  assert_strings_equal(
+      players_data_get_data_name(players_data, PLAYERS_DATA_TYPE_PAT, 0),
+      "NWL20");
+  // One player's weights named, and the other's left to the lexicon.
+  load_and_exec_config_or_die(config, "set -pat1 none");
+  assert(players_data_get_pat(players_data, 0) == NULL);
+  assert(players_data_get_pat(players_data, 1) != NULL);
+  load_and_exec_config_or_die(config, "set -lex CSW21");
+  assert(players_data_get_pat(players_data, 0) == NULL);
+  assert_strings_equal(
+      players_data_get_data_name(players_data, PLAYERS_DATA_TYPE_PAT, 1),
+      "CSW21");
+  // A settings file keeps a named choice, and a config that loads it has
+  // the choice again.
+  string_builder_clear(settings);
+  config_add_saved_settings_to_string_builder(config, settings);
+  assert(strstr(string_builder_peek(settings), "-pat1 none") != NULL);
+  assert(strstr(string_builder_peek(settings), "-pat2") == NULL);
+  Config *reloaded = config_create_or_die("set -pat default");
+  load_and_exec_config_or_die(reloaded, string_builder_peek(settings));
+  assert(players_data_get_pat(config_get_players_data(reloaded), 0) == NULL);
+  assert(players_data_get_pat(config_get_players_data(reloaded), 1) != NULL);
+  config_destroy(reloaded);
+  // Named weights stay through a change of lexicon.
+  load_and_exec_config_or_die(config, "set -pat CSW21 -lex NWL20");
+  for (int player_index = 0; player_index < 2; player_index++) {
+    assert_strings_equal(players_data_get_data_name(
+                             players_data, PLAYERS_DATA_TYPE_PAT, player_index),
+                         "CSW21");
+  }
+  string_builder_clear(settings);
+  config_add_saved_settings_to_string_builder(config, settings);
+  assert(strstr(string_builder_peek(settings), "-pat1 CSW21") != NULL);
+  assert(strstr(string_builder_peek(settings), "-pat2 CSW21") != NULL);
+  // And 'default' hands them back to it.
+  load_and_exec_config_or_die(config, "set -pat default");
+  for (int player_index = 0; player_index < 2; player_index++) {
+    assert_strings_equal(players_data_get_data_name(
+                             players_data, PLAYERS_DATA_TYPE_PAT, player_index),
+                         "NWL20");
+  }
+  string_builder_destroy(settings);
+  config_destroy(config);
+}
+
 // The per-player PAT options land in players_data, and the global form sets
 // both players unless a per-player one overrides it.
 static void test_pat_usage_options(void) {
@@ -2545,6 +2616,7 @@ void test_pat(void) {
   test_pat_path_parity();
   test_pat_wmp_parity();
   test_pat_usage_options();
+  test_pat_default_weights();
   test_pat_candidates_option();
   destroy_temp_pat_data_dir(data_dir);
 }

@@ -440,8 +440,13 @@ static void run_process_command(const char *arg_string,
   if (!default_save_settings && !has_substring(arg_string, "-saves")) {
     disable_save_settings = " -savesettings false";
   }
+  // PAT off, as in the tests' default config (see
+  // config_create_default_test): a lexicon would bring its own, and a run
+  // with it takes longer than these tests wait for one.
+  const char *disable_pat =
+      has_substring(arg_string, "-pat") ? "" : " -pat none";
   char *arg_string_with_exec = get_formatted_string(
-      "./bin/magpie %s%s", arg_string, disable_save_settings);
+      "./bin/magpie %s%s%s", arg_string, disable_save_settings, disable_pat);
 
   // Reset the contents of output
   fclose_or_die(fopen_or_die(test_output_filename, "w"));
