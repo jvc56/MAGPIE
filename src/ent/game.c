@@ -5,6 +5,7 @@
 #include "../def/game_defs.h"
 #include "../def/letter_distribution_defs.h"
 #include "../def/players_data_defs.h"
+#include "../def/rack_defs.h"
 #include "../ent/equity.h"
 #include "../util/io_util.h"
 #include "../util/string_util.h"
@@ -114,6 +115,15 @@ game_variant_t get_game_variant_type_from_name(const char *variant_name) {
 Board *game_get_board(const Game *game) { return game->board; }
 
 Bag *game_get_bag(const Game *game) { return game->bag; }
+
+int game_get_real_bag_size(const Game *game) {
+  int real_bag_size = bag_get_letters(game->bag);
+  for (int player_index = 0; player_index < 2; player_index++) {
+    const Rack *rack = player_get_rack(game->players[player_index]);
+    real_bag_size -= RACK_SIZE - (int)rack_get_total_letters(rack);
+  }
+  return real_bag_size > 0 ? real_bag_size : 0;
+}
 
 const LetterDistribution *game_get_ld(const Game *game) { return game->ld; }
 

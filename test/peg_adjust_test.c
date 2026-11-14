@@ -808,12 +808,13 @@ static Equity get_expected_adjustment(const PegAdjust *peg_adjust, int bag,
 // - a top-n recording holds the n best equities of all moves;
 // - a within-x-of-best recording holds every move within x of the best;
 // - entering a move as text adds the same adjustment.
+// The caller counts bag, the bag the plays are made from: with a rack that is
+// not known it is not the game's bag.
 static void assert_peg_adjust_equities(const Game *game,
                                        PlayersData *players_data,
-                                       PegAdjust *peg_adjust,
-                                       PegAdjust *decoy) {
+                                       PegAdjust *peg_adjust, PegAdjust *decoy,
+                                       int bag) {
   const int player_index = game_get_player_on_turn_index(game);
-  const int bag = bag_get_letters(game_get_bag(game));
 
   set_peg_adjust(players_data, game, player_index, NULL);
   set_peg_adjust(players_data, game, 1 - player_index, decoy);
@@ -960,13 +961,123 @@ static void test_peg_adjust_movegen(const char *set_cmd) {
         // Only positions with fewer tiles in the bag than the table has
         // values can reach it.
         if (bag > 0 && bag < peg_adjust_get_number_of_values(peg_adjust)) {
-          assert_peg_adjust_equities(game, players_data, peg_adjust, decoy);
+          assert_peg_adjust_equities(game, players_data, peg_adjust, decoy,
+                                     bag);
           positions++;
         }
         play_top_n_equity_move(game, 0);
       }
     }
     assert(positions > 0);
+    peg_adjust_destroy(decoy);
+    peg_adjust_destroy(peg_adjust);
+  }
+  game_destroy(game);
+  config_destroy(config);
+}
+
+// Returns all but the first tiles_kept tiles of a player's rack to the bag,
+// where the tiles of a rack that is not known, or known only in part, are.
+static void return_rack_tiles_to_bag(const Game *game, int player_index,
+                                     int tiles_kept) {
+  Bag *bag = game_get_bag(game);
+  Rack *rack = player_get_rack(game_get_player(game, player_index));
+  const int player_draw_index = game_get_player_draw_index(game, player_index);
+  const int dist_size = rack_get_dist_size(rack);
+  int tiles_seen = 0;
+  for (int ml = 0; ml < dist_size; ml++) {
+    const int number_of_letter = rack_get_letter(rack, (MachineLetter)ml);
+    for (int letter_idx = 0; letter_idx < number_of_letter; letter_idx++) {
+      if (tiles_seen >= tiles_kept) {
+        rack_take_letter(rack, (MachineLetter)ml);
+        bag_add_letter(bag, (MachineLetter)ml, player_draw_index);
+      }
+      tiles_seen++;
+    }
+  }
+}
+
+// The position with only the first player_tiles_kept tiles of the mover's
+// rack and the first opponent_tiles_kept tiles of the opponent's known. Its
+// real bag is still real_bag, and its plays get the table's values for it.
+static void assert_partly_known_equities(const Game *game,
+                                         PlayersData *players_data,
+                                         PegAdjust *peg_adjust,
+                                         PegAdjust *decoy, int real_bag,
+                                         int player_tiles_kept,
+                                         int opponent_tiles_kept) {
+  const int player_index = game_get_player_on_turn_index(game);
+  Game *view = game_duplicate(game);
+  return_rack_tiles_to_bag(view, player_index, player_tiles_kept);
+  return_rack_tiles_to_bag(view, 1 - player_index, opponent_tiles_kept);
+  assert(game_get_real_bag_size(view) == real_bag);
+  assert_peg_adjust_equities(view, players_data, peg_adjust, decoy, real_bag);
+  game_destroy(view);
+}
+
+// The table is read by the real bag: the bag once both racks are full. A
+// game's bag also holds the tiles of a rack that is not known or known only
+// in part, as in a position entered with one rack. Positions of games played
+// with both racks known are given again with the opponent's rack not known,
+// with half of it known, and with half of the mover's rack and none of the
+// opponent's known. The plays of each get the table's values for the bag
+// counted while both racks were known, and none where that bag was empty,
+// however many tiles the game's bag holds by then: the first such position
+// of each game is checked.
+static void test_peg_adjust_unknown_racks(const char *set_cmd) {
+  Config *config = config_create_or_die(set_cmd);
+  PlayersData *players_data = config_get_players_data(config);
+  Game *game = config_game_create(config);
+  const peg_adjust_pattern_t patterns[] = {
+      PEG_ADJUST_PATTERN_ALTERNATING,
+      PEG_ADJUST_PATTERN_LONG_ALTERNATING,
+  };
+  for (size_t pattern_idx = 0;
+       pattern_idx < sizeof(patterns) / sizeof(patterns[0]); pattern_idx++) {
+    PegAdjust *peg_adjust = create_pattern_table(patterns[pattern_idx], 1);
+    PegAdjust *decoy = create_pattern_table(patterns[pattern_idx], -1);
+    int positions_with_bag = 0;
+    int positions_without_bag = 0;
+    for (int game_idx = 0; game_idx < PEG_ADJUST_TEST_GAMES; game_idx++) {
+      game_reset(game);
+      game_seed(game, (uint64_t)game_idx + 5000 + 100 * (uint64_t)pattern_idx);
+      draw_starting_racks(game);
+      bool empty_bag_checked = false;
+      while (!game_over(game)) {
+        // Both racks are full while the bag holds tiles, so the game's bag is
+        // the real bag here.
+        const int real_bag = bag_get_letters(game_get_bag(game));
+        assert(game_get_real_bag_size(game) == real_bag);
+        if (real_bag < peg_adjust_get_number_of_values(peg_adjust) &&
+            (real_bag > 0 || !empty_bag_checked)) {
+          const int player_index = game_get_player_on_turn_index(game);
+          const int player_tiles = rack_get_total_letters(
+              player_get_rack(game_get_player(game, player_index)));
+          const int opponent_tiles = rack_get_total_letters(
+              player_get_rack(game_get_player(game, 1 - player_index)));
+          assert_partly_known_equities(game, players_data, peg_adjust, decoy,
+                                       real_bag, player_tiles, 0);
+          if (opponent_tiles > 1) {
+            assert_partly_known_equities(game, players_data, peg_adjust, decoy,
+                                         real_bag, player_tiles,
+                                         opponent_tiles / 2);
+          }
+          if (player_tiles > 1) {
+            assert_partly_known_equities(game, players_data, peg_adjust, decoy,
+                                         real_bag, (player_tiles + 1) / 2, 0);
+          }
+          if (real_bag > 0) {
+            positions_with_bag++;
+          } else {
+            positions_without_bag++;
+            empty_bag_checked = true;
+          }
+        }
+        play_top_n_equity_move(game, 0);
+      }
+    }
+    assert(positions_with_bag > 0);
+    assert(positions_without_bag > 0);
     peg_adjust_destroy(decoy);
     peg_adjust_destroy(peg_adjust);
   }
@@ -1056,11 +1167,45 @@ static void assert_carry_matches(Game *game, MoveList *plain_list,
   assert(move_get_equity(plain) == move_get_equity(carried));
 }
 
-// With a table a move's equity depends on the bag, so what the carry
+// Adds a copy of each tile of a player's rack to the bag, which makes the bag
+// larger while both racks stay as they are.
+static void add_rack_copy_to_bag(const Game *game, int player_index) {
+  Bag *bag = game_get_bag(game);
+  const Rack *rack = player_get_rack(game_get_player(game, player_index));
+  const int player_draw_index = game_get_player_draw_index(game, player_index);
+  const int dist_size = rack_get_dist_size(rack);
+  for (int ml = 0; ml < dist_size; ml++) {
+    const int number_of_letter = rack_get_letter(rack, (MachineLetter)ml);
+    for (int letter_idx = 0; letter_idx < number_of_letter; letter_idx++) {
+      bag_add_letter(bag, (MachineLetter)ml, player_draw_index);
+    }
+  }
+}
+
+// Takes the tiles add_rack_copy_to_bag added out of the bag again.
+static void draw_rack_copy_from_bag(const Game *game, int player_index) {
+  Bag *bag = game_get_bag(game);
+  const Rack *rack = player_get_rack(game_get_player(game, player_index));
+  const int player_draw_index = game_get_player_draw_index(game, player_index);
+  const int dist_size = rack_get_dist_size(rack);
+  for (int ml = 0; ml < dist_size; ml++) {
+    const int number_of_letter = rack_get_letter(rack, (MachineLetter)ml);
+    for (int letter_idx = 0; letter_idx < number_of_letter; letter_idx++) {
+      const bool drawn =
+          bag_draw_letter(bag, (MachineLetter)ml, player_draw_index);
+      assert(drawn);
+    }
+  }
+}
+
+// With a table a move's equity depends on the real bag, so what the carry
 // remembers at one bag must not decide a generation at another. Simulation
 // uses the carry for its rollouts: each candidate is played and the next two
 // plies are compared. The same board and rack are also generated at the bag
-// as it is and with the opponent's rack returned to it. The table is both
+// as it is, at a larger bag, and with the opponent's rack returned to the
+// bag, which leaves the real bag and so every equity as it was at first. On
+// one board the real bag is larger only with more tiles in the game, so a
+// copy of the opponent's rack is added to the bag for it. The table is both
 // players', or only the first player's: the bags that share what is
 // remembered are the mover's table's to say. Or it is neither's, and only
 // says which bags are checked: without a table every bag that holds tiles
@@ -1092,10 +1237,15 @@ static void test_peg_adjust_carry_pattern(const char *set_cmd,
         const int opponent_index = 1 - game_get_player_on_turn_index(game);
         for (int repeat = 0; repeat < 2; repeat++) {
           assert_carry_matches(game, plain_list, carried_list, carry);
+          add_rack_copy_to_bag(game, opponent_index);
+          assert(game_get_real_bag_size(game) == bag + RACK_SIZE);
+          assert_carry_matches(game, plain_list, carried_list, carry);
+          draw_rack_copy_from_bag(game, opponent_index);
           return_rack_to_bag(game, opponent_index);
+          assert(game_get_real_bag_size(game) == bag);
           assert_carry_matches(game, plain_list, carried_list, carry);
           draw_to_full_rack(game, opponent_index);
-          generations += 2;
+          generations += 3;
         }
         const MoveGenArgs candidate_args = {
             .game = game,
@@ -1382,6 +1532,7 @@ static void test_peg_adjust_carry(const char *set_cmd) {
 // Runs every movegen check under set_cmd.
 static void test_peg_adjust_config_movegen(const char *set_cmd) {
   test_peg_adjust_movegen(set_cmd);
+  test_peg_adjust_unknown_racks(set_cmd);
   test_peg_adjust_bonus(set_cmd);
   test_peg_adjust_carry(set_cmd);
   test_peg_adjust_inference(set_cmd);

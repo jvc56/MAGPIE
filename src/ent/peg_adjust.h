@@ -19,6 +19,9 @@
 // Plays that reach an index past the table's last get no adjustment, nor do
 // exchanges and passes, which leave the bag as it is. The index counts from
 // the rack size, so a table is for the RACK_SIZE it was made with.
+//
+// The bag is the real one: a game's bag also holds the tiles of a rack that
+// is not known, so a game's plays are looked up by game_get_real_bag_size.
 typedef struct PegAdjust PegAdjust;
 
 // Reads <data path>/strategy/<name>.csv. Each row is "index,value", the
