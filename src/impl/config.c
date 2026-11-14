@@ -3974,7 +3974,7 @@ static bool config_parse_bool_arg(const char *value, const char *name,
 // The name of a lexicon's own pre-endgame adjustments: what pegfit writes by
 // default, and what a player set to auto plays with. The caller frees.
 static char *config_lexicon_peg_adjust_name(const char *lexicon) {
-  return get_formatted_string("%s_pegadjust", lexicon);
+  return get_formatted_string("%s%s", lexicon, LEXICON_PEG_ADJUST_SUFFIX);
 }
 
 // Whether a pat or pegadjust option's value returns the choice to the

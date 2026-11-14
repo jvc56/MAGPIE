@@ -168,6 +168,19 @@ bool tui_game_state_init(const char *lexicon, uint64_t seed, bool load_rit,
       error_stack_reset(err);
     }
   }
+  // The lexicon's own pre-endgame adjustments, the table the command line
+  // program plays with by default (-pegadjust auto): static equities late
+  // in a game carry it, in the kibitz list, in a sim's candidates and
+  // rollouts and in the computer's static moves. Best-effort like the
+  // wordmap: a lexicon without a table is played without one.
+  char *peg_adjust_name =
+      get_formatted_string("%s%s", lexicon, LEXICON_PEG_ADJUST_SUFFIX);
+  players_data_set(out_state->players_data, PLAYERS_DATA_TYPE_PEG_ADJUST,
+                   data_paths, peg_adjust_name, peg_adjust_name, false, err);
+  free(peg_adjust_name);
+  if (!error_stack_is_empty(err)) {
+    error_stack_reset(err);
+  }
   // Both players: pick the best move by static-eval equity.
   players_data_set_move_sort_type(out_state->players_data, 0, MOVE_SORT_EQUITY);
   players_data_set_move_sort_type(out_state->players_data, 1, MOVE_SORT_EQUITY);
