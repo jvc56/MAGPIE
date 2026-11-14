@@ -61,6 +61,12 @@ void players_data_set_pat_rollout_disabled(PlayersData *players_data,
                                            int player_index, bool disabled);
 bool players_data_get_pat_rollout_disabled(const PlayersData *players_data,
                                            int player_index);
+// Whether the player's sims roll out with the PAT term static evaluation
+// uses, in place of board-only PAT (see the patrolloutfast option).
+void players_data_set_pat_rollout_exact(PlayersData *players_data,
+                                        int player_index, bool exact);
+bool players_data_get_pat_rollout_exact(const PlayersData *players_data,
+                                        int player_index);
 void players_data_set_pat_rollout_disabled_classes_mask(
     PlayersData *players_data, int player_index, uint32_t mask);
 uint32_t players_data_get_pat_rollout_disabled_classes_mask(

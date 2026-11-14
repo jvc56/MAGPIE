@@ -22,6 +22,7 @@
 #include "../ent/leave_map.h"
 #include "../ent/letter_distribution.h"
 #include "../ent/move.h"
+#include "../ent/pat_board_cache.h"
 #include "../ent/pat_eval.h"
 #include "../ent/rack.h"
 #include "../ent/rack_info_table.h"
@@ -173,6 +174,14 @@ typedef struct MoveGen {
   // PAT evaluation state; disabled (weights NULL) unless the player
   // has PAT weights loaded and the record/sort types use static equity.
   PATEvalContext pat_eval_ctx;
+  // The context in use: pat_eval_ctx, or with board-only PAT (see
+  // pat_board_cache.h) the player's cached context for the board.
+  PATEvalContext *pat_ctx;
+  // With board-only PAT, where a move's term depends only on the board and
+  // the move: the cache of exact terms and the board's key in it. NULL when
+  // terms are not cached.
+  PATBoardCacheTerm *pat_terms;
+  uint64_t pat_term_key;
   // pat_eval_lane_penalty_bound for the lane the shadow phase is on, folded
   // into every shadow equity bound recorded from it (zero when disabled).
   Equity pat_lane_penalty_bound;
@@ -194,6 +203,14 @@ typedef struct MoveGen {
   // By lane, the anchor columns whose plays this generation does not search,
   // or NULL (MoveGenArgs.skip_anchor_cols).
   const uint32_t *skip_anchor_cols;
+  // MoveGenArgs.anchor_equity_caps, or NULL.
+  const Equity *anchor_equity_caps;
+  // With caps, a lane whose every unskipped anchor has one is not shadowed
+  // until its bound, the largest cap plus the lane's bound on the PAT term,
+  // is at least every heaped anchor's; a best move above the bound first
+  // leaves it unshadowed.
+  uint64_t deferred_lanes;
+  Equity deferred_lane_bounds[2 * BOARD_DIM];
   bool threshold_exceeded;
 
   MachineLetter strip[(MOVE_MAX_TILES)];
@@ -404,9 +421,9 @@ static inline Equity gen_get_static_equity(const MoveGen *gen,
   return static_eval_get_move_equity_with_leave_value(
       &gen->ld, move, &gen->player_rack, &gen->opponent_rack,
       gen->opening_move_word_penalties, gen->opening_move_letter_penalties,
-      pat_eval_context_get_active_classes(&gen->pat_eval_ctx),
-      &gen->pat_eval_ctx, gen->board_number_of_tiles_played,
-      gen->number_of_tiles_in_bag, leave_map_get_current_value(&gen->leave_map),
+      pat_eval_context_get_active_classes(gen->pat_ctx), gen->pat_ctx,
+      gen->board_number_of_tiles_played, gen->number_of_tiles_in_bag,
+      leave_map_get_current_value(&gen->leave_map),
       gen_get_peg_adjustment(gen, move));
 }
 
@@ -417,7 +434,7 @@ static inline Equity gen_get_static_equity(const MoveGen *gen,
 // (see gen_pat_contender_equity). The stored equity of a skipped candidate
 // is an overestimate used only in a comparison it strictly loses.
 static inline bool gen_pat_is_active(const MoveGen *gen) {
-  return gen->pat_eval_ctx.weights != NULL;
+  return gen->pat_ctx->weights != NULL;
 }
 
 // Static equity without the PAT term. Passes the mover's real active PAT
@@ -427,7 +444,7 @@ static inline Equity gen_get_static_equity_without_pat(const MoveGen *gen,
   return static_eval_get_move_equity_with_leave_value(
       &gen->ld, move, &gen->player_rack, &gen->opponent_rack,
       gen->opening_move_word_penalties, gen->opening_move_letter_penalties,
-      pat_eval_context_get_active_classes(&gen->pat_eval_ctx), NULL,
+      pat_eval_context_get_active_classes(gen->pat_ctx), NULL,
       gen->board_number_of_tiles_played, gen->number_of_tiles_in_bag,
       leave_map_get_current_value(&gen->leave_map),
       gen_get_peg_adjustment(gen, move));
@@ -457,8 +474,35 @@ static inline Equity gen_pat_contender_equity(const MoveGen *gen,
     }
     floor = (Equity)needed;
   }
-  return equity_without_pat +
-         pat_eval_move_penalty_capped(&gen->pat_eval_ctx, move, leave, floor);
+  if (gen->pat_terms == NULL) {
+    return equity_without_pat +
+           pat_eval_move_penalty_capped(gen->pat_ctx, move, leave, floor);
+  }
+  uint64_t key =
+      (gen->pat_term_key ^ ((uint64_t)move_get_row_start(move) |
+                            ((uint64_t)move_get_col_start(move) << 8) |
+                            ((uint64_t)move_get_dir(move) << 16) |
+                            ((uint64_t)move_get_tiles_length(move) << 24))) *
+      PAT_BOARD_CACHE_KEY_MULTIPLIER;
+  const int tiles_length = move_get_tiles_length(move);
+  for (int tile_idx = 0; tile_idx < tiles_length; tile_idx++) {
+    key = (key ^ move_get_tile(move, tile_idx)) * PAT_BOARD_CACHE_KEY_PRIME;
+    key ^= key >> 31;
+  }
+  key |= 1;
+  PATBoardCacheTerm *entry =
+      &gen->pat_terms[key & (PAT_BOARD_CACHE_NUM_TERMS - 1)];
+  if (entry->key == key) {
+    return equity_without_pat + entry->term;
+  }
+  const Equity term =
+      pat_eval_move_penalty_capped(gen->pat_ctx, move, leave, floor);
+  // A term at or above the floor is exact; one below it is only a bound.
+  if (term >= floor) {
+    entry->key = key;
+    entry->term = term;
+  }
+  return equity_without_pat + term;
 }
 
 // The PAT bound, utility correction included, for a WMP anchor's plays:
@@ -472,9 +516,8 @@ static inline Equity gen_wmp_anchor_pat_bound(const MoveGen *gen, int dir,
   if (!gen_pat_is_active(gen)) {
     return 0;
   }
-  return pat_eval_lane_defense_bound(&gen->pat_eval_ctx, dir, lane) +
-         pat_eval_utility_bound_for_play(&gen->pat_eval_ctx,
-                                         anchor->tiles_to_play,
+  return pat_eval_lane_defense_bound(gen->pat_ctx, dir, lane) +
+         pat_eval_utility_bound_for_play(gen->pat_ctx, anchor->tiles_to_play,
                                          anchor->highest_possible_score);
 }
 

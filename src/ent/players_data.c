@@ -52,6 +52,7 @@ struct PlayersData {
   // The same two settings for the rollouts of the player's sims.
   bool pat_rollout_disabled[2];
   uint32_t pat_rollout_disabled_classes_masks[2];
+  bool pat_rollout_exact[2];
   // The largest PAT adjustment a move of the player's can get.
 };
 
@@ -115,6 +116,16 @@ void players_data_set_pat_rollout_disabled(PlayersData *players_data,
 bool players_data_get_pat_rollout_disabled(const PlayersData *players_data,
                                            int player_index) {
   return players_data->pat_rollout_disabled[player_index];
+}
+
+void players_data_set_pat_rollout_exact(PlayersData *players_data,
+                                        int player_index, bool exact) {
+  players_data->pat_rollout_exact[player_index] = exact;
+}
+
+bool players_data_get_pat_rollout_exact(const PlayersData *players_data,
+                                        int player_index) {
+  return players_data->pat_rollout_exact[player_index];
 }
 
 void players_data_set_pat_rollout_disabled_classes_mask(
@@ -373,6 +384,7 @@ PlayersData *players_data_create(bool use_wmp) {
     players_data_set_pat_disabled_classes_mask(players_data, player_index, 0);
     players_data_set_pat_candidates_disabled(players_data, player_index, false);
     players_data_set_pat_rollout_disabled(players_data, player_index, false);
+    players_data_set_pat_rollout_exact(players_data, player_index, false);
     players_data_set_pat_rollout_disabled_classes_mask(
         players_data, player_index,
         PAT_CLASS_MASK_ALL & ~PAT_CLASS_MASK_ROLLOUT_DEFAULT);

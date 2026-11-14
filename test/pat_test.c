@@ -1751,17 +1751,22 @@ static void test_pat_usage_options(void) {
     assert(players_data_get_pat_rollout_disabled_classes_mask(
                config_get_players_data(default_config), player_index) ==
            (PAT_CLASS_MASK_ALL & ~PAT_CLASS_MASK_ROLLOUT_DEFAULT));
+    // And to board-only PAT.
+    assert(!players_data_get_pat_rollout_exact(
+        config_get_players_data(default_config), player_index));
   }
   config_destroy(default_config);
   Config *config = config_create_or_die(
       "set -lex CSW21 -patcand false -patcand2 true -patrollout1 false "
       "-patclasses dws,tws -patrolloutclasses tws,windows "
-      "-patrolloutclasses2 all");
+      "-patrolloutclasses2 all -patrolloutfast false -patrolloutfast2 true");
   const PlayersData *players_data = config_get_players_data(config);
   assert(players_data_get_pat_candidates_disabled(players_data, 0));
   assert(!players_data_get_pat_candidates_disabled(players_data, 1));
   assert(players_data_get_pat_rollout_disabled(players_data, 0));
   assert(!players_data_get_pat_rollout_disabled(players_data, 1));
+  assert(players_data_get_pat_rollout_exact(players_data, 0));
+  assert(!players_data_get_pat_rollout_exact(players_data, 1));
   for (int player_index = 0; player_index < 2; player_index++) {
     assert(players_data_get_pat_disabled_classes_mask(players_data,
                                                       player_index) ==

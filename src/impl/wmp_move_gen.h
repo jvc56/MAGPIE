@@ -1168,7 +1168,7 @@ static inline void wmp_move_gen_add_anchors(WMPMoveGen *wmp_move_gen, int row,
           anchor->highest_possible_equity >= inference_cutoff_equity) {
         assert(anchor->word_length >= MINIMUM_WORD_LENGTH);
         assert(anchor->word_length <= wmp_move_gen->wmp->board_dim);
-        memcpy(wmp_move_gen->heap_score_bases[anchor_heap->count],
+        memcpy(wmp_move_gen->heap_score_bases[anchor_heap->insertions],
                wmp_move_gen->anchor_score_bases[slot_idx],
                sizeof(wmp_move_gen->anchor_score_bases[slot_idx]));
         anchor_heap_add_unheaped_wmp_anchor(

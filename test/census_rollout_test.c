@@ -14,6 +14,7 @@
 #include "../src/ent/game.h"
 #include "../src/ent/letter_distribution.h"
 #include "../src/ent/move.h"
+#include "../src/ent/pat_board_cache.h"
 #include "../src/ent/peg_adjust.h"
 #include "../src/ent/player.h"
 #include "../src/ent/players_data.h"
@@ -504,13 +505,13 @@ static void test_census_rollout_steers_many_candidates(void) {
 // A single-threaded sim gives the same results with the census as without
 // it, since every census-steered move is the plain one: a sim of the position
 // a static game reaches with at most bag_tiles tiles in the bag, under
-// options, which name the players' pre-endgame adjustment tables if they
-// have any.
+// options, which name the players' pre-endgame adjustment tables and PAT
+// weights if they have any.
 static void assert_census_rollout_sim_matches_plain(const char *options,
                                                     int bag_tiles) {
   char *command = get_formatted_string(
       "set -lex CSW21 -wmp true -threads 1 -plies 2 -numplays 8 -it %d "
-      "-scond none -patrollout false -sinfer false%s",
+      "-scond none -sinfer false%s",
       CENSUS_ROLLOUT_TEST_SIM_ITERATIONS, options);
   Config *config = config_create_or_die(command);
   free(command);
@@ -534,6 +535,62 @@ static void test_census_rollout_sim_matches_plain(void) {
     return;
   }
   assert_census_rollout_sim_matches_plain("", 40);
+  // With board-only PAT in the rollouts, where the census caps the anchors
+  // it knows instead of skipping them, on every class and on the rollouts'
+  // default ones.
+  assert_census_rollout_sim_matches_plain(" -pat CSW21", 40);
+  assert_census_rollout_sim_matches_plain(" -pat CSW21", 12);
+  assert_census_rollout_sim_matches_plain(" -pat CSW21 -patrolloutclasses all",
+                                          40);
+}
+
+// Board-only PAT finds the same move from a cache that has seen the board,
+// and other racks on it, as from one that has seen nothing.
+static void test_census_rollout_pat_board_cache(void) {
+  if (BOARD_DIM != 15) {
+    return;
+  }
+  Config *config = config_create_or_die("set -lex CSW21 -pat CSW21 -wmp true");
+  Game *game = config_game_create(config);
+  MoveList *move_list = move_list_create(1);
+  PATBoardCache *warm_cache = pat_board_cache_create();
+  PATBoardCache *cold_cache = pat_board_cache_create();
+  Move warm_move;
+  uint64_t differing = 0;
+  const int number_of_bags = (int)(sizeof(census_rollout_test_bag_sizes) /
+                                   sizeof(census_rollout_test_bag_sizes[0]));
+  for (int bag_idx = 0; bag_idx < number_of_bags; bag_idx++) {
+    play_to_bag_size(game, move_list, 100 + (uint64_t)bag_idx,
+                     census_rollout_test_bag_sizes[bag_idx]);
+    const int player_index = game_get_player_on_turn_index(game);
+    Player *player = game_get_player(game, player_index);
+    for (int rack_idx = 0; rack_idx < CENSUS_ROLLOUT_TEST_ROLLOUTS;
+         rack_idx++) {
+      return_rack_to_bag(game, player_index);
+      game_seed(game, 2000 + (uint64_t)rack_idx);
+      set_random_rack(game, player_index, NULL);
+      // Twice from the warm cache: the second generation finds the board's
+      // context and the terms the first one left.
+      for (int pass = 0; pass < 2; pass++) {
+        player_set_pat_board_cache(player, warm_cache);
+        move_copy(&warm_move, get_top_equity_move(game, move_list));
+        pat_board_cache_reset(cold_cache);
+        player_set_pat_board_cache(player, cold_cache);
+        assert_moves_are_equal(&warm_move,
+                               get_top_equity_move(game, move_list));
+      }
+      // Board-only PAT is not the term static evaluation uses.
+      player_set_pat_board_cache(player, NULL);
+      const Move *exact_move = get_top_equity_move(game, move_list);
+      differing += move_get_equity(exact_move) != move_get_equity(&warm_move);
+    }
+  }
+  assert(differing > 0);
+  pat_board_cache_destroy(cold_cache);
+  pat_board_cache_destroy(warm_cache);
+  move_list_destroy(move_list);
+  game_destroy(game);
+  config_destroy(config);
 }
 
 // Writes a table's values to <dir>/strategy/<name>.csv for a config to load.
@@ -600,14 +657,16 @@ static void test_census_rollout_sim_matches_plain_with_tables(void) {
 }
 
 // The census leaves out PAT's term, so a sim refuses it while its rollouts
-// use PAT, and takes it with rollout PAT off.
+// use the term static evaluation uses, and takes it with board-only PAT or
+// with rollout PAT off.
 static void test_census_rollout_refuses_pat(void) {
   if (BOARD_DIM != 15) {
     return;
   }
   Config *config = config_create_or_die(
       "set -lex CSW21 -pat CSW21 -wmp true -threads 1 -plies 2 -numplays 4 "
-      "-it 20 -scond none -seed 7 -scensus true -patrollout true");
+      "-it 20 -scond none -seed 7 -scensus true -patrollout true "
+      "-patrolloutfast false");
   load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
   MoveList *move_list = move_list_create(1);
   play_to_bag_size(config_get_game(config), move_list, 7, 40);
@@ -616,6 +675,10 @@ static void test_census_rollout_refuses_pat(void) {
   assert(config_simulate_and_return_status(config, NULL, NULL, sim_results) ==
          ERROR_STATUS_SIM_CENSUS_WITH_PAT);
   load_and_exec_config_or_die(config, "set -patrollout false");
+  assert(config_simulate_and_return_status(config, NULL, NULL, sim_results) ==
+         ERROR_STATUS_SUCCESS);
+  load_and_exec_config_or_die(config,
+                              "set -patrollout true -patrolloutfast true");
   assert(config_simulate_and_return_status(config, NULL, NULL, sim_results) ==
          ERROR_STATUS_SUCCESS);
   sim_results_destroy(sim_results);
@@ -732,8 +795,12 @@ static void test_census_rollout_auto(void) {
   assert(census_rollout_sim_steers(config, &sim_ctx, sim_results, "auto"));
   // A second sim reuses the census, whose memory auto counts as free.
   assert(census_rollout_sim_steers(config, &sim_ctx, sim_results, "auto"));
-  // With rollout PAT on, auto leaves the census out rather than refusing.
+  // With board-only PAT in the rollouts, auto still steers the sim.
   load_and_exec_config_or_die(config, "set -patrollout true");
+  assert(census_rollout_sim_steers(config, &sim_ctx, sim_results, "auto"));
+  // With the term static evaluation uses, auto leaves the census out
+  // rather than refusing.
+  load_and_exec_config_or_die(config, "set -patrolloutfast false");
   assert(!census_rollout_sim_steers(config, &sim_ctx, sim_results, "auto"));
   sim_ctx_destroy(sim_ctx);
   sim_results_destroy(sim_results);
@@ -890,6 +957,7 @@ void test_census_rollout(void) {
   test_census_rollout_tells_tables_apart();
   test_census_rollout_steers_many_candidates();
   test_census_rollout_sim_matches_plain();
+  test_census_rollout_pat_board_cache();
   test_census_rollout_sim_matches_plain_with_tables();
   test_census_rollout_refuses_pat();
   test_census_rollout_auto();

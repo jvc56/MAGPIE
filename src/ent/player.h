@@ -5,6 +5,7 @@
 #include "klv.h"
 #include "kwg.h"
 #include "pat.h"
+#include "pat_board_cache.h"
 #include "peg_adjust.h"
 #include "players_data.h"
 #include "rack.h"
@@ -62,6 +63,13 @@ void player_set_pat(Player *player, const PATWeights *pat);
 // player_update loads.
 void player_set_pat_usage(Player *player, bool disabled,
                           uint32_t disabled_classes_mask);
+// Gives the player a cache for board-only PAT, or NULL for none. With one,
+// the player's move generation uses board-only PAT: the term leaves out the
+// player's rack and the utility correction (see pat_board_cache.h). The
+// cache is not owned, must outlive its use, and serves one thread; a sim
+// worker sets it for its rollouts. player_update clears it.
+void player_set_pat_board_cache(Player *player, PATBoardCache *cache);
+PATBoardCache *player_get_pat_board_cache(const Player *player);
 
 void player_update(const PlayersData *players_data, Player *player);
 Player *player_duplicate(const Player *player);

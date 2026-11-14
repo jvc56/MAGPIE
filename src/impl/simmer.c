@@ -102,6 +102,13 @@ static bool sim_rollout_pat_is_on(const SimArgs *sim_args) {
   return false;
 }
 
+// Whether the sim's rollouts use a PAT the census cannot steer: the term
+// static evaluation uses. Board-only PAT bounds each anchor's term for it
+// (see MoveGenArgs.anchor_equity_caps).
+static bool sim_rollout_pat_excludes_census(const SimArgs *sim_args) {
+  return sim_args->pat_rollout_exact && sim_rollout_pat_is_on(sim_args);
+}
+
 void simulate(SimArgs *sim_args, SimCtx **sim_ctx, SimResults *sim_results,
               ErrorStack *error_stack) {
   if (!sim_args->move_list || move_list_get_count(sim_args->move_list) == 0) {
@@ -137,25 +144,27 @@ void simulate(SimArgs *sim_args, SimCtx **sim_ctx, SimResults *sim_results,
 
   // The census rollout's equities leave out PAT's term, so the two do not
   // mix: a sim steered by the census plays its rollouts without PAT. Auto
-  // considers the census only for a sim whose rollouts go without PAT, from a
+  // considers the census only for a sim whose rollouts go without PAT or
+  // with board-only PAT, from a
   // bag with tiles (the census serves no generation from an empty bag), when
   // it fits in memory; the simmer then builds it if the sim's rollouts pay
   // for it (see census_rollout_prepare_if_it_pays).
   if (sim_args->census_rollout_auto) {
     const uint64_t held_bytes = sim_ctx_census_rollout_held_bytes(*sim_ctx);
     sim_args->use_census_rollout =
-        !sim_rollout_pat_is_on(sim_args) &&
+        !sim_rollout_pat_excludes_census(sim_args) &&
         !bag_is_empty(game_get_bag(sim_args->game)) &&
         census_rollout_auto_fits(sim_args->game, sim_args->num_threads,
                                  move_list_get_count(sim_args->move_list),
                                  held_bytes);
   }
-  if (sim_args->use_census_rollout && sim_rollout_pat_is_on(sim_args)) {
+  if (sim_args->use_census_rollout &&
+      sim_rollout_pat_excludes_census(sim_args)) {
     error_stack_push(
         error_stack, ERROR_STATUS_SIM_CENSUS_WITH_PAT,
         string_duplicate("cannot steer rollouts with the census while their "
-                         "PAT is on: set patrollout to false, or scensus to "
-                         "false"));
+                         "PAT is not board-only: set patrolloutfast to true, "
+                         "patrollout to false, or scensus to false"));
     return;
   }
 

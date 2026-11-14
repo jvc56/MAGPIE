@@ -22,9 +22,15 @@
 // cover or border with the rack's tiles) misses every changed square on both
 // boards. Every steered generation finds the move a plain one finds.
 //
-// The census leaves out PAT's term, so the two do not mix: a sim refuses the
-// census while its rollouts use PAT (see the patrollout option), and the
-// census steers no generation of a player whose PAT is on.
+// The census leaves out PAT's term. With board-only PAT (see
+// pat_board_cache.h) the term has no positive part, so a known anchor's best
+// equity caps its plays' equity without the term, and the generation adds
+// the lane's bound on the term (see MoveGenArgs.anchor_equity_caps): it
+// skips only the anchors without a play, and searches the others only while
+// their caps can still beat the best move. With the term static evaluation
+// uses the two do not mix: a sim refuses the census while its rollouts use
+// that PAT (see the patrollout and patrolloutfast options), and the census
+// steers no generation of a player whose PAT is on without a board cache.
 
 enum {
   CENSUS_ROLLOUT_NUM_LANES = 2 * BOARD_DIM,

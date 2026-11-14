@@ -1149,7 +1149,8 @@ static void census_rollout_gather_rack(CensusRolloutWorker *worker,
 static bool census_rollout_skips(CensusRolloutWorker *worker,
                                  const CensusRollout *census, const Game *game,
                                  const uint64_t *hashes, uint64_t *skip_lanes,
-                                 uint32_t *skip_anchor_cols) {
+                                 uint32_t *skip_anchor_cols,
+                                 Equity *equity_caps) {
   const CensusRolloutBoard *board = worker->current;
   const Rack *rack = player_get_rack(
       game_get_player(game, game_get_player_on_turn_index(game)));
@@ -1206,7 +1207,13 @@ static bool census_rollout_skips(CensusRolloutWorker *worker,
       }
       values[lane][col] = value;
       any_known = true;
-      raise_best(&floor_equity, value);
+      if (equity_caps != NULL) {
+        // With PAT the best known anchor's equity is not a floor: each
+        // known anchor's equity without the term caps its bound instead.
+        equity_caps[lane * BOARD_DIM + col] = value;
+      } else {
+        raise_best(&floor_equity, value);
+      }
     }
   }
   if (!any_known) {
@@ -1247,7 +1254,16 @@ static bool census_rollout_serves(const Game *game) {
   }
   const Player *player =
       game_get_player(game, game_get_player_on_turn_index(game));
-  return player_get_pat(player) == NULL || player_get_pat_disabled(player);
+  return player_get_pat(player) == NULL || player_get_pat_disabled(player) ||
+         player_get_pat_board_cache(player) != NULL;
+}
+
+// Whether the player on turn's generation has a PAT term, which the census's
+// equities leave out.
+static bool census_rollout_pat_is_on(const Game *game) {
+  const Player *player =
+      game_get_player(game, game_get_player_on_turn_index(game));
+  return player_get_pat(player) != NULL && !player_get_pat_disabled(player);
 }
 
 const Move *census_rollout_get_best_move(CensusRolloutWorker *worker,
@@ -1263,6 +1279,10 @@ const Move *census_rollout_get_best_move(CensusRolloutWorker *worker,
                       .target_equity = EQUITY_MAX_VALUE};
   uint32_t skip_anchor_cols[CENSUS_ROLLOUT_NUM_LANES];
   uint64_t hashes[CENSUS_ROLLOUT_NUM_LANES];
+  // With PAT on: each known anchor's equity without the term, for the
+  // generation to cap its bound with.
+  Equity equity_cap_storage[CENSUS_ROLLOUT_NUM_LANES * BOARD_DIM];
+  Equity *equity_caps = NULL;
   worker->last_served = worker->current != NULL &&
                         ply <= CENSUS_ROLLOUT_MAX_PLY &&
                         census_rollout_serves(game);
@@ -1270,10 +1290,18 @@ const Move *census_rollout_get_best_move(CensusRolloutWorker *worker,
   if (worker->last_served) {
     gen_hash_game_lanes(game, 0, hashes);
     uint64_t skip_lanes = 0;
+    if (census_rollout_pat_is_on(game)) {
+      equity_caps = equity_cap_storage;
+      for (int cap_idx = 0; cap_idx < CENSUS_ROLLOUT_NUM_LANES * BOARD_DIM;
+           cap_idx++) {
+        equity_caps[cap_idx] = EQUITY_MAX_VALUE;
+      }
+    }
     if (census_rollout_skips(worker, census, game, hashes, &skip_lanes,
-                             skip_anchor_cols)) {
+                             skip_anchor_cols, equity_caps)) {
       args.skip_lanes = skip_lanes;
       args.skip_anchor_cols = skip_anchor_cols;
+      args.anchor_equity_caps = equity_caps;
       worker->last_steered = true;
     }
   }

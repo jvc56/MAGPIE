@@ -53,6 +53,9 @@ static_assert(ANCHOR_HEAP_CAPACITY <= (1 << 15),
 typedef struct AnchorHeap {
   int count;
   Anchor anchors[ANCHOR_HEAP_CAPACITY];
+  // The WMP anchors added since the reset, which numbers the next one: the
+  // count falls as anchors are extracted, and anchors may be added after.
+  int insertions;
 } AnchorHeap;
 
 // Appends anchors to the end of the list without any comparisons.
@@ -89,11 +92,15 @@ static inline void anchor_heap_add_unheaped_wmp_anchor(
   ah->anchors[i].tiles_to_play = tiles_to_play;
   ah->anchors[i].playthrough_blocks = playthrough_blocks;
   ah->anchors[i].word_length = word_length;
-  ah->anchors[i].insertion_idx = i;
+  ah->anchors[i].insertion_idx = ah->insertions;
+  ah->insertions++;
   ah->count++;
 }
 
-static inline void anchor_heap_reset(AnchorHeap *ah) { ah->count = 0; }
+static inline void anchor_heap_reset(AnchorHeap *ah) {
+  ah->count = 0;
+  ah->insertions = 0;
+}
 
 // The bound of the sentinels past the last anchor: below every anchor's, so
 // a sentinel is never a better child than an anchor.
