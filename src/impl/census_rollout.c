@@ -1108,10 +1108,10 @@ static void census_rollout_gather_rack(CensusRolloutWorker *worker,
                                        const CensusRollout *census,
                                        const Game *game, const Rack *rack,
                                        const CensusRolloutBoard *board) {
-  const int bag = bag_get_letters(game_get_bag(game));
+  const int bag = game_get_real_bag_size(game);
   // By tiles played, the pre-endgame adjustment of a play from this bag, as
-  // move generation adds it: the mover's table's, all 0 without a table and
-  // from a bag no value of the table reaches.
+  // move generation adds it: the mover's table's by the real bag, all 0
+  // without a table and from a bag no value of the table reaches.
   Equity peg_by_tiles_played[RACK_SIZE + 1];
   peg_adjust_fill_by_tiles_played(
       player_get_peg_adjust(

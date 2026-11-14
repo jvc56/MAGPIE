@@ -507,7 +507,7 @@ void validated_move_load(ValidatedMove *vm, const Game *game, int player_index,
               move_get_type(vm->move) == GAME_EVENT_TILE_PLACEMENT_MOVE
                   ? peg_adjust_get_placement_value(
                         player_get_peg_adjust(player),
-                        bag_get_letters(game_get_bag(game)),
+                        game_get_real_bag_size(game),
                         move_get_tiles_played(vm->move))
                   : 0));
     } else {

@@ -3567,8 +3567,10 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
 
   gen->bingo_bonus = game_get_bingo_bonus(game);
   gen->number_of_tiles_in_bag = bag_get_letters(game_get_bag(game));
+  // The table is read by the real bag: the game's bag also holds the tiles of
+  // a rack that is not known, which are not in the bag the play is made from.
   peg_adjust_fill_by_tiles_played(player_get_peg_adjust(player),
-                                  gen->number_of_tiles_in_bag,
+                                  game_get_real_bag_size(game),
                                   gen->peg_adjust_by_tiles_played);
   gen->wmp_prune_subracks_by_leave = (gen->number_of_tiles_in_bag > 0) &&
                                      (gen->move_sort_type == MOVE_SORT_EQUITY);
@@ -5073,8 +5075,8 @@ void generate_moves(const MoveGenArgs *args) {
     const bool carry_best_moves = gen_can_carry_best_moves(gen, args);
     uint64_t lane_hash_storage[2 * BOARD_DIM];
     const uint64_t *lane_hashes = NULL;
-    // The lanes' bounds are kept by the mover's class for the bag: with a
-    // pre-endgame adjustment a move's equity depends on the bag.
+    // The lanes' bounds are kept by the mover's class for the real bag: with
+    // a pre-endgame adjustment a move's equity depends on it.
     int bag_class = 0;
     uint64_t skipped_lanes = 0;
     if (carry_best_moves) {
@@ -5089,7 +5091,7 @@ void generate_moves(const MoveGenArgs *args) {
         bag_class =
             peg_adjust_get_bag_class(player_get_peg_adjust(game_get_player(
                                          args->game, gen->player_index)),
-                                     gen->number_of_tiles_in_bag);
+                                     game_get_real_bag_size(args->game));
       }
       skipped_lanes =
           gen_seed_carried_best_move(gen, args->best_move_carry, lane_hashes,
