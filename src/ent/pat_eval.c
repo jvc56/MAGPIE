@@ -18,6 +18,7 @@
 #include "rack.h"
 #include <assert.h>
 #include <math.h>
+#include <stdatomic.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -187,28 +188,6 @@ void pat_eval_context_set_utility(PATEvalContext *pat_eval_ctx, int margin,
     }
   }
   pat_eval_ctx->utility_bound = bound;
-  // Each draw count's row read from the current margin up, a point of score
-  // at a time, clamped at the table's edges as pat_utility_index clamps:
-  // utility_prefix_max[d][s] is the running maximum.
-  for (int drawn = 0; drawn <= RACK_SIZE; drawn++) {
-    const int bag_after = bag > drawn ? bag - drawn : 0;
-    const Equity *row =
-        weights->utility_table +
-        pat_utility_index(weights, bag_after, -PAT_UTILITY_MARGIN_LIMIT);
-    Equity running = EQUITY_MIN_VALUE;
-    for (int score = 0; score <= PAT_UTILITY_PREFIX_MAX_SCORE; score++) {
-      int offset = margin + score + PAT_UTILITY_MARGIN_LIMIT;
-      if (offset < 0) {
-        offset = 0;
-      } else if (offset >= PAT_UTILITY_WIDTH) {
-        offset = PAT_UTILITY_WIDTH - 1;
-      }
-      if (row[offset] > running) {
-        running = row[offset];
-      }
-      pat_eval_ctx->utility_prefix_max[drawn][score] = running;
-    }
-  }
 }
 
 // The utility correction for move (see PAT_UTILITY_ADJUST_ROW_PREFIX), 0
@@ -253,7 +232,8 @@ static void pat_scan_context_unit(const PATEvalContext *pat_eval_ctx,
         pat_eval_ctx->weights, premium_row, premium_col,
         pat_eval_ctx->premium_classes[premium_idx], dir, overlay, features,
         extent_lo, extent_hi, pat_eval_ctx->opponent_rack_size,
-        hook_letters_out, pat_eval_ctx->score_channels);
+        hook_letters_out, pat_eval_ctx->score_channels,
+        (PATSquareInfoCache *)&pat_eval_ctx->square_info);
     return;
   }
   const int dd_idx = unit_index - num_premium_units;
@@ -264,7 +244,8 @@ static void pat_scan_context_unit(const PATEvalContext *pat_eval_ctx,
                    pat_eval_ctx->dd_lanes[dd_idx], pat_eval_ctx->dd_los[dd_idx],
                    pat_eval_ctx->dd_his[dd_idx], pat_eval_ctx->dd_tiers[dd_idx],
                    overlay, features, extent_lo, extent_hi,
-                   pat_eval_ctx->opponent_rack_size, hook_letters_out);
+                   pat_eval_ctx->opponent_rack_size, hook_letters_out,
+                   (PATSquareInfoCache *)&pat_eval_ctx->square_info);
 }
 
 // Whether any channel a walk from this premium class can write carries a
@@ -398,6 +379,14 @@ static void pat_eval_context_load_units(
     return;
   }
   pat_eval_ctx->opponent_rack_size = opponent_rack_size;
+  memset(pat_eval_ctx->square_info.states, 0,
+         sizeof(pat_eval_ctx->square_info.states));
+  // One counter for every thread: a context can be loaded by one thread and
+  // loaded again later by another, and the two loads must not share a stamp.
+  static _Atomic uint64_t cross_rescan_stamp;
+  pat_eval_ctx->cross_rescan_stamp =
+      atomic_fetch_add_explicit(&cross_rescan_stamp, 1, memory_order_relaxed) +
+      1;
   // Without a word list until pat_eval_context_set_kwg gives it one.
   pat_eval_ctx->kwg = NULL;
   pat_eval_ctx->woadwage = false;
@@ -920,7 +909,55 @@ static Equity pat_eval_move_penalty_scaled(const PATEvalContext *pat_eval_ctx,
     const int unit_index = reached_units[reached_idx];
     Equity penalty;
     bool qualifies_for_credit;
-    if (pat_mask_test(affected_units, unit_index)) {
+    // A unit whose lane the move crosses sees the move at one square only:
+    // no other square of its lane is covered or has a fresh tile beside it
+    // across the lane. Played through, that square changes nothing; with a
+    // fresh tile, the rescan depends on that tile and square alone.
+    int cross_slot = -1;
+    uint32_t cross_key = 0;
+    bool cross_known = false;
+    Equity cross_penalty = 0;
+    if (discount <= 0.0 && pat_mask_test(affected_units, unit_index)) {
+      const int num_premium_units = pat_eval_ctx->num_premium * 2;
+      int unit_dir;
+      int unit_lane;
+      if (unit_index < num_premium_units) {
+        unit_dir = unit_index % 2;
+        unit_lane = (unit_dir == BOARD_HORIZONTAL_DIRECTION)
+                        ? pat_eval_ctx->premium_rows[unit_index / 2]
+                        : pat_eval_ctx->premium_cols[unit_index / 2];
+      } else {
+        unit_dir = pat_eval_ctx->dd_dirs[unit_index - num_premium_units];
+        unit_lane = pat_eval_ctx->dd_lanes[unit_index - num_premium_units];
+      }
+      const bool unit_vertical = unit_dir != BOARD_HORIZONTAL_DIRECTION;
+      const int span_start = vertical ? row_start : col_start;
+      const int span_end = vertical ? row_end : col_end;
+      if (unit_vertical != vertical && unit_lane >= span_start &&
+          unit_lane <= span_end) {
+        const MachineLetter tile = move_get_tile(move, unit_lane - span_start);
+        if (tile == PLAYED_THROUGH_MARKER) {
+          cross_known = true;
+          cross_penalty = pat_eval_ctx->unit_penalty[unit_index];
+        } else {
+          const int cross_idx = vertical ? col_start : row_start;
+          cross_key = ((uint32_t)unit_index << 16) |
+                      ((uint32_t)cross_idx << 8) | (uint32_t)tile;
+          cross_slot = (int)((cross_key * 0x9E3779B1U) >>
+                             (32 - PAT_CROSS_RESCAN_CACHE_BITS));
+          if (pat_eval_ctx->cross_rescans[cross_slot].stamp ==
+                  pat_eval_ctx->cross_rescan_stamp &&
+              pat_eval_ctx->cross_rescans[cross_slot].key == cross_key) {
+            cross_known = true;
+            cross_penalty = pat_eval_ctx->cross_rescans[cross_slot].penalty;
+          }
+        }
+      }
+    }
+    if (cross_known) {
+      penalty = cross_penalty;
+      qualifies_for_credit = false;
+    } else if (pat_mask_test(affected_units, unit_index)) {
       int32_t overlay_features[PAT_NUM_FEATURES] = {0};
       int scan_dir = 0;
       int scan_lane = 0;
@@ -935,6 +972,13 @@ static Equity pat_eval_move_penalty_scaled(const PATEvalContext *pat_eval_ctx,
                             overlay_features, &scan_dir, &scan_lane, NULL, NULL,
                             discount > 0.0 ? &fresh_hook_letters : NULL);
       penalty = pat_dot_unit(pat_eval_ctx, unit_index, overlay_features);
+      if (cross_slot >= 0) {
+        PATEvalContext *mutable_ctx = (PATEvalContext *)pat_eval_ctx;
+        mutable_ctx->cross_rescans[cross_slot].stamp =
+            pat_eval_ctx->cross_rescan_stamp;
+        mutable_ctx->cross_rescans[cross_slot].key = cross_key;
+        mutable_ctx->cross_rescans[cross_slot].penalty = penalty;
+      }
       // The move's own placement can create or destroy this unit's hook
       // letters (a newly hooked square, or covering one that existed at
       // baseline), so eligibility is re-checked against the fresh,

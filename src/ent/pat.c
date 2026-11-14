@@ -215,6 +215,7 @@ PATWeights *pat_create_zeroed(const char *pat_name) {
   pat->utility_table = NULL;
   pat->utility_win_pct_name = NULL;
   pat->utility_suffix_max = NULL;
+  pat->utility_range_max = NULL;
   for (int stage = 0; stage < PAT_STAGE_COUNT; stage++) {
     pat->stage_scale[stage] = PAT_DEFAULT_STAGE_SCALE;
   }
@@ -235,6 +236,7 @@ void pat_destroy(PATWeights *pat) {
   }
   free(pat->utility_table);
   free(pat->utility_suffix_max);
+  free(pat->utility_range_max);
   free(pat->utility_win_pct_name);
   free(pat->name);
   free(pat->run_through_count);
