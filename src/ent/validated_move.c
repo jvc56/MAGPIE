@@ -477,20 +477,22 @@ void validated_move_load(ValidatedMove *vm, const Game *game, int player_index,
       // Build the PAT context on the stack so validated moves get
       // the same equity as movegen-recorded moves. Disabled when the
       // player has no weights or the board state cannot support the scans.
+      // As in the move generator, PAT and the table read the real bag: while
+      // it has tiles the opponent's rack is full, whether or not the game
+      // knows its tiles.
+      const int real_bag_size = game_get_real_bag_size(game);
       PATEvalContext pat_eval_ctx;
       pat_eval_context_disable(&pat_eval_ctx);
       const PATWeights *pat = player_get_pat(player);
-      if (pat && bag_get_letters(game_get_bag(game)) > 0 &&
-          !board_get_transposed(board) && board_get_cross_sets_valid(board)) {
+      if (pat && real_bag_size > 0 && !board_get_transposed(board) &&
+          board_get_cross_sets_valid(board)) {
         pat_eval_context_load(
             &pat_eval_ctx, pat,
             board_get_readonly_lanes(
                 board, board_get_cross_set_index(
                            game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KWG),
                            player_index)),
-            ld, player_get_rack(player), PAT_CLASS_MASK_ALL,
-            rack_get_total_letters(
-                player_get_rack(game_get_player(game, 1 - player_index))));
+            ld, player_get_rack(player), PAT_CLASS_MASK_ALL, RACK_SIZE);
         pat_eval_context_set_kwg(&pat_eval_ctx, player_get_kwg(player),
                                  game_get_variant(game));
       }
@@ -506,8 +508,7 @@ void validated_move_load(ValidatedMove *vm, const Game *game, int player_index,
               bag_get_letters(game_get_bag(game)),
               move_get_type(vm->move) == GAME_EVENT_TILE_PLACEMENT_MOVE
                   ? peg_adjust_get_placement_value(
-                        player_get_peg_adjust(player),
-                        game_get_real_bag_size(game),
+                        player_get_peg_adjust(player), real_bag_size,
                         move_get_tiles_played(vm->move))
                   : 0));
     } else {

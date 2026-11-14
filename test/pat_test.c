@@ -29,11 +29,13 @@
 #include "../src/ent/players_data.h"
 #include "../src/ent/rack.h"
 #include "../src/ent/static_eval.h"
+#include "../src/ent/validated_move.h"
 #include "../src/impl/cgp.h"
 #include "../src/impl/config.h"
 #include "../src/impl/gameplay.h"
 #include "../src/impl/move_gen.h"
 #include "../src/impl/pat_gen.h"
+#include "../src/str/move_string.h"
 #include "../src/util/io_util.h"
 #include "../src/util/string_util.h"
 #include "pat_test_util.h"
@@ -1742,6 +1744,345 @@ static void test_pat_path_parity(void) {
   pat_path_parity_run(2000.0);
 }
 
+enum {
+  // test_pat_unknown_racks: its seeded self-play games, the plies from one
+  // position it checks to the next while the bag holds more than a rack, the
+  // moves of a position it enters as text, and the capacity of its move
+  // lists, which hold every move.
+  PAT_UNKNOWN_RACKS_GAMES = 8,
+  PAT_UNKNOWN_RACKS_PLY_STRIDE = 3,
+  PAT_UNKNOWN_RACKS_VALIDATED_MOVES = 10,
+  PAT_UNKNOWN_RACKS_LIST_CAPACITY = 100000,
+};
+
+// The scratch move lists and the counts of test_pat_unknown_racks.
+typedef struct PATUnknownRacksCheck {
+  MoveList *expected_list;
+  MoveList *actual_list;
+  MoveList *best_list;
+  int moves_validated;
+  int moves_from_context;
+} PATUnknownRacksCheck;
+
+// Returns all but the first tiles_kept tiles of a player's rack to the bag,
+// where a game keeps the tiles of a rack that is not known, or known only in
+// part.
+static void keep_rack_tiles(const Game *game, int player_index,
+                            int tiles_kept) {
+  Bag *bag = game_get_bag(game);
+  Rack *rack = player_get_rack(game_get_player(game, player_index));
+  const int player_draw_index = game_get_player_draw_index(game, player_index);
+  const int dist_size = rack_get_dist_size(rack);
+  int tiles_seen = 0;
+  for (int ml = 0; ml < dist_size; ml++) {
+    const int number_of_letter = rack_get_letter(rack, (MachineLetter)ml);
+    for (int letter_idx = 0; letter_idx < number_of_letter; letter_idx++) {
+      if (tiles_seen >= tiles_kept) {
+        rack_take_letter(rack, (MachineLetter)ml);
+        bag_add_letter(bag, (MachineLetter)ml, player_draw_index);
+      }
+      tiles_seen++;
+    }
+  }
+}
+
+// The position of the player on turn with only the first player_tiles_kept
+// tiles of that player's rack and the first opponent_tiles_kept tiles of the
+// opponent's known. The caller destroys it.
+static Game *create_partly_known_position(const Game *game,
+                                          int player_tiles_kept,
+                                          int opponent_tiles_kept) {
+  const int player_index = game_get_player_on_turn_index(game);
+  Game *position = game_duplicate(game);
+  keep_rack_tiles(position, player_index, player_tiles_kept);
+  keep_rack_tiles(position, 1 - player_index, opponent_tiles_kept);
+  return position;
+}
+
+// The same position for players without PAT weights. The caller destroys it.
+static Game *create_position_without_pat(const Game *game) {
+  Game *position = game_duplicate(game);
+  player_set_pat(game_get_player(position, 0), NULL);
+  player_set_pat(game_get_player(position, 1), NULL);
+  return position;
+}
+
+// Every move of the player on turn, best first.
+static void generate_all_moves_sorted(const Game *game, MoveList *move_list) {
+  const MoveGenArgs args = {
+      .game = game,
+      .move_list = move_list,
+      .move_record_type = MOVE_RECORD_ALL,
+      .move_sort_type = MOVE_SORT_EQUITY,
+      .override_kwg = NULL,
+      .eq_margin_movegen = 0,
+      .target_equity = EQUITY_MAX_VALUE,
+  };
+  generate_moves(&args);
+  assert(move_list_get_count(move_list) < PAT_UNKNOWN_RACKS_LIST_CAPACITY);
+  move_list_sort_moves(move_list);
+}
+
+// The equity that validating a move's text for the player on turn gives it.
+static Equity get_validated_equity(const Game *game, const Move *move) {
+  StringBuilder *move_string = string_builder_create();
+  string_builder_add_ucgi_move(move_string, move, game_get_board(game),
+                               game_get_ld(game));
+  ValidatedMoves *validated_moves = validated_moves_create_and_assert_status(
+      game, game_get_player_on_turn_index(game),
+      string_builder_peek(move_string), true, true, ERROR_STATUS_SUCCESS);
+  assert(validated_moves_get_number_of_moves(validated_moves) == 1);
+  const Equity equity =
+      move_get_equity(validated_moves_get_move(validated_moves, 0));
+  validated_moves_destroy(validated_moves);
+  string_builder_destroy(move_string);
+  return equity;
+}
+
+// Two positions of one board give the player on turn the same moves with the
+// same equities: every move, the best move recorded alone, and moves spread
+// over the list entered as text (passes aside: validation gives a pass a
+// fixed value). The lists of check are left holding the positions' moves,
+// best first.
+static void assert_same_moves_and_equities(const Game *expected_game,
+                                           Game *actual_game,
+                                           PATUnknownRacksCheck *check) {
+  generate_all_moves_sorted(expected_game, check->expected_list);
+  generate_all_moves_sorted(actual_game, check->actual_list);
+  const int count = move_list_get_count(check->expected_list);
+  assert(count == move_list_get_count(check->actual_list));
+  for (int move_idx = 0; move_idx < count; move_idx++) {
+    const Move *expected_move =
+        move_list_get_move(check->expected_list, move_idx);
+    const Move *actual_move = move_list_get_move(check->actual_list, move_idx);
+    assert(compare_moves_without_equity(expected_move, actual_move, true) ==
+           -1);
+    assert(move_get_equity(expected_move) == move_get_equity(actual_move));
+  }
+
+  const Move *best_move = get_top_equity_move(actual_game, check->best_list);
+  const Move *top_move = move_list_get_move(check->actual_list, 0);
+  assert(move_get_equity(best_move) == move_get_equity(top_move));
+  assert(compare_moves_without_equity(best_move, top_move, true) == -1);
+
+  int step = count / PAT_UNKNOWN_RACKS_VALIDATED_MOVES;
+  if (step < 1) {
+    step = 1;
+  }
+  for (int move_idx = 0; move_idx < count; move_idx += step) {
+    const Move *move = move_list_get_move(check->expected_list, move_idx);
+    if (move_get_type(move) == GAME_EVENT_PASS) {
+      continue;
+    }
+    assert(get_validated_equity(expected_game, move) ==
+           get_validated_equity(actual_game, move));
+    check->moves_validated++;
+  }
+}
+
+// The equities of with_list, every move of a position on a board with tiles,
+// are those of the mover's weights loaded by hand with a full rack for the
+// opponent and real_bag tiles in the bag: each move gets its equity without
+// the weights plus that term. The pass is left out: the generator gives it a
+// fixed equity. without_list is scratch space. Returns the number of moves
+// checked.
+static int assert_equities_of_real_bag(const Game *game, int real_bag,
+                                       const MoveList *with_list,
+                                       MoveList *without_list) {
+  Game *position_without_pat = create_position_without_pat(game);
+  generate_all_moves_sorted(position_without_pat, without_list);
+  game_destroy(position_without_pat);
+
+  const int mover_index = game_get_player_on_turn_index(game);
+  const Player *mover = game_get_player(game, mover_index);
+  const Player *opponent = game_get_player(game, 1 - mover_index);
+  PATEvalContext *pat_eval_ctx = malloc_or_die(sizeof(PATEvalContext));
+  pat_eval_context_load(
+      pat_eval_ctx, player_get_pat(mover),
+      board_get_readonly_lanes(
+          game_get_board(game),
+          board_get_cross_set_index(
+              game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KWG),
+              mover_index)),
+      game_get_ld(game), player_get_rack(mover), PAT_CLASS_MASK_ALL, RACK_SIZE);
+  pat_eval_context_set_kwg(pat_eval_ctx, player_get_kwg(mover),
+                           GAME_VARIANT_CLASSIC);
+  pat_eval_context_set_utility(
+      pat_eval_ctx,
+      equity_to_int(player_get_score(mover) - player_get_score(opponent)),
+      real_bag);
+
+  // The lists hold the same moves, in the orders of their own equities.
+  const int count = move_list_get_count(with_list);
+  assert(count == move_list_get_count(without_list));
+  int moves_checked = 0;
+  for (int with_idx = 0; with_idx < count; with_idx++) {
+    const Move *with_move = move_list_get_move(with_list, with_idx);
+    if (move_get_type(with_move) == GAME_EVENT_PASS) {
+      continue;
+    }
+    int without_idx = 0;
+    while (without_idx < count &&
+           compare_moves_without_equity(
+               with_move, move_list_get_move(without_list, without_idx),
+               true) != -1) {
+      without_idx++;
+    }
+    assert(without_idx < count);
+    Rack leave;
+    get_leave_for_move(with_move, game, &leave);
+    assert(move_get_equity(with_move) ==
+           move_get_equity(move_list_get_move(without_list, without_idx)) +
+               pat_eval_move_penalty(pat_eval_ctx, with_move, &leave));
+    moves_checked++;
+  }
+  free(pat_eval_ctx);
+  return moves_checked;
+}
+
+// The position of game, which knows both racks and counts real_bag tiles in
+// its bag, with only the first player_tiles_kept tiles of the mover's rack
+// and the first opponent_tiles_kept tiles of the opponent's known. While the
+// real bag holds tiles its moves and equities are those of the position with
+// all of the opponent's rack known, and with part of the mover's rack known,
+// where no position knows more, also those of weights loaded by hand. Once
+// the real bag is empty they are those of the same position without PAT.
+static void assert_partly_known_position(const Game *game, int real_bag,
+                                         int player_tiles_kept,
+                                         int opponent_tiles_kept,
+                                         PATUnknownRacksCheck *check) {
+  const int player_index = game_get_player_on_turn_index(game);
+  const int player_tiles = rack_get_total_letters(
+      player_get_rack(game_get_player(game, player_index)));
+  const int opponent_tiles = rack_get_total_letters(
+      player_get_rack(game_get_player(game, 1 - player_index)));
+  Game *position = create_partly_known_position(game, player_tiles_kept,
+                                                opponent_tiles_kept);
+  assert(game_get_real_bag_size(position) == real_bag);
+  Game *expected_position =
+      real_bag > 0 ? create_partly_known_position(game, player_tiles_kept,
+                                                  opponent_tiles)
+                   : create_position_without_pat(position);
+  assert_same_moves_and_equities(expected_position, position, check);
+  if (real_bag > 0 && player_tiles_kept < player_tiles &&
+      board_get_tiles_played(game_get_board(game)) > 0) {
+    check->moves_from_context += assert_equities_of_real_bag(
+        position, real_bag, check->actual_list, check->expected_list);
+  }
+  game_destroy(expected_position);
+  game_destroy(position);
+}
+
+// PAT reads two facts about what the mover cannot see: the size of the
+// opponent's rack, which caps how far a threat reaches, and the tiles in the
+// bag, for its gate and its utility correction. Neither changes with how
+// many of those tiles the game knows: a game keeps the tiles of a rack that
+// is not known, or known only in part, in its bag, as in a position entered
+// with one rack. Positions of games played with both racks known are given
+// again with the opponent's rack not known, with half of it known, and with
+// half of the mover's rack and none of the opponent's known. Each has the
+// moves and equities that assert_partly_known_position names, in the move
+// generator and for moves entered as text; the first position of each game
+// with an empty bag is checked too, however many tiles the game's bag holds
+// by then.
+static void test_pat_unknown_racks(void) {
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1 "
+      "-winpct winpct_english -wmp true");
+  // Heavy weights on every channel and a utility correction far stronger
+  // than any file uses, so that a wrong reach or a wrong bag changes
+  // equities.
+  PATWeights *pat = pat_create_zeroed("unknown_racks");
+  for (int feature_index = 0; feature_index < PAT_NUM_FEATURES;
+       feature_index++) {
+    pat_set_weight(pat, feature_index, -40 - 3 * (feature_index % 7));
+  }
+  pat_set_combine_gamma(pat, 0.5);
+  pat_set_lexicon_floaters(pat, true);
+  pat_set_signed_through(pat, true);
+  pat_set_utility_adjust(pat, 2000.0, config_get_win_pcts(config));
+  PlayersData *players_data = config_get_players_data(config);
+  players_data_set_data(players_data, PLAYERS_DATA_TYPE_PAT, 0, pat);
+  players_data_set_data(players_data, PLAYERS_DATA_TYPE_PAT, 1, pat);
+  players_data_set_is_shared(players_data, PLAYERS_DATA_TYPE_PAT, true);
+  load_and_exec_config_or_die(
+      config, "cgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 / 0/0 0");
+  Game *game = config_get_game(config);
+  pat_prepare_hook_flex(pat, player_get_kwg(game_get_player(game, 0)),
+                        game_get_ld(game));
+  for (int player_index = 0; player_index < 2; player_index++) {
+    player_update(players_data, game_get_player(game, player_index));
+  }
+  assert(player_get_pat(game_get_player(game, 0)) == pat);
+
+  PATUnknownRacksCheck check = {
+      .expected_list = move_list_create(PAT_UNKNOWN_RACKS_LIST_CAPACITY),
+      .actual_list = move_list_create(PAT_UNKNOWN_RACKS_LIST_CAPACITY),
+      .best_list = move_list_create(1),
+      .moves_validated = 0,
+      .moves_from_context = 0,
+  };
+  int positions_with_bag = 0;
+  int positions_without_bag = 0;
+  for (int game_idx = 0; game_idx < PAT_UNKNOWN_RACKS_GAMES; game_idx++) {
+    game_reset(game);
+    game_seed(game, 7000000ULL + (uint64_t)game_idx);
+    draw_starting_racks(game);
+    bool empty_bag_checked = false;
+    for (int ply = 0; !game_over(game); ply++) {
+      // Both racks are full while the bag holds tiles, so the game's bag is
+      // the real bag here.
+      const int real_bag = bag_get_letters(game_get_bag(game));
+      assert(game_get_real_bag_size(game) == real_bag);
+      const bool check_position =
+          real_bag > 0 ? (ply % PAT_UNKNOWN_RACKS_PLY_STRIDE == 0 ||
+                          real_bag <= RACK_SIZE)
+                       : !empty_bag_checked;
+      if (check_position) {
+        const int player_index = game_get_player_on_turn_index(game);
+        const int player_tiles = rack_get_total_letters(
+            player_get_rack(game_get_player(game, player_index)));
+        const int opponent_tiles = rack_get_total_letters(
+            player_get_rack(game_get_player(game, 1 - player_index)));
+        assert_partly_known_position(game, real_bag, player_tiles, 0, &check);
+        if (opponent_tiles > 1) {
+          assert_partly_known_position(game, real_bag, player_tiles,
+                                       opponent_tiles / 2, &check);
+        }
+        if (player_tiles > 1) {
+          assert_partly_known_position(game, real_bag, (player_tiles + 1) / 2,
+                                       0, &check);
+        }
+        if (real_bag > 0) {
+          positions_with_bag++;
+        } else {
+          positions_without_bag++;
+          empty_bag_checked = true;
+        }
+      }
+      // The games are played without the heavy weights, under which passing
+      // beats every opening play.
+      player_set_pat(game_get_player(game, 0), NULL);
+      player_set_pat(game_get_player(game, 1), NULL);
+      play_move(get_top_equity_move(game, check.best_list), game, NULL);
+      player_set_pat(game_get_player(game, 0), pat);
+      player_set_pat(game_get_player(game, 1), pat);
+    }
+  }
+  printf("PAT unknown racks: %d positions with tiles in the bag, %d without, "
+         "%d moves entered as text, %d moves against weights loaded by hand\n",
+         positions_with_bag, positions_without_bag, check.moves_validated,
+         check.moves_from_context);
+  assert(positions_with_bag > 0);
+  assert(positions_without_bag > 0);
+  assert(check.moves_validated > 0);
+  assert(check.moves_from_context > 0);
+  move_list_destroy(check.expected_list);
+  move_list_destroy(check.actual_list);
+  move_list_destroy(check.best_list);
+  config_destroy(config);
+}
+
 // A player is on auto until a pat option sets it: it has its lexicon's
 // weights, on the standard board and when the data has them. A player given
 // a name or none keeps it, through a change of lexicon, until auto.
@@ -2645,6 +2986,7 @@ void test_pat(void) {
   test_pat_opening_and_hook_flex();
   test_pat_movegen_integration();
   test_pat_path_parity();
+  test_pat_unknown_racks();
   test_pat_wmp_parity();
   test_pat_usage_options();
   test_pat_default_weights();
