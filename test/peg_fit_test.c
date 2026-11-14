@@ -4,6 +4,7 @@
 #include "../src/def/rack_defs.h"
 #include "../src/def/static_eval_defs.h"
 #include "../src/ent/peg_adjust.h"
+#include "../src/ent/players_data.h"
 #include "../src/impl/config.h"
 #include "../src/impl/peg_fit.h"
 #include "../src/util/io_util.h"
@@ -236,6 +237,23 @@ static void test_peg_fit_command(void) {
   assert_table_rows(quackle, PEG_ADJUST_STANDARD_VALUES_LENGTH);
   assert_config_exec_status(config, "pegfit 1 1 0 -pegadjust2 none",
                             ERROR_STATUS_PEG_FIT_DIFFERENT_TABLES);
+  // Players on auto have the lexicon's own table, which is the fit's default
+  // output from above, but fit without it; the next command has it back.
+  const PlayersData *players_data = config_get_players_data(config);
+  load_and_exec_config_or_die(config, "set -pegadjust auto");
+  assert_strings_equal(
+      peg_adjust_get_name(players_data_get_peg_adjust(players_data, 0)),
+      "CSW21_pegadjust");
+  load_and_exec_config_or_die(config, "pegfit 2 1 0 fit_auto -threads 2");
+  char *fit_auto_filename = get_table_filename(strategy_dir, "fit_auto");
+  char *fit_auto = get_string_from_file_or_die(fit_auto_filename);
+  assert(strstr(fit_auto, "playing table none") != NULL);
+  free(fit_auto);
+  free(fit_auto_filename);
+  load_and_exec_config_or_die(config, "set -threads 2");
+  assert_strings_equal(
+      peg_adjust_get_name(players_data_get_peg_adjust(players_data, 1)),
+      "CSW21_pegadjust");
   load_and_exec_config_or_die(config, "set -pegadjust none");
 
   assert_config_exec_status(config, "pegfit 0 1 0",

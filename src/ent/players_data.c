@@ -370,8 +370,9 @@ PlayersData *players_data_create(bool use_wmp) {
         // with -rit/-wit (or the per-player variants) since they are built by
         // a convert command and may not exist for every lexicon. PAT
         // weights are likewise opt-in: they load only when named explicitly
-        // with -pat (or -pat1/-pat2), as are pre-endgame adjustments with
-        // -pegadjust (or -pegadjust1/-pegadjust2).
+        // with -pat (or -pat1/-pat2). Pre-endgame adjustments load by name
+        // with -pegadjust (or -pegadjust1/-pegadjust2), or as the config
+        // resolves auto; this flag plays no part in either.
         default_use = false;
       }
       players_data_set_use_when_available(players_data, data_index,

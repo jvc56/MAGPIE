@@ -162,9 +162,11 @@ struct Config {
   char *data_paths;
   // See ConfigArgs.
   bool build_missing_wordmaps;
-  // Per table type and player: set to auto (-wmp, -rit, -wit auto), so the
-  // table is used when this machine has room for it. Only the WMP, RIT and
-  // WIT entries are used.
+  // Per table type and player: set to auto. A wordmap, rack info table or
+  // word info table (-wmp, -rit, -wit auto) is then used when this machine
+  // has room for it, and the pre-endgame adjustments (-pegadjust auto) are
+  // the player's lexicon's own where the data has them. Only these four
+  // types' entries are used.
   bool table_auto[NUMBER_OF_DATA][2];
   int64_t auto_table_cap_bytes;
   // What config_choose_auto_tables last said it decided, so it says it again
@@ -1540,7 +1542,7 @@ static void add_player_solver_help_arg(arg_token_t arg_token,
         "scenario) for a complete one.";
     break;
   case ARG_TOKEN_PEG_ADJUST:
-    usages[0] = "<adjustments>";
+    usages[0] = "<adjustments_auto_or_none>";
     examples[0] = "CSW24_pegadjust";
     examples[1] = "none";
     *text = "Specifies the pre-endgame adjustments for both players. The "
@@ -1550,18 +1552,24 @@ static void add_player_solver_help_arg(arg_token_t arg_token,
             "the tiles in the bag less the tiles played plus the rack size. "
             "A table reaches as far as its file's highest index. In a "
             "player's simulations, both sides' plies in the rollouts use "
-            "that player's adjustments. Use 'none' to unload. They are off "
-            "by default.";
+            "that player's adjustments. auto (the default for the command "
+            "line program and the library's magpie_create()) gives a player "
+            "its lexicon's own table, <lexicon>_pegadjust, where the data "
+            "has one, and none otherwise; the commands that train static "
+            "values (leavegen, census, patgen and pegfit) play without it. "
+            "none plays without adjustments, and is the default for the "
+            "browser build and browser games.";
     break;
   case ARG_TOKEN_P1_PEG_ADJUST:
   case ARG_TOKEN_P2_PEG_ADJUST:
-    usages[0] = "<adjustments>";
+    usages[0] = "<adjustments_auto_or_none>";
     examples[0] = "CSW24_pegadjust";
     examples[1] = "none";
     *text = "Specifies the pre-endgame adjustments for the given player. "
             "This can be used with the autoplay command to compare two "
-            "tables. In the player's simulations, both sides' plies in "
-            "the rollouts use them. Use 'none' to unload.";
+            "tables, or a table with none. In the player's simulations, "
+            "both sides' plies in the rollouts use them. See 'pegadjust' "
+            "for auto and none.";
     break;
   default:
     break;
@@ -1650,11 +1658,11 @@ static const char *peg_fit_help(const char **usages, const char **examples) {
          "<endgame_plies> above 0, play stops when the bag is empty and the "
          "endgame is solved that many plies deep. That is much slower than "
          "static play, and it values tempo more. Self-play uses the "
-         "loaded pre-endgame adjustments (see 'pegadjust'), which both "
-         "players must share. The table is written as "
-         "data/strategy/<output_name>.csv (default: <lexicon>_pegadjust) and "
-         "can be loaded with 'pegadjust'. Use the -seed, -threads and "
-         "-ttfraction options.";
+         "pre-endgame adjustments named with 'pegadjust', which both "
+         "players must share, and none for players left at auto. The table "
+         "is written as data/strategy/<output_name>.csv (default: "
+         "<lexicon>_pegadjust, the table auto loads) and can be loaded with "
+         "'pegadjust'. Use the -seed, -threads and -ttfraction options.";
 }
 
 // One case for all three in add_help_arg_to_string_builder, which is at the
@@ -3961,51 +3969,10 @@ static bool config_parse_bool_arg(const char *value, const char *name,
   return true;
 }
 
-// Loads the pre-endgame adjustments, which are opt-in and per player like
-// the PAT weights: the "pegadjust1" and "pegadjust2" options override
-// "pegadjust", "none" unloads, and an unset option keeps what is loaded.
-static void config_load_peg_adjust(Config *config, ErrorStack *error_stack) {
-  const arg_token_t player_tokens[2] = {ARG_TOKEN_P1_PEG_ADJUST,
-                                        ARG_TOKEN_P2_PEG_ADJUST};
-  const char *both_name =
-      config_get_parg_value(config, ARG_TOKEN_PEG_ADJUST, 0);
-  const char *new_names[2];
-  bool any_set = false;
-  for (int player_index = 0; player_index < 2; player_index++) {
-    new_names[player_index] = both_name;
-    if (config_get_parg_num_set_values(config, player_tokens[player_index]) >
-        0) {
-      new_names[player_index] =
-          config_get_parg_value(config, player_tokens[player_index], 0);
-    }
-    if (new_names[player_index]) {
-      any_set = true;
-    }
-  }
-  if (!any_set) {
-    return;
-  }
-  // Copies, since loading may free the table an existing name belongs to.
-  char *updated_names[2];
-  const char *names_or_null[2];
-  for (int player_index = 0; player_index < 2; player_index++) {
-    const char *name = new_names[player_index];
-    if (!name) {
-      name = players_data_get_data_name(
-          config->players_data, PLAYERS_DATA_TYPE_PEG_ADJUST, player_index);
-    }
-    updated_names[player_index] = string_duplicate_allow_null(name);
-    names_or_null[player_index] = updated_names[player_index];
-    if (names_or_null[player_index] &&
-        strings_iequal(names_or_null[player_index], "none")) {
-      names_or_null[player_index] = NULL;
-    }
-  }
-  players_data_set(config->players_data, PLAYERS_DATA_TYPE_PEG_ADJUST,
-                   config->data_paths, names_or_null[0], names_or_null[1],
-                   false, error_stack);
-  free(updated_names[0]);
-  free(updated_names[1]);
+// The name of a lexicon's own pre-endgame adjustments: what pegfit writes by
+// default, and what a player set to auto plays with. The caller frees.
+static char *config_lexicon_peg_adjust_name(const char *lexicon) {
+  return get_formatted_string("%s_pegadjust", lexicon);
 }
 
 // Loads one player's PAT usage options (patcand, patclasses, patrollout,
@@ -5969,8 +5936,7 @@ void impl_peg_fit(Config *config, ErrorStack *error_stack) {
   const char *output_name = config_get_parg_value(config, ARG_TOKEN_PEG_FIT, 3);
   char *default_output_name = NULL;
   if (!output_name) {
-    default_output_name = get_formatted_string(
-        "%s_pegadjust",
+    default_output_name = config_lexicon_peg_adjust_name(
         kwg_get_name(player_get_kwg(game_get_player(config->game, 0))));
     output_name = default_output_name;
   }
@@ -8488,7 +8454,8 @@ static char *config_default_pat_name(const Config *config, int player_index) {
 }
 
 // What a table type (WMP, WIT or RIT) is on disk, to contribute's chooser,
-// and to the player.
+// and to the player. The pre-endgame adjustments have a file and a name
+// only, to be left out by: nothing chooses them, and they speed nothing up.
 typedef struct ConfigTableKind {
   data_filepath_t file_type;
   contribute_table_role_t role;
@@ -8505,6 +8472,10 @@ static ConfigTableKind config_table_kind(players_data_t type) {
     return (ConfigTableKind){DATA_FILEPATH_TYPE_WORD_INFO_TABLE,
                              CONTRIBUTE_TABLE_WIT, "simulation about 9% faster",
                              "word info table"};
+  case PLAYERS_DATA_TYPE_PEG_ADJUST:
+    return (ConfigTableKind){DATA_FILEPATH_TYPE_PEG_ADJUST,
+                             NUMBER_OF_CONTRIBUTE_TABLE_ROLES, NULL,
+                             "pre-endgame adjustments"};
   default:
     return (ConfigTableKind){DATA_FILEPATH_TYPE_RACK_INFO_TABLE,
                              CONTRIBUTE_TABLE_RIT,
@@ -10040,6 +10011,115 @@ static void config_load_lexicon_dependent_data_internal(
   free(updated_ld_name);
 }
 
+// ----- Pre-endgame adjustments (-pegadjust) -----
+
+// Applies the pre-endgame adjustment options of the command being loaded. A
+// player's setting is a table's name, none, or auto (see
+// config_load_auto_peg_adjust). The "pegadjust1" and "pegadjust2" options
+// override "pegadjust", and an unset option keeps the player's setting. A
+// named table that cannot be loaded is an error, which leaves the settings
+// and the tables as they were.
+static void config_load_peg_adjust_options(Config *config,
+                                           ErrorStack *error_stack) {
+  const players_data_t type = PLAYERS_DATA_TYPE_PEG_ADJUST;
+  const arg_token_t player_tokens[2] = {ARG_TOKEN_P1_PEG_ADJUST,
+                                        ARG_TOKEN_P2_PEG_ADJUST};
+  const char *both_value =
+      config_get_parg_value(config, ARG_TOKEN_PEG_ADJUST, 0);
+  bool player_auto[2];
+  // Copies, since loading may free the table a loaded name belongs to.
+  char *names[2];
+  bool any_set = false;
+  for (int player_idx = 0; player_idx < 2; player_idx++) {
+    const char *value = both_value;
+    if (config_get_parg_num_set_values(config, player_tokens[player_idx]) > 0) {
+      value = config_get_parg_value(config, player_tokens[player_idx], 0);
+    }
+    player_auto[player_idx] = config->table_auto[type][player_idx];
+    // A player set to auto keeps its table until its lexicon is loaded.
+    const char *name =
+        players_data_get_data_name(config->players_data, type, player_idx);
+    if (value) {
+      any_set = true;
+      player_auto[player_idx] = strings_iequal(value, "auto");
+      if (!player_auto[player_idx]) {
+        name = strings_iequal(value, "none") ? NULL : value;
+      }
+    }
+    names[player_idx] = string_duplicate_allow_null(name);
+  }
+  if (any_set) {
+    players_data_set(config->players_data, type, config->data_paths, names[0],
+                     names[1], false, error_stack);
+    if (error_stack_is_empty(error_stack)) {
+      config->table_auto[type][0] = player_auto[0];
+      config->table_auto[type][1] = player_auto[1];
+    }
+  }
+  free(names[0]);
+  free(names[1]);
+}
+
+// Whether the command being executed trains static values: the leaves
+// (leavegen, census), PAT weights (patgen), or the pre-endgame adjustments
+// themselves (pegfit).
+static bool config_exec_trains_static_values(const Config *config) {
+  return config->exec_parg_token == ARG_TOKEN_LEAVE_GEN ||
+         config->exec_parg_token == ARG_TOKEN_CENSUS ||
+         config->exec_parg_token == ARG_TOKEN_PAT_GEN ||
+         config->exec_parg_token == ARG_TOKEN_PEG_FIT;
+}
+
+// Loads the pre-endgame adjustments of each player set to auto: its lexicon's
+// own, <lexicon>_pegadjust, where the data has them, so that the table
+// follows the lexicon; a lexicon without a table is played without one. As
+// with the other tables under auto, a table that cannot be loaded is said
+// once and left out rather than an error. The commands that train static
+// values play without the table for their load, so that what they train
+// does not depend on the tables the data happens to hold, and pegfit does
+// not refit on top of the table it is about to replace; the settings stand.
+static void config_load_auto_peg_adjust(Config *config,
+                                        ErrorStack *error_stack) {
+  const players_data_t type = PLAYERS_DATA_TYPE_PEG_ADJUST;
+  const bool plays_without = config_exec_trains_static_values(config);
+  // Copies, since loading may free the table a loaded name belongs to.
+  char *names[2];
+  bool any_changed = false;
+  for (int player_idx = 0; player_idx < 2; player_idx++) {
+    const char *loaded_name =
+        players_data_get_data_name(config->players_data, type, player_idx);
+    if (!config->table_auto[type][player_idx]) {
+      names[player_idx] = string_duplicate_allow_null(loaded_name);
+      continue;
+    }
+    names[player_idx] = NULL;
+    const char *lexicon = players_data_get_data_name(
+        config->players_data, PLAYERS_DATA_TYPE_KWG, player_idx);
+    if (lexicon && !plays_without) {
+      char *name = config_lexicon_peg_adjust_name(lexicon);
+      if (config_table_file_bytes(config, name,
+                                  DATA_FILEPATH_TYPE_PEG_ADJUST) >= 0 &&
+          !config_table_is_left_out(config, type, player_idx, name)) {
+        names[player_idx] = name;
+      } else {
+        free(name);
+      }
+    }
+    if (!strings_equal(names[player_idx], loaded_name)) {
+      any_changed = true;
+    }
+  }
+  if (any_changed) {
+    const char *p1_name = names[0];
+    const char *p2_name = names[1];
+    const char **names_to_load[2] = {&p1_name, &p2_name};
+    config_load_tables_or_leave_out(config, type, names_to_load,
+                                    /*use_mmap=*/false, error_stack);
+  }
+  free(names[0]);
+  free(names[1]);
+}
+
 // The lexical data each player borrows. Data reloaded under a new name can
 // land at the freed data's address, so the name is kept as well as the
 // pointer.
@@ -10120,6 +10200,9 @@ static void config_rebuild_lexical_games(Config *config) {
 // the endgame results still borrow until they are rebuilt. A new letter
 // distribution instead drops the game and the results (see
 // config_invalidate_everything), since their racks and bag no longer fit.
+// The pre-endgame adjustments of the players set to auto are part of the
+// load, whoever loads the lexicon: a command, a game file, or the way back
+// from one that failed to load.
 void config_load_lexicon_dependent_data(
     Config *config, const char *new_lexicon_name,
     const char *new_p1_lexicon_name, const char *new_p2_lexicon_name,
@@ -10142,6 +10225,9 @@ void config_load_lexicon_dependent_data(
       use_rit_has_value, p1_use_rit_has_value, p2_use_rit_has_value,
       use_mmap_for_rit_has_value, use_wit_has_value, p1_use_wit_has_value,
       p2_use_wit_has_value, disable_rit, is_loading_game_history, error_stack);
+  if (error_stack_is_empty(error_stack)) {
+    config_load_auto_peg_adjust(config, error_stack);
+  }
   if (!config->ld_changed && config->ld &&
       !lexical_data_identity_matches(config->players_data, &identity_before)) {
     config_rebuild_lexical_games(config);
@@ -15119,6 +15205,13 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
   const bool p2_use_wit =
       config_get_parg_value(config, ARG_TOKEN_P2_USE_WIT, 0);
 
+  // The pre-endgame adjustment options come first, so that the lexicon's
+  // load resolves the players set to auto as this command leaves them.
+  config_load_peg_adjust_options(config, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
   config_load_lexicon_dependent_data(
       config, new_lexicon_name, new_p1_lexicon_name, new_p2_lexicon_name,
       new_leaves_name, new_p1_leaves_name, new_p2_leaves_name, new_ld_name,
@@ -15237,11 +15330,6 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
   }
   free(updated_pat_names[0]);
   free(updated_pat_names[1]);
-  if (!error_stack_is_empty(error_stack)) {
-    return;
-  }
-
-  config_load_peg_adjust(config, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
@@ -16980,13 +17068,15 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->ld = NULL;
   config->players_data = players_data_create(default_use_wmp);
   // The command line program and the library's magpie_create() use each
-  // table when this machine has room for it; tests, browser games and
+  // table when this machine has room for it, and each lexicon's pre-endgame
+  // adjustments where the data has them; tests, browser games and
   // contribute's task configurations state what they use.
   const bool auto_tables = config_args && config_args->auto_tables;
   for (int player_idx = 0; player_idx < 2; player_idx++) {
     config->table_auto[PLAYERS_DATA_TYPE_WMP][player_idx] = auto_tables;
     config->table_auto[PLAYERS_DATA_TYPE_RIT][player_idx] = auto_tables;
     config->table_auto[PLAYERS_DATA_TYPE_WIT][player_idx] = auto_tables;
+    config->table_auto[PLAYERS_DATA_TYPE_PEG_ADJUST][player_idx] = auto_tables;
     if (auto_tables) {
       players_data_set_use_when_available(
           config->players_data, PLAYERS_DATA_TYPE_WMP, player_idx, true);
@@ -17154,6 +17244,22 @@ static void config_add_table_setting_to_string_builder(const Config *config,
       config, sb, arg_token,
       players_data_get_use_when_available(config->players_data, type,
                                           player_index));
+}
+
+// A player's pre-endgame adjustments as set: auto, a table's name, or none.
+// Always written, since what an unset option means depends on who reads it:
+// auto for the command line program and the library, none elsewhere.
+static void config_add_peg_adjust_setting_to_string_builder(
+    const Config *config, StringBuilder *sb, arg_token_t arg_token,
+    int player_index) {
+  const char *value = "none";
+  if (config->table_auto[PLAYERS_DATA_TYPE_PEG_ADJUST][player_index]) {
+    value = "auto";
+  } else if (players_data_get_peg_adjust(config->players_data, player_index)) {
+    value = players_data_get_data_name(
+        config->players_data, PLAYERS_DATA_TYPE_PEG_ADJUST, player_index);
+  }
+  config_add_string_setting_to_string_builder(config, sb, arg_token, value);
 }
 
 // The settings a settings file keeps: those that hold for a whole game or
@@ -17371,13 +17477,7 @@ static void config_add_settings_to_string_builder_internal(const Config *config,
       }
       break;
     case ARG_TOKEN_P1_PEG_ADJUST:
-      // Omitted when no table is loaded; unloaded is the default.
-      if (players_data_get_peg_adjust(config->players_data, 0)) {
-        config_add_string_setting_to_string_builder(
-            config, sb, arg_token,
-            players_data_get_data_name(config->players_data,
-                                       PLAYERS_DATA_TYPE_PEG_ADJUST, 0));
-      }
+      config_add_peg_adjust_setting_to_string_builder(config, sb, arg_token, 0);
       break;
     case ARG_TOKEN_P1_PAT_CLASSES: {
       // Omitted when every class applies; that is the default.
@@ -17466,13 +17566,7 @@ static void config_add_settings_to_string_builder_internal(const Config *config,
       }
       break;
     case ARG_TOKEN_P2_PEG_ADJUST:
-      // Omitted when no table is loaded; unloaded is the default.
-      if (players_data_get_peg_adjust(config->players_data, 1)) {
-        config_add_string_setting_to_string_builder(
-            config, sb, arg_token,
-            players_data_get_data_name(config->players_data,
-                                       PLAYERS_DATA_TYPE_PEG_ADJUST, 1));
-      }
+      config_add_peg_adjust_setting_to_string_builder(config, sb, arg_token, 1);
       break;
     case ARG_TOKEN_P2_PAT_CLASSES: {
       // Omitted when every class applies; that is the default.

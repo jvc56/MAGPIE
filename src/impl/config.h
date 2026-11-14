@@ -50,7 +50,9 @@ typedef struct ConfigArgs {
   // library's magpie_create() do; tests, browser games and contribute's task
   // configurations state what they use, with use_wmp for the wordmap. So does
   // -scensus, which steers sims' rollouts when this machine has the memory
-  // and the rollouts pay for the census's build.
+  // and the rollouts pay for the census's build, and so does -pegadjust,
+  // which gives each player its lexicon's own pre-endgame adjustments where
+  // the data has them.
   bool auto_tables;
 } ConfigArgs;
 
