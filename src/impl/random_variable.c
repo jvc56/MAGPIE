@@ -15,6 +15,7 @@
 #include "../ent/inference_results.h"
 #include "../ent/letter_distribution.h"
 #include "../ent/move.h"
+#include "../ent/pat_board_cache.h"
 #include "../ent/player.h"
 #include "../ent/rack.h"
 #include "../ent/sim_args.h"
@@ -420,6 +421,9 @@ typedef struct SimmerWorker {
   // The census rollout's state for this worker's rollouts, made by the first
   // sim that uses the census (see SimArgs.use_census_rollout).
   CensusRolloutWorker *census_rollout_worker;
+  // The worker's cache for board-only PAT (see pat_board_cache.h), made by
+  // the first sim whose rollouts use it and emptied for each one.
+  PATBoardCache *pat_board_cache;
 } SimmerWorker;
 
 // The step of a simulation worker's cross set salt: odd, so a worker's
@@ -467,19 +471,35 @@ typedef struct Simmer {
 } Simmer;
 
 // A worker's copy of the game plays the sim's rollouts, so both of its
-// players take the simming player's rollout PAT settings.
-static void simmer_worker_set_rollout_pat(const SimmerWorker *simmer_worker,
+// players take the simming player's rollout PAT settings. Unless those ask
+// for the term static evaluation uses, a player with PAT weights gets the
+// worker's board cache, emptied for this sim, and with it board-only PAT.
+static void simmer_worker_set_rollout_pat(SimmerWorker *simmer_worker,
                                           const SimArgs *sim_args) {
+  const bool board_only =
+      !sim_args->pat_rollout_disabled && !sim_args->pat_rollout_exact;
   for (int player_index = 0; player_index < 2; player_index++) {
-    player_set_pat_usage(game_get_player(simmer_worker->game, player_index),
-                         sim_args->pat_rollout_disabled,
+    Player *player = game_get_player(simmer_worker->game, player_index);
+    player_set_pat_usage(player, sim_args->pat_rollout_disabled,
                          sim_args->pat_rollout_disabled_classes_mask);
+    PATBoardCache *board_cache = NULL;
+    if (board_only && player_get_pat(player) != NULL) {
+      if (simmer_worker->pat_board_cache == NULL) {
+        simmer_worker->pat_board_cache = pat_board_cache_create();
+      }
+      board_cache = simmer_worker->pat_board_cache;
+    }
+    player_set_pat_board_cache(player, board_cache);
+  }
+  if (simmer_worker->pat_board_cache != NULL) {
+    pat_board_cache_reset(simmer_worker->pat_board_cache);
   }
 }
 
 SimmerWorker *simmer_create_worker(const SimArgs *sim_args) {
   SimmerWorker *simmer_worker = malloc_or_die(sizeof(SimmerWorker));
   simmer_worker->game = game_duplicate(sim_args->game);
+  simmer_worker->pat_board_cache = NULL;
   simmer_worker_set_rollout_pat(simmer_worker, sim_args);
   game_set_backup_mode(simmer_worker->game, BACKUP_MODE_SIMULATION);
   // A rollout plays its candidate and plies, then unplays them all at once,
@@ -516,6 +536,7 @@ void simmer_worker_destroy(SimmerWorker *simmer_worker) {
   move_list_destroy(simmer_worker->move_list);
   prng_destroy(simmer_worker->prng);
   census_rollout_worker_destroy(simmer_worker->census_rollout_worker);
+  pat_board_cache_destroy(simmer_worker->pat_board_cache);
   free(simmer_worker);
 }
 

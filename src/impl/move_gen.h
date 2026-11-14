@@ -80,6 +80,13 @@ typedef struct MoveGenArgs {
   // equity. 0 and NULL change nothing.
   uint64_t skip_lanes;
   const uint32_t *skip_anchor_cols;
+  // By lane and anchor column (2 * BOARD_DIM by BOARD_DIM), a bound on the
+  // equity without the PAT term of each anchor's plays, or EQUITY_MAX_VALUE
+  // for an anchor without one; NULL for none. A best-equity generation with
+  // PAT and a word map searches an anchor only while its cap plus the
+  // lane's bound on the term can beat the best move. The best move is the
+  // same.
+  const Equity *anchor_equity_caps;
 } MoveGenArgs;
 
 // The hash of each lane of the game's board as the best-move carry computes

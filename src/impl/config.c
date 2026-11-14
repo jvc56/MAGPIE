@@ -1410,6 +1410,23 @@ static void add_pat_help_arg(arg_token_t arg_token, const char **usages,
             "'patrolloutclasses' sets both players; 'patrolloutclasses1' "
             "and 'patrolloutclasses2' set one.";
     break;
+  case ARG_TOKEN_PAT_ROLLOUT_FAST:
+  case ARG_TOKEN_P1_PAT_ROLLOUT_FAST:
+  case ARG_TOKEN_P2_PAT_ROLLOUT_FAST:
+    usages[0] = "<true_or_false>";
+    examples[0] = "true";
+    examples[1] = "false";
+    *text = "Specifies whether the PAT in the player's rollouts is "
+            "board-only, which is faster. Board-only PAT leaves out the "
+            "mover's rack, which static evaluation takes from the unseen "
+            "tiles, and the utility correction. A position's PAT then "
+            "depends on the board alone, so rollouts that reach the same "
+            "board share the work, and the census can steer them (see "
+            "'scensus'). Rollouts are 1.2 to 1.5 times as fast as with "
+            "false, which uses the term static evaluation uses and no "
+            "census. Defaults to true. 'patrolloutfast' sets both players; "
+            "'patrolloutfast1' and 'patrolloutfast2' set one.";
+    break;
   case ARG_TOKEN_PAT_LABEL_PLIES:
     usages[0] = "<plies>";
     *text = "Specifies how many plies of net result a PAT training label "
@@ -1792,6 +1809,9 @@ static void help_entry_fill(const Config *config, int token,
     case ARG_TOKEN_PAT_ROLLOUT_CLASSES:
     case ARG_TOKEN_P1_PAT_ROLLOUT_CLASSES:
     case ARG_TOKEN_P2_PAT_ROLLOUT_CLASSES:
+    case ARG_TOKEN_PAT_ROLLOUT_FAST:
+    case ARG_TOKEN_P1_PAT_ROLLOUT_FAST:
+    case ARG_TOKEN_P2_PAT_ROLLOUT_FAST:
     case ARG_TOKEN_PAT_LABEL_PLIES:
       add_pat_help_arg(arg_token, usages, examples, &text);
       break;
@@ -2717,9 +2737,10 @@ static void help_entry_fill(const Config *config, int token,
              "stopping condition, otherwise its minimum iterations for each "
              "play) save more time than the build takes, the bag has "
              "tiles, the players share a lexicon and leaves in a classic "
-             "game, and the rollouts go without PAT; the sim's Census line "
-             "says whether it did. true always uses it, and needs "
-             "patrollout set to false; false never uses it.";
+             "game, and the rollouts go without PAT or with board-only PAT "
+             "(see 'patrolloutfast'); the sim's Census line says whether it "
+             "did. true always uses it, and needs patrolloutfast set to "
+             "true or patrollout to false; false never uses it.";
       break;
     case ARG_TOKEN_USE_HEAT_MAP:
       usages[0] = "<true_or_false>";
@@ -3976,8 +3997,9 @@ static void config_load_peg_adjust(Config *config, ErrorStack *error_stack) {
   free(updated_names[1]);
 }
 
-// Loads one player's PAT usage options (patcand, patclasses, patrollout and
-// patrolloutclasses, each global or per player) into players_data.
+// Loads one player's PAT usage options (patcand, patclasses, patrollout,
+// patrolloutclasses and patrolloutfast, each global or per player) into
+// players_data.
 static void config_load_player_pat_usage(Config *config, int player_index,
                                          ErrorStack *error_stack) {
   PlayersData *players_data = config->players_data;
@@ -4000,6 +4022,16 @@ static void config_load_player_pat_usage(Config *config, int player_index,
       return;
     }
     players_data_set_pat_rollout_disabled(players_data, player_index, !enabled);
+  }
+  value = config_get_player_arg_value(
+      config, ARG_TOKEN_PAT_ROLLOUT_FAST, ARG_TOKEN_P1_PAT_ROLLOUT_FAST,
+      ARG_TOKEN_P2_PAT_ROLLOUT_FAST, player_index);
+  if (value) {
+    if (!config_parse_bool_arg(value, "patrolloutfast", &enabled,
+                               error_stack)) {
+      return;
+    }
+    players_data_set_pat_rollout_exact(players_data, player_index, !enabled);
   }
   value = config_get_player_arg_value(config, ARG_TOKEN_PAT_CLASSES,
                                       ARG_TOKEN_P1_PAT_CLASSES,
@@ -4035,6 +4067,8 @@ static void config_set_sim_args_pat_rollout(const Config *config,
   sim_args->pat_rollout_disabled_classes_mask =
       players_data_get_pat_rollout_disabled_classes_mask(config->players_data,
                                                          player_index);
+  sim_args->pat_rollout_exact =
+      players_data_get_pat_rollout_exact(config->players_data, player_index);
 }
 
 void config_fill_sim_args(const Config *config, Rack *known_opp_rack,
@@ -5585,6 +5619,8 @@ void config_fill_autoplay_args(const Config *config,
             .pat_rollout_disabled_classes_mask =
                 players_data_get_pat_rollout_disabled_classes_mask(
                     config->players_data, player_index),
+            .pat_rollout_exact = players_data_get_pat_rollout_exact(
+                config->players_data, player_index),
             .sim_bag_cycle = player_index == 0 ? config->p1_sim_bag_cycle
                                                : config->p2_sim_bag_cycle,
         };
@@ -16608,6 +16644,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_PAT_CANDIDATES, "patcand", 1, 1);
   arg(ARG_TOKEN_PAT_ROLLOUT, "patrollout", 1, 1);
   arg(ARG_TOKEN_PAT_ROLLOUT_CLASSES, "patrolloutclasses", 1, 1);
+  arg(ARG_TOKEN_PAT_ROLLOUT_FAST, "patrolloutfast", 1, 1);
   arg(ARG_TOKEN_PEG_ADJUST, "pegadjust", 1, 1);
   arg(ARG_TOKEN_P1_LEXICON, "l1", 1, 1);
   arg(ARG_TOKEN_P1_USE_WMP, "w1", 1, 1);
@@ -16619,6 +16656,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_P1_PAT_CANDIDATES, "patcand1", 1, 1);
   arg(ARG_TOKEN_P1_PAT_ROLLOUT, "patrollout1", 1, 1);
   arg(ARG_TOKEN_P1_PAT_ROLLOUT_CLASSES, "patrolloutclasses1", 1, 1);
+  arg(ARG_TOKEN_P1_PAT_ROLLOUT_FAST, "patrolloutfast1", 1, 1);
   arg(ARG_TOKEN_P1_PEG_ADJUST, "pegadjust1", 1, 1);
   arg(ARG_TOKEN_P1_MOVE_SORT_TYPE, "s1", 1, 1);
   arg(ARG_TOKEN_P1_MOVE_RECORD_TYPE, "r1", 1, 1);
@@ -16632,6 +16670,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_P2_PAT_CANDIDATES, "patcand2", 1, 1);
   arg(ARG_TOKEN_P2_PAT_ROLLOUT, "patrollout2", 1, 1);
   arg(ARG_TOKEN_P2_PAT_ROLLOUT_CLASSES, "patrolloutclasses2", 1, 1);
+  arg(ARG_TOKEN_P2_PAT_ROLLOUT_FAST, "patrolloutfast2", 1, 1);
   arg(ARG_TOKEN_P2_PEG_ADJUST, "pegadjust2", 1, 1);
   arg(ARG_TOKEN_P2_MOVE_SORT_TYPE, "s2", 1, 1);
   arg(ARG_TOKEN_P2_MOVE_RECORD_TYPE, "r2", 1, 1);
@@ -17250,6 +17289,7 @@ static void config_add_settings_to_string_builder_internal(const Config *config,
     case ARG_TOKEN_PAT_CANDIDATES:
     case ARG_TOKEN_PAT_ROLLOUT:
     case ARG_TOKEN_PAT_ROLLOUT_CLASSES:
+    case ARG_TOKEN_PAT_ROLLOUT_FAST:
     case ARG_TOKEN_PEG_ADJUST:
       // Set these values on a per-player basis
       break;
@@ -17321,6 +17361,11 @@ static void config_add_settings_to_string_builder_internal(const Config *config,
       config_add_bool_setting_to_string_builder(
           config, sb, arg_token,
           !players_data_get_pat_rollout_disabled(config->players_data, 0));
+      break;
+    case ARG_TOKEN_P1_PAT_ROLLOUT_FAST:
+      config_add_bool_setting_to_string_builder(
+          config, sb, arg_token,
+          !players_data_get_pat_rollout_exact(config->players_data, 0));
       break;
     case ARG_TOKEN_P1_PAT_ROLLOUT_CLASSES: {
       char *classes_str = pat_classes_mask_to_string(
@@ -17408,6 +17453,11 @@ static void config_add_settings_to_string_builder_internal(const Config *config,
       config_add_bool_setting_to_string_builder(
           config, sb, arg_token,
           !players_data_get_pat_rollout_disabled(config->players_data, 1));
+      break;
+    case ARG_TOKEN_P2_PAT_ROLLOUT_FAST:
+      config_add_bool_setting_to_string_builder(
+          config, sb, arg_token,
+          !players_data_get_pat_rollout_exact(config->players_data, 1));
       break;
     case ARG_TOKEN_P2_PAT_ROLLOUT_CLASSES: {
       char *classes_str = pat_classes_mask_to_string(
