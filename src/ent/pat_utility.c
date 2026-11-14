@@ -11,6 +11,7 @@
 #include <math.h>
 #include <stddef.h>
 #include <stdlib.h>
+#include <string.h>
 
 // The default sim utility (win 1.0, spread 0.5, scale 100; see
 // sim_utility_blend) of the mover at margin with bag tiles left after the
@@ -29,6 +30,8 @@ static double pat_utility_mover_value(const WinPct *win_pcts, int margin,
 static void pat_clear_utility_tables(PATWeights *pat) {
   free(pat->utility_table);
   free(pat->utility_suffix_max);
+  free(pat->utility_range_max);
+  pat->utility_range_max = NULL;
   free(pat->utility_win_pct_name);
   pat->utility_table = NULL;
   pat->utility_suffix_max = NULL;
@@ -67,6 +70,27 @@ static void pat_build_utility_tables(PATWeights *pat, const WinPct *win_pcts) {
         running = row[offset];
       }
       suffix[offset] = running;
+    }
+  }
+  // Level 0 is the table; level k's entry is the larger of two of level
+  // k - 1's, 2^(k - 1) apart, kept within the row.
+  pat->utility_range_max =
+      malloc_or_die(sizeof(Equity) * size * PAT_UTILITY_RANGE_LEVELS);
+  memcpy(pat->utility_range_max, pat->utility_table, sizeof(Equity) * size);
+  for (int level = 1; level < PAT_UTILITY_RANGE_LEVELS; level++) {
+    const Equity *below = pat->utility_range_max + (size_t)(level - 1) * size;
+    Equity *this_level = pat->utility_range_max + (size_t)level * size;
+    const int half = 1 << (level - 1);
+    for (int bag = 0; bag <= max_bag; bag++) {
+      const size_t row_start = (size_t)bag * PAT_UTILITY_WIDTH;
+      for (int offset = 0; offset < PAT_UTILITY_WIDTH; offset++) {
+        const int other =
+            offset + half < PAT_UTILITY_WIDTH ? offset + half : offset;
+        const Equity first_half = below[row_start + offset];
+        const Equity second_half = below[row_start + other];
+        this_level[row_start + offset] =
+            first_half > second_half ? first_half : second_half;
+      }
     }
   }
 }

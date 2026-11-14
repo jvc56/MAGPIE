@@ -463,6 +463,121 @@ pat_effective_cross_info(const Square *lane, int idx, int dir,
   return info;
 }
 
+// The lane squares of a unit a move can matter to: those it may cover
+// (cover_lo..cover_hi) and those it may place a tile beside, across the lane
+// (beside_lo..beside_hi). Either range is empty (lo > hi) when the move has no
+// such square on the lane. Outside them a scan reads the board alone, so it
+// need not ask the move about every square it walks.
+typedef struct PATOverlayReach {
+  int cover_lo;
+  int cover_hi;
+  int beside_lo;
+  int beside_hi;
+} PATOverlayReach;
+
+static inline PATOverlayReach pat_overlay_reach(const PATMoveOverlay *overlay,
+                                                int dir, int lane_index) {
+  PATOverlayReach reach = {1, 0, 1, 0};
+  if (overlay == NULL) {
+    return reach;
+  }
+  const bool unit_vertical = dir != BOARD_HORIZONTAL_DIRECTION;
+  // The move's span along its own line, and the lane of its direction it
+  // lies on.
+  const int span_lo =
+      overlay->vertical ? overlay->row_start : overlay->col_start;
+  const int span_hi = overlay->vertical ? overlay->row_end : overlay->col_end;
+  const int move_lane =
+      overlay->vertical ? overlay->col_start : overlay->row_start;
+  if (unit_vertical == overlay->vertical) {
+    if (move_lane == lane_index) {
+      reach.cover_lo = span_lo;
+      reach.cover_hi = span_hi;
+    } else if (move_lane == lane_index - 1 || move_lane == lane_index + 1) {
+      reach.beside_lo = span_lo;
+      reach.beside_hi = span_hi;
+    }
+    return reach;
+  }
+  // The move crosses the unit's direction, on one square of each lane it
+  // spans, at lane position move_lane.
+  if (lane_index >= span_lo && lane_index <= span_hi) {
+    reach.cover_lo = move_lane;
+    reach.cover_hi = move_lane;
+  }
+  if (lane_index + 1 >= span_lo && lane_index - 1 <= span_hi) {
+    reach.beside_lo = move_lane;
+    reach.beside_hi = move_lane;
+  }
+  return reach;
+}
+
+static inline const PATMoveOverlay *
+pat_overlay_if_covering(const PATMoveOverlay *overlay,
+                        const PATOverlayReach *reach, int idx) {
+  return (idx >= reach->cover_lo && idx <= reach->cover_hi) ? overlay : NULL;
+}
+
+static inline const PATMoveOverlay *
+pat_overlay_if_beside(const PATMoveOverlay *overlay,
+                      const PATOverlayReach *reach, int idx) {
+  return (idx >= reach->beside_lo && idx <= reach->beside_hi) ? overlay : NULL;
+}
+
+// pat_effective_cross_info, read from the position's remembered squares when
+// no move bears on this one.
+static inline PATCrossInfo
+pat_cross_info(PATSquareInfoCache *square_cache, int lane_index,
+               const Square *lane, int idx, int dir,
+               const PATMoveOverlay *overlay, int row, int col,
+               const uint8_t *unseen_counts, const LetterDistribution *ld,
+               bool want_score_exposure, int premium_word_multiplier) {
+  if (square_cache == NULL || overlay != NULL) {
+    return pat_effective_cross_info(lane, idx, dir, overlay, row, col,
+                                    unseen_counts, ld, want_score_exposure,
+                                    premium_word_multiplier);
+  }
+  const int dir_idx = dir == BOARD_HORIZONTAL_DIRECTION ? 0 : 1;
+  const uint8_t state = square_cache->states[dir_idx][lane_index][idx];
+  PATCrossInfo info;
+  if ((state & PAT_SQUARE_INFO_KNOWN) != 0 &&
+      (!want_score_exposure ||
+       ((state & PAT_SQUARE_INFO_EXPOSURE_KNOWN) != 0 &&
+        square_cache->exposure_multipliers[dir_idx][lane_index][idx] ==
+            premium_word_multiplier))) {
+    info.dead = (state & PAT_SQUARE_INFO_DEAD) != 0;
+    info.hooky = (state & PAT_SQUARE_INFO_HOOKY) != 0;
+    info.flex = square_cache->flexes[dir_idx][lane_index][idx];
+    info.score_exposure =
+        want_score_exposure
+            ? square_cache->score_exposures[dir_idx][lane_index][idx]
+            : 0;
+    info.letter_set = square_cache->letter_sets[dir_idx][lane_index][idx];
+    return info;
+  }
+  info = pat_effective_cross_info(lane, idx, dir, NULL, row, col, unseen_counts,
+                                  ld, want_score_exposure,
+                                  premium_word_multiplier);
+  uint8_t new_state = PAT_SQUARE_INFO_KNOWN;
+  if (info.dead) {
+    new_state |= PAT_SQUARE_INFO_DEAD;
+  }
+  if (info.hooky) {
+    new_state |= PAT_SQUARE_INFO_HOOKY;
+  }
+  if (want_score_exposure) {
+    new_state |= PAT_SQUARE_INFO_EXPOSURE_KNOWN;
+    square_cache->exposure_multipliers[dir_idx][lane_index][idx] =
+        (uint8_t)premium_word_multiplier;
+    square_cache->score_exposures[dir_idx][lane_index][idx] =
+        info.score_exposure;
+  }
+  square_cache->states[dir_idx][lane_index][idx] = new_state;
+  square_cache->flexes[dir_idx][lane_index][idx] = info.flex;
+  square_cache->letter_sets[dir_idx][lane_index][idx] = info.letter_set;
+  return info;
+}
+
 void pat_class_channel_bases(int premium_class, int *hook_base,
                              int *float_score_base) {
   *hook_base = PAT_FEATURE_HOOK_START;
@@ -545,7 +660,8 @@ void pat_scan_unit(const Square *lanes, const LetterDistribution *ld,
                    int premium_row, int premium_col, int premium_class, int dir,
                    const PATMoveOverlay *overlay, int32_t *features,
                    int *extent_lo, int *extent_hi, int opponent_rack_size,
-                   uint64_t *hook_letters_out, bool score_channels) {
+                   uint64_t *hook_letters_out, bool score_channels,
+                   PATSquareInfoCache *square_cache) {
   const int max_reach =
       (opponent_rack_size < RACK_SIZE) ? opponent_rack_size : RACK_SIZE;
   // Feature extraction needs every score channel even from a zero bootstrap.
@@ -577,9 +693,12 @@ void pat_scan_unit(const Square *lanes, const LetterDistribution *ld,
     *extent_hi = premium_idx;
   }
 
-  if (pat_effective_letter(lane, premium_idx, overlay,
-                           pat_unit_row(dir, lane_index, premium_idx),
-                           pat_unit_col(dir, lane_index, premium_idx)) !=
+  const PATOverlayReach reach = pat_overlay_reach(overlay, dir, lane_index);
+  if (pat_effective_letter(
+          lane, premium_idx,
+          pat_overlay_if_covering(overlay, &reach, premium_idx),
+          pat_unit_row(dir, lane_index, premium_idx),
+          pat_unit_col(dir, lane_index, premium_idx)) !=
       ALPHABET_EMPTY_SQUARE_MARKER) {
     // The TWS square is covered (by the board or by the move itself):
     // nothing along this lane can reach it. Covering a TWS is exactly the
@@ -588,8 +707,9 @@ void pat_scan_unit(const Square *lanes, const LetterDistribution *ld,
   }
   const int premium_word_multiplier = bonus_square_get_word_multiplier(
       square_get_bonus_square(&lane[premium_idx]));
-  const PATCrossInfo premium_info = pat_effective_cross_info(
-      lane, premium_idx, dir, overlay,
+  const PATCrossInfo premium_info = pat_cross_info(
+      square_cache, lane_index, lane, premium_idx, dir,
+      pat_overlay_if_beside(overlay, &reach, premium_idx),
       pat_unit_row(dir, lane_index, premium_idx),
       pat_unit_col(dir, lane_index, premium_idx), unseen_counts, hook_score_ld,
       want_score_exposure, premium_word_multiplier);
@@ -627,8 +747,9 @@ void pat_scan_unit(const Square *lanes, const LetterDistribution *ld,
       }
       const int square_row = pat_unit_row(dir, lane_index, idx);
       const int square_col = pat_unit_col(dir, lane_index, idx);
-      const MachineLetter letter =
-          pat_effective_letter(lane, idx, overlay, square_row, square_col);
+      const MachineLetter letter = pat_effective_letter(
+          lane, idx, pat_overlay_if_covering(overlay, &reach, idx), square_row,
+          square_col);
       if (letter != ALPHABET_EMPTY_SQUARE_MARKER) {
         // A run of tiles: floater (playthrough) access. The run costs the
         // opponent no tiles, so the whole run shares the bin of the empty
@@ -648,14 +769,16 @@ void pat_scan_unit(const Square *lanes, const LetterDistribution *ld,
                !square_get_is_brick(&lane[idx])) {
           const int run_row = pat_unit_row(dir, lane_index, idx);
           const int run_col = pat_unit_col(dir, lane_index, idx);
+          const PATMoveOverlay *run_overlay =
+              pat_overlay_if_covering(overlay, &reach, idx);
           const MachineLetter run_letter =
-              pat_effective_letter(lane, idx, overlay, run_row, run_col);
+              pat_effective_letter(lane, idx, run_overlay, run_row, run_col);
           if (run_letter == ALPHABET_EMPTY_SQUARE_MARKER) {
             break;
           }
           last_visited_idx = idx;
           MachineLetter fresh_letter;
-          if (pat_move_covers(overlay, run_row, run_col, &fresh_letter)) {
+          if (pat_move_covers(run_overlay, run_row, run_col, &fresh_letter)) {
             run_has_fresh_tile = true;
           }
           int tile_score = 0;
@@ -778,9 +901,11 @@ void pat_scan_unit(const Square *lanes, const LetterDistribution *ld,
         span_floater_flex += run_flex;
         continue;
       }
-      const PATCrossInfo info = pat_effective_cross_info(
-          lane, idx, dir, overlay, square_row, square_col, unseen_counts,
-          hook_score_ld, want_score_exposure, premium_word_multiplier);
+      const PATCrossInfo info =
+          pat_cross_info(square_cache, lane_index, lane, idx, dir,
+                         pat_overlay_if_beside(overlay, &reach, idx),
+                         square_row, square_col, unseen_counts, hook_score_ld,
+                         want_score_exposure, premium_word_multiplier);
       if (info.dead) {
         break;
       }
@@ -833,7 +958,8 @@ void pat_scan_dd_unit(const Square *lanes, const uint8_t *unseen_counts,
                       int dir, int lane_index, int lo, int hi, int tier,
                       const PATMoveOverlay *overlay, int32_t *features,
                       int *extent_lo, int *extent_hi, int opponent_rack_size,
-                      uint64_t *hook_letters_out) {
+                      uint64_t *hook_letters_out,
+                      PATSquareInfoCache *square_cache) {
   const int max_reach =
       (opponent_rack_size < RACK_SIZE) ? opponent_rack_size : RACK_SIZE;
   const int tier_base =
@@ -845,6 +971,7 @@ void pat_scan_dd_unit(const Square *lanes, const uint8_t *unseen_counts,
   if (extent_hi != NULL) {
     *extent_hi = hi;
   }
+  const PATOverlayReach reach = pat_overlay_reach(overlay, dir, lane_index);
   int empties = 0;
   bool has_floater = false;
   bool has_hook = false;
@@ -854,8 +981,9 @@ void pat_scan_dd_unit(const Square *lanes, const uint8_t *unseen_counts,
     }
     const int square_row = pat_unit_row(dir, lane_index, idx);
     const int square_col = pat_unit_col(dir, lane_index, idx);
-    const MachineLetter letter =
-        pat_effective_letter(lane, idx, overlay, square_row, square_col);
+    const MachineLetter letter = pat_effective_letter(
+        lane, idx, pat_overlay_if_covering(overlay, &reach, idx), square_row,
+        square_col);
     if (letter != ALPHABET_EMPTY_SQUARE_MARKER) {
       if (idx == lo || idx == hi) {
         return;
@@ -866,8 +994,9 @@ void pat_scan_dd_unit(const Square *lanes, const uint8_t *unseen_counts,
     // Never reads score_exposure, so the premium multiplier is a
     // don't-care here; a NULL ld keeps created hooks approximate.
     const PATCrossInfo info =
-        pat_effective_cross_info(lane, idx, dir, overlay, square_row,
-                                 square_col, unseen_counts, NULL, false, 2);
+        pat_cross_info(square_cache, lane_index, lane, idx, dir,
+                       pat_overlay_if_beside(overlay, &reach, idx), square_row,
+                       square_col, unseen_counts, NULL, false, 2);
     if (info.dead) {
       return;
     }
@@ -1024,11 +1153,11 @@ void pat_extract_features(const Square *lanes, const LetterDistribution *ld,
     pat_scan_unit(lanes, ld, unseen_counts, pat, premium_rows[premium_idx],
                   premium_cols[premium_idx], premium_classes[premium_idx],
                   BOARD_HORIZONTAL_DIRECTION, NULL, features, NULL, NULL,
-                  opponent_rack_size, NULL, true);
+                  opponent_rack_size, NULL, true, NULL);
     pat_scan_unit(lanes, ld, unseen_counts, pat, premium_rows[premium_idx],
                   premium_cols[premium_idx], premium_classes[premium_idx],
                   BOARD_VERTICAL_DIRECTION, NULL, features, NULL, NULL,
-                  opponent_rack_size, NULL, true);
+                  opponent_rack_size, NULL, true, NULL);
   }
   uint8_t dd_dirs[PAT_MAX_DD];
   uint8_t dd_lanes[PAT_MAX_DD];
@@ -1040,7 +1169,7 @@ void pat_extract_features(const Square *lanes, const LetterDistribution *ld,
   for (int dd_idx = 0; dd_idx < num_dd; dd_idx++) {
     pat_scan_dd_unit(lanes, unseen_counts, dd_dirs[dd_idx], dd_lanes[dd_idx],
                      dd_los[dd_idx], dd_his[dd_idx], dd_tiers[dd_idx], NULL,
-                     features, NULL, NULL, opponent_rack_size, NULL);
+                     features, NULL, NULL, opponent_rack_size, NULL, NULL);
   }
 }
 
@@ -1106,12 +1235,12 @@ void pat_extract_features_combined(const Square *lanes,
       pat_scan_unit(lanes, ld, unseen_counts, pat, premium_rows[premium_idx],
                     premium_cols[premium_idx], premium_classes[premium_idx],
                     unit_index % 2, NULL, row, NULL, NULL, opponent_rack_size,
-                    NULL, true);
+                    NULL, true, NULL);
     } else {
       const int dd_idx = unit_index - num_premium * 2;
       pat_scan_dd_unit(lanes, unseen_counts, dd_dirs[dd_idx], dd_lanes[dd_idx],
                        dd_los[dd_idx], dd_his[dd_idx], dd_tiers[dd_idx], NULL,
-                       row, NULL, NULL, opponent_rack_size, NULL);
+                       row, NULL, NULL, opponent_rack_size, NULL, NULL);
     }
     const Equity penalty = pat_dot(pat, row);
     if (penalty < worst_penalty) {
