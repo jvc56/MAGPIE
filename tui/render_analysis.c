@@ -38,6 +38,8 @@ enum {
   // Width of one per-ply average column, and the gap before it.
   AVG_COL_W = 4,
   AVG_GAP_W = 1,
+  // Gap before each adjustment column of a static ranking.
+  ADJUSTMENT_GAP_W = 1,
   // Gap between the move text and the leave column.
   LEAVE_GAP_L = 2,
 };
@@ -113,6 +115,7 @@ static int analysis_compact_exchanges(AnalysisRow *rows, int count) {
 // Standard-layout column geometry, fixed once per frame before the
 // header strip, rows, and scrollbar are drawn. Columns right-anchor:
 // [rank][move]  [leave] [score][primary][secondary][avg1 avg2 ...]
+// with [pat][peg] in the averages' place for a static ranking.
 typedef struct {
   int interior_left;
   int interior_right; // excludes the scrollbar cell when it shows
@@ -128,6 +131,10 @@ typedef struct {
   bool show_avgs;
   int max_ply_count;
   int avg_left_edge;
+  // Right edges of a static ranking's adjustment columns, -1 for one
+  // that is not shown.
+  int pat_right_edge;
+  int peg_right_edge;
   bool show_score;
   int score_w;
   int score_right_edge;
@@ -434,9 +441,42 @@ static void render_analysis_rows_compact(struct ncplane *plane,
   }
 }
 
-// Paints the column-header strip (leave / sc / avgN / win% / sprd) on the
-// panel's top border when the title leaves room, else on the first
-// interior row. Returns the first row available for data.
+// The widths of a static ranking's adjustment columns: of the widest pat
+// cell and of the widest peg cell among `count` rows, 0 for a column
+// with no cell to show. A cell ("+0.1") is wider than its header.
+static void analysis_adjustment_widths(const AnalysisRow *rows, int count,
+                                       int *pat_w, int *peg_w) {
+  *pat_w = 0;
+  *peg_w = 0;
+  for (int row_idx = 0; row_idx < count; row_idx++) {
+    if (!rows[row_idx].valid) {
+      continue;
+    }
+    const int pat_len = (int)strlen(rows[row_idx].pat);
+    const int peg_len = (int)strlen(rows[row_idx].peg);
+    if (pat_len > *pat_w) {
+      *pat_w = pat_len;
+    }
+    if (peg_len > *peg_w) {
+      *peg_w = peg_len;
+    }
+  }
+}
+
+// Writes `text`, a static ranking's adjustment cell or its column's
+// header, to end at column `right_edge`, in the plane's current colors.
+// Nothing for a column that is not shown (a negative edge).
+static void put_adjustment(struct ncplane *plane, int row, int right_edge,
+                           const char *text) {
+  if (right_edge >= 0) {
+    ncplane_putstr_yx(plane, row, right_edge - (int)strlen(text) + 1, text);
+  }
+}
+
+// Paints the column-header strip (leave / sc / avgN / win% / sprd, and a
+// static ranking's pat / peg) on the panel's top border when the title
+// leaves room, else on the first interior row. Returns the first row
+// available for data.
 static int render_analysis_headers(struct ncplane *plane, const Theme *theme,
                                    const Layout *L,
                                    const AnalysisColumns *columns,
@@ -546,6 +586,8 @@ static int render_analysis_headers(struct ncplane *plane, const Theme *theme,
     const int col = columns->sec_col + columns->secondary_w - len;
     ncplane_putstr_yx(plane, header_row, col, secondary_label);
   }
+  put_adjustment(plane, header_row, columns->pat_right_edge, "pat");
+  put_adjustment(plane, header_row, columns->peg_right_edge, "peg");
   ncplane_set_styles(plane, 0);
   return list_top;
 }
@@ -810,6 +852,11 @@ static void render_analysis_row(struct ncplane *plane, const Theme *theme,
       ncplane_set_styles(plane, 0);
     }
   }
+
+  // A static ranking's adjustment cells, dim like the secondary.
+  theme_apply_fg(plane, theme->dim_fg);
+  put_adjustment(plane, row, columns->pat_right_edge, rows[data_i].pat);
+  put_adjustment(plane, row, columns->peg_right_edge, rows[data_i].peg);
 }
 
 // Draws the scrollbar in the cell right of the interior, spanning the
@@ -933,13 +980,15 @@ static void render_analysis_scrollbar(struct ncplane *plane, const Theme *theme,
 // Handles the leave column auto-sizing, exchange compaction, and
 // right-anchored primary/secondary columns. primary_bold gates whether
 // the primary string renders in bold (true for win%, false for W/T/L
-// which already pop visually).
+// which already pop visually). with_adjustments adds a static ranking's
+// pat and peg columns.
 static void render_analysis_rows(struct ncplane *plane, const Theme *theme,
                                  TuiGameState *state, const Layout *L,
                                  AnalysisRow *rows, int visible, int primary_w,
                                  int secondary_w, int primary_secondary_gap,
                                  bool primary_bold, int title_end_col,
-                                 const char *secondary_label) {
+                                 const char *secondary_label,
+                                 bool with_adjustments) {
   TuiHitMaps *hit = tui_hit_maps();
   const int interior_left = L->analysis_left + 1;
   const int interior_right_full = L->analysis_right - 1;
@@ -1022,8 +1071,32 @@ static void render_analysis_rows(struct ncplane *plane, const Theme *theme,
   const bool show_avgs = avg_block_w_probe_ply > 0 && avg_need <= avail_w;
   const int avg_block_w = show_avgs ? avg_block_w_tentative : 0;
   const int max_ply_count = show_avgs ? avg_block_w_probe_ply : 0;
+  // A static ranking's adjustment columns go at the right edge, each a
+  // gap and its widest cell wide. A column that no row of the list has
+  // a cell for is left out. They are the first columns to give way:
+  // both are left out unless they fit beside everything else, the
+  // leave column included, by the per-ply block's probe. They are sized
+  // over the whole list, not the window, so scrolling doesn't move
+  // them.
+  int pat_w = 0;
+  int peg_w = 0;
+  if (with_adjustments) {
+    analysis_adjustment_widths(rows, total_rows, &pat_w, &peg_w);
+  }
+  const int pat_col_w = pat_w > 0 ? ADJUSTMENT_GAP_W + pat_w : 0;
+  const int peg_col_w = peg_w > 0 ? ADJUSTMENT_GAP_W + peg_w : 0;
+  const int leave_block_w = max_leave_w > 0 ? LEAVE_GAP_L + max_leave_w : 0;
+  const bool show_adjustments =
+      pat_col_w + peg_col_w > 0 &&
+      avg_need + leave_block_w + pat_col_w + peg_col_w <= avail_w;
+  const int adjustment_block_w = show_adjustments ? pat_col_w + peg_col_w : 0;
+  const int peg_right_edge =
+      show_adjustments && peg_w > 0 ? interior_right : -1;
+  const int pat_right_edge =
+      show_adjustments && pat_w > 0 ? interior_right - peg_col_w : -1;
   const int right_anchor =
-      show_avgs ? interior_right - avg_block_w : interior_right;
+      (show_avgs ? interior_right - avg_block_w : interior_right) -
+      adjustment_block_w;
   const int sec_col = right_anchor - secondary_w + 1;
   const int prim_col = sec_col - primary_secondary_gap - primary_w;
   const int avg_left_edge = show_avgs ? right_anchor + 1 : -1;
@@ -1121,6 +1194,8 @@ static void render_analysis_rows(struct ncplane *plane, const Theme *theme,
       .show_avgs = show_avgs,
       .max_ply_count = max_ply_count,
       .avg_left_edge = avg_left_edge,
+      .pat_right_edge = pat_right_edge,
+      .peg_right_edge = peg_right_edge,
       .show_score = show_score,
       .score_w = score_w,
       .score_right_edge = score_right_edge,
@@ -1547,5 +1622,5 @@ void render_analysis_panel(struct ncplane *plane, const Theme *theme,
          sizeof(AnalysisRow) * (size_t)total_rows);
   render_analysis_rows(plane, theme, state, L, rows, visible, primary_w,
                        secondary_w, primary_secondary_gap, primary_bold,
-                       title_end_col, use_static ? "eq" : "sprd");
+                       title_end_col, use_static ? "eq" : "sprd", use_static);
 }

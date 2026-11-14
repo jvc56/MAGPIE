@@ -88,6 +88,11 @@ typedef struct {
   char score[8];     // "30" / "120"; empty if not applicable
   char primary[8];   // "67.3%" in sim; empty in endgame
   char secondary[8]; // "+32.5" or "+27"
+  // A static ("/kibitz") row's adjustments: what PAT and what the
+  // pre-endgame adjustment table put into the move's equity, "-4.2";
+  // empty where that would read 0.0, and in every other mode.
+  char pat[8];
+  char peg[8];
   AnalysisTint secondary_tint;
   // Raw values, kept alongside the display strings so the renderer
   // can bold the highest-scoring row(s) using full precision

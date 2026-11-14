@@ -6,6 +6,7 @@
 // Also tests that the game state plays with the lexicon's pre-endgame
 // adjustments and PAT weights: a kibitz of a late position has the table's
 // amounts in its equities, and a kibitz of a mid-game position has PAT's.
+// A kibitz's rows say what each of the two put into a play's equity.
 //
 // Run from the repository root (reads data/).
 // Build and run: make magpie_tui_app_test && ./bin/magpie_tui_app_test
@@ -64,6 +65,20 @@ static const char *const LATE_POSITION_CGP =
 static const char *const MID_POSITION_CGP =
     "15/15/10T4/10AD3/10MO3/5ZEK2EW3/6MITT1N3/7DOWLY3/8POI4/3ALBUGoS5/15/15/"
     "15/15/15 CGILLRS/ 98/167 0";
+
+// A CSW24 position with eight tiles in the bag, given the same way: the
+// table has an amount for some of its tile placements and none for others.
+static const char *const BAG_OF_EIGHT_POSITION_CGP =
+    "FOAM11/1PRICK6V2/5E6I2/3GUY6C1J/2QAT7A1A/3BEVY1DENARII/6EGO3A1L/"
+    "5WHUPS2T1O/9T2E1R/G2WOX3E5/A3DINNLES4/ZATI5L5/I1INTHRONE5/E8D5/R14 "
+    "EEOOTUU/ 377/405 0";
+
+// A CSW24 position with an empty bag, given the same way: the six tiles
+// not seen are the opponent's rack.
+static const char *const EMPTY_BAG_POSITION_CGP =
+    "7F3QINS/7E3E2H/6ORBITED1O/3JAMBU2OM2R/1ROATE1L2FAV1T/GI5ED1T1OPE/"
+    "OD6R3WEN/EL5RUNTY2S/1E6N2U3/1Y5AKA1C3/ES1VAgUIsH1C3/X2I7A3/I2G11/"
+    "LOOING9/E2A11 ADLRSTZ/ 451/296 0";
 
 // How far a row's shown equity may be from the equity it shows.
 static const double SHOWN_TOLERANCE = 1e-9;
@@ -583,6 +598,126 @@ static void test_kibitz_has_pat(TuiGameState *state) {
   game_destroy(position);
 }
 
+// How many rows of a kibitz have a cell in each adjustment column.
+typedef struct KibitzCells {
+  int rows;
+  int pat_cells;
+  int peg_cells;
+} KibitzCells;
+
+// The text of a kibitz row's adjustment cell for `amount`: one decimal
+// with its sign, and nothing where that would read 0.0.
+static void adjustment_text(Equity amount, char *out, size_t out_size) {
+  (void)snprintf(out, out_size, "%+.1f", equity_to_double(amount));
+  if (strcmp(out, "+0.0") == 0 || strcmp(out, "-0.0") == 0) {
+    out[0] = '\0';
+  }
+}
+
+static void check_cell(const AnalysisRow *row, const char *column,
+                       const char *got, const char *want) {
+  if (strcmp(got, want) != 0) {
+    (void)fprintf(stderr, "FAIL: %s cell of %s: got \"%s\", want \"%s\"\n",
+                  column, row->move, got, want);
+    failures++;
+  }
+}
+
+// Kibitzes `cgp` and checks every row's adjustment cells against the
+// engine's equities for the position. The pat cell has the play's equity
+// less the equity players without PAT weights give it. The peg cell has
+// what the pre-endgame adjustments add to that: the equity without PAT
+// weights less the equity without the table either. Returns how many rows
+// have each cell.
+static KibitzCells check_kibitz_cells(TuiGameState *state, const char *cgp) {
+  KibitzCells cells = {0};
+  const TuiHistoryEntry *entry = kibitz_position(state, cgp);
+  if (entry == NULL) {
+    return cells;
+  }
+  const TuiAnalysisSnapshot *snap = &entry->analysis_snapshot;
+  Game *position = duplicate_turn_position(state, entry);
+  for (int player_idx = 0; player_idx < 2; player_idx++) {
+    player_set_pat(game_get_player(position, player_idx), NULL);
+  }
+  MoveList *table_plays = generate_all_plays(position);
+  for (int player_idx = 0; player_idx < 2; player_idx++) {
+    player_set_peg_adjust(game_get_player(position, player_idx), NULL);
+  }
+  MoveList *plain_plays = generate_all_plays(position);
+
+  cells.rows = snap->num_rows;
+  for (int row_idx = 0; row_idx < snap->num_rows; row_idx++) {
+    const Move *move = &entry->static_moves_saved[row_idx];
+    const AnalysisRow *row = &snap->rows[row_idx];
+    char want_pat[sizeof(row->pat)] = "";
+    char want_peg[sizeof(row->peg)] = "";
+    // The pass has a fixed value in place of an equity, and no cell.
+    if (move_get_type(move) != GAME_EVENT_PASS) {
+      Equity table_equity = 0;
+      Equity plain_equity = 0;
+      if (find_play_equity(table_plays, move, &table_equity) &&
+          find_play_equity(plain_plays, move, &plain_equity)) {
+        adjustment_text(move_get_equity(move) - table_equity, want_pat,
+                        sizeof(want_pat));
+        adjustment_text(table_equity - plain_equity, want_peg,
+                        sizeof(want_peg));
+      } else {
+        (void)fprintf(stderr, "FAIL: %s is not a play of the position\n",
+                      row->move);
+        failures++;
+      }
+    }
+    check_cell(row, "pat", row->pat, want_pat);
+    check_cell(row, "peg", row->peg, want_peg);
+    if (row->pat[0] != '\0') {
+      cells.pat_cells++;
+    }
+    if (row->peg[0] != '\0') {
+      cells.peg_cells++;
+    }
+  }
+  move_list_destroy(plain_plays);
+  move_list_destroy(table_plays);
+  game_destroy(position);
+  return cells;
+}
+
+// A kibitz's rows say what PAT and the pre-endgame adjustments put into
+// each play's equity, and leave a cell empty where the amount would read
+// 0.0. In the middle of a game no row has a peg cell, late in a game some
+// rows have one, and with an empty bag no row has either cell. A game
+// played without a table (data that has none) has no peg cell anywhere.
+static void test_kibitz_adjustment_cells(TuiGameState *state) {
+  if (players_data_get_pat(state->players_data, 0) == NULL) {
+    // test_lexicon_pat_is_loaded has reported it.
+    return;
+  }
+  const bool has_table =
+      players_data_get_peg_adjust(state->players_data, 0) != NULL;
+  KibitzCells cells = check_kibitz_cells(state, MID_POSITION_CGP);
+  check(cells.pat_cells > 0, "a mid-game kibitz has pat cells");
+  check_int(cells.peg_cells, 0, "a mid-game kibitz's peg cells");
+
+  cells = check_kibitz_cells(state, LATE_POSITION_CGP);
+  check(cells.pat_cells > 0, "a late kibitz has pat cells");
+  check((cells.peg_cells > 0) == has_table,
+        "a late kibitz has peg cells when there is a table, and only then");
+
+  cells = check_kibitz_cells(state, BAG_OF_EIGHT_POSITION_CGP);
+  check(cells.pat_cells > 0, "a kibitz with eight in the bag has pat cells");
+  check((cells.peg_cells > 0) == has_table,
+        "a kibitz with eight in the bag has peg cells when there is a "
+        "table, and only then");
+  check(cells.peg_cells < cells.rows,
+        "a kibitz with eight in the bag has empty peg cells");
+
+  cells = check_kibitz_cells(state, EMPTY_BAG_POSITION_CGP);
+  check(cells.rows > 0, "an empty bag's position is kibitzed");
+  check_int(cells.pat_cells, 0, "an empty bag's pat cells");
+  check_int(cells.peg_cells, 0, "an empty bag's peg cells");
+}
+
 int main(void) {
   TuiGameState *state = calloc(1, sizeof(*state));
   if (state == NULL) {
@@ -604,6 +739,7 @@ int main(void) {
   test_lexicon_pat_is_loaded(state, "CSW24");
   test_kibitz_has_peg_adjust(state);
   test_kibitz_has_pat(state);
+  test_kibitz_adjustment_cells(state);
   tui_game_state_destroy(state);
   free(state);
   test_other_lexicon_has_its_data();

@@ -15,6 +15,7 @@
 #include "../src/ent/game.h"
 #include "../src/ent/letter_distribution.h"
 #include "../src/ent/move.h"
+#include "../src/ent/peg_adjust.h"
 #include "../src/ent/player.h"
 #include "../src/ent/players_data.h"
 #include "../src/ent/rack.h"
@@ -47,6 +48,10 @@ enum {
   SIM_CANDIDATES = 50,
   // "/kibitz" lists at most this many moves, best static equity first.
   KIBITZ_MAX_MOVES = 100,
+  // The moves valued without PAT, for the kibitz's pat column, go into a
+  // list this many times the size of the last one tried, starting from the
+  // kibitz's own, until it holds every move the kibitz lists.
+  KIBITZ_PLAIN_LIST_GROWTH = 8,
   SIM_PLIES = 4,
   // Rollouts every candidate gets before the sim may stop. BAI stops once
   // the leader's mean win% is within the cutoff of 0 or 100%, and after
@@ -1716,6 +1721,101 @@ static void take_string(StringBuilder *sb, char *out, size_t out_size) {
 // EQUITY_PASS_VALUE, say), which equity_to_double refuses.
 static bool equity_has_value(Equity eq) { return eq > EQUITY_PASS_VALUE; }
 
+// Writes a kibitz row's adjustment cell: the amount with one decimal, or
+// nothing where that would read 0.0.
+static void format_adjustment(char *out, size_t out_size, Equity amount) {
+  (void)snprintf(out, out_size, "%+.1f", equity_to_double(amount));
+  if (strcmp(out, "+0.0") == 0 || strcmp(out, "-0.0") == 0) {
+    out[0] = '\0';
+  }
+}
+
+// Finds `move` in `list` and writes the equity it has there. False when the
+// list does not hold the move.
+static bool move_list_find_equity(const MoveList *list, const Move *move,
+                                  Equity *equity) {
+  const int count = move_list_get_count(list);
+  for (int move_idx = 0; move_idx < count; move_idx++) {
+    const Move *candidate = move_list_get_move(list, move_idx);
+    if (compare_moves_without_equity(candidate, move, true) == -1) {
+      *equity = move_get_equity(candidate);
+      return true;
+    }
+  }
+  return false;
+}
+
+// Fills the pat cells of a kibitz's rows, rows[row_idx] being the row of
+// moves' move row_idx: the move's equity less the equity the same position
+// gives it with PAT off. The cells stay empty when the player on turn has
+// no PAT weights, and for a move without a real equity.
+static void kibitz_fill_pat(const Game *position, const MoveList *moves,
+                            AnalysisRow *rows, int num_rows) {
+  const int on_turn = game_get_player_on_turn_index(position);
+  if (player_get_pat(game_get_player(position, on_turn)) == NULL) {
+    return;
+  }
+  int capacity = KIBITZ_MAX_MOVES;
+  bool has_every_row = false;
+  while (!has_every_row) {
+    capacity *= KIBITZ_PLAIN_LIST_GROWTH;
+    MoveList *plain_moves = move_list_create(capacity);
+    const MoveGenArgs args = {
+        .game = position,
+        .move_record_type = MOVE_RECORD_ALL,
+        .move_sort_type = MOVE_SORT_EQUITY,
+        .override_kwg = NULL,
+        .eq_margin_movegen = 0,
+        .target_equity = EQUITY_MAX_VALUE,
+        .move_list = plain_moves,
+        .tiles_played_bv = NULL,
+        .initial_tiles_bv = 0,
+        .disable_pat = true,
+    };
+    generate_moves(&args);
+    // A list with room to spare holds every move of the position.
+    has_every_row = move_list_get_count(plain_moves) < capacity;
+    int rows_not_found = 0;
+    for (int row_idx = 0; row_idx < num_rows; row_idx++) {
+      const Move *move = move_list_get_move(moves, row_idx);
+      const Equity equity = move_get_equity(move);
+      Equity plain_equity = 0;
+      if (!equity_has_value(equity)) {
+        continue;
+      }
+      if (move_list_find_equity(plain_moves, move, &plain_equity)) {
+        format_adjustment(rows[row_idx].pat, sizeof(rows[row_idx].pat),
+                          equity - plain_equity);
+      } else {
+        rows_not_found++;
+      }
+    }
+    has_every_row = has_every_row || rows_not_found == 0;
+    move_list_destroy(plain_moves);
+  }
+}
+
+// Fills the peg cells of a kibitz's rows, rows[row_idx] being the row of
+// moves' move row_idx: the adjustment in a tile placement's equity, which
+// the pre-endgame adjustment table of the player on turn gives by the tiles
+// in the real bag and the tiles played.
+static void kibitz_fill_peg(const Game *position, const MoveList *moves,
+                            AnalysisRow *rows, int num_rows) {
+  const int on_turn = game_get_player_on_turn_index(position);
+  const PegAdjust *peg_adjust =
+      player_get_peg_adjust(game_get_player(position, on_turn));
+  const int tiles_in_bag = game_get_real_bag_size(position);
+  for (int row_idx = 0; row_idx < num_rows; row_idx++) {
+    const Move *move = move_list_get_move(moves, row_idx);
+    if (move_get_type(move) == GAME_EVENT_TILE_PLACEMENT_MOVE) {
+      format_adjustment(
+          rows[row_idx].peg, sizeof(rows[row_idx].peg),
+          peg_adjust_get_placement_value(peg_adjust, tiles_in_bag,
+                                         move_get_tiles_played(move)));
+    }
+  }
+}
+
 bool tui_analysis_kibitz(TuiGameState *state, int turn_idx) {
   const char *reason =
       tui_analysis_unavailable_reason(state, turn_idx, TUI_ANALYSIS_KIBITZ);
@@ -1786,6 +1886,8 @@ bool tui_analysis_kibitz(TuiGameState *state, int turn_idx) {
     }
   }
   snap->num_rows = count < ANALYSIS_ROW_CAP ? count : ANALYSIS_ROW_CAP;
+  kibitz_fill_pat(position, moves, snap->rows, snap->num_rows);
+  kibitz_fill_peg(position, moves, snap->rows, snap->num_rows);
   snap->is_static = true;
   snap->valid = true;
   // Keep the moves for the board preview, in row order.
