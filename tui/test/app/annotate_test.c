@@ -4,8 +4,8 @@
 // editor the way the keyboard does.
 //
 // Also tests that the game state plays with the lexicon's pre-endgame
-// adjustments: a kibitz of a late position has the table's amounts in its
-// equities.
+// adjustments and PAT weights: a kibitz of a late position has the table's
+// amounts in its equities, and a kibitz of a mid-game position has PAT's.
 //
 // Run from the repository root (reads data/).
 // Build and run: make magpie_tui_app_test && ./bin/magpie_tui_app_test
@@ -20,6 +20,7 @@
 #include "../../../src/ent/game.h"
 #include "../../../src/ent/letter_distribution.h"
 #include "../../../src/ent/move.h"
+#include "../../../src/ent/pat.h"
 #include "../../../src/ent/peg_adjust.h"
 #include "../../../src/ent/player.h"
 #include "../../../src/ent/players_data.h"
@@ -45,7 +46,7 @@ enum {
   TEST_SEED = 7,
   // The tiles in the bag of LATE_POSITION_CGP.
   LATE_POSITION_BAG = 2,
-  // More than the plays of LATE_POSITION_CGP: a list this long holds them
+  // More than the plays of any position here: a list this long holds them
   // all.
   ALL_PLAYS_CAPACITY = 4096,
 };
@@ -58,6 +59,11 @@ static const char *const LATE_POSITION_CGP =
     "15/13T1/12DEW/FE5NARGHILE/OR11E1/OK11s1/T4NU5BA1/R5HM1ROPILY/"
     "AIYEE2EWE2ZE1/1FUNDING1Q5/9U5/2OVERLADE1GOV1/7MASTIX2/1BOrICUA1T5/"
     "7SISSOO2 AIJNNPT/ 476/394 0";
+
+// A CSW24 position from the middle of a game, given the same way.
+static const char *const MID_POSITION_CGP =
+    "15/15/10T4/10AD3/10MO3/5ZEK2EW3/6MITT1N3/7DOWLY3/8POI4/3ALBUGoS5/15/15/"
+    "15/15/15 CGILLRS/ 98/167 0";
 
 // How far a row's shown equity may be from the equity it shows.
 static const double SHOWN_TOLERANCE = 1e-9;
@@ -316,9 +322,31 @@ static void test_lexicon_peg_adjust_is_loaded(const TuiGameState *state,
   }
 }
 
+// The game state plays with its lexicon's own PAT weights, named
+// `pat_name`: the weights the command line program plays with by default.
+static void test_lexicon_pat_is_loaded(const TuiGameState *state,
+                                       const char *pat_name) {
+  const PATWeights *pat = players_data_get_pat(state->players_data, 0);
+  check(pat != NULL, "the lexicon's PAT weights are loaded");
+  if (pat == NULL) {
+    return;
+  }
+  check_str(pat_get_name(pat), pat_name, "the PAT weights' name");
+  // Weights with a utility correction need its tables, which are built
+  // when the weights are prepared.
+  check(pat->utility_adjust <= 0.0 || pat->utility_table != NULL,
+        "the PAT weights' utility correction is prepared");
+  for (int player_idx = 0; player_idx < 2; player_idx++) {
+    check(players_data_get_pat(state->players_data, player_idx) == pat,
+          "both players have the one PAT weights");
+    check(player_get_pat(game_get_player(state->game, player_idx)) == pat,
+          "the game's players play with the PAT weights");
+  }
+}
+
 // A game state of another lexicon, as a change of lexicon starts one, plays
-// with that lexicon's table.
-static void test_other_lexicon_has_its_table(void) {
+// with that lexicon's table and PAT weights.
+static void test_other_lexicon_has_its_data(void) {
   TuiGameState *state = calloc(1, sizeof(*state));
   if (state == NULL) {
     check(false, "memory for a second game state");
@@ -328,6 +356,7 @@ static void test_other_lexicon_has_its_table(void) {
   if (tui_game_state_init("NWL23", TEST_SEED, false, state, error_message,
                           sizeof(error_message))) {
     test_lexicon_peg_adjust_is_loaded(state, "NWL23_pegadjust");
+    test_lexicon_pat_is_loaded(state, "NWL23");
     tui_game_state_destroy(state);
   } else {
     (void)fprintf(stderr, "FAIL: could not start an NWL23 game: %s\n",
@@ -371,6 +400,61 @@ static bool find_play_equity(const MoveList *plays, const Move *move,
   return false;
 }
 
+// Opens `cgp` and kibitzes its turn. Returns the turn, or NULL when it has
+// no kibitz with a move for each row, which is then reported.
+static const TuiHistoryEntry *kibitz_position(TuiGameState *state,
+                                              const char *cgp) {
+  load_position(state, cgp);
+  check_int(state->history_count, 1, "the position opens one turn");
+  if (state->history_count != 1) {
+    return NULL;
+  }
+  const TuiHistoryEntry *entry = &state->history[0];
+  check(tui_analysis_kibitz(state, 0), "the position is kibitzed");
+  const TuiAnalysisSnapshot *snap = &entry->analysis_snapshot;
+  check(snap->valid && snap->is_static, "the turn has its kibitz");
+  check(snap->num_rows > 1, "the kibitz ranks several plays");
+  check_int(entry->static_moves_saved_count, snap->num_rows,
+            "the kibitz keeps a move for each row");
+  if (!snap->valid || entry->static_moves_saved_count != snap->num_rows) {
+    return NULL;
+  }
+  return entry;
+}
+
+// The position of `entry`'s turn on a game of its own, whose players the
+// caller may change, and which the caller destroys.
+static Game *duplicate_turn_position(const TuiGameState *state,
+                                     const TuiHistoryEntry *entry) {
+  Game *position = game_duplicate(state->game);
+  ErrorStack *error_stack = error_stack_create();
+  game_load_cgp(position, entry->cgp_before, error_stack);
+  check(error_stack_is_empty(error_stack), "the turn's position loads");
+  error_stack_destroy(error_stack);
+  return position;
+}
+
+// Every play of `position` with the equity its player on turn gives it, in
+// a list the caller destroys.
+static MoveList *generate_all_plays(const Game *position) {
+  MoveList *plays = move_list_create(ALL_PLAYS_CAPACITY);
+  const MoveGenArgs args = {
+      .game = position,
+      .move_record_type = MOVE_RECORD_ALL,
+      .move_sort_type = MOVE_SORT_EQUITY,
+      .override_kwg = NULL,
+      .eq_margin_movegen = 0,
+      .target_equity = EQUITY_MAX_VALUE,
+      .move_list = plays,
+      .tiles_played_bv = NULL,
+      .initial_tiles_bv = 0,
+  };
+  generate_moves(&args);
+  check(move_list_get_count(plays) < ALL_PLAYS_CAPACITY,
+        "the list holds every play of the position");
+  return plays;
+}
+
 // A kibitz of a late position has the table's amounts in its equities:
 // each tile placement shown has the equity it gets without a table plus
 // the table's amount for the tiles it plays. The amount is read by the
@@ -383,31 +467,17 @@ static void test_kibitz_has_peg_adjust(TuiGameState *state) {
     // reported that it is not loaded.
     return;
   }
-  load_position(state, LATE_POSITION_CGP);
-  check_int(state->history_count, 1, "the position opens one turn");
-  if (state->history_count != 1) {
+  const TuiHistoryEntry *entry = kibitz_position(state, LATE_POSITION_CGP);
+  if (entry == NULL) {
     return;
   }
-  const TuiHistoryEntry *entry = &state->history[0];
   check(strstr(entry->cgp_before, " AIJNNPT/ ") != NULL,
         "the turn's position has the rack on turn only");
-  check(tui_analysis_kibitz(state, 0), "the late position is kibitzed");
   const TuiAnalysisSnapshot *snap = &entry->analysis_snapshot;
-  check(snap->valid && snap->is_static, "the turn has its kibitz");
-  check(snap->num_rows > 1, "the kibitz ranks several plays");
-  check_int(entry->static_moves_saved_count, snap->num_rows,
-            "the kibitz keeps a move for each row");
-  if (!snap->valid || entry->static_moves_saved_count != snap->num_rows) {
-    return;
-  }
 
   // The same position played without a table, and every play's equity
   // there.
-  Game *plain_position = game_duplicate(state->game);
-  ErrorStack *error_stack = error_stack_create();
-  game_load_cgp(plain_position, entry->cgp_before, error_stack);
-  check(error_stack_is_empty(error_stack), "the turn's position loads");
-  error_stack_destroy(error_stack);
+  Game *plain_position = duplicate_turn_position(state, entry);
   for (int player_idx = 0; player_idx < 2; player_idx++) {
     player_set_peg_adjust(game_get_player(plain_position, player_idx), NULL);
   }
@@ -416,21 +486,7 @@ static void test_kibitz_has_peg_adjust(TuiGameState *state) {
   check_int(bag_get_letters(game_get_bag(plain_position)),
             LATE_POSITION_BAG + RACK_SIZE,
             "the engine's bag also holds the unknown rack");
-  MoveList *plain_plays = move_list_create(ALL_PLAYS_CAPACITY);
-  const MoveGenArgs args = {
-      .game = plain_position,
-      .move_record_type = MOVE_RECORD_ALL,
-      .move_sort_type = MOVE_SORT_EQUITY,
-      .override_kwg = NULL,
-      .eq_margin_movegen = 0,
-      .target_equity = EQUITY_MAX_VALUE,
-      .move_list = plain_plays,
-      .tiles_played_bv = NULL,
-      .initial_tiles_bv = 0,
-  };
-  generate_moves(&args);
-  check(move_list_get_count(plain_plays) < ALL_PLAYS_CAPACITY,
-        "the list without a table holds every play");
+  MoveList *plain_plays = generate_all_plays(plain_position);
 
   int adjusted_rows = 0;
   for (int row_idx = 0; row_idx < snap->num_rows; row_idx++) {
@@ -471,6 +527,62 @@ static void test_kibitz_has_peg_adjust(TuiGameState *state) {
   game_destroy(plain_position);
 }
 
+// A kibitz of a mid-game position has PAT in its equities: they are the
+// equities the engine gives the plays with the PAT weights, and not those
+// of players without the weights.
+static void test_kibitz_has_pat(TuiGameState *state) {
+  if (players_data_get_pat(state->players_data, 0) == NULL) {
+    // test_lexicon_pat_is_loaded has reported it.
+    return;
+  }
+  const TuiHistoryEntry *entry = kibitz_position(state, MID_POSITION_CGP);
+  if (entry == NULL) {
+    return;
+  }
+  const TuiAnalysisSnapshot *snap = &entry->analysis_snapshot;
+
+  // The same position, and every play's equity there: with the weights,
+  // then for players without them.
+  Game *position = duplicate_turn_position(state, entry);
+  MoveList *pat_plays = generate_all_plays(position);
+  for (int player_idx = 0; player_idx < 2; player_idx++) {
+    player_set_pat(game_get_player(position, player_idx), NULL);
+  }
+  MoveList *plain_plays = generate_all_plays(position);
+
+  int pat_rows = 0;
+  for (int row_idx = 0; row_idx < snap->num_rows; row_idx++) {
+    const Move *move = &entry->static_moves_saved[row_idx];
+    if (move_get_type(move) == GAME_EVENT_PASS) {
+      // The pass has a fixed value in place of an equity.
+      continue;
+    }
+    Equity pat_equity = 0;
+    Equity plain_equity = 0;
+    if (!find_play_equity(pat_plays, move, &pat_equity) ||
+        !find_play_equity(plain_plays, move, &plain_equity)) {
+      (void)fprintf(stderr, "FAIL: %s is not a play of the position\n",
+                    snap->rows[row_idx].move);
+      failures++;
+      continue;
+    }
+    if (move_get_equity(move) != pat_equity) {
+      (void)fprintf(stderr, "FAIL: equity of %s: got %.3f, want %.3f\n",
+                    snap->rows[row_idx].move,
+                    equity_to_double(move_get_equity(move)),
+                    equity_to_double(pat_equity));
+      failures++;
+    }
+    if (pat_equity != plain_equity) {
+      pat_rows++;
+    }
+  }
+  check(pat_rows > 0, "PAT changes equities the kibitz shows");
+  move_list_destroy(plain_plays);
+  move_list_destroy(pat_plays);
+  game_destroy(position);
+}
+
 int main(void) {
   TuiGameState *state = calloc(1, sizeof(*state));
   if (state == NULL) {
@@ -489,10 +601,12 @@ int main(void) {
   test_rack_only_turn_can_be_analyzed(state);
   test_chosen_exchange_is_entered(state);
   test_lexicon_peg_adjust_is_loaded(state, "CSW24_pegadjust");
+  test_lexicon_pat_is_loaded(state, "CSW24");
   test_kibitz_has_peg_adjust(state);
+  test_kibitz_has_pat(state);
   tui_game_state_destroy(state);
   free(state);
-  test_other_lexicon_has_its_table();
+  test_other_lexicon_has_its_data();
   if (failures > 0) {
     (void)fprintf(stderr, "%d failure(s)\n", failures);
     return 1;

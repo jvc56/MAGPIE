@@ -549,8 +549,9 @@ typedef struct {
   int sim_plies;
   int sim_candidates;
   // Whether sims steer their rollouts with a census of the position (see
-  // SimArgs.use_census_rollout). The TUI's games load no PAT, which the
-  // census refuses.
+  // SimArgs.use_census_rollout). The rollouts' PAT is the board-only kind
+  // (see sim_args_set_pat_rollout in bot_worker.c), which the census can
+  // steer.
   bool sim_census;
   // Renderer publishes the count of visible analysis rows here so
   // main.c can bound cursor++ without re-computing the layout.

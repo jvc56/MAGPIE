@@ -16,6 +16,7 @@
 #include "../src/ent/letter_distribution.h"
 #include "../src/ent/move.h"
 #include "../src/ent/player.h"
+#include "../src/ent/players_data.h"
 #include "../src/ent/rack.h"
 #include "../src/ent/sim_args.h"
 #include "../src/ent/sim_results.h"
@@ -477,6 +478,23 @@ static bool find_equity_best(const Game *game, MoveList *scratch,
   return true;
 }
 
+// Sets a sim's rollout PAT as the command line program does: from the
+// rollout settings of the simming player, the player on turn in `game`.
+// The TUI leaves those at the engine's defaults: board-only PAT, which the
+// census can steer, with the default rollout classes. Zeroed SimArgs would
+// turn every class on instead.
+static void sim_args_set_pat_rollout(const TuiGameState *state,
+                                     const Game *game, SimArgs *args) {
+  const int player_idx = game_get_player_on_turn_index(game);
+  args->pat_rollout_disabled =
+      players_data_get_pat_rollout_disabled(state->players_data, player_idx);
+  args->pat_rollout_disabled_classes_mask =
+      players_data_get_pat_rollout_disabled_classes_mask(state->players_data,
+                                                         player_idx);
+  args->pat_rollout_exact =
+      players_data_get_pat_rollout_exact(state->players_data, player_idx);
+}
+
 // Generate up to N top candidates by equity into a fresh capacity-N
 // MoveList. Returns the list (caller must destroy via
 // move_list_destroy) or NULL when no moves exist.
@@ -576,6 +594,7 @@ static bool run_sim(TuiGameState *state, double budget_sec, Move *out_move) {
   // SimArgs.game field; the sim doesn't mutate it but the struct's
   // declaration is `const Game *`.
   args.game = state->game;
+  sim_args_set_pat_rollout(state, state->game, &args);
 
   // The analysis panel reads state->sim_results in real time while the
   // sim is running. Flip the active flag and stamp the current turn
@@ -1495,6 +1514,7 @@ static void analysis_resume_sim(TuiGameState *state, TuiHistoryEntry *entry,
   args.bai_options.delta = 1.0;
   args.game = position;
   args.resume_results = !fresh;
+  sim_args_set_pat_rollout(state, position, &args);
 
   ErrorStack *sim_err = error_stack_create();
   simulate_without_ctx(&args, results, sim_err);

@@ -17,6 +17,9 @@
 #include "../src/ent/game.h"
 #include "../src/ent/letter_distribution.h"
 #include "../src/ent/move.h"
+#include "../src/ent/pat.h"
+#include "../src/ent/pat_lexicon.h"
+#include "../src/ent/pat_utility.h"
 #include "../src/ent/player.h"
 #include "../src/ent/players_data.h"
 #include "../src/ent/rack.h"
@@ -86,6 +89,37 @@ static bool init_failed(ErrorStack *err, TuiGameState *state) {
   error_stack_destroy(err);
   tui_game_state_destroy(state);
   return false;
+}
+
+// Loads the lexicon's own PAT weights by the command line program's default
+// rule (-pat auto): the weights named after the lexicon, on the standard
+// board only, prepared with the lexicon's tables and, for their utility
+// correction, the letter distribution's win percentage table. Static
+// equities then carry PAT, in the kibitz list, in a sim's candidates and in
+// the computer's static moves; a sim's rollouts get the board-only kind (see
+// sim_args_set_pat_rollout in bot_worker.c). Best-effort like the wordmap: a
+// lexicon without weights, or with weights that cannot be prepared, is
+// played without PAT.
+static void load_lexicon_pat(PlayersData *players_data, const char *data_paths,
+                             const char *lexicon, const LetterDistribution *ld,
+                             ErrorStack *err) {
+  // NOLINTNEXTLINE(misc-redundant-expression)
+  if (BOARD_DIM != DEFAULT_BOARD_DIM) {
+    return;
+  }
+  players_data_set(players_data, PLAYERS_DATA_TYPE_PAT, data_paths, lexicon,
+                   lexicon, false, err);
+  if (!error_stack_is_empty(err)) {
+    error_stack_reset(err);
+    return;
+  }
+  PATWeights *pat = players_data_get_pat(players_data, 0);
+  pat_prepare_hook_flex(pat, players_data_get_kwg(players_data, 0), ld);
+  pat_prepare_utility(pat, data_paths, ld, err);
+  if (!error_stack_is_empty(err)) {
+    error_stack_reset(err);
+    players_data_evict(players_data, PLAYERS_DATA_TYPE_PAT);
+  }
 }
 
 bool tui_game_state_init(const char *lexicon, uint64_t seed, bool load_rit,
@@ -181,6 +215,8 @@ bool tui_game_state_init(const char *lexicon, uint64_t seed, bool load_rit,
   if (!error_stack_is_empty(err)) {
     error_stack_reset(err);
   }
+  load_lexicon_pat(out_state->players_data, data_paths, lexicon, out_state->ld,
+                   err);
   // Both players: pick the best move by static-eval equity.
   players_data_set_move_sort_type(out_state->players_data, 0, MOVE_SORT_EQUITY);
   players_data_set_move_sort_type(out_state->players_data, 1, MOVE_SORT_EQUITY);
