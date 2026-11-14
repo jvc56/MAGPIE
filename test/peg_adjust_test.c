@@ -23,6 +23,7 @@
 #include "../src/ent/player.h"
 #include "../src/ent/players_data.h"
 #include "../src/ent/rack.h"
+#include "../src/ent/sim_results.h"
 #include "../src/ent/stats.h"
 #include "../src/ent/thread_control.h"
 #include "../src/ent/validated_move.h"
@@ -30,6 +31,7 @@
 #include "../src/impl/gameplay.h"
 #include "../src/impl/inference.h"
 #include "../src/impl/move_gen.h"
+#include "../src/impl/simmer.h"
 #include "../src/str/move_string.h"
 #include "../src/util/io_util.h"
 #include "../src/util/string_util.h"
@@ -39,7 +41,9 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 // Quackle's table, in test/fixtures/strategy.
 #define PEG_ADJUST_TEST_FIXTURES_PATH "./test/fixtures"
@@ -68,6 +72,13 @@ enum {
   PEG_ADJUST_TEST_INFERENCES = 6,
   PEG_ADJUST_TEST_INFERENCE_MIN_TILES = 4,
   PEG_ADJUST_TEST_INFERENCE_LEAVES = 10,
+  // Sims run at each position of this many games with at most this many
+  // tiles in the bag, where most replies to a candidate are within a
+  // table's reach: of this many candidates, with this many rollouts each.
+  PEG_ADJUST_TEST_SIM_GAMES = 4,
+  PEG_ADJUST_TEST_SIM_MAX_BAG = RACK_SIZE + 2,
+  PEG_ADJUST_TEST_SIM_CANDIDATES = 6,
+  PEG_ADJUST_TEST_SIM_PLAY_ROLLOUTS = 20,
 };
 
 // Tables that stress the bounds differently: values of both signs, values
@@ -367,6 +378,330 @@ static void test_peg_adjust_config(void) {
 
   config_destroy(config);
   free(set_cmd);
+  test_platform_remove_directory_tree(dir);
+  free(dir);
+}
+
+// Starts capturing what is printed.
+static FILE *capture_output(void) {
+  FILE *captured = tmpfile();
+  assert(captured);
+  io_set_stream_out(captured);
+  return captured;
+}
+
+// Stops capturing, and writes what was printed to output (size bytes,
+// terminated).
+static void read_captured_output(FILE *captured, char *output, size_t size) {
+  io_reset_stream_out();
+  const int seek_result = fseek(captured, 0, SEEK_SET);
+  assert(seek_result == 0);
+  const size_t length = fread(output, 1, size - 1, captured);
+  output[length] = '\0';
+  (void)fclose(captured);
+}
+
+// Runs command on config, which must succeed, and writes what it prints to
+// output (size bytes, terminated).
+static void exec_capturing_output(Config *config, const char *command,
+                                  char *output, size_t size) {
+  FILE *captured = capture_output();
+  load_and_exec_config_or_die(config, command);
+  read_captured_output(captured, output, size);
+}
+
+// Loads settings into config as a settings file does, which must give no
+// warning, and writes what loading prints to output (size bytes,
+// terminated).
+static void load_settings_capturing_output(Config *config, const char *settings,
+                                           char *output, size_t size) {
+  StringList *warnings = string_list_create();
+  FILE *captured = capture_output();
+  config_load_settings(config, settings, warnings);
+  read_captured_output(captured, output, size);
+  assert(string_list_get_count(warnings) == 0);
+  string_list_destroy(warnings);
+}
+
+// The live game's players play with the tables the players' data holds.
+static void assert_game_peg_adjust(const Config *config) {
+  const Game *game = config_get_game(config);
+  assert(game);
+  const PlayersData *players_data = config_get_players_data(config);
+  for (int player_index = 0; player_index < 2; player_index++) {
+    assert(player_get_peg_adjust(game_get_player(game, player_index)) ==
+           players_data_get_peg_adjust(players_data, player_index));
+  }
+}
+
+static void assert_settings_have(const Config *config, const char *first,
+                                 const char *second) {
+  StringBuilder *settings = string_builder_create();
+  config_add_settings_to_string_builder(config, settings);
+  assert(strstr(string_builder_peek(settings), first) != NULL);
+  assert(strstr(string_builder_peek(settings), second) != NULL);
+  string_builder_destroy(settings);
+}
+
+// Whether a settings file keeps setting for the config.
+static bool settings_file_keeps(const Config *config, const char *setting) {
+  StringBuilder *saved = string_builder_create();
+  config_add_saved_settings_to_string_builder(config, saved);
+  const bool keeps = strstr(string_builder_peek(saved), setting) != NULL;
+  string_builder_destroy(saved);
+  return keeps;
+}
+
+// A player set to auto plays with its lexicon's own table, and changes
+// tables with its lexicon, however the lexicon is loaded.
+static void test_peg_adjust_auto(void) {
+  char *dir = test_platform_make_temporary_directory("peg_adjust_auto");
+  // Ahead in the path of the tables the data has for these lexica.
+  write_peg_adjust_file(dir, "CSW21_pegadjust", "8,5\n");
+  write_peg_adjust_file(dir, "NWL20_pegadjust", "8,7\n");
+  write_peg_adjust_file(dir, "other", "8,3\n");
+  write_peg_adjust_file(dir, "broken", "8,nan\n");
+  char *set_cmd = get_formatted_string("set -lex CSW21 -wmp false -path %s:%s",
+                                       dir, DEFAULT_TEST_DATA_PATH);
+  Config *config = config_create_or_die(set_cmd);
+  const PlayersData *players_data = config_get_players_data(config);
+  // Tests state what they use: no table until one is asked for. None is
+  // what an unset option gives here, so a settings file leaves it out.
+  assert_peg_adjust_names(players_data, NULL, NULL);
+  assert_settings_have(config, " -pegadjust1 none", " -pegadjust2 none");
+  assert(!settings_file_keeps(config, " -pegadjust"));
+  load_and_exec_config_or_die(config, "set -pegadjust auto");
+  assert_peg_adjust_names(players_data, "CSW21_pegadjust", "CSW21_pegadjust");
+  assert(players_data_get_peg_adjust(players_data, 0) ==
+         players_data_get_peg_adjust(players_data, 1));
+  // A command that changes nothing loads nothing.
+  const PegAdjust *loaded = players_data_get_peg_adjust(players_data, 0);
+  load_and_exec_config_or_die(config, "set -threads 1");
+  assert(players_data_get_peg_adjust(players_data, 0) == loaded);
+  char output[4096];
+  exec_capturing_output(config, "new", output, sizeof(output));
+  assert_game_peg_adjust(config);
+
+  // The table follows the lexicon, per player, and the live game follows
+  // the table.
+  load_and_exec_config_or_die(config, "set -lex NWL20");
+  assert_peg_adjust_names(players_data, "NWL20_pegadjust", "NWL20_pegadjust");
+  assert_game_peg_adjust(config);
+  load_and_exec_config_or_die(config, "set -l1 CSW21");
+  assert_peg_adjust_names(players_data, "CSW21_pegadjust", "NWL20_pegadjust");
+  assert_game_peg_adjust(config);
+
+  // A name or none takes the player it is given to off auto, also when it
+  // comes with a new lexicon.
+  load_and_exec_config_or_die(config, "set -pegadjust2 other");
+  assert_peg_adjust_names(players_data, "CSW21_pegadjust", "other");
+  load_and_exec_config_or_die(config, "set -lex NWL20");
+  assert_peg_adjust_names(players_data, "NWL20_pegadjust", "other");
+  load_and_exec_config_or_die(config, "set -lex CSW21 -pegadjust1 none");
+  assert_peg_adjust_names(players_data, NULL, "other");
+  load_and_exec_config_or_die(config, "set -lex NWL20");
+  assert_peg_adjust_names(players_data, NULL, "other");
+  load_and_exec_config_or_die(config, "set -pegadjust1 AUTO");
+  assert_peg_adjust_names(players_data, "NWL20_pegadjust", "other");
+  // 'default' is accepted for auto, as the pat options have it.
+  load_and_exec_config_or_die(config, "set -pegadjust1 none");
+  assert_peg_adjust_names(players_data, NULL, "other");
+  load_and_exec_config_or_die(config, "set -pegadjust1 Default");
+  assert_peg_adjust_names(players_data, "NWL20_pegadjust", "other");
+
+  // A named table that does not load is an error, which leaves every player
+  // as it was: the first is still on auto.
+  assert_config_exec_status(config, "set -pegadjust2 broken",
+                            ERROR_STATUS_PEG_ADJUST_INVALID_ROW);
+  assert_config_exec_status(config, "set -pegadjust missing",
+                            ERROR_STATUS_FILEPATH_FILE_NOT_FOUND);
+  assert_peg_adjust_names(players_data, "NWL20_pegadjust", "other");
+  load_and_exec_config_or_die(config, "set -lex CSW21");
+  assert_peg_adjust_names(players_data, "CSW21_pegadjust", "other");
+  load_and_exec_config_or_die(config, "set -lex NWL20");
+  assert_game_peg_adjust(config);
+
+  // The settings say auto rather than the table auto found, and loading
+  // them back finds it again. A settings file keeps both: a name, and auto
+  // where an unset option gives none.
+  assert_settings_have(config, " -pegadjust1 auto", " -pegadjust2 other");
+  assert(settings_file_keeps(config, " -pegadjust1 auto"));
+  assert(settings_file_keeps(config, " -pegadjust2 other"));
+  StringBuilder *settings = string_builder_create();
+  config_add_settings_to_string_builder(config, settings);
+  Config *restored = config_create_or_die(string_builder_peek(settings));
+  string_builder_destroy(settings);
+  assert_peg_adjust_names(config_get_players_data(restored), "NWL20_pegadjust",
+                          "other");
+  load_and_exec_config_or_die(restored, "set -lex CSW21 -pegadjust2 none");
+  assert_peg_adjust_names(config_get_players_data(restored), "CSW21_pegadjust",
+                          NULL);
+  assert_settings_have(restored, " -pegadjust1 auto", " -pegadjust2 none");
+  assert(!settings_file_keeps(restored, " -pegadjust2"));
+  config_destroy(restored);
+
+  // A game file that fails to load puts the lexicon back, and the table
+  // with it; one that loads brings its lexicon's table.
+  assert_config_exec_status(config,
+                            "load testdata/gcgs/invalid_tile_placement.gcg",
+                            ERROR_STATUS_GCG_PARSE_MOVE_VALIDATION_ERROR);
+  assert_peg_adjust_names(players_data, "NWL20_pegadjust", "other");
+  assert_game_peg_adjust(config);
+  exec_capturing_output(config, "load testdata/gcgs/success_standard.gcg",
+                        output, sizeof(output));
+  assert_peg_adjust_names(players_data, "CSW21_pegadjust", "other");
+  assert_game_peg_adjust(config);
+
+  config_destroy(config);
+  free(set_cmd);
+  test_platform_remove_directory_tree(dir);
+  free(dir);
+}
+
+// How many times text occurs in output.
+static int count_occurrences(const char *output, const char *text) {
+  int count = 0;
+  const char *next = output;
+  while ((next = strstr(next, text)) != NULL) {
+    count++;
+    next += strlen(text);
+  }
+  return count;
+}
+
+// Every player is on auto where the tables are: in the command line program
+// and the library. A lexicon without a table is played without one and
+// nothing is said; a table that does not load is said once and left out; and
+// the commands that train static values play without the table.
+static void test_peg_adjust_auto_default(void) {
+  char *dir = test_platform_make_temporary_directory("peg_adjust_default");
+  // The trainers write here.
+  char *lexica_dir = get_formatted_string("%s/lexica", dir);
+  assert(cfile_mkdir(lexica_dir) == 0);
+  free(lexica_dir);
+  char *strategy_dir = get_formatted_string("%s/strategy", dir);
+  assert(cfile_mkdir(strategy_dir) == 0);
+  free(strategy_dir);
+  char *data_paths = get_formatted_string("%s:%s", dir, DEFAULT_TEST_DATA_PATH);
+  const ConfigArgs args = {.data_paths = data_paths,
+                           .settings_filename = DEFAULT_TEST_SETTINGS_FILENAME,
+                           .use_wmp = true,
+                           .auto_tables = true};
+  ErrorStack *error_stack = error_stack_create();
+  Config *config = config_create(&args, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  const PlayersData *players_data = config_get_players_data(config);
+  const char *table = "CSW21_ab_pegadjust";
+  const char *said = "pre-endgame adjustments";
+  write_peg_adjust_file(dir, "other", "8,3\n");
+  char output[4096];
+  // Only this test's directory has a table for this lexicon, and not yet.
+  exec_capturing_output(config,
+                        "set -lex CSW21_ab -ld english_ab -wmp false -wit "
+                        "false -rit false -s1 equity -s2 equity -r1 best -r2 "
+                        "best -numplays 1 -threads 1 -savesettings false",
+                        output, sizeof(output));
+  assert_peg_adjust_names(players_data, NULL, NULL);
+  assert(strstr(output, said) == NULL);
+  assert_settings_have(config, " -pegadjust1 auto", " -pegadjust2 auto");
+  // The table is found once the data has it.
+  write_peg_adjust_file(dir, table, "8,5\n");
+  exec_capturing_output(config, "set -threads 1", output, sizeof(output));
+  assert_peg_adjust_names(players_data, table, table);
+  assert(strstr(output, said) == NULL);
+
+  // A table that does not load is not an error: it is said once, for both
+  // players, and passed over until its file changes.
+  load_and_exec_config_or_die(config, "set -pegadjust none");
+  assert_peg_adjust_names(players_data, NULL, NULL);
+  write_peg_adjust_file(dir, table, "8,nan\n");
+  exec_capturing_output(config, "set -pegadjust auto", output, sizeof(output));
+  assert_peg_adjust_names(players_data, NULL, NULL);
+  assert(
+      count_occurrences(
+          output,
+          "playing without the pre-endgame adjustments CSW21_ab_pegadjust:") ==
+      1);
+  exec_capturing_output(config, "set -threads 1", output, sizeof(output));
+  assert_peg_adjust_names(players_data, NULL, NULL);
+  assert(strstr(output, said) == NULL);
+  write_peg_adjust_file(dir, table, "8,5\n9,2\n");
+  exec_capturing_output(config, "set -threads 1", output, sizeof(output));
+  assert_peg_adjust_names(players_data, table, table);
+  assert(strstr(output, said) == NULL);
+
+  // A settings file keeps a choice, a name or none, and leaves out auto,
+  // which every player starts on here, so that a player left alone goes on
+  // following its lexicon.
+  assert(!settings_file_keeps(config, " -pegadjust"));
+  load_and_exec_config_or_die(config, "set -pegadjust1 none -pegadjust2 other");
+  assert_peg_adjust_names(players_data, NULL, "other");
+  assert(settings_file_keeps(config, " -pegadjust1 none"));
+  assert(settings_file_keeps(config, " -pegadjust2 other"));
+  load_and_exec_config_or_die(config, "set -pegadjust2 none");
+  StringBuilder *saved = string_builder_create();
+  config_add_saved_settings_to_string_builder(config, saved);
+  // A config that loads the file has the choice again. The choice loads
+  // with the lexicon, so a player saved as none never has its lexicon's
+  // table loaded: one that cannot be loaded is not even said.
+  write_peg_adjust_file(dir, table, "8,nan\n");
+  Config *reloaded = config_create(&args, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  load_and_exec_config_or_die(
+      reloaded, "set -wmp false -wit false -rit false -savesettings false");
+  load_settings_capturing_output(reloaded, string_builder_peek(saved), output,
+                                 sizeof(output));
+  string_builder_destroy(saved);
+  const PlayersData *reloaded_players_data = config_get_players_data(reloaded);
+  assert_strings_equal(players_data_get_data_name(reloaded_players_data,
+                                                  PLAYERS_DATA_TYPE_KWG, 0),
+                       "CSW21_ab");
+  assert_peg_adjust_names(reloaded_players_data, NULL, NULL);
+  assert(strstr(output, said) == NULL);
+  assert(settings_file_keeps(reloaded, " -pegadjust1 none"));
+  assert(settings_file_keeps(reloaded, " -pegadjust2 none"));
+  // Auto returns the choice to the lexicon, whose table is then tried, and
+  // the file has nothing left to keep; 'default' is accepted for auto.
+  exec_capturing_output(reloaded, "set -pegadjust default", output,
+                        sizeof(output));
+  assert(
+      count_occurrences(
+          output,
+          "playing without the pre-endgame adjustments CSW21_ab_pegadjust:") ==
+      1);
+  assert_settings_have(reloaded, " -pegadjust1 auto", " -pegadjust2 auto");
+  assert(!settings_file_keeps(reloaded, " -pegadjust"));
+  config_destroy(reloaded);
+  write_peg_adjust_file(dir, table, "8,5\n9,2\n");
+  load_and_exec_config_or_die(config, "set -pegadjust auto");
+  assert_peg_adjust_names(players_data, table, table);
+  assert(!settings_file_keeps(config, " -pegadjust"));
+
+  // The trainers' loads go without the table, and the settings stand: the
+  // next command has it back.
+  const char *trainers[3] = {
+      "leavegen 1 0 -seed 3",
+      "census 2x72,80 peg_adjust_census null -seed 3",
+      "patgen 4,4 peg_adjust_patgen -seed 3",
+  };
+  for (int trainer_idx = 0; trainer_idx < 3; trainer_idx++) {
+    exec_capturing_output(config, trainers[trainer_idx], output,
+                          sizeof(output));
+    assert_peg_adjust_names(players_data, NULL, NULL);
+    assert_settings_have(config, " -pegadjust1 auto", " -pegadjust2 auto");
+    exec_capturing_output(config, "set -threads 1", output, sizeof(output));
+    assert_peg_adjust_names(players_data, table, table);
+  }
+  // A table a trainer is told to play with, it plays with.
+  exec_capturing_output(config, "leavegen 1 0 -seed 3 -pegadjust1 other",
+                        output, sizeof(output));
+  assert_peg_adjust_names(players_data, "other", NULL);
+  exec_capturing_output(config, "set -threads 1", output, sizeof(output));
+  assert_peg_adjust_names(players_data, "other", table);
+
+  error_stack_destroy(error_stack);
+  config_destroy(config);
+  free(data_paths);
   test_platform_remove_directory_tree(dir);
   free(dir);
 }
@@ -897,6 +1232,136 @@ static void test_peg_adjust_inference(const char *set_cmd) {
   config_destroy(config);
 }
 
+// Sims the config's position and candidates with mover_table for the player
+// on turn and opponent_table for the other, then unloads both. The sim's
+// workers are new ones if sim_ctx is NULL or has run no sim yet, and
+// otherwise those of its earlier sims, reset. A context writes every sim's
+// results where its first sim's went, so it goes with one sim_results.
+static void simulate_with_tables(Config *config, SimCtx **sim_ctx,
+                                 PegAdjust *mover_table,
+                                 PegAdjust *opponent_table,
+                                 SimResults *sim_results) {
+  PlayersData *players_data = config_get_players_data(config);
+  const Game *game = config_get_game(config);
+  const int mover_index = game_get_player_on_turn_index(game);
+  set_peg_adjust(players_data, game, mover_index, mover_table);
+  set_peg_adjust(players_data, game, 1 - mover_index, opponent_table);
+  const error_code_t status =
+      config_simulate_and_return_status(config, sim_ctx, NULL, sim_results);
+  assert(status == ERROR_STATUS_SUCCESS);
+  for (int player_index = 0; player_index < 2; player_index++) {
+    set_peg_adjust(players_data, game, player_index, NULL);
+  }
+}
+
+// Whether two sims of the same candidates differ in the opponent's replies
+// to one of them, the first ply of its rollouts: in how many there are or in
+// their mean score.
+static bool sim_replies_differ(const SimResults *first,
+                               const SimResults *second) {
+  const int number_of_plays = sim_results_get_number_of_plays(first);
+  assert(number_of_plays == sim_results_get_number_of_plays(second));
+  for (int play_idx = 0; play_idx < number_of_plays; play_idx++) {
+    const Stat *first_scores = simmed_play_get_score_stat(
+        sim_results_get_simmed_play(first, play_idx), 0);
+    const Stat *second_scores = simmed_play_get_score_stat(
+        sim_results_get_simmed_play(second, play_idx), 0);
+    if (stat_get_num_samples(first_scores) !=
+            stat_get_num_samples(second_scores) ||
+        stat_get_mean(first_scores) != stat_get_mean(second_scores)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// A sim models the opponent as playing by the simming player's table,
+// whichever table the opponent has. With the same candidates, a sim gives the
+// same results with a table for both players, for the simming player only,
+// and for the simming player against another table; and the same results
+// with a table for the opponent only as with none. This holds for new
+// workers and for the reset workers of an earlier sim. The replies do depend
+// on the table that plays them: with the table for both players they differ
+// from the replies with none. The sims' rollouts are steered by the census
+// if use_census.
+static void test_peg_adjust_sim(bool use_census) {
+  char *set_cmd = get_formatted_string(
+      "set -lex CSW21 -wmp true -threads 1 -plies 2 -numplays %d "
+      "-iterations %d -minplayiterations %d -scond none -patrollout false "
+      "-sinfer false -seed 7 -scensus %s",
+      PEG_ADJUST_TEST_SIM_CANDIDATES,
+      PEG_ADJUST_TEST_SIM_CANDIDATES * PEG_ADJUST_TEST_SIM_PLAY_ROLLOUTS,
+      PEG_ADJUST_TEST_SIM_PLAY_ROLLOUTS, use_census ? "true" : "false");
+  Config *config = config_create_or_die(set_cmd);
+  free(set_cmd);
+  load_and_exec_config_or_die(config, "new");
+  PegAdjust *table = create_pattern_table(PEG_ADJUST_PATTERN_ALTERNATING, 1);
+  PegAdjust *other_table =
+      create_pattern_table(PEG_ADJUST_PATTERN_ALTERNATING, -1);
+  // The sims of each of the first three results share a context, so all but
+  // the first of them reset its workers. Those of the last create theirs.
+  SimCtx *neither_ctx = NULL;
+  SimCtx *both_ctx = NULL;
+  SimCtx *one_sided_ctx = NULL;
+  SimResults *neither = sim_results_create(0);
+  SimResults *both = sim_results_create(0);
+  SimResults *one_sided = sim_results_create(0);
+  SimResults *one_sided_new = sim_results_create(0);
+  Game *game = config_get_game(config);
+  MoveList *best_list = move_list_create(1);
+  bool mover_seen[2] = {false, false};
+  int positions = 0;
+  int positions_with_other_replies = 0;
+  for (int game_idx = 0; game_idx < PEG_ADJUST_TEST_SIM_GAMES; game_idx++) {
+    game_reset(game);
+    game_seed(game, (uint64_t)game_idx + 4000);
+    draw_starting_racks(game);
+    while (!game_over(game)) {
+      const int bag = bag_get_letters(game_get_bag(game));
+      if (bag > 0 && bag <= PEG_ADJUST_TEST_SIM_MAX_BAG) {
+        // The candidates of every sim of the position: its best plays
+        // without a table.
+        load_and_exec_config_or_die(config, "gen");
+        simulate_with_tables(config, &neither_ctx, NULL, NULL, neither);
+        assert(sim_results_get_census_rollout(neither) == use_census);
+        simulate_with_tables(config, &both_ctx, table, table, both);
+        assert(sim_results_get_census_rollout(both) == use_census);
+        simulate_with_tables(config, &one_sided_ctx, table, NULL, one_sided);
+        assert_sim_results_equal(both, one_sided);
+        simulate_with_tables(config, &one_sided_ctx, table, other_table,
+                             one_sided);
+        assert_sim_results_equal(both, one_sided);
+        simulate_with_tables(config, &one_sided_ctx, NULL, table, one_sided);
+        assert_sim_results_equal(neither, one_sided);
+        simulate_with_tables(config, NULL, table, other_table, one_sided_new);
+        assert_sim_results_equal(both, one_sided_new);
+        simulate_with_tables(config, NULL, NULL, table, one_sided_new);
+        assert_sim_results_equal(neither, one_sided_new);
+        if (sim_replies_differ(neither, both)) {
+          positions_with_other_replies++;
+        }
+        mover_seen[game_get_player_on_turn_index(game)] = true;
+        positions++;
+      }
+      play_move(get_top_equity_move(game, best_list), game, NULL);
+    }
+  }
+  assert(positions >= PEG_ADJUST_TEST_SIM_GAMES);
+  assert(mover_seen[0] && mover_seen[1]);
+  assert(positions_with_other_replies > 0);
+  move_list_destroy(best_list);
+  sim_results_destroy(one_sided_new);
+  sim_results_destroy(one_sided);
+  sim_results_destroy(both);
+  sim_results_destroy(neither);
+  sim_ctx_destroy(one_sided_ctx);
+  sim_ctx_destroy(both_ctx);
+  sim_ctx_destroy(neither_ctx);
+  peg_adjust_destroy(other_table);
+  peg_adjust_destroy(table);
+  config_destroy(config);
+}
+
 // A remembered move scored without its adjustment starts the generation
 // from too high an equity when its adjustment is negative and the true best
 // move's is no better, as under the table of the most negative values. Under
@@ -926,6 +1391,8 @@ void test_peg_adjust(void) {
   test_peg_adjust_file();
   test_peg_adjust_bag_class();
   test_peg_adjust_config();
+  test_peg_adjust_auto();
+  test_peg_adjust_auto_default();
   // The PAT term's bound joins the adjustment in the WMP prune bound.
   const char *set_cmds[] = {
       "set -lex CSW21 -wmp false -s1 equity -s2 equity -r1 all -r2 all "
@@ -953,5 +1420,11 @@ void test_peg_adjust(void) {
     test_peg_adjust_config_movegen(
         "set -lex CSW24 -wmp true -rit true -wit true -s1 equity -s2 equity "
         "-r1 all -r2 all -numplays 1");
+  }
+  // The census, which reads the table for its rollouts itself, serves the
+  // standard board.
+  test_peg_adjust_sim(false);
+  if (is_standard_board) {
+    test_peg_adjust_sim(true);
   }
 }

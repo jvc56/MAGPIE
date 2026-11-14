@@ -50,7 +50,9 @@ typedef struct ConfigArgs {
   // library's magpie_create() do; tests, browser games and contribute's task
   // configurations state what they use, with use_wmp for the wordmap. So does
   // -scensus, which steers sims' rollouts when this machine has the memory
-  // and the rollouts pay for the census's build.
+  // and the rollouts pay for the census's build, and so does -pegadjust,
+  // which gives each player its lexicon's own pre-endgame adjustments where
+  // the data has them.
   bool auto_tables;
 } ConfigArgs;
 
@@ -294,13 +296,13 @@ bool config_command_turns_off_save_settings(Config *config, const char *cmd);
 // config_get_save_settings(config) is false.
 void save_config_settings(const Config *config, ErrorStack *error_stack);
 // Loads the contents of a saved settings file. Each setting is loaded on its
-// own, except the letter distribution, lexica and leaves, which are loaded
-// together after a trial in a scratch config, so a value that fails to load
-// loses only itself (or its lexicon group) and leaves the rest applied. A
-// setting the file does not keep, or whose default changed after the file's
-// -fileversion, is dropped. Each unknown setting, line that is not a set
-// command, and setting that failed to load is dropped and described in
-// `warnings`.
+// own, except the letter distribution, lexica, leaves, PAT weights and
+// pre-endgame adjustments, which are loaded together after a trial in a
+// scratch config, so a value that fails to load loses only itself (or its
+// lexicon group) and leaves the rest applied. A setting the file does not
+// keep, or whose default changed after the file's -fileversion, is dropped.
+// Each unknown setting, line that is not a set command, and setting that
+// failed to load is dropped and described in `warnings`.
 void config_load_settings(Config *config, const char *settings_string,
                           StringList *warnings);
 // The Config contribute's tasks run in, sharing the caller's thread control
