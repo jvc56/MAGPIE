@@ -16,6 +16,9 @@
 
 typedef struct SimArgs {
   int num_plies;
+  // The position. Its player on turn is the simming player, whose
+  // pre-endgame adjustments both players' plies in the rollouts use,
+  // whichever table the opponent has.
   const Game *game;
   const MoveList *move_list;
   int num_plays;

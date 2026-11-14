@@ -226,7 +226,7 @@ Config *config_create_default_test(void) {
   }
   error_stack_destroy(error_stack);
   // PAT off, so that a test gets PAT only by naming its weights: by default
-  // a lexicon brings its own (set -pat default restores that).
+  // a lexicon brings its own (set -pat auto restores that).
   load_and_exec_config_or_die(
       config, "set -threads 1 -savesettings false -hr "
               "false -numplays 15 -ima 0 -minp 100 -autosave false "

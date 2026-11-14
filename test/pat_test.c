@@ -1742,11 +1742,11 @@ static void test_pat_path_parity(void) {
   pat_path_parity_run(2000.0);
 }
 
-// A player no pat option has named gets its lexicon's weights, on the
-// standard board and when the data has them; a named player keeps what it
-// was given, through a change of lexicon, until 'default'.
+// A player is on auto until a pat option sets it: it has its lexicon's
+// weights, on the standard board and when the data has them. A player given
+// a name or none keeps it, through a change of lexicon, until auto.
 static void test_pat_default_weights(void) {
-  Config *config = config_create_or_die("set -pat default -lex CSW21");
+  Config *config = config_create_or_die("set -pat auto -lex CSW21");
   const PlayersData *players_data = config_get_players_data(config);
   StringBuilder *settings = string_builder_create();
   // NOLINTNEXTLINE(misc-redundant-expression)
@@ -1763,14 +1763,33 @@ static void test_pat_default_weights(void) {
                              players_data, PLAYERS_DATA_TYPE_PAT, player_index),
                          "CSW21");
   }
-  // The default is not saved: it follows the lexicon.
+  // Auto is not saved, so that the weights go on following the lexicon;
+  // the full settings say it.
   config_add_saved_settings_to_string_builder(config, settings);
   assert(strstr(string_builder_peek(settings), "-pat1") == NULL);
+  string_builder_clear(settings);
+  config_add_settings_to_string_builder(config, settings);
+  assert(strstr(string_builder_peek(settings), " -pat1 auto") != NULL);
+  assert(strstr(string_builder_peek(settings), " -pat2 auto") != NULL);
   // The weights follow the lexicon.
   load_and_exec_config_or_die(config, "set -lex NWL20");
   assert_strings_equal(
       players_data_get_data_name(players_data, PLAYERS_DATA_TYPE_PAT, 0),
       "NWL20");
+  // Weights that cannot be loaded are an error, which leaves both players
+  // as they were: on auto, with weights that follow the lexicon.
+  assert_config_exec_status(config, "set -pat no_such_weights",
+                            ERROR_STATUS_FILEPATH_FILE_NOT_FOUND);
+  load_and_exec_config_or_die(config, "set -lex CSW21");
+  for (int player_index = 0; player_index < 2; player_index++) {
+    assert_strings_equal(players_data_get_data_name(
+                             players_data, PLAYERS_DATA_TYPE_PAT, player_index),
+                         "CSW21");
+  }
+  string_builder_clear(settings);
+  config_add_saved_settings_to_string_builder(config, settings);
+  assert(strstr(string_builder_peek(settings), "-pat1") == NULL);
+  load_and_exec_config_or_die(config, "set -lex NWL20");
   // One player's weights named, and the other's left to the lexicon.
   load_and_exec_config_or_die(config, "set -pat1 none");
   assert(players_data_get_pat(players_data, 0) == NULL);
@@ -1802,8 +1821,20 @@ static void test_pat_default_weights(void) {
   config_add_saved_settings_to_string_builder(config, settings);
   assert(strstr(string_builder_peek(settings), "-pat1 CSW21") != NULL);
   assert(strstr(string_builder_peek(settings), "-pat2 CSW21") != NULL);
-  // And 'default' hands them back to it.
-  load_and_exec_config_or_die(config, "set -pat default");
+  // And auto returns them to it, a player at a time; 'default' is accepted
+  // for auto.
+  load_and_exec_config_or_die(config, "set -pat1 AUTO");
+  assert_strings_equal(
+      players_data_get_data_name(players_data, PLAYERS_DATA_TYPE_PAT, 0),
+      "NWL20");
+  assert_strings_equal(
+      players_data_get_data_name(players_data, PLAYERS_DATA_TYPE_PAT, 1),
+      "CSW21");
+  string_builder_clear(settings);
+  config_add_saved_settings_to_string_builder(config, settings);
+  assert(strstr(string_builder_peek(settings), "-pat1") == NULL);
+  assert(strstr(string_builder_peek(settings), "-pat2 CSW21") != NULL);
+  load_and_exec_config_or_die(config, "set -pat2 default");
   for (int player_index = 0; player_index < 2; player_index++) {
     assert_strings_equal(players_data_get_data_name(
                              players_data, PLAYERS_DATA_TYPE_PAT, player_index),

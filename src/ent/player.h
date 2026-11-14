@@ -38,7 +38,9 @@ bool player_get_pat_disabled(const Player *player);
 // The player's pre-endgame adjustments, or NULL for none.
 const PegAdjust *player_get_peg_adjust(const Player *player);
 // Overrides the adjustments players_data gave the player until the next
-// player_update.
+// player_update. A sim sets the simming player's on both players of its
+// rollout copies of the game (see rv_sim_create), so its rollouts model the
+// opponent as playing by the simming player's table.
 void player_set_peg_adjust(Player *player, const PegAdjust *peg_adjust);
 
 void player_set_score(Player *player, Equity score);
