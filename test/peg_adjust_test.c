@@ -382,20 +382,45 @@ static void test_peg_adjust_config(void) {
   free(dir);
 }
 
-// Runs command on config, which must succeed, and writes what it prints to
-// output (size bytes, terminated).
-static void exec_capturing_output(Config *config, const char *command,
-                                  char *output, size_t size) {
+// Starts capturing what is printed.
+static FILE *capture_output(void) {
   FILE *captured = tmpfile();
   assert(captured);
   io_set_stream_out(captured);
-  load_and_exec_config_or_die(config, command);
+  return captured;
+}
+
+// Stops capturing, and writes what was printed to output (size bytes,
+// terminated).
+static void read_captured_output(FILE *captured, char *output, size_t size) {
   io_reset_stream_out();
   const int seek_result = fseek(captured, 0, SEEK_SET);
   assert(seek_result == 0);
   const size_t length = fread(output, 1, size - 1, captured);
   output[length] = '\0';
   (void)fclose(captured);
+}
+
+// Runs command on config, which must succeed, and writes what it prints to
+// output (size bytes, terminated).
+static void exec_capturing_output(Config *config, const char *command,
+                                  char *output, size_t size) {
+  FILE *captured = capture_output();
+  load_and_exec_config_or_die(config, command);
+  read_captured_output(captured, output, size);
+}
+
+// Loads settings into config as a settings file does, which must give no
+// warning, and writes what loading prints to output (size bytes,
+// terminated).
+static void load_settings_capturing_output(Config *config, const char *settings,
+                                           char *output, size_t size) {
+  StringList *warnings = string_list_create();
+  FILE *captured = capture_output();
+  config_load_settings(config, settings, warnings);
+  read_captured_output(captured, output, size);
+  assert(string_list_get_count(warnings) == 0);
+  string_list_destroy(warnings);
 }
 
 // The live game's players play with the tables the players' data holds.
@@ -418,6 +443,15 @@ static void assert_settings_have(const Config *config, const char *first,
   string_builder_destroy(settings);
 }
 
+// Whether a settings file keeps setting for the config.
+static bool settings_file_keeps(const Config *config, const char *setting) {
+  StringBuilder *saved = string_builder_create();
+  config_add_saved_settings_to_string_builder(config, saved);
+  const bool keeps = strstr(string_builder_peek(saved), setting) != NULL;
+  string_builder_destroy(saved);
+  return keeps;
+}
+
 // A player set to auto plays with its lexicon's own table, and changes
 // tables with its lexicon, however the lexicon is loaded.
 static void test_peg_adjust_auto(void) {
@@ -431,9 +465,11 @@ static void test_peg_adjust_auto(void) {
                                        dir, DEFAULT_TEST_DATA_PATH);
   Config *config = config_create_or_die(set_cmd);
   const PlayersData *players_data = config_get_players_data(config);
-  // Tests state what they use: no table until one is asked for.
+  // Tests state what they use: no table until one is asked for. None is
+  // what an unset option gives here, so a settings file leaves it out.
   assert_peg_adjust_names(players_data, NULL, NULL);
   assert_settings_have(config, " -pegadjust1 none", " -pegadjust2 none");
+  assert(!settings_file_keeps(config, " -pegadjust"));
   load_and_exec_config_or_die(config, "set -pegadjust auto");
   assert_peg_adjust_names(players_data, "CSW21_pegadjust", "CSW21_pegadjust");
   assert(players_data_get_peg_adjust(players_data, 0) ==
@@ -467,6 +503,11 @@ static void test_peg_adjust_auto(void) {
   assert_peg_adjust_names(players_data, NULL, "other");
   load_and_exec_config_or_die(config, "set -pegadjust1 AUTO");
   assert_peg_adjust_names(players_data, "NWL20_pegadjust", "other");
+  // 'default' is accepted for auto, as the pat options have it.
+  load_and_exec_config_or_die(config, "set -pegadjust1 none");
+  assert_peg_adjust_names(players_data, NULL, "other");
+  load_and_exec_config_or_die(config, "set -pegadjust1 Default");
+  assert_peg_adjust_names(players_data, "NWL20_pegadjust", "other");
 
   // A named table that does not load is an error, which leaves every player
   // as it was: the first is still on auto.
@@ -481,8 +522,11 @@ static void test_peg_adjust_auto(void) {
   assert_game_peg_adjust(config);
 
   // The settings say auto rather than the table auto found, and loading
-  // them back finds it again.
+  // them back finds it again. A settings file keeps both: a name, and auto
+  // where an unset option gives none.
   assert_settings_have(config, " -pegadjust1 auto", " -pegadjust2 other");
+  assert(settings_file_keeps(config, " -pegadjust1 auto"));
+  assert(settings_file_keeps(config, " -pegadjust2 other"));
   StringBuilder *settings = string_builder_create();
   config_add_settings_to_string_builder(config, settings);
   Config *restored = config_create_or_die(string_builder_peek(settings));
@@ -493,6 +537,7 @@ static void test_peg_adjust_auto(void) {
   assert_peg_adjust_names(config_get_players_data(restored), "CSW21_pegadjust",
                           NULL);
   assert_settings_have(restored, " -pegadjust1 auto", " -pegadjust2 none");
+  assert(!settings_file_keeps(restored, " -pegadjust2"));
   config_destroy(restored);
 
   // A game file that fails to load puts the lexicon back, and the table
@@ -545,7 +590,6 @@ static void test_peg_adjust_auto_default(void) {
   ErrorStack *error_stack = error_stack_create();
   Config *config = config_create(&args, error_stack);
   assert(error_stack_is_empty(error_stack));
-  error_stack_destroy(error_stack);
   const PlayersData *players_data = config_get_players_data(config);
   const char *table = "CSW21_ab_pegadjust";
   const char *said = "pre-endgame adjustments";
@@ -586,6 +630,53 @@ static void test_peg_adjust_auto_default(void) {
   assert_peg_adjust_names(players_data, table, table);
   assert(strstr(output, said) == NULL);
 
+  // A settings file keeps a choice, a name or none, and leaves out auto,
+  // which every player starts on here, so that a player left alone goes on
+  // following its lexicon.
+  assert(!settings_file_keeps(config, " -pegadjust"));
+  load_and_exec_config_or_die(config, "set -pegadjust1 none -pegadjust2 other");
+  assert_peg_adjust_names(players_data, NULL, "other");
+  assert(settings_file_keeps(config, " -pegadjust1 none"));
+  assert(settings_file_keeps(config, " -pegadjust2 other"));
+  load_and_exec_config_or_die(config, "set -pegadjust2 none");
+  StringBuilder *saved = string_builder_create();
+  config_add_saved_settings_to_string_builder(config, saved);
+  // A config that loads the file has the choice again. The choice loads
+  // with the lexicon, so a player saved as none never has its lexicon's
+  // table loaded: one that cannot be loaded is not even said.
+  write_peg_adjust_file(dir, table, "8,nan\n");
+  Config *reloaded = config_create(&args, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  load_and_exec_config_or_die(
+      reloaded, "set -wmp false -wit false -rit false -savesettings false");
+  load_settings_capturing_output(reloaded, string_builder_peek(saved), output,
+                                 sizeof(output));
+  string_builder_destroy(saved);
+  const PlayersData *reloaded_players_data = config_get_players_data(reloaded);
+  assert_strings_equal(players_data_get_data_name(reloaded_players_data,
+                                                  PLAYERS_DATA_TYPE_KWG, 0),
+                       "CSW21_ab");
+  assert_peg_adjust_names(reloaded_players_data, NULL, NULL);
+  assert(strstr(output, said) == NULL);
+  assert(settings_file_keeps(reloaded, " -pegadjust1 none"));
+  assert(settings_file_keeps(reloaded, " -pegadjust2 none"));
+  // Auto returns the choice to the lexicon, whose table is then tried, and
+  // the file has nothing left to keep; 'default' is accepted for auto.
+  exec_capturing_output(reloaded, "set -pegadjust default", output,
+                        sizeof(output));
+  assert(
+      count_occurrences(
+          output,
+          "playing without the pre-endgame adjustments CSW21_ab_pegadjust:") ==
+      1);
+  assert_settings_have(reloaded, " -pegadjust1 auto", " -pegadjust2 auto");
+  assert(!settings_file_keeps(reloaded, " -pegadjust"));
+  config_destroy(reloaded);
+  write_peg_adjust_file(dir, table, "8,5\n9,2\n");
+  load_and_exec_config_or_die(config, "set -pegadjust auto");
+  assert_peg_adjust_names(players_data, table, table);
+  assert(!settings_file_keeps(config, " -pegadjust"));
+
   // The trainers' loads go without the table, and the settings stand: the
   // next command has it back.
   const char *trainers[3] = {
@@ -608,6 +699,7 @@ static void test_peg_adjust_auto_default(void) {
   exec_capturing_output(config, "set -threads 1", output, sizeof(output));
   assert_peg_adjust_names(players_data, "other", table);
 
+  error_stack_destroy(error_stack);
   config_destroy(config);
   free(data_paths);
   test_platform_remove_directory_tree(dir);

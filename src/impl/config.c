@@ -162,11 +162,13 @@ struct Config {
   char *data_paths;
   // See ConfigArgs.
   bool build_missing_wordmaps;
+  // See ConfigArgs.
+  bool auto_tables;
   // Per table type and player: set to auto. A wordmap, rack info table or
   // word info table (-wmp, -rit, -wit auto) is then used when this machine
-  // has room for it, and the pre-endgame adjustments (-pegadjust auto) are
-  // the player's lexicon's own where the data has them. Only these four
-  // types' entries are used.
+  // has room for it, and the PAT weights (-pat auto) and the pre-endgame
+  // adjustments (-pegadjust auto) are the player's lexicon's own where the
+  // data has them. Only these five types' entries are used.
   bool table_auto[NUMBER_OF_DATA][2];
   int64_t auto_table_cap_bytes;
   // What config_choose_auto_tables last said it decided, so it says it again
@@ -232,10 +234,6 @@ struct Config {
   // The table named by -winpct, owned; NULL means the default for the
   // current letter distribution (see config_win_pct_target_name).
   char *win_pct_explicit_name;
-  // Whether a pat option named the player's PAT weights, or 'none'. Until
-  // one does, the player's weights are its lexicon's (see
-  // config_default_pat_name).
-  bool pat_is_explicit[2];
   BoardLayout *board_layout;
   LetterDistribution *ld;
   PlayersData *players_data;
@@ -1348,25 +1346,26 @@ static void add_pat_help_arg(arg_token_t arg_token, const char **usages,
             "<output_name>, which defaults to the loaded weights name.";
     break;
   case ARG_TOKEN_PAT:
-    usages[0] = "<pat>";
+    usages[0] = "<weights_auto_or_none>";
     examples[0] = "english_pat";
     examples[1] = "none";
     *text = "Specifies the PAT weights for both players, unless "
-            "overridden by the 'pat1' or 'pat2' options. Use 'none' to "
-            "unload. By default a player uses the weights named after its "
-            "lexicon, when the data has them and the board is the standard "
-            "size, and none otherwise; once an option names a player's "
-            "weights or 'none', they stay as given until 'default' "
-            "returns them to the lexicon's.";
+            "overridden by the 'pat1' or 'pat2' options. auto (the default) "
+            "gives a player the weights named after its lexicon, when the "
+            "data has them and the board is the standard size, and none "
+            "otherwise. none plays without weights. A name or none stays as "
+            "given when the lexicon changes, and the settings file keeps "
+            "it, until auto returns the choice to the lexicon; 'default' is "
+            "accepted for auto.";
     break;
   case ARG_TOKEN_P1_PAT:
   case ARG_TOKEN_P2_PAT:
-    usages[0] = "<pat>";
+    usages[0] = "<weights_auto_or_none>";
     examples[0] = "english_pat";
     examples[1] = "none";
     *text = "Specifies the PAT weights for the given player. This "
             "can be used with the autoplay command to compare playing with "
-            "and without defense weights. Use 'none' to unload.";
+            "and without defense weights. See 'pat' for auto and none.";
     break;
   case ARG_TOKEN_PAT_CLASSES:
   case ARG_TOKEN_P1_PAT_CLASSES:
@@ -1558,7 +1557,10 @@ static void add_player_solver_help_arg(arg_token_t arg_token,
             "has one, and none otherwise; the commands that train static "
             "values (leavegen, census, patgen and pegfit) play without it. "
             "none plays without adjustments, and is the default for the "
-            "browser build and browser games.";
+            "browser build and browser games. A name or none stays as given "
+            "when the lexicon changes, and the settings file keeps it, "
+            "until auto returns the choice to the lexicon; 'default' is "
+            "accepted for auto.";
     break;
   case ARG_TOKEN_P1_PEG_ADJUST:
   case ARG_TOKEN_P2_PEG_ADJUST:
@@ -3973,6 +3975,20 @@ static bool config_parse_bool_arg(const char *value, const char *name,
 // default, and what a player set to auto plays with. The caller frees.
 static char *config_lexicon_peg_adjust_name(const char *lexicon) {
   return get_formatted_string("%s_pegadjust", lexicon);
+}
+
+// Whether a pat or pegadjust option's value returns the choice to the
+// player's lexicon: auto, as the table options say it, or default.
+static bool config_arg_value_is_auto(const char *value) {
+  return strings_iequal(value, "auto") || strings_iequal(value, "default");
+}
+
+// Whether a player's PAT weights or pre-endgame adjustments are on auto
+// until an option sets them: the weights everywhere, the adjustments where
+// the tables are (see ConfigArgs).
+static bool config_lexicon_data_starts_auto(const Config *config,
+                                            players_data_t type) {
+  return type == PLAYERS_DATA_TYPE_PAT || config->auto_tables;
 }
 
 // Loads one player's PAT usage options (patcand, patclasses, patrollout,
@@ -10015,33 +10031,29 @@ static void config_load_lexicon_dependent_data_internal(
 
 // Applies the pre-endgame adjustment options of the command being loaded. A
 // player's setting is a table's name, none, or auto (see
-// config_load_auto_peg_adjust). The "pegadjust1" and "pegadjust2" options
+// config_load_auto_peg_adjust), as for the PAT weights (see
+// config_load_data). The "pegadjust1" and "pegadjust2" options
 // override "pegadjust", and an unset option keeps the player's setting. A
 // named table that cannot be loaded is an error, which leaves the settings
 // and the tables as they were.
 static void config_load_peg_adjust_options(Config *config,
                                            ErrorStack *error_stack) {
   const players_data_t type = PLAYERS_DATA_TYPE_PEG_ADJUST;
-  const arg_token_t player_tokens[2] = {ARG_TOKEN_P1_PEG_ADJUST,
-                                        ARG_TOKEN_P2_PEG_ADJUST};
-  const char *both_value =
-      config_get_parg_value(config, ARG_TOKEN_PEG_ADJUST, 0);
   bool player_auto[2];
   // Copies, since loading may free the table a loaded name belongs to.
   char *names[2];
   bool any_set = false;
   for (int player_idx = 0; player_idx < 2; player_idx++) {
-    const char *value = both_value;
-    if (config_get_parg_num_set_values(config, player_tokens[player_idx]) > 0) {
-      value = config_get_parg_value(config, player_tokens[player_idx], 0);
-    }
+    const char *value = config_get_player_arg_value(
+        config, ARG_TOKEN_PEG_ADJUST, ARG_TOKEN_P1_PEG_ADJUST,
+        ARG_TOKEN_P2_PEG_ADJUST, player_idx);
     player_auto[player_idx] = config->table_auto[type][player_idx];
     // A player set to auto keeps its table until its lexicon is loaded.
     const char *name =
         players_data_get_data_name(config->players_data, type, player_idx);
     if (value) {
       any_set = true;
-      player_auto[player_idx] = strings_iequal(value, "auto");
+      player_auto[player_idx] = config_arg_value_is_auto(value);
       if (!player_auto[player_idx]) {
         name = strings_iequal(value, "none") ? NULL : value;
       }
@@ -15275,64 +15287,55 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
     free(target_name);
   }
 
-  // Set the PAT weights, per player. The "pat1" and "pat2" args override
-  // the "pat" arg, and "none" unloads. A player no pat arg has named gets
-  // its lexicon's weights when there are any (see config_default_pat_name);
-  // one that an arg has named keeps what it was given until "default"
-  // hands it back to its lexicon.
-  const char *new_pat_names[2];
-  new_pat_names[0] = config_get_parg_value(config, ARG_TOKEN_PAT, 0);
-  new_pat_names[1] = new_pat_names[0];
-  if (config_get_parg_num_set_values(config, ARG_TOKEN_P1_PAT) > 0) {
-    new_pat_names[0] = config_get_parg_value(config, ARG_TOKEN_P1_PAT, 0);
-  }
-  if (config_get_parg_num_set_values(config, ARG_TOKEN_P2_PAT) > 0) {
-    new_pat_names[1] = config_get_parg_value(config, ARG_TOKEN_P2_PAT, 0);
-  }
+  // Set the PAT weights, per player. A player's setting is the weights'
+  // name, none, or auto, as for the pre-endgame adjustments (see
+  // config_load_peg_adjust_options): auto, which every player starts on,
+  // gives it its lexicon's weights when there are any (see
+  // config_default_pat_name), and a name or none stays as given until auto
+  // returns the choice to the lexicon. The "pat1" and "pat2" args override
+  // the "pat" arg, and an unset arg keeps the player's setting. Weights that
+  // cannot be loaded are an error, which leaves the settings and the weights
+  // as they were.
+  bool pat_auto[2];
   // Copies, since loading may free the weights an existing name belongs to.
   char *updated_pat_names[2];
-  const char *pat_names_or_null[2];
   bool pat_names_changed = false;
   for (int player_index = 0; player_index < 2; player_index++) {
     const char *existing_name = players_data_get_data_name(
         config->players_data, PLAYERS_DATA_TYPE_PAT, player_index);
-    if (new_pat_names[player_index]) {
-      config->pat_is_explicit[player_index] =
-          !strings_iequal(new_pat_names[player_index], "default");
-    }
-    if (new_pat_names[player_index] && config->pat_is_explicit[player_index]) {
-      updated_pat_names[player_index] =
-          string_duplicate(new_pat_names[player_index]);
-      pat_names_changed = true;
-    } else if (config->pat_is_explicit[player_index]) {
-      updated_pat_names[player_index] =
-          string_duplicate_allow_null(existing_name);
-    } else {
+    const char *value =
+        config_get_player_arg_value(config, ARG_TOKEN_PAT, ARG_TOKEN_P1_PAT,
+                                    ARG_TOKEN_P2_PAT, player_index);
+    pat_auto[player_index] =
+        value ? config_arg_value_is_auto(value)
+              : config->table_auto[PLAYERS_DATA_TYPE_PAT][player_index];
+    if (pat_auto[player_index]) {
       updated_pat_names[player_index] =
           config_default_pat_name(config, player_index);
-      const char *default_name = updated_pat_names[player_index];
-      if ((default_name == NULL) != (existing_name == NULL) ||
-          (default_name != NULL &&
-           !strings_equal(default_name, existing_name))) {
+      if (!strings_equal(updated_pat_names[player_index], existing_name)) {
         pat_names_changed = true;
       }
-    }
-    pat_names_or_null[player_index] = updated_pat_names[player_index];
-    if (pat_names_or_null[player_index] &&
-        strings_iequal(pat_names_or_null[player_index], "none")) {
-      pat_names_or_null[player_index] = NULL;
+    } else if (value) {
+      updated_pat_names[player_index] =
+          strings_iequal(value, "none") ? NULL : string_duplicate(value);
+      pat_names_changed = true;
+    } else {
+      updated_pat_names[player_index] =
+          string_duplicate_allow_null(existing_name);
     }
   }
   if (pat_names_changed) {
     players_data_set(config->players_data, PLAYERS_DATA_TYPE_PAT,
-                     config->data_paths, pat_names_or_null[0],
-                     pat_names_or_null[1], false, error_stack);
+                     config->data_paths, updated_pat_names[0],
+                     updated_pat_names[1], false, error_stack);
   }
   free(updated_pat_names[0]);
   free(updated_pat_names[1]);
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
+  config->table_auto[PLAYERS_DATA_TYPE_PAT][0] = pat_auto[0];
+  config->table_auto[PLAYERS_DATA_TYPE_PAT][1] = pat_auto[1];
 
   // How each player uses its PAT weights. The global option sets both
   // players and the per-player one overrides it; unset means "keep what is
@@ -17072,11 +17075,15 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   // adjustments where the data has them; tests, browser games and
   // contribute's task configurations state what they use.
   const bool auto_tables = config_args && config_args->auto_tables;
+  config->auto_tables = auto_tables;
   for (int player_idx = 0; player_idx < 2; player_idx++) {
     config->table_auto[PLAYERS_DATA_TYPE_WMP][player_idx] = auto_tables;
     config->table_auto[PLAYERS_DATA_TYPE_RIT][player_idx] = auto_tables;
     config->table_auto[PLAYERS_DATA_TYPE_WIT][player_idx] = auto_tables;
-    config->table_auto[PLAYERS_DATA_TYPE_PEG_ADJUST][player_idx] = auto_tables;
+    config->table_auto[PLAYERS_DATA_TYPE_PAT][player_idx] =
+        config_lexicon_data_starts_auto(config, PLAYERS_DATA_TYPE_PAT);
+    config->table_auto[PLAYERS_DATA_TYPE_PEG_ADJUST][player_idx] =
+        config_lexicon_data_starts_auto(config, PLAYERS_DATA_TYPE_PEG_ADJUST);
     if (auto_tables) {
       players_data_set_use_when_available(
           config->players_data, PLAYERS_DATA_TYPE_WMP, player_idx, true);
@@ -17246,27 +17253,37 @@ static void config_add_table_setting_to_string_builder(const Config *config,
                                           player_index));
 }
 
-// A player's pre-endgame adjustments as set: auto, a table's name, or none.
-// Always written, since what an unset option means depends on who reads it:
-// auto for the command line program and the library, none elsewhere.
-static void config_add_peg_adjust_setting_to_string_builder(
+// A player's PAT weights or pre-endgame adjustments as set: auto, a name, or
+// none. The full settings always say which, since what an unset option
+// means depends on who reads it: the adjustments are auto for the command
+// line program and the library, and none elsewhere. A settings file keeps a
+// choice only, which is a name or whatever else an unset option would not
+// give, so that a player left on auto goes on following its lexicon.
+static void config_add_lexicon_data_setting_to_string_builder(
     const Config *config, StringBuilder *sb, arg_token_t arg_token,
-    int player_index) {
-  const char *value = "none";
-  if (config->table_auto[PLAYERS_DATA_TYPE_PEG_ADJUST][player_index]) {
-    value = "auto";
-  } else if (players_data_get_peg_adjust(config->players_data, player_index)) {
-    value = players_data_get_data_name(
-        config->players_data, PLAYERS_DATA_TYPE_PEG_ADJUST, player_index);
+    players_data_t type, int player_index, bool saved_only) {
+  const bool is_auto = config->table_auto[type][player_index];
+  const char *value = NULL;
+  if (!is_auto) {
+    value =
+        players_data_get_data_name(config->players_data, type, player_index);
+  }
+  if (saved_only && !value &&
+      is_auto == config_lexicon_data_starts_auto(config, type)) {
+    return;
+  }
+  if (!value) {
+    value = is_auto ? "auto" : "none";
   }
   config_add_string_setting_to_string_builder(config, sb, arg_token, value);
 }
 
 // The settings a settings file keeps: those that hold for a whole game or
-// session -- the rules, the lexica and the data that goes with them, and how
-// things are displayed. Settings a command or an analysis tunes (plies,
-// endgame plies, iterations, threads, seeds, the tables, ...) start from
-// their defaults on every run.
+// session -- the rules, the lexica and the data that goes with them (leaves,
+// PAT weights, pre-endgame adjustments), and how things are displayed.
+// Settings a command or an analysis tunes (plies, endgame plies, iterations,
+// threads, seeds, the wordmap and the info tables, ...) start from their
+// defaults on every run.
 static const arg_token_t config_saved_settings[] = {
     ARG_TOKEN_BINGO_BONUS,
     ARG_TOKEN_CHALLENGE_BONUS,
@@ -17282,6 +17299,9 @@ static const arg_token_t config_saved_settings[] = {
     ARG_TOKEN_PAT,
     ARG_TOKEN_P1_PAT,
     ARG_TOKEN_P2_PAT,
+    ARG_TOKEN_PEG_ADJUST,
+    ARG_TOKEN_P1_PEG_ADJUST,
+    ARG_TOKEN_P2_PEG_ADJUST,
     ARG_TOKEN_WIN_PCT,
     ARG_TOKEN_SHPLIES,
     ARG_TOKEN_SHOW_BU,
@@ -17465,19 +17485,12 @@ static void config_add_settings_to_string_builder_internal(const Config *config,
                                      PLAYERS_DATA_TYPE_KLV, 0));
       break;
     case ARG_TOKEN_P1_PAT:
-      // Omitted unless an option named the weights: the default follows the
-      // lexicon. A named choice is kept by a settings file, 'none' included.
-      if (config->pat_is_explicit[0]) {
-        config_add_string_setting_to_string_builder(
-            config, sb, arg_token,
-            players_data_get_pat(config->players_data, 0)
-                ? players_data_get_data_name(config->players_data,
-                                             PLAYERS_DATA_TYPE_PAT, 0)
-                : "none");
-      }
+      config_add_lexicon_data_setting_to_string_builder(
+          config, sb, arg_token, PLAYERS_DATA_TYPE_PAT, 0, saved_only);
       break;
     case ARG_TOKEN_P1_PEG_ADJUST:
-      config_add_peg_adjust_setting_to_string_builder(config, sb, arg_token, 0);
+      config_add_lexicon_data_setting_to_string_builder(
+          config, sb, arg_token, PLAYERS_DATA_TYPE_PEG_ADJUST, 0, saved_only);
       break;
     case ARG_TOKEN_P1_PAT_CLASSES: {
       // Omitted when every class applies; that is the default.
@@ -17554,19 +17567,12 @@ static void config_add_settings_to_string_builder_internal(const Config *config,
                                      PLAYERS_DATA_TYPE_KLV, 1));
       break;
     case ARG_TOKEN_P2_PAT:
-      // Omitted unless an option named the weights: the default follows the
-      // lexicon. A named choice is kept by a settings file, 'none' included.
-      if (config->pat_is_explicit[1]) {
-        config_add_string_setting_to_string_builder(
-            config, sb, arg_token,
-            players_data_get_pat(config->players_data, 1)
-                ? players_data_get_data_name(config->players_data,
-                                             PLAYERS_DATA_TYPE_PAT, 1)
-                : "none");
-      }
+      config_add_lexicon_data_setting_to_string_builder(
+          config, sb, arg_token, PLAYERS_DATA_TYPE_PAT, 1, saved_only);
       break;
     case ARG_TOKEN_P2_PEG_ADJUST:
-      config_add_peg_adjust_setting_to_string_builder(config, sb, arg_token, 1);
+      config_add_lexicon_data_setting_to_string_builder(
+          config, sb, arg_token, PLAYERS_DATA_TYPE_PEG_ADJUST, 1, saved_only);
       break;
     case ARG_TOKEN_P2_PAT_CLASSES: {
       // Omitted when every class applies; that is the default.
@@ -18243,10 +18249,10 @@ static bool config_setting_is_stale(arg_token_t arg_token, int file_version) {
 }
 
 // The settings that load together: a lexicon goes with its letter
-// distribution, leaves and PAT weights, and loading them stops at the first
-// that fails, so they are tried in a scratch config before they are applied.
-// A lexicon loaded apart from a saved 'pat none' would load its default
-// weights first.
+// distribution, leaves, PAT weights and pre-endgame adjustments, and loading
+// them stops at the first that fails, so they are tried in a scratch config
+// before they are applied. A lexicon loaded apart from a saved 'pat none' or
+// 'pegadjust none' would load its own weights or adjustments first.
 static const arg_token_t config_lexicon_settings[] = {
     ARG_TOKEN_LETTER_DISTRIBUTION,
     ARG_TOKEN_LEXICON,
@@ -18258,6 +18264,9 @@ static const arg_token_t config_lexicon_settings[] = {
     ARG_TOKEN_PAT,
     ARG_TOKEN_P1_PAT,
     ARG_TOKEN_P2_PAT,
+    ARG_TOKEN_PEG_ADJUST,
+    ARG_TOKEN_P1_PEG_ADJUST,
+    ARG_TOKEN_P2_PEG_ADJUST,
 };
 
 static bool config_setting_is_lexicon_setting(arg_token_t arg_token) {
