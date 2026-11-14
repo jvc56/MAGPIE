@@ -3567,10 +3567,11 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
 
   gen->bingo_bonus = game_get_bingo_bonus(game);
   gen->number_of_tiles_in_bag = bag_get_letters(game_get_bag(game));
-  // The table is read by the real bag: the game's bag also holds the tiles of
-  // a rack that is not known, which are not in the bag the play is made from.
-  peg_adjust_fill_by_tiles_played(player_get_peg_adjust(player),
-                                  game_get_real_bag_size(game),
+  // The table and PAT read the real bag: the game's bag also holds the tiles
+  // of a rack that is not known, which are not in the bag the play is made
+  // from.
+  const int real_bag_size = game_get_real_bag_size(game);
+  peg_adjust_fill_by_tiles_played(player_get_peg_adjust(player), real_bag_size,
                                   gen->peg_adjust_by_tiles_played);
   gen->wmp_prune_subracks_by_leave = (gen->number_of_tiles_in_bag > 0) &&
                                      (gen->move_sort_type == MOVE_SORT_EQUITY);
@@ -3626,21 +3627,21 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
       gen->move_record_type != MOVE_RECORD_BEST_SMALL) {
     board_copy_opening_penalties(gen->board, gen->opening_move_word_penalties,
                                  gen->opening_move_letter_penalties);
-    // The PAT term is equity-only, bag-gated like the leave value,
+    // The PAT term is equity-only, runs only while the real bag has tiles,
     // and requires valid cross sets (its scans read them). The weights are
     // re-read from the player on every position load, so a training loop
     // that rewrites them between generations needs no extra invalidation,
     // and so are the player's PAT settings (see player_set_pat_usage).
     const PATWeights *pat = player_get_pat(player);
     if (pat && !args->disable_pat && !player_get_pat_disabled(player) &&
-        gen->move_sort_type == MOVE_SORT_EQUITY &&
-        gen->number_of_tiles_in_bag > 0 &&
+        gen->move_sort_type == MOVE_SORT_EQUITY && real_bag_size > 0 &&
         board_get_cross_sets_valid(gen->board)) {
       const uint32_t classes_mask =
           PAT_CLASS_MASK_ALL & ~args->pat_disabled_classes_mask &
           ~player_get_pat_disabled_classes_mask(player);
-      const int opponent_rack_size =
-          rack_get_total_letters(&gen->opponent_rack);
+      // While the real bag has tiles the opponent's rack is full, whether or
+      // not the game knows its tiles.
+      const int opponent_rack_size = RACK_SIZE;
       PATBoardCache *board_cache = player_get_pat_board_cache(player);
       if (board_cache == NULL) {
         pat_eval_context_load(gen->pat_ctx, pat, gen->board_lanes, &gen->ld,
@@ -3651,7 +3652,7 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
         pat_eval_context_set_utility(gen->pat_ctx,
                                      equity_to_int(player_get_score(player) -
                                                    player_get_score(opponent)),
-                                     gen->number_of_tiles_in_bag);
+                                     real_bag_size);
       } else {
         gen_load_board_only_pat(gen, board_cache, pat, classes_mask,
                                 opponent_rack_size);
