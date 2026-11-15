@@ -18,6 +18,9 @@ enum {
 #define DEFAULT_WIN_PCT_PREFIX "winpct_"
 // Given to -winpct, returns to that per-distribution default.
 #define DEFAULT_WIN_PCT_ARG "default"
+// A lexicon's own pre-endgame adjustments are named the lexicon's name
+// followed by LEXICON_PEG_ADJUST_SUFFIX (e.g. CSW24_pegadjust).
+#define LEXICON_PEG_ADJUST_SUFFIX "_pegadjust"
 #define COMMAND_FINISHED_KEYWORD "finished"
 #define COMMAND_RUNNING_KEYWORD "running"
 
