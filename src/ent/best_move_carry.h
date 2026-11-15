@@ -3,7 +3,6 @@
 
 #include "../def/board_defs.h"
 #include "../def/move_defs.h"
-#include "../def/static_eval_defs.h"
 #include "../util/io_util.h"
 #include "board.h"
 #include "letter_distribution.h"
@@ -52,11 +51,14 @@ typedef struct CarriedBestMove {
   MachineLetter board_letters[MOVE_MAX_TILES];
 } CarriedBestMove;
 
-// No move of a lane hashing lane_hash beats bound, given a bag that gives
-// the same equities as number_of_tiles_in_bag. A lane_hash of 0 is unused.
+// No move of a lane hashing lane_hash beats bound, given a bag of bag_class:
+// the mover's class for a bag (see peg_adjust_get_bag_class), which bags
+// share only when every move gets the same equity from them. The bag's only
+// term in an equity is the mover's pre-endgame adjustment. A lane_hash of 0
+// is unused.
 typedef struct CarriedLaneBound {
   uint64_t lane_hash;
-  int number_of_tiles_in_bag;
+  int bag_class;
   // Whether bound is a play in this lane, and so the lane's best move.
   bool bound_is_in_lane;
   Move bound;
@@ -101,15 +103,6 @@ typedef struct BestMoveCarry {
   // By bucket, under the bucket's lock; NULL when the carry skips no lanes.
   CarriedLaneBounds *lane_bounds;
 } BestMoveCarry;
-
-// Whether every move gets the same equity from either bag: the bag's only
-// term is peg_adjust_values, which no play from a bag that full reaches.
-static inline bool best_move_carry_bags_give_same_equities(int tiles_in_bag,
-                                                           int other_in_bag) {
-  return tiles_in_bag == other_in_bag ||
-         (tiles_in_bag >= PEG_ADJUST_VALUES_LENGTH &&
-          other_in_bag >= PEG_ADJUST_VALUES_LENGTH);
-}
 
 // Not thread safe: call it while no generation uses the carry.
 static inline void best_move_carry_reset(BestMoveCarry *carry) {
@@ -190,14 +183,13 @@ static inline void best_move_carry_unlock(BestMoveCarryBucket *bucket) {
 
 // Copies the moves remembered for this rack into found, with a bound for
 // each lane whose hash in lane_hashes (by lane, BOARD_DIM * dir + row as in
-// the generator's anchor counts) has one for this bag. A NULL lane_hashes
+// the generator's anchor counts) has one for bag_class. A NULL lane_hashes
 // reads no bounds; a carry that skips no lanes needs NULL. Returns false,
 // leaving found unspecified, when nothing is remembered for the rack.
 static inline bool best_move_carry_find(BestMoveCarry *carry, const Rack *rack,
                                         int player_index,
                                         const uint64_t *lane_hashes,
-                                        int number_of_tiles_in_bag,
-                                        CarriedRackFind *found) {
+                                        int bag_class, CarriedRackFind *found) {
   const uint64_t key = best_move_carry_get_key(rack, player_index);
   const int bucket_idx = (int)(key & (uint64_t)(carry->num_buckets - 1));
   BestMoveCarryBucket *bucket = best_move_carry_lock(carry, key);
@@ -219,8 +211,7 @@ static inline bool best_move_carry_find(BestMoveCarry *carry, const Rack *rack,
         const CarriedLaneBound *lane_bound =
             &carry->lane_bounds[bucket_idx].bounds[lane][bound_idx];
         if (lane_bound->lane_hash == lane_hashes[lane] &&
-            best_move_carry_bags_give_same_equities(
-                lane_bound->number_of_tiles_in_bag, number_of_tiles_in_bag)) {
+            lane_bound->bag_class == bag_class) {
           found->lane_bounds[lane] = *lane_bound;
           found->lanes_with_bounds |= (uint64_t)1 << lane;
           break;
@@ -271,10 +262,11 @@ static inline int best_move_carry_get_move_lane(const Move *move) {
                                 : move_get_row_start(move));
 }
 
-// Bounds lane by best_move, keeping the lane's lower bound for its hash.
+// Bounds lane by best_move, keeping the lane's lower bound for its hash and
+// bag class.
 static inline void
 best_move_carry_add_lane_bound(CarriedLaneBounds *rack_lane_bounds, int lane,
-                               uint64_t lane_hash, int number_of_tiles_in_bag,
+                               uint64_t lane_hash, int bag_class,
                                const Move *best_move) {
   CarriedLaneBound *lane_bounds = rack_lane_bounds->bounds[lane];
   CarriedLaneBound *slot = NULL;
@@ -282,8 +274,7 @@ best_move_carry_add_lane_bound(CarriedLaneBounds *rack_lane_bounds, int lane,
        bound_idx++) {
     CarriedLaneBound *lane_bound = &lane_bounds[bound_idx];
     if (lane_bound->lane_hash == lane_hash &&
-        best_move_carry_bags_give_same_equities(
-            lane_bound->number_of_tiles_in_bag, number_of_tiles_in_bag)) {
+        lane_bound->bag_class == bag_class) {
       if (compare_moves(best_move, &lane_bound->bound, true) != 0) {
         return;
       }
@@ -298,7 +289,7 @@ best_move_carry_add_lane_bound(CarriedLaneBounds *rack_lane_bounds, int lane,
                   BEST_MOVE_CARRY_BOUNDS_PER_LANE);
   }
   slot->lane_hash = lane_hash;
-  slot->number_of_tiles_in_bag = number_of_tiles_in_bag;
+  slot->bag_class = bag_class;
   slot->bound_is_in_lane =
       move_get_type(best_move) == GAME_EVENT_TILE_PLACEMENT_MOVE &&
       best_move_carry_get_move_lane(best_move) == lane;
@@ -308,16 +299,17 @@ best_move_carry_add_lane_bound(CarriedLaneBounds *rack_lane_bounds, int lane,
 // Remembers a generation's best move for this rack: carried, if not NULL,
 // as a move to try on later boards, and, in a carry that skips lanes,
 // best_move as a bound on each lane in searched_lanes, whose hashes are in
-// lane_hashes. A carried move replaces
+// lane_hashes, for bags of bag_class. A carried move replaces
 // the rack's own entry for the same placement, so the newest board replaces
 // the older one; otherwise the rack's oldest move when it already has
 // BEST_MOVE_CARRY_MOVES_PER_RACK of them, or the bucket's moves for another
 // rack.
-static inline void
-best_move_carry_add(BestMoveCarry *carry, const Rack *rack, int player_index,
-                    const CarriedBestMove *carried, const Move *best_move,
-                    const uint64_t *lane_hashes, uint64_t searched_lanes,
-                    int number_of_tiles_in_bag) {
+static inline void best_move_carry_add(BestMoveCarry *carry, const Rack *rack,
+                                       int player_index,
+                                       const CarriedBestMove *carried,
+                                       const Move *best_move,
+                                       const uint64_t *lane_hashes,
+                                       uint64_t searched_lanes, int bag_class) {
   const uint64_t key = best_move_carry_get_key(rack, player_index);
   const int bucket_idx = (int)(key & (uint64_t)(carry->num_buckets - 1));
   BestMoveCarryBucket *bucket = best_move_carry_lock(carry, key);
@@ -349,7 +341,7 @@ best_move_carry_add(BestMoveCarry *carry, const Rack *rack, int player_index,
        rack_lane_bounds != NULL && lane < BEST_MOVE_CARRY_NUM_LANES; lane++) {
     if (searched_lanes & ((uint64_t)1 << lane)) {
       best_move_carry_add_lane_bound(rack_lane_bounds, lane, lane_hashes[lane],
-                                     number_of_tiles_in_bag, best_move);
+                                     bag_class, best_move);
     }
   }
   best_move_carry_unlock(bucket);

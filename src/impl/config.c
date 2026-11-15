@@ -25,6 +25,7 @@
 #include "../def/players_data_defs.h"
 #include "../def/rack_defs.h"
 #include "../def/sim_defs.h"
+#include "../def/static_eval_defs.h"
 #include "../def/thread_control_defs.h"
 #include "../def/validated_move_defs.h"
 #include "../ent/autoplay_results.h"
@@ -90,6 +91,7 @@
 #include "move_gen_base.h"
 #include "move_gen_threats.h"
 #include "peg.h"
+#include "peg_fit.h"
 #include "play_chooser.h"
 #include "rack_draw.h"
 #include "rack_info_table_maker.h"
@@ -131,7 +133,7 @@ enum {
   // The format -savesettings writes as -fileversion. Raise it whenever a
   // default that settings files record changes, and list the setting in
   // config_stale_settings.
-  CONFIG_SETTINGS_VERSION = 2,
+  CONFIG_SETTINGS_VERSION = 3,
   // The table types that can be auto (WMP, WIT, RIT), and the most tables a
   // load weighs: two of each, and a wordmap each player's rack info table needs
   // and neither player loads.
@@ -161,9 +163,13 @@ struct Config {
   char *data_paths;
   // See ConfigArgs.
   bool build_missing_wordmaps;
-  // Per table type and player: set to auto (-wmp, -rit, -wit auto), so the
-  // table is used when this machine has room for it. Only the WMP, RIT and
-  // WIT entries are used.
+  // See ConfigArgs.
+  bool auto_tables;
+  // Per table type and player: set to auto. A wordmap, rack info table or
+  // word info table (-wmp, -rit, -wit auto) is then used when this machine
+  // has room for it, and the PAT weights (-pat auto) and the pre-endgame
+  // adjustments (-pegadjust auto) are the player's lexicon's own where the
+  // data has them. Only these five types' entries are used.
   bool table_auto[NUMBER_OF_DATA][2];
   int64_t auto_table_cap_bytes;
   // What config_choose_auto_tables last said it decided, so it says it again
@@ -356,7 +362,12 @@ struct Config {
   bool sim_with_inference;
   bool sim_margin_forecast;
   bool sim_bag_cycle;
+  // -scensus: true or false, or auto (sim_census_rollout_auto, with
+  // sim_census_rollout set), which steers a sim's rollouts with the census
+  // when it fits in this machine's memory and the sim's rollouts pay for its
+  // build (census_rollout_auto_fits, census_rollout_prepare_if_it_pays).
   bool sim_census_rollout;
+  bool sim_census_rollout_auto;
   bool use_heat_map;
   bool print_boards;
   // A config contribute's tasks run in (config_create_for_contribute): its
@@ -389,7 +400,6 @@ struct Config {
   char *contribute_layout_identity;
   bool autosave_gcg;
   bool fg_required;
-  bool loaded_settings;
   // Plies of net result a PAT training label spans.
   int pat_label_plies;
   bool p1_sim_with_inference;
@@ -638,14 +648,6 @@ bool config_get_use_mmap_for_rit(const Config *config) {
 
 bool config_get_fg_required(const Config *config) {
   return config->fg_required;
-}
-
-bool config_get_loaded_settings(const Config *config) {
-  return config->loaded_settings;
-}
-
-void config_set_loaded_settings(Config *config, const bool value) {
-  config->loaded_settings = value;
 }
 
 PlayersData *config_get_players_data(const Config *config) {
@@ -1039,8 +1041,11 @@ char *str_api_fatal(Config *config,
 // it (`derived_skipped`); a full disk during a rack info table's build skips
 // the table rather than ending the run; one that does not fit in the memory
 // beyond `memreserve`, to build or to hold, is skipped the same way; the
-// claim's derived files carry their sizes (`bytes`).
-#define MAGPIE_VERSION "0.1.4"
+// claim's derived files carry their sizes (`bytes`). 0.1.5: an opening-rack
+// request may state each rack's `candidates`, the moves a later pass ranks in
+// place of every play -- birdtest's reanalysis of a rack's first-pass
+// leaders, which only a build that reads them can run.
+#define MAGPIE_VERSION "0.1.5"
 
 const char *config_get_magpie_version(void) { return MAGPIE_VERSION; }
 
@@ -1329,7 +1334,7 @@ static void add_analyze_and_settings_help_arg(arg_token_t arg_token,
             "writes it. A file saved by an older version recorded every "
             "setting, including defaults that have since changed, so those "
             "settings are dropped when it is loaded and the new defaults "
-            "apply.";
+            "apply, as are the settings a settings file no longer keeps.";
     break;
   default:
     break;
@@ -1357,21 +1362,26 @@ static void add_pat_help_arg(arg_token_t arg_token, const char **usages,
             "<output_name>, which defaults to the loaded weights name.";
     break;
   case ARG_TOKEN_PAT:
-    usages[0] = "<pat>";
+    usages[0] = "<weights_auto_or_none>";
     examples[0] = "english_pat";
     examples[1] = "none";
     *text = "Specifies the PAT weights for both players, unless "
-            "overridden by the 'pat1' or 'pat2' options. Use 'none' to "
-            "unload. PAT weights are off by default.";
+            "overridden by the 'pat1' or 'pat2' options. auto (the default) "
+            "gives a player the weights named after its lexicon, when the "
+            "data has them and the board is the standard size, and none "
+            "otherwise. none plays without weights. A name or none stays as "
+            "given when the lexicon changes, and the settings file keeps "
+            "it, until auto returns the choice to the lexicon; 'default' is "
+            "accepted for auto.";
     break;
   case ARG_TOKEN_P1_PAT:
   case ARG_TOKEN_P2_PAT:
-    usages[0] = "<pat>";
+    usages[0] = "<weights_auto_or_none>";
     examples[0] = "english_pat";
     examples[1] = "none";
     *text = "Specifies the PAT weights for the given player. This "
             "can be used with the autoplay command to compare playing with "
-            "and without defense weights. Use 'none' to unload.";
+            "and without defense weights. See 'pat' for auto and none.";
     break;
   case ARG_TOKEN_PAT_CLASSES:
   case ARG_TOKEN_P1_PAT_CLASSES:
@@ -1425,6 +1435,23 @@ static void add_pat_help_arg(arg_token_t arg_token, const char **usages,
             "'patrolloutclasses' sets both players; 'patrolloutclasses1' "
             "and 'patrolloutclasses2' set one.";
     break;
+  case ARG_TOKEN_PAT_ROLLOUT_FAST:
+  case ARG_TOKEN_P1_PAT_ROLLOUT_FAST:
+  case ARG_TOKEN_P2_PAT_ROLLOUT_FAST:
+    usages[0] = "<true_or_false>";
+    examples[0] = "true";
+    examples[1] = "false";
+    *text = "Specifies whether the PAT in the player's rollouts is "
+            "board-only, which is faster. Board-only PAT leaves out the "
+            "mover's rack, which static evaluation takes from the unseen "
+            "tiles, and the utility correction. A position's PAT then "
+            "depends on the board alone, so rollouts that reach the same "
+            "board share the work, and the census can steer them (see "
+            "'scensus'). Rollouts are 1.2 to 1.5 times as fast as with "
+            "false, which uses the term static evaluation uses and no "
+            "census. Defaults to true. 'patrolloutfast' sets both players; "
+            "'patrolloutfast1' and 'patrolloutfast2' set one.";
+    break;
   case ARG_TOKEN_PAT_LABEL_PLIES:
     usages[0] = "<plies>";
     *text = "Specifies how many plies of net result a PAT training label "
@@ -1469,8 +1496,9 @@ static void add_inference_help_arg(arg_token_t arg_token, const char **usages,
   }
 }
 
-// The help for the players' autoplay endgame and pre-endgame options (see
-// help_entry_fill).
+// The help for the players' autoplay endgame and pre-endgame options, and for
+// the pre-endgame adjustments (see help_entry_fill, which is at the function
+// size limit).
 static void add_player_solver_help_arg(arg_token_t arg_token,
                                        const char **usages,
                                        const char **examples,
@@ -1560,6 +1588,39 @@ static void add_player_solver_help_arg(arg_token_t arg_token,
         "Defaults to 1,1,5,7 for autoplay and a timed peg, and to 1 (every "
         "scenario) for a complete one.";
     break;
+  case ARG_TOKEN_PEG_ADJUST:
+    usages[0] = "<adjustments_auto_or_none>";
+    examples[0] = "CSW24_pegadjust";
+    examples[1] = "none";
+    *text = "Specifies the pre-endgame adjustments for both players. The "
+            "'pegadjust1' and 'pegadjust2' options override it. The "
+            "adjustments, read from <data path>/strategy/<adjustments>.csv, "
+            "are amounts added to the static equity of a tile placement by "
+            "the tiles in the bag less the tiles played plus the rack size. "
+            "A table reaches as far as its file's highest index. In a "
+            "player's simulations, both sides' plies in the rollouts use "
+            "that player's adjustments. auto (the default for the command "
+            "line program and the library's magpie_create()) gives a player "
+            "its lexicon's own table, <lexicon>_pegadjust, where the data "
+            "has one, and none otherwise; the commands that train static "
+            "values (leavegen, census, patgen and pegfit) play without it. "
+            "none plays without adjustments, and is the default for the "
+            "browser build and browser games. A name or none stays as given "
+            "when the lexicon changes, and the settings file keeps it, "
+            "until auto returns the choice to the lexicon; 'default' is "
+            "accepted for auto.";
+    break;
+  case ARG_TOKEN_P1_PEG_ADJUST:
+  case ARG_TOKEN_P2_PEG_ADJUST:
+    usages[0] = "<adjustments_auto_or_none>";
+    examples[0] = "CSW24_pegadjust";
+    examples[1] = "none";
+    *text = "Specifies the pre-endgame adjustments for the given player. "
+            "This can be used with the autoplay command to compare two "
+            "tables, or a table with none. In the player's simulations, "
+            "both sides' plies in the rollouts use them. See 'pegadjust' "
+            "for auto and none.";
+    break;
   default:
     break;
   }
@@ -1627,12 +1688,43 @@ static const char *leave_blend_help(const char **usages,
          "tables mixed at 0.5 measured stronger than either.";
 }
 
-// One case for both in add_help_arg_to_string_builder, which is at the
+static const char *peg_fit_help(const char **usages, const char **examples) {
+  usages[0] = "<games> <rollouts> <endgame_plies> [<output_name> "
+              "[<tiles_left>]]";
+  examples[0] = "1000 16 2";
+  examples[1] = "4000 128 0 CSW24_static";
+  examples[2] = "4000 16 0 CSW24_static_long 12";
+  return "Fits pre-endgame adjustments to static play's outcomes. They "
+         "adjust a tile placement's static equity by the tiles it leaves in "
+         "the bag, or, if it empties the bag, by the tiles it leaves on the "
+         "mover's rack. The table reaches the plays that leave up to "
+         "<tiles_left> tiles in the bag (default: the rack size less two), "
+         "and static self-play gives the positions: those with tiles in the "
+         "bag, at most a rack more than <tiles_left>. In each, the best play "
+         "of each count by static equity without the adjustments is played out "
+         "to the end <rollouts> times, with the same draws for every count, "
+         "and the fit is the least squares one of each play's outcome less "
+         "its static equity as a position term plus a count term. With "
+         "<endgame_plies> above 0, play stops when the bag is empty and the "
+         "endgame is solved that many plies deep. That is much slower than "
+         "static play, and it values tempo more. Self-play uses the "
+         "pre-endgame adjustments named with 'pegadjust', which both "
+         "players must share, and none for players left at auto. The table "
+         "is written as data/strategy/<output_name>.csv (default: "
+         "<lexicon>_pegadjust, the table auto loads) and can be loaded with "
+         "'pegadjust'. Use the -seed, -threads and -ttfraction options.";
+}
+
+// One case for all three in add_help_arg_to_string_builder, which is at the
 // function size limit.
-static const char *census_or_leave_blend_help(int token, const char **usages,
-                                              const char **examples) {
+static const char *census_leave_blend_or_peg_fit_help(int token,
+                                                      const char **usages,
+                                                      const char **examples) {
   if (token == ARG_TOKEN_CENSUS) {
     return census_help(usages, examples);
+  }
+  if (token == ARG_TOKEN_PEG_FIT) {
+    return peg_fit_help(usages, examples);
   }
   return leave_blend_help(usages, examples);
 }
@@ -1786,6 +1878,9 @@ static void help_entry_fill(const Config *config, int token,
     case ARG_TOKEN_PAT_ROLLOUT_CLASSES:
     case ARG_TOKEN_P1_PAT_ROLLOUT_CLASSES:
     case ARG_TOKEN_P2_PAT_ROLLOUT_CLASSES:
+    case ARG_TOKEN_PAT_ROLLOUT_FAST:
+    case ARG_TOKEN_P1_PAT_ROLLOUT_FAST:
+    case ARG_TOKEN_P2_PAT_ROLLOUT_FAST:
     case ARG_TOKEN_PAT_LABEL_PLIES:
       add_pat_help_arg(arg_token, usages, examples, &text);
       break;
@@ -1979,7 +2074,8 @@ static void help_entry_fill(const Config *config, int token,
       break;
     case ARG_TOKEN_CENSUS:
     case ARG_TOKEN_LEAVE_BLEND:
-      text = census_or_leave_blend_help(token, usages, examples);
+    case ARG_TOKEN_PEG_FIT:
+      text = census_leave_blend_or_peg_fit_help(token, usages, examples);
       break;
     case ARG_TOKEN_CREATE_DATA:
       usages[0] = "<type> <output_name> [<letter_distribution>]";
@@ -2691,16 +2787,29 @@ static void help_entry_fill(const Config *config, int token,
              "least two cycles. On by default.";
       break;
     case ARG_TOKEN_SIM_CENSUS_ROLLOUT:
-      usages[0] = "<true_or_false>";
-      examples[0] = "true";
+      usages[0] = "<auto_true_or_false>";
+      examples[0] = "auto";
       examples[1] = "false";
       text = "Specifies whether a census of the position steers the "
              "rollouts' move generation. Before the rollouts, it scores "
              "every rack's best play in each anchor of the position and of "
              "each candidate's board; each rollout move generation then "
              "skips the anchors it knows to be worse. The moves are the "
-             "same, found faster. The census leaves out PAT, so a sim with "
-             "it needs patrollout set to false. Off by default.";
+             "same, found faster once the census is built, which takes "
+             "time and memory, the most on an open board with a full bag: "
+             "for English with 100 candidates, up to 15 seconds and 0.6 GB "
+             "on 1 thread, and 3 seconds and 0.9 GB on 12. auto (the "
+             "default for the command line program and the library) uses "
+             "it for a sim when this machine has the memory for it (within "
+             "a quarter of the physical memory, and what is available less "
+             "1 GB), the sim's fewest rollouts (its iterations without a "
+             "stopping condition, otherwise its minimum iterations for each "
+             "play) save more time than the build takes, the bag has "
+             "tiles, the players share a lexicon and leaves in a classic "
+             "game, and the rollouts go without PAT or with board-only PAT "
+             "(see 'patrolloutfast'); the sim's Census line says whether it "
+             "did. true always uses it, and needs patrolloutfast set to "
+             "true or patrollout to false; false never uses it.";
       break;
     case ARG_TOKEN_USE_HEAT_MAP:
       usages[0] = "<true_or_false>";
@@ -2942,10 +3051,15 @@ static void help_entry_fill(const Config *config, int token,
       usages[0] = "<true_or_false>";
       examples[0] = "true";
       examples[1] = "false";
-      text = "Specifies whether or not to save the current settings to "
-             "settings.txt after every command. It is false by default. The "
-             "saved settings are loaded on a startup that sets this to true, "
-             "and ignored on any other.";
+      text = "Specifies whether or not to save settings to settings.txt "
+             "after every command. It is true by default. Only the settings "
+             "that hold for a whole game are saved: the lexica, leaves, "
+             "letter distribution, board, bonuses and the display settings. "
+             "Settings that a command or an analysis tunes, such as plies, "
+             "endgame plies, iterations and threads, are never saved. The "
+             "saved settings are loaded on a startup that does not set this "
+             "to false; a saved setting that is unknown or fails to load is "
+             "skipped with a warning.";
       break;
     case ARG_TOKEN_AUTOSAVE_GCG:
       usages[0] = "<true_or_false>";
@@ -3093,6 +3207,9 @@ static void help_entry_fill(const Config *config, int token,
     case ARG_TOKEN_PEG_NESTED_CAND_CAPS:
     case ARG_TOKEN_PEG_NESTED_DEPTH:
     case ARG_TOKEN_PEG_NESTED_STRIDES:
+    case ARG_TOKEN_PEG_ADJUST:
+    case ARG_TOKEN_P1_PEG_ADJUST:
+    case ARG_TOKEN_P2_PEG_ADJUST:
       add_player_solver_help_arg(arg_token, usages, examples, &text);
       break;
     case ARG_TOKEN_MULTI_THREADING_MODE:
@@ -3896,8 +4013,29 @@ static bool config_parse_bool_arg(const char *value, const char *name,
   return true;
 }
 
-// Loads one player's PAT usage options (patcand, patclasses, patrollout and
-// patrolloutclasses, each global or per player) into players_data.
+// The name of a lexicon's own pre-endgame adjustments: what pegfit writes by
+// default, and what a player set to auto plays with. The caller frees.
+static char *config_lexicon_peg_adjust_name(const char *lexicon) {
+  return get_formatted_string("%s%s", lexicon, LEXICON_PEG_ADJUST_SUFFIX);
+}
+
+// Whether a pat or pegadjust option's value returns the choice to the
+// player's lexicon: auto, as the table options say it, or default.
+static bool config_arg_value_is_auto(const char *value) {
+  return strings_iequal(value, "auto") || strings_iequal(value, "default");
+}
+
+// Whether a player's PAT weights or pre-endgame adjustments are on auto
+// until an option sets them: the weights everywhere, the adjustments where
+// the tables are (see ConfigArgs).
+static bool config_lexicon_data_starts_auto(const Config *config,
+                                            players_data_t type) {
+  return type == PLAYERS_DATA_TYPE_PAT || config->auto_tables;
+}
+
+// Loads one player's PAT usage options (patcand, patclasses, patrollout,
+// patrolloutclasses and patrolloutfast, each global or per player) into
+// players_data.
 static void config_load_player_pat_usage(Config *config, int player_index,
                                          ErrorStack *error_stack) {
   PlayersData *players_data = config->players_data;
@@ -3920,6 +4058,16 @@ static void config_load_player_pat_usage(Config *config, int player_index,
       return;
     }
     players_data_set_pat_rollout_disabled(players_data, player_index, !enabled);
+  }
+  value = config_get_player_arg_value(
+      config, ARG_TOKEN_PAT_ROLLOUT_FAST, ARG_TOKEN_P1_PAT_ROLLOUT_FAST,
+      ARG_TOKEN_P2_PAT_ROLLOUT_FAST, player_index);
+  if (value) {
+    if (!config_parse_bool_arg(value, "patrolloutfast", &enabled,
+                               error_stack)) {
+      return;
+    }
+    players_data_set_pat_rollout_exact(players_data, player_index, !enabled);
   }
   value = config_get_player_arg_value(config, ARG_TOKEN_PAT_CLASSES,
                                       ARG_TOKEN_P1_PAT_CLASSES,
@@ -3955,6 +4103,8 @@ static void config_set_sim_args_pat_rollout(const Config *config,
   sim_args->pat_rollout_disabled_classes_mask =
       players_data_get_pat_rollout_disabled_classes_mask(config->players_data,
                                                          player_index);
+  sim_args->pat_rollout_exact =
+      players_data_get_pat_rollout_exact(config->players_data, player_index);
 }
 
 void config_fill_sim_args(const Config *config, Rack *known_opp_rack,
@@ -3982,6 +4132,7 @@ void config_fill_sim_args(const Config *config, Rack *known_opp_rack,
       config->sim_margin_forecast, &inference_args, sim_args);
   sim_args->bag_cycle = config->sim_bag_cycle;
   sim_args->use_census_rollout = config->sim_census_rollout;
+  sim_args->census_rollout_auto = config->sim_census_rollout_auto;
   if (config->game) {
     config_set_sim_args_pat_rollout(
         config, game_get_player_on_turn_index(config->game), sim_args);
@@ -5506,6 +5657,8 @@ void config_fill_autoplay_args(const Config *config,
             .pat_rollout_disabled_classes_mask =
                 players_data_get_pat_rollout_disabled_classes_mask(
                     config->players_data, player_index),
+            .pat_rollout_exact = players_data_get_pat_rollout_exact(
+                config->players_data, player_index),
             .sim_bag_cycle = player_index == 0 ? config->p1_sim_bag_cycle
                                                : config->p2_sim_bag_cycle,
         };
@@ -5781,6 +5934,87 @@ void impl_pat_gen(Config *config, ErrorStack *error_stack) {
   config_autoplay(config, config->autoplay_results, AUTOPLAY_TYPE_PAT_GEN,
                   games_per_gen_str, 0, /*forced_racks=*/NULL,
                   /*num_forced_racks=*/0, output_name, error_stack);
+}
+
+// Pre-endgame fit
+
+void impl_peg_fit(Config *config, ErrorStack *error_stack) {
+  if (!config_has_game_data(config)) {
+    error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
+                     string_duplicate("cannot fit pre-endgame adjustments "
+                                      "without lexicon"));
+    return;
+  }
+  int number_of_games;
+  string_to_int_or_push_error(
+      "games", config_get_parg_value(config, ARG_TOKEN_PEG_FIT, 0), 1, INT_MAX,
+      ERROR_STATUS_CONFIG_LOAD_MALFORMED_INT_ARG, &number_of_games,
+      error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  int rollouts_per_class;
+  string_to_int_or_push_error(
+      "rollouts", config_get_parg_value(config, ARG_TOKEN_PEG_FIT, 1), 1,
+      INT_MAX, ERROR_STATUS_CONFIG_LOAD_MALFORMED_INT_ARG, &rollouts_per_class,
+      error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  int endgame_plies;
+  string_to_int_or_push_error(
+      "endgame plies", config_get_parg_value(config, ARG_TOKEN_PEG_FIT, 2), 0,
+      MAX_VARIANT_LENGTH, ERROR_STATUS_CONFIG_LOAD_MALFORMED_INT_ARG,
+      &endgame_plies, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  // The most tiles a fitted play leaves in the bag, which sets the table's
+  // length.
+  int tiles_left = PEG_ADJUST_STANDARD_VALUES_LENGTH - RACK_SIZE - 1;
+  const char *tiles_left_arg =
+      config_get_parg_value(config, ARG_TOKEN_PEG_FIT, 4);
+  if (tiles_left_arg) {
+    string_to_int_or_push_error("tiles left", tiles_left_arg, 0,
+                                PEG_ADJUST_MAX_VALUES_LENGTH - RACK_SIZE - 1,
+                                ERROR_STATUS_CONFIG_LOAD_MALFORMED_INT_ARG,
+                                &tiles_left, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+  }
+  // Self-play fits the one table both players play with.
+  if (players_data_get_peg_adjust(config->players_data, 0) !=
+      players_data_get_peg_adjust(config->players_data, 1)) {
+    error_stack_push(error_stack, ERROR_STATUS_PEG_FIT_DIFFERENT_TABLES,
+                     string_duplicate("cannot fit pre-endgame adjustments "
+                                      "when the players have different "
+                                      "adjustments loaded"));
+    return;
+  }
+  config_init_game(config);
+  const char *output_name = config_get_parg_value(config, ARG_TOKEN_PEG_FIT, 3);
+  char *default_output_name = NULL;
+  if (!output_name) {
+    default_output_name = config_lexicon_peg_adjust_name(
+        kwg_get_name(player_get_kwg(game_get_player(config->game, 0))));
+    output_name = default_output_name;
+  }
+  const PegFitArgs args = {
+      .game = config->game,
+      .number_of_games = number_of_games,
+      .rollouts_per_class = rollouts_per_class,
+      .endgame_plies = endgame_plies,
+      .number_of_values = RACK_SIZE + tiles_left + 1,
+      .tt_fraction_of_mem = config->tt_fraction_of_mem,
+      .output_name = output_name,
+      .data_paths = config->data_paths,
+      .seed = config_get_seed(config),
+      .number_of_threads = config_get_num_threads(config),
+      .thread_control = config->thread_control,
+  };
+  peg_fit(&args, error_stack);
+  free(default_output_name);
 }
 
 // Create
@@ -8263,8 +8497,25 @@ static int64_t config_table_file_bytes(const Config *config, const char *name,
   return bytes;
 }
 
+// The PAT weights a player gets when no pat option has named any: those
+// named after its lexicon, when a file of them is on the data paths, and
+// otherwise none (NULL). Those are weights for the standard board, so a
+// build for another size has no default. The caller owns the name.
+static char *config_default_pat_name(const Config *config, int player_index) {
+  const char *lexicon_name = players_data_get_data_name(
+      config->players_data, PLAYERS_DATA_TYPE_KWG, player_index);
+  // NOLINTNEXTLINE(misc-redundant-expression)
+  if (BOARD_DIM != DEFAULT_BOARD_DIM || lexicon_name == NULL ||
+      config_table_file_bytes(config, lexicon_name, DATA_FILEPATH_TYPE_PAT) <
+          0) {
+    return NULL;
+  }
+  return string_duplicate(lexicon_name);
+}
+
 // What a table type (WMP, WIT or RIT) is on disk, to contribute's chooser,
-// and to the player.
+// and to the player. The pre-endgame adjustments have a file and a name
+// only, to be left out by: nothing chooses them, and they speed nothing up.
 typedef struct ConfigTableKind {
   data_filepath_t file_type;
   contribute_table_role_t role;
@@ -8281,6 +8532,10 @@ static ConfigTableKind config_table_kind(players_data_t type) {
     return (ConfigTableKind){DATA_FILEPATH_TYPE_WORD_INFO_TABLE,
                              CONTRIBUTE_TABLE_WIT, "simulation about 9% faster",
                              "word info table"};
+  case PLAYERS_DATA_TYPE_PEG_ADJUST:
+    return (ConfigTableKind){DATA_FILEPATH_TYPE_PEG_ADJUST,
+                             NUMBER_OF_CONTRIBUTE_TABLE_ROLES, NULL,
+                             "pre-endgame adjustments"};
   default:
     return (ConfigTableKind){DATA_FILEPATH_TYPE_RACK_INFO_TABLE,
                              CONTRIBUTE_TABLE_RIT,
@@ -8692,9 +8947,10 @@ config_wordmap_for_first_use(Config *config, int player_index,
   return lexicon;
 }
 
-// Loads a table option's value into *use and *automatic: true or false, or
-// auto, which uses the table when this machine has room for it (and sets
-// *use, the setting's "wanted"). Leaves both when the option is absent.
+// Loads a table option's value (or -scensus's) into *use and *automatic: true
+// or false, or auto, which uses the table when this machine has room for it
+// (and sets *use, the setting's "wanted"). Leaves both when the option is
+// absent.
 static void config_load_table_setting(const Config *config,
                                       arg_token_t arg_token, bool *use,
                                       bool *automatic,
@@ -9815,6 +10071,111 @@ static void config_load_lexicon_dependent_data_internal(
   free(updated_ld_name);
 }
 
+// ----- Pre-endgame adjustments (-pegadjust) -----
+
+// Applies the pre-endgame adjustment options of the command being loaded. A
+// player's setting is a table's name, none, or auto (see
+// config_load_auto_peg_adjust), as for the PAT weights (see
+// config_load_data). The "pegadjust1" and "pegadjust2" options
+// override "pegadjust", and an unset option keeps the player's setting. A
+// named table that cannot be loaded is an error, which leaves the settings
+// and the tables as they were.
+static void config_load_peg_adjust_options(Config *config,
+                                           ErrorStack *error_stack) {
+  const players_data_t type = PLAYERS_DATA_TYPE_PEG_ADJUST;
+  bool player_auto[2];
+  // Copies, since loading may free the table a loaded name belongs to.
+  char *names[2];
+  bool any_set = false;
+  for (int player_idx = 0; player_idx < 2; player_idx++) {
+    const char *value = config_get_player_arg_value(
+        config, ARG_TOKEN_PEG_ADJUST, ARG_TOKEN_P1_PEG_ADJUST,
+        ARG_TOKEN_P2_PEG_ADJUST, player_idx);
+    player_auto[player_idx] = config->table_auto[type][player_idx];
+    // A player set to auto keeps its table until its lexicon is loaded.
+    const char *name =
+        players_data_get_data_name(config->players_data, type, player_idx);
+    if (value) {
+      any_set = true;
+      player_auto[player_idx] = config_arg_value_is_auto(value);
+      if (!player_auto[player_idx]) {
+        name = strings_iequal(value, "none") ? NULL : value;
+      }
+    }
+    names[player_idx] = string_duplicate_allow_null(name);
+  }
+  if (any_set) {
+    players_data_set(config->players_data, type, config->data_paths, names[0],
+                     names[1], false, error_stack);
+    if (error_stack_is_empty(error_stack)) {
+      config->table_auto[type][0] = player_auto[0];
+      config->table_auto[type][1] = player_auto[1];
+    }
+  }
+  free(names[0]);
+  free(names[1]);
+}
+
+// Whether the command being executed trains static values: the leaves
+// (leavegen, census), PAT weights (patgen), or the pre-endgame adjustments
+// themselves (pegfit).
+static bool config_exec_trains_static_values(const Config *config) {
+  return config->exec_parg_token == ARG_TOKEN_LEAVE_GEN ||
+         config->exec_parg_token == ARG_TOKEN_CENSUS ||
+         config->exec_parg_token == ARG_TOKEN_PAT_GEN ||
+         config->exec_parg_token == ARG_TOKEN_PEG_FIT;
+}
+
+// Loads the pre-endgame adjustments of each player set to auto: its lexicon's
+// own, <lexicon>_pegadjust, where the data has them, so that the table
+// follows the lexicon; a lexicon without a table is played without one. As
+// with the other tables under auto, a table that cannot be loaded is said
+// once and left out rather than an error. The commands that train static
+// values play without the table for their load, so that what they train
+// does not depend on the tables the data happens to hold, and pegfit does
+// not refit on top of the table it is about to replace; the settings stand.
+static void config_load_auto_peg_adjust(Config *config,
+                                        ErrorStack *error_stack) {
+  const players_data_t type = PLAYERS_DATA_TYPE_PEG_ADJUST;
+  const bool plays_without = config_exec_trains_static_values(config);
+  // Copies, since loading may free the table a loaded name belongs to.
+  char *names[2];
+  bool any_changed = false;
+  for (int player_idx = 0; player_idx < 2; player_idx++) {
+    const char *loaded_name =
+        players_data_get_data_name(config->players_data, type, player_idx);
+    if (!config->table_auto[type][player_idx]) {
+      names[player_idx] = string_duplicate_allow_null(loaded_name);
+      continue;
+    }
+    names[player_idx] = NULL;
+    const char *lexicon = players_data_get_data_name(
+        config->players_data, PLAYERS_DATA_TYPE_KWG, player_idx);
+    if (lexicon && !plays_without) {
+      char *name = config_lexicon_peg_adjust_name(lexicon);
+      if (config_table_file_bytes(config, name,
+                                  DATA_FILEPATH_TYPE_PEG_ADJUST) >= 0 &&
+          !config_table_is_left_out(config, type, player_idx, name)) {
+        names[player_idx] = name;
+      } else {
+        free(name);
+      }
+    }
+    if (!strings_equal(names[player_idx], loaded_name)) {
+      any_changed = true;
+    }
+  }
+  if (any_changed) {
+    const char *p1_name = names[0];
+    const char *p2_name = names[1];
+    const char **names_to_load[2] = {&p1_name, &p2_name};
+    config_load_tables_or_leave_out(config, type, names_to_load,
+                                    /*use_mmap=*/false, error_stack);
+  }
+  free(names[0]);
+  free(names[1]);
+}
+
 // The lexical data each player borrows. Data reloaded under a new name can
 // land at the freed data's address, so the name is kept as well as the
 // pointer.
@@ -9895,6 +10256,9 @@ static void config_rebuild_lexical_games(Config *config) {
 // the endgame results still borrow until they are rebuilt. A new letter
 // distribution instead drops the game and the results (see
 // config_invalidate_everything), since their racks and bag no longer fit.
+// The pre-endgame adjustments of the players set to auto are part of the
+// load, whoever loads the lexicon: a command, a game file, or the way back
+// from one that failed to load.
 void config_load_lexicon_dependent_data(
     Config *config, const char *new_lexicon_name,
     const char *new_p1_lexicon_name, const char *new_p2_lexicon_name,
@@ -9917,6 +10281,9 @@ void config_load_lexicon_dependent_data(
       use_rit_has_value, p1_use_rit_has_value, p2_use_rit_has_value,
       use_mmap_for_rit_has_value, use_wit_has_value, p1_use_wit_has_value,
       p2_use_wit_has_value, disable_rit, is_loading_game_history, error_stack);
+  if (error_stack_is_empty(error_stack)) {
+    config_load_auto_peg_adjust(config, error_stack);
+  }
   if (!config->ld_changed && config->ld &&
       !lexical_data_identity_matches(config->players_data, &identity_before)) {
     config_rebuild_lexical_games(config);
@@ -12459,6 +12826,7 @@ void config_contribute_reset_shared_settings(Config *config) {
   config->sim_margin_forecast = false;
   config->sim_bag_cycle = true;
   config->sim_census_rollout = false;
+  config->sim_census_rollout_auto = false;
 }
 
 // Applies the run-wide settings a task request states, on top of
@@ -12803,8 +13171,83 @@ static char *config_contribute_games(Config *config, const JsonValue *request,
       autoplay_results_get_json(config->autoplay_results, game_pairs));
 }
 
+// A candidate move as the server sends it, in the form a ranked play's "move"
+// is reported (move_get_string), rewritten where the move parser reads it
+// differently: an exchange is reported "(exch ABC)" and parsed "ex ABC". A
+// placement ("8H HADJI", "H8 HADJI") and a pass read the same both ways.
+// Returns a new string the caller frees.
+static char *contribute_candidate_to_parsable(const char *candidate) {
+  static const char exch_prefix[] = "(exch ";
+  const size_t prefix_length = sizeof(exch_prefix) - 1;
+  const size_t length = string_length(candidate);
+  if (length > prefix_length + 1 &&
+      strncmp(candidate, exch_prefix, prefix_length) == 0 &&
+      candidate[length - 1] == ')') {
+    return get_formatted_string("ex %.*s", (int)(length - prefix_length - 1),
+                                candidate + prefix_length);
+  }
+  return string_duplicate(candidate);
+}
+
+// The rack's move list is the candidates the server sent, each validated
+// against the empty board and the rack just drawn: a move the rack cannot
+// make, a phony, or one listed twice is the server's error, refused rather
+// than ranked. The list is not regenerated, so the simulation that follows
+// ranks exactly these (up to the player's num_plays).
+static bool contribute_load_candidates(Config *config, const char *rack_str,
+                                       const JsonValue *candidates,
+                                       ErrorStack *error_stack) {
+  const int count = json_array_length(candidates);
+  if (!json_is_array(candidates) || count < 1) {
+    error_stack_push(error_stack, ERROR_STATUS_CONTRIBUTE_SERVER_ERROR,
+                     get_formatted_string(
+                         "server sent no candidates for rack '%s'", rack_str));
+    return false;
+  }
+  const int player_index = game_get_player_on_turn_index(config->game);
+  config_recreate_move_list(config, count, MOVE_LIST_TYPE_DEFAULT);
+  for (int i = 0; i < count; i++) {
+    const char *candidate = json_array_get_string(candidates, i);
+    if (!candidate || is_string_empty_or_whitespace(candidate)) {
+      error_stack_push(
+          error_stack, ERROR_STATUS_CONTRIBUTE_SERVER_ERROR,
+          get_formatted_string(
+              "candidate %d for rack '%s' is not a nonempty string", i,
+              rack_str));
+      return false;
+    }
+    char *parsable = contribute_candidate_to_parsable(candidate);
+    ErrorStack *move_errors = error_stack_create();
+    ValidatedMoves *vms =
+        validated_moves_create(config->game, player_index, parsable,
+                               /*allow_phonies=*/false,
+                               /*allow_playthrough=*/false, move_errors);
+    const bool valid = error_stack_is_empty(move_errors) &&
+                       validated_moves_get_number_of_moves(vms) == 1;
+    const bool repeated =
+        valid && move_list_move_exists(config->move_list,
+                                       validated_moves_get_move(vms, 0));
+    if (valid && !repeated) {
+      validated_moves_add_to_sorted_move_list(vms, config->move_list);
+    }
+    validated_moves_destroy(vms);
+    error_stack_destroy(move_errors);
+    free(parsable);
+    if (!valid || repeated) {
+      error_stack_push(
+          error_stack, ERROR_STATUS_CONTRIBUTE_SERVER_ERROR,
+          get_formatted_string(
+              "candidate '%s' for rack '%s' is %s", candidate, rack_str,
+              repeated ? "listed twice" : "not a valid play of the rack"));
+      return false;
+    }
+  }
+  return true;
+}
+
 bool config_contribute_generate_for_rack(Config *config, const char *rack_str,
                                          uint64_t seed, bool simming,
+                                         const JsonValue *candidates,
                                          ErrorStack *error_stack) {
   config_init_game(config);
   game_reset(config->game);
@@ -12826,6 +13269,18 @@ bool config_contribute_generate_for_rack(Config *config, const char *rack_str,
   // Simulating needs a move list to simulate over; the CLI's "simulate"
   // command relies on the user already having run "generate", but a task
   // request has no such prior step to reuse.
+  if (candidates) {
+    // Only a simulation ranks a fixed set: a static player's ranking of its
+    // candidates is their order by equity, which the server already has.
+    if (!simming) {
+      error_stack_push(
+          error_stack, ERROR_STATUS_CONTRIBUTE_SERVER_ERROR,
+          string_duplicate("server sent candidates for a static player"));
+      return false;
+    }
+    return contribute_load_candidates(config, rack_str, candidates,
+                                      error_stack);
+  }
   if (!simming) {
     impl_move_gen(config, error_stack);
     return error_stack_is_empty(error_stack);
@@ -12855,13 +13310,12 @@ bool config_contribute_generate_for_rack(Config *config, const char *rack_str,
 // executor used to derive one from the rack's letters, which was the same on
 // every machine but not the server's to choose; every task now states a seed,
 // this one included, so what a simulation samples is a function of the task.
-static bool
-config_contribute_analyze_rack_searching(Config *config, const char *rack_str,
-                                         uint64_t seed, const JsonValue *player,
-                                         bool simming, StringBuilder *sb,
-                                         ErrorStack *error_stack) {
+static bool config_contribute_analyze_rack_searching(
+    Config *config, const char *rack_str, uint64_t seed,
+    const JsonValue *player, bool simming, const JsonValue *candidates,
+    StringBuilder *sb, ErrorStack *error_stack) {
   if (!config_contribute_generate_for_rack(config, rack_str, seed, simming,
-                                           error_stack)) {
+                                           candidates, error_stack)) {
     return false;
   }
   if (simming) {
@@ -12909,20 +13363,20 @@ config_contribute_analyze_rack_searching(Config *config, const char *rack_str,
 
 // One rack's analysis, within the player's movegen budget for it if it has
 // one: the rack is the opening-rack job's move.
-static bool config_contribute_analyze_rack(Config *config, const char *rack_str,
-                                           uint64_t seed,
-                                           const JsonValue *player,
-                                           bool simming, StringBuilder *sb,
-                                           ErrorStack *error_stack) {
+static bool
+config_contribute_analyze_rack(Config *config, const char *rack_str,
+                               uint64_t seed, const JsonValue *player,
+                               bool simming, const JsonValue *candidates,
+                               StringBuilder *sb, ErrorStack *error_stack) {
   if (config->movegen_budget == 0) {
     return config_contribute_analyze_rack_searching(
-        config, rack_str, seed, player, simming, sb, error_stack);
+        config, rack_str, seed, player, simming, candidates, sb, error_stack);
   }
   MovegenBudget budget;
   movegen_budget_init(&budget, config->movegen_budget);
   MovegenBudget *previous = gen_set_movegen_budget(&budget);
   const bool ok = config_contribute_analyze_rack_searching(
-      config, rack_str, seed, player, simming, sb, error_stack);
+      config, rack_str, seed, player, simming, candidates, sb, error_stack);
   (void)gen_set_movegen_budget(previous);
   return ok;
 }
@@ -12951,6 +13405,23 @@ static char *config_contribute_opening_rack(Config *config,
     error_stack_push(
         error_stack, ERROR_STATUS_CONTRIBUTE_SERVER_ERROR,
         string_duplicate("server sent an opening rack task with no racks"));
+    return NULL;
+  }
+  // Optional, and when present an array parallel to the racks: element i is
+  // the moves rack i ranks instead of every play (a later pass over a rack's
+  // first-pass leaders). Null means none, as absent does.
+  const JsonValue *candidates =
+      json_object_get(request, CONTRIBUTE_KEY_CANDIDATES);
+  if (candidates && json_is_null(candidates)) {
+    candidates = NULL;
+  }
+  if (candidates && (!json_is_array(candidates) ||
+                     json_array_length(candidates) != rack_count)) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_CONTRIBUTE_SERVER_ERROR,
+        get_formatted_string("server sent candidates that are not an array "
+                             "with one element per rack (%d racks)",
+                             rack_count));
     return NULL;
   }
   // Required, as it is for games and leave generation: rack i of the batch is
@@ -13050,8 +13521,10 @@ static char *config_contribute_opening_rack(Config *config,
     if (i > 0) {
       string_builder_add_string(sb, ",");
     }
-    if (!config_contribute_analyze_rack(config, rack_str, seed + (uint64_t)i,
-                                        player, simming, sb, error_stack)) {
+    if (!config_contribute_analyze_rack(
+            config, rack_str, seed + (uint64_t)i, player, simming,
+            candidates ? json_array_get(candidates, i) : NULL, sb,
+            error_stack)) {
       string_builder_destroy(sb);
       return NULL;
     }
@@ -14533,8 +15006,9 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
     return;
   }
 
-  config_load_bool(config, ARG_TOKEN_SIM_CENSUS_ROLLOUT,
-                   &config->sim_census_rollout, error_stack);
+  config_load_table_setting(config, ARG_TOKEN_SIM_CENSUS_ROLLOUT,
+                            &config->sim_census_rollout,
+                            &config->sim_census_rollout_auto, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
@@ -14824,6 +15298,13 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
   const bool p2_use_wit =
       config_get_parg_value(config, ARG_TOKEN_P2_USE_WIT, 0);
 
+  // The pre-endgame adjustment options come first, so that the lexicon's
+  // load resolves the players set to auto as this command leaves them.
+  config_load_peg_adjust_options(config, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
   config_load_lexicon_dependent_data(
       config, new_lexicon_name, new_p1_lexicon_name, new_p2_lexicon_name,
       new_leaves_name, new_p1_leaves_name, new_p2_leaves_name, new_ld_name,
@@ -14851,8 +15332,10 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
   // checked, only if something needs it.
   const char *new_win_pct_name =
       config_get_parg_value(config, ARG_TOKEN_WIN_PCT, 0);
+  // The table named before, put back if the new one fails to load, so a
+  // bad -winpct is not left behind for the next sim to fail on.
+  char *previous_win_pct_explicit_name = config->win_pct_explicit_name;
   if (new_win_pct_name != NULL) {
-    free(config->win_pct_explicit_name);
     config->win_pct_explicit_name =
         strings_equal(new_win_pct_name, DEFAULT_WIN_PCT_ARG)
             ? NULL
@@ -14861,9 +15344,17 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
   if (config->win_pct_explicit_name != NULL) {
     config_ensure_win_pcts(config, error_stack);
     if (!error_stack_is_empty(error_stack)) {
+      if (new_win_pct_name != NULL) {
+        free(config->win_pct_explicit_name);
+        config->win_pct_explicit_name = previous_win_pct_explicit_name;
+      }
       return;
     }
-  } else if (config->win_pcts != NULL) {
+  }
+  if (new_win_pct_name != NULL) {
+    free(previous_win_pct_explicit_name);
+  }
+  if (config->win_pct_explicit_name == NULL && config->win_pcts != NULL) {
     char *target_name = config_win_pct_target_name(config);
     ErrorStack *coverage_errors = error_stack_create();
     config_check_win_pct_coverage(config, coverage_errors);
@@ -14877,57 +15368,55 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
     free(target_name);
   }
 
-  // Set the PAT weights - opt-in and per-player. The "pat1" and
-  // "pat2" args override the "pat" arg; "none" unloads. Unlike leaves, an
-  // unset arg means "keep whatever is currently loaded", which for a fresh
-  // config is nothing.
-  const char *new_pat_name = config_get_parg_value(config, ARG_TOKEN_PAT, 0);
-  const char *new_p1_pat_name = new_pat_name;
-  const char *new_p2_pat_name = new_pat_name;
-  if (config_get_parg_num_set_values(config, ARG_TOKEN_P1_PAT) > 0) {
-    new_p1_pat_name = config_get_parg_value(config, ARG_TOKEN_P1_PAT, 0);
-  }
-  if (config_get_parg_num_set_values(config, ARG_TOKEN_P2_PAT) > 0) {
-    new_p2_pat_name = config_get_parg_value(config, ARG_TOKEN_P2_PAT, 0);
-  }
-  if (new_p1_pat_name || new_p2_pat_name) {
-    char *updated_p1_pat_name = NULL;
-    if (new_p1_pat_name) {
-      updated_p1_pat_name = string_duplicate(new_p1_pat_name);
-    } else {
-      const char *existing_p1_pat_name = players_data_get_data_name(
-          config->players_data, PLAYERS_DATA_TYPE_PAT, 0);
-      if (existing_p1_pat_name) {
-        updated_p1_pat_name = string_duplicate(existing_p1_pat_name);
+  // Set the PAT weights, per player. A player's setting is the weights'
+  // name, none, or auto, as for the pre-endgame adjustments (see
+  // config_load_peg_adjust_options): auto, which every player starts on,
+  // gives it its lexicon's weights when there are any (see
+  // config_default_pat_name), and a name or none stays as given until auto
+  // returns the choice to the lexicon. The "pat1" and "pat2" args override
+  // the "pat" arg, and an unset arg keeps the player's setting. Weights that
+  // cannot be loaded are an error, which leaves the settings and the weights
+  // as they were.
+  bool pat_auto[2];
+  // Copies, since loading may free the weights an existing name belongs to.
+  char *updated_pat_names[2];
+  bool pat_names_changed = false;
+  for (int player_index = 0; player_index < 2; player_index++) {
+    const char *existing_name = players_data_get_data_name(
+        config->players_data, PLAYERS_DATA_TYPE_PAT, player_index);
+    const char *value =
+        config_get_player_arg_value(config, ARG_TOKEN_PAT, ARG_TOKEN_P1_PAT,
+                                    ARG_TOKEN_P2_PAT, player_index);
+    pat_auto[player_index] =
+        value ? config_arg_value_is_auto(value)
+              : config->table_auto[PLAYERS_DATA_TYPE_PAT][player_index];
+    if (pat_auto[player_index]) {
+      updated_pat_names[player_index] =
+          config_default_pat_name(config, player_index);
+      if (!strings_equal(updated_pat_names[player_index], existing_name)) {
+        pat_names_changed = true;
       }
-    }
-    char *updated_p2_pat_name = NULL;
-    if (new_p2_pat_name) {
-      updated_p2_pat_name = string_duplicate(new_p2_pat_name);
+    } else if (value) {
+      updated_pat_names[player_index] =
+          strings_iequal(value, "none") ? NULL : string_duplicate(value);
+      pat_names_changed = true;
     } else {
-      const char *existing_p2_pat_name = players_data_get_data_name(
-          config->players_data, PLAYERS_DATA_TYPE_PAT, 1);
-      if (existing_p2_pat_name) {
-        updated_p2_pat_name = string_duplicate(existing_p2_pat_name);
-      }
+      updated_pat_names[player_index] =
+          string_duplicate_allow_null(existing_name);
     }
-    const char *p1_pat_name_or_null = updated_p1_pat_name;
-    if (p1_pat_name_or_null && strings_iequal(p1_pat_name_or_null, "none")) {
-      p1_pat_name_or_null = NULL;
-    }
-    const char *p2_pat_name_or_null = updated_p2_pat_name;
-    if (p2_pat_name_or_null && strings_iequal(p2_pat_name_or_null, "none")) {
-      p2_pat_name_or_null = NULL;
-    }
+  }
+  if (pat_names_changed) {
     players_data_set(config->players_data, PLAYERS_DATA_TYPE_PAT,
-                     config->data_paths, p1_pat_name_or_null,
-                     p2_pat_name_or_null, false, error_stack);
-    free(updated_p1_pat_name);
-    free(updated_p2_pat_name);
-    if (!error_stack_is_empty(error_stack)) {
-      return;
-    }
+                     config->data_paths, updated_pat_names[0],
+                     updated_pat_names[1], false, error_stack);
   }
+  free(updated_pat_names[0]);
+  free(updated_pat_names[1]);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  config->table_auto[PLAYERS_DATA_TYPE_PAT][0] = pat_auto[0];
+  config->table_auto[PLAYERS_DATA_TYPE_PAT][1] = pat_auto[1];
 
   // How each player uses its PAT weights. The global option sets both
   // players and the per-player one overrides it; unset means "keep what is
@@ -15020,7 +15509,7 @@ void config_execute_command(Config *config, ErrorStack *error_stack) {
     config_get_parg_exec_func(config, config->exec_parg_token)(config,
                                                                error_stack);
     config_report_movegen_limit(config, gen_stop_movegen_limit());
-    if (config->print_on_finish && config->loaded_settings) {
+    if (config->print_on_finish) {
       char *finished_msg = get_status_finished_str(config);
       thread_control_print(config_get_thread_control(config), finished_msg);
       free(finished_msg);
@@ -15312,6 +15801,15 @@ void execute_pat_gen(Config *config, ErrorStack *error_stack) {
 
 char *str_api_pat_gen(Config *config, ErrorStack *error_stack) {
   impl_pat_gen(config, error_stack);
+  return empty_string();
+}
+
+void execute_peg_fit(Config *config, ErrorStack *error_stack) {
+  impl_peg_fit(config, error_stack);
+}
+
+char *str_api_peg_fit(Config *config, ErrorStack *error_stack) {
+  impl_peg_fit(config, error_stack);
   return empty_string();
 }
 
@@ -16326,6 +16824,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   cmd(ARG_TOKEN_CENSUS, "census", 1, 3, census, generic, false);
   cmd(ARG_TOKEN_LEAVE_BLEND, "leaveblend", 4, 4, leave_blend, generic, false);
   cmd(ARG_TOKEN_PAT_GEN, "patgen", 1, 2, pat_gen, generic, false);
+  cmd(ARG_TOKEN_PEG_FIT, "pegfit", 3, 5, peg_fit, generic, false);
   cmd(ARG_TOKEN_CREATE_DATA, "createdata", 2, 3, create_data, generic, false);
   cmd(ARG_TOKEN_NEXT, "next", 0, 0, next, generic, true);
   cmd(ARG_TOKEN_PREVIOUS, "previous", 0, 0, previous, generic, true);
@@ -16351,6 +16850,8 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_PAT_CANDIDATES, "patcand", 1, 1);
   arg(ARG_TOKEN_PAT_ROLLOUT, "patrollout", 1, 1);
   arg(ARG_TOKEN_PAT_ROLLOUT_CLASSES, "patrolloutclasses", 1, 1);
+  arg(ARG_TOKEN_PAT_ROLLOUT_FAST, "patrolloutfast", 1, 1);
+  arg(ARG_TOKEN_PEG_ADJUST, "pegadjust", 1, 1);
   arg(ARG_TOKEN_P1_LEXICON, "l1", 1, 1);
   arg(ARG_TOKEN_P1_USE_WMP, "w1", 1, 1);
   arg(ARG_TOKEN_P1_USE_RIT, "rit1", 1, 1);
@@ -16361,6 +16862,8 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_P1_PAT_CANDIDATES, "patcand1", 1, 1);
   arg(ARG_TOKEN_P1_PAT_ROLLOUT, "patrollout1", 1, 1);
   arg(ARG_TOKEN_P1_PAT_ROLLOUT_CLASSES, "patrolloutclasses1", 1, 1);
+  arg(ARG_TOKEN_P1_PAT_ROLLOUT_FAST, "patrolloutfast1", 1, 1);
+  arg(ARG_TOKEN_P1_PEG_ADJUST, "pegadjust1", 1, 1);
   arg(ARG_TOKEN_P1_MOVE_SORT_TYPE, "s1", 1, 1);
   arg(ARG_TOKEN_P1_MOVE_RECORD_TYPE, "r1", 1, 1);
   arg(ARG_TOKEN_P2_LEXICON, "l2", 1, 1);
@@ -16373,6 +16876,8 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_P2_PAT_CANDIDATES, "patcand2", 1, 1);
   arg(ARG_TOKEN_P2_PAT_ROLLOUT, "patrollout2", 1, 1);
   arg(ARG_TOKEN_P2_PAT_ROLLOUT_CLASSES, "patrolloutclasses2", 1, 1);
+  arg(ARG_TOKEN_P2_PAT_ROLLOUT_FAST, "patrolloutfast2", 1, 1);
+  arg(ARG_TOKEN_P2_PEG_ADJUST, "pegadjust2", 1, 1);
   arg(ARG_TOKEN_P2_MOVE_SORT_TYPE, "s2", 1, 1);
   arg(ARG_TOKEN_P2_MOVE_RECORD_TYPE, "r2", 1, 1);
   arg(ARG_TOKEN_WIN_PCT, "winpct", 1, 1);
@@ -16649,21 +17154,26 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->print_on_finish = false;
   config->show_game_with_moves = true;
   config->show_prompt = true;
-  config->save_settings = false;
+  config->save_settings = true;
   config->autosave_gcg = true;
   config->fg_required = true;
-  config->loaded_settings = true;
   config->game_variant = DEFAULT_GAME_VARIANT;
   config->ld = NULL;
   config->players_data = players_data_create(default_use_wmp);
   // The command line program and the library's magpie_create() use each
-  // table when this machine has room for it; tests, browser games and
+  // table when this machine has room for it, and each lexicon's pre-endgame
+  // adjustments where the data has them; tests, browser games and
   // contribute's task configurations state what they use.
   const bool auto_tables = config_args && config_args->auto_tables;
+  config->auto_tables = auto_tables;
   for (int player_idx = 0; player_idx < 2; player_idx++) {
     config->table_auto[PLAYERS_DATA_TYPE_WMP][player_idx] = auto_tables;
     config->table_auto[PLAYERS_DATA_TYPE_RIT][player_idx] = auto_tables;
     config->table_auto[PLAYERS_DATA_TYPE_WIT][player_idx] = auto_tables;
+    config->table_auto[PLAYERS_DATA_TYPE_PAT][player_idx] =
+        config_lexicon_data_starts_auto(config, PLAYERS_DATA_TYPE_PAT);
+    config->table_auto[PLAYERS_DATA_TYPE_PEG_ADJUST][player_idx] =
+        config_lexicon_data_starts_auto(config, PLAYERS_DATA_TYPE_PEG_ADJUST);
     if (auto_tables) {
       players_data_set_use_when_available(
           config->players_data, PLAYERS_DATA_TYPE_WMP, player_idx, true);
@@ -16676,6 +17186,10 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   // A mapped rack info table starts faster, is shared by the processes using
   // its data directory, and gives the system pages it can reclaim.
   config->use_mmap_for_rit = auto_tables && IS_LITTLE_ENDIAN;
+  // The census steers sims' rollouts when this machine has the memory for
+  // it, wherever the tables are auto.
+  config->sim_census_rollout = auto_tables;
+  config->sim_census_rollout_auto = auto_tables;
   config->auto_table_report = NULL;
   memset(config->table_left_out, 0, sizeof(config->table_left_out));
   memset(config->table_checked, 0, sizeof(config->table_checked));
@@ -16829,11 +17343,99 @@ static void config_add_table_setting_to_string_builder(const Config *config,
                                           player_index));
 }
 
-void config_add_settings_to_string_builder(const Config *config,
-                                           StringBuilder *sb) {
+// A player's PAT weights or pre-endgame adjustments as set: auto, a name, or
+// none. The full settings always say which, since what an unset option
+// means depends on who reads it: the adjustments are auto for the command
+// line program and the library, and none elsewhere. A settings file keeps a
+// choice only, which is a name or whatever else an unset option would not
+// give, so that a player left on auto goes on following its lexicon.
+static void config_add_lexicon_data_setting_to_string_builder(
+    const Config *config, StringBuilder *sb, arg_token_t arg_token,
+    players_data_t type, int player_index, bool saved_only) {
+  const bool is_auto = config->table_auto[type][player_index];
+  const char *value = NULL;
+  if (!is_auto) {
+    value =
+        players_data_get_data_name(config->players_data, type, player_index);
+  }
+  if (saved_only && !value &&
+      is_auto == config_lexicon_data_starts_auto(config, type)) {
+    return;
+  }
+  if (!value) {
+    value = is_auto ? "auto" : "none";
+  }
+  config_add_string_setting_to_string_builder(config, sb, arg_token, value);
+}
+
+// The settings a settings file keeps: those that hold for a whole game or
+// session -- the rules, the lexica and the data that goes with them (leaves,
+// PAT weights, pre-endgame adjustments), and how things are displayed.
+// Settings a command or an analysis tunes (plies, endgame plies, iterations,
+// threads, seeds, the wordmap and the info tables, ...) start from their
+// defaults on every run.
+static const arg_token_t config_saved_settings[] = {
+    ARG_TOKEN_BINGO_BONUS,
+    ARG_TOKEN_CHALLENGE_BONUS,
+    ARG_TOKEN_BOARD_LAYOUT,
+    ARG_TOKEN_GAME_VARIANT,
+    ARG_TOKEN_LETTER_DISTRIBUTION,
+    ARG_TOKEN_LEXICON,
+    ARG_TOKEN_P1_LEXICON,
+    ARG_TOKEN_P2_LEXICON,
+    ARG_TOKEN_LEAVES,
+    ARG_TOKEN_P1_LEAVES,
+    ARG_TOKEN_P2_LEAVES,
+    ARG_TOKEN_PAT,
+    ARG_TOKEN_P1_PAT,
+    ARG_TOKEN_P2_PAT,
+    ARG_TOKEN_PEG_ADJUST,
+    ARG_TOKEN_P1_PEG_ADJUST,
+    ARG_TOKEN_P2_PEG_ADJUST,
+    ARG_TOKEN_WIN_PCT,
+    ARG_TOKEN_SHPLIES,
+    ARG_TOKEN_SHOW_BU,
+    ARG_TOKEN_PEG_OUT_WIDTH,
+    ARG_TOKEN_PEG_OUT_LINES,
+    ARG_TOKEN_MAX_NUMBER_OF_DISPLAY_PLAYS,
+    ARG_TOKEN_HUMAN_READABLE,
+    ARG_TOKEN_PRINT_BOARDS,
+    ARG_TOKEN_BOARD_COLOR,
+    ARG_TOKEN_BOARD_TILE_GLYPHS,
+    ARG_TOKEN_BOARD_BORDER,
+    ARG_TOKEN_BOARD_COLUMN_LABEL,
+    ARG_TOKEN_ON_TURN_MARKER,
+    ARG_TOKEN_ON_TURN_COLOR,
+    ARG_TOKEN_ON_TURN_SCORE_STYLE,
+    ARG_TOKEN_PRETTY,
+    ARG_TOKEN_PRINT_ON_FINISH,
+    ARG_TOKEN_SHOW_GAME_WITH_MOVES,
+    ARG_TOKEN_SHOW_PROMPT,
+    ARG_TOKEN_AUTOSAVE_GCG,
+    ARG_TOKEN_FG_REQUIRED,
+    ARG_TOKEN_SETTINGS_VERSION,
+};
+
+static bool config_setting_is_saved(arg_token_t arg_token) {
+  const int num_saved =
+      (int)(sizeof(config_saved_settings) / sizeof(config_saved_settings[0]));
+  for (int saved_idx = 0; saved_idx < num_saved; saved_idx++) {
+    if (config_saved_settings[saved_idx] == arg_token) {
+      return true;
+    }
+  }
+  return false;
+}
+
+static void config_add_settings_to_string_builder_internal(const Config *config,
+                                                           StringBuilder *sb,
+                                                           bool saved_only) {
   string_builder_add_string(sb, config->pargs[ARG_TOKEN_SET]->name);
   for (arg_token_t arg_token = 0; arg_token < NUMBER_OF_ARG_TOKENS;
        arg_token++) {
+    if (saved_only && !config_setting_is_saved(arg_token)) {
+      continue;
+    }
     switch (arg_token) {
     case ARG_TOKEN_HELP:
     case ARG_TOKEN_VERSION:
@@ -16863,6 +17465,7 @@ void config_add_settings_to_string_builder(const Config *config,
     case ARG_TOKEN_CENSUS:
     case ARG_TOKEN_LEAVE_BLEND:
     case ARG_TOKEN_PAT_GEN:
+    case ARG_TOKEN_PEG_FIT:
     case ARG_TOKEN_CREATE_DATA:
     case ARG_TOKEN_ANALYZE:
     case ARG_TOKEN_LOAD:
@@ -16939,6 +17542,8 @@ void config_add_settings_to_string_builder(const Config *config,
     case ARG_TOKEN_PAT_CANDIDATES:
     case ARG_TOKEN_PAT_ROLLOUT:
     case ARG_TOKEN_PAT_ROLLOUT_CLASSES:
+    case ARG_TOKEN_PAT_ROLLOUT_FAST:
+    case ARG_TOKEN_PEG_ADJUST:
       // Set these values on a per-player basis
       break;
     case ARG_TOKEN_USE_MMAP_FOR_RIT:
@@ -16970,13 +17575,12 @@ void config_add_settings_to_string_builder(const Config *config,
                                      PLAYERS_DATA_TYPE_KLV, 0));
       break;
     case ARG_TOKEN_P1_PAT:
-      // Omitted when no weights are loaded; unloaded is the default.
-      if (players_data_get_pat(config->players_data, 0)) {
-        config_add_string_setting_to_string_builder(
-            config, sb, arg_token,
-            players_data_get_data_name(config->players_data,
-                                       PLAYERS_DATA_TYPE_PAT, 0));
-      }
+      config_add_lexicon_data_setting_to_string_builder(
+          config, sb, arg_token, PLAYERS_DATA_TYPE_PAT, 0, saved_only);
+      break;
+    case ARG_TOKEN_P1_PEG_ADJUST:
+      config_add_lexicon_data_setting_to_string_builder(
+          config, sb, arg_token, PLAYERS_DATA_TYPE_PEG_ADJUST, 0, saved_only);
       break;
     case ARG_TOKEN_P1_PAT_CLASSES: {
       // Omitted when every class applies; that is the default.
@@ -17000,6 +17604,11 @@ void config_add_settings_to_string_builder(const Config *config,
       config_add_bool_setting_to_string_builder(
           config, sb, arg_token,
           !players_data_get_pat_rollout_disabled(config->players_data, 0));
+      break;
+    case ARG_TOKEN_P1_PAT_ROLLOUT_FAST:
+      config_add_bool_setting_to_string_builder(
+          config, sb, arg_token,
+          !players_data_get_pat_rollout_exact(config->players_data, 0));
       break;
     case ARG_TOKEN_P1_PAT_ROLLOUT_CLASSES: {
       char *classes_str = pat_classes_mask_to_string(
@@ -17048,13 +17657,12 @@ void config_add_settings_to_string_builder(const Config *config,
                                      PLAYERS_DATA_TYPE_KLV, 1));
       break;
     case ARG_TOKEN_P2_PAT:
-      // Omitted when no weights are loaded; unloaded is the default.
-      if (players_data_get_pat(config->players_data, 1)) {
-        config_add_string_setting_to_string_builder(
-            config, sb, arg_token,
-            players_data_get_data_name(config->players_data,
-                                       PLAYERS_DATA_TYPE_PAT, 1));
-      }
+      config_add_lexicon_data_setting_to_string_builder(
+          config, sb, arg_token, PLAYERS_DATA_TYPE_PAT, 1, saved_only);
+      break;
+    case ARG_TOKEN_P2_PEG_ADJUST:
+      config_add_lexicon_data_setting_to_string_builder(
+          config, sb, arg_token, PLAYERS_DATA_TYPE_PEG_ADJUST, 1, saved_only);
       break;
     case ARG_TOKEN_P2_PAT_CLASSES: {
       // Omitted when every class applies; that is the default.
@@ -17078,6 +17686,11 @@ void config_add_settings_to_string_builder(const Config *config,
       config_add_bool_setting_to_string_builder(
           config, sb, arg_token,
           !players_data_get_pat_rollout_disabled(config->players_data, 1));
+      break;
+    case ARG_TOKEN_P2_PAT_ROLLOUT_FAST:
+      config_add_bool_setting_to_string_builder(
+          config, sb, arg_token,
+          !players_data_get_pat_rollout_exact(config->players_data, 1));
       break;
     case ARG_TOKEN_P2_PAT_ROLLOUT_CLASSES: {
       char *classes_str = pat_classes_mask_to_string(
@@ -17417,8 +18030,15 @@ void config_add_settings_to_string_builder(const Config *config,
                                                 config->sim_bag_cycle);
       break;
     case ARG_TOKEN_SIM_CENSUS_ROLLOUT:
-      config_add_bool_setting_to_string_builder(config, sb, arg_token,
-                                                config->sim_census_rollout);
+      // Auto as auto, as the table options are saved: what it decides
+      // depends on the machine.
+      if (config->sim_census_rollout_auto) {
+        string_builder_add_formatted_string(sb, " -%s auto",
+                                            config->pargs[arg_token]->name);
+      } else {
+        config_add_bool_setting_to_string_builder(config, sb, arg_token,
+                                                  config->sim_census_rollout);
+      }
       break;
     case ARG_TOKEN_P1_SIM_BAG_CYCLE:
       config_add_bool_setting_to_string_builder(config, sb, arg_token,
@@ -17669,7 +18289,17 @@ void config_add_settings_to_string_builder(const Config *config,
   }
 }
 
-bool config_command_turns_on_save_settings(Config *config, const char *cmd) {
+void config_add_settings_to_string_builder(const Config *config,
+                                           StringBuilder *sb) {
+  config_add_settings_to_string_builder_internal(config, sb, false);
+}
+
+void config_add_saved_settings_to_string_builder(const Config *config,
+                                                 StringBuilder *sb) {
+  config_add_settings_to_string_builder_internal(config, sb, true);
+}
+
+bool config_command_turns_off_save_settings(Config *config, const char *cmd) {
   if (is_string_empty_or_whitespace(cmd)) {
     return false;
   }
@@ -17677,15 +18307,15 @@ bool config_command_turns_on_save_settings(Config *config, const char *cmd) {
   StringSplitter *cmd_split_string = split_string_by_whitespace(cmd, true);
   string_splitter_trim_char(cmd_split_string, ';');
   config_load_parsed_args(config, cmd_split_string, cmd, error_stack);
-  bool save_settings = false;
+  bool save_settings = true;
   if (error_stack_is_empty(error_stack)) {
     config_load_bool(config, ARG_TOKEN_SAVE_SETTINGS, &save_settings,
                      error_stack);
   }
   string_splitter_destroy(cmd_split_string);
-  const bool turns_on = error_stack_is_empty(error_stack) && save_settings;
+  const bool turns_off = error_stack_is_empty(error_stack) && !save_settings;
   error_stack_destroy(error_stack);
-  return turns_on;
+  return turns_off;
 }
 
 // A setting whose default changed in `version`: a settings file older than
@@ -17703,7 +18333,7 @@ static const StaleSetting config_stale_settings[] = {
     {2, ARG_TOKEN_P2_USE_WIT},           {2, ARG_TOKEN_USE_MMAP_FOR_RIT},
     {2, ARG_TOKEN_PEG_NESTED_CAND_CAPS}, {2, ARG_TOKEN_PEG_NESTED_DEPTH},
     {2, ARG_TOKEN_PEG_NESTED_STRIDES},   {2, ARG_TOKEN_ENDGAME_PLIES},
-    {2, ARG_TOKEN_PEG_OUT_WIDTH},
+    {2, ARG_TOKEN_PEG_OUT_WIDTH},        {3, ARG_TOKEN_SIM_CENSUS_ROLLOUT},
 };
 
 // The arg token whose full name is `name` (without its dash), or
@@ -17731,8 +18361,49 @@ static bool config_setting_is_stale(arg_token_t arg_token, int file_version) {
   return false;
 }
 
-char *config_upgrade_settings_line(const Config *config, const char *line) {
-  StringSplitter *items = split_string_by_whitespace(line, true);
+// The settings that load together: a lexicon goes with its letter
+// distribution, leaves, PAT weights and pre-endgame adjustments, and loading
+// them stops at the first that fails, so they are tried in a scratch config
+// before they are applied. A lexicon loaded apart from a saved 'pat none' or
+// 'pegadjust none' would load its own weights or adjustments first.
+static const arg_token_t config_lexicon_settings[] = {
+    ARG_TOKEN_LETTER_DISTRIBUTION,
+    ARG_TOKEN_LEXICON,
+    ARG_TOKEN_P1_LEXICON,
+    ARG_TOKEN_P2_LEXICON,
+    ARG_TOKEN_LEAVES,
+    ARG_TOKEN_P1_LEAVES,
+    ARG_TOKEN_P2_LEAVES,
+    ARG_TOKEN_PAT,
+    ARG_TOKEN_P1_PAT,
+    ARG_TOKEN_P2_PAT,
+    ARG_TOKEN_PEG_ADJUST,
+    ARG_TOKEN_P1_PEG_ADJUST,
+    ARG_TOKEN_P2_PEG_ADJUST,
+};
+
+static bool config_setting_is_lexicon_setting(arg_token_t arg_token) {
+  const int num_lexicon = (int)(sizeof(config_lexicon_settings) /
+                                sizeof(config_lexicon_settings[0]));
+  for (int lexicon_idx = 0; lexicon_idx < num_lexicon; lexicon_idx++) {
+    if (config_lexicon_settings[lexicon_idx] == arg_token) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// Whether a settings file item names a setting rather than giving a value,
+// by the rule the command parser uses: a dash followed by anything but a
+// digit, so that a negative number is a value.
+static bool config_settings_item_is_name(const char *item) {
+  return string_length(item) > 1 && item[0] == '-' &&
+         !isdigit((unsigned char)item[1]);
+}
+
+// The -fileversion a settings file line records, or 1 when it records none.
+static int config_settings_line_version(const Config *config,
+                                        const StringSplitter *items) {
   const int num_items = string_splitter_get_number_of_items(items);
   const char *version_name = config->pargs[ARG_TOKEN_SETTINGS_VERSION]->name;
   int file_version = 1;
@@ -17748,26 +18419,175 @@ char *config_upgrade_settings_line(const Config *config, const char *line) {
       error_stack_destroy(error_stack);
     }
   }
+  return file_version;
+}
+
+// Items [first_idx, end_idx) of `items`, joined by spaces.
+static char *config_settings_join_items(const StringSplitter *items,
+                                        int first_idx, int end_idx) {
   StringBuilder *sb = string_builder_create();
-  int item_idx = 0;
-  while (item_idx < num_items) {
-    const char *item = string_splitter_get_item(items, item_idx);
-    const arg_token_t arg_token =
-        item[0] == '-' ? config_arg_token_from_full_name(config, item + 1)
-                       : NUMBER_OF_ARG_TOKENS;
-    if (arg_token != NUMBER_OF_ARG_TOKENS &&
-        config_setting_is_stale(arg_token, file_version)) {
-      item_idx += 1 + config->pargs[arg_token]->num_values;
-      continue;
-    }
-    if (string_builder_length(sb) > 0) {
+  for (int item_idx = first_idx; item_idx < end_idx; item_idx++) {
+    if (item_idx > first_idx) {
       string_builder_add_char(sb, ' ');
     }
-    string_builder_add_string(sb, item);
-    item_idx++;
+    string_builder_add_string(sb, string_splitter_get_item(items, item_idx));
+  }
+  return string_builder_dump_and_destroy(sb, NULL);
+}
+
+// Splits a settings file line into what to load: the lexicon settings
+// together, as one string of settings (empty when the line has none), and
+// each other setting on its own in `settings`, so that a value that fails to
+// load loses only itself. A setting is a name and the values up to the next
+// name. Settings the file does not keep, those whose defaults changed after
+// the line's -fileversion, and -fileversion itself are dropped. Unknown names
+// (only a current full name is known) and lines that are not set commands
+// are dropped with a warning.
+static void config_settings_line_split(Config *config, const char *line,
+                                       StringBuilder *lexicon_settings,
+                                       StringList *settings,
+                                       StringList *warnings) {
+  StringSplitter *items = split_string_by_whitespace(line, true);
+  const int num_items = string_splitter_get_number_of_items(items);
+  if (num_items == 0) {
+    string_splitter_destroy(items);
+    return;
+  }
+  ErrorStack *command_error_stack = error_stack_create();
+  const arg_token_t command_token = get_token_from_string(
+      config, string_splitter_get_item(items, 0), command_error_stack);
+  error_stack_destroy(command_error_stack);
+  if (command_token != ARG_TOKEN_SET) {
+    char *warning = get_formatted_string(
+        "ignored a line that is not a set command: %s", line);
+    string_list_add_string(warnings, warning);
+    free(warning);
+    string_splitter_destroy(items);
+    return;
+  }
+  const int file_version = config_settings_line_version(config, items);
+  int item_idx = 1;
+  while (item_idx < num_items) {
+    const char *name_item = string_splitter_get_item(items, item_idx);
+    int end_idx = item_idx + 1;
+    while (end_idx < num_items &&
+           !config_settings_item_is_name(
+               string_splitter_get_item(items, end_idx))) {
+      end_idx++;
+    }
+    char *setting = config_settings_join_items(items, item_idx, end_idx);
+    const arg_token_t arg_token =
+        config_settings_item_is_name(name_item)
+            ? config_arg_token_from_full_name(config, name_item + 1)
+            : NUMBER_OF_ARG_TOKENS;
+    if (arg_token == NUMBER_OF_ARG_TOKENS) {
+      char *warning =
+          config_settings_item_is_name(name_item)
+              ? get_formatted_string("ignored unknown setting %s", setting)
+              : get_formatted_string("ignored '%s', which follows no setting",
+                                     setting);
+      string_list_add_string(warnings, warning);
+      free(warning);
+    } else if (config_setting_is_saved(arg_token) &&
+               !config_setting_is_stale(arg_token, file_version) &&
+               arg_token != ARG_TOKEN_SETTINGS_VERSION) {
+      if (config_setting_is_lexicon_setting(arg_token)) {
+        if (string_builder_length(lexicon_settings) > 0) {
+          string_builder_add_char(lexicon_settings, ' ');
+        }
+        string_builder_add_string(lexicon_settings, setting);
+      } else {
+        string_list_add_string(settings, setting);
+      }
+    }
+    free(setting);
+    item_idx = end_idx;
   }
   string_splitter_destroy(items);
-  return string_builder_dump_and_destroy(sb, NULL);
+}
+
+// Loads `settings` into a scratch config with config's data paths, so that
+// settings which can fail part way are checked before they are applied.
+static void config_try_settings(const Config *config, const char *settings,
+                                ErrorStack *error_stack) {
+  const ConfigArgs args = {.data_paths = config->data_paths,
+                           .settings_filename = config->settings_filename,
+                           .use_wmp = false};
+  Config *scratch = config_create(&args, error_stack);
+  if (!scratch) {
+    return;
+  }
+  scratch->save_settings = false;
+  if (error_stack_is_empty(error_stack)) {
+    char *cmd = get_formatted_string(
+        "%s %s", config->pargs[ARG_TOKEN_SET]->name, settings);
+    config_load_command(scratch, cmd, error_stack);
+    free(cmd);
+  }
+  config_destroy(scratch);
+}
+
+// Applies `settings`, first trying them in a scratch config when
+// `try_first`, or adds a warning naming them and why they failed.
+static void config_apply_settings(Config *config, const char *settings,
+                                  bool try_first, StringList *warnings) {
+  ErrorStack *error_stack = error_stack_create();
+  if (try_first) {
+    config_try_settings(config, settings, error_stack);
+  }
+  if (error_stack_is_empty(error_stack)) {
+    char *cmd = get_formatted_string(
+        "%s %s", config->pargs[ARG_TOKEN_SET]->name, settings);
+    config_load_command(config, cmd, error_stack);
+    free(cmd);
+  }
+  if (!error_stack_is_empty(error_stack)) {
+    // One line per warning: the errors, which are one per line, are joined.
+    char *errors = error_stack_get_string_and_reset(error_stack);
+    StringSplitter *error_lines = split_string_by_newline(errors, true);
+    const int num_error_lines =
+        string_splitter_get_number_of_items(error_lines);
+    StringBuilder *warning_sb = string_builder_create();
+    string_builder_add_formatted_string(warning_sb, "ignored %s: ", settings);
+    for (int line_idx = 0; line_idx < num_error_lines; line_idx++) {
+      if (line_idx > 0) {
+        string_builder_add_string(warning_sb, "; ");
+      }
+      string_builder_add_string(
+          warning_sb, string_splitter_get_item(error_lines, line_idx));
+    }
+    string_list_add_string(warnings, string_builder_peek(warning_sb));
+    string_builder_destroy(warning_sb);
+    string_splitter_destroy(error_lines);
+    free(errors);
+  }
+  error_stack_destroy(error_stack);
+}
+
+void config_load_settings(Config *config, const char *settings_string,
+                          StringList *warnings) {
+  StringSplitter *lines = split_string_by_newline(settings_string, true);
+  const int num_lines = string_splitter_get_number_of_items(lines);
+  for (int line_idx = 0; line_idx < num_lines; line_idx++) {
+    StringBuilder *lexicon_settings = string_builder_create();
+    StringList *settings = string_list_create();
+    config_settings_line_split(config,
+                               string_splitter_get_item(lines, line_idx),
+                               lexicon_settings, settings, warnings);
+    if (string_builder_length(lexicon_settings) > 0) {
+      config_apply_settings(config, string_builder_peek(lexicon_settings), true,
+                            warnings);
+    }
+    const int num_settings = string_list_get_count(settings);
+    for (int setting_idx = 0; setting_idx < num_settings; setting_idx++) {
+      config_apply_settings(config,
+                            string_list_get_string(settings, setting_idx),
+                            false, warnings);
+    }
+    string_list_destroy(settings);
+    string_builder_destroy(lexicon_settings);
+  }
+  string_splitter_destroy(lines);
 }
 
 void save_config_settings(const Config *config, ErrorStack *error_stack) {
@@ -17775,7 +18595,7 @@ void save_config_settings(const Config *config, ErrorStack *error_stack) {
     return;
   }
   StringBuilder *sb = string_builder_create();
-  config_add_settings_to_string_builder(config, sb);
+  config_add_saved_settings_to_string_builder(config, sb);
   write_string_to_file(config_get_settings_filename(config), "wb",
                        string_builder_peek(sb), error_stack);
   string_builder_destroy(sb);

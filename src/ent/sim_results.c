@@ -139,6 +139,8 @@ struct SimResults {
   // sim_results_get_best_move; see the comment there.
   double utility_w_spread;
   uint64_t num_infer_leaves;
+  // Whether the census steered the last sim's rollouts.
+  bool census_rollout;
 };
 
 void ply_info_init(PlyInfo *ply_info, bool use_heat_map) {
@@ -445,6 +447,7 @@ SimResults *sim_results_create(const double cutoff) {
   sim_results->cutoff = cutoff;
   sim_results->utility_w_spread = 0.0;
   sim_results->num_infer_leaves = 0;
+  sim_results->census_rollout = false;
   rack_set_dist_size_and_reset(&sim_results->rack, 0);
   rack_set_dist_size_and_reset(&sim_results->known_opp_rack, 0);
   return sim_results;
@@ -500,6 +503,7 @@ SimResults *sim_results_duplicate(SimResults *sim_results) {
   new_sim_results->cutoff = sim_results->cutoff;
   new_sim_results->utility_w_spread = sim_results->utility_w_spread;
   new_sim_results->num_infer_leaves = sim_results->num_infer_leaves;
+  new_sim_results->census_rollout = sim_results->census_rollout;
   cpthread_mutex_unlock(&sim_results->display_mutex);
   cpthread_mutex_unlock(&sim_results->simmed_plays_mutex);
   return new_sim_results;
@@ -667,6 +671,15 @@ uint64_t sim_results_get_num_infer_leaves(const SimResults *sim_results) {
 void sim_results_set_num_infer_leaves(SimResults *sim_results,
                                       uint64_t num_infer_leaves) {
   sim_results->num_infer_leaves = num_infer_leaves;
+}
+
+bool sim_results_get_census_rollout(const SimResults *sim_results) {
+  return sim_results->census_rollout;
+}
+
+void sim_results_set_census_rollout(SimResults *sim_results,
+                                    bool census_rollout) {
+  sim_results->census_rollout = census_rollout;
 }
 
 void simmed_play_sample_record_clear(SimmedPlaySampleRecord *record) {

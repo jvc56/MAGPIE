@@ -22,6 +22,7 @@
 #include "../ent/leave_map.h"
 #include "../ent/letter_distribution.h"
 #include "../ent/move.h"
+#include "../ent/pat_board_cache.h"
 #include "../ent/pat_eval.h"
 #include "../ent/rack.h"
 #include "../ent/rack_info_table.h"
@@ -75,6 +76,7 @@ typedef struct SubrackEnumCacheEntry {
   // Flat array indexed by subracks_get_combination_offset(size) + idx_for_size.
   BitRack subracks[MOVEGEN_SUBRACK_CACHE_ENTRIES];
   Equity leave_values[MOVEGEN_SUBRACK_CACHE_ENTRIES];
+  Equity tile_score_sums[MOVEGEN_SUBRACK_CACHE_ENTRIES];
   // Lazily populated wmp_entry pointers per subrack, also rack-determined:
   // WMP_ENTRY_UNRESOLVED, a resolved miss (NULL), or a resolved entry.
   // Invalidated when the WMP pointer changes.
@@ -131,6 +133,8 @@ typedef struct MoveGen {
   // subrack can still beat the cutoff: only when the bag is not empty and
   // the sort is by equity.
   bool wmp_prune_subracks_by_leave;
+  // The sum of the rack's tile scores, for the WMP anchors' score bases.
+  Equity rack_tile_score_sum;
   int player_index;
   Equity bingo_bonus;
   // MOVE_RECORD_BEST_SMALL only: added to the ranking value (not the recorded
@@ -170,6 +174,14 @@ typedef struct MoveGen {
   // PAT evaluation state; disabled (weights NULL) unless the player
   // has PAT weights loaded and the record/sort types use static equity.
   PATEvalContext pat_eval_ctx;
+  // The context in use: pat_eval_ctx, or with board-only PAT (see
+  // pat_board_cache.h) the player's cached context for the board.
+  PATEvalContext *pat_ctx;
+  // With board-only PAT, where a move's term depends only on the board and
+  // the move: the cache of exact terms and the board's key in it. NULL when
+  // terms are not cached.
+  PATBoardCacheTerm *pat_terms;
+  uint64_t pat_term_key;
   // pat_eval_lane_penalty_bound for the lane the shadow phase is on, folded
   // into every shadow equity bound recorded from it (zero when disabled).
   Equity pat_lane_penalty_bound;
@@ -192,6 +204,14 @@ typedef struct MoveGen {
   // By lane, the anchor columns whose plays this generation does not search,
   // or NULL (MoveGenArgs.skip_anchor_cols).
   const uint32_t *skip_anchor_cols;
+  // MoveGenArgs.anchor_equity_caps, or NULL.
+  const Equity *anchor_equity_caps;
+  // With caps, a lane whose every unskipped anchor has one is not shadowed
+  // until its bound, the largest cap plus the lane's bound on the PAT term,
+  // is at least every heaped anchor's; a best move above the bound first
+  // leaves it unshadowed.
+  uint64_t deferred_lanes;
+  Equity deferred_lane_bounds[2 * BOARD_DIM];
   bool threshold_exceeded;
 
   MachineLetter strip[(MOVE_MAX_TILES)];
@@ -256,16 +276,16 @@ typedef struct MoveGen {
   // (including between leavegen generations), leave-derived caches must be
   // invalidated even though the KLV pointer is unchanged.
   uint64_t klv_mutation_counter_at_load;
-  // Instance fingerprints of the KLV and WMP captured at the last
-  // gen_load_position call. The MoveGen cache is pooled per thread and
+  // The KLV's instance id and the WMP's instance fingerprint captured at the
+  // last gen_load_position call. The MoveGen cache is pooled per thread and
   // outlives the Configs the engine creates and destroys; when a Config is
   // freed and another loaded, the allocator can hand the new KLV/WMP the freed
-  // one's struct address (ABA) -- even for the same lexicon -- while its
-  // internal arrays are reallocated elsewhere. A KLV/WMP pointer (or lexicon
-  // name) comparison reads "unchanged" and keeps stale leave_values / dangling
-  // wmp_entry pointers cached. The fingerprint hashes the internal array
-  // addresses, so it changes whenever the backing data is reloaded.
-  uint64_t klv_instance_fp_at_load;
+  // one's struct address (ABA). A KLV/WMP pointer (or lexicon name) comparison
+  // reads "unchanged" and keeps stale leave_values / dangling wmp_entry
+  // pointers cached. The KLV's id is unique to each load (the allocator can
+  // reuse its arrays' addresses as well, see klv_next_instance_id); the WMP's
+  // fingerprint hashes the internal array addresses and entry counts.
+  uint64_t klv_instance_id_at_load;
   uint64_t wmp_instance_fp_at_load;
   const RackInfoTable *rack_info_table;
   // The rack_info_table's instance id when it was loaded here, for the same
@@ -336,6 +356,14 @@ typedef struct MoveGen {
   // while the WMP is active and the bag is not empty.
   Equity shadow_equity_by_tiles_played[RACK_SIZE + 1];
   Equity shadow_nonplaythrough_equity_by_tiles_played[RACK_SIZE + 1];
+  // With a lane_shadow_cache: the key of each lane this generation shadowed
+  // (see shadow_lanes_small_cached), rows and then columns.
+  uint64_t lane_shadow_keys[2 * BOARD_DIM];
+  // The pre-endgame adjustment of a tile placement, by tiles played, set once
+  // per generation from the player's table and the bag (see peg_adjust.h);
+  // all 0 when the player has no table. Last, so that every field above keeps
+  // its offset.
+  Equity peg_adjust_by_tiles_played[RACK_SIZE + 1];
 } MoveGen;
 
 // Cache getter functions
@@ -379,15 +407,25 @@ static inline uint64_t gen_cache_get_right_extension_set(const MoveGen *gen,
   return square_get_right_extension_set(&gen->row_squares[col]);
 }
 
+// A move's pre-endgame adjustment. Only tile placements get one: an exchange
+// leaves the bag as it is (see peg_adjust.h).
+static inline Equity gen_get_peg_adjustment(const MoveGen *gen,
+                                            const Move *move) {
+  if (move_get_type(move) != GAME_EVENT_TILE_PLACEMENT_MOVE) {
+    return 0;
+  }
+  return gen->peg_adjust_by_tiles_played[move_get_tiles_played(move)];
+}
+
 static inline Equity gen_get_static_equity(const MoveGen *gen,
                                            const Move *move) {
   return static_eval_get_move_equity_with_leave_value(
       &gen->ld, move, &gen->player_rack, &gen->opponent_rack,
       gen->opening_move_word_penalties, gen->opening_move_letter_penalties,
-      pat_eval_context_get_active_classes(&gen->pat_eval_ctx),
-      &gen->pat_eval_ctx, gen->board_number_of_tiles_played,
-      gen->number_of_tiles_in_bag,
-      leave_map_get_current_value(&gen->leave_map));
+      pat_eval_context_get_active_classes(gen->pat_ctx), gen->pat_ctx,
+      gen->board_number_of_tiles_played, gen->number_of_tiles_in_bag,
+      leave_map_get_current_value(&gen->leave_map),
+      gen_get_peg_adjustment(gen, move));
 }
 
 // Best-move recording computes the PAT term lazily: a candidate whose
@@ -397,7 +435,7 @@ static inline Equity gen_get_static_equity(const MoveGen *gen,
 // (see gen_pat_contender_equity). The stored equity of a skipped candidate
 // is an overestimate used only in a comparison it strictly loses.
 static inline bool gen_pat_is_active(const MoveGen *gen) {
-  return gen->pat_eval_ctx.weights != NULL;
+  return gen->pat_ctx->weights != NULL;
 }
 
 // Static equity without the PAT term. Passes the mover's real active PAT
@@ -407,9 +445,10 @@ static inline Equity gen_get_static_equity_without_pat(const MoveGen *gen,
   return static_eval_get_move_equity_with_leave_value(
       &gen->ld, move, &gen->player_rack, &gen->opponent_rack,
       gen->opening_move_word_penalties, gen->opening_move_letter_penalties,
-      pat_eval_context_get_active_classes(&gen->pat_eval_ctx), NULL,
+      pat_eval_context_get_active_classes(gen->pat_ctx), NULL,
       gen->board_number_of_tiles_played, gen->number_of_tiles_in_bag,
-      leave_map_get_current_value(&gen->leave_map));
+      leave_map_get_current_value(&gen->leave_map),
+      gen_get_peg_adjustment(gen, move));
 }
 
 static inline const Move *gen_get_readonly_best_move(const MoveGen *gen) {
@@ -436,8 +475,35 @@ static inline Equity gen_pat_contender_equity(const MoveGen *gen,
     }
     floor = (Equity)needed;
   }
-  return equity_without_pat +
-         pat_eval_move_penalty_capped(&gen->pat_eval_ctx, move, leave, floor);
+  if (gen->pat_terms == NULL) {
+    return equity_without_pat +
+           pat_eval_move_penalty_capped(gen->pat_ctx, move, leave, floor);
+  }
+  uint64_t key =
+      (gen->pat_term_key ^ ((uint64_t)move_get_row_start(move) |
+                            ((uint64_t)move_get_col_start(move) << 8) |
+                            ((uint64_t)move_get_dir(move) << 16) |
+                            ((uint64_t)move_get_tiles_length(move) << 24))) *
+      PAT_BOARD_CACHE_KEY_MULTIPLIER;
+  const int tiles_length = move_get_tiles_length(move);
+  for (int tile_idx = 0; tile_idx < tiles_length; tile_idx++) {
+    key = (key ^ move_get_tile(move, tile_idx)) * PAT_BOARD_CACHE_KEY_PRIME;
+    key ^= key >> 31;
+  }
+  key |= 1;
+  PATBoardCacheTerm *entry =
+      &gen->pat_terms[key & (PAT_BOARD_CACHE_NUM_TERMS - 1)];
+  if (entry->key == key) {
+    return equity_without_pat + entry->term;
+  }
+  const Equity term =
+      pat_eval_move_penalty_capped(gen->pat_ctx, move, leave, floor);
+  // A term at or above the floor is exact; one below it is only a bound.
+  if (term >= floor) {
+    entry->key = key;
+    entry->term = term;
+  }
+  return equity_without_pat + term;
 }
 
 // The PAT bound, utility correction included, for a WMP anchor's plays:
@@ -451,9 +517,8 @@ static inline Equity gen_wmp_anchor_pat_bound(const MoveGen *gen, int dir,
   if (!gen_pat_is_active(gen)) {
     return 0;
   }
-  return pat_eval_lane_defense_bound(&gen->pat_eval_ctx, dir, lane) +
-         pat_eval_utility_bound_for_play(&gen->pat_eval_ctx,
-                                         anchor->tiles_to_play,
+  return pat_eval_lane_defense_bound(gen->pat_ctx, dir, lane) +
+         pat_eval_utility_bound_for_play(gen->pat_ctx, anchor->tiles_to_play,
                                          anchor->highest_possible_score);
 }
 
@@ -766,6 +831,69 @@ static inline int lowest_set_bit_index_64(uint64_t bitset) {
   }
   return index;
 #endif
+}
+
+// Index of the highest set bit of a nonzero bitset, following
+// lowest_set_bit_index's guarded-intrinsic pattern.
+static inline int highest_set_bit_index(uint32_t bitset) {
+#if defined(__has_builtin) && __has_builtin(__builtin_clz)
+  return 31 - __builtin_clz(bitset);
+#else
+  int index = 31;
+  while ((bitset & ((uint32_t)1 << index)) == 0) {
+    index--;
+  }
+  return index;
+#endif
+}
+
+enum {
+  // The entries before and after a lane's empty columns in the list that
+  // anchor_span_reach reads: one more than the tiles a rack holds.
+  LANE_SPAN_PAD = RACK_SIZE + 1,
+};
+
+// The lane positions a play from the anchor at `col` can span: right of
+// `limit` (the anchor's leftward limit, or -1 for none), and on either side
+// of the anchor no further than `spare` of the lane's empty squares, plus
+// the tiles it plays through, and short of any empty square in `blocked`,
+// where no rack tile fits. empty_cols lists the lane's empty columns in
+// order, after LANE_SPAN_PAD entries of -1 and before as many of BOARD_DIM,
+// so that the first empty square each way that the rack has no tile left for
+// is read without a bounds check; empties_left counts the empty squares left
+// of the anchor, and anchor_is_empty is 1 if its square is empty and 0 if
+// not.
+static inline uint32_t anchor_span_reach(const int8_t *empty_cols,
+                                         int empties_left, int anchor_is_empty,
+                                         uint32_t blocked, int col, int limit,
+                                         int spare) {
+  const uint32_t right_of_col = ~(((uint32_t)2 << col) - 1);
+  const uint32_t left_of_col = ((uint32_t)1 << col) - 1;
+  // The nearest empty square each way that the rack cannot fill: one past
+  // the tiles it has, or a blocked one.
+  int right_stop =
+      empty_cols[LANE_SPAN_PAD + empties_left + anchor_is_empty + spare];
+  int left_stop = empty_cols[LANE_SPAN_PAD + empties_left - 1 - spare];
+  const uint32_t right_blocked = blocked & right_of_col;
+  const uint32_t left_blocked = blocked & left_of_col;
+  if (right_blocked != 0) {
+    const int blocked_col = lowest_set_bit_index(right_blocked);
+    if (blocked_col < right_stop) {
+      right_stop = blocked_col;
+    }
+  }
+  if (left_blocked != 0) {
+    const int blocked_col = highest_set_bit_index(left_blocked);
+    if (blocked_col > left_stop) {
+      left_stop = blocked_col;
+    }
+  }
+  const int right = right_stop - 1;
+  int left = left_stop + 1;
+  if (left <= limit) {
+    left = limit + 1;
+  }
+  return (((uint32_t)2 << right) - 1) & ~(((uint32_t)1 << left) - 1);
 }
 
 static inline bool play_is_nonempty_and_nonduplicate(int tiles_played,

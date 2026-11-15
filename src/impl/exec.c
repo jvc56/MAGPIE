@@ -249,28 +249,33 @@ void execute_command_async(Config *config, ErrorStack *error_stack,
   execute_command_async_queueing(config, error_stack, command, NULL);
 }
 
-void load_config_settings(Config *config, ErrorStack *error_stack) {
-  // if file does not exist, just return
-  if (!cfile_access(config_get_settings_filename(config),
-                    CFILE_ACCESS_EXISTS)) {
+// Loads the settings file, if there is one. What cannot be loaded is
+// reported as a warning and left out, never stopping the startup.
+static void load_config_settings(Config *config) {
+  const char *settings_filename = config_get_settings_filename(config);
+  if (!cfile_access(settings_filename, CFILE_ACCESS_EXISTS)) {
     return;
   }
-  char *settings_string =
-      get_string_from_file(config_get_settings_filename(config), error_stack);
-  StringSplitter *settings_split_by_newline =
-      split_string_by_newline(settings_string, true);
-  const int num_lines =
-      string_splitter_get_number_of_items(settings_split_by_newline);
-  for (int i = 0; i < num_lines; i++) {
-    char *line = config_upgrade_settings_line(
-        config, string_splitter_get_item(settings_split_by_newline, i));
-    execute_command_sync(config, error_stack, line);
-    free(line);
-    if (!error_stack_is_empty(error_stack)) {
-      break;
-    }
+  ErrorStack *error_stack = error_stack_create();
+  char *settings_string = get_string_from_file(settings_filename, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    char *reason = error_stack_get_string_and_reset(error_stack);
+    trim_whitespace(reason);
+    write_to_stream_err("%s: not loaded: %s\n", settings_filename, reason);
+    free(reason);
+    free(settings_string);
+    error_stack_destroy(error_stack);
+    return;
   }
-  string_splitter_destroy(settings_split_by_newline);
+  error_stack_destroy(error_stack);
+  StringList *warnings = string_list_create();
+  config_load_settings(config, settings_string, warnings);
+  const int num_warnings = string_list_get_count(warnings);
+  for (int warning_idx = 0; warning_idx < num_warnings; warning_idx++) {
+    write_to_stream_err("%s: %s\n", settings_filename,
+                        string_list_get_string(warnings, warning_idx));
+  }
+  string_list_destroy(warnings);
   free(settings_string);
 }
 
@@ -344,18 +349,12 @@ static bool run_queued_commands(Config *config, ErrorStack *error_stack,
 
 void sync_command_scan_loop(Config *config, ErrorStack *error_stack,
                             const char *initial_command_string) {
-  // The settings file is left alone unless the command line asks for it with
-  // -savesettings true, so a settings.txt in the working directory cannot
-  // change what a run does on its own.
-  if (config_command_turns_on_save_settings(config, initial_command_string)) {
-    // To suppress 'finished' for internal load settings commands
-    config_set_loaded_settings(config, false);
-    load_config_settings(config, error_stack);
-    config_set_loaded_settings(config, true);
-    if (!error_stack_is_empty(error_stack)) {
-      error_stack_print_and_reset(error_stack);
-      return;
-    }
+  // The settings file holds only settings that last a whole game, such as
+  // the lexicon and the display settings. A command line that sets
+  // -savesettings false leaves it alone.
+  if (config_get_save_settings(config) &&
+      !config_command_turns_off_save_settings(config, initial_command_string)) {
+    load_config_settings(config);
   }
   execute_command_sync(config, error_stack, initial_command_string);
   if (!error_stack_is_empty(error_stack)) {

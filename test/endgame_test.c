@@ -549,6 +549,105 @@ static void run_lent_helper_abdada_case(bool use_inline) {
   config_destroy(config);
 }
 
+typedef struct LendAroundStop {
+  EndgameCtx **solver_ptr; // address of the caller's ctx (set by the solve)
+  ThreadControl *thread_control;
+  bool offered;          // the callback made its two offers
+  bool lent_before_stop; // the running solve took a helper
+  bool lent_after_stop;  // the stopped solve took another
+} LendAroundStop;
+
+// Runs on the main worker after depth 1, with the injection window open: lends
+// one helper, stops the solve, and offers a second, which there is room for.
+static void lend_before_and_after_stop(int depth, int32_t value,
+                                       const PVLine *pv_line, const Game *game,
+                                       const PVLine *ranked_pvs,
+                                       int num_ranked_pvs, void *user_data) {
+  (void)depth;
+  (void)value;
+  (void)pv_line;
+  (void)game;
+  (void)ranked_pvs;
+  (void)num_ranked_pvs;
+  LendAroundStop *lend = (LendAroundStop *)user_data;
+  if (lend->offered) {
+    return;
+  }
+  lend->offered = true;
+  EndgameCtx *solver = *lend->solver_ptr;
+  lend->lent_before_stop = endgame_add_worker(solver);
+  thread_control_set_status(lend->thread_control,
+                            THREAD_CONTROL_STATUS_USER_INTERRUPT);
+  lend->lent_after_stop = endgame_add_worker(solver);
+}
+
+// A solve that has been told to stop takes no more helpers. Its workers are
+// about to leave, so the thread would be started only to be joined, and where
+// threads come from a fixed pool (the browser) it may never start at all,
+// which leaves the solve waiting for it. Checked for both entry points.
+static void run_no_lend_after_stop_case(bool use_inline) {
+  Config *config =
+      config_create_or_die("set -s1 score -s2 score -threads 1 -eplies 8");
+  load_and_exec_config_or_die(
+      config,
+      "cgp "
+      "GATELEGs1POGOED/R4MOOLI3X1/AA10U2/YU4BREDRIN2/1TITULE3E1IN1/1E4N3c1BOK/"
+      "1C2O4CHARD1/QI1FLAWN2E1OE1/IS2E1HIN1A1W2/1MOTIVATE1T1S2/1S2N5S4/"
+      "3PERJURY5/15/15/15 FV/AADIZ 442/388 0 -lex CSW21");
+  ThreadControl *thread_control = thread_control_create();
+  thread_control_set_status(thread_control, THREAD_CONTROL_STATUS_STARTED);
+
+  EndgameCtx *ctx = NULL;
+  LendAroundStop lend = {.solver_ptr = &ctx,
+                         .thread_control = thread_control,
+                         .offered = false,
+                         .lent_before_stop = false,
+                         .lent_after_stop = false};
+
+  EndgameArgs args = {0};
+  args.thread_control = thread_control;
+  args.game = config_get_game(config);
+  args.plies = config_get_endgame_plies(config);
+  args.tt_fraction_of_mem = 0.0001;
+  args.initial_small_move_arena_size = DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
+  args.num_threads = 1;
+  // Room for both helpers offered, so the second is not declined for want of
+  // it.
+  args.max_workers = 3;
+  args.use_heuristics = true;
+  args.forced_pass_bypass = true;
+  args.num_top_moves = 1;
+  args.seed = 42;
+  args.per_ply_callback = lend_before_and_after_stop;
+  args.per_ply_callback_data = &lend;
+
+  EndgameResults *results = config_get_endgame_results(config);
+  ErrorStack *error_stack = error_stack_create();
+  if (use_inline) {
+    endgame_solve_inline(&ctx, &args, results);
+  } else {
+    endgame_solve(&ctx, &args, results, error_stack);
+  }
+  assert(error_stack_is_empty(error_stack));
+  printf("lend around stop (%s): before=%d after=%d\n",
+         use_inline ? "inline" : "spawned", lend.lent_before_stop,
+         lend.lent_after_stop);
+  assert(lend.offered);
+  // The first offer shows the solve was taking helpers and had room for more.
+  assert(lend.lent_before_stop);
+  assert(!lend.lent_after_stop);
+
+  error_stack_destroy(error_stack);
+  endgame_ctx_destroy(ctx);
+  thread_control_destroy(thread_control);
+  config_destroy(config);
+}
+
+static void test_no_lend_after_stop(void) {
+  run_no_lend_after_stop_case(/*use_inline=*/false);
+  run_no_lend_after_stop_case(/*use_inline=*/true);
+}
+
 static bool always_stop(const void *stop_data) {
   (void)stop_data;
   return true;
@@ -2872,6 +2971,7 @@ void test_endgame(void) {
   test_stuck_playout_tails();
   test_unfinished_depth_best();
   test_lent_helper_runs_abdada();
+  test_no_lend_after_stop();
   test_endgame_stop_fn();
   test_endgame_time_limit_stops_depth();
   // Cheap (sub-second) regression of the VIA mover-must-bingo case. The full

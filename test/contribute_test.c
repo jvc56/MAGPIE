@@ -38,6 +38,7 @@
 #include "../src/impl/move_gen.h"
 #include "../src/impl/rack_list.h"
 #include "../src/impl/simmer.h"
+#include "../src/str/move_string.h"
 #include "../src/util/hash.h"
 #include "../src/util/http_client.h"
 #include "../src/util/io_util.h"
@@ -595,6 +596,8 @@ static const char *const BIRDTEST_LEAVE_FIXTURE =
     "test/birdtest_contract/assignment-leave-generation.json";
 static const char *const BIRDTEST_OPENING_RACK_FIXTURE =
     "test/birdtest_contract/assignment-opening-rack.json";
+static const char *const BIRDTEST_OPENING_RACK_CANDIDATES_FIXTURE =
+    "test/birdtest_contract/assignment-opening-rack-candidates.json";
 static const char *const BIRDTEST_DECLINE_FIXTURE =
     "test/birdtest_contract/decline-missing-data.json";
 // Captured from a real exchange between this client and birdtest by
@@ -796,7 +799,33 @@ static void test_contract_fixtures_carry_every_key_contribute_reads(void) {
   assert_fixture_has_keys(json_object_get(request, CONTRIBUTE_KEY_PLAYER),
                           player_keys, num_player_keys, "opening_rack player");
   assert_fixture_pins_derived_files(opening_rack);
+  // A first pass sends no candidates: the key is absent, not null.
+  assert(!json_object_get(request, CONTRIBUTE_KEY_CANDIDATES));
   json_destroy(opening_rack);
+
+  // A reissue names its racks' candidates, one list of move strings per
+  // rack, which the executor ranks in place of every play.
+  const JsonValue *reissue = load_task_request_fixture(
+      BIRDTEST_OPENING_RACK_CANDIDATES_FIXTURE, &request);
+  assert_fixture_is_an_assignment(reissue, "opening_rack reissue assignment");
+  assert_fixture_has_keys(request, opening_rack_keys,
+                          sizeof(opening_rack_keys) /
+                              sizeof(opening_rack_keys[0]),
+                          "opening_rack reissue task_request");
+  const JsonValue *candidates =
+      json_object_get(request, CONTRIBUTE_KEY_CANDIDATES);
+  const int reissued =
+      json_array_length(json_object_get(request, CONTRIBUTE_KEY_RACKS));
+  assert(json_is_array(candidates) && reissued > 0 &&
+         json_array_length(candidates) == reissued);
+  for (int i = 0; i < reissued; i++) {
+    const JsonValue *moves = json_array_get(candidates, i);
+    assert(json_is_array(moves) && json_array_length(moves) > 0);
+    for (int m = 0; m < json_array_length(moves); m++) {
+      assert(json_array_get_string(moves, m));
+    }
+  }
+  json_destroy(reissue);
 
   const JsonValue *leave =
       load_task_request_fixture(BIRDTEST_LEAVE_FIXTURE, &request);
@@ -3158,23 +3187,247 @@ static void test_a_simulating_rack_analysis_ranks_every_play(void) {
   ErrorStack *error_stack = error_stack_create();
 
   // Static: the recorder's one best play is the answer.
-  assert(config_contribute_generate_for_rack(config, "AEGINRV", 1, false,
+  assert(config_contribute_generate_for_rack(config, "AEGINRV", 1, false, NULL,
                                              error_stack));
   assert(move_list_get_count(config_get_move_list(config)) == 1);
 
   // Simulating: every candidate, up to num_plays.
-  assert(config_contribute_generate_for_rack(config, "AEGINRV", 1, true,
+  assert(config_contribute_generate_for_rack(config, "AEGINRV", 1, true, NULL,
                                              error_stack));
   assert(error_stack_is_empty(error_stack));
   assert(move_list_get_count(config_get_move_list(config)) == 8);
 
   // An unusable rack is refused either way.
-  assert(
-      !config_contribute_generate_for_rack(config, "", 1, true, error_stack));
+  assert(!config_contribute_generate_for_rack(config, "", 1, true, NULL,
+                                              error_stack));
   assert(!error_stack_is_empty(error_stack));
 
   error_stack_destroy(error_stack);
   config_destroy(config);
+}
+
+static int compare_move_strings(const void *a, const void *b) {
+  return strcmp(*(char *const *)a, *(char *const *)b);
+}
+
+// The moves of `config`'s move list as the server stores them: each one as a
+// ranked play reports its "move" (move_get_string), sorted, in a new array of
+// new strings the caller frees with free_move_strings.
+static char **move_list_strings(const Config *config, int *count) {
+  const MoveList *ml = config_get_move_list(config);
+  const Game *game = config_get_game(config);
+  *count = move_list_get_count(ml);
+  char **moves = malloc_or_die(sizeof(char *) * (size_t)*count);
+  for (int i = 0; i < *count; i++) {
+    char move[128];
+    move_get_string(move_list_get_move(ml, i), game_get_board(game),
+                    game_get_ld(game), false, move, sizeof(move));
+    moves[i] = string_duplicate(move);
+  }
+  qsort(moves, (size_t)*count, sizeof(char *), compare_move_strings);
+  return moves;
+}
+
+static void free_move_strings(char **moves, int count) {
+  for (int i = 0; i < count; i++) {
+    free(moves[i]);
+  }
+  free(moves);
+}
+
+// Move strings as a JSON array, as a request's candidates for one rack.
+static char *move_strings_json(char **moves, int count) {
+  StringBuilder *sb = string_builder_create();
+  string_builder_add_string(sb, "[");
+  for (int i = 0; i < count; i++) {
+    string_builder_add_formatted_string(sb, "%s\"%s\"", i ? ", " : "",
+                                        moves[i]);
+  }
+  string_builder_add_string(sb, "]");
+  return string_builder_dump_and_destroy(sb, NULL);
+}
+
+// Whether `candidates` (a JSON array of move strings) is refused for `rack`:
+// pushed onto the stack as a server error, nothing ranked.
+static bool candidates_are_refused(Config *config, const char *rack,
+                                   const char *candidates_json, bool simming) {
+  ErrorStack *error_stack = error_stack_create();
+  const JsonValue *candidates = json_parse(candidates_json, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  const bool ok = config_contribute_generate_for_rack(config, rack, 1, simming,
+                                                      candidates, error_stack);
+  const bool refused = !ok && error_stack_top(error_stack) ==
+                                  ERROR_STATUS_CONTRIBUTE_SERVER_ERROR;
+  json_destroy(candidates);
+  error_stack_destroy(error_stack);
+  return refused;
+}
+
+// A later pass over an opening rack ranks only the candidates the server
+// sends, which are moves an earlier analysis reported. So every move a rack
+// can make -- placements across and down, blanks, exchanges and the pass --
+// must come back from its reported form as the same move: an exchange is
+// reported "(exch ABC)" while the move parser reads "ex ABC". Anything the
+// rack cannot play, a phony, a move listed twice, an empty list, or
+// candidates for a static player are the server's error.
+static void test_rack_candidates_round_trip_every_reported_move(void) {
+  // Every play: a simulating player's generation keeps up to num_plays.
+  Config *config = config_create_or_die("set -lex CSW21 -numplays 100000");
+  ErrorStack *error_stack = error_stack_create();
+  const char *racks[] = {"AEGINR?", "AEINRST", "QI", "VVWWXYY"};
+  for (size_t r = 0; r < sizeof(racks) / sizeof(racks[0]); r++) {
+    assert(config_contribute_generate_for_rack(config, racks[r], 1, true, NULL,
+                                               error_stack));
+    assert(error_stack_is_empty(error_stack));
+    int generated = 0;
+    char **reported = move_list_strings(config, &generated);
+    assert(generated > 1);
+    char *json = move_strings_json(reported, generated);
+    if (r == 0) {
+      // The blank rack plays lowercase designations and exchanges a '?'.
+      assert(strstr(json, "(exch ") != NULL);
+      assert(strstr(json, "?)") != NULL);
+    }
+    const JsonValue *candidates = json_parse(json, error_stack);
+    assert(error_stack_is_empty(error_stack));
+    assert(config_contribute_generate_for_rack(config, racks[r], 1, true,
+                                               candidates, error_stack));
+    if (!error_stack_is_empty(error_stack)) {
+      error_stack_print_and_reset(error_stack);
+      assert(false);
+    }
+    // Every candidate loaded as the move it was reported from: the same
+    // reported forms, sorted, one for one (a move listed twice is refused).
+    int loaded = 0;
+    char **again = move_list_strings(config, &loaded);
+    assert(loaded == generated);
+    for (int i = 0; i < generated; i++) {
+      assert(strings_equal(reported[i], again[i]));
+    }
+    free_move_strings(again, loaded);
+    json_destroy(candidates);
+    free(json);
+    free_move_strings(reported, generated);
+  }
+
+  assert(candidates_are_refused(config, "AEINRST", "[\"8H NITRES\"]", false));
+  assert(candidates_are_refused(config, "AEINRST", "[]", true));
+  assert(candidates_are_refused(config, "AEINRST", "[7]", true));
+  assert(candidates_are_refused(config, "AEINRST", "[\"\"]", true));
+  assert(candidates_are_refused(config, "AEINRST", "[\"8H RSTAEIN\"]", true));
+  assert(candidates_are_refused(config, "AEINRST", "[\"8H QI\"]", true));
+  assert(candidates_are_refused(config, "AEINRST", "[\"(exch QZ)\"]", true));
+  assert(candidates_are_refused(config, "AEINRST",
+                                "[\"8H NITRES\", \"8H NITRES\"]", true));
+  assert(!candidates_are_refused(
+      config, "AEINRST", "[\"8H NITRES\", \"(exch AE)\", \"pass\"]", true));
+  assert(move_list_get_count(config_get_move_list(config)) == 3);
+
+  error_stack_destroy(error_stack);
+  config_destroy(config);
+}
+
+// A request's candidates rank exactly those moves: a simulating analysis of
+// each rack reports them and only them, with num_moves their count. They are
+// taken from a first analysis's own report, as birdtest takes them. A list
+// that is not one element per rack is the server's error.
+static void test_an_opening_rack_task_ranks_only_its_candidates(void) {
+  char *simmer = simming_csw21_player(false);
+  char *request = get_formatted_string(
+      "{\"job_type\": \"opening_rack\", \"variant\": \"classic\", "
+      "\"letter_distribution\": \"english\", "
+      "\"board_layout\": \"standard15\", \"seed\": \"7\", "
+      "\"bingo_bonus\": 50, \"sim_cutoff\": 0.005, "
+      "\"racks\": [\"AEGINR?\", \"VVWWXYY\"], \"player\": %s}",
+      simmer);
+  uint64_t movegens = 0;
+  char *first = execute_task("opening_rack", request, 2, &movegens);
+  free(request);
+  ErrorStack *error_stack = error_stack_create();
+  const JsonValue *first_parsed = json_parse(first, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  const JsonValue *first_racks =
+      json_object_get(first_parsed, CONTRIBUTE_KEY_RACKS);
+
+  // Each rack's first two reported moves, as the next pass's candidates.
+  StringBuilder *sb = string_builder_create();
+  string_builder_add_string(sb, "[");
+  for (int r = 0; r < 2; r++) {
+    const JsonValue *moves =
+        json_object_get(json_array_get(first_racks, r), CONTRIBUTE_KEY_MOVES);
+    assert(json_array_length(moves) >= 2);
+    string_builder_add_formatted_string(
+        sb, "%s[\"%s\", \"%s\"]", r ? ", " : "",
+        json_get_string(json_array_get(moves, 0), CONTRIBUTE_KEY_MOVE,
+                        error_stack),
+        json_get_string(json_array_get(moves, 1), CONTRIBUTE_KEY_MOVE,
+                        error_stack));
+  }
+  string_builder_add_string(sb, "]");
+  char *candidates = string_builder_dump_and_destroy(sb, NULL);
+  request = get_formatted_string(
+      "{\"job_type\": \"opening_rack\", \"variant\": \"classic\", "
+      "\"letter_distribution\": \"english\", "
+      "\"board_layout\": \"standard15\", \"seed\": \"8\", "
+      "\"bingo_bonus\": 50, \"sim_cutoff\": 0.005, "
+      "\"racks\": [\"AEGINR?\", \"VVWWXYY\"], \"candidates\": %s, "
+      "\"player\": %s}",
+      candidates, simmer);
+  char *second = execute_task("opening_rack", request, 2, &movegens);
+  free(request);
+  const JsonValue *second_parsed = json_parse(second, error_stack);
+  const JsonValue *sent = json_parse(candidates, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  const JsonValue *second_racks =
+      json_object_get(second_parsed, CONTRIBUTE_KEY_RACKS);
+  for (int r = 0; r < 2; r++) {
+    const JsonValue *rack = json_array_get(second_racks, r);
+    assert(json_get_int(rack, CONTRIBUTE_KEY_NUM_MOVES, error_stack) == 2);
+    const JsonValue *moves = json_object_get(rack, CONTRIBUTE_KEY_MOVES);
+    assert(json_array_length(moves) == 2);
+    const JsonValue *expected = json_array_get(sent, r);
+    for (int m = 0; m < 2; m++) {
+      const char *move = json_get_string(json_array_get(moves, m),
+                                         CONTRIBUTE_KEY_MOVE, error_stack);
+      assert(strings_equal(move, json_array_get_string(expected, 0)) ||
+             strings_equal(move, json_array_get_string(expected, 1)));
+    }
+  }
+  assert(error_stack_is_empty(error_stack));
+  json_destroy(sent);
+  json_destroy(second_parsed);
+  free(second);
+
+  // One element per rack, or nothing is analysed.
+  Config *config = config_create_default_test();
+  Config *task_config = config_create_for_contribute(config, error_stack);
+  thread_control_set_status(config_get_thread_control(task_config),
+                            THREAD_CONTROL_STATUS_STARTED);
+  request = get_formatted_string(
+      "{\"job_type\": \"opening_rack\", \"variant\": \"classic\", "
+      "\"letter_distribution\": \"english\", "
+      "\"board_layout\": \"standard15\", \"seed\": \"8\", "
+      "\"bingo_bonus\": 50, \"sim_cutoff\": 0.005, "
+      "\"racks\": [\"AEGINR?\", \"VVWWXYY\"], \"candidates\": [[\"pass\"]], "
+      "\"player\": %s}",
+      simmer);
+  const JsonValue *mismatched = json_parse(request, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  char *result = NULL;
+  (void)config_contribute_execute(task_config, "opening_rack", mismatched, 2,
+                                  NULL, &result, &movegens, error_stack);
+  assert(!result);
+  assert(error_stack_top(error_stack) == ERROR_STATUS_CONTRIBUTE_SERVER_ERROR);
+  json_destroy(mismatched);
+  free(request);
+  config_destroy_for_contribute(task_config);
+  config_destroy(config);
+
+  free(candidates);
+  json_destroy(first_parsed);
+  free(first);
+  free(simmer);
+  error_stack_destroy(error_stack);
 }
 
 // A layout comes from the server's data; a byte above 0x7f was a negative
@@ -3749,6 +4002,8 @@ void test_contribute(void) {
   test_solving_players_report_their_solves();
   test_a_high_byte_is_not_a_bonus_square();
   test_a_simulating_rack_analysis_ranks_every_play();
+  test_rack_candidates_round_trip_every_reported_move();
+  test_an_opening_rack_task_ranks_only_its_candidates();
   test_contribute_runs_in_a_config_of_its_own();
   test_http_retries_outlast_a_server_deployment();
   test_a_request_must_state_its_distribution_and_layout();

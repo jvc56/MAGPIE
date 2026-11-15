@@ -337,6 +337,12 @@ typedef enum {
   ERROR_STATUS_THREATS_UNSUPPORTED_GAME,
   ERROR_STATUS_THREATS_OPP_RACK_NOT_IN_BAG,
   ERROR_STATUS_THREATS_EXTRANEOUS_ARG,
+  // A pre-endgame adjustment file has a malformed row, an index out of range
+  // or an index given twice.
+  ERROR_STATUS_PEG_ADJUST_INVALID_ROW,
+  // pegfit was asked to fit while the players have different pre-endgame
+  // adjustments loaded.
+  ERROR_STATUS_PEG_FIT_DIFFERENT_TABLES,
 } error_code_t;
 
 typedef enum {

@@ -2,6 +2,7 @@
 
 #include "../compat/cpthread.h"
 #include "../compat/cpthread_defs.h"
+#include "../def/bit_rack_defs.h"
 #include "../def/board_defs.h"
 #include "../def/cross_set_defs.h"
 #include "../def/equity_defs.h"
@@ -30,7 +31,9 @@
 #include "../ent/letter_distribution.h"
 #include "../ent/move.h"
 #include "../ent/pat.h"
+#include "../ent/pat_board_cache.h"
 #include "../ent/pat_eval.h"
+#include "../ent/peg_adjust.h"
 #include "../ent/player.h"
 #include "../ent/rack.h"
 #include "../ent/rack_info_table.h"
@@ -360,9 +363,8 @@ static inline void record_exchange(MoveGen *gen) {
       // known) PAT baseline; the cutoff already includes the best
       // move's defense term, so compare like with like or every exchange
       // within the baseline of the cutoff gets needlessly recorded.
-      const Equity leave_value =
-          leave_map_get_current_value(&gen->leave_map) +
-          pat_eval_non_placement_penalty(&gen->pat_eval_ctx);
+      const Equity leave_value = leave_map_get_current_value(&gen->leave_map) +
+                                 pat_eval_non_placement_penalty(gen->pat_ctx);
       if (better_play_has_been_found(gen, leave_value)) {
         return;
       }
@@ -403,8 +405,7 @@ static void record_best_exchange_from_table(MoveGen *gen) {
   const Equity leave_value = gen->best_leaves[leave_size];
   // See record_exchange for why the defense baseline is included.
   if (better_play_has_been_found(
-          gen,
-          leave_value + pat_eval_non_placement_penalty(&gen->pat_eval_ctx))) {
+          gen, leave_value + pat_eval_non_placement_penalty(gen->pat_ctx))) {
     return;
   }
   // Temporarily set leave_map so gen_get_static_equity reads the correct
@@ -542,9 +543,10 @@ static inline Equity get_move_equity_for_sort_type_wmp(MoveGen *gen,
     return static_eval_get_move_equity_with_leave_value(
         &gen->ld, move, &gen->leave, &gen->opponent_rack,
         gen->opening_move_word_penalties, gen->opening_move_letter_penalties,
-        pat_eval_context_get_active_classes(&gen->pat_eval_ctx),
-        &gen->pat_eval_ctx, gen->board_number_of_tiles_played,
-        gen->number_of_tiles_in_bag, leave_value);
+        pat_eval_context_get_active_classes(gen->pat_ctx), gen->pat_ctx,
+        gen->board_number_of_tiles_played, gen->number_of_tiles_in_bag,
+        leave_value,
+        gen->peg_adjust_by_tiles_played[move_get_tiles_played(move)]);
   case MOVE_SORT_SCORE:
     return move_get_score(move);
   default:
@@ -568,8 +570,8 @@ static inline Equity get_move_equity_for_sort_type_wmp(MoveGen *gen,
 // anchor's tiles_to_play: every word for a size-k subrack plays exactly k
 // tiles, so it is what set_play_for_record_wmp writes into the Move. If a WMP
 // anchor ever emitted plays of varying length, the pre-endgame adjustment
-// (bag_plus_rack_size < PEG_ADJUST_VALUES_LENGTH) would be the only place
-// this went wrong, and it would do so silently.
+// (peg_adjust_by_tiles_played) would be the only place this went wrong, and
+// it would do so silently.
 static inline bool get_wmp_equity_without_move(const MoveGen *gen, Equity score,
                                                Equity leave_value,
                                                Equity *equity) {
@@ -582,8 +584,9 @@ static inline bool get_wmp_equity_without_move(const MoveGen *gen, Equity score,
       return false;
     }
     *equity = static_eval_get_nonopening_move_equity(
-        &gen->ld, &gen->leave, &gen->opponent_rack, gen->max_tiles_to_play,
-        gen->number_of_tiles_in_bag, score, leave_value);
+        &gen->ld, &gen->leave, &gen->opponent_rack, gen->number_of_tiles_in_bag,
+        score, leave_value,
+        gen->peg_adjust_by_tiles_played[gen->max_tiles_to_play]);
     return true;
   default:
     log_fatal("unhandled move sort type: %d", gen->move_sort_type);
@@ -610,7 +613,7 @@ update_best_move_or_insert_into_movelist_wmp(MoveGen *gen, int start_col,
       // The defense term is <= 0 except for the utility correction, whose
       // largest possible value keeps these upper-bound skips sound.
       const Equity equity_bound =
-          precomputed_equity + pat_eval_utility_bound(&gen->pat_eval_ctx);
+          precomputed_equity + pat_eval_utility_bound(gen->pat_ctx);
       if (gen->move_record_type == MOVE_RECORD_ALL &&
           move_list_get_count(gen->move_list) ==
               move_list_get_capacity(gen->move_list) &&
@@ -634,7 +637,7 @@ update_best_move_or_insert_into_movelist_wmp(MoveGen *gen, int start_col,
       move_equity_or_score = precomputed_equity;
       if (gen->move_sort_type == MOVE_SORT_EQUITY && gen_pat_is_active(gen)) {
         move_equity_or_score +=
-            pat_eval_move_penalty(&gen->pat_eval_ctx, move, &gen->leave);
+            pat_eval_move_penalty(gen->pat_ctx, move, &gen->leave);
       }
     } else {
       move_equity_or_score =
@@ -654,7 +657,7 @@ update_best_move_or_insert_into_movelist_wmp(MoveGen *gen, int start_col,
     const bool has_precomputed_equity = get_wmp_equity_without_move(
         gen, score, leave_value, &precomputed_equity);
     if (has_precomputed_equity &&
-        precomputed_equity + pat_eval_utility_bound(&gen->pat_eval_ctx) <
+        precomputed_equity + pat_eval_utility_bound(gen->pat_ctx) <
             move_get_equity(gen_get_readonly_best_move(gen))) {
       return;
     }
@@ -676,9 +679,11 @@ update_best_move_or_insert_into_movelist_wmp(MoveGen *gen, int start_col,
                     &gen->ld, current_move, &gen->leave, &gen->opponent_rack,
                     gen->opening_move_word_penalties,
                     gen->opening_move_letter_penalties,
-                    pat_eval_context_get_active_classes(&gen->pat_eval_ctx),
-                    NULL, gen->board_number_of_tiles_played,
-                    gen->number_of_tiles_in_bag, leave_value);
+                    pat_eval_context_get_active_classes(gen->pat_ctx), NULL,
+                    gen->board_number_of_tiles_played,
+                    gen->number_of_tiles_in_bag, leave_value,
+                    gen->peg_adjust_by_tiles_played[move_get_tiles_played(
+                        current_move)]);
       move_equity_or_score = gen_pat_contender_equity(
           gen, current_move, &gen->leave, equity_without_pat);
     } else {
@@ -720,7 +725,9 @@ update_best_move_or_insert_into_movelist_wmp(MoveGen *gen, int start_col,
   }
 }
 
-void record_wmp_play(MoveGen *gen, int start_col, Equity leave_value) {
+// The score of the word in playthrough_marked played at start_col.
+static inline __attribute__((always_inline)) Equity
+wmp_play_score(const MoveGen *gen, int start_col) {
   const WMPMoveGen *wgen = &gen->wmp_move_gen;
   const Equity bingo_bonus =
       gen->max_tiles_to_play == RACK_SIZE ? gen->bingo_bonus : 0;
@@ -756,9 +763,12 @@ void record_wmp_play(MoveGen *gen, int start_col, Equity leave_value) {
       playthrough_score_total += gen->tile_scores[ml];
     }
   }
-  const Equity score =
-      (played_score_total + playthrough_score_total) * word_multiplier +
-      hooked_cross_total + played_cross_total + bingo_bonus;
+  return (played_score_total + playthrough_score_total) * word_multiplier +
+         hooked_cross_total + played_cross_total + bingo_bonus;
+}
+
+void record_wmp_play(MoveGen *gen, int start_col, Equity leave_value) {
+  const Equity score = wmp_play_score(gen, start_col);
   update_best_move_or_insert_into_movelist_wmp(gen, start_col, score,
                                                leave_value);
 }
@@ -839,64 +849,88 @@ void record_wmp_plays_for_word(MoveGen *gen, int subrack_idx, int start_col,
   }
 }
 
-bool wordmap_gen_check_playthrough_and_crosses(MoveGen *gen, int word_idx,
-                                               int start_col,
-                                               uint32_t playthrough_positions) {
-  const WMPMoveGen *wgen = &gen->wmp_move_gen;
-  const MachineLetter *word = wmp_move_gen_get_word(wgen, word_idx);
-  if (playthrough_positions != 0) {
-    // WMP words are anagrams of the rack plus the playthrough tiles, but most
-    // anagrams do not put those tiles at the board's fixed positions. Check
-    // every fixed position before spending time on cross sets at empty
-    // squares. The positions were collected while building the playthrough
-    // BitRack, so this phase visits only actual board tiles.
-    uint32_t positions = playthrough_positions;
-    while (positions != 0) {
-      const int board_col = lowest_set_bit_index(positions);
-      const int letter_idx = board_col - start_col;
-      assert(board_col < BOARD_DIM);
-      assert(board_col >= 0);
-      assert(letter_idx >= 0);
-      assert(letter_idx < wgen->word_length);
-      const MachineLetter board_letter =
-          get_unblanked_machine_letter(gen_cache_get_letter(gen, board_col));
-      assert(board_letter != ALPHABET_EMPTY_SQUARE_MARKER);
-      assert(
-          !bonus_square_is_brick(gen_cache_get_bonus_square(gen, board_col)));
-      if (board_letter != word[letter_idx]) {
-        return false;
-      }
-      gen->playthrough_marked[letter_idx] = PLAYED_THROUGH_MARKER;
-      positions &= positions - 1;
-    }
-    for (int letter_idx = 0; letter_idx < wgen->word_length; letter_idx++) {
-      const int board_col = start_col + letter_idx;
-      if ((playthrough_positions & (1U << board_col)) != 0) {
-        continue;
-      }
-      const MachineLetter word_letter = word[letter_idx];
-      if (!board_is_letter_allowed_in_cross_set(
-              gen_cache_get_cross_set(gen, board_col), word_letter)) {
-        return false;
-      }
-      gen->playthrough_marked[letter_idx] = word_letter;
-    }
-    return true;
+// The bits of the columns from leftmost to rightmost.
+static inline uint32_t wordmap_gen_col_range(int leftmost_col,
+                                             int rightmost_col) {
+  return (((uint32_t)2 << rightmost_col) - 1U) &
+         ~(((uint32_t)1 << leftmost_col) - 1U);
+}
+
+// For each letter, the board columns of this anchor's words where the letter
+// may go: the column of a tile it matches, or an empty square whose cross set
+// holds it. Bit col of letter_cols[ml] is set when ml fits at col.
+//
+// Most squares away from the tiles allow every letter, so the columns that do
+// are found first and given to every letter at once; only the restricted
+// columns are walked letter by letter.
+static inline void wordmap_gen_load_letter_cols(
+    const MoveGen *gen, int leftmost_start_col, int rightmost_start_col,
+    int word_length, uint32_t playthrough_positions, uint32_t *letter_cols) {
+  const int last_col = rightmost_start_col + word_length - 1;
+  assert(last_col < BOARD_DIM);
+  const uint64_t letter_universe =
+      (((uint64_t)1 << ld_get_size(&gen->ld)) - 1) & ~(uint64_t)1;
+  uint64_t col_letters[BOARD_DIM];
+  uint32_t open_cols = 0;
+  for (int col = leftmost_start_col; col <= last_col; col++) {
+    const uint64_t board_letter_mask = (uint64_t)1
+                                       << (get_unblanked_machine_letter(
+                                               gen_cache_get_letter(gen, col)) &
+                                           (MachineLetter)63);
+    const uint64_t letters = (((playthrough_positions >> col) & 1U) != 0
+                                  ? board_letter_mask
+                                  : gen_cache_get_cross_set(gen, col)) &
+                             letter_universe;
+    col_letters[col] = letters;
+    open_cols |= (uint32_t)(letters == letter_universe) << col;
   }
-  // A zero mask means this anchor has no fixed letters. Check only crosses.
-  for (int letter_idx = 0; letter_idx < wgen->word_length; letter_idx++) {
-    assert(start_col + letter_idx >= 0);
-    assert(start_col + letter_idx < BOARD_DIM);
-    assert(gen_cache_is_empty(gen, start_col + letter_idx));
-    const MachineLetter word_letter = word[letter_idx];
-    if (!board_is_letter_allowed_in_cross_set(
-            gen_cache_get_cross_set(gen, start_col + letter_idx),
-            word_letter)) {
-      return false;
-    }
-    gen->playthrough_marked[letter_idx] = word_letter;
+  uint32_t restricted_cols =
+      wordmap_gen_col_range(leftmost_start_col, last_col) & ~open_cols;
+  for (int ml = 0; ml < BIT_RACK_MAX_ALPHABET_SIZE; ml++) {
+    letter_cols[ml] = open_cols;
   }
-  return true;
+  while (restricted_cols != 0) {
+    const int col = lowest_set_bit_index(restricted_cols);
+    restricted_cols &= restricted_cols - 1;
+    uint64_t letters = col_letters[col];
+    while (letters != 0) {
+      letter_cols[wmp_move_gen_get_lowest_set_bit(letters)] |= 1U << col;
+      letters &= letters - 1;
+    }
+  }
+}
+
+// The start columns, out of those in start_cols, where the word fits the
+// board: its letters match the tiles it plays through and are in the cross
+// sets of the squares it fills. Bit start_col of the result is set when it
+// fits there.
+//
+// Every start column is tested at once and every letter is tested, with no
+// branch on the board. Most words fit nowhere, and loops over the start
+// columns and letters that left at the first letter that did not fit
+// mispredicted their exits for nearly every word; the one branch on this
+// result is almost always not taken.
+static inline __attribute__((always_inline)) uint32_t wordmap_gen_word_fit_cols(
+    const uint32_t *letter_cols, const MachineLetter *word, int word_length,
+    uint32_t start_cols) {
+  for (int letter_idx = 0; letter_idx < word_length; letter_idx++) {
+    start_cols &= letter_cols[word[letter_idx]] >> letter_idx;
+  }
+  return start_cols;
+}
+
+// Writes a word that fits at start_col into playthrough_marked, with the
+// marker in place of each tile played through.
+static inline void wordmap_gen_mark_word(MoveGen *gen,
+                                         const MachineLetter *word,
+                                         int word_length, int start_col,
+                                         uint32_t playthrough_positions) {
+  for (int letter_idx = 0; letter_idx < word_length; letter_idx++) {
+    const bool is_playthrough =
+        ((playthrough_positions >> (start_col + letter_idx)) & 1U) != 0;
+    gen->playthrough_marked[letter_idx] =
+        is_playthrough ? PLAYED_THROUGH_MARKER : word[letter_idx];
+  }
 }
 
 // The anchor's score bound plus this subrack's leave bounds the equity of
@@ -905,24 +939,74 @@ bool wordmap_gen_check_playthrough_and_crosses(MoveGen *gen, int word_idx,
 // which the anchor-level check already bounded; adding a leave there would
 // skip subracks that still hold plays above the cutoff. This is an equity
 // upper bound independent of the anchor's highest_possible_score, so any
-// positive equity term added to the real evaluation must be added here too:
-// anchor_pat_bound (see gen_wmp_anchor_pat_bound) folds in the PAT term's
-// contribution, which includes the largest utility correction the anchor's
-// plays can get and so can be positive; the opening placement_adjustment
-// (always <= 0) is soundly
-// omitted; see static_eval_get_shadow_equity. The candidate mask applies the
-// same bound (see wordmap_gen_candidate_subracks).
+// positive equity term added to the real evaluation must be added here too.
+// The score bounds carry two (see wordmap_gen_load_score_bounds, which adds
+// the anchor's term bound to each): the PAT term's contribution (see
+// gen_wmp_anchor_pat_bound), which includes the largest utility correction
+// the anchor's plays can get and so can be positive, and the pre-endgame
+// adjustment, which every play of the anchor shares since they all use
+// anchor->tiles_to_play tiles. The opening placement_adjustment (always <= 0)
+// is soundly omitted; see static_eval_get_shadow_equity. The candidate mask
+// applies the same bound (see wordmap_gen_candidate_subracks).
 static inline __attribute__((always_inline)) bool
-wordmap_gen_leave_prunes_subrack(const MoveGen *gen, const Anchor *anchor,
-                                 int subrack_idx, Equity anchor_pat_bound) {
-  if (!gen->wmp_prune_subracks_by_leave) {
+wordmap_gen_leave_prunes_subrack(const MoveGen *gen, int subrack_idx,
+                                 const int64_t *score_bounds) {
+  if (!gen->wmp_prune_subracks_by_leave ||
+      !better_play_has_been_found(gen, EQUITY_MIN_VALUE)) {
     return false;
   }
-  const Equity leave_value =
-      wmp_move_gen_get_leave_value(&gen->wmp_move_gen, subrack_idx);
-  return better_play_has_been_found(
-      gen, leave_value + anchor->highest_possible_score + anchor_pat_bound);
+  const WMPMoveGen *wgen = &gen->wmp_move_gen;
+  const int info_idx =
+      subracks_get_combination_offset(wgen->tiles_to_play) + subrack_idx;
+  return wmp_move_gen_subrack_leave_kept(
+             wgen->nonplaythrough_leave_values[info_idx],
+             wgen->nonplaythrough_tile_score_sums[info_idx], score_bounds,
+             gen_get_cutoff_equity_or_score(gen)) == 0;
 }
+
+// The anchor's score bound and score bases, each with the anchor's term bound
+// (its PAT bound plus its pre-endgame adjustment) added, as the candidate mask
+// and the leave prune take them (see wmp_move_gen_subrack_leave_kept).
+static inline void wordmap_gen_load_score_bounds(const MoveGen *gen,
+                                                 const Anchor *anchor,
+                                                 Equity anchor_term_bound,
+                                                 int64_t *score_bounds) {
+  const Equity *heap_score_bases =
+      gen->wmp_move_gen.heap_score_bases[anchor->insertion_idx];
+  score_bounds[0] = (int64_t)anchor->highest_possible_score + anchor_term_bound;
+  for (int base_idx = 0; base_idx < WMP_SCORE_BASE_COUNT; base_idx++) {
+    score_bounds[base_idx + 1] =
+        (int64_t)heap_score_bases[base_idx] + anchor_term_bound;
+  }
+}
+
+#ifndef NDEBUG
+// Whether the anchor's score bounds hold for the marked word at start_col,
+// with every tile scored at its face value: the claim
+// wmp_move_gen_update_anchor_score_bases makes. A subrack with a blank is not
+// checked: the word's letters are not all its tiles, so this score is not one
+// of its plays'. The blankless subracks cover the claim.
+static bool wordmap_gen_score_bounds_hold(const MoveGen *gen,
+                                          const Anchor *anchor, int subrack_idx,
+                                          int start_col,
+                                          const int64_t *score_bounds) {
+  const WMPMoveGen *wgen = &gen->wmp_move_gen;
+  const int info_idx =
+      subracks_get_combination_offset(wgen->tiles_to_play) + subrack_idx;
+  if (bit_rack_get_letter(&wgen->nonplaythrough_infos[info_idx].subrack,
+                          BLANK_MACHINE_LETTER) > 0) {
+    return true;
+  }
+  // Every bound carries the anchor's term bound (its PAT bound plus its
+  // pre-endgame adjustment), so the score takes it too.
+  const int64_t term_bound = score_bounds[0] - anchor->highest_possible_score;
+  const int64_t score = (int64_t)wmp_play_score(gen, start_col) + term_bound;
+  const Equity leave_value = wgen->nonplaythrough_leave_values[info_idx];
+  return wmp_move_gen_subrack_leave_kept(
+             leave_value, wgen->nonplaythrough_tile_score_sums[info_idx],
+             score_bounds, score + leave_value) == 1;
+}
+#endif
 
 // Probes the WMP for one canonical subrack of the current anchor and records
 // every play its words allow. Returns true once the recording threshold has
@@ -935,7 +1019,8 @@ wordmap_gen_leave_prunes_subrack(const MoveGen *gen, const Anchor *anchor,
 // with WIT off).
 static inline __attribute__((always_inline)) bool
 wordmap_gen_record_subrack(MoveGen *gen, const Anchor *anchor, int subrack_idx,
-                           bool lazy, Equity anchor_pat_bound) {
+                           bool lazy, const int64_t *score_bounds,
+                           uint32_t *letter_cols, bool *letter_cols_loaded) {
   WMPMoveGen *wgen = &gen->wmp_move_gen;
   // record_wmp_play prices every play below with wgen->leave_value. Only
   // equity sort with tiles in the bag reads the subrack's leave, and that is
@@ -944,8 +1029,7 @@ wordmap_gen_record_subrack(MoveGen *gen, const Anchor *anchor, int subrack_idx,
   if (gen->wmp_prune_subracks_by_leave) {
     wgen->leave_value = wmp_move_gen_get_leave_value(wgen, subrack_idx);
   }
-  if (wordmap_gen_leave_prunes_subrack(gen, anchor, subrack_idx,
-                                       anchor_pat_bound)) {
+  if (wordmap_gen_leave_prunes_subrack(gen, subrack_idx, score_bounds)) {
     return false;
   }
   if (!wmp_move_gen_get_subrack_words(wgen, subrack_idx, lazy,
@@ -965,15 +1049,28 @@ wordmap_gen_record_subrack(MoveGen *gen, const Anchor *anchor, int subrack_idx,
                            rack_get_total_letters(&gen->player_rack) -
                                anchor->tiles_to_play);
   }
+  if (!*letter_cols_loaded) {
+    wordmap_gen_load_letter_cols(gen, anchor->leftmost_start_col,
+                                 anchor->rightmost_start_col, wgen->word_length,
+                                 wgen->playthrough_positions, letter_cols);
+    *letter_cols_loaded = true;
+  }
+  const uint32_t start_cols = wordmap_gen_col_range(
+      anchor->leftmost_start_col, anchor->rightmost_start_col);
   for (int word_idx = 0; word_idx < wgen->num_words; word_idx++) {
-    for (int start_col = anchor->leftmost_start_col;
-         start_col <= anchor->rightmost_start_col; start_col++) {
-      if (wordmap_gen_check_playthrough_and_crosses(
-              gen, word_idx, start_col, wgen->playthrough_positions)) {
-        record_wmp_plays_for_word(gen, subrack_idx, start_col, 0, 0);
-        if (gen->threshold_exceeded) {
-          return true;
-        }
+    const MachineLetter *word = wmp_move_gen_get_word(wgen, word_idx);
+    uint32_t fit_cols = wordmap_gen_word_fit_cols(
+        letter_cols, word, wgen->word_length, start_cols);
+    while (fit_cols != 0) {
+      const int start_col = lowest_set_bit_index(fit_cols);
+      fit_cols &= fit_cols - 1;
+      wordmap_gen_mark_word(gen, word, wgen->word_length, start_col,
+                            wgen->playthrough_positions);
+      assert(wordmap_gen_score_bounds_hold(gen, anchor, subrack_idx, start_col,
+                                           score_bounds));
+      record_wmp_plays_for_word(gen, subrack_idx, start_col, 0, 0);
+      if (gen->threshold_exceeded) {
+        return true;
       }
     }
   }
@@ -996,18 +1093,16 @@ wordmap_gen_record_subrack(MoveGen *gen, const Anchor *anchor, int subrack_idx,
 // never reaches EQUITY_MAX_VALUE. So wordmap_gen_leave_prunes_subrack would
 // skip the subrack when the walk reaches it.
 static inline __attribute__((always_inline)) uint64_t
-wordmap_gen_candidate_subracks(const MoveGen *gen, const Anchor *anchor,
-                               int first_idx, int count, bool lazy,
-                               Equity anchor_pat_bound,
+wordmap_gen_candidate_subracks(const MoveGen *gen, int first_idx, int count,
+                               bool lazy, const int64_t *score_bounds,
                                uint64_t *filter_misses) {
   const bool prune_by_leave = gen->wmp_prune_subracks_by_leave &&
                               better_play_has_been_found(gen, EQUITY_MIN_VALUE);
-  // The PAT bound joins the anchor's score bound, exactly as in
-  // wordmap_gen_leave_prunes_subrack; dropping it would be unsound, since
-  // it can be positive.
+  // The score bounds carry the PAT bound and the pre-endgame adjustment,
+  // exactly as in wordmap_gen_leave_prunes_subrack; dropping either would be
+  // unsound, since each can be positive.
   return wmp_move_gen_get_candidate_subracks(
-      &gen->wmp_move_gen, first_idx, count, lazy, prune_by_leave,
-      anchor->highest_possible_score + anchor_pat_bound,
+      &gen->wmp_move_gen, first_idx, count, lazy, prune_by_leave, score_bounds,
       gen_get_cutoff_equity_or_score(gen), filter_misses);
 }
 
@@ -1034,14 +1129,12 @@ static __attribute__((noinline)) uint64_t wordmap_gen_allowed_subracks(
 // of line to keep the walk in generate_moves small; it has work only while a
 // lazily resolved rack still has unresolved subracks of the anchor's size.
 static __attribute__((noinline)) void
-wordmap_gen_resolve_filter_misses(MoveGen *gen, const Anchor *anchor,
-                                  int first_idx, uint64_t misses,
-                                  Equity anchor_pat_bound) {
+wordmap_gen_resolve_filter_misses(MoveGen *gen, int first_idx, uint64_t misses,
+                                  const int64_t *score_bounds) {
   while (misses != 0) {
     const int subrack_idx = first_idx + wmp_move_gen_get_lowest_set_bit(misses);
     misses &= misses - 1;
-    if (!wordmap_gen_leave_prunes_subrack(gen, anchor, subrack_idx,
-                                          anchor_pat_bound)) {
+    if (!wordmap_gen_leave_prunes_subrack(gen, subrack_idx, score_bounds)) {
       wmp_move_gen_resolve_filter_miss(&gen->wmp_move_gen, subrack_idx);
     }
   }
@@ -1064,6 +1157,8 @@ wordmap_gen(MoveGen *gen, const Anchor *anchor, bool lazy) {
   gen->max_tiles_to_play = anchor->tiles_to_play;
   assert(anchor->tiles_to_play <= rack_get_total_letters(&gen->player_rack));
   WMPMoveGen *wgen = &gen->wmp_move_gen;
+  uint32_t letter_cols[BIT_RACK_MAX_ALPHABET_SIZE];
+  bool letter_cols_loaded = false;
 
   // Inline bingo fast path: for nonplaythrough full-rack plays with
   // precomputed bingo words, skip subrack enumeration and WMP lookup.
@@ -1080,17 +1175,24 @@ wordmap_gen(MoveGen *gen, const Anchor *anchor, bool lazy) {
       if (gen->number_of_tiles_in_bag == 0) {
         rack_reset(&gen->leave);
       }
+      wordmap_gen_load_letter_cols(gen, anchor->leftmost_start_col,
+                                   anchor->rightmost_start_col, RACK_SIZE, 0,
+                                   letter_cols);
+      const uint32_t start_cols = wordmap_gen_col_range(
+          anchor->leftmost_start_col, anchor->rightmost_start_col);
       for (int bingo_idx = 0; bingo_idx < num_bingos; bingo_idx++) {
         // Point the word list at the RIT's inline word (no copy).
         wgen->words = gen->rit_entry->bingo_words[bingo_idx];
         wgen->num_words = 1;
-        for (int start_col = anchor->leftmost_start_col;
-             start_col <= anchor->rightmost_start_col; start_col++) {
-          if (wordmap_gen_check_playthrough_and_crosses(gen, 0, start_col, 0)) {
-            record_wmp_plays_for_word(gen, 0, start_col, 0, 0);
-            if (gen->threshold_exceeded) {
-              return;
-            }
+        uint32_t fit_cols = wordmap_gen_word_fit_cols(letter_cols, wgen->words,
+                                                      RACK_SIZE, start_cols);
+        while (fit_cols != 0) {
+          const int start_col = lowest_set_bit_index(fit_cols);
+          fit_cols &= fit_cols - 1;
+          wordmap_gen_mark_word(gen, wgen->words, RACK_SIZE, start_col, 0);
+          record_wmp_plays_for_word(gen, 0, start_col, 0, 0);
+          if (gen->threshold_exceeded) {
+            return;
           }
         }
       }
@@ -1166,9 +1268,13 @@ wordmap_gen(MoveGen *gen, const Anchor *anchor, bool lazy) {
   const bool has_forbidden =
       bit_rack_mask_has_letters(forbidden_subrack_low, forbidden_subrack_high);
   // Upper bound on the PAT term of every move from this anchor (zero when
-  // the term is off). See wordmap_gen_leave_prunes_subrack.
-  const Equity anchor_pat_bound =
-      gen_wmp_anchor_pat_bound(gen, anchor->dir, anchor->row, anchor);
+  // the term is off), plus their shared pre-endgame adjustment. See
+  // wordmap_gen_leave_prunes_subrack.
+  const Equity anchor_term_bound =
+      gen_wmp_anchor_pat_bound(gen, anchor->dir, anchor->row, anchor) +
+      gen->peg_adjust_by_tiles_played[anchor->tiles_to_play];
+  int64_t score_bounds[WMP_SCORE_BOUND_COUNT];
+  wordmap_gen_load_score_bounds(gen, anchor, anchor_term_bound, score_bounds);
   for (int first_idx = 0; first_idx < num_subrack_combinations;
        first_idx += WMP_MOVE_GEN_SUBRACKS_PER_MASK) {
     const int remaining = num_subrack_combinations - first_idx;
@@ -1177,7 +1283,7 @@ wordmap_gen(MoveGen *gen, const Anchor *anchor, bool lazy) {
                           : WMP_MOVE_GEN_SUBRACKS_PER_MASK;
     uint64_t filter_misses = 0;
     uint64_t candidates = wordmap_gen_candidate_subracks(
-        gen, anchor, first_idx, count, lazy, anchor_pat_bound, &filter_misses);
+        gen, first_idx, count, lazy, score_bounds, &filter_misses);
     if (has_forbidden) {
       const uint64_t allowed = wordmap_gen_allowed_subracks(
           wgen, first_idx, count, forbidden_subrack_low,
@@ -1190,18 +1296,19 @@ wordmap_gen(MoveGen *gen, const Anchor *anchor, bool lazy) {
       candidates &= candidates - 1;
       const uint64_t misses_below = filter_misses & ((1ULL << bit_idx) - 1);
       if (misses_below != 0) {
-        wordmap_gen_resolve_filter_misses(gen, anchor, first_idx, misses_below,
-                                          anchor_pat_bound);
+        wordmap_gen_resolve_filter_misses(gen, first_idx, misses_below,
+                                          score_bounds);
         filter_misses ^= misses_below;
       }
       if (wordmap_gen_record_subrack(gen, anchor, first_idx + bit_idx, lazy,
-                                     anchor_pat_bound)) {
+                                     score_bounds, letter_cols,
+                                     &letter_cols_loaded)) {
         return;
       }
     }
     if (filter_misses != 0) {
-      wordmap_gen_resolve_filter_misses(gen, anchor, first_idx, filter_misses,
-                                        anchor_pat_bound);
+      wordmap_gen_resolve_filter_misses(gen, first_idx, filter_misses,
+                                        score_bounds);
     }
   }
 }
@@ -1903,6 +2010,30 @@ shadow_record_impl(MoveGen *gen, bool wmp_active, uint32_t allowed_lengths) {
     const int word_length =
         gen->wmp_move_gen.num_tiles_played_through + gen->tiles_played;
     if (word_length >= MINIMUM_WORD_LENGTH) {
+      // The tiles this bound places are the rack's less the ones it has no
+      // square for, which are the ones past its unrestricted squares'
+      // multipliers.
+      const int num_unrestricted = gen->num_unrestricted_multipliers;
+      Equity shadow_tile_score_sum = gen->rack_tile_score_sum;
+      for (int i = 0; i < RACK_SIZE; i++) {
+        shadow_tile_score_sum -=
+            i >= num_unrestricted ? gen->descending_tile_scores[i] : 0;
+      }
+      assert(
+          num_unrestricted == 0 ||
+          gen->descending_effective_letter_multipliers[num_unrestricted - 1] !=
+              0);
+      assert(num_unrestricted == RACK_SIZE ||
+             gen->descending_effective_letter_multipliers[num_unrestricted] ==
+                 0);
+      const int smallest_multiplier =
+          num_unrestricted > 0
+              ? gen->descending_effective_letter_multipliers[num_unrestricted -
+                                                             1]
+              : WMP_SCORE_BASE_COUNT;
+      wmp_move_gen_update_anchor_score_bases(
+          &gen->wmp_move_gen, gen->tiles_played, score, shadow_tile_score_sum,
+          smallest_multiplier);
       wmp_move_gen_maybe_update_anchor(&gen->wmp_move_gen, gen->tiles_played,
                                        word_length, gen->current_left_col,
                                        score, equity);
@@ -2963,6 +3094,15 @@ static inline void shadow_start_small(MoveGen *gen) {
 // its equity bound, which shadow_record left without the term.
 static void gen_add_pat_bounds_to_wmp_anchors(MoveGen *gen) {
   WMPMoveGen *wgen = &gen->wmp_move_gen;
+  // The anchor's cap, if it has one, also bounds its equity without the
+  // term (see MoveGenArgs.anchor_equity_caps).
+  const Equity equity_cap =
+      gen->anchor_equity_caps != NULL
+          ? gen->anchor_equity_caps[(BOARD_DIM * gen->dir +
+                                     gen->current_row_index) *
+                                        BOARD_DIM +
+                                    gen->current_anchor_col]
+          : EQUITY_MAX_VALUE;
   for (int word_idx = 0; word_idx < WMP_ANCHOR_MASK_WORDS; word_idx++) {
     uint64_t touched = wgen->touched_anchor_masks[word_idx];
     while (touched != 0) {
@@ -2970,6 +3110,9 @@ static void gen_add_pat_bounds_to_wmp_anchors(MoveGen *gen) {
           word_idx * 64 + wmp_move_gen_get_lowest_set_bit(touched);
       touched &= touched - 1;
       Anchor *anchor = &wgen->anchors[slot_idx];
+      if (equity_cap < anchor->highest_possible_equity) {
+        anchor->highest_possible_equity = equity_cap;
+      }
       anchor->highest_possible_equity += gen_wmp_anchor_pat_bound(
           gen, gen->dir, gen->current_row_index, anchor);
     }
@@ -3094,48 +3237,102 @@ void shadow_play_for_anchor_small(MoveGen *gen, int col) {
       gen->dir, gen->highest_shadow_score, gen->highest_shadow_score);
 }
 
-void shadow_by_orientation(MoveGen *gen) {
-  for (int row = 0; row < BOARD_DIM; row++) {
-    gen->current_row_index = row;
-    if (gen->row_number_of_anchors_cache[BOARD_DIM * gen->dir + row] == 0) {
-      continue;
-    }
-    gen->last_anchor_col = INITIAL_LAST_ANCHOR_COL;
-    gen->row_squares =
-        board_get_row_cache(gen->board_lanes, gen->current_row_index, gen->dir);
-    gen->wit_row_lane = board_get_wit_row_lane(
-        gen->board, gen->current_row_index, gen->dir, gen->cross_index);
-    gen->wit_len_lane = board_get_wit_len_lane(
-        gen->board, gen->current_row_index, gen->dir, gen->cross_index);
-    gen->pat_lane_penalty_bound = pat_eval_lane_penalty_bound(
-        &gen->pat_eval_ctx, gen->dir, gen->current_row_index);
-    // Gathering the anchors into a mask first replaces a branch per square,
-    // which mispredicted, with one per anchor.
-    uint32_t anchor_cols = 0;
-    for (int col = 0; col < BOARD_DIM; col++) {
-      anchor_cols |= (uint32_t)gen_cache_get_is_anchor(gen, col) << col;
-    }
-    const uint32_t skipped_cols =
-        gen->skip_anchor_cols != NULL
-            ? gen->skip_anchor_cols[BOARD_DIM * gen->dir + row]
-            : 0;
-    while (anchor_cols != 0) {
-      const int col = wmp_move_gen_get_lowest_set_bit(anchor_cols);
-      anchor_cols &= anchor_cols - 1;
-      // A skipped anchor still bounds the next one's plays on the left, so
-      // that exactly its own plays go unsearched.
-      if ((skipped_cols & ((uint32_t)1 << col)) == 0) {
-        shadow_play_for_anchor(gen, col);
-      }
+// Whether this generation uses its anchors' equity caps (see
+// MoveGenArgs.anchor_equity_caps).
+static inline bool gen_uses_anchor_equity_caps(const MoveGen *gen) {
+  return gen->anchor_equity_caps != NULL && gen_pat_is_active(gen) &&
+         wmp_move_gen_is_active(&gen->wmp_move_gen) &&
+         gen->move_record_type == MOVE_RECORD_BEST &&
+         gen->move_sort_type == MOVE_SORT_EQUITY;
+}
 
-      gen->last_anchor_col = col;
-      // The next anchor to search after a playthrough tile should
-      // leave a gap of one square so that it will not search backwards
-      // into the square adjacent to the playthrough tile.
-      if (!gen_cache_is_empty(gen, col)) {
-        gen->last_anchor_col++;
+// Shadows lane row of gen->dir. With may_defer, which needs caps in use, a
+// lane whose every unskipped anchor has a cap is left for later instead (see
+// MoveGen.deferred_lanes).
+static inline void shadow_lane(MoveGen *gen, int row, bool caps_apply,
+                               bool may_defer) {
+  gen->current_row_index = row;
+  if (gen->row_number_of_anchors_cache[BOARD_DIM * gen->dir + row] == 0) {
+    return;
+  }
+  gen->last_anchor_col = INITIAL_LAST_ANCHOR_COL;
+  gen->row_squares =
+      board_get_row_cache(gen->board_lanes, gen->current_row_index, gen->dir);
+  gen->wit_row_lane = board_get_wit_row_lane(gen->board, gen->current_row_index,
+                                             gen->dir, gen->cross_index);
+  gen->wit_len_lane = board_get_wit_len_lane(gen->board, gen->current_row_index,
+                                             gen->dir, gen->cross_index);
+  gen->pat_lane_penalty_bound = pat_eval_lane_penalty_bound(
+      gen->pat_ctx, gen->dir, gen->current_row_index);
+  // Gathering the anchors into a mask first replaces a branch per square,
+  // which mispredicted, with one per anchor.
+  uint32_t anchor_cols = 0;
+  for (int col = 0; col < BOARD_DIM; col++) {
+    anchor_cols |= (uint32_t)gen_cache_get_is_anchor(gen, col) << col;
+  }
+  const uint32_t skipped_cols =
+      gen->skip_anchor_cols != NULL
+          ? gen->skip_anchor_cols[BOARD_DIM * gen->dir + row]
+          : 0;
+  const Equity *lane_caps =
+      caps_apply ? gen->anchor_equity_caps +
+                       (ptrdiff_t)(BOARD_DIM * gen->dir + row) * BOARD_DIM
+                 : NULL;
+  if (may_defer) {
+    Equity largest_cap = EQUITY_MIN_VALUE;
+    for (uint32_t remaining = anchor_cols & ~skipped_cols; remaining != 0;
+         remaining &= remaining - 1) {
+      const Equity cap = lane_caps[wmp_move_gen_get_lowest_set_bit(remaining)];
+      if (cap > largest_cap) {
+        largest_cap = cap;
       }
     }
+    if (largest_cap == EQUITY_MIN_VALUE) {
+      // Every anchor is skipped.
+      return;
+    }
+    if (largest_cap != EQUITY_MAX_VALUE) {
+      const int lane = BOARD_DIM * gen->dir + row;
+      gen->deferred_lanes |= (uint64_t)1 << lane;
+      gen->deferred_lane_bounds[lane] =
+          largest_cap + gen->pat_lane_penalty_bound;
+      return;
+    }
+  }
+  while (anchor_cols != 0) {
+    const int col = wmp_move_gen_get_lowest_set_bit(anchor_cols);
+    anchor_cols &= anchor_cols - 1;
+    // A skipped anchor still bounds the next one's plays on the left, so
+    // that exactly its own plays go unsearched.
+    bool skip_anchor = (skipped_cols & ((uint32_t)1 << col)) != 0;
+    if (!skip_anchor && lane_caps != NULL) {
+      // An anchor whose cap plus the lane's bound on the PAT term is below
+      // the best move so far holds nothing better.
+      const Equity cap = lane_caps[col];
+      const Equity best_equity =
+          move_get_equity(gen_get_readonly_best_move(gen));
+      skip_anchor =
+          cap != EQUITY_MAX_VALUE && best_equity != EQUITY_INITIAL_VALUE &&
+          (int64_t)cap + gen->pat_lane_penalty_bound < (int64_t)best_equity;
+    }
+    if (!skip_anchor) {
+      shadow_play_for_anchor(gen, col);
+    }
+
+    gen->last_anchor_col = col;
+    // The next anchor to search after a playthrough tile should
+    // leave a gap of one square so that it will not search backwards
+    // into the square adjacent to the playthrough tile.
+    if (!gen_cache_is_empty(gen, col)) {
+      gen->last_anchor_col++;
+    }
+  }
+}
+
+void shadow_by_orientation(MoveGen *gen) {
+  const bool caps_apply = gen_uses_anchor_equity_caps(gen);
+  for (int row = 0; row < BOARD_DIM; row++) {
+    shadow_lane(gen, row, caps_apply, caps_apply);
   }
 }
 
@@ -3186,8 +3383,53 @@ static inline void set_descending_tile_scores(MoveGen *gen) {
          sizeof(gen->descending_tile_scores));
 }
 
+// Points gen->pat_ctx at the board's context in board_cache, loading it
+// when the cache does not hold it (see pat_board_cache.h). Board-only PAT
+// gives the load no rack and sets no utility correction, so the context
+// depends on nothing but what its key holds.
+static void gen_load_board_only_pat(MoveGen *gen, PATBoardCache *board_cache,
+                                    const PATWeights *pat,
+                                    uint32_t classes_mask,
+                                    int opponent_rack_size) {
+  uint64_t key = ((uint64_t)(uintptr_t)pat ^ board_cache->salt) *
+                 PAT_BOARD_CACHE_KEY_MULTIPLIER;
+  key ^= pat_get_mutation_counter(pat) + ((uint64_t)classes_mask << 20) +
+         ((uint64_t)opponent_rack_size << 52) +
+         ((uint64_t)gen->player_index << 60);
+  key *= PAT_BOARD_CACHE_KEY_PRIME;
+  for (int row = 0; row < BOARD_DIM; row++) {
+    const Square *lane_squares =
+        board_get_row_cache(gen->board_lanes, row, BOARD_HORIZONTAL_DIRECTION);
+    for (int col = 0; col < BOARD_DIM; col++) {
+      key = (key ^ square_get_letter(&lane_squares[col])) *
+            PAT_BOARD_CACHE_KEY_PRIME;
+      key ^= key >> 29;
+    }
+  }
+  key |= 1;
+  PATBoardCacheContext *entry =
+      &board_cache->contexts[key & (PAT_BOARD_CACHE_NUM_CONTEXTS - 1)];
+  gen->pat_ctx = &entry->ctx;
+  // With an own-asset discount a move's term also depends on its leave.
+  if (pat_get_own_asset_discount(pat) == 0.0) {
+    gen->pat_terms = board_cache->terms;
+    gen->pat_term_key = key;
+  }
+  if (entry->key == key) {
+    // The lanes and the letter distribution are this generation's.
+    entry->ctx.lanes = gen->board_lanes;
+    entry->ctx.ld = &gen->ld;
+    return;
+  }
+  entry->key = key;
+  pat_eval_context_load(&entry->ctx, pat, gen->board_lanes, &gen->ld, NULL,
+                        classes_mask, opponent_rack_size);
+}
+
 void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
   gen->skip_anchor_cols = args->skip_anchor_cols;
+  gen->anchor_equity_caps = args->anchor_equity_caps;
+  gen->deferred_lanes = 0;
   const Game *game = args->game;
   gen->move_record_type = args->move_record_type;
   gen->move_sort_type = args->move_sort_type;
@@ -3230,20 +3472,20 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
   const KLV *new_klv = player_get_klv(player);
   const uint64_t new_klv_mutation_counter =
       (new_klv != NULL) ? klv_get_mutation_counter(new_klv) : 0;
-  const uint64_t new_klv_instance_fp =
-      (new_klv != NULL) ? klv_get_instance_fingerprint(new_klv) : 0;
+  const uint64_t new_klv_instance_id =
+      (new_klv != NULL) ? klv_get_instance_id(new_klv) : 0;
   // Invalidate when the KLV pointer changes (player swap, lexicon change), the
-  // KLV instance fingerprint changes (catches a reloaded KLV the allocator
-  // placed at the freed KLV's address -- ABA -- which the pointer comparison
-  // misses because the move_gen cache outlives the Config that owned the old
-  // KLV), OR the same KLV's leave_values have been mutated in place. The
+  // KLV instance id changes (catches a reloaded KLV the allocator placed at
+  // the freed KLV's address -- ABA -- which the pointer comparison misses
+  // because the move_gen cache outlives the Config that owned the old KLV),
+  // OR the same KLV's leave_values have been mutated in place. The
   // mutation-counter path catches both leavegen's bulk updates and test-only
   // set_klv_leave_value calls between generate_moves invocations, which would
   // otherwise leave stale leave_values cached in the subrack cache and
   // anchor-cache upper-bound entries.
   const bool klv_changed =
       (new_klv != gen->klv) ||
-      (new_klv_instance_fp != gen->klv_instance_fp_at_load) ||
+      (new_klv_instance_id != gen->klv_instance_id_at_load) ||
       (new_klv_mutation_counter != gen->klv_mutation_counter_at_load);
   if (klv_changed) {
     for (int i = 0; i < MOVEGEN_SUBRACK_CACHE_SIZE; i++) {
@@ -3255,7 +3497,7 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
   }
   gen->klv = new_klv;
   gen->klv_mutation_counter_at_load = new_klv_mutation_counter;
-  gen->klv_instance_fp_at_load = new_klv_instance_fp;
+  gen->klv_instance_id_at_load = new_klv_instance_id;
   // The RIT keys on a BitRack, so it is unusable for a BitRack-incompatible
   // alphabet; treat it as absent (the WMP is gated the same way below).
   const RackInfoTable *new_rit =
@@ -3328,6 +3570,12 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
 
   gen->bingo_bonus = game_get_bingo_bonus(game);
   gen->number_of_tiles_in_bag = bag_get_letters(game_get_bag(game));
+  // The table and PAT read the real bag: the game's bag also holds the tiles
+  // of a rack that is not known, which are not in the bag the play is made
+  // from.
+  const int real_bag_size = game_get_real_bag_size(game);
+  peg_adjust_fill_by_tiles_played(player_get_peg_adjust(player), real_bag_size,
+                                  gen->peg_adjust_by_tiles_played);
   gen->wmp_prune_subracks_by_leave = (gen->number_of_tiles_in_bag > 0) &&
                                      (gen->move_sort_type == MOVE_SORT_EQUITY);
   gen->kwgs_are_shared = game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KWG);
@@ -3375,50 +3623,62 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
   // opening_move_word/letter_penalties is read only by gen_get_static_equity
   // (the equity-recording paths). The endgame's small-record movegen types
   // never read it, so skip the per-node 240-byte copy for them.
+  gen->pat_ctx = &gen->pat_eval_ctx;
+  gen->pat_terms = NULL;
   if (gen->move_record_type != MOVE_RECORD_ALL_SMALL &&
       gen->move_record_type != MOVE_RECORD_TILES_PLAYED &&
       gen->move_record_type != MOVE_RECORD_BEST_SMALL) {
     board_copy_opening_penalties(gen->board, gen->opening_move_word_penalties,
                                  gen->opening_move_letter_penalties);
-    // The PAT term is equity-only, bag-gated like the leave value,
+    // The PAT term is equity-only, runs only while the real bag has tiles,
     // and requires valid cross sets (its scans read them). The weights are
     // re-read from the player on every position load, so a training loop
     // that rewrites them between generations needs no extra invalidation,
     // and so are the player's PAT settings (see player_set_pat_usage).
     const PATWeights *pat = player_get_pat(player);
     if (pat && !args->disable_pat && !player_get_pat_disabled(player) &&
-        gen->move_sort_type == MOVE_SORT_EQUITY &&
-        gen->number_of_tiles_in_bag > 0 &&
+        gen->move_sort_type == MOVE_SORT_EQUITY && real_bag_size > 0 &&
         board_get_cross_sets_valid(gen->board)) {
-      pat_eval_context_load(&gen->pat_eval_ctx, pat, gen->board_lanes, &gen->ld,
-                            &gen->player_rack,
-                            PAT_CLASS_MASK_ALL &
-                                ~args->pat_disabled_classes_mask &
-                                ~player_get_pat_disabled_classes_mask(player),
-                            rack_get_total_letters(&gen->opponent_rack));
-      pat_eval_context_set_kwg(&gen->pat_eval_ctx, gen->kwg,
-                               game_get_variant(game));
-      pat_eval_context_set_utility(
-          &gen->pat_eval_ctx,
-          equity_to_int(player_get_score(player) - player_get_score(opponent)),
-          gen->number_of_tiles_in_bag);
+      const uint32_t classes_mask =
+          PAT_CLASS_MASK_ALL & ~args->pat_disabled_classes_mask &
+          ~player_get_pat_disabled_classes_mask(player);
+      // While the real bag has tiles the opponent's rack is full, whether or
+      // not the game knows its tiles.
+      const int opponent_rack_size = RACK_SIZE;
+      PATBoardCache *board_cache = player_get_pat_board_cache(player);
+      if (board_cache == NULL) {
+        pat_eval_context_load(gen->pat_ctx, pat, gen->board_lanes, &gen->ld,
+                              &gen->player_rack, classes_mask,
+                              opponent_rack_size);
+        pat_eval_context_set_kwg(gen->pat_ctx, gen->kwg,
+                                 game_get_variant(game));
+        pat_eval_context_set_utility(gen->pat_ctx,
+                                     equity_to_int(player_get_score(player) -
+                                                   player_get_score(opponent)),
+                                     real_bag_size);
+      } else {
+        gen_load_board_only_pat(gen, board_cache, pat, classes_mask,
+                                opponent_rack_size);
+        pat_eval_context_set_kwg(gen->pat_ctx, gen->kwg,
+                                 game_get_variant(game));
+      }
     } else {
-      pat_eval_context_disable(&gen->pat_eval_ctx);
+      pat_eval_context_disable(gen->pat_ctx);
     }
   } else {
-    pat_eval_context_disable(&gen->pat_eval_ctx);
+    pat_eval_context_disable(gen->pat_ctx);
   }
 
   gen->is_wordsmog = game_get_variant(game) == GAME_VARIANT_WORDSMOG;
   gen->threshold_exceeded = false;
   gen->stop_on_threshold = args->target_equity != EQUITY_MAX_VALUE;
-  // A word info table's prune and wordsmog's letters are shadow inputs that
-  // the cache's keys do not hold.
-  gen->lane_shadow_cache = gen->move_record_type == MOVE_RECORD_BEST_SMALL &&
-                                   gen->word_info_table == NULL &&
-                                   !gen->is_wordsmog
-                               ? args->lane_shadow_cache
-                               : NULL;
+  // Wordsmog is left out. A word info table is no input of what the cache
+  // holds: only the full shadow and WMP generation read it, and these
+  // generations run the small shadow and the small generator.
+  gen->lane_shadow_cache =
+      gen->move_record_type == MOVE_RECORD_BEST_SMALL && !gen->is_wordsmog
+          ? args->lane_shadow_cache
+          : NULL;
 }
 
 void gen_look_up_leaves_and_record_exchanges(MoveGen *gen) {
@@ -3567,7 +3827,8 @@ static void gen_set_shadow_equities(MoveGen *gen) {
         static_eval_get_shadow_equity(
             &gen->ld, &gen->opponent_rack, gen->best_leaves,
             gen->full_rack_descending_tile_scores, gen->number_of_tiles_in_bag,
-            number_of_letters_on_rack, tiles_played);
+            number_of_letters_on_rack, tiles_played,
+            gen->peg_adjust_by_tiles_played[tiles_played]);
   }
   if (!wmp_move_gen_is_active(&gen->wmp_move_gen) ||
       gen->number_of_tiles_in_bag == 0) {
@@ -3581,12 +3842,17 @@ static void gen_set_shadow_equities(MoveGen *gen) {
         static_eval_get_shadow_equity(
             &gen->ld, &gen->opponent_rack, nonplaythrough_best_leaves,
             gen->full_rack_descending_tile_scores, gen->number_of_tiles_in_bag,
-            number_of_letters_on_rack, tiles_played);
+            number_of_letters_on_rack, tiles_played,
+            gen->peg_adjust_by_tiles_played[tiles_played]);
   }
 }
 
 void gen_shadow(MoveGen *gen) {
   gen_set_shadow_equities(gen);
+  gen->rack_tile_score_sum = 0;
+  for (int i = 0; i < RACK_SIZE; i++) {
+    gen->rack_tile_score_sum += gen->full_rack_descending_tile_scores[i];
+  }
   // Set the leave_map index to 2^number_of_letters - 1, which represents
   // using (playing) zero tiles and keeping
   // gen->player_rack->number_of_letters tiles.
@@ -3620,16 +3886,39 @@ static inline uint64_t lane_shadow_mix(uint64_t value) {
   return value;
 }
 
+// The bits of the word lane_shadow_key reads from a square that it keys on:
+// the cross score, letter and bonus square, and the anchor and cross word
+// flags. Not the tile's owner, the flags byte's unused bits or the padding
+// after it, none of which the shadow reads. Boards are allocated
+// uninitialized, and nothing sets the unused bits, the padding or an unowned
+// square's player, so two boards with the same tiles can differ in them;
+// leaving them out gives a lane one key on every board.
+static inline uint64_t lane_shadow_field_mask(void) {
+  Square fields;
+  memset(&fields, 0, sizeof(fields));
+  fields.cross_score = -1;
+  fields.letter = UINT8_MAX;
+  fields.bonus_square.raw = UINT8_MAX;
+  fields.anchor = 1;
+  fields.is_cross_word = 1;
+  uint64_t mask;
+  memcpy(&mask, (const char *)&fields + offsetof(Square, cross_score),
+         sizeof(mask));
+  return mask;
+}
+
 // The key of a lane's squares as the small shadow reads them, with
 // context_key: each square's cross set, and the word holding its cross
-// score, letter, bonus square and flags. The extension sets follow from the
-// letters and the lexicon, which context_key holds. The two words go in
-// separate chains of multiply-adds; each step is a bijection of its chain so
-// far (the multiplier is odd), so lanes that differ in one word always differ
-// in a chain. One finalizer then mixes both chains and context_key into the
-// top bits that index the cache. A key is never 0, which marks no lane.
+// score, letter, bonus square and flags, less field_mask's complement (see
+// lane_shadow_field_mask). The extension sets follow from the letters and the
+// lexicon, which context_key holds. The two words go in separate chains of
+// multiply-adds; each step is a bijection of its chain so far (the multiplier
+// is odd), so lanes that differ in one word always differ in a chain. One
+// finalizer then mixes both chains and context_key into the top bits that
+// index the cache. A key is never 0, which marks no lane.
 static inline uint64_t lane_shadow_key(const Square *lane_squares,
-                                       uint64_t context_key) {
+                                       uint64_t context_key,
+                                       uint64_t field_mask) {
   uint64_t cross_sets = UINT64_C(0x9E3779B97F4A7C15);
   uint64_t fields = UINT64_C(0xC2B2AE3D27D4EB4F);
   for (int col = 0; col < BOARD_DIM; col++) {
@@ -3639,7 +3928,7 @@ static inline uint64_t lane_shadow_key(const Square *lane_squares,
            sizeof(field_word));
     cross_sets = cross_sets * LANE_HASH_MULTIPLIER +
                  square_get_cross_set(&lane_squares[col]);
-    fields = fields * LANE_HASH_MULTIPLIER + field_word;
+    fields = fields * LANE_HASH_MULTIPLIER + (field_word & field_mask);
   }
   const uint64_t rotated_fields = (fields << 32) | (fields >> 32);
   return lane_shadow_mix(cross_sets ^ rotated_fields ^ context_key) | 1;
@@ -3712,19 +4001,21 @@ static void shadow_lanes_small_cached(MoveGen *gen, uint64_t lane_mask) {
   const uint64_t row_context_key = lane_shadow_context_key(gen);
   const uint64_t context_keys[2] = {
       row_context_key, row_context_key ^ UINT64_C(0x9E3779B97F4A7C15)};
+  const uint64_t field_mask = lane_shadow_field_mask();
   uint64_t lanes = 0;
   for (int lane = 0; lane < 2 * BOARD_DIM; lane++) {
     lanes |= (uint64_t)(gen->row_number_of_anchors_cache[lane] != 0) << lane;
   }
   lanes &= lane_mask;
-  // Every lane's key first, so that the loads of their entries overlap.
-  uint64_t keys[2 * BOARD_DIM];
+  // Every lane's key first, so that the loads of their entries overlap. The
+  // keys stay in gen for the anchors' plays (see gen_anchor_play_key).
+  uint64_t *keys = gen->lane_shadow_keys;
   for (uint64_t remaining = lanes; remaining != 0; remaining &= remaining - 1) {
     const int lane = lowest_set_bit_index_64(remaining);
     keys[lane] =
         lane_shadow_key(board_get_row_cache(gen->board_lanes, lane % BOARD_DIM,
                                             lane / BOARD_DIM),
-                        context_keys[lane / BOARD_DIM]);
+                        context_keys[lane / BOARD_DIM], field_mask);
     __builtin_prefetch(lane_shadow_cache_entry(cache, keys[lane]));
   }
   for (uint64_t remaining = lanes; remaining != 0; remaining &= remaining - 1) {
@@ -3858,11 +4149,138 @@ gen_record_scoring_plays_unordered(MoveGen *gen, bool record_small) {
   }
 }
 
+// The key of the best play of anchor, in a lane this generation shadowed
+// through the lane shadow cache: the lane's key, which holds everything the
+// search of the anchor reads but the lane's row, the anchor's column and how
+// ties are broken. Never 0.
+static inline uint64_t gen_anchor_play_key(const MoveGen *gen,
+                                           const Anchor *anchor) {
+  const uint64_t lane_key =
+      gen->lane_shadow_keys[BOARD_DIM * anchor->dir + anchor->row];
+  const uint64_t place =
+      (((uint64_t)anchor->row * BOARD_DIM + anchor->col) << 1) +
+      (uint64_t)gen->best_small_canonical_ties + 1;
+  return lane_shadow_mix(lane_key + place * LANE_HASH_MULTIPLIER) | 1;
+}
+
+// Offers an anchor's best play to the generation's best, as recording the
+// anchor's plays one by one would: see MOVE_RECORD_BEST_SMALL in
+// update_best_move_or_insert_into_movelist.
+static inline void gen_offer_anchor_play(MoveGen *gen,
+                                         const AnchorPlayEntry *play) {
+  if (play->tiny_move == 0) {
+    return;
+  }
+  SmallMove *best = gen->move_list->small_moves[0];
+  if (play->value > gen->best_move_equity_or_score ||
+      (play->value == gen->best_move_equity_or_score &&
+       gen->best_small_canonical_ties && play->tiny_move > best->tiny_move)) {
+    best->tiny_move = play->tiny_move;
+    best->metadata.score = play->score;
+    best->metadata.play_length = play->play_length;
+    best->metadata.tiles_played = play->tiles_played;
+    best->metadata.estimated_value = 0;
+    gen->move_list->count = 1;
+    gen->best_move_equity_or_score = play->value;
+    gen_update_cutoff_equity_or_score(gen);
+  }
+  if (gen->stop_on_threshold && play->value > gen->target_equity_cutoff) {
+    gen->threshold_exceeded = true;
+  }
+}
+
+// Searches the anchor the generator is set up for, with the generation's
+// best so far set aside, so that what it finds is the anchor's own best play;
+// remembers that in entry under key, and then offers it to the generation's
+// best. With held, the entry already holds the key, and must hold what the
+// search finds.
+static void gen_search_and_remember_anchor_play(MoveGen *gen,
+                                                const Anchor *anchor,
+                                                uint32_t kwg_root_node_index,
+                                                AnchorPlayEntry *entry,
+                                                uint64_t key, bool held) {
+  MoveList *move_list = gen->move_list;
+  const SmallMove best_so_far = *move_list->small_moves[0];
+  const int count_so_far = move_list->count;
+  const Equity value_so_far = gen->best_move_equity_or_score;
+  const Equity cutoff_so_far = gen->cutoff_equity_or_score;
+  move_list->count = 0;
+  gen->best_move_equity_or_score = EQUITY_INITIAL_VALUE;
+  gen->cutoff_equity_or_score = EQUITY_INITIAL_VALUE;
+  recursive_gen_small(gen, anchor->col, kwg_root_node_index, anchor->col,
+                      anchor->col, gen->dir == BOARD_HORIZONTAL_DIRECTION, 0, 1,
+                      0);
+  AnchorPlayEntry found = {.key = key};
+  if (move_list->count != 0) {
+    const SmallMove *play = move_list->small_moves[0];
+    found.tiny_move = play->tiny_move;
+    found.value = gen->best_move_equity_or_score;
+    found.score = play->metadata.score;
+    found.play_length = play->metadata.play_length;
+    found.tiles_played = play->metadata.tiles_played;
+  }
+  // The search may have swapped the list's best and spare moves; whichever
+  // is the best now takes the best so far back.
+  *move_list->small_moves[0] = best_so_far;
+  move_list->count = count_so_far;
+  gen->best_move_equity_or_score = value_so_far;
+  gen->cutoff_equity_or_score = cutoff_so_far;
+  assert(!held || (entry->tiny_move == found.tiny_move &&
+                   entry->value == found.value && entry->score == found.score &&
+                   entry->play_length == found.play_length &&
+                   entry->tiles_played == found.tiles_played));
+  if (!held) {
+    *entry = found;
+  }
+  gen_offer_anchor_play(gen, &found);
+}
+
+// With lanes deferred (see MoveGen.deferred_lanes): when the deferred lane
+// with the largest bound has at least the bound of every heaped anchor, it
+// is shadowed onto the heap, or every deferred lane is dropped when the best
+// move already beats that bound. Returns whether it did either, which leaves
+// the heap to be looked at again; false means the heap's top anchor is next.
+static bool gen_shadow_next_deferred_lane(MoveGen *gen) {
+  int best_lane = -1;
+  Equity best_bound = EQUITY_MIN_VALUE;
+  for (uint64_t remaining = gen->deferred_lanes; remaining != 0;
+       remaining &= remaining - 1) {
+    const int lane = __builtin_ctzll(remaining);
+    if (best_lane < 0 || gen->deferred_lane_bounds[lane] > best_bound) {
+      best_lane = lane;
+      best_bound = gen->deferred_lane_bounds[lane];
+    }
+  }
+  if (gen->anchor_heap.count > 0 &&
+      best_bound < gen->anchor_heap.anchors[0].highest_possible_equity) {
+    return false;
+  }
+  if (better_play_has_been_found(gen, best_bound)) {
+    gen->deferred_lanes = 0;
+    return true;
+  }
+  gen->deferred_lanes &= ~((uint64_t)1 << best_lane);
+  gen->dir = best_lane / BOARD_DIM;
+  shadow_lane(gen, best_lane % BOARD_DIM, true, false);
+  anchor_heapify_all(&gen->anchor_heap);
+  // As the record loop starts: shadowing used these fields, and the row
+  // cache must be loaded for the next anchor.
+  gen->tiles_played = 0;
+  gen->current_row_index = -1;
+  gen->dir = -1;
+  return true;
+}
+
 static inline __attribute__((always_inline)) void
 gen_record_scoring_plays_impl(MoveGen *gen, bool lazy) {
   if (gen->threshold_exceeded) {
     return;
   }
+  // The anchors' remembered plays answer for the plain small generator only.
+  LaneShadowCache *anchor_play_cache =
+      gen->move_record_type == MOVE_RECORD_BEST_SMALL && !gen->is_woadwage
+          ? gen->lane_shadow_cache
+          : NULL;
   // Reset the reused generator fields
   gen->tiles_played = 0;
 
@@ -3875,9 +4293,17 @@ gen_record_scoring_plays_impl(MoveGen *gen, bool lazy) {
   if (gen->is_wordsmog) {
     rack_reset(&gen->full_player_rack);
   }
-  while (gen->anchor_heap.count > 0) {
+  // Only a generation with anchor equity caps defers lanes, so that no
+  // other one looks for them in its loop.
+  const bool defers_lanes = gen->deferred_lanes != 0;
+  while (gen->anchor_heap.count > 0 ||
+         (defers_lanes && gen->deferred_lanes != 0)) {
     if (gen->threshold_exceeded) {
       break;
+    }
+    if (defers_lanes && gen->deferred_lanes != 0 &&
+        gen_shadow_next_deferred_lane(gen)) {
+      continue;
     }
     const Anchor anchor = anchor_heap_extract_max(&gen->anchor_heap);
     // The heap is ordered by highest_possible_equity, so one anchor whose
@@ -3887,6 +4313,21 @@ gen_record_scoring_plays_impl(MoveGen *gen, bool lazy) {
     // static_eval_get_shadow_equity for what that requires of new terms.
     if (better_play_has_been_found(gen, anchor.highest_possible_equity)) {
       break;
+    }
+    AnchorPlayEntry *anchor_play = NULL;
+    uint64_t anchor_play_key = 0;
+    bool anchor_play_held = false;
+    if (anchor_play_cache != NULL) {
+      anchor_play_key = gen_anchor_play_key(gen, &anchor);
+      anchor_play =
+          lane_shadow_cache_anchor_play(anchor_play_cache, anchor_play_key);
+      anchor_play_held = anchor_play->key == anchor_play_key;
+#ifdef NDEBUG
+      if (anchor_play_held) {
+        gen_offer_anchor_play(gen, anchor_play);
+        continue;
+      }
+#endif
     }
     gen->current_anchor_col = anchor.col;
     // Don't recopy the row cache if we're working on the same board lane
@@ -3909,6 +4350,12 @@ gen_record_scoring_plays_impl(MoveGen *gen, bool lazy) {
     gen->current_anchor_highest_possible_score = anchor.highest_possible_score;
     if (gen->is_woadwage) {
       woadwage_gen_anchor(gen);
+    } else if (anchor_play != NULL) {
+      // Without NDEBUG a held anchor is searched again, and must be found as
+      // it is held.
+      gen_search_and_remember_anchor_play(gen, &anchor, kwg_root_node_index,
+                                          anchor_play, anchor_play_key,
+                                          anchor_play_held);
     } else if (gen->move_record_type == MOVE_RECORD_BEST_SMALL) {
       recursive_gen_small(gen, anchor.col, kwg_root_node_index, anchor.col,
                           anchor.col, gen->dir == BOARD_HORIZONTAL_DIRECTION, 0,
@@ -3980,50 +4427,6 @@ void gen_record_pass(MoveGen *gen) {
   }
 }
 
-// Index of the highest set bit of a nonzero bitset, following
-// lowest_set_bit_index's guarded-intrinsic pattern.
-static inline int highest_set_bit_index(uint32_t bitset) {
-#if defined(__has_builtin) && __has_builtin(__builtin_clz)
-  return 31 - __builtin_clz(bitset);
-#else
-  int index = 31;
-  while ((bitset & ((uint32_t)1 << index)) == 0) {
-    index--;
-  }
-  return index;
-#endif
-}
-
-// The lane positions a play from the anchor at `col` can span: right of
-// `limit` (the anchor's leftward limit, or -1 for none), and on either side
-// of the anchor no further than `spare` of the lane's `empty` squares, plus
-// the tiles it plays through, and short of any empty square in `blocked`,
-// where no rack tile fits.
-static inline uint32_t anchor_span_reach(uint32_t empty, uint32_t blocked,
-                                         int col, int limit, int spare) {
-  const uint32_t right_of_col = ~(((uint32_t)2 << col) - 1);
-  const uint32_t left_of_col = ((uint32_t)1 << col) - 1;
-  uint32_t right_empties = empty & right_of_col;
-  uint32_t left_empties = empty & left_of_col;
-  for (int tile_idx = 0; tile_idx < spare; tile_idx++) {
-    right_empties &= right_empties - 1;
-    if (left_empties != 0) {
-      left_empties &= ~((uint32_t)1 << highest_set_bit_index(left_empties));
-    }
-  }
-  // The nearest empty square each way that the rack cannot fill: one past
-  // the tiles it has, or a blocked one.
-  right_empties |= blocked & right_of_col;
-  left_empties |= blocked & left_of_col;
-  const int right = right_empties != 0 ? lowest_set_bit_index(right_empties) - 1
-                                       : BOARD_DIM - 1;
-  int left = left_empties != 0 ? highest_set_bit_index(left_empties) + 1 : 0;
-  if (left <= limit) {
-    left = limit + 1;
-  }
-  return (((uint32_t)2 << right) - 1) & ~(((uint32_t)1 << left) - 1);
-}
-
 // Records, by the generation's record type, the plays of lane `row` of the
 // current gen->dir from the anchors whose plays may span a position in `hit`,
 // scanning the anchors in board order (see generate_small_moves_in_lanes).
@@ -4036,27 +4439,37 @@ static void gen_record_lane_plays_reaching(MoveGen *gen, int row,
                                            uint32_t *generated) {
   gen_load_lane(gen, row);
   const uint64_t rack_cross_set = gen->rack_cross_set;
+  assert(rack_tiles >= 1 && rack_tiles <= RACK_SIZE);
   uint32_t lane_anchors = 0;
   uint32_t empty = 0;
   uint32_t blocked = 0;
+  // What anchor_span_reach reads: the lane's empty columns, padded each way,
+  // and how many of them lie left of each column.
+  int8_t empty_cols[LANE_SPAN_PAD + BOARD_DIM + LANE_SPAN_PAD];
+  uint8_t empties_left_of[BOARD_DIM];
+  memset(empty_cols, -1, LANE_SPAN_PAD);
+  int lane_empties = 0;
+  // Every column does the same work whatever it holds, so that the scan has
+  // no branch on the lane's squares.
   for (int col = 0; col < BOARD_DIM; col++) {
-    const uint32_t col_bit = (uint32_t)1 << col;
-    if (gen_cache_get_is_anchor(gen, col)) {
-      lane_anchors |= col_bit;
+    const uint32_t is_anchor = gen_cache_get_is_anchor(gen, col) ? 1 : 0;
+    const uint32_t is_empty = gen_cache_is_empty(gen, col) ? 1 : 0;
+    // Read as recursive_gen_small reads it: a cross-set of bit 0 alone
+    // admits no tile.
+    uint64_t possible_letters_here = gen_cache_get_cross_set(gen, col);
+    if (possible_letters_here == 1) {
+      possible_letters_here = 0;
     }
-    if (gen_cache_is_empty(gen, col)) {
-      empty |= col_bit;
-      // Read as recursive_gen_small reads it: a cross-set of bit 0 alone
-      // admits no tile.
-      uint64_t possible_letters_here = gen_cache_get_cross_set(gen, col);
-      if (possible_letters_here == 1) {
-        possible_letters_here = 0;
-      }
-      if ((possible_letters_here & rack_cross_set) == 0) {
-        blocked |= col_bit;
-      }
-    }
+    const uint32_t is_blocked =
+        is_empty & ((possible_letters_here & rack_cross_set) == 0 ? 1 : 0);
+    lane_anchors |= is_anchor << col;
+    empty |= is_empty << col;
+    blocked |= is_blocked << col;
+    empties_left_of[col] = (uint8_t)lane_empties;
+    empty_cols[LANE_SPAN_PAD + lane_empties] = (int8_t)col;
+    lane_empties += (int)is_empty;
   }
+  memset(&empty_cols[LANE_SPAN_PAD + lane_empties], BOARD_DIM, LANE_SPAN_PAD);
   uint32_t lane_generated = 0;
   int last_anchor_col = INITIAL_LAST_ANCHOR_COL;
   for (uint32_t remaining = lane_anchors; remaining != 0;
@@ -4065,12 +4478,32 @@ static void gen_record_lane_plays_reaching(MoveGen *gen, int row,
     const uint32_t anchor_bit = (uint32_t)1 << col;
     const int limit =
         last_anchor_col == INITIAL_LAST_ANCHOR_COL ? -1 : last_anchor_col;
-    const int spare = rack_tiles - ((empty & anchor_bit) != 0 ? 1 : 0);
+    const int anchor_is_empty = (int)((empty >> col) & 1);
+    const int spare = rack_tiles - anchor_is_empty;
     // A blocked anchor square anchors no play; one in `hit` is reached.
-    if ((blocked & anchor_bit) == 0 &&
-        ((hit & anchor_bit) != 0 ||
-         (anchor_span_reach(empty, blocked, col, limit, spare) & hit) != 0)) {
-      lane_generated |= anchor_bit;
+    if ((blocked & anchor_bit) == 0) {
+      const uint32_t reach =
+          anchor_span_reach(empty_cols, empties_left_of[col], anchor_is_empty,
+                            blocked, col, limit, spare);
+      if (((reach | anchor_bit) & hit) != 0) {
+        lane_generated |= anchor_bit;
+      }
+    }
+    last_anchor_col = col;
+    last_anchor_col += 1 - anchor_is_empty;
+  }
+  *anchors = lane_anchors;
+  *generated = lane_generated;
+  if (lane_generated == 0) {
+    return;
+  }
+
+  last_anchor_col = INITIAL_LAST_ANCHOR_COL;
+  for (uint32_t remaining = lane_anchors; remaining != 0;
+       remaining &= remaining - 1) {
+    const int col = lowest_set_bit_index(remaining);
+    const uint32_t anchor_bit = (uint32_t)1 << col;
+    if ((lane_generated & anchor_bit) != 0) {
       gen->current_anchor_col = col;
       gen->last_anchor_col = last_anchor_col;
       gen->anchor_right_extension_set =
@@ -4088,8 +4521,6 @@ static void gen_record_lane_plays_reaching(MoveGen *gen, int row,
       last_anchor_col++;
     }
   }
-  *anchors = lane_anchors;
-  *generated = lane_generated;
 }
 
 void generate_small_moves_in_lanes(const MoveGenArgs *args, uint64_t lane_mask,
@@ -4298,9 +4729,10 @@ static Equity gen_get_carried_move_equity(const MoveGen *gen, const Move *move,
   return static_eval_get_move_equity_with_leave_value(
       &gen->ld, move, &leave, &gen->opponent_rack,
       gen->opening_move_word_penalties, gen->opening_move_letter_penalties,
-      pat_eval_context_get_active_classes(&gen->pat_eval_ctx),
-      &gen->pat_eval_ctx, gen->board_number_of_tiles_played,
-      gen->number_of_tiles_in_bag, leave_value);
+      pat_eval_context_get_active_classes(gen->pat_ctx), gen->pat_ctx,
+      gen->board_number_of_tiles_played, gen->number_of_tiles_in_bag,
+      leave_value,
+      gen->peg_adjust_by_tiles_played[move_get_tiles_played(move)]);
 }
 
 // Whether this generation can start from remembered moves and remember its
@@ -4387,16 +4819,16 @@ static uint64_t gen_get_skippable_lanes(const MoveGen *gen,
 // moves are found among the plays the generator would record, at the equity
 // it would record them with, and compare_moves breaks ties, so the
 // generation's best move is unchanged. Given lane_hashes, the lanes' bounds
-// that are moves of their lanes are such moves too, and it also drops the
-// lanes gen_get_skippable_lanes finds, by clearing their anchor counts.
-// Returns those lanes.
+// for bag_class that are moves of their lanes are such moves too, and it also
+// drops the lanes gen_get_skippable_lanes finds, by clearing their anchor
+// counts. Returns those lanes.
 static uint64_t gen_seed_carried_best_move(MoveGen *gen, BestMoveCarry *carry,
                                            const uint64_t *lane_hashes,
-                                           const Rack *rack) {
+                                           int bag_class, const Rack *rack) {
   CarriedRackFind found;
   const bool can_skip_lanes = lane_hashes != NULL;
   if (!best_move_carry_find(carry, rack, gen->player_index, lane_hashes,
-                            gen->number_of_tiles_in_bag, &found)) {
+                            bag_class, &found)) {
     return 0;
   }
   bool seeded = false;
@@ -4445,11 +4877,11 @@ static uint64_t gen_seed_carried_best_move(MoveGen *gen, BestMoveCarry *carry,
 }
 
 // Remembers the generation's best move for its rack, and given lane_hashes as
-// the bound of each lane it searched. Plays of one tile are not carried to
-// other boards: the generator records each in only one direction, and which
-// one depends on the board.
+// the bound, for bag_class, of each lane it searched. Plays of one tile are
+// not carried to other boards: the generator records each in only one
+// direction, and which one depends on the board.
 static void gen_remember_best_move(const MoveGen *gen, BestMoveCarry *carry,
-                                   const uint64_t *lane_hashes,
+                                   const uint64_t *lane_hashes, int bag_class,
                                    uint64_t skipped_lanes, const Rack *rack) {
   const Move *best_move = gen_get_readonly_best_move(gen);
   if (move_get_equity(best_move) == EQUITY_INITIAL_VALUE) {
@@ -4488,7 +4920,7 @@ static void gen_remember_best_move(const MoveGen *gen, BestMoveCarry *carry,
   }
   best_move_carry_add(carry, rack, gen->player_index,
                       carry_move ? &carried : NULL, best_move, lane_hashes,
-                      searched_lanes, gen->number_of_tiles_in_bag);
+                      searched_lanes, bag_class);
 }
 
 // Drops the anchors of the lanes in skip_lanes (MoveGenArgs.skip_lanes).
@@ -4581,11 +5013,14 @@ void generate_moves(const MoveGenArgs *args) {
                sizeof(wgen->count_by_size));
         for (int i = 0; i < MOVEGEN_SUBRACK_CACHE_ENTRIES; i++) {
           wgen->nonplaythrough_infos[i].subrack = subrack_entry->subracks[i];
-          wgen->nonplaythrough_infos[i].leave_value =
-              subrack_entry->leave_values[i];
           wgen->nonplaythrough_infos[i].wmp_entry =
               subrack_entry->wmp_entries[i];
         }
+        memcpy(wgen->nonplaythrough_leave_values, subrack_entry->leave_values,
+               sizeof(subrack_entry->leave_values));
+        memcpy(wgen->nonplaythrough_tile_score_sums,
+               subrack_entry->tile_score_sums,
+               sizeof(subrack_entry->tile_score_sums));
       }
       if (leaves_are_populated) {
         wgen->nonplaythrough_wmp_entry_cache = subrack_entry->wmp_entries;
@@ -4613,11 +5048,14 @@ void generate_moves(const MoveGenArgs *args) {
                sizeof(wgen->count_by_size));
         for (int i = 0; i < MOVEGEN_SUBRACK_CACHE_ENTRIES; i++) {
           subrack_entry->subracks[i] = wgen->nonplaythrough_infos[i].subrack;
-          subrack_entry->leave_values[i] =
-              wgen->nonplaythrough_infos[i].leave_value;
           subrack_entry->wmp_entries[i] =
               wgen->nonplaythrough_infos[i].wmp_entry;
         }
+        memcpy(subrack_entry->leave_values, wgen->nonplaythrough_leave_values,
+               sizeof(subrack_entry->leave_values));
+        memcpy(subrack_entry->tile_score_sums,
+               wgen->nonplaythrough_tile_score_sums,
+               sizeof(subrack_entry->tile_score_sums));
       }
     }
 
@@ -4641,6 +5079,9 @@ void generate_moves(const MoveGenArgs *args) {
     const bool carry_best_moves = gen_can_carry_best_moves(gen, args);
     uint64_t lane_hash_storage[2 * BOARD_DIM];
     const uint64_t *lane_hashes = NULL;
+    // The lanes' bounds are kept by the mover's class for the real bag: with
+    // a pre-endgame adjustment a move's equity depends on it.
+    int bag_class = 0;
     uint64_t skipped_lanes = 0;
     if (carry_best_moves) {
       // With PAT a move's equity reads more of the board than its own lane,
@@ -4651,9 +5092,14 @@ void generate_moves(const MoveGenArgs *args) {
           best_move_carry_skips_lanes(args->best_move_carry)) {
         gen_hash_lanes(gen, lane_hash_storage);
         lane_hashes = lane_hash_storage;
+        bag_class =
+            peg_adjust_get_bag_class(player_get_peg_adjust(game_get_player(
+                                         args->game, gen->player_index)),
+                                     game_get_real_bag_size(args->game));
       }
-      skipped_lanes = gen_seed_carried_best_move(
-          gen, args->best_move_carry, lane_hashes, &gen->player_rack);
+      skipped_lanes =
+          gen_seed_carried_best_move(gen, args->best_move_carry, lane_hashes,
+                                     bag_class, &gen->player_rack);
     }
     if (args->skip_lanes != 0) {
       gen_skip_lanes(gen, args->skip_lanes);
@@ -4665,7 +5111,7 @@ void generate_moves(const MoveGenArgs *args) {
     }
     gen_record_scoring_plays(gen);
     if (carry_best_moves) {
-      gen_remember_best_move(gen, args->best_move_carry, lane_hashes,
+      gen_remember_best_move(gen, args->best_move_carry, lane_hashes, bag_class,
                              skipped_lanes, &gen->player_rack);
     }
   }

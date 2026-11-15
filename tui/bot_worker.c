@@ -1,0 +1,2250 @@
+#include "bot_worker.h"
+
+#include "../src/compat/memory_info.h"
+#include "../src/def/bai_defs.h"
+#include "../src/def/equity_defs.h"
+#include "../src/def/game_history_defs.h"
+#include "../src/def/letter_distribution_defs.h"
+#include "../src/def/move_defs.h"
+#include "../src/def/peg_defs.h"
+#include "../src/def/rack_defs.h"
+#include "../src/def/thread_control_defs.h"
+#include "../src/ent/bag.h"
+#include "../src/ent/board.h"
+#include "../src/ent/endgame_results.h"
+#include "../src/ent/equity.h"
+#include "../src/ent/game.h"
+#include "../src/ent/inference_args.h"
+#include "../src/ent/inference_results.h"
+#include "../src/ent/letter_distribution.h"
+#include "../src/ent/move.h"
+#include "../src/ent/peg_adjust.h"
+#include "../src/ent/player.h"
+#include "../src/ent/players_data.h"
+#include "../src/ent/rack.h"
+#include "../src/ent/sim_args.h"
+#include "../src/ent/sim_results.h"
+#include "../src/ent/thread_control.h"
+#include "../src/ent/validated_move.h"
+#include "../src/impl/cgp.h"
+#include "../src/impl/endgame.h"
+#include "../src/impl/gameplay.h"
+#include "../src/impl/inference.h"
+#include "../src/impl/move_gen.h"
+#include "../src/impl/peg.h"
+#include "../src/impl/simmer.h"
+#include "../src/str/move_string.h"
+#include "../src/str/rack_string.h"
+#include "../src/util/io_util.h"
+#include "../src/util/string_util.h"
+#include "analysis_rows.h"
+#include "config.h"
+#include "game_state.h"
+#include "sound.h"
+#include "turn_inference.h"
+#include <pthread.h>
+#include <stdatomic.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <time.h>
+
+enum {
+  SIM_CANDIDATES = 50,
+  // "/kibitz" lists at most this many moves, best static equity first.
+  KIBITZ_MAX_MOVES = 100,
+  // The moves valued without PAT, for the kibitz's pat column, go into a
+  // list this many times the size of the last one tried, starting from the
+  // kibitz's own, until it holds every move the kibitz lists.
+  KIBITZ_PLAIN_LIST_GROWTH = 8,
+  SIM_PLIES = 4,
+  // An inference keeps racks whose best play was within this many points
+  // of the play made (the CLI's default), and lists this many leaves.
+  INFERENCE_EQUITY_MARGIN = 5,
+  INFERENCE_LEAVE_LIST_CAPACITY = 16,
+  // Rollouts every candidate gets before the sim may stop. BAI stops once
+  // the leader's mean win% is within the cutoff of 0 or 100%, and after
+  // one rollout per candidate some candidate often reads 100%: the sim
+  // then "finished" after that first round with meaningless numbers.
+  // The CLI's default (-minplayiterations).
+  SIM_MIN_PLAY_ITERATIONS = 500,
+  ENDGAME_PLIES = 25,
+  // Effective "run until /stop" budget for resumed analysis. Large
+  // enough to never fire in practice; the watchdog's interrupt (or
+  // BAI's own convergence cutoff) is the real terminator.
+  ANALYSIS_RESUME_TIME_LIMIT_SEC = 14 * 24 * 3600,
+  // Untimed games still want a noticeable pause per turn so the player
+  // can read the previous move; 5s gives the engine real work to do
+  // without dragging.
+  UNTIMED_BUDGET_SEC = 5,
+  // Minimum effective budget so degenerate clock states don't make the
+  // engine do almost-no-work and pick a near-random move.
+  MIN_BUDGET_MS = 250,
+  // The watchdog polls bot_stop while the engine is running and signals
+  // the thread_control if a quit is requested.
+  WATCHDOG_POLL_NS = 50L * 1000 * 1000,
+  // Grace past a bot sim's budget before the watchdog interrupts it. BAI
+  // normally stops itself at the budget; this is the backstop.
+  SIM_DEADLINE_GRACE_MS = 1000,
+};
+
+// Threads for an engine search (sim, endgame, PEG): the Threads setting,
+// else every core but one, leaving it for the UI thread's input and
+// rendering so frames keep their rate.
+static int engine_threads(const TuiGameState *state) {
+  if (state->thread_limit > 0) {
+    return state->thread_limit;
+  }
+  const int hw_cores = get_num_cores();
+  return hw_cores > 1 ? hw_cores - 1 : 1;
+}
+
+// How long an analysis sim or solve may run: the Time limit setting, or
+// (none) until stopped.
+static double analysis_time_limit(const TuiGameState *state) {
+  return state->analysis_time_limit > 0
+             ? (double)state->analysis_time_limit
+             : (double)ANALYSIS_RESUME_TIME_LIMIT_SEC;
+}
+
+static void copy_str(char *dst, size_t dst_size, const char *src) {
+  if (dst_size == 0) {
+    return;
+  }
+  if (src == NULL) {
+    dst[0] = '\0';
+    return;
+  }
+  size_t len = strlen(src);
+  if (len >= dst_size) {
+    len = dst_size - 1;
+  }
+  memcpy(dst, src, len);
+  dst[len] = '\0';
+}
+
+// Ring-buffer eviction: drop the oldest entry's owned state before
+// shifting the array left so nothing leaks. Shifts the history cursor
+// down by one too so it tracks the same logical move; if it was on the
+// evicted entry, it falls back to the [4>] label. No-op while there is
+// still room.
+//
+// Caller must hold state->mutex.
+static void evict_oldest_history_entry(TuiGameState *state) {
+  if (state->history_count < TUI_HISTORY_MAX) {
+    return;
+  }
+  tui_history_entry_release(&state->history[0]);
+  memmove(&state->history[0], &state->history[1],
+          sizeof(state->history[0]) * (TUI_HISTORY_MAX - 1));
+  state->history_count = TUI_HISTORY_MAX - 1;
+  if (state->history_cursor >= 0) {
+    state->history_cursor--; // -1 = label, which is fine if 0 → -1
+  }
+}
+
+// Snapshot the on-turn player's rack into entry->rack_str before the
+// engine has computed the move. The clock value reflects what the
+// player had when the turn began.
+//
+// Caller must hold state->mutex.
+int tui_bot_worker_append_pending_history(TuiGameState *state, int player_idx,
+                                          const struct Rack *rack_at_start,
+                                          int clock_at_start) {
+  // If the user's history cursor was sitting on the previous last
+  // entry, the new pending turn is "the current one" they were
+  // watching — slide the cursor forward to keep it on the live
+  // turn. If they parked the cursor on an older entry we leave it
+  // alone.
+  const bool follow_to_new_pending =
+      state->history_cursor >= 0 &&
+      state->history_cursor == state->history_count - 1;
+  // The Analysis cursor should reset even when the History
+  // cursor is parked on the [4>] label — both states mean
+  // "watching the live latest turn," so the new turn's
+  // leaderboard should fresh-start at rank 0 rather than
+  // inheriting wherever the user was looking on the previous
+  // turn.
+  const bool watching_latest_turn =
+      state->history_cursor < 0 || follow_to_new_pending;
+  evict_oldest_history_entry(state);
+  TuiHistoryEntry *entry = &state->history[state->history_count++];
+  memset(entry, 0, sizeof(*entry));
+  entry->player_idx = player_idx;
+  entry->clock_at_start = clock_at_start;
+  // Snapshot the opponent's clock too so the History-cursor view
+  // can show both players' time-remaining as it stood at the
+  // start of this turn.
+  entry->opp_clock_at_start =
+      state->time_per_side_seconds - (int)state->seconds_used[1 - player_idx];
+  entry->pending = true;
+  // Snapshot the board AND rack NOW (pre-move) so the History
+  // cursor can replay the position this player saw at the moment
+  // of decision. Both are owned by the entry; destroyed when the
+  // entry is dropped or the game state is torn down. The rack is
+  // the engine-friendly Rack object — analysis resumption needs
+  // it; the text rack_str field on the entry is just for display.
+  entry->board_before = board_duplicate(game_get_board(state->game));
+  // CGP of this position (on-turn rack first) so the "/resume"
+  // analysis worker can rebuild the exact game — board, racks, bag,
+  // and scores — to keep sampling on after the game ends.
+  entry->bag_before = tui_position_effective_bag(state->game);
+  entry->bag_before_known = true;
+  char *cgp = game_get_cgp(state->game, true);
+  if (cgp != NULL) {
+    copy_str(entry->cgp_before, sizeof(entry->cgp_before), cgp);
+    free(cgp);
+  }
+  if (rack_at_start != NULL) {
+    entry->rack_before = rack_duplicate(rack_at_start);
+  } else {
+    entry->rack_before = NULL;
+  }
+  // Capture the opponent's rack at this moment too so the History
+  // cursor can rewind both pills together.
+  const Rack *opp_rack =
+      player_get_rack(game_get_player(state->game, 1 - player_idx));
+  entry->opp_rack_before = opp_rack != NULL ? rack_duplicate(opp_rack) : NULL;
+  if (follow_to_new_pending) {
+    state->history_cursor = state->history_count - 1;
+  }
+  if (watching_latest_turn) {
+    // Reset the Analysis cursor to row 0 so the panel snaps to
+    // the top play of the new turn's in-progress analysis (the
+    // current best by sim ranking, == the move the bot is most
+    // likely about to play) instead of inheriting whatever row
+    // the user had selected on the previous turn. Also fires
+    // when the History cursor is on the [4>] label — both that
+    // and "following the latest" mean the panel was tracking
+    // the live turn.
+    state->analysis_cursor = 0;
+    // Drop back to RANK column on turn advance: the prior turn's
+    // anchored move doesn't apply to the new turn's leaderboard.
+    state->analysis_cursor_column = 0; // TUI_ANALYSIS_COLUMN_RANK
+    state->analysis_anchored_move[0] = '\0';
+    // Reset the scroll position so the new turn's leaderboard
+    // starts from the top instead of wherever the previous turn
+    // happened to be scrolled to.
+    state->analysis_scroll_offset = 0;
+  }
+
+  if (rack_at_start != NULL) {
+    StringBuilder *rsb = string_builder_create();
+    string_builder_add_rack(rsb, rack_at_start, state->ld, false);
+    size_t rack_len = 0;
+    char *rack_dump = string_builder_dump(rsb, &rack_len);
+    copy_str(entry->rack_str, sizeof(entry->rack_str), rack_dump);
+    free(rack_dump);
+    string_builder_destroy(rsb);
+  }
+  return state->history_count - 1;
+}
+
+void tui_bot_worker_append_clock_event(TuiGameState *state, int kind,
+                                       int player_idx, int adjustment,
+                                       int cumulative_after) {
+  evict_oldest_history_entry(state);
+  TuiHistoryEntry *entry = &state->history[state->history_count++];
+  memset(entry, 0, sizeof(*entry));
+  entry->kind = kind;
+  entry->player_idx = player_idx;
+  entry->score = adjustment;
+  entry->total_after = cumulative_after;
+  // Clocks at the moment of the event. With the game in overtime
+  // these go negative; the renderer formats negative values as
+  // "-m:ss". clock_at_end doubles as the entry's "how far into
+  // overtime" readout.
+  const int remaining =
+      state->time_per_side_seconds - (int)state->seconds_used[player_idx];
+  entry->clock_at_start = remaining;
+  entry->clock_at_end = remaining;
+  entry->opp_clock_at_start =
+      state->time_per_side_seconds - (int)state->seconds_used[1 - player_idx];
+  // Snapshot the (final) board so the History-cursor preview has
+  // something coherent to show when parked on this entry.
+  entry->board_before = board_duplicate(game_get_board(state->game));
+}
+
+// Seconds of overtime used by player_idx, rounded up so any started
+// second counts. 0 when the player finished within their base time or
+// the game is untimed.
+static int overtime_seconds_used(const TuiGameState *state, int player_idx) {
+  if (state->time_per_side_seconds <= 0) {
+    return 0;
+  }
+  const double over =
+      state->seconds_used[player_idx] - (double)state->time_per_side_seconds;
+  if (over <= 0.0) {
+    return 0;
+  }
+  int over_secs = (int)over;
+  if ((double)over_secs < over) {
+    over_secs++;
+  }
+  return over_secs;
+}
+
+// Penalty points for the given overtime, per the session's rate.
+// 10 pts/min charges every started minute in full (the standard
+// "10 points per minute or fraction thereof" rule).
+static int time_penalty_points(const TuiGameState *state, int over_secs) {
+  if (over_secs <= 0) {
+    return 0;
+  }
+  if (state->time_penalty_rate == UI_TIME_PENALTY_1_PER_SEC) {
+    return over_secs;
+  }
+  return ((over_secs + 59) / 60) * 10;
+}
+
+void tui_bot_worker_apply_time_penalties(TuiGameState *state) {
+  if (state->app_mode != TUI_APP_MODE_PLAY_VS_COMPUTER ||
+      state->time_per_side_seconds <= 0 ||
+      state->overtime_rule == UI_OVERTIME_FLAG ||
+      state->time_penalties_applied) {
+    return;
+  }
+  state->time_penalties_applied = true;
+  for (int player_idx = 0; player_idx < 2; player_idx++) {
+    const int penalty =
+        time_penalty_points(state, overtime_seconds_used(state, player_idx));
+    if (penalty <= 0) {
+      continue;
+    }
+    // Mirror the engine's GAME_EVENT_TIME_PENALTY semantics: a
+    // negative score adjustment applied to the player's cumulative
+    // score. Adjusting the live engine score keeps the player pills,
+    // CGP export, and history totals all in agreement.
+    Player *player = game_get_player(state->game, player_idx);
+    player_add_to_score(player, int_to_equity(-penalty));
+    tui_bot_worker_append_clock_event(state, TUI_HISTORY_ENTRY_TIME_PENALTY,
+                                      player_idx, -penalty,
+                                      equity_to_int(player_get_score(player)));
+  }
+}
+
+// Fill in move_str, score, total_after on an entry that was created
+// pending. Clears the pending flag.
+//
+// Caller must hold state->mutex.
+static void finalize_history(TuiGameState *state, int idx, const Move *move,
+                             int score, int total_after, const Rack *leave) {
+  if (idx < 0 || idx >= state->history_count) {
+    return;
+  }
+  TuiHistoryEntry *entry = &state->history[idx];
+  entry->score = score;
+  entry->total_after = total_after;
+
+  StringBuilder *sb = string_builder_create();
+  string_builder_add_move(sb, game_get_board(state->game), move, state->ld,
+                          false);
+  size_t move_len = 0;
+  char *move_dump = string_builder_dump(sb, &move_len);
+  copy_str(entry->move_str, sizeof(entry->move_str), move_dump);
+  free(move_dump);
+  string_builder_destroy(sb);
+
+  // Compact exchanges to "-ABCD" form, matching the analysis panel.
+  // The renderer (render_move_styled) already special-cases a leading
+  // "-" so it renders non-bold like the legacy "(exch ...)" group.
+  if (strncmp(entry->move_str, "(exch ", 6) == 0) {
+    const char *close_paren = strchr(entry->move_str, ')');
+    if (close_paren != NULL) {
+      const int letters_len = (int)(close_paren - (entry->move_str + 6));
+      char tmp[sizeof(entry->move_str)];
+      tmp[0] = '-';
+      const int cap = (int)sizeof(tmp) - 2;
+      const int copy = letters_len < cap ? letters_len : cap;
+      memcpy(tmp + 1, entry->move_str + 6, (size_t)copy);
+      tmp[1 + copy] = '\0';
+      copy_str(entry->move_str, sizeof(entry->move_str), tmp);
+    }
+  }
+
+  // Leave goes in its own right-aligned column rather than inline; the
+  // renderer pulls it from entry->leave_str. Empty leaves (bingos /
+  // outplays) leave the string empty and render as a "·" placeholder.
+  entry->leave_str[0] = '\0';
+  if (leave != NULL && !rack_is_empty(leave)) {
+    StringBuilder *lsb = string_builder_create();
+    string_builder_add_rack(lsb, leave, state->ld, false);
+    size_t leave_len = 0;
+    char *leave_dump = string_builder_dump(lsb, &leave_len);
+    if (leave_dump != NULL) {
+      copy_str(entry->leave_str, sizeof(entry->leave_str), leave_dump);
+      free(leave_dump);
+    }
+    string_builder_destroy(lsb);
+  }
+
+  entry->pending = false;
+}
+
+// Drop the most recent history entry (used when computation is aborted
+// before a move is selected).
+//
+// Caller must hold state->mutex.
+static void pop_history(TuiGameState *state) {
+  if (state->history_count > 0) {
+    TuiHistoryEntry *entry = &state->history[state->history_count - 1];
+    tui_history_entry_release(entry);
+    state->history_count--;
+  }
+}
+
+// Budget for the on-turn player's current move. Strategy: estimate
+// remaining plays in the game (assuming ~4 tiles per play, averaged
+// across both players) and split the player's remaining clock evenly
+// across them. For untimed games the budget collapses to a flat
+// UNTIMED_BUDGET_SEC.
+//
+// Caller must hold state->mutex.
+static double compute_budget_sec(const TuiGameState *state, int player_idx) {
+  if (state->time_per_side_seconds <= 0) {
+    return (double)UNTIMED_BUDGET_SEC;
+  }
+  const Bag *bag = game_get_bag(state->game);
+  const int bag_tiles = bag_get_letters(bag);
+  const int p1_rack =
+      rack_get_total_letters(player_get_rack(game_get_player(state->game, 0)));
+  const int p2_rack =
+      rack_get_total_letters(player_get_rack(game_get_player(state->game, 1)));
+  const int total_tiles = bag_tiles + p1_rack + p2_rack;
+  // ~4 tiles per play means total_plays_remaining = total_tiles / 4
+  // and the current player has roughly half of those. Round up so a
+  // sparse remaining-tile count doesn't push n to 0.
+  int plays_for_this_player = (total_tiles + 7) / 8;
+  if (plays_for_this_player < 1) {
+    plays_for_this_player = 1;
+  }
+  double remaining_clock =
+      (double)state->time_per_side_seconds - state->seconds_used[player_idx];
+  if (remaining_clock < 0.0) {
+    remaining_clock = 0.0;
+  }
+  double budget = remaining_clock / (double)plays_for_this_player;
+  if (budget < (double)MIN_BUDGET_MS / 1000.0) {
+    budget = (double)MIN_BUDGET_MS / 1000.0;
+  }
+  return budget;
+}
+
+// Watchdog: spins while the engine is running and translates a
+// bot_stop request into a thread_control USER_INTERRUPT so the engine
+// can bail out early. With deadline_sec > 0 it also interrupts the
+// engine once that many seconds have passed, so a bot turn can never
+// run unbounded even if the engine's own time limit fails to stop it.
+typedef struct {
+  ThreadControl *tc;
+  _Atomic bool *bot_stop;
+  _Atomic bool finished;
+  double deadline_sec;
+} Watchdog;
+
+static double seconds_since(const struct timespec *start) {
+  struct timespec now;
+  clock_gettime(CLOCK_MONOTONIC, &now);
+  return (double)(now.tv_sec - start->tv_sec) +
+         (double)(now.tv_nsec - start->tv_nsec) / 1e9;
+}
+
+static void *watchdog_main(void *arg) {
+  Watchdog *w = (Watchdog *)arg;
+  struct timespec start;
+  clock_gettime(CLOCK_MONOTONIC, &start);
+  while (!atomic_load(&w->finished)) {
+    if (atomic_load(w->bot_stop) ||
+        (w->deadline_sec > 0 && seconds_since(&start) >= w->deadline_sec)) {
+      thread_control_set_status(w->tc, THREAD_CONTROL_STATUS_USER_INTERRUPT);
+      break;
+    }
+    struct timespec ts = {0, WATCHDOG_POLL_NS};
+    nanosleep(&ts, NULL);
+  }
+  return NULL;
+}
+
+// Plain equity-best generation (the original behaviour). Used as a
+// fallback when sim/endgame fail to return a move, or when WinPct
+// wasn't loaded and bag still has tiles.
+//
+// `scratch` should be a MoveList created with capacity 1 (the standard
+// MOVE_RECORD_BEST recorder).
+static bool find_equity_best(const Game *game, MoveList *scratch,
+                             Move *out_move) {
+  const MoveGenArgs args = {
+      .game = game,
+      .move_record_type = MOVE_RECORD_BEST,
+      .move_sort_type = MOVE_SORT_EQUITY,
+      .override_kwg = NULL,
+      .eq_margin_movegen = 0,
+      .target_equity = EQUITY_MAX_VALUE,
+      .move_list = scratch,
+      .tiles_played_bv = NULL,
+      .initial_tiles_bv = 0,
+  };
+  generate_moves_for_game(&args);
+  if (move_list_get_count(scratch) == 0) {
+    return false;
+  }
+  move_copy(out_move, move_list_get_move(scratch, 0));
+  return true;
+}
+
+// Sets a sim's rollout PAT as the command line program does: from the
+// rollout settings of the simming player, the player on turn in `game`.
+// The TUI leaves those at the engine's defaults: board-only PAT, which the
+// census can steer, with the default rollout classes. Zeroed SimArgs would
+// turn every class on instead.
+static void sim_args_set_pat_rollout(const TuiGameState *state,
+                                     const Game *game, SimArgs *args) {
+  const int player_idx = game_get_player_on_turn_index(game);
+  args->pat_rollout_disabled =
+      players_data_get_pat_rollout_disabled(state->players_data, player_idx);
+  args->pat_rollout_disabled_classes_mask =
+      players_data_get_pat_rollout_disabled_classes_mask(state->players_data,
+                                                         player_idx);
+  args->pat_rollout_exact =
+      players_data_get_pat_rollout_exact(state->players_data, player_idx);
+}
+
+// Generate up to N top candidates by equity into a fresh capacity-N
+// MoveList. Returns the list (caller must destroy via
+// move_list_destroy) or NULL when no moves exist.
+//
+// We call generate_moves() directly rather than
+// generate_moves_for_game(): the latter overrides move_record_type
+// with the player's configured record type (MOVE_RECORD_BEST in our
+// case), which collapses the candidate list to a single move.
+static MoveList *generate_top_candidates(const Game *game, int n) {
+  MoveList *list = move_list_create(n);
+  const MoveGenArgs args = {
+      .game = game,
+      .move_record_type = MOVE_RECORD_ALL,
+      .move_sort_type = MOVE_SORT_EQUITY,
+      .override_kwg = NULL,
+      .eq_margin_movegen = 0,
+      .target_equity = EQUITY_MAX_VALUE,
+      .move_list = list,
+      .tiles_played_bv = NULL,
+      .initial_tiles_bv = 0,
+  };
+  generate_moves(&args);
+  if (move_list_get_count(list) == 0) {
+    move_list_destroy(list);
+    return NULL;
+  }
+  return list;
+}
+
+// Write the move played on `entry`'s turn into `out_move`, validated
+// against `position`, the position it was played from: the GCG move a
+// loaded game carries, else the move History records. False when there
+// is none to offer, as for a play that was challenged off.
+static bool entry_played_move(const TuiHistoryEntry *entry,
+                              const Game *position, Move *out_move) {
+  if (entry->loaded_move != NULL) {
+    move_copy(out_move, entry->loaded_move);
+    return true;
+  }
+  if (entry->challenged_off || entry->move_str[0] == '\0') {
+    return false;
+  }
+  char engine_move[64];
+  tui_history_move_to_engine(entry->move_str, engine_move, sizeof(engine_move));
+  if (engine_move[0] == '\0') {
+    return false;
+  }
+  ErrorStack *err = error_stack_create();
+  ValidatedMoves *vms = validated_moves_create(
+      position, game_get_player_on_turn_index(position), engine_move,
+      /*allow_phonies=*/true, /*allow_playthrough=*/true, err);
+  const bool found = error_stack_is_empty(err) && vms != NULL &&
+                     validated_moves_get_number_of_moves(vms) > 0;
+  if (found) {
+    move_copy(out_move, validated_moves_get_move(vms, 0));
+  }
+  if (vms != NULL) {
+    validated_moves_destroy(vms);
+  }
+  error_stack_destroy(err);
+  return found;
+}
+
+// Infers the leave the opponent kept on the move before History turn
+// `turn_idx`, as seen by the player on turn there holding `mover_rack`,
+// and attaches it to the turn, unless Inference is off, the turn already
+// has one, or none applies: that move was a bingo or the opening play
+// (or see tui_turn_inference_applies). Takes state->mutex itself, so call
+// it without; `stop` interrupts it. Returns whether the turn has an
+// inference afterward.
+static bool infer_turn(TuiGameState *state, int turn_idx,
+                       const Rack *mover_rack, _Atomic bool *stop) {
+  pthread_mutex_lock(&state->mutex);
+  if (turn_idx < 0 || turn_idx >= state->history_count) {
+    pthread_mutex_unlock(&state->mutex);
+    return false;
+  }
+  if (state->history[turn_idx].inference != NULL || !state->infer ||
+      !tui_turn_inference_applies(state, turn_idx) ||
+      rack_is_empty(mover_rack)) {
+    const bool has_inference = state->history[turn_idx].inference != NULL;
+    pthread_mutex_unlock(&state->mutex);
+    return has_inference;
+  }
+  // The position the opponent played from, with them on turn as
+  // player 0 (the saved CGP lists the on-turn player first).
+  const TuiHistoryEntry *prev = &state->history[turn_idx - 1];
+  Game *position = game_duplicate(state->game);
+  ErrorStack *err = error_stack_create();
+  game_load_cgp(position, prev->cgp_before, err);
+  Move played;
+  bool usable =
+      error_stack_is_empty(err) && entry_played_move(prev, position, &played);
+  error_stack_destroy(err);
+  const int target_player_idx = prev->player_idx;
+  char after_move[sizeof(prev->move_str)];
+  (void)snprintf(after_move, sizeof(after_move), "%s", prev->move_str);
+  const int num_threads = engine_threads(state);
+  pthread_mutex_unlock(&state->mutex);
+
+  const game_event_t played_type =
+      usable ? move_get_type(&played) : GAME_EVENT_PASS;
+  const Rack *target_rack = player_get_rack(game_get_player(position, 0));
+  const int rack_total = rack_is_empty(target_rack)
+                             ? RACK_SIZE
+                             : rack_get_total_letters(target_rack);
+  usable = usable &&
+           (played_type == GAME_EVENT_TILE_PLACEMENT_MOVE ||
+            played_type == GAME_EVENT_EXCHANGE) &&
+           move_get_tiles_played(&played) < rack_total &&
+           board_get_tiles_played(game_get_board(position)) > 0;
+  if (!usable) {
+    game_destroy(position);
+    return false;
+  }
+
+  const int ld_size = ld_get_size(game_get_ld(position));
+  Rack target_played_tiles;
+  rack_set_dist_size_and_reset(&target_played_tiles, ld_size);
+  int target_num_exch = 0;
+  if (played_type == GAME_EVENT_EXCHANGE) {
+    target_num_exch = move_get_tiles_played(&played);
+  } else {
+    for (int tile_idx = 0; tile_idx < move_get_tiles_length(&played);
+         tile_idx++) {
+      const MachineLetter tile = move_get_tile(&played, tile_idx);
+      if (tile != PLAYED_THROUGH_MARKER) {
+        rack_add_letter(&target_played_tiles,
+                        get_is_blanked(tile) ? BLANK_MACHINE_LETTER : tile);
+      }
+    }
+  }
+  Rack target_known_rack;
+  rack_set_dist_size_and_reset(&target_known_rack, ld_size);
+  Rack nontarget_known_rack;
+  rack_set_dist_size_and_reset(&nontarget_known_rack, ld_size);
+  rack_copy(&nontarget_known_rack, mover_rack);
+
+  ThreadControl *tc = thread_control_create();
+  thread_control_set_status(tc, THREAD_CONTROL_STATUS_STARTED);
+  Watchdog wd = {.tc = tc, .bot_stop = stop, .finished = false};
+  pthread_t wd_thread;
+  const bool wd_started =
+      (pthread_create(&wd_thread, NULL, watchdog_main, &wd) == 0);
+  InferenceArgs args;
+  infer_args_fill(&args, INFERENCE_LEAVE_LIST_CAPACITY,
+                  int_to_equity(INFERENCE_EQUITY_MARGIN), NULL, position,
+                  num_threads, 0, 0, tc, /*use_game_history=*/false,
+                  /*use_inference_cutoff_optimization=*/true,
+                  /*target_index=*/0,
+                  played_type == GAME_EVENT_EXCHANGE ? 0
+                                                     : move_get_score(&played),
+                  target_num_exch, &target_played_tiles, &target_known_rack,
+                  &nontarget_known_rack);
+  args.target_move =
+      played_type == GAME_EVENT_TILE_PLACEMENT_MOVE ? &played : NULL;
+  InferenceResults *results = inference_results_create(NULL);
+  err = error_stack_create();
+  infer_without_ctx(&args, results, err);
+  const bool inferred =
+      error_stack_is_empty(err) && !inference_results_get_interrupted(results);
+  error_stack_destroy(err);
+  atomic_store(&wd.finished, true);
+  if (wd_started) {
+    pthread_join(wd_thread, NULL);
+  }
+  thread_control_destroy(tc);
+
+  TuiInferenceSummary summary;
+  if (inferred) {
+    tui_inference_summary_fill(results, game_get_ld(position),
+                               player_get_klv(game_get_player(position, 0)),
+                               target_player_idx, after_move, &summary);
+  }
+  game_destroy(position);
+  if (!inferred || !summary.valid) {
+    inference_results_destroy(results);
+    return false;
+  }
+  pthread_mutex_lock(&state->mutex);
+  bool attached = false;
+  if (turn_idx < state->history_count &&
+      state->history[turn_idx].inference == NULL) {
+    tui_history_entry_attach_inference(state, &state->history[turn_idx],
+                                       results, &summary);
+    attached = true;
+    atomic_fetch_add(&state->render_version, 1);
+  }
+  pthread_mutex_unlock(&state->mutex);
+  if (!attached) {
+    inference_results_destroy(results);
+  }
+  return attached;
+}
+
+// Run a Monte Carlo simulation against the current position with a
+// time budget. Returns true and writes the chosen move on success.
+// Falls back to equity-best on any internal failure.
+static bool run_sim(TuiGameState *state, double budget_sec, Move *out_move) {
+  // With Inference on, first infer the opponent's leave from their last
+  // move, on the clock of this turn's budget.
+  pthread_mutex_lock(&state->mutex);
+  const int turn_idx = state->history_count - 1;
+  Rack mover_rack;
+  rack_set_dist_size(&mover_rack, ld_get_size(state->ld));
+  rack_copy(&mover_rack,
+            player_get_rack(game_get_player(
+                state->game, game_get_player_on_turn_index(state->game))));
+  pthread_mutex_unlock(&state->mutex);
+  struct timespec infer_start;
+  clock_gettime(CLOCK_MONOTONIC, &infer_start);
+  const bool has_inference =
+      infer_turn(state, turn_idx, &mover_rack, &state->bot_stop);
+  budget_sec -= seconds_since(&infer_start);
+  if (budget_sec < (double)MIN_BUDGET_MS / 1000.0) {
+    budget_sec = (double)MIN_BUDGET_MS / 1000.0;
+  }
+  pthread_mutex_lock(&state->mutex);
+  InferenceResults *inference = has_inference && tui_sim_inference_on(state)
+                                    ? state->history[turn_idx].inference
+                                    : NULL;
+  state->live_sim_inferred = inference != NULL;
+  pthread_mutex_unlock(&state->mutex);
+
+  const int requested_cands =
+      state->sim_candidates > 0 ? state->sim_candidates : SIM_CANDIDATES;
+  MoveList *candidates = generate_top_candidates(state->game, requested_cands);
+  if (candidates == NULL) {
+    return false;
+  }
+  // Single-candidate position: no point simming a one-horse race.
+  if (move_list_get_count(candidates) <= 1) {
+    move_copy(out_move, move_list_get_move(candidates, 0));
+    move_list_destroy(candidates);
+    return true;
+  }
+
+  ThreadControl *tc = thread_control_create();
+  thread_control_set_status(tc, THREAD_CONTROL_STATUS_STARTED);
+
+  Watchdog wd = {.tc = tc,
+                 .bot_stop = &state->bot_stop,
+                 .finished = false,
+                 .deadline_sec =
+                     budget_sec + (double)SIM_DEADLINE_GRACE_MS / 1000.0};
+  pthread_t wd_thread;
+  const bool wd_started =
+      (pthread_create(&wd_thread, NULL, watchdog_main, &wd) == 0);
+
+  const int num_threads = engine_threads(state);
+  SimArgs args = {0};
+  // Pull sim depth + breadth from state so the Watch setup modal
+  // can tune them per game. Clamp to sensible bounds — a 0 ply
+  // sim is a no-op and a 0 candidate sim asks BAI to pick from
+  // nothing.
+  int s_plies = state->sim_plies > 0 ? state->sim_plies : 4;
+  int s_cands =
+      state->sim_candidates > 0 ? state->sim_candidates : SIM_CANDIDATES;
+  args.num_plies = s_plies;
+  args.move_list = candidates;
+  args.num_plays = move_list_get_count(candidates);
+  args.known_opp_rack = NULL;
+  args.win_pcts = state->win_pcts;
+  args.use_inference = inference != NULL;
+  args.use_precomputed_inference = true;
+  args.use_census_rollout = state->sim_census;
+  args.use_heat_map = false;
+  args.inference_results = inference;
+  args.num_threads = num_threads;
+  args.print_interval = 0;
+  args.max_num_display_plays = s_cands;
+  args.max_num_display_plies = s_plies;
+  args.seed = (uint64_t)time(NULL);
+  args.thread_control = tc;
+  args.bai_options.sampling_rule = BAI_SAMPLING_RULE_TOP_TWO_IDS;
+  args.bai_options.threshold = BAI_THRESHOLD_NONE;
+  args.bai_options.sample_limit = (uint64_t)1e15;
+  args.bai_options.sample_minimum = SIM_MIN_PLAY_ITERATIONS;
+  // BAI takes fractional seconds; truncating to whole seconds turned any
+  // budget under 1s into 0, which BAI treats as no time limit at all.
+  args.bai_options.time_limit_seconds = budget_sec;
+  args.bai_options.num_threads = num_threads;
+  args.bai_options.cutoff = 0.005;
+  args.bai_options.parent_worker_thread_index = 0;
+  args.bai_options.arm_avoid_prune = NULL;
+  args.bai_options.num_arm_avoid_prune = 0;
+  args.bai_options.delta = 1.0;
+  // Game pointer must be a Game* (not const) when passed through the
+  // SimArgs.game field; the sim doesn't mutate it but the struct's
+  // declaration is `const Game *`.
+  args.game = state->game;
+  sim_args_set_pat_rollout(state, state->game, &args);
+
+  // The analysis panel reads state->sim_results in real time while the
+  // sim is running. Flip the active flag and stamp the current turn
+  // index BEFORE the simmer kicks off so the renderer doesn't show
+  // stale data from a previous turn.
+  atomic_store(&state->sim_results_turn_idx, state->history_count);
+  atomic_store(&state->sim_results_active, true);
+
+  SimResults *results = state->sim_results;
+  ErrorStack *err = error_stack_create();
+  simulate_without_ctx(&args, results, err);
+
+  atomic_store(&wd.finished, true);
+  if (wd_started) {
+    pthread_join(wd_thread, NULL);
+  }
+
+  bool got_move = false;
+  const Move *best = sim_results_get_best_move(results);
+  if (best != NULL) {
+    move_copy(out_move, best);
+    got_move = true;
+  } else {
+    // Sim couldn't pick a winner — fall back to the top equity move
+    // from the candidate list we already generated.
+    move_copy(out_move, move_list_get_move(candidates, 0));
+    got_move = true;
+  }
+
+  atomic_store(&state->sim_results_active, false);
+
+  error_stack_destroy(err);
+  thread_control_destroy(tc);
+  move_list_destroy(candidates);
+  return got_move;
+}
+
+// Run the endgame solver against the current position with a time
+// budget. Returns true and writes the chosen move on success.
+// Build a TuiEndgameSnapshot from a freshly-computed PV array. Holds
+// state->mutex for the duration and bumps render_version so the
+// analysis panel picks up the change on the next frame. Called both
+// per-ply (incremental from the engine's callback, ranked_pvs path)
+// and post-solve (full multi_pvs leaderboard).
+static void endgame_snapshot_from_pvs(TuiGameState *state, const PVLine *pvs,
+                                      int num_pvs, int depth,
+                                      int initial_spread, int solving_player,
+                                      const Game *game, bool exhaustive) {
+  pthread_mutex_lock(&state->mutex);
+  tui_endgame_snapshot_clear(&state->endgame_snapshot);
+  TuiEndgameSnapshot *snap = &state->endgame_snapshot;
+  snap->board = board_duplicate(game_get_board(game));
+  snap->solve_rack =
+      rack_duplicate(player_get_rack(game_get_player(game, solving_player)));
+  snap->initial_spread = initial_spread;
+  snap->depth = depth;
+  snap->solving_player = solving_player;
+  snap->exhaustive = exhaustive;
+  if (num_pvs > 0 && pvs != NULL) {
+    snap->moves = (Move **)calloc((size_t)num_pvs, sizeof(Move *));
+    snap->values = (int *)calloc((size_t)num_pvs, sizeof(int));
+    if (snap->moves != NULL && snap->values != NULL) {
+      int filled = 0;
+      for (int i = 0; i < num_pvs; i++) {
+        const PVLine *pvi = &pvs[i];
+        if (pvi->num_moves <= 0) {
+          continue;
+        }
+        Move *candidate = move_create();
+        small_move_to_move(candidate, &pvi->moves[0], snap->board);
+        // Dedupe on board-effect equivalence: same move_type, same
+        // anchor + direction + tiles, regardless of move->score. The
+        // engine's compare_moves_without_equity checks score first
+        // which lets identical plays slip through when the re-search
+        // updated one PV's score but not the other.
+        bool duplicate = false;
+        for (int j = 0; j < filled; j++) {
+          const Move *other = snap->moves[j];
+          if (candidate->move_type != other->move_type) {
+            continue;
+          }
+          if (candidate->move_type == GAME_EVENT_PASS) {
+            duplicate = true; // only one "pass" play, no further fields
+            break;
+          }
+          if (candidate->row_start != other->row_start ||
+              candidate->col_start != other->col_start ||
+              candidate->dir != other->dir ||
+              candidate->tiles_played != other->tiles_played ||
+              candidate->tiles_length != other->tiles_length) {
+            continue;
+          }
+          bool tiles_match = true;
+          for (int t = 0; t < candidate->tiles_length; t++) {
+            if (candidate->tiles[t] != other->tiles[t]) {
+              tiles_match = false;
+              break;
+            }
+          }
+          if (tiles_match) {
+            duplicate = true;
+            break;
+          }
+        }
+        if (duplicate) {
+          move_destroy(candidate);
+          continue;
+        }
+        snap->moves[filled] = candidate;
+        snap->values[filled] = (int)pvi->score;
+        filled++;
+      }
+      // Sort by value descending so the leaderboard reads top-down.
+      // Simple insertion sort — num_entries is tiny.
+      for (int i = 1; i < filled; i++) {
+        Move *km = snap->moves[i];
+        int kv = snap->values[i];
+        int j = i - 1;
+        while (j >= 0 && snap->values[j] < kv) {
+          snap->moves[j + 1] = snap->moves[j];
+          snap->values[j + 1] = snap->values[j];
+          j--;
+        }
+        snap->moves[j + 1] = km;
+        snap->values[j + 1] = kv;
+      }
+      snap->num_entries = filled;
+      snap->valid = filled > 0;
+    }
+  }
+  atomic_fetch_add(&state->render_version, 1);
+  pthread_mutex_unlock(&state->mutex);
+}
+
+// Engine callback fired by the endgame solver after each iterative-
+// deepening pass completes. user_data is the TuiGameState pointer set
+// in EndgameArgs. The engine guarantees this only fires from worker
+// thread index 0, so we can mutate the snapshot under state->mutex
+// without worrying about concurrent calls.
+static void endgame_per_ply_cb(int depth, int32_t value, const PVLine *pv_line,
+                               const Game *game, const PVLine *ranked_pvs,
+                               int num_ranked_pvs, void *user_data) {
+  (void)value;
+  (void)pv_line;
+  TuiGameState *state = (TuiGameState *)user_data;
+  if (state == NULL) {
+    return;
+  }
+  // Throttle the snapshot rebuild to ~10 Hz. The rebuild duplicates
+  // the whole Board (~29 KB) under state->mutex; firing it 25× per
+  // ply iteration during a small endgame starves the main render
+  // thread, which is what was causing the ~4 fps freeze when a game
+  // hit endgame phase. The final solve still publishes a full
+  // snapshot from run_endgame after the search returns, so the
+  // displayed leaderboard converges either way.
+  static _Atomic uint64_t last_ns;
+  enum { THROTTLE_NS = 100 * 1000 * 1000 }; // 100 ms
+  struct timespec now;
+  clock_gettime(CLOCK_MONOTONIC, &now);
+  const uint64_t now_ns =
+      (uint64_t)now.tv_sec * 1000000000ULL + (uint64_t)now.tv_nsec;
+  const uint64_t last = atomic_load(&last_ns);
+  if (last != 0 && now_ns - last < THROTTLE_NS) {
+    return;
+  }
+  atomic_store(&last_ns, now_ns);
+  const int solving_player = atomic_load(&state->endgame_results_turn_idx) >= 0
+                                 ? game_get_player_on_turn_index(game)
+                                 : 0;
+  const int initial_spread = atomic_load(&state->endgame_initial_spread);
+  // Partial snapshot — search is still running, so not exhaustive
+  // yet. Final snapshot in run_endgame may flip exhaustive=true once
+  // endgame_solve returns with status FINISHED.
+  endgame_snapshot_from_pvs(state, ranked_pvs, num_ranked_pvs, depth,
+                            initial_spread, solving_player, game,
+                            /*exhaustive=*/false);
+}
+
+// Engine callback fired once, before any worker spawns, with the
+// initial root-move list sorted by static estimate. Gives us a d=0
+// snapshot within sub-ms of endgame_solve start — the analysis panel
+// can show *something* fresh before any negamax work has happened.
+static void endgame_before_search_cb(const Game *game,
+                                     const SmallMove *initial_moves,
+                                     int initial_move_count, int initial_spread,
+                                     int solving_player, void *user_data) {
+  TuiGameState *state = (TuiGameState *)user_data;
+  if (state == NULL || initial_moves == NULL || initial_move_count <= 0) {
+    return;
+  }
+  // Build a temporary PVLine array on the stack so we can reuse
+  // endgame_snapshot_from_pvs. Each PVLine wraps one SmallMove with
+  // its current estimated value (in PVLine.score's spread-adjusted
+  // sign convention: value - initial_spread).
+  const int n = initial_move_count > MAX_ENDGAME_DISPLAY_PVS
+                    ? MAX_ENDGAME_DISPLAY_PVS
+                    : initial_move_count;
+  PVLine pvs[MAX_ENDGAME_DISPLAY_PVS];
+  for (int i = 0; i < n; i++) {
+    pvs[i].moves[0] = initial_moves[i];
+    pvs[i].num_moves = 1;
+    pvs[i].negamax_depth = 0;
+    pvs[i].game = NULL;
+    pvs[i].score =
+        small_move_get_estimated_value(&initial_moves[i]) - initial_spread;
+  }
+  endgame_snapshot_from_pvs(state, pvs, n, /*depth=*/0, initial_spread,
+                            solving_player, game, /*exhaustive=*/false);
+}
+
+// Solve `position` (the live game for the bot; a reconstructed past
+// position for the "/resume" analysis worker). `results_turn_idx` is
+// stamped into endgame_results_turn_idx for the analysis panel;
+// `stop_flag` is the atomic the watchdog translates into an engine
+// interrupt (&state->bot_stop for the bot, &state->analysis_stop for
+// the resume worker).
+static bool run_endgame_on(TuiGameState *state, const Game *position,
+                           int results_turn_idx, double budget_sec,
+                           _Atomic bool *stop_flag, Move *out_move) {
+  ThreadControl *tc = thread_control_create();
+  thread_control_set_status(tc, THREAD_CONTROL_STATUS_STARTED);
+
+  Watchdog wd = {.tc = tc, .bot_stop = stop_flag, .finished = false};
+  pthread_t wd_thread;
+  const bool wd_started =
+      (pthread_create(&wd_thread, NULL, watchdog_main, &wd) == 0);
+
+  EndgameArgs args = {0};
+  args.thread_control = tc;
+  args.game = position;
+  args.tt_fraction_of_mem = 0.10;
+  args.plies = ENDGAME_PLIES;
+  args.initial_small_move_arena_size = DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
+  args.num_threads = engine_threads(state);
+  args.use_heuristics = true;
+  // Ask the solver for a top-K leaderboard. Post-#530 the negamax
+  // search uses topk_values[MAX_ENDGAME_DISPLAY_PVS], so that's the
+  // hard ceiling.
+  int top_k = SIM_CANDIDATES;
+  // cppcheck-suppress knownConditionTrueFalse ; guards a constant change
+  if (top_k > MAX_ENDGAME_DISPLAY_PVS) {
+    top_k = MAX_ENDGAME_DISPLAY_PVS;
+  }
+  args.num_top_moves = top_k;
+  args.enable_pv_display = true;
+  // The engine always iterative-deepens (thread 0 runs depth 1, 2, ... up to
+  // the requested plies), which is what makes the per-ply callback fire
+  // incrementally instead of only landing one final post-solve update.
+  // Live updates:
+  //   before_search_callback fires once before any worker spawns,
+  //     populating the snapshot with the d=0 leaderboard (root moves
+  //     sorted by static estimate).
+  //   per_ply_callback fires after each iterative-deepening pass
+  //     completes, updating the snapshot with that depth's ranked
+  //     leaderboard.
+  args.before_search_callback = endgame_before_search_cb;
+  args.before_search_callback_data = state;
+  args.per_ply_callback = endgame_per_ply_cb;
+  args.per_ply_callback_data = state;
+  args.forced_pass_bypass = false;
+  args.soft_time_limit = budget_sec * 0.9;
+  args.hard_time_limit = budget_sec;
+  args.seed = (uint64_t)time(NULL);
+
+  // Capture the solver's initial spread so the renderer can show
+  // W/T/L from the correct side once the bot has played and the
+  // on-turn flag has flipped.
+  const int solving_player = game_get_player_on_turn_index(position);
+  const int p0_score =
+      equity_to_int(player_get_score(game_get_player(position, 0)));
+  const int p1_score =
+      equity_to_int(player_get_score(game_get_player(position, 1)));
+  const int initial_spread =
+      (solving_player == 0) ? p0_score - p1_score : p1_score - p0_score;
+
+  atomic_store(&state->endgame_initial_spread, initial_spread);
+  atomic_store(&state->endgame_results_turn_idx, results_turn_idx);
+
+  // Clear the previous turn's snapshot now so the renderer doesn't
+  // keep showing it during the gap between activation and the engine's
+  // first before_search_callback. The before_search_callback will
+  // populate a fresh d=0 snapshot within sub-ms.
+  pthread_mutex_lock(&state->mutex);
+  tui_endgame_snapshot_clear(&state->endgame_snapshot);
+  atomic_fetch_add(&state->render_version, 1);
+  pthread_mutex_unlock(&state->mutex);
+
+  atomic_store(&state->endgame_results_active, true);
+
+  EndgameResults *results = state->endgame_results;
+  ErrorStack *err = error_stack_create();
+  // Reuse state->endgame_ctx across turns. endgame_solve allocates
+  // on first call (*ctx == NULL) and reuses afterward — including
+  // the transposition table, which is large enough (10% of system
+  // memory by default) that recreating it every turn was the most
+  // likely source of the SIGABRT we kept hitting under fragmentation.
+  endgame_solve(&state->endgame_ctx, &args, results, err);
+
+  atomic_store(&wd.finished, true);
+  if (wd_started) {
+    pthread_join(wd_thread, NULL);
+  }
+
+  bool got_move = false;
+  const PVLine *pv = endgame_results_get_pvline(results, ENDGAME_RESULT_BEST);
+  if (pv != NULL && pv->num_moves > 0) {
+    small_move_to_move(out_move, &pv->moves[0], game_get_board(position));
+    got_move = true;
+  }
+
+  // Finalize the snapshot with all multi-PVs from the completed
+  // solve, and mark exhaustive when the search ran to completion
+  // (no time interrupt). Per-ply callback updates above only see
+  // ranked_pvs (capped at 10); this is the full leaderboard.
+  const bool exhaustive =
+      endgame_results_get_status(results) == ENDGAME_RESULT_STATUS_FINISHED;
+  endgame_results_lock(results, ENDGAME_RESULT_DISPLAY);
+  const int num_pvs = endgame_results_get_num_pvs(results);
+  const PVLine *multi = endgame_results_get_multi_pvs(results);
+  endgame_snapshot_from_pvs(
+      state, multi, num_pvs,
+      endgame_results_get_depth(results, ENDGAME_RESULT_BEST), initial_spread,
+      solving_player, position, exhaustive);
+  endgame_results_unlock(results, ENDGAME_RESULT_DISPLAY);
+
+  atomic_store(&state->endgame_results_active, false);
+
+  // state->endgame_ctx is owned by the game state and freed in
+  // tui_game_state_destroy — don't tear it down here.
+  error_stack_destroy(err);
+  thread_control_destroy(tc);
+  return got_move;
+}
+
+// Bot-turn wrapper: solve the live game, stamped as the live turn.
+static bool run_endgame(TuiGameState *state, double budget_sec,
+                        Move *out_move) {
+  return run_endgame_on(state, state->game, state->history_count, budget_sec,
+                        &state->bot_stop, out_move);
+}
+
+// Inner-peg stage schedule when nested lookahead is on — same
+// defaults the CLI uses (see config_fill_peg_args): 8 candidates at
+// the first inner stage, then 4, then 2.
+static const int TUI_PEG_NESTED_CAND_CAPS[] = {8, 4, 2};
+
+// Run the PEG (pre-endgame) solver against `position` with a time
+// budget. Live progress streams through state->peg_poll, which the
+// analysis panel reads via peg_poll_read at render cadence — the
+// same pollable pattern the sim panel uses. Returns true and writes
+// the best move on success. Generic over which position / stop flag
+// so both the live bot turn and the post-game analysis resume can
+// use it (mirrors run_endgame_on).
+static bool run_peg_on(TuiGameState *state, const Game *position,
+                       int results_turn_idx, double budget_sec,
+                       _Atomic bool *stop_flag, Move *out_move) {
+  // Create the poll lazily on the first PEG turn; reset it on reuse
+  // so a previous solve's stage history doesn't leak into this one.
+  if (state->peg_poll == NULL) {
+    state->peg_poll = peg_poll_create();
+  } else {
+    peg_poll_reset(state->peg_poll);
+  }
+
+  ThreadControl *tc = thread_control_create();
+  thread_control_set_status(tc, THREAD_CONTROL_STATUS_STARTED);
+
+  Watchdog wd = {.tc = tc, .bot_stop = stop_flag, .finished = false};
+  pthread_t wd_thread;
+  const bool wd_started =
+      (pthread_create(&wd_thread, NULL, watchdog_main, &wd) == 0);
+
+  PegArgs args = {0};
+  args.game = position;
+  args.thread_control = tc;
+  // peg_solve's calling thread drains the pool alongside its workers, so
+  // one fewer worker keeps the search to engine_threads() cores.
+  const int peg_threads = engine_threads(state);
+  args.num_threads = peg_threads > 1 ? peg_threads - 1 : 1;
+  args.time_budget_seconds = budget_sec;
+  args.opp_model = PEG_OPP_RATIONAL;
+  args.scenario_stride = 0; // bag-size default
+  args.stage_top_k = NULL;  // built-in halving schedule
+  // Nested inner-peg lookahead for non-emptier leaves, matching the
+  // CLI's defaults (on, depth 1, 8-4-2 inner candidate caps).
+  args.nested_enabled = true;
+  args.nested_max_depth = PEG_NESTED_DEFAULT_DEPTH;
+  args.nested_cand_caps = TUI_PEG_NESTED_CAND_CAPS;
+  args.nested_n_cand_caps = (int)(sizeof(TUI_PEG_NESTED_CAND_CAPS) /
+                                  sizeof(TUI_PEG_NESTED_CAND_CAPS[0]));
+  args.nested_stride = 0; // bag-size default
+  args.poll = state->peg_poll;
+
+  // Publish to the renderer BEFORE the solve kicks off so the panel
+  // doesn't show stale data from a previous turn (sim pattern).
+  atomic_store(&state->peg_results_turn_idx, results_turn_idx);
+  atomic_store(&state->peg_results_active, true);
+
+  PegResult result = {0};
+  ErrorStack *err = error_stack_create();
+  peg_solve(&args, &result, err);
+  const bool solve_ok = error_stack_is_empty(err);
+  error_stack_destroy(err);
+
+  atomic_store(&wd.finished, true);
+  if (wd_started) {
+    pthread_join(wd_thread, NULL);
+  }
+
+  bool got_move = false;
+  if (solve_ok && result.n_top_cands > 0) {
+    // top_cands[0] is the best move of the deepest completed stage
+    // (sorted by win% with a spread tiebreak).
+    move_copy(out_move, &result.top_cands[0].move);
+    got_move = true;
+  }
+
+  atomic_store(&state->peg_results_active, false);
+  atomic_fetch_add(&state->render_version, 1);
+
+  peg_result_destroy(&result);
+  thread_control_destroy(tc);
+  return got_move;
+}
+
+// Bot-turn wrapper: PEG-solve the live game, stamped as the live turn.
+static bool run_peg(TuiGameState *state, double budget_sec, Move *out_move) {
+  return run_peg_on(state, state->game, state->history_count, budget_sec,
+                    &state->bot_stop, out_move);
+}
+
+static void *bot_thread_main(void *arg) {
+  TuiGameState *state = (TuiGameState *)arg;
+  // Scratch list for the equity-best fallback path.
+  MoveList *fallback_list = move_list_create(1);
+  // Scratch move buffer that engine routines write into. Lives across
+  // turns so we don't churn the small-move arena on every turn.
+  Move *chosen = move_create();
+
+  while (!atomic_load(&state->bot_stop)) {
+    // ── Snapshot turn state, append pending history ──────────────────
+    int pending_idx = -1;
+    bool empty_bag = false;
+    bool peg_range = false;
+    double budget_sec = 0.0;
+    int player_idx = -1;
+
+    pthread_mutex_lock(&state->mutex);
+    if (game_over(state->game)) {
+      pthread_mutex_unlock(&state->mutex);
+      break;
+    }
+    player_idx = game_get_player_on_turn_index(state->game);
+
+    // Time-forfeit enforcement (play-vs-computer only). Poll the
+    // on-turn player's live clock against the overtime rule — losing
+    // at 0:00 under FLAG, at the overtime cap under MAX. UNLIMITED
+    // never forfeits; its penalties are settled at game end. The 30ms
+    // human-turn idle poll below gives this check sub-second latency
+    // while the human is thinking.
+    if (state->app_mode == TUI_APP_MODE_PLAY_VS_COMPUTER &&
+        state->time_per_side_seconds > 0 &&
+        state->overtime_rule != UI_OVERTIME_UNLIMITED) {
+      struct timespec poll_now;
+      clock_gettime(CLOCK_MONOTONIC, &poll_now);
+      double turn_elapsed =
+          (double)(poll_now.tv_sec - state->turn_started.tv_sec) +
+          (double)(poll_now.tv_nsec - state->turn_started.tv_nsec) / 1e9;
+      if (turn_elapsed < 0.0) {
+        turn_elapsed = 0.0;
+      }
+      const double live_used = state->seconds_used[player_idx] + turn_elapsed;
+      double allowed = (double)state->time_per_side_seconds;
+      if (state->overtime_rule == UI_OVERTIME_MAX) {
+        allowed += (double)state->overtime_cap_minutes * 60.0;
+      }
+      if (live_used >= allowed) {
+        // Stop the clock at the forfeit moment so the final times
+        // reflect what was actually used.
+        state->seconds_used[player_idx] = live_used;
+        state->turn_started = poll_now;
+        state->time_forfeit_player_idx = player_idx;
+        const int cumulative = equity_to_int(
+            player_get_score(game_get_player(state->game, player_idx)));
+        // The turn's pending entry (if present) becomes the forfeit
+        // event in place, preserving its board snapshot; otherwise
+        // append a fresh event.
+        TuiHistoryEntry *last = state->history_count > 0
+                                    ? &state->history[state->history_count - 1]
+                                    : NULL;
+        if (last != NULL && last->pending && last->player_idx == player_idx) {
+          last->kind = TUI_HISTORY_ENTRY_TIME_FORFEIT;
+          last->pending = false;
+          last->move_str[0] = '\0';
+          last->leave_str[0] = '\0';
+          last->score = 0;
+          last->total_after = cumulative;
+          last->clock_at_end = state->time_per_side_seconds -
+                               (int)state->seconds_used[player_idx];
+          // Re-stamp the start clock to the forfeit moment too — the
+          // pill preview reads clock_at_start while the cursor is
+          // parked here, and "time remaining when the turn began" is
+          // misleading for an event that ended the game.
+          last->clock_at_start = last->clock_at_end;
+        } else {
+          tui_bot_worker_append_clock_event(
+              state, TUI_HISTORY_ENTRY_TIME_FORFEIT, player_idx, 0, cumulative);
+        }
+        // Drop any in-progress board move entry — the game is over.
+        state->board_entry_active = false;
+        state->edit_history_idx = -1;
+        state->edit_move_buf[0] = '\0';
+        state->edit_move_len = 0;
+        state->edit_move_cursor = 0;
+        tui_game_state_parse_edit_buf(state);
+        const char *loser_name = player_idx == 0 ? "P1" : "P2";
+        if (state->player_names[player_idx][0] != '\0') {
+          loser_name = state->player_names[player_idx];
+        }
+        (void)snprintf(state->notice_buf, sizeof(state->notice_buf),
+                       "%s lost on time", loser_name);
+        clock_gettime(CLOCK_MONOTONIC, &state->notice_expires_at);
+        state->notice_expires_at.tv_sec += 6;
+        state->history_cursor = state->history_count - 1;
+        atomic_fetch_add(&state->render_version, 1);
+        pthread_mutex_unlock(&state->mutex);
+        break;
+      }
+    }
+
+    const int clock_at_start =
+        state->time_per_side_seconds - (int)state->seconds_used[player_idx];
+
+    // Single-appender discipline: the bot worker is the ONLY place that
+    // appends a pending history entry. Append only when the last entry
+    // isn't already a pending one for this player — otherwise we'd add a
+    // fresh entry on every poll while idling on the human's turn (and the
+    // human-commit path, which finalizes this same pending entry, would
+    // double up with the bot). The first poll of each turn does the
+    // append; subsequent polls reuse history_count-1.
+    const bool need_append =
+        state->history_count == 0 ||
+        !state->history[state->history_count - 1].pending ||
+        state->history[state->history_count - 1].player_idx != player_idx;
+    if (need_append) {
+      Rack rack_at_start;
+      rack_set_dist_size(&rack_at_start, ld_get_size(state->ld));
+      rack_copy(&rack_at_start,
+                player_get_rack(game_get_player(state->game, player_idx)));
+      pending_idx = tui_bot_worker_append_pending_history(
+          state, player_idx, &rack_at_start, clock_at_start);
+      // Render the pending entry's spinner immediately.
+      atomic_fetch_add(&state->render_version, 1);
+    } else {
+      pending_idx = state->history_count - 1;
+    }
+
+    // In play-vs-computer, the human enters their own move through the
+    // board move-entry / commit path. The bot leaves the pending entry
+    // visible and idles (short poll) until the turn passes back to it.
+    // Never sleep holding the mutex — the render thread and the commit
+    // path need it.
+    if (state->app_mode == TUI_APP_MODE_PLAY_VS_COMPUTER &&
+        player_idx == state->human_player_idx) {
+      pthread_mutex_unlock(&state->mutex);
+      const struct timespec idle = {.tv_sec = 0, .tv_nsec = 30L * 1000 * 1000};
+      nanosleep(&idle, NULL);
+      continue;
+    }
+
+    budget_sec = compute_budget_sec(state, player_idx);
+    empty_bag = (bag_get_letters(game_get_bag(state->game)) == 0);
+    peg_range = tui_position_in_peg_range(state->game);
+    pthread_mutex_unlock(&state->mutex);
+
+    // ── Run the engine with the mutex released ───────────────────────
+    bool got_move = false;
+    if (empty_bag) {
+      got_move = run_endgame(state, budget_sec, chosen);
+    } else if (peg_range) {
+      // Pre-endgame (1-4 effective tiles in the bag): exact win%
+      // ranking from the PEG solver, streaming into the live panel.
+      got_move = run_peg(state, budget_sec, chosen);
+      if (!got_move && state->win_pcts != NULL) {
+        // PEG failed before ranking anything — invalidate the poll's
+        // turn stamp so the panel's mode selection doesn't shadow the
+        // sim leaderboard with an empty PEG view, then fall back to a
+        // sim so the bot still gets an informed move.
+        atomic_store(&state->peg_results_turn_idx, -1);
+        got_move = run_sim(state, budget_sec, chosen);
+      }
+    } else if (state->win_pcts != NULL) {
+      got_move = run_sim(state, budget_sec, chosen);
+    }
+    if (!got_move) {
+      // Either we don't have win_pcts (no sim possible) or the engine
+      // failed. Fall back to plain best-equity generation.
+      pthread_mutex_lock(&state->mutex);
+      got_move = find_equity_best(state->game, fallback_list, chosen);
+      pthread_mutex_unlock(&state->mutex);
+    }
+
+    // ── Apply the move and finalize history ──────────────────────────
+    pthread_mutex_lock(&state->mutex);
+    if (atomic_load(&state->bot_stop) || game_over(state->game) || !got_move) {
+      pop_history(state);
+      atomic_fetch_add(&state->render_version, 1);
+      pthread_mutex_unlock(&state->mutex);
+      break;
+    }
+
+    const int move_score = equity_to_int(move_get_score(chosen));
+    // Snapshot the Analysis-panel state BEFORE the move is played
+    // (so the move-string formatting and leave column read off the
+    // pre-move board + rack). The pending history entry already
+    // exists at pending_idx; stash the snapshot into it so the
+    // History cursor can replay this turn's analysis later.
+    //
+    // For sim turns ALSO deep-copy the live SimResults — every
+    // Stat / PRNG / BAIResult / SimmedPlay — so a future "/resume"
+    // can pick up iterating onto these samples rather than restart
+    // from zero. The duplicate is owned by the entry; destroyed on
+    // pop / reset / state-destroy.
+    if (pending_idx >= 0 && pending_idx < state->history_count) {
+      TuiHistoryEntry *finalized = &state->history[pending_idx];
+      tui_capture_analysis_snapshot(state, &finalized->analysis_snapshot);
+      if (finalized->analysis_snapshot.is_sim && state->sim_results != NULL) {
+        if (finalized->sim_results_saved != NULL) {
+          sim_results_destroy(finalized->sim_results_saved);
+        }
+        finalized->sim_results_saved =
+            sim_results_duplicate(state->sim_results);
+        // Show the kind of sim Sim inference asks for now, which may
+        // not be the kind this one was.
+        if (finalized->inference != NULL) {
+          finalized->analysis_inferred = state->live_sim_inferred;
+          tui_history_entry_show_inference_variant(finalized,
+                                                   tui_sim_inference_on(state));
+        }
+      } else if (!finalized->analysis_snapshot.is_sim &&
+                 state->endgame_snapshot.valid &&
+                 state->endgame_snapshot.num_entries > 0 &&
+                 state->endgame_snapshot.moves != NULL) {
+        // Endgame turn — deep-copy the leaderboard moves so the
+        // History cursor can preview each candidate on the board
+        // even after the live endgame_snapshot has moved on.
+        if (finalized->endgame_moves_saved != NULL) {
+          free(finalized->endgame_moves_saved);
+        }
+        const int n = state->endgame_snapshot.num_entries;
+        finalized->endgame_moves_saved =
+            (Move *)malloc((size_t)n * sizeof(Move));
+        if (finalized->endgame_moves_saved != NULL) {
+          for (int i = 0; i < n; i++) {
+            if (state->endgame_snapshot.moves[i] != NULL) {
+              move_copy(&finalized->endgame_moves_saved[i],
+                        state->endgame_snapshot.moves[i]);
+            } else {
+              memset(&finalized->endgame_moves_saved[i], 0, sizeof(Move));
+            }
+          }
+          finalized->endgame_moves_saved_count = n;
+        }
+      }
+    }
+    Rack leave;
+    rack_set_dist_size(&leave, ld_get_size(state->ld));
+    play_move(chosen, state->game, &leave);
+
+    // Tag the squares that got tiles placed on them with this
+    // player's index so the renderer can colour them P1-green or
+    // P2-amber later. Only happens here in the "live" game loop —
+    // sim/endgame board copies leave the owner bits untouched.
+    if (move_get_type(chosen) == GAME_EVENT_TILE_PLACEMENT_MOVE) {
+      const int dir = move_get_dir(chosen);
+      int r = move_get_row_start(chosen);
+      int c = move_get_col_start(chosen);
+      const int tile_count = move_get_tiles_length(chosen);
+      for (int t = 0; t < tile_count; t++) {
+        if (move_get_tile(chosen, t) != PLAYED_THROUGH_MARKER) {
+          board_set_square_owner(game_get_board(state->game), r, c, player_idx);
+        }
+        if (board_is_dir_vertical(dir)) {
+          r++;
+        } else {
+          c++;
+        }
+      }
+    }
+
+    const int post_play_score = equity_to_int(
+        player_get_score(game_get_player(state->game, player_idx)));
+    int bonus = 0;
+    const Rack *opp_rack = NULL;
+    if (game_over(state->game)) {
+      opp_rack = player_get_rack(game_get_player(state->game, 1 - player_idx));
+      if (!rack_is_empty(opp_rack)) {
+        bonus = equity_to_int(calculate_end_rack_points(opp_rack, state->ld));
+      }
+    }
+    const int total_after_move = post_play_score - bonus;
+    finalize_history(state, pending_idx, chosen, move_score, total_after_move,
+                     &leave);
+    // Against the user, the computer's move sounds: a tock for each tile
+    // it placed, or a drop into the bag for each it exchanged.
+    if (state->app_mode == TUI_APP_MODE_PLAY_VS_COMPUTER && state->sound) {
+      if (move_get_type(chosen) == GAME_EVENT_TILE_PLACEMENT_MOVE) {
+        tui_sound_play(TUI_SOUND_PLACE, move_get_tiles_played(chosen));
+      } else if (move_get_type(chosen) == GAME_EVENT_EXCHANGE) {
+        tui_sound_play(TUI_SOUND_EXCHANGE, move_get_tiles_played(chosen));
+      }
+    }
+
+    // Charge wall time used to the on-turn player. Clamp negative
+    // deltas (clock skew / bad turn_started) to 0 so a single bad
+    // reading can't poison the running total.
+    struct timespec now;
+    clock_gettime(CLOCK_MONOTONIC, &now);
+    double elapsed = (double)(now.tv_sec - state->turn_started.tv_sec) +
+                     (double)(now.tv_nsec - state->turn_started.tv_nsec) / 1e9;
+    if (elapsed < 0.0) {
+      elapsed = 0.0;
+    }
+    state->seconds_used[player_idx] += elapsed;
+    state->turn_started = now;
+
+    // Snapshot the player's clock at end-of-move so the going-out
+    // entry's bonus row can surface it (the player pills only show
+    // it when no turn is focused; the History panel needs its own
+    // copy for the cursor preview).
+    if (pending_idx >= 0 && pending_idx < state->history_count) {
+      state->history[pending_idx].clock_at_end =
+          state->time_per_side_seconds - (int)state->seconds_used[player_idx];
+    }
+
+    // Surface end-of-game bonus on the same entry that just went out.
+    bool finished = false;
+    if (game_over(state->game)) {
+      if (bonus != 0 && opp_rack != NULL && pending_idx >= 0 &&
+          pending_idx < state->history_count) {
+        TuiHistoryEntry *entry = &state->history[pending_idx];
+        entry->end_bonus = bonus;
+        StringBuilder *rsb = string_builder_create();
+        string_builder_add_rack(rsb, opp_rack, state->ld, false);
+        size_t rlen = 0;
+        char *rdump = string_builder_dump(rsb, &rlen);
+        copy_str(entry->end_rack_str, sizeof(entry->end_rack_str), rdump);
+        free(rdump);
+        string_builder_destroy(rsb);
+      }
+      finished = true;
+      // Auto-park the History cursor on the last committed turn at
+      // game over. Without this the cursor stays at -1 (label) and
+      // the renderers fall back to the live game state — which is
+      // the post-going-out position (board has DI placed, rack is
+      // empty) and any candidate previews in Analysis don't match
+      // visually. Parking on the last turn rewinds board/rack/
+      // pills/clocks to the pre-going-out moment so the saved
+      // endgame leaderboard the user is browsing makes sense
+      // against what's on screen.
+      if (state->history_count > 0) {
+        state->history_cursor = state->history_count - 1;
+        state->analysis_cursor = 0;
+        state->analysis_cursor_column = 0; // TUI_ANALYSIS_COLUMN_RANK
+        state->analysis_anchored_move[0] = '\0';
+      }
+      // Settle overtime penalties now that the game is over. Appended
+      // after the cursor parking above so the cursor stays on the
+      // going-out move (penalty entries have no analysis to browse).
+      tui_bot_worker_apply_time_penalties(state);
+    }
+
+    atomic_fetch_add(&state->render_version, 1);
+    pthread_mutex_unlock(&state->mutex);
+
+    if (finished) {
+      break;
+    }
+  }
+
+  move_destroy(chosen);
+  move_list_destroy(fallback_list);
+  return NULL;
+}
+
+void tui_bot_worker_start(TuiGameState *state) {
+  if (state == NULL || state->bot_started) {
+    return;
+  }
+  // Without a win% table the computer can't simulate; it still plays,
+  // choosing by equity alone. Say so rather than play weaker silently.
+  const char *missing = tui_game_state_win_pct_missing(state);
+  if (missing != NULL) {
+    pthread_mutex_lock(&state->mutex);
+    tui_game_state_notice(state, missing);
+    pthread_mutex_unlock(&state->mutex);
+  }
+  if (pthread_create(&state->bot_thread, NULL, bot_thread_main, state) == 0) {
+    state->bot_started = true;
+  }
+}
+
+// ── Post-game analysis resume ("/resume") ────────────────────────────
+
+// Build a MoveList containing the same plays a saved SimResults was
+// built from. The resume path only consumes the count and the rack —
+// sampling reads moves from the SimmedPlays themselves — but the
+// plays are real so the engine's compatibility checks hold.
+static MoveList *move_list_from_sim_results(const SimResults *results) {
+  const int num_plays = sim_results_get_number_of_plays(results);
+  if (num_plays <= 0) {
+    return NULL;
+  }
+  MoveList *list = move_list_create(num_plays);
+  for (int play_idx = 0; play_idx < num_plays; play_idx++) {
+    const SimmedPlay *play = sim_results_get_simmed_play(results, play_idx);
+    Move *spare = move_list_get_spare_move(list);
+    move_copy(spare, simmed_play_get_move(play));
+    move_list_insert_spare_move(list, move_get_equity(spare));
+  }
+  move_list_set_rack(list, sim_results_get_rack(results));
+  return list;
+}
+
+// The top sim candidates at `position`, with the move actually played
+// (`played`, when known) swapped in for the last one if it didn't make
+// the cut, so the sim always says how the played move compares.
+static MoveList *sim_candidates_with_played(const Game *position,
+                                            const Move *played, int n) {
+  MoveList *candidates = generate_top_candidates(position, n);
+  if (candidates == NULL || played == NULL) {
+    return candidates;
+  }
+  move_list_sort_moves(candidates);
+  const int count = move_list_get_count(candidates);
+  for (int move_idx = 0; move_idx < count; move_idx++) {
+    if (compare_moves_without_equity(move_list_get_move(candidates, move_idx),
+                                     played, true) == -1) {
+      return candidates;
+    }
+  }
+  move_copy(move_list_get_move(candidates, count - 1), played);
+  return candidates;
+}
+
+// Simulate a turn: continue sampling its saved sim when it has one, else
+// start a fresh sim on the top candidates (plus the played move). The
+// live display pointer is swapped to the results for the duration (the
+// analysis panel renders them ticking in real time), and they're owned
+// by the entry afterward, so the next "/sim" or "/resume" keeps adding
+// on.
+static void analysis_resume_sim(TuiGameState *state, TuiHistoryEntry *entry,
+                                int turn_idx, Game *position) {
+  // Infer the opponent's leave first, so the sim can draw from it, and
+  // show the turn's sim of the kind Sim inference asks for: that's the
+  // one this sim continues.
+  infer_turn(state, turn_idx,
+             player_get_rack(game_get_player(
+                 position, game_get_player_on_turn_index(position))),
+             &state->analysis_stop);
+  pthread_mutex_lock(&state->mutex);
+  const bool use_inference =
+      tui_sim_inference_on(state) && entry->inference != NULL;
+  tui_history_entry_show_inference_variant(entry, use_inference);
+  pthread_mutex_unlock(&state->mutex);
+  const bool fresh = entry->sim_results_saved == NULL;
+  const int fresh_plies = state->sim_plies > 0 ? state->sim_plies : SIM_PLIES;
+  const int fresh_cands =
+      state->sim_candidates > 0 ? state->sim_candidates : SIM_CANDIDATES;
+  SimResults *results =
+      fresh ? sim_results_create(0.005) : entry->sim_results_saved;
+  Move played;
+  const bool have_played = fresh && entry_played_move(entry, position, &played);
+  MoveList *candidates =
+      fresh ? sim_candidates_with_played(position, have_played ? &played : NULL,
+                                         fresh_cands)
+            : move_list_from_sim_results(results);
+  if (candidates == NULL || move_list_get_count(candidates) < 2) {
+    pthread_mutex_lock(&state->mutex);
+    tui_game_state_notice(state, fresh ? "nothing to sim: fewer than 2 moves"
+                                       : "resume failed: empty saved sim");
+    pthread_mutex_unlock(&state->mutex);
+    if (candidates != NULL) {
+      move_list_destroy(candidates);
+    }
+    if (fresh) {
+      sim_results_destroy(results);
+    }
+    return;
+  }
+
+  pthread_mutex_lock(&state->mutex);
+  SimResults *live_results = state->sim_results;
+  const int prev_turn_idx = atomic_load(&state->sim_results_turn_idx);
+  state->sim_results = results;
+  state->live_sim_inferred = use_inference;
+  state->analysis_game = position;
+  atomic_store(&state->sim_results_turn_idx, turn_idx);
+  atomic_store(&state->sim_results_active, true);
+  tui_game_state_notice(state, fresh ? "simming - /stop to pause"
+                                     : "resuming sim - /stop to pause");
+  pthread_mutex_unlock(&state->mutex);
+
+  ThreadControl *tc = thread_control_create();
+  thread_control_set_status(tc, THREAD_CONTROL_STATUS_STARTED);
+  Watchdog wd = {
+      .tc = tc, .bot_stop = &state->analysis_stop, .finished = false};
+  pthread_t wd_thread;
+  const bool wd_started =
+      (pthread_create(&wd_thread, NULL, watchdog_main, &wd) == 0);
+
+  const int num_threads = engine_threads(state);
+  SimArgs args = {0};
+  args.num_plies = fresh ? fresh_plies : sim_results_get_num_plies(results);
+  args.move_list = candidates;
+  args.num_plays = move_list_get_count(candidates);
+  args.known_opp_rack = NULL;
+  args.win_pcts = state->win_pcts;
+  args.use_inference = use_inference;
+  args.use_precomputed_inference = true;
+  args.use_census_rollout = state->sim_census;
+  args.use_heat_map = false;
+  args.inference_results = use_inference ? entry->inference : NULL;
+  args.num_threads = num_threads;
+  args.print_interval = 0;
+  args.max_num_display_plays = fresh ? move_list_get_count(candidates)
+                                     : sim_results_get_number_of_plays(results);
+  args.max_num_display_plies = args.num_plies;
+  args.seed = (uint64_t)time(NULL);
+  args.thread_control = tc;
+  args.bai_options.sampling_rule = BAI_SAMPLING_RULE_TOP_TWO_IDS;
+  args.bai_options.threshold = BAI_THRESHOLD_NONE;
+  args.bai_options.sample_limit = (uint64_t)1e15;
+  args.bai_options.sample_minimum = SIM_MIN_PLAY_ITERATIONS;
+  args.bai_options.time_limit_seconds = analysis_time_limit(state);
+  args.bai_options.num_threads = num_threads;
+  args.bai_options.cutoff = 0.005;
+  args.bai_options.parent_worker_thread_index = 0;
+  args.bai_options.arm_avoid_prune = NULL;
+  args.bai_options.num_arm_avoid_prune = 0;
+  args.bai_options.delta = 1.0;
+  args.game = position;
+  args.resume_results = !fresh;
+  sim_args_set_pat_rollout(state, position, &args);
+
+  ErrorStack *sim_err = error_stack_create();
+  simulate_without_ctx(&args, results, sim_err);
+  error_stack_destroy(sim_err);
+
+  atomic_store(&wd.finished, true);
+  if (wd_started) {
+    pthread_join(wd_thread, NULL);
+  }
+  thread_control_destroy(tc);
+
+  pthread_mutex_lock(&state->mutex);
+  atomic_store(&state->sim_results_active, false);
+  if (fresh) {
+    entry->sim_results_saved = results;
+  }
+  // Refresh the entry's snapshot from the accumulated samples
+  // (the capture reads state->sim_results — currently the entry's own
+  // results — and formats against analysis_game).
+  tui_capture_analysis_snapshot(state, &entry->analysis_snapshot);
+  // Sim inference may have flipped while this ran; the other turns
+  // swapped then, and this one swaps now that it has saved.
+  if (entry->inference != NULL) {
+    entry->analysis_inferred = use_inference;
+    tui_history_entry_show_inference_variant(entry,
+                                             tui_sim_inference_on(state));
+  }
+  state->sim_results = live_results;
+  atomic_store(&state->sim_results_turn_idx, prev_turn_idx);
+  char done_notice[64];
+  (void)snprintf(done_notice, sizeof(done_notice),
+                 "sim paused - %llu iterations",
+                 (unsigned long long)sim_results_get_iteration_count(results));
+  tui_game_state_notice(state, done_notice);
+  pthread_mutex_unlock(&state->mutex);
+
+  move_list_destroy(candidates);
+}
+
+// Re-solve a saved endgame turn with the session's warm transposition
+// table. The live endgame snapshot streams to the panel during the
+// solve; the entry's snapshot + saved leaderboard are refreshed when
+// it stops.
+static void analysis_resume_endgame(TuiGameState *state, TuiHistoryEntry *entry,
+                                    int turn_idx, const Game *position,
+                                    const char *start_notice) {
+  pthread_mutex_lock(&state->mutex);
+  tui_game_state_notice(state, start_notice);
+  state->analysis_game = (struct Game *)position;
+  pthread_mutex_unlock(&state->mutex);
+
+  Move *scratch = move_create();
+  run_endgame_on(state, position, turn_idx, analysis_time_limit(state),
+                 &state->analysis_stop, scratch);
+  move_destroy(scratch);
+
+  pthread_mutex_lock(&state->mutex);
+  tui_capture_analysis_snapshot(state, &entry->analysis_snapshot);
+  // Refresh the entry's saved leaderboard from the final snapshot so
+  // candidate previews use the deeper solve (same copy the bot's
+  // finalize path makes).
+  if (state->endgame_snapshot.valid &&
+      state->endgame_snapshot.num_entries > 0 &&
+      state->endgame_snapshot.moves != NULL) {
+    if (entry->endgame_moves_saved != NULL) {
+      free(entry->endgame_moves_saved);
+      entry->endgame_moves_saved = NULL;
+      entry->endgame_moves_saved_count = 0;
+    }
+    const int num_moves = state->endgame_snapshot.num_entries;
+    entry->endgame_moves_saved =
+        (Move *)malloc((size_t)num_moves * sizeof(Move));
+    if (entry->endgame_moves_saved != NULL) {
+      for (int move_idx = 0; move_idx < num_moves; move_idx++) {
+        if (state->endgame_snapshot.moves[move_idx] != NULL) {
+          move_copy(&entry->endgame_moves_saved[move_idx],
+                    state->endgame_snapshot.moves[move_idx]);
+        } else {
+          memset(&entry->endgame_moves_saved[move_idx], 0, sizeof(Move));
+        }
+      }
+      entry->endgame_moves_saved_count = num_moves;
+    }
+  }
+  tui_game_state_notice(state, "endgame analysis saved");
+  pthread_mutex_unlock(&state->mutex);
+}
+
+// Re-solve a saved PEG turn. Like the endgame resume this is a fresh
+// solve (PEG has no incremental resume), streaming into the live
+// panel through the poll; the entry's snapshot is refreshed when it
+// stops.
+static void analysis_resume_peg(TuiGameState *state, TuiHistoryEntry *entry,
+                                int turn_idx, const Game *position,
+                                const char *start_notice) {
+  pthread_mutex_lock(&state->mutex);
+  tui_game_state_notice(state, start_notice);
+  state->analysis_game = (struct Game *)position;
+  pthread_mutex_unlock(&state->mutex);
+
+  Move *scratch = move_create();
+  run_peg_on(state, position, turn_idx, analysis_time_limit(state),
+             &state->analysis_stop, scratch);
+  move_destroy(scratch);
+
+  pthread_mutex_lock(&state->mutex);
+  tui_capture_analysis_snapshot(state, &entry->analysis_snapshot);
+  tui_game_state_notice(state, "peg analysis saved");
+  pthread_mutex_unlock(&state->mutex);
+}
+
+static void *analysis_thread_main(void *arg) {
+  TuiGameState *state = (TuiGameState *)arg;
+
+  pthread_mutex_lock(&state->mutex);
+  const int turn_idx = state->analysis_resume_turn_idx;
+  TuiHistoryEntry *entry = NULL;
+  if (turn_idx >= 0 && turn_idx < state->history_count) {
+    entry = &state->history[turn_idx];
+  }
+  Game *position = NULL;
+  const int action = state->analysis_request;
+  bool is_sim = false;
+  bool is_peg = false;
+  if (entry != NULL && entry->cgp_before[0] != '\0') {
+    is_sim = entry->analysis_snapshot.is_sim;
+    is_peg = entry->analysis_snapshot.is_peg;
+    position = game_duplicate(state->game);
+  }
+  pthread_mutex_unlock(&state->mutex);
+
+  if (position == NULL) {
+    atomic_store(&state->analysis_running, false);
+    return NULL;
+  }
+
+  // Rebuild the position this turn was decided from. Entries are
+  // stable here: nothing appends after game over, and every reset /
+  // teardown path stops this worker first.
+  ErrorStack *err = error_stack_create();
+  game_load_cgp(position, entry->cgp_before, err);
+  const bool position_ok = error_stack_is_empty(err);
+  error_stack_destroy(err);
+  if (!position_ok) {
+    game_destroy(position);
+    pthread_mutex_lock(&state->mutex);
+    tui_game_state_notice(state, "resume failed: bad position snapshot");
+    state->analysis_resume_turn_idx = -1;
+    pthread_mutex_unlock(&state->mutex);
+    atomic_store(&state->analysis_running, false);
+    return NULL;
+  }
+
+  // "/sim" always simulates; "/solve" runs the exact solver the
+  // position calls for; "/resume" continues whatever was saved.
+  const bool endgame = tui_position_effective_bag(position) <= 0;
+  if (endgame) {
+    // A loaded GCG records only the mover's rack; in an endgame the
+    // opponent holds exactly the unseen tiles.
+    const int mover_idx = game_get_player_on_turn_index(position);
+    draw_to_full_rack(position, 1 - mover_idx);
+  }
+  if (action == TUI_ANALYSIS_SOLVE) {
+    if (endgame) {
+      analysis_resume_endgame(state, entry, turn_idx, position,
+                              "solving endgame - /stop to pause");
+    } else {
+      analysis_resume_peg(state, entry, turn_idx, position,
+                          "solving pre-endgame - /stop to pause");
+    }
+  } else if (action == TUI_ANALYSIS_RESUME && is_peg) {
+    analysis_resume_peg(state, entry, turn_idx, position,
+                        "resuming peg solve - /stop to pause");
+  } else if (action == TUI_ANALYSIS_SIM || is_sim) {
+    analysis_resume_sim(state, entry, turn_idx, position);
+  } else {
+    analysis_resume_endgame(state, entry, turn_idx, position,
+                            "resuming endgame solve - /stop to pause");
+  }
+
+  pthread_mutex_lock(&state->mutex);
+  state->analysis_game = NULL;
+  state->analysis_resume_turn_idx = -1;
+  atomic_fetch_add(&state->render_version, 1);
+  pthread_mutex_unlock(&state->mutex);
+  game_destroy(position);
+  atomic_store(&state->analysis_running, false);
+  return NULL;
+}
+
+// Copies a StringBuilder's contents into `out` (truncating) and frees it.
+static void take_string(StringBuilder *sb, char *out, size_t out_size) {
+  size_t len = 0;
+  char *dump = string_builder_dump(sb, &len);
+  out[0] = '\0';
+  if (dump != NULL) {
+    const size_t copy = len < out_size ? len : out_size - 1;
+    memcpy(out, dump, copy);
+    out[copy] = '\0';
+    free(dump);
+  }
+  string_builder_destroy(sb);
+}
+
+// Whether `eq` is a real value rather than a sentinel (a pass's
+// EQUITY_PASS_VALUE, say), which equity_to_double refuses.
+static bool equity_has_value(Equity eq) { return eq > EQUITY_PASS_VALUE; }
+
+// Writes a kibitz row's adjustment cell: the amount with one decimal, or
+// nothing where that would read 0.0.
+static void format_adjustment(char *out, size_t out_size, Equity amount) {
+  (void)snprintf(out, out_size, "%+.1f", equity_to_double(amount));
+  if (strcmp(out, "+0.0") == 0 || strcmp(out, "-0.0") == 0) {
+    out[0] = '\0';
+  }
+}
+
+// Finds `move` in `list` and writes the equity it has there. False when the
+// list does not hold the move.
+static bool move_list_find_equity(const MoveList *list, const Move *move,
+                                  Equity *equity) {
+  const int count = move_list_get_count(list);
+  for (int move_idx = 0; move_idx < count; move_idx++) {
+    const Move *candidate = move_list_get_move(list, move_idx);
+    if (compare_moves_without_equity(candidate, move, true) == -1) {
+      *equity = move_get_equity(candidate);
+      return true;
+    }
+  }
+  return false;
+}
+
+// Fills the pat cells of a kibitz's rows, rows[row_idx] being the row of
+// moves' move row_idx: the move's equity less the equity the same position
+// gives it with PAT off. The cells stay empty when the player on turn has
+// no PAT weights, and for a move without a real equity.
+static void kibitz_fill_pat(const Game *position, const MoveList *moves,
+                            AnalysisRow *rows, int num_rows) {
+  const int on_turn = game_get_player_on_turn_index(position);
+  if (player_get_pat(game_get_player(position, on_turn)) == NULL) {
+    return;
+  }
+  int capacity = KIBITZ_MAX_MOVES;
+  bool has_every_row = false;
+  while (!has_every_row) {
+    capacity *= KIBITZ_PLAIN_LIST_GROWTH;
+    MoveList *plain_moves = move_list_create(capacity);
+    const MoveGenArgs args = {
+        .game = position,
+        .move_record_type = MOVE_RECORD_ALL,
+        .move_sort_type = MOVE_SORT_EQUITY,
+        .override_kwg = NULL,
+        .eq_margin_movegen = 0,
+        .target_equity = EQUITY_MAX_VALUE,
+        .move_list = plain_moves,
+        .tiles_played_bv = NULL,
+        .initial_tiles_bv = 0,
+        .disable_pat = true,
+    };
+    generate_moves(&args);
+    // A list with room to spare holds every move of the position.
+    has_every_row = move_list_get_count(plain_moves) < capacity;
+    int rows_not_found = 0;
+    for (int row_idx = 0; row_idx < num_rows; row_idx++) {
+      const Move *move = move_list_get_move(moves, row_idx);
+      const Equity equity = move_get_equity(move);
+      Equity plain_equity = 0;
+      if (!equity_has_value(equity)) {
+        continue;
+      }
+      if (move_list_find_equity(plain_moves, move, &plain_equity)) {
+        format_adjustment(rows[row_idx].pat, sizeof(rows[row_idx].pat),
+                          equity - plain_equity);
+      } else {
+        rows_not_found++;
+      }
+    }
+    has_every_row = has_every_row || rows_not_found == 0;
+    move_list_destroy(plain_moves);
+  }
+}
+
+// Fills the peg cells of a kibitz's rows, rows[row_idx] being the row of
+// moves' move row_idx: the adjustment in a tile placement's equity, which
+// the pre-endgame adjustment table of the player on turn gives by the tiles
+// in the real bag and the tiles played.
+static void kibitz_fill_peg(const Game *position, const MoveList *moves,
+                            AnalysisRow *rows, int num_rows) {
+  const int on_turn = game_get_player_on_turn_index(position);
+  const PegAdjust *peg_adjust =
+      player_get_peg_adjust(game_get_player(position, on_turn));
+  const int tiles_in_bag = game_get_real_bag_size(position);
+  for (int row_idx = 0; row_idx < num_rows; row_idx++) {
+    const Move *move = move_list_get_move(moves, row_idx);
+    if (move_get_type(move) == GAME_EVENT_TILE_PLACEMENT_MOVE) {
+      format_adjustment(
+          rows[row_idx].peg, sizeof(rows[row_idx].peg),
+          peg_adjust_get_placement_value(peg_adjust, tiles_in_bag,
+                                         move_get_tiles_played(move)));
+    }
+  }
+}
+
+bool tui_analysis_kibitz(TuiGameState *state, int turn_idx) {
+  const char *reason =
+      tui_analysis_unavailable_reason(state, turn_idx, TUI_ANALYSIS_KIBITZ);
+  if (reason != NULL) {
+    tui_game_state_notice(state, reason);
+    return false;
+  }
+  TuiHistoryEntry *entry = &state->history[turn_idx];
+  Game *position = game_duplicate(state->game);
+  ErrorStack *err = error_stack_create();
+  game_load_cgp(position, entry->cgp_before, err);
+  const bool position_ok = error_stack_is_empty(err);
+  error_stack_destroy(err);
+  MoveList *moves =
+      position_ok ? generate_top_candidates(position, KIBITZ_MAX_MOVES) : NULL;
+  if (moves == NULL) {
+    game_destroy(position);
+    tui_game_state_notice(state, "kibitz failed: no moves for this position");
+    return false;
+  }
+  move_list_sort_moves(moves);
+
+  TuiAnalysisSnapshot *snap = &entry->analysis_snapshot;
+  memset(snap, 0, sizeof(*snap));
+  const int on_turn = game_get_player_on_turn_index(position);
+  const Rack *rack = player_get_rack(game_get_player(position, on_turn));
+  const Board *board = game_get_board(position);
+  const int count = move_list_get_count(moves);
+  // The top ranked move with a real equity (a sentinel, like a pass's,
+  // sorts last).
+  double best_equity = 0.0;
+  bool have_best = false;
+  for (int move_idx = 0; move_idx < count && !have_best; move_idx++) {
+    const Equity eq = move_get_equity(move_list_get_move(moves, move_idx));
+    if (equity_has_value(eq)) {
+      best_equity = equity_to_double(eq);
+      have_best = true;
+    }
+  }
+  for (int move_idx = 0; move_idx < count && move_idx < ANALYSIS_ROW_CAP;
+       move_idx++) {
+    const Move *move = move_list_get_move(moves, move_idx);
+    AnalysisRow *row = &snap->rows[move_idx];
+    StringBuilder *msb = string_builder_create();
+    string_builder_add_move(msb, board, move, state->ld, false);
+    take_string(msb, row->move, sizeof(row->move));
+    StringBuilder *lsb = string_builder_create();
+    string_builder_add_move_leave(lsb, rack, move, state->ld);
+    take_string(lsb, row->leave, sizeof(row->leave));
+    const Equity score = move_get_score(move);
+    row->score_value = equity_has_value(score) ? equity_to_int(score) : 0;
+    (void)snprintf(row->score, sizeof(row->score), "%d", row->score_value);
+    // A move whose equity is a sentinel shows no equity.
+    const Equity equity = move_get_equity(move);
+    const bool has_equity = equity_has_value(equity);
+    row->secondary_value = has_equity ? equity_to_double(equity) : 0.0;
+    if (has_equity) {
+      (void)snprintf(row->secondary, sizeof(row->secondary), "%+.1f",
+                     row->secondary_value);
+    }
+    row->candidate_player_idx = on_turn;
+    row->valid = true;
+    if (entry->loaded_move != NULL && snap->static_played_rank == 0 &&
+        compare_moves_without_equity(move, entry->loaded_move, true) == -1) {
+      snap->static_played_rank = move_idx + 1;
+      snap->static_played_equity_loss =
+          has_equity && have_best ? best_equity - row->secondary_value : 0.0;
+    }
+  }
+  snap->num_rows = count < ANALYSIS_ROW_CAP ? count : ANALYSIS_ROW_CAP;
+  kibitz_fill_pat(position, moves, snap->rows, snap->num_rows);
+  kibitz_fill_peg(position, moves, snap->rows, snap->num_rows);
+  snap->is_static = true;
+  snap->valid = true;
+  // Keep the moves for the board preview, in row order.
+  free(entry->static_moves_saved);
+  entry->static_moves_saved =
+      malloc_or_die(sizeof(Move) * (size_t)snap->num_rows);
+  for (int move_idx = 0; move_idx < snap->num_rows; move_idx++) {
+    move_copy(&entry->static_moves_saved[move_idx],
+              move_list_get_move(moves, move_idx));
+  }
+  entry->static_moves_saved_count = snap->num_rows;
+  move_list_destroy(moves);
+  game_destroy(position);
+  atomic_fetch_add(&state->render_version, 1);
+  return true;
+}
+
+const char *tui_analysis_unavailable_reason(const TuiGameState *state,
+                                            int turn_idx,
+                                            TuiAnalysisAction action) {
+  const bool running = atomic_load(&state->analysis_running);
+  if (action == TUI_ANALYSIS_STOP) {
+    return running ? NULL : "no analysis is running";
+  }
+  const bool play_over = tui_game_state_play_over(state);
+  if (action == TUI_ANALYSIS_RESUME && !play_over) {
+    return "available once the game is over";
+  }
+  if ((action == TUI_ANALYSIS_SIM || action == TUI_ANALYSIS_SOLVE) &&
+      !play_over && state->bot_started) {
+    return "not while a game against the computer is in progress";
+  }
+  if (running) {
+    return "an analysis is already running - stop it first";
+  }
+  if (turn_idx < 0 || turn_idx >= state->history_count) {
+    return "select a turn in History first";
+  }
+  const TuiHistoryEntry *entry = &state->history[turn_idx];
+  // A turn being annotated can be analyzed once its rack is entered,
+  // before its play is: the history replay saves its position then.
+  if (entry->pending && state->app_mode == TUI_APP_MODE_ANNOTATE &&
+      entry->rack_str[0] == '\0') {
+    return "enter this turn's rack first";
+  }
+  if ((entry->pending && state->app_mode != TUI_APP_MODE_ANNOTATE) ||
+      entry->cgp_before[0] == '\0') {
+    return "this turn has no position to analyze";
+  }
+  if (action == TUI_ANALYSIS_SOLVE) {
+    if (!entry->bag_before_known || entry->bag_before > PEG_MAX_BAG) {
+      return "solve is for endgames and pre-endgames - use Simulate";
+    }
+  }
+  if (action == TUI_ANALYSIS_SIM && entry->bag_before_known &&
+      entry->bag_before <= 0) {
+    return "the bag is empty - use Solve";
+  }
+  if (action == TUI_ANALYSIS_SIM) {
+    const char *missing = tui_game_state_win_pct_missing(state);
+    if (missing != NULL) {
+      return missing;
+    }
+  }
+  if (action == TUI_ANALYSIS_RESUME) {
+    if (!entry->analysis_snapshot.valid || entry->analysis_snapshot.is_static) {
+      return "nothing saved to resume - use Simulate";
+    }
+    if (entry->analysis_snapshot.is_sim && entry->sim_results_saved == NULL) {
+      return "no saved sim for this turn";
+    }
+    if (entry->analysis_snapshot.is_sim) {
+      return tui_game_state_win_pct_missing(state);
+    }
+  }
+  return NULL;
+}
+
+bool tui_analysis_worker_start(TuiGameState *state, int turn_idx,
+                               TuiAnalysisAction action) {
+  if (state == NULL) {
+    return false;
+  }
+  const char *reason = tui_analysis_unavailable_reason(state, turn_idx, action);
+  if (reason != NULL) {
+    tui_game_state_notice(state, reason);
+    return false;
+  }
+  // Reap a previously finished worker before reusing the handle.
+  if (state->analysis_started) {
+    pthread_join(state->analysis_thread, NULL);
+    state->analysis_started = false;
+  }
+  atomic_store(&state->analysis_stop, false);
+  state->analysis_resume_turn_idx = turn_idx;
+  state->analysis_request = (int)action;
+  atomic_store(&state->analysis_running, true);
+  if (pthread_create(&state->analysis_thread, NULL, analysis_thread_main,
+                     state) != 0) {
+    atomic_store(&state->analysis_running, false);
+    state->analysis_resume_turn_idx = -1;
+    tui_game_state_notice(state, "failed to start the analysis worker");
+    return false;
+  }
+  state->analysis_started = true;
+  return true;
+}
+
+void tui_analysis_worker_stop_and_join(TuiGameState *state) {
+  if (state == NULL || !state->analysis_started) {
+    return;
+  }
+  atomic_store(&state->analysis_stop, true);
+  pthread_join(state->analysis_thread, NULL);
+  state->analysis_started = false;
+  atomic_store(&state->analysis_stop, false);
+}
+
+void tui_stop_workers(TuiGameState *state) {
+  tui_analysis_worker_stop_and_join(state);
+  if (state->bot_started) {
+    atomic_store(&state->bot_stop, true);
+    pthread_join(state->bot_thread, NULL);
+    state->bot_started = false;
+    atomic_store(&state->bot_stop, false);
+  }
+}

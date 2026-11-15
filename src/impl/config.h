@@ -48,7 +48,11 @@ typedef struct ConfigArgs {
   // -wmp, -rit and -wit default to auto: each table is used when this
   // machine has the disk and memory for it. The magpie executable and the
   // library's magpie_create() do; tests, browser games and contribute's task
-  // configurations state what they use, with use_wmp for the wordmap.
+  // configurations state what they use, with use_wmp for the wordmap. So does
+  // -scensus, which steers sims' rollouts when this machine has the memory
+  // and the rollouts pay for the census's build, and so does -pegadjust,
+  // which gives each player its lexicon's own pre-endgame adjustments where
+  // the data has them.
   bool auto_tables;
 } ConfigArgs;
 
@@ -121,10 +125,13 @@ bool config_contribute_validate_common(const JsonValue *request,
 // those entry points, which ignore the per-player settings a request applies.
 // The first half of analysing one opening rack: the empty board, the rack
 // drawn, and the moves to rank generated -- every play up to num_plays for a
-// simulating player, whatever its recorder. False, with the error pushed, on
-// an unusable rack.
+// simulating player, whatever its recorder. With `candidates` (a JSON array
+// of move strings, or NULL for none), exactly those moves instead, validated
+// against the rack and the lexicon: no move generation. False, with the error
+// pushed, on an unusable rack or candidate.
 bool config_contribute_generate_for_rack(Config *config, const char *rack_str,
                                          uint64_t seed, bool simming,
+                                         const JsonValue *candidates,
                                          ErrorStack *error_stack);
 
 void config_contribute_use_player_settings_for_analysis(Config *config,
@@ -198,8 +205,6 @@ bool config_get_save_settings(const Config *config);
 // Whether a rack info table this config loads is memory-mapped (-ritmmap).
 bool config_get_use_mmap_for_rit(const Config *config);
 bool config_get_fg_required(const Config *config);
-bool config_get_loaded_settings(const Config *config);
-void config_set_loaded_settings(Config *config, const bool value);
 double config_get_tt_fraction_of_mem(const Config *config);
 double config_get_utility_w_winpct(const Config *config);
 double config_get_utility_w_spread(const Config *config);
@@ -276,20 +281,33 @@ void config_parse_gcg_string(Config *config, const char *gcg_string,
                              GameHistory *game_history,
                              ErrorStack *error_stack);
 // Settings
+// Every setting, as a set command that restores them.
 void config_add_settings_to_string_builder(const Config *config,
                                            StringBuilder *sb);
-// Whether `cmd` sets savesettings to true. It is only parsed, not applied,
+// Only the settings a settings file keeps: those that hold for a whole game,
+// such as the lexica, the letter distribution and the display settings, and
+// not those a command tunes, such as plies and endgame plies.
+void config_add_saved_settings_to_string_builder(const Config *config,
+                                                 StringBuilder *sb);
+// Whether `cmd` sets savesettings to false. It is only parsed, not applied,
 // so a malformed `cmd` is reported when it is run, not here.
-bool config_command_turns_on_save_settings(Config *config, const char *cmd);
-// Writes config's current settings to config_get_settings_filename(config)
-// (settings.txt by default), the same file the REPL loop keeps in sync after
-// every command. No-op if config_get_save_settings(config) is false, which it
-// is unless savesettings was set to true.
+bool config_command_turns_off_save_settings(Config *config, const char *cmd);
+// Writes config's saved settings (see
+// config_add_saved_settings_to_string_builder) to
+// config_get_settings_filename(config) (settings.txt by default), the same
+// file the REPL loop keeps in sync after every command. No-op if
+// config_get_save_settings(config) is false.
 void save_config_settings(const Config *config, ErrorStack *error_stack);
-// A line of a saved settings file, with the settings dropped whose defaults
-// changed after the version the file records with -fileversion (1 when it
-// records none). The caller frees the result.
-char *config_upgrade_settings_line(const Config *config, const char *line);
+// Loads the contents of a saved settings file. Each setting is loaded on its
+// own, except the letter distribution, lexica, leaves, PAT weights and
+// pre-endgame adjustments, which are loaded together after a trial in a
+// scratch config, so a value that fails to load loses only itself (or its
+// lexicon group) and leaves the rest applied. A setting the file does not
+// keep, or whose default changed after the file's -fileversion, is dropped.
+// Each unknown setting, line that is not a set command, and setting that
+// failed to load is dropped and described in `warnings`.
+void config_load_settings(Config *config, const char *settings_string,
+                          StringList *warnings);
 // The Config contribute's tasks run in, sharing the caller's thread control
 // and never saving settings, so the caller's session and settings file are
 // left as they were; and its destruction, which leaves the thread control to

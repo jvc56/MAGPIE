@@ -335,10 +335,10 @@ void endgame_solve(EndgameCtx **ctx, const EndgameArgs *endgame_args,
 // (read-only) root inputs, and a MoveGen cache slot assigned on demand by
 // get_movegen(); it cooperates with the running workers purely through the
 // shared TT and self-exits when the search completes. Returns true if a worker
-// was spawned, false if the injection window is shut or the max_workers ceiling
-// is reached. Only valid against a ctx whose current solve was launched with
-// max_workers enabling growth (max_workers > effective thread count after reset
-// normalization).
+// was spawned, false if the injection window is shut, the solve has been
+// interrupted, or the max_workers ceiling is reached. Only valid against a ctx
+// whose current solve was launched with max_workers enabling growth
+// (max_workers > effective thread count after reset normalization).
 bool endgame_add_worker(EndgameCtx *ctx);
 
 // Number of worker threads currently live in this solve (main worker + injected

@@ -48,7 +48,7 @@ source changes and on each target architecture. Override `PGO_CC`,
 
 ## CI Checks (the hard part)
 
-CI runs on every push. These must all pass: **cppcheck**, **clang-tidy**, **clang-format**, **circular-dependencies**, **portability**, **windows-cross-compile**, **unit-tests**, **wasm-tests**.
+CI runs on pull requests into main and on pushes to main; a pull request stacked on another branch runs once it targets main. These must all pass: **cppcheck**, **clang-tidy**, **clang-format**, **circular-dependencies**, **portability**, **windows-cross-compile**, **unit-tests**, **wasm-tests**.
 
 CI uses **cppcheck 2.17.1**, **clang-tidy-18**, **clang-format-20** (Ubuntu 24.04). Local versions will differ.
 

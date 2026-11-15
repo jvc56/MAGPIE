@@ -1,0 +1,398 @@
+#include "render_rack.h"
+
+#include "../src/def/board_defs.h"
+#include "../src/def/letter_distribution_defs.h"
+#include "../src/def/rack_defs.h"
+#include "../src/ent/equity.h"
+#include "../src/ent/letter_distribution.h"
+#include "../src/ent/rack.h"
+#include "frame_dump.h"
+#include "game_state.h"
+#include "move_entry.h"
+#include "pixel_compose.h"
+#include "render_common.h"
+#include "render_hit_test.h"
+#include "render_layout.h"
+#include "render_planes.h"
+#include "render_view.h"
+#include "theme.h"
+#include "tile_input.h"
+#include "tui_ui_types.h"
+#include <notcurses/notcurses.h>
+#include <stdatomic.h>
+#include <stdbool.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+// ── Rack panel ────────────────────────────────────────────────────────────
+//
+// Rack tiles scale alongside the board: at scale=2 we composite an RGBA
+// strip via FreeType (same path as the board); at scale=1 we use
+// fullwidth Unicode glyphs in cells; at scale=0 we collapse to single
+// ASCII chars. The panel box gains one row at scale=2 so the 2-row
+// tiles fit.
+
+// Per-tile state for the rack panel. Same idea as the board tile
+// cache: one small pixel plane per rack slot, re-blit only when
+// the letter at that slot changes. RACK_SIZE = 7 in standard
+// games. When the bot finalizes a move and draws fresh tiles,
+// only the slots that actually changed letters re-emit instead
+// of the whole rack strip thrashing.
+typedef struct {
+  int letter;
+  int player_idx;
+  int score;
+  int score_subscripts;
+  unsigned cdy;
+  unsigned cdx;
+  int scale;
+  // Last screen position the plane was created at. Pixel-mode
+  // terminals don't move sprixel pixels when ncplane_move_yx is
+  // called; if our slot needs to shift (rack count changed →
+  // start_col shifted), we have to destroy + recreate the plane
+  // so the terminal drops the old sprixel and rebuilds at the
+  // new position. Otherwise tiles can end up at mismatched y
+  // coords (the "ghost Q is misplaced" bug).
+  int screen_top;
+  int screen_left;
+  bool antialias;
+  bool ghost;
+  bool valid;
+} RackTileCache;
+static RackTileCache rack_tile_cache[RACK_SIZE];
+static struct ncplane *rack_tile_planes[RACK_SIZE];
+void invalidate_rack_tile_planes(void) {
+  for (int i = 0; i < RACK_SIZE; i++) {
+    if (rack_tile_planes[i] != NULL) {
+      tui_plane_destroy(rack_tile_planes[i]);
+      rack_tile_planes[i] = NULL;
+    }
+    rack_tile_cache[i].valid = false;
+  }
+}
+// Rack-panel tile blits since start (NOT included in the per-frame
+// board blits count) — surfaces a rack cache that re-composes every
+// frame.
+static _Atomic unsigned long g_rack_blits;
+unsigned long tui_debug_rack_blits(void) { return atomic_load(&g_rack_blits); }
+static BlitCache rack_pixel_cache;
+
+// Whose rack the Rack panel shows: the human's throughout a game against
+// the computer (the computer's stays hidden, and the human keeps seeing
+// their tiles while the computer thinks); otherwise the on-turn player's,
+// following the History cursor.
+static int rack_panel_player(const TuiGameState *state) {
+  if (state->app_mode == TUI_APP_MODE_PLAY_VS_COMPUTER &&
+      !tui_game_state_play_over(state)) {
+    return state->human_player_idx;
+  }
+  return pick_render_on_turn(state);
+}
+static void render_rack_panel_pixel(struct ncplane *plane, const Theme *theme,
+                                    const TuiGameState *state, const Layout *L,
+                                    int start_col, int tile_count) {
+  TuiGridPlanes *planes = tui_grid_planes();
+  struct notcurses *nc = ncplane_notcurses(plane);
+  if (nc == NULL || !notcurses_canpixel(nc) || state->glyph_cache == NULL) {
+    return;
+  }
+  // When the rack drops to 0 tiles (e.g. P2 just went out), fall
+  // through to the cleanup loop below so the previously-rendered
+  // pixel planes get destroyed instead of sitting on screen
+  // showing stale DI/etc tiles.
+  if (tile_count <= 0) {
+    for (int i = 0; i < RACK_SIZE; i++) {
+      if (rack_tile_planes[i] != NULL) {
+        tui_plane_destroy(rack_tile_planes[i]);
+        rack_tile_planes[i] = NULL;
+        rack_tile_cache[i].valid = false;
+      }
+    }
+    return;
+  }
+  const int cell_w = L->board_cell_w; // 4
+  const int cell_h = L->board_cell_h; // 2
+  // Probe cell-pixel geometry off the parent plane.
+  unsigned pxy = 0;
+  unsigned pxx = 0;
+  unsigned cdy = 0;
+  unsigned cdx = 0;
+  unsigned mby = 0;
+  unsigned mbx = 0;
+  ncplane_pixel_geom(plane, &pxy, &pxx, &cdy, &cdx, &mby, &mbx);
+  if (cdy == 0 || cdx == 0) {
+    return;
+  }
+  const int tile_w = (int)cdx * cell_w;
+  const int tile_h = (int)cdy * cell_h;
+  if (tile_w <= 0 || tile_h <= 0) {
+    return;
+  }
+
+  // Expand the rack into a per-slot letter array so we can cache
+  // each slot independently. tile_count comes from the caller and
+  // is the visible rack length. Cursor-aware: the on-turn player
+  // is resolved through pick_render_on_turn so navigating to a
+  // committed turn rewinds the rack panel to that turn's player
+  // + rack.
+  const int player_idx = rack_panel_player(state);
+  MachineLetter slot_letters[RACK_SIZE];
+  for (int i = 0; i < RACK_SIZE; i++) {
+    slot_letters[i] = ALPHABET_EMPTY_SQUARE_MARKER;
+  }
+  bool slot_ghost[RACK_SIZE];
+  for (int i = 0; i < RACK_SIZE; i++) {
+    slot_ghost[i] = false;
+  }
+  {
+    const Rack *rack = pick_render_rack(state, player_idx);
+    const int slot_max = tile_count < RACK_SIZE ? tile_count : RACK_SIZE;
+    const int slot_idx = sort_rack_for_display(
+        rack, state->ld, state->rack_sort, slot_letters, slot_max);
+    compute_rack_ghost_mask(state, slot_letters, slot_idx, slot_ghost);
+    for (int i = slot_idx; i < RACK_SIZE; i++) {
+      slot_ghost[i] = false;
+    }
+  }
+
+  // Drop any cached tile plane beyond the visible rack length so
+  // shrinking rack (end of game) frees its planes.
+  for (int i = tile_count; i < RACK_SIZE; i++) {
+    if (rack_tile_planes[i] != NULL) {
+      tui_plane_destroy(rack_tile_planes[i]);
+      rack_tile_planes[i] = NULL;
+      rack_tile_cache[i].valid = false;
+    }
+  }
+
+  for (int i = 0; i < tile_count && i < RACK_SIZE; i++) {
+    const MachineLetter ml = slot_letters[i];
+    const bool ghost = slot_ghost[i];
+    RackTileCache *rc = &rack_tile_cache[i];
+    const int tile_score =
+        (ml == 0) ? 0 : equity_to_int(ld_get_score(state->ld, ml));
+    const int screen_top = L->rack_top + 1;
+    const int screen_left = start_col + i * cell_w;
+    // Pixel-mode terminals don't actually move sprixel pixels when
+    // ncplane_move_yx is called — they only update notcurses'
+    // internal plane state. If our slot needs to shift (because
+    // the rack count changed and the rack is re-centered on the
+    // board), the old sprixel content sits at the previous y/x
+    // until we destroy + recreate the plane. So: any time the
+    // cached screen position doesn't match the current one,
+    // tear the plane down so we start fresh. The cache only
+    // counts as "hit" when content AND position match.
+    const bool same_pos = rc->valid && rack_tile_planes[i] != NULL &&
+                          rc->screen_top == screen_top &&
+                          rc->screen_left == screen_left;
+    if (!same_pos && rack_tile_planes[i] != NULL) {
+      tui_plane_destroy(rack_tile_planes[i]);
+      rack_tile_planes[i] = NULL;
+      rc->valid = false;
+    }
+    if (rc->valid && rc->letter == (int)ml && rc->player_idx == player_idx &&
+        rc->score == tile_score && rc->antialias == state->antialias &&
+        rc->ghost == ghost &&
+        rc->score_subscripts == (int)state->score_subscripts &&
+        rc->cdy == cdy && rc->cdx == cdx && rc->scale == L->scale &&
+        rack_tile_planes[i] != NULL) {
+      continue;
+    }
+    if (rack_tile_planes[i] == NULL) {
+      ncplane_options opts = {0};
+      opts.y = screen_top;
+      opts.x = screen_left;
+      opts.rows = (unsigned)cell_h;
+      opts.cols = (unsigned)cell_w;
+      opts.name = "rack_tile";
+      rack_tile_planes[i] = ncplane_create(plane, &opts);
+      if (rack_tile_planes[i] == NULL) {
+        continue;
+      }
+    }
+    uint8_t *buf = compose_rack_tile_pixels(
+        ml, player_idx, ghost, tile_w, tile_h, state->glyph_cache,
+        state->glyph_cache_sub, state->score_subscripts, state->antialias,
+        theme, state->ld);
+    if (buf == NULL) {
+      continue;
+    }
+    struct ncvisual_options vopts = {0};
+    vopts.n = rack_tile_planes[i];
+    vopts.blitter = NCBLIT_PIXEL;
+    vopts.leny = (unsigned)tile_h;
+    vopts.lenx = (unsigned)tile_w;
+    ncblit_rgba(buf, tile_w * 4, &vopts);
+    atomic_fetch_add(&g_rack_blits, 1);
+    tui_frame_dump_capture(vopts.n, buf, (int)vopts.lenx, (int)vopts.leny);
+    free(buf);
+    rc->letter = (int)ml;
+    rc->player_idx = player_idx;
+    rc->score = tile_score;
+    rc->antialias = state->antialias;
+    rc->ghost = ghost;
+    rc->score_subscripts = (int)state->score_subscripts;
+    rc->cdy = cdy;
+    rc->cdx = cdx;
+    rc->scale = L->scale;
+    rc->screen_top = screen_top;
+    rc->screen_left = screen_left;
+    rc->valid = true;
+  }
+  // The legacy single-plane rack_pixel_cache is unused now; clear
+  // it so a future regression that re-enables it starts cold
+  // rather than reusing stale state.
+  rack_pixel_cache.valid = false;
+  if (planes->rack != NULL) {
+    tui_plane_destroy(planes->rack);
+    planes->rack = NULL;
+  }
+}
+// The user's Exchange and Pass buttons, right-aligned on the Rack panel's
+// top border, shown on their turn against the computer. Exchange is
+// dimmed when the bag is too low to exchange; clicking it says so.
+static void draw_rack_buttons(struct ncplane *plane, const Theme *theme,
+                              const TuiGameState *state, const Layout *L) {
+  static const char exchange_label[] = " Exchange ";
+  static const char pass_label[] = " Pass ";
+  TuiHitMaps *hit = tui_hit_maps();
+  hit->rack_buttons_row = -1;
+  if (tui_pvc_move_unavailable_reason(state, false) != NULL) {
+    return;
+  }
+  const bool can_exchange =
+      tui_pvc_move_unavailable_reason(state, true) == NULL;
+  // Two cells in from the corner, a cell apart, clear of the title
+  // ("[2] Rack (7)" ends by column 14).
+  const int pass_right = L->board_width - 3;
+  const int pass_left = pass_right - (int)strlen(pass_label) + 1;
+  const int exchange_right = pass_left - 2;
+  const int exchange_left = exchange_right - (int)strlen(exchange_label) + 1;
+  if (exchange_left < 15) {
+    return;
+  }
+  theme_apply_bg(plane, theme->modal_bg);
+  theme_apply_fg(plane, can_exchange ? theme->modal_fg : theme->dim_fg);
+  ncplane_putstr_yx(plane, L->rack_top, exchange_left, exchange_label);
+  theme_apply_fg(plane, theme->modal_fg);
+  ncplane_putstr_yx(plane, L->rack_top, pass_left, pass_label);
+  theme_apply_bg(plane, theme->bg);
+  hit->rack_buttons_row = L->rack_top;
+  hit->rack_exchange_left = exchange_left;
+  hit->rack_exchange_right = exchange_right;
+  hit->rack_pass_left = pass_left;
+  hit->rack_pass_right = pass_right;
+}
+
+void render_rack_panel(struct ncplane *plane, const Theme *theme,
+                       const TuiGameState *state, const Layout *L) {
+  TuiGridPlanes *planes = tui_grid_planes();
+  const int box_height = L->rack_bottom - L->rack_top + 1;
+  // Follow the History cursor: when parked on a committed turn we
+  // show that turn's player + rack, not the live game's on-turn
+  // player. pick_render_rack falls through to live state when the
+  // cursor is on the label or a pending entry.
+  const int player_idx = rack_panel_player(state);
+  const Rack *rack = pick_render_rack(state, player_idx);
+  const bool rack_focused = state->focused_panel == TUI_FOCUS_RACK;
+  if (rack == NULL) {
+    return;
+  }
+  char title[32];
+  (void)snprintf(title, sizeof(title), "Rack (%d)",
+                 rack_get_total_letters(rack));
+  draw_box_styled(plane, theme, L->rack_top, 0, box_height, L->board_width,
+                  title, TUI_FOCUS_RACK, rack_focused);
+  draw_rack_buttons(plane, theme, state, L);
+  const LetterDistribution *ld = state->ld;
+
+  const int cell_w = L->board_cell_w;
+  const int total_letters = rack_get_total_letters(rack);
+  const int rack_width = total_letters * cell_w;
+  // Align the rack's center column with the board's middle column
+  // (H8 in standard 15×15), not the rack panel's interior center.
+  // Board cells span [CELL_COL_BASE, CELL_COL_BASE + BOARD_DIM*cell_w),
+  // so the midpoint is CELL_COL_BASE + (BOARD_DIM*cell_w)/2. Centering
+  // on the panel made the rack drift relative to the board because the
+  // panel box starts at col 0 (not CELL_COL_BASE) — visibly off by 2
+  // cols at fullwidth.
+  const int board_center = CELL_COL_BASE + (BOARD_DIM * cell_w) / 2;
+  int start_col = board_center - rack_width / 2;
+  if (start_col < 1) {
+    start_col = 1;
+  }
+
+  // Idle / pre-game state: rack hasn't been drawn yet. Print a
+  // single dim placeholder centered in the panel interior. The 2x
+  // pixel path still gets called below so any leftover rack pixel
+  // planes from a prior game get destroyed. At 2x the rack interior
+  // isn't erased between frames (that would re-emit the tile
+  // sprixels), so once letters arrive, blank the placeholder's cells
+  // or its text shows between the tiles.
+  const char *msg = "(no rack specified)";
+  const int msg_len = (int)strlen(msg);
+  const int msg_col = 1 + (L->board_width - 2 - msg_len) / 2;
+  static bool placeholder_shown = false;
+  theme_apply_bg(plane, theme->bg);
+  if (total_letters == 0) {
+    theme_apply_fg(plane, theme->dim_fg);
+    ncplane_putstr_yx(plane, L->rack_top + 1, msg_col, msg);
+    placeholder_shown = true;
+  } else if (placeholder_shown) {
+    for (int col = msg_col; col < msg_col + msg_len; col++) {
+      ncplane_putstr_yx(plane, L->rack_top + 1, col, " ");
+    }
+    placeholder_shown = false;
+  }
+
+  if (L->scale >= 2 && state->glyph_cache != NULL) {
+    render_rack_panel_pixel(plane, theme, state, L, start_col, total_letters);
+    return;
+  }
+
+  // Drop the 2x-only rack pixel plane if we're not using it — stale
+  // pixel content otherwise sits on top of the text-mode rack.
+  if (planes->rack != NULL) {
+    tui_plane_destroy(planes->rack);
+    planes->rack = NULL;
+    rack_pixel_cache.valid = false;
+  }
+
+  // Cell-text rack: row sits one below the box top. Halfwidth uses
+  // single-char glyphs, fullwidth uses ld_ml_to_alt_hl.
+  const bool halfwidth = (cell_w == 1);
+  // Build slot_letters in the user's chosen display order, then
+  // compute the ghost mask against it so previewed-move tiles
+  // render gray in the same positions the pixel renderer uses.
+  MachineLetter slot_letters[RACK_SIZE];
+  const int slot_idx = sort_rack_for_display(rack, ld, state->rack_sort,
+                                             slot_letters, RACK_SIZE);
+  bool slot_ghost[RACK_SIZE];
+  compute_rack_ghost_mask(state, slot_letters, slot_idx, slot_ghost);
+  const ThemeRgb ghost_fg = {.r = 102, .g = 102, .b = 102};
+  int col_offset = 0;
+  for (int i = 0; i < slot_idx; i++) {
+    const MachineLetter ml = slot_letters[i];
+    {
+      const bool is_ghost = slot_ghost[i];
+      if (is_ghost) {
+        theme_apply_fg(plane, ghost_fg);
+        theme_apply_bg(plane, theme->bg);
+      } else {
+        theme_apply_fg(plane, player_idx == 1 ? theme->rack_tile2_fg
+                                              : theme->rack_tile1_fg);
+        theme_apply_bg(plane, player_idx == 1 ? theme->rack_tile2_bg
+                                              : theme->rack_tile1_bg);
+      }
+      // A blank is "?"; see tile_face_cells for multi-letter tiles.
+      char face[TUI_TILE_TEXT_MAX];
+      tile_face_cells(ld, ml, halfwidth, face, sizeof(face));
+      ncplane_putstr_yx(plane, L->rack_top + 1, start_col + col_offset, face);
+      col_offset += cell_w;
+    }
+  }
+}
+
+void render_rack_invalidate_blit_cache(void) { rack_pixel_cache.valid = false; }

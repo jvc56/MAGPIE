@@ -4,6 +4,7 @@
 #include "../def/board_defs.h"
 #include "../def/game_defs.h"
 #include "../def/letter_distribution_defs.h"
+#include "../def/rack_defs.h"
 #include "../ent/board.h"
 #include "../ent/move.h"
 #include "move_gen.h"
@@ -33,6 +34,18 @@ typedef struct PackedCounts {
   uint64_t words[PATH_MOVE_LISTS_COUNT_WORDS];
 } PackedCounts;
 
+// The plays of a list that place one multiset of tiles (see
+// path_move_lists_penalized_best_play): [begin, end) of by_tiles, by
+// descending score. weight is the sum of their tiles' weights and top_score
+// the score of the first.
+typedef struct PathPlayGroup {
+  PackedCounts used;
+  int begin;
+  int end;
+  int weight;
+  int top_score;
+} PathPlayGroup;
+
 // One materialized list: plays partitioned by lane (lane L spans
 // [lane_begin[L], lane_begin[L + 1])), each play's placed-tile multiset packed
 // alongside for the rack filter. The trailing pass of a generation is not
@@ -43,6 +56,26 @@ typedef struct PathListSlot {
   int count;
   int capacity;
   int lane_begin[PATH_MOVE_LISTS_NUM_LANES + 1];
+  // The plays by tiles placed and, among those of as many, by descending
+  // score, each as its score above its index in moves: built when first asked
+  // for (see path_move_lists_best_play_alone) and dropped when the list is
+  // rebuilt. The plays of k tiles are [tiles_begin[k], tiles_begin[k + 1]).
+  uint64_t *by_score;
+  int by_score_capacity;
+  bool by_score_valid;
+  int tiles_begin[RACK_SIZE + 2];
+  // Whether groups and by_tiles hold this list's plays (dropped when the list
+  // is rebuilt), built with the tile weights by_tiles_weights.
+  bool by_tiles_valid;
+  // The plays by the tiles they place and, among those of the same tiles, by
+  // descending score and then list order, each as its score above its index
+  // in moves; its second half is scratch.
+  uint64_t *by_tiles;
+  uint16_t *group_ids;
+  int by_tiles_capacity;
+  PathPlayGroup *groups;
+  int group_count;
+  const int *by_tiles_weights;
 } PathListSlot;
 
 // The legal-play lists of both sides of an endgame search, maintained
@@ -218,5 +251,79 @@ path_move_lists_pending_lanes(const PathMoveLists *lists) {
 bool path_move_lists_best_play(PathMoveLists *lists,
                                const MoveGenArgs *best_small_args,
                                SmallMove *out_best);
+
+// path_move_lists_best_play for a position that shares its lanes with no
+// sibling (the leaf under a first reply, whose parent searches no other
+// move): the same play, found without the per-lane bests the siblings would
+// share. The side's list two moves up is read in descending score order,
+// stopping at the first of its plays that still stands, and the lanes either
+// later move touched are generated against that play.
+bool path_move_lists_best_play_alone(PathMoveLists *lists,
+                                     const MoveGenArgs *best_small_args,
+                                     SmallMove *out_best);
+
+// The play of the list moves_at would return here that scores highest less a
+// penalty for the tiles it places, the first such in the list's order, found
+// without building the list. The penalty is the sum of the placed tiles'
+// `tile_weights` (by machine letter, a designated blank counting as the
+// blank) times `scale`, truncated to an integer. The plays are read from the
+// nearest list of the side to move that is built, up the path (down to its
+// root list), grouped by the tiles they place: a group whose tiles the rack no
+// longer holds is skipped whole, and the others are read by descending score
+// up to their first play that stands. The anchors that can reach a square
+// changed since that list are regenerated (`args` as for moves_at). Returns
+// false iff the side has no play, and otherwise sets *out_best and its
+// penalized score *out_adjusted. Nothing is stored in the slot of the current
+// length.
+bool path_move_lists_penalized_best_play(PathMoveLists *lists,
+                                         const MoveGenArgs *args,
+                                         const int *tile_weights, float scale,
+                                         SmallMove *out_best,
+                                         int *out_adjusted);
+
+// The tile types among `wanted` (a bit per machine letter, the blank's bit 0)
+// that the plays of one side still standing at the current path position
+// place. The side is the one to move there (`side_is_on_turn`) or the other
+// one, and `rack` is its rack there. The plays are read from the nearest list
+// of that side up the path that is built, down to its root list: one stands
+// when the rack still holds its tiles and it spans no square a move made
+// since has changed for its lane. `touched` and the PATH_MOVE_LISTS_NUM_LANES
+// entries of `hits` get those moves' lanes and squares, so the side's plays
+// here are the standing ones and those that
+// generate_tiles_played_in_lanes(args, *touched, hits) finds.
+uint64_t path_move_lists_standing_tile_types(const PathMoveLists *lists,
+                                             bool side_is_on_turn,
+                                             const Rack *rack, uint64_t wanted,
+                                             uint64_t *touched, uint32_t *hits);
+
+// Per lane, the squares `move` would change for the lane's plays if played on
+// `board` (see move_lane_hits in path_move_lists.c), written to the
+// PATH_MOVE_LISTS_NUM_LANES entries of `hits`: a play spanning none of its
+// lane's is a play after the move too, score included. Returns the lanes with
+// any.
+uint64_t path_move_lists_move_hits(const Board *board, const Move *move,
+                                   uint32_t *hits);
+
+// The best plays of every lane for the side that replies to the side to move,
+// on the current board: what path_move_lists_best_play shares among the
+// positions one move below this one, found here before any of those moves is
+// made (and left for those positions to use). `reply_args` is the
+// MOVE_RECORD_BEST_SMALL generation the replying side would run, its game
+// holding that side on turn for the length of the call. Returns NULL when the
+// replying side's list at its last turn, one move up the path, is not built
+// (or a reply would be past the longest path), and the
+// PATH_MOVE_LISTS_NUM_LANES lanes otherwise, valid until the next call to
+// either function one move below.
+const LaneBestPlays *
+path_move_lists_reply_lane_bests(PathMoveLists *lists,
+                                 const MoveGenArgs *reply_args);
+
+// What path_move_lists_reply_lane_bests returns, found without the lists:
+// each lane's best plays among `move_list`, a MOVE_RECORD_ALL_SMALL generation
+// for a side holding `side_to_move_tiles` tiles, written to the
+// PATH_MOVE_LISTS_NUM_LANES entries of `lanes`.
+void path_move_lists_lane_bests_of_list(const MoveList *move_list,
+                                        int side_to_move_tiles,
+                                        LaneBestPlays *lanes);
 
 #endif

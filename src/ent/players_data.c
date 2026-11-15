@@ -14,6 +14,7 @@
 #include "kwg.h"
 #include "pat.h"
 #include "pat_file.h"
+#include "peg_adjust.h"
 #include "rack.h"
 #include "rack_info_table.h"
 #include "wmp.h"
@@ -27,7 +28,8 @@ static const char *const players_data_type_names[] = {
     "wordmap",
     "rack info table",
     "word info table",
-    "positional adjustment table"};
+    "positional adjustment table",
+    "pre-endgame adjustments"};
 
 // The PlayersData struct holds all of the
 // information that can be set during configuration.
@@ -50,6 +52,7 @@ struct PlayersData {
   // The same two settings for the rollouts of the player's sims.
   bool pat_rollout_disabled[2];
   uint32_t pat_rollout_disabled_classes_masks[2];
+  bool pat_rollout_exact[2];
   // The largest PAT adjustment a move of the player's can get.
 };
 
@@ -113,6 +116,16 @@ void players_data_set_pat_rollout_disabled(PlayersData *players_data,
 bool players_data_get_pat_rollout_disabled(const PlayersData *players_data,
                                            int player_index) {
   return players_data->pat_rollout_disabled[player_index];
+}
+
+void players_data_set_pat_rollout_exact(PlayersData *players_data,
+                                        int player_index, bool exact) {
+  players_data->pat_rollout_exact[player_index] = exact;
+}
+
+bool players_data_get_pat_rollout_exact(const PlayersData *players_data,
+                                        int player_index) {
+  return players_data->pat_rollout_exact[player_index];
 }
 
 void players_data_set_pat_rollout_disabled_classes_mask(
@@ -193,6 +206,12 @@ PATWeights *players_data_get_pat(const PlayersData *players_data,
       players_data, PLAYERS_DATA_TYPE_PAT, player_index);
 }
 
+PegAdjust *players_data_get_peg_adjust(const PlayersData *players_data,
+                                       int player_index) {
+  return (PegAdjust *)players_data_get_data(
+      players_data, PLAYERS_DATA_TYPE_PEG_ADJUST, player_index);
+}
+
 void players_data_set_data(PlayersData *players_data,
                            players_data_t players_data_type, int player_index,
                            void *data) {
@@ -233,6 +252,9 @@ void *players_data_create_data(players_data_t players_data_type,
   case PLAYERS_DATA_TYPE_PAT:
     data = pat_create(data_paths, data_name, error_stack);
     break;
+  case PLAYERS_DATA_TYPE_PEG_ADJUST:
+    data = peg_adjust_create(data_paths, data_name, error_stack);
+    break;
   case NUMBER_OF_DATA:
     log_fatal("cannot create invalid players data type");
     break;
@@ -264,6 +286,9 @@ void players_data_destroy_data(PlayersData *players_data,
       break;
     case PLAYERS_DATA_TYPE_PAT:
       pat_destroy(players_data->data[data_index]);
+      break;
+    case PLAYERS_DATA_TYPE_PEG_ADJUST:
+      peg_adjust_destroy(players_data->data[data_index]);
       break;
     case NUMBER_OF_DATA:
       log_fatal("cannot destroy invalid players data type");
@@ -315,6 +340,9 @@ const char *players_data_get_data_name(const PlayersData *players_data,
     case PLAYERS_DATA_TYPE_PAT:
       data_name = pat_get_name(players_data->data[data_index]);
       break;
+    case PLAYERS_DATA_TYPE_PEG_ADJUST:
+      data_name = peg_adjust_get_name(players_data->data[data_index]);
+      break;
     case NUMBER_OF_DATA:
       log_fatal("cannot destroy invalid players data type");
       break;
@@ -336,12 +364,14 @@ PlayersData *players_data_create(bool use_wmp) {
         default_use = use_wmp;
       } else if (data_index == PLAYERS_DATA_TYPE_RIT ||
                  data_index == PLAYERS_DATA_TYPE_WIT ||
-                 data_index == PLAYERS_DATA_TYPE_PAT) {
+                 data_index == PLAYERS_DATA_TYPE_PAT ||
+                 data_index == PLAYERS_DATA_TYPE_PEG_ADJUST) {
         // RIT and WIT files are opt-in: callers must explicitly enable them
         // with -rit/-wit (or the per-player variants) since they are built by
-        // a convert command and may not exist for every lexicon. PAT
-        // weights are likewise opt-in: they load only when named explicitly
-        // with -pat (or -pat1/-pat2).
+        // a convert command and may not exist for every lexicon. PAT weights
+        // and pre-endgame adjustments load by name, with -pat and -pegadjust
+        // (or the per-player variants) or as the config resolves auto; this
+        // flag plays no part in either.
         default_use = false;
       }
       players_data_set_use_when_available(players_data, data_index,
@@ -354,6 +384,7 @@ PlayersData *players_data_create(bool use_wmp) {
     players_data_set_pat_disabled_classes_mask(players_data, player_index, 0);
     players_data_set_pat_candidates_disabled(players_data, player_index, false);
     players_data_set_pat_rollout_disabled(players_data, player_index, false);
+    players_data_set_pat_rollout_exact(players_data, player_index, false);
     players_data_set_pat_rollout_disabled_classes_mask(
         players_data, player_index,
         PAT_CLASS_MASK_ALL & ~PAT_CLASS_MASK_ROLLOUT_DEFAULT);
@@ -382,7 +413,8 @@ bool players_data_type_is_nullable(players_data_t players_data_type) {
   return players_data_type == PLAYERS_DATA_TYPE_WMP ||
          players_data_type == PLAYERS_DATA_TYPE_RIT ||
          players_data_type == PLAYERS_DATA_TYPE_WIT ||
-         players_data_type == PLAYERS_DATA_TYPE_PAT;
+         players_data_type == PLAYERS_DATA_TYPE_PAT ||
+         players_data_type == PLAYERS_DATA_TYPE_PEG_ADJUST;
 }
 
 void players_data_set(PlayersData *players_data,

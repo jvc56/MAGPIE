@@ -22,6 +22,7 @@
 #include "../util/io_util.h"
 #include "../util/string_util.h"
 #include "bai.h"
+#include "census_rollout.h"
 #include "inference.h"
 #include "move_gen.h"
 #include "rack_draw.h"
@@ -57,6 +58,13 @@ void sim_ctx_destroy(SimCtx *sim_ctx) {
   rvs_destroy(sim_ctx->rvs);
   inference_ctx_destroy(sim_ctx->inference_ctx);
   free(sim_ctx);
+}
+
+uint64_t sim_ctx_census_rollout_held_bytes(const SimCtx *sim_ctx) {
+  if (sim_ctx == NULL || sim_ctx->rvs == NULL) {
+    return 0;
+  }
+  return rv_sim_census_rollout_held_bytes(sim_ctx->rvs);
 }
 
 // A bag-cycled sample is a whole cycle of rollouts, but the sample limit
@@ -95,6 +103,13 @@ static bool sim_rollout_pat_is_on(const SimArgs *sim_args) {
   return false;
 }
 
+// Whether the sim's rollouts use a PAT the census cannot steer: the term
+// static evaluation uses. Board-only PAT bounds each anchor's term for it
+// (see MoveGenArgs.anchor_equity_caps).
+static bool sim_rollout_pat_excludes_census(const SimArgs *sim_args) {
+  return sim_args->pat_rollout_exact && sim_rollout_pat_is_on(sim_args);
+}
+
 void simulate(SimArgs *sim_args, SimCtx **sim_ctx, SimResults *sim_results,
               ErrorStack *error_stack) {
   if (!sim_args->move_list || move_list_get_count(sim_args->move_list) == 0) {
@@ -129,13 +144,28 @@ void simulate(SimArgs *sim_args, SimCtx **sim_ctx, SimResults *sim_results,
   }
 
   // The census rollout's equities leave out PAT's term, so the two do not
-  // mix: a sim steered by the census plays its rollouts without PAT.
-  if (sim_args->use_census_rollout && sim_rollout_pat_is_on(sim_args)) {
+  // mix: a sim steered by the census plays its rollouts without PAT. Auto
+  // considers the census only for a sim whose rollouts go without PAT or
+  // with board-only PAT, from a
+  // bag with tiles (the census serves no generation from an empty bag), when
+  // it fits in memory; the simmer then builds it if the sim's rollouts pay
+  // for it (see census_rollout_prepare_if_it_pays).
+  if (sim_args->census_rollout_auto) {
+    const uint64_t held_bytes = sim_ctx_census_rollout_held_bytes(*sim_ctx);
+    sim_args->use_census_rollout =
+        !sim_rollout_pat_excludes_census(sim_args) &&
+        !bag_is_empty(game_get_bag(sim_args->game)) &&
+        census_rollout_auto_fits(sim_args->game, sim_args->num_threads,
+                                 move_list_get_count(sim_args->move_list),
+                                 held_bytes);
+  }
+  if (sim_args->use_census_rollout &&
+      sim_rollout_pat_excludes_census(sim_args)) {
     error_stack_push(
         error_stack, ERROR_STATUS_SIM_CENSUS_WITH_PAT,
         string_duplicate("cannot steer rollouts with the census while their "
-                         "PAT is on: set patrollout to false, or scensus to "
-                         "false"));
+                         "PAT is not board-only: set patrolloutfast to true, "
+                         "patrollout to false, or scensus to false"));
     return;
   }
 
@@ -147,12 +177,15 @@ void simulate(SimArgs *sim_args, SimCtx **sim_ctx, SimResults *sim_results,
 
   uint64_t num_infer_leaves = 0;
   if (sim_args->use_inference) {
-    Timer inference_timer;
-    ctimer_start(&inference_timer);
-    infer(&sim_args->inference_args, &((*sim_ctx)->inference_ctx),
-          sim_args->inference_results, error_stack);
-    inference_results_set_elapsed_seconds(
-        sim_args->inference_results, ctimer_elapsed_seconds(&inference_timer));
+    if (!sim_args->use_precomputed_inference) {
+      Timer inference_timer;
+      ctimer_start(&inference_timer);
+      infer(&sim_args->inference_args, &((*sim_ctx)->inference_ctx),
+            sim_args->inference_results, error_stack);
+      inference_results_set_elapsed_seconds(
+          sim_args->inference_results,
+          ctimer_elapsed_seconds(&inference_timer));
+    }
     if (!error_stack_is_empty(error_stack) ||
         thread_control_get_status(sim_args->thread_control) !=
             THREAD_CONTROL_STATUS_STARTED) {

@@ -3,6 +3,7 @@
 #include "../compat/cpthread.h"
 #include "../compat/cpthread_defs.h"
 #include "../compat/memory_info.h"
+#include "../def/bai_defs.h"
 #include "../def/game_defs.h"
 #include "../def/rack_defs.h"
 #include "../ent/alias_method.h"
@@ -14,6 +15,8 @@
 #include "../ent/inference_results.h"
 #include "../ent/letter_distribution.h"
 #include "../ent/move.h"
+#include "../ent/pat_board_cache.h"
+#include "../ent/peg_adjust.h"
 #include "../ent/player.h"
 #include "../ent/rack.h"
 #include "../ent/sim_args.h"
@@ -419,6 +422,9 @@ typedef struct SimmerWorker {
   // The census rollout's state for this worker's rollouts, made by the first
   // sim that uses the census (see SimArgs.use_census_rollout).
   CensusRolloutWorker *census_rollout_worker;
+  // The worker's cache for board-only PAT (see pat_board_cache.h), made by
+  // the first sim whose rollouts use it and emptied for each one.
+  PATBoardCache *pat_board_cache;
 } SimmerWorker;
 
 // The step of a simulation worker's cross set salt: odd, so a worker's
@@ -466,20 +472,52 @@ typedef struct Simmer {
 } Simmer;
 
 // A worker's copy of the game plays the sim's rollouts, so both of its
-// players take the simming player's rollout PAT settings.
-static void simmer_worker_set_rollout_pat(const SimmerWorker *simmer_worker,
+// players take the simming player's rollout PAT settings. Unless those ask
+// for the term static evaluation uses, a player with PAT weights gets the
+// worker's board cache, emptied for this sim, and with it board-only PAT.
+static void simmer_worker_set_rollout_pat(SimmerWorker *simmer_worker,
                                           const SimArgs *sim_args) {
+  const bool board_only =
+      !sim_args->pat_rollout_disabled && !sim_args->pat_rollout_exact;
   for (int player_index = 0; player_index < 2; player_index++) {
-    player_set_pat_usage(game_get_player(simmer_worker->game, player_index),
-                         sim_args->pat_rollout_disabled,
+    Player *player = game_get_player(simmer_worker->game, player_index);
+    player_set_pat_usage(player, sim_args->pat_rollout_disabled,
                          sim_args->pat_rollout_disabled_classes_mask);
+    PATBoardCache *board_cache = NULL;
+    if (board_only && player_get_pat(player) != NULL) {
+      if (simmer_worker->pat_board_cache == NULL) {
+        simmer_worker->pat_board_cache = pat_board_cache_create();
+      }
+      board_cache = simmer_worker->pat_board_cache;
+    }
+    player_set_pat_board_cache(player, board_cache);
+  }
+  if (simmer_worker->pat_board_cache != NULL) {
+    pat_board_cache_reset(simmer_worker->pat_board_cache);
+  }
+}
+
+// The rollouts model the opponent as playing by the simming player's
+// pre-endgame adjustments, whichever table the opponent itself plays by: both
+// players of a worker's copy of the game take the table of the player on
+// turn, and none if that player has none.
+static void
+simmer_worker_set_rollout_peg_adjust(const SimmerWorker *simmer_worker,
+                                     const SimArgs *sim_args) {
+  const PegAdjust *peg_adjust = player_get_peg_adjust(game_get_player(
+      sim_args->game, game_get_player_on_turn_index(sim_args->game)));
+  for (int player_index = 0; player_index < 2; player_index++) {
+    player_set_peg_adjust(game_get_player(simmer_worker->game, player_index),
+                          peg_adjust);
   }
 }
 
 SimmerWorker *simmer_create_worker(const SimArgs *sim_args) {
   SimmerWorker *simmer_worker = malloc_or_die(sizeof(SimmerWorker));
   simmer_worker->game = game_duplicate(sim_args->game);
+  simmer_worker->pat_board_cache = NULL;
   simmer_worker_set_rollout_pat(simmer_worker, sim_args);
+  simmer_worker_set_rollout_peg_adjust(simmer_worker, sim_args);
   game_set_backup_mode(simmer_worker->game, BACKUP_MODE_SIMULATION);
   // A rollout plays its candidate and plies, then unplays them all at once,
   // so recording the squares they change beats copying the board twice.
@@ -504,6 +542,7 @@ void simmer_reset_worker(SimmerWorker *simmer_worker, const SimArgs *sim_args) {
   cross_set_cache_set_salt(simmer_worker->cross_set_cache,
                            simmer_worker->cross_set_salt);
   simmer_worker_set_rollout_pat(simmer_worker, sim_args);
+  simmer_worker_set_rollout_peg_adjust(simmer_worker, sim_args);
 }
 
 void simmer_worker_destroy(SimmerWorker *simmer_worker) {
@@ -515,6 +554,7 @@ void simmer_worker_destroy(SimmerWorker *simmer_worker) {
   move_list_destroy(simmer_worker->move_list);
   prng_destroy(simmer_worker->prng);
   census_rollout_worker_destroy(simmer_worker->census_rollout_worker);
+  pat_board_cache_destroy(simmer_worker->pat_board_cache);
   free(simmer_worker);
 }
 
@@ -855,20 +895,80 @@ void rv_sim_destroy(RandomVariables *rvs) {
   free(simmer);
 }
 
+// Frees the census and its workers, which a sim without the census does not
+// read, so that they do not hold their memory through it.
+static void simmer_release_census_rollout(Simmer *simmer) {
+  census_rollout_destroy(simmer->census_rollout);
+  simmer->census_rollout = NULL;
+  for (int thread_index = 0; thread_index < simmer->num_threads;
+       thread_index++) {
+    SimmerWorker *simmer_worker = simmer->workers[thread_index];
+    census_rollout_worker_destroy(simmer_worker->census_rollout_worker);
+    simmer_worker->census_rollout_worker = NULL;
+  }
+}
+
+uint64_t rv_sim_census_rollout_held_bytes(const RandomVariables *rvs) {
+  const Simmer *simmer = (const Simmer *)rvs->data;
+  uint64_t bytes = census_rollout_held_bytes(simmer->census_rollout);
+  for (int thread_index = 0; thread_index < simmer->num_threads;
+       thread_index++) {
+    bytes += census_rollout_worker_held_bytes(
+        simmer->workers[thread_index]->census_rollout_worker);
+  }
+  return bytes;
+}
+
+// The fewest rollouts the sim plays, short of a time limit or a stop: its
+// sample limit without a stopping threshold, and otherwise its sample minimum
+// for every play, up to the limit. A bag-cycled sample is a cycle of
+// draws_per_sample rollouts.
+static uint64_t simmer_min_rollouts(const SimArgs *sim_args) {
+  const BAIOptions *bai_options = &sim_args->bai_options;
+  uint64_t samples = bai_options->sample_limit;
+  if (bai_options->threshold != BAI_THRESHOLD_NONE) {
+    const uint64_t minimum_samples =
+        (uint64_t)move_list_get_count(sim_args->move_list) *
+        bai_options->sample_minimum;
+    if (minimum_samples < samples) {
+      samples = minimum_samples;
+    }
+  }
+  if (bai_options->draws_per_sample > 1) {
+    samples *= bai_options->draws_per_sample;
+  }
+  return samples;
+}
+
 // At the start of a sim steered by the census: the census of its position and
 // candidates, built on the sim's threads, and a census worker for each of its
-// workers.
+// workers. Under -scensus auto, the census steers the sim only when its
+// fewest rollouts pay for the candidates' tables; when they do not, it keeps
+// what it holds for a later sim. A sim without the census releases it.
 static void simmer_prepare_census_rollout(Simmer *simmer,
                                           const SimArgs *sim_args) {
   simmer->use_census_rollout = sim_args->use_census_rollout;
   if (!simmer->use_census_rollout) {
+    simmer_release_census_rollout(simmer);
+    sim_results_set_census_rollout(simmer->sim_results, false);
     return;
   }
   if (simmer->census_rollout == NULL) {
     simmer->census_rollout = census_rollout_create(simmer->num_threads);
   }
-  census_rollout_prepare(simmer->census_rollout, sim_args->game,
-                         sim_args->move_list);
+  if (sim_args->census_rollout_auto) {
+    simmer->use_census_rollout = census_rollout_prepare_if_it_pays(
+        simmer->census_rollout, sim_args->game, sim_args->move_list,
+        simmer_min_rollouts(sim_args), sim_args->num_plies);
+  } else {
+    census_rollout_prepare(simmer->census_rollout, sim_args->game,
+                           sim_args->move_list);
+  }
+  sim_results_set_census_rollout(simmer->sim_results,
+                                 simmer->use_census_rollout);
+  if (!simmer->use_census_rollout) {
+    return;
+  }
   for (int thread_index = 0; thread_index < simmer->num_threads;
        thread_index++) {
     SimmerWorker *simmer_worker = simmer->workers[thread_index];

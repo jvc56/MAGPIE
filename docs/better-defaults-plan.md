@@ -32,6 +32,14 @@ settings in `config_stale_settings`, so their new defaults apply: `-pegpess`,
 `-w1`/`-w2`, `-rit1`/`-rit2`, `-wit1`/`-wit2` and `-ritmmap`. A later change
 of default adds its setting to that list and bumps the version.
 
+Settings files now keep only the settings in `config_saved_settings`: the
+rules, the lexica and their data, and the display settings. The tables,
+search settings and the rest are neither written nor loaded, whatever the
+file's version, so they always start from their defaults. Each kept
+setting loads on its own (the letter distribution, lexica and leaves
+together, after a trial in a scratch config), so an unknown setting or one
+that fails to load is skipped with a warning and never stops the startup.
+
 ---
 
 ## Phase 1: PEG: complete, untimed, results-only solves

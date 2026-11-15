@@ -16,12 +16,21 @@
 
 typedef struct SimArgs {
   int num_plies;
+  // The position. Its player on turn is the simming player, whose
+  // pre-endgame adjustments both players' plies in the rollouts use,
+  // whichever table the opponent has.
   const Game *game;
   const MoveList *move_list;
   int num_plays;
   Rack *known_opp_rack;
   WinPct *win_pcts;
   bool use_inference;
+  // Whether, with use_inference, inference_results already holds the
+  // inference of the opponent's previous move in this position, so the sim
+  // samples the opponent's racks from it as given instead of running
+  // inference_args first. Lets a caller show an inference and then sim with
+  // it, or resume a sim, without inferring again. sim_args_fill clears it.
+  bool use_precomputed_inference;
   bool use_heat_map;
   InferenceResults *inference_results;
   InferenceArgs inference_args;
@@ -54,6 +63,11 @@ typedef struct SimArgs {
   // sim_args_fill clears them (PAT on, every class); callers set them after.
   bool pat_rollout_disabled;
   uint32_t pat_rollout_disabled_classes_mask;
+  // Whether the rollouts' PAT is the term static evaluation uses, with the
+  // mover's rack and the utility correction. Otherwise it is board-only PAT
+  // (see the patrolloutfast option and pat_board_cache.h), which the census
+  // can steer. sim_args_fill clears it.
+  bool pat_rollout_exact;
   // Whether a nonterminal sim horizon's spread is projected to the end of the
   // game with the win percentage table's expected swing for that state (see
   // rv_sim_sample).
@@ -69,6 +83,12 @@ typedef struct SimArgs {
   // (see census_rollout.h): the same moves, found faster. sim_args_fill
   // clears it.
   bool use_census_rollout;
+  // Whether use_census_rollout is auto (-scensus auto): simulate sets it for
+  // each sim, to whether the census supports the game and fits in this
+  // machine's memory while rollout PAT is off (census_rollout_auto_fits), and
+  // the census then steers the sim only if its fewest rollouts pay for the
+  // build (census_rollout_prepare_if_it_pays). sim_args_fill clears it.
+  bool census_rollout_auto;
 } SimArgs;
 
 // Unlike endgame_args_fill and peg_args_fill, this does NOT take a parameter
@@ -100,6 +120,7 @@ sim_args_fill(const int num_plies, const MoveList *move_list,
   sim_args->thread_control = thread_control;
   sim_args->game = game;
   sim_args->use_inference = sim_with_inference;
+  sim_args->use_precomputed_inference = false;
   sim_args->use_heat_map = use_heat_map;
   sim_args->num_threads = num_threads;
   sim_args->print_interval = print_interval;
@@ -136,6 +157,7 @@ sim_args_fill(const int num_plies, const MoveList *move_list,
   sim_args->use_margin_forecast = use_margin_forecast;
   sim_args->bag_cycle = false;
   sim_args->use_census_rollout = false;
+  sim_args->census_rollout_auto = false;
   // Start fresh, not resuming a prior SimResults. Only the TUI's analysis-
   // resume path sets this true; every other caller fills SimArgs through
   // here, so leaving it uninitialized let stack garbage spuriously trigger
@@ -144,6 +166,7 @@ sim_args_fill(const int num_plies, const MoveList *move_list,
   sim_args->resume_results = false;
   sim_args->pat_rollout_disabled = false;
   sim_args->pat_rollout_disabled_classes_mask = 0;
+  sim_args->pat_rollout_exact = false;
 }
 
 // Blend rollout win% and (sigmoid-normalized) spread into a single BAI

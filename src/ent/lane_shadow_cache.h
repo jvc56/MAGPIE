@@ -48,15 +48,58 @@ typedef struct LaneShadowEntry {
 static_assert(sizeof(LaneShadowEntry) == LANE_SHADOW_ENTRY_BYTES,
               "a lane shadow entry fills one 64-byte block");
 
+// The best play of one anchor of a lane, as the small generator finds it:
+// the generator searches an anchor for every play whatever the best so far
+// is, so an anchor's best play depends only on what its lane's key holds, on
+// which lane it is (a play names its row), on the anchor's column and on how
+// ties are broken. The lanes that recur across an endgame's playouts recur
+// with their anchors, so a generation takes the play remembered for an anchor
+// instead of searching it again (see gen_record_scoring_plays_impl in
+// move_gen.c). Direct-mapped by the key's top bits, like the lanes' entries;
+// a key is never 0.
+typedef struct AnchorPlayEntry {
+  uint64_t key;
+  // 0 when the anchor has no play.
+  uint64_t tiny_move;
+  // The play's score, with the out bonus if it empties the rack.
+  Equity value;
+  uint16_t score;
+  uint8_t play_length;
+  uint8_t tiles_played;
+  uint64_t unused;
+} AnchorPlayEntry;
+
+enum {
+  ANCHOR_PLAY_ENTRY_BYTES = 32,
+};
+
+static_assert(sizeof(AnchorPlayEntry) == ANCHOR_PLAY_ENTRY_BYTES,
+              "two anchor play entries fill one 64-byte block");
+
 typedef struct LaneShadowCache {
   LaneShadowEntry *entries;
   // The entries are 2^index_bits, indexed by the key's top index_bits bits.
   int index_bits;
   uint64_t salt;
+  // The anchors' plays are 2^anchor_index_bits, indexed the same way.
+  AnchorPlayEntry *anchor_plays;
+  int anchor_index_bits;
 } LaneShadowCache;
 
-static inline LaneShadowCache *lane_shadow_cache_create(int index_bits) {
+static inline LaneShadowCache *lane_shadow_cache_create(int index_bits,
+                                                        int anchor_index_bits) {
   LaneShadowCache *cache = malloc_or_die(sizeof(LaneShadowCache));
+  const size_t plays_size =
+      ((size_t)1 << anchor_index_bits) * sizeof(AnchorPlayEntry);
+  void *plays = NULL;
+  if (portable_aligned_alloc(&plays, LANE_SHADOW_ENTRY_BYTES, plays_size) !=
+      0) {
+    log_fatal("could not allocate the anchor play cache");
+  }
+  // A zero key is never an anchor's.
+  memset(plays, 0, plays_size);
+  cache->anchor_plays = (AnchorPlayEntry *)plays;
+  cache->anchor_index_bits = anchor_index_bits;
   const size_t entries_size =
       ((size_t)1 << index_bits) * sizeof(LaneShadowEntry);
   void *entries = NULL;
@@ -77,6 +120,7 @@ static inline void lane_shadow_cache_destroy(LaneShadowCache *cache) {
     return;
   }
   portable_aligned_free(cache->entries);
+  portable_aligned_free(cache->anchor_plays);
   free(cache);
 }
 
@@ -89,6 +133,11 @@ static inline void lane_shadow_cache_set_salt(LaneShadowCache *cache,
 static inline LaneShadowEntry *lane_shadow_cache_entry(LaneShadowCache *cache,
                                                        uint64_t key) {
   return &cache->entries[key >> (64 - cache->index_bits)];
+}
+
+static inline AnchorPlayEntry *
+lane_shadow_cache_anchor_play(LaneShadowCache *cache, uint64_t key) {
+  return &cache->anchor_plays[key >> (64 - cache->anchor_index_bits)];
 }
 
 #endif
