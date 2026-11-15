@@ -135,10 +135,11 @@ static Equity pat_units_penalty_bound(const PATEvalContext *pat_eval_ctx,
   // can never be the worst, so it simply drops out of both: the sum is the
   // total less the reached baselines, and the worst is the first unit in
   // penalty order the move does not reach. Only the reached units are
-  // visited, and a move reaches few.
+  // visited, and a move reaches few. Of those, a unit with a zero baseline
+  // takes nothing from the sum, so it is skipped.
   int64_t sum = pat_eval_ctx->total_unit_penalty;
   for (int word = 0; word < PAT_MASK_WORDS; word++) {
-    uint64_t bits = affected_units[word];
+    uint64_t bits = affected_units[word] & pat_eval_ctx->penalized_units[word];
     while (bits != 0) {
       const int unit_index = word * 64 + pat_ctz(bits);
       sum -= pat_eval_ctx->unit_penalty[unit_index];
@@ -146,7 +147,8 @@ static Equity pat_units_penalty_bound(const PATEvalContext *pat_eval_ctx,
     }
   }
   int64_t worst = 0;
-  for (int order_idx = 0; order_idx < pat_eval_ctx->num_units; order_idx++) {
+  for (int order_idx = 0; order_idx < pat_eval_ctx->num_penalized_units;
+       order_idx++) {
     const int unit_index = pat_eval_ctx->units_by_penalty[order_idx];
     if (!pat_mask_test(affected_units, unit_index)) {
       worst = pat_eval_ctx->unit_penalty[unit_index];
@@ -466,6 +468,8 @@ static void pat_eval_context_load_units(
     }
     pat_eval_ctx->group_num_features[unit_group] = (uint8_t)num_weighted;
   }
+  // Only the leave credit reads the hook letters (see unit_hook_letters).
+  const bool has_discount = weights->own_asset_discount > 0.0;
   for (int unit_index = 0; unit_index < pat_eval_ctx->num_units; unit_index++) {
     int32_t unit_features[PAT_NUM_FEATURES];
     memset(unit_features, 0, sizeof(unit_features));
@@ -474,9 +478,10 @@ static void pat_eval_context_load_units(
     int extent_lo = 0;
     int extent_hi = 0;
     pat_eval_ctx->unit_hook_letters[unit_index] = 0;
-    pat_scan_context_unit(pat_eval_ctx, unit_index, NULL, unit_features, &dir,
-                          &lane, &extent_lo, &extent_hi,
-                          &pat_eval_ctx->unit_hook_letters[unit_index]);
+    pat_scan_context_unit(
+        pat_eval_ctx, unit_index, NULL, unit_features, &dir, &lane, &extent_lo,
+        &extent_hi,
+        has_discount ? &pat_eval_ctx->unit_hook_letters[unit_index] : NULL);
     pat_eval_ctx->unit_penalty[unit_index] =
         pat_dot_unit(pat_eval_ctx, unit_index, unit_features);
     // A move affects this unit only when it has a tile on or directly
@@ -506,9 +511,12 @@ static void pat_eval_context_load_units(
   // admitting letter L. Built once per position so a move's own leave (at
   // most RACK_SIZE distinct letters) can find every unit it could exploit
   // in a handful of ORs, entirely independent of the move's placement.
-  memset(pat_eval_ctx->units_by_hook_letter, 0,
-         sizeof(pat_eval_ctx->units_by_hook_letter));
-  for (int unit_index = 0; unit_index < pat_eval_ctx->num_units; unit_index++) {
+  if (has_discount) {
+    memset(pat_eval_ctx->units_by_hook_letter, 0,
+           sizeof(pat_eval_ctx->units_by_hook_letter));
+  }
+  for (int unit_index = 0; has_discount && unit_index < pat_eval_ctx->num_units;
+       unit_index++) {
     uint64_t remaining_letters =
         pat_eval_ctx->unit_hook_letters[unit_index] & ~(uint64_t)1;
     while (remaining_letters) {
@@ -519,13 +527,22 @@ static void pat_eval_context_load_units(
     }
   }
   // The total and the penalty order that let a move's combination be
-  // formed from the units it reaches alone (see pat_units_penalty_bound).
-  // Insertion sort: a few dozen units, once per position.
+  // formed from the units it reaches alone (see pat_units_penalty_bound):
+  // the units with a penalty from the most negative up, ties in unit order.
+  // A unit without one adds nothing to the total and is never the worst, so
+  // it is left out of the order. Insertion sort: a few dozen units, once
+  // per position.
   int64_t total_unit_penalty = 0;
+  int num_penalized = 0;
+  pat_mask_clear(pat_eval_ctx->penalized_units);
   for (int unit_index = 0; unit_index < pat_eval_ctx->num_units; unit_index++) {
     const Equity penalty = pat_eval_ctx->unit_penalty[unit_index];
+    if (penalty == 0) {
+      continue;
+    }
+    pat_mask_set(pat_eval_ctx->penalized_units, unit_index);
     total_unit_penalty += penalty;
-    int order_idx = unit_index;
+    int order_idx = num_penalized++;
     while (
         order_idx > 0 &&
         pat_eval_ctx
@@ -537,6 +554,7 @@ static void pat_eval_context_load_units(
     }
     pat_eval_ctx->units_by_penalty[order_idx] = (uint16_t)unit_index;
   }
+  pat_eval_ctx->num_penalized_units = num_penalized;
   pat_eval_ctx->total_unit_penalty = total_unit_penalty;
   pat_eval_ctx->pre_penalty = pat_combine_unit_penalties(
       pat_eval_ctx->unit_penalty, pat_eval_ctx->num_units,
@@ -878,12 +896,11 @@ static Equity pat_eval_move_penalty_scaled(const PATEvalContext *pat_eval_ctx,
     }
   }
   int64_t worst = 0;
-  for (int order_idx = 0; order_idx < pat_eval_ctx->num_units; order_idx++) {
+  for (int order_idx = 0; order_idx < pat_eval_ctx->num_penalized_units;
+       order_idx++) {
     const int unit_index = pat_eval_ctx->units_by_penalty[order_idx];
     if (!pat_mask_test(combined_units, unit_index)) {
-      if (pat_eval_ctx->unit_penalty[unit_index] < worst) {
-        worst = pat_eval_ctx->unit_penalty[unit_index];
-      }
+      worst = pat_eval_ctx->unit_penalty[unit_index];
       break;
     }
   }
@@ -895,13 +912,24 @@ static Equity pat_eval_move_penalty_scaled(const PATEvalContext *pat_eval_ctx,
     if (bound < scaled_floor) {
       return bound;
     }
+    // Worst baseline first: the reached units with a penalty in penalty
+    // order, then those without one in unit order.
     int num_ordered = 0;
-    for (int order_idx = 0;
-         order_idx < pat_eval_ctx->num_units && num_ordered < num_reached;
+    for (int order_idx = 0; order_idx < pat_eval_ctx->num_penalized_units &&
+                            num_ordered < num_reached;
          order_idx++) {
       const int unit_index = pat_eval_ctx->units_by_penalty[order_idx];
       if (pat_mask_test(combined_units, unit_index)) {
         reached_units[num_ordered++] = (uint16_t)unit_index;
+      }
+    }
+    for (int word = 0; word < PAT_MASK_WORDS && num_ordered < num_reached;
+         word++) {
+      uint64_t bits =
+          combined_units[word] & ~pat_eval_ctx->penalized_units[word];
+      while (bits != 0) {
+        reached_units[num_ordered++] = (uint16_t)(word * 64 + pat_ctz(bits));
+        bits &= bits - 1;
       }
     }
   }
