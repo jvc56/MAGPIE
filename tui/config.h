@@ -181,6 +181,11 @@ typedef struct {
   // Whether sims steer their rollouts with a census of the position.
   bool sim_census;
   bool sim_census_set;
+  // Whether to infer the opponent's leave, and whether sims draw from it.
+  bool infer;
+  bool infer_set;
+  bool sim_inference;
+  bool sim_inference_set;
   // Spoiler-free History review.
   bool hide_spoilers;
   bool hide_spoilers_set;
