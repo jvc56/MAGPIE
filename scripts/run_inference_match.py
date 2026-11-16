@@ -84,6 +84,8 @@ def main():
     parser.add_argument('--seed', type=int, default=2026110300)
     parser.add_argument('--null-match', action='store_true',
                         help='neither player infers')
+    parser.add_argument('--summary-interval', type=float, default=15,
+                        help='seconds between live summary.json rewrites')
     parser.add_argument('--pat', action='store_true',
                         help='PAT candidates and rollouts on for both players')
     parser.add_argument('--seat0-budget-ms', type=int,
@@ -127,6 +129,7 @@ def main():
     signal.signal(signal.SIGINT, stop)
     started = time.monotonic()
     jobs = []
+    next_summary = started + 15
     reason = 'deadline'
     failure = None
     try:
@@ -151,9 +154,11 @@ def main():
             if all(proc.poll() == 0 for proc, _ in jobs):
                 reason = 'complete'
                 break
-            summary = summarize(directory, started)
-            summary['status'] = 'running'
-            write_json(directory/'summary.json', summary)
+            if time.monotonic() >= next_summary:
+                summary = summarize(directory, started)
+                summary['status'] = 'running'
+                write_json(directory/'summary.json', summary)
+                next_summary = time.monotonic() + args.summary_interval
             time.sleep(min(15, max(0, deadline.timestamp()-time.time())) if deadline else 15)
         if stopping:
             reason = 'interrupted'
