@@ -728,8 +728,8 @@ static void test_census_command(void) {
       rack_value_table_create(tmp_dir, "ab_census_3", true, table_error_stack);
   KLV *table_klv = klv_create(tmp_dir, "ab_census_1", table_error_stack);
   assert(error_stack_is_empty(table_error_stack));
-  assert(rack_value_table_get_number_of_racks(table_1) == RACK_SIZE + 1);
-  assert(rack_value_table_get_number_of_racks(table_3) == RACK_SIZE + 1);
+  assert(rack_value_table_get_number_of_valued_racks(table_1) == RACK_SIZE + 1);
+  assert(rack_value_table_get_number_of_valued_racks(table_3) == RACK_SIZE + 1);
   assert(rack_value_table_get_klv_hash(table_1) == klv_get_hash(table_klv));
   assert(rack_value_table_get_klv_hash(table_3) == klv_get_hash(table_klv));
   bool any_nonzero = false;
@@ -1027,7 +1027,7 @@ static void test_rack_values_match_movegen_csw(void) {
       scarce_letter = ml;
     }
   }
-  assert(rack_value_table_get_number_of_racks(rvt) == ways[RACK_SIZE]);
+  assert(rack_value_table_get_number_of_valued_racks(rvt) == ways[RACK_SIZE]);
 
   // a rack with one copy more of a letter than is unseen has no value
   assert(scarce_letter >= 0);
@@ -1088,6 +1088,108 @@ static void test_rack_values_match_movegen_csw(void) {
   free(tmp_dir);
 }
 
+// With table, the census writes the full racks' values of the current leaves,
+// as a census from those leaves finds them, with those leaves' hash and
+// nothing else.
+static void test_census_table_only(void) {
+  char *tmp_dir = test_platform_make_temporary_directory("magpie_census_");
+  char *lexica_dir = get_formatted_string("%s/lexica", tmp_dir);
+  assert(cfile_mkdir(lexica_dir) == 0);
+  char *set_cmd = get_formatted_string("set -path %s:%s -lex CSW21 -wmp false",
+                                       tmp_dir, DEFAULT_TEST_DATA_PATH);
+  Config *config = config_create_or_die(set_cmd);
+  load_and_exec_config_or_die(config,
+                              "census 2 csw_from leaves -threads 4 -seed 12");
+  load_and_exec_config_or_die(config,
+                              "census 2 csw_only table -threads 4 -seed 12");
+  const uint64_t current_leaves_hash =
+      klv_get_hash(player_get_klv(game_get_player(config_get_game(config), 0)));
+
+  ErrorStack *error_stack = error_stack_create();
+  RackValueTable *from_leaves =
+      rack_value_table_create(tmp_dir, "csw_from", false, error_stack);
+  RackValueTable *table_only =
+      rack_value_table_create(tmp_dir, "csw_only", false, error_stack);
+  KLV *written_leaves = klv_create(tmp_dir, "csw_from", error_stack);
+  assert(error_stack_is_empty(error_stack));
+  assert(rack_value_table_get_klv_hash(from_leaves) ==
+         klv_get_hash(written_leaves));
+  assert(klv_get_hash(written_leaves) != current_leaves_hash);
+  assert(rack_value_table_get_klv_hash(table_only) == current_leaves_hash);
+  klv_destroy(written_leaves);
+
+  // the same values, rack by rack
+  const uint32_t number_of_valued_racks =
+      rack_value_table_get_number_of_valued_racks(table_only);
+  assert(number_of_valued_racks > 100000);
+  assert(number_of_valued_racks ==
+         rack_value_table_get_number_of_valued_racks(from_leaves));
+  const LetterDistribution *ld = game_get_ld(config_get_game(config));
+  const int ld_size = ld_get_size(ld);
+  XoshiroPRNG *prng = prng_create(13);
+  int racks_found = 0;
+  for (int rack_idx = 0; rack_idx < 2000; rack_idx++) {
+    uint8_t rack_tally[MAX_ALPHABET_SIZE] = {0};
+    for (int tile_idx = 0; tile_idx < RACK_SIZE; tile_idx++) {
+      MachineLetter ml = (MachineLetter)prng_get_random_number(prng, ld_size);
+      while (rack_tally[ml] >= ld_get_dist(ld, ml)) {
+        ml = (MachineLetter)prng_get_random_number(prng, ld_size);
+      }
+      rack_tally[ml]++;
+    }
+    const BitRack bit_rack = bit_rack_of_tally(rack_tally, ld_size);
+    Equity from_value = 0;
+    Equity only_value = 0;
+    const bool from_found =
+        rack_value_table_lookup(from_leaves, &bit_rack, &from_value);
+    const bool only_found =
+        rack_value_table_lookup(table_only, &bit_rack, &only_value);
+    assert(from_found == only_found);
+    if (from_found) {
+      assert(from_value == only_value);
+      racks_found++;
+    }
+  }
+  assert(racks_found > 200);
+  prng_destroy(prng);
+  rack_value_table_destroy(table_only);
+  rack_value_table_destroy(from_leaves);
+
+  error_stack_destroy(error_stack);
+
+  // the table and nothing beside it
+  const char *written[] = {"csw_only.rvt", "csw_from.klv2",
+                           "csw_from_gen_1.klv2", "csw_from.csv"};
+  const char *not_written[] = {"csw_only.klv2", "csw_only_gen_1.klv2",
+                               "csw_only.csv"};
+  for (size_t file_idx = 0; file_idx < sizeof(written) / sizeof(written[0]);
+       file_idx++) {
+    char *filename =
+        get_formatted_string("%s/%s", lexica_dir, written[file_idx]);
+    assert(cfile_access(filename, CFILE_ACCESS_EXISTS));
+    free(filename);
+  }
+  for (size_t file_idx = 0;
+       file_idx < sizeof(not_written) / sizeof(not_written[0]); file_idx++) {
+    char *filename =
+        get_formatted_string("%s/%s", lexica_dir, not_written[file_idx]);
+    assert(!cfile_access(filename, CFILE_ACCESS_EXISTS));
+    free(filename);
+  }
+
+  // one generation only
+  assert_config_exec_status(config, "census 2x2 csw_two table",
+                            ERROR_STATUS_CENSUS_MALFORMED_RECIPE);
+  assert_config_exec_status(config, "census 2,2 csw_two table",
+                            ERROR_STATUS_CENSUS_MALFORMED_RECIPE);
+
+  config_destroy(config);
+  free(set_cmd);
+  free(lexica_dir);
+  test_platform_remove_directory_tree(tmp_dir);
+  free(tmp_dir);
+}
+
 void test_census(void) {
   test_lattice_ranks_round_trip();
   test_add_table();
@@ -1100,4 +1202,5 @@ void test_census(void) {
   test_census_command();
   test_rack_values_match_movegen_ab();
   test_rack_values_match_movegen_csw();
+  test_census_table_only();
 }
