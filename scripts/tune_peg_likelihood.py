@@ -28,7 +28,12 @@ def load(paths):
             row = dict(re.findall(r'(\w+)=(\S+)', line))
             if 'top' not in row:
                 continue
-            top = [tuple(map(float, item.split(':'))) for item in row['top'].split(',')]
+            try:
+                top = [tuple(map(float, item.split(':'))) for item in row['top'].split(',')]
+            except ValueError:
+                continue  # a line still being written
+            if not line.endswith('\n') or any(len(item) != 2 for item in top):
+                continue
             rack = {'leave': row['leave'], 'truth': row['truth'] == '1', 'ways': float(row['ways']),
                     'klv': float(row['klv']), 'rank': int(row['observed_rank']),
                     'win': float(row['observed_win']), 'spread': float(row['observed_spread']),
@@ -75,7 +80,8 @@ def score(observations, keys, win_points, temperature):
         out['nll'].append(-math.log(mixed))
         out['gain'].append(math.log(mixed) - math.log(prior[truth]))
         out['excluded'].append(post[truth] == 0)
-        out['top1'].append(post[truth] == max(post))
+        ties = sum(p == max(post) for p in post)
+        out['top1'].append(1 / ties if post[truth] == max(post) else 0.0)
         for name, values in (('klv', [r['klv'] for r in racks]),
                              ('vowel', [features(r['leave'])[0] for r in racks]),
                              ('score', [features(r['leave'])[1] for r in racks])):
@@ -113,8 +119,8 @@ def main():
           f'{100 * st.mean(r == 0 for r in ranks):.1f}% of observations, top three in '
           f'{100 * st.mean(0 <= r < 3 for r in ranks):.1f}%')
     best = None
-    for win_points in (0, 25, 50, 100, 200, 400, 1000):
-        for temperature in (0.5, 1, 2, 3, 4, 6, 8, 12, 16, 24, 32, 48):
+    for win_points in (0, 25, 50, 100, 200, 400, 1000, 3000, 10000, 100000):
+        for temperature in (0.25, 0.5, 1, 2, 3, 4, 6, 8, 12, 16, 24, 32, 48):
             value = st.mean(score(observations, train, win_points, temperature)['gain'])
             if best is None or value > best[0]:
                 best = (value, win_points, temperature)
