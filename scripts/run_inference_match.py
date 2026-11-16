@@ -84,6 +84,8 @@ def main():
     parser.add_argument('--seed', type=int, default=2026110300)
     parser.add_argument('--null-match', action='store_true',
                         help='neither player infers')
+    parser.add_argument('--pat', action='store_true',
+                        help='PAT candidates and rollouts on for both players')
     parser.add_argument('--seat0-budget-ms', type=int,
                         help="player 0's game clock; player 1 gets --budget-ms")
     args = parser.parse_args()
@@ -109,7 +111,7 @@ def main():
                 'null_match': args.null_match,
                 'seat0_game_budget_ms': args.seat0_budget_ms or args.budget_ms,
                 'softmax_margin': 10000, 'softmax_temperature': 8,
-                'control_inference': False, 'PAT': False, 'game_pairs': True,
+                'control_inference': False, 'PAT': args.pat, 'game_pairs': True,
                 'inference_charged_to_game_clock': True,
                 'reserve_seconds': min(1.0, args.budget_ms / 10000),
                 'inference_min_search_seconds': 0.3,
@@ -132,8 +134,10 @@ def main():
             log = open(directory/f'worker-{worker:02d}.log', 'w')
             pair_count = (args.pairs // args.workers + (worker < args.pairs % args.workers)) if args.pairs else 100000
             spec = f'infmatch:{pair_count}:{args.budget_ms}:{args.seed+worker}:{args.workers}:{int(args.null_match)}'
-            if args.seat0_budget_ms:
-                spec += f':{args.seat0_budget_ms}'
+            if args.seat0_budget_ms or args.pat:
+                spec += f':{args.seat0_budget_ms or args.budget_ms}'
+            if args.pat:
+                spec += ':1'
             proc = subprocess.Popen([str(binary), spec], stdout=log, stderr=subprocess.STDOUT,
                                     cwd=Path(__file__).resolve().parents[1])
             jobs.append((proc, log))
