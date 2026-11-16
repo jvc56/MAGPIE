@@ -125,15 +125,22 @@ static void infbench_peg_solver_init(int peg_bag) {
 
 // As autoplay's pre-endgame solve (every unseen tile dealt, the opponent's
 // actual rack never read), with the greedy-seed and stage caps exposed.
-static const Move *infbench_peg_solve(Game *game, ErrorStack *error_stack) {
+// full_ranking (greedy solves only): report every candidate, not just the
+// first stage's survivors.
+static void infbench_peg_solve_result(const Game *game, bool greedy_only,
+                                      bool full_ranking, PegResult *result,
+                                      ErrorStack *error_stack) {
   InferBenchPegSolver *solver = &infbench_peg_solver;
   const AutoplaySolverSettings *settings = &solver->settings;
+  static const int keep_all[] = {1000000};
+  const bool keep_everything = greedy_only && full_ranking;
   ThreadControl *thread_control = thread_control_create();
   thread_control_set_status(thread_control, THREAD_CONTROL_STATUS_STARTED);
   PegArgs peg_args;
   peg_args_fill(
       game, thread_control, 1, /*time_budget_seconds=*/0.0, solver->max_stage,
-      solver->greedy_only, settings->peg_stage_top_k, settings->peg_num_stages,
+      greedy_only, keep_everything ? keep_all : settings->peg_stage_top_k,
+      keep_everything ? 1 : settings->peg_num_stages,
       /*inner_top_k=*/0,
       settings->peg_pessimistic ? PEG_OPP_PESSIMISTIC : PEG_OPP_RATIONAL,
       settings->peg_scenario_stride, settings->peg_nested,
@@ -157,9 +164,15 @@ static const Move *infbench_peg_solve(Game *game, ErrorStack *error_stack) {
       /*on_cand_done=*/NULL, /*on_scenario_done=*/NULL, /*user_data=*/NULL,
       /*poll=*/NULL, solver->table, /*checkpoint=*/NULL, /*resume=*/false,
       &peg_args);
-  PegResult result = {0};
-  peg_solve(&peg_args, &result, error_stack);
+  peg_solve(&peg_args, result, error_stack);
   thread_control_destroy(thread_control);
+}
+
+static const Move *infbench_peg_solve(Game *game, ErrorStack *error_stack) {
+  InferBenchPegSolver *solver = &infbench_peg_solver;
+  PegResult result = {0};
+  infbench_peg_solve_result(game, solver->greedy_only, false, &result,
+                            error_stack);
   const bool chose = error_stack_is_empty(error_stack) &&
                      result.n_top_cands > 0 && result.best_win >= 0.0;
   if (chose) {
@@ -433,6 +446,100 @@ static void infbench_played_tiles(const Move *move, Rack *played) {
   assert(rack_get_total_letters(played) == move_get_tiles_played(move));
 }
 
+enum { INFBENCH_PEG_CACHE_CANDS = 40 };
+
+// One greedy-seed solve of the observed position with the target holding
+// `leave` plus the tiles it played, and the rest of the unseen pool in the
+// bag. Prints the solver's value of the observed move and of its best
+// candidates for that rack: the raw material of a solver-based likelihood,
+// which can then be tuned offline without solving again.
+static void infbench_peg_cache_rack(const Game *game, const Move *move,
+                                    const char *move_text, const Rack *unseen,
+                                    const Rack *played, const Rack *leave,
+                                    const Rack *truth, const KLV *klv,
+                                    double ways, const char *prefix) {
+  const LetterDistribution *ld = game_get_ld(game);
+  Game *copy = game_duplicate(game);
+  Rack *target_rack = player_get_rack(game_get_player(copy, 0));
+  rack_copy(target_rack, leave);
+  MachineLetter bag_tiles[MAX_ALPHABET_SIZE * 4];
+  int num_bag_tiles = 0;
+  bool is_truth = true;
+  for (int ml = 0; ml < ld_get_size(ld); ml++) {
+    rack_add_letters(target_rack, ml, rack_get_letter(played, ml));
+    const int in_bag = rack_get_letter(unseen, ml) - rack_get_letter(leave, ml);
+    for (int idx = 0; idx < in_bag; idx++) {
+      bag_tiles[num_bag_tiles++] = (MachineLetter)ml;
+    }
+    is_truth = is_truth && rack_get_letter(leave, ml) == rack_get_letter(truth, ml);
+  }
+  bag_set_to_tiles(game_get_bag(copy), bag_tiles, num_bag_tiles);
+  ErrorStack *errors = error_stack_create();
+  PegResult result = {0};
+  Timer timer;
+  ctimer_start(&timer);
+  infbench_peg_solve_result(copy, true, true, &result, errors);
+  const double seconds = ctimer_elapsed_seconds(&timer);
+  if (!error_stack_is_empty(errors) || result.n_top_cands == 0) {
+    error_stack_print_and_reset(errors);
+    log_fatal("infbench peg cache solve failed: %s", prefix);
+  }
+  StringBuilder *text = string_builder_create();
+  int observed_rank = -1;
+  for (int idx = 0; idx < result.n_top_cands && observed_rank < 0; idx++) {
+    string_builder_clear(text);
+    string_builder_add_move_description(text, &result.top_cands[idx].move, ld);
+    if (strings_equal(string_builder_peek(text), move_text)) {
+      observed_rank = idx;
+    }
+  }
+  string_builder_clear(text);
+  string_builder_add_rack(text, leave, ld, true);
+  printf("INFBENCH pegcache %s leave=%s truth=%d ways=%.0f klv=%.4f "
+         "candidates=%d observed_rank=%d observed_win=%.6f "
+         "observed_spread=%.4f seconds=%.3f top=",
+         prefix, string_builder_peek(text), is_truth, ways,
+         equity_to_double(klv_get_leave_value(klv, leave)), result.n_top_cands,
+         observed_rank,
+         observed_rank < 0 ? -1.0 : result.top_cands[observed_rank].win_pct,
+         observed_rank < 0 ? 0.0 : result.top_cands[observed_rank].mean_spread,
+         seconds);
+  for (int idx = 0;
+       idx < result.n_top_cands && idx < INFBENCH_PEG_CACHE_CANDS; idx++) {
+    printf("%s%.5f:%.3f", idx == 0 ? "" : ",", result.top_cands[idx].win_pct,
+           result.top_cands[idx].mean_spread);
+  }
+  printf("\n");
+  string_builder_destroy(text);
+  peg_result_destroy(&result);
+  error_stack_destroy(errors);
+  game_destroy(copy);
+}
+
+static void infbench_peg_cache(const Game *game, const Move *move,
+                               const char *move_text, const Rack *unseen,
+                               const Rack *played, Rack *leave,
+                               const Rack *truth, const KLV *klv, int ml,
+                               int remaining, double ways, const char *prefix) {
+  if (remaining == 0) {
+    infbench_peg_cache_rack(game, move, move_text, unseen, played, leave, truth,
+                            klv, ways, prefix);
+    return;
+  }
+  if (ml == rack_get_dist_size(unseen)) {
+    return;
+  }
+  const int available = rack_get_letter(unseen, ml);
+  const int max_count = available < remaining ? available : remaining;
+  for (int count = 0; count <= max_count; count++) {
+    rack_add_letters(leave, ml, count);
+    infbench_peg_cache(game, move, move_text, unseen, played, leave, truth, klv,
+                       ml + 1, remaining - count,
+                       ways * (double)choose(available, count), prefix);
+    rack_take_letters(leave, ml, count);
+  }
+}
+
 static void infbench_observe(const Config *config, const Move *move, int policy,
                              int pair_idx, int game_idx, int turn,
                              InferBenchScore totals[INFBENCH_MODES],
@@ -563,6 +670,23 @@ static void infbench_observe(const Config *config, const Move *move, int policy,
              exchanged_score.metrics[4], exchanged_score.metrics[5],
              exchanged_score.empty);
     }
+    (void)fflush(stdout);
+  }
+  // INFBENCH_PEG_CACHE=1 (pegBxT scans): a greedy solve per candidate rack.
+  if (infbench_peg_solver.ctx != NULL && !exchange &&
+      infbench_env_int("INFBENCH_PEG_CACHE", 0) != 0) {
+    StringBuilder *move_text = string_builder_create();
+    string_builder_add_move_description(move_text, move, ld);
+    char *prefix =
+        get_formatted_string("policy=%s pair=%d game=%d turn=%d",
+                             infbench_policies[policy], pair_idx, game_idx, turn);
+    Rack leave;
+    rack_set_dist_size_and_reset(&leave, ld_get_size(ld));
+    infbench_peg_cache(game, move, string_builder_peek(move_text), &unseen,
+                       &played, &leave, &truth, klv, 0,
+                       rack_get_total_letters(&truth), 1.0, prefix);
+    free(prefix);
+    string_builder_destroy(move_text);
     (void)fflush(stdout);
   }
   error_stack_destroy(errors);
