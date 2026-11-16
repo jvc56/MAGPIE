@@ -83,13 +83,17 @@ typedef struct PATEvalContext {
   // Each unit's baseline contribution to pre_penalty (always <= 0), used
   // to bound a move's penalty from above without rescanning.
   Equity unit_penalty[PAT_MAX_SCAN_UNITS];
-  // Sum of every unit's baseline penalty, and the units ordered from the
-  // most negative baseline up. A move's combination is then formed from
-  // the units it reaches alone: the unreached sum is the total less the
-  // reached baselines, and the unreached worst is the first unit in this
-  // order the move does not reach.
+  // Sum of every unit's baseline penalty, and the units that have one
+  // ordered from the most negative up: the first num_penalized_units
+  // entries of units_by_penalty, which are also the bits of
+  // penalized_units. A move's combination is then formed from the units it
+  // reaches alone: the unreached sum is the total less the reached
+  // baselines, and the unreached worst is the first unit in this order the
+  // move does not reach, or 0 when it reaches them all.
   int64_t total_unit_penalty;
+  int num_penalized_units;
   uint16_t units_by_penalty[PAT_MAX_SCAN_UNITS];
+  uint64_t penalized_units[PAT_MASK_WORDS];
   // For each unit group (see PAT_NUM_UNIT_GROUPS), the features its scans
   // can write that carry a nonzero weight, and those weights, so a unit's
   // dot product visits only those; every other term is exactly zero.
@@ -164,7 +168,8 @@ typedef struct PATEvalContext {
   // route found by unit u's baseline scan accepts machine letter L (blanks
   // excluded, as in pat_set_flex), so a move's leave can be checked against
   // the letters that would let it exploit the unit whether or not the move
-  // touches it. Computed once per position load.
+  // touches it. Computed once per position load, and only when the file
+  // carries a discount, which is all that reads it or the reverse index.
   uint64_t unit_hook_letters[PAT_MAX_SCAN_UNITS];
   // Reverse index of the above: bit u of units_by_hook_letter[L] is set when
   // unit_hook_letters[u] has bit L, so the units a leave could exploit are a
