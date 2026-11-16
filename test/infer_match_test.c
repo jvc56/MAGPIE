@@ -86,7 +86,7 @@ typedef struct MatchSeatStats {
 } MatchSeatStats;
 
 static double match_game(const Config *config, unsigned int seed, int game_idx,
-                         double game_seconds, bool null_match) {
+                         const double seat_seconds[2], bool null_match) {
   Game *game = config_get_game(config);
   game_reset(game);
   game_seed(game, seed);
@@ -115,6 +115,7 @@ static double match_game(const Config *config, unsigned int seed, int game_idx,
     const int seat = game_get_player_on_turn_index(game);
     MatchSeatStats *stat = &stats[seat];
     stat->turns++;
+    const double game_seconds = seat_seconds[seat];
     const double remaining = fmax(0, game_seconds - stat->elapsed);
     const double reserve = fmin(1.0, game_seconds * 0.1);
     const double search_remaining = fmax(0, remaining - reserve);
@@ -222,10 +223,10 @@ static double match_game(const Config *config, unsigned int seed, int game_idx,
              inference_results_get_elapsed_seconds(inferences));
     }
     // Fail the experiment instead of accepting a move computed over budget.
-    if (stat->elapsed > game_seconds) {
+    if (stat->elapsed > seat_seconds[seat]) {
       log_fatal("infmatch clock overrun: seed=%u game=%d seat=%d elapsed=%.6f "
                 "cap=%.6f",
-                seed, game_idx, seat, stat->elapsed, game_seconds);
+                seed, game_idx, seat, stat->elapsed, seat_seconds[seat]);
     }
     game_copy(previous, game);
     move_copy(&previous_move, &chosen);
@@ -273,7 +274,8 @@ static double match_outcome(double spread) {
 
 void infer_match_run_spec(const char *spec) {
   StringSplitter *fields = split_string(spec, ':', true);
-  assert(string_splitter_get_number_of_items(fields) == 5);
+  const int num_fields = string_splitter_get_number_of_items(fields);
+  assert(num_fields == 5 || num_fields == 6);
   ErrorStack *errors = error_stack_create();
   const int pairs = string_to_int(string_splitter_get_item(fields, 0), errors);
   const int milliseconds =
@@ -283,8 +285,16 @@ void infer_match_run_spec(const char *spec) {
   const int stride = string_to_int(string_splitter_get_item(fields, 3), errors);
   const int null_match =
       string_to_int(string_splitter_get_item(fields, 4), errors);
+  // Optional sixth field: player 0's game clock in milliseconds. Player 1
+  // always gets MILLISECONDS. Used for handicap (unequal-clock) matches.
+  const int seat0_milliseconds =
+      num_fields == 6
+          ? string_to_int(string_splitter_get_item(fields, 5), errors)
+          : milliseconds;
   assert(error_stack_is_empty(errors) && pairs > 0 && milliseconds > 0 &&
-         stride > 0);
+         stride > 0 && seat0_milliseconds > 0);
+  const double seat_seconds[2] = {seat0_milliseconds / 1000.0,
+                                  milliseconds / 1000.0};
   string_splitter_destroy(fields);
   error_stack_destroy(errors);
   Config *config = config_create_or_die(
@@ -306,11 +316,13 @@ void infer_match_run_spec(const char *spec) {
     assert(player_get_word_info_table(player) != NULL);
   }
   printf(
-      "INFMATCH_SETTINGS milliseconds=%d seed=%llu stride=%d null=%d "
+      "INFMATCH_SETTINGS milliseconds=%d seat0_milliseconds=%d seed=%llu "
+      "stride=%d null=%d "
       "lex=CSW24 threads=1 bag_cycle=1 rit=1 wit=1 margin=10000 temperature=8 "
       "candidates=15 plies=2 reserve_seconds=%.6f "
       "inference_min_search_seconds=0.3 exchange_max_bag=30\n",
-      milliseconds, (unsigned long long)seed, stride, null_match,
+      milliseconds, seat0_milliseconds, (unsigned long long)seed, stride,
+      null_match,
       fmin(1.0, milliseconds / 10000.0));
   if (fflush(stdout) != 0) {
     log_fatal("infmatch output flush failed");
@@ -318,10 +330,10 @@ void infer_match_run_spec(const char *spec) {
   for (int pair_idx = 0; pair_idx < pairs; pair_idx++) {
     const unsigned int pair_seed =
         (unsigned int)(seed + ((uint64_t)pair_idx * (uint64_t)stride));
-    const double first = match_game(config, pair_seed, 0, milliseconds / 1000.0,
-                                    null_match != 0);
-    const double second = match_game(config, pair_seed, 1,
-                                     milliseconds / 1000.0, null_match != 0);
+    const double first =
+        match_game(config, pair_seed, 0, seat_seconds, null_match != 0);
+    const double second =
+        match_game(config, pair_seed, 1, seat_seconds, null_match != 0);
     const double outcome = (match_outcome(first) + match_outcome(second)) / 2;
     printf("INFMATCH_PAIR seed=%u win_fraction=%.6f spread=%.3f\n", pair_seed,
            outcome, (first + second) / 2);
