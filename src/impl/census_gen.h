@@ -46,6 +46,10 @@ typedef struct CensusGenArgs {
   // are played by the game's leaves, and the first generation starts from
   // them.
   bool null_start;
+  // Write no leaves, only the rack value table output_name: the full racks'
+  // values on the scale of the game's leaves, with their hash. For one
+  // generation that starts from the game's leaves.
+  bool table_only;
   ThreadControl *thread_control;
 } CensusGenArgs;
 

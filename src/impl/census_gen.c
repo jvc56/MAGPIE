@@ -527,6 +527,14 @@ void census_gen(const CensusGenArgs *args, ErrorStack *error_stack) {
   if (!board_counts) {
     return;
   }
+  if (args->table_only && (number_of_gens != 1 || args->null_start)) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_CENSUS_MALFORMED_RECIPE,
+        string_duplicate("a rack value table for the current leaves takes one "
+                         "generation that starts from them"));
+    free(board_counts);
+    return;
+  }
   const LetterDistribution *ld = game_get_ld(args->game);
   const int num_letters = ld_get_size(ld);
   int num_tiles = 0;
@@ -715,6 +723,14 @@ void census_gen(const CensusGenArgs *args, ErrorStack *error_stack) {
         play_scores_cache_entry_free(&shared.play_scores_cache[board_idx]);
       }
     }
+    if (args->table_only) {
+      thread_control_print_formatted(
+          args->thread_control,
+          "census: %lu boards, %u multisets valued, baseline %.3f (%.1fs)\n",
+          (unsigned long)shared.gen_boards, number_valued, base / 1000.0,
+          ctimer_elapsed_seconds(&timer));
+      break;
+    }
     char *gen_name =
         get_formatted_string("%s_gen_%d", args->output_name, gen_idx + 1);
     census_write_klv(&shared, ld, exact, ever_valued, gen_name, false, NULL,
@@ -733,8 +749,13 @@ void census_gen(const CensusGenArgs *args, ErrorStack *error_stack) {
 
   if (error_stack_is_empty(error_stack) && !interrupted) {
     uint64_t klv_hash = 0;
-    census_write_klv(&shared, ld, exact, ever_valued, args->output_name, true,
-                     &klv_hash, error_stack);
+    if (args->table_only) {
+      // the leaves the racks were valued with
+      klv_hash = klv_get_hash(player_get_klv(game_get_player(args->game, 0)));
+    } else {
+      census_write_klv(&shared, ld, exact, ever_valued, args->output_name, true,
+                       &klv_hash, error_stack);
+    }
     if (error_stack_is_empty(error_stack)) {
       census_write_rack_values(&shared, exact, ever_valued, args->output_name,
                                klv_hash, error_stack);

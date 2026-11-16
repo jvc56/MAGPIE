@@ -1610,9 +1610,10 @@ static const char *contribute_help(const char **usages, const char **examples) {
 }
 
 static const char *census_help(const char **usages, const char **examples) {
-  usages[0] = "<recipe> [<output_name>] [null|leaves]";
+  usages[0] = "<recipe> [<output_name>] [null|leaves|table]";
   examples[0] = "3x256,2048";
   examples[1] = "4x256 CSW24_census";
+  examples[2] = "8192 CSW24 table";
   return "Generates leaves for the current lexicon with the census. It "
          "values every leave exactly on each of many boards against the "
          "leaves of the generation before. The recipe gives each "
@@ -1625,7 +1626,10 @@ static const char *census_help(const char **usages, const char **examples) {
          "<output_name>.rvt. With null (the default) the boards are "
          "played greedily by score and the first generation starts from "
          "leaves of zero; with leaves they are played by the current leaves, "
-         "which the first generation starts from. The census values a full "
+         "which the first generation starts from. With table, a recipe of "
+         "one generation values the full racks with the current leaves and "
+         "writes only <output_name>.rvt, the table that goes with those "
+         "leaves. The census values a full "
          "rack as the best of its plays and its exchanges, so it assumes an "
          "exchange is always allowed. Use the -seed and -threads options. "
          "The census is about as strong as leavegen alone; the blend of the "
@@ -5779,14 +5783,20 @@ void impl_census(Config *config, ErrorStack *error_stack) {
   const char *output_name = config_get_parg_value(config, ARG_TOKEN_CENSUS, 1);
   const char *start = config_get_parg_value(config, ARG_TOKEN_CENSUS, 2);
   bool null_start = true;
+  bool table_only = false;
   if (start) {
     if (strings_equal(start, "leaves")) {
       null_start = false;
+    } else if (strings_equal(start, "table")) {
+      null_start = false;
+      table_only = true;
     } else if (!strings_equal(start, "null")) {
       error_stack_push(
           error_stack, ERROR_STATUS_CENSUS_MALFORMED_RECIPE,
           get_formatted_string(
-              "the census starts from 'null' or 'leaves', not '%s'", start));
+              "the census starts from 'null' or 'leaves' or writes only a "
+              "'table', not '%s'",
+              start));
       return;
     }
   }
@@ -5805,6 +5815,7 @@ void impl_census(Config *config, ErrorStack *error_stack) {
       .seed = config_get_seed(config),
       .number_of_threads = config_get_num_threads(config),
       .null_start = null_start,
+      .table_only = table_only,
       .thread_control = config->thread_control,
   };
   census_gen(&args, error_stack);
