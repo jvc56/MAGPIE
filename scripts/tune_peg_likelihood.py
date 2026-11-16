@@ -45,7 +45,10 @@ def load(paths):
 def regret(rack, win_points):
     if rack['rank'] < 0:
         return float('inf')
-    observed = win_points * rack['win'] + rack['spread']
+    # The ranking is printed to fewer decimals than the observed move's own
+    # fields; read the observed move from the ranking when it is listed there.
+    win, spread = rack['top'][rack['rank']] if rack['rank'] < len(rack['top']) else (rack['win'], rack['spread'])
+    observed = win_points * win + spread
     best = max(win_points * win + spread for win, spread in rack['top'])
     return max(0.0, best - observed)
 
