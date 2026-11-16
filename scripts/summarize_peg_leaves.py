@@ -6,7 +6,8 @@ import statistics as st
 import sys
 from collections import defaultdict
 
-MODES = ['prior', 'hard0', 'hard5', 'hard10', 'soft5t2', 'soft10t5', 'soft20t5', 'softnocutofft8']
+MODES = ['prior', 'hard0', 'hard10', 'soft20t5', 'softnocutofft4', 'softnocutofft8', 'softnocutofft12',
+         'softnocutofft16', 'softnocutofft24', 'softnocutofft32', 'softnocutofft48', 'softnocutofft64']
 FIELDS = ['mixed_nll', 'gain_nats', 'klv_mse', 'vowel_mse', 'score_mse', 'tile_mse', 'duplicate_mse']
 
 

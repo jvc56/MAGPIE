@@ -48,7 +48,7 @@
 
 enum {
   INFBENCH_POLICIES = 3,
-  INFBENCH_MODES = 12,
+  INFBENCH_MODES = 19,
   INFBENCH_METRICS = 6,
   INFBENCH_DEFAULT_PAIRS = 4,
   INFBENCH_DEFAULT_POSITIONS = 2,
@@ -186,6 +186,11 @@ static const InferBenchMode infbench_modes[INFBENCH_MODES] = {
     {"soft5t5", 5, 5, 2},   {"soft10t2", 10, 2, 3},
     {"soft10t5", 10, 5, 3}, {"soft20t2", 20, 2, 4},
     {"soft20t5", 20, 5, 4}, {"softnocutofft8", 10000, 8, 4},
+    // Temperature sweep with no margin; each is compared with temperature 8.
+    {"softnocutofft4", 10000, 4, 11},  {"softnocutofft12", 10000, 12, 11},
+    {"softnocutofft16", 10000, 16, 11}, {"softnocutofft24", 10000, 24, 11},
+    {"softnocutofft32", 10000, 32, 11}, {"softnocutofft48", 10000, 48, 11},
+    {"softnocutofft64", 10000, 64, 11},
 };
 
 typedef struct InferBenchPrediction {
