@@ -8,6 +8,8 @@
 #include "../src/def/letter_distribution_defs.h"
 #include "../src/def/move_defs.h"
 #include "../src/def/rack_defs.h"
+#include "../src/ent/bit_rack.h"
+#include "../src/ent/board.h"
 #include "../src/ent/dictionary_word.h"
 #include "../src/ent/equity.h"
 #include "../src/ent/game.h"
@@ -17,10 +19,12 @@
 #include "../src/ent/move.h"
 #include "../src/ent/player.h"
 #include "../src/ent/rack.h"
+#include "../src/ent/rack_value_table.h"
 #include "../src/ent/xoshiro.h"
 #include "../src/impl/census.h"
 #include "../src/impl/census_play_scores.h"
 #include "../src/impl/config.h"
+#include "../src/impl/gameplay.h"
 #include "../src/impl/kwg_maker.h"
 #include "../src/impl/move_gen.h"
 #include "../src/util/io_util.h"
@@ -713,6 +717,42 @@ static void test_census_command(void) {
       get_string_from_file_or_die("./test/fixtures/census_CSW21_ab.csv");
   assert_strings_equal(csv_1, csv_3);
   assert_strings_equal(csv_1, expected_csv);
+
+  // The full racks' values come out the same on any number of threads, and
+  // carry the hash of the leaves written with them. With no blank in the
+  // distribution, the full racks of A and B are RACK_SIZE + 1.
+  ErrorStack *table_error_stack = error_stack_create();
+  RackValueTable *table_1 =
+      rack_value_table_create(tmp_dir, "ab_census_1", false, table_error_stack);
+  RackValueTable *table_3 =
+      rack_value_table_create(tmp_dir, "ab_census_3", true, table_error_stack);
+  KLV *table_klv = klv_create(tmp_dir, "ab_census_1", table_error_stack);
+  assert(error_stack_is_empty(table_error_stack));
+  assert(rack_value_table_get_number_of_racks(table_1) == RACK_SIZE + 1);
+  assert(rack_value_table_get_number_of_racks(table_3) == RACK_SIZE + 1);
+  assert(rack_value_table_get_klv_hash(table_1) == klv_get_hash(table_klv));
+  assert(rack_value_table_get_klv_hash(table_3) == klv_get_hash(table_klv));
+  bool any_nonzero = false;
+  for (int number_of_as = 0; number_of_as <= RACK_SIZE; number_of_as++) {
+    BitRack bit_rack = bit_rack_create_empty();
+    for (int tile_idx = 0; tile_idx < RACK_SIZE; tile_idx++) {
+      bit_rack_add_letter(&bit_rack, tile_idx < number_of_as ? 1 : 2);
+    }
+    Equity value_1 = 0;
+    Equity value_3 = 0;
+    const bool found_1 = rack_value_table_lookup(table_1, &bit_rack, &value_1);
+    const bool found_3 = rack_value_table_lookup(table_3, &bit_rack, &value_3);
+    assert(found_1);
+    assert(found_3);
+    assert(value_1 == value_3);
+    any_nonzero = any_nonzero || value_1 != 0;
+  }
+  assert(any_nonzero);
+  klv_destroy(table_klv);
+  rack_value_table_destroy(table_3);
+  rack_value_table_destroy(table_1);
+  error_stack_destroy(table_error_stack);
+
   free(expected_csv);
   free(csv_3);
   free(csv_1);
@@ -776,6 +816,278 @@ static void test_census_command(void) {
   free(tmp_dir);
 }
 
+// as the census derives a board's seed (census_mix64 in census_gen.c)
+static uint64_t census_test_mix64(uint64_t value) {
+  value = (value ^ (value >> 30)) * 0xbf58476d1ce4e5b9ULL;
+  value = (value ^ (value >> 27)) * 0x94d049bb133111ebULL;
+  return value ^ (value >> 31);
+}
+
+// Leaves game at the census's board number 0 of a null-start run with the
+// seed: the first game, played greedily by score, to stop with two racks'
+// worth of tiles on the board or more, and a tile left for the bag.
+static void play_first_census_board(Game *game, MoveList *move_list,
+                                    uint64_t seed) {
+  const int target = 2 * RACK_SIZE;
+  const int high_tiles =
+      ld_get_total_tiles(game_get_ld(game)) - 2 * RACK_SIZE - 1;
+  const uint64_t base_seed = census_test_mix64(seed + census_test_mix64(0));
+  for (uint64_t try_idx = 0; try_idx < 1000; try_idx++) {
+    game_reset(game);
+    game_seed(game, try_idx == 0 ? base_seed
+                                 : census_test_mix64(base_seed + try_idx));
+    draw_starting_racks(game);
+    while (!game_over(game)) {
+      const int fill = board_get_tiles_played(game_get_board(game));
+      if (fill >= target) {
+        if (fill <= high_tiles) {
+          return;
+        }
+        break;
+      }
+      const MoveGenArgs move_gen_args = {
+          .game = game,
+          .move_list = move_list,
+          .move_record_type = MOVE_RECORD_BEST,
+          .move_sort_type = MOVE_SORT_SCORE,
+          .override_kwg = NULL,
+          .eq_margin_movegen = 0,
+          .target_equity = EQUITY_MAX_VALUE,
+      };
+      generate_moves(&move_gen_args);
+      play_move(move_list_get_move(move_list, 0), game, NULL);
+    }
+  }
+  assert(false);
+}
+
+// The best score the rack of the tally has on the game's board, 0 if it has
+// no play: what a one-board census from leaves of zero takes the rack's best
+// equity to be.
+static Equity best_score_of_rack(Game *game, MoveList *move_list,
+                                 const uint8_t *rack_tally) {
+  const int ld_size = ld_get_size(game_get_ld(game));
+  Rack *rack = player_get_rack(
+      game_get_player(game, game_get_player_on_turn_index(game)));
+  rack_reset(rack);
+  for (int ml = 0; ml < ld_size; ml++) {
+    for (int copy_idx = 0; copy_idx < rack_tally[ml]; copy_idx++) {
+      rack_add_letter(rack, (MachineLetter)ml);
+    }
+  }
+  const MoveGenArgs move_gen_args = {
+      .game = game,
+      .move_list = move_list,
+      .move_record_type = MOVE_RECORD_BEST,
+      .move_sort_type = MOVE_SORT_SCORE,
+      .override_kwg = NULL,
+      .eq_margin_movegen = 0,
+      .target_equity = EQUITY_MAX_VALUE,
+  };
+  generate_moves(&move_gen_args);
+  const Move *best = move_list_get_move(move_list, 0);
+  if (move_get_type(best) != GAME_EVENT_TILE_PLACEMENT_MOVE) {
+    return 0;
+  }
+  return move_get_score(best);
+}
+
+static BitRack bit_rack_of_tally(const uint8_t *rack_tally, int ld_size) {
+  BitRack bit_rack = bit_rack_create_empty();
+  for (int ml = 0; ml < ld_size; ml++) {
+    for (int copy_idx = 0; copy_idx < rack_tally[ml]; copy_idx++) {
+      bit_rack_add_letter(&bit_rack, (MachineLetter)ml);
+    }
+  }
+  return bit_rack;
+}
+
+// The full racks' values of a one-board census from leaves of zero, against
+// the move generator on that board, replayed here: every rack of the
+// two-letter lexicon to the millipoint, baseline included.
+static void test_rack_values_match_movegen_ab(void) {
+  char *tmp_dir = test_platform_make_temporary_directory("magpie_census_");
+  char *lexica_dir = get_formatted_string("%s/lexica", tmp_dir);
+  assert(cfile_mkdir(lexica_dir) == 0);
+  char *set_cmd = get_formatted_string(
+      "set -path %s:%s -lex CSW21_ab -ld english_ab -wmp false", tmp_dir,
+      DEFAULT_TEST_DATA_PATH);
+  Config *config = config_create_or_die(set_cmd);
+  ErrorStack *error_stack = error_stack_create();
+  MoveList *move_list = move_list_create(1);
+  for (uint64_t seed = 5; seed < 9; seed++) {
+    char *census_cmd = get_formatted_string(
+        "census 1 ab_one null -threads 2 -seed %lu", (unsigned long)seed);
+    load_and_exec_config_or_die(config, census_cmd);
+    free(census_cmd);
+    RackValueTable *rvt =
+        rack_value_table_create(tmp_dir, "ab_one", false, error_stack);
+    assert(error_stack_is_empty(error_stack));
+
+    Game *game = config_game_create(config);
+    play_first_census_board(game, move_list, seed);
+    uint8_t unseen[CENSUS_MAX_LETTERS];
+    census_get_unseen_tally(game, unseen);
+    assert(unseen[0] == 0);
+    Equity best[RACK_SIZE + 1];
+    double weighted_sum = 0.0;
+    double weight_sum = 0.0;
+    for (int number_of_as = 0; number_of_as <= RACK_SIZE; number_of_as++) {
+      uint8_t rack_tally[CENSUS_MAX_LETTERS];
+      memset(rack_tally, 0, sizeof(rack_tally));
+      rack_tally[1] = (uint8_t)number_of_as;
+      rack_tally[2] = (uint8_t)(RACK_SIZE - number_of_as);
+      best[number_of_as] = best_score_of_rack(game, move_list, rack_tally);
+      // the ways to draw the rack from the unseen tiles
+      double weight = 1.0;
+      for (int ml = 1; ml <= 2; ml++) {
+        for (int copy_idx = 0; copy_idx < rack_tally[ml]; copy_idx++) {
+          weight *= (double)(unseen[ml] - copy_idx) / (double)(copy_idx + 1);
+        }
+      }
+      assert(weight > 0.0);
+      weighted_sum += weight * (double)best[number_of_as];
+      weight_sum += weight;
+    }
+    const double baseline = round(weighted_sum / weight_sum);
+    bool values_differ = false;
+    for (int number_of_as = 0; number_of_as <= RACK_SIZE; number_of_as++) {
+      uint8_t rack_tally[CENSUS_MAX_LETTERS];
+      memset(rack_tally, 0, sizeof(rack_tally));
+      rack_tally[1] = (uint8_t)number_of_as;
+      rack_tally[2] = (uint8_t)(RACK_SIZE - number_of_as);
+      const BitRack bit_rack = bit_rack_of_tally(rack_tally, 3);
+      Equity value = 0;
+      const bool found = rack_value_table_lookup(rvt, &bit_rack, &value);
+      assert(found);
+      const double expected = (double)best[number_of_as] - baseline;
+      assert(fabs((double)value - expected) <= 1.0);
+      values_differ = values_differ || best[number_of_as] != best[0];
+    }
+    // a board on which every rack scores the same would check nothing
+    assert(values_differ);
+    game_destroy(game);
+    rack_value_table_destroy(rvt);
+  }
+  move_list_destroy(move_list);
+  error_stack_destroy(error_stack);
+  config_destroy(config);
+  free(set_cmd);
+  free(lexica_dir);
+  test_platform_remove_directory_tree(tmp_dir);
+  free(tmp_dir);
+}
+
+// The same on a full lexicon, for racks drawn at random: the baseline is the
+// same for every rack of a board, so two racks' values differ by what their
+// best scores differ by. The table holds the racks the board's unseen tiles
+// can deal and no others.
+static void test_rack_values_match_movegen_csw(void) {
+  char *tmp_dir = test_platform_make_temporary_directory("magpie_census_");
+  char *lexica_dir = get_formatted_string("%s/lexica", tmp_dir);
+  assert(cfile_mkdir(lexica_dir) == 0);
+  char *set_cmd = get_formatted_string("set -path %s:%s -lex CSW21 -wmp false",
+                                       tmp_dir, DEFAULT_TEST_DATA_PATH);
+  Config *config = config_create_or_die(set_cmd);
+  const uint64_t seed = 11;
+  load_and_exec_config_or_die(config,
+                              "census 1 csw_one null -threads 4 -seed 11");
+  ErrorStack *error_stack = error_stack_create();
+  RackValueTable *rvt =
+      rack_value_table_create(tmp_dir, "csw_one", true, error_stack);
+  KLV *klv = klv_create(tmp_dir, "csw_one", error_stack);
+  assert(error_stack_is_empty(error_stack));
+  assert(rack_value_table_get_klv_hash(rvt) == klv_get_hash(klv));
+  klv_destroy(klv);
+
+  MoveList *move_list = move_list_create(1);
+  Game *game = config_game_create(config);
+  play_first_census_board(game, move_list, seed);
+  const int ld_size = ld_get_size(game_get_ld(game));
+  uint8_t unseen[CENSUS_MAX_LETTERS];
+  census_get_unseen_tally(game, unseen);
+
+  // the multisets of RACK_SIZE tiles within the unseen tally, letter by letter
+  uint64_t ways[RACK_SIZE + 1];
+  memset(ways, 0, sizeof(ways));
+  ways[0] = 1;
+  MachineLetter pool[200];
+  int pool_size = 0;
+  int scarce_letter = -1;
+  for (int ml = 0; ml < ld_size; ml++) {
+    for (int tiles = RACK_SIZE; tiles >= 1; tiles--) {
+      for (int copies = 1; copies <= unseen[ml] && copies <= tiles; copies++) {
+        ways[tiles] += ways[tiles - copies];
+      }
+    }
+    for (int copy_idx = 0; copy_idx < unseen[ml]; copy_idx++) {
+      pool[pool_size++] = (MachineLetter)ml;
+    }
+    if (unseen[ml] < RACK_SIZE) {
+      scarce_letter = ml;
+    }
+  }
+  assert(rack_value_table_get_number_of_racks(rvt) == ways[RACK_SIZE]);
+
+  // a rack with one copy more of a letter than is unseen has no value
+  assert(scarce_letter >= 0);
+  uint8_t undealt_tally[CENSUS_MAX_LETTERS];
+  memset(undealt_tally, 0, sizeof(undealt_tally));
+  undealt_tally[scarce_letter] = (uint8_t)(unseen[scarce_letter] + 1);
+  for (int ml = 0; ml < ld_size; ml++) {
+    if (ml != scarce_letter && unseen[ml] >= RACK_SIZE) {
+      undealt_tally[ml] = (uint8_t)(RACK_SIZE - undealt_tally[scarce_letter]);
+      break;
+    }
+  }
+  const BitRack undealt = bit_rack_of_tally(undealt_tally, ld_size);
+  Equity undealt_value = 0;
+  const bool undealt_found =
+      rack_value_table_lookup(rvt, &undealt, &undealt_value);
+  assert(!undealt_found);
+
+  XoshiroPRNG *prng = prng_create(17);
+  Equity first_best = 0;
+  Equity first_value = 0;
+  int racks_differing = 0;
+  for (int rack_idx = 0; rack_idx < 300; rack_idx++) {
+    for (int draw_idx = 0; draw_idx < RACK_SIZE; draw_idx++) {
+      const int pick = draw_idx + (int)prng_get_random_number(
+                                      prng, (uint64_t)(pool_size - draw_idx));
+      const MachineLetter swap = pool[draw_idx];
+      pool[draw_idx] = pool[pick];
+      pool[pick] = swap;
+    }
+    uint8_t rack_tally[CENSUS_MAX_LETTERS];
+    memset(rack_tally, 0, sizeof(rack_tally));
+    for (int draw_idx = 0; draw_idx < RACK_SIZE; draw_idx++) {
+      rack_tally[pool[draw_idx]]++;
+    }
+    const Equity best = best_score_of_rack(game, move_list, rack_tally);
+    const BitRack bit_rack = bit_rack_of_tally(rack_tally, ld_size);
+    Equity value = 0;
+    const bool found = rack_value_table_lookup(rvt, &bit_rack, &value);
+    assert(found);
+    if (rack_idx == 0) {
+      first_best = best;
+      first_value = value;
+    }
+    assert(abs((value - first_value) - (best - first_best)) <= 1);
+    racks_differing += best != first_best ? 1 : 0;
+  }
+  assert(racks_differing > 200);
+  prng_destroy(prng);
+  game_destroy(game);
+  move_list_destroy(move_list);
+  rack_value_table_destroy(rvt);
+  error_stack_destroy(error_stack);
+  config_destroy(config);
+  free(set_cmd);
+  free(lexica_dir);
+  test_platform_remove_directory_tree(tmp_dir);
+  free(tmp_dir);
+}
+
 void test_census(void) {
   test_lattice_ranks_round_trip();
   test_add_table();
@@ -786,4 +1098,6 @@ void test_census(void) {
   test_leaves_from_klv();
   test_expected_best_matches_apportion();
   test_census_command();
+  test_rack_values_match_movegen_ab();
+  test_rack_values_match_movegen_csw();
 }
