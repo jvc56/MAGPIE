@@ -61,7 +61,7 @@ dsymutil reads the debug information from the object files the binary was linked
     - `quit`.
 
     That takes about 5 seconds; raise `-it` for more samples.
-- **Time-limited runs are not fixed work.** `simbench` gives each turn 2 seconds, so a faster build runs more iterations, and so does a run that happens to go faster. Compare its shares and its iters/s, never its total cycles. `SIMBENCH_THREADS=1` makes it single-threaded; `record.sh` passes its environment to the command.
+- **Time-limited runs are not fixed work.** `simbench` gives each turn 2 seconds, so a faster build runs more iterations, and so does a run that happens to go faster. Compare its shares and its iters/s, never its total cycles. `simbench:threads=1` makes it single-threaded; its other settings go after the colon too, as in `simbench:plies=4,threads=1,wit=false`. Builds from before #929 read environment variables instead, such as `SIMBENCH_THREADS=1`, and `record.sh` passes its environment to the command.
 - **Multithreaded runs** can vary in work from run to run, for example threads sharing a transposition table. `pegspeedbench1` uses 9 threads, and its totals vary by ±2%.
   - Compare their shares, never their totals, over several runs.
   - For exact pairs, build both sides from a local, uncommitted copy of the benchmark set to one thread. Don't commit benchmark tweaks or add environment variables for them.
