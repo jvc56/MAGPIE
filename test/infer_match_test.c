@@ -86,7 +86,8 @@ typedef struct MatchSeatStats {
 } MatchSeatStats;
 
 static double match_game(const Config *config, unsigned int seed, int game_idx,
-                         const double seat_seconds[2], bool null_match) {
+                         const double seat_seconds[2], bool null_match,
+                         bool use_pat) {
   Game *game = config_get_game(config);
   game_reset(game);
   game_seed(game, seed);
@@ -184,7 +185,7 @@ static double match_game(const Config *config, unsigned int seed, int game_idx,
                     BAI_SAMPLING_RULE_TOP_TWO_IDS, 0, 1, 0.5, 100, false,
                     &infer_args, &args);
       args.bag_cycle = true;
-      args.pat_rollout_disabled = true;
+      args.pat_rollout_disabled = !use_pat;
       thread_control_set_status(control, THREAD_CONTROL_STATUS_STARTED);
       bool simulated = false;
       const Move *move = get_top_simming_move(
@@ -275,7 +276,7 @@ static double match_outcome(double spread) {
 void infer_match_run_spec(const char *spec) {
   StringSplitter *fields = split_string(spec, ':', true);
   const int num_fields = string_splitter_get_number_of_items(fields);
-  assert(num_fields == 5 || num_fields == 6);
+  assert(num_fields >= 5 && num_fields <= 7);
   ErrorStack *errors = error_stack_create();
   const int pairs = string_to_int(string_splitter_get_item(fields, 0), errors);
   const int milliseconds =
@@ -288,9 +289,14 @@ void infer_match_run_spec(const char *spec) {
   // Optional sixth field: player 0's game clock in milliseconds. Player 1
   // always gets MILLISECONDS. Used for handicap (unequal-clock) matches.
   const int seat0_milliseconds =
-      num_fields == 6
+      num_fields >= 6
           ? string_to_int(string_splitter_get_item(fields, 5), errors)
           : milliseconds;
+  // Optional seventh field: 1 leaves PAT at the engine defaults (PAT
+  // candidates and PAT rollouts on) for both players; 0 disables both.
+  const bool use_pat =
+      num_fields == 7 &&
+      string_to_int(string_splitter_get_item(fields, 6), errors) != 0;
   assert(error_stack_is_empty(errors) && pairs > 0 && milliseconds > 0 &&
          stride > 0 && seat0_milliseconds > 0);
   const double seat_seconds[2] = {seat0_milliseconds / 1000.0,
@@ -298,11 +304,14 @@ void infer_match_run_spec(const char *spec) {
   string_splitter_destroy(fields);
   error_stack_destroy(errors);
   Config *config = config_create_or_die(
-      "set -lex CSW24 -leaves CSW24 -wmp true -rit true -ritmmap true -wit "
-      "true -s1 equity "
-      "-s2 equity "
-      "-r1 all -r2 all -patcand1 false -patcand2 false -patrollout false "
-      "-threads 1 -numplays 15 -savesettings false -autosavegcg false");
+      use_pat
+          ? "set -lex CSW24 -leaves CSW24 -wmp true -rit true -ritmmap true "
+            "-wit true -s1 equity -s2 equity -r1 all -r2 all -pat auto "
+            "-threads 1 -numplays 15 -savesettings false -autosavegcg false"
+          : "set -lex CSW24 -leaves CSW24 -wmp true -rit true -ritmmap true "
+            "-wit true -s1 equity -s2 equity -r1 all -r2 all "
+            "-patcand1 false -patcand2 false -patrollout false "
+            "-threads 1 -numplays 15 -savesettings false -autosavegcg false");
   load_and_exec_config_or_die(
       config,
       "cgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 / 0/0 0 -lex CSW24;");
@@ -314,15 +323,19 @@ void infer_match_run_spec(const char *spec) {
     const Player *player = game_get_player(config_get_game(config), seat);
     assert(player_get_rack_info_table(player) != NULL);
     assert(player_get_word_info_table(player) != NULL);
+    if (use_pat && (player_get_pat(player) == NULL ||
+                    player_get_pat_disabled(player))) {
+      log_fatal("infmatch: PAT requested but not active for player %d", seat);
+    }
   }
   printf(
       "INFMATCH_SETTINGS milliseconds=%d seat0_milliseconds=%d seed=%llu "
-      "stride=%d null=%d "
+      "stride=%d null=%d pat=%d "
       "lex=CSW24 threads=1 bag_cycle=1 rit=1 wit=1 margin=10000 temperature=8 "
       "candidates=15 plies=2 reserve_seconds=%.6f "
       "inference_min_search_seconds=0.3 exchange_max_bag=30\n",
       milliseconds, seat0_milliseconds, (unsigned long long)seed, stride,
-      null_match,
+      null_match, (int)use_pat,
       fmin(1.0, milliseconds / 10000.0));
   if (fflush(stdout) != 0) {
     log_fatal("infmatch output flush failed");
@@ -331,9 +344,11 @@ void infer_match_run_spec(const char *spec) {
     const unsigned int pair_seed =
         (unsigned int)(seed + ((uint64_t)pair_idx * (uint64_t)stride));
     const double first =
-        match_game(config, pair_seed, 0, seat_seconds, null_match != 0);
+        match_game(config, pair_seed, 0, seat_seconds, null_match != 0,
+                   use_pat);
     const double second =
-        match_game(config, pair_seed, 1, seat_seconds, null_match != 0);
+        match_game(config, pair_seed, 1, seat_seconds, null_match != 0,
+                   use_pat);
     const double outcome = (match_outcome(first) + match_outcome(second)) / 2;
     printf("INFMATCH_PAIR seed=%u win_fraction=%.6f spread=%.3f\n", pair_seed,
            outcome, (first + second) / 2);
