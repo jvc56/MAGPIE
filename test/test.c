@@ -59,6 +59,7 @@
 #include "move_gen_test.h"
 #include "move_test.h"
 #include "movegen_budget_test.h"
+#include "pass_inference_test.h"
 #include "pat_eval_test.h"
 #include "pat_features_test.h"
 #include "pat_file_test.h"
@@ -137,6 +138,7 @@ static TestEntry test_table[] = {
     {"leavemap", test_leave_map},
     {"rit", test_rack_info_table},
     {"rvt", test_rack_value_table},
+    {"passinfer", test_pass_inference},
     {"wit", test_word_info_table},
     {"wpfmaker", test_word_plus_floater_maker},
     {"positionlengths", test_position_lengths},
