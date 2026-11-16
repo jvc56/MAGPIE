@@ -7,6 +7,7 @@
 #include "../src/def/rack_defs.h"
 #include "../src/def/thread_control_defs.h"
 #include "../src/ent/alias_method.h"
+#include "../src/ent/autoplay_solver_settings.h"
 #include "../src/ent/bag.h"
 #include "../src/ent/encoded_rack.h"
 #include "../src/ent/equity.h"
@@ -22,6 +23,9 @@
 #include "../src/ent/sim_results.h"
 #include "../src/ent/stats.h"
 #include "../src/ent/thread_control.h"
+#include "../src/ent/transposition_table.h"
+#include "../src/impl/autoplay_solvers.h"
+#include "../src/impl/peg.h"
 #include "../src/impl/cgp.h"
 #include "../src/impl/config.h"
 #include "../src/impl/gameplay.h"
@@ -57,7 +61,113 @@ enum {
 // All finite comparisons use the same declared mixture. Raw log loss is
 // also reported: a single unsupported true leave makes its mean infinite.
 static const double INFBENCH_PRIOR_MIX = 0.01;
-static const char *const infbench_policies[] = {"static", "pat", "sim2"};
+// "peg" exists only in the pegBxT scan: player 0 chooses the observed
+// decision with the pre-endgame solver (autoplay's, which deals every unseen
+// tile and never sees the opponent's actual rack) and is static otherwise.
+static const char *const infbench_policies[] = {"static", "pat", "sim2", "peg"};
+enum { INFBENCH_PEG_POLICY = 3 };
+
+typedef struct InferBenchPegSolver {
+  AutoplaySolverCtx *ctx;
+  AutoplaySolverSettings settings;
+  TranspositionTable *table;
+  double seconds;
+  int solves;
+  // Greedy seed only (stage 0): every candidate ranked by greedy-playout win%
+  // over the full scenario enumeration, with no endgame-exact halving stages.
+  bool greedy_only;
+  int max_stage;
+  Move move;
+} InferBenchPegSolver;
+
+static InferBenchPegSolver infbench_peg_solver = {0};
+
+static int infbench_env_int(const char *name, int fallback) {
+  const char *value = getenv(name);
+  return value == NULL ? fallback : atoi(value);
+}
+
+// INFBENCH_PEG_GREEDY (default 1: the fast greedy-seed solve; 0 runs the
+// halving stages), INFBENCH_PEG_MAX_STAGE (last halving stage, default all),
+// INFBENCH_PEG_EPLIES (endgame depth, default 3), INFBENCH_PEG_TOPK (stage
+// survivor counts, default "8,4,2"), INFBENCH_PEG_NESTED (default 0),
+// INFBENCH_PEG_STRIDE (scenario stride, default 1 = every scenario).
+static void infbench_peg_solver_init(int peg_bag) {
+  InferBenchPegSolver *solver = &infbench_peg_solver;
+  autoplay_solver_settings_set_defaults(&solver->settings);
+  solver->settings.endgame_plies = infbench_env_int("INFBENCH_PEG_EPLIES", 3);
+  solver->settings.peg_max_bag = peg_bag;
+  solver->settings.peg_nested = infbench_env_int("INFBENCH_PEG_NESTED", 0) != 0;
+  solver->settings.peg_scenario_stride =
+      infbench_env_int("INFBENCH_PEG_STRIDE", 1);
+  solver->greedy_only = infbench_env_int("INFBENCH_PEG_GREEDY", 1) != 0;
+  solver->max_stage = infbench_env_int("INFBENCH_PEG_MAX_STAGE", 0);
+  const char *top_k = getenv("INFBENCH_PEG_TOPK");
+  char schedule[128];
+  snprintf(schedule, sizeof(schedule), "%s", top_k ? top_k : "8,4,2");
+  solver->settings.peg_num_stages = 0;
+  for (char *token = strtok(schedule, ","); token != NULL;
+       token = strtok(NULL, ",")) {
+    assert(solver->settings.peg_num_stages < AUTOPLAY_SOLVER_MAX_PEG_STAGES);
+    solver->settings.peg_stage_top_k[solver->settings.peg_num_stages++] =
+        atoi(token);
+  }
+  solver->ctx = autoplay_solver_ctx_create();
+  solver->table = transposition_table_create(0.01);
+  printf("INFBENCH peg_solver greedy_only=%d max_stage=%d endgame_plies=%d "
+         "stages=%d first_top_k=%d nested=%d stride=%d opp_rack_known=0 "
+         "threads=1\n",
+         solver->greedy_only, solver->max_stage,
+         solver->settings.endgame_plies, solver->settings.peg_num_stages,
+         solver->settings.peg_stage_top_k[0], solver->settings.peg_nested,
+         solver->settings.peg_scenario_stride);
+}
+
+// As autoplay's pre-endgame solve (every unseen tile dealt, the opponent's
+// actual rack never read), with the greedy-seed and stage caps exposed.
+static const Move *infbench_peg_solve(Game *game, ErrorStack *error_stack) {
+  InferBenchPegSolver *solver = &infbench_peg_solver;
+  const AutoplaySolverSettings *settings = &solver->settings;
+  ThreadControl *thread_control = thread_control_create();
+  thread_control_set_status(thread_control, THREAD_CONTROL_STATUS_STARTED);
+  PegArgs peg_args;
+  peg_args_fill(
+      game, thread_control, 1, /*time_budget_seconds=*/0.0, solver->max_stage,
+      solver->greedy_only, settings->peg_stage_top_k, settings->peg_num_stages,
+      /*inner_top_k=*/0,
+      settings->peg_pessimistic ? PEG_OPP_PESSIMISTIC : PEG_OPP_RATIONAL,
+      settings->peg_scenario_stride, settings->peg_nested,
+      /*nested_cand_cap=*/0,
+      settings->peg_nested ? settings->peg_nested_cand_caps : NULL,
+      settings->peg_nested ? settings->peg_nested_num_cand_caps : 0,
+      /*nested_stride=*/0,
+      settings->peg_nested ? settings->peg_nested_strides : NULL,
+      settings->peg_nested ? AUTOPLAY_SOLVER_NUM_NESTED_STRIDES : 0,
+      /*nested_emptier_ply_cap=*/0,
+      settings->peg_nested ? settings->peg_nested_max_depth : 0,
+      /*nested_score_actual=*/false, /*nested_pessimistic=*/false,
+      settings->disable_best_reply_shortcuts, /*first_win=*/false,
+      /*early_cutoff=*/false, /*opp_rack_known=*/false,
+      /*first_win_intermediate=*/false, /*skip_noncutting_stages=*/false,
+      /*final_stage_cutoff=*/false, /*eval_bag_order=*/NULL,
+      /*eval_bag_order_len=*/0, /*limit_tiles_left=*/false,
+      /*max_tiles_left=*/0, /*only_moves=*/NULL, /*n_only_moves=*/0,
+      /*protect_moves=*/NULL, /*n_protect_moves=*/0,
+      /*include_per_scenario=*/false, /*on_stage_start=*/NULL,
+      /*on_cand_done=*/NULL, /*on_scenario_done=*/NULL, /*user_data=*/NULL,
+      /*poll=*/NULL, solver->table, /*checkpoint=*/NULL, /*resume=*/false,
+      &peg_args);
+  PegResult result = {0};
+  peg_solve(&peg_args, &result, error_stack);
+  thread_control_destroy(thread_control);
+  const bool chose = error_stack_is_empty(error_stack) &&
+                     result.n_top_cands > 0 && result.best_win >= 0.0;
+  if (chose) {
+    solver->move = result.best_move;
+  }
+  peg_result_destroy(&result);
+  return chose ? &solver->move : NULL;
+}
 static const char *const infbench_metric_names[] = {
     "mixed_nll", "klv_mse",  "vowel_mse",
     "score_mse", "tile_mse", "duplicate_mse"};
@@ -751,6 +861,23 @@ static void infbench_game(Config *config, int policy, int pair_idx,
       free(sim_command);
       move_copy(&chosen,
                 sim_results_get_best_move(config_get_sim_results(config)));
+    } else if (policy == INFBENCH_PEG_POLICY &&
+               game_get_player_on_turn_index(game) == 0 &&
+               bag_get_letters(game_get_bag(game)) == peg_bag) {
+      InferBenchPegSolver *solver = &infbench_peg_solver;
+      ErrorStack *solve_errors = error_stack_create();
+      Timer solve_timer;
+      ctimer_start(&solve_timer);
+      const Move *solved = infbench_peg_solve(game, solve_errors);
+      solver->seconds += ctimer_elapsed_seconds(&solve_timer);
+      solver->solves++;
+      if (!error_stack_is_empty(solve_errors) || solved == NULL) {
+        error_stack_print_and_reset(solve_errors);
+        log_fatal("infbench peg solve failed: pair=%d game=%d turn=%d",
+                  pair_idx, game_idx, turn);
+      }
+      error_stack_destroy(solve_errors);
+      move_copy(&chosen, solved);
     } else {
       move_copy(&chosen, get_top_equity_move(game, moves));
     }
@@ -956,8 +1083,17 @@ void infer_bench_run_spec(const char *spec) {
            "tiles_played=%d sim2_only_at_observed_decision=1\n",
            peg_bag, peg_tiles);
   }
-  for (int policy = temperature_size > 0 ? 2 : 0; policy < INFBENCH_POLICIES;
-       policy++) {
+  // INFBENCH_ONLY_POLICY restricts a pegBxT scan to one policy by name.
+  const char *only_policy = peg_bag > 0 ? getenv("INFBENCH_ONLY_POLICY") : NULL;
+  if (peg_bag > 0) {
+    infbench_peg_solver_init(peg_bag);
+  }
+  for (int policy = temperature_size > 0 ? 2 : 0;
+       policy < INFBENCH_POLICIES + (peg_bag > 0 ? 1 : 0); policy++) {
+    if (only_policy != NULL &&
+        !strings_equal(only_policy, infbench_policies[policy])) {
+      continue;
+    }
     Config *config =
         infbench_config(policy, seed, peg_bag > 0 ? "CSW24" : "CSW21");
     if (temperature_size > 0) {
@@ -998,6 +1134,13 @@ void infer_bench_run_spec(const char *spec) {
       infbench_accumulate_pair(pair_scores, totals, deltas);
       infbench_accumulate_pair(exchanged_pair_scores, exchanged_totals,
                                exchanged_deltas);
+    }
+    if (policy == INFBENCH_PEG_POLICY) {
+      printf("INFBENCH peg_solves n=%d mean_seconds=%.6f\n",
+             infbench_peg_solver.solves,
+             infbench_peg_solver.solves > 0
+                 ? infbench_peg_solver.seconds / infbench_peg_solver.solves
+                 : 0.0);
     }
     infbench_summary(policy, totals, deltas, config_get_ld(config), false);
     infbench_summary(policy, exchanged_totals, exchanged_deltas,
