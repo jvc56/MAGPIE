@@ -728,8 +728,8 @@ static void test_census_command(void) {
       rack_value_table_create(tmp_dir, "ab_census_3", true, table_error_stack);
   KLV *table_klv = klv_create(tmp_dir, "ab_census_1", table_error_stack);
   assert(error_stack_is_empty(table_error_stack));
-  assert(rack_value_table_get_number_of_racks(table_1) == RACK_SIZE + 1);
-  assert(rack_value_table_get_number_of_racks(table_3) == RACK_SIZE + 1);
+  assert(rack_value_table_get_number_of_valued_racks(table_1) == RACK_SIZE + 1);
+  assert(rack_value_table_get_number_of_valued_racks(table_3) == RACK_SIZE + 1);
   assert(rack_value_table_get_klv_hash(table_1) == klv_get_hash(table_klv));
   assert(rack_value_table_get_klv_hash(table_3) == klv_get_hash(table_klv));
   bool any_nonzero = false;
@@ -1027,7 +1027,7 @@ static void test_rack_values_match_movegen_csw(void) {
       scarce_letter = ml;
     }
   }
-  assert(rack_value_table_get_number_of_racks(rvt) == ways[RACK_SIZE]);
+  assert(rack_value_table_get_number_of_valued_racks(rvt) == ways[RACK_SIZE]);
 
   // a rack with one copy more of a letter than is unseen has no value
   assert(scarce_letter >= 0);

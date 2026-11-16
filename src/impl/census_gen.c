@@ -449,24 +449,28 @@ static void census_write_klv(const CensusShared *shared,
 // (rack_value_table.h), on the scale of the leaves hashing to klv_hash: a
 // rack's value is its mean best equity over the boards that could deal it,
 // less the baseline the leaves are measured from. A rack never valued is left
-// out.
+// unvalued.
 static void census_write_rack_values(const CensusShared *shared,
                                      const double *values,
                                      const bool *ever_valued,
                                      const char *table_name, uint64_t klv_hash,
                                      ErrorStack *error_stack) {
   const CensusLattice *lattice = shared->lattice;
+  const LetterDistribution *ld = game_get_ld(shared->args->game);
   const int num_letters = census_lattice_get_num_letters(lattice);
-  const uint32_t full_rack_start = census_lattice_get_full_rack_start(lattice);
-  uint32_t number_of_racks = 0;
-  for (uint32_t index = full_rack_start; index < shared->lattice_size;
-       index++) {
-    number_of_racks += ever_valued[index] ? 1 : 0;
+  uint8_t letter_counts[CENSUS_MAX_LETTERS] = {0};
+  for (int ml = 0; ml < num_letters; ml++) {
+    letter_counts[ml] = (uint8_t)ld_get_dist(ld, ml);
   }
-  const size_t capacity = number_of_racks > 0 ? number_of_racks : 1;
-  BitRack *bit_racks = malloc_or_die(sizeof(BitRack) * capacity);
-  Equity *rack_values = malloc_or_die(sizeof(Equity) * capacity);
-  uint32_t rack_idx = 0;
+  RackValueTable *rvt =
+      rack_value_table_create_unvalued(letter_counts, num_letters, klv_hash);
+  if (!rvt) {
+    // more letters than a BitRack holds: the leaves stand without a table
+    log_warn("no rack value table written for %s: too many letters",
+             table_name);
+    return;
+  }
+  const uint32_t full_rack_start = census_lattice_get_full_rack_start(lattice);
   uint8_t tally[CENSUS_MAX_LETTERS];
   for (uint32_t index = full_rack_start; index < shared->lattice_size;
        index++) {
@@ -480,17 +484,13 @@ static void census_write_rack_values(const CensusShared *shared,
         bit_rack_add_letter(&bit_rack, (MachineLetter)ml);
       }
     }
-    bit_racks[rack_idx] = bit_rack;
-    rack_values[rack_idx] = (Equity)llround(values[index]);
-    rack_idx++;
+    if (!rack_value_table_set(rvt, &bit_rack, (Equity)llround(values[index]))) {
+      log_fatal("the census valued a rack its distribution cannot deal");
+    }
   }
-  RackValueTable *rvt = rack_value_table_create_from_values(
-      bit_racks, rack_values, number_of_racks, klv_hash);
   rack_value_table_write(rvt, shared->args->data_paths, table_name,
                          error_stack);
   rack_value_table_destroy(rvt);
-  free(rack_values);
-  free(bit_racks);
 }
 
 // Checks what the census does not model.
