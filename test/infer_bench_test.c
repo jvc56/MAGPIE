@@ -455,18 +455,24 @@ static void infbench_observe(const Config *config, const Move *move, int policy,
   inference_results_destroy(results);
 }
 
-static Config *infbench_config(int policy, unsigned int seed) {
+static Config *infbench_config(int policy, unsigned int seed,
+                               const char *lexicon) {
   char *settings = get_formatted_string(
-      "set -lex CSW21 -wmp true -s1 equity -s2 equity -r1 all -r2 all "
-      "-pat CSW21 -patcand1 %s -patcand2 false -patrollout false -numplays 15 "
+      "set -lex %s -leaves %s -wmp true -s1 equity -s2 equity -r1 all -r2 all "
+      "-pat %s -patcand1 %s -patcand2 false -patrollout false -numplays 15 "
       "-plies 2 -iterations %d -minplayiterations 10 -scond none "
       "-sr rr -tlim 0 -threads 1 -sinfer false -sbagcycle false "
       "-uwin 1 -uspread 0.5 -uspreadscale 100 -seed %u "
       "-savesettings false -autosavegcg false",
-      policy == 1 ? "true" : "false", INFBENCH_SIM_ITERS, seed);
+      lexicon, lexicon, lexicon, policy == 1 ? "true" : "false",
+      INFBENCH_SIM_ITERS, seed);
   Config *config = config_create_or_die(settings);
   free(settings);
-  load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
+  char *empty_board = get_formatted_string(
+      "cgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 / 0/0 0 -lex %s;",
+      lexicon);
+  load_and_exec_config_or_die(config, empty_board);
+  free(empty_board);
   if (policy == 1) {
     assert(player_get_pat(game_get_player(config_get_game(config), 0)) != NULL);
     assert(
@@ -479,7 +485,7 @@ static Config *infbench_config(int policy, unsigned int seed) {
 }
 
 void test_infer_bench_metrics(void) {
-  Config *config = infbench_config(0, INFBENCH_DEFAULT_SEED);
+  Config *config = infbench_config(0, INFBENCH_DEFAULT_SEED, "CSW21");
   const LetterDistribution *ld = config_get_ld(config);
   const KLV *klv = player_get_klv(game_get_player(config_get_game(config), 0));
   Rack unseen;
@@ -714,7 +720,7 @@ static void infbench_game(Config *config, int policy, int pair_idx,
                           InferBenchScore scores[INFBENCH_MODES],
                           InferBenchScore exchanged_scores[INFBENCH_MODES],
                           bool exchanges_only, bool use_census,
-                          int temperature_size) {
+                          int temperature_size, int peg_bag, int peg_tiles) {
   Game *game = config_get_game(config);
   game_reset(game);
   game_seed(game, seed);
@@ -726,12 +732,18 @@ static void infbench_game(Config *config, int policy, int pair_idx,
   int turn = 0;
   // Sample at target decisions 4, 10, 16, ...; defer passes and bingos to
   // the next nontrivial leave. No filtering on inferred probability or regret.
+  // Pre-endgame scan (peg_bag > 0): observe only player 0's tile placements
+  // of exactly peg_tiles tiles made with exactly peg_bag tiles in the bag.
+  // The sim2 policy then simulates only that decision; its other moves are
+  // static, which keeps the scan of many games affordable.
   while (!game_over(game) && observations < positions &&
          (!exchanges_only || bag_get_letters(game_get_bag(game)) > 0) &&
+         (peg_bag == 0 || bag_get_letters(game_get_bag(game)) >= peg_bag) &&
          turn < INFBENCH_MAX_TURNS) {
     Move chosen;
     if (policy == 2 && game_get_player_on_turn_index(game) == 0 &&
-        bag_get_letters(game_get_bag(game)) > 0) {
+        bag_get_letters(game_get_bag(game)) > 0 &&
+        (peg_bag == 0 || bag_get_letters(game_get_bag(game)) == peg_bag)) {
       load_and_exec_config_or_die(config, "gen");
       char *sim_command =
           get_formatted_string("sim -seed %u", seed + (unsigned int)turn);
@@ -749,7 +761,11 @@ static void infbench_game(Config *config, int policy, int pair_idx,
           rack_get_total_letters(player_get_rack(game_get_player(game, 0))) -
           move_get_tiles_played(&chosen);
       bool sample;
-      if (temperature_size > 0) {
+      if (peg_bag > 0) {
+        sample = type == GAME_EVENT_TILE_PLACEMENT_MOVE &&
+                 move_get_tiles_played(&chosen) == peg_tiles &&
+                 bag_get_letters(game_get_bag(game)) == peg_bag;
+      } else if (temperature_size > 0) {
         if (temperature_size == 7) {
           sample = type == GAME_EVENT_EXCHANGE;
         } else {
@@ -777,10 +793,12 @@ static void infbench_game(Config *config, int policy, int pair_idx,
     play_move(&chosen, game, NULL);
     turn++;
   }
-  printf("INFBENCH game policy=%s pair=%d game=%d observations=%d requested=%d "
-         "turns=%d\n",
-         infbench_policies[policy], pair_idx, game_idx, observations, positions,
-         turn);
+  if (peg_bag == 0 || observations > 0) {
+    printf("INFBENCH game policy=%s pair=%d game=%d observations=%d "
+           "requested=%d turns=%d\n",
+           infbench_policies[policy], pair_idx, game_idx, observations,
+           positions, turn);
+  }
   move_list_destroy(moves);
 }
 
@@ -873,6 +891,8 @@ void infer_bench_run_spec(const char *spec) {
   bool exchanges_only = false;
   int temperature_size = 0;
   bool use_census = true;
+  int peg_bag = 0;
+  int peg_tiles = 0;
   if (spec != NULL) {
     StringSplitter *fields = split_string(spec, ':', true);
     const int num_fields = string_splitter_get_number_of_items(fields);
@@ -894,15 +914,24 @@ void infer_bench_run_spec(const char *spec) {
         temperature_size = mode_name[6] - '0';
       }
       exchanges_only = strings_equal(mode_name, "exchanges");
+      // pegBxT: T-tile placements made with B tiles in the bag, CSW24.
+      if (strlen(mode_name) == 6 && strncmp(mode_name, "peg", 3) == 0 &&
+          mode_name[3] >= '1' && mode_name[3] <= '7' && mode_name[4] == 'x' &&
+          mode_name[5] >= '1' && mode_name[5] <= '7') {
+        peg_bag = mode_name[3] - '0';
+        peg_tiles = mode_name[5] - '0';
+      }
     }
     if (num_fields == 5) {
       use_census =
           !strings_equal(string_splitter_get_item(fields, 4), "movegen");
     }
     const bool invalid =
-        (num_fields >= 4 && !exchanges_only && temperature_size == 0) ||
+        (num_fields >= 4 && !exchanges_only && temperature_size == 0 &&
+         peg_bag == 0) ||
         (num_fields == 5 && (use_census || temperature_size > 0)) ||
-        !error_stack_is_empty(errors) || pairs < 1 || pairs > 10000 ||
+        !error_stack_is_empty(errors) || pairs < 1 ||
+        pairs > (peg_bag > 0 ? 100000000 : 10000) ||
         positions < 1 || positions > 20 || parsed_seed > UINT_MAX;
     error_stack_destroy(errors);
     string_splitter_destroy(fields);
@@ -922,9 +951,15 @@ void infer_bench_run_spec(const char *spec) {
            INFBENCH_PRIOR_MIX, exchanges_only ? "exchanges" : "scheduled",
            use_census);
   }
+  if (peg_bag > 0) {
+    printf("INFBENCH peg_settings lex=CSW24 klv=CSW24 pat=CSW24 bag=%d "
+           "tiles_played=%d sim2_only_at_observed_decision=1\n",
+           peg_bag, peg_tiles);
+  }
   for (int policy = temperature_size > 0 ? 2 : 0; policy < INFBENCH_POLICIES;
        policy++) {
-    Config *config = infbench_config(policy, seed);
+    Config *config =
+        infbench_config(policy, seed, peg_bag > 0 ? "CSW24" : "CSW21");
     if (temperature_size > 0) {
       load_and_exec_config_or_die(config,
                                   "set -lex NWL23 -leaves NWL23 -numplays 64 "
@@ -940,6 +975,13 @@ void infer_bench_run_spec(const char *spec) {
              "threads=1 leave=%d seed=%u pairs=%d margin=10000\n",
              temperature_size, seed, pairs);
     }
+    if (peg_bag > 0) {
+      for (int player_idx = 0; player_idx < 2; player_idx++) {
+        assert(strings_equal(klv_get_name(player_get_klv(game_get_player(
+                                 config_get_game(config), player_idx))),
+                             "CSW24"));
+      }
+    }
     InferBenchScore totals[INFBENCH_MODES] = {0};
     InferBenchScore exchanged_totals[INFBENCH_MODES] = {0};
     InferBenchMoments exchanged_deltas[INFBENCH_MODES][INFBENCH_METRICS] = {0};
@@ -951,7 +993,7 @@ void infer_bench_run_spec(const char *spec) {
         infbench_game(config, policy, pair_idx, game_idx, positions,
                       seed + (unsigned int)pair_idx, pair_scores,
                       exchanged_pair_scores, exchanges_only, use_census,
-                      temperature_size);
+                      temperature_size, peg_bag, peg_tiles);
       }
       infbench_accumulate_pair(pair_scores, totals, deltas);
       infbench_accumulate_pair(exchanged_pair_scores, exchanged_totals,
