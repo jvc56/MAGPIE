@@ -11,11 +11,13 @@
 #include "../src/def/thread_control_defs.h"
 #include "../src/ent/bag.h"
 #include "../src/ent/best_move_carry.h"
+#include "../src/ent/bit_rack.h"
 #include "../src/ent/equity.h"
 #include "../src/ent/game.h"
 #include "../src/ent/inference_args.h"
 #include "../src/ent/inference_results.h"
 #include "../src/ent/klv.h"
+#include "../src/ent/leave_map.h"
 #include "../src/ent/letter_distribution.h"
 #include "../src/ent/move.h"
 #include "../src/ent/player.h"
@@ -30,6 +32,7 @@
 #include "../src/impl/gameplay.h"
 #include "../src/impl/inference.h"
 #include "../src/impl/move_gen.h"
+#include "../src/impl/wmp_move_gen.h"
 #include "../src/str/move_string.h"
 #include "../src/util/io_util.h"
 #include "../src/util/string_util.h"
@@ -159,6 +162,60 @@ static void assert_pool_shift_subsets(const CensusLattice *lattice,
   }
 }
 
+// Move generation fills the word map generator's subracks from the compact
+// subsets instead of enumerating them (gen_set_shifted_subracks), and reuses
+// word map entries cached by slot. So the subsets, read as tiles played, must
+// come in the order of the enumeration within each size, each with the leave
+// map index of the tiles it keeps.
+static void assert_pool_shift_subrack_order(const PoolShiftTable *table,
+                                            const Game *game, const Rack *rack,
+                                            const Rack *opponent_rack) {
+  const LetterDistribution *ld = game_get_ld(game);
+  PoolShiftRack subsets;
+  pool_shift_fill_rack(table, ld, game_get_bag(game), opponent_rack,
+                       POOL_SHIFT_TEST_WEIGHT, rack, &subsets);
+  // The enumeration reads only these fields, so no word map is needed.
+  WMPMoveGen *wmg = malloc_or_die(sizeof(WMPMoveGen));
+  wmg->ld = ld;
+  wmg->player_bit_rack = bit_rack_create_from_rack(ld, rack);
+  wmg->full_rack_size = RACK_SIZE;
+  memset(wmg->count_by_size, 0, sizeof(wmg->count_by_size));
+  // Each leave's value is its leave map index.
+  LeaveMap leave_map;
+  leave_map_init(rack, &leave_map);
+  const int full_rack_index = (1 << RACK_SIZE) - 1;
+  for (int map_idx = 0; map_idx <= full_rack_index; map_idx++) {
+    leave_map_set_current_index(&leave_map, map_idx);
+    leave_map_set_current_value(&leave_map, int_to_equity(map_idx));
+  }
+  leave_map_set_current_index(&leave_map, full_rack_index);
+  wmp_move_gen_enumerate_nonplaythrough_subracks(wmg, &leave_map);
+
+  int count_by_size[RACK_SIZE + 1] = {0};
+  for (int played = 0; played < subsets.count; played++) {
+    const int size = subsets.sizes[played];
+    const int slot =
+        subracks_get_combination_offset(size) + count_by_size[size]++;
+    const int mask = subsets.map_indices[played];
+    BitRack subrack = bit_rack_create_empty();
+    Equity tile_score_sum = 0;
+    for (int bit = 0; bit < RACK_SIZE; bit++) {
+      if ((mask & (1 << bit)) != 0) {
+        bit_rack_add_letter(&subrack, subsets.bit_tiles[bit]);
+        tile_score_sum += ld_get_score(ld, subsets.bit_tiles[bit]);
+      }
+    }
+    assert(bit_rack_equals(&wmg->nonplaythrough_infos[slot].subrack, &subrack));
+    assert(wmg->nonplaythrough_tile_score_sums[slot] == tile_score_sum);
+    assert(wmg->nonplaythrough_leave_values[slot] ==
+           int_to_equity(subsets.map_indices[subsets.count - 1 - played]));
+  }
+  for (int size = 0; size <= RACK_SIZE; size++) {
+    assert(count_by_size[size] == wmg->count_by_size[size]);
+  }
+  free(wmg);
+}
+
 // A table holds the KLV's value of each leave with one more of each tile,
 // and the shift it gives is the definition's to within a millipoint. A table
 // is of its KLV as it was built: once a leave value changes, the shift no
@@ -192,6 +249,7 @@ static void test_pool_shift_table(void) {
       const int real_bag_size = game_get_real_bag_size(game);
       if (tiles_on_rack == RACK_SIZE) {
         assert_pool_shift_subsets(lattice, table, game, rack, opponent_rack);
+        assert_pool_shift_subrack_order(table, game, rack, opponent_rack);
       }
       for (int leave_size = 0; leave_size <= tiles_on_rack; leave_size++) {
         Rack leave;
