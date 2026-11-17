@@ -53,6 +53,7 @@
 #include "../ent/pat_utility.h"
 #include "../ent/player.h"
 #include "../ent/players_data.h"
+#include "../ent/pool_shift.h"
 #include "../ent/rack.h"
 #include "../ent/sim_args.h"
 #include "../ent/sim_results.h"
@@ -386,6 +387,10 @@ struct Config {
   // pinned a hash for, and these carry that name to the load.
   char *p1_rit_name_override;
   char *p2_rit_name_override;
+  // Each player's pool shift weight (-poolshift, -poolshift1, -poolshift2),
+  // in thousandths: what the players' data is given, except while a command
+  // that trains static values runs (see config_update_pool_shift).
+  int pool_shift_weights[2];
   // The identity (get_file_identity) of the file each player's lexical data
   // was read from, as of the last contribute load; NULL for data that load
   // did not read or could not stat. See config_contribute_evict_changed_data.
@@ -1572,6 +1577,40 @@ static void add_player_solver_help_arg(arg_token_t arg_token,
             "tables, or a table with none. In the player's simulations, "
             "both sides' plies in the rollouts use them. See 'pegadjust' "
             "for auto and none.";
+    break;
+  case ARG_TOKEN_POOL_SHIFT:
+    usages[0] = "<weight>";
+    examples[0] = "1.2";
+    examples[1] = "0";
+    *text = "Specifies the weight of the pool shift for both players. The "
+            "'poolshift1' and 'poolshift2' options override it. A leave's "
+            "value is an average over the tiles a typical game leaves "
+            "unseen. The pool shift corrects it for the tiles unseen now, "
+            "the bag and the opponent's rack: to each play's leave value it "
+            "adds the weight times the tiles the play draws, times the sum "
+            "over the tiles of (the tile's share of the unseen tiles less "
+            "its share of a full bag) times the value of the leave with "
+            "that tile added. A play that draws from a rich pool gains, one "
+            "that draws from a poor pool loses, and a leave gains when the "
+            "pool holds the tiles that go with it. It applies to plays and "
+            "exchanges made from a full rack while the bag holds at least a "
+            "rack of tiles, for leaves of up to two tiles fewer than a "
+            "rack. 0 (the default) turns it off, and 1 adds the correction "
+            "as computed. In a player's simulations, both sides' plies in "
+            "the rollouts use that player's weight. The table it reads is "
+            "built from the player's leaves when the weight is first set, "
+            "which takes about a quarter of a second. The commands that "
+            "train static values (leavegen, census, patgen and pegfit) and "
+            "inferences play without it.";
+    break;
+  case ARG_TOKEN_P1_POOL_SHIFT:
+  case ARG_TOKEN_P2_POOL_SHIFT:
+    usages[0] = "<weight>";
+    examples[0] = "1.2";
+    examples[1] = "0";
+    *text = "Specifies the weight of the pool shift for the given player. "
+            "This can be used with the autoplay command to compare two "
+            "weights, or a weight with none. See 'poolshift'.";
     break;
   default:
     break;
@@ -3169,6 +3208,9 @@ static void help_entry_fill(const Config *config, int token,
     case ARG_TOKEN_PEG_ADJUST:
     case ARG_TOKEN_P1_PEG_ADJUST:
     case ARG_TOKEN_P2_PEG_ADJUST:
+    case ARG_TOKEN_POOL_SHIFT:
+    case ARG_TOKEN_P1_POOL_SHIFT:
+    case ARG_TOKEN_P2_POOL_SHIFT:
       add_player_solver_help_arg(arg_token, usages, examples, &text);
       break;
     case ARG_TOKEN_MULTI_THREADING_MODE:
@@ -10072,6 +10114,38 @@ static void config_load_peg_adjust_options(Config *config,
   free(names[1]);
 }
 
+// ----- Pool shift (-poolshift) -----
+
+// Applies the pool shift options of the command being loaded: each player's
+// weight, "poolshift1" and "poolshift2" overriding "poolshift". An unset
+// option keeps the player's weight.
+static void config_load_pool_shift_options(Config *config,
+                                           ErrorStack *error_stack) {
+  int weights[2];
+  for (int player_idx = 0; player_idx < 2; player_idx++) {
+    weights[player_idx] = config->pool_shift_weights[player_idx];
+    const arg_token_t player_token =
+        player_idx == 0 ? ARG_TOKEN_P1_POOL_SHIFT : ARG_TOKEN_P2_POOL_SHIFT;
+    const arg_token_t token =
+        config_get_parg_num_set_values(config, player_token) > 0
+            ? player_token
+            : ARG_TOKEN_POOL_SHIFT;
+    if (!config_get_parg_value(config, token, 0)) {
+      continue;
+    }
+    double weight = 0;
+    config_load_double(config, token, 0,
+                       (double)POOL_SHIFT_MAX_WEIGHT_MILLI / 1000.0, &weight,
+                       error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+    weights[player_idx] = (int)lround(weight * 1000.0);
+  }
+  config->pool_shift_weights[0] = weights[0];
+  config->pool_shift_weights[1] = weights[1];
+}
+
 // Whether the command being executed trains static values: the leaves
 // (leavegen, census), PAT weights (patgen), or the pre-endgame adjustments
 // themselves (pegfit).
@@ -10080,6 +10154,29 @@ static bool config_exec_trains_static_values(const Config *config) {
          config->exec_parg_token == ARG_TOKEN_CENSUS ||
          config->exec_parg_token == ARG_TOKEN_PAT_GEN ||
          config->exec_parg_token == ARG_TOKEN_PEG_FIT;
+}
+
+// Gives the players' data the pool shift weights and has it build or free
+// the pool shift tables to match them and the leaves now loaded. The commands
+// that train static values play without the pool shift for their load, as
+// they do without the pre-endgame adjustments. The live game's players are
+// given the result here, since a table they read may just have been freed.
+static void config_update_pool_shift(Config *config) {
+  const bool plays_without = config_exec_trains_static_values(config);
+  for (int player_idx = 0; player_idx < 2; player_idx++) {
+    players_data_set_pool_shift_weight(
+        config->players_data, player_idx,
+        plays_without ? 0 : config->pool_shift_weights[player_idx]);
+  }
+  players_data_update_pool_shift(config->players_data, config->ld);
+  if (config->game) {
+    for (int player_idx = 0; player_idx < 2; player_idx++) {
+      player_set_pool_shift(
+          game_get_player(config->game, player_idx),
+          players_data_get_pool_shift_table(config->players_data, player_idx),
+          players_data_get_pool_shift_weight(config->players_data, player_idx));
+    }
+  }
 }
 
 // Loads the pre-endgame adjustments of each player set to auto: its lexicon's
@@ -10239,6 +10336,9 @@ void config_load_lexicon_dependent_data(
       p2_use_wit_has_value, disable_rit, is_loading_game_history, error_stack);
   if (error_stack_is_empty(error_stack)) {
     config_load_auto_peg_adjust(config, error_stack);
+  }
+  if (error_stack_is_empty(error_stack)) {
+    config_update_pool_shift(config);
   }
   if (!config->ld_changed && config->ld &&
       !lexical_data_identity_matches(config->players_data, &identity_before)) {
@@ -15223,6 +15323,10 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
+  config_load_pool_shift_options(config, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
 
   config_load_lexicon_dependent_data(
       config, new_lexicon_name, new_p1_lexicon_name, new_p2_lexicon_name,
@@ -16771,6 +16875,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_PAT_ROLLOUT_CLASSES, "patrolloutclasses", 1, 1);
   arg(ARG_TOKEN_PAT_ROLLOUT_FAST, "patrolloutfast", 1, 1);
   arg(ARG_TOKEN_PEG_ADJUST, "pegadjust", 1, 1);
+  arg(ARG_TOKEN_POOL_SHIFT, "poolshift", 1, 1);
   arg(ARG_TOKEN_P1_LEXICON, "l1", 1, 1);
   arg(ARG_TOKEN_P1_USE_WMP, "w1", 1, 1);
   arg(ARG_TOKEN_P1_USE_RIT, "rit1", 1, 1);
@@ -16783,6 +16888,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_P1_PAT_ROLLOUT_CLASSES, "patrolloutclasses1", 1, 1);
   arg(ARG_TOKEN_P1_PAT_ROLLOUT_FAST, "patrolloutfast1", 1, 1);
   arg(ARG_TOKEN_P1_PEG_ADJUST, "pegadjust1", 1, 1);
+  arg(ARG_TOKEN_P1_POOL_SHIFT, "poolshift1", 1, 1);
   arg(ARG_TOKEN_P1_MOVE_SORT_TYPE, "s1", 1, 1);
   arg(ARG_TOKEN_P1_MOVE_RECORD_TYPE, "r1", 1, 1);
   arg(ARG_TOKEN_P2_LEXICON, "l2", 1, 1);
@@ -16797,6 +16903,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_P2_PAT_ROLLOUT_CLASSES, "patrolloutclasses2", 1, 1);
   arg(ARG_TOKEN_P2_PAT_ROLLOUT_FAST, "patrolloutfast2", 1, 1);
   arg(ARG_TOKEN_P2_PEG_ADJUST, "pegadjust2", 1, 1);
+  arg(ARG_TOKEN_P2_POOL_SHIFT, "poolshift2", 1, 1);
   arg(ARG_TOKEN_P2_MOVE_SORT_TYPE, "s2", 1, 1);
   arg(ARG_TOKEN_P2_MOVE_RECORD_TYPE, "r2", 1, 1);
   arg(ARG_TOKEN_WIN_PCT, "winpct", 1, 1);
@@ -17215,6 +17322,18 @@ void config_add_double_setting_to_string_builder(const Config *config,
                                       config->pargs[arg_token]->name, value);
 }
 
+// A player's pool shift weight, left out at 0, the default.
+static void config_add_pool_shift_setting_to_string_builder(
+    const Config *config, StringBuilder *sb, arg_token_t arg_token,
+    int player_index) {
+  const int weight_milli = config->pool_shift_weights[player_index];
+  if (weight_milli != 0) {
+    string_builder_add_formatted_string(
+        sb, " -%s %d.%03d", config->pargs[arg_token]->name, weight_milli / 1000,
+        weight_milli % 1000);
+  }
+}
+
 void config_add_bool_setting_to_string_builder(const Config *config,
                                                StringBuilder *sb,
                                                arg_token_t arg_token,
@@ -17302,6 +17421,8 @@ static const arg_token_t config_saved_settings[] = {
     ARG_TOKEN_PEG_ADJUST,
     ARG_TOKEN_P1_PEG_ADJUST,
     ARG_TOKEN_P2_PEG_ADJUST,
+    ARG_TOKEN_P1_POOL_SHIFT,
+    ARG_TOKEN_P2_POOL_SHIFT,
     ARG_TOKEN_WIN_PCT,
     ARG_TOKEN_SHPLIES,
     ARG_TOKEN_SHOW_BU,
@@ -17454,6 +17575,7 @@ static void config_add_settings_to_string_builder_internal(const Config *config,
     case ARG_TOKEN_PAT_ROLLOUT_CLASSES:
     case ARG_TOKEN_PAT_ROLLOUT_FAST:
     case ARG_TOKEN_PEG_ADJUST:
+    case ARG_TOKEN_POOL_SHIFT:
       // Set these values on a per-player basis
       break;
     case ARG_TOKEN_USE_MMAP_FOR_RIT:
@@ -17491,6 +17613,9 @@ static void config_add_settings_to_string_builder_internal(const Config *config,
     case ARG_TOKEN_P1_PEG_ADJUST:
       config_add_lexicon_data_setting_to_string_builder(
           config, sb, arg_token, PLAYERS_DATA_TYPE_PEG_ADJUST, 0, saved_only);
+      break;
+    case ARG_TOKEN_P1_POOL_SHIFT:
+      config_add_pool_shift_setting_to_string_builder(config, sb, arg_token, 0);
       break;
     case ARG_TOKEN_P1_PAT_CLASSES: {
       // Omitted when every class applies; that is the default.
@@ -17573,6 +17698,9 @@ static void config_add_settings_to_string_builder_internal(const Config *config,
     case ARG_TOKEN_P2_PEG_ADJUST:
       config_add_lexicon_data_setting_to_string_builder(
           config, sb, arg_token, PLAYERS_DATA_TYPE_PEG_ADJUST, 1, saved_only);
+      break;
+    case ARG_TOKEN_P2_POOL_SHIFT:
+      config_add_pool_shift_setting_to_string_builder(config, sb, arg_token, 1);
       break;
     case ARG_TOKEN_P2_PAT_CLASSES: {
       // Omitted when every class applies; that is the default.

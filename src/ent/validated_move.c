@@ -22,6 +22,7 @@
 #include "pat_eval.h"
 #include "peg_adjust.h"
 #include "player.h"
+#include "pool_shift.h"
 #include "rack.h"
 #include "static_eval.h"
 #include "words.h"
@@ -496,16 +497,29 @@ void validated_move_load(ValidatedMove *vm, const Game *game, int player_index,
         pat_eval_context_set_kwg(&pat_eval_ctx, player_get_kwg(player),
                                  game_get_variant(game));
       }
+      // The leave's value with its pool shift, as the move generator's is.
+      const Rack *opponent_rack =
+          player_get_rack(game_get_player(game, 1 - player_index));
+      Equity leave_value = 0;
+      if (vm->leave && !rack_is_empty(vm->leave)) {
+        leave_value = klv_get_leave_value(klv, vm->leave);
+      }
+      if (vm->leave) {
+        leave_value += pool_shift_get_leave_shift(
+            player_get_pool_shift_table(player), klv,
+            player_get_pool_shift_weight(player), ld, game_get_bag(game),
+            opponent_rack, vm->leave,
+            rack_get_total_letters(player_get_rack(player)), real_bag_size);
+      }
       move_set_equity(
           vm->move,
-          static_eval_get_move_equity(
-              ld, klv, vm->move, vm->leave,
-              player_get_rack(game_get_player(game, 1 - player_index)),
+          static_eval_get_move_equity_with_leave_value(
+              ld, vm->move, vm->leave, opponent_rack,
               board_get_opening_move_word_penalties(board),
               board_get_opening_move_letter_penalties(board),
               pat_eval_context_get_active_classes(&pat_eval_ctx), &pat_eval_ctx,
               board_get_tiles_played(board),
-              bag_get_letters(game_get_bag(game)),
+              bag_get_letters(game_get_bag(game)), leave_value,
               move_get_type(vm->move) == GAME_EVENT_TILE_PLACEMENT_MOVE
                   ? peg_adjust_get_placement_value(
                         player_get_peg_adjust(player), real_bag_size,

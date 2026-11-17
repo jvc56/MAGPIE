@@ -80,6 +80,7 @@
 #include "peg_validate_test.h"
 #include "play_chooser_test.h"
 #include "players_data_test.h"
+#include "pool_shift_test.h"
 #include "position_lengths_test.h"
 #include "rack_info_table_test.h"
 #include "rack_list_test.h"
@@ -157,6 +158,7 @@ static TestEntry test_table[] = {
     {"eq", test_equity},
     {"eqadj", test_equity_adjustments},
     {"pegadjust", test_peg_adjust},
+    {"poolshift", test_pool_shift},
     {"gameplay", test_gameplay},
     {"stats", test_stats},
     {"infer", test_infer},

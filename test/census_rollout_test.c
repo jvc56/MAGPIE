@@ -18,6 +18,7 @@
 #include "../src/ent/peg_adjust.h"
 #include "../src/ent/player.h"
 #include "../src/ent/players_data.h"
+#include "../src/ent/pool_shift.h"
 #include "../src/ent/rack.h"
 #include "../src/ent/sim_results.h"
 #include "../src/impl/census_rollout.h"
@@ -145,6 +146,18 @@ static bool mover_table_reaches_bag(const Game *game) {
          bag < peg_adjust_get_number_of_values(peg_adjust);
 }
 
+// Whether the leave values of the generation of game's player on turn are
+// pool-shifted.
+static bool mover_is_pool_shifted(const Game *game) {
+  const Player *player =
+      game_get_player(game, game_get_player_on_turn_index(game));
+  return pool_shift_applies(player_get_pool_shift_table(player),
+                            player_get_klv(player),
+                            player_get_pool_shift_weight(player),
+                            rack_get_total_letters(player_get_rack(player)),
+                            game_get_real_bag_size(game));
+}
+
 // Rollouts as a sim plays them: the opponent draws a random rack, the
 // candidate is played, and each ply plays the best move. Every census-steered
 // move must be the move a plain generation finds, from a census built on one
@@ -152,12 +165,14 @@ static bool mover_table_reaches_bag(const Game *game) {
 // adjustment tables given, NULL for none. With shared_racks every candidate's
 // rollouts deal the opponent the same racks, as a sim's do, so that a worker
 // meets a rack again from each bag the candidates leave.
-static void assert_census_rollout_moves_match_plain(PegAdjust *first_table,
-                                                    PegAdjust *second_table,
-                                                    const int *bag_sizes,
-                                                    int number_of_positions,
-                                                    bool shared_racks) {
-  Config *config = config_create_or_die("set -lex CSW21 -wmp true");
+// options, which may be empty, are added to the players' settings: the
+// players' pool shift weights, if they have any.
+static void assert_census_rollout_moves_match_plain(
+    PegAdjust *first_table, PegAdjust *second_table, const int *bag_sizes,
+    int number_of_positions, bool shared_racks, const char *options) {
+  char *set_cmd = get_formatted_string("set -lex CSW21 -wmp true%s", options);
+  Config *config = config_create_or_die(set_cmd);
+  free(set_cmd);
   Game *game = config_game_create(config);
   set_peg_adjust(config, game, 0, first_table);
   set_peg_adjust(config, game, 1, second_table);
@@ -174,6 +189,13 @@ static void assert_census_rollout_moves_match_plain(PegAdjust *first_table,
   uint64_t served = 0;
   uint64_t steered = 0;
   uint64_t steered_with_adjustments = 0;
+  uint64_t steered_with_pool_shift = 0;
+  bool any_pool_shift = false;
+  for (int player_index = 0; player_index < 2; player_index++) {
+    any_pool_shift =
+        any_pool_shift || player_get_pool_shift_table(
+                              game_get_player(game, player_index)) != NULL;
+  }
   for (int position_idx = 0; position_idx < number_of_positions;
        position_idx++) {
     play_to_bag_size(game, move_list, 100 + (uint64_t)position_idx,
@@ -212,6 +234,10 @@ static void assert_census_rollout_moves_match_plain(PegAdjust *first_table,
               mover_table_reaches_bag(rollout)) {
             steered_with_adjustments++;
           }
+          if (census_rollout_worker_last_steered(serial_worker) &&
+              mover_is_pool_shifted(rollout)) {
+            steered_with_pool_shift++;
+          }
           assert_moves_are_equal(
               &census_move,
               census_rollout_get_best_move(threaded_worker, threaded_census,
@@ -229,6 +255,8 @@ static void assert_census_rollout_moves_match_plain(PegAdjust *first_table,
   assert(steered > 0);
   assert(steered_with_adjustments > 0 ||
          (first_table == NULL && second_table == NULL));
+  // And of generations whose leave values are pool-shifted.
+  assert(steered_with_pool_shift > 0 || !any_pool_shift);
   census_rollout_worker_destroy(threaded_worker);
   census_rollout_worker_destroy(serial_worker);
   census_rollout_destroy(threaded_census);
@@ -251,7 +279,30 @@ static void test_census_rollout_moves_match_plain(void) {
       NULL, NULL, census_rollout_test_bag_sizes,
       (int)(sizeof(census_rollout_test_bag_sizes) /
             sizeof(census_rollout_test_bag_sizes[0])),
-      false);
+      false, "");
+}
+
+// The census serves a player whose leave values are pool-shifted (see
+// pool_shift.h) as it does any other: both players with one weight, with
+// different weights, and one of them alone. A rack the candidates share then
+// meets a different pool after each candidate, and its plays different
+// equities.
+static void test_census_rollout_moves_match_plain_with_pool_shift(void) {
+  if (BOARD_DIM != 15) {
+    return;
+  }
+  const int number_of_positions =
+      (int)(sizeof(census_rollout_test_bag_sizes) /
+            sizeof(census_rollout_test_bag_sizes[0]));
+  assert_census_rollout_moves_match_plain(
+      NULL, NULL, census_rollout_test_bag_sizes, number_of_positions, false,
+      " -poolshift 1.2");
+  assert_census_rollout_moves_match_plain(
+      NULL, NULL, census_rollout_test_bag_sizes, number_of_positions, true,
+      " -poolshift1 0.6 -poolshift2 2.5");
+  assert_census_rollout_moves_match_plain(
+      NULL, NULL, census_rollout_test_bag_sizes, number_of_positions, true,
+      " -poolshift2 1.2");
 }
 
 // The census serves a player with a pre-endgame adjustment table as one
@@ -275,15 +326,15 @@ static void test_census_rollout_moves_match_plain_with_tables(void) {
       (int)(sizeof(census_rollout_test_table_bag_sizes) /
             sizeof(census_rollout_test_table_bag_sizes[0]));
   assert_census_rollout_moves_match_plain(NULL, NULL, bag_sizes,
-                                          number_of_positions, true);
+                                          number_of_positions, true, "");
   assert_census_rollout_moves_match_plain(table, table, bag_sizes,
-                                          number_of_positions, true);
+                                          number_of_positions, true, "");
   assert_census_rollout_moves_match_plain(table, NULL, bag_sizes,
-                                          number_of_positions, true);
+                                          number_of_positions, true, "");
   assert_census_rollout_moves_match_plain(table, opposite_table, bag_sizes,
-                                          number_of_positions, true);
+                                          number_of_positions, true, "");
   assert_census_rollout_moves_match_plain(long_table, long_table, bag_sizes,
-                                          number_of_positions, true);
+                                          number_of_positions, true, "");
   peg_adjust_destroy(long_table);
   peg_adjust_destroy(opposite_table);
   peg_adjust_destroy(table);
@@ -542,6 +593,10 @@ static void test_census_rollout_sim_matches_plain(void) {
   assert_census_rollout_sim_matches_plain(" -pat CSW21", 12);
   assert_census_rollout_sim_matches_plain(" -pat CSW21 -patrolloutclasses all",
                                           40);
+  // With pool-shifted leave values, and with board-only PAT as well from a
+  // bag the rollouts empty past where the shift applies.
+  assert_census_rollout_sim_matches_plain(" -poolshift 1.2", 40);
+  assert_census_rollout_sim_matches_plain(" -poolshift 1.2 -pat CSW21", 12);
 }
 
 // Board-only PAT finds the same move from a cache that has seen the board,
@@ -954,6 +1009,7 @@ void test_census_rollout(void) {
   test_census_rollout_root_cache_keys();
   test_census_rollout_moves_match_plain();
   test_census_rollout_moves_match_plain_with_tables();
+  test_census_rollout_moves_match_plain_with_pool_shift();
   test_census_rollout_tells_tables_apart();
   test_census_rollout_steers_many_candidates();
   test_census_rollout_sim_matches_plain();
