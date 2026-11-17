@@ -25,6 +25,7 @@
 #include "../src/ent/stats.h"
 #include "../src/ent/thread_control.h"
 #include "../src/ent/validated_move.h"
+#include "../src/impl/census.h"
 #include "../src/impl/config.h"
 #include "../src/impl/gameplay.h"
 #include "../src/impl/inference.h"
@@ -119,6 +120,45 @@ static void set_leave_prefix(const Rack *rack, int leave_size, Rack *leave) {
   }
 }
 
+// Each compact subset and its opposite must be the exact leave and play
+// that the independent census ranker would look up, including duplicates.
+static void assert_pool_shift_subsets(const CensusLattice *lattice,
+                                      const PoolShiftTable *table,
+                                      const Game *game, const Rack *rack,
+                                      const Rack *opponent_rack) {
+  PoolShiftRack subsets;
+  pool_shift_fill_rack(table, game_get_ld(game), game_get_bag(game),
+                       opponent_rack, POOL_SHIFT_TEST_WEIGHT, rack, &subsets);
+  int expected_count = 1;
+  for (int ml = 0; ml < table->ld_size; ml++) {
+    expected_count *= rack_get_letter(rack, (MachineLetter)ml) + 1;
+  }
+  assert(subsets.count == expected_count);
+  bool visited[1 << RACK_SIZE] = {false};
+  for (int idx = 0; idx < subsets.count; idx++) {
+    const int mask = subsets.map_indices[idx];
+    assert(mask >= 0 && mask < (1 << RACK_SIZE) && !visited[mask]);
+    visited[mask] = true;
+    uint8_t kept[MAX_ALPHABET_SIZE] = {0};
+    uint8_t played[MAX_ALPHABET_SIZE] = {0};
+    int bit = 0;
+    int kept_size = 0;
+    for (int ml = 0; ml < table->ld_size; ml++) {
+      const int copies = rack_get_letter(rack, (MachineLetter)ml);
+      const int group = (mask >> bit) & ((1 << copies) - 1);
+      assert((group & (group + 1)) == 0);
+      kept[ml] = (uint8_t)__builtin_popcount((unsigned int)group);
+      played[ml] = (uint8_t)(copies - kept[ml]);
+      kept_size += kept[ml];
+      bit += copies;
+    }
+    assert(subsets.sizes[idx] == kept_size);
+    assert(subsets.ranks[idx] == census_lattice_rank(lattice, kept));
+    assert(subsets.ranks[subsets.count - 1 - idx] ==
+           census_lattice_rank(lattice, played));
+  }
+}
+
 // A table holds the KLV's value of each leave with one more of each tile,
 // and the shift it gives is the definition's to within a millipoint. A table
 // is of its KLV as it was built: once a leave value changes, the shift no
@@ -133,6 +173,10 @@ static void test_pool_shift_table(void) {
   assert(pool_shift_table_matches_klv(table, klv));
 
   Game *game = config_game_create(config);
+  ErrorStack *errors = error_stack_create();
+  CensusLattice *lattice =
+      census_lattice_create(table->ld_size, RACK_SIZE, errors);
+  assert(lattice != NULL && error_stack_is_empty(errors));
   int rows_checked = 0;
   int nonzero_shifts = 0;
   for (int game_idx = 0; game_idx < POOL_SHIFT_TEST_GAMES; game_idx++) {
@@ -146,6 +190,9 @@ static void test_pool_shift_table(void) {
           player_get_rack(game_get_player(game, 1 - player_index));
       const int tiles_on_rack = rack_get_total_letters(rack);
       const int real_bag_size = game_get_real_bag_size(game);
+      if (tiles_on_rack == RACK_SIZE) {
+        assert_pool_shift_subsets(lattice, table, game, rack, opponent_rack);
+      }
       for (int leave_size = 0; leave_size <= tiles_on_rack; leave_size++) {
         Rack leave;
         set_leave_prefix(rack, leave_size, &leave);
@@ -224,6 +271,8 @@ static void test_pool_shift_table(void) {
          single_value + 1000);
   klv_set_indexed_leave_value(klv, single_index, single_value);
 
+  census_lattice_destroy(lattice);
+  error_stack_destroy(errors);
   pool_shift_table_destroy(rebuilt);
   pool_shift_table_destroy(table);
   game_destroy(game);

@@ -41,14 +41,12 @@
 // A PoolShiftTable holds value(L + t) for one KLV: a row of values by t for
 // each leave L. A leave's row is computed from its tiles alone, with no walk
 // of the KLV and no lookup: the rows of each leave size are in the order of
-// the combinatorial number system, where the leave whose tiles in ascending
-// order are a_0 <= a_1 <= ... is number
-//
-//   sum over i of C(a_i + i, i + 1)
-//
-// of its size. That numbers every multiset of the alphabet, so the leaves
-// with more of a tile than the distribution has get rows too, which nothing
-// reads.
+// the census lattice. For alphabet size n, number the tiles in reverse
+// alphabet order (z is 0 in English). For a leave with those numbers
+// a_0 <= ... <= a_(k-1), its rank is its size block's start plus
+// sum_i C(a_i + i, i + 1). Adding the next tile requires one addition.
+// All sizes have ranks. Only leaves through POOL_SHIFT_MAX_LEAVE_SIZE
+// have rows of extension values.
 
 enum {
   POOL_SHIFT_MAX_LEAVE_SIZE = RACK_SIZE - 2,
@@ -79,11 +77,9 @@ typedef struct PoolShiftTable {
   int ld_size;
   int stride;
   uint32_t number_of_rows;
-  // By leave size, the row of the first leave of that size.
-  uint32_t size_starts[POOL_SHIFT_MAX_LEAVE_SIZE + 1];
-  // rank_terms[i][t] is C(t + i, i + 1): what tile t adds to the number of a
-  // leave with i tiles before it in ascending order.
-  uint32_t rank_terms[POOL_SHIFT_MAX_LEAVE_SIZE][MAX_ALPHABET_SIZE];
+  // Adding ml to a size-k subset whose letters are all >= ml advances
+  // its rank by one size block plus the new tile's binomial term.
+  uint32_t rank_increments[RACK_SIZE][MAX_ALPHABET_SIZE];
   // number_of_rows rows of stride values: values[row * stride + t] is the
   // KLV's value of the row's leave with one more t.
   Equity *values;
@@ -114,30 +110,6 @@ static inline bool pool_shift_applies(const PoolShiftTable *table,
          real_bag_size >= RACK_SIZE && pool_shift_table_matches_klv(table, klv);
 }
 
-// The number among the leaves of its size (see above) of a leave with one
-// more tile: of the leave of leave_size tiles numbered rank with ml added,
-// where no tile of the leave is greater than ml. Unchanged for a leave too
-// long to have a row.
-static inline uint32_t pool_shift_table_extend_rank(const PoolShiftTable *table,
-                                                    uint32_t rank,
-                                                    int leave_size,
-                                                    MachineLetter ml) {
-  if (leave_size >= POOL_SHIFT_MAX_LEAVE_SIZE) {
-    return rank;
-  }
-  return rank + table->rank_terms[leave_size][ml];
-}
-
-// The row of the leave of leave_size tiles numbered rank among the leaves of
-// its size.
-static inline uint32_t pool_shift_table_get_row(const PoolShiftTable *table,
-                                                uint32_t rank, int leave_size) {
-  if (leave_size > POOL_SHIFT_MAX_LEAVE_SIZE) {
-    return POOL_SHIFT_NO_ROW;
-  }
-  return table->size_starts[leave_size] + rank;
-}
-
 // The row of a leave.
 uint32_t pool_shift_table_get_leave_row(const PoolShiftTable *table,
                                         const Rack *leave);
@@ -158,7 +130,9 @@ static inline void pool_shift_table_prefetch_row(const PoolShiftTable *table,
 #if defined(__has_builtin) && __has_builtin(__builtin_prefetch)
   const Equity *values = table->values + (size_t)row * (size_t)table->stride;
   __builtin_prefetch(values);
-  __builtin_prefetch(values + 16);
+  if (table->stride > 16) {
+    __builtin_prefetch(values + 16);
+  }
 #else
   (void)table;
   (void)row;
@@ -180,6 +154,25 @@ static inline Equity pool_shift_table_get_shift(const PoolShiftTable *table,
   const int64_t one = (int64_t)1 << POOL_SHIFT_WEIGHT_BITS;
   return (Equity)(sum >= 0 ? (sum + half) / one : -((half - sum) / one));
 }
+
+// The subsets of a full rack in the WMP's order: counts of the highest
+// letters vary fastest. Subsets i and count - 1 - i are complements.
+// map_indices uses the generator's low bits for repeated kept letters.
+typedef struct PoolShiftRack {
+  int count;
+  uint32_t ranks[1 << RACK_SIZE];
+  MachineLetter bit_tiles[RACK_SIZE];
+  int map_indices[1 << RACK_SIZE];
+  uint8_t sizes[1 << RACK_SIZE];
+  Equity shifts[1 << RACK_SIZE];
+  int32_t weights[POOL_SHIFT_MAX_STRIDE];
+} PoolShiftRack;
+
+// Prepare the weights, ranks and exact shifts once for a full mover rack.
+void pool_shift_fill_rack(const PoolShiftTable *table,
+                          const LetterDistribution *ld, const Bag *bag,
+                          const Rack *opponent_rack, int weight_milli,
+                          const Rack *rack, PoolShiftRack *result);
 
 // The pool shift of keeping leave for a mover who holds tiles_on_rack tiles
 // and sees the bag, of real_bag_size tiles, and opponent_rack as unseen: 0

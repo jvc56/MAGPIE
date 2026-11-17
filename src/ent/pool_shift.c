@@ -1,6 +1,7 @@
 #include "pool_shift.h"
 
 #include "../def/letter_distribution_defs.h"
+#include "../def/rack_defs.h"
 #include "../util/fnv.h"
 #include "../util/io_util.h"
 #include "bag.h"
@@ -13,7 +14,6 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <stdlib.h>
-#include <string.h>
 
 // Counted across every thread that builds a table.
 static atomic_uint_fast64_t pool_shift_tables_created = 0;
@@ -56,60 +56,56 @@ static void pool_shift_build_fill_row(PoolShiftBuild *build, uint32_t row) {
   }
 }
 
-// Fills the rows of the build's leave, which is numbered rank among the
-// leaves of its size, and of every leave of the distribution that adds tiles
-// from min_ml up to it.
+// Fills the row at rank and the rows of leaves formed by adding tiles
+// at or below max_ml.
 static void pool_shift_build_walk(PoolShiftBuild *build, uint32_t rank,
-                                  int min_ml) {
+                                  int max_ml) {
   const PoolShiftTable *table = build->table;
   const int leave_size = rack_get_total_letters(&build->leave);
-  pool_shift_build_fill_row(build,
-                            pool_shift_table_get_row(table, rank, leave_size));
+  pool_shift_build_fill_row(build, rank);
   if (leave_size == POOL_SHIFT_MAX_LEAVE_SIZE) {
     return;
   }
-  for (int ml = min_ml; ml < table->ld_size; ml++) {
+  for (int ml = max_ml; ml >= 0; ml--) {
     if (rack_get_letter(&build->leave, (MachineLetter)ml) >=
         ld_get_dist(build->ld, (MachineLetter)ml)) {
       continue;
     }
-    const uint32_t extended_rank = pool_shift_table_extend_rank(
-        table, rank, leave_size, (MachineLetter)ml);
+    const uint32_t extended_rank =
+        rank + table->rank_increments[leave_size][ml];
     rack_add_letter(&build->leave, (MachineLetter)ml);
     pool_shift_build_walk(build, extended_rank, ml);
     rack_take_letter(&build->leave, (MachineLetter)ml);
   }
 }
 
-// Sets rank_terms, size_starts and number_of_rows for the table's ld_size.
+// The binomial term and the distance to the next size block depend only on
+// the alphabet and the old size. Folding them together also gives ranks of
+// the larger subsets used as played tiles in a census lookup.
 static void pool_shift_table_set_numbering(PoolShiftTable *table) {
-  // C(t + i, i + 1) from C(t + i - 1, i), the row before, by
-  // C(n, k) = C(n - 1, k - 1) * n / k, which divides exactly.
-  for (int ml = 0; ml < MAX_ALPHABET_SIZE; ml++) {
-    uint64_t term = (uint64_t)ml;
-    for (int tiles_before = 0; tiles_before < POOL_SHIFT_MAX_LEAVE_SIZE;
-         tiles_before++) {
-      if (tiles_before > 0) {
-        term =
-            term * (uint64_t)(ml + tiles_before) / (uint64_t)(tiles_before + 1);
+  uint64_t size_counts[RACK_SIZE];
+  size_counts[0] = 1;
+  table->number_of_rows = 0;
+  for (int size = 0; size < RACK_SIZE; size++) {
+    if (size > 0) {
+      size_counts[size] = size_counts[size - 1] *
+                          (uint64_t)(table->ld_size + size - 1) /
+                          (uint64_t)size;
+    }
+    if (size <= POOL_SHIFT_MAX_LEAVE_SIZE) {
+      table->number_of_rows += (uint32_t)size_counts[size];
+    }
+  }
+  for (int ml = 0; ml < table->ld_size; ml++) {
+    const int reverse_ml = table->ld_size - 1 - ml;
+    uint64_t term = (uint64_t)reverse_ml;
+    for (int size = 0; size < RACK_SIZE; size++) {
+      if (size > 0) {
+        term = term * (uint64_t)(reverse_ml + size) / (uint64_t)(size + 1);
       }
-      table->rank_terms[tiles_before][ml] = (uint32_t)term;
+      table->rank_increments[size][ml] = (uint32_t)(size_counts[size] + term);
     }
   }
-  // There are C(ld_size + k - 1, k) multisets of k tiles, which is the
-  // number of the first one whose greatest tile would be ld_size.
-  uint32_t number_of_rows = 0;
-  for (int leave_size = 0; leave_size <= POOL_SHIFT_MAX_LEAVE_SIZE;
-       leave_size++) {
-    table->size_starts[leave_size] = number_of_rows;
-    uint64_t size_count = 1;
-    for (int tile_idx = 0; tile_idx < leave_size; tile_idx++) {
-      size_count = size_count * (uint64_t)(table->ld_size + tile_idx) /
-                   (uint64_t)(tile_idx + 1);
-    }
-    number_of_rows += (uint32_t)size_count;
-  }
-  table->number_of_rows = number_of_rows;
 }
 
 PoolShiftTable *pool_shift_table_create(const KLV *klv,
@@ -127,7 +123,7 @@ PoolShiftTable *pool_shift_table_create(const KLV *klv,
       (size_t)table->number_of_rows * (size_t)table->stride, sizeof(Equity));
   PoolShiftBuild build = {.klv = klv, .ld = ld, .table = table};
   rack_set_dist_size_and_reset(&build.leave, table->ld_size);
-  pool_shift_build_walk(&build, 0, 0);
+  pool_shift_build_walk(&build, 0, table->ld_size - 1);
   return table;
 }
 
@@ -148,15 +144,14 @@ uint32_t pool_shift_table_get_leave_row(const PoolShiftTable *table,
   }
   uint32_t rank = 0;
   int tiles_before = 0;
-  for (int ml = 0; ml < table->ld_size; ml++) {
+  for (int ml = table->ld_size - 1; ml >= 0; ml--) {
     const int num_this = rack_get_letter(leave, (MachineLetter)ml);
     for (int copy_idx = 0; copy_idx < num_this; copy_idx++) {
-      rank = pool_shift_table_extend_rank(table, rank, tiles_before,
-                                          (MachineLetter)ml);
+      rank += table->rank_increments[tiles_before][ml];
       tiles_before++;
     }
   }
-  return pool_shift_table_get_row(table, rank, leave_size);
+  return rank;
 }
 
 void pool_shift_fill_weights(const PoolShiftTable *table,
@@ -188,6 +183,53 @@ void pool_shift_fill_weights(const PoolShiftTable *table,
         (int32_t)(numerator >= 0
                       ? (numerator + denominator / 2) / denominator
                       : -((denominator / 2 - numerator) / denominator));
+  }
+}
+
+void pool_shift_fill_rack(const PoolShiftTable *table,
+                          const LetterDistribution *ld, const Bag *bag,
+                          const Rack *opponent_rack, int weight_milli,
+                          const Rack *rack, PoolShiftRack *result) {
+  pool_shift_fill_weights(table, ld, bag, opponent_rack, weight_milli,
+                          result->weights);
+  result->ranks[0] = 0;
+  result->map_indices[0] = 0;
+  result->sizes[0] = 0;
+  int count = 1;
+  int base_bit = RACK_SIZE;
+  for (int ml = table->ld_size - 1; ml >= 0; ml--) {
+    const int copies = rack_get_letter(rack, (MachineLetter)ml);
+    const int block_size = count;
+    base_bit -= copies;
+    for (int copy = 0; copy < copies; copy++) {
+      result->bit_tiles[base_bit + copy] = (MachineLetter)ml;
+      const int bit = 1 << (base_bit + copy);
+      // Extend only the preceding block. For repeated letters this adds a
+      // copy only to leaves that already kept every preceding copy.
+      for (int src = count - block_size; src < count; src++) {
+        const int dst = src + block_size;
+        const int size = result->sizes[src];
+        result->sizes[dst] = (uint8_t)(size + 1);
+        result->map_indices[dst] = result->map_indices[src] | bit;
+        result->ranks[dst] =
+            result->ranks[src] + table->rank_increments[size][ml];
+      }
+      count += block_size;
+    }
+  }
+  result->count = count;
+  for (int idx = 0; idx < count; idx++) {
+    if (result->sizes[idx] <= POOL_SHIFT_MAX_LEAVE_SIZE) {
+      pool_shift_table_prefetch_row(table, result->ranks[idx]);
+    }
+  }
+  for (int idx = 0; idx < count; idx++) {
+    const int size = result->sizes[idx];
+    result->shifts[idx] =
+        size > POOL_SHIFT_MAX_LEAVE_SIZE
+            ? 0
+            : pool_shift_table_get_shift(table, result->weights,
+                                         result->ranks[idx], size);
   }
 }
 

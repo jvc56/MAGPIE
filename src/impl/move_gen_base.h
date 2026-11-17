@@ -38,10 +38,6 @@
 
 #define MOVEGEN_RIT_CACHE_SIZE 64
 
-// In MoveGen.pool_shift_rows: a leave map index that no subset of the rack
-// uses.
-#define MOVEGEN_POOL_SHIFT_ROW_UNVISITED (UINT32_MAX - 1)
-
 // Per-thread cache of KLV walk results (leave_values[128] and
 // best_leaves[8]) keyed by player_bit_rack. This is the "mini-RIT":
 // the same data a loaded RackInfoTable would have supplied, computed
@@ -378,12 +374,10 @@ typedef struct MoveGen {
   // Raised whenever the subrack cache is invalidated: see
   // pool_shift_subrack_epochs.
   uint64_t subrack_cache_epoch;
-  // The weight of each tile's values for this generation's pool.
-  int32_t pool_shift_weights[POOL_SHIFT_MAX_STRIDE];
-  // By leave map index: the row of the subset's leave, POOL_SHIFT_NO_ROW for
-  // a leave without one, or MOVEGEN_POOL_SHIFT_ROW_UNVISITED for an index the
-  // rack's subsets do not use.
-  uint32_t pool_shift_rows[1 << RACK_SIZE];
+  // The census supplies the shifts it has just gathered for the same rack
+  // and pool. Other shifted generations prepare their own here.
+  PoolShiftRack own_pool_shift;
+  const PoolShiftRack *rack_shift;
   // By leave size, the largest shift of the rack's leaves of that size.
   Equity pool_shift_max_by_leave_size[RACK_SIZE + 1];
   // A pool-shifted generation stores its subrack cache entry with the entry's
@@ -392,8 +386,6 @@ typedef struct MoveGen {
   // subrack_cache_epoch + 1 here. A pool-shifted generation takes such an
   // entry while the epoch is the same, and recomputes its leave values.
   uint64_t pool_shift_subrack_epochs[MOVEGEN_SUBRACK_CACHE_SIZE];
-  // By leave map bit, the tile of the rack it stands for.
-  MachineLetter pool_shift_bit_tiles[RACK_SIZE];
 } MoveGen;
 
 // Cache getter functions
