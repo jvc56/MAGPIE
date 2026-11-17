@@ -86,6 +86,7 @@
 #include "rack_info_table_test.h"
 #include "rack_list_test.h"
 #include "rack_test.h"
+#include "rack_value_table_test.h"
 #include "random_variable_test.h"
 #include "shadow_test.h"
 #include "sim_benchmark_test.h"
@@ -137,6 +138,7 @@ static TestEntry test_table[] = {
     {"l", test_leaves},
     {"leavemap", test_leave_map},
     {"rit", test_rack_info_table},
+    {"rvt", test_rack_value_table},
     {"wit", test_word_info_table},
     {"wpfmaker", test_word_plus_floater_maker},
     {"positionlengths", test_position_lengths},

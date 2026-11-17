@@ -49,7 +49,7 @@
 
 #elif defined(__linux__)
 
-#include <endian.h>
+#include <endian.h> // IWYU pragma: export
 
 #if __BYTE_ORDER == __LITTLE_ENDIAN
 #define IS_LITTLE_ENDIAN 1
