@@ -10,6 +10,10 @@
 //   p  the same search told the opponent's actual rack (perfect information)
 //   c  the control search again with another seed (negative control)
 //   t  the top static-equity move (positive control, free)
+//   a  softmax inference at temperature 3; b at temperature 16
+//   h  hard-margin inference, margin 5
+//   1, 2, 4  the search told that many tiles of the opponent's actual rack,
+//      chosen at random (partial information)
 // Where an arm picks a different move from the control, both moves are scored
 // against the opponent's actual rack two ways:
 //   playout oracle: PLAYOUTS full games to the end with static play for both
@@ -57,7 +61,7 @@
 #include <string.h>
 
 enum {
-  DECIDE_MAX_ARMS = 5,
+  DECIDE_MAX_ARMS = 12,
   DECIDE_MAX_TURNS = 200,
   DECIDE_PLAYOUT_MAX_TURNS = 120,
   DECIDE_MOVE_STR = 96,
@@ -130,6 +134,37 @@ static void *decide_playout_worker(void *context) {
   return NULL;
 }
 
+// Copies `keep` tiles of `actual`, chosen uniformly without replacement.
+static void decide_partial_rack(const Rack *actual, int keep, uint64_t seed,
+                                Rack *out) {
+  MachineLetter tiles[RACK_SIZE];
+  int count = 0;
+  const int dist_size = rack_get_dist_size(actual);
+  for (int ml = 0; ml < dist_size; ml++) {
+    for (int copy = 0; copy < (int)rack_get_letter(actual, (MachineLetter)ml);
+         copy++) {
+      if (count < RACK_SIZE) {
+        tiles[count++] = (MachineLetter)ml;
+      }
+    }
+  }
+  rack_reset(out);
+  uint64_t state = seed;
+  for (int idx = 0; idx < keep && idx < count; idx++) {
+    // splitmix64
+    state += UINT64_C(0x9E3779B97F4A7C15);
+    uint64_t mixed = state;
+    mixed = (mixed ^ (mixed >> 30)) * UINT64_C(0xBF58476D1CE4E5B9);
+    mixed = (mixed ^ (mixed >> 27)) * UINT64_C(0x94D049BB133111EB);
+    mixed ^= mixed >> 31;
+    const int pick = idx + (int)(mixed % (uint64_t)(count - idx));
+    const MachineLetter chosen = tiles[pick];
+    tiles[pick] = tiles[idx];
+    tiles[idx] = chosen;
+    rack_add_letter(out, chosen);
+  }
+}
+
 static void decide_move_string(const Game *game, const Move *move, char *dest) {
   StringBuilder *sb = string_builder_create();
   string_builder_add_move(sb, game_get_board(game), move, game_get_ld(game),
@@ -174,7 +209,7 @@ void infer_decide_run_spec(const char *spec) {
   error_stack_destroy(errors);
   const int num_extra = (int)strlen(arm_codes);
   for (int idx = 0; idx < num_extra; idx++) {
-    assert(strchr("spct", arm_codes[idx]) != NULL);
+    assert(strchr("spctabh124", arm_codes[idx]) != NULL);
   }
   const double move_seconds = move_ms / 1000.0;
 
@@ -216,14 +251,16 @@ void infer_decide_run_spec(const char *spec) {
   Rack observer;
   Rack opp_actual;
   Rack no_rack;
+  Rack partial;
   rack_set_dist_size_and_reset(&played, ld_get_size(ld));
   rack_set_dist_size_and_reset(&known, ld_get_size(ld));
   rack_set_dist_size_and_reset(&observer, ld_get_size(ld));
   rack_set_dist_size_and_reset(&opp_actual, ld_get_size(ld));
   rack_set_dist_size_and_reset(&no_rack, ld_get_size(ld));
+  rack_set_dist_size_and_reset(&partial, ld_get_size(ld));
   MoveList *moves = move_list_create(num_plays);
   MoveList *static_best = move_list_create(1);
-  MoveList *oracle_moves = move_list_create(DECIDE_MAX_ARMS);
+  MoveList *oracle_moves = move_list_create(DECIDE_MAX_ARMS + 1);
   SimResults *results = sim_results_create(0);
   SimResults *oracle_results = sim_results_create(0);
   InferenceResults *inferences = inference_results_create(NULL);
@@ -294,11 +331,18 @@ void infer_decide_run_spec(const char *spec) {
           decide_move_string(game, &arm->move, arm->move_str);
           continue;
         }
-        const bool use_inference = arm->code == 's';
+        const bool use_inference = strchr("sabh", arm->code) != NULL;
+        Rack *arm_known_rack = &no_rack;
+        if (arm->code == 'p') {
+          arm_known_rack = &opp_actual;
+        } else if (arm->code >= '1' && arm->code <= '6') {
+          decide_partial_rack(&opp_actual, arm->code - '0',
+                              sim_seed + UINT64_C(424243), &partial);
+          arm_known_rack = &partial;
+        }
         SimArgs args;
-        config_fill_sim_args(config,
-                             arm->code == 'p' ? &opp_actual : &no_rack,
-                             &played, &observer, &known, &args);
+        config_fill_sim_args(config, arm_known_rack, &played, &observer,
+                             &known, &args);
         args.move_list = moves;
         args.num_plays = num_plays;
         args.game = game;
@@ -307,14 +351,23 @@ void infer_decide_run_spec(const char *spec) {
         args.bai_options.time_limit_seconds = move_seconds;
         args.use_inference = use_inference;
         if (use_inference) {
-          infer_args_fill(&args.inference_args, 0, int_to_equity(10000), NULL,
+          infer_args_fill(&args.inference_args, 0,
+                          int_to_equity(arm->code == 'h' ? 5 : 10000), NULL,
                           previous, threads, 0, 0, control, false, true,
                           1 - seat, move_get_score(&previous_move),
                           move_get_type(&previous_move) == GAME_EVENT_EXCHANGE
                               ? move_get_tiles_played(&previous_move)
                               : 0,
                           &played, &known, &observer);
-          args.inference_args.temperature = int_to_equity(8);
+          int arm_temperature = 8;
+          if (arm->code == 'a') {
+            arm_temperature = 3;
+          } else if (arm->code == 'b') {
+            arm_temperature = 16;
+          } else if (arm->code == 'h') {
+            arm_temperature = 0;
+          }
+          args.inference_args.temperature = int_to_equity(arm_temperature);
           args.inference_args.target_move = &previous_move;
         }
         thread_control_set_status(control, THREAD_CONTROL_STATUS_STARTED);
