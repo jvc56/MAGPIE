@@ -6,8 +6,10 @@
 #include "equity.h"
 #include "klv.h"
 #include "kwg.h"
+#include "letter_distribution.h"
 #include "pat.h"
 #include "peg_adjust.h"
+#include "pool_shift.h"
 #include "rack_info_table.h"
 #include "wmp.h"
 #include "word_info_table.h"
@@ -71,6 +73,26 @@ void players_data_set_pat_rollout_disabled_classes_mask(
     PlayersData *players_data, int player_index, uint32_t mask);
 uint32_t players_data_get_pat_rollout_disabled_classes_mask(
     const PlayersData *players_data, int player_index);
+// The player's pool shift weight (see pool_shift.h), in thousandths, from 0
+// (no pool shift, the default) to POOL_SHIFT_MAX_WEIGHT_MILLI. Setting it
+// does not build or free a table; players_data_update_pool_shift does.
+void players_data_set_pool_shift_weight(PlayersData *players_data,
+                                        int player_index, int weight_milli);
+int players_data_get_pool_shift_weight(const PlayersData *players_data,
+                                       int player_index);
+// Gives each player whose weight is not 0 a pool shift table of its KLV as it
+// is now, building the ones that are missing, and frees every table built
+// from leaves no player has any more. A table stays while a player has its
+// leaves, even at weight 0, so that a game that read it can still do so.
+// Players with the same KLV share one table. To be called once the players'
+// leaves and weights are as a command leaves them, before any game is
+// updated from them.
+void players_data_update_pool_shift(PlayersData *players_data,
+                                    const LetterDistribution *ld);
+// The player's table, or NULL when its weight is 0 or it has no leaves.
+const PoolShiftTable *
+players_data_get_pool_shift_table(const PlayersData *players_data,
+                                  int player_index);
 void *players_data_get_data(const PlayersData *players_data,
                             players_data_t players_data_type, int player_index);
 bool players_data_get_is_shared(const PlayersData *players_data,

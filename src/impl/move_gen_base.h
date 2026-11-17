@@ -24,6 +24,7 @@
 #include "../ent/move.h"
 #include "../ent/pat_board_cache.h"
 #include "../ent/pat_eval.h"
+#include "../ent/pool_shift.h"
 #include "../ent/rack.h"
 #include "../ent/rack_info_table.h"
 #include "../ent/static_eval.h"
@@ -363,6 +364,28 @@ typedef struct MoveGen {
   // all 0 when the player has no table. Last, so that every field above keeps
   // its offset.
   Equity peg_adjust_by_tiles_played[RACK_SIZE + 1];
+  // The pool shift table of a generation whose leave values are pool-shifted
+  // (see pool_shift.h), set once per generation; NULL for any other, which
+  // reads none of the pool shift fields below.
+  const PoolShiftTable *pool_shift_table;
+  // The value of the empty leave, set once per generation: its pool shift in
+  // a pool-shifted generation, and 0 in any other.
+  Equity empty_leave_value;
+  // Raised whenever the subrack cache is invalidated: see
+  // pool_shift_subrack_epochs.
+  uint64_t subrack_cache_epoch;
+  // The census supplies the shifts it has just gathered for the same rack
+  // and pool. Other shifted generations prepare their own here.
+  PoolShiftRack own_pool_shift;
+  const PoolShiftRack *rack_shift;
+  // By leave size, the largest shift of the rack's leaves of that size.
+  Equity pool_shift_max_by_leave_size[RACK_SIZE + 1];
+  // A pool-shifted generation stores its subrack cache entry with the entry's
+  // valid flag off, since the leave values in it carry that generation's
+  // shift and no other generation may read them, and writes
+  // subrack_cache_epoch + 1 here. A pool-shifted generation takes such an
+  // entry while the epoch is the same, and recomputes its leave values.
+  uint64_t pool_shift_subrack_epochs[MOVEGEN_SUBRACK_CACHE_SIZE];
 } MoveGen;
 
 // Cache getter functions

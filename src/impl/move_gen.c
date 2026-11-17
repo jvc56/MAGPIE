@@ -35,6 +35,7 @@
 #include "../ent/pat_eval.h"
 #include "../ent/peg_adjust.h"
 #include "../ent/player.h"
+#include "../ent/pool_shift.h"
 #include "../ent/rack.h"
 #include "../ent/rack_info_table.h"
 #include "../ent/static_eval.h"
@@ -1170,8 +1171,8 @@ wordmap_gen(MoveGen *gen, const Anchor *anchor, bool lazy) {
     if (num_bingos > 0) {
       wgen->word_length = RACK_SIZE;
       wgen->tiles_to_play = RACK_SIZE;
-      // Leave value is 0 for bingo (all tiles played), leave is empty.
-      wgen->leave_value = 0;
+      // The leave is empty (all tiles played): 0, or its pool shift.
+      wgen->leave_value = gen->empty_leave_value;
       if (gen->number_of_tiles_in_bag == 0) {
         rack_reset(&gen->leave);
       }
@@ -3426,6 +3427,44 @@ static void gen_load_board_only_pat(MoveGen *gen, PATBoardCache *board_cache,
                         classes_mask, opponent_rack_size);
 }
 
+// Decides whether this generation is pool-shifted, and if so sets its table
+// and weights. Out of line: only a player with a table gets here.
+static __attribute__((noinline)) void
+gen_load_pool_shift(MoveGen *gen, const Game *game, const Player *player,
+                    const PoolShiftTable *table, int real_bag_size,
+                    const PoolShiftRack *prepared) {
+  if (gen->move_sort_type != MOVE_SORT_EQUITY ||
+      gen->move_record_type == MOVE_RECORD_ALL_SMALL ||
+      gen->move_record_type == MOVE_RECORD_TILES_PLAYED ||
+      gen->move_record_type == MOVE_RECORD_BEST_SMALL ||
+      table->ld_size != ld_get_size(&gen->ld) ||
+      !pool_shift_applies(table, gen->klv, player_get_pool_shift_weight(player),
+                          rack_get_total_letters(&gen->player_rack),
+                          real_bag_size)) {
+    return;
+  }
+  if (prepared == NULL) {
+    pool_shift_fill_rack(table, &gen->ld, game_get_bag(game),
+                         &gen->opponent_rack,
+                         player_get_pool_shift_weight(player),
+                         &gen->player_rack, &gen->own_pool_shift);
+    prepared = &gen->own_pool_shift;
+  }
+  gen->rack_shift = prepared;
+  gen->pool_shift_table = table;
+}
+
+static inline void gen_set_pool_shift(MoveGen *gen, const Game *game,
+                                      const Player *player, int real_bag_size,
+                                      const PoolShiftRack *prepared) {
+  gen->pool_shift_table = NULL;
+  gen->empty_leave_value = 0;
+  const PoolShiftTable *table = player_get_pool_shift_table(player);
+  if (table != NULL) {
+    gen_load_pool_shift(gen, game, player, table, real_bag_size, prepared);
+  }
+}
+
 void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
   gen->skip_anchor_cols = args->skip_anchor_cols;
   gen->anchor_equity_caps = args->anchor_equity_caps;
@@ -3488,6 +3527,7 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
     for (int i = 0; i < MOVEGEN_SUBRACK_CACHE_SIZE; i++) {
       gen->subrack_cache[i].valid = false;
     }
+    gen->subrack_cache_epoch++;
     for (int i = 0; i < MOVEGEN_KLV_LEAVES_CACHE_SIZE; i++) {
       gen->klv_leaves_cache[i].valid = false;
     }
@@ -3509,6 +3549,7 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
     for (int i = 0; i < MOVEGEN_SUBRACK_CACHE_SIZE; i++) {
       gen->subrack_cache[i].valid = false;
     }
+    gen->subrack_cache_epoch++;
   }
   gen->rack_info_table = new_rit;
   gen->rit_instance_id_at_load = new_rit_instance_id;
@@ -3562,6 +3603,7 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
     for (int i = 0; i < MOVEGEN_SUBRACK_CACHE_SIZE; i++) {
       gen->subrack_cache[i].valid = false;
     }
+    gen->subrack_cache_epoch++;
   }
   gen->wmp_instance_fp_at_load = new_wmp_instance_fp;
 
@@ -3573,6 +3615,7 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
   const int real_bag_size = game_get_real_bag_size(game);
   peg_adjust_fill_by_tiles_played(player_get_peg_adjust(player), real_bag_size,
                                   gen->peg_adjust_by_tiles_played);
+  gen_set_pool_shift(gen, game, player, real_bag_size, args->rack_shift);
   gen->wmp_prune_subracks_by_leave = (gen->number_of_tiles_in_bag > 0) &&
                                      (gen->move_sort_type == MOVE_SORT_EQUITY);
   gen->kwgs_are_shared = game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KWG);
@@ -3678,6 +3721,96 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
           : NULL;
 }
 
+// Pool shift (see pool_shift.h). A pool-shifted generation fills the leave
+// map with each subset's leave value as any other does, then adds every
+// subset's shift to the map, so that everything downstream reads shifted
+// leave values as it would any others, and only then compares the exchanges.
+
+// Adds its shift to every leave value in the leave map, and sets best_leaves
+// and pool_shift_max_by_leave_size from the results. Returns the canonical
+// subset index of an exchange with the greatest leave value.
+//
+// A leave map index has a bit for each tile of the full rack, in ascending
+// order of tile, and while the map is filled a set bit is a tile kept. The
+// subset that keeps k of a tile the rack has several of is at the index with
+// the lowest k of that tile's bits; no subset is at any other index.
+static int gen_apply_pool_shift(MoveGen *gen) {
+  const PoolShiftRack *rack_shift = gen->rack_shift;
+  for (int leave_size = 0; leave_size <= RACK_SIZE; leave_size++) {
+    gen->best_leaves[leave_size] = EQUITY_INITIAL_VALUE;
+    gen->pool_shift_max_by_leave_size[leave_size] = EQUITY_MIN_VALUE;
+  }
+  int best_exchange_idx = 0;
+  Equity best_exchange_value = EQUITY_MIN_VALUE;
+  for (int idx = 0; idx < rack_shift->count; idx++) {
+    const int map_idx = rack_shift->map_indices[idx];
+    const int leave_size = rack_shift->sizes[idx];
+    const Equity shift = rack_shift->shifts[idx];
+    const Equity value = gen->leave_map.leave_values[map_idx] + shift;
+    gen->leave_map.leave_values[map_idx] = value;
+    if (leave_size == 0) {
+      gen->empty_leave_value = value;
+    }
+    if (value > gen->best_leaves[leave_size]) {
+      gen->best_leaves[leave_size] = value;
+    }
+    if (shift > gen->pool_shift_max_by_leave_size[leave_size]) {
+      gen->pool_shift_max_by_leave_size[leave_size] = shift;
+    }
+    if (leave_size < RACK_SIZE && value > best_exchange_value) {
+      best_exchange_value = value;
+      best_exchange_idx = idx;
+    }
+  }
+  return best_exchange_idx;
+}
+
+// Records the exchange that keeps the subset at map_idx of the leave map,
+// with the rack and the leave map as the walks that record exchanges have
+// them, and puts them back.
+static void gen_record_exchange_at_map_index(MoveGen *gen, int map_idx) {
+  for (int bit_idx = 0; bit_idx < RACK_SIZE; bit_idx++) {
+    if ((map_idx & (1 << bit_idx)) != 0) {
+      rack_take_letter(&gen->player_rack, gen->rack_shift->bit_tiles[bit_idx]);
+      rack_add_letter(&gen->leave, gen->rack_shift->bit_tiles[bit_idx]);
+    }
+  }
+  leave_map_set_current_index(&gen->leave_map, map_idx);
+  record_exchange(gen);
+  leave_map_set_current_index(&gen->leave_map, 0);
+  for (int bit_idx = 0; bit_idx < RACK_SIZE; bit_idx++) {
+    if ((map_idx & (1 << bit_idx)) != 0) {
+      rack_add_letter(&gen->player_rack, gen->rack_shift->bit_tiles[bit_idx]);
+      rack_take_letter(&gen->leave, gen->rack_shift->bit_tiles[bit_idx]);
+    }
+  }
+}
+
+// Shifts the leave values of a pool-shifted generation, which has a full
+// rack, a bag with tiles, the leave map filled and at index 0, and gen->leave
+// empty, and then records its exchanges.
+static void gen_shift_leaves_and_record_exchanges(MoveGen *gen,
+                                                  bool add_exchange) {
+  const int best_exchange_idx = gen_apply_pool_shift(gen);
+  if (!add_exchange) {
+    return;
+  }
+  if (gen->move_record_type != MOVE_RECORD_BEST) {
+    generate_exchange_moves_from_table(gen, &gen->leave, 0, true);
+    return;
+  }
+  // Only an exchange with the greatest leave value can be the best move.
+  const PoolShiftRack *rack_shift = gen->rack_shift;
+  const Equity best_exchange_value =
+      gen->leave_map.leave_values[rack_shift->map_indices[best_exchange_idx]];
+  for (int idx = best_exchange_idx; idx < rack_shift->count - 1; idx++) {
+    const int map_idx = rack_shift->map_indices[idx];
+    if (gen->leave_map.leave_values[map_idx] == best_exchange_value) {
+      gen_record_exchange_at_map_index(gen, map_idx);
+    }
+  }
+}
+
 void gen_look_up_leaves_and_record_exchanges(MoveGen *gen) {
   leave_map_init(&gen->player_rack, &gen->leave_map);
   if (rack_get_total_letters(&gen->player_rack) < RACK_SIZE) {
@@ -3736,6 +3869,11 @@ void gen_look_up_leaves_and_record_exchanges(MoveGen *gen) {
   leave_map_set_current_index(&gen->leave_map, 0);
   rack_reset(&gen->leave);
 
+  // A pool-shifted generation's exchanges are compared once its leave values
+  // carry the shift (and the RIT's best exchange was chosen without it).
+  const bool pool_shifted = gen->pool_shift_table != NULL;
+  const bool add_exchange_now = add_exchange && !pool_shifted;
+
   if (gen->rit_entry != NULL) {
     // Fast path: unpack the RIT's 24-bit packed leave values to 32-bit
     // in the leave map so play-time leave_map_get_current_value calls
@@ -3749,7 +3887,7 @@ void gen_look_up_leaves_and_record_exchanges(MoveGen *gen) {
         rack_info_table_entry_get_best_leaves(gen->rit_entry);
     memcpy(gen->best_leaves, rit_best_leaves,
            RACK_INFO_TABLE_BEST_LEAVES_PER_ENTRY * sizeof(Equity));
-    if (add_exchange) {
+    if (add_exchange_now) {
       if (gen->move_record_type == MOVE_RECORD_BEST) {
         // For MOVE_RECORD_BEST, record the single precomputed best
         // exchange from the RIT — O(1) instead of 2^RACK_SIZE walk.
@@ -3758,7 +3896,7 @@ void gen_look_up_leaves_and_record_exchanges(MoveGen *gen) {
         generate_exchange_moves_from_table(gen, &gen->leave, 0, true);
       }
     }
-  } else if (check_leaves || add_exchange) {
+  } else if (check_leaves || add_exchange_now) {
     // Mini-RIT fast path: when the leave_values and best_leaves for this
     // rack have been computed by a previous KLV walk on this thread,
     // memcpy them in and only walk the KLV tree again when add_exchange
@@ -3783,14 +3921,15 @@ void gen_look_up_leaves_and_record_exchanges(MoveGen *gen) {
       memcpy(gen->leave_map.leave_values, kle->leave_values,
              sizeof(kle->leave_values));
       memcpy(gen->best_leaves, kle->best_leaves, sizeof(kle->best_leaves));
-      if (add_exchange) {
+      if (add_exchange_now) {
         // Leaves are already in the leave map, so the RIT-style variant
         // (no KLV descent) can record exchanges straight from memory.
         generate_exchange_moves_from_table(gen, &gen->leave, 0, true);
       }
     } else {
       const uint32_t node_index = kwg_get_dawg_root_node_index(gen->klv->kwg);
-      generate_exchange_moves(gen, &gen->leave, node_index, 0, 0, add_exchange);
+      generate_exchange_moves(gen, &gen->leave, node_index, 0, 0,
+                              add_exchange_now);
       if (kle_eligible) {
         kle->key = kle_bit_rack;
         memcpy(kle->leave_values, gen->leave_map.leave_values,
@@ -3806,6 +3945,9 @@ void gen_look_up_leaves_and_record_exchanges(MoveGen *gen) {
          leave_size_idx++) {
       gen->best_leaves[leave_size_idx] = 0;
     }
+  }
+  if (pool_shifted) {
+    gen_shift_leaves_and_record_exchanges(gen, add_exchange);
   }
 }
 
@@ -4720,7 +4862,17 @@ static Equity gen_get_carried_move_equity(const MoveGen *gen, const Move *move,
     rack_take_letter(&leave, get_is_blanked(ml) ? BLANK_MACHINE_LETTER : ml);
   }
   Equity leave_value = 0;
-  if (!rack_is_empty(&leave)) {
+  if (gen->pool_shift_table != NULL) {
+    // The shifted leave map is already complete. Each group keeps its
+    // lowest bits for the copies still on the rack.
+    int map_idx = 0;
+    for (int bit = 0; bit < RACK_SIZE;) {
+      const MachineLetter ml = gen->rack_shift->bit_tiles[bit];
+      map_idx |= ((1 << rack_get_letter(&leave, ml)) - 1) << bit;
+      bit += rack_get_letter(rack, ml);
+    }
+    leave_value = gen->leave_map.leave_values[map_idx];
+  } else if (!rack_is_empty(&leave)) {
     leave_value = klv_get_leave_value(gen->klv, &leave);
   }
   return static_eval_get_move_equity_with_leave_value(
@@ -4947,6 +5099,61 @@ void gen_hash_game_lanes(const Game *game, int player_index,
   }
 }
 
+typedef struct ShiftedSubrackPart {
+  BitRack rack;
+  Equity score;
+} ShiftedSubrackPart;
+
+// The subsets of a short consecutive run of tiles. Two such lookups give a
+// full subrack without recursively enumerating it and its leave again.
+static void gen_shifted_subrack_parts(const MoveGen *gen, int start, int bits,
+                                      ShiftedSubrackPart *parts) {
+  parts[0] = (ShiftedSubrackPart){.rack = bit_rack_create_empty(), .score = 0};
+  for (int bit = 0; bit < bits; bit++) {
+    const MachineLetter ml = gen->rack_shift->bit_tiles[start + bit];
+    BitRack tile = bit_rack_create_empty();
+    bit_rack_add_letter(&tile, ml);
+    const Equity score = ld_get_score(&gen->ld, ml);
+    const int count = 1 << bit;
+    for (int idx = 0; idx < count; idx++) {
+      parts[count + idx] = parts[idx];
+      bit_rack_add_bit_rack(&parts[count + idx].rack, &tile);
+      parts[count + idx].score += score;
+    }
+  }
+}
+
+static void gen_set_shifted_subracks(MoveGen *gen, bool cache_hit) {
+  const PoolShiftRack *rack_shift = gen->rack_shift;
+  WMPMoveGen *wgen = &gen->wmp_move_gen;
+  const int low_bits = RACK_SIZE / 2;
+  const int low_mask = (1 << low_bits) - 1;
+  ShiftedSubrackPart low[1 << (RACK_SIZE / 2)];
+  ShiftedSubrackPart high[1 << (RACK_SIZE - RACK_SIZE / 2)];
+  if (!cache_hit) {
+    gen_shifted_subrack_parts(gen, 0, low_bits, low);
+    gen_shifted_subrack_parts(gen, low_bits, RACK_SIZE - low_bits, high);
+  }
+  memset(wgen->count_by_size, 0, sizeof(wgen->count_by_size));
+  for (int played = 0; played < rack_shift->count; played++) {
+    const int size = rack_shift->sizes[played];
+    const int slot =
+        subracks_get_combination_offset(size) + wgen->count_by_size[size]++;
+    const int kept = rack_shift->map_indices[rack_shift->count - 1 - played];
+    wgen->nonplaythrough_leave_values[slot] = gen->leave_map.leave_values[kept];
+    if (!cache_hit) {
+      const int mask = rack_shift->map_indices[played];
+      const ShiftedSubrackPart *left = &low[mask & low_mask];
+      const ShiftedSubrackPart *right = &high[mask >> low_bits];
+      wgen->nonplaythrough_infos[slot].wmp_entry = WMP_ENTRY_UNRESOLVED;
+      wgen->nonplaythrough_infos[slot].subrack = left->rack;
+      bit_rack_add_bit_rack(&wgen->nonplaythrough_infos[slot].subrack,
+                            &right->rack);
+      wgen->nonplaythrough_tile_score_sums[slot] = left->score + right->score;
+    }
+  }
+}
+
 void generate_moves(const MoveGenArgs *args) {
   MoveGen *gen = get_movegen();
   gen_count_movegen(gen);
@@ -5000,9 +5207,19 @@ void generate_moves(const MoveGenArgs *args) {
       const uint32_t subrack_slot = bit_rack_get_bucket_index(
           &wgen->player_bit_rack, MOVEGEN_SUBRACK_CACHE_SIZE);
       SubrackEnumCacheEntry *subrack_entry = &gen->subrack_cache[subrack_slot];
-      const bool subrack_cache_hit =
+      bool subrack_cache_hit =
           leaves_are_populated && subrack_entry->valid &&
           bit_rack_equals(&subrack_entry->key, &wgen->player_bit_rack);
+      const bool pool_shifted = gen->pool_shift_table != NULL;
+      if (pool_shifted) {
+        // Also the entries pool-shifted generations stored (see
+        // MoveGen.pool_shift_subrack_epochs).
+        subrack_cache_hit =
+            bit_rack_equals(&subrack_entry->key, &wgen->player_bit_rack) &&
+            (subrack_entry->valid ||
+             gen->pool_shift_subrack_epochs[subrack_slot] ==
+                 gen->subrack_cache_epoch + 1);
+      }
       if (subrack_cache_hit) {
         // Restore the enumeration output and whichever per-subrack WMP
         // entries prior occurrences of this rack actually needed.
@@ -5019,6 +5236,9 @@ void generate_moves(const MoveGenArgs *args) {
                subrack_entry->tile_score_sums,
                sizeof(subrack_entry->tile_score_sums));
       }
+      if (pool_shifted) {
+        gen_set_shifted_subracks(gen, subrack_cache_hit);
+      }
       if (leaves_are_populated) {
         wgen->nonplaythrough_wmp_entry_cache = subrack_entry->wmp_entries;
       }
@@ -5028,11 +5248,30 @@ void generate_moves(const MoveGenArgs *args) {
         // bounds and actually needs that subrack's words.
         wmp_move_gen_check_nonplaythrough_existence_with_rit(
             wgen, check_leaves, &gen->leave_map, gen->rit_entry,
-            /*subracks_precomputed=*/subrack_cache_hit);
+            /*subracks_precomputed=*/subrack_cache_hit || pool_shifted);
+        if (pool_shifted) {
+          // The RIT's best leave of each size among the subracks with a word
+          // is without the shift. Bound the shifted best from above: by the
+          // RIT's plus the largest shift of the size, and by the best
+          // shifted leave of the size over every subrack.
+          for (int leave_size = 0; leave_size <= RACK_SIZE; leave_size++) {
+            const Equity rit_best =
+                wgen->nonplaythrough_best_leave_values[leave_size];
+            if (rit_best <= EQUITY_MIN_VALUE) {
+              continue;
+            }
+            Equity bound =
+                rit_best + gen->pool_shift_max_by_leave_size[leave_size];
+            if (gen->best_leaves[leave_size] < bound) {
+              bound = gen->best_leaves[leave_size];
+            }
+            wgen->nonplaythrough_best_leave_values[leave_size] = bound;
+          }
+        }
       } else {
         wmp_move_gen_check_nonplaythrough_existence(
             wgen, check_leaves, &gen->leave_map,
-            /*subracks_precomputed=*/subrack_cache_hit,
+            /*subracks_precomputed=*/subrack_cache_hit || pool_shifted,
             /*wmp_entries_precomputed=*/subrack_cache_hit);
       }
       if (!subrack_cache_hit && leaves_are_populated) {
@@ -5053,6 +5292,12 @@ void generate_moves(const MoveGenArgs *args) {
         memcpy(subrack_entry->tile_score_sums,
                wgen->nonplaythrough_tile_score_sums,
                sizeof(subrack_entry->tile_score_sums));
+        if (pool_shifted) {
+          // The leave values just stored carry this generation's shift.
+          subrack_entry->valid = false;
+          gen->pool_shift_subrack_epochs[subrack_slot] =
+              gen->subrack_cache_epoch + 1;
+        }
       }
     }
 
@@ -5085,7 +5330,9 @@ void generate_moves(const MoveGenArgs *args) {
       // so no lane is skipped or bounded. Hashed before
       // gen_seed_carried_best_move clears anchor counts, so that skipped
       // lanes keep their hashes.
-      if (!gen_pat_is_active(gen) &&
+      // Nor with the pool shift, where a move's equity depends on the pool,
+      // which a lane's hash does not hold.
+      if (!gen_pat_is_active(gen) && gen->pool_shift_table == NULL &&
           best_move_carry_skips_lanes(args->best_move_carry)) {
         gen_hash_lanes(gen, lane_hash_storage);
         lane_hashes = lane_hash_storage;
