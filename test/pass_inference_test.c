@@ -390,7 +390,7 @@ static void test_pass_inference_temperature_and_bonus(void) {
   }
   assert(racks_better_passed > 100);
   assert(racks_better_played > 100);
-  assert(racks_bonus_helps > number_of_racks / 2);
+  assert((uint32_t)racks_bonus_helps > number_of_racks / 2);
   assert(pass_inference_get_total_mass(bonus_inference) >
          pass_inference_get_total_mass(base_inference));
   pass_inference_destroy(flat_inference);
