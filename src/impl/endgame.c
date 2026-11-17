@@ -2954,6 +2954,14 @@ void assign_estimates_and_sort(EndgameCtxWorker *worker, int move_count,
               compare_small_moves_by_estimated_value);
 }
 
+// Whether `small_move` places every one of the side to move's `stm_tiles`
+// tiles, which ends the game.
+static inline bool small_move_goes_out(const SmallMove *small_move,
+                                       int stm_tiles) {
+  return !small_move_is_pass(small_move) &&
+         small_move_get_tiles_played(small_move) == stm_tiles;
+}
+
 // Play play_idx of a playout step's nplays plays: those of move_list, or,
 // when in_place, plays[0] to plays[nplays - 2] and then pass. The incremental
 // lists' plays are read where they lie rather than copied into move_list; in
@@ -3010,6 +3018,19 @@ static int playout_step_from_lists(EndgameCtxWorker *worker, bool alone,
       calculate_end_rack_points(opp_rack, game_get_ld(worker->game_copy));
   SmallMove best;
   small_move_set_as_pass(&best);
+  // The MOVE_RECORD_BEST_SMALL generation a step without the lists runs.
+  const MoveGenArgs best_args = {
+      .best_small_out_bonus = go_out_bonus,
+      .best_small_canonical_ties = true,
+      .game = worker->game_copy,
+      .move_list = worker->move_list,
+      .move_record_type = MOVE_RECORD_BEST_SMALL,
+      .move_sort_type = MOVE_SORT_SCORE,
+      .override_kwg = solver_get_pruned_kwg(worker->solver, stm_idx),
+      .eq_margin_movegen = 0,
+      .target_equity = EQUITY_MAX_VALUE,
+      .lane_shadow_cache = worker->lane_shadow_cache,
+  };
   if (leaf_plays != NULL) {
     const int stm_tiles =
         player_get_rack(game_get_player(worker->game_copy, stm_idx))
@@ -3017,18 +3038,6 @@ static int playout_step_from_lists(EndgameCtxWorker *worker, bool alone,
     pick_best_playout_play(leaf_plays, leaf_play_count,
                            equity_to_int(go_out_bonus), stm_tiles, &best);
   } else {
-    const MoveGenArgs best_args = {
-        .best_small_out_bonus = go_out_bonus,
-        .best_small_canonical_ties = true,
-        .game = worker->game_copy,
-        .move_list = worker->move_list,
-        .move_record_type = MOVE_RECORD_BEST_SMALL,
-        .move_sort_type = MOVE_SORT_SCORE,
-        .override_kwg = solver_get_pruned_kwg(worker->solver, stm_idx),
-        .eq_margin_movegen = 0,
-        .target_equity = EQUITY_MAX_VALUE,
-        .lane_shadow_cache = worker->lane_shadow_cache,
-    };
     SmallMove found;
     if (alone ? path_move_lists_best_play_alone(worker->path_lists, &best_args,
                                                 &found)
@@ -3037,6 +3046,16 @@ static int playout_step_from_lists(EndgameCtxWorker *worker, bool alone,
       best = found;
     }
   }
+#ifndef NDEBUG
+  // The lists' pick is the play that generation from scratch finds, or the
+  // pass where it finds none.
+  generate_moves(&best_args);
+  const SmallMove *expected_play = worker->move_list->small_moves[0];
+  assert(small_move_is_pass(expected_play) == small_move_is_pass(&best));
+  assert(small_move_is_pass(expected_play) ||
+         (expected_play->tiny_move == best.tiny_move &&
+          small_move_get_score(expected_play) == small_move_get_score(&best)));
+#endif
   // Looked up only now: generating into the list reorders its entries.
   *worker->move_list->small_moves[0] = best;
   worker->move_list->count = 1;
@@ -3203,15 +3222,19 @@ static inline uint64_t leaf_tt_key(const EndgameCtxWorker *worker,
 
 // The step `playout_depth` of a greedy playout whose side to move holds one
 // tile: leaves its play, the best drop or the pass, as the only entry of
-// worker->move_list. first_step_is_pass and follow_path are the playout's
-// (see negamax_greedy_leaf_playout), and *opp_stuck_step is the last step at
+// worker->move_list. first_step_is_pass is the playout's (see
+// negamax_greedy_leaf_playout), path_is_current is whether the incremental
+// lists' path ends with the last move played (the playout pushed every move it
+// has made), and *opp_stuck_step is the last step at
 // which the opponent, down to one tile, had no play, which this keeps.
 // known_first_play, when non-NULL, is the first step's play, which the leaf's
 // stuck check found. Out of line: inlined, its state took registers from the
 // playout's loop at every step.
-static __attribute__((noinline)) void playout_single_tile_step(
-    EndgameCtxWorker *worker, int playout_depth, bool first_step_is_pass,
-    const SmallMove *known_first_play, bool follow_path, int *opp_stuck_step) {
+static __attribute__((noinline)) void
+playout_single_tile_step(EndgameCtxWorker *worker, int playout_depth,
+                         bool first_step_is_pass,
+                         const SmallMove *known_first_play,
+                         bool path_is_current, int *opp_stuck_step) {
   const bool opp_on_turn = game_get_player_on_turn_index(worker->game_copy) !=
                            worker->solver->solving_player;
   SmallMove *step_play = worker->move_list->small_moves[0];
@@ -3235,10 +3258,9 @@ static __attribute__((noinline)) void playout_single_tile_step(
   } else {
     // Whether the opponent's tile had no play before the last move, by the
     // stuck check there or by its own step two up. Either answers only while
-    // the last move played is the path's last, which holds at the leaf and
-    // for a playout that pushes its moves.
+    // the last move played is the path's last.
     const bool stuck_before_last_move =
-        (playout_depth == 0 || follow_path) && opp_on_turn &&
+        path_is_current && opp_on_turn &&
         ((playout_depth >= 2 && *opp_stuck_step == playout_depth - 2) ||
          opp_single_tile_was_stuck(worker));
     single_tile_play(worker, worker_board_occupancy(worker),
@@ -3254,12 +3276,12 @@ static __attribute__((noinline)) void playout_single_tile_step(
 // when the opponent is stuck. Most non-stuck steps already have one pick.
 static SmallMove pick_greedy_playout_move(const EndgameCtxWorker *worker,
                                           bool in_place, const SmallMove *plays,
-                                          int nplays, const SmallMove *pass,
+                                          int play_count, const SmallMove *pass,
                                           int playout_on_turn, int stm_tiles,
                                           float opp_stuck_frac) {
-  if (nplays == 1) {
-    return *playout_step_play(worker->move_list, in_place, plays, nplays, pass,
-                              0);
+  if (play_count == 1) {
+    return *playout_step_play(worker->move_list, in_place, plays, play_count,
+                              pass, 0);
   }
   const bool conserve = opp_stuck_frac > 0.0F &&
                         playout_on_turn == worker->solver->solving_player;
@@ -3290,36 +3312,35 @@ static SmallMove pick_greedy_playout_move(const EndgameCtxWorker *worker,
         calculate_end_rack_points(opp_rack, game_get_ld(worker->game_copy)));
   }
 
-  int best_idx = 0;
-  int best_adj = INT32_MIN;
-  for (int move_idx = 0; move_idx < nplays; move_idx++) {
-    const SmallMove *sm = playout_step_play(worker->move_list, in_place, plays,
-                                            nplays, pass, move_idx);
-    int score = small_move_get_score(sm);
-    if (go_out_bonus > 0 && !small_move_is_pass(sm) &&
-        small_move_get_tiles_played(sm) == stm_tiles) {
+  int best_move_idx = 0;
+  int best_adjusted = INT32_MIN;
+  for (int move_idx = 0; move_idx < play_count; move_idx++) {
+    const SmallMove *candidate = playout_step_play(
+        worker->move_list, in_place, plays, play_count, pass, move_idx);
+    int score = small_move_get_score(candidate);
+    if (go_out_bonus > 0 && small_move_goes_out(candidate, stm_tiles)) {
       score += go_out_bonus;
     }
-    int adj;
+    int adjusted;
     if (conserve) {
-      if (small_move_is_pass(sm)) {
-        adj = score - pass_penalty;
+      if (small_move_is_pass(candidate)) {
+        adjusted = score - pass_penalty;
       } else {
         int conservation_bonus = compute_conservation_bonus(
-            sm, worker->solver->tile_face_values, opp_stuck_frac);
-        adj = score - conservation_bonus;
+            candidate, worker->solver->tile_face_values, opp_stuck_frac);
+        adjusted = score - conservation_bonus;
       }
     } else {
-      adj = score;
+      adjusted = score;
     }
-    if (adj > best_adj) {
-      best_adj = adj;
-      best_idx = move_idx;
+    if (adjusted > best_adjusted) {
+      best_adjusted = adjusted;
+      best_move_idx = move_idx;
     }
   }
 
-  return *playout_step_play(worker->move_list, in_place, plays, nplays, pass,
-                            best_idx);
+  return *playout_step_play(worker->move_list, in_place, plays, play_count,
+                            pass, best_move_idx);
 }
 
 static int32_t negamax_greedy_leaf_playout(EndgameCtxWorker *worker,
@@ -3421,21 +3442,25 @@ static int32_t negamax_greedy_leaf_playout(EndgameCtxWorker *worker,
     }
   }
 
-  // Stuck playouts use the path throughout so later steps can derive lists.
+  // A stuck playout derives its steps' lists from the incremental lists.
+  // (opp_stuck_frac is fixed for the whole playout.) A step derives from the
+  // same side's list two moves up. Where that list was never built (the second
+  // step's, when the leaf's parent cut off on its first reply), the step
+  // generates from scratch, which gives the same plays in the same order, and
+  // stores its list for the steps that follow.
   const bool follow_path = use_path_lists && opp_stuck_frac > 0.0F;
+  // A playout with no stuck tiles needs only each step's best play, which the
+  // lists find from the side's nearest built list up the path and a
+  // generation of the lanes changed since (path_move_lists_best_play_alone).
+  // A playout of one move has only the leaf's step, which needs no push.
   const bool use_best_lists = use_path_lists && opp_stuck_frac == 0.0F &&
                               worker->solver->best_reply_shortcuts;
-  // After the first greedy play, the replying side's list two moves up is
-  // the leaf parent's list. When it exists, push that play so the reply
-  // needs to generate only the lanes that changed. A one-tile reply already
-  // has its own scan.
-  const bool reuse_reply_list =
-      use_best_lists && max_playout > 1 &&
-      rack_get_total_letters(player_get_rack(
-          game_get_player(worker->game_copy, 1 - on_turn_idx))) > 1 &&
-      (worker->path_lists->length == 1 ||
-       path_move_lists_slot_is_current(worker->path_lists,
-                                       worker->path_lists->length - 1));
+  // Either kind pushes every move it makes onto the lists' path, and the
+  // unwind pops each one. So for such a playout the path always ends with the
+  // last move played, and for any other it does only at the leaf: a step may
+  // read the path's last move or derive from the lists only where
+  // playout_depth == 0 || push_moves.
+  const bool push_moves = follow_path || (use_best_lists && max_playout > 1);
 
   // A stuck playout often passes through a position an earlier one reached,
   // the same moves in another order, and from there it plays the same moves.
@@ -3493,11 +3518,14 @@ static int32_t negamax_greedy_leaf_playout(EndgameCtxWorker *worker,
     SmallMove picked_play;
     if (stm_rack_p->number_of_letters == 1) {
       // A one-tile rack can only pass or go out. Neither needs a move list.
+      // Its move is still pushed where the playout pushes, without a
+      // materialized list: a side down to one tile never needs its list
+      // derived again.
       playout_single_tile_step(worker, playout_depth, first_step_is_pass,
-                               leaf_opp_play, follow_path, &opp_stuck_step);
+                               leaf_opp_play, playout_depth == 0 || push_moves,
+                               &opp_stuck_step);
       nplays = 1;
-    } else if (use_best_lists && (playout_depth == 0 ||
-                                  (playout_depth == 1 && reuse_reply_list))) {
+    } else if (use_best_lists && (playout_depth == 0 || push_moves)) {
       nplays = playout_step_from_lists(
           worker, worker->leaf_is_alone || playout_depth > 0,
           playout_depth == 0 ? leaf_plays : NULL, leaf_play_count);
@@ -3622,8 +3650,7 @@ static int32_t negamax_greedy_leaf_playout(EndgameCtxWorker *worker,
     if (playout_depth < MAX_VARIANT_LENGTH) {
       pv->moves[playout_depth] = best_sm;
     }
-    if (!small_move_is_pass(&best_sm) &&
-        small_move_get_tiles_played(&best_sm) == stm_tiles) {
+    if (small_move_goes_out(&best_sm, stm_tiles)) {
       const Rack *opp_rack = player_get_rack(
           game_get_player(worker->game_copy, 1 - playout_on_turn));
       // The final move belongs in the PV and cached tail length. Its score
@@ -3640,7 +3667,7 @@ static int32_t negamax_greedy_leaf_playout(EndgameCtxWorker *worker,
                        game_get_board(worker->game_copy));
 
     int undo_slot = plies + playout_depth;
-    if (follow_path || (playout_depth == 0 && reuse_reply_list)) {
+    if (push_moves) {
       path_move_lists_push(worker->path_lists,
                            game_get_board(worker->game_copy),
                            worker->move_list->spare_move);
@@ -3729,12 +3756,13 @@ static int32_t negamax_greedy_leaf_playout(EndgameCtxWorker *worker,
   pv->negamax_depth = 0;
 
   // Unplay all playout moves in reverse. Cross-set updates were saved into
-  // each move's undo, so the square restore reverts them exactly.
+  // each move's undo, so the square restore reverts them exactly. A move
+  // that went out was never played on the board, nor pushed.
   const int moves_to_unplay = went_out ? playout_depth - 1 : playout_depth;
   for (int step = moves_to_unplay - 1; step >= 0; step--) {
     const int undo_slot = plies + step;
     unplay_played_move(worker, &worker->move_undos[undo_slot]);
-    if (follow_path || (step == 0 && reuse_reply_list)) {
+    if (push_moves) {
       path_move_lists_pop(worker->path_lists);
     }
   }
@@ -4132,8 +4160,8 @@ static void play_keyed_small_move(EndgameCtxWorker *worker,
   const int on_turn_idx = game_get_player_on_turn_index(worker_game);
   const Player *player_on_turn = game_get_player(worker_game, on_turn_idx);
   const Rack *stm_rack = player_get_rack(player_on_turn);
-  const bool is_outplay = small_move_get_tiles_played(small_move) ==
-                          rack_get_total_letters(stm_rack);
+  const bool is_outplay =
+      small_move_goes_out(small_move, rack_get_total_letters(stm_rack));
 
   if (worker->path_lists != NULL) {
     path_move_lists_push(worker->path_lists, game_get_board(worker_game),
@@ -4257,7 +4285,8 @@ static inline bool child_node_needs_no_checks(EndgameCtxWorker *worker) {
 // generation does; both pick the same play, so the search does not depend on
 // which ran. Only if that move does not cut off is the list built. (The node's
 // own list slot then stays unbuilt, which is safe only because its children
-// are leaves: nothing below derives from it.) Picks that move and
+// are leaves: a leaf's playout reads the nearest list that is built, or
+// generates from scratch.) Picks that move and
 // returns true, or returns false when the node should build its list first: a
 // stuck opponent (the ordering then weighs conservation), an interrupt, or no
 // play at all.

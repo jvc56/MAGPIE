@@ -1165,26 +1165,29 @@ bool path_move_lists_best_play_alone(PathMoveLists *lists,
                                      SmallMove *out_best) {
   const int length = lists->length;
   assert(length >= 1);
-  assert(length <= 2 || path_move_lists_slot_is_current(lists, length - 2));
   assert(best_small_args->move_record_type == MOVE_RECORD_BEST_SMALL);
   assert(best_small_args->best_small_canonical_ties);
-  PathListSlot *parent =
-      length <= 2 ? &lists->roots[2 - length] : &lists->slots[length - 2];
-  if (!parent->by_score_valid) {
-    slot_order_by_score(parent);
+  int first_move;
+  PathListSlot *source = nearest_built_list(lists, &first_move);
+  if (!source->by_score_valid) {
+    slot_order_by_score(source);
   }
-  // As in path_move_lists_moves_at: the lanes either move touched, and the
-  // squares they changed there.
-  uint64_t touched = lists->masks[length - 1];
+  // The lanes the moves made since that list touched, and the squares they
+  // changed there. The side's own moves among them, every second one back
+  // from the last but one, took the tiles they placed from its rack.
+  uint64_t touched = 0;
   bool filter = false;
-  for (int lane = 0; lane < PATH_MOVE_LISTS_NUM_LANES; lane++) {
-    lists->lane_hits[lane] = lists->hits[length - 1][lane];
-  }
-  if (length >= 2) {
-    touched |= lists->masks[length - 2];
-    filter = lists->played[length - 2];
+  memset(lists->lane_hits, 0, sizeof(lists->lane_hits));
+  for (int move_idx = first_move; move_idx < length; move_idx++) {
+    if (((length - move_idx) & 1) == 0 && lists->played[move_idx]) {
+      filter = true;
+    }
+    if (lists->masks[move_idx] == 0) {
+      continue;
+    }
+    touched |= lists->masks[move_idx];
     for (int lane = 0; lane < PATH_MOVE_LISTS_NUM_LANES; lane++) {
-      lists->lane_hits[lane] |= lists->hits[length - 2][lane];
+      lists->lane_hits[lane] |= lists->hits[move_idx][lane];
     }
   }
   const Game *game = best_small_args->game;
@@ -1206,17 +1209,17 @@ bool path_move_lists_best_play_alone(PathMoveLists *lists,
       side_to_move_tiles < RACK_SIZE ? side_to_move_tiles : RACK_SIZE;
   for (int tiles = most_tiles; tiles >= 1; tiles--) {
     const int bonus = tiles == side_to_move_tiles ? scan.go_out_bonus : 0;
-    const int end = parent->tiles_begin[tiles + 1];
-    for (int key_idx = parent->tiles_begin[tiles]; key_idx < end; key_idx++) {
-      const uint64_t key = parent->by_score[key_idx];
+    const int end = source->tiles_begin[tiles + 1];
+    for (int key_idx = source->tiles_begin[tiles]; key_idx < end; key_idx++) {
+      const uint64_t key = source->by_score[key_idx];
       if ((int)(key >> 32) + bonus < scan.best_adjusted) {
         break;
       }
       const uint32_t move_idx = (uint32_t)key;
-      if (filter && !counts_subset(&parent->used[move_idx], &avail)) {
+      if (filter && !counts_subset(&source->used[move_idx], &avail)) {
         continue;
       }
-      const SmallMove *small_move = &parent->moves[move_idx];
+      const SmallMove *small_move = &source->moves[move_idx];
       if ((small_move_span(small_move) &
            lists->lane_hits[lane_of_small_move(small_move)]) != 0) {
         continue;

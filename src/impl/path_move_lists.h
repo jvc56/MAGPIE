@@ -17,9 +17,9 @@ enum {
   PATH_MOVE_LISTS_NUM_LANES = 2 * BOARD_DIM,
   // Deepest search path the lists follow: a forced-pass bypass can precede
   // every negamax ply (a bypass never follows another bypass), so at most
-  // 2 * plies moves reach a leaf, and a stuck-tile greedy playout then pushes
-  // up to MAX_SEARCH_DEPTH + 1 - plies more (see
-  // negamax_greedy_leaf_playout). The total is at most
+  // 2 * plies moves reach a leaf, and a greedy playout of more than one move
+  // then pushes up to MAX_SEARCH_DEPTH + 1 - plies more, stopping where the
+  // path is full (see negamax_greedy_leaf_playout). The total is at most
   // 2 * MAX_SEARCH_DEPTH + 1; the rest is slack.
   PATH_MOVE_LISTS_MAX_PATH = 2 * MAX_SEARCH_DEPTH + 4,
   // Per-tile-type counts in 4-bit fields (the blank at index 0), packed into
@@ -253,11 +253,15 @@ bool path_move_lists_best_play(PathMoveLists *lists,
                                SmallMove *out_best);
 
 // path_move_lists_best_play for a position that shares its lanes with no
-// sibling (the leaf under a first reply, whose parent searches no other
-// move): the same play, found without the per-lane bests the siblings would
-// share. The side's list two moves up is read in descending score order,
-// stopping at the first of its plays that still stands, and the lanes either
-// later move touched are generated against that play.
+// sibling (the leaf under a first reply, whose parent searches no other move,
+// and every later step of a greedy playout): the same play, found without the
+// per-lane bests the siblings would share. Unlike path_move_lists_best_play it
+// does not need the side's list two moves up: it reads the nearest list of the
+// side to move that is built, up the path (down to its root list), in
+// descending score order, stopping at the first of its plays that still
+// stands, and the lanes touched by the moves made since that list are
+// generated against that play. Nothing is stored in the slot of the current
+// length.
 bool path_move_lists_best_play_alone(PathMoveLists *lists,
                                      const MoveGenArgs *best_small_args,
                                      SmallMove *out_best);
