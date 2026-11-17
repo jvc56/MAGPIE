@@ -81,6 +81,9 @@ typedef struct Inference {
   // the top move.
   Equity equity_margin;
   Equity temperature;
+  int oracle_feature;
+  Equity oracle_tolerance;
+  const Rack *oracle_leave;
   bool use_infer_cutoff_optimization;
   // Every worker walks every possible leave in the same order;
   // current_rack_index is the position of the walk. A worker evaluates only
@@ -459,6 +462,40 @@ static Equity get_top_equity_from_census(const Inference *inference,
   }
 }
 
+static int inference_vowel_count(const Inference *inference,
+                                 const Rack *rack) {
+  const LetterDistribution *ld = game_get_ld(inference->game);
+  int vowels = 0;
+  for (int ml = 0; ml < inference->ld_size; ml++) {
+    if (ld_get_is_vowel(ld, (MachineLetter)ml)) {
+      vowels += rack_get_letter(rack, (MachineLetter)ml);
+    }
+  }
+  return vowels;
+}
+
+// Test-only oracle: does the leave match the oracle leave on the feature?
+static bool inference_oracle_matches(const Inference *inference,
+                                     Equity current_leave_value) {
+  const int feature = inference->oracle_feature;
+  if ((feature & 1) != 0 &&
+      inference_vowel_count(inference, inference->current_target_leave) !=
+          inference_vowel_count(inference, inference->oracle_leave)) {
+    return false;
+  }
+  if ((feature & 2) != 0) {
+    const Equity oracle_value =
+        inference_get_leave_value(inference, inference->oracle_leave);
+    const Equity difference = current_leave_value > oracle_value
+                                  ? current_leave_value - oracle_value
+                                  : oracle_value - current_leave_value;
+    if (difference > inference->oracle_tolerance) {
+      return false;
+    }
+  }
+  return true;
+}
+
 // A rack is consistent with the target's move when no move beats it by more
 // than the equity margin. For a tile placement the move's equity is its
 // score plus the leave value. For an exchange of N tiles it is the best
@@ -497,7 +534,12 @@ void evaluate_possible_leave(Inference *inference) {
   // Census exhausts every split for an admitted rack, so softmax receives
   // its exact best equity. Rejected racks can stop at the admission cutoff.
   Equity top_equity;
-  if (inference->census_play_scores != NULL) {
+  if (inference->oracle_feature != 0) {
+    if (!inference_oracle_matches(inference, current_leave_value)) {
+      return;
+    }
+    top_equity = observed_equity;
+  } else if (inference->census_play_scores != NULL) {
     top_equity = get_top_equity_from_census(
         inference, use_cutoff ? target_equity_cutoff : EQUITY_MAX_VALUE);
   } else {
@@ -753,6 +795,9 @@ Inference *inference_create(const Game *game, const InferenceArgs *args,
   inference->target_number_of_tiles_exchanged = args->target_num_exch;
   inference->equity_margin = args->equity_margin;
   inference->temperature = args->temperature;
+  inference->oracle_feature = args->oracle_feature;
+  inference->oracle_tolerance = args->oracle_tolerance;
+  inference->oracle_leave = args->oracle_leave;
   // Disable cutoff optimization for exchanges with large leaves
   // as benchmarks show it hurts performance for small exchanges
   const int leave_size = RACK_SIZE - args->target_num_exch;
@@ -799,6 +844,9 @@ void inference_reset(Inference *inference, const Game *game,
   inference->target_number_of_tiles_exchanged = args->target_num_exch;
   inference->equity_margin = args->equity_margin;
   inference->temperature = args->temperature;
+  inference->oracle_feature = args->oracle_feature;
+  inference->oracle_tolerance = args->oracle_tolerance;
+  inference->oracle_leave = args->oracle_leave;
   // Disable cutoff optimization for exchanges with large leaves
   const int leave_size = RACK_SIZE - args->target_num_exch;
   const bool is_small_exchange =

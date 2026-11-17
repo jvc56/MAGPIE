@@ -26,6 +26,13 @@ typedef struct InferenceArgs {
   int leave_list_capacity;
   Equity equity_margin;
   Equity temperature;
+  // Test-only oracle (infdecide): when oracle_feature is nonzero the leave
+  // weights ignore the observed move and are the draw counts of the leaves
+  // that match oracle_leave on a feature. 1: same vowel count. 2: leave
+  // value within oracle_tolerance. 3: both.
+  int oracle_feature;
+  Equity oracle_tolerance;
+  const Rack *oracle_leave;
   const Move *target_move;
   Rack *target_played_tiles;
   Rack *target_known_rack;
@@ -52,6 +59,9 @@ infer_args_fill(InferenceArgs *args, int leave_list_capacity, Equity eq_margin,
   args->leave_list_capacity = leave_list_capacity;
   args->equity_margin = eq_margin;
   args->temperature = 0;
+  args->oracle_feature = 0;
+  args->oracle_tolerance = 0;
+  args->oracle_leave = NULL;
   args->target_move = NULL;
   args->target_played_tiles = target_played_tiles;
   args->target_known_rack = target_known_rack;

@@ -16,7 +16,10 @@ NAMES = {'s': 'softmax inference', 'p': 'perfect information',
          'c': 'second control (other seed)', 't': 'top static move',
          'a': 'softmax inference T3', 'b': 'softmax inference T16',
          'h': 'hard-margin inference (5)', '1': 'one opponent tile known',
-         '2': 'two opponent tiles known', '4': 'four opponent tiles known'}
+         '2': 'two opponent tiles known', '4': 'four opponent tiles known',
+         'v': 'true vowel count of the leave known',
+         'k': 'true leave value known (within 2)',
+         'j': 'true vowel count and leave value known'}
 
 
 def mean_ci(values):
@@ -50,7 +53,7 @@ def main():
         label = 'control' if arm == '0' else NAMES.get(arm, arm)
         print(f'search seconds per move, {label}: mean {st.mean(values):.2f}, '
               f'median {st.median(values):.2f}, max {max(values):.2f} (n={len(values)})')
-    for arm in 'spctabh124':
+    for arm in 'spctabh124vkj':
         if arm not in rows:
             continue
         data = rows[arm]

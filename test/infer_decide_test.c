@@ -12,6 +12,10 @@
 //   t  the top static-equity move (positive control, free)
 //   a  softmax inference at temperature 3; b at temperature 16
 //   h  hard-margin inference, margin 5
+//   v, k, j  feature oracles: the search samples the opponent's kept tiles
+//      from the draw-count prior restricted to leaves with the true vowel
+//      count (v), a leave value within 2 points of the true one (k), or both
+//      (j). After an exchange these arms run without inference.
 //   1, 2, 4  the search told that many tiles of the opponent's actual rack,
 //      chosen at random (partial information)
 // Where an arm picks a different move from the control, both moves are scored
@@ -209,7 +213,7 @@ void infer_decide_run_spec(const char *spec) {
   error_stack_destroy(errors);
   const int num_extra = (int)strlen(arm_codes);
   for (int idx = 0; idx < num_extra; idx++) {
-    assert(strchr("spctabh124", arm_codes[idx]) != NULL);
+    assert(strchr("spctabh124vkj", arm_codes[idx]) != NULL);
   }
   const double move_seconds = move_ms / 1000.0;
 
@@ -252,12 +256,14 @@ void infer_decide_run_spec(const char *spec) {
   Rack opp_actual;
   Rack no_rack;
   Rack partial;
+  Rack true_leave;
   rack_set_dist_size_and_reset(&played, ld_get_size(ld));
   rack_set_dist_size_and_reset(&known, ld_get_size(ld));
   rack_set_dist_size_and_reset(&observer, ld_get_size(ld));
   rack_set_dist_size_and_reset(&opp_actual, ld_get_size(ld));
   rack_set_dist_size_and_reset(&no_rack, ld_get_size(ld));
   rack_set_dist_size_and_reset(&partial, ld_get_size(ld));
+  rack_set_dist_size_and_reset(&true_leave, ld_get_size(ld));
   MoveList *moves = move_list_create(num_plays);
   MoveList *static_best = move_list_create(1);
   MoveList *oracle_moves = move_list_create(DECIDE_MAX_ARMS + 1);
@@ -331,7 +337,11 @@ void infer_decide_run_spec(const char *spec) {
           decide_move_string(game, &arm->move, arm->move_str);
           continue;
         }
-        const bool use_inference = strchr("sabh", arm->code) != NULL;
+        const bool feature_oracle = strchr("vkj", arm->code) != NULL;
+        const bool use_inference =
+            strchr("sabh", arm->code) != NULL ||
+            (feature_oracle &&
+             move_get_type(&previous_move) == GAME_EVENT_TILE_PLACEMENT_MOVE);
         Rack *arm_known_rack = &no_rack;
         if (arm->code == 'p') {
           arm_known_rack = &opp_actual;
@@ -368,6 +378,15 @@ void infer_decide_run_spec(const char *spec) {
             arm_temperature = 0;
           }
           args.inference_args.temperature = int_to_equity(arm_temperature);
+          if (feature_oracle) {
+            rack_copy(&true_leave,
+                      player_get_rack(game_get_player(previous, 1 - seat)));
+            rack_subtract_using_floor_zero(&true_leave, &played);
+            args.inference_args.oracle_leave = &true_leave;
+            args.inference_args.oracle_tolerance = int_to_equity(2);
+            args.inference_args.oracle_feature =
+                arm->code == 'v' ? 1 : (arm->code == 'k' ? 2 : 3);
+          }
           args.inference_args.target_move = &previous_move;
         }
         thread_control_set_status(control, THREAD_CONTROL_STATUS_STARTED);
