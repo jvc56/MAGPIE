@@ -149,7 +149,7 @@ static void test_pool_shift_table(void) {
       for (int leave_size = 0; leave_size <= tiles_on_rack; leave_size++) {
         Rack leave;
         set_leave_prefix(rack, leave_size, &leave);
-        const uint32_t row = pool_shift_table_get_leave_row(table, klv, &leave);
+        const uint32_t row = pool_shift_table_get_leave_row(table, &leave);
         const Equity shift = pool_shift_get_leave_shift(
             table, klv, POOL_SHIFT_TEST_WEIGHT, ld, game_get_bag(game),
             opponent_rack, &leave, tiles_on_rack, real_bag_size);

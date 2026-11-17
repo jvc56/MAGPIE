@@ -6,7 +6,6 @@
 #include "bag.h"
 #include "equity.h"
 #include "klv.h"
-#include "kwg.h"
 #include "letter_distribution.h"
 #include "rack.h"
 #include <stdatomic.h>
@@ -34,19 +33,11 @@ bool pool_shift_table_matches_ld(const PoolShiftTable *table,
          table->ld_hash == pool_shift_get_ld_hash(ld);
 }
 
-// A walk of the KLV's word graph in its own order, which numbers each leave
-// by how many come before it.
 typedef struct PoolShiftBuild {
   const KLV *klv;
-  const KWG *kwg;
   const LetterDistribution *ld;
-  // NULL while the rows are only being counted.
   PoolShiftTable *table;
   Rack leave;
-  // The tiles on the walk's path that the leave above does not hold.
-  int tiles_outside_distribution;
-  uint32_t klv_leave_index;
-  uint32_t next_row;
 } PoolShiftBuild;
 
 // Fills the row of the build's leave: the value of the leave with one more
@@ -65,73 +56,64 @@ static void pool_shift_build_fill_row(PoolShiftBuild *build, uint32_t row) {
   }
 }
 
-// Visits the leaves under the sibling list at node_index, giving a row to
-// each of at most POOL_SHIFT_MAX_LEAVE_SIZE tiles of the distribution.
-static void pool_shift_build_walk(PoolShiftBuild *build, uint32_t node_index) {
-  const int ld_size = ld_get_size(build->ld);
-  for (;; node_index++) {
-    const uint32_t node = kwg_node(build->kwg, node_index);
-    const int ml = (int)kwg_node_tile(node);
-    // A leave with a tile the distribution lacks, or too many of one, gets
-    // no row, and neither does any leave that extends it. They are still
-    // walked, since they count toward the indexes of the leaves after them.
-    const bool in_distribution =
-        ml < ld_size && rack_get_letter(&build->leave, (MachineLetter)ml) <
-                            ld_get_dist(build->ld, (MachineLetter)ml);
-    if (in_distribution) {
-      rack_add_letter(&build->leave, (MachineLetter)ml);
-    } else {
-      build->tiles_outside_distribution++;
+// Fills the rows of the build's leave, which is numbered rank among the
+// leaves of its size, and of every leave of the distribution that adds tiles
+// from min_ml up to it.
+static void pool_shift_build_walk(PoolShiftBuild *build, uint32_t rank,
+                                  int min_ml) {
+  const PoolShiftTable *table = build->table;
+  const int leave_size = rack_get_total_letters(&build->leave);
+  pool_shift_build_fill_row(build,
+                            pool_shift_table_get_row(table, rank, leave_size));
+  if (leave_size == POOL_SHIFT_MAX_LEAVE_SIZE) {
+    return;
+  }
+  for (int ml = min_ml; ml < table->ld_size; ml++) {
+    if (rack_get_letter(&build->leave, (MachineLetter)ml) >=
+        ld_get_dist(build->ld, (MachineLetter)ml)) {
+      continue;
     }
-    if (kwg_node_accepts(node)) {
-      if (build->tiles_outside_distribution == 0 &&
-          rack_get_total_letters(&build->leave) <= POOL_SHIFT_MAX_LEAVE_SIZE) {
-        if (build->table != NULL) {
-          build->table->rows[build->klv_leave_index] = build->next_row;
-          pool_shift_build_fill_row(build, build->next_row);
-        }
-        build->next_row++;
-      }
-      build->klv_leave_index++;
-    }
-    const uint32_t arc_index = kwg_node_arc_index(node);
-    if (arc_index != 0) {
-      pool_shift_build_walk(build, arc_index);
-    }
-    if (in_distribution) {
-      rack_take_letter(&build->leave, (MachineLetter)ml);
-    } else {
-      build->tiles_outside_distribution--;
-    }
-    if (kwg_node_is_end(node)) {
-      return;
-    }
+    const uint32_t extended_rank = pool_shift_table_extend_rank(
+        table, rank, leave_size, (MachineLetter)ml);
+    rack_add_letter(&build->leave, (MachineLetter)ml);
+    pool_shift_build_walk(build, extended_rank, ml);
+    rack_take_letter(&build->leave, (MachineLetter)ml);
   }
 }
 
-// One pass over the KLV: counts the rows, and fills them when the build has
-// a table. Returns the number of rows, the empty leave's included.
-static uint32_t pool_shift_build_run(PoolShiftBuild *build) {
-  rack_set_dist_size_and_reset(&build->leave, ld_get_size(build->ld));
-  build->tiles_outside_distribution = 0;
-  build->klv_leave_index = 0;
-  build->next_row = POOL_SHIFT_EMPTY_LEAVE_ROW;
-  if (build->table != NULL) {
-    pool_shift_build_fill_row(build, build->next_row);
+// Sets rank_terms, size_starts and number_of_rows for the table's ld_size.
+static void pool_shift_table_set_numbering(PoolShiftTable *table) {
+  // C(t + i, i + 1) from C(t + i - 1, i), the row before, by
+  // C(n, k) = C(n - 1, k - 1) * n / k, which divides exactly.
+  for (int ml = 0; ml < MAX_ALPHABET_SIZE; ml++) {
+    uint64_t term = (uint64_t)ml;
+    for (int tiles_before = 0; tiles_before < POOL_SHIFT_MAX_LEAVE_SIZE;
+         tiles_before++) {
+      if (tiles_before > 0) {
+        term =
+            term * (uint64_t)(ml + tiles_before) / (uint64_t)(tiles_before + 1);
+      }
+      table->rank_terms[tiles_before][ml] = (uint32_t)term;
+    }
   }
-  build->next_row++;
-  const uint32_t root_node_index = kwg_get_dawg_root_node_index(build->kwg);
-  if (root_node_index != 0) {
-    pool_shift_build_walk(build, root_node_index);
+  // There are C(ld_size + k - 1, k) multisets of k tiles, which is the
+  // number of the first one whose greatest tile would be ld_size.
+  uint32_t number_of_rows = 0;
+  for (int leave_size = 0; leave_size <= POOL_SHIFT_MAX_LEAVE_SIZE;
+       leave_size++) {
+    table->size_starts[leave_size] = number_of_rows;
+    uint64_t size_count = 1;
+    for (int tile_idx = 0; tile_idx < leave_size; tile_idx++) {
+      size_count = size_count * (uint64_t)(table->ld_size + tile_idx) /
+                   (uint64_t)(tile_idx + 1);
+    }
+    number_of_rows += (uint32_t)size_count;
   }
-  return build->next_row;
+  table->number_of_rows = number_of_rows;
 }
 
 PoolShiftTable *pool_shift_table_create(const KLV *klv,
                                         const LetterDistribution *ld) {
-  PoolShiftBuild build = {
-      .klv = klv, .kwg = klv_get_kwg(klv), .ld = ld, .table = NULL};
-  const uint32_t number_of_rows = pool_shift_build_run(&build);
   PoolShiftTable *table = malloc_or_die(sizeof(PoolShiftTable));
   table->instance_id =
       (uint64_t)atomic_fetch_add(&pool_shift_tables_created, 1) + 1;
@@ -140,16 +122,12 @@ PoolShiftTable *pool_shift_table_create(const KLV *klv,
   table->ld_hash = pool_shift_get_ld_hash(ld);
   table->ld_size = ld_get_size(ld);
   table->stride = (table->ld_size + 3) & ~3;
-  table->number_of_leaves = klv_get_number_of_leaves(klv);
-  table->number_of_rows = number_of_rows;
-  const size_t rows_bytes = sizeof(uint32_t) * (size_t)table->number_of_leaves;
-  table->rows = malloc_or_die(rows_bytes > 0 ? rows_bytes : sizeof(uint32_t));
-  // Every byte 0xFF is POOL_SHIFT_NO_ROW.
-  memset(table->rows, 0xFF, rows_bytes);
-  table->values = calloc_or_die((size_t)number_of_rows * (size_t)table->stride,
-                                sizeof(Equity));
-  build.table = table;
-  pool_shift_build_run(&build);
+  pool_shift_table_set_numbering(table);
+  table->values = calloc_or_die(
+      (size_t)table->number_of_rows * (size_t)table->stride, sizeof(Equity));
+  PoolShiftBuild build = {.klv = klv, .ld = ld, .table = table};
+  rack_set_dist_size_and_reset(&build.leave, table->ld_size);
+  pool_shift_build_walk(&build, 0, 0);
   return table;
 }
 
@@ -157,22 +135,28 @@ void pool_shift_table_destroy(PoolShiftTable *table) {
   if (!table) {
     return;
   }
-  free(table->rows);
   free(table->values);
   free(table);
 }
 
 uint32_t pool_shift_table_get_leave_row(const PoolShiftTable *table,
-                                        const KLV *klv, const Rack *leave) {
+                                        const Rack *leave) {
   const int leave_size = rack_get_total_letters(leave);
-  if (leave_size == 0) {
-    return POOL_SHIFT_EMPTY_LEAVE_ROW;
-  }
-  if (leave_size > POOL_SHIFT_MAX_LEAVE_SIZE) {
+  if (leave_size > POOL_SHIFT_MAX_LEAVE_SIZE ||
+      rack_get_dist_size(leave) != table->ld_size) {
     return POOL_SHIFT_NO_ROW;
   }
-  return pool_shift_table_get_row(table, klv_get_word_index(klv, leave),
-                                  leave_size);
+  uint32_t rank = 0;
+  int tiles_before = 0;
+  for (int ml = 0; ml < table->ld_size; ml++) {
+    const int num_this = rack_get_letter(leave, (MachineLetter)ml);
+    for (int copy_idx = 0; copy_idx < num_this; copy_idx++) {
+      rank = pool_shift_table_extend_rank(table, rank, tiles_before,
+                                          (MachineLetter)ml);
+      tiles_before++;
+    }
+  }
+  return pool_shift_table_get_row(table, rank, leave_size);
 }
 
 void pool_shift_fill_weights(const PoolShiftTable *table,
@@ -217,7 +201,7 @@ Equity pool_shift_get_leave_shift(const PoolShiftTable *table, const KLV *klv,
       table->ld_size != ld_get_size(ld)) {
     return 0;
   }
-  const uint32_t row = pool_shift_table_get_leave_row(table, klv, leave);
+  const uint32_t row = pool_shift_table_get_leave_row(table, leave);
   if (row == POOL_SHIFT_NO_ROW) {
     return 0;
   }

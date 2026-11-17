@@ -748,7 +748,7 @@ static void census_rollout_ensure_pool_shift_rows(CensusRollout *census,
       rack_add_letters(&leave, (MachineLetter)ml, tally[ml]);
     }
     census->pool_shift_rows[rank] =
-        pool_shift_table_get_leave_row(table, klv, &leave);
+        pool_shift_table_get_leave_row(table, &leave);
   }
   census->pool_shift_table_instance_id = table->instance_id;
 }

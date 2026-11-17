@@ -89,18 +89,6 @@ typedef struct SubrackEnumCacheEntry {
   uint8_t count_by_size[RACK_SIZE + 1];
 } SubrackEnumCacheEntry;
 
-// Per-thread cache of the walk a pool-shifted generation makes of its rack's
-// leaves: each subset's leave value without the shift, which depends on the
-// pool, and the leave's row in the pool shift table. Keyed by the rack, as
-// the KLV leaves cache is, and read only by pool-shifted generations.
-typedef struct PoolShiftLeavesCacheEntry {
-  BitRack key;
-  bool valid;
-  // By leave map index, as leave_map.leave_values is.
-  Equity leave_values[1 << RACK_SIZE];
-  uint32_t rows[1 << RACK_SIZE];
-} PoolShiftLeavesCacheEntry;
-
 typedef struct UnrestrictedMultiplier {
   uint8_t multiplier;
   uint8_t column;
@@ -404,10 +392,8 @@ typedef struct MoveGen {
   // subrack_cache_epoch + 1 here. A pool-shifted generation takes such an
   // entry while the epoch is the same, and recomputes its leave values.
   uint64_t pool_shift_subrack_epochs[MOVEGEN_SUBRACK_CACHE_SIZE];
-  // The table the pool shift leaves cache was filled from, by instance id.
-  uint64_t pool_shift_cache_table_instance_id;
-  PoolShiftLeavesCacheEntry
-      pool_shift_leaves_cache[MOVEGEN_KLV_LEAVES_CACHE_SIZE];
+  // By leave map bit, the tile of the rack it stands for.
+  MachineLetter pool_shift_bit_tiles[RACK_SIZE];
 } MoveGen;
 
 // Cache getter functions

@@ -39,7 +39,16 @@
 // millipoints.
 //
 // A PoolShiftTable holds value(L + t) for one KLV: a row of values by t for
-// each leave L, found by the leave's index in the KLV.
+// each leave L. A leave's row is computed from its tiles alone, with no walk
+// of the KLV and no lookup: the rows of each leave size are in the order of
+// the combinatorial number system, where the leave whose tiles in ascending
+// order are a_0 <= a_1 <= ... is number
+//
+//   sum over i of C(a_i + i, i + 1)
+//
+// of its size. That numbers every multiset of the alphabet, so the leaves
+// with more of a tile than the distribution has get rows too, which nothing
+// reads.
 
 enum {
   POOL_SHIFT_MAX_LEAVE_SIZE = RACK_SIZE - 2,
@@ -69,10 +78,12 @@ typedef struct PoolShiftTable {
   uint64_t ld_hash;
   int ld_size;
   int stride;
-  uint32_t number_of_leaves;
   uint32_t number_of_rows;
-  // By KLV leave index, the leave's row, or POOL_SHIFT_NO_ROW.
-  uint32_t *rows;
+  // By leave size, the row of the first leave of that size.
+  uint32_t size_starts[POOL_SHIFT_MAX_LEAVE_SIZE + 1];
+  // rank_terms[i][t] is C(t + i, i + 1): what tile t adds to the number of a
+  // leave with i tiles before it in ascending order.
+  uint32_t rank_terms[POOL_SHIFT_MAX_LEAVE_SIZE][MAX_ALPHABET_SIZE];
   // number_of_rows rows of stride values: values[row * stride + t] is the
   // KLV's value of the row's leave with one more t.
   Equity *values;
@@ -103,25 +114,33 @@ static inline bool pool_shift_applies(const PoolShiftTable *table,
          real_bag_size >= RACK_SIZE && pool_shift_table_matches_klv(table, klv);
 }
 
-// The row of the leave of leave_size tiles whose index in the KLV is
-// klv_leave_index (KLV_UNFOUND_INDEX for a leave the KLV does not hold, and
-// anything for the empty leave).
-static inline uint32_t pool_shift_table_get_row(const PoolShiftTable *table,
-                                                uint32_t klv_leave_index,
-                                                int leave_size) {
-  if (leave_size == 0) {
-    return POOL_SHIFT_EMPTY_LEAVE_ROW;
+// The number among the leaves of its size (see above) of a leave with one
+// more tile: of the leave of leave_size tiles numbered rank with ml added,
+// where no tile of the leave is greater than ml. Unchanged for a leave too
+// long to have a row.
+static inline uint32_t pool_shift_table_extend_rank(const PoolShiftTable *table,
+                                                    uint32_t rank,
+                                                    int leave_size,
+                                                    MachineLetter ml) {
+  if (leave_size >= POOL_SHIFT_MAX_LEAVE_SIZE) {
+    return rank;
   }
-  if (leave_size > POOL_SHIFT_MAX_LEAVE_SIZE ||
-      klv_leave_index >= table->number_of_leaves) {
-    return POOL_SHIFT_NO_ROW;
-  }
-  return table->rows[klv_leave_index];
+  return rank + table->rank_terms[leave_size][ml];
 }
 
-// The row of a leave, looked up in the KLV the table was built from.
+// The row of the leave of leave_size tiles numbered rank among the leaves of
+// its size.
+static inline uint32_t pool_shift_table_get_row(const PoolShiftTable *table,
+                                                uint32_t rank, int leave_size) {
+  if (leave_size > POOL_SHIFT_MAX_LEAVE_SIZE) {
+    return POOL_SHIFT_NO_ROW;
+  }
+  return table->size_starts[leave_size] + rank;
+}
+
+// The row of a leave.
 uint32_t pool_shift_table_get_leave_row(const PoolShiftTable *table,
-                                        const KLV *klv, const Rack *leave);
+                                        const Rack *leave);
 
 // Sets weights[t], for each t below the table's stride, to the weight of t's
 // values for a mover who sees the bag and opponent_rack as unseen. The
