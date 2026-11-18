@@ -649,19 +649,23 @@ void complete_inference_setup(Inference *inference, const InferenceArgs *args) {
   }
 }
 
+// Inference leaves pre-endgame adjustments out, as it did before they were
+// loadable: the equities it computes itself (the target's move, the census
+// plays and the best exchange) pass none, so the moves it generates must get
+// none either. The same goes for the pool shift. Copying a game brings both
+// back, so every copy into the inference's game must clear them again.
+static void clear_equity_adjustments(Game *game) {
+  for (int player_index = 0; player_index < 2; player_index++) {
+    player_set_peg_adjust(game_get_player(game, player_index), NULL);
+    player_set_pool_shift(game_get_player(game, player_index), NULL, 0);
+  }
+}
+
 Inference *inference_create(const Game *game, const InferenceArgs *args,
                             const InferenceResults *results) {
   Inference *inference = malloc_or_die(sizeof(Inference));
   inference->game = game_duplicate(game);
-  // Inference leaves pre-endgame adjustments out, as it did before they were
-  // loadable: the equities it computes itself (the target's move, the census
-  // plays and the best exchange) pass none, so the moves it generates must
-  // get none either. The same goes for the pool shift.
-  for (int player_index = 0; player_index < 2; player_index++) {
-    player_set_peg_adjust(game_get_player(inference->game, player_index), NULL);
-    player_set_pool_shift(game_get_player(inference->game, player_index), NULL,
-                          0);
-  }
+  clear_equity_adjustments(inference->game);
   inference->move_list = move_list_create(1);
   inference->klv =
       player_get_klv(game_get_player(inference->game, args->target_index));
@@ -712,6 +716,7 @@ void inference_reset(Inference *inference, const Game *game,
   // Only update fields that will change between
   // inferences that happen in autoplay simming.
   game_copy(inference->game, game);
+  clear_equity_adjustments(inference->game);
 
   inference->target_index = args->target_index;
   inference->target_score = args->target_score;
