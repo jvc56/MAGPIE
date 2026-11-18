@@ -4361,44 +4361,60 @@ static Equity gen_search_lane_above_cutoff(MoveGen *gen, uint32_t root,
                                                         : skipped_bound;
 }
 
-// Saves the generation's incumbent while finding the best play at anchor,
-// or in the current lane when anchor is NULL. Records the result and offers
-// it to the generation. In debug builds a held entry is searched again.
-static void gen_search_and_remember_play(MoveGen *gen, const Anchor *anchor,
-                                         uint32_t kwg_root_node_index,
-                                         AnchorPlayEntry *entry, uint64_t key,
-                                         bool held) {
-  MoveList *move_list = gen->move_list;
-  const SmallMove best_so_far = *move_list->small_moves[0];
-  const int count_so_far = move_list->count;
-  const Equity value_so_far = gen->best_move_equity_or_score;
-  const Equity cutoff_so_far = gen->cutoff_equity_or_score;
-  move_list->count = 0;
+// A lane or anchor search needs its own best play while the generation's
+// incumbent is set aside.
+typedef struct BestSmallIncumbent {
+  SmallMove play;
+  int count;
+  Equity value;
+  Equity cutoff;
+} BestSmallIncumbent;
+
+static inline BestSmallIncumbent gen_set_aside_incumbent(MoveGen *gen) {
+  const BestSmallIncumbent incumbent = {.play = *gen->move_list->small_moves[0],
+                                        .count = gen->move_list->count,
+                                        .value = gen->best_move_equity_or_score,
+                                        .cutoff = gen->cutoff_equity_or_score};
+  gen->move_list->count = 0;
   gen->best_move_equity_or_score = EQUITY_INITIAL_VALUE;
   gen->cutoff_equity_or_score = EQUITY_INITIAL_VALUE;
+  return incumbent;
+}
+
+static inline void gen_restore_incumbent(MoveGen *gen,
+                                         const BestSmallIncumbent *incumbent) {
+  // The search may swap the best and spare. Restore to the current best slot.
+  *gen->move_list->small_moves[0] = incumbent->play;
+  gen->move_list->count = incumbent->count;
+  gen->best_move_equity_or_score = incumbent->value;
+  gen->cutoff_equity_or_score = incumbent->cutoff;
+}
+
+static inline AnchorPlayEntry gen_best_small_entry(const MoveGen *gen,
+                                                   uint64_t key) {
   AnchorPlayEntry found = {.key = key};
-  if (anchor == NULL) {
-    found.skipped_bound =
-        gen_search_lane_above_cutoff(gen, kwg_root_node_index, cutoff_so_far);
-  } else {
-    recursive_gen_small(gen, anchor->col, kwg_root_node_index, anchor->col,
-                        anchor->col, gen->dir == BOARD_HORIZONTAL_DIRECTION, 0,
-                        1, 0);
-  }
-  if (move_list->count != 0) {
-    const SmallMove *play = move_list->small_moves[0];
+  if (gen->move_list->count != 0) {
+    const SmallMove *play = gen->move_list->small_moves[0];
     found.tiny_move = play->tiny_move;
     found.value = gen->best_move_equity_or_score;
     found.score = play->metadata.score;
     found.play_length = play->metadata.play_length;
     found.tiles_played = play->metadata.tiles_played;
   }
-  // The search may have swapped the list's best and spare moves; whichever
-  // is the best now takes the best so far back.
-  *move_list->small_moves[0] = best_so_far;
-  move_list->count = count_so_far;
-  gen->best_move_equity_or_score = value_so_far;
-  gen->cutoff_equity_or_score = cutoff_so_far;
+  return found;
+}
+
+static void gen_search_and_remember_anchor_play(MoveGen *gen,
+                                                const Anchor *anchor,
+                                                uint32_t kwg_root_node_index,
+                                                AnchorPlayEntry *entry,
+                                                uint64_t key, bool held) {
+  const BestSmallIncumbent incumbent = gen_set_aside_incumbent(gen);
+  recursive_gen_small(gen, anchor->col, kwg_root_node_index, anchor->col,
+                      anchor->col, gen->dir == BOARD_HORIZONTAL_DIRECTION, 0, 1,
+                      0);
+  const AnchorPlayEntry found = gen_best_small_entry(gen, key);
+  gen_restore_incumbent(gen, &incumbent);
   assert(!held || (entry->tiny_move == found.tiny_move &&
                    entry->value == found.value && entry->score == found.score &&
                    entry->play_length == found.play_length &&
@@ -4527,9 +4543,9 @@ gen_record_scoring_plays_impl(MoveGen *gen, bool lazy) {
     } else if (anchor_play != NULL) {
       // Without NDEBUG a held anchor is searched again, and must be found as
       // it is held.
-      gen_search_and_remember_play(gen, &anchor, kwg_root_node_index,
-                                   anchor_play, anchor_play_key,
-                                   anchor_play_held);
+      gen_search_and_remember_anchor_play(gen, &anchor, kwg_root_node_index,
+                                          anchor_play, anchor_play_key,
+                                          anchor_play_held);
     } else if (gen->move_record_type == MOVE_RECORD_BEST_SMALL) {
       recursive_gen_small(gen, anchor.col, kwg_root_node_index, anchor.col,
                           anchor.col, gen->dir == BOARD_HORIZONTAL_DIRECTION, 0,
@@ -4806,14 +4822,18 @@ static void gen_record_cached_lane_bests(MoveGen *gen, uint64_t lane_mask) {
     const uint64_t key = keys[lane];
     AnchorPlayEntry *entry =
         lane_shadow_cache_anchor_play(gen->lane_shadow_cache, key);
-    if (entry->key == key &&
-        entry->skipped_bound < gen->best_move_equity_or_score) {
-      gen_offer_cached_play(gen, entry);
-    } else {
+    if (entry->key != key ||
+        entry->skipped_bound >= gen->best_move_equity_or_score) {
       gen->dir = lane / BOARD_DIM;
       gen->current_row_index = lane % BOARD_DIM;
-      gen_search_and_remember_play(gen, NULL, root, entry, key, false);
+      const BestSmallIncumbent incumbent = gen_set_aside_incumbent(gen);
+      const Equity skipped_bound =
+          gen_search_lane_above_cutoff(gen, root, incumbent.cutoff);
+      *entry = gen_best_small_entry(gen, key);
+      entry->skipped_bound = skipped_bound;
+      gen_restore_incumbent(gen, &incumbent);
     }
+    gen_offer_cached_play(gen, entry);
   }
 }
 
