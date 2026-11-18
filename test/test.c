@@ -90,6 +90,7 @@
 #include "shadow_test.h"
 #include "sim_benchmark_test.h"
 #include "sim_det_sweep_test.h"
+#include "sim_exact_test.h"
 #include "sim_quality_test.h"
 #include "sim_regret_test.h"
 #include "sim_test.h"
@@ -293,6 +294,7 @@ static TestEntry on_demand_test_table[] = {
     {"simbench", test_sim_benchmark},
     {"baisched", test_bai_sched},
     {"simquality", test_sim_quality},
+    {"simexact", test_sim_exact},
     {"simregretref", test_sim_regret_reference},
     {"simregret", test_sim_regret},
     {"pcbench", test_play_chooser_benchmark},
@@ -351,6 +353,14 @@ void run_test(const char *subtest) {
   }
   if (has_prefix("patopeningsim:", subtest)) {
     pat_opening_sim_run_spec(subtest + strlen("patopeningsim:"));
+    return;
+  }
+  if (has_prefix("simexact:", subtest)) {
+    sim_exact_run_spec(subtest + strlen("simexact:"));
+    return;
+  }
+  if (has_prefix("simnest:", subtest)) {
+    sim_exact_nested_run_spec(subtest + strlen("simnest:"));
     return;
   }
   if (has_prefix("egspeedbench:", subtest)) {

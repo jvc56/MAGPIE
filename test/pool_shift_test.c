@@ -1,6 +1,7 @@
 #include "pool_shift_test.h"
 
 #include "../src/compat/cfile.h"
+#include "../src/compat/ctime.h"
 #include "../src/def/board_defs.h"
 #include "../src/def/equity_defs.h"
 #include "../src/def/game_history_defs.h"
@@ -24,6 +25,7 @@
 #include "../src/ent/players_data.h"
 #include "../src/ent/pool_shift.h"
 #include "../src/ent/rack.h"
+#include "../src/ent/rack_value_table.h"
 #include "../src/ent/stats.h"
 #include "../src/ent/thread_control.h"
 #include "../src/ent/validated_move.h"
@@ -66,6 +68,16 @@ enum {
   POOL_SHIFT_TEST_INFERENCES = 4,
   POOL_SHIFT_TEST_INFERENCE_MIN_TILES = 5,
   POOL_SHIFT_TEST_INFERENCE_LEAVES = 10,
+  // The exact leave values: games, positions of each whose leaves and moves
+  // are checked, the shortest leave checked against the draw-by-draw mean
+  // (once a game; the others are a tile longer), and every this-many-th
+  // move entered as text.
+  // The rack size of the tables in the data directory.
+  POOL_SHIFT_EXACT_TEST_RACK_SIZE = 7,
+  POOL_SHIFT_EXACT_TEST_GAMES = 2,
+  POOL_SHIFT_EXACT_TEST_POSITIONS = 3,
+  POOL_SHIFT_EXACT_TEST_SHORT_LEAVE = 2,
+  POOL_SHIFT_EXACT_TEST_VALIDATE_STRIDE = 37,
 };
 
 // Sets a player's weight in the players' data, builds the table it needs,
@@ -835,6 +847,251 @@ static void test_pool_shift_inference(const char *set_cmd) {
   config_destroy(config);
 }
 
+// The exact leave values (see pool_shift.h): the mean of the full racks'
+// values over the draws that fill a leave, summed here over every draw one by
+// one, each rack looked up by its tiles.
+typedef struct ExactMean {
+  const RackValueTable *rvt;
+  const LetterDistribution *ld;
+  int unseen_counts[MAX_ALPHABET_SIZE];
+  Rack rack;
+  double draws;
+  double value_sum;
+} ExactMean;
+
+static void exact_mean_walk(ExactMean *mean, int ml, int tiles_to_draw,
+                            double ways) {
+  if (tiles_to_draw == 0) {
+    const BitRack bit_rack = bit_rack_create_from_rack(mean->ld, &mean->rack);
+    Equity value = 0;
+    if (rack_value_table_lookup(mean->rvt, &bit_rack, &value)) {
+      mean->draws += ways;
+      mean->value_sum += ways * (double)value;
+    }
+    return;
+  }
+  if (ml == ld_get_size(mean->ld)) {
+    return;
+  }
+  const int unseen = mean->unseen_counts[ml];
+  double letter_ways = 1.0;
+  int drawn = 0;
+  while (true) {
+    exact_mean_walk(mean, ml + 1, tiles_to_draw - drawn, ways * letter_ways);
+    if (drawn == unseen || drawn == tiles_to_draw) {
+      break;
+    }
+    letter_ways = letter_ways * (double)(unseen - drawn) / (double)(drawn + 1);
+    drawn++;
+    rack_add_letter(&mean->rack, (MachineLetter)ml);
+  }
+  for (; drawn > 0; drawn--) {
+    rack_take_letter(&mean->rack, (MachineLetter)ml);
+  }
+}
+
+// Asserts that the mover's table values leave as the draw-by-draw mean does.
+static void assert_exact_leave_value(const Game *game, const Rack *leave) {
+  const int mover_idx = game_get_player_on_turn_index(game);
+  const Player *mover = game_get_player(game, mover_idx);
+  const Rack *opponent_rack =
+      player_get_rack(game_get_player(game, 1 - mover_idx));
+  const PoolShiftTable *table = player_get_pool_shift_table(mover);
+  const LetterDistribution *ld = game_get_ld(game);
+  ExactMean mean = {.rvt = table->exact_values, .ld = ld};
+  bag_increment_unseen_count(game_get_bag(game), mean.unseen_counts);
+  for (int ml = 0; ml < ld_get_size(ld); ml++) {
+    mean.unseen_counts[ml] += rack_get_letter(opponent_rack, (MachineLetter)ml);
+  }
+  rack_copy(&mean.rack, leave);
+  exact_mean_walk(&mean, 0, RACK_SIZE - rack_get_total_letters(leave), 1.0);
+  assert(mean.draws > 0);
+  const double expected = mean.value_sum / mean.draws;
+  const Equity actual =
+      klv_get_leave_value(player_get_klv(mover), leave) +
+      pool_shift_get_leave_shift(table, player_get_klv(mover),
+                                 POOL_SHIFT_EXACT_WEIGHT_MILLI, ld,
+                                 game_get_bag(game), opponent_rack, leave,
+                                 RACK_SIZE, game_get_real_bag_size(game));
+  assert(fabs((double)actual - expected) <= 1.0);
+}
+
+// The leaves of the mover's pool (see PoolLeaves) value every leave as the
+// exact leave values do, less one amount for all of them: checked on the
+// leaves of the mover's rack, pair by pair.
+static void assert_pool_leaves(const Game *game) {
+  const int mover_idx = game_get_player_on_turn_index(game);
+  const Player *mover = game_get_player(game, mover_idx);
+  const Rack *rack = player_get_rack(mover);
+  const Rack *opponent_rack =
+      player_get_rack(game_get_player(game, 1 - mover_idx));
+  const PoolShiftTable *table = player_get_pool_shift_table(mover);
+  Timer timer;
+  ctimer_start(&timer);
+  PoolLeaves *pool_leaves = pool_leaves_create(
+      table, game_get_ld(game), game_get_bag(game), opponent_rack, NULL);
+  printf("pool leaves built in %.3f seconds\n", ctimer_elapsed_seconds(&timer));
+  assert(pool_shift_table_matches_klv(pool_leaves->table, pool_leaves->klv));
+  Equity first_difference = 0;
+  for (int leave_size = RACK_SIZE - 1; leave_size >= 1; leave_size--) {
+    Rack leave;
+    set_leave_prefix(rack, leave_size, &leave);
+    const Equity exact_value =
+        klv_get_leave_value(player_get_klv(mover), &leave) +
+        pool_shift_get_leave_shift(
+            table, player_get_klv(mover), POOL_SHIFT_EXACT_WEIGHT_MILLI,
+            game_get_ld(game), game_get_bag(game), opponent_rack, &leave,
+            RACK_SIZE, game_get_real_bag_size(game));
+    const Equity difference =
+        exact_value - klv_get_leave_value(pool_leaves->klv, &leave);
+    if (leave_size == RACK_SIZE - 1) {
+      first_difference = difference;
+    }
+    assert(abs(difference - first_difference) <= 2);
+  }
+  // For the pool the leaves were built for, the table's shifts are 0.
+  Rack leave;
+  set_leave_prefix(rack, 2, &leave);
+  assert(pool_shift_get_leave_shift(pool_leaves->table, pool_leaves->klv,
+                                    POOL_SHIFT_POOL_LEAVES_WEIGHT_MILLI,
+                                    game_get_ld(game), game_get_bag(game),
+                                    opponent_rack, &leave, RACK_SIZE,
+                                    game_get_real_bag_size(game)) == 0);
+  const int private_total = pool_leaves->table->reference_total;
+  pool_leaves_destroy(pool_leaves);
+  // With the mover's rack, the pool is what neither player has played: the
+  // same for both, and the mover's own rack is then part of the shift.
+  PoolLeaves *public_leaves = pool_leaves_create(
+      table, game_get_ld(game), game_get_bag(game), opponent_rack, rack);
+  assert(public_leaves->table->reference_total == private_total + RACK_SIZE);
+  PoolLeaves *swapped_leaves = pool_leaves_create(
+      table, game_get_ld(game), game_get_bag(game), rack, opponent_rack);
+  assert(memcmp(public_leaves->klv->leave_values,
+                swapped_leaves->klv->leave_values,
+                sizeof(Equity) *
+                    (size_t)klv_get_number_of_leaves(public_leaves->klv)) == 0);
+  // A leave of all but one tile has its exact value for the mover's pool,
+  // less what the KLV is centred on: whichever tile is left out.
+  Equity first_long_difference = 0;
+  for (int left_out = 0; left_out < 2; left_out++) {
+    Rack long_leave;
+    rack_copy(&long_leave, rack);
+    int skipped = left_out;
+    for (int ml = 0; ml < rack_get_dist_size(rack); ml++) {
+      if (rack_get_letter(&long_leave, (MachineLetter)ml) == 0) {
+        continue;
+      }
+      if (skipped == 0) {
+        rack_take_letter(&long_leave, (MachineLetter)ml);
+        break;
+      }
+      skipped--;
+    }
+    assert(rack_get_total_letters(&long_leave) == RACK_SIZE - 1);
+    const Equity long_exact_value =
+        klv_get_leave_value(player_get_klv(mover), &long_leave) +
+        pool_shift_get_leave_shift(
+            table, player_get_klv(mover), POOL_SHIFT_EXACT_WEIGHT_MILLI,
+            game_get_ld(game), game_get_bag(game), opponent_rack, &long_leave,
+            RACK_SIZE, game_get_real_bag_size(game));
+    const Equity long_pool_value =
+        klv_get_leave_value(public_leaves->klv, &long_leave) +
+        pool_shift_get_leave_shift(public_leaves->table, public_leaves->klv,
+                                   POOL_SHIFT_POOL_LEAVES_WEIGHT_MILLI,
+                                   game_get_ld(game), game_get_bag(game),
+                                   opponent_rack, &long_leave, RACK_SIZE,
+                                   game_get_real_bag_size(game));
+    const Equity long_difference = long_exact_value - long_pool_value;
+    assert(long_difference == public_leaves->table->reference_exact_offset);
+    if (left_out == 0) {
+      first_long_difference = long_difference;
+    }
+    assert(long_difference == first_long_difference);
+  }
+  pool_leaves_destroy(swapped_leaves);
+  pool_leaves_destroy(public_leaves);
+}
+
+// With -poolshift exact, a leave's value is the draw-by-draw mean, every
+// move's equity is the one its text validates to, the best move recorded
+// alone is the best of all the moves, and the values differ from the KLV's.
+static void test_pool_shift_exact(const char *set_cmd) {
+  Config *config = config_create_or_die(set_cmd);
+  load_and_exec_config_or_die(config, "set -poolshift exact");
+  assert(settings_have(config, "-poolshift1 exact", false));
+  assert(settings_have(config, "-poolshift2 exact", true));
+  Game *game = config_game_create(config);
+  int exact_positions = 0;
+  int exact_moves = 0;
+  int moved_equities = 0;
+  for (int game_idx = 0; game_idx < POOL_SHIFT_EXACT_TEST_GAMES; game_idx++) {
+    game_reset(game);
+    game_seed(game, (uint64_t)game_idx + 1);
+    draw_starting_racks(game);
+    int game_positions = 0;
+    while (!game_over(game)) {
+      const int mover_idx = game_get_player_on_turn_index(game);
+      const Player *mover = game_get_player(game, mover_idx);
+      const Rack *rack = player_get_rack(mover);
+      if (rack_get_total_letters(rack) == RACK_SIZE &&
+          game_get_real_bag_size(game) >= RACK_SIZE &&
+          game_positions < POOL_SHIFT_EXACT_TEST_POSITIONS) {
+        assert(player_get_pool_shift_table(mover)->exact_values != NULL);
+        // The longer the leave, the fewer the draws: one short leave a game.
+        const int shortest_leave = game_positions == 0
+                                       ? POOL_SHIFT_EXACT_TEST_SHORT_LEAVE
+                                       : POOL_SHIFT_EXACT_TEST_SHORT_LEAVE + 1;
+        for (int leave_size = RACK_SIZE - 1; leave_size >= shortest_leave;
+             leave_size--) {
+          Rack leave;
+          set_leave_prefix(rack, leave_size, &leave);
+          assert_exact_leave_value(game, &leave);
+        }
+        if (game_positions == 0) {
+          assert_pool_leaves(game);
+        }
+        MoveList *all_moves = generate_all_moves(game);
+        const int count = move_list_get_count(all_moves);
+        Equity best_equity = EQUITY_MIN_VALUE;
+        for (int move_idx = 0; move_idx < count; move_idx++) {
+          const Move *move = move_list_get_move(all_moves, move_idx);
+          if (move_get_equity(move) > best_equity) {
+            best_equity = move_get_equity(move);
+          }
+          if (move_idx % POOL_SHIFT_EXACT_TEST_VALIDATE_STRIDE != 0 ||
+              move_get_type(move) == GAME_EVENT_PASS) {
+            continue;
+          }
+          assert(move_get_equity(move) == get_validated_equity(game, move));
+          Rack leave;
+          get_leave_for_move(move, game, &leave);
+          const Equity exact_shift = pool_shift_get_leave_shift(
+              player_get_pool_shift_table(mover), player_get_klv(mover),
+              POOL_SHIFT_EXACT_WEIGHT_MILLI, game_get_ld(game),
+              game_get_bag(game),
+              player_get_rack(game_get_player(game, 1 - mover_idx)), &leave,
+              RACK_SIZE, game_get_real_bag_size(game));
+          moved_equities += exact_shift != 0;
+          exact_moves++;
+        }
+        assert(generate_best_move_equity(game) == best_equity);
+        move_list_destroy(all_moves);
+        game_positions++;
+        exact_positions++;
+      }
+      play_top_n_equity_move(game, 0);
+    }
+  }
+  assert(exact_positions >= POOL_SHIFT_EXACT_TEST_GAMES);
+  assert(moved_equities > exact_moves / 2);
+  // A weight takes the exact values' place, and nothing is left of them.
+  load_and_exec_config_or_die(config, "set -poolshift 1.2");
+  assert(settings_have(config, "-poolshift1 1.200", false));
+  load_and_exec_config_or_die(config, "set -poolshift 0");
+  game_destroy(game);
+  config_destroy(config);
+}
+
 void test_pool_shift(void) {
   test_pool_shift_table();
   test_pool_shift_config();
@@ -865,5 +1122,11 @@ void test_pool_shift(void) {
     test_pool_shift_carry(
         "set -lex CSW24 -wmp true -rit true -wit true -s1 equity -s2 equity "
         "-r1 best -r2 best -numplays 1");
+  }
+  // The full racks' values are in the data directory, for the standard rack.
+  if (is_standard_board && RACK_SIZE == POOL_SHIFT_EXACT_TEST_RACK_SIZE &&
+      cfile_access("./data/lexica/CSW24.rvt", CFILE_ACCESS_READ)) {
+    test_pool_shift_exact("set -lex CSW24 -wmp true -s1 equity -s2 equity "
+                          "-r1 all -r2 all -numplays 1");
   }
 }
