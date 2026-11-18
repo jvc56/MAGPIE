@@ -4790,6 +4790,37 @@ void generate_tiles_played_in_lanes(const MoveGenArgs *args, uint64_t lane_mask,
   }
 }
 
+#ifndef NDEBUG
+// Asserts that entry, which answers for lane against the generation's best
+// so far, holds what a search of the whole lane finds, so that a search input
+// the key misses fails the tests: the lane's best play, or, when the entry's
+// search left anchors out, a play that only a play bounded by them outranks.
+static void gen_assert_lane_play(MoveGen *gen, const AnchorPlayEntry *entry,
+                                 int lane, uint32_t root) {
+  const BestSmallIncumbent incumbent = gen_set_aside_incumbent(gen);
+  gen->dir = lane / BOARD_DIM;
+  gen->current_row_index = lane % BOARD_DIM;
+  const Equity skipped_bound =
+      gen_search_lane_above_cutoff(gen, root, EQUITY_INITIAL_VALUE);
+  assert(skipped_bound == EQUITY_UNDEFINED_VALUE);
+  const AnchorPlayEntry lane_best = gen_best_small_entry(gen, entry->key);
+  gen_restore_incumbent(gen, &incumbent);
+  anchor_heap_reset(&gen->anchor_heap);
+  const bool same_play = entry->tiny_move == lane_best.tiny_move &&
+                         entry->value == lane_best.value &&
+                         entry->score == lane_best.score &&
+                         entry->play_length == lane_best.play_length &&
+                         entry->tiles_played == lane_best.tiles_played;
+  if (entry->skipped_bound == EQUITY_UNDEFINED_VALUE) {
+    assert(same_play);
+    return;
+  }
+  assert(same_play ||
+         (lane_best.tiny_move != 0 && lane_best.value <= entry->skipped_bound &&
+          (entry->tiny_move == 0 || entry->value <= lane_best.value)));
+}
+#endif
+
 // A canonical lane result includes its row and direction: a cached move
 // names its board coordinates. Prefetch all the requested lanes' entries
 // before reading them, as for the lane shadows.
@@ -4832,6 +4863,10 @@ static void gen_record_cached_lane_bests(MoveGen *gen, uint64_t lane_mask) {
       *entry = gen_best_small_entry(gen, key);
       entry->skipped_bound = skipped_bound;
       gen_restore_incumbent(gen, &incumbent);
+    } else {
+#ifndef NDEBUG
+      gen_assert_lane_play(gen, entry, lane, root);
+#endif
     }
     gen_offer_cached_play(gen, entry);
   }
