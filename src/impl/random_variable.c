@@ -603,7 +603,6 @@ static double sim_rollout(const Simmer *simmer, SimmerWorker *simmer_worker,
 
   // This will shuffle the bag, so there is no need
   // to call bag_shuffle explicitly.
-  prng_seed(simmer_worker->prng, seed);
   game_seed(game, seed);
   if (rotation > 0) {
     bag_rotate(game_get_bag(game), rotation * RACK_SIZE);
@@ -611,6 +610,10 @@ static double sim_rollout(const Simmer *simmer, SimmerWorker *simmer_worker,
 
   bool set_player_off_turn_rack_with_known_opp_rack = false;
   if (simmer->use_alias_method) {
+    // The inferred leave and the shuffle that replenishes it must be drawn
+    // independently. Seeded alike, the alias bin is tied to the first shuffle
+    // index, which biases the tiles the opponent draws to fill their rack.
+    prng_seed(simmer_worker->prng, seed ^ UINT64_C(0xD1B54A32D192ED03));
     Rack inferred_rack;
     rack_set_dist_size(&inferred_rack, simmer->dist_size);
     if (alias_method_sample(
