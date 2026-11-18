@@ -738,9 +738,11 @@ Inference *inference_create(const Game *game, const InferenceArgs *args,
   // Inference leaves pre-endgame adjustments out, as it did before they were
   // loadable: the equities it computes itself (the target's move, the census
   // plays and the best exchange) pass none, so the moves it generates must
-  // get none either.
+  // get none either. The same goes for the pool shift.
   for (int player_index = 0; player_index < 2; player_index++) {
     player_set_peg_adjust(game_get_player(inference->game, player_index), NULL);
+    player_set_pool_shift(game_get_player(inference->game, player_index), NULL,
+                          0);
   }
   inference->move_list = move_list_create(1);
   inference->klv =

@@ -12,9 +12,11 @@
 #include "equity.h"
 #include "klv.h"
 #include "kwg.h"
+#include "letter_distribution.h"
 #include "pat.h"
 #include "pat_file.h"
 #include "peg_adjust.h"
+#include "pool_shift.h"
 #include "rack.h"
 #include "rack_info_table.h"
 #include "wmp.h"
@@ -53,7 +55,12 @@ struct PlayersData {
   bool pat_rollout_disabled[2];
   uint32_t pat_rollout_disabled_classes_masks[2];
   bool pat_rollout_exact[2];
-  // The largest PAT adjustment a move of the player's can get.
+  // The pool shift (see pool_shift.h): each player's weight in thousandths,
+  // and the table players_data_update_pool_shift built from the player's
+  // KLV, which is kept for as long as it is that KLV's, whatever the weight
+  // becomes. The players share one table when they share a KLV.
+  int pool_shift_weights[2];
+  PoolShiftTable *pool_shift_tables[2];
 };
 
 #define DEFAULT_MOVE_SORT_TYPE MOVE_SORT_EQUITY
@@ -136,6 +143,77 @@ void players_data_set_pat_rollout_disabled_classes_mask(
 uint32_t players_data_get_pat_rollout_disabled_classes_mask(
     const PlayersData *players_data, int player_index) {
   return players_data->pat_rollout_disabled_classes_masks[player_index];
+}
+
+void players_data_set_pool_shift_weight(PlayersData *players_data,
+                                        int player_index, int weight_milli) {
+  players_data->pool_shift_weights[player_index] = weight_milli;
+}
+
+int players_data_get_pool_shift_weight(const PlayersData *players_data,
+                                       int player_index) {
+  return players_data->pool_shift_weights[player_index];
+}
+
+const PoolShiftTable *
+players_data_get_pool_shift_table(const PlayersData *players_data,
+                                  int player_index) {
+  return players_data->pool_shift_weights[player_index] == 0
+             ? NULL
+             : players_data->pool_shift_tables[player_index];
+}
+
+// Frees both players' pool shift tables, once if they share one.
+static void players_data_destroy_pool_shift_tables(PlayersData *players_data) {
+  if (players_data->pool_shift_tables[1] !=
+      players_data->pool_shift_tables[0]) {
+    pool_shift_table_destroy(players_data->pool_shift_tables[1]);
+  }
+  pool_shift_table_destroy(players_data->pool_shift_tables[0]);
+  players_data->pool_shift_tables[0] = NULL;
+  players_data->pool_shift_tables[1] = NULL;
+}
+
+void players_data_update_pool_shift(PlayersData *players_data,
+                                    const LetterDistribution *ld) {
+  PoolShiftTable *old_tables[2] = {players_data->pool_shift_tables[0],
+                                   players_data->pool_shift_tables[1]};
+  PoolShiftTable *new_tables[2] = {NULL, NULL};
+  for (int player_index = 0; player_index < 2; player_index++) {
+    const KLV *klv = players_data_get_klv(players_data, player_index);
+    if (klv == NULL || ld == NULL) {
+      continue;
+    }
+    // A table already built from these leaves: either player's old one, or
+    // the one the first player was just given.
+    for (int old_idx = 0; old_idx < 2 && new_tables[player_index] == NULL;
+         old_idx++) {
+      if (old_tables[old_idx] != NULL &&
+          pool_shift_table_matches_ld(old_tables[old_idx], ld) &&
+          pool_shift_table_matches_klv(old_tables[old_idx], klv)) {
+        new_tables[player_index] = old_tables[old_idx];
+      }
+    }
+    if (new_tables[player_index] == NULL && player_index == 1 &&
+        new_tables[0] != NULL &&
+        pool_shift_table_matches_klv(new_tables[0], klv)) {
+      new_tables[1] = new_tables[0];
+    }
+    if (new_tables[player_index] == NULL &&
+        players_data->pool_shift_weights[player_index] != 0) {
+      new_tables[player_index] = pool_shift_table_create(klv, ld);
+    }
+  }
+  for (int old_idx = 0; old_idx < 2; old_idx++) {
+    PoolShiftTable *old_table = old_tables[old_idx];
+    const bool already_freed = old_idx == 1 && old_table == old_tables[0];
+    if (old_table != NULL && !already_freed && old_table != new_tables[0] &&
+        old_table != new_tables[1]) {
+      pool_shift_table_destroy(old_table);
+    }
+  }
+  players_data->pool_shift_tables[0] = new_tables[0];
+  players_data->pool_shift_tables[1] = new_tables[1];
 }
 
 bool players_data_get_is_shared(const PlayersData *players_data,
@@ -382,6 +460,8 @@ PlayersData *players_data_create(bool use_wmp) {
     players_data_set_move_record_type(players_data, player_index,
                                       DEFAULT_MOVE_RECORD_TYPE);
     players_data_set_pat_disabled_classes_mask(players_data, player_index, 0);
+    players_data->pool_shift_weights[player_index] = 0;
+    players_data->pool_shift_tables[player_index] = NULL;
     players_data_set_pat_candidates_disabled(players_data, player_index, false);
     players_data_set_pat_rollout_disabled(players_data, player_index, false);
     players_data_set_pat_rollout_exact(players_data, player_index, false);
@@ -406,6 +486,7 @@ void players_data_destroy(PlayersData *players_data) {
       }
     }
   }
+  players_data_destroy_pool_shift_tables(players_data);
   free(players_data);
 }
 

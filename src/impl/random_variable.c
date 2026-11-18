@@ -512,12 +512,28 @@ simmer_worker_set_rollout_peg_adjust(const SimmerWorker *simmer_worker,
   }
 }
 
+// The same goes for the pool shift (see pool_shift.h): both players of a
+// worker's copy of the game take the table and weight of the player on turn.
+// A player with other leaves than that table's gets no shift from it.
+static void
+simmer_worker_set_rollout_pool_shift(const SimmerWorker *simmer_worker,
+                                     const SimArgs *sim_args) {
+  const Player *simming_player = game_get_player(
+      sim_args->game, game_get_player_on_turn_index(sim_args->game));
+  for (int player_index = 0; player_index < 2; player_index++) {
+    player_set_pool_shift(game_get_player(simmer_worker->game, player_index),
+                          player_get_pool_shift_table(simming_player),
+                          player_get_pool_shift_weight(simming_player));
+  }
+}
+
 SimmerWorker *simmer_create_worker(const SimArgs *sim_args) {
   SimmerWorker *simmer_worker = malloc_or_die(sizeof(SimmerWorker));
   simmer_worker->game = game_duplicate(sim_args->game);
   simmer_worker->pat_board_cache = NULL;
   simmer_worker_set_rollout_pat(simmer_worker, sim_args);
   simmer_worker_set_rollout_peg_adjust(simmer_worker, sim_args);
+  simmer_worker_set_rollout_pool_shift(simmer_worker, sim_args);
   game_set_backup_mode(simmer_worker->game, BACKUP_MODE_SIMULATION);
   // A rollout plays its candidate and plies, then unplays them all at once,
   // so recording the squares they change beats copying the board twice.
@@ -543,6 +559,7 @@ void simmer_reset_worker(SimmerWorker *simmer_worker, const SimArgs *sim_args) {
                            simmer_worker->cross_set_salt);
   simmer_worker_set_rollout_pat(simmer_worker, sim_args);
   simmer_worker_set_rollout_peg_adjust(simmer_worker, sim_args);
+  simmer_worker_set_rollout_pool_shift(simmer_worker, sim_args);
 }
 
 void simmer_worker_destroy(SimmerWorker *simmer_worker) {
@@ -586,7 +603,6 @@ static double sim_rollout(const Simmer *simmer, SimmerWorker *simmer_worker,
 
   // This will shuffle the bag, so there is no need
   // to call bag_shuffle explicitly.
-  prng_seed(simmer_worker->prng, seed);
   game_seed(game, seed);
   if (rotation > 0) {
     bag_rotate(game_get_bag(game), rotation * RACK_SIZE);
@@ -594,6 +610,10 @@ static double sim_rollout(const Simmer *simmer, SimmerWorker *simmer_worker,
 
   bool set_player_off_turn_rack_with_known_opp_rack = false;
   if (simmer->use_alias_method) {
+    // The inferred leave and the shuffle that replenishes it must be drawn
+    // independently. Seeded alike, the alias bin is tied to the first shuffle
+    // index, which biases the tiles the opponent draws to fill their rack.
+    prng_seed(simmer_worker->prng, seed ^ UINT64_C(0xD1B54A32D192ED03));
     Rack inferred_rack;
     rack_set_dist_size(&inferred_rack, simmer->dist_size);
     if (alias_method_sample(

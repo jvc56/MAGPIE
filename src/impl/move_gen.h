@@ -8,6 +8,7 @@
 #include "../ent/kwg.h"
 #include "../ent/lane_shadow_cache.h"
 #include "../ent/move.h"
+#include "../ent/pool_shift.h"
 #include "../ent/thread_control.h"
 #include "move_gen_base.h"
 #include <stdbool.h>
@@ -94,6 +95,8 @@ typedef struct MoveGenArgs {
   // lane's bound on the term can beat the best move. The best move is the
   // same.
   const Equity *anchor_equity_caps;
+  // Optional shifts already computed by the census for this exact position.
+  const PoolShiftRack *rack_shift;
 } MoveGenArgs;
 
 // The hash of each lane of the game's board as the best-move carry computes
