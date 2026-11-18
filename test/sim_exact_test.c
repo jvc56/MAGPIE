@@ -20,6 +20,7 @@
 #include "../src/compat/ctime.h"
 #include "../src/compat/memory_info.h"
 #include "../src/def/rack_defs.h"
+#include "../src/ent/bag.h"
 #include "../src/ent/game.h"
 #include "../src/ent/move.h"
 #include "../src/ent/player.h"
@@ -95,9 +96,15 @@ static Config *simx_config(const char *pool_shift, int plies,
   return config;
 }
 
-// The mover's rack alone: the opponent's is not known to a sim.
-static char *simx_cgp_command(const Game *game) {
+// The position as a cgp command. The opponent's rack is not known to a sim
+// that chooses a play, so it is left out unless both_racks is set.
+static char *simx_cgp_command_with_racks(const Game *game, bool both_racks) {
   char *cgp = game_get_cgp(game, true);
+  if (both_racks) {
+    char *command = get_formatted_string("cgp %s", cgp);
+    free(cgp);
+    return command;
+  }
   StringSplitter *fields = split_string_by_whitespace(cgp, true);
   StringBuilder *sb = string_builder_create();
   string_builder_add_string(sb, "cgp ");
@@ -121,6 +128,10 @@ static char *simx_cgp_command(const Game *game) {
   string_splitter_destroy(fields);
   free(cgp);
   return string_builder_dump_and_destroy(sb, NULL);
+}
+
+static char *simx_cgp_command(const Game *game) {
+  return simx_cgp_command_with_racks(game, false);
 }
 
 // Sims the position's candidates and prints the play chosen, which it also
@@ -322,6 +333,10 @@ enum {
   SIMN_VALUE_SEED_OFFSET = 500,
 };
 
+// The win % weight and the spread weight of the blended utility, summed: a
+// utility of u to one player is this less u to the other.
+static const double SIMN_UTILITY_TOTAL_WEIGHT = 1.5;
+
 static double simn_spread(const Game *game, int player_index) {
   return equity_to_double(
       player_get_score(game_get_player(game, player_index)) -
@@ -354,10 +369,13 @@ static void simn_sample(Config *sim_config, const Game *root, const Move *pick,
   play_move(pick, truth, NULL);
   double value = 0;
   double win_pct = -1;
+  double utility = -1;
   bool valued = false;
   int plies = 0;
   for (; plies <= SIMN_NESTED_PLIES && !game_over(truth); plies++) {
-    char *cgp_command = simx_cgp_command(truth);
+    // With the bag empty, each player can deduce the other's rack.
+    const bool bag_is_empty = bag_get_letters(game_get_bag(truth)) == 0;
+    char *cgp_command = simx_cgp_command_with_racks(truth, bag_is_empty);
     char *settings = get_formatted_string(
         "set -seed %llu -iterations %d",
         (unsigned long long)(seed + (uint64_t)plies + 1), iterations);
@@ -373,7 +391,9 @@ static void simn_sample(Config *sim_config, const Game *root, const Move *pick,
       continue;
     }
     // The last sim chooses the play; a sim of that play alone, from another
-    // seed, values it, so that the value is not the best of noisy ones.
+    // seed, values it, so that the value is not the best of noisy ones. The
+    // valuing sim is given both racks, so that the tiles the other player
+    // kept on their last play count for what they are.
     char best_name[SIMX_MAX_MOVE_STRING];
     simx_move_string(sim_config, sim_results_get_best_move(sim_results),
                      best_name);
@@ -383,7 +403,7 @@ static void simn_sample(Config *sim_config, const Game *root, const Move *pick,
         SIMN_VALUE_ITERATIONS);
     load_and_exec_config_or_die(sim_config, value_settings);
     free(value_settings);
-    char *value_cgp = simx_cgp_command(truth);
+    char *value_cgp = simx_cgp_command_with_racks(truth, true);
     load_and_exec_config_or_die(sim_config, value_cgp);
     free(value_cgp);
     char *add_command = get_formatted_string("addmoves %s", best_name);
@@ -396,6 +416,10 @@ static void simn_sample(Config *sim_config, const Game *root, const Move *pick,
     const double sign = on_turn_index == mover_index ? 1.0 : -1.0;
     value = simn_spread(truth, mover_index) +
             sign * simmed_play_get_exact_equity_mean(best);
+    const double on_turn_utility = simmed_play_get_exact_utility_mean(best);
+    utility = on_turn_index == mover_index
+                  ? on_turn_utility
+                  : SIMN_UTILITY_TOTAL_WEIGHT - on_turn_utility;
     const double on_turn_win_pct = simmed_play_get_exact_win_pct_mean(best);
     win_pct =
         on_turn_index == mover_index ? on_turn_win_pct : 1.0 - on_turn_win_pct;
@@ -411,8 +435,9 @@ static void simn_sample(Config *sim_config, const Game *root, const Move *pick,
       win_pct = 0.5;
     }
   }
-  printf("NEST pos=%d pick=%d sample=%d value=%.4f wp=%.6f plies=%d\n", pos_idx,
-         pick_idx, sample_idx, value, win_pct, plies);
+  printf("NEST pos=%d pick=%d sample=%d value=%.4f wp=%.6f plies=%d "
+         "util=%.6f\n",
+         pos_idx, pick_idx, sample_idx, value, win_pct, plies, utility);
 }
 
 void sim_exact_nested_run_spec(const char *spec) {
