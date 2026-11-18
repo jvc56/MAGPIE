@@ -595,6 +595,46 @@ static void check_twin_lane_position(const Game *game,
   }
 }
 
+// A high incumbent can leave a lane with no recorded play. Asking for the
+// lane again with a weaker incumbent must reopen it, even at an equal bound
+// where only the canonical tie decides the winner.
+static void check_cached_lane_cutoff(Config *config, LaneShadowCache *cache,
+                                     MoveList *best_small) {
+  const TwinLaneBoard *twins = &twin_lane_boards[0];
+  char *command = get_formatted_string("cgp %s A/ 0/0 0", twins->board);
+  load_and_exec_config_or_die(config, command);
+  free(command);
+  const Game *game = config_get_game(config);
+  const int lanes[] = {BOARD_DIM + twins->first_lane,
+                       BOARD_DIM + twins->second_lane};
+  const SmallMove plays[] = {
+      best_small_through_cache(game, NULL, best_small, lanes[0], true),
+      best_small_through_cache(game, NULL, best_small, lanes[1], true)};
+  assert(!small_move_is_pass(&plays[0]));
+  assert(small_move_get_score(&plays[0]) == small_move_get_score(&plays[1]));
+  assert(plays[0].tiny_move != plays[1].tiny_move);
+  const int winner = plays[1].tiny_move > plays[0].tiny_move;
+  const SmallMove *incumbent = &plays[1 - winner];
+  const uint64_t mask = UINT64_C(1) << lanes[winner];
+  const MoveGenArgs args = {
+      .game = game,
+      .move_list = best_small,
+      .move_record_type = MOVE_RECORD_BEST_SMALL,
+      .move_sort_type = MOVE_SORT_SCORE,
+      .target_equity = EQUITY_MAX_VALUE,
+      .best_small_canonical_ties = true,
+      .lane_shadow_cache = cache,
+  };
+  assert(generate_best_small_move_in_lanes(&args, mask, incumbent,
+                                           EQUITY_MAX_VALUE - 1));
+  assert_small_plays_equal(best_small->small_moves[0], incumbent);
+  assert(generate_best_small_move_in_lanes(
+      &args, mask, incumbent, int_to_equity(small_move_get_score(incumbent))));
+  assert_small_plays_equal(best_small->small_moves[0], &plays[winner]);
+  assert(generate_best_small_move_in_lanes(&args, mask, NULL, 0));
+  assert_small_plays_equal(best_small->small_moves[0], &plays[winner]);
+}
+
 static void check_twin_lane_boards(MoveList *best_small) {
   Config *config = config_create_or_die(
       "set -lex CSW21 -wmp false -s1 equity -s2 equity -r1 all -r2 all "
@@ -604,6 +644,7 @@ static void check_twin_lane_boards(MoveList *best_small) {
   LaneShadowCache *cache = lane_shadow_cache_create(TWIN_LANE_CACHE_INDEX_BITS,
                                                     TWIN_LANE_CACHE_INDEX_BITS);
   lane_shadow_cache_set_salt(cache, 1);
+  check_cached_lane_cutoff(config, cache, best_small);
   TwinLaneStats stats = {0};
   for (size_t board_idx = 0;
        board_idx < sizeof(twin_lane_boards) / sizeof(TwinLaneBoard);
