@@ -615,7 +615,9 @@ static void check_cached_lane_cutoff(Config *config, LaneShadowCache *cache,
   assert(plays[0].tiny_move != plays[1].tiny_move);
   const int winner = plays[1].tiny_move > plays[0].tiny_move;
   const SmallMove *incumbent = &plays[1 - winner];
-  const uint64_t mask = UINT64_C(1) << lanes[winner];
+  const int winning_lane = lanes[winner];
+  assert(winning_lane >= 0 && winning_lane < 2 * BOARD_DIM);
+  const uint64_t mask = UINT64_C(1) << winning_lane;
   const MoveGenArgs args = {
       .game = game,
       .move_list = best_small,
