@@ -3,7 +3,9 @@
 #include "../src/def/game_history_defs.h"
 #include "../src/def/inference_defs.h"
 #include "../src/def/letter_distribution_defs.h"
+#include "../src/def/players_data_defs.h"
 #include "../src/def/rack_defs.h"
+#include "../src/def/static_eval_defs.h"
 #include "../src/def/thread_control_defs.h"
 #include "../src/ent/alias_method.h"
 #include "../src/ent/bag.h"
@@ -16,7 +18,9 @@
 #include "../src/ent/leave_rack.h"
 #include "../src/ent/letter_distribution.h"
 #include "../src/ent/move.h"
+#include "../src/ent/peg_adjust.h"
 #include "../src/ent/player.h"
+#include "../src/ent/players_data.h"
 #include "../src/ent/rack.h"
 #include "../src/ent/stats.h"
 #include "../src/ent/thread_control.h"
@@ -1622,6 +1626,110 @@ static void test_infer_preendgame_no_phantom_exchange(void) {
   config_destroy(config);
 }
 
+// Infers player 0's placement of target_played_tiles for target_score, with
+// player 1's rack known, reusing *ctx's workers when it has them.
+static void infer_preendgame_placement(InferenceCtx **ctx, const Config *config,
+                                       Equity target_score,
+                                       Rack *target_played_tiles,
+                                       InferenceResults *results) {
+  const Game *game = config_get_game(config);
+  const LetterDistribution *ld = game_get_ld(game);
+  Rack target_known_rack;
+  rack_set_dist_size_and_reset(&target_known_rack, ld_get_size(ld));
+  Rack nontarget_known_rack;
+  rack_set_dist_size_and_reset(&nontarget_known_rack, ld_get_size(ld));
+  rack_set_to_string(ld, &nontarget_known_rack, "EEINTTX");
+
+  ErrorStack *error_stack = error_stack_create();
+  thread_control_set_status(config_get_thread_control(config),
+                            THREAD_CONTROL_STATUS_STARTED);
+  InferenceArgs args;
+  infer_args_fill(
+      &args, config_get_num_plays(config),
+      config_get_eq_margin_inference(config), NULL, game,
+      config_get_num_threads(config), 0, config_get_print_interval(config),
+      config_get_thread_control(config), false, true, 0, target_score, 0,
+      target_played_tiles, &target_known_rack, &nontarget_known_rack);
+  infer(&args, ctx, results, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  error_stack_destroy(error_stack);
+}
+
+// Inference scores the observed move without pre-endgame adjustments, so the
+// moves it generates must get none either. A context reused for a second
+// inference, as autoplay and analyze reuse theirs, resets its workers by
+// copying the game in again, and that copy must not bring back the players'
+// adjustment tables.
+static void test_infer_reused_context_ignores_peg_adjust(void) {
+  const char *cgp_13_unseen =
+      "cgp 2CHIGOE3T3/3O6NAE2/3M6END2/1PAY6UG1G1/2B7MO1L1/1VODKA5i1OD/"
+      "2R2TANNERS1RE/OUTA2ZA3T1IF/2I1CRoWDIE2A1/2V6FEEBS1/1NEWISHLY1LEA2/"
+      "JA13/15/15/15 IILOOQR/EEINTTX 297/456 0 -lex CSW21;";
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -wmp true -s1 equity -s2 equity -r1 all -r2 all "
+      "-numplays 1 -threads 2 -ima 0");
+  load_and_exec_config_or_die(config, cgp_13_unseen);
+  Game *game = config_get_game(config);
+  const int ld_size = ld_get_size(game_get_ld(game));
+
+  MoveList *move_list = move_list_create(1);
+  const Move *top_move = get_top_equity_move(game, move_list);
+  assert(move_get_type(top_move) == GAME_EVENT_TILE_PLACEMENT_MOVE);
+  const Equity target_score = move_get_score(top_move);
+  Rack target_played_tiles;
+  rack_set_dist_size_and_reset(&target_played_tiles, ld_size);
+  for (int tile_idx = 0; tile_idx < move_get_tiles_length(top_move);
+       tile_idx++) {
+    const MachineLetter ml = move_get_tile(top_move, tile_idx);
+    if (ml != PLAYED_THROUGH_MARKER) {
+      rack_add_letter(&target_played_tiles, get_unblanked_machine_letter(ml));
+    }
+  }
+  move_list_destroy(move_list);
+
+  InferenceResults *expected = inference_results_create(NULL);
+  InferenceCtx *fresh_ctx = NULL;
+  infer_preendgame_placement(&fresh_ctx, config, target_score,
+                             &target_played_tiles, expected);
+  inference_ctx_destroy(fresh_ctx);
+  assert(stat_get_num_samples(inference_results_get_equity_values(
+             expected, INFERENCE_TYPE_LEAVE)) > 0);
+
+  // 20 points for every tile left unplayed: at a 0 margin, any adjustment
+  // the candidates get and the observed move does not rejects most leaves.
+  Equity values[PEG_ADJUST_MAX_VALUES_LENGTH] = {0};
+  for (int index = 0; index < PEG_ADJUST_MAX_VALUES_LENGTH; index++) {
+    values[index] = int_to_equity(20 * index);
+  }
+  PegAdjust *peg_adjust = peg_adjust_create_from_values(
+      "per_tile_kept", values, PEG_ADJUST_MAX_VALUES_LENGTH);
+  PlayersData *players_data = config_get_players_data(config);
+  for (int player_index = 0; player_index < 2; player_index++) {
+    players_data_set_data(players_data, PLAYERS_DATA_TYPE_PEG_ADJUST,
+                          player_index, peg_adjust);
+    player_update(players_data, game_get_player(game, player_index));
+  }
+
+  InferenceCtx *ctx = NULL;
+  InferenceResults *results = inference_results_create(NULL);
+  for (int inference_idx = 0; inference_idx < 3; inference_idx++) {
+    infer_preendgame_placement(&ctx, config, target_score, &target_played_tiles,
+                               results);
+    assert_inference_results_equal(results, expected, ld_size);
+  }
+  inference_results_destroy(results);
+  inference_ctx_destroy(ctx);
+
+  for (int player_index = 0; player_index < 2; player_index++) {
+    players_data_set_data(players_data, PLAYERS_DATA_TYPE_PEG_ADJUST,
+                          player_index, NULL);
+    player_update(players_data, game_get_player(game, player_index));
+  }
+  peg_adjust_destroy(peg_adjust);
+  inference_results_destroy(expected);
+  config_destroy(config);
+}
+
 // On an empty board, MoveGen applies placement_adjustment (the -0.7 pt vowel
 // hotspot penalty adjacent to double-letter squares) to candidate opening
 // moves. When the target move itself is known (e.g. from game history or
@@ -1679,6 +1787,7 @@ void test_infer(void) {
   test_infer_exchange_margin();
   test_infer_exchange_cutoff_matches();
   test_infer_preendgame_no_phantom_exchange();
+  test_infer_reused_context_ignores_peg_adjust();
   test_infer_opening_placement_adjustment_parity();
   for (int i = 0; i < 2; i++) {
     const bool use_game_history = i == 1;
