@@ -1379,7 +1379,10 @@ static PegBenchOutcome pegswitch_arm(Config *config, double tlim,
   PegArgs args;
   config_fill_peg_args(config, &args);
   args.num_threads = threads;
-  args.time_budget_seconds = tlim;
+  // A limit of 0 runs the greedy seed alone: every candidate ranked by its
+  // greedy playouts, with no endgame solves.
+  args.time_budget_seconds = tlim > 0 ? tlim : 0;
+  args.greedy_seed_only = tlim <= 0;
   args.include_per_scenario = false;
   args.tt_fraction_of_mem = 0.05;
   eg_pick_set_suppressed(suppressed);

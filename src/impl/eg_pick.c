@@ -6,6 +6,8 @@
 #include "../def/move_defs.h"
 #include "../ent/equity.h"
 #include "../ent/game.h"
+#include "../def/board_defs.h"
+#include "../ent/board.h"
 #include "../ent/kwg.h"
 #include "../ent/letter_distribution.h"
 #include "../ent/move.h"
@@ -15,6 +17,7 @@
 #include "../util/io_util.h"
 #include "gameplay.h"
 #include "move_gen.h"
+#include "path_move_lists.h"
 #include <stdatomic.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -39,7 +42,24 @@ typedef enum {
   EG_PICK_MODE_RULE,
   EG_PICK_MODE_STATIC,
   EG_PICK_MODE_STATIC_BEST,
+  // The opponent's and the mover's own out plays, each estimated from the
+  // plays on the board before the move (see eg_pick_own_value).
+  EG_PICK_MODE_OWN,
 } eg_pick_mode_t;
+
+// A play as EG_PICK_MODE_OWN needs it: where it lies, what it scores and
+// which rack tiles it places.
+typedef struct EgPickPlay {
+  int lane;
+  uint32_t span;
+  int score;
+  // The tiles placed, sorted, five bits each (a designated blank counts as
+  // the blank).
+  uint64_t tiles_key;
+  bool is_single;
+  int row;
+  int col;
+} EgPickPlay;
 
 typedef struct EgPickWeights {
   double out;
@@ -51,6 +71,15 @@ typedef struct EgPickWeights {
   // w[s] + w[s|tag] for each 1- and 2-tile sub-multiset s.
   double single[EG_PICK_NUM_TAGS][MAX_ALPHABET_SIZE];
   double pair[EG_PICK_NUM_TAGS][MAX_ALPHABET_SIZE][MAX_ALPHABET_SIZE];
+  // EG_PICK_MODE_OWN, for a leave that has an out play: a constant, per point
+  // of the best one's score, for out plays in at least two and three lanes,
+  // per point of the leave's face value, and by the leave's size.
+  double own[EG_PICK_NUM_TAGS];
+  double own_best[EG_PICK_NUM_TAGS];
+  double own_two_lanes[EG_PICK_NUM_TAGS];
+  double own_three_lanes[EG_PICK_NUM_TAGS];
+  double own_face[EG_PICK_NUM_TAGS];
+  double own_size[EG_PICK_NUM_TAGS][EG_PICK_MAX_LEAVE_SIZE + 1];
 } EgPickWeights;
 
 struct EgPick {
@@ -61,6 +90,12 @@ struct EgPick {
   MoveList *replies;
   Game *after;
   Move candidates[EG_PICK_MAX_CANDIDATES];
+  // EG_PICK_MODE_OWN: the mover's plays and the opponent's out plays on the
+  // board before the move.
+  EgPickPlay *own_plays;
+  EgPickPlay *opp_outs;
+  int num_own_plays;
+  int num_opp_outs;
 };
 
 static atomic_int eg_pick_suppressed;
@@ -99,6 +134,9 @@ static eg_pick_mode_t eg_pick_requested_mode(void) {
   }
   if (strcmp(value, "static") == 0) {
     return EG_PICK_MODE_STATIC;
+  }
+  if (strcmp(value, "own") == 0) {
+    return EG_PICK_MODE_OWN;
   }
   log_fatal("MAGPIE_EGPICK_MODE must be full, noobs, rule or static, not %s",
             value);
@@ -153,6 +191,23 @@ static void eg_pick_add_weight(EgPickWeights *weights,
     weights->constant[tag] += value;
   } else if (strcmp(base, "face") == 0 && has_tag) {
     weights->face[tag] += value;
+  } else if (strcmp(base, "own") == 0 && has_tag) {
+    weights->own[tag] += value;
+  } else if (strcmp(base, "ownb") == 0 && has_tag) {
+    weights->own_best[tag] += value;
+  } else if (strcmp(base, "ownl2") == 0 && has_tag) {
+    weights->own_two_lanes[tag] += value;
+  } else if (strcmp(base, "ownl3") == 0 && has_tag) {
+    weights->own_three_lanes[tag] += value;
+  } else if (strcmp(base, "ownface") == 0 && has_tag) {
+    weights->own_face[tag] += value;
+  } else if (strncmp(base, "ownn", 4) == 0 && base[4] >= '0' &&
+             base[4] <= '9' && base[5] == '\0' && has_tag) {
+    const int leave_size = base[4] - '0';
+    if (leave_size > EG_PICK_MAX_LEAVE_SIZE) {
+      log_fatal("egpick: bad leave size in %s", name);
+    }
+    weights->own_size[tag][leave_size] += value;
   } else if (base[0] == 'n' && base[1] >= '0' && base[1] <= '9' &&
              base[2] == '\0' && has_tag) {
     const int leave_size = base[1] - '0';
@@ -220,6 +275,12 @@ EgPick *eg_pick_create(const Game *game) {
   pick->moves = move_list_create(EG_PICK_MOVE_LIST_CAPACITY);
   pick->replies = move_list_create(EG_PICK_MOVE_LIST_CAPACITY);
   pick->after = game_duplicate(game);
+  pick->own_plays =
+      malloc_or_die(sizeof(EgPickPlay) * EG_PICK_MOVE_LIST_CAPACITY);
+  pick->opp_outs =
+      malloc_or_die(sizeof(EgPickPlay) * EG_PICK_MOVE_LIST_CAPACITY);
+  pick->num_own_plays = 0;
+  pick->num_opp_outs = 0;
   return pick;
 }
 
@@ -230,6 +291,8 @@ void eg_pick_destroy(EgPick *pick) {
   move_list_destroy(pick->moves);
   move_list_destroy(pick->replies);
   game_destroy(pick->after);
+  free(pick->own_plays);
+  free(pick->opp_outs);
   free(pick);
 }
 
@@ -353,6 +416,170 @@ static double eg_pick_value(EgPick *pick, const Game *game, const Move *move,
   return value;
 }
 
+static uint64_t eg_pick_tiles_key(const int *counts, int dist_size) {
+  uint64_t key = 0;
+  for (int ml = 0; ml < dist_size; ml++) {
+    for (int copy_idx = 0; copy_idx < counts[ml]; copy_idx++) {
+      key = (key << 5) | (uint64_t)(ml + 1);
+    }
+  }
+  return key;
+}
+
+static void eg_pick_play_set(EgPickPlay *play, const Move *move,
+                             int dist_size) {
+  const bool vertical = board_is_dir_vertical(move_get_dir(move));
+  const int length = move_get_tiles_length(move);
+  play->row = move_get_row_start(move);
+  play->col = move_get_col_start(move);
+  play->lane = vertical ? BOARD_DIM + play->col : play->row;
+  play->span = ((UINT32_C(1) << length) - 1)
+               << (vertical ? play->row : play->col);
+  play->score = equity_to_int(move_get_score(move));
+  play->is_single = move_get_tiles_played(move) == 1;
+  int counts[MAX_ALPHABET_SIZE] = {0};
+  for (int tile_idx = 0; tile_idx < length; tile_idx++) {
+    const MachineLetter ml = move_get_tile(move, tile_idx);
+    if (ml == PLAYED_THROUGH_MARKER) {
+      continue;
+    }
+    if (play->is_single) {
+      // The one square a single tile fills.
+      if (vertical) {
+        play->row += tile_idx;
+      } else {
+        play->col += tile_idx;
+      }
+    }
+    counts[get_is_blanked(ml) ? BLANK_MACHINE_LETTER : ml]++;
+  }
+  play->tiles_key = eg_pick_tiles_key(counts, dist_size);
+}
+
+// Whether `play` is still a play, for the same score, after the move whose
+// path_move_lists_move_hits are `hits`. A single tile also forms a word across
+// its lane, so both of its lanes must stand.
+static bool eg_pick_play_stands(const EgPickPlay *play, const uint32_t *hits) {
+  if ((hits[play->lane] & play->span) != 0) {
+    return false;
+  }
+  return !play->is_single ||
+         ((((hits[play->row] >> play->col) & 1) == 0) &&
+          (((hits[BOARD_DIM + play->col] >> play->row) & 1) == 0));
+}
+
+// EG_PICK_MODE_OWN, before the candidates are valued: the mover's plays (in
+// pick->moves) and the opponent's out plays, both on the board as it is.
+static void eg_pick_own_prepare(EgPick *pick, const Game *game) {
+  const int dist_size = ld_get_size(game_get_ld(game));
+  pick->num_own_plays = 0;
+  const int num_moves = move_list_get_count(pick->moves);
+  for (int move_idx = 0; move_idx < num_moves; move_idx++) {
+    const Move *move = move_list_get_move(pick->moves, move_idx);
+    if (move_get_type(move) == GAME_EVENT_TILE_PLACEMENT_MOVE) {
+      eg_pick_play_set(&pick->own_plays[pick->num_own_plays++], move,
+                       dist_size);
+    }
+  }
+  pick->num_opp_outs = 0;
+  const int opp_idx = 1 - game_get_player_on_turn_index(game);
+  const int opp_tiles =
+      rack_get_total_letters(player_get_rack(game_get_player(game, opp_idx)));
+  game_copy(pick->after, game);
+  game_set_player_on_turn_index(pick->after, opp_idx);
+  const MoveGenArgs opp_args = {
+      .game = pick->after,
+      .move_list = pick->replies,
+      .move_record_type = MOVE_RECORD_ALL,
+      .move_sort_type = MOVE_SORT_SCORE,
+      .override_kwg = NULL,
+      .eq_margin_movegen = 0,
+      .target_equity = EQUITY_MAX_VALUE,
+  };
+  generate_moves(&opp_args);
+  atomic_fetch_add(&eg_pick_total_reply_movegens, 1);
+  const int num_replies = move_list_get_count(pick->replies);
+  for (int reply_idx = 0; reply_idx < num_replies; reply_idx++) {
+    const Move *reply = move_list_get_move(pick->replies, reply_idx);
+    if (move_get_type(reply) == GAME_EVENT_TILE_PLACEMENT_MOVE &&
+        move_get_tiles_played(reply) == opp_tiles) {
+      eg_pick_play_set(&pick->opp_outs[pick->num_opp_outs++], reply,
+                       dist_size);
+    }
+  }
+}
+
+// EG_PICK_MODE_OWN's value of one candidate: static equity, less the best of
+// the opponent's out plays the candidate leaves standing, plus fitted terms
+// for the leave's own out plays it leaves standing (fit_eg_own.py, "cheap:
+// check + own outs + leave size/face"). Plays the candidate creates for
+// either side are not seen.
+static double eg_pick_own_value(const EgPick *pick, const Game *game,
+                                const Move *move, const Rack *rack) {
+  const LetterDistribution *ld = game_get_ld(game);
+  const EgPickWeights *weights = &pick->weights;
+  const bool is_play = move_get_type(move) == GAME_EVENT_TILE_PLACEMENT_MOVE;
+  const double equity =
+      is_play ? equity_to_double(move_get_equity(move))
+              : equity_to_double(endgame_nonoutplay_adjustment(
+                    rack_get_score(ld, rack)));
+  if (is_play && move_get_tiles_played(move) == rack_get_total_letters(rack)) {
+    return equity + weights->out;
+  }
+  uint32_t hits[PATH_MOVE_LISTS_NUM_LANES] = {0};
+  if (is_play) {
+    path_move_lists_move_hits(game_get_board(game), move, hits);
+  }
+  bool opp_out = false;
+  int best_opp_out = 0;
+  for (int out_idx = 0; out_idx < pick->num_opp_outs; out_idx++) {
+    const EgPickPlay *opp_play = &pick->opp_outs[out_idx];
+    if ((!opp_out || opp_play->score > best_opp_out) &&
+        eg_pick_play_stands(opp_play, hits)) {
+      opp_out = true;
+      best_opp_out = opp_play->score;
+    }
+  }
+  const int tag = opp_out ? EG_PICK_TAG_OO : EG_PICK_TAG_NO;
+  double value = equity + weights->constant[tag];
+  if (opp_out) {
+    value -= best_opp_out;
+  }
+  Rack leave;
+  eg_pick_leave(rack, move, &leave);
+  int counts[MAX_ALPHABET_SIZE] = {0};
+  const int dist_size = ld_get_size(ld);
+  for (int ml = 0; ml < dist_size; ml++) {
+    counts[ml] = rack_get_letter(&leave, (MachineLetter)ml);
+  }
+  const uint64_t leave_key = eg_pick_tiles_key(counts, dist_size);
+  bool own_out = false;
+  int best_own_out = 0;
+  uint64_t lanes = 0;
+  for (int play_idx = 0; play_idx < pick->num_own_plays; play_idx++) {
+    const EgPickPlay *own_play = &pick->own_plays[play_idx];
+    if (own_play->tiles_key != leave_key ||
+        !eg_pick_play_stands(own_play, hits)) {
+      continue;
+    }
+    if (!own_out || own_play->score > best_own_out) {
+      best_own_out = own_play->score;
+    }
+    own_out = true;
+    lanes |= (uint64_t)1 << own_play->lane;
+  }
+  if (own_out) {
+    const int num_lanes = __builtin_popcountll(lanes);
+    const int leave_size = rack_get_total_letters(&leave);
+    value += weights->own[tag] + weights->own_best[tag] * best_own_out +
+             (num_lanes >= 2 ? weights->own_two_lanes[tag] : 0.0) +
+             (num_lanes >= 3 ? weights->own_three_lanes[tag] : 0.0) +
+             weights->own_face[tag] * equity_to_double(rack_get_score(ld, &leave)) +
+             weights->own_size[tag][leave_size];
+  }
+  return value;
+}
+
 bool eg_pick_choose(EgPick *pick, Game *game, const KWG *override_kwg,
                     Move *out) {
   const int64_t start_ns = ctimer_monotonic_ns();
@@ -403,11 +630,16 @@ bool eg_pick_choose(EgPick *pick, Game *game, const KWG *override_kwg,
   }
   const Rack *rack = player_get_rack(
       game_get_player(game, game_get_player_on_turn_index(game)));
+  if (pick->mode == EG_PICK_MODE_OWN) {
+    eg_pick_own_prepare(pick, game);
+  }
   int best_idx = 0;
   double best_value = 0.0;
   for (int cand_idx = 0; cand_idx < num_candidates; cand_idx++) {
     const double value =
-        eg_pick_value(pick, game, &pick->candidates[cand_idx], rack);
+        pick->mode == EG_PICK_MODE_OWN
+            ? eg_pick_own_value(pick, game, &pick->candidates[cand_idx], rack)
+            : eg_pick_value(pick, game, &pick->candidates[cand_idx], rack);
     if (cand_idx == 0 || value > best_value) {
       best_value = value;
       best_idx = cand_idx;
