@@ -146,14 +146,24 @@ typedef struct EgtArm {
   TranspositionTable *tt;
 } EgtArm;
 
+typedef enum {
+  EGT_ARM_SWITCH,
+  EGT_ARM_STOCK,
+  EGT_ARM_FLAGS_OFF,
+} egt_arm_kind_t;
+
 static void egt_arm_create(EgtShared *shared, EgtArm *arm, Game *game,
-                           bool suppressed) {
+                           egt_arm_kind_t suppressed) {
   arm->ctx = NULL;
   arm->results = endgame_results_create();
   arm->tt = transposition_table_create_with_threads(0.0, EGQ_TT_SIZE_POWER, 1);
   // The first solve creates the context's worker, which reads the switch.
   pthread_mutex_lock(&shared->create_mutex);
-  eg_pick_set_suppressed(suppressed);
+  if (suppressed == EGT_ARM_FLAGS_OFF) {
+    eg_pick_set_arm_flags_suppressed(true);
+  } else {
+    eg_pick_set_suppressed(suppressed == EGT_ARM_STOCK);
+  }
   egq_solve_timed(game, &arm->ctx, arm->results, arm->tt, 1, NULL, 0.0);
   eg_pick_set_suppressed(false);
   pthread_mutex_unlock(&shared->create_mutex);
@@ -181,9 +191,13 @@ static void *egt_worker_run(void *arg) {
   EgtArm arms[2];
   EgtArm judge;
   Game *after = config_game_create(shared->config);
-  egt_arm_create(shared, &arms[0], game, true);
-  egt_arm_create(shared, &arms[1], game, false);
-  egt_arm_create(shared, &judge, game, true);
+  // MAGPIE_EGPICK_BASE (any value): the reference arm keeps the pick and only
+  // the "arm" flags differ between the two arms.
+  egt_arm_create(shared, &arms[0], game,
+                 getenv("MAGPIE_EGPICK_BASE") != NULL ? EGT_ARM_FLAGS_OFF
+                                                      : EGT_ARM_STOCK);
+  egt_arm_create(shared, &arms[1], game, EGT_ARM_SWITCH);
+  egt_arm_create(shared, &judge, game, EGT_ARM_STOCK);
   for (;;) {
     pthread_mutex_lock(&shared->mutex);
     const int position_idx = shared->next++;

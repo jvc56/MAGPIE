@@ -1,0 +1,13 @@
+Thu Nov 19 09:30:59 PST 2026 done /Users/john/sources/nov17-magpie/egswitch-work/step2/stock_nonstuck_t10.txt
+Thu Nov 19 09:31:35 PST 2026 done /Users/john/sources/nov17-magpie/egswitch-work/step2/stock_nonstuck_t50.txt
+Thu Nov 19 09:32:58 PST 2026 done /Users/john/sources/nov17-magpie/egswitch-work/step2/stock_nonstuck_t200.txt
+Thu Nov 19 09:33:22 PST 2026 done /Users/john/sources/nov17-magpie/egswitch-work/step2/stock_ge11_t20.txt
+Thu Nov 19 09:34:16 PST 2026 done /Users/john/sources/nov17-magpie/egswitch-work/step2/stock_ge11_t100.txt
+Thu Nov 19 09:36:50 PST 2026 done /Users/john/sources/nov17-magpie/egswitch-work/step2/stock_ge11_t500.txt
+Thu Nov 19 09:37:12 PST 2026 done /Users/john/sources/nov17-magpie/egswitch-work/step2/staticbest_nonstuck_t10.txt
+Thu Nov 19 09:37:43 PST 2026 done /Users/john/sources/nov17-magpie/egswitch-work/step2/staticbest_nonstuck_t50.txt
+Thu Nov 19 09:39:03 PST 2026 done /Users/john/sources/nov17-magpie/egswitch-work/step2/staticbest_nonstuck_t200.txt
+Thu Nov 19 09:39:36 PST 2026 done /Users/john/sources/nov17-magpie/egswitch-work/step2/staticbest_ge11_t20.txt
+Thu Nov 19 09:40:38 PST 2026 done /Users/john/sources/nov17-magpie/egswitch-work/step2/staticbest_ge11_t100.txt
+Thu Nov 19 09:43:11 PST 2026 done /Users/john/sources/nov17-magpie/egswitch-work/step2/staticbest_ge11_t500.txt
+Thu Nov 19 09:43:11 PST 2026 all finished

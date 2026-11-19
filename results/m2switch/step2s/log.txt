@@ -1,0 +1,7 @@
+Thu Nov 19 11:06:39 PST 2026 done /Users/john/sources/nov17-magpie/egswitch-work/step2s/ge11_t20.txt
+Thu Nov 19 11:09:11 PST 2026 done /Users/john/sources/nov17-magpie/egswitch-work/step2s/ge11_t100.txt
+Thu Nov 19 11:09:20 PST 2026 done /Users/john/sources/nov17-magpie/egswitch-work/step2s/nonstuck_t10.txt
+Thu Nov 19 11:09:50 PST 2026 done /Users/john/sources/nov17-magpie/egswitch-work/step2s/nonstuck_t50.txt
+Thu Nov 19 11:11:07 PST 2026 done /Users/john/sources/nov17-magpie/egswitch-work/step2s/nonstuck_t200.txt
+Thu Nov 19 11:18:21 PST 2026 done /Users/john/sources/nov17-magpie/egswitch-work/step2s/ge11_t500.txt
+Thu Nov 19 11:18:21 PST 2026 all finished

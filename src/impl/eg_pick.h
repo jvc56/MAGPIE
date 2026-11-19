@@ -32,9 +32,23 @@ typedef struct EgPickStats {
 
 bool eg_pick_enabled(void);
 
+// A lab flag from the environment: "all" is on everywhere, "arm" is on except
+// while suppressed (so only for the switch arm of a comparison). Read when a
+// solver worker is created.
+//   MAGPIE_EG_STEP2            a timed endgame solve searches depths 1, 2, 4,
+//                              6, ... instead of every depth
+// MAGPIE_EGPICK_MODE=stock keeps the stock pick (to compare such a flag alone).
+// MAGPIE_EGPICK_STUCK_GATE (any value): a solve whose root has a stuck tile
+// for either side uses the stock pick throughout.
+bool eg_pick_arm_flag(const char *env_name);
+
 // While suppressed, eg_pick_create returns NULL, so solver workers created
 // meanwhile run stock (for reference solves in the same process).
 void eg_pick_set_suppressed(bool suppressed);
+
+// While set, workers created keep the pick but "arm" flags are off (a
+// reference arm that differs from the switch arm only by those flags).
+void eg_pick_set_arm_flags_suppressed(bool suppressed);
 
 // Per-thread scratch. Returns NULL when the switch is off.
 EgPick *eg_pick_create(const Game *game);

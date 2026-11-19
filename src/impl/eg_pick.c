@@ -118,6 +118,17 @@ static int eg_pick_requested_candidates(void) {
 
 bool eg_pick_enabled(void) { return eg_pick_requested_candidates() > 0; }
 
+bool eg_pick_arm_flag(const char *env_name) {
+  const char *value = getenv(env_name);
+  if (value == NULL) {
+    return false;
+  }
+  if (strcmp(value, "all") == 0) {
+    return true;
+  }
+  return strcmp(value, "arm") == 0 && atomic_load(&eg_pick_suppressed) == 0;
+}
+
 static eg_pick_mode_t eg_pick_requested_mode(void) {
   const char *value = getenv("MAGPIE_EGPICK_MODE");
   if (value == NULL || strcmp(value, "full") == 0) {
@@ -263,9 +274,17 @@ void eg_pick_set_suppressed(bool suppressed) {
   atomic_store(&eg_pick_suppressed, suppressed ? 1 : 0);
 }
 
+void eg_pick_set_arm_flags_suppressed(bool suppressed) {
+  atomic_store(&eg_pick_suppressed, suppressed ? 2 : 0);
+}
+
 EgPick *eg_pick_create(const Game *game) {
   const int num_candidates = eg_pick_requested_candidates();
-  if (num_candidates == 0 || atomic_load(&eg_pick_suppressed) != 0) {
+  if (num_candidates == 0 || atomic_load(&eg_pick_suppressed) == 1) {
+    return NULL;
+  }
+  const char *mode_name = getenv("MAGPIE_EGPICK_MODE");
+  if (mode_name != NULL && strcmp(mode_name, "stock") == 0) {
     return NULL;
   }
   EgPick *pick = malloc_or_die(sizeof(EgPick));

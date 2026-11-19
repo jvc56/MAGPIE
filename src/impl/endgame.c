@@ -243,6 +243,9 @@ struct EndgameCtx {
   atomic_int stuck_tile_logged;
   // Fraction of opponent's tiles that are stuck at the root (0.0 = none)
   float initial_opp_stuck_frac;
+  // LAB egregret: MAGPIE_EGPICK_STUCK_GATE is set and either side has a stuck
+  // tile at the root, so this solve's workers use the stock pick.
+  bool lab_static_gated;
 
   // Root move progress tracking (thread 0 only, for external polling)
   atomic_int root_moves_completed; // How many root moves finished this depth
@@ -348,6 +351,8 @@ struct EndgameCtxWorker {
   Game *game_copy;
   // LAB egregret: the empty-bag pick for leaf playouts (NULL when off).
   EgPick *eg_pick;
+  // LAB egregret: see eg_pick_arm_flag, MAGPIE_EG_STEP2.
+  bool lab_timed_step_two;
   Arena *small_move_arena;
   MoveList *move_list;
   // The incremental move lists (EndgameArgs.incremental_movegen), or NULL
@@ -1012,8 +1017,7 @@ static float compute_opp_stuck_fraction(
 // Compute the initial stuck-tile fraction for the opponent at the root.
 // Duplicates the game to avoid modifying the original.
 static float compute_initial_stuck_fraction(const EndgameCtx *solver,
-                                            const Game *game) {
-  int opp_idx = 1 - solver->solving_player;
+                                            const Game *game, int opp_idx) {
   Game *root_game = game_duplicate(game);
   MoveList *tmp_ml = move_list_create_small(ENDGAME_MOVELIST_INITIAL_CAPACITY);
   float frac = compute_opp_stuck_fraction(
@@ -1223,9 +1227,14 @@ void endgame_ctx_reset(EndgameCtx *es, EndgameResults *results,
   // Per-node detection in abdada_negamax recomputes this dynamically.
   es->initial_opp_stuck_frac = 0.0F;
   if (es->use_heuristics) {
-    es->initial_opp_stuck_frac =
-        compute_initial_stuck_fraction(es, endgame_args->game);
+    es->initial_opp_stuck_frac = compute_initial_stuck_fraction(
+        es, endgame_args->game, 1 - es->solving_player);
   }
+  es->lab_static_gated =
+      getenv("MAGPIE_EGPICK_STUCK_GATE") != NULL && es->use_heuristics &&
+      (es->initial_opp_stuck_frac > 0.0F ||
+       compute_initial_stuck_fraction(es, endgame_args->game,
+                                      es->solving_player) > 0.0F);
 }
 
 EndgameCtx *endgame_ctx_create(void) {
@@ -1484,6 +1493,7 @@ static EndgameCtxWorker *endgame_ctx_create_worker(EndgameCtx *solver,
   solver_worker->ordinal = ordinal;
   solver_worker->game_copy = game_duplicate(template_game);
   solver_worker->eg_pick = eg_pick_create(template_game);
+  solver_worker->lab_timed_step_two = eg_pick_arm_flag("MAGPIE_EG_STEP2");
   game_set_endgame_solving_mode(solver_worker->game_copy);
 
   solver_worker->move_list =
@@ -2465,6 +2475,12 @@ static void seed_opponent_root_list(EndgameCtxWorker *worker) {
   path_move_lists_set_root(worker->path_lists, 1, worker->move_list);
 }
 
+// LAB egregret: the worker's empty-bag pick, or NULL where the solve uses the
+// stock one (off, or gated by stuck tiles at the root).
+static inline EgPick *worker_eg_pick(const EndgameCtxWorker *worker) {
+  return worker->solver->lab_static_gated ? NULL : worker->eg_pick;
+}
+
 // Sum the face values (tile_face_values, by machine letter) of the rack tiles
 // a move places; a designated blank counts as the blank.
 static int compute_played_tiles_face_value(const SmallMove *small_move,
@@ -2599,7 +2615,7 @@ static void out_reply_bound_init(OutReplyBound *bound, EndgameCtxWorker *worker,
   const MoveGenArgs reply_args = {
       .best_small_out_bonus = 0,
       .best_small_face_weight =
-          worker->eg_pick != NULL && eg_pick_is_static_best(worker->eg_pick)
+          eg_pick_is_static_best(worker_eg_pick(worker))
               ? 2
               : 0,
       .best_small_canonical_ties = true,
@@ -3034,7 +3050,7 @@ static int playout_step_from_lists(EndgameCtxWorker *worker, bool alone,
   const Rack *opp_rack =
       player_get_rack(game_get_player(worker->game_copy, 1 - stm_idx));
   // LAB egregret: static equity's rank (see negamax_greedy_leaf_playout).
-  const bool rank_by_static = worker->eg_pick != NULL;
+  const bool rank_by_static = worker_eg_pick(worker) != NULL;
   const int face_weight = rank_by_static ? 2 : 0;
   const Equity go_out_bonus =
       calculate_end_rack_points(opp_rack, game_get_ld(worker->game_copy)) +
@@ -3373,7 +3389,7 @@ static SmallMove pick_greedy_playout_move(const EndgameCtxWorker *worker,
 static int endgame_eg_pick_step(EndgameCtxWorker *worker) {
   Move picked;
   if (!eg_pick_choose(
-          worker->eg_pick, worker->game_copy,
+          worker_eg_pick(worker), worker->game_copy,
           solver_get_pruned_kwg(
               worker->solver, game_get_player_on_turn_index(worker->game_copy)),
           &picked)) {
@@ -3513,8 +3529,8 @@ static int32_t negamax_greedy_leaf_playout(EndgameCtxWorker *worker,
   // A playout of one move has only the leaf's step, which needs no push.
   const bool use_best_lists = use_path_lists && opp_stuck_frac == 0.0F &&
                               worker->solver->best_reply_shortcuts &&
-                              (worker->eg_pick == NULL ||
-                               eg_pick_is_static_best(worker->eg_pick));
+                              (worker_eg_pick(worker) == NULL ||
+                               eg_pick_is_static_best(worker_eg_pick(worker)));
   // Either kind pushes every move it makes onto the lists' path, and the
   // unwind pops each one. So for such a playout the path always ends with the
   // last move played, and for any other it does only at the leaf: a step may
@@ -3589,8 +3605,8 @@ static int32_t negamax_greedy_leaf_playout(EndgameCtxWorker *worker,
       nplays = playout_step_from_lists(
           worker, worker->leaf_is_alone || playout_depth > 0,
           playout_depth == 0 ? leaf_plays : NULL, leaf_play_count);
-    } else if (opp_stuck_frac == 0.0F && worker->eg_pick != NULL &&
-               !eg_pick_is_static_best(worker->eg_pick)) {
+    } else if (opp_stuck_frac == 0.0F && worker_eg_pick(worker) != NULL &&
+               !eg_pick_is_static_best(worker_eg_pick(worker))) {
       // LAB egregret: the empty-bag pick instead of the greedy best play.
       nplays = endgame_eg_pick_step(worker);
     } else if (opp_stuck_frac == 0.0F) {
@@ -3604,7 +3620,7 @@ static int32_t negamax_greedy_leaf_playout(EndgameCtxWorker *worker,
           game_get_player(worker->game_copy, 1 - playout_on_turn));
       // LAB egregret: static equity ranks a play by its score plus twice the
       // face value it places, and going out by ten points more.
-      const bool rank_by_static = worker->eg_pick != NULL;
+      const bool rank_by_static = worker_eg_pick(worker) != NULL;
       const MoveGenArgs pargs = {
           .best_small_out_bonus =
               calculate_end_rack_points(opp_rack_p,
@@ -5702,6 +5718,11 @@ void iterative_deepening(EndgameCtxWorker *worker, int plies) {
 
   for (int ply = start; ply <= plies; ply++) {
     if (steps_by_two && iterative_deepening_skips_ply(ply, plies)) {
+      continue;
+    }
+    // LAB egregret: a timed solve that skips the odd depths past the first.
+    if (worker->lab_timed_step_two && !steps_by_two && ply > 1 &&
+        ply % 2 == 1 && ply != plies) {
       continue;
     }
     // Check if another thread has completed the full search
