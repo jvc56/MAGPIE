@@ -365,6 +365,14 @@ void run_test(const char *subtest) {
     eg_regret_run_spec(subtest + strlen("egregret:"));
     return;
   }
+  if (has_prefix("egsolve:", subtest)) {
+    eg_solve_run_file(subtest + strlen("egsolve:"));
+    return;
+  }
+  if (has_prefix("egstuck:", subtest)) {
+    eg_stuck_run_file(subtest + strlen("egstuck:"));
+    return;
+  }
   if (has_prefix("leavebag:", subtest)) {
     leave_bag_run_spec(subtest + strlen("leavebag:"));
     return;
