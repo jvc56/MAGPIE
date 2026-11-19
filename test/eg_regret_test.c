@@ -15,7 +15,7 @@
 //   P <game> <turn> <mover tiles> <opp tiles> <moves> <b2> <b4> <b6> <cgp>
 //   C <game> <turn> <cand> <score> <equity> <tiles played> <goes out> <leave>
 //     <v2> <v4> <v6> <seconds>
-// b6 and v6 are -99999 when not solved.
+// b6 and v6 are -99999 when not solved; a pass's equity prints as -99999.
 
 #include "eg_regret_test.h"
 
@@ -183,7 +183,10 @@ static void egr_measure(EgrWorker *worker, MoveList *all_moves, int game_idx,
     string_builder_add_formatted_string(
         out, "C %d %d %d %d %.3f %d %d %s %d %d %d %.3f\n", game_idx, turn,
         cand_idx, equity_to_int(move_get_score(&cands[cand_idx])),
-        equity_to_double(move_get_equity(&cands[cand_idx])), tiles_played,
+        move_get_type(&cands[cand_idx]) == GAME_EVENT_PASS
+            ? (double)EGR_NO_VALUE
+            : equity_to_double(move_get_equity(&cands[cand_idx])),
+        tiles_played,
         tiles_played == mover_tiles ? 1 : 0, leave_string, v2, v4, v6,
         seconds);
   }
