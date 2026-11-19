@@ -8,6 +8,7 @@
 #include "../ent/board.h"
 #include "../ent/equity.h"
 #include "../ent/game.h"
+#include "../ent/letter_distribution.h"
 #include "../ent/move.h"
 #include "../ent/player.h"
 #include "../ent/rack.h"
@@ -925,13 +926,36 @@ typedef struct BestScan {
   const SmallMove *best_play;
   int go_out_bonus;
   int side_to_move_tiles;
+  // LAB egregret: a play also ranks by face_weight times the face value of
+  // the tiles it places (tile_values, by machine letter). 0 for none.
+  int face_weight;
+  const int *tile_values;
 } BestScan;
+
+// The face value of the rack tiles a small move places, a designated blank
+// counting as the blank.
+static inline int small_move_placed_face_value(const SmallMove *small_move,
+                                               const int *tile_values) {
+  int face_value = 0;
+  const int tiles_played = small_move_get_tiles_played(small_move);
+  for (int tile_idx = 0; tile_idx < tiles_played; tile_idx++) {
+    const MachineLetter ml = small_move_tile_is_blank(small_move, tile_idx)
+                                 ? BLANK_MACHINE_LETTER
+                                 : small_move_get_tile(small_move, tile_idx);
+    face_value += tile_values[ml];
+  }
+  return face_value;
+}
 
 static inline void best_scan_consider(BestScan *scan,
                                       const SmallMove *small_move) {
   int adjusted = small_move_get_score(small_move);
   if (small_move_get_tiles_played(small_move) == scan->side_to_move_tiles) {
     adjusted += scan->go_out_bonus;
+  }
+  if (scan->face_weight != 0) {
+    adjusted += scan->face_weight *
+                small_move_placed_face_value(small_move, scan->tile_values);
   }
   if (adjusted > scan->best_adjusted ||
       (adjusted == scan->best_adjusted &&
@@ -949,19 +973,40 @@ static inline uint64_t all_lanes_mask(void) {
              : ((uint64_t)1 << PATH_MOVE_LISTS_NUM_LANES) - 1;
 }
 
+// The face value of every tile type, by machine letter.
+static void fill_tile_values(const Game *game, int *tile_values) {
+  const LetterDistribution *ld = game_get_ld(game);
+  const int dist_size = ld_get_size(ld);
+  for (int ml = 0; ml < dist_size; ml++) {
+    tile_values[ml] = equity_to_int(ld_get_score(ld, (MachineLetter)ml));
+  }
+}
+
 // Keeps `small_move` if it is its lane's best whole-rack or best partial play
 // by score, ties going to the larger tiny_move.
+// LAB egregret: with a face weight, a play ranks by its score plus the weight
+// times the face value it places. Whole-rack plays all place the same tiles,
+// so only the partial plays' order changes.
 static inline void lane_best_consider(LaneBestPlays *best,
                                       const SmallMove *small_move,
-                                      int side_to_move_tiles) {
+                                      int side_to_move_tiles, int face_weight,
+                                      const int *tile_values) {
   const bool whole_rack =
       small_move_get_tiles_played(small_move) == side_to_move_tiles;
   SmallMove *kept = whole_rack ? &best->whole_rack : &best->partial;
   bool *has_kept = whole_rack ? &best->has_whole_rack : &best->has_partial;
-  if (!*has_kept ||
-      small_move_get_score(small_move) > small_move_get_score(kept) ||
-      (small_move_get_score(small_move) == small_move_get_score(kept) &&
-       small_move->tiny_move > kept->tiny_move)) {
+  int move_value = small_move_get_score(small_move);
+  int kept_value = *has_kept ? small_move_get_score(kept) : 0;
+  if (face_weight != 0 && !whole_rack) {
+    move_value +=
+        face_weight * small_move_placed_face_value(small_move, tile_values);
+    if (*has_kept) {
+      kept_value +=
+          face_weight * small_move_placed_face_value(kept, tile_values);
+    }
+  }
+  if (!*has_kept || move_value > kept_value ||
+      (move_value == kept_value && small_move->tiny_move > kept->tiny_move)) {
     *kept = *small_move;
     *has_kept = true;
   }
@@ -979,6 +1024,11 @@ static void fill_sibling_lanes(PathMoveLists *lists,
   const int length = lists->length;
   const uint64_t previous_move = length >= 2 ? lists->masks[length - 2] : 0;
   const uint64_t regenerated = missing & previous_move;
+  const int face_weight = best_small_args->best_small_face_weight;
+  int tile_values[MAX_ALPHABET_SIZE];
+  if (face_weight != 0) {
+    fill_tile_values(best_small_args->game, tile_values);
+  }
   for (int lane = 0; lane < PATH_MOVE_LISTS_NUM_LANES; lane++) {
     if (((missing >> lane) & 1) != 0) {
       lists->sibling_lanes[length][lane].has_whole_rack = false;
@@ -1005,7 +1055,7 @@ static void fill_sibling_lanes(PathMoveLists *lists,
         for (int move_idx = begin; move_idx < end; move_idx++) {
           lane_best_consider(&lists->sibling_lanes[length][lane],
                              move_list->small_moves[move_idx],
-                             side_to_move_tiles);
+                             side_to_move_tiles, face_weight, tile_values);
         }
       }
       begin = end;
@@ -1044,7 +1094,8 @@ static void fill_sibling_lanes(PathMoveLists *lists,
       if (filter && !counts_subset(&parent->used[move_idx], &avail)) {
         continue;
       }
-      lane_best_consider(best, &parent->moves[move_idx], side_to_move_tiles);
+      lane_best_consider(best, &parent->moves[move_idx], side_to_move_tiles,
+                         face_weight, tile_values);
     }
   }
 }
@@ -1092,7 +1143,7 @@ void path_move_lists_lane_bests_of_list(const MoveList *move_list,
       continue;
     }
     lane_best_consider(&lanes[lane_of_small_move(small_move)], small_move,
-                       side_to_move_tiles);
+                       side_to_move_tiles, 0, NULL);
   }
 }
 
@@ -1123,12 +1174,18 @@ bool path_move_lists_best_play(PathMoveLists *lists,
     lists->sibling_valid[length] |= missing;
   }
 
+  int tile_values[MAX_ALPHABET_SIZE];
+  if (best_small_args->best_small_face_weight != 0) {
+    fill_tile_values(game, tile_values);
+  }
   BestScan scan = {
       .best_adjusted = INT32_MIN,
       .best_tiny_move = 0,
       .best_play = NULL,
       .go_out_bonus = equity_to_int(best_small_args->best_small_out_bonus),
       .side_to_move_tiles = side_to_move_tiles,
+      .face_weight = best_small_args->best_small_face_weight,
+      .tile_values = tile_values,
   };
   for (int lane = 0; lane < PATH_MOVE_LISTS_NUM_LANES; lane++) {
     if (((shared_lanes >> lane) & 1) == 0) {
@@ -1195,12 +1252,47 @@ bool path_move_lists_best_play_alone(PathMoveLists *lists,
       game_get_player(game, game_get_player_on_turn_index(game)));
   const int side_to_move_tiles = rack_get_total_letters(rack);
   const PackedCounts avail = pack_rack(rack);
+  // LAB egregret: with a face weight, the most a play of each tile count can
+  // gain from it, which loosens the stop below.
+  const int face_weight = best_small_args->best_small_face_weight;
+  int tile_values[MAX_ALPHABET_SIZE];
+  int face_bounds[RACK_SIZE + 1] = {0};
+  if (face_weight != 0) {
+    fill_tile_values(game, tile_values);
+    const int dist_size = rack_get_dist_size(rack);
+    int rack_values[RACK_SIZE];
+    int num_rack_values = 0;
+    for (int ml = 0; ml < dist_size; ml++) {
+      const int number_of_ml = rack_get_letter(rack, (MachineLetter)ml);
+      for (int copy_idx = 0;
+           copy_idx < number_of_ml && num_rack_values < RACK_SIZE;
+           copy_idx++) {
+        // Insert in descending order.
+        int insert_idx = num_rack_values;
+        while (insert_idx > 0 &&
+               rack_values[insert_idx - 1] < tile_values[ml]) {
+          rack_values[insert_idx] = rack_values[insert_idx - 1];
+          insert_idx--;
+        }
+        rack_values[insert_idx] = tile_values[ml];
+        num_rack_values++;
+      }
+    }
+    for (int tiles = 1; tiles <= RACK_SIZE; tiles++) {
+      face_bounds[tiles] =
+          face_bounds[tiles - 1] +
+          (tiles <= num_rack_values ? face_weight * rack_values[tiles - 1]
+                                    : 0);
+    }
+  }
   BestScan scan = {
       .best_adjusted = INT32_MIN,
       .best_tiny_move = 0,
       .best_play = NULL,
       .go_out_bonus = equity_to_int(best_small_args->best_small_out_bonus),
       .side_to_move_tiles = side_to_move_tiles,
+      .face_weight = face_weight,
+      .tile_values = tile_values,
   };
   // A play of more tiles than the rack holds cannot stand. Within a tile
   // count the plays descend by score, so once one stands, only its ties are
@@ -1208,7 +1300,8 @@ bool path_move_lists_best_play_alone(PathMoveLists *lists,
   const int most_tiles =
       side_to_move_tiles < RACK_SIZE ? side_to_move_tiles : RACK_SIZE;
   for (int tiles = most_tiles; tiles >= 1; tiles--) {
-    const int bonus = tiles == side_to_move_tiles ? scan.go_out_bonus : 0;
+    const int bonus = (tiles == side_to_move_tiles ? scan.go_out_bonus : 0) +
+                      face_bounds[tiles];
     const int end = source->tiles_begin[tiles + 1];
     for (int key_idx = source->tiles_begin[tiles]; key_idx < end; key_idx++) {
       const uint64_t key = source->by_score[key_idx];

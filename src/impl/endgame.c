@@ -14,6 +14,7 @@
 #include "../def/move_defs.h"
 #include "../def/players_data_defs.h"
 #include "../def/rack_defs.h"
+#include "../def/static_eval_defs.h"
 #include "../def/thread_control_defs.h"
 #include "../ent/bag.h"
 #include "../ent/board.h"
@@ -41,6 +42,7 @@
 #include "../util/io_util.h"
 #include "../util/stable_sort.h"
 #include "../util/string_util.h"
+#include "eg_pick.h"
 #include "gameplay.h"
 #include "kwg_maker.h"
 #include "move_gen.h"
@@ -344,6 +346,8 @@ struct EndgameCtxWorker {
   // slot, so no explicit slot is tracked here.
   int ordinal;
   Game *game_copy;
+  // LAB egregret: the empty-bag pick for leaf playouts (NULL when off).
+  EgPick *eg_pick;
   Arena *small_move_arena;
   MoveList *move_list;
   // The incremental move lists (EndgameArgs.incremental_movegen), or NULL
@@ -1435,6 +1439,7 @@ static void solver_worker_destroy(EndgameCtxWorker *solver_worker) {
     return;
   }
   game_destroy(solver_worker->game_copy);
+  eg_pick_destroy(solver_worker->eg_pick);
   small_move_list_destroy(solver_worker->move_list);
   arena_destroy(solver_worker->small_move_arena);
   path_move_lists_destroy(solver_worker->path_lists_storage);
@@ -1478,6 +1483,7 @@ static EndgameCtxWorker *endgame_ctx_create_worker(EndgameCtx *solver,
 
   solver_worker->ordinal = ordinal;
   solver_worker->game_copy = game_duplicate(template_game);
+  solver_worker->eg_pick = eg_pick_create(template_game);
   game_set_endgame_solving_mode(solver_worker->game_copy);
 
   solver_worker->move_list =
@@ -2587,8 +2593,15 @@ static void out_reply_bound_init(OutReplyBound *bound, EndgameCtxWorker *worker,
     }
     return;
   }
+  // LAB egregret: the per-lane bests this fills are the ones the leaves'
+  // picks read, so they are kept in the leaves' order (only the whole-rack
+  // plays are read here, whose order is the same either way).
   const MoveGenArgs reply_args = {
       .best_small_out_bonus = 0,
+      .best_small_face_weight =
+          worker->eg_pick != NULL && eg_pick_is_static_best(worker->eg_pick)
+              ? 2
+              : 0,
       .best_small_canonical_ties = true,
       .game = game,
       .move_list = worker->move_list,
@@ -2984,6 +2997,7 @@ playout_step_play(const MoveList *move_list, bool in_place,
 // `best` untouched when there are no plays.
 static void pick_best_playout_play(const SmallMove *plays, int count,
                                    int go_out_bonus, int side_to_move_tiles,
+                                   int face_weight, const int *tile_face_values,
                                    SmallMove *best) {
   int best_adjusted = INT32_MIN;
   const SmallMove *best_play = NULL;
@@ -2992,6 +3006,11 @@ static void pick_best_playout_play(const SmallMove *plays, int count,
     int adjusted = small_move_get_score(candidate);
     if (small_move_get_tiles_played(candidate) == side_to_move_tiles) {
       adjusted += go_out_bonus;
+    }
+    if (face_weight != 0) {
+      // LAB egregret: static equity's rank (see negamax_greedy_leaf_playout).
+      adjusted += face_weight *
+                  compute_played_tiles_face_value(candidate, tile_face_values);
     }
     if (best_play == NULL || adjusted > best_adjusted ||
         (adjusted == best_adjusted &&
@@ -3014,13 +3033,18 @@ static int playout_step_from_lists(EndgameCtxWorker *worker, bool alone,
   const int stm_idx = game_get_player_on_turn_index(worker->game_copy);
   const Rack *opp_rack =
       player_get_rack(game_get_player(worker->game_copy, 1 - stm_idx));
+  // LAB egregret: static equity's rank (see negamax_greedy_leaf_playout).
+  const bool rank_by_static = worker->eg_pick != NULL;
+  const int face_weight = rank_by_static ? 2 : 0;
   const Equity go_out_bonus =
-      calculate_end_rack_points(opp_rack, game_get_ld(worker->game_copy));
+      calculate_end_rack_points(opp_rack, game_get_ld(worker->game_copy)) +
+      (rank_by_static ? NON_OUTPLAY_CONSTANT_PENALTY : 0);
   SmallMove best;
   small_move_set_as_pass(&best);
   // The MOVE_RECORD_BEST_SMALL generation a step without the lists runs.
   const MoveGenArgs best_args = {
       .best_small_out_bonus = go_out_bonus,
+      .best_small_face_weight = face_weight,
       .best_small_canonical_ties = true,
       .game = worker->game_copy,
       .move_list = worker->move_list,
@@ -3036,7 +3060,8 @@ static int playout_step_from_lists(EndgameCtxWorker *worker, bool alone,
         player_get_rack(game_get_player(worker->game_copy, stm_idx))
             ->number_of_letters;
     pick_best_playout_play(leaf_plays, leaf_play_count,
-                           equity_to_int(go_out_bonus), stm_tiles, &best);
+                           equity_to_int(go_out_bonus), stm_tiles, face_weight,
+                           worker->solver->tile_face_values, &best);
   } else {
     SmallMove found;
     if (alone ? path_move_lists_best_play_alone(worker->path_lists, &best_args,
@@ -3343,6 +3368,39 @@ static SmallMove pick_greedy_playout_move(const EndgameCtxWorker *worker,
                             pass, best_move_idx);
 }
 
+// LAB egregret: the step's one play, chosen by eg_pick, as the only entry of
+// worker->move_list. Returns the play count (0 when there is none).
+static int endgame_eg_pick_step(EndgameCtxWorker *worker) {
+  Move picked;
+  if (!eg_pick_choose(
+          worker->eg_pick, worker->game_copy,
+          solver_get_pruned_kwg(
+              worker->solver, game_get_player_on_turn_index(worker->game_copy)),
+          &picked)) {
+    worker->move_list->count = 0;
+    return 0;
+  }
+  SmallMove *step_play = worker->move_list->small_moves[0];
+  if (move_get_type(&picked) == GAME_EVENT_PASS) {
+    small_move_set_as_pass(step_play);
+  } else {
+    const bool is_vertical = board_is_dir_vertical(move_get_dir(&picked));
+    int row_start = move_get_row_start(&picked);
+    int col_start = move_get_col_start(&picked);
+    if (is_vertical) {
+      const int swap = row_start;
+      row_start = col_start;
+      col_start = swap;
+    }
+    small_move_set_all(
+        step_play, picked.tiles, 0, move_get_tiles_length(&picked) - 1,
+        move_get_score(&picked), row_start, col_start,
+        move_get_tiles_played(&picked), is_vertical, move_get_type(&picked));
+  }
+  worker->move_list->count = 1;
+  return 1;
+}
+
 static int32_t negamax_greedy_leaf_playout(EndgameCtxWorker *worker,
                                            uint64_t node_key, int on_turn_idx,
                                            int32_t on_turn_spread, PVLine *pv,
@@ -3454,7 +3512,9 @@ static int32_t negamax_greedy_leaf_playout(EndgameCtxWorker *worker,
   // generation of the lanes changed since (path_move_lists_best_play_alone).
   // A playout of one move has only the leaf's step, which needs no push.
   const bool use_best_lists = use_path_lists && opp_stuck_frac == 0.0F &&
-                              worker->solver->best_reply_shortcuts;
+                              worker->solver->best_reply_shortcuts &&
+                              (worker->eg_pick == NULL ||
+                               eg_pick_is_static_best(worker->eg_pick));
   // Either kind pushes every move it makes onto the lists' path, and the
   // unwind pops each one. So for such a playout the path always ends with the
   // last move played, and for any other it does only at the leaf: a step may
@@ -3529,6 +3589,10 @@ static int32_t negamax_greedy_leaf_playout(EndgameCtxWorker *worker,
       nplays = playout_step_from_lists(
           worker, worker->leaf_is_alone || playout_depth > 0,
           playout_depth == 0 ? leaf_plays : NULL, leaf_play_count);
+    } else if (opp_stuck_frac == 0.0F && worker->eg_pick != NULL &&
+               !eg_pick_is_static_best(worker->eg_pick)) {
+      // LAB egregret: the empty-bag pick instead of the greedy best play.
+      nplays = endgame_eg_pick_step(worker);
     } else if (opp_stuck_frac == 0.0F) {
       // No stuck tiles: only the best play is needed, ranked by score plus
       // twice the opponent's rack for going out.
@@ -3538,9 +3602,15 @@ static int32_t negamax_greedy_leaf_playout(EndgameCtxWorker *worker,
       // break them, so a search plays the same playouts with or without them.
       const Rack *opp_rack_p = player_get_rack(
           game_get_player(worker->game_copy, 1 - playout_on_turn));
+      // LAB egregret: static equity ranks a play by its score plus twice the
+      // face value it places, and going out by ten points more.
+      const bool rank_by_static = worker->eg_pick != NULL;
       const MoveGenArgs pargs = {
-          .best_small_out_bonus = calculate_end_rack_points(
-              opp_rack_p, game_get_ld(worker->game_copy)),
+          .best_small_out_bonus =
+              calculate_end_rack_points(opp_rack_p,
+                                        game_get_ld(worker->game_copy)) +
+              (rank_by_static ? NON_OUTPLAY_CONSTANT_PENALTY : 0),
+          .best_small_face_weight = rank_by_static ? 2 : 0,
           .best_small_canonical_ties = worker->solver->best_reply_shortcuts,
           .game = worker->game_copy,
           .move_list = worker->move_list,

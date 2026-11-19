@@ -143,6 +143,10 @@ typedef struct MoveGen {
   // whole rack.
   Equity best_small_out_bonus;
   int best_small_out_rack_size;
+  // LAB egregret: see MoveGenArgs.best_small_face_weight. The bounds are the
+  // weight times the most face value any k of the rack's tiles have.
+  int best_small_face_weight;
+  Equity best_small_face_bounds[RACK_SIZE + 1];
   bool kwgs_are_shared;
   bool is_wordsmog;
   Rack player_rack;
@@ -748,6 +752,16 @@ static inline void update_best_move_or_insert_into_movelist(
     move_equity_or_score = score;
     if (tiles_played == gen->best_small_out_rack_size) {
       move_equity_or_score += gen->best_small_out_bonus;
+    }
+    if (gen->best_small_face_weight != 0) {
+      Equity placed_face = 0;
+      for (int strip_idx = leftstrip; strip_idx <= rightstrip; strip_idx++) {
+        const MachineLetter placed = strip[strip_idx];
+        if (placed != PLAYED_THROUGH_MARKER && !get_is_blanked(placed)) {
+          placed_face += ld_get_score(&gen->ld, placed);
+        }
+      }
+      move_equity_or_score += gen->best_small_face_weight * placed_face;
     }
     // With canonical ties, equal values go to the larger tiny_move, so the
     // winner does not depend on the order in which anchors are searched. A tie

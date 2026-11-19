@@ -92,6 +92,7 @@
 #include "sim_det_sweep_test.h"
 #include "sim_exact_test.h"
 #include "leave_bag_test.h"
+#include "eg_pick_bench_test.h"
 #include "eg_regret_test.h"
 #include "sim_quality_test.h"
 #include "sim_regret_test.h"
@@ -363,6 +364,14 @@ void run_test(const char *subtest) {
   }
   if (has_prefix("egregret:", subtest)) {
     eg_regret_run_spec(subtest + strlen("egregret:"));
+    return;
+  }
+  if (has_prefix("pegswitch:", subtest)) {
+    peg_switch_run_spec(subtest + strlen("pegswitch:"));
+    return;
+  }
+  if (has_prefix("egpickq:", subtest)) {
+    eg_pick_bench_run_spec(subtest + strlen("egpickq:"));
     return;
   }
   if (has_prefix("egsolve:", subtest)) {

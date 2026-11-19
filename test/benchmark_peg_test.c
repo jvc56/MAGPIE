@@ -14,6 +14,7 @@
 #include "../src/ent/thread_control.h"
 #include "../src/impl/cgp.h"
 #include "../src/impl/config.h"
+#include "../src/impl/eg_pick.h"
 #include "../src/impl/gameplay.h"
 #include "../src/impl/peg.h"
 #include "../src/str/move_string.h"
@@ -1361,5 +1362,143 @@ void test_peg_strength_curve(void) {
     }
     (void)fclose(fp);
   }
+  config_destroy(config);
+}
+
+// LAB egregret (not for merge). pegswitch:<file>,<first>,<max>,<tlim seconds>,
+// <oracle tlim seconds>,<threads>: each position is solved twice with the peg
+// command's default arguments under the same time budget, stock (eg_pick
+// suppressed) and with eg_pick as the environment sets it, alternating which
+// goes first. Where the two choose different moves, a stock solve under the
+// oracle budget, with both moves protected, values them. Prints
+//   PS <index> <stock move> | <switch move> | <stock stage> <switch stage>
+//     <differ> <oracle win stock> <oracle win switch> <oracle spread stock>
+//     <oracle spread switch> <oracle stage>
+static PegBenchOutcome pegswitch_arm(Config *config, double tlim,
+                                     int threads, bool suppressed) {
+  PegArgs args;
+  config_fill_peg_args(config, &args);
+  args.num_threads = threads;
+  args.time_budget_seconds = tlim;
+  args.include_per_scenario = false;
+  args.tt_fraction_of_mem = 0.05;
+  eg_pick_set_suppressed(suppressed);
+  PegResult result;
+  ErrorStack *err = error_stack_create();
+  Timer timer;
+  ctimer_start(&timer);
+  peg_solve(&args, &result, err);
+  const double elapsed = ctimer_elapsed_seconds(&timer);
+  eg_pick_set_suppressed(false);
+  PegBenchOutcome outcome;
+  memset(&outcome, 0, sizeof(outcome));
+  outcome.elapsed = elapsed;
+  if (error_stack_is_empty(err)) {
+    outcome.move = result.best_move;
+    move_to_string(config_get_game(config), &outcome.move, outcome.move_str,
+                   sizeof(outcome.move_str));
+    outcome.stage = result.last_completed_stage;
+    outcome.ok = true;
+  }
+  error_stack_destroy(err);
+  peg_result_destroy(&result);
+  return outcome;
+}
+
+void peg_switch_run_spec(const char *spec) {
+  log_set_level(LOG_FATAL);
+  char path[1024];
+  int first = 0;
+  int max_positions = 0;
+  double tlim = 0;
+  double oracle_tlim = 0;
+  int threads = 0;
+  if (sscanf(spec, "%1023[^,],%d,%d,%lf,%lf,%d", path, &first, &max_positions,
+             &tlim, &oracle_tlim, &threads) != 6) {
+    log_fatal("pegswitch:<file>,<first>,<max>,<tlim>,<oracle tlim>,<threads>");
+  }
+  Config *config =
+      config_create_or_die("set -lex CSW24 -threads 1 -pegoutcomes false");
+  FILE *file = fopen_or_die(path, "re");
+  char line[4096];
+  int index = 0;
+  int done = 0;
+  while (done < max_positions && fgets(line, sizeof(line), file)) {
+    line[strcspn(line, "\n")] = '\0';
+    if (line[0] == '\0') {
+      continue;
+    }
+    if (index++ < first) {
+      continue;
+    }
+    char *cmd = get_formatted_string("cgp %s", line);
+    exec_config_quiet(config, cmd);
+    free(cmd);
+    PegBenchOutcome stock;
+    PegBenchOutcome with_switch;
+    if (done % 2 == 0) {
+      stock = pegswitch_arm(config, tlim, threads, true);
+      with_switch = pegswitch_arm(config, tlim, threads, false);
+    } else {
+      with_switch = pegswitch_arm(config, tlim, threads, false);
+      stock = pegswitch_arm(config, tlim, threads, true);
+    }
+    done++;
+    if (!stock.ok || !with_switch.ok) {
+      printf("PS %d SKIP\n", index - 1);
+      continue;
+    }
+    const bool differ = strcmp(stock.move_str, with_switch.move_str) != 0;
+    double win_stock = 0;
+    double win_switch = 0;
+    double spread_stock = 0;
+    double spread_switch = 0;
+    int oracle_stage = -1;
+    if (differ) {
+      PegArgs args;
+      config_fill_peg_args(config, &args);
+      args.num_threads = threads;
+      args.time_budget_seconds = oracle_tlim;
+      args.include_per_scenario = false;
+      args.tt_fraction_of_mem = 0.05;
+      const Move *protect[2] = {&stock.move, &with_switch.move};
+      args.protect_moves = protect;
+      args.n_protect_moves = 2;
+      eg_pick_set_suppressed(true);
+      PegResult result;
+      ErrorStack *err = error_stack_create();
+      peg_solve(&args, &result, err);
+      eg_pick_set_suppressed(false);
+      win_stock = -1;
+      win_switch = -1;
+      if (error_stack_is_empty(err)) {
+        oracle_stage = result.last_completed_stage;
+        for (int cand_idx = 0; cand_idx < result.n_top_cands; cand_idx++) {
+          char cand_str[32];
+          move_to_string(config_get_game(config),
+                         &result.top_cands[cand_idx].move, cand_str,
+                         sizeof(cand_str));
+          if (strcmp(cand_str, stock.move_str) == 0) {
+            win_stock = result.top_cands[cand_idx].win_pct;
+            spread_stock = result.top_cands[cand_idx].mean_spread;
+          }
+          if (strcmp(cand_str, with_switch.move_str) == 0) {
+            win_switch = result.top_cands[cand_idx].win_pct;
+            spread_switch = result.top_cands[cand_idx].mean_spread;
+          }
+        }
+      }
+      error_stack_destroy(err);
+      peg_result_destroy(&result);
+    }
+    printf("PS %d %s | %s | %d %d %d %.4f %.4f %.3f %.3f %d %.3f %.3f\n",
+           index - 1, stock.move_str, with_switch.move_str, stock.stage,
+           with_switch.stage, differ ? 1 : 0, win_stock, win_switch,
+           spread_stock, spread_switch, oracle_stage, stock.elapsed,
+           with_switch.elapsed);
+    (void)fflush(stdout);
+  }
+  fclose_or_die(file);
+  printf("PSDONE\n");
   config_destroy(config);
 }

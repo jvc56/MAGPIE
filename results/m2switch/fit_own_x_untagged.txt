@@ -1,0 +1,8 @@
+positions 8451 lam 3.0
+greedy                                               regret  4.21 wrong 32.0%  vs greedy +0.00 (SE 0.00)
+static + own outs, untagged (4 terms, no opp gen) (5 terms) regret  3.61 wrong 32.3%  vs greedy -0.60 (SE 0.06)
+   weights: ownl3|all +0.20, ownb|all +0.37, own|all +0.85, ownl2|all +1.94, _out +5.76
+static + own outs + leave size/face, untagged (12 terms) regret  3.53 wrong 32.5%  vs greedy -0.68 (SE 0.06)
+   weights: ownn1|all -1.53, ownn2|all -1.04, own|all -0.73, ownn6|all -0.19, ownn3|all -0.12, ownb|all +0.28, ownface|all +0.66, ownn4|all +0.82, ownn5|all +1.34, ownl3|all +1.51, ownl2|all +2.19, _out +4.78
+static + own outs + survive, untagged (11 terms)     regret  3.52 wrong 31.9%  vs greedy -0.69 (SE 0.07)
+   weights: ownl3|all -1.18, safeb|all -0.12, ownb|all +0.09, net|all +0.23, topout|all +0.39, own|all +0.52, topkeep|all +0.74, ownl2|all +1.06, safe|all +1.66, keepfrac|all +2.52, _out +6.66

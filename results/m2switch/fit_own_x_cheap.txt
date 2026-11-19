@@ -1,0 +1,11 @@
+positions 8451 lam 3.0
+greedy                                               regret  4.21 wrong 32.0%  vs greedy +0.00 (SE 0.00)
+cheap: check by standing opp outs (no fit) (1 terms) regret  3.93 wrong 30.2%  vs greedy -0.28 (SE 0.05)
+cheap: check + constants (3 terms)                   regret  3.92 wrong 30.0%  vs greedy -0.29 (SE 0.04)
+cheap: check + own outs (11 terms)                   regret  3.02 wrong 26.9%  vs greedy -1.19 (SE 0.08)
+   weights: const|no -4.33, own|no -1.38, _out -1.00, ownl3|no -0.57, ownl3|oo +0.00, ownb|oo +0.03, ownb|no +0.89, ownl2|oo +1.08, own|oo +1.16, ownl2|no +4.03, const|oo +5.33
+cheap: check + own outs + leave size/face (25 terms) regret  2.81 wrong 26.1%  vs greedy -1.40 (SE 0.08)
+   weights: own|no -4.02, ownn1|no -2.44, _out -2.16, const|no -1.97, ownn2|no -1.64, ownn3|no -0.31, ownn5|oo -0.27, ownn5|no -0.21, ownl3|oo -0.10, ownface|oo -0.08, ownb|oo +0.02, ownn1|oo +0.05, ownn6|oo +0.12, ownn3|oo +0.13, ownn6|no +0.13, ownn2|oo +0.26, ownn4|no +0.45, ownb|no +0.57, ownn4|oo +0.69, own|oo +0.97, ownl2|oo +1.09, ownl3|no +1.73, ownface|no +1.79, const|oo +4.13, ownl2|no +
+cheap: check + own outs + survive (23 terms)         regret  2.80 wrong 25.7%  vs greedy -1.41 (SE 0.08)
+exactopp: check + constants (3 terms)                regret  3.44 wrong 28.1%  vs greedy -0.77 (SE 0.06)
+check only: minus out score (no fit) (1 terms)       regret  3.46 wrong 28.1%  vs greedy -0.75 (SE 0.06)

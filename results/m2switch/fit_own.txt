@@ -1,0 +1,11 @@
+positions 8451 lam 3.0
+greedy                                               regret  4.21 wrong 32.0%  vs greedy +0.00 (SE 0.00)
+check only: minus out score (no fit) (1 terms)       regret  3.46 wrong 28.1%  vs greedy -0.75 (SE 0.06)
+static + own outs on the board (no reply look) (9 terms) regret  2.71 wrong 27.0%  vs greedy -1.50 (SE 0.08)
+static + own outs + survive replies (21 terms)       regret  2.21 wrong 24.4%  vs greedy -2.00 (SE 0.08)
+check + own outs on the board (11 terms)             regret  2.46 wrong 24.3%  vs greedy -1.75 (SE 0.08)
+check + own outs + survive replies (23 terms)        regret  1.91 wrong 21.4%  vs greedy -2.30 (SE 0.08)
+check + opp best score + leaves split (1202 terms)   regret  2.38 wrong 25.6%  vs greedy -1.83 (SE 0.08)
+check + opp best + leaves split + own outs on board (1210 terms) regret  1.85 wrong 21.8%  vs greedy -2.36 (SE 0.09)
+check + opp best + leaves split + own outs + survive (1222 terms) regret  1.66 wrong 20.3%  vs greedy -2.55 (SE 0.09)
+python3 scripts/egregret/fit_eg_own.py $W/own_all.txt $W/m2_all.out  387.40s user 2.76s system 99% cpu 6:30.27 total

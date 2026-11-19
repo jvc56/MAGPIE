@@ -43,6 +43,10 @@ typedef struct MoveGenArgs {
   // score plus this bonus, e.g. twice the opponent's rack for going out in an
   // endgame. The recorded play keeps its real score. Default 0.
   Equity best_small_out_bonus;
+  // LAB egregret. MOVE_RECORD_BEST_SMALL only: also add this many times the
+  // face value of the tiles a play places to its ranking value (2 ranks by
+  // score less twice the leave's face value). Default 0.
+  int best_small_face_weight;
   // MOVE_RECORD_BEST_SMALL only: if true, a play that ties the best value
   // replaces it when its tiny_move is larger, so the play returned does not
   // depend on the order in which anchors are searched (the endgame's

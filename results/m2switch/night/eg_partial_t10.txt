@@ -1,0 +1,401 @@
+TCFG file=/Users/john/sources/nov17-magpie/egswitch-work/eq_stuck_partial.txt tlim_ms=10 jtlim_ms=10000 threads=4 positions=200 egpick_n=1 mode=staticbest
+T stuck_partial_1 3 38 25 38 25 0 0 0 0 7N O(E) | 7N O(E)
+TT stuck_partial_1 0.000156 0.000162 0 0 0
+T stuck_partial_2 4 33 25 33 25 0 0 0 0 8A MO(B) | 8A MO(B)
+TT stuck_partial_2 0.000439 0.000480 0 0 0
+T stuck_partial_4 4 12 25 12 25 0 0 0 0 4M L(EW) | 4M L(EW)
+TT stuck_partial_4 0.000305 0.000298 0 0 0
+T stuck_partial_6 3 31 25 31 25 0 0 0 0 14D (X)I | 14D (X)I
+TT stuck_partial_6 0.000125 0.000175 0 0 0
+T stuck_partial_8 6 -28 25 -28 25 0 0 0 0 11A R(UG) | 11A R(UG)
+TT stuck_partial_8 0.000615 0.000738 0 0 0
+T stuck_partial_3 7 60 3 60 3 0 0 0 0 I12 IO(TA) | I12 IO(TA)
+TT stuck_partial_3 0.010409 0.010319 0 0 0
+T stuck_partial_7 9 68 2 68 2 0 0 0 0 D3 TE | D3 TE
+TT stuck_partial_7 0.011249 0.011145 0 0 0
+T stuck_partial_9 6 64 4 64 4 0 0 0 0 I1 (MA)T | I1 (MA)T
+TT stuck_partial_9 0.010167 0.010167 0 0 0
+T stuck_partial_11 3 20 25 20 25 0 0 0 0 2M (D)A | 2M (D)A
+TT stuck_partial_11 0.000128 0.000166 0 0 0
+T stuck_partial_5 8 38 1 38 1 0 0 0 0 5G E(N)ARMeD | 5G E(N)ARMeD
+TT stuck_partial_5 0.019676 0.019672 0 0 0
+T stuck_partial_12 6 53 25 53 25 0 0 0 0 9L (BA)N | 9L (BA)N
+TT stuck_partial_12 0.007095 0.007492 0 0 0
+T stuck_partial_10 8 60 2 60 2 0 0 0 0 B14 N(O) | B14 N(O)
+TT stuck_partial_10 0.010210 0.010191 0 0 0
+T stuck_partial_15 3 44 25 44 25 0 0 0 0 L3 (J)O(L) | L3 (J)O(L)
+TT stuck_partial_15 0.000201 0.000158 0 0 0
+T stuck_partial_16 4 34 25 34 25 0 0 0 0 13L (F)IR | 13L (F)IR
+TT stuck_partial_16 0.000265 0.000364 0 0 0
+T stuck_partial_18 5 26 25 26 25 0 0 0 0 J10 (PER)I | J10 (PER)I
+TT stuck_partial_18 0.000599 0.000677 0 0 0
+T stuck_partial_13 5 44 25 44 25 0 0 0 0 4K (V)iVE | 4K (V)iVE
+TT stuck_partial_13 0.009100 0.009258 0 0 0
+T stuck_partial_19 3 35 25 35 25 0 0 0 0 11J I(n) | 11J I(n)
+TT stuck_partial_19 0.000137 0.000163 0 0 0
+T stuck_partial_14 6 36 3 36 3 0 0 0 0 3G (ZE)E | 3G (ZE)E
+TT stuck_partial_14 0.010440 0.010586 0 0 0
+T stuck_partial_17 6 30 3 30 3 0 0 0 0 11I GE(N)ET | 11I GE(N)ET
+TT stuck_partial_17 0.010244 0.010185 0 0 0
+T stuck_partial_23 3 32 25 32 25 0 0 0 0 I9 (JO)T | I9 (JO)T
+TT stuck_partial_23 0.000136 0.000153 0 0 0
+T stuck_partial_22 5 40 25 40 25 0 0 0 0 B1 (L)OID | B1 (L)OID
+TT stuck_partial_22 0.001219 0.001318 0 0 0
+T stuck_partial_20 7 -30 3 -31 3 0 0 0 0 pass | pass
+TT stuck_partial_20 0.010177 0.010205 0 0 0
+T stuck_partial_21 7 49 4 49 4 0 0 0 0 13B (PORE)S | 13B (PORE)S
+TT stuck_partial_21 0.010188 0.010192 0 0 0
+T stuck_partial_26 4 29 25 29 25 0 0 0 0 2J OU | 2J OU
+TT stuck_partial_26 0.000354 0.000418 0 0 0
+T stuck_partial_27 4 14 25 14 25 0 0 0 0 C5 (P)IU | C5 (P)IU
+TT stuck_partial_27 0.000379 0.000334 0 0 0
+T stuck_partial_28 3 20 25 20 25 0 0 0 0 8C (A)I | 8C (A)I
+TT stuck_partial_28 0.000134 0.000166 0 0 0
+T stuck_partial_29 5 51 25 51 25 0 0 0 0 F4 (NO)H | F4 (NO)H
+TT stuck_partial_29 0.004422 0.004264 0 0 0
+T stuck_partial_24 6 53 25 53 25 0 0 0 0 5G (T)O | 5G (T)O
+TT stuck_partial_24 0.007221 0.007410 0 0 0
+T stuck_partial_32 4 58 25 58 25 0 0 0 0 8A ST | 8A ST
+TT stuck_partial_32 0.000367 0.000429 0 0 0
+T stuck_partial_33 3 19 25 19 25 0 0 0 0 13J U(G) | 13J U(G)
+TT stuck_partial_33 0.000142 0.000123 0 0 0
+T stuck_partial_34 5 34 25 34 25 0 0 0 0 6E AB | 6E AB
+TT stuck_partial_34 0.000363 0.000367 0 0 0
+T stuck_partial_35 4 19 25 19 25 0 0 0 0 E12 M(o)T(I) | E12 M(o)T(I)
+TT stuck_partial_35 0.000248 0.000227 0 0 0
+T stuck_partial_36 3 34 25 34 25 0 0 0 0 3M A(HI) | 3M A(HI)
+TT stuck_partial_36 0.000159 0.000140 0 0 0
+T stuck_partial_37 3 31 25 31 25 0 0 0 0 15L G(AW) | 15L G(AW)
+TT stuck_partial_37 0.000105 0.000100 0 0 0
+T stuck_partial_38 3 18 25 18 25 0 0 0 0 10E (I)T | 10E (I)T
+TT stuck_partial_38 0.000138 0.000129 0 0 0
+T stuck_partial_25 8 87 2 87 2 0 0 0 0 O8 IT | O8 IT
+TT stuck_partial_25 0.010512 0.010422 0 0 0
+T stuck_partial_40 3 22 25 22 25 0 0 0 0 6A A(ZO) | 6A A(ZO)
+TT stuck_partial_40 0.000129 0.000154 0 0 0
+T stuck_partial_31 7 25 25 25 25 0 0 0 0 1M RI(B) | 1M RI(B)
+TT stuck_partial_31 0.005165 0.005524 0 0 0
+T stuck_partial_39 5 36 25 36 25 0 0 0 0 J13 U(PO) | J13 U(PO)
+TT stuck_partial_39 0.001188 0.001189 0 0 0
+T stuck_partial_41 3 35 25 35 25 0 0 0 0 6N F(E) | 6N F(E)
+TT stuck_partial_41 0.000106 0.000124 0 0 0
+T stuck_partial_30 8 61 2 61 2 0 0 0 0 7D TE | 7D TE
+TT stuck_partial_30 0.010375 0.010362 0 0 0
+T stuck_partial_45 4 56 25 56 25 0 0 0 0 12B T(U)P | 12B T(U)P
+TT stuck_partial_45 0.000295 0.000270 0 0 0
+T stuck_partial_44 5 23 25 23 25 0 0 0 0 O7 NON | O7 NON
+TT stuck_partial_44 0.001294 0.001392 0 0 0
+T stuck_partial_42 7 21 25 21 25 0 0 0 0 5D EL(iDE) | 5D EL(iDE)
+TT stuck_partial_42 0.002740 0.002932 0 0 0
+T stuck_partial_46 6 35 25 35 25 0 0 0 0 9D I(D) | 9D I(D)
+TT stuck_partial_46 0.005284 0.005475 0 0 0
+T stuck_partial_43 7 52 2 52 2 0 0 0 0 M2 (ZE)L | M2 (ZE)L
+TT stuck_partial_43 0.010220 0.010209 0 0 0
+T stuck_partial_47 6 56 4 56 4 0 0 0 0 H8 (A)L(E) | H8 (A)L(E)
+TT stuck_partial_47 0.010154 0.010150 0 0 0
+T stuck_partial_50 4 70 25 70 25 0 0 0 0 10E (t)I | 10E (t)I
+TT stuck_partial_50 0.002027 0.002017 0 0 0
+T stuck_partial_51 4 36 25 36 25 0 0 0 0 2A IO | 2A IO
+TT stuck_partial_51 0.000453 0.000422 0 0 0
+T stuck_partial_48 9 101 2 101 2 0 0 0 0 C2 CAROTIN | C2 CAROTIN
+TT stuck_partial_48 0.010719 0.010749 0 0 0
+T stuck_partial_54 5 46 25 46 25 0 0 0 0 10E (G)I | 10E (G)I
+TT stuck_partial_54 0.001956 0.002050 0 0 0
+T stuck_partial_49 8 61 2 61 2 0 0 0 0 3L (I)T | 3L (I)T
+TT stuck_partial_49 0.010448 0.010439 0 0 0
+T stuck_partial_53 5 45 25 45 25 0 0 0 0 2K (W)O | 2K (W)O
+TT stuck_partial_53 0.004300 0.004418 0 0 0
+T stuck_partial_57 3 19 25 19 25 0 0 0 0 O4 (X)I | O4 (X)I
+TT stuck_partial_57 0.000130 0.000110 0 0 0
+T stuck_partial_52 6 59 4 59 4 0 0 0 0 O7 O(X) | O7 O(X)
+TT stuck_partial_52 0.010243 0.010388 0 0 0
+T stuck_partial_55 7 52 2 52 2 0 0 0 0 3H N(A) | 3H N(A)
+TT stuck_partial_55 0.010521 0.010515 0 0 0
+T stuck_partial_56 6 35 5 35 5 0 0 0 0 6J I(D) | 6J I(D)
+TT stuck_partial_56 0.010165 0.010147 0 0 0
+T stuck_partial_60 5 48 25 48 25 0 0 0 0 11K SEV | 11K SEV
+TT stuck_partial_60 0.001123 0.001170 0 0 0
+T stuck_partial_58 6 47 4 47 4 0 0 0 0 1F HEAR | 1F HEAR
+TT stuck_partial_58 0.010253 0.010221 0 0 0
+T stuck_partial_62 4 19 25 19 25 0 0 0 0 C11 (UN)I | C11 (UN)I
+TT stuck_partial_62 0.000301 0.000294 0 0 0
+T stuck_partial_63 3 33 25 33 25 0 0 0 0 6N (Z)E | 6N (Z)E
+TT stuck_partial_63 0.000142 0.000171 0 0 0
+T stuck_partial_64 3 -23 25 -23 25 0 0 0 0 8K (B)I | 8K (B)I
+TT stuck_partial_64 0.000125 0.000132 0 0 0
+T stuck_partial_65 3 18 25 18 25 0 0 0 0 B1 (P)A | B1 (P)A
+TT stuck_partial_65 0.000173 0.000160 0 0 0
+T stuck_partial_66 5 1 25 1 25 0 0 0 0 N14 O(B) | N14 O(B)
+TT stuck_partial_66 0.000663 0.000742 0 0 0
+T stuck_partial_59 7 62 2 62 2 0 0 0 0 13D TE | 13D TE
+TT stuck_partial_59 0.010520 0.010550 0 0 0
+T stuck_partial_67 6 56 5 56 5 0 0 0 0 F11 (A)R(F) | F11 (A)R(F)
+TT stuck_partial_67 0.010130 0.010125 0 0 0
+T stuck_partial_70 4 42 25 42 25 0 0 0 0 10B (R)O(T) | 10B (R)O(T)
+TT stuck_partial_70 0.000340 0.000374 0 0 0
+T stuck_partial_68 6 39 5 39 4 0 0 0 0 H1 G(A)I(R) | H1 G(A)I(R)
+TT stuck_partial_68 0.010558 0.010476 0 0 0
+T stuck_partial_72 4 30 25 30 25 0 0 0 0 2A (L)UE(S) | 2A (L)UE(S)
+TT stuck_partial_72 0.000382 0.000430 0 0 0
+T stuck_partial_69 6 51 3 51 3 0 0 0 0 A14 (O)U | A14 (O)U
+TT stuck_partial_69 0.010287 0.010281 0 0 0
+T stuck_partial_74 5 19 25 19 25 0 0 0 0 N5 NU | N5 NU
+TT stuck_partial_74 0.000908 0.000964 0 0 0
+T stuck_partial_71 9 76 2 76 2 0 0 0 0 L13 RE(Z) | L13 RE(Z)
+TT stuck_partial_71 0.010606 0.010631 0 0 0
+T stuck_partial_73 11 101 2 101 2 0 0 0 0 12M (E)D | 12M (E)D
+TT stuck_partial_73 0.010821 0.010790 0 0 0
+T stuck_partial_75 7 51 3 51 3 0 0 0 0 2J (JO)L | 2J (JO)L
+TT stuck_partial_75 0.010239 0.010265 0 0 0
+T stuck_partial_77 5 40 25 40 25 0 0 0 0 E8 (J)O | E8 (J)O
+TT stuck_partial_77 0.003675 0.003718 0 0 0
+T stuck_partial_61 9 90 1 90 1 0 0 0 0 13B RE(D)SHIrE | 13B RE(D)SHIrE
+TT stuck_partial_61 0.032984 0.033679 0 0 0
+T stuck_partial_80 3 -19 25 -19 25 0 0 0 0 13D E(M) | 13D E(M)
+TT stuck_partial_80 0.000147 0.000154 0 0 0
+T stuck_partial_76 9 75 2 75 2 0 0 0 0 9A (O)E | 9A (O)E
+TT stuck_partial_76 0.010321 0.010310 0 0 0
+T stuck_partial_78 6 47 4 47 4 0 0 0 0 5D (HE)N | 5D (HE)N
+TT stuck_partial_78 0.010208 0.010290 0 0 0
+T stuck_partial_79 8 59 2 59 2 0 0 0 0 10L NA(ZE) | 10L NA(ZE)
+TT stuck_partial_79 0.010444 0.010404 0 0 0
+T stuck_partial_83 4 38 25 38 25 0 0 0 0 B10 DI | B10 DI
+TT stuck_partial_83 0.000386 0.000336 0 0 0
+T stuck_partial_84 3 20 25 20 25 0 0 0 0 E10 (S)O(DA) | E10 (S)O(DA)
+TT stuck_partial_84 0.000114 0.000174 0 0 0
+T stuck_partial_86 5 36 25 36 25 0 0 0 0 14F T(ARES) | 14F T(ARES)
+TT stuck_partial_86 0.001390 0.001495 0 0 0
+T stuck_partial_85 5 26 25 26 25 0 0 0 0 15A (E)L | 15A (E)L
+TT stuck_partial_85 0.001745 0.001758 0 0 0
+T stuck_partial_88 3 -5 25 -5 25 0 0 0 0 10B D(O) | 10B D(O)
+TT stuck_partial_88 0.000121 0.000138 0 0 0
+T stuck_partial_89 5 31 25 31 25 0 0 0 0 5C R(IF) | 5C R(IF)
+TT stuck_partial_89 0.001816 0.001771 0 0 0
+T stuck_partial_82 6 38 6 38 6 0 0 0 0 G5 (FE)D | G5 (FE)D
+TT stuck_partial_82 0.010370 0.010232 0 0 0
+T stuck_partial_81 9 101 2 101 2 0 0 0 0 1B TRI(B)ASIC | 1B TRI(B)ASIC
+TT stuck_partial_81 0.010786 0.010724 0 0 0
+T stuck_partial_90 4 11 25 11 25 0 0 0 0 6I (N)I(T) | 6I (N)I(T)
+TT stuck_partial_90 0.000225 0.000178 0 0 0
+T stuck_partial_91 4 33 25 33 25 0 0 0 0 15H LO | 15H LO
+TT stuck_partial_91 0.000381 0.000280 0 0 0
+T stuck_partial_87 9 56 2 56 2 0 0 0 0 2I (A)L | 2I (A)L
+TT stuck_partial_87 0.011111 0.010999 0 0 0
+T stuck_partial_92 6 38 25 38 25 0 0 0 0 A8 (Q)I | A8 (Q)I
+TT stuck_partial_92 0.008308 0.008648 0 0 0
+T stuck_partial_93 7 78 2 78 2 0 0 0 0 D4 DA | D4 DA
+TT stuck_partial_93 0.010452 0.010374 0 0 0
+T stuck_partial_94 7 75 2 75 2 0 0 0 0 G3 (C)I(T) | G3 (C)I(T)
+TT stuck_partial_94 0.010219 0.010254 0 0 0
+T stuck_partial_97 3 31 25 31 25 0 0 0 0 7F (B)I | 7F (B)I
+TT stuck_partial_97 0.000121 0.000135 0 0 0
+T stuck_partial_98 4 18 25 18 25 0 0 0 0 14M LI | 14M LI
+TT stuck_partial_98 0.000269 0.000317 0 0 0
+T stuck_partial_99 5 19 25 19 25 0 0 0 0 12K (ET)U(I) | 12K (ET)U(I)
+TT stuck_partial_99 0.000390 0.000351 0 0 0
+T stuck_partial_100 4 19 25 19 25 0 0 0 0 N5 (S)UE | N5 (S)UE
+TT stuck_partial_100 0.000352 0.000441 0 0 0
+T stuck_partial_101 5 35 25 35 25 0 0 0 0 I2 ET | I2 ET
+TT stuck_partial_101 0.002357 0.002239 0 0 0
+T stuck_partial_103 4 22 25 22 25 0 0 0 0 E4 (T)IE | E4 (T)IE
+TT stuck_partial_103 0.000392 0.000355 0 0 0
+T stuck_partial_95 7 70 3 70 3 0 0 0 0 A12 R(ICH) | A12 R(ICH)
+TT stuck_partial_95 0.010225 0.010213 0 0 0
+T stuck_partial_96 10 109 1 109 1 0 0 0 0 14D ASTERIA | 14D ASTERIA
+TT stuck_partial_96 0.010986 0.010992 0 0 0
+T stuck_partial_106 3 24 25 24 25 0 0 0 0 4A O(LID) | 4A O(LID)
+TT stuck_partial_106 0.000138 0.000114 0 0 0
+T stuck_partial_107 4 28 25 28 25 0 0 0 0 5E EA | 5E EA
+TT stuck_partial_107 0.000527 0.000489 0 0 0
+T stuck_partial_108 3 23 25 23 25 0 0 0 0 D4 (MA)N | D4 (MA)N
+TT stuck_partial_108 0.000099 0.000132 0 0 0
+T stuck_partial_109 3 23 25 23 25 0 0 0 0 5M (EA)R | 5M (EA)R
+TT stuck_partial_109 0.000110 0.000137 0 0 0
+T stuck_partial_110 5 -40 25 -40 25 0 0 0 0 B1 (O)P | B1 (O)P
+TT stuck_partial_110 0.000377 0.000453 0 0 0
+T stuck_partial_111 5 14 25 14 25 0 0 0 0 12L B(ARM) | 12L B(ARM)
+TT stuck_partial_111 0.000522 0.000493 0 0 0
+T stuck_partial_102 7 55 2 55 2 0 0 0 0 9G GNU | 9G GNU
+TT stuck_partial_102 0.010841 0.010892 0 0 0
+T stuck_partial_112 3 27 25 27 25 0 0 0 0 J1 (I)C(E) | J1 (I)C(E)
+TT stuck_partial_112 0.000106 0.000135 0 0 0
+T stuck_partial_113 3 34 25 34 25 0 0 0 0 C13 T(EW) | C13 T(EW)
+TT stuck_partial_113 0.000169 0.000144 0 0 0
+T stuck_partial_114 4 -13 25 -13 25 0 0 0 0 I5 (KA)T | I5 (KA)T
+TT stuck_partial_114 0.000261 0.000257 0 0 0
+T stuck_partial_116 4 28 25 28 25 0 0 0 0 A10 L(U)G | A10 L(U)G
+TT stuck_partial_116 0.000278 0.000267 0 0 0
+T stuck_partial_104 8 83 2 83 2 0 0 0 0 O8 (FIREARM)S | O8 (FIREARM)S
+TT stuck_partial_104 0.010195 0.010185 0 0 0
+T stuck_partial_115 5 36 25 36 25 0 0 0 0 15A (FE)T | 15A (FE)T
+TT stuck_partial_115 0.001402 0.001363 0 0 0
+T stuck_partial_119 4 33 25 33 25 0 0 0 0 9H (S)I | 9H (S)I
+TT stuck_partial_119 0.000233 0.000213 0 0 0
+T stuck_partial_118 4 24 25 24 25 0 0 0 0 M1 A(N)E(W) | M1 A(N)E(W)
+TT stuck_partial_118 0.000430 0.000469 0 0 0
+T stuck_partial_120 4 40 25 40 25 0 0 0 0 3H ST | 3H ST
+TT stuck_partial_120 0.000291 0.000319 0 0 0
+T stuck_partial_121 4 41 25 41 25 0 0 0 0 7F NO | 7F NO
+TT stuck_partial_121 0.000445 0.000337 0 0 0
+T stuck_partial_122 3 31 25 31 25 0 0 0 0 6D (OD)D | 6D (OD)D
+TT stuck_partial_122 0.000133 0.000106 0 0 0
+T stuck_partial_123 3 19 25 19 25 0 0 0 0 6J U(S) | 6J U(S)
+TT stuck_partial_123 0.000165 0.000099 0 0 0
+T stuck_partial_125 3 32 25 32 25 0 0 0 0 L6 P(EW) | L6 P(EW)
+TT stuck_partial_125 0.000103 0.000125 0 0 0
+T stuck_partial_126 6 30 25 30 25 0 0 0 0 12J T(O)T | 12J T(O)T
+TT stuck_partial_126 0.000160 0.000183 0 0 0
+T stuck_partial_124 5 55 25 55 25 0 0 0 0 A7 HER | A7 HER
+TT stuck_partial_124 0.001793 0.001953 0 0 0
+T stuck_partial_105 7 67 2 67 2 0 0 0 0 5I A(T) | 5I A(T)
+TT stuck_partial_105 0.010579 0.010593 0 0 0
+T stuck_partial_127 5 27 25 27 25 0 0 0 0 14B PIT | 14B PIT
+TT stuck_partial_127 0.001268 0.001238 0 0 0
+T stuck_partial_130 3 30 25 30 25 0 0 0 0 2G G(O) | 2G G(O)
+TT stuck_partial_130 0.000120 0.000100 0 0 0
+T stuck_partial_129 6 49 25 49 25 0 0 0 0 9L (O)R | 9L (O)R
+TT stuck_partial_129 0.004472 0.004372 0 0 0
+T stuck_partial_132 3 29 25 29 25 0 0 0 0 B10 A(H) | B10 A(H)
+TT stuck_partial_132 0.000167 0.000134 0 0 0
+T stuck_partial_133 4 27 25 27 25 0 0 0 0 15N (D)I | 15N (D)I
+TT stuck_partial_133 0.000213 0.000196 0 0 0
+T stuck_partial_134 4 40 25 40 25 0 0 0 0 C9 PE | C9 PE
+TT stuck_partial_134 0.000214 0.000246 0 0 0
+T stuck_partial_117 8 68 2 68 2 0 0 0 0 13M IT | 13M IT
+TT stuck_partial_117 0.010700 0.010682 0 0 0
+T stuck_partial_131 6 43 25 43 25 0 0 0 0 2F URIT(E) | 2F URIT(E)
+TT stuck_partial_131 0.006213 0.006462 0 0 0
+T stuck_partial_128 9 48 2 48 2 0 0 0 0 10D R(E) | 10D R(E)
+TT stuck_partial_128 0.010493 0.010467 0 0 0
+T stuck_partial_135 8 83 2 83 2 0 0 0 0 3I (KINO)S | 3I (KINO)S
+TT stuck_partial_135 0.010559 0.010563 0 0 0
+T stuck_partial_136 9 83 2 83 2 0 0 0 0 N1 PA(V) | N1 PA(V)
+TT stuck_partial_136 0.010670 0.010704 0 0 0
+T stuck_partial_137 11 41 2 41 2 0 0 0 0 5G (E)LT | 5G (E)LT
+TT stuck_partial_137 0.011917 0.011854 0 0 0
+T stuck_partial_141 4 34 25 34 25 0 0 0 0 3I SI | 3I SI
+TT stuck_partial_141 0.000318 0.000268 0 0 0
+T stuck_partial_138 9 86 2 86 2 0 0 0 0 9N (D)A | 9N (D)A
+TT stuck_partial_138 0.010313 0.010308 0 0 0
+T stuck_partial_139 8 94 2 94 2 0 0 0 0 A7 AB | A7 AB
+TT stuck_partial_139 0.010422 0.010394 0 0 0
+T stuck_partial_140 9 85 1 85 1 0 0 0 0 9L T(AD) | 9L T(AD)
+TT stuck_partial_140 0.011250 0.011284 0 0 0
+T stuck_partial_145 4 34 25 34 25 0 0 0 0 I12 AI | I12 AI
+TT stuck_partial_145 0.000470 0.000417 0 0 0
+T stuck_partial_142 8 66 2 66 2 0 0 0 0 2F R(UM) | 2F R(UM)
+TT stuck_partial_142 0.010399 0.010414 0 0 0
+T stuck_partial_147 4 37 25 37 25 0 0 0 0 12F S(AX) | 12F S(AX)
+TT stuck_partial_147 0.000396 0.000349 0 0 0
+T stuck_partial_143 9 75 2 75 2 0 0 0 0 E12 OW(L) | E12 OW(L)
+TT stuck_partial_143 0.010433 0.010422 0 0 0
+T stuck_partial_148 4 25 25 25 25 0 0 0 0 9G EN | 9G EN
+TT stuck_partial_148 0.000314 0.000350 0 0 0
+T stuck_partial_149 4 29 25 29 25 0 0 0 0 9D (EM)U | 9D (EM)U
+TT stuck_partial_149 0.000338 0.000267 0 0 0
+T stuck_partial_150 5 43 25 43 25 0 0 0 0 6D T(EX) | 6D T(EX)
+TT stuck_partial_150 0.000873 0.000946 0 0 0
+T stuck_partial_152 5 35 25 35 25 0 0 0 0 9I (T)E | 9I (T)E
+TT stuck_partial_152 0.001829 0.001900 0 0 0
+T stuck_partial_153 7 43 25 43 25 0 0 0 0 G3 LI(E) | G3 LI(E)
+TT stuck_partial_153 0.002668 0.002735 0 0 0
+T stuck_partial_144 7 64 2 64 2 0 0 0 0 7H (Z)A | 7H (Z)A
+TT stuck_partial_144 0.010462 0.010463 0 0 0
+T stuck_partial_154 5 37 25 37 25 0 0 0 0 3C (C)ARD | 3C (C)ARD
+TT stuck_partial_154 0.000849 0.000943 0 0 0
+T stuck_partial_155 5 22 25 22 25 0 0 0 0 11F (O)R | 11F (O)R
+TT stuck_partial_155 0.001020 0.000997 0 0 0
+T stuck_partial_157 3 21 25 21 25 0 0 0 0 A1 O(F) | A1 O(F)
+TT stuck_partial_157 0.000169 0.000122 0 0 0
+T stuck_partial_146 9 96 2 96 2 0 0 0 0 N6 DINGIER | N6 DINGIER
+TT stuck_partial_146 0.010534 0.010564 0 0 0
+T stuck_partial_159 3 24 25 24 25 0 0 0 0 13J (EQuAL)I | 13J (EQuAL)I
+TT stuck_partial_159 0.000129 0.000116 0 0 0
+T stuck_partial_158 5 37 25 37 25 0 0 0 0 2G O(I) | 2G O(I)
+TT stuck_partial_158 0.002516 0.002740 0 0 0
+T stuck_partial_151 7 60 2 60 2 0 0 0 0 10H (P)A | 10H (P)A
+TT stuck_partial_151 0.010358 0.010348 0 0 0
+T stuck_partial_161 4 -44 25 -44 25 0 0 0 0 F1 (LA)V | F1 (LA)V
+TT stuck_partial_161 0.000199 0.000179 0 0 0
+T stuck_partial_162 5 44 25 44 25 0 0 0 0 13A (HE)N | 13A (HE)N
+TT stuck_partial_162 0.001085 0.001192 0 0 0
+T stuck_partial_156 9 100 1 100 1 0 0 0 0 14M SIX | 14M SIX
+TT stuck_partial_156 0.010625 0.010649 0 0 0
+T stuck_partial_160 8 48 3 48 3 0 0 0 0 J1 (A)PT | J1 (A)PT
+TT stuck_partial_160 0.010140 0.010147 0 0 0
+T stuck_partial_163 8 60 2 60 2 0 0 0 0 4L (UN)C(E) | 4L (UN)C(E)
+TT stuck_partial_163 0.010482 0.010446 0 0 0
+T stuck_partial_166 6 48 25 48 25 0 0 0 0 6I (AI)D | 6I (AI)D
+TT stuck_partial_166 0.004871 0.004932 0 0 0
+T stuck_partial_168 3 40 25 40 25 0 0 0 0 6B (JESs)E | 6B (JESs)E
+TT stuck_partial_168 0.000147 0.000141 0 0 0
+T stuck_partial_164 8 86 1 86 1 0 0 0 0 2K t(APE) | 2K t(APE)
+TT stuck_partial_164 0.012402 0.012490 0 0 0
+T stuck_partial_170 5 24 25 24 25 0 0 0 0 11G TO | 11G TO
+TT stuck_partial_170 0.000710 0.000800 0 0 0
+T stuck_partial_169 6 33 25 33 25 0 0 0 0 1H (TRANQ)S | 1H (TRANQ)S
+TT stuck_partial_169 0.003793 0.003706 0 0 0
+T stuck_partial_172 4 32 25 32 25 0 0 0 0 13J (G)E(ISH)A | 13J (G)E(ISH)A
+TT stuck_partial_172 0.000279 0.000273 0 0 0
+T stuck_partial_173 5 40 25 40 25 0 0 0 0 2F (ZA)G | 2F (ZA)G
+TT stuck_partial_173 0.002146 0.002089 0 0 0
+T stuck_partial_167 7 55 3 55 3 0 0 0 0 K12 IS | K12 IS
+TT stuck_partial_167 0.010197 0.010186 0 0 0
+T stuck_partial_174 5 46 25 46 25 0 0 0 0 3L (F)I(R) | 3L (F)I(R)
+TT stuck_partial_174 0.001136 0.001173 0 0 0
+T stuck_partial_175 4 40 25 40 25 0 0 0 0 D12 CL(EW) | D12 CL(EW)
+TT stuck_partial_175 0.000285 0.000293 0 0 0
+T stuck_partial_176 5 11 25 11 25 0 0 0 0 12A (KI)S(T) | 12A (KI)S(T)
+TT stuck_partial_176 0.000300 0.000336 0 0 0
+T stuck_partial_177 4 24 25 24 25 0 0 0 0 15A (QI)N | 15A (QI)N
+TT stuck_partial_177 0.000229 0.000168 0 0 0
+T stuck_partial_178 3 30 25 30 25 0 0 0 0 10E (OX)O | 10E (OX)O
+TT stuck_partial_178 0.000120 0.000123 0 0 0
+T stuck_partial_179 4 32 25 32 25 0 0 0 0 11D (T)AP | 11D (T)AP
+TT stuck_partial_179 0.000437 0.000359 0 0 0
+T stuck_partial_171 8 90 2 90 2 0 0 0 0 14A (M)E | 14A (M)E
+TT stuck_partial_171 0.010187 0.010199 0 0 0
+T stuck_partial_180 8 73 2 73 2 0 0 0 0 2M (WO)E | 2M (WO)E
+TT stuck_partial_180 0.010434 0.010423 0 0 0
+T stuck_partial_181 7 74 3 74 3 0 0 0 0 6I L(I) | 6I L(I)
+TT stuck_partial_181 0.010196 0.010187 0 0 0
+T stuck_partial_184 3 40 25 40 25 0 0 0 0 9I F(E) | 9I F(E)
+TT stuck_partial_184 0.000128 0.000120 0 0 0
+T stuck_partial_185 3 21 25 21 25 0 0 0 0 2A D(RUTHER) | 2A D(RUTHER)
+TT stuck_partial_185 0.000114 0.000104 0 0 0
+T stuck_partial_182 8 67 2 67 2 0 0 0 0 H12 G(AME) | H12 G(AME)
+TT stuck_partial_182 0.010225 0.010239 0 0 0
+T stuck_partial_187 4 18 25 18 25 0 0 0 0 12N UR | 12N UR
+TT stuck_partial_187 0.000261 0.000238 0 0 0
+T stuck_partial_186 6 31 25 31 25 0 0 0 0 12L (KON)D | 12L (KON)D
+TT stuck_partial_186 0.006787 0.007086 0 0 0
+T stuck_partial_189 5 8 25 8 25 0 0 0 0 J13 (I)D | J13 (I)D
+TT stuck_partial_189 0.000267 0.000223 0 0 0
+T stuck_partial_190 4 33 25 33 25 0 0 0 0 L1 EL | L1 EL
+TT stuck_partial_190 0.000446 0.000505 0 0 0
+T stuck_partial_191 3 -23 25 -23 25 0 0 0 0 2D (O)I | 2D (O)I
+TT stuck_partial_191 0.000148 0.000135 0 0 0
+T stuck_partial_183 9 92 2 92 2 0 0 0 0 O6 P(E) | O6 P(E)
+TT stuck_partial_183 0.010527 0.010443 0 0 0
+T stuck_partial_193 5 20 25 20 25 0 0 0 0 6A (O)I | 6A (O)I
+TT stuck_partial_193 0.000454 0.000403 0 0 0
+T stuck_partial_188 6 47 25 47 25 0 0 0 0 3M D(OP) | 3M D(OP)
+TT stuck_partial_188 0.008475 0.008480 0 0 0
+T stuck_partial_195 5 37 25 37 25 0 0 0 0 E9 NIL | E9 NIL
+TT stuck_partial_195 0.000540 0.000500 0 0 0
+T stuck_partial_196 4 16 25 16 25 0 0 0 0 12H DE | 12H DE
+TT stuck_partial_196 0.000181 0.000203 0 0 0
+T stuck_partial_197 3 28 25 28 25 0 0 0 0 9L U(TE) | 9L U(TE)
+TT stuck_partial_197 0.000132 0.000149 0 0 0
+T stuck_partial_192 8 92 1 92 1 0 0 0 0 10B Z(AX) | 10B Z(AX)
+TT stuck_partial_192 0.011510 0.011576 0 0 0
+T stuck_partial_194 6 44 4 44 4 0 0 0 0 12L N(IDE) | 12L N(IDE)
+TT stuck_partial_194 0.010197 0.010229 0 0 0
+T stuck_partial_200 4 -7 25 -7 25 0 0 0 0 8N (O)P | 8N (O)P
+TT stuck_partial_200 0.000173 0.000218 0 0 0
+T stuck_partial_198 7 42 25 42 25 0 0 0 0 I10 V(ET) | I10 V(ET)
+TT stuck_partial_198 0.009149 0.009137 0 0 0
+T stuck_partial_199 7 -42 25 -42 25 0 0 0 0 F10 H(e) | F10 H(e)
+TT stuck_partial_199 0.005976 0.006497 0 0 0
+T stuck_partial_165 8 65 2 64 2 65 25 64 25 13H (E)A | B3 AI
+TT stuck_partial_165 0.010946 0.010946 0 1 1

@@ -1,0 +1,10 @@
+positions 8451 lam 3.0
+greedy                                               regret  4.21 wrong 32.0%  vs greedy +0.00 (SE 0.00)
+check only: minus out score (no fit) (1 terms)       regret  3.46 wrong 28.1%  vs greedy -0.75 (SE 0.06)
+static + own outs on the board (no reply look) (9 terms) regret  2.69 wrong 27.3%  vs greedy -1.52 (SE 0.08)
+static + own outs + survive replies (21 terms)       regret  2.53 wrong 26.0%  vs greedy -1.68 (SE 0.08)
+check + own outs on the board (11 terms)             regret  2.46 wrong 24.7%  vs greedy -1.75 (SE 0.08)
+check + own outs + survive replies (23 terms)        regret  2.23 wrong 23.4%  vs greedy -1.97 (SE 0.08)
+check + opp best score + leaves split (1202 terms)   regret  2.38 wrong 25.6%  vs greedy -1.83 (SE 0.08)
+check + opp best + leaves split + own outs on board (1210 terms) regret  1.89 wrong 22.4%  vs greedy -2.32 (SE 0.09)
+check + opp best + leaves split + own outs + survive (1222 terms) regret  1.82 wrong 21.8%  vs greedy -2.39 (SE 0.09)

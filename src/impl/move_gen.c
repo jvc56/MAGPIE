@@ -2169,6 +2169,9 @@ static inline void shadow_record_small(MoveGen *gen) {
   if (gen->tiles_played == gen->best_small_out_rack_size) {
     bound += gen->best_small_out_bonus;
   }
+  if (gen->best_small_face_weight != 0) {
+    bound += gen->best_small_face_bounds[gen->tiles_played];
+  }
   if (bound > gen->highest_shadow_score) {
     gen->highest_shadow_score = bound;
   }
@@ -3455,6 +3458,17 @@ static inline void set_descending_tile_scores(MoveGen *gen) {
   }
   memcpy(gen->full_rack_descending_tile_scores, gen->descending_tile_scores,
          sizeof(gen->descending_tile_scores));
+  if (gen->best_small_face_weight != 0) {
+    const int rack_tiles = rack_get_total_letters(&gen->player_rack);
+    gen->best_small_face_bounds[0] = 0;
+    for (int tiles = 1; tiles <= RACK_SIZE; tiles++) {
+      gen->best_small_face_bounds[tiles] =
+          gen->best_small_face_bounds[tiles - 1] +
+          (tiles <= rack_tiles ? gen->best_small_face_weight *
+                                     gen->descending_tile_scores[tiles - 1]
+                               : 0);
+    }
+  }
 }
 
 // Points gen->pat_ctx at the board's context in board_cache, loading it
@@ -3550,6 +3564,7 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
   gen->eq_margin_movegen = args->eq_margin_movegen;
   gen->target_equity_cutoff = args->target_equity;
   gen->best_small_out_bonus = args->best_small_out_bonus;
+  gen->best_small_face_weight = args->best_small_face_weight;
   gen->best_small_canonical_ties = args->best_small_canonical_ties;
 
   gen->board = game_get_board(game);
@@ -4166,6 +4181,7 @@ static uint64_t lane_shadow_context_key(const MoveGen *gen) {
   key = key * LANE_HASH_MULTIPLIER +
         (uint64_t)(uint32_t)gen->best_small_out_bonus;
   key = key * LANE_HASH_MULTIPLIER + (uint64_t)gen->best_small_out_rack_size;
+  key = key * LANE_HASH_MULTIPLIER + (uint64_t)gen->best_small_face_weight;
   return lane_shadow_mix(key);
 }
 

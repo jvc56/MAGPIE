@@ -34,6 +34,7 @@
 #include "../util/stable_sort.h"
 #include "../util/string_util.h"
 #include "cgp.h"
+#include "eg_pick.h"
 #include "endgame.h"
 #include "gameplay.h"
 #include "kwg_maker.h"
@@ -148,6 +149,8 @@ typedef struct PegReplyCache {
 // main thread when it helps drain the queue).
 typedef struct PegWorker {
   MoveList *playout_ml;
+  // LAB egregret: the empty-bag pick for greedy playouts (NULL when off).
+  EgPick *eg_pick;
   EndgameCtx *eg_ctx;
   EndgameResults *eg_results;
   // Per-candidate template: the post-cand board with cross-sets generated once
@@ -1238,7 +1241,8 @@ static int32_t peg_greedy_playout(Game *game, int mover_idx,
                                   MoveList *playout_ml, int64_t deadline_ns,
                                   ThreadControl *thread_control,
                                   bool *interrupted,
-                                  PegSharedPly *const *shared_plies) {
+                                  PegSharedPly *const *shared_plies,
+                                  EgPick *eg_pick) {
   const LetterDistribution *ld = game_get_ld(game);
   for (int ply = 0; ply < PEG_PLAYOUT_MAX_PLIES; ply++) {
     if (peg_should_stop(deadline_ns, thread_control)) {
@@ -1250,10 +1254,29 @@ static int32_t peg_greedy_playout(Game *game, int mover_idx,
     if (game_get_game_end_reason(game) != GAME_END_REASON_NONE) {
       break;
     }
+    const bool bag_has_tiles = bag_get_letters(game_get_bag(game)) > 0;
+    // LAB egregret: at an empty bag the pick depends on the opponent's rack,
+    // which scenarios sharing plies need not share, so such plies are neither
+    // shared nor recorded.
+    const bool use_eg_pick = eg_pick != NULL && !bag_has_tiles;
     PegSharedPly *shared =
-        shared_plies != NULL && ply < PEG_SHARED_PLAYOUT_PLIES
+        shared_plies != NULL && ply < PEG_SHARED_PLAYOUT_PLIES && !use_eg_pick
             ? shared_plies[ply]
             : NULL;
+    if (use_eg_pick) {
+      Move picked;
+      if (!eg_pick_choose(eg_pick, game, /*override_kwg=*/NULL, &picked)) {
+        break;
+      }
+      if (peg_should_stop(deadline_ns, thread_control)) {
+        if (interrupted != NULL) {
+          *interrupted = true;
+        }
+        break;
+      }
+      play_move(&picked, game, NULL);
+      continue;
+    }
     if (shared != NULL && shared->known) {
       if (shared->none) {
         break;
@@ -1261,7 +1284,6 @@ static int32_t peg_greedy_playout(Game *game, int mover_idx,
       play_move(&shared->move, game, NULL);
       continue;
     }
-    const bool bag_has_tiles = bag_get_letters(game_get_bag(game)) > 0;
     const MoveGenArgs args = {
         .game = game,
         .move_record_type = MOVE_RECORD_BEST,
@@ -1451,7 +1473,7 @@ static int32_t peg_pessimistic_playout(Game *game, int mover_idx,
       const int32_t mover_net =
           peg_greedy_playout(branch, mover_idx, rollout_ml, deadline_ns,
                              thread_control, interrupted,
-                             /*shared_plies=*/NULL);
+                             /*shared_plies=*/NULL, /*eg_pick=*/NULL);
       if (interrupted != NULL && *interrupted) {
         break;
       }
@@ -1905,7 +1927,7 @@ static int32_t peg_nested_floor(PegWorker *worker, const Game *game,
   const int32_t value = peg_greedy_playout(
       frame->game, on_turn, worker->playout_ml, stop->deadline_ns,
       worker->thread_control, /*interrupted=*/NULL,
-      /*shared_plies=*/NULL);
+      /*shared_plies=*/NULL, worker->eg_pick);
   peg_nest_release(worker, frame);
   return value;
 }
@@ -1956,7 +1978,8 @@ static int32_t peg_nested_endgame_value(PegWorker *worker, Game *game,
   if (endgame_results_get_depth(worker->eg_results, ENDGAME_RESULT_BEST) < 0) {
     return peg_greedy_playout(game, on_turn, worker->playout_ml,
                               stop->deadline_ns, worker->thread_control,
-                              /*interrupted=*/NULL, /*shared_plies=*/NULL);
+                              /*interrupted=*/NULL, /*shared_plies=*/NULL,
+                              worker->eg_pick);
   }
   const int32_t eg_val =
       endgame_results_get_value(worker->eg_results, ENDGAME_RESULT_BEST);
@@ -2705,7 +2728,8 @@ static int32_t peg_eval_leaf(PegEvalCtx *ctx, Game *game) {
     }
     return peg_greedy_playout(game, ctx->mover_idx, ctx->worker->playout_ml,
                               ctx->deadline_ns, ctx->thread_control,
-                              &ctx->interrupted, ctx->shared_plies);
+                              &ctx->interrupted, ctx->shared_plies,
+                              ctx->worker->eg_pick);
   }
   // Exact endgame leaf. After the mover plays and draws it is the opponent's
   // turn, so the solved value is from the on-turn player's perspective; fold
@@ -2763,7 +2787,8 @@ static int32_t peg_eval_leaf(PegEvalCtx *ctx, Game *game) {
       0) {
     return peg_greedy_playout(game, ctx->mover_idx, ctx->worker->playout_ml,
                               ctx->deadline_ns, ctx->thread_control,
-                              &ctx->interrupted, /*shared_plies=*/NULL);
+                              &ctx->interrupted, /*shared_plies=*/NULL,
+                              ctx->worker->eg_pick);
   }
   if (ctx->capture != NULL) {
     const PVLine *pv =
@@ -3843,7 +3868,7 @@ static void peg_order_jobs_losses_first(PegScenarioJobList *list,
     job->greedy_value =
         peg_greedy_playout(game, mover_idx, worker->playout_ml, deadline_ns,
                            thread_control, /*interrupted=*/NULL,
-                           /*shared_plies=*/NULL);
+                           /*shared_plies=*/NULL, worker->eg_pick);
   }
   stable_sort(list->jobs, (size_t)list->count, sizeof(PegScenarioJob),
               peg_scenario_job_greedy_cmp);
@@ -4801,6 +4826,7 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
   PegWorker *workers = malloc_or_die((size_t)n_scratch * sizeof(PegWorker));
   for (int worker_idx = 0; worker_idx < n_scratch; worker_idx++) {
     workers[worker_idx].playout_ml = move_list_create(1);
+    workers[worker_idx].eg_pick = eg_pick_create(args->game);
     workers[worker_idx].eg_results = endgame_results_create();
     // Pre-created so the injection monitor reads a stable, non-NULL ctx pointer
     // (no race with lazy creation inside endgame_solve_inline).
@@ -5453,6 +5479,7 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
   }
   for (int worker_idx = 0; worker_idx < n_scratch; worker_idx++) {
     move_list_destroy(workers[worker_idx].playout_ml);
+    eg_pick_destroy(workers[worker_idx].eg_pick);
     free(workers[worker_idx].reply_cache);
     endgame_ctx_destroy(workers[worker_idx].eg_ctx);
     endgame_results_destroy(workers[worker_idx].eg_results);

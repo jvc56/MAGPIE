@@ -25,4 +25,6 @@ void test_peg_strength_ab(void);
 void test_gen_peg_fresh(void);
 void test_peg_strength_curve(void);
 
+void peg_switch_run_spec(const char *spec);
+
 #endif
