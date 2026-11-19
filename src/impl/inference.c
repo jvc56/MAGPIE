@@ -654,7 +654,7 @@ void complete_inference_setup(Inference *inference, const InferenceArgs *args) {
 // plays and the best exchange) pass none, so the moves it generates must get
 // none either. The same goes for the pool shift. Copying a game brings both
 // back, so every copy into the inference's game must clear them again.
-static void clear_equity_adjustments(Game *game) {
+static void clear_equity_adjustments(const Game *game) {
   for (int player_index = 0; player_index < 2; player_index++) {
     player_set_peg_adjust(game_get_player(game, player_index), NULL);
     player_set_pool_shift(game_get_player(game, player_index), NULL, 0);

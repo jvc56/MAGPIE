@@ -5,6 +5,7 @@
 #include "../src/def/letter_distribution_defs.h"
 #include "../src/def/players_data_defs.h"
 #include "../src/def/rack_defs.h"
+#include "../src/def/static_eval_defs.h"
 #include "../src/def/thread_control_defs.h"
 #include "../src/ent/alias_method.h"
 #include "../src/ent/bag.h"
@@ -1627,7 +1628,7 @@ static void test_infer_preendgame_no_phantom_exchange(void) {
 
 // Infers player 0's placement of target_played_tiles for target_score, with
 // player 1's rack known, reusing *ctx's workers when it has them.
-static void infer_preendgame_placement(InferenceCtx **ctx, Config *config,
+static void infer_preendgame_placement(InferenceCtx **ctx, const Config *config,
                                        Equity target_score,
                                        Rack *target_played_tiles,
                                        InferenceResults *results) {
