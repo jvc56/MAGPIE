@@ -7,6 +7,7 @@
 #include "encoded_rack.h"
 #include "rack.h"
 #include "xoshiro.h"
+#include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -27,6 +28,7 @@ typedef struct AliasMethod {
   uint32_t num_items;
   uint32_t capacity;
   uint64_t total_item_count;
+  bool use_weights;
   cpthread_mutex_t mutex;
 } AliasMethod;
 
@@ -37,6 +39,7 @@ static inline AliasMethod *alias_method_create(void) {
       (AliasMethodItem *)malloc_or_die(sizeof(AliasMethodItem) * am->capacity);
   am->num_items = 0;
   am->total_item_count = 0;
+  am->use_weights = false;
   cpthread_mutex_init(&am->mutex);
   return am;
 }
@@ -52,6 +55,7 @@ static inline void alias_method_destroy(AliasMethod *am) {
 static inline void alias_method_reset(AliasMethod *am) {
   am->num_items = 0;
   am->total_item_count = 0;
+  am->use_weights = false;
 }
 
 // Thread safe
@@ -72,6 +76,29 @@ static inline void alias_method_add_rack(AliasMethod *am, const Rack *rack,
   cpthread_mutex_unlock(&am->mutex);
 }
 
+// Thread safe. Stores the unnormalized weight in item->probability before
+// alias_method_generate_tables normalizes it, avoiding any extra field on
+// AliasMethodItem or extra stores on the unweighted path.
+static inline void alias_method_add_weighted_rack(AliasMethod *am,
+                                                  const Rack *rack, int count,
+                                                  double weight) {
+  cpthread_mutex_lock(&am->mutex);
+  if (am->num_items == am->capacity) {
+    am->capacity *= 2;
+    am->items = (AliasMethodItem *)realloc_or_die(
+        am->items, sizeof(AliasMethodItem) * am->capacity);
+  }
+  int new_item_index = am->num_items;
+  am->total_item_count += (uint64_t)count;
+  am->num_items++;
+  am->use_weights = true;
+  AliasMethodItem *item = &am->items[new_item_index];
+  rack_encode(rack, &item->rack);
+  item->count = (uint32_t)count;
+  item->probability = weight;
+  cpthread_mutex_unlock(&am->mutex);
+}
+
 static inline int alias_method_compare_items(const void *a, const void *b) {
   const AliasMethodItem *item_a = (const AliasMethodItem *)a;
   const AliasMethodItem *item_b = (const AliasMethodItem *)b;
@@ -83,6 +110,22 @@ static inline int alias_method_compare_items(const void *a, const void *b) {
   return (item_a->count > item_b->count) - (item_a->count < item_b->count);
 }
 
+static inline int alias_method_compare_weighted_items(const void *a,
+                                                      const void *b) {
+  const AliasMethodItem *item_a = (const AliasMethodItem *)a;
+  const AliasMethodItem *item_b = (const AliasMethodItem *)b;
+  const int rack_order =
+      memcmp(&item_a->rack, &item_b->rack, sizeof(item_a->rack));
+  if (rack_order != 0) {
+    return rack_order;
+  }
+  if (item_a->probability != item_b->probability) {
+    return (item_a->probability > item_b->probability) -
+           (item_a->probability < item_b->probability);
+  }
+  return (item_a->count > item_b->count) - (item_a->count < item_b->count);
+}
+
 // Returns true if there are a nonzero number of items and counts to generate
 // tables for and returns false otherwise.
 static inline bool alias_method_generate_tables(AliasMethod *am) {
@@ -90,24 +133,46 @@ static inline bool alias_method_generate_tables(AliasMethod *am) {
     return false;
   }
 
-  // Sort the items (by rack, then count) so the tables, and the racks a
+  // Sort the items (by rack, then weight/count) so the tables, and the racks a
   // seeded sample draws, do not depend on the order the items were added in:
   // inference threads add them in whatever order they finish.
   qsort(am->items, am->num_items, sizeof(AliasMethodItem),
-        alias_method_compare_items);
+        am->use_weights ? alias_method_compare_weighted_items
+                        : alias_method_compare_items);
 
   uint32_t num_overfull_items = 0;
   uint32_t num_underfull_items = 0;
 
   // Scale probabilities and separate into small/large queues
   double n = (double)am->num_items;
-  for (uint32_t i = 0; i < am->num_items; i++) {
-    double prob = (double)am->items[i].count / (double)am->total_item_count;
-    am->items[i].probability = prob * n;
-    if (am->items[i].probability > 1.0) {
-      am->items[num_overfull_items++].overfull_item_index = i;
-    } else {
-      am->items[num_underfull_items++].underfull_item_index = i;
+  if (am->use_weights) {
+    double total_weight = 0.0;
+    for (uint32_t i = 0; i < am->num_items; i++) {
+      total_weight += am->items[i].probability;
+    }
+    if (total_weight <= 0.0) {
+      // No representable posterior mass: sampling must report failure.
+      am->num_items = 0;
+      return false;
+    }
+    for (uint32_t i = 0; i < am->num_items; i++) {
+      double prob = am->items[i].probability / total_weight;
+      am->items[i].probability = prob * n;
+      if (am->items[i].probability > 1.0) {
+        am->items[num_overfull_items++].overfull_item_index = i;
+      } else {
+        am->items[num_underfull_items++].underfull_item_index = i;
+      }
+    }
+  } else {
+    for (uint32_t i = 0; i < am->num_items; i++) {
+      double prob = (double)am->items[i].count / (double)am->total_item_count;
+      am->items[i].probability = prob * n;
+      if (am->items[i].probability > 1.0) {
+        am->items[num_overfull_items++].overfull_item_index = i;
+      } else {
+        am->items[num_underfull_items++].underfull_item_index = i;
+      }
     }
   }
 

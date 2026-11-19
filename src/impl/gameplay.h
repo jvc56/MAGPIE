@@ -31,7 +31,8 @@ const Move *get_top_equity_move_with_carry(Game *game, MoveList *move_list,
 const Move *get_top_move_for_player_on_turn(Game *game, MoveList *move_list,
                                             bool record_all);
 Move *get_top_equity_move_for_inferences(Game *game, MoveList *move_list,
-                                         Equity target_equity);
+                                         Equity target_equity,
+                                         Equity anchor_equity_cutoff);
 void generate_moves_for_game_override_record_type(
     const MoveGenArgs *args, move_record_t move_record_type);
 void generate_moves_for_game(const MoveGenArgs *args);
