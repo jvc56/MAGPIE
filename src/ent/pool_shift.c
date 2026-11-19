@@ -288,7 +288,7 @@ static void pool_shift_exact_walk(PoolShiftExactWalk *walk, int letter_idx,
 // Sets *value to the exact value of leave, of fewer than RACK_SIZE tiles,
 // for a mover who sees unseen_counts, and returns true, or returns false if
 // no draw gives a rack the table values.
-static bool pool_shift_get_exact_leave_value(const PoolShiftTable *table,
+bool pool_shift_get_exact_leave_value(const PoolShiftTable *table,
                                              const int *unseen_counts,
                                              const Rack *leave, Equity *value) {
   PoolShiftExactWalk walk;

@@ -155,6 +155,11 @@ PoolLeaves *pool_leaves_create(const PoolShiftTable *table,
                                const Rack *mover_rack);
 void pool_leaves_destroy(PoolLeaves *pool_leaves);
 
+// LAB (not for merge): exposed for test/leave_bag_test.c.
+bool pool_shift_get_exact_leave_value(const PoolShiftTable *table,
+                                      const int *unseen_counts,
+                                      const Rack *leave, Equity *value);
+
 PoolShiftTable *pool_shift_table_create(const KLV *klv,
                                         const LetterDistribution *ld);
 void pool_shift_table_destroy(PoolShiftTable *table);

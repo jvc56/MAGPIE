@@ -91,6 +91,8 @@
 #include "sim_benchmark_test.h"
 #include "sim_det_sweep_test.h"
 #include "sim_exact_test.h"
+#include "leave_bag_test.h"
+#include "eg_regret_test.h"
 #include "sim_quality_test.h"
 #include "sim_regret_test.h"
 #include "sim_test.h"
@@ -357,6 +359,14 @@ void run_test(const char *subtest) {
   }
   if (has_prefix("simexact:", subtest)) {
     sim_exact_run_spec(subtest + strlen("simexact:"));
+    return;
+  }
+  if (has_prefix("egregret:", subtest)) {
+    eg_regret_run_spec(subtest + strlen("egregret:"));
+    return;
+  }
+  if (has_prefix("leavebag:", subtest)) {
+    leave_bag_run_spec(subtest + strlen("leavebag:"));
     return;
   }
   if (has_prefix("simnest:", subtest)) {

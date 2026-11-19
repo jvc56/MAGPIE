@@ -58,6 +58,79 @@
 // See WMP_ENTRY_UNRESOLVED in wmp_move_gen.h. Only its address is used.
 const WMPEntry wmp_entry_unresolved_sentinel = {0};
 
+// LAB (not for merge): leave values by tiles in the bag. A player whose
+// leaves are named LEAVEBAG_NAME plays with the table interpolated by the real
+// bag size between the group tables LEAVEBAG_DIR/g<center>.klv2.
+enum { LB_GROUPS = 14, LB_MAX_BAG = 100 };
+static const int lb_centers[LB_GROUPS] = {1,  2,  3,  4,  5,  6,  7,
+                                          10, 14, 20, 40, 60, 80, 86};
+static KLV *lb_by_bag[LB_MAX_BAG];
+static const char *lb_name;
+static cpthread_once_t lb_once = PTHREAD_ONCE_INIT;
+
+static KLV *lb_load_group(const char *dir, int center) {
+  char path[1024];
+  snprintf(path, sizeof(path), "%s/g%d.klv2", dir, center);
+  KLV *klv = calloc_or_die(1, sizeof(KLV));
+  klv->instance_id = klv_next_instance_id();
+  ErrorStack *error_stack = error_stack_create();
+  klv_load(path, path, klv, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    log_fatal("leavebag: cannot load %s", path);
+  }
+  error_stack_destroy(error_stack);
+  return klv;
+}
+
+static void lb_init(void) {
+  lb_name = getenv("LEAVEBAG_NAME");
+  const char *dir = getenv("LEAVEBAG_DIR");
+  if (lb_name == NULL || dir == NULL) {
+    lb_name = NULL;
+    return;
+  }
+  KLV *groups[LB_GROUPS];
+  for (int group_idx = 0; group_idx < LB_GROUPS; group_idx++) {
+    groups[group_idx] = lb_load_group(dir, lb_centers[group_idx]);
+  }
+  const uint32_t number_of_leaves = groups[0]->number_of_leaves;
+  for (int bag = 1; bag < LB_MAX_BAG; bag++) {
+    int upper = 0;
+    while (upper < LB_GROUPS - 1 && lb_centers[upper] < bag) {
+      upper++;
+    }
+    const int lower = (upper > 0 && lb_centers[upper] > bag) ? upper - 1 : upper;
+    double weight = 0.0;
+    if (lower != upper) {
+      weight = (double)(bag - lb_centers[lower]) /
+               (double)(lb_centers[upper] - lb_centers[lower]);
+    }
+    KLV *klv = calloc_or_die(1, sizeof(KLV));
+    *klv = *groups[lower];
+    klv->instance_id = klv_next_instance_id();
+    klv->mutation_counter = 0;
+    klv->leave_values = malloc_or_die(number_of_leaves * sizeof(Equity));
+    for (uint32_t leave_idx = 0; leave_idx < number_of_leaves; leave_idx++) {
+      const double low = (double)groups[lower]->leave_values[leave_idx];
+      const double high = (double)groups[upper]->leave_values[leave_idx];
+      klv->leave_values[leave_idx] =
+          (Equity)(low + weight * (high - low) + (low < 0 ? -0.5 : 0.5));
+    }
+    lb_by_bag[bag] = klv;
+  }
+}
+
+static const KLV *lb_klv_for_bag(const KLV *klv, int real_bag_size) {
+  if (klv == NULL || real_bag_size < 1 || real_bag_size >= LB_MAX_BAG) {
+    return klv;
+  }
+  cpthread_once(&lb_once, lb_init);
+  if (lb_name == NULL || strcmp(klv_get_name(klv), lb_name) != 0) {
+    return klv;
+  }
+  return lb_by_bag[real_bag_size];
+}
+
 #define INITIAL_LAST_ANCHOR_COL (BOARD_DIM)
 
 // The odd multiplier of gen_hash_lane's steps (MurmurHash3's fmix64).
@@ -3505,7 +3578,8 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
     gen->bit_rack_compatible = bit_rack_is_compatible_with_ld(&gen->ld);
   }
   gen->kwg = (override_kwg == NULL) ? player_get_kwg(player) : override_kwg;
-  const KLV *new_klv = player_get_klv(player);
+  const KLV *new_klv =
+      lb_klv_for_bag(player_get_klv(player), game_get_real_bag_size(game));
   const uint64_t new_klv_mutation_counter =
       (new_klv != NULL) ? klv_get_mutation_counter(new_klv) : 0;
   const uint64_t new_klv_instance_id =
