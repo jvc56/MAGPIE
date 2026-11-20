@@ -19,6 +19,11 @@ void cpath_list_destroy(char **paths, int count);
 // The first path in `list` ("" if it has none), which the caller frees.
 char *cpath_list_first(const char *list);
 
+// The list that has `path` first and then the paths of `list` (which may be
+// NULL or empty), separated as this platform writes a list. The caller frees
+// it; NULL if memory runs out.
+char *cpath_list_prepend(const char *path, const char *list);
+
 // Whether `c` separates the directories in a path: '/' everywhere, and '\'
 // as well on Windows.
 bool cpath_is_separator(char c);

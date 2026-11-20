@@ -1,6 +1,7 @@
 #include "contribute_test.h"
 
 #include "../src/compat/cfile.h"
+#include "../src/compat/cpath.h"
 #include "../src/compat/ctime.h"
 #include "../src/compat/endian_conv.h"
 #include "../src/def/autoplay_defs.h"
@@ -896,8 +897,8 @@ static void test_contract_fixtures_carry_every_key_contribute_reads(void) {
                        "sha256");
   const JsonValue *files = json_object_get(expected, "files");
   assert(json_array_length(files) > 0);
-  const char *const file_keys[] = {"role", "name", "sha256", "path",
-                                   "tarball_date"};
+  const char *const file_keys[] = {"role",         "name",  "sha256", "path",
+                                   "tarball_date", "bytes", "sources"};
   for (int i = 0; i < json_array_length(files); i++) {
     const JsonValue *file = json_array_get(files, i);
     assert_fixture_has_keys(file, file_keys,
@@ -3000,6 +3001,222 @@ static void test_the_claim_body_matches_the_claim_fixture(void) {
   (void)remove(path);
 }
 
+// What stands in for the server when a pinned input file is fetched: the
+// bytes it sends for any source, and what it was asked for.
+typedef struct FakeInputServer {
+  const char *body;
+  int requests;
+  char *last_source;
+} FakeInputServer;
+
+static char *fake_input_fetch(void *context, const char *source, size_t *length,
+                              char **why) {
+  FakeInputServer *server = (FakeInputServer *)context;
+  server->requests++;
+  free(server->last_source);
+  server->last_source = string_duplicate(source);
+  if (!server->body) {
+    *why = string_duplicate("the server answered HTTP 404");
+    return NULL;
+  }
+  *length = strlen(server->body);
+  return string_duplicate(server->body);
+}
+
+// An assignment whose one expected file is the letter distribution `english`
+// with the digest of `pinned`, fetchable from `sources_json` (a JSON array).
+static JsonValue *assignment_pinning_english(const char *pinned,
+                                             const char *sources_json,
+                                             const char *more_files) {
+  char *digest = sha256_hash_bytes(pinned, strlen(pinned));
+  char *text = get_formatted_string(
+      "{\"expected_data\":{\"algorithm\":\"sha256\",\"files\":[{\"role\":"
+      "\"letterdist\",\"name\":\"english\",\"path\":\"letterdistributions/"
+      "english.csv\",\"sha256\":\"%s\",\"tarball_date\":\"20260925\","
+      "\"bytes\":%d,\"sources\":%s}%s],\"derived\":[]}}",
+      digest, (int)strlen(pinned), sources_json, more_files);
+  ErrorStack *error_stack = error_stack_create();
+  JsonValue *assignment = json_parse(text, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  error_stack_destroy(error_stack);
+  free(text);
+  free(digest);
+  return assignment;
+}
+
+static bool verify_and_take_missing(ContributeState *state,
+                                    const char *data_paths,
+                                    ThreadControl *thread_control,
+                                    char **missing_json) {
+  StringBuilder *missing = string_builder_create();
+  const bool ok = contribute_verify_expected_data(state, data_paths,
+                                                  thread_control, missing);
+  *missing_json = string_builder_dump_and_destroy(missing, NULL);
+  return ok;
+}
+
+// A file the job pins that the contributor has with other bytes -- a tarball
+// rebuilt under its old name left every CSW24 job pinning leaves no download
+// installed -- is fetched from the source the assignment names, kept only if
+// it is the pinned bytes, and kept apart from the contributor's own file:
+// the task reads it from a directory put ahead of theirs. A file with no
+// source, or whose download is not what the job pins, is declined as before.
+static void test_a_pinned_file_the_contributor_lacks_is_fetched(void) {
+  const char *settings_path = "contribute_test_fetch_settings.txt";
+  write_settings_file(settings_path, "server https://birdtest.example\n");
+  ErrorStack *error_stack = error_stack_create();
+  ThreadControl *thread_control = thread_control_create();
+  ContributeState *state =
+      contribute_state_create(settings_path, thread_control, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  FakeInputServer server = {0};
+  contribute_set_input_fetch(state, fake_input_fetch, &server);
+
+  char *data_dir = test_platform_make_temporary_directory("contribute_fetch");
+  char *ld_dir = get_formatted_string("%s/letterdistributions", data_dir);
+  assert(cfile_mkdir(ld_dir) == 0);
+  char *own_path = get_formatted_string("%s/english.csv", ld_dir);
+  const char *own = "the contributor's own distribution\n";
+  const char *pinned = "the distribution the job pins\n";
+  write_string_to_file(own_path, "wb", own, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  const char *source = "/api/worker/input?sha256=abc123";
+  char *sources = get_formatted_string("[\"%s\"]", source);
+  char *missing = NULL;
+
+  // Their own copy is the pinned one: nothing is fetched, and the task runs
+  // on their data paths.
+  contribute_state_set_assignment(state,
+                                  assignment_pinning_english(own, sources, ""));
+  assert(verify_and_take_missing(state, data_dir, thread_control, &missing));
+  assert_strings_equal(missing, "");
+  free(missing);
+  assert(server.requests == 0);
+  assert(!contribute_get_task_data_paths(state));
+
+  // Other bytes, and a server that sends something else again: declined, with
+  // nothing kept.
+  server.body = "not what anybody pinned\n";
+  contribute_state_set_assignment(
+      state, assignment_pinning_english(pinned, sources, ""));
+  assert(!verify_and_take_missing(state, data_dir, thread_control, &missing));
+  assert(strstr(missing, "\"role\":\"letterdist\""));
+  assert(strstr(missing, "\"actual\""));
+  free(missing);
+  assert(server.requests == 1);
+  assert_strings_equal(server.last_source, source);
+  assert(!contribute_get_task_data_paths(state));
+  char *pinned_digest = sha256_hash_bytes(pinned, strlen(pinned));
+  char *fetched_list =
+      get_formatted_string("letterdist\tenglish\t%s\n", pinned_digest);
+  char *fetched_dir = contribute_input_directory(data_dir, fetched_list);
+  char *fetched_path =
+      get_formatted_string("%s/letterdistributions/english.csv", fetched_dir);
+  assert(!cfile_access(fetched_path, CFILE_ACCESS_EXISTS));
+
+  // The right size and the wrong bytes is no better.
+  server.body = "the distribution the job pinz\n";
+  assert(strlen(server.body) == strlen(pinned));
+  assert(!verify_and_take_missing(state, data_dir, thread_control, &missing));
+  free(missing);
+  assert(!cfile_access(fetched_path, CFILE_ACCESS_EXISTS));
+
+  // A server that has it: fetched into a directory of its own inside the
+  // data directory, which the task reads ahead of the contributor's. Their
+  // own file is as it was.
+  server.body = pinned;
+  server.requests = 0;
+  assert(verify_and_take_missing(state, data_dir, thread_control, &missing));
+  assert_strings_equal(missing, "");
+  free(missing);
+  assert(server.requests == 1);
+  char *kept = get_string_from_file(fetched_path, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  assert_strings_equal(kept, pinned);
+  free(kept);
+  char *still_own = get_string_from_file(own_path, error_stack);
+  assert_strings_equal(still_own, own);
+  free(still_own);
+  const char *task_paths = contribute_get_task_data_paths(state);
+  assert(task_paths);
+  char **paths = NULL;
+  const int path_count = cpath_split_list(task_paths, &paths);
+  assert(path_count == 2);
+  assert_strings_equal(paths[0], fetched_dir);
+  assert_strings_equal(paths[1], data_dir);
+  cpath_list_destroy(paths, path_count);
+  // Resolved as the task will resolve it, the name is the fetched file.
+  char *resolved = data_filepaths_get_readable_filename(
+      task_paths, "english", DATA_FILEPATH_TYPE_LD, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  assert_strings_equal(resolved, fetched_path);
+  free(resolved);
+  // And the tables a task builds have somewhere to go.
+  char *lexica_dir = get_formatted_string("%s/lexica", fetched_dir);
+  assert(cfile_is_directory(lexica_dir));
+  free(lexica_dir);
+
+  // The next task of the job finds it there, and asks the server for nothing.
+  contribute_state_set_assignment(
+      state, assignment_pinning_english(pinned, sources, ""));
+  server.body = NULL;
+  server.requests = 0;
+  assert(verify_and_take_missing(state, data_dir, thread_control, &missing));
+  free(missing);
+  assert(server.requests == 0);
+  assert(contribute_get_task_data_paths(state));
+
+  // A file with no source -- an older server, or a file the server does not
+  // hold -- is a gap, as it always was, and nothing is asked for. Nor is a
+  // source this build cannot use: another host, or a path that is not plain.
+  const char *const unusable[] = {
+      "[]", "[\"https://elsewhere.example/english.csv\"]",
+      "[\"/api/worker/../admin\"]", "[\"//elsewhere.example/x\"]",
+      "[\"/api/worker/input?sha256=a b\"]"};
+  const char *other = "bytes nobody has\n";
+  for (size_t i = 0; i < sizeof(unusable) / sizeof(unusable[0]); i++) {
+    contribute_state_set_assignment(
+        state, assignment_pinning_english(other, unusable[i], ""));
+    assert(!verify_and_take_missing(state, data_dir, thread_control, &missing));
+    assert(strstr(missing, "\"name\":\"english\""));
+    free(missing);
+    assert(server.requests == 0);
+    assert(!contribute_get_task_data_paths(state));
+  }
+
+  // With one file the server cannot send among them, the task is declined
+  // whatever else could be fetched: nothing is, and only the file that cannot
+  // be had is reported missing.
+  server.body = pinned;
+  contribute_state_set_assignment(
+      state,
+      assignment_pinning_english(
+          pinned, sources,
+          ",{\"role\":\"layout\",\"name\":\"nowhere15\",\"path\":\"layouts/"
+          "nowhere15.txt\",\"sha256\":\"00\",\"tarball_date\":\"20260925\"}"));
+  assert(!verify_and_take_missing(state, data_dir, thread_control, &missing));
+  assert(strstr(missing, "\"name\":\"nowhere15\""));
+  assert(!strstr(missing, "\"name\":\"english\""));
+  free(missing);
+  assert(server.requests == 0);
+  assert(!contribute_get_task_data_paths(state));
+
+  free(server.last_source);
+  free(fetched_path);
+  free(fetched_dir);
+  free(fetched_list);
+  free(pinned_digest);
+  free(sources);
+  free(own_path);
+  free(ld_dir);
+  test_platform_remove_directory_tree(data_dir);
+  free(data_dir);
+  contribute_state_destroy(state);
+  thread_control_destroy(thread_control);
+  error_stack_destroy(error_stack);
+  (void)remove(settings_path);
+}
+
 // The decline body, against birdtest's decline-missing-data.json, built the
 // way a missing_data decline builds it: one entry per file the fixture names,
 // one not found and one found with other bytes. The same keys at every depth
@@ -4037,6 +4254,7 @@ void test_contribute(void) {
   test_only_a_data_shutdown_is_waited_out_for_a_set_aside_job();
   test_the_claim_body_matches_the_claim_fixture();
   test_the_decline_body_matches_the_decline_fixture();
+  test_a_pinned_file_the_contributor_lacks_is_fetched();
   test_the_result_body_carries_movegens();
   test_a_task_counts_its_move_generations();
   test_every_job_type_counts_its_move_generations();
