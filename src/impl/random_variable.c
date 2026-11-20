@@ -652,10 +652,9 @@ static double sim_rollout(const Simmer *simmer, SimmerWorker *simmer_worker,
     // The inferred leave and the shuffle that replenishes it must be drawn
     // independently. Seeded alike, the alias bin is tied to the first shuffle
     // index, which biases the tiles the opponent draws to fill their rack.
-    prng_seed(simmer_worker->prng,
-              simmer->legacy_alias_seed
-                  ? seed
-                  : seed ^ UINT64_C(0xD1B54A32D192ED03));
+    prng_seed(simmer_worker->prng, simmer->legacy_alias_seed
+                                       ? seed
+                                       : seed ^ UINT64_C(0xD1B54A32D192ED03));
     Rack inferred_rack;
     rack_set_dist_size(&inferred_rack, simmer->dist_size);
     if (alias_method_sample(

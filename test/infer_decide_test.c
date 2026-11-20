@@ -41,9 +41,8 @@
 #include "../src/def/game_history_defs.h"
 #include "../src/def/thread_control_defs.h"
 #include "../src/ent/alias_method.h"
-#include "../src/ent/encoded_rack.h"
-#include "../src/impl/inference.h"
 #include "../src/ent/bag.h"
+#include "../src/ent/encoded_rack.h"
 #include "../src/ent/equity.h"
 #include "../src/ent/game.h"
 #include "../src/ent/inference_args.h"
@@ -57,11 +56,12 @@
 #include "../src/ent/sim_results.h"
 #include "../src/ent/stats.h"
 #include "../src/ent/thread_control.h"
-#include "../src/impl/cgp.h"
-#include "../src/impl/move_gen.h"
 #include "../src/ent/validated_move.h"
+#include "../src/impl/cgp.h"
 #include "../src/impl/config.h"
 #include "../src/impl/gameplay.h"
+#include "../src/impl/inference.h"
+#include "../src/impl/move_gen.h"
 #include "../src/impl/simmer.h"
 #include "../src/str/move_string.h"
 #include "../src/str/rack_string.h"
@@ -94,6 +94,13 @@ enum {
   DECIDE_SIM_LOG_PLAYS = 5,
   DECIDE_SIM_LOG_CAPACITY = 512,
   DECIDE_MORE_SEARCH_FACTOR = 4,
+  STEER_TOP_PLAYS = 10,
+  STEER_MAX_PLAYS = 11,
+  STEER_MAX_RACKS = 4000,
+  STEER_MIN_FIT = 8,
+  STEER_MIN_PAIR_COUNT = 2,
+  STEER_PLIES = 2,
+  STEER_GRID = 6,
   DECIDE_DEFAULT_EXCHANGE_BAG = 30,
   DECIDE_RANK_LINE = 4096,
 };
@@ -164,6 +171,343 @@ static void *decide_playout_worker(void *context) {
   return NULL;
 }
 
+static int sfit_env_int(const char *name, int fallback) {
+  const char *text = getenv(name);
+  return text ? atoi(text) : fallback;
+}
+
+// Sim-steered weights. For a sample of the racks the mover might have held,
+// a short rollout of their best static plays and of the observed play gives
+// the observed play's loss by simulation. A ridge regression of that loss on
+// the static loss, the tiles kept and the pairs of tiles kept is then applied
+// by the inference to every rack (InferenceLossModel).
+typedef struct SteerRack {
+  Rack leave;
+  bool usable;
+  double static_loss;
+  double sim_loss;
+} SteerRack;
+
+typedef struct SteerJob {
+  const Game *base;
+  const Move *observed;
+  const Rack *played;
+  int mover;
+  int rollouts;
+  uint64_t seed;
+  int first;
+  int last;
+  SteerRack *racks;
+} SteerJob;
+
+static bool steer_same_move(const Move *first, const Move *second) {
+  if (move_get_type(first) != move_get_type(second) ||
+      move_get_score(first) != move_get_score(second) ||
+      move_get_row_start(first) != move_get_row_start(second) ||
+      move_get_col_start(first) != move_get_col_start(second) ||
+      move_get_dir(first) != move_get_dir(second) ||
+      move_get_tiles_length(first) != move_get_tiles_length(second)) {
+    return false;
+  }
+  for (int tile_idx = 0; tile_idx < move_get_tiles_length(first); tile_idx++) {
+    if (move_get_tile(first, tile_idx) != move_get_tile(second, tile_idx)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+static void *steer_worker(void *context) {
+  SteerJob *job = context;
+  Game *work = game_duplicate(job->base);
+  Game *roll = game_duplicate(job->base);
+  MoveList *moves = move_list_create(SFIT_MOVE_CAPACITY);
+  MoveList *best = move_list_create(1);
+  Move candidates[STEER_MAX_PLAYS];
+  const int other = 1 - job->mover;
+  for (int rack_idx = job->first; rack_idx < job->last; rack_idx++) {
+    SteerRack *out = &job->racks[rack_idx];
+    out->usable = false;
+    game_copy(work, job->base);
+    game_seed(work, job->seed + ((uint64_t)rack_idx * UINT64_C(1000003)));
+    set_random_rack(work, job->mover, job->played);
+    rack_copy(&out->leave, player_get_rack(game_get_player(work, job->mover)));
+    rack_subtract_using_floor_zero(&out->leave, job->played);
+    const MoveGenArgs gen = {.game = work,
+                             .move_list = moves,
+                             .move_record_type = MOVE_RECORD_ALL,
+                             .move_sort_type = MOVE_SORT_EQUITY,
+                             .target_equity = EQUITY_MAX_VALUE};
+    generate_moves(&gen);
+    move_list_sort_moves(moves);
+    const int count = move_list_get_count(moves);
+    int observed_rank = -1;
+    for (int idx = 0; idx < count && observed_rank < 0; idx++) {
+      if (steer_same_move(move_list_get_move(moves, idx), job->observed)) {
+        observed_rank = idx;
+      }
+    }
+    if (observed_rank < 0) {
+      continue;
+    }
+    out->static_loss =
+        equity_to_double(move_get_equity(move_list_get_move(moves, 0))) -
+        equity_to_double(
+            move_get_equity(move_list_get_move(moves, observed_rank)));
+    int num_candidates = 0;
+    int observed_candidate = -1;
+    for (int idx = 0; idx < count && idx < STEER_TOP_PLAYS; idx++) {
+      if (idx == observed_rank) {
+        observed_candidate = num_candidates;
+      }
+      move_copy(&candidates[num_candidates++], move_list_get_move(moves, idx));
+    }
+    const int num_top = num_candidates;
+    if (observed_candidate < 0) {
+      observed_candidate = num_candidates;
+      move_copy(&candidates[num_candidates++],
+                move_list_get_move(moves, observed_rank));
+    }
+    double total[STEER_MAX_PLAYS] = {0};
+    for (int rollout = 0; rollout < job->rollouts; rollout++) {
+      for (int idx = 0; idx < num_candidates; idx++) {
+        game_copy(roll, work);
+        // The same draws for every candidate; the observer's rack is unknown
+        // to the mover, so it is redrawn.
+        game_seed(roll, job->seed + ((uint64_t)rack_idx * UINT64_C(7919)) +
+                            ((uint64_t)rollout * UINT64_C(104729)) + 1);
+        set_random_rack(roll, other, NULL);
+        play_move(&candidates[idx], roll, NULL);
+        for (int ply = 0; ply < STEER_PLIES && !game_over(roll); ply++) {
+          play_move(get_top_equity_move(roll, best), roll, NULL);
+        }
+        const Player *mover_player = game_get_player(roll, job->mover);
+        const Player *other_player = game_get_player(roll, other);
+        double value = equity_to_double(player_get_score(mover_player) -
+                                        player_get_score(other_player));
+        if (!game_over(roll)) {
+          value +=
+              equity_to_double(
+                  klv_get_leave_value(player_get_klv(mover_player),
+                                      player_get_rack(mover_player))) -
+              equity_to_double(klv_get_leave_value(
+                  player_get_klv(other_player), player_get_rack(other_player)));
+        }
+        total[idx] += value;
+      }
+    }
+    double top = total[0];
+    for (int idx = 1; idx < num_top; idx++) {
+      if (total[idx] > top) {
+        top = total[idx];
+      }
+    }
+    out->sim_loss =
+        fmax(0.0, (top - total[observed_candidate]) / (double)job->rollouts);
+    out->usable = true;
+  }
+  move_list_destroy(best);
+  move_list_destroy(moves);
+  game_destroy(roll);
+  game_destroy(work);
+  return NULL;
+}
+
+// Solves (matrix) x = rhs in place for a symmetric positive definite matrix
+// of size dim, by Cholesky. Returns false if it is not positive definite.
+static bool steer_solve(double *matrix, double *rhs, int dim) {
+  for (int col = 0; col < dim; col++) {
+    double diagonal = matrix[((size_t)col * dim) + col];
+    for (int prior = 0; prior < col; prior++) {
+      const double entry = matrix[((size_t)col * dim) + prior];
+      diagonal -= entry * entry;
+    }
+    if (diagonal <= 0) {
+      return false;
+    }
+    diagonal = sqrt(diagonal);
+    matrix[((size_t)col * dim) + col] = diagonal;
+    for (int row = col + 1; row < dim; row++) {
+      double entry = matrix[((size_t)row * dim) + col];
+      for (int prior = 0; prior < col; prior++) {
+        entry -= matrix[((size_t)row * dim) + prior] *
+                 matrix[((size_t)col * dim) + prior];
+      }
+      matrix[((size_t)row * dim) + col] = entry / diagonal;
+    }
+  }
+  for (int row = 0; row < dim; row++) {
+    double value = rhs[row];
+    for (int prior = 0; prior < row; prior++) {
+      value -= matrix[((size_t)row * dim) + prior] * rhs[prior];
+    }
+    rhs[row] = value / matrix[((size_t)row * dim) + row];
+  }
+  for (int row = dim - 1; row >= 0; row--) {
+    double value = rhs[row];
+    for (int later = row + 1; later < dim; later++) {
+      value -= matrix[((size_t)later * dim) + row] * rhs[later];
+    }
+    rhs[row] = value / matrix[((size_t)row * dim) + row];
+  }
+  return true;
+}
+
+// The columns of a leave's feature row: 0 intercept, 1 static loss, then a
+// count for each letter, then an indicator for each pair in pair_column.
+static int steer_features(const Rack *leave, double static_loss, int ld_size,
+                          int pair_column[MAX_ALPHABET_SIZE][MAX_ALPHABET_SIZE],
+                          int *columns, double *values) {
+  int num = 0;
+  columns[num] = 0;
+  values[num++] = 1;
+  columns[num] = 1;
+  values[num++] = static_loss;
+  for (int first = 0; first < ld_size; first++) {
+    const int first_count = rack_get_letter(leave, first);
+    if (first_count == 0) {
+      continue;
+    }
+    columns[num] = 2 + first;
+    values[num++] = first_count;
+    for (int second = first; second < ld_size; second++) {
+      const bool present = second == first ? first_count > 1
+                                           : rack_get_letter(leave, second) > 0;
+      if (present && pair_column[first][second] >= 0) {
+        columns[num] = pair_column[first][second];
+        values[num++] = 1;
+      }
+    }
+  }
+  return num;
+}
+
+// Fits `model` for the mover's play `observed` in `base` (the position before
+// it, mover on turn). Returns the number of racks fitted on, 0 when there
+// were too few to fit and the model must not be used.
+static int steer_fit(const Game *base, int mover, const Move *observed,
+                     const Rack *played, int threads, int num_racks,
+                     int rollouts, uint64_t seed, InferenceLossModel *model,
+                     double *mean_static, double *mean_sim) {
+  assert(num_racks <= STEER_MAX_RACKS);
+  const int ld_size = ld_get_size(game_get_ld(base));
+  SteerRack *racks = malloc_or_die((size_t)num_racks * sizeof(SteerRack));
+  SteerJob *jobs = malloc_or_die((size_t)threads * sizeof(SteerJob));
+  cpthread_t *workers = malloc_or_die((size_t)threads * sizeof(cpthread_t));
+  for (int worker = 0; worker < threads; worker++) {
+    jobs[worker] = (SteerJob){
+        .base = base,
+        .observed = observed,
+        .played = played,
+        .mover = mover,
+        .rollouts = rollouts,
+        .seed = seed,
+        .first = (int)(((int64_t)num_racks * worker) / threads),
+        .last = (int)(((int64_t)num_racks * (worker + 1)) / threads),
+        .racks = racks,
+    };
+    cpthread_create(&workers[worker], steer_worker, &jobs[worker]);
+  }
+  for (int worker = 0; worker < threads; worker++) {
+    cpthread_join(workers[worker]);
+  }
+  free(workers);
+  free(jobs);
+  const double clip = 40;
+  int pair_count[MAX_ALPHABET_SIZE][MAX_ALPHABET_SIZE];
+  int pair_column[MAX_ALPHABET_SIZE][MAX_ALPHABET_SIZE];
+  memset(pair_count, 0, sizeof(pair_count));
+  int num_fit = 0;
+  for (int rack_idx = 0; rack_idx < num_racks; rack_idx++) {
+    SteerRack *rack = &racks[rack_idx];
+    rack->usable = rack->usable && rack->static_loss <= clip;
+    if (!rack->usable) {
+      continue;
+    }
+    num_fit++;
+    for (int first = 0; first < ld_size; first++) {
+      const int first_count = rack_get_letter(&rack->leave, first);
+      if (first_count == 0) {
+        continue;
+      }
+      pair_count[first][first] += first_count > 1;
+      for (int second = first + 1; second < ld_size; second++) {
+        pair_count[first][second] += rack_get_letter(&rack->leave, second) > 0;
+      }
+    }
+  }
+  if (num_fit < STEER_MIN_FIT) {
+    free(racks);
+    return 0;
+  }
+  int dim = 2 + ld_size;
+  for (int first = 0; first < ld_size; first++) {
+    for (int second = 0; second < ld_size; second++) {
+      pair_column[first][second] = -1;
+      if (second >= first &&
+          pair_count[first][second] >= STEER_MIN_PAIR_COUNT) {
+        pair_column[first][second] = dim++;
+      }
+    }
+  }
+  double *matrix = calloc_or_die((size_t)dim * dim, sizeof(double));
+  double *rhs = calloc_or_die((size_t)dim, sizeof(double));
+  int columns[2 + RACK_SIZE + (RACK_SIZE * RACK_SIZE)];
+  double values[2 + RACK_SIZE + (RACK_SIZE * RACK_SIZE)];
+  double static_sum = 0;
+  double sim_sum = 0;
+  for (int rack_idx = 0; rack_idx < num_racks; rack_idx++) {
+    const SteerRack *rack = &racks[rack_idx];
+    if (!rack->usable) {
+      continue;
+    }
+    const double target = fmin(rack->sim_loss, clip);
+    static_sum += rack->static_loss;
+    sim_sum += target;
+    const int num = steer_features(&rack->leave, rack->static_loss, ld_size,
+                                   pair_column, columns, values);
+    for (int left = 0; left < num; left++) {
+      rhs[columns[left]] += values[left] * target;
+      for (int right = 0; right < num; right++) {
+        matrix[((size_t)columns[left] * dim) + columns[right]] +=
+            values[left] * values[right];
+      }
+    }
+  }
+  for (int col = 0; col < dim; col++) {
+    double penalty = 30;
+    if (col == 0) {
+      penalty = 1e-6;
+    } else if (col == 1) {
+      penalty = 1e-3;
+    } else if (col < 2 + ld_size) {
+      penalty = 10;
+    }
+    matrix[((size_t)col * dim) + col] += penalty;
+  }
+  const bool solved = steer_solve(matrix, rhs, dim);
+  if (solved) {
+    memset(model, 0, sizeof(*model));
+    model->intercept = rhs[0];
+    model->slope = rhs[1];
+    model->clip = clip;
+    for (int ml = 0; ml < ld_size; ml++) {
+      model->letter[ml] = rhs[2 + ml];
+      for (int second = ml; second < ld_size; second++) {
+        if (pair_column[ml][second] >= 0) {
+          model->pair[ml][second] = rhs[pair_column[ml][second]];
+        }
+      }
+    }
+    *mean_static = static_sum / num_fit;
+    *mean_sim = sim_sum / num_fit;
+  }
+  free(rhs);
+  free(matrix);
+  free(racks);
+  return solved ? num_fit : 0;
+}
+
 // Copies `keep` tiles of `actual`, chosen uniformly without replacement.
 static void decide_partial_rack(const Rack *actual, int keep, uint64_t seed,
                                 Rack *out) {
@@ -229,7 +573,8 @@ static double decide_schedule_temperature(int bag) {
     if (text == NULL || text[0] == '\0') {
       text = "4:12,10:8,17:5,25:3,38:3,53:2,75:1.5";
     }
-    while (knots < 16 && sscanf(text, "%d:%lf", &bags[knots], &temps[knots]) == 2) {
+    while (knots < 16 &&
+           sscanf(text, "%d:%lf", &bags[knots], &temps[knots]) == 2) {
       knots++;
       text = strchr(text, ',');
       if (text == NULL) {
@@ -348,9 +693,18 @@ void infer_decide_run_spec(const char *spec) {
   error_stack_destroy(errors);
   const int num_extra = (int)strlen(arm_codes);
   for (int idx = 0; idx < num_extra; idx++) {
-    assert(strchr("spctabh124vkjloxgm", arm_codes[idx]) != NULL);
+    assert(strchr("spctabh124vkjloxgmry", arm_codes[idx]) != NULL);
   }
   const double move_seconds = move_ms / 1000.0;
+  const int steer_racks = sfit_env_int("INFDEC_STEER_RACKS", 150);
+  const int steer_rollouts = sfit_env_int("INFDEC_STEER_ROLLOUTS", 20);
+  const char *steer_scale_text = getenv("INFDEC_STEER_TSCALE");
+  const double steer_temperature_scale =
+      steer_scale_text ? atof(steer_scale_text) : 0.5;
+  const char *equal_time_text = getenv("INFDEC_EQUAL_TIME_FACTOR");
+  const double equal_time_factor =
+      equal_time_text ? atof(equal_time_text) : 1.0;
+  InferenceLossModel steer_model;
   // INFDEC_ITERATIONS=N gives every search exactly N rollouts: no stopping
   // rule and no clock, so the arms differ only in what they know.
   // INFDEC_EXCH_BAG is the most tiles in the bag at which an exchange is
@@ -375,7 +729,8 @@ void infer_decide_run_spec(const char *spec) {
   char *settings = get_formatted_string(
       "set -lex CSW24 -leaves CSW24 -wmp true -rit true -ritmmap true -wit "
       "true -s1 equity -s2 equity -r1 all -r2 all -pat auto -threads %d "
-      "-numplays 100 -minp 500 -savesettings false -autosavegcg false", threads);
+      "-numplays 100 -minp 500 -savesettings false -autosavegcg false",
+      threads);
   Config *config = config_create_or_die(settings);
   if (extra_settings && extra_settings[0]) {
     char *overrides = get_formatted_string("set %s", extra_settings);
@@ -399,13 +754,13 @@ void infer_decide_run_spec(const char *spec) {
   printf("INFDEC_SETTINGS games=%d move_ms=%d threads=%d seed=%llu arms=c0%s "
          "playouts=%d plies=%d candidates=%d oracle_sim_rollouts=%d "
          "temperature=8 margin=10000 lex=CSW24 fixed_iterations=%llu "
-         "exchange_bag=%d exchange_temperature=%d settings=\"%s\" overrides=\"%s\"\n",
-         games, move_ms, threads, (unsigned long long)seed, arm_codes,
-         playouts, config_get_plies(config), num_plays,
+         "exchange_bag=%d exchange_temperature=%d settings=\"%s\" "
+         "overrides=\"%s\"\n",
+         games, move_ms, threads, (unsigned long long)seed, arm_codes, playouts,
+         config_get_plies(config), num_plays,
          DECIDE_ORACLE_SIM_ROLLOUTS_PER_MOVE,
          (unsigned long long)fixed_iterations, exchange_bag,
-         exchange_temperature, settings,
-         extra_settings ? extra_settings : "");
+         exchange_temperature, settings, extra_settings ? extra_settings : "");
   free(settings);
   printf("INFDEC_SCHEDULE env=\"%s\" T(2)=%.2f T(7)=%.2f T(14)=%.2f T(20)=%.2f "
          "T(30)=%.2f T(45)=%.2f T(60)=%.2f T(86)=%.2f\n",
@@ -532,8 +887,8 @@ void infer_decide_run_spec(const char *spec) {
           // With no kept tiles to reveal (after a bingo, an exchange or a
           // pass) this arm is the control: copy its move so that search
           // noise is not counted as an effect of the arm.
-          bool informative = move_get_type(&previous_move) ==
-                             GAME_EVENT_TILE_PLACEMENT_MOVE;
+          bool informative =
+              move_get_type(&previous_move) == GAME_EVENT_TILE_PLACEMENT_MOVE;
           if (informative) {
             rack_copy(&true_leave,
                       player_get_rack(game_get_player(previous, 1 - seat)));
@@ -549,7 +904,7 @@ void infer_decide_run_spec(const char *spec) {
         }
         const bool feature_oracle = strchr("vkj", arm->code) != NULL;
         const bool use_inference =
-            strchr("sabhogm", arm->code) != NULL ||
+            strchr("sabhogmry", arm->code) != NULL ||
             (feature_oracle &&
              move_get_type(&previous_move) == GAME_EVENT_TILE_PLACEMENT_MOVE);
         Rack *arm_known_rack = &no_rack;
@@ -567,8 +922,8 @@ void infer_decide_run_spec(const char *spec) {
           arm_known_rack = &partial;
         }
         SimArgs args;
-        config_fill_sim_args(config, arm_known_rack, &played, &observer,
-                             &known, &args);
+        config_fill_sim_args(config, arm_known_rack, &played, &observer, &known,
+                             &args);
         args.move_list = moves;
         args.num_plays = num_plays;
         args.game = game;
@@ -582,6 +937,12 @@ void infer_decide_run_spec(const char *spec) {
         }
         if (arm->code == 'x') {
           args.bai_options.sample_limit *= DECIDE_MORE_SEARCH_FACTOR;
+        }
+        if (arm->code == 'y') {
+          // Arm y: the schedule with more search, to match arm r's time.
+          args.bai_options.sample_limit =
+              (uint64_t)((double)args.bai_options.sample_limit *
+                         equal_time_factor);
         }
         args.use_inference = use_inference;
         args.legacy_alias_seed = arm->code == 'o';
@@ -606,11 +967,42 @@ void infer_decide_run_spec(const char *spec) {
             arm_temperature = 0;
           }
           args.inference_args.temperature = int_to_equity(arm_temperature);
-          if ((arm->code == 'g' || arm->code == 'm') &&
+          if ((arm->code == 'g' || arm->code == 'm' || arm->code == 'r' ||
+               arm->code == 'y') &&
               move_get_type(&previous_move) != GAME_EVENT_EXCHANGE) {
-            args.inference_args.temperature = double_to_equity(
-                decide_schedule_temperature(
+            args.inference_args.temperature =
+                double_to_equity(decide_schedule_temperature(
                     bag_get_letters(game_get_bag(previous))));
+          }
+          if (arm->code == 'r' &&
+              move_get_type(&previous_move) == GAME_EVENT_TILE_PLACEMENT_MOVE &&
+              move_get_tiles_played(&previous_move) < (RACK_SIZE) &&
+              bag_get_letters(game_get_bag(previous)) > 0) {
+            // Arm r: the schedule, with the loss of each rack steered by a
+            // mini-sim of a sample of racks.
+            Timer steer_timer;
+            ctimer_start(&steer_timer);
+            double mean_static = 0;
+            double mean_sim = 0;
+            const int fitted = steer_fit(
+                previous, 1 - seat, &previous_move, &played, threads,
+                steer_racks, steer_rollouts, sim_seed + UINT64_C(31337),
+                &steer_model, &mean_static, &mean_sim);
+            if (fitted > 0) {
+              args.inference_args.loss_model = &steer_model;
+              args.inference_args.temperature =
+                  double_to_equity(steer_temperature_scale *
+                                   decide_schedule_temperature(bag_get_letters(
+                                       game_get_bag(previous))));
+            }
+            printf("INFDEC_STEER seed=%llu game=%d turn=%d bag=%d racks=%d "
+                   "fitted=%d seconds=%.3f mean_static=%.3f mean_sim=%.3f "
+                   "intercept=%.3f slope=%.3f\n",
+                   (unsigned long long)seed, game_idx, turn,
+                   bag_get_letters(game_get_bag(previous)), steer_racks, fitted,
+                   ctimer_elapsed_seconds(&steer_timer), mean_static, mean_sim,
+                   fitted > 0 ? steer_model.intercept : 0.0,
+                   fitted > 0 ? steer_model.slope : 0.0);
           }
           if (feature_oracle) {
             rack_copy(&true_leave,
@@ -655,10 +1047,9 @@ void infer_decide_run_spec(const char *spec) {
               table_max = value;
             }
           }
-          const int kept_now =
-              rack_get_total_letters(
-                  player_get_rack(game_get_player(previous, target))) -
-              move_get_tiles_played(&previous_move);
+          const int kept_now = rack_get_total_letters(player_get_rack(
+                                   game_get_player(previous, target))) -
+                               move_get_tiles_played(&previous_move);
           printf("INFDEC_CARRY seed=%llu game=%d turn=%d target=%d used=%d "
                  "kept_in=%d kept_out=%d table_max=%.4g\n",
                  (unsigned long long)seed, game_idx, turn, target,
@@ -688,7 +1079,9 @@ void infer_decide_run_spec(const char *spec) {
           for (int tile_idx = 0;
                tile_idx < move_get_tiles_length(&previous_move); tile_idx++) {
             const MachineLetter ml = move_get_tile(&previous_move, tile_idx);
-            if (ml != PLAYED_THROUGH_MARKER) {
+            // An exchanged blank is 0, the same as PLAYED_THROUGH_MARKER.
+            if (move_get_type(&previous_move) == GAME_EVENT_EXCHANGE ||
+                ml != PLAYED_THROUGH_MARKER) {
               const MachineLetter tile =
                   get_is_blanked(ml) ? BLANK_MACHINE_LETTER : ml;
               if (rack_get_letter(&kept_truth, tile) > 0) {
@@ -853,7 +1246,8 @@ void infer_decide_run_spec(const char *spec) {
           log_fatal("infdecide oracle sim failed: seed=%llu game=%d turn=%d",
                     (unsigned long long)seed, game_idx, turn);
         }
-        const int oracle_plays = sim_results_get_number_of_plays(oracle_results);
+        const int oracle_plays =
+            sim_results_get_number_of_plays(oracle_results);
         for (int play_idx = 0; play_idx < oracle_plays; play_idx++) {
           const SimmedPlay *simmed =
               sim_results_get_simmed_play(oracle_results, play_idx);
@@ -911,9 +1305,8 @@ void infer_decide_run_spec(const char *spec) {
         const double count = playouts;
         const double dwin_mean = win_sum / count;
         const double dspread_mean = spread_sum / count;
-        const double dwin_se =
-            sqrt(fmax(0, (win_sq / count) - (dwin_mean * dwin_mean)) /
-                 (count - 1));
+        const double dwin_se = sqrt(
+            fmax(0, (win_sq / count) - (dwin_mean * dwin_mean)) / (count - 1));
         const double dspread_se =
             sqrt(fmax(0, (spread_sq / count) - (dspread_mean * dspread_mean)) /
                  (count - 1));
@@ -1048,7 +1441,7 @@ static double tfit_true_probability(const InferenceResults *results,
 
 void infer_decide_tfit_stdin(void) {
   // Negative: hard margin of that many points. Positive: temperature.
-  static const double grid[] = {100000, 0.5, 1,  1.5, 2,  3,  4, 5,
+  static const double grid[] = {100000, 0.5, 1,  1.5, 2,  3,  4,  5,
                                 6,      8,   10, 12,  16, 24, 32, -5};
   enum { GRID = sizeof(grid) / sizeof(grid[0]) };
   const char *seed_text = getenv("INFTFIT_SEED");
@@ -1059,6 +1452,13 @@ void infer_decide_tfit_stdin(void) {
   // INFTFIT_CARRY=1: instead of the temperature grid, compare inference
   // with and without carry-over from the mover's earlier turns.
   const bool carry_mode = getenv("INFTFIT_CARRY") != NULL;
+  // INFTFIT_STEER=1: sim-steered weights (see steer_fit).
+  const bool steer_mode = getenv("INFTFIT_STEER") != NULL;
+  const int steer_racks = sfit_env_int("INFDEC_STEER_RACKS", 150);
+  const int steer_rollouts = sfit_env_int("INFDEC_STEER_ROLLOUTS", 20);
+  const int steer_every = sfit_env_int("INFTFIT_EVERY", 5);
+  static const double steer_grid[] = {0.25, 0.35, 0.5, 0.7, 1.0, 1.4};
+  InferenceLossModel steer_model;
   const char *carry_temp_text = getenv("INFTFIT_CARRY_T");
   char *settings = get_formatted_string(
       "set -lex CSW24 -leaves CSW24 -wmp true -rit true -ritmmap true -wit "
@@ -1075,10 +1475,10 @@ void infer_decide_tfit_stdin(void) {
   Game *game = config_get_game(config);
   const LetterDistribution *ld = game_get_ld(game);
   ThreadControl *control = config_get_thread_control(config);
-  printf("TFIT_SETTINGS seed=%llu peg0=%d peg1=%d grid=",
-         (unsigned long long)seed,
-         player_get_peg_adjust(game_get_player(game, 0)) != NULL,
-         player_get_peg_adjust(game_get_player(game, 1)) != NULL);
+  printf(
+      "TFIT_SETTINGS seed=%llu peg0=%d peg1=%d grid=", (unsigned long long)seed,
+      player_get_peg_adjust(game_get_player(game, 0)) != NULL,
+      player_get_peg_adjust(game_get_player(game, 1)) != NULL);
   for (int idx = 0; idx < GRID; idx++) {
     printf("%s%g", idx ? "," : "", grid[idx]);
   }
@@ -1169,7 +1569,9 @@ void infer_decide_tfit_stdin(void) {
       rack_set_dist_size_and_reset(&used, ld_get_size(ld));
       for (int idx = 0; idx < move_get_tiles_length(&move); idx++) {
         const MachineLetter ml = move_get_tile(&move, idx);
-        if (ml != PLAYED_THROUGH_MARKER) {
+        // An exchanged blank is 0, the same as PLAYED_THROUGH_MARKER.
+        if (move_get_type(&move) == GAME_EVENT_EXCHANGE ||
+            ml != PLAYED_THROUGH_MARKER) {
           rack_add_letter(&used,
                           get_is_blanked(ml) ? BLANK_MACHINE_LETTER : ml);
         }
@@ -1179,18 +1581,70 @@ void infer_decide_tfit_stdin(void) {
         rack_copy(&played, &used);
       }
     }
-    if (carry_mode) {
+    if (steer_mode) {
+      // Sim-steered weights against the static schedule, at several
+      // temperature scales, on every steer_every-th placement.
+      if (move_get_type(&move) == GAME_EVENT_TILE_PLACEMENT_MOVE &&
+          !rack_is_empty(&truth) && bag_tiles > 0 &&
+          ((game_idx * 31) + turn) % steer_every == 0) {
+        rack_copy(&observer, player_get_rack(game_get_player(game, 1 - seat)));
+        Timer steer_timer;
+        ctimer_start(&steer_timer);
+        double mean_static = 0;
+        double mean_sim = 0;
+        const int fitted = steer_fit(
+            game, seat, &move, &played, threads, steer_racks, steer_rollouts,
+            (seed * UINT64_C(31)) + ((uint64_t)game_idx * UINT64_C(1000003)) +
+                ((uint64_t)turn * UINT64_C(7919)),
+            &steer_model, &mean_static, &mean_sim);
+        const double steer_seconds = ctimer_elapsed_seconds(&steer_timer);
+        printf("TSTEER game=%d turn=%d bag=%d tiles=%d leave=%d loss=%.3f "
+               "fitted=%d seconds=%.3f mean_static=%.3f mean_sim=%.3f "
+               "slope=%.3f",
+               game_idx, turn, bag_tiles, move_get_tiles_played(&move),
+               rack_get_total_letters(&truth), loss, fitted, steer_seconds,
+               mean_static, mean_sim, fitted > 0 ? steer_model.slope : 0.0);
+        for (int with_model = 0; with_model < 2; with_model++) {
+          printf(with_model ? " pm=" : " ps=");
+          for (int idx = 0; idx < STEER_GRID; idx++) {
+            InferenceArgs args;
+            infer_args_fill(&args, 0, int_to_equity(10000), NULL, game, threads,
+                            0, 0, control, false, true, seat,
+                            move_get_score(&move), 0, &played, &known,
+                            &observer);
+            args.temperature = double_to_equity(
+                steer_grid[idx] * decide_schedule_temperature(bag_tiles));
+            args.target_move = &move;
+            if (with_model && fitted > 0) {
+              args.loss_model = &steer_model;
+            }
+            thread_control_set_status(control, THREAD_CONTROL_STATUS_STARTED);
+            infer_without_ctx(&args, inferences, errors);
+            if (!error_stack_is_empty(errors)) {
+              error_stack_print_and_reset(errors);
+              log_fatal("inftfit: inference failed game=%d turn=%d", game_idx,
+                        turn);
+            }
+            printf("%s%.6g", idx ? "," : "",
+                   tfit_true_probability(inferences, &truth));
+          }
+        }
+        printf("\n");
+        fflush(stdout);
+      }
+    } else if (carry_mode) {
       if (move_get_type(&move) != GAME_EVENT_PASS && !rack_is_empty(&truth) &&
           bag_tiles > 0) {
         rack_copy(&observer, player_get_rack(game_get_player(game, 1 - seat)));
         const double carry_temperature =
-            carry_temp_text ? atof(carry_temp_text)
-                            : (exchange ? 3.0
-                                        : decide_schedule_temperature(bag_tiles));
+            carry_temp_text
+                ? atof(carry_temp_text)
+                : (exchange ? 3.0 : decide_schedule_temperature(bag_tiles));
         InferenceCarrySlot *table_in = carry_table[seat][carry_current[seat]];
         InferenceCarrySlot *table_out =
             carry_table[seat][1 - carry_current[seat]];
-        memset(table_out, 0, (size_t)num_klv_leaves * sizeof(InferenceCarrySlot));
+        memset(table_out, 0,
+               (size_t)num_klv_leaves * sizeof(InferenceCarrySlot));
         double probability[2];
         for (int with_carry = 0; with_carry < 2; with_carry++) {
           InferenceArgs args;
@@ -1254,13 +1708,12 @@ void infer_decide_tfit_stdin(void) {
              rack_get_total_letters(&truth), rank, loss);
       for (int idx = 0; idx < GRID; idx++) {
         InferenceArgs args;
-        infer_args_fill(&args, 0,
-                        grid[idx] < 0 ? double_to_equity(-grid[idx])
-                                      : int_to_equity(10000),
-                        NULL, game, threads, 0, 0, control, false, true, seat,
-                        move_get_score(&move),
-                        exchange ? move_get_tiles_played(&move) : 0, &played,
-                        &known, &observer);
+        infer_args_fill(
+            &args, 0,
+            grid[idx] < 0 ? double_to_equity(-grid[idx]) : int_to_equity(10000),
+            NULL, game, threads, 0, 0, control, false, true, seat,
+            move_get_score(&move), exchange ? move_get_tiles_played(&move) : 0,
+            &played, &known, &observer);
         args.temperature = grid[idx] < 0 ? 0 : double_to_equity(grid[idx]);
         args.target_move = &move;
         thread_control_set_status(control, THREAD_CONTROL_STATUS_STARTED);
@@ -1287,11 +1740,6 @@ void infer_decide_tfit_stdin(void) {
   move_list_destroy(moves);
   error_stack_destroy(errors);
   config_destroy(config);
-}
-
-static int sfit_env_int(const char *name, int fallback) {
-  const char *text = getenv(name);
-  return text ? atoi(text) : fallback;
 }
 
 // True when the move places exactly the tiles in used.
@@ -1334,8 +1782,8 @@ typedef struct SfitMemory {
   uint64_t cache_used;
 } SfitMemory;
 
-static uint64_t sfit_cache_key(int level, int depth,
-                               const MachineLetter *tiles, int num_tiles) {
+static uint64_t sfit_cache_key(int level, int depth, const MachineLetter *tiles,
+                               int num_tiles) {
   uint64_t key = 1;
   key = (key << 3) | (uint64_t)level;
   key = (key << 3) | (uint64_t)depth;
@@ -1370,7 +1818,8 @@ static void sfit_memory_lift(SfitMemory *memory, int level,
   }
   if (memory->cache_keys[slot] == cache_key) {
     for (int grid_idx = 0; grid_idx < SFIT_MEMORY_GRID; grid_idx++) {
-      lift[grid_idx] = memory->cache_values[(slot * SFIT_MEMORY_GRID) + grid_idx];
+      lift[grid_idx] =
+          memory->cache_values[(slot * SFIT_MEMORY_GRID) + grid_idx];
     }
     return;
   }
@@ -1437,7 +1886,8 @@ static void sfit_memory_lift(SfitMemory *memory, int level,
     memory->cache_keys[slot] = cache_key;
     memory->cache_used++;
     for (int grid_idx = 0; grid_idx < SFIT_MEMORY_GRID; grid_idx++) {
-      memory->cache_values[(slot * SFIT_MEMORY_GRID) + grid_idx] = lift[grid_idx];
+      memory->cache_values[(slot * SFIT_MEMORY_GRID) + grid_idx] =
+          lift[grid_idx];
     }
   }
 }
@@ -1490,9 +1940,8 @@ void infer_decide_sfit_stdin(void) {
     memory[player_idx].moves = NULL;
     memory[player_idx].cache_keys =
         calloc_or_die((size_t)1 << SFIT_CACHE_BITS, sizeof(uint64_t));
-    memory[player_idx].cache_values =
-        calloc_or_die(((size_t)1 << SFIT_CACHE_BITS) * SFIT_MEMORY_GRID,
-                      sizeof(double));
+    memory[player_idx].cache_values = calloc_or_die(
+        ((size_t)1 << SFIT_CACHE_BITS) * SFIT_MEMORY_GRID, sizeof(double));
     memory[player_idx].cache_used = 0;
     for (int turn_idx = 0; turn_idx < SFIT_MAX_HISTORY; turn_idx++) {
       memory[player_idx].turns[turn_idx].game = game_duplicate(game);
@@ -1638,8 +2087,7 @@ void infer_decide_sfit_stdin(void) {
     }
     if (num_leaves >= 0 && placement && !rack_is_empty(&truth) &&
         bag_tiles > 0 &&
-        ((game_idx * 31) + turn) % every ==
-            sfit_env_int("INFSFIT_OFFSET", 0)) {
+        ((game_idx * 31) + turn) % every == sfit_env_int("INFSFIT_OFFSET", 0)) {
       game_copy(work, game);
       game_seed(work, (seed * UINT64_C(1000003)) +
                           ((uint64_t)game_idx * UINT64_C(7919)) +
@@ -1678,11 +2126,11 @@ void infer_decide_sfit_stdin(void) {
         if (observed_rank < 0) {
           // Not among the best SFIT_MOVE_CAPACITY plays: report how far
           // below the best play it must be.
-          printf(" floor=%.3f\n",
-                 equity_to_double(
-                     move_get_equity(move_list_get_move(moves, 0))) -
-                     equity_to_double(move_get_equity(
-                         move_list_get_move(moves, count - 1))));
+          printf(
+              " floor=%.3f\n",
+              equity_to_double(move_get_equity(move_list_get_move(moves, 0))) -
+                  equity_to_double(
+                      move_get_equity(move_list_get_move(moves, count - 1))));
           continue;
         }
         // Follow-up features: the best play the kept tiles alone can make
@@ -1781,8 +2229,8 @@ void infer_decide_sfit_stdin(void) {
           rack_reset(&sim_played);
           rack_copy(&observer,
                     player_get_rack(game_get_player(work, 1 - seat)));
-          config_fill_sim_args(config, &no_rack, &sim_played, &observer,
-                               &known, &args);
+          config_fill_sim_args(config, &no_rack, &sim_played, &observer, &known,
+                               &args);
           args.move_list = candidates;
           args.num_plays = num_candidates;
           args.game = work;
