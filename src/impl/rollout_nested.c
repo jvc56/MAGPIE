@@ -39,6 +39,10 @@ enum {
   NESTED_CACHE_PROBES = 8,
   // The most tiles a pool holds.
   NESTED_MAX_POOL = 1024,
+  // The most static plies a nested rollout plays to finish a game, and the
+  // ply it tells the census they are (past any the census serves).
+  NESTED_FINISH_MAX_PLIES = 40,
+  NESTED_FINISH_PLY = 1000,
 };
 
 // One cached reply: the replying player's best play to a board, from one
@@ -296,7 +300,7 @@ static double nested_rollout(NestedWorker *worker, const NestedArgs *args,
     const Move *play =
         nested_top_play(worker, game, worker->reply_ply + ply, carry);
     rack_copy(&rack_before, player_get_rack(on_turn_player));
-    if (ply == args->nested_plies - 1) {
+    if (ply == args->nested_plies - 1 && !eval->finish_endgame) {
       play_move_no_cross_set_update(play, game, NULL);
     } else {
       play_move(play, game, NULL);
@@ -310,6 +314,19 @@ static double nested_rollout(NestedWorker *worker, const NestedArgs *args,
        play_idx++) {
     leftover +=
         players[play_idx] == mover ? leaves[play_idx] : -leaves[play_idx];
+  }
+  // As the sim's rollouts do (see SimArgs.finish_endgame): play on to the
+  // end when the bag is about empty, and score the result.
+  if (eval->finish_endgame && !game_over(game) &&
+      bag_get_letters(game_get_bag(game)) <= eval->finish_max_bag) {
+    for (int extra = 0; extra < NESTED_FINISH_MAX_PLIES && !game_over(game);
+         extra++) {
+      play_move(nested_top_play(worker, game, NESTED_FINISH_PLY, carry), game,
+                NULL);
+    }
+    if (game_over(game)) {
+      leftover = 0;
+    }
   }
   const double utility = nested_score(eval, game, mover, leftover);
   game_unplay_last_move(game);

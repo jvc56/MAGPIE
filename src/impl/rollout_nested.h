@@ -70,6 +70,10 @@ typedef struct NestedEval {
   double utility_w_winpct;
   double utility_w_spread;
   double utility_spread_scale;
+  // SimArgs.finish_endgame and finish_max_bag: nested rollouts finish games
+  // as the sim's rollouts do.
+  bool finish_endgame;
+  int finish_max_bag;
 } NestedEval;
 
 // Whether the rollout ply ply of game chooses by a nested search.

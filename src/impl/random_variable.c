@@ -1087,6 +1087,8 @@ static void simmer_set_nested(Simmer *simmer, const SimArgs *sim_args) {
   simmer->nested_eval.utility_w_winpct = sim_args->utility_w_winpct;
   simmer->nested_eval.utility_w_spread = sim_args->utility_w_spread;
   simmer->nested_eval.utility_spread_scale = sim_args->utility_spread_scale;
+  simmer->nested_eval.finish_endgame = sim_args->finish_endgame;
+  simmer->nested_eval.finish_max_bag = sim_args->finish_max_bag;
 }
 
 RandomVariables *rv_sim_create(RandomVariables *rvs, const SimArgs *sim_args,
