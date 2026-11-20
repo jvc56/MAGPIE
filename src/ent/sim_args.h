@@ -91,6 +91,10 @@ typedef struct SimArgs {
   // Whether and how the rollouts choose some plies' plays by nested search
   // (see rollout_nested.h). sim_args_fill turns it off; callers set it after.
   NestedArgs nested_args;
+  // Whether a rollout whose bag is empty at its horizon plays on to the end
+  // of the game by static equity, and is scored by the result instead of the
+  // win percentage table. sim_args_fill clears it.
+  bool finish_endgame;
   // Whether use_census_rollout is auto (-scensus auto): simulate sets it for
   // each sim, to whether the census supports the game and fits in this
   // machine's memory while rollout PAT is off (census_rollout_auto_fits), and
@@ -167,6 +171,7 @@ sim_args_fill(const int num_plies, const MoveList *move_list,
   sim_args->use_census_rollout = false;
   lamc_args_set_defaults(&sim_args->lamc_args);
   nested_args_set_defaults(&sim_args->nested_args);
+  sim_args->finish_endgame = false;
   sim_args->census_rollout_auto = false;
   // Start fresh, not resuming a prior SimResults. Only the TUI's analysis-
   // resume path sets this true; every other caller fills SimArgs through

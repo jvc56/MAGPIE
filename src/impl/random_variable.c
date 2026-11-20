@@ -432,6 +432,10 @@ typedef struct SimmerWorker {
   NestedWorker *nested_worker;
 } SimmerWorker;
 
+// The most static plies a rollout plays to finish a game whose bag is empty
+// at its horizon (see SimArgs.finish_endgame); the game ends well before.
+enum { SIM_FINISH_MAX_PLIES = 40 };
+
 // The step of a simulation worker's cross set salt: odd, so a worker's
 // salts do not repeat.
 static const uint64_t SIMMER_CROSS_SET_SALT_STEP = 0xD1B54A32D192ED03ULL;
@@ -477,6 +481,8 @@ typedef struct Simmer {
   // SimArgs.nested_args, and how its nested rollouts are scored.
   NestedArgs nested_args;
   NestedEval nested_eval;
+  // SimArgs.finish_endgame.
+  bool finish_endgame;
 } Simmer;
 
 // A worker's copy of the game plays the sim's rollouts, so both of its
@@ -706,7 +712,8 @@ static double sim_rollout(const Simmer *simmer, SimmerWorker *simmer_worker,
     // On the final ply the resulting cross-sets are never read (no further move
     // generation happens before game_unplay_last_move restores the board), so
     // skip the cross-set update for that play.
-    if (ply == plies - 1) {
+    if (ply == plies - 1 &&
+        !(simmer->finish_endgame && bag_is_empty(game_get_bag(game)))) {
       play_move_no_cross_set_update(best_play, game, NULL);
     } else {
       play_move(best_play, game, NULL);
@@ -722,6 +729,27 @@ static double sim_rollout(const Simmer *simmer, SimmerWorker *simmer_worker,
       }
     }
     simmed_play_add_stats_for_ply(simmed_play, ply, best_play, record);
+  }
+
+  // With finish_endgame, a rollout whose bag is empty at its horizon plays
+  // on by static equity to the end of the game, which then scores it.
+  bool horizon_plies_odd = plies % 2 == 1;
+  if (simmer->finish_endgame && !game_over(game) &&
+      bag_is_empty(game_get_bag(game))) {
+    int extra_plies = 0;
+    while (!game_over(game) && extra_plies < SIM_FINISH_MAX_PLIES) {
+      const Move *play = get_top_equity_move_with_carry(
+          game, move_list, simmer->best_move_carry);
+      play_move(play, game, NULL);
+      sim_results_increment_node_count(sim_results);
+      extra_plies++;
+    }
+    if (game_over(game)) {
+      leftover = 0;
+    } else {
+      horizon_plies_odd =
+          game_get_player_on_turn_index(game) == simmer->initial_player;
+    }
   }
 
   const Equity spread =
@@ -753,7 +781,8 @@ static double sim_rollout(const Simmer *simmer, SimmerWorker *simmer_worker,
                               projected_leftover, record);
   const double wpct = simmed_play_add_win_pct_stat(
       simmer->win_pcts, simmed_play, spread, leftover, game_end_reason,
-      bag_tiles, on_turn_rack_tiles, off_turn_rack_tiles, plies % 2, record);
+      bag_tiles, on_turn_rack_tiles, off_turn_rack_tiles, horizon_plies_odd,
+      record);
   // reset to first state. we only need to restore one backup.
   game_unplay_last_move(game);
   return_rack_to_bag(game, player_off_turn_index);
@@ -1044,6 +1073,7 @@ static bool rv_sim_can_resume(const SimArgs *sim_args,
 }
 
 static void simmer_set_nested(Simmer *simmer, const SimArgs *sim_args) {
+  simmer->finish_endgame = sim_args->finish_endgame;
   simmer->nested_args = sim_args->nested_args;
   simmer->nested_eval.win_pcts = sim_args->win_pcts;
   simmer->nested_eval.utility_w_winpct = sim_args->utility_w_winpct;

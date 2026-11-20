@@ -50,9 +50,12 @@
 #include "../src/impl/cgp.h"
 #include "../src/impl/config.h"
 #include "../src/impl/gameplay.h"
+#include "../src/impl/move_gen.h"
+#include "../src/impl/random_variable.h"
 #include "../src/impl/rollout_nested.h"
 #include "../src/impl/simmer.h"
 #include "../src/str/move_string.h"
+#include "../src/str/rack_string.h"
 #include "../src/util/fnv.h"
 #include "../src/util/io_util.h"
 #include "../src/util/string_util.h"
@@ -119,7 +122,6 @@ typedef struct NcrShared {
   int eg_plies;
   SimArgs base_args[NCR_NUM_METHODS];
   int num_plays[NCR_NUM_METHODS];
-  ThreadControl *thread_control;
   TranspositionTable *tt;
   atomic_int next_position;
   atomic_int done;
@@ -173,11 +175,12 @@ static double ncr_play_out(NcrWorker *worker, const int mover,
           worker->solver, &worker->solver_settings, game, worker->shared->tt, 1,
           ncr_mix(seed + 7919ULL * (uint64_t)turn) | 1ULL, NULL, false,
           worker->error_stack);
-      if (!solved || !error_stack_is_empty(worker->error_stack)) {
+      if (solved == NULL || !error_stack_is_empty(worker->error_stack)) {
         error_stack_print_and_reset(worker->error_stack);
         log_fatal("nested continuation regret: an endgame solve failed");
+      } else {
+        move_copy(&move, solved);
       }
-      move_copy(&move, solved);
     } else {
       ncr_choose(worker, NCR_METHOD_CONT,
                  ncr_mix(seed + 104729ULL * (uint64_t)turn), &move);
@@ -196,7 +199,7 @@ static double ncr_play_out(NcrWorker *worker, const int mover,
 
 static void ncr_evaluate(NcrWorker *worker, NcrPosition *position,
                          const uint64_t pos_seed) {
-  NcrShared *shared = worker->shared;
+  const NcrShared *shared = worker->shared;
   const int mover = game_get_player_on_turn_index(position->game);
   const int other = 1 - mover;
   double win_sum = 0.0;
@@ -629,9 +632,763 @@ void test_nested_bench(void) {
       totals.searches ? 100.0 * totals.switched / totals.searches : 0.0,
       (unsigned long long)totals.samples, (unsigned long long)totals.cache_hits,
       (unsigned long long)totals.cache_misses,
-      totals.cache_hits + totals.cache_misses
+      (totals.cache_hits + totals.cache_misses) > 0
           ? 100.0 * totals.cache_hits /
                 (double)(totals.cache_hits + totals.cache_misses)
           : 0.0);
+  config_destroy(config);
+}
+
+// Ground truth tables (on demand: nestedgt, nestedeval).
+//
+// nestedgt writes a table of positions and, for each, the continuation value
+// of each of its top plays by static equity: NGT_CANDS plays, each played out
+// NCR_CONTS times by the continuation engine on the same continuation seeds,
+// so that the plays' values are compared on common random numbers.
+// nestedeval then scores sim settings against the table without playing
+// anything out: each settings' play in each position is looked up, and its
+// regret is the best value in the position less its own. A play outside the
+// table is counted, not scored.
+//
+// Settings (and NCR_* as above for positions and the continuation engine):
+//   NGT_FILE     the table (default nested_gt.txt)
+//   NGT_CANDS    plays valued per position (default 10)
+//   NE_METHODS   |-separated sim settings to score, each after NCR_BASE
+
+enum {
+  NGT_MAX_CANDS = 64,
+  NGT_MAX_CONTS = 1024,
+  NGT_LINE_SIZE = 65536,
+};
+
+typedef struct GtPosition {
+  Game *game;
+  int bag;
+  int pos_id;
+  int num_cands;
+  Move cands[NGT_MAX_CANDS];
+  // num_cands x num_conts results for the mover.
+  double *wins;
+  double *spreads;
+} GtPosition;
+
+typedef struct GtShared {
+  GtPosition *positions;
+  int num_positions;
+  int num_cands;
+  int num_conts;
+  FILE *out;
+  cpthread_mutex_t out_mutex;
+  atomic_int next_position;
+} GtShared;
+
+// The top num_cands plays of game by static equity, best first.
+static int gt_candidates(const Game *game, const int num_cands, Move *out) {
+  MoveList *move_list = move_list_create(num_cands);
+  const MoveGenArgs gen_args = {
+      .game = game,
+      .move_list = move_list,
+      .move_record_type = MOVE_RECORD_ALL,
+      .move_sort_type = MOVE_SORT_EQUITY,
+      .override_kwg = NULL,
+      .eq_margin_movegen = 0,
+      .target_equity = EQUITY_MAX_VALUE,
+  };
+  generate_moves(&gen_args);
+  move_list_sort_moves(move_list);
+  const int count = move_list_get_count(move_list);
+  for (int move_idx = 0; move_idx < count; move_idx++) {
+    move_copy(&out[move_idx], move_list_get_move(move_list, move_idx));
+  }
+  move_list_destroy(move_list);
+  return count;
+}
+
+static uint64_t gt_cont_seed(const int pos_id, const int cont_idx) {
+  return ncr_mix(ncr_mix(0x6A09E667ULL + (uint64_t)pos_id) ^
+                 (0x51ED27ULL + (uint64_t)cont_idx));
+}
+
+// Plays candidate cand_idx of position out num_conts times.
+static void gt_value_candidate(NcrWorker *worker, GtPosition *position,
+                               const int cand_idx, const int num_conts) {
+  const int mover = game_get_player_on_turn_index(position->game);
+  const int other = 1 - mover;
+  for (int cont_idx = 0; cont_idx < num_conts; cont_idx++) {
+    const uint64_t cont_seed = gt_cont_seed(position->pos_id, cont_idx);
+    game_copy(worker->game, position->game);
+    return_rack_to_bag(worker->game, other);
+    game_seed(worker->game, cont_seed);
+    draw_to_full_rack(worker->game, other);
+    play_move(&position->cands[cand_idx], worker->game, NULL);
+    double spread;
+    const double win = ncr_play_out(worker, mover, cont_seed, &spread);
+    position->wins[cand_idx * num_conts + cont_idx] = win;
+    position->spreads[cand_idx * num_conts + cont_idx] = spread;
+  }
+}
+
+static void gt_write_position(GtShared *shared, const GtPosition *position) {
+  // The opponent's rack is not part of the position: the sims and the
+  // continuations draw it from the unseen tiles.
+  Game *copy = game_duplicate(position->game);
+  return_rack_to_bag(copy, 1 - game_get_player_on_turn_index(copy));
+  char *cgp = game_get_cgp(copy, true);
+  game_destroy(copy);
+  StringBuilder *sb = string_builder_create();
+  string_builder_add_formatted_string(
+      sb, "GTPOS %d %d %d %d %s\n", position->pos_id, position->bag,
+      position->num_cands, shared->num_conts, cgp);
+  free(cgp);
+  for (int cand_idx = 0; cand_idx < position->num_cands; cand_idx++) {
+    string_builder_add_formatted_string(sb, "GTCAND %d %d", position->pos_id,
+                                        cand_idx);
+    for (int cont_idx = 0; cont_idx < shared->num_conts; cont_idx++) {
+      string_builder_add_formatted_string(
+          sb, " %g:%g", position->wins[cand_idx * shared->num_conts + cont_idx],
+          position->spreads[cand_idx * shared->num_conts + cont_idx]);
+    }
+    string_builder_add_string(sb, "\n");
+  }
+  cpthread_mutex_lock(&shared->out_mutex);
+  (void)fputs(string_builder_peek(sb), shared->out);
+  (void)fflush(shared->out);
+  cpthread_mutex_unlock(&shared->out_mutex);
+  string_builder_destroy(sb);
+}
+
+typedef struct GtWorkerArgs {
+  NcrWorker *worker;
+  GtShared *gt;
+} GtWorkerArgs;
+
+static void *gt_worker_run(void *data) {
+  const GtWorkerArgs *args = (const GtWorkerArgs *)data;
+  GtShared *gt = args->gt;
+  while (true) {
+    const int pos_idx = atomic_fetch_add(&gt->next_position, 1);
+    if (pos_idx >= gt->num_positions) {
+      break;
+    }
+    GtPosition *position = &gt->positions[pos_idx];
+    position->num_cands =
+        gt_candidates(position->game, gt->num_cands, position->cands);
+    position->wins =
+        malloc_or_die(sizeof(double) * position->num_cands * gt->num_conts);
+    position->spreads =
+        malloc_or_die(sizeof(double) * position->num_cands * gt->num_conts);
+    for (int cand_idx = 0; cand_idx < position->num_cands; cand_idx++) {
+      gt_value_candidate(args->worker, position, cand_idx, gt->num_conts);
+    }
+    gt_write_position(gt, position);
+    printf("NGT position %d (bag %d) done\n", position->pos_id, position->bag);
+    (void)fflush(stdout);
+  }
+  return NULL;
+}
+
+// The workers, each with its own game, lists and sim contexts for settings
+// base_args, and endgame solving at eg_plies.
+static NcrWorker *ncr_workers_create(NcrShared *shared, const Game *game,
+                                     const int num_threads) {
+  NcrWorker *workers = calloc_or_die(num_threads, sizeof(NcrWorker));
+  for (int worker_idx = 0; worker_idx < num_threads; worker_idx++) {
+    NcrWorker *worker = &workers[worker_idx];
+    worker->shared = shared;
+    worker->worker_idx = worker_idx;
+    worker->game = game_duplicate(game);
+    for (int method = 0; method < NCR_NUM_METHODS; method++) {
+      worker->lists[method] = move_list_create(shared->num_plays[method]);
+      worker->ctxs[method] = NULL;
+      worker->results[method] = sim_results_create(0.0);
+    }
+    worker->solver = autoplay_solver_ctx_create();
+    autoplay_solver_settings_set_defaults(&worker->solver_settings);
+    worker->solver_settings.endgame_plies = shared->eg_plies;
+    worker->solver_settings.peg_max_bag = 0;
+    worker->error_stack = error_stack_create();
+  }
+  return workers;
+}
+
+static void ncr_workers_destroy(NcrWorker *workers, const int num_threads) {
+  for (int worker_idx = 0; worker_idx < num_threads; worker_idx++) {
+    NcrWorker *worker = &workers[worker_idx];
+    game_destroy(worker->game);
+    for (int method = 0; method < NCR_NUM_METHODS; method++) {
+      move_list_destroy(worker->lists[method]);
+      sim_ctx_destroy(worker->ctxs[method]);
+      sim_results_destroy(worker->results[method]);
+    }
+    autoplay_solver_ctx_destroy(worker->solver);
+    error_stack_destroy(worker->error_stack);
+  }
+  free(workers);
+}
+
+void test_nested_gt(void) {
+  log_set_level(LOG_FATAL);
+  const int num_positions = ncr_env_int("NCR_POSITIONS", 200);
+  const int min_bag = ncr_env_int("NCR_MIN_BAG", 1);
+  const int max_bag = ncr_env_int("NCR_MAX_BAG", 20);
+  int num_threads = ncr_env_int("NCR_THREADS", 10);
+  if (num_threads > NCR_MAX_THREADS) {
+    num_threads = NCR_MAX_THREADS;
+  }
+  const char *lexicon = ncr_env_string("NCR_LEX", "CSW21");
+  const char *cont_settings = ncr_env_string(
+      "NCR_CONT", "-plies 2 -numplays 8 -it 300 -scond none -tlim 0 "
+                  "-minplayiterations 10 -sbagcycle false");
+  NcrShared shared;
+  memset(&shared, 0, sizeof(shared));
+  shared.num_threads = num_threads;
+  shared.eg_plies = ncr_env_int("NCR_EG_PLIES", 4);
+  Config *config = ncr_config(lexicon, cont_settings);
+  thread_control_set_status(config_get_thread_control(config),
+                            THREAD_CONTROL_STATUS_STARTED);
+  for (int method = 0; method < NCR_NUM_METHODS; method++) {
+    config_fill_sim_args(config, NULL, NULL, NULL, NULL,
+                         &shared.base_args[method]);
+    shared.num_plays[method] = shared.base_args[method].num_plays;
+  }
+  shared.tt = transposition_table_create(NCR_TT_FRACTION);
+
+  GtShared gt;
+  memset(&gt, 0, sizeof(gt));
+  gt.num_cands = ncr_env_int("NGT_CANDS", 10);
+  gt.num_conts = ncr_env_int("NCR_CONTS", 32);
+  assert(gt.num_cands <= NGT_MAX_CANDS && gt.num_conts <= NGT_MAX_CONTS);
+  NcrPosition *made = calloc_or_die(num_positions, sizeof(NcrPosition));
+  const int first_game = ncr_env_int("NCR_FIRST_GAME", 0);
+  gt.num_positions =
+      ncr_make_positions(config_get_game(config), made, num_positions, min_bag,
+                         max_bag, (uint64_t)first_game);
+  gt.positions = calloc_or_die(gt.num_positions, sizeof(GtPosition));
+  for (int pos_idx = 0; pos_idx < gt.num_positions; pos_idx++) {
+    gt.positions[pos_idx].game = made[pos_idx].game;
+    gt.positions[pos_idx].bag = made[pos_idx].bag;
+    gt.positions[pos_idx].pos_id = first_game * 1000 + pos_idx;
+  }
+  free(made);
+  const char *file = ncr_env_string("NGT_FILE", "nested_gt.txt");
+  gt.out = fopen_or_die(file, "a");
+  cpthread_mutex_init(&gt.out_mutex);
+  atomic_init(&gt.next_position, 0);
+  printf("NGT: %d positions, bag %d to %d, %d plays, %d continuations, %d "
+         "threads, to %s\nNGT cont: %s\n",
+         gt.num_positions, min_bag, max_bag, gt.num_cands, gt.num_conts,
+         num_threads, file, cont_settings);
+  (void)fflush(stdout);
+  NcrWorker *workers =
+      ncr_workers_create(&shared, gt.positions[0].game, num_threads);
+  GtWorkerArgs *worker_args = malloc_or_die(sizeof(GtWorkerArgs) * num_threads);
+  cpthread_t *threads = malloc_or_die(sizeof(cpthread_t) * num_threads);
+  for (int worker_idx = 0; worker_idx < num_threads; worker_idx++) {
+    worker_args[worker_idx].worker = &workers[worker_idx];
+    worker_args[worker_idx].gt = &gt;
+    cpthread_create(&threads[worker_idx], gt_worker_run,
+                    &worker_args[worker_idx]);
+  }
+  for (int worker_idx = 0; worker_idx < num_threads; worker_idx++) {
+    cpthread_join(threads[worker_idx]);
+  }
+  (void)fclose(gt.out);
+  ncr_workers_destroy(workers, num_threads);
+  free(worker_args);
+  free(threads);
+  for (int pos_idx = 0; pos_idx < gt.num_positions; pos_idx++) {
+    game_destroy(gt.positions[pos_idx].game);
+    free(gt.positions[pos_idx].wins);
+    free(gt.positions[pos_idx].spreads);
+  }
+  free(gt.positions);
+  transposition_table_destroy(shared.tt);
+  config_destroy(config);
+}
+
+// The evaluation of sim settings against a table.
+
+typedef struct EvalShared {
+  GtPosition *positions;
+  int num_positions;
+  int num_conts;
+  int num_methods;
+  // num_methods x num_positions: the index of the play chosen, or -1 when
+  // it is outside the table.
+  int *chosen;
+  double *seconds;
+  int method;
+  atomic_int next_position;
+} EvalShared;
+
+typedef struct EvalWorkerArgs {
+  NcrWorker *worker;
+  EvalShared *eval;
+} EvalWorkerArgs;
+
+static void *eval_worker_run(void *data) {
+  const EvalWorkerArgs *args = (const EvalWorkerArgs *)data;
+  EvalShared *eval = args->eval;
+  NcrWorker *worker = args->worker;
+  while (true) {
+    const int pos_idx = atomic_fetch_add(&eval->next_position, 1);
+    if (pos_idx >= eval->num_positions) {
+      break;
+    }
+    const GtPosition *position = &eval->positions[pos_idx];
+    game_copy(worker->game, position->game);
+    Move chosen;
+    const double start = (double)ctimer_monotonic_ns() / 1e9;
+    ncr_choose(worker, NCR_METHOD_A,
+               ncr_mix(0x243F6A88ULL + (uint64_t)position->pos_id), &chosen);
+    eval->seconds[eval->method * eval->num_positions + pos_idx] =
+        (double)ctimer_monotonic_ns() / 1e9 - start;
+    int index = -1;
+    for (int cand_idx = 0; cand_idx < position->num_cands; cand_idx++) {
+      if (compare_moves_without_equity(&chosen, &position->cands[cand_idx],
+                                       true) == -1) {
+        index = cand_idx;
+        break;
+      }
+    }
+    eval->chosen[eval->method * eval->num_positions + pos_idx] = index;
+  }
+  return NULL;
+}
+
+static double gt_mean(const GtPosition *position, const int num_conts,
+                      const int cand_idx, const bool spread) {
+  const double *values = spread ? position->spreads : position->wins;
+  double sum = 0.0;
+  for (int cont_idx = 0; cont_idx < num_conts; cont_idx++) {
+    sum += values[cand_idx * num_conts + cont_idx];
+  }
+  return sum / num_conts;
+}
+
+// Loads the table in file, whose positions are in the lexicon of config's
+// game.
+static int gt_load(const char *file, Config *config, GtPosition **out,
+                   int *num_conts) {
+  FILE *in = fopen_or_die(file, "r");
+  char *line = malloc_or_die(NGT_LINE_SIZE);
+  int capacity = 64;
+  int count = 0;
+  GtPosition *positions = calloc_or_die(capacity, sizeof(GtPosition));
+  GtPosition *current = NULL;
+  while (fgets(line, NGT_LINE_SIZE, in)) {
+    if (strncmp(line, "GTPOS ", 6) == 0) {
+      int pos_id = 0;
+      int bag = 0;
+      int cands = 0;
+      int conts = 0;
+      int consumed = 0;
+      if (sscanf(line, "GTPOS %d %d %d %d %n", &pos_id, &bag, &cands, &conts,
+                 &consumed) != 4) {
+        log_fatal("bad table line: %s", line);
+      }
+      char *cgp = line + consumed;
+      cgp[strcspn(cgp, "\n")] = '\0';
+      char *load = get_formatted_string("cgp %s", cgp);
+      load_and_exec_config_or_die(config, load);
+      free(load);
+      if (count == capacity) {
+        capacity *= 2;
+        positions = realloc_or_die(positions, sizeof(GtPosition) * capacity);
+      }
+      current = &positions[count++];
+      memset(current, 0, sizeof(GtPosition));
+      current->game = game_duplicate(config_get_game(config));
+      current->bag = bag;
+      current->pos_id = pos_id;
+      current->num_cands = gt_candidates(current->game, cands, current->cands);
+      assert(current->num_cands == cands);
+      *num_conts = conts;
+      current->wins = malloc_or_die(sizeof(double) * cands * conts);
+      current->spreads = malloc_or_die(sizeof(double) * cands * conts);
+    } else if (strncmp(line, "GTCAND ", 7) == 0) {
+      int pos_id = 0;
+      int cand_idx = 0;
+      int consumed = 0;
+      if (sscanf(line, "GTCAND %d %d%n", &pos_id, &cand_idx, &consumed) != 2 ||
+          current == NULL || pos_id != current->pos_id) {
+        log_fatal("bad table line: %s", line);
+      }
+      const char *cursor = line + consumed;
+      for (int cont_idx = 0; cont_idx < *num_conts; cont_idx++) {
+        double win = 0;
+        double spread = 0;
+        int used = 0;
+        if (sscanf(cursor, " %lf:%lf%n", &win, &spread, &used) != 2) {
+          log_fatal("bad table line: %s", line);
+        }
+        cursor += used;
+        current->wins[cand_idx * *num_conts + cont_idx] = win;
+        current->spreads[cand_idx * *num_conts + cont_idx] = spread;
+      }
+    }
+  }
+  free(line);
+  (void)fclose(in);
+  *out = positions;
+  return count;
+}
+
+// The mean of candidate cand_idx's results over the continuations of one
+// half: even (half 0) or odd (half 1).
+static double gt_half_mean(const GtPosition *position, const int num_conts,
+                           const int cand_idx, const int half) {
+  double sum = 0.0;
+  int count = 0;
+  for (int cont_idx = half; cont_idx < num_conts; cont_idx += 2) {
+    sum += position->wins[cand_idx * num_conts + cont_idx];
+    count++;
+  }
+  return count > 0 ? sum / count : 0.0;
+}
+
+// Regret of cand_idx against an oracle that picks the best play on one half
+// of the continuations and is scored on the other, averaged over both
+// splits: free of the bias of taking the best of noisy means.
+static double gt_oracle_regret(const GtPosition *position, const int num_conts,
+                               const int cand_idx) {
+  double regret = 0.0;
+  for (int half = 0; half < 2; half++) {
+    int best = 0;
+    for (int other = 1; other < position->num_cands; other++) {
+      if (gt_half_mean(position, num_conts, other, half) >
+          gt_half_mean(position, num_conts, best, half)) {
+        best = other;
+      }
+    }
+    regret += gt_half_mean(position, num_conts, best, 1 - half) -
+              gt_half_mean(position, num_conts, cand_idx, 1 - half);
+  }
+  return regret / 2.0;
+}
+
+void test_nested_eval(void) {
+  log_set_level(LOG_FATAL);
+  int num_threads = ncr_env_int("NCR_THREADS", 10);
+  if (num_threads > NCR_MAX_THREADS) {
+    num_threads = NCR_MAX_THREADS;
+  }
+  const char *lexicon = ncr_env_string("NCR_LEX", "CSW21");
+  const char *base =
+      ncr_env_string("NCR_BASE", "-plies 2 -numplays 10 -scond none -tlim 0 "
+                                 "-minplayiterations 10");
+  StringSplitter *methods = split_string(
+      ncr_env_string("NE_METHODS", "-it 1000|-it 1000 -nested plies=0"), '|',
+      false);
+  const int num_methods = string_splitter_get_number_of_items(methods);
+  Config *loader = ncr_config(lexicon, "");
+  EvalShared eval;
+  memset(&eval, 0, sizeof(eval));
+  eval.num_positions = gt_load(ncr_env_string("NGT_FILE", "nested_gt.txt"),
+                               loader, &eval.positions, &eval.num_conts);
+  eval.num_methods = num_methods;
+  eval.chosen = malloc_or_die(sizeof(int) * num_methods * eval.num_positions);
+  eval.seconds =
+      malloc_or_die(sizeof(double) * num_methods * eval.num_positions);
+  printf("NE: %d positions, %d continuations each, %d threads\nNE base: %s\n",
+         eval.num_positions, eval.num_conts, num_threads, base);
+  for (int method = 0; method < num_methods; method++) {
+    char *settings = get_formatted_string(
+        "%s %s", base, string_splitter_get_item(methods, method));
+    Config *config = ncr_config(lexicon, settings);
+    free(settings);
+    thread_control_set_status(config_get_thread_control(config),
+                              THREAD_CONTROL_STATUS_STARTED);
+    NcrShared shared;
+    memset(&shared, 0, sizeof(shared));
+    for (int slot = 0; slot < NCR_NUM_METHODS; slot++) {
+      config_fill_sim_args(config, NULL, NULL, NULL, NULL,
+                           &shared.base_args[slot]);
+      shared.num_plays[slot] = shared.base_args[slot].num_plays;
+    }
+    NcrWorker *workers =
+        ncr_workers_create(&shared, eval.positions[0].game, num_threads);
+    EvalWorkerArgs *worker_args =
+        malloc_or_die(sizeof(EvalWorkerArgs) * num_threads);
+    cpthread_t *threads = malloc_or_die(sizeof(cpthread_t) * num_threads);
+    eval.method = method;
+    atomic_init(&eval.next_position, 0);
+    nested_totals_reset();
+    for (int worker_idx = 0; worker_idx < num_threads; worker_idx++) {
+      worker_args[worker_idx].worker = &workers[worker_idx];
+      worker_args[worker_idx].eval = &eval;
+      cpthread_create(&threads[worker_idx], eval_worker_run,
+                      &worker_args[worker_idx]);
+    }
+    for (int worker_idx = 0; worker_idx < num_threads; worker_idx++) {
+      cpthread_join(threads[worker_idx]);
+    }
+    ncr_workers_destroy(workers, num_threads);
+    free(worker_args);
+    free(threads);
+    config_destroy(config);
+
+    // Regret against the table's best, and the difference from method 0 in
+    // the positions both chose inside the table.
+    double win_regret[2] = {0, 0};
+    double spread_regret[2] = {0, 0};
+    double diff[2] = {0, 0};
+    double oracle_regret[2] = {0, 0};
+    double spread_diff[2] = {0, 0};
+    double group_regret[4] = {0, 0, 0, 0};
+    int group_count[4] = {0, 0, 0, 0};
+    double seconds = 0.0;
+    int inside = 0;
+    int differ = 0;
+    for (int pos_idx = 0; pos_idx < eval.num_positions; pos_idx++) {
+      const GtPosition *position = &eval.positions[pos_idx];
+      seconds += eval.seconds[method * eval.num_positions + pos_idx];
+      const int index = eval.chosen[method * eval.num_positions + pos_idx];
+      const int base_index = eval.chosen[pos_idx];
+      if (index < 0 || base_index < 0) {
+        continue;
+      }
+      inside++;
+      double best_win = -1e9;
+      double best_spread = -1e9;
+      for (int cand_idx = 0; cand_idx < position->num_cands; cand_idx++) {
+        best_win =
+            fmax(best_win, gt_mean(position, eval.num_conts, cand_idx, false));
+        best_spread = fmax(best_spread,
+                           gt_mean(position, eval.num_conts, cand_idx, true));
+      }
+      const double wr =
+          best_win - gt_mean(position, eval.num_conts, index, false);
+      const double sr =
+          best_spread - gt_mean(position, eval.num_conts, index, true);
+      win_regret[0] += wr;
+      win_regret[1] += wr * wr;
+      spread_regret[0] += sr;
+      spread_regret[1] += sr * sr;
+      const double oracle = gt_oracle_regret(position, eval.num_conts, index);
+      oracle_regret[0] += oracle;
+      oracle_regret[1] += oracle * oracle;
+      const int group = position->bag <= 3    ? 0
+                        : position->bag <= 7  ? 1
+                        : position->bag <= 12 ? 2
+                                              : 3;
+      group_regret[group] += oracle;
+      group_count[group]++;
+      const double d = gt_mean(position, eval.num_conts, index, false) -
+                       gt_mean(position, eval.num_conts, base_index, false);
+      diff[0] += d;
+      diff[1] += d * d;
+      const double ds = gt_mean(position, eval.num_conts, index, true) -
+                        gt_mean(position, eval.num_conts, base_index, true);
+      spread_diff[0] += ds;
+      spread_diff[1] += ds * ds;
+      if (getenv("NE_CHOICES")) {
+        printf("NE choice %d %d %d %d\n", method, position->pos_id,
+               position->bag, index);
+      }
+      differ += index != base_index ? 1 : 0;
+    }
+    const double n = inside > 0 ? inside : 1;
+    const double wr_mean = win_regret[0] / n;
+    const double sr_mean = spread_regret[0] / n;
+    const double d_mean = diff[0] / n;
+    const NestedTotals totals = nested_get_totals();
+    printf("NE method %d [%s]: regret win %.5f (SE %.5f) spread %.3f (SE "
+           "%.3f); vs method 0 win %+.5f (SE %.5f), %d differ; %d of %d "
+           "inside; %.3f s each; nested switched %.1f%%\n",
+           method, string_splitter_get_item(methods, method), wr_mean,
+           sqrt(fmax(win_regret[1] / n - wr_mean * wr_mean, 0) / n), sr_mean,
+           sqrt(fmax(spread_regret[1] / n - sr_mean * sr_mean, 0) / n), d_mean,
+           sqrt(fmax(diff[1] / n - d_mean * d_mean, 0) / n), differ, inside,
+           eval.num_positions, seconds / eval.num_positions,
+           totals.searches ? 100.0 * totals.switched / totals.searches : 0.0);
+    const double sd_mean = spread_diff[0] / n;
+    printf("NE method %d vs method 0 spread %+.3f (SE %.3f)\n", method, sd_mean,
+           sqrt(fmax(spread_diff[1] / n - sd_mean * sd_mean, 0) / n));
+    const double or_mean = oracle_regret[0] / n;
+    printf(
+        "NE method %d oracle regret %.5f (SE %.5f); by bag 1-3 %.4f (%d), "
+        "4-7 %.4f (%d), 8-12 %.4f (%d), 13+ %.4f (%d)\n",
+        method, or_mean,
+        sqrt(fmax(oracle_regret[1] / n - or_mean * or_mean, 0) / n),
+        group_count[0] ? group_regret[0] / group_count[0] : 0.0, group_count[0],
+        group_count[1] ? group_regret[1] / group_count[1] : 0.0, group_count[1],
+        group_count[2] ? group_regret[2] / group_count[2] : 0.0, group_count[2],
+        group_count[3] ? group_regret[3] / group_count[3] : 0.0,
+        group_count[3]);
+    (void)fflush(stdout);
+  }
+  string_splitter_destroy(methods);
+  for (int pos_idx = 0; pos_idx < eval.num_positions; pos_idx++) {
+    game_destroy(eval.positions[pos_idx].game);
+    free(eval.positions[pos_idx].wins);
+    free(eval.positions[pos_idx].spreads);
+  }
+  free(eval.positions);
+  free(eval.chosen);
+  free(eval.seconds);
+  config_destroy(loader);
+}
+
+// On demand (nestedvar): rollout data for studying what explains a
+// rollout's outcome. For each position of the table NGT_FILE and each of its
+// plays, NV_SEEDS rollouts on the seeds every play shares, each written as a
+// line: the position, the play, the seed's index, the rollout's utility, the
+// opponent's rack the seed drew, and the mover's rack after the play's draw.
+// Sim settings come from NCR_BASE; the output goes to NV_FILE.
+
+typedef struct VarShared {
+  GtPosition *positions;
+  int num_positions;
+  int num_seeds;
+  SimArgs base_args;
+  FILE *out;
+  cpthread_mutex_t out_mutex;
+  atomic_int next_position;
+} VarShared;
+
+typedef struct VarWorkerArgs {
+  VarShared *var;
+  int worker_idx;
+} VarWorkerArgs;
+
+static void var_add_rack(StringBuilder *sb, const Game *game,
+                         const int player_index) {
+  const Rack *rack = player_get_rack(game_get_player(game, player_index));
+  if (rack_is_empty(rack)) {
+    string_builder_add_string(sb, "-");
+  } else {
+    string_builder_add_rack(sb, rack, game_get_ld(game), false);
+  }
+}
+
+static void *var_worker_run(void *data) {
+  const VarWorkerArgs *args = (const VarWorkerArgs *)data;
+  VarShared *var = args->var;
+  SimResults *sim_results = sim_results_create(0.0);
+  RandomVariables *rvs = NULL;
+  while (true) {
+    const int pos_idx = atomic_fetch_add(&var->next_position, 1);
+    if (pos_idx >= var->num_positions) {
+      break;
+    }
+    const GtPosition *position = &var->positions[pos_idx];
+    MoveList *move_list = move_list_create(position->num_cands);
+    const MoveGenArgs gen_args = {
+        .game = position->game,
+        .move_list = move_list,
+        .move_record_type = MOVE_RECORD_ALL,
+        .move_sort_type = MOVE_SORT_EQUITY,
+        .override_kwg = NULL,
+        .eq_margin_movegen = 0,
+        .target_equity = EQUITY_MAX_VALUE,
+    };
+    generate_moves(&gen_args);
+    move_list_sort_moves(move_list);
+    SimArgs sim_args = var->base_args;
+    sim_args.game = position->game;
+    sim_args.move_list = move_list;
+    sim_args.num_plays = move_list_get_count(move_list);
+    sim_args.num_threads = 1;
+    sim_args.bai_options.num_threads = 1;
+    sim_args.bai_options.parent_worker_thread_index = args->worker_idx;
+    sim_args.seed = ncr_mix(0x13198A2EULL + (uint64_t)position->pos_id);
+    const RandomVariablesArgs rvs_args = {
+        .type = RANDOM_VARIABLES_SIMMED_PLAYS,
+        .sim_args = &sim_args,
+        .sim_results = sim_results,
+    };
+    if (rvs) {
+      rvs_reset(rvs, &rvs_args);
+    } else {
+      rvs = rvs_create(&rvs_args);
+    }
+    const int mover = game_get_player_on_turn_index(position->game);
+    Game *copy = game_duplicate(position->game);
+    StringBuilder *sb = string_builder_create();
+    for (int seed_idx = 0; seed_idx < var->num_seeds; seed_idx++) {
+      const uint64_t seed =
+          ncr_mix(ncr_mix((uint64_t)position->pos_id) + (uint64_t)seed_idx);
+      for (int cand_idx = 0; cand_idx < move_list_get_count(move_list);
+           cand_idx++) {
+        const double utility = rvs_sample_with_seed(
+            rvs, (uint64_t)cand_idx, seed, args->worker_idx, NULL, NULL);
+        // The racks the rollout drew, drawn again the same way.
+        game_copy(copy, position->game);
+        return_rack_to_bag(copy, 1 - mover);
+        game_seed(copy, seed);
+        draw_to_full_rack(copy, 1 - mover);
+        string_builder_add_formatted_string(sb, "NV %d %d %d %.6f ",
+                                            position->pos_id, cand_idx,
+                                            seed_idx, utility);
+        var_add_rack(sb, copy, 1 - mover);
+        string_builder_add_string(sb, " ");
+        play_move(move_list_get_move(move_list, cand_idx), copy, NULL);
+        var_add_rack(sb, copy, mover);
+        string_builder_add_string(sb, "\n");
+      }
+    }
+    cpthread_mutex_lock(&var->out_mutex);
+    (void)fputs(string_builder_peek(sb), var->out);
+    (void)fflush(var->out);
+    cpthread_mutex_unlock(&var->out_mutex);
+    string_builder_destroy(sb);
+    game_destroy(copy);
+    move_list_destroy(move_list);
+  }
+  rvs_destroy(rvs);
+  sim_results_destroy(sim_results);
+  return NULL;
+}
+
+void test_nested_var(void) {
+  log_set_level(LOG_FATAL);
+  int num_threads = ncr_env_int("NCR_THREADS", 10);
+  if (num_threads > NCR_MAX_THREADS) {
+    num_threads = NCR_MAX_THREADS;
+  }
+  const char *lexicon = ncr_env_string("NCR_LEX", "CSW21");
+  const char *base =
+      ncr_env_string("NCR_BASE", "-plies 2 -numplays 10 -scond none -tlim 0 "
+                                 "-minplayiterations 10 -sbagcycle false");
+  Config *config = ncr_config(lexicon, base);
+  thread_control_set_status(config_get_thread_control(config),
+                            THREAD_CONTROL_STATUS_STARTED);
+  VarShared var;
+  memset(&var, 0, sizeof(var));
+  int num_conts = 0;
+  var.num_positions = gt_load(ncr_env_string("NGT_FILE", "nested_gt.txt"),
+                              config, &var.positions, &num_conts);
+  const int num_loaded = var.num_positions;
+  const int limit = ncr_env_int("NV_POSITIONS", var.num_positions);
+  if (limit < var.num_positions) {
+    var.num_positions = limit;
+  }
+  var.num_seeds = ncr_env_int("NV_SEEDS", 200);
+  config_fill_sim_args(config, NULL, NULL, NULL, NULL, &var.base_args);
+  var.out = fopen_or_die(ncr_env_string("NV_FILE", "nested_var.txt"), "w");
+  cpthread_mutex_init(&var.out_mutex);
+  atomic_init(&var.next_position, 0);
+  VarWorkerArgs *worker_args =
+      malloc_or_die(sizeof(VarWorkerArgs) * num_threads);
+  cpthread_t *threads = malloc_or_die(sizeof(cpthread_t) * num_threads);
+  for (int worker_idx = 0; worker_idx < num_threads; worker_idx++) {
+    worker_args[worker_idx].var = &var;
+    worker_args[worker_idx].worker_idx = worker_idx;
+    cpthread_create(&threads[worker_idx], var_worker_run,
+                    &worker_args[worker_idx]);
+  }
+  for (int worker_idx = 0; worker_idx < num_threads; worker_idx++) {
+    cpthread_join(threads[worker_idx]);
+  }
+  (void)fclose(var.out);
+  free(worker_args);
+  free(threads);
+  for (int pos_idx = 0; pos_idx < num_loaded; pos_idx++) {
+    game_destroy(var.positions[pos_idx].game);
+    free(var.positions[pos_idx].wins);
+    free(var.positions[pos_idx].spreads);
+  }
+  free(var.positions);
   config_destroy(config);
 }

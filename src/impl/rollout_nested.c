@@ -50,12 +50,6 @@ typedef struct NestedReply {
   uint8_t replier_rack_after;
 } NestedReply;
 
-typedef struct NestedCacheEntry {
-  // 0 for empty.
-  uint64_t key;
-  // NestedArgs.num_samples replies, at replies[slot * num_samples].
-} NestedCacheEntry;
-
 struct NestedWorker {
   // The copy of the rollout's game the nested rollouts play on.
   Game *game;
