@@ -60,6 +60,7 @@
 #include "move_gen_test.h"
 #include "move_test.h"
 #include "movegen_budget_test.h"
+#include "nested_test.h"
 #include "pat_eval_test.h"
 #include "pat_features_test.h"
 #include "pat_file_test.h"
@@ -176,6 +177,7 @@ static TestEntry test_table[] = {
     {"datafetch", test_data_fetch},
     {"bai", test_bai},
     {"lamc", test_lamc},
+    {"nested", test_nested},
     {"baiutil", test_bai_utility},
     {"command", test_command},
     {"embedding", test_embedding_lifecycle},
@@ -270,6 +272,8 @@ static TestEntry on_demand_test_table[] = {
     {"infercmp", test_infer_cmp},
     {"censusrolloutbench", test_census_rollout_bench},
     {"lamcreplay", test_lamc_replay},
+    {"nestedcr", test_nested_cr},
+    {"nestedbench", test_nested_bench},
     {"lamcautoplay", test_lamc_autoplay},
     {"genstuck", test_generate_stuck_cgps},
     {"gennonstuck", test_generate_nonstuck_cgps},

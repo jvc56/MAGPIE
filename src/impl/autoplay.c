@@ -1071,6 +1071,12 @@ static const Move *game_runner_choose_best_move(AutoplayWorker *autoplay_worker,
   autoplay_worker->turn_was_simmed = false;
   const int player_on_turn_index =
       game_get_player_on_turn_index(game_runner->game);
+  if (autoplay_worker->args.static_until_bag > 0 &&
+      bag_get_letters(game_get_bag(game_runner->game)) >
+          autoplay_worker->args.static_until_bag) {
+    return get_top_equity_move(
+        game_runner->game, autoplay_worker->move_lists[player_on_turn_index]);
+  }
   PlayChooser *play_chooser = game_runner->play_choosers[player_on_turn_index];
   if (play_chooser != NULL) {
     game_timer_start_turn(&game_runner->game_timer, player_on_turn_index);

@@ -15,6 +15,7 @@
 #include "../ent/inference_results.h"
 #include "../ent/letter_distribution.h"
 #include "../ent/move.h"
+#include "../ent/nested_args.h"
 #include "../ent/pat_board_cache.h"
 #include "../ent/peg_adjust.h"
 #include "../ent/player.h"
@@ -29,6 +30,7 @@
 #include "bai_logger.h"
 #include "census_rollout.h"
 #include "gameplay.h"
+#include "rollout_nested.h"
 #include <math.h>
 #include <stdatomic.h>
 #include <stddef.h>
@@ -425,6 +427,9 @@ typedef struct SimmerWorker {
   // The worker's cache for board-only PAT (see pat_board_cache.h), made by
   // the first sim whose rollouts use it and emptied for each one.
   PATBoardCache *pat_board_cache;
+  // The worker's nested searches (see rollout_nested.h), made by the first
+  // sim whose rollouts use them.
+  NestedWorker *nested_worker;
 } SimmerWorker;
 
 // The step of a simulation worker's cross set salt: odd, so a worker's
@@ -469,6 +474,9 @@ typedef struct Simmer {
   // sim that uses it makes (SimArgs.use_census_rollout).
   bool use_census_rollout;
   CensusRollout *census_rollout;
+  // SimArgs.nested_args, and how its nested rollouts are scored.
+  NestedArgs nested_args;
+  NestedEval nested_eval;
 } Simmer;
 
 // A worker's copy of the game plays the sim's rollouts, so both of its
@@ -549,6 +557,12 @@ SimmerWorker *simmer_create_worker(const SimArgs *sim_args) {
   simmer_worker->move_list = move_list_create(1);
   simmer_worker->prng = prng_create(0);
   simmer_worker->census_rollout_worker = NULL;
+  simmer_worker->nested_worker = NULL;
+  if (sim_args->nested_args.enabled) {
+    simmer_worker->nested_worker = nested_worker_create(
+        simmer_worker->game, simmer_worker->cross_set_cache);
+    nested_worker_reset(simmer_worker->nested_worker, sim_args->seed);
+  }
   return simmer_worker;
 }
 
@@ -560,6 +574,13 @@ void simmer_reset_worker(SimmerWorker *simmer_worker, const SimArgs *sim_args) {
   simmer_worker_set_rollout_pat(simmer_worker, sim_args);
   simmer_worker_set_rollout_peg_adjust(simmer_worker, sim_args);
   simmer_worker_set_rollout_pool_shift(simmer_worker, sim_args);
+  if (sim_args->nested_args.enabled && simmer_worker->nested_worker == NULL) {
+    simmer_worker->nested_worker = nested_worker_create(
+        simmer_worker->game, simmer_worker->cross_set_cache);
+  }
+  if (simmer_worker->nested_worker != NULL) {
+    nested_worker_reset(simmer_worker->nested_worker, sim_args->seed);
+  }
 }
 
 void simmer_worker_destroy(SimmerWorker *simmer_worker) {
@@ -572,6 +593,7 @@ void simmer_worker_destroy(SimmerWorker *simmer_worker) {
   prng_destroy(simmer_worker->prng);
   census_rollout_worker_destroy(simmer_worker->census_rollout_worker);
   pat_board_cache_destroy(simmer_worker->pat_board_cache);
+  nested_worker_destroy(simmer_worker->nested_worker);
   free(simmer_worker);
 }
 
@@ -662,13 +684,23 @@ static double sim_rollout(const Simmer *simmer, SimmerWorker *simmer_worker,
       break;
     }
 
-    const Move *best_play =
-        simmer->use_census_rollout
-            ? census_rollout_get_best_move(simmer_worker->census_rollout_worker,
-                                           simmer->census_rollout, game,
-                                           move_list, ply)
-            : get_top_equity_move_with_carry(game, move_list,
-                                             simmer->best_move_carry);
+    const Move *best_play;
+    if (simmer->nested_args.enabled &&
+        nested_applies(&simmer->nested_args, ply,
+                       bag_get_letters(game_get_bag(game)))) {
+      best_play = nested_choose_move(
+          simmer_worker->nested_worker, &simmer->nested_args,
+          &simmer->nested_eval, game,
+          seed ^ ((uint64_t)(ply + 1) * 0xA24BAED4963EE407ULL),
+          simmer->best_move_carry);
+    } else if (simmer->use_census_rollout) {
+      best_play = census_rollout_get_best_move(
+          simmer_worker->census_rollout_worker, simmer->census_rollout, game,
+          move_list, ply);
+    } else {
+      best_play = get_top_equity_move_with_carry(game, move_list,
+                                                 simmer->best_move_carry);
+    }
     rack_copy(&spare_rack, player_get_rack(player_on_turn));
 
     // On the final ply the resulting cross-sets are never read (no further move
@@ -1011,6 +1043,14 @@ static bool rv_sim_can_resume(const SimArgs *sim_args,
          sim_results_get_num_plies(sim_results) == sim_args->num_plies;
 }
 
+static void simmer_set_nested(Simmer *simmer, const SimArgs *sim_args) {
+  simmer->nested_args = sim_args->nested_args;
+  simmer->nested_eval.win_pcts = sim_args->win_pcts;
+  simmer->nested_eval.utility_w_winpct = sim_args->utility_w_winpct;
+  simmer->nested_eval.utility_w_spread = sim_args->utility_w_spread;
+  simmer->nested_eval.utility_spread_scale = sim_args->utility_spread_scale;
+}
+
 RandomVariables *rv_sim_create(RandomVariables *rvs, const SimArgs *sim_args,
                                SimResults *sim_results) {
   rvs->sample_func = rv_sim_sample;
@@ -1075,6 +1115,7 @@ RandomVariables *rv_sim_create(RandomVariables *rvs, const SimArgs *sim_args,
   simmer->utility_spread_scale = sim_args->utility_spread_scale;
   simmer->use_margin_forecast = sim_args->use_margin_forecast;
   simmer->bag_cycle = sim_args->bag_cycle;
+  simmer_set_nested(simmer, sim_args);
 
   simmer->thread_control = thread_control;
 
@@ -1135,6 +1176,7 @@ void rv_sim_reset(RandomVariables *rvs, const SimArgs *sim_args) {
   simmer->utility_spread_scale = sim_args->utility_spread_scale;
   simmer->use_margin_forecast = sim_args->use_margin_forecast;
   simmer->bag_cycle = sim_args->bag_cycle;
+  simmer_set_nested(simmer, sim_args);
 
   if (!rv_sim_can_resume(sim_args, simmer->sim_results)) {
     sim_results_reset(sim_args->move_list, simmer->sim_results,

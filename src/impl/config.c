@@ -51,6 +51,7 @@
 #include "../ent/lamc_args.h"
 #include "../ent/letter_distribution.h"
 #include "../ent/move.h"
+#include "../ent/nested_args.h"
 #include "../ent/pat.h"
 #include "../ent/pat_lexicon.h"
 #include "../ent/pat_utility.h"
@@ -100,6 +101,7 @@
 #include "play_feature_registry.h"
 #include "rack_draw.h"
 #include "rack_info_table_maker.h"
+#include "rollout_nested.h"
 #include "simmer.h"
 #include <assert.h>
 #include <ctype.h>
@@ -374,6 +376,12 @@ struct Config {
   bool sim_lamc;
   bool p1_sim_lamc;
   bool p2_sim_lamc;
+  // -nested, and the per-player -nested1 and -nested2, which default to it.
+  NestedArgs sim_nested;
+  NestedArgs p1_sim_nested;
+  NestedArgs p2_sim_nested;
+  // -apstaticbag (see AutoplayArgs.static_until_bag).
+  int autoplay_static_bag;
   bool sim_census_rollout_auto;
   bool use_heat_map;
   bool print_boards;
@@ -2985,6 +2993,31 @@ static void help_entry_fill(const Config *config, int token,
       text = "Specifies whether LAMC (see lamc) picks player 1 or 2's plays "
              "to simulate in autoplay.";
       break;
+    case ARG_TOKEN_NESTED:
+    case ARG_TOKEN_P1_NESTED:
+    case ARG_TOKEN_P2_NESTED:
+      usages[0] = "<spec>";
+      examples[0] = "off";
+      examples[1] = "plies=0,k=6,m=8,h=1";
+      text = "Specifies whether a simulation's rollouts choose the plays of "
+             "some plies by a nested search instead of by static equity "
+             "(nested1 and nested2 for each player in autoplay). off, or "
+             "comma-separated settings: plies (joined by +, 0 is the reply "
+             "to the candidate), k (candidates), m (nested rollouts each), h "
+             "(static plies after the candidate in a nested rollout), margin "
+             "(points below the best), maxbag, minbag, alloc (uniform or "
+             "race), z (the race's standard errors) and switch (the nested "
+             "utility a candidate other than the static best must gain). Off "
+             "by default.";
+      break;
+    case ARG_TOKEN_AUTOPLAY_STATIC_BAG:
+      usages[0] = "<tiles>";
+      examples[0] = "20";
+      text = "Specifies that in autoplay, while the bag holds more than this "
+             "many tiles, both players play their top static equity play, so "
+             "that each game of a pair reaches the same late position before "
+             "the players' own choices begin. 0 (the default) for never.";
+      break;
     case ARG_TOKEN_USE_HEAT_MAP:
       usages[0] = "<true_or_false>";
       examples[0] = "true";
@@ -4323,6 +4356,7 @@ void config_fill_sim_args(const Config *config, Rack *known_opp_rack,
   sim_args->bag_cycle = config->sim_bag_cycle;
   sim_args->use_census_rollout = config->sim_census_rollout;
   config_set_sim_args_lamc(config, config->sim_lamc, sim_args);
+  sim_args->nested_args = config->sim_nested;
   sim_args->census_rollout_auto = config->sim_census_rollout_auto;
   if (config->game) {
     config_set_sim_args_pat_rollout(
@@ -5735,6 +5769,7 @@ void config_fill_autoplay_args(const Config *config,
   autoplay_args->solver_settings[1] = config->solver_settings[1];
   autoplay_args->movegen_budget[0] = config->p1_movegen_budget;
   autoplay_args->movegen_budget[1] = config->p2_movegen_budget;
+  autoplay_args->static_until_bag = config->autoplay_static_bag;
   autoplay_args->total_num_threads = config->num_threads;
   autoplay_args->solver_tt_fraction_of_mem = config->tt_fraction_of_mem;
 
@@ -5805,6 +5840,7 @@ void config_fill_autoplay_args(const Config *config,
   autoplay_args->p1_sim_args.bag_cycle = config->p1_sim_bag_cycle;
   config_set_sim_args_lamc(config, config->p1_sim_lamc,
                            &autoplay_args->p1_sim_args);
+  autoplay_args->p1_sim_args.nested_args = config->p1_sim_nested;
 
   sim_args_fill(
       config->p2_sim_plies, /*move_list=*/NULL, config->p2_num_plays,
@@ -5822,6 +5858,7 @@ void config_fill_autoplay_args(const Config *config,
   autoplay_args->p2_sim_args.bag_cycle = config->p2_sim_bag_cycle;
   config_set_sim_args_lamc(config, config->p2_sim_lamc,
                            &autoplay_args->p2_sim_args);
+  autoplay_args->p2_sim_args.nested_args = config->p2_sim_nested;
 
   config_set_sim_args_pat_rollout(config, 0, &autoplay_args->p1_sim_args);
   config_set_sim_args_pat_rollout(config, 1, &autoplay_args->p2_sim_args);
@@ -14511,6 +14548,35 @@ static void config_set_lamc_defaults(Config *config) {
   config->sim_lamc = false;
   config->p1_sim_lamc = false;
   config->p2_sim_lamc = false;
+  nested_args_set_defaults(&config->sim_nested);
+  nested_args_set_defaults(&config->p1_sim_nested);
+  nested_args_set_defaults(&config->p2_sim_nested);
+  config->autoplay_static_bag = 0;
+}
+
+// Loads -nested, and the per-player -nested1 and -nested2, which default to
+// it.
+static void config_load_nested(Config *config, ErrorStack *error_stack) {
+  const char *shared = config_get_parg_value(config, ARG_TOKEN_NESTED, 0);
+  if (shared) {
+    nested_args_parse(shared, &config->sim_nested, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+    config->p1_sim_nested = config->sim_nested;
+    config->p2_sim_nested = config->sim_nested;
+  }
+  const char *p1 = config_get_parg_value(config, ARG_TOKEN_P1_NESTED, 0);
+  if (p1) {
+    nested_args_parse(p1, &config->p1_sim_nested, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+  }
+  const char *p2 = config_get_parg_value(config, ARG_TOKEN_P2_NESTED, 0);
+  if (p2) {
+    nested_args_parse(p2, &config->p2_sim_nested, error_stack);
+  }
 }
 
 // Loads -lamc, the per-player -lamc1 and -lamc2, which default to it, and the
@@ -15383,6 +15449,17 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
   }
 
   config_load_lamc(config, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
+  config_load_nested(config, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
+  config_load_int(config, ARG_TOKEN_AUTOPLAY_STATIC_BAG, 0, 1000,
+                  &config->autoplay_static_bag, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
@@ -17337,6 +17414,10 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_P2_SIM_BAG_CYCLE, "sbc2", 1, 1);
   arg(ARG_TOKEN_P1_LAMC, "lamc1", 1, 1);
   arg(ARG_TOKEN_P2_LAMC, "lamc2", 1, 1);
+  arg(ARG_TOKEN_NESTED, "nested", 1, 1);
+  arg(ARG_TOKEN_P1_NESTED, "nested1", 1, 1);
+  arg(ARG_TOKEN_P2_NESTED, "nested2", 1, 1);
+  arg(ARG_TOKEN_AUTOPLAY_STATIC_BAG, "apstaticbag", 1, 1);
   arg(ARG_TOKEN_P1_TIME_LIMIT, "tl1", 1, 1);
   arg(ARG_TOKEN_P2_TIME_LIMIT, "tl2", 1, 1);
   arg(ARG_TOKEN_MOVE_BUDGET, "movebudget", 1, 1);
@@ -17852,6 +17933,10 @@ static void config_add_settings_to_string_builder_internal(const Config *config,
     case ARG_TOKEN_LAMC_STATIC_FINALISTS:
     case ARG_TOKEN_P1_LAMC:
     case ARG_TOKEN_P2_LAMC:
+    case ARG_TOKEN_NESTED:
+    case ARG_TOKEN_P1_NESTED:
+    case ARG_TOKEN_P2_NESTED:
+    case ARG_TOKEN_AUTOPLAY_STATIC_BAG:
     case ARG_TOKEN_HELP:
     case ARG_TOKEN_VERSION:
     case ARG_TOKEN_BUILDERS:
