@@ -462,6 +462,7 @@ typedef struct Simmer {
   bool use_margin_forecast;
   // SimArgs.bag_cycle.
   bool bag_cycle;
+  bool legacy_alias_seed;
   ThreadControl *thread_control;
   SimResults *sim_results;
   // The best moves the current simulation's playouts found, by rack, shared
@@ -651,7 +652,10 @@ static double sim_rollout(const Simmer *simmer, SimmerWorker *simmer_worker,
     // The inferred leave and the shuffle that replenishes it must be drawn
     // independently. Seeded alike, the alias bin is tied to the first shuffle
     // index, which biases the tiles the opponent draws to fill their rack.
-    prng_seed(simmer_worker->prng, seed ^ UINT64_C(0xD1B54A32D192ED03));
+    prng_seed(simmer_worker->prng,
+              simmer->legacy_alias_seed
+                  ? seed
+                  : seed ^ UINT64_C(0xD1B54A32D192ED03));
     Rack inferred_rack;
     rack_set_dist_size(&inferred_rack, simmer->dist_size);
     if (alias_method_sample(
@@ -1169,6 +1173,7 @@ RandomVariables *rv_sim_create(RandomVariables *rvs, const SimArgs *sim_args,
   simmer->utility_spread_scale = sim_args->utility_spread_scale;
   simmer->use_margin_forecast = sim_args->use_margin_forecast;
   simmer->bag_cycle = sim_args->bag_cycle;
+  simmer->legacy_alias_seed = sim_args->legacy_alias_seed;
 
   simmer->thread_control = thread_control;
 
@@ -1232,6 +1237,7 @@ void rv_sim_reset(RandomVariables *rvs, const SimArgs *sim_args) {
   simmer->utility_spread_scale = sim_args->utility_spread_scale;
   simmer->use_margin_forecast = sim_args->use_margin_forecast;
   simmer->bag_cycle = sim_args->bag_cycle;
+  simmer->legacy_alias_seed = sim_args->legacy_alias_seed;
 
   if (!rv_sim_can_resume(sim_args, simmer->sim_results)) {
     sim_results_reset(sim_args->move_list, simmer->sim_results,

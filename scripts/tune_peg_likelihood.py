@@ -21,8 +21,16 @@ PRIOR_MIX = 0.01
 
 def load(paths):
     observations = defaultdict(list)
+    expected_ways = {}
     for path in paths:
         for line in open(path, errors='replace'):
+            if not line.endswith('\n'):
+                continue
+            if line.startswith('INFBENCH observation '):
+                row = dict(re.findall(r'(\w+)=(\S+)', line))
+                key = (path, row['pair'], row['game'], row['turn'])
+                leave = int(row['leave'])
+                expected_ways[key] = math.comb(leave + int(row['bag']), leave)
             if not line.startswith('INFBENCH pegcache '):
                 continue
             row = dict(re.findall(r'(\w+)=(\S+)', line))
@@ -32,14 +40,19 @@ def load(paths):
                 top = [tuple(map(float, item.split(':'))) for item in row['top'].split(',')]
             except ValueError:
                 continue  # a line still being written
-            if not line.endswith('\n') or any(len(item) != 2 for item in top):
+            if any(len(item) != 2 for item in top):
                 continue
             rack = {'leave': row['leave'], 'truth': row['truth'] == '1', 'ways': float(row['ways']),
                     'klv': float(row['klv']), 'rank': int(row['observed_rank']),
                     'win': float(row['observed_win']), 'spread': float(row['observed_spread']),
                     'top': top}
             observations[(path, row['pair'], row['game'], row['turn'])].append(rack)
-    return {key: racks for key, racks in observations.items() if sum(r['truth'] for r in racks) == 1}
+    # A killed worker can print the truth before it finishes enumerating.
+    # Check the prior's combinatorial mass before normalizing a posterior.
+    return {key: racks for key, racks in observations.items()
+            if sum(r['truth'] for r in racks) == 1
+            and len({r['leave'] for r in racks}) == len(racks)
+            and sum(r['ways'] for r in racks) == expected_ways.get(key)}
 
 
 def regret(rack, win_points):

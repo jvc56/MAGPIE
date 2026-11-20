@@ -1,0 +1,21 @@
+complete games: 341
+search seconds per move, control: mean 1.15, median 1.16, max 2.45 (n=7001)
+search seconds per move, g: mean 1.20, median 1.20, max 3.45 (n=6660)
+search seconds per move, hard-margin inference (5): mean 1.18, median 1.19, max 2.71 (n=6660)
+search seconds per move, softmax inference: mean 1.20, median 1.20, max 3.33 (n=6660)
+
+== softmax inference vs control: 6660 positions, 454 differ (6.8%)
+  playout oracle, win: per decision +0.0617 (game-clustered se 0.0235, z +2.62); per game (n=341) +0.602 [+0.152, +1.053]; when different +0.905
+  playout oracle, spread: per decision +0.1361 (game-clustered se 0.0557, z +2.44); per game (n=341) +1.329 [+0.262, +2.396]; when different +1.996
+  sim oracle, win: per decision +0.0748 (game-clustered se 0.0258, z +2.91); per game (n=341) +0.731 [+0.238, +1.224]; when different +1.098
+  sim oracle, utility: per decision +0.0619 (game-clustered se 0.0202, z +3.07); per game (n=341) +0.604 [+0.218, +0.990]; when different +0.908
+  sim oracle, equity: per decision +0.1556 (game-clustered se 0.0537, z +2.90); per game (n=341) +1.519 [+0.492, +2.547]; when different +2.282
+  oracles agree in sign on 381/454 differing positions
+
+== hard-margin inference (5) vs control: 6660 positions, 605 differ (9.1%)
+  playout oracle, win: per decision +0.1736 (game-clustered se 0.0395, z +4.40); per game (n=341) +1.696 [+0.941, +2.450]; when different +1.911
+  playout oracle, spread: per decision +0.2105 (game-clustered se 0.0757, z +2.78); per game (n=341) +2.056 [+0.608, +3.503]; when different +2.317
+  sim oracle, win: per decision +0.1777 (game-clustered se 0.0400, z +4.44); per game (n=341) +1.736 [+0.970, +2.502]; when different +1.957
+  sim oracle, utility: per decision +0.1380 (game-clustered se 0.0302, z +4.57); per game (n=341) +1.348 [+0.770, +1.925]; when different +1.519
+  sim oracle, equity: per decision +0.2449 (game-clustered se 0.0730, z +3.36); per game (n=341) +2.391 [+0.996, +3.787]; when different +2.696
+  oracles agree in sign on 530/605 differing positions

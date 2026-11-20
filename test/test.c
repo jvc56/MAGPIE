@@ -50,6 +50,7 @@
 #include "infer_cmp_test.h"
 #include "infer_decide_test.h"
 #include "infer_match_test.h"
+#include "infer_reply_test.h"
 #include "infer_test.h"
 #include "klv_test.h"
 #include "kwg_alpha_test.h"
@@ -318,6 +319,11 @@ static TestEntry on_demand_test_table[] = {
     {"peg4pondpess", test_peg_4bag_pond_pessimistic},
     {"pegbench1", test_benchmark_peg_1},
     {"pegbench2", test_benchmark_peg_2},
+    {"infrank", infer_decide_rank_stdin},
+    {"inftfit", infer_decide_tfit_stdin},
+    {"infsfit", infer_decide_sfit_stdin},
+    {"infreply", test_infer_reply},
+    {"infrefill", test_infer_reply_sampler},
     {"pegbench3", test_benchmark_peg_3},
     {"pegbench4", test_benchmark_peg_4},
     {"pegbfix", test_peg_bench_fixture},

@@ -79,6 +79,9 @@ typedef struct SimArgs {
   // (see sim_args_set_bag_cycle_bai_options). sim_args_fill clears it; the
   // config turns it on by default.
   bool bag_cycle;
+  // Test-only (infdecide arm o): seed the alias sampler exactly as the bag
+  // shuffle, as before the sampler fix, to measure what the fix changes.
+  bool legacy_alias_seed;
   // Whether a census of the position steers the rollouts' move generation
   // (see census_rollout.h): the same moves, found faster. sim_args_fill
   // clears it.
@@ -156,6 +159,7 @@ sim_args_fill(const int num_plies, const MoveList *move_list,
   sim_args->utility_spread_scale = utility_spread_scale;
   sim_args->use_margin_forecast = use_margin_forecast;
   sim_args->bag_cycle = false;
+  sim_args->legacy_alias_seed = false;
   sim_args->use_census_rollout = false;
   sim_args->census_rollout_auto = false;
   // Start fresh, not resuming a prior SimResults. Only the TUI's analysis-
