@@ -48,7 +48,7 @@ typedef struct LaneShadowEntry {
 static_assert(sizeof(LaneShadowEntry) == LANE_SHADOW_ENTRY_BYTES,
               "a lane shadow entry fills one 64-byte block");
 
-// The best play of one anchor of a lane, as the small generator finds it:
+// The best play of a lane or one of its anchors. For an anchor (odd key),
 // the generator searches an anchor for every play whatever the best so far
 // is, so an anchor's best play depends only on what its lane's key holds, on
 // which lane it is (a play names its row), on the anchor's column and on how
@@ -66,7 +66,10 @@ typedef struct AnchorPlayEntry {
   uint16_t score;
   uint8_t play_length;
   uint8_t tiles_played;
-  uint64_t unused;
+  // For a canonical lane result (even key), the highest shadow bound still
+  // unaccounted for. A strictly higher incumbent can reuse the result.
+  // EQUITY_UNDEFINED_VALUE marks a complete search.
+  Equity skipped_bound;
 } AnchorPlayEntry;
 
 enum {
@@ -81,7 +84,8 @@ typedef struct LaneShadowCache {
   // The entries are 2^index_bits, indexed by the key's top index_bits bits.
   int index_bits;
   uint64_t salt;
-  // The anchors' plays are 2^anchor_index_bits, indexed the same way.
+  // Anchor and lane plays share 2^anchor_index_bits entries, indexed the same
+  // way.
   AnchorPlayEntry *anchor_plays;
   int anchor_index_bits;
 } LaneShadowCache;
