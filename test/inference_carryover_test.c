@@ -483,10 +483,11 @@ void test_inference_carryover(void) {
 // opponent burns a lone S for 1 point under a blank, then plays a Q for 62
 // and an X for 50, one tile each, on a board set up for it. Prints the
 // probability that their kept tiles include an S after each play, with the
-// history off and on, at temperatures 8, 4 and 2. MAGPIE_CARRY_FLOOR_PROBE
-// overrides the floor fraction (see inference_carryover_begin): with the
-// default 1e-3 a 99% belief at temperature 2 falls to 44% after the Q; with
-// 1e-6 it holds at 99%.
+// history off and on, at temperatures 8, 4, 2 and 1.6 (what the
+// harness schedule gives with about 70 tiles in the bag, as here).
+// MAGPIE_CARRY_FLOOR_PROBE overrides the floor fraction (see
+// inference_carryover_begin): with the default 1e-3 a 99% belief at temperature
+// 2 falls to 44% after the Q; with 1e-6 it holds at 99%.
 static double carry_test_probability_of_letter(Config *config,
                                                const char *letter) {
   InferenceResults *results = config_get_inference_results(config);
@@ -501,22 +502,22 @@ static double carry_test_probability_of_letter(Config *config,
 }
 
 void carry_probe(void) {
-  const int temperatures[] = {8, 4, 2};
-  for (int temp_idx = 0; temp_idx < 3; temp_idx++) {
+  const double temperatures[] = {8, 4, 2, 1.6};
+  for (int temp_idx = 0; temp_idx < 4; temp_idx++) {
     for (int carry_over = 0; carry_over < 2; carry_over++) {
       char *settings = get_formatted_string(
           "set -lex CSW21 -wmp true -s1 equity -s2 equity -r1 all -r2 all "
-          "-numplays 1 -threads 4 -inftemp %d -ima 10000 -fgrequired false "
+          "-numplays 1 -threads 4 -inftemp %g -ima 10000 -fgrequired false "
           "-infcarryover %s",
           temperatures[temp_idx], carry_over ? "true" : "false");
       Config *config = config_create_or_die(settings);
       free(settings);
       load_and_exec_config_or_die(
           config,
-          "cgp 15/15/15/15/10M4/6I3U4/5INDRI5/7O7/7Z7/7E7/6sNaRE4/15/15/15/15 "
+          "cgp 15/15/15/15/10M4/6I3U4/5INDRIs4/7O7/7Z7/7E7/7DaFT4/15/15/15/15 "
           "/ 0/0 0");
       const char *plays[] = {"com i11 .S", "com 6f Q.", "com 6j X."};
-      const char *racks[] = {"SSEIRLG", "SEIRLGQ", "SEIRLGX"};
+      const char *racks[] = {"EGILRSS", "EGILQRS", "EGILRSX"};
       for (int play_idx = 0; play_idx < 3; play_idx++) {
         char *rack_command = get_formatted_string("rack %s", racks[play_idx]);
         load_and_exec_config_or_die(config, rack_command);
@@ -524,7 +525,7 @@ void carry_probe(void) {
         load_and_exec_config_or_die(config, plays[play_idx]);
         load_and_exec_config_or_die(config, "rack AEGNOTW");
         load_and_exec_config_or_die(config, "infer");
-        fprintf(stderr, "PROBE T=%d carry=%d after %s: score %d P(S)=%.4f\n",
+        fprintf(stderr, "PROBE T=%g carry=%d after %s: score %d P(S)=%.4f\n",
                 temperatures[temp_idx], carry_over, plays[play_idx],
                 equity_to_int(game_event_get_move_score(game_history_get_event(
                     config_get_game_history(config), play_idx * 2))),
