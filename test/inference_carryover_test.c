@@ -486,8 +486,10 @@ void test_inference_carryover(void) {
 // history off and on, at temperatures 8, 4, 2 and 1.6 (what the
 // harness schedule gives with about 70 tiles in the bag, as here).
 // MAGPIE_CARRY_FLOOR_PROBE overrides the floor fraction (see
-// inference_carryover_begin): with the default 1e-3 a 99% belief at temperature
-// 2 falls to 44% after the Q; with 1e-6 it holds at 99%.
+// inference_carryover_begin): in CSW24 at temperature 1.6, with the default
+// 1e-3 a belief over 99.99% falls to 36% after the Q; with 1e-6 it holds at
+// 98.4%. No word on the board takes an S, so the 1-point hook is not passed
+// over for a better one.
 static double carry_test_probability_of_letter(Config *config,
                                                const char *letter) {
   InferenceResults *results = config_get_inference_results(config);
