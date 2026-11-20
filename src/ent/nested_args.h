@@ -67,6 +67,12 @@ typedef struct NestedArgs {
   // and the other player's best responses to the board it leaves, which are
   // cached by that board.
   bool share;
+  // With finalists > 0, a sim with more plays than that first simulates them
+  // all without nested rollouts, with stage_share of its iterations and
+  // time, and then simulates its best finalists plays with nested rollouts
+  // and the rest. The nested sim's results alone choose the play.
+  int finalists;
+  double stage_share;
 } NestedArgs;
 
 static inline void nested_args_set_defaults(NestedArgs *args) {
@@ -82,6 +88,8 @@ static inline void nested_args_set_defaults(NestedArgs *args) {
   args->race_z = 2.0;
   args->switch_margin = 0.0;
   args->share = false;
+  args->finalists = 0;
+  args->stage_share = 0.5;
 }
 
 #endif

@@ -694,6 +694,11 @@ static double sim_rollout(const Simmer *simmer, SimmerWorker *simmer_worker,
     if (simmer->nested_args.enabled &&
         nested_applies(&simmer->nested_args, ply,
                        bag_get_letters(game_get_bag(game)))) {
+      nested_worker_set_census(
+          simmer_worker->nested_worker,
+          simmer->use_census_rollout ? simmer_worker->census_rollout_worker
+                                     : NULL,
+          simmer->use_census_rollout ? simmer->census_rollout : NULL, ply + 1);
       best_play = nested_choose_move(
           simmer_worker->nested_worker, &simmer->nested_args,
           &simmer->nested_eval, game,

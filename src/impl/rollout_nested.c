@@ -19,6 +19,7 @@
 #include "../ent/win_pct.h"
 #include "../util/io_util.h"
 #include "../util/string_util.h"
+#include "census_rollout.h"
 #include "gameplay.h"
 #include "move_gen.h"
 #include "rack_draw.h"
@@ -75,6 +76,11 @@ struct NestedWorker {
   int cache_samples;
   // Whether the worker's game holds the search's position.
   bool game_is_current;
+  // The census that steers the sim's rollouts, if one does, the thread's
+  // worker of it, and the rollout ply of the replies the search plays.
+  CensusRolloutWorker *census_worker;
+  const CensusRollout *census;
+  int reply_ply;
 };
 
 static _Atomic uint64_t nested_total_searches;
@@ -123,7 +129,30 @@ NestedWorker *nested_worker_create(const Game *game,
   worker->cache_replies = NULL;
   worker->cache_samples = 0;
   worker->game_is_current = false;
+  worker->census_worker = NULL;
+  worker->census = NULL;
+  worker->reply_ply = 0;
   return worker;
+}
+
+void nested_worker_set_census(NestedWorker *worker,
+                              CensusRolloutWorker *census_worker,
+                              const CensusRollout *census,
+                              const int reply_ply) {
+  worker->census_worker = census_worker;
+  worker->census = census;
+  worker->reply_ply = reply_ply;
+}
+
+// The top static play of the player on turn in game, steered by the census
+// when the sim has one: the same play, found faster.
+static const Move *nested_top_play(NestedWorker *worker, Game *game,
+                                   const int ply, BestMoveCarry *carry) {
+  if (worker->census != NULL) {
+    return census_rollout_get_best_move(worker->census_worker, worker->census,
+                                        game, worker->reply_list, ply);
+  }
+  return get_top_equity_move_with_carry(game, worker->reply_list, carry);
 }
 
 void nested_worker_reset(NestedWorker *worker, const uint64_t sim_seed) {
@@ -265,7 +294,7 @@ static double nested_rollout(NestedWorker *worker, const NestedArgs *args,
     const int on_turn = game_get_player_on_turn_index(game);
     const Player *on_turn_player = game_get_player(game, on_turn);
     const Move *play =
-        get_top_equity_move_with_carry(game, worker->reply_list, carry);
+        nested_top_play(worker, game, worker->reply_ply + ply, carry);
     rack_copy(&rack_before, player_get_rack(on_turn_player));
     if (ply == args->nested_plies - 1) {
       play_move_no_cross_set_update(play, game, NULL);
@@ -497,8 +526,7 @@ static void nested_fill_replies(NestedWorker *worker, const NestedArgs *args,
     }
     draw_rack_from_bag(game, replier, &replier_rack);
     draw_rack_from_bag(game, other, &other_rack);
-    const Move *reply =
-        get_top_equity_move_with_carry(game, worker->reply_list, carry);
+    const Move *reply = nested_top_play(worker, game, worker->reply_ply, carry);
     Rack rack_before;
     rack_copy(&rack_before, player_get_rack(replier_player));
     const Equity leave = get_leave_value_for_move(
@@ -765,6 +793,13 @@ static bool nested_parse_setting(const char *key, const char *value,
   }
   if (strings_iequal(key, "switch")) {
     return nested_parse_double(value, &args->switch_margin);
+  }
+  if (strings_iequal(key, "finalists")) {
+    return nested_parse_int(value, 0, 1000, &args->finalists);
+  }
+  if (strings_iequal(key, "stage")) {
+    return nested_parse_double(value, &args->stage_share) &&
+           args->stage_share > 0.0 && args->stage_share < 1.0;
   }
   if (strings_iequal(key, "share")) {
     int share = 0;

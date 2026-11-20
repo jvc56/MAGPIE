@@ -8,6 +8,7 @@
 #include "../ent/nested_args.h"
 #include "../ent/win_pct.h"
 #include "../util/io_util.h"
+#include "census_rollout.h"
 #include <stdbool.h>
 #include <stdint.h>
 
@@ -56,6 +57,12 @@ NestedWorker *nested_worker_create(const Game *game,
 void nested_worker_destroy(NestedWorker *worker);
 // Starts a sim with seed sim_seed: empties the worker's cache.
 void nested_worker_reset(NestedWorker *worker, uint64_t sim_seed);
+// The census that steers the sim's rollouts, or NULL, and the rollout ply of
+// the replies the next search plays: its nested rollouts' plays are then
+// found with the census's help.
+void nested_worker_set_census(NestedWorker *worker,
+                              CensusRolloutWorker *census_worker,
+                              const CensusRollout *census, int reply_ply);
 
 // How a nested rollout is scored: the sim's own settings.
 typedef struct NestedEval {
@@ -95,6 +102,7 @@ const Move *nested_choose_move(NestedWorker *worker, const NestedArgs *args,
 //   alloc   uniform or race       z       race_z
 //   switch  switch_margin
 //   share   1 to share nested rollouts (see above), 0 not to
+//   finalists, stage  NestedArgs.finalists and stage_share
 // Settings not named keep their defaults.
 void nested_args_parse(const char *spec, NestedArgs *args,
                        ErrorStack *error_stack);

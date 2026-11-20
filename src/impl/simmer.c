@@ -1,5 +1,6 @@
 #include "simmer.h"
 
+#include "../compat/ctime.h"
 #include "../def/equity_defs.h"
 #include "../def/game_defs.h"
 #include "../def/inference_defs.h"
@@ -11,6 +12,7 @@
 #include "../ent/inference_results.h"
 #include "../ent/letter_distribution.h"
 #include "../ent/move.h"
+#include "../ent/nested_args.h"
 #include "../ent/player.h"
 #include "../ent/rack.h"
 #include "../ent/sim_args.h"
@@ -57,6 +59,8 @@ struct SimCtx {
   RandomVariables *rvs;
   InferenceCtx *inference_ctx;
   LamcCtx *lamc_ctx;
+  // The finalists of a two-stage nested sim (see NestedArgs.finalists).
+  MoveList *nested_finalists;
 };
 
 void sim_ctx_destroy(SimCtx *sim_ctx) {
@@ -66,6 +70,7 @@ void sim_ctx_destroy(SimCtx *sim_ctx) {
   rvs_destroy(sim_ctx->rvs);
   inference_ctx_destroy(sim_ctx->inference_ctx);
   lamc_ctx_destroy(sim_ctx->lamc_ctx);
+  move_list_destroy(sim_ctx->nested_finalists);
   free(sim_ctx);
 }
 
@@ -117,6 +122,72 @@ static bool sim_rollout_pat_is_on(const SimArgs *sim_args) {
 // (see MoveGenArgs.anchor_equity_caps).
 static bool sim_rollout_pat_excludes_census(const SimArgs *sim_args) {
   return sim_args->pat_rollout_exact && sim_rollout_pat_is_on(sim_args);
+}
+
+void simulate(SimArgs *sim_args, SimCtx **sim_ctx, SimResults *sim_results,
+              ErrorStack *error_stack);
+
+// The finalists of the sim in sim_results: its best count plays, in the
+// order the sim ranks them.
+static void sim_collect_finalists(SimResults *sim_results, const int count,
+                                  MoveList **finalists) {
+  if (*finalists == NULL || move_list_get_capacity(*finalists) < count) {
+    move_list_destroy(*finalists);
+    *finalists = move_list_create(count);
+  }
+  move_list_reset(*finalists);
+  if (!sim_results_lock_and_sort_display_simmed_plays(sim_results)) {
+    log_fatal("a nested sim's first stage has no plays to rank");
+  }
+  const int num_plays = sim_results_get_number_of_plays(sim_results);
+  for (int rank = 0; rank < count && rank < num_plays; rank++) {
+    const SimmedPlay *simmed_play =
+        sim_results_get_display_simmed_play(sim_results, rank);
+    move_list_add_move(*finalists, simmed_play_get_move(simmed_play));
+  }
+  sim_results_unlock_display_infos(sim_results);
+  move_list_sort_moves(*finalists);
+}
+
+// Runs a two-stage nested sim (see NestedArgs.finalists): the inference, if
+// any, has already run.
+static void simulate_two_stage(const SimArgs *sim_args, SimCtx **sim_ctx,
+                               SimResults *sim_results,
+                               ErrorStack *error_stack) {
+  const NestedArgs *nested = &sim_args->nested_args;
+  const double share = nested->stage_share;
+  const int64_t start_ns = ctimer_monotonic_ns();
+  SimArgs first = *sim_args;
+  first.nested_args.enabled = false;
+  first.use_precomputed_inference = sim_args->use_inference;
+  const uint64_t limit = sim_args->bai_options.sample_limit;
+  first.bai_options.sample_limit = (uint64_t)((double)limit * share);
+  if (sim_args->bai_options.time_limit_seconds > 0) {
+    first.bai_options.time_limit_seconds =
+        sim_args->bai_options.time_limit_seconds * share;
+  }
+  simulate(&first, sim_ctx, sim_results, error_stack);
+  if (!error_stack_is_empty(error_stack) ||
+      thread_control_get_status(sim_args->thread_control) !=
+          THREAD_CONTROL_STATUS_STARTED) {
+    return;
+  }
+  const uint64_t used = sim_results_get_iteration_count(sim_results);
+  sim_collect_finalists(sim_results, nested->finalists,
+                        &(*sim_ctx)->nested_finalists);
+  SimArgs second = *sim_args;
+  second.move_list = (*sim_ctx)->nested_finalists;
+  second.nested_args.finalists = 0;
+  second.use_precomputed_inference = sim_args->use_inference;
+  second.resume_results = false;
+  second.bai_options.sample_limit = limit > used ? limit - used : 1;
+  if (sim_args->bai_options.time_limit_seconds > 0) {
+    const double spent = (double)(ctimer_monotonic_ns() - start_ns) / 1e9;
+    const double left = sim_args->bai_options.time_limit_seconds - spent;
+    second.bai_options.time_limit_seconds =
+        left > SIM_LAMC_MIN_TIME_LEFT ? left : SIM_LAMC_MIN_TIME_LEFT;
+  }
+  simulate(&second, sim_ctx, sim_results, error_stack);
 }
 
 void simulate(SimArgs *sim_args, SimCtx **sim_ctx, SimResults *sim_results,
@@ -183,6 +254,7 @@ void simulate(SimArgs *sim_args, SimCtx **sim_ctx, SimResults *sim_results,
     (*sim_ctx)->rvs = NULL;
     (*sim_ctx)->inference_ctx = NULL;
     (*sim_ctx)->lamc_ctx = NULL;
+    (*sim_ctx)->nested_finalists = NULL;
   }
 
   uint64_t num_infer_leaves = 0;
@@ -199,6 +271,16 @@ void simulate(SimArgs *sim_args, SimCtx **sim_ctx, SimResults *sim_results,
     num_infer_leaves =
         stat_get_num_unique_samples(inference_results_get_equity_values(
             sim_args->inference_results, INFERENCE_TYPE_LEAVE));
+  }
+
+  // A two-stage nested sim: the standard sim finds the finalists, and a sim
+  // with nested rollouts chooses among them.
+  const NestedArgs *nested = &sim_args->nested_args;
+  if (nested->enabled && nested->finalists > 0 &&
+      move_list_get_count(sim_args->move_list) > nested->finalists &&
+      !bag_is_empty(game_get_bag(sim_args->game))) {
+    simulate_two_stage(sim_args, sim_ctx, sim_results, error_stack);
+    return;
   }
 
   // A LAMC search picks the plays to simulate, from every play in the
