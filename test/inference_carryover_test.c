@@ -342,8 +342,8 @@ static void test_carry_game_history(bool carry_over) {
   Config *config = config_create_or_die(
       "set -lex CSW21 -wmp true -s1 equity -s2 equity -r1 all -r2 all "
       "-numplays 1 -threads 1 -inftemp 8 -ima 10000 -fgrequired false");
-  load_and_exec_config_or_die(config, carry_over ? "set -infhistory true"
-                                                 : "set -infhistory false");
+  load_and_exec_config_or_die(config, carry_over ? "set -infcarryover true"
+                                                 : "set -infcarryover false");
   load_and_exec_config_or_die(config, "newgame");
   // Event 0, player 1: keeps AEN.
   load_and_exec_config_or_die(config, "rack QUIZAEN");
@@ -479,7 +479,7 @@ void test_inference_carryover(void) {
   test_carry_game_history(true);
 }
 
-// Research probe (magpie_test infcarryprobe), not an assertion yet: an
+// Research probe (magpie_test infcarryoverprobe), not an assertion yet: an
 // opponent burns a lone S for 1 point under a blank, then plays a Q for 62
 // and an X for 50, one tile each, on a board set up for it. Prints the
 // probability that their kept tiles include an S after each play, with the
@@ -507,7 +507,7 @@ void carry_probe(void) {
       char *settings = get_formatted_string(
           "set -lex CSW21 -wmp true -s1 equity -s2 equity -r1 all -r2 all "
           "-numplays 1 -threads 4 -inftemp %d -ima 10000 -fgrequired false "
-          "-infhistory %s",
+          "-infcarryover %s",
           temperatures[temp_idx], carry_over ? "true" : "false");
       Config *config = config_create_or_die(settings);
       free(settings);
