@@ -95,6 +95,9 @@ typedef struct SimArgs {
   // of the game by static equity, and is scored by the result instead of the
   // win percentage table. sim_args_fill clears it.
   bool finish_endgame;
+  // With finish_endgame, a rollout also plays on to the end when its bag
+  // holds at most this many tiles at its horizon. sim_args_fill clears it.
+  int finish_max_bag;
   // Whether use_census_rollout is auto (-scensus auto): simulate sets it for
   // each sim, to whether the census supports the game and fits in this
   // machine's memory while rollout PAT is off (census_rollout_auto_fits), and
@@ -172,6 +175,7 @@ sim_args_fill(const int num_plies, const MoveList *move_list,
   lamc_args_set_defaults(&sim_args->lamc_args);
   nested_args_set_defaults(&sim_args->nested_args);
   sim_args->finish_endgame = false;
+  sim_args->finish_max_bag = 0;
   sim_args->census_rollout_auto = false;
   // Start fresh, not resuming a prior SimResults. Only the TUI's analysis-
   // resume path sets this true; every other caller fills SimArgs through

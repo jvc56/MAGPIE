@@ -481,8 +481,9 @@ typedef struct Simmer {
   // SimArgs.nested_args, and how its nested rollouts are scored.
   NestedArgs nested_args;
   NestedEval nested_eval;
-  // SimArgs.finish_endgame.
+  // SimArgs.finish_endgame and finish_max_bag.
   bool finish_endgame;
+  int finish_max_bag;
 } Simmer;
 
 // A worker's copy of the game plays the sim's rollouts, so both of its
@@ -718,7 +719,8 @@ static double sim_rollout(const Simmer *simmer, SimmerWorker *simmer_worker,
     // generation happens before game_unplay_last_move restores the board), so
     // skip the cross-set update for that play.
     if (ply == plies - 1 &&
-        !(simmer->finish_endgame && bag_is_empty(game_get_bag(game)))) {
+        !(simmer->finish_endgame &&
+          bag_get_letters(game_get_bag(game)) <= simmer->finish_max_bag)) {
       play_move_no_cross_set_update(best_play, game, NULL);
     } else {
       play_move(best_play, game, NULL);
@@ -740,7 +742,7 @@ static double sim_rollout(const Simmer *simmer, SimmerWorker *simmer_worker,
   // on by static equity to the end of the game, which then scores it.
   bool horizon_plies_odd = plies % 2 == 1;
   if (simmer->finish_endgame && !game_over(game) &&
-      bag_is_empty(game_get_bag(game))) {
+      bag_get_letters(game_get_bag(game)) <= simmer->finish_max_bag) {
     int extra_plies = 0;
     while (!game_over(game) && extra_plies < SIM_FINISH_MAX_PLIES) {
       const Move *play = get_top_equity_move_with_carry(
@@ -1079,6 +1081,7 @@ static bool rv_sim_can_resume(const SimArgs *sim_args,
 
 static void simmer_set_nested(Simmer *simmer, const SimArgs *sim_args) {
   simmer->finish_endgame = sim_args->finish_endgame;
+  simmer->finish_max_bag = sim_args->finish_max_bag;
   simmer->nested_args = sim_args->nested_args;
   simmer->nested_eval.win_pcts = sim_args->win_pcts;
   simmer->nested_eval.utility_w_winpct = sim_args->utility_w_winpct;
