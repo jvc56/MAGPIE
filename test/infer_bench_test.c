@@ -593,6 +593,7 @@ static void infbench_observe(const Config *config, const Move *move, int policy,
       exchange ? move_get_tiles_played(move) : 0, &played, &known, &observer);
   args.target_move = move;
   args.use_census_play_scores = use_census;
+  args.full_rack_prior = infbench_env_int("INFBENCH_FULL_RACK_PRIOR", 0) != 0;
   StringBuilder *description = string_builder_create();
   string_builder_add_move_description(description, move, ld);
   printf("INFBENCH observation policy=%s pair=%d game=%d turn=%d bag=%d "

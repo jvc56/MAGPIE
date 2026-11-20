@@ -1,0 +1,14 @@
+Analysis plan for decide-fixed100k-carry, written 2026-11-19 before the run started.
+
+Binary: magpie_test_carry_frozen (sha256 prefix 76eb0f12cbecf5f9). Seed 2128000000.
+Arms: 0 control (no inference), h hard margin 5, g softmax bag schedule, m schedule + carry-over of the
+opponent's inferred leave from turn to turn (reset after a bingo; kept after a pass; exchanges carried).
+Settings as decide-fixed100k-sched: 4-ply, 100,000 rollouts per arm, exchange temperature 3, oracle 30,000 rollouts.
+Stop: 07:00 2026-11-20 by stop-at-7.sh. Complete games only, CIs clustered by game.
+
+Primary: m - h (paired), 100*sim_dwin per decision, bag >= 8, two-sided alpha 0.05.
+Key secondary: m - g (carry-over on vs off with the same kernel), same endpoint.
+Other secondary: m, g, h vs control; g - h; utility and equity for all; by bag band; by carry history length.
+Bag 1-7 is reported separately because the oracle there scores a single greedy line.
+Offline expectation: carry-over improves leave prediction by +0.22 nats on moves with history; the schedule's
++0.4 nats over hard5 last night gave no decision gain, so no gain here is a live possibility.

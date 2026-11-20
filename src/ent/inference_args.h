@@ -10,6 +10,12 @@
 #include "../ent/rack.h"
 #include "../ent/thread_control.h"
 #include "../util/io_util.h"
+#include <stdatomic.h>
+#include <stdint.h>
+
+// Research (infdecide, inftfit): one slot per KLV leave, holding a float's
+// bits, so that inference workers can add to a slot without a lock.
+typedef _Atomic uint32_t InferenceCarrySlot;
 
 typedef struct InferenceArgs {
   bool use_game_history;
@@ -33,6 +39,21 @@ typedef struct InferenceArgs {
   int oracle_feature;
   Equity oracle_tolerance;
   const Rack *oracle_leave;
+  // Test-only (infbench, infdecide): weight each leave by the ways to draw
+  // the full rack, played tiles included, instead of the ways to draw the
+  // leave from the tiles unseen after the play.
+  bool full_rack_prior;
+  // Research: carry-over between a player's turns. carry_in holds, for each
+  // leave the target might have kept on their previous turn (carry_in_kept
+  // tiles, indexed by klv_get_word_index), that leave's posterior weight
+  // over its prior. Each rack inferred now is weighted by the mean of
+  // carry_in over the ways to choose which of its tiles were kept then, plus
+  // carry_in_floor. carry_out, when set, receives the same quantity for the
+  // leaves kept on this turn (the caller zeroes it). Softmax only.
+  InferenceCarrySlot *carry_in;
+  int carry_in_kept;
+  double carry_in_floor;
+  InferenceCarrySlot *carry_out;
   const Move *target_move;
   Rack *target_played_tiles;
   Rack *target_known_rack;
@@ -62,6 +83,11 @@ infer_args_fill(InferenceArgs *args, int leave_list_capacity, Equity eq_margin,
   args->oracle_feature = 0;
   args->oracle_tolerance = 0;
   args->oracle_leave = NULL;
+  args->full_rack_prior = false;
+  args->carry_in = NULL;
+  args->carry_in_kept = 0;
+  args->carry_in_floor = 0;
+  args->carry_out = NULL;
   args->target_move = NULL;
   args->target_played_tiles = target_played_tiles;
   args->target_known_rack = target_known_rack;

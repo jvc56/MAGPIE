@@ -84,6 +84,11 @@ typedef struct Inference {
   int oracle_feature;
   Equity oracle_tolerance;
   const Rack *oracle_leave;
+  bool full_rack_prior;
+  InferenceCarrySlot *carry_in;
+  int carry_in_kept;
+  double carry_in_floor;
+  InferenceCarrySlot *carry_out;
   bool use_infer_cutoff_optimization;
   // Every worker walks every possible leave in the same order;
   // current_rack_index is the position of the walk. A worker evaluates only
@@ -496,6 +501,91 @@ static bool inference_oracle_matches(const Inference *inference,
   return true;
 }
 
+static float inference_carry_load(InferenceCarrySlot *slot) {
+  const uint32_t bits = atomic_load(slot);
+  float value;
+  memcpy(&value, &bits, sizeof(value));
+  return value;
+}
+
+static void inference_carry_add(InferenceCarrySlot *slot, double amount) {
+  uint32_t old_bits = atomic_load(slot);
+  while (true) {
+    float value;
+    memcpy(&value, &old_bits, sizeof(value));
+    value += (float)amount;
+    uint32_t new_bits;
+    memcpy(&new_bits, &value, sizeof(value));
+    if (atomic_compare_exchange_weak(slot, &old_bits, new_bits)) {
+      return;
+    }
+  }
+}
+
+// Research: the carry-over weight of the rack being evaluated: the previous
+// turn's weight for a kept leave, averaged over every way of choosing which
+// of this rack's tiles were that leave.
+static double inference_carry_factor(const Inference *inference) {
+  if (inference->carry_in == NULL || inference->carry_in_kept <= 0) {
+    return 1.0;
+  }
+  const Rack *rack = inference->current_target_rack;
+  MachineLetter tiles[RACK_SIZE];
+  int num_tiles = 0;
+  if (rack_get_total_letters(rack) > (RACK_SIZE) ||
+      rack_get_total_letters(rack) < inference->carry_in_kept) {
+    return 1.0;
+  }
+  for (int ml = 0; ml < inference->ld_size; ml++) {
+    for (int copy = 0; copy < rack_get_letter(rack, ml); copy++) {
+      tiles[num_tiles++] = (MachineLetter)ml;
+    }
+  }
+  Rack kept;
+  double sum = 0;
+  int subsets = 0;
+  for (int mask = 0; mask < (1 << num_tiles); mask++) {
+    int bits = 0;
+    for (int bit = 0; bit < num_tiles; bit++) {
+      bits += (mask >> bit) & 1;
+    }
+    if (bits != inference->carry_in_kept) {
+      continue;
+    }
+    rack_set_dist_size_and_reset(&kept, inference->ld_size);
+    for (int bit = 0; bit < num_tiles; bit++) {
+      if ((mask >> bit) & 1) {
+        rack_add_letter(&kept, tiles[bit]);
+      }
+    }
+    const uint32_t index = klv_get_word_index(inference->klv, &kept);
+    if (index != KLV_UNFOUND_INDEX) {
+      sum += inference_carry_load(&inference->carry_in[index]);
+    }
+    subsets++;
+  }
+  return (subsets > 0 ? sum / subsets : 1.0) + inference->carry_in_floor;
+}
+
+// Research: records what this turn says about the tiles kept, for the next
+// turn's carry-over: the weight over the ways to draw the kept tiles.
+static void inference_carry_record(const Inference *inference,
+                                   const Rack *kept, double weight) {
+  if (inference->carry_out == NULL || rack_is_empty(kept) ||
+      rack_get_total_letters(kept) >= (RACK_SIZE)) {
+    return;
+  }
+  const uint32_t index = klv_get_word_index(inference->klv, kept);
+  if (index == KLV_UNFOUND_INDEX) {
+    return;
+  }
+  const uint64_t draws =
+      get_number_of_draws_for_rack(inference->bag_as_rack, kept);
+  if (draws > 0) {
+    inference_carry_add(&inference->carry_out[index], weight / (double)draws);
+  }
+}
+
 // A rack is consistent with the target's move when no move beats it by more
 // than the equity margin. For a tile placement the move's equity is its
 // score plus the leave value. For an exchange of N tiles it is the best
@@ -556,11 +646,18 @@ void evaluate_possible_leave(Inference *inference) {
   }
 
   const uint64_t number_of_draws_for_leave = get_number_of_draws_for_rack(
-      inference->bag_as_rack, inference->current_target_leave);
+      inference->bag_as_rack, inference->full_rack_prior
+                                  ? inference->current_target_rack
+                                  : inference->current_target_leave);
   if (inference->temperature > 0) {
     const double loss = fmax(0.0, (double)top_equity - observed_equity);
-    const double weight =
-        (double)number_of_draws_for_leave * exp(-loss / inference->temperature);
+    const double weight = (double)number_of_draws_for_leave *
+                          exp(-loss / inference->temperature) *
+                          inference_carry_factor(inference);
+    inference_carry_record(inference,
+                           is_exchange ? inference->best_exchange_leave
+                                       : inference->current_target_leave,
+                           weight);
     if (is_exchange) {
       record_valid_leave_weighted(inference->current_target_leave,
                                   inference->results, INFERENCE_TYPE_RACK,
@@ -798,6 +895,11 @@ Inference *inference_create(const Game *game, const InferenceArgs *args,
   inference->oracle_feature = args->oracle_feature;
   inference->oracle_tolerance = args->oracle_tolerance;
   inference->oracle_leave = args->oracle_leave;
+  inference->full_rack_prior = args->full_rack_prior;
+  inference->carry_in = args->carry_in;
+  inference->carry_in_kept = args->carry_in_kept;
+  inference->carry_in_floor = args->carry_in_floor;
+  inference->carry_out = args->carry_out;
   // Disable cutoff optimization for exchanges with large leaves
   // as benchmarks show it hurts performance for small exchanges
   const int leave_size = RACK_SIZE - args->target_num_exch;
@@ -847,6 +949,11 @@ void inference_reset(Inference *inference, const Game *game,
   inference->oracle_feature = args->oracle_feature;
   inference->oracle_tolerance = args->oracle_tolerance;
   inference->oracle_leave = args->oracle_leave;
+  inference->full_rack_prior = args->full_rack_prior;
+  inference->carry_in = args->carry_in;
+  inference->carry_in_kept = args->carry_in_kept;
+  inference->carry_in_floor = args->carry_in_floor;
+  inference->carry_out = args->carry_out;
   // Disable cutoff optimization for exchanges with large leaves
   const int leave_size = RACK_SIZE - args->target_num_exch;
   const bool is_small_exchange =
