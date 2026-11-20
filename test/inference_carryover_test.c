@@ -506,7 +506,7 @@ void carry_probe(void) {
   for (int temp_idx = 0; temp_idx < 4; temp_idx++) {
     for (int carry_over = 0; carry_over < 2; carry_over++) {
       char *settings = get_formatted_string(
-          "set -lex CSW21 -wmp true -s1 equity -s2 equity -r1 all -r2 all "
+          "set -lex CSW24 -wmp true -s1 equity -s2 equity -r1 all -r2 all "
           "-numplays 1 -threads 4 -inftemp %g -ima 10000 -fgrequired false "
           "-infcarryover %s",
           temperatures[temp_idx], carry_over ? "true" : "false");
