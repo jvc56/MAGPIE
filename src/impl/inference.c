@@ -1580,7 +1580,7 @@ static int inference_carryover_begin(const InferenceArgs *args,
   if (table_in != NULL) {
     inference_carryover_table_fill_slots(table_in, ctx->carry_in_slots);
     // Research: MAGPIE_CARRY_FLOOR_PROBE overrides the floor fraction, to
-    // measure what the floor does (magpie_test infcarryprobe).
+    // measure what the floor does (magpie_test infcarryoverprobe).
     const char *floor_text = getenv("MAGPIE_CARRY_FLOOR_PROBE");
     floor_in =
         (floor_text ? atof(floor_text) : INFERENCE_CARRYOVER_FLOOR_FRACTION) *

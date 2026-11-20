@@ -308,10 +308,10 @@ struct Config {
   // Research: the inference of a player's move uses the inferences of their
   // earlier moves (inference_carryover.h); the directory its per-turn tables
   // are written to.
-  bool inference_history;
-  bool p1_inference_history;
-  bool p2_inference_history;
-  char *inference_history_dir;
+  bool inference_carryover;
+  bool p1_inference_carryover;
+  bool p2_inference_carryover;
+  char *inference_carryover_dir;
   Equity eq_margin_movegen;
   int num_threads;
   int print_interval;
@@ -1487,19 +1487,19 @@ static void add_inference_help_arg(arg_token_t arg_token, const char **usages,
     *text = "Sets the softmax inference temperature in points (default 8; zero "
             "disables weighting).";
     break;
-  case ARG_TOKEN_INFERENCE_HISTORY:
-  case ARG_TOKEN_P1_INFERENCE_HISTORY:
-  case ARG_TOKEN_P2_INFERENCE_HISTORY:
+  case ARG_TOKEN_INFERENCE_CARRYOVER:
+  case ARG_TOKEN_P1_INFERENCE_CARRYOVER:
+  case ARG_TOKEN_P2_INFERENCE_CARRYOVER:
     usages[0] = "<true_or_false>";
     examples[0] = "true";
     *text = "Research: softmax inference also uses the player's earlier "
             "inferred moves. What those moves say about the tiles the player "
             "kept weights the racks inferred now (default false).";
     break;
-  case ARG_TOKEN_INFERENCE_HISTORY_DIR:
+  case ARG_TOKEN_INFERENCE_CARRYOVER_DIR:
     usages[0] = "<directory>";
     examples[0] = "inference_tables";
-    *text = "Research: writes each turn's inference history table to this "
+    *text = "Research: writes each turn's inference carry-over table to this "
             "directory. It must exist; 'none' stops writing them.";
     break;
   case ARG_TOKEN_INFERENCE_MARGIN:
@@ -2740,10 +2740,10 @@ static void help_entry_fill(const Config *config, int token,
     case ARG_TOKEN_INFERENCE_TEMP:
     case ARG_TOKEN_P1_INFERENCE_TEMP:
     case ARG_TOKEN_P2_INFERENCE_TEMP:
-    case ARG_TOKEN_INFERENCE_HISTORY:
-    case ARG_TOKEN_P1_INFERENCE_HISTORY:
-    case ARG_TOKEN_P2_INFERENCE_HISTORY:
-    case ARG_TOKEN_INFERENCE_HISTORY_DIR:
+    case ARG_TOKEN_INFERENCE_CARRYOVER:
+    case ARG_TOKEN_P1_INFERENCE_CARRYOVER:
+    case ARG_TOKEN_P2_INFERENCE_CARRYOVER:
+    case ARG_TOKEN_INFERENCE_CARRYOVER_DIR:
     case ARG_TOKEN_INFERENCE_MARGIN:
     case ARG_TOKEN_P1_INFERENCE_MARGIN:
     case ARG_TOKEN_P2_INFERENCE_MARGIN:
@@ -3853,8 +3853,8 @@ void config_fill_infer_args(const Config *config, bool use_game_history,
                   target_score, target_num_exch, target_played_tiles,
                   target_known_rack, nontarget_known_rack);
   args->temperature = config->inference_temperature;
-  args->use_carry_over = config->inference_history;
-  args->carry_dump_dir = config->inference_history_dir;
+  args->use_carry_over = config->inference_carryover;
+  args->carry_dump_dir = config->inference_carryover_dir;
 }
 
 // Use target_index < 0 to infer using the game history
@@ -4265,7 +4265,7 @@ static void config_contribute_use_win_pct(Config *config, const char *name,
     return;
   }
   free(config->win_pct_explicit_name);
-  free(config->inference_history_dir);
+  free(config->inference_carryover_dir);
   config->win_pct_explicit_name = string_duplicate(name);
   config_ensure_win_pcts(config, error_stack);
   if (!error_stack_is_empty(error_stack)) {
@@ -5612,8 +5612,8 @@ void config_fill_autoplay_args(const Config *config,
                     config->thread_control, false, true, 0, 0, 0, NULL, NULL,
                     NULL);
     p1_inference_args.temperature = config->p1_inference_temperature;
-    p1_inference_args.use_carry_over = config->p1_inference_history;
-    p1_inference_args.carry_dump_dir = config->inference_history_dir;
+    p1_inference_args.use_carry_over = config->p1_inference_carryover;
+    p1_inference_args.carry_dump_dir = config->inference_carryover_dir;
   }
   InferenceArgs p2_inference_args = {0};
   if (config->p2_sim_with_inference) {
@@ -5622,8 +5622,8 @@ void config_fill_autoplay_args(const Config *config,
                     config->thread_control, false, true, 0, 0, 0, NULL, NULL,
                     NULL);
     p2_inference_args.temperature = config->p2_inference_temperature;
-    p2_inference_args.use_carry_over = config->p2_inference_history;
-    p2_inference_args.carry_dump_dir = config->inference_history_dir;
+    p2_inference_args.use_carry_over = config->p2_inference_carryover;
+    p2_inference_args.carry_dump_dir = config->inference_carryover_dir;
   }
 
   // Autoplay with sims must populate the following SimArgs fields that are left
@@ -12299,7 +12299,8 @@ static void config_contribute_reset_player_settings(Config *config,
   *(p1 ? &config->p1_inference_temperature
        : &config->p2_inference_temperature) =
       int_to_equity(CONFIG_DEFAULT_INFERENCE_TEMPERATURE);
-  *(p1 ? &config->p1_inference_history : &config->p2_inference_history) = false;
+  *(p1 ? &config->p1_inference_carryover : &config->p2_inference_carryover) =
+      false;
   *(p1 ? &config->p1_utility_w_winpct : &config->p2_utility_w_winpct) =
       CONFIG_DEFAULT_UTILITY_W_WINPCT;
   *(p1 ? &config->p1_utility_w_spread : &config->p2_utility_w_spread) =
@@ -15227,32 +15228,32 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
     config->p2_inference_temperature = double_to_equity(temperature);
   }
 
-  config_load_bool(config, ARG_TOKEN_INFERENCE_HISTORY,
-                   &config->inference_history, error_stack);
+  config_load_bool(config, ARG_TOKEN_INFERENCE_CARRYOVER,
+                   &config->inference_carryover, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
-  if (config_get_parg_value(config, ARG_TOKEN_INFERENCE_HISTORY, 0) != NULL) {
-    config->p1_inference_history = config->inference_history;
-    config->p2_inference_history = config->inference_history;
+  if (config_get_parg_value(config, ARG_TOKEN_INFERENCE_CARRYOVER, 0) != NULL) {
+    config->p1_inference_carryover = config->inference_carryover;
+    config->p2_inference_carryover = config->inference_carryover;
   }
-  config_load_bool(config, ARG_TOKEN_P1_INFERENCE_HISTORY,
-                   &config->p1_inference_history, error_stack);
+  config_load_bool(config, ARG_TOKEN_P1_INFERENCE_CARRYOVER,
+                   &config->p1_inference_carryover, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
-  config_load_bool(config, ARG_TOKEN_P2_INFERENCE_HISTORY,
-                   &config->p2_inference_history, error_stack);
+  config_load_bool(config, ARG_TOKEN_P2_INFERENCE_CARRYOVER,
+                   &config->p2_inference_carryover, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
-  const char *new_history_dir =
-      config_get_parg_value(config, ARG_TOKEN_INFERENCE_HISTORY_DIR, 0);
-  if (new_history_dir != NULL) {
-    free(config->inference_history_dir);
-    config->inference_history_dir = strings_equal(new_history_dir, "none")
-                                        ? NULL
-                                        : string_duplicate(new_history_dir);
+  const char *new_carryover_dir =
+      config_get_parg_value(config, ARG_TOKEN_INFERENCE_CARRYOVER_DIR, 0);
+  if (new_carryover_dir != NULL) {
+    free(config->inference_carryover_dir);
+    config->inference_carryover_dir = strings_equal(new_carryover_dir, "none")
+                                          ? NULL
+                                          : string_duplicate(new_carryover_dir);
   }
 
   config_load_solver_settings(config, error_stack);
@@ -16975,10 +16976,10 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_INFERENCE_TEMP, "inftemp", 1, 1);
   arg(ARG_TOKEN_P1_INFERENCE_TEMP, "inftemp1", 1, 1);
   arg(ARG_TOKEN_P2_INFERENCE_TEMP, "inftemp2", 1, 1);
-  arg(ARG_TOKEN_INFERENCE_HISTORY, "infhistory", 1, 1);
-  arg(ARG_TOKEN_P1_INFERENCE_HISTORY, "infhistory1", 1, 1);
-  arg(ARG_TOKEN_P2_INFERENCE_HISTORY, "infhistory2", 1, 1);
-  arg(ARG_TOKEN_INFERENCE_HISTORY_DIR, "infhistorydir", 1, 1);
+  arg(ARG_TOKEN_INFERENCE_CARRYOVER, "infcarryover", 1, 1);
+  arg(ARG_TOKEN_P1_INFERENCE_CARRYOVER, "infcarryover1", 1, 1);
+  arg(ARG_TOKEN_P2_INFERENCE_CARRYOVER, "infcarryover2", 1, 1);
+  arg(ARG_TOKEN_INFERENCE_CARRYOVER_DIR, "infcarryoverdir", 1, 1);
   arg(ARG_TOKEN_INFERENCE_MARGIN, "imargin", 1, 1);
   arg(ARG_TOKEN_MOVEGEN_MARGIN, "mmargin", 1, 1);
   arg(ARG_TOKEN_USE_GAME_PAIRS, "gp", 1, 1);
@@ -17144,10 +17145,10 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
       int_to_equity(CONFIG_DEFAULT_INFERENCE_TEMPERATURE);
   config->p2_inference_temperature =
       int_to_equity(CONFIG_DEFAULT_INFERENCE_TEMPERATURE);
-  config->inference_history = false;
-  config->p1_inference_history = false;
-  config->p2_inference_history = false;
-  config->inference_history_dir = NULL;
+  config->inference_carryover = false;
+  config->p1_inference_carryover = false;
+  config->p2_inference_carryover = false;
+  config->inference_carryover_dir = NULL;
   config->eq_margin_inference = int_to_equity(CONFIG_DEFAULT_INFERENCE_MARGIN);
   config->eq_margin_movegen = int_to_equity(CONFIG_DEFAULT_EQ_MARGIN);
   config->min_play_iterations = CONFIG_DEFAULT_MIN_PLAY_ITERATIONS;
@@ -17953,28 +17954,28 @@ static void config_add_settings_to_string_builder_internal(const Config *config,
             equity_to_double(config->p2_inference_temperature));
       }
       break;
-    case ARG_TOKEN_INFERENCE_HISTORY:
-      if (config->inference_history) {
+    case ARG_TOKEN_INFERENCE_CARRYOVER:
+      if (config->inference_carryover) {
         config_add_bool_setting_to_string_builder(config, sb, arg_token,
-                                                  config->inference_history);
+                                                  config->inference_carryover);
       }
       break;
-    case ARG_TOKEN_P1_INFERENCE_HISTORY:
-      if (config->p1_inference_history != config->inference_history) {
-        config_add_bool_setting_to_string_builder(config, sb, arg_token,
-                                                  config->p1_inference_history);
+    case ARG_TOKEN_P1_INFERENCE_CARRYOVER:
+      if (config->p1_inference_carryover != config->inference_carryover) {
+        config_add_bool_setting_to_string_builder(
+            config, sb, arg_token, config->p1_inference_carryover);
       }
       break;
-    case ARG_TOKEN_P2_INFERENCE_HISTORY:
-      if (config->p2_inference_history != config->inference_history) {
-        config_add_bool_setting_to_string_builder(config, sb, arg_token,
-                                                  config->p2_inference_history);
+    case ARG_TOKEN_P2_INFERENCE_CARRYOVER:
+      if (config->p2_inference_carryover != config->inference_carryover) {
+        config_add_bool_setting_to_string_builder(
+            config, sb, arg_token, config->p2_inference_carryover);
       }
       break;
-    case ARG_TOKEN_INFERENCE_HISTORY_DIR:
-      if (config->inference_history_dir != NULL) {
+    case ARG_TOKEN_INFERENCE_CARRYOVER_DIR:
+      if (config->inference_carryover_dir != NULL) {
         config_add_string_setting_to_string_builder(
-            config, sb, arg_token, config->inference_history_dir);
+            config, sb, arg_token, config->inference_carryover_dir);
       }
       break;
     case ARG_TOKEN_INFERENCE_MARGIN:
