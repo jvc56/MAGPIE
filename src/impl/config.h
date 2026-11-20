@@ -228,6 +228,7 @@ Game *config_get_game(const Config *config);
 GameHistory *config_get_game_history(const Config *config);
 MoveList *config_get_move_list(const Config *config);
 SimResults *config_get_sim_results(const Config *config);
+InferenceResults *config_get_inference_results(const Config *config);
 EndgameResults *config_get_endgame_results(const Config *config);
 char *config_get_peg_outcomes(Config *config, const char *move);
 

@@ -52,6 +52,7 @@
 #include "infer_match_test.h"
 #include "infer_reply_test.h"
 #include "infer_test.h"
+#include "inference_carryover_test.h"
 #include "klv_test.h"
 #include "kwg_alpha_test.h"
 #include "kwg_maker_test.h"
@@ -164,6 +165,8 @@ static TestEntry test_table[] = {
     {"gameplay", test_gameplay},
     {"stats", test_stats},
     {"infer", test_infer},
+    {"infcarry", test_inference_carryover},
+    {"infcarryprobe", carry_probe},
     {"infbenchmetrics", test_infer_bench_metrics},
     {"rv", test_random_variable},
     {"am", test_alias_method},

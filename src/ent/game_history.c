@@ -42,6 +42,7 @@ struct GameEvent {
   MoveList *move_list;
   SimResults *sim_results;
   InferenceResults *inference_results;
+  InferenceCarryoverTable *inference_carryover;
   EndgameResults *endgame_results;
 };
 
@@ -66,6 +67,8 @@ void game_event_reset(GameEvent *game_event) {
   game_event->sim_results = NULL;
   inference_results_destroy(game_event->inference_results);
   game_event->inference_results = NULL;
+  inference_carryover_table_destroy(game_event->inference_carryover);
+  game_event->inference_carryover = NULL;
   endgame_results_destroy(game_event->endgame_results);
   game_event->endgame_results = NULL;
 }
@@ -177,6 +180,17 @@ void game_event_set_inference_results(GameEvent *event,
 
 InferenceResults *game_event_get_inference_results(const GameEvent *event) {
   return event->inference_results;
+}
+
+void game_event_set_inference_carryover(
+    GameEvent *event, InferenceCarryoverTable *inference_carryover) {
+  inference_carryover_table_destroy(event->inference_carryover);
+  event->inference_carryover = inference_carryover;
+}
+
+const InferenceCarryoverTable *
+game_event_get_inference_carryover(const GameEvent *event) {
+  return event->inference_carryover;
 }
 
 void game_event_set_endgame_results(GameEvent *event,
@@ -619,6 +633,8 @@ GameHistory *game_history_duplicate(const GameHistory *gh_orig) {
     ge_copy->sim_results = sim_results_duplicate(ge_orig->sim_results);
     ge_copy->inference_results =
         inference_results_duplicate(ge_orig->inference_results);
+    ge_copy->inference_carryover =
+        inference_carryover_table_duplicate(ge_orig->inference_carryover);
     ge_copy->endgame_results =
         endgame_results_duplicate(ge_orig->endgame_results);
   }
@@ -724,6 +740,32 @@ int game_history_get_most_recent_move_event_index(
     }
   }
   return -1;
+}
+
+const InferenceCarryoverTable *
+game_history_get_inference_carryover_in(const GameHistory *game_history,
+                                        int move_event_index) {
+  if (move_event_index <= 0 || move_event_index >= game_history->num_events) {
+    return NULL;
+  }
+  const int target_index = game_history->events[move_event_index].player_index;
+  for (int event_idx = move_event_index - 1; event_idx >= 0; event_idx--) {
+    const GameEvent *event = &game_history->events[event_idx];
+    if (event->player_index != target_index) {
+      continue;
+    }
+    switch (event->event_type) {
+    case GAME_EVENT_PASS:
+    case GAME_EVENT_CHALLENGE_BONUS:
+      break;
+    case GAME_EVENT_TILE_PLACEMENT_MOVE:
+    case GAME_EVENT_EXCHANGE:
+      return event->inference_carryover;
+    default:
+      return NULL;
+    }
+  }
+  return NULL;
 }
 
 GameEvent *game_history_add_game_event(GameHistory *game_history,
