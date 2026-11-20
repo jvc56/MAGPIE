@@ -85,10 +85,10 @@ typedef struct Inference {
   Equity oracle_tolerance;
   const Rack *oracle_leave;
   bool full_rack_prior;
-  InferenceCarrySlot *carry_in;
+  InferenceCarryoverSlot *carry_in;
   int carry_in_kept;
   double carry_in_floor;
-  InferenceCarrySlot *carry_out;
+  InferenceCarryoverSlot *carry_out;
   bool use_infer_cutoff_optimization;
   // Every worker walks every possible leave in the same order;
   // current_rack_index is the position of the walk. A worker evaluates only
@@ -155,6 +155,12 @@ struct InferenceCtx {
   const KLV *census_leave_klv;
   uint64_t census_leave_klv_instance_id;
   uint64_t census_leave_klv_mutation_counter;
+  // Carry-over in play (InferenceArgs.use_carry_over): the slots the workers
+  // read the previous table from and add this move's to, one per leave of the
+  // target's KLV.
+  InferenceCarryoverSlot *carry_in_slots;
+  InferenceCarryoverSlot *carry_out_slots;
+  uint32_t carry_num_leaves;
 };
 
 void inference_destroy(Inference *inference) {
@@ -501,14 +507,15 @@ static bool inference_oracle_matches(const Inference *inference,
   return true;
 }
 
-static float inference_carry_load(InferenceCarrySlot *slot) {
+static float inference_carryover_load(InferenceCarryoverSlot *slot) {
   const uint32_t bits = atomic_load(slot);
   float value;
   memcpy(&value, &bits, sizeof(value));
   return value;
 }
 
-static void inference_carry_add(InferenceCarrySlot *slot, double amount) {
+static void inference_carryover_add(InferenceCarryoverSlot *slot,
+                                    double amount) {
   uint32_t old_bits = atomic_load(slot);
   while (true) {
     float value;
@@ -525,7 +532,7 @@ static void inference_carry_add(InferenceCarrySlot *slot, double amount) {
 // Research: the carry-over weight of the rack being evaluated: the previous
 // turn's weight for a kept leave, averaged over every way of choosing which
 // of this rack's tiles were that leave.
-static double inference_carry_factor(const Inference *inference) {
+static double inference_carryover_factor(const Inference *inference) {
   if (inference->carry_in == NULL || inference->carry_in_kept <= 0) {
     return 1.0;
   }
@@ -560,7 +567,7 @@ static double inference_carry_factor(const Inference *inference) {
     }
     const uint32_t index = klv_get_word_index(inference->klv, &kept);
     if (index != KLV_UNFOUND_INDEX) {
-      sum += inference_carry_load(&inference->carry_in[index]);
+      sum += inference_carryover_load(&inference->carry_in[index]);
     }
     subsets++;
   }
@@ -569,8 +576,8 @@ static double inference_carry_factor(const Inference *inference) {
 
 // Research: records what this turn says about the tiles kept, for the next
 // turn's carry-over: the weight over the ways to draw the kept tiles.
-static void inference_carry_record(const Inference *inference,
-                                   const Rack *kept, double weight) {
+static void inference_carryover_record(const Inference *inference,
+                                       const Rack *kept, double weight) {
   if (inference->carry_out == NULL || rack_is_empty(kept) ||
       rack_get_total_letters(kept) >= (RACK_SIZE)) {
     return;
@@ -582,7 +589,8 @@ static void inference_carry_record(const Inference *inference,
   const uint64_t draws =
       get_number_of_draws_for_rack(inference->bag_as_rack, kept);
   if (draws > 0) {
-    inference_carry_add(&inference->carry_out[index], weight / (double)draws);
+    inference_carryover_add(&inference->carry_out[index],
+                            weight / (double)draws);
   }
 }
 
@@ -653,11 +661,11 @@ void evaluate_possible_leave(Inference *inference) {
     const double loss = fmax(0.0, (double)top_equity - observed_equity);
     const double weight = (double)number_of_draws_for_leave *
                           exp(-loss / inference->temperature) *
-                          inference_carry_factor(inference);
-    inference_carry_record(inference,
-                           is_exchange ? inference->best_exchange_leave
-                                       : inference->current_target_leave,
-                           weight);
+                          inference_carryover_factor(inference);
+    inference_carryover_record(inference,
+                               is_exchange ? inference->best_exchange_leave
+                                           : inference->current_target_leave,
+                               weight);
     if (is_exchange) {
       record_valid_leave_weighted(inference->current_target_leave,
                                   inference->results, INFERENCE_TYPE_RACK,
@@ -1505,6 +1513,8 @@ void inference_ctx_destroy(InferenceCtx *ctx) {
   }
   game_destroy(ctx->game);
   inference_ctx_free_census(ctx);
+  free(ctx->carry_in_slots);
+  free(ctx->carry_out_slots);
   for (int i = 0; i < ctx->num_workers; i++) {
     inference_destroy(ctx->worker_inferences[i]);
   }
@@ -1513,6 +1523,130 @@ void inference_ctx_destroy(InferenceCtx *ctx) {
   free(ctx->exchanged_stats);
   free(ctx->rack_stats);
   free(ctx);
+}
+
+// Carry-over in play. Whether this inference carries: softmax, asked for, and
+// not driven by hand through carry_in and carry_out.
+static bool inference_uses_carry_over(const InferenceArgs *args) {
+  return args->use_carry_over && args->temperature > 0 &&
+         args->carry_in == NULL && args->carry_out == NULL &&
+         ((args->use_game_history && args->game_history != NULL) ||
+          args->carry_chain != NULL);
+}
+
+// The event of the move being inferred, when the tables are kept on the game
+// history; -1 when they are kept in a chain.
+static int inference_carryover_event_index(const InferenceArgs *args) {
+  return args->use_game_history && args->game_history != NULL
+             ? game_history_get_most_recent_move_event_index(args->game_history)
+             : -1;
+}
+
+// Points the workers at the table recorded for the target's previous move, if
+// there is one, and at empty slots to record this move's in. Returns the
+// number of tiles the move keeps, or 0 when it leaves nothing to carry: a
+// bingo, or a target that did not hold a full rack.
+static int inference_carryover_begin(const InferenceArgs *args,
+                                     InferenceCtx *ctx) {
+  const Inference *first = ctx->worker_inferences[0];
+  const uint32_t num_leaves =
+      first->klv == NULL ? 0 : klv_get_number_of_leaves(first->klv);
+  if (num_leaves == 0) {
+    return 0;
+  }
+  if (ctx->carry_num_leaves != num_leaves) {
+    free(ctx->carry_in_slots);
+    free(ctx->carry_out_slots);
+    ctx->carry_in_slots =
+        calloc_or_die(num_leaves, sizeof(InferenceCarryoverSlot));
+    ctx->carry_out_slots =
+        calloc_or_die(num_leaves, sizeof(InferenceCarryoverSlot));
+    ctx->carry_num_leaves = num_leaves;
+  }
+  const int event_index = inference_carryover_event_index(args);
+  const InferenceCarryoverTable *table_in =
+      event_index >= 0 ? game_history_get_inference_carryover_in(
+                             args->game_history, event_index)
+                       : inference_carryover_chain_get_table(args->carry_chain);
+  if (table_in != NULL &&
+      inference_carryover_table_get_num_leaves(table_in) != num_leaves) {
+    // Recorded with another KLV.
+    table_in = NULL;
+  }
+  // What the target could hold now: their known and played tiles and what
+  // the observer has not seen.
+  Rack pool;
+  rack_copy(&pool, first->bag_as_rack);
+  int unseen_tiles = rack_get_total_letters(first->bag_as_rack);
+  for (int ml = 0; ml < first->ld_size; ml++) {
+    rack_add_letters(&pool, ml,
+                     rack_get_letter(first->current_target_rack, ml));
+  }
+  unseen_tiles += rack_get_total_letters(first->current_target_rack);
+  double floor_in = 0;
+  if (table_in != NULL) {
+    inference_carryover_table_fill_slots(table_in, ctx->carry_in_slots);
+    // Research: MAGPIE_CARRY_FLOOR_PROBE overrides the floor fraction, to
+    // measure what the floor does (magpie_test infcarryprobe).
+    const char *floor_text = getenv("MAGPIE_CARRY_FLOOR_PROBE");
+    floor_in =
+        (floor_text ? atof(floor_text) : INFERENCE_CARRYOVER_FLOOR_FRACTION) *
+        (double)inference_carryover_table_get_max_within(table_in, &pool);
+  }
+  memset(ctx->carry_out_slots, 0,
+         (size_t)num_leaves * sizeof(InferenceCarryoverSlot));
+  for (int thread_index = 0; thread_index < ctx->num_workers; thread_index++) {
+    Inference *inference = ctx->worker_inferences[thread_index];
+    inference->carry_in = table_in == NULL ? NULL : ctx->carry_in_slots;
+    inference->carry_in_kept =
+        table_in == NULL ? 0 : inference_carryover_table_get_kept(table_in);
+    inference->carry_in_floor = floor_in;
+    inference->carry_out = ctx->carry_out_slots;
+  }
+  // With fewer unseen tiles than a rack the bag was empty before the move and
+  // the target held all of them: there is no later draw to carry into.
+  if (unseen_tiles < (RACK_SIZE)) {
+    return 0;
+  }
+  const int tiles_removed = first->target_number_of_tiles_exchanged > 0
+                                ? first->target_number_of_tiles_exchanged
+                                : first->target_tiles_played;
+  return (RACK_SIZE)-tiles_removed;
+}
+
+// Keeps the table this inference recorded, on the move's event or in the
+// chain. With no table (nothing kept, or an interrupted inference) the chain
+// starts again from the target's next move.
+static void inference_carryover_end(const InferenceArgs *args,
+                                    InferenceCtx *ctx, int kept,
+                                    bool interrupted) {
+  const Inference *first = ctx->worker_inferences[0];
+  InferenceCarryoverTable *table =
+      interrupted || kept <= 0 ? NULL
+                               : inference_carryover_table_create_from_slots(
+                                     ctx->carry_out_slots, first->klv, kept);
+  const int event_index = inference_carryover_event_index(args);
+  if (table != NULL && args->carry_dump_dir != NULL) {
+    char *tag = args->carry_dump_tag[0] != '\0' || event_index < 0
+                    ? string_duplicate(args->carry_dump_tag)
+                    : get_formatted_string("e%d", event_index);
+    char *filename =
+        get_formatted_string("%s/carry_%s_p%d.tsv", args->carry_dump_dir, tag,
+                             first->target_index + 1);
+    if (!inference_carryover_table_write(table, game_get_ld(first->game), tag,
+                                         filename)) {
+      log_warn("could not write the inference carry-over table to %s",
+               filename);
+    }
+    free(filename);
+    free(tag);
+  }
+  if (event_index >= 0) {
+    game_event_set_inference_carryover(
+        game_history_get_event(args->game_history, event_index), table);
+  } else {
+    inference_carryover_chain_advance(args->carry_chain, table);
+  }
 }
 
 void infer_with_initialized_ctx(InferenceArgs *args, InferenceCtx *ctx,
@@ -1549,7 +1683,17 @@ void infer_with_initialized_ctx(InferenceArgs *args, InferenceCtx *ctx,
   inference_ctx_set_inferences(ctx, args, results);
   inference_ctx_set_census_play_scores(ctx, args);
 
+  const bool carries_over = inference_uses_carry_over(args);
+  const int carry_kept =
+      carries_over ? inference_carryover_begin(args, ctx) : 0;
+
   infer_manager(ctx, results);
+
+  if (carries_over) {
+    inference_carryover_end(args, ctx, carry_kept,
+                            thread_control_get_status(args->thread_control) ==
+                                THREAD_CONTROL_STATUS_USER_INTERRUPT);
+  }
 
   const Inference *wi = ctx->worker_inferences[0];
   inference_results_set_temperature(results, wi->temperature);

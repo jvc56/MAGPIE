@@ -830,6 +830,13 @@ void autoplay_shared_data_destroy(AutoplaySharedData *shared_data) {
 }
 
 typedef struct GameRunner {
+  // Research: inference carry-over (InferenceArgs.use_carry_over). One chain
+  // for each player as the target of the other's inferences, and whether that
+  // player's latest play or exchange has yet to be inferred: if it still has
+  // not been when they make another, the chain starts again. The chains are
+  // the game's, as a worker plays the two games of a pair turn about.
+  InferenceCarryoverChain *carry_chains[2];
+  bool carry_move_pending[2];
   bool force_draw;
   int turn_number;
   int pair_game_number; // 0 for non-paired games, 1 or 2 for game pairs
@@ -880,6 +887,11 @@ GameRunner *game_runner_create(AutoplayWorker *autoplay_worker) {
   if (args->p1_sim_args.use_inference || args->p2_sim_args.use_inference) {
     game_runner->game_one_move_behind = game_create(args->game_args);
   }
+  for (int player_index = 0; player_index < 2; player_index++) {
+    game_runner->carry_chains[player_index] =
+        inference_carryover_chain_create();
+    game_runner->carry_move_pending[player_index] = false;
+  }
   game_runner->pair_game_number =
       0; // Will be set in game_runner_start if using pairs
   game_runner->play_choosers[0] = NULL;
@@ -897,6 +909,8 @@ void game_runner_destroy(GameRunner *game_runner) {
   game_destroy(game_runner->game);
   cross_set_cache_destroy(game_runner->cross_set_cache);
   game_destroy(game_runner->game_one_move_behind);
+  inference_carryover_chain_destroy(game_runner->carry_chains[0]);
+  inference_carryover_chain_destroy(game_runner->carry_chains[1]);
   free(game_runner);
 }
 
@@ -945,6 +959,10 @@ void game_runner_start(AutoplayWorker *autoplay_worker, GameRunner *game_runner,
   }
 
   game_runner->turn_number = 0;
+  for (int player_index = 0; player_index < 2; player_index++) {
+    inference_carryover_chain_reset(game_runner->carry_chains[player_index]);
+    game_runner->carry_move_pending[player_index] = false;
+  }
   game_runner->opening_tiles = -1;
   game_runner->opening_equity = 0.0;
   game_runner->force_draw = false;
@@ -1014,6 +1032,8 @@ const Move *game_runner_get_top_simming_move(AutoplayWorker *autoplay_worker,
     // will always be empty because autoplay does not support challenged phonies
     // (yet).
     const Equity temperature = infer_args->temperature;
+    const bool use_carry_over = infer_args->use_carry_over;
+    const char *carry_dump_dir = infer_args->carry_dump_dir;
     infer_args_fill(
         infer_args, infer_args->leave_list_capacity, infer_args->equity_margin,
         infer_args->game_history, game_runner->game_one_move_behind,
@@ -1031,6 +1051,14 @@ const Move *game_runner_get_top_simming_move(AutoplayWorker *autoplay_worker,
         &autoplay_worker->target_known_rack,
         &autoplay_worker->nontarget_known_rack);
     infer_args->temperature = temperature;
+    infer_args->use_carry_over = use_carry_over;
+    infer_args->carry_chain =
+        game_runner->carry_chains[1 - player_on_turn_index];
+    infer_args->carry_dump_dir = carry_dump_dir;
+    (void)snprintf(infer_args->carry_dump_tag,
+                   sizeof(infer_args->carry_dump_tag), "g%llu_%d_t%d",
+                   (unsigned long long)game_runner->game_number + 1,
+                   game_runner->pair_game_number, game_runner->turn_number);
     if (move_get_type(&game_runner->previous_move) ==
         GAME_EVENT_TILE_PLACEMENT_MOVE) {
       infer_args->target_move = &game_runner->previous_move;
@@ -1062,6 +1090,10 @@ const Move *game_runner_get_top_simming_move(AutoplayWorker *autoplay_worker,
               game_runner->turn_number + 1,
               (unsigned long long)game_runner->game_number + 1,
               (unsigned long long)game_runner->seed);
+  }
+  if (sim_args->use_inference && autoplay_worker->turn_was_simmed) {
+    // The opponent's latest move has been inferred, and its table recorded.
+    game_runner->carry_move_pending[1 - player_on_turn_index] = false;
   }
   sim_args->use_inference = player_uses_inference;
   return move;
@@ -1378,6 +1410,16 @@ const Move *game_runner_play_move(AutoplayWorker *autoplay_worker,
   if (game_runner->game_one_move_behind && game_runner->turn_number > 0) {
     play_move(&game_runner->previous_move, game_runner->game_one_move_behind,
               NULL);
+  }
+  if (move_get_type(move) != GAME_EVENT_PASS) {
+    // A play or exchange whose predecessor was never inferred breaks the
+    // mover's carry-over chain. A pass leaves their rack, and the chain, as
+    // they were.
+    if (game_runner->carry_move_pending[player_on_turn_index]) {
+      inference_carryover_chain_reset(
+          game_runner->carry_chains[player_on_turn_index]);
+    }
+    game_runner->carry_move_pending[player_on_turn_index] = true;
   }
   move_copy(&game_runner->previous_move, move);
   game_runner->turn_number++;

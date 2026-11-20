@@ -5,6 +5,7 @@
 #include "../ent/equity.h"
 #include "../ent/game.h"
 #include "../ent/game_history.h"
+#include "../ent/inference_carryover.h"
 #include "../ent/inference_results.h"
 #include "../ent/move.h"
 #include "../ent/rack.h"
@@ -12,10 +13,6 @@
 #include "../util/io_util.h"
 #include <stdatomic.h>
 #include <stdint.h>
-
-// Research (infdecide, inftfit): one slot per KLV leave, holding a float's
-// bits, so that inference workers can add to a slot without a lock.
-typedef _Atomic uint32_t InferenceCarrySlot;
 
 typedef struct InferenceArgs {
   bool use_game_history;
@@ -50,10 +47,24 @@ typedef struct InferenceArgs {
   // carry_in over the ways to choose which of its tiles were kept then, plus
   // carry_in_floor. carry_out, when set, receives the same quantity for the
   // leaves kept on this turn (the caller zeroes it). Softmax only.
-  InferenceCarrySlot *carry_in;
+  InferenceCarryoverSlot *carry_in;
   int carry_in_kept;
   double carry_in_floor;
-  InferenceCarrySlot *carry_out;
+  InferenceCarryoverSlot *carry_out;
+  // Carry-over in play (softmax only; ignored while carry_in or carry_out is
+  // set by hand). The inference weights each rack by the table recorded for
+  // the target's previous move and records a table for this one. With
+  // use_game_history the tables are kept on the game history's events
+  // (game_history_get_inference_carryover_in); otherwise in carry_chain, which
+  // the caller resets at the start of a game and whenever a move of the
+  // target's other than a pass is not inferred. With carry_dump_dir set, the
+  // table recorded is also written there for postmortems, as
+  // carry_<tag>_p<target>.tsv: the tag is carry_dump_tag, or e<event index>
+  // when that is empty and the tables are on the game history.
+  bool use_carry_over;
+  InferenceCarryoverChain *carry_chain;
+  const char *carry_dump_dir;
+  char carry_dump_tag[48];
   const Move *target_move;
   Rack *target_played_tiles;
   Rack *target_known_rack;
@@ -88,6 +99,10 @@ infer_args_fill(InferenceArgs *args, int leave_list_capacity, Equity eq_margin,
   args->carry_in_kept = 0;
   args->carry_in_floor = 0;
   args->carry_out = NULL;
+  args->use_carry_over = false;
+  args->carry_chain = NULL;
+  args->carry_dump_dir = NULL;
+  args->carry_dump_tag[0] = '\0';
   args->target_move = NULL;
   args->target_played_tiles = target_played_tiles;
   args->target_known_rack = target_known_rack;

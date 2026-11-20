@@ -7,6 +7,7 @@
 #include "../util/io_util.h"
 #include "../util/string_util.h"
 #include "endgame_results.h"
+#include "inference_carryover.h"
 #include "inference_results.h"
 #include "letter_distribution.h"
 #include "move.h"
@@ -60,6 +61,13 @@ SimResults *game_event_get_sim_results(const GameEvent *event);
 void game_event_set_inference_results(GameEvent *event,
                                       InferenceResults *inference_results);
 InferenceResults *game_event_get_inference_results(const GameEvent *event);
+
+// The carry-over table the inference of this event's move recorded (see
+// inference_carryover.h). The event takes ownership; NULL clears it.
+void game_event_set_inference_carryover(
+    GameEvent *event, InferenceCarryoverTable *inference_carryover);
+const InferenceCarryoverTable *
+game_event_get_inference_carryover(const GameEvent *event);
 
 void game_event_set_endgame_results(GameEvent *event,
                                     EndgameResults *endgame_results);
@@ -152,6 +160,14 @@ void game_history_player_reset(GameHistory *history, int player_index,
 void game_history_switch_names(GameHistory *history);
 int game_history_get_most_recent_move_event_index(
     const GameHistory *game_history);
+// The carry-over table to use when inferring the move of the event at
+// move_event_index: the one recorded for the same player's previous play or
+// exchange, looking back past their passes (a pass leaves their rack as it
+// was). NULL when that move has no table (it was not inferred, or it was a
+// bingo, which keeps nothing) or their tiles were returned after a challenge.
+const InferenceCarryoverTable *
+game_history_get_inference_carryover_in(const GameHistory *game_history,
+                                        int move_event_index);
 
 void game_history_next(GameHistory *game_history, ErrorStack *error_stack);
 void game_history_previous(GameHistory *game_history, ErrorStack *error_stack);

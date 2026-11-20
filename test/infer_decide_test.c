@@ -456,11 +456,11 @@ void infer_decide_run_spec(const char *spec) {
   // leave from turn to turn. One pair of tables per inferred player.
   const uint32_t num_klv_leaves =
       klv_get_number_of_leaves(player_get_klv(game_get_player(game, 0)));
-  InferenceCarrySlot *carry_table[2][2];
+  InferenceCarryoverSlot *carry_table[2][2];
   for (int player_idx = 0; player_idx < 2; player_idx++) {
     for (int table_idx = 0; table_idx < 2; table_idx++) {
       carry_table[player_idx][table_idx] =
-          calloc_or_die(num_klv_leaves, sizeof(InferenceCarrySlot));
+          calloc_or_die(num_klv_leaves, sizeof(InferenceCarryoverSlot));
     }
   }
   int carry_current[2] = {0, 0};
@@ -624,10 +624,10 @@ void infer_decide_run_spec(const char *spec) {
           args.inference_args.target_move = &previous_move;
           if (arm->code == 'm') {
             const int target = 1 - seat;
-            InferenceCarrySlot *table_out =
+            InferenceCarryoverSlot *table_out =
                 carry_table[target][1 - carry_current[target]];
             memset(table_out, 0,
-                   (size_t)num_klv_leaves * sizeof(InferenceCarrySlot));
+                   (size_t)num_klv_leaves * sizeof(InferenceCarryoverSlot));
             if (carry_history[target] > 0) {
               args.inference_args.carry_in =
                   carry_table[target][carry_current[target]];
@@ -643,7 +643,7 @@ void infer_decide_run_spec(const char *spec) {
                                  &arm->simulated, errors);
         if (arm->code == 'm' && use_inference) {
           const int target = 1 - seat;
-          const InferenceCarrySlot *table_out =
+          const InferenceCarryoverSlot *table_out =
               carry_table[target][1 - carry_current[target]];
           float table_max = 0;
           for (uint32_t leave_idx = 0; leave_idx < num_klv_leaves;
@@ -1059,11 +1059,31 @@ void infer_decide_tfit_stdin(void) {
   // INFTFIT_CARRY=1: instead of the temperature grid, compare inference
   // with and without carry-over from the mover's earlier turns.
   const bool carry_mode = getenv("INFTFIT_CARRY") != NULL;
+  // INFTFIT_POOL_FLOOR: the carry-over floor is 1e-3 of the largest weight
+  // among the kept leaves the mover can still hold, as in play, instead of
+  // the table's largest. INFTFIT_PRUNE=<fraction>: entries below that fraction
+  // of the table's largest weight are dropped when it is recorded. Either one
+  // adds the two maxima and the entry counts to each line.
+  const bool carry_pool_floor = getenv("INFTFIT_POOL_FLOOR") != NULL;
+  // INFTFIT_FLOOR=<fraction>: the floor as a fraction of the table's largest
+  // weight (default 1e-3).
+  const char *carry_floor_text = getenv("INFTFIT_FLOOR");
+  const double carry_floor_fraction =
+      carry_floor_text ? atof(carry_floor_text) : 1e-3;
+  const char *carry_prune_text = getenv("INFTFIT_PRUNE");
+  const double carry_prune = carry_prune_text ? atof(carry_prune_text) : 0.0;
+  const bool carry_extra = carry_pool_floor || carry_prune_text != NULL;
+  double carry_pool_max[2] = {0, 0};
+  double carry_table_max[2] = {0, 0};
   const char *carry_temp_text = getenv("INFTFIT_CARRY_T");
+  // INFTFIT_NO_TABLES: run on a machine without the rack and word info
+  // tables, which only speed move generation up.
   char *settings = get_formatted_string(
-      "set -lex CSW24 -leaves CSW24 -wmp true -rit true -ritmmap true -wit "
-      "true -s1 equity -s2 equity -r1 all -r2 all -pat auto -threads %d "
-      "-numplays 100 -minp 500 -savesettings false -autosavegcg false",
+      "set -lex CSW24 -leaves CSW24 -wmp true %s -s1 equity -s2 equity -r1 "
+      "all -r2 all -pat auto -threads %d -numplays 100 -minp 500 "
+      "-savesettings false -autosavegcg false",
+      getenv("INFTFIT_NO_TABLES") != NULL ? "-rit false -wit false"
+                                          : "-rit true -ritmmap true -wit true",
       threads);
   Config *config = config_create_or_die(settings);
   free(settings);
@@ -1087,11 +1107,11 @@ void infer_decide_tfit_stdin(void) {
   InferenceResults *inferences = inference_results_create(NULL);
   const uint32_t num_klv_leaves =
       klv_get_number_of_leaves(player_get_klv(game_get_player(game, 0)));
-  InferenceCarrySlot *carry_table[2][2];
+  InferenceCarryoverSlot *carry_table[2][2];
   for (int player_idx = 0; player_idx < 2; player_idx++) {
     for (int table_idx = 0; table_idx < 2; table_idx++) {
       carry_table[player_idx][table_idx] =
-          calloc_or_die(num_klv_leaves, sizeof(InferenceCarrySlot));
+          calloc_or_die(num_klv_leaves, sizeof(InferenceCarryoverSlot));
     }
   }
   int carry_current[2] = {0, 0};
@@ -1187,10 +1207,12 @@ void infer_decide_tfit_stdin(void) {
             carry_temp_text ? atof(carry_temp_text)
                             : (exchange ? 3.0
                                         : decide_schedule_temperature(bag_tiles));
-        InferenceCarrySlot *table_in = carry_table[seat][carry_current[seat]];
-        InferenceCarrySlot *table_out =
+        InferenceCarryoverSlot *table_in =
+            carry_table[seat][carry_current[seat]];
+        InferenceCarryoverSlot *table_out =
             carry_table[seat][1 - carry_current[seat]];
-        memset(table_out, 0, (size_t)num_klv_leaves * sizeof(InferenceCarrySlot));
+        memset(table_out, 0,
+               (size_t)num_klv_leaves * sizeof(InferenceCarryoverSlot));
         double probability[2];
         for (int with_carry = 0; with_carry < 2; with_carry++) {
           InferenceArgs args;
@@ -1206,6 +1228,32 @@ void infer_decide_tfit_stdin(void) {
               args.carry_in = table_in;
               args.carry_in_kept = carry_kept[seat];
               args.carry_in_floor = carry_floor[seat];
+              if (carry_extra) {
+                // What the mover can hold: the bag and their rack.
+                const KLV *seat_klv =
+                    player_get_klv(game_get_player(game, seat));
+                InferenceCarryoverTable *sparse =
+                    inference_carryover_table_create_from_slots(
+                        table_in, seat_klv, carry_kept[seat]);
+                Rack pool;
+                rack_copy(&pool, player_get_rack(game_get_player(game, seat)));
+                for (int ml = 0; ml < rack_get_dist_size(&pool); ml++) {
+                  rack_add_letters(&pool, ml,
+                                   bag_get_letter(game_get_bag(game), ml));
+                }
+                carry_table_max[seat] =
+                    sparse ? (double)inference_carryover_table_get_max(sparse)
+                           : 0;
+                carry_pool_max[seat] =
+                    sparse ? (double)inference_carryover_table_get_max_within(
+                                 sparse, &pool)
+                           : 0;
+                inference_carryover_table_destroy(sparse);
+                if (carry_pool_floor) {
+                  args.carry_in_floor =
+                      carry_floor_fraction * carry_pool_max[seat];
+                }
+              }
             }
             args.carry_out = table_out;
           }
@@ -1219,11 +1267,10 @@ void infer_decide_tfit_stdin(void) {
           probability[with_carry] = tfit_true_probability(inferences, &truth);
         }
         printf("TCARRY game=%d turn=%d bag=%d tiles=%d exch=%d leave=%d "
-               "hist=%d kept=%d p0=%.6g p1=%.6g\n",
+               "hist=%d kept=%d p0=%.6g p1=%.6g",
                game_idx, turn, bag_tiles, move_get_tiles_played(&move),
                exchange, rack_get_total_letters(&truth), carry_history[seat],
                carry_kept[seat], probability[0], probability[1]);
-        fflush(stdout);
         float table_max = 0;
         for (uint32_t leave_idx = 0; leave_idx < num_klv_leaves; leave_idx++) {
           const uint32_t bits = atomic_load(&table_out[leave_idx]);
@@ -1233,10 +1280,35 @@ void infer_decide_tfit_stdin(void) {
             table_max = value;
           }
         }
+        uint32_t entries_kept = 0;
+        uint32_t entries_dropped = 0;
+        for (uint32_t leave_idx = 0; carry_extra && leave_idx < num_klv_leaves;
+             leave_idx++) {
+          const uint32_t bits = atomic_load(&table_out[leave_idx]);
+          float value;
+          memcpy(&value, &bits, sizeof(value));
+          if (value <= 0) {
+            continue;
+          }
+          if ((double)value < carry_prune * (double)table_max) {
+            atomic_store(&table_out[leave_idx], 0);
+            entries_dropped++;
+          } else {
+            entries_kept++;
+          }
+        }
+        if (carry_extra) {
+          printf(" tmax=%.6g pmax=%.6g entries=%u dropped=%u",
+                 carry_history[seat] > 0 ? carry_table_max[seat] : 0.0,
+                 carry_history[seat] > 0 ? carry_pool_max[seat] : 0.0,
+                 entries_kept, entries_dropped);
+        }
+        printf("\n");
+        fflush(stdout);
         if (table_max > 0 && rack_get_total_letters(&truth) < (RACK_SIZE)) {
           carry_current[seat] = 1 - carry_current[seat];
           carry_kept[seat] = rack_get_total_letters(&truth);
-          carry_floor[seat] = 1e-3 * (double)table_max;
+          carry_floor[seat] = carry_floor_fraction * (double)table_max;
           carry_history[seat]++;
         } else {
           carry_history[seat] = 0;
