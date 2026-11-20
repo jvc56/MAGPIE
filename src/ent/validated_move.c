@@ -20,7 +20,9 @@
 #include "move.h"
 #include "pat.h"
 #include "pat_eval.h"
+#include "peg_adjust.h"
 #include "player.h"
+#include "pool_shift.h"
 #include "rack.h"
 #include "static_eval.h"
 #include "words.h"
@@ -476,33 +478,53 @@ void validated_move_load(ValidatedMove *vm, const Game *game, int player_index,
       // Build the PAT context on the stack so validated moves get
       // the same equity as movegen-recorded moves. Disabled when the
       // player has no weights or the board state cannot support the scans.
+      // As in the move generator, PAT and the table read the real bag: while
+      // it has tiles the opponent's rack is full, whether or not the game
+      // knows its tiles.
+      const int real_bag_size = game_get_real_bag_size(game);
       PATEvalContext pat_eval_ctx;
       pat_eval_context_disable(&pat_eval_ctx);
       const PATWeights *pat = player_get_pat(player);
-      if (pat && bag_get_letters(game_get_bag(game)) > 0 &&
-          !board_get_transposed(board) && board_get_cross_sets_valid(board)) {
+      if (pat && real_bag_size > 0 && !board_get_transposed(board) &&
+          board_get_cross_sets_valid(board)) {
         pat_eval_context_load(
             &pat_eval_ctx, pat,
             board_get_readonly_lanes(
                 board, board_get_cross_set_index(
                            game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KWG),
                            player_index)),
-            ld, player_get_rack(player), PAT_CLASS_MASK_ALL,
-            rack_get_total_letters(
-                player_get_rack(game_get_player(game, 1 - player_index))));
+            ld, player_get_rack(player), PAT_CLASS_MASK_ALL, RACK_SIZE);
         pat_eval_context_set_kwg(&pat_eval_ctx, player_get_kwg(player),
                                  game_get_variant(game));
       }
+      // The leave's value with its pool shift, as the move generator's is.
+      const Rack *opponent_rack =
+          player_get_rack(game_get_player(game, 1 - player_index));
+      Equity leave_value = 0;
+      if (vm->leave && !rack_is_empty(vm->leave)) {
+        leave_value = klv_get_leave_value(klv, vm->leave);
+      }
+      if (vm->leave) {
+        leave_value += pool_shift_get_leave_shift(
+            player_get_pool_shift_table(player), klv,
+            player_get_pool_shift_weight(player), ld, game_get_bag(game),
+            opponent_rack, vm->leave,
+            rack_get_total_letters(player_get_rack(player)), real_bag_size);
+      }
       move_set_equity(
           vm->move,
-          static_eval_get_move_equity(
-              ld, klv, vm->move, vm->leave,
-              player_get_rack(game_get_player(game, 1 - player_index)),
+          static_eval_get_move_equity_with_leave_value(
+              ld, vm->move, vm->leave, opponent_rack,
               board_get_opening_move_word_penalties(board),
               board_get_opening_move_letter_penalties(board),
               pat_eval_context_get_active_classes(&pat_eval_ctx), &pat_eval_ctx,
               board_get_tiles_played(board),
-              bag_get_letters(game_get_bag(game))));
+              bag_get_letters(game_get_bag(game)), leave_value,
+              move_get_type(vm->move) == GAME_EVENT_TILE_PLACEMENT_MOVE
+                  ? peg_adjust_get_placement_value(
+                        player_get_peg_adjust(player), real_bag_size,
+                        move_get_tiles_played(vm->move))
+                  : 0));
     } else {
       move_set_equity(vm->move, score);
     }

@@ -36,6 +36,11 @@ int game_get_bingo_bonus(const Game *game);
 game_variant_t get_game_variant_type_from_name(const char *variant_name);
 Board *game_get_board(const Game *game);
 Bag *game_get_bag(const Game *game);
+// The number of tiles in the bag once both racks are full. The game's bag
+// also holds the tiles a rack is short of: a rack that is not known, or known
+// only in part, has the rest of its tiles there with the other unseen tiles.
+// Zero when the bag cannot fill both racks: then the real bag is empty.
+int game_get_real_bag_size(const Game *game);
 const LetterDistribution *game_get_ld(const Game *game);
 Player *game_get_player(const Game *game, int player_index);
 int game_get_player_on_turn_index(const Game *game);

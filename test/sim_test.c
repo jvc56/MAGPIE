@@ -3,14 +3,17 @@
 #include "../src/compat/cpthread.h"
 #include "../src/compat/cpthread_defs.h"
 #include "../src/compat/ctime.h"
+#include "../src/def/bai_defs.h"
 #include "../src/def/game_defs.h"
 #include "../src/def/rack_defs.h"
 #include "../src/def/thread_control_defs.h"
+#include "../src/ent/alias_method.h"
 #include "../src/ent/autoplay_results.h"
 #include "../src/ent/bag.h"
 #include "../src/ent/bai_result.h"
 #include "../src/ent/equity.h"
 #include "../src/ent/game.h"
+#include "../src/ent/inference_results.h"
 #include "../src/ent/letter_distribution.h"
 #include "../src/ent/move.h"
 #include "../src/ent/rack.h"
@@ -18,6 +21,7 @@
 #include "../src/ent/sim_results.h"
 #include "../src/ent/stats.h"
 #include "../src/ent/thread_control.h"
+#include "../src/ent/validated_move.h"
 #include "../src/ent/win_pct.h"
 #include "../src/impl/config.h"
 #include "../src/impl/gameplay.h"
@@ -35,6 +39,7 @@
 #include <assert.h>
 #include <errno.h>
 #include <inttypes.h>
+#include <math.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -1535,6 +1540,208 @@ void test_sim_with_inference_cutoff(void) {
   config_destroy(config);
 }
 
+// Sims the position after an exchange of 6 as simulate_after_exchange does,
+// but with inference args that can't be inferred from (an exchange that
+// scored), so the sim succeeds only by taking the inference the config's
+// inference results already hold. Returns the sim's error status.
+static error_code_t simulate_after_exchange_with_bad_inference_args(
+    Config *config, bool use_precomputed_inference, SimResults *sim_results) {
+  load_and_exec_config_or_die(config, "set -seed 10");
+  const int ld_size = ld_get_size(config_get_ld(config));
+  Rack target_played_tiles;
+  rack_set_dist_size_and_reset(&target_played_tiles, ld_size);
+  Rack nontarget_known_tiles;
+  rack_set_dist_size_and_reset(&nontarget_known_tiles, ld_size);
+  Rack target_known_inference_tiles;
+  rack_set_dist_size_and_reset(&target_known_inference_tiles, ld_size);
+  SimArgs sim_args;
+  config_fill_sim_args(config, NULL, &target_played_tiles,
+                       &nontarget_known_tiles, &target_known_inference_tiles,
+                       &sim_args);
+  assert(sim_args.use_inference);
+  assert(!sim_args.use_precomputed_inference);
+  sim_args.use_precomputed_inference = use_precomputed_inference;
+  sim_args.inference_args.use_game_history = false;
+  sim_args.inference_args.target_num_exch = 6;
+  sim_args.inference_args.target_score = int_to_equity(10);
+  ErrorStack *error_stack = error_stack_create();
+  thread_control_set_status(config_get_thread_control(config),
+                            THREAD_CONTROL_STATUS_STARTED);
+  simulate_without_ctx(&sim_args, sim_results, error_stack);
+  const error_code_t status = error_stack_top(error_stack);
+  error_stack_destroy(error_stack);
+  return status;
+}
+
+// A sim told its inference is precomputed samples from the inference results
+// as given, without inferring again, and comes out as the sim that inferred
+// them did.
+void test_sim_with_precomputed_inference(void) {
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -wmp true -s1 equity -s2 equity -r1 all -r2 all "
+      "-numplays 4 -plies 2 -threads 1 -iter 200 -scond none -sinfer true "
+      "-ima 5");
+  load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
+  assert(test_parse_gcg("exchange_with_seven_in_bag", config,
+                        config_get_game_history(config)) ==
+         ERROR_STATUS_SUCCESS);
+  game_play_to_end_or_die(config_get_game_history(config),
+                          config_get_game(config));
+  load_and_exec_config_or_die(config, "gen");
+  ErrorStack *error_stack = error_stack_create();
+  config_load_win_pcts(config, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  error_stack_destroy(error_stack);
+
+  SimResults *inferred =
+      sim_results_create(convert_user_cutoff_to_cutoff(0.005));
+  SimResults *precomputed =
+      sim_results_create(convert_user_cutoff_to_cutoff(0.005));
+  // The first sim infers, leaving its inference in the config's results.
+  simulate_after_exchange(config, true, inferred);
+  assert(sim_results_get_num_infer_leaves(inferred) > 0);
+  // Inferring from the bad args fails, so the next sim can't be inferring.
+  const error_code_t inferring_status =
+      simulate_after_exchange_with_bad_inference_args(config, false,
+                                                      precomputed);
+  assert(inferring_status != ERROR_STATUS_SUCCESS);
+  // That failure came at the args check, before the inference results were
+  // reset, so they still hold the first sim's inference.
+  const error_code_t precomputed_status =
+      simulate_after_exchange_with_bad_inference_args(config, true,
+                                                      precomputed);
+  assert(precomputed_status == ERROR_STATUS_SUCCESS);
+  assert(sim_results_get_num_infer_leaves(precomputed) ==
+         sim_results_get_num_infer_leaves(inferred));
+  assert(sim_results_get_iteration_count(precomputed) ==
+         sim_results_get_iteration_count(inferred));
+  assert_simmed_plays_identical(inferred, precomputed);
+  sim_results_destroy(inferred);
+  sim_results_destroy(precomputed);
+  config_destroy(config);
+}
+
+// Sims one play against an inference of two equally likely leaves and
+// checks the play's win rate against the exact mixture over the opponent's
+// full racks. The unseen pool is EGILNRSY, so the leave EGLNRS draws its
+// seventh tile from I and Y, and GLNRSY draws it from E and I: the full rack
+// is GILNRSY with probability 1/4, EGLNRSY with 1/2 and EGILNRS with 1/4.
+// The rollouts reach the end of the game, so each full rack gives a fixed
+// result, and the sampled sim must land on their weighted mean. A draw that
+// depends on which leave was sampled moves the win rate well outside the
+// tolerance. With mirrored, the seats are swapped, so the opponent draws
+// from the other end of the bag.
+static void assert_inferred_leave_draws_uniformly(const bool mirrored) {
+  Config *config = config_create_or_die(
+      "set -lex CSW24 -wmp true -s1 equity -s2 equity -r1 all -r2 all "
+      "-threads 1 -plies 4 -numplays 100");
+  load_and_exec_config_or_die(
+      config,
+      mirrored
+          ? "cgp 7W6W/7U5LI/7D4KIF/MAISTERS4ONE/3HUE6BO1/1PrEPLAN1VOG1C1/"
+            "6HEJAB2U1/3LOUIE1GAROTE/2QI10R/3pARROTY4I/2FAX2T6N/"
+            "5ANTECEDE1I/7A6T/7V6E/7A6S DDIMNOO/EILRSYZ 417/375 0 -lex CSW24;"
+          : "cgp 7W6W/7U5LI/7D4KIF/MAISTERS4ONE/3HUE6BO1/1PrEPLAN1VOG1C1/"
+            "6HEJAB2U1/3LOUIE1GAROTE/2QI10R/3pARROTY4I/2FAX2T6N/"
+            "5ANTECEDE1I/7A6T/7V6E/7A6S EILRSYZ/DDIMNOO 375/417 0 -lex CSW24;");
+  Game *game = config_get_game(config);
+  const LetterDistribution *ld = game_get_ld(game);
+  ErrorStack *error_stack = error_stack_create();
+  config_load_win_pcts(config, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  if (mirrored) {
+    ValidatedMoves *pass =
+        validated_moves_create(game, 0, "pass", false, true, error_stack);
+    assert(error_stack_is_empty(error_stack));
+    play_move(validated_moves_get_move(pass, 0), game, NULL);
+    validated_moves_destroy(pass);
+  }
+  const int opp_index = mirrored ? 1 : 0;
+  ValidatedMoves *previous = validated_moves_create(game, opp_index, "14N Z.",
+                                                    false, true, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  play_move(validated_moves_get_move(previous, 0), game, NULL);
+  validated_moves_destroy(previous);
+  assert(game_get_player_on_turn_index(game) == 1 - opp_index);
+  load_and_exec_config_or_die(config, "gen");
+  MoveList *only_play = move_list_create(1);
+  move_list_add_move(only_play,
+                     move_list_get_move(config_get_move_list(config), 0));
+
+  InferenceResults *inference_results = inference_results_create(NULL);
+  AliasMethod *alias_method =
+      inference_results_get_alias_method(inference_results);
+  const char *leaves[] = {"EGLNRS", "GLNRSY"};
+  Rack rack;
+  rack_set_dist_size_and_reset(&rack, ld_get_size(ld));
+  for (int leave_idx = 0; leave_idx < 2; leave_idx++) {
+    rack_set_to_string(ld, &rack, leaves[leave_idx]);
+    alias_method_add_rack(alias_method, &rack, 1);
+  }
+  const bool tables_generated = alias_method_generate_tables(alias_method);
+  assert(tables_generated);
+
+  enum { NUM_FULL_RACKS = 3, NUM_SAMPLED_ROLLOUTS = 8192 };
+  const char *full_racks[NUM_FULL_RACKS] = {"GILNRSY", "EGLNRSY", "EGILNRS"};
+  const double full_rack_probs[NUM_FULL_RACKS] = {0.25, 0.5, 0.25};
+  SimCtx *sim_ctx = NULL;
+  SimResults *sim_results = sim_results_create(0);
+  double expected_win = 0.0;
+  double min_win = 1.0;
+  double max_win = 0.0;
+  for (int sim_idx = 0; sim_idx <= NUM_FULL_RACKS; sim_idx++) {
+    const bool sample_leave = sim_idx == NUM_FULL_RACKS;
+    rack_reset(&rack);
+    if (!sample_leave) {
+      rack_set_to_string(ld, &rack, full_racks[sim_idx]);
+    }
+    SimArgs sim_args;
+    config_fill_sim_args(config, &rack, NULL, NULL, NULL, &sim_args);
+    sim_args.use_inference = sample_leave;
+    sim_args.use_precomputed_inference = sample_leave;
+    sim_args.inference_results = inference_results;
+    sim_args.move_list = only_play;
+    sim_args.num_plays = 1;
+    sim_args.seed = 2120000002;
+    // One rollout per sample, so that every draw is its own shuffle.
+    sim_args.bag_cycle = false;
+    sim_args.bai_options.threshold = BAI_THRESHOLD_NONE;
+    sim_args.bai_options.sampling_rule = BAI_SAMPLING_RULE_ROUND_ROBIN;
+    sim_args.bai_options.sample_minimum = 1;
+    sim_args.bai_options.sample_limit = sample_leave ? NUM_SAMPLED_ROLLOUTS : 1;
+    sim_args.bai_options.time_limit_seconds = 0;
+    thread_control_set_status(sim_args.thread_control,
+                              THREAD_CONTROL_STATUS_STARTED);
+    simulate(&sim_args, &sim_ctx, sim_results, error_stack);
+    assert(error_stack_is_empty(error_stack));
+    const SimmedPlay *simmed_play = sim_results_get_simmed_play(sim_results, 0);
+    assert(simmed_play_get_num_rollouts(simmed_play) ==
+           sim_args.bai_options.sample_limit);
+    const double win = stat_get_mean(simmed_play_get_win_pct_stat(simmed_play));
+    if (sample_leave) {
+      // The full racks must disagree, or any draw would pass.
+      assert(max_win - min_win > 0.5);
+      // Five standard errors of the sampled mean at this many rollouts.
+      assert(fabs(win - expected_win) < 0.025);
+    } else {
+      expected_win += full_rack_probs[sim_idx] * win;
+      min_win = win < min_win ? win : min_win;
+      max_win = win > max_win ? win : max_win;
+    }
+  }
+  sim_ctx_destroy(sim_ctx);
+  sim_results_destroy(sim_results);
+  inference_results_destroy(inference_results);
+  move_list_destroy(only_play);
+  error_stack_destroy(error_stack);
+  config_destroy(config);
+}
+
+void test_sim_inferred_leave_draws_uniformly(void) {
+  assert_inferred_leave_draws_uniformly(false);
+  assert_inferred_leave_draws_uniformly(true);
+}
+
 // A resumed sim continues accumulating onto the existing samples, and a
 // duplicated SimResults resumes exactly as the original would: the duplicate
 // copies each play's PRNG state rather than reseeding it.
@@ -1594,6 +1801,8 @@ void test_sim(void) {
     perf_test_multithread_sim();
     test_sim_with_inference();
     test_sim_with_inference_cutoff();
+    test_sim_with_precomputed_inference();
+    test_sim_inferred_leave_draws_uniformly();
     test_sim_round_robin_consistency();
     test_sim_top_two_consistency();
     test_sim_one_ply();

@@ -73,6 +73,24 @@ void pat_class_channel_bases(int premium_class, int *hook_base,
 // of the unit's row stays zero, so a dot product over the group's features
 // alone equals the full one.
 int pat_unit_group_features(int unit_group, uint8_t *feature_indexes);
+// What a board square offers a scan before any move is laid on it (see
+// pat_effective_cross_info), remembered per position so that the many scans
+// that walk the same square work it out once. Zero the states to empty it.
+enum {
+  PAT_SQUARE_INFO_KNOWN = 1,
+  PAT_SQUARE_INFO_DEAD = 2,
+  PAT_SQUARE_INFO_HOOKY = 4,
+  PAT_SQUARE_INFO_EXPOSURE_KNOWN = 8,
+};
+typedef struct PATSquareInfoCache {
+  uint8_t states[2][BOARD_DIM][BOARD_DIM];
+  // The premium word multiplier the remembered exposure was worked out for.
+  uint8_t exposure_multipliers[2][BOARD_DIM][BOARD_DIM];
+  int32_t flexes[2][BOARD_DIM][BOARD_DIM];
+  int32_t score_exposures[2][BOARD_DIM][BOARD_DIM];
+  uint64_t letter_sets[2][BOARD_DIM][BOARD_DIM];
+} PATSquareInfoCache;
+
 // Scans one premium square's walk along dir, or one window, adding its
 // features to features; see the definitions for the parameters.
 void pat_scan_unit(const Square *lanes, const LetterDistribution *ld,
@@ -80,12 +98,14 @@ void pat_scan_unit(const Square *lanes, const LetterDistribution *ld,
                    int premium_row, int premium_col, int premium_class, int dir,
                    const PATMoveOverlay *overlay, int32_t *features,
                    int *extent_lo, int *extent_hi, int opponent_rack_size,
-                   uint64_t *hook_letters_out, bool score_channels);
+                   uint64_t *hook_letters_out, bool score_channels,
+                   PATSquareInfoCache *square_cache);
 void pat_scan_dd_unit(const Square *lanes, const uint8_t *unseen_counts,
                       int dir, int lane_index, int lo, int hi, int tier,
                       const PATMoveOverlay *overlay, int32_t *features,
                       int *extent_lo, int *extent_hi, int opponent_rack_size,
-                      uint64_t *hook_letters_out);
+                      uint64_t *hook_letters_out,
+                      PATSquareInfoCache *square_cache);
 // The weights' dot product with a feature row, and the clamp that keeps it
 // in [EQUITY_MIN_VALUE, 0].
 int64_t pat_dot_raw(const PATWeights *pat, const int32_t *features);

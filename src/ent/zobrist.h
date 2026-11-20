@@ -135,10 +135,13 @@ zobrist_calculate_hash(const Zobrist *z, const Board *game_board,
   return key;
 }
 
-inline static uint64_t zobrist_add_move(const Zobrist *z, uint64_t key,
-                                        const Move *move, const Rack *move_rack,
-                                        bool was_our_move, int scoreless_turns,
-                                        int last_scoreless_turns) {
+// move_rack is the mover's rack: what is left of it after the move, or, with
+// rack_holds_move, the rack before the move, the tiles it plays included.
+inline static uint64_t
+zobrist_add_move_impl(const Zobrist *z, uint64_t key, const Move *move,
+                      const Rack *move_rack, bool rack_holds_move,
+                      bool was_our_move, int scoreless_turns,
+                      int last_scoreless_turns) {
   // Add a move to the Zobrist hash.
 
   // For every letter in the move (assume it's only a tile placement or
@@ -202,6 +205,10 @@ inline static uint64_t zobrist_add_move(const Zobrist *z, uint64_t key,
         }
       }
       int leftover = move_rack->array[tile_idx];
+      if (rack_holds_move) {
+        leftover -= copies;
+        assert(leftover >= 0);
+      }
       key ^= rack_table[tile_idx][leftover + copies];
       key ^= rack_table[tile_idx][leftover];
     }
@@ -216,6 +223,27 @@ inline static uint64_t zobrist_add_move(const Zobrist *z, uint64_t key,
   key ^= z->their_turn;
 
   return key;
+}
+
+// move_rack is what the move leaves of the mover's rack.
+inline static uint64_t zobrist_add_move(const Zobrist *z, uint64_t key,
+                                        const Move *move, const Rack *move_rack,
+                                        bool was_our_move, int scoreless_turns,
+                                        int last_scoreless_turns) {
+  return zobrist_add_move_impl(z, key, move, move_rack, false, was_our_move,
+                               scoreless_turns, last_scoreless_turns);
+}
+
+// zobrist_add_move for a move not played yet: rack_before_move is the mover's
+// rack with the move's tiles still on it, and scoreless_turns the count the
+// move will leave.
+inline static uint64_t
+zobrist_add_unplayed_move(const Zobrist *z, uint64_t key, const Move *move,
+                          const Rack *rack_before_move, bool was_our_move,
+                          int scoreless_turns, int last_scoreless_turns) {
+  return zobrist_add_move_impl(z, key, move, rack_before_move, true,
+                               was_our_move, scoreless_turns,
+                               last_scoreless_turns);
 }
 
 #endif

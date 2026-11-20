@@ -68,8 +68,10 @@
 #include "pat_test.h"
 #include "pat_utility_test.h"
 #include "path_move_lists_test.h"
+#include "peg_adjust_test.h"
 #include "peg_cascade_bench_test.h"
 #include "peg_embedding_test.h"
+#include "peg_fit_test.h"
 #include "peg_oracle_test.h"
 #include "peg_pess_test.h"
 #include "peg_poll_test.h"
@@ -79,10 +81,12 @@
 #include "peg_validate_test.h"
 #include "play_chooser_test.h"
 #include "players_data_test.h"
+#include "pool_shift_test.h"
 #include "position_lengths_test.h"
 #include "rack_info_table_test.h"
 #include "rack_list_test.h"
 #include "rack_test.h"
+#include "rack_value_table_test.h"
 #include "random_variable_test.h"
 #include "shadow_test.h"
 #include "sim_benchmark_test.h"
@@ -134,6 +138,7 @@ static TestEntry test_table[] = {
     {"l", test_leaves},
     {"leavemap", test_leave_map},
     {"rit", test_rack_info_table},
+    {"rvt", test_rack_value_table},
     {"wit", test_word_info_table},
     {"wpfmaker", test_word_plus_floater_maker},
     {"positionlengths", test_position_lengths},
@@ -155,6 +160,8 @@ static TestEntry test_table[] = {
     {"bestsmall", test_best_small},
     {"eq", test_equity},
     {"eqadj", test_equity_adjustments},
+    {"pegadjust", test_peg_adjust},
+    {"poolshift", test_pool_shift},
     {"gameplay", test_gameplay},
     {"stats", test_stats},
     {"infer", test_infer},
@@ -223,6 +230,7 @@ static TestEntry test_table[] = {
     {"peg", test_peg},
     {"pegpessdraw", test_peg_pessfull_draw_regression},
     {"pegtopkall", test_peg_pegtopk_all},
+    {"pegfit", test_peg_fit},
     {"playchooser", test_play_chooser},
     {NULL, NULL} // Sentinel value to mark end of array
 };

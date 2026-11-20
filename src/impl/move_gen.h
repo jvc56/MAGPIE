@@ -8,6 +8,7 @@
 #include "../ent/kwg.h"
 #include "../ent/lane_shadow_cache.h"
 #include "../ent/move.h"
+#include "../ent/pool_shift.h"
 #include "../ent/thread_control.h"
 #include "move_gen_base.h"
 #include <stdbool.h>
@@ -68,9 +69,9 @@ typedef struct MoveGenArgs {
   // MOVE_RECORD_BEST_SMALL only: lane shadows that earlier generations
   // recorded (see lane_shadow_cache.h). A lane the cache holds adds the
   // anchors recorded for it instead of being shadowed, and every other lane
-  // is recorded. Not used with a word info table or in wordsmog, whose
-  // shadows read more than the key holds. NULL (the default) shadows every
-  // lane.
+  // is recorded. Not used in wordsmog. A word info table does not matter:
+  // only the full shadow and WMP generation read it, not the small shadow and
+  // generator these generations run. NULL (the default) shadows every lane.
   LaneShadowCache *lane_shadow_cache;
   // For the census rollout (census_rollout.h), MOVE_RECORD_BEST by equity
   // only: the lanes (bit dir * BOARD_DIM + row_or_col) whose anchors are not
@@ -80,6 +81,15 @@ typedef struct MoveGenArgs {
   // equity. 0 and NULL change nothing.
   uint64_t skip_lanes;
   const uint32_t *skip_anchor_cols;
+  // By lane and anchor column (2 * BOARD_DIM by BOARD_DIM), a bound on the
+  // equity without the PAT term of each anchor's plays, or EQUITY_MAX_VALUE
+  // for an anchor without one; NULL for none. A best-equity generation with
+  // PAT and a word map searches an anchor only while its cap plus the
+  // lane's bound on the term can beat the best move. The best move is the
+  // same.
+  const Equity *anchor_equity_caps;
+  // Optional shifts already computed by the census for this exact position.
+  const PoolShiftRack *rack_shift;
 } MoveGenArgs;
 
 // The hash of each lane of the game's board as the best-move carry computes

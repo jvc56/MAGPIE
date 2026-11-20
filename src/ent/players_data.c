@@ -12,8 +12,11 @@
 #include "equity.h"
 #include "klv.h"
 #include "kwg.h"
+#include "letter_distribution.h"
 #include "pat.h"
 #include "pat_file.h"
+#include "peg_adjust.h"
+#include "pool_shift.h"
 #include "rack.h"
 #include "rack_info_table.h"
 #include "wmp.h"
@@ -27,7 +30,8 @@ static const char *const players_data_type_names[] = {
     "wordmap",
     "rack info table",
     "word info table",
-    "positional adjustment table"};
+    "positional adjustment table",
+    "pre-endgame adjustments"};
 
 // The PlayersData struct holds all of the
 // information that can be set during configuration.
@@ -50,7 +54,13 @@ struct PlayersData {
   // The same two settings for the rollouts of the player's sims.
   bool pat_rollout_disabled[2];
   uint32_t pat_rollout_disabled_classes_masks[2];
-  // The largest PAT adjustment a move of the player's can get.
+  bool pat_rollout_exact[2];
+  // The pool shift (see pool_shift.h): each player's weight in thousandths,
+  // and the table players_data_update_pool_shift built from the player's
+  // KLV, which is kept for as long as it is that KLV's, whatever the weight
+  // becomes. The players share one table when they share a KLV.
+  int pool_shift_weights[2];
+  PoolShiftTable *pool_shift_tables[2];
 };
 
 #define DEFAULT_MOVE_SORT_TYPE MOVE_SORT_EQUITY
@@ -115,6 +125,16 @@ bool players_data_get_pat_rollout_disabled(const PlayersData *players_data,
   return players_data->pat_rollout_disabled[player_index];
 }
 
+void players_data_set_pat_rollout_exact(PlayersData *players_data,
+                                        int player_index, bool exact) {
+  players_data->pat_rollout_exact[player_index] = exact;
+}
+
+bool players_data_get_pat_rollout_exact(const PlayersData *players_data,
+                                        int player_index) {
+  return players_data->pat_rollout_exact[player_index];
+}
+
 void players_data_set_pat_rollout_disabled_classes_mask(
     PlayersData *players_data, int player_index, uint32_t mask) {
   players_data->pat_rollout_disabled_classes_masks[player_index] = mask;
@@ -123,6 +143,77 @@ void players_data_set_pat_rollout_disabled_classes_mask(
 uint32_t players_data_get_pat_rollout_disabled_classes_mask(
     const PlayersData *players_data, int player_index) {
   return players_data->pat_rollout_disabled_classes_masks[player_index];
+}
+
+void players_data_set_pool_shift_weight(PlayersData *players_data,
+                                        int player_index, int weight_milli) {
+  players_data->pool_shift_weights[player_index] = weight_milli;
+}
+
+int players_data_get_pool_shift_weight(const PlayersData *players_data,
+                                       int player_index) {
+  return players_data->pool_shift_weights[player_index];
+}
+
+const PoolShiftTable *
+players_data_get_pool_shift_table(const PlayersData *players_data,
+                                  int player_index) {
+  return players_data->pool_shift_weights[player_index] == 0
+             ? NULL
+             : players_data->pool_shift_tables[player_index];
+}
+
+// Frees both players' pool shift tables, once if they share one.
+static void players_data_destroy_pool_shift_tables(PlayersData *players_data) {
+  if (players_data->pool_shift_tables[1] !=
+      players_data->pool_shift_tables[0]) {
+    pool_shift_table_destroy(players_data->pool_shift_tables[1]);
+  }
+  pool_shift_table_destroy(players_data->pool_shift_tables[0]);
+  players_data->pool_shift_tables[0] = NULL;
+  players_data->pool_shift_tables[1] = NULL;
+}
+
+void players_data_update_pool_shift(PlayersData *players_data,
+                                    const LetterDistribution *ld) {
+  PoolShiftTable *old_tables[2] = {players_data->pool_shift_tables[0],
+                                   players_data->pool_shift_tables[1]};
+  PoolShiftTable *new_tables[2] = {NULL, NULL};
+  for (int player_index = 0; player_index < 2; player_index++) {
+    const KLV *klv = players_data_get_klv(players_data, player_index);
+    if (klv == NULL || ld == NULL) {
+      continue;
+    }
+    // A table already built from these leaves: either player's old one, or
+    // the one the first player was just given.
+    for (int old_idx = 0; old_idx < 2 && new_tables[player_index] == NULL;
+         old_idx++) {
+      if (old_tables[old_idx] != NULL &&
+          pool_shift_table_matches_ld(old_tables[old_idx], ld) &&
+          pool_shift_table_matches_klv(old_tables[old_idx], klv)) {
+        new_tables[player_index] = old_tables[old_idx];
+      }
+    }
+    if (new_tables[player_index] == NULL && player_index == 1 &&
+        new_tables[0] != NULL &&
+        pool_shift_table_matches_klv(new_tables[0], klv)) {
+      new_tables[1] = new_tables[0];
+    }
+    if (new_tables[player_index] == NULL &&
+        players_data->pool_shift_weights[player_index] != 0) {
+      new_tables[player_index] = pool_shift_table_create(klv, ld);
+    }
+  }
+  for (int old_idx = 0; old_idx < 2; old_idx++) {
+    PoolShiftTable *old_table = old_tables[old_idx];
+    const bool already_freed = old_idx == 1 && old_table == old_tables[0];
+    if (old_table != NULL && !already_freed && old_table != new_tables[0] &&
+        old_table != new_tables[1]) {
+      pool_shift_table_destroy(old_table);
+    }
+  }
+  players_data->pool_shift_tables[0] = new_tables[0];
+  players_data->pool_shift_tables[1] = new_tables[1];
 }
 
 bool players_data_get_is_shared(const PlayersData *players_data,
@@ -193,6 +284,12 @@ PATWeights *players_data_get_pat(const PlayersData *players_data,
       players_data, PLAYERS_DATA_TYPE_PAT, player_index);
 }
 
+PegAdjust *players_data_get_peg_adjust(const PlayersData *players_data,
+                                       int player_index) {
+  return (PegAdjust *)players_data_get_data(
+      players_data, PLAYERS_DATA_TYPE_PEG_ADJUST, player_index);
+}
+
 void players_data_set_data(PlayersData *players_data,
                            players_data_t players_data_type, int player_index,
                            void *data) {
@@ -233,6 +330,9 @@ void *players_data_create_data(players_data_t players_data_type,
   case PLAYERS_DATA_TYPE_PAT:
     data = pat_create(data_paths, data_name, error_stack);
     break;
+  case PLAYERS_DATA_TYPE_PEG_ADJUST:
+    data = peg_adjust_create(data_paths, data_name, error_stack);
+    break;
   case NUMBER_OF_DATA:
     log_fatal("cannot create invalid players data type");
     break;
@@ -264,6 +364,9 @@ void players_data_destroy_data(PlayersData *players_data,
       break;
     case PLAYERS_DATA_TYPE_PAT:
       pat_destroy(players_data->data[data_index]);
+      break;
+    case PLAYERS_DATA_TYPE_PEG_ADJUST:
+      peg_adjust_destroy(players_data->data[data_index]);
       break;
     case NUMBER_OF_DATA:
       log_fatal("cannot destroy invalid players data type");
@@ -315,6 +418,9 @@ const char *players_data_get_data_name(const PlayersData *players_data,
     case PLAYERS_DATA_TYPE_PAT:
       data_name = pat_get_name(players_data->data[data_index]);
       break;
+    case PLAYERS_DATA_TYPE_PEG_ADJUST:
+      data_name = peg_adjust_get_name(players_data->data[data_index]);
+      break;
     case NUMBER_OF_DATA:
       log_fatal("cannot destroy invalid players data type");
       break;
@@ -336,12 +442,14 @@ PlayersData *players_data_create(bool use_wmp) {
         default_use = use_wmp;
       } else if (data_index == PLAYERS_DATA_TYPE_RIT ||
                  data_index == PLAYERS_DATA_TYPE_WIT ||
-                 data_index == PLAYERS_DATA_TYPE_PAT) {
+                 data_index == PLAYERS_DATA_TYPE_PAT ||
+                 data_index == PLAYERS_DATA_TYPE_PEG_ADJUST) {
         // RIT and WIT files are opt-in: callers must explicitly enable them
         // with -rit/-wit (or the per-player variants) since they are built by
-        // a convert command and may not exist for every lexicon. PAT
-        // weights are likewise opt-in: they load only when named explicitly
-        // with -pat (or -pat1/-pat2).
+        // a convert command and may not exist for every lexicon. PAT weights
+        // and pre-endgame adjustments load by name, with -pat and -pegadjust
+        // (or the per-player variants) or as the config resolves auto; this
+        // flag plays no part in either.
         default_use = false;
       }
       players_data_set_use_when_available(players_data, data_index,
@@ -352,8 +460,11 @@ PlayersData *players_data_create(bool use_wmp) {
     players_data_set_move_record_type(players_data, player_index,
                                       DEFAULT_MOVE_RECORD_TYPE);
     players_data_set_pat_disabled_classes_mask(players_data, player_index, 0);
+    players_data->pool_shift_weights[player_index] = 0;
+    players_data->pool_shift_tables[player_index] = NULL;
     players_data_set_pat_candidates_disabled(players_data, player_index, false);
     players_data_set_pat_rollout_disabled(players_data, player_index, false);
+    players_data_set_pat_rollout_exact(players_data, player_index, false);
     players_data_set_pat_rollout_disabled_classes_mask(
         players_data, player_index,
         PAT_CLASS_MASK_ALL & ~PAT_CLASS_MASK_ROLLOUT_DEFAULT);
@@ -375,6 +486,7 @@ void players_data_destroy(PlayersData *players_data) {
       }
     }
   }
+  players_data_destroy_pool_shift_tables(players_data);
   free(players_data);
 }
 
@@ -382,7 +494,8 @@ bool players_data_type_is_nullable(players_data_t players_data_type) {
   return players_data_type == PLAYERS_DATA_TYPE_WMP ||
          players_data_type == PLAYERS_DATA_TYPE_RIT ||
          players_data_type == PLAYERS_DATA_TYPE_WIT ||
-         players_data_type == PLAYERS_DATA_TYPE_PAT;
+         players_data_type == PLAYERS_DATA_TYPE_PAT ||
+         players_data_type == PLAYERS_DATA_TYPE_PEG_ADJUST;
 }
 
 void players_data_set(PlayersData *players_data,

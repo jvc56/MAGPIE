@@ -244,6 +244,18 @@ inline static uint64_t ttentry_stored_hash(TTEntry t) {
   return ((uint64_t)(t.top_4_bytes) << 8) | t.fifth_byte;
 }
 
+// Starts loading zval's bucket, for a lookup that is about to come.
+static inline void transposition_table_prefetch(const TranspositionTable *tt,
+                                                uint64_t zval) {
+#if defined(__has_builtin) && __has_builtin(__builtin_prefetch)
+  const uint64_t bucket = zval & tt->bucket_mask;
+  __builtin_prefetch(&tt->table[bucket * TT_BUCKET_SIZE * 2]);
+#else
+  (void)tt;
+  (void)zval;
+#endif
+}
+
 static inline TTEntry transposition_table_lookup(TranspositionTable *tt,
                                                  uint64_t zval) {
   const uint64_t bucket = zval & tt->bucket_mask;

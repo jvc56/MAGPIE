@@ -12,7 +12,12 @@
 // built from a win percentage table and indexed by the bag after the move
 // and the mover's margin.
 
-enum { PAT_UTILITY_WIDTH = 2 * PAT_UTILITY_MARGIN_LIMIT + 1 };
+enum {
+  PAT_UTILITY_WIDTH = 2 * PAT_UTILITY_MARGIN_LIMIT + 1,
+  // Levels of utility_range_max: spans of up to 2^(levels - 1) margins,
+  // which must reach PAT_UTILITY_PREFIX_MAX_SCORE + 1.
+  PAT_UTILITY_RANGE_LEVELS = 8,
+};
 
 // Sets the utility correction (see PAT_UTILITY_ADJUST_ROW_PREFIX) and builds
 // its tables from win_pcts; 0 removes it.
@@ -42,6 +47,24 @@ static inline size_t pat_utility_index(const PATWeights *pat, int bag,
   }
   return (size_t)bag * PAT_UTILITY_WIDTH +
          (size_t)(margin + PAT_UTILITY_MARGIN_LIMIT);
+}
+
+// The largest correction in the row of bag over the margins from margin to
+// margin + span, each clamped to the table as pat_utility_index clamps it.
+static inline Equity pat_utility_range_max(const PATWeights *pat, int bag,
+                                           int margin, int span) {
+  const size_t first = pat_utility_index(pat, bag, margin);
+  const size_t last = pat_utility_index(pat, bag, margin + span);
+  const unsigned length = (unsigned)(last - first) + 1;
+  // floor(log2(length)), length >= 1.
+  const int level = 31 - __builtin_clz(length);
+  const size_t table_size =
+      (size_t)(pat->utility_max_bag + 1) * PAT_UTILITY_WIDTH;
+  const Equity *level_table =
+      pat->utility_range_max + (size_t)level * table_size;
+  const Equity from_first = level_table[first];
+  const Equity to_last = level_table[last + 1 - ((size_t)1 << level)];
+  return from_first > to_last ? from_first : to_last;
 }
 
 #endif

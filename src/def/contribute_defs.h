@@ -179,6 +179,11 @@ enum { CONTRIBUTE_MAX_THREADS = (MAX_THREADS - 1) / 2 };
 #define CONTRIBUTE_KEY_POSITION_PLAYER "player"
 #define CONTRIBUTE_KEY_RACK "rack"
 #define CONTRIBUTE_KEY_RACKS "racks"
+// An opening-rack request's optional per-rack candidate moves: an array
+// parallel to "racks", each element the moves to rank for that rack, in the
+// form a ranked play's "move" is reported. Sent for a rack's later passes,
+// which rank only the leaders of its first.
+#define CONTRIBUTE_KEY_CANDIDATES "candidates"
 #define CONTRIBUTE_KEY_POSITION "position"
 #define CONTRIBUTE_KEY_PREVIOUS_MOVE "previous_move"
 #define CONTRIBUTE_KEY_PREVIOUS_MOVE_SCORE "previous_move_score"

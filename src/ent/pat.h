@@ -97,6 +97,10 @@ struct PATWeights {
   int utility_max_bag;
   Equity *utility_table;
   Equity *utility_suffix_max;
+  // By level k, then as utility_table is indexed: the largest correction
+  // over the 2^k margins from the index up, within the row. Two of them
+  // cover any span of margins (see pat_utility_range_max).
+  Equity *utility_range_max;
   char *utility_win_pct_name;
   // Per-stage factor on the applied term (see the row prefixes in
   // pat_defs.h); indexed by PAT_STAGE_*.

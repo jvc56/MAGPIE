@@ -7,7 +7,10 @@
 #include "kwg.h"
 #include "letter_distribution.h"
 #include "pat.h"
+#include "pat_board_cache.h"
+#include "peg_adjust.h"
 #include "players_data.h"
+#include "pool_shift.h"
 #include "rack.h"
 #include "rack_info_table.h"
 #include "wmp.h"
@@ -37,6 +40,12 @@ struct Player {
   // rollouts (see player_set_pat_usage).
   bool pat_disabled;
   uint32_t pat_disabled_classes_mask;
+  // Not owned; see player_set_pat_board_cache.
+  PATBoardCache *pat_board_cache;
+  const PegAdjust *peg_adjust;
+  // The pool shift (see pool_shift.h): NULL and 0 for none.
+  const PoolShiftTable *pool_shift_table;
+  int pool_shift_weight;
 };
 
 void player_reset(Player *player) {
@@ -62,6 +71,12 @@ void player_update(const PlayersData *players_data, Player *player) {
       players_data_get_pat_candidates_disabled(players_data, player->index);
   player->pat_disabled_classes_mask =
       players_data_get_pat_disabled_classes_mask(players_data, player->index);
+  player->pat_board_cache = NULL;
+  player->peg_adjust = players_data_get_peg_adjust(players_data, player->index);
+  player->pool_shift_table =
+      players_data_get_pool_shift_table(players_data, player->index);
+  player->pool_shift_weight =
+      players_data_get_pool_shift_weight(players_data, player->index);
 }
 
 Player *player_create(const PlayersData *players_data,
@@ -93,6 +108,10 @@ Player *player_duplicate(const Player *player) {
   new_player->pat = player->pat;
   new_player->pat_disabled = player->pat_disabled;
   new_player->pat_disabled_classes_mask = player->pat_disabled_classes_mask;
+  new_player->pat_board_cache = player->pat_board_cache;
+  new_player->peg_adjust = player->peg_adjust;
+  new_player->pool_shift_table = player->pool_shift_table;
+  new_player->pool_shift_weight = player->pool_shift_weight;
   return new_player;
 }
 
@@ -111,6 +130,10 @@ void player_copy(Player *dst, const Player *src) {
   dst->pat = src->pat;
   dst->pat_disabled = src->pat_disabled;
   dst->pat_disabled_classes_mask = src->pat_disabled_classes_mask;
+  dst->pat_board_cache = src->pat_board_cache;
+  dst->peg_adjust = src->peg_adjust;
+  dst->pool_shift_table = src->pool_shift_table;
+  dst->pool_shift_weight = src->pool_shift_weight;
 }
 
 void player_destroy(Player *player) {
@@ -156,6 +179,28 @@ const WordInfoTable *player_get_word_info_table(const Player *player) {
 
 const PATWeights *player_get_pat(const Player *player) { return player->pat; }
 
+const PegAdjust *player_get_peg_adjust(const Player *player) {
+  return player->peg_adjust;
+}
+
+void player_set_peg_adjust(Player *player, const PegAdjust *peg_adjust) {
+  player->peg_adjust = peg_adjust;
+}
+
+const PoolShiftTable *player_get_pool_shift_table(const Player *player) {
+  return player->pool_shift_table;
+}
+
+int player_get_pool_shift_weight(const Player *player) {
+  return player->pool_shift_weight;
+}
+
+void player_set_pool_shift(Player *player, const PoolShiftTable *table,
+                           int weight_milli) {
+  player->pool_shift_table = table;
+  player->pool_shift_weight = weight_milli;
+}
+
 uint32_t player_get_pat_disabled_classes_mask(const Player *player) {
   return player->pat_disabled_classes_mask;
 }
@@ -174,6 +219,14 @@ void player_set_pat_usage(Player *player, bool disabled,
                           uint32_t disabled_classes_mask) {
   player->pat_disabled = disabled;
   player->pat_disabled_classes_mask = disabled_classes_mask;
+}
+
+PATBoardCache *player_get_pat_board_cache(const Player *player) {
+  return player->pat_board_cache;
+}
+
+void player_set_pat_board_cache(Player *player, PATBoardCache *cache) {
+  player->pat_board_cache = cache;
 }
 
 void player_add_to_score(Player *player, Equity score) {

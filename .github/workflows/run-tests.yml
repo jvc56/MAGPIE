@@ -1,5 +1,19 @@
 name: ci
-on: [push]
+# Pushes to main, and pull requests into main. A pull request stacked on
+# another branch runs once it targets main, when its branch is next pushed.
+# workflow_dispatch runs it on any branch by hand.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+# One run per pull request (or branch) at a time: a new push cancels the run
+# it replaces. On main every commit has a group of its own, so each one's run
+# finishes, and none waits for another or is dropped for a newer commit.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || (github.ref == 'refs/heads/main' && github.sha) || github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 env:
   # The pinned Windows toolchain, for windows-build and windows-cross-compile,
   # with the SHA-256 of its release tarball (also the digest GitHub reports
@@ -176,7 +190,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: windows-data
-          key: windows-data-files-33
+          key: windows-data-files-35
           enableCrossOsArchive: true
           lookup-only: true
 
@@ -188,7 +202,7 @@ jobs:
           path: |
             data/*
             testdata/*
-          key: downloaded-data-files-33
+          key: downloaded-data-files-35
 
       - name: Download data files and convert lexica
         if: steps.windows-data.outputs.cache-hit != 'true' && steps.cache-datafiles.outputs.cache-hit != 'true'
@@ -205,7 +219,7 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: windows-data
-          key: windows-data-files-33
+          key: windows-data-files-35
           enableCrossOsArchive: true
 
   # L3: the x64 test binary under Wine, which catches most runtime problems
@@ -229,7 +243,7 @@ jobs:
           path: |
             data/*
             testdata/*
-          key: downloaded-data-files-33
+          key: downloaded-data-files-35
 
       - name: Download data files and convert lexica
         if: steps.cache-datafiles.outputs.cache-hit != 'true'
@@ -322,7 +336,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: windows-data
-          key: windows-data-files-33
+          key: windows-data-files-35
           enableCrossOsArchive: true
           fail-on-cache-miss: true
 
@@ -446,7 +460,8 @@ jobs:
       - name: Run clang-tidy static analysis
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang-tidy-18 && ./tidy.sh clang-tidy-18
+          sudo apt-get install -y clang-tidy-18 libnotcurses-dev libfreetype-dev zlib1g-dev pkg-config
+          MAGPIE_TIDY_REQUIRE_TUI=1 ./tidy.sh clang-tidy-18
 
   unit-tests-no-pgo-release:
     runs-on: ubuntu-latest
@@ -466,7 +481,7 @@ jobs:
           path: |
             data/*
             testdata/*
-          key: downloaded-data-files-33
+          key: downloaded-data-files-35
 
       - name: Download data files and convert lexica
         if: steps.cache-datafiles.outputs.cache-hit != 'true'
@@ -485,6 +500,18 @@ jobs:
         run: |
           ./bin/magpie_test
           ./bin/magpie_test pegpoll
+
+      - name: Build and run TUI unit tests
+        run: make magpie_tui_test BUILD=no_pgo_release && ./bin/magpie_tui_test
+
+      # Built with clang, as the TUI is everywhere else: GCC's
+      # -Wformat-truncation rejects its snprintf into fixed cells under
+      # -Werror. Without LTO, so any linker will do.
+      - name: Build and run TUI app tests
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang libnotcurses-dev libfreetype-dev zlib1g-dev pkg-config
+          make magpie_tui_app_test BUILD=no_pgo_release CC=clang TUI_LTO= && ./bin/magpie_tui_app_test
 
   unit-tests-dev:
     name: unit-tests-dev (${{ matrix.shard }})
@@ -529,7 +556,7 @@ jobs:
           path: |
             data/*
             testdata/*
-          key: downloaded-data-files-33
+          key: downloaded-data-files-35
 
       - name: Download data files and convert lexica
         if: steps.cache-datafiles.outputs.cache-hit != 'true'
@@ -610,7 +637,7 @@ jobs:
           path: |
             data/*
             testdata/*
-          key: downloaded-data-files-33
+          key: downloaded-data-files-35
 
       - name: Download data files and convert lexica
         if: steps.cache-datafiles.outputs.cache-hit != 'true'
@@ -643,7 +670,7 @@ jobs:
           path: |
             data/*
             testdata/*
-          key: downloaded-data-files-33
+          key: downloaded-data-files-35
 
       - name: Download data files and convert lexica
         if: steps.cache-datafiles.outputs.cache-hit != 'true'

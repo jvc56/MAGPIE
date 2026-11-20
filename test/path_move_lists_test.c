@@ -1,9 +1,11 @@
 #include "path_move_lists_test.h"
 
+#include "../src/def/board_defs.h"
 #include "../src/def/equity_defs.h"
 #include "../src/def/game_defs.h"
 #include "../src/def/letter_distribution_defs.h"
 #include "../src/def/move_defs.h"
+#include "../src/def/rack_defs.h"
 #include "../src/ent/bag.h"
 #include "../src/ent/board.h"
 #include "../src/ent/endgame_results.h"
@@ -18,6 +20,7 @@
 #include "../src/impl/endgame.h"
 #include "../src/impl/gameplay.h"
 #include "../src/impl/move_gen.h"
+#include "../src/impl/move_gen_base.h"
 #include "../src/impl/path_move_lists.h"
 #include "../src/util/io_util.h"
 #include "test_util.h"
@@ -26,6 +29,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <string.h>
 
 // Compare the complete lists in generation order, excluding the trailing pass
 // that PathMoveLists deliberately leaves for its caller to append.
@@ -235,11 +239,21 @@ enum {
   BEST_PLAY_MIN_CHECKS = 500,
   BEST_PLAY_MIN_DEEPEST = 4,
   BEST_PLAY_SIBLINGS = 3,
+  // How many lanes' whole-rack plays and other plays the replying side's
+  // per-lane bests are compared over, at least.
+  REPLY_LANES_MIN_WHOLE_RACK = 1000,
+  REPLY_LANES_MIN_PARTIAL = 1500,
   // test_tiles_played_in_lanes_random_paths: its positions, and how often at
   // least a move's changed squares had to reveal a tile type over its checks.
   TILES_PLAYED_NUM_POSITIONS = 3,
   TILES_PLAYED_PATHS_PER_POSITION = 400,
   TILES_PLAYED_MIN_REVEALED = 20,
+  // How many picks path_move_lists_penalized_best_play is compared over, at
+  // least, in each of the two tests that check it.
+  PENALIZED_MIN_PICKS = 1000,
+  PENALIZED_SCALES = 3,
+  // How often a tile type's only plays had to be standing ones, at least.
+  TILES_PLAYED_MIN_STANDING = 250,
   BEST_PLAY_MOVE_LIST_CAPACITY = 100000,
 };
 
@@ -303,10 +317,11 @@ static MoveGenArgs best_small_args_for(const Game *game, MoveList *move_list,
   return best_args;
 }
 
-// Every best_play answer at the current path position must agree with the
-// argmax of the materialized list, of a scratch ALL_SMALL generation, and of a
-// scratch BEST_SMALL generation. Counts in *num_split_lanes the lanes the
-// materialized list both regenerated anchors of and carried anchors of.
+// Every best_play and best_play_alone answer at the current path position
+// must agree with the argmax of the materialized list, of a scratch ALL_SMALL
+// generation, and of a scratch BEST_SMALL generation. Counts in
+// *num_split_lanes the lanes the materialized list both regenerated anchors
+// of and carried anchors of.
 static void assert_best_play_matches(PathMoveLists *lists,
                                      const MoveGenArgs *args,
                                      MoveList *best_move_list, uint64_t *rng,
@@ -317,14 +332,26 @@ static void assert_best_play_matches(PathMoveLists *lists,
   const int bonuses[BEST_PLAY_BONUS_VARIANTS] = {
       0, 1, (int)(next_random(rng) % 40), (int)(next_random(rng) % 120)};
 
-  // best_play first: it must not need (or disturb) the current slot.
+  // best_play and best_play_alone first: neither may need (or disturb) the
+  // current slot. They take turns going first, since they share the lists'
+  // scratch.
   SmallMove best_plays[BEST_PLAY_BONUS_VARIANTS];
   bool found[BEST_PLAY_BONUS_VARIANTS];
+  SmallMove alone_plays[BEST_PLAY_BONUS_VARIANTS];
+  bool alone_found[BEST_PLAY_BONUS_VARIANTS];
   for (int variant = 0; variant < BEST_PLAY_BONUS_VARIANTS; variant++) {
     const MoveGenArgs best_args =
         best_small_args_for(game, best_move_list, bonuses[variant]);
+    if (variant % 2 == 0) {
+      alone_found[variant] = path_move_lists_best_play_alone(
+          lists, &best_args, &alone_plays[variant]);
+    }
     found[variant] =
         path_move_lists_best_play(lists, &best_args, &best_plays[variant]);
+    if (variant % 2 != 0) {
+      alone_found[variant] = path_move_lists_best_play_alone(
+          lists, &best_args, &alone_plays[variant]);
+    }
   }
 
   const SmallMove *derived = NULL;
@@ -358,9 +385,13 @@ static void assert_best_play_matches(PathMoveLists *lists,
         argmax_of_plays(derived_pointers, count, bonuses[variant],
                         side_to_move_tiles, &from_derived, &derived_adjusted);
     assert(found[variant] == expected_found);
+    assert(alone_found[variant] == expected_found);
     assert(derived_found == expected_found);
     if (expected_found) {
       assert(best_plays[variant].tiny_move == expected.tiny_move);
+      assert(alone_plays[variant].tiny_move == expected.tiny_move);
+      assert(small_move_get_score(&alone_plays[variant]) ==
+             small_move_get_score(&expected));
       assert(from_derived.tiny_move == expected.tiny_move);
       assert(derived_adjusted == expected_adjusted);
     }
@@ -377,6 +408,63 @@ static void assert_best_play_matches(PathMoveLists *lists,
   free(derived_pointers);
 }
 
+// Weights for path_move_lists_penalized_best_play, different for most tile
+// types.
+static void set_tile_weights(int *tile_weights) {
+  for (int ml = 0; ml < MAX_ALPHABET_SIZE; ml++) {
+    tile_weights[ml] = 2 + (ml * 5) % 7;
+  }
+}
+
+// At the current path position, path_move_lists_penalized_best_play must
+// pick the first play of a scratch generation with the highest score less its
+// tiles' weights times the scale, for the scales 0 and 1 and one that
+// `variety` selects. Adds the picks compared to *num_picks.
+static void assert_penalized_best_play_matches(PathMoveLists *lists,
+                                               const MoveGenArgs *args,
+                                               const int *tile_weights,
+                                               int variety, int *num_picks) {
+  const float scales[PENALIZED_SCALES] = {0.0F, 1.0F,
+                                          (float)(variety % 16) / 8.0F};
+  for (int scale_idx = 0; scale_idx < PENALIZED_SCALES; scale_idx++) {
+    const float scale = scales[scale_idx];
+    SmallMove picked;
+    int picked_adjusted = 0;
+    const bool found = path_move_lists_penalized_best_play(
+        lists, args, tile_weights, scale, &picked, &picked_adjusted);
+    generate_moves(args);
+    const MoveList *scratch = args->move_list;
+    const SmallMove *expected = NULL;
+    int expected_adjusted = 0;
+    for (int move_idx = 0; move_idx < scratch->count; move_idx++) {
+      const SmallMove *candidate = scratch->small_moves[move_idx];
+      if (small_move_is_pass(candidate)) {
+        continue;
+      }
+      int weight = 0;
+      const int tiles_played = small_move_get_tiles_played(candidate);
+      for (int tile_idx = 0; tile_idx < tiles_played; tile_idx++) {
+        weight += tile_weights[small_move_tile_is_blank(candidate, tile_idx)
+                                   ? BLANK_MACHINE_LETTER
+                                   : small_move_get_tile(candidate, tile_idx)];
+      }
+      const int adjusted =
+          (int)small_move_get_score(candidate) - (int)((float)weight * scale);
+      if (expected == NULL || adjusted > expected_adjusted) {
+        expected = candidate;
+        expected_adjusted = adjusted;
+      }
+    }
+    assert(found == (expected != NULL));
+    if (expected != NULL) {
+      assert(picked.tiny_move == expected->tiny_move);
+      assert(small_move_get_score(&picked) == small_move_get_score(expected));
+      assert(picked_adjusted == expected_adjusted);
+      (*num_picks)++;
+    }
+  }
+}
+
 // Makes `chosen` along the path: pushes it on the lists, plays it, and brings
 // the cross-sets up to date for the next generation.
 static void make_path_move(Game *game, PathMoveLists *lists,
@@ -389,6 +477,96 @@ static void make_path_move(Game *game, PathMoveLists *lists,
     update_cross_set_for_move_from_undo(undo, game);
   }
   board_set_cross_sets_valid(game_get_board(game), true);
+}
+
+// The lane of a play as PathMoveLists numbers them: its row, or past the rows
+// its column when it is vertical.
+static int lane_of_play(const SmallMove *small_move) {
+  return small_move_is_vertical(small_move)
+             ? BOARD_DIM + small_move_get_col_start(small_move)
+             : small_move_get_row_start(small_move);
+}
+
+// Each lane's best whole-rack play and best other play among the plays of
+// `move_list`, for a side holding `side_to_move_tiles` tiles: the highest
+// score, then the larger tiny_move.
+static void lane_bests_of_scratch(const MoveList *move_list,
+                                  int side_to_move_tiles,
+                                  LaneBestPlays *lanes) {
+  memset(lanes, 0, PATH_MOVE_LISTS_NUM_LANES * sizeof(LaneBestPlays));
+  for (int move_idx = 0; move_idx < move_list->count; move_idx++) {
+    const SmallMove *candidate = move_list->small_moves[move_idx];
+    if (small_move_is_pass(candidate)) {
+      continue;
+    }
+    LaneBestPlays *best = &lanes[lane_of_play(candidate)];
+    const int score = small_move_get_score(candidate);
+    if (small_move_get_tiles_played(candidate) == side_to_move_tiles) {
+      if (outranks(score, candidate, best->has_whole_rack,
+                   small_move_get_score(&best->whole_rack),
+                   &best->whole_rack)) {
+        best->whole_rack = *candidate;
+        best->has_whole_rack = true;
+      }
+    } else if (outranks(score, candidate, best->has_partial,
+                        small_move_get_score(&best->partial), &best->partial)) {
+      best->partial = *candidate;
+      best->has_partial = true;
+    }
+  }
+}
+
+static void assert_lane_bests_equal(const LaneBestPlays *actual,
+                                    const LaneBestPlays *expected) {
+  for (int lane = 0; lane < PATH_MOVE_LISTS_NUM_LANES; lane++) {
+    assert(actual[lane].has_whole_rack == expected[lane].has_whole_rack);
+    if (expected[lane].has_whole_rack) {
+      assert(actual[lane].whole_rack.tiny_move ==
+             expected[lane].whole_rack.tiny_move);
+      assert(small_move_get_score(&actual[lane].whole_rack) ==
+             small_move_get_score(&expected[lane].whole_rack));
+    }
+    assert(actual[lane].has_partial == expected[lane].has_partial);
+    if (expected[lane].has_partial) {
+      assert(actual[lane].partial.tiny_move ==
+             expected[lane].partial.tiny_move);
+      assert(small_move_get_score(&actual[lane].partial) ==
+             small_move_get_score(&expected[lane].partial));
+    }
+  }
+}
+
+// The per-lane best plays of the side not on turn, on the current board:
+// path_move_lists_reply_lane_bests must find, and
+// path_move_lists_lane_bests_of_list pick out of a scratch generation, the
+// plays this file picks out of that generation. Adds the lanes compared with
+// a whole-rack play and with another play to the two counts.
+static void assert_reply_lane_bests_match(PathMoveLists *lists, Game *game,
+                                          const MoveGenArgs *args,
+                                          MoveList *best_move_list,
+                                          int *num_whole_rack,
+                                          int *num_partial) {
+  const int on_turn = game_get_player_on_turn_index(game);
+  const int replying_tiles = rack_get_total_letters(
+      player_get_rack(game_get_player(game, 1 - on_turn)));
+  game_set_player_on_turn_index(game, 1 - on_turn);
+  const MoveGenArgs reply_args = best_small_args_for(game, best_move_list, 0);
+  const LaneBestPlays *from_lists =
+      path_move_lists_reply_lane_bests(lists, &reply_args);
+  assert(from_lists != NULL);
+  generate_moves(args);
+  game_set_player_on_turn_index(game, on_turn);
+  LaneBestPlays expected[PATH_MOVE_LISTS_NUM_LANES];
+  lane_bests_of_scratch(args->move_list, replying_tiles, expected);
+  LaneBestPlays from_list[PATH_MOVE_LISTS_NUM_LANES];
+  path_move_lists_lane_bests_of_list(args->move_list, replying_tiles,
+                                     from_list);
+  assert_lane_bests_equal(from_list, expected);
+  assert_lane_bests_equal(from_lists, expected);
+  for (int lane = 0; lane < PATH_MOVE_LISTS_NUM_LANES; lane++) {
+    *num_whole_rack += expected[lane].has_whole_rack ? 1 : 0;
+    *num_partial += expected[lane].has_partial ? 1 : 0;
+  }
 }
 
 static void test_best_play_random_paths(void) {
@@ -415,6 +593,11 @@ static void test_best_play_random_paths(void) {
   uint64_t rng = 0x9E3779B97F4A7C15ULL;
   int num_checks = 0;
   int num_split_lanes = 0;
+  int num_reply_whole_rack = 0;
+  int num_reply_partial = 0;
+  int num_penalized = 0;
+  int tile_weights[MAX_ALPHABET_SIZE];
+  set_tile_weights(tile_weights);
   int deepest = 0;
   bool saw_filter_case = false;
   for (int position_idx = 0; position_idx < BEST_PLAY_NUM_POSITIONS;
@@ -435,6 +618,14 @@ static void test_best_play_random_paths(void) {
       int length = 0;
       while (length < BEST_PLAY_MAX_PATH_LENGTH &&
              game_get_game_end_reason(game) == GAME_END_REASON_NONE) {
+        // At every other position the replying side's per-lane bests are
+        // found before any move is made, which the positions below then
+        // share; at the others those positions find their own.
+        if ((path_idx + length) % 2 == 1) {
+          assert_reply_lane_bests_match(lists, game, &args, best_move_list,
+                                        &num_reply_whole_rack,
+                                        &num_reply_partial);
+        }
         generate_moves(&args);
         const int play_count = move_list->count - 1;
         // Mostly tile plays, occasionally the trailing pass. The first pick
@@ -469,6 +660,8 @@ static void test_best_play_random_paths(void) {
         if (length >= 2 && lists->played[length - 2]) {
           saw_filter_case = true;
         }
+        assert_penalized_best_play_matches(
+            lists, &args, tile_weights, path_idx + 3 * length, &num_penalized);
         assert_best_play_matches(lists, &args, best_move_list, &rng,
                                  &num_checks, &num_split_lanes);
         if (length > deepest) {
@@ -491,6 +684,9 @@ static void test_best_play_random_paths(void) {
   // Touched lanes that carried some anchors' plays and regenerated others,
   // merging the two.
   assert(num_split_lanes > 0);
+  assert(num_reply_whole_rack >= REPLY_LANES_MIN_WHOLE_RACK);
+  assert(num_reply_partial >= REPLY_LANES_MIN_PARTIAL);
+  assert(num_penalized >= PENALIZED_MIN_PICKS);
   path_move_lists_destroy(lists);
   small_move_list_destroy(best_move_list);
   small_move_list_destroy(move_list);
@@ -552,12 +748,55 @@ static uint64_t side_single_tile_types(Game *game, MoveList *move_list,
   return tile_types;
 }
 
+// The tile types side `side` plays on the current board, `playable`, are
+// those its standing plays place (path_move_lists_standing_tile_types), those
+// of the plays from the anchors that reach a square changed since
+// (generate_tiles_played_in_lanes over the lanes and squares it reports), and
+// those of its single-tile plays, `single`. Counts in *num_standing the
+// positions where only standing plays placed some tile type.
+static void assert_standing_tile_types(const PathMoveLists *lists, Game *game,
+                                       MoveList *move_list, int side,
+                                       uint64_t playable, uint64_t single,
+                                       int *num_standing) {
+  const Rack *rack = player_get_rack(game_get_player(game, side));
+  uint64_t rack_types = 0;
+  for (int ml = 0; ml < rack_get_dist_size(rack); ml++) {
+    if (rack_get_letter(rack, ml) > 0) {
+      rack_types |= (uint64_t)1 << ml;
+    }
+  }
+  const bool side_is_on_turn = side == game_get_player_on_turn_index(game);
+  uint64_t touched = 0;
+  uint32_t hits[PATH_MOVE_LISTS_NUM_LANES];
+  const uint64_t standing = path_move_lists_standing_tile_types(
+      lists, side_is_on_turn, rack, rack_types, &touched, hits);
+  assert((standing & ~playable) == 0);
+  const uint64_t in_lanes =
+      touched == 0 ? 0
+                   : side_tiles_played(game, move_list, side, touched, hits);
+  assert((standing | in_lanes | single) == playable);
+  if ((standing & ~(in_lanes | single)) != 0) {
+    (*num_standing)++;
+  }
+  // Asked about fewer tile types, it answers the same about those.
+  const uint64_t wanted = rack_types & ~single;
+  uint64_t wanted_touched = 0;
+  uint32_t wanted_hits[PATH_MOVE_LISTS_NUM_LANES];
+  assert(path_move_lists_standing_tile_types(
+             lists, side_is_on_turn, rack, wanted, &wanted_touched,
+             wanted_hits) == (standing & wanted));
+  assert(wanted_touched == touched);
+  assert(memcmp(wanted_hits, hits, sizeof(hits)) == 0);
+}
+
 // generate_tiles_played_in_lanes along random paths. Over every lane with
 // every square changed it is the whole-board generation. Over the last move's
 // changed squares (path_move_lists_last_move_hits), for each side: every tile
 // type it reports is playable, and a tile type that had no play before the
 // move but has one after has a single-tile play or one it reports -- what the
-// endgame's stuck-tile check relies on.
+// endgame's stuck-tile check relies on. So is what
+// path_move_lists_standing_tile_types reports, with the lists built at some
+// positions and not at others (see assert_standing_tile_types).
 static void test_tiles_played_in_lanes_random_paths(void) {
   // Endgames where the opponent holds tiles with no play.
   const char *positions[TILES_PLAYED_NUM_POSITIONS] = {
@@ -593,6 +832,10 @@ static void test_tiles_played_in_lanes_random_paths(void) {
   PathMoveLists *lists = path_move_lists_create();
   uint64_t rng = 0x2545F4914F6CDD1DULL;
   int num_revealed = 0;
+  int num_standing = 0;
+  int num_penalized = 0;
+  int tile_weights[MAX_ALPHABET_SIZE];
+  set_tile_weights(tile_weights);
   for (int position_idx = 0; position_idx < TILES_PLAYED_NUM_POSITIONS;
        position_idx++) {
     load_cgp_or_die(game, positions[position_idx]);
@@ -601,6 +844,11 @@ static void test_tiles_played_in_lanes_random_paths(void) {
     for (int path_idx = 0; path_idx < TILES_PLAYED_PATHS_PER_POSITION;
          path_idx++) {
       path_move_lists_reset(lists);
+      for (int side = 0; side < 2; side++) {
+        game_set_player_on_turn_index(game, side);
+        generate_moves(&args);
+        path_move_lists_set_root(lists, side, move_list);
+      }
       game_set_player_on_turn_index(game, 0);
       MoveUndo undos[BEST_PLAY_MAX_PATH_LENGTH];
       int length = 0;
@@ -619,6 +867,20 @@ static void test_tiles_played_in_lanes_random_paths(void) {
         const SmallMove chosen = *move_list->small_moves[pick];
         make_path_move(game, lists, move_list, &chosen, &undos[length]);
         length++;
+        // Three positions in four get their list, where the lists up the path
+        // allow it, so that the standing plays and the penalized pick are read
+        // from a list at every distance up the path, the root lists included.
+        if (game_get_game_end_reason(game) == GAME_END_REASON_NONE) {
+          assert_penalized_best_play_matches(lists, &args, tile_weights,
+                                             path_idx + 3 * length,
+                                             &num_penalized);
+          if ((path_idx + length) % 4 != 0 &&
+              (length <= 2 ||
+               path_move_lists_slot_is_current(lists, length - 2))) {
+            const SmallMove *derived = NULL;
+            path_move_lists_moves_at(lists, &args, &derived);
+          }
+        }
         for (int side = 0; side < 2; side++) {
           const uint64_t after =
               side_tiles_played(game, move_list, side, 0, NULL);
@@ -634,6 +896,8 @@ static void test_tiles_played_in_lanes_random_paths(void) {
           if ((revealed & ~single) != 0) {
             num_revealed++;
           }
+          assert_standing_tile_types(lists, game, move_list, side, after,
+                                     single, &num_standing);
         }
       }
       while (length > 0) {
@@ -646,14 +910,16 @@ static void test_tiles_played_in_lanes_random_paths(void) {
     game_destroy(snapshot);
   }
   assert(num_revealed >= TILES_PLAYED_MIN_REVEALED);
+  assert(num_standing >= TILES_PLAYED_MIN_STANDING);
+  assert(num_penalized >= PENALIZED_MIN_PICKS);
   path_move_lists_destroy(lists);
   small_move_list_destroy(move_list);
   game_destroy(game);
   config_destroy(config);
 }
 
-// A pass-only path never regenerates; best_play must report no play when the
-// side has none, and agree with moves_at when it does.
+// A pass-only path never regenerates; best_play and best_play_alone must
+// report no play when the side has none, and agree with moves_at when it does.
 static void test_best_play_pass_path(int empty_side) {
   Config *config =
       config_create_or_die("set -lex NWL20 -wmp false -rit false -wit false");
@@ -692,6 +958,11 @@ static void test_best_play_pass_path(int empty_side) {
     const MoveGenArgs best_args = best_small_args_for(game, best_move_list, 10);
     SmallMove best_play;
     const bool found = path_move_lists_best_play(lists, &best_args, &best_play);
+    SmallMove alone_play;
+    const bool alone_found =
+        path_move_lists_best_play_alone(lists, &best_args, &alone_play);
+    assert(alone_found == found);
+    assert(!found || alone_play.tiny_move == best_play.tiny_move);
     const SmallMove *derived = NULL;
     const int count = path_move_lists_moves_at(lists, &args, &derived);
     assert(found == (count > 0));
@@ -704,6 +975,77 @@ static void test_best_play_pass_path(int empty_side) {
   config_destroy(config);
 }
 
+// anchor_span_reach from the lane's `empty` bits, a rack tile at a time.
+static uint32_t anchor_span_reach_by_steps(uint32_t empty, uint32_t blocked,
+                                           int col, int limit, int spare) {
+  const uint32_t right_of_col = ~(((uint32_t)2 << col) - 1);
+  const uint32_t left_of_col = ((uint32_t)1 << col) - 1;
+  uint32_t right_empties = empty & right_of_col;
+  uint32_t left_empties = empty & left_of_col;
+  for (int tile_idx = 0; tile_idx < spare; tile_idx++) {
+    right_empties &= right_empties - 1;
+    if (left_empties != 0) {
+      left_empties &= ~((uint32_t)1 << highest_set_bit_index(left_empties));
+    }
+  }
+  right_empties |= blocked & right_of_col;
+  left_empties |= blocked & left_of_col;
+  const int right = right_empties != 0 ? lowest_set_bit_index(right_empties) - 1
+                                       : BOARD_DIM - 1;
+  int left = left_empties != 0 ? highest_set_bit_index(left_empties) + 1 : 0;
+  if (left <= limit) {
+    left = limit + 1;
+  }
+  return (((uint32_t)2 << right) - 1) & ~(((uint32_t)1 << left) - 1);
+}
+
+enum {
+  SPAN_REACH_NUM_LANES = 5000,
+  SPAN_REACH_DENSE_BLOCKS_ONE_IN = 4,
+};
+
+// anchor_span_reach reads where a play must stop from the list of the lane's
+// empty columns. Over random lanes, and every anchor column, leftward limit
+// and rack size, that is where taking the rack's tiles off the lane's empty
+// squares one at a time stops.
+static void test_anchor_span_reach(void) {
+  uint64_t rng = 0xD1B54A32D192ED03ULL;
+  const uint32_t lane_squares = ((uint32_t)1 << BOARD_DIM) - 1;
+  for (int lane_idx = 0; lane_idx < SPAN_REACH_NUM_LANES; lane_idx++) {
+    const uint32_t empty = (uint32_t)next_random(&rng) & lane_squares;
+    // Usually a quarter of the empty squares take no rack tile, sometimes
+    // half.
+    uint32_t blocked = empty & (uint32_t)next_random(&rng);
+    if (lane_idx % SPAN_REACH_DENSE_BLOCKS_ONE_IN != 0) {
+      blocked &= (uint32_t)next_random(&rng);
+    }
+    int8_t empty_cols[LANE_SPAN_PAD + BOARD_DIM + LANE_SPAN_PAD];
+    int empties_left_of[BOARD_DIM];
+    memset(empty_cols, -1, LANE_SPAN_PAD);
+    int lane_empties = 0;
+    for (int col = 0; col < BOARD_DIM; col++) {
+      empties_left_of[col] = lane_empties;
+      if (((empty >> col) & 1) != 0) {
+        empty_cols[LANE_SPAN_PAD + lane_empties] = (int8_t)col;
+        lane_empties++;
+      }
+    }
+    memset(&empty_cols[LANE_SPAN_PAD + lane_empties], BOARD_DIM, LANE_SPAN_PAD);
+    for (int col = 0; col < BOARD_DIM; col++) {
+      const int anchor_is_empty = (int)((empty >> col) & 1);
+      for (int limit = -1; limit <= col; limit++) {
+        for (int rack_tiles = 1; rack_tiles <= RACK_SIZE; rack_tiles++) {
+          const int spare = rack_tiles - anchor_is_empty;
+          assert(anchor_span_reach(empty_cols, empties_left_of[col],
+                                   anchor_is_empty, blocked, col, limit,
+                                   spare) ==
+                 anchor_span_reach_by_steps(empty, blocked, col, limit, spare));
+        }
+      }
+    }
+  }
+}
+
 void test_path_move_lists(void) {
   test_pass_path(1);
   test_pass_path(0);
@@ -713,4 +1055,5 @@ void test_path_move_lists(void) {
   test_best_play_pass_path(0);
   test_best_play_random_paths();
   test_tiles_played_in_lanes_random_paths();
+  test_anchor_span_reach();
 }

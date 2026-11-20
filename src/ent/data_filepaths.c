@@ -22,6 +22,8 @@ static const char *const filepath_type_names[] = {"kwg",
                                                   "packed dawg",
                                                   "word info table",
                                                   "positional adjustment table",
+                                                  "pre-endgame adjustments",
+                                                  "rack value table",
                                                   "word plus floater"};
 
 void string_builder_add_directory_for_data_type(StringBuilder *sb,
@@ -36,6 +38,7 @@ void string_builder_add_directory_for_data_type(StringBuilder *sb,
   case DATA_FILEPATH_TYPE_RACK_INFO_TABLE:
   case DATA_FILEPATH_TYPE_DAWG_PACKED:
   case DATA_FILEPATH_TYPE_WORD_INFO_TABLE:
+  case DATA_FILEPATH_TYPE_RACK_VALUE_TABLE:
     string_builder_add_formatted_string(sb, "%s/lexica/", data_path);
     break;
   case DATA_FILEPATH_TYPE_LAYOUT:
@@ -43,6 +46,7 @@ void string_builder_add_directory_for_data_type(StringBuilder *sb,
     break;
   case DATA_FILEPATH_TYPE_WIN_PCT:
   case DATA_FILEPATH_TYPE_PAT:
+  case DATA_FILEPATH_TYPE_PEG_ADJUST:
     string_builder_add_formatted_string(sb, "%s/strategy/", data_path);
     break;
   case DATA_FILEPATH_TYPE_LD:
@@ -83,12 +87,16 @@ char *get_filepath(const char *data_path, const char *data_name,
   case DATA_FILEPATH_TYPE_WORD_INFO_TABLE:
     file_ext = WORD_INFO_TABLE_EXTENSION;
     break;
+  case DATA_FILEPATH_TYPE_RACK_VALUE_TABLE:
+    file_ext = RACK_VALUE_TABLE_EXTENSION;
+    break;
   case DATA_FILEPATH_TYPE_LAYOUT:
     file_ext = TXT_EXTENSION;
     break;
   case DATA_FILEPATH_TYPE_WIN_PCT:
   case DATA_FILEPATH_TYPE_LD:
   case DATA_FILEPATH_TYPE_LEAVES:
+  case DATA_FILEPATH_TYPE_PEG_ADJUST:
     file_ext = CSV_EXTENSION;
     break;
   case DATA_FILEPATH_TYPE_GCG:

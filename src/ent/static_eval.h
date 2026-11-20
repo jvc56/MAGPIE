@@ -2,6 +2,7 @@
 #define STATIC_EVAL_H
 
 #include "../def/config_defs.h"
+#include "../def/equity_defs.h"
 #include "../def/letter_distribution_defs.h"
 #include "../def/rack_defs.h"
 #include "../def/static_eval_defs.h"
@@ -13,13 +14,6 @@
 #include "../ent/pat.h"
 #include "../ent/pat_eval.h"
 #include "../ent/rack.h"
-
-static const Equity peg_adjust_values[PEG_ADJUST_VALUES_LENGTH] = {0};
-
-// These are quackle values, but we can probably come up with our
-// own at some point.
-// static const double peg_adjust_values[PEG_ADJUST_VALUES_LENGTH] = {
-//    0, -8, 0, -0.5, -2, -3.5, -2, 2, 10, 7, 4, -1, -2};
 
 // word_penalties and letter_penalties are the halves of the opening penalty
 // driven by word and by letter multipliers (see update_opening_penalty).
@@ -104,18 +98,15 @@ shadow_endgame_adjustment(const LetterDistribution *ld, const Rack *opp_rack,
 // Computes the parts of a move's static equity that do not depend on its
 // placement. Callers may use this before materializing a Move when the board
 // is nonempty; opening-move placement_adjustment still requires the Move.
+// peg_adjustment is the move's pre-endgame adjustment (see peg_adjust.h),
+// which counts only while the bag holds tiles.
 static inline Equity static_eval_get_nonopening_move_equity(
     const LetterDistribution *ld, const Rack *player_leave,
-    const Rack *opp_rack, int tiles_played, int number_of_tiles_in_bag,
-    Equity score, Equity leave_value) {
+    const Rack *opp_rack, int number_of_tiles_in_bag, Equity score,
+    Equity leave_value, Equity peg_adjustment) {
   Equity equity = score;
   if (number_of_tiles_in_bag > 0) {
-    equity += leave_value;
-    const int bag_plus_rack_size =
-        number_of_tiles_in_bag - tiles_played + RACK_SIZE;
-    if (bag_plus_rack_size < PEG_ADJUST_VALUES_LENGTH) {
-      equity += peg_adjust_values[bag_plus_rack_size];
-    }
+    equity += leave_value + peg_adjustment;
   } else {
     equity += standard_endgame_adjustment(ld, player_leave, opp_rack);
   }
@@ -132,21 +123,21 @@ static inline Equity static_eval_get_nonopening_move_equity(
 // whose utility correction, the one part that can be positive, movegen adds
 // to its bounds separately (see pat_eval_utility_bound). If you add a term
 // that can be positive, you must account for it here.
-static inline Equity
-static_eval_get_shadow_equity(const LetterDistribution *ld,
-                              const Rack *opp_rack, const Equity *best_leaves,
-                              const Equity *descending_tile_scores,
-                              int number_of_tiles_in_bag,
-                              int number_of_letters_on_rack, int tiles_played) {
+static inline Equity static_eval_get_shadow_equity(
+    const LetterDistribution *ld, const Rack *opp_rack,
+    const Equity *best_leaves, const Equity *descending_tile_scores,
+    int number_of_tiles_in_bag, int number_of_letters_on_rack, int tiles_played,
+    Equity peg_adjustment) {
   Equity equity = 0;
   if (number_of_tiles_in_bag > 0) {
-    // Bag is not empty: use leave values
-    equity += best_leaves[number_of_letters_on_rack - tiles_played];
-    // Apply preendgame heuristic if this play would empty the bag or leave
-    // few enough tiles remaining.
-    int bag_plus_rack_size = number_of_tiles_in_bag - tiles_played + RACK_SIZE;
-    if (bag_plus_rack_size < PEG_ADJUST_VALUES_LENGTH) {
-      equity += peg_adjust_values[bag_plus_rack_size];
+    // Bag is not empty: use leave values and the play's pre-endgame
+    // adjustment. A leave size no play reaches keeps its sentinel value (at
+    // most EQUITY_MIN_VALUE), which a negative adjustment would overflow.
+    const Equity best_leave =
+        best_leaves[number_of_letters_on_rack - tiles_played];
+    equity += best_leave;
+    if (best_leave > EQUITY_MIN_VALUE) {
+      equity += peg_adjustment;
     }
   } else {
     // Bag is empty: add double opponent's rack if playing out, otherwise
@@ -171,7 +162,7 @@ static inline Equity static_eval_get_move_equity_with_leave_value(
     const Rack *opp_rack, const Equity *word_penalties,
     const Equity *letter_penalties, uint32_t pat_active_classes,
     const PATEvalContext *pat_eval_ctx, int board_number_of_tiles_played,
-    int number_of_tiles_in_bag, Equity leave_value) {
+    int number_of_tiles_in_bag, Equity leave_value, Equity peg_adjustment) {
   Equity other_adjustments = 0;
 
   if (board_number_of_tiles_played == 0 &&
@@ -188,8 +179,8 @@ static inline Equity static_eval_get_move_equity_with_leave_value(
   }
 
   return static_eval_get_nonopening_move_equity(
-             ld, player_leave, opp_rack, move_get_tiles_played(move),
-             number_of_tiles_in_bag, move_get_score(move), leave_value) +
+             ld, player_leave, opp_rack, number_of_tiles_in_bag,
+             move_get_score(move), leave_value, peg_adjustment) +
          other_adjustments;
 }
 
@@ -199,7 +190,8 @@ static inline Equity static_eval_get_move_equity(
     const Rack *player_leave, const Rack *opp_rack,
     const Equity *word_penalties, const Equity *letter_penalties,
     uint32_t pat_active_classes, const PATEvalContext *pat_eval_ctx,
-    int board_number_of_tiles_played, int number_of_tiles_in_bag) {
+    int board_number_of_tiles_played, int number_of_tiles_in_bag,
+    Equity peg_adjustment) {
   Equity leave_equity = 0;
   if (player_leave && !rack_is_empty(player_leave)) {
     leave_equity = klv_get_leave_value(klv, player_leave);
@@ -207,7 +199,7 @@ static inline Equity static_eval_get_move_equity(
   return static_eval_get_move_equity_with_leave_value(
       ld, move, player_leave, opp_rack, word_penalties, letter_penalties,
       pat_active_classes, pat_eval_ctx, board_number_of_tiles_played,
-      number_of_tiles_in_bag, leave_equity);
+      number_of_tiles_in_bag, leave_equity, peg_adjustment);
 }
 
 static inline Equity static_eval_get_move_score(const LetterDistribution *ld,

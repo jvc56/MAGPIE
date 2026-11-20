@@ -11,6 +11,7 @@
 #include "../def/players_data_defs.h"
 #include "../def/rack_defs.h"
 #include "../def/thread_control_defs.h"
+#include "../ent/bit_rack.h"
 #include "../ent/board.h"
 #include "../ent/dictionary_word.h"
 #include "../ent/equity.h"
@@ -22,6 +23,7 @@
 #include "../ent/move.h"
 #include "../ent/player.h"
 #include "../ent/rack.h"
+#include "../ent/rack_value_table.h"
 #include "../ent/thread_control.h"
 #include "../util/io_util.h"
 #include "../util/string_util.h"
@@ -392,11 +394,13 @@ static void census_add_valued_leaves(CensusLeaveWriter *writer, int length,
 }
 
 // Writes the valued leaves to data/leaves as klv_name, and as a CSV beside it
-// if write_csv; a leave never valued is left out, and so reads as 0.
+// if write_csv; a leave never valued is left out, and so reads as 0. Sets
+// *klv_hash, if not NULL, to the hash of the leaves written.
 static void census_write_klv(const CensusShared *shared,
                              const LetterDistribution *ld, const double *values,
                              const bool *ever_valued, const char *klv_name,
-                             bool write_csv, ErrorStack *error_stack) {
+                             bool write_csv, uint64_t *klv_hash,
+                             ErrorStack *error_stack) {
   const int num_letters = census_lattice_get_num_letters(shared->lattice);
   uint8_t available[CENSUS_MAX_LETTERS] = {0};
   for (int ml = 0; ml < num_letters; ml++) {
@@ -430,12 +434,63 @@ static void census_write_klv(const CensusShared *shared,
                                 (Equity)llround(values[index]));
   }
   dictionary_word_list_destroy(writer.dwl);
+  if (klv_hash) {
+    *klv_hash = klv_get_hash(klv);
+  }
   klv_write(klv, shared->args->data_paths, klv_name, error_stack);
   if (write_csv && error_stack_is_empty(error_stack)) {
     klv_write_to_csv(klv, ld, shared->args->data_paths, klv_name, NULL,
                      error_stack);
   }
   klv_destroy(klv);
+}
+
+// Writes the valued full racks as the rack value table table_name
+// (rack_value_table.h), on the scale of the leaves hashing to klv_hash: a
+// rack's value is its mean best equity over the boards that could deal it,
+// less the baseline the leaves are measured from. A rack never valued is left
+// unvalued.
+static void census_write_rack_values(const CensusShared *shared,
+                                     const double *values,
+                                     const bool *ever_valued,
+                                     const char *table_name, uint64_t klv_hash,
+                                     ErrorStack *error_stack) {
+  const CensusLattice *lattice = shared->lattice;
+  const LetterDistribution *ld = game_get_ld(shared->args->game);
+  const int num_letters = census_lattice_get_num_letters(lattice);
+  uint8_t letter_counts[CENSUS_MAX_LETTERS] = {0};
+  for (int ml = 0; ml < num_letters; ml++) {
+    letter_counts[ml] = (uint8_t)ld_get_dist(ld, ml);
+  }
+  RackValueTable *rvt =
+      rack_value_table_create_unvalued(letter_counts, num_letters, klv_hash);
+  if (!rvt) {
+    // more letters than a BitRack holds: the leaves stand without a table
+    log_warn("no rack value table written for %s: too many letters",
+             table_name);
+    return;
+  }
+  const uint32_t full_rack_start = census_lattice_get_full_rack_start(lattice);
+  uint8_t tally[CENSUS_MAX_LETTERS];
+  for (uint32_t index = full_rack_start; index < shared->lattice_size;
+       index++) {
+    if (!ever_valued[index]) {
+      continue;
+    }
+    census_lattice_unrank(lattice, index, tally);
+    BitRack bit_rack = bit_rack_create_empty();
+    for (int ml = 0; ml < num_letters; ml++) {
+      for (int copy_idx = 0; copy_idx < tally[ml]; copy_idx++) {
+        bit_rack_add_letter(&bit_rack, (MachineLetter)ml);
+      }
+    }
+    if (!rack_value_table_set(rvt, &bit_rack, (Equity)llround(values[index]))) {
+      log_fatal("the census valued a rack its distribution cannot deal");
+    }
+  }
+  rack_value_table_write(rvt, shared->args->data_paths, table_name,
+                         error_stack);
+  rack_value_table_destroy(rvt);
 }
 
 // Checks what the census does not model.
@@ -470,6 +525,14 @@ void census_gen(const CensusGenArgs *args, ErrorStack *error_stack) {
   uint64_t *board_counts =
       census_parse_recipe(args->recipe, &number_of_gens, error_stack);
   if (!board_counts) {
+    return;
+  }
+  if (args->table_only && (number_of_gens != 1 || args->null_start)) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_CENSUS_MALFORMED_RECIPE,
+        string_duplicate("a rack value table for the current leaves takes one "
+                         "generation that starts from them"));
+    free(board_counts);
     return;
   }
   const LetterDistribution *ld = game_get_ld(args->game);
@@ -660,9 +723,17 @@ void census_gen(const CensusGenArgs *args, ErrorStack *error_stack) {
         play_scores_cache_entry_free(&shared.play_scores_cache[board_idx]);
       }
     }
+    if (args->table_only) {
+      thread_control_print_formatted(
+          args->thread_control,
+          "census: %lu boards, %u multisets valued, baseline %.3f (%.1fs)\n",
+          (unsigned long)shared.gen_boards, number_valued, base / 1000.0,
+          ctimer_elapsed_seconds(&timer));
+      break;
+    }
     char *gen_name =
         get_formatted_string("%s_gen_%d", args->output_name, gen_idx + 1);
-    census_write_klv(&shared, ld, exact, ever_valued, gen_name, false,
+    census_write_klv(&shared, ld, exact, ever_valued, gen_name, false, NULL,
                      error_stack);
     thread_control_print_formatted(
         args->thread_control,
@@ -677,8 +748,18 @@ void census_gen(const CensusGenArgs *args, ErrorStack *error_stack) {
   }
 
   if (error_stack_is_empty(error_stack) && !interrupted) {
-    census_write_klv(&shared, ld, exact, ever_valued, args->output_name, true,
-                     error_stack);
+    uint64_t klv_hash = 0;
+    if (args->table_only) {
+      // the leaves the racks were valued with
+      klv_hash = klv_get_hash(player_get_klv(game_get_player(args->game, 0)));
+    } else {
+      census_write_klv(&shared, ld, exact, ever_valued, args->output_name, true,
+                       &klv_hash, error_stack);
+    }
+    if (error_stack_is_empty(error_stack)) {
+      census_write_rack_values(&shared, exact, ever_valued, args->output_name,
+                               klv_hash, error_stack);
+    }
     if (error_stack_is_empty(error_stack)) {
       thread_control_print_formatted(
           args->thread_control, "census: wrote %s (%.1fs)\n", args->output_name,

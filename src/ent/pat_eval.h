@@ -12,6 +12,8 @@
 #include "letter_distribution.h"
 #include "move.h"
 #include "pat.h"
+#include "pat_features.h"
+#include "pat_utility.h"
 #include "rack.h"
 #include <math.h>
 #include <stdbool.h>
@@ -19,6 +21,13 @@
 
 // Static evaluation with a PATWeights: the per-position context and the
 // per-move defense term.
+
+// Slots of a context's cache of cross rescans (see
+// PATEvalContext.cross_rescans).
+enum {
+  PAT_CROSS_RESCAN_CACHE_BITS = 9,
+  PAT_CROSS_RESCAN_CACHE_SIZE = 1 << PAT_CROSS_RESCAN_CACHE_BITS,
+};
 
 // Per-position evaluation state, rebuilt by each movegen position load (and
 // on the stack for validated moves). Holds the position-constant part of the
@@ -74,13 +83,17 @@ typedef struct PATEvalContext {
   // Each unit's baseline contribution to pre_penalty (always <= 0), used
   // to bound a move's penalty from above without rescanning.
   Equity unit_penalty[PAT_MAX_SCAN_UNITS];
-  // Sum of every unit's baseline penalty, and the units ordered from the
-  // most negative baseline up. A move's combination is then formed from
-  // the units it reaches alone: the unreached sum is the total less the
-  // reached baselines, and the unreached worst is the first unit in this
-  // order the move does not reach.
+  // Sum of every unit's baseline penalty, and the units that have one
+  // ordered from the most negative up: the first num_penalized_units
+  // entries of units_by_penalty, which are also the bits of
+  // penalized_units. A move's combination is then formed from the units it
+  // reaches alone: the unreached sum is the total less the reached
+  // baselines, and the unreached worst is the first unit in this order the
+  // move does not reach, or 0 when it reaches them all.
   int64_t total_unit_penalty;
+  int num_penalized_units;
   uint16_t units_by_penalty[PAT_MAX_SCAN_UNITS];
+  uint64_t penalized_units[PAT_MASK_WORDS];
   // For each unit group (see PAT_NUM_UNIT_GROUPS), the features its scans
   // can write that carry a nonzero weight, and those weights, so a unit's
   // dot product visits only those; every other term is exactly zero.
@@ -107,6 +120,21 @@ typedef struct PATEvalContext {
   // path, zero for the vast majority of moves.
   uint64_t unit_mask_by_row[BOARD_DIM][PAT_MASK_WORDS];
   uint64_t unit_mask_by_col[BOARD_DIM][PAT_MASK_WORDS];
+  // Board squares' hook information for this load, filled as scans ask (see
+  // PATSquareInfoCache). Written through a const context: it is a cache, and
+  // a context is only ever evaluated by the thread that loaded it.
+  PATSquareInfoCache square_info;
+  // Rescans of a unit under a move that crosses its lane at one square,
+  // which depend only on the unit, that square and the tile placed there.
+  // An entry is live when its stamp is this load's (see
+  // pat_eval_move_penalty_scaled); written through a const context like
+  // square_info.
+  uint64_t cross_rescan_stamp;
+  struct {
+    uint64_t stamp;
+    uint32_t key;
+    Equity penalty;
+  } cross_rescans[PAT_CROSS_RESCAN_CACHE_SIZE];
   // lane_penalty_bound[dir][lane] is an upper bound on the defense term of
   // every tile placement along that lane (a row for horizontal moves, a
   // column for vertical ones): the baseline penalty less the baseline
@@ -126,10 +154,6 @@ typedef struct PATEvalContext {
   // get this position (folded into every movegen bound).
   Equity utility_non_placement;
   Equity utility_bound;
-  // utility_prefix_max[d][s] is the largest correction any placement that
-  // draws d tiles and scores at most s points can get this position (see
-  // pat_eval_utility_bound_for_play).
-  Equity utility_prefix_max[RACK_SIZE + 1][PAT_UTILITY_PREFIX_MAX_SCORE + 1];
   // Bitmask of PAT_CLASS_MASK_* classes this context actually applies
   // (weighted in the file and not excluded by the runtime mask); see
   // pat_eval_context_get_active_classes, the safe way to read this from outside
@@ -144,7 +168,8 @@ typedef struct PATEvalContext {
   // route found by unit u's baseline scan accepts machine letter L (blanks
   // excluded, as in pat_set_flex), so a move's leave can be checked against
   // the letters that would let it exploit the unit whether or not the move
-  // touches it. Computed once per position load.
+  // touches it. Computed once per position load, and only when the file
+  // carries a discount, which is all that reads it or the reverse index.
   uint64_t unit_hook_letters[PAT_MAX_SCAN_UNITS];
   // Reverse index of the above: bit u of units_by_hook_letter[L] is set when
   // unit_hook_letters[u] has bit L, so the units a leave could exploit are a
@@ -253,7 +278,11 @@ pat_eval_utility_bound_for_play(const PATEvalContext *pat_eval_ctx,
       max_score > 0
           ? (int)((max_score + EQUITY_RESOLUTION - 1) / EQUITY_RESOLUTION)
           : 0;
-  return pat_eval_ctx->utility_prefix_max[tiles_played][max_points];
+  const int bag_after = pat_eval_ctx->utility_bag > tiles_played
+                            ? pat_eval_ctx->utility_bag - tiles_played
+                            : 0;
+  return pat_utility_range_max(pat_eval_ctx->weights, bag_after,
+                               pat_eval_ctx->utility_margin, max_points);
 }
 // Bitmask of PAT_CLASS_MASK_* classes this context actually applies, or 0
 // when the context is NULL or disabled. See placement_adjustment, which

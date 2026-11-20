@@ -67,13 +67,16 @@ typedef enum {
 // info table settings are auto, as in the command line program: each table
 // on disk is used when this machine has the memory for it (see -wmp, -wit,
 // -rit), which can take a few hundred MB, and the 1.9 GB rack info table,
-// of this process's memory.
+// of this process's memory. Its pre-endgame adjustments are auto too: each
+// player plays with its lexicon's own where the data has them (see
+// -pegadjust).
 Magpie *magpie_create(const char *data_paths);
 
 // Like magpie_create, with explicit control over the settings filename
 // (NULL for the default) and the tables: use_wmp true sets the wordmap, word
-// info table and rack info table to auto, as magpie_create does; false turns
-// all three off (a command can still turn them on).
+// info table, rack info table and pre-endgame adjustments to auto, as
+// magpie_create does; false turns all four off (a command can still turn
+// them on).
 Magpie *magpie_create_with_options(const char *data_paths,
                                    const char *settings_filename, bool use_wmp);
 

@@ -11,6 +11,13 @@
 // exactly on each of its boards, from one table of play scores a board, against
 // the leaves of the generation before, and averages over the boards.
 //
+// A full rack is valued the same way, with nothing left to draw: its mean
+// best equity over the boards whose pool can deal it, less the baseline the
+// leaves are measured from. That is the value of keeping every tile, as a
+// leave value is the value of keeping some. From the second generation on,
+// keeping the whole rack at the value the generation before gave it is one of
+// the plays a rack's best is taken over.
+//
 // The recipe is a comma-separated list of board counts, one a generation;
 // KxN is K generations of N boards. 3x256,2048 is the recipe wolges measured
 // best, and 4x256 a much faster one almost as good. Board b is the same board
@@ -28,7 +35,8 @@ typedef struct CensusGenArgs {
   const Game *game;
   const char *recipe;
   // The leaves are written to data/leaves as output_name, with each
-  // generation's as output_name_gen_N.
+  // generation's as output_name_gen_N. The last generation's full-rack values
+  // are written beside them as the rack value table output_name.
   const char *output_name;
   const char *data_paths;
   uint64_t seed;
@@ -38,6 +46,10 @@ typedef struct CensusGenArgs {
   // are played by the game's leaves, and the first generation starts from
   // them.
   bool null_start;
+  // Write no leaves, only the rack value table output_name: the full racks'
+  // values on the scale of the game's leaves, with their hash. For one
+  // generation that starts from the game's leaves.
+  bool table_only;
   ThreadControl *thread_control;
 } CensusGenArgs;
 

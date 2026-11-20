@@ -30,6 +30,9 @@ typedef struct Anchor {
   unsigned word_length : 6;
   unsigned leftmost_start_col : 6;
   unsigned rightmost_start_col : 6;
+  // Where the heap first held this anchor, which stays the same as the heap
+  // reorders it. WMP move generation keeps the anchor's score bases there.
+  unsigned insertion_idx : 15;
 
   // The direction of the board for
   // this anchor column.
@@ -44,9 +47,15 @@ typedef struct Anchor {
 // would move the move generator's fields that follow it.
 enum { ANCHOR_HEAP_ARITY = 4 };
 
+static_assert(ANCHOR_HEAP_CAPACITY <= (1 << 15),
+              "an anchor's insertion_idx must hold every heap index");
+
 typedef struct AnchorHeap {
   int count;
   Anchor anchors[ANCHOR_HEAP_CAPACITY];
+  // The WMP anchors added since the reset, which numbers the next one: the
+  // count falls as anchors are extracted, and anchors may be added after.
+  int insertions;
 } AnchorHeap;
 
 // Appends anchors to the end of the list without any comparisons.
@@ -83,10 +92,15 @@ static inline void anchor_heap_add_unheaped_wmp_anchor(
   ah->anchors[i].tiles_to_play = tiles_to_play;
   ah->anchors[i].playthrough_blocks = playthrough_blocks;
   ah->anchors[i].word_length = word_length;
+  ah->anchors[i].insertion_idx = ah->insertions;
+  ah->insertions++;
   ah->count++;
 }
 
-static inline void anchor_heap_reset(AnchorHeap *ah) { ah->count = 0; }
+static inline void anchor_heap_reset(AnchorHeap *ah) {
+  ah->count = 0;
+  ah->insertions = 0;
+}
 
 // The bound of the sentinels past the last anchor: below every anchor's, so
 // a sentinel is never a better child than an anchor.

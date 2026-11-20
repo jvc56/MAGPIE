@@ -5,7 +5,10 @@
 #include "klv.h"
 #include "kwg.h"
 #include "pat.h"
+#include "pat_board_cache.h"
+#include "peg_adjust.h"
 #include "players_data.h"
+#include "pool_shift.h"
 #include "rack.h"
 #include "rack_info_table.h"
 #include "wmp.h"
@@ -33,6 +36,23 @@ const PATWeights *player_get_pat(const Player *player);
 uint32_t player_get_pat_disabled_classes_mask(const Player *player);
 // Whether this player's move generation leaves PAT out.
 bool player_get_pat_disabled(const Player *player);
+// The player's pre-endgame adjustments, or NULL for none.
+const PegAdjust *player_get_peg_adjust(const Player *player);
+// Overrides the adjustments players_data gave the player until the next
+// player_update. A sim sets the simming player's on both players of its
+// rollout copies of the game (see rv_sim_create), so its rollouts model the
+// opponent as playing by the simming player's table.
+void player_set_peg_adjust(Player *player, const PegAdjust *peg_adjust);
+
+// The player's pool shift table and weight in thousandths (see
+// pool_shift.h): NULL and 0 for none.
+const PoolShiftTable *player_get_pool_shift_table(const Player *player);
+int player_get_pool_shift_weight(const Player *player);
+// Overrides the pool shift players_data gave the player until the next
+// player_update. An inference turns it off (NULL and 0) on its copy of the
+// game, as it does the pre-endgame adjustments.
+void player_set_pool_shift(Player *player, const PoolShiftTable *table,
+                           int weight_milli);
 
 void player_set_score(Player *player, Equity score);
 void player_set_move_sort_type(Player *player, move_sort_t move_sort_type);
@@ -56,6 +76,13 @@ void player_set_pat(Player *player, const PATWeights *pat);
 // player_update loads.
 void player_set_pat_usage(Player *player, bool disabled,
                           uint32_t disabled_classes_mask);
+// Gives the player a cache for board-only PAT, or NULL for none. With one,
+// the player's move generation uses board-only PAT: the term leaves out the
+// player's rack and the utility correction (see pat_board_cache.h). The
+// cache is not owned, must outlive its use, and serves one thread; a sim
+// worker sets it for its rollouts. player_update clears it.
+void player_set_pat_board_cache(Player *player, PATBoardCache *cache);
+PATBoardCache *player_get_pat_board_cache(const Player *player);
 
 void player_update(const PlayersData *players_data, Player *player);
 Player *player_duplicate(const Player *player);
