@@ -89,6 +89,7 @@ typedef struct Inference {
   int carry_in_kept;
   double carry_in_floor;
   InferenceCarrySlot *carry_out;
+  const InferenceLossModel *loss_model;
   bool use_infer_cutoff_optimization;
   // Every worker walks every possible leave in the same order;
   // current_rack_index is the position of the walk. A worker evaluates only
@@ -467,8 +468,7 @@ static Equity get_top_equity_from_census(const Inference *inference,
   }
 }
 
-static int inference_vowel_count(const Inference *inference,
-                                 const Rack *rack) {
+static int inference_vowel_count(const Inference *inference, const Rack *rack) {
   const LetterDistribution *ld = game_get_ld(inference->game);
   int vowels = 0;
   for (int ml = 0; ml < inference->ld_size; ml++) {
@@ -569,8 +569,35 @@ static double inference_carry_factor(const Inference *inference) {
 
 // Research: records what this turn says about the tiles kept, for the next
 // turn's carry-over: the weight over the ways to draw the kept tiles.
-static void inference_carry_record(const Inference *inference,
-                                   const Rack *kept, double weight) {
+// The fitted loss of the current rack, given its static loss.
+static double inference_model_loss(const Inference *inference,
+                                   double static_loss) {
+  const InferenceLossModel *model = inference->loss_model;
+  if (model == NULL || static_loss > model->clip) {
+    return static_loss;
+  }
+  const Rack *leave = inference->current_target_leave;
+  double loss = model->intercept + (model->slope * static_loss);
+  for (int first = 0; first < inference->ld_size; first++) {
+    const int first_count = rack_get_letter(leave, first);
+    if (first_count == 0) {
+      continue;
+    }
+    loss += model->letter[first] * first_count;
+    if (first_count > 1) {
+      loss += model->pair[first][first];
+    }
+    for (int second = first + 1; second < inference->ld_size; second++) {
+      if (rack_get_letter(leave, second) > 0) {
+        loss += model->pair[first][second];
+      }
+    }
+  }
+  return fmax(0.0, loss);
+}
+
+static void inference_carry_record(const Inference *inference, const Rack *kept,
+                                   double weight) {
   if (inference->carry_out == NULL || rack_is_empty(kept) ||
       rack_get_total_letters(kept) >= (RACK_SIZE)) {
     return;
@@ -650,7 +677,12 @@ void evaluate_possible_leave(Inference *inference) {
                                   ? inference->current_target_rack
                                   : inference->current_target_leave);
   if (inference->temperature > 0) {
-    const double loss = fmax(0.0, (double)top_equity - observed_equity);
+    double loss = fmax(0.0, (double)top_equity - observed_equity);
+    if (inference->loss_model != NULL && !is_exchange) {
+      // The model works in points; Equity is millipoints.
+      loss = inference_model_loss(inference, loss / (double)EQUITY_RESOLUTION) *
+             (double)EQUITY_RESOLUTION;
+    }
     const double weight = (double)number_of_draws_for_leave *
                           exp(-loss / inference->temperature) *
                           inference_carry_factor(inference);
@@ -900,6 +932,7 @@ Inference *inference_create(const Game *game, const InferenceArgs *args,
   inference->carry_in_kept = args->carry_in_kept;
   inference->carry_in_floor = args->carry_in_floor;
   inference->carry_out = args->carry_out;
+  inference->loss_model = args->loss_model;
   // Disable cutoff optimization for exchanges with large leaves
   // as benchmarks show it hurts performance for small exchanges
   const int leave_size = RACK_SIZE - args->target_num_exch;
@@ -954,6 +987,7 @@ void inference_reset(Inference *inference, const Game *game,
   inference->carry_in_kept = args->carry_in_kept;
   inference->carry_in_floor = args->carry_in_floor;
   inference->carry_out = args->carry_out;
+  inference->loss_model = args->loss_model;
   // Disable cutoff optimization for exchanges with large leaves
   const int leave_size = RACK_SIZE - args->target_num_exch;
   const bool is_small_exchange =

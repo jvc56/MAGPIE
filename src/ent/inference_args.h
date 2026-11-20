@@ -2,6 +2,7 @@
 #define INFERENCE_ARGS_H
 
 #include "../def/inference_defs.h"
+#include "../def/letter_distribution_defs.h"
 #include "../ent/equity.h"
 #include "../ent/game.h"
 #include "../ent/game_history.h"
@@ -16,6 +17,19 @@
 // Research (infdecide, inftfit): one slot per KLV leave, holding a float's
 // bits, so that inference workers can add to a slot without a lock.
 typedef _Atomic uint32_t InferenceCarrySlot;
+
+// Research (sim-steered weights): a fitted replacement for a rack's static
+// loss, as a function of that loss and of the tiles kept. A rack whose static
+// loss is above clip keeps it. Read-only during an inference.
+typedef struct InferenceLossModel {
+  double intercept;
+  double slope;
+  double clip;
+  double letter[MAX_ALPHABET_SIZE];
+  // One term for each distinct unordered pair of kept tiles; pair[a][b] with
+  // a <= b, and a == b when the leave has two or more of that tile.
+  double pair[MAX_ALPHABET_SIZE][MAX_ALPHABET_SIZE];
+} InferenceLossModel;
 
 typedef struct InferenceArgs {
   bool use_game_history;
@@ -54,6 +68,8 @@ typedef struct InferenceArgs {
   int carry_in_kept;
   double carry_in_floor;
   InferenceCarrySlot *carry_out;
+  // Research: softmax placements only. NULL for the static loss.
+  const InferenceLossModel *loss_model;
   const Move *target_move;
   Rack *target_played_tiles;
   Rack *target_known_rack;
@@ -88,6 +104,7 @@ infer_args_fill(InferenceArgs *args, int leave_list_capacity, Equity eq_margin,
   args->carry_in_kept = 0;
   args->carry_in_floor = 0;
   args->carry_out = NULL;
+  args->loss_model = NULL;
   args->target_move = NULL;
   args->target_played_tiles = target_played_tiles;
   args->target_known_rack = target_known_rack;

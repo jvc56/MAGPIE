@@ -597,10 +597,9 @@ static double sim_rollout(const Simmer *simmer, SimmerWorker *simmer_worker,
     // The posterior leave and the shuffle used to replenish it must draw
     // independently. Reusing the shuffle's first random word for the alias
     // bin biases which of the remaining tiles the opponent draws.
-    prng_seed(simmer_worker->prng,
-              simmer->legacy_alias_seed
-                  ? seed
-                  : seed ^ UINT64_C(0xD1B54A32D192ED03));
+    prng_seed(simmer_worker->prng, simmer->legacy_alias_seed
+                                       ? seed
+                                       : seed ^ UINT64_C(0xD1B54A32D192ED03));
     Rack inferred_rack;
     rack_set_dist_size(&inferred_rack, simmer->dist_size);
     if (alias_method_sample(
