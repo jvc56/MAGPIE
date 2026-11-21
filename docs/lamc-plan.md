@@ -1548,8 +1548,8 @@ by default.
 
 | File | Contents |
 |---|---|
-| `src/ent/nested_args.h` | `NestedArgs`: which plies are nested, candidates, samples, depth, margin, bag range, allocation, sharing, decision cache, two-stage finalists |
-| `src/impl/rollout_nested.c/.h` | The nested search: plain, shared (reply cache), decision cache, census-steered replies, spec parsing, totals |
+| `src/ent/nested_args.h` | `NestedArgs`: the levels of nested search (`NestedLevel`: which plies, candidates, samples, depth, margin, bag range, allocation, sharing, decision cache, LAMC search) and two-stage finalists |
+| `src/impl/rollout_nested.c/.h` | The nested search: plain, shared (reply cache), LAMC, decision cache, census-steered replies, deeper levels, spec parsing, totals |
 | `src/impl/random_variable.c` | The hook in `sim_rollout`, and `-sfinish` (rollouts played to the end of the game) |
 | `src/impl/simmer.c` | Two-stage nested sims (`finalists=`) |
 | `src/impl/autoplay.c` | `-apstaticbag` |
@@ -1563,7 +1563,15 @@ by default.
   (static plies after the candidate in a nested rollout), `margin` (points
   of static equity below the best), `maxbag`, `minbag`, `alloc`
   (`uniform` or `race`), `z`, `switch`, `share` (0/1), `dcache` (0/1),
-  `finalists`, `stage`.
+  `finalists`, `stage`, `lamc` (0/1, with `pool`, `keep`, `rounds`,
+  `beta`), `universe`, `seeds`. Levels are separated by `/`: each level
+  starts from the settings of the one before it, and its search chooses
+  the plays at its `plies` of the nested rollouts of the level before it.
+  For example `plies=0+1,lamc=1,dcache=1/plies=0,k=3,m=2` nests a LAMC
+  search at the sim's first two rollout plies, and in each of its nested
+  rollouts the reply to its candidate is chosen by a top-3 search of 2
+  samples each: triply nested Monte Carlo, counting the sim. At most 4
+  levels.
 - `-sfinish true|false` (and `-sfinish1`, `-sfinish2`), `-sfinishbag N`.
 - `-apstaticbag N`.
 
@@ -1580,6 +1588,18 @@ is empty). Every candidate's j-th nested rollout uses the same seed (common
 random numbers). The search plays the best mean. It works on a copy of the
 rollout's game, so the rollout's backups and board-undo record are never
 touched.
+
+With `lamc=1` the search is Phase 1's, over every play of the position
+rather than a top-k by static equity: a first pool of the best few static
+plays and plays spread over the play embedding by farthest-point sampling,
+`m` nested rollouts each a round, a Gaussian process whose prior mean is
+linear in static equity, then rounds that keep the surrogate's best plays
+and add the unevaluated plays of highest upper confidence bound. The play
+is the best evaluated by the surrogate's mean.
+
+A deeper level's search runs on a worker of its own, made the first time
+it is needed, with its own copy of the game and its own caches, so the
+levels never disturb one another.
 
 ### Sharing (Phase 3)
 
