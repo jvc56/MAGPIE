@@ -1867,8 +1867,16 @@ void test_nested_pegm(void) {
                             ? 1
                             : 0;
       if (diff != 0.0) {
-        printf("NPEGM pos %d bag %d setting %d diff %+.4f\n", pos_idx,
-               position->bag, method, diff);
+        char *base_string = pegm_move_string(position->game, base_move);
+        char *move_string = pegm_move_string(
+            position->game,
+            &pegm.chosen[method * pegm.num_positions + pos_idx]);
+        printf("NPEGM pos %d bag %d setting %d diff %+.4f: %s %.4f -> %s "
+               "%.4f | %s\n",
+               pos_idx, position->bag, method, diff, base_string, wins[0],
+               move_string, wins[method], cgp);
+        free(base_string);
+        free(move_string);
       }
     }
     free(cgp);
