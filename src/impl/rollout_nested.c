@@ -2,7 +2,9 @@
 
 #include "../def/equity_defs.h"
 #include "../def/game_defs.h"
+#include "../def/lamc_defs.h"
 #include "../def/move_defs.h"
+#include "../def/play_feature_defs.h"
 #include "../ent/bag.h"
 #include "../ent/best_move_carry.h"
 #include "../ent/board.h"
@@ -13,6 +15,7 @@
 #include "../ent/letter_distribution.h"
 #include "../ent/move.h"
 #include "../ent/nested_args.h"
+#include "../ent/play_feature.h"
 #include "../ent/player.h"
 #include "../ent/rack.h"
 #include "../ent/sim_args.h"
@@ -21,7 +24,9 @@
 #include "../util/string_util.h"
 #include "census_rollout.h"
 #include "gameplay.h"
+#include "gp.h"
 #include "move_gen.h"
+#include "play_feature_registry.h"
 #include "rack_draw.h"
 #include <math.h>
 #include <stdatomic.h>
@@ -45,6 +50,17 @@ enum {
   NESTED_FINISH_PLY = 1000,
 };
 
+// A feature column whose standard deviation is below this is constant.
+#define NESTED_MIN_COLUMN_STDEV 1e-9
+// The LAMC search's variance floors and the rollout variance it assumes
+// before any play has two samples (as Phase 1's, in lamc.c).
+#define NESTED_MIN_SIGNAL_VARIANCE 1e-6
+#define NESTED_MIN_ROLLOUT_VARIANCE 1e-4
+#define NESTED_DEFAULT_ROLLOUT_VARIANCE 0.1
+// The LAMC search's length scale, in standard deviations of each column, and
+// the multiples of it and of the signal variance each fit chooses among.
+#define NESTED_LENGTH_SCALE 1.5
+
 // One cached reply: the replying player's best play to a board, from one
 // sample's racks.
 typedef struct NestedReply {
@@ -54,6 +70,28 @@ typedef struct NestedReply {
   uint8_t bag_after;
   uint8_t replier_rack_after;
 } NestedReply;
+
+static const double nested_length_multiples[] = {0.5, 1.0, 2.0};
+static const double nested_signal_multiples[] = {0.1, 0.3, 1.0};
+
+// Standardizes count values, stride apart: a constant column becomes zeros.
+static void nested_standardize(double *values, const int stride,
+                               const int count) {
+  double sum = 0.0;
+  double squares = 0.0;
+  for (int idx = 0; idx < count; idx++) {
+    sum += values[idx * stride];
+    squares += values[idx * stride] * values[idx * stride];
+  }
+  const double mean = sum / count;
+  const double variance = squares / count - mean * mean;
+  const double stdev = variance > 0.0 ? sqrt(variance) : 0.0;
+  for (int idx = 0; idx < count; idx++) {
+    values[idx * stride] = stdev < NESTED_MIN_COLUMN_STDEV
+                               ? 0.0
+                               : (values[idx * stride] - mean) / stdev;
+  }
+}
 
 struct NestedWorker {
   // The copy of the rollout's game the nested rollouts play on.
@@ -89,6 +127,36 @@ struct NestedWorker {
   // decision chose.
   uint64_t *decision_keys;
   Move *decision_moves;
+  // For diverse candidates (NestedArgs.universe): the play features, and the
+  // embedding of the generated plays with its scratch.
+  bool features[NUMBER_OF_PLAY_FEATURES];
+  bool features_ready;
+  PlayFeatureCtx feature_ctx;
+  double *embedding;
+  int embedding_capacity;
+  double *min_distance;
+  bool *picked;
+  // For the LAMC search (NestedArgs.lamc_search), per generated play: its
+  // standardized static equity, its nested rollouts' sums and count, and
+  // its upper confidence bound; the pool, the evaluated plays, and the
+  // surrogate.
+  int play_capacity;
+  double *static_equity;
+  double *play_sums;
+  double *play_squares;
+  int *play_counts;
+  double *upper_bounds;
+  int pool[NESTED_MAX_UNIVERSE];
+  int evaluated[NESTED_MAX_EVALUATED];
+  int num_evaluated;
+  double gp_points[NESTED_MAX_EVALUATED * NESTED_MAX_COLUMNS];
+  double gp_values[NESTED_MAX_EVALUATED];
+  double gp_noise[NESTED_MAX_EVALUATED];
+  double fit_inverse_length_scales[NESTED_MAX_COLUMNS];
+  double mean_intercept;
+  double mean_slope;
+  GaussianProcess *gp;
+  int gp_num_dims;
 };
 
 static _Atomic uint64_t nested_total_searches;
@@ -145,6 +213,20 @@ NestedWorker *nested_worker_create(const Game *game,
   worker->reply_ply = 0;
   worker->decision_keys = NULL;
   worker->decision_moves = NULL;
+  worker->features_ready = false;
+  worker->embedding = NULL;
+  worker->embedding_capacity = 0;
+  worker->min_distance = NULL;
+  worker->picked = NULL;
+  worker->play_capacity = 0;
+  worker->static_equity = NULL;
+  worker->play_sums = NULL;
+  worker->play_squares = NULL;
+  worker->play_counts = NULL;
+  worker->upper_bounds = NULL;
+  worker->num_evaluated = 0;
+  worker->gp = NULL;
+  worker->gp_num_dims = 0;
   return worker;
 }
 
@@ -192,6 +274,15 @@ void nested_worker_destroy(NestedWorker *worker) {
   free(worker->cache_replies);
   free(worker->decision_keys);
   free(worker->decision_moves);
+  free(worker->embedding);
+  free(worker->min_distance);
+  free(worker->picked);
+  free(worker->static_equity);
+  free(worker->play_sums);
+  free(worker->play_squares);
+  free(worker->play_counts);
+  free(worker->upper_bounds);
+  gp_destroy(worker->gp);
   free(worker);
 }
 
@@ -204,10 +295,156 @@ static uint64_t nested_mix(uint64_t value) {
 
 // Generates the candidates of the player on turn in worker's game: up to
 // num_candidates plays by static equity, within margin points of the best.
+// Embeds the worker's generated plays (worker->candidate_list) in the
+// Phase 1 play embedding (see play_feature_registry.h), every continuous
+// column standardized across them, and their static equity, standardized,
+// in worker->static_equity. Returns the number of columns.
+static int nested_embed(NestedWorker *worker, const Game *game) {
+  const MoveList *plays = worker->candidate_list;
+  const int count = move_list_get_count(plays);
+  if (!worker->features_ready) {
+    ErrorStack *error_stack = error_stack_create();
+    play_feature_parse_set(PLAY_FEATURE_DEFAULT_SET, worker->features,
+                           error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      log_fatal("the default play feature set does not parse");
+    }
+    error_stack_destroy(error_stack);
+    worker->features_ready = true;
+  }
+  int num_columns = 0;
+  for (int feature_idx = 0; feature_idx < NUMBER_OF_PLAY_FEATURES;
+       feature_idx++) {
+    if (worker->features[feature_idx]) {
+      num_columns += play_feature_get_num_columns((play_feature_t)feature_idx);
+    }
+  }
+  if (worker->embedding_capacity < count * num_columns ||
+      worker->play_capacity < count) {
+    free(worker->embedding);
+    free(worker->min_distance);
+    free(worker->picked);
+    free(worker->static_equity);
+    free(worker->play_sums);
+    free(worker->play_squares);
+    free(worker->play_counts);
+    free(worker->upper_bounds);
+    worker->embedding_capacity = count * num_columns;
+    worker->play_capacity = count;
+    worker->embedding =
+        malloc_or_die(sizeof(double) * (size_t)worker->embedding_capacity);
+    worker->min_distance = malloc_or_die(sizeof(double) * (size_t)count);
+    worker->picked = malloc_or_die(sizeof(bool) * (size_t)count);
+    worker->static_equity = malloc_or_die(sizeof(double) * (size_t)count);
+    worker->play_sums = malloc_or_die(sizeof(double) * (size_t)count);
+    worker->play_squares = malloc_or_die(sizeof(double) * (size_t)count);
+    worker->play_counts = malloc_or_die(sizeof(int) * (size_t)count);
+    worker->upper_bounds = malloc_or_die(sizeof(double) * (size_t)count);
+  }
+  double *embedding = worker->embedding;
+  play_feature_ctx_init(&worker->feature_ctx, game);
+  int column = 0;
+  for (int feature_idx = 0; feature_idx < NUMBER_OF_PLAY_FEATURES;
+       feature_idx++) {
+    if (!worker->features[feature_idx]) {
+      continue;
+    }
+    const play_feature_t feature = (play_feature_t)feature_idx;
+    play_feature_prepare(feature, &worker->feature_ctx);
+    play_feature_extract(feature, &worker->feature_ctx, plays, num_columns,
+                         embedding + column);
+    const int feature_columns = play_feature_get_num_columns(feature);
+    if (play_feature_get_kind(feature) == PLAY_FEATURE_KIND_CONTINUOUS) {
+      for (int offset = 0; offset < feature_columns; offset++) {
+        nested_standardize(embedding + column + offset, num_columns, count);
+      }
+    }
+    column += feature_columns;
+  }
+  play_feature_extract(PLAY_FEATURE_EQUITY, &worker->feature_ctx, plays, 1,
+                       worker->static_equity);
+  nested_standardize(worker->static_equity, 1, count);
+  return num_columns;
+}
+
+static double nested_distance_squared(const double *a, const double *b,
+                                      const int num_columns) {
+  double distance = 0.0;
+  for (int col = 0; col < num_columns; col++) {
+    const double diff = a[col] - b[col];
+    distance += diff * diff;
+  }
+  return distance;
+}
+
+// Picks wanted plays of the embedded worker->candidate_list into
+// worker->pool: the first num_seeds (the best by static equity), then each
+// time the play farthest from those already picked.
+static int nested_farthest_points(NestedWorker *worker, const int num_columns,
+                                  const int wanted, int num_seeds) {
+  const int count = move_list_get_count(worker->candidate_list);
+  const double *embedding = worker->embedding;
+  if (num_seeds < 1) {
+    num_seeds = 1;
+  }
+  for (int play_idx = 0; play_idx < count; play_idx++) {
+    worker->min_distance[play_idx] = INFINITY;
+    worker->picked[play_idx] = false;
+  }
+  int picks = 0;
+  for (int pick = 0; pick < wanted && pick < count; pick++) {
+    int chosen = pick;
+    if (pick >= num_seeds) {
+      double farthest = -1.0;
+      for (int play_idx = 0; play_idx < count; play_idx++) {
+        if (!worker->picked[play_idx] &&
+            worker->min_distance[play_idx] > farthest) {
+          farthest = worker->min_distance[play_idx];
+          chosen = play_idx;
+        }
+      }
+    }
+    worker->picked[chosen] = true;
+    worker->pool[picks++] = chosen;
+    const double *chosen_row = embedding + chosen * num_columns;
+    for (int play_idx = 0; play_idx < count; play_idx++) {
+      const double distance = nested_distance_squared(
+          embedding + play_idx * num_columns, chosen_row, num_columns);
+      if (distance < worker->min_distance[play_idx]) {
+        worker->min_distance[play_idx] = distance;
+      }
+    }
+  }
+  return picks;
+}
+
+// Picks the worker's candidates from its generated plays by the play
+// embedding: the best static_seeds plays, then plays spread over the
+// embedding by farthest-point sampling, until there are num_candidates.
+static void nested_pick_diverse(NestedWorker *worker, const NestedArgs *args,
+                                const Game *game) {
+  const int num_columns = nested_embed(worker, game);
+  const int picks = nested_farthest_points(
+      worker, num_columns, args->num_candidates, args->static_seeds);
+  worker->num_candidates = 0;
+  for (int pick = 0; pick < picks; pick++) {
+    move_copy(&worker->candidates[worker->num_candidates++],
+              move_list_get_move(worker->candidate_list, worker->pool[pick]));
+  }
+}
+
+// Generates the candidates of the player on turn in game: up to
+// num_candidates plays by static equity, within margin points of the best,
+// or with a universe, a diverse pick from that many (nested_pick_diverse).
 static void nested_generate_candidates(NestedWorker *worker,
                                        const NestedArgs *args,
                                        const Game *game) {
-  const int capacity = args->num_candidates;
+  int capacity = args->num_candidates;
+  if (args->lamc_search) {
+    capacity = args->universe > 0 ? args->universe : NESTED_MAX_UNIVERSE;
+  } else if (args->universe > 0) {
+    capacity = args->universe;
+  }
   if (worker->candidate_capacity != capacity) {
     move_list_destroy(worker->candidate_list);
     worker->candidate_list = move_list_create(capacity);
@@ -227,6 +464,14 @@ static void nested_generate_candidates(NestedWorker *worker,
   const int count = move_list_get_count(worker->candidate_list);
   worker->num_candidates = 0;
   if (count == 0) {
+    return;
+  }
+  if (args->lamc_search) {
+    // nested_choose_lamc searches the plays as generated.
+    return;
+  }
+  if (args->universe > 0) {
+    nested_pick_diverse(worker, args, game);
     return;
   }
   const Equity best =
@@ -720,6 +965,291 @@ static const Move *nested_choose_shared(NestedWorker *worker,
   return &worker->chosen;
 }
 
+// The LAMC search's surrogate of the evaluated plays (NestedArgs.lamc_search),
+// as Phase 1's (lamc_fit): a prior mean linear in static equity, fit by least
+// squares weighted by each mean's precision, and a Gaussian process of the
+// residuals whose length scale and signal variance are chosen by marginal
+// likelihood. Returns whether a fit succeeded.
+static bool nested_fit(NestedWorker *worker, const int num_columns) {
+  const int num_evaluated = worker->num_evaluated;
+  double pooled_squares = 0.0;
+  double pooled_dof = 0.0;
+  for (int eval_idx = 0; eval_idx < num_evaluated; eval_idx++) {
+    const int play_idx = worker->evaluated[eval_idx];
+    const double n = worker->play_counts[play_idx];
+    const double mean = worker->play_sums[play_idx] / n;
+    if (n > 1) {
+      const double variance =
+          (worker->play_squares[play_idx] / n - mean * mean) * n / (n - 1);
+      pooled_squares += (variance > 0 ? variance : 0.0) * (n - 1);
+      pooled_dof += n - 1;
+    }
+    worker->gp_values[eval_idx] = mean;
+    memcpy(worker->gp_points + (ptrdiff_t)eval_idx * num_columns,
+           worker->embedding + (ptrdiff_t)play_idx * num_columns,
+           sizeof(double) * num_columns);
+  }
+  double rollout_variance = pooled_dof > 0 ? pooled_squares / pooled_dof
+                                           : NESTED_DEFAULT_ROLLOUT_VARIANCE;
+  if (rollout_variance < NESTED_MIN_ROLLOUT_VARIANCE) {
+    rollout_variance = NESTED_MIN_ROLLOUT_VARIANCE;
+  }
+  double noise_sum = 0.0;
+  double weight_sum = 0.0;
+  double equity_sum = 0.0;
+  double value_sum = 0.0;
+  for (int eval_idx = 0; eval_idx < num_evaluated; eval_idx++) {
+    const int play_idx = worker->evaluated[eval_idx];
+    worker->gp_noise[eval_idx] =
+        rollout_variance / (double)worker->play_counts[play_idx];
+    noise_sum += worker->gp_noise[eval_idx];
+    const double weight = 1.0 / worker->gp_noise[eval_idx];
+    weight_sum += weight;
+    equity_sum += weight * worker->static_equity[play_idx];
+    value_sum += weight * worker->gp_values[eval_idx];
+  }
+  const double equity_mean = equity_sum / weight_sum;
+  const double value_mean = value_sum / weight_sum;
+  double covariance = 0.0;
+  double equity_variance = 0.0;
+  for (int eval_idx = 0; eval_idx < num_evaluated; eval_idx++) {
+    const double weight = 1.0 / worker->gp_noise[eval_idx];
+    const double equity_diff =
+        worker->static_equity[worker->evaluated[eval_idx]] - equity_mean;
+    covariance +=
+        weight * equity_diff * (worker->gp_values[eval_idx] - value_mean);
+    equity_variance += weight * equity_diff * equity_diff;
+  }
+  worker->mean_slope =
+      equity_variance > 0.0 ? covariance / equity_variance : 0.0;
+  worker->mean_intercept = value_mean - worker->mean_slope * equity_mean;
+  double value_squares = 0.0;
+  for (int eval_idx = 0; eval_idx < num_evaluated; eval_idx++) {
+    worker->gp_values[eval_idx] -=
+        worker->mean_intercept +
+        worker->mean_slope * worker->static_equity[worker->evaluated[eval_idx]];
+    value_squares += worker->gp_values[eval_idx] * worker->gp_values[eval_idx];
+  }
+  double signal_variance =
+      value_squares / num_evaluated - noise_sum / num_evaluated;
+  if (signal_variance < NESTED_MIN_SIGNAL_VARIANCE) {
+    signal_variance = NESTED_MIN_SIGNAL_VARIANCE;
+  }
+  if (worker->gp_num_dims != num_columns) {
+    gp_destroy(worker->gp);
+    worker->gp = gp_create(NESTED_MAX_EVALUATED, num_columns);
+    worker->gp_num_dims = num_columns;
+  }
+  GaussianProcessParams params = {
+      .kernel = GP_KERNEL_MATERN52,
+      .inverse_length_scales = worker->fit_inverse_length_scales,
+      .signal_variance = signal_variance,
+      .prior_mean = 0.0,
+  };
+  const int num_length = (int)(sizeof(nested_length_multiples) /
+                               sizeof(nested_length_multiples[0]));
+  const int num_signal = (int)(sizeof(nested_signal_multiples) /
+                               sizeof(nested_signal_multiples[0]));
+  int best_length = -1;
+  int best_signal = -1;
+  double best_likelihood = -INFINITY;
+  for (int signal_idx = 0; signal_idx < num_signal; signal_idx++) {
+    params.signal_variance =
+        signal_variance * nested_signal_multiples[signal_idx];
+    for (int length_idx = 0; length_idx < num_length; length_idx++) {
+      for (int column = 0; column < num_columns; column++) {
+        worker->fit_inverse_length_scales[column] =
+            1.0 / (NESTED_LENGTH_SCALE * nested_length_multiples[length_idx]);
+      }
+      if (gp_fit(worker->gp, &params, worker->gp_points, worker->gp_values,
+                 worker->gp_noise, num_evaluated) &&
+          gp_get_log_marginal_likelihood(worker->gp) > best_likelihood) {
+        best_likelihood = gp_get_log_marginal_likelihood(worker->gp);
+        best_length = length_idx;
+        best_signal = signal_idx;
+      }
+    }
+  }
+  if (best_length < 0) {
+    return false;
+  }
+  params.signal_variance =
+      signal_variance * nested_signal_multiples[best_signal];
+  for (int column = 0; column < num_columns; column++) {
+    worker->fit_inverse_length_scales[column] =
+        1.0 / (NESTED_LENGTH_SCALE * nested_length_multiples[best_length]);
+  }
+  return gp_fit(worker->gp, &params, worker->gp_points, worker->gp_values,
+                worker->gp_noise, num_evaluated);
+}
+
+// The surrogate's posterior mean and variance at play play_idx.
+static void nested_posterior(NestedWorker *worker, const int num_columns,
+                             const int play_idx, double *mean,
+                             double *variance) {
+  double residual = 0.0;
+  gp_predict(worker->gp, worker->embedding + (ptrdiff_t)play_idx * num_columns,
+             &residual, variance);
+  *mean = worker->mean_intercept +
+          worker->mean_slope * worker->static_equity[play_idx] + residual;
+}
+
+// Gives each play in pool num_samples more nested rollouts. A play's n-th
+// rollout uses the n-th seed, the same for every play: common random numbers.
+static uint64_t nested_sample_pool(NestedWorker *worker, const NestedArgs *args,
+                                   const NestedEval *eval, const int *pool,
+                                   const int pool_count, const uint64_t seed,
+                                   BestMoveCarry *carry) {
+  uint64_t samples = 0;
+  for (int pool_idx = 0; pool_idx < pool_count; pool_idx++) {
+    const int play_idx = pool[pool_idx];
+    if (worker->play_counts[play_idx] == 0 &&
+        worker->num_evaluated < NESTED_MAX_EVALUATED) {
+      worker->evaluated[worker->num_evaluated++] = play_idx;
+    }
+    for (int sample = 0; sample < args->num_samples; sample++) {
+      const double value = nested_rollout(
+          worker, args, eval,
+          move_list_get_move(worker->candidate_list, play_idx),
+          nested_mix(seed + (uint64_t)worker->play_counts[play_idx]), carry);
+      worker->play_sums[play_idx] += value;
+      worker->play_squares[play_idx] += value * value;
+      worker->play_counts[play_idx]++;
+      samples++;
+    }
+  }
+  return samples;
+}
+
+// Chooses by a LAMC search over every generated play of the position in
+// game (NestedArgs.lamc_search): a first pool of the best static plays and
+// plays spread over the play embedding, then rounds in which the surrogate's
+// best plays are kept and the rest of the pool is the unevaluated plays with
+// the highest upper confidence bounds.
+static const Move *nested_choose_lamc(NestedWorker *worker,
+                                      const NestedArgs *args,
+                                      const NestedEval *eval, const Game *game,
+                                      const uint64_t seed,
+                                      BestMoveCarry *carry) {
+  const MoveList *plays = worker->candidate_list;
+  const int count = move_list_get_count(plays);
+  if (count <= 1) {
+    move_copy(&worker->chosen, move_list_get_move(plays, 0));
+    return &worker->chosen;
+  }
+  game_copy(worker->game, game);
+  worker->game_is_current = true;
+  const int num_columns = nested_embed(worker, game);
+  if (num_columns > NESTED_MAX_COLUMNS) {
+    log_fatal("the play embedding has more columns than nested search holds");
+  }
+  for (int play_idx = 0; play_idx < count; play_idx++) {
+    worker->play_sums[play_idx] = 0.0;
+    worker->play_squares[play_idx] = 0.0;
+    worker->play_counts[play_idx] = 0;
+  }
+  worker->num_evaluated = 0;
+  int pool[NESTED_MAX_POOL_SIZE];
+  int pool_count = nested_farthest_points(
+      worker, num_columns, args->pool_size < count ? args->pool_size : count,
+      args->static_seeds);
+  memcpy(pool, worker->pool, sizeof(int) * (size_t)pool_count);
+  uint64_t samples = 0;
+  bool fitted = false;
+  for (int round = 0; round < args->rounds; round++) {
+    samples +=
+        nested_sample_pool(worker, args, eval, pool, pool_count, seed, carry);
+    fitted = nested_fit(worker, num_columns);
+    if (round == args->rounds - 1 || !fitted) {
+      break;
+    }
+    // Keep the best by the surrogate's mean.
+    for (int play_idx = 0; play_idx < count; play_idx++) {
+      worker->picked[play_idx] = false;
+    }
+    pool_count = 0;
+    for (int kept = 0; kept < args->keep && kept < worker->num_evaluated;
+         kept++) {
+      int best = -1;
+      double best_mean = -INFINITY;
+      for (int eval_idx = 0; eval_idx < worker->num_evaluated; eval_idx++) {
+        const int play_idx = worker->evaluated[eval_idx];
+        if (worker->picked[play_idx]) {
+          continue;
+        }
+        double mean = 0.0;
+        nested_posterior(worker, num_columns, play_idx, &mean, NULL);
+        if (mean > best_mean) {
+          best_mean = mean;
+          best = play_idx;
+        }
+      }
+      worker->picked[best] = true;
+      pool[pool_count++] = best;
+    }
+    // The rest: the unevaluated plays of highest upper confidence bound.
+    for (int play_idx = 0; play_idx < count; play_idx++) {
+      if (worker->play_counts[play_idx] > 0) {
+        worker->upper_bounds[play_idx] = -INFINITY;
+        continue;
+      }
+      double mean = 0.0;
+      double variance = 0.0;
+      nested_posterior(worker, num_columns, play_idx, &mean, &variance);
+      worker->upper_bounds[play_idx] =
+          mean + args->ucb_beta * sqrt(variance > 0.0 ? variance : 0.0);
+    }
+    while (pool_count < args->pool_size &&
+           worker->num_evaluated + pool_count - args->keep <
+               NESTED_MAX_EVALUATED) {
+      int best = -1;
+      double best_bound = -INFINITY;
+      for (int play_idx = 0; play_idx < count; play_idx++) {
+        if (!worker->picked[play_idx] &&
+            worker->upper_bounds[play_idx] > best_bound) {
+          best_bound = worker->upper_bounds[play_idx];
+          best = play_idx;
+        }
+      }
+      if (best < 0) {
+        break;
+      }
+      worker->picked[best] = true;
+      pool[pool_count++] = best;
+    }
+  }
+  atomic_fetch_add_explicit(&nested_total_samples, samples,
+                            memory_order_relaxed);
+  atomic_fetch_add_explicit(&nested_total_candidates,
+                            (uint64_t)worker->num_evaluated,
+                            memory_order_relaxed);
+  // The best evaluated play by the surrogate's mean, or by its own mean
+  // without a fit.
+  int best = worker->evaluated[0];
+  double best_value = -INFINITY;
+  for (int eval_idx = 0; eval_idx < worker->num_evaluated; eval_idx++) {
+    const int play_idx = worker->evaluated[eval_idx];
+    double value = 0.0;
+    if (fitted) {
+      nested_posterior(worker, num_columns, play_idx, &value, NULL);
+    } else {
+      value = worker->play_sums[play_idx] / worker->play_counts[play_idx];
+    }
+    if (play_idx != 0) {
+      value -= args->switch_margin;
+    }
+    if (value > best_value) {
+      best_value = value;
+      best = play_idx;
+    }
+  }
+  if (best != 0) {
+    atomic_fetch_add_explicit(&nested_total_switched, 1, memory_order_relaxed);
+  }
+  move_copy(&worker->chosen, move_list_get_move(plays, best));
+  return &worker->chosen;
+}
+
 // The key of the decision the player on turn in game makes: its board, its
 // rack, which player it is, the spread and the scoreless turns. The unseen
 // tiles it draws other racks from follow from the board and its rack.
@@ -781,6 +1311,9 @@ nested_choose_move_uncached(NestedWorker *worker, const NestedArgs *args,
   worker->game_is_current = false;
   nested_generate_candidates(worker, args, game);
   atomic_fetch_add_explicit(&nested_total_searches, 1, memory_order_relaxed);
+  if (args->lamc_search) {
+    return nested_choose_lamc(worker, args, eval, game, seed, carry);
+  }
   atomic_fetch_add_explicit(&nested_total_candidates,
                             (uint64_t)worker->num_candidates,
                             memory_order_relaxed);
@@ -887,6 +1420,33 @@ static bool nested_parse_setting(const char *key, const char *value,
   if (strings_iequal(key, "stage")) {
     return nested_parse_double(value, &args->stage_share) &&
            args->stage_share > 0.0 && args->stage_share < 1.0;
+  }
+  if (strings_iequal(key, "lamc")) {
+    int lamc = 0;
+    if (!nested_parse_int(value, 0, 1, &lamc)) {
+      return false;
+    }
+    args->lamc_search = lamc == 1;
+    return true;
+  }
+  if (strings_iequal(key, "pool")) {
+    return nested_parse_int(value, 2, NESTED_MAX_POOL_SIZE, &args->pool_size);
+  }
+  if (strings_iequal(key, "keep")) {
+    return nested_parse_int(value, 1, NESTED_MAX_POOL_SIZE, &args->keep);
+  }
+  if (strings_iequal(key, "rounds")) {
+    return nested_parse_int(value, 1, NESTED_MAX_ROUNDS, &args->rounds);
+  }
+  if (strings_iequal(key, "beta")) {
+    return nested_parse_double(value, &args->ucb_beta);
+  }
+  if (strings_iequal(key, "universe")) {
+    return nested_parse_int(value, 0, NESTED_MAX_UNIVERSE, &args->universe);
+  }
+  if (strings_iequal(key, "seeds")) {
+    return nested_parse_int(value, 1, NESTED_MAX_CANDIDATES,
+                            &args->static_seeds);
   }
   if (strings_iequal(key, "dcache")) {
     int cache = 0;

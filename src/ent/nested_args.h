@@ -18,6 +18,17 @@ enum {
   NESTED_MAX_CANDIDATES = 64,
   NESTED_MAX_SAMPLES = 4096,
   NESTED_MAX_PLIES = 16,
+  // The most plays a diverse pick chooses from.
+  NESTED_MAX_UNIVERSE = 5000,
+  NESTED_DEFAULT_STATIC_SEEDS = 3,
+  // The LAMC search's bounds and defaults (NestedArgs.lamc_search).
+  NESTED_MAX_POOL_SIZE = 64,
+  NESTED_MAX_ROUNDS = 32,
+  NESTED_MAX_EVALUATED = 256,
+  NESTED_MAX_COLUMNS = 64,
+  NESTED_DEFAULT_POOL_SIZE = 8,
+  NESTED_DEFAULT_KEEP = 3,
+  NESTED_DEFAULT_ROUNDS = 3,
   // Plies at or past this are never nested.
   NESTED_MAX_PLY_INDEX = 31,
   NESTED_DEFAULT_CANDIDATES = 6,
@@ -79,6 +90,25 @@ typedef struct NestedArgs {
   // whichever rollout makes it. Late in the game, where few racks are
   // possible, decisions repeat often.
   bool decision_cache;
+  // With universe > 0, the candidates are not the top num_candidates by
+  // static equity but a diverse pick from the top universe: the best
+  // static_seeds, then plays spread over the Phase 1 play embedding by
+  // farthest-point sampling. margin does not apply.
+  int universe;
+  int static_seeds;
+  // Whether a nested search is a LAMC search (as Phase 1's, at the root):
+  // over every play, at most universe of them if universe is set; a first
+  // pool of pool_size plays (static_seeds best by static equity, the rest
+  // spread over the play embedding), num_samples nested rollouts each a
+  // round; a Gaussian process with a prior mean linear in static equity;
+  // then rounds that keep its best keep plays and add the unevaluated plays
+  // of highest upper confidence bound (ucb_beta standard deviations). The
+  // play is the best evaluated by the surrogate's mean.
+  bool lamc_search;
+  int pool_size;
+  int keep;
+  int rounds;
+  double ucb_beta;
 } NestedArgs;
 
 static inline void nested_args_set_defaults(NestedArgs *args) {
@@ -97,6 +127,13 @@ static inline void nested_args_set_defaults(NestedArgs *args) {
   args->finalists = 0;
   args->stage_share = 0.5;
   args->decision_cache = false;
+  args->universe = 0;
+  args->static_seeds = NESTED_DEFAULT_STATIC_SEEDS;
+  args->lamc_search = false;
+  args->pool_size = NESTED_DEFAULT_POOL_SIZE;
+  args->keep = NESTED_DEFAULT_KEEP;
+  args->rounds = NESTED_DEFAULT_ROUNDS;
+  args->ucb_beta = 1.0;
 }
 
 #endif

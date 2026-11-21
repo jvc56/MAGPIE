@@ -1836,14 +1836,27 @@ void test_nested_pegm(void) {
       free(command);
       solved++;
       const PegResult *result = config_get_peg_result(peg_config);
+      // Each solved play is cached under the string of the chosen play it
+      // is, matched by the move itself: PEG may write a play otherwise.
       for (int cand_idx = 0; cand_idx < result->n_top_cands; cand_idx++) {
-        char *move =
-            pegm_move_string(position->game, &result->top_cands[cand_idx].move);
-        const uint64_t key = pegm_key(cgp, move, peg_extra);
-        pegm_cache_add(&cache, key, result->top_cands[cand_idx].win_pct);
-        (void)fprintf(cache_out, "PEGC %llx %.6f\n", (unsigned long long)key,
-                      result->top_cands[cand_idx].win_pct);
-        free(move);
+        for (int method = 0; method < num_methods; method++) {
+          const Move *chosen =
+              &pegm.chosen[method * pegm.num_positions + pos_idx];
+          if (compare_moves_without_equity(&result->top_cands[cand_idx].move,
+                                           chosen, true) != -1) {
+            continue;
+          }
+          char *move = pegm_move_string(position->game, chosen);
+          const uint64_t key = pegm_key(cgp, move, peg_extra);
+          double cached = 0;
+          if (!pegm_cache_find(&cache, key, &cached)) {
+            pegm_cache_add(&cache, key, result->top_cands[cand_idx].win_pct);
+            (void)fprintf(cache_out, "PEGC %llx %.6f\n",
+                          (unsigned long long)key,
+                          result->top_cands[cand_idx].win_pct);
+          }
+          free(move);
+        }
       }
       (void)fflush(cache_out);
     }

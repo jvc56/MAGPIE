@@ -108,6 +108,9 @@ const Move *nested_choose_move(NestedWorker *worker, const NestedArgs *args,
 //   share   1 to share nested rollouts (see above), 0 not to
 //   finalists, stage  NestedArgs.finalists and stage_share
 //   dcache  1 to cache decisions (NestedArgs.decision_cache), 0 not to
+//   universe, seeds  NestedArgs.universe and static_seeds: diverse candidates
+//   lamc    1 for a LAMC search over every play (NestedArgs.lamc_search),
+//           with pool, keep, rounds and beta
 // Settings not named keep their defaults.
 void nested_args_parse(const char *spec, NestedArgs *args,
                        ErrorStack *error_stack);
