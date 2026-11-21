@@ -3006,6 +3006,7 @@ static void help_entry_fill(const Config *config, int token,
       usages[0] = "<spec>";
       examples[0] = "off";
       examples[1] = "plies=0,k=6,m=8,h=1";
+      examples[2] = "plies=0+1,lamc=1,dcache=1/plies=0,k=3,m=2";
       text = "Specifies whether a simulation's rollouts choose the plays of "
              "some plies by a nested search instead of by static equity "
              "(nested1 and nested2 for each player in autoplay). off, or "
@@ -3013,9 +3014,14 @@ static void help_entry_fill(const Config *config, int token,
              "to the candidate), k (candidates), m (nested rollouts each), h "
              "(static plies after the candidate in a nested rollout), margin "
              "(points below the best), maxbag, minbag, alloc (uniform or "
-             "race), z (the race's standard errors) and switch (the nested "
-             "utility a candidate other than the static best must gain). Off "
-             "by default.";
+             "race), z (the race's standard errors), switch (the nested "
+             "utility a candidate other than the static best must gain), "
+             "dcache (1 to cache decisions), lamc (1 for a LAMC search over "
+             "every play, with pool, keep, rounds and beta), share, universe, "
+             "seeds, finalists and stage. Settings after a / are a deeper "
+             "level, whose search chooses plays in the nested rollouts of the "
+             "level before it, starting from that level's settings. Off by "
+             "default.";
       break;
     case ARG_TOKEN_SIM_FINISH_BAG:
       usages[0] = "<tiles>";

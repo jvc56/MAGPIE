@@ -94,6 +94,13 @@ static void nested_standardize(double *values, const int stride,
 }
 
 struct NestedWorker {
+  // The level of search the worker makes (an index into NestedArgs.levels),
+  // the settings of its current search, and the worker of the level below
+  // it, made when first needed.
+  int level;
+  const NestedArgs *spec;
+  NestedWorker *inner;
+  CrossSetCache *cross_set_cache;
   // The copy of the rollout's game the nested rollouts play on.
   Game *game;
   // The candidates of the current search, best by static equity first.
@@ -123,11 +130,11 @@ struct NestedWorker {
   CensusRolloutWorker *census_worker;
   const CensusRollout *census;
   int reply_ply;
-  // The decision cache (NestedArgs.decision_cache): keys, and the play each
+  // The decision cache (NestedLevel.decision_cache): keys, and the play each
   // decision chose.
   uint64_t *decision_keys;
   Move *decision_moves;
-  // For diverse candidates (NestedArgs.universe): the play features, and the
+  // For diverse candidates (NestedLevel.universe): the play features, and the
   // embedding of the generated plays with its scratch.
   bool features[NUMBER_OF_PLAY_FEATURES];
   bool features_ready;
@@ -136,7 +143,7 @@ struct NestedWorker {
   int embedding_capacity;
   double *min_distance;
   bool *picked;
-  // For the LAMC search (NestedArgs.lamc_search), per generated play: its
+  // For the LAMC search (NestedLevel.lamc_search), per generated play: its
   // standardized static equity, its nested rollouts' sums and count, and
   // its upper confidence bound; the pool, the evaluated plays, and the
   // surrogate.
@@ -160,6 +167,7 @@ struct NestedWorker {
 };
 
 static _Atomic uint64_t nested_total_searches;
+static _Atomic uint64_t nested_total_inner_searches;
 static _Atomic uint64_t nested_total_samples;
 static _Atomic uint64_t nested_total_candidates;
 static _Atomic uint64_t nested_total_switched;
@@ -169,6 +177,7 @@ static _Atomic uint64_t nested_total_decision_hits;
 
 void nested_totals_reset(void) {
   atomic_store(&nested_total_searches, 0);
+  atomic_store(&nested_total_inner_searches, 0);
   atomic_store(&nested_total_samples, 0);
   atomic_store(&nested_total_candidates, 0);
   atomic_store(&nested_total_switched, 0);
@@ -180,6 +189,7 @@ void nested_totals_reset(void) {
 NestedTotals nested_get_totals(void) {
   NestedTotals totals = {
       .searches = atomic_load(&nested_total_searches),
+      .inner_searches = atomic_load(&nested_total_inner_searches),
       .samples = atomic_load(&nested_total_samples),
       .candidates = atomic_load(&nested_total_candidates),
       .switched = atomic_load(&nested_total_switched),
@@ -190,9 +200,14 @@ NestedTotals nested_get_totals(void) {
   return totals;
 }
 
-NestedWorker *nested_worker_create(const Game *game,
-                                   CrossSetCache *cross_set_cache) {
+static NestedWorker *nested_worker_create_level(const Game *game,
+                                                CrossSetCache *cross_set_cache,
+                                                const int level) {
   NestedWorker *worker = malloc_or_die(sizeof(NestedWorker));
+  worker->level = level;
+  worker->spec = NULL;
+  worker->inner = NULL;
+  worker->cross_set_cache = cross_set_cache;
   worker->game = game_duplicate(game);
   game_set_backup_mode(worker->game, BACKUP_MODE_SIMULATION);
   game_enable_rollout_board_undo(worker->game);
@@ -230,6 +245,11 @@ NestedWorker *nested_worker_create(const Game *game,
   return worker;
 }
 
+NestedWorker *nested_worker_create(const Game *game,
+                                   CrossSetCache *cross_set_cache) {
+  return nested_worker_create_level(game, cross_set_cache, 0);
+}
+
 void nested_worker_set_census(NestedWorker *worker,
                               CensusRolloutWorker *census_worker,
                               const CensusRollout *census,
@@ -252,6 +272,9 @@ static const Move *nested_top_play(NestedWorker *worker, Game *game,
 
 void nested_worker_reset(NestedWorker *worker, const uint64_t sim_seed) {
   worker->sim_seed = sim_seed;
+  if (worker->inner != NULL) {
+    nested_worker_reset(worker->inner, sim_seed);
+  }
   if (worker->cache_keys != NULL) {
     memset(worker->cache_keys, 0,
            sizeof(uint64_t) * ((size_t)1 << NESTED_CACHE_BITS));
@@ -266,6 +289,7 @@ void nested_worker_destroy(NestedWorker *worker) {
   if (!worker) {
     return;
   }
+  nested_worker_destroy(worker->inner);
   game_destroy(worker->game);
   move_list_destroy(worker->candidate_list);
   move_list_destroy(worker->reply_list);
@@ -421,7 +445,7 @@ static int nested_farthest_points(NestedWorker *worker, const int num_columns,
 // Picks the worker's candidates from its generated plays by the play
 // embedding: the best static_seeds plays, then plays spread over the
 // embedding by farthest-point sampling, until there are num_candidates.
-static void nested_pick_diverse(NestedWorker *worker, const NestedArgs *args,
+static void nested_pick_diverse(NestedWorker *worker, const NestedLevel *args,
                                 const Game *game) {
   const int num_columns = nested_embed(worker, game);
   const int picks = nested_farthest_points(
@@ -437,7 +461,7 @@ static void nested_pick_diverse(NestedWorker *worker, const NestedArgs *args,
 // num_candidates plays by static equity, within margin points of the best,
 // or with a universe, a diverse pick from that many (nested_pick_diverse).
 static void nested_generate_candidates(NestedWorker *worker,
-                                       const NestedArgs *args,
+                                       const NestedLevel *args,
                                        const Game *game) {
   int capacity = args->num_candidates;
   if (args->lamc_search) {
@@ -521,11 +545,44 @@ static double nested_score(const NestedEval *eval, const Game *game,
                            eval->utility_w_spread, eval->utility_spread_scale);
 }
 
+static const Move *nested_choose_level(NestedWorker *worker,
+                                       const NestedEval *eval, const Game *game,
+                                       uint64_t seed, BestMoveCarry *carry);
+
+// The play at ply of a nested rollout of worker's search: a search of the
+// next level if there is one and it names ply, else the top static play.
+static const Move *nested_ply_play(NestedWorker *worker, const NestedEval *eval,
+                                   Game *game, const int ply,
+                                   const uint64_t sample_seed,
+                                   BestMoveCarry *carry) {
+  const NestedArgs *spec = worker->spec;
+  const int inner_level = worker->level + 1;
+  if (inner_level < spec->depth &&
+      nested_level_applies(&spec->levels[inner_level], ply,
+                           bag_get_letters(game_get_bag(game)))) {
+    if (worker->inner == NULL) {
+      worker->inner = nested_worker_create_level(game, worker->cross_set_cache,
+                                                 inner_level);
+      worker->inner->sim_seed = worker->sim_seed;
+    }
+    NestedWorker *inner = worker->inner;
+    inner->spec = spec;
+    inner->census_worker = worker->census_worker;
+    inner->census = worker->census;
+    inner->reply_ply = worker->reply_ply + ply + 1;
+    return nested_choose_level(
+        inner, eval, game,
+        nested_mix(sample_seed ^ ((uint64_t)(ply + 1) * 0xA24BAED4963EE407ULL)),
+        carry);
+  }
+  return nested_top_play(worker, game, worker->reply_ply + ply, carry);
+}
+
 // One nested rollout of candidate from worker's game, whose other player's
 // rack is drawn again from sample_seed's shuffle. Returns its utility for the
 // player on turn, and leaves the game as it found it, apart from the other
 // player's rack and the order of the bag.
-static double nested_rollout(NestedWorker *worker, const NestedArgs *args,
+static double nested_rollout(NestedWorker *worker, const NestedLevel *args,
                              const NestedEval *eval, const Move *candidate,
                              const uint64_t sample_seed, BestMoveCarry *carry) {
   Game *game = worker->game;
@@ -558,7 +615,7 @@ static double nested_rollout(NestedWorker *worker, const NestedArgs *args,
     const int on_turn = game_get_player_on_turn_index(game);
     const Player *on_turn_player = game_get_player(game, on_turn);
     const Move *play =
-        nested_top_play(worker, game, worker->reply_ply + ply, carry);
+        nested_ply_play(worker, eval, game, ply, sample_seed, carry);
     rack_copy(&rack_before, player_get_rack(on_turn_player));
     if (ply == args->nested_plies - 1 && !eval->finish_endgame) {
       play_move_no_cross_set_update(play, game, NULL);
@@ -619,7 +676,7 @@ static bool nested_trails(const NestedWorker *worker, const int cand_idx,
 // Chooses among the worker's candidates by plain nested rollouts, from the
 // position in the worker's game.
 static const Move *nested_choose_plain(NestedWorker *worker,
-                                       const NestedArgs *args,
+                                       const NestedLevel *args,
                                        const NestedEval *eval,
                                        const uint64_t seed,
                                        BestMoveCarry *carry) {
@@ -764,7 +821,7 @@ static int nested_compare_priorities(const void *a, const void *b) {
 // is the replier and whose bag and racks hold every tile not on the board:
 // for each sample, the replier's rack and the other player's are the tiles of
 // lowest priority for that sample, and the replier plays its best play.
-static void nested_fill_replies(NestedWorker *worker, const NestedArgs *args,
+static void nested_fill_replies(NestedWorker *worker, const NestedLevel *args,
                                 NestedReply *replies, BestMoveCarry *carry) {
   Game *game = worker->game;
   const int replier = game_get_player_on_turn_index(game);
@@ -825,7 +882,7 @@ static void nested_fill_replies(NestedWorker *worker, const NestedArgs *args,
 // The cached replies to the board key names, which the worker's candidate
 // leaves, computed and cached if they are not there yet.
 static const NestedReply *
-nested_get_replies(NestedWorker *worker, const NestedArgs *args,
+nested_get_replies(NestedWorker *worker, const NestedLevel *args,
                    const Game *game, const Move *candidate, const uint64_t key,
                    BestMoveCarry *carry) {
   const uint64_t mask = ((uint64_t)1 << NESTED_CACHE_BITS) - 1;
@@ -866,7 +923,7 @@ nested_get_replies(NestedWorker *worker, const NestedArgs *args,
 // leave, against the cached replies to the board it leaves. spread is the
 // player's spread before it.
 static double
-nested_value_from_replies(const NestedArgs *args, const NestedEval *eval,
+nested_value_from_replies(const NestedLevel *args, const NestedEval *eval,
                           const NestedReply *replies, const Equity spread_after,
                           const Equity leave, const int mover_rack_after) {
   double sum = 0.0;
@@ -888,7 +945,7 @@ nested_value_from_replies(const NestedArgs *args, const NestedEval *eval,
 // Chooses among the worker's candidates, of the position in game, by shared
 // nested rollouts; a candidate that would empty the bag gets plain ones.
 static const Move *nested_choose_shared(NestedWorker *worker,
-                                        const NestedArgs *args,
+                                        const NestedLevel *args,
                                         const NestedEval *eval,
                                         const Game *game, const uint64_t seed,
                                         BestMoveCarry *carry) {
@@ -965,7 +1022,7 @@ static const Move *nested_choose_shared(NestedWorker *worker,
   return &worker->chosen;
 }
 
-// The LAMC search's surrogate of the evaluated plays (NestedArgs.lamc_search),
+// The LAMC search's surrogate of the evaluated plays (NestedLevel.lamc_search),
 // as Phase 1's (lamc_fit): a prior mean linear in static equity, fit by least
 // squares weighted by each mean's precision, and a Gaussian process of the
 // residuals whose length scale and signal variance are chosen by marginal
@@ -1096,7 +1153,8 @@ static void nested_posterior(NestedWorker *worker, const int num_columns,
 
 // Gives each play in pool num_samples more nested rollouts. A play's n-th
 // rollout uses the n-th seed, the same for every play: common random numbers.
-static uint64_t nested_sample_pool(NestedWorker *worker, const NestedArgs *args,
+static uint64_t nested_sample_pool(NestedWorker *worker,
+                                   const NestedLevel *args,
                                    const NestedEval *eval, const int *pool,
                                    const int pool_count, const uint64_t seed,
                                    BestMoveCarry *carry) {
@@ -1122,12 +1180,12 @@ static uint64_t nested_sample_pool(NestedWorker *worker, const NestedArgs *args,
 }
 
 // Chooses by a LAMC search over every generated play of the position in
-// game (NestedArgs.lamc_search): a first pool of the best static plays and
+// game (NestedLevel.lamc_search): a first pool of the best static plays and
 // plays spread over the play embedding, then rounds in which the surrogate's
 // best plays are kept and the rest of the pool is the unevaluated plays with
 // the highest upper confidence bounds.
 static const Move *nested_choose_lamc(NestedWorker *worker,
-                                      const NestedArgs *args,
+                                      const NestedLevel *args,
                                       const NestedEval *eval, const Game *game,
                                       const uint64_t seed,
                                       BestMoveCarry *carry) {
@@ -1271,13 +1329,23 @@ static uint64_t nested_decision_key(const Game *game) {
 }
 
 static const Move *
-nested_choose_move_uncached(NestedWorker *worker, const NestedArgs *args,
+nested_choose_move_uncached(NestedWorker *worker, const NestedLevel *args,
                             const NestedEval *eval, const Game *game,
                             const uint64_t seed, BestMoveCarry *carry);
 
 const Move *nested_choose_move(NestedWorker *worker, const NestedArgs *args,
                                const NestedEval *eval, const Game *game,
                                const uint64_t seed, BestMoveCarry *carry) {
+  worker->spec = args;
+  return nested_choose_level(worker, eval, game, seed, carry);
+}
+
+// The play of a search of the worker's level, from game.
+static const Move *nested_choose_level(NestedWorker *worker,
+                                       const NestedEval *eval, const Game *game,
+                                       const uint64_t seed,
+                                       BestMoveCarry *carry) {
+  const NestedLevel *args = &worker->spec->levels[worker->level];
   if (!args->decision_cache) {
     return nested_choose_move_uncached(worker, args, eval, game, seed, carry);
   }
@@ -1305,12 +1373,16 @@ const Move *nested_choose_move(NestedWorker *worker, const NestedArgs *args,
 }
 
 static const Move *
-nested_choose_move_uncached(NestedWorker *worker, const NestedArgs *args,
+nested_choose_move_uncached(NestedWorker *worker, const NestedLevel *args,
                             const NestedEval *eval, const Game *game,
                             const uint64_t seed, BestMoveCarry *carry) {
   worker->game_is_current = false;
   nested_generate_candidates(worker, args, game);
   atomic_fetch_add_explicit(&nested_total_searches, 1, memory_order_relaxed);
+  if (worker->level > 0) {
+    atomic_fetch_add_explicit(&nested_total_inner_searches, 1,
+                              memory_order_relaxed);
+  }
   if (args->lamc_search) {
     return nested_choose_lamc(worker, args, eval, game, seed, carry);
   }
@@ -1374,7 +1446,7 @@ static bool nested_parse_plies(const char *value, uint32_t *mask) {
 }
 
 static bool nested_parse_setting(const char *key, const char *value,
-                                 NestedArgs *args) {
+                                 NestedArgs *spec, NestedLevel *args) {
   if (strings_iequal(key, "plies")) {
     return nested_parse_plies(value, &args->plies_mask);
   }
@@ -1415,11 +1487,11 @@ static bool nested_parse_setting(const char *key, const char *value,
     return nested_parse_double(value, &args->switch_margin);
   }
   if (strings_iequal(key, "finalists")) {
-    return nested_parse_int(value, 0, 1000, &args->finalists);
+    return nested_parse_int(value, 0, 1000, &spec->finalists);
   }
   if (strings_iequal(key, "stage")) {
-    return nested_parse_double(value, &args->stage_share) &&
-           args->stage_share > 0.0 && args->stage_share < 1.0;
+    return nested_parse_double(value, &spec->stage_share) &&
+           spec->stage_share > 0.0 && spec->stage_share < 1.0;
   }
   if (strings_iequal(key, "lamc")) {
     int lamc = 0;
@@ -1467,6 +1539,31 @@ static bool nested_parse_setting(const char *key, const char *value,
   return false;
 }
 
+// Parses one level's comma-separated settings into level. Returns false,
+// with an error on error_stack, for a bad one.
+static bool nested_parse_level(const char *settings_spec, NestedArgs *spec,
+                               NestedLevel *level, ErrorStack *error_stack) {
+  StringSplitter *settings = split_string(settings_spec, ',', true);
+  const int count = string_splitter_get_number_of_items(settings);
+  bool ok = true;
+  for (int item_idx = 0; ok && item_idx < count; item_idx++) {
+    const char *setting = string_splitter_get_item(settings, item_idx);
+    StringSplitter *key_value = split_string(setting, '=', false);
+    ok = string_splitter_get_number_of_items(key_value) == 2 &&
+         nested_parse_setting(string_splitter_get_item(key_value, 0),
+                              string_splitter_get_item(key_value, 1), spec,
+                              level);
+    string_splitter_destroy(key_value);
+    if (!ok) {
+      error_stack_push(
+          error_stack, ERROR_STATUS_NESTED_BAD_SPEC,
+          get_formatted_string("invalid nested rollout setting '%s'", setting));
+    }
+  }
+  string_splitter_destroy(settings);
+  return ok;
+}
+
 void nested_args_parse(const char *spec, NestedArgs *args,
                        ErrorStack *error_stack) {
   NestedArgs parsed;
@@ -1476,26 +1573,39 @@ void nested_args_parse(const char *spec, NestedArgs *args,
     return;
   }
   parsed.enabled = true;
-  if (!strings_iequal(spec, "on") && !strings_iequal(spec, "true")) {
-    StringSplitter *settings = split_string(spec, ',', true);
-    const int count = string_splitter_get_number_of_items(settings);
-    for (int item_idx = 0; item_idx < count; item_idx++) {
-      const char *setting = string_splitter_get_item(settings, item_idx);
-      StringSplitter *key_value = split_string(setting, '=', false);
-      const bool ok =
-          string_splitter_get_number_of_items(key_value) == 2 &&
-          nested_parse_setting(string_splitter_get_item(key_value, 0),
-                               string_splitter_get_item(key_value, 1), &parsed);
-      string_splitter_destroy(key_value);
-      if (!ok) {
-        error_stack_push(error_stack, ERROR_STATUS_NESTED_BAD_SPEC,
-                         get_formatted_string(
-                             "invalid nested rollout setting '%s'", setting));
-        string_splitter_destroy(settings);
-        return;
-      }
-    }
-    string_splitter_destroy(settings);
+  if (strings_iequal(spec, "on") || strings_iequal(spec, "true")) {
+    *args = parsed;
+    return;
   }
+  StringSplitter *levels = split_string(spec, '/', false);
+  const int count = string_splitter_get_number_of_items(levels);
+  if (count > NESTED_MAX_DEPTH) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_NESTED_BAD_SPEC,
+        get_formatted_string("nested rollouts have at most %d levels, not %d",
+                             NESTED_MAX_DEPTH, count));
+    string_splitter_destroy(levels);
+    return;
+  }
+  parsed.depth = count;
+  for (int level_idx = 0; level_idx < count; level_idx++) {
+    if (level_idx > 0) {
+      parsed.levels[level_idx] = parsed.levels[level_idx - 1];
+    }
+    if (!nested_parse_level(string_splitter_get_item(levels, level_idx),
+                            &parsed, &parsed.levels[level_idx], error_stack)) {
+      string_splitter_destroy(levels);
+      return;
+    }
+    // A shared search's nested rollouts play only static replies.
+    if (level_idx > 0 && parsed.levels[level_idx - 1].share) {
+      error_stack_push(error_stack, ERROR_STATUS_NESTED_BAD_SPEC,
+                       string_duplicate("only the deepest nested level may "
+                                        "share its nested rollouts"));
+      string_splitter_destroy(levels);
+      return;
+    }
+  }
+  string_splitter_destroy(levels);
   *args = parsed;
 }

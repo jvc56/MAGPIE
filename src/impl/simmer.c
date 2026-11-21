@@ -279,8 +279,10 @@ void simulate(SimArgs *sim_args, SimCtx **sim_ctx, SimResults *sim_results,
   const int root_bag = bag_get_letters(game_get_bag(sim_args->game));
   if (nested->enabled && nested->finalists > 0 &&
       move_list_get_count(sim_args->move_list) > nested->finalists &&
-      root_bag > 0 && (nested->max_bag == 0 || root_bag <= nested->max_bag) &&
-      root_bag >= nested->min_bag) {
+      root_bag > 0 &&
+      (nested->levels[0].max_bag == 0 ||
+       root_bag <= nested->levels[0].max_bag) &&
+      root_bag >= nested->levels[0].min_bag) {
     simulate_two_stage(sim_args, sim_ctx, sim_results, error_stack);
     return;
   }

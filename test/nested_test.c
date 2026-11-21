@@ -547,21 +547,35 @@ static void test_nested_parse(void) {
                     &args, error_stack);
   assert(error_stack_is_empty(error_stack));
   assert(args.enabled);
-  assert(args.plies_mask == 5U);
-  assert(args.num_candidates == 4);
-  assert(args.num_samples == 3);
-  assert(args.nested_plies == 2);
-  assert(args.margin == 12);
-  assert(args.max_bag == 20);
-  assert(args.min_bag == 1);
-  assert(args.alloc == NESTED_ALLOC_RACE);
-  assert(args.race_z == 1.5);
-  assert(args.switch_margin == 0.01);
+  assert(args.depth == 1);
+  assert(args.levels[0].plies_mask == 5U);
+  assert(args.levels[0].num_candidates == 4);
+  assert(args.levels[0].num_samples == 3);
+  assert(args.levels[0].nested_plies == 2);
+  assert(args.levels[0].margin == 12);
+  assert(args.levels[0].max_bag == 20);
+  assert(args.levels[0].min_bag == 1);
+  assert(args.levels[0].alloc == NESTED_ALLOC_RACE);
+  assert(args.levels[0].race_z == 1.5);
+  assert(args.levels[0].switch_margin == 0.01);
+  // Levels: each starts from the one before it.
+  nested_args_parse("plies=0+1,lamc=1,m=6/plies=0,m=2,finalists=5", &args,
+                    error_stack);
+  assert(error_stack_is_empty(error_stack));
+  assert(args.depth == 2);
+  assert(args.finalists == 5);
+  assert(args.levels[0].plies_mask == 3U);
+  assert(args.levels[0].num_samples == 6);
+  assert(args.levels[1].plies_mask == 1U);
+  assert(args.levels[1].num_samples == 2);
+  assert(args.levels[1].lamc_search);
   nested_args_parse("off", &args, error_stack);
   assert(error_stack_is_empty(error_stack));
   assert(!args.enabled);
-  const char *const bad[] = {"k=0", "plies=", "m=x", "alloc=fast", "q=1", "k"};
-  for (int bad_idx = 0; bad_idx < 6; bad_idx++) {
+  const char *const bad[] = {
+      "k=0", "plies=",  "m=x",         "alloc=fast",         "q=1",
+      "k",   "k=2/k=0", "share=1/k=2", "m=1/m=1/m=1/m=1/m=1"};
+  for (int bad_idx = 0; bad_idx < 9; bad_idx++) {
     nested_args_parse(bad[bad_idx], &args, error_stack);
     assert(error_stack_top(error_stack) == ERROR_STATUS_NESTED_BAD_SPEC);
     error_stack_reset(error_stack);
@@ -572,9 +586,15 @@ static void test_nested_parse(void) {
 void test_nested(void) {
   test_nested_parse();
   const char *const specs[] = {
-      "off", "plies=0,k=4,m=3,h=1", "plies=0+1,k=3,m=2,h=2,alloc=race,z=1",
-      "plies=0+1,k=5,m=4,share=1", "plies=0+1,k=4,m=3,dcache=1"};
-  for (int spec_idx = 0; spec_idx < 5; spec_idx++) {
+      "off",
+      "plies=0,k=4,m=3,h=1",
+      "plies=0+1,k=3,m=2,h=2,alloc=race,z=1",
+      "plies=0+1,k=5,m=4,share=1",
+      "plies=0+1,k=4,m=3,dcache=1",
+      "plies=0,lamc=1,pool=5,keep=2,rounds=2,m=2",
+      "plies=0,k=3,m=2,h=1/plies=0,k=2,m=1,dcache=1",
+      "plies=0,lamc=1,pool=4,keep=2,rounds=2,m=2,dcache=1/plies=0,lamc=0,k=2"};
+  for (int spec_idx = 0; spec_idx < 8; spec_idx++) {
     const uint64_t one = nested_test_sim(1, specs[spec_idx]);
     const uint64_t several = nested_test_sim(4, specs[spec_idx]);
     assert(one == several);

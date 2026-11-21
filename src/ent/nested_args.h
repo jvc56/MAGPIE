@@ -31,6 +31,9 @@ enum {
   NESTED_DEFAULT_ROUNDS = 3,
   // Plies at or past this are never nested.
   NESTED_MAX_PLY_INDEX = 31,
+  // The most levels of nested search: a level's nested rollouts may choose
+  // plays by a search of the next level.
+  NESTED_MAX_DEPTH = 4,
   NESTED_DEFAULT_CANDIDATES = 6,
   NESTED_DEFAULT_SAMPLES = 8,
   NESTED_DEFAULT_PLIES = 1,
@@ -47,10 +50,12 @@ typedef enum {
   NESTED_ALLOC_RACE,
 } nested_alloc_t;
 
-typedef struct NestedArgs {
-  bool enabled;
+// The settings of one level of nested search.
+typedef struct NestedLevel {
   // Bit p: rollout ply p (0 is the reply to the candidate) chooses by a
-  // nested search.
+  // search of this level. For the first level these are the sim's rollout
+  // plies; for a deeper level, the plies of the nested rollouts of the level
+  // above it.
   uint32_t plies_mask;
   // The most plays a nested search considers, best by static equity first.
   int num_candidates;
@@ -78,12 +83,6 @@ typedef struct NestedArgs {
   // and the other player's best responses to the board it leaves, which are
   // cached by that board.
   bool share;
-  // With finalists > 0, a sim with more plays than that first simulates them
-  // all without nested rollouts, with stage_share of its iterations and
-  // time, and then simulates its best finalists plays with nested rollouts
-  // and the rest. The nested sim's results alone choose the play.
-  int finalists;
-  double stage_share;
   // Whether a search's decision is cached, by the board, the rack of the
   // player on turn, the spread and the scoreless turns, and the search's
   // nested rollouts are seeded from that key, so that a decision is the same
@@ -109,10 +108,25 @@ typedef struct NestedArgs {
   int keep;
   int rounds;
   double ucb_beta;
+} NestedLevel;
+
+typedef struct NestedArgs {
+  bool enabled;
+  // The levels of nested search, at least 1 when enabled. The sim's rollouts
+  // choose by levels[0] at its plies; a nested rollout of level d chooses by
+  // levels[d + 1] at its plies, if there is such a level, and by static
+  // equity otherwise.
+  int depth;
+  NestedLevel levels[NESTED_MAX_DEPTH];
+  // With finalists > 0, a sim with more plays than that first simulates them
+  // all without nested rollouts, with stage_share of its iterations and
+  // time, and then simulates its best finalists plays with nested rollouts
+  // and the rest. The nested sim's results alone choose the play.
+  int finalists;
+  double stage_share;
 } NestedArgs;
 
-static inline void nested_args_set_defaults(NestedArgs *args) {
-  args->enabled = false;
+static inline void nested_level_set_defaults(NestedLevel *args) {
   args->plies_mask = 1;
   args->num_candidates = NESTED_DEFAULT_CANDIDATES;
   args->num_samples = NESTED_DEFAULT_SAMPLES;
@@ -124,8 +138,6 @@ static inline void nested_args_set_defaults(NestedArgs *args) {
   args->race_z = 2.0;
   args->switch_margin = 0.0;
   args->share = false;
-  args->finalists = 0;
-  args->stage_share = 0.5;
   args->decision_cache = false;
   args->universe = 0;
   args->static_seeds = NESTED_DEFAULT_STATIC_SEEDS;
@@ -134,6 +146,16 @@ static inline void nested_args_set_defaults(NestedArgs *args) {
   args->keep = NESTED_DEFAULT_KEEP;
   args->rounds = NESTED_DEFAULT_ROUNDS;
   args->ucb_beta = 1.0;
+}
+
+static inline void nested_args_set_defaults(NestedArgs *args) {
+  args->enabled = false;
+  args->depth = 1;
+  for (int level_idx = 0; level_idx < NESTED_MAX_DEPTH; level_idx++) {
+    nested_level_set_defaults(&args->levels[level_idx]);
+  }
+  args->finalists = 0;
+  args->stage_share = 0.5;
 }
 
 #endif

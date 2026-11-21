@@ -22,13 +22,15 @@
 //      cannot see (the bag and that rack), with the bag shuffled by the
 //      sample's seed. Every candidate's j-th rollout uses the same seed, so
 //      candidates are compared on common random numbers;
-//   2. plays the candidate, then nested_plies plies of top static equity
-//      plays;
+//   2. plays the candidate, then nested_plies plies: top static equity
+//      plays, or, at the plies a deeper level names (NestedArgs.levels),
+//      plays chosen by a search of that level, on its own worker and its own
+//      copy of the game;
 //   3. scores the result for the player on turn as the sim scores a rollout:
 //      the win percentage table at the spread plus the last two plays'
 //      leaves, blended with spread by the sim's utility weights.
 
-// With NestedArgs.share, a nested rollout plays only the other player's
+// With NestedLevel.share, a nested rollout plays only the other player's
 // reply (nested_plies is 1), and the search shares those replies between its
 // candidates and between searches. A candidate's value splits into what
 // depends on the rollout (its score, and the leave it keeps from the player's
@@ -76,17 +78,24 @@ typedef struct NestedEval {
   int finish_max_bag;
 } NestedEval;
 
-// Whether the rollout ply ply of game chooses by a nested search.
+// Whether a search of level chooses the play at ply (of the rollout of the
+// level above it) with bag_tiles in the bag.
+static inline bool nested_level_applies(const NestedLevel *level, const int ply,
+                                        const int bag_tiles) {
+  if (ply > NESTED_MAX_PLY_INDEX || ((level->plies_mask >> ply) & 1U) == 0) {
+    return false;
+  }
+  if (level->max_bag > 0 && bag_tiles > level->max_bag) {
+    return false;
+  }
+  return bag_tiles >= level->min_bag;
+}
+
+// Whether the sim's rollout chooses its play at ply by a nested search.
 static inline bool nested_applies(const NestedArgs *args, const int ply,
                                   const int bag_tiles) {
-  if (!args->enabled || ply > NESTED_MAX_PLY_INDEX ||
-      ((args->plies_mask >> ply) & 1U) == 0) {
-    return false;
-  }
-  if (args->max_bag > 0 && bag_tiles > args->max_bag) {
-    return false;
-  }
-  return bag_tiles >= args->min_bag;
+  return args->enabled &&
+         nested_level_applies(&args->levels[0], ply, bag_tiles);
 }
 
 // The play the player on turn in game makes by a nested search. game is left
@@ -95,8 +104,9 @@ const Move *nested_choose_move(NestedWorker *worker, const NestedArgs *args,
                                const NestedEval *eval, const Game *game,
                                uint64_t seed, BestMoveCarry *carry);
 
-// Parses a nested search spec into args: "off", or comma-separated
-// key=value settings, which turn nested rollouts on. Keys:
+// Parses a nested search spec into args: "off", or levels separated by '/',
+// each comma-separated key=value settings, which turn nested rollouts on. A
+// level starts from the settings of the level before it. Keys:
 //   plies   the nested plies, joined by '+', for example 0 or 0+1
 //   k       candidates            m       samples per candidate
 //   h       static plies after the candidate in a nested rollout
@@ -105,12 +115,17 @@ const Move *nested_choose_move(NestedWorker *worker, const NestedArgs *args,
 //   minbag  the fewest tiles in the bag for a nested search
 //   alloc   uniform or race       z       race_z
 //   switch  switch_margin
-//   share   1 to share nested rollouts (see above), 0 not to
-//   finalists, stage  NestedArgs.finalists and stage_share
-//   dcache  1 to cache decisions (NestedArgs.decision_cache), 0 not to
-//   universe, seeds  NestedArgs.universe and static_seeds: diverse candidates
-//   lamc    1 for a LAMC search over every play (NestedArgs.lamc_search),
+//   share   1 to share nested rollouts (see above), 0 not to; only for the
+//           deepest level
+//   finalists, stage  NestedArgs.finalists and stage_share (any level)
+//   dcache  1 to cache decisions (NestedLevel.decision_cache), 0 not to
+//   universe, seeds  NestedLevel.universe and static_seeds: diverse
+//           candidates
+//   lamc    1 for a LAMC search over every play (NestedLevel.lamc_search),
 //           with pool, keep, rounds and beta
+// For example "plies=0+1,lamc=1,dcache=1/plies=0,m=4" nests a LAMC search at
+// the sim's first two plies, and another, of 4 samples a play, at the reply
+// of each of its nested rollouts.
 // Settings not named keep their defaults.
 void nested_args_parse(const char *spec, NestedArgs *args,
                        ErrorStack *error_stack);
@@ -118,6 +133,8 @@ void nested_args_parse(const char *spec, NestedArgs *args,
 // Totals over every nested search since the last reset, for experiments.
 typedef struct NestedTotals {
   uint64_t searches;
+  // The searches of a level below the first.
+  uint64_t inner_searches;
   uint64_t samples;
   uint64_t candidates;
   // Searches whose play was not the top play by static equity.
