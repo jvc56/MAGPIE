@@ -51,6 +51,7 @@
 #include "../src/impl/config.h"
 #include "../src/impl/gameplay.h"
 #include "../src/impl/move_gen.h"
+#include "../src/impl/peg.h"
 #include "../src/impl/random_variable.h"
 #include "../src/impl/rollout_nested.h"
 #include "../src/impl/simmer.h"
@@ -1391,4 +1392,194 @@ void test_nested_var(void) {
   }
   free(var.positions);
   config_destroy(config);
+}
+
+typedef struct NestedPegChoiceArgs {
+  NcrWorker *worker;
+} NestedPegChoiceArgs;
+
+// Each worker: the plays A and B choose in the positions it takes.
+static void *npeg_choose_run(void *data) {
+  NcrWorker *worker = ((NestedPegChoiceArgs *)data)->worker;
+  NcrShared *shared = worker->shared;
+  while (true) {
+    const int pos_idx = atomic_fetch_add(&shared->next_position, 1);
+    if (pos_idx >= shared->num_positions) {
+      break;
+    }
+    NcrPosition *position = &shared->positions[pos_idx];
+    const uint64_t pos_seed = ncr_mix(1000003ULL * (uint64_t)(pos_idx + 1));
+    for (int method = 0; method < 2; method++) {
+      game_copy(worker->game, position->game);
+      ncr_choose(worker, method, pos_seed, &position->chosen[method]);
+      StringBuilder *sb = string_builder_create();
+      string_builder_add_move(sb, game_get_board(position->game),
+                              &position->chosen[method],
+                              game_get_ld(position->game), false);
+      (void)snprintf(position->chosen_string[method], NCR_MOVE_STRING_SIZE,
+                     "%s", string_builder_peek(sb));
+      string_builder_destroy(sb);
+    }
+  }
+  return NULL;
+}
+
+// On demand (nestedpeg): sim settings A and B against the pre-endgame solver.
+// Positions with NCR_MIN_BAG to NCR_MAX_BAG tiles in the bag (default 2) from
+// games of static plays; A and B choose plays as in nestedcr, on one thread
+// each. Where they differ, PEG solves just the two plays (peg only), from the
+// mover's view of the unseen tiles, on NCR_THREADS threads, and the
+// difference of their exact win percentages is B's gain over A.
+void test_nested_peg(void) {
+  log_set_level(LOG_FATAL);
+  const int num_positions = ncr_env_int("NCR_POSITIONS", 100);
+  const int min_bag = ncr_env_int("NCR_MIN_BAG", 2);
+  const int max_bag = ncr_env_int("NCR_MAX_BAG", 2);
+  int num_threads = ncr_env_int("NCR_THREADS", 10);
+  if (num_threads > NCR_MAX_THREADS) {
+    num_threads = NCR_MAX_THREADS;
+  }
+  const char *lexicon = ncr_env_string("NCR_LEX", "CSW24");
+  const char *base =
+      ncr_env_string("NCR_BASE", "-plies 2 -numplays 10 -scond none -tlim 0 "
+                                 "-minplayiterations 10");
+  const char *method_settings[2] = {
+      ncr_env_string("NCR_A", "-it 1000"),
+      ncr_env_string("NCR_B", "-it 1000 -sfinish true"),
+  };
+  NcrShared shared;
+  memset(&shared, 0, sizeof(shared));
+  shared.num_threads = num_threads;
+  Config *configs[2];
+  for (int method = 0; method < 2; method++) {
+    char *settings =
+        get_formatted_string("%s %s", base, method_settings[method]);
+    configs[method] = ncr_config(lexicon, settings);
+    free(settings);
+    thread_control_set_status(config_get_thread_control(configs[method]),
+                              THREAD_CONTROL_STATUS_STARTED);
+    config_fill_sim_args(configs[method], NULL, NULL, NULL, NULL,
+                         &shared.base_args[method]);
+    shared.num_plays[method] = shared.base_args[method].num_plays;
+  }
+  shared.base_args[NCR_METHOD_CONT] = shared.base_args[NCR_METHOD_A];
+  shared.num_plays[NCR_METHOD_CONT] = shared.num_plays[NCR_METHOD_A];
+  shared.positions = calloc_or_die(num_positions, sizeof(NcrPosition));
+  shared.num_positions = ncr_make_positions(
+      config_get_game(configs[0]), shared.positions, num_positions, min_bag,
+      max_bag, (uint64_t)ncr_env_int("NCR_FIRST_GAME", 0));
+  printf("NPEG: %d positions, bag %d to %d\nNPEG base: %s\nNPEG A: %s\nNPEG "
+         "B: %s\n",
+         shared.num_positions, min_bag, max_bag, base, method_settings[0],
+         method_settings[1]);
+  (void)fflush(stdout);
+
+  // The choices, on one thread each.
+  NcrWorker *workers =
+      ncr_workers_create(&shared, shared.positions[0].game, num_threads);
+  atomic_init(&shared.next_position, 0);
+  NestedPegChoiceArgs *choice_args =
+      malloc_or_die(sizeof(NestedPegChoiceArgs) * num_threads);
+  cpthread_t *threads = malloc_or_die(sizeof(cpthread_t) * num_threads);
+  for (int worker_idx = 0; worker_idx < num_threads; worker_idx++) {
+    choice_args[worker_idx].worker = &workers[worker_idx];
+    cpthread_create(&threads[worker_idx], npeg_choose_run,
+                    &choice_args[worker_idx]);
+  }
+  for (int worker_idx = 0; worker_idx < num_threads; worker_idx++) {
+    cpthread_join(threads[worker_idx]);
+  }
+  ncr_workers_destroy(workers, num_threads);
+  free(choice_args);
+  free(threads);
+
+  // PEG on the positions where they differ.
+  char *peg_settings = get_formatted_string(
+      "set -lex %s -wmp true -s1 equity -s2 equity -r1 all -r2 all -threads "
+      "%d -savesettings false -hr false",
+      lexicon, num_threads);
+  Config *peg_config = config_create_or_die(peg_settings);
+  free(peg_settings);
+  load_and_exec_config_or_die(peg_config, "cgp " EMPTY_CGP);
+  double sum = 0.0;
+  double sum_sq = 0.0;
+  int differ = 0;
+  for (int pos_idx = 0; pos_idx < shared.num_positions; pos_idx++) {
+    NcrPosition *position = &shared.positions[pos_idx];
+    position->differ =
+        compare_moves_without_equity(&position->chosen[0], &position->chosen[1],
+                                     true) != -1;
+    if (!position->differ) {
+      continue;
+    }
+    differ++;
+    Game *copy = game_duplicate(position->game);
+    return_rack_to_bag(copy, 1 - game_get_player_on_turn_index(copy));
+    char *cgp = game_get_cgp(copy, true);
+    game_destroy(copy);
+    char *load = get_formatted_string("cgp %s", cgp);
+    free(cgp);
+    load_and_exec_config_or_die(peg_config, load);
+    free(load);
+    StringBuilder *sb = string_builder_create();
+    string_builder_add_string(sb, "peg only ");
+    for (int method = 0; method < 2; method++) {
+      if (method > 0) {
+        string_builder_add_string(sb, ",");
+      }
+      // peg only takes plays as position.word.
+      StringBuilder *move_sb = string_builder_create();
+      string_builder_add_ucgi_move(move_sb, &position->chosen[method],
+                                   game_get_board(position->game),
+                                   game_get_ld(position->game));
+      char *move = string_builder_dump_and_destroy(move_sb, NULL);
+      for (char *cursor = move; *cursor != '\0'; cursor++) {
+        if (*cursor == ' ') {
+          *cursor = '.';
+        }
+      }
+      string_builder_add_string(sb, move);
+      free(move);
+    }
+    const double start = (double)ctimer_monotonic_ns() / 1e9;
+    load_and_exec_config_or_die(peg_config, string_builder_peek(sb));
+    const double seconds = (double)ctimer_monotonic_ns() / 1e9 - start;
+    const PegResult *result = config_get_peg_result(peg_config);
+    double wins[2] = {-1.0, -1.0};
+    for (int cand_idx = 0; cand_idx < result->n_top_cands; cand_idx++) {
+      for (int method = 0; method < 2; method++) {
+        if (compare_moves_without_equity(&result->top_cands[cand_idx].move,
+                                         &position->chosen[method],
+                                         true) == -1) {
+          wins[method] = result->top_cands[cand_idx].win_pct;
+        }
+      }
+    }
+    if (wins[0] < 0 || wins[1] < 0) {
+      log_fatal("peg did not solve both plays: %s", string_builder_peek(sb));
+    }
+    position->win_diff = wins[1] - wins[0];
+    sum += position->win_diff;
+    sum_sq += position->win_diff * position->win_diff;
+    printf("NPEG pos %d bag %d A %s %.4f B %s %.4f diff %+.4f (%.1fs; %s)\n",
+           pos_idx, position->bag, position->chosen_string[0], wins[0],
+           position->chosen_string[1], wins[1], position->win_diff, seconds,
+           string_builder_peek(sb));
+    (void)fflush(stdout);
+    string_builder_destroy(sb);
+  }
+  const double n = shared.num_positions;
+  const double mean = sum / n;
+  printf("NPEG summary: %d positions, %d differ; B - A win per position "
+         "%+.5f (SE %.5f)\n",
+         shared.num_positions, differ, mean,
+         sqrt(fmax(sum_sq / n - mean * mean, 0.0) / n));
+  for (int pos_idx = 0; pos_idx < shared.num_positions; pos_idx++) {
+    game_destroy(shared.positions[pos_idx].game);
+  }
+  free(shared.positions);
+  config_destroy(peg_config);
+  for (int method = 0; method < 2; method++) {
+    config_destroy(configs[method]);
+  }
 }
