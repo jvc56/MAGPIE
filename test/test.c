@@ -279,6 +279,7 @@ static TestEntry on_demand_test_table[] = {
     {"nestedvar", test_nested_var},
     {"nestedpeg", test_nested_peg},
     {"nestedpegm", test_nested_pegm},
+    {"nestedtrace", test_nested_trace},
     {"lamcautoplay", test_lamc_autoplay},
     {"genstuck", test_generate_stuck_cgps},
     {"gennonstuck", test_generate_nonstuck_cgps},

@@ -37,6 +37,7 @@
 #include "../src/def/thread_control_defs.h"
 #include "../src/ent/autoplay_solver_settings.h"
 #include "../src/ent/bag.h"
+#include "../src/ent/cross_set_cache.h"
 #include "../src/ent/game.h"
 #include "../src/ent/move.h"
 #include "../src/ent/nested_args.h"
@@ -1924,4 +1925,122 @@ void test_nested_pegm(void) {
   string_splitter_destroy(methods);
   config_destroy(peg_config);
   config_destroy(base_config);
+}
+
+// On demand (nestedtrace): what a nested search chooses. In the position
+// NT_CGP (its player on turn's rack is drawn), NT_SAMPLES racks are drawn
+// for the player on turn from the unseen tiles, and the nested search of
+// NT_SPEC (with NT_SETTINGS for the sim's scoring) chooses a play for each.
+// Prints each distinct play chosen, how often, and its rank among the
+// player's plays by static equity for the racks it was chosen with.
+void test_nested_trace(void) {
+  log_set_level(LOG_FATAL);
+  const char *cgp = getenv("NT_CGP");
+  if (cgp == NULL) {
+    log_fatal("NT_CGP is required");
+  }
+  char *settings = get_formatted_string(
+      "set -lex %s -wmp true -s1 equity -s2 equity -r1 all -r2 all "
+      "-threads 1 -savesettings false -hr false %s",
+      ncr_env_string("NCR_LEX", "CSW24"), ncr_env_string("NT_SETTINGS", ""));
+  Config *config = config_create_or_die(settings);
+  free(settings);
+  char *load = get_formatted_string("cgp %s", cgp);
+  load_and_exec_config_or_die(config, load);
+  free(load);
+  ErrorStack *error_stack = error_stack_create();
+  config_load_win_pcts(config, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  NestedArgs args;
+  nested_args_parse(ncr_env_string("NT_SPEC", "plies=0,lamc=1"), &args,
+                    error_stack);
+  assert(error_stack_is_empty(error_stack));
+  error_stack_destroy(error_stack);
+  const NestedEval eval = {
+      .win_pcts = config_get_win_pcts(config),
+      .utility_w_winpct = 1.0,
+      .utility_w_spread = 0.5,
+      .utility_spread_scale = 100.0,
+      .finish_endgame = ncr_env_int("NT_FINISH", 1) != 0,
+      .finish_max_bag = 0,
+  };
+  const Game *base = config_get_game(config);
+  Game *game = game_duplicate(base);
+  CrossSetCache *cross_set_cache = cross_set_cache_create(16);
+  NestedWorker *worker = nested_worker_create(game, cross_set_cache);
+  nested_worker_reset(worker, 12345);
+  MoveList *all = move_list_create(5000);
+  const int num_samples = ncr_env_int("NT_SAMPLES", 200);
+  enum { NT_MAX_DISTINCT = 2048 };
+  char *names[NT_MAX_DISTINCT];
+  int counts[NT_MAX_DISTINCT];
+  int rank_sums[NT_MAX_DISTINCT];
+  int num_distinct = 0;
+  int top_static = 0;
+  const int mover = game_get_player_on_turn_index(base);
+  for (int sample = 0; sample < num_samples; sample++) {
+    game_copy(game, base);
+    return_rack_to_bag(game, mover);
+    game_seed(game, ncr_mix(777 + (uint64_t)sample));
+    draw_to_full_rack(game, mover);
+    Move chosen;
+    move_copy(&chosen,
+              nested_choose_move(worker, &args, &eval, game,
+                                 ncr_mix(31 + (uint64_t)sample), NULL));
+    // Its rank by static equity.
+    const MoveGenArgs gen_args = {
+        .game = game,
+        .move_list = all,
+        .move_record_type = MOVE_RECORD_ALL,
+        .move_sort_type = MOVE_SORT_EQUITY,
+        .override_kwg = NULL,
+        .eq_margin_movegen = 0,
+        .target_equity = EQUITY_MAX_VALUE,
+    };
+    generate_moves(&gen_args);
+    move_list_sort_moves(all);
+    int rank = -1;
+    for (int move_idx = 0; move_idx < move_list_get_count(all); move_idx++) {
+      if (compare_moves_without_equity(move_list_get_move(all, move_idx),
+                                       &chosen, true) == -1) {
+        rank = move_idx;
+        break;
+      }
+    }
+    top_static += rank == 0 ? 1 : 0;
+    StringBuilder *sb = string_builder_create();
+    string_builder_add_move(sb, game_get_board(game), &chosen,
+                            game_get_ld(game), false);
+    const char *name = string_builder_peek(sb);
+    int found = -1;
+    for (int idx = 0; idx < num_distinct; idx++) {
+      if (strings_equal(names[idx], name)) {
+        found = idx;
+        break;
+      }
+    }
+    if (found < 0 && num_distinct < NT_MAX_DISTINCT) {
+      found = num_distinct++;
+      names[found] = string_duplicate(name);
+      counts[found] = 0;
+      rank_sums[found] = 0;
+    }
+    if (found >= 0) {
+      counts[found]++;
+      rank_sums[found] += rank;
+    }
+    string_builder_destroy(sb);
+  }
+  printf("NT %d racks, %d distinct plays, top static play chosen %d times\n",
+         num_samples, num_distinct, top_static);
+  for (int idx = 0; idx < num_distinct; idx++) {
+    printf("NT play %-20s chosen %4d mean static rank %.1f\n", names[idx],
+           counts[idx], (double)rank_sums[idx] / counts[idx]);
+    free(names[idx]);
+  }
+  move_list_destroy(all);
+  nested_worker_destroy(worker);
+  cross_set_cache_destroy(cross_set_cache);
+  game_destroy(game);
+  config_destroy(config);
 }

@@ -9,5 +9,6 @@ void test_nested_eval(void);
 void test_nested_var(void);
 void test_nested_peg(void);
 void test_nested_pegm(void);
+void test_nested_trace(void);
 
 #endif
