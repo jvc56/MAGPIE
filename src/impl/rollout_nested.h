@@ -107,6 +107,7 @@ const Move *nested_choose_move(NestedWorker *worker, const NestedArgs *args,
 //   switch  switch_margin
 //   share   1 to share nested rollouts (see above), 0 not to
 //   finalists, stage  NestedArgs.finalists and stage_share
+//   dcache  1 to cache decisions (NestedArgs.decision_cache), 0 not to
 // Settings not named keep their defaults.
 void nested_args_parse(const char *spec, NestedArgs *args,
                        ErrorStack *error_stack);
@@ -121,6 +122,8 @@ typedef struct NestedTotals {
   // Shared searches' candidates found in the cache, and computed.
   uint64_t cache_hits;
   uint64_t cache_misses;
+  // Searches answered by the decision cache.
+  uint64_t decision_hits;
 } NestedTotals;
 
 void nested_totals_reset(void);

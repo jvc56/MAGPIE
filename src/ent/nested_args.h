@@ -73,6 +73,12 @@ typedef struct NestedArgs {
   // and the rest. The nested sim's results alone choose the play.
   int finalists;
   double stage_share;
+  // Whether a search's decision is cached, by the board, the rack of the
+  // player on turn, the spread and the scoreless turns, and the search's
+  // nested rollouts are seeded from that key, so that a decision is the same
+  // whichever rollout makes it. Late in the game, where few racks are
+  // possible, decisions repeat often.
+  bool decision_cache;
 } NestedArgs;
 
 static inline void nested_args_set_defaults(NestedArgs *args) {
@@ -90,6 +96,7 @@ static inline void nested_args_set_defaults(NestedArgs *args) {
   args->share = false;
   args->finalists = 0;
   args->stage_share = 0.5;
+  args->decision_cache = false;
 }
 
 #endif

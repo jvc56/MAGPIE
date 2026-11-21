@@ -570,10 +570,10 @@ static void test_nested_parse(void) {
 
 void test_nested(void) {
   test_nested_parse();
-  const char *const specs[] = {"off", "plies=0,k=4,m=3,h=1",
-                               "plies=0+1,k=3,m=2,h=2,alloc=race,z=1",
-                               "plies=0+1,k=5,m=4,share=1"};
-  for (int spec_idx = 0; spec_idx < 4; spec_idx++) {
+  const char *const specs[] = {
+      "off", "plies=0,k=4,m=3,h=1", "plies=0+1,k=3,m=2,h=2,alloc=race,z=1",
+      "plies=0+1,k=5,m=4,share=1", "plies=0+1,k=4,m=3,dcache=1"};
+  for (int spec_idx = 0; spec_idx < 5; spec_idx++) {
     const uint64_t one = nested_test_sim(1, specs[spec_idx]);
     const uint64_t several = nested_test_sim(4, specs[spec_idx]);
     assert(one == several);
@@ -636,7 +636,8 @@ void test_nested_bench(void) {
       (totals.cache_hits + totals.cache_misses) > 0
           ? 100.0 * totals.cache_hits /
                 (double)(totals.cache_hits + totals.cache_misses)
-          : 0.0);
+          : 0.0,
+      (unsigned long long)totals.decision_hits);
   config_destroy(config);
 }
 

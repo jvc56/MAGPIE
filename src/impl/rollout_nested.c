@@ -85,6 +85,10 @@ struct NestedWorker {
   CensusRolloutWorker *census_worker;
   const CensusRollout *census;
   int reply_ply;
+  // The decision cache (NestedArgs.decision_cache): keys, and the play each
+  // decision chose.
+  uint64_t *decision_keys;
+  Move *decision_moves;
 };
 
 static _Atomic uint64_t nested_total_searches;
@@ -93,6 +97,7 @@ static _Atomic uint64_t nested_total_candidates;
 static _Atomic uint64_t nested_total_switched;
 static _Atomic uint64_t nested_total_cache_hits;
 static _Atomic uint64_t nested_total_cache_misses;
+static _Atomic uint64_t nested_total_decision_hits;
 
 void nested_totals_reset(void) {
   atomic_store(&nested_total_searches, 0);
@@ -101,6 +106,7 @@ void nested_totals_reset(void) {
   atomic_store(&nested_total_switched, 0);
   atomic_store(&nested_total_cache_hits, 0);
   atomic_store(&nested_total_cache_misses, 0);
+  atomic_store(&nested_total_decision_hits, 0);
 }
 
 NestedTotals nested_get_totals(void) {
@@ -111,6 +117,7 @@ NestedTotals nested_get_totals(void) {
       .switched = atomic_load(&nested_total_switched),
       .cache_hits = atomic_load(&nested_total_cache_hits),
       .cache_misses = atomic_load(&nested_total_cache_misses),
+      .decision_hits = atomic_load(&nested_total_decision_hits),
   };
   return totals;
 }
@@ -136,6 +143,8 @@ NestedWorker *nested_worker_create(const Game *game,
   worker->census_worker = NULL;
   worker->census = NULL;
   worker->reply_ply = 0;
+  worker->decision_keys = NULL;
+  worker->decision_moves = NULL;
   return worker;
 }
 
@@ -165,6 +174,10 @@ void nested_worker_reset(NestedWorker *worker, const uint64_t sim_seed) {
     memset(worker->cache_keys, 0,
            sizeof(uint64_t) * ((size_t)1 << NESTED_CACHE_BITS));
   }
+  if (worker->decision_keys != NULL) {
+    memset(worker->decision_keys, 0,
+           sizeof(uint64_t) * ((size_t)1 << NESTED_CACHE_BITS));
+  }
 }
 
 void nested_worker_destroy(NestedWorker *worker) {
@@ -177,6 +190,8 @@ void nested_worker_destroy(NestedWorker *worker) {
   free(worker->values);
   free(worker->cache_keys);
   free(worker->cache_replies);
+  free(worker->decision_keys);
+  free(worker->decision_moves);
   free(worker);
 }
 
@@ -705,9 +720,64 @@ static const Move *nested_choose_shared(NestedWorker *worker,
   return &worker->chosen;
 }
 
+// The key of the decision the player on turn in game makes: its board, its
+// rack, which player it is, the spread and the scoreless turns. The unseen
+// tiles it draws other racks from follow from the board and its rack.
+static uint64_t nested_decision_key(const Game *game) {
+  const int mover = game_get_player_on_turn_index(game);
+  uint64_t key = nested_board_hash(game_get_board(game));
+  const Rack *rack = player_get_rack(game_get_player(game, mover));
+  for (int letter = 0; letter < rack_get_dist_size(rack); letter++) {
+    key = nested_mix(key ^ ((uint64_t)letter << 8) ^
+                     (uint64_t)rack_get_letter(rack, (MachineLetter)letter));
+  }
+  const Equity spread = player_get_score(game_get_player(game, mover)) -
+                        player_get_score(game_get_player(game, 1 - mover));
+  key = nested_mix(key ^ (uint64_t)(int64_t)spread);
+  key =
+      nested_mix(key ^ ((uint64_t)mover << 40) ^
+                 ((uint64_t)game_get_consecutive_scoreless_turns(game) << 48));
+  return key | 1ULL;
+}
+
+static const Move *
+nested_choose_move_uncached(NestedWorker *worker, const NestedArgs *args,
+                            const NestedEval *eval, const Game *game,
+                            const uint64_t seed, BestMoveCarry *carry);
+
 const Move *nested_choose_move(NestedWorker *worker, const NestedArgs *args,
                                const NestedEval *eval, const Game *game,
                                const uint64_t seed, BestMoveCarry *carry) {
+  if (!args->decision_cache) {
+    return nested_choose_move_uncached(worker, args, eval, game, seed, carry);
+  }
+  if (worker->decision_keys == NULL) {
+    worker->decision_keys =
+        calloc_or_die((size_t)1 << NESTED_CACHE_BITS, sizeof(uint64_t));
+    worker->decision_moves =
+        malloc_or_die(sizeof(Move) * ((size_t)1 << NESTED_CACHE_BITS));
+  }
+  // The decision is a function of its key alone, its nested rollouts' seeds
+  // included, so a cached one is the one the search would make again.
+  const uint64_t key = nested_decision_key(game);
+  const uint64_t slot = key & (((uint64_t)1 << NESTED_CACHE_BITS) - 1);
+  if (worker->decision_keys[slot] == key) {
+    atomic_fetch_add_explicit(&nested_total_decision_hits, 1,
+                              memory_order_relaxed);
+    move_copy(&worker->chosen, &worker->decision_moves[slot]);
+    return &worker->chosen;
+  }
+  const Move *chosen = nested_choose_move_uncached(
+      worker, args, eval, game, nested_mix(key ^ worker->sim_seed), carry);
+  worker->decision_keys[slot] = key;
+  move_copy(&worker->decision_moves[slot], chosen);
+  return chosen;
+}
+
+static const Move *
+nested_choose_move_uncached(NestedWorker *worker, const NestedArgs *args,
+                            const NestedEval *eval, const Game *game,
+                            const uint64_t seed, BestMoveCarry *carry) {
   worker->game_is_current = false;
   nested_generate_candidates(worker, args, game);
   atomic_fetch_add_explicit(&nested_total_searches, 1, memory_order_relaxed);
@@ -817,6 +887,14 @@ static bool nested_parse_setting(const char *key, const char *value,
   if (strings_iequal(key, "stage")) {
     return nested_parse_double(value, &args->stage_share) &&
            args->stage_share > 0.0 && args->stage_share < 1.0;
+  }
+  if (strings_iequal(key, "dcache")) {
+    int cache = 0;
+    if (!nested_parse_int(value, 0, 1, &cache)) {
+      return false;
+    }
+    args->decision_cache = cache == 1;
+    return true;
   }
   if (strings_iequal(key, "share")) {
     int share = 0;
