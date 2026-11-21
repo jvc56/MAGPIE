@@ -8,5 +8,6 @@ void test_nested_gt(void);
 void test_nested_eval(void);
 void test_nested_var(void);
 void test_nested_peg(void);
+void test_nested_pegm(void);
 
 #endif

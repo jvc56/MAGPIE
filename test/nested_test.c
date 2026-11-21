@@ -626,7 +626,7 @@ void test_nested_bench(void) {
   printf(
       "NB %.3f s, %llu rollouts, nested searches %llu, candidates %.2f, "
       "switched %.1f%%, samples %llu, cache hits %llu misses %llu "
-      "(%.1f%% hit)\n",
+      "(%.1f%% hit), decision hits %llu\n",
       seconds, (unsigned long long)sim_results_get_iteration_count(sim_results),
       (unsigned long long)totals.searches,
       totals.searches ? (double)totals.candidates / totals.searches : 0.0,
@@ -1592,4 +1592,315 @@ void test_nested_peg(void) {
   for (int method = 0; method < 2; method++) {
     config_destroy(configs[method]);
   }
+}
+
+// On demand (nestedpegm): several sim settings against the pre-endgame
+// solver at once, with a cache of its verdicts. NPEG_METHODS holds the
+// settings, |-separated, each after NCR_BASE; each is compared with the
+// first. In each position, PEG solves together every play some setting chose
+// that the cache (NPEG_CACHE, a file it reads and appends to) lacks. A
+// verdict is cached by the position, the play and NPEG_SETTINGS.
+
+typedef struct PegmShared {
+  NcrPosition *positions;
+  int num_positions;
+  int method;
+  // methods x positions.
+  Move *chosen;
+  double *seconds;
+  atomic_int next_position;
+} PegmShared;
+
+typedef struct PegmWorkerArgs {
+  NcrWorker *worker;
+  PegmShared *pegm;
+} PegmWorkerArgs;
+
+static void *pegm_choose_run(void *data) {
+  const PegmWorkerArgs *args = (const PegmWorkerArgs *)data;
+  PegmShared *pegm = args->pegm;
+  NcrWorker *worker = args->worker;
+  while (true) {
+    const int pos_idx = atomic_fetch_add(&pegm->next_position, 1);
+    if (pos_idx >= pegm->num_positions) {
+      break;
+    }
+    const NcrPosition *position = &pegm->positions[pos_idx];
+    game_copy(worker->game, position->game);
+    const double start = (double)ctimer_monotonic_ns() / 1e9;
+    ncr_choose(worker, NCR_METHOD_A,
+               ncr_mix(1000003ULL * (uint64_t)(pos_idx + 1)),
+               &pegm->chosen[pegm->method * pegm->num_positions + pos_idx]);
+    pegm->seconds[pegm->method * pegm->num_positions + pos_idx] =
+        (double)ctimer_monotonic_ns() / 1e9 - start;
+  }
+  return NULL;
+}
+
+// A play as peg only takes it: position.word.
+static char *pegm_move_string(const Game *game, const Move *move) {
+  StringBuilder *sb = string_builder_create();
+  string_builder_add_ucgi_move(sb, move, game_get_board(game),
+                               game_get_ld(game));
+  char *string = string_builder_dump_and_destroy(sb, NULL);
+  for (char *cursor = string; *cursor != '\0'; cursor++) {
+    if (*cursor == ' ') {
+      *cursor = '.';
+    }
+  }
+  return string;
+}
+
+typedef struct PegmCache {
+  uint64_t *keys;
+  double *wins;
+  int count;
+  int capacity;
+} PegmCache;
+
+static uint64_t pegm_key(const char *cgp, const char *move,
+                         const char *settings) {
+  uint64_t hash = FNV_64_OFFSET_BASIS;
+  for (const char *parts[3] = {cgp, move, settings}, **part = parts;
+       part < parts + 3; part++) {
+    for (const char *cursor = *part; *cursor != '\0'; cursor++) {
+      hash = fnv64a_step(hash, (uint64_t)(unsigned char)*cursor);
+    }
+    hash = fnv64a_step(hash, (uint64_t)'|');
+  }
+  return hash;
+}
+
+static bool pegm_cache_find(const PegmCache *cache, const uint64_t key,
+                            double *win) {
+  for (int idx = 0; idx < cache->count; idx++) {
+    if (cache->keys[idx] == key) {
+      *win = cache->wins[idx];
+      return true;
+    }
+  }
+  return false;
+}
+
+static void pegm_cache_add(PegmCache *cache, const uint64_t key,
+                           const double win) {
+  if (cache->count == cache->capacity) {
+    cache->capacity = cache->capacity > 0 ? cache->capacity * 2 : 256;
+    cache->keys =
+        realloc_or_die(cache->keys, sizeof(uint64_t) * cache->capacity);
+    cache->wins = realloc_or_die(cache->wins, sizeof(double) * cache->capacity);
+  }
+  cache->keys[cache->count] = key;
+  cache->wins[cache->count] = win;
+  cache->count++;
+}
+
+void test_nested_pegm(void) {
+  log_set_level(LOG_FATAL);
+  const int num_positions = ncr_env_int("NCR_POSITIONS", 100);
+  const int min_bag = ncr_env_int("NCR_MIN_BAG", 2);
+  const int max_bag = ncr_env_int("NCR_MAX_BAG", 2);
+  int num_threads = ncr_env_int("NCR_THREADS", 10);
+  if (num_threads > NCR_MAX_THREADS) {
+    num_threads = NCR_MAX_THREADS;
+  }
+  const char *lexicon = ncr_env_string("NCR_LEX", "CSW24");
+  const char *base =
+      ncr_env_string("NCR_BASE", "-plies 5 -numplays 30 -scond none -tlim 0 "
+                                 "-minplayiterations 10 -it 3000");
+  const char *peg_extra = ncr_env_string("NPEG_SETTINGS", "");
+  StringSplitter *methods = split_string(
+      ncr_env_string("NPEG_METHODS", "-sfinish true|-sfinish true -nested "
+                                     "plies=0+1,k=6,m=8,dcache=1"),
+      '|', false);
+  const int num_methods = string_splitter_get_number_of_items(methods);
+
+  Config *base_config = ncr_config(lexicon, base);
+  PegmShared pegm;
+  memset(&pegm, 0, sizeof(pegm));
+  pegm.positions = calloc_or_die(num_positions, sizeof(NcrPosition));
+  pegm.num_positions = ncr_make_positions(
+      config_get_game(base_config), pegm.positions, num_positions, min_bag,
+      max_bag, (uint64_t)ncr_env_int("NCR_FIRST_GAME", 0));
+  pegm.chosen = malloc_or_die(sizeof(Move) * num_methods * pegm.num_positions);
+  pegm.seconds =
+      malloc_or_die(sizeof(double) * num_methods * pegm.num_positions);
+  printf("NPEGM: %d positions, bag %d to %d, %d settings, PEG settings '%s'\n"
+         "NPEGM base: %s\n",
+         pegm.num_positions, min_bag, max_bag, num_methods, peg_extra, base);
+  for (int method = 0; method < num_methods; method++) {
+    char *settings = get_formatted_string(
+        "%s %s", base, string_splitter_get_item(methods, method));
+    Config *config = ncr_config(lexicon, settings);
+    free(settings);
+    thread_control_set_status(config_get_thread_control(config),
+                              THREAD_CONTROL_STATUS_STARTED);
+    NcrShared shared;
+    memset(&shared, 0, sizeof(shared));
+    for (int slot = 0; slot < NCR_NUM_METHODS; slot++) {
+      config_fill_sim_args(config, NULL, NULL, NULL, NULL,
+                           &shared.base_args[slot]);
+      shared.num_plays[slot] = shared.base_args[slot].num_plays;
+    }
+    NcrWorker *workers =
+        ncr_workers_create(&shared, pegm.positions[0].game, num_threads);
+    PegmWorkerArgs *worker_args =
+        malloc_or_die(sizeof(PegmWorkerArgs) * num_threads);
+    cpthread_t *threads = malloc_or_die(sizeof(cpthread_t) * num_threads);
+    pegm.method = method;
+    atomic_init(&pegm.next_position, 0);
+    for (int worker_idx = 0; worker_idx < num_threads; worker_idx++) {
+      worker_args[worker_idx].worker = &workers[worker_idx];
+      worker_args[worker_idx].pegm = &pegm;
+      cpthread_create(&threads[worker_idx], pegm_choose_run,
+                      &worker_args[worker_idx]);
+    }
+    for (int worker_idx = 0; worker_idx < num_threads; worker_idx++) {
+      cpthread_join(threads[worker_idx]);
+    }
+    ncr_workers_destroy(workers, num_threads);
+    free(worker_args);
+    free(threads);
+    config_destroy(config);
+    printf("NPEGM chose with setting %d\n", method);
+    (void)fflush(stdout);
+  }
+
+  // The cache.
+  PegmCache cache;
+  memset(&cache, 0, sizeof(cache));
+  const char *cache_file = ncr_env_string("NPEG_CACHE", "nested_peg_cache.txt");
+  FILE *cache_in = fopen(cache_file, "r");
+  if (cache_in != NULL) {
+    unsigned long long key = 0;
+    double win = 0;
+    while (fscanf(cache_in, "PEGC %llx %lf\n", &key, &win) == 2) {
+      pegm_cache_add(&cache, (uint64_t)key, win);
+    }
+    (void)fclose(cache_in);
+  }
+  FILE *cache_out = fopen_or_die(cache_file, "a");
+
+  char *peg_settings = get_formatted_string(
+      "set -lex %s -wmp true -s1 equity -s2 equity -r1 all -r2 all -threads "
+      "%d -savesettings false -hr false %s",
+      lexicon, num_threads, peg_extra);
+  Config *peg_config = config_create_or_die(peg_settings);
+  free(peg_settings);
+  load_and_exec_config_or_die(peg_config, "cgp " EMPTY_CGP);
+  double *wins = malloc_or_die(sizeof(double) * num_methods);
+  double *diff_sum = calloc_or_die(num_methods, sizeof(double));
+  double *diff_sum_sq = calloc_or_die(num_methods, sizeof(double));
+  int *differ = calloc_or_die(num_methods, sizeof(int));
+  int solved = 0;
+  for (int pos_idx = 0; pos_idx < pegm.num_positions; pos_idx++) {
+    const NcrPosition *position = &pegm.positions[pos_idx];
+    const Move *base_move = &pegm.chosen[pos_idx];
+    bool any_differ = false;
+    for (int method = 1; method < num_methods; method++) {
+      if (compare_moves_without_equity(
+              &pegm.chosen[method * pegm.num_positions + pos_idx], base_move,
+              true) != -1) {
+        any_differ = true;
+      }
+    }
+    if (!any_differ) {
+      continue;
+    }
+    Game *copy = game_duplicate(position->game);
+    return_rack_to_bag(copy, 1 - game_get_player_on_turn_index(copy));
+    char *cgp = game_get_cgp(copy, true);
+    game_destroy(copy);
+    // The plays to solve: those not cached.
+    StringBuilder *only = string_builder_create();
+    int num_to_solve = 0;
+    for (int method = 0; method < num_methods; method++) {
+      char *move = pegm_move_string(
+          position->game, &pegm.chosen[method * pegm.num_positions + pos_idx]);
+      double win = 0;
+      if (!pegm_cache_find(&cache, pegm_key(cgp, move, peg_extra), &win) &&
+          !has_substring(string_builder_peek(only), move)) {
+        string_builder_add_formatted_string(only, "%s%s",
+                                            num_to_solve > 0 ? "," : "", move);
+        num_to_solve++;
+      }
+      free(move);
+    }
+    if (num_to_solve > 0) {
+      char *load = get_formatted_string("cgp %s", cgp);
+      load_and_exec_config_or_die(peg_config, load);
+      free(load);
+      char *command =
+          get_formatted_string("peg only %s", string_builder_peek(only));
+      load_and_exec_config_or_die(peg_config, command);
+      free(command);
+      solved++;
+      const PegResult *result = config_get_peg_result(peg_config);
+      for (int cand_idx = 0; cand_idx < result->n_top_cands; cand_idx++) {
+        char *move =
+            pegm_move_string(position->game, &result->top_cands[cand_idx].move);
+        const uint64_t key = pegm_key(cgp, move, peg_extra);
+        pegm_cache_add(&cache, key, result->top_cands[cand_idx].win_pct);
+        (void)fprintf(cache_out, "PEGC %llx %.6f\n", (unsigned long long)key,
+                      result->top_cands[cand_idx].win_pct);
+        free(move);
+      }
+      (void)fflush(cache_out);
+    }
+    string_builder_destroy(only);
+    for (int method = 0; method < num_methods; method++) {
+      char *move = pegm_move_string(
+          position->game, &pegm.chosen[method * pegm.num_positions + pos_idx]);
+      if (!pegm_cache_find(&cache, pegm_key(cgp, move, peg_extra),
+                           &wins[method])) {
+        log_fatal("peg did not solve %s", move);
+      }
+      free(move);
+    }
+    for (int method = 1; method < num_methods; method++) {
+      const double diff = wins[method] - wins[0];
+      diff_sum[method] += diff;
+      diff_sum_sq[method] += diff * diff;
+      differ[method] += compare_moves_without_equity(
+                            &pegm.chosen[method * pegm.num_positions + pos_idx],
+                            base_move, true) != -1
+                            ? 1
+                            : 0;
+      if (diff != 0.0) {
+        printf("NPEGM pos %d bag %d setting %d diff %+.4f\n", pos_idx,
+               position->bag, method, diff);
+      }
+    }
+    free(cgp);
+  }
+  (void)fclose(cache_out);
+  const double n = pegm.num_positions;
+  for (int method = 0; method < num_methods; method++) {
+    double seconds = 0.0;
+    for (int pos_idx = 0; pos_idx < pegm.num_positions; pos_idx++) {
+      seconds += pegm.seconds[method * pegm.num_positions + pos_idx];
+    }
+    const double mean = diff_sum[method] / n;
+    printf("NPEGM setting %d [%s]: vs setting 0 win %+.5f (SE %.5f) per "
+           "position, %d differ; sim %.3f s per position\n",
+           method, string_splitter_get_item(methods, method), mean,
+           sqrt(fmax(diff_sum_sq[method] / n - mean * mean, 0.0) / n),
+           differ[method], seconds / n);
+  }
+  printf("NPEGM: %d positions solved, cache %d entries\n", solved, cache.count);
+  free(wins);
+  free(diff_sum);
+  free(diff_sum_sq);
+  free(differ);
+  free(cache.keys);
+  free(cache.wins);
+  free(pegm.chosen);
+  free(pegm.seconds);
+  for (int pos_idx = 0; pos_idx < pegm.num_positions; pos_idx++) {
+    game_destroy(pegm.positions[pos_idx].game);
+  }
+  free(pegm.positions);
+  string_splitter_destroy(methods);
+  config_destroy(peg_config);
+  config_destroy(base_config);
 }
