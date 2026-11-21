@@ -9,8 +9,11 @@ both parts as two phases of work in MAGPIE. It describes the code as of
 
 Phase 1 is implemented, off by default, on the `lamc-phase1` branch. What
 was built, how it differs from the plan, and what the tests found are in
-[Phase 1 as built](#phase-1-as-built). Phase 2 is not started. Elsewhere,
-option names, file names and defaults are the plan's proposals.
+[Phase 1 as built](#phase-1-as-built). Phase 2 (adaptive search at every
+ply) and Phase 3 (more information per rollout, the second half of slide
+31) are implemented on the same branch, also off by default: see
+[Phases 2 and 3 as built](#phases-2-and-3-as-built). Elsewhere, option
+names, file names and defaults are the plan's proposals.
 
 ## Contents
 
@@ -23,6 +26,8 @@ option names, file names and defaults are the plan's proposals.
 - [Phase 1 as built](#phase-1-as-built): the code, the tests, the results
   and the [open questions](#open-questions)
 - [Phase 2: adaptive search at every ply](#phase-2-adaptive-search-at-every-ply)
+- [Phases 2 and 3 as built](#phases-2-and-3-as-built): nested rollouts,
+  sharing between rollouts, the instruments, and the results
 - [Risks and open questions](#risks-and-open-questions)
 - [Future work](#future-work)
 
@@ -1530,6 +1535,91 @@ also reported, as a measure of quality per rollout.
    interval excludes 0, overall or in a stage named before the run (for
    example 1 to 14 tiles in the bag). A stage-only gain ships as a
    stage-gated default.
+
+## Phases 2 and 3 as built
+
+Phase 2 is the talk's "Locally Adaptive Monte Carlo on plies": rollouts in
+which a player chooses its play by a search of its own. Phase 3 is the
+second half of slide 31: making each permutation more informative, by
+letting rollouts with different racks share what they learn. Both are off
+by default.
+
+### The code
+
+| File | Contents |
+|---|---|
+| `src/ent/nested_args.h` | `NestedArgs`: which plies are nested, candidates, samples, depth, margin, bag range, allocation, sharing, decision cache, two-stage finalists |
+| `src/impl/rollout_nested.c/.h` | The nested search: plain, shared (reply cache), decision cache, census-steered replies, spec parsing, totals |
+| `src/impl/random_variable.c` | The hook in `sim_rollout`, and `-sfinish` (rollouts played to the end of the game) |
+| `src/impl/simmer.c` | Two-stage nested sims (`finalists=`) |
+| `src/impl/autoplay.c` | `-apstaticbag` |
+| `test/nested_test.c` | `nested` (CI), and the on-demand `nestedcr`, `nestedgt`, `nestedeval`, `nestedvar`, `nestedpeg`, `nestedbench` |
+
+### Options
+
+- `-nested <spec>` (and `-nested1`, `-nested2` in autoplay): `off`, or
+  comma-separated `key=value` settings: `plies` (joined by `+`; 0 is the
+  reply to the candidate), `k` (candidates), `m` (nested rollouts each), `h`
+  (static plies after the candidate in a nested rollout), `margin` (points
+  of static equity below the best), `maxbag`, `minbag`, `alloc`
+  (`uniform` or `race`), `z`, `switch`, `share` (0/1), `dcache` (0/1),
+  `finalists`, `stage`.
+- `-sfinish true|false` (and `-sfinish1`, `-sfinish2`), `-sfinishbag N`.
+- `-apstaticbag N`.
+
+### A nested search
+
+At a nested ply, the player on turn takes its top `k` plays by static
+equity within `margin` points of the best. Each gets `m` nested rollouts:
+the other player's rack is drawn again from the tiles the player on turn
+cannot see (the bag and that rack), the candidate is played, then `h`
+static plies, and the result is scored as the sim scores a rollout (the win
+percentage table at spread plus the last two leaves, blended with spread by
+the sim's utility weights; with `-sfinish`, played to the end when the bag
+is empty). Every candidate's j-th nested rollout uses the same seed (common
+random numbers). The search plays the best mean. It works on a copy of the
+rollout's game, so the rollout's backups and board-undo record are never
+touched.
+
+### Sharing (Phase 3)
+
+- **Reply cache (`share=1`).** With `h` 1, a candidate's value splits into
+  what depends on the rollout (its score and the leave it keeps) and what
+  depends on the board it leaves (the other player's best replies to that
+  board). The replies are cached by the board's hash, so every rollout
+  whose player can make the same play shares them, whatever its rack. Each
+  cached sample draws racks by priorities fixed per physical tile and
+  sample, so two boards whose unseen tiles differ by the few tiles each
+  candidate plays get nearly the same racks: rack similarity as coupling.
+  An entry is a function of its board and the sim's seed alone, so results
+  do not depend on which thread fills it.
+- **Decision cache (`dcache=1`).** A decision's key is the board, the rack
+  of the player on turn, the spread and the scoreless turns; the search is
+  seeded from the key, so a decision is a function of the key and can be
+  cached per thread. Late in the game few racks are possible and decisions
+  repeat.
+- **Census-steered replies.** When the sim's rollouts use the census,
+  nested rollouts find their plays with it.
+
+### Instruments
+
+- **Continuation regret (`nestedcr`).** Two sim settings choose a play in
+  each position; where they differ, both plays are played to the end many
+  times on common random numbers by a fixed continuation engine (a 2-ply
+  sim, and the endgame solver at an empty bag).
+- **Ground truth tables (`nestedgt`, `nestedeval`).** The continuation value
+  of each of a position's top 10 static plays, once; any sim settings are
+  then scored against it by running their sims only. A split-half oracle
+  removes the bias of the best of noisy means.
+- **Against PEG (`nestedpeg`).** Where two settings differ in a
+  pre-endgame position, PEG solves just their two plays (`peg only`).
+- **Game pairs from late positions (`-apstaticbag`).**
+- **Rollout data (`nestedvar`).** Each rollout's utility with the racks it
+  drew, for studying what explains outcomes.
+
+### Results
+
+(In progress; see the runs below.)
 
 ---
 
