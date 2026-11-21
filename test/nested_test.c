@@ -1412,7 +1412,9 @@ static void *npeg_choose_run(void *data) {
     const uint64_t pos_seed = ncr_mix(1000003ULL * (uint64_t)(pos_idx + 1));
     for (int method = 0; method < 2; method++) {
       game_copy(worker->game, position->game);
+      const double start = (double)ctimer_monotonic_ns() / 1e9;
       ncr_choose(worker, method, pos_seed, &position->chosen[method]);
+      position->seconds[method] = (double)ctimer_monotonic_ns() / 1e9 - start;
       StringBuilder *sb = string_builder_create();
       string_builder_add_move(sb, game_get_board(position->game),
                               &position->chosen[method],
@@ -1572,10 +1574,16 @@ void test_nested_peg(void) {
   }
   const double n = shared.num_positions;
   const double mean = sum / n;
+  double seconds[2] = {0.0, 0.0};
+  for (int pos_idx = 0; pos_idx < shared.num_positions; pos_idx++) {
+    seconds[0] += shared.positions[pos_idx].seconds[0];
+    seconds[1] += shared.positions[pos_idx].seconds[1];
+  }
   printf("NPEG summary: %d positions, %d differ; B - A win per position "
-         "%+.5f (SE %.5f)\n",
+         "%+.5f (SE %.5f); sim seconds per position A %.3f, B %.3f\n",
          shared.num_positions, differ, mean,
-         sqrt(fmax(sum_sq / n - mean * mean, 0.0) / n));
+         sqrt(fmax(sum_sq / n - mean * mean, 0.0) / n), seconds[0] / n,
+         seconds[1] / n);
   for (int pos_idx = 0; pos_idx < shared.num_positions; pos_idx++) {
     game_destroy(shared.positions[pos_idx].game);
   }
