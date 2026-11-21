@@ -591,7 +591,7 @@ void test_nested(void) {
       "plies=0+1,k=3,m=2,h=2,alloc=race,z=1",
       "plies=0+1,k=5,m=4,share=1",
       "plies=0+1,k=4,m=3,dcache=1",
-      "plies=0,lamc=1,pool=5,keep=2,rounds=2,m=2",
+      "plies=0,lamc=1,pool=5,keep=2,rounds=3,m=2,stop=1",
       "plies=0,k=3,m=2,h=1/plies=0,k=2,m=1,dcache=1",
       "plies=0,lamc=1,pool=4,keep=2,rounds=2,m=2,dcache=1/plies=0,lamc=0,k=2"};
   for (int spec_idx = 0; spec_idx < 8; spec_idx++) {
@@ -647,7 +647,7 @@ void test_nested_bench(void) {
   printf(
       "NB %.3f s, %llu rollouts, nested searches %llu, candidates %.2f, "
       "switched %.1f%%, samples %llu, cache hits %llu misses %llu "
-      "(%.1f%% hit), decision hits %llu\n",
+      "(%.1f%% hit), decision hits %llu, inner searches %llu, stopped %llu\n",
       seconds, (unsigned long long)sim_results_get_iteration_count(sim_results),
       (unsigned long long)totals.searches,
       totals.searches ? (double)totals.candidates / totals.searches : 0.0,
@@ -658,7 +658,9 @@ void test_nested_bench(void) {
           ? 100.0 * totals.cache_hits /
                 (double)(totals.cache_hits + totals.cache_misses)
           : 0.0,
-      (unsigned long long)totals.decision_hits);
+      (unsigned long long)totals.decision_hits,
+      (unsigned long long)totals.inner_searches,
+      (unsigned long long)totals.stopped);
   config_destroy(config);
 }
 
@@ -1998,6 +2000,8 @@ void test_nested_trace(void) {
   int num_distinct = 0;
   int top_static = 0;
   const int mover = game_get_player_on_turn_index(base);
+  nested_totals_reset();
+  const int64_t start_ns = ctimer_monotonic_ns();
   for (int sample = 0; sample < num_samples; sample++) {
     game_copy(game, base);
     return_rack_to_bag(game, mover);
@@ -2051,8 +2055,16 @@ void test_nested_trace(void) {
     }
     string_builder_destroy(sb);
   }
+  const double seconds = (double)(ctimer_monotonic_ns() - start_ns) / 1e9;
+  const NestedTotals totals = nested_get_totals();
   printf("NT %d racks, %d distinct plays, top static play chosen %d times\n",
          num_samples, num_distinct, top_static);
+  printf("NT %.3f s, searches %llu (inner %llu), rollouts %llu, stopped "
+         "%llu, decision hits %llu\n",
+         seconds, (unsigned long long)totals.searches,
+         (unsigned long long)totals.inner_searches,
+         (unsigned long long)totals.samples, (unsigned long long)totals.stopped,
+         (unsigned long long)totals.decision_hits);
   for (int idx = 0; idx < num_distinct; idx++) {
     printf("NT play %-20s chosen %4d mean static rank %.1f\n", names[idx],
            counts[idx], (double)rank_sums[idx] / counts[idx]);

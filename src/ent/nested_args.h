@@ -108,6 +108,10 @@ typedef struct NestedLevel {
   int keep;
   int rounds;
   double ucb_beta;
+  // With stop_z > 0, a LAMC search stops before its rounds are done once
+  // its best play by the surrogate's mean, less stop_z standard deviations,
+  // leads every other play's mean plus stop_z standard deviations.
+  double stop_z;
 } NestedLevel;
 
 typedef struct NestedArgs {
@@ -146,6 +150,7 @@ static inline void nested_level_set_defaults(NestedLevel *args) {
   args->keep = NESTED_DEFAULT_KEEP;
   args->rounds = NESTED_DEFAULT_ROUNDS;
   args->ucb_beta = 1.0;
+  args->stop_z = 0.0;
 }
 
 static inline void nested_args_set_defaults(NestedArgs *args) {

@@ -174,6 +174,7 @@ static _Atomic uint64_t nested_total_switched;
 static _Atomic uint64_t nested_total_cache_hits;
 static _Atomic uint64_t nested_total_cache_misses;
 static _Atomic uint64_t nested_total_decision_hits;
+static _Atomic uint64_t nested_total_stopped;
 
 void nested_totals_reset(void) {
   atomic_store(&nested_total_searches, 0);
@@ -184,6 +185,7 @@ void nested_totals_reset(void) {
   atomic_store(&nested_total_cache_hits, 0);
   atomic_store(&nested_total_cache_misses, 0);
   atomic_store(&nested_total_decision_hits, 0);
+  atomic_store(&nested_total_stopped, 0);
 }
 
 NestedTotals nested_get_totals(void) {
@@ -196,6 +198,7 @@ NestedTotals nested_get_totals(void) {
       .cache_hits = atomic_load(&nested_total_cache_hits),
       .cache_misses = atomic_load(&nested_total_cache_misses),
       .decision_hits = atomic_load(&nested_total_decision_hits),
+      .stopped = atomic_load(&nested_total_stopped),
   };
   return totals;
 }
@@ -1151,6 +1154,39 @@ static void nested_posterior(NestedWorker *worker, const int num_columns,
           worker->mean_slope * worker->static_equity[play_idx] + residual;
 }
 
+// Whether the surrogate's best evaluated play, less stop_z standard
+// deviations, leads every other play by its mean plus stop_z standard
+// deviations.
+static bool nested_decided(NestedWorker *worker, const int num_columns,
+                           const double stop_z) {
+  const int count = move_list_get_count(worker->candidate_list);
+  int best = -1;
+  double best_mean = -INFINITY;
+  for (int eval_idx = 0; eval_idx < worker->num_evaluated; eval_idx++) {
+    const int play_idx = worker->evaluated[eval_idx];
+    double mean = 0.0;
+    nested_posterior(worker, num_columns, play_idx, &mean, NULL);
+    if (mean > best_mean) {
+      best_mean = mean;
+      best = play_idx;
+    }
+  }
+  double mean = 0.0;
+  double variance = 0.0;
+  nested_posterior(worker, num_columns, best, &mean, &variance);
+  const double floor = mean - stop_z * sqrt(variance > 0.0 ? variance : 0.0);
+  for (int play_idx = 0; play_idx < count; play_idx++) {
+    if (play_idx == best) {
+      continue;
+    }
+    nested_posterior(worker, num_columns, play_idx, &mean, &variance);
+    if (mean + stop_z * sqrt(variance > 0.0 ? variance : 0.0) >= floor) {
+      return false;
+    }
+  }
+  return true;
+}
+
 // Gives each play in pool num_samples more nested rollouts. A play's n-th
 // rollout uses the n-th seed, the same for every play: common random numbers.
 static uint64_t nested_sample_pool(NestedWorker *worker,
@@ -1219,6 +1255,11 @@ static const Move *nested_choose_lamc(NestedWorker *worker,
         nested_sample_pool(worker, args, eval, pool, pool_count, seed, carry);
     fitted = nested_fit(worker, num_columns);
     if (round == args->rounds - 1 || !fitted) {
+      break;
+    }
+    if (args->stop_z > 0.0 &&
+        nested_decided(worker, num_columns, args->stop_z)) {
+      atomic_fetch_add_explicit(&nested_total_stopped, 1, memory_order_relaxed);
       break;
     }
     // Keep the best by the surrogate's mean.
@@ -1512,6 +1553,9 @@ static bool nested_parse_setting(const char *key, const char *value,
   }
   if (strings_iequal(key, "beta")) {
     return nested_parse_double(value, &args->ucb_beta);
+  }
+  if (strings_iequal(key, "stop")) {
+    return nested_parse_double(value, &args->stop_z) && args->stop_z >= 0.0;
   }
   if (strings_iequal(key, "universe")) {
     return nested_parse_int(value, 0, NESTED_MAX_UNIVERSE, &args->universe);

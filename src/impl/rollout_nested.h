@@ -122,7 +122,7 @@ const Move *nested_choose_move(NestedWorker *worker, const NestedArgs *args,
 //   universe, seeds  NestedLevel.universe and static_seeds: diverse
 //           candidates
 //   lamc    1 for a LAMC search over every play (NestedLevel.lamc_search),
-//           with pool, keep, rounds and beta
+//           with pool, keep, rounds and beta, and stop (NestedLevel.stop_z)
 // For example "plies=0+1,lamc=1,dcache=1/plies=0,m=4" nests a LAMC search at
 // the sim's first two plies, and another, of 4 samples a play, at the reply
 // of each of its nested rollouts.
@@ -144,6 +144,8 @@ typedef struct NestedTotals {
   uint64_t cache_misses;
   // Searches answered by the decision cache.
   uint64_t decision_hits;
+  // LAMC searches stopped early (NestedLevel.stop_z).
+  uint64_t stopped;
 } NestedTotals;
 
 void nested_totals_reset(void);
