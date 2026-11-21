@@ -1429,8 +1429,9 @@ static void *npeg_choose_run(void *data) {
 // Positions with NCR_MIN_BAG to NCR_MAX_BAG tiles in the bag (default 2) from
 // games of static plays; A and B choose plays as in nestedcr, on one thread
 // each. Where they differ, PEG solves just the two plays (peg only), from the
-// mover's view of the unseen tiles, on NCR_THREADS threads, and the
-// difference of their exact win percentages is B's gain over A.
+// mover's view of the unseen tiles, on NCR_THREADS threads, with
+// NPEG_SETTINGS (for example -pegpess false for the rational opponent), and
+// the difference of their exact win percentages is B's gain over A.
 void test_nested_peg(void) {
   log_set_level(LOG_FATAL);
   const int num_positions = ncr_env_int("NCR_POSITIONS", 100);
@@ -1497,8 +1498,8 @@ void test_nested_peg(void) {
   // PEG on the positions where they differ.
   char *peg_settings = get_formatted_string(
       "set -lex %s -wmp true -s1 equity -s2 equity -r1 all -r2 all -threads "
-      "%d -savesettings false -hr false",
-      lexicon, num_threads);
+      "%d -savesettings false -hr false %s",
+      lexicon, num_threads, ncr_env_string("NPEG_SETTINGS", ""));
   Config *peg_config = config_create_or_die(peg_settings);
   free(peg_settings);
   load_and_exec_config_or_die(peg_config, "cgp " EMPTY_CGP);
