@@ -20,6 +20,7 @@
 #include "../src/compat/ctime.h"
 #include "../src/compat/memory_info.h"
 #include "../src/def/rack_defs.h"
+#include "../src/def/sim_defs.h"
 #include "../src/ent/bag.h"
 #include "../src/ent/game.h"
 #include "../src/ent/move.h"
@@ -315,9 +316,16 @@ void sim_exact_run_spec(const char *spec) {
 // the play, from a seed shared by the plays of a position.
 //
 // Spec: tasks=<file>,mode=<pool shift>,slice=<i>,of=<n>,samples=<m>,iters=<k>
+// with an optional ,endbag=<b>: a sim of a position with b tiles in the bag
+// or fewer, choosing or valuing, then rolls out to the end of the game (the
+// most plies a sim allows), so that no leave value stands in for tiles that
+// can no longer be drawn or for a game that has already ended. With the bag
+// empty both racks are known and every rollout is the same, so one is run.
 // A task line is: pos_idx <tab> cgp command <tab> play <tab> play
 // Lines printed:
-//   NEST pos= pick= sample= value= wp= plies=
+//   NEST pos= pick= sample= value= wp= plies= util= vbag=
+// vbag is the number of tiles in the bag where the value was taken, or -1
+// when the game ended first.
 
 // LOCAL MEASUREMENT HOOK in random_variable.c.
 extern PoolLeaves *simmer_pool_leaves_override;
@@ -329,9 +337,29 @@ enum {
   SIMN_MAX_MODE = 16,
   SIMN_NUM_PICKS = 2,
   SIMN_SPEC_FIELDS = 6,
+  SIMN_SPEC_FIELDS_WITH_END_BAG = 7,
   SIMN_VALUE_ITERATIONS = 1500,
   SIMN_VALUE_SEED_OFFSET = 500,
+  SIMN_NO_END_BAG = -1,
 };
+
+// The endbag of the spec, or SIMN_NO_END_BAG.
+static int simn_end_bag = SIMN_NO_END_BAG;
+
+static bool simn_rolls_out_to_end(int bag_tiles) {
+  return simn_end_bag != SIMN_NO_END_BAG && bag_tiles <= simn_end_bag;
+}
+
+static int simn_sim_plies(int bag_tiles) {
+  return simn_rolls_out_to_end(bag_tiles) ? MAX_PLIES : SIMX_PLIES;
+}
+
+static int simn_sim_iterations(int bag_tiles, int iterations) {
+  if (simn_rolls_out_to_end(bag_tiles) && bag_tiles == 0) {
+    return 1;
+  }
+  return iterations;
+}
 
 // The win % weight and the spread weight of the blended utility, summed: a
 // utility of u to one player is this less u to the other.
@@ -371,14 +399,17 @@ static void simn_sample(Config *sim_config, const Game *root, const Move *pick,
   double win_pct = -1;
   double utility = -1;
   bool valued = false;
+  int value_bag_tiles = -1;
   int plies = 0;
   for (; plies <= SIMN_NESTED_PLIES && !game_over(truth); plies++) {
+    const int bag_tiles = bag_get_letters(game_get_bag(truth));
     // With the bag empty, each player can deduce the other's rack.
-    const bool bag_is_empty = bag_get_letters(game_get_bag(truth)) == 0;
+    const bool bag_is_empty = bag_tiles == 0;
     char *cgp_command = simx_cgp_command_with_racks(truth, bag_is_empty);
     char *settings = get_formatted_string(
-        "set -seed %llu -iterations %d",
-        (unsigned long long)(seed + (uint64_t)plies + 1), iterations);
+        "set -seed %llu -iterations %d -plies %d",
+        (unsigned long long)(seed + (uint64_t)plies + 1),
+        simn_sim_iterations(bag_tiles, iterations), simn_sim_plies(bag_tiles));
     load_and_exec_config_or_die(sim_config, settings);
     free(settings);
     load_and_exec_config_or_die(sim_config, cgp_command);
@@ -398,9 +429,11 @@ static void simn_sample(Config *sim_config, const Game *root, const Move *pick,
     simx_move_string(sim_config, sim_results_get_best_move(sim_results),
                      best_name);
     char *value_settings = get_formatted_string(
-        "set -seed %llu -iterations %d",
+        "set -seed %llu -iterations %d -plies %d",
         (unsigned long long)(seed + SIMN_VALUE_SEED_OFFSET),
-        SIMN_VALUE_ITERATIONS);
+        simn_sim_iterations(bag_tiles, SIMN_VALUE_ITERATIONS),
+        simn_sim_plies(bag_tiles));
+    value_bag_tiles = bag_tiles;
     load_and_exec_config_or_die(sim_config, value_settings);
     free(value_settings);
     char *value_cgp = simx_cgp_command_with_racks(truth, true);
@@ -436,8 +469,9 @@ static void simn_sample(Config *sim_config, const Game *root, const Move *pick,
     }
   }
   printf("NEST pos=%d pick=%d sample=%d value=%.4f wp=%.6f plies=%d "
-         "util=%.6f\n",
-         pos_idx, pick_idx, sample_idx, value, win_pct, plies, utility);
+         "util=%.6f vbag=%d\n",
+         pos_idx, pick_idx, sample_idx, value, win_pct, plies, utility,
+         value_bag_tiles);
 }
 
 void sim_exact_nested_run_spec(const char *spec) {
@@ -447,12 +481,18 @@ void sim_exact_nested_run_spec(const char *spec) {
   int num_slices = 1;
   int samples = 0;
   int iterations = 0;
-  if (sscanf(spec,
-             "tasks=%1023[^,],mode=%15[^,],slice=%d,of=%d,samples=%d,iters=%d",
-             tasks_path, mode, &slice, &num_slices, &samples,
-             &iterations) != SIMN_SPEC_FIELDS) {
+  int end_bag = SIMN_NO_END_BAG;
+  const int num_fields = sscanf(
+      spec,
+      "tasks=%1023[^,],mode=%15[^,],slice=%d,of=%d,samples=%d,iters=%d,"
+      "endbag=%d",
+      tasks_path, mode, &slice, &num_slices, &samples, &iterations, &end_bag);
+  if ((num_fields != SIMN_SPEC_FIELDS &&
+       num_fields != SIMN_SPEC_FIELDS_WITH_END_BAG) ||
+      (num_fields == SIMN_SPEC_FIELDS_WITH_END_BAG && end_bag < 0)) {
     log_fatal("nested oracle: bad spec: %s", spec);
   }
+  simn_end_bag = end_bag;
   // mode exactroot: the inner sims roll out on the leaves of the root
   // position's pool, shifted from that pool, instead of building their own.
   const bool reuse_root_leaves = strings_equal(mode, "exactroot");
@@ -527,4 +567,159 @@ void sim_exact_nested_run_spec(const char *spec) {
   config_destroy(sim_config);
   pool_leaves_destroy(simmer_pool_leaves_override);
   simmer_pool_leaves_override = NULL;
+}
+
+// Leave accuracy: for the mover of each eligible position of static self-play,
+// the error of each model's value of every leave of the rack against the
+// exact value for the pool the mover sees, less the rack's mean error (a
+// constant across a rack's leaves changes no choice).
+//
+// Spec: games=<n>
+extern bool pool_leaves_fill_exhausted;
+
+enum {
+  LEAFDIAG_MODELS = 4,
+  LEAFDIAG_SUBSETS = 1 << RACK_SIZE,
+};
+
+typedef struct LeafDiagStat {
+  double sum_error[LEAFDIAG_MODELS];
+  double sum_squared[LEAFDIAG_MODELS];
+  double count;
+} LeafDiagStat;
+
+static void leafdiag_print(const char *label, const LeafDiagStat *stat) {
+  if (stat->count == 0) {
+    return;
+  }
+  printf("LEAF %s n=%.0f", label, stat->count);
+  static const char *names[LEAFDIAG_MODELS] = {"pool", "poolfix", "poolnoshift",
+                                               "stock1.2"};
+  for (int model_idx = 0; model_idx < LEAFDIAG_MODELS; model_idx++) {
+    printf(" %s bias=%+.3f rmse=%.3f", names[model_idx],
+           stat->sum_error[model_idx] / stat->count,
+           sqrt(stat->sum_squared[model_idx] / stat->count));
+  }
+  printf("\n");
+}
+
+void sim_exact_leaf_diag_run_spec(const char *spec) {
+  int num_games = 0;
+  if (sscanf(spec, "games=%d", &num_games) != 1) {
+    log_fatal("leaf diag: bad spec: %s", spec);
+  }
+  Config *config = simx_config("exact", SIMX_PLIES, "");
+  Game *game = config_game_create(config);
+  const LetterDistribution *ld = game_get_ld(game);
+  // By leave size, then leaves with no exhausted letter and with one.
+  LeafDiagStat stats[RACK_SIZE][2];
+  memset(stats, 0, sizeof(stats));
+  LeafDiagStat low_bag[2];
+  memset(low_bag, 0, sizeof(low_bag));
+  for (int game_idx = 0; game_idx < num_games; game_idx++) {
+    game_reset(game);
+    game_seed(game, (uint64_t)(SIMX_FIRST_GAME_SEED + game_idx));
+    draw_starting_racks(game);
+    while (!game_over(game)) {
+      const int mover_index = game_get_player_on_turn_index(game);
+      const Player *mover = game_get_player(game, mover_index);
+      const Rack *rack = player_get_rack(mover);
+      const Rack *opp_rack =
+          player_get_rack(game_get_player(game, 1 - mover_index));
+      const int bag_size = game_get_real_bag_size(game);
+      if (rack_get_total_letters(rack) == RACK_SIZE && bag_size >= RACK_SIZE) {
+        const KLV *klv = player_get_klv(mover);
+        const PoolShiftTable *table = player_get_pool_shift_table(mover);
+        const Bag *bag = game_get_bag(game);
+        pool_leaves_fill_exhausted = false;
+        PoolLeaves *pool = pool_leaves_create(table, ld, bag, opp_rack, rack);
+        pool_leaves_fill_exhausted = true;
+        PoolLeaves *fixed = pool_leaves_create(table, ld, bag, opp_rack, rack);
+        MachineLetter tiles[RACK_SIZE];
+        int num_tiles = 0;
+        for (int ml = 0; ml < ld_get_size(ld); ml++) {
+          for (int copy = 0; copy < rack_get_letter(rack, (MachineLetter)ml);
+               copy++) {
+            tiles[num_tiles++] = (MachineLetter)ml;
+          }
+        }
+        double errors[LEAFDIAG_SUBSETS][LEAFDIAG_MODELS];
+        int sizes[LEAFDIAG_SUBSETS];
+        int exhausted[LEAFDIAG_SUBSETS];
+        double means[LEAFDIAG_MODELS] = {0};
+        for (int mask = 0; mask < LEAFDIAG_SUBSETS - 1; mask++) {
+          Rack leave;
+          rack_set_dist_size_and_reset(&leave, ld_get_size(ld));
+          for (int bit = 0; bit < RACK_SIZE; bit++) {
+            if (mask & (1 << bit)) {
+              rack_add_letter(&leave, tiles[bit]);
+            }
+          }
+          sizes[mask] = rack_get_total_letters(&leave);
+          exhausted[mask] = 0;
+          for (int ml = 0; ml < ld_get_size(ld); ml++) {
+            if (rack_get_letter(&leave, (MachineLetter)ml) >=
+                ld_get_dist(ld, (MachineLetter)ml)) {
+              exhausted[mask] = 1;
+            }
+          }
+          const double exact = equity_to_double(
+              klv_get_leave_value(klv, &leave) +
+              pool_shift_get_leave_shift(
+                  table, klv, POOL_SHIFT_EXACT_WEIGHT_MILLI, ld, bag, opp_rack,
+                  &leave, RACK_SIZE, bag_size));
+          const PoolLeaves *pools[2] = {pool, fixed};
+          double values[LEAFDIAG_MODELS];
+          for (int pool_idx = 0; pool_idx < 2; pool_idx++) {
+            const PoolLeaves *leaves = pools[pool_idx];
+            values[pool_idx] =
+                equity_to_double(klv_get_leave_value(leaves->klv, &leave) +
+                                 leaves->table->reference_exact_offset +
+                                 pool_shift_get_leave_shift(
+                                     leaves->table, leaves->klv, 1000, ld, bag,
+                                     opp_rack, &leave, RACK_SIZE, bag_size));
+          }
+          values[2] = equity_to_double(klv_get_leave_value(fixed->klv, &leave) +
+                                       fixed->table->reference_exact_offset);
+          values[3] = equity_to_double(
+              klv_get_leave_value(klv, &leave) +
+              pool_shift_get_leave_shift(table, klv, 1200, ld, bag, opp_rack,
+                                         &leave, RACK_SIZE, bag_size));
+          for (int model_idx = 0; model_idx < LEAFDIAG_MODELS; model_idx++) {
+            errors[mask][model_idx] = values[model_idx] - exact;
+            means[model_idx] +=
+                errors[mask][model_idx] / (double)(LEAFDIAG_SUBSETS - 1);
+          }
+        }
+        for (int mask = 0; mask < LEAFDIAG_SUBSETS - 1; mask++) {
+          LeafDiagStat *targets[2] = {&stats[sizes[mask]][exhausted[mask]],
+                                      &low_bag[bag_size <= 20 ? 0 : 1]};
+          for (int target_idx = 0; target_idx < 2; target_idx++) {
+            LeafDiagStat *stat = targets[target_idx];
+            stat->count += 1;
+            for (int model_idx = 0; model_idx < LEAFDIAG_MODELS; model_idx++) {
+              const double centred = errors[mask][model_idx] - means[model_idx];
+              stat->sum_error[model_idx] += centred;
+              stat->sum_squared[model_idx] += centred * centred;
+            }
+          }
+        }
+        pool_leaves_destroy(pool);
+        pool_leaves_destroy(fixed);
+      }
+      play_top_n_equity_move(game, 0);
+    }
+  }
+  for (int size = 0; size < RACK_SIZE; size++) {
+    for (int has_exhausted = 0; has_exhausted < 2; has_exhausted++) {
+      char label[SIMX_MAX_MOVE_STRING];
+      (void)snprintf(label, sizeof(label), "size=%d exhausted=%d", size,
+                     has_exhausted);
+      leafdiag_print(label, &stats[size][has_exhausted]);
+    }
+  }
+  leafdiag_print("bag<=20", &low_bag[0]);
+  leafdiag_print("bag>20", &low_bag[1]);
+  game_destroy(game);
+  config_destroy(config);
 }

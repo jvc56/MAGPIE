@@ -11,6 +11,7 @@
 #include "letter_distribution.h"
 #include "rack.h"
 #include "rack_value_table.h"
+#include <assert.h>
 #include <math.h>
 #include <stdatomic.h>
 #include <stdbool.h>
@@ -37,26 +38,157 @@ bool pool_shift_table_matches_ld(const PoolShiftTable *table,
          table->ld_hash == pool_shift_get_ld_hash(ld);
 }
 
-typedef struct PoolShiftBuild {
+// The seen-letter mask of pool_shift_klv_walk_siblings.
+static_assert(MAX_ALPHABET_SIZE <= 64, "a letter's bit fits a uint64_t");
+
+// Called for a leave, its letters in ascending order, at the index
+// klv_get_word_index finds it at.
+typedef void (*PoolShiftLeaveVisit)(void *context, const MachineLetter *letters,
+                                    int number_of_letters, uint32_t klv_index);
+
+// A depth-first walk of a KLV's word graph that visits every leave of 1 to
+// RACK_SIZE - 1 tiles the letter distribution can deal and the KLV has, at
+// the index klv_get_word_index finds it at. It does the lookup's arithmetic
+// (increment_node_to_ml, follow_arc): a sibling passed over adds its word
+// count, an arc followed adds 1. Only paths of non-decreasing letters are
+// lookups, and of siblings of one letter only the first.
+typedef struct PoolShiftKlvWalk {
   const KLV *klv;
+  int ld_size;
+  int dist_counts[MAX_ALPHABET_SIZE];
+  int leave_counts[MAX_ALPHABET_SIZE];
+  MachineLetter letters[RACK_SIZE];
+  PoolShiftLeaveVisit visit;
+  void *context;
+} PoolShiftKlvWalk;
+
+static void pool_shift_klv_walk_siblings(PoolShiftKlvWalk *walk,
+                                         uint32_t node_index,
+                                         uint32_t word_index,
+                                         int number_of_letters) {
+  const KLV *klv = walk->klv;
+  const KWG *kwg = klv_get_kwg(klv);
+  const uint32_t min_ml =
+      number_of_letters == 0 ? 0 : walk->letters[number_of_letters - 1];
+  uint64_t seen_letters = 0;
+  for (;; node_index++) {
+    const uint32_t node = kwg_node(kwg, node_index);
+    const uint32_t ml = kwg_node_tile(node);
+    if (ml < (uint32_t)walk->ld_size &&
+        (seen_letters & ((uint64_t)1 << ml)) == 0) {
+      seen_letters |= (uint64_t)1 << ml;
+      if (ml >= min_ml && walk->leave_counts[ml] < walk->dist_counts[ml]) {
+        walk->letters[number_of_letters] = (MachineLetter)ml;
+        walk->leave_counts[ml]++;
+        walk->visit(walk->context, walk->letters, number_of_letters + 1,
+                    word_index);
+        const uint32_t arc_index = kwg_node_arc_index(node);
+        if (number_of_letters + 1 < RACK_SIZE - 1 && arc_index != 0) {
+          pool_shift_klv_walk_siblings(walk, arc_index, word_index + 1,
+                                       number_of_letters + 1);
+        }
+        walk->leave_counts[ml]--;
+      }
+    }
+    if (kwg_node_is_end(node)) {
+      return;
+    }
+    word_index +=
+        klv->word_counts[node_index] - klv->word_counts[node_index + 1];
+  }
+}
+
+static void pool_shift_klv_walk(const KLV *klv, const LetterDistribution *ld,
+                                PoolShiftLeaveVisit visit, void *context) {
+  PoolShiftKlvWalk walk;
+  walk.klv = klv;
+  walk.ld_size = ld_get_size(ld);
+  for (int ml = 0; ml < walk.ld_size; ml++) {
+    walk.dist_counts[ml] = ld_get_dist(ld, (MachineLetter)ml);
+    walk.leave_counts[ml] = 0;
+  }
+  walk.visit = visit;
+  walk.context = context;
+  const uint32_t root_index = kwg_get_dawg_root_node_index(klv_get_kwg(klv));
+  if (root_index != 0) {
+    pool_shift_klv_walk_siblings(&walk, root_index, 0, 0);
+  }
+}
+
+typedef struct PoolShiftBuild {
   const LetterDistribution *ld;
   PoolShiftTable *table;
+  // klv_get_leave_value of every leave of up to RACK_SIZE - 1 tiles the
+  // letter distribution can deal, by rank (pool_shift_table_get_leave_row).
+  const Equity *value_by_rank;
   Rack leave;
+  // The leave's tiles, highest letter first.
+  MachineLetter letters[RACK_SIZE];
+  // Whether a tile the leave holds every copy of takes the leave's own value
+  // rather than 0, so that its weight moves the leave's value by nothing.
+  bool fill_exhausted;
 } PoolShiftBuild;
 
-// Fills the row of the build's leave: the value of the leave with one more
-// of each tile it does not hold every copy of.
-static void pool_shift_build_fill_row(PoolShiftBuild *build, uint32_t row) {
+typedef struct PoolShiftRankFill {
+  const PoolShiftTable *table;
+  const KLV *klv;
+  Equity *value_by_rank;
+} PoolShiftRankFill;
+
+static void pool_shift_set_rank_value(void *context,
+                                      const MachineLetter *letters,
+                                      int number_of_letters,
+                                      uint32_t klv_index) {
+  const PoolShiftRankFill *fill = context;
+  // The rank takes the letters highest first.
+  uint32_t rank = 0;
+  for (int place = 0; place < number_of_letters; place++) {
+    rank +=
+        fill->table
+            ->rank_increments[place][letters[number_of_letters - 1 - place]];
+  }
+  fill->value_by_rank[rank] = klv_get_indexed_leave_value(fill->klv, klv_index);
+}
+
+// Fills the row of the build's leave, of leave_size tiles: the value of the
+// leave with one more of each tile it does not hold every copy of. With the
+// leave's tiles m_0 >= ... >= m_(k-1), one more t goes to place p, the
+// number of them above t, and the leave with it has rank
+//   sum_(i < p) rank_increments[i][m_i] + rank_increments[p][t]
+//     + sum_(i >= p) rank_increments[i + 1][m_i].
+static void pool_shift_build_fill_row(const PoolShiftBuild *build, uint32_t row,
+                                      int leave_size) {
   const PoolShiftTable *table = build->table;
   Equity *values = table->values + (size_t)row * (size_t)table->stride;
-  for (int ml = 0; ml < table->ld_size; ml++) {
+  uint32_t rank_before[RACK_SIZE];
+  uint32_t rank_after[RACK_SIZE];
+  rank_before[0] = 0;
+  for (int place = 0; place < leave_size; place++) {
+    rank_before[place + 1] =
+        rank_before[place] +
+        table->rank_increments[place][build->letters[place]];
+  }
+  rank_after[leave_size] = 0;
+  for (int place = leave_size - 1; place >= 0; place--) {
+    rank_after[place] =
+        rank_after[place + 1] +
+        table->rank_increments[place + 1][build->letters[place]];
+  }
+  int place = 0;
+  for (int ml = table->ld_size - 1; ml >= 0; ml--) {
+    while (place < leave_size && build->letters[place] > ml) {
+      place++;
+    }
     if (rack_get_letter(&build->leave, (MachineLetter)ml) >=
         ld_get_dist(build->ld, (MachineLetter)ml)) {
+      if (build->fill_exhausted) {
+        values[ml] = klv_get_leave_value(table->klv, &build->leave);
+      }
       continue;
     }
-    rack_add_letter(&build->leave, (MachineLetter)ml);
-    values[ml] = klv_get_leave_value(build->klv, &build->leave);
-    rack_take_letter(&build->leave, (MachineLetter)ml);
+    values[ml] = build->value_by_rank[rank_before[place] +
+                                      table->rank_increments[place][ml] +
+                                      rank_after[place]];
   }
 }
 
@@ -66,7 +198,7 @@ static void pool_shift_build_walk(PoolShiftBuild *build, uint32_t rank,
                                   int max_ml) {
   const PoolShiftTable *table = build->table;
   const int leave_size = rack_get_total_letters(&build->leave);
-  pool_shift_build_fill_row(build, rank);
+  pool_shift_build_fill_row(build, rank, leave_size);
   if (leave_size == POOL_SHIFT_MAX_LEAVE_SIZE) {
     return;
   }
@@ -78,6 +210,7 @@ static void pool_shift_build_walk(PoolShiftBuild *build, uint32_t rank,
     const uint32_t extended_rank =
         rank + table->rank_increments[leave_size][ml];
     rack_add_letter(&build->leave, (MachineLetter)ml);
+    build->letters[leave_size] = (MachineLetter)ml;
     pool_shift_build_walk(build, extended_rank, ml);
     rack_take_letter(&build->leave, (MachineLetter)ml);
   }
@@ -85,11 +218,14 @@ static void pool_shift_build_walk(PoolShiftBuild *build, uint32_t rank,
 
 // The binomial term and the distance to the next size block depend only on
 // the alphabet and the old size. Folding them together also gives ranks of
-// the larger subsets used as played tiles in a census lookup.
-static void pool_shift_table_set_numbering(PoolShiftTable *table) {
+// the larger subsets used as played tiles in a census lookup. Returns the
+// number of leaves of up to RACK_SIZE - 1 tiles, which have the ranks below
+// it.
+static size_t pool_shift_table_set_numbering(PoolShiftTable *table) {
   uint64_t size_counts[RACK_SIZE];
   size_counts[0] = 1;
   table->number_of_rows = 0;
+  uint64_t number_of_ranks = 0;
   for (int size = 0; size < RACK_SIZE; size++) {
     if (size > 0) {
       size_counts[size] = size_counts[size - 1] *
@@ -99,6 +235,7 @@ static void pool_shift_table_set_numbering(PoolShiftTable *table) {
     if (size <= POOL_SHIFT_MAX_LEAVE_SIZE) {
       table->number_of_rows += (uint32_t)size_counts[size];
     }
+    number_of_ranks += size_counts[size];
   }
   for (int ml = 0; ml < table->ld_size; ml++) {
     const int reverse_ml = table->ld_size - 1 - ml;
@@ -110,10 +247,18 @@ static void pool_shift_table_set_numbering(PoolShiftTable *table) {
       table->rank_increments[size][ml] = (uint32_t)(size_counts[size] + term);
     }
   }
+  return (size_t)number_of_ranks;
 }
 
-PoolShiftTable *pool_shift_table_create(const KLV *klv,
-                                        const LetterDistribution *ld) {
+// The rows' values are the KLV's values of leaves of up to RACK_SIZE - 1
+// tiles: one walk of the KLV puts them in an array by rank, from which each
+// row reads its own.
+// LOCAL MEASUREMENT SWITCH.
+bool pool_leaves_fill_exhausted = true;
+
+static PoolShiftTable *
+pool_shift_table_create_with_fill(const KLV *klv, const LetterDistribution *ld,
+                                  bool fill_exhausted) {
   PoolShiftTable *table = malloc_or_die(sizeof(PoolShiftTable));
   table->instance_id =
       (uint64_t)atomic_fetch_add(&pool_shift_tables_created, 1) + 1;
@@ -122,17 +267,36 @@ PoolShiftTable *pool_shift_table_create(const KLV *klv,
   table->ld_hash = pool_shift_get_ld_hash(ld);
   table->ld_size = ld_get_size(ld);
   table->stride = (table->ld_size + 3) & ~3;
-  pool_shift_table_set_numbering(table);
+  const size_t number_of_ranks = pool_shift_table_set_numbering(table);
   table->values = calloc_or_die(
       (size_t)table->number_of_rows * (size_t)table->stride, sizeof(Equity));
   table->klv = klv;
   table->exact_values = NULL;
   table->has_reference_pool = false;
   table->reference_exact_offset = 0;
-  PoolShiftBuild build = {.klv = klv, .ld = ld, .table = table};
+  // A leave the KLV does not have is worth 0, as klv_get_leave_value says.
+  Equity *value_by_rank = calloc_or_die(number_of_ranks, sizeof(Equity));
+  PoolShiftRankFill rank_fill = {
+      .table = table,
+      .klv = klv,
+      .value_by_rank = value_by_rank,
+  };
+  pool_shift_klv_walk(klv, ld, pool_shift_set_rank_value, &rank_fill);
+  PoolShiftBuild build = {
+      .ld = ld,
+      .table = table,
+      .value_by_rank = value_by_rank,
+      .fill_exhausted = fill_exhausted,
+  };
   rack_set_dist_size_and_reset(&build.leave, table->ld_size);
   pool_shift_build_walk(&build, 0, table->ld_size - 1);
+  free(value_by_rank);
   return table;
+}
+
+PoolShiftTable *pool_shift_table_create(const KLV *klv,
+                                        const LetterDistribution *ld) {
+  return pool_shift_table_create_with_fill(klv, ld, false);
 }
 
 void pool_shift_table_destroy(PoolShiftTable *table) {
@@ -374,6 +538,232 @@ static Equity pool_shift_get_long_leave_shift(const PoolShiftTable *table,
          klv_get_leave_value(table->klv, leave);
 }
 
+// The exact values of every leave of one rack at once (see
+// pool_shift_fill_rack). Each leave's own walk would visit every full rack
+// that contains it, so a rack's leaves together visit most full racks many
+// times. Instead one walk visits each full rack the leaves can reach once,
+// with the weight of its tiles of letters the rack does not hold, and adds
+// its value to a sum kept by its counts of the rack's letters. Each leave's
+// sum is then the sum over those counts, weighted by the ways to draw the
+// rest of the rack's letters. Every sum is of the same integer terms as the
+// leave's own walk, so the values are the same.
+typedef struct PoolShiftRackSums {
+  const RackValueTable *rvt;
+  // The letters held or unseen, in order, the most of each a full rack can
+  // hold here, and the most of all those from each letter on.
+  int number_of_letters;
+  MachineLetter letters[MAX_ALPHABET_SIZE];
+  int unseen_counts[MAX_ALPHABET_SIZE];
+  int max_counts[MAX_ALPHABET_SIZE];
+  int max_from[MAX_ALPHABET_SIZE + 1];
+  // Each letter's place among the rack's letters, or -1.
+  int rack_slots[MAX_ALPHABET_SIZE];
+  // The rack's distinct letters: their unseen counts and the most of each a
+  // full rack can hold here.
+  int number_of_slots;
+  int slot_unseen[RACK_SIZE];
+  int slot_max[RACK_SIZE];
+  // Counts of the rack's letters, numbered like the pool leaves: the sum over
+  // slots of slot_offsets[slot][capacity][count], where capacity is
+  // RACK_SIZE less the counts of the slots before.
+  int slot_offsets[RACK_SIZE][RACK_SIZE + 1][RACK_SIZE + 1];
+  int number_of_sums;
+  // By counts of the rack's letters: the draws of the other letters that
+  // give a valued full rack, and the sum of those racks' values, each rack
+  // counted once for every draw that gives it.
+  int64_t *draws;
+  int64_t *value_sums;
+} PoolShiftRackSums;
+
+static void pool_shift_rack_sums_walk(PoolShiftRackSums *sums, int letter_idx,
+                                      int tiles, uint32_t rack_index,
+                                      int sum_index, int capacity,
+                                      int64_t ways) {
+  if (tiles == 0) {
+    const int32_t stored = rack_value_table_read_stored(sums->rvt, rack_index);
+    if (stored != RACK_VALUE_TABLE_UNVALUED) {
+      sums->draws[sum_index] += ways;
+      sums->value_sums[sum_index] += ways * (int64_t)stored;
+    }
+    return;
+  }
+  if (sums->max_from[letter_idx] < tiles) {
+    return;
+  }
+  const MachineLetter ml = sums->letters[letter_idx];
+  const int max_count = sums->max_counts[letter_idx] < tiles
+                            ? sums->max_counts[letter_idx]
+                            : tiles;
+  const int max_after = sums->max_from[letter_idx + 1];
+  const int min_count = tiles > max_after ? tiles - max_after : 0;
+  const int slot = sums->rack_slots[letter_idx];
+  const int unseen = sums->unseen_counts[letter_idx];
+  // C(unseen, count) for a letter the rack does not hold, carried from one
+  // count to the next.
+  int64_t letter_ways = 1;
+  if (slot < 0) {
+    for (int count = 0; count < min_count; count++) {
+      letter_ways = letter_ways * (unseen - count) / (count + 1);
+    }
+  }
+  for (int count = min_count; count <= max_count; count++) {
+    uint32_t offset = 0;
+    if (count != 0) {
+      offset = sums->rvt->rank_offsets[ml][tiles][count];
+    }
+    if (offset != UINT32_MAX) {
+      if (slot < 0) {
+        pool_shift_rack_sums_walk(sums, letter_idx + 1, tiles - count,
+                                  rack_index + offset, sum_index, capacity,
+                                  ways * letter_ways);
+      } else {
+        pool_shift_rack_sums_walk(
+            sums, letter_idx + 1, tiles - count, rack_index + offset,
+            sum_index + sums->slot_offsets[slot][capacity][count],
+            capacity - count, ways);
+      }
+    }
+    if (slot < 0) {
+      letter_ways = letter_ways * (unseen - count) / (count + 1);
+    }
+  }
+}
+
+// Adds to *draws and *value_sums the sums of every count of the rack's
+// letters from slot on that can complete leave_counts, weighted by the ways
+// to draw the difference.
+static void pool_shift_rack_sums_gather(const PoolShiftRackSums *sums,
+                                        const int *leave_counts, int slot,
+                                        int sum_index, int capacity,
+                                        int64_t ways, int64_t *draws,
+                                        int64_t *value_sums) {
+  if (slot == sums->number_of_slots) {
+    *draws += ways * sums->draws[sum_index];
+    *value_sums += ways * sums->value_sums[sum_index];
+    return;
+  }
+  const int kept = leave_counts[slot];
+  const int unseen = sums->slot_unseen[slot];
+  int max_count = kept + unseen;
+  if (max_count > sums->slot_max[slot]) {
+    max_count = sums->slot_max[slot];
+  }
+  if (max_count > capacity) {
+    max_count = capacity;
+  }
+  // C(unseen, count - kept), carried from one count to the next.
+  int64_t letter_ways = 1;
+  for (int count = kept; count <= max_count; count++) {
+    pool_shift_rack_sums_gather(
+        sums, leave_counts, slot + 1,
+        sum_index + sums->slot_offsets[slot][capacity][count], capacity - count,
+        ways * letter_ways, draws, value_sums);
+    const int drawn = count - kept;
+    letter_ways = letter_ways * (unseen - drawn) / (drawn + 1);
+  }
+}
+
+// Sets result->shifts to what pool_shift_get_exact_shift gives each of the
+// result's leaves, for a mover who holds rack and sees unseen_counts.
+static void pool_shift_fill_exact_shifts(const PoolShiftTable *table,
+                                         const int *unseen_counts,
+                                         const Rack *rack,
+                                         PoolShiftRack *result) {
+  PoolShiftRackSums *sums = malloc_or_die(sizeof(PoolShiftRackSums));
+  sums->rvt = table->exact_values;
+  sums->number_of_letters = 0;
+  sums->number_of_slots = 0;
+  int slot_of_ml[MAX_ALPHABET_SIZE];
+  for (int ml = 0; ml < table->ld_size; ml++) {
+    const int held = rack_get_letter(rack, (MachineLetter)ml);
+    slot_of_ml[ml] = -1;
+    if (held == 0 && unseen_counts[ml] == 0) {
+      continue;
+    }
+    int max_count = held + unseen_counts[ml];
+    if (max_count > RACK_SIZE) {
+      max_count = RACK_SIZE;
+    }
+    const int letter_idx = sums->number_of_letters++;
+    sums->letters[letter_idx] = (MachineLetter)ml;
+    sums->unseen_counts[letter_idx] = unseen_counts[ml];
+    sums->max_counts[letter_idx] = max_count;
+    sums->rack_slots[letter_idx] = -1;
+    if (held != 0) {
+      const int slot = sums->number_of_slots++;
+      slot_of_ml[ml] = slot;
+      sums->rack_slots[letter_idx] = slot;
+      sums->slot_unseen[slot] = unseen_counts[ml];
+      sums->slot_max[slot] = max_count;
+    }
+  }
+  sums->max_from[sums->number_of_letters] = 0;
+  for (int letter_idx = sums->number_of_letters - 1; letter_idx >= 0;
+       letter_idx--) {
+    sums->max_from[letter_idx] =
+        sums->max_from[letter_idx + 1] + sums->max_counts[letter_idx];
+  }
+  // completions[capacity]: the counts of the slots after the current one
+  // that fit in capacity tiles.
+  int completions[RACK_SIZE + 1];
+  for (int capacity = 0; capacity <= RACK_SIZE; capacity++) {
+    completions[capacity] = 1;
+  }
+  for (int slot = sums->number_of_slots - 1; slot >= 0; slot--) {
+    int slot_completions[RACK_SIZE + 1];
+    for (int capacity = 0; capacity <= RACK_SIZE; capacity++) {
+      int offset = 0;
+      slot_completions[capacity] = 0;
+      for (int count = 0; count <= RACK_SIZE; count++) {
+        sums->slot_offsets[slot][capacity][count] = offset;
+        if (count <= capacity && count <= sums->slot_max[slot]) {
+          offset += completions[capacity - count];
+        }
+      }
+      slot_completions[capacity] = offset;
+    }
+    memcpy(completions, slot_completions, sizeof(completions));
+  }
+  sums->number_of_sums = completions[RACK_SIZE];
+  sums->draws = calloc_or_die((size_t)sums->number_of_sums, sizeof(int64_t));
+  sums->value_sums =
+      calloc_or_die((size_t)sums->number_of_sums, sizeof(int64_t));
+  pool_shift_rack_sums_walk(sums, 0, RACK_SIZE, 0, 0, RACK_SIZE, 1);
+
+  Rack leave;
+  for (int idx = 0; idx < result->count; idx++) {
+    result->shifts[idx] = 0;
+    if (result->sizes[idx] >= RACK_SIZE) {
+      continue;
+    }
+    rack_set_dist_size_and_reset(&leave, table->ld_size);
+    int leave_counts[RACK_SIZE] = {0};
+    for (int bit_idx = 0; bit_idx < RACK_SIZE; bit_idx++) {
+      if ((result->map_indices[idx] & (1 << bit_idx)) != 0) {
+        const MachineLetter ml = result->bit_tiles[bit_idx];
+        rack_add_letter(&leave, ml);
+        leave_counts[slot_of_ml[ml]]++;
+      }
+    }
+    int64_t draws = 0;
+    int64_t value_sum = 0;
+    pool_shift_rack_sums_gather(sums, leave_counts, 0, 0, RACK_SIZE, 1, &draws,
+                                &value_sum);
+    if (draws == 0) {
+      continue;
+    }
+    // Rounded as pool_shift_get_exact_leave_value rounds.
+    const int64_t half = draws / 2;
+    const Equity exact_value =
+        (Equity)(value_sum >= 0 ? (value_sum + half) / draws
+                                : -((half - value_sum) / draws));
+    result->shifts[idx] = exact_value - klv_get_leave_value(table->klv, &leave);
+  }
+  free(sums->value_sums);
+  free(sums->draws);
+  free(sums);
+}
+
 // The leaves of one pool (see PoolLeaves). One walk over the full racks
 // gives every leave its exact value: each rack is split, letter by letter,
 // into the tiles of a leave and the tiles drawn, in every way the pool can
@@ -501,10 +891,11 @@ static void pool_leaves_fill_klv(const PoolLeavesWalk *walk, const KLV *stock,
   }
 }
 
-PoolLeaves *pool_leaves_create(const PoolShiftTable *table,
-                               const LetterDistribution *ld, const Bag *bag,
-                               const Rack *opponent_rack,
-                               const Rack *mover_rack) {
+PoolLeaves *pool_leaves_create_by_walk(const PoolShiftTable *table,
+                                       const LetterDistribution *ld,
+                                       const Bag *bag,
+                                       const Rack *opponent_rack,
+                                       const Rack *mover_rack) {
   const KLV *stock = table->klv;
   PoolLeavesWalk *walk = malloc_or_die(sizeof(PoolLeavesWalk));
   walk->rvt = table->exact_values;
@@ -550,7 +941,8 @@ PoolLeaves *pool_leaves_create(const PoolShiftTable *table,
   pool_leaves_fill_klv(walk, stock, pool_leaves->klv, &leave, 0, RACK_SIZE, 0,
                        empty_value);
   klv_mark_leave_values_mutated(pool_leaves->klv);
-  pool_leaves->table = pool_shift_table_create(pool_leaves->klv, ld);
+  pool_leaves->table = pool_shift_table_create_with_fill(
+      pool_leaves->klv, ld, pool_leaves_fill_exhausted);
   pool_leaves->table->has_reference_pool = true;
   pool_leaves->table->exact_values = table->exact_values;
   pool_leaves->table->reference_exact_offset = (Equity)llround(empty_value);
@@ -560,6 +952,514 @@ PoolLeaves *pool_leaves_create(const PoolShiftTable *table,
   free(walk->value_sums);
   free(walk->draws);
   free(walk);
+  return pool_leaves;
+}
+
+// The leaves of one pool by a transform of the full racks' values, one letter
+// at a time, in place of the walk above, which splits every full rack into
+// every leave and draw.
+//
+// Let S(L) and N(L) be the sum of values and the number of draws that the
+// walk gives leave L: over the full racks R >= L the table values, of
+// prod_t C(unseen_t, R_t - L_t) times V(R), or times 1. The weight is a
+// product over letters, so S is a product of one-letter transforms, each
+// acting on one letter's count: from the counts of a rack to those of a
+// leave, S'(.., l, ..) = sum over r >= l of C(unseen, r - l) * S(.., r, ..).
+// The transforms of different letters commute. A state whose counts total
+// RACK_SIZE holds the counts of a rack R in every letter, transformed or
+// not, so its value is V(R) at every step: only the states of up to
+// RACK_SIZE - 1 tiles, which are the leaves, are stored, and the others are
+// read from the table when they are a source.
+//
+// The sums are integers and are added in int64 (see
+// pool_leaves_create_by_transform for why the result equals the walk's
+// doubles).
+typedef struct PoolLeaveSums {
+  int64_t value_sum;
+  int64_t draws;
+} PoolLeaveSums;
+
+typedef struct PoolLeavesTransform {
+  const RackValueTable *rvt;
+  int ld_size;
+  int unseen_counts[MAX_ALPHABET_SIZE];
+  int dist_counts[MAX_ALPHABET_SIZE];
+  // The tiles of the letters from ml on.
+  int dist_from[MAX_ALPHABET_SIZE + 1];
+  // ways[ml][drawn] is C(unseen_counts[ml], drawn).
+  int64_t ways[MAX_ALPHABET_SIZE][RACK_SIZE + 1];
+  // The states are numbered among the leaves of up to RACK_SIZE - 1 tiles
+  // that the letter distribution can deal: a leave's index is the sum over
+  // its letters of leave_offsets[ml][capacity][count], where capacity is
+  // RACK_SIZE - 1 less the tiles of the letters before ml. The leaves that
+  // agree on the letters before ml form one block, laid out by ml and
+  // capacity alone, of one sub-block for each count of ml.
+  uint32_t leave_offsets[MAX_ALPHABET_SIZE][RACK_SIZE][RACK_SIZE];
+  // For a last tile, contiguous for the loops over it: the rack offset
+  // (rank_offsets[ml][1][1], or UINT32_MAX for a letter with no tiles), and
+  // leave_offsets[ml][capacity][1] by capacity.
+  uint32_t one_tile_rack_offsets[MAX_ALPHABET_SIZE];
+  uint32_t one_tile_leave_offsets[RACK_SIZE][MAX_ALPHABET_SIZE];
+  uint32_t number_of_leaves;
+  PoolLeaveSums *sums;
+  // The largest |V(R)| of the racks read.
+  int32_t max_abs_value;
+} PoolLeavesTransform;
+
+// Sets the pool, the bag, opponent_rack and mover_rack as in
+// pool_leaves_create_by_walk, and returns its number of tiles.
+static int pool_leaves_transform_set_pool(PoolLeavesTransform *transform,
+                                          const PoolShiftTable *table,
+                                          const LetterDistribution *ld,
+                                          const Bag *bag,
+                                          const Rack *opponent_rack,
+                                          const Rack *mover_rack) {
+  transform->rvt = table->exact_values;
+  transform->ld_size = table->ld_size;
+  int pool_size = pool_shift_get_unseen_counts(table, bag, opponent_rack,
+                                               transform->unseen_counts);
+  if (mover_rack != NULL) {
+    for (int ml = 0; ml < transform->ld_size; ml++) {
+      const int held = rack_get_letter(mover_rack, (MachineLetter)ml);
+      transform->unseen_counts[ml] += held;
+      pool_size += held;
+    }
+  }
+  transform->dist_from[transform->ld_size] = 0;
+  for (int ml = transform->ld_size - 1; ml >= 0; ml--) {
+    transform->dist_counts[ml] = ld_get_dist(ld, (MachineLetter)ml);
+    transform->dist_from[ml] =
+        transform->dist_from[ml + 1] + transform->dist_counts[ml];
+  }
+  return pool_size;
+}
+
+// The most draws of any leave: the largest C(pool_size, k) for k up to
+// RACK_SIZE, as the draws of k tiles from a pool, weighted by letter as
+// above, number C(pool_size, k) (Vandermonde). UINT64_MAX if that does not
+// fit.
+static uint64_t pool_leaves_get_max_draws(int pool_size) {
+  uint64_t draws = 1;
+  uint64_t max_draws = 1;
+  for (int tiles = 1; tiles <= RACK_SIZE && tiles <= pool_size; tiles++) {
+    const uint64_t factor = (uint64_t)pool_size - (uint64_t)tiles + 1;
+    if (draws > UINT64_MAX / factor) {
+      return UINT64_MAX;
+    }
+    draws = draws * factor / (uint64_t)tiles;
+    if (draws > max_draws) {
+      max_draws = draws;
+    }
+  }
+  return max_draws;
+}
+
+// Sets ways, which must fit (see pool_leaves_create_by_transform), and the
+// leave offsets.
+static void pool_leaves_transform_set_tables(PoolLeavesTransform *transform) {
+  for (int ml = 0; ml < transform->ld_size; ml++) {
+    const int unseen = transform->unseen_counts[ml];
+    int64_t ways = 1;
+    for (int drawn = 0; drawn <= RACK_SIZE; drawn++) {
+      transform->ways[ml][drawn] = drawn <= unseen ? ways : 0;
+      ways = ways * (unseen - drawn) / (drawn + 1);
+    }
+  }
+  // dealable[capacity]: the leaves of up to capacity tiles that the letters
+  // after the current one can deal. After the last letter, the empty leave.
+  uint32_t dealable[RACK_SIZE];
+  for (int capacity = 0; capacity < RACK_SIZE; capacity++) {
+    dealable[capacity] = 1;
+  }
+  for (int ml = transform->ld_size - 1; ml >= 0; ml--) {
+    uint32_t dealable_with_letter[RACK_SIZE];
+    for (int capacity = 0; capacity < RACK_SIZE; capacity++) {
+      uint32_t offset = 0;
+      for (int count = 0; count < RACK_SIZE; count++) {
+        transform->leave_offsets[ml][capacity][count] = offset;
+        if (count <= capacity && count <= transform->dist_counts[ml]) {
+          offset += dealable[capacity - count];
+        }
+      }
+      dealable_with_letter[capacity] = offset;
+    }
+    memcpy(dealable, dealable_with_letter, sizeof(dealable));
+  }
+  transform->number_of_leaves = dealable[RACK_SIZE - 1];
+  for (int ml = 0; ml < transform->ld_size; ml++) {
+    transform->one_tile_rack_offsets[ml] =
+        transform->dist_counts[ml] == 0
+            ? UINT32_MAX
+            : transform->rvt->rank_offsets[ml][1][1];
+    for (int capacity = 0; capacity < RACK_SIZE; capacity++) {
+      transform->one_tile_leave_offsets[capacity][ml] =
+          transform->leave_offsets[ml][capacity][1];
+    }
+  }
+}
+
+// Adds ways times the full rack at rack_index, if the table values it, to
+// sums, and returns the rack's |V|, or 0.
+static inline int32_t pool_leaves_add_rack(const RackValueTable *rvt,
+                                           uint32_t rack_index,
+                                           PoolLeaveSums *sums, int64_t ways) {
+  const int32_t stored = rack_value_table_read_stored(rvt, rack_index);
+  if (stored == RACK_VALUE_TABLE_UNVALUED) {
+    return 0;
+  }
+  sums->value_sum += ways * (int64_t)stored;
+  sums->draws += ways;
+  return stored < 0 ? -stored : stored;
+}
+
+// Keeps the largest |V| read.
+static inline void pool_leaves_note_value(PoolLeavesTransform *transform,
+                                          int32_t magnitude) {
+  if (magnitude > transform->max_abs_value) {
+    transform->max_abs_value = magnitude;
+  }
+}
+
+// pool_leaves_add_racks for one tile: T is one tile of a letter from ml on.
+static inline void
+pool_leaves_add_one_tile_racks(PoolLeavesTransform *transform, int ml,
+                               uint32_t rack_index, int capacity,
+                               uint32_t leave_index, int64_t ways) {
+  const RackValueTable *rvt = transform->rvt;
+  PoolLeaveSums *sums = transform->sums + leave_index;
+  const uint32_t *rack_offsets = transform->one_tile_rack_offsets;
+  const uint32_t *leave_offsets = transform->one_tile_leave_offsets[capacity];
+  int32_t max_abs_value = transform->max_abs_value;
+  for (int last_ml = ml; last_ml < transform->ld_size; last_ml++) {
+    const uint32_t rack_offset = rack_offsets[last_ml];
+    if (rack_offset == UINT32_MAX) {
+      continue;
+    }
+    const int32_t magnitude = pool_leaves_add_rack(
+        rvt, rack_index + rack_offset, sums + leave_offsets[last_ml], ways);
+    max_abs_value = magnitude > max_abs_value ? magnitude : max_abs_value;
+  }
+  transform->max_abs_value = max_abs_value;
+}
+
+// For every T of exactly tiles (at least 1) tiles of the letters from ml
+// on, adds ways times the full rack at rack_index plus T to the state of T
+// in the block at leave_index, of up to capacity (at least tiles) tiles of
+// those letters. T is enumerated by its lowest letter and that letter's
+// count; the last tile or two are done here, without a call per rack.
+static void pool_leaves_add_racks(PoolLeavesTransform *transform, int ml,
+                                  int tiles, uint32_t rack_index, int capacity,
+                                  uint32_t leave_index, int64_t ways) {
+  if (tiles == 1) {
+    pool_leaves_add_one_tile_racks(transform, ml, rack_index, capacity,
+                                   leave_index, ways);
+    return;
+  }
+  const RackValueTable *rvt = transform->rvt;
+  for (int first_ml = ml;
+       first_ml < transform->ld_size && transform->dist_from[first_ml] >= tiles;
+       first_ml++) {
+    const int dist = transform->dist_counts[first_ml];
+    const int max_count = tiles < dist ? tiles : dist;
+    // The letters after first_ml hold the rest.
+    const int fewest = tiles - transform->dist_from[first_ml + 1];
+    const int min_count = fewest > 1 ? fewest : 1;
+    const uint32_t *leave_offsets =
+        transform->leave_offsets[first_ml][capacity];
+    for (int count = min_count; count <= max_count; count++) {
+      const uint32_t rack_offset = rvt->rank_offsets[first_ml][tiles][count];
+      if (rack_offset == UINT32_MAX) {
+        continue;
+      }
+      const int rest = tiles - count;
+      if (rest == 0) {
+        pool_leaves_note_value(
+            transform,
+            pool_leaves_add_rack(
+                rvt, rack_index + rack_offset,
+                &transform->sums[leave_index + leave_offsets[count]], ways));
+      } else if (rest == 1) {
+        pool_leaves_add_one_tile_racks(
+            transform, first_ml + 1, rack_index + rack_offset, capacity - count,
+            leave_index + leave_offsets[count], ways);
+      } else {
+        pool_leaves_add_racks(transform, first_ml + 1, rest,
+                              rack_index + rack_offset, capacity - count,
+                              leave_index + leave_offsets[count], ways);
+      }
+    }
+  }
+}
+
+// Adds ways times every state of the block at source_index, of up to
+// source_capacity tiles of the letters from ml on, to the state of the same
+// leave in the block at dest_index, of up to dest_capacity (more) tiles.
+static void pool_leaves_add_states(PoolLeavesTransform *transform, int ml,
+                                   int source_capacity, uint32_t source_index,
+                                   int dest_capacity, uint32_t dest_index,
+                                   int64_t ways) {
+  PoolLeaveSums *sums = transform->sums;
+  sums[dest_index].value_sum += ways * sums[source_index].value_sum;
+  sums[dest_index].draws += ways * sums[source_index].draws;
+  for (int first_ml = ml; first_ml < transform->ld_size; first_ml++) {
+    const int dist = transform->dist_counts[first_ml];
+    const int max_count = source_capacity < dist ? source_capacity : dist;
+    const uint32_t *source_offsets =
+        transform->leave_offsets[first_ml][source_capacity];
+    const uint32_t *dest_offsets =
+        transform->leave_offsets[first_ml][dest_capacity];
+    for (int count = 1; count <= max_count; count++) {
+      const uint32_t source = source_index + source_offsets[count];
+      const uint32_t dest = dest_index + dest_offsets[count];
+      if (count == source_capacity) {
+        // A block of one state.
+        sums[dest].value_sum += ways * sums[source].value_sum;
+        sums[dest].draws += ways * sums[source].draws;
+      } else {
+        pool_leaves_add_states(transform, first_ml + 1, source_capacity - count,
+                               source, dest_capacity - count, dest, ways);
+      }
+    }
+  }
+}
+
+// The block of one leave of RACK_SIZE - 1 tiles, none of them ml or later:
+// a draw of one of those letters makes it a full rack.
+static void pool_leaves_transform_long_leave(PoolLeavesTransform *transform,
+                                             int ml, uint32_t leave_index,
+                                             uint32_t rack_index) {
+  const RackValueTable *rvt = transform->rvt;
+  const uint32_t *rack_offsets = transform->one_tile_rack_offsets;
+  // Summed here, not through memory: every rack adds to the one state.
+  PoolLeaveSums sums = transform->sums[leave_index];
+  int32_t max_abs_value = transform->max_abs_value;
+  for (int last_ml = ml; last_ml < transform->ld_size; last_ml++) {
+    const uint32_t rack_offset = rack_offsets[last_ml];
+    if (transform->unseen_counts[last_ml] == 0 || rack_offset == UINT32_MAX) {
+      continue;
+    }
+    const int32_t magnitude = pool_leaves_add_rack(
+        rvt, rack_index + rack_offset, &sums, transform->ways[last_ml][1]);
+    max_abs_value = magnitude > max_abs_value ? magnitude : max_abs_value;
+  }
+  transform->sums[leave_index] = sums;
+  transform->max_abs_value = max_abs_value;
+}
+
+// Applies the transforms of the letters from ml on to the block at
+// leave_index: the states that agree on the counts of the letters before ml,
+// which are still a rack's and make up rack_index, and hold up to capacity
+// more tiles. Letters after ml go first, sub-block by sub-block, then ml in
+// place: a sub-block takes from those of higher counts, which still hold
+// their values before ml.
+static void pool_leaves_transform_block(PoolLeavesTransform *transform, int ml,
+                                        int capacity, uint32_t leave_index,
+                                        uint32_t rack_index) {
+  if (capacity == 0) {
+    pool_leaves_transform_long_leave(transform, ml, leave_index, rack_index);
+    return;
+  }
+  if (ml == transform->ld_size) {
+    return;
+  }
+  const RackValueTable *rvt = transform->rvt;
+  const uint32_t *leave_offsets = transform->leave_offsets[ml][capacity];
+  const int rack_tiles = capacity + 1;
+  const int dist = transform->dist_counts[ml];
+  const int max_count = capacity < dist ? capacity : dist;
+  for (int count = 0; count <= max_count; count++) {
+    uint32_t rack_offset = 0;
+    if (count != 0) {
+      rack_offset = rvt->rank_offsets[ml][rack_tiles][count];
+      // No rack has this count: the sub-block stays 0.
+      if (rack_offset == UINT32_MAX) {
+        continue;
+      }
+    }
+    pool_leaves_transform_block(transform, ml + 1, capacity - count,
+                                leave_index + leave_offsets[count],
+                                rack_index + rack_offset);
+  }
+  const int unseen = transform->unseen_counts[ml];
+  if (unseen == 0) {
+    return;
+  }
+  const int max_rack_count = rack_tiles < dist ? rack_tiles : dist;
+  for (int count = 0; count <= max_count; count++) {
+    const uint32_t dest_index = leave_index + leave_offsets[count];
+    const int max_source =
+        count + unseen < max_rack_count ? count + unseen : max_rack_count;
+    for (int source = count + 1; source <= max_source; source++) {
+      const int64_t ways = transform->ways[ml][source - count];
+      if (source <= capacity) {
+        pool_leaves_add_states(transform, ml + 1, capacity - source,
+                               leave_index + leave_offsets[source],
+                               capacity - count, dest_index, ways);
+      }
+      // The sources of RACK_SIZE tiles.
+      const uint32_t rack_offset = rvt->rank_offsets[ml][rack_tiles][source];
+      if (rack_offset == UINT32_MAX) {
+        continue;
+      }
+      if (source == rack_tiles) {
+        pool_leaves_note_value(
+            transform,
+            pool_leaves_add_rack(rvt, rack_index + rack_offset,
+                                 &transform->sums[dest_index], ways));
+      } else {
+        pool_leaves_add_racks(transform, ml + 1, rack_tiles - source,
+                              rack_index + rack_offset, capacity - count,
+                              dest_index, ways);
+      }
+    }
+  }
+}
+
+// The index of a leave, its letters in ascending order.
+static uint32_t
+pool_leaves_transform_get_index(const PoolLeavesTransform *transform,
+                                const MachineLetter *letters,
+                                int number_of_letters) {
+  uint32_t leave_index = 0;
+  int capacity = RACK_SIZE - 1;
+  int letter_idx = 0;
+  while (letter_idx < number_of_letters) {
+    const MachineLetter ml = letters[letter_idx];
+    int count = 1;
+    while (letter_idx + count < number_of_letters &&
+           letters[letter_idx + count] == ml) {
+      count++;
+    }
+    leave_index += transform->leave_offsets[ml][capacity][count];
+    capacity -= count;
+    letter_idx += count;
+  }
+  return leave_index;
+}
+
+typedef struct PoolLeavesKlvFill {
+  const PoolLeavesTransform *transform;
+  KLV *klv;
+  double empty_value;
+  // Whether every KLV index came after the one before: in a KLV whose
+  // every node accepts, they do, and no two leaves share an index.
+  bool indices_increase;
+  bool has_klv_index;
+  uint32_t last_klv_index;
+} PoolLeavesKlvFill;
+
+// Sets the pool KLV's value of a leave, as pool_leaves_fill_klv does.
+static void pool_leaves_set_klv_value(void *context,
+                                      const MachineLetter *letters,
+                                      int number_of_letters,
+                                      uint32_t klv_index) {
+  PoolLeavesKlvFill *fill = context;
+  if (fill->has_klv_index && klv_index <= fill->last_klv_index) {
+    fill->indices_increase = false;
+  }
+  fill->has_klv_index = true;
+  fill->last_klv_index = klv_index;
+  const PoolLeaveSums *sums =
+      &fill->transform->sums[pool_leaves_transform_get_index(
+          fill->transform, letters, number_of_letters)];
+  if (sums->draws > 0) {
+    fill->klv->leave_values[klv_index] = (Equity)llround(
+        ((double)sums->value_sum / (double)sums->draws) - fill->empty_value);
+  }
+}
+
+// Builds what pool_leaves_create_by_walk builds, bit for bit, or returns
+// NULL when the sums might not fit int64 or the walk's doubles might not be
+// exact.
+//
+// Every partial sum the walk forms for a leave of k tiles fewer than a rack
+// is at most max |V| times the draws of k tiles, C(pool_size, k): when that
+// is below 2^53, every double the walk forms is an exact integer, so its
+// sums do not depend on their order and equal the exact sums here, and the
+// values computed from them below are the walk's. The KLV values come in
+// the order of the KLV's word graph rather than the walk's, which is the
+// same when no two leaves share an index.
+static PoolLeaves *pool_leaves_create_by_transform(const PoolShiftTable *table,
+                                                   const LetterDistribution *ld,
+                                                   const Bag *bag,
+                                                   const Rack *opponent_rack,
+                                                   const Rack *mover_rack) {
+  PoolLeavesTransform *transform = malloc_or_die(sizeof(PoolLeavesTransform));
+  const int pool_size = pool_leaves_transform_set_pool(
+      transform, table, ld, bag, opponent_rack, mover_rack);
+  const uint64_t max_draws = pool_leaves_get_max_draws(pool_size);
+  // With every |V| below 2^23, every sum and product below fits in 62 bits.
+  if (max_draws >=
+      (UINT64_C(1) << 62U) / (uint64_t)RACK_VALUE_TABLE_MAX_VALUE) {
+    free(transform);
+    return NULL;
+  }
+  pool_leaves_transform_set_tables(transform);
+  transform->sums =
+      calloc_or_die(transform->number_of_leaves, sizeof(PoolLeaveSums));
+  transform->max_abs_value = 0;
+  pool_leaves_transform_block(transform, 0, RACK_SIZE - 1, 0, 0);
+  if ((uint64_t)transform->max_abs_value * max_draws >= (UINT64_C(1) << 53U)) {
+    free(transform->sums);
+    free(transform);
+    return NULL;
+  }
+
+  const KLV *stock = table->klv;
+  const KWG *stock_kwg = klv_get_kwg(stock);
+  KWG *kwg = kwg_create_empty();
+  const int number_of_nodes = kwg_get_number_of_nodes(stock_kwg);
+  kwg_allocate_nodes(kwg, (size_t)number_of_nodes);
+  memcpy(kwg_get_mutable_nodes(kwg), kwg_get_mutable_nodes(stock_kwg),
+         sizeof(uint32_t) * (size_t)number_of_nodes);
+  KLV *klv = klv_create_zeroed_from_kwg(
+      kwg, (int)klv_get_number_of_leaves(stock), klv_get_name(stock));
+  memcpy(klv->leave_values, stock->leave_values,
+         sizeof(Equity) * (size_t)klv_get_number_of_leaves(stock));
+  const PoolLeaveSums *empty_sums = &transform->sums[0];
+  PoolLeavesKlvFill fill = {
+      .transform = transform,
+      .klv = klv,
+      .empty_value = empty_sums->draws > 0 ? (double)empty_sums->value_sum /
+                                                 (double)empty_sums->draws
+                                           : 0.0,
+      .indices_increase = true,
+      .has_klv_index = false,
+      .last_klv_index = 0,
+  };
+  pool_shift_klv_walk(klv, ld, pool_leaves_set_klv_value, &fill);
+  free(transform->sums);
+  if (!fill.indices_increase) {
+    klv_destroy(klv);
+    free(transform);
+    return NULL;
+  }
+  klv_mark_leave_values_mutated(klv);
+  PoolLeaves *pool_leaves = malloc_or_die(sizeof(PoolLeaves));
+  pool_leaves->klv = klv;
+  pool_leaves->table =
+      pool_shift_table_create_with_fill(klv, ld, pool_leaves_fill_exhausted);
+  pool_leaves->table->has_reference_pool = true;
+  pool_leaves->table->exact_values = table->exact_values;
+  pool_leaves->table->reference_exact_offset =
+      (Equity)llround(fill.empty_value);
+  pool_leaves->table->reference_total = pool_size;
+  memcpy(pool_leaves->table->reference_counts, transform->unseen_counts,
+         sizeof(transform->unseen_counts));
+  free(transform);
+  return pool_leaves;
+}
+
+PoolLeaves *pool_leaves_create(const PoolShiftTable *table,
+                               const LetterDistribution *ld, const Bag *bag,
+                               const Rack *opponent_rack,
+                               const Rack *mover_rack) {
+  PoolLeaves *pool_leaves = pool_leaves_create_by_transform(
+      table, ld, bag, opponent_rack, mover_rack);
+  if (pool_leaves == NULL) {
+    pool_leaves =
+        pool_leaves_create_by_walk(table, ld, bag, opponent_rack, mover_rack);
+  }
   return pool_leaves;
 }
 
@@ -615,17 +1515,7 @@ void pool_shift_fill_rack(const PoolShiftTable *table,
     for (int ml = 0; ml < POOL_SHIFT_MAX_STRIDE; ml++) {
       result->weights[ml] = ml < table->ld_size ? unseen_counts[ml] : 0;
     }
-    Rack leave;
-    for (int idx = 0; idx < count; idx++) {
-      rack_set_dist_size_and_reset(&leave, table->ld_size);
-      for (int bit_idx = 0; bit_idx < RACK_SIZE; bit_idx++) {
-        if ((result->map_indices[idx] & (1 << bit_idx)) != 0) {
-          rack_add_letter(&leave, result->bit_tiles[bit_idx]);
-        }
-      }
-      result->shifts[idx] =
-          pool_shift_get_exact_shift(table, unseen_counts, &leave);
-    }
+    pool_shift_fill_exact_shifts(table, unseen_counts, rack, result);
     return;
   }
   for (int idx = 0; idx < count; idx++) {

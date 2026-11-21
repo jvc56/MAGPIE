@@ -153,6 +153,17 @@ PoolLeaves *pool_leaves_create(const PoolShiftTable *table,
                                const LetterDistribution *ld, const Bag *bag,
                                const Rack *opponent_rack,
                                const Rack *mover_rack);
+
+// Builds the same leaves by a walk over every way to split every full rack
+// into a leave and a draw: far slower, and the definition the tests compare
+// pool_leaves_create against. pool_leaves_create falls back to it when its
+// own sums might not be exact, or when the KLV's word indices do not increase
+// along its KWG.
+PoolLeaves *pool_leaves_create_by_walk(const PoolShiftTable *table,
+                                       const LetterDistribution *ld,
+                                       const Bag *bag,
+                                       const Rack *opponent_rack,
+                                       const Rack *mover_rack);
 void pool_leaves_destroy(PoolLeaves *pool_leaves);
 
 PoolShiftTable *pool_shift_table_create(const KLV *klv,
