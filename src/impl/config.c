@@ -18,10 +18,12 @@
 #include "../def/exec_defs.h"
 #include "../def/game_defs.h"
 #include "../def/game_history_defs.h"
+#include "../def/lamc_defs.h"
 #include "../def/letter_distribution_defs.h"
 #include "../def/move_defs.h"
 #include "../def/pat_defs.h"
 #include "../def/peg_defs.h"
+#include "../def/play_feature_defs.h"
 #include "../def/players_data_defs.h"
 #include "../def/rack_defs.h"
 #include "../def/sim_defs.h"
@@ -46,8 +48,10 @@
 #include "../ent/klv.h"
 #include "../ent/klv_csv.h"
 #include "../ent/kwg.h"
+#include "../ent/lamc_args.h"
 #include "../ent/letter_distribution.h"
 #include "../ent/move.h"
+#include "../ent/nested_args.h"
 #include "../ent/pat.h"
 #include "../ent/pat_lexicon.h"
 #include "../ent/pat_utility.h"
@@ -94,8 +98,10 @@
 #include "peg.h"
 #include "peg_fit.h"
 #include "play_chooser.h"
+#include "play_feature_registry.h"
 #include "rack_draw.h"
 #include "rack_info_table_maker.h"
+#include "rollout_nested.h"
 #include "simmer.h"
 #include <assert.h>
 #include <ctype.h>
@@ -364,6 +370,25 @@ struct Config {
   // when it fits in this machine's memory and the sim's rollouts pay for its
   // build (census_rollout_auto_fits, census_rollout_prepare_if_it_pays).
   bool sim_census_rollout;
+  // The LAMC settings both players share; lamc_args.enabled is unused, the
+  // three flags below say who searches.
+  LamcArgs lamc_args;
+  bool sim_lamc;
+  bool p1_sim_lamc;
+  bool p2_sim_lamc;
+  // -nested, and the per-player -nested1 and -nested2, which default to it.
+  NestedArgs sim_nested;
+  NestedArgs p1_sim_nested;
+  NestedArgs p2_sim_nested;
+  // -apstaticbag (see AutoplayArgs.static_until_bag).
+  int autoplay_static_bag;
+  // -sfinish (see SimArgs.finish_endgame), and the per-player -sfinish1 and
+  // -sfinish2 for autoplay, which default to it.
+  bool sim_finish;
+  bool p1_sim_finish;
+  bool p2_sim_finish;
+  // -sfinishbag (see SimArgs.finish_max_bag), for every sim.
+  int sim_finish_bag;
   bool sim_census_rollout_auto;
   bool use_heat_map;
   bool print_boards;
@@ -2808,6 +2833,226 @@ static void help_entry_fill(const Config *config, int token,
              "did. true always uses it, and needs patrolloutfast set to "
              "true or patrollout to false; false never uses it.";
       break;
+    case ARG_TOKEN_LAMC:
+      usages[0] = "<true_or_false>";
+      examples[0] = "true";
+      examples[1] = "false";
+      text = "Specifies whether Locally Adaptive Monte Carlo (LAMC) picks "
+             "the plays a simulation simulates. It embeds every play within "
+             "lamcfloor points of the best in a space of features, samples a "
+             "pool of them spread over that space with a few rollouts each, "
+             "and fits a Gaussian process from features to win percentage. "
+             "Each round keeps the best plays by its prediction and replaces "
+             "the others with plays it favors. The plays it predicts best "
+             "are then simulated as usual with the rest of the iterations "
+             "and time. Off by default.";
+      break;
+    case ARG_TOKEN_LAMC_POOL:
+      usages[0] = "<number_of_plays>";
+      examples[0] = "16";
+      text = "Specifies how many plays LAMC samples in each round.";
+      break;
+    case ARG_TOKEN_LAMC_KEEP:
+      usages[0] = "<number_of_plays>";
+      examples[0] = "4";
+      text = "Specifies how many plays LAMC keeps from one round to the "
+             "next. They are the best by its prediction.";
+      break;
+    case ARG_TOKEN_LAMC_SEED_PLAYS:
+      usages[0] = "<number_of_plays>";
+      examples[0] = "4";
+      text = "Specifies how many of LAMC's first pool are the best plays by "
+             "static equity. The rest are spread over the feature space. 12 "
+             "by default.";
+      break;
+    case ARG_TOKEN_LAMC_SHALLOW:
+      usages[0] = "<number_of_samples>";
+      examples[0] = "4";
+      text = "Specifies how many samples LAMC gives each play in the pool in "
+             "each round.";
+      break;
+    case ARG_TOKEN_LAMC_ROUNDS:
+      usages[0] = "<number_of_rounds>";
+      examples[0] = "12";
+      text = "Specifies the most rounds LAMC runs.";
+      break;
+    case ARG_TOKEN_LAMC_STABLE:
+      usages[0] = "<number_of_rounds>";
+      examples[0] = "3";
+      text = "Specifies after how many rounds with the same kept plays LAMC "
+             "stops searching.";
+      break;
+    case ARG_TOKEN_LAMC_EXPLORE:
+      usages[0] = "<share>";
+      examples[0] = "0.3";
+      text = "Specifies the share of a simulation's iterations and time LAMC "
+             "may search with.";
+      break;
+    case ARG_TOKEN_LAMC_FLOOR:
+      usages[0] = "<points>";
+      examples[0] = "30";
+      text = "Specifies how far below the best static equity LAMC considers "
+             "plays, in points.";
+      break;
+    case ARG_TOKEN_LAMC_UNIVERSE:
+      usages[0] = "<number_of_plays>";
+      examples[0] = "400";
+      text = "Specifies the most plays LAMC considers, best by static "
+             "equity.";
+      break;
+    case ARG_TOKEN_LAMC_EVALUATED:
+      usages[0] = "<number_of_plays>";
+      examples[0] = "128";
+      text = "Specifies the most plays LAMC samples in one search.";
+      break;
+    case ARG_TOKEN_LAMC_FINALISTS:
+      usages[0] = "<number_of_plays>";
+      examples[0] = "15";
+      text = "Specifies how many plays LAMC hands to the simulation. 0, the "
+             "default, hands it as many as numplays.";
+      break;
+    case ARG_TOKEN_LAMC_CYCLE:
+      usages[0] = "<true_or_false>";
+      examples[0] = "false";
+      text = "Specifies whether LAMC's search samples cycle the bag as "
+             "sbagcycle does. Off by default.";
+      break;
+    case ARG_TOKEN_LAMC_FEATURES:
+      usages[0] = "<feature_list>";
+      examples[0] = "score,leave,tiles";
+      text = "Specifies the comma-separated features of the space LAMC "
+             "searches. The features are score, leave, equity, tiles, type, "
+             "bagafter, leaveshape, leavedups, location, direction, premium "
+             "and perimeter.";
+      break;
+    case ARG_TOKEN_LAMC_PROPOSAL:
+      usages[0] = "<ascent_or_acquire>";
+      examples[0] = "ascent";
+      examples[1] = "acquire";
+      text = "Specifies how LAMC proposes new plays: ascent or acquire. "
+             "Ascent steps up the gradient of its prediction from each play "
+             "it drops. Acquire, the default, takes the plays with the "
+             "highest upper confidence bound.";
+      break;
+    case ARG_TOKEN_LAMC_KERNEL:
+      usages[0] = "<matern52_or_se>";
+      examples[0] = "matern52";
+      text = "Specifies the kernel of LAMC's Gaussian process: matern52 or "
+             "se. Matern52 is the default; se is squared exponential.";
+      break;
+    case ARG_TOKEN_LAMC_LENGTH:
+      usages[0] = "<length>";
+      examples[0] = "1.5";
+      text = "Specifies the length scale of LAMC's Gaussian process. It is "
+             "in standard deviations of each feature, and each fit chooses "
+             "among multiples of it.";
+      break;
+    case ARG_TOKEN_LAMC_RADIUS:
+      usages[0] = "<length>";
+      examples[0] = "1";
+      text = "Specifies the length of the steps of LAMC's ascent proposal. "
+             "It is in standard deviations of each feature.";
+      break;
+    case ARG_TOKEN_LAMC_BETA:
+      usages[0] = "<weight>";
+      examples[0] = "1";
+      text = "Specifies the weight of the standard deviation in LAMC's "
+             "acquire proposal.";
+      break;
+    case ARG_TOKEN_LAMC_EQUITY_MEAN:
+      usages[0] = "<true_or_false>";
+      examples[0] = "true";
+      text = "Specifies whether LAMC's Gaussian process has a prior mean "
+             "linear in static equity. Otherwise the prior mean is constant. "
+             "On by default.";
+      break;
+    case ARG_TOKEN_LAMC_FINAL_ALL:
+      usages[0] = "<true_or_false>";
+      examples[0] = "true";
+      text = "Specifies whether LAMC hands the simulation its best predicted "
+             "plays of all plays. Otherwise they come from the plays it "
+             "sampled. On by default.";
+      break;
+    case ARG_TOKEN_LAMC_MAX_BAG:
+      usages[0] = "<number_of_tiles>";
+      examples[0] = "20";
+      text = "Specifies the most tiles in the bag at which LAMC searches. "
+             "With more, the simulation takes the top plays by static equity "
+             "as usual. 20 by default; 1000 always searches.";
+      break;
+    case ARG_TOKEN_LAMC_REUSE:
+      usages[0] = "<true_or_false>";
+      examples[0] = "true";
+      text = "Specifies whether the simulation of LAMC's plays continues the "
+             "samples the search took of them. Otherwise it starts over with "
+             "other seeds. On by default.";
+      break;
+    case ARG_TOKEN_LAMC_STATIC_FINALISTS:
+      usages[0] = "<number_of_plays>";
+      examples[0] = "8";
+      text = "Specifies how many top plays by static equity LAMC always "
+             "hands the simulation. The rest of its plays are its best "
+             "predicted. 10 by default.";
+      break;
+    case ARG_TOKEN_P1_LAMC:
+    case ARG_TOKEN_P2_LAMC:
+      usages[0] = "<true_or_false>";
+      text = "Specifies whether LAMC (see lamc) picks player 1 or 2's plays "
+             "to simulate in autoplay.";
+      break;
+    case ARG_TOKEN_NESTED:
+    case ARG_TOKEN_P1_NESTED:
+    case ARG_TOKEN_P2_NESTED:
+      usages[0] = "<spec>";
+      examples[0] = "off";
+      examples[1] = "plies=0,k=6,m=8,h=1";
+      examples[2] = "plies=0+1,lamc=1,dcache=1/plies=0,k=3,m=2";
+      text = "Specifies whether a simulation's rollouts choose the plays of "
+             "some plies by a nested search instead of by static equity "
+             "(nested1 and nested2 for each player in autoplay). off, or "
+             "comma-separated settings: plies (joined by +, 0 is the reply "
+             "to the candidate), k (candidates), m (nested rollouts each), h "
+             "(static plies after the candidate in a nested rollout), margin "
+             "(points below the best), maxbag, minbag, alloc (uniform or "
+             "race), z (the race's standard errors), switch (the nested "
+             "utility a candidate other than the static best must gain), "
+             "dcache (1 to cache decisions), lamc (1 for a LAMC search over "
+             "every play, with pool, keep, rounds and beta), share, universe, "
+             "seeds, finalists and stage. Settings after a / are a deeper "
+             "level, whose search chooses plays in the nested rollouts of the "
+             "level before it, starting from that level's settings. Off by "
+             "default.";
+      break;
+    case ARG_TOKEN_SIM_FINISH_BAG:
+      usages[0] = "<tiles>";
+      examples[0] = "2";
+      text = "Specifies that with sfinish, a simulation's rollout also plays "
+             "on to the end of the game when its bag holds at most this many "
+             "tiles at its last ply. 0 (the default) for only an empty bag.";
+      break;
+    case ARG_TOKEN_P1_SIM_FINISH:
+    case ARG_TOKEN_P2_SIM_FINISH:
+      usages[0] = "<true_or_false>";
+      text = "Specifies whether player 1 or 2's simulations finish their "
+             "rollouts in autoplay (see sfinish).";
+      break;
+    case ARG_TOKEN_SIM_FINISH:
+      usages[0] = "<true_or_false>";
+      examples[0] = "true";
+      examples[1] = "false";
+      text = "Specifies whether a simulation's rollout whose bag is empty at "
+             "its last ply plays on to the end of the game by static "
+             "equity, and counts the game's result instead of the win "
+             "percentage table's estimate. Off by default.";
+      break;
+    case ARG_TOKEN_AUTOPLAY_STATIC_BAG:
+      usages[0] = "<tiles>";
+      examples[0] = "20";
+      text = "Specifies that in autoplay, while the bag holds more than this "
+             "many tiles, both players play their top static equity play, so "
+             "that each game of a pair reaches the same late position before "
+             "the players' own choices begin. 0 (the default) for never.";
+      break;
     case ARG_TOKEN_USE_HEAT_MAP:
       usages[0] = "<true_or_false>";
       examples[0] = "true";
@@ -4099,6 +4344,13 @@ static void config_load_player_pat_usage(Config *config, int player_index,
   }
 }
 
+// The LAMC settings for a player's sim: the shared ones, on or off for them.
+static void config_set_sim_args_lamc(const Config *config, const bool enabled,
+                                     SimArgs *sim_args) {
+  sim_args->lamc_args = config->lamc_args;
+  sim_args->lamc_args.enabled = enabled;
+}
+
 // Copies the rollout PAT settings of the simming player (player_index) into
 // sim_args (see SimArgs.pat_rollout_disabled).
 static void config_set_sim_args_pat_rollout(const Config *config,
@@ -4138,6 +4390,10 @@ void config_fill_sim_args(const Config *config, Rack *known_opp_rack,
       config->sim_margin_forecast, &inference_args, sim_args);
   sim_args->bag_cycle = config->sim_bag_cycle;
   sim_args->use_census_rollout = config->sim_census_rollout;
+  config_set_sim_args_lamc(config, config->sim_lamc, sim_args);
+  sim_args->nested_args = config->sim_nested;
+  sim_args->finish_endgame = config->sim_finish;
+  sim_args->finish_max_bag = config->sim_finish_bag;
   sim_args->census_rollout_auto = config->sim_census_rollout_auto;
   if (config->game) {
     config_set_sim_args_pat_rollout(
@@ -5550,6 +5806,7 @@ void config_fill_autoplay_args(const Config *config,
   autoplay_args->solver_settings[1] = config->solver_settings[1];
   autoplay_args->movegen_budget[0] = config->p1_movegen_budget;
   autoplay_args->movegen_budget[1] = config->p2_movegen_budget;
+  autoplay_args->static_until_bag = config->autoplay_static_bag;
   autoplay_args->total_num_threads = config->num_threads;
   autoplay_args->solver_tt_fraction_of_mem = config->tt_fraction_of_mem;
 
@@ -5618,6 +5875,11 @@ void config_fill_autoplay_args(const Config *config,
       config->p1_utility_spread_scale, config->p1_sim_margin_forecast,
       &p1_inference_args, &autoplay_args->p1_sim_args);
   autoplay_args->p1_sim_args.bag_cycle = config->p1_sim_bag_cycle;
+  config_set_sim_args_lamc(config, config->p1_sim_lamc,
+                           &autoplay_args->p1_sim_args);
+  autoplay_args->p1_sim_args.nested_args = config->p1_sim_nested;
+  autoplay_args->p1_sim_args.finish_endgame = config->p1_sim_finish;
+  autoplay_args->p1_sim_args.finish_max_bag = config->sim_finish_bag;
 
   sim_args_fill(
       config->p2_sim_plies, /*move_list=*/NULL, config->p2_num_plays,
@@ -5633,6 +5895,11 @@ void config_fill_autoplay_args(const Config *config,
       config->p2_utility_spread_scale, config->p2_sim_margin_forecast,
       &p2_inference_args, &autoplay_args->p2_sim_args);
   autoplay_args->p2_sim_args.bag_cycle = config->p2_sim_bag_cycle;
+  config_set_sim_args_lamc(config, config->p2_sim_lamc,
+                           &autoplay_args->p2_sim_args);
+  autoplay_args->p2_sim_args.nested_args = config->p2_sim_nested;
+  autoplay_args->p2_sim_args.finish_endgame = config->p2_sim_finish;
+  autoplay_args->p2_sim_args.finish_max_bag = config->sim_finish_bag;
 
   config_set_sim_args_pat_rollout(config, 0, &autoplay_args->p1_sim_args);
   config_set_sim_args_pat_rollout(config, 1, &autoplay_args->p2_sim_args);
@@ -14309,6 +14576,162 @@ exec_mode_t get_exec_mode_type_from_name(const char *exec_mode_str) {
 }
 
 // Assumes all args are parsed and correctly set in pargs.
+// LAMC off for both players, with its other settings at their defaults.
+static void config_set_lamc_defaults(Config *config) {
+  lamc_args_set_defaults(&config->lamc_args);
+  ErrorStack *error_stack = error_stack_create();
+  play_feature_parse_set(PLAY_FEATURE_DEFAULT_SET, config->lamc_args.features,
+                         error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    log_fatal("the default play feature set does not parse");
+  }
+  error_stack_destroy(error_stack);
+  config->sim_lamc = false;
+  config->p1_sim_lamc = false;
+  config->p2_sim_lamc = false;
+  nested_args_set_defaults(&config->sim_nested);
+  nested_args_set_defaults(&config->p1_sim_nested);
+  nested_args_set_defaults(&config->p2_sim_nested);
+  config->autoplay_static_bag = 0;
+  config->sim_finish = false;
+  config->p1_sim_finish = false;
+  config->p2_sim_finish = false;
+  config->sim_finish_bag = 0;
+}
+
+// Loads -nested, and the per-player -nested1 and -nested2, which default to
+// it.
+static void config_load_nested(Config *config, ErrorStack *error_stack) {
+  const char *shared = config_get_parg_value(config, ARG_TOKEN_NESTED, 0);
+  if (shared) {
+    nested_args_parse(shared, &config->sim_nested, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+    config->p1_sim_nested = config->sim_nested;
+    config->p2_sim_nested = config->sim_nested;
+  }
+  const char *p1 = config_get_parg_value(config, ARG_TOKEN_P1_NESTED, 0);
+  if (p1) {
+    nested_args_parse(p1, &config->p1_sim_nested, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+  }
+  const char *p2 = config_get_parg_value(config, ARG_TOKEN_P2_NESTED, 0);
+  if (p2) {
+    nested_args_parse(p2, &config->p2_sim_nested, error_stack);
+  }
+}
+
+// Loads -lamc, the per-player -lamc1 and -lamc2, which default to it, and the
+// LAMC settings the players share.
+static void config_load_lamc(Config *config, ErrorStack *error_stack) {
+  config_load_bool(config, ARG_TOKEN_LAMC, &config->sim_lamc, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  if (config_get_parg_value(config, ARG_TOKEN_LAMC, 0) != NULL) {
+    config->p1_sim_lamc = config->sim_lamc;
+    config->p2_sim_lamc = config->sim_lamc;
+  }
+  config_load_bool(config, ARG_TOKEN_P1_LAMC, &config->p1_sim_lamc,
+                   error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  config_load_bool(config, ARG_TOKEN_P2_LAMC, &config->p2_sim_lamc,
+                   error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  LamcArgs *args = &config->lamc_args;
+  config_load_int(config, ARG_TOKEN_LAMC_POOL, 2, LAMC_MAX_POOL_SIZE,
+                  &args->pool_size, error_stack);
+  config_load_int(config, ARG_TOKEN_LAMC_KEEP, 1, LAMC_MAX_KEEP, &args->keep,
+                  error_stack);
+  config_load_int(config, ARG_TOKEN_LAMC_SEED_PLAYS, 1, LAMC_MAX_POOL_SIZE,
+                  &args->seed_plays, error_stack);
+  config_load_int(config, ARG_TOKEN_LAMC_SHALLOW, 1, LAMC_MAX_SHALLOW_SAMPLES,
+                  &args->shallow_samples, error_stack);
+  config_load_int(config, ARG_TOKEN_LAMC_ROUNDS, 1, LAMC_MAX_ROUNDS,
+                  &args->max_rounds, error_stack);
+  config_load_int(config, ARG_TOKEN_LAMC_STABLE, 1, LAMC_MAX_ROUNDS,
+                  &args->stable_rounds, error_stack);
+  config_load_double(config, ARG_TOKEN_LAMC_EXPLORE, 0.01, 0.95,
+                     &args->explore_share, error_stack);
+  config_load_double(config, ARG_TOKEN_LAMC_FLOOR, 0.0, 1000.0,
+                     &args->equity_floor, error_stack);
+  config_load_int(config, ARG_TOKEN_LAMC_UNIVERSE, 2, LAMC_MAX_UNIVERSE,
+                  &args->max_universe, error_stack);
+  config_load_int(config, ARG_TOKEN_LAMC_EVALUATED, 2, LAMC_MAX_EVALUATED,
+                  &args->max_evaluated, error_stack);
+  config_load_int(config, ARG_TOKEN_LAMC_FINALISTS, 0, LAMC_MAX_POOL_SIZE,
+                  &args->num_finalists, error_stack);
+  config_load_bool(config, ARG_TOKEN_LAMC_CYCLE, &args->explore_bag_cycle,
+                   error_stack);
+  config_load_bool(config, ARG_TOKEN_LAMC_EQUITY_MEAN, &args->equity_prior_mean,
+                   error_stack);
+  config_load_bool(config, ARG_TOKEN_LAMC_FINAL_ALL, &args->finalists_from_all,
+                   error_stack);
+  config_load_int(config, ARG_TOKEN_LAMC_MAX_BAG, 0, LAMC_MAX_BAG,
+                  &args->max_bag, error_stack);
+  config_load_bool(config, ARG_TOKEN_LAMC_REUSE, &args->reuse_samples,
+                   error_stack);
+  config_load_int(config, ARG_TOKEN_LAMC_STATIC_FINALISTS, 0,
+                  LAMC_MAX_POOL_SIZE, &args->static_finalists, error_stack);
+  config_load_double(config, ARG_TOKEN_LAMC_LENGTH, 0.01, 100.0,
+                     &args->length_scale, error_stack);
+  config_load_double(config, ARG_TOKEN_LAMC_RADIUS, 0.0, 100.0,
+                     &args->trust_radius, error_stack);
+  config_load_double(config, ARG_TOKEN_LAMC_BETA, 0.0, 100.0, &args->ucb_beta,
+                     error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  const char *features =
+      config_get_parg_value(config, ARG_TOKEN_LAMC_FEATURES, 0);
+  if (features) {
+    bool active[NUMBER_OF_PLAY_FEATURES];
+    play_feature_parse_set(features, active, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+    memcpy(args->features, active, sizeof(active));
+  }
+  const char *proposal =
+      config_get_parg_value(config, ARG_TOKEN_LAMC_PROPOSAL, 0);
+  if (proposal) {
+    if (strings_iequal(proposal, LAMC_PROPOSAL_ASCENT_STRING)) {
+      args->proposal = LAMC_PROPOSAL_ASCENT;
+    } else if (strings_iequal(proposal, LAMC_PROPOSAL_ACQUIRE_STRING)) {
+      args->proposal = LAMC_PROPOSAL_ACQUIRE;
+    } else {
+      error_stack_push(
+          error_stack, ERROR_STATUS_LAMC_BAD_FEATURE_SET,
+          get_formatted_string("unknown LAMC proposal '%s'; use %s or %s",
+                               proposal, LAMC_PROPOSAL_ASCENT_STRING,
+                               LAMC_PROPOSAL_ACQUIRE_STRING));
+      return;
+    }
+  }
+  const char *kernel = config_get_parg_value(config, ARG_TOKEN_LAMC_KERNEL, 0);
+  if (kernel) {
+    if (strings_iequal(kernel, GP_KERNEL_MATERN52_STRING)) {
+      args->kernel = GP_KERNEL_MATERN52;
+    } else if (strings_iequal(kernel, GP_KERNEL_SQUARED_EXPONENTIAL_STRING)) {
+      args->kernel = GP_KERNEL_SQUARED_EXPONENTIAL;
+    } else {
+      error_stack_push(
+          error_stack, ERROR_STATUS_LAMC_BAD_FEATURE_SET,
+          get_formatted_string("unknown LAMC kernel '%s'; use %s or %s", kernel,
+                               GP_KERNEL_MATERN52_STRING,
+                               GP_KERNEL_SQUARED_EXPONENTIAL_STRING));
+      return;
+    }
+  }
+}
+
 // Loads -sbagcycle and the per-player -sbc1 and -sbc2, which default to it.
 static void config_load_sim_bag_cycle(Config *config, ErrorStack *error_stack) {
   config_load_bool(config, ARG_TOKEN_SIM_BAG_CYCLE, &config->sim_bag_cycle,
@@ -15066,6 +15489,47 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
   }
 
   config_load_sim_bag_cycle(config, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
+  config_load_lamc(config, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
+  config_load_nested(config, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
+  config_load_int(config, ARG_TOKEN_AUTOPLAY_STATIC_BAG, 0, 1000,
+                  &config->autoplay_static_bag, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
+  config_load_bool(config, ARG_TOKEN_SIM_FINISH, &config->sim_finish,
+                   error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  if (config_get_parg_value(config, ARG_TOKEN_SIM_FINISH, 0) != NULL) {
+    config->p1_sim_finish = config->sim_finish;
+    config->p2_sim_finish = config->sim_finish;
+  }
+  config_load_bool(config, ARG_TOKEN_P1_SIM_FINISH, &config->p1_sim_finish,
+                   error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  config_load_bool(config, ARG_TOKEN_P2_SIM_FINISH, &config->p2_sim_finish,
+                   error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  config_load_int(config, ARG_TOKEN_SIM_FINISH_BAG, 0, 1000,
+                  &config->sim_finish_bag, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
@@ -16953,6 +17417,30 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_SIM_MARGIN_FORECAST, "smargin", 1, 1);
   arg(ARG_TOKEN_SIM_BAG_CYCLE, "sbagcycle", 1, 1);
   arg(ARG_TOKEN_SIM_CENSUS_ROLLOUT, "scensus", 1, 1);
+  arg(ARG_TOKEN_LAMC, "lamc", 1, 1);
+  arg(ARG_TOKEN_LAMC_POOL, "lamcpool", 1, 1);
+  arg(ARG_TOKEN_LAMC_KEEP, "lamckeep", 1, 1);
+  arg(ARG_TOKEN_LAMC_SEED_PLAYS, "lamcseed", 1, 1);
+  arg(ARG_TOKEN_LAMC_SHALLOW, "lamcshallow", 1, 1);
+  arg(ARG_TOKEN_LAMC_ROUNDS, "lamcrounds", 1, 1);
+  arg(ARG_TOKEN_LAMC_STABLE, "lamcstable", 1, 1);
+  arg(ARG_TOKEN_LAMC_EXPLORE, "lamcexplore", 1, 1);
+  arg(ARG_TOKEN_LAMC_FLOOR, "lamcfloor", 1, 1);
+  arg(ARG_TOKEN_LAMC_UNIVERSE, "lamcuniverse", 1, 1);
+  arg(ARG_TOKEN_LAMC_EVALUATED, "lamcevaluated", 1, 1);
+  arg(ARG_TOKEN_LAMC_FINALISTS, "lamcfinal", 1, 1);
+  arg(ARG_TOKEN_LAMC_CYCLE, "lamccycle", 1, 1);
+  arg(ARG_TOKEN_LAMC_FEATURES, "lamcfeatures", 1, 1);
+  arg(ARG_TOKEN_LAMC_PROPOSAL, "lamcproposal", 1, 1);
+  arg(ARG_TOKEN_LAMC_KERNEL, "lamckernel", 1, 1);
+  arg(ARG_TOKEN_LAMC_LENGTH, "lamclength", 1, 1);
+  arg(ARG_TOKEN_LAMC_RADIUS, "lamcradius", 1, 1);
+  arg(ARG_TOKEN_LAMC_BETA, "lamcbeta", 1, 1);
+  arg(ARG_TOKEN_LAMC_EQUITY_MEAN, "lamcequitymean", 1, 1);
+  arg(ARG_TOKEN_LAMC_FINAL_ALL, "lamcfinalall", 1, 1);
+  arg(ARG_TOKEN_LAMC_MAX_BAG, "lamcmaxbag", 1, 1);
+  arg(ARG_TOKEN_LAMC_REUSE, "lamcreuse", 1, 1);
+  arg(ARG_TOKEN_LAMC_STATIC_FINALISTS, "lamcfinalstatic", 1, 1);
   arg(ARG_TOKEN_USE_HEAT_MAP, "useheatmap", 1, 1);
   arg(ARG_TOKEN_HUMAN_READABLE, "hr", 1, 1);
   arg(ARG_TOKEN_SHOW_MISTAKES, "mistakes", 1, 1);
@@ -16994,6 +17482,16 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_P2_SIM_MARGIN_FORECAST, "sm2", 1, 1);
   arg(ARG_TOKEN_P1_SIM_BAG_CYCLE, "sbc1", 1, 1);
   arg(ARG_TOKEN_P2_SIM_BAG_CYCLE, "sbc2", 1, 1);
+  arg(ARG_TOKEN_P1_LAMC, "lamc1", 1, 1);
+  arg(ARG_TOKEN_P2_LAMC, "lamc2", 1, 1);
+  arg(ARG_TOKEN_NESTED, "nested", 1, 1);
+  arg(ARG_TOKEN_P1_NESTED, "nested1", 1, 1);
+  arg(ARG_TOKEN_P2_NESTED, "nested2", 1, 1);
+  arg(ARG_TOKEN_AUTOPLAY_STATIC_BAG, "apstaticbag", 1, 1);
+  arg(ARG_TOKEN_SIM_FINISH, "sfinish", 1, 1);
+  arg(ARG_TOKEN_SIM_FINISH_BAG, "sfinishbag", 1, 1);
+  arg(ARG_TOKEN_P1_SIM_FINISH, "sfinish1", 1, 1);
+  arg(ARG_TOKEN_P2_SIM_FINISH, "sfinish2", 1, 1);
   arg(ARG_TOKEN_P1_TIME_LIMIT, "tl1", 1, 1);
   arg(ARG_TOKEN_P2_TIME_LIMIT, "tl2", 1, 1);
   arg(ARG_TOKEN_MOVE_BUDGET, "movebudget", 1, 1);
@@ -17158,6 +17656,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->p2_sim_margin_forecast = config->sim_margin_forecast;
   config->p1_sim_bag_cycle = config->sim_bag_cycle;
   config->p2_sim_bag_cycle = config->sim_bag_cycle;
+  config_set_lamc_defaults(config);
   config->p1_time_limit_seconds = config->time_limit_seconds;
   config->p2_time_limit_seconds = config->time_limit_seconds;
   config->p1_play_chooser_time_ms = -1.0;
@@ -17481,6 +17980,41 @@ static void config_add_settings_to_string_builder_internal(const Config *config,
       continue;
     }
     switch (arg_token) {
+    // LAMC is experimental: its settings are not saved.
+    case ARG_TOKEN_LAMC:
+    case ARG_TOKEN_LAMC_POOL:
+    case ARG_TOKEN_LAMC_KEEP:
+    case ARG_TOKEN_LAMC_SEED_PLAYS:
+    case ARG_TOKEN_LAMC_SHALLOW:
+    case ARG_TOKEN_LAMC_ROUNDS:
+    case ARG_TOKEN_LAMC_STABLE:
+    case ARG_TOKEN_LAMC_EXPLORE:
+    case ARG_TOKEN_LAMC_FLOOR:
+    case ARG_TOKEN_LAMC_UNIVERSE:
+    case ARG_TOKEN_LAMC_EVALUATED:
+    case ARG_TOKEN_LAMC_FINALISTS:
+    case ARG_TOKEN_LAMC_CYCLE:
+    case ARG_TOKEN_LAMC_FEATURES:
+    case ARG_TOKEN_LAMC_PROPOSAL:
+    case ARG_TOKEN_LAMC_KERNEL:
+    case ARG_TOKEN_LAMC_LENGTH:
+    case ARG_TOKEN_LAMC_RADIUS:
+    case ARG_TOKEN_LAMC_BETA:
+    case ARG_TOKEN_LAMC_EQUITY_MEAN:
+    case ARG_TOKEN_LAMC_FINAL_ALL:
+    case ARG_TOKEN_LAMC_MAX_BAG:
+    case ARG_TOKEN_LAMC_REUSE:
+    case ARG_TOKEN_LAMC_STATIC_FINALISTS:
+    case ARG_TOKEN_P1_LAMC:
+    case ARG_TOKEN_P2_LAMC:
+    case ARG_TOKEN_NESTED:
+    case ARG_TOKEN_P1_NESTED:
+    case ARG_TOKEN_P2_NESTED:
+    case ARG_TOKEN_AUTOPLAY_STATIC_BAG:
+    case ARG_TOKEN_SIM_FINISH:
+    case ARG_TOKEN_SIM_FINISH_BAG:
+    case ARG_TOKEN_P1_SIM_FINISH:
+    case ARG_TOKEN_P2_SIM_FINISH:
     case ARG_TOKEN_HELP:
     case ARG_TOKEN_VERSION:
     case ARG_TOKEN_BUILDERS:

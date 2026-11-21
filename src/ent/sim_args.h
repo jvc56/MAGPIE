@@ -7,6 +7,8 @@
 #include "../ent/game_history.h"
 #include "../ent/inference_args.h"
 #include "../ent/inference_results.h"
+#include "../ent/lamc_args.h"
+#include "../ent/nested_args.h"
 #include "../ent/rack.h"
 #include "../ent/sim_results.h"
 #include "../ent/thread_control.h"
@@ -83,6 +85,19 @@ typedef struct SimArgs {
   // (see census_rollout.h): the same moves, found faster. sim_args_fill
   // clears it.
   bool use_census_rollout;
+  // Whether and how Locally Adaptive Monte Carlo chooses the plays the sim
+  // simulates (see lamc.h). sim_args_fill turns it off; callers set it after.
+  LamcArgs lamc_args;
+  // Whether and how the rollouts choose some plies' plays by nested search
+  // (see rollout_nested.h). sim_args_fill turns it off; callers set it after.
+  NestedArgs nested_args;
+  // Whether a rollout whose bag is empty at its horizon plays on to the end
+  // of the game by static equity, and is scored by the result instead of the
+  // win percentage table. sim_args_fill clears it.
+  bool finish_endgame;
+  // With finish_endgame, a rollout also plays on to the end when its bag
+  // holds at most this many tiles at its horizon. sim_args_fill clears it.
+  int finish_max_bag;
   // Whether use_census_rollout is auto (-scensus auto): simulate sets it for
   // each sim, to whether the census supports the game and fits in this
   // machine's memory while rollout PAT is off (census_rollout_auto_fits), and
@@ -157,6 +172,10 @@ sim_args_fill(const int num_plies, const MoveList *move_list,
   sim_args->use_margin_forecast = use_margin_forecast;
   sim_args->bag_cycle = false;
   sim_args->use_census_rollout = false;
+  lamc_args_set_defaults(&sim_args->lamc_args);
+  nested_args_set_defaults(&sim_args->nested_args);
+  sim_args->finish_endgame = false;
+  sim_args->finish_max_bag = 0;
   sim_args->census_rollout_auto = false;
   // Start fresh, not resuming a prior SimResults. Only the TUI's analysis-
   // resume path sets this true; every other caller fills SimArgs through

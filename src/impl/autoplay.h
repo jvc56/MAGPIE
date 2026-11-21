@@ -87,6 +87,11 @@ typedef struct AutoplayArgs {
   AutoplaySolverSettings solver_settings[2];
   // Each player's movegen budget for one move (-mb1, -mb2); 0 is none.
   uint64_t movegen_budget[2];
+  // While the bag holds more than this many tiles, both players play their
+  // top static equity play instead of their own choice, so that a game pair
+  // reaches the same late position before its players' choices differ. 0
+  // for never.
+  int static_until_bag;
   // The run's whole thread count. num_threads above is how many autoplay
   // workers it runs, a game at a time each: all of them under pgp, or one
   // simulating on every thread under igp. Autoplay divides this between the

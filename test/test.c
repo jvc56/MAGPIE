@@ -51,6 +51,7 @@
 #include "klv_test.h"
 #include "kwg_alpha_test.h"
 #include "kwg_maker_test.h"
+#include "lamc_test.h"
 #include "leave_map_test.h"
 #include "leaves_test.h"
 #include "letter_distribution_test.h"
@@ -59,6 +60,7 @@
 #include "move_gen_test.h"
 #include "move_test.h"
 #include "movegen_budget_test.h"
+#include "nested_test.h"
 #include "pat_eval_test.h"
 #include "pat_features_test.h"
 #include "pat_file_test.h"
@@ -174,6 +176,8 @@ static TestEntry test_table[] = {
     {"gzipreader", test_gzip_reader},
     {"datafetch", test_data_fetch},
     {"bai", test_bai},
+    {"lamc", test_lamc},
+    {"nested", test_nested},
     {"baiutil", test_bai_utility},
     {"command", test_command},
     {"embedding", test_embedding_lifecycle},
@@ -267,6 +271,16 @@ static TestEntry on_demand_test_table[] = {
     {"viastress", test_via_interrupted_reasonable_under_time_pressure},
     {"infercmp", test_infer_cmp},
     {"censusrolloutbench", test_census_rollout_bench},
+    {"lamcreplay", test_lamc_replay},
+    {"nestedcr", test_nested_cr},
+    {"nestedbench", test_nested_bench},
+    {"nestedgt", test_nested_gt},
+    {"nestedeval", test_nested_eval},
+    {"nestedvar", test_nested_var},
+    {"nestedpeg", test_nested_peg},
+    {"nestedpegm", test_nested_pegm},
+    {"nestedtrace", test_nested_trace},
+    {"lamcautoplay", test_lamc_autoplay},
     {"genstuck", test_generate_stuck_cgps},
     {"gennonstuck", test_generate_nonstuck_cgps},
     {"gennonstuck2", test_generate_nonstuck_cgps2},
