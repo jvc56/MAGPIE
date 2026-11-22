@@ -30,6 +30,8 @@
 //   NCR_DUMP        1: print each position's CGP, the opponent's rack unseen
 //   NCR_ONLY        only these positions, by index, comma-separated
 //   NCR_SHOW        the number of the sim's top plays to print per choice
+//   NPEGM_FROM      nestedpegm: the first position to choose and solve, to
+//                   resume a run (default 0); positions keep their indices
 
 #include "nested_test.h"
 
@@ -1665,6 +1667,8 @@ void test_nested_peg(void) {
 typedef struct PegmShared {
   NcrPosition *positions;
   int num_positions;
+  // NPEGM_FROM: positions before it are neither chosen nor solved.
+  int first_position;
   int method;
   // methods x positions.
   Move *chosen;
@@ -1783,6 +1787,11 @@ void test_nested_pegm(void) {
   pegm.num_positions = ncr_make_positions(
       config_get_game(base_config), pegm.positions, num_positions, min_bag,
       max_bag, (uint64_t)ncr_env_int("NCR_FIRST_GAME", 0));
+  pegm.first_position = ncr_env_int("NPEGM_FROM", 0);
+  if (pegm.first_position < 0 || pegm.first_position >= pegm.num_positions) {
+    log_fatal("NPEGM_FROM %d is not a position index below %d",
+              pegm.first_position, pegm.num_positions);
+  }
   pegm.chosen = malloc_or_die(sizeof(Move) * num_methods * pegm.num_positions);
   pegm.seconds =
       malloc_or_die(sizeof(double) * num_methods * pegm.num_positions);
@@ -1809,7 +1818,7 @@ void test_nested_pegm(void) {
         malloc_or_die(sizeof(PegmWorkerArgs) * num_threads);
     cpthread_t *threads = malloc_or_die(sizeof(cpthread_t) * num_threads);
     pegm.method = method;
-    atomic_init(&pegm.next_position, 0);
+    atomic_init(&pegm.next_position, pegm.first_position);
     for (int worker_idx = 0; worker_idx < num_threads; worker_idx++) {
       worker_args[worker_idx].worker = &workers[worker_idx];
       worker_args[worker_idx].pegm = &pegm;
@@ -1854,7 +1863,8 @@ void test_nested_pegm(void) {
   double *diff_sum_sq = calloc_or_die(num_methods, sizeof(double));
   int *differ = calloc_or_die(num_methods, sizeof(int));
   int solved = 0;
-  for (int pos_idx = 0; pos_idx < pegm.num_positions; pos_idx++) {
+  for (int pos_idx = pegm.first_position; pos_idx < pegm.num_positions;
+       pos_idx++) {
     const NcrPosition *position = &pegm.positions[pos_idx];
     const Move *base_move = &pegm.chosen[pos_idx];
     bool any_differ = false;
@@ -1964,10 +1974,11 @@ void test_nested_pegm(void) {
     free(cgp);
   }
   (void)fclose(cache_out);
-  const double n = pegm.num_positions;
+  const double n = pegm.num_positions - pegm.first_position;
   for (int method = 0; method < num_methods; method++) {
     double seconds = 0.0;
-    for (int pos_idx = 0; pos_idx < pegm.num_positions; pos_idx++) {
+    for (int pos_idx = pegm.first_position; pos_idx < pegm.num_positions;
+         pos_idx++) {
       seconds += pegm.seconds[method * pegm.num_positions + pos_idx];
     }
     const double mean = diff_sum[method] / n;
