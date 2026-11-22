@@ -176,6 +176,23 @@ static int sfit_env_int(const char *name, int fallback) {
   return text ? atoi(text) : fallback;
 }
 
+static double decide_steer_scale(const char *spec, int bag) {
+  double scale = 1.0;
+  while (spec != NULL && *spec != '\0') {
+    char *end = NULL;
+    const long max_bag = strtol(spec, &end, 10);
+    if (end == spec || *end != ':') {
+      log_fatal("bad INFDEC_STEER_TSCALE");
+    }
+    scale = strtod(end + 1, &end);
+    if (bag <= max_bag) {
+      return scale;
+    }
+    spec = *end == ',' ? end + 1 : end;
+  }
+  return scale;
+}
+
 // Sim-steered weights. For a sample of the racks the mover might have held,
 // a short rollout of their best static plays and of the observed play gives
 // the observed play's loss by simulation. A ridge regression of that loss on
@@ -693,14 +710,17 @@ void infer_decide_run_spec(const char *spec) {
   error_stack_destroy(errors);
   const int num_extra = (int)strlen(arm_codes);
   for (int idx = 0; idx < num_extra; idx++) {
-    assert(strchr("spctabh124vkjloxgmry", arm_codes[idx]) != NULL);
+    assert(strchr("spctabh124vkjloxgmryzdef", arm_codes[idx]) != NULL);
   }
   const double move_seconds = move_ms / 1000.0;
   const int steer_racks = sfit_env_int("INFDEC_STEER_RACKS", 150);
   const int steer_rollouts = sfit_env_int("INFDEC_STEER_ROLLOUTS", 20);
+  // "13:0.5,30:0.7,100:1": the temperature scale for each bag size up to
+  // the one named.
   const char *steer_scale_text = getenv("INFDEC_STEER_TSCALE");
-  const double steer_temperature_scale =
-      steer_scale_text ? atof(steer_scale_text) : 0.5;
+  // INFDEC_ORACLE_KEPT: also score with a sim oracle that is told only the
+  // tiles the opponent kept, drawing their refill at random on each rollout.
+  const bool kept_oracle = getenv("INFDEC_ORACLE_KEPT") != NULL;
   const char *equal_time_text = getenv("INFDEC_EQUAL_TIME_FACTOR");
   const double equal_time_factor =
       equal_time_text ? atof(equal_time_text) : 1.0;
@@ -811,21 +831,27 @@ void infer_decide_run_spec(const char *spec) {
   // leave from turn to turn. One pair of tables per inferred player.
   const uint32_t num_klv_leaves =
       klv_get_number_of_leaves(player_get_klv(game_get_player(game, 0)));
-  InferenceCarrySlot *carry_table[2][2];
-  for (int player_idx = 0; player_idx < 2; player_idx++) {
-    for (int table_idx = 0; table_idx < 2; table_idx++) {
-      carry_table[player_idx][table_idx] =
-          calloc_or_die(num_klv_leaves, sizeof(InferenceCarrySlot));
+  // Arm z: arm m with sim steering as well. Each of the two arms keeps its
+  // own tables (slot 0 for m, slot 1 for z).
+  InferenceCarrySlot *carry_table_all[2][2][2];
+  for (int slot_idx = 0; slot_idx < 2; slot_idx++) {
+    for (int player_idx = 0; player_idx < 2; player_idx++) {
+      for (int table_idx = 0; table_idx < 2; table_idx++) {
+        carry_table_all[slot_idx][player_idx][table_idx] =
+            calloc_or_die(num_klv_leaves, sizeof(InferenceCarrySlot));
+      }
     }
   }
-  int carry_current[2] = {0, 0};
-  int carry_kept[2] = {0, 0};
-  int carry_history[2] = {0, 0};
-  double carry_floor[2] = {0, 0};
+  int carry_current_all[2][2] = {{0, 0}, {0, 0}};
+  int carry_kept_all[2][2] = {{0, 0}, {0, 0}};
+  int carry_history_all[2][2] = {{0, 0}, {0, 0}};
+  double carry_floor_all[2][2] = {{0, 0}, {0, 0}};
 
   for (int game_idx = 0; game_idx < games; game_idx++) {
-    carry_history[0] = 0;
-    carry_history[1] = 0;
+    for (int slot_idx = 0; slot_idx < 2; slot_idx++) {
+      carry_history_all[slot_idx][0] = 0;
+      carry_history_all[slot_idx][1] = 0;
+    }
     const uint64_t game_seed_value = seed + (uint64_t)game_idx;
     game_reset(game);
     game_seed(game, game_seed_value);
@@ -862,7 +888,8 @@ void infer_decide_run_spec(const char *spec) {
           move_get_type(&previous_move) != GAME_EVENT_PASS) {
         // No inference this turn: the chain for that player starts again.
         // After a pass their rack, and so the table, is unchanged.
-        carry_history[1 - seat] = 0;
+        carry_history_all[0][1 - seat] = 0;
+        carry_history_all[1][1 - seat] = 0;
       }
       int candidates = 0;
       for (int arm_idx = 0; arm_idx < num_arms; arm_idx++) {
@@ -883,7 +910,8 @@ void infer_decide_run_spec(const char *spec) {
           decide_move_string(game, &arm->move, arm->move_str);
           continue;
         }
-        if (arm->code == 'l') {
+        if (arm->code == 'l' || arm->code == 'd' || arm->code == 'e' ||
+            arm->code == 'f') {
           // With no kept tiles to reveal (after a bingo, an exchange or a
           // pass) this arm is the control: copy its move so that search
           // noise is not counted as an effect of the arm.
@@ -893,7 +921,9 @@ void infer_decide_run_spec(const char *spec) {
             rack_copy(&true_leave,
                       player_get_rack(game_get_player(previous, 1 - seat)));
             rack_subtract_using_floor_zero(&true_leave, &played);
-            informative = !rack_is_empty(&true_leave);
+            // Arm f is told half the kept tiles, rounded down.
+            informative = rack_get_total_letters(&true_leave) >=
+                          (arm->code == 'f' ? 2 : 1);
           }
           if (!informative) {
             move_copy(&arm->move, &arms[0].move);
@@ -902,9 +932,17 @@ void infer_decide_run_spec(const char *spec) {
             continue;
           }
         }
-        const bool feature_oracle = strchr("vkj", arm->code) != NULL;
+        const bool feature_oracle = strchr("vkjde", arm->code) != NULL;
+        const bool carry_arm = arm->code == 'm' || arm->code == 'z';
+        const int carry_slot = arm->code == 'z' ? 1 : 0;
+        InferenceCarrySlot **carry_table[2] = {carry_table_all[carry_slot][0],
+                                               carry_table_all[carry_slot][1]};
+        int *carry_current = carry_current_all[carry_slot];
+        int *carry_kept = carry_kept_all[carry_slot];
+        int *carry_history = carry_history_all[carry_slot];
+        double *carry_floor = carry_floor_all[carry_slot];
         const bool use_inference =
-            strchr("sabhogmry", arm->code) != NULL ||
+            strchr("sabhogmryz", arm->code) != NULL ||
             (feature_oracle &&
              move_get_type(&previous_move) == GAME_EVENT_TILE_PLACEMENT_MOVE);
         Rack *arm_known_rack = &no_rack;
@@ -916,6 +954,14 @@ void infer_decide_run_spec(const char *spec) {
                     player_get_rack(game_get_player(previous, 1 - seat)));
           rack_subtract_using_floor_zero(&true_leave, &played);
           arm_known_rack = &true_leave;
+        } else if (arm->code == 'f') {
+          rack_copy(&true_leave,
+                    player_get_rack(game_get_player(previous, 1 - seat)));
+          rack_subtract_using_floor_zero(&true_leave, &played);
+          decide_partial_rack(&true_leave,
+                              rack_get_total_letters(&true_leave) / 2,
+                              sim_seed + UINT64_C(515151), &partial);
+          arm_known_rack = &partial;
         } else if (arm->code >= '1' && arm->code <= '6') {
           decide_partial_rack(&opp_actual, arm->code - '0',
                               sim_seed + UINT64_C(424243), &partial);
@@ -968,13 +1014,13 @@ void infer_decide_run_spec(const char *spec) {
           }
           args.inference_args.temperature = int_to_equity(arm_temperature);
           if ((arm->code == 'g' || arm->code == 'm' || arm->code == 'r' ||
-               arm->code == 'y') &&
+               arm->code == 'y' || arm->code == 'z') &&
               move_get_type(&previous_move) != GAME_EVENT_EXCHANGE) {
             args.inference_args.temperature =
                 double_to_equity(decide_schedule_temperature(
                     bag_get_letters(game_get_bag(previous))));
           }
-          if (arm->code == 'r' &&
+          if ((arm->code == 'r' || arm->code == 'z') &&
               move_get_type(&previous_move) == GAME_EVENT_TILE_PLACEMENT_MOVE &&
               move_get_tiles_played(&previous_move) < (RACK_SIZE) &&
               bag_get_letters(game_get_bag(previous)) > 0) {
@@ -991,9 +1037,12 @@ void infer_decide_run_spec(const char *spec) {
             if (fitted > 0) {
               args.inference_args.loss_model = &steer_model;
               args.inference_args.temperature =
-                  double_to_equity(steer_temperature_scale *
-                                   decide_schedule_temperature(bag_get_letters(
-                                       game_get_bag(previous))));
+                  double_to_equity(
+                      decide_steer_scale(
+                          steer_scale_text,
+                          bag_get_letters(game_get_bag(previous))) *
+                      decide_schedule_temperature(
+                          bag_get_letters(game_get_bag(previous))));
             }
             printf("INFDEC_STEER seed=%llu game=%d turn=%d bag=%d racks=%d "
                    "fitted=%d seconds=%.3f mean_static=%.3f mean_sim=%.3f "
@@ -1011,10 +1060,15 @@ void infer_decide_run_spec(const char *spec) {
             args.inference_args.oracle_leave = &true_leave;
             args.inference_args.oracle_tolerance = int_to_equity(2);
             args.inference_args.oracle_feature =
-                arm->code == 'v' ? 1 : (arm->code == 'k' ? 2 : 3);
+                arm->code == 'd'
+                    ? 4
+                    : (arm->code == 'e'
+                           ? 8
+                           : (arm->code == 'v' ? 1
+                                               : (arm->code == 'k' ? 2 : 3)));
           }
           args.inference_args.target_move = &previous_move;
-          if (arm->code == 'm') {
+          if (carry_arm) {
             const int target = 1 - seat;
             InferenceCarrySlot *table_out =
                 carry_table[target][1 - carry_current[target]];
@@ -1033,7 +1087,7 @@ void infer_decide_run_spec(const char *spec) {
         const Move *move =
             get_top_simming_move(game, moves, &args, &arm->sim_ctx, results,
                                  &arm->simulated, errors);
-        if (arm->code == 'm' && use_inference) {
+        if (carry_arm && use_inference) {
           const int target = 1 - seat;
           const InferenceCarrySlot *table_out =
               carry_table[target][1 - carry_current[target]];
@@ -1051,10 +1105,10 @@ void infer_decide_run_spec(const char *spec) {
                                    game_get_player(previous, target))) -
                                move_get_tiles_played(&previous_move);
           printf("INFDEC_CARRY seed=%llu game=%d turn=%d target=%d used=%d "
-                 "kept_in=%d kept_out=%d table_max=%.4g\n",
+                 "kept_in=%d kept_out=%d table_max=%.4g arm=%c\n",
                  (unsigned long long)seed, game_idx, turn, target,
                  carry_history[target], carry_kept[target], kept_now,
-                 (double)table_max);
+                 (double)table_max, arm->code);
           if (table_max > 0 && kept_now > 0 && kept_now < (RACK_SIZE)) {
             carry_current[target] = 1 - carry_current[target];
             carry_kept[target] = kept_now;
@@ -1193,6 +1247,10 @@ void infer_decide_run_spec(const char *spec) {
       double sim_utility[DECIDE_MAX_ARMS + 1] = {0};
       double sim_equity[DECIDE_MAX_ARMS + 1] = {0};
       uint64_t sim_rollouts[DECIDE_MAX_ARMS + 1] = {0};
+      double kept_win[DECIDE_MAX_ARMS + 1] = {0};
+      double kept_utility[DECIDE_MAX_ARMS + 1] = {0};
+      double kept_equity[DECIDE_MAX_ARMS + 1] = {0};
+      int oracle_kept_tiles = -1;
       double oracle_seconds = 0;
       if (num_distinct > 1) {
         Timer oracle_timer;
@@ -1223,9 +1281,33 @@ void infer_decide_run_spec(const char *spec) {
         for (int idx = 0; idx < num_distinct; idx++) {
           move_list_add_move(oracle_moves, &distinct[idx]);
         }
+        // The tiles the opponent kept after their last move; none before the
+        // first move.
+        Rack oracle_kept;
+        rack_copy(&oracle_kept, &no_rack);
+        if (turn > 0) {
+          rack_copy(&oracle_kept,
+                    player_get_rack(game_get_player(previous, 1 - seat)));
+          for (int tile_idx = 0;
+               tile_idx < move_get_tiles_length(&previous_move); tile_idx++) {
+            const MachineLetter ml = move_get_tile(&previous_move, tile_idx);
+            if (move_get_type(&previous_move) == GAME_EVENT_EXCHANGE ||
+                ml != PLAYED_THROUGH_MARKER) {
+              const MachineLetter tile =
+                  get_is_blanked(ml) ? BLANK_MACHINE_LETTER : ml;
+              if (rack_get_letter(&oracle_kept, tile) > 0) {
+                rack_take_letter(&oracle_kept, tile);
+              }
+            }
+          }
+        }
+        oracle_kept_tiles = rack_get_total_letters(&oracle_kept);
+        for (int oracle_pass = 0; oracle_pass < (kept_oracle ? 2 : 1);
+             oracle_pass++) {
         SimArgs args;
-        config_fill_sim_args(config, &opp_actual, &played, &observer, &known,
-                             &args);
+        config_fill_sim_args(config,
+                             oracle_pass == 0 ? &opp_actual : &oracle_kept,
+                             &played, &observer, &known, &args);
         args.move_list = oracle_moves;
         args.num_plays = num_distinct;
         args.game = game;
@@ -1254,7 +1336,8 @@ void infer_decide_run_spec(const char *spec) {
           char simmed_str[DECIDE_MOVE_STR];
           decide_move_string(game, simmed_play_get_move(simmed), simmed_str);
           for (int idx = 0; idx < num_distinct; idx++) {
-            if (strcmp(distinct_str[idx], simmed_str) == 0) {
+            if (strcmp(distinct_str[idx], simmed_str) == 0 &&
+                oracle_pass == 0) {
               sim_win[idx] =
                   stat_get_mean(simmed_play_get_win_pct_stat(simmed));
               sim_utility[idx] =
@@ -1262,10 +1345,18 @@ void infer_decide_run_spec(const char *spec) {
               sim_equity[idx] =
                   stat_get_mean(simmed_play_get_equity_stat(simmed));
               sim_rollouts[idx] = simmed_play_get_num_rollouts(simmed);
+            } else if (strcmp(distinct_str[idx], simmed_str) == 0) {
+              kept_win[idx] =
+                  stat_get_mean(simmed_play_get_win_pct_stat(simmed));
+              kept_utility[idx] =
+                  stat_get_mean(simmed_play_get_utility_stat(simmed));
+              kept_equity[idx] =
+                  stat_get_mean(simmed_play_get_equity_stat(simmed));
             }
           }
         }
         sim_ctx_destroy(oracle_ctx);
+        }
         oracle_seconds = ctimer_elapsed_seconds(&oracle_timer);
       }
 
@@ -1315,7 +1406,7 @@ void infer_decide_run_spec(const char *spec) {
                "ctl_spread=%.4f dwin=%.6f dwin_se=%.6f dspread=%.4f "
                "dspread_se=%.4f sim_dwin=%.6f sim_dutility=%.6f "
                "sim_dequity=%.4f sim_rollouts=%llu sim_ctl_rollouts=%llu "
-               "oracle_seconds=%.3f\n",
+               "oracle_seconds=%.3f",
                (unsigned long long)seed, game_idx, turn, seat, bag_tiles,
                arm->code, arm->move_str, arms[0].move_str, playouts,
                ctl_win / count, ctl_spread / count, dwin_mean, dwin_se,
@@ -1324,6 +1415,14 @@ void infer_decide_run_spec(const char *spec) {
                sim_equity[idx] - sim_equity[0],
                (unsigned long long)sim_rollouts[idx],
                (unsigned long long)sim_rollouts[0], oracle_seconds);
+        if (kept_oracle) {
+          printf(" kept_tiles=%d kept_dwin=%.6f kept_dutility=%.6f "
+                 "kept_dequity=%.4f",
+                 oracle_kept_tiles, kept_win[idx] - kept_win[0],
+                 kept_utility[idx] - kept_utility[0],
+                 kept_equity[idx] - kept_equity[0]);
+        }
+        printf("\n");
       }
       if (fflush(stdout) != 0) {
         log_fatal("infdecide output flush failed");
@@ -1342,9 +1441,11 @@ void infer_decide_run_spec(const char *spec) {
   for (int arm_idx = 0; arm_idx < num_arms; arm_idx++) {
     sim_ctx_destroy(arms[arm_idx].sim_ctx);
   }
-  for (int player_idx = 0; player_idx < 2; player_idx++) {
-    for (int table_idx = 0; table_idx < 2; table_idx++) {
-      free(carry_table[player_idx][table_idx]);
+  for (int slot_idx = 0; slot_idx < 2; slot_idx++) {
+    for (int player_idx = 0; player_idx < 2; player_idx++) {
+      for (int table_idx = 0; table_idx < 2; table_idx++) {
+        free(carry_table_all[slot_idx][player_idx][table_idx]);
+      }
     }
   }
   free(workers);

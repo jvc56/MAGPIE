@@ -488,6 +488,33 @@ static bool inference_oracle_matches(const Inference *inference,
           inference_vowel_count(inference, inference->oracle_leave)) {
     return false;
   }
+  if ((feature & 4) != 0 || (feature & 8) != 0) {
+    // English tiles only: blank 0, J 10, Q 17, S 19, X 24, Z 26.
+    // 4: the same count of each of blank, S, Q, X, Z and J.
+    // 8: the same count of blank, S, Q, X/Z/J together, and vowels.
+    const Rack *leave = inference->current_target_leave;
+    const Rack *truth = inference->oracle_leave;
+    if (rack_get_letter(leave, 0) != rack_get_letter(truth, 0) ||
+        rack_get_letter(leave, 19) != rack_get_letter(truth, 19) ||
+        rack_get_letter(leave, 17) != rack_get_letter(truth, 17)) {
+      return false;
+    }
+    if ((feature & 4) != 0 &&
+        (rack_get_letter(leave, 24) != rack_get_letter(truth, 24) ||
+         rack_get_letter(leave, 26) != rack_get_letter(truth, 26) ||
+         rack_get_letter(leave, 10) != rack_get_letter(truth, 10))) {
+      return false;
+    }
+    if ((feature & 8) != 0 &&
+        (rack_get_letter(leave, 24) + rack_get_letter(leave, 26) +
+                 rack_get_letter(leave, 10) !=
+             rack_get_letter(truth, 24) + rack_get_letter(truth, 26) +
+                 rack_get_letter(truth, 10) ||
+         inference_vowel_count(inference, leave) !=
+             inference_vowel_count(inference, truth))) {
+      return false;
+    }
+  }
   if ((feature & 2) != 0) {
     const Equity oracle_value =
         inference_get_leave_value(inference, inference->oracle_leave);
