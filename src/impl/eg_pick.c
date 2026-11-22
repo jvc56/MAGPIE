@@ -284,6 +284,30 @@ EgPick *eg_pick_create(const Game *game) {
   return pick;
 }
 
+// LAB: an own-outplay pick whatever MAGPIE_EGPICK_MODE says, for the PEG
+// solver's middle stage. NULL while suppressed.
+EgPick *eg_pick_create_own(const Game *game, int num_candidates) {
+  if (num_candidates <= 0 || atomic_load(&eg_pick_suppressed) != 0) {
+    return NULL;
+  }
+  EgPick *pick = malloc_or_die(sizeof(EgPick));
+  pick->num_candidates = num_candidates > EG_PICK_MAX_CANDIDATES
+                             ? EG_PICK_MAX_CANDIDATES
+                             : num_candidates;
+  pick->mode = EG_PICK_MODE_OWN;
+  eg_pick_load_weights(&pick->weights, game_get_ld(game));
+  pick->moves = move_list_create(EG_PICK_MOVE_LIST_CAPACITY);
+  pick->replies = move_list_create(EG_PICK_MOVE_LIST_CAPACITY);
+  pick->after = game_duplicate(game);
+  pick->own_plays =
+      malloc_or_die(sizeof(EgPickPlay) * EG_PICK_MOVE_LIST_CAPACITY);
+  pick->opp_outs =
+      malloc_or_die(sizeof(EgPickPlay) * EG_PICK_MOVE_LIST_CAPACITY);
+  pick->num_own_plays = 0;
+  pick->num_opp_outs = 0;
+  return pick;
+}
+
 void eg_pick_destroy(EgPick *pick) {
   if (pick == NULL) {
     return;

@@ -38,6 +38,7 @@ void eg_pick_set_suppressed(bool suppressed);
 
 // Per-thread scratch. Returns NULL when the switch is off.
 EgPick *eg_pick_create(const Game *game);
+EgPick *eg_pick_create_own(const Game *game, int num_candidates);
 void eg_pick_destroy(EgPick *pick);
 
 // The move for the side on turn in `game`, whose bag is empty. `game` is used

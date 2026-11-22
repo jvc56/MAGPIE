@@ -3,7 +3,9 @@
 #include "../src/compat/cfile.h"
 #include "../src/compat/ctime.h"
 #include "../src/compat/memory_info.h"
+#include "../src/def/equity_defs.h"
 #include "../src/def/game_defs.h"
+#include "../src/def/move_defs.h"
 #include "../src/def/rack_defs.h"
 #include "../src/def/thread_control_defs.h"
 #include "../src/ent/bag.h"
@@ -16,6 +18,7 @@
 #include "../src/impl/config.h"
 #include "../src/impl/eg_pick.h"
 #include "../src/impl/gameplay.h"
+#include "../src/impl/move_gen.h"
 #include "../src/impl/peg.h"
 #include "../src/str/move_string.h"
 #include "../src/util/io_util.h"
@@ -1504,4 +1507,1692 @@ void peg_switch_run_spec(const char *spec) {
   fclose_or_die(file);
   printf("PSDONE\n");
   config_destroy(config);
+}
+
+// LAB (M4, local): pegclose:<file>,<threads>. A stock greedy-seed-only solve
+// of each position; prints PC <index> <best move's win> <its spread>.
+void peg_close_run_spec(const char *spec) {
+  log_set_level(LOG_FATAL);
+  char path[1024];
+  int threads = 0;
+  if (sscanf(spec, "%1023[^,],%d", path, &threads) != 2) {
+    log_fatal("pegclose:<file>,<threads>");
+  }
+  Config *config =
+      config_create_or_die("set -lex CSW24 -threads 1 -pegoutcomes false");
+  FILE *file = fopen_or_die(path, "re");
+  char line[4096];
+  int index = 0;
+  while (fgets(line, sizeof(line), file)) {
+    line[strcspn(line, "\n")] = '\0';
+    if (line[0] == '\0') {
+      continue;
+    }
+    char *cmd = get_formatted_string("cgp %s", line);
+    exec_config_quiet(config, cmd);
+    free(cmd);
+    PegArgs args;
+    config_fill_peg_args(config, &args);
+    args.num_threads = threads;
+    args.time_budget_seconds = 0;
+    args.greedy_seed_only = true;
+    args.include_per_scenario = false;
+    args.tt_fraction_of_mem = 0.05;
+    eg_pick_set_suppressed(true);
+    PegResult result;
+    ErrorStack *err = error_stack_create();
+    peg_solve(&args, &result, err);
+    eg_pick_set_suppressed(false);
+    if (error_stack_is_empty(err) && result.n_top_cands > 0) {
+      double best_win = -1;
+      double best_spread = 0;
+      for (int cand_idx = 0; cand_idx < result.n_top_cands; cand_idx++) {
+        if (result.top_cands[cand_idx].win_pct > best_win) {
+          best_win = result.top_cands[cand_idx].win_pct;
+          best_spread = result.top_cands[cand_idx].mean_spread;
+        }
+      }
+      printf("PC %d %.4f %.3f\n", index, best_win, best_spread);
+    } else {
+      printf("PC %d SKIP\n", index);
+    }
+    (void)fflush(stdout);
+    error_stack_destroy(err);
+    peg_result_destroy(&result);
+    index++;
+  }
+  fclose_or_die(file);
+  config_destroy(config);
+}
+
+// LAB (M4, local, never for a PR). pegarms:<file>,<first>,<max>,
+// <oracle tlim seconds>,<threads>. Each position is solved by five arms with
+// no time limit: stock greedy seed, staticbest greedy seed, own (N=12) greedy
+// seed, stock with one stage of 2-ply endgames on the seed's top 32
+// (-pegtopk 32), staticbest with the same stage. One stock oracle solve protects every arm's move. Prints
+//   PA <index> <oracle stage> then per arm: | <move> | <win> <spread> <elapsed>
+enum { PEG_ARMS_COUNT = 5 };
+
+typedef struct PegArmSpec {
+  const char *name;
+  const char *pick_n; // NULL = stock
+  const char *pick_mode;
+  int max_stage; // 0 = greedy seed only
+} PegArmSpec;
+
+static const PegArmSpec PEG_ARM_SPECS[PEG_ARMS_COUNT] = {
+    {"stock0", NULL, NULL, 0},      {"static0", "1", "staticbest", 0},
+    {"own0", "12", "own", 0},       {"stock2", NULL, NULL, 1},
+    {"static2", "1", "staticbest", 1},
+};
+
+static PegBenchOutcome peg_arms_solve(Config *config, const PegArmSpec *spec,
+                                      int threads) {
+  if (spec->pick_n != NULL) {
+    setenv("MAGPIE_EGPICK_N", spec->pick_n, 1);
+    setenv("MAGPIE_EGPICK_MODE", spec->pick_mode, 1);
+  }
+  PegArgs args;
+  config_fill_peg_args(config, &args);
+  args.num_threads = threads;
+  args.time_budget_seconds = 0;
+  args.greedy_seed_only = spec->max_stage == 0;
+  args.include_per_scenario = false;
+  args.tt_fraction_of_mem = 0.05;
+  eg_pick_set_suppressed(spec->pick_n == NULL);
+  PegResult result;
+  ErrorStack *err = error_stack_create();
+  Timer timer;
+  ctimer_start(&timer);
+  peg_solve(&args, &result, err);
+  const double elapsed = ctimer_elapsed_seconds(&timer);
+  eg_pick_set_suppressed(false);
+  PegBenchOutcome outcome;
+  memset(&outcome, 0, sizeof(outcome));
+  outcome.elapsed = elapsed;
+  if (error_stack_is_empty(err)) {
+    outcome.move = result.best_move;
+    move_to_string(config_get_game(config), &outcome.move, outcome.move_str,
+                   sizeof(outcome.move_str));
+    outcome.stage = result.last_completed_stage;
+    outcome.ok = true;
+  }
+  error_stack_destroy(err);
+  peg_result_destroy(&result);
+  return outcome;
+}
+
+void peg_arms_run_spec(const char *spec) {
+  log_set_level(LOG_FATAL);
+  char path[1024];
+  int first = 0;
+  int max_positions = 0;
+  double oracle_tlim = 0;
+  int threads = 0;
+  if (sscanf(spec, "%1023[^,],%d,%d,%lf,%d", path, &first, &max_positions,
+             &oracle_tlim, &threads) != 5) {
+    log_fatal("pegarms:<file>,<first>,<max>,<oracle tlim>,<threads>");
+  }
+  setenv("MAGPIE_EGPICK_WEIGHTS", "scripts/egregret/weights/cheap_own_leave.tsv",
+         1);
+  setenv("MAGPIE_EGPICK_N", "1", 1);
+  setenv("MAGPIE_EGPICK_MODE", "staticbest", 1);
+  Config *config =
+      config_create_or_die("set -lex CSW24 -threads 1 -pegoutcomes false");
+  // An explicit one-stage schedule: the greedy seed, then its top 32 at 2-ply.
+  Config *stage_config = config_create_or_die(
+      "set -lex CSW24 -threads 1 -pegoutcomes false -pegtopk 32");
+  FILE *file = fopen_or_die(path, "re");
+  char line[4096];
+  int index = 0;
+  int done = 0;
+  while (done < max_positions && fgets(line, sizeof(line), file)) {
+    line[strcspn(line, "\n")] = '\0';
+    if (line[0] == '\0') {
+      continue;
+    }
+    if (index++ < first) {
+      continue;
+    }
+    char *cmd = get_formatted_string("cgp %s", line);
+    exec_config_quiet(config, cmd);
+    exec_config_quiet(stage_config, cmd);
+    free(cmd);
+    PegBenchOutcome arms[PEG_ARMS_COUNT];
+    bool all_ok = true;
+    for (int step_idx = 0; step_idx < PEG_ARMS_COUNT; step_idx++) {
+      // Rotate the order so no arm always runs first.
+      const int arm_idx = (step_idx + done) % PEG_ARMS_COUNT;
+      arms[arm_idx] = peg_arms_solve(
+          PEG_ARM_SPECS[arm_idx].max_stage > 0 ? stage_config : config,
+          &PEG_ARM_SPECS[arm_idx], threads);
+      all_ok = all_ok && arms[arm_idx].ok;
+    }
+    done++;
+    if (!all_ok) {
+      printf("PA %d SKIP\n", index - 1);
+      continue;
+    }
+    const Move *protect[PEG_ARMS_COUNT];
+    bool any_differ = false;
+    for (int arm_idx = 0; arm_idx < PEG_ARMS_COUNT; arm_idx++) {
+      protect[arm_idx] = &arms[arm_idx].move;
+      if (strcmp(arms[arm_idx].move_str, arms[0].move_str) != 0) {
+        any_differ = true;
+      }
+    }
+    double wins[PEG_ARMS_COUNT];
+    double spreads[PEG_ARMS_COUNT];
+    for (int arm_idx = 0; arm_idx < PEG_ARMS_COUNT; arm_idx++) {
+      wins[arm_idx] = any_differ ? -1 : 0;
+      spreads[arm_idx] = 0;
+    }
+    int oracle_stage = -1;
+    if (any_differ) {
+      PegArgs args;
+      config_fill_peg_args(config, &args);
+      args.num_threads = threads;
+      args.time_budget_seconds = oracle_tlim;
+      args.include_per_scenario = false;
+      args.tt_fraction_of_mem = 0.05;
+      args.protect_moves = protect;
+      args.n_protect_moves = PEG_ARMS_COUNT;
+      eg_pick_set_suppressed(true);
+      PegResult result;
+      ErrorStack *err = error_stack_create();
+      peg_solve(&args, &result, err);
+      eg_pick_set_suppressed(false);
+      if (error_stack_is_empty(err)) {
+        oracle_stage = result.last_completed_stage;
+        for (int cand_idx = 0; cand_idx < result.n_top_cands; cand_idx++) {
+          char cand_str[32];
+          move_to_string(config_get_game(config),
+                         &result.top_cands[cand_idx].move, cand_str,
+                         sizeof(cand_str));
+          for (int arm_idx = 0; arm_idx < PEG_ARMS_COUNT; arm_idx++) {
+            if (strcmp(cand_str, arms[arm_idx].move_str) == 0) {
+              wins[arm_idx] = result.top_cands[cand_idx].win_pct;
+              spreads[arm_idx] = result.top_cands[cand_idx].mean_spread;
+            }
+          }
+        }
+      }
+      error_stack_destroy(err);
+      peg_result_destroy(&result);
+    }
+    printf("PA %d %d", index - 1, oracle_stage);
+    for (int arm_idx = 0; arm_idx < PEG_ARMS_COUNT; arm_idx++) {
+      printf(" | %s | %.4f %.3f %.3f", arms[arm_idx].move_str, wins[arm_idx],
+             spreads[arm_idx], arms[arm_idx].elapsed);
+    }
+    printf("\n");
+    (void)fflush(stdout);
+  }
+  fclose_or_die(file);
+  printf("PADONE\n");
+  config_destroy(stage_config);
+  config_destroy(config);
+}
+
+// LAB (M4, local, never for a PR). pegmid:<file>,<first>,<max>,
+// <oracle tlim seconds>,<threads>. An own-outplay stage between the static
+// greedy seed and the 2-ply stage, emulated with only_moves. Arms:
+//   0 stock0     stock greedy seed
+//   1 static0    staticbest greedy seed
+//   2 own0       own (N=12) greedy seed over the whole field
+//   3 static2    staticbest seed, its top 32 at 2-ply
+//   4 mid        staticbest seed, its top 64 re-ranked by own greedy playouts
+//   5 mid2x32    mid, then own's top 32 at 2-ply
+//   6 mid2x8     mid, then own's top 8 at 2-ply
+//   7 static2x8  staticbest seed, its top 8 at 2-ply
+// Elapsed is cumulative over an arm's steps. One stock oracle solve protects
+// every arm's move. Prints PM lines in the PA layout.
+enum {
+  PEG_MID_ARMS = 8,
+  PEG_MID_FIELD = 64,
+  PEG_MID_WIDE = 32,
+  PEG_MID_NARROW = 8,
+};
+
+typedef struct PegMidStep {
+  Move ranked[PEG_MID_FIELD];
+  int count;
+  int stage; // last completed stage: 0 = the greedy seed only
+  double elapsed;
+  bool ok;
+} PegMidStep;
+
+// One solve. pick_n NULL = stock. only/n_only restrict the candidates.
+static PegMidStep peg_mid_step(Config *config, const char *pick_n,
+                               const char *pick_mode, bool greedy_only,
+                               const Move *only, int n_only, int threads,
+                               double tlim) {
+  if (pick_n != NULL) {
+    setenv("MAGPIE_EGPICK_N", pick_n, 1);
+    setenv("MAGPIE_EGPICK_MODE", pick_mode, 1);
+  }
+  PegArgs args;
+  config_fill_peg_args(config, &args);
+  args.num_threads = threads;
+  // A 2-ply stage with no limit can run for many minutes with two or more
+  // in the bag, so it gets a budget; cut off, the solve reports stage 0.
+  args.time_budget_seconds = greedy_only ? 0 : tlim;
+  args.greedy_seed_only = greedy_only;
+  args.include_per_scenario = false;
+  args.tt_fraction_of_mem = 0.05;
+  const Move *only_ptrs[PEG_MID_FIELD];
+  if (n_only > 0) {
+    for (int move_idx = 0; move_idx < n_only; move_idx++) {
+      only_ptrs[move_idx] = &only[move_idx];
+    }
+    args.only_moves = only_ptrs;
+    args.n_only_moves = n_only;
+  }
+  eg_pick_set_suppressed(pick_n == NULL);
+  PegResult result;
+  ErrorStack *err = error_stack_create();
+  Timer timer;
+  ctimer_start(&timer);
+  peg_solve(&args, &result, err);
+  PegMidStep step;
+  memset(&step, 0, sizeof(step));
+  step.elapsed = ctimer_elapsed_seconds(&timer);
+  eg_pick_set_suppressed(false);
+  if (error_stack_is_empty(err) && result.n_top_cands > 0) {
+    step.ok = true;
+    step.stage = result.last_completed_stage;
+    step.count = result.n_top_cands < PEG_MID_FIELD ? result.n_top_cands
+                                                    : PEG_MID_FIELD;
+    for (int cand_idx = 0; cand_idx < step.count; cand_idx++) {
+      step.ranked[cand_idx] = result.top_cands[cand_idx].move;
+    }
+  }
+  error_stack_destroy(err);
+  peg_result_destroy(&result);
+  return step;
+}
+
+static int peg_mid_min(int first, int second) {
+  return first < second ? first : second;
+}
+
+void peg_mid_run_spec(const char *spec) {
+  log_set_level(LOG_FATAL);
+  char path[1024];
+  int first = 0;
+  int max_positions = 0;
+  double oracle_tlim = 0;
+  int threads = 0;
+  double stage_tlim = 0;
+  if (sscanf(spec, "%1023[^,],%d,%d,%lf,%d,%lf", path, &first, &max_positions,
+             &oracle_tlim, &threads, &stage_tlim) != 6) {
+    log_fatal("pegmid:<file>,<first>,<max>,<oracle tlim>,<threads>,"
+              "<2-ply stage tlim>");
+  }
+  setenv("MAGPIE_EGPICK_WEIGHTS", "scripts/egregret/weights/cheap_own_leave.tsv",
+         1);
+  setenv("MAGPIE_EGPICK_N", "1", 1);
+  setenv("MAGPIE_EGPICK_MODE", "staticbest", 1);
+  Config *config =
+      config_create_or_die("set -lex CSW24 -threads 1 -pegoutcomes false");
+  Config *stage_config = config_create_or_die(
+      "set -lex CSW24 -threads 1 -pegoutcomes false -pegtopk 32");
+  FILE *file = fopen_or_die(path, "re");
+  char line[4096];
+  int index = 0;
+  int done = 0;
+  while (done < max_positions && fgets(line, sizeof(line), file)) {
+    line[strcspn(line, "\n")] = '\0';
+    if (line[0] == '\0') {
+      continue;
+    }
+    if (index++ < first) {
+      continue;
+    }
+    char *cmd = get_formatted_string("cgp %s", line);
+    exec_config_quiet(config, cmd);
+    exec_config_quiet(stage_config, cmd);
+    free(cmd);
+    done++;
+    Move moves[PEG_MID_ARMS];
+    double elapsed[PEG_MID_ARMS];
+    const PegMidStep stock0 = peg_mid_step(config, NULL, NULL, true, NULL, 0,
+                                           threads, stage_tlim);
+    const PegMidStep static0 =
+        peg_mid_step(config, "1", "staticbest", true, NULL, 0, threads, stage_tlim);
+    const PegMidStep own0 =
+        peg_mid_step(config, "12", "own", true, NULL, 0, threads, stage_tlim);
+    const PegMidStep static2 =
+        peg_mid_step(stage_config, "1", "staticbest", false, NULL, 0, threads, stage_tlim);
+    if (!stock0.ok || !static0.ok || !own0.ok || !static2.ok) {
+      printf("PM %d SKIP\n", index - 1);
+      continue;
+    }
+    const PegMidStep mid = peg_mid_step(config, "12", "own", true,
+                                        static0.ranked, static0.count, threads, stage_tlim);
+    if (!mid.ok) {
+      printf("PM %d SKIP\n", index - 1);
+      continue;
+    }
+    const PegMidStep mid_wide = peg_mid_step(
+        stage_config, "1", "staticbest", false, mid.ranked,
+        peg_mid_min(mid.count, PEG_MID_WIDE), threads, stage_tlim);
+    const PegMidStep mid_narrow = peg_mid_step(
+        stage_config, "1", "staticbest", false, mid.ranked,
+        peg_mid_min(mid.count, PEG_MID_NARROW), threads, stage_tlim);
+    const PegMidStep static_narrow = peg_mid_step(
+        stage_config, "1", "staticbest", false, static0.ranked,
+        peg_mid_min(static0.count, PEG_MID_NARROW), threads, stage_tlim);
+    if (!mid_wide.ok || !mid_narrow.ok || !static_narrow.ok) {
+      printf("PM %d SKIP\n", index - 1);
+      continue;
+    }
+    moves[0] = stock0.ranked[0];
+    elapsed[0] = stock0.elapsed;
+    moves[1] = static0.ranked[0];
+    elapsed[1] = static0.elapsed;
+    moves[2] = own0.ranked[0];
+    elapsed[2] = own0.elapsed;
+    // A stage cut off by its budget falls back to the step before it.
+    moves[3] = static2.stage > 0 ? static2.ranked[0] : static0.ranked[0];
+    elapsed[3] = static2.elapsed;
+    moves[4] = mid.ranked[0];
+    elapsed[4] = static0.elapsed + mid.elapsed;
+    moves[5] = mid_wide.stage > 0 ? mid_wide.ranked[0] : mid.ranked[0];
+    elapsed[5] = elapsed[4] + mid_wide.elapsed;
+    moves[6] = mid_narrow.stage > 0 ? mid_narrow.ranked[0] : mid.ranked[0];
+    elapsed[6] = elapsed[4] + mid_narrow.elapsed;
+    moves[7] =
+        static_narrow.stage > 0 ? static_narrow.ranked[0] : static0.ranked[0];
+    elapsed[7] = static0.elapsed + static_narrow.elapsed;
+    char move_strs[PEG_MID_ARMS][32];
+    const Move *protect[PEG_MID_ARMS];
+    bool any_differ = false;
+    int n_distinct = 0;
+    for (int arm_idx = 0; arm_idx < PEG_MID_ARMS; arm_idx++) {
+      move_to_string(config_get_game(config), &moves[arm_idx],
+                     move_strs[arm_idx], sizeof(move_strs[arm_idx]));
+      bool seen = false;
+      for (int prev_idx = 0; prev_idx < arm_idx; prev_idx++) {
+        seen = seen || strcmp(move_strs[arm_idx], move_strs[prev_idx]) == 0;
+      }
+      if (!seen) {
+        protect[n_distinct++] = &moves[arm_idx];
+      }
+      if (strcmp(move_strs[arm_idx], move_strs[0]) != 0) {
+        any_differ = true;
+      }
+    }
+    double wins[PEG_MID_ARMS];
+    double spreads[PEG_MID_ARMS];
+    for (int arm_idx = 0; arm_idx < PEG_MID_ARMS; arm_idx++) {
+      wins[arm_idx] = any_differ ? -1 : 0;
+      spreads[arm_idx] = 0;
+    }
+    int oracle_stage = -1;
+    if (any_differ) {
+      PegArgs args;
+      config_fill_peg_args(config, &args);
+      args.num_threads = threads;
+      args.time_budget_seconds = oracle_tlim;
+      args.include_per_scenario = false;
+      args.tt_fraction_of_mem = 0.05;
+      // The judge: only the arms' distinct moves, each solved to the end of
+      // the game with a full window and no cutoff, so wins and spreads are
+      // exact. (The default complete solve is first-win: its spreads mean
+      // nothing, and under a time limit it publishes only the candidates it
+      // finished.)
+      args.only_moves = protect;
+      args.n_only_moves = n_distinct;
+      args.first_win = false;
+      args.early_cutoff = false;
+      eg_pick_set_suppressed(true);
+      PegResult result;
+      ErrorStack *err = error_stack_create();
+      peg_solve(&args, &result, err);
+      eg_pick_set_suppressed(false);
+      if (error_stack_is_empty(err)) {
+        oracle_stage = result.last_completed_stage;
+        for (int cand_idx = 0; cand_idx < result.n_top_cands; cand_idx++) {
+          char cand_str[32];
+          move_to_string(config_get_game(config),
+                         &result.top_cands[cand_idx].move, cand_str,
+                         sizeof(cand_str));
+          for (int arm_idx = 0; arm_idx < PEG_MID_ARMS; arm_idx++) {
+            if (strcmp(cand_str, move_strs[arm_idx]) == 0) {
+              wins[arm_idx] = result.top_cands[cand_idx].win_pct;
+              spreads[arm_idx] = result.top_cands[cand_idx].mean_spread;
+            }
+          }
+        }
+      }
+      error_stack_destroy(err);
+      peg_result_destroy(&result);
+    }
+    printf("PM %d %d", index - 1, oracle_stage);
+    for (int arm_idx = 0; arm_idx < PEG_MID_ARMS; arm_idx++) {
+      printf(" | %s | %.4f %.3f %.3f", move_strs[arm_idx], wins[arm_idx],
+             spreads[arm_idx], elapsed[arm_idx]);
+    }
+    printf(" | %d %d %d %d\n", static2.stage, mid_wide.stage, mid_narrow.stage,
+           static_narrow.stage);
+    (void)fflush(stdout);
+  }
+  fclose_or_die(file);
+  printf("PMDONE\n");
+  config_destroy(stage_config);
+  config_destroy(config);
+}
+
+// LAB (M4, local, never for a PR). pegbuilt:<file>,<first>,<max>,
+// <judge tlim seconds>,<threads>,<stage tlim seconds>. The own-outplay middle
+// stage built into the solver (MAGPIE_PEGMID_N), each arm one peg_solve:
+// greedy arms unlimited, arms with a 2-ply stage under the stage budget (the
+// solver's own partial-stage rule applies). The judge solves the arms'
+// distinct moves to the end of the game with full spreads. Prints
+//   PB <index> <judge stage> then per arm: | <move> | <win> <spread> <elapsed>
+//   and last: | per arm <stage reached><p if partial>
+enum { PEG_BUILT_ARMS = 9, PEG_BUILT_CONFIGS = 4 };
+
+typedef struct PegBuiltSpec {
+  const char *name;
+  bool pick;          // false = stock playouts
+  const char *mid_n;  // NULL = no middle stage
+  int config_idx;     // 0 = greedy seed only, else PEG_BUILT_TOPK[config_idx]
+} PegBuiltSpec;
+
+static const char *const PEG_BUILT_TOPK[PEG_BUILT_CONFIGS] = {NULL, "32", "16",
+                                                             "8"};
+
+static const PegBuiltSpec PEG_BUILT_SPECS[PEG_BUILT_ARMS] = {
+    {"stock0", false, NULL, 0},   {"static0", true, NULL, 0},
+    {"mid", true, "64", 0},       {"static2x32", true, NULL, 1},
+    {"mid2x32", true, "64", 1},   {"static2x16", true, NULL, 2},
+    {"mid2x16", true, "64", 2},   {"static2x8", true, NULL, 3},
+    {"mid2x8", true, "64", 3},
+};
+
+typedef struct PegBuiltOutcome {
+  Move move;
+  char move_str[32];
+  double elapsed;
+  int stage;
+  bool partial;
+  bool ok;
+} PegBuiltOutcome;
+
+// pegnest only: > 0 caps the pessimistic opponent's replies (inner_top_k).
+static int peg_built_inner_top_k = 0;
+
+static PegBuiltOutcome peg_built_solve(Config *config,
+                                       const PegBuiltSpec *spec, int threads,
+                                       double stage_tlim) {
+  if (spec->mid_n != NULL) {
+    setenv("MAGPIE_PEGMID_N", spec->mid_n, 1);
+  } else {
+    unsetenv("MAGPIE_PEGMID_N");
+  }
+  PegArgs args;
+  config_fill_peg_args(config, &args);
+  args.num_threads = threads;
+  args.greedy_seed_only = spec->config_idx == 0;
+  args.time_budget_seconds = spec->config_idx == 0 ? 0 : stage_tlim;
+  args.include_per_scenario = false;
+  args.tt_fraction_of_mem = 0.05;
+  if (peg_built_inner_top_k > 0) {
+    args.inner_top_k = peg_built_inner_top_k;
+  }
+  eg_pick_set_suppressed(!spec->pick);
+  PegResult result;
+  ErrorStack *err = error_stack_create();
+  Timer timer;
+  ctimer_start(&timer);
+  peg_solve(&args, &result, err);
+  PegBuiltOutcome outcome;
+  memset(&outcome, 0, sizeof(outcome));
+  outcome.elapsed = ctimer_elapsed_seconds(&timer);
+  eg_pick_set_suppressed(false);
+  unsetenv("MAGPIE_PEGMID_N");
+  if (error_stack_is_empty(err) && result.n_top_cands > 0) {
+    outcome.ok = true;
+    outcome.move = result.best_move;
+    move_to_string(config_get_game(config), &outcome.move, outcome.move_str,
+                   sizeof(outcome.move_str));
+    outcome.stage = result.last_completed_stage;
+    outcome.partial = result.last_stage_partial;
+  }
+  error_stack_destroy(err);
+  peg_result_destroy(&result);
+  return outcome;
+}
+
+void peg_built_run_spec(const char *spec) {
+  log_set_level(LOG_FATAL);
+  char path[1024];
+  int first = 0;
+  int max_positions = 0;
+  double judge_tlim = 0;
+  int threads = 0;
+  double stage_tlim = 0;
+  if (sscanf(spec, "%1023[^,],%d,%d,%lf,%d,%lf", path, &first, &max_positions,
+             &judge_tlim, &threads, &stage_tlim) != 6) {
+    log_fatal("pegbuilt:<file>,<first>,<max>,<judge tlim>,<threads>,"
+              "<stage tlim>");
+  }
+  setenv("MAGPIE_EGPICK_WEIGHTS", "scripts/egregret/weights/cheap_own_leave.tsv",
+         1);
+  setenv("MAGPIE_EGPICK_N", "1", 1);
+  setenv("MAGPIE_EGPICK_MODE", "staticbest", 1);
+  Config *configs[PEG_BUILT_CONFIGS];
+  for (int config_idx = 0; config_idx < PEG_BUILT_CONFIGS; config_idx++) {
+    char *cmd = PEG_BUILT_TOPK[config_idx] == NULL
+                    ? get_formatted_string(
+                          "set -lex CSW24 -threads 1 -pegoutcomes false")
+                    : get_formatted_string("set -lex CSW24 -threads 1 "
+                                           "-pegoutcomes false -pegtopk %s",
+                                           PEG_BUILT_TOPK[config_idx]);
+    configs[config_idx] = config_create_or_die(cmd);
+    free(cmd);
+  }
+  FILE *file = fopen_or_die(path, "re");
+  char line[4096];
+  int index = 0;
+  int done = 0;
+  while (done < max_positions && fgets(line, sizeof(line), file)) {
+    line[strcspn(line, "\n")] = '\0';
+    if (line[0] == '\0') {
+      continue;
+    }
+    if (index++ < first) {
+      continue;
+    }
+    char *cmd = get_formatted_string("cgp %s", line);
+    for (int config_idx = 0; config_idx < PEG_BUILT_CONFIGS; config_idx++) {
+      exec_config_quiet(configs[config_idx], cmd);
+    }
+    free(cmd);
+    PegBuiltOutcome arms[PEG_BUILT_ARMS];
+    bool all_ok = true;
+    for (int step_idx = 0; step_idx < PEG_BUILT_ARMS; step_idx++) {
+      const int arm_idx = (step_idx + done) % PEG_BUILT_ARMS;
+      arms[arm_idx] =
+          peg_built_solve(configs[PEG_BUILT_SPECS[arm_idx].config_idx],
+                          &PEG_BUILT_SPECS[arm_idx], threads, stage_tlim);
+      all_ok = all_ok && arms[arm_idx].ok;
+    }
+    done++;
+    if (!all_ok) {
+      printf("PB %d SKIP\n", index - 1);
+      continue;
+    }
+    const Move *distinct[PEG_BUILT_ARMS];
+    int n_distinct = 0;
+    for (int arm_idx = 0; arm_idx < PEG_BUILT_ARMS; arm_idx++) {
+      bool seen = false;
+      for (int prev_idx = 0; prev_idx < arm_idx; prev_idx++) {
+        seen = seen ||
+               strcmp(arms[arm_idx].move_str, arms[prev_idx].move_str) == 0;
+      }
+      if (!seen) {
+        distinct[n_distinct++] = &arms[arm_idx].move;
+      }
+    }
+    double wins[PEG_BUILT_ARMS];
+    double spreads[PEG_BUILT_ARMS];
+    for (int arm_idx = 0; arm_idx < PEG_BUILT_ARMS; arm_idx++) {
+      wins[arm_idx] = n_distinct > 1 ? -1 : 0;
+      spreads[arm_idx] = 0;
+    }
+    int judge_stage = -1;
+    if (n_distinct > 1) {
+      PegArgs args;
+      config_fill_peg_args(configs[0], &args);
+      args.num_threads = threads;
+      args.time_budget_seconds = judge_tlim;
+      args.include_per_scenario = false;
+      args.tt_fraction_of_mem = 0.05;
+      args.only_moves = distinct;
+      args.n_only_moves = n_distinct;
+      args.first_win = false;
+      args.early_cutoff = false;
+      eg_pick_set_suppressed(true);
+      PegResult result;
+      ErrorStack *err = error_stack_create();
+      peg_solve(&args, &result, err);
+      eg_pick_set_suppressed(false);
+      if (error_stack_is_empty(err)) {
+        judge_stage = result.last_completed_stage;
+        for (int cand_idx = 0; cand_idx < result.n_top_cands; cand_idx++) {
+          char cand_str[32];
+          move_to_string(config_get_game(configs[0]),
+                         &result.top_cands[cand_idx].move, cand_str,
+                         sizeof(cand_str));
+          for (int arm_idx = 0; arm_idx < PEG_BUILT_ARMS; arm_idx++) {
+            if (strcmp(cand_str, arms[arm_idx].move_str) == 0) {
+              wins[arm_idx] = result.top_cands[cand_idx].win_pct;
+              spreads[arm_idx] = result.top_cands[cand_idx].mean_spread;
+            }
+          }
+        }
+      }
+      error_stack_destroy(err);
+      peg_result_destroy(&result);
+    }
+    printf("PB %d %d", index - 1, judge_stage);
+    for (int arm_idx = 0; arm_idx < PEG_BUILT_ARMS; arm_idx++) {
+      printf(" | %s | %.4f %.3f %.3f", arms[arm_idx].move_str, wins[arm_idx],
+             spreads[arm_idx], arms[arm_idx].elapsed);
+    }
+    printf(" |");
+    for (int arm_idx = 0; arm_idx < PEG_BUILT_ARMS; arm_idx++) {
+      printf(" %d%s", arms[arm_idx].stage, arms[arm_idx].partial ? "p" : "");
+    }
+    printf("\n");
+    (void)fflush(stdout);
+  }
+  fclose_or_die(file);
+  printf("PBDONE\n");
+  for (int config_idx = 0; config_idx < PEG_BUILT_CONFIGS; config_idx++) {
+    config_destroy(configs[config_idx]);
+  }
+}
+
+// LAB (M4, local, never for a PR). pegnest:<file>,<first>,<max>,
+// <judge tlim seconds>,<threads>,<stage tlim seconds>. Cheaper solves of the
+// candidates that leave tiles in the bag: static greedy seed, then a 2-ply
+// stage on the top 32 under the stage budget, one arm per setting of the
+// nested lookahead (PEG_NEST_OPTIONS). Same judge and line format as pegbuilt,
+// with PN in place of PB.
+enum { PEG_NEST_ARMS = 6 };
+
+// Arms: every reply (the default), the opponent's top 16 / 8 / 4 / 2 replies,
+// and the rational opponent model.
+static const char *const PEG_NEST_OPTIONS[PEG_NEST_ARMS] = {
+    "", "", "", "", "", "-pegpess false",
+};
+
+static const int PEG_NEST_INNER_TOP_K[PEG_NEST_ARMS] = {0, 16, 8, 4, 2, 0};
+
+static const PegBuiltSpec PEG_NEST_SPEC = {"nest", true, NULL, 1};
+
+void peg_nest_run_spec(const char *spec) {
+  log_set_level(LOG_FATAL);
+  char path[1024];
+  int first = 0;
+  int max_positions = 0;
+  double judge_tlim = 0;
+  int threads = 0;
+  double stage_tlim = 0;
+  if (sscanf(spec, "%1023[^,],%d,%d,%lf,%d,%lf", path, &first, &max_positions,
+             &judge_tlim, &threads, &stage_tlim) != 6) {
+    log_fatal("pegnest:<file>,<first>,<max>,<judge tlim>,<threads>,"
+              "<stage tlim>");
+  }
+  setenv("MAGPIE_EGPICK_WEIGHTS", "scripts/egregret/weights/cheap_own_leave.tsv",
+         1);
+  setenv("MAGPIE_EGPICK_N", "1", 1);
+  setenv("MAGPIE_EGPICK_MODE", "staticbest", 1);
+  Config *configs[PEG_NEST_ARMS];
+  for (int config_idx = 0; config_idx < PEG_NEST_ARMS; config_idx++) {
+    char *cmd = get_formatted_string("set -lex CSW24 -threads 1 -pegoutcomes "
+                                     "false -pegtopk 32 %s",
+                                     PEG_NEST_OPTIONS[config_idx]);
+    configs[config_idx] = config_create_or_die(cmd);
+    free(cmd);
+  }
+  // The judge is a complete solve: no -pegtopk.
+  Config *judge_config =
+      config_create_or_die("set -lex CSW24 -threads 1 -pegoutcomes false");
+  FILE *file = fopen_or_die(path, "re");
+  char line[4096];
+  int index = 0;
+  int done = 0;
+  while (done < max_positions && fgets(line, sizeof(line), file)) {
+    line[strcspn(line, "\n")] = '\0';
+    if (line[0] == '\0') {
+      continue;
+    }
+    if (index++ < first) {
+      continue;
+    }
+    char *cmd = get_formatted_string("cgp %s", line);
+    for (int config_idx = 0; config_idx < PEG_NEST_ARMS; config_idx++) {
+      exec_config_quiet(configs[config_idx], cmd);
+    }
+    exec_config_quiet(judge_config, cmd);
+    free(cmd);
+    PegBuiltOutcome arms[PEG_NEST_ARMS];
+    bool all_ok = true;
+    for (int step_idx = 0; step_idx < PEG_NEST_ARMS; step_idx++) {
+      const int arm_idx = (step_idx + done) % PEG_NEST_ARMS;
+      peg_built_inner_top_k = PEG_NEST_INNER_TOP_K[arm_idx];
+      arms[arm_idx] = peg_built_solve(configs[arm_idx], &PEG_NEST_SPEC,
+                                      threads, stage_tlim);
+      peg_built_inner_top_k = 0;
+      all_ok = all_ok && arms[arm_idx].ok;
+    }
+    done++;
+    if (!all_ok) {
+      printf("PN %d SKIP\n", index - 1);
+      continue;
+    }
+    const Move *distinct[PEG_NEST_ARMS];
+    int n_distinct = 0;
+    for (int arm_idx = 0; arm_idx < PEG_NEST_ARMS; arm_idx++) {
+      bool seen = false;
+      for (int prev_idx = 0; prev_idx < arm_idx; prev_idx++) {
+        seen = seen ||
+               strcmp(arms[arm_idx].move_str, arms[prev_idx].move_str) == 0;
+      }
+      if (!seen) {
+        distinct[n_distinct++] = &arms[arm_idx].move;
+      }
+    }
+    double wins[PEG_NEST_ARMS];
+    double spreads[PEG_NEST_ARMS];
+    for (int arm_idx = 0; arm_idx < PEG_NEST_ARMS; arm_idx++) {
+      wins[arm_idx] = n_distinct > 1 ? -1 : 0;
+      spreads[arm_idx] = 0;
+    }
+    int judge_stage = -1;
+    if (n_distinct > 1) {
+      PegArgs args;
+      config_fill_peg_args(judge_config, &args);
+      args.num_threads = threads;
+      args.time_budget_seconds = judge_tlim;
+      args.include_per_scenario = false;
+      args.tt_fraction_of_mem = 0.05;
+      args.only_moves = distinct;
+      args.n_only_moves = n_distinct;
+      args.first_win = false;
+      args.early_cutoff = false;
+      eg_pick_set_suppressed(true);
+      PegResult result;
+      ErrorStack *err = error_stack_create();
+      peg_solve(&args, &result, err);
+      eg_pick_set_suppressed(false);
+      if (error_stack_is_empty(err)) {
+        judge_stage = result.last_completed_stage;
+        for (int cand_idx = 0; cand_idx < result.n_top_cands; cand_idx++) {
+          char cand_str[32];
+          move_to_string(config_get_game(configs[0]),
+                         &result.top_cands[cand_idx].move, cand_str,
+                         sizeof(cand_str));
+          for (int arm_idx = 0; arm_idx < PEG_NEST_ARMS; arm_idx++) {
+            if (strcmp(cand_str, arms[arm_idx].move_str) == 0) {
+              wins[arm_idx] = result.top_cands[cand_idx].win_pct;
+              spreads[arm_idx] = result.top_cands[cand_idx].mean_spread;
+            }
+          }
+        }
+      }
+      error_stack_destroy(err);
+      peg_result_destroy(&result);
+    }
+    printf("PN %d %d", index - 1, judge_stage);
+    for (int arm_idx = 0; arm_idx < PEG_NEST_ARMS; arm_idx++) {
+      printf(" | %s | %.4f %.3f %.3f", arms[arm_idx].move_str, wins[arm_idx],
+             spreads[arm_idx], arms[arm_idx].elapsed);
+    }
+    printf(" |");
+    for (int arm_idx = 0; arm_idx < PEG_NEST_ARMS; arm_idx++) {
+      printf(" %d%s", arms[arm_idx].stage, arms[arm_idx].partial ? "p" : "");
+    }
+    printf("\n");
+    (void)fflush(stdout);
+  }
+  fclose_or_die(file);
+  printf("PNDONE\n");
+  config_destroy(judge_config);
+  for (int config_idx = 0; config_idx < PEG_NEST_ARMS; config_idx++) {
+    config_destroy(configs[config_idx]);
+  }
+}
+
+// LAB (M4, local, never for a PR). pegjudge:<file>,<first>,<max>,
+// <judge tlim seconds>,<threads>. Two judges on the same picks: the greedy
+// arms stock0, static0 and mid (cheap, and they often pick plays that leave
+// tiles in the bag) are judged by a complete solve with the default opponent,
+// who sees every rack and the bag (judge 0), and by one with -pegpess false,
+// whose opponent chooses from what it can see (judge 1). Prints
+//   PJ <index> | per arm: <move> | then per judge:
+//   J<judge> <stage> <seconds> then <win> <spread> per arm |
+enum { PEG_JUDGE_ARMS = 3, PEG_JUDGE_COUNT = 4 };
+
+// Judge 2: as judge 1, the opponent choosing among its top 8 candidates.
+// Judge 3: as judge 1, the opponent ranking its plays by wins, then spread
+// (MAGPIE_PEG_WINFIRST).
+static const char *const PEG_JUDGE_OPTIONS[PEG_JUDGE_COUNT] = {
+    "", "-pegpess false", "-pegpess false -pegncaps 8,4,2", "-pegpess false"};
+
+static const bool PEG_JUDGE_WIN_FIRST[PEG_JUDGE_COUNT] = {false, false, false,
+                                                          true};
+
+// PEGJUDGE_SKIP=<digits> leaves those judges out (their columns print -1).
+static bool peg_judge_skipped(int judge_idx) {
+  const char *skip = getenv("PEGJUDGE_SKIP");
+  return skip != NULL && strchr(skip, '0' + judge_idx) != NULL;
+}
+
+void peg_judge_run_spec(const char *spec) {
+  log_set_level(LOG_FATAL);
+  char path[1024];
+  int first = 0;
+  int max_positions = 0;
+  double judge_tlim = 0;
+  int threads = 0;
+  if (sscanf(spec, "%1023[^,],%d,%d,%lf,%d", path, &first, &max_positions,
+             &judge_tlim, &threads) != 5) {
+    log_fatal("pegjudge:<file>,<first>,<max>,<judge tlim>,<threads>");
+  }
+  setenv("MAGPIE_EGPICK_WEIGHTS", "scripts/egregret/weights/cheap_own_leave.tsv",
+         1);
+  setenv("MAGPIE_EGPICK_N", "1", 1);
+  setenv("MAGPIE_EGPICK_MODE", "staticbest", 1);
+  Config *arm_config =
+      config_create_or_die("set -lex CSW24 -threads 1 -pegoutcomes false");
+  Config *judge_configs[PEG_JUDGE_COUNT];
+  for (int judge_idx = 0; judge_idx < PEG_JUDGE_COUNT; judge_idx++) {
+    char *cmd = get_formatted_string(
+        "set -lex CSW24 -threads 1 -pegoutcomes false %s",
+        PEG_JUDGE_OPTIONS[judge_idx]);
+    judge_configs[judge_idx] = config_create_or_die(cmd);
+    free(cmd);
+  }
+  FILE *file = fopen_or_die(path, "re");
+  char line[4096];
+  int index = 0;
+  int done = 0;
+  while (done < max_positions && fgets(line, sizeof(line), file)) {
+    line[strcspn(line, "\n")] = '\0';
+    if (line[0] == '\0') {
+      continue;
+    }
+    if (index++ < first) {
+      continue;
+    }
+    char *cmd = get_formatted_string("cgp %s", line);
+    exec_config_quiet(arm_config, cmd);
+    for (int judge_idx = 0; judge_idx < PEG_JUDGE_COUNT; judge_idx++) {
+      exec_config_quiet(judge_configs[judge_idx], cmd);
+    }
+    free(cmd);
+    PegBuiltOutcome arms[PEG_JUDGE_ARMS];
+    bool all_ok = true;
+    for (int arm_idx = 0; arm_idx < PEG_JUDGE_ARMS; arm_idx++) {
+      arms[arm_idx] =
+          peg_built_solve(arm_config, &PEG_BUILT_SPECS[arm_idx], threads, 0);
+      all_ok = all_ok && arms[arm_idx].ok;
+    }
+    done++;
+    if (!all_ok) {
+      printf("PJ %d SKIP\n", index - 1);
+      continue;
+    }
+    const Move *distinct[PEG_JUDGE_ARMS];
+    int n_distinct = 0;
+    for (int arm_idx = 0; arm_idx < PEG_JUDGE_ARMS; arm_idx++) {
+      bool seen = false;
+      for (int prev_idx = 0; prev_idx < arm_idx; prev_idx++) {
+        seen = seen ||
+               strcmp(arms[arm_idx].move_str, arms[prev_idx].move_str) == 0;
+      }
+      if (!seen) {
+        distinct[n_distinct++] = &arms[arm_idx].move;
+      }
+    }
+    printf("PJ %d", index - 1);
+    for (int arm_idx = 0; arm_idx < PEG_JUDGE_ARMS; arm_idx++) {
+      printf(" | %s", arms[arm_idx].move_str);
+    }
+    for (int judge_idx = 0; judge_idx < PEG_JUDGE_COUNT; judge_idx++) {
+      double wins[PEG_JUDGE_ARMS];
+      double spreads[PEG_JUDGE_ARMS];
+      for (int arm_idx = 0; arm_idx < PEG_JUDGE_ARMS; arm_idx++) {
+        wins[arm_idx] = -1;
+        spreads[arm_idx] = 0;
+      }
+      PegArgs args;
+      config_fill_peg_args(judge_configs[judge_idx], &args);
+      args.num_threads = threads;
+      args.time_budget_seconds = judge_tlim;
+      args.include_per_scenario = false;
+      args.tt_fraction_of_mem = 0.05;
+      args.only_moves = distinct;
+      args.n_only_moves = n_distinct;
+      args.first_win = false;
+      args.early_cutoff = false;
+      if (peg_judge_skipped(judge_idx)) {
+        printf(" | J%d -1 0.00", judge_idx);
+        for (int arm_idx = 0; arm_idx < PEG_JUDGE_ARMS; arm_idx++) {
+          printf(" %.4f %.3f", wins[arm_idx], spreads[arm_idx]);
+        }
+        continue;
+      }
+      if (PEG_JUDGE_WIN_FIRST[judge_idx]) {
+        setenv("MAGPIE_PEG_WINFIRST", "1", 1);
+      } else {
+        unsetenv("MAGPIE_PEG_WINFIRST");
+      }
+      eg_pick_set_suppressed(true);
+      PegResult result;
+      ErrorStack *err = error_stack_create();
+      Timer timer;
+      ctimer_start(&timer);
+      peg_solve(&args, &result, err);
+      const double elapsed = ctimer_elapsed_seconds(&timer);
+      eg_pick_set_suppressed(false);
+      unsetenv("MAGPIE_PEG_WINFIRST");
+      int judge_stage = -1;
+      if (error_stack_is_empty(err)) {
+        judge_stage = result.last_completed_stage;
+        for (int cand_idx = 0; cand_idx < result.n_top_cands; cand_idx++) {
+          char cand_str[32];
+          move_to_string(config_get_game(arm_config),
+                         &result.top_cands[cand_idx].move, cand_str,
+                         sizeof(cand_str));
+          for (int arm_idx = 0; arm_idx < PEG_JUDGE_ARMS; arm_idx++) {
+            if (strcmp(cand_str, arms[arm_idx].move_str) == 0) {
+              wins[arm_idx] = result.top_cands[cand_idx].win_pct;
+              spreads[arm_idx] = result.top_cands[cand_idx].mean_spread;
+            }
+          }
+        }
+      }
+      error_stack_destroy(err);
+      peg_result_destroy(&result);
+      printf(" | J%d %d %.2f", judge_idx, judge_stage, elapsed);
+      for (int arm_idx = 0; arm_idx < PEG_JUDGE_ARMS; arm_idx++) {
+        printf(" %.4f %.3f", wins[arm_idx], spreads[arm_idx]);
+      }
+    }
+    printf("\n");
+    (void)fflush(stdout);
+  }
+  fclose_or_die(file);
+  printf("PJDONE\n");
+  config_destroy(arm_config);
+  for (int judge_idx = 0; judge_idx < PEG_JUDGE_COUNT; judge_idx++) {
+    config_destroy(judge_configs[judge_idx]);
+  }
+}
+
+// LAB (M4, local, never for a PR). pegsoft:<file>,<first>,<max>,<threads>,
+// <stage tlim seconds>,<exact tlim seconds>. Per-scenario values for a soft
+// win and for the first-win check: a 2-ply stage on the static seed's top 16
+// with full spreads (run T) and first-win (run F), then the exact outcome of
+// every scenario of the bag-emptying candidates (run X, a complete solve with
+// full spreads). The opponent's replies are capped at 2 in T and F so the
+// candidates that leave tiles in the bag, which the analysis leaves out, do
+// not hold the stage up. Prints, per candidate with outcomes,
+//   PS <index> <run> <tiles played> <fidelity> | <move> | then per scenario
+//   <drawn>:<remaining>:<weight>:<value>
+enum { PEG_SOFT_MAX_MOVES = 64 };
+
+static void peg_soft_print(const Game *game, int index, char run,
+                           const PegResult *result) {
+  for (int cand_idx = 0; cand_idx < result->n_cand_outcomes; cand_idx++) {
+    const PegCandOutcomes *outcomes = &result->cand_outcomes[cand_idx];
+    char move_str[32];
+    move_to_string(game, &outcomes->move, move_str, sizeof(move_str));
+    printf("PS %d %c %d %d | %s |", index, run,
+           move_get_tiles_played(&outcomes->move), outcomes->fidelity,
+           move_str);
+    for (int row_idx = 0; row_idx < outcomes->n_rows; row_idx++) {
+      const PegPerScenario *row = &outcomes->rows[row_idx];
+      printf(" %s:%s:%lld:%d", row->drawn[0] == '\0' ? "-" : row->drawn,
+             row->remaining[0] == '\0' ? "-" : row->remaining,
+             (long long)row->weight, (int)row->mover_total);
+    }
+    printf("\n");
+  }
+}
+
+void peg_soft_run_spec(const char *spec) {
+  log_set_level(LOG_FATAL);
+  char path[1024];
+  int first = 0;
+  int max_positions = 0;
+  int threads = 0;
+  double stage_tlim = 0;
+  double exact_tlim = 0;
+  if (sscanf(spec, "%1023[^,],%d,%d,%d,%lf,%lf", path, &first, &max_positions,
+             &threads, &stage_tlim, &exact_tlim) != 6) {
+    log_fatal("pegsoft:<file>,<first>,<max>,<threads>,<stage tlim>,"
+              "<exact tlim>");
+  }
+  setenv("MAGPIE_EGPICK_WEIGHTS", "scripts/egregret/weights/cheap_own_leave.tsv",
+         1);
+  setenv("MAGPIE_EGPICK_N", "1", 1);
+  setenv("MAGPIE_EGPICK_MODE", "staticbest", 1);
+  // PEGSOFT_TOPK=16,16 runs a second stage (3 plies), 16,16,16 a third (4).
+  const char *top_k_schedule = getenv("PEGSOFT_TOPK");
+  char *stage_cmd = get_formatted_string(
+      "set -lex CSW24 -threads 1 -pegoutcomes false -pegtopk %s",
+      top_k_schedule == NULL ? "16" : top_k_schedule);
+  Config *stage_config = config_create_or_die(stage_cmd);
+  free(stage_cmd);
+  // LAB: PEGSOFT_EXACT_OPTS adds options to the reference solve; without
+  // "-pegplies end" its endgames are only the default 3 plies deep.
+  const char *exact_opts = getenv("PEGSOFT_EXACT_OPTS");
+  char *exact_cmd =
+      get_formatted_string("set -lex CSW24 -threads 1 -pegoutcomes false %s",
+                           exact_opts == NULL ? "" : exact_opts);
+  Config *exact_config = config_create_or_die(exact_cmd);
+  free(exact_cmd);
+  FILE *file = fopen_or_die(path, "re");
+  char line[4096];
+  int index = 0;
+  int done = 0;
+  while (done < max_positions && fgets(line, sizeof(line), file)) {
+    line[strcspn(line, "\n")] = '\0';
+    if (line[0] == '\0') {
+      continue;
+    }
+    if (index++ < first) {
+      continue;
+    }
+    done++;
+    char *cmd = get_formatted_string("cgp %s", line);
+    exec_config_quiet(stage_config, cmd);
+    exec_config_quiet(exact_config, cmd);
+    free(cmd);
+    const Game *game = config_get_game(stage_config);
+    const int bag_size = game_get_real_bag_size(game);
+    PegResult stage_result;
+    bool stage_ok = false;
+    for (int run_idx = 0; run_idx < 2; run_idx++) {
+      PegArgs args;
+      config_fill_peg_args(stage_config, &args);
+      args.num_threads = threads;
+      args.time_budget_seconds = stage_tlim;
+      args.include_per_scenario = true;
+      args.tt_fraction_of_mem = 0.05;
+      args.inner_top_k = 2;
+      args.first_win = run_idx == 1;
+      PegResult result;
+      ErrorStack *err = error_stack_create();
+      peg_solve(&args, &result, err);
+      const bool ok = error_stack_is_empty(err);
+      error_stack_destroy(err);
+      if (ok) {
+        peg_soft_print(game, index - 1, run_idx == 0 ? 'T' : 'F', &result);
+      }
+      if (run_idx == 0 && ok) {
+        stage_result = result;
+        stage_ok = true;
+      } else {
+        peg_result_destroy(&result);
+      }
+    }
+    if (!stage_ok) {
+      printf("PS %d SKIP\n", index - 1);
+      continue;
+    }
+    const Move *emptiers[PEG_SOFT_MAX_MOVES];
+    int n_emptiers = 0;
+    for (int cand_idx = 0; cand_idx < stage_result.n_cand_outcomes &&
+                           n_emptiers < PEG_SOFT_MAX_MOVES;
+         cand_idx++) {
+      const Move *move = &stage_result.cand_outcomes[cand_idx].move;
+      if (move_get_tiles_played(move) >= bag_size) {
+        emptiers[n_emptiers++] = move;
+      }
+    }
+    if (n_emptiers > 0) {
+      PegArgs args;
+      config_fill_peg_args(exact_config, &args);
+      args.num_threads = threads;
+      args.time_budget_seconds = exact_tlim;
+      args.include_per_scenario = true;
+      args.tt_fraction_of_mem = 0.05;
+      args.only_moves = emptiers;
+      args.n_only_moves = n_emptiers;
+      args.first_win = false;
+      args.early_cutoff = false;
+      eg_pick_set_suppressed(true);
+      PegResult result;
+      ErrorStack *err = error_stack_create();
+      peg_solve(&args, &result, err);
+      eg_pick_set_suppressed(false);
+      if (error_stack_is_empty(err)) {
+        peg_soft_print(game, index - 1, 'X', &result);
+        printf("PS %d XSTAGE %d%s %d\n", index - 1, result.last_completed_stage,
+               result.last_stage_partial ? "p" : "", result.n_cand_outcomes);
+      } else {
+        char *error_string = error_stack_get_string_and_reset(err);
+        printf("PS %d XERROR %s\n", index - 1, error_string);
+        free(error_string);
+      }
+      error_stack_destroy(err);
+      peg_result_destroy(&result);
+    }
+    peg_result_destroy(&stage_result);
+    (void)fflush(stdout);
+  }
+  fclose_or_die(file);
+  printf("PSDONE\n");
+  config_destroy(stage_config);
+  config_destroy(exact_config);
+}
+
+// LAB (M4, local, never for a PR). pegdiag:<file>,<first>,<max>,<threads>,
+// <stage tlim seconds>. Why the 2-ply stage is slower after the own-outplay
+// middle stage: per position, the greedy ranking with and without the middle
+// stage (PD <index> <arm> G <rank> <tiles played> <move>), then a 2-ply top-32
+// stage for each, with every finished candidate
+// (PD <index> <arm> E <stage> <rank> <tiles played> <seconds> <move>) and
+// PD <index> <arm> R <stage><p> <seconds> <move>.
+enum { PEG_DIAG_MAX_EVENTS = 512, PEG_DIAG_TOP = 32 };
+
+typedef struct PegDiagEvent {
+  int stage_idx;
+  int cand_rank;
+  Move move;
+  int64_t elapsed_ns;
+} PegDiagEvent;
+
+typedef struct PegDiagTrace {
+  _Atomic uint64_t event_count;
+  int64_t start_ns;
+  PegDiagEvent events[PEG_DIAG_MAX_EVENTS];
+} PegDiagTrace;
+
+static void peg_diag_on_candidate_done(int stage_idx, int cand_rank,
+                                       const Move *cand, double win_pct,
+                                       double mean_spread,
+                                       int scenarios_completed,
+                                       int64_t completed_ns, bool reordered,
+                                       void *user_data) {
+  (void)win_pct;
+  (void)mean_spread;
+  (void)scenarios_completed;
+  (void)reordered;
+  if (stage_idx < 1) {
+    return;
+  }
+  PegDiagTrace *trace = user_data;
+  const uint64_t event_idx =
+      atomic_fetch_add_explicit(&trace->event_count, 1, memory_order_relaxed);
+  if (event_idx >= PEG_DIAG_MAX_EVENTS) {
+    return;
+  }
+  PegDiagEvent *event = &trace->events[event_idx];
+  event->stage_idx = stage_idx;
+  event->cand_rank = cand_rank;
+  event->move = *cand;
+  event->elapsed_ns = completed_ns - trace->start_ns;
+}
+
+static void peg_diag_solve(Config *config, const char *arm_name,
+                           const char *mid_n, bool greedy, int threads,
+                           double stage_tlim, int index, PegDiagTrace *trace) {
+  if (mid_n != NULL) {
+    setenv("MAGPIE_PEGMID_N", mid_n, 1);
+  } else {
+    unsetenv("MAGPIE_PEGMID_N");
+  }
+  PegArgs args;
+  config_fill_peg_args(config, &args);
+  args.num_threads = threads;
+  args.greedy_seed_only = greedy;
+  args.time_budget_seconds = greedy ? 0 : stage_tlim;
+  args.include_per_scenario = false;
+  args.tt_fraction_of_mem = 0.05;
+  const char *inner_top_k = getenv("PEGDIAG_INNER_TOPK");
+  if (inner_top_k != NULL) {
+    args.inner_top_k = atoi(inner_top_k);
+  }
+  atomic_store_explicit(&trace->event_count, 0, memory_order_relaxed);
+  if (!greedy) {
+    args.on_cand_done = peg_diag_on_candidate_done;
+    args.user_data = trace;
+  }
+  PegResult result;
+  ErrorStack *err = error_stack_create();
+  Timer timer;
+  ctimer_start(&timer);
+  trace->start_ns = ctimer_monotonic_ns();
+  peg_solve(&args, &result, err);
+  const double elapsed = ctimer_elapsed_seconds(&timer);
+  unsetenv("MAGPIE_PEGMID_N");
+  const Game *game = config_get_game(config);
+  char move_str[32];
+  if (error_stack_is_empty(err) && result.n_top_cands > 0) {
+    if (greedy) {
+      for (int cand_idx = 0;
+           cand_idx < result.n_top_cands && cand_idx < PEG_DIAG_TOP;
+           cand_idx++) {
+        const Move *move = &result.top_cands[cand_idx].move;
+        move_to_string(game, move, move_str, sizeof(move_str));
+        printf("PD %d %s G %d %d %s\n", index, arm_name, cand_idx,
+               move_get_tiles_played(move), move_str);
+      }
+    } else {
+      uint64_t event_count =
+          atomic_load_explicit(&trace->event_count, memory_order_relaxed);
+      if (event_count > PEG_DIAG_MAX_EVENTS) {
+        event_count = PEG_DIAG_MAX_EVENTS;
+      }
+      for (uint64_t event_idx = 0; event_idx < event_count; event_idx++) {
+        const PegDiagEvent *event = &trace->events[event_idx];
+        move_to_string(game, &event->move, move_str, sizeof(move_str));
+        printf("PD %d %s E %d %d %d %.3f %s\n", index, arm_name,
+               event->stage_idx, event->cand_rank,
+               move_get_tiles_played(&event->move),
+               (double)event->elapsed_ns / 1e9, move_str);
+      }
+      move_to_string(game, &result.best_move, move_str, sizeof(move_str));
+      printf("PD %d %s R %d%s %.3f %s\n", index, arm_name,
+             result.last_completed_stage,
+             result.last_stage_partial ? "p" : "", elapsed, move_str);
+    }
+  } else {
+    printf("PD %d %s FAIL\n", index, arm_name);
+  }
+  error_stack_destroy(err);
+  peg_result_destroy(&result);
+}
+
+// LAB pegtie:<file>,<first>,<max>,<threads>,<tlim>: the stock staged solve
+// under a time limit; how it ended (stage, partial, spreads known or not) and
+// how many of its ranked candidates share the top win count. Lines:
+// PT <index> <stage>[p] <secs> <n ranked> <spread unknown 0/1> <tied at top>
+//    <tied at top with a different seed-independent move> | <best move>
+void peg_tie_run_spec(const char *spec) {
+  log_set_level(LOG_FATAL);
+  char path[1024];
+  int first = 0;
+  int max_positions = 0;
+  int threads = 0;
+  double tlim = 0;
+  if (sscanf(spec, "%1023[^,],%d,%d,%d,%lf", path, &first, &max_positions,
+             &threads, &tlim) != 5) {
+    log_fatal("pegtie:<file>,<first>,<max>,<threads>,<tlim>");
+  }
+  const char *extra_options = getenv("PEGTIE_OPTS");
+  char *config_cmd =
+      get_formatted_string("set -lex CSW24 -threads 1 -pegoutcomes false %s",
+                           extra_options == NULL ? "" : extra_options);
+  Config *config = config_create_or_die(config_cmd);
+  free(config_cmd);
+  char *tlim_cmd = get_formatted_string("set -pegtlim %f", tlim);
+  exec_config_quiet(config, tlim_cmd);
+  free(tlim_cmd);
+  FILE *file = fopen_or_die(path, "re");
+  char line[4096];
+  int index = 0;
+  int done = 0;
+  while (done < max_positions && fgets(line, sizeof(line), file)) {
+    line[strcspn(line, "\n")] = '\0';
+    if (line[0] == '\0') {
+      continue;
+    }
+    if (index++ < first) {
+      continue;
+    }
+    done++;
+    char *cmd = get_formatted_string("cgp %s", line);
+    exec_config_quiet(config, cmd);
+    free(cmd);
+    PegArgs args;
+    config_fill_peg_args(config, &args);
+    args.num_threads = threads;
+    args.time_budget_seconds = tlim;
+    args.tt_fraction_of_mem = 0.05;
+    PegResult result;
+    ErrorStack *err = error_stack_create();
+    Timer timer;
+    ctimer_start(&timer);
+    peg_solve(&args, &result, err);
+    const double elapsed = ctimer_elapsed_seconds(&timer);
+    if (error_stack_is_empty(err) && result.n_top_cands > 0) {
+      const PegRankedCand *top = &result.top_cands[0];
+      const int64_t top_score = 2 * top->win_count + top->tie_count;
+      int tied = 0;
+      int tied_no_spread = 0;
+      for (int cand_idx = 0; cand_idx < result.n_top_cands; cand_idx++) {
+        const PegRankedCand *cand = &result.top_cands[cand_idx];
+        if (cand->cut || cand->weight_sum != top->weight_sum ||
+            2 * cand->win_count + cand->tie_count != top_score) {
+          continue;
+        }
+        tied++;
+        if (cand->spread_unknown) {
+          tied_no_spread++;
+        }
+      }
+      char move_str[32];
+      move_to_string(config_get_game(config), &result.best_move, move_str,
+                     sizeof(move_str));
+      printf("PT %d %d%s %.3f %d %d %d %d %.4f | %s\n", index - 1,
+             result.last_completed_stage, result.last_stage_partial ? "p" : "",
+             elapsed, result.n_top_cands, top->spread_unknown ? 1 : 0, tied,
+             tied_no_spread, top->win_pct, move_str);
+    } else {
+      printf("PT %d FAIL\n", index - 1);
+    }
+    error_stack_destroy(err);
+    peg_result_destroy(&result);
+    (void)fflush(stdout);
+  }
+  fclose_or_die(file);
+  printf("PTDONE\n");
+  config_destroy(config);
+}
+
+// LAB pegtieloss:<file>,<first>,<max>,<threads>,<tlim>,<judge tlim>: what the
+// order of tied candidates costs. The stock staged solve under a time limit,
+// then, when two or more candidates share the top win count, every scenario of
+// the bag-emptying ones solved to the end of the game (run X rows, as pegsoft
+// prints them). Lines:
+// TL <index> <stage>[p] <secs> <n tied> <spread unknown 0/1> <top win_pct>
+// TC <index> <rank> <tiles played> <spread unknown 0/1> <mean spread> | <move>
+void peg_tie_loss_run_spec(const char *spec) {
+  log_set_level(LOG_FATAL);
+  char path[1024];
+  int first = 0;
+  int max_positions = 0;
+  int threads = 0;
+  double tlim = 0;
+  double judge_tlim = 0;
+  if (sscanf(spec, "%1023[^,],%d,%d,%d,%lf,%lf", path, &first, &max_positions,
+             &threads, &tlim, &judge_tlim) != 6) {
+    log_fatal("pegtieloss:<file>,<first>,<max>,<threads>,<tlim>,<judge tlim>");
+  }
+  const char *extra_options = getenv("PEGTIE_OPTS");
+  char *config_cmd =
+      get_formatted_string("set -lex CSW24 -threads 1 -pegoutcomes false %s",
+                           extra_options == NULL ? "" : extra_options);
+  Config *config = config_create_or_die(config_cmd);
+  free(config_cmd);
+  char *tlim_cmd = get_formatted_string("set -pegtlim %f", tlim);
+  exec_config_quiet(config, tlim_cmd);
+  free(tlim_cmd);
+  Config *judge_config = config_create_or_die(
+      "set -lex CSW24 -threads 1 -pegoutcomes false -pegplies end");
+  FILE *file = fopen_or_die(path, "re");
+  char line[4096];
+  int index = 0;
+  int done = 0;
+  while (done < max_positions && fgets(line, sizeof(line), file)) {
+    line[strcspn(line, "\n")] = '\0';
+    if (line[0] == '\0') {
+      continue;
+    }
+    if (index++ < first) {
+      continue;
+    }
+    done++;
+    char *cmd = get_formatted_string("cgp %s", line);
+    exec_config_quiet(config, cmd);
+    exec_config_quiet(judge_config, cmd);
+    free(cmd);
+    const Game *game = config_get_game(config);
+    const int bag_size = game_get_real_bag_size(game);
+    PegArgs args;
+    config_fill_peg_args(config, &args);
+    args.num_threads = threads;
+    args.time_budget_seconds = tlim;
+    args.tt_fraction_of_mem = 0.05;
+    PegResult result;
+    ErrorStack *err = error_stack_create();
+    Timer timer;
+    ctimer_start(&timer);
+    peg_solve(&args, &result, err);
+    const double elapsed = ctimer_elapsed_seconds(&timer);
+    const bool ok = error_stack_is_empty(err) && result.n_top_cands > 0;
+    error_stack_destroy(err);
+    if (!ok) {
+      printf("TL %d FAIL\n", index - 1);
+      peg_result_destroy(&result);
+      continue;
+    }
+    const PegRankedCand *top = &result.top_cands[0];
+    const int64_t top_score = 2 * top->win_count + top->tie_count;
+    const Move *emptiers[PEG_SOFT_MAX_MOVES];
+    int n_emptiers = 0;
+    int tied = 0;
+    for (int cand_idx = 0; cand_idx < result.n_top_cands; cand_idx++) {
+      const PegRankedCand *cand = &result.top_cands[cand_idx];
+      if (cand->cut || cand->weight_sum != top->weight_sum ||
+          2 * cand->win_count + cand->tie_count != top_score) {
+        continue;
+      }
+      tied++;
+      char move_str[32];
+      move_to_string(game, &cand->move, move_str, sizeof(move_str));
+      printf("TC %d %d %d %d %.3f | %s\n", index - 1, cand_idx,
+             move_get_tiles_played(&cand->move), cand->spread_unknown ? 1 : 0,
+             cand->mean_spread, move_str);
+      if (move_get_tiles_played(&cand->move) >= bag_size &&
+          n_emptiers < PEG_SOFT_MAX_MOVES) {
+        emptiers[n_emptiers++] = &cand->move;
+      }
+    }
+    printf("TL %d %d%s %.3f %d %d %.4f\n", index - 1,
+           result.last_completed_stage, result.last_stage_partial ? "p" : "",
+           elapsed, tied, top->spread_unknown ? 1 : 0, top->win_pct);
+    if (tied >= 2 && n_emptiers >= 2) {
+      PegArgs judge_args;
+      config_fill_peg_args(judge_config, &judge_args);
+      judge_args.num_threads = threads;
+      judge_args.time_budget_seconds = judge_tlim;
+      judge_args.include_per_scenario = true;
+      judge_args.tt_fraction_of_mem = 0.05;
+      judge_args.only_moves = emptiers;
+      judge_args.n_only_moves = n_emptiers;
+      judge_args.first_win = false;
+      judge_args.early_cutoff = false;
+      PegResult judge_result;
+      ErrorStack *judge_err = error_stack_create();
+      peg_solve(&judge_args, &judge_result, judge_err);
+      if (error_stack_is_empty(judge_err)) {
+        peg_soft_print(game, index - 1, 'X', &judge_result);
+        printf("PS %d XSTAGE %d%s %d\n", index - 1,
+               judge_result.last_completed_stage,
+               judge_result.last_stage_partial ? "p" : "",
+               judge_result.n_cand_outcomes);
+      } else {
+        printf("PS %d XERROR\n", index - 1);
+      }
+      error_stack_destroy(judge_err);
+      peg_result_destroy(&judge_result);
+    }
+    peg_result_destroy(&result);
+    (void)fflush(stdout);
+  }
+  fclose_or_die(file);
+  printf("TLDONE\n");
+  config_destroy(config);
+  config_destroy(judge_config);
+}
+
+// LAB pegrejudge:<cgp file>,<moves file>,<threads>,<tlim>: one candidate per
+// line of the moves file ("<index>\t<move as move_to_string prints it>"),
+// valued alone by the judge PEGRJ_OPTS configures (default: the opponent does
+// not see our rack and ranks its replies by wins, then spread). Lines:
+// RJ <index> <stage>[p] <secs> <win_pct> <mean spread> | <move>
+static bool peg_rejudge_load_position(Config *config, const char *path,
+                                      int wanted) {
+  FILE *file = fopen_or_die(path, "re");
+  char line[4096];
+  int index = 0;
+  bool found = false;
+  while (!found && fgets(line, sizeof(line), file)) {
+    line[strcspn(line, "\n")] = '\0';
+    if (line[0] == '\0') {
+      continue;
+    }
+    if (index++ == wanted) {
+      char *cmd = get_formatted_string("cgp %s", line);
+      exec_config_quiet(config, cmd);
+      free(cmd);
+      found = true;
+    }
+  }
+  fclose_or_die(file);
+  return found;
+}
+
+void peg_rejudge_run_spec(const char *spec) {
+  log_set_level(LOG_FATAL);
+  char path[1024];
+  char moves_path[1024];
+  int threads = 0;
+  double tlim = 0;
+  if (sscanf(spec, "%1023[^,],%1023[^,],%d,%lf", path, moves_path, &threads,
+             &tlim) != 4) {
+    log_fatal("pegrejudge:<cgp file>,<moves file>,<threads>,<tlim>");
+  }
+  const char *options = getenv("PEGRJ_OPTS");
+  const bool win_first = getenv("PEGRJ_SPREAD_FIRST") == NULL;
+  char *config_cmd =
+      get_formatted_string("set -lex CSW24 -threads 1 -pegoutcomes false %s",
+                           options == NULL ? "-pegpess false" : options);
+  Config *config = config_create_or_die(config_cmd);
+  free(config_cmd);
+  MoveList *move_list = move_list_create(10000);
+  FILE *moves_file = fopen_or_die(moves_path, "re");
+  char line[1024];
+  while (fgets(line, sizeof(line), moves_file)) {
+    line[strcspn(line, "\n")] = '\0';
+    char *tab = strchr(line, '\t');
+    if (tab == NULL) {
+      continue;
+    }
+    *tab = '\0';
+    const int index = atoi(line);
+    const char *wanted_move = tab + 1;
+    if (!peg_rejudge_load_position(config, path, index)) {
+      printf("RJ %d NOPOSITION | %s\n", index, wanted_move);
+      continue;
+    }
+    const Game *game = config_get_game(config);
+    const MoveGenArgs gen_args = {
+        .game = game,
+        .move_list = move_list,
+        .move_record_type = MOVE_RECORD_ALL,
+        .move_sort_type = MOVE_SORT_EQUITY,
+        .override_kwg = NULL,
+        .eq_margin_movegen = 0,
+        .target_equity = EQUITY_MAX_VALUE,
+    };
+    generate_moves(&gen_args);
+    const Move *found = NULL;
+    const int n_moves = move_list_get_count(move_list);
+    for (int move_idx = 0; move_idx < n_moves && found == NULL; move_idx++) {
+      const Move *move = move_list_get_move(move_list, move_idx);
+      char move_str[32];
+      move_to_string(game, move, move_str, sizeof(move_str));
+      if (strcmp(move_str, wanted_move) == 0) {
+        found = move;
+      }
+    }
+    if (found == NULL) {
+      printf("RJ %d NOMOVE | %s\n", index, wanted_move);
+      continue;
+    }
+    const Move judged = *found;
+    const Move *only[1] = {&judged};
+    PegArgs args;
+    config_fill_peg_args(config, &args);
+    args.num_threads = threads;
+    args.time_budget_seconds = tlim;
+    args.include_per_scenario = false;
+    args.tt_fraction_of_mem = 0.05;
+    args.only_moves = only;
+    args.n_only_moves = 1;
+    args.first_win = false;
+    args.early_cutoff = false;
+    if (win_first) {
+      setenv("MAGPIE_PEG_WINFIRST", "1", 1);
+    }
+    eg_pick_set_suppressed(true);
+    PegResult result;
+    ErrorStack *err = error_stack_create();
+    Timer timer;
+    ctimer_start(&timer);
+    peg_solve(&args, &result, err);
+    const double elapsed = ctimer_elapsed_seconds(&timer);
+    eg_pick_set_suppressed(false);
+    unsetenv("MAGPIE_PEG_WINFIRST");
+    if (error_stack_is_empty(err) && result.n_top_cands > 0) {
+      printf("RJ %d %d%s %.2f %.4f %.3f | %s\n", index,
+             result.last_completed_stage, result.last_stage_partial ? "p" : "",
+             elapsed, result.top_cands[0].win_pct,
+             result.top_cands[0].mean_spread, wanted_move);
+    } else {
+      printf("RJ %d FAIL | %s\n", index, wanted_move);
+    }
+    error_stack_destroy(err);
+    peg_result_destroy(&result);
+    (void)fflush(stdout);
+  }
+  fclose_or_die(moves_file);
+  printf("RJDONE\n");
+  move_list_destroy(move_list);
+  config_destroy(config);
+}
+
+void peg_diag_run_spec(const char *spec) {
+  log_set_level(LOG_FATAL);
+  char path[1024];
+  int first = 0;
+  int max_positions = 0;
+  int threads = 0;
+  double stage_tlim = 0;
+  if (sscanf(spec, "%1023[^,],%d,%d,%d,%lf", path, &first, &max_positions,
+             &threads, &stage_tlim) != 5) {
+    log_fatal("pegdiag:<file>,<first>,<max>,<threads>,<stage tlim>");
+  }
+  setenv("MAGPIE_EGPICK_WEIGHTS", "scripts/egregret/weights/cheap_own_leave.tsv",
+         1);
+  setenv("MAGPIE_EGPICK_N", "1", 1);
+  setenv("MAGPIE_EGPICK_MODE", "staticbest", 1);
+  Config *greedy_config =
+      config_create_or_die("set -lex CSW24 -threads 1 -pegoutcomes false");
+  const char *extra_options = getenv("PEGDIAG_OPTS");
+  char *stage_cmd = get_formatted_string(
+      "set -lex CSW24 -threads 1 -pegoutcomes false -pegtopk 32 %s",
+      extra_options == NULL ? "" : extra_options);
+  Config *stage_config = config_create_or_die(stage_cmd);
+  free(stage_cmd);
+  PegDiagTrace *trace = calloc_or_die(1, sizeof(*trace));
+  atomic_init(&trace->event_count, 0);
+  FILE *file = fopen_or_die(path, "re");
+  char line[4096];
+  int index = 0;
+  int done = 0;
+  while (done < max_positions && fgets(line, sizeof(line), file)) {
+    line[strcspn(line, "\n")] = '\0';
+    if (line[0] == '\0') {
+      continue;
+    }
+    if (index++ < first) {
+      continue;
+    }
+    char *cmd = get_formatted_string("cgp %s", line);
+    exec_config_quiet(greedy_config, cmd);
+    exec_config_quiet(stage_config, cmd);
+    free(cmd);
+    peg_diag_solve(greedy_config, "static", NULL, true, threads, stage_tlim,
+                   index - 1, trace);
+    peg_diag_solve(greedy_config, "mid", "64", true, threads, stage_tlim,
+                   index - 1, trace);
+    const bool mid_first = done % 2 == 1;
+    peg_diag_solve(stage_config, mid_first ? "mid" : "static",
+                   mid_first ? "64" : NULL, false, threads, stage_tlim,
+                   index - 1, trace);
+    peg_diag_solve(stage_config, mid_first ? "static" : "mid",
+                   mid_first ? NULL : "64", false, threads, stage_tlim,
+                   index - 1, trace);
+    done++;
+    (void)fflush(stdout);
+  }
+  fclose_or_die(file);
+  printf("PDDONE\n");
+  free(trace);
+  config_destroy(greedy_config);
+  config_destroy(stage_config);
 }

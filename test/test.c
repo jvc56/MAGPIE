@@ -366,6 +366,54 @@ void run_test(const char *subtest) {
     eg_regret_run_spec(subtest + strlen("egregret:"));
     return;
   }
+  if (has_prefix("pegpos:", subtest)) {
+    peg_positions_run_spec(subtest + strlen("pegpos:"));
+    return;
+  }
+  if (has_prefix("pegnest:", subtest)) {
+    peg_nest_run_spec(subtest + strlen("pegnest:"));
+    return;
+  }
+  if (has_prefix("pegjudge:", subtest)) {
+    peg_judge_run_spec(subtest + strlen("pegjudge:"));
+    return;
+  }
+  if (has_prefix("pegsoft:", subtest)) {
+    peg_soft_run_spec(subtest + strlen("pegsoft:"));
+    return;
+  }
+  if (has_prefix("pegrejudge:", subtest)) {
+    peg_rejudge_run_spec(subtest + strlen("pegrejudge:"));
+    return;
+  }
+  if (has_prefix("pegtieloss:", subtest)) {
+    peg_tie_loss_run_spec(subtest + strlen("pegtieloss:"));
+    return;
+  }
+  if (has_prefix("pegtie:", subtest)) {
+    peg_tie_run_spec(subtest + strlen("pegtie:"));
+    return;
+  }
+  if (has_prefix("pegdiag:", subtest)) {
+    peg_diag_run_spec(subtest + strlen("pegdiag:"));
+    return;
+  }
+  if (has_prefix("pegbuilt:", subtest)) {
+    peg_built_run_spec(subtest + strlen("pegbuilt:"));
+    return;
+  }
+  if (has_prefix("pegmid:", subtest)) {
+    peg_mid_run_spec(subtest + strlen("pegmid:"));
+    return;
+  }
+  if (has_prefix("pegarms:", subtest)) {
+    peg_arms_run_spec(subtest + strlen("pegarms:"));
+    return;
+  }
+  if (has_prefix("pegclose:", subtest)) {
+    peg_close_run_spec(subtest + strlen("pegclose:"));
+    return;
+  }
   if (has_prefix("pegswitch:", subtest)) {
     peg_switch_run_spec(subtest + strlen("pegswitch:"));
     return;

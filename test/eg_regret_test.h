@@ -4,5 +4,6 @@
 void eg_regret_run_spec(const char *spec);
 void eg_stuck_run_file(const char *spec);
 void eg_solve_run_file(const char *path);
+void peg_positions_run_spec(const char *spec);
 
 #endif

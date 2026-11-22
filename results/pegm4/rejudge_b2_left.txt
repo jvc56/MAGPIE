@@ -1,0 +1,9 @@
+loaded config with command: set -threads 1 -savesettings false -hr false -numplays 15 -ima 0 -minp 100 -autosave false -fgrequired false -pat none
+seed: 1795348144
+loaded config with command: set -lex CSW24 -threads 1 -pegoutcomes false -pegpess false
+seed: 1795348145
+RJ 4 1 497.84 0.2639 -5.931 | 4A Q(I)
+RJ 76 1 526.23 0.3056 -6.083 | 3M D(EL)
+RJ 109 1 382.68 0.3472 -19.458 | 5H F(E)
+RJ 147 1 915.88 0.0417 -34.750 | 9H X(U)
+RJDONE

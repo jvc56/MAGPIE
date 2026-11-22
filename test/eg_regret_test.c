@@ -75,6 +75,7 @@ enum {
   EGR_NO_VALUE = -99999,
   EGR_MOVE_LIST_CAPACITY = 2000,
   EGR_TT_SIZE_POWER = 20,
+  EGR_PEGPOS_MAX_BAG = 4,
   EGR_RACK_STRING = 64,
   EGR_STUCK_LINE = 4096,
   EGR_STUCK_CANDS = 12,
@@ -983,5 +984,42 @@ void eg_solve_run_file(const char *path) {
   endgame_results_destroy(worker.results);
   endgame_ctx_destroy(worker.ctx);
   game_destroy(worker.game);
+  config_destroy(config);
+}
+
+// LAB (M4, local): pegpos:<first game>,<games>. Static CSW24 self-play; the
+// first turn of each game at which the bag holds 1, 2, 3 or 4 tiles prints
+//   B <bag> <game> <cgp> -lex CSW24
+void peg_positions_run_spec(const char *spec) {
+  int first = 0;
+  int games = 0;
+  if (sscanf(spec, "%d,%d", &first, &games) != 2) {
+    log_fatal("pegpos:<first game>,<games>");
+  }
+  Config *config = config_create_or_die(
+      "set -lex CSW24 -wmp true -s1 equity -s2 equity -r1 all -r2 all "
+      "-numplays 1 -threads 1 -savesettings false -poolshift 0 "
+      "-pegadjust none -pat none");
+  Game *game = config_game_create(config);
+  MoveList *top_move = move_list_create(1);
+  for (int game_idx = first; game_idx < first + games; game_idx++) {
+    game_reset(game);
+    game_seed(game, EGR_GAME_SEED + (uint64_t)game_idx);
+    draw_starting_racks(game);
+    bool seen[EGR_PEGPOS_MAX_BAG + 1] = {false};
+    while (!game_over(game)) {
+      const int bag = bag_get_letters(game_get_bag(game));
+      if (bag >= 1 && bag <= EGR_PEGPOS_MAX_BAG && !seen[bag]) {
+        seen[bag] = true;
+        char *cgp = game_get_cgp(game, true);
+        printf("B %d %d %s -lex CSW24\n", bag, game_idx, cgp);
+        free(cgp);
+      }
+      play_move(get_top_equity_move(game, top_move), game, NULL);
+    }
+  }
+  (void)fflush(stdout);
+  move_list_destroy(top_move);
+  game_destroy(game);
   config_destroy(config);
 }

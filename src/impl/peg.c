@@ -63,6 +63,17 @@
 // >= 2 to compare. The table length is the default number of halving stages;
 // there is no fixed cap, so a caller may pass a longer schedule via
 // PegArgs.stage_top_k.
+enum { PEG_MID_STAGE_PICK_CANDIDATES = 12 };
+
+// LAB (never for a PR): the fast hidden-rack judge (MAGPIE_PEG_FASTJUDGE=1).
+// A nested stage fidelity with PEG_LAB_WIN_ONLY added asks for the win score
+// alone (first-win endgames); PEG_LAB_CHOICE_SLOTS caps the choices kept.
+enum { PEG_LAB_WIN_ONLY = 1000, PEG_LAB_CHOICE_SLOTS = 8192 };
+
+// LAB (never for a PR): weight of the win score in PegWorker.nested_win_first's
+// ranking key, far above any mean spread.
+static const double PEG_WIN_FIRST_SCALE = 1e8;
+
 static const int PEG_DEFAULT_HALVING_COUNTS[] = {32, 16, 8, 4, 2};
 
 // Two win%s closer than this are tied: floating-point noise, not a result.
@@ -151,6 +162,7 @@ typedef struct PegWorker {
   MoveList *playout_ml;
   // LAB egregret: the empty-bag pick for greedy playouts (NULL when off).
   EgPick *eg_pick;
+  EgPick *eg_pick_mid; // LAB: own-outplay pick of the middle stage, or NULL
   EndgameCtx *eg_ctx;
   EndgameResults *eg_results;
   // Per-candidate template: the post-cand board with cross-sets generated once
@@ -196,6 +208,14 @@ typedef struct PegWorker {
   int nested_max_depth;
   bool nested_score_actual; // see PegArgs
   bool nested_pessimistic;  // see PegArgs
+  // LAB (never for a PR): a nested player that chooses from what it can see
+  // ranks its plays by wins plus half the draws, then by mean spread, with
+  // exact spreads (MAGPIE_PEG_WINFIRST=1).
+  bool nested_win_first;
+  // LAB (never for a PR): with nested_win_first, a nested player's choice is
+  // found by win scores first (first-win endgames), spreads only for the plays
+  // tied at the top, and kept per information set (MAGPIE_PEG_FASTJUDGE=1).
+  bool nested_fast;
   int inner_top_k;          // see PegArgs; the pessimistic opponent's cap
   int root_mover_idx;       // the player the solve chooses a move for
   // The opponent's known tiles (PegArgs.opp_rack_known), by machine letter,
@@ -1940,7 +1960,7 @@ static int32_t peg_nested_floor(PegWorker *worker, const Game *game,
 // outplay deeper than that lookahead.
 static int32_t peg_nested_endgame_value(PegWorker *worker, Game *game,
                                         int on_turn, int lookahead,
-                                        const PegStop *stop) {
+                                        bool win_only, const PegStop *stop) {
   int plies = worker->nested_emptier_ply_cap > 0
                   ? worker->nested_emptier_ply_cap
                   : lookahead;
@@ -1968,7 +1988,7 @@ static int32_t peg_nested_endgame_value(PegWorker *worker, Game *game,
       // Most are too short for the monitor to look at, and it lends idle cores
       // to the rest.
       /*max_workers=*/peg_pool_num_workers(worker->nest_pool),
-      worker->first_win, /*first_win_fallback_moves=*/0,
+      worker->first_win || win_only, /*first_win_fallback_moves=*/0,
       /*use_initial_window=*/false, /*initial_alpha=*/0, /*initial_beta=*/0,
       stop->deadline_ns, /*actual_move=*/NULL, &ea);
   ea.stop_fn = peg_stop_cancelled;
@@ -2216,10 +2236,13 @@ static double peg_nested_cand_value(PegWorker *worker, const Game *parent_game,
   }
   int64_t weight_sum = 0;
   double value_weight = 0.0;
+  double sign_weight = 0.0;
   for (int job_idx = 0; job_idx < nc.n_jobs; job_idx++) {
+    const double job_spread = nc.jobs[job_idx].mover_spread;
     weight_sum += nc.jobs[job_idx].weight;
-    value_weight +=
-        (double)nc.jobs[job_idx].weight * nc.jobs[job_idx].mover_spread;
+    value_weight += (double)nc.jobs[job_idx].weight * job_spread;
+    sign_weight += (double)nc.jobs[job_idx].weight *
+                   (double)((job_spread > 0) - (job_spread < 0));
   }
   free(nc.jobs);
   peg_nest_release(worker, tframe);
@@ -2231,6 +2254,14 @@ static double peg_nested_cand_value(PegWorker *worker, const Game *parent_game,
   if (worker->first_win) {
     return avg;
   }
+  if (stage_fidelity >= PEG_LAB_WIN_ONLY) {
+    return sign_weight / (double)weight_sum;
+  }
+  if (worker->nested_win_first) {
+    // LAB: a ranking key only (the choice is then valued on the scenario at
+    // hand): wins plus half the draws first, mean spread within a tie.
+    return PEG_WIN_FIRST_SCALE * (sign_weight / (double)weight_sum) + avg;
+  }
   return (double)(int32_t)(avg >= 0 ? avg + 0.5 : avg - 0.5);
 }
 
@@ -2240,6 +2271,11 @@ static double peg_nested_cand_value(PegWorker *worker, const Game *parent_game,
 static double peg_inner_leaf(PegWorker *worker, Game *game, int stage_fidelity,
                              int depth, int outer_fidelity,
                              const PegStop *stop) {
+  // LAB: see PEG_LAB_WIN_ONLY. Only the sign of a win-only value is used.
+  const bool win_only = stage_fidelity >= PEG_LAB_WIN_ONLY;
+  if (win_only) {
+    stage_fidelity -= PEG_LAB_WIN_ONLY;
+  }
   const int on_turn = game_get_player_on_turn_index(game);
   if (game_get_game_end_reason(game) != GAME_END_REASON_NONE) {
     const Player *me = game_get_player(game, on_turn);
@@ -2254,7 +2290,8 @@ static double peg_inner_leaf(PegWorker *worker, Game *game, int stage_fidelity,
   if (bag_get_letters(game_get_bag(game)) == 0) {
     return peg_nested_result(
         worker,
-        peg_nested_endgame_value(worker, game, on_turn, stage_fidelity, stop));
+        peg_nested_endgame_value(worker, game, on_turn, stage_fidelity,
+                                 win_only, stop));
   }
   if (worker->nested_pessimistic && on_turn != worker->root_mover_idx) {
     return peg_nested_best_reply(worker, game, stage_fidelity, depth,
@@ -2512,6 +2549,59 @@ static double peg_nested_best_reply(PegWorker *worker, Game *game,
   return worker->first_win && search.best > 0 ? 1.0 : search.best;
 }
 
+// LAB (never for a PR): the choices of PegWorker.nested_fast, one per
+// information set of the player choosing (board, its rack, both scores).
+typedef struct PegLabChoice {
+  uint64_t key;
+  Move move;
+} PegLabChoice;
+
+static PegLabChoice peg_lab_choices[PEG_LAB_CHOICE_SLOTS];
+static int peg_lab_choice_count = 0;
+static cpthread_mutex_t peg_lab_choice_mutex;
+static _Atomic uint64_t peg_lab_choice_hits;
+static _Atomic uint64_t peg_lab_choice_misses;
+
+static uint64_t peg_lab_choice_key(const Game *game, int on_turn) {
+  uint64_t hash = peg_board_signature(game);
+  hash = fnv64a_step(hash, (uint64_t)on_turn);
+  const Rack *rack = player_get_rack(game_get_player(game, on_turn));
+  const int ld_size = ld_get_size(game_get_ld(game));
+  for (int ml = 0; ml < ld_size; ml++) {
+    hash = fnv64a_step(hash, (uint64_t)rack_get_letter(rack, ml));
+  }
+  for (int player_idx = 0; player_idx < 2; player_idx++) {
+    hash = fnv64a_step(
+        hash, (uint64_t)player_get_score(game_get_player(game, player_idx)));
+  }
+  hash = fnv64a_step(hash, (uint64_t)bag_get_letters(game_get_bag(game)));
+  return hash;
+}
+
+static bool peg_lab_choice_get(uint64_t key, Move *move) {
+  bool found = false;
+  cpthread_mutex_lock(&peg_lab_choice_mutex);
+  for (int slot_idx = 0; slot_idx < peg_lab_choice_count && !found;
+       slot_idx++) {
+    if (peg_lab_choices[slot_idx].key == key) {
+      *move = peg_lab_choices[slot_idx].move;
+      found = true;
+    }
+  }
+  cpthread_mutex_unlock(&peg_lab_choice_mutex);
+  return found;
+}
+
+static void peg_lab_choice_put(uint64_t key, const Move *move) {
+  cpthread_mutex_lock(&peg_lab_choice_mutex);
+  if (peg_lab_choice_count < PEG_LAB_CHOICE_SLOTS) {
+    peg_lab_choices[peg_lab_choice_count].key = key;
+    peg_lab_choices[peg_lab_choice_count].move = *move;
+    peg_lab_choice_count++;
+  }
+  cpthread_mutex_unlock(&peg_lab_choice_mutex);
+}
+
 // One cascade stage's scoring of its candidates (see peg_inner_cascade).
 typedef struct PegNestStage {
   const Game *game;
@@ -2608,6 +2698,80 @@ static double peg_inner_cascade(PegWorker *worker, Game *game, int depth,
   // outer stages (2-ply) thus run a single cheap inner stage; the inner peg
   // only deepens as the outer cascade does, keeping early outer stages
   // affordable.
+  // LAB: PegWorker.nested_fast. The single-stage choice (no schedule) made in
+  // two passes: every play's win score, then the full ranking key of the plays
+  // tied at the top; the first of the equal best is taken, as the selection
+  // sort below takes it. A stopped pass falls through to the stock path.
+  if (worker->nested_fast && n_sched == 0 && worker->nested_score_actual &&
+      !worker->first_win && field_n > 0) {
+    const uint64_t choice_key = peg_lab_choice_key(game, on_turn);
+    Move chosen;
+    bool have_choice = peg_lab_choice_get(choice_key, &chosen);
+    if (have_choice) {
+      atomic_fetch_add(&peg_lab_choice_hits, 1);
+    } else {
+      atomic_fetch_add(&peg_lab_choice_misses, 1);
+      PegNestStage win_stage = {
+          .game = game,
+          .on_turn = on_turn,
+          .cand_moves = cand_moves,
+          .idx = idx,
+          .val = val,
+          .unseen = unseen,
+          .ld_size = ld_size,
+          .stage_fidelity = 2 + PEG_LAB_WIN_ONLY,
+          .depth = depth,
+          .outer_fidelity = outer_fidelity,
+      };
+      const int scored =
+          peg_nest_loop_run(peg_nest_stage_item_fn, &win_stage, worker, field_n,
+                            /*reentrant=*/true, stop);
+      if (scored == field_n && !peg_nested_should_stop(worker, stop)) {
+        double top_win = val[0];
+        for (int cand_idx = 1; cand_idx < field_n; cand_idx++) {
+          if (val[cand_idx] > top_win) {
+            top_win = val[cand_idx];
+          }
+        }
+        int tied_idx[PEG_NEST_FIELD_MAX];
+        double tied_val[PEG_NEST_FIELD_MAX];
+        int n_tied = 0;
+        for (int cand_idx = 0; cand_idx < field_n; cand_idx++) {
+          if (val[cand_idx] >= top_win - PEG_WIN_PCT_TIE_TOLERANCE) {
+            tied_idx[n_tied++] = idx[cand_idx];
+          }
+        }
+        int best_tied = 0;
+        bool tie_ok = true;
+        if (n_tied > 1) {
+          PegNestStage tie_stage = win_stage;
+          tie_stage.idx = tied_idx;
+          tie_stage.val = tied_val;
+          tie_stage.stage_fidelity = 2;
+          const int tie_scored =
+              peg_nest_loop_run(peg_nest_stage_item_fn, &tie_stage, worker,
+                                n_tied, /*reentrant=*/true, stop);
+          tie_ok = tie_scored == n_tied && !peg_nested_should_stop(worker, stop);
+          for (int cand_idx = 1; tie_ok && cand_idx < n_tied; cand_idx++) {
+            if (tied_val[cand_idx] > tied_val[best_tied]) {
+              best_tied = cand_idx;
+            }
+          }
+        }
+        if (tie_ok) {
+          chosen = *move_list_get_move(cand_moves, tied_idx[best_tied]);
+          peg_lab_choice_put(choice_key, &chosen);
+          have_choice = true;
+        }
+      }
+    }
+    if (have_choice) {
+      const double fast_result = peg_nested_play_actual(
+          worker, game, &chosen, 2, depth, outer_fidelity, stop);
+      peg_nest_release(worker, cframe);
+      return fast_result;
+    }
+  }
   int n_stages = n_sched > 0 ? n_sched : 1;
   const int fidelity_stage_cap = outer_fidelity - 1;
   if (fidelity_stage_cap >= 1 && fidelity_stage_cap < n_stages) {
@@ -4823,10 +4987,28 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
   PegPruneCache *prune_cache = peg_prune_cache_create();
   atomic_int n_lends;
   atomic_init(&n_lends, 0);
+  // LAB (egregret, never for a PR): MAGPIE_PEGMID_N > 0 adds a middle stage
+  // after the greedy seed: its top N are re-ranked by greedy playouts whose
+  // empty-bag moves come from the own-outplay pick, before the halving stages.
+  const char *mid_stage_env = getenv("MAGPIE_PEGMID_N");
+  const int mid_stage_count = mid_stage_env != NULL ? atoi(mid_stage_env) : 0;
+  // LAB: see PegWorker.nested_win_first.
+  const char *win_first_env = getenv("MAGPIE_PEG_WINFIRST");
+  const bool nested_win_first = win_first_env != NULL && atoi(win_first_env) > 0;
+  // LAB: see PegWorker.nested_fast. The kept choices are per solve.
+  const char *fast_env = getenv("MAGPIE_PEG_FASTJUDGE");
+  const bool nested_fast =
+      nested_win_first && fast_env != NULL && atoi(fast_env) > 0;
+  cpthread_mutex_init(&peg_lab_choice_mutex);
+  peg_lab_choice_count = 0;
   PegWorker *workers = malloc_or_die((size_t)n_scratch * sizeof(PegWorker));
   for (int worker_idx = 0; worker_idx < n_scratch; worker_idx++) {
     workers[worker_idx].playout_ml = move_list_create(1);
     workers[worker_idx].eg_pick = eg_pick_create(args->game);
+    workers[worker_idx].eg_pick_mid =
+        mid_stage_count > 0
+            ? eg_pick_create_own(args->game, PEG_MID_STAGE_PICK_CANDIDATES)
+            : NULL;
     workers[worker_idx].eg_results = endgame_results_create();
     // Pre-created so the injection monitor reads a stable, non-NULL ctx pointer
     // (no race with lazy creation inside endgame_solve_inline).
@@ -4868,6 +5050,9 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
     workers[worker_idx].nested_pessimistic =
         args->nested_pessimistic && args->opp_model == PEG_OPP_PESSIMISTIC;
     workers[worker_idx].inner_top_k = args->inner_top_k;
+    workers[worker_idx].nested_win_first =
+        nested_win_first && args->nested_score_actual;
+    workers[worker_idx].nested_fast = nested_fast;
     workers[worker_idx].root_mover_idx = mover_idx;
     workers[worker_idx].known_opp = any_known_opp ? known_opp : NULL;
     workers[worker_idx].nest_free = NULL;
@@ -5009,6 +5194,48 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
     }
     if (n_real == 0) {
       n_real = n_cands; // nothing finished in budget; keep what we have
+    }
+    // LAB: the middle stage (see mid_stage_count). Cut off with fewer than
+    // two candidates finished, it changes nothing; otherwise the finished ones,
+    // re-ranked, are the field that goes on.
+    if (mid_stage_count > 0 && workers[0].eg_pick_mid != NULL && n_real > 1 &&
+        !peg_should_stop(deadline_ns, args->thread_control)) {
+      const int mid_count = peg_select_survivors(
+          ranked, n_real, mid_stage_count < n_real ? mid_stage_count : n_real,
+          protect_moves, n_protect);
+      PegRankedCand *mid_ranked =
+          malloc_or_die((size_t)mid_count * sizeof(PegRankedCand));
+      for (int cand_idx = 0; cand_idx < mid_count; cand_idx++) {
+        moves[cand_idx] = &ranked[cand_idx].move;
+      }
+      for (int worker_idx = 0; worker_idx < n_scratch; worker_idx++) {
+        EgPick *seed_pick = workers[worker_idx].eg_pick;
+        workers[worker_idx].eg_pick = workers[worker_idx].eg_pick_mid;
+        workers[worker_idx].eg_pick_mid = seed_pick;
+      }
+      peg_eval_candidates(
+          pool, workers, prepared_base, mover_idx, unseen, ld_size, bag_size,
+          moves, mid_count,
+          seed_orders_only ? PEG_OPP_RATIONAL : args->opp_model,
+          args->inner_top_k, /*fidelity_plies=*/0, scenario_stride, deadline_ns,
+          args->thread_control, /*poll=*/NULL, &progress, args->eval_bag_order,
+          args->eval_bag_order_len, mid_ranked, /*checkpoint=*/NULL);
+      for (int worker_idx = 0; worker_idx < n_scratch; worker_idx++) {
+        EgPick *mid_pick = workers[worker_idx].eg_pick;
+        workers[worker_idx].eg_pick = workers[worker_idx].eg_pick_mid;
+        workers[worker_idx].eg_pick_mid = mid_pick;
+      }
+      stable_sort(mid_ranked, (size_t)mid_count, sizeof(PegRankedCand),
+                  peg_rank_cmp);
+      int mid_done = 0;
+      while (mid_done < mid_count && mid_ranked[mid_done].win_pct >= 0.0) {
+        mid_done++;
+      }
+      if (mid_done >= 2) {
+        memcpy(ranked, mid_ranked, (size_t)mid_done * sizeof(PegRankedCand));
+        n_real = mid_done;
+      }
+      free(mid_ranked);
     }
     const int num_kept_after_stage0 = n_real < counts[0] ? n_real : counts[0];
     // Survivors carried forward = top-K unprotected plus every protected move.
@@ -5480,6 +5707,7 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
   for (int worker_idx = 0; worker_idx < n_scratch; worker_idx++) {
     move_list_destroy(workers[worker_idx].playout_ml);
     eg_pick_destroy(workers[worker_idx].eg_pick);
+    eg_pick_destroy(workers[worker_idx].eg_pick_mid);
     free(workers[worker_idx].reply_cache);
     endgame_ctx_destroy(workers[worker_idx].eg_ctx);
     endgame_results_destroy(workers[worker_idx].eg_results);

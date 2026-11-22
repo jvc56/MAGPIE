@@ -26,5 +26,16 @@ void test_gen_peg_fresh(void);
 void test_peg_strength_curve(void);
 
 void peg_switch_run_spec(const char *spec);
+void peg_close_run_spec(const char *spec);
+void peg_arms_run_spec(const char *spec);
+void peg_mid_run_spec(const char *spec);
+void peg_built_run_spec(const char *spec);
+void peg_diag_run_spec(const char *spec);
+void peg_tie_run_spec(const char *spec);
+void peg_tie_loss_run_spec(const char *spec);
+void peg_rejudge_run_spec(const char *spec);
+void peg_soft_run_spec(const char *spec);
+void peg_judge_run_spec(const char *spec);
+void peg_nest_run_spec(const char *spec);
 
 #endif
