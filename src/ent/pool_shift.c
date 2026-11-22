@@ -227,6 +227,8 @@ void pool_shift_fill_rack(const PoolShiftTable *table,
   result->map_indices[0] = 0;
   result->sizes[0] = 0;
   size_t value_sources[1 << RACK_SIZE];
+  // The empty leave extends nothing: its place is never read.
+  value_sources[0] = 0;
   int count = 1;
   int base_bit = RACK_SIZE;
   for (int ml = table->ld_size - 1; ml >= 0; ml--) {
