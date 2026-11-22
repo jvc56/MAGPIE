@@ -8,6 +8,11 @@
 //
 // Spec: first=<game>,games=<n>,reps=<r>,private=<0 or 1>
 //       followed by any of ,pos=<index> ,build=<0 or 1> ,cgp=<0 or 1>
+//       ,threads=<n> ,root=<0 or 1>
+// threads=<n> builds on n threads; 1, the default, on the caller's alone.
+// root=1 times, in place of the build, the exact shifts of the mover's rack
+// (pool_shift_fill_rack), which generating the root's moves with the exact
+// leave values computes once.
 // With private=1 the pool is the one the mover sees; otherwise it is the
 // public pool, which is what a sim builds.
 // pos=<index> builds at that position alone (the index of its PLB line) and
@@ -22,10 +27,11 @@
 // so that its tiles are in the bag as a sim of that CGP sees them; such a sim
 // builds the public pool of the position's PLB line.
 // Lines printed:
-//   PLB spec first= games= reps= private= pos= build= cgp=
+//   PLB spec first= games= reps= private= pos= build= cgp= threads= root=
 //   PLB cgp pos= <cgp>
 //   PLB pos= game= bag= unseen= letters= min_ms= med_ms= klv_hash=
 //       table_hash= offset=
+//   PLB root pos= game= bag= min_ms= med_ms= shifts_hash=
 //   PLB total positions= builds= sum_min_ms= mean_min_ms= mean_med_ms=
 //   PLB bucket bag=<range> positions= mean_min_ms= mean_med_ms=
 
@@ -72,6 +78,8 @@ typedef struct PoolLeavesBenchSpec {
   int position;
   int build;
   int print_cgp;
+  int threads;
+  int root;
 } PoolLeavesBenchSpec;
 
 typedef struct PoolLeavesBenchBucket {
@@ -159,6 +167,8 @@ static void plb_parse_spec(const char *spec, PoolLeavesBenchSpec *parsed) {
   parsed->position = PLB_ALL_POSITIONS;
   parsed->build = 1;
   parsed->print_cgp = 0;
+  parsed->threads = 1;
+  parsed->root = 0;
   int consumed = 0;
   // The spec is test input, and the field count is checked.
   // NOLINTNEXTLINE(cert-err34-c,bugprone-unchecked-string-to-number-conversion)
@@ -177,12 +187,19 @@ static void plb_parse_spec(const char *spec, PoolLeavesBenchSpec *parsed) {
       field_length = plb_parse_field(rest, "cgp", &parsed->print_cgp);
     }
     if (field_length == 0) {
+      field_length = plb_parse_field(rest, "threads", &parsed->threads);
+    }
+    if (field_length == 0) {
+      field_length = plb_parse_field(rest, "root", &parsed->root);
+    }
+    if (field_length == 0) {
       log_fatal("pool leaves bench: bad spec field: %s", rest);
     }
     rest += field_length;
   }
   if (parsed->reps < 1 || parsed->reps > PLB_MAX_REPS ||
       parsed->num_games < 0 || parsed->position < PLB_ALL_POSITIONS ||
+      parsed->threads < 1 || (parsed->root != 0 && parsed->root != 1) ||
       (parsed->build != 0 && parsed->build != 1) ||
       (parsed->print_cgp != 0 && parsed->print_cgp != 1)) {
     log_fatal("pool leaves bench: bad spec: %s", spec);
@@ -218,9 +235,9 @@ static PoolLeavesBenchBuild plb_build_position(const PoolLeavesBenchSpec *spec,
   for (int rep_idx = 0; rep_idx < spec->reps; rep_idx++) {
     Timer timer;
     ctimer_start(&timer);
-    PoolLeaves *pool_leaves =
-        pool_leaves_create(table, ld, game_get_bag(game), opponent_rack,
-                           spec->private_view != 0 ? NULL : mover_rack);
+    PoolLeaves *pool_leaves = pool_leaves_create(
+        table, ld, game_get_bag(game), opponent_rack,
+        spec->private_view != 0 ? NULL : mover_rack, spec->threads);
     times_ms[rep_idx] = ctimer_elapsed_seconds(&timer) * 1000.0;
     const uint64_t rep_klv_hash = plb_hash_klv(pool_leaves->klv);
     const uint64_t rep_table_hash = plb_hash_table(pool_leaves->table);
@@ -253,13 +270,52 @@ static PoolLeavesBenchBuild plb_build_position(const PoolLeavesBenchSpec *spec,
   return build;
 }
 
+// Fills the exact shifts of the mover's rack reps times and prints its line.
+static PoolLeavesBenchBuild plb_fill_root(const PoolLeavesBenchSpec *spec,
+                                          const Game *game,
+                                          const PoolShiftTable *table,
+                                          int game_idx, int pos_idx) {
+  const LetterDistribution *ld = game_get_ld(game);
+  const int mover_index = game_get_player_on_turn_index(game);
+  const Rack *mover_rack = player_get_rack(game_get_player(game, mover_index));
+  const Rack *opponent_rack =
+      player_get_rack(game_get_player(game, 1 - mover_index));
+  double times_ms[PLB_MAX_REPS];
+  uint64_t shifts_hash = 0;
+  PoolShiftRack *rack_shift = malloc_or_die(sizeof(PoolShiftRack));
+  for (int rep_idx = 0; rep_idx < spec->reps; rep_idx++) {
+    Timer timer;
+    ctimer_start(&timer);
+    pool_shift_fill_rack(table, ld, game_get_bag(game), opponent_rack,
+                         POOL_SHIFT_EXACT_WEIGHT_MILLI, mover_rack, rack_shift);
+    times_ms[rep_idx] = ctimer_elapsed_seconds(&timer) * 1000.0;
+    const uint64_t rep_hash = plb_hash_equities(
+        FNV_64_OFFSET_BASIS, rack_shift->shifts, (size_t)rack_shift->count);
+    if (rep_idx > 0 && rep_hash != shifts_hash) {
+      log_fatal("pool leaves bench: shifts of one rack differ at %d", pos_idx);
+    }
+    shifts_hash = rep_hash;
+  }
+  free(rack_shift);
+  plb_sort(times_ms, spec->reps);
+  PoolLeavesBenchBuild build;
+  build.min_ms = times_ms[0];
+  build.med_ms = times_ms[spec->reps / 2];
+  printf("PLB root pos=%d game=%d bag=%d min_ms=%.3f med_ms=%.3f "
+         "shifts_hash=%016llx\n",
+         pos_idx, game_idx, game_get_real_bag_size(game), build.min_ms,
+         build.med_ms, (unsigned long long)shifts_hash);
+  (void)fflush(stdout);
+  return build;
+}
+
 void pool_leaves_bench_run_spec(const char *spec_string) {
   PoolLeavesBenchSpec spec;
   plb_parse_spec(spec_string, &spec);
   printf("PLB spec first=%d games=%d reps=%d private=%d pos=%d build=%d "
-         "cgp=%d\n",
+         "cgp=%d threads=%d root=%d\n",
          spec.first_game, spec.num_games, spec.reps, spec.private_view,
-         spec.position, spec.build, spec.print_cgp);
+         spec.position, spec.build, spec.print_cgp, spec.threads, spec.root);
   (void)fflush(stdout);
   Config *config = config_create_or_die(
       "set -lex CSW24 -wmp true -s1 equity -s2 equity -r1 all -r2 all "
@@ -294,7 +350,9 @@ void pool_leaves_bench_run_spec(const char *spec_string) {
           }
           if (spec.build != 0) {
             const PoolLeavesBenchBuild build =
-                plb_build_position(&spec, game, table, game_idx, pos_idx);
+                spec.root != 0
+                    ? plb_fill_root(&spec, game, table, game_idx, pos_idx)
+                    : plb_build_position(&spec, game, table, game_idx, pos_idx);
             PoolLeavesBenchBucket *bucket =
                 &buckets[plb_bucket_of_bag(bag_size)];
             bucket->positions++;

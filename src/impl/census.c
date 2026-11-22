@@ -25,6 +25,11 @@ enum {
   // census_expected_best splits its walk over drawable racks after this many
   // letters, so that the subtree drawing none of them is a small share.
   EXPECTED_BEST_SPLIT_LETTERS = 12,
+  // How a tile joins the path of a walk of a KLV's leaves (see
+  // LeavesFromKlv).
+  LEAVES_FROM_KLV_TILE_STARTS_RUN = 0,
+  LEAVES_FROM_KLV_TILE_EXTENDS_RUN = 1,
+  LEAVES_FROM_KLV_TILE_UNSORTED = 2,
 };
 
 struct CensusLattice {
@@ -222,9 +227,75 @@ typedef struct LeavesFromKlv {
   const KWG *kwg;
   Equity *leave;
   uint8_t tally[CENSUS_MAX_LETTERS];
+  // The tiles on the path. While no tile on it is a lesser letter than the
+  // one before, the path is its letters' runs: each run's letter, the tiles
+  // before it and its tiles, which are what a leave's rank is made of (see
+  // census_lattice_rank). unsorted_tiles counts the tiles from the first
+  // lesser one on, and the runs stop before it.
+  int size;
+  int unsorted_tiles;
+  int number_of_runs;
+  uint8_t run_letters[CENSUS_MAX_LETTERS];
+  int run_tiles_before[CENSUS_MAX_LETTERS];
+  int run_tiles[CENSUS_MAX_LETTERS];
   // the KLV index of the next leave, in the order of the walk
   uint32_t word_index;
 } LeavesFromKlv;
+
+// The rank of the path's leave, as census_lattice_rank gives it for the
+// tally: from the runs alone while the path is in order, since a letter the
+// leave has none of adds nothing to a rank.
+static uint32_t leaves_from_klv_rank(const LeavesFromKlv *walk) {
+  if (walk->unsorted_tiles != 0) {
+    return census_lattice_rank(walk->lattice, walk->tally);
+  }
+  if (walk->size > walk->lattice->rack_size) {
+    return CENSUS_UNRANKED;
+  }
+  uint32_t within = 0;
+  for (int run_idx = 0; run_idx < walk->number_of_runs; run_idx++) {
+    within += lattice_rank_term(walk->lattice, walk->run_letters[run_idx],
+                                walk->size - walk->run_tiles_before[run_idx],
+                                walk->run_tiles[run_idx]);
+  }
+  return (uint32_t)walk->lattice->size_offsets[walk->size] + within;
+}
+
+// Adds a tile of ml to the path, and returns how it joined.
+static int leaves_from_klv_push(LeavesFromKlv *walk, MachineLetter ml) {
+  walk->tally[ml]++;
+  walk->size++;
+  const int last_run = walk->number_of_runs - 1;
+  if (walk->unsorted_tiles == 0 && last_run >= 0 &&
+      walk->run_letters[last_run] == ml) {
+    walk->run_tiles[last_run]++;
+    return LEAVES_FROM_KLV_TILE_EXTENDS_RUN;
+  }
+  if (walk->unsorted_tiles == 0 &&
+      (last_run < 0 || walk->run_letters[last_run] < ml)) {
+    walk->run_letters[walk->number_of_runs] = ml;
+    walk->run_tiles_before[walk->number_of_runs] = walk->size - 1;
+    walk->run_tiles[walk->number_of_runs] = 1;
+    walk->number_of_runs++;
+    return LEAVES_FROM_KLV_TILE_STARTS_RUN;
+  }
+  walk->unsorted_tiles++;
+  return LEAVES_FROM_KLV_TILE_UNSORTED;
+}
+
+// Takes back the path's last tile, of ml, which joined as joined.
+static void leaves_from_klv_pop(LeavesFromKlv *walk, MachineLetter ml,
+                                int joined) {
+  if (joined == LEAVES_FROM_KLV_TILE_EXTENDS_RUN) {
+    walk->run_tiles[walk->number_of_runs - 1]--;
+  } else if (joined == LEAVES_FROM_KLV_TILE_STARTS_RUN) {
+    walk->number_of_runs--;
+  } else {
+    walk->unsorted_tiles--;
+  }
+  walk->size--;
+  walk->tally[ml]--;
+}
 
 // Visits the leaves under the sibling list at node_index in the KLV's order,
 // which numbers each leave by how many come before it.
@@ -232,9 +303,9 @@ static void leaves_from_klv_walk(LeavesFromKlv *walk, uint32_t node_index) {
   for (;; node_index++) {
     const uint32_t node = kwg_node(walk->kwg, node_index);
     const MachineLetter ml = kwg_node_tile(node);
-    walk->tally[ml]++;
+    const int joined = leaves_from_klv_push(walk, ml);
     if (kwg_node_accepts(node)) {
-      const uint32_t index = census_lattice_rank(walk->lattice, walk->tally);
+      const uint32_t index = leaves_from_klv_rank(walk);
       if (index != CENSUS_UNRANKED) {
         walk->leave[index] =
             klv_get_indexed_leave_value(walk->klv, walk->word_index);
@@ -245,7 +316,7 @@ static void leaves_from_klv_walk(LeavesFromKlv *walk, uint32_t node_index) {
     if (arc_index != 0) {
       leaves_from_klv_walk(walk, arc_index);
     }
-    walk->tally[ml]--;
+    leaves_from_klv_pop(walk, ml, joined);
     if (kwg_node_is_end(node)) {
       return;
     }
@@ -262,6 +333,9 @@ void census_leaves_from_klv(const CensusLattice *lattice, const KLV *klv,
                         .klv = klv,
                         .kwg = klv_get_kwg(klv),
                         .leave = leave,
+                        .size = 0,
+                        .unsorted_tiles = 0,
+                        .number_of_runs = 0,
                         .word_index = 0};
   memset(walk.tally, 0, sizeof(walk.tally));
   const uint32_t root_node_index = kwg_get_dawg_root_node_index(walk.kwg);

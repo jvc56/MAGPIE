@@ -1042,7 +1042,7 @@ static void simmer_prepare_pool_leaves(Simmer *simmer,
     simmer->pool_leaves = pool_leaves_create(
         table, game_get_ld(game), game_get_bag(game),
         player_get_rack(game_get_player(game, 1 - mover_index)),
-        player_get_rack(mover));
+        player_get_rack(mover), simmer->num_threads);
   }
   for (int thread_index = 0; thread_index < simmer->num_threads;
        thread_index++) {

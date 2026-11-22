@@ -57,6 +57,8 @@
 #include "../src/ent/player.h"
 #include "../src/ent/players_data.h"
 #include "../src/ent/pool_shift.h"
+// LOCAL MEASUREMENT SWITCH in pool_shift.c.
+extern bool pool_leaves_fill_exhausted;
 #include "../src/ent/rack.h"
 #include "../src/ent/rack_value_table.h"
 #include "../src/ent/xoshiro.h"
@@ -78,6 +80,10 @@
 enum {
   // The longest leave a pool's KLV values.
   PLE_MAX_LEAVE_SIZE = RACK_SIZE - 1,
+  // The numbers of threads the builds are also run on: 2, then every
+  // PLE_BUILD_THREADS_STEP more up to PLE_MAX_BUILD_THREADS.
+  PLE_MAX_BUILD_THREADS = 12,
+  PLE_BUILD_THREADS_STEP = 5,
   // The synthetic leaves' values and full racks' values, in millipoints.
   PLE_LEAVE_VALUE_RANGE = 30000,
   PLE_RACK_VALUE_RANGE = 60000,
@@ -546,11 +552,30 @@ static void ple_assert_klv_shape(const char *label, const KLV *klv,
   }
 }
 
+// Whether the leaves of a pool leave out a leave: left_out_counts are the
+// tiles of a pool that holds the mover's rack, and it has none of a letter
+// the leave holds. With NULL left_out_counts no leave is left out.
+static bool ple_is_left_out(const Rack *leave, int ld_size,
+                            const int *left_out_counts) {
+  if (left_out_counts == NULL) {
+    return false;
+  }
+  for (int ml = 0; ml < ld_size; ml++) {
+    if (left_out_counts[ml] == 0 &&
+        rack_get_letter(leave, (MachineLetter)ml) > 0) {
+      return true;
+    }
+  }
+  return false;
+}
+
 typedef struct PleTableCheck {
   const char *label;
   const PoolShiftTable *table;
   const KLV *klv;
   const LetterDistribution *ld;
+  // See ple_is_left_out.
+  const int *left_out_counts;
   bool *row_seen;
   int64_t rows_seen;
   uint64_t cells_compared;
@@ -579,19 +604,31 @@ static void ple_check_table_row(void *context, const Rack *leave) {
   }
   check->row_seen[rank] = true;
   check->rows_seen++;
-  const bool dealable = ple_is_dealable(leave, ld);
+  // A leave with a letter the pool has none of has no row, and no row has a
+  // value for such a letter.
+  const bool dealable =
+      ple_is_dealable(leave, ld) &&
+      !ple_is_left_out(leave, table->ld_size, check->left_out_counts);
   Rack extended;
   rack_copy(&extended, leave);
   const Equity *row_values =
       table->values + ((size_t)rank * (size_t)table->stride);
   for (int column = 0; column < table->stride; column++) {
     Equity expected = 0;
-    if (dealable && column < table->ld_size &&
-        rack_get_letter(leave, (MachineLetter)column) <
-            ld_get_dist(ld, (MachineLetter)column)) {
+    const bool column_left_out = column < table->ld_size &&
+                                 check->left_out_counts != NULL &&
+                                 check->left_out_counts[column] == 0;
+    if (!dealable || column >= table->ld_size || column_left_out) {
+      expected = 0;
+    } else if (rack_get_letter(leave, (MachineLetter)column) <
+               ld_get_dist(ld, (MachineLetter)column)) {
       rack_add_letter(&extended, (MachineLetter)column);
       expected = klv_get_leave_value(check->klv, &extended);
       rack_take_letter(&extended, (MachineLetter)column);
+    } else if (table->has_reference_pool && pool_leaves_fill_exhausted) {
+      // The exhausted-tile fill: a tile the leave holds every copy of takes
+      // the leave's own value in a pool's table.
+      expected = klv_get_leave_value(check->klv, leave);
     }
     if (row_values[column] != expected) {
       char letter_string[PLE_LEAVE_STRING_SIZE];
@@ -609,11 +646,10 @@ static void ple_check_table_row(void *context, const Rack *leave) {
 
 // Every value of the table, cell by cell, against klv_get_leave_value, and
 // its numbering against pool_shift.h's.
-static void ple_assert_table_matches_klv(const char *label,
-                                         const PoolShiftTable *table,
-                                         const KLV *klv,
-                                         const LetterDistribution *ld,
-                                         PleTally *tally) {
+static void
+ple_assert_table_matches_klv(const char *label, const PoolShiftTable *table,
+                             const KLV *klv, const LetterDistribution *ld,
+                             const int *left_out_counts, PleTally *tally) {
   const int ld_size = ld_get_size(ld);
   if (table->ld_size != ld_size || !pool_shift_table_matches_ld(table, ld)) {
     log_fatal("%s: the table is for another letter distribution", label);
@@ -655,6 +691,7 @@ static void ple_assert_table_matches_klv(const char *label,
       .table = table,
       .klv = klv,
       .ld = ld,
+      .left_out_counts = left_out_counts,
       .row_seen = calloc_or_die(table->number_of_rows, sizeof(bool)),
   };
   ple_visit_multisets(ld_size, POOL_SHIFT_MAX_LEAVE_SIZE, NULL,
@@ -678,7 +715,7 @@ static void ple_assert_stock_table(const char *label,
       table->reference_exact_offset != 0) {
     log_fatal("%s: a stock table has a reference pool or offset", label);
   }
-  ple_assert_table_matches_klv(label, table, klv, ld, tally);
+  ple_assert_table_matches_klv(label, table, klv, ld, NULL, tally);
 }
 
 // The leaves of a pool keep the stock KLV's shape, and their table is bound
@@ -943,6 +980,8 @@ typedef struct PleBruteForceCheck {
   PleBruteForce brute_force;
   const KLV *stock;
   const KLV *actual;
+  // See ple_is_left_out.
+  const int *left_out_counts;
   double empty_value;
   bool *index_seen;
   uint64_t values_compared;
@@ -966,9 +1005,13 @@ static void ple_check_leave_by_brute_force(void *context, const Rack *leave) {
   }
   check->index_seen[klv_index] = true;
   ple_brute_force_leave(&check->brute_force, leave, check->label);
-  const Equity expected = ple_expected_leave_value(
-      check->brute_force.value_sum, check->brute_force.draws,
-      check->empty_value, check->stock->leave_values[klv_index]);
+  // A leave left out keeps its stock value.
+  const Equity expected =
+      ple_is_left_out(leave, rack_get_dist_size(leave), check->left_out_counts)
+          ? check->stock->leave_values[klv_index]
+          : ple_expected_leave_value(
+                check->brute_force.value_sum, check->brute_force.draws,
+                check->empty_value, check->stock->leave_values[klv_index]);
   const Equity actual = check->actual->leave_values[klv_index];
   if (actual != expected) {
     log_fatal(
@@ -987,14 +1030,16 @@ static void ple_check_leave_by_brute_force(void *context, const Rack *leave) {
 
 // Every value of the pool's KLV, and its table's offset, against the brute
 // force.
-static void ple_assert_brute_force(const char *label,
-                                   const PoolLeaves *pool_leaves,
-                                   const PoolShiftTable *stock_table,
-                                   const LetterDistribution *ld,
-                                   const int *pool_counts, PleTally *tally) {
+static void
+ple_assert_brute_force(const char *label, const PoolLeaves *pool_leaves,
+                       const PoolShiftTable *stock_table,
+                       const LetterDistribution *ld, const int *pool_counts,
+                       const int *left_out_counts, PleTally *tally) {
   const int ld_size = ld_get_size(ld);
-  PleBruteForceCheck check = {
-      .label = label, .stock = stock_table->klv, .actual = pool_leaves->klv};
+  PleBruteForceCheck check = {.label = label,
+                              .stock = stock_table->klv,
+                              .actual = pool_leaves->klv,
+                              .left_out_counts = left_out_counts};
   ple_brute_force_create(&check.brute_force, ld, stock_table->exact_values,
                          pool_counts);
   Rack empty_leave;
@@ -1041,6 +1086,25 @@ static void ple_assert_brute_force(const char *label,
   tally->values += check.values_compared + 1;
 }
 
+// The build on several threads gives the leaves of the build on one, which
+// are expected.
+static void
+ple_assert_threaded_builds(const char *label, const PoolShiftTable *stock_table,
+                           const LetterDistribution *ld, const Bag *bag,
+                           const Rack *opponent_rack, const Rack *mover_rack,
+                           const int *pool_counts, const PoolLeaves *expected,
+                           PleTally *tally) {
+  for (int number_of_threads = 2; number_of_threads <= PLE_MAX_BUILD_THREADS;
+       number_of_threads += PLE_BUILD_THREADS_STEP) {
+    PoolLeaves *actual = pool_leaves_create(stock_table, ld, bag, opponent_rack,
+                                            mover_rack, number_of_threads);
+    ple_assert_pool_leaves_bound(label, actual, stock_table, ld, pool_counts,
+                                 tally);
+    ple_assert_same_pool_leaves(label, expected, actual, ld, tally);
+    pool_leaves_destroy(actual);
+  }
+}
+
 // Builds the leaves of a pool with pool_leaves_create and checks every value
 // they hold: against the walk when compare_with_walk, against the brute
 // force when brute_force, and the table against its KLV always.
@@ -1055,16 +1119,21 @@ ple_check_pool(const char *label, const PoolShiftTable *stock_table,
   if (mover_rack != NULL) {
     rack_increment_unseen_count(mover_rack, pool_counts);
   }
+  // A pool with the mover's rack leaves out the letters it has none of.
+  const int *left_out_counts = mover_rack != NULL ? pool_counts : NULL;
   PleBuildTimes times = {0};
   Timer timer;
   ctimer_start(&timer);
   PoolLeaves *actual =
-      pool_leaves_create(stock_table, ld, bag, opponent_rack, mover_rack);
+      pool_leaves_create(stock_table, ld, bag, opponent_rack, mover_rack, 1);
   times.create_seconds = ctimer_elapsed_seconds(&timer);
   ple_assert_pool_leaves_bound(label, actual, stock_table, ld, pool_counts,
                                tally);
+  ple_assert_threaded_builds(label, stock_table, ld, bag, opponent_rack,
+                             mover_rack, pool_counts, actual, tally);
   ctimer_start(&timer);
-  ple_assert_table_matches_klv(label, actual->table, actual->klv, ld, tally);
+  ple_assert_table_matches_klv(label, actual->table, actual->klv, ld,
+                               left_out_counts, tally);
   times.table_check_seconds = ctimer_elapsed_seconds(&timer);
   if (compare_with_walk) {
     ctimer_start(&timer);
@@ -1078,7 +1147,8 @@ ple_check_pool(const char *label, const PoolShiftTable *stock_table,
   }
   if (brute_force) {
     ctimer_start(&timer);
-    ple_assert_brute_force(label, actual, stock_table, ld, pool_counts, tally);
+    ple_assert_brute_force(label, actual, stock_table, ld, pool_counts,
+                           left_out_counts, tally);
     times.brute_force_seconds = ctimer_elapsed_seconds(&timer);
   }
   pool_leaves_destroy(actual);

@@ -135,11 +135,54 @@ static void set_leave_prefix(const Rack *rack, int leave_size, Rack *leave) {
   }
 }
 
+// Each tile's weight is weight * (unseen_t / unseen - dist_t / total) in
+// units of 2^-POOL_SHIFT_WEIGHT_BITS, rounded to the nearest unit and away
+// from zero at a half, as integer division gives it.
+static void assert_pool_shift_weights(const PoolShiftTable *table,
+                                      const LetterDistribution *ld,
+                                      const Bag *bag,
+                                      const Rack *opponent_rack) {
+  static const int weights_milli[] = {1, 500, POOL_SHIFT_TEST_WEIGHT, 1200,
+                                      3000};
+  int unseen_counts[MAX_ALPHABET_SIZE] = {0};
+  bag_increment_unseen_count(bag, unseen_counts);
+  int64_t unseen_total = 0;
+  for (int ml = 0; ml < table->ld_size; ml++) {
+    unseen_counts[ml] += rack_get_letter(opponent_rack, (MachineLetter)ml);
+    unseen_total += unseen_counts[ml];
+  }
+  const int64_t full_total = ld_get_total_tiles(ld);
+  const int64_t denominator = INT64_C(1000) * unseen_total * full_total;
+  for (size_t weight_idx = 0;
+       weight_idx < sizeof(weights_milli) / sizeof(weights_milli[0]);
+       weight_idx++) {
+    int32_t weights[POOL_SHIFT_MAX_STRIDE];
+    pool_shift_fill_weights(table, ld, bag, opponent_rack,
+                            weights_milli[weight_idx], weights);
+    for (int ml = 0; ml < table->stride; ml++) {
+      int64_t expected = 0;
+      if (ml < table->ld_size && denominator != 0) {
+        const int64_t numerator =
+            (int64_t)weights_milli[weight_idx] *
+            ((int64_t)unseen_counts[ml] * full_total -
+             (int64_t)ld_get_dist(ld, (MachineLetter)ml) * unseen_total) *
+            ((int64_t)1 << POOL_SHIFT_WEIGHT_BITS);
+        expected = numerator >= 0
+                       ? (numerator + denominator / 2) / denominator
+                       : -((denominator / 2 - numerator) / denominator);
+      }
+      assert(weights[ml] == (int32_t)expected);
+    }
+  }
+}
+
 // Each compact subset and its opposite must be the exact leave and play
-// that the independent census ranker would look up, including duplicates.
+// that the independent census ranker would look up, including duplicates,
+// and each subset's value must be the KLV's value of it as a leave.
 static void assert_pool_shift_subsets(const CensusLattice *lattice,
                                       const PoolShiftTable *table,
-                                      const Game *game, const Rack *rack,
+                                      const KLV *klv, const Game *game,
+                                      const Rack *rack,
                                       const Rack *opponent_rack) {
   PoolShiftRack subsets;
   pool_shift_fill_rack(table, game_get_ld(game), game_get_bag(game),
@@ -171,6 +214,16 @@ static void assert_pool_shift_subsets(const CensusLattice *lattice,
     assert(subsets.ranks[idx] == census_lattice_rank(lattice, kept));
     assert(subsets.ranks[subsets.count - 1 - idx] ==
            census_lattice_rank(lattice, played));
+    // The full rack is not a leave.
+    Rack kept_rack;
+    rack_set_dist_size_and_reset(&kept_rack, table->ld_size);
+    for (int ml = 0; ml < table->ld_size; ml++) {
+      for (int copy_idx = 0; copy_idx < kept[ml]; copy_idx++) {
+        rack_add_letter(&kept_rack, (MachineLetter)ml);
+      }
+    }
+    assert(subsets.values[idx] ==
+           (kept_size == RACK_SIZE ? 0 : klv_get_leave_value(klv, &kept_rack)));
   }
 }
 
@@ -259,8 +312,10 @@ static void test_pool_shift_table(void) {
           player_get_rack(game_get_player(game, 1 - player_index));
       const int tiles_on_rack = rack_get_total_letters(rack);
       const int real_bag_size = game_get_real_bag_size(game);
+      assert_pool_shift_weights(table, ld, game_get_bag(game), opponent_rack);
       if (tiles_on_rack == RACK_SIZE) {
-        assert_pool_shift_subsets(lattice, table, game, rack, opponent_rack);
+        assert_pool_shift_subsets(lattice, table, klv, game, rack,
+                                  opponent_rack);
         assert_pool_shift_subrack_order(table, game, rack, opponent_rack);
       }
       for (int leave_size = 0; leave_size <= tiles_on_rack; leave_size++) {
@@ -929,7 +984,7 @@ static void assert_pool_leaves(const Game *game) {
   Timer timer;
   ctimer_start(&timer);
   PoolLeaves *pool_leaves = pool_leaves_create(
-      table, game_get_ld(game), game_get_bag(game), opponent_rack, NULL);
+      table, game_get_ld(game), game_get_bag(game), opponent_rack, NULL, 1);
   printf("pool leaves built in %.3f seconds\n", ctimer_elapsed_seconds(&timer));
   assert(pool_shift_table_matches_klv(pool_leaves->table, pool_leaves->klv));
   Equity first_difference = 0;
@@ -962,10 +1017,28 @@ static void assert_pool_leaves(const Game *game) {
   // With the mover's rack, the pool is what neither player has played: the
   // same for both, and the mover's own rack is then part of the shift.
   PoolLeaves *public_leaves = pool_leaves_create(
-      table, game_get_ld(game), game_get_bag(game), opponent_rack, rack);
+      table, game_get_ld(game), game_get_bag(game), opponent_rack, rack, 1);
   assert(public_leaves->table->reference_total == private_total + RACK_SIZE);
+  // The rack's subsets get their values as leaves from the pool's own table.
+  PoolShiftRack *pool_subsets = malloc_or_die(sizeof(PoolShiftRack));
+  pool_shift_fill_rack(public_leaves->table, game_get_ld(game),
+                       game_get_bag(game), opponent_rack,
+                       POOL_SHIFT_POOL_LEAVES_WEIGHT_MILLI, rack, pool_subsets);
+  for (int idx = 0; idx < pool_subsets->count - 1; idx++) {
+    Rack kept_rack;
+    rack_set_dist_size_and_reset(&kept_rack, rack_get_dist_size(rack));
+    for (int bit_idx = 0; bit_idx < RACK_SIZE; bit_idx++) {
+      if ((pool_subsets->map_indices[idx] & (1 << bit_idx)) != 0) {
+        rack_add_letter(&kept_rack, pool_subsets->bit_tiles[bit_idx]);
+      }
+    }
+    assert(pool_subsets->values[idx] ==
+           klv_get_leave_value(public_leaves->klv, &kept_rack));
+  }
+  assert(pool_subsets->values[pool_subsets->count - 1] == 0);
+  free(pool_subsets);
   PoolLeaves *swapped_leaves = pool_leaves_create(
-      table, game_get_ld(game), game_get_bag(game), rack, opponent_rack);
+      table, game_get_ld(game), game_get_bag(game), rack, opponent_rack, 1);
   assert(memcmp(public_leaves->klv->leave_values,
                 swapped_leaves->klv->leave_values,
                 sizeof(Equity) *

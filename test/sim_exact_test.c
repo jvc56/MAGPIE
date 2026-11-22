@@ -228,9 +228,13 @@ static void simx_print_static_pick(Config *config, const char *cgp_command,
          pos_idx, simx_tiers[0], pick);
 }
 
-static void simx_run(int first_game, int num_games, bool with_static) {
-  Config *shift_config = simx_config("1.2", SIMX_PLIES, "");
-  Config *exact_config = simx_config("exact", SIMX_PLIES, "");
+static void simx_run(int first_game, int num_games, bool with_static,
+                     bool with_census) {
+  // The census steers only the sims that choose plays: it changes no result,
+  // and it is slower for sims as short as the nested oracle's.
+  const char *pick_settings = with_census ? "-scensus auto" : "";
+  Config *shift_config = simx_config("1.2", SIMX_PLIES, pick_settings);
+  Config *exact_config = simx_config("exact", SIMX_PLIES, pick_settings);
   Config *shift_oracle = simx_config("1.2", SIMX_ORACLE_PLIES, "-sr rr");
   Config *exact_oracle = simx_config("exact", SIMX_ORACLE_PLIES, "-sr rr");
   Game *game = config_game_create(shift_config);
@@ -296,18 +300,23 @@ static void simx_run(int first_game, int num_games, bool with_static) {
   config_destroy(shift_config);
 }
 
-void test_sim_exact(void) { simx_run(0, SIMX_DEFAULT_GAMES, false); }
+void test_sim_exact(void) { simx_run(0, SIMX_DEFAULT_GAMES, false, false); }
 
-// Spec: first=<game>,games=<n>,static=<0 or 1>
+// Spec: first=<game>,games=<n>,static=<0 or 1>[,census=<0 or 1>]
+// census=1 runs the sims that choose plays with -scensus auto. Left out or
+// 0, they run without the census, as the harness always has.
 void sim_exact_run_spec(const char *spec) {
   int first_game = 0;
   int num_games = 0;
   int with_static = 0;
-  if (sscanf(spec, "first=%d,games=%d,static=%d", &first_game, &num_games,
-             &with_static) != SIMX_SPEC_FIELDS) {
+  int with_census = 0;
+  const int fields_read =
+      sscanf(spec, "first=%d,games=%d,static=%d,census=%d", &first_game,
+             &num_games, &with_static, &with_census);
+  if (fields_read < SIMX_SPEC_FIELDS) {
     log_fatal("sim exact: bad spec: %s", spec);
   }
-  simx_run(first_game, num_games, with_static != 0);
+  simx_run(first_game, num_games, with_static != 0, with_census != 0);
 }
 
 // The nested oracle: values a play by playing it and then letting sims, not
@@ -548,7 +557,7 @@ void sim_exact_nested_run_spec(const char *spec) {
           player_get_pool_shift_table(game_get_player(root, root_mover_index)),
           game_get_ld(root), game_get_bag(root),
           player_get_rack(game_get_player(root, 1 - root_mover_index)),
-          player_get_rack(game_get_player(root, root_mover_index)));
+          player_get_rack(game_get_player(root, root_mover_index)), 1);
     }
     for (int sample_idx = 0; sample_idx < samples; sample_idx++) {
       for (int pick_idx = 0; pick_idx < SIMN_NUM_PICKS; pick_idx++) {
@@ -632,9 +641,11 @@ void sim_exact_leaf_diag_run_spec(const char *spec) {
         const PoolShiftTable *table = player_get_pool_shift_table(mover);
         const Bag *bag = game_get_bag(game);
         pool_leaves_fill_exhausted = false;
-        PoolLeaves *pool = pool_leaves_create(table, ld, bag, opp_rack, rack);
+        PoolLeaves *pool =
+            pool_leaves_create(table, ld, bag, opp_rack, rack, 1);
         pool_leaves_fill_exhausted = true;
-        PoolLeaves *fixed = pool_leaves_create(table, ld, bag, opp_rack, rack);
+        PoolLeaves *fixed =
+            pool_leaves_create(table, ld, bag, opp_rack, rack, 1);
         MachineLetter tiles[RACK_SIZE];
         int num_tiles = 0;
         for (int ml = 0; ml < ld_get_size(ld); ml++) {
