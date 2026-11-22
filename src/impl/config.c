@@ -6896,6 +6896,9 @@ char *impl_show_heat_map(const Config *config, ErrorStack *error_stack) {
       GAME_STRING_BOARD_COLOR_NONE) {
     string_builder_add_heat_map(hm_string, heat_map, heat_map_type,
                                 config->max_num_display_plays);
+    if (getenv("MAGPIE_HEATMAP_LETTERS")) {
+      string_builder_add_heat_map_letters(hm_string, heat_map, heat_map_type);
+    }
   } else {
     Game *game_dupe = game_duplicate(config->game);
     Move move;

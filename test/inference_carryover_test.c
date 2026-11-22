@@ -1,5 +1,8 @@
 #include "inference_carryover_test.h"
 
+#include "../src/ent/alias_method.h"
+#include "../src/ent/encoded_rack.h"
+
 #include "../src/def/game_history_defs.h"
 #include "../src/def/inference_defs.h"
 #include "../src/def/klv_defs.h"
@@ -472,11 +475,189 @@ static void test_carry_game_history(bool carry_over) {
   config_destroy(config);
 }
 
+// Plays the scripted game of test_carry_game_history, inferring each move as
+// it is made or none of them.
+static Config *carry_test_play_scripted_game(bool infer_each_move) {
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -wmp true -s1 equity -s2 equity -r1 all -r2 all "
+      "-numplays 1 -threads 1 -inftemp 8 -ima 10000 -fgrequired false "
+      "-infcarryover true");
+  load_and_exec_config_or_die(config, "newgame");
+  const char *racks[] = {"QUIZAEN", "MUDROTS", "AENLTRS", "ORTSEAI",
+                         "AENLTRS", "ERTSEAB", "EIOUDGN", "ERSECLP"};
+  const char *moves[] = {"com 8e QUIZ", "com f7 M.D",      "com pass",
+                         "com ex OI",   "com 10f SALTERN", "com j9 B.T",
+                         "com l8 DO."};
+  for (int move_idx = 0; move_idx < 7; move_idx++) {
+    char *rack_command = get_formatted_string("rack %s", racks[move_idx]);
+    load_and_exec_config_or_die(config, rack_command);
+    free(rack_command);
+    load_and_exec_config_or_die(config, moves[move_idx]);
+    if (infer_each_move) {
+      rack_command = get_formatted_string("rack %s", racks[move_idx + 1]);
+      load_and_exec_config_or_die(config, rack_command);
+      free(rack_command);
+      load_and_exec_config_or_die(config, "infer");
+    }
+  }
+  if (!infer_each_move) {
+    load_and_exec_config_or_die(config, "rack ERSECLP");
+  }
+  return config;
+}
+
+static bool carry_test_event_recorded(const Config *config, int event_index) {
+  return game_event_get_inference_carryover_recorded(
+      game_history_get_event(config_get_game_history(config), event_index));
+}
+
+// Jumping into a game that was never inferred fills in the moves behind the
+// one inferred, back to the target's last full draw, and gives the tables
+// that inferring every move in turn gives. Player 2's moves are events 1
+// (M.D), 3 (the exchange) and 5 (B.T): a chain of three.
+static void test_carry_backfill(void) {
+  Config *played = carry_test_play_scripted_game(true);
+  Config *jumped = carry_test_play_scripted_game(false);
+  const int dist_size = ld_get_size(game_get_ld(config_get_game(played)));
+  for (int event_index = 0; event_index < 7; event_index++) {
+    assert(!carry_test_event_recorded(jumped, event_index));
+    assert(carry_test_event_table(jumped, event_index) == NULL);
+  }
+  // Back to just after B.T, the third move of player 2's chain.
+  load_and_exec_config_or_die(jumped, "previous");
+  load_and_exec_config_or_die(jumped, "infer");
+  const int chain_events[] = {1, 3, 5};
+  for (int chain_idx = 0; chain_idx < 3; chain_idx++) {
+    const int event_index = chain_events[chain_idx];
+    assert(carry_test_event_recorded(jumped, event_index));
+    assert(carry_test_event_table(jumped, event_index) != NULL);
+    carry_test_assert_tables_equal(carry_test_event_table(played, event_index),
+                                   carry_test_event_table(jumped, event_index),
+                                   dist_size);
+  }
+  // Player 1's moves are not player 2's chain.
+  assert(!carry_test_event_recorded(jumped, 0));
+  assert(!carry_test_event_recorded(jumped, 2));
+  assert(!carry_test_event_recorded(jumped, 4));
+
+  // Inferring again reuses the tables behind: the same objects stay on the
+  // events.
+  const InferenceCarryoverTable *first_table =
+      carry_test_event_table(jumped, 1);
+  const InferenceCarryoverTable *second_table =
+      carry_test_event_table(jumped, 3);
+  load_and_exec_config_or_die(jumped, "infer");
+  assert(carry_test_event_table(jumped, 1) == first_table);
+  assert(carry_test_event_table(jumped, 3) == second_table);
+
+  // Forward to player 1's DO.: the bingo before it was a full draw, so
+  // nothing behind it is filled in. No later event holds player 2's rack, so
+  // it is set again.
+  load_and_exec_config_or_die(jumped, "next");
+  load_and_exec_config_or_die(jumped, "rack ERSECLP");
+  load_and_exec_config_or_die(jumped, "infer");
+  assert(carry_test_event_recorded(jumped, 6));
+  carry_test_assert_tables_equal(carry_test_event_table(played, 6),
+                                 carry_test_event_table(jumped, 6), dist_size);
+  assert(!carry_test_event_recorded(jumped, 0));
+  assert(!carry_test_event_recorded(jumped, 4));
+
+  // Back to just after the bingo (event 4): the pass is skipped and QUIZ,
+  // the move before it, is filled in. The bingo itself keeps nothing.
+  load_and_exec_config_or_die(jumped, "previous");
+  load_and_exec_config_or_die(jumped, "previous");
+  load_and_exec_config_or_die(jumped, "infer");
+  assert(carry_test_event_recorded(jumped, 0));
+  carry_test_assert_tables_equal(carry_test_event_table(played, 0),
+                                 carry_test_event_table(jumped, 0), dist_size);
+  assert(!carry_test_event_recorded(jumped, 2));
+  assert(carry_test_event_recorded(jumped, 4));
+  assert(carry_test_event_table(jumped, 4) == NULL);
+
+  config_destroy(jumped);
+  config_destroy(played);
+}
+
+// The probability the last inference gives to the target keeping exactly
+// these tiles.
+static double carry_test_leave_probability(Config *config,
+                                           const char *leave_string) {
+  const LetterDistribution *ld = game_get_ld(config_get_game(config));
+  Rack leave;
+  rack_set_dist_size_and_reset(&leave, ld_get_size(ld));
+  const int num_tiles = rack_set_to_string(ld, &leave, leave_string);
+  assert(num_tiles > 0);
+  const AliasMethod *am = inference_results_get_alias_method(
+      config_get_inference_results(config));
+  Rack rack;
+  rack_set_dist_size_and_reset(&rack, ld_get_size(ld));
+  double total = 0;
+  for (uint32_t idx = 0; idx < am->num_items; idx++) {
+    const AliasMethodItem *item = &am->items[idx];
+    rack_decode(&item->rack, &rack);
+    if (racks_are_equal(&rack, &leave)) {
+      total += item->probability / am->num_items;
+    }
+    rack_decode(&am->items[item->alias].rack, &rack);
+    if (racks_are_equal(&rack, &leave)) {
+      total += (1 - item->probability) / am->num_items;
+    }
+  }
+  return total;
+}
+
+// A softmax inference of an exchange weighs every way of keeping tiles, not
+// only each rack's best keep: a keep that is never the best one, such as QV
+// from an exchange of five, still gets some probability, less than a good
+// keep gets and less the lower the temperature.
+static void test_soft_exchange_keep(void) {
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -wmp true -s1 equity -s2 equity -r1 all -r2 all "
+      "-numplays 1 -threads 1 -inftemp 8 -ima 10000 -fgrequired false");
+  load_and_exec_config_or_die(config, "newgame");
+  load_and_exec_config_or_die(config, "rack QVUUWWI");
+  load_and_exec_config_or_die(config, "com ex UUWWI");
+  load_and_exec_config_or_die(config, "rack AENLTRD");
+  load_and_exec_config_or_die(config, "infer");
+  const double poor_keep = carry_test_leave_probability(config, "QV");
+  const double good_keep = carry_test_leave_probability(config, "?S");
+  assert(poor_keep > 0);
+  assert(good_keep > poor_keep);
+  // Each leave is handed to the sampler once, and they sum to one.
+  const AliasMethod *am = inference_results_get_alias_method(
+      config_get_inference_results(config));
+  double total = 0;
+  for (uint32_t idx = 0; idx < am->num_items; idx++) {
+    total += am->items[idx].probability / am->num_items +
+             (1 - am->items[idx].probability) / am->num_items;
+  }
+  assert(fabs(total - 1.0) < 1e-9);
+  assert(am->num_items < 1000);
+
+  // Several threads agree with one to float rounding.
+  load_and_exec_config_or_die(config, "set -threads 4");
+  load_and_exec_config_or_die(config, "infer");
+  assert(fabs(carry_test_leave_probability(config, "QV") - poor_keep) <=
+         1e-3 * poor_keep);
+
+  // A sharper inference makes the poor keep less likely still, but possible.
+  load_and_exec_config_or_die(config, "set -threads 1 -inftemp 2");
+  load_and_exec_config_or_die(config, "infer");
+  const double sharp_poor_keep = carry_test_leave_probability(config, "QV");
+  assert(sharp_poor_keep > 0);
+  assert(sharp_poor_keep < poor_keep);
+  printf("soft exchange keep: QV %.3g at 8, %.3g at 2; ?S %.3g at 8\n",
+         poor_keep, sharp_poor_keep, good_keep);
+  config_destroy(config);
+}
+
 void test_inference_carryover(void) {
+  test_soft_exchange_keep();
   test_carry_table();
   test_carry_chain();
   test_carry_game_history(false);
   test_carry_game_history(true);
+  test_carry_backfill();
 }
 
 // Research probe (magpie_test infcarryoverprobe), not an assertion yet: an

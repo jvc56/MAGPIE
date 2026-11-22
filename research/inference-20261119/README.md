@@ -54,3 +54,25 @@ Better nats have not yet turned into better decisions.
 - `run-scripts/`: how the offline collections were launched.
 
 Raw run logs and the 640 MB of mini-sim output are not in git.
+
+## Update 2026-11-20
+
+- `decide-fixed100k-carry` final, 921 games (see `decide-fixed100k-carry/summary-7am.txt`):
+  carry - hard5 +0.018 +-0.027 win pp; carry - schedule -0.002 +-0.022;
+  schedule - hard5 +0.020 +-0.025. Carry-over is decision-neutral.
+- Sim-steered weights are now in the engine path (research only):
+  `InferenceArgs.loss_model` (`InferenceLossModel` in
+  `src/ent/inference_args.h`), applied in the softmax branch of
+  `evaluate_possible_leave` for placements. The model is fitted by
+  `steer_fit` in `test/infer_decide_test.c`: a 2-ply rollout of the top 10
+  static plays and the observed play for a sample of racks, then a ridge
+  regression of sim loss on static loss, tiles kept and pairs of tiles kept.
+  Harness arm `r` (schedule + steering; `INFDEC_STEER_RACKS`,
+  `INFDEC_STEER_ROLLOUTS`, `INFDEC_STEER_TSCALE`), arm `y` (schedule with
+  `INFDEC_EQUAL_TIME_FACTOR` more search), replay `inftfit` with
+  `INFTFIT_STEER=1` (prints `TSTEER`; analysed by `analysis/steer_fit.py`).
+- First replay numbers: 150 racks x 20 rollouts costs 0.17 s per move on 18
+  threads and gives no gain in nats (too noisy). Larger budgets were still
+  running when this was written.
+- Fixed: an exchanged blank was dropped as a played-through square in two
+  harness loops (found by the m2 session).

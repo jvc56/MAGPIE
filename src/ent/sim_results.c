@@ -733,7 +733,7 @@ static void simmed_play_apply_utility_while_locked(SimmedPlay *simmed_play,
 }
 
 void simmed_play_add_stats_for_ply(SimmedPlay *simmed_play, int ply_index,
-                                   const Move *move,
+                                   const Move *move, const Board *board,
                                    SimmedPlaySampleRecord *record) {
   SimmedPlayPlyRecord ply;
   ply.score = move_get_score(move);
@@ -758,7 +758,7 @@ void simmed_play_add_stats_for_ply(SimmedPlay *simmed_play, int ply_index,
   HeatMap *heat_map = simmed_play_get_heat_map(simmed_play, ply_index);
   if (record) {
     if (heat_map) {
-      ply.placement = heat_map_placement_from_move(move);
+      ply.placement = heat_map_placement_from_move(move, board);
     }
     record->plies[ply_index] = ply;
     record->num_plies = ply_index + 1;
@@ -767,7 +767,10 @@ void simmed_play_add_stats_for_ply(SimmedPlay *simmed_play, int ply_index,
   cpthread_mutex_lock(&simmed_play->mutex);
   simmed_play_apply_ply_while_locked(simmed_play, ply_index, &ply);
   if (heat_map) {
-    heat_map_add_move(heat_map, move);
+    const HeatMapPlacement placement =
+        heat_map_placement_from_move(move, board);
+    heat_map_add_placement(heat_map, &placement,
+                           move_get_tiles_played(move) == RACK_SIZE);
   }
   cpthread_mutex_unlock(&simmed_play->mutex);
 }

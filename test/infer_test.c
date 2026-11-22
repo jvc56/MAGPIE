@@ -1289,8 +1289,9 @@ void test_infer_exchange_margin(void) {
   assert_known_rack_exchange_accepted(config, "BLNRV??", 5, false);
 
   // An accepted rack records the leave and exchanged tiles of its best
-  // exchange of 5, even though a play is its best move.
-  load_and_exec_config_or_die(config, "set -ima 5");
+  // exchange of 5, even though a play is its best move. This is the hard
+  // margin's rule; softmax weighs every keep (test_soft_exchange_keep).
+  load_and_exec_config_or_die(config, "set -ima 5 -inftemp 0");
   const LetterDistribution *ld = config_get_ld(config);
   InferenceResults *inference_results = inference_results_create(NULL);
   assert(

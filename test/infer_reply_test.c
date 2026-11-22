@@ -43,9 +43,9 @@ enum {
   MODEL_RIVALS = 4
 };
 
-// Score the observed move given each possible leave and the configured opponent.
-// Its rack is hypothetical; its opponent rack is unknown inside every rollout.
-// The two-ply model normalizes over the entire 15-move shortlist. The
+// Score the observed move given each possible leave and the configured
+// opponent. Its rack is hypothetical; its opponent rack is unknown inside every
+// rollout. The two-ply model normalizes over the entire 15-move shortlist. The
 // four-ply model compares the observed move with the top four static rivals.
 static void predict_search(const Config *config, const Game *base,
                            const Move *observed, const Rack *played,

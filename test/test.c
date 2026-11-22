@@ -53,6 +53,7 @@
 #include "infer_reply_test.h"
 #include "infer_test.h"
 #include "inference_carryover_test.h"
+#include "infer_human_test.h"
 #include "klv_test.h"
 #include "kwg_alpha_test.h"
 #include "kwg_maker_test.h"
@@ -174,6 +175,8 @@ static TestEntry test_table[] = {
     {"infer", test_infer},
     {"infcarryover", test_inference_carryover},
     {"infcarryoverprobe", carry_probe},
+    {"infhuman", infer_human_stdin},
+    {"infdump", infer_dump_leaves},
     {"infbenchmetrics", test_infer_bench_metrics},
     {"rv", test_random_variable},
     {"am", test_alias_method},
@@ -324,6 +327,7 @@ static TestEntry on_demand_test_table[] = {
     {"pegbench2", test_benchmark_peg_2},
     {"infrank", infer_decide_rank_stdin},
     {"inftfit", infer_decide_tfit_stdin},
+    {"infsteer", infer_steer_position},
     {"infsfit", infer_decide_sfit_stdin},
     {"infreply", test_infer_reply},
     {"infrefill", test_infer_reply_sampler},

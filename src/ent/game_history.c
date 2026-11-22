@@ -43,6 +43,9 @@ struct GameEvent {
   SimResults *sim_results;
   InferenceResults *inference_results;
   InferenceCarryoverTable *inference_carryover;
+  // Whether an inference has run to completion for this event with carry-over
+  // on, with or without leaving a table.
+  bool inference_carryover_recorded;
   EndgameResults *endgame_results;
 };
 
@@ -69,6 +72,7 @@ void game_event_reset(GameEvent *game_event) {
   game_event->inference_results = NULL;
   inference_carryover_table_destroy(game_event->inference_carryover);
   game_event->inference_carryover = NULL;
+  game_event->inference_carryover_recorded = false;
   endgame_results_destroy(game_event->endgame_results);
   game_event->endgame_results = NULL;
 }
@@ -186,6 +190,11 @@ void game_event_set_inference_carryover(
     GameEvent *event, InferenceCarryoverTable *inference_carryover) {
   inference_carryover_table_destroy(event->inference_carryover);
   event->inference_carryover = inference_carryover;
+  event->inference_carryover_recorded = true;
+}
+
+bool game_event_get_inference_carryover_recorded(const GameEvent *event) {
+  return event->inference_carryover_recorded;
 }
 
 const InferenceCarryoverTable *
@@ -635,6 +644,8 @@ GameHistory *game_history_duplicate(const GameHistory *gh_orig) {
         inference_results_duplicate(ge_orig->inference_results);
     ge_copy->inference_carryover =
         inference_carryover_table_duplicate(ge_orig->inference_carryover);
+    ge_copy->inference_carryover_recorded =
+        ge_orig->inference_carryover_recorded;
     ge_copy->endgame_results =
         endgame_results_duplicate(ge_orig->endgame_results);
   }

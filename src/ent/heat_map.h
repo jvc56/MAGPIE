@@ -5,6 +5,7 @@
 #include "../def/game_defs.h"
 #include "../util/io_util.h"
 #include "../util/string_util.h"
+#include "board.h"
 #include "move.h"
 #include <assert.h>
 #include <inttypes.h>
@@ -22,11 +23,30 @@ typedef enum {
 
 enum {
   NUM_HEAT_MAP_COUNTS = NUM_HEAT_MAP_TYPES * BOARD_DIM * BOARD_DIM,
+  // Research only: letters tracked per square. A blank counts as the letter
+  // it stands for.
+  HEAT_MAP_NUM_LETTERS = 32,
 };
+
+// Research only: the kind of play that put a tile on a square. A one-tile
+// play is classed by the words it forms, not by the direction it was
+// generated in.
+typedef enum {
+  HEAT_MAP_PLAY_HORIZONTAL,
+  HEAT_MAP_PLAY_VERTICAL,
+  HEAT_MAP_PLAY_ONE_TILE_HORIZONTAL,
+  HEAT_MAP_PLAY_ONE_TILE_VERTICAL,
+  HEAT_MAP_PLAY_ONE_TILE_BOTH,
+  NUM_HEAT_MAP_PLAY_KINDS,
+} heat_map_play_kind_t;
 
 typedef struct HeatMap {
   uint64_t board_count_maxes[NUM_HEAT_MAP_TYPES];
   uint64_t counts[NUM_HEAT_MAP_COUNTS];
+  // Research only: how often each letter was the tile placed on the square,
+  // by kind of play.
+  uint32_t letter_counts[NUM_HEAT_MAP_COUNTS][NUM_HEAT_MAP_PLAY_KINDS]
+                        [HEAT_MAP_NUM_LETTERS];
 } HeatMap;
 
 static inline HeatMap *heat_map_create(void) {
@@ -43,6 +63,7 @@ static inline void heat_map_destroy(HeatMap *hm) {
 static inline void heat_map_reset(HeatMap *hm) {
   memset(hm->board_count_maxes, 0, sizeof(hm->board_count_maxes));
   memset(hm->counts, 0, sizeof(hm->counts));
+  memset(hm->letter_counts, 0, sizeof(hm->letter_counts));
 }
 
 static inline size_t heat_map_get_index(int row, int col, heat_map_t type) {
@@ -64,11 +85,24 @@ typedef struct HeatMapPlacement {
   uint8_t col_start;
   uint8_t dir;
   uint8_t length;
+  // Research only: the unblanked letter placed on the i-th square.
+  uint8_t letters[BOARD_DIM];
+  // Research only: a heat_map_play_kind_t.
+  uint8_t play_kind;
 } HeatMapPlacement;
 
 static_assert(BOARD_DIM <= 32, "HeatMapPlacement masks a play in 32 bits");
 
-static inline HeatMapPlacement heat_map_placement_from_move(const Move *move) {
+static inline bool heat_map_square_has_tile(const Board *board, int row,
+                                            int col) {
+  return row >= 0 && row < BOARD_DIM && col >= 0 && col < BOARD_DIM &&
+         !board_is_empty(board, row, col);
+}
+
+// The board, which may be NULL, is the board before or after the move; it is
+// only used to see which words a one-tile play forms.
+static inline HeatMapPlacement heat_map_placement_from_move(const Move *move,
+                                                            const Board *board) {
   HeatMapPlacement placement = {0};
   if (move_get_type(move) != GAME_EVENT_TILE_PLACEMENT_MOVE) {
     return placement;
@@ -80,6 +114,33 @@ static inline HeatMapPlacement heat_map_placement_from_move(const Move *move) {
   for (int i = 0; i < placement.length; i++) {
     if (move_get_tile(move, i) != PLAYED_THROUGH_MARKER) {
       placement.new_tile_mask |= (uint32_t)1 << i;
+      placement.letters[i] = (uint8_t)(move_get_tile(move, i) & UNBLANK_MASK);
+    }
+  }
+  const bool is_vertical = placement.dir == BOARD_VERTICAL_DIRECTION;
+  placement.play_kind = is_vertical ? HEAT_MAP_PLAY_VERTICAL
+                                    : HEAT_MAP_PLAY_HORIZONTAL;
+  if (move_get_tiles_played(move) == 1) {
+    int tile_index = 0;
+    while (!(placement.new_tile_mask & ((uint32_t)1 << tile_index))) {
+      tile_index++;
+    }
+    const int row = placement.row_start + (is_vertical ? tile_index : 0);
+    const int col = placement.col_start + (is_vertical ? 0 : tile_index);
+    bool forms_horizontal = !is_vertical;
+    bool forms_vertical = is_vertical;
+    if (board) {
+      forms_horizontal = heat_map_square_has_tile(board, row, col - 1) ||
+                         heat_map_square_has_tile(board, row, col + 1);
+      forms_vertical = heat_map_square_has_tile(board, row - 1, col) ||
+                       heat_map_square_has_tile(board, row + 1, col);
+    }
+    if (forms_horizontal && forms_vertical) {
+      placement.play_kind = HEAT_MAP_PLAY_ONE_TILE_BOTH;
+    } else if (forms_vertical) {
+      placement.play_kind = HEAT_MAP_PLAY_ONE_TILE_VERTICAL;
+    } else {
+      placement.play_kind = HEAT_MAP_PLAY_ONE_TILE_HORIZONTAL;
     }
   }
   return placement;
@@ -98,7 +159,12 @@ static inline void heat_map_add_placement(HeatMap *hm,
   for (int i = 0; i < placement->length; i++) {
     if (placement->new_tile_mask & ((uint32_t)1 << i)) {
       const size_t current_all_index = current_offset + HEAT_MAP_TYPE_ALL;
+      const uint8_t letter = placement->letters[i];
+      const bool track_letter = letter < HEAT_MAP_NUM_LETTERS;
       hm->counts[current_all_index]++;
+      if (track_letter) {
+        hm->letter_counts[current_all_index][placement->play_kind][letter]++;
+      }
       if (hm->counts[current_all_index] >
           hm->board_count_maxes[HEAT_MAP_TYPE_ALL]) {
         hm->board_count_maxes[HEAT_MAP_TYPE_ALL] =
@@ -107,6 +173,10 @@ static inline void heat_map_add_placement(HeatMap *hm,
       if (is_bingo) {
         const size_t current_bingo_index = current_offset + HEAT_MAP_TYPE_BINGO;
         hm->counts[current_bingo_index]++;
+        if (track_letter) {
+          hm->letter_counts[current_bingo_index][placement->play_kind]
+                           [letter]++;
+        }
         if (hm->counts[current_bingo_index] >
             hm->board_count_maxes[HEAT_MAP_TYPE_BINGO]) {
           hm->board_count_maxes[HEAT_MAP_TYPE_BINGO] =
@@ -119,7 +189,7 @@ static inline void heat_map_add_placement(HeatMap *hm,
 }
 
 static inline void heat_map_add_move(HeatMap *hm, const Move *move) {
-  const HeatMapPlacement placement = heat_map_placement_from_move(move);
+  const HeatMapPlacement placement = heat_map_placement_from_move(move, NULL);
   heat_map_add_placement(hm, &placement,
                          move_get_tiles_played(move) == RACK_SIZE);
 }
@@ -203,6 +273,38 @@ static inline void string_builder_add_heat_map(StringBuilder *sb,
   }
   string_builder_add_string_grid(sb, sg, false);
   string_grid_destroy(sg);
+}
+
+// Research only: one line per square with a count, "LETTERS 8H 1:12:0:0:0:3",
+// giving for each machine letter placed there its count for each kind of play,
+// in heat_map_play_kind_t order.
+static inline void string_builder_add_heat_map_letters(
+    StringBuilder *sb, const HeatMap *hm, heat_map_t heat_map_type) {
+  for (int row = 0; row < BOARD_DIM; row++) {
+    for (int col = 0; col < BOARD_DIM; col++) {
+      const size_t index = heat_map_get_index(row, col, heat_map_type);
+      if (hm->counts[index] == 0) {
+        continue;
+      }
+      string_builder_add_formatted_string(sb, "LETTERS %d%c", row + 1,
+                                          col + ASCII_UPPERCASE_A);
+      for (int letter = 0; letter < HEAT_MAP_NUM_LETTERS; letter++) {
+        uint32_t letter_total = 0;
+        for (int kind = 0; kind < NUM_HEAT_MAP_PLAY_KINDS; kind++) {
+          letter_total += hm->letter_counts[index][kind][letter];
+        }
+        if (letter_total == 0) {
+          continue;
+        }
+        string_builder_add_formatted_string(sb, " %d", letter);
+        for (int kind = 0; kind < NUM_HEAT_MAP_PLAY_KINDS; kind++) {
+          string_builder_add_formatted_string(
+              sb, ":%u", hm->letter_counts[index][kind][letter]);
+        }
+      }
+      string_builder_add_string(sb, "\n");
+    }
+  }
 }
 
 typedef struct ColorSegment {

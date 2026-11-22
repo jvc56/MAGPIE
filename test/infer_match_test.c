@@ -323,8 +323,8 @@ void infer_match_run_spec(const char *spec) {
     const Player *player = game_get_player(config_get_game(config), seat);
     assert(player_get_rack_info_table(player) != NULL);
     assert(player_get_word_info_table(player) != NULL);
-    if (use_pat && (player_get_pat(player) == NULL ||
-                    player_get_pat_disabled(player))) {
+    if (use_pat &&
+        (player_get_pat(player) == NULL || player_get_pat_disabled(player))) {
       log_fatal("infmatch: PAT requested but not active for player %d", seat);
     }
   }
@@ -335,20 +335,17 @@ void infer_match_run_spec(const char *spec) {
       "candidates=15 plies=2 reserve_seconds=%.6f "
       "inference_min_search_seconds=0.3 exchange_max_bag=30\n",
       milliseconds, seat0_milliseconds, (unsigned long long)seed, stride,
-      null_match, (int)use_pat,
-      fmin(1.0, milliseconds / 10000.0));
+      null_match, (int)use_pat, fmin(1.0, milliseconds / 10000.0));
   if (fflush(stdout) != 0) {
     log_fatal("infmatch output flush failed");
   }
   for (int pair_idx = 0; pair_idx < pairs; pair_idx++) {
     const unsigned int pair_seed =
         (unsigned int)(seed + ((uint64_t)pair_idx * (uint64_t)stride));
-    const double first =
-        match_game(config, pair_seed, 0, seat_seconds, null_match != 0,
-                   use_pat);
-    const double second =
-        match_game(config, pair_seed, 1, seat_seconds, null_match != 0,
-                   use_pat);
+    const double first = match_game(config, pair_seed, 0, seat_seconds,
+                                    null_match != 0, use_pat);
+    const double second = match_game(config, pair_seed, 1, seat_seconds,
+                                     null_match != 0, use_pat);
     const double outcome = (match_outcome(first) + match_outcome(second)) / 2;
     printf("INFMATCH_PAIR seed=%u win_fraction=%.6f spread=%.3f\n", pair_seed,
            outcome, (first + second) / 2);

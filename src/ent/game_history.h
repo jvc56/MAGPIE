@@ -68,6 +68,7 @@ void game_event_set_inference_carryover(
     GameEvent *event, InferenceCarryoverTable *inference_carryover);
 const InferenceCarryoverTable *
 game_event_get_inference_carryover(const GameEvent *event);
+bool game_event_get_inference_carryover_recorded(const GameEvent *event);
 
 void game_event_set_endgame_results(GameEvent *event,
                                     EndgameResults *endgame_results);

@@ -89,6 +89,13 @@ typedef struct Inference {
   int carry_in_kept;
   double carry_in_floor;
   InferenceCarryoverSlot *carry_out;
+  const InferenceLossModel *loss_model;
+  void (*rack_hook)(void *data, const Rack *rack, const Rack *kept,
+                    uint64_t draws, uint64_t kept_draws, double loss);
+  void *rack_hook_data;
+  // Softmax inference of an exchange: the weight of each leave kept, summed
+  // over the racks it can be kept from, by klv index. Shared by the workers.
+  InferenceCarryoverSlot *exchange_keep_slots;
   bool use_infer_cutoff_optimization;
   // Every worker walks every possible leave in the same order;
   // current_rack_index is the position of the walk. A worker evaluates only
@@ -161,6 +168,9 @@ struct InferenceCtx {
   InferenceCarryoverSlot *carry_in_slots;
   InferenceCarryoverSlot *carry_out_slots;
   uint32_t carry_num_leaves;
+  // See Inference.exchange_keep_slots.
+  InferenceCarryoverSlot *exchange_keep_slots;
+  uint32_t exchange_keep_num_leaves;
 };
 
 void inference_destroy(Inference *inference) {
@@ -473,8 +483,7 @@ static Equity get_top_equity_from_census(const Inference *inference,
   }
 }
 
-static int inference_vowel_count(const Inference *inference,
-                                 const Rack *rack) {
+static int inference_vowel_count(const Inference *inference, const Rack *rack) {
   const LetterDistribution *ld = game_get_ld(inference->game);
   int vowels = 0;
   for (int ml = 0; ml < inference->ld_size; ml++) {
@@ -594,6 +603,133 @@ static void inference_carryover_record(const Inference *inference,
   }
 }
 
+// Softmax inference of an exchange: what one candidate rack contributes.
+typedef struct SoftExchange {
+  uint64_t draws;
+  // The equity the rack's best exchange of this size gives up to its best
+  // move, and that exchange's equity.
+  double best_loss;
+  Equity best_equity;
+  double carryover_factor;
+  // A keep that gives up more than the equity margin is not admitted, as a
+  // rack is not.
+  double equity_margin;
+  double rack_weight;
+} SoftExchange;
+
+const InferenceLossModel *inference_research_loss_model = NULL;
+
+// The fitted loss of the current rack, given its static loss.
+static double inference_model_loss(const Inference *inference,
+                                   double static_loss) {
+  const InferenceLossModel *model = inference->loss_model;
+  if (model == NULL || static_loss > model->clip) {
+    return static_loss;
+  }
+  const Rack *leave = inference->current_target_leave;
+  double loss = model->intercept + (model->slope * static_loss);
+  for (int first = 0; first < inference->ld_size; first++) {
+    const int first_count = rack_get_letter(leave, first);
+    if (first_count == 0) {
+      continue;
+    }
+    loss += model->letter[first] * first_count;
+    if (first_count > 1) {
+      loss += model->pair[first][first];
+    }
+    for (int second = first + 1; second < inference->ld_size; second++) {
+      if (rack_get_letter(leave, second) > 0) {
+        loss += model->pair[first][second];
+      }
+    }
+  }
+  return fmax(0.0, loss);
+}
+
+// Records one way of keeping tiles from the candidate rack
+// (current_target_leave) in an exchange: its weight falls with the equity it
+// gives up to the rack's best move.
+static void record_soft_exchange_keep(Inference *inference, const Rack *keep,
+                                      SoftExchange *soft) {
+  const Equity keep_value = inference_get_leave_value(inference, keep);
+  const Game *game = inference->game;
+  const Equity keep_equity = static_eval_get_nonopening_move_equity(
+      game_get_ld(game), keep,
+      player_get_rack(game_get_player(game, 1 - inference->target_index)),
+      bag_get_letters(game_get_bag(game)), 0, keep_value, 0);
+  const double loss =
+      soft->best_loss +
+      fmax(0.0, (double)soft->best_equity - (double)keep_equity);
+  if (loss > soft->equity_margin) {
+    return;
+  }
+  const double weight = (double)soft->draws *
+                        exp(-loss / inference->temperature) *
+                        soft->carryover_factor;
+  soft->rack_weight += weight;
+  inference_carryover_record(inference, keep, weight);
+  if (inference->rack_hook != NULL) {
+    inference->rack_hook(
+        inference->rack_hook_data, inference->current_target_rack, keep,
+        soft->draws, get_number_of_draws_for_rack(inference->bag_as_rack, keep),
+        loss);
+  }
+  rack_copy(inference->current_target_exchanged,
+            inference->current_target_leave);
+  rack_subtract_using_floor_zero(inference->current_target_exchanged, keep);
+  record_valid_leave_weighted(keep, inference->results, INFERENCE_TYPE_LEAVE,
+                              equity_to_double(keep_value), soft->draws,
+                              weight);
+  record_valid_leave_weighted(
+      inference->current_target_exchanged, inference->results,
+      INFERENCE_TYPE_EXCHANGED,
+      equity_to_double(inference_get_leave_value(
+          inference, inference->current_target_exchanged)),
+      soft->draws, weight);
+  LeaveRackList *lrl =
+      inference_results_get_leave_rack_list(inference->results);
+  if (lrl) {
+    leave_rack_list_insert_weighted_rack(
+        keep, inference->current_target_exchanged, (int)soft->draws,
+        inference_get_leave_value(inference, inference->current_target_leave),
+        weight, lrl);
+  }
+  // A leave is kept from many racks: its weight is summed here and handed to
+  // the sampler once, after the workers finish.
+  const uint32_t keep_index = rack_is_empty(keep)
+                                  ? KLV_UNFOUND_INDEX
+                                  : klv_get_word_index(inference->klv, keep);
+  if (inference->exchange_keep_slots != NULL &&
+      keep_index != KLV_UNFOUND_INDEX) {
+    inference_carryover_add(&inference->exchange_keep_slots[keep_index],
+                            weight);
+  } else {
+    alias_method_add_weighted_rack(
+        inference_results_get_alias_method(inference->results), keep,
+        (int)soft->draws, weight);
+  }
+  rack_reset(inference->current_target_exchanged);
+}
+
+// Every multiset of remaining more tiles kept from the candidate rack, each
+// once: letters are added in increasing order from start_ml.
+static void record_soft_exchange_keeps(Inference *inference, Rack *keep,
+                                       int start_ml, int remaining,
+                                       SoftExchange *soft) {
+  if (remaining == 0) {
+    record_soft_exchange_keep(inference, keep, soft);
+    return;
+  }
+  for (int ml = start_ml; ml < inference->ld_size; ml++) {
+    if (rack_get_letter(keep, ml) <
+        rack_get_letter(inference->current_target_leave, ml)) {
+      rack_add_letter(keep, ml);
+      record_soft_exchange_keeps(inference, keep, ml, remaining - 1, soft);
+      rack_take_letter(keep, ml);
+    }
+  }
+}
+
 // A rack is consistent with the target's move when no move beats it by more
 // than the equity margin. For a tile placement the move's equity is its
 // score plus the leave value. For an exchange of N tiles it is the best
@@ -658,46 +794,49 @@ void evaluate_possible_leave(Inference *inference) {
                                   ? inference->current_target_rack
                                   : inference->current_target_leave);
   if (inference->temperature > 0) {
-    const double loss = fmax(0.0, (double)top_equity - observed_equity);
-    const double weight = (double)number_of_draws_for_leave *
-                          exp(-loss / inference->temperature) *
-                          inference_carryover_factor(inference);
-    inference_carryover_record(inference,
-                               is_exchange ? inference->best_exchange_leave
-                                           : inference->current_target_leave,
-                               weight);
+    double loss = fmax(0.0, (double)top_equity - observed_equity);
+    if (inference->loss_model != NULL && !is_exchange) {
+      // The model works in points; Equity is millipoints.
+      loss = inference_model_loss(inference, loss / (double)EQUITY_RESOLUTION) *
+             (double)EQUITY_RESOLUTION;
+    }
+    const double carryover_factor = inference_carryover_factor(inference);
+    double weight = (double)number_of_draws_for_leave *
+                    exp(-loss / inference->temperature) * carryover_factor;
+    if (is_exchange) {
+      // The mover chose which tiles to keep as softly as they chose to
+      // exchange: every keep of this rack is weighed by the equity it gives
+      // up, so no keep is ruled out. The rack's weight is the sum.
+      SoftExchange soft = {.draws = number_of_draws_for_leave,
+                           .best_loss = loss,
+                           .best_equity = observed_equity,
+                           .carryover_factor = carryover_factor,
+                           .equity_margin = (double)inference->equity_margin,
+                           .rack_weight = 0};
+      Rack keep;
+      rack_set_dist_size_and_reset(&keep, inference->ld_size);
+      record_soft_exchange_keeps(inference, &keep, 0,
+                                 (RACK_SIZE)-inference
+                                     ->target_number_of_tiles_exchanged,
+                                 &soft);
+      weight = soft.rack_weight;
+    } else {
+      inference_carryover_record(inference, inference->current_target_leave,
+                                 weight);
+      if (inference->rack_hook != NULL) {
+        inference->rack_hook(
+            inference->rack_hook_data, inference->current_target_rack,
+            inference->current_target_leave, number_of_draws_for_leave,
+            get_number_of_draws_for_rack(inference->bag_as_rack,
+                                         inference->current_target_leave),
+            loss);
+      }
+    }
     if (is_exchange) {
       record_valid_leave_weighted(inference->current_target_leave,
                                   inference->results, INFERENCE_TYPE_RACK,
                                   equity_to_double(current_leave_value),
                                   number_of_draws_for_leave, weight);
-      const Rack *best_exchange_leave = inference->best_exchange_leave;
-      rack_copy(inference->current_target_exchanged,
-                inference->current_target_leave);
-      rack_subtract_using_floor_zero(inference->current_target_exchanged,
-                                     best_exchange_leave);
-      record_valid_leave_weighted(best_exchange_leave, inference->results,
-                                  INFERENCE_TYPE_LEAVE,
-                                  equity_to_double(inference_get_leave_value(
-                                      inference, best_exchange_leave)),
-                                  number_of_draws_for_leave, weight);
-      record_valid_leave_weighted(
-          inference->current_target_exchanged, inference->results,
-          INFERENCE_TYPE_EXCHANGED,
-          equity_to_double(inference_get_leave_value(
-              inference, inference->current_target_exchanged)),
-          number_of_draws_for_leave, weight);
-      LeaveRackList *lrl =
-          inference_results_get_leave_rack_list(inference->results);
-      if (lrl) {
-        leave_rack_list_insert_weighted_rack(
-            best_exchange_leave, inference->current_target_exchanged,
-            (int)number_of_draws_for_leave, current_leave_value, weight, lrl);
-      }
-      alias_method_add_weighted_rack(
-          inference_results_get_alias_method(inference->results),
-          best_exchange_leave, (int)number_of_draws_for_leave, weight);
-      rack_reset(inference->current_target_exchanged);
     } else {
       record_valid_leave_weighted(inference->current_target_leave,
                                   inference->results, INFERENCE_TYPE_LEAVE,
@@ -914,6 +1053,10 @@ Inference *inference_create(const Game *game, const InferenceArgs *args,
   inference->carry_in_kept = args->carry_in_kept;
   inference->carry_in_floor = args->carry_in_floor;
   inference->carry_out = args->carry_out;
+  inference->loss_model = args->loss_model;
+  inference->rack_hook = args->rack_hook;
+  inference->rack_hook_data = args->rack_hook_data;
+  inference->exchange_keep_slots = NULL;
   // Disable cutoff optimization for exchanges with large leaves
   // as benchmarks show it hurts performance for small exchanges
   const int leave_size = RACK_SIZE - args->target_num_exch;
@@ -969,6 +1112,10 @@ void inference_reset(Inference *inference, const Game *game,
   inference->carry_in_kept = args->carry_in_kept;
   inference->carry_in_floor = args->carry_in_floor;
   inference->carry_out = args->carry_out;
+  inference->loss_model = args->loss_model;
+  inference->rack_hook = args->rack_hook;
+  inference->rack_hook_data = args->rack_hook_data;
+  inference->exchange_keep_slots = NULL;
   // Disable cutoff optimization for exchanges with large leaves
   const int leave_size = RACK_SIZE - args->target_num_exch;
   const bool is_small_exchange =
@@ -1238,7 +1385,9 @@ void populate_inference_args_with_game_history(InferenceArgs *args,
                                                ErrorStack *error_stack) {
   GameHistory *game_history = args->game_history;
   const int most_recent_move_event_index =
-      game_history_get_most_recent_move_event_index(game_history);
+      args->history_event_index >= 0
+          ? args->history_event_index
+          : game_history_get_most_recent_move_event_index(game_history);
   if (most_recent_move_event_index < 0) {
     error_stack_push(
         error_stack, ERROR_STATUS_INFERENCE_EMPTY_GAME_HISTORY,
@@ -1279,7 +1428,10 @@ void populate_inference_args_with_game_history(InferenceArgs *args,
   // replayed state), allowing inference to enumerate racks that include tiles
   // already held by the current player — causing fatal draw failures when
   // simulation later tries to draw those tiles from the bag.
-  if (rack_is_empty(args->nontarget_known_rack)) {
+  // An inference for an earlier event must not see the rack the other player
+  // holds now.
+  if (rack_is_empty(args->nontarget_known_rack) &&
+      args->history_event_index < 0) {
     rack_copy(
         args->nontarget_known_rack,
         player_get_rack(game_get_player(game_dup, 1 - args->target_index)));
@@ -1515,6 +1667,7 @@ void inference_ctx_destroy(InferenceCtx *ctx) {
   inference_ctx_free_census(ctx);
   free(ctx->carry_in_slots);
   free(ctx->carry_out_slots);
+  free(ctx->exchange_keep_slots);
   for (int i = 0; i < ctx->num_workers; i++) {
     inference_destroy(ctx->worker_inferences[i]);
   }
@@ -1537,9 +1690,13 @@ static bool inference_uses_carry_over(const InferenceArgs *args) {
 // The event of the move being inferred, when the tables are kept on the game
 // history; -1 when they are kept in a chain.
 static int inference_carryover_event_index(const InferenceArgs *args) {
-  return args->use_game_history && args->game_history != NULL
-             ? game_history_get_most_recent_move_event_index(args->game_history)
-             : -1;
+  if (!args->use_game_history || args->game_history == NULL) {
+    return -1;
+  }
+  return args->history_event_index >= 0
+             ? args->history_event_index
+             : game_history_get_most_recent_move_event_index(
+                   args->game_history);
 }
 
 // Points the workers at the table recorded for the target's previous move, if
@@ -1592,6 +1749,15 @@ static int inference_carryover_begin(const InferenceArgs *args,
     floor_in =
         (floor_text ? atof(floor_text) : INFERENCE_CARRYOVER_FLOOR_FRACTION) *
         (double)inference_carryover_table_get_max_within(table_in, &pool);
+    // Research: MAGPIE_CARRY_PRIOR_PROBE=<eps> replaces the floor with the
+    // one that mixes the carried belief with eps of the prior:
+    // eps / (1 - eps) times the mean weight under the prior.
+    const char *prior_text = getenv("MAGPIE_CARRY_PRIOR_PROBE");
+    if (prior_text) {
+      const double prior_share = atof(prior_text);
+      floor_in = prior_share / (1.0 - prior_share) *
+                 inference_carryover_table_get_mean_within(table_in, &pool);
+    }
   }
   memset(ctx->carry_out_slots, 0,
          (size_t)num_leaves * sizeof(InferenceCarryoverSlot));
@@ -1642,16 +1808,179 @@ static void inference_carryover_end(const InferenceArgs *args,
     free(tag);
   }
   if (event_index >= 0) {
-    game_event_set_inference_carryover(
-        game_history_get_event(args->game_history, event_index), table);
+    // An interrupted inference leaves the event as it was, so that the move
+    // is inferred again the next time its table is wanted.
+    if (!interrupted) {
+      game_event_set_inference_carryover(
+          game_history_get_event(args->game_history, event_index), table);
+    }
   } else {
     inference_carryover_chain_advance(args->carry_chain, table);
   }
 }
 
+// Research: the decision harness's temperature schedule, by tiles in the bag
+// (knots 4:12, 10:8, 17:5, 25:3, 38:3, 53:2, 75:1.5, log-interpolated).
+static double inference_schedule_temperature(int bag_tiles) {
+  static const int bags[] = {4, 10, 17, 25, 38, 53, 75};
+  static const double temps[] = {12, 8, 5, 3, 3, 2, 1.5};
+  enum { KNOTS = sizeof(bags) / sizeof(bags[0]) };
+  if (bag_tiles <= bags[0]) {
+    return temps[0];
+  }
+  for (int idx = 1; idx < KNOTS; idx++) {
+    if (bag_tiles <= bags[idx]) {
+      const double weight =
+          (double)(bag_tiles - bags[idx - 1]) / (bags[idx] - bags[idx - 1]);
+      return exp((1 - weight) * log(temps[idx - 1]) + weight * log(temps[idx]));
+    }
+  }
+  return temps[KNOTS - 1];
+}
+
+// Softmax inference of an exchange: points the workers at empty slots to sum
+// each kept leave's weight in.
+static void inference_exchange_keeps_begin(InferenceCtx *ctx) {
+  const Inference *first = ctx->worker_inferences[0];
+  const uint32_t num_leaves = klv_get_number_of_leaves(first->klv);
+  if (ctx->exchange_keep_num_leaves != num_leaves) {
+    free(ctx->exchange_keep_slots);
+    ctx->exchange_keep_slots =
+        malloc_or_die((size_t)num_leaves * sizeof(InferenceCarryoverSlot));
+    ctx->exchange_keep_num_leaves = num_leaves;
+  }
+  memset(ctx->exchange_keep_slots, 0,
+         (size_t)num_leaves * sizeof(InferenceCarryoverSlot));
+  for (int thread_index = 0; thread_index < ctx->num_workers; thread_index++) {
+    ctx->worker_inferences[thread_index]->exchange_keep_slots =
+        ctx->exchange_keep_slots;
+  }
+}
+
+// Hands each kept leave and its summed weight to the sampler.
+static void inference_exchange_keeps_end(InferenceCtx *ctx,
+                                         InferenceResults *results) {
+  const Inference *first = ctx->worker_inferences[0];
+  const int keep_size = (RACK_SIZE)-first->target_number_of_tiles_exchanged;
+  InferenceCarryoverTable *keeps = inference_carryover_table_create_from_slots(
+      ctx->exchange_keep_slots, first->klv, keep_size);
+  Rack keep;
+  for (uint32_t entry_idx = 0;
+       keeps != NULL && entry_idx < inference_carryover_table_get_count(keeps);
+       entry_idx++) {
+    inference_carryover_table_get_entry_leave(keeps, entry_idx, first->ld_size,
+                                              &keep);
+    const uint64_t draws =
+        get_number_of_draws_for_rack(first->bag_as_rack, &keep);
+    alias_method_add_weighted_rack(
+        inference_results_get_alias_method(results), &keep,
+        draws > INT32_MAX ? INT32_MAX : (int)draws,
+        (double)inference_carryover_table_get_entry_weight(keeps, entry_idx));
+  }
+  inference_carryover_table_destroy(keeps);
+  for (int thread_index = 0; thread_index < ctx->num_workers; thread_index++) {
+    ctx->worker_inferences[thread_index]->exchange_keep_slots = NULL;
+  }
+}
+
+void infer_with_initialized_ctx(InferenceArgs *args, InferenceCtx *ctx,
+                                InferenceResults *results,
+                                ErrorStack *error_stack);
+
+// Carry-over on the game history: before inferring the most recent move,
+// infers every earlier move of the target's that has no table yet, back to
+// the target's last full draw, oldest first, so that each table carries the
+// one before it. Each is inferred as the other player saw it then: the board
+// and the pool of that turn and the rack they held after the move. A move
+// that cannot be inferred leaves no table and the chain starts again after
+// it, as it would have in play. An interrupt stops the fill; the moves not
+// reached are filled the next time.
+//
+// The fills write to the caller's results, which the inference that follows
+// resets: the context's workers hold on to the results object they were first
+// given.
+static void inference_carryover_backfill(const InferenceArgs *args,
+                                         InferenceCtx *ctx,
+                                         InferenceResults *results) {
+  GameHistory *game_history = args->game_history;
+  const int target_event_index =
+      game_history_get_most_recent_move_event_index(game_history);
+  if (target_event_index <= 0) {
+    return;
+  }
+  const int target_index = game_event_get_player_index(
+      game_history_get_event(game_history, target_event_index));
+  int *missing = malloc_or_die(sizeof(int) * (size_t)target_event_index);
+  int num_missing = 0;
+  bool chain_continues = true;
+  for (int event_index = target_event_index - 1;
+       chain_continues && event_index >= 0; event_index--) {
+    const GameEvent *event = game_history_get_event(game_history, event_index);
+    if (game_event_get_player_index(event) != target_index) {
+      continue;
+    }
+    const game_event_t event_type = game_event_get_type(event);
+    if (event_type == GAME_EVENT_PASS ||
+        event_type == GAME_EVENT_CHALLENGE_BONUS) {
+      continue;
+    }
+    chain_continues = false;
+    if ((event_type == GAME_EVENT_TILE_PLACEMENT_MOVE ||
+         event_type == GAME_EVENT_EXCHANGE) &&
+        !game_event_get_inference_carryover_recorded(event) &&
+        move_get_tiles_played(validated_moves_get_move(
+            game_event_get_vms(event), 0)) < (RACK_SIZE)) {
+      missing[num_missing++] = event_index;
+      chain_continues = true;
+    }
+  }
+  if (num_missing > 0) {
+    const int ld_size = ld_get_size(game_get_ld(args->game));
+    ErrorStack *fill_error_stack = error_stack_create();
+    for (int i = num_missing - 1; i >= 0; i--) {
+      if (thread_control_get_status(args->thread_control) ==
+          THREAD_CONTROL_STATUS_USER_INTERRUPT) {
+        break;
+      }
+      Rack target_played_tiles;
+      rack_set_dist_size_and_reset(&target_played_tiles, ld_size);
+      Rack target_known_rack;
+      rack_set_dist_size_and_reset(&target_known_rack, ld_size);
+      Rack nontarget_known_rack;
+      rack_set_dist_size_and_reset(&nontarget_known_rack, ld_size);
+      const Rack *observer_rack =
+          game_event_get_after_event_player_on_turn_rack(
+              game_history_get_event(game_history, missing[i]));
+      if (rack_get_dist_size(observer_rack) == ld_size) {
+        rack_copy(&nontarget_known_rack, observer_rack);
+      }
+      InferenceArgs fill_args = *args;
+      fill_args.history_event_index = missing[i];
+      fill_args.target_played_tiles = &target_played_tiles;
+      fill_args.target_known_rack = &target_known_rack;
+      fill_args.nontarget_known_rack = &nontarget_known_rack;
+      fill_args.target_move = NULL;
+      fill_args.carry_dump_tag[0] = '\0';
+      infer_with_initialized_ctx(&fill_args, ctx, results, fill_error_stack);
+      if (!error_stack_is_empty(fill_error_stack)) {
+        log_warn("could not fill in the inference carry-over for event %d",
+                 missing[i]);
+        error_stack_reset(fill_error_stack);
+      }
+    }
+    error_stack_destroy(fill_error_stack);
+  }
+  free(missing);
+}
+
 void infer_with_initialized_ctx(InferenceArgs *args, InferenceCtx *ctx,
                                 InferenceResults *results,
                                 ErrorStack *error_stack) {
+  if (args->history_event_index < 0 && args->use_game_history &&
+      args->game_history != NULL && inference_uses_carry_over(args)) {
+    inference_carryover_backfill(args, ctx, results);
+  }
+
   inference_ctx_set_game(ctx, args->game);
 
   if (args->use_game_history) {
@@ -1680,6 +2009,38 @@ void infer_with_initialized_ctx(InferenceArgs *args, InferenceCtx *ctx,
     return;
   }
 
+  // Research: MAGPIE_INF_SCHEDULE sets the softmax temperature from the
+  // tiles in the bag before the target's move, on the decision harness's
+  // schedule, and to 3 for an exchange. Each inference of a back-fill gets
+  // the temperature of its own turn.
+  if (args->temperature > 0 && getenv("MAGPIE_INF_SCHEDULE") != NULL) {
+    int unseen_tiles = bag_get_letters(game_get_bag(ctx->game));
+    for (int player_index = 0; player_index < 2; player_index++) {
+      unseen_tiles += rack_get_total_letters(
+          player_get_rack(game_get_player(ctx->game, player_index)));
+    }
+    const int bag_tiles = unseen_tiles - 2 * (RACK_SIZE);
+    args->temperature = double_to_equity(
+        args->target_num_exch > 0
+            ? 3.0
+            : inference_schedule_temperature(bag_tiles < 0 ? 0 : bag_tiles));
+    // Research: MAGPIE_INF_SCHEDULE_SCALE scales the temperature of the move
+    // asked about, not of the back-filled ones.
+    const char *scale = getenv("MAGPIE_INF_SCHEDULE_SCALE");
+    if (scale != NULL && args->history_event_index < 0 &&
+        args->target_num_exch == 0) {
+      args->temperature = double_to_equity(equity_to_double(args->temperature) *
+                                           strtod(scale, NULL));
+    }
+  }
+  // Research: a loss model set by a test harness applies to the move asked
+  // about, never to a back-filled one.
+  if (args->history_event_index >= 0) {
+    args->loss_model = NULL;
+  } else if (args->loss_model == NULL) {
+    args->loss_model = inference_research_loss_model;
+  }
+
   inference_ctx_set_inferences(ctx, args, results);
   inference_ctx_set_census_play_scores(ctx, args);
 
@@ -1687,7 +2048,16 @@ void infer_with_initialized_ctx(InferenceArgs *args, InferenceCtx *ctx,
   const int carry_kept =
       carries_over ? inference_carryover_begin(args, ctx) : 0;
 
+  const bool soft_exchange = args->temperature > 0 && args->target_num_exch > 0;
+  if (soft_exchange) {
+    inference_exchange_keeps_begin(ctx);
+  }
+
   infer_manager(ctx, results);
+
+  if (soft_exchange) {
+    inference_exchange_keeps_end(ctx, results);
+  }
 
   if (carries_over) {
     inference_carryover_end(args, ctx, carry_kept,

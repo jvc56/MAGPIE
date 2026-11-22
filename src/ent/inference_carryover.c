@@ -4,6 +4,7 @@
 #include "../def/letter_distribution_defs.h"
 #include "../str/rack_string.h"
 #include "../util/io_util.h"
+#include "../util/math_util.h"
 #include "kwg.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -246,6 +247,34 @@ float inference_carryover_table_get_max_within(
     }
   }
   return max_within;
+}
+
+double inference_carryover_table_get_mean_within(
+    const InferenceCarryoverTable *table, const Rack *pool) {
+  const int pool_tiles = rack_get_total_letters(pool);
+  if (pool_tiles < table->kept) {
+    return 0;
+  }
+  const int dist_size = rack_get_dist_size(pool);
+  Rack leave;
+  double weighted_sum = 0;
+  for (uint32_t entry_idx = 0; entry_idx < table->count; entry_idx++) {
+    inference_carryover_table_get_entry_leave(table, entry_idx, dist_size,
+                                              &leave);
+    double ways = 1;
+    for (int ml = 0; ml < dist_size && ways > 0; ml++) {
+      const int held = rack_get_letter(&leave, ml);
+      if (held > 0) {
+        const int available = rack_get_letter(pool, ml);
+        ways *= held > available
+                    ? 0.0
+                    : (double)choose((uint64_t)available, (uint64_t)held);
+      }
+    }
+    weighted_sum += ways * (double)table->entries[entry_idx].weight;
+  }
+  return weighted_sum /
+         (double)choose((uint64_t)pool_tiles, (uint64_t)table->kept);
 }
 
 void inference_carryover_table_fill_slots(const InferenceCarryoverTable *table,

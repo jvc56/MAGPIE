@@ -20,4 +20,7 @@ void infer(InferenceArgs *args, InferenceCtx **ctx, InferenceResults *results,
 void infer_without_ctx(InferenceArgs *args, InferenceResults *results,
                        ErrorStack *error_stack);
 
+// Research: when set, the loss model for inferences whose args carry none.
+extern const InferenceLossModel *inference_research_loss_model;
+
 #endif

@@ -25,11 +25,11 @@
 #include "../src/ent/thread_control.h"
 #include "../src/ent/transposition_table.h"
 #include "../src/impl/autoplay_solvers.h"
-#include "../src/impl/peg.h"
 #include "../src/impl/cgp.h"
 #include "../src/impl/config.h"
 #include "../src/impl/gameplay.h"
 #include "../src/impl/inference.h"
+#include "../src/impl/peg.h"
 #include "../src/str/move_string.h"
 #include "../src/str/rack_string.h"
 #include "../src/util/io_util.h"
@@ -117,10 +117,9 @@ static void infbench_peg_solver_init(int peg_bag) {
   printf("INFBENCH peg_solver greedy_only=%d max_stage=%d endgame_plies=%d "
          "stages=%d first_top_k=%d nested=%d stride=%d opp_rack_known=0 "
          "threads=1\n",
-         solver->greedy_only, solver->max_stage,
-         solver->settings.endgame_plies, solver->settings.peg_num_stages,
-         solver->settings.peg_stage_top_k[0], solver->settings.peg_nested,
-         solver->settings.peg_scenario_stride);
+         solver->greedy_only, solver->max_stage, solver->settings.endgame_plies,
+         solver->settings.peg_num_stages, solver->settings.peg_stage_top_k[0],
+         solver->settings.peg_nested, solver->settings.peg_scenario_stride);
 }
 
 // As autoplay's pre-endgame solve (every unseen tile dealt, the opponent's
@@ -193,16 +192,25 @@ typedef struct InferBenchMode {
 } InferBenchMode;
 
 static const InferBenchMode infbench_modes[INFBENCH_MODES] = {
-    {"prior", 0, 0, 0},     {"hard0", 0, 0, 0},
-    {"hard5", 5, 0, 0},     {"hard10", 10, 0, 0},
-    {"hard20", 20, 0, 0},   {"soft5t2", 5, 2, 2},
-    {"soft5t5", 5, 5, 2},   {"soft10t2", 10, 2, 3},
-    {"soft10t5", 10, 5, 3}, {"soft20t2", 20, 2, 4},
-    {"soft20t5", 20, 5, 4}, {"softnocutofft8", 10000, 8, 4},
+    {"prior", 0, 0, 0},
+    {"hard0", 0, 0, 0},
+    {"hard5", 5, 0, 0},
+    {"hard10", 10, 0, 0},
+    {"hard20", 20, 0, 0},
+    {"soft5t2", 5, 2, 2},
+    {"soft5t5", 5, 5, 2},
+    {"soft10t2", 10, 2, 3},
+    {"soft10t5", 10, 5, 3},
+    {"soft20t2", 20, 2, 4},
+    {"soft20t5", 20, 5, 4},
+    {"softnocutofft8", 10000, 8, 4},
     // Temperature sweep with no margin; each is compared with temperature 8.
-    {"softnocutofft4", 10000, 4, 11},  {"softnocutofft12", 10000, 12, 11},
-    {"softnocutofft16", 10000, 16, 11}, {"softnocutofft24", 10000, 24, 11},
-    {"softnocutofft32", 10000, 32, 11}, {"softnocutofft48", 10000, 48, 11},
+    {"softnocutofft4", 10000, 4, 11},
+    {"softnocutofft12", 10000, 12, 11},
+    {"softnocutofft16", 10000, 16, 11},
+    {"softnocutofft24", 10000, 24, 11},
+    {"softnocutofft32", 10000, 32, 11},
+    {"softnocutofft48", 10000, 48, 11},
     {"softnocutofft64", 10000, 64, 11},
 };
 
@@ -471,7 +479,8 @@ static void infbench_peg_cache_rack(const Game *game, const Move *move,
     for (int idx = 0; idx < in_bag; idx++) {
       bag_tiles[num_bag_tiles++] = (MachineLetter)ml;
     }
-    is_truth = is_truth && rack_get_letter(leave, ml) == rack_get_letter(truth, ml);
+    is_truth =
+        is_truth && rack_get_letter(leave, ml) == rack_get_letter(truth, ml);
   }
   bag_set_to_tiles(game_get_bag(copy), bag_tiles, num_bag_tiles);
   ErrorStack *errors = error_stack_create();
@@ -504,8 +513,8 @@ static void infbench_peg_cache_rack(const Game *game, const Move *move,
          observed_rank < 0 ? -1.0 : result.top_cands[observed_rank].win_pct,
          observed_rank < 0 ? 0.0 : result.top_cands[observed_rank].mean_spread,
          seconds);
-  for (int idx = 0;
-       idx < result.n_top_cands && idx < INFBENCH_PEG_CACHE_CANDS; idx++) {
+  for (int idx = 0; idx < result.n_top_cands && idx < INFBENCH_PEG_CACHE_CANDS;
+       idx++) {
     printf("%s%.5f:%.3f", idx == 0 ? "" : ",", result.top_cands[idx].win_pct,
            result.top_cands[idx].mean_spread);
   }
@@ -678,9 +687,9 @@ static void infbench_observe(const Config *config, const Move *move, int policy,
       infbench_env_int("INFBENCH_PEG_CACHE", 0) != 0) {
     StringBuilder *move_text = string_builder_create();
     string_builder_add_move_description(move_text, move, ld);
-    char *prefix =
-        get_formatted_string("policy=%s pair=%d game=%d turn=%d",
-                             infbench_policies[policy], pair_idx, game_idx, turn);
+    char *prefix = get_formatted_string("policy=%s pair=%d game=%d turn=%d",
+                                        infbench_policies[policy], pair_idx,
+                                        game_idx, turn);
     Rack leave;
     rack_set_dist_size_and_reset(&leave, ld_get_size(ld));
     infbench_peg_cache(game, move, string_builder_peek(move_text), &unseen,
@@ -1188,8 +1197,8 @@ void infer_bench_run_spec(const char *spec) {
          peg_bag == 0) ||
         (num_fields == 5 && (use_census || temperature_size > 0)) ||
         !error_stack_is_empty(errors) || pairs < 1 ||
-        pairs > (peg_bag > 0 ? 100000000 : 10000) ||
-        positions < 1 || positions > 20 || parsed_seed > UINT_MAX;
+        pairs > (peg_bag > 0 ? 100000000 : 10000) || positions < 1 ||
+        positions > 20 || parsed_seed > UINT_MAX;
     error_stack_destroy(errors);
     string_splitter_destroy(fields);
     if (invalid) {

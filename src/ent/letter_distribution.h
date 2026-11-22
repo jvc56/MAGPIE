@@ -728,6 +728,7 @@ static inline ld_t ld_get_type_from_lex_name(const char *full_lexicon_name,
   if (has_iprefix("CSW", lexicon_name) || has_iprefix("NWL", lexicon_name) ||
       has_iprefix("OSPD", lexicon_name) || has_iprefix("OSW", lexicon_name) ||
       has_iprefix("TWL", lexicon_name) ||
+      has_iprefix("WOW", lexicon_name) ||
       has_iprefix("America", lexicon_name) ||
       has_iprefix("CEL", lexicon_name)) {
     ld_type = LD_TYPE_ENGLISH;

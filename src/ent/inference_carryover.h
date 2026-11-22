@@ -79,6 +79,10 @@ float inference_carryover_table_get_weight(const InferenceCarryoverTable *table,
 // ones the target can still hold.
 float inference_carryover_table_get_max_within(
     const InferenceCarryoverTable *table, const Rack *pool);
+// The mean weight over the ways to draw a leave of the table's size from the
+// pool: what the weights average to under the prior.
+double inference_carryover_table_get_mean_within(
+    const InferenceCarryoverTable *table, const Rack *pool);
 // Writes the table into slots for the inference workers to read: every slot
 // is zeroed and the table's entries set. There must be
 // inference_carryover_table_get_num_leaves slots.

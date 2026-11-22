@@ -2,6 +2,7 @@
 #define INFERENCE_ARGS_H
 
 #include "../def/inference_defs.h"
+#include "../def/letter_distribution_defs.h"
 #include "../ent/equity.h"
 #include "../ent/game.h"
 #include "../ent/game_history.h"
@@ -13,6 +14,19 @@
 #include "../util/io_util.h"
 #include <stdatomic.h>
 #include <stdint.h>
+
+// Research (sim-steered weights): a fitted replacement for a rack's static
+// loss, as a function of that loss and of the tiles kept. A rack whose static
+// loss is above clip keeps it. Read-only during an inference.
+typedef struct InferenceLossModel {
+  double intercept;
+  double slope;
+  double clip;
+  double letter[MAX_ALPHABET_SIZE];
+  // One term for each distinct unordered pair of kept tiles; pair[a][b] with
+  // a <= b, and a == b when the leave has two or more of that tile.
+  double pair[MAX_ALPHABET_SIZE][MAX_ALPHABET_SIZE];
+} InferenceLossModel;
 
 typedef struct InferenceArgs {
   bool use_game_history;
@@ -51,6 +65,8 @@ typedef struct InferenceArgs {
   int carry_in_kept;
   double carry_in_floor;
   InferenceCarryoverSlot *carry_out;
+  // Research: softmax placements only. NULL for the static loss.
+  const InferenceLossModel *loss_model;
   // Carry-over in play (softmax only; ignored while carry_in or carry_out is
   // set by hand). The inference weights each rack by the table recorded for
   // the target's previous move and records a table for this one. With
@@ -61,10 +77,24 @@ typedef struct InferenceArgs {
   // table recorded is also written there for postmortems, as
   // carry_<tag>_p<target>.tsv: the tag is carry_dump_tag, or e<event index>
   // when that is empty and the tables are on the game history.
+  // With the tables on the game history, the inference first fills in any
+  // earlier move of the target's that has no table yet, back to the target's
+  // last full draw, so that jumping into the middle of a game gives the same
+  // tables as playing through it. history_event_index is the event to infer
+  // for such a fill; negative means the most recent move played.
   bool use_carry_over;
+  int history_event_index;
   InferenceCarryoverChain *carry_chain;
   const char *carry_dump_dir;
   char carry_dump_tag[48];
+  // Research: with softmax, called for every rack the inference weighs, with
+  // the tiles it would keep, the ways to draw the rack and the kept tiles
+  // from the unseen pool, and the equity the observed move loses on it. For
+  // scoring many temperatures and carry-over forms from one inference
+  // (magpie_test infhuman). Called from the worker threads.
+  void (*rack_hook)(void *data, const Rack *rack, const Rack *kept,
+                    uint64_t draws, uint64_t kept_draws, double loss);
+  void *rack_hook_data;
   const Move *target_move;
   Rack *target_played_tiles;
   Rack *target_known_rack;
@@ -99,7 +129,11 @@ infer_args_fill(InferenceArgs *args, int leave_list_capacity, Equity eq_margin,
   args->carry_in_kept = 0;
   args->carry_in_floor = 0;
   args->carry_out = NULL;
+  args->loss_model = NULL;
   args->use_carry_over = false;
+  args->history_event_index = -1;
+  args->rack_hook = NULL;
+  args->rack_hook_data = NULL;
   args->carry_chain = NULL;
   args->carry_dump_dir = NULL;
   args->carry_dump_tag[0] = '\0';

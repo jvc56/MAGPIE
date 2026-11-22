@@ -80,7 +80,7 @@ uint64_t simmed_play_peek_seed(SimmedPlay *simmed_play, uint64_t ahead);
 // simmed_play_sample_record_clear before a sample starts filling it.
 void simmed_play_sample_record_clear(SimmedPlaySampleRecord *record);
 void simmed_play_add_stats_for_ply(SimmedPlay *simmed_play, int ply_index,
-                                   const Move *move,
+                                   const Move *move, const Board *board,
                                    SimmedPlaySampleRecord *record);
 void simmed_play_add_equity_stat(SimmedPlay *simmed_play, Equity initial_spread,
                                  Equity spread, Equity leftover,
