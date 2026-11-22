@@ -115,6 +115,13 @@ typedef struct PoolShiftTable {
   // them. Neither is owned.
   const KLV *klv;
   const RackValueTable *exact_values;
+  // With exact_values: the most unseen tiles for which the sums of the exact
+  // leave values are known to fit int64. A pool with more takes sums that
+  // are split to fit, which give the same values more slowly. It is found
+  // from the values of exact_values when the distribution has more tiles
+  // than fit whatever a table holds, so those values must not change while
+  // the table has them.
+  int exact_sums_max_unseen;
   // The pool the KLV's values are for, when they are not for the letter
   // distribution's (see PoolLeaves): the shift then corrects for the unseen
   // tiles' shares less this pool's.

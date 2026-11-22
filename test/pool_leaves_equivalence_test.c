@@ -112,6 +112,10 @@ enum {
 // The builders' sums are exact in doubles below this.
 #define PLE_EXACT_DOUBLE_LIMIT (INT64_C(1) << 53)
 
+// How far a value rounded to a millipoint may be from its mean summed in
+// doubles: half a millipoint, and the error of the doubles' sums.
+#define PLE_MEAN_TOLERANCE 0.51
+
 typedef enum {
   // Random values, about one rack in PLE_UNVALUED_ONE_IN unvalued and a few
   // at the limits of what a table holds.
@@ -161,6 +165,9 @@ typedef struct PleSyntheticCase {
   bool sums_are_exact;
   const PlePool *pools;
   int number_of_pools;
+  // Whether the pools have more unseen tiles than the table's exact leave
+  // values can sum in int64 (see exact_sums_max_unseen).
+  bool root_sums_are_wide;
 } PleSyntheticCase;
 
 // What was compared.
@@ -254,6 +261,12 @@ static const char *const ple_huge_distribution = "?,?,2,0,0\n"
                                                  "A,a,100,1,1\n"
                                                  "B,b,100,3,0\n";
 
+// More tiles than fit the sums of the exact leave values whatever a table
+// holds, even split into two digits.
+static const char *const ple_vast_distribution = "?,?,2,0,0\n"
+                                                 "A,a,250,1,1\n"
+                                                 "B,b,250,3,0\n";
+
 static const PlePool ple_mixed_pools[] = {
     {"every tile in the bag", "??AAABCCDEEEEF", NULL, "", "", true},
     // The private pool is exactly a rack, the public one every tile.
@@ -311,42 +324,51 @@ static const PlePool ple_huge_pools[] = {
 
 static const PleSyntheticCase ple_synthetic_cases[] = {
     {"mixed, random", ple_mixed_distribution, NULL, PLE_RACK_VALUES_RANDOM, 0,
-     11, true, PLE_POOLS(ple_mixed_pools)},
+     11, true, PLE_POOLS(ple_mixed_pools), false},
     {"mixed, ties", ple_mixed_distribution, NULL, PLE_RACK_VALUES_TIES, 0, 12,
-     true, PLE_POOLS(ple_mixed_pools)},
+     true, PLE_POOLS(ple_mixed_pools), false},
     // D has one copy: no rack holding it is valued.
     {"mixed, no rack with D valued", ple_mixed_distribution, NULL,
      PLE_RACK_VALUES_WITHOUT_LETTER, 4, 13, true,
-     PLE_POOLS(ple_mixed_some_pools)},
+     PLE_POOLS(ple_mixed_some_pools), false},
     {"mixed, no rack valued", ple_mixed_distribution, NULL,
-     PLE_RACK_VALUES_NONE, 0, 14, true, PLE_POOLS(ple_mixed_some_pools)},
+     PLE_RACK_VALUES_NONE, 0, 14, true, PLE_POOLS(ple_mixed_some_pools), false},
     {"mixed, KLV of more copies", ple_mixed_distribution,
      ple_mixed_more_distribution, PLE_RACK_VALUES_RANDOM, 0, 15, true,
-     PLE_POOLS(ple_mixed_some_pools)},
+     PLE_POOLS(ple_mixed_some_pools), false},
     {"mixed, KLV of fewer copies", ple_mixed_distribution,
      ple_mixed_fewer_distribution, PLE_RACK_VALUES_RANDOM, 0, 16, true,
-     PLE_POOLS(ple_mixed_some_pools)},
+     PLE_POOLS(ple_mixed_some_pools), false},
     {"three letters, random", ple_three_letter_distribution, NULL,
-     PLE_RACK_VALUES_RANDOM, 0, 17, true, PLE_POOLS(ple_three_letter_pools)},
+     PLE_RACK_VALUES_RANDOM, 0, 17, true, PLE_POOLS(ple_three_letter_pools),
+     false},
     {"wide, random", ple_wide_distribution, NULL, PLE_RACK_VALUES_RANDOM, 0, 18,
-     true, PLE_POOLS(ple_wide_pools)},
+     true, PLE_POOLS(ple_wide_pools), false},
     // No rack holding a blank is valued.
     {"wide, no rack with a blank valued", ple_wide_distribution, NULL,
-     PLE_RACK_VALUES_WITHOUT_LETTER, 0, 19, true, PLE_POOLS(ple_wide_pools)},
+     PLE_RACK_VALUES_WITHOUT_LETTER, 0, 19, true, PLE_POOLS(ple_wide_pools),
+     false},
     {"one rack, ties", ple_one_rack_distribution, NULL, PLE_RACK_VALUES_TIES, 0,
-     20, true, PLE_POOLS(ple_one_rack_pools)},
+     20, true, PLE_POOLS(ple_one_rack_pools), false},
     {"fewer tiles than a rack", ple_short_distribution, NULL,
-     PLE_RACK_VALUES_RANDOM, 0, 21, true, PLE_POOLS(ple_short_pools)},
+     PLE_RACK_VALUES_RANDOM, 0, 21, true, PLE_POOLS(ple_short_pools), false},
     {"50 tiles, extreme values", ple_near_bound_distribution, NULL,
-     PLE_RACK_VALUES_EXTREME, 0, 22, true, PLE_POOLS(ple_large_pools)},
+     PLE_RACK_VALUES_EXTREME, 0, 22, true, PLE_POOLS(ple_large_pools), false},
     {"82 tiles, ties", ple_large_distribution, NULL, PLE_RACK_VALUES_TIES, 0,
-     23, true, PLE_POOLS(ple_large_pools)},
+     23, true, PLE_POOLS(ple_large_pools), false},
     // Past 2^53 a builder that sums exactly can differ from the walk's
     // doubles, and past 2^63 overflow: either must build as the walk does.
     {"82 tiles, extreme values", ple_large_distribution, NULL,
-     PLE_RACK_VALUES_EXTREME, 0, 24, false, PLE_POOLS(ple_large_pools)},
+     PLE_RACK_VALUES_EXTREME, 0, 24, false, PLE_POOLS(ple_large_pools), false},
+    // The sums of the exact leave values pass 2^63 as well.
     {"202 tiles, extreme values", ple_huge_distribution, NULL,
-     PLE_RACK_VALUES_EXTREME, 0, 25, false, PLE_POOLS(ple_huge_pools)},
+     PLE_RACK_VALUES_EXTREME, 0, 25, false, PLE_POOLS(ple_huge_pools), true},
+    // Small values, which a table's own values show to fit: split by force,
+    // the exact leave values take two digits and three.
+    {"202 tiles, ties", ple_huge_distribution, NULL, PLE_RACK_VALUES_TIES, 0,
+     26, false, PLE_POOLS(ple_huge_pools), false},
+    {"502 tiles, ties", ple_vast_distribution, NULL, PLE_RACK_VALUES_TIES, 0,
+     27, false, PLE_POOLS(ple_huge_pools), false},
 };
 
 // CSW24 pools for the on-demand test. The unit test checks the private pool
@@ -926,6 +948,52 @@ static void ple_brute_force_destroy(PleBruteForce *brute_force) {
   }
 }
 
+// Whether the draw fills leave, whose tiles are leave_tiles, to a full rack
+// that the distribution deals and the table values: *value is then the
+// rack's value.
+static bool ple_get_drawn_rack_value(const PleBruteForce *brute_force,
+                                     const Rack *leave,
+                                     const BitRack *leave_tiles,
+                                     const PleDraw *draw, Equity *value) {
+  for (int letter_idx = 0; letter_idx < draw->number_of_letters; letter_idx++) {
+    const MachineLetter ml = draw->letters[letter_idx];
+    if (rack_get_letter(leave, ml) + draw->counts[letter_idx] >
+        ld_get_dist(brute_force->ld, ml)) {
+      return false;
+    }
+  }
+  BitRack full_rack = *leave_tiles;
+  bit_rack_add_bit_rack(&full_rack, &draw->tiles);
+  return rack_value_table_lookup(brute_force->rvt, &full_rack, value);
+}
+
+// Sets *mean to S(leave) / N(leave), summed in doubles, and returns true,
+// or returns false if no draw gives a valued rack. Unlike
+// ple_brute_force_leave's, the sums have no limit, and are exact only as far
+// as doubles are.
+static bool ple_brute_force_leave_mean(const PleBruteForce *brute_force,
+                                       const Rack *leave, double *mean) {
+  const int tiles_to_draw = RACK_SIZE - rack_get_total_letters(leave);
+  const BitRack leave_tiles = bit_rack_create_from_rack(brute_force->ld, leave);
+  double value_sum = 0;
+  double draws = 0;
+  for (int draw_idx = 0; draw_idx < brute_force->number_of_draws[tiles_to_draw];
+       draw_idx++) {
+    const PleDraw *draw = &brute_force->draws_by_size[tiles_to_draw][draw_idx];
+    Equity value = 0;
+    if (ple_get_drawn_rack_value(brute_force, leave, &leave_tiles, draw,
+                                 &value)) {
+      draws += (double)draw->ways;
+      value_sum += (double)draw->ways * (double)value;
+    }
+  }
+  if (draws == 0) {
+    return false;
+  }
+  *mean = value_sum / draws;
+  return true;
+}
+
 // Sets the brute force's value_sum and draws to S(leave) and N(leave).
 static void ple_brute_force_leave(PleBruteForce *brute_force, const Rack *leave,
                                   const char *label) {
@@ -936,23 +1004,9 @@ static void ple_brute_force_leave(PleBruteForce *brute_force, const Rack *leave,
   for (int draw_idx = 0; draw_idx < brute_force->number_of_draws[tiles_to_draw];
        draw_idx++) {
     const PleDraw *draw = &brute_force->draws_by_size[tiles_to_draw][draw_idx];
-    // The full rack must be one the distribution deals.
-    bool dealable = true;
-    for (int letter_idx = 0; letter_idx < draw->number_of_letters;
-         letter_idx++) {
-      const MachineLetter ml = draw->letters[letter_idx];
-      if (rack_get_letter(leave, ml) + draw->counts[letter_idx] >
-          ld_get_dist(brute_force->ld, ml)) {
-        dealable = false;
-      }
-    }
-    if (!dealable) {
-      continue;
-    }
-    BitRack full_rack = leave_tiles;
-    bit_rack_add_bit_rack(&full_rack, &draw->tiles);
     Equity value = 0;
-    if (rack_value_table_lookup(brute_force->rvt, &full_rack, &value)) {
+    if (ple_get_drawn_rack_value(brute_force, leave, &leave_tiles, draw,
+                                 &value)) {
       brute_force->draws += draw->ways;
       brute_force->value_sum += draw->ways * (int64_t)value;
     }
@@ -1376,6 +1430,136 @@ static void ple_check_rack_shifts(const char *label,
   tally->values += (uint64_t)result.count;
 }
 
+// Sets leave to the subset of the rack's tiles that the result numbers
+// subset_idx.
+static void ple_set_rack_subset(const PoolShiftRack *result, int subset_idx,
+                                int ld_size, Rack *leave) {
+  rack_set_dist_size_and_reset(leave, ld_size);
+  for (int bit_idx = 0; bit_idx < RACK_SIZE; bit_idx++) {
+    if ((result->map_indices[subset_idx] & (1 << bit_idx)) != 0) {
+      rack_add_letter(leave, result->bit_tiles[bit_idx]);
+    }
+  }
+}
+
+// The exact shifts pool_shift_fill_rack gives every leave of rack once the
+// table takes no pool's sums to fit int64, so that every leave's values are
+// split into digits (see exact_sums_max_unseen): they must be the shifts
+// the table gives as it is.
+static void ple_check_wide_rack_shifts(const char *label, PoolShiftTable *table,
+                                       const LetterDistribution *ld,
+                                       const Bag *bag,
+                                       const Rack *opponent_rack,
+                                       const Rack *rack, PleTally *tally) {
+  PoolShiftRack expected;
+  pool_shift_fill_rack(table, ld, bag, opponent_rack,
+                       POOL_SHIFT_EXACT_WEIGHT_MILLI, rack, &expected);
+  const int max_unseen = table->exact_sums_max_unseen;
+  table->exact_sums_max_unseen = 0;
+  PoolShiftRack actual;
+  pool_shift_fill_rack(table, ld, bag, opponent_rack,
+                       POOL_SHIFT_EXACT_WEIGHT_MILLI, rack, &actual);
+  table->exact_sums_max_unseen = max_unseen;
+  if (actual.count != expected.count) {
+    log_fatal("%s: %d leaves with split sums, %d without", label, actual.count,
+              expected.count);
+  }
+  Rack leave;
+  for (int subset_idx = 0; subset_idx < expected.count; subset_idx++) {
+    if (actual.shifts[subset_idx] != expected.shifts[subset_idx]) {
+      char leave_string[PLE_LEAVE_STRING_SIZE];
+      ple_set_rack_subset(&expected, subset_idx, ld_get_size(ld), &leave);
+      log_fatal(
+          "%s: the exact shift of leave %s is %d with split sums, %d without",
+          label,
+          ple_leave_string(&leave, ld, leave_string, sizeof(leave_string)),
+          (int)actual.shifts[subset_idx], (int)expected.shifts[subset_idx]);
+    }
+  }
+  tally->values += (uint64_t)expected.count;
+}
+
+// The exact value pool_shift_fill_rack gives every leave of rack against
+// the mean of the leave's draws, which see unseen_counts, summed here in
+// doubles one draw at a time. That holds for sums of any size, to within the
+// rounding to a millipoint.
+static void
+ple_check_rack_shifts_by_draws(const char *label, const PoolShiftTable *table,
+                               const LetterDistribution *ld, const Bag *bag,
+                               const Rack *opponent_rack, const Rack *rack,
+                               const int *unseen_counts, PleTally *tally) {
+  PleBruteForce brute_force;
+  ple_brute_force_create(&brute_force, ld, table->exact_values, unseen_counts);
+  PoolShiftRack result;
+  pool_shift_fill_rack(table, ld, bag, opponent_rack,
+                       POOL_SHIFT_EXACT_WEIGHT_MILLI, rack, &result);
+  Rack leave;
+  for (int subset_idx = 0; subset_idx < result.count; subset_idx++) {
+    ple_set_rack_subset(&result, subset_idx, ld_get_size(ld), &leave);
+    if (rack_get_total_letters(&leave) >= RACK_SIZE) {
+      continue;
+    }
+    // Without a valued draw, a leave has no exact value and is not shifted.
+    double mean = 0;
+    const bool has_mean =
+        ple_brute_force_leave_mean(&brute_force, &leave, &mean);
+    const double actual = (double)result.shifts[subset_idx] +
+                          (double)klv_get_leave_value(table->klv, &leave);
+    if (has_mean ? fabs(actual - mean) > PLE_MEAN_TOLERANCE
+                 : result.shifts[subset_idx] != 0) {
+      char leave_string[PLE_LEAVE_STRING_SIZE];
+      log_fatal(
+          "%s: leave %s is shifted by %d to %.0f, and the mean of its "
+          "draws is %s%.3f",
+          label,
+          ple_leave_string(&leave, ld, leave_string, sizeof(leave_string)),
+          (int)result.shifts[subset_idx], actual,
+          has_mean ? "" : "of no valued rack: ", mean);
+    }
+    tally->values++;
+  }
+  ple_brute_force_destroy(&brute_force);
+}
+
+// The exact shifts of the mover's rack in a pool of a synthetic case, whose
+// table the checks may change: whether the pool's sums are as wide as the
+// case says, the shifts with every leave's sums split, and the shifts
+// against each leave's draws.
+static void ple_check_pool_rack_shifts(const PleSyntheticCase *spec,
+                                       PoolShiftTable *table,
+                                       const LetterDistribution *ld,
+                                       const PlePool *pool, Bag *bag,
+                                       PleTally *tally) {
+  Rack bag_tiles;
+  Rack opponent_rack;
+  Rack mover_rack;
+  ple_set_pool_racks(ld, pool, &bag_tiles, &opponent_rack, &mover_rack);
+  ple_set_bag(bag, &bag_tiles);
+  int unseen_counts[MAX_ALPHABET_SIZE] = {0};
+  int unseen_total = 0;
+  for (int ml = 0; ml < ld_get_size(ld); ml++) {
+    unseen_counts[ml] = rack_get_letter(&bag_tiles, (MachineLetter)ml) +
+                        rack_get_letter(&opponent_rack, (MachineLetter)ml);
+    unseen_total += unseen_counts[ml];
+  }
+  char *label = get_formatted_string("%s, pool \"%s\", rack shifts", spec->name,
+                                     pool->name);
+  if ((unseen_total > table->exact_sums_max_unseen) !=
+      spec->root_sums_are_wide) {
+    log_fatal("%s: %d unseen tiles, and the table's sums fit int64 up to %d: "
+              "the case expects %s",
+              label, unseen_total, table->exact_sums_max_unseen,
+              spec->root_sums_are_wide ? "more than fit" : "no more than fit");
+  }
+  ple_check_wide_rack_shifts(label, table, ld, bag, &opponent_rack, &mover_rack,
+                             tally);
+  if (pool->brute_force) {
+    ple_check_rack_shifts_by_draws(label, table, ld, bag, &opponent_rack,
+                                   &mover_rack, unseen_counts, tally);
+  }
+  free(label);
+}
+
 static void ple_check_constructed_pool(const char *case_name,
                                        const PoolShiftTable *stock_table,
                                        const LetterDistribution *ld,
@@ -1439,6 +1623,8 @@ static void ple_run_synthetic_case(const PleSyntheticCase *spec,
   for (int pool_idx = 0; pool_idx < spec->number_of_pools; pool_idx++) {
     ple_check_constructed_pool(spec->name, table, ld, &spec->pools[pool_idx],
                                bag, true, spec->sums_are_exact, false, tally);
+    ple_check_pool_rack_shifts(spec, table, ld, &spec->pools[pool_idx], bag,
+                               tally);
   }
   bag_destroy(bag);
   pool_shift_table_destroy(table);
