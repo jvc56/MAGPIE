@@ -34,6 +34,7 @@
 
 #include "infer_decide_test.h"
 
+#include "../src/util/math_util.h"
 #include "../src/compat/cpthread.h"
 #include "../src/compat/cpthread_defs.h"
 #include "../src/compat/ctime.h"
@@ -186,6 +187,8 @@ typedef struct SteerRack {
   bool usable;
   double static_loss;
   double sim_loss;
+  // Standard error of sim_loss, from the rollouts' paired differences.
+  double sim_se;
 } SteerRack;
 
 typedef struct SteerJob {
@@ -198,7 +201,63 @@ typedef struct SteerJob {
   int first;
   int last;
   SteerRack *racks;
+  // Diagnostic: evaluate the rack the mover actually holds in base instead of
+  // a random one.
+  bool actual_rack;
+  // Direct arm: racks[].leave already holds the tiles kept; evaluate the
+  // rack of those tiles and the tiles played.
+  bool given_leaves;
 } SteerJob;
+
+// Research options for the fit; the defaults give the original method.
+enum { STEER_SAMPLE_ATTEMPTS = 60 };
+typedef struct SteerOptions {
+  // Rivals rolled out against the observed play: the top static plays no more
+  // than window below it. 0: the original top STEER_TOP_PLAYS.
+  int rivals;
+  double window;
+  // Choose the best rival on half of the rollouts and measure it on the rest.
+  bool split;
+  // Sample racks in proportion to exp(-static loss / this); 0: the prior.
+  double sample_temperature;
+  // 0: the original regression. 1: the simulated loss minus the static loss,
+  // on an intercept and the letters kept, with the slope fixed at 1.
+  int model;
+  double letter_penalty;
+  bool clamp_intercept;
+} SteerOptions;
+static SteerOptions steer_options = {.letter_penalty = 150};
+
+// Diagnostic: root mean square error over the last fit's racks of the fitted
+// loss and of the static loss, both against the simulated loss.
+static double steer_last_rmse_model = 0;
+static double steer_last_rmse_static = 0;
+
+// The loss the model gives a leave; mirrors inference_model_loss.
+static double steer_model_predict(const InferenceLossModel *model,
+                                  const Rack *leave, double static_loss,
+                                  int ld_size) {
+  if (static_loss > model->clip) {
+    return static_loss;
+  }
+  double loss = model->intercept + (model->slope * static_loss);
+  for (int first = 0; first < ld_size; first++) {
+    const int first_count = rack_get_letter(leave, first);
+    if (first_count == 0) {
+      continue;
+    }
+    loss += model->letter[first] * first_count;
+    if (first_count > 1) {
+      loss += model->pair[first][first];
+    }
+    for (int second = first + 1; second < ld_size; second++) {
+      if (rack_get_letter(leave, second) > 0) {
+        loss += model->pair[first][second];
+      }
+    }
+  }
+  return fmax(0.0, loss);
+}
 
 static bool steer_same_move(const Move *first, const Move *second) {
   if (move_get_type(first) != move_get_type(second) ||
@@ -225,50 +284,119 @@ static void *steer_worker(void *context) {
   MoveList *best = move_list_create(1);
   Move candidates[STEER_MAX_PLAYS];
   const int other = 1 - job->mover;
+  const bool sample_posterior = !job->actual_rack && !job->given_leaves &&
+                                steer_options.sample_temperature > 0;
+  const int max_attempts = sample_posterior ? STEER_SAMPLE_ATTEMPTS : 1;
   for (int rack_idx = job->first; rack_idx < job->last; rack_idx++) {
     SteerRack *out = &job->racks[rack_idx];
     out->usable = false;
-    game_copy(work, job->base);
-    game_seed(work, job->seed + ((uint64_t)rack_idx * UINT64_C(1000003)));
-    set_random_rack(work, job->mover, job->played);
-    rack_copy(&out->leave, player_get_rack(game_get_player(work, job->mover)));
-    rack_subtract_using_floor_zero(&out->leave, job->played);
-    const MoveGenArgs gen = {.game = work,
-                             .move_list = moves,
-                             .move_record_type = MOVE_RECORD_ALL,
-                             .move_sort_type = MOVE_SORT_EQUITY,
-                             .target_equity = EQUITY_MAX_VALUE};
-    generate_moves(&gen);
-    move_list_sort_moves(moves);
-    const int count = move_list_get_count(moves);
+    // With posterior sampling a random rack is kept with probability
+    // exp(-static loss / sample temperature), and redrawn otherwise.
+    bool accepted = false;
     int observed_rank = -1;
-    for (int idx = 0; idx < count && observed_rank < 0; idx++) {
-      if (steer_same_move(move_list_get_move(moves, idx), job->observed)) {
-        observed_rank = idx;
+    int count = 0;
+    for (int attempt = 0; attempt < max_attempts && !accepted; attempt++) {
+      const uint64_t rack_seed = job->seed +
+                                 ((uint64_t)rack_idx * UINT64_C(1000003)) +
+                                 ((uint64_t)attempt * UINT64_C(2654435761));
+      game_copy(work, job->base);
+      game_seed(work, rack_seed);
+      if (job->given_leaves) {
+        Rack whole;
+        rack_copy(&whole, &out->leave);
+        rack_add(&whole, job->played);
+        set_random_rack(work, job->mover, &whole);
+      } else if (!job->actual_rack) {
+        set_random_rack(work, job->mover, job->played);
       }
+      const MoveGenArgs gen = {.game = work,
+                               .move_list = moves,
+                               .move_record_type = MOVE_RECORD_ALL,
+                               .move_sort_type = MOVE_SORT_EQUITY,
+                               .target_equity = EQUITY_MAX_VALUE};
+      generate_moves(&gen);
+      move_list_sort_moves(moves);
+      count = move_list_get_count(moves);
+      observed_rank = -1;
+      for (int idx = 0; idx < count && observed_rank < 0; idx++) {
+        if (steer_same_move(move_list_get_move(moves, idx), job->observed)) {
+          observed_rank = idx;
+        }
+      }
+      if (observed_rank < 0) {
+        continue;
+      }
+      out->static_loss =
+          equity_to_double(move_get_equity(move_list_get_move(moves, 0))) -
+          equity_to_double(
+              move_get_equity(move_list_get_move(moves, observed_rank)));
+      if (sample_posterior) {
+        // splitmix64 of the rack's seed, as a uniform draw in [0, 1).
+        uint64_t mixed = rack_seed + UINT64_C(0x9E3779B97F4A7C15);
+        mixed = (mixed ^ (mixed >> 30)) * UINT64_C(0xBF58476D1CE4E5B9);
+        mixed = (mixed ^ (mixed >> 27)) * UINT64_C(0x94D049BB133111EB);
+        mixed ^= mixed >> 31;
+        const double uniform = (double)(mixed >> 11) / 9007199254740992.0;
+        if (uniform >=
+            exp(-out->static_loss / steer_options.sample_temperature)) {
+          continue;
+        }
+      }
+      accepted = true;
     }
-    if (observed_rank < 0) {
+    if (!accepted) {
       continue;
     }
-    out->static_loss =
-        equity_to_double(move_get_equity(move_list_get_move(moves, 0))) -
-        equity_to_double(
-            move_get_equity(move_list_get_move(moves, observed_rank)));
+    rack_copy(&out->leave, player_get_rack(game_get_player(work, job->mover)));
+    rack_subtract_using_floor_zero(&out->leave, job->played);
+    // The rivals come first and the observed play last, unless it is already
+    // among the top plays of the original selection.
     int num_candidates = 0;
     int observed_candidate = -1;
-    for (int idx = 0; idx < count && idx < STEER_TOP_PLAYS; idx++) {
-      if (idx == observed_rank) {
-        observed_candidate = num_candidates;
+    if (steer_options.rivals > 0) {
+      const double floor_equity =
+          equity_to_double(
+              move_get_equity(move_list_get_move(moves, observed_rank))) -
+          steer_options.window;
+      for (int idx = 0; idx < count && num_candidates < steer_options.rivals;
+           idx++) {
+        if (idx == observed_rank) {
+          continue;
+        }
+        if (equity_to_double(move_get_equity(move_list_get_move(moves, idx))) <
+            floor_equity) {
+          break;
+        }
+        move_copy(&candidates[num_candidates++],
+                  move_list_get_move(moves, idx));
       }
-      move_copy(&candidates[num_candidates++], move_list_get_move(moves, idx));
+    } else {
+      for (int idx = 0; idx < count && idx < STEER_TOP_PLAYS; idx++) {
+        if (idx == observed_rank) {
+          observed_candidate = num_candidates;
+        }
+        move_copy(&candidates[num_candidates++],
+                  move_list_get_move(moves, idx));
+      }
     }
     const int num_top = num_candidates;
+    if (num_top == 0) {
+      // No play is close enough to the observed one to overtake it.
+      out->sim_loss = 0;
+      out->sim_se = 0;
+      out->usable = true;
+      continue;
+    }
     if (observed_candidate < 0) {
       observed_candidate = num_candidates;
       move_copy(&candidates[num_candidates++],
                 move_list_get_move(moves, observed_rank));
     }
-    double total[STEER_MAX_PLAYS] = {0};
+    // Totals for the even and the odd rollouts.
+    double total[2][STEER_MAX_PLAYS] = {{0}};
+    // Sums of squares of each candidate's margin over the observed play.
+    double margin_squares[STEER_MAX_PLAYS] = {0};
+    double values[STEER_MAX_PLAYS];
     for (int rollout = 0; rollout < job->rollouts; rollout++) {
       for (int idx = 0; idx < num_candidates; idx++) {
         game_copy(roll, work);
@@ -293,17 +421,62 @@ static void *steer_worker(void *context) {
               equity_to_double(klv_get_leave_value(
                   player_get_klv(other_player), player_get_rack(other_player)));
         }
-        total[idx] += value;
+        total[rollout % 2][idx] += value;
+        values[idx] = value;
+      }
+      for (int idx = 0; idx < num_candidates; idx++) {
+        const double margin = values[idx] - values[observed_candidate];
+        margin_squares[idx] += margin * margin;
       }
     }
-    double top = total[0];
-    for (int idx = 1; idx < num_top; idx++) {
-      if (total[idx] > top) {
-        top = total[idx];
+    {
+      int leader = 0;
+      for (int idx = 1; idx < num_top; idx++) {
+        if (total[0][idx] + total[1][idx] >
+            total[0][leader] + total[1][leader]) {
+          leader = idx;
+        }
       }
+      const double count = (double)job->rollouts;
+      const double mean_margin =
+          (total[0][leader] + total[1][leader] - total[0][observed_candidate] -
+           total[1][observed_candidate]) /
+          count;
+      const double variance =
+          fmax(0.0, (margin_squares[leader] / count) -
+                        (mean_margin * mean_margin));
+      out->sim_se = sqrt(variance / count);
     }
-    out->sim_loss =
-        fmax(0.0, (top - total[observed_candidate]) / (double)job->rollouts);
+    if (steer_options.split && job->rollouts >= 2) {
+      // The best rival is chosen on one half of the rollouts and measured on
+      // the other, so that choosing the maximum does not inflate it.
+      const double half_count[2] = {(double)((job->rollouts + 1) / 2),
+                                    (double)(job->rollouts / 2)};
+      double estimate = 0;
+      for (int half = 0; half < 2; half++) {
+        int best_idx = 0;
+        for (int idx = 1; idx < num_top; idx++) {
+          if (total[half][idx] > total[half][best_idx]) {
+            best_idx = idx;
+          }
+        }
+        estimate += 0.5 *
+                    (total[1 - half][best_idx] -
+                     total[1 - half][observed_candidate]) /
+                    half_count[1 - half];
+      }
+      out->sim_loss = fmax(0.0, estimate);
+    } else {
+      double top = total[0][0] + total[1][0];
+      for (int idx = 1; idx < num_top; idx++) {
+        if (total[0][idx] + total[1][idx] > top) {
+          top = total[0][idx] + total[1][idx];
+        }
+      }
+      out->sim_loss = fmax(0.0, (top - total[0][observed_candidate] -
+                                 total[1][observed_candidate]) /
+                                    (double)job->rollouts);
+    }
     out->usable = true;
   }
   move_list_destroy(best);
@@ -444,7 +617,7 @@ static int steer_fit(const Game *base, int mover, const Move *observed,
   for (int first = 0; first < ld_size; first++) {
     for (int second = 0; second < ld_size; second++) {
       pair_column[first][second] = -1;
-      if (second >= first &&
+      if (steer_options.model == 0 && second >= first &&
           pair_count[first][second] >= STEER_MIN_PAIR_COUNT) {
         pair_column[first][second] = dim++;
       }
@@ -461,9 +634,11 @@ static int steer_fit(const Game *base, int mover, const Move *observed,
     if (!rack->usable) {
       continue;
     }
-    const double target = fmin(rack->sim_loss, clip);
+    const double simulated = fmin(rack->sim_loss, clip);
+    const double target =
+        steer_options.model == 1 ? simulated - rack->static_loss : simulated;
     static_sum += rack->static_loss;
-    sim_sum += target;
+    sim_sum += simulated;
     const int num = steer_features(&rack->leave, rack->static_loss, ld_size,
                                    pair_column, columns, values);
     for (int left = 0; left < num; left++) {
@@ -479,9 +654,10 @@ static int steer_fit(const Game *base, int mover, const Move *observed,
     if (col == 0) {
       penalty = 1e-6;
     } else if (col == 1) {
-      penalty = 1e-3;
+      // The residual model keeps the static loss out of the fit.
+      penalty = steer_options.model == 1 ? 1e12 : 1e-3;
     } else if (col < 2 + ld_size) {
-      penalty = 10;
+      penalty = steer_options.model == 1 ? steer_options.letter_penalty : 10;
     }
     matrix[((size_t)col * dim) + col] += penalty;
   }
@@ -490,6 +666,12 @@ static int steer_fit(const Game *base, int mover, const Move *observed,
     memset(model, 0, sizeof(*model));
     model->intercept = rhs[0];
     model->slope = rhs[1];
+    if (steer_options.model == 1) {
+      model->slope = 1;
+      if (steer_options.clamp_intercept) {
+        model->intercept = fmin(0.0, rhs[0]);
+      }
+    }
     model->clip = clip;
     for (int ml = 0; ml < ld_size; ml++) {
       model->letter[ml] = rhs[2 + ml];
@@ -501,11 +683,54 @@ static int steer_fit(const Game *base, int mover, const Move *observed,
     }
     *mean_static = static_sum / num_fit;
     *mean_sim = sim_sum / num_fit;
+    double model_squares = 0;
+    double static_squares = 0;
+    for (int rack_idx = 0; rack_idx < num_racks; rack_idx++) {
+      const SteerRack *rack = &racks[rack_idx];
+      if (!rack->usable) {
+        continue;
+      }
+      const double target = fmin(rack->sim_loss, clip);
+      const double fitted_error =
+          steer_model_predict(model, &rack->leave, rack->static_loss, ld_size) -
+          target;
+      const double static_error = rack->static_loss - target;
+      model_squares += fitted_error * fitted_error;
+      static_squares += static_error * static_error;
+    }
+    steer_last_rmse_model = sqrt(model_squares / num_fit);
+    steer_last_rmse_static = sqrt(static_squares / num_fit);
   }
   free(rhs);
   free(matrix);
   free(racks);
   return solved ? num_fit : 0;
+}
+
+// Diagnostic: the simulated loss of the observed play for the rack the mover
+// actually holds in base, by the same rollout as steer_fit. Returns false if
+// the play was not found.
+static bool steer_actual_loss(const Game *base, int mover, const Move *observed,
+                              const Rack *played, int rollouts, uint64_t seed,
+                              double *sim_loss) {
+  SteerRack rack;
+  SteerJob job = {
+      .base = base,
+      .observed = observed,
+      .played = played,
+      .mover = mover,
+      .rollouts = rollouts,
+      .seed = seed,
+      .first = 0,
+      .last = 1,
+      .racks = &rack,
+      .actual_rack = true,
+  };
+  cpthread_t worker;
+  cpthread_create(&worker, steer_worker, &job);
+  cpthread_join(worker);
+  *sim_loss = rack.sim_loss;
+  return rack.usable;
 }
 
 // Copies `keep` tiles of `actual`, chosen uniformly without replacement.
@@ -1419,6 +1644,61 @@ void infer_decide_rank_stdin(void) {
 // stdin, in log order; the seed comes from INFTFIT_SEED) and, before each
 // move, scores how well inference at each temperature predicts the leave the
 // mover really kept. Prints the posterior probability of the true leave.
+// Sum over every leave of `remaining` more tiles from the pool, starting at
+// letter ml, of the number of ways to draw it times its carried weight.
+static double tfit_carry_weighted_sum(const InferenceCarrySlot *table,
+                                      const KLV *klv, const Rack *pool,
+                                      Rack *leave, int ml, int remaining,
+                                      double ways) {
+  if (remaining == 0) {
+    const uint32_t index = klv_get_word_index(klv, leave);
+    if (index == KLV_UNFOUND_INDEX) {
+      return 0;
+    }
+    const uint32_t bits = atomic_load(&table[index]);
+    float value;
+    memcpy(&value, &bits, sizeof(value));
+    return ways * (double)value;
+  }
+  if (ml >= rack_get_dist_size(pool)) {
+    return 0;
+  }
+  const int available = rack_get_letter(pool, ml);
+  double sum = 0;
+  int added = 0;
+  for (int count = 0; count <= available && count <= remaining; count++) {
+    if (count > 0) {
+      rack_add_letter(leave, (MachineLetter)ml);
+      added++;
+    }
+    sum += tfit_carry_weighted_sum(
+        table, klv, pool, leave, ml + 1, remaining - count,
+        ways * (double)choose((uint64_t)available, (uint64_t)count));
+  }
+  for (int idx = 0; idx < added; idx++) {
+    rack_take_letter(leave, (MachineLetter)ml);
+  }
+  return sum;
+}
+
+// The prior-mix floor for a carried table: mixing the carried belief with
+// prior_share of the prior adds prior_share / (1 - prior_share) times the
+// table's mean weight under the prior (kept tiles drawn from the pool).
+static double tfit_carry_prior_mix_floor(const InferenceCarrySlot *table,
+                                         const KLV *klv, const Rack *pool,
+                                         int kept, double prior_share) {
+  const int pool_tiles = rack_get_total_letters(pool);
+  if (kept <= 0 || pool_tiles < kept) {
+    return 0;
+  }
+  Rack leave;
+  rack_set_dist_size_and_reset(&leave, rack_get_dist_size(pool));
+  const double weighted_sum =
+      tfit_carry_weighted_sum(table, klv, pool, &leave, 0, kept, 1.0);
+  return prior_share / (1.0 - prior_share) * weighted_sum /
+         (double)choose((uint64_t)pool_tiles, (uint64_t)kept);
+}
+
 static double tfit_true_probability(const InferenceResults *results,
                                     const Rack *truth) {
   const AliasMethod *am = inference_results_get_alias_method(results);
@@ -1439,6 +1719,80 @@ static double tfit_true_probability(const InferenceResults *results,
   return total;
 }
 
+// Defined in inference.c.
+uint64_t get_number_of_draws_for_rack(const Rack *bag_as_rack, const Rack *rack);
+
+// Direct arm: one leave of the static posterior.
+typedef struct DirectLeave {
+  Rack leave;
+  double probability;
+  double ways;
+  double static_loss;
+  double proposal;
+  double sim_loss;
+  double sim_se;
+  double order_key;
+  bool simulated;
+} DirectLeave;
+
+// Letters of a rack as text ('?' for the blank), for the leave dump.
+static void direct_rack_text(const Rack *rack, int dist_size, char *text) {
+  int length = 0;
+  for (int ml = 0; ml < dist_size; ml++) {
+    for (int idx = 0; idx < rack_get_letter(rack, ml); idx++) {
+      text[length++] = ml == 0 ? '?' : (char)('A' + ml - 1);
+    }
+  }
+  text[length] = '\0';
+}
+
+static int direct_compare_proposal(const void *left, const void *right) {
+  const double left_value = ((const DirectLeave *)left)->order_key;
+  const double right_value = ((const DirectLeave *)right)->order_key;
+  return (left_value < right_value) - (left_value > right_value);
+}
+
+// Rolls out the first num_contenders leaves directly (the rollout of
+// steer_fit, no regression).
+static void direct_simulate(const Game *base, int mover, const Move *observed,
+                            const Rack *played, int threads, int rollouts,
+                            uint64_t seed, DirectLeave *leaves,
+                            int num_contenders) {
+  SteerRack *racks =
+      malloc_or_die((size_t)num_contenders * sizeof(SteerRack));
+  for (int idx = 0; idx < num_contenders; idx++) {
+    rack_copy(&racks[idx].leave, &leaves[idx].leave);
+  }
+  SteerJob *jobs = malloc_or_die((size_t)threads * sizeof(SteerJob));
+  cpthread_t *workers = malloc_or_die((size_t)threads * sizeof(cpthread_t));
+  for (int worker = 0; worker < threads; worker++) {
+    jobs[worker] = (SteerJob){
+        .base = base,
+        .observed = observed,
+        .played = played,
+        .mover = mover,
+        .rollouts = rollouts,
+        .seed = seed,
+        .first = (int)(((int64_t)num_contenders * worker) / threads),
+        .last = (int)(((int64_t)num_contenders * (worker + 1)) / threads),
+        .racks = racks,
+        .given_leaves = true,
+    };
+    cpthread_create(&workers[worker], steer_worker, &jobs[worker]);
+  }
+  for (int worker = 0; worker < threads; worker++) {
+    cpthread_join(workers[worker]);
+  }
+  for (int idx = 0; idx < num_contenders; idx++) {
+    leaves[idx].simulated = racks[idx].usable;
+    leaves[idx].sim_loss = racks[idx].sim_loss;
+    leaves[idx].sim_se = racks[idx].sim_se;
+  }
+  free(workers);
+  free(jobs);
+  free(racks);
+}
+
 void infer_decide_tfit_stdin(void) {
   // Negative: hard margin of that many points. Positive: temperature.
   static const double grid[] = {100000, 0.5, 1,  1.5, 2,  3,  4,  5,
@@ -1454,12 +1808,28 @@ void infer_decide_tfit_stdin(void) {
   const bool carry_mode = getenv("INFTFIT_CARRY") != NULL;
   // INFTFIT_STEER=1: sim-steered weights (see steer_fit).
   const bool steer_mode = getenv("INFTFIT_STEER") != NULL;
+  // INFTFIT_DIRECT=1: the direct arm (prints TDIRECT) on the selected games.
+  const bool direct_mode = getenv("INFTFIT_DIRECT") != NULL;
+  const int direct_cap = sfit_env_int("INFTFIT_DIRECT_CAP", 120);
+  const double direct_cover =
+      sfit_env_int("INFTFIT_DIRECT_COVER_PCT", 95) / 100.0;
+  // INFTFIT_DIRECT_SAMPLE=1: contenders are drawn from the proposal without
+  // replacement instead of taken from its top. INFTFIT_DIRECT_DUMP=<file>:
+  // every leave with static probability of at least 1e-7, for offline work.
+  const bool direct_sample = getenv("INFTFIT_DIRECT_SAMPLE") != NULL;
+  const char *direct_dump_name = getenv("INFTFIT_DIRECT_DUMP");
+  FILE *direct_dump =
+      direct_dump_name != NULL ? fopen(direct_dump_name, "w") : NULL;
   const int steer_racks = sfit_env_int("INFDEC_STEER_RACKS", 150);
   const int steer_rollouts = sfit_env_int("INFDEC_STEER_ROLLOUTS", 20);
   const int steer_every = sfit_env_int("INFTFIT_EVERY", 5);
   static const double steer_grid[] = {0.25, 0.35, 0.5, 0.7, 1.0, 1.4};
   InferenceLossModel steer_model;
   const char *carry_temp_text = getenv("INFTFIT_CARRY_T");
+  // Flat carry-over floor as a fraction of the carried table's largest value.
+  const char *carry_floor_text = getenv("INFTFIT_CARRY_FLOOR");
+  const double carry_floor_fraction =
+      carry_floor_text ? atof(carry_floor_text) : 1e-3;
   char *settings = get_formatted_string(
       "set -lex CSW24 -leaves CSW24 -wmp true -rit true -ritmmap true -wit "
       "true -s1 equity -s2 equity -r1 all -r2 all -pat auto -threads %d "
@@ -1498,6 +1868,26 @@ void infer_decide_tfit_stdin(void) {
   int carry_kept[2] = {0, 0};
   int carry_history[2] = {0, 0};
   double carry_floor[2] = {0, 0};
+  // A second chain for steer mode, carried from sim-steered inference.
+  InferenceCarrySlot *steer_carry_table[2][2];
+  for (int player_idx = 0; player_idx < 2; player_idx++) {
+    for (int table_idx = 0; table_idx < 2; table_idx++) {
+      steer_carry_table[player_idx][table_idx] =
+          calloc_or_die(num_klv_leaves, sizeof(InferenceCarrySlot));
+    }
+  }
+  int steer_carry_current[2] = {0, 0};
+  int steer_carry_kept[2] = {0, 0};
+  int steer_carry_history[2] = {0, 0};
+  double steer_carry_floor[2] = {0, 0};
+  // In steer mode only games with game_idx % steer_games_every == 0 are
+  // measured, on every placement, so that the steered chain is unbroken.
+  const int steer_games_every = sfit_env_int("INFTFIT_GAMES_EVERY", 1);
+  // INFTFIT_CARRY_PRIOR=<share>: in steer and carry modes, replace the flat carry-over
+  // floor with the prior-mix floor (see tfit_carry_prior_mix_floor).
+  const char *carry_prior_text = getenv("INFTFIT_CARRY_PRIOR");
+  const double carry_prior_share =
+      carry_prior_text ? atof(carry_prior_text) : 0.0;
   Rack played, known, observer, truth;
   rack_set_dist_size_and_reset(&played, ld_get_size(ld));
   rack_set_dist_size_and_reset(&known, ld_get_size(ld));
@@ -1524,7 +1914,11 @@ void infer_decide_tfit_stdin(void) {
       draw_starting_racks(game);
       carry_history[0] = 0;
       carry_history[1] = 0;
+      steer_carry_history[0] = 0;
+      steer_carry_history[1] = 0;
     }
+    const bool steer_game = game_idx % steer_games_every == 0;
+    int steer_fitted_now = 0;
     const int seat = game_get_player_on_turn_index(game);
     const Rack *mover = player_get_rack(game_get_player(game, seat));
     decide_rack_string(game, mover, rack_str, sizeof(rack_str));
@@ -1581,31 +1975,328 @@ void infer_decide_tfit_stdin(void) {
         rack_copy(&played, &used);
       }
     }
+    double static_floor_now = carry_floor[seat];
+    double steer_floor_now = steer_carry_floor[seat];
+    if (((steer_mode && steer_game) || carry_mode) && carry_prior_share > 0) {
+      // What the mover could have kept last turn: every tile the observer
+      // cannot see, which is the bag and the mover's rack.
+      Rack pool;
+      rack_set_dist_size_and_reset(&pool, ld_get_size(ld));
+      for (int ml = 0; ml < ld_get_size(ld); ml++) {
+        const int unseen = bag_get_letter(game_get_bag(game), (MachineLetter)ml) +
+                           rack_get_letter(mover, ml);
+        for (int idx = 0; idx < unseen; idx++) {
+          rack_add_letter(&pool, (MachineLetter)ml);
+        }
+      }
+      const KLV *carry_klv = player_get_klv(game_get_player(game, 0));
+      if (carry_history[seat] > 0) {
+        static_floor_now = tfit_carry_prior_mix_floor(
+            carry_table[seat][carry_current[seat]], carry_klv, &pool,
+            carry_kept[seat], carry_prior_share);
+      }
+      if (steer_carry_history[seat] > 0) {
+        steer_floor_now = tfit_carry_prior_mix_floor(
+            steer_carry_table[seat][steer_carry_current[seat]], carry_klv,
+            &pool, steer_carry_kept[seat], carry_prior_share);
+      }
+    }
+    if (direct_mode && steer_game &&
+        move_get_type(&move) == GAME_EVENT_TILE_PLACEMENT_MOVE &&
+        !rack_is_empty(&truth) && bag_tiles > 0) {
+      // Direct arm: the leaves holding most of a tempered static posterior
+      // are rolled out themselves, and their simulated loss replaces the
+      // static one; the other leaves keep the static loss, shifted by the
+      // contenders' mean change.
+      rack_copy(&observer, player_get_rack(game_get_player(game, 1 - seat)));
+      Timer direct_timer;
+      ctimer_start(&direct_timer);
+      const double temperature = decide_schedule_temperature(bag_tiles);
+      InferenceArgs args;
+      infer_args_fill(&args, 0, int_to_equity(10000), NULL, game, threads, 0, 0,
+                      control, false, true, seat, move_get_score(&move), 0,
+                      &played, &known, &observer);
+      args.temperature = double_to_equity(temperature);
+      args.target_move = &move;
+      thread_control_set_status(control, THREAD_CONTROL_STATUS_STARTED);
+      infer_without_ctx(&args, inferences, errors);
+      if (!error_stack_is_empty(errors)) {
+        error_stack_print_and_reset(errors);
+        log_fatal("inftfit: inference failed game=%d turn=%d", game_idx, turn);
+      }
+      const AliasMethod *am = inference_results_get_alias_method(inferences);
+      const int num_leaves = (int)am->num_items;
+      DirectLeave *leaves =
+          calloc_or_die((size_t)(num_leaves > 0 ? num_leaves : 1),
+                        sizeof(DirectLeave));
+      for (int idx = 0; idx < num_leaves; idx++) {
+        const AliasMethodItem *item = &am->items[idx];
+        leaves[idx].probability += item->probability / num_leaves;
+        leaves[item->alias].probability +=
+            (1 - item->probability) / num_leaves;
+      }
+      // What the mover could have kept: the bag and the mover's rack, less
+      // the tiles played.
+      Rack unseen;
+      rack_set_dist_size_and_reset(&unseen, ld_get_size(ld));
+      for (int ml = 0; ml < ld_get_size(ld); ml++) {
+        const int count =
+            bag_get_letter(game_get_bag(game), (MachineLetter)ml) +
+            rack_get_letter(mover, ml) - rack_get_letter(&played, ml);
+        for (int idx = 0; idx < count; idx++) {
+          rack_add_letter(&unseen, (MachineLetter)ml);
+        }
+      }
+      const double proposal_temperature = fmax(2 * temperature, 4.0);
+      double proposal_total = 0;
+      for (int idx = 0; idx < num_leaves; idx++) {
+        DirectLeave *entry = &leaves[idx];
+        rack_set_dist_size_and_reset(&entry->leave, ld_get_size(ld));
+        rack_decode(&am->items[idx].rack, &entry->leave);
+        // get_number_of_draws_for_rack wants the pool without the leave.
+        Rack rest;
+        rack_copy(&rest, &unseen);
+        rack_subtract_using_floor_zero(&rest, &entry->leave);
+        entry->ways =
+            (double)get_number_of_draws_for_rack(&rest, &entry->leave);
+        // Up to a constant shared by every leave, which cancels.
+        entry->static_loss =
+            entry->probability > 0 && entry->ways > 0
+                ? -temperature * log(entry->probability / entry->ways)
+                : 1e9;
+      }
+      double least_loss = 1e9;
+      for (int idx = 0; idx < num_leaves; idx++) {
+        least_loss = fmin(least_loss, leaves[idx].static_loss);
+      }
+      for (int idx = 0; idx < num_leaves; idx++) {
+        DirectLeave *entry = &leaves[idx];
+        if (entry->static_loss < 1e8) {
+          entry->static_loss -= least_loss;
+          entry->proposal =
+              entry->ways * exp(-entry->static_loss / proposal_temperature);
+          proposal_total += entry->proposal;
+        }
+      }
+      uint64_t order_state = (seed * UINT64_C(41)) +
+                             ((uint64_t)game_idx * UINT64_C(1000003)) +
+                             ((uint64_t)turn * UINT64_C(7919));
+      for (int idx = 0; idx < num_leaves; idx++) {
+        DirectLeave *entry = &leaves[idx];
+        entry->order_key = entry->proposal;
+        if (direct_sample) {
+          // Gumbel keys: the top of the order is a draw without replacement.
+          order_state += UINT64_C(0x9E3779B97F4A7C15);
+          uint64_t mixed = order_state;
+          mixed = (mixed ^ (mixed >> 30)) * UINT64_C(0xBF58476D1CE4E5B9);
+          mixed = (mixed ^ (mixed >> 27)) * UINT64_C(0x94D049BB133111EB);
+          mixed ^= mixed >> 31;
+          const double uniform =
+              ((double)(mixed >> 11) + 0.5) / 9007199254740992.0;
+          entry->order_key = entry->proposal > 0
+                                 ? log(entry->proposal) - log(-log(uniform))
+                                 : -1e300;
+        }
+      }
+      qsort(leaves, (size_t)num_leaves, sizeof(DirectLeave),
+            direct_compare_proposal);
+      int num_contenders = 0;
+      double proposal_covered = 0;
+      double static_covered = 0;
+      while (num_contenders < num_leaves && num_contenders < direct_cap &&
+             proposal_covered < direct_cover * proposal_total &&
+             leaves[num_contenders].proposal > 0) {
+        proposal_covered += leaves[num_contenders].proposal;
+        static_covered += leaves[num_contenders].probability;
+        num_contenders++;
+      }
+      steer_options.rivals = sfit_env_int("INFDEC_STEER_RIVALS", 0);
+      steer_options.window = sfit_env_int("INFDEC_STEER_WINDOW", 10);
+      steer_options.split = sfit_env_int("INFDEC_STEER_SPLIT", 0) != 0;
+      steer_options.sample_temperature = 0;
+      direct_simulate(game, seat, &move, &played, threads, steer_rollouts,
+                      (seed * UINT64_C(37)) +
+                          ((uint64_t)game_idx * UINT64_C(1000003)) +
+                          ((uint64_t)turn * UINT64_C(7919)),
+                      leaves, num_contenders);
+      int num_simulated = 0;
+      double mean_se = 0;
+      for (int idx = 0; idx < num_contenders; idx++) {
+        if (leaves[idx].simulated) {
+          num_simulated++;
+          mean_se += leaves[idx].sim_se;
+        }
+      }
+      mean_se = num_simulated > 0 ? mean_se / num_simulated : 0;
+      int truth_idx = -1;
+      for (int idx = 0; idx < num_leaves && truth_idx < 0; idx++) {
+        if (racks_are_equal(&leaves[idx].leave, &truth)) {
+          truth_idx = idx;
+        }
+      }
+      const bool truth_simulated = truth_idx >= 0 &&
+                                   truth_idx < num_contenders &&
+                                   leaves[truth_idx].simulated;
+      if (direct_dump != NULL) {
+        char leave_text[RACK_SIZE + 1];
+        char unseen_text[128];
+        direct_rack_text(&truth, ld_get_size(ld), leave_text);
+        direct_rack_text(&unseen, ld_get_size(ld), unseen_text);
+        fprintf(direct_dump, "M %d %d %d %.4f %s %s\n", game_idx, turn,
+                bag_tiles, temperature, leave_text, unseen_text);
+        for (int idx = 0; idx < num_leaves; idx++) {
+          const DirectLeave *entry = &leaves[idx];
+          const bool simulated = idx < num_contenders && entry->simulated;
+          if (entry->probability < 1e-7 && idx >= num_contenders &&
+              idx != truth_idx) {
+            continue;
+          }
+          direct_rack_text(&entry->leave, ld_get_size(ld), leave_text);
+          fprintf(direct_dump, "L %s %.0f %.4f %.6g %d %.4f %.4f %d\n",
+                  leave_text, entry->ways, entry->static_loss,
+                  entry->probability,
+                  simulated ? 1 : (idx < num_contenders ? 2 : 0),
+                  simulated ? entry->sim_loss : 0.0,
+                  simulated ? entry->sim_se : 0.0, idx == truth_idx ? 1 : 0);
+        }
+        fflush(direct_dump);
+      }
+      printf("TDIRECT game=%d turn=%d bag=%d tiles=%d leave=%d loss=%.3f "
+             "seconds=%.3f leaves=%d contenders=%d simulated=%d "
+             "cover_proposal=%.4f cover_static=%.4f mean_se=%.3f "
+             "truth_rank=%d truth_static=%.3f truth_sim=%.3f truth_se=%.3f",
+             game_idx, turn, bag_tiles, move_get_tiles_played(&move),
+             rack_get_total_letters(&truth), loss,
+             ctimer_elapsed_seconds(&direct_timer), num_leaves, num_contenders,
+             num_simulated,
+             proposal_total > 0 ? proposal_covered / proposal_total : 0.0,
+             static_covered, mean_se, truth_idx,
+             truth_idx >= 0 ? leaves[truth_idx].static_loss : -1.0,
+             truth_simulated ? leaves[truth_idx].sim_loss : -1.0,
+             truth_simulated ? leaves[truth_idx].sim_se : -1.0);
+      // Arms: static recomputed from the recovered losses (ps, a check
+      // against the engine), then the direct arm with each contender's
+      // simulated loss shrunk toward its static loss by
+      // signal^2 / (signal^2 + standard error^2), for a signal of 1, 2 and 4
+      // points (p1, p2, p4) and with no shrinking (pd). The other leaves keep
+      // the static loss plus the contenders' mean change.
+      static const char *const direct_names[] = {" ps=", " p1=", " p2=",
+                                                 " p4=", " pd="};
+      static const double direct_signal[] = {0, 1, 2, 4, 1e9};
+      for (int arm = 0; arm < 5; arm++) {
+        const double signal_squared = direct_signal[arm] * direct_signal[arm];
+        double shift_sum = 0;
+        double shift_weight = 0;
+        for (int idx = 0; idx < num_contenders; idx++) {
+          DirectLeave *entry = &leaves[idx];
+          if (!entry->simulated) {
+            continue;
+          }
+          const double denominator =
+              signal_squared + (entry->sim_se * entry->sim_se);
+          const double share =
+              arm == 0 ? 0 : (denominator > 0 ? signal_squared / denominator : 1);
+          entry->proposal =
+              entry->static_loss +
+              (share * (entry->sim_loss - entry->static_loss));
+          shift_sum +=
+              entry->probability * (entry->proposal - entry->static_loss);
+          shift_weight += entry->probability;
+        }
+        const double shift = shift_weight > 0 ? shift_sum / shift_weight : 0;
+        printf("%s", direct_names[arm]);
+        for (int scale_idx = 0; scale_idx < STEER_GRID; scale_idx++) {
+          const double arm_temperature = steer_grid[scale_idx] * temperature;
+          double total = 0;
+          double truth_weight = 0;
+          for (int idx = 0; idx < num_leaves; idx++) {
+            const DirectLeave *entry = &leaves[idx];
+            if (entry->static_loss >= 1e8) {
+              continue;
+            }
+            const bool simulated = idx < num_contenders && entry->simulated;
+            const double arm_loss =
+                simulated ? entry->proposal : entry->static_loss + shift;
+            const double weight =
+                entry->ways * exp(-fmax(0.0, arm_loss) / arm_temperature);
+            total += weight;
+            if (idx == truth_idx) {
+              truth_weight = weight;
+            }
+          }
+          printf("%s%.6g", scale_idx ? "," : "",
+                 total > 0 ? truth_weight / total : 0.0);
+        }
+      }
+      printf("\n");
+      fflush(stdout);
+      free(leaves);
+    }
     if (steer_mode) {
       // Sim-steered weights against the static schedule, at several
       // temperature scales, on every steer_every-th placement.
       if (move_get_type(&move) == GAME_EVENT_TILE_PLACEMENT_MOVE &&
-          !rack_is_empty(&truth) && bag_tiles > 0 &&
+          !rack_is_empty(&truth) && bag_tiles > 0 && steer_game &&
           ((game_idx * 31) + turn) % steer_every == 0) {
         rack_copy(&observer, player_get_rack(game_get_player(game, 1 - seat)));
         Timer steer_timer;
         ctimer_start(&steer_timer);
         double mean_static = 0;
         double mean_sim = 0;
+        steer_options.rivals = sfit_env_int("INFDEC_STEER_RIVALS", 0);
+        steer_options.window = sfit_env_int("INFDEC_STEER_WINDOW", 10);
+        steer_options.split = sfit_env_int("INFDEC_STEER_SPLIT", 0) != 0;
+        steer_options.model = sfit_env_int("INFDEC_STEER_MODEL", 0);
+        steer_options.letter_penalty =
+            sfit_env_int("INFDEC_STEER_LETTER_PENALTY", 150);
+        steer_options.clamp_intercept =
+            sfit_env_int("INFDEC_STEER_CLAMP", 0) != 0;
+        const int sample_multiple = sfit_env_int("INFDEC_STEER_SAMPLE_T", 0);
+        steer_options.sample_temperature =
+            sample_multiple > 0
+                ? fmax(sample_multiple * decide_schedule_temperature(bag_tiles),
+                       4.0)
+                : 0;
         const int fitted = steer_fit(
             game, seat, &move, &played, threads, steer_racks, steer_rollouts,
             (seed * UINT64_C(31)) + ((uint64_t)game_idx * UINT64_C(1000003)) +
                 ((uint64_t)turn * UINT64_C(7919)),
             &steer_model, &mean_static, &mean_sim);
         const double steer_seconds = ctimer_elapsed_seconds(&steer_timer);
+        steer_fitted_now = fitted;
         printf("TSTEER game=%d turn=%d bag=%d tiles=%d leave=%d loss=%.3f "
                "fitted=%d seconds=%.3f mean_static=%.3f mean_sim=%.3f "
                "slope=%.3f",
                game_idx, turn, bag_tiles, move_get_tiles_played(&move),
                rack_get_total_letters(&truth), loss, fitted, steer_seconds,
                mean_static, mean_sim, fitted > 0 ? steer_model.slope : 0.0);
-        for (int with_model = 0; with_model < 2; with_model++) {
-          printf(with_model ? " pm=" : " ps=");
+        printf(" intercept=%.3f", fitted > 0 ? steer_model.intercept : 0.0);
+        const int truth_rollouts = sfit_env_int("INFTFIT_STEER_TRUTH", 0);
+        if (truth_rollouts > 0 && fitted > 0) {
+          double truth_sim = 0;
+          const bool truth_found = steer_actual_loss(
+              game, seat, &move, &played, truth_rollouts,
+              (seed * UINT64_C(131)) + ((uint64_t)game_idx * UINT64_C(15485863)) +
+                  ((uint64_t)turn * UINT64_C(32452843)),
+              &truth_sim);
+          printf(" truth_found=%d truth_sim=%.3f truth_model=%.3f "
+                 "rmse_model=%.3f rmse_static=%.3f",
+                 truth_found, truth_sim,
+                 steer_model_predict(&steer_model, &truth, loss,
+                                     ld_get_size(ld)),
+                 steer_last_rmse_model, steer_last_rmse_static);
+        }
+        // Arms: static (ps), steered (pm), static with static carry-over
+        // (pcs), steered with steered carry-over (pcm), and steered with
+        // static carry-over (pcx).
+        static const char *const arm_names[] = {" ps=", " pm=", " pcs=",
+                                                " pcm=", " pcx="};
+        printf(" hist=%d,%d", carry_history[seat], steer_carry_history[seat]);
+        for (int arm = 0; arm < 5; arm++) {
+          const bool with_model = arm == 1 || arm >= 3;
+          const bool static_carry = arm == 2 || arm == 4;
+          const bool steered_carry = arm == 3;
+          printf("%s", arm_names[arm]);
           for (int idx = 0; idx < STEER_GRID; idx++) {
             InferenceArgs args;
             infer_args_fill(&args, 0, int_to_equity(10000), NULL, game, threads,
@@ -1617,6 +2308,17 @@ void infer_decide_tfit_stdin(void) {
             args.target_move = &move;
             if (with_model && fitted > 0) {
               args.loss_model = &steer_model;
+            }
+            if (static_carry && carry_history[seat] > 0) {
+              args.carry_in = carry_table[seat][carry_current[seat]];
+              args.carry_in_kept = carry_kept[seat];
+              args.carry_in_floor = static_floor_now;
+            }
+            if (steered_carry && steer_carry_history[seat] > 0) {
+              args.carry_in =
+                  steer_carry_table[seat][steer_carry_current[seat]];
+              args.carry_in_kept = steer_carry_kept[seat];
+              args.carry_in_floor = steer_floor_now;
             }
             thread_control_set_status(control, THREAD_CONTROL_STATUS_STARTED);
             infer_without_ctx(&args, inferences, errors);
@@ -1632,7 +2334,68 @@ void infer_decide_tfit_stdin(void) {
         printf("\n");
         fflush(stdout);
       }
-    } else if (carry_mode) {
+    }
+    if (steer_mode && steer_game && move_get_type(&move) != GAME_EVENT_PASS) {
+      // Advance the steered chain: the same inference as the running arm
+      // (fitted model on placements, its fixed temperature scale by bag),
+      // with the steered table carried in and a new one written out.
+      if (!rack_is_empty(&truth) && bag_tiles > 0) {
+        rack_copy(&observer, player_get_rack(game_get_player(game, 1 - seat)));
+        const double chain_scale =
+            bag_tiles <= 13 ? 0.5 : (bag_tiles <= 30 ? 0.7 : 1.0);
+        InferenceCarrySlot *table_in =
+            steer_carry_table[seat][steer_carry_current[seat]];
+        InferenceCarrySlot *table_out =
+            steer_carry_table[seat][1 - steer_carry_current[seat]];
+        memset(table_out, 0,
+               (size_t)num_klv_leaves * sizeof(InferenceCarrySlot));
+        InferenceArgs args;
+        infer_args_fill(&args, 0, int_to_equity(10000), NULL, game, threads, 0,
+                        0, control, false, true, seat, move_get_score(&move),
+                        exchange ? move_get_tiles_played(&move) : 0, &played,
+                        &known, &observer);
+        args.temperature = double_to_equity(
+            exchange ? 3.0
+                     : chain_scale * decide_schedule_temperature(bag_tiles));
+        args.target_move = &move;
+        if (steer_fitted_now > 0) {
+          args.loss_model = &steer_model;
+        }
+        if (steer_carry_history[seat] > 0) {
+          args.carry_in = table_in;
+          args.carry_in_kept = steer_carry_kept[seat];
+          args.carry_in_floor = steer_floor_now;
+        }
+        args.carry_out = table_out;
+        thread_control_set_status(control, THREAD_CONTROL_STATUS_STARTED);
+        infer_without_ctx(&args, inferences, errors);
+        if (!error_stack_is_empty(errors)) {
+          error_stack_print_and_reset(errors);
+          log_fatal("inftfit: inference failed game=%d turn=%d", game_idx,
+                    turn);
+        }
+        float table_max = 0;
+        for (uint32_t leave_idx = 0; leave_idx < num_klv_leaves; leave_idx++) {
+          const uint32_t bits = atomic_load(&table_out[leave_idx]);
+          float value;
+          memcpy(&value, &bits, sizeof(value));
+          if (value > table_max) {
+            table_max = value;
+          }
+        }
+        if (table_max > 0 && rack_get_total_letters(&truth) < (RACK_SIZE)) {
+          steer_carry_current[seat] = 1 - steer_carry_current[seat];
+          steer_carry_kept[seat] = rack_get_total_letters(&truth);
+          steer_carry_floor[seat] = carry_floor_fraction * (double)table_max;
+          steer_carry_history[seat]++;
+        } else {
+          steer_carry_history[seat] = 0;
+        }
+      } else {
+        steer_carry_history[seat] = 0;
+      }
+    }
+    if (carry_mode || (steer_mode && steer_game)) {
       if (move_get_type(&move) != GAME_EVENT_PASS && !rack_is_empty(&truth) &&
           bag_tiles > 0) {
         rack_copy(&observer, player_get_rack(game_get_player(game, 1 - seat)));
@@ -1659,7 +2422,7 @@ void infer_decide_tfit_stdin(void) {
             if (carry_history[seat] > 0) {
               args.carry_in = table_in;
               args.carry_in_kept = carry_kept[seat];
-              args.carry_in_floor = carry_floor[seat];
+              args.carry_in_floor = static_floor_now;
             }
             args.carry_out = table_out;
           }
@@ -1690,7 +2453,7 @@ void infer_decide_tfit_stdin(void) {
         if (table_max > 0 && rack_get_total_letters(&truth) < (RACK_SIZE)) {
           carry_current[seat] = 1 - carry_current[seat];
           carry_kept[seat] = rack_get_total_letters(&truth);
-          carry_floor[seat] = 1e-3 * (double)table_max;
+          carry_floor[seat] = carry_floor_fraction * (double)table_max;
           carry_history[seat]++;
         } else {
           carry_history[seat] = 0;
@@ -1699,7 +2462,7 @@ void infer_decide_tfit_stdin(void) {
         // A bingo or an empty bag: nothing kept to carry.
         carry_history[seat] = 0;
       }
-    } else if (move_get_type(&move) != GAME_EVENT_PASS &&
+    } else if (!direct_mode && move_get_type(&move) != GAME_EVENT_PASS &&
                !rack_is_empty(&truth) && bag_tiles > 0) {
       rack_copy(&observer, player_get_rack(game_get_player(game, 1 - seat)));
       printf("TFIT game=%d turn=%d bag=%d tiles=%d exch=%d leave=%d rank=%d "
@@ -1734,6 +2497,7 @@ void infer_decide_tfit_stdin(void) {
   for (int player_idx = 0; player_idx < 2; player_idx++) {
     for (int table_idx = 0; table_idx < 2; table_idx++) {
       free(carry_table[player_idx][table_idx]);
+      free(steer_carry_table[player_idx][table_idx]);
     }
   }
   inference_results_destroy(inferences);
