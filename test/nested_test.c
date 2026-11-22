@@ -1836,19 +1836,27 @@ void test_nested_pegm(void) {
     game_destroy(copy);
     // The plays to solve: those not cached.
     StringBuilder *only = string_builder_create();
+    // The plays listed so far, each between commas, so that a play is
+    // matched whole: 14f.QiN is not 14f.QiNS.
+    StringBuilder *listed = string_builder_create();
+    string_builder_add_string(listed, ",");
     int num_to_solve = 0;
     for (int method = 0; method < num_methods; method++) {
       char *move = pegm_move_string(
           position->game, &pegm.chosen[method * pegm.num_positions + pos_idx]);
+      char *delimited = get_formatted_string(",%s,", move);
       double win = 0;
       if (!pegm_cache_find(&cache, pegm_key(cgp, move, peg_extra), &win) &&
-          !has_substring(string_builder_peek(only), move)) {
+          !has_substring(string_builder_peek(listed), delimited)) {
         string_builder_add_formatted_string(only, "%s%s",
                                             num_to_solve > 0 ? "," : "", move);
+        string_builder_add_formatted_string(listed, "%s,", move);
         num_to_solve++;
       }
+      free(delimited);
       free(move);
     }
+    string_builder_destroy(listed);
     if (num_to_solve > 0) {
       char *load = get_formatted_string("cgp %s", cgp);
       load_and_exec_config_or_die(peg_config, load);
