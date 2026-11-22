@@ -9,6 +9,7 @@
 #include "klv.h"
 #include "letter_distribution.h"
 #include "rack.h"
+#include <float.h>
 #include <stdatomic.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -154,6 +155,20 @@ uint32_t pool_shift_table_get_leave_row(const PoolShiftTable *table,
   return rank;
 }
 
+// dividend / divisor as integer division gives it, for a dividend of 0 or
+// more and a divisor above 0. Both convert to doubles exactly while they are
+// below 2^DBL_MANT_DIG, and the doubles' quotient, cut to an integer, is then
+// the integers' quotient or one more. One multiplication tells which, and all
+// of it costs less than a 64-bit integer division where that is slow.
+static inline int64_t pool_shift_divide(int64_t dividend, int64_t divisor) {
+  const int64_t exact_double_limit = (int64_t)1 << DBL_MANT_DIG;
+  if (dividend >= exact_double_limit || divisor >= exact_double_limit) {
+    return dividend / divisor;
+  }
+  const int64_t quotient = (int64_t)((double)dividend / (double)divisor);
+  return quotient * divisor > dividend ? quotient - 1 : quotient;
+}
+
 void pool_shift_fill_weights(const PoolShiftTable *table,
                              const LetterDistribution *ld, const Bag *bag,
                              const Rack *opponent_rack, int weight_milli,
@@ -181,9 +196,25 @@ void pool_shift_fill_weights(const PoolShiftTable *table,
                               ((int64_t)1 << POOL_SHIFT_WEIGHT_BITS);
     weights[ml] =
         (int32_t)(numerator >= 0
-                      ? (numerator + denominator / 2) / denominator
-                      : -((denominator / 2 - numerator) / denominator));
+                      ? pool_shift_divide(numerator + denominator / 2,
+                                          denominator)
+                      : -pool_shift_divide(denominator / 2 - numerator,
+                                           denominator));
   }
+}
+
+// Sets result->values (see PoolShiftRack): value_sources has where the
+// table holds each subset's own value, in the row of the subset it extends,
+// at the tile added. The full rack, last, extends a subset too large to
+// have a row.
+static void pool_shift_fill_rack_values(const PoolShiftTable *table,
+                                        const size_t *value_sources,
+                                        PoolShiftRack *result) {
+  result->values[0] = 0;
+  for (int idx = 1; idx < result->count - 1; idx++) {
+    result->values[idx] = table->values[value_sources[idx]];
+  }
+  result->values[result->count - 1] = 0;
 }
 
 void pool_shift_fill_rack(const PoolShiftTable *table,
@@ -195,6 +226,7 @@ void pool_shift_fill_rack(const PoolShiftTable *table,
   result->ranks[0] = 0;
   result->map_indices[0] = 0;
   result->sizes[0] = 0;
+  size_t value_sources[1 << RACK_SIZE];
   int count = 1;
   int base_bit = RACK_SIZE;
   for (int ml = table->ld_size - 1; ml >= 0; ml--) {
@@ -213,6 +245,8 @@ void pool_shift_fill_rack(const PoolShiftTable *table,
         result->map_indices[dst] = result->map_indices[src] | bit;
         result->ranks[dst] =
             result->ranks[src] + table->rank_increments[size][ml];
+        value_sources[dst] =
+            (size_t)result->ranks[src] * (size_t)table->stride + (size_t)ml;
       }
       count += block_size;
     }
@@ -231,6 +265,8 @@ void pool_shift_fill_rack(const PoolShiftTable *table,
             : pool_shift_table_get_shift(table, result->weights,
                                          result->ranks[idx], size);
   }
+  // Every row read here was read for a shift above.
+  pool_shift_fill_rack_values(table, value_sources, result);
 }
 
 Equity pool_shift_get_leave_shift(const PoolShiftTable *table, const KLV *klv,

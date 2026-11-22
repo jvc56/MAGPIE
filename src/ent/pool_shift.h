@@ -158,6 +158,12 @@ static inline Equity pool_shift_table_get_shift(const PoolShiftTable *table,
 // The subsets of a full rack in the WMP's order: counts of the highest
 // letters vary fastest. Subsets i and count - 1 - i are complements.
 // map_indices uses the generator's low bits for repeated kept letters.
+//
+// values holds the KLV's value of each subset as a leave, without its shift.
+// A subset is some smaller subset with one more tile, and that subset's row
+// of the table holds the value. So a shifted generation's leave values cost
+// no walk of the KLV and no lookup of their own. The full rack, last, is not
+// a leave: its value is 0.
 typedef struct PoolShiftRack {
   int count;
   uint32_t ranks[1 << RACK_SIZE];
@@ -165,10 +171,12 @@ typedef struct PoolShiftRack {
   int map_indices[1 << RACK_SIZE];
   uint8_t sizes[1 << RACK_SIZE];
   Equity shifts[1 << RACK_SIZE];
+  Equity values[1 << RACK_SIZE];
   int32_t weights[POOL_SHIFT_MAX_STRIDE];
 } PoolShiftRack;
 
-// Prepare the weights, ranks and exact shifts once for a full mover rack.
+// Prepare the weights, ranks, leave values and exact shifts once for a full
+// mover rack.
 void pool_shift_fill_rack(const PoolShiftTable *table,
                           const LetterDistribution *ld, const Bag *bag,
                           const Rack *opponent_rack, int weight_milli,

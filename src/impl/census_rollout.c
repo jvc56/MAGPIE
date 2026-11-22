@@ -1104,8 +1104,10 @@ static void census_rollout_gather(const CensusRollout *census, const Rack *rack,
                                 &candidate_lasts[split_idx]);
     }
     if (rack_shift != NULL) {
+      // The rack shift has each kept subset's value as a leave, from the
+      // table that matches the census's KLV (see PoolShiftRack).
       const int kept_size = rack_shift->sizes[split_idx];
-      leave_values[split_idx] = census->leave[rack_shift->ranks[split_idx]] +
+      leave_values[split_idx] = rack_shift->values[split_idx] +
                                 peg_by_tiles_played[RACK_SIZE - kept_size] +
                                 rack_shift->shifts[split_idx];
     } else {
