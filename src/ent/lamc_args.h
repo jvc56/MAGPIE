@@ -45,7 +45,12 @@ typedef struct LamcArgs {
   // The candidates always include this many top plays by static equity.
   int static_finalists;
   // Whether the sim of the candidates continues the samples the search took
-  // of them, instead of starting over with other seeds.
+  // of them, instead of starting over with other seeds. Off by default: BAI
+  // starts its own statistics from zero, so it can set aside a play after a
+  // few poor samples of its own while the sim's ranking, which also holds
+  // the search's samples, still puts it first. The search keeps plays whose
+  // samples were lucky, so such a play is often chosen on a handful of
+  // samples (docs/lamc-plan.md, "Letting BAI count the search's samples").
   bool reuse_samples;
   lamc_proposal_t proposal;
   gp_kernel_t kernel;
@@ -80,7 +85,7 @@ static inline void lamc_args_set_defaults(LamcArgs *args) {
   args->equity_prior_mean = true;
   args->finalists_from_all = true;
   args->static_finalists = LAMC_DEFAULT_STATIC_FINALISTS;
-  args->reuse_samples = true;
+  args->reuse_samples = false;
   args->proposal = LAMC_PROPOSAL_ACQUIRE;
   args->kernel = GP_KERNEL_MATERN52;
   args->length_scale = LAMC_DEFAULT_LENGTH_SCALE;

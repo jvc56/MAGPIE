@@ -661,7 +661,7 @@ they are the best settings the replay found.
    (`-lamcfinalall`, on) or among the evaluated ones. There are as many as
    the sim would simulate, unless `-lamcfinal` says otherwise.
 9. **The sim** of the candidates runs as usual, with what is left of the
-   rollouts and time. With `-lamcreuse` (on), it resumes from the search's
+   rollouts and time. With `-lamcreuse` (off), it resumes from the search's
    samples of the candidates (their statistics and seed streams); otherwise
    it starts over with other seeds, so that plays the search favored for
    lucky draws do not get those draws again.

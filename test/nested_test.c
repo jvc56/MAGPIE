@@ -27,6 +27,9 @@
 //   NCR_CONTS       continuations per disagreement (default 32)
 //   NCR_EG_PLIES    the continuation's endgame depth (default 4)
 //   NCR_THREADS     positions solved at once, one thread each (default 10)
+//   NCR_DUMP        1: print each position's CGP, the opponent's rack unseen
+//   NCR_ONLY        only these positions, by index, comma-separated
+//   NCR_SHOW        the number of the sim's top plays to print per choice
 
 #include "nested_test.h"
 
@@ -58,6 +61,7 @@
 #include "../src/impl/simmer.h"
 #include "../src/str/move_string.h"
 #include "../src/str/rack_string.h"
+#include "../src/str/sim_string.h"
 #include "../src/util/fnv.h"
 #include "../src/util/io_util.h"
 #include "../src/util/string_util.h"
@@ -125,6 +129,10 @@ typedef struct NcrShared {
   SimArgs base_args[NCR_NUM_METHODS];
   int num_plays[NCR_NUM_METHODS];
   TranspositionTable *tt;
+  // NCR_ONLY with a comma before and after, or NULL for every position.
+  char *only;
+  // NCR_SHOW: the sim's top plays to print after each choice (0: none).
+  int show;
   atomic_int next_position;
   atomic_int done;
 } NcrShared;
@@ -249,12 +257,27 @@ static void *ncr_worker_run(void *data) {
       break;
     }
     NcrPosition *position = &shared->positions[pos_idx];
+    if (shared->only != NULL) {
+      char *delimited = get_formatted_string(",%d,", pos_idx);
+      const bool listed = has_substring(shared->only, delimited);
+      free(delimited);
+      if (!listed) {
+        continue;
+      }
+    }
     const uint64_t pos_seed = ncr_mix(1000003ULL * (uint64_t)(pos_idx + 1));
     for (int method = 0; method < 2; method++) {
       game_copy(worker->game, position->game);
       const double start = ((double)ctimer_monotonic_ns() / 1e9);
       ncr_choose(worker, method, pos_seed, &position->chosen[method]);
       position->seconds[method] = ((double)ctimer_monotonic_ns() / 1e9) - start;
+      if (shared->show > 0) {
+        char *table = sim_results_get_string(
+            worker->game, worker->results[method], shared->show, 1, -1, -1,
+            NULL, 0, false, false, false, NULL);
+        printf("NCR show pos %d method %c\n%s", pos_idx, 'A' + method, table);
+        free(table);
+      }
       StringBuilder *sb = string_builder_create();
       string_builder_add_move(sb, game_get_board(position->game),
                               &position->chosen[method],
@@ -390,6 +413,20 @@ void test_nested_cr(void) {
   shared.num_positions = ncr_make_positions(
       config_get_game(configs[NCR_METHOD_A]), shared.positions, num_positions,
       min_bag, max_bag, (uint64_t)ncr_env_int("NCR_FIRST_GAME", 0));
+  const char *only = ncr_env_string("NCR_ONLY", "");
+  shared.only = only[0] != '\0' ? get_formatted_string(",%s,", only) : NULL;
+  shared.show = ncr_env_int("NCR_SHOW", 0);
+  if (ncr_env_int("NCR_DUMP", 0) != 0) {
+    for (int pos_idx = 0; pos_idx < shared.num_positions; pos_idx++) {
+      Game *copy = game_duplicate(shared.positions[pos_idx].game);
+      return_rack_to_bag(copy, 1 - game_get_player_on_turn_index(copy));
+      char *cgp = game_get_cgp(copy, true);
+      printf("NCR cgp %d bag %d %s\n", pos_idx, shared.positions[pos_idx].bag,
+             cgp);
+      free(cgp);
+      game_destroy(copy);
+    }
+  }
   atomic_init(&shared.next_position, 0);
   atomic_init(&shared.done, 0);
   printf("NCR: %d positions, bag %d to %d, %d continuations, %d threads\n"
@@ -463,6 +500,7 @@ void test_nested_cr(void) {
 
   free(win_diffs);
   free(spread_diffs);
+  free(shared.only);
   for (int worker_idx = 0; worker_idx < num_threads; worker_idx++) {
     NcrWorker *worker = &workers[worker_idx];
     game_destroy(worker->game);
