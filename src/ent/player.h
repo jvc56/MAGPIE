@@ -51,6 +51,10 @@ int player_get_pool_shift_weight(const Player *player);
 // Overrides the pool shift players_data gave the player until the next
 // player_update. An inference turns it off (NULL and 0) on its copy of the
 // game, as it does the pre-endgame adjustments.
+// Gives the player other leaves than its players' data holds, for the life
+// of a sim (see PoolLeaves in pool_shift.h). The rack info table, which holds
+// the values of the leaves it was built from, goes.
+void player_set_leaves(Player *player, const KLV *klv);
 void player_set_pool_shift(Player *player, const PoolShiftTable *table,
                            int weight_milli);
 

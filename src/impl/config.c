@@ -1616,8 +1616,12 @@ static void add_player_solver_help_arg(arg_token_t arg_token,
             "shift does and to leaves one tile short of a rack, and takes "
             "milliseconds for each rack whose moves are generated, where the "
             "weighted correction takes microseconds. So in a player's "
-            "simulations only the moves simmed are valued exactly, and the "
-            "plies of the rollouts take the pool shift at weight 1.2.";
+            "simulations only the moves simmed are valued exactly. A "
+            "simulation from a bag of at least a rack builds the exact "
+            "leave values of its own unseen tiles once, and the plies of "
+            "its rollouts read those with the pool shift from them at "
+            "weight 1. Any other simulation's rollouts take the pool shift "
+            "at weight 1.2.";
     break;
   case ARG_TOKEN_P1_POOL_SHIFT:
   case ARG_TOKEN_P2_POOL_SHIFT:
