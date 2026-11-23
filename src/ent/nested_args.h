@@ -124,6 +124,10 @@ typedef struct NestedLevel {
   // n / R rotated by n % R racks, where R racks cover every unseen letter,
   // so each R rollouts start every unseen letter on that rack once.
   bool bag_cycle;
+  // Whether this depth's rollouts skip the static finish that -sfinish plays
+  // from an empty bag, and score the position after their plies as rollouts
+  // without -sfinish do.
+  bool skip_finish;
   // Whether a LAMC search's pool changes dynamically: instead of rounds of
   // num_samples rollouts for every play in the pool, its budget (rounds x
   // pool_size x num_samples rollouts) goes out step rollouts at a time to
@@ -175,6 +179,7 @@ static inline void nested_level_set_defaults(NestedLevel *args) {
   args->stop_z = 0.0;
   args->paired = false;
   args->bag_cycle = false;
+  args->skip_finish = false;
   args->dynamic = false;
   args->step = NESTED_DEFAULT_STEP;
 }

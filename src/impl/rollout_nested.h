@@ -127,6 +127,8 @@ const Move *nested_choose_move(NestedWorker *worker, const NestedArgs *args,
 //           (NestedLevel.paired)
 //   cycle   1 for a LAMC search whose rollouts cycle the bag
 //           (NestedLevel.bag_cycle)
+//   fin     0 for rollouts that skip the static finish from an empty bag
+//           (NestedLevel.skip_finish)
 //   dyn, step  1 for a LAMC search whose pool changes after every step
 //           rollouts a play (NestedLevel.dynamic and step)
 // For example "plies=0+1,lamc=1,dcache=1/plies=0,m=4" nests a LAMC search at

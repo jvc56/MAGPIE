@@ -855,6 +855,7 @@ static double nested_rollout(NestedWorker *worker, const NestedLevel *args,
                              const uint64_t sample_seed, const int rotation,
                              BestMoveCarry *carry) {
   Game *game = worker->game;
+  const bool finish = eval->finish_endgame && !args->skip_finish;
   const int mover = game_get_player_on_turn_index(game);
   const int other = 1 - mover;
   return_rack_to_bag(game, other);
@@ -883,7 +884,7 @@ static double nested_rollout(NestedWorker *worker, const NestedLevel *args,
   // From an empty bag, the rest of a rollout whose plays are all static is a
   // function of nested_rollout_key, and its utility is kept in the rollout
   // cache.
-  const bool cacheable = eval->finish_endgame && !game_over(game) &&
+  const bool cacheable = finish && !game_over(game) &&
                          bag_get_letters(game_get_bag(game)) == 0 &&
                          nested_plies_are_static(worker, args);
   uint64_t rollout_key = 0;
@@ -918,7 +919,7 @@ static double nested_rollout(NestedWorker *worker, const NestedLevel *args,
     const Move *play =
         nested_ply_play(worker, eval, game, ply, sample_seed, carry);
     rack_copy(&rack_before, player_get_rack(on_turn_player));
-    if (ply == args->nested_plies - 1 && !eval->finish_endgame) {
+    if (ply == args->nested_plies - 1 && !finish) {
       play_move_no_cross_set_update(play, game, NULL);
     } else {
       play_move(play, game, NULL);
@@ -937,7 +938,7 @@ static double nested_rollout(NestedWorker *worker, const NestedLevel *args,
   // end when the bag is about empty, and score the result.
   double utility = 0.0;
   Equity final_spread = 0;
-  if (eval->finish_endgame && !game_over(game) &&
+  if (finish && !game_over(game) &&
       bag_get_letters(game_get_bag(game)) <= eval->finish_max_bag &&
       nested_finish(worker, game, mover, carry, &final_spread)) {
     utility = nested_ended_score(eval, final_spread, 0);
@@ -2165,6 +2166,14 @@ static bool nested_parse_setting(const char *key, const char *value,
       return false;
     }
     args->bag_cycle = bag_cycle == 1;
+    return true;
+  }
+  if (strings_iequal(key, "fin")) {
+    int finish = 1;
+    if (!nested_parse_int(value, 0, 1, &finish)) {
+      return false;
+    }
+    args->skip_finish = finish == 0;
     return true;
   }
   if (strings_iequal(key, "pair")) {

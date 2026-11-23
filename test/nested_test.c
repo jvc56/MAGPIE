@@ -688,14 +688,18 @@ static void test_nested_parse(void) {
   nested_args_parse("plies=0,lamc=1,cycle=1", &args, error_stack);
   assert(error_stack_is_empty(error_stack));
   assert(args.levels[0].bag_cycle);
+  assert(!args.levels[0].skip_finish);
+  nested_args_parse("plies=0,lamc=1,fin=0", &args, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  assert(args.levels[0].skip_finish);
   nested_args_parse("off", &args, error_stack);
   assert(error_stack_is_empty(error_stack));
   assert(!args.enabled);
   const char *const bad[] = {"k=0",        "plies=",      "m=x",
                              "alloc=fast", "q=1",         "k",
                              "k=2/k=0",    "share=1/k=2", "m=1/m=1/m=1/m=1/m=1",
-                             "pair=2",     "cycle=2"};
-  for (int bad_idx = 0; bad_idx < 11; bad_idx++) {
+                             "pair=2",     "cycle=2",     "fin=2"};
+  for (int bad_idx = 0; bad_idx < 12; bad_idx++) {
     nested_args_parse(bad[bad_idx], &args, error_stack);
     assert(error_stack_top(error_stack) == ERROR_STATUS_NESTED_BAD_SPEC);
     error_stack_reset(error_stack);
