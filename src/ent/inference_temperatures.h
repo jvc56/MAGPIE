@@ -30,8 +30,7 @@ InferenceTemperatures *inference_temperatures_create(const char *data_paths,
 InferenceTemperatures *inference_temperatures_create_from_knots(
     const char *name, const int *bags, const double *temperatures,
     int number_of_knots, bool has_exchange, double exchange_temperature);
-void inference_temperatures_destroy(
-    InferenceTemperatures *inference_temperatures);
+void inference_temperatures_destroy(InferenceTemperatures *table);
 
 const char *
 inference_temperatures_get_name(const InferenceTemperatures *temperatures);

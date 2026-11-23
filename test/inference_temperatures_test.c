@@ -2,8 +2,8 @@
 
 #include "../src/compat/cfile.h"
 #include "../src/def/game_history_defs.h"
-#include "../src/def/inference_defs.h"
 #include "../src/def/letter_distribution_defs.h"
+#include "../src/def/rack_defs.h"
 #include "../src/def/thread_control_defs.h"
 #include "../src/ent/alias_method.h"
 #include "../src/ent/bag.h"
@@ -22,7 +22,6 @@
 #include "../src/impl/gameplay.h"
 #include "../src/impl/inference.h"
 #include "../src/impl/inference_temperature_fit.h"
-#include "../src/impl/move_gen.h"
 #include "../src/util/io_util.h"
 #include "../src/util/string_util.h"
 #include "test_platform.h"

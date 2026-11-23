@@ -43,7 +43,6 @@
 #include "../ent/heat_map.h"
 #include "../ent/inference_args.h"
 #include "../ent/inference_results.h"
-#include "../ent/inference_temperatures.h"
 #include "../ent/klv.h"
 #include "../ent/klv_csv.h"
 #include "../ent/kwg.h"

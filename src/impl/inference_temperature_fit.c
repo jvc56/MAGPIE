@@ -1,12 +1,11 @@
 #include "inference_temperature_fit.h"
 
 #include "../compat/cpthread.h"
+#include "../compat/cpthread_defs.h"
 #include "../def/game_history_defs.h"
-#include "../def/inference_defs.h"
 #include "../def/letter_distribution_defs.h"
 #include "../def/thread_control_defs.h"
 #include "../ent/alias_method.h"
-#include "../ent/autoplay_results.h"
 #include "../ent/data_filepaths.h"
 #include "../ent/encoded_rack.h"
 #include "../ent/equity.h"
@@ -186,7 +185,7 @@ static void fit_observe_move(void *data, int worker_index, const Game *game,
     return;
   }
   FitWorker *worker = &shared->workers[worker_index];
-  const int mover = game_get_player_on_turn_index(game);
+  const int target_index = game_get_player_on_turn_index(game);
   if (is_exchange) {
     rack_reset(&worker->played);
   } else {
@@ -194,7 +193,7 @@ static void fit_observe_move(void *data, int worker_index, const Game *game,
   }
   rack_reset(&worker->known);
   rack_copy(&worker->observer,
-            player_get_rack(game_get_player(game, 1 - mover)));
+            player_get_rack(game_get_player(game, 1 - target_index)));
   double probabilities[INFERENCE_TEMPERATURE_FIT_NUMBER_OF_TEMPERATURES];
   ErrorStack *error_stack = error_stack_create();
   for (int temperature_idx = 0;
@@ -204,7 +203,7 @@ static void fit_observe_move(void *data, int worker_index, const Game *game,
     infer_args_fill(&inference_args, 0,
                     int_to_equity(INFERENCE_TEMPERATURE_FIT_MARGIN), NULL, game,
                     1, worker_index, 0, shared->args->thread_control, false,
-                    true, mover, move_get_score(move),
+                    true, target_index, move_get_score(move),
                     is_exchange ? move_get_tiles_played(move) : 0,
                     &worker->played, &worker->known, &worker->observer);
     inference_args.temperature =
