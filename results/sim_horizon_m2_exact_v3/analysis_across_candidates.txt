@@ -1,36 +1,36 @@
 Across a position's kept candidates: finished games' result on the horizon's values (1 = worth its face value)
-  final spread: the sim's value +0.919 (0.031);  PAT term +0.594 (0.085);  shift +0.251 (0.056)   [837 games, 40644 candidate values]
-  final win  : the sim's value +0.563 (0.162);  PAT term +0.250 (0.182);  shift +0.354 (0.229)   [837 games, 40644 candidate values]
-  4-ply value : the sim's value +0.947 (0.030);  PAT term +0.301 (0.064);  shift +0.249 (0.056)   [837 games, 40644 candidate values]
+  final spread: the sim's value +0.916 (0.028);  PAT term +0.613 (0.080);  shift +0.250 (0.053)   [957 games, 46482 candidate values]
+  final win  : the sim's value +0.497 (0.155);  PAT term +0.323 (0.181);  shift +0.275 (0.212)   [957 games, 46482 candidate values]
+  4-ply value : the sim's value +0.934 (0.027);  PAT term +0.286 (0.060);  shift +0.231 (0.052)   [957 games, 46482 candidate values]
 
 The same with the shift in parts (later runs only): each player's last leave, as its mover sees the unseen tiles and from the bag alone
-  final spread, mover's view: the sim's value +0.912 (0.031);  PAT term +0.594 (0.084);  own leave's shift +0.460 (0.133);  opponent's leave's shift +0.113 (0.087)   [837 games, 40644 candidate values]
-  final spread, from the bag: the sim's value +0.897 (0.030);  PAT term +0.593 (0.084);  own leave's shift +0.485 (0.133);  opponent's leave's shift +0.103 (0.115)   [837 games, 40644 candidate values]
-  4-ply value , mover's view: the sim's value +0.930 (0.030);  PAT term +0.299 (0.060);  own leave's shift +0.772 (0.096);  opponent's leave's shift -0.097 (0.079)   [837 games, 40644 candidate values]
-  4-ply value , from the bag: the sim's value +0.936 (0.028);  PAT term +0.296 (0.060);  own leave's shift +0.726 (0.099);  opponent's leave's shift +0.021 (0.117)   [837 games, 40644 candidate values]
+  final spread, mover's view: the sim's value +0.909 (0.028);  PAT term +0.616 (0.078);  own leave's shift +0.473 (0.125);  opponent's leave's shift +0.111 (0.080)   [957 games, 46482 candidate values]
+  final spread, from the bag: the sim's value +0.895 (0.027);  PAT term +0.611 (0.079);  own leave's shift +0.512 (0.127);  opponent's leave's shift +0.164 (0.105)   [957 games, 46482 candidate values]
+  4-ply value , mover's view: the sim's value +0.918 (0.027);  PAT term +0.294 (0.056);  own leave's shift +0.781 (0.092);  opponent's leave's shift -0.113 (0.072)   [957 games, 46482 candidate values]
+  4-ply value , from the bag: the sim's value +0.926 (0.025);  PAT term +0.284 (0.057);  own leave's shift +0.738 (0.094);  opponent's leave's shift +0.039 (0.105)   [957 games, 46482 candidate values]
 
 The same with the leave values in parts as well (last runs only)
-  final spread: the spread +0.979 (0.032);  own leave value +0.836 (0.039);  opponent's leave value +0.528 (0.079);  PAT term +0.556 (0.083);  own leave's shift +0.396 (0.143);  opponent's leave's shift -0.033 (0.091)   [837 games, 40644 candidate values]
+  final spread: the spread +0.981 (0.028);  own leave value +0.830 (0.037);  opponent's leave value +0.549 (0.073);  PAT term +0.572 (0.076);  own leave's shift +0.410 (0.135);  opponent's leave's shift -0.039 (0.084)   [957 games, 46482 candidate values]
 
 Gain in final spread a position as the between-candidate fit predicts it (picks by util from 3 of 4 parts)
-  half PAT           +0.0090 (0.0024)
-  PAT                +0.0076 (0.0042)
-  shift              -0.0153 (0.0049)
-  shift + half PAT   -0.0067 (0.0051)
-  shift + PAT        -0.0097 (0.0063)
+  half PAT           +0.0100 (0.0023)
+  PAT                +0.0090 (0.0039)
+  shift              -0.0139 (0.0045)
+  shift + half PAT   -0.0046 (0.0048)
+  shift + PAT        -0.0073 (0.0059)
 
 Gain in final spread a position as the between-candidate fit predicts it (picks by eq from 3 of 4 parts)
-  half PAT           +0.0085 (0.0020)
-  PAT                +0.0077 (0.0040)
-  shift              -0.0107 (0.0039)
-  shift + half PAT   -0.0031 (0.0043)
-  shift + PAT        -0.0064 (0.0053)
+  half PAT           +0.0089 (0.0018)
+  PAT                +0.0086 (0.0036)
+  shift              -0.0102 (0.0035)
+  shift + half PAT   -0.0025 (0.0040)
+  shift + PAT        -0.0051 (0.0050)
 
-Variants that are linear in the terms, picks by equity from 3 of 4 parts; 8901 positions from 837 games that recorded the shift in parts
+Variants that are linear in the terms, picks by equity from 3 of 4 parts; 10156 positions from 957 games that recorded the shift in parts
   variant                       differs         spread/pos        win pts/pos    spread/pos by fit
-  PAT                             4.73%  -0.0012 (0.0063)  -0.0101 (0.0039)   +0.0080 (0.0041)
-  shift, both leaves              3.32%  -0.0110 (0.0058)  -0.0028 (0.0047)   -0.0113 (0.0041)
-  shift, own leave only           2.14%  +0.0066 (0.0045)  +0.0063 (0.0033)   +0.0025 (0.0027)
-  PAT + shift, both leaves        6.79%  -0.0075 (0.0078)  -0.0078 (0.0061)   -0.0061 (0.0055)
-  PAT + shift, own leave only     5.81%  +0.0025 (0.0071)  -0.0062 (0.0049)   +0.0088 (0.0045)
-  0.65 PAT + 0.8 own shift        4.05%  +0.0060 (0.0059)  -0.0002 (0.0041)   +0.0125 (0.0032)
+  PAT                             4.67%  -0.0012 (0.0058)  -0.0086 (0.0035)   +0.0093 (0.0037)
+  shift, both leaves              3.27%  -0.0121 (0.0054)  -0.0039 (0.0043)   -0.0106 (0.0037)
+  shift, own leave only           2.14%  +0.0081 (0.0043)  +0.0063 (0.0031)   +0.0027 (0.0025)
+  PAT + shift, both leaves        6.73%  -0.0109 (0.0073)  -0.0086 (0.0056)   -0.0044 (0.0051)
+  PAT + shift, own leave only     5.72%  +0.0032 (0.0065)  -0.0052 (0.0044)   +0.0104 (0.0041)
+  0.65 PAT + 0.8 own shift        4.00%  +0.0059 (0.0054)  -0.0004 (0.0038)   +0.0135 (0.0030)

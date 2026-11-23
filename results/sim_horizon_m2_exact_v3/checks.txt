@@ -33,3 +33,8 @@ v2_g60775.out horizon_mismatches=0  mean_mismatches=0 SIMH done positions=478 wi
 v2_g60800.out horizon_mismatches=0  mean_mismatches=0 SIMH done positions=465 with_main=177 with_oracle=62 seconds=936
 v2_g60825.out horizon_mismatches=0  mean_mismatches=0 SIMH done positions=460 with_main=163 with_oracle=61 seconds=866
 v2_g60850.out horizon_mismatches=0  mean_mismatches=0 SIMH done positions=448 with_main=134 with_oracle=54 seconds=766
+v2_g60875.out horizon_mismatches=0  mean_mismatches=0 SIMH done positions=470 with_main=191 with_oracle=62 seconds=932
+v2_g60900.out horizon_mismatches=0  mean_mismatches=0 SIMH done positions=464 with_main=162 with_oracle=64 seconds=882
+v2_g60925.out horizon_mismatches=0  mean_mismatches=0 SIMH done positions=462 with_main=161 with_oracle=63 seconds=893
+v2_g60950.out horizon_mismatches=0  mean_mismatches=0 SIMH done positions=456 with_main=164 with_oracle=53 seconds=849
+v2_g60975.out horizon_mismatches=0  mean_mismatches=0 SIMH done positions=471 with_main=175 with_oracle=65 seconds=950
