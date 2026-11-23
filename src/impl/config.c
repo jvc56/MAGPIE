@@ -89,6 +89,7 @@
 #include "get_gcg.h"
 #include "help_table.h"
 #include "inference.h"
+#include "inference_temperature_fit.h"
 #include "leave_blend.h"
 #include "move_gen.h"
 #include "move_gen_base.h"
@@ -1812,9 +1813,35 @@ static const char *peg_fit_help(const char **usages, const char **examples) {
 
 // One case for all three in add_help_arg_to_string_builder, which is at the
 // function size limit.
+static const char *inference_temperature_fit_help(const char **usages,
+                                                  const char **examples) {
+  usages[0] = "<games> [<output_name>]";
+  examples[0] = "1000";
+  examples[1] = "400 CSW24_sim_inftemp";
+  return "Fits inference temperatures by bag to self-play. Autoplay plays the "
+         "games with the players as set, game pairs and all. At each tile "
+         "placement made with tiles in the bag that keeps tiles, and each "
+         "exchange, the opponent infers the leave from the play at each "
+         "temperature of a grid from 0.5 to 32 points, scored by the log of "
+         "the probability it gives the leave really kept (mixed 1% with the "
+         "draw prior) less the draw prior's. Placements fall into bands by "
+         "the bag before them, up to 7, 13, 20, 30, 45 and 60 tiles and "
+         "above, the bands past 20 scaled to the distribution's starting "
+         "bag. Each band gives a knot at its mean bag with its best "
+         "temperature, and the exchanges an exchange temperature. The table "
+         "is written as data/strategy/<output_name>.csv (default: "
+         "<leaves>_inftemp, the table auto loads) and can be loaded with "
+         "'inftemps'. Fit against the player whose rack is to be inferred: "
+         "the table depends on how it chooses its plays. Use the -seed and "
+         "-threads options.";
+}
+
 static const char *census_leave_blend_or_peg_fit_help(int token,
                                                       const char **usages,
                                                       const char **examples) {
+  if (token == ARG_TOKEN_INFERENCE_TEMPERATURE_FIT) {
+    return inference_temperature_fit_help(usages, examples);
+  }
   if (token == ARG_TOKEN_CENSUS) {
     return census_help(usages, examples);
   }
@@ -2170,6 +2197,7 @@ static void help_entry_fill(const Config *config, int token,
     case ARG_TOKEN_CENSUS:
     case ARG_TOKEN_LEAVE_BLEND:
     case ARG_TOKEN_PEG_FIT:
+    case ARG_TOKEN_INFERENCE_TEMPERATURE_FIT:
       text = census_leave_blend_or_peg_fit_help(token, usages, examples);
       break;
     case ARG_TOKEN_CREATE_DATA:
@@ -5616,6 +5644,8 @@ void config_fill_autoplay_args(const Config *config,
   autoplay_args->num_forced_racks = num_forced_racks;
   autoplay_args->leavegen_max_games = config->leavegen_max_games;
   autoplay_args->leavegen_write_files = config->leavegen_write_files;
+  autoplay_args->move_observer = NULL;
+  autoplay_args->move_observer_data = NULL;
   // A seat with no cap of its own keeps -numplays' display count.
   for (int player_index = 0; player_index < 2; player_index++) {
     autoplay_args->position_play_caps[player_index] =
@@ -6054,6 +6084,100 @@ void impl_pat_gen(Config *config, ErrorStack *error_stack) {
   config_autoplay(config, config->autoplay_results, AUTOPLAY_TYPE_PAT_GEN,
                   games_per_gen_str, 0, /*forced_racks=*/NULL,
                   /*num_forced_racks=*/0, output_name, error_stack);
+}
+
+// Inference temperature fit
+
+// How each player chooses its plays, for the fitted table's header. The
+// caller frees.
+static char *config_players_summary(const Config *config) {
+  StringBuilder *sb = string_builder_create();
+  for (int player_idx = 0; player_idx < 2; player_idx++) {
+    const int plies = config_get_player_sim_plies(config, player_idx);
+    string_builder_add_formatted_string(
+        sb, "%sp%d ", player_idx == 0 ? "" : ", ", player_idx + 1);
+    if (plies > 0) {
+      const bool infers = player_idx == 0 ? config->p1_sim_with_inference
+                                          : config->p2_sim_with_inference;
+      string_builder_add_formatted_string(
+          sb, "sim %d plies %llu iterations%s", plies,
+          (unsigned long long)config_get_player_max_iterations(config,
+                                                               player_idx),
+          infers ? " with inference" : "");
+    } else {
+      string_builder_add_string(sb, "static");
+    }
+  }
+  return string_builder_dump_and_destroy(sb, NULL);
+}
+
+void impl_inference_temperature_fit(Config *config, ErrorStack *error_stack) {
+  if (!config_has_game_data(config)) {
+    error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
+                     string_duplicate("cannot fit inference temperatures "
+                                      "without lexicon"));
+    return;
+  }
+  const char *num_games_str =
+      config_get_parg_value(config, ARG_TOKEN_INFERENCE_TEMPERATURE_FIT, 0);
+  int number_of_games;
+  string_to_int_or_push_error("games", num_games_str, 1, INT_MAX,
+                              ERROR_STATUS_CONFIG_LOAD_MALFORMED_INT_ARG,
+                              &number_of_games, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  if (config->p1_sim_plies > 0 || config->p2_sim_plies > 0 ||
+      config->p1_play_chooser_time_ms >= 0.0 ||
+      config->p2_play_chooser_time_ms >= 0.0) {
+    config_load_win_pcts(config, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+  }
+  autoplay_results_set_options(config->autoplay_results, "games", error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  config_init_game(config);
+  const char *leaves_name = players_data_get_data_name(
+      config->players_data, PLAYERS_DATA_TYPE_KLV, 0);
+  const char *output_name =
+      config_get_parg_value(config, ARG_TOKEN_INFERENCE_TEMPERATURE_FIT, 1);
+  char *default_output_name = NULL;
+  if (!output_name) {
+    default_output_name = get_formatted_string(
+        "%s%s", leaves_name, LEAVES_INFERENCE_TEMPERATURES_SUFFIX);
+    output_name = default_output_name;
+  }
+  AutoplayArgs autoplay_args;
+  GameArgs game_args;
+  autoplay_args.game_args = &game_args;
+  config_fill_autoplay_args(config, &autoplay_args, AUTOPLAY_TYPE_DEFAULT,
+                            num_games_str, 0, /*forced_racks=*/NULL,
+                            /*num_forced_racks=*/0);
+  autoplay_args.pat_gen_output_name = NULL;
+  autoplay_args.print_results = false;
+  char *players_summary = config_players_summary(config);
+  const LetterDistribution *ld = config_get_ld(config);
+  const InferenceTemperatureFitArgs args = {
+      .autoplay_args = &autoplay_args,
+      .autoplay_results = config->autoplay_results,
+      .output_name = output_name,
+      .data_paths = config->data_paths,
+      .lexicon_name = players_data_get_data_name(config->players_data,
+                                                 PLAYERS_DATA_TYPE_KWG, 0),
+      .leaves_name = leaves_name,
+      .ld_name = ld_get_name(ld),
+      .players_summary = players_summary,
+      .number_of_games = number_of_games,
+      .seed = config_get_seed(config),
+      .starting_bag_size = ld_get_total_tiles(ld) - (2 * (RACK_SIZE)),
+      .thread_control = config->thread_control,
+  };
+  inference_temperature_fit(&args, error_stack);
+  free(players_summary);
+  free(default_output_name);
 }
 
 // Pre-endgame fit
@@ -16102,6 +16226,17 @@ char *str_api_pat_gen(Config *config, ErrorStack *error_stack) {
   return empty_string();
 }
 
+void execute_inference_temperature_fit(Config *config,
+                                       ErrorStack *error_stack) {
+  impl_inference_temperature_fit(config, error_stack);
+}
+
+char *str_api_inference_temperature_fit(Config *config,
+                                        ErrorStack *error_stack) {
+  impl_inference_temperature_fit(config, error_stack);
+  return empty_string();
+}
+
 void execute_peg_fit(Config *config, ErrorStack *error_stack) {
   impl_peg_fit(config, error_stack);
 }
@@ -17123,6 +17258,8 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   cmd(ARG_TOKEN_LEAVE_BLEND, "leaveblend", 4, 4, leave_blend, generic, false);
   cmd(ARG_TOKEN_PAT_GEN, "patgen", 1, 2, pat_gen, generic, false);
   cmd(ARG_TOKEN_PEG_FIT, "pegfit", 3, 5, peg_fit, generic, false);
+  cmd(ARG_TOKEN_INFERENCE_TEMPERATURE_FIT, "inftempfit", 1, 2,
+      inference_temperature_fit, generic, false);
   cmd(ARG_TOKEN_CREATE_DATA, "createdata", 2, 3, create_data, generic, false);
   cmd(ARG_TOKEN_NEXT, "next", 0, 0, next, generic, true);
   cmd(ARG_TOKEN_PREVIOUS, "previous", 0, 0, previous, generic, true);
@@ -17794,6 +17931,7 @@ static void config_add_settings_to_string_builder_internal(const Config *config,
     case ARG_TOKEN_LEAVE_BLEND:
     case ARG_TOKEN_PAT_GEN:
     case ARG_TOKEN_PEG_FIT:
+    case ARG_TOKEN_INFERENCE_TEMPERATURE_FIT:
     case ARG_TOKEN_CREATE_DATA:
     case ARG_TOKEN_ANALYZE:
     case ARG_TOKEN_LOAD:

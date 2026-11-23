@@ -1272,6 +1272,13 @@ const Move *game_runner_play_move(AutoplayWorker *autoplay_worker,
   const int pat_pre_move_bag_count =
       pat_gen_shared_data ? bag_get_letters(game_get_bag(game)) : 0;
   get_leave_for_move(move, game, &rare_rack_or_move_leave);
+  if (autoplay_worker->args.move_observer) {
+    autoplay_worker->args.move_observer(
+        autoplay_worker->args.move_observer_data, autoplay_worker->worker_index,
+        game_runner->game, move, &rare_rack_or_move_leave,
+        game_runner->game_number, game_runner->pair_game_number,
+        game_runner->turn_number);
+  }
   // Only when a simulation actually ran this turn: sim_results holds
   // whatever the last simulation produced, so passing it on a static player's
   // turn, on a turn a solver decided, or on a simmer's turn with one legal

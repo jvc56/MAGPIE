@@ -347,6 +347,8 @@ typedef enum {
   // An inference temperature file has a malformed row, a temperature out of
   // range, bags not in ascending order or an exchange row given twice.
   ERROR_STATUS_INFERENCE_TEMPERATURES_INVALID_ROW,
+  // inftempfit's self-play gave no tile placements to fit to.
+  ERROR_STATUS_INFERENCE_TEMPERATURE_FIT_NO_PLAYS,
 } error_code_t;
 
 typedef enum {
