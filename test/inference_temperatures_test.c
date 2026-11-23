@@ -68,7 +68,7 @@ static void write_table_file(const char *dir, const char *name,
 static void assert_table_file_error(const char *dir, const char *contents) {
   write_table_file(dir, "bad", contents);
   ErrorStack *error_stack = error_stack_create();
-  InferenceTemperatures *table =
+  const InferenceTemperatures *table =
       inference_temperatures_create(dir, "bad", error_stack);
   assert(table == NULL);
   assert(error_stack_top(error_stack) ==
