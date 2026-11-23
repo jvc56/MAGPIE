@@ -55,6 +55,7 @@
 #include "../ent/players_data.h"
 #include "../ent/pool_shift.h"
 #include "../ent/rack.h"
+#include "../ent/rack_value_table.h"
 #include "../ent/sim_args.h"
 #include "../ent/sim_results.h"
 #include "../ent/thread_control.h"
@@ -391,6 +392,10 @@ struct Config {
   // in thousandths: what the players' data is given, except while a command
   // that trains static values runs (see config_update_pool_shift).
   int pool_shift_weights[2];
+  // The full racks' values a player's exact leave values read (-poolshift
+  // exact): loaded by the name of the player's leaves. The second player's
+  // is the first's when both read the same.
+  RackValueTable *exact_leave_values[2];
   // The identity (get_file_identity) of the file each player's lexical data
   // was read from, as of the last contribute load; NULL for data that load
   // did not read or could not stat. See config_contribute_evict_changed_data.
@@ -1580,8 +1585,10 @@ static void add_player_solver_help_arg(arg_token_t arg_token,
     break;
   case ARG_TOKEN_POOL_SHIFT:
     usages[0] = "<weight>";
+    usages[1] = "exact";
     examples[0] = "1.2";
     examples[1] = "0";
+    examples[2] = "exact";
     *text = "Specifies the weight of the pool shift for both players. The "
             "'poolshift1' and 'poolshift2' options override it. A leave's "
             "value is an average over the tiles a typical game leaves "
@@ -1601,7 +1608,16 @@ static void add_player_solver_help_arg(arg_token_t arg_token,
             "built from the player's leaves when the weight is first set, "
             "which takes about a quarter of a second. The commands that "
             "train static values (leavegen, census, patgen and pegfit) and "
-            "inferences play without it.";
+            "inferences play without it. 'exact' replaces the correction "
+            "with the exact leave values: a leave is worth the mean value "
+            "of the full rack it becomes, over every draw from the unseen "
+            "tiles, read from the rack value table of the player's leaves "
+            "(the .rvt file of the same name). It applies where the pool "
+            "shift does and to leaves one tile short of a rack, and takes "
+            "milliseconds for each rack whose moves are generated, where the "
+            "weighted correction takes microseconds. So in a player's "
+            "simulations only the moves simmed are valued exactly, and the "
+            "plies of the rollouts take the pool shift at weight 1.2.";
     break;
   case ARG_TOKEN_P1_POOL_SHIFT:
   case ARG_TOKEN_P2_POOL_SHIFT:
@@ -10146,6 +10162,10 @@ static void config_load_pool_shift_options(Config *config,
     if (!config_get_parg_value(config, token, 0)) {
       continue;
     }
+    if (strings_iequal(config_get_parg_value(config, token, 0), "exact")) {
+      weights[player_idx] = POOL_SHIFT_EXACT_WEIGHT_MILLI;
+      continue;
+    }
     double weight = 0;
     config_load_double(config, token, 0,
                        (double)POOL_SHIFT_MAX_WEIGHT_MILLI / 1000.0, &weight,
@@ -10174,7 +10194,84 @@ static bool config_exec_trains_static_values(const Config *config) {
 // that train static values play without the pool shift for their load, as
 // they do without the pre-endgame adjustments. The live game's players are
 // given the result here, since a table they read may just have been freed.
-static void config_update_pool_shift(Config *config) {
+static void config_destroy_exact_leave_values(Config *config) {
+  if (config->exact_leave_values[1] != config->exact_leave_values[0]) {
+    rack_value_table_destroy(config->exact_leave_values[1]);
+  }
+  rack_value_table_destroy(config->exact_leave_values[0]);
+  config->exact_leave_values[0] = NULL;
+  config->exact_leave_values[1] = NULL;
+}
+
+// Loads the full racks' values of each player whose leave values are exact
+// (-poolshift exact), keeping those already loaded under the same name, and
+// gives them to the players' pool shift tables.
+static void config_update_exact_leave_values(Config *config,
+                                             ErrorStack *error_stack) {
+  RackValueTable *old_values[2] = {config->exact_leave_values[0],
+                                   config->exact_leave_values[1]};
+  RackValueTable *new_values[2] = {NULL, NULL};
+  for (int player_idx = 0; player_idx < 2; player_idx++) {
+    const int weight_milli =
+        players_data_get_pool_shift_weight(config->players_data, player_idx);
+    if (weight_milli != POOL_SHIFT_EXACT_WEIGHT_MILLI) {
+      continue;
+    }
+    const char *leaves_name = players_data_get_data_name(
+        config->players_data, PLAYERS_DATA_TYPE_KLV, player_idx);
+    if (leaves_name == NULL) {
+      continue;
+    }
+    for (int other_idx = 0; other_idx < 2 && new_values[player_idx] == NULL;
+         other_idx++) {
+      RackValueTable *loaded =
+          other_idx < player_idx ? new_values[other_idx] : NULL;
+      if (loaded == NULL) {
+        loaded = old_values[other_idx];
+      }
+      if (loaded != NULL &&
+          strings_equal(rack_value_table_get_name(loaded), leaves_name)) {
+        new_values[player_idx] = loaded;
+      }
+    }
+    if (new_values[player_idx] == NULL) {
+      new_values[player_idx] = rack_value_table_create(
+          config_get_data_paths(config), leaves_name, false, error_stack);
+    }
+  }
+  const RackValueTable *const given_values[2] = {new_values[0], new_values[1]};
+  (void)players_data_set_pool_shift_exact_values(config->players_data,
+                                                 given_values, config->ld);
+  bool all_set = true;
+  for (int player_idx = 0; player_idx < 2; player_idx++) {
+    const PoolShiftTable *table =
+        players_data_get_pool_shift_table(config->players_data, player_idx);
+    if (players_data_get_pool_shift_weight(config->players_data, player_idx) ==
+            POOL_SHIFT_EXACT_WEIGHT_MILLI &&
+        (table == NULL || table->exact_values == NULL)) {
+      all_set = false;
+    }
+  }
+  for (int old_idx = 0; old_idx < 2; old_idx++) {
+    const bool already_freed = old_idx == 1 && old_values[1] == old_values[0];
+    if (old_values[old_idx] != NULL && !already_freed &&
+        old_values[old_idx] != new_values[0] &&
+        old_values[old_idx] != new_values[1]) {
+      rack_value_table_destroy(old_values[old_idx]);
+    }
+  }
+  config->exact_leave_values[0] = new_values[0];
+  config->exact_leave_values[1] = new_values[1];
+  if (error_stack_is_empty(error_stack) && !all_set) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_CONFIG_LOAD_INCOMPATIBLE_RACK_VALUE_TABLE,
+        string_duplicate("the exact leave values need a rack value table "
+                         "made with the player's leaves and letter "
+                         "distribution"));
+  }
+}
+
+static void config_update_pool_shift(Config *config, ErrorStack *error_stack) {
   const bool plays_without = config_exec_trains_static_values(config);
   for (int player_idx = 0; player_idx < 2; player_idx++) {
     players_data_set_pool_shift_weight(
@@ -10182,6 +10279,7 @@ static void config_update_pool_shift(Config *config) {
         plays_without ? 0 : config->pool_shift_weights[player_idx]);
   }
   players_data_update_pool_shift(config->players_data, config->ld);
+  config_update_exact_leave_values(config, error_stack);
   if (config->game) {
     for (int player_idx = 0; player_idx < 2; player_idx++) {
       player_set_pool_shift(
@@ -10351,7 +10449,7 @@ void config_load_lexicon_dependent_data(
     config_load_auto_peg_adjust(config, error_stack);
   }
   if (error_stack_is_empty(error_stack)) {
-    config_update_pool_shift(config);
+    config_update_pool_shift(config, error_stack);
   }
   if (!config->ld_changed && config->ld &&
       !lexical_data_identity_matches(config->players_data, &identity_before)) {
@@ -17257,6 +17355,7 @@ void config_destroy(Config *config) {
   free(config->win_pct_explicit_name);
   board_layout_destroy(config->board_layout);
   ld_destroy(config->ld);
+  config_destroy_exact_leave_values(config);
   players_data_destroy(config->players_data);
   thread_control_destroy(config->thread_control);
   game_destroy(config->game);
@@ -17340,7 +17439,10 @@ static void config_add_pool_shift_setting_to_string_builder(
     const Config *config, StringBuilder *sb, arg_token_t arg_token,
     int player_index) {
   const int weight_milli = config->pool_shift_weights[player_index];
-  if (weight_milli != 0) {
+  if (weight_milli == POOL_SHIFT_EXACT_WEIGHT_MILLI) {
+    string_builder_add_formatted_string(sb, " -%s exact",
+                                        config->pargs[arg_token]->name);
+  } else if (weight_milli != 0) {
     string_builder_add_formatted_string(
         sb, " -%s %d.%03d", config->pargs[arg_token]->name, weight_milli / 1000,
         weight_milli % 1000);

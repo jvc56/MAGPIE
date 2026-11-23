@@ -516,16 +516,23 @@ simmer_worker_set_rollout_peg_adjust(const SimmerWorker *simmer_worker,
 
 // The same goes for the pool shift (see pool_shift.h): both players of a
 // worker's copy of the game take the table and weight of the player on turn.
-// A player with other leaves than that table's gets no shift from it.
+// A player with other leaves than that table's gets no shift from it. A
+// player whose leave values are exact has them for the moves simmed, which
+// are generated from the game itself, and the plies of the rollouts take the
+// shift at POOL_SHIFT_EXACT_ROLLOUT_WEIGHT_MILLI in their place.
 static void
 simmer_worker_set_rollout_pool_shift(const SimmerWorker *simmer_worker,
                                      const SimArgs *sim_args) {
   const Player *simming_player = game_get_player(
       sim_args->game, game_get_player_on_turn_index(sim_args->game));
+  int weight_milli = player_get_pool_shift_weight(simming_player);
+  if (weight_milli == POOL_SHIFT_EXACT_WEIGHT_MILLI) {
+    weight_milli = POOL_SHIFT_EXACT_ROLLOUT_WEIGHT_MILLI;
+  }
   for (int player_index = 0; player_index < 2; player_index++) {
     player_set_pool_shift(game_get_player(simmer_worker->game, player_index),
                           player_get_pool_shift_table(simming_player),
-                          player_get_pool_shift_weight(simming_player));
+                          weight_milli);
   }
 }
 
