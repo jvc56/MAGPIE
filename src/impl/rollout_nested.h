@@ -156,6 +156,10 @@ typedef struct NestedTotals {
   // in a worker's finish cache.
   uint64_t finishes;
   uint64_t finish_hits;
+  // Rollouts whose bag is empty after the candidate and whose plays left are
+  // all static, and those found in a worker's rollout cache.
+  uint64_t static_rollouts;
+  uint64_t rollout_hits;
 } NestedTotals;
 
 void nested_totals_reset(void);

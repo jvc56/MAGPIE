@@ -52,8 +52,9 @@ enum {
   // ply it tells the census they are (past any the census serves).
   NESTED_FINISH_MAX_PLIES = 40,
   NESTED_FINISH_PLY = 1000,
-  // The finish cache's entries, a power of 2.
+  // The finish cache's and the rollout cache's entries, powers of 2.
   NESTED_FINISH_CACHE_BITS = 16,
+  NESTED_ROLLOUT_CACHE_BITS = 16,
 };
 
 // A feature column whose standard deviation is below this is constant.
@@ -164,6 +165,11 @@ struct NestedWorker {
   // to the end (see nested_finish).
   uint64_t *finish_keys;
   Equity *finish_points;
+  // The rollout cache: keys of the positions after a candidate that leave
+  // the bag empty, from which the rest of a rollout is static plays, and the
+  // rollout's utility (see nested_rollout_key).
+  uint64_t *rollout_keys;
+  double *rollout_values;
   // For diverse candidates (NestedLevel.universe): the play features, and the
   // embedding of the generated plays with its scratch.
   bool features[NUMBER_OF_PLAY_FEATURES];
@@ -217,6 +223,8 @@ static _Atomic uint64_t nested_total_decision_hits;
 static _Atomic uint64_t nested_total_stopped;
 static _Atomic uint64_t nested_total_finishes;
 static _Atomic uint64_t nested_total_finish_hits;
+static _Atomic uint64_t nested_total_static_rollouts;
+static _Atomic uint64_t nested_total_rollout_hits;
 
 void nested_totals_reset(void) {
   atomic_store(&nested_total_searches, 0);
@@ -230,6 +238,8 @@ void nested_totals_reset(void) {
   atomic_store(&nested_total_stopped, 0);
   atomic_store(&nested_total_finishes, 0);
   atomic_store(&nested_total_finish_hits, 0);
+  atomic_store(&nested_total_static_rollouts, 0);
+  atomic_store(&nested_total_rollout_hits, 0);
 }
 
 NestedTotals nested_get_totals(void) {
@@ -245,6 +255,8 @@ NestedTotals nested_get_totals(void) {
       .stopped = atomic_load(&nested_total_stopped),
       .finishes = atomic_load(&nested_total_finishes),
       .finish_hits = atomic_load(&nested_total_finish_hits),
+      .static_rollouts = atomic_load(&nested_total_static_rollouts),
+      .rollout_hits = atomic_load(&nested_total_rollout_hits),
   };
   return totals;
 }
@@ -296,6 +308,8 @@ static NestedWorker *nested_worker_create_level(const Game *game,
   worker->seed_plays = NULL;
   worker->finish_keys = NULL;
   worker->finish_points = NULL;
+  worker->rollout_keys = NULL;
+  worker->rollout_values = NULL;
   worker->num_evaluated = 0;
   worker->gp = NULL;
   worker->gp_num_dims = 0;
@@ -340,6 +354,16 @@ void nested_worker_reset(NestedWorker *worker, const uint64_t sim_seed) {
     memset(worker->decision_keys, 0,
            sizeof(uint64_t) * ((size_t)1 << NESTED_CACHE_BITS));
   }
+  // A finish's plays and a rollout's utility depend on the players' settings
+  // and the sim's, which another sim may change.
+  if (worker->finish_keys != NULL) {
+    memset(worker->finish_keys, 0,
+           sizeof(uint64_t) * ((size_t)1 << NESTED_FINISH_CACHE_BITS));
+  }
+  if (worker->rollout_keys != NULL) {
+    memset(worker->rollout_keys, 0,
+           sizeof(uint64_t) * ((size_t)1 << NESTED_ROLLOUT_CACHE_BITS));
+  }
 }
 
 void nested_worker_destroy(NestedWorker *worker) {
@@ -357,6 +381,8 @@ void nested_worker_destroy(NestedWorker *worker) {
   free(worker->decision_moves);
   free(worker->finish_keys);
   free(worker->finish_points);
+  free(worker->rollout_keys);
+  free(worker->rollout_values);
   free(worker->embedding);
   free(worker->min_distance);
   free(worker->picked);
@@ -785,6 +811,40 @@ static bool nested_finish(NestedWorker *worker, Game *game, const int mover,
   return true;
 }
 
+// Whether, with an empty bag, every ply of a rollout of worker's search is
+// the top static play: no deeper level names any of them.
+static bool nested_plies_are_static(const NestedWorker *worker,
+                                    const NestedLevel *args) {
+  const NestedArgs *spec = worker->spec;
+  const int inner_level = worker->level + 1;
+  if (inner_level >= spec->depth) {
+    return true;
+  }
+  for (int ply = 0; ply < args->nested_plies; ply++) {
+    if (nested_level_applies(&spec->levels[inner_level], ply, 0)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+// The key of the rest of a rollout from game, just after its candidate, when
+// the bag is empty and every play left is static (with -sfinish, to the end):
+// the finish's key (see nested_finish_key), which fixes the plays, with the
+// mover's spread and the candidate's leave value, which with them fix the
+// rollout's utility.
+static uint64_t nested_rollout_key(const Game *game, const int mover,
+                                   const Equity candidate_leave) {
+  const Equity spread = player_get_score(game_get_player(game, mover)) -
+                        player_get_score(game_get_player(game, 1 - mover));
+  uint64_t key = nested_mix(
+      nested_finish_key(game, nested_board_hash(game_get_board(game))) ^
+      0xBF58476D1CE4E5B9ULL);
+  key = nested_mix(key ^ (uint64_t)(int64_t)spread);
+  key = nested_mix(key ^ ((uint64_t)(int64_t)candidate_leave << 1));
+  return key | 1ULL;
+}
+
 // One nested rollout of candidate from worker's game, whose other player's
 // rack is drawn again from sample_seed's shuffle, rotated left by rotation
 // racks (see bag_rotate). Returns its utility for the player on turn, and
@@ -820,6 +880,35 @@ static double nested_rollout(NestedWorker *worker, const NestedLevel *args,
                                                candidate, &rack_before);
   players[num_plays++] = mover;
 
+  // From an empty bag, the rest of a rollout whose plays are all static is a
+  // function of nested_rollout_key, and its utility is kept in the rollout
+  // cache.
+  const bool cacheable = eval->finish_endgame && !game_over(game) &&
+                         bag_get_letters(game_get_bag(game)) == 0 &&
+                         nested_plies_are_static(worker, args);
+  uint64_t rollout_key = 0;
+  uint64_t rollout_slot = 0;
+  if (cacheable) {
+    if (worker->rollout_keys == NULL) {
+      worker->rollout_keys = calloc_or_die(
+          (size_t)1 << NESTED_ROLLOUT_CACHE_BITS, sizeof(uint64_t));
+      worker->rollout_values = malloc_or_die(
+          sizeof(double) * ((size_t)1 << NESTED_ROLLOUT_CACHE_BITS));
+    }
+    atomic_fetch_add_explicit(&nested_total_static_rollouts, 1,
+                              memory_order_relaxed);
+    rollout_key = nested_rollout_key(game, mover, leaves[0]);
+    rollout_slot =
+        rollout_key & (((uint64_t)1 << NESTED_ROLLOUT_CACHE_BITS) - 1);
+    if (worker->rollout_keys[rollout_slot] == rollout_key) {
+      atomic_fetch_add_explicit(&nested_total_rollout_hits, 1,
+                                memory_order_relaxed);
+      const double cached = worker->rollout_values[rollout_slot];
+      game_unplay_last_move(game);
+      return cached;
+    }
+  }
+
   for (int ply = 0; ply < args->nested_plies; ply++) {
     if (game_over(game)) {
       break;
@@ -854,6 +943,10 @@ static double nested_rollout(NestedWorker *worker, const NestedLevel *args,
     utility = nested_ended_score(eval, final_spread, 0);
   } else {
     utility = nested_score(eval, game, mover, leftover);
+  }
+  if (cacheable) {
+    worker->rollout_keys[rollout_slot] = rollout_key;
+    worker->rollout_values[rollout_slot] = utility;
   }
   game_unplay_last_move(game);
   return utility;
