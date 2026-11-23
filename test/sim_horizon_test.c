@@ -25,7 +25,9 @@
 //
 // Spec: first=<game>,games=<n>,plies=<p>,screen=<rollouts per play>,
 //       main=<rollouts per play>,cont=<one seed in this many plays on>,
-//       oracle=<rollouts per pick>[,mid=<rollouts per play>]
+//       oracle=<rollouts per pick>[,mid=<rollouts per play>
+//       [,poolshift=<weight or exact>]]
+// The pool shift is 1.2 unless given.
 //
 // Lines printed:
 //   SIMH pos ...     one per position
@@ -67,6 +69,8 @@ enum {
   SIMH_MAX_MOVE_STRING = 64,
   SIMH_SPEC_FIELDS = 7,
   SIMH_SPEC_FIELDS_WITH_MID = 8,
+  SIMH_SPEC_FIELDS_WITH_POOL_SHIFT = 9,
+  SIMH_MAX_POOL_SHIFT_STRING = 16,
   SIMH_NUM_MEASURES = 3,
   SIMH_MEASURE_UTILITY = 2,
   SIMH_FIRST_GAME_SEED = 5000,
@@ -498,13 +502,13 @@ static int simh_sim_moves(Config *config, SimLab *lab, const char *cgp_command,
 
 static void simh_run(int first_game, int num_games, int plies,
                      int screen_rollouts, int main_rollouts,
-                     int continue_one_in, int oracle_rollouts,
-                     int mid_rollouts) {
+                     int continue_one_in, int oracle_rollouts, int mid_rollouts,
+                     const char *pool_shift) {
   char *settings = get_formatted_string(
       "set -lex CSW24 -wmp true -s1 equity -s2 equity -r1 all -r2 all "
       "-numplays %d -plies %d -threads %d -scond none -sr rr -tlim 0 "
-      "-savesettings false -poolshift 1.2 -pat auto -scensus false",
-      SIMH_NUM_PLAYS, plies, get_num_cores());
+      "-savesettings false -poolshift %s -pat auto -scensus false",
+      SIMH_NUM_PLAYS, plies, get_num_cores(), pool_shift);
   Config *config = config_create_or_die(settings);
   free(settings);
   SimLab *lab = calloc_or_die(1, sizeof(SimLab));
@@ -731,16 +735,18 @@ void sim_horizon_run_spec(const char *spec) {
   int continue_one_in = 0;
   int oracle_rollouts = 0;
   int mid_rollouts = 0;
+  char pool_shift[SIMH_MAX_POOL_SHIFT_STRING] = "1.2";
   const int fields_read =
       sscanf(spec,
              "first=%d,games=%d,plies=%d,screen=%d,main=%d,"
-             "cont=%d,oracle=%d,mid=%d",
+             "cont=%d,oracle=%d,mid=%d,poolshift=%15s",
              &first_game, &num_games, &plies, &screen_rollouts, &main_rollouts,
-             &continue_one_in, &oracle_rollouts, &mid_rollouts);
+             &continue_one_in, &oracle_rollouts, &mid_rollouts, pool_shift);
   if (fields_read != SIMH_SPEC_FIELDS &&
-      fields_read != SIMH_SPEC_FIELDS_WITH_MID) {
+      fields_read != SIMH_SPEC_FIELDS_WITH_MID &&
+      fields_read != SIMH_SPEC_FIELDS_WITH_POOL_SHIFT) {
     log_fatal("sim horizon: bad spec: %s", spec);
   }
   simh_run(first_game, num_games, plies, screen_rollouts, main_rollouts,
-           continue_one_in, oracle_rollouts, mid_rollouts);
+           continue_one_in, oracle_rollouts, mid_rollouts, pool_shift);
 }

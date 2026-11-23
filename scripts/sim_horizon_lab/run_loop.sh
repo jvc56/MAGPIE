@@ -13,7 +13,7 @@
 results=$1
 first=$2
 chunks=$3
-spec="plies=2,screen=3000,main=48000,cont=32,oracle=24000,mid=12000"
+spec="plies=2,screen=3000,main=48000,cont=32,oracle=24000,mid=12000,poolshift=exact"
 mkdir -p "$results" || exit 1
 chunk=0
 while [ "$chunk" -lt "$chunks" ]; do

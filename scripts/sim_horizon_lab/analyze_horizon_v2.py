@@ -4,9 +4,9 @@ oracle; test/sim_horizon_test.c in the horizon-eval worktree).
 
 Usage: analyze_horizon_v2.py [--base N] FILE [FILE...]
 
---base is the variant the others are compared with: 0 (the default) is the
-horizon with plain leave values, 3 is the sim as it is on main, whose
-horizon has the pool shift of both players' last leaves.
+--base is the variant the others are compared with: 3 (the default) is the
+sim as it is on main, whose horizon values both players' last leaves as the
+rollout's plies do, shift included; 0 is those leaves without the shift.
 
 Each variant's pick is the kept candidate with the best mean utility over
 the main stage's rollouts. Where the variants' picks differ, the oracle
@@ -20,10 +20,16 @@ import re
 import sys
 from collections import defaultdict
 
-VARIANTS = ["plain leaves", "half PAT", "PAT", "shift (both leaves)",
-            "shift (both) + half PAT", "shift (both) + PAT",
-            "shift (own leave)", "shift (own) + half PAT",
-            "shift (own) + PAT"]
+# A variant is a leave mode and a share of the last play's PAT term (see
+# SIM_LAB_NUM_LEAVE_MODES in src/impl/sim_lab.h). The rollout's leaves are the
+# stock leaves under a pool shift weight and the leaves of the sim's pool
+# under -poolshift exact. Runs made before the last two leave modes existed
+# have nine variants.
+LEAVE_MODES = ["rollout leaves, no shift", "sim as it is",
+               "shift on own leave only", "opponent's leave at stock",
+               "both leaves at stock"]
+PAT_SHARES = ["", " + half PAT", " + PAT"]
+VARIANTS = [mode + share for mode in LEAVE_MODES for share in PAT_SHARES]
 NUM_PARTS = 4
 METRICS = ["fspread", "fwin", "futil"]
 
@@ -106,7 +112,10 @@ def oracle_value(parts, metric, only_part=None):
 
 
 def report(positions, base, measure="util", bag_filter=None, label=""):
-    number_of_variants = len(VARIANTS)
+    number_of_variants = min(
+        [len(VARIANTS)] +
+        [len(position["picks"][measure]) for position in positions.values()
+         if measure in position["picks"]])
     gains = [[defaultdict(list) for _ in METRICS]
              for _ in range(number_of_variants)]
     flips = [defaultdict(list) for _ in range(number_of_variants)]
@@ -180,7 +189,7 @@ def report(positions, base, measure="util", bag_filter=None, label=""):
           f"with more than one candidate kept, {with_oracle} with differing "
           f"picks" + (f"; {missing_oracle} dropped for lack of oracle lines"
                       if missing_oracle else ""))
-    print(f"  {'variant':24s} {'differs':>8s} {'spread/pos':>18s} "
+    print(f"  {'variant':36s} {'differs':>8s} {'spread/pos':>18s} "
           f"{'win pts/pos':>18s} {'utility/pos x 1e4':>20s}   "
           f"oracle noise per differing pick (spread, win pts)")
     for variant in range(number_of_variants):
@@ -194,7 +203,7 @@ def report(positions, base, measure="util", bag_filter=None, label=""):
         count = max(noise_counts[variant], 1)
         noise = [math.sqrt(noise_squares[variant][metric_idx] / count)
                  for metric_idx in range(len(METRICS))]
-        print(f"  {VARIANTS[variant]:24s} {100 * flip_mean:7.2f}% "
+        print(f"  {VARIANTS[variant]:36s} {100 * flip_mean:7.2f}% "
               f"{cells[0][0]:+8.4f} ({cells[0][1]:.4f}) "
               f"{cells[1][0]:+8.4f} ({cells[1][1]:.4f}) "
               f"{cells[2][0]:+9.4f} ({cells[2][1]:.4f})   "
@@ -203,7 +212,7 @@ def report(positions, base, measure="util", bag_filter=None, label=""):
 
 def main():
     arguments = sys.argv[1:]
-    base = 0
+    base = 3
     if arguments and arguments[0] == "--base":
         base = int(arguments[1])
         arguments = arguments[2:]

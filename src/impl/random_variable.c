@@ -480,6 +480,8 @@ typedef struct Simmer {
   // the census: NULL for any other sim.
   PoolLeaves *pool_leaves;
   Game *pool_leaves_game;
+  // LAB (see sim_lab.h): the simming player's stock leaves.
+  const KLV *lab_stock_klv;
 } Simmer;
 
 // A worker's copy of the game plays the sim's rollouts, so both of its
@@ -634,6 +636,8 @@ typedef struct SimLabTrack {
   // The plies played, tracked or not.
   int plies;
   Equity plain[SIM_LAB_MAX_TRACKED_PLIES];
+  // The leave's value in the stock leaves.
+  Equity stock[SIM_LAB_MAX_TRACKED_PLIES];
   Equity shift[SIM_LAB_MAX_TRACKED_PLIES];
   // The shift from the bag alone, and whether the simming player moved.
   Equity bag_shift[SIM_LAB_MAX_TRACKED_PLIES];
@@ -661,7 +665,7 @@ static Equity sim_lab_get_spread(const Game *game, int initial_player) {
 // found it.
 static void sim_lab_track_play(SimLabChecks *checks, SimLabTrack *track,
                                const Game *game, int initial_player,
-                               const Move *move) {
+                               const Move *move, const KLV *stock_klv) {
   const int ply = track->plies;
   if (ply >= SIM_LAB_MAX_TRACKED_PLIES) {
     return;
@@ -714,6 +718,7 @@ static void sim_lab_track_play(SimLabChecks *checks, SimLabTrack *track,
   }
   const Equity sign = player_index == initial_player ? 1 : -1;
   track->plain[ply] = sign * leave_value;
+  track->stock[ply] = sign * klv_get_leave_value(stock_klv, &leave);
   track->shift[ply] = sign * shift;
   track->bag_shift[ply] = sign * bag_shift;
   track->is_own[ply] = player_index == initial_player;
@@ -759,10 +764,12 @@ static void sim_lab_get_horizon(const SimLabTrack *track, int horizon,
         splits[SIM_LAB_SPLIT_OWN] += track->shift[ply];
         splits[SIM_LAB_SPLIT_OWN_FROM_BAG] += track->bag_shift[ply];
         splits[SIM_LAB_SPLIT_OWN_PLAIN] += track->plain[ply];
+        splits[SIM_LAB_SPLIT_OWN_STOCK] += track->stock[ply];
       } else {
         splits[SIM_LAB_SPLIT_OPPONENT] += track->shift[ply];
         splits[SIM_LAB_SPLIT_OPPONENT_FROM_BAG] += track->bag_shift[ply];
         splits[SIM_LAB_SPLIT_OPPONENT_PLAIN] += track->plain[ply];
+        splits[SIM_LAB_SPLIT_OPPONENT_STOCK] += track->stock[ply];
       }
     }
   }
@@ -917,7 +924,8 @@ static double sim_rollout(const Simmer *simmer, SimmerWorker *simmer_worker,
     }
     if (lab != NULL) {
       sim_lab_track_play(&lab->checks[worker_index], &lab_track, game,
-                         simmer->initial_player, best_play);
+                         simmer->initial_player, best_play,
+                         simmer->lab_stock_klv);
     }
 
     // On the final ply the resulting cross-sets are never read (no further move
@@ -998,14 +1006,22 @@ static double sim_rollout(const Simmer *simmer, SimmerWorker *simmer_worker,
       for (int pat_share = 0; pat_share < SIM_LAB_NUM_PAT_SHARES;
            pat_share++) {
         const int variant = leave_mode * SIM_LAB_NUM_PAT_SHARES + pat_share;
-        Equity variant_shift = 0;
+        // See SIM_LAB_NUM_LEAVE_MODES.
+        Equity variant_leaves = lab_plain;
         if (leave_mode == 1) {
-          variant_shift = lab_shift;
+          variant_leaves = lab_plain + lab_shift;
         } else if (leave_mode == 2) {
-          variant_shift = lab_splits[SIM_LAB_SPLIT_OWN];
+          variant_leaves = lab_plain + lab_splits[SIM_LAB_SPLIT_OWN];
+        } else if (leave_mode == 3) {
+          variant_leaves = lab_splits[SIM_LAB_SPLIT_OWN_PLAIN] +
+                           lab_splits[SIM_LAB_SPLIT_OWN] +
+                           lab_splits[SIM_LAB_SPLIT_OPPONENT_STOCK];
+        } else if (leave_mode == 4) {
+          variant_leaves = lab_splits[SIM_LAB_SPLIT_OWN_STOCK] +
+                           lab_splits[SIM_LAB_SPLIT_OPPONENT_STOCK];
         }
         const Equity variant_leftover =
-            lab_plain + variant_shift +
+            variant_leaves +
             lab_pat * pat_share / (SIM_LAB_NUM_PAT_SHARES - 1);
         const Equity variant_projected =
             variant_leftover + (projected_leftover - leftover);
@@ -1035,7 +1051,7 @@ static double sim_rollout(const Simmer *simmer, SimmerWorker *simmer_worker,
         const Move *next_play = get_top_equity_move_with_carry(
             game, move_list, simmer->best_move_carry);
         sim_lab_track_play(checks, &lab_track, game, simmer->initial_player,
-                           next_play);
+                           next_play, simmer->lab_stock_klv);
         play_move(next_play, game, NULL);
         sim_lab_track_played(&lab_track, game, simmer->initial_player);
       }
@@ -1517,6 +1533,8 @@ RandomVariables *rv_sim_create(RandomVariables *rvs, const SimArgs *sim_args,
   simmer->census_rollout = NULL;
   simmer->pool_leaves = NULL;
   simmer->pool_leaves_game = NULL;
+  simmer->lab_stock_klv = player_get_klv(game_get_player(
+      sim_args->game, game_get_player_on_turn_index(sim_args->game)));
   simmer_prepare_pool_leaves(simmer, sim_args);
   simmer_prepare_census_rollout(simmer, sim_args);
 
@@ -1575,6 +1593,8 @@ void rv_sim_reset(RandomVariables *rvs, const SimArgs *sim_args) {
                       sim_args->num_plies, sim_args->seed,
                       sim_args->use_heat_map);
   }
+  simmer->lab_stock_klv = player_get_klv(game_get_player(
+      sim_args->game, game_get_player_on_turn_index(sim_args->game)));
   simmer_prepare_pool_leaves(simmer, sim_args);
   simmer_prepare_census_rollout(simmer, sim_args);
 }

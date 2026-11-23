@@ -21,9 +21,18 @@ enum {
   // so that some parts choose a play and the others value the choice. (The
   // code calls a part a half.)
   SIM_LAB_NUM_HALVES = 4,
-  // The horizon's leave values: plain, with the pool shift of both players'
-  // last leaves, or with the shift of the simming player's last leave only.
-  SIM_LAB_NUM_LEAVE_MODES = 3,
+  // The horizon's leave values, by mode. The rollout's own leaves are the
+  // stock leaves under a pool shift weight and the leaves of the sim's pool
+  // under -poolshift exact (see PoolLeaves), and its shift is the pool shift
+  // its plies add to them.
+  //   0  the rollout's leaves, no shift
+  //   1  the rollout's leaves and shift, for both players' last leaves (the
+  //      sim as it is)
+  //   2  the rollout's leaves, with the shift of the simming player's alone
+  //   3  the simming player's as in 1, the opponent's at its stock value
+  //   4  both at their stock values
+  // Under a pool shift weight, 3 is 2 and 4 is 0.
+  SIM_LAB_NUM_LEAVE_MODES = 5,
   // How much of the last play's PAT term the horizon charges: none, half or
   // all of it.
   SIM_LAB_NUM_PAT_SHARES = 3,
@@ -53,7 +62,11 @@ enum {
   // The plain leave values of the same two leaves, signed the same way.
   SIM_LAB_SPLIT_OWN_PLAIN = 4,
   SIM_LAB_SPLIT_OPPONENT_PLAIN = 5,
-  SIM_LAB_NUM_SPLITS = 6,
+  // Their values in the stock leaves, which are the same leaves unless the
+  // rollout reads the leaves of the sim's pool.
+  SIM_LAB_SPLIT_OWN_STOCK = 6,
+  SIM_LAB_SPLIT_OPPONENT_STOCK = 7,
+  SIM_LAB_NUM_SPLITS = 8,
   // The plies of a rollout whose terms are kept: the sim's and two more.
   SIM_LAB_MAX_TRACKED_PLIES = 8,
   SIM_LAB_MAX_SIM_PLIES = SIM_LAB_MAX_TRACKED_PLIES - 2,
