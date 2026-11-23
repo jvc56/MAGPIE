@@ -513,13 +513,15 @@ void test_nested_cr(void) {
     const NestedTotals choose_totals = nested_get_totals();
     printf("NCR choose summary: %d positions, hash %016llx, %.3f s per "
            "choice, nested searches %llu, samples %llu, decision hits %llu, "
-           "stopped %llu\n",
+           "stopped %llu, finishes %llu, finish hits %llu\n",
            shared.num_positions, (unsigned long long)hash,
            total_seconds / shared.num_positions,
            (unsigned long long)choose_totals.searches,
            (unsigned long long)choose_totals.samples,
            (unsigned long long)choose_totals.decision_hits,
-           (unsigned long long)choose_totals.stopped);
+           (unsigned long long)choose_totals.stopped,
+           (unsigned long long)choose_totals.finishes,
+           (unsigned long long)choose_totals.finish_hits);
     (void)fflush(stdout);
   }
 

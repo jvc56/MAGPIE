@@ -152,6 +152,10 @@ typedef struct NestedTotals {
   uint64_t decision_hits;
   // LAMC searches stopped early (NestedLevel.stop_z).
   uint64_t stopped;
+  // Finishes from an empty bag (see SimArgs.finish_endgame), and those found
+  // in a worker's finish cache.
+  uint64_t finishes;
+  uint64_t finish_hits;
 } NestedTotals;
 
 void nested_totals_reset(void);

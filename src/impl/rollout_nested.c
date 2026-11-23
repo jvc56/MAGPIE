@@ -52,6 +52,8 @@ enum {
   // ply it tells the census they are (past any the census serves).
   NESTED_FINISH_MAX_PLIES = 40,
   NESTED_FINISH_PLY = 1000,
+  // The finish cache's entries, a power of 2.
+  NESTED_FINISH_CACHE_BITS = 16,
 };
 
 // A feature column whose standard deviation is below this is constant.
@@ -157,6 +159,11 @@ struct NestedWorker {
   // decision chose.
   uint64_t *decision_keys;
   Move *decision_moves;
+  // The finish cache: keys of positions with an empty bag that a rollout
+  // played to the end by static plays, and each player's points from there
+  // to the end (see nested_finish).
+  uint64_t *finish_keys;
+  Equity *finish_points;
   // For diverse candidates (NestedLevel.universe): the play features, and the
   // embedding of the generated plays with its scratch.
   bool features[NUMBER_OF_PLAY_FEATURES];
@@ -208,6 +215,8 @@ static _Atomic uint64_t nested_total_cache_hits;
 static _Atomic uint64_t nested_total_cache_misses;
 static _Atomic uint64_t nested_total_decision_hits;
 static _Atomic uint64_t nested_total_stopped;
+static _Atomic uint64_t nested_total_finishes;
+static _Atomic uint64_t nested_total_finish_hits;
 
 void nested_totals_reset(void) {
   atomic_store(&nested_total_searches, 0);
@@ -219,6 +228,8 @@ void nested_totals_reset(void) {
   atomic_store(&nested_total_cache_misses, 0);
   atomic_store(&nested_total_decision_hits, 0);
   atomic_store(&nested_total_stopped, 0);
+  atomic_store(&nested_total_finishes, 0);
+  atomic_store(&nested_total_finish_hits, 0);
 }
 
 NestedTotals nested_get_totals(void) {
@@ -232,6 +243,8 @@ NestedTotals nested_get_totals(void) {
       .cache_misses = atomic_load(&nested_total_cache_misses),
       .decision_hits = atomic_load(&nested_total_decision_hits),
       .stopped = atomic_load(&nested_total_stopped),
+      .finishes = atomic_load(&nested_total_finishes),
+      .finish_hits = atomic_load(&nested_total_finish_hits),
   };
   return totals;
 }
@@ -281,6 +294,8 @@ static NestedWorker *nested_worker_create_level(const Game *game,
   worker->seed_capacity = 0;
   worker->seed_effects = NULL;
   worker->seed_plays = NULL;
+  worker->finish_keys = NULL;
+  worker->finish_points = NULL;
   worker->num_evaluated = 0;
   worker->gp = NULL;
   worker->gp_num_dims = 0;
@@ -340,6 +355,8 @@ void nested_worker_destroy(NestedWorker *worker) {
   free(worker->cache_replies);
   free(worker->decision_keys);
   free(worker->decision_moves);
+  free(worker->finish_keys);
+  free(worker->finish_points);
   free(worker->embedding);
   free(worker->min_distance);
   free(worker->picked);
@@ -564,34 +581,41 @@ static void nested_generate_candidates(NestedWorker *worker,
 
 // The utility for player mover of the nested rollout's last state, as the sim
 // scores a rollout's horizon (see sim_rollout).
+// The utility of a game that has ended with spread for the mover.
+static double nested_ended_score(const NestedEval *eval, const Equity spread,
+                                 const Equity leftover) {
+  double win_pct;
+  if (spread == 0) {
+    win_pct = 0.5;
+  } else {
+    win_pct = spread > 0 ? 1.0 : 0.0;
+  }
+  return sim_utility_blend(win_pct, spread + leftover, eval->utility_w_winpct,
+                           eval->utility_w_spread, eval->utility_spread_scale);
+}
+
 static double nested_score(const NestedEval *eval, const Game *game,
                            const int mover, const Equity leftover) {
   const Equity spread = player_get_score(game_get_player(game, mover)) -
                         player_get_score(game_get_player(game, 1 - mover));
-  double win_pct;
   if (game_get_game_end_reason(game) != GAME_END_REASON_NONE) {
-    if (spread == 0) {
-      win_pct = 0.5;
-    } else {
-      win_pct = spread > 0 ? 1.0 : 0.0;
-    }
-  } else {
-    const int on_turn = game_get_player_on_turn_index(game);
-    int spread_plus_leftover = (int)lround(equity_to_double(spread + leftover));
-    if (on_turn != mover) {
-      spread_plus_leftover = -spread_plus_leftover;
-    }
-    const int bag_tiles = bag_get_letters(game_get_bag(game));
-    const int on_turn_rack =
-        rack_get_total_letters(player_get_rack(game_get_player(game, on_turn)));
-    const int off_turn_rack = rack_get_total_letters(
-        player_get_rack(game_get_player(game, 1 - on_turn)));
-    win_pct = (double)win_pct_get(
-        eval->win_pcts, spread_plus_leftover, (unsigned int)bag_tiles,
-        (unsigned int)on_turn_rack, (unsigned int)off_turn_rack);
-    if (on_turn != mover) {
-      win_pct = 1.0 - win_pct;
-    }
+    return nested_ended_score(eval, spread, leftover);
+  }
+  const int on_turn = game_get_player_on_turn_index(game);
+  int spread_plus_leftover = (int)lround(equity_to_double(spread + leftover));
+  if (on_turn != mover) {
+    spread_plus_leftover = -spread_plus_leftover;
+  }
+  const int bag_tiles = bag_get_letters(game_get_bag(game));
+  const int on_turn_rack =
+      rack_get_total_letters(player_get_rack(game_get_player(game, on_turn)));
+  const int off_turn_rack = rack_get_total_letters(
+      player_get_rack(game_get_player(game, 1 - on_turn)));
+  double win_pct = (double)win_pct_get(
+      eval->win_pcts, spread_plus_leftover, (unsigned int)bag_tiles,
+      (unsigned int)on_turn_rack, (unsigned int)off_turn_rack);
+  if (on_turn != mover) {
+    win_pct = 1.0 - win_pct;
   }
   return sim_utility_blend(win_pct, spread + leftover, eval->utility_w_winpct,
                            eval->utility_w_spread, eval->utility_spread_scale);
@@ -630,6 +654,26 @@ static const Move *nested_ply_play(NestedWorker *worker, const NestedEval *eval,
   return nested_top_play(worker, game, worker->reply_ply + ply, carry);
 }
 
+// A hash of a square holding a letter.
+static uint64_t nested_square_hash(const int row, const int col,
+                                   const MachineLetter letter) {
+  return nested_mix(0xC2B2AE3D27D4EB4FULL ^
+                    ((uint64_t)((row * BOARD_DIM + col) * 256 + letter)));
+}
+
+static uint64_t nested_board_hash(const Board *board) {
+  uint64_t hash = 0;
+  for (int row = 0; row < BOARD_DIM; row++) {
+    for (int col = 0; col < BOARD_DIM; col++) {
+      const MachineLetter letter = board_get_letter(board, row, col);
+      if (letter != ALPHABET_EMPTY_SQUARE_MARKER) {
+        hash ^= nested_square_hash(row, col, letter);
+      }
+    }
+  }
+  return hash;
+}
+
 // The rotations of a bag-cycled LAMC search (NestedLevel.bag_cycle) in game:
 // how many racks of RACK_SIZE letters it takes for every letter unseen by
 // the player on turn to start on the other player's rack once.
@@ -638,6 +682,107 @@ static int nested_cycle_rotations(const Game *game) {
                      rack_get_total_letters(player_get_rack(game_get_player(
                          game, 1 - game_get_player_on_turn_index(game))));
   return unseen > RACK_SIZE ? (unseen + RACK_SIZE - 1) / RACK_SIZE : 1;
+}
+
+// The hash of the board move leaves, from the hash of the board it is
+// played on. Exchanges and passes leave the board as it is.
+static uint64_t nested_board_hash_after(const uint64_t board_hash,
+                                        const Move *move) {
+  if (move_get_type(move) != GAME_EVENT_TILE_PLACEMENT_MOVE) {
+    return board_hash;
+  }
+  uint64_t hash = board_hash;
+  const int row_start = move_get_row_start(move);
+  const int col_start = move_get_col_start(move);
+  const bool vertical = move_get_dir(move) == BOARD_VERTICAL_DIRECTION;
+  for (int tile_idx = 0; tile_idx < move_get_tiles_length(move); tile_idx++) {
+    const MachineLetter letter = move_get_tile(move, tile_idx);
+    if (letter == PLAYED_THROUGH_MARKER) {
+      continue;
+    }
+    const int row = vertical ? row_start + tile_idx : row_start;
+    const int col = vertical ? col_start : col_start + tile_idx;
+    hash ^= nested_square_hash(row, col, letter);
+  }
+  return hash;
+}
+
+// The key of a finish from game, whose bag is empty and whose board hashes
+// to board_hash (see nested_board_hash): its board, the rack of
+// the player on turn, which player that is and the scoreless turns. The other
+// rack is the tiles unseen by the player on turn. The static plays to the end
+// depend on nothing else, and a finish's points are kept apart from the
+// scores, so the spread is no part of the key.
+static uint64_t nested_finish_key(const Game *game, const uint64_t board_hash) {
+  const int on_turn = game_get_player_on_turn_index(game);
+  uint64_t key = nested_mix(board_hash ^ 0x94D049BB133111EBULL);
+  const Rack *rack = player_get_rack(game_get_player(game, on_turn));
+  for (int letter = 0; letter < rack_get_dist_size(rack); letter++) {
+    key = nested_mix(key ^ ((uint64_t)letter << 8) ^
+                     (uint64_t)rack_get_letter(rack, (MachineLetter)letter));
+  }
+  key =
+      nested_mix(key ^ ((uint64_t)on_turn << 40) ^
+                 ((uint64_t)game_get_consecutive_scoreless_turns(game) << 48));
+  return key | 1ULL;
+}
+
+// Plays game on by static plays to its end, or for at most
+// NESTED_FINISH_MAX_PLIES plies, as the sim's rollouts do (see
+// SimArgs.finish_endgame). Returns whether the game ended and, if it did,
+// sets *spread to the mover's final spread. A finish from an empty bag is a
+// function of nested_finish_key, so the points each player scored in one
+// that ended are kept in the worker's finish cache, and a finish found there
+// is not played: game is then left where the finish began. (Keeping the
+// positions a finish passes through as well finds no more.)
+static bool nested_finish(NestedWorker *worker, Game *game, const int mover,
+                          BestMoveCarry *carry, Equity *spread) {
+  const int on_turn = game_get_player_on_turn_index(game);
+  const Equity on_turn_score = player_get_score(game_get_player(game, on_turn));
+  const Equity off_turn_score =
+      player_get_score(game_get_player(game, 1 - on_turn));
+  const bool cacheable = bag_get_letters(game_get_bag(game)) == 0;
+  uint64_t key = 0;
+  uint64_t slot = 0;
+  if (cacheable) {
+    if (worker->finish_keys == NULL) {
+      worker->finish_keys = calloc_or_die((size_t)1 << NESTED_FINISH_CACHE_BITS,
+                                          sizeof(uint64_t));
+      worker->finish_points = malloc_or_die(
+          sizeof(Equity) * 2 * ((size_t)1 << NESTED_FINISH_CACHE_BITS));
+    }
+    atomic_fetch_add_explicit(&nested_total_finishes, 1, memory_order_relaxed);
+    key = nested_finish_key(game, nested_board_hash(game_get_board(game)));
+    slot = key & (((uint64_t)1 << NESTED_FINISH_CACHE_BITS) - 1);
+    if (worker->finish_keys[slot] == key) {
+      atomic_fetch_add_explicit(&nested_total_finish_hits, 1,
+                                memory_order_relaxed);
+      const Equity on_turn_points = worker->finish_points[2 * slot];
+      const Equity off_turn_points = worker->finish_points[2 * slot + 1];
+      const Equity on_turn_spread =
+          on_turn_score + on_turn_points - off_turn_score - off_turn_points;
+      *spread = on_turn == mover ? on_turn_spread : -on_turn_spread;
+      return true;
+    }
+  }
+  for (int extra = 0; extra < NESTED_FINISH_MAX_PLIES && !game_over(game);
+       extra++) {
+    play_move(nested_top_play(worker, game, NESTED_FINISH_PLY, carry), game,
+              NULL);
+  }
+  if (!game_over(game)) {
+    return false;
+  }
+  if (cacheable) {
+    worker->finish_keys[slot] = key;
+    worker->finish_points[2 * slot] =
+        player_get_score(game_get_player(game, on_turn)) - on_turn_score;
+    worker->finish_points[2 * slot + 1] =
+        player_get_score(game_get_player(game, 1 - on_turn)) - off_turn_score;
+  }
+  *spread = player_get_score(game_get_player(game, mover)) -
+            player_get_score(game_get_player(game, 1 - mover));
+  return true;
 }
 
 // One nested rollout of candidate from worker's game, whose other player's
@@ -701,18 +846,15 @@ static double nested_rollout(NestedWorker *worker, const NestedLevel *args,
   }
   // As the sim's rollouts do (see SimArgs.finish_endgame): play on to the
   // end when the bag is about empty, and score the result.
+  double utility = 0.0;
+  Equity final_spread = 0;
   if (eval->finish_endgame && !game_over(game) &&
-      bag_get_letters(game_get_bag(game)) <= eval->finish_max_bag) {
-    for (int extra = 0; extra < NESTED_FINISH_MAX_PLIES && !game_over(game);
-         extra++) {
-      play_move(nested_top_play(worker, game, NESTED_FINISH_PLY, carry), game,
-                NULL);
-    }
-    if (game_over(game)) {
-      leftover = 0;
-    }
+      bag_get_letters(game_get_bag(game)) <= eval->finish_max_bag &&
+      nested_finish(worker, game, mover, carry, &final_spread)) {
+    utility = nested_ended_score(eval, final_spread, 0);
+  } else {
+    utility = nested_score(eval, game, mover, leftover);
   }
-  const double utility = nested_score(eval, game, mover, leftover);
   game_unplay_last_move(game);
   return utility;
 }
@@ -817,49 +959,6 @@ static const Move *nested_choose_plain(NestedWorker *worker,
   }
   move_copy(&worker->chosen, &worker->candidates[best]);
   return &worker->chosen;
-}
-
-// A hash of a square holding a letter.
-static uint64_t nested_square_hash(const int row, const int col,
-                                   const MachineLetter letter) {
-  return nested_mix(0xC2B2AE3D27D4EB4FULL ^
-                    ((uint64_t)((row * BOARD_DIM + col) * 256 + letter)));
-}
-
-static uint64_t nested_board_hash(const Board *board) {
-  uint64_t hash = 0;
-  for (int row = 0; row < BOARD_DIM; row++) {
-    for (int col = 0; col < BOARD_DIM; col++) {
-      const MachineLetter letter = board_get_letter(board, row, col);
-      if (letter != ALPHABET_EMPTY_SQUARE_MARKER) {
-        hash ^= nested_square_hash(row, col, letter);
-      }
-    }
-  }
-  return hash;
-}
-
-// The hash of the board move leaves, from the hash of the board it is
-// played on. Exchanges and passes leave the board as it is.
-static uint64_t nested_board_hash_after(const uint64_t board_hash,
-                                        const Move *move) {
-  if (move_get_type(move) != GAME_EVENT_TILE_PLACEMENT_MOVE) {
-    return board_hash;
-  }
-  uint64_t hash = board_hash;
-  const int row_start = move_get_row_start(move);
-  const int col_start = move_get_col_start(move);
-  const bool vertical = move_get_dir(move) == BOARD_VERTICAL_DIRECTION;
-  for (int tile_idx = 0; tile_idx < move_get_tiles_length(move); tile_idx++) {
-    const MachineLetter letter = move_get_tile(move, tile_idx);
-    if (letter == PLAYED_THROUGH_MARKER) {
-      continue;
-    }
-    const int row = vertical ? row_start + tile_idx : row_start;
-    const int col = vertical ? col_start : col_start + tile_idx;
-    hash ^= nested_square_hash(row, col, letter);
-  }
-  return hash;
 }
 
 // The tiles a placement takes from the bag's count: the tiles it places. An
