@@ -630,18 +630,33 @@ static const Move *nested_ply_play(NestedWorker *worker, const NestedEval *eval,
   return nested_top_play(worker, game, worker->reply_ply + ply, carry);
 }
 
+// The rotations of a bag-cycled LAMC search (NestedLevel.bag_cycle) in game:
+// how many racks of RACK_SIZE letters it takes for every letter unseen by
+// the player on turn to start on the other player's rack once.
+static int nested_cycle_rotations(const Game *game) {
+  const int unseen = bag_get_letters(game_get_bag(game)) +
+                     rack_get_total_letters(player_get_rack(game_get_player(
+                         game, 1 - game_get_player_on_turn_index(game))));
+  return unseen > RACK_SIZE ? (unseen + RACK_SIZE - 1) / RACK_SIZE : 1;
+}
+
 // One nested rollout of candidate from worker's game, whose other player's
-// rack is drawn again from sample_seed's shuffle. Returns its utility for the
-// player on turn, and leaves the game as it found it, apart from the other
-// player's rack and the order of the bag.
+// rack is drawn again from sample_seed's shuffle, rotated left by rotation
+// racks (see bag_rotate). Returns its utility for the player on turn, and
+// leaves the game as it found it, apart from the other player's rack and the
+// order of the bag.
 static double nested_rollout(NestedWorker *worker, const NestedLevel *args,
                              const NestedEval *eval, const Move *candidate,
-                             const uint64_t sample_seed, BestMoveCarry *carry) {
+                             const uint64_t sample_seed, const int rotation,
+                             BestMoveCarry *carry) {
   Game *game = worker->game;
   const int mover = game_get_player_on_turn_index(game);
   const int other = 1 - mover;
   return_rack_to_bag(game, other);
   game_seed(game, sample_seed);
+  if (rotation > 0) {
+    bag_rotate(game_get_bag(game), rotation * RACK_SIZE);
+  }
   draw_to_full_rack(game, other);
 
   // The plays of the rollout, and the leave each one kept, for the leftover
@@ -754,7 +769,7 @@ static const Move *nested_choose_plain(NestedWorker *worker,
       }
       const double value =
           nested_rollout(worker, args, eval, &worker->candidates[cand_idx],
-                         sample_seed, carry);
+                         sample_seed, 0, carry);
       worker->values[round * NESTED_MAX_CANDIDATES + cand_idx] = value;
       worker->sums[cand_idx] += value;
       worker->counts[cand_idx]++;
@@ -1035,7 +1050,7 @@ static const Move *nested_choose_shared(NestedWorker *worker,
       double sum = 0.0;
       for (int sample = 0; sample < args->num_samples; sample++) {
         sum += nested_rollout(worker, args, eval, candidate,
-                              nested_mix(seed + (uint64_t)sample), carry);
+                              nested_mix(seed + (uint64_t)sample), 0, carry);
       }
       value = sum / args->num_samples;
       samples += (uint64_t)args->num_samples;
@@ -1369,12 +1384,15 @@ static bool nested_decided(NestedWorker *worker, const int num_columns,
 }
 
 // Gives each play in pool samples_each more nested rollouts. A play's n-th
-// rollout uses the n-th seed, the same for every play: common random numbers.
+// rollout uses the n-th seed (or, bag-cycled, the n-th rotation), the same
+// for every play: common random numbers.
 static uint64_t nested_sample_pool(NestedWorker *worker,
                                    const NestedLevel *args,
                                    const NestedEval *eval, const int *pool,
                                    const int pool_count, const int samples_each,
                                    const uint64_t seed, BestMoveCarry *carry) {
+  const int rotations =
+      args->bag_cycle ? nested_cycle_rotations(worker->game) : 1;
   uint64_t samples = 0;
   for (int pool_idx = 0; pool_idx < pool_count; pool_idx++) {
     const int play_idx = pool[pool_idx];
@@ -1384,10 +1402,15 @@ static uint64_t nested_sample_pool(NestedWorker *worker,
       worker->evaluated[worker->num_evaluated++] = play_idx;
     }
     for (int sample = 0; sample < samples_each; sample++) {
-      const double value = nested_rollout(
-          worker, args, eval,
-          move_list_get_move(worker->candidate_list, play_idx),
-          nested_mix(seed + (uint64_t)worker->play_counts[play_idx]), carry);
+      // A bag-cycled search's n-th rollout is rotation n % rotations of
+      // shuffle n / rotations.
+      const int count = worker->play_counts[play_idx];
+      const int shuffle = rotations > 1 ? count / rotations : count;
+      const int rotation = rotations > 1 ? count % rotations : 0;
+      const double value =
+          nested_rollout(worker, args, eval,
+                         move_list_get_move(worker->candidate_list, play_idx),
+                         nested_mix(seed + (uint64_t)shuffle), rotation, carry);
       if (args->paired && worker->eval_index[play_idx] >= 0 &&
           worker->play_counts[play_idx] < worker->seed_capacity) {
         worker->seed_values[(ptrdiff_t)worker->eval_index[play_idx] *
@@ -1943,6 +1966,14 @@ static bool nested_parse_setting(const char *key, const char *value,
   }
   if (strings_iequal(key, "step")) {
     return nested_parse_int(value, 1, NESTED_MAX_SAMPLES, &args->step);
+  }
+  if (strings_iequal(key, "cycle")) {
+    int bag_cycle = 0;
+    if (!nested_parse_int(value, 0, 1, &bag_cycle)) {
+      return false;
+    }
+    args->bag_cycle = bag_cycle == 1;
+    return true;
   }
   if (strings_iequal(key, "pair")) {
     int paired = 0;

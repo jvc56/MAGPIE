@@ -679,13 +679,18 @@ static void test_nested_parse(void) {
   nested_args_parse("plies=0,lamc=1,dyn=1,step=3", &args, error_stack);
   assert(error_stack_is_empty(error_stack));
   assert(args.levels[0].dynamic && args.levels[0].step == 3);
+  assert(!args.levels[0].bag_cycle);
+  nested_args_parse("plies=0,lamc=1,cycle=1", &args, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  assert(args.levels[0].bag_cycle);
   nested_args_parse("off", &args, error_stack);
   assert(error_stack_is_empty(error_stack));
   assert(!args.enabled);
-  const char *const bad[] = {
-      "k=0", "plies=",  "m=x",         "alloc=fast",          "q=1",
-      "k",   "k=2/k=0", "share=1/k=2", "m=1/m=1/m=1/m=1/m=1", "pair=2"};
-  for (int bad_idx = 0; bad_idx < 10; bad_idx++) {
+  const char *const bad[] = {"k=0",        "plies=",      "m=x",
+                             "alloc=fast", "q=1",         "k",
+                             "k=2/k=0",    "share=1/k=2", "m=1/m=1/m=1/m=1/m=1",
+                             "pair=2",     "cycle=2"};
+  for (int bad_idx = 0; bad_idx < 11; bad_idx++) {
     nested_args_parse(bad[bad_idx], &args, error_stack);
     assert(error_stack_top(error_stack) == ERROR_STATUS_NESTED_BAD_SPEC);
     error_stack_reset(error_stack);
@@ -705,8 +710,9 @@ void test_nested(void) {
       "plies=0,k=3,m=2,h=1/plies=0,k=2,m=1,dcache=1",
       "plies=0,lamc=1,pool=4,keep=2,rounds=2,m=2,dcache=1/plies=0,lamc=0,k=2",
       "plies=0,lamc=1,pool=5,keep=2,rounds=3,m=2,pair=1",
-      "plies=0,lamc=1,pool=5,rounds=3,m=2,dyn=1,step=1,pair=1"};
-  for (int spec_idx = 0; spec_idx < 10; spec_idx++) {
+      "plies=0,lamc=1,pool=5,rounds=3,m=2,dyn=1,step=1,pair=1",
+      "plies=0,lamc=1,pool=5,keep=2,rounds=3,m=2,cycle=1"};
+  for (int spec_idx = 0; spec_idx < 11; spec_idx++) {
     const uint64_t one = nested_test_sim(1, specs[spec_idx]);
     const uint64_t several = nested_test_sim(4, specs[spec_idx]);
     assert(one == several);
