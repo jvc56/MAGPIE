@@ -80,6 +80,8 @@
 #include "peg_validate_test.h"
 #include "play_chooser_test.h"
 #include "players_data_test.h"
+#include "pool_leaves_bench_test.h"
+#include "pool_leaves_equivalence_test.h"
 #include "pool_shift_test.h"
 #include "position_lengths_test.h"
 #include "rack_info_table_test.h"
@@ -161,6 +163,7 @@ static TestEntry test_table[] = {
     {"eqadj", test_equity_adjustments},
     {"pegadjust", test_peg_adjust},
     {"poolshift", test_pool_shift},
+    {"poolleavesequiv", test_pool_leaves_equivalence},
     {"gameplay", test_gameplay},
     {"stats", test_stats},
     {"infer", test_infer},
@@ -351,6 +354,14 @@ void run_test(const char *subtest) {
   }
   if (has_prefix("patopeningsim:", subtest)) {
     pat_opening_sim_run_spec(subtest + strlen("patopeningsim:"));
+    return;
+  }
+  if (has_prefix("poolleavesbench:", subtest)) {
+    pool_leaves_bench_run_spec(subtest + strlen("poolleavesbench:"));
+    return;
+  }
+  if (has_prefix("poolleavesequiv:", subtest)) {
+    pool_leaves_equivalence_run_spec(subtest + strlen("poolleavesequiv:"));
     return;
   }
   if (has_prefix("egspeedbench:", subtest)) {
