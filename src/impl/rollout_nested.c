@@ -1339,9 +1339,26 @@ static bool nested_decided(NestedWorker *worker, const int num_columns,
   double variance = 0.0;
   nested_posterior(worker, num_columns, best, &mean, &variance);
   const double floor = mean - stop_z * sqrt(variance > 0.0 ? variance : 0.0);
-  for (int play_idx = 0; play_idx < count; play_idx++) {
+  // A play's mean plus stop_z deviations is at most its prior mean plus the
+  // process's bounds (see nested_set_upper_bounds), so plays are visited by
+  // prior mean, highest first, until even that is below the floor.
+  double mean_bound = 0.0;
+  double variance_bound = 0.0;
+  gp_get_bounds(worker->gp, &mean_bound, &variance_bound);
+  double excess =
+      mean_bound + stop_z * sqrt(variance_bound > 0.0 ? variance_bound : 0.0);
+  excess += NESTED_BOUND_SLACK * (1.0 + fabs(excess));
+  const bool ascending = worker->mean_slope < 0.0;
+  for (int rank = 0; rank < count; rank++) {
+    const int play_idx =
+        worker->equity_order[ascending ? count - 1 - rank : rank].play_idx;
     if (play_idx == best) {
       continue;
+    }
+    const double prior = worker->mean_intercept +
+                         worker->mean_slope * worker->static_equity[play_idx];
+    if (prior + excess < floor) {
+      break;
     }
     nested_posterior(worker, num_columns, play_idx, &mean, &variance);
     if (mean + stop_z * sqrt(variance > 0.0 ? variance : 0.0) >= floor) {
