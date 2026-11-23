@@ -1,4 +1,4 @@
-8763 finished positions from 475 games
+12485 finished positions from 675 games
   SIMH checks placements=109651366 placement_mismatches=0 other_plays=891127 other_play_mismatches=0 horizons=49111883 horizon_mismatches=0 positive_pat_terms=0 mean_mismatches=0
   SIMH checks placements=116594362 placement_mismatches=0 other_plays=726512 other_play_mismatches=0 horizons=51309744 horizon_mismatches=0 positive_pat_terms=0 mean_mismatches=0
   SIMH checks placements=113767456 placement_mismatches=0 other_plays=871637 other_play_mismatches=0 horizons=51563961 horizon_mismatches=0 positive_pat_terms=0 mean_mismatches=0
@@ -18,108 +18,116 @@
   SIMH checks placements=124227353 placement_mismatches=0 other_plays=1223761 other_play_mismatches=0 horizons=54781388 horizon_mismatches=0 positive_pat_terms=0 mean_mismatches=0
   SIMH checks placements=116277530 placement_mismatches=0 other_plays=1112636 other_play_mismatches=0 horizons=52150689 horizon_mismatches=0 positive_pat_terms=0 mean_mismatches=0
   SIMH checks placements=121898670 placement_mismatches=0 other_plays=991404 other_play_mismatches=2 horizons=53391457 horizon_mismatches=0 positive_pat_terms=0 mean_mismatches=0
-  mean seconds a position: screen 0.61, main 0.89, oracle 0.47
+  SIMH checks placements=104053190 placement_mismatches=0 other_plays=768932 other_play_mismatches=0 horizons=46947148 horizon_mismatches=0 positive_pat_terms=0 mean_mismatches=0
+  SIMH checks placements=110673209 placement_mismatches=0 other_plays=995423 other_play_mismatches=0 horizons=49990666 horizon_mismatches=0 positive_pat_terms=0 mean_mismatches=0
+  SIMH checks placements=130012331 placement_mismatches=0 other_plays=1136084 other_play_mismatches=0 horizons=57574934 horizon_mismatches=0 positive_pat_terms=0 mean_mismatches=0
+  SIMH checks placements=117240680 placement_mismatches=0 other_plays=1048273 other_play_mismatches=0 horizons=52890586 horizon_mismatches=0 positive_pat_terms=0 mean_mismatches=0
+  SIMH checks placements=118118095 placement_mismatches=0 other_plays=964759 other_play_mismatches=0 horizons=53167245 horizon_mismatches=0 positive_pat_terms=0 mean_mismatches=0
+  SIMH checks placements=106368236 placement_mismatches=0 other_plays=755774 other_play_mismatches=0 horizons=48373435 horizon_mismatches=0 positive_pat_terms=0 mean_mismatches=0
+  SIMH checks placements=123421111 placement_mismatches=0 other_plays=953314 other_play_mismatches=0 horizons=56455700 horizon_mismatches=0 positive_pat_terms=0 mean_mismatches=0
+  SIMH checks placements=115451903 placement_mismatches=0 other_plays=849784 other_play_mismatches=0 horizons=51423596 horizon_mismatches=0 positive_pat_terms=0 mean_mismatches=0
+  mean seconds a position: screen 0.61, main 0.88, oracle 0.46
 
-against 'sim as it is': picks by util from about 48022 rollouts a candidate; 8763 positions from 475 games, 3219 with more than one candidate kept, 1199 with differing picks
+against 'sim as it is': picks by util from about 48022 rollouts a candidate; 12485 positions from 675 games, 4563 with more than one candidate kept, 1677 with differing picks
   variant                               differs         spread/pos        win pts/pos    utility/pos x 1e4   oracle noise per differing pick (spread, win pts)
-  rollout leaves, no shift                4.15%  +0.0147 (0.0077)  +0.0030 (0.0046)   +0.3110 (0.3380)   0.46, 0.31
-  rollout leaves, no shift + half PAT     5.42%  +0.0364 (0.0076)  +0.0063 (0.0048)   +0.6677 (0.3533)   0.47, 0.32
-  rollout leaves, no shift + PAT          7.05%  +0.0303 (0.0079)  +0.0027 (0.0051)   +0.3786 (0.3694)   0.49, 0.32
-  sim as it is + half PAT                 2.82%  +0.0172 (0.0053)  +0.0047 (0.0026)   +0.4208 (0.1999)   0.51, 0.34
-  sim as it is + PAT                      4.95%  +0.0186 (0.0063)  +0.0026 (0.0032)   +0.2856 (0.2436)   0.52, 0.33
-  shift on own leave only                 3.23%  +0.0333 (0.0070)  +0.0097 (0.0047)   +0.8892 (0.3329)   0.46, 0.32
-  shift on own leave only + half PAT      4.50%  +0.0522 (0.0071)  +0.0124 (0.0051)   +1.1858 (0.3658)   0.48, 0.32
-  shift on own leave only + PAT           6.48%  +0.0500 (0.0076)  +0.0086 (0.0054)   +0.9103 (0.3883)   0.50, 0.32
-  opponent's leave at stock               3.64%  +0.0214 (0.0075)  -0.0009 (0.0056)   +0.0849 (0.4070)   0.46, 0.31
-  opponent's leave at stock + half PAT    4.79%  +0.0329 (0.0080)  +0.0012 (0.0055)   +0.2948 (0.3957)   0.48, 0.32
-  opponent's leave at stock + PAT         6.63%  +0.0341 (0.0080)  -0.0028 (0.0057)   +0.0295 (0.4054)   0.49, 0.32
-  both leaves at stock                    4.80%  +0.0060 (0.0098)  +0.0012 (0.0052)   +0.1145 (0.3850)   0.46, 0.31
-  both leaves at stock + half PAT         6.11%  +0.0104 (0.0099)  +0.0015 (0.0052)   +0.1540 (0.3862)   0.48, 0.32
-  both leaves at stock + PAT              7.82%  +0.0130 (0.0101)  +0.0049 (0.0052)   +0.3996 (0.3821)   0.49, 0.32
-  empty-bag plays at -2 face - 10         0.70%  -0.0131 (0.0074)  -0.0133 (0.0057)   -0.9882 (0.4214)   0.28, 0.26
-  empty-bag plays at -2 face - 10 + half PAT    3.33%  -0.0020 (0.0083)  -0.0091 (0.0063)   -0.6393 (0.4660)   0.48, 0.33
-  empty-bag plays at -2 face - 10 + PAT    5.41%  -0.0017 (0.0088)  -0.0108 (0.0067)   -0.7546 (0.4918)   0.50, 0.33
-  empty-bag plays at 0                    0.60%  -0.0102 (0.0071)  +0.0070 (0.0038)   +0.3907 (0.2735)   0.30, 0.25
-  empty-bag plays at 0 + half PAT         3.36%  +0.0072 (0.0088)  +0.0131 (0.0051)   +0.9127 (0.3747)   0.48, 0.33
-  empty-bag plays at 0 + PAT              5.43%  +0.0064 (0.0095)  +0.0108 (0.0054)   +0.7457 (0.4009)   0.50, 0.33
-  short-bag plays at 0                    1.75%  -0.0434 (0.0102)  +0.0010 (0.0061)   -0.2417 (0.4394)   0.30, 0.27
-  short-bag plays at 0 + half PAT         4.25%  -0.0322 (0.0109)  +0.0024 (0.0062)   -0.0749 (0.4491)   0.45, 0.32
-  short-bag plays at 0 + PAT              6.37%  -0.0311 (0.0113)  -0.0001 (0.0064)   -0.2453 (0.4695)   0.48, 0.32
-  short-bag plays x bag/7                 1.23%  -0.0210 (0.0098)  +0.0114 (0.0053)   +0.6169 (0.3924)   0.28, 0.26
-  short-bag plays x bag/7 + half PAT      3.74%  -0.0080 (0.0103)  +0.0138 (0.0055)   +0.8603 (0.4099)   0.46, 0.32
-  short-bag plays x bag/7 + PAT           5.88%  -0.0105 (0.0109)  +0.0095 (0.0059)   +0.5458 (0.4368)   0.49, 0.32
-  shift for both or neither               1.11%  +0.0171 (0.0065)  +0.0085 (0.0044)   +0.6890 (0.3222)   0.35, 0.30
-  shift for both or neither + half PAT    3.64%  +0.0325 (0.0071)  +0.0068 (0.0052)   +0.6746 (0.3749)   0.48, 0.33
-  shift for both or neither + PAT         5.73%  +0.0324 (0.0077)  +0.0037 (0.0055)   +0.4583 (0.3991)   0.50, 0.33
+  rollout leaves, no shift                4.04%  +0.0162 (0.0066)  +0.0071 (0.0039)   +0.5996 (0.2822)   0.46, 0.32
+  rollout leaves, no shift + half PAT     5.18%  +0.0323 (0.0065)  +0.0090 (0.0040)   +0.8284 (0.2898)   0.47, 0.31
+  rollout leaves, no shift + PAT          6.90%  +0.0295 (0.0072)  +0.0080 (0.0042)   +0.7380 (0.3077)   0.50, 0.32
+  sim as it is + half PAT                 2.70%  +0.0141 (0.0042)  +0.0041 (0.0020)   +0.3655 (0.1529)   0.52, 0.33
+  sim as it is + PAT                      4.93%  +0.0161 (0.0061)  +0.0030 (0.0026)   +0.3025 (0.2034)   0.51, 0.32
+  shift on own leave only                 3.14%  +0.0322 (0.0059)  +0.0120 (0.0038)   +1.0374 (0.2756)   0.45, 0.31
+  shift on own leave only + half PAT      4.40%  +0.0480 (0.0059)  +0.0148 (0.0040)   +1.3230 (0.2925)   0.48, 0.32
+  shift on own leave only + PAT           6.30%  +0.0456 (0.0071)  +0.0118 (0.0044)   +1.1031 (0.3183)   0.50, 0.32
+  opponent's leave at stock               3.59%  +0.0226 (0.0071)  +0.0032 (0.0045)   +0.3725 (0.3239)   0.45, 0.32
+  opponent's leave at stock + half PAT    4.65%  +0.0335 (0.0074)  +0.0059 (0.0044)   +0.6218 (0.3185)   0.47, 0.31
+  opponent's leave at stock + PAT         6.46%  +0.0315 (0.0076)  +0.0016 (0.0046)   +0.3139 (0.3317)   0.49, 0.32
+  both leaves at stock                    4.65%  +0.0113 (0.0084)  +0.0053 (0.0042)   +0.4341 (0.3106)   0.46, 0.32
+  both leaves at stock + half PAT         5.90%  +0.0171 (0.0087)  +0.0057 (0.0043)   +0.4883 (0.3201)   0.48, 0.32
+  both leaves at stock + PAT              7.66%  +0.0143 (0.0090)  +0.0056 (0.0044)   +0.4628 (0.3294)   0.49, 0.33
+  empty-bag plays at -2 face - 10         0.68%  -0.0143 (0.0060)  -0.0122 (0.0046)   -0.9205 (0.3375)   0.29, 0.27
+  empty-bag plays at -2 face - 10 + half PAT    3.21%  -0.0039 (0.0069)  -0.0058 (0.0050)   -0.4250 (0.3682)   0.49, 0.32
+  empty-bag plays at -2 face - 10 + PAT    5.37%  -0.0043 (0.0075)  -0.0071 (0.0053)   -0.5170 (0.3924)   0.50, 0.32
+  empty-bag plays at 0                    0.59%  -0.0069 (0.0061)  +0.0054 (0.0031)   +0.3068 (0.2274)   0.29, 0.26
+  empty-bag plays at 0 + half PAT         3.24%  +0.0062 (0.0077)  +0.0107 (0.0040)   +0.7440 (0.2979)   0.48, 0.32
+  empty-bag plays at 0 + PAT              5.43%  +0.0040 (0.0085)  +0.0082 (0.0044)   +0.5607 (0.3288)   0.50, 0.32
+  short-bag plays at 0                    1.73%  -0.0464 (0.0084)  -0.0039 (0.0048)   -0.5887 (0.3498)   0.30, 0.28
+  short-bag plays at 0 + half PAT         4.16%  -0.0362 (0.0090)  -0.0032 (0.0050)   -0.4827 (0.3697)   0.45, 0.31
+  short-bag plays at 0 + PAT              6.36%  -0.0361 (0.0094)  -0.0043 (0.0053)   -0.5618 (0.3902)   0.47, 0.31
+  short-bag plays x bag/7                 1.19%  -0.0239 (0.0079)  +0.0046 (0.0043)   +0.1385 (0.3185)   0.28, 0.27
+  short-bag plays x bag/7 + half PAT      3.66%  -0.0153 (0.0083)  +0.0075 (0.0044)   +0.3891 (0.3297)   0.46, 0.32
+  short-bag plays x bag/7 + PAT           5.83%  -0.0164 (0.0088)  +0.0049 (0.0047)   +0.2004 (0.3518)   0.49, 0.32
+  shift for both or neither               1.04%  +0.0150 (0.0053)  +0.0080 (0.0035)   +0.6454 (0.2532)   0.36, 0.31
+  shift for both or neither + half PAT    3.48%  +0.0271 (0.0058)  +0.0083 (0.0040)   +0.7390 (0.2897)   0.48, 0.33
+  shift for both or neither + PAT         5.65%  +0.0276 (0.0070)  +0.0073 (0.0043)   +0.6696 (0.3140)   0.50, 0.32
 
-bag of 21 or more: against 'sim as it is': picks by util from about 48022 rollouts a candidate; 7172 positions from 475 games, 2419 with more than one candidate kept, 789 with differing picks
+bag of 21 or more: against 'sim as it is': picks by util from about 48022 rollouts a candidate; 10232 positions from 675 games, 3430 with more than one candidate kept, 1105 with differing picks
   variant                               differs         spread/pos        win pts/pos    utility/pos x 1e4   oracle noise per differing pick (spread, win pts)
-  rollout leaves, no shift                3.22%  +0.0023 (0.0059)  -0.0027 (0.0021)   -0.1661 (0.1691)   0.52, 0.32
-  rollout leaves, no shift + half PAT     4.59%  +0.0220 (0.0061)  +0.0026 (0.0022)   +0.3099 (0.1781)   0.52, 0.32
-  rollout leaves, no shift + PAT          6.46%  +0.0157 (0.0063)  +0.0000 (0.0025)   +0.0913 (0.1969)   0.54, 0.33
-  sim as it is + half PAT                 2.82%  +0.0123 (0.0039)  +0.0024 (0.0013)   +0.2350 (0.1060)   0.54, 0.35
-  sim as it is + PAT                      5.09%  +0.0119 (0.0049)  +0.0007 (0.0019)   +0.1103 (0.1475)   0.55, 0.34
-  shift on own leave only                 2.52%  +0.0218 (0.0051)  +0.0056 (0.0016)   +0.5176 (0.1265)   0.51, 0.33
-  shift on own leave only + half PAT      3.96%  +0.0356 (0.0054)  +0.0083 (0.0019)   +0.7842 (0.1535)   0.53, 0.34
-  shift on own leave only + PAT           6.11%  +0.0314 (0.0059)  +0.0054 (0.0023)   +0.5565 (0.1795)   0.54, 0.33
-  opponent's leave at stock               2.75%  +0.0129 (0.0050)  +0.0023 (0.0016)   +0.2424 (0.1287)   0.52, 0.33
-  opponent's leave at stock + half PAT    3.97%  +0.0215 (0.0053)  +0.0045 (0.0019)   +0.4369 (0.1511)   0.54, 0.34
-  opponent's leave at stock + PAT         5.93%  +0.0237 (0.0057)  +0.0023 (0.0022)   +0.2943 (0.1735)   0.54, 0.34
-  both leaves at stock                    3.49%  -0.0104 (0.0053)  -0.0057 (0.0022)   -0.4522 (0.1701)   0.53, 0.33
-  both leaves at stock + half PAT         4.95%  -0.0025 (0.0055)  -0.0050 (0.0023)   -0.3637 (0.1843)   0.54, 0.34
-  both leaves at stock + PAT              6.96%  -0.0026 (0.0061)  -0.0071 (0.0026)   -0.5133 (0.2062)   0.54, 0.34
+  rollout leaves, no shift                3.14%  +0.0015 (0.0048)  -0.0012 (0.0020)   -0.0650 (0.1552)   0.51, 0.32
+  rollout leaves, no shift + half PAT     4.41%  +0.0168 (0.0050)  +0.0032 (0.0020)   +0.3186 (0.1608)   0.51, 0.32
+  rollout leaves, no shift + PAT          6.35%  +0.0121 (0.0052)  +0.0018 (0.0023)   +0.1936 (0.1777)   0.54, 0.33
+  sim as it is + half PAT                 2.76%  +0.0098 (0.0031)  +0.0029 (0.0011)   +0.2526 (0.0906)   0.54, 0.34
+  sim as it is + PAT                      5.10%  +0.0093 (0.0043)  +0.0024 (0.0018)   +0.2164 (0.1403)   0.54, 0.33
+  shift on own leave only                 2.42%  +0.0208 (0.0040)  +0.0064 (0.0013)   +0.5701 (0.1082)   0.50, 0.32
+  shift on own leave only + half PAT      3.86%  +0.0320 (0.0043)  +0.0094 (0.0016)   +0.8426 (0.1276)   0.52, 0.33
+  shift on own leave only + PAT           5.93%  +0.0274 (0.0047)  +0.0061 (0.0019)   +0.5798 (0.1517)   0.54, 0.33
+  opponent's leave at stock               2.65%  +0.0107 (0.0040)  +0.0029 (0.0014)   +0.2682 (0.1099)   0.51, 0.33
+  opponent's leave at stock + half PAT    3.82%  +0.0192 (0.0043)  +0.0054 (0.0016)   +0.4897 (0.1269)   0.53, 0.33
+  opponent's leave at stock + PAT         5.78%  +0.0182 (0.0048)  +0.0022 (0.0019)   +0.2582 (0.1505)   0.54, 0.34
+  both leaves at stock                    3.42%  -0.0080 (0.0042)  -0.0037 (0.0018)   -0.3032 (0.1449)   0.53, 0.33
+  both leaves at stock + half PAT         4.82%  -0.0000 (0.0047)  -0.0020 (0.0020)   -0.1422 (0.1602)   0.53, 0.33
+  both leaves at stock + PAT              6.85%  -0.0040 (0.0053)  -0.0048 (0.0023)   -0.3598 (0.1843)   0.54, 0.34
   empty-bag plays at -2 face - 10         0.00%  +0.0000 (0.0000)  +0.0000 (0.0000)   +0.0000 (0.0000)   0.00, 0.00
-  empty-bag plays at -2 face - 10 + half PAT    2.82%  +0.0123 (0.0039)  +0.0024 (0.0013)   +0.2350 (0.1060)   0.54, 0.35
-  empty-bag plays at -2 face - 10 + PAT    5.09%  +0.0119 (0.0049)  +0.0007 (0.0019)   +0.1103 (0.1475)   0.55, 0.34
+  empty-bag plays at -2 face - 10 + half PAT    2.76%  +0.0098 (0.0031)  +0.0029 (0.0011)   +0.2526 (0.0906)   0.54, 0.34
+  empty-bag plays at -2 face - 10 + PAT    5.10%  +0.0093 (0.0043)  +0.0024 (0.0018)   +0.2164 (0.1403)   0.54, 0.33
   empty-bag plays at 0                    0.00%  +0.0000 (0.0000)  +0.0000 (0.0000)   +0.0000 (0.0000)   0.00, 0.00
-  empty-bag plays at 0 + half PAT         2.82%  +0.0123 (0.0039)  +0.0024 (0.0013)   +0.2350 (0.1060)   0.54, 0.35
-  empty-bag plays at 0 + PAT              5.09%  +0.0119 (0.0049)  +0.0007 (0.0019)   +0.1103 (0.1475)   0.55, 0.34
+  empty-bag plays at 0 + half PAT         2.76%  +0.0098 (0.0031)  +0.0029 (0.0011)   +0.2526 (0.0906)   0.54, 0.34
+  empty-bag plays at 0 + PAT              5.10%  +0.0093 (0.0043)  +0.0024 (0.0018)   +0.2164 (0.1403)   0.54, 0.33
   short-bag plays at 0                    0.00%  +0.0000 (0.0000)  +0.0000 (0.0000)   +0.0000 (0.0000)   0.00, 0.00
-  short-bag plays at 0 + half PAT         2.82%  +0.0123 (0.0039)  +0.0024 (0.0013)   +0.2350 (0.1060)   0.54, 0.35
-  short-bag plays at 0 + PAT              5.09%  +0.0119 (0.0049)  +0.0007 (0.0019)   +0.1103 (0.1475)   0.55, 0.34
+  short-bag plays at 0 + half PAT         2.76%  +0.0098 (0.0031)  +0.0029 (0.0011)   +0.2526 (0.0906)   0.54, 0.34
+  short-bag plays at 0 + PAT              5.10%  +0.0093 (0.0043)  +0.0024 (0.0018)   +0.2164 (0.1403)   0.54, 0.33
   short-bag plays x bag/7                 0.00%  +0.0000 (0.0000)  +0.0000 (0.0000)   +0.0000 (0.0000)   0.00, 0.00
-  short-bag plays x bag/7 + half PAT      2.82%  +0.0123 (0.0039)  +0.0024 (0.0013)   +0.2350 (0.1060)   0.54, 0.35
-  short-bag plays x bag/7 + PAT           5.09%  +0.0119 (0.0049)  +0.0007 (0.0019)   +0.1103 (0.1475)   0.55, 0.34
+  short-bag plays x bag/7 + half PAT      2.76%  +0.0098 (0.0031)  +0.0029 (0.0011)   +0.2526 (0.0906)   0.54, 0.34
+  short-bag plays x bag/7 + PAT           5.10%  +0.0093 (0.0043)  +0.0024 (0.0018)   +0.2164 (0.1403)   0.54, 0.33
   shift for both or neither               0.00%  +0.0000 (0.0000)  +0.0000 (0.0000)   +0.0000 (0.0000)   0.00, 0.00
-  shift for both or neither + half PAT    2.82%  +0.0123 (0.0039)  +0.0024 (0.0013)   +0.2350 (0.1060)   0.54, 0.35
-  shift for both or neither + PAT         5.09%  +0.0119 (0.0049)  +0.0007 (0.0019)   +0.1103 (0.1475)   0.55, 0.34
+  shift for both or neither + half PAT    2.76%  +0.0098 (0.0031)  +0.0029 (0.0011)   +0.2526 (0.0906)   0.54, 0.34
+  shift for both or neither + PAT         5.10%  +0.0093 (0.0043)  +0.0024 (0.0018)   +0.2164 (0.1403)   0.54, 0.33
 
-bag under 21: against 'sim as it is': picks by util from about 48000 rollouts a candidate; 1591 positions from 475 games, 800 with more than one candidate kept, 410 with differing picks
+bag under 21: against 'sim as it is': picks by util from about 48000 rollouts a candidate; 2253 positions from 675 games, 1133 with more than one candidate kept, 572 with differing picks
   variant                               differs         spread/pos        win pts/pos    utility/pos x 1e4   oracle noise per differing pick (spread, win pts)
-  rollout leaves, no shift                8.36%  +0.0706 (0.0351)  +0.0285 (0.0238)   +2.4618 (1.7150)   0.34, 0.30
-  rollout leaves, no shift + half PAT     9.18%  +0.1011 (0.0331)  +0.0228 (0.0247)   +2.2806 (1.7774)   0.33, 0.30
-  rollout leaves, no shift + PAT          9.74%  +0.0962 (0.0359)  +0.0146 (0.0257)   +1.6740 (1.8477)   0.33, 0.29
-  sim as it is + half PAT                 2.83%  +0.0393 (0.0229)  +0.0149 (0.0132)   +1.2582 (0.9876)   0.35, 0.27
-  sim as it is + PAT                      4.34%  +0.0490 (0.0273)  +0.0112 (0.0155)   +1.0763 (1.1602)   0.33, 0.29
-  shift on own leave only                 6.41%  +0.0852 (0.0316)  +0.0285 (0.0250)   +2.5641 (1.7687)   0.33, 0.29
-  shift on own leave only + half PAT      6.91%  +0.1273 (0.0306)  +0.0308 (0.0268)   +2.9962 (1.9112)   0.32, 0.28
-  shift on own leave only + PAT           8.17%  +0.1336 (0.0329)  +0.0230 (0.0281)   +2.5051 (2.0061)   0.32, 0.28
-  opponent's leave at stock               7.67%  +0.0594 (0.0350)  -0.0153 (0.0304)   -0.6254 (2.1811)   0.33, 0.28
-  opponent's leave at stock + half PAT    8.49%  +0.0842 (0.0369)  -0.0136 (0.0291)   -0.3460 (2.0811)   0.32, 0.27
-  opponent's leave at stock + PAT         9.81%  +0.0812 (0.0367)  -0.0255 (0.0297)   -1.1640 (2.1168)   0.31, 0.28
-  both leaves at stock                   10.75%  +0.0801 (0.0491)  +0.0320 (0.0275)   +2.6691 (2.0155)   0.34, 0.29
-  both leaves at stock + half PAT        11.31%  +0.0687 (0.0491)  +0.0306 (0.0275)   +2.4879 (2.0129)   0.33, 0.29
-  both leaves at stock + PAT             11.69%  +0.0834 (0.0492)  +0.0591 (0.0265)   +4.5147 (1.9350)   0.33, 0.29
-  empty-bag plays at -2 face - 10         3.83%  -0.0723 (0.0409)  -0.0735 (0.0315)   -5.4428 (2.3221)   0.28, 0.26
-  empty-bag plays at -2 face - 10 + half PAT    5.66%  -0.0666 (0.0428)  -0.0609 (0.0341)   -4.5806 (2.5137)   0.31, 0.27
-  empty-bag plays at -2 face - 10 + PAT    6.85%  -0.0629 (0.0445)  -0.0626 (0.0356)   -4.6535 (2.6236)   0.31, 0.29
-  empty-bag plays at 0                    3.33%  -0.0560 (0.0393)  +0.0385 (0.0207)   +2.1520 (1.5053)   0.30, 0.25
-  empty-bag plays at 0 + half PAT         5.78%  -0.0159 (0.0453)  +0.0617 (0.0273)   +3.9672 (1.9878)   0.31, 0.28
-  empty-bag plays at 0 + PAT              6.98%  -0.0187 (0.0477)  +0.0565 (0.0285)   +3.6104 (2.0939)   0.31, 0.29
-  short-bag plays at 0                    9.62%  -0.2390 (0.0562)  +0.0055 (0.0334)   -1.3315 (2.4205)   0.30, 0.27
-  short-bag plays at 0 + half PAT        10.69%  -0.2325 (0.0569)  +0.0027 (0.0333)   -1.4719 (2.4219)   0.31, 0.27
-  short-bag plays at 0 + PAT             12.13%  -0.2249 (0.0583)  -0.0034 (0.0345)   -1.8481 (2.5111)   0.31, 0.28
-  short-bag plays x bag/7                 6.79%  -0.1155 (0.0537)  +0.0628 (0.0292)   +3.3979 (2.1591)   0.28, 0.26
-  short-bag plays x bag/7 + half PAT      7.92%  -0.0994 (0.0542)  +0.0655 (0.0297)   +3.6790 (2.1984)   0.30, 0.27
-  short-bag plays x bag/7 + PAT           9.43%  -0.1116 (0.0559)  +0.0494 (0.0313)   +2.5092 (2.3167)   0.30, 0.28
-  shift for both or neither               6.10%  +0.0941 (0.0359)  +0.0466 (0.0243)   +3.7948 (1.7730)   0.35, 0.30
-  shift for both or neither + half PAT    7.35%  +0.1237 (0.0348)  +0.0267 (0.0279)   +2.6558 (2.0109)   0.33, 0.29
-  shift for both or neither + PAT         8.61%  +0.1248 (0.0367)  +0.0173 (0.0291)   +2.0270 (2.1067)   0.34, 0.29
+  rollout leaves, no shift                8.17%  +0.0830 (0.0298)  +0.0445 (0.0196)   +3.6182 (1.4060)   0.36, 0.31
+  rollout leaves, no shift + half PAT     8.70%  +0.1026 (0.0286)  +0.0355 (0.0201)   +3.1434 (1.4460)   0.35, 0.30
+  rollout leaves, no shift + PAT          9.41%  +0.1085 (0.0345)  +0.0361 (0.0213)   +3.2102 (1.5400)   0.34, 0.30
+  sim as it is + half PAT                 2.44%  +0.0334 (0.0182)  +0.0097 (0.0098)   +0.8785 (0.7371)   0.36, 0.28
+  sim as it is + PAT                      4.17%  +0.0471 (0.0286)  +0.0056 (0.0124)   +0.6935 (0.9590)   0.33, 0.29
+  shift on own leave only                 6.39%  +0.0840 (0.0277)  +0.0375 (0.0204)   +3.1599 (1.4509)   0.34, 0.31
+  shift on own leave only + half PAT      6.84%  +0.1205 (0.0270)  +0.0391 (0.0213)   +3.5051 (1.5149)   0.33, 0.29
+  shift on own leave only + PAT           7.94%  +0.1284 (0.0330)  +0.0379 (0.0226)   +3.4794 (1.6215)   0.32, 0.29
+  opponent's leave at stock               7.86%  +0.0766 (0.0349)  +0.0048 (0.0241)   +0.8460 (1.7323)   0.33, 0.29
+  opponent's leave at stock + half PAT    8.39%  +0.0984 (0.0357)  +0.0081 (0.0232)   +1.2213 (1.6653)   0.32, 0.28
+  opponent's leave at stock + PAT         9.54%  +0.0922 (0.0370)  -0.0011 (0.0237)   +0.5665 (1.7057)   0.32, 0.29
+  both leaves at stock                   10.21%  +0.0989 (0.0423)  +0.0464 (0.0225)   +3.7828 (1.6376)   0.34, 0.30
+  both leaves at stock + half PAT        10.79%  +0.0949 (0.0430)  +0.0404 (0.0227)   +3.3517 (1.6535)   0.33, 0.31
+  both leaves at stock + PAT             11.32%  +0.0976 (0.0439)  +0.0527 (0.0223)   +4.1984 (1.6318)   0.34, 0.30
+  empty-bag plays at -2 face - 10         3.77%  -0.0791 (0.0334)  -0.0677 (0.0254)   -5.1008 (1.8717)   0.29, 0.27
+  empty-bag plays at -2 face - 10 + half PAT    5.28%  -0.0661 (0.0355)  -0.0450 (0.0270)   -3.5024 (1.9859)   0.31, 0.28
+  empty-bag plays at -2 face - 10 + PAT    6.61%  -0.0661 (0.0372)  -0.0503 (0.0281)   -3.8481 (2.0754)   0.31, 0.28
+  empty-bag plays at 0                    3.28%  -0.0384 (0.0336)  +0.0298 (0.0170)   +1.7004 (1.2588)   0.29, 0.26
+  empty-bag plays at 0 + half PAT         5.42%  -0.0103 (0.0402)  +0.0461 (0.0213)   +2.9760 (1.5814)   0.30, 0.27
+  empty-bag plays at 0 + PAT              6.92%  -0.0202 (0.0426)  +0.0343 (0.0227)   +2.1241 (1.6957)   0.31, 0.28
+  short-bag plays at 0                    9.59%  -0.2571 (0.0464)  -0.0215 (0.0263)   -3.2625 (1.9386)   0.30, 0.28
+  short-bag plays at 0 + half PAT        10.56%  -0.2456 (0.0474)  -0.0310 (0.0271)   -3.8218 (1.9958)   0.30, 0.28
+  short-bag plays at 0 + PAT             12.07%  -0.2423 (0.0491)  -0.0352 (0.0282)   -4.0961 (2.0859)   0.31, 0.28
+  short-bag plays x bag/7                 6.61%  -0.1326 (0.0434)  +0.0255 (0.0236)   +0.7673 (1.7645)   0.28, 0.27
+  short-bag plays x bag/7 + half PAT      7.77%  -0.1293 (0.0438)  +0.0288 (0.0238)   +1.0090 (1.7728)   0.30, 0.28
+  short-bag plays x bag/7 + PAT           9.14%  -0.1334 (0.0455)  +0.0162 (0.0250)   +0.1279 (1.8668)   0.30, 0.28
+  shift for both or neither               5.77%  +0.0832 (0.0295)  +0.0444 (0.0194)   +3.5766 (1.4017)   0.36, 0.31
+  shift for both or neither + half PAT    6.79%  +0.1056 (0.0288)  +0.0327 (0.0216)   +2.9480 (1.5517)   0.34, 0.30
+  shift for both or neither + PAT         8.17%  +0.1106 (0.0343)  +0.0291 (0.0228)   +2.7278 (1.6461)   0.34, 0.29
 
 The two last plays by root bag, as shares of the kept candidates' rollouts
   root bag   cands   own last play from a bag that is empty / short   opponent's: empty / short   shift applies to: opponent's only / own only / both
-  7-13        1310                           29.1% / 61.6%                 0.8% / 54.0%                          35.9% /  0.0% /  9.3%
-  14-20       1135                            0.2% / 20.1%                 0.0% /  0.0%                          20.3% /  0.0% / 79.7%
-  21-29       1039                            0.0% /  0.0%                 0.0% /  0.0%                           0.0% /  0.0% / 100.0%
-  30-49       1992                            0.0% /  0.0%                 0.0% /  0.0%                           0.0% /  0.0% / 100.0%
-  50+         3330                            0.0% /  0.0%                 0.0% /  0.0%                           0.0% /  0.0% / 100.0%
+  7-13        1901                           28.3% / 62.8%                 1.3% / 52.9%                          37.0% /  0.0% /  8.8%
+  14-20       1554                            0.3% / 20.0%                 0.0% /  0.0%                          20.3% /  0.0% / 79.7%
+  21-29       1535                            0.0% /  0.0%                 0.0% /  0.0%                           0.0% /  0.0% / 100.0%
+  30-49       2704                            0.0% /  0.0%                 0.0% /  0.0%                           0.0% /  0.0% / 100.0%
+  50+         4800                            0.0% /  0.0%                 0.0% /  0.0%                           0.0% /  0.0% / 100.0%

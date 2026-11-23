@@ -17,3 +17,11 @@ v2_g60375.out horizon_mismatches=0  mean_mismatches=0 SIMH done positions=457 wi
 v2_g60400.out horizon_mismatches=0  mean_mismatches=0 SIMH done positions=461 with_main=189 with_oracle=67 seconds=973
 v2_g60425.out horizon_mismatches=0  mean_mismatches=0 SIMH done positions=466 with_main=166 with_oracle=66 seconds=911
 v2_g60450.out horizon_mismatches=0  mean_mismatches=0 SIMH done positions=468 with_main=172 with_oracle=74 seconds=957
+v2_g60475.out horizon_mismatches=0  mean_mismatches=0 SIMH done positions=460 with_main=151 with_oracle=59 seconds=841
+v2_g60500.out horizon_mismatches=0  mean_mismatches=0 SIMH done positions=466 with_main=161 with_oracle=63 seconds=861
+v2_g60525.out horizon_mismatches=0  mean_mismatches=0 SIMH done positions=470 with_main=186 with_oracle=67 seconds=996
+v2_g60550.out horizon_mismatches=0  mean_mismatches=0 SIMH done positions=471 with_main=171 with_oracle=63 seconds=896
+v2_g60575.out horizon_mismatches=0  mean_mismatches=0 SIMH done positions=459 with_main=172 with_oracle=54 seconds=904
+v2_g60600.out horizon_mismatches=0  mean_mismatches=0 SIMH done positions=461 with_main=152 with_oracle=55 seconds=828
+v2_g60625.out horizon_mismatches=0  mean_mismatches=0 SIMH done positions=475 with_main=181 with_oracle=59 seconds=950
+v2_g60650.out horizon_mismatches=0  mean_mismatches=0 SIMH done positions=460 with_main=170 with_oracle=58 seconds=887
