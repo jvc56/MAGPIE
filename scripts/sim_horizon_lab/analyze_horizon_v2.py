@@ -23,11 +23,13 @@ from collections import defaultdict
 # A variant is a leave mode and a share of the last play's PAT term (see
 # SIM_LAB_NUM_LEAVE_MODES in src/impl/sim_lab.h). The rollout's leaves are the
 # stock leaves under a pool shift weight and the leaves of the sim's pool
-# under -poolshift exact. Runs made before the last two leave modes existed
-# have nine variants.
+# under -poolshift exact. Earlier runs have nine or fifteen variants; files
+# with different numbers are compared on the variants they share.
 LEAVE_MODES = ["rollout leaves, no shift", "sim as it is",
                "shift on own leave only", "opponent's leave at stock",
-               "both leaves at stock"]
+               "both leaves at stock", "empty-bag plays at -2 face - 10",
+               "empty-bag plays at 0", "short-bag plays at 0",
+               "short-bag plays x bag/7", "shift for both or neither"]
 PAT_SHARES = ["", " + half PAT", " + PAT"]
 VARIANTS = [mode + share for mode in LEAVE_MODES for share in PAT_SHARES]
 NUM_PARTS = 4
@@ -41,6 +43,8 @@ PICKS_RE = re.compile(r"^SIMH picks pos=(\d+) measure=(\w+) picks=(\S+)")
 ORACLE_RE = re.compile(
     r"^SIMH oracle pos=(\d+) play=(\d+) move=(.*?) half=(\d+) n=(\d+) "
     r"cont=(\d+) fspread=(\S+) fwin=(\S+) futil=(\S+)")
+TALLY_RE = re.compile(r"^SIMH tally pos=(\d+) play=(\d+) move=(.*?) n=(\d+) "
+                      r"bags=(\S+) applies=(\S+)")
 TIME_RE = re.compile(r"^SIMH time pos=(\d+) screen_secs=(\S+) "
                      r"main_secs=(\S+) oracle_secs=(\S+)")
 
@@ -56,7 +60,7 @@ def read(paths):
                     "game": int(match.group(2)), "bag": int(match.group(3)),
                     "kept": int(match.group(5)), "moves": {}, "picks": {},
                     "oracle": defaultdict(dict), "done": False,
-                    "main_rollouts": 0, "seconds": None}
+                    "main_rollouts": 0, "seconds": None, "tally": []}
                 continue
             match = MAIN_RE.match(line)
             if match:
@@ -78,6 +82,13 @@ def read(paths):
                     "fspread": float(match.group(7)),
                     "fwin": float(match.group(8)),
                     "futil": float(match.group(9))}
+                continue
+            match = TALLY_RE.match(line)
+            if match:
+                positions[int(match.group(1))]["tally"].append(
+                    (int(match.group(4)),
+                     [float(value) for value in match.group(5).split(",")],
+                     [float(value) for value in match.group(6).split(",")]))
                 continue
             match = TIME_RE.match(line)
             if match:
@@ -210,6 +221,45 @@ def report(positions, base, measure="util", bag_filter=None, label=""):
               f"{noise[0]:.2f}, {100 * noise[1]:.2f}")
 
 
+def report_tallies(positions):
+    """By root bag: how often each player's last play was made from an empty
+    or a short bag, and how often the pool shift applied to one last play and
+    not the other, over the kept candidates' rollouts."""
+    buckets = [("7-13", 7, 13), ("14-20", 14, 20), ("21-29", 21, 29),
+               ("30-49", 30, 49), ("50+", 50, 1000)]
+    rows = []
+    for name, low, high in buckets:
+        rollouts = 0.0
+        bags = [0.0] * 6
+        applies = [0.0] * 4
+        candidates = 0
+        for position in positions.values():
+            if not position["done"] or not low <= position["bag"] <= high:
+                continue
+            for count, play_bags, play_applies in position["tally"]:
+                candidates += 1
+                rollouts += count
+                for idx in range(6):
+                    bags[idx] += play_bags[idx]
+                for idx in range(4):
+                    applies[idx] += play_applies[idx]
+        if rollouts > 0:
+            rows.append((name, candidates, [value / rollouts for value in bags],
+                         [value / rollouts for value in applies]))
+    if not rows:
+        return
+    print("\nThe two last plays by root bag, as shares of the kept "
+          "candidates' rollouts")
+    print(f"  {'root bag':9s} {'cands':>6s}   own last play from a bag that "
+          f"is empty / short   opponent's: empty / short   shift applies to: "
+          f"opponent's only / own only / both")
+    for name, candidates, bags, applies in rows:
+        print(f"  {name:9s} {candidates:6d}   {100 * bags[0]:28.1f}% / "
+              f"{100 * bags[1]:4.1f}%   {100 * bags[3]:17.1f}% / "
+              f"{100 * bags[4]:4.1f}%   {100 * applies[1]:27.1f}% / "
+              f"{100 * applies[2]:4.1f}% / {100 * applies[3]:4.1f}%")
+
+
 def main():
     arguments = sys.argv[1:]
     base = 3
@@ -234,6 +284,7 @@ def main():
            label="bag of 21 or more: ")
     report(positions, base, bag_filter=lambda bag: bag < 21,
            label="bag under 21: ")
+    report_tallies(positions)
 
 
 if __name__ == "__main__":

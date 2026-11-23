@@ -6,6 +6,7 @@
 #include "../def/bai_defs.h"
 #include "../def/game_defs.h"
 #include "../def/rack_defs.h"
+#include "../def/static_eval_defs.h"
 #include "../ent/alias_method.h"
 #include "../ent/bag.h"
 #include "../ent/best_move_carry.h"
@@ -645,7 +646,24 @@ typedef struct SimLabTrack {
   Equity pat[SIM_LAB_MAX_TRACKED_PLIES];
   Equity spread_after[SIM_LAB_MAX_TRACKED_PLIES];
   bool over_after[SIM_LAB_MAX_TRACKED_PLIES];
+  // The bag before the play, the face value of the tiles it keeps (not
+  // signed), and whether the pool shift applied to it.
+  int bag_before[SIM_LAB_MAX_TRACKED_PLIES];
+  Equity face[SIM_LAB_MAX_TRACKED_PLIES];
+  bool shift_applies[SIM_LAB_MAX_TRACKED_PLIES];
 } SimLabTrack;
+
+// One of the two plays whose leaves a horizon values.
+typedef struct SimLabLastPlay {
+  bool is_played;
+  bool is_own;
+  // Signed for the simming player, as in SimLabTrack.
+  Equity plain;
+  Equity shift;
+  Equity face;
+  int bag_before;
+  bool shift_applies;
+} SimLabLastPlay;
 
 static uint64_t sim_lab_hash(uint64_t seed) {
   uint64_t hash = seed + UINT64_C(0x9E3779B97F4A7C15);
@@ -719,6 +737,12 @@ static void sim_lab_track_play(SimLabChecks *checks, SimLabTrack *track,
   const Equity sign = player_index == initial_player ? 1 : -1;
   track->plain[ply] = sign * leave_value;
   track->stock[ply] = sign * klv_get_leave_value(stock_klv, &leave);
+  track->bag_before[ply] = bag_get_letters(game_get_bag(game));
+  track->face[ply] = rack_get_score(game_get_ld(game), &leave);
+  track->shift_applies[ply] =
+      pool_shift_applies(player_get_pool_shift_table(player), klv,
+                         player_get_pool_shift_weight(player), tiles_on_rack,
+                         real_bag_size);
   track->shift[ply] = sign * shift;
   track->bag_shift[ply] = sign * bag_shift;
   track->is_own[ply] = player_index == initial_player;
@@ -744,7 +768,8 @@ static void sim_lab_get_horizon(const SimLabTrack *track, int horizon,
                                 Equity lead_before, bool over_before,
                                 Equity *lead, bool *is_over, Equity *plain,
                                 Equity *shift, Equity *pat,
-                                Equity splits[SIM_LAB_NUM_SPLITS]) {
+                                Equity splits[SIM_LAB_NUM_SPLITS],
+                                SimLabLastPlay last_plays[2]) {
   const int plies_played = track->plies < horizon ? track->plies : horizon;
   *lead = plies_played == 0 ? lead_before
                             : track->spread_after[plies_played - 1];
@@ -757,7 +782,15 @@ static void sim_lab_get_horizon(const SimLabTrack *track, int horizon,
     splits[split] = 0;
   }
   for (int ply = horizon - 2; ply < horizon; ply++) {
-    if (ply >= 0 && ply < plies_played) {
+    SimLabLastPlay *last_play = &last_plays[ply - (horizon - 2)];
+    last_play->is_played = ply >= 0 && ply < plies_played;
+    if (last_play->is_played) {
+      last_play->is_own = track->is_own[ply];
+      last_play->plain = track->plain[ply];
+      last_play->shift = track->shift[ply];
+      last_play->face = track->face[ply];
+      last_play->bag_before = track->bag_before[ply];
+      last_play->shift_applies = track->shift_applies[ply];
       *plain += track->plain[ply];
       *shift += track->shift[ply];
       if (track->is_own[ply]) {
@@ -776,6 +809,44 @@ static void sim_lab_get_horizon(const SimLabTrack *track, int horizon,
   if (plies_played == horizon && !*is_over) {
     *pat = track->pat[horizon - 1];
   }
+}
+
+// The value of the two last plays' leaves under a leave mode of 5 or more
+// (see SIM_LAB_NUM_LEAVE_MODES), signed for the simming player.
+static Equity sim_lab_get_short_bag_leaves(int leave_mode,
+                                           const SimLabLastPlay last_plays[2]) {
+  bool shift_applies_to_both = true;
+  for (int play_idx = 0; play_idx < 2; play_idx++) {
+    if (!last_plays[play_idx].is_played ||
+        !last_plays[play_idx].shift_applies) {
+      shift_applies_to_both = false;
+    }
+  }
+  Equity leaves = 0;
+  for (int play_idx = 0; play_idx < 2; play_idx++) {
+    const SimLabLastPlay *last_play = &last_plays[play_idx];
+    if (!last_play->is_played) {
+      continue;
+    }
+    const Equity as_the_sim = last_play->plain + last_play->shift;
+    const int bag = last_play->bag_before;
+    Equity value = as_the_sim;
+    if (leave_mode == 5 && bag == 0) {
+      const Equity empty_bag_term =
+          -(2 * last_play->face + NON_OUTPLAY_CONSTANT_PENALTY);
+      value = last_play->is_own ? empty_bag_term : -empty_bag_term;
+    } else if (leave_mode == 6 && bag == 0) {
+      value = 0;
+    } else if (leave_mode == 7 && bag < RACK_SIZE) {
+      value = 0;
+    } else if (leave_mode == 8 && bag < RACK_SIZE) {
+      value = as_the_sim * bag / RACK_SIZE;
+    } else if (leave_mode == 9 && !shift_applies_to_both) {
+      value = last_play->plain;
+    }
+    leaves += value;
+  }
+  return leaves;
 }
 
 // The win fraction simmed_play_add_win_pct_stat records for a horizon.
@@ -989,9 +1060,29 @@ static double sim_rollout(const Simmer *simmer, SimmerWorker *simmer_worker,
     Equity lab_shift = 0;
     Equity lab_pat = 0;
     Equity lab_splits[SIM_LAB_NUM_SPLITS];
+    SimLabLastPlay lab_last_plays[2];
     sim_lab_get_horizon(&lab_track, plies, lab_lead_before, lab_over_before,
                         &lab_lead, &lab_is_over, &lab_plain, &lab_shift,
-                        &lab_pat, lab_splits);
+                        &lab_pat, lab_splits, lab_last_plays);
+    for (int play_idx = 0; play_idx < 2; play_idx++) {
+      const SimLabLastPlay *last_play = &lab_last_plays[play_idx];
+      if (!last_play->is_played) {
+        continue;
+      }
+      int bag_class = SIM_LAB_BAG_FULL;
+      if (last_play->bag_before == 0) {
+        bag_class = SIM_LAB_BAG_EMPTY;
+      } else if (last_play->bag_before < RACK_SIZE) {
+        bag_class = SIM_LAB_BAG_SHORT;
+      }
+      cell->bag_class_sum[last_play->is_own ? 0 : 1][bag_class] += 1.0;
+    }
+    if (lab_last_plays[0].is_played && lab_last_plays[1].is_played) {
+      const int own_idx = lab_last_plays[0].is_own ? 0 : 1;
+      cell->applies_sum[lab_last_plays[own_idx].shift_applies ? 1 : 0]
+                       [lab_last_plays[1 - own_idx].shift_applies ? 1 : 0] +=
+          1.0;
+    }
     for (int split = 0; split < SIM_LAB_NUM_SPLITS; split++) {
       cell->split_sum[split] += equity_to_double(lab_splits[split]);
     }
@@ -1019,6 +1110,9 @@ static double sim_rollout(const Simmer *simmer, SimmerWorker *simmer_worker,
         } else if (leave_mode == 4) {
           variant_leaves = lab_splits[SIM_LAB_SPLIT_OWN_STOCK] +
                            lab_splits[SIM_LAB_SPLIT_OPPONENT_STOCK];
+        } else if (leave_mode >= 5) {
+          variant_leaves =
+              sim_lab_get_short_bag_leaves(leave_mode, lab_last_plays);
         }
         const Equity variant_leftover =
             variant_leaves +
@@ -1069,9 +1163,11 @@ static double sim_rollout(const Simmer *simmer, SimmerWorker *simmer_worker,
       Equity deep_shift = 0;
       Equity deep_pat = 0;
       Equity deep_splits[SIM_LAB_NUM_SPLITS];
+      SimLabLastPlay deep_last_plays[2];
       sim_lab_get_horizon(&lab_track, plies + 2, lab_lead_before,
                           lab_over_before, &deep_lead, &deep_is_over,
-                          &deep_plain, &deep_shift, &deep_pat, deep_splits);
+                          &deep_plain, &deep_shift, &deep_pat, deep_splits,
+                          deep_last_plays);
       cell->continued++;
       cell->final_spread_sum +=
           equity_to_double(final_spread - simmer->initial_spread);

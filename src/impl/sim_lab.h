@@ -32,7 +32,16 @@ enum {
   //   3  the simming player's as in 1, the opponent's at its stock value
   //   4  both at their stock values
   // Under a pool shift weight, 3 is 2 and 4 is 0.
-  SIM_LAB_NUM_LEAVE_MODES = 5,
+  // The rest are the sim as it is (1) except for a last play made from a
+  // short bag, where a leave no longer draws a full rack:
+  //   5  from an empty bag: the engine's empty-bag term for the tiles kept,
+  //      minus twice their face value minus the non-out-play penalty
+  //   6  from an empty bag: 0
+  //   7  from a bag of fewer tiles than a rack: 0
+  //   8  from a bag of fewer tiles than a rack: its value and shift times
+  //      the bag's tiles over a rack's
+  //   9  the shift only where it applies to both players' last plays
+  SIM_LAB_NUM_LEAVE_MODES = 10,
   // How much of the last play's PAT term the horizon charges: none, half or
   // all of it.
   SIM_LAB_NUM_PAT_SHARES = 3,
@@ -67,6 +76,10 @@ enum {
   SIM_LAB_SPLIT_OWN_STOCK = 6,
   SIM_LAB_SPLIT_OPPONENT_STOCK = 7,
   SIM_LAB_NUM_SPLITS = 8,
+  SIM_LAB_BAG_EMPTY = 0,
+  SIM_LAB_BAG_SHORT = 1,
+  SIM_LAB_BAG_FULL = 2,
+  SIM_LAB_NUM_BAG_CLASSES = 3,
   // The plies of a rollout whose terms are kept: the sim's and two more.
   SIM_LAB_MAX_TRACKED_PLIES = 8,
   SIM_LAB_MAX_SIM_PLIES = SIM_LAB_MAX_TRACKED_PLIES - 2,
@@ -86,6 +99,13 @@ typedef struct SimLabCell {
   double pat_sum;
   // The shift in parts (see SIM_LAB_SPLIT_*), over every rollout.
   double split_sum[SIM_LAB_NUM_SPLITS];
+  // How many rollouts had the simming player's last play ([0]) and the
+  // opponent's ([1]) made from an empty bag, from a bag of fewer tiles than
+  // a rack, and from a fuller one.
+  double bag_class_sum[2][SIM_LAB_NUM_BAG_CLASSES];
+  // How many rollouts with both last plays played had the pool shift apply
+  // to the simming player's ([1][.]) and to the opponent's ([.][1]).
+  double applies_sum[2][2];
   // The rollouts played on to the end of the game.
   uint64_t continued;
   double final_spread_sum;

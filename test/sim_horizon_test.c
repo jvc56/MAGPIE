@@ -34,6 +34,7 @@
 //   SIMH screen ...  a candidate's screen values
 //   SIMH mid ...     a kept candidate's utilities after <mid> rollouts
 //   SIMH main ...    a kept candidate's values in one part
+//   SIMH tally ...   its rollouts by the bag its last plays were made from
 //   SIMH picks ...   the main play each variant picks, by one measure
 //   SIMH oracle ...  a pick's finished games in one part
 //   SIMH checks ...  the lab's checks of its own arithmetic
@@ -153,6 +154,15 @@ static void simh_cell_add(SimLabCell *total, const SimLabCell *cell) {
   for (int split = 0; split < SIM_LAB_NUM_SPLITS; split++) {
     total->split_sum[split] += cell->split_sum[split];
   }
+  for (int side = 0; side < 2; side++) {
+    for (int bag_class = 0; bag_class < SIM_LAB_NUM_BAG_CLASSES; bag_class++) {
+      total->bag_class_sum[side][bag_class] +=
+          cell->bag_class_sum[side][bag_class];
+    }
+    for (int other = 0; other < 2; other++) {
+      total->applies_sum[side][other] += cell->applies_sum[side][other];
+    }
+  }
   total->continued += cell->continued;
   total->final_spread_sum += cell->final_spread_sum;
   total->final_win_sum += cell->final_win_sum;
@@ -239,6 +249,29 @@ static void simh_print_screen(int pos_idx, int play_idx, const SimhPlay *play) {
   simh_print_variants("util", both.utility_sum, rollouts);
   printf(" shift=%.6f pat=%.6f\n", both.shift_sum / rollouts,
          both.pat_sum / rollouts);
+}
+
+// A kept candidate's counts of rollouts by the bag its two last plays were
+// made from (the simming player's, then the opponent's: empty, short, full)
+// and by whether the pool shift applied to them (neither, the opponent's
+// only, the simming player's only, both).
+static void simh_print_tally(int pos_idx, int play_idx, const SimhPlay *play) {
+  SimLabCell both;
+  memset(&both, 0, sizeof(both));
+  for (int half = 0; half < SIM_LAB_NUM_HALVES; half++) {
+    simh_cell_add(&both, &play->halves[half]);
+  }
+  printf("SIMH tally pos=%d play=%d move=%s n=%llu bags=", pos_idx, play_idx,
+         play->move, (unsigned long long)both.rollouts);
+  for (int side = 0; side < 2; side++) {
+    for (int bag_class = 0; bag_class < SIM_LAB_NUM_BAG_CLASSES; bag_class++) {
+      printf("%s%.0f", side + bag_class == 0 ? "" : ",",
+             both.bag_class_sum[side][bag_class]);
+    }
+  }
+  printf(" applies=%.0f,%.0f,%.0f,%.0f\n", both.applies_sum[0][0],
+         both.applies_sum[0][1], both.applies_sum[1][0],
+         both.applies_sum[1][1]);
 }
 
 static void simh_print_main(int pos_idx, int play_idx, const SimhPlay *play) {
@@ -626,6 +659,7 @@ static void simh_run(int first_game, int num_games, int plies,
         if (number_of_main_plays > 1) {
           for (int play_idx = 0; play_idx < number_of_main_plays; play_idx++) {
             simh_print_main(pos_idx, play_idx, &plays[play_idx]);
+            simh_print_tally(pos_idx, play_idx, &plays[play_idx]);
           }
           positions_with_main++;
           // Oracle: the picks' finished games, where the variants' picks by
