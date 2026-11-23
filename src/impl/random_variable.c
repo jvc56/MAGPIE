@@ -30,7 +30,10 @@
 #include "../util/io_util.h"
 #include "bai_logger.h"
 #include "census_rollout.h"
+#include "../ent/board.h"
 #include "gameplay.h"
+#include "move_gen.h"
+#include "sim_lab.h"
 #include <math.h>
 #include <stdatomic.h>
 #include <stddef.h>
@@ -613,18 +616,219 @@ static Equity simmer_get_leftover_value(const Game *game, int player_index,
              tiles_on_rack, game_get_real_bag_size(game));
 }
 
+// LAB, NOT FOR MERGE (see sim_lab.h).
+
+enum {
+  // A rollout played on stops here if its game has not ended.
+  SIM_LAB_MAX_ROLLOUT_PLIES = 200,
+};
+
+static SimLab *sim_lab = NULL;
+
+void rv_sim_lab_set(SimLab *lab) { sim_lab = lab; }
+
+// The first plies of one rollout: each play's leave value, pool shift and
+// PAT term, signed for the simming player, and the simming player's lead
+// and whether the game was over after it.
+typedef struct SimLabTrack {
+  // The plies played, tracked or not.
+  int plies;
+  Equity plain[SIM_LAB_MAX_TRACKED_PLIES];
+  Equity shift[SIM_LAB_MAX_TRACKED_PLIES];
+  // The shift from the bag alone, and whether the simming player moved.
+  Equity bag_shift[SIM_LAB_MAX_TRACKED_PLIES];
+  bool is_own[SIM_LAB_MAX_TRACKED_PLIES];
+  Equity pat[SIM_LAB_MAX_TRACKED_PLIES];
+  Equity spread_after[SIM_LAB_MAX_TRACKED_PLIES];
+  bool over_after[SIM_LAB_MAX_TRACKED_PLIES];
+} SimLabTrack;
+
+static uint64_t sim_lab_hash(uint64_t seed) {
+  uint64_t hash = seed + UINT64_C(0x9E3779B97F4A7C15);
+  hash = (hash ^ (hash >> 30)) * UINT64_C(0xBF58476D1CE4E5B9);
+  hash = (hash ^ (hash >> 27)) * UINT64_C(0x94D049BB133111EB);
+  return hash ^ (hash >> 31);
+}
+
+static Equity sim_lab_get_spread(const Game *game, int initial_player) {
+  return player_get_score(game_get_player(game, initial_player)) -
+         player_get_score(game_get_player(game, 1 - initial_player));
+}
+
+// Records the terms of move, which the player on turn is about to play as
+// the rollout's next ply, and checks them against the equity the generator
+// gave the move. The calling thread's last generation must be the one that
+// found it.
+static void sim_lab_track_play(SimLabChecks *checks, SimLabTrack *track,
+                               const Game *game, int initial_player,
+                               const Move *move) {
+  const int ply = track->plies;
+  if (ply >= SIM_LAB_MAX_TRACKED_PLIES) {
+    return;
+  }
+  const int player_index = game_get_player_on_turn_index(game);
+  const Player *player = game_get_player(game, player_index);
+  const KLV *klv = player_get_klv(player);
+  const int tiles_on_rack = rack_get_total_letters(player_get_rack(player));
+  const int real_bag_size = game_get_real_bag_size(game);
+  Rack leave;
+  rack_copy(&leave, player_get_rack(player));
+  const Equity leave_value = get_leave_value_for_move(klv, move, &leave);
+  const Equity shift = pool_shift_get_leave_shift(
+      player_get_pool_shift_table(player), klv,
+      player_get_pool_shift_weight(player), game_get_ld(game),
+      game_get_bag(game),
+      player_get_rack(game_get_player(game, 1 - player_index)), &leave,
+      tiles_on_rack, real_bag_size);
+  Rack no_tiles;
+  rack_set_dist_size_and_reset(&no_tiles, ld_get_size(game_get_ld(game)));
+  const Equity bag_shift = pool_shift_get_leave_shift(
+      player_get_pool_shift_table(player), klv,
+      player_get_pool_shift_weight(player), game_get_ld(game),
+      game_get_bag(game), &no_tiles, &leave, tiles_on_rack, real_bag_size);
+  const Equity pat_term = gen_lab_get_pat_term(move, &leave);
+  if (pat_term > 0) {
+    checks->positive_pat_terms++;
+  }
+  if (bag_get_letters(game_get_bag(game)) > 0 &&
+      board_get_tiles_played(game_get_board(game)) > 0) {
+    Equity expected_equity = leave_value + shift + pat_term;
+    if (move_get_type(move) == GAME_EVENT_TILE_PLACEMENT_MOVE) {
+      Equity peg_adjust_by_tiles_played[RACK_SIZE + 1];
+      peg_adjust_fill_by_tiles_played(player_get_peg_adjust(player),
+                                      real_bag_size,
+                                      peg_adjust_by_tiles_played);
+      expected_equity +=
+          move_get_score(move) +
+          peg_adjust_by_tiles_played[move_get_tiles_played(move)];
+      checks->placements++;
+      if (expected_equity != move_get_equity(move)) {
+        checks->placement_mismatches++;
+      }
+    } else {
+      checks->other_plays++;
+      if (expected_equity != move_get_equity(move)) {
+        checks->other_play_mismatches++;
+      }
+    }
+  }
+  const Equity sign = player_index == initial_player ? 1 : -1;
+  track->plain[ply] = sign * leave_value;
+  track->shift[ply] = sign * shift;
+  track->bag_shift[ply] = sign * bag_shift;
+  track->is_own[ply] = player_index == initial_player;
+  track->pat[ply] = sign * pat_term;
+}
+
+// After the play sim_lab_track_play recorded has been played.
+static void sim_lab_track_played(SimLabTrack *track, const Game *game,
+                                 int initial_player) {
+  if (track->plies < SIM_LAB_MAX_TRACKED_PLIES) {
+    track->spread_after[track->plies] =
+        sim_lab_get_spread(game, initial_player);
+    track->over_after[track->plies] = game_over(game);
+  }
+  track->plies++;
+}
+
+// What a sim of horizon plies has at its horizon: the lead, whether the
+// game is over, and the terms of each player's last play, where the last
+// two plies were played. The PAT term is the last play's alone, and 0 when
+// the game is over. lead_before is the lead before the first ply.
+static void sim_lab_get_horizon(const SimLabTrack *track, int horizon,
+                                Equity lead_before, bool over_before,
+                                Equity *lead, bool *is_over, Equity *plain,
+                                Equity *shift, Equity *pat,
+                                Equity splits[SIM_LAB_NUM_SPLITS]) {
+  const int plies_played = track->plies < horizon ? track->plies : horizon;
+  *lead = plies_played == 0 ? lead_before
+                            : track->spread_after[plies_played - 1];
+  *is_over =
+      plies_played == 0 ? over_before : track->over_after[plies_played - 1];
+  *plain = 0;
+  *shift = 0;
+  *pat = 0;
+  for (int split = 0; split < SIM_LAB_NUM_SPLITS; split++) {
+    splits[split] = 0;
+  }
+  for (int ply = horizon - 2; ply < horizon; ply++) {
+    if (ply >= 0 && ply < plies_played) {
+      *plain += track->plain[ply];
+      *shift += track->shift[ply];
+      if (track->is_own[ply]) {
+        splits[SIM_LAB_SPLIT_OWN] += track->shift[ply];
+        splits[SIM_LAB_SPLIT_OWN_FROM_BAG] += track->bag_shift[ply];
+        splits[SIM_LAB_SPLIT_OWN_PLAIN] += track->plain[ply];
+      } else {
+        splits[SIM_LAB_SPLIT_OPPONENT] += track->shift[ply];
+        splits[SIM_LAB_SPLIT_OPPONENT_FROM_BAG] += track->bag_shift[ply];
+        splits[SIM_LAB_SPLIT_OPPONENT_PLAIN] += track->plain[ply];
+      }
+    }
+  }
+  if (plies_played == horizon && !*is_over) {
+    *pat = track->pat[horizon - 1];
+  }
+}
+
+// The win fraction simmed_play_add_win_pct_stat records for a horizon.
+static double sim_lab_get_win_pct(const WinPct *win_pcts, Equity spread,
+                                  Equity leftover,
+                                  game_end_reason_t game_end_reason,
+                                  int bag_tiles, int on_turn_rack_tiles,
+                                  int off_turn_rack_tiles,
+                                  bool plies_are_odd) {
+  if (game_end_reason != GAME_END_REASON_NONE) {
+    if (spread == 0) {
+      return 0.5;
+    }
+    return spread > 0 ? 1.0 : 0.0;
+  }
+  const double exact_margin = equity_to_double(spread + leftover);
+  int margin = (int)(exact_margin + 0.5 - (exact_margin < 0));
+  if (!plies_are_odd) {
+    margin = -margin;
+  }
+  const double win_pct = (double)win_pct_get(
+      win_pcts, margin, (unsigned int)bag_tiles,
+      (unsigned int)on_turn_rack_tiles, (unsigned int)off_turn_rack_tiles);
+  return plies_are_odd ? win_pct : 1.0 - win_pct;
+}
+
 // One rollout of simmed_play from seed's shuffled bag, rotated left by
 // rotation * RACK_SIZE letters (see bag_rotate) before the opponent's rack is
 // drawn. When record is non-NULL, the rollout's contributions to its
 // SimmedPlay are written there instead of applied. Returns its utility.
 static double sim_rollout(const Simmer *simmer, SimmerWorker *simmer_worker,
                           SimmedPlay *simmed_play, const uint64_t seed,
-                          const int rotation, SimmedPlaySampleRecord *record) {
+                          const int rotation, SimmedPlaySampleRecord *record,
+                          const int worker_index, const int play_index) {
   SimResults *sim_results = simmer->sim_results;
   Game *game = simmer_worker->game;
   MoveList *move_list = simmer_worker->move_list;
   const int plies = sim_results_get_num_plies(sim_results);
   const int player_off_turn_index = 1 - game_get_player_on_turn_index(game);
+  // LAB (see sim_lab.h).
+  SimLab *lab = sim_lab;
+  SimLabTrack lab_track;
+  lab_track.plies = 0;
+  int lab_half = 0;
+  bool lab_continues = false;
+  if (lab != NULL) {
+    if (worker_index < 0 || worker_index >= SIM_LAB_MAX_WORKERS ||
+        play_index < 0 || play_index >= SIM_LAB_MAX_PLAYS || plies < 2 ||
+        plies > SIM_LAB_MAX_SIM_PLIES || simmer->use_census_rollout) {
+      log_fatal("sim lab: unsupported sim (worker %d, play %d, plies %d, "
+                "census %d)",
+                worker_index, play_index, plies,
+                (int)simmer->use_census_rollout);
+    }
+    const uint64_t seed_hash = sim_lab_hash(seed);
+    lab_half = (int)(seed_hash >> 62);
+    lab_continues =
+        lab->continue_one_in > 0 &&
+        ((seed_hash >> 16) % (uint64_t)lab->continue_one_in) == 0;
+  }
   // Canonicalize the bag before seeding it. game_seed alphabetizes and
   // reshuffles whatever the bag currently holds, so the shuffle -- and
   // therefore the opponent rack drawn below -- depends on the bag's contents,
@@ -686,6 +890,9 @@ static double sim_rollout(const Simmer *simmer, SimmerWorker *simmer_worker,
   sim_results_increment_node_count(sim_results);
   game_set_backup_mode(game, BACKUP_MODE_OFF);
   // further plies will NOT be backed up.
+  const Equity lab_lead_before =
+      sim_lab_get_spread(game, simmer->initial_player);
+  const bool lab_over_before = game_over(game);
   for (int ply = 0; ply < plies; ply++) {
     const int player_on_turn_index = game_get_player_on_turn_index(game);
 
@@ -708,14 +915,21 @@ static double sim_rollout(const Simmer *simmer, SimmerWorker *simmer_worker,
       this_leftover =
           simmer_get_leftover_value(game, player_on_turn_index, best_play);
     }
+    if (lab != NULL) {
+      sim_lab_track_play(&lab->checks[worker_index], &lab_track, game,
+                         simmer->initial_player, best_play);
+    }
 
     // On the final ply the resulting cross-sets are never read (no further move
     // generation happens before game_unplay_last_move restores the board), so
     // skip the cross-set update for that play.
-    if (ply == plies - 1) {
+    if (ply == plies - 1 && !lab_continues) {
       play_move_no_cross_set_update(best_play, game, NULL);
     } else {
       play_move(best_play, game, NULL);
+    }
+    if (lab != NULL) {
+      sim_lab_track_played(&lab_track, game, simmer->initial_player);
     }
     sim_results_increment_node_count(sim_results);
     if (is_last_play_of_player) {
@@ -758,6 +972,126 @@ static double sim_rollout(const Simmer *simmer, SimmerWorker *simmer_worker,
   const double wpct = simmed_play_add_win_pct_stat(
       simmer->win_pcts, simmed_play, spread, leftover, game_end_reason,
       bag_tiles, on_turn_rack_tiles, off_turn_rack_tiles, plies % 2, record);
+  if (lab != NULL) {
+    SimLabCell *cell = &lab->cells[worker_index][play_index][lab_half];
+    SimLabChecks *checks = &lab->checks[worker_index];
+    Equity lab_lead = 0;
+    bool lab_is_over = false;
+    Equity lab_plain = 0;
+    Equity lab_shift = 0;
+    Equity lab_pat = 0;
+    Equity lab_splits[SIM_LAB_NUM_SPLITS];
+    sim_lab_get_horizon(&lab_track, plies, lab_lead_before, lab_over_before,
+                        &lab_lead, &lab_is_over, &lab_plain, &lab_shift,
+                        &lab_pat, lab_splits);
+    for (int split = 0; split < SIM_LAB_NUM_SPLITS; split++) {
+      cell->split_sum[split] += equity_to_double(lab_splits[split]);
+    }
+    checks->horizons++;
+    if (lab_plain + lab_shift != leftover || lab_lead != spread ||
+        lab_is_over != (game_end_reason != GAME_END_REASON_NONE)) {
+      checks->horizon_mismatches++;
+    }
+    cell->rollouts++;
+    for (int leave_mode = 0; leave_mode < SIM_LAB_NUM_LEAVE_MODES;
+         leave_mode++) {
+      for (int pat_share = 0; pat_share < SIM_LAB_NUM_PAT_SHARES;
+           pat_share++) {
+        const int variant = leave_mode * SIM_LAB_NUM_PAT_SHARES + pat_share;
+        Equity variant_shift = 0;
+        if (leave_mode == 1) {
+          variant_shift = lab_shift;
+        } else if (leave_mode == 2) {
+          variant_shift = lab_splits[SIM_LAB_SPLIT_OWN];
+        }
+        const Equity variant_leftover =
+            lab_plain + variant_shift +
+            lab_pat * pat_share / (SIM_LAB_NUM_PAT_SHARES - 1);
+        const Equity variant_projected =
+            variant_leftover + (projected_leftover - leftover);
+        const double variant_win = sim_lab_get_win_pct(
+            simmer->win_pcts, spread, variant_leftover, game_end_reason,
+            bag_tiles, on_turn_rack_tiles, off_turn_rack_tiles, plies % 2);
+        if (variant == SIM_LAB_SIM_VARIANT && variant_win != wpct) {
+          checks->horizon_mismatches++;
+        }
+        cell->equity_sum[variant] += equity_to_double(
+            spread - simmer->initial_spread + variant_projected);
+        cell->win_sum[variant] += variant_win;
+        cell->utility_sum[variant] += sim_utility_blend(
+            variant_win,
+            simmer->use_margin_forecast ? spread + variant_projected : spread,
+            simmer->utility_w_winpct, simmer->utility_w_spread,
+            simmer->utility_spread_scale);
+      }
+    }
+    const double pat_points = equity_to_double(lab_pat);
+    const double shift_points = equity_to_double(lab_shift);
+    cell->pat_sum += pat_points;
+    cell->shift_sum += shift_points;
+    if (lab_continues) {
+      while (!game_over(game) &&
+             lab_track.plies < SIM_LAB_MAX_ROLLOUT_PLIES) {
+        const Move *next_play = get_top_equity_move_with_carry(
+            game, move_list, simmer->best_move_carry);
+        sim_lab_track_play(checks, &lab_track, game, simmer->initial_player,
+                           next_play);
+        play_move(next_play, game, NULL);
+        sim_lab_track_played(&lab_track, game, simmer->initial_player);
+      }
+      const Equity final_spread =
+          sim_lab_get_spread(game, simmer->initial_player);
+      double final_win = 0.0;
+      if (final_spread == 0) {
+        final_win = 0.5;
+      } else if (final_spread > 0) {
+        final_win = 1.0;
+      }
+      Equity deep_lead = 0;
+      bool deep_is_over = false;
+      Equity deep_plain = 0;
+      Equity deep_shift = 0;
+      Equity deep_pat = 0;
+      Equity deep_splits[SIM_LAB_NUM_SPLITS];
+      sim_lab_get_horizon(&lab_track, plies + 2, lab_lead_before,
+                          lab_over_before, &deep_lead, &deep_is_over,
+                          &deep_plain, &deep_shift, &deep_pat, deep_splits);
+      cell->continued++;
+      cell->final_spread_sum +=
+          equity_to_double(final_spread - simmer->initial_spread);
+      cell->final_win_sum += final_win;
+      cell->final_utility_sum += sim_utility_blend(
+          final_win, final_spread, simmer->utility_w_winpct,
+          simmer->utility_w_spread, simmer->utility_spread_scale);
+      cell->deep_plain_sum +=
+          equity_to_double(deep_lead - simmer->initial_spread + deep_plain);
+      cell->deep_full_sum +=
+          equity_to_double(deep_lead - simmer->initial_spread + deep_plain +
+                           deep_shift + deep_pat);
+      // The horizon with plain leave values, whatever the sim adds.
+      const Equity horizon_value = spread + lab_plain;
+      double targets[SIM_LAB_NUM_TARGETS];
+      targets[SIM_LAB_TARGET_NEXT_PLY] =
+          lab_track.plies > plies
+              ? equity_to_double(lab_track.spread_after[plies] - spread)
+              : 0.0;
+      targets[SIM_LAB_TARGET_TWO_PLIES] =
+          equity_to_double(deep_lead + deep_plain - horizon_value);
+      targets[SIM_LAB_TARGET_GAME_END] =
+          equity_to_double(final_spread - horizon_value);
+      cell->pat_term_sum += pat_points;
+      cell->shift_term_sum += shift_points;
+      cell->pat_square_sum += pat_points * pat_points;
+      cell->shift_square_sum += shift_points * shift_points;
+      cell->pat_shift_sum += pat_points * shift_points;
+      for (int target = 0; target < SIM_LAB_NUM_TARGETS; target++) {
+        cell->target_sum[target] += targets[target];
+        cell->target_square_sum[target] += targets[target] * targets[target];
+        cell->target_pat_sum[target] += targets[target] * pat_points;
+        cell->target_shift_sum[target] += targets[target] * shift_points;
+      }
+    }
+  }
   // reset to first state. we only need to restore one backup.
   game_unplay_last_move(game);
   return_rack_to_bag(game, player_off_turn_index);
@@ -796,7 +1130,9 @@ int rv_sim_bag_cycle_rotations(const Game *game) {
 static double sim_cycled_rollouts(const Simmer *simmer,
                                   SimmerWorker *simmer_worker,
                                   SimmedPlay *simmed_play, const uint64_t seed,
-                                  SimmedPlaySampleRecord *record) {
+                                  SimmedPlaySampleRecord *record,
+                                  const int worker_index,
+                                  const int play_index) {
   const int rotations = rv_sim_bag_cycle_rotations(simmer_worker->game);
   SimmedPlaySampleRecord combined;
   SimmedPlaySampleRecord *out = record != NULL ? record : &combined;
@@ -809,7 +1145,7 @@ static double sim_cycled_rollouts(const Simmer *simmer,
   for (int rotation = 0; rotation < rotations; rotation++) {
     simmed_play_sample_record_clear(&rollout);
     utility_sum += sim_rollout(simmer, simmer_worker, simmed_play, seed,
-                               rotation, &rollout);
+                               rotation, &rollout, worker_index, play_index);
     if (rotation == 0) {
       *out = rollout;
     }
@@ -865,14 +1201,15 @@ static double rv_sim_sample_impl(RandomVariables *rvs,
                             : simmed_play_get_seed(simmed_play);
   double utility;
   if (!simmer->bag_cycle) {
-    utility = sim_rollout(simmer, simmer_worker, simmed_play, seed, 0, record);
+    utility = sim_rollout(simmer, simmer_worker, simmed_play, seed, 0, record,
+                          local_worker_index, (int)play_index);
     // A recorded sample is counted when its record is applied.
     if (!record) {
       sim_results_increment_iteration_count(sim_results);
     }
   } else {
-    utility =
-        sim_cycled_rollouts(simmer, simmer_worker, simmed_play, seed, record);
+    utility = sim_cycled_rollouts(simmer, simmer_worker, simmed_play, seed,
+                                  record, local_worker_index, (int)play_index);
   }
   if (simmer->print_interval > 0 &&
       sample_count % simmer->print_interval == 0) {

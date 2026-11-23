@@ -92,6 +92,7 @@
 #include "shadow_test.h"
 #include "sim_benchmark_test.h"
 #include "sim_det_sweep_test.h"
+#include "sim_horizon_test.h"
 #include "sim_quality_test.h"
 #include "sim_regret_test.h"
 #include "sim_test.h"
@@ -362,6 +363,10 @@ void run_test(const char *subtest) {
   }
   if (has_prefix("poolleavesequiv:", subtest)) {
     pool_leaves_equivalence_run_spec(subtest + strlen("poolleavesequiv:"));
+    return;
+  }
+  if (has_prefix("simhorizon:", subtest)) {
+    sim_horizon_run_spec(subtest + strlen("simhorizon:"));
     return;
   }
   if (has_prefix("egspeedbench:", subtest)) {

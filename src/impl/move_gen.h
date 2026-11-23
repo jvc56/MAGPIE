@@ -155,6 +155,10 @@ void gen_reset_slots_high_water(void);
 // solving.
 void generate_moves(const MoveGenArgs *args);
 
+// LAB, NOT FOR MERGE (see sim_lab.h): the PAT term the calling thread's last
+// generation gives move, a play of that generation's mover that keeps leave.
+Equity gen_lab_get_pat_term(const Move *move, const Rack *leave);
+
 // The MOVE_RECORD_ALL_SMALL plays of the lanes whose bit is set in
 // `lane_mask` (bit dir * BOARD_DIM + row_or_col: the BOARD_DIM horizontal
 // rows, then the BOARD_DIM vertical columns), appended to args->move_list in

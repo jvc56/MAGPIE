@@ -5371,3 +5371,15 @@ void generate_moves(const MoveGenArgs *args) {
   }
   gen_record_pass(gen);
 }
+
+// LAB, NOT FOR MERGE (see sim_lab.h).
+Equity gen_lab_get_pat_term(const Move *move, const Rack *leave) {
+  const MoveGen *gen = get_movegen();
+  // The term is scoped to a bag with tiles (see
+  // static_eval_get_move_equity_with_leave_value).
+  if (gen->pat_ctx == NULL || !gen_pat_is_active(gen) ||
+      gen->number_of_tiles_in_bag <= 0) {
+    return 0;
+  }
+  return pat_eval_move_penalty(gen->pat_ctx, move, leave);
+}
