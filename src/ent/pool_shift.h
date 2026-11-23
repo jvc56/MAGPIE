@@ -64,9 +64,11 @@ enum {
   // In place of a weight: the exact leave values (see below).
   POOL_SHIFT_EXACT_WEIGHT_MILLI = -1,
   // The rollouts of a player whose leave values are exact: the exact values
-  // cost far too much for every ply of every rollout, so the moves a sim
-  // sims are valued exactly and its rollouts' plies shift the leaves at this
-  // weight, the one that scored best in static play.
+  // cost far too much for every ply of every rollout. A sim from a bag of at
+  // least a rack builds the leaves of its pool once (see PoolLeaves), and
+  // its rollouts' plies read those and shift them at
+  // POOL_SHIFT_POOL_LEAVES_WEIGHT_MILLI. Any other sim's plies shift the
+  // stock leaves at this weight, the one that scored best in static play.
   POOL_SHIFT_EXACT_ROLLOUT_WEIGHT_MILLI = 1200,
   // The weight at which the leaves of a pool (see PoolLeaves) are shifted:
   // the first-order correction as computed.
