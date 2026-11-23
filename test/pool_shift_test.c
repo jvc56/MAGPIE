@@ -1,7 +1,6 @@
 #include "pool_shift_test.h"
 
 #include "../src/compat/cfile.h"
-#include "../src/compat/ctime.h"
 #include "../src/def/board_defs.h"
 #include "../src/def/equity_defs.h"
 #include "../src/def/game_history_defs.h"
@@ -1028,11 +1027,8 @@ static void assert_pool_leaves(const Game *game) {
   const Rack *opponent_rack =
       player_get_rack(game_get_player(game, 1 - mover_idx));
   const PoolShiftTable *table = player_get_pool_shift_table(mover);
-  Timer timer;
-  ctimer_start(&timer);
   PoolLeaves *pool_leaves = pool_leaves_create(
       table, game_get_ld(game), game_get_bag(game), opponent_rack, NULL, 1);
-  printf("pool leaves built in %.3f seconds\n", ctimer_elapsed_seconds(&timer));
   assert(pool_shift_table_matches_klv(pool_leaves->table, pool_leaves->klv));
   Equity first_difference = 0;
   for (int leave_size = RACK_SIZE - 1; leave_size >= 1; leave_size--) {
@@ -1084,6 +1080,8 @@ static void assert_pool_leaves(const Game *game) {
   }
   assert(pool_subsets->values[pool_subsets->count - 1] == 0);
   free(pool_subsets);
+  // The racks change places on purpose: the pool is the same.
+  // NOLINTNEXTLINE(readability-suspicious-call-argument)
   PoolLeaves *swapped_leaves = pool_leaves_create(
       table, game_get_ld(game), game_get_bag(game), rack, opponent_rack, 1);
   assert(memcmp(public_leaves->klv->leave_values,

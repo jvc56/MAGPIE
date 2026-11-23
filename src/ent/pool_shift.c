@@ -2,6 +2,7 @@
 
 #include "../compat/cpthread.h"
 #include "../compat/cpthread_defs.h"
+#include "../def/klv_defs.h"
 #include "../def/letter_distribution_defs.h"
 #include "../def/rack_defs.h"
 #include "../util/fnv.h"
@@ -2435,8 +2436,10 @@ static void pool_leaves_transform_all(PoolLeavesTransform *transform,
   PoolLeavesBlockList split_blocks = {0};
   pool_leaves_plan_block(transform, min_split_size, &whole_blocks,
                          &split_blocks, 0, RACK_SIZE - 1, 0, 0);
-  qsort(whole_blocks.blocks, (size_t)whole_blocks.number_of_blocks,
-        sizeof(PoolLeavesBlock), pool_leaves_compare_blocks);
+  if (whole_blocks.number_of_blocks > 1) {
+    qsort(whole_blocks.blocks, (size_t)whole_blocks.number_of_blocks,
+          sizeof(PoolLeavesBlock), pool_leaves_compare_blocks);
+  }
   // The pieces of a block: at most RACK_SIZE - 1 counts of each letter.
   const int max_pieces = MAX_ALPHABET_SIZE * (RACK_SIZE - 1);
   const int max_units = whole_blocks.number_of_blocks > max_pieces

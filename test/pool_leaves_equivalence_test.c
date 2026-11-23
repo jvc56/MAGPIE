@@ -146,6 +146,8 @@ typedef struct PlePool {
   bool brute_force;
 } PlePool;
 
+// The cases below are easier to read in this order than in the tightest.
+// NOLINTNEXTLINE(clang-analyzer-optin.performance.Padding)
 typedef struct PleSyntheticCase {
   const char *name;
   // A letter distribution file's contents.
@@ -1311,9 +1313,7 @@ static RackValueTable *ple_create_rack_values(const LetterDistribution *ld,
   }
   RackValueTable *rvt = rack_value_table_create_unvalued(
       letter_counts, ld_get_size(ld), klv_get_hash(klv));
-  if (rvt == NULL) {
-    log_fatal("%s: could not make the rack value table", spec->name);
-  }
+  assert(rvt != NULL);
   const uint32_t number_of_racks = rack_value_table_get_number_of_racks(rvt);
   PleRackValuesFill fill = {
       .rvt = rvt,
@@ -1378,7 +1378,7 @@ static void ple_set_pool_racks(const LetterDistribution *ld,
 }
 
 static void ple_set_bag(Bag *bag, const Rack *bag_tiles) {
-  MachineLetter tiles[MAX_BAG_SIZE];
+  MachineLetter tiles[MAX_BAG_SIZE] = {0};
   int number_of_tiles = 0;
   for (int ml = 0; ml < rack_get_dist_size(bag_tiles); ml++) {
     for (int copy_idx = 0;
