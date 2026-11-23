@@ -1,0 +1,3 @@
+v2_g21000.out horizon_mismatches=0  mean_mismatches=0 SIMH done positions=477 with_main=175 with_oracle=59 seconds=924
+v2_g21025.out horizon_mismatches=0  mean_mismatches=0 SIMH done positions=480 with_main=152 with_oracle=44 seconds=800
+v2_g21050.out horizon_mismatches=0  mean_mismatches=0 SIMH done positions=455 with_main=158 with_oracle=35 seconds=778

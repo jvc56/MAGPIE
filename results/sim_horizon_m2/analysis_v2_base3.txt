@@ -1,0 +1,38 @@
+1412 finished positions from 75 games
+  SIMH checks placements=125517666 placement_mismatches=190 other_plays=1061715 other_play_mismatches=0 horizons=55586874 horizon_mismatches=0 positive_pat_terms=0 mean_mismatches=0
+  SIMH checks placements=111169286 placement_mismatches=1112 other_plays=811999 other_play_mismatches=0 horizons=50212939 horizon_mismatches=0 positive_pat_terms=0 mean_mismatches=0
+  SIMH checks placements=108170649 placement_mismatches=1397 other_plays=644538 other_play_mismatches=0 horizons=49543020 horizon_mismatches=0 positive_pat_terms=0 mean_mismatches=0
+  mean seconds a position: screen 0.57, main 0.83, oracle 0.37
+
+against 'shift (both leaves)': picks by util from about 48022 rollouts a candidate; 1412 positions from 75 games, 485 with more than one candidate kept, 138 with differing picks
+  variant                   differs         spread/pos        win pts/pos    utility/pos x 1e4   oracle noise per differing pick (spread, win pts)
+  plain leaves                5.10%  +0.0068 (0.0207)  +0.0102 (0.0102)   +0.7520 (0.7760)   0.44, 0.31
+  half PAT                    5.95%  -0.0007 (0.0233)  +0.0053 (0.0111)   +0.3741 (0.8525)   0.47, 0.31
+  PAT                         7.37%  +0.0087 (0.0254)  +0.0058 (0.0113)   +0.4568 (0.8828)   0.47, 0.30
+  shift (both) + half PAT     1.27%  +0.0051 (0.0090)  +0.0017 (0.0055)   +0.1547 (0.4273)   0.58, 0.37
+  shift (both) + PAT          3.33%  +0.0017 (0.0115)  +0.0016 (0.0064)   +0.1297 (0.4996)   0.49, 0.33
+  shift (own leave)           3.54%  +0.0436 (0.0204)  +0.0214 (0.0113)   +1.7517 (0.8534)   0.43, 0.32
+  shift (own) + half PAT      4.32%  +0.0479 (0.0209)  +0.0208 (0.0115)   +1.7326 (0.8630)   0.44, 0.31
+  shift (own) + PAT           5.38%  +0.0360 (0.0219)  +0.0197 (0.0117)   +1.5883 (0.8838)   0.47, 0.31
+
+bag of 21 or more: against 'shift (both leaves)': picks by util from about 48022 rollouts a candidate; 1150 positions from 75 games, 385 with more than one candidate kept, 111 with differing picks
+  variant                   differs         spread/pos        win pts/pos    utility/pos x 1e4   oracle noise per differing pick (spread, win pts)
+  plain leaves                4.61%  -0.0243 (0.0174)  -0.0111 (0.0067)   -0.9123 (0.5458)   0.47, 0.31
+  half PAT                    5.39%  -0.0297 (0.0194)  -0.0102 (0.0074)   -0.8790 (0.6003)   0.50, 0.32
+  PAT                         7.04%  -0.0211 (0.0207)  -0.0076 (0.0086)   -0.6561 (0.6979)   0.50, 0.31
+  shift (both) + half PAT     1.30%  +0.0040 (0.0086)  +0.0020 (0.0041)   +0.1634 (0.3275)   0.62, 0.38
+  shift (both) + PAT          3.65%  -0.0034 (0.0119)  -0.0009 (0.0051)   -0.0810 (0.4144)   0.51, 0.33
+  shift (own leave)           2.70%  +0.0221 (0.0149)  +0.0075 (0.0051)   +0.6551 (0.4243)   0.48, 0.32
+  shift (own) + half PAT      3.48%  +0.0273 (0.0165)  +0.0072 (0.0064)   +0.6571 (0.5174)   0.47, 0.32
+  shift (own) + PAT           4.87%  +0.0160 (0.0168)  +0.0069 (0.0063)   +0.5752 (0.5088)   0.50, 0.31
+
+bag under 21: against 'shift (both leaves)': picks by util from about 48000 rollouts a candidate; 262 positions from 75 games, 100 with more than one candidate kept, 27 with differing picks
+  variant                   differs         spread/pos        win pts/pos    utility/pos x 1e4   oracle noise per differing pick (spread, win pts)
+  plain leaves                7.25%  +0.1436 (0.0881)  +0.1034 (0.0488)   +8.0573 (3.6389)   0.35, 0.29
+  half PAT                    8.40%  +0.1269 (0.0950)  +0.0734 (0.0527)   +5.8744 (3.9488)   0.35, 0.27
+  PAT                         8.78%  +0.1398 (0.0961)  +0.0644 (0.0514)   +5.3416 (3.8755)   0.35, 0.27
+  shift (both) + half PAT     1.15%  +0.0100 (0.0309)  +0.0002 (0.0235)   +0.1167 (1.8004)   0.30, 0.35
+  shift (both) + PAT          1.91%  +0.0241 (0.0331)  +0.0126 (0.0264)   +1.0543 (2.0152)   0.28, 0.29
+  shift (own leave)           7.25%  +0.1380 (0.0910)  +0.0826 (0.0532)   +6.5650 (3.9759)   0.35, 0.31
+  shift (own) + half PAT      8.02%  +0.1385 (0.0914)  +0.0808 (0.0532)   +6.4533 (3.9831)   0.36, 0.29
+  shift (own) + PAT           7.63%  +0.1239 (0.0891)  +0.0758 (0.0531)   +6.0353 (3.9823)   0.37, 0.30

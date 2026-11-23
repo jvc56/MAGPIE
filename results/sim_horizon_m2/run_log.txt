@@ -1,0 +1,5 @@
+chunk 21000 exit=0 2026-11-22 20:03 plies=2,screen=3000,main=48000,cont=32,oracle=24000,mid=12000
+chunk 21025 exit=0 2026-11-22 20:16 plies=2,screen=3000,main=48000,cont=32,oracle=24000,mid=12000
+chunk 21050 exit=0 2026-11-22 20:29 plies=2,screen=3000,main=48000,cont=32,oracle=24000,mid=12000
+stopped by STOP file 2026-11-22 20:29
+loop finished 2026-11-22 20:29
