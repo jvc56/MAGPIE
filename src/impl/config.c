@@ -43,6 +43,7 @@
 #include "../ent/heat_map.h"
 #include "../ent/inference_args.h"
 #include "../ent/inference_results.h"
+#include "../ent/inference_temperatures.h"
 #include "../ent/klv.h"
 #include "../ent/klv_csv.h"
 #include "../ent/kwg.h"
@@ -1487,6 +1488,34 @@ static void add_inference_help_arg(arg_token_t arg_token, const char **usages,
             "a hard margin). Zero keeps every rack within the inference "
             "margin, weighted by draw count.";
     break;
+  case ARG_TOKEN_INFERENCE_TEMPERATURES:
+    usages[0] = "<temperatures_auto_or_none>";
+    examples[0] = "CSW24_inftemp";
+    examples[1] = "none";
+    *text = "Specifies the inference temperatures by bag for both players. "
+            "The 'inftemps1' and 'inftemps2' options override it. The table, "
+            "read from <data path>/strategy/<temperatures>.csv and written by "
+            "inftempfit, gives a softmax temperature for each number of tiles "
+            "in the bag before the observed play, and optionally one for "
+            "exchanges. A player with a table infers with its temperature "
+            "instead of 'inftemp', unless 'inftemp' is 0 (a hard margin). "
+            "auto (the default for the command line program and the "
+            "library's magpie_create()) gives a player its leaves' own "
+            "table, <leaves>_inftemp, where the data has one, and none "
+            "otherwise. none infers with 'inftemp' alone. A name or none "
+            "stays as given when the leaves change, and the settings file "
+            "keeps it, until auto returns the choice to the leaves; "
+            "'default' is accepted for auto.";
+    break;
+  case ARG_TOKEN_P1_INFERENCE_TEMPERATURES:
+  case ARG_TOKEN_P2_INFERENCE_TEMPERATURES:
+    usages[0] = "<temperatures_auto_or_none>";
+    examples[0] = "CSW24_inftemp";
+    examples[1] = "none";
+    *text = "Specifies one player's inference temperatures by bag. The "
+            "player uses them when it infers its opponent's rack. See "
+            "'inftemps' for auto and none.";
+    break;
   case ARG_TOKEN_INFERENCE_MARGIN:
     usages[0] = "<inference_equity_margin>";
     examples[0] = "1";
@@ -2780,6 +2809,9 @@ static void help_entry_fill(const Config *config, int token,
     case ARG_TOKEN_INFERENCE_TEMP:
     case ARG_TOKEN_P1_INFERENCE_TEMP:
     case ARG_TOKEN_P2_INFERENCE_TEMP:
+    case ARG_TOKEN_INFERENCE_TEMPERATURES:
+    case ARG_TOKEN_P1_INFERENCE_TEMPERATURES:
+    case ARG_TOKEN_P2_INFERENCE_TEMPERATURES:
     case ARG_TOKEN_INFERENCE_MARGIN:
     case ARG_TOKEN_P1_INFERENCE_MARGIN:
     case ARG_TOKEN_P2_INFERENCE_MARGIN:
@@ -3879,6 +3911,15 @@ void impl_rack_and_gen(Config *config, ErrorStack *error_stack) {
 
 // Inference
 
+// Gives args each player's inference temperatures by bag, if any.
+static void config_set_inference_temperatures(const Config *config,
+                                              InferenceArgs *args) {
+  for (int player_idx = 0; player_idx < 2; player_idx++) {
+    args->temperatures[player_idx] = players_data_get_inference_temperatures(
+        config->players_data, player_idx);
+  }
+}
+
 void config_fill_infer_args(const Config *config, bool use_game_history,
                             int target_index, Equity target_score,
                             int target_num_exch, Rack *target_played_tiles,
@@ -3892,6 +3933,7 @@ void config_fill_infer_args(const Config *config, bool use_game_history,
                   target_score, target_num_exch, target_played_tiles,
                   target_known_rack, nontarget_known_rack);
   args->temperature = config->inference_temperature;
+  config_set_inference_temperatures(config, args);
 }
 
 // Use target_index < 0 to infer using the game history
@@ -5648,6 +5690,7 @@ void config_fill_autoplay_args(const Config *config,
                     config->thread_control, false, true, 0, 0, 0, NULL, NULL,
                     NULL);
     p1_inference_args.temperature = config->p1_inference_temperature;
+    config_set_inference_temperatures(config, &p1_inference_args);
   }
   InferenceArgs p2_inference_args = {0};
   if (config->p2_sim_with_inference) {
@@ -5656,6 +5699,7 @@ void config_fill_autoplay_args(const Config *config,
                     config->thread_control, false, true, 0, 0, 0, NULL, NULL,
                     NULL);
     p2_inference_args.temperature = config->p2_inference_temperature;
+    config_set_inference_temperatures(config, &p2_inference_args);
   }
 
   // Autoplay with sims must populate the following SimArgs fields that are left
@@ -8612,6 +8656,10 @@ static ConfigTableKind config_table_kind(players_data_t type) {
     return (ConfigTableKind){DATA_FILEPATH_TYPE_PEG_ADJUST,
                              NUMBER_OF_CONTRIBUTE_TABLE_ROLES, NULL,
                              "pre-endgame adjustments"};
+  case PLAYERS_DATA_TYPE_INFERENCE_TEMPERATURES:
+    return (ConfigTableKind){DATA_FILEPATH_TYPE_INFERENCE_TEMPERATURES,
+                             NUMBER_OF_CONTRIBUTE_TABLE_ROLES, NULL,
+                             "inference temperatures"};
   default:
     return (ConfigTableKind){DATA_FILEPATH_TYPE_RACK_INFO_TABLE,
                              CONTRIBUTE_TABLE_RIT,
@@ -10151,22 +10199,25 @@ static void config_load_lexicon_dependent_data_internal(
 
 // Applies the pre-endgame adjustment options of the command being loaded. A
 // player's setting is a table's name, none, or auto (see
-// config_load_auto_peg_adjust), as for the PAT weights (see
+// config_load_auto_named_table), as for the PAT weights (see
 // config_load_data). The "pegadjust1" and "pegadjust2" options
 // override "pegadjust", and an unset option keeps the player's setting. A
 // named table that cannot be loaded is an error, which leaves the settings
 // and the tables as they were.
-static void config_load_peg_adjust_options(Config *config,
-                                           ErrorStack *error_stack) {
-  const players_data_t type = PLAYERS_DATA_TYPE_PEG_ADJUST;
+// The inference temperature options (inftemps, inftemps1 and inftemps2) work
+// the same way, by this function's general form.
+static void config_load_named_table_options(Config *config, players_data_t type,
+                                            arg_token_t token,
+                                            arg_token_t p1_token,
+                                            arg_token_t p2_token,
+                                            ErrorStack *error_stack) {
   bool player_auto[2];
   // Copies, since loading may free the table a loaded name belongs to.
   char *names[2];
   bool any_set = false;
   for (int player_idx = 0; player_idx < 2; player_idx++) {
-    const char *value = config_get_player_arg_value(
-        config, ARG_TOKEN_PEG_ADJUST, ARG_TOKEN_P1_PEG_ADJUST,
-        ARG_TOKEN_P2_PEG_ADJUST, player_idx);
+    const char *value = config_get_player_arg_value(config, token, p1_token,
+                                                    p2_token, player_idx);
     player_auto[player_idx] = config->table_auto[type][player_idx];
     // A player set to auto keeps its table until its lexicon is loaded.
     const char *name =
@@ -10190,6 +10241,20 @@ static void config_load_peg_adjust_options(Config *config,
   }
   free(names[0]);
   free(names[1]);
+}
+
+static void config_load_peg_adjust_options(Config *config,
+                                           ErrorStack *error_stack) {
+  config_load_named_table_options(config, PLAYERS_DATA_TYPE_PEG_ADJUST,
+                                  ARG_TOKEN_PEG_ADJUST, ARG_TOKEN_P1_PEG_ADJUST,
+                                  ARG_TOKEN_P2_PEG_ADJUST, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  config_load_named_table_options(
+      config, PLAYERS_DATA_TYPE_INFERENCE_TEMPERATURES,
+      ARG_TOKEN_INFERENCE_TEMPERATURES, ARG_TOKEN_P1_INFERENCE_TEMPERATURES,
+      ARG_TOKEN_P2_INFERENCE_TEMPERATURES, error_stack);
 }
 
 // ----- Pool shift (-poolshift) -----
@@ -10347,10 +10412,15 @@ static void config_update_pool_shift(Config *config, ErrorStack *error_stack) {
 // values play without the table for their load, so that what they train
 // does not depend on the tables the data happens to hold, and pegfit does
 // not refit on top of the table it is about to replace; the settings stand.
-static void config_load_auto_peg_adjust(Config *config,
-                                        ErrorStack *error_stack) {
-  const players_data_t type = PLAYERS_DATA_TYPE_PEG_ADJUST;
-  const bool plays_without = config_exec_trains_static_values(config);
+//
+// The inference temperatures work the same way, by this function's general
+// form, but follow the player's leaves (named by owner_type) rather than its
+// lexicon, and no command plays without them.
+static void config_load_auto_named_table(Config *config, players_data_t type,
+                                         players_data_t owner_type,
+                                         const char *suffix, bool plays_without,
+                                         ErrorStack *error_stack) {
+  const data_filepath_t file_type = config_table_kind(type).file_type;
   // Copies, since loading may free the table a loaded name belongs to.
   char *names[2];
   bool any_changed = false;
@@ -10362,12 +10432,11 @@ static void config_load_auto_peg_adjust(Config *config,
       continue;
     }
     names[player_idx] = NULL;
-    const char *lexicon = players_data_get_data_name(
-        config->players_data, PLAYERS_DATA_TYPE_KWG, player_idx);
-    if (lexicon && !plays_without) {
-      char *name = config_lexicon_peg_adjust_name(lexicon);
-      if (config_table_file_bytes(config, name,
-                                  DATA_FILEPATH_TYPE_PEG_ADJUST) >= 0 &&
+    const char *owner = players_data_get_data_name(config->players_data,
+                                                   owner_type, player_idx);
+    if (owner && !plays_without) {
+      char *name = get_formatted_string("%s%s", owner, suffix);
+      if (config_table_file_bytes(config, name, file_type) >= 0 &&
           !config_table_is_left_out(config, type, player_idx, name)) {
         names[player_idx] = name;
       } else {
@@ -10495,7 +10564,16 @@ void config_load_lexicon_dependent_data(
       use_mmap_for_rit_has_value, use_wit_has_value, p1_use_wit_has_value,
       p2_use_wit_has_value, disable_rit, is_loading_game_history, error_stack);
   if (error_stack_is_empty(error_stack)) {
-    config_load_auto_peg_adjust(config, error_stack);
+    config_load_auto_named_table(
+        config, PLAYERS_DATA_TYPE_PEG_ADJUST, PLAYERS_DATA_TYPE_KWG,
+        LEXICON_PEG_ADJUST_SUFFIX, config_exec_trains_static_values(config),
+        error_stack);
+  }
+  if (error_stack_is_empty(error_stack)) {
+    config_load_auto_named_table(
+        config, PLAYERS_DATA_TYPE_INFERENCE_TEMPERATURES, PLAYERS_DATA_TYPE_KLV,
+        LEAVES_INFERENCE_TEMPERATURES_SUFFIX,
+        /*plays_without=*/false, error_stack);
   }
   if (error_stack_is_empty(error_stack)) {
     config_update_pool_shift(config, error_stack);
@@ -17132,6 +17210,9 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_INFERENCE_TEMP, "inftemp", 1, 1);
   arg(ARG_TOKEN_P1_INFERENCE_TEMP, "inftemp1", 1, 1);
   arg(ARG_TOKEN_P2_INFERENCE_TEMP, "inftemp2", 1, 1);
+  arg(ARG_TOKEN_INFERENCE_TEMPERATURES, "inftemps", 1, 1);
+  arg(ARG_TOKEN_P1_INFERENCE_TEMPERATURES, "inftemps1", 1, 1);
+  arg(ARG_TOKEN_P2_INFERENCE_TEMPERATURES, "inftemps2", 1, 1);
   arg(ARG_TOKEN_INFERENCE_MARGIN, "imargin", 1, 1);
   arg(ARG_TOKEN_MOVEGEN_MARGIN, "mmargin", 1, 1);
   arg(ARG_TOKEN_USE_GAME_PAIRS, "gp", 1, 1);
@@ -17397,6 +17478,9 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
         config_lexicon_data_starts_auto(config, PLAYERS_DATA_TYPE_PAT);
     config->table_auto[PLAYERS_DATA_TYPE_PEG_ADJUST][player_idx] =
         config_lexicon_data_starts_auto(config, PLAYERS_DATA_TYPE_PEG_ADJUST);
+    config->table_auto[PLAYERS_DATA_TYPE_INFERENCE_TEMPERATURES][player_idx] =
+        config_lexicon_data_starts_auto(
+            config, PLAYERS_DATA_TYPE_INFERENCE_TEMPERATURES);
     if (auto_tables) {
       players_data_set_use_when_available(
           config->players_data, PLAYERS_DATA_TYPE_WMP, player_idx, true);
@@ -17631,6 +17715,9 @@ static const arg_token_t config_saved_settings[] = {
     ARG_TOKEN_PEG_ADJUST,
     ARG_TOKEN_P1_PEG_ADJUST,
     ARG_TOKEN_P2_PEG_ADJUST,
+    ARG_TOKEN_INFERENCE_TEMPERATURES,
+    ARG_TOKEN_P1_INFERENCE_TEMPERATURES,
+    ARG_TOKEN_P2_INFERENCE_TEMPERATURES,
     ARG_TOKEN_P1_POOL_SHIFT,
     ARG_TOKEN_P2_POOL_SHIFT,
     ARG_TOKEN_WIN_PCT,
@@ -17785,6 +17872,7 @@ static void config_add_settings_to_string_builder_internal(const Config *config,
     case ARG_TOKEN_PAT_ROLLOUT_CLASSES:
     case ARG_TOKEN_PAT_ROLLOUT_FAST:
     case ARG_TOKEN_PEG_ADJUST:
+    case ARG_TOKEN_INFERENCE_TEMPERATURES:
     case ARG_TOKEN_POOL_SHIFT:
       // Set these values on a per-player basis
       break;
@@ -17823,6 +17911,11 @@ static void config_add_settings_to_string_builder_internal(const Config *config,
     case ARG_TOKEN_P1_PEG_ADJUST:
       config_add_lexicon_data_setting_to_string_builder(
           config, sb, arg_token, PLAYERS_DATA_TYPE_PEG_ADJUST, 0, saved_only);
+      break;
+    case ARG_TOKEN_P1_INFERENCE_TEMPERATURES:
+      config_add_lexicon_data_setting_to_string_builder(
+          config, sb, arg_token, PLAYERS_DATA_TYPE_INFERENCE_TEMPERATURES, 0,
+          saved_only);
       break;
     case ARG_TOKEN_P1_POOL_SHIFT:
       config_add_pool_shift_setting_to_string_builder(config, sb, arg_token, 0);
@@ -17908,6 +18001,11 @@ static void config_add_settings_to_string_builder_internal(const Config *config,
     case ARG_TOKEN_P2_PEG_ADJUST:
       config_add_lexicon_data_setting_to_string_builder(
           config, sb, arg_token, PLAYERS_DATA_TYPE_PEG_ADJUST, 1, saved_only);
+      break;
+    case ARG_TOKEN_P2_INFERENCE_TEMPERATURES:
+      config_add_lexicon_data_setting_to_string_builder(
+          config, sb, arg_token, PLAYERS_DATA_TYPE_INFERENCE_TEMPERATURES, 1,
+          saved_only);
       break;
     case ARG_TOKEN_P2_POOL_SHIFT:
       config_add_pool_shift_setting_to_string_builder(config, sb, arg_token, 1);
@@ -18628,6 +18726,9 @@ static const arg_token_t config_lexicon_settings[] = {
     ARG_TOKEN_PEG_ADJUST,
     ARG_TOKEN_P1_PEG_ADJUST,
     ARG_TOKEN_P2_PEG_ADJUST,
+    ARG_TOKEN_INFERENCE_TEMPERATURES,
+    ARG_TOKEN_P1_INFERENCE_TEMPERATURES,
+    ARG_TOKEN_P2_INFERENCE_TEMPERATURES,
 };
 
 static bool config_setting_is_lexicon_setting(arg_token_t arg_token) {

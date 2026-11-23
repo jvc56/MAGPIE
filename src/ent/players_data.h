@@ -4,6 +4,7 @@
 #include "../def/move_defs.h"
 #include "../def/players_data_defs.h"
 #include "equity.h"
+#include "inference_temperatures.h"
 #include "klv.h"
 #include "kwg.h"
 #include "letter_distribution.h"
@@ -37,6 +38,9 @@ WordInfoTable *players_data_get_word_info_table(const PlayersData *players_data,
                                                 int player_index);
 PATWeights *players_data_get_pat(const PlayersData *players_data,
                                  int player_index);
+InferenceTemperatures *
+players_data_get_inference_temperatures(const PlayersData *players_data,
+                                        int player_index);
 PegAdjust *players_data_get_peg_adjust(const PlayersData *players_data,
                                        int player_index);
 uint32_t

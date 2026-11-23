@@ -27,6 +27,12 @@
 // play scores, one Equity each: English (27 letters, 7 tiles) has 5,379,616.
 #define INFERENCE_CENSUS_MAX_LATTICE_SIZE (1U << 24)
 
+// An inference temperature table (see inference_temperatures.h) has at most
+// this many bag knots, each temperature a number of points above 0 and at
+// most INFERENCE_TEMPERATURES_MAX_VALUE.
+#define INFERENCE_TEMPERATURES_MAX_KNOTS 64
+#define INFERENCE_TEMPERATURES_MAX_VALUE 100000.0
+
 typedef enum {
   INFERENCE_TYPE_LEAVE,
   INFERENCE_TYPE_EXCHANGED,

@@ -20,6 +20,7 @@
 #include "../ent/game_history.h"
 #include "../ent/inference_args.h"
 #include "../ent/inference_results.h"
+#include "../ent/inference_temperatures.h"
 #include "../ent/klv.h"
 #include "../ent/kwg.h"
 #include "../ent/leave_rack.h"
@@ -743,6 +744,23 @@ static void clear_equity_adjustments(const Game *game) {
   }
 }
 
+// The temperature of an inference of the target's play from game, the
+// position before it: the inferring player's table's for the real bag, when
+// that player has one and the temperature is above 0 (0 is a hard margin).
+static Equity inference_get_temperature(const Game *game,
+                                        const InferenceArgs *args) {
+  if (args->temperature <= 0) {
+    return args->temperature;
+  }
+  const InferenceTemperatures *temperatures =
+      args->temperatures[1 - args->target_index];
+  if (temperatures == NULL) {
+    return args->temperature;
+  }
+  return inference_temperatures_get(temperatures, game_get_real_bag_size(game),
+                                    args->target_num_exch > 0);
+}
+
 Inference *inference_create(const Game *game, const InferenceArgs *args,
                             const InferenceResults *results) {
   Inference *inference = malloc_or_die(sizeof(Inference));
@@ -758,7 +776,7 @@ Inference *inference_create(const Game *game, const InferenceArgs *args,
   inference->target_score = args->target_score;
   inference->target_number_of_tiles_exchanged = args->target_num_exch;
   inference->equity_margin = args->equity_margin;
-  inference->temperature = args->temperature;
+  inference->temperature = inference_get_temperature(game, args);
   // Disable cutoff optimization for exchanges with large leaves
   // as benchmarks show it hurts performance for small exchanges
   const int leave_size = RACK_SIZE - args->target_num_exch;
@@ -805,7 +823,7 @@ void inference_reset(Inference *inference, const Game *game,
   inference->target_score = args->target_score;
   inference->target_number_of_tiles_exchanged = args->target_num_exch;
   inference->equity_margin = args->equity_margin;
-  inference->temperature = args->temperature;
+  inference->temperature = inference_get_temperature(game, args);
   // Disable cutoff optimization for exchanges with large leaves
   const int leave_size = RACK_SIZE - args->target_num_exch;
   const bool is_small_exchange =
