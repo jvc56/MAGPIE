@@ -1,0 +1,1 @@
+chunk 60000 exit=0 2026-11-23 08:24 plies=5,screen=3000,main=48000,cont=32,oracle=24000,mid=12000,poolshift=exact
