@@ -29,6 +29,8 @@ enum {
   NESTED_DEFAULT_POOL_SIZE = 8,
   NESTED_DEFAULT_KEEP = 3,
   NESTED_DEFAULT_ROUNDS = 3,
+  // A dynamic LAMC search's rollouts per play between refits.
+  NESTED_DEFAULT_STEP = 2,
   // Plies at or past this are never nested.
   NESTED_MAX_PLY_INDEX = 31,
   // The most levels of nested search: a level's nested rollouts may choose
@@ -117,6 +119,16 @@ typedef struct NestedLevel {
   // as the play's mean plus the seed's effect plus noise, and the surrogate
   // fits the plays' means with the noise that is left.
   bool paired;
+  // Whether a LAMC search's pool changes dynamically: instead of rounds of
+  // num_samples rollouts for every play in the pool, its budget (rounds x
+  // pool_size x num_samples rollouts) goes out step rollouts at a time to
+  // each play in the pool, and after each step the pool becomes the best
+  // play by the surrogate's mean and the pool_size - 1 other plays,
+  // evaluated or not, of highest upper confidence bound. A play the
+  // surrogate shows beaten leaves the pool as soon as it is, and the best
+  // unevaluated play takes its place.
+  bool dynamic;
+  int step;
 } NestedLevel;
 
 typedef struct NestedArgs {
@@ -157,6 +169,8 @@ static inline void nested_level_set_defaults(NestedLevel *args) {
   args->ucb_beta = 1.0;
   args->stop_z = 0.0;
   args->paired = false;
+  args->dynamic = false;
+  args->step = NESTED_DEFAULT_STEP;
 }
 
 static inline void nested_args_set_defaults(NestedArgs *args) {

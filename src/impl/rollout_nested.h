@@ -125,6 +125,8 @@ const Move *nested_choose_move(NestedWorker *worker, const NestedArgs *args,
 //           with pool, keep, rounds and beta, and stop (NestedLevel.stop_z)
 //   pair    1 for a LAMC search that models the luck of common seeds
 //           (NestedLevel.paired)
+//   dyn, step  1 for a LAMC search whose pool changes after every step
+//           rollouts a play (NestedLevel.dynamic and step)
 // For example "plies=0+1,lamc=1,dcache=1/plies=0,m=4" nests a LAMC search at
 // the sim's first two plies, and another, of 4 samples a play, at the reply
 // of each of its nested rollouts.

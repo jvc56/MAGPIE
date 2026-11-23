@@ -1351,13 +1351,13 @@ static bool nested_decided(NestedWorker *worker, const int num_columns,
   return true;
 }
 
-// Gives each play in pool num_samples more nested rollouts. A play's n-th
+// Gives each play in pool samples_each more nested rollouts. A play's n-th
 // rollout uses the n-th seed, the same for every play: common random numbers.
 static uint64_t nested_sample_pool(NestedWorker *worker,
                                    const NestedLevel *args,
                                    const NestedEval *eval, const int *pool,
-                                   const int pool_count, const uint64_t seed,
-                                   BestMoveCarry *carry) {
+                                   const int pool_count, const int samples_each,
+                                   const uint64_t seed, BestMoveCarry *carry) {
   uint64_t samples = 0;
   for (int pool_idx = 0; pool_idx < pool_count; pool_idx++) {
     const int play_idx = pool[pool_idx];
@@ -1366,7 +1366,7 @@ static uint64_t nested_sample_pool(NestedWorker *worker,
       worker->eval_index[play_idx] = worker->num_evaluated;
       worker->evaluated[worker->num_evaluated++] = play_idx;
     }
-    for (int sample = 0; sample < args->num_samples; sample++) {
+    for (int sample = 0; sample < samples_each; sample++) {
       const double value = nested_rollout(
           worker, args, eval,
           move_list_get_move(worker->candidate_list, play_idx),
@@ -1449,6 +1449,104 @@ static void nested_set_upper_bounds(NestedWorker *worker,
   }
 }
 
+// A dynamic LAMC search (NestedLevel.dynamic) from the first pool: budget
+// rollouts, step to each pool play at a time, the pool remade after each
+// step. Adds the rollouts to *samples and returns whether the last fit
+// succeeded.
+static bool nested_search_dynamic(NestedWorker *worker, const NestedLevel *args,
+                                  const NestedEval *eval, int *pool,
+                                  int pool_count, const int budget,
+                                  const int num_columns, const int count,
+                                  const uint64_t seed, BestMoveCarry *carry,
+                                  uint64_t *samples) {
+  bool fitted = false;
+  while (true) {
+    const int remaining = budget - (int)*samples;
+    if (remaining <= 0 || pool_count == 0) {
+      break;
+    }
+    // The pool is in order of preference: the leader first.
+    int step = args->step;
+    if (step * pool_count > remaining) {
+      pool_count = remaining / step;
+      if (pool_count == 0) {
+        pool_count = 1;
+        step = remaining;
+      }
+    }
+    *samples += nested_sample_pool(worker, args, eval, pool, pool_count, step,
+                                   seed, carry);
+    fitted = nested_fit(worker, args, num_columns);
+    if (!fitted || (int)*samples >= budget) {
+      break;
+    }
+    if (args->stop_z > 0.0 &&
+        nested_decided(worker, num_columns, args->stop_z)) {
+      atomic_fetch_add_explicit(&nested_total_stopped, 1, memory_order_relaxed);
+      break;
+    }
+    // The leader by the surrogate's mean, then the other plays of highest
+    // upper confidence bound, at most the room left for new ones among them.
+    for (int play_idx = 0; play_idx < count; play_idx++) {
+      worker->picked[play_idx] = false;
+    }
+    int leader = -1;
+    double leader_mean = -INFINITY;
+    for (int eval_idx = 0; eval_idx < worker->num_evaluated; eval_idx++) {
+      double mean = 0.0;
+      nested_posterior(worker, num_columns, worker->evaluated[eval_idx], &mean,
+                       NULL);
+      if (mean > leader_mean) {
+        leader_mean = mean;
+        leader = worker->evaluated[eval_idx];
+      }
+    }
+    pool_count = 0;
+    worker->picked[leader] = true;
+    pool[pool_count++] = leader;
+    int room = NESTED_MAX_EVALUATED - worker->num_evaluated;
+    if (room > args->pool_size - 1) {
+      room = args->pool_size - 1;
+    }
+    nested_set_upper_bounds(worker, args, num_columns, count, room);
+    for (int eval_idx = 0; eval_idx < worker->num_evaluated; eval_idx++) {
+      const int play_idx = worker->evaluated[eval_idx];
+      if (play_idx == leader) {
+        continue;
+      }
+      double mean = 0.0;
+      double variance = 0.0;
+      nested_posterior(worker, num_columns, play_idx, &mean, &variance);
+      worker->upper_bounds[play_idx] =
+          mean + args->ucb_beta * sqrt(variance > 0.0 ? variance : 0.0);
+    }
+    int new_plays = 0;
+    while (pool_count < args->pool_size) {
+      int best = -1;
+      double best_bound = -INFINITY;
+      for (int play_idx = 0; play_idx < count; play_idx++) {
+        if (worker->picked[play_idx] ||
+            (worker->play_counts[play_idx] == 0 && new_plays >= room)) {
+          continue;
+        }
+        if (worker->upper_bounds[play_idx] > best_bound) {
+          best_bound = worker->upper_bounds[play_idx];
+          best = play_idx;
+        }
+      }
+      if (best < 0) {
+        break;
+      }
+      if (worker->play_counts[best] == 0) {
+        new_plays++;
+      }
+      worker->picked[best] = true;
+      pool[pool_count++] = best;
+    }
+  }
+  return fitted;
+}
+
 // Chooses by a LAMC search over every generated play of the position in
 // game (NestedLevel.lamc_search): a first pool of the best static plays and
 // plays spread over the play embedding, then rounds in which the surrogate's
@@ -1477,9 +1575,11 @@ static const Move *nested_choose_lamc(NestedWorker *worker,
     worker->play_counts[play_idx] = 0;
     worker->eval_index[play_idx] = -1;
   }
+  const int budget = args->rounds * args->pool_size * args->num_samples;
   if (args->paired) {
-    // A play draws at most num_samples seeds a round.
-    const int seeds = args->rounds * args->num_samples;
+    // A play draws at most num_samples seeds a round, or with a dynamic pool,
+    // at most the whole budget.
+    const int seeds = args->dynamic ? budget : args->rounds * args->num_samples;
     if (worker->seed_capacity < seeds) {
       free(worker->seed_values);
       free(worker->seed_effects);
@@ -1505,9 +1605,13 @@ static const Move *nested_choose_lamc(NestedWorker *worker,
   memcpy(pool, worker->pool, sizeof(int) * (size_t)pool_count);
   uint64_t samples = 0;
   bool fitted = false;
-  for (int round = 0; round < args->rounds; round++) {
-    samples +=
-        nested_sample_pool(worker, args, eval, pool, pool_count, seed, carry);
+  if (args->dynamic) {
+    fitted = nested_search_dynamic(worker, args, eval, pool, pool_count, budget,
+                                   num_columns, count, seed, carry, &samples);
+  }
+  for (int round = 0; round < args->rounds && !args->dynamic; round++) {
+    samples += nested_sample_pool(worker, args, eval, pool, pool_count,
+                                  args->num_samples, seed, carry);
     fitted = nested_fit(worker, args, num_columns);
     if (round == args->rounds - 1 || !fitted) {
       break;
@@ -1811,6 +1915,17 @@ static bool nested_parse_setting(const char *key, const char *value,
   }
   if (strings_iequal(key, "stop")) {
     return nested_parse_double(value, &args->stop_z) && args->stop_z >= 0.0;
+  }
+  if (strings_iequal(key, "dyn")) {
+    int dynamic = 0;
+    if (!nested_parse_int(value, 0, 1, &dynamic)) {
+      return false;
+    }
+    args->dynamic = dynamic == 1;
+    return true;
+  }
+  if (strings_iequal(key, "step")) {
+    return nested_parse_int(value, 1, NESTED_MAX_SAMPLES, &args->step);
   }
   if (strings_iequal(key, "pair")) {
     int paired = 0;
