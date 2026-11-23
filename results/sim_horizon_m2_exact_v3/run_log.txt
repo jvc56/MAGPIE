@@ -25,3 +25,11 @@ chunk 60575 exit=0 2026-11-23 04:00 plies=2,screen=3000,main=48000,cont=32,oracl
 chunk 60600 exit=0 2026-11-23 04:14 plies=2,screen=3000,main=48000,cont=32,oracle=24000,mid=12000,poolshift=exact
 chunk 60625 exit=0 2026-11-23 04:30 plies=2,screen=3000,main=48000,cont=32,oracle=24000,mid=12000,poolshift=exact
 chunk 60650 exit=0 2026-11-23 04:44 plies=2,screen=3000,main=48000,cont=32,oracle=24000,mid=12000,poolshift=exact
+chunk 60675 exit=0 2026-11-23 05:00 plies=2,screen=3000,main=48000,cont=32,oracle=24000,mid=12000,poolshift=exact
+chunk 60700 exit=0 2026-11-23 05:15 plies=2,screen=3000,main=48000,cont=32,oracle=24000,mid=12000,poolshift=exact
+chunk 60725 exit=0 2026-11-23 05:30 plies=2,screen=3000,main=48000,cont=32,oracle=24000,mid=12000,poolshift=exact
+chunk 60750 exit=0 2026-11-23 05:46 plies=2,screen=3000,main=48000,cont=32,oracle=24000,mid=12000,poolshift=exact
+chunk 60775 exit=0 2026-11-23 06:01 plies=2,screen=3000,main=48000,cont=32,oracle=24000,mid=12000,poolshift=exact
+chunk 60800 exit=0 2026-11-23 06:17 plies=2,screen=3000,main=48000,cont=32,oracle=24000,mid=12000,poolshift=exact
+chunk 60825 exit=0 2026-11-23 06:31 plies=2,screen=3000,main=48000,cont=32,oracle=24000,mid=12000,poolshift=exact
+chunk 60850 exit=0 2026-11-23 06:44 plies=2,screen=3000,main=48000,cont=32,oracle=24000,mid=12000,poolshift=exact
