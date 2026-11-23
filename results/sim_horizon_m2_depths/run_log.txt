@@ -1,2 +1,6 @@
 chunk 60000 exit=0 2026-11-23 08:24 plies=5,screen=3000,main=48000,cont=32,oracle=24000,mid=12000,poolshift=exact
 chunk 60000 exit=0 2026-11-23 08:45 plies=4,screen=3000,main=48000,cont=32,oracle=24000,mid=12000,poolshift=exact
+chunk 60000 exit=0 2026-11-23 09:04 plies=3,screen=3000,main=48000,cont=32,oracle=24000,mid=12000,poolshift=exact
+chunk 60025 exit=0 2026-11-23 09:30 plies=5,screen=3000,main=48000,cont=32,oracle=24000,mid=12000,poolshift=exact
+chunk 60025 exit=0 2026-11-23 10:00 plies=4,screen=3000,main=48000,cont=32,oracle=24000,mid=12000,poolshift=exact
+chunk 60025 exit=0 2026-11-23 10:32 plies=3,screen=3000,main=48000,cont=32,oracle=24000,mid=12000,poolshift=exact
