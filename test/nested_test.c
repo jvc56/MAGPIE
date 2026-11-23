@@ -30,6 +30,12 @@
 //   NCR_DUMP        1: print each position's CGP, the opponent's rack unseen
 //   NCR_ONLY        only these positions, by index, comma-separated
 //   NCR_SHOW        the number of the sim's top plays to print per choice
+//   NCR_TABLES      the lexical tables every config loads (default
+//                   NCR_DEFAULT_TABLES: the word info and rack info tables,
+//                   the RIT mapped so processes share it; every config
+//                   loads the wordmap besides); a
+//                   lexicon without a WIT or RIT, such as CSW21, needs
+//                   "-rit false -wit false"
 //   NPEGM_FROM      nestedpegm: the first position to choose and solve, to
 //                   resume a run (default 0); positions keep their indices
 
@@ -106,6 +112,12 @@ static int ncr_env_int(const char *name, const int fallback) {
 static const char *ncr_env_string(const char *name, const char *fallback) {
   const char *value = getenv(name);
   return value ? value : fallback;
+}
+
+#define NCR_DEFAULT_TABLES "-wit true -rit true -ritmmap true"
+
+static const char *ncr_tables(void) {
+  return ncr_env_string("NCR_TABLES", NCR_DEFAULT_TABLES);
 }
 
 typedef struct NcrPosition {
@@ -345,11 +357,12 @@ static int ncr_make_positions(const Game *base, NcrPosition *positions,
 static Config *ncr_config(const char *lexicon, const char *settings) {
   char *full = get_formatted_string(
       "set -lex %s -wmp true -s1 equity -s2 equity -r1 all -r2 all "
-      "-threads 1 -savesettings false -hr false -sinfer false %s",
-      lexicon, settings);
+      "-threads 1 -savesettings false -hr false -sinfer false %s %s",
+      lexicon, ncr_tables(), settings);
   Config *config = config_create_or_die(full);
   free(full);
-  load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
+  // Without options: EMPTY_CGP names CSW21, which would replace the lexicon.
+  load_and_exec_config_or_die(config, "cgp " EMPTY_CGP_WITHOUT_OPTIONS);
   ErrorStack *error_stack = error_stack_create();
   config_load_win_pcts(config, error_stack);
   assert(error_stack_is_empty(error_stack));
@@ -1563,11 +1576,11 @@ void test_nested_peg(void) {
   // PEG on the positions where they differ.
   char *peg_settings = get_formatted_string(
       "set -lex %s -wmp true -s1 equity -s2 equity -r1 all -r2 all -threads "
-      "%d -savesettings false -hr false %s",
-      lexicon, num_threads, ncr_env_string("NPEG_SETTINGS", ""));
+      "%d -savesettings false -hr false %s %s",
+      lexicon, num_threads, ncr_tables(), ncr_env_string("NPEG_SETTINGS", ""));
   Config *peg_config = config_create_or_die(peg_settings);
   free(peg_settings);
-  load_and_exec_config_or_die(peg_config, "cgp " EMPTY_CGP);
+  load_and_exec_config_or_die(peg_config, "cgp " EMPTY_CGP_WITHOUT_OPTIONS);
   double sum = 0.0;
   double sum_sq = 0.0;
   int differ = 0;
@@ -1853,11 +1866,11 @@ void test_nested_pegm(void) {
 
   char *peg_settings = get_formatted_string(
       "set -lex %s -wmp true -s1 equity -s2 equity -r1 all -r2 all -threads "
-      "%d -savesettings false -hr false %s",
-      lexicon, num_threads, peg_extra);
+      "%d -savesettings false -hr false %s %s",
+      lexicon, num_threads, ncr_tables(), peg_extra);
   Config *peg_config = config_create_or_die(peg_settings);
   free(peg_settings);
-  load_and_exec_config_or_die(peg_config, "cgp " EMPTY_CGP);
+  load_and_exec_config_or_die(peg_config, "cgp " EMPTY_CGP_WITHOUT_OPTIONS);
   double *wins = malloc_or_die(sizeof(double) * num_methods);
   double *diff_sum = calloc_or_die(num_methods, sizeof(double));
   double *diff_sum_sq = calloc_or_die(num_methods, sizeof(double));
@@ -2020,8 +2033,9 @@ void test_nested_trace(void) {
   }
   char *settings = get_formatted_string(
       "set -lex %s -wmp true -s1 equity -s2 equity -r1 all -r2 all "
-      "-threads 1 -savesettings false -hr false %s",
-      ncr_env_string("NCR_LEX", "CSW24"), ncr_env_string("NT_SETTINGS", ""));
+      "-threads 1 -savesettings false -hr false %s %s",
+      ncr_env_string("NCR_LEX", "CSW24"), ncr_tables(),
+      ncr_env_string("NT_SETTINGS", ""));
   Config *config = config_create_or_die(settings);
   free(settings);
   char *load = get_formatted_string("cgp %s", cgp);
