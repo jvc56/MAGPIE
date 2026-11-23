@@ -36,6 +36,9 @@
 //                   loads the wordmap besides); a
 //                   lexicon without a WIT or RIT, such as CSW21, needs
 //                   "-rit false -wit false"
+//   NCR_CHOOSE      A or B: only that method chooses, nothing is played
+//                   out, and the summary has a hash of its choices, for
+//                   timing and for checking that a speedup is exact
 //   NPEGM_FROM      nestedpegm: the first position to choose and solve, to
 //                   resume a run (default 0); positions keep their indices
 
@@ -147,6 +150,8 @@ typedef struct NcrShared {
   char *only;
   // NCR_SHOW: the sim's top plays to print after each choice (0: none).
   int show;
+  // NCR_CHOOSE: the one method that chooses, or -1 for both.
+  int choose_only;
   atomic_int next_position;
   atomic_int done;
 } NcrShared;
@@ -281,6 +286,9 @@ static void *ncr_worker_run(void *data) {
     }
     const uint64_t pos_seed = ncr_mix(1000003ULL * (uint64_t)(pos_idx + 1));
     for (int method = 0; method < 2; method++) {
+      if (shared->choose_only >= 0 && method != shared->choose_only) {
+        continue;
+      }
       game_copy(worker->game, position->game);
       const double start = ((double)ctimer_monotonic_ns() / 1e9);
       ncr_choose(worker, method, pos_seed, &position->chosen[method]);
@@ -299,6 +307,14 @@ static void *ncr_worker_run(void *data) {
       (void)snprintf(position->chosen_string[method], NCR_MOVE_STRING_SIZE,
                      "%s", string_builder_peek(sb));
       string_builder_destroy(sb);
+    }
+    if (shared->choose_only >= 0) {
+      const int method = shared->choose_only;
+      printf("NCR pos %d bag %d %c %s (%.2fs)\n", pos_idx, position->bag,
+             'A' + method, position->chosen_string[method],
+             position->seconds[method]);
+      (void)fflush(stdout);
+      continue;
     }
     position->differ =
         compare_moves_without_equity(&position->chosen[0], &position->chosen[1],
@@ -431,6 +447,11 @@ void test_nested_cr(void) {
   const char *only = ncr_env_string("NCR_ONLY", "");
   shared.only = only[0] != '\0' ? get_formatted_string(",%s,", only) : NULL;
   shared.show = ncr_env_int("NCR_SHOW", 0);
+  const char *choose = ncr_env_string("NCR_CHOOSE", "");
+  shared.choose_only = -1;
+  if (choose[0] == 'A' || choose[0] == 'B') {
+    shared.choose_only = choose[0] - 'A';
+  }
   if (ncr_env_int("NCR_DUMP", 0) != 0) {
     for (int pos_idx = 0; pos_idx < shared.num_positions; pos_idx++) {
       Game *copy = game_duplicate(shared.positions[pos_idx].game);
@@ -472,6 +493,34 @@ void test_nested_cr(void) {
   }
   for (int worker_idx = 0; worker_idx < num_threads; worker_idx++) {
     cpthread_join(threads[worker_idx]);
+  }
+
+  if (shared.choose_only >= 0) {
+    // A hash of the choices, by position, so that two builds' choices
+    // compare at a glance.
+    uint64_t hash = 0;
+    double total_seconds = 0.0;
+    for (int pos_idx = 0; pos_idx < shared.num_positions; pos_idx++) {
+      const NcrPosition *position = &shared.positions[pos_idx];
+      const char *chosen = position->chosen_string[shared.choose_only];
+      uint64_t value = (uint64_t)pos_idx;
+      for (int char_idx = 0; chosen[char_idx] != '\0'; char_idx++) {
+        value = ncr_mix(value ^ (uint64_t)(unsigned char)chosen[char_idx]);
+      }
+      hash = ncr_mix(hash ^ value);
+      total_seconds += position->seconds[shared.choose_only];
+    }
+    const NestedTotals choose_totals = nested_get_totals();
+    printf("NCR choose summary: %d positions, hash %016llx, %.3f s per "
+           "choice, nested searches %llu, samples %llu, decision hits %llu, "
+           "stopped %llu\n",
+           shared.num_positions, (unsigned long long)hash,
+           total_seconds / shared.num_positions,
+           (unsigned long long)choose_totals.searches,
+           (unsigned long long)choose_totals.samples,
+           (unsigned long long)choose_totals.decision_hits,
+           (unsigned long long)choose_totals.stopped);
+    (void)fflush(stdout);
   }
 
   // B's regret against A is A's mean result less B's: positive favors A.
