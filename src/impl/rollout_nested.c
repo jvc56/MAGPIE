@@ -44,6 +44,10 @@ enum {
   NESTED_CACHE_PROBES = 8,
   // The most tiles a pool holds.
   NESTED_MAX_POOL = 1024,
+  // A paired LAMC search's alternating fits, and the fewest degrees of
+  // freedom its noise estimate needs.
+  NESTED_PAIRED_ITERATIONS = 20,
+  NESTED_PAIRED_MIN_DOF = 4,
   // The most static plies a nested rollout plays to finish a game, and the
   // ply it tells the census they are (past any the census serves).
   NESTED_FINISH_MAX_PLIES = 40,
@@ -174,6 +178,14 @@ struct NestedWorker {
   double *upper_bounds;
   // The plays by standardized static equity, highest first.
   NestedEquityRank *equity_order;
+  // For a paired search (NestedLevel.paired): each play's index among the
+  // evaluated plays, or -1; the evaluated plays' values by seed,
+  // seed_capacity a play; and per seed, its effect and its plays.
+  int *eval_index;
+  double *seed_values;
+  int seed_capacity;
+  double *seed_effects;
+  int *seed_plays;
   int pool[NESTED_MAX_UNIVERSE];
   int evaluated[NESTED_MAX_EVALUATED];
   int num_evaluated;
@@ -264,6 +276,11 @@ static NestedWorker *nested_worker_create_level(const Game *game,
   worker->play_counts = NULL;
   worker->upper_bounds = NULL;
   worker->equity_order = NULL;
+  worker->eval_index = NULL;
+  worker->seed_values = NULL;
+  worker->seed_capacity = 0;
+  worker->seed_effects = NULL;
+  worker->seed_plays = NULL;
   worker->num_evaluated = 0;
   worker->gp = NULL;
   worker->gp_num_dims = 0;
@@ -332,6 +349,10 @@ void nested_worker_destroy(NestedWorker *worker) {
   free(worker->play_counts);
   free(worker->upper_bounds);
   free(worker->equity_order);
+  free(worker->eval_index);
+  free(worker->seed_values);
+  free(worker->seed_effects);
+  free(worker->seed_plays);
   gp_destroy(worker->gp);
   free(worker);
 }
@@ -380,6 +401,7 @@ static int nested_embed(NestedWorker *worker, const Game *game) {
     free(worker->play_counts);
     free(worker->upper_bounds);
     free(worker->equity_order);
+    free(worker->eval_index);
     worker->embedding_capacity = count * num_columns;
     worker->play_capacity = count;
     worker->embedding =
@@ -393,6 +415,7 @@ static int nested_embed(NestedWorker *worker, const Game *game) {
     worker->upper_bounds = malloc_or_die(sizeof(double) * (size_t)count);
     worker->equity_order =
         malloc_or_die(sizeof(NestedEquityRank) * (size_t)count);
+    worker->eval_index = malloc_or_die(sizeof(int) * (size_t)count);
   }
   double *embedding = worker->embedding;
   play_feature_ctx_init(&worker->feature_ctx, game);
@@ -1056,7 +1079,118 @@ static const Move *nested_choose_shared(NestedWorker *worker,
 // squares weighted by each mean's precision, and a Gaussian process of the
 // residuals whose length scale and signal variance are chosen by marginal
 // likelihood. Returns whether a fit succeeded.
-static bool nested_fit(NestedWorker *worker, const int num_columns) {
+// For a paired search: each evaluated play's mean and its variance, in
+// worker->gp_values and worker->gp_noise, from the model value = play mean +
+// seed effect + noise, fit by alternating means over the seeds that two or
+// more plays share. A seed only one play drew counts as a plain sample.
+// Returns false, leaving the plain estimates to be used, when too few
+// samples share seeds to estimate the noise.
+static bool nested_paired_estimates(NestedWorker *worker,
+                                    const double rollout_variance) {
+  const int num_evaluated = worker->num_evaluated;
+  int num_seeds = 0;
+  for (int eval_idx = 0; eval_idx < num_evaluated; eval_idx++) {
+    const int samples = worker->play_counts[worker->evaluated[eval_idx]];
+    num_seeds = samples > num_seeds ? samples : num_seeds;
+  }
+  for (int seed_idx = 0; seed_idx < num_seeds; seed_idx++) {
+    worker->seed_plays[seed_idx] = 0;
+    worker->seed_effects[seed_idx] = 0.0;
+  }
+  for (int eval_idx = 0; eval_idx < num_evaluated; eval_idx++) {
+    const int samples = worker->play_counts[worker->evaluated[eval_idx]];
+    for (int seed_idx = 0; seed_idx < samples; seed_idx++) {
+      worker->seed_plays[seed_idx]++;
+    }
+  }
+  int shared_samples = 0;
+  int shared_seeds = 0;
+  for (int seed_idx = 0; seed_idx < num_seeds; seed_idx++) {
+    if (worker->seed_plays[seed_idx] >= 2) {
+      shared_samples += worker->seed_plays[seed_idx];
+      shared_seeds++;
+    }
+  }
+  const int dof = shared_samples - shared_seeds - num_evaluated + 1;
+  if (dof < NESTED_PAIRED_MIN_DOF) {
+    return false;
+  }
+  double *means = worker->gp_values;
+  for (int eval_idx = 0; eval_idx < num_evaluated; eval_idx++) {
+    const int play_idx = worker->evaluated[eval_idx];
+    means[eval_idx] =
+        worker->play_sums[play_idx] / worker->play_counts[play_idx];
+  }
+  for (int iteration = 0; iteration < NESTED_PAIRED_ITERATIONS; iteration++) {
+    for (int seed_idx = 0; seed_idx < num_seeds; seed_idx++) {
+      worker->seed_effects[seed_idx] = 0.0;
+    }
+    for (int eval_idx = 0; eval_idx < num_evaluated; eval_idx++) {
+      const int samples = worker->play_counts[worker->evaluated[eval_idx]];
+      const double *values =
+          worker->seed_values + (ptrdiff_t)eval_idx * worker->seed_capacity;
+      for (int seed_idx = 0; seed_idx < samples; seed_idx++) {
+        worker->seed_effects[seed_idx] += values[seed_idx] - means[eval_idx];
+      }
+    }
+    // Effects of shared seeds only, centered over their samples.
+    double effect_sum = 0.0;
+    for (int seed_idx = 0; seed_idx < num_seeds; seed_idx++) {
+      if (worker->seed_plays[seed_idx] >= 2) {
+        effect_sum += worker->seed_effects[seed_idx];
+        worker->seed_effects[seed_idx] /= worker->seed_plays[seed_idx];
+      } else {
+        worker->seed_effects[seed_idx] = 0.0;
+      }
+    }
+    const double shift = effect_sum / shared_samples;
+    for (int seed_idx = 0; seed_idx < num_seeds; seed_idx++) {
+      if (worker->seed_plays[seed_idx] >= 2) {
+        worker->seed_effects[seed_idx] -= shift;
+      }
+    }
+    for (int eval_idx = 0; eval_idx < num_evaluated; eval_idx++) {
+      const int samples = worker->play_counts[worker->evaluated[eval_idx]];
+      const double *values =
+          worker->seed_values + (ptrdiff_t)eval_idx * worker->seed_capacity;
+      double sum = 0.0;
+      for (int seed_idx = 0; seed_idx < samples; seed_idx++) {
+        sum += values[seed_idx] - worker->seed_effects[seed_idx];
+      }
+      means[eval_idx] = sum / samples;
+    }
+  }
+  double residual_squares = 0.0;
+  for (int eval_idx = 0; eval_idx < num_evaluated; eval_idx++) {
+    const int samples = worker->play_counts[worker->evaluated[eval_idx]];
+    const double *values =
+        worker->seed_values + (ptrdiff_t)eval_idx * worker->seed_capacity;
+    for (int seed_idx = 0; seed_idx < samples; seed_idx++) {
+      if (worker->seed_plays[seed_idx] >= 2) {
+        const double residual =
+            values[seed_idx] - means[eval_idx] - worker->seed_effects[seed_idx];
+        residual_squares += residual * residual;
+      }
+    }
+  }
+  double paired_variance = residual_squares / dof;
+  if (paired_variance < NESTED_MIN_ROLLOUT_VARIANCE) {
+    paired_variance = NESTED_MIN_ROLLOUT_VARIANCE;
+  }
+  for (int eval_idx = 0; eval_idx < num_evaluated; eval_idx++) {
+    const int samples = worker->play_counts[worker->evaluated[eval_idx]];
+    double variance_sum = 0.0;
+    for (int seed_idx = 0; seed_idx < samples; seed_idx++) {
+      variance_sum += worker->seed_plays[seed_idx] >= 2 ? paired_variance
+                                                        : rollout_variance;
+    }
+    worker->gp_noise[eval_idx] = variance_sum / ((double)samples * samples);
+  }
+  return true;
+}
+
+static bool nested_fit(NestedWorker *worker, const NestedLevel *args,
+                       const int num_columns) {
   const int num_evaluated = worker->num_evaluated;
   double pooled_squares = 0.0;
   double pooled_dof = 0.0;
@@ -1080,14 +1214,18 @@ static bool nested_fit(NestedWorker *worker, const int num_columns) {
   if (rollout_variance < NESTED_MIN_ROLLOUT_VARIANCE) {
     rollout_variance = NESTED_MIN_ROLLOUT_VARIANCE;
   }
+  const bool paired =
+      args->paired && nested_paired_estimates(worker, rollout_variance);
   double noise_sum = 0.0;
   double weight_sum = 0.0;
   double equity_sum = 0.0;
   double value_sum = 0.0;
   for (int eval_idx = 0; eval_idx < num_evaluated; eval_idx++) {
     const int play_idx = worker->evaluated[eval_idx];
-    worker->gp_noise[eval_idx] =
-        rollout_variance / (double)worker->play_counts[play_idx];
+    if (!paired) {
+      worker->gp_noise[eval_idx] =
+          rollout_variance / (double)worker->play_counts[play_idx];
+    }
     noise_sum += worker->gp_noise[eval_idx];
     const double weight = 1.0 / worker->gp_noise[eval_idx];
     weight_sum += weight;
@@ -1225,6 +1363,7 @@ static uint64_t nested_sample_pool(NestedWorker *worker,
     const int play_idx = pool[pool_idx];
     if (worker->play_counts[play_idx] == 0 &&
         worker->num_evaluated < NESTED_MAX_EVALUATED) {
+      worker->eval_index[play_idx] = worker->num_evaluated;
       worker->evaluated[worker->num_evaluated++] = play_idx;
     }
     for (int sample = 0; sample < args->num_samples; sample++) {
@@ -1232,6 +1371,12 @@ static uint64_t nested_sample_pool(NestedWorker *worker,
           worker, args, eval,
           move_list_get_move(worker->candidate_list, play_idx),
           nested_mix(seed + (uint64_t)worker->play_counts[play_idx]), carry);
+      if (args->paired && worker->eval_index[play_idx] >= 0 &&
+          worker->play_counts[play_idx] < worker->seed_capacity) {
+        worker->seed_values[(ptrdiff_t)worker->eval_index[play_idx] *
+                                worker->seed_capacity +
+                            worker->play_counts[play_idx]] = value;
+      }
       worker->play_sums[play_idx] += value;
       worker->play_squares[play_idx] += value * value;
       worker->play_counts[play_idx]++;
@@ -1330,6 +1475,21 @@ static const Move *nested_choose_lamc(NestedWorker *worker,
     worker->play_sums[play_idx] = 0.0;
     worker->play_squares[play_idx] = 0.0;
     worker->play_counts[play_idx] = 0;
+    worker->eval_index[play_idx] = -1;
+  }
+  if (args->paired) {
+    // A play draws at most num_samples seeds a round.
+    const int seeds = args->rounds * args->num_samples;
+    if (worker->seed_capacity < seeds) {
+      free(worker->seed_values);
+      free(worker->seed_effects);
+      free(worker->seed_plays);
+      worker->seed_capacity = seeds;
+      worker->seed_values = malloc_or_die(
+          sizeof(double) * (size_t)NESTED_MAX_EVALUATED * (size_t)seeds);
+      worker->seed_effects = malloc_or_die(sizeof(double) * (size_t)seeds);
+      worker->seed_plays = malloc_or_die(sizeof(int) * (size_t)seeds);
+    }
   }
   worker->num_evaluated = 0;
   for (int play_idx = 0; play_idx < count; play_idx++) {
@@ -1348,7 +1508,7 @@ static const Move *nested_choose_lamc(NestedWorker *worker,
   for (int round = 0; round < args->rounds; round++) {
     samples +=
         nested_sample_pool(worker, args, eval, pool, pool_count, seed, carry);
-    fitted = nested_fit(worker, num_columns);
+    fitted = nested_fit(worker, args, num_columns);
     if (round == args->rounds - 1 || !fitted) {
       break;
     }
@@ -1651,6 +1811,14 @@ static bool nested_parse_setting(const char *key, const char *value,
   }
   if (strings_iequal(key, "stop")) {
     return nested_parse_double(value, &args->stop_z) && args->stop_z >= 0.0;
+  }
+  if (strings_iequal(key, "pair")) {
+    int paired = 0;
+    if (!nested_parse_int(value, 0, 1, &paired)) {
+      return false;
+    }
+    args->paired = paired == 1;
+    return true;
   }
   if (strings_iequal(key, "universe")) {
     return nested_parse_int(value, 0, NESTED_MAX_UNIVERSE, &args->universe);

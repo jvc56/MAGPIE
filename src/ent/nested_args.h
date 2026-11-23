@@ -112,6 +112,11 @@ typedef struct NestedLevel {
   // its best play by the surrogate's mean, less stop_z standard deviations,
   // leads every other play's mean plus stop_z standard deviations.
   double stop_z;
+  // Whether a LAMC search models the luck its common seeds share: a play's
+  // n-th rollout of every play draws the same racks, so each value is taken
+  // as the play's mean plus the seed's effect plus noise, and the surrogate
+  // fits the plays' means with the noise that is left.
+  bool paired;
 } NestedLevel;
 
 typedef struct NestedArgs {
@@ -151,6 +156,7 @@ static inline void nested_level_set_defaults(NestedLevel *args) {
   args->rounds = NESTED_DEFAULT_ROUNDS;
   args->ucb_beta = 1.0;
   args->stop_z = 0.0;
+  args->paired = false;
 }
 
 static inline void nested_args_set_defaults(NestedArgs *args) {
