@@ -6,14 +6,14 @@
 
 against 'sim as it is': picks by util from about 48022 rollouts a candidate; 1382 positions from 75 games, 434 with more than one candidate kept, 104 with differing picks
   variant                               differs         spread/pos        win pts/pos    utility/pos x 1e4   oracle noise per differing pick (spread, win pts)
-  rollout leaves, no shift                1.09%  +0.0047 (0.0039)  +0.0010 (0.0028)   +0.1002 (0.2069)   0.44, 0.35
-  rollout leaves, no shift + half PAT     2.39%  +0.0016 (0.0057)  +0.0017 (0.0031)   +0.1350 (0.2273)   0.56, 0.35
-  rollout leaves, no shift + PAT          3.47%  -0.0002 (0.0070)  -0.0005 (0.0039)   -0.0258 (0.2903)   0.59, 0.38
+  no shift                                1.09%  +0.0047 (0.0039)  +0.0010 (0.0028)   +0.1002 (0.2069)   0.44, 0.35
+  no shift + half PAT                     2.39%  +0.0016 (0.0057)  +0.0017 (0.0031)   +0.1350 (0.2273)   0.56, 0.35
+  no shift + PAT                          3.47%  -0.0002 (0.0070)  -0.0005 (0.0039)   -0.0258 (0.2903)   0.59, 0.38
   sim as it is + half PAT                 1.66%  +0.0039 (0.0041)  -0.0003 (0.0014)   +0.0030 (0.1113)   0.63, 0.37
   sim as it is + PAT                      2.82%  -0.0068 (0.0069)  -0.0005 (0.0019)   -0.0679 (0.1503)   0.60, 0.35
-  shift on own leave only                 1.16%  +0.0061 (0.0034)  +0.0039 (0.0021)   +0.3092 (0.1644)   0.58, 0.37
-  shift on own leave only + half PAT      1.88%  +0.0073 (0.0052)  +0.0037 (0.0021)   +0.3038 (0.1631)   0.59, 0.34
-  shift on own leave only + PAT           2.82%  +0.0062 (0.0056)  +0.0039 (0.0025)   +0.3069 (0.1897)   0.60, 0.37
+  own shift only                          1.16%  +0.0061 (0.0034)  +0.0039 (0.0021)   +0.3092 (0.1644)   0.58, 0.37
+  own shift only + half PAT               1.88%  +0.0073 (0.0052)  +0.0037 (0.0021)   +0.3038 (0.1631)   0.59, 0.34
+  own shift only + PAT                    2.82%  +0.0062 (0.0056)  +0.0039 (0.0025)   +0.3069 (0.1897)   0.60, 0.37
   opponent's leave at stock               1.37%  +0.0079 (0.0216)  -0.0052 (0.0043)   -0.2969 (0.2757)   0.49, 0.35
   opponent's leave at stock + half PAT    2.60%  +0.0091 (0.0222)  -0.0066 (0.0045)   -0.3818 (0.2751)   0.59, 0.36
   opponent's leave at stock + PAT         3.40%  +0.0105 (0.0222)  -0.0053 (0.0047)   -0.2883 (0.2876)   0.58, 0.37
@@ -38,14 +38,14 @@ against 'sim as it is': picks by util from about 48022 rollouts a candidate; 138
 
 bag of 21 or more: against 'sim as it is': picks by util from about 48022 rollouts a candidate; 1130 positions from 75 games, 342 with more than one candidate kept, 64 with differing picks
   variant                               differs         spread/pos        win pts/pos    utility/pos x 1e4   oracle noise per differing pick (spread, win pts)
-  rollout leaves, no shift                0.97%  +0.0032 (0.0045)  -0.0002 (0.0033)   +0.0089 (0.2451)   0.44, 0.35
-  rollout leaves, no shift + half PAT     2.48%  -0.0008 (0.0069)  +0.0007 (0.0037)   +0.0569 (0.2697)   0.58, 0.35
-  rollout leaves, no shift + PAT          3.81%  -0.0029 (0.0086)  -0.0019 (0.0047)   -0.1397 (0.3491)   0.61, 0.39
+  no shift                                0.97%  +0.0032 (0.0045)  -0.0002 (0.0033)   +0.0089 (0.2451)   0.44, 0.35
+  no shift + half PAT                     2.48%  -0.0008 (0.0069)  +0.0007 (0.0037)   +0.0569 (0.2697)   0.58, 0.35
+  no shift + PAT                          3.81%  -0.0029 (0.0086)  -0.0019 (0.0047)   -0.1397 (0.3491)   0.61, 0.39
   sim as it is + half PAT                 1.95%  +0.0047 (0.0050)  -0.0003 (0.0017)   +0.0092 (0.1360)   0.64, 0.38
   sim as it is + PAT                      3.19%  -0.0014 (0.0067)  -0.0006 (0.0024)   -0.0384 (0.1817)   0.62, 0.36
-  shift on own leave only                 1.06%  +0.0049 (0.0040)  +0.0033 (0.0025)   +0.2645 (0.1931)   0.63, 0.37
-  shift on own leave only + half PAT      1.86%  +0.0063 (0.0062)  +0.0032 (0.0025)   +0.2633 (0.1915)   0.63, 0.35
-  shift on own leave only + PAT           2.92%  +0.0063 (0.0067)  +0.0030 (0.0029)   +0.2488 (0.2269)   0.63, 0.38
+  own shift only                          1.06%  +0.0049 (0.0040)  +0.0033 (0.0025)   +0.2645 (0.1931)   0.63, 0.37
+  own shift only + half PAT               1.86%  +0.0063 (0.0062)  +0.0032 (0.0025)   +0.2633 (0.1915)   0.63, 0.35
+  own shift only + PAT                    2.92%  +0.0063 (0.0067)  +0.0030 (0.0029)   +0.2488 (0.2269)   0.63, 0.38
   opponent's leave at stock               0.88%  +0.0023 (0.0040)  +0.0014 (0.0023)   +0.1107 (0.1782)   0.59, 0.37
   opponent's leave at stock + half PAT    2.21%  -0.0008 (0.0066)  +0.0003 (0.0028)   +0.0212 (0.2183)   0.66, 0.38
   opponent's leave at stock + PAT         3.19%  +0.0010 (0.0068)  +0.0018 (0.0030)   +0.1356 (0.2372)   0.63, 0.38
@@ -70,14 +70,14 @@ bag of 21 or more: against 'sim as it is': picks by util from about 48022 rollou
 
 bag under 21: against 'sim as it is': picks by util from about 48000 rollouts a candidate; 252 positions from 75 games, 92 with more than one candidate kept, 40 with differing picks
   variant                               differs         spread/pos        win pts/pos    utility/pos x 1e4   oracle noise per differing pick (spread, win pts)
-  rollout leaves, no shift                1.59%  +0.0117 (0.0063)  +0.0063 (0.0038)   +0.5098 (0.2841)   0.43, 0.35
-  rollout leaves, no shift + half PAT     1.98%  +0.0120 (0.0063)  +0.0059 (0.0038)   +0.4852 (0.2856)   0.39, 0.33
-  rollout leaves, no shift + PAT          1.98%  +0.0120 (0.0063)  +0.0059 (0.0038)   +0.4852 (0.2856)   0.39, 0.33
+  no shift                                1.59%  +0.0117 (0.0063)  +0.0063 (0.0038)   +0.5098 (0.2841)   0.43, 0.35
+  no shift + half PAT                     1.98%  +0.0120 (0.0063)  +0.0059 (0.0038)   +0.4852 (0.2856)   0.39, 0.33
+  no shift + PAT                          1.98%  +0.0120 (0.0063)  +0.0059 (0.0038)   +0.4852 (0.2856)   0.39, 0.33
   sim as it is + half PAT                 0.40%  +0.0003 (0.0003)  -0.0004 (0.0004)   -0.0246 (0.0247)   0.17, 0.22
   sim as it is + PAT                      1.19%  -0.0310 (0.0233)  -0.0003 (0.0010)   -0.2006 (0.1261)   0.41, 0.29
-  shift on own leave only                 1.59%  +0.0117 (0.0063)  +0.0063 (0.0038)   +0.5098 (0.2841)   0.43, 0.35
-  shift on own leave only + half PAT      1.98%  +0.0120 (0.0063)  +0.0059 (0.0038)   +0.4852 (0.2856)   0.39, 0.33
-  shift on own leave only + PAT           2.38%  +0.0059 (0.0089)  +0.0077 (0.0042)   +0.5672 (0.2946)   0.36, 0.31
+  own shift only                          1.59%  +0.0117 (0.0063)  +0.0063 (0.0038)   +0.5098 (0.2841)   0.43, 0.35
+  own shift only + half PAT               1.98%  +0.0120 (0.0063)  +0.0059 (0.0038)   +0.4852 (0.2856)   0.39, 0.33
+  own shift only + PAT                    2.38%  +0.0059 (0.0089)  +0.0077 (0.0042)   +0.5672 (0.2946)   0.36, 0.31
   opponent's leave at stock               3.57%  +0.0331 (0.1171)  -0.0346 (0.0207)   -2.1243 (1.2664)   0.35, 0.32
   opponent's leave at stock + half PAT    4.37%  +0.0534 (0.1179)  -0.0375 (0.0234)   -2.1888 (1.3546)   0.36, 0.32
   opponent's leave at stock + PAT         4.37%  +0.0534 (0.1179)  -0.0375 (0.0234)   -2.1888 (1.3546)   0.36, 0.32
