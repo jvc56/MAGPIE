@@ -1,0 +1,3 @@
+chunk 60000 exit=0 2026-11-22 22:12 plies=2,screen=3000,main=48000,cont=32,oracle=24000,mid=12000,poolshift=exact
+chunk 60025 exit=0 2026-11-22 22:27 plies=2,screen=3000,main=48000,cont=32,oracle=24000,mid=12000,poolshift=exact
+chunk 60050 exit=0 2026-11-22 22:42 plies=2,screen=3000,main=48000,cont=32,oracle=24000,mid=12000,poolshift=exact
