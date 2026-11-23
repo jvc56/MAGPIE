@@ -305,6 +305,17 @@ static void test_play_features(void) {
     assert(type[0] + type[1] + type[2] == 1.0);
     assert((type[1] == 1.0) == (move_get_type(move) == GAME_EVENT_EXCHANGE));
   }
+  // Premium access: the per-square masks count as the direct loop does.
+  play_feature_prepare(PLAY_FEATURE_PREMIUM_ACCESS, &ctx);
+  assert(ctx.premium_masks_ready);
+  play_feature_extract(PLAY_FEATURE_PREMIUM_ACCESS, &ctx, moves, stride, first);
+  ctx.premium_masks_ready = false;
+  play_feature_extract(PLAY_FEATURE_PREMIUM_ACCESS, &ctx, moves, stride,
+                       second);
+  for (int move_idx = 0; move_idx < num_moves; move_idx++) {
+    assert(first[move_idx * stride] == second[move_idx * stride]);
+    assert(first[move_idx * stride + 1] == second[move_idx * stride + 1]);
+  }
   free(first);
   free(second);
 

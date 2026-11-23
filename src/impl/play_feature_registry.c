@@ -24,6 +24,7 @@ void play_feature_ctx_init(PlayFeatureCtx *ctx, const Game *game) {
   rack_copy(&ctx->rack, player_get_rack(player));
   ctx->bag_tiles = bag_get_letters(game_get_bag(game));
   ctx->num_premium_squares = 0;
+  ctx->premium_masks_ready = false;
 }
 
 const char *play_feature_get_name(const play_feature_t feature) {

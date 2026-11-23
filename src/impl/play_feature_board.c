@@ -10,6 +10,7 @@
 #include "../ent/move.h"
 #include "../ent/play_feature.h"
 #include <stdbool.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -17,7 +18,37 @@ enum {
   // Premium word squares are counted in a play's reach out to this many
   // squares from a placed tile.
   PLAY_FEATURE_PREMIUM_REACH = RACK_SIZE,
+  // The most premium squares the per-square masks hold.
+  PLAY_FEATURE_MAX_MASKED_PREMIUMS = 64,
 };
+
+// The number of set bits, following the guarded-intrinsic pattern.
+static inline int play_feature_bit_count(uint64_t bits) {
+#if defined(__has_builtin) && __has_builtin(__builtin_popcountll)
+  return __builtin_popcountll(bits);
+#else
+  int count = 0;
+  while (bits != 0) {
+    bits &= bits - 1;
+    count++;
+  }
+  return count;
+#endif
+}
+
+// Whether the premium square at premium_row, premium_col is in reach of a
+// tile placed at row, col.
+static bool play_feature_premium_in_reach(const int premium_row,
+                                          const int premium_col, const int row,
+                                          const int col) {
+  if (premium_row == row) {
+    return abs(premium_col - col) <= PLAY_FEATURE_PREMIUM_REACH;
+  }
+  if (premium_col == col) {
+    return abs(premium_row - row) <= PLAY_FEATURE_PREMIUM_REACH;
+  }
+  return false;
+}
 
 // Writes the rows and columns of the tiles the play places, and returns how
 // many there are: 0 for an exchange or a pass.
@@ -102,6 +133,33 @@ void play_feature_prepare_premium_access(PlayFeatureCtx *ctx) {
       ctx->num_premium_squares++;
     }
   }
+  ctx->premium_masks_ready =
+      ctx->num_premium_squares <= PLAY_FEATURE_MAX_MASKED_PREMIUMS;
+  if (!ctx->premium_masks_ready) {
+    return;
+  }
+  for (int row = 0; row < BOARD_DIM; row++) {
+    for (int col = 0; col < BOARD_DIM; col++) {
+      uint64_t triple_mask = 0;
+      uint64_t double_mask = 0;
+      for (int premium_idx = 0; premium_idx < ctx->num_premium_squares;
+           premium_idx++) {
+        if (!play_feature_premium_in_reach(ctx->premium_rows[premium_idx],
+                                           ctx->premium_cols[premium_idx], row,
+                                           col)) {
+          continue;
+        }
+        const uint64_t bit = (uint64_t)1 << premium_idx;
+        if (ctx->premium_word_multipliers[premium_idx] >= 3) {
+          triple_mask |= bit;
+        } else {
+          double_mask |= bit;
+        }
+      }
+      ctx->premium_triple_masks[row * BOARD_DIM + col] = triple_mask;
+      ctx->premium_double_masks[row * BOARD_DIM + col] = double_mask;
+    }
+  }
 }
 
 void play_feature_extract_premium_access(const PlayFeatureCtx *ctx,
@@ -109,6 +167,18 @@ void play_feature_extract_premium_access(const PlayFeatureCtx *ctx,
   int rows[BOARD_DIM];
   int cols[BOARD_DIM];
   const int num_placed = play_feature_placed_squares(move, rows, cols);
+  if (ctx->premium_masks_ready) {
+    uint64_t triple_mask = 0;
+    uint64_t double_mask = 0;
+    for (int placed_idx = 0; placed_idx < num_placed; placed_idx++) {
+      const int square = rows[placed_idx] * BOARD_DIM + cols[placed_idx];
+      triple_mask |= ctx->premium_triple_masks[square];
+      double_mask |= ctx->premium_double_masks[square];
+    }
+    out[0] = (double)play_feature_bit_count(triple_mask);
+    out[1] = (double)play_feature_bit_count(double_mask);
+    return;
+  }
   int triple_words = 0;
   int double_words = 0;
   for (int premium_idx = 0; premium_idx < ctx->num_premium_squares;
@@ -118,13 +188,8 @@ void play_feature_extract_premium_access(const PlayFeatureCtx *ctx,
     bool in_reach = false;
     for (int placed_idx = 0; placed_idx < num_placed && !in_reach;
          placed_idx++) {
-      if (premium_row == rows[placed_idx]) {
-        in_reach =
-            abs(premium_col - cols[placed_idx]) <= PLAY_FEATURE_PREMIUM_REACH;
-      } else if (premium_col == cols[placed_idx]) {
-        in_reach =
-            abs(premium_row - rows[placed_idx]) <= PLAY_FEATURE_PREMIUM_REACH;
-      }
+      in_reach = play_feature_premium_in_reach(
+          premium_row, premium_col, rows[placed_idx], cols[placed_idx]);
     }
     if (!in_reach) {
       continue;

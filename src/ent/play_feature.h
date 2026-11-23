@@ -7,6 +7,8 @@
 #include "../ent/letter_distribution.h"
 #include "../ent/move.h"
 #include "../ent/rack.h"
+#include <stdbool.h>
+#include <stdint.h>
 
 // What feature extraction reads for one position. play_feature_ctx_init fills
 // the common fields; a feature's prepare step fills what only it reads.
@@ -24,6 +26,12 @@ typedef struct PlayFeatureCtx {
   int premium_rows[BOARD_DIM * BOARD_DIM];
   int premium_cols[BOARD_DIM * BOARD_DIM];
   int premium_word_multipliers[BOARD_DIM * BOARD_DIM];
+  // With at most 64 premium squares (premium_masks_ready), by square (row *
+  // BOARD_DIM + col): the premium squares in reach of a tile placed there, as
+  // bits by premium index, triple word squares and double word squares apart.
+  bool premium_masks_ready;
+  uint64_t premium_triple_masks[BOARD_DIM * BOARD_DIM];
+  uint64_t premium_double_masks[BOARD_DIM * BOARD_DIM];
 } PlayFeatureCtx;
 
 // Writes a feature's raw values for one play: play_feature_get_num_columns
