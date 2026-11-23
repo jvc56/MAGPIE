@@ -1,2 +1,8 @@
 chunk 50000 exit=0 2026-11-22 20:47 plies=2,screen=3000,main=48000,cont=32,oracle=24000,mid=12000,poolshift=exact
 chunk 50025 exit=0 2026-11-22 21:01 plies=2,screen=3000,main=48000,cont=32,oracle=24000,mid=12000,poolshift=exact
+chunk 50050 exit=0 2026-11-22 21:14 plies=2,screen=3000,main=48000,cont=32,oracle=24000,mid=12000,poolshift=exact
+chunk 50075 exit=0 2026-11-22 21:28 plies=2,screen=3000,main=48000,cont=32,oracle=24000,mid=12000,poolshift=exact
+chunk 50100 exit=0 2026-11-22 21:42 plies=2,screen=3000,main=48000,cont=32,oracle=24000,mid=12000,poolshift=exact
+chunk 50125 exit=0 2026-11-22 21:56 plies=2,screen=3000,main=48000,cont=32,oracle=24000,mid=12000,poolshift=exact
+stopped by STOP file 2026-11-22 21:56
+loop finished 2026-11-22 21:56

@@ -1,2 +1,6 @@
 v2_g50000.out horizon_mismatches=0  mean_mismatches=0 SIMH done positions=465 with_main=167 with_oracle=64 seconds=929
 v2_g50025.out horizon_mismatches=0  mean_mismatches=0 SIMH done positions=462 with_main=146 with_oracle=52 seconds=835
+v2_g50050.out horizon_mismatches=0  mean_mismatches=0 SIMH done positions=460 with_main=146 with_oracle=54 seconds=827
+v2_g50075.out horizon_mismatches=0  mean_mismatches=0 SIMH done positions=439 with_main=157 with_oracle=51 seconds=832
+v2_g50100.out horizon_mismatches=0  mean_mismatches=0 SIMH done positions=452 with_main=152 with_oracle=45 seconds=814
+v2_g50125.out horizon_mismatches=0  mean_mismatches=0 SIMH done positions=468 with_main=149 with_oracle=45 seconds=826
