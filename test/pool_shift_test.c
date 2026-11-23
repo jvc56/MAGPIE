@@ -1017,6 +1017,119 @@ static void assert_exact_rack_shifts(const Game *game) {
   free(subsets);
 }
 
+// The leaves of the mover's pool (see PoolLeaves) value every leave as the
+// exact leave values do, less one amount for all of them: checked on the
+// leaves of the mover's rack, pair by pair.
+static void assert_pool_leaves(const Game *game) {
+  const int mover_idx = game_get_player_on_turn_index(game);
+  const Player *mover = game_get_player(game, mover_idx);
+  const Rack *rack = player_get_rack(mover);
+  const Rack *opponent_rack =
+      player_get_rack(game_get_player(game, 1 - mover_idx));
+  const PoolShiftTable *table = player_get_pool_shift_table(mover);
+  PoolLeaves *pool_leaves = pool_leaves_create(
+      table, game_get_ld(game), game_get_bag(game), opponent_rack, NULL, 1);
+  assert(pool_shift_table_matches_klv(pool_leaves->table, pool_leaves->klv));
+  Equity first_difference = 0;
+  for (int leave_size = RACK_SIZE - 1; leave_size >= 1; leave_size--) {
+    Rack leave;
+    set_leave_prefix(rack, leave_size, &leave);
+    const Equity exact_value =
+        klv_get_leave_value(player_get_klv(mover), &leave) +
+        pool_shift_get_leave_shift(
+            table, player_get_klv(mover), POOL_SHIFT_EXACT_WEIGHT_MILLI,
+            game_get_ld(game), game_get_bag(game), opponent_rack, &leave,
+            RACK_SIZE, game_get_real_bag_size(game));
+    const Equity difference =
+        exact_value - klv_get_leave_value(pool_leaves->klv, &leave);
+    if (leave_size == RACK_SIZE - 1) {
+      first_difference = difference;
+    }
+    assert(abs(difference - first_difference) <= 2);
+  }
+  // For the pool the leaves were built for, the table's shifts are 0.
+  Rack leave;
+  set_leave_prefix(rack, 2, &leave);
+  assert(pool_shift_get_leave_shift(pool_leaves->table, pool_leaves->klv,
+                                    POOL_SHIFT_POOL_LEAVES_WEIGHT_MILLI,
+                                    game_get_ld(game), game_get_bag(game),
+                                    opponent_rack, &leave, RACK_SIZE,
+                                    game_get_real_bag_size(game)) == 0);
+  const int private_total = pool_leaves->table->reference_total;
+  pool_leaves_destroy(pool_leaves);
+  // With the mover's rack, the pool is what neither player has played: the
+  // same for both, and the mover's own rack is then part of the shift.
+  PoolLeaves *public_leaves = pool_leaves_create(
+      table, game_get_ld(game), game_get_bag(game), opponent_rack, rack, 1);
+  assert(public_leaves->table->reference_total == private_total + RACK_SIZE);
+  // The rack's subsets get their values as leaves from the pool's own table.
+  PoolShiftRack *pool_subsets = malloc_or_die(sizeof(PoolShiftRack));
+  pool_shift_fill_rack(public_leaves->table, game_get_ld(game),
+                       game_get_bag(game), opponent_rack,
+                       POOL_SHIFT_POOL_LEAVES_WEIGHT_MILLI, rack, pool_subsets);
+  for (int idx = 0; idx < pool_subsets->count - 1; idx++) {
+    Rack kept_rack;
+    rack_set_dist_size_and_reset(&kept_rack, rack_get_dist_size(rack));
+    for (int bit_idx = 0; bit_idx < RACK_SIZE; bit_idx++) {
+      if ((pool_subsets->map_indices[idx] & (1 << bit_idx)) != 0) {
+        rack_add_letter(&kept_rack, pool_subsets->bit_tiles[bit_idx]);
+      }
+    }
+    assert(pool_subsets->values[idx] ==
+           klv_get_leave_value(public_leaves->klv, &kept_rack));
+  }
+  assert(pool_subsets->values[pool_subsets->count - 1] == 0);
+  free(pool_subsets);
+  // The racks change places on purpose: the pool is the same.
+  // NOLINTNEXTLINE(readability-suspicious-call-argument)
+  PoolLeaves *swapped_leaves = pool_leaves_create(
+      table, game_get_ld(game), game_get_bag(game), rack, opponent_rack, 1);
+  assert(memcmp(public_leaves->klv->leave_values,
+                swapped_leaves->klv->leave_values,
+                sizeof(Equity) *
+                    (size_t)klv_get_number_of_leaves(public_leaves->klv)) == 0);
+  // A leave of all but one tile has its exact value for the mover's pool,
+  // less what the KLV is centred on: whichever tile is left out.
+  Equity first_long_difference = 0;
+  for (int left_out = 0; left_out < 2; left_out++) {
+    Rack long_leave;
+    rack_copy(&long_leave, rack);
+    int skipped = left_out;
+    for (int ml = 0; ml < rack_get_dist_size(rack); ml++) {
+      if (rack_get_letter(&long_leave, (MachineLetter)ml) == 0) {
+        continue;
+      }
+      if (skipped == 0) {
+        rack_take_letter(&long_leave, (MachineLetter)ml);
+        break;
+      }
+      skipped--;
+    }
+    assert(rack_get_total_letters(&long_leave) == RACK_SIZE - 1);
+    const Equity long_exact_value =
+        klv_get_leave_value(player_get_klv(mover), &long_leave) +
+        pool_shift_get_leave_shift(
+            table, player_get_klv(mover), POOL_SHIFT_EXACT_WEIGHT_MILLI,
+            game_get_ld(game), game_get_bag(game), opponent_rack, &long_leave,
+            RACK_SIZE, game_get_real_bag_size(game));
+    const Equity long_pool_value =
+        klv_get_leave_value(public_leaves->klv, &long_leave) +
+        pool_shift_get_leave_shift(public_leaves->table, public_leaves->klv,
+                                   POOL_SHIFT_POOL_LEAVES_WEIGHT_MILLI,
+                                   game_get_ld(game), game_get_bag(game),
+                                   opponent_rack, &long_leave, RACK_SIZE,
+                                   game_get_real_bag_size(game));
+    const Equity long_difference = long_exact_value - long_pool_value;
+    assert(long_difference == public_leaves->table->reference_exact_offset);
+    if (left_out == 0) {
+      first_long_difference = long_difference;
+    }
+    assert(long_difference == first_long_difference);
+  }
+  pool_leaves_destroy(swapped_leaves);
+  pool_leaves_destroy(public_leaves);
+}
+
 // With -poolshift exact, a leave's value is the draw-by-draw mean, every
 // move's equity is the one its text validates to, the best move recorded
 // alone is the best of all the moves, and the values differ from the KLV's.
@@ -1053,6 +1166,9 @@ static void test_pool_shift_exact(const char *set_cmd) {
           assert_exact_leave_value(game, &leave);
         }
         assert_exact_rack_shifts(game);
+        if (game_positions == 0) {
+          assert_pool_leaves(game);
+        }
         MoveList *all_moves = generate_all_moves(game);
         const int count = move_list_get_count(all_moves);
         Equity best_equity = EQUITY_MIN_VALUE;

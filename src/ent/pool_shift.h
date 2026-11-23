@@ -68,6 +68,9 @@ enum {
   // sims are valued exactly and its rollouts' plies shift the leaves at this
   // weight, the one that scored best in static play.
   POOL_SHIFT_EXACT_ROLLOUT_WEIGHT_MILLI = 1200,
+  // The weight at which the leaves of a pool (see PoolLeaves) are shifted:
+  // the first-order correction as computed.
+  POOL_SHIFT_POOL_LEAVES_WEIGHT_MILLI = 1000,
 };
 
 // The exact leave values: in place of the first-order shift, a leave L is
@@ -117,7 +120,65 @@ typedef struct PoolShiftTable {
   // than fit whatever a table holds, so those values must not change while
   // the table has them.
   int exact_sums_max_unseen;
+  // The pool the KLV's values are for, when they are not for the letter
+  // distribution's (see PoolLeaves): the shift then corrects for the unseen
+  // tiles' shares less this pool's.
+  bool has_reference_pool;
+  int reference_counts[MAX_ALPHABET_SIZE];
+  int reference_total;
+  // With a reference pool and exact_values, a leave of RACK_SIZE - 1 tiles,
+  // which has no row, is shifted to its exact value for the unseen tiles,
+  // whatever the weight: one draw fills it, so the first-order shift is
+  // exact. This is what the KLV's values are less than the exact values of
+  // the reference pool, and is 0 without one.
+  Equity reference_exact_offset;
 } PoolShiftTable;
+
+// The leaves of one pool: a KLV whose value of every leave is the leave's
+// exact value for that pool (see above) less the empty leave's, so that an
+// empty leave is worth 0 as in any KLV, and the pool shift table of that KLV,
+// whose shifts correct for how the unseen tiles differ from that pool.
+//
+// A sim builds them for the tiles neither player has played, the bag and
+// both racks, which both players know: the same leaves then serve either
+// player's plies. Its rollouts' plies read leave values from the KLV and
+// shift them by the table: a ply's mover sees that pool less their own rack
+// and the few tiles since played, so the first-order shift has little left
+// to correct.
+//
+// That pool holds every tile off the board, so every rack of the position
+// and of any position after it is made of its tiles. A leave that holds a
+// letter the pool has none of is then never read, and is left out: it keeps
+// the stock KLV's value and its row stays 0. So does every row's value for
+// such a letter, whose weight is 0 (pool_shift_fill_weights). Late in a game
+// most leaves are left out, and the build takes a fraction of the time.
+typedef struct PoolLeaves {
+  KLV *klv;
+  PoolShiftTable *table;
+} PoolLeaves;
+
+// Builds the leaves of the pool of the bag, opponent_rack and mover_rack,
+// from table's KLV and full racks' values, which it must have
+// (pool_shift_table_set_exact_values). With a NULL mover_rack, the pool is
+// the one the mover sees, and no leave is left out: the mover may hold any
+// letter. The build runs on number_of_threads threads, the caller's among
+// them, and gives the same leaves whatever their number.
+PoolLeaves *pool_leaves_create(const PoolShiftTable *table,
+                               const LetterDistribution *ld, const Bag *bag,
+                               const Rack *opponent_rack,
+                               const Rack *mover_rack, int number_of_threads);
+
+// Builds the same leaves by a walk over every way to split every full rack
+// into a leave and a draw: far slower, and the definition the tests compare
+// pool_leaves_create against. pool_leaves_create falls back to it when its
+// own sums might not be exact, or when the KLV's word indices do not increase
+// along its KWG.
+PoolLeaves *pool_leaves_create_by_walk(const PoolShiftTable *table,
+                                       const LetterDistribution *ld,
+                                       const Bag *bag,
+                                       const Rack *opponent_rack,
+                                       const Rack *mover_rack);
+void pool_leaves_destroy(PoolLeaves *pool_leaves);
 
 PoolShiftTable *pool_shift_table_create(const KLV *klv,
                                         const LetterDistribution *ld);
