@@ -60,6 +60,8 @@ enum {
 // The LAMC search's length scale, in standard deviations of each column, and
 // the multiples of it and of the signal variance each fit chooses among.
 #define NESTED_LENGTH_SCALE 1.5
+// The relative slack on the LAMC search's bound on upper confidence bounds.
+#define NESTED_BOUND_SLACK 1e-9
 
 // One cached reply: the replying player's best play to a board, from one
 // sample's racks.
@@ -70,6 +72,23 @@ typedef struct NestedReply {
   uint8_t bag_after;
   uint8_t replier_rack_after;
 } NestedReply;
+
+// A play and its standardized static equity, for ordering plays by the LAMC
+// search's prior mean.
+typedef struct NestedEquityRank {
+  double equity;
+  int play_idx;
+} NestedEquityRank;
+
+// Higher equity first; ties by play.
+static int nested_equity_rank_compare(const void *a, const void *b) {
+  const NestedEquityRank *first = (const NestedEquityRank *)a;
+  const NestedEquityRank *second = (const NestedEquityRank *)b;
+  if (first->equity != second->equity) {
+    return first->equity > second->equity ? -1 : 1;
+  }
+  return first->play_idx - second->play_idx;
+}
 
 static const double nested_length_multiples[] = {0.5, 1.0, 2.0};
 static const double nested_signal_multiples[] = {0.1, 0.3, 1.0};
@@ -153,6 +172,8 @@ struct NestedWorker {
   double *play_squares;
   int *play_counts;
   double *upper_bounds;
+  // The plays by standardized static equity, highest first.
+  NestedEquityRank *equity_order;
   int pool[NESTED_MAX_UNIVERSE];
   int evaluated[NESTED_MAX_EVALUATED];
   int num_evaluated;
@@ -242,6 +263,7 @@ static NestedWorker *nested_worker_create_level(const Game *game,
   worker->play_squares = NULL;
   worker->play_counts = NULL;
   worker->upper_bounds = NULL;
+  worker->equity_order = NULL;
   worker->num_evaluated = 0;
   worker->gp = NULL;
   worker->gp_num_dims = 0;
@@ -309,6 +331,7 @@ void nested_worker_destroy(NestedWorker *worker) {
   free(worker->play_squares);
   free(worker->play_counts);
   free(worker->upper_bounds);
+  free(worker->equity_order);
   gp_destroy(worker->gp);
   free(worker);
 }
@@ -356,6 +379,7 @@ static int nested_embed(NestedWorker *worker, const Game *game) {
     free(worker->play_squares);
     free(worker->play_counts);
     free(worker->upper_bounds);
+    free(worker->equity_order);
     worker->embedding_capacity = count * num_columns;
     worker->play_capacity = count;
     worker->embedding =
@@ -367,6 +391,8 @@ static int nested_embed(NestedWorker *worker, const Game *game) {
     worker->play_squares = malloc_or_die(sizeof(double) * (size_t)count);
     worker->play_counts = malloc_or_die(sizeof(int) * (size_t)count);
     worker->upper_bounds = malloc_or_die(sizeof(double) * (size_t)count);
+    worker->equity_order =
+        malloc_or_die(sizeof(NestedEquityRank) * (size_t)count);
   }
   double *embedding = worker->embedding;
   play_feature_ctx_init(&worker->feature_ctx, game);
@@ -1215,6 +1241,69 @@ static uint64_t nested_sample_pool(NestedWorker *worker,
   return samples;
 }
 
+// Sets worker->upper_bounds to each unevaluated play's upper confidence
+// bound, for the wanted plays of highest bound to be picked from: plays that
+// cannot be among them are left at -INFINITY without being predicted. A
+// play's bound is at most its prior mean plus the process's bounds on the
+// residual mean and variance, so plays are visited by prior mean, highest
+// first, until even that is below the wanted-th highest bound found.
+static void nested_set_upper_bounds(NestedWorker *worker,
+                                    const NestedLevel *args,
+                                    const int num_columns, const int count,
+                                    const int wanted) {
+  for (int play_idx = 0; play_idx < count; play_idx++) {
+    worker->upper_bounds[play_idx] = -INFINITY;
+  }
+  if (wanted <= 0) {
+    return;
+  }
+  double mean_bound = 0.0;
+  double variance_bound = 0.0;
+  gp_get_bounds(worker->gp, &mean_bound, &variance_bound);
+  double excess = mean_bound;
+  if (args->ucb_beta > 0.0) {
+    excess +=
+        args->ucb_beta * sqrt(variance_bound > 0.0 ? variance_bound : 0.0);
+  }
+  // Room for rounding in sums taken in another order.
+  excess += NESTED_BOUND_SLACK * (1.0 + fabs(excess));
+  // The wanted highest bounds so far, highest first.
+  double top[NESTED_MAX_POOL_SIZE];
+  int num_top = 0;
+  const int kept_top =
+      wanted < NESTED_MAX_POOL_SIZE ? wanted : NESTED_MAX_POOL_SIZE;
+  const bool ascending = worker->mean_slope < 0.0;
+  for (int rank = 0; rank < count; rank++) {
+    const int play_idx =
+        worker->equity_order[ascending ? count - 1 - rank : rank].play_idx;
+    if (worker->play_counts[play_idx] > 0) {
+      continue;
+    }
+    const double prior = worker->mean_intercept +
+                         worker->mean_slope * worker->static_equity[play_idx];
+    if (num_top == kept_top && prior + excess < top[kept_top - 1]) {
+      break;
+    }
+    double mean = 0.0;
+    double variance = 0.0;
+    nested_posterior(worker, num_columns, play_idx, &mean, &variance);
+    const double bound =
+        mean + args->ucb_beta * sqrt(variance > 0.0 ? variance : 0.0);
+    worker->upper_bounds[play_idx] = bound;
+    if (num_top < kept_top || bound > top[num_top - 1]) {
+      int insert_at = num_top < kept_top ? num_top : kept_top - 1;
+      while (insert_at > 0 && top[insert_at - 1] < bound) {
+        top[insert_at] = top[insert_at - 1];
+        insert_at--;
+      }
+      top[insert_at] = bound;
+      if (num_top < kept_top) {
+        num_top++;
+      }
+    }
+  }
+}
+
 // Chooses by a LAMC search over every generated play of the position in
 // game (NestedLevel.lamc_search): a first pool of the best static plays and
 // plays spread over the play embedding, then rounds in which the surrogate's
@@ -1243,6 +1332,12 @@ static const Move *nested_choose_lamc(NestedWorker *worker,
     worker->play_counts[play_idx] = 0;
   }
   worker->num_evaluated = 0;
+  for (int play_idx = 0; play_idx < count; play_idx++) {
+    worker->equity_order[play_idx].equity = worker->static_equity[play_idx];
+    worker->equity_order[play_idx].play_idx = play_idx;
+  }
+  qsort(worker->equity_order, (size_t)count, sizeof(NestedEquityRank),
+        nested_equity_rank_compare);
   int pool[NESTED_MAX_POOL_SIZE];
   int pool_count = nested_farthest_points(
       worker, num_columns, args->pool_size < count ? args->pool_size : count,
@@ -1267,6 +1362,11 @@ static const Move *nested_choose_lamc(NestedWorker *worker,
       worker->picked[play_idx] = false;
     }
     pool_count = 0;
+    double eval_means[NESTED_MAX_EVALUATED];
+    for (int eval_idx = 0; eval_idx < worker->num_evaluated; eval_idx++) {
+      nested_posterior(worker, num_columns, worker->evaluated[eval_idx],
+                       &eval_means[eval_idx], NULL);
+    }
     for (int kept = 0; kept < args->keep && kept < worker->num_evaluated;
          kept++) {
       int best = -1;
@@ -1276,8 +1376,7 @@ static const Move *nested_choose_lamc(NestedWorker *worker,
         if (worker->picked[play_idx]) {
           continue;
         }
-        double mean = 0.0;
-        nested_posterior(worker, num_columns, play_idx, &mean, NULL);
+        const double mean = eval_means[eval_idx];
         if (mean > best_mean) {
           best_mean = mean;
           best = play_idx;
@@ -1287,17 +1386,13 @@ static const Move *nested_choose_lamc(NestedWorker *worker,
       pool[pool_count++] = best;
     }
     // The rest: the unevaluated plays of highest upper confidence bound.
-    for (int play_idx = 0; play_idx < count; play_idx++) {
-      if (worker->play_counts[play_idx] > 0) {
-        worker->upper_bounds[play_idx] = -INFINITY;
-        continue;
-      }
-      double mean = 0.0;
-      double variance = 0.0;
-      nested_posterior(worker, num_columns, play_idx, &mean, &variance);
-      worker->upper_bounds[play_idx] =
-          mean + args->ucb_beta * sqrt(variance > 0.0 ? variance : 0.0);
+    int wanted = 0;
+    while (pool_count + wanted < args->pool_size &&
+           worker->num_evaluated + pool_count + wanted - args->keep <
+               NESTED_MAX_EVALUATED) {
+      wanted++;
     }
+    nested_set_upper_bounds(worker, args, num_columns, count, wanted);
     while (pool_count < args->pool_size &&
            worker->num_evaluated + pool_count - args->keep <
                NESTED_MAX_EVALUATED) {

@@ -39,6 +39,13 @@ double gp_get_log_marginal_likelihood(const GaussianProcess *gp);
 void gp_predict(GaussianProcess *gp, const double *point, double *mean,
                 double *variance);
 
+// Bounds that hold at every point after a fit: the posterior mean is at most
+// *mean_bound and the posterior variance at most *variance_bound. The
+// kernel's values lie between 0 and the signal variance, so the mean is at
+// most the prior mean plus the signal variance times the positive weights.
+void gp_get_bounds(const GaussianProcess *gp, double *mean_bound,
+                   double *variance_bound);
+
 // The gradient of the posterior mean at point, num_dims values.
 void gp_mean_gradient(const GaussianProcess *gp, const double *point,
                       double *gradient);

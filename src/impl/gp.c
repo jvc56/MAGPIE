@@ -199,6 +199,18 @@ void gp_predict(GaussianProcess *gp, const double *point, double *mean,
   *variance = posterior > 0.0 ? posterior : 0.0;
 }
 
+void gp_get_bounds(const GaussianProcess *gp, double *mean_bound,
+                   double *variance_bound) {
+  double positive_weights = 0.0;
+  for (int point_idx = 0; point_idx < gp->num_points; point_idx++) {
+    if (gp->alpha[point_idx] > 0.0) {
+      positive_weights += gp->alpha[point_idx];
+    }
+  }
+  *mean_bound = gp->prior_mean + gp->signal_variance * positive_weights;
+  *variance_bound = gp->signal_variance;
+}
+
 void gp_mean_gradient(const GaussianProcess *gp, const double *point,
                       double *gradient) {
   for (int dim_idx = 0; dim_idx < gp->num_dims; dim_idx++) {
