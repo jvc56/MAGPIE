@@ -749,7 +749,8 @@ static void clear_equity_adjustments(const Game *game) {
 // that player has one and the temperature is above 0 (0 is a hard margin).
 static Equity inference_get_temperature(const Game *game,
                                         const InferenceArgs *args) {
-  if (args->temperature <= 0) {
+  if (args->temperature <= 0 || args->target_index < 0 ||
+      args->target_index > 1) {
     return args->temperature;
   }
   const InferenceTemperatures *temperatures =
