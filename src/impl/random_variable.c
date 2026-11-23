@@ -998,7 +998,10 @@ static uint64_t simmer_min_rollouts(const SimArgs *sim_args) {
   return samples;
 }
 
-static void simmer_set_pool_leaves_players(const Simmer *simmer, Game *game) {
+// The game's players are changed through the game, as in the functions that
+// set a worker's rollout players above.
+static void simmer_set_pool_leaves_players(const Simmer *simmer,
+                                           const Game *game) {
   for (int player_index = 0; player_index < 2; player_index++) {
     Player *player = game_get_player(game, player_index);
     player_set_leaves(player, simmer->pool_leaves->klv);
