@@ -164,6 +164,29 @@ players_data_get_pool_shift_table(const PlayersData *players_data,
 }
 
 // Frees both players' pool shift tables, once if they share one.
+bool players_data_set_pool_shift_exact_values(
+    PlayersData *players_data, const RackValueTable *const exact_values[2],
+    const LetterDistribution *ld) {
+  for (int player_index = 0; player_index < 2; player_index++) {
+    if (players_data->pool_shift_tables[player_index] != NULL) {
+      players_data->pool_shift_tables[player_index]->exact_values = NULL;
+    }
+  }
+  bool all_set = true;
+  for (int player_index = 0; player_index < 2; player_index++) {
+    PoolShiftTable *table = players_data->pool_shift_tables[player_index];
+    if (exact_values[player_index] == NULL) {
+      continue;
+    }
+    if (table == NULL || (table->exact_values != exact_values[player_index] &&
+                          !pool_shift_table_set_exact_values(
+                              table, exact_values[player_index], ld))) {
+      all_set = false;
+    }
+  }
+  return all_set;
+}
+
 static void players_data_destroy_pool_shift_tables(PlayersData *players_data) {
   if (players_data->pool_shift_tables[1] !=
       players_data->pool_shift_tables[0]) {

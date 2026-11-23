@@ -8,6 +8,7 @@
 #include "klv.h"
 #include "letter_distribution.h"
 #include "rack.h"
+#include "rack_value_table.h"
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -60,7 +61,28 @@ enum {
   POOL_SHIFT_WEIGHT_BITS = 24,
   // A player's weight is set in thousandths, up to this.
   POOL_SHIFT_MAX_WEIGHT_MILLI = 10000,
+  // In place of a weight: the exact leave values (see below).
+  POOL_SHIFT_EXACT_WEIGHT_MILLI = -1,
+  // The rollouts of a player whose leave values are exact: the exact values
+  // cost far too much for every ply of every rollout, so the moves a sim
+  // sims are valued exactly and its rollouts' plies shift the leaves at this
+  // weight, the one that scored best in static play.
+  POOL_SHIFT_EXACT_ROLLOUT_WEIGHT_MILLI = 1200,
 };
+
+// The exact leave values: in place of the first-order shift, a leave L is
+// valued as the mean value of the full rack it becomes, over every draw of
+// RACK_SIZE - |L| tiles from the unseen tiles:
+//
+//   sum over draws D of prod_t C(unseen_t, D_t) * value(L + D)
+//       / C(unseen, RACK_SIZE - |L|)
+//
+// where value is a RackValueTable's (rack_value_table.h), the full racks'
+// values on the scale of the KLV's leaves. A rack the table has no value for
+// is left out of the mean. The "shift" of a leave is then that mean less the
+// KLV's value of the leave, so that everything that adds a shift to a leave
+// value ends with the mean. It applies where the pool shift does, and to
+// leaves of RACK_SIZE - 1 tiles too. The sums are in integers.
 
 // The row of a leave without one.
 #define POOL_SHIFT_NO_ROW UINT32_MAX
@@ -83,6 +105,18 @@ typedef struct PoolShiftTable {
   // number_of_rows rows of stride values: values[row * stride + t] is the
   // KLV's value of the row's leave with one more t.
   Equity *values;
+  // The KLV the table was built from, and the full racks' values for the
+  // exact leave values: NULL until pool_shift_table_set_exact_values gives
+  // them. Neither is owned.
+  const KLV *klv;
+  const RackValueTable *exact_values;
+  // With exact_values: the most unseen tiles for which the sums of the exact
+  // leave values are known to fit int64. A pool with more takes sums that
+  // are split to fit, which give the same values more slowly. It is found
+  // from the values of exact_values when the distribution has more tiles
+  // than fit whatever a table holds, so those values must not change while
+  // the table has them.
+  int exact_sums_max_unseen;
 } PoolShiftTable;
 
 PoolShiftTable *pool_shift_table_create(const KLV *klv,
@@ -96,6 +130,13 @@ static inline bool pool_shift_table_matches_klv(const PoolShiftTable *table,
          table->klv_mutation_counter == klv_get_mutation_counter(klv);
 }
 
+// Gives the table the full racks' values for the exact leave values, or
+// takes them away with NULL. Returns false, taking them away, if rvt is not
+// for the table's KLV and ld's tile counts.
+bool pool_shift_table_set_exact_values(PoolShiftTable *table,
+                                       const RackValueTable *rvt,
+                                       const LetterDistribution *ld);
+
 // Whether the table was built for this letter distribution's tile counts.
 bool pool_shift_table_matches_ld(const PoolShiftTable *table,
                                  const LetterDistribution *ld);
@@ -107,7 +148,10 @@ static inline bool pool_shift_applies(const PoolShiftTable *table,
                                       const KLV *klv, int weight_milli,
                                       int tiles_on_rack, int real_bag_size) {
   return table != NULL && weight_milli != 0 && tiles_on_rack == RACK_SIZE &&
-         real_bag_size >= RACK_SIZE && pool_shift_table_matches_klv(table, klv);
+         real_bag_size >= RACK_SIZE &&
+         pool_shift_table_matches_klv(table, klv) &&
+         (weight_milli != POOL_SHIFT_EXACT_WEIGHT_MILLI ||
+          table->exact_values != NULL);
 }
 
 // The row of a leave.
@@ -172,6 +216,9 @@ typedef struct PoolShiftRack {
   uint8_t sizes[1 << RACK_SIZE];
   Equity shifts[1 << RACK_SIZE];
   Equity values[1 << RACK_SIZE];
+  // The tiles' weights (pool_shift_fill_weights), or with the exact leave
+  // values the unseen tiles' counts: either way they change with the pool,
+  // and with nothing else the shifts of a rack depend on.
   int32_t weights[POOL_SHIFT_MAX_STRIDE];
 } PoolShiftRack;
 
