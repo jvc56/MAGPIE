@@ -19,6 +19,7 @@
 #include "pool_shift.h"
 #include "rack.h"
 #include "rack_info_table.h"
+#include "rack_value_table.h"
 #include "wmp.h"
 #include "word_info_table.h"
 #include <stdint.h>
