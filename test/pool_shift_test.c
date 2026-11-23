@@ -1110,7 +1110,7 @@ static void test_pool_shift_exact_made_up(void) {
   Config *config = config_create_or_die(set_cmd);
   const LetterDistribution *ld = config_get_ld(config);
   const int ld_size = ld_get_size(ld);
-  uint8_t letter_counts[MAX_ALPHABET_SIZE];
+  uint8_t letter_counts[MAX_ALPHABET_SIZE] = {0};
   for (int ml = 0; ml < ld_size; ml++) {
     letter_counts[ml] = (uint8_t)ld_get_dist(ld, (MachineLetter)ml);
   }
