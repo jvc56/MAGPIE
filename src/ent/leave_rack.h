@@ -9,6 +9,7 @@ void leave_rack_get_leave(const LeaveRack *leave_rack, Rack *rack_to_update);
 void leave_rack_get_exchanged(const LeaveRack *leave_rack,
                               Rack *rack_to_update);
 int leave_rack_get_draws(const LeaveRack *leave_rack);
+double leave_rack_get_weight(const LeaveRack *leave_rack);
 Equity leave_rack_get_equity(const LeaveRack *leave_rack);
 
 typedef struct LeaveRackList LeaveRackList;
@@ -27,6 +28,11 @@ LeaveRack *leave_rack_list_pop_rack(LeaveRackList *lrl);
 void leave_rack_list_insert_rack(const Rack *leave, const Rack *exchanged,
                                  int number_of_draws_for_leave, Equity equity,
                                  LeaveRackList *lrl);
+void leave_rack_list_insert_weighted_rack(const Rack *leave,
+                                          const Rack *exchanged,
+                                          int number_of_draws_for_leave,
+                                          Equity equity, double weight,
+                                          LeaveRackList *lrl);
 void leave_rack_list_insert_leave_rack(const LeaveRack *leave_rack,
                                        LeaveRackList *lrl);
 #endif
