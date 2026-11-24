@@ -411,7 +411,9 @@ static void slot_order_by_score(PathListSlot *slot) {
   const int count = slot->count;
   const SmallMove *moves = slot->moves;
   uint64_t *by_score = slot->by_score;
-  uint64_t *scratch = by_score + slot->by_score_capacity;
+  // A slot that never held a play has no buffer, and NULL + 0 is undefined.
+  uint64_t *scratch =
+      by_score == NULL ? NULL : by_score + slot->by_score_capacity;
   int score_begin[PATH_MOVE_LISTS_SCORE_BUCKETS + 1] = {0};
   int next[RACK_SIZE + 2] = {0};
   for (int move_idx = 0; move_idx < count; move_idx++) {
@@ -527,7 +529,9 @@ static void slot_group_by_tiles(PathListSlot *slot, const int *tile_weights) {
   const SmallMove *moves = slot->moves;
   const PackedCounts *used = slot->used;
   uint64_t *by_tiles = slot->by_tiles;
-  uint64_t *scratch = by_tiles + slot->by_tiles_capacity;
+  // A slot that never held a play has no buffer, and NULL + 0 is undefined.
+  uint64_t *scratch =
+      by_tiles == NULL ? NULL : by_tiles + slot->by_tiles_capacity;
   uint16_t *group_ids = slot->group_ids;
   PathPlayGroup *groups = slot->groups;
   int16_t table[PATH_MOVE_LISTS_GROUP_TABLE_SIZE];
