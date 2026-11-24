@@ -128,6 +128,13 @@ static void test_inference_temperatures_file(void) {
   assert_points(table, 1, false, 5);
   assert_points(table, 86, true, 5);
   inference_temperatures_destroy(table);
+
+  // A missing table is reported as one.
+  table = inference_temperatures_create(dir, "missing", error_stack);
+  assert(table == NULL);
+  char *missing = error_stack_get_string_and_reset(error_stack);
+  assert(has_substring(missing, "for data type inference temperatures"));
+  free(missing);
   error_stack_destroy(error_stack);
 
   assert_table_file_error(dir, "4,12,1\n");
