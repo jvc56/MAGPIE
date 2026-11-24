@@ -239,10 +239,10 @@ static void set_played_tiles(const Move *move, Rack *played) {
   }
 }
 
-// Infers the mover's leave from move in game, with temperature and each
-// player's table, into results.
+// Infers the mover's leave from move in game, with margin, temperature and
+// each player's table, into results.
 static void infer_with(const Config *config, const Game *game, const Move *move,
-                       Equity temperature,
+                       Equity margin, Equity temperature,
                        const InferenceTemperatures *p1_table,
                        const InferenceTemperatures *p2_table,
                        InferenceResults *results) {
@@ -259,9 +259,9 @@ static void infer_with(const Config *config, const Game *game, const Move *move,
   ThreadControl *thread_control = config_get_thread_control(config);
   thread_control_set_status(thread_control, THREAD_CONTROL_STATUS_STARTED);
   InferenceArgs args;
-  infer_args_fill(&args, 0, int_to_equity(10000), NULL, game, 1, 0, 0,
-                  thread_control, false, true, mover, move_get_score(move), 0,
-                  &played, &known, &observer);
+  infer_args_fill(&args, 0, margin, NULL, game, 1, 0, 0, thread_control, false,
+                  true, mover, move_get_score(move), 0, &played, &known,
+                  &observer);
   args.temperature = temperature;
   args.target_move = move;
   args.temperatures[0] = p1_table;
@@ -289,8 +289,9 @@ static void assert_same_inference(const InferenceResults *first,
 
 // With a table for the inferring player, inference uses the table's
 // temperature for the real bag before the play: the same inference as with
-// that temperature and no table. The target's own table and a temperature of
-// 0 (a hard margin) leave the table out.
+// that temperature, no table and an unlimited margin, whatever the args'
+// temperature and margin (a hard margin too). The target's own table is left
+// out.
 static void test_inference_temperatures_inference(void) {
   Config *config = config_create_or_die(
       "set -lex CSW21 -wmp false -s1 equity -s2 equity -r1 all -r2 all");
@@ -318,26 +319,31 @@ static void test_inference_temperatures_inference(void) {
   const InferenceTemperatures *tables[2] = {NULL, NULL};
   tables[1 - mover] = table;
 
+  const Equity unlimited = int_to_equity(INFERENCE_TEMPERATURES_EQUITY_MARGIN);
+  const Equity hard_margin = int_to_equity(5);
   InferenceResults *with_table = inference_results_create(NULL);
   InferenceResults *expected = inference_results_create(NULL);
-  infer_with(config, game, best, int_to_equity(8), tables[0], tables[1],
-             with_table);
-  infer_with(config, game, best, scheduled, NULL, NULL, expected);
+  infer_with(config, game, best, unlimited, int_to_equity(8), tables[0],
+             tables[1], with_table);
+  infer_with(config, game, best, unlimited, scheduled, NULL, NULL, expected);
   assert(inference_results_get_temperature(with_table) == scheduled);
   assert_same_inference(with_table, expected);
 
   // The target's table is not the inferring player's.
   const InferenceTemperatures *target_only[2] = {NULL, NULL};
   target_only[mover] = table;
-  infer_with(config, game, best, int_to_equity(8), target_only[0],
-             target_only[1], with_table);
-  infer_with(config, game, best, int_to_equity(8), NULL, NULL, expected);
+  infer_with(config, game, best, hard_margin, 0, target_only[0], target_only[1],
+             with_table);
+  infer_with(config, game, best, hard_margin, 0, NULL, NULL, expected);
   assert_same_inference(with_table, expected);
 
-  // A hard margin leaves the table out.
-  infer_with(config, game, best, 0, tables[0], tables[1], with_table);
-  infer_with(config, game, best, 0, NULL, NULL, expected);
+  // The table overrides a hard margin: its temperature, no cutoff.
+  infer_with(config, game, best, hard_margin, 0, tables[0], tables[1],
+             with_table);
+  infer_with(config, game, best, unlimited, scheduled, NULL, NULL, expected);
   assert_same_inference(with_table, expected);
+  infer_with(config, game, best, hard_margin, 0, NULL, NULL, expected);
+  assert(inference_results_get_temperature(expected) == 0);
 
   inference_results_destroy(expected);
   inference_results_destroy(with_table);

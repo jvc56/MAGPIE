@@ -744,22 +744,36 @@ static void clear_equity_adjustments(const Game *game) {
   }
 }
 
+// The inferring player's (the one that is not the target's) temperatures by
+// bag, or NULL.
+static const InferenceTemperatures *
+inference_get_temperatures(const InferenceArgs *args) {
+  if (args->target_index < 0 || args->target_index > 1) {
+    return NULL;
+  }
+  return args->temperatures[1 - args->target_index];
+}
+
 // The temperature of an inference of the target's play from game, the
-// position before it: the inferring player's table's for the real bag, when
-// that player has one and the temperature is above 0 (0 is a hard margin).
+// position before it: the inferring player's table's for the real bag when
+// that player has one, otherwise the args' temperature (0 is a hard margin).
 static Equity inference_get_temperature(const Game *game,
                                         const InferenceArgs *args) {
-  if (args->temperature <= 0 || args->target_index < 0 ||
-      args->target_index > 1) {
-    return args->temperature;
-  }
-  const InferenceTemperatures *temperatures =
-      args->temperatures[1 - args->target_index];
+  const InferenceTemperatures *temperatures = inference_get_temperatures(args);
   if (temperatures == NULL) {
     return args->temperature;
   }
   return inference_temperatures_get(temperatures, game_get_real_bag_size(game),
                                     args->target_num_exch > 0);
+}
+
+// The admission margin: with a table, softmax weighs every rack, so the
+// margin is effectively unlimited; otherwise the args' margin.
+static Equity inference_get_equity_margin(const InferenceArgs *args) {
+  if (inference_get_temperatures(args) == NULL) {
+    return args->equity_margin;
+  }
+  return int_to_equity(INFERENCE_TEMPERATURES_EQUITY_MARGIN);
 }
 
 Inference *inference_create(const Game *game, const InferenceArgs *args,
@@ -776,7 +790,7 @@ Inference *inference_create(const Game *game, const InferenceArgs *args,
   inference->target_index = args->target_index;
   inference->target_score = args->target_score;
   inference->target_number_of_tiles_exchanged = args->target_num_exch;
-  inference->equity_margin = args->equity_margin;
+  inference->equity_margin = inference_get_equity_margin(args);
   inference->temperature = inference_get_temperature(game, args);
   // Disable cutoff optimization for exchanges with large leaves
   // as benchmarks show it hurts performance for small exchanges
@@ -823,7 +837,7 @@ void inference_reset(Inference *inference, const Game *game,
   inference->target_index = args->target_index;
   inference->target_score = args->target_score;
   inference->target_number_of_tiles_exchanged = args->target_num_exch;
-  inference->equity_margin = args->equity_margin;
+  inference->equity_margin = inference_get_equity_margin(args);
   inference->temperature = inference_get_temperature(game, args);
   // Disable cutoff optimization for exchanges with large leaves
   const int leave_size = RACK_SIZE - args->target_num_exch;

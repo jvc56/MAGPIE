@@ -1498,7 +1498,7 @@ static void add_inference_help_arg(arg_token_t arg_token, const char **usages,
             "inftempfit, gives a softmax temperature for each number of tiles "
             "in the bag before the observed play, and optionally one for "
             "exchanges. A player with a table infers with its temperature "
-            "instead of 'inftemp', unless 'inftemp' is 0 (a hard margin). "
+            "and no margin cutoff, instead of 'inftemp' and 'imargin'. "
             "auto (the default for the command line program and the "
             "library's magpie_create()) gives a player its leaves' own "
             "table, <leaves>_inftemp, where the data has one, and none "

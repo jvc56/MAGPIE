@@ -28,9 +28,10 @@ typedef struct InferenceArgs {
   Equity equity_margin;
   Equity temperature;
   // Each player's temperatures by bag, or NULL. When the inferring player
-  // (the one that is not the target) has a table and temperature is above 0,
-  // inference uses the table's temperature for the real bag before the
-  // target's play instead of temperature.
+  // (the one that is not the target) has a table, inference uses the table's
+  // temperature for the real bag before the target's play instead of
+  // temperature, and an effectively unlimited margin instead of
+  // equity_margin.
   const InferenceTemperatures *temperatures[2];
   const Move *target_move;
   Rack *target_played_tiles;

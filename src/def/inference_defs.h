@@ -32,6 +32,9 @@
 // most INFERENCE_TEMPERATURES_MAX_VALUE.
 #define INFERENCE_TEMPERATURES_MAX_KNOTS 64
 #define INFERENCE_TEMPERATURES_MAX_VALUE 100000.0
+// With a temperature table, inference admits every rack whose best play
+// beats the observed play by at most this many points: effectively all.
+#define INFERENCE_TEMPERATURES_EQUITY_MARGIN 10000
 
 typedef enum {
   INFERENCE_TYPE_LEAVE,
