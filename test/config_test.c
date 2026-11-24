@@ -4188,7 +4188,7 @@ void test_narrow_glyphs(void) {
 
 static void test_config_inference_temperature(void) {
   Config *config = config_create_default_test();
-  assert(config_get_inference_temperature(config) == int_to_equity(8));
+  assert(config_get_inference_temperature(config) == 0);
   load_and_exec_config_or_die(config,
                               "set -inftemp 2.5 -inftemp1 0 -inftemp2 4 "
                               "-imargin 27 -im1 0 -im2 12");

@@ -1,11 +1,17 @@
 # Softmax inference
 
-Inference uses static score-plus-leave evaluation with temperature 8 points
-(T8) by default. The default 10,000-point admission margin is effectively no
-cutoff. PAT and neural inference experiments have been removed.
+Inference uses static score-plus-leave evaluation. The default is unchanged
+from earlier releases: temperature zero with a 5-point admission margin, which
+keeps every rack whose best play beats the observed play by at most 5 points
+and weights it by draw count ("hard margin"). A positive temperature enables
+softmax weighting. PAT and neural inference experiments have been removed.
 
 `set -inftemp 2 -imargin 10` selects temperature 2 and admission margin 10.
-Setting temperature zero enables the legacy hard-margin, draw-count weighting.
+`set -inftemp 8 -imargin 10000` gives T8 with effectively no cutoff, the
+setting validated in [the static temperature report](static-temperature-validation-20261103.md).
+Decision tests against a 4-ply simulation opponent found constant T8 slightly
+worse than the hard margin (−0.046 ±0.035 win percentage points per decision
+with 8 or more tiles in the bag), so the hard margin stays the default.
 `-inftemp1` and `-inftemp2` override the temperature for each autoplay player;
 setting `-inftemp` also sets both players' temperatures.
 

@@ -1483,8 +1483,9 @@ static void add_inference_help_arg(arg_token_t arg_token, const char **usages,
   case ARG_TOKEN_P2_INFERENCE_TEMP:
     usages[0] = "<temperature>";
     examples[0] = "2.0";
-    *text = "Sets the softmax inference temperature in points (default 8; zero "
-            "disables weighting).";
+    *text = "Sets the softmax inference temperature in points (default 0, "
+            "which keeps every rack within the inference margin, weighted by "
+            "draw count; a positive temperature enables softmax weighting).";
     break;
   case ARG_TOKEN_INFERENCE_MARGIN:
     usages[0] = "<inference_equity_margin>";
@@ -10999,8 +11000,8 @@ enum {
   CONFIG_DEFAULT_STOP_COND_PCT = 99,
   CONFIG_DEFAULT_TIME_LIMIT_SECONDS = 60,
   CONFIG_DEFAULT_EQ_MARGIN = 5,
-  CONFIG_DEFAULT_INFERENCE_MARGIN = 10000,
-  CONFIG_DEFAULT_INFERENCE_TEMPERATURE = 8,
+  CONFIG_DEFAULT_INFERENCE_MARGIN = 5,
+  CONFIG_DEFAULT_INFERENCE_TEMPERATURE = 0,
 };
 #define CONFIG_DEFAULT_MAX_ITERATIONS 1000000000000ULL
 #define CONFIG_DEFAULT_UTILITY_W_WINPCT 1.0

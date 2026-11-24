@@ -1,6 +1,6 @@
 # Static-only inference temperature validation — 2026-11-03
 
-Production inference defaults to static evaluation, T8, and an effectively unlimited (10,000-point) margin. Experimental PAT inference and its dedicated board-cache/movegen interface have been removed. Neural inference was external experimental code, never a production integration. General PAT move generation remains available.
+This report was written when the proposed default was static evaluation, T8, and an effectively unlimited (10,000-point) margin; the shipped default is the hard 5-point margin (see [softmax-inference.md](softmax-inference.md)). Experimental PAT inference and its dedicated board-cache/movegen interface have been removed. Neural inference was external experimental code, never a production integration. General PAT move generation remains available.
 
 ## Protocol
 
@@ -182,7 +182,7 @@ Temperature comparisons above use NLL as the primary metric; a different tempera
 
 Across placements with one through six unknown tiles, no tested temperature has a nominal 95% paired NLL advantage over T8. T8 is within 0.008 nats of the lowest observed mean at every size. This does not establish exact optimality or a win-rate benefit.
 
-Exchanges favor lower temperatures: T3 beats T8 by 0.135737 nats (95% CI 0.040444 to 0.231030), and T5 beats T8 by 0.092361 (0.050804 to 0.133917). T3 is the best tested point estimate, not an established optimum; the minimum is at the edge of the tested grid. The implementation retains the requested global T8 default.
+Exchanges favor lower temperatures: T3 beats T8 by 0.135737 nats (95% CI 0.040444 to 0.231030), and T5 beats T8 by 0.092361 (0.050804 to 0.133917). T3 is the best tested point estimate, not an established optimum; the minimum is at the edge of the tested grid. At the time of this report the implementation used a global T8 default; it now keeps the hard 5-point margin.
 
 ## Four-tile census experiment
 
