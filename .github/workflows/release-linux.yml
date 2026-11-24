@@ -178,7 +178,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: windows-data
-          key: windows-data-files-35
+          key: windows-data-files-36
           enableCrossOsArchive: true
       - name: Put the data in place
         if: steps.data-cache.outputs.cache-hit == 'true'
