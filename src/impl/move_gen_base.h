@@ -690,8 +690,9 @@ gen_insert_spare_move_within_x_equity_of_best(MoveGen *gen,
 // does in update_best_move_or_insert_into_movelist, with the play's ranking
 // value also counting the face value of the tiles it places. Kept out of
 // line so that the other record types' recording is compiled as it is without
-// it.
-static inline __attribute__((noinline)) void
+// it. Not inline, which GCC refuses with noinline; unused, since not every file
+// that includes this header records plays.
+static __attribute__((noinline, unused)) void
 record_best_small_face_play(MoveGen *gen, int leftstrip, int rightstrip,
                             game_event_t move_type, Equity score, int start_row,
                             int start_col, int tiles_played, int dir,
