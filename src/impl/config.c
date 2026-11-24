@@ -1484,8 +1484,8 @@ static void add_inference_help_arg(arg_token_t arg_token, const char **usages,
     usages[0] = "<temperature>";
     examples[0] = "2.0";
     *text = "Sets the softmax inference temperature in points (default 0, "
-            "which keeps every rack within the inference margin, weighted by "
-            "draw count; a positive temperature enables softmax weighting).";
+            "a hard margin). Zero keeps every rack within the inference "
+            "margin, weighted by draw count.";
     break;
   case ARG_TOKEN_INFERENCE_MARGIN:
     usages[0] = "<inference_equity_margin>";
