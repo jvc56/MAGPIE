@@ -6,6 +6,7 @@
 #include "../def/rack_defs.h"
 #include "../util/io_util.h"
 #include "rack.h"
+#include <assert.h>
 #include <limits.h>
 
 #define ENCODED_RACK_UNIT_TYPE uint64_t
@@ -100,6 +101,10 @@ static inline bool rack_encode_at_end(int bit_index) {
 }
 
 static inline void rack_encode(const Rack *rack, EncodedRack *encoded_rack) {
+  // The encoding has room for RACK_SIZE (letter, count) slots with
+  // BITS_PER_COUNT-bit counts. A larger rack corrupts it silently and
+  // rack_decode then reads back garbage letters (jvc56/MAGPIE#662).
+  assert(rack_get_total_letters(rack) <= RACK_SIZE);
   for (int i = 0; i < (int)ENCODED_RACK_UNITS; i++) {
     encoded_rack->array[i] = 0;
   }

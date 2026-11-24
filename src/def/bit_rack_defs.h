@@ -9,62 +9,87 @@ enum {
   BIT_RACK_EXPECTED_SIZE_BYTES = 128 / 8
 };
 
+// BIT_RACK_COMBINATION_OFFSETS lists, for each subrack size k in
+// [0, RACK_SIZE], the index at which size-k subracks begin in a flat array of
+// all canonical subracks: the prefix sums of C(RACK_SIZE, k). The last offset
+// plus C(RACK_SIZE, RACK_SIZE) is therefore 1 << RACK_SIZE.
+//
+// Formatting hazard: these are multi-line macros directly followed by
+// preprocessor directives. A backslash on the LAST line of a macro body
+// swallows the next #elif/#endif into the macro, which silently deletes that
+// branch and breaks the build for other RACK_SIZE values (jvc56/MAGPIE#659).
+// Keep the final line of each BIT_RACK_COMBINATION_OFFSETS free of a trailing
+// backslash. The #error guard after the chain turns a missing branch into a
+// clear compile error, and test_combination_offsets in test/bit_rack_test.c
+// checks the values and the entry count at every RACK_SIZE.
 #if RACK_SIZE == 2
-#define BIT_RACK_C_2_0 1
-#define BIT_RACK_C_2_1 BIT_RACK_C_2_0 * 2 / 1
-#define BIT_RACK_C_2_2 BIT_RACK_C_2_0
-#define BIT_RACK_OFFSET_0 0
-#define BIT_RACK_OFFSET_1 BIT_RACK_OFFSET_0 + BIT_RACK_C_2_0
-#define BIT_RACK_OFFSET_2 BIT_RACK_OFFSET_1 + BIT_RACK_C_2_1
+#define BIT_RACK_C_2_0 (1)
+#define BIT_RACK_C_2_1 (BIT_RACK_C_2_0 * 2 / 1)
+#define BIT_RACK_C_2_2 (BIT_RACK_C_2_0)
+#define BIT_RACK_OFFSET_0 (0)
+#define BIT_RACK_OFFSET_1 (BIT_RACK_OFFSET_0 + BIT_RACK_C_2_0)
+#define BIT_RACK_OFFSET_2 (BIT_RACK_OFFSET_1 + BIT_RACK_C_2_1)
 #define BIT_RACK_COMBINATION_OFFSETS                                           \
   BIT_RACK_OFFSET_0, BIT_RACK_OFFSET_1, BIT_RACK_OFFSET_2
 #elif RACK_SIZE == 3
-#define BIT_RACK_C_3_0 1
-#define BIT_RACK_C_3_1 BIT_RACK_C_3_0 * 3 / 1
-#define BIT_RACK_C_3_2 BIT_RACK_C_3_1
-#define BIT_RACK_C_3_3 BIT_RACK_C_3_0
-#define BIT_RACK_OFFSET_0 0
-#define BIT_RACK_OFFSET_1 BIT_RACK_OFFSET_0 + BIT_RACK_C_3_0
-#define BIT_RACK_OFFSET_2 BIT_RACK_OFFSET_1 + BIT_RACK_C_3_1
-#define BIT_RACK_OFFSET_3 BIT_RACK_OFFSET_2 + BIT_RACK_C_3_2
+#define BIT_RACK_C_3_0 (1)
+#define BIT_RACK_C_3_1 (BIT_RACK_C_3_0 * 3 / 1)
+#define BIT_RACK_C_3_2 (BIT_RACK_C_3_1)
+#define BIT_RACK_C_3_3 (BIT_RACK_C_3_0)
+#define BIT_RACK_OFFSET_0 (0)
+#define BIT_RACK_OFFSET_1 (BIT_RACK_OFFSET_0 + BIT_RACK_C_3_0)
+#define BIT_RACK_OFFSET_2 (BIT_RACK_OFFSET_1 + BIT_RACK_C_3_1)
+#define BIT_RACK_OFFSET_3 (BIT_RACK_OFFSET_2 + BIT_RACK_C_3_2)
 #define BIT_RACK_COMBINATION_OFFSETS                                           \
   BIT_RACK_OFFSET_0, BIT_RACK_OFFSET_1, BIT_RACK_OFFSET_2, BIT_RACK_OFFSET_3
 #elif RACK_SIZE == 4
-#define BIT_RACK_C_4_0 1
-#define BIT_RACK_C_4_1 BIT_RACK_C_4_0 * 4 / 1
-#define BIT_RACK_C_4_2 BIT_RACK_C_4_1 * 3 / 2
-#define BIT_RACK_C_4_3 BIT_RACK_C_4_1
-#define BIT_RACK_C_4_4 BIT_RACK_C_4_0
-#define BIT_RACK_OFFSET_0 0
-#define BIT_RACK_OFFSET_1 BIT_RACK_OFFSET_0 + BIT_RACK_C_4_0
-#define BIT_RACK_OFFSET_2 BIT_RACK_OFFSET_1 + BIT_RACK_C_4_1
-#define BIT_RACK_OFFSET_3 BIT_RACK_OFFSET_2 + BIT_RACK_C_4_2
-#define BIT_RACK_OFFSET_4 BIT_RACK_OFFSET_3 + BIT_RACK_C_4_3
+#define BIT_RACK_C_4_0 (1)
+#define BIT_RACK_C_4_1 (BIT_RACK_C_4_0 * 4 / 1)
+#define BIT_RACK_C_4_2 (BIT_RACK_C_4_1 * 3 / 2)
+#define BIT_RACK_C_4_3 (BIT_RACK_C_4_1)
+#define BIT_RACK_C_4_4 (BIT_RACK_C_4_0)
+#define BIT_RACK_OFFSET_0 (0)
+#define BIT_RACK_OFFSET_1 (BIT_RACK_OFFSET_0 + BIT_RACK_C_4_0)
+#define BIT_RACK_OFFSET_2 (BIT_RACK_OFFSET_1 + BIT_RACK_C_4_1)
+#define BIT_RACK_OFFSET_3 (BIT_RACK_OFFSET_2 + BIT_RACK_C_4_2)
+#define BIT_RACK_OFFSET_4 (BIT_RACK_OFFSET_3 + BIT_RACK_C_4_3)
 #define BIT_RACK_COMBINATION_OFFSETS                                           \
   BIT_RACK_OFFSET_0, BIT_RACK_OFFSET_1, BIT_RACK_OFFSET_2, BIT_RACK_OFFSET_3,  \
-      BIT_RACK_OFFSET_4 #elif RACK_SIZE == 5
-#define BIT_RACK_C_5_0 1
-#define BIT_RACK_C_5_1 BIT_RACK_C_5_0 * 5 / 1
-#define BIT_RACK_C_5_2 BIT_RACK_C_5_1 * 4 / 2
-#define BIT_RACK_C_5_3 BIT_RACK_C_5_2
-#define BIT_RACK_C_5_4 BIT_RACK_C_5_1
-#define BIT_RACK_C_5_5 BIT_RACK_C_5_0
-#define BIT_RACK_OFFSET_0 0
-#define BIT_RACK_OFFSET_1 BIT_RACK_OFFSET_0 + BIT_RACK_C_5_0
-#define BIT_RACK_OFFSET_2 BIT_RACK_OFFSET_1 + BIT_RACK_C_5_1
-#define BIT_RACK_OFFSET_3 BIT_RACK_OFFSET_2 + BIT_RACK_C_5_2
-#define BIT_RACK_OFFSET_4 BIT_RACK_OFFSET_3 + BIT_RACK_C_5_3
-#define BIT_RACK_OFFSET_5 BIT_RACK_OFFSET_4 + BIT_RACK_C_5_4
+      BIT_RACK_OFFSET_4
+#elif RACK_SIZE == 5
+#define BIT_RACK_C_5_0 (1)
+#define BIT_RACK_C_5_1 (BIT_RACK_C_5_0 * 5 / 1)
+#define BIT_RACK_C_5_2 (BIT_RACK_C_5_1 * 4 / 2)
+#define BIT_RACK_C_5_3 (BIT_RACK_C_5_2)
+#define BIT_RACK_C_5_4 (BIT_RACK_C_5_1)
+#define BIT_RACK_C_5_5 (BIT_RACK_C_5_0)
+#define BIT_RACK_OFFSET_0 (0)
+#define BIT_RACK_OFFSET_1 (BIT_RACK_OFFSET_0 + BIT_RACK_C_5_0)
+#define BIT_RACK_OFFSET_2 (BIT_RACK_OFFSET_1 + BIT_RACK_C_5_1)
+#define BIT_RACK_OFFSET_3 (BIT_RACK_OFFSET_2 + BIT_RACK_C_5_2)
+#define BIT_RACK_OFFSET_4 (BIT_RACK_OFFSET_3 + BIT_RACK_C_5_3)
+#define BIT_RACK_OFFSET_5 (BIT_RACK_OFFSET_4 + BIT_RACK_C_5_4)
 #define BIT_RACK_COMBINATION_OFFSETS                                           \
   BIT_RACK_OFFSET_0, BIT_RACK_OFFSET_1, BIT_RACK_OFFSET_2, BIT_RACK_OFFSET_3,  \
-      BIT_RACK_OFFSET_4, BIT_RACK_OFFSET_5 #elif RACK_SIZE == 6
-#define BIT_RACK_C_6_0 1
-#define BIT_RACK_C_6_1 BIT_RACK_C_6_0 * 6 / 1
-#define BIT_RACK_C_6_2 BIT_RACK_C_6_1 * 5 / 2
-#define BIT_RACK_C_6_3 BIT_RACK_C_6_2 * 4 / 3
-#define BIT_RACK_C_6_4 BIT_RACK_C_6_2
-#define BIT_RACK_C_6_5 BIT_RACK_C_6_1
-#define BIT_RACK_C_6_6 BIT_RACK_C_6_0
+      BIT_RACK_OFFSET_4, BIT_RACK_OFFSET_5
+#elif RACK_SIZE == 6
+#define BIT_RACK_C_6_0 (1)
+#define BIT_RACK_C_6_1 (BIT_RACK_C_6_0 * 6 / 1)
+#define BIT_RACK_C_6_2 (BIT_RACK_C_6_1 * 5 / 2)
+#define BIT_RACK_C_6_3 (BIT_RACK_C_6_2 * 4 / 3)
+#define BIT_RACK_C_6_4 (BIT_RACK_C_6_2)
+#define BIT_RACK_C_6_5 (BIT_RACK_C_6_1)
+#define BIT_RACK_C_6_6 (BIT_RACK_C_6_0)
+#define BIT_RACK_OFFSET_0 (0)
+#define BIT_RACK_OFFSET_1 (BIT_RACK_OFFSET_0 + BIT_RACK_C_6_0)
+#define BIT_RACK_OFFSET_2 (BIT_RACK_OFFSET_1 + BIT_RACK_C_6_1)
+#define BIT_RACK_OFFSET_3 (BIT_RACK_OFFSET_2 + BIT_RACK_C_6_2)
+#define BIT_RACK_OFFSET_4 (BIT_RACK_OFFSET_3 + BIT_RACK_C_6_3)
+#define BIT_RACK_OFFSET_5 (BIT_RACK_OFFSET_4 + BIT_RACK_C_6_4)
+#define BIT_RACK_OFFSET_6 (BIT_RACK_OFFSET_5 + BIT_RACK_C_6_5)
+#define BIT_RACK_COMBINATION_OFFSETS                                           \
+  BIT_RACK_OFFSET_0, BIT_RACK_OFFSET_1, BIT_RACK_OFFSET_2, BIT_RACK_OFFSET_3,  \
+      BIT_RACK_OFFSET_4, BIT_RACK_OFFSET_5, BIT_RACK_OFFSET_6
 #elif RACK_SIZE == 7
 #define BIT_RACK_C_7_0 (1)
 #define BIT_RACK_C_7_1 (BIT_RACK_C_7_0 * 7 / 1)
@@ -87,28 +112,32 @@ enum {
       BIT_RACK_OFFSET_4, BIT_RACK_OFFSET_5, BIT_RACK_OFFSET_6,                 \
       BIT_RACK_OFFSET_7
 #elif RACK_SIZE == 8
-#define BIT_RACK_C_8_0 1
-#define BIT_RACK_C_8_1 BIT_RACK_C_8_0 * 8 / 1
-#define BIT_RACK_C_8_2 BIT_RACK_C_8_1 * 7 / 2
-#define BIT_RACK_C_8_3 BIT_RACK_C_8_2 * 6 / 3
-#define BIT_RACK_C_8_4 BIT_RACK_C_8_3 * 5 / 4
-#define BIT_RACK_C_8_5 BIT_RACK_C_8_3
-#define BIT_RACK_C_8_6 BIT_RACK_C_8_2
-#define BIT_RACK_C_8_7 BIT_RACK_C_8_1
-#define BIT_RACK_C_8_8 BIT_RACK_C_8_0
-#define BIT_RACK_OFFSET_0 0
-#define BIT_RACK_OFFSET_1 BIT_RACK_OFFSET_0 + BIT_RACK_C_8_0
-#define BIT_RACK_OFFSET_2 BIT_RACK_OFFSET_1 + BIT_RACK_C_8_1
-#define BIT_RACK_OFFSET_3 BIT_RACK_OFFSET_2 + BIT_RACK_C_8_2
-#define BIT_RACK_OFFSET_4 BIT_RACK_OFFSET_3 + BIT_RACK_C_8_3
-#define BIT_RACK_OFFSET_5 BIT_RACK_OFFSET_4 + BIT_RACK_C_8_4
-#define BIT_RACK_OFFSET_6 BIT_RACK_OFFSET_5 + BIT_RACK_C_8_5
-#define BIT_RACK_OFFSET_7 BIT_RACK_OFFSET_6 + BIT_RACK_C_8_6
-#define BIT_RACK_OFFSET_8 BIT_RACK_OFFSET_7 + BIT_RACK_C_8_7
+#define BIT_RACK_C_8_0 (1)
+#define BIT_RACK_C_8_1 (BIT_RACK_C_8_0 * 8 / 1)
+#define BIT_RACK_C_8_2 (BIT_RACK_C_8_1 * 7 / 2)
+#define BIT_RACK_C_8_3 (BIT_RACK_C_8_2 * 6 / 3)
+#define BIT_RACK_C_8_4 (BIT_RACK_C_8_3 * 5 / 4)
+#define BIT_RACK_C_8_5 (BIT_RACK_C_8_3)
+#define BIT_RACK_C_8_6 (BIT_RACK_C_8_2)
+#define BIT_RACK_C_8_7 (BIT_RACK_C_8_1)
+#define BIT_RACK_C_8_8 (BIT_RACK_C_8_0)
+#define BIT_RACK_OFFSET_0 (0)
+#define BIT_RACK_OFFSET_1 (BIT_RACK_OFFSET_0 + BIT_RACK_C_8_0)
+#define BIT_RACK_OFFSET_2 (BIT_RACK_OFFSET_1 + BIT_RACK_C_8_1)
+#define BIT_RACK_OFFSET_3 (BIT_RACK_OFFSET_2 + BIT_RACK_C_8_2)
+#define BIT_RACK_OFFSET_4 (BIT_RACK_OFFSET_3 + BIT_RACK_C_8_3)
+#define BIT_RACK_OFFSET_5 (BIT_RACK_OFFSET_4 + BIT_RACK_C_8_4)
+#define BIT_RACK_OFFSET_6 (BIT_RACK_OFFSET_5 + BIT_RACK_C_8_5)
+#define BIT_RACK_OFFSET_7 (BIT_RACK_OFFSET_6 + BIT_RACK_C_8_6)
+#define BIT_RACK_OFFSET_8 (BIT_RACK_OFFSET_7 + BIT_RACK_C_8_7)
 #define BIT_RACK_COMBINATION_OFFSETS                                           \
   BIT_RACK_OFFSET_0, BIT_RACK_OFFSET_1, BIT_RACK_OFFSET_2, BIT_RACK_OFFSET_3,  \
       BIT_RACK_OFFSET_4, BIT_RACK_OFFSET_5, BIT_RACK_OFFSET_6,                 \
-      BIT_RACK_OFFSET_7, BIT_RACK_OFFSET_8 #endif
+      BIT_RACK_OFFSET_7, BIT_RACK_OFFSET_8
+#endif
+
+#ifndef BIT_RACK_COMBINATION_OFFSETS
+#error "bit_rack_defs.h: no BIT_RACK_COMBINATION_OFFSETS for this RACK_SIZE"
 #endif
 
 // MurmurHash3-style mixing constants for BitRack hashing
