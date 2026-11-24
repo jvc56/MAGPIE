@@ -1478,6 +1478,240 @@ static void add_pat_help_arg(arg_token_t arg_token, const char **usages,
   }
 }
 
+// The help for the LAMC, nested search, rollout finish and autoplay static
+// bag options (see help_entry_fill, which is at the function size limit).
+static void add_lamc_nested_help_arg(arg_token_t arg_token, const char **usages,
+                                     const char **examples, const char **text) {
+  switch (arg_token) {
+  case ARG_TOKEN_LAMC:
+    usages[0] = "<true_or_false>";
+    examples[0] = "true";
+    examples[1] = "false";
+    *text = "Specifies whether Locally Adaptive Monte Carlo (LAMC) picks "
+            "the plays a simulation simulates. It embeds every play within "
+            "lamcfloor points of the best in a space of features, samples a "
+            "pool of them spread over that space with a few rollouts each, "
+            "and fits a Gaussian process from features to win percentage. "
+            "Each round keeps the best plays by its prediction and replaces "
+            "the others with plays it favors. The plays it predicts best "
+            "are then simulated as usual with the rest of the iterations "
+            "and time. Off by default.";
+    break;
+  case ARG_TOKEN_LAMC_POOL:
+    usages[0] = "<number_of_plays>";
+    examples[0] = "16";
+    *text = "Specifies how many plays LAMC samples in each round.";
+    break;
+  case ARG_TOKEN_LAMC_KEEP:
+    usages[0] = "<number_of_plays>";
+    examples[0] = "4";
+    *text = "Specifies how many plays LAMC keeps from one round to the "
+            "next. They are the best by its prediction.";
+    break;
+  case ARG_TOKEN_LAMC_SEED_PLAYS:
+    usages[0] = "<number_of_plays>";
+    examples[0] = "4";
+    *text = "Specifies how many of LAMC's first pool are the best plays by "
+            "static equity. The rest are spread over the feature space. 12 "
+            "by default.";
+    break;
+  case ARG_TOKEN_LAMC_SHALLOW:
+    usages[0] = "<number_of_samples>";
+    examples[0] = "4";
+    *text = "Specifies how many samples LAMC gives each play in the pool in "
+            "each round.";
+    break;
+  case ARG_TOKEN_LAMC_ROUNDS:
+    usages[0] = "<number_of_rounds>";
+    examples[0] = "12";
+    *text = "Specifies the most rounds LAMC runs.";
+    break;
+  case ARG_TOKEN_LAMC_STABLE:
+    usages[0] = "<number_of_rounds>";
+    examples[0] = "3";
+    *text = "Specifies after how many rounds with the same kept plays LAMC "
+            "stops searching.";
+    break;
+  case ARG_TOKEN_LAMC_EXPLORE:
+    usages[0] = "<share>";
+    examples[0] = "0.3";
+    *text = "Specifies the share of a simulation's iterations and time LAMC "
+            "may search with.";
+    break;
+  case ARG_TOKEN_LAMC_FLOOR:
+    usages[0] = "<points>";
+    examples[0] = "30";
+    *text = "Specifies how far below the best static equity LAMC considers "
+            "plays, in points.";
+    break;
+  case ARG_TOKEN_LAMC_UNIVERSE:
+    usages[0] = "<number_of_plays>";
+    examples[0] = "400";
+    *text = "Specifies the most plays LAMC considers, best by static "
+            "equity.";
+    break;
+  case ARG_TOKEN_LAMC_EVALUATED:
+    usages[0] = "<number_of_plays>";
+    examples[0] = "128";
+    *text = "Specifies the most plays LAMC samples in one search.";
+    break;
+  case ARG_TOKEN_LAMC_FINALISTS:
+    usages[0] = "<number_of_plays>";
+    examples[0] = "15";
+    *text = "Specifies how many plays LAMC hands to the simulation. 0, the "
+            "default, hands it as many as numplays.";
+    break;
+  case ARG_TOKEN_LAMC_CYCLE:
+    usages[0] = "<true_or_false>";
+    examples[0] = "false";
+    *text = "Specifies whether LAMC's search samples cycle the bag as "
+            "sbagcycle does. Off by default.";
+    break;
+  case ARG_TOKEN_LAMC_FEATURES:
+    usages[0] = "<feature_list>";
+    examples[0] = "score,leave,tiles";
+    *text = "Specifies the comma-separated features of the space LAMC "
+            "searches. The features are score, leave, equity, tiles, type, "
+            "bagafter, leaveshape, leavedups, location, direction, premium "
+            "and perimeter.";
+    break;
+  case ARG_TOKEN_LAMC_PROPOSAL:
+    usages[0] = "<ascent_or_acquire>";
+    examples[0] = "ascent";
+    examples[1] = "acquire";
+    *text = "Specifies how LAMC proposes new plays: ascent or acquire. "
+            "Ascent steps up the gradient of its prediction from each play "
+            "it drops. Acquire, the default, takes the plays with the "
+            "highest upper confidence bound.";
+    break;
+  case ARG_TOKEN_LAMC_KERNEL:
+    usages[0] = "<matern52_or_se>";
+    examples[0] = "matern52";
+    *text = "Specifies the kernel of LAMC's Gaussian process: matern52 or "
+            "se. Matern52 is the default; se is squared exponential.";
+    break;
+  case ARG_TOKEN_LAMC_LENGTH:
+    usages[0] = "<length>";
+    examples[0] = "1.5";
+    *text = "Specifies the length scale of LAMC's Gaussian process. It is "
+            "in standard deviations of each feature, and each fit chooses "
+            "among multiples of it.";
+    break;
+  case ARG_TOKEN_LAMC_RADIUS:
+    usages[0] = "<length>";
+    examples[0] = "1";
+    *text = "Specifies the length of the steps of LAMC's ascent proposal. "
+            "It is in standard deviations of each feature.";
+    break;
+  case ARG_TOKEN_LAMC_BETA:
+    usages[0] = "<weight>";
+    examples[0] = "1";
+    *text = "Specifies the weight of the standard deviation in LAMC's "
+            "acquire proposal.";
+    break;
+  case ARG_TOKEN_LAMC_EQUITY_MEAN:
+    usages[0] = "<true_or_false>";
+    examples[0] = "true";
+    *text = "Specifies whether LAMC's Gaussian process has a prior mean "
+            "linear in static equity. Otherwise the prior mean is constant. "
+            "On by default.";
+    break;
+  case ARG_TOKEN_LAMC_FINAL_ALL:
+    usages[0] = "<true_or_false>";
+    examples[0] = "true";
+    *text = "Specifies whether LAMC hands the simulation its best predicted "
+            "plays of all plays. Otherwise they come from the plays it "
+            "sampled. On by default.";
+    break;
+  case ARG_TOKEN_LAMC_MAX_BAG:
+    usages[0] = "<number_of_tiles>";
+    examples[0] = "20";
+    *text = "Specifies the most tiles in the bag at which LAMC searches. "
+            "With more, the simulation takes the top plays by static equity "
+            "as usual. 20 by default; 1000 always searches.";
+    break;
+  case ARG_TOKEN_LAMC_REUSE:
+    usages[0] = "<true_or_false>";
+    examples[0] = "true";
+    *text = "Specifies whether the simulation of LAMC's plays continues the "
+            "samples the search took of them. Otherwise it starts over with "
+            "other seeds. On by default.";
+    break;
+  case ARG_TOKEN_LAMC_STATIC_FINALISTS:
+    usages[0] = "<number_of_plays>";
+    examples[0] = "8";
+    *text = "Specifies how many top plays by static equity LAMC always "
+            "hands the simulation. The rest of its plays are its best "
+            "predicted. 10 by default.";
+    break;
+  case ARG_TOKEN_P1_LAMC:
+  case ARG_TOKEN_P2_LAMC:
+    usages[0] = "<true_or_false>";
+    *text = "Specifies whether LAMC (see lamc) picks player 1 or 2's plays "
+            "to simulate in autoplay.";
+    break;
+  case ARG_TOKEN_NESTED:
+  case ARG_TOKEN_P1_NESTED:
+  case ARG_TOKEN_P2_NESTED:
+    usages[0] = "<spec>";
+    examples[0] = "off";
+    examples[1] = "plies=0,k=6,m=8,h=1";
+    examples[2] = "plies=0+1,lamc=1,dcache=1/plies=0,k=3,m=2";
+    *text = "Specifies the nested search that picks the plays of some plies "
+            "of a simulation's rollouts. Without it they play by static "
+            "equity; nested1 and nested2 set it for each player in "
+            "autoplay. off, or "
+            "comma-separated settings: plies (joined by +, 0 is the reply "
+            "to the candidate), k (candidates), m (nested rollouts each), h "
+            "(static plies after the candidate in a nested rollout), margin "
+            "(points below the best), maxbag, minbag, alloc (uniform or "
+            "race), z (the race's standard errors), switch (the nested "
+            "utility a candidate other than the static best must gain), "
+            "dcache (1 to cache decisions), lamc (1 for a LAMC search over "
+            "every play, with pool, keep, rounds and beta), share, universe, "
+            "seeds, finalists and stage. Settings after a / are a deeper "
+            "level, whose search chooses plays in the nested rollouts of the "
+            "level before it, starting from that level's settings. Off by "
+            "default.";
+    break;
+  case ARG_TOKEN_SIM_FINISH_BAG:
+    usages[0] = "<tiles>";
+    examples[0] = "2";
+    *text = "Specifies the most tiles in the bag at which sfinish finishes "
+            "a rollout. With sfinish, a simulation's rollout also plays on to "
+            "the end of the game when its bag holds at most this many tiles "
+            "at its last ply. 0 (the default) for only an empty bag.";
+    break;
+  case ARG_TOKEN_P1_SIM_FINISH:
+  case ARG_TOKEN_P2_SIM_FINISH:
+    usages[0] = "<true_or_false>";
+    *text = "Specifies whether player 1 or 2's simulations finish their "
+            "rollouts in autoplay (see sfinish).";
+    break;
+  case ARG_TOKEN_SIM_FINISH:
+    usages[0] = "<true_or_false>";
+    examples[0] = "true";
+    examples[1] = "false";
+    *text = "Specifies whether simulation rollouts play out the game from an "
+            "empty bag. A rollout whose bag is empty at its last ply then "
+            "plays on to the end of the game by static equity, and counts "
+            "the game's result instead of the win percentage table's "
+            "estimate. Off by default.";
+    break;
+  case ARG_TOKEN_AUTOPLAY_STATIC_BAG:
+    usages[0] = "<tiles>";
+    examples[0] = "20";
+    *text = "Specifies the bag size above which autoplay plays only static "
+            "equity. While the bag holds more than this many tiles, both "
+            "players play their top static equity play, so that each game "
+            "of a pair reaches the same late position before the players' "
+            "own choices begin. 0 (the default) for never.";
+    break;
+  default:
+    break;
+  }
+}
+
 // The help for the players' autoplay endgame and pre-endgame options, and for
 // the pre-endgame adjustments (see help_entry_fill, which is at the function
 // size limit).
@@ -1638,6 +1872,9 @@ static void add_player_solver_help_arg(arg_token_t arg_token,
             "weights, or a weight with none. See 'poolshift'.";
     break;
   default:
+    // The LAMC, nested search, rollout finish and autoplay static bag
+    // options.
+    add_lamc_nested_help_arg(arg_token, usages, examples, text);
     break;
   }
 }
@@ -2833,226 +3070,6 @@ static void help_entry_fill(const Config *config, int token,
              "did. true always uses it, and needs patrolloutfast set to "
              "true or patrollout to false; false never uses it.";
       break;
-    case ARG_TOKEN_LAMC:
-      usages[0] = "<true_or_false>";
-      examples[0] = "true";
-      examples[1] = "false";
-      text = "Specifies whether Locally Adaptive Monte Carlo (LAMC) picks "
-             "the plays a simulation simulates. It embeds every play within "
-             "lamcfloor points of the best in a space of features, samples a "
-             "pool of them spread over that space with a few rollouts each, "
-             "and fits a Gaussian process from features to win percentage. "
-             "Each round keeps the best plays by its prediction and replaces "
-             "the others with plays it favors. The plays it predicts best "
-             "are then simulated as usual with the rest of the iterations "
-             "and time. Off by default.";
-      break;
-    case ARG_TOKEN_LAMC_POOL:
-      usages[0] = "<number_of_plays>";
-      examples[0] = "16";
-      text = "Specifies how many plays LAMC samples in each round.";
-      break;
-    case ARG_TOKEN_LAMC_KEEP:
-      usages[0] = "<number_of_plays>";
-      examples[0] = "4";
-      text = "Specifies how many plays LAMC keeps from one round to the "
-             "next. They are the best by its prediction.";
-      break;
-    case ARG_TOKEN_LAMC_SEED_PLAYS:
-      usages[0] = "<number_of_plays>";
-      examples[0] = "4";
-      text = "Specifies how many of LAMC's first pool are the best plays by "
-             "static equity. The rest are spread over the feature space. 12 "
-             "by default.";
-      break;
-    case ARG_TOKEN_LAMC_SHALLOW:
-      usages[0] = "<number_of_samples>";
-      examples[0] = "4";
-      text = "Specifies how many samples LAMC gives each play in the pool in "
-             "each round.";
-      break;
-    case ARG_TOKEN_LAMC_ROUNDS:
-      usages[0] = "<number_of_rounds>";
-      examples[0] = "12";
-      text = "Specifies the most rounds LAMC runs.";
-      break;
-    case ARG_TOKEN_LAMC_STABLE:
-      usages[0] = "<number_of_rounds>";
-      examples[0] = "3";
-      text = "Specifies after how many rounds with the same kept plays LAMC "
-             "stops searching.";
-      break;
-    case ARG_TOKEN_LAMC_EXPLORE:
-      usages[0] = "<share>";
-      examples[0] = "0.3";
-      text = "Specifies the share of a simulation's iterations and time LAMC "
-             "may search with.";
-      break;
-    case ARG_TOKEN_LAMC_FLOOR:
-      usages[0] = "<points>";
-      examples[0] = "30";
-      text = "Specifies how far below the best static equity LAMC considers "
-             "plays, in points.";
-      break;
-    case ARG_TOKEN_LAMC_UNIVERSE:
-      usages[0] = "<number_of_plays>";
-      examples[0] = "400";
-      text = "Specifies the most plays LAMC considers, best by static "
-             "equity.";
-      break;
-    case ARG_TOKEN_LAMC_EVALUATED:
-      usages[0] = "<number_of_plays>";
-      examples[0] = "128";
-      text = "Specifies the most plays LAMC samples in one search.";
-      break;
-    case ARG_TOKEN_LAMC_FINALISTS:
-      usages[0] = "<number_of_plays>";
-      examples[0] = "15";
-      text = "Specifies how many plays LAMC hands to the simulation. 0, the "
-             "default, hands it as many as numplays.";
-      break;
-    case ARG_TOKEN_LAMC_CYCLE:
-      usages[0] = "<true_or_false>";
-      examples[0] = "false";
-      text = "Specifies whether LAMC's search samples cycle the bag as "
-             "sbagcycle does. Off by default.";
-      break;
-    case ARG_TOKEN_LAMC_FEATURES:
-      usages[0] = "<feature_list>";
-      examples[0] = "score,leave,tiles";
-      text = "Specifies the comma-separated features of the space LAMC "
-             "searches. The features are score, leave, equity, tiles, type, "
-             "bagafter, leaveshape, leavedups, location, direction, premium "
-             "and perimeter.";
-      break;
-    case ARG_TOKEN_LAMC_PROPOSAL:
-      usages[0] = "<ascent_or_acquire>";
-      examples[0] = "ascent";
-      examples[1] = "acquire";
-      text = "Specifies how LAMC proposes new plays: ascent or acquire. "
-             "Ascent steps up the gradient of its prediction from each play "
-             "it drops. Acquire, the default, takes the plays with the "
-             "highest upper confidence bound.";
-      break;
-    case ARG_TOKEN_LAMC_KERNEL:
-      usages[0] = "<matern52_or_se>";
-      examples[0] = "matern52";
-      text = "Specifies the kernel of LAMC's Gaussian process: matern52 or "
-             "se. Matern52 is the default; se is squared exponential.";
-      break;
-    case ARG_TOKEN_LAMC_LENGTH:
-      usages[0] = "<length>";
-      examples[0] = "1.5";
-      text = "Specifies the length scale of LAMC's Gaussian process. It is "
-             "in standard deviations of each feature, and each fit chooses "
-             "among multiples of it.";
-      break;
-    case ARG_TOKEN_LAMC_RADIUS:
-      usages[0] = "<length>";
-      examples[0] = "1";
-      text = "Specifies the length of the steps of LAMC's ascent proposal. "
-             "It is in standard deviations of each feature.";
-      break;
-    case ARG_TOKEN_LAMC_BETA:
-      usages[0] = "<weight>";
-      examples[0] = "1";
-      text = "Specifies the weight of the standard deviation in LAMC's "
-             "acquire proposal.";
-      break;
-    case ARG_TOKEN_LAMC_EQUITY_MEAN:
-      usages[0] = "<true_or_false>";
-      examples[0] = "true";
-      text = "Specifies whether LAMC's Gaussian process has a prior mean "
-             "linear in static equity. Otherwise the prior mean is constant. "
-             "On by default.";
-      break;
-    case ARG_TOKEN_LAMC_FINAL_ALL:
-      usages[0] = "<true_or_false>";
-      examples[0] = "true";
-      text = "Specifies whether LAMC hands the simulation its best predicted "
-             "plays of all plays. Otherwise they come from the plays it "
-             "sampled. On by default.";
-      break;
-    case ARG_TOKEN_LAMC_MAX_BAG:
-      usages[0] = "<number_of_tiles>";
-      examples[0] = "20";
-      text = "Specifies the most tiles in the bag at which LAMC searches. "
-             "With more, the simulation takes the top plays by static equity "
-             "as usual. 20 by default; 1000 always searches.";
-      break;
-    case ARG_TOKEN_LAMC_REUSE:
-      usages[0] = "<true_or_false>";
-      examples[0] = "true";
-      text = "Specifies whether the simulation of LAMC's plays continues the "
-             "samples the search took of them. Otherwise it starts over with "
-             "other seeds. On by default.";
-      break;
-    case ARG_TOKEN_LAMC_STATIC_FINALISTS:
-      usages[0] = "<number_of_plays>";
-      examples[0] = "8";
-      text = "Specifies how many top plays by static equity LAMC always "
-             "hands the simulation. The rest of its plays are its best "
-             "predicted. 10 by default.";
-      break;
-    case ARG_TOKEN_P1_LAMC:
-    case ARG_TOKEN_P2_LAMC:
-      usages[0] = "<true_or_false>";
-      text = "Specifies whether LAMC (see lamc) picks player 1 or 2's plays "
-             "to simulate in autoplay.";
-      break;
-    case ARG_TOKEN_NESTED:
-    case ARG_TOKEN_P1_NESTED:
-    case ARG_TOKEN_P2_NESTED:
-      usages[0] = "<spec>";
-      examples[0] = "off";
-      examples[1] = "plies=0,k=6,m=8,h=1";
-      examples[2] = "plies=0+1,lamc=1,dcache=1/plies=0,k=3,m=2";
-      text = "Specifies whether a simulation's rollouts choose the plays of "
-             "some plies by a nested search instead of by static equity "
-             "(nested1 and nested2 for each player in autoplay). off, or "
-             "comma-separated settings: plies (joined by +, 0 is the reply "
-             "to the candidate), k (candidates), m (nested rollouts each), h "
-             "(static plies after the candidate in a nested rollout), margin "
-             "(points below the best), maxbag, minbag, alloc (uniform or "
-             "race), z (the race's standard errors), switch (the nested "
-             "utility a candidate other than the static best must gain), "
-             "dcache (1 to cache decisions), lamc (1 for a LAMC search over "
-             "every play, with pool, keep, rounds and beta), share, universe, "
-             "seeds, finalists and stage. Settings after a / are a deeper "
-             "level, whose search chooses plays in the nested rollouts of the "
-             "level before it, starting from that level's settings. Off by "
-             "default.";
-      break;
-    case ARG_TOKEN_SIM_FINISH_BAG:
-      usages[0] = "<tiles>";
-      examples[0] = "2";
-      text = "Specifies that with sfinish, a simulation's rollout also plays "
-             "on to the end of the game when its bag holds at most this many "
-             "tiles at its last ply. 0 (the default) for only an empty bag.";
-      break;
-    case ARG_TOKEN_P1_SIM_FINISH:
-    case ARG_TOKEN_P2_SIM_FINISH:
-      usages[0] = "<true_or_false>";
-      text = "Specifies whether player 1 or 2's simulations finish their "
-             "rollouts in autoplay (see sfinish).";
-      break;
-    case ARG_TOKEN_SIM_FINISH:
-      usages[0] = "<true_or_false>";
-      examples[0] = "true";
-      examples[1] = "false";
-      text = "Specifies whether a simulation's rollout whose bag is empty at "
-             "its last ply plays on to the end of the game by static "
-             "equity, and counts the game's result instead of the win "
-             "percentage table's estimate. Off by default.";
-      break;
-    case ARG_TOKEN_AUTOPLAY_STATIC_BAG:
-      usages[0] = "<tiles>";
-      examples[0] = "20";
-      text = "Specifies that in autoplay, while the bag holds more than this "
-             "many tiles, both players play their top static equity play, so "
-             "that each game of a pair reaches the same late position before "
-             "the players' own choices begin. 0 (the default) for never.";
-      break;
     case ARG_TOKEN_USE_HEAT_MAP:
       usages[0] = "<true_or_false>";
       examples[0] = "true";
@@ -3462,6 +3479,40 @@ static void help_entry_fill(const Config *config, int token,
     case ARG_TOKEN_POOL_SHIFT:
     case ARG_TOKEN_P1_POOL_SHIFT:
     case ARG_TOKEN_P2_POOL_SHIFT:
+    case ARG_TOKEN_LAMC:
+    case ARG_TOKEN_LAMC_POOL:
+    case ARG_TOKEN_LAMC_KEEP:
+    case ARG_TOKEN_LAMC_SEED_PLAYS:
+    case ARG_TOKEN_LAMC_SHALLOW:
+    case ARG_TOKEN_LAMC_ROUNDS:
+    case ARG_TOKEN_LAMC_STABLE:
+    case ARG_TOKEN_LAMC_EXPLORE:
+    case ARG_TOKEN_LAMC_FLOOR:
+    case ARG_TOKEN_LAMC_UNIVERSE:
+    case ARG_TOKEN_LAMC_EVALUATED:
+    case ARG_TOKEN_LAMC_FINALISTS:
+    case ARG_TOKEN_LAMC_CYCLE:
+    case ARG_TOKEN_LAMC_FEATURES:
+    case ARG_TOKEN_LAMC_PROPOSAL:
+    case ARG_TOKEN_LAMC_KERNEL:
+    case ARG_TOKEN_LAMC_LENGTH:
+    case ARG_TOKEN_LAMC_RADIUS:
+    case ARG_TOKEN_LAMC_BETA:
+    case ARG_TOKEN_LAMC_EQUITY_MEAN:
+    case ARG_TOKEN_LAMC_FINAL_ALL:
+    case ARG_TOKEN_LAMC_MAX_BAG:
+    case ARG_TOKEN_LAMC_REUSE:
+    case ARG_TOKEN_LAMC_STATIC_FINALISTS:
+    case ARG_TOKEN_P1_LAMC:
+    case ARG_TOKEN_P2_LAMC:
+    case ARG_TOKEN_NESTED:
+    case ARG_TOKEN_P1_NESTED:
+    case ARG_TOKEN_P2_NESTED:
+    case ARG_TOKEN_SIM_FINISH_BAG:
+    case ARG_TOKEN_P1_SIM_FINISH:
+    case ARG_TOKEN_P2_SIM_FINISH:
+    case ARG_TOKEN_SIM_FINISH:
+    case ARG_TOKEN_AUTOPLAY_STATIC_BAG:
       add_player_solver_help_arg(arg_token, usages, examples, &text);
       break;
     case ARG_TOKEN_MULTI_THREADING_MODE:

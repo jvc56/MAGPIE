@@ -1,5 +1,6 @@
 #include "gp.h"
 
+#include "../def/lamc_defs.h"
 #include "../util/dense_linalg.h"
 #include "../util/io_util.h"
 #include <math.h>

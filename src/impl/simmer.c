@@ -124,9 +124,6 @@ static bool sim_rollout_pat_excludes_census(const SimArgs *sim_args) {
   return sim_args->pat_rollout_exact && sim_rollout_pat_is_on(sim_args);
 }
 
-void simulate(SimArgs *sim_args, SimCtx **sim_ctx, SimResults *sim_results,
-              ErrorStack *error_stack);
-
 // The finalists of the sim in sim_results: its best count plays, in the
 // order the sim ranks them.
 static void sim_collect_finalists(SimResults *sim_results, const int count,

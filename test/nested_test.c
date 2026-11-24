@@ -47,15 +47,18 @@
 #include "../src/compat/cpthread.h"
 #include "../src/compat/cpthread_defs.h"
 #include "../src/compat/ctime.h"
-#include "../src/def/game_defs.h"
+#include "../src/def/equity_defs.h"
+#include "../src/def/move_defs.h"
 #include "../src/def/thread_control_defs.h"
 #include "../src/ent/autoplay_solver_settings.h"
 #include "../src/ent/bag.h"
 #include "../src/ent/cross_set_cache.h"
+#include "../src/ent/equity.h"
 #include "../src/ent/game.h"
 #include "../src/ent/move.h"
 #include "../src/ent/nested_args.h"
 #include "../src/ent/player.h"
+#include "../src/ent/rack.h"
 #include "../src/ent/sim_args.h"
 #include "../src/ent/sim_results.h"
 #include "../src/ent/stats.h"
@@ -109,7 +112,7 @@ static uint64_t ncr_mix(uint64_t value) {
 
 static int ncr_env_int(const char *name, const int fallback) {
   const char *value = getenv(name);
-  return value ? atoi(value) : fallback;
+  return value ? (int)strtol(value, NULL, 10) : fallback;
 }
 
 static const char *ncr_env_string(const char *name, const char *fallback) {
@@ -563,8 +566,11 @@ void test_nested_cr(void) {
       differ > 0 ? spread_mean * shared.num_positions / differ : 0.0,
       seconds[0] / shared.num_positions, seconds[1] / shared.num_positions,
       (unsigned long long)totals.searches, (unsigned long long)totals.samples,
-      totals.searches > 0 ? (double)totals.candidates / totals.searches : 0.0,
-      totals.searches > 0 ? 100.0 * totals.switched / totals.searches : 0.0);
+      totals.searches > 0 ? (double)totals.candidates / (double)totals.searches
+                          : 0.0,
+      totals.searches > 0
+          ? 100.0 * (double)totals.switched / (double)totals.searches
+          : 0.0);
   (void)fflush(stdout);
 
   free(win_diffs);
@@ -617,10 +623,10 @@ static uint64_t nested_test_sim(const int num_threads, const char *nested) {
         sim_results_get_simmed_play(sim_results, play_idx);
     const double mean = simmed_play_get_exact_win_pct_mean(simmed_play);
     if (getenv("NESTED_TEST_DEBUG")) {
-      fprintf(stderr, "NTD %d threads play %d mean %.17g n %llu\n", num_threads,
-              play_idx, mean,
-              (unsigned long long)stat_get_num_samples(
-                  simmed_play_get_equity_stat(simmed_play)));
+      (void)fprintf(stderr, "NTD %d threads play %d mean %.17g n %llu\n",
+                    num_threads, play_idx, mean,
+                    (unsigned long long)stat_get_num_samples(
+                        simmed_play_get_equity_stat(simmed_play)));
     }
     uint64_t bits;
     memcpy(&bits, &mean, sizeof(bits));
@@ -629,10 +635,11 @@ static uint64_t nested_test_sim(const int num_threads, const char *nested) {
         hash, stat_get_num_samples(simmed_play_get_equity_stat(simmed_play)));
   }
   if (getenv("NESTED_TEST_DEBUG")) {
-    fprintf(stderr, "NTD %d threads searches %llu samples %llu switched %llu\n",
-            num_threads, (unsigned long long)totals.searches,
-            (unsigned long long)totals.samples,
-            (unsigned long long)totals.switched);
+    (void)fprintf(stderr,
+                  "NTD %d threads searches %llu samples %llu switched %llu\n",
+                  num_threads, (unsigned long long)totals.searches,
+                  (unsigned long long)totals.samples,
+                  (unsigned long long)totals.switched);
   }
   // The totals are not part of the fingerprint: with several threads, BAI
   // can take samples it then discards, whose searches count too.
@@ -782,12 +789,15 @@ void test_nested_bench(void) {
       "(%.1f%% hit), decision hits %llu, inner searches %llu, stopped %llu\n",
       seconds, (unsigned long long)sim_results_get_iteration_count(sim_results),
       (unsigned long long)totals.searches,
-      totals.searches ? (double)totals.candidates / totals.searches : 0.0,
-      totals.searches ? 100.0 * totals.switched / totals.searches : 0.0,
+      totals.searches ? (double)totals.candidates / (double)totals.searches
+                      : 0.0,
+      totals.searches
+          ? 100.0 * (double)totals.switched / (double)totals.searches
+          : 0.0,
       (unsigned long long)totals.samples, (unsigned long long)totals.cache_hits,
       (unsigned long long)totals.cache_misses,
       (totals.cache_hits + totals.cache_misses) > 0
-          ? 100.0 * totals.cache_hits /
+          ? 100.0 * (double)totals.cache_hits /
                 (double)(totals.cache_hits + totals.cache_misses)
           : 0.0,
       (unsigned long long)totals.decision_hits,
@@ -1140,6 +1150,7 @@ static int gt_load(const char *file, Config *config, GtPosition **out,
       int cands = 0;
       int conts = 0;
       int consumed = 0;
+      // NOLINTNEXTLINE(cert-err34-c)
       if (sscanf(line, "GTPOS %d %d %d %d %n", &pos_id, &bag, &cands, &conts,
                  &consumed) != 4) {
         log_fatal("bad table line: %s", line);
@@ -1167,6 +1178,7 @@ static int gt_load(const char *file, Config *config, GtPosition **out,
       int pos_id = 0;
       int cand_idx = 0;
       int consumed = 0;
+      // NOLINTNEXTLINE(cert-err34-c)
       if (sscanf(line, "GTCAND %d %d%n", &pos_id, &cand_idx, &consumed) != 2 ||
           current == NULL || pos_id != current->pos_id) {
         log_fatal("bad table line: %s", line);
@@ -1176,6 +1188,7 @@ static int gt_load(const char *file, Config *config, GtPosition **out,
         double win = 0;
         double spread = 0;
         int used = 0;
+        // NOLINTNEXTLINE(cert-err34-c)
         if (sscanf(cursor, " %lf:%lf%n", &win, &spread, &used) != 2) {
           log_fatal("bad table line: %s", line);
         }
@@ -1325,10 +1338,14 @@ void test_nested_eval(void) {
       const double oracle = gt_oracle_regret(position, eval.num_conts, index);
       oracle_regret[0] += oracle;
       oracle_regret[1] += oracle * oracle;
-      const int group = position->bag <= 3    ? 0
-                        : position->bag <= 7  ? 1
-                        : position->bag <= 12 ? 2
-                                              : 3;
+      int group = 3;
+      if (position->bag <= 3) {
+        group = 0;
+      } else if (position->bag <= 7) {
+        group = 1;
+      } else if (position->bag <= 12) {
+        group = 2;
+      }
       group_regret[group] += oracle;
       group_count[group]++;
       const double d = gt_mean(position, eval.num_conts, index, false) -
@@ -1358,7 +1375,9 @@ void test_nested_eval(void) {
            sqrt(fmax(spread_regret[1] / n - sr_mean * sr_mean, 0) / n), d_mean,
            sqrt(fmax(diff[1] / n - d_mean * d_mean, 0) / n), differ, inside,
            eval.num_positions, seconds / eval.num_positions,
-           totals.searches ? 100.0 * totals.switched / totals.searches : 0.0);
+           totals.searches
+               ? 100.0 * (double)totals.switched / (double)totals.searches
+               : 0.0);
     const double sd_mean = spread_diff[0] / n;
     printf("NE method %d vs method 0 spread %+.3f (SE %.3f)\n", method, sd_mean,
            sqrt(fmax(spread_diff[1] / n - sd_mean * sd_mean, 0) / n));
@@ -1932,10 +1951,13 @@ void test_nested_pegm(void) {
   PegmCache cache;
   memset(&cache, 0, sizeof(cache));
   const char *cache_file = ncr_env_string("NPEG_CACHE", "nested_peg_cache.txt");
+  // The cache may not exist yet.
+  // NOLINTNEXTLINE(android-cloexec-fopen)
   FILE *cache_in = fopen(cache_file, "r");
   if (cache_in != NULL) {
     unsigned long long key = 0;
     double win = 0;
+    // NOLINTNEXTLINE(cert-err34-c)
     while (fscanf(cache_in, "PEGC %llx %lf\n", &key, &win) == 2) {
       pegm_cache_add(&cache, (uint64_t)key, win);
     }

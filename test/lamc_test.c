@@ -5,9 +5,11 @@
 #include "lamc_test.h"
 
 #include "../src/compat/cpthread.h"
+#include "../src/compat/cpthread_defs.h"
 #include "../src/compat/ctime.h"
 #include "../src/compat/memory_info.h"
 #include "../src/def/bai_defs.h"
+#include "../src/def/equity_defs.h"
 #include "../src/def/game_history_defs.h"
 #include "../src/def/lamc_defs.h"
 #include "../src/def/move_defs.h"
@@ -19,6 +21,7 @@
 #include "../src/ent/game.h"
 #include "../src/ent/lamc_args.h"
 #include "../src/ent/move.h"
+#include "../src/ent/play_feature.h"
 #include "../src/ent/sim_args.h"
 #include "../src/ent/sim_results.h"
 #include "../src/ent/stats.h"
@@ -40,6 +43,7 @@
 #include <math.h>
 #include <stdatomic.h>
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -54,7 +58,7 @@ enum {
   LAMC_REPLAY_MAX_THREADS = 64,
 };
 
-#define LAMC_TEST_GUARD_VALUE -12345.0
+#define LAMC_TEST_GUARD_VALUE (-12345.0)
 
 static void test_dense_linalg(void) {
   double matrix[9] = {4, 12, -16, 12, 37, -43, -16, -43, 98};
@@ -179,10 +183,11 @@ static void test_gp_kernel(const gp_kernel_t kernel) {
   for (int row = 0; row < LAMC_TEST_GP_GRID; row++) {
     for (int col = 0; col < LAMC_TEST_GP_GRID; col++) {
       const int idx = row * LAMC_TEST_GP_GRID + col;
-      bowl_points[idx * 2] = -2.0 + 4.0 * row / (LAMC_TEST_GP_GRID - 1);
+      bowl_points[(ptrdiff_t)idx * 2] =
+          -2.0 + 4.0 * row / (LAMC_TEST_GP_GRID - 1);
       bowl_points[idx * 2 + 1] = -2.0 + 4.0 * col / (LAMC_TEST_GP_GRID - 1);
-      bowl_values[idx] =
-          lamc_test_bowl(bowl_points[idx * 2], bowl_points[idx * 2 + 1]);
+      bowl_values[idx] = lamc_test_bowl(bowl_points[(ptrdiff_t)idx * 2],
+                                        bowl_points[(ptrdiff_t)idx * 2 + 1]);
       bowl_noise[idx] = 1e-6;
     }
   }
@@ -300,8 +305,9 @@ static void test_play_features(void) {
   play_feature_extract(PLAY_FEATURE_MOVE_TYPE, &ctx, moves, stride, second);
   for (int move_idx = 0; move_idx < num_moves; move_idx++) {
     const Move *move = move_list_get_move(moves, move_idx);
-    assert(first[move_idx * stride] == equity_to_double(move_get_score(move)));
-    const double *type = &second[move_idx * stride];
+    assert(first[(ptrdiff_t)move_idx * stride] ==
+           equity_to_double(move_get_score(move)));
+    const double *type = &second[(ptrdiff_t)move_idx * stride];
     assert(type[0] + type[1] + type[2] == 1.0);
     assert((type[1] == 1.0) == (move_get_type(move) == GAME_EVENT_EXCHANGE));
   }
@@ -313,7 +319,8 @@ static void test_play_features(void) {
   play_feature_extract(PLAY_FEATURE_PREMIUM_ACCESS, &ctx, moves, stride,
                        second);
   for (int move_idx = 0; move_idx < num_moves; move_idx++) {
-    assert(first[move_idx * stride] == second[move_idx * stride]);
+    assert(first[(ptrdiff_t)move_idx * stride] ==
+           second[(ptrdiff_t)move_idx * stride]);
     assert(first[move_idx * stride + 1] == second[move_idx * stride + 1]);
   }
   free(first);
@@ -667,7 +674,7 @@ static void *replay_evaluate_worker(void *data) {
   const ReplayWorker *worker = (const ReplayWorker *)data;
   ReplayShared *shared = worker->shared;
   LamcCtx *ctx = lamc_ctx_create();
-  int plays[LAMC_MAX_POOL_SIZE];
+  int plays[LAMC_MAX_POOL_SIZE] = {0};
   for (int pos_idx = worker->worker_idx; pos_idx < shared->num_positions;
        pos_idx += shared->num_threads) {
     const ReplayPosition *position = &shared->positions[pos_idx];
@@ -758,7 +765,7 @@ static void replay_run_workers(ReplayShared *shared, void *(*func)(void *)) {
 
 static int replay_env_int(const char *name, const int fallback) {
   const char *value = getenv(name);
-  return value ? atoi(value) : fallback;
+  return value ? (int)strtol(value, NULL, 10) : fallback;
 }
 
 static void replay_mean_and_se(const double *values, const int count,

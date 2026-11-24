@@ -1,17 +1,20 @@
 #include "rollout_nested.h"
 
+#include "../def/board_defs.h"
 #include "../def/equity_defs.h"
 #include "../def/game_defs.h"
+#include "../def/game_history_defs.h"
 #include "../def/lamc_defs.h"
+#include "../def/letter_distribution_defs.h"
 #include "../def/move_defs.h"
 #include "../def/play_feature_defs.h"
+#include "../def/rack_defs.h"
 #include "../ent/bag.h"
 #include "../ent/best_move_carry.h"
 #include "../ent/board.h"
 #include "../ent/cross_set_cache.h"
 #include "../ent/equity.h"
 #include "../ent/game.h"
-#include "../ent/klv.h"
 #include "../ent/letter_distribution.h"
 #include "../ent/move.h"
 #include "../ent/nested_args.h"
@@ -31,6 +34,7 @@
 #include <math.h>
 #include <stdatomic.h>
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -106,16 +110,16 @@ static void nested_standardize(double *values, const int stride,
   double sum = 0.0;
   double squares = 0.0;
   for (int idx = 0; idx < count; idx++) {
-    sum += values[idx * stride];
-    squares += values[idx * stride] * values[idx * stride];
+    const double value = values[(ptrdiff_t)idx * stride];
+    sum += value;
+    squares += value * value;
   }
   const double mean = sum / count;
   const double variance = squares / count - mean * mean;
   const double stdev = variance > 0.0 ? sqrt(variance) : 0.0;
   for (int idx = 0; idx < count; idx++) {
-    values[idx * stride] = stdev < NESTED_MIN_COLUMN_STDEV
-                               ? 0.0
-                               : (values[idx * stride] - mean) / stdev;
+    double *value = values + (ptrdiff_t)idx * stride;
+    *value = stdev < NESTED_MIN_COLUMN_STDEV ? 0.0 : (*value - mean) / stdev;
   }
 }
 
@@ -132,8 +136,8 @@ struct NestedWorker {
   // The candidates of the current search, best by static equity first.
   MoveList *candidate_list;
   int candidate_capacity;
-  Move candidates[NESTED_MAX_CANDIDATES];
   int num_candidates;
+  Move candidates[NESTED_MAX_CANDIDATES];
   // For the static plies of nested rollouts.
   MoveList *reply_list;
   // Per candidate: whether it is still in the race, and its utility sums.
@@ -177,13 +181,14 @@ struct NestedWorker {
   PlayFeatureCtx feature_ctx;
   double *embedding;
   int embedding_capacity;
+  // The capacity of the per-play arrays of the LAMC search below.
+  int play_capacity;
   double *min_distance;
   bool *picked;
   // For the LAMC search (NestedLevel.lamc_search), per generated play: its
   // standardized static equity, its nested rollouts' sums and count, and
   // its upper confidence bound; the pool, the evaluated plays, and the
   // surrogate.
-  int play_capacity;
   double *static_equity;
   double *play_sums;
   double *play_squares;
@@ -525,10 +530,11 @@ static int nested_farthest_points(NestedWorker *worker, const int num_columns,
     }
     worker->picked[chosen] = true;
     worker->pool[picks++] = chosen;
-    const double *chosen_row = embedding + chosen * num_columns;
+    const double *chosen_row = embedding + (ptrdiff_t)chosen * num_columns;
     for (int play_idx = 0; play_idx < count; play_idx++) {
-      const double distance = nested_distance_squared(
-          embedding + play_idx * num_columns, chosen_row, num_columns);
+      const double distance =
+          nested_distance_squared(embedding + (ptrdiff_t)play_idx * num_columns,
+                                  chosen_row, num_columns);
       if (distance < worker->min_distance[play_idx]) {
         worker->min_distance[play_idx] = distance;
       }
@@ -1961,10 +1967,11 @@ static uint64_t nested_decision_key(const Game *game) {
   return key | 1ULL;
 }
 
-static const Move *
-nested_choose_move_uncached(NestedWorker *worker, const NestedLevel *args,
-                            const NestedEval *eval, const Game *game,
-                            const uint64_t seed, BestMoveCarry *carry);
+static const Move *nested_choose_move_uncached(NestedWorker *worker,
+                                               const NestedLevel *args,
+                                               const NestedEval *eval,
+                                               const Game *game, uint64_t seed,
+                                               BestMoveCarry *carry);
 
 const Move *nested_choose_move(NestedWorker *worker, const NestedArgs *args,
                                const NestedEval *eval, const Game *game,

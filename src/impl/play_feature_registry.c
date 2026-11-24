@@ -4,6 +4,7 @@
 #include "../ent/bag.h"
 #include "../ent/game.h"
 #include "../ent/move.h"
+#include "../ent/play_feature.h"
 #include "../ent/player.h"
 #include "../ent/rack.h"
 #include "../util/io_util.h"
