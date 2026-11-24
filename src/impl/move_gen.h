@@ -50,6 +50,13 @@ typedef struct MoveGenArgs {
   // score plus this bonus, e.g. twice the opponent's rack for going out in an
   // endgame. The recorded play keeps its real score. Default 0.
   Equity best_small_out_bonus;
+  // MOVE_RECORD_BEST_SMALL_FACE only (the other fields for
+  // MOVE_RECORD_BEST_SMALL apply to it too): a play's ranking value also
+  // counts this many times the face value of the tiles it places, a blank
+  // counting nothing. With 2, plays rank by score less twice the face value
+  // of the tiles left on the rack, as static equity ranks them once the bag is
+  // empty. At least 0.
+  int best_small_face_weight;
   // MOVE_RECORD_BEST_SMALL only: if true, a play that ties the best value
   // replaces it when its tiny_move is larger, so the play returned does not
   // depend on the order in which anchors are searched (the endgame's

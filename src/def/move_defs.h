@@ -22,7 +22,17 @@ typedef enum {
   MOVE_RECORD_ALL_SMALL,
   MOVE_RECORD_TILES_PLAYED,
   MOVE_RECORD_BEST_SMALL,
+  // MOVE_RECORD_BEST_SMALL with a play's ranking value also counting the face
+  // value of the tiles it places (MoveGenArgs.best_small_face_weight). Kept
+  // last, after MOVE_RECORD_BEST_SMALL: see move_record_type_is_best_small.
+  MOVE_RECORD_BEST_SMALL_FACE,
 } move_record_t;
+
+// Whether a generation records only its best play as a small move, by either
+// ranking.
+static inline bool move_record_type_is_best_small(move_record_t record_type) {
+  return record_type >= MOVE_RECORD_BEST_SMALL;
+}
 
 #define MOVE_SORT_EQUITY_STRING "equity"
 #define MOVE_SORT_SCORE_STRING "score"

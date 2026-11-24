@@ -143,6 +143,14 @@ typedef struct MoveGen {
   // whole rack.
   Equity best_small_out_bonus;
   int best_small_out_rack_size;
+  // MoveGenArgs.best_small_face_weight for MOVE_RECORD_BEST_SMALL_FACE, and 0
+  // for every other record type.
+  int best_small_face_weight;
+  // The most that a play of each number of tiles adds to its score in its
+  // ranking value: best_small_out_bonus for the whole rack, and with a face
+  // weight, the weight times the face value of that many of the rack's
+  // highest tiles.
+  Equity best_small_bound_bonuses[RACK_SIZE + 1];
   bool kwgs_are_shared;
   bool is_wordsmog;
   Rack player_rack;
@@ -639,6 +647,7 @@ static inline void gen_update_cutoff_equity_or_score(MoveGen *gen) {
                                       : move_get_score(move);
     break;
   case MOVE_RECORD_BEST_SMALL:
+  case MOVE_RECORD_BEST_SMALL_FACE:
     // No Move object; best_move_equity_or_score is already the best score.
     gen->cutoff_equity_or_score = gen->best_move_equity_or_score;
     break;
@@ -674,6 +683,47 @@ gen_insert_spare_move_within_x_equity_of_best(MoveGen *gen,
            move_list_peek_equity(gen->move_list) < cutoff_equity_or_score) {
       move_list_pop_move(gen->move_list);
     }
+  }
+}
+
+// Records a play for MOVE_RECORD_BEST_SMALL_FACE: as MOVE_RECORD_BEST_SMALL
+// does in update_best_move_or_insert_into_movelist, with the play's ranking
+// value also counting the face value of the tiles it places. Kept out of
+// line so that the other record types' recording is compiled as it is without
+// it.
+static inline __attribute__((noinline)) void
+record_best_small_face_play(MoveGen *gen, int leftstrip, int rightstrip,
+                            game_event_t move_type, Equity score, int start_row,
+                            int start_col, int tiles_played, int dir,
+                            MachineLetter strip[]) {
+  SmallMove *spare_play = small_move_list_get_spare_move(gen->move_list);
+  set_small_play_for_record(spare_play, move_type, leftstrip, rightstrip, score,
+                            start_row, start_col, tiles_played, dir, strip);
+  Equity placed_face_value = 0;
+  for (int strip_idx = leftstrip; strip_idx <= rightstrip; strip_idx++) {
+    const MachineLetter placed = strip[strip_idx];
+    if (placed != PLAYED_THROUGH_MARKER && !get_is_blanked(placed)) {
+      placed_face_value += ld_get_score(&gen->ld, placed);
+    }
+  }
+  Equity ranking_value =
+      score + gen->best_small_face_weight * placed_face_value;
+  if (tiles_played == gen->best_small_out_rack_size) {
+    ranking_value += gen->best_small_out_bonus;
+  }
+  if (ranking_value > gen->best_move_equity_or_score ||
+      (ranking_value == gen->best_move_equity_or_score &&
+       gen->best_small_canonical_ties &&
+       spare_play->tiny_move > gen->move_list->small_moves[0]->tiny_move)) {
+    gen->best_move_equity_or_score = ranking_value;
+    SmallMove *previous_best = gen->move_list->small_moves[0];
+    gen->move_list->small_moves[0] = gen->move_list->spare_small_move;
+    gen->move_list->spare_small_move = previous_best;
+    gen->move_list->count = 1;
+    gen_update_cutoff_equity_or_score(gen);
+  }
+  if (gen->stop_on_threshold && ranking_value > gen->target_equity_cutoff) {
+    gen->threshold_exceeded = true;
   }
 }
 
@@ -772,6 +822,10 @@ static inline void update_best_move_or_insert_into_movelist(
       gen->move_list->count = 1;
     }
     break;
+  case MOVE_RECORD_BEST_SMALL_FACE:
+    record_best_small_face_play(gen, leftstrip, rightstrip, move_type, score,
+                                start_row, start_col, tiles_played, dir, strip);
+    return;
   }
 
   if (need_to_update_best_move_equity_or_score) {
@@ -820,6 +874,7 @@ static inline bool better_play_has_been_found(const MoveGen *gen,
     }
     break;
   case MOVE_RECORD_BEST_SMALL:
+  case MOVE_RECORD_BEST_SMALL_FACE:
   case MOVE_RECORD_BEST:
     break;
   }

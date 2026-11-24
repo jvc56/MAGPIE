@@ -331,7 +331,7 @@ static void woadwage_continue_right(const KWG *kwg,
 static inline bool woadwage_records_leaves(const MoveGen *gen) {
   return gen->move_record_type != MOVE_RECORD_ALL_SMALL &&
          gen->move_record_type != MOVE_RECORD_TILES_PLAYED &&
-         gen->move_record_type != MOVE_RECORD_BEST_SMALL;
+         !move_record_type_is_best_small(gen->move_record_type);
 }
 
 static inline void woadwage_take_tile(MoveGen *gen, MachineLetter ml) {

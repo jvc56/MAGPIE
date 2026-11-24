@@ -372,6 +372,7 @@ static inline void record_exchange(MoveGen *gen) {
     }
     break;
   case MOVE_RECORD_BEST_SMALL:
+  case MOVE_RECORD_BEST_SMALL_FACE:
     // BEST_SMALL only supports MOVE_SORT_SCORE; no exchange pruning needed.
     break;
   }
@@ -707,6 +708,7 @@ update_best_move_or_insert_into_movelist_wmp(MoveGen *gen, int start_col,
   case MOVE_RECORD_ALL_SMALL:
   case MOVE_RECORD_TILES_PLAYED:
   case MOVE_RECORD_BEST_SMALL:
+  case MOVE_RECORD_BEST_SMALL_FACE:
     log_fatal("update_best_move_or_insert_into_movelist_wmp called with "
               "MOVE_RECORD_ALL_SMALL, MOVE_RECORD_TILES_PLAYED, or "
               "MOVE_RECORD_BEST_SMALL");
@@ -2091,11 +2093,8 @@ static inline void shadow_record_small(MoveGen *gen) {
       (gen->shadow_mainword_restricted_score * gen->shadow_word_multiplier) +
       gen->shadow_perpendicular_additional_score + bingo_bonus;
   // Bound the ranking value, which includes the out bonus only for plays that
-  // use the whole rack.
-  Equity bound = score;
-  if (gen->tiles_played == gen->best_small_out_rack_size) {
-    bound += gen->best_small_out_bonus;
-  }
+  // use the whole rack (see gen_set_best_small_ranking).
+  const Equity bound = score + gen->best_small_bound_bonuses[gen->tiles_played];
   if (bound > gen->highest_shadow_score) {
     gen->highest_shadow_score = bound;
   }
@@ -3384,6 +3383,30 @@ static inline void set_descending_tile_scores(MoveGen *gen) {
          sizeof(gen->descending_tile_scores));
 }
 
+// Sets what a play's ranking value adds to its score for the two best small
+// record types, for a position gen_load_position has loaded: the face weight,
+// and what the small shadow adds to its bound of a play's score by the number
+// of tiles the play places (best_small_bound_bonuses).
+static inline void gen_set_best_small_ranking(MoveGen *gen,
+                                              const MoveGenArgs *args) {
+  const int rack_tiles = gen->best_small_out_rack_size;
+  assert(rack_tiles <= RACK_SIZE);
+  memset(gen->best_small_bound_bonuses, 0,
+         sizeof(gen->best_small_bound_bonuses));
+  gen->best_small_face_weight = 0;
+  if (gen->move_record_type == MOVE_RECORD_BEST_SMALL_FACE) {
+    assert(args->best_small_face_weight >= 0);
+    gen->best_small_face_weight = args->best_small_face_weight;
+    for (int tiles = 1; tiles <= rack_tiles; tiles++) {
+      gen->best_small_bound_bonuses[tiles] =
+          gen->best_small_bound_bonuses[tiles - 1] +
+          gen->best_small_face_weight *
+              gen->full_rack_descending_tile_scores[tiles - 1];
+    }
+  }
+  gen->best_small_bound_bonuses[rack_tiles] += gen->best_small_out_bonus;
+}
+
 // Points gen->pat_ctx at the board's context in board_cache, loading it
 // when the cache does not hold it (see pat_board_cache.h). Board-only PAT
 // gives the load no rack and sets no utility correction, so the context
@@ -3436,7 +3459,7 @@ gen_load_pool_shift(MoveGen *gen, const Game *game, const Player *player,
   if (gen->move_sort_type != MOVE_SORT_EQUITY ||
       gen->move_record_type == MOVE_RECORD_ALL_SMALL ||
       gen->move_record_type == MOVE_RECORD_TILES_PLAYED ||
-      gen->move_record_type == MOVE_RECORD_BEST_SMALL ||
+      move_record_type_is_best_small(gen->move_record_type) ||
       table->ld_size != ld_get_size(&gen->ld) ||
       !pool_shift_applies(table, gen->klv, player_get_pool_shift_weight(player),
                           rack_get_total_letters(&gen->player_rack),
@@ -3629,8 +3652,8 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
   // Reset the move list
   if (gen->move_record_type == MOVE_RECORD_ALL_SMALL ||
       gen->move_record_type == MOVE_RECORD_TILES_PLAYED ||
-      gen->move_record_type == MOVE_RECORD_BEST_SMALL) {
-    if (gen->move_record_type == MOVE_RECORD_BEST_SMALL &&
+      move_record_type_is_best_small(gen->move_record_type)) {
+    if (move_record_type_is_best_small(gen->move_record_type) &&
         gen->move_sort_type != MOVE_SORT_SCORE) {
       log_fatal("MOVE_RECORD_BEST_SMALL only supports MOVE_SORT_SCORE");
     }
@@ -3670,7 +3693,7 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
   gen->pat_terms = NULL;
   if (gen->move_record_type != MOVE_RECORD_ALL_SMALL &&
       gen->move_record_type != MOVE_RECORD_TILES_PLAYED &&
-      gen->move_record_type != MOVE_RECORD_BEST_SMALL) {
+      !move_record_type_is_best_small(gen->move_record_type)) {
     board_copy_opening_penalties(gen->board, gen->opening_move_word_penalties,
                                  gen->opening_move_letter_penalties);
     // The PAT term is equity-only, runs only while the real bag has tiles,
@@ -3719,7 +3742,7 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
   // holds: only the full shadow and WMP generation read it, and these
   // generations run the small shadow and the small generator.
   gen->lane_shadow_cache =
-      gen->move_record_type == MOVE_RECORD_BEST_SMALL && !gen->is_wordsmog
+      move_record_type_is_best_small(gen->move_record_type) && !gen->is_wordsmog
           ? args->lane_shadow_cache
           : NULL;
 }
@@ -4090,10 +4113,14 @@ static_assert(offsetof(Square, cross_score) + sizeof(uint64_t) <=
                   sizeof(Square),
               "lane_shadow_key reads a word from cross_score on");
 
+// The shift of the face weight in the lane shadow context key's last term,
+// above any rack size.
+enum { LANE_KEY_FACE_WEIGHT_SHIFT = 8 };
+
 // The key of what a lane's small shadow reads besides the lane's squares and
 // direction: the solve (by the cache's salt, which also stands for the letter
 // distribution and the bingo bonus), the lexicon and cross set index, the
-// rack, and the out bonus and the rack size it applies to.
+// rack, the out bonus and the rack size it applies to, and the face weight.
 static uint64_t lane_shadow_context_key(const MoveGen *gen) {
   uint64_t key = gen->lane_shadow_cache->salt;
   key = key * LANE_HASH_MULTIPLIER + (uint64_t)(uintptr_t)gen->kwg;
@@ -4104,7 +4131,8 @@ static uint64_t lane_shadow_context_key(const MoveGen *gen) {
   }
   key = key * LANE_HASH_MULTIPLIER +
         (uint64_t)(uint32_t)gen->best_small_out_bonus;
-  key = key * LANE_HASH_MULTIPLIER + (uint64_t)gen->best_small_out_rack_size;
+  key = key * LANE_HASH_MULTIPLIER + (uint64_t)gen->best_small_out_rack_size +
+        ((uint64_t)gen->best_small_face_weight << LANE_KEY_FACE_WEIGHT_SHIFT);
   return lane_shadow_mix(key);
 }
 
@@ -4481,7 +4509,7 @@ gen_record_scoring_plays_impl(MoveGen *gen, bool lazy) {
   }
   // The anchors' remembered plays answer for the plain small generator only.
   LaneShadowCache *anchor_play_cache =
-      gen->move_record_type == MOVE_RECORD_BEST_SMALL && !gen->is_woadwage
+      move_record_type_is_best_small(gen->move_record_type) && !gen->is_woadwage
           ? gen->lane_shadow_cache
           : NULL;
   // Reset the reused generator fields
@@ -4559,7 +4587,7 @@ gen_record_scoring_plays_impl(MoveGen *gen, bool lazy) {
       gen_search_and_remember_anchor_play(gen, &anchor, kwg_root_node_index,
                                           anchor_play, anchor_play_key,
                                           anchor_play_held);
-    } else if (gen->move_record_type == MOVE_RECORD_BEST_SMALL) {
+    } else if (move_record_type_is_best_small(gen->move_record_type)) {
       recursive_gen_small(gen, anchor.col, kwg_root_node_index, anchor.col,
                           anchor.col, gen->dir == BOARD_HORIZONTAL_DIRECTION, 0,
                           1, 0);
@@ -4620,6 +4648,7 @@ void gen_record_pass(MoveGen *gen) {
     // Pass doesn't use any tiles — nothing to record.
     break;
   case MOVE_RECORD_BEST_SMALL:
+  case MOVE_RECORD_BEST_SMALL_FACE:
     if (gen->best_move_equity_or_score < EQUITY_PASS_VALUE) {
       // No scoring play was found; result is a pass.
       small_move_set_as_pass(gen->move_list->small_moves[0]);
@@ -4892,7 +4921,8 @@ bool generate_best_small_move_in_lanes(const MoveGenArgs *args,
   MoveGen *gen = get_movegen();
   gen_count_movegen(gen);
   gen_load_position(gen, args);
-  assert(gen->move_record_type == MOVE_RECORD_BEST_SMALL);
+  assert(move_record_type_is_best_small(gen->move_record_type));
+  gen_set_best_small_ranking(gen, args);
   if (incumbent != NULL) {
     // The incumbent is the best so far, so the generator prunes against it
     // from the start and an equal-valued play must beat its tiny_move.
@@ -5324,9 +5354,10 @@ void generate_moves(const MoveGenArgs *args) {
       }
       return; // No pass recording needed
     }
-  } else if (gen->move_record_type == MOVE_RECORD_BEST_SMALL) {
+  } else if (move_record_type_is_best_small(gen->move_record_type)) {
     // BEST_SMALL uses small shadow and small recursive_gen paths that skip
     // leave_map, WMP, and wordsmog operations entirely.
+    gen_set_best_small_ranking(gen, args);
     gen_shadow_small(gen);
     gen_record_scoring_plays(gen);
   } else {

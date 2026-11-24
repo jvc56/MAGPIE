@@ -11,6 +11,7 @@
 #include "../src/ent/endgame_results.h"
 #include "../src/ent/equity.h"
 #include "../src/ent/game.h"
+#include "../src/ent/letter_distribution.h"
 #include "../src/ent/move.h"
 #include "../src/ent/move_undo.h"
 #include "../src/ent/player.h"
@@ -235,6 +236,12 @@ enum {
   BEST_PLAY_PATHS_PER_POSITION = 60,
   BEST_PLAY_MAX_PATH_LENGTH = 12,
   BEST_PLAY_BONUS_VARIANTS = 4,
+  // Each bonus is checked by the plain ranking (MOVE_RECORD_BEST_SMALL) and
+  // by the face ranking with this weight (MOVE_RECORD_BEST_SMALL_FACE), in
+  // turn, so that the two share the lists' sibling lanes.
+  BEST_PLAY_RANKINGS = 2,
+  BEST_PLAY_VARIANTS = BEST_PLAY_BONUS_VARIANTS * BEST_PLAY_RANKINGS,
+  BEST_PLAY_FACE_WEIGHT = 2,
   BEST_PLAY_PASS_ONE_IN = 7,
   BEST_PLAY_MIN_CHECKS = 500,
   BEST_PLAY_MIN_DEEPEST = 4,
@@ -274,10 +281,27 @@ static bool outranks(int adjusted, const SmallMove *candidate, bool have_best,
          (adjusted == best_adjusted && candidate->tiny_move > best->tiny_move);
 }
 
-// The argmax of `count` plays (a trailing or interior pass never competes).
+// `face_weight` times the face value of the tiles a play places, a blank
+// counting nothing.
+static int face_bonus_of_play(const SmallMove *play,
+                              const LetterDistribution *ld, int face_weight) {
+  int face_value = 0;
+  const int tiles_played = small_move_get_tiles_played(play);
+  for (int tile_idx = 0; tile_idx < tiles_played; tile_idx++) {
+    if (!small_move_tile_is_blank(play, tile_idx)) {
+      face_value +=
+          equity_to_int(ld_get_score(ld, small_move_get_tile(play, tile_idx)));
+    }
+  }
+  return face_weight * face_value;
+}
+
+// The argmax of `count` plays (a trailing or interior pass never competes),
+// each play's score counting `face_weight` times the face value it places.
 // Returns whether a play exists.
 static bool argmax_of_plays(const SmallMove *const *plays, int count,
                             int go_out_bonus, int side_to_move_tiles,
+                            const LetterDistribution *ld, int face_weight,
                             SmallMove *out_best, int *out_adjusted) {
   bool found = false;
   int best_adjusted = 0;
@@ -286,7 +310,8 @@ static bool argmax_of_plays(const SmallMove *const *plays, int count,
     if (small_move_is_pass(candidate)) {
       continue;
     }
-    int adjusted = small_move_get_score(candidate);
+    int adjusted = small_move_get_score(candidate) +
+                   face_bonus_of_play(candidate, ld, face_weight);
     if (small_move_get_tiles_played(candidate) == side_to_move_tiles) {
       adjusted += go_out_bonus;
     }
@@ -300,17 +325,20 @@ static bool argmax_of_plays(const SmallMove *const *plays, int count,
   return found;
 }
 
-// The MOVE_RECORD_BEST_SMALL generation for the player on turn, with
-// `go_out_bonus` points for a whole-rack play and the canonical tie-break
+// The MOVE_RECORD_BEST_SMALL generation for the player on turn, or with a
+// `face_weight` the MOVE_RECORD_BEST_SMALL_FACE one, with `go_out_bonus`
+// points for a whole-rack play and the canonical tie-break
 // path_move_lists_best_play reproduces.
 static MoveGenArgs best_small_args_for(const Game *game, MoveList *move_list,
-                                       int go_out_bonus) {
+                                       int go_out_bonus, int face_weight) {
   const MoveGenArgs best_args = {
       .best_small_out_bonus = int_to_equity(go_out_bonus),
+      .best_small_face_weight = face_weight,
       .best_small_canonical_ties = true,
       .game = game,
       .move_list = move_list,
-      .move_record_type = MOVE_RECORD_BEST_SMALL,
+      .move_record_type = face_weight == 0 ? MOVE_RECORD_BEST_SMALL
+                                           : MOVE_RECORD_BEST_SMALL_FACE,
       .move_sort_type = MOVE_SORT_SCORE,
       .target_equity = EQUITY_MAX_VALUE,
   };
@@ -325,30 +353,40 @@ static MoveGenArgs best_small_args_for(const Game *game, MoveList *move_list,
 static void assert_best_play_matches(PathMoveLists *lists,
                                      const MoveGenArgs *args,
                                      MoveList *best_move_list, uint64_t *rng,
-                                     int *num_checks, int *num_split_lanes) {
+                                     int *num_checks, int *num_split_lanes,
+                                     int *num_face_changes) {
   const Game *game = args->game;
+  const LetterDistribution *ld = game_get_ld(game);
   const int side_to_move_tiles = rack_get_total_letters(player_get_rack(
       game_get_player(game, game_get_player_on_turn_index(game))));
-  const int bonuses[BEST_PLAY_BONUS_VARIANTS] = {
+  const int bonus_kinds[BEST_PLAY_BONUS_VARIANTS] = {
       0, 1, (int)(next_random(rng) % 40), (int)(next_random(rng) % 120)};
+  int bonuses[BEST_PLAY_VARIANTS];
+  int face_weights[BEST_PLAY_VARIANTS];
+  for (int variant = 0; variant < BEST_PLAY_VARIANTS; variant++) {
+    bonuses[variant] = bonus_kinds[variant / BEST_PLAY_RANKINGS];
+    face_weights[variant] =
+        variant % BEST_PLAY_RANKINGS == 0 ? 0 : BEST_PLAY_FACE_WEIGHT;
+  }
 
   // best_play and best_play_alone first: neither may need (or disturb) the
   // current slot. They take turns going first, since they share the lists'
   // scratch.
-  SmallMove best_plays[BEST_PLAY_BONUS_VARIANTS];
-  bool found[BEST_PLAY_BONUS_VARIANTS];
-  SmallMove alone_plays[BEST_PLAY_BONUS_VARIANTS];
-  bool alone_found[BEST_PLAY_BONUS_VARIANTS];
-  for (int variant = 0; variant < BEST_PLAY_BONUS_VARIANTS; variant++) {
-    const MoveGenArgs best_args =
-        best_small_args_for(game, best_move_list, bonuses[variant]);
-    if (variant % 2 == 0) {
+  SmallMove best_plays[BEST_PLAY_VARIANTS];
+  bool found[BEST_PLAY_VARIANTS];
+  SmallMove alone_plays[BEST_PLAY_VARIANTS];
+  bool alone_found[BEST_PLAY_VARIANTS];
+  for (int variant = 0; variant < BEST_PLAY_VARIANTS; variant++) {
+    const MoveGenArgs best_args = best_small_args_for(
+        game, best_move_list, bonuses[variant], face_weights[variant]);
+    const bool alone_first = (variant / BEST_PLAY_RANKINGS) % 2 == 0;
+    if (alone_first) {
       alone_found[variant] = path_move_lists_best_play_alone(
           lists, &best_args, &alone_plays[variant]);
     }
     found[variant] =
         path_move_lists_best_play(lists, &best_args, &best_plays[variant]);
-    if (variant % 2 != 0) {
+    if (!alone_first) {
       alone_found[variant] = path_move_lists_best_play_alone(
           lists, &best_args, &alone_plays[variant]);
     }
@@ -371,19 +409,21 @@ static void assert_best_play_matches(PathMoveLists *lists,
     derived_pointers[move_idx] = &derived[move_idx];
   }
 
-  for (int variant = 0; variant < BEST_PLAY_BONUS_VARIANTS; variant++) {
+  uint64_t plain_tiny_move = 0;
+  for (int variant = 0; variant < BEST_PLAY_VARIANTS; variant++) {
     SmallMove expected;
     small_move_set_as_pass(&expected);
     int expected_adjusted = 0;
     const bool expected_found = argmax_of_plays(
         (const SmallMove *const *)scratch->small_moves, scratch->count,
-        bonuses[variant], side_to_move_tiles, &expected, &expected_adjusted);
+        bonuses[variant], side_to_move_tiles, ld, face_weights[variant],
+        &expected, &expected_adjusted);
     SmallMove from_derived;
     small_move_set_as_pass(&from_derived);
     int derived_adjusted = 0;
-    const bool derived_found =
-        argmax_of_plays(derived_pointers, count, bonuses[variant],
-                        side_to_move_tiles, &from_derived, &derived_adjusted);
+    const bool derived_found = argmax_of_plays(
+        derived_pointers, count, bonuses[variant], side_to_move_tiles, ld,
+        face_weights[variant], &from_derived, &derived_adjusted);
     assert(found[variant] == expected_found);
     assert(alone_found[variant] == expected_found);
     assert(derived_found == expected_found);
@@ -396,9 +436,15 @@ static void assert_best_play_matches(PathMoveLists *lists,
       assert(derived_adjusted == expected_adjusted);
     }
 
+    if (face_weights[variant] == 0) {
+      plain_tiny_move = expected_found ? expected.tiny_move : 0;
+    } else if (expected_found && expected.tiny_move != plain_tiny_move) {
+      (*num_face_changes)++;
+    }
+
     // BEST_SMALL generation must pick the same play (a pass when none).
-    const MoveGenArgs best_args =
-        best_small_args_for(game, best_move_list, bonuses[variant]);
+    const MoveGenArgs best_args = best_small_args_for(
+        game, best_move_list, bonuses[variant], face_weights[variant]);
     generate_moves(&best_args);
     assert(best_move_list->count == 1);
     assert(best_move_list->small_moves[0]->tiny_move ==
@@ -489,9 +535,11 @@ static int lane_of_play(const SmallMove *small_move) {
 
 // Each lane's best whole-rack play and best other play among the plays of
 // `move_list`, for a side holding `side_to_move_tiles` tiles: the highest
-// score, then the larger tiny_move.
+// score, each play's counting `face_weight` times the face value it places,
+// then the larger tiny_move.
 static void lane_bests_of_scratch(const MoveList *move_list,
                                   int side_to_move_tiles,
+                                  const LetterDistribution *ld, int face_weight,
                                   LaneBestPlays *lanes) {
   memset(lanes, 0, PATH_MOVE_LISTS_NUM_LANES * sizeof(LaneBestPlays));
   for (int move_idx = 0; move_idx < move_list->count; move_idx++) {
@@ -500,16 +548,26 @@ static void lane_bests_of_scratch(const MoveList *move_list,
       continue;
     }
     LaneBestPlays *best = &lanes[lane_of_play(candidate)];
-    const int score = small_move_get_score(candidate);
+    const int score = small_move_get_score(candidate) +
+                      face_bonus_of_play(candidate, ld, face_weight);
     if (small_move_get_tiles_played(candidate) == side_to_move_tiles) {
-      if (outranks(score, candidate, best->has_whole_rack,
-                   small_move_get_score(&best->whole_rack),
-                   &best->whole_rack)) {
+      if (outranks(
+              score, candidate, best->has_whole_rack,
+              best->has_whole_rack
+                  ? small_move_get_score(&best->whole_rack) +
+                        face_bonus_of_play(&best->whole_rack, ld, face_weight)
+                  : 0,
+              &best->whole_rack)) {
         best->whole_rack = *candidate;
         best->has_whole_rack = true;
       }
-    } else if (outranks(score, candidate, best->has_partial,
-                        small_move_get_score(&best->partial), &best->partial)) {
+    } else if (outranks(
+                   score, candidate, best->has_partial,
+                   best->has_partial
+                       ? small_move_get_score(&best->partial) +
+                             face_bonus_of_play(&best->partial, ld, face_weight)
+                       : 0,
+                   &best->partial)) {
       best->partial = *candidate;
       best->has_partial = true;
     }
@@ -550,19 +608,34 @@ static void assert_reply_lane_bests_match(PathMoveLists *lists, Game *game,
   const int replying_tiles = rack_get_total_letters(
       player_get_rack(game_get_player(game, 1 - on_turn)));
   game_set_player_on_turn_index(game, 1 - on_turn);
-  const MoveGenArgs reply_args = best_small_args_for(game, best_move_list, 0);
+  const LetterDistribution *ld = game_get_ld(game);
+  // By the face ranking first, then by the plain one: both fill the same
+  // lanes of the lists, and each must find its own.
+  const MoveGenArgs face_reply_args =
+      best_small_args_for(game, best_move_list, 0, BEST_PLAY_FACE_WEIGHT);
+  const LaneBestPlays *face_lanes =
+      path_move_lists_reply_lane_bests(lists, &face_reply_args);
+  assert(face_lanes != NULL);
+  LaneBestPlays from_lists_by_face[PATH_MOVE_LISTS_NUM_LANES];
+  memcpy(from_lists_by_face, face_lanes, sizeof(from_lists_by_face));
+  const MoveGenArgs reply_args =
+      best_small_args_for(game, best_move_list, 0, 0);
   const LaneBestPlays *from_lists =
       path_move_lists_reply_lane_bests(lists, &reply_args);
   assert(from_lists != NULL);
   generate_moves(args);
   game_set_player_on_turn_index(game, on_turn);
   LaneBestPlays expected[PATH_MOVE_LISTS_NUM_LANES];
-  lane_bests_of_scratch(args->move_list, replying_tiles, expected);
+  lane_bests_of_scratch(args->move_list, replying_tiles, ld, 0, expected);
   LaneBestPlays from_list[PATH_MOVE_LISTS_NUM_LANES];
   path_move_lists_lane_bests_of_list(args->move_list, replying_tiles,
                                      from_list);
   assert_lane_bests_equal(from_list, expected);
   assert_lane_bests_equal(from_lists, expected);
+  LaneBestPlays expected_by_face[PATH_MOVE_LISTS_NUM_LANES];
+  lane_bests_of_scratch(args->move_list, replying_tiles, ld,
+                        BEST_PLAY_FACE_WEIGHT, expected_by_face);
+  assert_lane_bests_equal(from_lists_by_face, expected_by_face);
   for (int lane = 0; lane < PATH_MOVE_LISTS_NUM_LANES; lane++) {
     *num_whole_rack += expected[lane].has_whole_rack ? 1 : 0;
     *num_partial += expected[lane].has_partial ? 1 : 0;
@@ -593,6 +666,8 @@ static void test_best_play_random_paths(void) {
   uint64_t rng = 0x9E3779B97F4A7C15ULL;
   int num_checks = 0;
   int num_split_lanes = 0;
+  // Checks where the face ranking's play is not the plain ranking's.
+  int num_face_changes = 0;
   int num_reply_whole_rack = 0;
   int num_reply_partial = 0;
   int num_penalized = 0;
@@ -647,7 +722,8 @@ static void test_best_play_random_paths(void) {
                          &undos[length]);
           if (game_get_game_end_reason(game) == GAME_END_REASON_NONE) {
             assert_best_play_matches(lists, &args, best_move_list, &rng,
-                                     &num_checks, &num_split_lanes);
+                                     &num_checks, &num_split_lanes,
+                                     &num_face_changes);
           }
           unplay_move_incremental(game, &undos[length]);
           path_move_lists_pop(lists);
@@ -663,7 +739,8 @@ static void test_best_play_random_paths(void) {
         assert_penalized_best_play_matches(
             lists, &args, tile_weights, path_idx + 3 * length, &num_penalized);
         assert_best_play_matches(lists, &args, best_move_list, &rng,
-                                 &num_checks, &num_split_lanes);
+                                 &num_checks, &num_split_lanes,
+                                 &num_face_changes);
         if (length > deepest) {
           deepest = length;
         }
@@ -684,6 +761,7 @@ static void test_best_play_random_paths(void) {
   // Touched lanes that carried some anchors' plays and regenerated others,
   // merging the two.
   assert(num_split_lanes > 0);
+  assert(num_face_changes > 0);
   assert(num_reply_whole_rack >= REPLY_LANES_MIN_WHOLE_RACK);
   assert(num_reply_partial >= REPLY_LANES_MIN_PARTIAL);
   assert(num_penalized >= PENALIZED_MIN_PICKS);
@@ -955,7 +1033,8 @@ static void test_best_play_pass_path(int empty_side) {
     play_move(&pass, game, NULL);
     assert(path_move_lists_pending_lanes(lists) == 0);
     small_move_list_reset(move_list);
-    const MoveGenArgs best_args = best_small_args_for(game, best_move_list, 10);
+    const MoveGenArgs best_args =
+        best_small_args_for(game, best_move_list, 10, 0);
     SmallMove best_play;
     const bool found = path_move_lists_best_play(lists, &best_args, &best_play);
     SmallMove alone_play;
