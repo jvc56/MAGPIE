@@ -25,6 +25,7 @@
 #include "../ent/game_timer.h"
 #include "../ent/inference_args.h"
 #include "../ent/inference_results.h"
+#include "../ent/inference_temperatures.h"
 #include "../ent/klv.h"
 #include "../ent/klv_csv.h"
 #include "../ent/letter_distribution.h"
@@ -1014,6 +1015,8 @@ const Move *game_runner_get_top_simming_move(AutoplayWorker *autoplay_worker,
     // will always be empty because autoplay does not support challenged phonies
     // (yet).
     const Equity temperature = infer_args->temperature;
+    const InferenceTemperatures *temperatures[2] = {
+        infer_args->temperatures[0], infer_args->temperatures[1]};
     infer_args_fill(
         infer_args, infer_args->leave_list_capacity, infer_args->equity_margin,
         infer_args->game_history, game_runner->game_one_move_behind,
@@ -1031,6 +1034,8 @@ const Move *game_runner_get_top_simming_move(AutoplayWorker *autoplay_worker,
         &autoplay_worker->target_known_rack,
         &autoplay_worker->nontarget_known_rack);
     infer_args->temperature = temperature;
+    infer_args->temperatures[0] = temperatures[0];
+    infer_args->temperatures[1] = temperatures[1];
     if (move_get_type(&game_runner->previous_move) ==
         GAME_EVENT_TILE_PLACEMENT_MOVE) {
       infer_args->target_move = &game_runner->previous_move;
@@ -1267,6 +1272,13 @@ const Move *game_runner_play_move(AutoplayWorker *autoplay_worker,
   const int pat_pre_move_bag_count =
       pat_gen_shared_data ? bag_get_letters(game_get_bag(game)) : 0;
   get_leave_for_move(move, game, &rare_rack_or_move_leave);
+  if (autoplay_worker->args.move_observer) {
+    autoplay_worker->args.move_observer(
+        autoplay_worker->args.move_observer_data, autoplay_worker->worker_index,
+        game_runner->game, move, &rare_rack_or_move_leave,
+        game_runner->game_number, game_runner->pair_game_number,
+        game_runner->turn_number);
+  }
   // Only when a simulation actually ran this turn: sim_results holds
   // whatever the last simulation produced, so passing it on a static player's
   // turn, on a turn a solver decided, or on a simmer's turn with one legal

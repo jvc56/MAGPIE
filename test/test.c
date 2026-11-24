@@ -50,6 +50,7 @@
 #include "infer_cmp_test.h"
 #include "infer_match_test.h"
 #include "infer_test.h"
+#include "inference_temperatures_test.h"
 #include "klv_test.h"
 #include "kwg_alpha_test.h"
 #include "kwg_maker_test.h"
@@ -235,6 +236,7 @@ static TestEntry test_table[] = {
     {"pegpessdraw", test_peg_pessfull_draw_regression},
     {"pegtopkall", test_peg_pegtopk_all},
     {"pegfit", test_peg_fit},
+    {"inftemps", test_inference_temperatures},
     {"playchooser", test_play_chooser},
     {NULL, NULL} // Sentinel value to mark end of array
 };
