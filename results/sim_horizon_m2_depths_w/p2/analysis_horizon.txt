@@ -1,0 +1,106 @@
+454 positions from 25 games
+  SIMH checks placements=116253471 placement_mismatches=0 other_plays=844125 other_play_mismatches=0 horizons=53133475 horizon_mismatches=0 positive_pat_terms=0 mean_mismatches=0
+  SIMH done positions=454 with_main=166 with_oracle=40 seconds=2780
+
+The terms over each position's screened candidates (454 positions), in points
+  PAT term: mean -2.968; range across a position's candidates: mean 1.804, median 1.685
+  shift:    mean -0.320; range across a position's candidates: mean 1.946, median 1.268
+
+picks by util from 1 of 4 parts (about 12005 rollouts a candidate); 454 positions, 166 with more than one candidate kept
+  variant             differs         spread/pos        win pts/pos          utility/pos      4-ply plain       4-ply full
+  half PAT              0.77%  +0.0045 (0.0038)  +0.0029 (0.0041) +0.000023 (0.000029) +0.0007 (0.0049) +0.0052 (0.0067)
+  PAT                   2.09%  -0.0032 (0.0079)  +0.0002 (0.0086) +0.000002 (0.000061) -0.0087 (0.0060) -0.0030 (0.0073)
+  shift                 3.25%  +0.0036 (0.0105)  -0.0000 (0.0087) +0.000004 (0.000063) -0.0125 (0.0082) -0.0018 (0.0087)
+  shift + half PAT      4.30%  +0.0101 (0.0124)  +0.0056 (0.0107) +0.000046 (0.000079) -0.0232 (0.0103) -0.0057 (0.0097)
+  shift + PAT           3.36%  -0.0073 (0.0309)  +0.0021 (0.0105) +0.000004 (0.000083) +0.0031 (0.0240) +0.0000 (0.0231)
+
+picks by util from 2 of 4 parts (about 24010 rollouts a candidate); 454 positions, 166 with more than one candidate kept
+  variant             differs         spread/pos        win pts/pos          utility/pos      4-ply plain       4-ply full
+  half PAT              1.47%  +0.0054 (0.0091)  +0.0012 (0.0069) +0.000012 (0.000052) -0.0022 (0.0046) +0.0037 (0.0071)
+  PAT                   2.42%  +0.0020 (0.0100)  +0.0007 (0.0103) +0.000009 (0.000074) -0.0113 (0.0063) -0.0038 (0.0073)
+  shift                 3.67%  +0.0113 (0.0122)  +0.0014 (0.0114) +0.000017 (0.000083) -0.0126 (0.0091) +0.0004 (0.0093)
+  shift + half PAT      4.52%  +0.0240 (0.0148)  +0.0054 (0.0118) +0.000052 (0.000087) -0.0125 (0.0114) +0.0027 (0.0109)
+  shift + PAT           3.16%  -0.0300 (0.0332)  -0.0044 (0.0120) -0.000054 (0.000094) -0.0108 (0.0203) -0.0084 (0.0215)
+
+picks by util from 3 of 4 parts (about 36015 rollouts a candidate); 454 positions, 166 with more than one candidate kept
+  variant             differs         spread/pos        win pts/pos          utility/pos      4-ply plain       4-ply full
+  half PAT              1.10%  +0.0021 (0.0111)  -0.0047 (0.0093) -0.000030 (0.000069) +0.0102 (0.0078) +0.0121 (0.0103)
+  PAT                   2.15%  +0.0016 (0.0107)  -0.0033 (0.0125) -0.000019 (0.000090) -0.0002 (0.0066) +0.0050 (0.0081)
+  shift                 3.47%  +0.0025 (0.0140)  -0.0023 (0.0133) -0.000013 (0.000097) -0.0106 (0.0078) +0.0000 (0.0095)
+  shift + half PAT      4.30%  +0.0136 (0.0141)  -0.0022 (0.0134) -0.000007 (0.000098) -0.0096 (0.0125) +0.0037 (0.0126)
+  shift + PAT           3.19%  -0.0529 (0.0338)  -0.0049 (0.0149) -0.000072 (0.000116) -0.0128 (0.0184) -0.0095 (0.0209)
+
+picks by win from 3 of 4 parts (about 36015 rollouts a candidate); 454 positions, 166 with more than one candidate kept
+  variant             differs         spread/pos        win pts/pos          utility/pos      4-ply plain       4-ply full
+  half PAT              1.43%  +0.0109 (0.0164)  +0.0047 (0.0047) +0.000040 (0.000039) +0.0035 (0.0111) +0.0088 (0.0108)
+  PAT                   2.70%  +0.0211 (0.0232)  +0.0092 (0.0077) +0.000077 (0.000059) +0.0222 (0.0203) +0.0293 (0.0198)
+  shift                 4.35%  +0.0394 (0.0252)  +0.0185 (0.0126) +0.000151 (0.000094) +0.0235 (0.0203) +0.0338 (0.0196)
+  shift + half PAT      5.73%  +0.0419 (0.0281)  +0.0214 (0.0143) +0.000174 (0.000107) +0.0124 (0.0240) +0.0336 (0.0206)
+  shift + PAT           3.58%  +0.0020 (0.0320)  +0.0049 (0.0161) +0.000033 (0.000124) +0.0172 (0.0276) +0.0174 (0.0275)
+
+picks by eq from 3 of 4 parts (about 36015 rollouts a candidate); 454 positions, 166 with more than one candidate kept
+  variant             differs         spread/pos        win pts/pos          utility/pos      4-ply plain       4-ply full
+  half PAT              1.43%  +0.0025 (0.0123)  +0.0079 (0.0079) +0.000057 (0.000060) +0.0038 (0.0092) +0.0090 (0.0101)
+  PAT                   2.59%  +0.0048 (0.0161)  +0.0086 (0.0119) +0.000062 (0.000089) -0.0001 (0.0104) +0.0079 (0.0110)
+  shift                 4.19%  +0.0289 (0.0286)  +0.0065 (0.0128) +0.000058 (0.000096) +0.0168 (0.0217) +0.0291 (0.0234)
+  shift + half PAT      6.11%  +0.0035 (0.0370)  -0.0150 (0.0181) -0.000108 (0.000136) -0.0003 (0.0297) +0.0224 (0.0316)
+  shift + PAT           4.96%  -0.0424 (0.0328)  -0.0192 (0.0218) -0.000163 (0.000164) -0.0100 (0.0315) -0.0137 (0.0332)
+
+bag of 21 or more: picks by util from 3 of 4 parts (about 36015 rollouts a candidate); 366 positions, 124 with more than one candidate kept
+  variant             differs         spread/pos        win pts/pos          utility/pos      4-ply plain       4-ply full
+  half PAT              1.16%  +0.0080 (0.0128)  -0.0019 (0.0109) -0.000007 (0.000081) +0.0137 (0.0095) +0.0180 (0.0123)
+  PAT                   2.32%  +0.0077 (0.0124)  -0.0001 (0.0150) +0.000006 (0.000107) +0.0045 (0.0070) +0.0132 (0.0089)
+  shift                 3.62%  +0.0080 (0.0160)  -0.0007 (0.0148) +0.000002 (0.000107) -0.0030 (0.0085) +0.0130 (0.0101)
+  shift + half PAT      4.58%  +0.0224 (0.0173)  +0.0009 (0.0145) +0.000019 (0.000107) -0.0004 (0.0135) +0.0189 (0.0134)
+  shift + PAT           2.25%  -0.0317 (0.0238)  -0.0048 (0.0132) -0.000056 (0.000103) -0.0080 (0.0140) +0.0017 (0.0119)
+
+bag under 21: picks by util from 3 of 4 parts (about 36015 rollouts a candidate); 88 positions, 42 with more than one candidate kept
+  variant             differs         spread/pos        win pts/pos          utility/pos      4-ply plain       4-ply full
+  half PAT              0.85%  -0.0225 (0.0189)  -0.0165 (0.0166) -0.000123 (0.000127) -0.0043 (0.0044) -0.0123 (0.0092)
+  PAT                   1.42%  -0.0237 (0.0189)  -0.0165 (0.0166) -0.000122 (0.000127) -0.0200 (0.0159) -0.0292 (0.0186)
+  shift                 2.84%  -0.0205 (0.0300)  -0.0089 (0.0294) -0.000076 (0.000218) -0.0422 (0.0327) -0.0538 (0.0345)
+  shift + half PAT      3.12%  -0.0232 (0.0285)  -0.0150 (0.0275) -0.000119 (0.000203) -0.0477 (0.0375) -0.0593 (0.0394)
+  shift + PAT           7.10%  -0.1412 (0.1387)  -0.0052 (0.0291) -0.000136 (0.000234) -0.0327 (0.0798) -0.0557 (0.0946)
+
+What followed the horizon, regressed on the horizon's terms within each candidate (711856 rollouts played to the end; standard errors ignore that rollouts of one bag cycle share a shuffle)
+  next ply's score             PAT term +1.343 (0.015), alone +1.330;  shift -0.147 (0.009), alone -0.103;  residual sd 22.1
+  next two plies and leaves    PAT term +0.840 (0.019), alone +0.909;  shift +0.803 (0.012), alone +0.831;  residual sd 29.4
+  rest of the game             PAT term +0.942 (0.041), alone +1.023;  shift +0.955 (0.025), alone +0.986;  residual sd 61.8
+  sd of the PAT term within a candidate 1.80, of the shift 2.91 points
+
+Across a position's kept candidates: finished games' result on the horizon's values (1 = worth its face value)
+  final spread: the sim's value +1.042 (0.061);  PAT term +0.856 (0.339);  shift +0.419 (0.282)   [25 games, 2862 candidate values]
+  final win  : the sim's value +0.672 (0.288);  PAT term +74.841 (33.168);  shift -50.608 (22.051)   [25 games, 2862 candidate values]
+  4-ply value : the sim's value +1.032 (0.061);  PAT term +0.481 (0.270);  shift +0.341 (0.272)   [25 games, 2862 candidate values]
+
+The same with the shift in parts (later runs only): each player's last leave, as its mover sees the unseen tiles and from the bag alone
+  final spread, mover's view: the sim's value +1.042 (0.062);  PAT term +0.856 (0.345);  own leave's shift +0.434 (0.290);  opponent's leave's shift +0.412 (0.342)   [25 games, 2862 candidate values]
+  final spread, from the bag: the sim's value +1.007 (0.060);  PAT term +0.745 (0.308);  own leave's shift +0.552 (0.320);  opponent's leave's shift +1.088 (0.749)   [25 games, 2862 candidate values]
+  4-ply value , mover's view: the sim's value +1.038 (0.055);  PAT term +0.472 (0.295);  own leave's shift +1.022 (0.214);  opponent's leave's shift +0.008 (0.314)   [25 games, 2862 candidate values]
+  4-ply value , from the bag: the sim's value +1.030 (0.042);  PAT term +0.409 (0.256);  own leave's shift +1.051 (0.218);  opponent's leave's shift +0.350 (0.844)   [25 games, 2862 candidate values]
+
+The same with the leave values in parts as well (last runs only)
+  final spread: the spread +1.128 (0.083);  own leave value +0.884 (0.117);  opponent's leave value +0.981 (0.186);  PAT term +0.915 (0.334);  own leave's shift +0.463 (0.304);  opponent's leave's shift +0.152 (0.469)   [25 games, 2862 candidate values]
+
+Gain in final spread a position as the between-candidate fit predicts it (picks by util from 3 of 4 parts)
+  half PAT           +0.0101 (0.0071)
+  PAT                +0.0145 (0.0128)
+  shift              +0.0182 (0.0161)
+  shift + half PAT   +0.0224 (0.0176)
+  shift + PAT        -0.0242 (0.0219)
+
+Gain in final spread a position as the between-candidate fit predicts it (picks by eq from 3 of 4 parts)
+  half PAT           +0.0094 (0.0054)
+  PAT                +0.0156 (0.0091)
+  shift              +0.0197 (0.0132)
+  shift + half PAT   +0.0193 (0.0212)
+  shift + PAT        -0.0063 (0.0300)
+
+Variants that are linear in the terms, picks by equity from 3 of 4 parts; 454 positions from 25 games that recorded the shift in parts
+  variant                       differs         spread/pos        win pts/pos    spread/pos by fit
+  PAT                             6.11%  +0.0035 (0.0370)  -0.0150 (0.0181)   +0.0194 (0.0208)
+  shift, both leaves              4.96%  -0.0424 (0.0328)  -0.0192 (0.0218)   -0.0060 (0.0281)
+  shift, own leave only           3.63%  -0.0176 (0.0242)  -0.0159 (0.0148)   +0.0021 (0.0085)
+  PAT + shift, both leaves        8.04%  -0.0076 (0.0549)  -0.0092 (0.0202)   +0.0046 (0.0415)
+  PAT + shift, own leave only     7.65%  -0.0132 (0.0500)  -0.0314 (0.0255)   +0.0202 (0.0278)
+  0.65 PAT + 0.8 own shift        5.89%  -0.0052 (0.0337)  -0.0103 (0.0243)   +0.0208 (0.0203)
