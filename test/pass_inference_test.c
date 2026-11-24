@@ -119,7 +119,7 @@ static Equity pass_inference_test_movegen_best(PassInferenceTestWalk *walk,
       game_get_player(walk->game, game_get_player_on_turn_index(walk->game)));
   rack_copy(passer_rack, rack);
   return move_get_equity(get_top_equity_move_for_inferences(
-      walk->game, walk->move_list, EQUITY_MAX_VALUE));
+      walk->game, walk->move_list, EQUITY_MAX_VALUE, EQUITY_MAX_VALUE));
 }
 
 static void pass_inference_test_check_rack(PassInferenceTestWalk *walk) {
