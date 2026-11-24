@@ -2,6 +2,7 @@
 
 #include "../src/compat/cfile.h"
 #include "../src/def/game_history_defs.h"
+#include "../src/def/inference_defs.h"
 #include "../src/def/letter_distribution_defs.h"
 #include "../src/def/rack_defs.h"
 #include "../src/def/thread_control_defs.h"
