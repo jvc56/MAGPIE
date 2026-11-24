@@ -24,6 +24,7 @@ static const char *const filepath_type_names[] = {"kwg",
                                                   "positional adjustment table",
                                                   "pre-endgame adjustments",
                                                   "inference temperatures",
+                                                  "out-play check weights",
                                                   "rack value table"};
 
 void string_builder_add_directory_for_data_type(StringBuilder *sb,
@@ -48,6 +49,7 @@ void string_builder_add_directory_for_data_type(StringBuilder *sb,
   case DATA_FILEPATH_TYPE_PAT:
   case DATA_FILEPATH_TYPE_PEG_ADJUST:
   case DATA_FILEPATH_TYPE_INFERENCE_TEMPERATURES:
+  case DATA_FILEPATH_TYPE_OUTPLAY_CHECK:
     string_builder_add_formatted_string(sb, "%s/strategy/", data_path);
     break;
   case DATA_FILEPATH_TYPE_LD:
@@ -99,6 +101,7 @@ char *get_filepath(const char *data_path, const char *data_name,
   case DATA_FILEPATH_TYPE_LEAVES:
   case DATA_FILEPATH_TYPE_PEG_ADJUST:
   case DATA_FILEPATH_TYPE_INFERENCE_TEMPERATURES:
+  case DATA_FILEPATH_TYPE_OUTPLAY_CHECK:
     file_ext = CSV_EXTENSION;
     break;
   case DATA_FILEPATH_TYPE_GCG:

@@ -6,6 +6,7 @@
 #include "klv.h"
 #include "kwg.h"
 #include "letter_distribution.h"
+#include "outplay_check_weights.h"
 #include "pat.h"
 #include "pat_board_cache.h"
 #include "peg_adjust.h"
@@ -43,6 +44,7 @@ struct Player {
   // Not owned; see player_set_pat_board_cache.
   PATBoardCache *pat_board_cache;
   const PegAdjust *peg_adjust;
+  const OutplayCheckWeights *outplay_check;
   // The pool shift (see pool_shift.h): NULL and 0 for none.
   const PoolShiftTable *pool_shift_table;
   int pool_shift_weight;
@@ -73,6 +75,8 @@ void player_update(const PlayersData *players_data, Player *player) {
       players_data_get_pat_disabled_classes_mask(players_data, player->index);
   player->pat_board_cache = NULL;
   player->peg_adjust = players_data_get_peg_adjust(players_data, player->index);
+  player->outplay_check =
+      players_data_get_outplay_check(players_data, player->index);
   player->pool_shift_table =
       players_data_get_pool_shift_table(players_data, player->index);
   player->pool_shift_weight =
@@ -110,6 +114,7 @@ Player *player_duplicate(const Player *player) {
   new_player->pat_disabled_classes_mask = player->pat_disabled_classes_mask;
   new_player->pat_board_cache = player->pat_board_cache;
   new_player->peg_adjust = player->peg_adjust;
+  new_player->outplay_check = player->outplay_check;
   new_player->pool_shift_table = player->pool_shift_table;
   new_player->pool_shift_weight = player->pool_shift_weight;
   return new_player;
@@ -132,6 +137,7 @@ void player_copy(Player *dst, const Player *src) {
   dst->pat_disabled_classes_mask = src->pat_disabled_classes_mask;
   dst->pat_board_cache = src->pat_board_cache;
   dst->peg_adjust = src->peg_adjust;
+  dst->outplay_check = src->outplay_check;
   dst->pool_shift_table = src->pool_shift_table;
   dst->pool_shift_weight = src->pool_shift_weight;
 }
@@ -185,6 +191,10 @@ const PegAdjust *player_get_peg_adjust(const Player *player) {
 
 void player_set_peg_adjust(Player *player, const PegAdjust *peg_adjust) {
   player->peg_adjust = peg_adjust;
+}
+
+const OutplayCheckWeights *player_get_outplay_check(const Player *player) {
+  return player->outplay_check;
 }
 
 const PoolShiftTable *player_get_pool_shift_table(const Player *player) {

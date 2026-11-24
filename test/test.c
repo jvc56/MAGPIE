@@ -62,6 +62,7 @@
 #include "move_gen_test.h"
 #include "move_test.h"
 #include "movegen_budget_test.h"
+#include "outplay_check_test.h"
 #include "pass_inference_test.h"
 #include "pat_eval_test.h"
 #include "pat_features_test.h"
@@ -239,6 +240,7 @@ static TestEntry test_table[] = {
     {"pegtopkall", test_peg_pegtopk_all},
     {"pegfit", test_peg_fit},
     {"inftemps", test_inference_temperatures},
+    {"outcheck", test_outplay_check},
     {"playchooser", test_play_chooser},
     {NULL, NULL} // Sentinel value to mark end of array
 };
