@@ -177,6 +177,14 @@ typedef struct EndgameArgs {
   // equal-valued lines a different one can be reported. True turns all of
   // this off. Zero-initialized args get the default.
   bool disable_best_reply_shortcuts;
+  // If true, a greedy leaf playout with no stuck tiles picks each play as
+  // static equity ranks plays once the bag is empty: by score less twice the
+  // face value of the tiles left on the rack, and going out by twice the
+  // opponent's rack plus NON_OUTPLAY_CONSTANT_PENALTY. If false (the default,
+  // also from endgame_args_fill), it picks the highest-scoring play, going out
+  // counting twice the opponent's rack. A leaf's value depends on which, so
+  // solves that share a transposition table must agree on it.
+  bool static_leaf_playouts;
   bool enable_pv_display; // Whether to prepare PVLine data for display
                           // (default: false)
   // IDS time management (0 = no limit, rely on external timer only):
@@ -297,6 +305,7 @@ static inline void endgame_args_fill(
   endgame_args->forced_pass_bypass = forced_pass_bypass;
   endgame_args->incremental_movegen = incremental_movegen;
   endgame_args->disable_best_reply_shortcuts = disable_best_reply_shortcuts;
+  endgame_args->static_leaf_playouts = false;
   endgame_args->enable_pv_display = enable_pv_display;
   endgame_args->soft_time_limit = soft_time_limit;
   endgame_args->hard_time_limit = hard_time_limit;

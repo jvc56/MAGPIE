@@ -1473,12 +1473,13 @@ void test_solve_standard(void) {
       0);
 }
 
-// Solve `cgp` single-threaded with the incremental move lists off or on and
-// the best-reply shortcuts off or on (a separate solver per call, so a
-// separate transposition table) and return the score and node count through
-// the out-params.
+// Solve `cgp` single-threaded with the incremental move lists off or on, the
+// best-reply shortcuts off or on and the static leaf playouts off or on (a
+// separate solver per call, so a separate transposition table) and return the
+// score and node count through the out-params.
 static void solve_for_incremental_check(const char *cgp, bool incremental,
                                         bool best_reply_shortcuts,
+                                        bool static_leaf_playouts,
                                         int32_t *score_out,
                                         uint64_t *nodes_out) {
   Config *config =
@@ -1495,6 +1496,7 @@ static void solve_for_incremental_check(const char *cgp, bool incremental,
   args.forced_pass_bypass = true;
   args.incremental_movegen = incremental;
   args.disable_best_reply_shortcuts = !best_reply_shortcuts;
+  args.static_leaf_playouts = static_leaf_playouts;
   args.num_top_moves = 1;
   args.seed = 42;
   EndgameCtx *ctx = NULL;
@@ -1513,20 +1515,26 @@ static void solve_for_incremental_check(const char *cgp, bool incremental,
 // invisible to the search of `cgp`: the same score and, single-threaded, the
 // same node count as scratch generation. (The shortcuts change the search
 // order, and their tie-break could change a leaf value, but these positions'
-// scores come out the same either way.)
+// scores come out the same either way.) The same holds with the static leaf
+// playouts, whose leaves the lists must rank as scratch generation does;
+// their solves need not find the expected score, which the default playouts'
+// leaf values give.
 static void assert_incremental_movegen_identical(const char *cgp,
                                                  int32_t expected_score) {
-  for (int shortcuts_idx = 0; shortcuts_idx < 2; shortcuts_idx++) {
-    const bool best_reply_shortcuts = shortcuts_idx == 0;
+  for (int variant_idx = 0; variant_idx < 4; variant_idx++) {
+    const bool best_reply_shortcuts = variant_idx % 2 == 0;
+    const bool static_leaf_playouts = variant_idx >= 2;
     int32_t scratch_score = 0;
     uint64_t scratch_nodes = 0;
     solve_for_incremental_check(cgp, false, best_reply_shortcuts,
-                                &scratch_score, &scratch_nodes);
+                                static_leaf_playouts, &scratch_score,
+                                &scratch_nodes);
     int32_t incremental_score = 0;
     uint64_t incremental_nodes = 0;
     solve_for_incremental_check(cgp, true, best_reply_shortcuts,
-                                &incremental_score, &incremental_nodes);
-    assert(scratch_score == expected_score);
+                                static_leaf_playouts, &incremental_score,
+                                &incremental_nodes);
+    assert(static_leaf_playouts || scratch_score == expected_score);
     assert(incremental_score == scratch_score);
     assert(incremental_nodes == scratch_nodes);
   }

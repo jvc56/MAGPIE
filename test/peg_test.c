@@ -1030,7 +1030,7 @@ static void test_peg_complete_threads_match(void) {
   assert(best[0].win_count == best[1].win_count);
   assert(best[0].tie_count == best[1].tie_count);
   assert(best[0].weight_sum == best[1].weight_sum);
-  assert(best[0].win_count == 38 && best[0].tie_count == 4);
+  assert(best[0].win_count == 34 && best[0].tie_count == 0);
   config_destroy(config);
 }
 
@@ -1129,7 +1129,7 @@ static void test_peg_without_table(void) {
     load_and_exec_config_or_die(config, command);
     free(command);
     const PegRankedCand *best = &config_get_peg_result(config)->top_cands[0];
-    assert(best->win_count == 38 && best->tie_count == 4);
+    assert(best->win_count == 34 && best->tie_count == 0);
   }
   config_destroy(config);
 }

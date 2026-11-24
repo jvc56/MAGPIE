@@ -1959,6 +1959,8 @@ static int32_t peg_nested_endgame_value(PegWorker *worker, Game *game,
       stop->deadline_ns, /*actual_move=*/NULL, &ea);
   ea.stop_fn = peg_stop_cancelled;
   ea.stop_data = stop;
+  // Leaf playouts rank plays by static equity, as PEG's greedy playouts do.
+  ea.static_leaf_playouts = true;
   endgame_results_reset(worker->eg_results);
   endgame_solve_inline(&worker->eg_ctx, &ea, worker->eg_results);
   if (endgame_results_get_depth(worker->eg_results, ENDGAME_RESULT_BEST) < 0) {
@@ -2762,6 +2764,8 @@ static int32_t peg_eval_leaf(PegEvalCtx *ctx, Game *game) {
   const PegStop stop = {ctx->deadline_ns, ctx->cutoff, NULL, NULL};
   ea.stop_fn = peg_stop_cancelled;
   ea.stop_data = &stop;
+  // As in peg_nested_endgame_value.
+  ea.static_leaf_playouts = true;
   endgame_results_reset(ctx->worker->eg_results);
   endgame_solve_inline(&ctx->worker->eg_ctx, &ea, ctx->worker->eg_results);
   // If the solver was interrupted before completing any search depth (depth

@@ -10,6 +10,7 @@
 #include "../src/ent/equity.h"
 #include "../src/ent/game.h"
 #include "../src/ent/lane_shadow_cache.h"
+#include "../src/ent/letter_distribution.h"
 #include "../src/ent/move.h"
 #include "../src/ent/player.h"
 #include "../src/ent/players_data.h"
@@ -35,7 +36,9 @@
 // break equal ranks in favor of the larger tiny_move, and return a pass only
 // when there is no play. The result must not depend on the order in which the
 // shadow-pruned search visits anchors and plays. Without it, the result must
-// still be a play of the best rank.
+// still be a play of the best rank. MOVE_RECORD_BEST_SMALL_FACE must do the
+// same with a play's rank also counting best_small_face_weight times the face
+// value of the tiles it places.
 
 enum {
   // The lane shadow cache's anchor plays (check_twin_lane_boards).
@@ -48,6 +51,9 @@ enum {
   SELF_PLAY_MAX_MOVES = 120,
   SELF_PLAY_CANDIDATE_MOVES = 6,
   BONUS_KINDS = 3,
+  // The face weights checked: none (MOVE_RECORD_BEST_SMALL), the weight the
+  // endgame's static leaf playouts use, and a larger one.
+  FACE_WEIGHT_KINDS = 3,
   SELF_PLAY_BASE_SEED = 1000,
   // The lane shadow cache check: its self-play games, and its caches' 2^16
   // lanes (4 MB) and 2^16 anchor plays (2 MB) each, more than those games
@@ -62,7 +68,32 @@ typedef struct BestSmallStats {
   int multiway_ties;
   int pass_results;
   int out_bonus_wins;
+  // Checks with a face weight where the play found is not the play the same
+  // check without the weight finds.
+  int face_weight_changes;
 } BestSmallStats;
+
+static const int face_weights[FACE_WEIGHT_KINDS] = {0, 2, 5};
+
+// The rank of a play of a rack of `rack_size` tiles: its score, plus `bonus`
+// when it uses the whole rack, plus `face_weight` times the face value of the
+// tiles it places, a blank counting nothing.
+static Equity small_move_rank(const SmallMove *small_move,
+                              const LetterDistribution *ld, int rack_size,
+                              Equity bonus, int face_weight) {
+  Equity value = int_to_equity(small_move_get_score(small_move));
+  const int tiles_played = small_move_get_tiles_played(small_move);
+  if (tiles_played == rack_size) {
+    value += bonus;
+  }
+  for (int tile_idx = 0; tile_idx < tiles_played; tile_idx++) {
+    if (!small_move_tile_is_blank(small_move, tile_idx)) {
+      value += face_weight *
+               ld_get_score(ld, small_move_get_tile(small_move, tile_idx));
+    }
+  }
+  return value;
+}
 
 // The distinct CGPs used by test/endgame_test.c.
 static const char *const endgame_cgps[] = {
@@ -151,7 +182,12 @@ static void check_player_on_turn(const Game *game, MoveList *all_small,
   assert(all_count < ALL_SMALL_CAPACITY);
   stats->positions++;
 
-  for (int bonus_idx = 0; bonus_idx < BONUS_KINDS; bonus_idx++) {
+  const LetterDistribution *ld = game_get_ld(game);
+  uint64_t unweighted_tiny_moves[BONUS_KINDS] = {0};
+  for (int check_idx = 0; check_idx < FACE_WEIGHT_KINDS * BONUS_KINDS;
+       check_idx++) {
+    const int face_weight = face_weights[check_idx / BONUS_KINDS];
+    const int bonus_idx = check_idx % BONUS_KINDS;
     const Equity bonus = bonuses[bonus_idx];
     bool found_play = false;
     Equity best_value = 0;
@@ -163,10 +199,8 @@ static void check_player_on_turn(const Game *game, MoveList *all_small,
       if (small_move_is_pass(small_move)) {
         continue;
       }
-      Equity value = int_to_equity(small_move_get_score(small_move));
-      if (small_move_get_tiles_played(small_move) == rack_size) {
-        value += bonus;
-      }
+      const Equity value =
+          small_move_rank(small_move, ld, rack_size, bonus, face_weight);
       if (!found_play || value > best_value) {
         found_play = true;
         best_value = value;
@@ -184,7 +218,9 @@ static void check_player_on_turn(const Game *game, MoveList *all_small,
 
     MoveGenArgs best_args = args;
     best_args.move_list = best_small;
-    best_args.move_record_type = MOVE_RECORD_BEST_SMALL;
+    best_args.move_record_type =
+        face_weight == 0 ? MOVE_RECORD_BEST_SMALL : MOVE_RECORD_BEST_SMALL_FACE;
+    best_args.best_small_face_weight = face_weight;
     best_args.best_small_out_bonus = bonus;
     best_args.best_small_canonical_ties = false;
     generate_moves(&best_args);
@@ -192,12 +228,8 @@ static void check_player_on_turn(const Game *game, MoveList *all_small,
     const SmallMove *first_found = best_small->small_moves[0];
     assert(small_move_is_pass(first_found) == !found_play);
     if (found_play) {
-      Equity first_found_value =
-          int_to_equity(small_move_get_score(first_found));
-      if (small_move_get_tiles_played(first_found) == rack_size) {
-        first_found_value += bonus;
-      }
-      assert(first_found_value == best_value);
+      assert(small_move_rank(first_found, ld, rack_size, bonus, face_weight) ==
+             best_value);
     }
 
     best_args.best_small_canonical_ties = true;
@@ -213,6 +245,11 @@ static void check_player_on_turn(const Game *game, MoveList *all_small,
     assert(!small_move_is_pass(result));
     assert(result->tiny_move == best_tiny_move);
     assert(small_move_get_score(result) == best_score);
+    if (face_weight == 0) {
+      unweighted_tiny_moves[bonus_idx] = result->tiny_move;
+    } else if (result->tiny_move != unweighted_tiny_moves[bonus_idx]) {
+      stats->face_weight_changes++;
+    }
     if (ties_at_best >= 2) {
       stats->multiway_ties++;
     }
@@ -273,17 +310,20 @@ static void check_self_play_games(const char *lexicon, MoveList *all_small,
 }
 
 // One best-play generation of the player on turn of `game`, through `cache`
-// when it is not NULL.
+// when it is not NULL, by the face ranking when `face_weight` is not 0.
 static SmallMove best_small_play(const Game *game, LaneShadowCache *cache,
-                                 MoveList *best_small, Equity bonus) {
+                                 MoveList *best_small, Equity bonus,
+                                 int face_weight) {
   const MoveGenArgs args = {
       .game = game,
       .move_list = best_small,
-      .move_record_type = MOVE_RECORD_BEST_SMALL,
+      .move_record_type = face_weight == 0 ? MOVE_RECORD_BEST_SMALL
+                                           : MOVE_RECORD_BEST_SMALL_FACE,
       .move_sort_type = MOVE_SORT_SCORE,
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
       .best_small_out_bonus = bonus,
+      .best_small_face_weight = face_weight,
       .best_small_canonical_ties = true,
       .lane_shadow_cache = cache,
   };
@@ -320,9 +360,10 @@ static void scribble_unread_square_bits(Board *board) {
 }
 
 // The same positions with a word info table (`game`) and without one
-// (`reference`): for the player on turn, without and with the out bonus, the
-// play without a cache, through game's cache twice (recording its lanes, then
-// finding them) and through the reference's cache.
+// (`reference`): for the player on turn, without and with the out bonus and
+// by each face weight, the play without a cache, through game's cache twice
+// (recording its lanes, then finding them) and through the reference's cache.
+// The rankings share the caches, which must keep their lanes and plays apart.
 static void check_lane_shadow_cache_position(
     const Game *game, const Game *reference, LaneShadowCache *cache,
     LaneShadowCache *reference_cache, MoveList *best_small, int *checks) {
@@ -335,16 +376,20 @@ static void check_lane_shadow_cache_position(
       0, calculate_end_rack_points(
              player_get_rack(game_get_player(game, 1 - player_idx)),
              game_get_ld(game))};
-  for (size_t bonus_idx = 0; bonus_idx < sizeof(bonuses) / sizeof(Equity);
-       bonus_idx++) {
-    const Equity bonus = bonuses[bonus_idx];
-    const SmallMove uncached = best_small_play(game, NULL, best_small, bonus);
+  const size_t num_bonuses = sizeof(bonuses) / sizeof(Equity);
+  for (size_t check_idx = 0; check_idx < FACE_WEIGHT_KINDS * num_bonuses;
+       check_idx++) {
+    const Equity bonus = bonuses[check_idx % num_bonuses];
+    const int face_weight = face_weights[check_idx / num_bonuses];
+    const SmallMove uncached =
+        best_small_play(game, NULL, best_small, bonus, face_weight);
     for (int pass_idx = 0; pass_idx < 2; pass_idx++) {
-      const SmallMove cached = best_small_play(game, cache, best_small, bonus);
+      const SmallMove cached =
+          best_small_play(game, cache, best_small, bonus, face_weight);
       assert_same_small_play(&cached, &uncached);
     }
-    const SmallMove reference_play =
-        best_small_play(reference, reference_cache, best_small, bonus);
+    const SmallMove reference_play = best_small_play(
+        reference, reference_cache, best_small, bonus, face_weight);
     assert_same_small_play(&reference_play, &uncached);
     (*checks)++;
   }
@@ -492,6 +537,8 @@ static const TwinLaneBoard twin_lane_boards[] = {
 typedef struct LaneIncumbentStats {
   int checks;
   int incumbents_beaten;
+  // Positions where a face weight changes the best play of all the lanes.
+  int face_weight_changes;
 } LaneIncumbentStats;
 
 typedef struct TwinLaneStats {
@@ -696,33 +743,47 @@ static void check_twin_lane_boards(MoveList *best_small) {
 // answers only against a best so far above every bound its search left out,
 // and a search that left an anchor out at a bound equal to the lane's best
 // has not settled a tie there. So each lane's best play in turn, the highest
-// first, is the incumbent for a generation over the lanes whose turn is still
-// to come, none of which scores more: the early generations leave most
-// anchors out, the later, weaker incumbents find entries that must be
+// ranked first, is the incumbent for a generation over the lanes whose turn
+// is still to come, none of which ranks higher: the early generations leave
+// most anchors out, the later, weaker incumbents find entries that must be
 // searched further, and only a tie beats an incumbent. Each generation
-// through the cache must give the play it gives without one.
-static void check_lane_incumbents_position(const Game *game,
-                                           LaneShadowCache *cache,
-                                           MoveList *best_small,
-                                           LaneIncumbentStats *stats) {
+// through the cache must give the play it gives without one. Plays rank by
+// small_move_rank with `face_weight` and no out bonus; the caller runs every
+// face weight through the same cache, which must keep their lanes apart.
+// Returns the best play of all the lanes, or a pass.
+static SmallMove check_lane_incumbents_position(const Game *game,
+                                                LaneShadowCache *cache,
+                                                MoveList *best_small,
+                                                int face_weight,
+                                                LaneIncumbentStats *stats) {
+  const LetterDistribution *ld = game_get_ld(game);
+  const int rack_size = rack_get_total_letters(player_get_rack(
+      game_get_player(game, game_get_player_on_turn_index(game))));
   MoveGenArgs args = {
       .game = game,
       .move_list = best_small,
-      .move_record_type = MOVE_RECORD_BEST_SMALL,
+      .move_record_type = face_weight == 0 ? MOVE_RECORD_BEST_SMALL
+                                           : MOVE_RECORD_BEST_SMALL_FACE,
       .move_sort_type = MOVE_SORT_SCORE,
       .target_equity = EQUITY_MAX_VALUE,
+      .best_small_face_weight = face_weight,
       .best_small_canonical_ties = true,
   };
   SmallMove lane_plays[2 * BOARD_DIM];
+  Equity lane_ranks[2 * BOARD_DIM] = {0};
   uint64_t lanes_with_plays = 0;
   for (int lane = 0; lane < 2 * BOARD_DIM; lane++) {
     if (generate_best_small_move_in_lanes(&args, UINT64_C(1) << lane, NULL,
                                           0)) {
       lane_plays[lane] = *best_small->small_moves[0];
+      lane_ranks[lane] =
+          small_move_rank(&lane_plays[lane], ld, rack_size, 0, face_weight);
       lanes_with_plays |= UINT64_C(1) << lane;
     }
   }
   const uint64_t all_lanes = lanes_with_plays;
+  SmallMove best_of_all;
+  small_move_set_as_pass(&best_of_all);
   // One more round than there are lanes with plays: the last has no
   // incumbent, and covers every one of them.
   bool has_incumbent = true;
@@ -731,8 +792,7 @@ static void check_lane_incumbents_position(const Game *game,
     for (int lane = 0; lane < 2 * BOARD_DIM; lane++) {
       if (((lanes_with_plays >> lane) & 1) != 0 &&
           (incumbent_lane < 0 ||
-           small_move_get_score(&lane_plays[lane]) >
-               small_move_get_score(&lane_plays[incumbent_lane]))) {
+           lane_ranks[lane] > lane_ranks[incumbent_lane])) {
         incumbent_lane = lane;
       }
     }
@@ -742,7 +802,7 @@ static void check_lane_incumbents_position(const Game *game,
     uint64_t lane_mask = all_lanes;
     if (has_incumbent) {
       incumbent = &lane_plays[incumbent_lane];
-      incumbent_value = int_to_equity(small_move_get_score(incumbent));
+      incumbent_value = lane_ranks[incumbent_lane];
       lanes_with_plays &= ~(UINT64_C(1) << incumbent_lane);
       lane_mask = lanes_with_plays;
     }
@@ -764,9 +824,13 @@ static void check_lane_incumbents_position(const Game *game,
           best_small->small_moves[0]->tiny_move != incumbent->tiny_move) {
         stats->incumbents_beaten++;
       }
+      if (!has_incumbent) {
+        best_of_all = *best_small->small_moves[0];
+      }
     }
     stats->checks++;
   }
+  return best_of_all;
 }
 
 static void check_lane_incumbents(MoveList *best_small) {
@@ -791,7 +855,17 @@ static void check_lane_incumbents(MoveList *best_small) {
       const int on_turn_idx = game_get_player_on_turn_index(game);
       for (int offset = 0; offset < 2; offset++) {
         game_set_player_on_turn_index(game, (on_turn_idx + offset) % 2);
-        check_lane_incumbents_position(game, cache, best_small, &stats);
+        SmallMove unweighted;
+        small_move_set_as_pass(&unweighted);
+        for (int weight_idx = 0; weight_idx < FACE_WEIGHT_KINDS; weight_idx++) {
+          const SmallMove best = check_lane_incumbents_position(
+              game, cache, best_small, face_weights[weight_idx], &stats);
+          if (weight_idx == 0) {
+            unweighted = best;
+          } else if (best.tiny_move != unweighted.tiny_move) {
+            stats.face_weight_changes++;
+          }
+        }
       }
       game_set_player_on_turn_index(game, on_turn_idx);
       const MoveGenArgs args = {
@@ -811,9 +885,11 @@ static void check_lane_incumbents(MoveList *best_small) {
     }
   }
   printf("best_small: %d generations in lanes against an incumbent through a "
-         "lane shadow cache, %d that beat it on a tie\n",
-         stats.checks, stats.incumbents_beaten);
+         "lane shadow cache, %d that beat it on a tie, %d best plays of all "
+         "the lanes that a face weight changes\n",
+         stats.checks, stats.incumbents_beaten, stats.face_weight_changes);
   assert(stats.incumbents_beaten > 0);
+  assert(stats.face_weight_changes > 0);
   move_list_destroy(candidates);
   lane_shadow_cache_destroy(cache);
   game_destroy(game);
@@ -857,11 +933,12 @@ void test_best_small(void) {
 
   printf("best_small: %d positions (%d self-play, %d endgame cgp, %d peg), "
          "%d checks, %d with a multi-way tie at the maximum, %d won by the "
-         "out bonus, %d passes\n",
+         "out bonus, %d passes, %d where a face weight changes the play\n",
          stats.positions, self_play_positions, endgame_positions, peg_positions,
          stats.checks, stats.multiway_ties, stats.out_bonus_wins,
-         stats.pass_results);
+         stats.pass_results, stats.face_weight_changes);
   assert(stats.multiway_ties > 0);
+  assert(stats.face_weight_changes > 0);
 
   check_lane_shadow_cache_with_word_info_table(best_small);
 

@@ -8,6 +8,7 @@
 #include "../ent/board.h"
 #include "../ent/equity.h"
 #include "../ent/game.h"
+#include "../ent/letter_distribution.h"
 #include "../ent/move.h"
 #include "../ent/player.h"
 #include "../ent/rack.h"
@@ -927,6 +928,46 @@ typedef struct BestScan {
   int side_to_move_tiles;
 } BestScan;
 
+// How a face-weighted scan values the tiles a play places
+// (MOVE_RECORD_BEST_SMALL_FACE): `weight` times their face values, which are
+// `tile_values` by machine letter.
+typedef struct FaceRanking {
+  int weight;
+  int tile_values[MAX_ALPHABET_SIZE];
+} FaceRanking;
+
+static void face_ranking_init(FaceRanking *ranking,
+                              const MoveGenArgs *best_small_args) {
+  const LetterDistribution *ld = game_get_ld(best_small_args->game);
+  const int dist_size = ld_get_size(ld);
+  ranking->weight = best_small_args->best_small_face_weight;
+  for (int ml = 0; ml < dist_size; ml++) {
+    ranking->tile_values[ml] =
+        equity_to_int(ld_get_score(ld, (MachineLetter)ml));
+  }
+}
+
+// What the face ranking adds to the score of a small move: the weight times
+// the face value of the rack tiles it places, a designated blank counting as
+// the blank.
+static inline int face_ranking_bonus(const FaceRanking *ranking,
+                                     const SmallMove *small_move) {
+  int face_value = 0;
+  const int tiles_played = small_move_get_tiles_played(small_move);
+  for (int tile_idx = 0; tile_idx < tiles_played; tile_idx++) {
+    const MachineLetter ml = small_move_tile_is_blank(small_move, tile_idx)
+                                 ? BLANK_MACHINE_LETTER
+                                 : small_move_get_tile(small_move, tile_idx);
+    face_value += ranking->tile_values[ml];
+  }
+  return ranking->weight * face_value;
+}
+
+// Marks the stamp of sibling lanes filled by the face ranking, whose best
+// partial plays are not the ones the plain ranking keeps. Stamps count up
+// from zero and never reach it.
+#define FACE_RANKED_SIBLING_STAMP (UINT64_C(1) << 63)
+
 static inline void best_scan_consider(BestScan *scan,
                                       const SmallMove *small_move) {
   int adjusted = small_move_get_score(small_move);
@@ -939,6 +980,36 @@ static inline void best_scan_consider(BestScan *scan,
     scan->best_adjusted = adjusted;
     scan->best_tiny_move = small_move->tiny_move;
     scan->best_play = small_move;
+  }
+}
+
+// best_scan_consider by the face ranking.
+static inline void best_scan_consider_face(BestScan *scan,
+                                           const SmallMove *small_move,
+                                           const FaceRanking *ranking) {
+  int adjusted = small_move_get_score(small_move) +
+                 face_ranking_bonus(ranking, small_move);
+  if (small_move_get_tiles_played(small_move) == scan->side_to_move_tiles) {
+    adjusted += scan->go_out_bonus;
+  }
+  if (adjusted > scan->best_adjusted ||
+      (adjusted == scan->best_adjusted &&
+       small_move->tiny_move > scan->best_tiny_move)) {
+    scan->best_adjusted = adjusted;
+    scan->best_tiny_move = small_move->tiny_move;
+    scan->best_play = small_move;
+  }
+}
+
+// best_scan_consider by the plain ranking, or by the face ranking when
+// `ranking` is not NULL. Inlined into callers that pass a constant.
+static inline __attribute__((always_inline)) void
+best_scan_consider_ranked(BestScan *scan, const SmallMove *small_move,
+                          const FaceRanking *ranking) {
+  if (ranking == NULL) {
+    best_scan_consider(scan, small_move);
+  } else {
+    best_scan_consider_face(scan, small_move, ranking);
   }
 }
 
@@ -967,15 +1038,57 @@ static inline void lane_best_consider(LaneBestPlays *best,
   }
 }
 
+// lane_best_consider by the face ranking. Whole-rack plays all place the same
+// tiles, so only the partial plays' order differs from the plain one.
+static inline void lane_best_consider_face(LaneBestPlays *best,
+                                           const SmallMove *small_move,
+                                           int side_to_move_tiles,
+                                           const FaceRanking *ranking) {
+  if (small_move_get_tiles_played(small_move) == side_to_move_tiles) {
+    lane_best_consider(best, small_move, side_to_move_tiles);
+    return;
+  }
+  const int move_value = small_move_get_score(small_move) +
+                         face_ranking_bonus(ranking, small_move);
+  if (best->has_partial) {
+    const int kept_value = small_move_get_score(&best->partial) +
+                           face_ranking_bonus(ranking, &best->partial);
+    if (move_value < kept_value ||
+        (move_value == kept_value &&
+         small_move->tiny_move <= best->partial.tiny_move)) {
+      return;
+    }
+  }
+  best->partial = *small_move;
+  best->has_partial = true;
+}
+
+// lane_best_consider by the plain ranking, or by the face ranking when
+// `ranking` is not NULL. Inlined into callers that pass a constant.
+static inline __attribute__((always_inline)) void
+lane_best_consider_ranked(LaneBestPlays *best, const SmallMove *small_move,
+                          int side_to_move_tiles, const FaceRanking *ranking) {
+  if (ranking == NULL) {
+    lane_best_consider(best, small_move, side_to_move_tiles);
+  } else {
+    lane_best_consider_face(best, small_move, side_to_move_tiles, ranking);
+  }
+}
+
 // Finds the sibling-shared best plays of the lanes in `missing`, none of which
 // the current leaf's own move touched, so they stand as they did after the
 // side's own previous move. Lanes that move also left alone carry over from
 // the side's list two moves up; in the others, only the anchors that can reach
 // a square the move changed are regenerated on the current board, and the
 // other anchors' plays carry over too.
-static void fill_sibling_lanes(PathMoveLists *lists,
-                               const MoveGenArgs *best_small_args,
-                               uint64_t missing, int side_to_move_tiles) {
+//
+// The lanes' bests are by the plain ranking, or by the face ranking when
+// `ranking` is not NULL; each caller below passes a constant, so that each
+// gets its own copy without the other's work.
+static inline __attribute__((always_inline)) void
+fill_sibling_lanes_ranked(PathMoveLists *lists,
+                          const MoveGenArgs *best_small_args, uint64_t missing,
+                          int side_to_move_tiles, const FaceRanking *ranking) {
   const int length = lists->length;
   const uint64_t previous_move = length >= 2 ? lists->masks[length - 2] : 0;
   const uint64_t regenerated = missing & previous_move;
@@ -1003,9 +1116,9 @@ static void fill_sibling_lanes(PathMoveLists *lists,
       const int end = lists->lane_end[lane];
       if (((regenerated >> lane) & 1) != 0) {
         for (int move_idx = begin; move_idx < end; move_idx++) {
-          lane_best_consider(&lists->sibling_lanes[length][lane],
-                             move_list->small_moves[move_idx],
-                             side_to_move_tiles);
+          lane_best_consider_ranked(&lists->sibling_lanes[length][lane],
+                                    move_list->small_moves[move_idx],
+                                    side_to_move_tiles, ranking);
         }
       }
       begin = end;
@@ -1044,9 +1157,25 @@ static void fill_sibling_lanes(PathMoveLists *lists,
       if (filter && !counts_subset(&parent->used[move_idx], &avail)) {
         continue;
       }
-      lane_best_consider(best, &parent->moves[move_idx], side_to_move_tiles);
+      lane_best_consider_ranked(best, &parent->moves[move_idx],
+                                side_to_move_tiles, ranking);
     }
   }
+}
+
+static void fill_sibling_lanes(PathMoveLists *lists,
+                               const MoveGenArgs *best_small_args,
+                               uint64_t missing, int side_to_move_tiles) {
+  fill_sibling_lanes_ranked(lists, best_small_args, missing, side_to_move_tiles,
+                            NULL);
+}
+
+static __attribute__((noinline)) void
+fill_sibling_lanes_face(PathMoveLists *lists,
+                        const MoveGenArgs *best_small_args, uint64_t missing,
+                        int side_to_move_tiles, const FaceRanking *ranking) {
+  fill_sibling_lanes_ranked(lists, best_small_args, missing, side_to_move_tiles,
+                            ranking);
 }
 
 const LaneBestPlays *
@@ -1061,8 +1190,11 @@ path_move_lists_reply_lane_bests(PathMoveLists *lists,
   const Game *game = reply_args->game;
   const int side_to_move_tiles = rack_get_total_letters(player_get_rack(
       game_get_player(game, game_get_player_on_turn_index(game))));
+  const bool face_ranked =
+      reply_args->move_record_type == MOVE_RECORD_BEST_SMALL_FACE;
   const uint64_t prefix_stamp =
-      length >= 2 ? lists->stamps[length - 2] : lists->root_stamp;
+      (length >= 2 ? lists->stamps[length - 2] : lists->root_stamp) |
+      (face_ranked ? FACE_RANKED_SIBLING_STAMP : 0);
   if (lists->sibling_stamp[length] != prefix_stamp) {
     lists->sibling_stamp[length] = prefix_stamp;
     lists->sibling_valid[length] = 0;
@@ -1072,7 +1204,14 @@ path_move_lists_reply_lane_bests(PathMoveLists *lists,
     // No move is made yet, so no lane is that move's own: fill them all as a
     // position one move down would fill the lanes its move left alone.
     lists->length = length;
-    fill_sibling_lanes(lists, reply_args, missing, side_to_move_tiles);
+    if (face_ranked) {
+      FaceRanking ranking;
+      face_ranking_init(&ranking, reply_args);
+      fill_sibling_lanes_face(lists, reply_args, missing, side_to_move_tiles,
+                              &ranking);
+    } else {
+      fill_sibling_lanes(lists, reply_args, missing, side_to_move_tiles);
+    }
     lists->length = length - 1;
     lists->sibling_valid[length] |= missing;
   }
@@ -1096,13 +1235,15 @@ void path_move_lists_lane_bests_of_list(const MoveList *move_list,
   }
 }
 
-bool path_move_lists_best_play(PathMoveLists *lists,
-                               const MoveGenArgs *best_small_args,
-                               SmallMove *out_best) {
+// path_move_lists_best_play by the plain ranking, or by the face ranking when
+// `ranking` is not NULL; each caller below passes a constant, so that each
+// gets its own copy without the other's work.
+static inline __attribute__((always_inline)) bool
+best_play_ranked(PathMoveLists *lists, const MoveGenArgs *best_small_args,
+                 SmallMove *out_best, const FaceRanking *ranking) {
   const int length = lists->length;
   assert(length >= 1);
   assert(length <= 2 || path_move_lists_slot_is_current(lists, length - 2));
-  assert(best_small_args->move_record_type == MOVE_RECORD_BEST_SMALL);
   assert(best_small_args->best_small_canonical_ties);
   const Game *game = best_small_args->game;
   const int side_to_move_tiles = rack_get_total_letters(player_get_rack(
@@ -1110,7 +1251,8 @@ bool path_move_lists_best_play(PathMoveLists *lists,
   // The prefix shared by this leaf's siblings ends with the side's own
   // previous move (or at the root).
   const uint64_t prefix_stamp =
-      length >= 2 ? lists->stamps[length - 2] : lists->root_stamp;
+      (length >= 2 ? lists->stamps[length - 2] : lists->root_stamp) |
+      (ranking == NULL ? 0 : FACE_RANKED_SIBLING_STAMP);
   if (lists->sibling_stamp[length] != prefix_stamp) {
     lists->sibling_stamp[length] = prefix_stamp;
     lists->sibling_valid[length] = 0;
@@ -1119,7 +1261,12 @@ bool path_move_lists_best_play(PathMoveLists *lists,
   const uint64_t shared_lanes = all_lanes_mask() & ~own_lanes;
   const uint64_t missing = shared_lanes & ~lists->sibling_valid[length];
   if (missing != 0) {
-    fill_sibling_lanes(lists, best_small_args, missing, side_to_move_tiles);
+    if (ranking == NULL) {
+      fill_sibling_lanes(lists, best_small_args, missing, side_to_move_tiles);
+    } else {
+      fill_sibling_lanes_face(lists, best_small_args, missing,
+                              side_to_move_tiles, ranking);
+    }
     lists->sibling_valid[length] |= missing;
   }
 
@@ -1136,10 +1283,10 @@ bool path_move_lists_best_play(PathMoveLists *lists,
     }
     const LaneBestPlays *best = &lists->sibling_lanes[length][lane];
     if (best->has_whole_rack) {
-      best_scan_consider(&scan, &best->whole_rack);
+      best_scan_consider_ranked(&scan, &best->whole_rack, ranking);
     }
     if (best->has_partial) {
-      best_scan_consider(&scan, &best->partial);
+      best_scan_consider_ranked(&scan, &best->partial, ranking);
     }
   }
   if (own_lanes == 0) {
@@ -1160,12 +1307,34 @@ bool path_move_lists_best_play(PathMoveLists *lists,
   return true;
 }
 
-bool path_move_lists_best_play_alone(PathMoveLists *lists,
-                                     const MoveGenArgs *best_small_args,
-                                     SmallMove *out_best) {
+static __attribute__((noinline)) bool
+best_play_face(PathMoveLists *lists, const MoveGenArgs *best_small_args,
+               SmallMove *out_best) {
+  FaceRanking ranking;
+  face_ranking_init(&ranking, best_small_args);
+  return best_play_ranked(lists, best_small_args, out_best, &ranking);
+}
+
+bool path_move_lists_best_play(PathMoveLists *lists,
+                               const MoveGenArgs *best_small_args,
+                               SmallMove *out_best) {
+  assert(move_record_type_is_best_small(best_small_args->move_record_type));
+  if (best_small_args->move_record_type == MOVE_RECORD_BEST_SMALL_FACE) {
+    return best_play_face(lists, best_small_args, out_best);
+  }
+  return best_play_ranked(lists, best_small_args, out_best, NULL);
+}
+
+// path_move_lists_best_play_alone by the plain ranking, or by the face
+// ranking when `ranking` is not NULL, as best_play_ranked is. With it,
+// face_bounds[k] is the most the ranking adds to the score of a play of k
+// tiles.
+static inline __attribute__((always_inline)) bool
+best_play_alone_ranked(PathMoveLists *lists, const MoveGenArgs *best_small_args,
+                       SmallMove *out_best, const FaceRanking *ranking,
+                       const int *face_bounds) {
   const int length = lists->length;
   assert(length >= 1);
-  assert(best_small_args->move_record_type == MOVE_RECORD_BEST_SMALL);
   assert(best_small_args->best_small_canonical_ties);
   int first_move;
   PathListSlot *source = nearest_built_list(lists, &first_move);
@@ -1204,11 +1373,13 @@ bool path_move_lists_best_play_alone(PathMoveLists *lists,
   };
   // A play of more tiles than the rack holds cannot stand. Within a tile
   // count the plays descend by score, so once one stands, only its ties are
-  // left to look at.
+  // left to look at; by the face ranking, only the plays within the count's
+  // face bound of it.
   const int most_tiles =
       side_to_move_tiles < RACK_SIZE ? side_to_move_tiles : RACK_SIZE;
   for (int tiles = most_tiles; tiles >= 1; tiles--) {
-    const int bonus = tiles == side_to_move_tiles ? scan.go_out_bonus : 0;
+    const int bonus = (tiles == side_to_move_tiles ? scan.go_out_bonus : 0) +
+                      (ranking == NULL ? 0 : face_bounds[tiles]);
     const int end = source->tiles_begin[tiles + 1];
     for (int key_idx = source->tiles_begin[tiles]; key_idx < end; key_idx++) {
       const uint64_t key = source->by_score[key_idx];
@@ -1224,7 +1395,7 @@ bool path_move_lists_best_play_alone(PathMoveLists *lists,
            lists->lane_hits[lane_of_small_move(small_move)]) != 0) {
         continue;
       }
-      best_scan_consider(&scan, small_move);
+      best_scan_consider_ranked(&scan, small_move, ranking);
     }
   }
   if (touched == 0) {
@@ -1241,4 +1412,54 @@ bool path_move_lists_best_play_alone(PathMoveLists *lists,
   }
   *out_best = *best_small_args->move_list->small_moves[0];
   return true;
+}
+
+static __attribute__((noinline)) bool
+best_play_alone_face(PathMoveLists *lists, const MoveGenArgs *best_small_args,
+                     SmallMove *out_best) {
+  // Zeroed first: the loop below reads the tile values by the rack's letters,
+  // which the analyzer cannot match to the ones face_ranking_init fills.
+  FaceRanking ranking = {0};
+  face_ranking_init(&ranking, best_small_args);
+  // The rack's face values in descending order, for the most that any k of
+  // its tiles are worth.
+  const Game *game = best_small_args->game;
+  const Rack *rack = player_get_rack(
+      game_get_player(game, game_get_player_on_turn_index(game)));
+  const int dist_size = rack_get_dist_size(rack);
+  int rack_values[RACK_SIZE];
+  int num_rack_values = 0;
+  for (int ml = 0; ml < dist_size; ml++) {
+    const int number_of_ml = rack_get_letter(rack, (MachineLetter)ml);
+    for (int copy_idx = 0;
+         copy_idx < number_of_ml && num_rack_values < RACK_SIZE; copy_idx++) {
+      int insert_idx = num_rack_values;
+      while (insert_idx > 0 &&
+             rack_values[insert_idx - 1] < ranking.tile_values[ml]) {
+        rack_values[insert_idx] = rack_values[insert_idx - 1];
+        insert_idx--;
+      }
+      rack_values[insert_idx] = ranking.tile_values[ml];
+      num_rack_values++;
+    }
+  }
+  int face_bounds[RACK_SIZE + 1] = {0};
+  for (int tiles = 1; tiles <= RACK_SIZE; tiles++) {
+    face_bounds[tiles] =
+        face_bounds[tiles - 1] + (tiles <= num_rack_values
+                                      ? ranking.weight * rack_values[tiles - 1]
+                                      : 0);
+  }
+  return best_play_alone_ranked(lists, best_small_args, out_best, &ranking,
+                                face_bounds);
+}
+
+bool path_move_lists_best_play_alone(PathMoveLists *lists,
+                                     const MoveGenArgs *best_small_args,
+                                     SmallMove *out_best) {
+  assert(move_record_type_is_best_small(best_small_args->move_record_type));
+  if (best_small_args->move_record_type == MOVE_RECORD_BEST_SMALL_FACE) {
+    return best_play_alone_face(lists, best_small_args, out_best);
+  }
+  return best_play_alone_ranked(lists, best_small_args, out_best, NULL, NULL);
 }
