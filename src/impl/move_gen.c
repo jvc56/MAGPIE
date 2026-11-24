@@ -3188,7 +3188,7 @@ void shadow_play_for_anchor(MoveGen *gen, int col) {
     // empty touched mask is already a no-op.
     wmp_move_gen_add_anchors(&gen->wmp_move_gen, gen->current_row_index, col,
                              gen->last_anchor_col, gen->dir,
-                             gen->target_equity_cutoff, &gen->anchor_heap);
+                             gen->anchor_equity_cutoff, &gen->anchor_heap);
     return;
   }
   if (gen->max_tiles_to_play == 0) {
@@ -3476,6 +3476,9 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
   const KWG *override_kwg = args->override_kwg;
   gen->eq_margin_movegen = args->eq_margin_movegen;
   gen->target_equity_cutoff = args->target_equity;
+  gen->anchor_equity_cutoff = args->has_anchor_equity_cutoff
+                                  ? args->anchor_equity_cutoff
+                                  : args->target_equity;
   gen->best_small_out_bonus = args->best_small_out_bonus;
   gen->best_small_canonical_ties = args->best_small_canonical_ties;
 
@@ -3722,13 +3725,16 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
 }
 
 // Pool shift (see pool_shift.h). A pool-shifted generation fills the leave
-// map with each subset's leave value as any other does, then adds every
-// subset's shift to the map, so that everything downstream reads shifted
-// leave values as it would any others, and only then compares the exchanges.
+// map with each subset's leave value plus its shift, both from its rack
+// shift, so that everything downstream reads shifted leave values as it
+// would any others, and only then compares the exchanges. It walks no KLV
+// and reads no leave values from a rack info table: the rack shift has them
+// from the rows its shifts were computed from (see PoolShiftRack).
 
-// Adds its shift to every leave value in the leave map, and sets best_leaves
-// and pool_shift_max_by_leave_size from the results. Returns the canonical
-// subset index of an exchange with the greatest leave value.
+// Sets every leave's value in the leave map to its value plus its shift, and
+// sets best_leaves and pool_shift_max_by_leave_size from the results.
+// Returns the canonical subset index of an exchange with the greatest leave
+// value.
 //
 // A leave map index has a bit for each tile of the full rack, in ascending
 // order of tile, and while the map is filled a set bit is a tile kept. The
@@ -3742,11 +3748,14 @@ static int gen_apply_pool_shift(MoveGen *gen) {
   }
   int best_exchange_idx = 0;
   Equity best_exchange_value = EQUITY_MIN_VALUE;
-  for (int idx = 0; idx < rack_shift->count; idx++) {
+  // The full rack, last, is not a leave. Its place in the map keeps the
+  // value the map was started with, and it has no shift.
+  const int number_of_leaves = rack_shift->count - 1;
+  for (int idx = 0; idx < number_of_leaves; idx++) {
     const int map_idx = rack_shift->map_indices[idx];
     const int leave_size = rack_shift->sizes[idx];
     const Equity shift = rack_shift->shifts[idx];
-    const Equity value = gen->leave_map.leave_values[map_idx] + shift;
+    const Equity value = rack_shift->values[idx] + shift;
     gen->leave_map.leave_values[map_idx] = value;
     if (leave_size == 0) {
       gen->empty_leave_value = value;
@@ -3757,11 +3766,12 @@ static int gen_apply_pool_shift(MoveGen *gen) {
     if (shift > gen->pool_shift_max_by_leave_size[leave_size]) {
       gen->pool_shift_max_by_leave_size[leave_size] = shift;
     }
-    if (leave_size < RACK_SIZE && value > best_exchange_value) {
+    if (value > best_exchange_value) {
       best_exchange_value = value;
       best_exchange_idx = idx;
     }
   }
+  gen->pool_shift_max_by_leave_size[RACK_SIZE] = 0;
   return best_exchange_idx;
 }
 
@@ -3786,9 +3796,9 @@ static void gen_record_exchange_at_map_index(MoveGen *gen, int map_idx) {
   }
 }
 
-// Shifts the leave values of a pool-shifted generation, which has a full
-// rack, a bag with tiles, the leave map filled and at index 0, and gen->leave
-// empty, and then records its exchanges.
+// Fills the leave map of a pool-shifted generation, which has a full rack, a
+// bag with tiles, the leave map at index 0 and gen->leave empty, with its
+// shifted leave values, and then records its exchanges.
 static void gen_shift_leaves_and_record_exchanges(MoveGen *gen,
                                                   bool add_exchange) {
   const int best_exchange_idx = gen_apply_pool_shift(gen);
@@ -3869,12 +3879,15 @@ void gen_look_up_leaves_and_record_exchanges(MoveGen *gen) {
   leave_map_set_current_index(&gen->leave_map, 0);
   rack_reset(&gen->leave);
 
-  // A pool-shifted generation's exchanges are compared once its leave values
-  // carry the shift (and the RIT's best exchange was chosen without it).
+  // A pool-shifted generation's leave values, with their shifts, come from
+  // its rack shift below, and its exchanges are compared once they are in
+  // the map (the RIT's best exchange was chosen without the shift).
   const bool pool_shifted = gen->pool_shift_table != NULL;
   const bool add_exchange_now = add_exchange && !pool_shifted;
 
-  if (gen->rit_entry != NULL) {
+  if (pool_shifted) {
+    // Nothing to look up: see gen_shift_leaves_and_record_exchanges.
+  } else if (gen->rit_entry != NULL) {
     // Fast path: unpack the RIT's 24-bit packed leave values to 32-bit
     // in the leave map so play-time leave_map_get_current_value calls
     // and wmp_move_gen's subrack reads return the right value.
@@ -5012,9 +5025,9 @@ static uint64_t gen_seed_carried_best_move(MoveGen *gen, BestMoveCarry *carry,
   }
   if (seeded) {
     gen_update_cutoff_equity_or_score(gen);
-    // With no target, target_equity_cutoff is read only by
+    // With no target, anchor_equity_cutoff is read only by
     // wmp_move_gen_add_anchors, which drops anchors whose bound is below it.
-    gen->target_equity_cutoff =
+    gen->anchor_equity_cutoff =
         move_get_equity(gen_get_readonly_best_move(gen));
   }
   for (int lane = 0; lane < BEST_MOVE_CARRY_NUM_LANES; lane++) {

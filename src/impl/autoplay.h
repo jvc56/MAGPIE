@@ -5,13 +5,28 @@
 #include "../ent/autoplay_results.h"
 #include "../ent/autoplay_solver_settings.h"
 #include "../ent/game.h"
+#include "../ent/move.h"
+#include "../ent/rack.h"
 #include "../ent/sim_args.h"
 #include "../ent/thread_control.h"
 #include "../util/io_util.h"
 #include "play_chooser.h"
 #include <stdbool.h>
+#include <stdint.h>
 
 typedef struct GameStringOptions GameStringOptions;
+
+// Told of every move autoplay plays, just before it plays it: game is the
+// position the move is made from (the mover's whole rack on it), leave the
+// tiles the mover keeps, worker_index the autoplay worker playing the game
+// (from 0 to the run's num_threads - 1; each worker calls from its own
+// thread). game_number, pair_game_number and turn_number say where the move
+// was played.
+typedef void (*autoplay_move_observer_t)(void *data, int worker_index,
+                                         const Game *game, const Move *move,
+                                         const Rack *leave,
+                                         uint64_t game_number,
+                                         int pair_game_number, int turn_number);
 
 typedef struct AutoplayArgs {
   const char *num_games_or_min_rack_targets;
@@ -101,6 +116,10 @@ typedef struct AutoplayArgs {
   // Fraction of memory the run's one endgame transposition table takes,
   // shared by every worker's endgame and PEG leaf solves.
   double solver_tt_fraction_of_mem;
+  // Optional: told of every move (see autoplay_move_observer_t), with
+  // move_observer_data. NULL for none.
+  autoplay_move_observer_t move_observer;
+  void *move_observer_data;
 } AutoplayArgs;
 
 void autoplay(const AutoplayArgs *args, AutoplayResults *autoplay_results,

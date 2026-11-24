@@ -70,8 +70,14 @@ void string_builder_add_letter_row(
     uint64_t leave_subtotal = inference_results_get_subtotal_sum_with_minimum(
         inference_results, inference_stat_type, letter, current_min,
         INFERENCE_SUBTOTAL_LEAVE);
-    double inference_probability =
-        ((double)draw_subtotal) / (double)stat_get_num_samples(equity_values);
+    const double weight_subtotal =
+        inference_results_get_weight_subtotal_sum_with_minimum(
+            inference_results, inference_stat_type, letter, current_min);
+    const double total_weight = stat_get_total_weight(equity_values);
+    double inference_probability = 0.0;
+    if (total_weight > 0.0) {
+      inference_probability = weight_subtotal / total_weight;
+    }
     double random_probability = get_probability_for_random_minimum_draw(
         bag_as_rack, rack, letter, current_min,
         number_of_tiles_played_or_exchanged);
@@ -193,15 +199,16 @@ void string_builder_add_inference_type(
   // Build a sorted order of letters by decreasing inferred Pct (probability
   // at minimum draw count 1), so the most likely letters appear first.
   // equity_values and total_draws are already declared above.
+  const double total_weight = stat_get_total_weight(equity_values);
   int sorted_letters[MAX_ALPHABET_SIZE];
   double letter_prct[MAX_ALPHABET_SIZE];
   for (int letter_idx = 0; letter_idx < (int)ld_size; letter_idx++) {
     sorted_letters[letter_idx] = letter_idx;
-    if (total_draws > 0) {
-      const uint64_t draws = inference_results_get_subtotal_sum_with_minimum(
-          inference_results, inference_stat_type, letter_idx, 1,
-          INFERENCE_SUBTOTAL_DRAW);
-      letter_prct[letter_idx] = (double)draws / (double)total_draws;
+    if (total_weight > 0.0) {
+      const double weight_subtotal =
+          inference_results_get_weight_subtotal_sum_with_minimum(
+              inference_results, inference_stat_type, letter_idx, 1);
+      letter_prct[letter_idx] = weight_subtotal / total_weight;
     } else {
       letter_prct[letter_idx] = 0.0;
     }
@@ -241,42 +248,60 @@ void string_builder_add_inference_description(
       inference_results_get_target_known_unplayed_tiles(inference_results);
   const int target_num_unplayed_tiles =
       rack_get_total_letters(target_unplayed_tiles);
+  const Equity temperature =
+      inference_results_get_temperature(inference_results);
 
   int num_info_rows = 3;
+  if (temperature > 0) {
+    num_info_rows++;
+  }
   if (target_num_unplayed_tiles > 0) {
     num_info_rows++;
   }
 
   StringGrid *sg = string_grid_create(num_info_rows, 2, 1);
+  int row_idx = 0;
   if (!is_exchange) {
     string_builder_add_rack(tmp_sb, target_played_tiles, ld, false);
-    string_grid_set_cell(sg, 0, 0, string_duplicate("Played tiles:"));
-    string_grid_set_cell(sg, 0, 1, string_builder_dump(tmp_sb, NULL));
+    string_grid_set_cell(sg, row_idx, 0, string_duplicate("Played tiles:"));
+    string_grid_set_cell(sg, row_idx, 1, string_builder_dump(tmp_sb, NULL));
     string_builder_clear(tmp_sb);
   } else {
-    string_grid_set_cell(sg, 0, 0, string_duplicate("Exchanged tiles:"));
+    string_grid_set_cell(sg, row_idx, 0, string_duplicate("Exchanged tiles:"));
     string_grid_set_cell(
-        sg, 0, 1, get_formatted_string("%d", target_number_of_tiles_exchanged));
+        sg, row_idx, 1,
+        get_formatted_string("%d", target_number_of_tiles_exchanged));
   }
+  row_idx++;
 
-  string_grid_set_cell(sg, 1, 0, string_duplicate("Score:"));
+  string_grid_set_cell(sg, row_idx, 0, string_duplicate("Score:"));
   string_grid_set_cell(
-      sg, 1, 1,
+      sg, row_idx, 1,
       get_formatted_string(
           "%d", equity_to_int(
                     inference_results_get_target_score(inference_results))));
+  row_idx++;
 
-  string_grid_set_cell(sg, 2, 0, string_duplicate("Equity margin:"));
+  string_grid_set_cell(sg, row_idx, 0, string_duplicate("Equity margin:"));
   string_grid_set_cell(
-      sg, 2, 1,
+      sg, row_idx, 1,
       get_formatted_string("%0.3f",
                            equity_to_double(inference_results_get_equity_margin(
                                inference_results))));
+  row_idx++;
+
+  if (temperature > 0) {
+    string_grid_set_cell(sg, row_idx, 0, string_duplicate("Temperature:"));
+    string_grid_set_cell(
+        sg, row_idx, 1,
+        get_formatted_string("%0.3f", equity_to_double(temperature)));
+    row_idx++;
+  }
 
   if (target_num_unplayed_tiles > 0) {
     string_builder_add_rack(tmp_sb, target_unplayed_tiles, ld, false);
-    string_grid_set_cell(sg, 3, 0, string_duplicate("Partial rack:"));
-    string_grid_set_cell(sg, 3, 1, string_builder_dump(tmp_sb, NULL));
+    string_grid_set_cell(sg, row_idx, 0, string_duplicate("Partial rack:"));
+    string_grid_set_cell(sg, row_idx, 1, string_builder_dump(tmp_sb, NULL));
     string_builder_clear(tmp_sb);
   }
 
@@ -335,9 +360,14 @@ StringGrid *get_common_leaves_string_grid(
     rack_set_dist_size(&leave_rack_leave, ld_size);
     leave_rack_get_leave(leave_rack, &leave_rack_leave);
     const int leave_rack_draws = leave_rack_get_draws(leave_rack);
-    const uint64_t total_draws =
-        stat_get_num_samples(inference_results_get_equity_values(
+    const double leave_rack_weight = leave_rack_get_weight(leave_rack);
+    const double total_weight =
+        stat_get_total_weight(inference_results_get_equity_values(
             inference_results, common_leaves_type));
+    double leave_rack_pct = 0.0;
+    if (total_weight > 0.0) {
+      leave_rack_pct = (leave_rack_weight / total_weight) * 100.0;
+    }
 
     curr_col = 0;
 
@@ -362,19 +392,15 @@ StringGrid *get_common_leaves_string_grid(
       string_builder_clear(tmp_sb);
 
       // Pct
-      string_grid_set_cell(
-          sg_common_leaves, curr_row, curr_col++,
-          get_formatted_string(
-              "%.2f", ((double)leave_rack_draws / (double)total_draws) * 100));
+      string_grid_set_cell(sg_common_leaves, curr_row, curr_col++,
+                           get_formatted_string("%.2f", leave_rack_pct));
       // Total
       string_grid_set_cell(sg_common_leaves, curr_row, curr_col++,
                            get_formatted_string("%d", leave_rack_draws));
     } else {
       // Pct
-      string_grid_set_cell(
-          sg_common_leaves, curr_row, curr_col++,
-          get_formatted_string(
-              "%.2f", ((double)leave_rack_draws / (double)total_draws) * 100));
+      string_grid_set_cell(sg_common_leaves, curr_row, curr_col++,
+                           get_formatted_string("%.2f", leave_rack_pct));
 
       // Total
       string_grid_set_cell(sg_common_leaves, curr_row, curr_col++,

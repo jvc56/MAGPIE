@@ -16,6 +16,7 @@
 #include "../src/ent/inference_results.h"
 #include "../src/ent/letter_distribution.h"
 #include "../src/ent/move.h"
+#include "../src/ent/player.h"
 #include "../src/ent/rack.h"
 #include "../src/ent/sim_args.h"
 #include "../src/ent/sim_results.h"
@@ -914,6 +915,64 @@ void test_sim_perf(const char *sim_perf_iters) {
   config_destroy(config);
 }
 
+// A rollout values the tiles each player's last play keeps as move generation
+// values a leave: with the pool shift where the player has one (see
+// pool_shift.h). With one ply and the opponent's rack known, every rollout of
+// a play is the play and then the opponent's best reply, so the play's mean
+// equity is its own static equity less the reply's, and both include the
+// shift of the leave they keep.
+void test_sim_leftover_has_pool_shift(void) {
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -wmp true -s1 equity -s2 equity -r1 all -r2 all "
+      "-numplays 5 -plies 1 -threads 1 -iter 20 -minp 4 -scond none "
+      "-pat none -sinfer false -poolshift 1.2");
+  load_and_exec_config_or_die(
+      config, "cgp 15/15/15/15/8FOO4/7GAUNTER1/2MEDALeD6/3HOMIE7/4L10/4I10/"
+              "4A10/15/15/15/15 CEIOQVZ/AEINRST 150/65 0");
+  load_and_exec_config_or_die(config, "gen");
+  const LetterDistribution *ld = config_get_ld(config);
+  Rack known_opp_rack;
+  rack_set_dist_size_and_reset(&known_opp_rack, ld_get_size(ld));
+  rack_set_to_string(ld, &known_opp_rack, "AEINRST");
+  SimResults *sim_results = config_get_sim_results(config);
+  const error_code_t status = config_simulate_and_return_status(
+      config, NULL, &known_opp_rack, sim_results);
+  assert(status == ERROR_STATUS_SUCCESS);
+
+  MoveList *reply_list = move_list_create(1);
+  bool any_play_is_shifted = false;
+  const int number_of_plays = sim_results_get_number_of_plays(sim_results);
+  assert(number_of_plays > 1);
+  for (int play_idx = 0; play_idx < number_of_plays; play_idx++) {
+    const SimmedPlay *simmed_play =
+        sim_results_get_simmed_play(sim_results, play_idx);
+    const Move *move = simmed_play_get_move(simmed_play);
+    Game *game = game_duplicate(config_get_game(config));
+    const Player *mover =
+        game_get_player(game, game_get_player_on_turn_index(game));
+    Rack leave;
+    rack_copy(&leave, player_get_rack(mover));
+    const Equity unshifted_equity =
+        move_get_score(move) +
+        get_leave_value_for_move(player_get_klv(mover), move, &leave);
+    if (move_get_equity(move) != unshifted_equity) {
+      any_play_is_shifted = true;
+    }
+    play_move(move, game, NULL);
+    const Move *reply = get_top_equity_move(game, reply_list);
+    const double expected_equity =
+        equity_to_double(move_get_equity(move) - move_get_equity(reply));
+    const Stat *equity_stat = simmed_play_get_equity_stat(simmed_play);
+    assert(stat_get_num_samples(equity_stat) > 0);
+    assert(within_epsilon(stat_get_mean(equity_stat), expected_equity));
+    game_destroy(game);
+  }
+  // The pool is far from a full bag's, so the shift is not 0 throughout.
+  assert(any_play_is_shifted);
+  move_list_destroy(reply_list);
+  config_destroy(config);
+}
+
 void test_sim_one_ply(void) {
   Config *config = config_create_or_die(
       "set -lex NWL20 -wmp true -s1 score -s2 score -r1 all -r2 all "
@@ -1806,6 +1865,7 @@ void test_sim(void) {
     test_sim_round_robin_consistency();
     test_sim_top_two_consistency();
     test_sim_one_ply();
+    test_sim_leftover_has_pool_shift();
     test_sim_ctx();
     test_sim_endgame();
     test_sim_best_move_equity_tiebreak();

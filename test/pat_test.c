@@ -20,6 +20,7 @@
 #include "../src/ent/letter_distribution.h"
 #include "../src/ent/move.h"
 #include "../src/ent/pat.h"
+#include "../src/ent/pat_board_cache.h"
 #include "../src/ent/pat_eval.h"
 #include "../src/ent/pat_features.h"
 #include "../src/ent/pat_file.h"
@@ -2303,6 +2304,110 @@ static void test_pat_candidates_option(void) {
 // are the unscaled ones; at a late position with late scale 0 they are
 // the no-PAT ones, best move included, which also exercises the scaled
 // pruning bounds.
+enum {
+  PAT_BOARD_CACHE_TEST_MOVES = 20000,
+};
+
+// Board-only PAT keeps each move's term in the player's board cache, under
+// a key made from the move (see gen_pat_contender_equity). An exchange is
+// recorded as a move at row 0, column 0, across, so a play of the same tiles
+// that starts on the board's first square must not find the exchange's term
+// under its key. BILLOWY from that square is the best play here, and
+// exchanging the same seven tiles is the first move a generation values.
+static void test_pat_board_cache_exchange_and_first_square_play(void) {
+  const char *wmp_settings[] = {"true", "false"};
+  const size_t number_of_wmp_settings =
+      sizeof(wmp_settings) / sizeof(wmp_settings[0]);
+  for (size_t wmp_idx = 0; wmp_idx < number_of_wmp_settings; wmp_idx++) {
+    char *settings = get_formatted_string(
+        "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -wmp %s",
+        wmp_settings[wmp_idx]);
+    Config *config = config_create_or_die(settings);
+    free(settings);
+    PATWeights *pat = pat_create_zeroed("board_cache_test");
+    for (int feature_index = 0; feature_index < PAT_NUM_FEATURES;
+         feature_index++) {
+      pat_set_weight(pat, feature_index, -30 - 2 * (feature_index % 5));
+    }
+    // Ownership transfers to players_data.
+    players_data_set_data(config_get_players_data(config),
+                          PLAYERS_DATA_TYPE_PAT, 0, pat);
+    // EAR down from the second square of the first column: BILLOWY across
+    // the first row makes BEAR.
+    load_and_exec_config_or_die(
+        config, "cgp 15/E14/A14/R14/15/15/15/15/15/15/15/15/15/15/15 "
+                "BILLOWY/ 0/0 0");
+    Game *game = config_get_game(config);
+    Player *player = game_get_player(game, 0);
+    assert(game_get_player_on_turn_index(game) == 0);
+    PATBoardCache *board_cache = pat_board_cache_create();
+    player_set_pat_board_cache(player, board_cache);
+
+    MoveList *best_move_list = move_list_create(1);
+    Move best_move;
+    move_copy(&best_move, get_top_equity_move(game, best_move_list));
+
+    // A generation that records every move takes no term from the cache.
+    MoveList *all_moves = move_list_create(PAT_BOARD_CACHE_TEST_MOVES);
+    const MoveGenArgs all_moves_args = {
+        .game = game,
+        .move_list = all_moves,
+        .move_record_type = MOVE_RECORD_ALL,
+        .move_sort_type = MOVE_SORT_EQUITY,
+        .override_kwg = NULL,
+        .eq_margin_movegen = 0,
+        .target_equity = EQUITY_MAX_VALUE,
+    };
+    generate_moves(&all_moves_args);
+    const Move *top_move = NULL;
+    const Move *full_exchange = NULL;
+    const int number_of_moves = move_list_get_count(all_moves);
+    assert(number_of_moves < PAT_BOARD_CACHE_TEST_MOVES);
+    for (int move_idx = 0; move_idx < number_of_moves; move_idx++) {
+      const Move *move = move_list_get_move(all_moves, move_idx);
+      if (top_move == NULL ||
+          move_get_equity(move) > move_get_equity(top_move)) {
+        top_move = move;
+      }
+      if (move_get_type(move) == GAME_EVENT_EXCHANGE &&
+          move_get_tiles_played(move) == RACK_SIZE) {
+        full_exchange = move;
+      }
+    }
+    assert(top_move != NULL);
+    assert(full_exchange != NULL);
+
+    // What the test relies on: the best play and the exchange move the same
+    // tiles in the same order, from the same square in the same direction...
+    assert(move_get_type(top_move) == GAME_EVENT_TILE_PLACEMENT_MOVE);
+    assert(move_get_row_start(top_move) == move_get_row_start(full_exchange));
+    assert(move_get_col_start(top_move) == move_get_col_start(full_exchange));
+    assert(move_get_dir(top_move) == move_get_dir(full_exchange));
+    assert(move_get_tiles_length(top_move) == RACK_SIZE);
+    assert(move_get_tiles_length(full_exchange) == RACK_SIZE);
+    for (int tile_idx = 0; tile_idx < RACK_SIZE; tile_idx++) {
+      assert(move_get_tile(top_move, tile_idx) ==
+             move_get_tile(full_exchange, tile_idx));
+    }
+    // ...and have different terms. Neither keeps a tile, so the exchange's
+    // equity is its term, and the play's is its score plus its term.
+    assert(move_get_equity(top_move) - move_get_score(top_move) !=
+           move_get_equity(full_exchange));
+
+    assert_moves_are_equal(&best_move, top_move);
+    assert(move_get_equity(&best_move) == move_get_equity(top_move));
+
+    // From the cache the first generation left, too.
+    assert_moves_are_equal(get_top_equity_move(game, best_move_list), top_move);
+
+    player_set_pat_board_cache(player, NULL);
+    pat_board_cache_destroy(board_cache);
+    move_list_destroy(all_moves);
+    move_list_destroy(best_move_list);
+    config_destroy(config);
+  }
+}
+
 static void test_pat_stage_scale(const char *data_dir) {
   Config *config = config_create_or_die(
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1 "
@@ -2991,5 +3096,6 @@ void test_pat(void) {
   test_pat_usage_options();
   test_pat_default_weights();
   test_pat_candidates_option();
+  test_pat_board_cache_exchange_and_first_square_play();
   destroy_temp_pat_data_dir(data_dir);
 }

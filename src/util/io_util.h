@@ -42,6 +42,7 @@ typedef enum {
   ERROR_STATUS_CONFIG_LOAD_MISSING_ARG,
   ERROR_STATUS_CONFIG_LOAD_INCOMPATIBLE_LEXICONS,
   ERROR_STATUS_CONFIG_LOAD_INCOMPATIBLE_LETTER_DISTRIBUTION,
+  ERROR_STATUS_CONFIG_LOAD_INCOMPATIBLE_RACK_VALUE_TABLE,
   ERROR_STATUS_CONFIG_LOAD_BOARD_LAYOUT_ERROR,
   ERROR_STATUS_CONFIG_LOAD_WIN_PCT_ERROR,
   ERROR_STATUS_CONFIG_LOAD_GAME_HISTORY_ERROR,
@@ -345,6 +346,11 @@ typedef enum {
   // pegfit was asked to fit while the players have different pre-endgame
   // adjustments loaded.
   ERROR_STATUS_PEG_FIT_DIFFERENT_TABLES,
+  // An inference temperature file has a malformed row, a temperature out of
+  // range, bags not in ascending order or an exchange row given twice.
+  ERROR_STATUS_INFERENCE_TEMPERATURES_INVALID_ROW,
+  // inftempfit's self-play gave no tile placements to fit to.
+  ERROR_STATUS_INFERENCE_TEMPERATURE_FIT_NO_PLAYS,
 } error_code_t;
 
 typedef enum {

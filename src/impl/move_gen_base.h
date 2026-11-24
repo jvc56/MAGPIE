@@ -200,6 +200,7 @@ typedef struct MoveGen {
 
   // Inference cutoff fields
   Equity target_equity_cutoff;
+  Equity anchor_equity_cutoff;
   bool stop_on_threshold;
   // By lane, the anchor columns whose plays this generation does not search,
   // or NULL (MoveGenArgs.skip_anchor_cols).
@@ -501,11 +502,15 @@ static inline Equity gen_pat_contender_equity(const MoveGen *gen,
     return equity_without_pat +
            pat_eval_move_penalty_capped(gen->pat_ctx, move, leave, floor);
   }
+  // The move's type is in the key: an exchange is recorded at row 0, column
+  // 0, across (see record_exchange), and a play of the same tiles can start
+  // there.
   uint64_t key =
       (gen->pat_term_key ^ ((uint64_t)move_get_row_start(move) |
                             ((uint64_t)move_get_col_start(move) << 8) |
                             ((uint64_t)move_get_dir(move) << 16) |
-                            ((uint64_t)move_get_tiles_length(move) << 24))) *
+                            ((uint64_t)move_get_tiles_length(move) << 24) |
+                            ((uint64_t)move_get_type(move) << 32))) *
       PAT_BOARD_CACHE_KEY_MULTIPLIER;
   const int tiles_length = move_get_tiles_length(move);
   for (int tile_idx = 0; tile_idx < tiles_length; tile_idx++) {

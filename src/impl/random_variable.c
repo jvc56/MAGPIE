@@ -13,12 +13,14 @@
 #include "../ent/equity.h"
 #include "../ent/game.h"
 #include "../ent/inference_results.h"
+#include "../ent/klv.h"
 #include "../ent/letter_distribution.h"
 #include "../ent/move.h"
 #include "../ent/nested_args.h"
 #include "../ent/pat_board_cache.h"
 #include "../ent/peg_adjust.h"
 #include "../ent/player.h"
+#include "../ent/pool_shift.h"
 #include "../ent/rack.h"
 #include "../ent/sim_args.h"
 #include "../ent/sim_results.h"
@@ -484,6 +486,12 @@ typedef struct Simmer {
   // SimArgs.finish_endgame and finish_max_bag.
   bool finish_endgame;
   int finish_max_bag;
+  // The leaves of the pool of the tiles neither player has played, which
+  // the sim's rollouts read when the mover's leave values are exact (see
+  // PoolLeaves), and a copy of the sim's game whose players have them, for
+  // the census: NULL for any other sim.
+  PoolLeaves *pool_leaves;
+  Game *pool_leaves_game;
 } Simmer;
 
 // A worker's copy of the game plays the sim's rollouts, so both of its
@@ -529,16 +537,24 @@ simmer_worker_set_rollout_peg_adjust(const SimmerWorker *simmer_worker,
 
 // The same goes for the pool shift (see pool_shift.h): both players of a
 // worker's copy of the game take the table and weight of the player on turn.
-// A player with other leaves than that table's gets no shift from it.
+// A player with other leaves than that table's gets no shift from it. A
+// player whose leave values are exact has them for the moves simmed, which
+// are generated from the game itself, and the plies of the rollouts take the
+// shift at POOL_SHIFT_EXACT_ROLLOUT_WEIGHT_MILLI in their place, unless the
+// sim builds the leaves of its pool (see simmer_prepare_pool_leaves).
 static void
 simmer_worker_set_rollout_pool_shift(const SimmerWorker *simmer_worker,
                                      const SimArgs *sim_args) {
   const Player *simming_player = game_get_player(
       sim_args->game, game_get_player_on_turn_index(sim_args->game));
+  int weight_milli = player_get_pool_shift_weight(simming_player);
+  if (weight_milli == POOL_SHIFT_EXACT_WEIGHT_MILLI) {
+    weight_milli = POOL_SHIFT_EXACT_ROLLOUT_WEIGHT_MILLI;
+  }
   for (int player_index = 0; player_index < 2; player_index++) {
     player_set_pool_shift(game_get_player(simmer_worker->game, player_index),
                           player_get_pool_shift_table(simming_player),
-                          player_get_pool_shift_weight(simming_player));
+                          weight_milli);
   }
 }
 
@@ -604,6 +620,28 @@ void simmer_worker_destroy(SimmerWorker *simmer_worker) {
   free(simmer_worker);
 }
 
+// The value to the player of the tiles a play of theirs keeps, for a play
+// not yet played: the leave's value and its pool shift (see pool_shift.h), as
+// move generation values the play's leave. The shift is for the tiles the
+// player sees as unseen before the play draws, and is 0 where move generation
+// adds none.
+static Equity simmer_get_leftover_value(const Game *game, int player_index,
+                                        const Move *move) {
+  const Player *player = game_get_player(game, player_index);
+  const KLV *klv = player_get_klv(player);
+  const int tiles_on_rack = rack_get_total_letters(player_get_rack(player));
+  Rack leave;
+  rack_copy(&leave, player_get_rack(player));
+  const Equity leave_value = get_leave_value_for_move(klv, move, &leave);
+  return leave_value +
+         pool_shift_get_leave_shift(
+             player_get_pool_shift_table(player), klv,
+             player_get_pool_shift_weight(player), game_get_ld(game),
+             game_get_bag(game),
+             player_get_rack(game_get_player(game, 1 - player_index)), &leave,
+             tiles_on_rack, game_get_real_bag_size(game));
+}
+
 // One rollout of simmed_play from seed's shuffled bag, rotated left by
 // rotation * RACK_SIZE letters (see bag_rotate) before the opponent's rack is
 // drawn. When record is non-NULL, the rollout's contributions to its
@@ -666,13 +704,8 @@ static double sim_rollout(const Simmer *simmer, SimmerWorker *simmer_worker,
   game_set_backup_mode(game, BACKUP_MODE_SIMULATION);
   // For one-ply sims, we need to account for the candidate move's leave value
   if (plies == 1) {
-    Rack candidate_rack;
-    const Player *player_on_turn =
-        game_get_player(game, simmer->initial_player);
-    rack_copy(&candidate_rack, player_get_rack(player_on_turn));
-    leftover += get_leave_value_for_move(player_get_klv(player_on_turn),
-                                         simmed_play_get_move(simmed_play),
-                                         &candidate_rack);
+    leftover += simmer_get_leftover_value(game, simmer->initial_player,
+                                          simmed_play_get_move(simmed_play));
   }
   // play move
   play_move(simmed_play_get_move(simmed_play), game, NULL);
@@ -684,10 +717,8 @@ static double sim_rollout(const Simmer *simmer, SimmerWorker *simmer_worker,
   sim_results_increment_node_count(sim_results);
   game_set_backup_mode(game, BACKUP_MODE_OFF);
   // further plies will NOT be backed up.
-  Rack spare_rack;
   for (int ply = 0; ply < plies; ply++) {
     const int player_on_turn_index = game_get_player_on_turn_index(game);
-    const Player *player_on_turn = game_get_player(game, player_on_turn_index);
 
     if (game_over(game)) {
       break;
@@ -715,7 +746,14 @@ static double sim_rollout(const Simmer *simmer, SimmerWorker *simmer_worker,
       best_play = get_top_equity_move_with_carry(game, move_list,
                                                  simmer->best_move_carry);
     }
-    rack_copy(&spare_rack, player_get_rack(player_on_turn));
+    // Each player's last play of the rollout leaves tiles the rollout never
+    // plays: their value, read before the play draws from the pool.
+    Equity this_leftover = 0;
+    const bool is_last_play_of_player = ply == plies - 2 || ply == plies - 1;
+    if (is_last_play_of_player) {
+      this_leftover =
+          simmer_get_leftover_value(game, player_on_turn_index, best_play);
+    }
 
     // On the final ply the resulting cross-sets are never read (no further move
     // generation happens before game_unplay_last_move restores the board), so
@@ -728,9 +766,7 @@ static double sim_rollout(const Simmer *simmer, SimmerWorker *simmer_worker,
       play_move(best_play, game, NULL);
     }
     sim_results_increment_node_count(sim_results);
-    if (ply == plies - 2 || ply == plies - 1) {
-      Equity this_leftover = get_leave_value_for_move(
-          player_get_klv(player_on_turn), best_play, &spare_rack);
+    if (is_last_play_of_player) {
       if (player_on_turn_index == simmer->initial_player) {
         leftover += this_leftover;
       } else {
@@ -1052,6 +1088,8 @@ void rv_sim_destroy(RandomVariables *rvs) {
   free(simmer->workers);
   best_move_carry_destroy(simmer->best_move_carry);
   census_rollout_destroy(simmer->census_rollout);
+  game_destroy(simmer->pool_leaves_game);
+  pool_leaves_destroy(simmer->pool_leaves);
   free(simmer);
 }
 
@@ -1100,6 +1138,60 @@ static uint64_t simmer_min_rollouts(const SimArgs *sim_args) {
   return samples;
 }
 
+// The game's players are changed through the game, as in the functions that
+// set a worker's rollout players above.
+static void simmer_set_pool_leaves_players(const Simmer *simmer,
+                                           const Game *game) {
+  for (int player_index = 0; player_index < 2; player_index++) {
+    Player *player = game_get_player(game, player_index);
+    player_set_leaves(player, simmer->pool_leaves->klv);
+    player_set_pool_shift(player, simmer->pool_leaves->table,
+                          POOL_SHIFT_POOL_LEAVES_WEIGHT_MILLI);
+  }
+}
+
+// At the start of a sim, after its workers have the sim's game: when the
+// mover's leave values are exact and the bag holds at least a rack, builds
+// the leaves of the pool of the bag and both racks and gives them to both
+// players of every worker's game, in place of the leaves and the pool shift
+// simmer_worker_set_rollout_pool_shift gave them.
+static void simmer_prepare_pool_leaves(Simmer *simmer,
+                                       const SimArgs *sim_args) {
+  game_destroy(simmer->pool_leaves_game);
+  simmer->pool_leaves_game = NULL;
+  pool_leaves_destroy(simmer->pool_leaves);
+  simmer->pool_leaves = NULL;
+  const Game *game = sim_args->game;
+  const int mover_index = game_get_player_on_turn_index(game);
+  const Player *mover = game_get_player(game, mover_index);
+  const PoolShiftTable *table = player_get_pool_shift_table(mover);
+  if (table == NULL ||
+      player_get_pool_shift_weight(mover) != POOL_SHIFT_EXACT_WEIGHT_MILLI ||
+      table->exact_values == NULL ||
+      table->ld_size != ld_get_size(game_get_ld(game)) ||
+      !pool_shift_table_matches_klv(table, player_get_klv(mover)) ||
+      game_get_real_bag_size(game) < RACK_SIZE) {
+    return;
+  }
+  simmer->pool_leaves = pool_leaves_create(
+      table, game_get_ld(game), game_get_bag(game),
+      player_get_rack(game_get_player(game, 1 - mover_index)),
+      player_get_rack(mover), simmer->num_threads);
+  for (int thread_index = 0; thread_index < simmer->num_threads;
+       thread_index++) {
+    simmer_set_pool_leaves_players(simmer, simmer->workers[thread_index]->game);
+  }
+  simmer->pool_leaves_game = game_duplicate(game);
+  simmer_set_pool_leaves_players(simmer, simmer->pool_leaves_game);
+}
+
+// The game the census reads the leaves and the pool shift of: the rollouts'.
+static const Game *simmer_get_census_game(const Simmer *simmer,
+                                          const SimArgs *sim_args) {
+  return simmer->pool_leaves_game != NULL ? simmer->pool_leaves_game
+                                          : sim_args->game;
+}
+
 // At the start of a sim steered by the census: the census of its position and
 // candidates, built on the sim's threads, and a census worker for each of its
 // workers. Under -scensus auto, the census steers the sim only when its
@@ -1118,10 +1210,12 @@ static void simmer_prepare_census_rollout(Simmer *simmer,
   }
   if (sim_args->census_rollout_auto) {
     simmer->use_census_rollout = census_rollout_prepare_if_it_pays(
-        simmer->census_rollout, sim_args->game, sim_args->move_list,
-        simmer_min_rollouts(sim_args), sim_args->num_plies);
+        simmer->census_rollout, simmer_get_census_game(simmer, sim_args),
+        sim_args->move_list, simmer_min_rollouts(sim_args),
+        sim_args->num_plies);
   } else {
-    census_rollout_prepare(simmer->census_rollout, sim_args->game,
+    census_rollout_prepare(simmer->census_rollout,
+                           simmer_get_census_game(simmer, sim_args),
                            sim_args->move_list);
   }
   sim_results_set_census_rollout(simmer->sim_results,
@@ -1237,6 +1331,9 @@ RandomVariables *rv_sim_create(RandomVariables *rvs, const SimArgs *sim_args,
   }
   simmer->sim_results = sim_results;
   simmer->census_rollout = NULL;
+  simmer->pool_leaves = NULL;
+  simmer->pool_leaves_game = NULL;
+  simmer_prepare_pool_leaves(simmer, sim_args);
   simmer_prepare_census_rollout(simmer, sim_args);
 
   rvs->data = simmer;
@@ -1295,6 +1392,7 @@ void rv_sim_reset(RandomVariables *rvs, const SimArgs *sim_args) {
                       sim_args->num_plies, sim_args->seed,
                       sim_args->use_heat_map);
   }
+  simmer_prepare_pool_leaves(simmer, sim_args);
   simmer_prepare_census_rollout(simmer, sim_args);
 }
 

@@ -4,6 +4,7 @@
 #include "../def/move_defs.h"
 #include "../def/players_data_defs.h"
 #include "equity.h"
+#include "inference_temperatures.h"
 #include "klv.h"
 #include "kwg.h"
 #include "letter_distribution.h"
@@ -11,6 +12,7 @@
 #include "peg_adjust.h"
 #include "pool_shift.h"
 #include "rack_info_table.h"
+#include "rack_value_table.h"
 #include "wmp.h"
 #include "word_info_table.h"
 #include <stdbool.h>
@@ -36,6 +38,9 @@ WordInfoTable *players_data_get_word_info_table(const PlayersData *players_data,
                                                 int player_index);
 PATWeights *players_data_get_pat(const PlayersData *players_data,
                                  int player_index);
+InferenceTemperatures *
+players_data_get_inference_temperatures(const PlayersData *players_data,
+                                        int player_index);
 PegAdjust *players_data_get_peg_adjust(const PlayersData *players_data,
                                        int player_index);
 uint32_t
@@ -90,6 +95,14 @@ int players_data_get_pool_shift_weight(const PlayersData *players_data,
 void players_data_update_pool_shift(PlayersData *players_data,
                                     const LetterDistribution *ld);
 // The player's table, or NULL when its weight is 0 or it has no leaves.
+// Gives each player's pool shift table the full racks' values for the exact
+// leave values (see pool_shift.h): exact_values[player_index], or none for
+// NULL. A table both players share has them if either player gives them.
+// Returns false if a player's values are not for that player's table.
+bool players_data_set_pool_shift_exact_values(
+    PlayersData *players_data, const RackValueTable *const exact_values[2],
+    const LetterDistribution *ld);
+
 const PoolShiftTable *
 players_data_get_pool_shift_table(const PlayersData *players_data,
                                   int player_index);

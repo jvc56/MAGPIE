@@ -581,7 +581,7 @@ typedef struct AtomicMaxThread {
 
 // The value and slot of a thread's raise_idx-th raise.
 static int32_t atomic_max_raise(uint32_t seed, int raise_idx, int *slot_idx) {
-  uint32_t state = seed * 2654435761U + (uint32_t)raise_idx * 40503U;
+  uint32_t state = (seed * 2654435761U) + ((uint32_t)raise_idx * 40503U);
   state ^= state >> 13;
   state *= 2246822519U;
   state ^= state >> 16;

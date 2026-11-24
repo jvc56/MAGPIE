@@ -195,6 +195,11 @@ int player_get_pool_shift_weight(const Player *player) {
   return player->pool_shift_weight;
 }
 
+void player_set_leaves(Player *player, const KLV *klv) {
+  player->klv = klv;
+  player->rack_info_table = NULL;
+}
+
 void player_set_pool_shift(Player *player, const PoolShiftTable *table,
                            int weight_milli) {
   player->pool_shift_table = table;

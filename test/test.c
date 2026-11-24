@@ -46,8 +46,11 @@
 #include "gzip_reader_test.h"
 #include "heat_map_test.h"
 #include "history_replay_test.h"
+#include "infer_bench_test.h"
 #include "infer_cmp_test.h"
+#include "infer_match_test.h"
 #include "infer_test.h"
+#include "inference_temperatures_test.h"
 #include "klv_test.h"
 #include "kwg_alpha_test.h"
 #include "kwg_maker_test.h"
@@ -82,6 +85,8 @@
 #include "peg_validate_test.h"
 #include "play_chooser_test.h"
 #include "players_data_test.h"
+#include "pool_leaves_bench_test.h"
+#include "pool_leaves_equivalence_test.h"
 #include "pool_shift_test.h"
 #include "position_lengths_test.h"
 #include "rack_info_table_test.h"
@@ -163,9 +168,11 @@ static TestEntry test_table[] = {
     {"eqadj", test_equity_adjustments},
     {"pegadjust", test_peg_adjust},
     {"poolshift", test_pool_shift},
+    {"poolleavesequiv", test_pool_leaves_equivalence},
     {"gameplay", test_gameplay},
     {"stats", test_stats},
     {"infer", test_infer},
+    {"infbenchmetrics", test_infer_bench_metrics},
     {"rv", test_random_variable},
     {"am", test_alias_method},
     {"hm", test_heat_map},
@@ -233,6 +240,7 @@ static TestEntry test_table[] = {
     {"pegpessdraw", test_peg_pessfull_draw_regression},
     {"pegtopkall", test_peg_pegtopk_all},
     {"pegfit", test_peg_fit},
+    {"inftemps", test_inference_temperatures},
     {"playchooser", test_play_chooser},
     {NULL, NULL} // Sentinel value to mark end of array
 };
@@ -270,6 +278,7 @@ static TestEntry on_demand_test_table[] = {
     {"viaopp", test_via_opp_must_block_every_depth},
     {"viastress", test_via_interrupted_reasonable_under_time_pressure},
     {"infercmp", test_infer_cmp},
+    {"infbench", test_infer_bench},
     {"censusrolloutbench", test_census_rollout_bench},
     {"lamcreplay", test_lamc_replay},
     {"nestedcr", test_nested_cr},
@@ -342,6 +351,14 @@ void run_all(void) {
 }
 
 void run_test(const char *subtest) {
+  if (has_prefix("infmatch:", subtest)) {
+    infer_match_run_spec(subtest + strlen("infmatch:"));
+    return;
+  }
+  if (has_prefix("infbench:", subtest)) {
+    infer_bench_run_spec(subtest + strlen("infbench:"));
+    return;
+  }
   if (has_prefix("xsdata:", subtest)) {
     test_xs_data_paths(subtest + strlen("xsdata:"));
     return;
@@ -365,6 +382,14 @@ void run_test(const char *subtest) {
   }
   if (has_prefix("patopeningsim:", subtest)) {
     pat_opening_sim_run_spec(subtest + strlen("patopeningsim:"));
+    return;
+  }
+  if (has_prefix("poolleavesbench:", subtest)) {
+    pool_leaves_bench_run_spec(subtest + strlen("poolleavesbench:"));
+    return;
+  }
+  if (has_prefix("poolleavesequiv:", subtest)) {
+    pool_leaves_equivalence_run_spec(subtest + strlen("poolleavesequiv:"));
     return;
   }
   if (has_prefix("egspeedbench:", subtest)) {

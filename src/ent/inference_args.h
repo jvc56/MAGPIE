@@ -6,6 +6,7 @@
 #include "../ent/game.h"
 #include "../ent/game_history.h"
 #include "../ent/inference_results.h"
+#include "../ent/inference_temperatures.h"
 #include "../ent/move.h"
 #include "../ent/rack.h"
 #include "../ent/thread_control.h"
@@ -25,6 +26,13 @@ typedef struct InferenceArgs {
   int target_num_exch;
   int leave_list_capacity;
   Equity equity_margin;
+  Equity temperature;
+  // Each player's temperatures by bag, or NULL. When the inferring player
+  // (the one that is not the target) has a table, inference uses the table's
+  // temperature for the real bag before the target's play instead of
+  // temperature, and an effectively unlimited margin instead of
+  // equity_margin.
+  const InferenceTemperatures *temperatures[2];
   const Move *target_move;
   Rack *target_played_tiles;
   Rack *target_known_rack;
@@ -50,6 +58,9 @@ infer_args_fill(InferenceArgs *args, int leave_list_capacity, Equity eq_margin,
   args->target_num_exch = target_num_exch;
   args->leave_list_capacity = leave_list_capacity;
   args->equity_margin = eq_margin;
+  args->temperature = 0;
+  args->temperatures[0] = NULL;
+  args->temperatures[1] = NULL;
   args->target_move = NULL;
   args->target_played_tiles = target_played_tiles;
   args->target_known_rack = target_known_rack;

@@ -109,6 +109,10 @@ struct CensusRollout {
   // By lattice rank, the leave value of the multiset.
   Equity *leave;
   const KLV *leave_klv;
+  // That KLV's instance and mutation count when its leaves were read: a sim's
+  // own leaves (see PoolLeaves) can be built where the last sim's were.
+  uint64_t leave_klv_instance_id;
+  uint64_t leave_klv_mutation_counter;
   // Shifted root-cache entries belong to this sim's prepared table.
   uint64_t pool_shift_table_instance_id;
   // One per thread that builds tables.
@@ -716,9 +720,13 @@ static void census_rollout_ensure_leaves(CensusRollout *census,
                                          const Game *game) {
   census_rollout_ensure_lattice(census, game);
   const KLV *klv = player_get_klv(game_get_player(game, 0));
-  if (klv != census->leave_klv) {
+  if (klv != census->leave_klv ||
+      klv_get_instance_id(klv) != census->leave_klv_instance_id ||
+      klv_get_mutation_counter(klv) != census->leave_klv_mutation_counter) {
     census_leaves_from_klv(census->lattice, klv, census->leave);
     census->leave_klv = klv;
+    census->leave_klv_instance_id = klv_get_instance_id(klv);
+    census->leave_klv_mutation_counter = klv_get_mutation_counter(klv);
   }
   census->pool_shift_table_instance_id = 0;
   for (int player_index = 0; player_index < 2; player_index++) {
@@ -1104,8 +1112,10 @@ static void census_rollout_gather(const CensusRollout *census, const Rack *rack,
                                 &candidate_lasts[split_idx]);
     }
     if (rack_shift != NULL) {
+      // The rack shift has each kept subset's value as a leave, from the
+      // table that matches the census's KLV (see PoolShiftRack).
       const int kept_size = rack_shift->sizes[split_idx];
-      leave_values[split_idx] = census->leave[rack_shift->ranks[split_idx]] +
+      leave_values[split_idx] = rack_shift->values[split_idx] +
                                 peg_by_tiles_played[RACK_SIZE - kept_size] +
                                 rack_shift->shifts[split_idx];
     } else {

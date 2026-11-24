@@ -10,6 +10,7 @@
 #include "../util/string_util.h"
 #include "bit_rack.h"
 #include "equity.h"
+#include "inference_temperatures.h"
 #include "klv.h"
 #include "kwg.h"
 #include "letter_distribution.h"
@@ -19,6 +20,7 @@
 #include "pool_shift.h"
 #include "rack.h"
 #include "rack_info_table.h"
+#include "rack_value_table.h"
 #include "wmp.h"
 #include "word_info_table.h"
 #include <stdint.h>
@@ -164,6 +166,29 @@ players_data_get_pool_shift_table(const PlayersData *players_data,
 }
 
 // Frees both players' pool shift tables, once if they share one.
+bool players_data_set_pool_shift_exact_values(
+    PlayersData *players_data, const RackValueTable *const exact_values[2],
+    const LetterDistribution *ld) {
+  for (int player_index = 0; player_index < 2; player_index++) {
+    if (players_data->pool_shift_tables[player_index] != NULL) {
+      players_data->pool_shift_tables[player_index]->exact_values = NULL;
+    }
+  }
+  bool all_set = true;
+  for (int player_index = 0; player_index < 2; player_index++) {
+    PoolShiftTable *table = players_data->pool_shift_tables[player_index];
+    if (exact_values[player_index] == NULL) {
+      continue;
+    }
+    if (table == NULL || (table->exact_values != exact_values[player_index] &&
+                          !pool_shift_table_set_exact_values(
+                              table, exact_values[player_index], ld))) {
+      all_set = false;
+    }
+  }
+  return all_set;
+}
+
 static void players_data_destroy_pool_shift_tables(PlayersData *players_data) {
   if (players_data->pool_shift_tables[1] !=
       players_data->pool_shift_tables[0]) {
@@ -284,6 +309,13 @@ PATWeights *players_data_get_pat(const PlayersData *players_data,
       players_data, PLAYERS_DATA_TYPE_PAT, player_index);
 }
 
+InferenceTemperatures *
+players_data_get_inference_temperatures(const PlayersData *players_data,
+                                        int player_index) {
+  return (InferenceTemperatures *)players_data_get_data(
+      players_data, PLAYERS_DATA_TYPE_INFERENCE_TEMPERATURES, player_index);
+}
+
 PegAdjust *players_data_get_peg_adjust(const PlayersData *players_data,
                                        int player_index) {
   return (PegAdjust *)players_data_get_data(
@@ -333,6 +365,9 @@ void *players_data_create_data(players_data_t players_data_type,
   case PLAYERS_DATA_TYPE_PEG_ADJUST:
     data = peg_adjust_create(data_paths, data_name, error_stack);
     break;
+  case PLAYERS_DATA_TYPE_INFERENCE_TEMPERATURES:
+    data = inference_temperatures_create(data_paths, data_name, error_stack);
+    break;
   case NUMBER_OF_DATA:
     log_fatal("cannot create invalid players data type");
     break;
@@ -367,6 +402,9 @@ void players_data_destroy_data(PlayersData *players_data,
       break;
     case PLAYERS_DATA_TYPE_PEG_ADJUST:
       peg_adjust_destroy(players_data->data[data_index]);
+      break;
+    case PLAYERS_DATA_TYPE_INFERENCE_TEMPERATURES:
+      inference_temperatures_destroy(players_data->data[data_index]);
       break;
     case NUMBER_OF_DATA:
       log_fatal("cannot destroy invalid players data type");
@@ -421,6 +459,10 @@ const char *players_data_get_data_name(const PlayersData *players_data,
     case PLAYERS_DATA_TYPE_PEG_ADJUST:
       data_name = peg_adjust_get_name(players_data->data[data_index]);
       break;
+    case PLAYERS_DATA_TYPE_INFERENCE_TEMPERATURES:
+      data_name =
+          inference_temperatures_get_name(players_data->data[data_index]);
+      break;
     case NUMBER_OF_DATA:
       log_fatal("cannot destroy invalid players data type");
       break;
@@ -443,7 +485,8 @@ PlayersData *players_data_create(bool use_wmp) {
       } else if (data_index == PLAYERS_DATA_TYPE_RIT ||
                  data_index == PLAYERS_DATA_TYPE_WIT ||
                  data_index == PLAYERS_DATA_TYPE_PAT ||
-                 data_index == PLAYERS_DATA_TYPE_PEG_ADJUST) {
+                 data_index == PLAYERS_DATA_TYPE_PEG_ADJUST ||
+                 data_index == PLAYERS_DATA_TYPE_INFERENCE_TEMPERATURES) {
         // RIT and WIT files are opt-in: callers must explicitly enable them
         // with -rit/-wit (or the per-player variants) since they are built by
         // a convert command and may not exist for every lexicon. PAT weights
@@ -495,7 +538,8 @@ bool players_data_type_is_nullable(players_data_t players_data_type) {
          players_data_type == PLAYERS_DATA_TYPE_RIT ||
          players_data_type == PLAYERS_DATA_TYPE_WIT ||
          players_data_type == PLAYERS_DATA_TYPE_PAT ||
-         players_data_type == PLAYERS_DATA_TYPE_PEG_ADJUST;
+         players_data_type == PLAYERS_DATA_TYPE_PEG_ADJUST ||
+         players_data_type == PLAYERS_DATA_TYPE_INFERENCE_TEMPERATURES;
 }
 
 void players_data_set(PlayersData *players_data,

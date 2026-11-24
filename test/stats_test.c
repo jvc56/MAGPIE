@@ -212,7 +212,32 @@ void test_combined_stats(void) {
   free(fragmented_stats);
 }
 
+static void test_weighted_stats(void) {
+  Stat *first = stat_create(false);
+  Stat *second = stat_create(false);
+  Stat *combined = stat_create(false);
+  stat_push_weighted(first, 2, 10, 0.25);
+  stat_push_weighted(second, 6, 20, 0.75);
+  Stat *parts[] = {first, second};
+  stats_combine(parts, 2, combined);
+  assert(stat_get_num_samples(combined) == 30);
+  assert(within_epsilon(stat_get_total_weight(combined), 1));
+  assert(within_epsilon(stat_get_mean(combined), 5));
+  assert(within_epsilon(stat_get_variance(combined), 3));
+  stat_reset(first);
+  stat_reset(second);
+  stat_push_weighted(first, 2, 10, 0);
+  stats_combine(parts, 2, combined);
+  assert(stat_get_num_samples(combined) == 10);
+  assert(stat_get_num_unique_samples(combined) == 1);
+  assert(stat_get_total_weight(combined) == 0);
+  stat_destroy(first);
+  stat_destroy(second);
+  stat_destroy(combined);
+}
+
 void test_stats(void) {
+  test_weighted_stats();
   test_single_stat();
   test_combined_stats();
 }
