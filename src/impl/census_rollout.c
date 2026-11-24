@@ -627,13 +627,27 @@ static void census_rollout_table_compact(CensusRolloutTable *table,
   }
 }
 
+// The sim a trial build of the position's table must pay for (see
+// census_rollout_build_pays).
+typedef struct CensusRolloutTrial {
+  int root_anchors;
+  int candidate_anchors;
+  uint64_t rollouts;
+  int plies;
+} CensusRolloutTrial;
+
 // Builds the play scores of the anchors in build_cols, by lane, of the board,
 // over its pool, sparsely: each anchor's build resets only what it wrote.
-static void census_rollout_table_build(const CensusRollout *census,
+// With a trial, it stops and returns false, leaving the table unusable, once
+// the table has more entries than pay for the trial's sim: the entries only
+// grow from one anchor to the next, so the whole table would not pay either.
+// Otherwise it returns true.
+static bool census_rollout_table_build(const CensusRollout *census,
                                        CensusRolloutBuilder *builder,
                                        CensusRolloutTable *table,
                                        const Game *game,
-                                       const uint32_t *build_cols) {
+                                       const uint32_t *build_cols,
+                                       const CensusRolloutTrial *trial) {
   if (builder->scratch == NULL) {
     const uint32_t size = census_lattice_get_size(census->lattice);
     builder->scratch = malloc_or_die(sizeof(Equity) * size);
@@ -676,10 +690,18 @@ static void census_rollout_table_build(const CensusRollout *census,
         }
         builder->scratch[rank] = CENSUS_UNPLAYABLE;
       }
+      if (trial != NULL &&
+          !census_rollout_build_pays(
+              table->number_of_entries, trial->root_anchors,
+              trial->candidate_anchors, trial->rollouts, trial->plies)) {
+        free(ranks);
+        return false;
+      }
     }
   }
   census_rollout_table_compact(table, census->lattice, ranks);
   free(ranks);
+  return true;
 }
 
 static void census_rollout_board_load(CensusRolloutBoard *board,
@@ -807,8 +829,8 @@ static void census_rollout_build_boards(const CensusRolloutBuildWork *work) {
        board_idx = atomic_fetch_add(work->next_board, 1)) {
     CensusRolloutBoard *board =
         board_idx == 0 ? &census->root : &census->candidates[board_idx - 1];
-    census_rollout_table_build(census, work->builder, &board->table,
-                               board->game, board->build_cols);
+    (void)census_rollout_table_build(census, work->builder, &board->table,
+                                     board->game, board->build_cols, NULL);
   }
 }
 
@@ -955,14 +977,23 @@ bool census_rollout_prepare_if_it_pays(CensusRollout *census, const Game *game,
                                     candidate_anchors, rollouts, plies)) {
     return false;
   }
-  census_rollout_ensure_leaves(census, game);
-  census_rollout_table_build(census, &census->builders[0], &census->root.table,
-                             census->root.game, census->root.build_cols);
-  if (!census_rollout_build_pays(census->root.table.number_of_entries,
-                                 census_rollout_build_anchors(&census->root),
-                                 candidate_anchors, rollouts, plies)) {
+  // The position's table says how many entries the candidates' are likely to
+  // hold. Its build stops at the first anchor after which they cannot pay,
+  // and it needs the lattice but not the leaves, which are read only once
+  // the census is to be used.
+  census_rollout_ensure_lattice(census, game);
+  const CensusRolloutTrial trial = {
+      .root_anchors = census_rollout_build_anchors(&census->root),
+      .candidate_anchors = candidate_anchors,
+      .rollouts = rollouts,
+      .plies = plies,
+  };
+  if (!census_rollout_table_build(census, &census->builders[0],
+                                  &census->root.table, census->root.game,
+                                  census->root.build_cols, &trial)) {
     return false;
   }
+  census_rollout_ensure_leaves(census, game);
   census_rollout_build_tables(census, 1);
   census->sim_number++;
   return true;

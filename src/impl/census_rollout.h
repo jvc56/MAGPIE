@@ -123,8 +123,10 @@ void census_rollout_prepare(CensusRollout *census, const Game *game,
 // For -scensus auto: census_rollout_prepare when the build pays for itself.
 // For a sim of at least rollouts rollouts of plies plies, it builds the
 // position's table if census_rollout_build_may_pay holds, then the
-// candidates' if census_rollout_build_pays holds. Returns whether it built
-// them; if not, the census steers none of the sim's rollouts.
+// candidates' if census_rollout_build_pays holds. The position's table is
+// built only as far as it takes to know that it does not hold. Returns
+// whether it built them; if not, the census steers none of the sim's
+// rollouts.
 bool census_rollout_prepare_if_it_pays(CensusRollout *census, const Game *game,
                                        const MoveList *candidates,
                                        uint64_t rollouts, int plies);
