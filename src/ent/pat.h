@@ -113,6 +113,11 @@ struct PATWeights {
   // so evaluation and training refuse an unprepared one rather than scoring
   // with empty tables.
   bool prepared;
+  // Whether the tables were last prepared from a lexicon, and what then
+  // identifies that lexicon and its letters' scores: preparing from the same
+  // ones again would change nothing, so pat_prepare_hook_flex skips it.
+  bool prepared_from_lexicon;
+  uint64_t prepared_lexicon_hash;
   uint64_t mutation_counter;
   // The version named on the file's header line (see PAT_VERSION).
   int version;

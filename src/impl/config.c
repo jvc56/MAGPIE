@@ -15875,7 +15875,11 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
     for (int player_index = 0; player_index < 2; player_index++) {
       PATWeights *player_pat =
           players_data_get_pat(config->players_data, player_index);
-      if (player_pat) {
+      // Weights the players share, which are of one lexicon (see above),
+      // were prepared for the first player.
+      const bool prepared_for_first_player =
+          player_index == 1 && player_pat == p1_pat;
+      if (player_pat && !prepared_for_first_player) {
         pat_prepare_hook_flex(
             player_pat,
             players_data_get_kwg(config->players_data, player_index),

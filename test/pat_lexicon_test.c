@@ -4,15 +4,19 @@
 #include "../src/def/letter_distribution_defs.h"
 #include "../src/def/pat_defs.h"
 #include "../src/ent/dictionary_word.h"
+#include "../src/ent/equity.h"
 #include "../src/ent/kwg.h"
 #include "../src/ent/letter_distribution.h"
 #include "../src/ent/pat.h"
 #include "../src/ent/pat_lexicon.h"
 #include "../src/impl/config.h"
 #include "../src/impl/kwg_maker.h"
+#include "../src/util/io_util.h"
 #include "test_util.h"
 #include <assert.h>
 #include <stddef.h>
+#include <stdint.h>
+#include <stdlib.h>
 
 static MachineLetter pat_lexicon_test_ml(const LetterDistribution *ld,
                                          const char *letter) {
@@ -21,16 +25,11 @@ static MachineLetter pat_lexicon_test_ml(const LetterDistribution *ld,
   return ml;
 }
 
-// A six-word lexicon small enough to count by hand: AE AT CAT CATS QI TA,
-// with English tile values (A E I S T 1, C 3, Q 10).
-static void test_pat_lexicon_tables(void) {
-  Config *config = config_create_or_die("set -lex CSW21");
-  const LetterDistribution *ld = config_get_ld(config);
+static KWG *pat_lexicon_test_kwg(const LetterDistribution *ld,
+                                 const char *const *word_strings,
+                                 size_t number_of_words) {
   DictionaryWordList *words = dictionary_word_list_create();
-  static const char *const word_strings[] = {"AE",   "AT", "CAT",
-                                             "CATS", "QI", "TA"};
-  for (size_t word_idx = 0;
-       word_idx < sizeof(word_strings) / sizeof(word_strings[0]); word_idx++) {
+  for (size_t word_idx = 0; word_idx < number_of_words; word_idx++) {
     MachineLetter word[8];
     const int length =
         ld_str_to_mls(ld, word_strings[word_idx], false, word, 8);
@@ -39,6 +38,21 @@ static void test_pat_lexicon_tables(void) {
   }
   KWG *kwg = make_kwg_from_words(words, KWG_MAKER_OUTPUT_DAWG_AND_GADDAG,
                                  KWG_MAKER_MERGE_EXACT);
+  dictionary_word_list_destroy(words);
+  return kwg;
+}
+
+// A six-word lexicon small enough to count by hand: AE AT CAT CATS QI TA,
+// with English tile values (A E I S T 1, C 3, Q 10).
+static const char *const pat_lexicon_test_words[] = {"AE",   "AT", "CAT",
+                                                     "CATS", "QI", "TA"};
+
+static void test_pat_lexicon_tables(void) {
+  Config *config = config_create_or_die("set -lex CSW21");
+  const LetterDistribution *ld = config_get_ld(config);
+  KWG *kwg = pat_lexicon_test_kwg(ld, pat_lexicon_test_words,
+                                  sizeof(pat_lexicon_test_words) /
+                                      sizeof(pat_lexicon_test_words[0]));
   const MachineLetter ml_a = pat_lexicon_test_ml(ld, "A");
   const MachineLetter ml_c = pat_lexicon_test_ml(ld, "C");
   const MachineLetter ml_e = pat_lexicon_test_ml(ld, "E");
@@ -115,8 +129,73 @@ static void test_pat_lexicon_tables(void) {
 
   pat_destroy(pat);
   kwg_destroy(kwg);
-  dictionary_word_list_destroy(words);
   config_destroy(config);
 }
 
-void test_pat_lexicon(void) { test_pat_lexicon_tables(); }
+// Preparing again from the lexicon and the scores the tables were made from
+// leaves the tables as they are. Any other lexicon or score, and a lexicon
+// after none, makes them again.
+static void test_pat_lexicon_prepared_again(void) {
+  Config *config = config_create_or_die("set -lex CSW21");
+  const LetterDistribution *ld = config_get_ld(config);
+  KWG *kwg = pat_lexicon_test_kwg(ld, pat_lexicon_test_words,
+                                  sizeof(pat_lexicon_test_words) /
+                                      sizeof(pat_lexicon_test_words[0]));
+  static const char *const fewer_words[] = {"AE", "AT"};
+  KWG *fewer_kwg = pat_lexicon_test_kwg(
+      ld, fewer_words, sizeof(fewer_words) / sizeof(fewer_words[0]));
+  const MachineLetter ml_a = pat_lexicon_test_ml(ld, "A");
+  const MachineLetter ml_i = pat_lexicon_test_ml(ld, "I");
+  const MachineLetter ml_q = pat_lexicon_test_ml(ld, "Q");
+
+  PATWeights *pat = pat_create_zeroed("lexicon");
+  pat_prepare_hook_flex(pat, kwg, ld);
+  assert(pat_get_hook_flex(pat, ml_a) == 3);
+
+  // A mark that only making the tables again would remove.
+  pat->hook_flex[ml_a] = UINT8_MAX;
+  pat_prepare_hook_flex(pat, kwg, ld);
+  assert(pat_get_hook_flex(pat, ml_a) == UINT8_MAX);
+
+  // Another lexicon, and the first one back.
+  pat_prepare_hook_flex(pat, fewer_kwg, ld);
+  assert(pat_get_hook_flex(pat, ml_a) == 2);
+  assert(pat_get_hook_flex(pat, ml_q) == 0);
+  pat_prepare_hook_flex(pat, kwg, ld);
+  assert(pat_get_hook_flex(pat, ml_a) == 3);
+  assert(pat_get_hook_flex(pat, ml_q) == 1);
+
+  // Another score for Q, which is what the rest of QI scores for its I.
+  assert(pat_get_through_score_end(pat, 1, ml_i, 2) == 10);
+  LetterDistribution *rescored = malloc_or_die(sizeof(LetterDistribution));
+  *rescored = *ld;
+  rescored->scores[ml_q] = int_to_equity(5);
+  pat_prepare_hook_flex(pat, kwg, rescored);
+  assert(pat_get_through_score_end(pat, 1, ml_i, 2) == 5);
+  pat_prepare_hook_flex(pat, kwg, ld);
+  assert(pat_get_through_score_end(pat, 1, ml_i, 2) == 10);
+  free(rescored);
+
+  // No lexicon empties the tables, and the same lexicon then fills them.
+  pat_prepare_hook_flex(pat, NULL, ld);
+  assert(pat_get_hook_flex(pat, ml_a) == 0);
+  pat_prepare_hook_flex(pat, kwg, ld);
+  assert(pat_get_hook_flex(pat, ml_a) == 3);
+
+  // A lexicon whose nodes change in place is another lexicon.
+  pat->hook_flex[ml_a] = UINT8_MAX;
+  uint32_t *nodes = kwg_get_mutable_nodes(kwg);
+  nodes[kwg_get_number_of_nodes(kwg) - 1] ^= KWG_NODE_ACCEPTS_FLAG;
+  pat_prepare_hook_flex(pat, kwg, ld);
+  assert(pat_get_hook_flex(pat, ml_a) != UINT8_MAX);
+
+  pat_destroy(pat);
+  kwg_destroy(fewer_kwg);
+  kwg_destroy(kwg);
+  config_destroy(config);
+}
+
+void test_pat_lexicon(void) {
+  test_pat_lexicon_tables();
+  test_pat_lexicon_prepared_again();
+}
