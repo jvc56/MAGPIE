@@ -23,8 +23,8 @@ static const char *const filepath_type_names[] = {"kwg",
                                                   "word info table",
                                                   "positional adjustment table",
                                                   "pre-endgame adjustments",
-                                                  "rack value table",
-                                                  "word plus floater"};
+                                                  "inference temperatures",
+                                                  "rack value table"};
 
 void string_builder_add_directory_for_data_type(StringBuilder *sb,
                                                 const char *data_path,
