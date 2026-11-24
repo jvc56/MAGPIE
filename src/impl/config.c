@@ -376,25 +376,26 @@ struct Config {
   // when it fits in this machine's memory and the sim's rollouts pay for its
   // build (census_rollout_auto_fits, census_rollout_prepare_if_it_pays).
   bool sim_census_rollout;
-  // The LAMC settings both players share; lamc_args.enabled is unused, the
-  // three flags below say who searches.
-  LamcArgs lamc_args;
+  // Who searches with LAMC (see lamc_args).
   bool sim_lamc;
   bool p1_sim_lamc;
   bool p2_sim_lamc;
+  // The LAMC settings both players share; lamc_args.enabled is unused, the
+  // three flags above say who searches.
+  LamcArgs lamc_args;
   // -nested, and the per-player -nested1 and -nested2, which default to it.
   NestedArgs sim_nested;
   NestedArgs p1_sim_nested;
   NestedArgs p2_sim_nested;
   // -apstaticbag (see AutoplayArgs.static_until_bag).
   int autoplay_static_bag;
+  // -sfinishbag (see SimArgs.finish_max_bag), for every sim.
+  int sim_finish_bag;
   // -sfinish (see SimArgs.finish_endgame), and the per-player -sfinish1 and
   // -sfinish2 for autoplay, which default to it.
   bool sim_finish;
   bool p1_sim_finish;
   bool p2_sim_finish;
-  // -sfinishbag (see SimArgs.finish_max_bag), for every sim.
-  int sim_finish_bag;
   bool sim_census_rollout_auto;
   bool use_heat_map;
   bool print_boards;
@@ -15137,6 +15138,46 @@ static void config_load_lamc(Config *config, ErrorStack *error_stack) {
 }
 
 // Loads -sbagcycle and the per-player -sbc1 and -sbc2, which default to it.
+// Loads the LAMC, nested search, rollout finish and autoplay static bag
+// options (see config_load_data, which is at the function size limit).
+static void config_load_rollout_search(Config *config,
+                                       ErrorStack *error_stack) {
+  config_load_lamc(config, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  config_load_nested(config, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  config_load_int(config, ARG_TOKEN_AUTOPLAY_STATIC_BAG, 0, 1000,
+                  &config->autoplay_static_bag, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  config_load_bool(config, ARG_TOKEN_SIM_FINISH, &config->sim_finish,
+                   error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  if (config_get_parg_value(config, ARG_TOKEN_SIM_FINISH, 0) != NULL) {
+    config->p1_sim_finish = config->sim_finish;
+    config->p2_sim_finish = config->sim_finish;
+  }
+  config_load_bool(config, ARG_TOKEN_P1_SIM_FINISH, &config->p1_sim_finish,
+                   error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  config_load_bool(config, ARG_TOKEN_P2_SIM_FINISH, &config->p2_sim_finish,
+                   error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  config_load_int(config, ARG_TOKEN_SIM_FINISH_BAG, 0, 1000,
+                  &config->sim_finish_bag, error_stack);
+}
+
 static void config_load_sim_bag_cycle(Config *config, ErrorStack *error_stack) {
   config_load_bool(config, ARG_TOKEN_SIM_BAG_CYCLE, &config->sim_bag_cycle,
                    error_stack);
@@ -15897,43 +15938,7 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
     return;
   }
 
-  config_load_lamc(config, error_stack);
-  if (!error_stack_is_empty(error_stack)) {
-    return;
-  }
-
-  config_load_nested(config, error_stack);
-  if (!error_stack_is_empty(error_stack)) {
-    return;
-  }
-
-  config_load_int(config, ARG_TOKEN_AUTOPLAY_STATIC_BAG, 0, 1000,
-                  &config->autoplay_static_bag, error_stack);
-  if (!error_stack_is_empty(error_stack)) {
-    return;
-  }
-
-  config_load_bool(config, ARG_TOKEN_SIM_FINISH, &config->sim_finish,
-                   error_stack);
-  if (!error_stack_is_empty(error_stack)) {
-    return;
-  }
-  if (config_get_parg_value(config, ARG_TOKEN_SIM_FINISH, 0) != NULL) {
-    config->p1_sim_finish = config->sim_finish;
-    config->p2_sim_finish = config->sim_finish;
-  }
-  config_load_bool(config, ARG_TOKEN_P1_SIM_FINISH, &config->p1_sim_finish,
-                   error_stack);
-  if (!error_stack_is_empty(error_stack)) {
-    return;
-  }
-  config_load_bool(config, ARG_TOKEN_P2_SIM_FINISH, &config->p2_sim_finish,
-                   error_stack);
-  if (!error_stack_is_empty(error_stack)) {
-    return;
-  }
-  config_load_int(config, ARG_TOKEN_SIM_FINISH_BAG, 0, 1000,
-                  &config->sim_finish_bag, error_stack);
+  config_load_rollout_search(config, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
