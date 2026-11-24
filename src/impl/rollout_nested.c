@@ -2122,6 +2122,10 @@ static bool nested_parse_setting(const char *key, const char *value,
   if (strings_iequal(key, "finalists")) {
     return nested_parse_int(value, 0, 1000, &spec->finalists);
   }
+  if (strings_iequal(key, "cv")) {
+    return nested_parse_int(value, 0, NESTED_MAX_CONTROL_SAMPLES,
+                            &spec->control_samples);
+  }
   if (strings_iequal(key, "stage")) {
     return nested_parse_double(value, &spec->stage_share) &&
            spec->stage_share > 0.0 && spec->stage_share < 1.0;

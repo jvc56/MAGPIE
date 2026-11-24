@@ -677,6 +677,10 @@ static void test_nested_parse(void) {
   assert(args.levels[1].num_samples == 2);
   assert(args.levels[1].lamc_search);
   assert(!args.levels[0].paired);
+  assert(args.control_samples == 0);
+  nested_args_parse("plies=0,lamc=1,cv=8", &args, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  assert(args.control_samples == 8);
   nested_args_parse("plies=0,lamc=1,pair=1", &args, error_stack);
   assert(error_stack_is_empty(error_stack));
   assert(args.levels[0].paired);
@@ -695,11 +699,11 @@ static void test_nested_parse(void) {
   nested_args_parse("off", &args, error_stack);
   assert(error_stack_is_empty(error_stack));
   assert(!args.enabled);
-  const char *const bad[] = {"k=0",        "plies=",      "m=x",
-                             "alloc=fast", "q=1",         "k",
-                             "k=2/k=0",    "share=1/k=2", "m=1/m=1/m=1/m=1/m=1",
-                             "pair=2",     "cycle=2",     "fin=2"};
-  for (int bad_idx = 0; bad_idx < 12; bad_idx++) {
+  const char *const bad[] = {
+      "k=0",     "plies=",  "m=x",         "alloc=fast",          "q=1",
+      "k",       "k=2/k=0", "share=1/k=2", "m=1/m=1/m=1/m=1/m=1", "pair=2",
+      "cycle=2", "fin=2",   "cv=65"};
+  for (int bad_idx = 0; bad_idx < 13; bad_idx++) {
     nested_args_parse(bad[bad_idx], &args, error_stack);
     assert(error_stack_top(error_stack) == ERROR_STATUS_NESTED_BAD_SPEC);
     error_stack_reset(error_stack);
@@ -720,8 +724,9 @@ void test_nested(void) {
       "plies=0,lamc=1,pool=4,keep=2,rounds=2,m=2,dcache=1/plies=0,lamc=0,k=2",
       "plies=0,lamc=1,pool=5,keep=2,rounds=3,m=2,pair=1",
       "plies=0,lamc=1,pool=5,rounds=3,m=2,dyn=1,step=1,pair=1",
-      "plies=0,lamc=1,pool=5,keep=2,rounds=3,m=2,cycle=1"};
-  for (int spec_idx = 0; spec_idx < 11; spec_idx++) {
+      "plies=0,lamc=1,pool=5,keep=2,rounds=3,m=2,cycle=1",
+      "plies=0,lamc=1,pool=5,keep=2,rounds=3,m=2,fin=0,cv=3"};
+  for (int spec_idx = 0; spec_idx < 12; spec_idx++) {
     const uint64_t one = nested_test_sim(1, specs[spec_idx]);
     const uint64_t several = nested_test_sim(4, specs[spec_idx]);
     assert(one == several);

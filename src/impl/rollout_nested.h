@@ -118,6 +118,7 @@ const Move *nested_choose_move(NestedWorker *worker, const NestedArgs *args,
 //   share   1 to share nested rollouts (see above), 0 not to; only for the
 //           deepest level
 //   finalists, stage  NestedArgs.finalists and stage_share (any level)
+//   cv      NestedArgs.control_samples (any level)
 //   dcache  1 to cache decisions (NestedLevel.decision_cache), 0 not to
 //   universe, seeds  NestedLevel.universe and static_seeds: diverse
 //           candidates

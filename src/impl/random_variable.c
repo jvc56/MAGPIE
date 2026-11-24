@@ -607,10 +607,12 @@ void simmer_worker_destroy(SimmerWorker *simmer_worker) {
 // One rollout of simmed_play from seed's shuffled bag, rotated left by
 // rotation * RACK_SIZE letters (see bag_rotate) before the opponent's rack is
 // drawn. When record is non-NULL, the rollout's contributions to its
-// SimmedPlay are written there instead of applied. Returns its utility.
+// SimmedPlay are written there instead of applied. Without use_nested, every
+// ply is static even when the sim's nested args apply. Returns its utility.
 static double sim_rollout(const Simmer *simmer, SimmerWorker *simmer_worker,
                           SimmedPlay *simmed_play, const uint64_t seed,
-                          const int rotation, SimmedPlaySampleRecord *record) {
+                          const int rotation, const bool use_nested,
+                          SimmedPlaySampleRecord *record) {
   SimResults *sim_results = simmer->sim_results;
   Game *game = simmer_worker->game;
   MoveList *move_list = simmer_worker->move_list;
@@ -692,7 +694,7 @@ static double sim_rollout(const Simmer *simmer, SimmerWorker *simmer_worker,
     }
 
     const Move *best_play;
-    if (simmer->nested_args.enabled &&
+    if (use_nested && simmer->nested_args.enabled &&
         nested_applies(&simmer->nested_args, ply,
                        bag_get_letters(game_get_bag(game)))) {
       nested_worker_set_census(
@@ -828,6 +830,7 @@ int rv_sim_bag_cycle_rotations(const Game *game) {
 static double sim_cycled_rollouts(const Simmer *simmer,
                                   SimmerWorker *simmer_worker,
                                   SimmedPlay *simmed_play, const uint64_t seed,
+                                  const bool use_nested,
                                   SimmedPlaySampleRecord *record) {
   const int rotations = rv_sim_bag_cycle_rotations(simmer_worker->game);
   SimmedPlaySampleRecord combined;
@@ -841,7 +844,7 @@ static double sim_cycled_rollouts(const Simmer *simmer,
   for (int rotation = 0; rotation < rotations; rotation++) {
     simmed_play_sample_record_clear(&rollout);
     utility_sum += sim_rollout(simmer, simmer_worker, simmed_play, seed,
-                               rotation, &rollout);
+                               rotation, use_nested, &rollout);
     if (rotation == 0) {
       *out = rollout;
     }
@@ -858,6 +861,69 @@ static double sim_cycled_rollouts(const Simmer *simmer,
   if (record == NULL) {
     simmed_play_apply_sample_record(simmed_play, out);
     sim_results_add_iteration_count(simmer->sim_results, (uint64_t)rotations);
+  }
+  return out->utility;
+}
+
+// A sample with a control variate (NestedArgs.control_samples = k): the
+// nested sample Y, the static sample X from the same seed, and k static
+// samples X_1 .. X_k from seeds of their own. Records Y - X + mean(X_j) as
+// the sample's equity, leftover, win% and utility (its per-ply statistics are
+// Y's). Its mean is Y's, and as Y and X share their draws, its variance is
+// Var(Y - X) + Var(X) / k, far below Var(Y) when the nested and static
+// rollouts mostly agree. Records into record, or applies once when it is
+// NULL. Returns the sample's utility.
+static double sim_controlled_sample(const Simmer *simmer,
+                                    SimmerWorker *simmer_worker,
+                                    SimmedPlay *simmed_play,
+                                    const uint64_t seed,
+                                    const int control_samples,
+                                    SimmedPlaySampleRecord *record) {
+  SimmedPlaySampleRecord nested_sample;
+  SimmedPlaySampleRecord *out = record != NULL ? record : &nested_sample;
+  simmed_play_sample_record_clear(out);
+  SimmedPlaySampleRecord control;
+  double equity_sum = 0.0;
+  double leftover_sum = 0.0;
+  double win_pct_sum = 0.0;
+  double utility_sum = 0.0;
+  for (int control_idx = -1; control_idx <= control_samples; control_idx++) {
+    // -1 is the nested sample, 0 its static twin, the rest independent.
+    SimmedPlaySampleRecord *sample = control_idx < 0 ? out : &control;
+    if (control_idx >= 0) {
+      simmed_play_sample_record_clear(&control);
+    }
+    const uint64_t sample_seed =
+        control_idx <= 0
+            ? seed
+            : seed + (uint64_t)control_idx * UINT64_C(0x9E3779B97F4A7C15);
+    const bool use_nested = control_idx < 0;
+    double utility = 0.0;
+    if (simmer->bag_cycle) {
+      utility = sim_cycled_rollouts(simmer, simmer_worker, simmed_play,
+                                    sample_seed, use_nested, sample);
+    } else {
+      utility = sim_rollout(simmer, simmer_worker, simmed_play, sample_seed, 0,
+                            use_nested, sample);
+    }
+    sample->utility = utility;
+    if (control_idx < 0) {
+      continue;
+    }
+    const double sign = control_idx == 0 ? -1.0 : 1.0 / control_samples;
+    equity_sum += sign * (double)control.equity_sample;
+    leftover_sum += sign * (double)control.leftover;
+    win_pct_sum += sign * control.win_pct;
+    utility_sum += sign * utility;
+  }
+  out->equity_sample += (Equity)llround(equity_sum);
+  out->leftover += (Equity)llround(leftover_sum);
+  out->win_pct += win_pct_sum;
+  out->utility += utility_sum;
+  if (record == NULL) {
+    simmed_play_apply_sample_record(simmed_play, out);
+    sim_results_add_iteration_count(simmer->sim_results,
+                                    (uint64_t)out->num_rollouts);
   }
   return out->utility;
 }
@@ -896,15 +962,21 @@ static double rv_sim_sample_impl(RandomVariables *rvs,
                             ? reserved_seed
                             : simmed_play_get_seed(simmed_play);
   double utility;
-  if (!simmer->bag_cycle) {
-    utility = sim_rollout(simmer, simmer_worker, simmed_play, seed, 0, record);
+  const int control_samples =
+      simmer->nested_args.enabled ? simmer->nested_args.control_samples : 0;
+  if (control_samples > 0) {
+    utility = sim_controlled_sample(simmer, simmer_worker, simmed_play, seed,
+                                    control_samples, record);
+  } else if (!simmer->bag_cycle) {
+    utility =
+        sim_rollout(simmer, simmer_worker, simmed_play, seed, 0, true, record);
     // A recorded sample is counted when its record is applied.
     if (!record) {
       sim_results_increment_iteration_count(sim_results);
     }
   } else {
-    utility =
-        sim_cycled_rollouts(simmer, simmer_worker, simmed_play, seed, record);
+    utility = sim_cycled_rollouts(simmer, simmer_worker, simmed_play, seed,
+                                  true, record);
   }
   if (simmer->print_interval > 0 &&
       sample_count % simmer->print_interval == 0) {

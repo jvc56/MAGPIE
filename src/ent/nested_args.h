@@ -23,6 +23,7 @@ enum {
   NESTED_DEFAULT_STATIC_SEEDS = 3,
   // The LAMC search's bounds and defaults (NestedArgs.lamc_search).
   NESTED_MAX_POOL_SIZE = 64,
+  NESTED_MAX_CONTROL_SAMPLES = 64,
   NESTED_MAX_ROUNDS = 32,
   NESTED_MAX_EVALUATED = 256,
   NESTED_MAX_COLUMNS = 64,
@@ -154,6 +155,10 @@ typedef struct NestedArgs {
   // and the rest. The nested sim's results alone choose the play.
   int finalists;
   double stage_share;
+  // With control_samples = k > 0, each of the sim's samples is taken with a
+  // control variate: the nested sample, less a static sample from the same
+  // seed, plus the mean of k static samples from seeds of their own.
+  int control_samples;
 } NestedArgs;
 
 static inline void nested_level_set_defaults(NestedLevel *args) {
@@ -191,6 +196,7 @@ static inline void nested_args_set_defaults(NestedArgs *args) {
     nested_level_set_defaults(&args->levels[level_idx]);
   }
   args->finalists = 0;
+  args->control_samples = 0;
   args->stage_share = 0.5;
 }
 
