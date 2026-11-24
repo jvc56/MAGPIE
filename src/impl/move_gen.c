@@ -4315,10 +4315,10 @@ static inline uint64_t gen_anchor_play_key(const MoveGen *gen,
   return lane_shadow_mix(lane_key + place * LANE_HASH_MULTIPLIER) | 1;
 }
 
-// Offers an anchor's best play to the generation's best, as recording the
-// anchor's plays one by one would: see MOVE_RECORD_BEST_SMALL in
+// Offers a cached play to the generation's best, as recording the plays
+// one by one would: see MOVE_RECORD_BEST_SMALL in
 // update_best_move_or_insert_into_movelist.
-static inline void gen_offer_anchor_play(MoveGen *gen,
+static inline void gen_offer_cached_play(MoveGen *gen,
                                          const AnchorPlayEntry *play) {
   if (play->tiny_move == 0) {
     return;
@@ -4341,42 +4341,93 @@ static inline void gen_offer_anchor_play(MoveGen *gen,
   }
 }
 
-// Searches the anchor the generator is set up for, with the generation's
-// best so far set aside, so that what it finds is the anchor's own best play;
-// remembers that in entry under key, and then offers it to the generation's
-// best. With held, the entry already holds the key, and must hold what the
-// search finds.
-static void gen_search_and_remember_anchor_play(MoveGen *gen,
-                                                const Anchor *anchor,
-                                                uint32_t kwg_root_node_index,
-                                                AnchorPlayEntry *entry,
-                                                uint64_t key, bool held) {
-  MoveList *move_list = gen->move_list;
-  const SmallMove best_so_far = *move_list->small_moves[0];
-  const int count_so_far = move_list->count;
-  const Equity value_so_far = gen->best_move_equity_or_score;
-  const Equity cutoff_so_far = gen->cutoff_equity_or_score;
-  move_list->count = 0;
+// Searches one canonical BEST_SMALL lane down to cutoff. Returns an upper
+// bound on the plays still unaccounted for; EQUITY_UNDEFINED_VALUE means
+// that the best play found (including no play) answers for the whole lane.
+static Equity gen_search_lane_above_cutoff(MoveGen *gen, uint32_t root,
+                                           Equity cutoff) {
+  anchor_heap_reset(&gen->anchor_heap);
+  shadow_lane_small(gen, gen->current_row_index);
+  gen->tiles_played = 0;
+  Equity skipped_bound = EQUITY_UNDEFINED_VALUE;
+  for (int anchor_idx = 0; anchor_idx < gen->anchor_heap.count; anchor_idx++) {
+    const Anchor *anchor = &gen->anchor_heap.anchors[anchor_idx];
+    if (anchor->highest_possible_equity < cutoff) {
+      if (anchor->highest_possible_equity > skipped_bound) {
+        skipped_bound = anchor->highest_possible_equity;
+      }
+      continue;
+    }
+    if (anchor->highest_possible_equity < gen->best_move_equity_or_score) {
+      continue;
+    }
+    gen->current_anchor_col = anchor->col;
+    gen->last_anchor_col = anchor->last_anchor_col;
+    gen->anchor_right_extension_set =
+        gen_cache_get_right_extension_set(gen, anchor->col);
+    gen->current_anchor_highest_possible_score = anchor->highest_possible_score;
+    recursive_gen_small(gen, anchor->col, root, anchor->col, anchor->col,
+                        gen->dir == BOARD_HORIZONTAL_DIRECTION, 0, 1, 0);
+  }
+  // An equal bound could still hold a play with a larger tiny_move.
+  return skipped_bound < gen->best_move_equity_or_score ? EQUITY_UNDEFINED_VALUE
+                                                        : skipped_bound;
+}
+
+// A lane or anchor search needs its own best play while the generation's
+// incumbent is set aside.
+typedef struct BestSmallIncumbent {
+  SmallMove play;
+  int count;
+  Equity value;
+  Equity cutoff;
+} BestSmallIncumbent;
+
+static inline BestSmallIncumbent gen_set_aside_incumbent(MoveGen *gen) {
+  const BestSmallIncumbent incumbent = {.play = *gen->move_list->small_moves[0],
+                                        .count = gen->move_list->count,
+                                        .value = gen->best_move_equity_or_score,
+                                        .cutoff = gen->cutoff_equity_or_score};
+  gen->move_list->count = 0;
   gen->best_move_equity_or_score = EQUITY_INITIAL_VALUE;
   gen->cutoff_equity_or_score = EQUITY_INITIAL_VALUE;
-  recursive_gen_small(gen, anchor->col, kwg_root_node_index, anchor->col,
-                      anchor->col, gen->dir == BOARD_HORIZONTAL_DIRECTION, 0, 1,
-                      0);
+  return incumbent;
+}
+
+static inline void gen_restore_incumbent(MoveGen *gen,
+                                         const BestSmallIncumbent *incumbent) {
+  // The search may swap the best and spare. Restore to the current best slot.
+  *gen->move_list->small_moves[0] = incumbent->play;
+  gen->move_list->count = incumbent->count;
+  gen->best_move_equity_or_score = incumbent->value;
+  gen->cutoff_equity_or_score = incumbent->cutoff;
+}
+
+static inline AnchorPlayEntry gen_best_small_entry(const MoveGen *gen,
+                                                   uint64_t key) {
   AnchorPlayEntry found = {.key = key};
-  if (move_list->count != 0) {
-    const SmallMove *play = move_list->small_moves[0];
+  if (gen->move_list->count != 0) {
+    const SmallMove *play = gen->move_list->small_moves[0];
     found.tiny_move = play->tiny_move;
     found.value = gen->best_move_equity_or_score;
     found.score = play->metadata.score;
     found.play_length = play->metadata.play_length;
     found.tiles_played = play->metadata.tiles_played;
   }
-  // The search may have swapped the list's best and spare moves; whichever
-  // is the best now takes the best so far back.
-  *move_list->small_moves[0] = best_so_far;
-  move_list->count = count_so_far;
-  gen->best_move_equity_or_score = value_so_far;
-  gen->cutoff_equity_or_score = cutoff_so_far;
+  return found;
+}
+
+static void gen_search_and_remember_anchor_play(MoveGen *gen,
+                                                const Anchor *anchor,
+                                                uint32_t kwg_root_node_index,
+                                                AnchorPlayEntry *entry,
+                                                uint64_t key, bool held) {
+  const BestSmallIncumbent incumbent = gen_set_aside_incumbent(gen);
+  recursive_gen_small(gen, anchor->col, kwg_root_node_index, anchor->col,
+                      anchor->col, gen->dir == BOARD_HORIZONTAL_DIRECTION, 0, 1,
+                      0);
+  const AnchorPlayEntry found = gen_best_small_entry(gen, key);
+  gen_restore_incumbent(gen, &incumbent);
   assert(!held || (entry->tiny_move == found.tiny_move &&
                    entry->value == found.value && entry->score == found.score &&
                    entry->play_length == found.play_length &&
@@ -4384,7 +4435,7 @@ static void gen_search_and_remember_anchor_play(MoveGen *gen,
   if (!held) {
     *entry = found;
   }
-  gen_offer_anchor_play(gen, &found);
+  gen_offer_cached_play(gen, &found);
 }
 
 // With lanes deferred (see MoveGen.deferred_lanes): when the deferred lane
@@ -4476,7 +4527,7 @@ gen_record_scoring_plays_impl(MoveGen *gen, bool lazy) {
       anchor_play_held = anchor_play->key == anchor_play_key;
 #ifdef NDEBUG
       if (anchor_play_held) {
-        gen_offer_anchor_play(gen, anchor_play);
+        gen_offer_cached_play(gen, anchor_play);
         continue;
       }
 #endif
@@ -4752,6 +4803,88 @@ void generate_tiles_played_in_lanes(const MoveGenArgs *args, uint64_t lane_mask,
   }
 }
 
+#ifndef NDEBUG
+// Asserts that entry, which answers for lane against the generation's best
+// so far, holds what a search of the whole lane finds, so that a search input
+// the key misses fails the tests: the lane's best play, or, when the entry's
+// search left anchors out, a play that only a play bounded by them outranks.
+static void gen_assert_lane_play(MoveGen *gen, const AnchorPlayEntry *entry,
+                                 int lane, uint32_t root) {
+  const BestSmallIncumbent incumbent = gen_set_aside_incumbent(gen);
+  gen->dir = lane / BOARD_DIM;
+  gen->current_row_index = lane % BOARD_DIM;
+  const Equity skipped_bound =
+      gen_search_lane_above_cutoff(gen, root, EQUITY_INITIAL_VALUE);
+  assert(skipped_bound == EQUITY_UNDEFINED_VALUE);
+  const AnchorPlayEntry lane_best = gen_best_small_entry(gen, entry->key);
+  gen_restore_incumbent(gen, &incumbent);
+  anchor_heap_reset(&gen->anchor_heap);
+  const bool same_play = entry->tiny_move == lane_best.tiny_move &&
+                         entry->value == lane_best.value &&
+                         entry->score == lane_best.score &&
+                         entry->play_length == lane_best.play_length &&
+                         entry->tiles_played == lane_best.tiles_played;
+  if (entry->skipped_bound == EQUITY_UNDEFINED_VALUE) {
+    assert(same_play);
+    return;
+  }
+  assert(same_play ||
+         (lane_best.tiny_move != 0 && lane_best.value <= entry->skipped_bound &&
+          (entry->tiny_move == 0 || entry->value <= lane_best.value)));
+}
+#endif
+
+// A canonical lane result includes its row and direction: a cached move
+// names its board coordinates. Prefetch all the requested lanes' entries
+// before reading them, as for the lane shadows.
+static void gen_record_cached_lane_bests(MoveGen *gen, uint64_t lane_mask) {
+  uint64_t lanes = lane_mask & ((UINT64_C(1) << (2 * BOARD_DIM)) - 1);
+  const uint64_t context_key = lane_shadow_context_key(gen);
+  const uint64_t field_mask = lane_shadow_field_mask();
+  const uint32_t root = kwg_get_root_node_index(gen->kwg);
+  uint64_t *keys = gen->lane_shadow_keys;
+  for (uint64_t remaining = lanes; remaining != 0; remaining &= remaining - 1) {
+    const int lane = lowest_set_bit_index_64(remaining);
+    if (gen->row_number_of_anchors_cache[lane] == 0) {
+      lanes &= ~(UINT64_C(1) << lane);
+      continue;
+    }
+    const int row = lane % BOARD_DIM;
+    const int dir = lane / BOARD_DIM;
+    // Anchor play keys are odd. Shift the lane's odd hash to give lane
+    // plays a disjoint set of nonzero keys in the same table.
+    keys[lane] =
+        lane_shadow_key(board_get_row_cache(gen->board_lanes, row, dir),
+                        context_key + (uint64_t)lane * LANE_HASH_MULTIPLIER,
+                        field_mask)
+        << 1;
+    __builtin_prefetch(
+        lane_shadow_cache_anchor_play(gen->lane_shadow_cache, keys[lane]));
+  }
+  for (; lanes != 0; lanes &= lanes - 1) {
+    const int lane = lowest_set_bit_index_64(lanes);
+    const uint64_t key = keys[lane];
+    AnchorPlayEntry *entry =
+        lane_shadow_cache_anchor_play(gen->lane_shadow_cache, key);
+    if (entry->key != key ||
+        entry->skipped_bound >= gen->best_move_equity_or_score) {
+      gen->dir = lane / BOARD_DIM;
+      gen->current_row_index = lane % BOARD_DIM;
+      const BestSmallIncumbent incumbent = gen_set_aside_incumbent(gen);
+      const Equity skipped_bound =
+          gen_search_lane_above_cutoff(gen, root, incumbent.cutoff);
+      *entry = gen_best_small_entry(gen, key);
+      entry->skipped_bound = skipped_bound;
+      gen_restore_incumbent(gen, &incumbent);
+    } else {
+#ifndef NDEBUG
+      gen_assert_lane_play(gen, entry, lane, root);
+#endif
+    }
+    gen_offer_cached_play(gen, entry);
+  }
+}
+
 bool generate_best_small_move_in_lanes(const MoveGenArgs *args,
                                        uint64_t lane_mask,
                                        const SmallMove *incumbent,
@@ -4761,7 +4894,7 @@ bool generate_best_small_move_in_lanes(const MoveGenArgs *args,
   gen_load_position(gen, args);
   assert(gen->move_record_type == MOVE_RECORD_BEST_SMALL);
   if (incumbent != NULL) {
-    // The incumbent is the best so far, so the anchor heap prunes against it
+    // The incumbent is the best so far, so the generator prunes against it
     // from the start and an equal-valued play must beat its tiny_move.
     *gen->move_list->small_moves[0] = *incumbent;
     gen->move_list->count = 1;
@@ -4769,6 +4902,11 @@ bool generate_best_small_move_in_lanes(const MoveGenArgs *args,
     gen->cutoff_equity_or_score = incumbent_value;
   }
   rack_copy(&gen->full_player_rack, &gen->player_rack);
+  if (gen->lane_shadow_cache != NULL && gen->best_small_canonical_ties &&
+      !gen->is_woadwage && !gen->stop_on_threshold) {
+    gen_record_cached_lane_bests(gen, lane_mask);
+    return gen->move_list->count > 0;
+  }
   anchor_heap_reset(&gen->anchor_heap);
   if (gen->lane_shadow_cache != NULL) {
     shadow_lanes_small_cached(gen, lane_mask);
