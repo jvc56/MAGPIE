@@ -1667,6 +1667,28 @@ static void add_lamc_rlamc_help_arg(arg_token_t arg_token, const char **usages,
             "hands the simulation. The rest of its plays are its best "
             "predicted. 10 by default.";
     break;
+  case ARG_TOKEN_LAMC_FINAL_EXCHANGES:
+    usages[0] = "<number_of_plays>";
+    examples[0] = "3";
+    *text = "Specifies how many exchanges LAMC always hands the simulation. "
+            "They are the best it predicts, after the top plays by static "
+            "equity. 0 by default.";
+    break;
+  case ARG_TOKEN_LAMC_REFINE:
+    usages[0] = "<true_or_false>";
+    examples[0] = "true";
+    *text = "Specifies whether LAMC spends the rest of its share of the "
+            "iterations. Once its rounds end, it samples the plays nearest "
+            "the cut for the plays it hands the simulation. Off by default.";
+    break;
+  case ARG_TOKEN_LAMC_FINAL_Z:
+    usages[0] = "<standard_deviations>";
+    examples[0] = "1";
+    *text = "Specifies the standard deviations LAMC adds to its predictions "
+            "to choose plays. It adds them to each play's predicted value "
+            "when it chooses the plays it hands the simulation. 0, the "
+            "default, chooses by the prediction alone.";
+    break;
   case ARG_TOKEN_P1_LAMC:
   case ARG_TOKEN_P2_LAMC:
     usages[0] = "<true_or_false>";
@@ -3627,6 +3649,9 @@ static void help_entry_fill(const Config *config, int token,
     case ARG_TOKEN_LAMC_MAX_BAG:
     case ARG_TOKEN_LAMC_REUSE:
     case ARG_TOKEN_LAMC_STATIC_FINALISTS:
+    case ARG_TOKEN_LAMC_FINAL_EXCHANGES:
+    case ARG_TOKEN_LAMC_REFINE:
+    case ARG_TOKEN_LAMC_FINAL_Z:
     case ARG_TOKEN_P1_LAMC:
     case ARG_TOKEN_P2_LAMC:
     case ARG_TOKEN_RLAMC:
@@ -15087,6 +15112,11 @@ static void config_load_lamc(Config *config, ErrorStack *error_stack) {
                    error_stack);
   config_load_int(config, ARG_TOKEN_LAMC_STATIC_FINALISTS, 0,
                   LAMC_MAX_POOL_SIZE, &args->static_finalists, error_stack);
+  config_load_int(config, ARG_TOKEN_LAMC_FINAL_EXCHANGES, 0, LAMC_MAX_POOL_SIZE,
+                  &args->final_exchanges, error_stack);
+  config_load_bool(config, ARG_TOKEN_LAMC_REFINE, &args->refine, error_stack);
+  config_load_double(config, ARG_TOKEN_LAMC_FINAL_Z, 0.0, 10.0, &args->final_z,
+                     error_stack);
   config_load_double(config, ARG_TOKEN_LAMC_LENGTH, 0.01, 100.0,
                      &args->length_scale, error_stack);
   config_load_double(config, ARG_TOKEN_LAMC_RADIUS, 0.0, 100.0,
@@ -17903,6 +17933,9 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_LAMC_MAX_BAG, "lamcmaxbag", 1, 1);
   arg(ARG_TOKEN_LAMC_REUSE, "lamcreuse", 1, 1);
   arg(ARG_TOKEN_LAMC_STATIC_FINALISTS, "lamcfinalstatic", 1, 1);
+  arg(ARG_TOKEN_LAMC_FINAL_EXCHANGES, "lamcfinalexch", 1, 1);
+  arg(ARG_TOKEN_LAMC_REFINE, "lamcrefine", 1, 1);
+  arg(ARG_TOKEN_LAMC_FINAL_Z, "lamcfinalz", 1, 1);
   arg(ARG_TOKEN_USE_HEAT_MAP, "useheatmap", 1, 1);
   arg(ARG_TOKEN_HUMAN_READABLE, "hr", 1, 1);
   arg(ARG_TOKEN_SHOW_MISTAKES, "mistakes", 1, 1);
@@ -18483,6 +18516,9 @@ static void config_add_settings_to_string_builder_internal(const Config *config,
     case ARG_TOKEN_LAMC_MAX_BAG:
     case ARG_TOKEN_LAMC_REUSE:
     case ARG_TOKEN_LAMC_STATIC_FINALISTS:
+    case ARG_TOKEN_LAMC_FINAL_EXCHANGES:
+    case ARG_TOKEN_LAMC_REFINE:
+    case ARG_TOKEN_LAMC_FINAL_Z:
     case ARG_TOKEN_P1_LAMC:
     case ARG_TOKEN_P2_LAMC:
     case ARG_TOKEN_RLAMC:

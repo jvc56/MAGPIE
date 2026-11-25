@@ -44,6 +44,9 @@ typedef struct LamcArgs {
   bool finalists_from_all;
   // The candidates always include this many top plays by static equity.
   int static_finalists;
+  // Then this many exchanges, the best by the selection score below, so
+  // that a prior linear in static equity cannot leave every exchange out.
+  int final_exchanges;
   // Whether the sim of the candidates continues the samples the search took
   // of them, instead of starting over with other seeds. Off by default: BAI
   // starts its own statistics from zero, so it can set aside a play after a
@@ -52,6 +55,11 @@ typedef struct LamcArgs {
   // samples were lucky, so such a play is often chosen on a handful of
   // samples (docs/lamc-plan.md, "Letting BAI count the search's samples").
   bool reuse_samples;
+  // Whether a search that ends with rollouts left in its share spends them
+  // on the plays whose place relative to the cut for the candidates is least
+  // certain: rounds of shallow_samples for the pool_size plays whose
+  // surrogate means are fewest standard deviations from the cut.
+  bool refine;
   lamc_proposal_t proposal;
   gp_kernel_t kernel;
   // The surrogate's length scale, in standard deviations of each feature. Fits
@@ -61,6 +69,10 @@ typedef struct LamcArgs {
   double trust_radius;
   // The weight of the standard deviation in the acquire proposal.
   double ucb_beta;
+  // The candidates after the top static plays are the best by the
+  // surrogate's mean plus final_z of its standard deviations: a play
+  // sampled a few times with poor luck stays in while it may be good.
+  double final_z;
   // Indexed by play_feature_t.
   bool features[NUMBER_OF_PLAY_FEATURES];
 } LamcArgs;
@@ -85,6 +97,9 @@ static inline void lamc_args_set_defaults(LamcArgs *args) {
   args->equity_prior_mean = true;
   args->finalists_from_all = true;
   args->static_finalists = LAMC_DEFAULT_STATIC_FINALISTS;
+  args->final_exchanges = 0;
+  args->refine = false;
+  args->final_z = 0.0;
   args->reuse_samples = false;
   args->proposal = LAMC_PROPOSAL_ACQUIRE;
   args->kernel = GP_KERNEL_MATERN52;

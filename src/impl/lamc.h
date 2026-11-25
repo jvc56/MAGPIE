@@ -44,6 +44,9 @@ typedef struct LamcSearchLimits {
   int num_threads;
   int parent_worker_thread_index;
   ThreadControl *thread_control;
+  // The candidates the search will choose (see LamcArgs.refine); 0 for no
+  // refinement.
+  int num_finalists;
 } LamcSearchLimits;
 
 // Searches the built plays, sampling base_rvs, whose arm k is the built play
