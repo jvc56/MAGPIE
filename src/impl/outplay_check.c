@@ -7,9 +7,9 @@
 #include "../def/move_defs.h"
 #include "../def/rack_defs.h"
 #include "../ent/bag.h"
-#include "../ent/board.h"
 #include "../ent/equity.h"
 #include "../ent/game.h"
+#include "../ent/lane_shadow_cache.h"
 #include "../ent/letter_distribution.h"
 #include "../ent/move.h"
 #include "../ent/outplay_check_weights.h"
@@ -28,9 +28,18 @@ enum {
   OUTPLAY_CHECK_CANDIDATES = 8,
   OUTPLAY_CHECK_MAX_BAG = 6,
   OUTPLAY_CHECK_MAX_DRAWS = 128,
-  // Every play of a rack on an endgame board fits: the move generator stops
-  // recording past a list's capacity.
-  OUTPLAY_CHECK_MOVE_LIST_CAPACITY = 20000,
+  // Points added to a play that uses the whole rack, so that a best-play
+  // generation ranks every such play above every other (as the endgame's
+  // first reply does).
+  OUTPLAY_CHECK_GOING_OUT_PRIORITY = 100000,
+  // The size of the lane shadow cache one choice's best-play generations
+  // share (see lane_shadow_cache.h): 2^13 lane entries and 2^14 lane and
+  // anchor plays, 1 MB in all.
+  OUTPLAY_CHECK_LANE_SHADOW_INDEX_BITS = 13,
+  OUTPLAY_CHECK_ANCHOR_PLAY_INDEX_BITS = 14,
+  // The model reads whether the mover's out plays lie in 2 lanes or 3 or
+  // more, so the lanes are counted up to 3.
+  OUTPLAY_CHECK_OUT_LANES_COUNTED = 3,
 };
 
 // The draws of the bag, as counts of each letter, and their weights.
@@ -39,6 +48,9 @@ typedef struct OutplayDraws {
   int dist_size;
   uint8_t counts[OUTPLAY_CHECK_MAX_DRAWS][MAX_ALPHABET_SIZE];
   double weights[OUTPLAY_CHECK_MAX_DRAWS];
+  // The first draw with the same tiles as each: itself, but for a sampled
+  // draw that repeats an earlier one.
+  int first_same[OUTPLAY_CHECK_MAX_DRAWS];
 } OutplayDraws;
 
 static double choose(int total, int taken) {
@@ -104,6 +116,7 @@ static void fill_draws(OutplayDraws *draws, const int *unseen, int bag_size,
     const double all_ways = choose(total, bag_size);
     for (int draw_idx = 0; draw_idx < draws->count; draw_idx++) {
       draws->weights[draw_idx] /= all_ways;
+      draws->first_same[draw_idx] = draw_idx;
     }
     return;
   }
@@ -128,6 +141,14 @@ static void fill_draws(OutplayDraws *draws, const int *unseen, int bag_size,
       counts[picked]++;
     }
     draws->weights[draw_idx] = 1.0 / (double)OUTPLAY_CHECK_MAX_DRAWS;
+    draws->first_same[draw_idx] = draw_idx;
+    for (int earlier_idx = 0; earlier_idx < draw_idx; earlier_idx++) {
+      if (memcmp(draws->counts[earlier_idx], counts,
+                 (size_t)draws->dist_size) == 0) {
+        draws->first_same[draw_idx] = earlier_idx;
+        break;
+      }
+    }
   }
   draws->count = OUTPLAY_CHECK_MAX_DRAWS;
 }
@@ -143,114 +164,220 @@ static void leave_of_move(const Rack *rack, const Move *move, Rack *leave) {
   }
 }
 
-// Every play of the player on turn in game, by score, into plays.
-static void generate_all_plays(Game *game, MoveList *plays) {
-  const MoveGenArgs args = {
+// The check's best-play generations: by score, a play that uses the whole
+// rack ranking above every play that does not, the result in best, and what
+// earlier generations found for lanes that recur with the same rack taken
+// from lane_cache (a draw's racks are the same after every candidate, and a
+// candidate's play changes only a few lanes of the board).
+static MoveGenArgs best_play_args(Game *game, MoveList *best,
+                                  LaneShadowCache *lane_cache) {
+  return (MoveGenArgs){
       .game = game,
-      .move_list = plays,
-      .move_record_type = MOVE_RECORD_ALL,
+      .move_list = best,
+      .move_record_type = MOVE_RECORD_BEST_SMALL,
       .move_sort_type = MOVE_SORT_SCORE,
       .override_kwg = NULL,
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
+      .best_small_out_bonus = int_to_equity(OUTPLAY_CHECK_GOING_OUT_PRIORITY),
+      .best_small_canonical_ties = true,
+      .lane_shadow_cache = lane_cache,
   };
+}
+
+// The best play of the player on turn in game, going out ranking first: the
+// best way to go out when there is one, and otherwise the best scoring play;
+// a pass when the player has no play.
+static const SmallMove *best_play_going_out_first(Game *game, MoveList *best,
+                                                  LaneShadowCache *lane_cache) {
+  const MoveGenArgs args = best_play_args(game, best, lane_cache);
   generate_moves(&args);
+  return best->small_moves[0];
+}
+
+// The lane of a play: bit dir * BOARD_DIM + row_or_col, as
+// generate_best_small_move_in_lanes numbers the lanes.
+static int play_lane(const SmallMove *play) {
+  return small_move_is_vertical(play)
+             ? BOARD_DIM + small_move_get_col_start(play)
+             : small_move_get_row_start(play);
+}
+
+// The best play of the player on turn in game that uses all its held_tiles,
+// among the lanes of lane_mask, or NULL when there is none. The generation
+// starts from an incumbent worth just under the out bonus, which every such
+// play beats and no other play does, so it searches only the anchors where
+// the whole rack could be played.
+static const SmallMove *best_out_play_in_lanes(Game *game, MoveList *best,
+                                               LaneShadowCache *lane_cache,
+                                               uint64_t lane_mask,
+                                               int held_tiles) {
+  const MoveGenArgs args = best_play_args(game, best, lane_cache);
+  const SmallMove no_out = {0};
+  generate_best_small_move_in_lanes(
+      &args, lane_mask, &no_out,
+      int_to_equity(OUTPLAY_CHECK_GOING_OUT_PRIORITY) - 1);
+  const SmallMove *found = best->small_moves[0];
+  if (small_move_is_pass(found) ||
+      small_move_get_tiles_played(found) != held_tiles) {
+    return NULL;
+  }
+  return found;
+}
+
+// How many lanes, up to OUTPLAY_CHECK_OUT_LANES_COUNTED, hold a play of the
+// player on turn that uses all its held_tiles, given first_lane, the lane of
+// one: each further search, kept out of the lanes found so far, finds such a
+// play in another lane if there is one.
+static int count_out_lanes(Game *game, MoveList *best,
+                           LaneShadowCache *lane_cache, int held_tiles,
+                           int first_lane) {
+  uint64_t lane_mask = (UINT64_C(1) << (2 * BOARD_DIM)) - 1;
+  lane_mask &= ~(UINT64_C(1) << first_lane);
+  int lanes = 1;
+  while (lanes < OUTPLAY_CHECK_OUT_LANES_COUNTED) {
+    const SmallMove *out =
+        best_out_play_in_lanes(game, best, lane_cache, lane_mask, held_tiles);
+    if (out == NULL) {
+      break;
+    }
+    lanes++;
+    lane_mask &= ~(UINT64_C(1) << play_lane(out));
+  }
+  return lanes;
 }
 
 // The features of `after` (the opponent on turn, the mover holding held):
-// what the opponent can play, and then the mover.
+// what the opponent can play, and then the mover. Best-play generations answer
+// them all: going out ranks first, so one generation for each side says
+// whether it can go out and for how much (or, for the opponent, its best score
+// otherwise), and a mover who can go out has its out plays' lanes counted.
 static void find_features(Game *after, int mover_idx, const Rack *held,
-                          MoveList *plays, OutplayCheckFeatures *features) {
+                          MoveList *best, LaneShadowCache *lane_cache,
+                          OutplayCheckFeatures *features) {
   const int opp_idx = 1 - mover_idx;
   const int opp_tiles =
       rack_get_total_letters(player_get_rack(game_get_player(after, opp_idx)));
   *features = (OutplayCheckFeatures){0};
   game_set_player_on_turn_index(after, opp_idx);
-  generate_all_plays(after, plays);
-  for (int play_idx = 0; play_idx < move_list_get_count(plays); play_idx++) {
-    const Move *play = move_list_get_move(plays, play_idx);
-    if (move_get_type(play) != GAME_EVENT_TILE_PLACEMENT_MOVE) {
-      continue;
-    }
-    const int score = equity_to_int(move_get_score(play));
-    if (score > features->opponent_best_score) {
-      features->opponent_best_score = score;
-    }
-    if (move_get_tiles_played(play) == opp_tiles &&
-        (!features->opponent_can_go_out ||
-         score > features->opponent_best_out_score)) {
-      features->opponent_best_out_score = score;
+  const SmallMove *opp_best =
+      best_play_going_out_first(after, best, lane_cache);
+  if (!small_move_is_pass(opp_best)) {
+    const int score = (int)small_move_get_score(opp_best);
+    if (small_move_get_tiles_played(opp_best) == opp_tiles) {
       features->opponent_can_go_out = true;
+      features->opponent_best_out_score = score;
+    } else {
+      features->opponent_best_score = score;
     }
   }
   const int held_tiles = rack_get_total_letters(held);
   game_set_player_on_turn_index(after, mover_idx);
-  generate_all_plays(after, plays);
-  game_set_player_on_turn_index(after, opp_idx);
-  uint64_t lanes = 0;
-  for (int play_idx = 0; play_idx < move_list_get_count(plays); play_idx++) {
-    const Move *play = move_list_get_move(plays, play_idx);
-    if (move_get_type(play) != GAME_EVENT_TILE_PLACEMENT_MOVE ||
-        move_get_tiles_played(play) != held_tiles) {
-      continue;
-    }
-    const int score = equity_to_int(move_get_score(play));
-    if (features->own_out_plays == 0 || score > features->own_best_out_score) {
-      features->own_best_out_score = score;
-    }
-    features->own_out_plays++;
-    const bool vertical = board_is_dir_vertical(move_get_dir(play));
-    lanes |= UINT64_C(1) << (vertical ? BOARD_DIM + move_get_col_start(play)
-                                      : move_get_row_start(play));
+  const SmallMove *own_out =
+      best_out_play_in_lanes(after, best, lane_cache,
+                             (UINT64_C(1) << (2 * BOARD_DIM)) - 1, held_tiles);
+  if (own_out != NULL) {
+    features->own_can_go_out = true;
+    features->own_best_out_score = (int)small_move_get_score(own_out);
+    features->own_out_lanes = count_out_lanes(after, best, lane_cache,
+                                              held_tiles, play_lane(own_out));
   }
-  features->own_out_lanes = __builtin_popcountll(lanes);
+  game_set_player_on_turn_index(after, opp_idx);
 }
 
 // The scratch one choice needs.
 typedef struct OutplayScratch {
   MoveList *candidates;
-  MoveList *plays;
-  Game *after;
+  MoveList *best;
+  LaneShadowCache *lane_cache;
+  // The position after each candidate that empties the bag.
+  Game *afters[OUTPLAY_CHECK_CANDIDATES];
   OutplayDraws draws;
+  // The model's value of each draw after each candidate that empties the bag,
+  // for the draws that repeat it.
+  double draw_values[OUTPLAY_CHECK_CANDIDATES][OUTPLAY_CHECK_MAX_DRAWS];
 } OutplayScratch;
 
-// The mean value, over the draws, of the position after candidate, which
-// empties the bag.
-static double candidate_model_value(OutplayScratch *scratch, const Game *game,
-                                    const Move *candidate, const Rack *leave,
-                                    const int *unseen,
-                                    const OutplayCheckWeights *weights) {
+// For each of the num_emptying candidates in emptying, which empty the bag
+// and leave leaves: its score plus the mean value, over the draws, of the
+// position after it, into values. The draws are the outer loop, so that a
+// draw's racks meet every candidate's board in turn while the lane cache
+// holds what the earlier candidates found for them; each candidate's sum
+// still adds the draws in their order. A sampled draw that repeats an earlier
+// one takes that one's value.
+static void emptying_candidate_values(OutplayScratch *scratch, const Game *game,
+                                      const Move *const *emptying,
+                                      const Rack *leaves, int num_emptying,
+                                      const int *unseen,
+                                      const OutplayCheckWeights *weights,
+                                      double *values) {
   const LetterDistribution *ld = game_get_ld(game);
   const int dist_size = ld_get_size(ld);
   const int mover_idx = game_get_player_on_turn_index(game);
-  Game *after = scratch->after;
-  game_copy(after, game);
-  play_move(candidate, after, NULL);
-  // Whatever play_move drew, the mover now holds its leave and a draw, the
+  // Whatever play_move draws, the mover then holds its leave and a draw, the
   // opponent the rest of the unseen tiles, and the bag is empty.
   const MachineLetter no_tiles[1] = {0};
-  bag_set_to_tiles(game_get_bag(after), no_tiles, 0);
-  Rack *held = player_get_rack(game_get_player(after, mover_idx));
-  Rack *opp_held = player_get_rack(game_get_player(after, 1 - mover_idx));
-  double model = 0.0;
-  for (int draw_idx = 0; draw_idx < scratch->draws.count; draw_idx++) {
-    const uint8_t *counts = scratch->draws.counts[draw_idx];
-    rack_copy(held, leave);
-    rack_set_dist_size_and_reset(opp_held, dist_size);
-    for (int ml = 0; ml < dist_size; ml++) {
-      if (counts[ml] > 0) {
-        rack_add_letters(held, (MachineLetter)ml, counts[ml]);
-      }
-      if (unseen[ml] > counts[ml]) {
-        rack_add_letters(opp_held, (MachineLetter)ml, unseen[ml] - counts[ml]);
-      }
+  for (int empty_idx = 0; empty_idx < num_emptying; empty_idx++) {
+    if (scratch->afters[empty_idx] == NULL) {
+      scratch->afters[empty_idx] = game_duplicate(game);
     }
-    OutplayCheckFeatures features;
-    find_features(after, mover_idx, held, scratch->plays, &features);
-    model += scratch->draws.weights[draw_idx] *
-             outplay_check_weights_value(weights, ld, held, &features);
+    Game *after = scratch->afters[empty_idx];
+    game_copy(after, game);
+    play_move(emptying[empty_idx], after, NULL);
+    bag_set_to_tiles(game_get_bag(after), no_tiles, 0);
+    values[empty_idx] = 0.0;
   }
-  return model + equity_to_double(move_get_score(candidate));
+  for (int draw_idx = 0; draw_idx < scratch->draws.count; draw_idx++) {
+    const double weight = scratch->draws.weights[draw_idx];
+    const int first_same = scratch->draws.first_same[draw_idx];
+    if (first_same != draw_idx) {
+      for (int empty_idx = 0; empty_idx < num_emptying; empty_idx++) {
+        values[empty_idx] +=
+            weight * scratch->draw_values[empty_idx][first_same];
+      }
+      continue;
+    }
+    const uint8_t *counts = scratch->draws.counts[draw_idx];
+    for (int empty_idx = 0; empty_idx < num_emptying; empty_idx++) {
+      Game *after = scratch->afters[empty_idx];
+      Rack *held = player_get_rack(game_get_player(after, mover_idx));
+      Rack *opp_held = player_get_rack(game_get_player(after, 1 - mover_idx));
+      rack_copy(held, &leaves[empty_idx]);
+      rack_set_dist_size_and_reset(opp_held, dist_size);
+      for (int ml = 0; ml < dist_size; ml++) {
+        if (counts[ml] > 0) {
+          rack_add_letters(held, (MachineLetter)ml, counts[ml]);
+        }
+        if (unseen[ml] > counts[ml]) {
+          rack_add_letters(opp_held, (MachineLetter)ml,
+                           unseen[ml] - counts[ml]);
+        }
+      }
+      OutplayCheckFeatures features;
+      find_features(after, mover_idx, held, scratch->best, scratch->lane_cache,
+                    &features);
+      const double draw_value =
+          outplay_check_weights_value(weights, ld, held, &features);
+      scratch->draw_values[empty_idx][draw_idx] = draw_value;
+      values[empty_idx] += weight * draw_value;
+    }
+  }
+  for (int empty_idx = 0; empty_idx < num_emptying; empty_idx++) {
+    values[empty_idx] += equity_to_double(move_get_score(emptying[empty_idx]));
+  }
+}
+
+void outplay_check_find_features(Game *game, OutplayCheckFeatures *features) {
+  MoveList *best = move_list_create_small(1);
+  LaneShadowCache *lane_cache =
+      lane_shadow_cache_create(OUTPLAY_CHECK_LANE_SHADOW_INDEX_BITS,
+                               OUTPLAY_CHECK_ANCHOR_PLAY_INDEX_BITS);
+  const int mover_idx = 1 - game_get_player_on_turn_index(game);
+  find_features(game, mover_idx,
+                player_get_rack(game_get_player(game, mover_idx)), best,
+                lane_cache, features);
+  lane_shadow_cache_destroy(lane_cache);
+  small_move_list_destroy(best);
 }
 
 void outplay_check_choose(Game *game, const MoveList *move_list,
@@ -288,9 +415,14 @@ void outplay_check_choose(Game *game, const MoveList *move_list,
     return;
   }
   OutplayScratch *scratch = malloc_or_die(sizeof(OutplayScratch));
-  scratch->candidates = move_list_create(OUTPLAY_CHECK_MOVE_LIST_CAPACITY);
-  scratch->plays = move_list_create(OUTPLAY_CHECK_MOVE_LIST_CAPACITY);
-  scratch->after = game_duplicate(game);
+  // The list keeps the best OUTPLAY_CHECK_CANDIDATES plays by equity, in the
+  // order sorting every play would give them.
+  scratch->candidates = move_list_create(OUTPLAY_CHECK_CANDIDATES);
+  scratch->best = move_list_create_small(1);
+  scratch->lane_cache = NULL;
+  for (int empty_idx = 0; empty_idx < OUTPLAY_CHECK_CANDIDATES; empty_idx++) {
+    scratch->afters[empty_idx] = NULL;
+  }
   scratch->draws.count = 0;
   scratch->draws.dist_size = dist_size;
   const MoveGenArgs candidate_args = {
@@ -308,27 +440,43 @@ void outplay_check_choose(Game *game, const MoveList *move_list,
   if (num_candidates > OUTPLAY_CHECK_CANDIDATES) {
     num_candidates = OUTPLAY_CHECK_CANDIDATES;
   }
-  bool draws_ready = false;
-  int best_idx = 0;
-  double best_value = 0.0;
-  bool any_valued = false;
+  // A candidate's value is its static equity, unless it empties the bag.
+  double values[OUTPLAY_CHECK_CANDIDATES];
+  const Move *emptying[OUTPLAY_CHECK_CANDIDATES];
+  Rack leaves[OUTPLAY_CHECK_CANDIDATES];
+  int emptying_cand_idx[OUTPLAY_CHECK_CANDIDATES];
+  int num_emptying = 0;
   for (int cand_idx = 0; cand_idx < num_candidates; cand_idx++) {
     const Move *candidate = move_list_get_move(scratch->candidates, cand_idx);
-    double value = equity_to_double(move_get_equity(candidate));
+    values[cand_idx] = equity_to_double(move_get_equity(candidate));
     if (move_get_type(candidate) == GAME_EVENT_TILE_PLACEMENT_MOVE &&
         move_get_tiles_played(candidate) >= bag_size) {
-      if (!draws_ready) {
-        fill_draws(&scratch->draws, unseen, bag_size, seed);
-        draws_ready = true;
-      }
-      Rack leave;
-      leave_of_move(rack, candidate, &leave);
-      value = candidate_model_value(scratch, game, candidate, &leave, unseen,
-                                    weights) -
-              outplay_check_weights_get_center(weights, bag_size,
-                                               rack_get_total_letters(&leave));
-      any_valued = true;
+      emptying[num_emptying] = candidate;
+      leave_of_move(rack, candidate, &leaves[num_emptying]);
+      emptying_cand_idx[num_emptying] = cand_idx;
+      num_emptying++;
     }
+  }
+  const bool any_valued = num_emptying > 0;
+  if (any_valued) {
+    fill_draws(&scratch->draws, unseen, bag_size, seed);
+    scratch->lane_cache =
+        lane_shadow_cache_create(OUTPLAY_CHECK_LANE_SHADOW_INDEX_BITS,
+                                 OUTPLAY_CHECK_ANCHOR_PLAY_INDEX_BITS);
+    double emptying_values[OUTPLAY_CHECK_CANDIDATES];
+    emptying_candidate_values(scratch, game, emptying, leaves, num_emptying,
+                              unseen, weights, emptying_values);
+    for (int empty_idx = 0; empty_idx < num_emptying; empty_idx++) {
+      values[emptying_cand_idx[empty_idx]] =
+          emptying_values[empty_idx] -
+          outplay_check_weights_get_center(
+              weights, bag_size, rack_get_total_letters(&leaves[empty_idx]));
+    }
+  }
+  int best_idx = 0;
+  double best_value = 0.0;
+  for (int cand_idx = 0; cand_idx < num_candidates; cand_idx++) {
+    const double value = values[cand_idx];
     if (cand_idx == 0 || value > best_value) {
       best_idx = cand_idx;
       best_value = value;
@@ -338,8 +486,11 @@ void outplay_check_choose(Game *game, const MoveList *move_list,
     move_copy(move_list_get_move(move_list, 0),
               move_list_get_move(scratch->candidates, best_idx));
   }
-  game_destroy(scratch->after);
-  move_list_destroy(scratch->plays);
+  for (int empty_idx = 0; empty_idx < OUTPLAY_CHECK_CANDIDATES; empty_idx++) {
+    game_destroy(scratch->afters[empty_idx]);
+  }
+  lane_shadow_cache_destroy(scratch->lane_cache);
+  small_move_list_destroy(scratch->best);
   move_list_destroy(scratch->candidates);
   free(scratch);
 }

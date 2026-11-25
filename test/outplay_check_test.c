@@ -1,12 +1,25 @@
 #include "outplay_check_test.h"
 
 #include "../src/compat/cfile.h"
+#include "../src/def/board_defs.h"
+#include "../src/def/equity_defs.h"
+#include "../src/def/game_history_defs.h"
+#include "../src/def/move_defs.h"
 #include "../src/ent/autoplay_results.h"
+#include "../src/ent/bag.h"
+#include "../src/ent/board.h"
+#include "../src/ent/equity.h"
+#include "../src/ent/game.h"
 #include "../src/ent/letter_distribution.h"
+#include "../src/ent/move.h"
 #include "../src/ent/outplay_check_weights.h"
+#include "../src/ent/player.h"
 #include "../src/ent/players_data.h"
 #include "../src/ent/rack.h"
 #include "../src/impl/config.h"
+#include "../src/impl/gameplay.h"
+#include "../src/impl/move_gen.h"
+#include "../src/impl/outplay_check.h"
 #include "../src/util/io_util.h"
 #include "../src/util/string_util.h"
 #include "test_platform.h"
@@ -14,6 +27,7 @@
 #include <assert.h>
 #include <math.h>
 #include <stdbool.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -106,7 +120,7 @@ static void test_outplay_check_weights_file(void) {
   const OutplayCheckFeatures no_out = {.opponent_can_go_out = false,
                                        .opponent_best_out_score = 0,
                                        .opponent_best_score = 20,
-                                       .own_out_plays = 2,
+                                       .own_can_go_out = true,
                                        .own_best_out_score = 15,
                                        .own_out_lanes = 3};
   assert_value(weights, ld, "AEE", &no_out,
@@ -120,7 +134,7 @@ static void test_outplay_check_weights_file(void) {
                (-2.0 * 3 - 10) + 2 + (-0.25 * 20) + (1.5 + 0.1 * 3 + 0.25 + 1) +
                    (1 + 0.5 * 15 + 2 + 0.75));
   OutplayCheckFeatures no_own = no_out;
-  no_own.own_out_plays = 0;
+  no_own.own_can_go_out = false;
   assert_value(weights, ld, "AEE", &no_own,
                (-2.0 * 3 - 10) + 2 + (-0.25 * 20) + (1.5 + 0.1 * 3 + 0.25 + 1));
 
@@ -130,7 +144,7 @@ static void test_outplay_check_weights_file(void) {
   const OutplayCheckFeatures opp_out = {.opponent_can_go_out = true,
                                         .opponent_best_out_score = 30,
                                         .opponent_best_score = 45,
-                                        .own_out_plays = 0,
+                                        .own_can_go_out = false,
                                         .own_best_out_score = 0,
                                         .own_out_lanes = 0};
   assert_value(weights, ld, "AB", &opp_out,
@@ -307,8 +321,120 @@ static void test_outplay_check_play(void) {
   free(dir);
 }
 
+// What every play of the player on turn, listed, says: whether one uses the
+// whole rack, the best score of those that do and of all plays, and the lanes
+// those that do lie in, counted up to 3.
+typedef struct ListedSide {
+  bool can_go_out;
+  int best_out_score;
+  int best_score;
+  int out_lanes;
+} ListedSide;
+
+static ListedSide listed_side(Game *game, MoveList *plays) {
+  const int on_turn = game_get_player_on_turn_index(game);
+  const int rack_tiles =
+      rack_get_total_letters(player_get_rack(game_get_player(game, on_turn)));
+  const MoveGenArgs args = {
+      .game = game,
+      .move_list = plays,
+      .move_record_type = MOVE_RECORD_ALL,
+      .move_sort_type = MOVE_SORT_SCORE,
+      .override_kwg = NULL,
+      .eq_margin_movegen = 0,
+      .target_equity = EQUITY_MAX_VALUE,
+  };
+  generate_moves(&args);
+  ListedSide side = {0};
+  uint64_t lane_bits = 0;
+  for (int play_idx = 0; play_idx < move_list_get_count(plays); play_idx++) {
+    const Move *play = move_list_get_move(plays, play_idx);
+    if (move_get_type(play) != GAME_EVENT_TILE_PLACEMENT_MOVE) {
+      continue;
+    }
+    const int score = equity_to_int(move_get_score(play));
+    if (score > side.best_score) {
+      side.best_score = score;
+    }
+    if (move_get_tiles_played(play) != rack_tiles) {
+      continue;
+    }
+    if (!side.can_go_out || score > side.best_out_score) {
+      side.best_out_score = score;
+    }
+    side.can_go_out = true;
+    lane_bits |= UINT64_C(1) << (board_is_dir_vertical(move_get_dir(play))
+                                     ? BOARD_DIM + move_get_col_start(play)
+                                     : move_get_row_start(play));
+  }
+  for (int lane = 0; lane < 2 * BOARD_DIM && side.out_lanes < 3; lane++) {
+    if ((lane_bits >> lane) & 1) {
+      side.out_lanes++;
+    }
+  }
+  return side;
+}
+
+// The features the check finds with its best-play generations equal what
+// every play of each side, listed, says, in the empty-bag positions of static
+// games.
+static void test_outplay_check_features(void) {
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -wmp false -s1 equity -s2 equity -r1 all -r2 all "
+      "-numplays 1");
+  Game *game = config_game_create(config);
+  MoveList *plays = move_list_create(20000);
+  int positions = 0;
+  int opponent_outs = 0;
+  int own_outs = 0;
+  int own_two_lanes = 0;
+  int own_three_lanes = 0;
+  for (int game_idx = 0; game_idx < 40; game_idx++) {
+    game_reset(game);
+    game_seed(game, 7000 + (uint64_t)game_idx);
+    draw_starting_racks(game);
+    while (!game_over(game)) {
+      if (bag_is_empty(game_get_bag(game))) {
+        OutplayCheckFeatures features;
+        outplay_check_find_features(game, &features);
+        const int opp_idx = game_get_player_on_turn_index(game);
+        const ListedSide opp = listed_side(game, plays);
+        game_set_player_on_turn_index(game, 1 - opp_idx);
+        const ListedSide own = listed_side(game, plays);
+        game_set_player_on_turn_index(game, opp_idx);
+        assert(features.opponent_can_go_out == opp.can_go_out);
+        if (opp.can_go_out) {
+          assert(features.opponent_best_out_score == opp.best_out_score);
+        } else {
+          assert(features.opponent_best_score == opp.best_score);
+        }
+        assert(features.own_can_go_out == own.can_go_out);
+        if (own.can_go_out) {
+          assert(features.own_best_out_score == own.best_out_score);
+          assert(features.own_out_lanes == own.out_lanes);
+        }
+        positions++;
+        opponent_outs += opp.can_go_out ? 1 : 0;
+        own_outs += own.can_go_out ? 1 : 0;
+        own_two_lanes += own.out_lanes >= 2 ? 1 : 0;
+        own_three_lanes += own.out_lanes >= 3 ? 1 : 0;
+      }
+      play_top_n_equity_move(game, 0);
+    }
+  }
+  // The positions cover every case the features tell apart.
+  assert(positions >= 100);
+  assert(opponent_outs > 0 && opponent_outs < positions);
+  assert(own_outs > 0 && own_outs < positions);
+  assert(own_two_lanes > 0 && own_three_lanes > 0);
+  move_list_destroy(plays);
+  game_destroy(game);
+  config_destroy(config);
+}
+
 void test_outplay_check(void) {
   test_outplay_check_weights_file();
   test_outplay_check_config();
+  test_outplay_check_features();
   test_outplay_check_play();
 }

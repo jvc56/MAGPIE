@@ -359,7 +359,7 @@ double outplay_check_weights_value(const OutplayCheckWeights *weights,
     value += weights->opponent_best * features->opponent_best_score;
   }
   value += rack_terms(weights, ld, held, tag);
-  if (features->own_out_plays > 0) {
+  if (features->own_can_go_out) {
     const int held_tiles = rack_get_total_letters(held);
     value +=
         weights->own[tag] +
