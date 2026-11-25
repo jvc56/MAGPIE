@@ -3969,12 +3969,25 @@ static void peg_scenario_worker_fn(void *arg, int worker_idx) {
   job->run_end_ns = ctimer_monotonic_ns();
 }
 
+// The jobs one thread runs in turn (see peg_scenario_eval_make_units).
+typedef struct PegScenarioUnit {
+  PegScenarioJob **jobs;
+  int count;
+} PegScenarioUnit;
+
+static void peg_scenario_unit_worker_fn(void *arg, int worker_idx) {
+  const PegScenarioUnit *unit = (const PegScenarioUnit *)arg;
+  for (int job_idx = 0; job_idx < unit->count; job_idx++) {
+    peg_scenario_worker_fn(unit->jobs[job_idx], worker_idx);
+  }
+}
+
 // A candidate's draws solved in turn, in peg_eval_candidates_scenario: `data`
-// is its job list.
+// is its units.
 static void peg_scenario_item_fn(PegNestLoop *loop, PegWorker *worker,
-                                 int job_idx) {
-  const PegScenarioJobList *list = (const PegScenarioJobList *)loop->data;
-  peg_scenario_worker_fn(&list->jobs[job_idx], worker->nest_worker_idx);
+                                 int unit_idx) {
+  PegScenarioUnit *units = (PegScenarioUnit *)loop->data;
+  peg_scenario_unit_worker_fn(&units[unit_idx], worker->nest_worker_idx);
 }
 
 // True when two moves are the same play (type, position, tiles).
@@ -4081,6 +4094,11 @@ typedef struct PegScenarioEval {
   // Per candidate, or NULL when the opponent's nested choices are not shared.
   PegChoiceCache **choice_caches;
   PegScenarioJobList list;
+  // The units of the jobs, the jobs in the units' order, and a pointer to
+  // each unit for the pool (see peg_scenario_eval_make_units).
+  PegScenarioUnit *units;
+  PegScenarioJob **unit_jobs;
+  int n_units;
   void **ptrs;
   // Filled by peg_scenario_eval_finish: from the first job's start to the last
   // one's end.
@@ -4088,6 +4106,69 @@ typedef struct PegScenarioEval {
 } PegScenarioEval;
 
 // Builds the templates and the jobs, ready to run.
+// Gathers a prepared evaluation's jobs into the units its threads run. Without
+// shared choices every job is a unit. With them a unit is the jobs that leave
+// the opponent one rack, in the list's order, and the units are in the order
+// of their first jobs: one thread makes the opponent's choice on the first
+// job and plays it on the others, so no thread waits for a choice another is
+// making. The rack is what the mover's draw and the rest of the bag leave of
+// the unseen tiles, so those tiles are its key; two racks with one key only
+// share a unit.
+static void peg_scenario_eval_make_units(PegScenarioEval *eval, bool by_rack) {
+  const PegScenarioJobList *list = &eval->list;
+  const int count = list->count;
+  eval->units = malloc_or_die((size_t)(count + 1) * sizeof(PegScenarioUnit));
+  eval->unit_jobs =
+      malloc_or_die((size_t)(count + 1) * sizeof(PegScenarioJob *));
+  eval->ptrs = malloc_or_die((size_t)(count + 1) * sizeof(void *));
+  eval->n_units = 0;
+  uint64_t *keys = malloc_or_die((size_t)(count + 1) * sizeof(uint64_t));
+  int *unit_of_job = malloc_or_die((size_t)(count + 1) * sizeof(int));
+  for (int job_idx = 0; job_idx < count; job_idx++) {
+    const PegScenarioJob *job = &list->jobs[job_idx];
+    uint64_t key = (uint64_t)job_idx;
+    int unit_idx = -1;
+    if (by_rack) {
+      uint8_t counts[MAX_ALPHABET_SIZE] = {0};
+      for (int tile_idx = 0; tile_idx < job->k_drawn; tile_idx++) {
+        counts[job->mover_drawn[tile_idx]]++;
+      }
+      for (int tile_idx = 0; tile_idx < job->n_bag_remaining; tile_idx++) {
+        counts[job->bag_remaining[tile_idx]]++;
+      }
+      key = fnv64a_step(FNV_64_OFFSET_BASIS, (uint64_t)job->cand_idx);
+      for (int ml = 0; ml < MAX_ALPHABET_SIZE; ml++) {
+        key = fnv64a_step(key, counts[ml]);
+      }
+      for (int prev_idx = 0; prev_idx < job_idx && unit_idx < 0; prev_idx++) {
+        if (keys[prev_idx] == key) {
+          unit_idx = unit_of_job[prev_idx];
+        }
+      }
+    }
+    keys[job_idx] = key;
+    if (unit_idx < 0) {
+      unit_idx = eval->n_units++;
+      eval->units[unit_idx].count = 0;
+    }
+    unit_of_job[job_idx] = unit_idx;
+    eval->units[unit_idx].count++;
+  }
+  int next_slot = 0;
+  for (int unit_idx = 0; unit_idx < eval->n_units; unit_idx++) {
+    eval->units[unit_idx].jobs = &eval->unit_jobs[next_slot];
+    next_slot += eval->units[unit_idx].count;
+    eval->units[unit_idx].count = 0;
+    eval->ptrs[unit_idx] = &eval->units[unit_idx];
+  }
+  for (int job_idx = 0; job_idx < count; job_idx++) {
+    PegScenarioUnit *unit = &eval->units[unit_of_job[job_idx]];
+    unit->jobs[unit->count++] = &list->jobs[job_idx];
+  }
+  free(unit_of_job);
+  free(keys);
+}
+
 static void peg_scenario_eval_prepare(PegScenarioEval *eval) {
   const int n = eval->n;
   // Shared per-cand templates: post-cand board + cross-sets + pruned override,
@@ -4164,10 +4245,7 @@ static void peg_scenario_eval_prepare(PegScenarioEval *eval) {
       job->ld = eval->ld;
     }
   }
-  eval->ptrs = malloc_or_die((size_t)(list->count + 1) * sizeof(void *));
-  for (int job_idx = 0; job_idx < list->count; job_idx++) {
-    eval->ptrs[job_idx] = &list->jobs[job_idx];
-  }
+  peg_scenario_eval_make_units(eval, hoist);
 }
 
 // Runs every job of a prepared evaluation, and returns when all have finished.
@@ -4177,16 +4255,17 @@ static void peg_scenario_eval_run(PegScenarioEval *eval) {
   peg_poll_set_cand_draws(eval->cand_poll, eval->caller_worker_idx,
                           list->count);
   if (eval->pool && list->count > 0) {
-    peg_pool_submit_and_wait(eval->pool, peg_scenario_worker_fn, eval->ptrs,
-                             list->count, peg_pool_num_workers(eval->pool));
+    peg_pool_submit_and_wait(eval->pool, peg_scenario_unit_worker_fn,
+                             eval->ptrs, eval->n_units,
+                             peg_pool_num_workers(eval->pool));
   } else if (list->count > 0) {
     // One after another, unless the workers run out of candidates: the first
     // to go idle has left the queue empty, so its share of the draws costs no
     // other candidate anything, and a cut stops the rest.
     const PegStop stop = {eval->deadline_ns, eval->cutoff, NULL, NULL};
-    (void)peg_nest_loop_run(peg_scenario_item_fn, list,
+    (void)peg_nest_loop_run(peg_scenario_item_fn, eval->units,
                             &eval->workers[eval->caller_worker_idx],
-                            list->count, /*reentrant=*/false, &stop);
+                            eval->n_units, /*reentrant=*/false, &stop);
   }
 }
 
@@ -4304,6 +4383,8 @@ static void peg_scenario_eval_finish(PegScenarioEval *eval) {
   free(candidate_completed);
   free(candidate_completed_ns);
   free(eval->ptrs);
+  free(eval->units);
+  free(eval->unit_jobs);
   free(list.jobs);
   for (int i = 0; i < n; i++) {
     game_destroy(eval->templates[i]);
@@ -4541,9 +4622,9 @@ static void peg_live_solve_in_order(PegLiveStage *stage, PegPool *pool,
     peg_live_begin_cand(stage, cand_idx, pool, helper_idx, /*alone=*/true,
                         &cands[cand_idx]);
     if (!cands[cand_idx].saved) {
-      batches[cand_idx] = peg_pool_submit(pool, peg_scenario_worker_fn,
+      batches[cand_idx] = peg_pool_submit(pool, peg_scenario_unit_worker_fn,
                                           cands[cand_idx].eval.ptrs,
-                                          cands[cand_idx].eval.list.count);
+                                          cands[cand_idx].eval.n_units);
     }
   }
   for (int cand_idx = 0; cand_idx < count; cand_idx++) {
