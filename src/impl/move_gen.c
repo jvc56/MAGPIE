@@ -4088,9 +4088,13 @@ static inline uint64_t lane_shadow_field_mask(void) {
 // lane_shadow_field_mask). The extension sets follow from the letters and the
 // lexicon, which context_key holds. The two words go in separate chains of
 // multiply-adds; each step is a bijection of its chain so far (the multiplier
-// is odd), so lanes that differ in one word always differ in a chain. One
-// finalizer then mixes both chains and context_key into the top bits that
-// index the cache. A key is never 0, which marks no lane.
+// is odd), so lanes that differ in one word always differ in a chain. The
+// cross set chain is mixed before the fields chain joins it: the last square's
+// terms are added unmultiplied, so XORing the raw chains let small changes to
+// both cancel (an empty last square with cross set 3 and the same square
+// holding letter 5 collided about one time in ten). A second finalizer then
+// mixes the result into the top bits that index the cache. A key is never 0,
+// which marks no lane.
 static inline uint64_t lane_shadow_key(const Square *lane_squares,
                                        uint64_t context_key,
                                        uint64_t field_mask) {
@@ -4106,7 +4110,9 @@ static inline uint64_t lane_shadow_key(const Square *lane_squares,
     fields = fields * LANE_HASH_MULTIPLIER + (field_word & field_mask);
   }
   const uint64_t rotated_fields = (fields << 32) | (fields >> 32);
-  return lane_shadow_mix(cross_sets ^ rotated_fields ^ context_key) | 1;
+  return lane_shadow_mix(lane_shadow_mix(cross_sets ^ context_key) ^
+                         rotated_fields) |
+         1;
 }
 
 static_assert(offsetof(Square, cross_score) + sizeof(uint64_t) <=
