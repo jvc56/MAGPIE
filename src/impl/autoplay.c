@@ -30,6 +30,7 @@
 #include "../ent/klv_csv.h"
 #include "../ent/letter_distribution.h"
 #include "../ent/move.h"
+#include "../ent/outplay_check_weights.h"
 #include "../ent/pat.h"
 #include "../ent/pat_features.h"
 #include "../ent/pat_file.h"
@@ -50,6 +51,7 @@
 #include "gameplay.h"
 #include "move_gen.h"
 #include "move_gen_base.h"
+#include "outplay_check.h"
 #include "pat_gen.h"
 #include "play_chooser.h"
 #include "rack_list.h"
@@ -1072,6 +1074,23 @@ const Move *game_runner_get_top_simming_move(AutoplayWorker *autoplay_worker,
   return move;
 }
 
+// The static player's move: static equity's best, unless the player's
+// out-play check chooses another (see outplay_check.h). A run that captures
+// positions records static's whole ranked list and plays its best.
+static const Move *get_static_move(const AutoplayWorker *autoplay_worker,
+                                   const GameRunner *game_runner,
+                                   int player_on_turn_index) {
+  MoveList *move_list = autoplay_worker->move_lists[player_on_turn_index];
+  const Move *move = get_top_move_for_player_on_turn(
+      game_runner->game, move_list, autoplay_worker->captures_positions);
+  const OutplayCheckWeights *weights = player_get_outplay_check(
+      game_get_player(game_runner->game, player_on_turn_index));
+  if (weights != NULL && !autoplay_worker->captures_positions) {
+    outplay_check_choose(game_runner->game, move_list, weights);
+  }
+  return move;
+}
+
 static const Move *game_runner_choose_best_move(AutoplayWorker *autoplay_worker,
                                                 GameRunner *game_runner) {
   autoplay_worker->turn_was_solved = false;
@@ -1128,9 +1147,8 @@ static const Move *game_runner_choose_best_move(AutoplayWorker *autoplay_worker,
       // and simulation returns at once. Or the player's movegen budget for
       // the move ran out before the solve chose anything, and its best move
       // so far is the static one.
-      return get_top_move_for_player_on_turn(
-          game_runner->game, autoplay_worker->move_lists[player_on_turn_index],
-          autoplay_worker->captures_positions);
+      return get_static_move(autoplay_worker, game_runner,
+                             player_on_turn_index);
     }
     if (!error_stack_is_empty(error_stack)) {
       error_stack_print_and_reset(error_stack);
@@ -1148,9 +1166,7 @@ static const Move *game_runner_choose_best_move(AutoplayWorker *autoplay_worker,
                                 ? &autoplay_worker->args.p1_sim_args
                                 : &autoplay_worker->args.p2_sim_args;
   if (sim_args->num_plies == 0) {
-    return get_top_move_for_player_on_turn(
-        game_runner->game, autoplay_worker->move_lists[player_on_turn_index],
-        autoplay_worker->captures_positions);
+    return get_static_move(autoplay_worker, game_runner, player_on_turn_index);
   }
   return game_runner_get_top_simming_move(autoplay_worker, game_runner);
 }

@@ -242,6 +242,140 @@ static void test_peg_main_4bag_single(void) {
                          PEG_OPP_RATIONAL, /*out_spread=*/NULL);
 }
 
+// The greedy playouts of a candidate share their opening plies: its splits
+// share the opponent's first reply by the opponent's rack, and one split's bag
+// orderings share the mover's answer. Once the bag is empty, both rank by
+// static equity, which reads the racks, so sharing holds only where those racks
+// are fixed. Each scenario's value from the full enumeration must then equal
+// the same scenario solved alone, with nothing shared. The candidate is the
+// mover's highest-equity play placing tiles_played tiles, or the pass for 0.
+// Every scenario is compared when there are at most max_pinned, else an even
+// sample of them.
+static void peg_assert_shared_plies_match(const char *name, const char *cgp,
+                                          int tiles_played, int max_pinned) {
+  Config *config = config_create_or_die("set -threads 2 -s1 score -s2 score");
+  load_and_exec_config_or_die(config, cgp);
+  Game *game = config_get_game(config);
+  const LetterDistribution *ld = game_get_ld(game);
+  ErrorStack *error_stack = error_stack_create();
+
+  ValidatedMoves *vms = NULL;
+  MoveList *gen_ml = NULL;
+  const Move *cand = NULL;
+  if (tiles_played == 0) {
+    vms = validated_moves_create(game, game_get_player_on_turn_index(game),
+                                 "pass", /*allow_phonies=*/false,
+                                 /*allow_playthrough=*/true, error_stack);
+    assert(error_stack_is_empty(error_stack));
+    cand = validated_moves_get_move(vms, 0);
+  } else {
+    gen_ml = move_list_create(10000);
+    const MoveGenArgs gen_args = {
+        .game = game,
+        .move_list = gen_ml,
+        .move_record_type = MOVE_RECORD_ALL,
+        .move_sort_type = MOVE_SORT_EQUITY,
+        .override_kwg = NULL,
+        .eq_margin_movegen = 0,
+        .target_equity = EQUITY_MAX_VALUE,
+    };
+    generate_moves(&gen_args);
+    for (int move_idx = 0; move_idx < move_list_get_count(gen_ml); move_idx++) {
+      const Move *move = move_list_get_move(gen_ml, move_idx);
+      if (move_get_type(move) == GAME_EVENT_TILE_PLACEMENT_MOVE &&
+          move_get_tiles_played(move) == tiles_played &&
+          (cand == NULL || move_get_equity(move) > move_get_equity(cand))) {
+        cand = move;
+      }
+    }
+    assert(cand != NULL);
+  }
+  const Move *only_moves[1] = {cand};
+
+  PegArgs args;
+  memset(&args, 0, sizeof(args));
+  args.game = game;
+  args.thread_control = config_get_thread_control(config);
+  args.num_threads = 2;
+  args.time_budget_seconds = 60.0;
+  args.only_moves = only_moves;
+  args.n_only_moves = 1;
+  args.opp_model = PEG_OPP_RATIONAL;
+  args.include_per_scenario = true;
+  PegResult enumerated;
+  memset(&enumerated, 0, sizeof(enumerated));
+  peg_solve(&args, &enumerated, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  assert(enumerated.n_top_cands == 1);
+  assert(enumerated.n_per_scenario > 0);
+
+  const int stride =
+      enumerated.n_per_scenario > max_pinned
+          ? (enumerated.n_per_scenario + max_pinned - 1) / max_pinned
+          : 1;
+  int compared = 0;
+  args.include_per_scenario = false;
+  for (int row_idx = 0; row_idx < enumerated.n_per_scenario;
+       row_idx += stride) {
+    const PegPerScenario *row = &enumerated.per_scenario[row_idx];
+    MachineLetter bag_order[MAX_BAG_SIZE];
+    const int n_drawn =
+        ld_str_to_mls(ld, row->drawn, false, bag_order, MAX_BAG_SIZE);
+    assert(n_drawn >= 0);
+    const int n_remaining =
+        ld_str_to_mls(ld, row->remaining, false, bag_order + n_drawn,
+                      (size_t)(MAX_BAG_SIZE - n_drawn));
+    assert(n_remaining >= 0);
+    args.eval_bag_order = bag_order;
+    args.eval_bag_order_len = n_drawn + n_remaining;
+    PegResult pinned;
+    memset(&pinned, 0, sizeof(pinned));
+    peg_solve(&args, &pinned, error_stack);
+    assert(error_stack_is_empty(error_stack));
+    assert(pinned.n_top_cands == 1);
+    assert(pinned.top_cands[0].n_scenarios == 1);
+    assert(pinned.top_cands[0].mean_spread == (double)row->mover_total);
+    peg_result_destroy(&pinned);
+    compared++;
+  }
+  printf("[%s] scenarios=%d compared=%d\n", name, enumerated.n_per_scenario,
+         compared);
+
+  peg_result_destroy(&enumerated);
+  if (vms != NULL) {
+    validated_moves_destroy(vms);
+  }
+  if (gen_ml != NULL) {
+    move_list_destroy(gen_ml);
+  }
+  error_stack_destroy(error_stack);
+  config_destroy(config);
+}
+
+// The cases where a shared ply meets an empty bag:
+// - 2 in the bag, the mover passes: when the opponent's reply empties the bag,
+//   the mover's shared answer ranks by equity, reading the opponent's rack,
+//   which every ordering of the split fills with the same tiles;
+// - 2 in the bag, a two-tile play empties it: the opponent's cached reply ranks
+//   by equity, reading the mover's rack, which the opponent's rack fixes;
+// - 3 in the bag, a one-tile play leaves two: as the first, with a draw first.
+static void test_peg_greedy_shared_plies_match(void) {
+  const char *two_in_bag =
+      "cgp 5U4OHMIC/5N3WREATH/5T4FAX2/5i3B1V3/5N3L1E3/5G2VELDT2/5E3S5/"
+      "5DREKS1F3/8YELL3/4ABASER1U3/4GYM3ZO3/WAITE5OR2J/10OI2A/"
+      "3QUOIT1PINNER/4RENEGADE2P ACDIOT?/AIIIOSU 431/392 0 -lex CSW24";
+  const char *three_in_bag =
+      "cgp BEDEL10/R1R9U2/O1IT1Q5OM2/W1BIDI4YUM2/N2XI5AT3/E3G4T1R3/"
+      "S1VOILE2OKA3/T3T1DISPACED1/9AWE1O1/9Z1s1FA/14R/13GO/13AH/"
+      "3JUVIE4UTA/INRO3FLENCHES ?ANNOPY/AEGILNS 344/368 0 -lex CSW21";
+  peg_assert_shared_plies_match("peg_shared_2bag_pass", two_in_bag,
+                                /*tiles_played=*/0, /*max_pinned=*/100);
+  peg_assert_shared_plies_match("peg_shared_2bag_empties", two_in_bag,
+                                /*tiles_played=*/2, /*max_pinned=*/100);
+  peg_assert_shared_plies_match("peg_shared_3bag_one_tile", three_in_bag,
+                                /*tiles_played=*/1, /*max_pinned=*/100);
+}
+
 // A short clock must bound the whole PEG solve, including worker setup and an
 // in-flight stage-0 scenario. This 4-in-bag position has enough candidates and
 // bag orderings to run well past the budget without the inner cancellation
@@ -896,7 +1030,7 @@ static void test_peg_complete_threads_match(void) {
   assert(best[0].win_count == best[1].win_count);
   assert(best[0].tie_count == best[1].tie_count);
   assert(best[0].weight_sum == best[1].weight_sum);
-  assert(best[0].win_count == 38 && best[0].tie_count == 4);
+  assert(best[0].win_count == 34 && best[0].tie_count == 0);
   config_destroy(config);
 }
 
@@ -995,7 +1129,7 @@ static void test_peg_without_table(void) {
     load_and_exec_config_or_die(config, command);
     free(command);
     const PegRankedCand *best = &config_get_peg_result(config)->top_cands[0];
-    assert(best->win_count == 38 && best->tie_count == 4);
+    assert(best->win_count == 34 && best->tie_count == 0);
   }
   config_destroy(config);
 }
@@ -2526,6 +2660,7 @@ void test_peg(void) {
   test_peg_main_2bag_single();
   test_peg_main_3bag_single();
   test_peg_main_4bag_single();
+  test_peg_greedy_shared_plies_match();
   test_peg_short_budget_interrupts();
   test_peg_main_opp_models();
   test_peg_main_pnoprune();

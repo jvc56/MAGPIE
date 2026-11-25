@@ -335,6 +335,9 @@ typedef enum {
   ERROR_STATUS_CENSUS_INVALID_LATTICE,
   ERROR_STATUS_CENSUS_MALFORMED_RECIPE,
   ERROR_STATUS_CENSUS_UNSUPPORTED_GAME,
+  // Pass inference errors
+  ERROR_STATUS_PASS_INFERENCE_UNSUPPORTED_GAME,
+  ERROR_STATUS_PASS_INFERENCE_TABLE_MISMATCH,
   ERROR_STATUS_LEAVE_BLEND_INVALID_WEIGHT,
   // Threats errors
   ERROR_STATUS_THREATS_UNSUPPORTED_GAME,
@@ -349,6 +352,8 @@ typedef enum {
   // An inference temperature file has a malformed row, a temperature out of
   // range, bags not in ascending order or an exchange row given twice.
   ERROR_STATUS_INFERENCE_TEMPERATURES_INVALID_ROW,
+  // A row of an out-play check file (see outplay_check_weights.h).
+  ERROR_STATUS_OUTPLAY_CHECK_INVALID_ROW,
   // inftempfit's self-play gave no tile placements to fit to.
   ERROR_STATUS_INFERENCE_TEMPERATURE_FIT_NO_PLAYS,
 } error_code_t;

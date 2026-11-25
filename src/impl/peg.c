@@ -127,9 +127,10 @@ typedef struct PegSharedPly {
 // the bag and the mover's rack, all fixed for the candidate except the
 // opponent's rack: while tiles remain, equity (the PAT term included) reads
 // the bag and the other rack only through their sizes, and once the bag is
-// empty the playout ranks by score. So every split that leaves the opponent
-// the same rack shares it. Entries from an earlier candidate are told apart by
-// their stamp.
+// empty it reads the mover's rack, which the opponent's rack then fixes (the
+// mover drew every unseen tile the opponent does not hold). So every split
+// that leaves the opponent the same rack shares it. Entries from an earlier
+// candidate are told apart by their stamp.
 typedef struct PegReplyCacheEntry {
   uint64_t stamp;
   int n_letters;
@@ -1234,6 +1235,15 @@ static bool peg_should_stop(int64_t deadline_ns,
 // non-NULL, holds a PegSharedPly (or NULL) for each of the first
 // PEG_SHARED_PLAYOUT_PLIES plies: a known one is played without generating, and
 // an unknown one records the generation's pick.
+//
+// Each side plays its best move by static equity, before and after the bag
+// empties: once it is empty, that is the score plus twice the opponent's rack
+// for going out, else the score less twice its own leave and a constant. The
+// pick depends only on the board and the two racks, so a shared ply stays
+// valid: the splits that share the opponent's first reply hold the same racks
+// once the bag is empty (the opponent's rack fixes the mover's draw), and an
+// opponent's reply that empties the bag draws every tile left, whatever their
+// order.
 static int32_t peg_greedy_playout(Game *game, int mover_idx,
                                   MoveList *playout_ml, int64_t deadline_ns,
                                   ThreadControl *thread_control,
@@ -1261,11 +1271,10 @@ static int32_t peg_greedy_playout(Game *game, int mover_idx,
       play_move(&shared->move, game, NULL);
       continue;
     }
-    const bool bag_has_tiles = bag_get_letters(game_get_bag(game)) > 0;
     const MoveGenArgs args = {
         .game = game,
         .move_record_type = MOVE_RECORD_BEST,
-        .move_sort_type = bag_has_tiles ? MOVE_SORT_EQUITY : MOVE_SORT_SCORE,
+        .move_sort_type = MOVE_SORT_EQUITY,
         .override_kwg = NULL,
         .eq_margin_movegen = 0,
         .target_equity = EQUITY_MAX_VALUE,
@@ -1349,10 +1358,11 @@ static PegSharedPly *peg_reply_cache_slot(PegReplyCache *cache,
 // Pessimistic playout: the mover plays greedily, but at each opponent turn the
 // opponent plays the reply that minimizes the mover's final spread — a 1-ply
 // adversarial choice scored by a greedy rollout of the remainder. This is the
-// PEG_OPP_PESSIMISTIC leaf for non-emptier scenarios; its mover spread is
-// always
-// <= the greedy (rational) playout's. Returns the signed mover spread with the
-// same rack-leave adjustment as peg_greedy_playout.
+// PEG_OPP_PESSIMISTIC leaf for non-emptier scenarios. Its moves and rollouts
+// rank by static equity, as peg_greedy_playout's do, so it differs from that
+// (rational) playout only in the opponent's replies and its mover spread is
+// <= the rational playout's. Returns the signed mover spread with the same
+// rack-leave adjustment as peg_greedy_playout.
 static int32_t peg_pessimistic_playout(Game *game, int mover_idx,
                                        MoveList *playout_ml, int inner_top_k,
                                        int64_t deadline_ns,
@@ -1372,14 +1382,12 @@ static int32_t peg_pessimistic_playout(Game *game, int mover_idx,
     if (game_get_game_end_reason(game) != GAME_END_REASON_NONE) {
       break;
     }
-    const bool bag_has_tiles = bag_get_letters(game_get_bag(game)) > 0;
-    const move_sort_t sort = bag_has_tiles ? MOVE_SORT_EQUITY : MOVE_SORT_SCORE;
     if (game_get_player_on_turn_index(game) == mover_idx) {
       // Mover: greedy best move.
       const MoveGenArgs ga = {
           .game = game,
           .move_record_type = MOVE_RECORD_BEST,
-          .move_sort_type = sort,
+          .move_sort_type = MOVE_SORT_EQUITY,
           .override_kwg = NULL,
           .eq_margin_movegen = 0,
           .target_equity = EQUITY_MAX_VALUE,
@@ -1409,7 +1417,7 @@ static int32_t peg_pessimistic_playout(Game *game, int mover_idx,
     const MoveGenArgs ga = {
         .game = game,
         .move_record_type = MOVE_RECORD_ALL,
-        .move_sort_type = sort,
+        .move_sort_type = MOVE_SORT_EQUITY,
         .override_kwg = NULL,
         .eq_margin_movegen = 0,
         .target_equity = EQUITY_MAX_VALUE,
@@ -1951,6 +1959,8 @@ static int32_t peg_nested_endgame_value(PegWorker *worker, Game *game,
       stop->deadline_ns, /*actual_move=*/NULL, &ea);
   ea.stop_fn = peg_stop_cancelled;
   ea.stop_data = stop;
+  // Leaf playouts rank plays by static equity, as PEG's greedy playouts do.
+  ea.static_leaf_playouts = true;
   endgame_results_reset(worker->eg_results);
   endgame_solve_inline(&worker->eg_ctx, &ea, worker->eg_results);
   if (endgame_results_get_depth(worker->eg_results, ENDGAME_RESULT_BEST) < 0) {
@@ -2754,6 +2764,8 @@ static int32_t peg_eval_leaf(PegEvalCtx *ctx, Game *game) {
   const PegStop stop = {ctx->deadline_ns, ctx->cutoff, NULL, NULL};
   ea.stop_fn = peg_stop_cancelled;
   ea.stop_data = &stop;
+  // As in peg_nested_endgame_value.
+  ea.static_leaf_playouts = true;
   endgame_results_reset(ctx->worker->eg_results);
   endgame_solve_inline(&ctx->worker->eg_ctx, &ea, ctx->worker->eg_results);
   // If the solver was interrupted before completing any search depth (depth

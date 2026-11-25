@@ -372,6 +372,7 @@ static inline void record_exchange(MoveGen *gen) {
     }
     break;
   case MOVE_RECORD_BEST_SMALL:
+  case MOVE_RECORD_BEST_SMALL_FACE:
     // BEST_SMALL only supports MOVE_SORT_SCORE; no exchange pruning needed.
     break;
   }
@@ -707,6 +708,7 @@ update_best_move_or_insert_into_movelist_wmp(MoveGen *gen, int start_col,
   case MOVE_RECORD_ALL_SMALL:
   case MOVE_RECORD_TILES_PLAYED:
   case MOVE_RECORD_BEST_SMALL:
+  case MOVE_RECORD_BEST_SMALL_FACE:
     log_fatal("update_best_move_or_insert_into_movelist_wmp called with "
               "MOVE_RECORD_ALL_SMALL, MOVE_RECORD_TILES_PLAYED, or "
               "MOVE_RECORD_BEST_SMALL");
@@ -2072,9 +2074,46 @@ static inline void shadow_record(MoveGen *gen, uint32_t allowed_lengths) {
   }
 }
 
+// Whether a word that uses the whole rack could fill the current shadow
+// window (current_left_col to current_right_col): the word map must hold a
+// word of the window's length made of the rack and the window's tiles, as the
+// full shadow checks with the word map (see
+// wmp_move_gen_check_playthrough_full_rack_existence). A window of one square
+// is a play whose word runs the other way, and is not checked. Out of line:
+// only windows of the whole rack call it.
+static __attribute__((noinline)) bool
+small_shadow_whole_rack_word_may_fit(const MoveGen *gen) {
+  const int word_length = gen->current_right_col - gen->current_left_col + 1;
+  if (word_length < MINIMUM_WORD_LENGTH) {
+    return true;
+  }
+  BitRack word = gen->best_small_out_bit_rack;
+  for (int col = gen->current_left_col; col <= gen->current_right_col; col++) {
+    const MachineLetter ml = gen_cache_get_letter(gen, col);
+    if (ml != ALPHABET_EMPTY_SQUARE_MARKER) {
+      bit_rack_add_letter(&word, get_unblanked_machine_letter(ml));
+    }
+  }
+  if (bit_rack_get_letter(&word, BLANK_MACHINE_LETTER) > 2) {
+    return true;
+  }
+  return wmp_get_word_entry(gen->best_small_out_wmp, &word, word_length) !=
+         NULL;
+}
+
 // Simplified shadow_record for small move types (BEST_SMALL).
-// Skips WMP, wordsmog, and leave/equity computations.
-static inline void shadow_record_small(MoveGen *gen) {
+// Skips WMP, wordsmog, and leave/equity computations. With
+// check_whole_rack_words (a constant in each copy of the small shadow; see
+// shadow_play_for_anchor_small), a window that no word using the whole rack
+// can fill is not recorded: it holds no play of the whole rack (see
+// best_small_out_wmp_tiles).
+static inline __attribute__((always_inline)) void
+shadow_record_small(MoveGen *gen, bool check_whole_rack_words) {
+  if (check_whole_rack_words &&
+      gen->tiles_played == gen->best_small_out_wmp_tiles &&
+      !small_shadow_whole_rack_word_may_fit(gen)) {
+    return;
+  }
   Equity tiles_played_score = 0;
   for (int i = 0; i < RACK_SIZE; i++) {
     tiles_played_score += gen->descending_tile_scores[i] *
@@ -2091,11 +2130,8 @@ static inline void shadow_record_small(MoveGen *gen) {
       (gen->shadow_mainword_restricted_score * gen->shadow_word_multiplier) +
       gen->shadow_perpendicular_additional_score + bingo_bonus;
   // Bound the ranking value, which includes the out bonus only for plays that
-  // use the whole rack.
-  Equity bound = score;
-  if (gen->tiles_played == gen->best_small_out_rack_size) {
-    bound += gen->best_small_out_bonus;
-  }
+  // use the whole rack (see gen_set_best_small_ranking).
+  const Equity bound = score + gen->best_small_bound_bonuses[gen->tiles_played];
   if (bound > gen->highest_shadow_score) {
     gen->highest_shadow_score = bound;
   }
@@ -2557,7 +2593,9 @@ static inline void shadow_play_right(MoveGen *gen, bool is_unique,
 
 // Simplified shadow_play_right for small move types.
 // Skips bingo_alpha_rack and WMP operations.
-static inline void shadow_play_right_small(MoveGen *gen, bool is_unique) {
+static inline __attribute__((always_inline)) void
+shadow_play_right_small_impl(MoveGen *gen, bool is_unique,
+                             bool check_whole_rack_words) {
   const Equity orig_main_restricted_score =
       gen->shadow_mainword_restricted_score;
   const Equity orig_perp_score = gen->shadow_perpendicular_additional_score;
@@ -2655,7 +2693,7 @@ static inline void shadow_play_right_small(MoveGen *gen, bool is_unique) {
 
     if (play_is_nonempty_and_nonduplicate(gen->tiles_played, is_unique)) {
       maybe_recalculate_effective_multipliers(gen);
-      shadow_record_small(gen);
+      shadow_record_small(gen, check_whole_rack_words);
     }
   }
 
@@ -2681,6 +2719,26 @@ static inline void shadow_play_right_small(MoveGen *gen, bool is_unique) {
   gen->tiles_played = original_tiles_played;
 
   maybe_recalculate_effective_multipliers(gen);
+}
+
+static __attribute__((noinline)) void
+shadow_play_right_small_unchecked(MoveGen *gen, bool is_unique) {
+  shadow_play_right_small_impl(gen, is_unique, false);
+}
+
+static __attribute__((noinline)) void
+shadow_play_right_small_checked(MoveGen *gen, bool is_unique) {
+  shadow_play_right_small_impl(gen, is_unique, true);
+}
+
+static inline __attribute__((always_inline)) void
+shadow_play_right_small(MoveGen *gen, bool is_unique,
+                        bool check_whole_rack_words) {
+  if (check_whole_rack_words) {
+    shadow_play_right_small_checked(gen, is_unique);
+  } else {
+    shadow_play_right_small_unchecked(gen, is_unique);
+  }
 }
 
 static inline void nonplaythrough_shadow_play_left(MoveGen *gen,
@@ -2721,13 +2779,14 @@ static inline void nonplaythrough_shadow_play_left(MoveGen *gen,
   }
 }
 
-static inline void nonplaythrough_shadow_play_left_small(MoveGen *gen,
-                                                         bool is_unique) {
+static inline __attribute__((always_inline)) void
+nonplaythrough_shadow_play_left_small(MoveGen *gen, bool is_unique,
+                                      bool check_whole_rack_words) {
   for (;;) {
     const uint64_t possible_tiles_for_shadow_right =
         gen->anchor_right_extension_set & gen->rack_cross_set;
     if (possible_tiles_for_shadow_right != 0) {
-      shadow_play_right_small(gen, is_unique);
+      shadow_play_right_small(gen, is_unique, check_whole_rack_words);
     }
     gen->anchor_right_extension_set = TRIVIAL_CROSS_SET;
     if (gen->current_left_col == 0 ||
@@ -2755,7 +2814,7 @@ static inline void nonplaythrough_shadow_play_left_small(MoveGen *gen,
             this_word_multiplier, gen->current_left_col)) {
       insert_unrestricted_multipliers(gen, gen->current_left_col);
     }
-    shadow_record_small(gen);
+    shadow_record_small(gen, check_whole_rack_words);
   }
 }
 
@@ -2833,13 +2892,14 @@ static inline void playthrough_shadow_play_left(MoveGen *gen, bool is_unique) {
   }
 }
 
-static inline void playthrough_shadow_play_left_small(MoveGen *gen,
-                                                      bool is_unique) {
+static inline __attribute__((always_inline)) void
+playthrough_shadow_play_left_small(MoveGen *gen, bool is_unique,
+                                   bool check_whole_rack_words) {
   for (;;) {
     const uint64_t possible_tiles_for_shadow_right =
         gen->anchor_right_extension_set & gen->rack_cross_set;
     if (possible_tiles_for_shadow_right != 0) {
-      shadow_play_right_small(gen, is_unique);
+      shadow_play_right_small(gen, is_unique, check_whole_rack_words);
     }
     gen->anchor_right_extension_set = TRIVIAL_CROSS_SET;
 
@@ -2897,7 +2957,7 @@ static inline void playthrough_shadow_play_left_small(MoveGen *gen,
     }
 
     if (play_is_nonempty_and_nonduplicate(gen->tiles_played, is_unique)) {
-      shadow_record_small(gen);
+      shadow_record_small(gen, check_whole_rack_words);
     }
   }
 }
@@ -2943,7 +3003,8 @@ static inline void shadow_start_nonplaythrough(MoveGen *gen) {
   nonplaythrough_shadow_play_left(gen, !board_is_dir_vertical(gen->dir));
 }
 
-static inline void shadow_start_nonplaythrough_small(MoveGen *gen) {
+static inline __attribute__((always_inline)) void
+shadow_start_nonplaythrough_small(MoveGen *gen, bool check_whole_rack_words) {
   const uint64_t cross_set =
       gen_cache_get_cross_set(gen, gen->current_left_col);
   gen->first_played_tile_col = gen->current_left_col;
@@ -2971,12 +3032,13 @@ static inline void shadow_start_nonplaythrough_small(MoveGen *gen) {
   }
   gen->tiles_played++;
   if (!board_is_dir_vertical(gen->dir)) {
-    shadow_record_small(gen);
+    shadow_record_small(gen, check_whole_rack_words);
   }
   gen->shadow_word_multiplier = this_word_multiplier;
   maybe_recalculate_effective_multipliers(gen);
 
-  nonplaythrough_shadow_play_left_small(gen, !board_is_dir_vertical(gen->dir));
+  nonplaythrough_shadow_play_left_small(gen, !board_is_dir_vertical(gen->dir),
+                                        check_whole_rack_words);
 }
 
 static inline void shadow_start_playthrough(MoveGen *gen,
@@ -3021,8 +3083,9 @@ static inline void shadow_start_playthrough(MoveGen *gen,
 
 // Simplified shadow_start_playthrough for small move types.
 // Skips bingo_alpha_rack and WMP operations.
-static inline void
-shadow_start_playthrough_small(MoveGen *gen, MachineLetter current_letter) {
+static inline __attribute__((always_inline)) void
+shadow_start_playthrough_small(MoveGen *gen, MachineLetter current_letter,
+                               bool check_whole_rack_words) {
   for (;;) {
     gen->shadow_mainword_restricted_score += gen->tile_scores[current_letter];
     if (gen->current_left_col == 0 ||
@@ -3036,7 +3099,8 @@ shadow_start_playthrough_small(MoveGen *gen, MachineLetter current_letter) {
       break;
     }
   }
-  playthrough_shadow_play_left_small(gen, !board_is_dir_vertical(gen->dir));
+  playthrough_shadow_play_left_small(gen, !board_is_dir_vertical(gen->dir),
+                                     check_whole_rack_words);
 }
 
 static inline void shadow_start(MoveGen *gen) {
@@ -3066,7 +3130,8 @@ static inline void shadow_start(MoveGen *gen) {
 
 // Simplified shadow_start for small move types.
 // Skips bingo_alpha_rack copy.
-static inline void shadow_start_small(MoveGen *gen) {
+static inline __attribute__((always_inline)) void
+shadow_start_small(MoveGen *gen, bool check_whole_rack_words) {
   const uint64_t any_extension_set =
       gen->anchor_left_extension_set | gen->anchor_right_extension_set;
   if (any_extension_set == 0) {
@@ -3078,9 +3143,9 @@ static inline void shadow_start_small(MoveGen *gen) {
   const MachineLetter current_letter =
       gen_cache_get_letter(gen, gen->current_left_col);
   if (current_letter == ALPHABET_EMPTY_SQUARE_MARKER) {
-    shadow_start_nonplaythrough_small(gen);
+    shadow_start_nonplaythrough_small(gen, check_whole_rack_words);
   } else {
-    shadow_start_playthrough_small(gen, current_letter);
+    shadow_start_playthrough_small(gen, current_letter, check_whole_rack_words);
   }
 
   gen->rack_cross_set = original_rack_cross_set;
@@ -3201,7 +3266,9 @@ void shadow_play_for_anchor(MoveGen *gen, int col) {
 
 // Simplified shadow_play_for_anchor for small move types (BEST_SMALL).
 // Skips WMP operations.
-void shadow_play_for_anchor_small(MoveGen *gen, int col) {
+static inline __attribute__((always_inline)) void
+shadow_play_for_anchor_small_impl(MoveGen *gen, int col,
+                                  bool check_whole_rack_words) {
   gen->current_left_col = col;
   gen->current_right_col = col;
 
@@ -3228,7 +3295,7 @@ void shadow_play_for_anchor_small(MoveGen *gen, int col) {
   gen->tiles_played = 0;
   gen->max_tiles_to_play = 0;
 
-  shadow_start_small(gen);
+  shadow_start_small(gen, check_whole_rack_words);
   if (gen->max_tiles_to_play == 0) {
     return;
   }
@@ -3236,6 +3303,18 @@ void shadow_play_for_anchor_small(MoveGen *gen, int col) {
   anchor_heap_add_unheaped_anchor(
       &gen->anchor_heap, gen->current_row_index, col, gen->last_anchor_col,
       gen->dir, gen->highest_shadow_score, gen->highest_shadow_score);
+}
+
+// The small shadow is compiled twice: without the whole-rack word check, for
+// every generation that does not make it (the endgame's among them), and with
+// it, for a best-play generation that has best_small_out_wmp_tiles set.
+void shadow_play_for_anchor_small(MoveGen *gen, int col) {
+  shadow_play_for_anchor_small_impl(gen, col, false);
+}
+
+static __attribute__((noinline)) void
+shadow_play_for_anchor_small_checking_words(MoveGen *gen, int col) {
+  shadow_play_for_anchor_small_impl(gen, col, true);
 }
 
 // Whether this generation uses its anchors' equity caps (see
@@ -3351,9 +3430,14 @@ shadow_lane_small(MoveGen *gen, int row) {
                                              gen->dir, gen->cross_index);
   gen->wit_len_lane = board_get_wit_len_lane(gen->board, gen->current_row_index,
                                              gen->dir, gen->cross_index);
+  const bool check_whole_rack_words = gen->best_small_out_wmp_tiles >= 0;
   for (int col = 0; col < BOARD_DIM; col++) {
     if (gen_cache_get_is_anchor(gen, col)) {
-      shadow_play_for_anchor_small(gen, col);
+      if (check_whole_rack_words) {
+        shadow_play_for_anchor_small_checking_words(gen, col);
+      } else {
+        shadow_play_for_anchor_small(gen, col);
+      }
 
       gen->last_anchor_col = col;
       if (!gen_cache_is_empty(gen, col)) {
@@ -3382,6 +3466,41 @@ static inline void set_descending_tile_scores(MoveGen *gen) {
   }
   memcpy(gen->full_rack_descending_tile_scores, gen->descending_tile_scores,
          sizeof(gen->descending_tile_scores));
+}
+
+// Sets what a play's ranking value adds to its score for the two best small
+// record types, for a position gen_load_position has loaded: the face weight,
+// and what the small shadow adds to its bound of a play's score by the number
+// of tiles the play places (best_small_bound_bonuses).
+static inline void gen_set_best_small_ranking(MoveGen *gen,
+                                              const MoveGenArgs *args) {
+  const int rack_tiles = gen->best_small_out_rack_size;
+  assert(rack_tiles <= RACK_SIZE);
+  memset(gen->best_small_bound_bonuses, 0,
+         sizeof(gen->best_small_bound_bonuses));
+  gen->best_small_face_weight = 0;
+  if (gen->move_record_type == MOVE_RECORD_BEST_SMALL_FACE) {
+    assert(args->best_small_face_weight >= 0);
+    gen->best_small_face_weight = args->best_small_face_weight;
+    for (int tiles = 1; tiles <= rack_tiles; tiles++) {
+      gen->best_small_bound_bonuses[tiles] =
+          gen->best_small_bound_bonuses[tiles - 1] +
+          gen->best_small_face_weight *
+              gen->full_rack_descending_tile_scores[tiles - 1];
+    }
+  }
+  gen->best_small_bound_bonuses[rack_tiles] += gen->best_small_out_bonus;
+  gen->best_small_out_wmp_tiles = -1;
+  if (gen->best_small_out_bonus > 0 && args->override_kwg == NULL &&
+      gen->bit_rack_compatible && !gen->is_wordsmog && !gen->is_woadwage) {
+    gen->best_small_out_wmp = player_get_wmp(
+        game_get_player(args->game, game_get_player_on_turn_index(args->game)));
+    if (gen->best_small_out_wmp != NULL) {
+      gen->best_small_out_wmp_tiles = rack_tiles;
+      gen->best_small_out_bit_rack =
+          bit_rack_create_from_rack(&gen->ld, &gen->player_rack);
+    }
+  }
 }
 
 // Points gen->pat_ctx at the board's context in board_cache, loading it
@@ -3436,7 +3555,7 @@ gen_load_pool_shift(MoveGen *gen, const Game *game, const Player *player,
   if (gen->move_sort_type != MOVE_SORT_EQUITY ||
       gen->move_record_type == MOVE_RECORD_ALL_SMALL ||
       gen->move_record_type == MOVE_RECORD_TILES_PLAYED ||
-      gen->move_record_type == MOVE_RECORD_BEST_SMALL ||
+      move_record_type_is_best_small(gen->move_record_type) ||
       table->ld_size != ld_get_size(&gen->ld) ||
       !pool_shift_applies(table, gen->klv, player_get_pool_shift_weight(player),
                           rack_get_total_letters(&gen->player_rack),
@@ -3629,8 +3748,8 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
   // Reset the move list
   if (gen->move_record_type == MOVE_RECORD_ALL_SMALL ||
       gen->move_record_type == MOVE_RECORD_TILES_PLAYED ||
-      gen->move_record_type == MOVE_RECORD_BEST_SMALL) {
-    if (gen->move_record_type == MOVE_RECORD_BEST_SMALL &&
+      move_record_type_is_best_small(gen->move_record_type)) {
+    if (move_record_type_is_best_small(gen->move_record_type) &&
         gen->move_sort_type != MOVE_SORT_SCORE) {
       log_fatal("MOVE_RECORD_BEST_SMALL only supports MOVE_SORT_SCORE");
     }
@@ -3670,7 +3789,7 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
   gen->pat_terms = NULL;
   if (gen->move_record_type != MOVE_RECORD_ALL_SMALL &&
       gen->move_record_type != MOVE_RECORD_TILES_PLAYED &&
-      gen->move_record_type != MOVE_RECORD_BEST_SMALL) {
+      !move_record_type_is_best_small(gen->move_record_type)) {
     board_copy_opening_penalties(gen->board, gen->opening_move_word_penalties,
                                  gen->opening_move_letter_penalties);
     // The PAT term is equity-only, runs only while the real bag has tiles,
@@ -3719,7 +3838,7 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
   // holds: only the full shadow and WMP generation read it, and these
   // generations run the small shadow and the small generator.
   gen->lane_shadow_cache =
-      gen->move_record_type == MOVE_RECORD_BEST_SMALL && !gen->is_wordsmog
+      move_record_type_is_best_small(gen->move_record_type) && !gen->is_wordsmog
           ? args->lane_shadow_cache
           : NULL;
 }
@@ -4065,9 +4184,13 @@ static inline uint64_t lane_shadow_field_mask(void) {
 // lane_shadow_field_mask). The extension sets follow from the letters and the
 // lexicon, which context_key holds. The two words go in separate chains of
 // multiply-adds; each step is a bijection of its chain so far (the multiplier
-// is odd), so lanes that differ in one word always differ in a chain. One
-// finalizer then mixes both chains and context_key into the top bits that
-// index the cache. A key is never 0, which marks no lane.
+// is odd), so lanes that differ in one word always differ in a chain. The
+// cross set chain is mixed before the fields chain joins it: the last square's
+// terms are added unmultiplied, so XORing the raw chains let small changes to
+// both cancel (an empty last square with cross set 3 and the same square
+// holding letter 5 collided about one time in ten). A second finalizer then
+// mixes the result into the top bits that index the cache. A key is never 0,
+// which marks no lane.
 static inline uint64_t lane_shadow_key(const Square *lane_squares,
                                        uint64_t context_key,
                                        uint64_t field_mask) {
@@ -4083,17 +4206,23 @@ static inline uint64_t lane_shadow_key(const Square *lane_squares,
     fields = fields * LANE_HASH_MULTIPLIER + (field_word & field_mask);
   }
   const uint64_t rotated_fields = (fields << 32) | (fields >> 32);
-  return lane_shadow_mix(cross_sets ^ rotated_fields ^ context_key) | 1;
+  return lane_shadow_mix(lane_shadow_mix(cross_sets ^ context_key) ^
+                         rotated_fields) |
+         1;
 }
 
 static_assert(offsetof(Square, cross_score) + sizeof(uint64_t) <=
                   sizeof(Square),
               "lane_shadow_key reads a word from cross_score on");
 
+// The shift of the face weight in the lane shadow context key's last term,
+// above any rack size.
+enum { LANE_KEY_FACE_WEIGHT_SHIFT = 8 };
+
 // The key of what a lane's small shadow reads besides the lane's squares and
 // direction: the solve (by the cache's salt, which also stands for the letter
 // distribution and the bingo bonus), the lexicon and cross set index, the
-// rack, and the out bonus and the rack size it applies to.
+// rack, the out bonus and the rack size it applies to, and the face weight.
 static uint64_t lane_shadow_context_key(const MoveGen *gen) {
   uint64_t key = gen->lane_shadow_cache->salt;
   key = key * LANE_HASH_MULTIPLIER + (uint64_t)(uintptr_t)gen->kwg;
@@ -4104,7 +4233,8 @@ static uint64_t lane_shadow_context_key(const MoveGen *gen) {
   }
   key = key * LANE_HASH_MULTIPLIER +
         (uint64_t)(uint32_t)gen->best_small_out_bonus;
-  key = key * LANE_HASH_MULTIPLIER + (uint64_t)gen->best_small_out_rack_size;
+  key = key * LANE_HASH_MULTIPLIER + (uint64_t)gen->best_small_out_rack_size +
+        ((uint64_t)gen->best_small_face_weight << LANE_KEY_FACE_WEIGHT_SHIFT);
   return lane_shadow_mix(key);
 }
 
@@ -4315,10 +4445,10 @@ static inline uint64_t gen_anchor_play_key(const MoveGen *gen,
   return lane_shadow_mix(lane_key + place * LANE_HASH_MULTIPLIER) | 1;
 }
 
-// Offers an anchor's best play to the generation's best, as recording the
-// anchor's plays one by one would: see MOVE_RECORD_BEST_SMALL in
+// Offers a cached play to the generation's best, as recording the plays
+// one by one would: see MOVE_RECORD_BEST_SMALL in
 // update_best_move_or_insert_into_movelist.
-static inline void gen_offer_anchor_play(MoveGen *gen,
+static inline void gen_offer_cached_play(MoveGen *gen,
                                          const AnchorPlayEntry *play) {
   if (play->tiny_move == 0) {
     return;
@@ -4341,42 +4471,93 @@ static inline void gen_offer_anchor_play(MoveGen *gen,
   }
 }
 
-// Searches the anchor the generator is set up for, with the generation's
-// best so far set aside, so that what it finds is the anchor's own best play;
-// remembers that in entry under key, and then offers it to the generation's
-// best. With held, the entry already holds the key, and must hold what the
-// search finds.
-static void gen_search_and_remember_anchor_play(MoveGen *gen,
-                                                const Anchor *anchor,
-                                                uint32_t kwg_root_node_index,
-                                                AnchorPlayEntry *entry,
-                                                uint64_t key, bool held) {
-  MoveList *move_list = gen->move_list;
-  const SmallMove best_so_far = *move_list->small_moves[0];
-  const int count_so_far = move_list->count;
-  const Equity value_so_far = gen->best_move_equity_or_score;
-  const Equity cutoff_so_far = gen->cutoff_equity_or_score;
-  move_list->count = 0;
+// Searches one canonical BEST_SMALL lane down to cutoff. Returns an upper
+// bound on the plays still unaccounted for; EQUITY_UNDEFINED_VALUE means
+// that the best play found (including no play) answers for the whole lane.
+static Equity gen_search_lane_above_cutoff(MoveGen *gen, uint32_t root,
+                                           Equity cutoff) {
+  anchor_heap_reset(&gen->anchor_heap);
+  shadow_lane_small(gen, gen->current_row_index);
+  gen->tiles_played = 0;
+  Equity skipped_bound = EQUITY_UNDEFINED_VALUE;
+  for (int anchor_idx = 0; anchor_idx < gen->anchor_heap.count; anchor_idx++) {
+    const Anchor *anchor = &gen->anchor_heap.anchors[anchor_idx];
+    if (anchor->highest_possible_equity < cutoff) {
+      if (anchor->highest_possible_equity > skipped_bound) {
+        skipped_bound = anchor->highest_possible_equity;
+      }
+      continue;
+    }
+    if (anchor->highest_possible_equity < gen->best_move_equity_or_score) {
+      continue;
+    }
+    gen->current_anchor_col = anchor->col;
+    gen->last_anchor_col = anchor->last_anchor_col;
+    gen->anchor_right_extension_set =
+        gen_cache_get_right_extension_set(gen, anchor->col);
+    gen->current_anchor_highest_possible_score = anchor->highest_possible_score;
+    recursive_gen_small(gen, anchor->col, root, anchor->col, anchor->col,
+                        gen->dir == BOARD_HORIZONTAL_DIRECTION, 0, 1, 0);
+  }
+  // An equal bound could still hold a play with a larger tiny_move.
+  return skipped_bound < gen->best_move_equity_or_score ? EQUITY_UNDEFINED_VALUE
+                                                        : skipped_bound;
+}
+
+// A lane or anchor search needs its own best play while the generation's
+// incumbent is set aside.
+typedef struct BestSmallIncumbent {
+  SmallMove play;
+  int count;
+  Equity value;
+  Equity cutoff;
+} BestSmallIncumbent;
+
+static inline BestSmallIncumbent gen_set_aside_incumbent(MoveGen *gen) {
+  const BestSmallIncumbent incumbent = {.play = *gen->move_list->small_moves[0],
+                                        .count = gen->move_list->count,
+                                        .value = gen->best_move_equity_or_score,
+                                        .cutoff = gen->cutoff_equity_or_score};
+  gen->move_list->count = 0;
   gen->best_move_equity_or_score = EQUITY_INITIAL_VALUE;
   gen->cutoff_equity_or_score = EQUITY_INITIAL_VALUE;
-  recursive_gen_small(gen, anchor->col, kwg_root_node_index, anchor->col,
-                      anchor->col, gen->dir == BOARD_HORIZONTAL_DIRECTION, 0, 1,
-                      0);
+  return incumbent;
+}
+
+static inline void gen_restore_incumbent(MoveGen *gen,
+                                         const BestSmallIncumbent *incumbent) {
+  // The search may swap the best and spare. Restore to the current best slot.
+  *gen->move_list->small_moves[0] = incumbent->play;
+  gen->move_list->count = incumbent->count;
+  gen->best_move_equity_or_score = incumbent->value;
+  gen->cutoff_equity_or_score = incumbent->cutoff;
+}
+
+static inline AnchorPlayEntry gen_best_small_entry(const MoveGen *gen,
+                                                   uint64_t key) {
   AnchorPlayEntry found = {.key = key};
-  if (move_list->count != 0) {
-    const SmallMove *play = move_list->small_moves[0];
+  if (gen->move_list->count != 0) {
+    const SmallMove *play = gen->move_list->small_moves[0];
     found.tiny_move = play->tiny_move;
     found.value = gen->best_move_equity_or_score;
     found.score = play->metadata.score;
     found.play_length = play->metadata.play_length;
     found.tiles_played = play->metadata.tiles_played;
   }
-  // The search may have swapped the list's best and spare moves; whichever
-  // is the best now takes the best so far back.
-  *move_list->small_moves[0] = best_so_far;
-  move_list->count = count_so_far;
-  gen->best_move_equity_or_score = value_so_far;
-  gen->cutoff_equity_or_score = cutoff_so_far;
+  return found;
+}
+
+static void gen_search_and_remember_anchor_play(MoveGen *gen,
+                                                const Anchor *anchor,
+                                                uint32_t kwg_root_node_index,
+                                                AnchorPlayEntry *entry,
+                                                uint64_t key, bool held) {
+  const BestSmallIncumbent incumbent = gen_set_aside_incumbent(gen);
+  recursive_gen_small(gen, anchor->col, kwg_root_node_index, anchor->col,
+                      anchor->col, gen->dir == BOARD_HORIZONTAL_DIRECTION, 0, 1,
+                      0);
+  const AnchorPlayEntry found = gen_best_small_entry(gen, key);
+  gen_restore_incumbent(gen, &incumbent);
   assert(!held || (entry->tiny_move == found.tiny_move &&
                    entry->value == found.value && entry->score == found.score &&
                    entry->play_length == found.play_length &&
@@ -4384,7 +4565,7 @@ static void gen_search_and_remember_anchor_play(MoveGen *gen,
   if (!held) {
     *entry = found;
   }
-  gen_offer_anchor_play(gen, &found);
+  gen_offer_cached_play(gen, &found);
 }
 
 // With lanes deferred (see MoveGen.deferred_lanes): when the deferred lane
@@ -4430,7 +4611,7 @@ gen_record_scoring_plays_impl(MoveGen *gen, bool lazy) {
   }
   // The anchors' remembered plays answer for the plain small generator only.
   LaneShadowCache *anchor_play_cache =
-      gen->move_record_type == MOVE_RECORD_BEST_SMALL && !gen->is_woadwage
+      move_record_type_is_best_small(gen->move_record_type) && !gen->is_woadwage
           ? gen->lane_shadow_cache
           : NULL;
   // Reset the reused generator fields
@@ -4476,7 +4657,7 @@ gen_record_scoring_plays_impl(MoveGen *gen, bool lazy) {
       anchor_play_held = anchor_play->key == anchor_play_key;
 #ifdef NDEBUG
       if (anchor_play_held) {
-        gen_offer_anchor_play(gen, anchor_play);
+        gen_offer_cached_play(gen, anchor_play);
         continue;
       }
 #endif
@@ -4508,7 +4689,7 @@ gen_record_scoring_plays_impl(MoveGen *gen, bool lazy) {
       gen_search_and_remember_anchor_play(gen, &anchor, kwg_root_node_index,
                                           anchor_play, anchor_play_key,
                                           anchor_play_held);
-    } else if (gen->move_record_type == MOVE_RECORD_BEST_SMALL) {
+    } else if (move_record_type_is_best_small(gen->move_record_type)) {
       recursive_gen_small(gen, anchor.col, kwg_root_node_index, anchor.col,
                           anchor.col, gen->dir == BOARD_HORIZONTAL_DIRECTION, 0,
                           1, 0);
@@ -4569,6 +4750,7 @@ void gen_record_pass(MoveGen *gen) {
     // Pass doesn't use any tiles — nothing to record.
     break;
   case MOVE_RECORD_BEST_SMALL:
+  case MOVE_RECORD_BEST_SMALL_FACE:
     if (gen->best_move_equity_or_score < EQUITY_PASS_VALUE) {
       // No scoring play was found; result is a pass.
       small_move_set_as_pass(gen->move_list->small_moves[0]);
@@ -4752,6 +4934,88 @@ void generate_tiles_played_in_lanes(const MoveGenArgs *args, uint64_t lane_mask,
   }
 }
 
+#ifndef NDEBUG
+// Asserts that entry, which answers for lane against the generation's best
+// so far, holds what a search of the whole lane finds, so that a search input
+// the key misses fails the tests: the lane's best play, or, when the entry's
+// search left anchors out, a play that only a play bounded by them outranks.
+static void gen_assert_lane_play(MoveGen *gen, const AnchorPlayEntry *entry,
+                                 int lane, uint32_t root) {
+  const BestSmallIncumbent incumbent = gen_set_aside_incumbent(gen);
+  gen->dir = lane / BOARD_DIM;
+  gen->current_row_index = lane % BOARD_DIM;
+  const Equity skipped_bound =
+      gen_search_lane_above_cutoff(gen, root, EQUITY_INITIAL_VALUE);
+  assert(skipped_bound == EQUITY_UNDEFINED_VALUE);
+  const AnchorPlayEntry lane_best = gen_best_small_entry(gen, entry->key);
+  gen_restore_incumbent(gen, &incumbent);
+  anchor_heap_reset(&gen->anchor_heap);
+  const bool same_play = entry->tiny_move == lane_best.tiny_move &&
+                         entry->value == lane_best.value &&
+                         entry->score == lane_best.score &&
+                         entry->play_length == lane_best.play_length &&
+                         entry->tiles_played == lane_best.tiles_played;
+  if (entry->skipped_bound == EQUITY_UNDEFINED_VALUE) {
+    assert(same_play);
+    return;
+  }
+  assert(same_play ||
+         (lane_best.tiny_move != 0 && lane_best.value <= entry->skipped_bound &&
+          (entry->tiny_move == 0 || entry->value <= lane_best.value)));
+}
+#endif
+
+// A canonical lane result includes its row and direction: a cached move
+// names its board coordinates. Prefetch all the requested lanes' entries
+// before reading them, as for the lane shadows.
+static void gen_record_cached_lane_bests(MoveGen *gen, uint64_t lane_mask) {
+  uint64_t lanes = lane_mask & ((UINT64_C(1) << (2 * BOARD_DIM)) - 1);
+  const uint64_t context_key = lane_shadow_context_key(gen);
+  const uint64_t field_mask = lane_shadow_field_mask();
+  const uint32_t root = kwg_get_root_node_index(gen->kwg);
+  uint64_t *keys = gen->lane_shadow_keys;
+  for (uint64_t remaining = lanes; remaining != 0; remaining &= remaining - 1) {
+    const int lane = lowest_set_bit_index_64(remaining);
+    if (gen->row_number_of_anchors_cache[lane] == 0) {
+      lanes &= ~(UINT64_C(1) << lane);
+      continue;
+    }
+    const int row = lane % BOARD_DIM;
+    const int dir = lane / BOARD_DIM;
+    // Anchor play keys are odd. Shift the lane's odd hash to give lane
+    // plays a disjoint set of nonzero keys in the same table.
+    keys[lane] =
+        lane_shadow_key(board_get_row_cache(gen->board_lanes, row, dir),
+                        context_key + (uint64_t)lane * LANE_HASH_MULTIPLIER,
+                        field_mask)
+        << 1;
+    __builtin_prefetch(
+        lane_shadow_cache_anchor_play(gen->lane_shadow_cache, keys[lane]));
+  }
+  for (; lanes != 0; lanes &= lanes - 1) {
+    const int lane = lowest_set_bit_index_64(lanes);
+    const uint64_t key = keys[lane];
+    AnchorPlayEntry *entry =
+        lane_shadow_cache_anchor_play(gen->lane_shadow_cache, key);
+    if (entry->key != key ||
+        entry->skipped_bound >= gen->best_move_equity_or_score) {
+      gen->dir = lane / BOARD_DIM;
+      gen->current_row_index = lane % BOARD_DIM;
+      const BestSmallIncumbent incumbent = gen_set_aside_incumbent(gen);
+      const Equity skipped_bound =
+          gen_search_lane_above_cutoff(gen, root, incumbent.cutoff);
+      *entry = gen_best_small_entry(gen, key);
+      entry->skipped_bound = skipped_bound;
+      gen_restore_incumbent(gen, &incumbent);
+    } else {
+#ifndef NDEBUG
+      gen_assert_lane_play(gen, entry, lane, root);
+#endif
+    }
+    gen_offer_cached_play(gen, entry);
+  }
+}
+
 bool generate_best_small_move_in_lanes(const MoveGenArgs *args,
                                        uint64_t lane_mask,
                                        const SmallMove *incumbent,
@@ -4759,9 +5023,10 @@ bool generate_best_small_move_in_lanes(const MoveGenArgs *args,
   MoveGen *gen = get_movegen();
   gen_count_movegen(gen);
   gen_load_position(gen, args);
-  assert(gen->move_record_type == MOVE_RECORD_BEST_SMALL);
+  assert(move_record_type_is_best_small(gen->move_record_type));
+  gen_set_best_small_ranking(gen, args);
   if (incumbent != NULL) {
-    // The incumbent is the best so far, so the anchor heap prunes against it
+    // The incumbent is the best so far, so the generator prunes against it
     // from the start and an equal-valued play must beat its tiny_move.
     *gen->move_list->small_moves[0] = *incumbent;
     gen->move_list->count = 1;
@@ -4769,6 +5034,11 @@ bool generate_best_small_move_in_lanes(const MoveGenArgs *args,
     gen->cutoff_equity_or_score = incumbent_value;
   }
   rack_copy(&gen->full_player_rack, &gen->player_rack);
+  if (gen->lane_shadow_cache != NULL && gen->best_small_canonical_ties &&
+      !gen->is_woadwage && !gen->stop_on_threshold) {
+    gen_record_cached_lane_bests(gen, lane_mask);
+    return gen->move_list->count > 0;
+  }
   anchor_heap_reset(&gen->anchor_heap);
   if (gen->lane_shadow_cache != NULL) {
     shadow_lanes_small_cached(gen, lane_mask);
@@ -5186,9 +5456,10 @@ void generate_moves(const MoveGenArgs *args) {
       }
       return; // No pass recording needed
     }
-  } else if (gen->move_record_type == MOVE_RECORD_BEST_SMALL) {
+  } else if (move_record_type_is_best_small(gen->move_record_type)) {
     // BEST_SMALL uses small shadow and small recursive_gen paths that skip
     // leave_map, WMP, and wordsmog operations entirely.
+    gen_set_best_small_ranking(gen, args);
     gen_shadow_small(gen);
     gen_record_scoring_plays(gen);
   } else {

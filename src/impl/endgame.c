@@ -14,6 +14,7 @@
 #include "../def/move_defs.h"
 #include "../def/players_data_defs.h"
 #include "../def/rack_defs.h"
+#include "../def/static_eval_defs.h"
 #include "../def/thread_control_defs.h"
 #include "../ent/bag.h"
 #include "../ent/board.h"
@@ -76,6 +77,9 @@ enum {
   // node's first reply before its move list exists, so going out ranks first,
   // as GOING_OUT_BF makes the move ordering rank it.
   FIRST_REPLY_GOING_OUT_PRIORITY = 100000,
+  // Static equity charges twice the face value of the tiles left on the rack
+  // once the bag is empty (see static_eval.h).
+  STATIC_PLAYOUT_FACE_WEIGHT = 2,
   // Bit flags for move estimates. These large numbers will force these
   // estimated values to sort first.
   LARGE_VALUE = 1 << 30, // for alpha-beta pruning
@@ -209,6 +213,14 @@ struct EndgameCtx {
   int num_top_moves;
   int requested_plies;
   int threads;
+  // How a greedy leaf playout with no stuck tiles ranks plays, from
+  // EndgameArgs.static_leaf_playouts: the record type of its best-play
+  // generations, their face weight, and what going out counts beyond twice
+  // the opponent's rack. Placed with the ints above, before the next double,
+  // so that they add no padding.
+  move_record_t playout_record_type;
+  int playout_face_weight;
+  Equity playout_out_bonus_extra;
   double tt_fraction_of_mem;
   TranspositionTable *transposition_table;
   bool tt_is_external; // true when using a caller-provided shared TT
@@ -1039,6 +1051,15 @@ void endgame_ctx_reset(EndgameCtx *es, EndgameResults *results,
   es->forced_pass_bypass = endgame_args->forced_pass_bypass;
   es->incremental_movegen = endgame_args->incremental_movegen;
   es->best_reply_shortcuts = !endgame_args->disable_best_reply_shortcuts;
+  if (endgame_args->static_leaf_playouts) {
+    es->playout_record_type = MOVE_RECORD_BEST_SMALL_FACE;
+    es->playout_face_weight = STATIC_PLAYOUT_FACE_WEIGHT;
+    es->playout_out_bonus_extra = NON_OUTPLAY_CONSTANT_PENALTY;
+  } else {
+    es->playout_record_type = MOVE_RECORD_BEST_SMALL;
+    es->playout_face_weight = 0;
+    es->playout_out_bonus_extra = 0;
+  }
   es->num_top_moves = endgame_args->num_top_moves;
   // The in-search top-K array (topk_values) and the live multi-PV leaderboard
   // are sized to MAX_ENDGAME_DISPLAY_PVS; clamp so a caller asking for more
@@ -2587,12 +2608,16 @@ static void out_reply_bound_init(OutReplyBound *bound, EndgameCtxWorker *worker,
     }
     return;
   }
+  // The lanes' bests this fills are the ones the leaves' playouts pick from,
+  // so they are ranked as the playouts rank. Only the whole-rack plays are
+  // read here, and those rank the same either way.
   const MoveGenArgs reply_args = {
       .best_small_out_bonus = 0,
+      .best_small_face_weight = worker->solver->playout_face_weight,
       .best_small_canonical_ties = true,
       .game = game,
       .move_list = worker->move_list,
-      .move_record_type = MOVE_RECORD_BEST_SMALL,
+      .move_record_type = worker->solver->playout_record_type,
       .move_sort_type = MOVE_SORT_SCORE,
       .override_kwg = solver_get_pruned_kwg(worker->solver, opp),
       .eq_margin_movegen = 0,
@@ -3005,6 +3030,38 @@ static void pick_best_playout_play(const SmallMove *plays, int count,
   }
 }
 
+// pick_best_playout_play for EndgameArgs.static_leaf_playouts: a play's rank
+// also counts STATIC_PLAYOUT_FACE_WEIGHT times the face value of the tiles it
+// places (tile_face_values, by machine letter), the order
+// MOVE_RECORD_BEST_SMALL_FACE ranks by.
+static void pick_best_playout_play_static(const SmallMove *plays, int count,
+                                          int go_out_bonus,
+                                          int side_to_move_tiles,
+                                          const int *tile_face_values,
+                                          SmallMove *best) {
+  int best_adjusted = INT32_MIN;
+  const SmallMove *best_play = NULL;
+  for (int move_idx = 0; move_idx < count; move_idx++) {
+    const SmallMove *candidate = &plays[move_idx];
+    int adjusted =
+        small_move_get_score(candidate) +
+        STATIC_PLAYOUT_FACE_WEIGHT *
+            compute_played_tiles_face_value(candidate, tile_face_values);
+    if (small_move_get_tiles_played(candidate) == side_to_move_tiles) {
+      adjusted += go_out_bonus;
+    }
+    if (best_play == NULL || adjusted > best_adjusted ||
+        (adjusted == best_adjusted &&
+         candidate->tiny_move > best_play->tiny_move)) {
+      best_adjusted = adjusted;
+      best_play = candidate;
+    }
+  }
+  if (best_play != NULL) {
+    *best = *best_play;
+  }
+}
+
 // Pick the greedy play from the incremental lists. At the leaf the stuck
 // check may already have materialized the side's plays. Otherwise sibling
 // leaves can share their lane bests. A step inside the playout has no siblings.
@@ -3015,16 +3072,18 @@ static int playout_step_from_lists(EndgameCtxWorker *worker, bool alone,
   const Rack *opp_rack =
       player_get_rack(game_get_player(worker->game_copy, 1 - stm_idx));
   const Equity go_out_bonus =
-      calculate_end_rack_points(opp_rack, game_get_ld(worker->game_copy));
+      calculate_end_rack_points(opp_rack, game_get_ld(worker->game_copy)) +
+      worker->solver->playout_out_bonus_extra;
   SmallMove best;
   small_move_set_as_pass(&best);
-  // The MOVE_RECORD_BEST_SMALL generation a step without the lists runs.
+  // The best small generation a step without the lists runs.
   const MoveGenArgs best_args = {
       .best_small_out_bonus = go_out_bonus,
+      .best_small_face_weight = worker->solver->playout_face_weight,
       .best_small_canonical_ties = true,
       .game = worker->game_copy,
       .move_list = worker->move_list,
-      .move_record_type = MOVE_RECORD_BEST_SMALL,
+      .move_record_type = worker->solver->playout_record_type,
       .move_sort_type = MOVE_SORT_SCORE,
       .override_kwg = solver_get_pruned_kwg(worker->solver, stm_idx),
       .eq_margin_movegen = 0,
@@ -3035,8 +3094,14 @@ static int playout_step_from_lists(EndgameCtxWorker *worker, bool alone,
     const int stm_tiles =
         player_get_rack(game_get_player(worker->game_copy, stm_idx))
             ->number_of_letters;
-    pick_best_playout_play(leaf_plays, leaf_play_count,
-                           equity_to_int(go_out_bonus), stm_tiles, &best);
+    if (worker->solver->playout_face_weight == 0) {
+      pick_best_playout_play(leaf_plays, leaf_play_count,
+                             equity_to_int(go_out_bonus), stm_tiles, &best);
+    } else {
+      pick_best_playout_play_static(leaf_plays, leaf_play_count,
+                                    equity_to_int(go_out_bonus), stm_tiles,
+                                    worker->solver->tile_face_values, &best);
+    }
   } else {
     SmallMove found;
     if (alone ? path_move_lists_best_play_alone(worker->path_lists, &best_args,
@@ -3539,12 +3604,15 @@ static int32_t negamax_greedy_leaf_playout(EndgameCtxWorker *worker,
       const Rack *opp_rack_p = player_get_rack(
           game_get_player(worker->game_copy, 1 - playout_on_turn));
       const MoveGenArgs pargs = {
-          .best_small_out_bonus = calculate_end_rack_points(
-              opp_rack_p, game_get_ld(worker->game_copy)),
+          .best_small_out_bonus =
+              calculate_end_rack_points(opp_rack_p,
+                                        game_get_ld(worker->game_copy)) +
+              worker->solver->playout_out_bonus_extra,
+          .best_small_face_weight = worker->solver->playout_face_weight,
           .best_small_canonical_ties = worker->solver->best_reply_shortcuts,
           .game = worker->game_copy,
           .move_list = worker->move_list,
-          .move_record_type = MOVE_RECORD_BEST_SMALL,
+          .move_record_type = worker->solver->playout_record_type,
           .move_sort_type = MOVE_SORT_SCORE,
           .override_kwg = solver_get_pruned_kwg(
               worker->solver, game_get_player_on_turn_index(worker->game_copy)),

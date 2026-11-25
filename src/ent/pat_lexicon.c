@@ -3,6 +3,7 @@
 #include "../def/kwg_defs.h"
 #include "../def/letter_distribution_defs.h"
 #include "../def/pat_defs.h"
+#include "../util/fnv.h"
 #include "../util/io_util.h"
 #include "equity.h"
 #include "kwg.h"
@@ -149,9 +150,34 @@ static void pat_walk_words(const KWG *kwg, const LetterDistribution *ld,
   }
 }
 
+// Identifies everything the lexicon tables are made from: the word graph and
+// the letters' scores.
+static uint64_t pat_get_lexicon_hash(const KWG *kwg,
+                                     const LetterDistribution *ld) {
+  uint64_t hash = FNV_64_OFFSET_BASIS;
+  hash = fnv64a_step(hash, kwg_get_hash(kwg));
+  const int ld_size = ld_get_size(ld);
+  hash = fnv64a_step(hash, (uint64_t)ld_size);
+  for (int ml = 0; ml < ld_size; ml++) {
+    hash = fnv64a_step(hash,
+                       (uint64_t)(uint32_t)ld_get_score(ld, (MachineLetter)ml));
+  }
+  return hash;
+}
+
 void pat_prepare_hook_flex(PATWeights *pat, const KWG *kwg,
                            const LetterDistribution *ld) {
+  uint64_t lexicon_hash = 0;
+  if (kwg) {
+    lexicon_hash = pat_get_lexicon_hash(kwg, ld);
+    if (pat->prepared && pat->prepared_from_lexicon &&
+        pat->prepared_lexicon_hash == lexicon_hash) {
+      return;
+    }
+  }
   pat->prepared = true;
+  pat->prepared_from_lexicon = kwg != NULL;
+  pat->prepared_lexicon_hash = lexicon_hash;
   memset(pat->hook_flex, 0, sizeof(pat->hook_flex));
   memset(pat->through_score, 0, sizeof(pat->through_score));
   memset(pat->through_count, 0, sizeof(pat->through_count));

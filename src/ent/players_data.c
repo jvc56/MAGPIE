@@ -14,6 +14,7 @@
 #include "klv.h"
 #include "kwg.h"
 #include "letter_distribution.h"
+#include "outplay_check_weights.h"
 #include "pat.h"
 #include "pat_file.h"
 #include "peg_adjust.h"
@@ -33,7 +34,9 @@ static const char *const players_data_type_names[] = {
     "rack info table",
     "word info table",
     "positional adjustment table",
-    "pre-endgame adjustments"};
+    "pre-endgame adjustments",
+    "inference temperatures",
+    "out-play check weights"};
 
 // The PlayersData struct holds all of the
 // information that can be set during configuration.
@@ -316,6 +319,13 @@ players_data_get_inference_temperatures(const PlayersData *players_data,
       players_data, PLAYERS_DATA_TYPE_INFERENCE_TEMPERATURES, player_index);
 }
 
+OutplayCheckWeights *
+players_data_get_outplay_check(const PlayersData *players_data,
+                               int player_index) {
+  return (OutplayCheckWeights *)players_data_get_data(
+      players_data, PLAYERS_DATA_TYPE_OUTPLAY_CHECK, player_index);
+}
+
 PegAdjust *players_data_get_peg_adjust(const PlayersData *players_data,
                                        int player_index) {
   return (PegAdjust *)players_data_get_data(
@@ -368,6 +378,9 @@ void *players_data_create_data(players_data_t players_data_type,
   case PLAYERS_DATA_TYPE_INFERENCE_TEMPERATURES:
     data = inference_temperatures_create(data_paths, data_name, error_stack);
     break;
+  case PLAYERS_DATA_TYPE_OUTPLAY_CHECK:
+    data = outplay_check_weights_create(data_paths, data_name, error_stack);
+    break;
   case NUMBER_OF_DATA:
     log_fatal("cannot create invalid players data type");
     break;
@@ -405,6 +418,9 @@ void players_data_destroy_data(PlayersData *players_data,
       break;
     case PLAYERS_DATA_TYPE_INFERENCE_TEMPERATURES:
       inference_temperatures_destroy(players_data->data[data_index]);
+      break;
+    case PLAYERS_DATA_TYPE_OUTPLAY_CHECK:
+      outplay_check_weights_destroy(players_data->data[data_index]);
       break;
     case NUMBER_OF_DATA:
       log_fatal("cannot destroy invalid players data type");
@@ -463,6 +479,10 @@ const char *players_data_get_data_name(const PlayersData *players_data,
       data_name =
           inference_temperatures_get_name(players_data->data[data_index]);
       break;
+    case PLAYERS_DATA_TYPE_OUTPLAY_CHECK:
+      data_name =
+          outplay_check_weights_get_name(players_data->data[data_index]);
+      break;
     case NUMBER_OF_DATA:
       log_fatal("cannot destroy invalid players data type");
       break;
@@ -486,7 +506,8 @@ PlayersData *players_data_create(bool use_wmp) {
                  data_index == PLAYERS_DATA_TYPE_WIT ||
                  data_index == PLAYERS_DATA_TYPE_PAT ||
                  data_index == PLAYERS_DATA_TYPE_PEG_ADJUST ||
-                 data_index == PLAYERS_DATA_TYPE_INFERENCE_TEMPERATURES) {
+                 data_index == PLAYERS_DATA_TYPE_INFERENCE_TEMPERATURES ||
+                 data_index == PLAYERS_DATA_TYPE_OUTPLAY_CHECK) {
         // RIT and WIT files are opt-in: callers must explicitly enable them
         // with -rit/-wit (or the per-player variants) since they are built by
         // a convert command and may not exist for every lexicon. PAT weights
@@ -539,7 +560,8 @@ bool players_data_type_is_nullable(players_data_t players_data_type) {
          players_data_type == PLAYERS_DATA_TYPE_WIT ||
          players_data_type == PLAYERS_DATA_TYPE_PAT ||
          players_data_type == PLAYERS_DATA_TYPE_PEG_ADJUST ||
-         players_data_type == PLAYERS_DATA_TYPE_INFERENCE_TEMPERATURES;
+         players_data_type == PLAYERS_DATA_TYPE_INFERENCE_TEMPERATURES ||
+         players_data_type == PLAYERS_DATA_TYPE_OUTPLAY_CHECK;
 }
 
 void players_data_set(PlayersData *players_data,

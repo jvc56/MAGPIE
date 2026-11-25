@@ -15,7 +15,10 @@
 // and extension flexibility of squares whose real cross and extension sets
 // do not exist yet because they are created by the move being evaluated.
 // Must be called before the weights are used for evaluation; kwg may be
-// NULL, which zeroes the table.
+// NULL, which zeroes the table. The tables are a function of the lexicon's
+// word graph and of the letters' scores, so a call with the ones the tables
+// were last prepared from leaves them as they are: it costs one pass over
+// the word graph's nodes, not a walk of its words.
 void pat_prepare_hook_flex(PATWeights *pat, const KWG *kwg,
                            const LetterDistribution *ld);
 // Returns the flexibility table entry for an (unblanked) machine letter.
