@@ -28,6 +28,7 @@
 #include "../ent/rack.h"
 #include "../ent/rack_info_table.h"
 #include "../ent/static_eval.h"
+#include "../ent/wmp.h"
 #include "../ent/word_info_table.h"
 #include "../util/io_util.h"
 #include "wmp_move_gen.h"
@@ -395,6 +396,15 @@ typedef struct MoveGen {
   // subrack_cache_epoch + 1 here. A pool-shifted generation takes such an
   // entry while the epoch is the same, and recomputes its leave values.
   uint64_t pool_shift_subrack_epochs[MOVEGEN_SUBRACK_CACHE_SIZE];
+  // MOVE_RECORD_BEST_SMALL with an out bonus, the full word list and a
+  // BitRack-compatible alphabet: the number of tiles on the rack, for which
+  // the small shadow skips a window that no word using the whole rack can
+  // fill (see small_shadow_whole_rack_word_may_fit); -1 otherwise, which
+  // reads neither field after it. Then the player's word map and the rack as
+  // a BitRack.
+  int best_small_out_wmp_tiles;
+  const WMP *best_small_out_wmp;
+  BitRack best_small_out_bit_rack;
 } MoveGen;
 
 // Cache getter functions
