@@ -1708,6 +1708,195 @@ static inline void go_on_small(MoveGen *gen, int current_col, MachineLetter L,
   }
 }
 
+static inline void go_on_small_out(MoveGen *gen, int current_col,
+                                   MachineLetter L, uint32_t new_node_index,
+                                   bool accepts, int leftstrip, int rightstrip,
+                                   bool unique_play, Equity main_word_score,
+                                   int word_multiplier, Equity cross_score);
+
+// recursive_gen_small for a search of the plays that use the whole rack
+// (generate_best_out_play_and_count_lanes): it gives up on a square from
+// which the empty squares the play can still fill
+// (gen->best_small_out_room) are fewer than the tiles left on the rack, and
+// records only plays that leave none.
+static inline void recursive_gen_small_out(MoveGen *gen, int col,
+                                           uint32_t node_index, int leftstrip,
+                                           int rightstrip, bool unique_play,
+                                           int main_word_score,
+                                           int word_multiplier,
+                                           Equity cross_score) {
+  if (gen->best_small_out_room[col] <
+      gen->best_small_out_rack_size - gen->tiles_played) {
+    return;
+  }
+  const Square *sq = &gen->row_squares[col];
+  const MachineLetter current_letter = square_get_letter(sq);
+  if (current_letter != ALPHABET_EMPTY_SQUARE_MARKER) {
+    const MachineLetter raw = get_unblanked_machine_letter(current_letter);
+    uint32_t next_node_index = 0;
+    bool accepts = false;
+    const uint64_t list_tiles = kwg_get_sibling_tiles(gen->kwg)[node_index];
+    const uint64_t raw_bit = (uint64_t)1 << raw;
+    if ((list_tiles & raw_bit) != 0) {
+      const uint32_t node =
+          kwg_list_node(gen->kwg, node_index, list_tiles, raw_bit);
+      next_node_index = kwg_node_arc_index_prefetch(node, gen->kwg);
+      accepts = kwg_node_accepts(node);
+    }
+    go_on_small_out(gen, col, current_letter, next_node_index, accepts,
+                    leftstrip, rightstrip, unique_play, main_word_score,
+                    word_multiplier, cross_score);
+  } else if (!rack_is_empty(&gen->player_rack)) {
+    uint64_t possible_letters_here =
+        square_get_cross_set(sq) & square_get_left_extension_set(sq);
+    if ((gen->tiles_played == 0) && (col == gen->current_anchor_col + 1)) {
+      possible_letters_here &= gen->anchor_right_extension_set;
+    }
+    if (possible_letters_here == 1) {
+      possible_letters_here = 0;
+    }
+    if ((possible_letters_here & gen->rack_cross_set) == 0) {
+      return;
+    }
+    const uint16_t num_blanks =
+        rack_get_letter(&gen->player_rack, BLANK_MACHINE_LETTER);
+    const uint64_t list_tiles = kwg_get_sibling_tiles(gen->kwg)[node_index];
+    uint64_t placeable = possible_letters_here & list_tiles & ~(uint64_t)1;
+    if (num_blanks == 0) {
+      placeable &= gen->rack_cross_set;
+    }
+    for (; placeable != 0; placeable &= placeable - 1) {
+      const MachineLetter ml =
+          (MachineLetter)lowest_set_bit_index_64(placeable);
+      const uint16_t number_of_ml = rack_get_letter(&gen->player_rack, ml);
+      if (number_of_ml == 0 && num_blanks == 0) {
+        continue;
+      }
+      const uint32_t node =
+          kwg_list_node(gen->kwg, node_index, list_tiles, (uint64_t)1 << ml);
+      const uint32_t next_node_index =
+          kwg_node_arc_index_prefetch(node, gen->kwg);
+      bool accepts = kwg_node_accepts(node);
+      if (number_of_ml > 0) {
+        rack_take_letter(&gen->player_rack, ml);
+        gen->tiles_played++;
+        go_on_small_out(gen, col, ml, next_node_index, accepts, leftstrip,
+                        rightstrip, unique_play, main_word_score,
+                        word_multiplier, cross_score);
+        gen->tiles_played--;
+        rack_add_letter(&gen->player_rack, ml);
+      }
+      if (num_blanks > 0) {
+        rack_take_letter(&gen->player_rack, BLANK_MACHINE_LETTER);
+        gen->tiles_played++;
+        go_on_small_out(gen, col, get_blanked_machine_letter(ml),
+                        next_node_index, accepts, leftstrip, rightstrip,
+                        unique_play, main_word_score, word_multiplier,
+                        cross_score);
+        gen->tiles_played--;
+        rack_add_letter(&gen->player_rack, BLANK_MACHINE_LETTER);
+      }
+    }
+  }
+}
+
+// go_on_small for recursive_gen_small_out.
+static inline void go_on_small_out(MoveGen *gen, int current_col,
+                                   MachineLetter L, uint32_t new_node_index,
+                                   bool accepts, int leftstrip, int rightstrip,
+                                   bool unique_play, Equity main_word_score,
+                                   int word_multiplier, Equity cross_score) {
+  const BonusSquare bonus_square = gen_cache_get_bonus_square(gen, current_col);
+  uint8_t letter_multiplier = 1;
+  uint8_t this_word_multiplier = 1;
+  bool fresh_tile = false;
+
+  const bool square_is_empty = gen_cache_is_empty(gen, current_col);
+  MachineLetter ml;
+  if (!square_is_empty) {
+    gen->strip[current_col] = PLAYED_THROUGH_MARKER;
+    ml = gen_cache_get_letter(gen, current_col);
+  } else {
+    gen->strip[current_col] = L;
+    ml = L;
+    fresh_tile = true;
+    this_word_multiplier = bonus_square_get_word_multiplier(bonus_square);
+    letter_multiplier = bonus_square_get_letter_multiplier(bonus_square);
+  }
+
+  const int inc_word_multiplier = this_word_multiplier * word_multiplier;
+  const Equity lsm = gen->tile_scores[ml] * letter_multiplier;
+  const Equity inc_main_word_score = lsm + main_word_score;
+  Equity inc_cross_scores = cross_score;
+
+  if (fresh_tile && gen_cache_get_is_cross_word(gen, current_col)) {
+    inc_cross_scores += (lsm + gen_cache_get_cross_score(gen, current_col)) *
+                        this_word_multiplier;
+  }
+  const bool rack_used_up = gen->tiles_played == gen->best_small_out_rack_size;
+
+  if (current_col <= gen->current_anchor_col) {
+    if (square_is_empty && gen->dir &&
+        gen_cache_get_cross_set(gen, current_col) == TRIVIAL_CROSS_SET) {
+      unique_play = true;
+    }
+    leftstrip = current_col;
+    bool no_letter_directly_left =
+        (current_col == 0) || gen_cache_is_empty(gen, current_col - 1);
+
+    if (rack_used_up && accepts && no_letter_directly_left &&
+        play_is_nonempty_and_nonduplicate(gen->tiles_played, unique_play)) {
+      record_tile_placement_move(gen, leftstrip, rightstrip,
+                                 inc_main_word_score, inc_word_multiplier,
+                                 inc_cross_scores);
+    }
+
+    if (new_node_index == 0) {
+      return;
+    }
+
+    if (current_col > 0 && current_col - 1 != gen->last_anchor_col) {
+      recursive_gen_small_out(gen, current_col - 1, new_node_index, leftstrip,
+                              rightstrip, unique_play, inc_main_word_score,
+                              inc_word_multiplier, inc_cross_scores);
+    }
+
+    if ((gen->tiles_played != 0) ||
+        (gen->anchor_right_extension_set & gen->rack_cross_set) != 0) {
+      uint32_t separation_node_index = kwg_get_next_node_index(
+          gen->kwg, new_node_index, SEPARATION_MACHINE_LETTER);
+      if (separation_node_index != 0 && no_letter_directly_left &&
+          gen->current_anchor_col < BOARD_DIM - 1) {
+        recursive_gen_small_out(gen, gen->current_anchor_col + 1,
+                                separation_node_index, leftstrip, rightstrip,
+                                unique_play, inc_main_word_score,
+                                inc_word_multiplier, inc_cross_scores);
+      }
+    }
+  } else {
+    if (square_is_empty && !unique_play && gen->dir &&
+        gen_cache_get_cross_set(gen, current_col) == TRIVIAL_CROSS_SET) {
+      unique_play = true;
+    }
+    rightstrip = current_col;
+    bool no_letter_directly_right = (current_col == BOARD_DIM - 1) ||
+                                    gen_cache_is_empty(gen, current_col + 1);
+
+    if (rack_used_up && accepts && no_letter_directly_right &&
+        play_is_nonempty_and_nonduplicate(gen->tiles_played, unique_play)) {
+      record_tile_placement_move(gen, leftstrip, rightstrip,
+                                 inc_main_word_score, inc_word_multiplier,
+                                 inc_cross_scores);
+    }
+
+    if (new_node_index != 0 && current_col < BOARD_DIM - 1) {
+      recursive_gen_small_out(gen, current_col + 1, new_node_index, leftstrip,
+                              rightstrip, unique_play, inc_main_word_score,
+                              inc_word_multiplier, inc_cross_scores);
+    }
+  }
+}
+
 void go_on_alpha(MoveGen *gen, int current_col, MachineLetter L, int leftstrip,
                  int rightstrip, bool unique_play, int main_word_score,
                  int word_multiplier, Equity cross_score);
@@ -5055,6 +5244,241 @@ bool generate_best_small_move_in_lanes(const MoveGenArgs *args,
   anchor_heapify_all(&gen->anchor_heap);
   gen_record_scoring_plays(gen);
   return gen->move_list->count > 0;
+}
+
+// Makes `anchor` the anchor a small recursion searches, as
+// gen_record_scoring_plays does for each anchor it takes from the heap.
+static inline void gen_set_small_anchor(MoveGen *gen, const Anchor *anchor) {
+  gen->current_anchor_col = anchor->col;
+  if (gen->current_row_index != anchor->row || gen->dir != anchor->dir) {
+    gen->current_row_index = anchor->row;
+    gen->dir = anchor->dir;
+    gen->row_squares =
+        board_get_row_cache(gen->board_lanes, anchor->row, anchor->dir);
+  }
+  gen->last_anchor_col = anchor->last_anchor_col;
+  gen->anchor_right_extension_set =
+      gen_cache_get_right_extension_set(gen, gen->current_anchor_col);
+  gen->current_anchor_highest_possible_score = anchor->highest_possible_score;
+}
+
+// Whether a square of the current lane is empty with no tile of the rack
+// allowed on it, read as recursive_gen_small reads it: a cross-set of bit 0
+// alone admits no tile.
+static inline bool gen_square_is_blocked(const MoveGen *gen, int col) {
+  if (!gen_cache_is_empty(gen, col)) {
+    return false;
+  }
+  uint64_t possible_letters_here = gen_cache_get_cross_set(gen, col);
+  if (possible_letters_here == 1) {
+    possible_letters_here = 0;
+  }
+  return (possible_letters_here & gen->rack_cross_set) == 0;
+}
+
+// The room recursive_gen_small_out reads for the anchor set by
+// gen_set_small_anchor. A play of the anchor is one run of squares, which no
+// blocked square breaks, from right of the previous anchor to the board's
+// edge: once it reaches a square right of the anchor, the tiles left go on
+// that square or further right; while it is at the anchor or left of it, they
+// go on that square or further left, or right of the anchor. The room at a
+// square is the number of empty squares there, which bounds those tiles.
+static inline void gen_set_out_room(MoveGen *gen) {
+  const int anchor_col = gen->current_anchor_col;
+  int run = 0;
+  for (int col = BOARD_DIM - 1; col > anchor_col; col--) {
+    if (gen_square_is_blocked(gen, col)) {
+      run = 0;
+    } else {
+      run += gen_cache_is_empty(gen, col) ? 1 : 0;
+    }
+    gen->best_small_out_room[col] = (int8_t)run;
+  }
+  const int room_right_of_anchor = run;
+  const int leftmost_col = gen->last_anchor_col == INITIAL_LAST_ANCHOR_COL
+                               ? 0
+                               : gen->last_anchor_col + 1;
+  run = 0;
+  for (int col = leftmost_col; col <= anchor_col; col++) {
+    if (gen_square_is_blocked(gen, col)) {
+      run = 0;
+    } else {
+      run += gen_cache_is_empty(gen, col) ? 1 : 0;
+    }
+    gen->best_small_out_room[col] = (int8_t)(run + room_right_of_anchor);
+  }
+}
+
+// The generation's best is no play, worth just under the out bonus: every play
+// that uses the whole rack beats it, and no other play does.
+static inline void gen_set_no_out_incumbent(MoveGen *gen) {
+  const Equity no_out_value = gen->best_small_out_bonus - 1;
+  *gen->move_list->small_moves[0] = (SmallMove){0};
+  gen->move_list->count = 1;
+  gen->best_move_equity_or_score = no_out_value;
+  gen->cutoff_equity_or_score = no_out_value;
+}
+
+static inline uint64_t anchor_lane_bit(const Anchor *anchor) {
+  return UINT64_C(1) << ((BOARD_DIM * anchor->dir) + anchor->row);
+}
+
+// Searches one anchor for its best play that uses the whole rack, from the
+// no-out incumbent, and offers that play to the generation's best: so the
+// answer does not depend on what the generation has found, and tells whether
+// the anchor holds such a play, which is returned.
+static inline bool
+gen_search_small_anchor_for_out(MoveGen *gen, const Anchor *anchor,
+                                uint32_t kwg_root_node_index) {
+  const BestSmallIncumbent best = gen_set_aside_incumbent(gen);
+  gen_set_no_out_incumbent(gen);
+  gen_set_small_anchor(gen, anchor);
+  gen_set_out_room(gen);
+  recursive_gen_small_out(gen, anchor->col, kwg_root_node_index, anchor->col,
+                          anchor->col, gen->dir == BOARD_HORIZONTAL_DIRECTION,
+                          0, 1, 0);
+  const AnchorPlayEntry found = gen_best_small_entry(gen, 0);
+  gen_restore_incumbent(gen, &best);
+  if (found.value < gen->best_small_out_bonus) {
+    return false;
+  }
+  gen_offer_cached_play(gen, &found);
+  return true;
+}
+
+// Whether the anchor at col of the current lane could hold a play of `tiles`
+// tiles. Its plays fill every empty square between their ends, place no tile
+// at or before the previous anchor (gen->last_anchor_col), and so lie in the
+// run of squares around the anchor that no blocked square breaks: that run
+// must hold `tiles` empty squares.
+static inline bool gen_anchor_may_hold_tiles(const MoveGen *gen, int col,
+                                             int tiles) {
+  const int leftmost_col = gen->last_anchor_col == INITIAL_LAST_ANCHOR_COL
+                               ? 0
+                               : gen->last_anchor_col + 1;
+  int empty_squares = 0;
+  for (int left_col = col; left_col >= leftmost_col && empty_squares < tiles;
+       left_col--) {
+    if (gen_square_is_blocked(gen, left_col)) {
+      break;
+    }
+    empty_squares += gen_cache_is_empty(gen, left_col) ? 1 : 0;
+  }
+  for (int right_col = col + 1; right_col < BOARD_DIM && empty_squares < tiles;
+       right_col++) {
+    if (gen_square_is_blocked(gen, right_col)) {
+      break;
+    }
+    empty_squares += gen_cache_is_empty(gen, right_col) ? 1 : 0;
+  }
+  return empty_squares >= tiles;
+}
+
+// shadow_lane_small for a search of the plays that use the whole rack: the
+// anchors that cannot hold that many tiles are not shadowed.
+static void shadow_lane_small_for_out(MoveGen *gen, int row) {
+  gen->current_row_index = row;
+  if (gen->row_number_of_anchors_cache[(BOARD_DIM * gen->dir) + row] == 0) {
+    return;
+  }
+  gen->last_anchor_col = INITIAL_LAST_ANCHOR_COL;
+  gen->row_squares =
+      board_get_row_cache(gen->board_lanes, gen->current_row_index, gen->dir);
+  gen->wit_row_lane = board_get_wit_row_lane(gen->board, gen->current_row_index,
+                                             gen->dir, gen->cross_index);
+  gen->wit_len_lane = board_get_wit_len_lane(gen->board, gen->current_row_index,
+                                             gen->dir, gen->cross_index);
+  const bool check_whole_rack_words = gen->best_small_out_wmp_tiles >= 0;
+  const int rack_tiles = gen->best_small_out_rack_size;
+  for (int col = 0; col < BOARD_DIM; col++) {
+    if (gen_cache_get_is_anchor(gen, col)) {
+      if (gen_anchor_may_hold_tiles(gen, col, rack_tiles)) {
+        if (check_whole_rack_words) {
+          shadow_play_for_anchor_small_checking_words(gen, col);
+        } else {
+          shadow_play_for_anchor_small(gen, col);
+        }
+      }
+      gen->last_anchor_col = col;
+      if (!gen_cache_is_empty(gen, col)) {
+        gen->last_anchor_col++;
+      }
+    }
+  }
+}
+
+bool generate_best_out_play_and_count_lanes(const MoveGenArgs *args,
+                                            int max_lanes, int *out_lanes) {
+  MoveGen *gen = get_movegen();
+  gen_count_movegen(gen);
+  gen_load_position(gen, args);
+  assert(gen->move_record_type == MOVE_RECORD_BEST_SMALL);
+  assert(gen->lane_shadow_cache == NULL);
+  gen_set_best_small_ranking(gen, args);
+  assert(gen->best_small_out_bonus > 0);
+  gen_set_no_out_incumbent(gen);
+  rack_copy(&gen->full_player_rack, &gen->player_rack);
+  anchor_heap_reset(&gen->anchor_heap);
+  for (int dir = 0; dir < 2; dir++) {
+    gen->dir = dir;
+    for (int row = 0; row < BOARD_DIM; row++) {
+      shadow_lane_small_for_out(gen, row);
+    }
+  }
+  anchor_heapify_all(&gen->anchor_heap);
+  gen->tiles_played = 0;
+  gen->current_row_index = -1;
+  gen->dir = -1;
+  const uint32_t kwg_root_node_index = kwg_get_root_node_index(gen->kwg);
+  // The best play that uses the whole rack: the anchors are searched in the
+  // order of their bounds until none left can beat it, as
+  // gen_record_scoring_plays does, each for its own best such play, so that
+  // every searched anchor also tells whether its lane holds one.
+  uint64_t found_lanes = 0;
+  int lanes = 0;
+  Anchor next_anchor;
+  bool has_next_anchor = false;
+  while (gen->anchor_heap.count > 0) {
+    const Anchor anchor = anchor_heap_extract_max(&gen->anchor_heap);
+    if (better_play_has_been_found(gen, anchor.highest_possible_equity)) {
+      next_anchor = anchor;
+      has_next_anchor = true;
+      break;
+    }
+    if (gen_search_small_anchor_for_out(gen, &anchor, kwg_root_node_index) &&
+        (found_lanes & anchor_lane_bit(&anchor)) == 0) {
+      found_lanes |= anchor_lane_bit(&anchor);
+      lanes++;
+    }
+  }
+  if (lanes == 0) {
+    *out_lanes = 0;
+    return false;
+  }
+  // The other lanes: the anchors left, in the order of their bounds, while one
+  // could hold a play that uses the whole rack, until max_lanes lanes hold
+  // one. None of them can change the best.
+  while (lanes < max_lanes) {
+    Anchor anchor;
+    if (has_next_anchor) {
+      anchor = next_anchor;
+      has_next_anchor = false;
+    } else if (gen->anchor_heap.count > 0) {
+      anchor = anchor_heap_extract_max(&gen->anchor_heap);
+    } else {
+      break;
+    }
+    if (anchor.highest_possible_equity < gen->best_small_out_bonus) {
+      break;
+    }
+    if ((found_lanes & anchor_lane_bit(&anchor)) == 0 &&
+        gen_search_small_anchor_for_out(gen, &anchor, kwg_root_node_index)) {
+      found_lanes |= anchor_lane_bit(&anchor);
+      lanes++;
+    }
+  }
+  *out_lanes = lanes < max_lanes ? lanes : max_lanes;
+  return true;
 }
 
 // Scores a remembered move on this board into move, or returns false when it

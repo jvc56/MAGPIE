@@ -214,6 +214,18 @@ bool generate_best_small_move_in_lanes(const MoveGenArgs *args,
                                        const SmallMove *incumbent,
                                        Equity incumbent_value);
 
+// The best play of the player on turn that uses the whole rack, and how many
+// lanes (as numbered for generate_small_moves_in_lanes), up to max_lanes, hold
+// a play that does. `args` is a MOVE_RECORD_BEST_SMALL generation with an out
+// bonus and no lane shadow cache. Leaves that play as the only entry of
+// args->move_list, sets *out_lanes and returns true, or returns false with
+// *out_lanes 0 when no play uses the whole rack. One shadow of the board
+// serves both: the search for the best such play goes out from the anchors in
+// the order of their bounds, and the lanes are counted from what it found and
+// from searches of the anchors whose answer it did not need.
+bool generate_best_out_play_and_count_lanes(const MoveGenArgs *args,
+                                            int max_lanes, int *out_lanes);
+
 MoveGen *get_movegen(void);
 
 void gen_load_position(MoveGen *gen, const MoveGenArgs *args);

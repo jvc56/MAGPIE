@@ -405,6 +405,11 @@ typedef struct MoveGen {
   int best_small_out_wmp_tiles;
   const WMP *best_small_out_wmp;
   BitRack best_small_out_bit_rack;
+  // generate_best_out_play_and_count_lanes, for the anchor it searches: by
+  // column of the lane, the most empty squares a play of the anchor can still
+  // fill from that square on (see gen_set_out_room). Read only by
+  // recursive_gen_small_out.
+  int8_t best_small_out_room[BOARD_DIM];
 } MoveGen;
 
 // Cache getter functions
