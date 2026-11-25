@@ -37,10 +37,13 @@ typedef struct OutplayCheckWeights OutplayCheckWeights;
 typedef struct OutplayCheckFeatures {
   bool opponent_can_go_out;
   int opponent_best_out_score;
+  // The opponent's best score when it cannot go out (the model reads it only
+  // then).
   int opponent_best_score;
-  int own_out_plays;
+  bool own_can_go_out;
   int own_best_out_score;
-  // The lanes (rows and columns) the mover's out plays lie in.
+  // The lanes (rows and columns) the mover's out plays lie in, counted up to 3
+  // (the model reads whether there are 2, and 3).
   int own_out_lanes;
 } OutplayCheckFeatures;
 
