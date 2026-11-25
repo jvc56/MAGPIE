@@ -208,11 +208,13 @@ typedef struct PegWorker {
   struct PegWorker *nest_workers; // worker array; jobs index by worker_idx
   int nest_worker_idx; // this worker's pool index (helper idx when submitting)
   atomic_int *n_lends; // see PegResult.n_lends
+  atomic_int *n_shared_nested_choices; // see PegResult
   // Whether a long nested loop takes threads that are not idle yet (see
   // peg_nest_loop_lend). Set per stage, like first_win.
   bool lend_when_busy;
   int lend_depth; // lends on this thread's stack
   bool nested_enabled;
+  bool nested_choose_per_scenario;
   int nested_cand_cap;
   const int *nested_cand_caps; // inner-peg stage schedule (NULL = flat cap)
   int nested_n_cand_caps;
@@ -2805,6 +2807,7 @@ static double peg_hoisted_reply(PegWorker *worker, PegChoiceCache *cache,
   }
   cpthread_mutex_unlock(&cache->mutex);
   if (!have) {
+    atomic_fetch_add(worker->n_shared_nested_choices, 1);
     none = !peg_inner_cascade_choose(worker, game, depth, outer_fidelity, stop,
                                      &choice, &n_stages, &best_val);
     if (owner) {
@@ -4185,7 +4188,8 @@ static void peg_scenario_eval_prepare(PegScenarioEval *eval) {
   // opponent sees the scenario, and chooses on each.
   const bool hoist = eval->fidelity_plies > 0 &&
                      eval->workers[0].nested_enabled &&
-                     !eval->workers[0].nested_pessimistic;
+                     !eval->workers[0].nested_pessimistic &&
+                     !eval->workers[0].nested_choose_per_scenario;
   eval->choice_caches = NULL;
   if (hoist) {
     eval->choice_caches = malloc_or_die((size_t)n * sizeof(PegChoiceCache *));
@@ -5092,6 +5096,8 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
   PegPruneCache *prune_cache = peg_prune_cache_create();
   atomic_int n_lends;
   atomic_init(&n_lends, 0);
+  atomic_int n_shared_nested_choices;
+  atomic_init(&n_shared_nested_choices, 0);
   PegWorker *workers = malloc_or_die((size_t)n_scratch * sizeof(PegWorker));
   for (int worker_idx = 0; worker_idx < n_scratch; worker_idx++) {
     workers[worker_idx].playout_ml = move_list_create(1);
@@ -5121,9 +5127,12 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
     workers[worker_idx].nest_workers = workers;
     workers[worker_idx].nest_worker_idx = worker_idx;
     workers[worker_idx].n_lends = &n_lends;
+    workers[worker_idx].n_shared_nested_choices = &n_shared_nested_choices;
     workers[worker_idx].lend_when_busy = false;
     workers[worker_idx].lend_depth = 0;
     workers[worker_idx].nested_enabled = args->nested_enabled;
+    workers[worker_idx].nested_choose_per_scenario =
+        args->nested_choose_per_scenario;
     workers[worker_idx].nested_cand_cap = args->nested_cand_cap;
     workers[worker_idx].nested_cand_caps = args->nested_cand_caps;
     workers[worker_idx].nested_n_cand_caps = args->nested_n_cand_caps;
@@ -5733,6 +5742,7 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
   }
 
   out->n_lends = atomic_load(&n_lends);
+  out->n_shared_nested_choices = atomic_load(&n_shared_nested_choices);
   // A status read must not reach the workers once they are freed.
   peg_poll_attach_workers(args->poll, NULL, 0);
   // Stop the injection monitor before tearing down the workers it observes.

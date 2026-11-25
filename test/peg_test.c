@@ -2173,6 +2173,113 @@ static void test_peg_main_inner_top_k(void) {
   config_destroy(config);
 }
 
+enum {
+  NUM_SOLVES = 4,
+  NUM_ONLY_MOVES = 2,
+};
+
+// A nested opponent that chooses from what it can see makes its choice once
+// per rack, shared by the scenarios of a candidate's stage, and one thread
+// runs the scenarios of a rack. Making the choice again on every scenario
+// (PegArgs.nested_choose_per_scenario) must give the same results, on one
+// thread and on several, and the choices made must be one for each rack.
+static void test_peg_shared_nested_choices(void) {
+  const char *const cgps[] = {
+      "cgp 7R7/1P3BROADAxES1/RIOJA2N5U1/1N1U1C1I5B1/1O1GIO1O5AW/"
+      "1C1AMMON5HI/1L2PE8T/1E1FARLS6I/1S2V2U6N/3FEZ1R1S4G/1QUEsO1TIT5/"
+      "HING3ADO5/6AXEL5/6WEEN5/6ED7 EEKLRTY/ 378/403 0 -lex CSW24",
+  };
+  const int num_cgps = (int)(sizeof(cgps) / sizeof(cgps[0]));
+  const int thread_counts[] = {1, 4};
+  Config *config = config_create_or_die(
+      "set -lex CSW24 -threads 4 -pegpess false -pegtopk 2 -pegplies 2 "
+      "-ttfraction 0.03");
+  ErrorStack *error_stack = error_stack_create();
+  MoveList *gen_ml = move_list_create(4096);
+  for (int cgp_idx = 0; cgp_idx < num_cgps; cgp_idx++) {
+    load_and_exec_config_or_die(config, cgps[cgp_idx]);
+    // The opponent's nested choice is made only after a play that leaves
+    // tiles in the bag: solve the best two that place one tile.
+    const MoveGenArgs gen_args = {
+        .game = config_get_game(config),
+        .move_list = gen_ml,
+        .move_record_type = MOVE_RECORD_ALL,
+        .move_sort_type = MOVE_SORT_EQUITY,
+        .override_kwg = NULL,
+        .eq_margin_movegen = 0,
+        .target_equity = EQUITY_MAX_VALUE,
+    };
+    generate_moves(&gen_args);
+    move_list_sort_moves(gen_ml);
+    const Move *only[NUM_ONLY_MOVES];
+    int num_only = 0;
+    for (int move_idx = 0;
+         move_idx < move_list_get_count(gen_ml) && num_only < NUM_ONLY_MOVES;
+         move_idx++) {
+      const Move *move = move_list_get_move(gen_ml, move_idx);
+      if (move_get_tiles_played(move) == 1) {
+        only[num_only++] = move;
+      }
+    }
+    assert(num_only == NUM_ONLY_MOVES);
+    PegResult results[NUM_SOLVES];
+    for (int solve_idx = 0; solve_idx < NUM_SOLVES; solve_idx++) {
+      PegArgs args;
+      config_fill_peg_args(config, &args);
+      assert(args.nested_enabled && !args.nested_pessimistic);
+      args.only_moves = only;
+      args.n_only_moves = num_only;
+      args.num_threads = thread_counts[solve_idx / 2];
+      args.nested_choose_per_scenario = solve_idx % 2 == 1;
+      memset(&results[solve_idx], 0, sizeof(PegResult));
+      peg_solve(&args, &results[solve_idx], error_stack);
+      assert(error_stack_is_empty(error_stack));
+    }
+    // One choice for each rack the opponent can be left with, for each play:
+    // the unseen tiles less any two of them. With the opponent's rack unknown,
+    // the unseen tiles are the bag's.
+    const Bag *bag = game_get_bag(config_get_game(config));
+    const int ld_size = ld_get_size(game_get_ld(config_get_game(config)));
+    int tile_types = 0;
+    int repeated_tile_types = 0;
+    for (int ml = 0; ml < ld_size; ml++) {
+      const int number_of_ml = bag_get_letter(bag, (MachineLetter)ml);
+      tile_types += number_of_ml >= 1 ? 1 : 0;
+      repeated_tile_types += number_of_ml >= 2 ? 1 : 0;
+    }
+    const int opp_racks =
+        tile_types * (tile_types - 1) / 2 + repeated_tile_types;
+    assert(opp_racks > 1);
+    for (int solve_idx = 0; solve_idx < NUM_SOLVES; solve_idx++) {
+      assert(results[solve_idx].n_shared_nested_choices ==
+             (solve_idx % 2 == 0 ? NUM_ONLY_MOVES * opp_racks : 0));
+    }
+    const PegResult *shared = &results[0];
+    assert(shared->n_top_cands > 0);
+    for (int solve_idx = 1; solve_idx < NUM_SOLVES; solve_idx++) {
+      const PegResult *other = &results[solve_idx];
+      assert(other->n_top_cands == shared->n_top_cands);
+      for (int cand_idx = 0; cand_idx < shared->n_top_cands; cand_idx++) {
+        const PegRankedCand *shared_cand = &shared->top_cands[cand_idx];
+        const PegRankedCand *other_cand = &other->top_cands[cand_idx];
+        assert_moves_are_equal(&shared_cand->move, &other_cand->move);
+        assert(other_cand->win_count == shared_cand->win_count);
+        assert(other_cand->tie_count == shared_cand->tie_count);
+        assert(other_cand->weight_sum == shared_cand->weight_sum);
+        assert(other_cand->n_scenarios == shared_cand->n_scenarios);
+        assert(
+            within_epsilon(other_cand->mean_spread, shared_cand->mean_spread));
+      }
+    }
+    for (int solve_idx = 0; solve_idx < NUM_SOLVES; solve_idx++) {
+      peg_result_destroy(&results[solve_idx]);
+    }
+  }
+  move_list_destroy(gen_ml);
+  error_stack_destroy(error_stack);
+  config_destroy(config);
+}
+
 // ---------------------------------------------------------------------------
 // On-demand deep anchors (test.c keys peg1pb / peg1onyx / peg2axe / peg2acid /
 // peg3pah / peg4pond): production peg_solve regression pins on studied boards.
@@ -2668,6 +2775,7 @@ void test_peg(void) {
   test_peg_discarded_stage_outcomes();
   test_peg_interrupted_candidate_outcomes();
   test_peg_main_inner_top_k();
+  test_peg_shared_nested_choices();
   // Cases drawn from the macondo codebase + pre-endgame manual.
   test_peg_macondo_only_onyx();
   test_peg_shared_endgame_tt_matches_single_worker();
