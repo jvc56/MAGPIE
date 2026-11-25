@@ -417,7 +417,7 @@ void test_rlamc_cr(void) {
       "-plies 2 -numplays 10 -scond none -tlim 0 -minplayiterations 10");
   const char *method_settings[RCR_NUM_METHODS] = {
       rcr_env_string("RCR_A", "-it 1000"),
-      rcr_env_string("RCR_B", "-it 1000 -rlamc plies=0,k=6,m=8,h=1"),
+      rcr_env_string("RCR_B", "-it 1000 -rlamc plies=0,lamc=0,k=6,m=8,h=1"),
       rcr_env_string("RCR_CONT",
                      "-plies 2 -numplays 8 -it 300 -scond none "
                      "-tlim 0 -minplayiterations 10 -sbagcycle false"),
@@ -699,9 +699,18 @@ static void test_rlamc_parse(void) {
   rlamc_args_parse("plies=0,lamc=1,cycle=1", &args, error_stack);
   assert(error_stack_is_empty(error_stack));
   assert(args.levels[0].bag_cycle);
-  assert(!args.levels[0].skip_finish);
-  rlamc_args_parse("plies=0,lamc=1,fin=0", &args, error_stack);
+  assert(args.levels[0].skip_finish);
+  rlamc_args_parse("plies=0,lamc=1,fin=1", &args, error_stack);
   assert(error_stack_is_empty(error_stack));
+  assert(!args.levels[0].skip_finish);
+  // Defaults: the best setting.
+  rlamc_args_parse("on", &args, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  assert(args.enabled && args.depth == 1);
+  assert(args.levels[0].plies_mask == 3U);
+  assert(args.levels[0].lamc_search);
+  assert(args.levels[0].decision_cache);
+  assert(args.levels[0].num_samples == 4);
   assert(args.levels[0].skip_finish);
   rlamc_args_parse("off", &args, error_stack);
   assert(error_stack_is_empty(error_stack));
@@ -722,18 +731,19 @@ void test_rlamc(void) {
   test_rlamc_parse();
   const char *const specs[] = {
       "off",
-      "plies=0,k=4,m=3,h=1",
-      "plies=0+1,k=3,m=2,h=2,alloc=race,z=1",
-      "plies=0+1,k=5,m=4,share=1",
-      "plies=0+1,k=4,m=3,dcache=1",
-      "plies=0,lamc=1,pool=5,keep=2,rounds=3,m=2,stop=1",
-      "plies=0,k=3,m=2,h=1/plies=0,k=2,m=1,dcache=1",
+      "on",
+      "plies=0,lamc=0,k=4,m=3,h=1,dcache=0",
+      "plies=0+1,lamc=0,k=3,m=2,h=2,alloc=race,z=1,dcache=0",
+      "plies=0+1,lamc=0,k=5,m=4,share=1,dcache=0",
+      "plies=0+1,lamc=0,k=4,m=3,dcache=1",
+      "plies=0,lamc=1,pool=5,keep=2,rounds=3,m=2,stop=1,dcache=0",
+      "plies=0,lamc=0,k=3,m=2,h=1,dcache=0/plies=0,k=2,m=1,dcache=1",
       "plies=0,lamc=1,pool=4,keep=2,rounds=2,m=2,dcache=1/plies=0,lamc=0,k=2",
-      "plies=0,lamc=1,pool=5,keep=2,rounds=3,m=2,pair=1",
-      "plies=0,lamc=1,pool=5,rounds=3,m=2,dyn=1,step=1,pair=1",
-      "plies=0,lamc=1,pool=5,keep=2,rounds=3,m=2,cycle=1",
-      "plies=0,lamc=1,pool=5,keep=2,rounds=3,m=2,fin=0,cv=3"};
-  for (int spec_idx = 0; spec_idx < 12; spec_idx++) {
+      "plies=0,lamc=1,pool=5,keep=2,rounds=3,m=2,pair=1,dcache=0",
+      "plies=0,lamc=1,pool=5,rounds=3,m=2,dyn=1,step=1,pair=1,dcache=0",
+      "plies=0,lamc=1,pool=5,keep=2,rounds=3,m=2,cycle=1,dcache=0",
+      "plies=0,lamc=1,pool=5,keep=2,rounds=3,m=2,fin=0,cv=3,dcache=0"};
+  for (int spec_idx = 0; spec_idx < 13; spec_idx++) {
     const uint64_t one = rlamc_test_sim(1, specs[spec_idx]);
     const uint64_t several = rlamc_test_sim(4, specs[spec_idx]);
     assert(one == several);
@@ -749,7 +759,7 @@ void test_rlamc_bench(void) {
   const char *settings = rcr_env_string(
       "RB_SETTINGS", "-numplays 10 -plies 2 -threads 2 -iterations 3000 "
                      "-minplayiterations 10 -scond none -tlim 0 -seed 42 "
-                     "-sbagcycle false -rlamc plies=0,k=6,m=8,share=1");
+                     "-sbagcycle false -rlamc plies=0,lamc=0,k=6,m=8,share=1");
   char *full = get_formatted_string(
       "set -lex CSW21 -wmp true -s1 equity -s2 equity -r1 all -r2 all "
       "-sinfer false -savesettings false -hr false %s",
@@ -1887,7 +1897,7 @@ void test_rlamc_pegm(void) {
   const char *peg_extra = rcr_env_string("RPEG_SETTINGS", "");
   StringSplitter *methods = split_string(
       rcr_env_string("RPEG_METHODS", "-sfinish true|-sfinish true -rlamc "
-                                     "plies=0+1,k=6,m=8,dcache=1"),
+                                     "plies=0+1,lamc=0,k=6,m=8,dcache=1"),
       '|', false);
   const int num_methods = string_splitter_get_number_of_items(methods);
 

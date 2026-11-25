@@ -37,8 +37,12 @@ enum {
   // The most levels of recursive search: a level's recursive rollouts may
   // choose plays by a search of the next level.
   RLAMC_MAX_DEPTH = 4,
+  // The defaults are the best settings found (RLAMC.md): a LAMC search at
+  // rollout plies 0 and 1 (bits 0 and 1), 4 rollouts a play, decisions
+  // cached, no static finish.
+  RLAMC_DEFAULT_PLIES_MASK = 3,
   RLAMC_DEFAULT_CANDIDATES = 6,
-  RLAMC_DEFAULT_SAMPLES = 8,
+  RLAMC_DEFAULT_SAMPLES = 4,
   RLAMC_DEFAULT_PLIES = 1,
   // Points of static equity below the best a candidate may be.
   RLAMC_DEFAULT_MARGIN = 30,
@@ -162,7 +166,7 @@ typedef struct RlamcArgs {
 } RlamcArgs;
 
 static inline void rlamc_level_set_defaults(RlamcLevel *args) {
-  args->plies_mask = 1;
+  args->plies_mask = RLAMC_DEFAULT_PLIES_MASK;
   args->num_candidates = RLAMC_DEFAULT_CANDIDATES;
   args->num_samples = RLAMC_DEFAULT_SAMPLES;
   args->horizon_plies = RLAMC_DEFAULT_PLIES;
@@ -173,10 +177,10 @@ static inline void rlamc_level_set_defaults(RlamcLevel *args) {
   args->race_z = 2.0;
   args->switch_margin = 0.0;
   args->share = false;
-  args->decision_cache = false;
+  args->decision_cache = true;
   args->universe = 0;
   args->static_seeds = RLAMC_DEFAULT_STATIC_SEEDS;
-  args->lamc_search = false;
+  args->lamc_search = true;
   args->pool_size = RLAMC_DEFAULT_POOL_SIZE;
   args->keep = RLAMC_DEFAULT_KEEP;
   args->rounds = RLAMC_DEFAULT_ROUNDS;
@@ -184,7 +188,7 @@ static inline void rlamc_level_set_defaults(RlamcLevel *args) {
   args->stop_z = 0.0;
   args->paired = false;
   args->bag_cycle = false;
-  args->skip_finish = false;
+  args->skip_finish = true;
   args->dynamic = false;
   args->step = RLAMC_DEFAULT_STEP;
 }

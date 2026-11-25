@@ -103,9 +103,12 @@ const Move *rlamc_choose_move(RlamcWorker *worker, const RlamcArgs *args,
                               const RlamcEval *eval, const Game *game,
                               uint64_t seed, BestMoveCarry *carry);
 
-// Parses a recursive search spec into args: "off", or levels separated by '/',
-// each comma-separated key=value settings, which turn recursive rollouts on. A
-// level starts from the settings of the level before it. Keys:
+// Parses a recursive search spec into args: "off"; "on", which turns recursive
+// rollouts on with the defaults, the best settings found
+// (plies=0+1,lamc=1,dcache=1,m=4,fin=0); or levels separated by '/', each
+// comma-separated key=value settings that change the defaults, which also turn
+// recursive rollouts on. A level starts from the settings of the level before
+// it. Keys:
 //   plies   the recursive plies, joined by '+', for example 0 or 0+1
 //   k       candidates            m       samples per candidate
 //   h       static plies after the candidate in a recursive rollout
@@ -122,7 +125,8 @@ const Move *rlamc_choose_move(RlamcWorker *worker, const RlamcArgs *args,
 //   universe, seeds  RlamcLevel.universe and static_seeds: diverse
 //           candidates
 //   lamc    1 for a LAMC search over every play (RlamcLevel.lamc_search),
-//           with pool, keep, rounds and beta, and stop (RlamcLevel.stop_z)
+//           with pool, keep, rounds and beta, and stop (RlamcLevel.stop_z);
+//           0 for the top k plays by static equity (k, margin, alloc, z, share)
 //   pair    1 for a LAMC search that models the luck of common seeds
 //           (RlamcLevel.paired)
 //   cycle   1 for a LAMC search whose rollouts cycle the bag
@@ -131,9 +135,9 @@ const Move *rlamc_choose_move(RlamcWorker *worker, const RlamcArgs *args,
 //           (RlamcLevel.skip_finish)
 //   dyn, step  1 for a LAMC search whose pool changes after every step
 //           rollouts a play (RlamcLevel.dynamic and step)
-// For example "plies=0+1,lamc=1,dcache=1/plies=0,m=4" runs a LAMC search at
-// the sim's first two plies, and another, of 4 samples a play, at the reply
-// of each of its recursive rollouts.
+// For example "plies=0+1/plies=0,lamc=0,k=3,m=2" runs a LAMC search at the
+// sim's first two rollout plies, and a search of the top 3 static plays, of 2
+// samples each, at the reply of each of its recursive rollouts.
 // Settings not named keep their defaults.
 void rlamc_args_parse(const char *spec, RlamcArgs *args,
                       ErrorStack *error_stack);

@@ -1557,17 +1557,20 @@ by default.
 
 ### Options
 
-- `-rlamc <spec>` (and `-rlamc1`, `-rlamc2` in autoplay): `off`, or
-  comma-separated `key=value` settings: `plies` (joined by `+`; 0 is the
+- `-rlamc <spec>` (and `-rlamc1`, `-rlamc2` in autoplay): `off`; `on`,
+  the defaults, which are the best settings found
+  (`plies=0+1,lamc=1,dcache=1,m=4,fin=0`); or comma-separated `key=value`
+  settings that change the defaults: `plies` (joined by `+`; 0 is the
   reply to the candidate), `k` (candidates), `m` (recursive rollouts each), `h`
   (static plies after the candidate in a recursive rollout), `margin` (points
   of static equity below the best), `maxbag`, `minbag`, `alloc`
   (`uniform` or `race`), `z`, `switch`, `share` (0/1), `dcache` (0/1),
   `finalists`, `stage`, `lamc` (0/1, with `pool`, `keep`, `rounds`,
-  `beta`), `universe`, `seeds`. Levels are separated by `/`: each level
+  `beta`), `universe`, `seeds`, `fin`, `stop`, `pair`, `cycle`, `dyn`,
+  `step`, `cv`. Levels are separated by `/`: each level
   starts from the settings of the one before it, and its search chooses
   the plays at its `plies` of the recursive rollouts of the level before it.
-  For example `plies=0+1,lamc=1,dcache=1/plies=0,k=3,m=2` runs a LAMC
+  For example `plies=0+1/plies=0,lamc=0,k=3,m=2` runs a LAMC
   search at the sim's first two rollout plies, and in each of its recursive
   rollouts the reply to its candidate is chosen by a top-3 search of 2
   samples each: triply recursive Monte Carlo, counting the sim. At most 4

@@ -1677,26 +1677,27 @@ static void add_lamc_rlamc_help_arg(arg_token_t arg_token, const char **usages,
   case ARG_TOKEN_P1_RLAMC:
   case ARG_TOKEN_P2_RLAMC:
     usages[0] = "<spec>";
-    examples[0] = "off";
-    examples[1] = "plies=0,k=6,m=8,h=1";
-    examples[2] = "plies=0+1,lamc=1,dcache=1/plies=0,k=3,m=2";
+    examples[0] = "on";
+    examples[1] = "plies=0,lamc=0,k=6,m=8,h=1";
+    examples[2] = "plies=0+1/plies=0,lamc=0,k=3,m=2";
     *text =
         "Specifies the RLAMC search that picks the plays of some plies "
         "of a simulation's rollouts. Without it they play by static "
         "equity; rlamc1 and rlamc2 set it for each player in "
-        "autoplay. off, or "
-        "comma-separated settings: plies (joined by +, 0 is the reply "
-        "to the candidate), k (candidates), m (recursive rollouts each), h "
-        "(static plies after the candidate in a recursive rollout), margin "
-        "(points below the best), maxbag, minbag, alloc (uniform or "
-        "race), z (the race's standard errors), switch (the recursive "
-        "utility a candidate other than the static best must gain), "
-        "dcache (1 to cache decisions), lamc (1 for a LAMC search over "
-        "every play, with pool, keep, rounds and beta), share, universe, "
-        "seeds, finalists and stage. Settings after a / are a deeper "
-        "level, whose search chooses plays in the recursive rollouts of the "
-        "level before it, starting from that level's settings. Off by "
-        "default.";
+        "autoplay. off, on (the defaults, the best settings found: "
+        "plies=0+1,lamc=1,dcache=1,m=4,fin=0), or comma-separated "
+        "settings that change the defaults: plies (joined by +, 0 is the "
+        "reply to the candidate), lamc (1 for a LAMC search over every "
+        "play, with pool, keep, rounds, beta, seeds, universe, stop, pair, "
+        "cycle, dyn and step; 0 for the top k plays by static equity within "
+        "margin points of the best, with alloc, z and share), m (recursive "
+        "rollouts per play), h (static plies after the play in a recursive "
+        "rollout), dcache (1 to cache decisions), fin (0 to skip the static "
+        "finish), switch (the recursive utility a play other than the "
+        "static best must gain), maxbag, minbag, finalists, stage and cv. "
+        "Settings after a / are a deeper level, whose search chooses plays "
+        "in the recursive rollouts of the level before it, starting from "
+        "that level's settings. Off by default.";
     break;
   case ARG_TOKEN_SIM_FINISH_BAG:
     usages[0] = "<tiles>";
