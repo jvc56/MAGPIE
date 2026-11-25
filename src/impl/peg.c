@@ -144,6 +144,35 @@ typedef struct PegReplyCache {
   PegReplyCacheEntry entries[PEG_REPLY_CACHE_SLOTS];
 } PegReplyCache;
 
+// The opponent's nested choice for each of its racks, shared by every split and
+// ordering of one candidate's stage (see peg_hoisted_reply). An entry is
+// computed once: the first scenario to ask for a rack computes it while the
+// others wait.
+enum {
+  PEG_CHOICE_CACHE_SLOTS = 1024,
+  PEG_CHOICE_EMPTY = 0,
+  PEG_CHOICE_COMPUTING = 1,
+  PEG_CHOICE_READY = 2,
+};
+
+typedef struct PegChoiceEntry {
+  bool used;
+  int state;
+  int n_letters;
+  MachineLetter letters[RACK_SIZE];
+  bool none;
+  int n_stages;
+  double best_val;
+  Move move;
+} PegChoiceEntry;
+
+typedef struct PegChoiceCache {
+  cpthread_mutex_t mutex;
+  cpthread_cond_t cond;
+  int count;
+  PegChoiceEntry entries[PEG_CHOICE_CACHE_SLOTS];
+} PegChoiceCache;
+
 // Per-worker scratch: a greedy-playout move list plus a reusable endgame
 // context/results pair. Indexed by the pool worker_idx (one extra slot for the
 // main thread when it helps drain the queue).
@@ -1635,6 +1664,8 @@ typedef struct PegScenarioJob {
   // Optional: the candidate's early cutoff (NULL = none), and the poll whose
   // current stage counts its solved scenario jobs (NULL = none).
   PegCutoff *cutoff;
+  // The candidate's nested choices of the opponent (NULL = not shared).
+  PegChoiceCache *choice_cache;
   PegPoll *scenario_poll;
   // Greedy value of the split's first ordering, by which a cutoff solve
   // orders its jobs (losses first).
@@ -1732,6 +1763,8 @@ typedef struct PegEvalCtx {
   bool interrupted;
   // The candidate's early cutoff (NULL = none), copied into collected jobs.
   PegCutoff *cutoff;
+  // The candidate's nested choices of the opponent (NULL = not shared).
+  PegChoiceCache *choice_cache;
 } PegEvalCtx;
 
 static bool peg_eval_should_stop(PegEvalCtx *ctx) {
@@ -2528,8 +2561,15 @@ static void peg_nest_stage_item_fn(PegNestLoop *loop, PegWorker *worker,
 // equity to the schedule's first cap, then run one stage per schedule entry at
 // rising endgame fidelity (2-ply, 3-ply, ...), narrowing to each entry's keep
 // count. Returns the best candidate's value (on-turn perspective).
-static double peg_inner_cascade(PegWorker *worker, Game *game, int depth,
-                                int outer_fidelity, const PegStop *stop) {
+// The cascade's choice alone, made from what the on-turn player can see.
+// Returns false when it has no candidate (the caller takes the greedy floor).
+// Otherwise *choice is the chosen play, *n_stages_out the stage count
+// peg_nested_play_actual uses, and *best_val the choice's value over the
+// player's own scenarios.
+static bool peg_inner_cascade_choose(PegWorker *worker, Game *game, int depth,
+                                     int outer_fidelity, const PegStop *stop,
+                                     Move *choice, int *n_stages_out,
+                                     double *best_val) {
   const int on_turn = game_get_player_on_turn_index(game);
   // The candidate list is read across the stage loop (which submits + waits per
   // candidate), so it is held on its own frame for the cascade's lifetime.
@@ -2553,8 +2593,7 @@ static double peg_inner_cascade(PegWorker *worker, Game *game, int depth,
   const int num_cands = move_list_get_count(cand_moves);
   if (num_cands == 0) {
     peg_nest_release(worker, cframe);
-    return peg_nested_result(worker,
-                             peg_nested_floor(worker, game, on_turn, stop));
+    return false;
   }
   move_list_sort_moves(cand_moves);
   uint8_t unseen[MAX_ALPHABET_SIZE];
@@ -2646,21 +2685,153 @@ static double peg_inner_cascade(PegWorker *worker, Game *game, int depth,
       }
     }
   }
-  double result = 0.0;
-  if (field_n == 0) {
-    result = peg_nested_result(worker,
-                               peg_nested_floor(worker, game, on_turn, stop));
-  } else if (worker->nested_score_actual) {
-    // The choice was made from what this player can see; its value is what it
-    // does on the scenario at hand.
-    result = peg_nested_play_actual(worker, game,
-                                    move_list_get_move(cand_moves, idx[0]),
-                                    1 + n_stages, depth, outer_fidelity, stop);
-  } else {
-    result = val[0];
+  bool chose = false;
+  if (field_n > 0) {
+    *choice = *move_list_get_move(cand_moves, idx[0]);
+    *n_stages_out = n_stages;
+    *best_val = val[0];
+    chose = true;
   }
   peg_nest_release(worker, cframe);
-  return result;
+  return chose;
+}
+
+static double peg_inner_cascade(PegWorker *worker, Game *game, int depth,
+                                int outer_fidelity, const PegStop *stop) {
+  const int on_turn = game_get_player_on_turn_index(game);
+  Move choice;
+  int n_stages = 0;
+  double best_val = 0.0;
+  if (!peg_inner_cascade_choose(worker, game, depth, outer_fidelity, stop,
+                                &choice, &n_stages, &best_val)) {
+    return peg_nested_result(worker,
+                             peg_nested_floor(worker, game, on_turn, stop));
+  }
+  if (worker->nested_score_actual) {
+    // The choice was made from what this player can see; its value is what it
+    // does on the scenario at hand.
+    return peg_nested_play_actual(worker, game, &choice, 1 + n_stages, depth,
+                                  outer_fidelity, stop);
+  }
+  return best_val;
+}
+
+// The opponent's nested reply at the root of a candidate's scenarios. Its
+// choice depends only on what it can see: the board, the scores, its rack and
+// the pool of tiles it cannot see, which are the same for every split and
+// ordering that leaves it this rack. So the choice is made once per rack and
+// played on each scenario's actual racks and bag (or, when a nested choice is
+// valued by its own average, that value is the reply's).
+static uint64_t peg_choice_hash(const MachineLetter *letters, int n_letters) {
+  uint64_t hash = fnv64a_step(FNV_64_OFFSET_BASIS, (uint64_t)n_letters);
+  for (int letter_idx = 0; letter_idx < n_letters; letter_idx++) {
+    hash = fnv64a_step(hash, letters[letter_idx]);
+  }
+  return hash;
+}
+
+// Returns the entry for the rack, created EMPTY on first use, or NULL when the
+// table is half full. Called with the mutex held.
+static PegChoiceEntry *peg_choice_find(PegChoiceCache *cache,
+                                       const MachineLetter *letters,
+                                       int n_letters) {
+  uint64_t slot_idx =
+      peg_choice_hash(letters, n_letters) & (PEG_CHOICE_CACHE_SLOTS - 1);
+  for (;;) {
+    PegChoiceEntry *entry = &cache->entries[slot_idx];
+    if (!entry->used) {
+      if (2 * cache->count >= PEG_CHOICE_CACHE_SLOTS) {
+        return NULL;
+      }
+      entry->used = true;
+      entry->n_letters = n_letters;
+      memcpy(entry->letters, letters,
+             (size_t)n_letters * sizeof(MachineLetter));
+      cache->count++;
+      return entry;
+    }
+    if (entry->n_letters == n_letters &&
+        memcmp(entry->letters, letters,
+               (size_t)n_letters * sizeof(MachineLetter)) == 0) {
+      return entry;
+    }
+    slot_idx = (slot_idx + 1) & (PEG_CHOICE_CACHE_SLOTS - 1);
+  }
+}
+
+static PegChoiceCache *peg_choice_cache_create(void) {
+  PegChoiceCache *cache = calloc_or_die(1, sizeof(PegChoiceCache));
+  cpthread_mutex_init(&cache->mutex);
+  cpthread_cond_init(&cache->cond);
+  return cache;
+}
+
+static double peg_hoisted_reply(PegWorker *worker, PegChoiceCache *cache,
+                                Game *game, int depth, int outer_fidelity,
+                                const PegStop *stop) {
+  const int on_turn = game_get_player_on_turn_index(game);
+  const Rack *rack = player_get_rack(game_get_player(game, on_turn));
+  const int ld_size = ld_get_size(game_get_ld(game));
+  MachineLetter letters[RACK_SIZE] = {0};
+  int n_letters = 0;
+  for (int ml = 0; ml < ld_size; ml++) {
+    for (int count = rack_get_letter(rack, (MachineLetter)ml); count > 0;
+         count--) {
+      letters[n_letters++] = (MachineLetter)ml;
+    }
+  }
+  Move choice;
+  int n_stages = 0;
+  double best_val = 0.0;
+  bool none = false;
+  bool have = false;
+  cpthread_mutex_lock(&cache->mutex);
+  PegChoiceEntry *entry = peg_choice_find(cache, letters, n_letters);
+  bool owner = false;
+  if (entry != NULL) {
+    while (entry->state == PEG_CHOICE_COMPUTING) {
+      cpthread_cond_wait(&cache->cond, &cache->mutex);
+    }
+    if (entry->state == PEG_CHOICE_READY) {
+      choice = entry->move;
+      n_stages = entry->n_stages;
+      best_val = entry->best_val;
+      none = entry->none;
+      have = true;
+    } else {
+      entry->state = PEG_CHOICE_COMPUTING;
+      owner = true;
+    }
+  }
+  cpthread_mutex_unlock(&cache->mutex);
+  if (!have) {
+    none = !peg_inner_cascade_choose(worker, game, depth, outer_fidelity, stop,
+                                     &choice, &n_stages, &best_val);
+    if (owner) {
+      const bool stopped = peg_nested_should_stop(worker, stop);
+      cpthread_mutex_lock(&cache->mutex);
+      if (stopped) {
+        entry->state = PEG_CHOICE_EMPTY;
+      } else {
+        entry->state = PEG_CHOICE_READY;
+        entry->move = choice;
+        entry->n_stages = n_stages;
+        entry->best_val = best_val;
+        entry->none = none;
+      }
+      cpthread_cond_broadcast(&cache->cond);
+      cpthread_mutex_unlock(&cache->mutex);
+    }
+  }
+  if (none) {
+    return peg_nested_result(worker,
+                             peg_nested_floor(worker, game, on_turn, stop));
+  }
+  if (!worker->nested_score_actual) {
+    return best_val;
+  }
+  return peg_nested_play_actual(worker, game, &choice, 1 + n_stages, depth,
+                                outer_fidelity, stop);
 }
 
 // Evaluate the leaf of one fully-resolved scenario (a specific post-cand game).
@@ -2695,12 +2866,18 @@ static int32_t peg_eval_leaf(PegEvalCtx *ctx, Game *game) {
           ctx->worker->nested_max_depth > 0 ? ctx->worker->nested_max_depth : 1;
       const int on_turn = game_get_player_on_turn_index(game);
       const PegStop stop = {ctx->deadline_ns, ctx->cutoff, NULL, NULL};
-      double on_turn_val =
-          ctx->worker->nested_pessimistic && on_turn != ctx->mover_idx
-              ? peg_nested_best_reply(ctx->worker, game, ctx->fidelity_plies,
-                                      depth, ctx->fidelity_plies, &stop)
-              : peg_inner_cascade(ctx->worker, game, depth, ctx->fidelity_plies,
-                                  &stop);
+      double on_turn_val = 0.0;
+      if (ctx->worker->nested_pessimistic && on_turn != ctx->mover_idx) {
+        on_turn_val =
+            peg_nested_best_reply(ctx->worker, game, ctx->fidelity_plies, depth,
+                                  ctx->fidelity_plies, &stop);
+      } else if (ctx->choice_cache != NULL && on_turn != ctx->mover_idx) {
+        on_turn_val = peg_hoisted_reply(ctx->worker, ctx->choice_cache, game,
+                                        depth, ctx->fidelity_plies, &stop);
+      } else {
+        on_turn_val = peg_inner_cascade(ctx->worker, game, depth,
+                                        ctx->fidelity_plies, &stop);
+      }
       if (ctx->worker->first_win) {
         // A first-win nested value is an average of signs: report its sign.
         on_turn_val = peg_nested_result(ctx->worker, on_turn_val);
@@ -2912,6 +3089,7 @@ static void peg_eval_split(PegEvalCtx *ctx, const MachineLetter *mover_drawn,
     job.cand_idx = ctx->cand_idx;
     job.progress = ctx->progress;
     job.cutoff = ctx->cutoff;
+    job.choice_cache = ctx->choice_cache;
     peg_scenario_joblist_push(ctx->out_jobs, &job);
     return;
   }
@@ -3763,6 +3941,7 @@ static void peg_scenario_worker_fn(void *arg, int worker_idx) {
   ctx.progress = job->progress;
   ctx.cand_idx = job->cand_idx;
   ctx.cutoff = job->cutoff;
+  ctx.choice_cache = job->choice_cache;
   // Per-ordering capture into the job's own sink (single-threaded per job).
   if (job->do_capture) {
     job->cap.ld = job->ld;
@@ -3899,6 +4078,8 @@ typedef struct PegScenarioEval {
   int poll_cand_idx;
   // Filled by peg_scenario_eval_prepare.
   Game **templates;
+  // Per candidate, or NULL when the opponent's nested choices are not shared.
+  PegChoiceCache **choice_caches;
   PegScenarioJobList list;
   void **ptrs;
   // Filled by peg_scenario_eval_finish: from the first job's start to the last
@@ -3918,6 +4099,19 @@ static void peg_scenario_eval_prepare(PegScenarioEval *eval) {
     game_gen_all_cross_sets(templates[i]);
   }
   eval->templates = templates;
+  // A nested opponent that chooses from what it can see makes the same choice
+  // on every scenario that leaves it the same rack: share it. The pessimistic
+  // opponent sees the scenario, and chooses on each.
+  const bool hoist = eval->fidelity_plies > 0 &&
+                     eval->workers[0].nested_enabled &&
+                     !eval->workers[0].nested_pessimistic;
+  eval->choice_caches = NULL;
+  if (hoist) {
+    eval->choice_caches = malloc_or_die((size_t)n * sizeof(PegChoiceCache *));
+    for (int i = 0; i < n; i++) {
+      eval->choice_caches[i] = peg_choice_cache_create();
+    }
+  }
 
   // Expand all (cand, split) jobs.
   PegScenarioJobList *list = &eval->list;
@@ -3925,6 +4119,7 @@ static void peg_scenario_eval_prepare(PegScenarioEval *eval) {
   for (int i = 0; i < n; i++) {
     PegEvalCtx ctx;
     memset(&ctx, 0, sizeof(ctx));
+    ctx.choice_cache = hoist ? eval->choice_caches[i] : NULL;
     ctx.template_src = templates[i];
     ctx.mover_idx = eval->mover_idx;
     ctx.unseen = eval->unseen;
@@ -4114,6 +4309,12 @@ static void peg_scenario_eval_finish(PegScenarioEval *eval) {
     game_destroy(eval->templates[i]);
   }
   free(eval->templates);
+  if (eval->choice_caches != NULL) {
+    for (int i = 0; i < n; i++) {
+      free(eval->choice_caches[i]);
+    }
+    free(eval->choice_caches);
+  }
 }
 
 // ----- live stages ---------------------------------------------------------
