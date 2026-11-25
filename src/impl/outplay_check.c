@@ -1,6 +1,5 @@
 #include "outplay_check.h"
 
-#include "../def/board_defs.h"
 #include "../def/equity_defs.h"
 #include "../def/game_history_defs.h"
 #include "../def/letter_distribution_defs.h"
@@ -195,65 +194,13 @@ static const SmallMove *best_play_going_out_first(Game *game, MoveList *best,
   return best->small_moves[0];
 }
 
-// The lane of a play: bit dir * BOARD_DIM + row_or_col, as
-// generate_best_small_move_in_lanes numbers the lanes.
-static int play_lane(const SmallMove *play) {
-  return small_move_is_vertical(play)
-             ? BOARD_DIM + small_move_get_col_start(play)
-             : small_move_get_row_start(play);
-}
-
-// The best play of the player on turn in game that uses all its held_tiles,
-// among the lanes of lane_mask, or NULL when there is none. The generation
-// starts from an incumbent worth just under the out bonus, which every such
-// play beats and no other play does, so it searches only the anchors where
-// the whole rack could be played.
-static const SmallMove *best_out_play_in_lanes(Game *game, MoveList *best,
-                                               LaneShadowCache *lane_cache,
-                                               uint64_t lane_mask,
-                                               int held_tiles) {
-  const MoveGenArgs args = best_play_args(game, best, lane_cache);
-  const SmallMove no_out = {0};
-  generate_best_small_move_in_lanes(
-      &args, lane_mask, &no_out,
-      int_to_equity(OUTPLAY_CHECK_GOING_OUT_PRIORITY) - 1);
-  const SmallMove *found = best->small_moves[0];
-  if (small_move_is_pass(found) ||
-      small_move_get_tiles_played(found) != held_tiles) {
-    return NULL;
-  }
-  return found;
-}
-
-// How many lanes, up to OUTPLAY_CHECK_OUT_LANES_COUNTED, hold a play of the
-// player on turn that uses all its held_tiles, given first_lane, the lane of
-// one: each further search, kept out of the lanes found so far, finds such a
-// play in another lane if there is one.
-static int count_out_lanes(Game *game, MoveList *best,
-                           LaneShadowCache *lane_cache, int held_tiles,
-                           int first_lane) {
-  uint64_t lane_mask = (UINT64_C(1) << (2 * BOARD_DIM)) - 1;
-  lane_mask &= ~(UINT64_C(1) << first_lane);
-  int lanes = 1;
-  while (lanes < OUTPLAY_CHECK_OUT_LANES_COUNTED) {
-    const SmallMove *out =
-        best_out_play_in_lanes(game, best, lane_cache, lane_mask, held_tiles);
-    if (out == NULL) {
-      break;
-    }
-    lanes++;
-    lane_mask &= ~(UINT64_C(1) << play_lane(out));
-  }
-  return lanes;
-}
-
-// The features of `after` (the opponent on turn, the mover holding held):
+// The features of `after` (the opponent on turn, the mover to play next):
 // what the opponent can play, and then the mover. Best-play generations answer
-// them all: going out ranks first, so one generation for each side says
-// whether it can go out and for how much (or, for the opponent, its best score
-// otherwise), and a mover who can go out has its out plays' lanes counted.
-static void find_features(Game *after, int mover_idx, const Rack *held,
-                          MoveList *best, LaneShadowCache *lane_cache,
+// them all: going out ranks first, so one generation for the opponent says
+// whether it can go out and for how much, or else its best score; and one for
+// the mover finds its best way to go out and counts the lanes that hold one.
+static void find_features(Game *after, int mover_idx, MoveList *best,
+                          LaneShadowCache *lane_cache,
                           OutplayCheckFeatures *features) {
   const int opp_idx = 1 - mover_idx;
   const int opp_tiles =
@@ -271,16 +218,15 @@ static void find_features(Game *after, int mover_idx, const Rack *held,
       features->opponent_best_score = score;
     }
   }
-  const int held_tiles = rack_get_total_letters(held);
   game_set_player_on_turn_index(after, mover_idx);
-  const SmallMove *own_out =
-      best_out_play_in_lanes(after, best, lane_cache,
-                             (UINT64_C(1) << (2 * BOARD_DIM)) - 1, held_tiles);
-  if (own_out != NULL) {
+  const MoveGenArgs own_args = best_play_args(after, best, NULL);
+  int own_out_lanes = 0;
+  if (generate_best_out_play_and_count_lanes(
+          &own_args, OUTPLAY_CHECK_OUT_LANES_COUNTED, &own_out_lanes)) {
     features->own_can_go_out = true;
-    features->own_best_out_score = (int)small_move_get_score(own_out);
-    features->own_out_lanes = count_out_lanes(after, best, lane_cache,
-                                              held_tiles, play_lane(own_out));
+    features->own_best_out_score =
+        (int)small_move_get_score(best->small_moves[0]);
+    features->own_out_lanes = own_out_lanes;
   }
   game_set_player_on_turn_index(after, opp_idx);
 }
@@ -354,7 +300,7 @@ static void emptying_candidate_values(OutplayScratch *scratch, const Game *game,
         }
       }
       OutplayCheckFeatures features;
-      find_features(after, mover_idx, held, scratch->best, scratch->lane_cache,
+      find_features(after, mover_idx, scratch->best, scratch->lane_cache,
                     &features);
       const double draw_value =
           outplay_check_weights_value(weights, ld, held, &features);
@@ -373,9 +319,7 @@ void outplay_check_find_features(Game *game, OutplayCheckFeatures *features) {
       lane_shadow_cache_create(OUTPLAY_CHECK_LANE_SHADOW_INDEX_BITS,
                                OUTPLAY_CHECK_ANCHOR_PLAY_INDEX_BITS);
   const int mover_idx = 1 - game_get_player_on_turn_index(game);
-  find_features(game, mover_idx,
-                player_get_rack(game_get_player(game, mover_idx)), best,
-                lane_cache, features);
+  find_features(game, mover_idx, best, lane_cache, features);
   lane_shadow_cache_destroy(lane_cache);
   small_move_list_destroy(best);
 }
