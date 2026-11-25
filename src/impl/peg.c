@@ -4250,7 +4250,7 @@ static void peg_scenario_eval_prepare(PegScenarioEval *eval) {
 
 // Runs every job of a prepared evaluation, and returns when all have finished.
 static void peg_scenario_eval_run(PegScenarioEval *eval) {
-  PegScenarioJobList *list = &eval->list;
+  const PegScenarioJobList *list = &eval->list;
   peg_poll_start_scenarios(eval->scenario_poll, list, eval->poll_cand_idx);
   peg_poll_set_cand_draws(eval->cand_poll, eval->caller_worker_idx,
                           list->count);
