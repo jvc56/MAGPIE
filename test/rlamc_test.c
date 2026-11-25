@@ -1,7 +1,7 @@
-// Nested rollouts (Phase 2 of docs/lamc-plan.md): the CI test, and the
+// Recursive rollouts (Phase 2 of docs/lamc-plan.md): the CI test, and the
 // continuation regret harness that compares sim settings on late positions.
 //
-// Continuation regret (on demand, nestedcr). For each of a set of positions,
+// Continuation regret (on demand, rlamccr). For each of a set of positions,
 // two sim settings, A and B, each choose a play. Where they choose the same
 // play, the position adds nothing and costs nothing more. Where they differ,
 // both plays are played out to the end of the game many times, on common
@@ -16,33 +16,33 @@
 // A nor B, so neither is favored by its own model of the future.
 //
 // Settings come from the environment:
-//   NCR_POSITIONS   positions (default 200)
-//   NCR_FIRST_GAME  games to skip, for a fresh set of positions (default 0)
-//   NCR_MIN_BAG     fewest tiles in the bag of a position (default 1)
-//   NCR_MAX_BAG     most tiles in the bag of a position (default 20)
-//   NCR_LEX         lexicon (default CSW21)
-//   NCR_BASE        settings both A and B take
-//   NCR_A, NCR_B    each one's settings, after NCR_BASE
-//   NCR_CONT        the continuation engine's sim settings
-//   NCR_CONTS       continuations per disagreement (default 32)
-//   NCR_EG_PLIES    the continuation's endgame depth (default 4)
-//   NCR_THREADS     positions solved at once, one thread each (default 10)
-//   NCR_DUMP        1: print each position's CGP, the opponent's rack unseen
-//   NCR_ONLY        only these positions, by index, comma-separated
-//   NCR_SHOW        the number of the sim's top plays to print per choice
-//   NCR_TABLES      the lexical tables every config loads (default
-//                   NCR_DEFAULT_TABLES: the word info and rack info tables,
+//   RCR_POSITIONS   positions (default 200)
+//   RCR_FIRST_GAME  games to skip, for a fresh set of positions (default 0)
+//   RCR_MIN_BAG     fewest tiles in the bag of a position (default 1)
+//   RCR_MAX_BAG     most tiles in the bag of a position (default 20)
+//   RCR_LEX         lexicon (default CSW21)
+//   RCR_BASE        settings both A and B take
+//   RCR_A, RCR_B    each one's settings, after RCR_BASE
+//   RCR_CONT        the continuation engine's sim settings
+//   RCR_CONTS       continuations per disagreement (default 32)
+//   RCR_EG_PLIES    the continuation's endgame depth (default 4)
+//   RCR_THREADS     positions solved at once, one thread each (default 10)
+//   RCR_DUMP        1: print each position's CGP, the opponent's rack unseen
+//   RCR_ONLY        only these positions, by index, comma-separated
+//   RCR_SHOW        the number of the sim's top plays to print per choice
+//   RCR_TABLES      the lexical tables every config loads (default
+//                   RCR_DEFAULT_TABLES: the word info and rack info tables,
 //                   the RIT mapped so processes share it; every config
 //                   loads the wordmap besides); a
 //                   lexicon without a WIT or RIT, such as CSW21, needs
 //                   "-rit false -wit false"
-//   NCR_CHOOSE      A or B: only that method chooses, nothing is played
+//   RCR_CHOOSE      A or B: only that method chooses, nothing is played
 //                   out, and the summary has a hash of its choices, for
 //                   timing and for checking that a speedup is exact
-//   NPEGM_FROM      nestedpegm: the first position to choose and solve, to
+//   RPEGM_FROM      rlamcpegm: the first position to choose and solve, to
 //                   resume a run (default 0); positions keep their indices
 
-#include "nested_test.h"
+#include "rlamc_test.h"
 
 #include "../src/compat/cpthread.h"
 #include "../src/compat/cpthread_defs.h"
@@ -56,9 +56,9 @@
 #include "../src/ent/equity.h"
 #include "../src/ent/game.h"
 #include "../src/ent/move.h"
-#include "../src/ent/nested_args.h"
 #include "../src/ent/player.h"
 #include "../src/ent/rack.h"
+#include "../src/ent/rlamc_args.h"
 #include "../src/ent/sim_args.h"
 #include "../src/ent/sim_results.h"
 #include "../src/ent/stats.h"
@@ -71,7 +71,7 @@
 #include "../src/impl/move_gen.h"
 #include "../src/impl/peg.h"
 #include "../src/impl/random_variable.h"
-#include "../src/impl/rollout_nested.h"
+#include "../src/impl/rlamc.h"
 #include "../src/impl/simmer.h"
 #include "../src/str/move_string.h"
 #include "../src/str/rack_string.h"
@@ -91,46 +91,46 @@
 #include <string.h>
 
 enum {
-  NCR_MAX_THREADS = 64,
-  NCR_MOVE_STRING_SIZE = 64,
-  NCR_NUM_METHODS = 3,
-  NCR_METHOD_A = 0,
-  NCR_METHOD_B = 1,
-  NCR_METHOD_CONT = 2,
-  NCR_MAX_TURNS = 200,
+  RCR_MAX_THREADS = 64,
+  RCR_MOVE_STRING_SIZE = 64,
+  RCR_NUM_METHODS = 3,
+  RCR_METHOD_A = 0,
+  RCR_METHOD_B = 1,
+  RCR_METHOD_CONT = 2,
+  RCR_MAX_TURNS = 200,
 };
 
 // The share of memory the continuations' endgame table takes.
-static const double NCR_TT_FRACTION = 0.04;
+static const double RCR_TT_FRACTION = 0.04;
 
-static uint64_t ncr_mix(uint64_t value) {
+static uint64_t rcr_mix(uint64_t value) {
   value += 0x9E3779B97F4A7C15ULL;
   value = (value ^ (value >> 30)) * 0xBF58476D1CE4E5B9ULL;
   value = (value ^ (value >> 27)) * 0x94D049BB133111EBULL;
   return value ^ (value >> 31);
 }
 
-static int ncr_env_int(const char *name, const int fallback) {
+static int rcr_env_int(const char *name, const int fallback) {
   const char *value = getenv(name);
   return value ? (int)strtol(value, NULL, 10) : fallback;
 }
 
-static const char *ncr_env_string(const char *name, const char *fallback) {
+static const char *rcr_env_string(const char *name, const char *fallback) {
   const char *value = getenv(name);
   return value ? value : fallback;
 }
 
-#define NCR_DEFAULT_TABLES "-wit true -rit true -ritmmap true"
+#define RCR_DEFAULT_TABLES "-wit true -rit true -ritmmap true"
 
-static const char *ncr_tables(void) {
-  return ncr_env_string("NCR_TABLES", NCR_DEFAULT_TABLES);
+static const char *rcr_tables(void) {
+  return rcr_env_string("RCR_TABLES", RCR_DEFAULT_TABLES);
 }
 
 typedef struct NcrPosition {
   Game *game;
   int bag;
   Move chosen[2];
-  char chosen_string[2][NCR_MOVE_STRING_SIZE];
+  char chosen_string[2][RCR_MOVE_STRING_SIZE];
   double seconds[2];
   bool differ;
   // B's result less A's, over the continuations.
@@ -146,14 +146,14 @@ typedef struct NcrShared {
   int num_threads;
   int num_conts;
   int eg_plies;
-  SimArgs base_args[NCR_NUM_METHODS];
-  int num_plays[NCR_NUM_METHODS];
+  SimArgs base_args[RCR_NUM_METHODS];
+  int num_plays[RCR_NUM_METHODS];
   TranspositionTable *tt;
-  // NCR_ONLY with a comma before and after, or NULL for every position.
+  // RCR_ONLY with a comma before and after, or NULL for every position.
   char *only;
-  // NCR_SHOW: the sim's top plays to print after each choice (0: none).
+  // RCR_SHOW: the sim's top plays to print after each choice (0: none).
   int show;
-  // NCR_CHOOSE: the one method that chooses, or -1 for both.
+  // RCR_CHOOSE: the one method that chooses, or -1 for both.
   int choose_only;
   atomic_int next_position;
   atomic_int done;
@@ -163,16 +163,16 @@ typedef struct NcrWorker {
   NcrShared *shared;
   int worker_idx;
   Game *game;
-  MoveList *lists[NCR_NUM_METHODS];
-  SimCtx *ctxs[NCR_NUM_METHODS];
-  SimResults *results[NCR_NUM_METHODS];
+  MoveList *lists[RCR_NUM_METHODS];
+  SimCtx *ctxs[RCR_NUM_METHODS];
+  SimResults *results[RCR_NUM_METHODS];
   AutoplaySolverCtx *solver;
   AutoplaySolverSettings solver_settings;
   ErrorStack *error_stack;
 } NcrWorker;
 
 // The play method chooses in the worker's game, copied into out.
-static void ncr_choose(NcrWorker *worker, const int method, const uint64_t seed,
+static void rcr_choose(NcrWorker *worker, const int method, const uint64_t seed,
                        Move *out) {
   NcrShared *shared = worker->shared;
   SimArgs sim_args = shared->base_args[method];
@@ -188,7 +188,7 @@ static void ncr_choose(NcrWorker *worker, const int method, const uint64_t seed,
       worker->results[method], &simulated, worker->error_stack);
   if (!error_stack_is_empty(worker->error_stack)) {
     error_stack_print_and_reset(worker->error_stack);
-    log_fatal("nested continuation regret: a sim failed");
+    log_fatal("RLAMC continuation regret: a sim failed");
   }
   move_copy(out, move);
 }
@@ -196,26 +196,26 @@ static void ncr_choose(NcrWorker *worker, const int method, const uint64_t seed,
 // Plays the worker's game to its end with the continuation engine. Returns
 // the result for player mover: 1 for a win, 0.5 for a tie, 0 for a loss; and
 // the final spread for mover in *spread.
-static double ncr_play_out(NcrWorker *worker, const int mover,
+static double rcr_play_out(NcrWorker *worker, const int mover,
                            const uint64_t seed, double *spread) {
   Game *game = worker->game;
   Move move;
-  for (int turn = 0; turn < NCR_MAX_TURNS && !game_over(game); turn++) {
+  for (int turn = 0; turn < RCR_MAX_TURNS && !game_over(game); turn++) {
     if (bag_get_letters(game_get_bag(game)) == 0 &&
         worker->shared->eg_plies > 0) {
       const Move *solved = autoplay_solver_solve(
           worker->solver, &worker->solver_settings, game, worker->shared->tt, 1,
-          ncr_mix(seed + 7919ULL * (uint64_t)turn) | 1ULL, NULL, false,
+          rcr_mix(seed + 7919ULL * (uint64_t)turn) | 1ULL, NULL, false,
           worker->error_stack);
       if (solved == NULL || !error_stack_is_empty(worker->error_stack)) {
         error_stack_print_and_reset(worker->error_stack);
-        log_fatal("nested continuation regret: an endgame solve failed");
+        log_fatal("RLAMC continuation regret: an endgame solve failed");
       } else {
         move_copy(&move, solved);
       }
     } else {
-      ncr_choose(worker, NCR_METHOD_CONT,
-                 ncr_mix(seed + 104729ULL * (uint64_t)turn), &move);
+      rcr_choose(worker, RCR_METHOD_CONT,
+                 rcr_mix(seed + 104729ULL * (uint64_t)turn), &move);
     }
     play_move(&move, game, NULL);
   }
@@ -229,7 +229,7 @@ static double ncr_play_out(NcrWorker *worker, const int mover,
   return final_spread == 0 ? 0.5 : 0.0;
 }
 
-static void ncr_evaluate(NcrWorker *worker, NcrPosition *position,
+static void rcr_evaluate(NcrWorker *worker, NcrPosition *position,
                          const uint64_t pos_seed) {
   const NcrShared *shared = worker->shared;
   const int mover = game_get_player_on_turn_index(position->game);
@@ -239,7 +239,7 @@ static void ncr_evaluate(NcrWorker *worker, NcrPosition *position,
   double spread_sum = 0.0;
   double spread_sum_sq = 0.0;
   for (int cont_idx = 0; cont_idx < shared->num_conts; cont_idx++) {
-    const uint64_t cont_seed = ncr_mix(pos_seed ^ (0x51ED27ULL + cont_idx));
+    const uint64_t cont_seed = rcr_mix(pos_seed ^ (0x51ED27ULL + cont_idx));
     double wins[2];
     double spreads[2];
     for (int branch = 0; branch < 2; branch++) {
@@ -250,7 +250,7 @@ static void ncr_evaluate(NcrWorker *worker, NcrPosition *position,
       game_seed(worker->game, cont_seed);
       draw_to_full_rack(worker->game, other);
       play_move(&position->chosen[branch], worker->game, NULL);
-      wins[branch] = ncr_play_out(worker, mover, cont_seed, &spreads[branch]);
+      wins[branch] = rcr_play_out(worker, mover, cont_seed, &spreads[branch]);
     }
     const double win_diff = wins[1] - wins[0];
     const double spread_diff = spreads[1] - spreads[0];
@@ -270,7 +270,7 @@ static void ncr_evaluate(NcrWorker *worker, NcrPosition *position,
   position->spread_diff_se = sqrt(fmax(spread_var, 0.0) / count);
 }
 
-static void *ncr_worker_run(void *data) {
+static void *rcr_worker_run(void *data) {
   NcrWorker *worker = (NcrWorker *)data;
   NcrShared *shared = worker->shared;
   while (true) {
@@ -287,33 +287,33 @@ static void *ncr_worker_run(void *data) {
         continue;
       }
     }
-    const uint64_t pos_seed = ncr_mix(1000003ULL * (uint64_t)(pos_idx + 1));
+    const uint64_t pos_seed = rcr_mix(1000003ULL * (uint64_t)(pos_idx + 1));
     for (int method = 0; method < 2; method++) {
       if (shared->choose_only >= 0 && method != shared->choose_only) {
         continue;
       }
       game_copy(worker->game, position->game);
       const double start = ((double)ctimer_monotonic_ns() / 1e9);
-      ncr_choose(worker, method, pos_seed, &position->chosen[method]);
+      rcr_choose(worker, method, pos_seed, &position->chosen[method]);
       position->seconds[method] = ((double)ctimer_monotonic_ns() / 1e9) - start;
       if (shared->show > 0) {
         char *table = sim_results_get_string(
             worker->game, worker->results[method], shared->show, 1, -1, -1,
             NULL, 0, false, false, false, NULL);
-        printf("NCR show pos %d method %c\n%s", pos_idx, 'A' + method, table);
+        printf("RCR show pos %d method %c\n%s", pos_idx, 'A' + method, table);
         free(table);
       }
       StringBuilder *sb = string_builder_create();
       string_builder_add_move(sb, game_get_board(position->game),
                               &position->chosen[method],
                               game_get_ld(position->game), false);
-      (void)snprintf(position->chosen_string[method], NCR_MOVE_STRING_SIZE,
+      (void)snprintf(position->chosen_string[method], RCR_MOVE_STRING_SIZE,
                      "%s", string_builder_peek(sb));
       string_builder_destroy(sb);
     }
     if (shared->choose_only >= 0) {
       const int method = shared->choose_only;
-      printf("NCR pos %d bag %d %c %s (%.2fs)\n", pos_idx, position->bag,
+      printf("RCR pos %d bag %d %c %s (%.2fs)\n", pos_idx, position->bag,
              'A' + method, position->chosen_string[method],
              position->seconds[method]);
       (void)fflush(stdout);
@@ -323,14 +323,14 @@ static void *ncr_worker_run(void *data) {
         compare_moves_without_equity(&position->chosen[0], &position->chosen[1],
                                      true) != -1;
     if (position->differ) {
-      ncr_evaluate(worker, position, pos_seed);
+      rcr_evaluate(worker, position, pos_seed);
     } else {
       position->win_diff = 0.0;
       position->win_diff_se = 0.0;
       position->spread_diff = 0.0;
       position->spread_diff_se = 0.0;
     }
-    printf("NCR pos %d bag %d A %s (%.2fs) B %s (%.2fs) win %+.4f (%.4f) "
+    printf("RCR pos %d bag %d A %s (%.2fs) B %s (%.2fs) win %+.4f (%.4f) "
            "spread %+.2f (%.2f)\n",
            pos_idx, position->bag, position->chosen_string[0],
            position->seconds[0], position->chosen_string[1],
@@ -343,7 +343,7 @@ static void *ncr_worker_run(void *data) {
 
 // Positions from games of top static equity plays, each stopped once the bag
 // holds at most a target that varies between min_bag and max_bag.
-static int ncr_make_positions(const Game *base, NcrPosition *positions,
+static int rcr_make_positions(const Game *base, NcrPosition *positions,
                               const int num_positions, const int min_bag,
                               const int max_bag, const uint64_t first_game) {
   MoveList *move_list = move_list_create(1);
@@ -354,7 +354,7 @@ static int ncr_make_positions(const Game *base, NcrPosition *positions,
     game_seed(game, 7919ULL * game_idx + 17);
     draw_starting_racks(game);
     const int bag_target =
-        min_bag + (int)(ncr_mix(game_idx) % (uint64_t)(max_bag - min_bag + 1));
+        min_bag + (int)(rcr_mix(game_idx) % (uint64_t)(max_bag - min_bag + 1));
     bool usable = true;
     while (usable && bag_get_letters(game_get_bag(game)) > bag_target) {
       play_move(get_top_equity_move(game, move_list), game, NULL);
@@ -373,11 +373,11 @@ static int ncr_make_positions(const Game *base, NcrPosition *positions,
   return made;
 }
 
-static Config *ncr_config(const char *lexicon, const char *settings) {
+static Config *rcr_config(const char *lexicon, const char *settings) {
   char *full = get_formatted_string(
       "set -lex %s -wmp true -s1 equity -s2 equity -r1 all -r2 all "
       "-threads 1 -savesettings false -hr false -sinfer false %s %s",
-      lexicon, ncr_tables(), settings);
+      lexicon, rcr_tables(), settings);
   Config *config = config_create_or_die(full);
   free(full);
   // Without options: EMPTY_CGP names CSW21, which would replace the lexicon.
@@ -389,7 +389,7 @@ static Config *ncr_config(const char *lexicon, const char *settings) {
   return config;
 }
 
-static void ncr_mean_se(const double *values, const int count, double *mean,
+static void rcr_mean_se(const double *values, const int count, double *mean,
                         double *se) {
   double sum = 0.0;
   double sum_sq = 0.0;
@@ -402,23 +402,23 @@ static void ncr_mean_se(const double *values, const int count, double *mean,
   *se = count > 0 ? sqrt(fmax(var, 0.0) / count) : 0.0;
 }
 
-void test_nested_cr(void) {
+void test_rlamc_cr(void) {
   log_set_level(LOG_FATAL);
-  const int num_positions = ncr_env_int("NCR_POSITIONS", 200);
-  const int min_bag = ncr_env_int("NCR_MIN_BAG", 1);
-  const int max_bag = ncr_env_int("NCR_MAX_BAG", 20);
-  int num_threads = ncr_env_int("NCR_THREADS", 10);
-  if (num_threads > NCR_MAX_THREADS) {
-    num_threads = NCR_MAX_THREADS;
+  const int num_positions = rcr_env_int("RCR_POSITIONS", 200);
+  const int min_bag = rcr_env_int("RCR_MIN_BAG", 1);
+  const int max_bag = rcr_env_int("RCR_MAX_BAG", 20);
+  int num_threads = rcr_env_int("RCR_THREADS", 10);
+  if (num_threads > RCR_MAX_THREADS) {
+    num_threads = RCR_MAX_THREADS;
   }
-  const char *lexicon = ncr_env_string("NCR_LEX", "CSW21");
-  const char *base = ncr_env_string(
-      "NCR_BASE",
+  const char *lexicon = rcr_env_string("RCR_LEX", "CSW21");
+  const char *base = rcr_env_string(
+      "RCR_BASE",
       "-plies 2 -numplays 10 -scond none -tlim 0 -minplayiterations 10");
-  const char *method_settings[NCR_NUM_METHODS] = {
-      ncr_env_string("NCR_A", "-it 1000"),
-      ncr_env_string("NCR_B", "-it 1000 -nested plies=0,k=6,m=8,h=1"),
-      ncr_env_string("NCR_CONT",
+  const char *method_settings[RCR_NUM_METHODS] = {
+      rcr_env_string("RCR_A", "-it 1000"),
+      rcr_env_string("RCR_B", "-it 1000 -rlamc plies=0,k=6,m=8,h=1"),
+      rcr_env_string("RCR_CONT",
                      "-plies 2 -numplays 8 -it 300 -scond none "
                      "-tlim 0 -minplayiterations 10 -sbagcycle false"),
   };
@@ -426,15 +426,15 @@ void test_nested_cr(void) {
   NcrShared shared;
   memset(&shared, 0, sizeof(shared));
   shared.num_threads = num_threads;
-  shared.num_conts = ncr_env_int("NCR_CONTS", 32);
-  shared.eg_plies = ncr_env_int("NCR_EG_PLIES", 4);
-  Config *configs[NCR_NUM_METHODS];
-  for (int method = 0; method < NCR_NUM_METHODS; method++) {
+  shared.num_conts = rcr_env_int("RCR_CONTS", 32);
+  shared.eg_plies = rcr_env_int("RCR_EG_PLIES", 4);
+  Config *configs[RCR_NUM_METHODS];
+  for (int method = 0; method < RCR_NUM_METHODS; method++) {
     char *settings =
-        method == NCR_METHOD_CONT
+        method == RCR_METHOD_CONT
             ? string_duplicate(method_settings[method])
             : get_formatted_string("%s %s", base, method_settings[method]);
-    configs[method] = ncr_config(lexicon, settings);
+    configs[method] = rcr_config(lexicon, settings);
     free(settings);
     thread_control_set_status(config_get_thread_control(configs[method]),
                               THREAD_CONTROL_STATUS_STARTED);
@@ -442,25 +442,25 @@ void test_nested_cr(void) {
                          &shared.base_args[method]);
     shared.num_plays[method] = shared.base_args[method].num_plays;
   }
-  shared.tt = transposition_table_create(NCR_TT_FRACTION);
+  shared.tt = transposition_table_create(RCR_TT_FRACTION);
   shared.positions = calloc_or_die(num_positions, sizeof(NcrPosition));
-  shared.num_positions = ncr_make_positions(
-      config_get_game(configs[NCR_METHOD_A]), shared.positions, num_positions,
-      min_bag, max_bag, (uint64_t)ncr_env_int("NCR_FIRST_GAME", 0));
-  const char *only = ncr_env_string("NCR_ONLY", "");
+  shared.num_positions = rcr_make_positions(
+      config_get_game(configs[RCR_METHOD_A]), shared.positions, num_positions,
+      min_bag, max_bag, (uint64_t)rcr_env_int("RCR_FIRST_GAME", 0));
+  const char *only = rcr_env_string("RCR_ONLY", "");
   shared.only = only[0] != '\0' ? get_formatted_string(",%s,", only) : NULL;
-  shared.show = ncr_env_int("NCR_SHOW", 0);
-  const char *choose = ncr_env_string("NCR_CHOOSE", "");
+  shared.show = rcr_env_int("RCR_SHOW", 0);
+  const char *choose = rcr_env_string("RCR_CHOOSE", "");
   shared.choose_only = -1;
   if (choose[0] == 'A' || choose[0] == 'B') {
     shared.choose_only = choose[0] - 'A';
   }
-  if (ncr_env_int("NCR_DUMP", 0) != 0) {
+  if (rcr_env_int("RCR_DUMP", 0) != 0) {
     for (int pos_idx = 0; pos_idx < shared.num_positions; pos_idx++) {
       Game *copy = game_duplicate(shared.positions[pos_idx].game);
       return_rack_to_bag(copy, 1 - game_get_player_on_turn_index(copy));
       char *cgp = game_get_cgp(copy, true);
-      printf("NCR cgp %d bag %d %s\n", pos_idx, shared.positions[pos_idx].bag,
+      printf("RCR cgp %d bag %d %s\n", pos_idx, shared.positions[pos_idx].bag,
              cgp);
       free(cgp);
       game_destroy(copy);
@@ -468,12 +468,12 @@ void test_nested_cr(void) {
   }
   atomic_init(&shared.next_position, 0);
   atomic_init(&shared.done, 0);
-  printf("NCR: %d positions, bag %d to %d, %d continuations, %d threads\n"
-         "NCR base: %s\nNCR A: %s\nNCR B: %s\nNCR cont: %s\n",
+  printf("RCR: %d positions, bag %d to %d, %d continuations, %d threads\n"
+         "RCR base: %s\nRCR A: %s\nRCR B: %s\nRCR cont: %s\n",
          shared.num_positions, min_bag, max_bag, shared.num_conts, num_threads,
          base, method_settings[0], method_settings[1], method_settings[2]);
   (void)fflush(stdout);
-  nested_totals_reset();
+  rlamc_totals_reset();
 
   NcrWorker *workers = calloc_or_die(num_threads, sizeof(NcrWorker));
   cpthread_t *threads = malloc_or_die(sizeof(cpthread_t) * num_threads);
@@ -482,7 +482,7 @@ void test_nested_cr(void) {
     worker->shared = &shared;
     worker->worker_idx = worker_idx;
     worker->game = game_duplicate(shared.positions[0].game);
-    for (int method = 0; method < NCR_NUM_METHODS; method++) {
+    for (int method = 0; method < RCR_NUM_METHODS; method++) {
       worker->lists[method] = move_list_create(shared.num_plays[method]);
       worker->ctxs[method] = NULL;
       worker->results[method] = sim_results_create(0.0);
@@ -492,7 +492,7 @@ void test_nested_cr(void) {
     worker->solver_settings.endgame_plies = shared.eg_plies;
     worker->solver_settings.peg_max_bag = 0;
     worker->error_stack = error_stack_create();
-    cpthread_create(&threads[worker_idx], ncr_worker_run, worker);
+    cpthread_create(&threads[worker_idx], rcr_worker_run, worker);
   }
   for (int worker_idx = 0; worker_idx < num_threads; worker_idx++) {
     cpthread_join(threads[worker_idx]);
@@ -508,14 +508,14 @@ void test_nested_cr(void) {
       const char *chosen = position->chosen_string[shared.choose_only];
       uint64_t value = (uint64_t)pos_idx;
       for (int char_idx = 0; chosen[char_idx] != '\0'; char_idx++) {
-        value = ncr_mix(value ^ (uint64_t)(unsigned char)chosen[char_idx]);
+        value = rcr_mix(value ^ (uint64_t)(unsigned char)chosen[char_idx]);
       }
-      hash = ncr_mix(hash ^ value);
+      hash = rcr_mix(hash ^ value);
       total_seconds += position->seconds[shared.choose_only];
     }
-    const NestedTotals choose_totals = nested_get_totals();
-    printf("NCR choose summary: %d positions, hash %016llx, %.3f s per "
-           "choice, nested searches %llu, samples %llu, decision hits %llu, "
+    const RlamcTotals choose_totals = rlamc_get_totals();
+    printf("RCR choose summary: %d positions, hash %016llx, %.3f s per "
+           "choice, RLAMC searches %llu, samples %llu, decision hits %llu, "
            "stopped %llu, finishes %llu, finish hits %llu, static rollouts "
            "%llu, rollout hits %llu\n",
            shared.num_positions, (unsigned long long)hash,
@@ -548,16 +548,16 @@ void test_nested_cr(void) {
   double win_se;
   double spread_mean;
   double spread_se;
-  ncr_mean_se(win_diffs, shared.num_positions, &win_mean, &win_se);
-  ncr_mean_se(spread_diffs, shared.num_positions, &spread_mean, &spread_se);
-  const NestedTotals totals = nested_get_totals();
+  rcr_mean_se(win_diffs, shared.num_positions, &win_mean, &win_se);
+  rcr_mean_se(spread_diffs, shared.num_positions, &spread_mean, &spread_se);
+  const RlamcTotals totals = rlamc_get_totals();
   printf(
-      "NCR summary: %d positions, %d differ (%.1f%%)\n"
-      "NCR B - A per position: win %+.5f (SE %.5f), spread %+.3f (SE "
+      "RCR summary: %d positions, %d differ (%.1f%%)\n"
+      "RCR B - A per position: win %+.5f (SE %.5f), spread %+.3f (SE "
       "%.3f)\n"
-      "NCR per differing position: win %+.4f, spread %+.2f\n"
-      "NCR seconds per choice: A %.3f, B %.3f\n"
-      "NCR nested searches %llu, samples %llu, candidates %.2f each, "
+      "RCR per differing position: win %+.4f, spread %+.2f\n"
+      "RCR seconds per choice: A %.3f, B %.3f\n"
+      "RCR RLAMC searches %llu, samples %llu, candidates %.2f each, "
       "switched %.1f%%\n",
       shared.num_positions, differ,
       100.0 * differ / (double)shared.num_positions, win_mean, win_se,
@@ -579,7 +579,7 @@ void test_nested_cr(void) {
   for (int worker_idx = 0; worker_idx < num_threads; worker_idx++) {
     NcrWorker *worker = &workers[worker_idx];
     game_destroy(worker->game);
-    for (int method = 0; method < NCR_NUM_METHODS; method++) {
+    for (int method = 0; method < RCR_NUM_METHODS; method++) {
       move_list_destroy(worker->lists[method]);
       sim_ctx_destroy(worker->ctxs[method]);
       sim_results_destroy(worker->results[method]);
@@ -594,26 +594,26 @@ void test_nested_cr(void) {
   }
   free(shared.positions);
   transposition_table_destroy(shared.tt);
-  for (int method = 0; method < NCR_NUM_METHODS; method++) {
+  for (int method = 0; method < RCR_NUM_METHODS; method++) {
     config_destroy(configs[method]);
   }
 }
 
-// A fingerprint of a nested sim's results.
-static uint64_t nested_test_sim(const int num_threads, const char *nested) {
+// A fingerprint of a recursive sim's results.
+static uint64_t rlamc_test_sim(const int num_threads, const char *rlamc) {
   char *settings = get_formatted_string(
       "set -lex CSW21 -wmp true -s1 equity -s2 equity -r1 all -r2 all "
       "-numplays 5 -plies 3 -threads %d -iterations 300 "
       "-minplayiterations 10 -scond none -tlim 0 -seed 42 -sinfer false "
-      "-savesettings false -hr false -nested %s",
-      num_threads, nested);
+      "-savesettings false -hr false -rlamc %s",
+      num_threads, rlamc);
   Config *config = config_create_or_die(settings);
   free(settings);
   load_and_exec_config_or_die(config, "cgp " JOSH2_CGP);
   load_and_exec_config_or_die(config, "gen");
-  nested_totals_reset();
+  rlamc_totals_reset();
   load_and_exec_config_or_die(config, "sim");
-  const NestedTotals totals = nested_get_totals();
+  const RlamcTotals totals = rlamc_get_totals();
   const SimResults *sim_results = config_get_sim_results(config);
   uint64_t hash = FNV_64_OFFSET_BASIS;
   const int num_plays = sim_results_get_number_of_plays(sim_results);
@@ -622,7 +622,7 @@ static uint64_t nested_test_sim(const int num_threads, const char *nested) {
     const SimmedPlay *simmed_play =
         sim_results_get_simmed_play(sim_results, play_idx);
     const double mean = simmed_play_get_exact_win_pct_mean(simmed_play);
-    if (getenv("NESTED_TEST_DEBUG")) {
+    if (getenv("RLAMC_TEST_DEBUG")) {
       (void)fprintf(stderr, "NTD %d threads play %d mean %.17g n %llu\n",
                     num_threads, play_idx, mean,
                     (unsigned long long)stat_get_num_samples(
@@ -634,7 +634,7 @@ static uint64_t nested_test_sim(const int num_threads, const char *nested) {
     hash = fnv64a_step(
         hash, stat_get_num_samples(simmed_play_get_equity_stat(simmed_play)));
   }
-  if (getenv("NESTED_TEST_DEBUG")) {
+  if (getenv("RLAMC_TEST_DEBUG")) {
     (void)fprintf(stderr,
                   "NTD %d threads searches %llu samples %llu switched %llu\n",
                   num_threads, (unsigned long long)totals.searches,
@@ -643,7 +643,7 @@ static uint64_t nested_test_sim(const int num_threads, const char *nested) {
   }
   // The totals are not part of the fingerprint: with several threads, BAI
   // can take samples it then discards, whose searches count too.
-  if (strings_equal(nested, "off")) {
+  if (strings_equal(rlamc, "off")) {
     assert(totals.searches == 0);
   } else {
     assert(totals.searches > 0);
@@ -653,28 +653,28 @@ static uint64_t nested_test_sim(const int num_threads, const char *nested) {
   return hash;
 }
 
-static void test_nested_parse(void) {
-  NestedArgs args;
+static void test_rlamc_parse(void) {
+  RlamcArgs args;
   ErrorStack *error_stack = error_stack_create();
-  nested_args_parse("plies=0+2,k=4,m=3,h=2,margin=12,maxbag=20,minbag=1,"
-                    "alloc=race,z=1.5,switch=0.01",
-                    &args, error_stack);
+  rlamc_args_parse("plies=0+2,k=4,m=3,h=2,margin=12,maxbag=20,minbag=1,"
+                   "alloc=race,z=1.5,switch=0.01",
+                   &args, error_stack);
   assert(error_stack_is_empty(error_stack));
   assert(args.enabled);
   assert(args.depth == 1);
   assert(args.levels[0].plies_mask == 5U);
   assert(args.levels[0].num_candidates == 4);
   assert(args.levels[0].num_samples == 3);
-  assert(args.levels[0].nested_plies == 2);
+  assert(args.levels[0].horizon_plies == 2);
   assert(args.levels[0].margin == 12);
   assert(args.levels[0].max_bag == 20);
   assert(args.levels[0].min_bag == 1);
-  assert(args.levels[0].alloc == NESTED_ALLOC_RACE);
+  assert(args.levels[0].alloc == RLAMC_ALLOC_RACE);
   assert(args.levels[0].race_z == 1.5);
   assert(args.levels[0].switch_margin == 0.01);
   // Levels: each starts from the one before it.
-  nested_args_parse("plies=0+1,lamc=1,m=6/plies=0,m=2,finalists=5", &args,
-                    error_stack);
+  rlamc_args_parse("plies=0+1,lamc=1,m=6/plies=0,m=2,finalists=5", &args,
+                   error_stack);
   assert(error_stack_is_empty(error_stack));
   assert(args.depth == 2);
   assert(args.finalists == 5);
@@ -685,25 +685,25 @@ static void test_nested_parse(void) {
   assert(args.levels[1].lamc_search);
   assert(!args.levels[0].paired);
   assert(args.control_samples == 0);
-  nested_args_parse("plies=0,lamc=1,cv=8", &args, error_stack);
+  rlamc_args_parse("plies=0,lamc=1,cv=8", &args, error_stack);
   assert(error_stack_is_empty(error_stack));
   assert(args.control_samples == 8);
-  nested_args_parse("plies=0,lamc=1,pair=1", &args, error_stack);
+  rlamc_args_parse("plies=0,lamc=1,pair=1", &args, error_stack);
   assert(error_stack_is_empty(error_stack));
   assert(args.levels[0].paired);
   assert(!args.levels[0].dynamic);
-  nested_args_parse("plies=0,lamc=1,dyn=1,step=3", &args, error_stack);
+  rlamc_args_parse("plies=0,lamc=1,dyn=1,step=3", &args, error_stack);
   assert(error_stack_is_empty(error_stack));
   assert(args.levels[0].dynamic && args.levels[0].step == 3);
   assert(!args.levels[0].bag_cycle);
-  nested_args_parse("plies=0,lamc=1,cycle=1", &args, error_stack);
+  rlamc_args_parse("plies=0,lamc=1,cycle=1", &args, error_stack);
   assert(error_stack_is_empty(error_stack));
   assert(args.levels[0].bag_cycle);
   assert(!args.levels[0].skip_finish);
-  nested_args_parse("plies=0,lamc=1,fin=0", &args, error_stack);
+  rlamc_args_parse("plies=0,lamc=1,fin=0", &args, error_stack);
   assert(error_stack_is_empty(error_stack));
   assert(args.levels[0].skip_finish);
-  nested_args_parse("off", &args, error_stack);
+  rlamc_args_parse("off", &args, error_stack);
   assert(error_stack_is_empty(error_stack));
   assert(!args.enabled);
   const char *const bad[] = {
@@ -711,15 +711,15 @@ static void test_nested_parse(void) {
       "k",       "k=2/k=0", "share=1/k=2", "m=1/m=1/m=1/m=1/m=1", "pair=2",
       "cycle=2", "fin=2",   "cv=65"};
   for (int bad_idx = 0; bad_idx < 13; bad_idx++) {
-    nested_args_parse(bad[bad_idx], &args, error_stack);
-    assert(error_stack_top(error_stack) == ERROR_STATUS_NESTED_BAD_SPEC);
+    rlamc_args_parse(bad[bad_idx], &args, error_stack);
+    assert(error_stack_top(error_stack) == ERROR_STATUS_RLAMC_BAD_SPEC);
     error_stack_reset(error_stack);
   }
   error_stack_destroy(error_stack);
 }
 
-void test_nested(void) {
-  test_nested_parse();
+void test_rlamc(void) {
+  test_rlamc_parse();
   const char *const specs[] = {
       "off",
       "plies=0,k=4,m=3,h=1",
@@ -734,22 +734,22 @@ void test_nested(void) {
       "plies=0,lamc=1,pool=5,keep=2,rounds=3,m=2,cycle=1",
       "plies=0,lamc=1,pool=5,keep=2,rounds=3,m=2,fin=0,cv=3"};
   for (int spec_idx = 0; spec_idx < 12; spec_idx++) {
-    const uint64_t one = nested_test_sim(1, specs[spec_idx]);
-    const uint64_t several = nested_test_sim(4, specs[spec_idx]);
+    const uint64_t one = rlamc_test_sim(1, specs[spec_idx]);
+    const uint64_t several = rlamc_test_sim(4, specs[spec_idx]);
     assert(one == several);
   }
 }
 
-// On demand (nestedbench): one sim of NB_CGP with NB_SETTINGS, timed, with
-// the nested totals.
-void test_nested_bench(void) {
-  const char *cgp = ncr_env_string(
-      "NB_CGP", "15/15/10T4/10AD3/10MO3/5ZEK2EW3/6MITT1N3/7DOWLY3/8POI4/"
+// On demand (rlamcbench): one sim of RB_CGP with RB_SETTINGS, timed, with
+// the recursive totals.
+void test_rlamc_bench(void) {
+  const char *cgp = rcr_env_string(
+      "RB_CGP", "15/15/10T4/10AD3/10MO3/5ZEK2EW3/6MITT1N3/7DOWLY3/8POI4/"
                 "3ALBUGoS5/15/15/15/15/15 CGILLRS/ 98/167 0");
-  const char *settings = ncr_env_string(
-      "NB_SETTINGS", "-numplays 10 -plies 2 -threads 2 -iterations 3000 "
+  const char *settings = rcr_env_string(
+      "RB_SETTINGS", "-numplays 10 -plies 2 -threads 2 -iterations 3000 "
                      "-minplayiterations 10 -scond none -tlim 0 -seed 42 "
-                     "-sbagcycle false -nested plies=0,k=6,m=8,share=1");
+                     "-sbagcycle false -rlamc plies=0,k=6,m=8,share=1");
   char *full = get_formatted_string(
       "set -lex CSW21 -wmp true -s1 equity -s2 equity -r1 all -r2 all "
       "-sinfer false -savesettings false -hr false %s",
@@ -759,32 +759,32 @@ void test_nested_bench(void) {
   char *load = get_formatted_string("cgp %s", cgp);
   load_and_exec_config_or_die(config, load);
   free(load);
-  const int bag = ncr_env_int("NB_BAG", 0);
+  const int bag = rcr_env_int("RB_BAG", 0);
   if (bag > 0) {
     // A position from a game of static plays, with bag tiles in the bag.
     NcrPosition position;
-    ncr_make_positions(config_get_game(config), &position, 1, bag, bag,
-                       (uint64_t)ncr_env_int("NB_GAME", 0));
+    rcr_make_positions(config_get_game(config), &position, 1, bag, bag,
+                       (uint64_t)rcr_env_int("RB_GAME", 0));
     // The opponent's rack is unknown to the sim.
     return_rack_to_bag(position.game,
                        1 - game_get_player_on_turn_index(position.game));
     char *position_cgp = game_get_cgp(position.game, true);
     game_destroy(position.game);
     load = get_formatted_string("cgp %s", position_cgp);
-    printf("NB position: %s\n", position_cgp);
+    printf("RB position: %s\n", position_cgp);
     free(position_cgp);
     load_and_exec_config_or_die(config, load);
     free(load);
   }
   load_and_exec_config_or_die(config, "gen");
-  nested_totals_reset();
+  rlamc_totals_reset();
   const double start = (double)ctimer_monotonic_ns() / 1e9;
   load_and_exec_config_or_die(config, "sim");
   const double seconds = (double)ctimer_monotonic_ns() / 1e9 - start;
-  const NestedTotals totals = nested_get_totals();
+  const RlamcTotals totals = rlamc_get_totals();
   const SimResults *sim_results = config_get_sim_results(config);
   printf(
-      "NB %.3f s, %llu rollouts, nested searches %llu, candidates %.2f, "
+      "RB %.3f s, %llu rollouts, RLAMC searches %llu, candidates %.2f, "
       "switched %.1f%%, samples %llu, cache hits %llu misses %llu "
       "(%.1f%% hit), decision hits %llu, inner searches %llu, stopped %llu\n",
       seconds, (unsigned long long)sim_results_get_iteration_count(sim_results),
@@ -806,26 +806,26 @@ void test_nested_bench(void) {
   config_destroy(config);
 }
 
-// Ground truth tables (on demand: nestedgt, nestedeval).
+// Ground truth tables (on demand: rlamcgt, rlamceval).
 //
-// nestedgt writes a table of positions and, for each, the continuation value
-// of each of its top plays by static equity: NGT_CANDS plays, each played out
-// NCR_CONTS times by the continuation engine on the same continuation seeds,
+// rlamcgt writes a table of positions and, for each, the continuation value
+// of each of its top plays by static equity: RGT_CANDS plays, each played out
+// RCR_CONTS times by the continuation engine on the same continuation seeds,
 // so that the plays' values are compared on common random numbers.
-// nestedeval then scores sim settings against the table without playing
+// rlamceval then scores sim settings against the table without playing
 // anything out: each settings' play in each position is looked up, and its
 // regret is the best value in the position less its own. A play outside the
 // table is counted, not scored.
 //
 // Settings (and NCR_* as above for positions and the continuation engine):
-//   NGT_FILE     the table (default nested_gt.txt)
-//   NGT_CANDS    plays valued per position (default 10)
-//   NE_METHODS   |-separated sim settings to score, each after NCR_BASE
+//   RGT_FILE     the table (default rlamc_gt.txt)
+//   RGT_CANDS    plays valued per position (default 10)
+//   RE_METHODS   |-separated sim settings to score, each after RCR_BASE
 
 enum {
-  NGT_MAX_CANDS = 64,
-  NGT_MAX_CONTS = 1024,
-  NGT_LINE_SIZE = 65536,
+  RGT_MAX_CANDS = 64,
+  RGT_MAX_CONTS = 1024,
+  RGT_LINE_SIZE = 65536,
 };
 
 typedef struct GtPosition {
@@ -833,7 +833,7 @@ typedef struct GtPosition {
   int bag;
   int pos_id;
   int num_cands;
-  Move cands[NGT_MAX_CANDS];
+  Move cands[RGT_MAX_CANDS];
   // num_cands x num_conts results for the mover.
   double *wins;
   double *spreads;
@@ -872,7 +872,7 @@ static int gt_candidates(const Game *game, const int num_cands, Move *out) {
 }
 
 static uint64_t gt_cont_seed(const int pos_id, const int cont_idx) {
-  return ncr_mix(ncr_mix(0x6A09E667ULL + (uint64_t)pos_id) ^
+  return rcr_mix(rcr_mix(0x6A09E667ULL + (uint64_t)pos_id) ^
                  (0x51ED27ULL + (uint64_t)cont_idx));
 }
 
@@ -889,7 +889,7 @@ static void gt_value_candidate(NcrWorker *worker, GtPosition *position,
     draw_to_full_rack(worker->game, other);
     play_move(&position->cands[cand_idx], worker->game, NULL);
     double spread;
-    const double win = ncr_play_out(worker, mover, cont_seed, &spread);
+    const double win = rcr_play_out(worker, mover, cont_seed, &spread);
     position->wins[cand_idx * num_conts + cont_idx] = win;
     position->spreads[cand_idx * num_conts + cont_idx] = spread;
   }
@@ -948,7 +948,7 @@ static void *gt_worker_run(void *data) {
       gt_value_candidate(args->worker, position, cand_idx, gt->num_conts);
     }
     gt_write_position(gt, position);
-    printf("NGT position %d (bag %d) done\n", position->pos_id, position->bag);
+    printf("RGT position %d (bag %d) done\n", position->pos_id, position->bag);
     (void)fflush(stdout);
   }
   return NULL;
@@ -956,7 +956,7 @@ static void *gt_worker_run(void *data) {
 
 // The workers, each with its own game, lists and sim contexts for settings
 // base_args, and endgame solving at eg_plies.
-static NcrWorker *ncr_workers_create(NcrShared *shared, const Game *game,
+static NcrWorker *rcr_workers_create(NcrShared *shared, const Game *game,
                                      const int num_threads) {
   NcrWorker *workers = calloc_or_die(num_threads, sizeof(NcrWorker));
   for (int worker_idx = 0; worker_idx < num_threads; worker_idx++) {
@@ -964,7 +964,7 @@ static NcrWorker *ncr_workers_create(NcrShared *shared, const Game *game,
     worker->shared = shared;
     worker->worker_idx = worker_idx;
     worker->game = game_duplicate(game);
-    for (int method = 0; method < NCR_NUM_METHODS; method++) {
+    for (int method = 0; method < RCR_NUM_METHODS; method++) {
       worker->lists[method] = move_list_create(shared->num_plays[method]);
       worker->ctxs[method] = NULL;
       worker->results[method] = sim_results_create(0.0);
@@ -978,11 +978,11 @@ static NcrWorker *ncr_workers_create(NcrShared *shared, const Game *game,
   return workers;
 }
 
-static void ncr_workers_destroy(NcrWorker *workers, const int num_threads) {
+static void rcr_workers_destroy(NcrWorker *workers, const int num_threads) {
   for (int worker_idx = 0; worker_idx < num_threads; worker_idx++) {
     NcrWorker *worker = &workers[worker_idx];
     game_destroy(worker->game);
-    for (int method = 0; method < NCR_NUM_METHODS; method++) {
+    for (int method = 0; method < RCR_NUM_METHODS; method++) {
       move_list_destroy(worker->lists[method]);
       sim_ctx_destroy(worker->ctxs[method]);
       sim_results_destroy(worker->results[method]);
@@ -993,42 +993,42 @@ static void ncr_workers_destroy(NcrWorker *workers, const int num_threads) {
   free(workers);
 }
 
-void test_nested_gt(void) {
+void test_rlamc_gt(void) {
   log_set_level(LOG_FATAL);
-  const int num_positions = ncr_env_int("NCR_POSITIONS", 200);
-  const int min_bag = ncr_env_int("NCR_MIN_BAG", 1);
-  const int max_bag = ncr_env_int("NCR_MAX_BAG", 20);
-  int num_threads = ncr_env_int("NCR_THREADS", 10);
-  if (num_threads > NCR_MAX_THREADS) {
-    num_threads = NCR_MAX_THREADS;
+  const int num_positions = rcr_env_int("RCR_POSITIONS", 200);
+  const int min_bag = rcr_env_int("RCR_MIN_BAG", 1);
+  const int max_bag = rcr_env_int("RCR_MAX_BAG", 20);
+  int num_threads = rcr_env_int("RCR_THREADS", 10);
+  if (num_threads > RCR_MAX_THREADS) {
+    num_threads = RCR_MAX_THREADS;
   }
-  const char *lexicon = ncr_env_string("NCR_LEX", "CSW21");
-  const char *cont_settings = ncr_env_string(
-      "NCR_CONT", "-plies 2 -numplays 8 -it 300 -scond none -tlim 0 "
+  const char *lexicon = rcr_env_string("RCR_LEX", "CSW21");
+  const char *cont_settings = rcr_env_string(
+      "RCR_CONT", "-plies 2 -numplays 8 -it 300 -scond none -tlim 0 "
                   "-minplayiterations 10 -sbagcycle false");
   NcrShared shared;
   memset(&shared, 0, sizeof(shared));
   shared.num_threads = num_threads;
-  shared.eg_plies = ncr_env_int("NCR_EG_PLIES", 4);
-  Config *config = ncr_config(lexicon, cont_settings);
+  shared.eg_plies = rcr_env_int("RCR_EG_PLIES", 4);
+  Config *config = rcr_config(lexicon, cont_settings);
   thread_control_set_status(config_get_thread_control(config),
                             THREAD_CONTROL_STATUS_STARTED);
-  for (int method = 0; method < NCR_NUM_METHODS; method++) {
+  for (int method = 0; method < RCR_NUM_METHODS; method++) {
     config_fill_sim_args(config, NULL, NULL, NULL, NULL,
                          &shared.base_args[method]);
     shared.num_plays[method] = shared.base_args[method].num_plays;
   }
-  shared.tt = transposition_table_create(NCR_TT_FRACTION);
+  shared.tt = transposition_table_create(RCR_TT_FRACTION);
 
   GtShared gt;
   memset(&gt, 0, sizeof(gt));
-  gt.num_cands = ncr_env_int("NGT_CANDS", 10);
-  gt.num_conts = ncr_env_int("NCR_CONTS", 32);
-  assert(gt.num_cands <= NGT_MAX_CANDS && gt.num_conts <= NGT_MAX_CONTS);
+  gt.num_cands = rcr_env_int("RGT_CANDS", 10);
+  gt.num_conts = rcr_env_int("RCR_CONTS", 32);
+  assert(gt.num_cands <= RGT_MAX_CANDS && gt.num_conts <= RGT_MAX_CONTS);
   NcrPosition *made = calloc_or_die(num_positions, sizeof(NcrPosition));
-  const int first_game = ncr_env_int("NCR_FIRST_GAME", 0);
+  const int first_game = rcr_env_int("RCR_FIRST_GAME", 0);
   gt.num_positions =
-      ncr_make_positions(config_get_game(config), made, num_positions, min_bag,
+      rcr_make_positions(config_get_game(config), made, num_positions, min_bag,
                          max_bag, (uint64_t)first_game);
   gt.positions = calloc_or_die(gt.num_positions, sizeof(GtPosition));
   for (int pos_idx = 0; pos_idx < gt.num_positions; pos_idx++) {
@@ -1037,17 +1037,17 @@ void test_nested_gt(void) {
     gt.positions[pos_idx].pos_id = first_game * 1000 + pos_idx;
   }
   free(made);
-  const char *file = ncr_env_string("NGT_FILE", "nested_gt.txt");
+  const char *file = rcr_env_string("RGT_FILE", "rlamc_gt.txt");
   gt.out = fopen_or_die(file, "a");
   cpthread_mutex_init(&gt.out_mutex);
   atomic_init(&gt.next_position, 0);
-  printf("NGT: %d positions, bag %d to %d, %d plays, %d continuations, %d "
-         "threads, to %s\nNGT cont: %s\n",
+  printf("RGT: %d positions, bag %d to %d, %d plays, %d continuations, %d "
+         "threads, to %s\nRGT cont: %s\n",
          gt.num_positions, min_bag, max_bag, gt.num_cands, gt.num_conts,
          num_threads, file, cont_settings);
   (void)fflush(stdout);
   NcrWorker *workers =
-      ncr_workers_create(&shared, gt.positions[0].game, num_threads);
+      rcr_workers_create(&shared, gt.positions[0].game, num_threads);
   GtWorkerArgs *worker_args = malloc_or_die(sizeof(GtWorkerArgs) * num_threads);
   cpthread_t *threads = malloc_or_die(sizeof(cpthread_t) * num_threads);
   for (int worker_idx = 0; worker_idx < num_threads; worker_idx++) {
@@ -1060,7 +1060,7 @@ void test_nested_gt(void) {
     cpthread_join(threads[worker_idx]);
   }
   (void)fclose(gt.out);
-  ncr_workers_destroy(workers, num_threads);
+  rcr_workers_destroy(workers, num_threads);
   free(worker_args);
   free(threads);
   for (int pos_idx = 0; pos_idx < gt.num_positions; pos_idx++) {
@@ -1106,8 +1106,8 @@ static void *eval_worker_run(void *data) {
     game_copy(worker->game, position->game);
     Move chosen;
     const double start = (double)ctimer_monotonic_ns() / 1e9;
-    ncr_choose(worker, NCR_METHOD_A,
-               ncr_mix(0x243F6A88ULL + (uint64_t)position->pos_id), &chosen);
+    rcr_choose(worker, RCR_METHOD_A,
+               rcr_mix(0x243F6A88ULL + (uint64_t)position->pos_id), &chosen);
     eval->seconds[eval->method * eval->num_positions + pos_idx] =
         (double)ctimer_monotonic_ns() / 1e9 - start;
     int index = -1;
@@ -1138,12 +1138,12 @@ static double gt_mean(const GtPosition *position, const int num_conts,
 static int gt_load(const char *file, Config *config, GtPosition **out,
                    int *num_conts) {
   FILE *in = fopen_or_die(file, "r");
-  char *line = malloc_or_die(NGT_LINE_SIZE);
+  char *line = malloc_or_die(RGT_LINE_SIZE);
   int capacity = 64;
   int count = 0;
   GtPosition *positions = calloc_or_die(capacity, sizeof(GtPosition));
   GtPosition *current = NULL;
-  while (fgets(line, NGT_LINE_SIZE, in)) {
+  while (fgets(line, RGT_LINE_SIZE, in)) {
     if (strncmp(line, "GTPOS ", 6) == 0) {
       int pos_id = 0;
       int bag = 0;
@@ -1237,53 +1237,53 @@ static double gt_oracle_regret(const GtPosition *position, const int num_conts,
   return regret / 2.0;
 }
 
-void test_nested_eval(void) {
+void test_rlamc_eval(void) {
   log_set_level(LOG_FATAL);
-  int num_threads = ncr_env_int("NCR_THREADS", 10);
-  if (num_threads > NCR_MAX_THREADS) {
-    num_threads = NCR_MAX_THREADS;
+  int num_threads = rcr_env_int("RCR_THREADS", 10);
+  if (num_threads > RCR_MAX_THREADS) {
+    num_threads = RCR_MAX_THREADS;
   }
-  const char *lexicon = ncr_env_string("NCR_LEX", "CSW21");
+  const char *lexicon = rcr_env_string("RCR_LEX", "CSW21");
   const char *base =
-      ncr_env_string("NCR_BASE", "-plies 2 -numplays 10 -scond none -tlim 0 "
+      rcr_env_string("RCR_BASE", "-plies 2 -numplays 10 -scond none -tlim 0 "
                                  "-minplayiterations 10");
   StringSplitter *methods = split_string(
-      ncr_env_string("NE_METHODS", "-it 1000|-it 1000 -nested plies=0"), '|',
+      rcr_env_string("RE_METHODS", "-it 1000|-it 1000 -rlamc plies=0"), '|',
       false);
   const int num_methods = string_splitter_get_number_of_items(methods);
-  Config *loader = ncr_config(lexicon, "");
+  Config *loader = rcr_config(lexicon, "");
   EvalShared eval;
   memset(&eval, 0, sizeof(eval));
-  eval.num_positions = gt_load(ncr_env_string("NGT_FILE", "nested_gt.txt"),
+  eval.num_positions = gt_load(rcr_env_string("RGT_FILE", "rlamc_gt.txt"),
                                loader, &eval.positions, &eval.num_conts);
   eval.num_methods = num_methods;
   eval.chosen = malloc_or_die(sizeof(int) * num_methods * eval.num_positions);
   eval.seconds =
       malloc_or_die(sizeof(double) * num_methods * eval.num_positions);
-  printf("NE: %d positions, %d continuations each, %d threads\nNE base: %s\n",
+  printf("RE: %d positions, %d continuations each, %d threads\nRE base: %s\n",
          eval.num_positions, eval.num_conts, num_threads, base);
   for (int method = 0; method < num_methods; method++) {
     char *settings = get_formatted_string(
         "%s %s", base, string_splitter_get_item(methods, method));
-    Config *config = ncr_config(lexicon, settings);
+    Config *config = rcr_config(lexicon, settings);
     free(settings);
     thread_control_set_status(config_get_thread_control(config),
                               THREAD_CONTROL_STATUS_STARTED);
     NcrShared shared;
     memset(&shared, 0, sizeof(shared));
-    for (int slot = 0; slot < NCR_NUM_METHODS; slot++) {
+    for (int slot = 0; slot < RCR_NUM_METHODS; slot++) {
       config_fill_sim_args(config, NULL, NULL, NULL, NULL,
                            &shared.base_args[slot]);
       shared.num_plays[slot] = shared.base_args[slot].num_plays;
     }
     NcrWorker *workers =
-        ncr_workers_create(&shared, eval.positions[0].game, num_threads);
+        rcr_workers_create(&shared, eval.positions[0].game, num_threads);
     EvalWorkerArgs *worker_args =
         malloc_or_die(sizeof(EvalWorkerArgs) * num_threads);
     cpthread_t *threads = malloc_or_die(sizeof(cpthread_t) * num_threads);
     eval.method = method;
     atomic_init(&eval.next_position, 0);
-    nested_totals_reset();
+    rlamc_totals_reset();
     for (int worker_idx = 0; worker_idx < num_threads; worker_idx++) {
       worker_args[worker_idx].worker = &workers[worker_idx];
       worker_args[worker_idx].eval = &eval;
@@ -1293,7 +1293,7 @@ void test_nested_eval(void) {
     for (int worker_idx = 0; worker_idx < num_threads; worker_idx++) {
       cpthread_join(threads[worker_idx]);
     }
-    ncr_workers_destroy(workers, num_threads);
+    rcr_workers_destroy(workers, num_threads);
     free(worker_args);
     free(threads);
     config_destroy(config);
@@ -1356,8 +1356,8 @@ void test_nested_eval(void) {
                         gt_mean(position, eval.num_conts, base_index, true);
       spread_diff[0] += ds;
       spread_diff[1] += ds * ds;
-      if (getenv("NE_CHOICES")) {
-        printf("NE choice %d %d %d %d\n", method, position->pos_id,
+      if (getenv("RE_CHOICES")) {
+        printf("RE choice %d %d %d %d\n", method, position->pos_id,
                position->bag, index);
       }
       differ += index != base_index ? 1 : 0;
@@ -1366,10 +1366,10 @@ void test_nested_eval(void) {
     const double wr_mean = win_regret[0] / n;
     const double sr_mean = spread_regret[0] / n;
     const double d_mean = diff[0] / n;
-    const NestedTotals totals = nested_get_totals();
-    printf("NE method %d [%s]: regret win %.5f (SE %.5f) spread %.3f (SE "
+    const RlamcTotals totals = rlamc_get_totals();
+    printf("RE method %d [%s]: regret win %.5f (SE %.5f) spread %.3f (SE "
            "%.3f); vs method 0 win %+.5f (SE %.5f), %d differ; %d of %d "
-           "inside; %.3f s each; nested switched %.1f%%\n",
+           "inside; %.3f s each; RLAMC switched %.1f%%\n",
            method, string_splitter_get_item(methods, method), wr_mean,
            sqrt(fmax(win_regret[1] / n - wr_mean * wr_mean, 0) / n), sr_mean,
            sqrt(fmax(spread_regret[1] / n - sr_mean * sr_mean, 0) / n), d_mean,
@@ -1379,11 +1379,11 @@ void test_nested_eval(void) {
                ? 100.0 * (double)totals.switched / (double)totals.searches
                : 0.0);
     const double sd_mean = spread_diff[0] / n;
-    printf("NE method %d vs method 0 spread %+.3f (SE %.3f)\n", method, sd_mean,
+    printf("RE method %d vs method 0 spread %+.3f (SE %.3f)\n", method, sd_mean,
            sqrt(fmax(spread_diff[1] / n - sd_mean * sd_mean, 0) / n));
     const double or_mean = oracle_regret[0] / n;
     printf(
-        "NE method %d oracle regret %.5f (SE %.5f); by bag 1-3 %.4f (%d), "
+        "RE method %d oracle regret %.5f (SE %.5f); by bag 1-3 %.4f (%d), "
         "4-7 %.4f (%d), 8-12 %.4f (%d), 13+ %.4f (%d)\n",
         method, or_mean,
         sqrt(fmax(oracle_regret[1] / n - or_mean * or_mean, 0) / n),
@@ -1406,12 +1406,12 @@ void test_nested_eval(void) {
   config_destroy(loader);
 }
 
-// On demand (nestedvar): rollout data for studying what explains a
-// rollout's outcome. For each position of the table NGT_FILE and each of its
-// plays, NV_SEEDS rollouts on the seeds every play shares, each written as a
+// On demand (rlamcvar): rollout data for studying what explains a
+// rollout's outcome. For each position of the table RGT_FILE and each of its
+// plays, RV_SEEDS rollouts on the seeds every play shares, each written as a
 // line: the position, the play, the seed's index, the rollout's utility, the
 // opponent's rack the seed drew, and the mover's rack after the play's draw.
-// Sim settings come from NCR_BASE; the output goes to NV_FILE.
+// Sim settings come from RCR_BASE; the output goes to RV_FILE.
 
 typedef struct VarShared {
   GtPosition *positions;
@@ -1468,7 +1468,7 @@ static void *var_worker_run(void *data) {
     sim_args.num_threads = 1;
     sim_args.bai_options.num_threads = 1;
     sim_args.bai_options.parent_worker_thread_index = args->worker_idx;
-    sim_args.seed = ncr_mix(0x13198A2EULL + (uint64_t)position->pos_id);
+    sim_args.seed = rcr_mix(0x13198A2EULL + (uint64_t)position->pos_id);
     const RandomVariablesArgs rvs_args = {
         .type = RANDOM_VARIABLES_SIMMED_PLAYS,
         .sim_args = &sim_args,
@@ -1484,7 +1484,7 @@ static void *var_worker_run(void *data) {
     StringBuilder *sb = string_builder_create();
     for (int seed_idx = 0; seed_idx < var->num_seeds; seed_idx++) {
       const uint64_t seed =
-          ncr_mix(ncr_mix((uint64_t)position->pos_id) + (uint64_t)seed_idx);
+          rcr_mix(rcr_mix((uint64_t)position->pos_id) + (uint64_t)seed_idx);
       for (int cand_idx = 0; cand_idx < move_list_get_count(move_list);
            cand_idx++) {
         const double utility = rvs_sample_with_seed(
@@ -1494,7 +1494,7 @@ static void *var_worker_run(void *data) {
         return_rack_to_bag(copy, 1 - mover);
         game_seed(copy, seed);
         draw_to_full_rack(copy, 1 - mover);
-        string_builder_add_formatted_string(sb, "NV %d %d %d %.6f ",
+        string_builder_add_formatted_string(sb, "RV %d %d %d %.6f ",
                                             position->pos_id, cand_idx,
                                             seed_idx, utility);
         var_add_rack(sb, copy, 1 - mover);
@@ -1517,32 +1517,32 @@ static void *var_worker_run(void *data) {
   return NULL;
 }
 
-void test_nested_var(void) {
+void test_rlamc_var(void) {
   log_set_level(LOG_FATAL);
-  int num_threads = ncr_env_int("NCR_THREADS", 10);
-  if (num_threads > NCR_MAX_THREADS) {
-    num_threads = NCR_MAX_THREADS;
+  int num_threads = rcr_env_int("RCR_THREADS", 10);
+  if (num_threads > RCR_MAX_THREADS) {
+    num_threads = RCR_MAX_THREADS;
   }
-  const char *lexicon = ncr_env_string("NCR_LEX", "CSW21");
+  const char *lexicon = rcr_env_string("RCR_LEX", "CSW21");
   const char *base =
-      ncr_env_string("NCR_BASE", "-plies 2 -numplays 10 -scond none -tlim 0 "
+      rcr_env_string("RCR_BASE", "-plies 2 -numplays 10 -scond none -tlim 0 "
                                  "-minplayiterations 10 -sbagcycle false");
-  Config *config = ncr_config(lexicon, base);
+  Config *config = rcr_config(lexicon, base);
   thread_control_set_status(config_get_thread_control(config),
                             THREAD_CONTROL_STATUS_STARTED);
   VarShared var;
   memset(&var, 0, sizeof(var));
   int num_conts = 0;
-  var.num_positions = gt_load(ncr_env_string("NGT_FILE", "nested_gt.txt"),
+  var.num_positions = gt_load(rcr_env_string("RGT_FILE", "rlamc_gt.txt"),
                               config, &var.positions, &num_conts);
   const int num_loaded = var.num_positions;
-  const int limit = ncr_env_int("NV_POSITIONS", var.num_positions);
+  const int limit = rcr_env_int("RV_POSITIONS", var.num_positions);
   if (limit < var.num_positions) {
     var.num_positions = limit;
   }
-  var.num_seeds = ncr_env_int("NV_SEEDS", 200);
+  var.num_seeds = rcr_env_int("RV_SEEDS", 200);
   config_fill_sim_args(config, NULL, NULL, NULL, NULL, &var.base_args);
-  var.out = fopen_or_die(ncr_env_string("NV_FILE", "nested_var.txt"), "w");
+  var.out = fopen_or_die(rcr_env_string("RV_FILE", "rlamc_var.txt"), "w");
   cpthread_mutex_init(&var.out_mutex);
   atomic_init(&var.next_position, 0);
   VarWorkerArgs *worker_args =
@@ -1569,13 +1569,13 @@ void test_nested_var(void) {
   config_destroy(config);
 }
 
-typedef struct NestedPegChoiceArgs {
+typedef struct RlamcPegChoiceArgs {
   NcrWorker *worker;
-} NestedPegChoiceArgs;
+} RlamcPegChoiceArgs;
 
 // Each worker: the plays A and B choose in the positions it takes.
-static void *npeg_choose_run(void *data) {
-  NcrWorker *worker = ((NestedPegChoiceArgs *)data)->worker;
+static void *rpeg_choose_run(void *data) {
+  NcrWorker *worker = ((RlamcPegChoiceArgs *)data)->worker;
   NcrShared *shared = worker->shared;
   while (true) {
     const int pos_idx = atomic_fetch_add(&shared->next_position, 1);
@@ -1583,17 +1583,17 @@ static void *npeg_choose_run(void *data) {
       break;
     }
     NcrPosition *position = &shared->positions[pos_idx];
-    const uint64_t pos_seed = ncr_mix(1000003ULL * (uint64_t)(pos_idx + 1));
+    const uint64_t pos_seed = rcr_mix(1000003ULL * (uint64_t)(pos_idx + 1));
     for (int method = 0; method < 2; method++) {
       game_copy(worker->game, position->game);
       const double start = (double)ctimer_monotonic_ns() / 1e9;
-      ncr_choose(worker, method, pos_seed, &position->chosen[method]);
+      rcr_choose(worker, method, pos_seed, &position->chosen[method]);
       position->seconds[method] = (double)ctimer_monotonic_ns() / 1e9 - start;
       StringBuilder *sb = string_builder_create();
       string_builder_add_move(sb, game_get_board(position->game),
                               &position->chosen[method],
                               game_get_ld(position->game), false);
-      (void)snprintf(position->chosen_string[method], NCR_MOVE_STRING_SIZE,
+      (void)snprintf(position->chosen_string[method], RCR_MOVE_STRING_SIZE,
                      "%s", string_builder_peek(sb));
       string_builder_destroy(sb);
     }
@@ -1601,29 +1601,29 @@ static void *npeg_choose_run(void *data) {
   return NULL;
 }
 
-// On demand (nestedpeg): sim settings A and B against the pre-endgame solver.
-// Positions with NCR_MIN_BAG to NCR_MAX_BAG tiles in the bag (default 2) from
-// games of static plays; A and B choose plays as in nestedcr, on one thread
+// On demand (rlamcpeg): sim settings A and B against the pre-endgame solver.
+// Positions with RCR_MIN_BAG to RCR_MAX_BAG tiles in the bag (default 2) from
+// games of static plays; A and B choose plays as in rlamccr, on one thread
 // each. Where they differ, PEG solves just the two plays (peg only), from the
-// mover's view of the unseen tiles, on NCR_THREADS threads, with
-// NPEG_SETTINGS (for example -pegpess false for the rational opponent), and
+// mover's view of the unseen tiles, on RCR_THREADS threads, with
+// RPEG_SETTINGS (for example -pegpess false for the rational opponent), and
 // the difference of their exact win percentages is B's gain over A.
-void test_nested_peg(void) {
+void test_rlamc_peg(void) {
   log_set_level(LOG_FATAL);
-  const int num_positions = ncr_env_int("NCR_POSITIONS", 100);
-  const int min_bag = ncr_env_int("NCR_MIN_BAG", 2);
-  const int max_bag = ncr_env_int("NCR_MAX_BAG", 2);
-  int num_threads = ncr_env_int("NCR_THREADS", 10);
-  if (num_threads > NCR_MAX_THREADS) {
-    num_threads = NCR_MAX_THREADS;
+  const int num_positions = rcr_env_int("RCR_POSITIONS", 100);
+  const int min_bag = rcr_env_int("RCR_MIN_BAG", 2);
+  const int max_bag = rcr_env_int("RCR_MAX_BAG", 2);
+  int num_threads = rcr_env_int("RCR_THREADS", 10);
+  if (num_threads > RCR_MAX_THREADS) {
+    num_threads = RCR_MAX_THREADS;
   }
-  const char *lexicon = ncr_env_string("NCR_LEX", "CSW24");
+  const char *lexicon = rcr_env_string("RCR_LEX", "CSW24");
   const char *base =
-      ncr_env_string("NCR_BASE", "-plies 2 -numplays 10 -scond none -tlim 0 "
+      rcr_env_string("RCR_BASE", "-plies 2 -numplays 10 -scond none -tlim 0 "
                                  "-minplayiterations 10");
   const char *method_settings[2] = {
-      ncr_env_string("NCR_A", "-it 1000"),
-      ncr_env_string("NCR_B", "-it 1000 -sfinish true"),
+      rcr_env_string("RCR_A", "-it 1000"),
+      rcr_env_string("RCR_B", "-it 1000 -sfinish true"),
   };
   NcrShared shared;
   memset(&shared, 0, sizeof(shared));
@@ -1632,7 +1632,7 @@ void test_nested_peg(void) {
   for (int method = 0; method < 2; method++) {
     char *settings =
         get_formatted_string("%s %s", base, method_settings[method]);
-    configs[method] = ncr_config(lexicon, settings);
+    configs[method] = rcr_config(lexicon, settings);
     free(settings);
     thread_control_set_status(config_get_thread_control(configs[method]),
                               THREAD_CONTROL_STATUS_STARTED);
@@ -1640,13 +1640,13 @@ void test_nested_peg(void) {
                          &shared.base_args[method]);
     shared.num_plays[method] = shared.base_args[method].num_plays;
   }
-  shared.base_args[NCR_METHOD_CONT] = shared.base_args[NCR_METHOD_A];
-  shared.num_plays[NCR_METHOD_CONT] = shared.num_plays[NCR_METHOD_A];
+  shared.base_args[RCR_METHOD_CONT] = shared.base_args[RCR_METHOD_A];
+  shared.num_plays[RCR_METHOD_CONT] = shared.num_plays[RCR_METHOD_A];
   shared.positions = calloc_or_die(num_positions, sizeof(NcrPosition));
-  shared.num_positions = ncr_make_positions(
+  shared.num_positions = rcr_make_positions(
       config_get_game(configs[0]), shared.positions, num_positions, min_bag,
-      max_bag, (uint64_t)ncr_env_int("NCR_FIRST_GAME", 0));
-  printf("NPEG: %d positions, bag %d to %d\nNPEG base: %s\nNPEG A: %s\nNPEG "
+      max_bag, (uint64_t)rcr_env_int("RCR_FIRST_GAME", 0));
+  printf("RPEG: %d positions, bag %d to %d\nRPEG base: %s\nRPEG A: %s\nRPEG "
          "B: %s\n",
          shared.num_positions, min_bag, max_bag, base, method_settings[0],
          method_settings[1]);
@@ -1654,20 +1654,20 @@ void test_nested_peg(void) {
 
   // The choices, on one thread each.
   NcrWorker *workers =
-      ncr_workers_create(&shared, shared.positions[0].game, num_threads);
+      rcr_workers_create(&shared, shared.positions[0].game, num_threads);
   atomic_init(&shared.next_position, 0);
-  NestedPegChoiceArgs *choice_args =
-      malloc_or_die(sizeof(NestedPegChoiceArgs) * num_threads);
+  RlamcPegChoiceArgs *choice_args =
+      malloc_or_die(sizeof(RlamcPegChoiceArgs) * num_threads);
   cpthread_t *threads = malloc_or_die(sizeof(cpthread_t) * num_threads);
   for (int worker_idx = 0; worker_idx < num_threads; worker_idx++) {
     choice_args[worker_idx].worker = &workers[worker_idx];
-    cpthread_create(&threads[worker_idx], npeg_choose_run,
+    cpthread_create(&threads[worker_idx], rpeg_choose_run,
                     &choice_args[worker_idx]);
   }
   for (int worker_idx = 0; worker_idx < num_threads; worker_idx++) {
     cpthread_join(threads[worker_idx]);
   }
-  ncr_workers_destroy(workers, num_threads);
+  rcr_workers_destroy(workers, num_threads);
   free(choice_args);
   free(threads);
 
@@ -1675,7 +1675,7 @@ void test_nested_peg(void) {
   char *peg_settings = get_formatted_string(
       "set -lex %s -wmp true -s1 equity -s2 equity -r1 all -r2 all -threads "
       "%d -savesettings false -hr false %s %s",
-      lexicon, num_threads, ncr_tables(), ncr_env_string("NPEG_SETTINGS", ""));
+      lexicon, num_threads, rcr_tables(), rcr_env_string("RPEG_SETTINGS", ""));
   Config *peg_config = config_create_or_die(peg_settings);
   free(peg_settings);
   load_and_exec_config_or_die(peg_config, "cgp " EMPTY_CGP_WITHOUT_OPTIONS);
@@ -1739,7 +1739,7 @@ void test_nested_peg(void) {
     position->win_diff = wins[1] - wins[0];
     sum += position->win_diff;
     sum_sq += position->win_diff * position->win_diff;
-    printf("NPEG pos %d bag %d A %s %.4f B %s %.4f diff %+.4f (%.1fs; %s)\n",
+    printf("RPEG pos %d bag %d A %s %.4f B %s %.4f diff %+.4f (%.1fs; %s)\n",
            pos_idx, position->bag, position->chosen_string[0], wins[0],
            position->chosen_string[1], wins[1], position->win_diff, seconds,
            string_builder_peek(sb));
@@ -1753,7 +1753,7 @@ void test_nested_peg(void) {
     seconds[0] += shared.positions[pos_idx].seconds[0];
     seconds[1] += shared.positions[pos_idx].seconds[1];
   }
-  printf("NPEG summary: %d positions, %d differ; B - A win per position "
+  printf("RPEG summary: %d positions, %d differ; B - A win per position "
          "%+.5f (SE %.5f); sim seconds per position A %.3f, B %.3f\n",
          shared.num_positions, differ, mean,
          sqrt(fmax(sum_sq / n - mean * mean, 0.0) / n), seconds[0] / n,
@@ -1768,17 +1768,17 @@ void test_nested_peg(void) {
   }
 }
 
-// On demand (nestedpegm): several sim settings against the pre-endgame
-// solver at once, with a cache of its verdicts. NPEG_METHODS holds the
-// settings, |-separated, each after NCR_BASE; each is compared with the
+// On demand (rlamcpegm): several sim settings against the pre-endgame
+// solver at once, with a cache of its verdicts. RPEG_METHODS holds the
+// settings, |-separated, each after RCR_BASE; each is compared with the
 // first. In each position, PEG solves together every play some setting chose
-// that the cache (NPEG_CACHE, a file it reads and appends to) lacks. A
-// verdict is cached by the position, the play and NPEG_SETTINGS.
+// that the cache (RPEG_CACHE, a file it reads and appends to) lacks. A
+// verdict is cached by the position, the play and RPEG_SETTINGS.
 
 typedef struct PegmShared {
   NcrPosition *positions;
   int num_positions;
-  // NPEGM_FROM: positions before it are neither chosen nor solved.
+  // RPEGM_FROM: positions before it are neither chosen nor solved.
   int first_position;
   int method;
   // methods x positions.
@@ -1804,8 +1804,8 @@ static void *pegm_choose_run(void *data) {
     const NcrPosition *position = &pegm->positions[pos_idx];
     game_copy(worker->game, position->game);
     const double start = (double)ctimer_monotonic_ns() / 1e9;
-    ncr_choose(worker, NCR_METHOD_A,
-               ncr_mix(1000003ULL * (uint64_t)(pos_idx + 1)),
+    rcr_choose(worker, RCR_METHOD_A,
+               rcr_mix(1000003ULL * (uint64_t)(pos_idx + 1)),
                &pegm->chosen[pegm->method * pegm->num_positions + pos_idx]);
     pegm->seconds[pegm->method * pegm->num_positions + pos_idx] =
         (double)ctimer_monotonic_ns() / 1e9 - start;
@@ -1871,60 +1871,60 @@ static void pegm_cache_add(PegmCache *cache, const uint64_t key,
   cache->count++;
 }
 
-void test_nested_pegm(void) {
+void test_rlamc_pegm(void) {
   log_set_level(LOG_FATAL);
-  const int num_positions = ncr_env_int("NCR_POSITIONS", 100);
-  const int min_bag = ncr_env_int("NCR_MIN_BAG", 2);
-  const int max_bag = ncr_env_int("NCR_MAX_BAG", 2);
-  int num_threads = ncr_env_int("NCR_THREADS", 10);
-  if (num_threads > NCR_MAX_THREADS) {
-    num_threads = NCR_MAX_THREADS;
+  const int num_positions = rcr_env_int("RCR_POSITIONS", 100);
+  const int min_bag = rcr_env_int("RCR_MIN_BAG", 2);
+  const int max_bag = rcr_env_int("RCR_MAX_BAG", 2);
+  int num_threads = rcr_env_int("RCR_THREADS", 10);
+  if (num_threads > RCR_MAX_THREADS) {
+    num_threads = RCR_MAX_THREADS;
   }
-  const char *lexicon = ncr_env_string("NCR_LEX", "CSW24");
+  const char *lexicon = rcr_env_string("RCR_LEX", "CSW24");
   const char *base =
-      ncr_env_string("NCR_BASE", "-plies 5 -numplays 30 -scond none -tlim 0 "
+      rcr_env_string("RCR_BASE", "-plies 5 -numplays 30 -scond none -tlim 0 "
                                  "-minplayiterations 10 -it 3000");
-  const char *peg_extra = ncr_env_string("NPEG_SETTINGS", "");
+  const char *peg_extra = rcr_env_string("RPEG_SETTINGS", "");
   StringSplitter *methods = split_string(
-      ncr_env_string("NPEG_METHODS", "-sfinish true|-sfinish true -nested "
+      rcr_env_string("RPEG_METHODS", "-sfinish true|-sfinish true -rlamc "
                                      "plies=0+1,k=6,m=8,dcache=1"),
       '|', false);
   const int num_methods = string_splitter_get_number_of_items(methods);
 
-  Config *base_config = ncr_config(lexicon, base);
+  Config *base_config = rcr_config(lexicon, base);
   PegmShared pegm;
   memset(&pegm, 0, sizeof(pegm));
   pegm.positions = calloc_or_die(num_positions, sizeof(NcrPosition));
-  pegm.num_positions = ncr_make_positions(
+  pegm.num_positions = rcr_make_positions(
       config_get_game(base_config), pegm.positions, num_positions, min_bag,
-      max_bag, (uint64_t)ncr_env_int("NCR_FIRST_GAME", 0));
-  pegm.first_position = ncr_env_int("NPEGM_FROM", 0);
+      max_bag, (uint64_t)rcr_env_int("RCR_FIRST_GAME", 0));
+  pegm.first_position = rcr_env_int("RPEGM_FROM", 0);
   if (pegm.first_position < 0 || pegm.first_position >= pegm.num_positions) {
-    log_fatal("NPEGM_FROM %d is not a position index below %d",
+    log_fatal("RPEGM_FROM %d is not a position index below %d",
               pegm.first_position, pegm.num_positions);
   }
   pegm.chosen = malloc_or_die(sizeof(Move) * num_methods * pegm.num_positions);
   pegm.seconds =
       malloc_or_die(sizeof(double) * num_methods * pegm.num_positions);
-  printf("NPEGM: %d positions, bag %d to %d, %d settings, PEG settings '%s'\n"
-         "NPEGM base: %s\n",
+  printf("RPEGM: %d positions, bag %d to %d, %d settings, PEG settings '%s'\n"
+         "RPEGM base: %s\n",
          pegm.num_positions, min_bag, max_bag, num_methods, peg_extra, base);
   for (int method = 0; method < num_methods; method++) {
     char *settings = get_formatted_string(
         "%s %s", base, string_splitter_get_item(methods, method));
-    Config *config = ncr_config(lexicon, settings);
+    Config *config = rcr_config(lexicon, settings);
     free(settings);
     thread_control_set_status(config_get_thread_control(config),
                               THREAD_CONTROL_STATUS_STARTED);
     NcrShared shared;
     memset(&shared, 0, sizeof(shared));
-    for (int slot = 0; slot < NCR_NUM_METHODS; slot++) {
+    for (int slot = 0; slot < RCR_NUM_METHODS; slot++) {
       config_fill_sim_args(config, NULL, NULL, NULL, NULL,
                            &shared.base_args[slot]);
       shared.num_plays[slot] = shared.base_args[slot].num_plays;
     }
     NcrWorker *workers =
-        ncr_workers_create(&shared, pegm.positions[0].game, num_threads);
+        rcr_workers_create(&shared, pegm.positions[0].game, num_threads);
     PegmWorkerArgs *worker_args =
         malloc_or_die(sizeof(PegmWorkerArgs) * num_threads);
     cpthread_t *threads = malloc_or_die(sizeof(cpthread_t) * num_threads);
@@ -1939,18 +1939,18 @@ void test_nested_pegm(void) {
     for (int worker_idx = 0; worker_idx < num_threads; worker_idx++) {
       cpthread_join(threads[worker_idx]);
     }
-    ncr_workers_destroy(workers, num_threads);
+    rcr_workers_destroy(workers, num_threads);
     free(worker_args);
     free(threads);
     config_destroy(config);
-    printf("NPEGM chose with setting %d\n", method);
+    printf("RPEGM chose with setting %d\n", method);
     (void)fflush(stdout);
   }
 
   // The cache.
   PegmCache cache;
   memset(&cache, 0, sizeof(cache));
-  const char *cache_file = ncr_env_string("NPEG_CACHE", "nested_peg_cache.txt");
+  const char *cache_file = rcr_env_string("RPEG_CACHE", "rlamc_peg_cache.txt");
   // The cache may not exist yet.
   // NOLINTNEXTLINE(android-cloexec-fopen)
   FILE *cache_in = fopen(cache_file, "r");
@@ -1968,7 +1968,7 @@ void test_nested_pegm(void) {
   char *peg_settings = get_formatted_string(
       "set -lex %s -wmp true -s1 equity -s2 equity -r1 all -r2 all -threads "
       "%d -savesettings false -hr false %s %s",
-      lexicon, num_threads, ncr_tables(), peg_extra);
+      lexicon, num_threads, rcr_tables(), peg_extra);
   Config *peg_config = config_create_or_die(peg_settings);
   free(peg_settings);
   load_and_exec_config_or_die(peg_config, "cgp " EMPTY_CGP_WITHOUT_OPTIONS);
@@ -2077,7 +2077,7 @@ void test_nested_pegm(void) {
         char *move_string = pegm_move_string(
             position->game,
             &pegm.chosen[method * pegm.num_positions + pos_idx]);
-        printf("NPEGM pos %d bag %d setting %d diff %+.4f: %s %.4f -> %s "
+        printf("RPEGM pos %d bag %d setting %d diff %+.4f: %s %.4f -> %s "
                "%.4f | %s\n",
                pos_idx, position->bag, method, diff, base_string, wins[0],
                move_string, wins[method], cgp);
@@ -2096,13 +2096,13 @@ void test_nested_pegm(void) {
       seconds += pegm.seconds[method * pegm.num_positions + pos_idx];
     }
     const double mean = diff_sum[method] / n;
-    printf("NPEGM setting %d [%s]: vs setting 0 win %+.5f (SE %.5f) per "
+    printf("RPEGM setting %d [%s]: vs setting 0 win %+.5f (SE %.5f) per "
            "position, %d differ; sim %.3f s per position\n",
            method, string_splitter_get_item(methods, method), mean,
            sqrt(fmax(diff_sum_sq[method] / n - mean * mean, 0.0) / n),
            differ[method], seconds / n);
   }
-  printf("NPEGM: %d positions solved, cache %d entries\n", solved, cache.count);
+  printf("RPEGM: %d positions solved, cache %d entries\n", solved, cache.count);
   free(wins);
   free(diff_sum);
   free(diff_sum_sq);
@@ -2120,23 +2120,23 @@ void test_nested_pegm(void) {
   config_destroy(base_config);
 }
 
-// On demand (nestedtrace): what a nested search chooses. In the position
-// NT_CGP (its player on turn's rack is drawn), NT_SAMPLES racks are drawn
-// for the player on turn from the unseen tiles, and the nested search of
-// NT_SPEC (with NT_SETTINGS for the sim's scoring) chooses a play for each.
+// On demand (rlamctrace): what a recursive search chooses. In the position
+// RT_CGP (its player on turn's rack is drawn), RT_SAMPLES racks are drawn
+// for the player on turn from the unseen tiles, and the recursive search of
+// RT_SPEC (with RT_SETTINGS for the sim's scoring) chooses a play for each.
 // Prints each distinct play chosen, how often, and its rank among the
 // player's plays by static equity for the racks it was chosen with.
-void test_nested_trace(void) {
+void test_rlamc_trace(void) {
   log_set_level(LOG_FATAL);
-  const char *cgp = getenv("NT_CGP");
+  const char *cgp = getenv("RT_CGP");
   if (cgp == NULL) {
-    log_fatal("NT_CGP is required");
+    log_fatal("RT_CGP is required");
   }
   char *settings = get_formatted_string(
       "set -lex %s -wmp true -s1 equity -s2 equity -r1 all -r2 all "
       "-threads 1 -savesettings false -hr false %s %s",
-      ncr_env_string("NCR_LEX", "CSW24"), ncr_tables(),
-      ncr_env_string("NT_SETTINGS", ""));
+      rcr_env_string("RCR_LEX", "CSW24"), rcr_tables(),
+      rcr_env_string("RT_SETTINGS", ""));
   Config *config = config_create_or_die(settings);
   free(settings);
   char *load = get_formatted_string("cgp %s", cgp);
@@ -2145,44 +2145,43 @@ void test_nested_trace(void) {
   ErrorStack *error_stack = error_stack_create();
   config_load_win_pcts(config, error_stack);
   assert(error_stack_is_empty(error_stack));
-  NestedArgs args;
-  nested_args_parse(ncr_env_string("NT_SPEC", "plies=0,lamc=1"), &args,
-                    error_stack);
+  RlamcArgs args;
+  rlamc_args_parse(rcr_env_string("RT_SPEC", "plies=0,lamc=1"), &args,
+                   error_stack);
   assert(error_stack_is_empty(error_stack));
   error_stack_destroy(error_stack);
-  const NestedEval eval = {
+  const RlamcEval eval = {
       .win_pcts = config_get_win_pcts(config),
       .utility_w_winpct = 1.0,
       .utility_w_spread = 0.5,
       .utility_spread_scale = 100.0,
-      .finish_endgame = ncr_env_int("NT_FINISH", 1) != 0,
+      .finish_endgame = rcr_env_int("RT_FINISH", 1) != 0,
       .finish_max_bag = 0,
   };
   const Game *base = config_get_game(config);
   Game *game = game_duplicate(base);
   CrossSetCache *cross_set_cache = cross_set_cache_create(16);
-  NestedWorker *worker = nested_worker_create(game, cross_set_cache);
-  nested_worker_reset(worker, 12345);
+  RlamcWorker *worker = rlamc_worker_create(game, cross_set_cache);
+  rlamc_worker_reset(worker, 12345);
   MoveList *all = move_list_create(5000);
-  const int num_samples = ncr_env_int("NT_SAMPLES", 200);
-  enum { NT_MAX_DISTINCT = 2048 };
-  char *names[NT_MAX_DISTINCT];
-  int counts[NT_MAX_DISTINCT];
-  int rank_sums[NT_MAX_DISTINCT];
+  const int num_samples = rcr_env_int("RT_SAMPLES", 200);
+  enum { RT_MAX_DISTINCT = 2048 };
+  char *names[RT_MAX_DISTINCT];
+  int counts[RT_MAX_DISTINCT];
+  int rank_sums[RT_MAX_DISTINCT];
   int num_distinct = 0;
   int top_static = 0;
   const int mover = game_get_player_on_turn_index(base);
-  nested_totals_reset();
+  rlamc_totals_reset();
   const int64_t start_ns = ctimer_monotonic_ns();
   for (int sample = 0; sample < num_samples; sample++) {
     game_copy(game, base);
     return_rack_to_bag(game, mover);
-    game_seed(game, ncr_mix(777 + (uint64_t)sample));
+    game_seed(game, rcr_mix(777 + (uint64_t)sample));
     draw_to_full_rack(game, mover);
     Move chosen;
-    move_copy(&chosen,
-              nested_choose_move(worker, &args, &eval, game,
-                                 ncr_mix(31 + (uint64_t)sample), NULL));
+    move_copy(&chosen, rlamc_choose_move(worker, &args, &eval, game,
+                                         rcr_mix(31 + (uint64_t)sample), NULL));
     // Its rank by static equity.
     const MoveGenArgs gen_args = {
         .game = game,
@@ -2215,7 +2214,7 @@ void test_nested_trace(void) {
         break;
       }
     }
-    if (found < 0 && num_distinct < NT_MAX_DISTINCT) {
+    if (found < 0 && num_distinct < RT_MAX_DISTINCT) {
       found = num_distinct++;
       names[found] = string_duplicate(name);
       counts[found] = 0;
@@ -2228,22 +2227,22 @@ void test_nested_trace(void) {
     string_builder_destroy(sb);
   }
   const double seconds = (double)(ctimer_monotonic_ns() - start_ns) / 1e9;
-  const NestedTotals totals = nested_get_totals();
-  printf("NT %d racks, %d distinct plays, top static play chosen %d times\n",
+  const RlamcTotals totals = rlamc_get_totals();
+  printf("RT %d racks, %d distinct plays, top static play chosen %d times\n",
          num_samples, num_distinct, top_static);
-  printf("NT %.3f s, searches %llu (inner %llu), rollouts %llu, stopped "
+  printf("RT %.3f s, searches %llu (inner %llu), rollouts %llu, stopped "
          "%llu, decision hits %llu\n",
          seconds, (unsigned long long)totals.searches,
          (unsigned long long)totals.inner_searches,
          (unsigned long long)totals.samples, (unsigned long long)totals.stopped,
          (unsigned long long)totals.decision_hits);
   for (int idx = 0; idx < num_distinct; idx++) {
-    printf("NT play %-20s chosen %4d mean static rank %.1f\n", names[idx],
+    printf("RT play %-20s chosen %4d mean static rank %.1f\n", names[idx],
            counts[idx], (double)rank_sums[idx] / counts[idx]);
     free(names[idx]);
   }
   move_list_destroy(all);
-  nested_worker_destroy(worker);
+  rlamc_worker_destroy(worker);
   cross_set_cache_destroy(cross_set_cache);
   game_destroy(game);
   config_destroy(config);

@@ -63,7 +63,6 @@
 #include "move_gen_test.h"
 #include "move_test.h"
 #include "movegen_budget_test.h"
-#include "nested_test.h"
 #include "pat_eval_test.h"
 #include "pat_features_test.h"
 #include "pat_file_test.h"
@@ -94,6 +93,7 @@
 #include "rack_test.h"
 #include "rack_value_table_test.h"
 #include "random_variable_test.h"
+#include "rlamc_test.h"
 #include "shadow_test.h"
 #include "sim_benchmark_test.h"
 #include "sim_det_sweep_test.h"
@@ -184,7 +184,7 @@ static TestEntry test_table[] = {
     {"datafetch", test_data_fetch},
     {"bai", test_bai},
     {"lamc", test_lamc},
-    {"nested", test_nested},
+    {"rlamc", test_rlamc},
     {"baiutil", test_bai_utility},
     {"command", test_command},
     {"embedding", test_embedding_lifecycle},
@@ -281,14 +281,14 @@ static TestEntry on_demand_test_table[] = {
     {"infbench", test_infer_bench},
     {"censusrolloutbench", test_census_rollout_bench},
     {"lamcreplay", test_lamc_replay},
-    {"nestedcr", test_nested_cr},
-    {"nestedbench", test_nested_bench},
-    {"nestedgt", test_nested_gt},
-    {"nestedeval", test_nested_eval},
-    {"nestedvar", test_nested_var},
-    {"nestedpeg", test_nested_peg},
-    {"nestedpegm", test_nested_pegm},
-    {"nestedtrace", test_nested_trace},
+    {"rlamccr", test_rlamc_cr},
+    {"rlamcbench", test_rlamc_bench},
+    {"rlamcgt", test_rlamc_gt},
+    {"rlamceval", test_rlamc_eval},
+    {"rlamcvar", test_rlamc_var},
+    {"rlamcpeg", test_rlamc_peg},
+    {"rlamcpegm", test_rlamc_pegm},
+    {"rlamctrace", test_rlamc_trace},
     {"lamcautoplay", test_lamc_autoplay},
     {"genstuck", test_generate_stuck_cgps},
     {"gennonstuck", test_generate_nonstuck_cgps},

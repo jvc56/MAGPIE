@@ -51,7 +51,6 @@
 #include "../ent/lamc_args.h"
 #include "../ent/letter_distribution.h"
 #include "../ent/move.h"
-#include "../ent/nested_args.h"
 #include "../ent/pat.h"
 #include "../ent/pat_lexicon.h"
 #include "../ent/pat_utility.h"
@@ -60,6 +59,7 @@
 #include "../ent/pool_shift.h"
 #include "../ent/rack.h"
 #include "../ent/rack_value_table.h"
+#include "../ent/rlamc_args.h"
 #include "../ent/sim_args.h"
 #include "../ent/sim_results.h"
 #include "../ent/thread_control.h"
@@ -103,7 +103,7 @@
 #include "play_feature_registry.h"
 #include "rack_draw.h"
 #include "rack_info_table_maker.h"
-#include "rollout_nested.h"
+#include "rlamc.h"
 #include "simmer.h"
 #include <assert.h>
 #include <ctype.h>
@@ -383,10 +383,10 @@ struct Config {
   // The LAMC settings both players share; lamc_args.enabled is unused, the
   // three flags above say who searches.
   LamcArgs lamc_args;
-  // -nested, and the per-player -nested1 and -nested2, which default to it.
-  NestedArgs sim_nested;
-  NestedArgs p1_sim_nested;
-  NestedArgs p2_sim_nested;
+  // -rlamc, and the per-player -rlamc1 and -rlamc2, which default to it.
+  RlamcArgs sim_rlamc;
+  RlamcArgs p1_sim_rlamc;
+  RlamcArgs p2_sim_rlamc;
   // -apstaticbag (see AutoplayArgs.static_until_bag).
   int autoplay_static_bag;
   // -sfinishbag (see SimArgs.finish_max_bag), for every sim.
@@ -1501,10 +1501,10 @@ static void add_pat_help_arg(arg_token_t arg_token, const char **usages,
   }
 }
 
-// The help for the LAMC, nested search, rollout finish and autoplay static
+// The help for the LAMC, recursive search, rollout finish and autoplay static
 // bag options (see help_entry_fill, which is at the function size limit).
-static void add_lamc_nested_help_arg(arg_token_t arg_token, const char **usages,
-                                     const char **examples, const char **text) {
+static void add_lamc_rlamc_help_arg(arg_token_t arg_token, const char **usages,
+                                    const char **examples, const char **text) {
   switch (arg_token) {
   case ARG_TOKEN_LAMC:
     usages[0] = "<true_or_false>";
@@ -1673,29 +1673,30 @@ static void add_lamc_nested_help_arg(arg_token_t arg_token, const char **usages,
     *text = "Specifies whether LAMC (see lamc) picks player 1 or 2's plays "
             "to simulate in autoplay.";
     break;
-  case ARG_TOKEN_NESTED:
-  case ARG_TOKEN_P1_NESTED:
-  case ARG_TOKEN_P2_NESTED:
+  case ARG_TOKEN_RLAMC:
+  case ARG_TOKEN_P1_RLAMC:
+  case ARG_TOKEN_P2_RLAMC:
     usages[0] = "<spec>";
     examples[0] = "off";
     examples[1] = "plies=0,k=6,m=8,h=1";
     examples[2] = "plies=0+1,lamc=1,dcache=1/plies=0,k=3,m=2";
-    *text = "Specifies the nested search that picks the plays of some plies "
-            "of a simulation's rollouts. Without it they play by static "
-            "equity; nested1 and nested2 set it for each player in "
-            "autoplay. off, or "
-            "comma-separated settings: plies (joined by +, 0 is the reply "
-            "to the candidate), k (candidates), m (nested rollouts each), h "
-            "(static plies after the candidate in a nested rollout), margin "
-            "(points below the best), maxbag, minbag, alloc (uniform or "
-            "race), z (the race's standard errors), switch (the nested "
-            "utility a candidate other than the static best must gain), "
-            "dcache (1 to cache decisions), lamc (1 for a LAMC search over "
-            "every play, with pool, keep, rounds and beta), share, universe, "
-            "seeds, finalists and stage. Settings after a / are a deeper "
-            "level, whose search chooses plays in the nested rollouts of the "
-            "level before it, starting from that level's settings. Off by "
-            "default.";
+    *text =
+        "Specifies the RLAMC search that picks the plays of some plies "
+        "of a simulation's rollouts. Without it they play by static "
+        "equity; rlamc1 and rlamc2 set it for each player in "
+        "autoplay. off, or "
+        "comma-separated settings: plies (joined by +, 0 is the reply "
+        "to the candidate), k (candidates), m (recursive rollouts each), h "
+        "(static plies after the candidate in a recursive rollout), margin "
+        "(points below the best), maxbag, minbag, alloc (uniform or "
+        "race), z (the race's standard errors), switch (the recursive "
+        "utility a candidate other than the static best must gain), "
+        "dcache (1 to cache decisions), lamc (1 for a LAMC search over "
+        "every play, with pool, keep, rounds and beta), share, universe, "
+        "seeds, finalists and stage. Settings after a / are a deeper "
+        "level, whose search chooses plays in the recursive rollouts of the "
+        "level before it, starting from that level's settings. Off by "
+        "default.";
     break;
   case ARG_TOKEN_SIM_FINISH_BAG:
     usages[0] = "<tiles>";
@@ -1971,9 +1972,9 @@ static void add_player_solver_help_arg(arg_token_t arg_token,
             "weights, or a weight with none. See 'poolshift'.";
     break;
   default:
-    // The LAMC, nested search, rollout finish and autoplay static bag
+    // The LAMC, recursive search, rollout finish and autoplay static bag
     // options.
-    add_lamc_nested_help_arg(arg_token, usages, examples, text);
+    add_lamc_rlamc_help_arg(arg_token, usages, examples, text);
     break;
   }
 }
@@ -3627,9 +3628,9 @@ static void help_entry_fill(const Config *config, int token,
     case ARG_TOKEN_LAMC_STATIC_FINALISTS:
     case ARG_TOKEN_P1_LAMC:
     case ARG_TOKEN_P2_LAMC:
-    case ARG_TOKEN_NESTED:
-    case ARG_TOKEN_P1_NESTED:
-    case ARG_TOKEN_P2_NESTED:
+    case ARG_TOKEN_RLAMC:
+    case ARG_TOKEN_P1_RLAMC:
+    case ARG_TOKEN_P2_RLAMC:
     case ARG_TOKEN_SIM_FINISH_BAG:
     case ARG_TOKEN_P1_SIM_FINISH:
     case ARG_TOKEN_P2_SIM_FINISH:
@@ -4575,7 +4576,7 @@ void config_fill_sim_args(const Config *config, Rack *known_opp_rack,
   sim_args->bag_cycle = config->sim_bag_cycle;
   sim_args->use_census_rollout = config->sim_census_rollout;
   config_set_sim_args_lamc(config, config->sim_lamc, sim_args);
-  sim_args->nested_args = config->sim_nested;
+  sim_args->rlamc_args = config->sim_rlamc;
   sim_args->finish_endgame = config->sim_finish;
   sim_args->finish_max_bag = config->sim_finish_bag;
   sim_args->census_rollout_auto = config->sim_census_rollout_auto;
@@ -6067,7 +6068,7 @@ void config_fill_autoplay_args(const Config *config,
   autoplay_args->p1_sim_args.bag_cycle = config->p1_sim_bag_cycle;
   config_set_sim_args_lamc(config, config->p1_sim_lamc,
                            &autoplay_args->p1_sim_args);
-  autoplay_args->p1_sim_args.nested_args = config->p1_sim_nested;
+  autoplay_args->p1_sim_args.rlamc_args = config->p1_sim_rlamc;
   autoplay_args->p1_sim_args.finish_endgame = config->p1_sim_finish;
   autoplay_args->p1_sim_args.finish_max_bag = config->sim_finish_bag;
 
@@ -6087,7 +6088,7 @@ void config_fill_autoplay_args(const Config *config,
   autoplay_args->p2_sim_args.bag_cycle = config->p2_sim_bag_cycle;
   config_set_sim_args_lamc(config, config->p2_sim_lamc,
                            &autoplay_args->p2_sim_args);
-  autoplay_args->p2_sim_args.nested_args = config->p2_sim_nested;
+  autoplay_args->p2_sim_args.rlamc_args = config->p2_sim_rlamc;
   autoplay_args->p2_sim_args.finish_endgame = config->p2_sim_finish;
   autoplay_args->p2_sim_args.finish_max_bag = config->sim_finish_bag;
 
@@ -14994,9 +14995,9 @@ static void config_set_lamc_defaults(Config *config) {
   config->sim_lamc = false;
   config->p1_sim_lamc = false;
   config->p2_sim_lamc = false;
-  nested_args_set_defaults(&config->sim_nested);
-  nested_args_set_defaults(&config->p1_sim_nested);
-  nested_args_set_defaults(&config->p2_sim_nested);
+  rlamc_args_set_defaults(&config->sim_rlamc);
+  rlamc_args_set_defaults(&config->p1_sim_rlamc);
+  rlamc_args_set_defaults(&config->p2_sim_rlamc);
   config->autoplay_static_bag = 0;
   config->sim_finish = false;
   config->p1_sim_finish = false;
@@ -15004,28 +15005,28 @@ static void config_set_lamc_defaults(Config *config) {
   config->sim_finish_bag = 0;
 }
 
-// Loads -nested, and the per-player -nested1 and -nested2, which default to
+// Loads -rlamc, and the per-player -rlamc1 and -rlamc2, which default to
 // it.
-static void config_load_nested(Config *config, ErrorStack *error_stack) {
-  const char *shared = config_get_parg_value(config, ARG_TOKEN_NESTED, 0);
+static void config_load_rlamc(Config *config, ErrorStack *error_stack) {
+  const char *shared = config_get_parg_value(config, ARG_TOKEN_RLAMC, 0);
   if (shared) {
-    nested_args_parse(shared, &config->sim_nested, error_stack);
+    rlamc_args_parse(shared, &config->sim_rlamc, error_stack);
     if (!error_stack_is_empty(error_stack)) {
       return;
     }
-    config->p1_sim_nested = config->sim_nested;
-    config->p2_sim_nested = config->sim_nested;
+    config->p1_sim_rlamc = config->sim_rlamc;
+    config->p2_sim_rlamc = config->sim_rlamc;
   }
-  const char *p1 = config_get_parg_value(config, ARG_TOKEN_P1_NESTED, 0);
+  const char *p1 = config_get_parg_value(config, ARG_TOKEN_P1_RLAMC, 0);
   if (p1) {
-    nested_args_parse(p1, &config->p1_sim_nested, error_stack);
+    rlamc_args_parse(p1, &config->p1_sim_rlamc, error_stack);
     if (!error_stack_is_empty(error_stack)) {
       return;
     }
   }
-  const char *p2 = config_get_parg_value(config, ARG_TOKEN_P2_NESTED, 0);
+  const char *p2 = config_get_parg_value(config, ARG_TOKEN_P2_RLAMC, 0);
   if (p2) {
-    nested_args_parse(p2, &config->p2_sim_nested, error_stack);
+    rlamc_args_parse(p2, &config->p2_sim_rlamc, error_stack);
   }
 }
 
@@ -15138,7 +15139,7 @@ static void config_load_lamc(Config *config, ErrorStack *error_stack) {
 }
 
 // Loads -sbagcycle and the per-player -sbc1 and -sbc2, which default to it.
-// Loads the LAMC, nested search, rollout finish and autoplay static bag
+// Loads the LAMC, recursive search, rollout finish and autoplay static bag
 // options (see config_load_data, which is at the function size limit).
 static void config_load_rollout_search(Config *config,
                                        ErrorStack *error_stack) {
@@ -15146,7 +15147,7 @@ static void config_load_rollout_search(Config *config,
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
-  config_load_nested(config, error_stack);
+  config_load_rlamc(config, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
@@ -17944,9 +17945,9 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_P2_SIM_BAG_CYCLE, "sbc2", 1, 1);
   arg(ARG_TOKEN_P1_LAMC, "lamc1", 1, 1);
   arg(ARG_TOKEN_P2_LAMC, "lamc2", 1, 1);
-  arg(ARG_TOKEN_NESTED, "nested", 1, 1);
-  arg(ARG_TOKEN_P1_NESTED, "nested1", 1, 1);
-  arg(ARG_TOKEN_P2_NESTED, "nested2", 1, 1);
+  arg(ARG_TOKEN_RLAMC, "rlamc", 1, 1);
+  arg(ARG_TOKEN_P1_RLAMC, "rlamc1", 1, 1);
+  arg(ARG_TOKEN_P2_RLAMC, "rlamc2", 1, 1);
   arg(ARG_TOKEN_AUTOPLAY_STATIC_BAG, "apstaticbag", 1, 1);
   arg(ARG_TOKEN_SIM_FINISH, "sfinish", 1, 1);
   arg(ARG_TOKEN_SIM_FINISH_BAG, "sfinishbag", 1, 1);
@@ -18483,9 +18484,9 @@ static void config_add_settings_to_string_builder_internal(const Config *config,
     case ARG_TOKEN_LAMC_STATIC_FINALISTS:
     case ARG_TOKEN_P1_LAMC:
     case ARG_TOKEN_P2_LAMC:
-    case ARG_TOKEN_NESTED:
-    case ARG_TOKEN_P1_NESTED:
-    case ARG_TOKEN_P2_NESTED:
+    case ARG_TOKEN_RLAMC:
+    case ARG_TOKEN_P1_RLAMC:
+    case ARG_TOKEN_P2_RLAMC:
     case ARG_TOKEN_AUTOPLAY_STATIC_BAG:
     case ARG_TOKEN_SIM_FINISH:
     case ARG_TOKEN_SIM_FINISH_BAG:

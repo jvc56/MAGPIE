@@ -12,9 +12,9 @@
 #include "../ent/inference_results.h"
 #include "../ent/letter_distribution.h"
 #include "../ent/move.h"
-#include "../ent/nested_args.h"
 #include "../ent/player.h"
 #include "../ent/rack.h"
+#include "../ent/rlamc_args.h"
 #include "../ent/sim_args.h"
 #include "../ent/sim_results.h"
 #include "../ent/stats.h"
@@ -59,8 +59,8 @@ struct SimCtx {
   RandomVariables *rvs;
   InferenceCtx *inference_ctx;
   LamcCtx *lamc_ctx;
-  // The finalists of a two-stage nested sim (see NestedArgs.finalists).
-  MoveList *nested_finalists;
+  // The finalists of a two-stage recursive sim (see RlamcArgs.finalists).
+  MoveList *rlamc_finalists;
 };
 
 void sim_ctx_destroy(SimCtx *sim_ctx) {
@@ -70,7 +70,7 @@ void sim_ctx_destroy(SimCtx *sim_ctx) {
   rvs_destroy(sim_ctx->rvs);
   inference_ctx_destroy(sim_ctx->inference_ctx);
   lamc_ctx_destroy(sim_ctx->lamc_ctx);
-  move_list_destroy(sim_ctx->nested_finalists);
+  move_list_destroy(sim_ctx->rlamc_finalists);
   free(sim_ctx);
 }
 
@@ -134,7 +134,7 @@ static void sim_collect_finalists(SimResults *sim_results, const int count,
   }
   move_list_reset(*finalists);
   if (!sim_results_lock_and_sort_display_simmed_plays(sim_results)) {
-    log_fatal("a nested sim's first stage has no plays to rank");
+    log_fatal("an RLAMC sim's first stage has no plays to rank");
   }
   const int num_plays = sim_results_get_number_of_plays(sim_results);
   for (int rank = 0; rank < count && rank < num_plays; rank++) {
@@ -146,16 +146,16 @@ static void sim_collect_finalists(SimResults *sim_results, const int count,
   move_list_sort_moves(*finalists);
 }
 
-// Runs a two-stage nested sim (see NestedArgs.finalists): the inference, if
+// Runs a two-stage recursive sim (see RlamcArgs.finalists): the inference, if
 // any, has already run.
 static void simulate_two_stage(const SimArgs *sim_args, SimCtx **sim_ctx,
                                SimResults *sim_results,
                                ErrorStack *error_stack) {
-  const NestedArgs *nested = &sim_args->nested_args;
-  const double share = nested->stage_share;
+  const RlamcArgs *rlamc = &sim_args->rlamc_args;
+  const double share = rlamc->stage_share;
   const int64_t start_ns = ctimer_monotonic_ns();
   SimArgs first = *sim_args;
-  first.nested_args.enabled = false;
+  first.rlamc_args.enabled = false;
   first.use_precomputed_inference = sim_args->use_inference;
   const uint64_t limit = sim_args->bai_options.sample_limit;
   first.bai_options.sample_limit = (uint64_t)((double)limit * share);
@@ -170,11 +170,11 @@ static void simulate_two_stage(const SimArgs *sim_args, SimCtx **sim_ctx,
     return;
   }
   const uint64_t used = sim_results_get_iteration_count(sim_results);
-  sim_collect_finalists(sim_results, nested->finalists,
-                        &(*sim_ctx)->nested_finalists);
+  sim_collect_finalists(sim_results, rlamc->finalists,
+                        &(*sim_ctx)->rlamc_finalists);
   SimArgs second = *sim_args;
-  second.move_list = (*sim_ctx)->nested_finalists;
-  second.nested_args.finalists = 0;
+  second.move_list = (*sim_ctx)->rlamc_finalists;
+  second.rlamc_args.finalists = 0;
   second.use_precomputed_inference = sim_args->use_inference;
   second.resume_results = false;
   second.bai_options.sample_limit = limit > used ? limit - used : 1;
@@ -251,7 +251,7 @@ void simulate(SimArgs *sim_args, SimCtx **sim_ctx, SimResults *sim_results,
     (*sim_ctx)->rvs = NULL;
     (*sim_ctx)->inference_ctx = NULL;
     (*sim_ctx)->lamc_ctx = NULL;
-    (*sim_ctx)->nested_finalists = NULL;
+    (*sim_ctx)->rlamc_finalists = NULL;
   }
 
   uint64_t num_infer_leaves = 0;
@@ -275,16 +275,15 @@ void simulate(SimArgs *sim_args, SimCtx **sim_ctx, SimResults *sim_results,
             sim_args->inference_results, INFERENCE_TYPE_LEAVE));
   }
 
-  // A two-stage nested sim: the standard sim finds the finalists, and a sim
-  // with nested rollouts chooses among them.
-  const NestedArgs *nested = &sim_args->nested_args;
+  // A two-stage recursive sim: the standard sim finds the finalists, and a sim
+  // with recursive rollouts chooses among them.
+  const RlamcArgs *rlamc = &sim_args->rlamc_args;
   const int root_bag = bag_get_letters(game_get_bag(sim_args->game));
-  if (nested->enabled && nested->finalists > 0 &&
-      move_list_get_count(sim_args->move_list) > nested->finalists &&
+  if (rlamc->enabled && rlamc->finalists > 0 &&
+      move_list_get_count(sim_args->move_list) > rlamc->finalists &&
       root_bag > 0 &&
-      (nested->levels[0].max_bag == 0 ||
-       root_bag <= nested->levels[0].max_bag) &&
-      root_bag >= nested->levels[0].min_bag) {
+      (rlamc->levels[0].max_bag == 0 || root_bag <= rlamc->levels[0].max_bag) &&
+      root_bag >= rlamc->levels[0].min_bag) {
     simulate_two_stage(sim_args, sim_ctx, sim_results, error_stack);
     return;
   }

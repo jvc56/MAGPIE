@@ -16,12 +16,12 @@
 #include "../ent/klv.h"
 #include "../ent/letter_distribution.h"
 #include "../ent/move.h"
-#include "../ent/nested_args.h"
 #include "../ent/pat_board_cache.h"
 #include "../ent/peg_adjust.h"
 #include "../ent/player.h"
 #include "../ent/pool_shift.h"
 #include "../ent/rack.h"
+#include "../ent/rlamc_args.h"
 #include "../ent/sim_args.h"
 #include "../ent/sim_results.h"
 #include "../ent/thread_control.h"
@@ -32,7 +32,7 @@
 #include "bai_logger.h"
 #include "census_rollout.h"
 #include "gameplay.h"
-#include "rollout_nested.h"
+#include "rlamc.h"
 #include <math.h>
 #include <stdatomic.h>
 #include <stddef.h>
@@ -429,9 +429,9 @@ typedef struct SimmerWorker {
   // The worker's cache for board-only PAT (see pat_board_cache.h), made by
   // the first sim whose rollouts use it and emptied for each one.
   PATBoardCache *pat_board_cache;
-  // The worker's nested searches (see rollout_nested.h), made by the first
+  // The worker's recursive searches (see rlamc.h), made by the first
   // sim whose rollouts use them.
-  NestedWorker *nested_worker;
+  RlamcWorker *rlamc_worker;
 } SimmerWorker;
 
 // The most static plies a rollout plays to finish a game whose bag is empty
@@ -480,9 +480,9 @@ typedef struct Simmer {
   // sim that uses it makes (SimArgs.use_census_rollout).
   bool use_census_rollout;
   CensusRollout *census_rollout;
-  // SimArgs.nested_args, and how its nested rollouts are scored.
-  NestedArgs nested_args;
-  NestedEval nested_eval;
+  // SimArgs.rlamc_args, and how its recursive rollouts are scored.
+  RlamcArgs rlamc_args;
+  RlamcEval rlamc_eval;
   // SimArgs.finish_endgame and finish_max_bag.
   bool finish_endgame;
   int finish_max_bag;
@@ -580,11 +580,11 @@ SimmerWorker *simmer_create_worker(const SimArgs *sim_args) {
   simmer_worker->move_list = move_list_create(1);
   simmer_worker->prng = prng_create(0);
   simmer_worker->census_rollout_worker = NULL;
-  simmer_worker->nested_worker = NULL;
-  if (sim_args->nested_args.enabled) {
-    simmer_worker->nested_worker = nested_worker_create(
+  simmer_worker->rlamc_worker = NULL;
+  if (sim_args->rlamc_args.enabled) {
+    simmer_worker->rlamc_worker = rlamc_worker_create(
         simmer_worker->game, simmer_worker->cross_set_cache);
-    nested_worker_reset(simmer_worker->nested_worker, sim_args->seed);
+    rlamc_worker_reset(simmer_worker->rlamc_worker, sim_args->seed);
   }
   return simmer_worker;
 }
@@ -597,12 +597,12 @@ void simmer_reset_worker(SimmerWorker *simmer_worker, const SimArgs *sim_args) {
   simmer_worker_set_rollout_pat(simmer_worker, sim_args);
   simmer_worker_set_rollout_peg_adjust(simmer_worker, sim_args);
   simmer_worker_set_rollout_pool_shift(simmer_worker, sim_args);
-  if (sim_args->nested_args.enabled && simmer_worker->nested_worker == NULL) {
-    simmer_worker->nested_worker = nested_worker_create(
+  if (sim_args->rlamc_args.enabled && simmer_worker->rlamc_worker == NULL) {
+    simmer_worker->rlamc_worker = rlamc_worker_create(
         simmer_worker->game, simmer_worker->cross_set_cache);
   }
-  if (simmer_worker->nested_worker != NULL) {
-    nested_worker_reset(simmer_worker->nested_worker, sim_args->seed);
+  if (simmer_worker->rlamc_worker != NULL) {
+    rlamc_worker_reset(simmer_worker->rlamc_worker, sim_args->seed);
   }
 }
 
@@ -616,7 +616,7 @@ void simmer_worker_destroy(SimmerWorker *simmer_worker) {
   prng_destroy(simmer_worker->prng);
   census_rollout_worker_destroy(simmer_worker->census_rollout_worker);
   pat_board_cache_destroy(simmer_worker->pat_board_cache);
-  nested_worker_destroy(simmer_worker->nested_worker);
+  rlamc_worker_destroy(simmer_worker->rlamc_worker);
   free(simmer_worker);
 }
 
@@ -645,11 +645,11 @@ static Equity simmer_get_leftover_value(const Game *game, int player_index,
 // One rollout of simmed_play from seed's shuffled bag, rotated left by
 // rotation * RACK_SIZE letters (see bag_rotate) before the opponent's rack is
 // drawn. When record is non-NULL, the rollout's contributions to its
-// SimmedPlay are written there instead of applied. Without use_nested, every
-// ply is static even when the sim's nested args apply. Returns its utility.
+// SimmedPlay are written there instead of applied. Without use_rlamc, every
+// ply is static even when the sim's recursive args apply. Returns its utility.
 static double sim_rollout(const Simmer *simmer, SimmerWorker *simmer_worker,
                           SimmedPlay *simmed_play, const uint64_t seed,
-                          const int rotation, const bool use_nested,
+                          const int rotation, const bool use_rlamc,
                           SimmedPlaySampleRecord *record) {
   SimResults *sim_results = simmer->sim_results;
   Game *game = simmer_worker->game;
@@ -725,18 +725,17 @@ static double sim_rollout(const Simmer *simmer, SimmerWorker *simmer_worker,
     }
 
     const Move *best_play;
-    if (use_nested && simmer->nested_args.enabled &&
-        nested_applies(&simmer->nested_args, ply,
-                       bag_get_letters(game_get_bag(game)))) {
-      nested_worker_set_census(
-          simmer_worker->nested_worker,
+    if (use_rlamc && simmer->rlamc_args.enabled &&
+        rlamc_applies(&simmer->rlamc_args, ply,
+                      bag_get_letters(game_get_bag(game)))) {
+      rlamc_worker_set_census(
+          simmer_worker->rlamc_worker,
           simmer->use_census_rollout ? simmer_worker->census_rollout_worker
                                      : NULL,
           simmer->use_census_rollout ? simmer->census_rollout : NULL, ply + 1);
-      best_play = nested_choose_move(
-          simmer_worker->nested_worker, &simmer->nested_args,
-          &simmer->nested_eval, game,
-          seed ^ ((uint64_t)(ply + 1) * 0xA24BAED4963EE407ULL),
+      best_play = rlamc_choose_move(
+          simmer_worker->rlamc_worker, &simmer->rlamc_args, &simmer->rlamc_eval,
+          game, seed ^ ((uint64_t)(ply + 1) * 0xA24BAED4963EE407ULL),
           simmer->best_move_carry);
     } else if (simmer->use_census_rollout) {
       best_play = census_rollout_get_best_move(
@@ -866,7 +865,7 @@ int rv_sim_bag_cycle_rotations(const Game *game) {
 static double sim_cycled_rollouts(const Simmer *simmer,
                                   SimmerWorker *simmer_worker,
                                   SimmedPlay *simmed_play, const uint64_t seed,
-                                  const bool use_nested,
+                                  const bool use_rlamc,
                                   SimmedPlaySampleRecord *record) {
   const int rotations = rv_sim_bag_cycle_rotations(simmer_worker->game);
   SimmedPlaySampleRecord combined;
@@ -880,7 +879,7 @@ static double sim_cycled_rollouts(const Simmer *simmer,
   for (int rotation = 0; rotation < rotations; rotation++) {
     simmed_play_sample_record_clear(&rollout);
     utility_sum += sim_rollout(simmer, simmer_worker, simmed_play, seed,
-                               rotation, use_nested, &rollout);
+                               rotation, use_rlamc, &rollout);
     if (rotation == 0) {
       *out = rollout;
     }
@@ -901,12 +900,12 @@ static double sim_cycled_rollouts(const Simmer *simmer,
   return out->utility;
 }
 
-// A sample with a control variate (NestedArgs.control_samples = k): the
-// nested sample Y, the static sample X from the same seed, and k static
+// A sample with a control variate (RlamcArgs.control_samples = k): the
+// recursive sample Y, the static sample X from the same seed, and k static
 // samples X_1 .. X_k from seeds of their own. Records Y - X + mean(X_j) as
 // the sample's equity, leftover, win% and utility (its per-ply statistics are
 // Y's). Its mean is Y's, and as Y and X share their draws, its variance is
-// Var(Y - X) + Var(X) / k, far below Var(Y) when the nested and static
+// Var(Y - X) + Var(X) / k, far below Var(Y) when the recursive and static
 // rollouts mostly agree. Records into record, or applies once when it is
 // NULL. Returns the sample's utility.
 static double sim_controlled_sample(const Simmer *simmer,
@@ -915,8 +914,8 @@ static double sim_controlled_sample(const Simmer *simmer,
                                     const uint64_t seed,
                                     const int control_samples,
                                     SimmedPlaySampleRecord *record) {
-  SimmedPlaySampleRecord nested_sample;
-  SimmedPlaySampleRecord *out = record != NULL ? record : &nested_sample;
+  SimmedPlaySampleRecord rlamc_sample;
+  SimmedPlaySampleRecord *out = record != NULL ? record : &rlamc_sample;
   simmed_play_sample_record_clear(out);
   SimmedPlaySampleRecord control;
   double equity_sum = 0.0;
@@ -924,7 +923,7 @@ static double sim_controlled_sample(const Simmer *simmer,
   double win_pct_sum = 0.0;
   double utility_sum = 0.0;
   for (int control_idx = -1; control_idx <= control_samples; control_idx++) {
-    // -1 is the nested sample, 0 its static twin, the rest independent.
+    // -1 is the recursive sample, 0 its static twin, the rest independent.
     SimmedPlaySampleRecord *sample = control_idx < 0 ? out : &control;
     if (control_idx >= 0) {
       simmed_play_sample_record_clear(&control);
@@ -933,14 +932,14 @@ static double sim_controlled_sample(const Simmer *simmer,
         control_idx <= 0
             ? seed
             : seed + (uint64_t)control_idx * UINT64_C(0x9E3779B97F4A7C15);
-    const bool use_nested = control_idx < 0;
+    const bool use_rlamc = control_idx < 0;
     double utility = 0.0;
     if (simmer->bag_cycle) {
       utility = sim_cycled_rollouts(simmer, simmer_worker, simmed_play,
-                                    sample_seed, use_nested, sample);
+                                    sample_seed, use_rlamc, sample);
     } else {
       utility = sim_rollout(simmer, simmer_worker, simmed_play, sample_seed, 0,
-                            use_nested, sample);
+                            use_rlamc, sample);
     }
     sample->utility = utility;
     if (control_idx < 0) {
@@ -999,7 +998,7 @@ static double rv_sim_sample_impl(RandomVariables *rvs,
                             : simmed_play_get_seed(simmed_play);
   double utility;
   const int control_samples =
-      simmer->nested_args.enabled ? simmer->nested_args.control_samples : 0;
+      simmer->rlamc_args.enabled ? simmer->rlamc_args.control_samples : 0;
   if (control_samples > 0) {
     utility = sim_controlled_sample(simmer, simmer_worker, simmed_play, seed,
                                     control_samples, record);
@@ -1245,16 +1244,16 @@ static bool rv_sim_can_resume(const SimArgs *sim_args,
          sim_results_get_num_plies(sim_results) == sim_args->num_plies;
 }
 
-static void simmer_set_nested(Simmer *simmer, const SimArgs *sim_args) {
+static void simmer_set_rlamc(Simmer *simmer, const SimArgs *sim_args) {
   simmer->finish_endgame = sim_args->finish_endgame;
   simmer->finish_max_bag = sim_args->finish_max_bag;
-  simmer->nested_args = sim_args->nested_args;
-  simmer->nested_eval.win_pcts = sim_args->win_pcts;
-  simmer->nested_eval.utility_w_winpct = sim_args->utility_w_winpct;
-  simmer->nested_eval.utility_w_spread = sim_args->utility_w_spread;
-  simmer->nested_eval.utility_spread_scale = sim_args->utility_spread_scale;
-  simmer->nested_eval.finish_endgame = sim_args->finish_endgame;
-  simmer->nested_eval.finish_max_bag = sim_args->finish_max_bag;
+  simmer->rlamc_args = sim_args->rlamc_args;
+  simmer->rlamc_eval.win_pcts = sim_args->win_pcts;
+  simmer->rlamc_eval.utility_w_winpct = sim_args->utility_w_winpct;
+  simmer->rlamc_eval.utility_w_spread = sim_args->utility_w_spread;
+  simmer->rlamc_eval.utility_spread_scale = sim_args->utility_spread_scale;
+  simmer->rlamc_eval.finish_endgame = sim_args->finish_endgame;
+  simmer->rlamc_eval.finish_max_bag = sim_args->finish_max_bag;
 }
 
 RandomVariables *rv_sim_create(RandomVariables *rvs, const SimArgs *sim_args,
@@ -1321,7 +1320,7 @@ RandomVariables *rv_sim_create(RandomVariables *rvs, const SimArgs *sim_args,
   simmer->utility_spread_scale = sim_args->utility_spread_scale;
   simmer->use_margin_forecast = sim_args->use_margin_forecast;
   simmer->bag_cycle = sim_args->bag_cycle;
-  simmer_set_nested(simmer, sim_args);
+  simmer_set_rlamc(simmer, sim_args);
 
   simmer->thread_control = thread_control;
 
@@ -1385,7 +1384,7 @@ void rv_sim_reset(RandomVariables *rvs, const SimArgs *sim_args) {
   simmer->utility_spread_scale = sim_args->utility_spread_scale;
   simmer->use_margin_forecast = sim_args->use_margin_forecast;
   simmer->bag_cycle = sim_args->bag_cycle;
-  simmer_set_nested(simmer, sim_args);
+  simmer_set_rlamc(simmer, sim_args);
 
   if (!rv_sim_can_resume(sim_args, simmer->sim_results)) {
     sim_results_reset(sim_args->move_list, simmer->sim_results,

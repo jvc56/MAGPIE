@@ -8,8 +8,8 @@
 #include "../ent/inference_args.h"
 #include "../ent/inference_results.h"
 #include "../ent/lamc_args.h"
-#include "../ent/nested_args.h"
 #include "../ent/rack.h"
+#include "../ent/rlamc_args.h"
 #include "../ent/sim_results.h"
 #include "../ent/thread_control.h"
 #include <math.h>
@@ -88,9 +88,9 @@ typedef struct SimArgs {
   // Whether and how Locally Adaptive Monte Carlo chooses the plays the sim
   // simulates (see lamc.h). sim_args_fill turns it off; callers set it after.
   LamcArgs lamc_args;
-  // Whether and how the rollouts choose some plies' plays by nested search
-  // (see rollout_nested.h). sim_args_fill turns it off; callers set it after.
-  NestedArgs nested_args;
+  // Whether and how the rollouts choose some plies' plays by recursive search
+  // (see rlamc.h). sim_args_fill turns it off; callers set it after.
+  RlamcArgs rlamc_args;
   // Whether a rollout whose bag is empty at its horizon plays on to the end
   // of the game by static equity, and is scored by the result instead of the
   // win percentage table. sim_args_fill clears it.
@@ -173,7 +173,7 @@ sim_args_fill(const int num_plies, const MoveList *move_list,
   sim_args->bag_cycle = false;
   sim_args->use_census_rollout = false;
   lamc_args_set_defaults(&sim_args->lamc_args);
-  nested_args_set_defaults(&sim_args->nested_args);
+  rlamc_args_set_defaults(&sim_args->rlamc_args);
   sim_args->finish_endgame = false;
   sim_args->finish_max_bag = 0;
   sim_args->census_rollout_auto = false;

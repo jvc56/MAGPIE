@@ -26,7 +26,7 @@ names, file names and defaults are the plan's proposals.
 - [Phase 1 as built](#phase-1-as-built): the code, the tests, the results
   and the [open questions](#open-questions)
 - [Phase 2: adaptive search at every ply](#phase-2-adaptive-search-at-every-ply)
-- [Phases 2 and 3 as built](#phases-2-and-3-as-built): nested rollouts,
+- [Phases 2 and 3 as built](#phases-2-and-3-as-built): recursive rollouts,
   sharing between rollouts, the instruments, and the results
 - [Risks and open questions](#risks-and-open-questions)
 - [Future work](#future-work)
@@ -1344,9 +1344,9 @@ example `0` for only the reply to the candidate, or `0,1,2`), the player on
 turn chooses by a small Phase 1 search instead of top equity:
 
 - Embed the ply's legal plays with the `-lamcplyfeatures` set.
-- Evaluate a small pool (P' plays, for example 8) with I_shallow *nested*
-  rollouts each. A nested rollout plays the rest of the horizon with the
-  top-equity policy, so the nesting is one level deep.
+- Evaluate a small pool (P' plays, for example 8) with I_shallow *recursive*
+  rollouts each. A recursive rollout plays the rest of the horizon with the
+  top-equity policy, so the recursion is one level deep.
 - Fit the GP, retain, propose, for at most `I_adapt` rounds (for example 2),
   and play the best by posterior mean.
 
@@ -1366,8 +1366,8 @@ fresh GP per permutation:
 
 - Keep one surrogate per candidate and ply for the whole sim. Its inputs are
   the play embedding plus a rack embedding of the responder's rack (2d).
-- Each permutation adds its nested results to that surrogate, then spends
-  nested rollouts only where the surrogate is uncertain (posterior standard
+- Each permutation adds its recursive results to that surrogate, then spends
+  recursive rollouts only where the surrogate is uncertain (posterior standard
   deviation over a threshold). Later permutations need few or none.
 - The surrogate's size is capped (`E_max` points per candidate and ply, the
   oldest dropped first), and it is only read and written by the thread that
@@ -1475,8 +1475,8 @@ with the Phase 1 tests rerun.
 
 - **Policy seam.** With `-rpolicy top` and `census`, every sim and autoplay
   test gives bit-identical results to main.
-- **Adaptive policy.** Deterministic across thread counts. Nested rollouts
-  never recurse past one level. Rollout and nested-rollout counts match the
+- **Adaptive policy.** Deterministic across thread counts. Recursive rollouts
+  never recurse past one level. Rollout and recursive-rollout counts match the
   budget formula exactly on small cases.
 - **Rack embedding.** File round trip (write, load, compare). Every full
   rack drawable from the distribution has a row. Loading a file for another
@@ -1500,7 +1500,7 @@ does not work and the cost of 2b is not paid for.
 
 Measure T_standard and T_adaptive on the position set across P, p and
 I_perm, with and without 2c, and fit the constants of the slides' formulas.
-The results set the defaults for `-lamcplies` and the nested budgets, and
+The results set the defaults for `-lamcplies` and the recursive budgets, and
 show how much of the cost amortization removes.
 
 #### Response quality
@@ -1548,43 +1548,43 @@ by default.
 
 | File | Contents |
 |---|---|
-| `src/ent/nested_args.h` | `NestedArgs`: the levels of nested search (`NestedLevel`: which plies, candidates, samples, depth, margin, bag range, allocation, sharing, decision cache, LAMC search) and two-stage finalists |
-| `src/impl/rollout_nested.c/.h` | The nested search: plain, shared (reply cache), LAMC, decision cache, census-steered replies, deeper levels, spec parsing, totals |
+| `src/ent/rlamc_args.h` | `RlamcArgs`: the levels of recursive search (`RlamcLevel`: which plies, candidates, samples, depth, margin, bag range, allocation, sharing, decision cache, LAMC search) and two-stage finalists |
+| `src/impl/rlamc.c/.h` | The recursive search: plain, shared (reply cache), LAMC, decision cache, census-steered replies, deeper levels, spec parsing, totals |
 | `src/impl/random_variable.c` | The hook in `sim_rollout`, and `-sfinish` (rollouts played to the end of the game) |
-| `src/impl/simmer.c` | Two-stage nested sims (`finalists=`) |
+| `src/impl/simmer.c` | Two-stage recursive sims (`finalists=`) |
 | `src/impl/autoplay.c` | `-apstaticbag` |
-| `test/nested_test.c` | `nested` (CI), and the on-demand `nestedcr`, `nestedgt`, `nestedeval`, `nestedvar`, `nestedpeg`, `nestedbench` |
+| `test/rlamc_test.c` | `rlamc` (CI), and the on-demand `rlamccr`, `rlamcgt`, `rlamceval`, `rlamcvar`, `rlamcpeg`, `rlamcbench` |
 
 ### Options
 
-- `-nested <spec>` (and `-nested1`, `-nested2` in autoplay): `off`, or
+- `-rlamc <spec>` (and `-rlamc1`, `-rlamc2` in autoplay): `off`, or
   comma-separated `key=value` settings: `plies` (joined by `+`; 0 is the
-  reply to the candidate), `k` (candidates), `m` (nested rollouts each), `h`
-  (static plies after the candidate in a nested rollout), `margin` (points
+  reply to the candidate), `k` (candidates), `m` (recursive rollouts each), `h`
+  (static plies after the candidate in a recursive rollout), `margin` (points
   of static equity below the best), `maxbag`, `minbag`, `alloc`
   (`uniform` or `race`), `z`, `switch`, `share` (0/1), `dcache` (0/1),
   `finalists`, `stage`, `lamc` (0/1, with `pool`, `keep`, `rounds`,
   `beta`), `universe`, `seeds`. Levels are separated by `/`: each level
   starts from the settings of the one before it, and its search chooses
-  the plays at its `plies` of the nested rollouts of the level before it.
-  For example `plies=0+1,lamc=1,dcache=1/plies=0,k=3,m=2` nests a LAMC
-  search at the sim's first two rollout plies, and in each of its nested
+  the plays at its `plies` of the recursive rollouts of the level before it.
+  For example `plies=0+1,lamc=1,dcache=1/plies=0,k=3,m=2` runs a LAMC
+  search at the sim's first two rollout plies, and in each of its recursive
   rollouts the reply to its candidate is chosen by a top-3 search of 2
-  samples each: triply nested Monte Carlo, counting the sim. At most 4
+  samples each: triply recursive Monte Carlo, counting the sim. At most 4
   levels.
 - `-sfinish true|false` (and `-sfinish1`, `-sfinish2`), `-sfinishbag N`.
 - `-apstaticbag N`.
 
-### A nested search
+### A recursive search
 
-At a nested ply, the player on turn takes its top `k` plays by static
-equity within `margin` points of the best. Each gets `m` nested rollouts:
+At a recursive ply, the player on turn takes its top `k` plays by static
+equity within `margin` points of the best. Each gets `m` recursive rollouts:
 the other player's rack is drawn again from the tiles the player on turn
 cannot see (the bag and that rack), the candidate is played, then `h`
 static plies, and the result is scored as the sim scores a rollout (the win
 percentage table at spread plus the last two leaves, blended with spread by
 the sim's utility weights; with `-sfinish`, played to the end when the bag
-is empty). Every candidate's j-th nested rollout uses the same seed (common
+is empty). Every candidate's j-th recursive rollout uses the same seed (common
 random numbers). The search plays the best mean. It works on a copy of the
 rollout's game, so the rollout's backups and board-undo record are never
 touched.
@@ -1592,7 +1592,7 @@ touched.
 With `lamc=1` the search is Phase 1's, over every play of the position
 rather than a top-k by static equity: a first pool of the best few static
 plays and plays spread over the play embedding by farthest-point sampling,
-`m` nested rollouts each a round, a Gaussian process whose prior mean is
+`m` recursive rollouts each a round, a Gaussian process whose prior mean is
 linear in static equity, then rounds that keep the surrogate's best plays
 and add the unevaluated plays of highest upper confidence bound. The play
 is the best evaluated by the surrogate's mean.
@@ -1619,22 +1619,22 @@ levels never disturb one another.
   cached per thread. Late in the game few racks are possible and decisions
   repeat.
 - **Census-steered replies.** When the sim's rollouts use the census,
-  nested rollouts find their plays with it.
+  recursive rollouts find their plays with it.
 
 ### Instruments
 
-- **Continuation regret (`nestedcr`).** Two sim settings choose a play in
+- **Continuation regret (`rlamccr`).** Two sim settings choose a play in
   each position; where they differ, both plays are played to the end many
   times on common random numbers by a fixed continuation engine (a 2-ply
   sim, and the endgame solver at an empty bag).
-- **Ground truth tables (`nestedgt`, `nestedeval`).** The continuation value
+- **Ground truth tables (`rlamcgt`, `rlamceval`).** The continuation value
   of each of a position's top 10 static plays, once; any sim settings are
   then scored against it by running their sims only. A split-half oracle
   removes the bias of the best of noisy means.
-- **Against PEG (`nestedpeg`).** Where two settings differ in a
+- **Against PEG (`rlamcpeg`).** Where two settings differ in a
   pre-endgame position, PEG solves just their two plays (`peg only`).
 - **Game pairs from late positions (`-apstaticbag`).**
-- **Rollout data (`nestedvar`).** Each rollout's utility with the racks it
+- **Rollout data (`rlamcvar`).** Each rollout's utility with the racks it
   drew, for studying what explains outcomes.
 
 ### Results
@@ -1661,7 +1661,7 @@ questions it raised, are in [Open questions](#open-questions).
   tests compare the two.
 - **Can BAI resume?** Covered in [Integration](#integration-with-the-sim);
   answered in PR 1d.
-- **Nested cost.** If amortization does not cut the nested rollouts, Phase
+- **Recursive cost.** If amortization does not cut the recursive rollouts, Phase
   2 may only pay at ply 0, or only in the pre-endgame.
 - **Rack data cost.** Filling Y well enough for 3.2 million racks needs a
   very large number of sims. Most racks will be seen rarely or never, so the
@@ -1713,8 +1713,8 @@ questions it raised, are in [Open questions](#open-questions).
   proposed (within the trust region of the pool); cache per-position
   `prepare` work across a turn's rounds; compute PAT-based features from the
   PAT evaluation already done for static equity.
-- **Faster nested rollouts.** Steer nested generation with the census, and
-  use WMP; reuse nested results across candidates whose boards agree in the
+- **Faster recursive rollouts.** Steer recursive generation with the census, and
+  use WMP; reuse recursive results across candidates whose boards agree in the
   relevant lanes (as the census does for anchors).
 - **Early pruning inside the explore stage.** Let BAI's cutoff drop clearly
   losing pool plays mid-round, saving their remaining shallow rollouts.
