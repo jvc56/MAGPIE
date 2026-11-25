@@ -1658,7 +1658,7 @@ static void add_lamc_rlamc_help_arg(arg_token_t arg_token, const char **usages,
     examples[0] = "true";
     *text = "Specifies whether the simulation of LAMC's plays continues the "
             "samples the search took of them. Otherwise it starts over with "
-            "other seeds. On by default.";
+            "other seeds. Off by default.";
     break;
   case ARG_TOKEN_LAMC_STATIC_FINALISTS:
     usages[0] = "<number_of_plays>";
