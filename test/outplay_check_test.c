@@ -377,11 +377,14 @@ static ListedSide listed_side(Game *game, MoveList *plays) {
 
 // The features the check finds with its best-play generations equal what
 // every play of each side, listed, says, in the empty-bag positions of static
-// games.
-static void test_outplay_check_features(void) {
+// games, with or without the word map (by which the mover's searches skip
+// windows that no word using the whole rack can fill).
+static void test_outplay_check_features_with_wmp(bool use_wmp) {
   Config *config = config_create_or_die(
-      "set -lex CSW21 -wmp false -s1 equity -s2 equity -r1 all -r2 all "
-      "-numplays 1");
+      use_wmp ? "set -lex CSW21 -wmp true -s1 equity -s2 equity -r1 all -r2 "
+                "all -numplays 1"
+              : "set -lex CSW21 -wmp false -s1 equity -s2 equity -r1 all -r2 "
+                "all -numplays 1");
   Game *game = config_game_create(config);
   MoveList *plays = move_list_create(20000);
   int positions = 0;
@@ -430,6 +433,11 @@ static void test_outplay_check_features(void) {
   move_list_destroy(plays);
   game_destroy(game);
   config_destroy(config);
+}
+
+static void test_outplay_check_features(void) {
+  test_outplay_check_features_with_wmp(false);
+  test_outplay_check_features_with_wmp(true);
 }
 
 void test_outplay_check(void) {

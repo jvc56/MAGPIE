@@ -2074,9 +2074,46 @@ static inline void shadow_record(MoveGen *gen, uint32_t allowed_lengths) {
   }
 }
 
+// Whether a word that uses the whole rack could fill the current shadow
+// window (current_left_col to current_right_col): the word map must hold a
+// word of the window's length made of the rack and the window's tiles, as the
+// full shadow checks with the word map (see
+// wmp_move_gen_check_playthrough_full_rack_existence). A window of one square
+// is a play whose word runs the other way, and is not checked. Out of line:
+// only windows of the whole rack call it.
+static __attribute__((noinline)) bool
+small_shadow_whole_rack_word_may_fit(const MoveGen *gen) {
+  const int word_length = gen->current_right_col - gen->current_left_col + 1;
+  if (word_length < MINIMUM_WORD_LENGTH) {
+    return true;
+  }
+  BitRack word = gen->best_small_out_bit_rack;
+  for (int col = gen->current_left_col; col <= gen->current_right_col; col++) {
+    const MachineLetter ml = gen_cache_get_letter(gen, col);
+    if (ml != ALPHABET_EMPTY_SQUARE_MARKER) {
+      bit_rack_add_letter(&word, get_unblanked_machine_letter(ml));
+    }
+  }
+  if (bit_rack_get_letter(&word, BLANK_MACHINE_LETTER) > 2) {
+    return true;
+  }
+  return wmp_get_word_entry(gen->best_small_out_wmp, &word, word_length) !=
+         NULL;
+}
+
 // Simplified shadow_record for small move types (BEST_SMALL).
-// Skips WMP, wordsmog, and leave/equity computations.
-static inline void shadow_record_small(MoveGen *gen) {
+// Skips WMP, wordsmog, and leave/equity computations. With
+// check_whole_rack_words (a constant in each copy of the small shadow; see
+// shadow_play_for_anchor_small), a window that no word using the whole rack
+// can fill is not recorded: it holds no play of the whole rack (see
+// best_small_out_wmp_tiles).
+static inline __attribute__((always_inline)) void
+shadow_record_small(MoveGen *gen, bool check_whole_rack_words) {
+  if (check_whole_rack_words &&
+      gen->tiles_played == gen->best_small_out_wmp_tiles &&
+      !small_shadow_whole_rack_word_may_fit(gen)) {
+    return;
+  }
   Equity tiles_played_score = 0;
   for (int i = 0; i < RACK_SIZE; i++) {
     tiles_played_score += gen->descending_tile_scores[i] *
@@ -2556,7 +2593,9 @@ static inline void shadow_play_right(MoveGen *gen, bool is_unique,
 
 // Simplified shadow_play_right for small move types.
 // Skips bingo_alpha_rack and WMP operations.
-static inline void shadow_play_right_small(MoveGen *gen, bool is_unique) {
+static inline __attribute__((always_inline)) void
+shadow_play_right_small_impl(MoveGen *gen, bool is_unique,
+                             bool check_whole_rack_words) {
   const Equity orig_main_restricted_score =
       gen->shadow_mainword_restricted_score;
   const Equity orig_perp_score = gen->shadow_perpendicular_additional_score;
@@ -2654,7 +2693,7 @@ static inline void shadow_play_right_small(MoveGen *gen, bool is_unique) {
 
     if (play_is_nonempty_and_nonduplicate(gen->tiles_played, is_unique)) {
       maybe_recalculate_effective_multipliers(gen);
-      shadow_record_small(gen);
+      shadow_record_small(gen, check_whole_rack_words);
     }
   }
 
@@ -2680,6 +2719,26 @@ static inline void shadow_play_right_small(MoveGen *gen, bool is_unique) {
   gen->tiles_played = original_tiles_played;
 
   maybe_recalculate_effective_multipliers(gen);
+}
+
+static __attribute__((noinline)) void
+shadow_play_right_small_unchecked(MoveGen *gen, bool is_unique) {
+  shadow_play_right_small_impl(gen, is_unique, false);
+}
+
+static __attribute__((noinline)) void
+shadow_play_right_small_checked(MoveGen *gen, bool is_unique) {
+  shadow_play_right_small_impl(gen, is_unique, true);
+}
+
+static inline __attribute__((always_inline)) void
+shadow_play_right_small(MoveGen *gen, bool is_unique,
+                        bool check_whole_rack_words) {
+  if (check_whole_rack_words) {
+    shadow_play_right_small_checked(gen, is_unique);
+  } else {
+    shadow_play_right_small_unchecked(gen, is_unique);
+  }
 }
 
 static inline void nonplaythrough_shadow_play_left(MoveGen *gen,
@@ -2720,13 +2779,14 @@ static inline void nonplaythrough_shadow_play_left(MoveGen *gen,
   }
 }
 
-static inline void nonplaythrough_shadow_play_left_small(MoveGen *gen,
-                                                         bool is_unique) {
+static inline __attribute__((always_inline)) void
+nonplaythrough_shadow_play_left_small(MoveGen *gen, bool is_unique,
+                                      bool check_whole_rack_words) {
   for (;;) {
     const uint64_t possible_tiles_for_shadow_right =
         gen->anchor_right_extension_set & gen->rack_cross_set;
     if (possible_tiles_for_shadow_right != 0) {
-      shadow_play_right_small(gen, is_unique);
+      shadow_play_right_small(gen, is_unique, check_whole_rack_words);
     }
     gen->anchor_right_extension_set = TRIVIAL_CROSS_SET;
     if (gen->current_left_col == 0 ||
@@ -2754,7 +2814,7 @@ static inline void nonplaythrough_shadow_play_left_small(MoveGen *gen,
             this_word_multiplier, gen->current_left_col)) {
       insert_unrestricted_multipliers(gen, gen->current_left_col);
     }
-    shadow_record_small(gen);
+    shadow_record_small(gen, check_whole_rack_words);
   }
 }
 
@@ -2832,13 +2892,14 @@ static inline void playthrough_shadow_play_left(MoveGen *gen, bool is_unique) {
   }
 }
 
-static inline void playthrough_shadow_play_left_small(MoveGen *gen,
-                                                      bool is_unique) {
+static inline __attribute__((always_inline)) void
+playthrough_shadow_play_left_small(MoveGen *gen, bool is_unique,
+                                   bool check_whole_rack_words) {
   for (;;) {
     const uint64_t possible_tiles_for_shadow_right =
         gen->anchor_right_extension_set & gen->rack_cross_set;
     if (possible_tiles_for_shadow_right != 0) {
-      shadow_play_right_small(gen, is_unique);
+      shadow_play_right_small(gen, is_unique, check_whole_rack_words);
     }
     gen->anchor_right_extension_set = TRIVIAL_CROSS_SET;
 
@@ -2896,7 +2957,7 @@ static inline void playthrough_shadow_play_left_small(MoveGen *gen,
     }
 
     if (play_is_nonempty_and_nonduplicate(gen->tiles_played, is_unique)) {
-      shadow_record_small(gen);
+      shadow_record_small(gen, check_whole_rack_words);
     }
   }
 }
@@ -2942,7 +3003,8 @@ static inline void shadow_start_nonplaythrough(MoveGen *gen) {
   nonplaythrough_shadow_play_left(gen, !board_is_dir_vertical(gen->dir));
 }
 
-static inline void shadow_start_nonplaythrough_small(MoveGen *gen) {
+static inline __attribute__((always_inline)) void
+shadow_start_nonplaythrough_small(MoveGen *gen, bool check_whole_rack_words) {
   const uint64_t cross_set =
       gen_cache_get_cross_set(gen, gen->current_left_col);
   gen->first_played_tile_col = gen->current_left_col;
@@ -2970,12 +3032,13 @@ static inline void shadow_start_nonplaythrough_small(MoveGen *gen) {
   }
   gen->tiles_played++;
   if (!board_is_dir_vertical(gen->dir)) {
-    shadow_record_small(gen);
+    shadow_record_small(gen, check_whole_rack_words);
   }
   gen->shadow_word_multiplier = this_word_multiplier;
   maybe_recalculate_effective_multipliers(gen);
 
-  nonplaythrough_shadow_play_left_small(gen, !board_is_dir_vertical(gen->dir));
+  nonplaythrough_shadow_play_left_small(gen, !board_is_dir_vertical(gen->dir),
+                                        check_whole_rack_words);
 }
 
 static inline void shadow_start_playthrough(MoveGen *gen,
@@ -3020,8 +3083,9 @@ static inline void shadow_start_playthrough(MoveGen *gen,
 
 // Simplified shadow_start_playthrough for small move types.
 // Skips bingo_alpha_rack and WMP operations.
-static inline void
-shadow_start_playthrough_small(MoveGen *gen, MachineLetter current_letter) {
+static inline __attribute__((always_inline)) void
+shadow_start_playthrough_small(MoveGen *gen, MachineLetter current_letter,
+                               bool check_whole_rack_words) {
   for (;;) {
     gen->shadow_mainword_restricted_score += gen->tile_scores[current_letter];
     if (gen->current_left_col == 0 ||
@@ -3035,7 +3099,8 @@ shadow_start_playthrough_small(MoveGen *gen, MachineLetter current_letter) {
       break;
     }
   }
-  playthrough_shadow_play_left_small(gen, !board_is_dir_vertical(gen->dir));
+  playthrough_shadow_play_left_small(gen, !board_is_dir_vertical(gen->dir),
+                                     check_whole_rack_words);
 }
 
 static inline void shadow_start(MoveGen *gen) {
@@ -3065,7 +3130,8 @@ static inline void shadow_start(MoveGen *gen) {
 
 // Simplified shadow_start for small move types.
 // Skips bingo_alpha_rack copy.
-static inline void shadow_start_small(MoveGen *gen) {
+static inline __attribute__((always_inline)) void
+shadow_start_small(MoveGen *gen, bool check_whole_rack_words) {
   const uint64_t any_extension_set =
       gen->anchor_left_extension_set | gen->anchor_right_extension_set;
   if (any_extension_set == 0) {
@@ -3077,9 +3143,9 @@ static inline void shadow_start_small(MoveGen *gen) {
   const MachineLetter current_letter =
       gen_cache_get_letter(gen, gen->current_left_col);
   if (current_letter == ALPHABET_EMPTY_SQUARE_MARKER) {
-    shadow_start_nonplaythrough_small(gen);
+    shadow_start_nonplaythrough_small(gen, check_whole_rack_words);
   } else {
-    shadow_start_playthrough_small(gen, current_letter);
+    shadow_start_playthrough_small(gen, current_letter, check_whole_rack_words);
   }
 
   gen->rack_cross_set = original_rack_cross_set;
@@ -3200,7 +3266,9 @@ void shadow_play_for_anchor(MoveGen *gen, int col) {
 
 // Simplified shadow_play_for_anchor for small move types (BEST_SMALL).
 // Skips WMP operations.
-void shadow_play_for_anchor_small(MoveGen *gen, int col) {
+static inline __attribute__((always_inline)) void
+shadow_play_for_anchor_small_impl(MoveGen *gen, int col,
+                                  bool check_whole_rack_words) {
   gen->current_left_col = col;
   gen->current_right_col = col;
 
@@ -3227,7 +3295,7 @@ void shadow_play_for_anchor_small(MoveGen *gen, int col) {
   gen->tiles_played = 0;
   gen->max_tiles_to_play = 0;
 
-  shadow_start_small(gen);
+  shadow_start_small(gen, check_whole_rack_words);
   if (gen->max_tiles_to_play == 0) {
     return;
   }
@@ -3235,6 +3303,18 @@ void shadow_play_for_anchor_small(MoveGen *gen, int col) {
   anchor_heap_add_unheaped_anchor(
       &gen->anchor_heap, gen->current_row_index, col, gen->last_anchor_col,
       gen->dir, gen->highest_shadow_score, gen->highest_shadow_score);
+}
+
+// The small shadow is compiled twice: without the whole-rack word check, for
+// every generation that does not make it (the endgame's among them), and with
+// it, for a best-play generation that has best_small_out_wmp_tiles set.
+void shadow_play_for_anchor_small(MoveGen *gen, int col) {
+  shadow_play_for_anchor_small_impl(gen, col, false);
+}
+
+static __attribute__((noinline)) void
+shadow_play_for_anchor_small_checking_words(MoveGen *gen, int col) {
+  shadow_play_for_anchor_small_impl(gen, col, true);
 }
 
 // Whether this generation uses its anchors' equity caps (see
@@ -3350,9 +3430,14 @@ shadow_lane_small(MoveGen *gen, int row) {
                                              gen->dir, gen->cross_index);
   gen->wit_len_lane = board_get_wit_len_lane(gen->board, gen->current_row_index,
                                              gen->dir, gen->cross_index);
+  const bool check_whole_rack_words = gen->best_small_out_wmp_tiles >= 0;
   for (int col = 0; col < BOARD_DIM; col++) {
     if (gen_cache_get_is_anchor(gen, col)) {
-      shadow_play_for_anchor_small(gen, col);
+      if (check_whole_rack_words) {
+        shadow_play_for_anchor_small_checking_words(gen, col);
+      } else {
+        shadow_play_for_anchor_small(gen, col);
+      }
 
       gen->last_anchor_col = col;
       if (!gen_cache_is_empty(gen, col)) {
@@ -3405,6 +3490,17 @@ static inline void gen_set_best_small_ranking(MoveGen *gen,
     }
   }
   gen->best_small_bound_bonuses[rack_tiles] += gen->best_small_out_bonus;
+  gen->best_small_out_wmp_tiles = -1;
+  if (gen->best_small_out_bonus > 0 && args->override_kwg == NULL &&
+      gen->bit_rack_compatible && !gen->is_wordsmog && !gen->is_woadwage) {
+    gen->best_small_out_wmp = player_get_wmp(
+        game_get_player(args->game, game_get_player_on_turn_index(args->game)));
+    if (gen->best_small_out_wmp != NULL) {
+      gen->best_small_out_wmp_tiles = rack_tiles;
+      gen->best_small_out_bit_rack =
+          bit_rack_create_from_rack(&gen->ld, &gen->player_rack);
+    }
+  }
 }
 
 // Points gen->pat_ctx at the board's context in board_cache, loading it
