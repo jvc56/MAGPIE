@@ -2248,7 +2248,7 @@ static void test_peg_shared_nested_choices(void) {
       repeated_tile_types += number_of_ml >= 2 ? 1 : 0;
     }
     const int opp_racks =
-        tile_types * (tile_types - 1) / 2 + repeated_tile_types;
+        ((tile_types * (tile_types - 1)) / 2) + repeated_tile_types;
     assert(opp_racks > 1);
     for (int solve_idx = 0; solve_idx < NUM_SOLVES; solve_idx++) {
       assert(results[solve_idx].n_shared_nested_choices ==
