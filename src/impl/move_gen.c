@@ -650,7 +650,7 @@ update_best_move_or_insert_into_movelist_wmp(MoveGen *gen, int start_col,
       // afterward.
       gen_insert_spare_move_within_x_equity_of_best(gen, move_equity_or_score);
     } else {
-      move_list_insert_spare_move(gen->move_list, move_equity_or_score);
+      gen_insert_spare_move_all(gen, move_equity_or_score);
     }
     break;
   }

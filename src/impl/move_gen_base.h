@@ -668,6 +668,20 @@ static inline void gen_update_cutoff_equity_or_score(MoveGen *gen) {
   (void)previous_cutoff;
 }
 
+// MOVE_RECORD_ALL: inserts the spare move. A full list keeps a play only when
+// compare_moves ranks it above the list's worst (the heap's root), which a
+// play worth less than the worst never is, so from then on the worst's
+// equity is the cutoff; it only rises. A list with room for every play never
+// fills, and keeps no cutoff.
+static inline void gen_insert_spare_move_all(MoveGen *gen,
+                                             Equity move_equity_or_score) {
+  move_list_insert_spare_move(gen->move_list, move_equity_or_score);
+  if (move_list_get_count(gen->move_list) ==
+      move_list_get_capacity(gen->move_list)) {
+    gen->cutoff_equity_or_score = move_list_peek_equity(gen->move_list);
+  }
+}
+
 static inline void
 gen_insert_spare_move_within_x_equity_of_best(MoveGen *gen,
                                               Equity move_equity_or_score) {
@@ -756,7 +770,7 @@ static inline void update_best_move_or_insert_into_movelist(
       // afterward.
       gen_insert_spare_move_within_x_equity_of_best(gen, move_equity_or_score);
     } else {
-      move_list_insert_spare_move(gen->move_list, move_equity_or_score);
+      gen_insert_spare_move_all(gen, move_equity_or_score);
     }
     break;
   case MOVE_RECORD_BEST:;
@@ -874,10 +888,13 @@ static inline void record_tile_placement_move(MoveGen *gen, int leftstrip,
 static inline bool better_play_has_been_found(const MoveGen *gen,
                                               Equity highest_possible_value) {
   switch (gen->move_record_type) {
-  case MOVE_RECORD_ALL:
   case MOVE_RECORD_ALL_SMALL:
   case MOVE_RECORD_TILES_PLAYED:
     return false;
+    break;
+  case MOVE_RECORD_ALL:
+    // The cutoff stays EQUITY_INITIAL_VALUE until the list is full (see
+    // gen_insert_spare_move_all).
     break;
   case MOVE_RECORD_WITHIN_X_EQUITY_OF_BEST:
     if (gen->best_move_equity_or_score == EQUITY_INITIAL_VALUE) {
