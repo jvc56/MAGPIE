@@ -30,7 +30,6 @@ enum {
   LAMC_DEFAULT_SHALLOW_SAMPLES = 4,
   LAMC_DEFAULT_MAX_ROUNDS = 12,
   LAMC_DEFAULT_STABLE_ROUNDS = 3,
-  LAMC_DEFAULT_MAX_UNIVERSE = 400,
   LAMC_DEFAULT_MAX_EVALUATED = 128,
   // The most plays retained from one round to the next.
   LAMC_MAX_KEEP = 64,
@@ -39,17 +38,21 @@ enum {
   LAMC_MAX_SHALLOW_SAMPLES = 1000,
   LAMC_MAX_ROUNDS = 1000,
   LAMC_MAX_UNIVERSE = 100000,
+  // By default LAMC considers every play: no limit on their number, on how
+  // far below the best they are (LAMC_DEFAULT_EQUITY_FLOOR) or on the bag.
+  // The recursive search work found the search over every play at any bag
+  // best (RLAMC.md); the replay that first suggested 20 tiles had a
+  // narrower search.
+  LAMC_DEFAULT_MAX_UNIVERSE = LAMC_MAX_UNIVERSE,
   LAMC_MAX_EVALUATED = 2048,
   // A bag limit at least this large never stops a search.
   LAMC_MAX_BAG = 1000,
-  // The replay found gains with at most this many tiles in the bag, and
-  // losses or nothing with more (see docs/lamc-plan.md).
-  LAMC_DEFAULT_MAX_BAG = 20,
+  LAMC_DEFAULT_MAX_BAG = LAMC_MAX_BAG,
   LAMC_DEFAULT_STATIC_FINALISTS = 10,
 };
 
 #define LAMC_DEFAULT_EXPLORE_SHARE 0.3
-#define LAMC_DEFAULT_EQUITY_FLOOR 30.0
+#define LAMC_DEFAULT_EQUITY_FLOOR 1000.0
 #define LAMC_DEFAULT_LENGTH_SCALE 1.5
 #define LAMC_DEFAULT_TRUST_RADIUS 1.0
 #define LAMC_DEFAULT_UCB_BETA 1.0

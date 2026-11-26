@@ -1565,13 +1565,13 @@ static void add_lamc_rlamc_help_arg(arg_token_t arg_token, const char **usages,
     usages[0] = "<points>";
     examples[0] = "30";
     *text = "Specifies how far below the best static equity LAMC considers "
-            "plays, in points.";
+            "plays, in points. 1000 (every play) by default.";
     break;
   case ARG_TOKEN_LAMC_UNIVERSE:
     usages[0] = "<number_of_plays>";
     examples[0] = "400";
     *text = "Specifies the most plays LAMC considers, best by static "
-            "equity.";
+            "equity. 100000 (every play) by default.";
     break;
   case ARG_TOKEN_LAMC_EVALUATED:
     usages[0] = "<number_of_plays>";
@@ -1651,7 +1651,7 @@ static void add_lamc_rlamc_help_arg(arg_token_t arg_token, const char **usages,
     examples[0] = "20";
     *text = "Specifies the most tiles in the bag at which LAMC searches. "
             "With more, the simulation takes the top plays by static equity "
-            "as usual. 20 by default; 1000 always searches.";
+            "as usual. 1000 (always search) by default.";
     break;
   case ARG_TOKEN_LAMC_REUSE:
     usages[0] = "<true_or_false>";
@@ -1706,16 +1706,18 @@ static void add_lamc_rlamc_help_arg(arg_token_t arg_token, const char **usages,
         "Specifies the RLAMC search that picks the plays of some plies "
         "of a simulation's rollouts. Without it they play by static "
         "equity; rlamc1 and rlamc2 set it for each player in "
-        "autoplay. off, on (the defaults, the best settings found: "
-        "plies=0+1,lamc=1,dcache=1,m=4,fin=0), or comma-separated "
+        "autoplay. off, on (the defaults: "
+        "plies=0+1,lamc=1,dcache=1,m=4,h=2,fin=1), or comma-separated "
         "settings that change the defaults: plies (joined by +, 0 is the "
         "reply to the candidate), lamc (1 for a LAMC search over every "
         "play, with pool, keep, rounds, beta, seeds, universe, stop, pair, "
         "cycle, dyn and step; 0 for the top k plays by static equity within "
         "margin points of the best, with alloc, z and share), m (recursive "
         "rollouts per play), h (static plies after the play in a recursive "
-        "rollout), dcache (1 to cache decisions), fin (0 to skip the static "
-        "finish), switch (the recursive utility a play other than the "
+        "rollout, 2 by default), dcache (1 to cache decisions), fin (1, the "
+        "default, to "
+        "play out the game from an empty bag with sfinish; 0 to skip it), "
+        "switch (the recursive utility a play other than the "
         "static best must gain), maxbag, minbag, finalists, stage and cv. "
         "Settings after a / are a deeper level, whose search chooses plays "
         "in the recursive rollouts of the level before it, starting from "
@@ -1743,7 +1745,7 @@ static void add_lamc_rlamc_help_arg(arg_token_t arg_token, const char **usages,
             "empty bag. A rollout whose bag is empty at its last ply then "
             "plays on to the end of the game by static equity, and counts "
             "the game's result instead of the win percentage table's "
-            "estimate. Off by default.";
+            "estimate. On by default.";
     break;
   case ARG_TOKEN_AUTOPLAY_STATIC_BAG:
     usages[0] = "<tiles>";
@@ -15058,7 +15060,8 @@ exec_mode_t get_exec_mode_type_from_name(const char *exec_mode_str) {
 }
 
 // Assumes all args are parsed and correctly set in pargs.
-// LAMC off for both players, with its other settings at their defaults.
+// LAMC off and rollout finishes on for both players, with LAMC's other
+// settings at their defaults.
 static void config_set_lamc_defaults(Config *config) {
   lamc_args_set_defaults(&config->lamc_args);
   ErrorStack *error_stack = error_stack_create();
@@ -15075,9 +15078,9 @@ static void config_set_lamc_defaults(Config *config) {
   rlamc_args_set_defaults(&config->p1_sim_rlamc);
   rlamc_args_set_defaults(&config->p2_sim_rlamc);
   config->autoplay_static_bag = 0;
-  config->sim_finish = false;
-  config->p1_sim_finish = false;
-  config->p2_sim_finish = false;
+  config->sim_finish = true;
+  config->p1_sim_finish = true;
+  config->p2_sim_finish = true;
   config->sim_finish_bag = 0;
 }
 

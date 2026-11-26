@@ -39,11 +39,14 @@ enum {
   RLAMC_MAX_DEPTH = 4,
   // The defaults are the best settings found (RLAMC.md): a LAMC search at
   // rollout plies 0 and 1 (bits 0 and 1), 4 rollouts a play, decisions
-  // cached, no static finish.
+  // cached. Unlike the best setting, rollouts that reach an empty bag play
+  // the game out (skip_finish off), which was weaker at equal time, and a
+  // recursive rollout plays 2 static plies after its play, not 1 (h=2 was
+  // no better at equal time with skip_finish on).
   RLAMC_DEFAULT_PLIES_MASK = 3,
   RLAMC_DEFAULT_CANDIDATES = 6,
   RLAMC_DEFAULT_SAMPLES = 4,
-  RLAMC_DEFAULT_PLIES = 1,
+  RLAMC_DEFAULT_PLIES = 2,
   // Points of static equity below the best a candidate may be.
   RLAMC_DEFAULT_MARGIN = 30,
 };
@@ -188,7 +191,7 @@ static inline void rlamc_level_set_defaults(RlamcLevel *args) {
   args->stop_z = 0.0;
   args->paired = false;
   args->bag_cycle = false;
-  args->skip_finish = true;
+  args->skip_finish = false;
   args->dynamic = false;
   args->step = RLAMC_DEFAULT_STEP;
 }

@@ -621,12 +621,14 @@ embedding, the GP and the search see columns of numbers.
 ### How a search runs
 
 With `-lamc true` (or `-lamc1`/`-lamc2` in autoplay), and the bag holding at
-least one tile and at most `-lamcmaxbag` (20). Defaults are in parentheses;
-they are the best settings the replay found.
+least one tile and at most `-lamcmaxbag` (1000: always). Defaults are in
+parentheses. The replay found 20, 400 and 30 for the bag, universe and
+floor; the recursive rollout work found searching every play at every bag
+better, and those are the defaults now.
 
 1. **Universe.** Every play by static equity, at most `-lamcuniverse`
-   (400), within `-lamcfloor` (30) points of the best. If there are no more
-   than the sim would simulate anyway, the search does not run.
+   (100000), within `-lamcfloor` (1000) points of the best. If there are no
+   more than the sim would simulate anyway, the search does not run.
 2. **Embedding.** Each active feature's columns (`-lamcfeatures`; the
    default set is every feature but `equity` and `leavedups`), then every
    continuous column standardized across the universe. Static equity,
@@ -1558,8 +1560,8 @@ by default.
 ### Options
 
 - `-rlamc <spec>` (and `-rlamc1`, `-rlamc2` in autoplay): `off`; `on`,
-  the defaults, which are the best settings found
-  (`plies=0+1,lamc=1,dcache=1,m=4,fin=0`); or comma-separated `key=value`
+  the defaults (`plies=0+1,lamc=1,dcache=1,m=4,h=2,fin=1`; the best
+  setting found has `h=1` and `fin=0`); or comma-separated `key=value`
   settings that change the defaults: `plies` (joined by `+`; 0 is the
   reply to the candidate), `k` (candidates), `m` (recursive rollouts each), `h`
   (static plies after the candidate in a recursive rollout), `margin` (points

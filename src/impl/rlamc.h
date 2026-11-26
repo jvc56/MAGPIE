@@ -104,8 +104,8 @@ const Move *rlamc_choose_move(RlamcWorker *worker, const RlamcArgs *args,
                               uint64_t seed, BestMoveCarry *carry);
 
 // Parses a recursive search spec into args: "off"; "on", which turns recursive
-// rollouts on with the defaults, the best settings found
-// (plies=0+1,lamc=1,dcache=1,m=4,fin=0); or levels separated by '/', each
+// rollouts on with the defaults (plies=0+1,lamc=1,dcache=1,m=4,h=2,fin=1;
+// the best setting found has h=1 and fin=0); or levels separated by '/', each
 // comma-separated key=value settings that change the defaults, which also turn
 // recursive rollouts on. A level starts from the settings of the level before
 // it. Keys:
@@ -131,8 +131,8 @@ const Move *rlamc_choose_move(RlamcWorker *worker, const RlamcArgs *args,
 //           (RlamcLevel.paired)
 //   cycle   1 for a LAMC search whose rollouts cycle the bag
 //           (RlamcLevel.bag_cycle)
-//   fin     0 for rollouts that skip the static finish from an empty bag
-//           (RlamcLevel.skip_finish)
+//   fin     0 for rollouts that skip the static finish from an empty bag,
+//           1 (the default) for rollouts that play it (RlamcLevel.skip_finish)
 //   dyn, step  1 for a LAMC search whose pool changes after every step
 //           rollouts a play (RlamcLevel.dynamic and step)
 // For example "plies=0+1/plies=0,lamc=0,k=3,m=2" runs a LAMC search at the

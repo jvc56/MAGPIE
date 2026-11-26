@@ -699,11 +699,11 @@ static void test_rlamc_parse(void) {
   rlamc_args_parse("plies=0,lamc=1,cycle=1", &args, error_stack);
   assert(error_stack_is_empty(error_stack));
   assert(args.levels[0].bag_cycle);
-  assert(args.levels[0].skip_finish);
-  rlamc_args_parse("plies=0,lamc=1,fin=1", &args, error_stack);
-  assert(error_stack_is_empty(error_stack));
   assert(!args.levels[0].skip_finish);
-  // Defaults: the best setting.
+  rlamc_args_parse("plies=0,lamc=1,fin=0", &args, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  assert(args.levels[0].skip_finish);
+  // Defaults: the best setting, but with finishes.
   rlamc_args_parse("on", &args, error_stack);
   assert(error_stack_is_empty(error_stack));
   assert(args.enabled && args.depth == 1);
@@ -711,7 +711,8 @@ static void test_rlamc_parse(void) {
   assert(args.levels[0].lamc_search);
   assert(args.levels[0].decision_cache);
   assert(args.levels[0].num_samples == 4);
-  assert(args.levels[0].skip_finish);
+  assert(args.levels[0].horizon_plies == 2);
+  assert(!args.levels[0].skip_finish);
   rlamc_args_parse("off", &args, error_stack);
   assert(error_stack_is_empty(error_stack));
   assert(!args.enabled);
