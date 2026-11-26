@@ -188,9 +188,10 @@ static MoveGenArgs best_play_args(Game *game, MoveList *best,
 // best way to go out when there is one, and otherwise the best scoring play;
 // a pass when the player has no play.
 static const SmallMove *best_play_going_out_first(Game *game, MoveList *best,
-                                                  LaneShadowCache *lane_cache) {
+                                                  LaneShadowCache *lane_cache,
+                                                  const Rack *pool) {
   const MoveGenArgs args = best_play_args(game, best, lane_cache);
-  generate_moves(&args);
+  generate_best_small_move_with_pool(&args, pool);
   return best->small_moves[0];
 }
 
@@ -200,7 +201,7 @@ static const SmallMove *best_play_going_out_first(Game *game, MoveList *best,
 // whether it can go out and for how much, or else its best score; and one for
 // the mover finds its best way to go out and counts the lanes that hold one.
 static void find_features(Game *after, int mover_idx, MoveList *best,
-                          LaneShadowCache *lane_cache,
+                          LaneShadowCache *lane_cache, const Rack *opp_pool,
                           OutplayCheckFeatures *features) {
   const int opp_idx = 1 - mover_idx;
   const int opp_tiles =
@@ -208,7 +209,7 @@ static void find_features(Game *after, int mover_idx, MoveList *best,
   *features = (OutplayCheckFeatures){0};
   game_set_player_on_turn_index(after, opp_idx);
   const SmallMove *opp_best =
-      best_play_going_out_first(after, best, lane_cache);
+      best_play_going_out_first(after, best, lane_cache, opp_pool);
   if (!small_move_is_pass(opp_best)) {
     const int score = (int)small_move_get_score(opp_best);
     if (small_move_get_tiles_played(opp_best) == opp_tiles) {
@@ -263,6 +264,13 @@ static void emptying_candidate_values(OutplayScratch *scratch, const Game *game,
   // Whatever play_move draws, the mover then holds its leave and a draw, the
   // opponent the rest of the unseen tiles, and the bag is empty.
   const MachineLetter no_tiles[1] = {0};
+  Rack opp_pool;
+  rack_set_dist_size_and_reset(&opp_pool, dist_size);
+  for (int ml = 0; ml < dist_size; ml++) {
+    if (unseen[ml] > 0) {
+      rack_add_letters(&opp_pool, (MachineLetter)ml, unseen[ml]);
+    }
+  }
   for (int empty_idx = 0; empty_idx < num_emptying; empty_idx++) {
     if (scratch->afters[empty_idx] == NULL) {
       scratch->afters[empty_idx] = game_duplicate(game);
@@ -301,7 +309,7 @@ static void emptying_candidate_values(OutplayScratch *scratch, const Game *game,
       }
       OutplayCheckFeatures features;
       find_features(after, mover_idx, scratch->best, scratch->lane_cache,
-                    &features);
+                    &opp_pool, &features);
       const double draw_value =
           outplay_check_weights_value(weights, ld, held, &features);
       scratch->draw_values[empty_idx][draw_idx] = draw_value;
@@ -319,7 +327,8 @@ void outplay_check_find_features(Game *game, OutplayCheckFeatures *features) {
       lane_shadow_cache_create(OUTPLAY_CHECK_LANE_SHADOW_INDEX_BITS,
                                OUTPLAY_CHECK_ANCHOR_PLAY_INDEX_BITS);
   const int mover_idx = 1 - game_get_player_on_turn_index(game);
-  find_features(game, mover_idx, best, lane_cache, features);
+  const Rack *opp_rack = player_get_rack(game_get_player(game, 1 - mover_idx));
+  find_features(game, mover_idx, best, lane_cache, opp_rack, features);
   lane_shadow_cache_destroy(lane_cache);
   small_move_list_destroy(best);
 }

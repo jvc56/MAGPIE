@@ -9,6 +9,7 @@
 #include "../ent/lane_shadow_cache.h"
 #include "../ent/move.h"
 #include "../ent/pool_shift.h"
+#include "../ent/rack.h"
 #include "../ent/thread_control.h"
 #include "move_gen_base.h"
 #include <stdbool.h>
@@ -225,6 +226,18 @@ bool generate_best_small_move_in_lanes(const MoveGenArgs *args,
 // from searches of the anchors whose answer it did not need.
 bool generate_best_out_play_and_count_lanes(const MoveGenArgs *args,
                                             int max_lanes, int *out_lanes);
+
+// generate_moves for MOVE_RECORD_BEST_SMALL with an out bonus, canonical ties
+// and a lane shadow cache, for a caller whose generations on a board are for
+// many racks drawn from one pool of tiles: `pool` holds every tile of the
+// rack on turn, and is the same for every such generation that shares the
+// cache. The move list gets the same play. Every play of fewer tiles than the
+// rack holds is a play the pool can make, so each anchor is searched once
+// with the pool for its best few plays, which the cache keeps, and they
+// answer for every rack that holds the tiles of one of them, or bound what
+// the rack can do there. Only the anchors left are searched with the rack.
+void generate_best_small_move_with_pool(const MoveGenArgs *args,
+                                        const Rack *pool);
 
 MoveGen *get_movegen(void);
 

@@ -103,6 +103,9 @@ typedef struct MovegenBudget {
   _Atomic uint64_t spent;
 } MovegenBudget;
 
+// The plays generate_best_small_move_with_pool keeps of a pool anchor.
+enum { BEST_SMALL_POOL_PLAYS = 4 };
+
 typedef struct MoveGen {
   // Move generations made on this MoveGen: generate_moves and
   // generate_small_moves_in_lanes calls, by whichever thread holds it. Never
@@ -410,6 +413,12 @@ typedef struct MoveGen {
   // fill from that square on (see gen_set_out_room). Read only by
   // recursive_gen_small_out.
   int8_t best_small_out_room[BOARD_DIM];
+  // generate_best_small_move_with_pool: the most tiles a play of the pool
+  // places, read only by recursive_gen_small_capped, and the best plays the
+  // search of an anchor has found, best first.
+  int best_small_tile_cap;
+  int best_small_pool_play_count;
+  AnchorPlayEntry best_small_pool_plays[BEST_SMALL_POOL_PLAYS];
 } MoveGen;
 
 // Cache getter functions
