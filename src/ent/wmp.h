@@ -933,6 +933,35 @@ wmp_get_word_entry(const WMP *wmp, const BitRack *bit_rack, int word_length) {
   return entry;
 }
 
+// Starts the first load wmp_get_word_entry makes for the rack, so that a
+// caller with several racks to look up has their loads overlap.
+static inline void wmp_prefetch_word_entry(const WMP *wmp,
+                                           const BitRack *bit_rack,
+                                           int word_length) {
+  const WMPForLength *wfl = &wmp->wfls[word_length];
+  switch (bit_rack_get_letter(bit_rack, BLANK_MACHINE_LETTER)) {
+  case 0:
+    __builtin_prefetch(
+        &wfl->word_filter[wmp_index_hash(bit_rack) >> wfl->word_filter_shift]);
+    break;
+  case 1:
+    if (wfl->num_blank_buckets != 0) {
+      __builtin_prefetch(&wfl->blank_bucket_starts[bit_rack_get_bucket_index(
+          bit_rack, wfl->num_blank_buckets)]);
+    }
+    break;
+  case 2:
+    if (wfl->num_double_blank_buckets != 0) {
+      __builtin_prefetch(
+          &wfl->double_blank_bucket_starts[bit_rack_get_bucket_index(
+              bit_rack, wfl->num_double_blank_buckets)]);
+    }
+    break;
+  default:
+    break;
+  }
+}
+
 static inline int wfl_write_blanks_to_buffer(const WMPForLength *wfl,
                                              const BitRack *bit_rack,
                                              int word_length,
