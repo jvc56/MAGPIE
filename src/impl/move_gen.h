@@ -220,10 +220,15 @@ bool generate_best_small_move_in_lanes(const MoveGenArgs *args,
 // a play that does. `args` is a MOVE_RECORD_BEST_SMALL generation with an out
 // bonus and no lane shadow cache. Leaves that play as the only entry of
 // args->move_list, sets *out_lanes and returns true, or returns false with
-// *out_lanes 0 when no play uses the whole rack. One shadow of the board
-// serves both: the search for the best such play goes out from the anchors in
-// the order of their bounds, and the lanes are counted from what it found and
-// from searches of the anchors whose answer it did not need.
+// *out_lanes 0 when no play uses the whole rack. With a word map, a rack of at
+// least two tiles and at most two blanks, the plays come from the map: a play
+// of the whole rack fills a window of a lane that holds as many empty squares
+// as the rack has tiles, and its word is one the rack's tiles and the
+// window's letters make, so each window costs one lookup and nothing is
+// shadowed or searched. Otherwise one shadow of the board serves both: the
+// search for the best such play goes out from the anchors in the order of
+// their bounds, and the lanes are counted from what it found and from
+// searches of the anchors whose answer it did not need.
 bool generate_best_out_play_and_count_lanes(const MoveGenArgs *args,
                                             int max_lanes, int *out_lanes);
 
@@ -236,9 +241,11 @@ bool generate_best_out_play_and_count_lanes(const MoveGenArgs *args,
 // with the pool for its best few plays, which the cache keeps, and they
 // answer for every rack that holds the tiles of one of them, or bound what
 // the rack can do there. An anchor that could hold a play of the whole rack
-// is searched with the pool for its plays of that many tiles as well: the
-// rack makes one of those only when its tiles are the rack's. Only the
-// anchors left are searched with the rack.
+// has its lane's plays of the whole rack found in the word map, as
+// generate_best_out_play_and_count_lanes finds them; where the map does not
+// serve, it is searched with the pool for its plays of that many tiles as
+// well, since the rack makes one of those only when its tiles are the rack's.
+// Only the anchors left are searched with the rack.
 void generate_best_small_move_with_pool(const MoveGenArgs *args,
                                         const Rack *pool);
 

@@ -15,6 +15,7 @@
 #include "../def/players_data_defs.h"
 #include "../def/rack_defs.h"
 #include "../def/thread_control_defs.h"
+#include "../def/wmp_defs.h"
 #include "../ent/anchor.h"
 #include "../ent/bag.h"
 #include "../ent/best_move_carry.h"
@@ -5741,16 +5742,171 @@ static void shadow_lane_small_for_out(MoveGen *gen, int row) {
   }
 }
 
-bool generate_best_out_play_and_count_lanes(const MoveGenArgs *args,
-                                            int max_lanes, int *out_lanes) {
-  MoveGen *gen = get_movegen();
-  gen_count_movegen(gen);
-  gen_load_position(gen, args);
-  assert(gen->move_record_type == MOVE_RECORD_BEST_SMALL);
-  assert(gen->lane_shadow_cache == NULL);
-  gen_set_best_small_ranking(gen, args);
-  assert(gen->best_small_out_bonus > 0);
-  gen_set_no_out_incumbent(gen);
+// Offers one word, laid on the squares from start to end of the current lane
+// with the tiles at blank_cols played from blanks, to the generation's best.
+static void gen_offer_out_word(MoveGen *gen, const MachineLetter *word,
+                               int start, int end, uint32_t blank_cols) {
+  Equity main_word_score = 0;
+  Equity cross_score = 0;
+  int word_multiplier = 1;
+  for (int col = start; col <= end; col++) {
+    if (!gen_cache_is_empty(gen, col)) {
+      gen->strip[col] = PLAYED_THROUGH_MARKER;
+      main_word_score += gen->tile_scores[gen_cache_get_letter(gen, col)];
+      continue;
+    }
+    MachineLetter ml = word[col - start];
+    if ((blank_cols & (1U << col)) != 0) {
+      ml = get_blanked_machine_letter(ml);
+    }
+    gen->strip[col] = ml;
+    const BonusSquare bonus_square = gen_cache_get_bonus_square(gen, col);
+    const int this_word_multiplier =
+        bonus_square_get_word_multiplier(bonus_square);
+    const Equity lsm =
+        gen->tile_scores[ml] * bonus_square_get_letter_multiplier(bonus_square);
+    main_word_score += lsm;
+    word_multiplier *= this_word_multiplier;
+    if (gen_cache_get_is_cross_word(gen, col)) {
+      cross_score +=
+          (lsm + gen_cache_get_cross_score(gen, col)) * this_word_multiplier;
+    }
+  }
+  record_tile_placement_move(gen, start, end, main_word_score, word_multiplier,
+                             cross_score);
+}
+
+// Offers every play of the whole rack in lane `row` of the current direction
+// to the generation's best, from the word map: a play fills a window of the
+// lane that holds as many empty squares as the rack has tiles, with no tile
+// just past either end, and its word is one the rack's tiles and the window's
+// letters make. Returns whether the lane holds such a play.
+static bool gen_offer_lane_out_plays_from_wmp(MoveGen *gen, int row) {
+  gen->current_row_index = row;
+  gen->row_squares = board_get_row_cache(gen->board_lanes, row, gen->dir);
+  const int rack_tiles = gen->best_small_out_rack_size;
+  const int rack_blanks =
+      rack_get_letter(&gen->player_rack, BLANK_MACHINE_LETTER);
+  uint8_t buffer[WMP_RESULT_BUFFER_SIZE + WMP_WORD_BUFFER_SLACK_BYTES];
+  bool found = false;
+  gen->tiles_played = rack_tiles;
+  for (int start = 0; start < BOARD_DIM; start++) {
+    if (start > 0 && !gen_cache_is_empty(gen, start - 1)) {
+      continue;
+    }
+    BitRack letters = gen->best_small_out_bit_rack;
+    int empties = 0;
+    bool touches = false;
+    bool blocked = false;
+    int end = BOARD_DIM - 1;
+    for (int col = start; col < BOARD_DIM; col++) {
+      if (gen_cache_is_empty(gen, col)) {
+        if (empties == rack_tiles) {
+          end = col - 1;
+          break;
+        }
+        if (gen_square_is_blocked(gen, col)) {
+          blocked = true;
+          break;
+        }
+        empties++;
+      } else {
+        touches = true;
+        bit_rack_add_letter(&letters, get_unblanked_machine_letter(
+                                          gen_cache_get_letter(gen, col)));
+      }
+      touches = touches || gen_cache_get_is_anchor(gen, col);
+    }
+    if (blocked) {
+      continue;
+    }
+    if (empties < rack_tiles) {
+      // No later start has more empty squares to its right.
+      break;
+    }
+    const int length = end - start + 1;
+    if (!touches || length < MINIMUM_WORD_LENGTH) {
+      continue;
+    }
+    const WMPEntry *entry =
+        wmp_get_word_entry(gen->best_small_out_wmp, &letters, length);
+    if (entry == NULL) {
+      continue;
+    }
+    const int bytes = wmp_entry_write_words_to_buffer(
+        entry, gen->best_small_out_wmp, &letters, length, buffer);
+    for (int word_start = 0; word_start < bytes; word_start += length) {
+      const MachineLetter *word = &buffer[word_start];
+      // The word must hold the window's letters where they are and a letter
+      // each empty square allows; the letters it places that the rack lacks
+      // come from the blanks.
+      uint8_t placed[MAX_ALPHABET_SIZE] = {0};
+      uint32_t empty_cols = 0;
+      bool fits = true;
+      for (int col = start; col <= end && fits; col++) {
+        const MachineLetter ml = word[col - start];
+        if (gen_cache_is_empty(gen, col)) {
+          fits = (gen_cache_get_cross_set(gen, col) & ((uint64_t)1 << ml)) != 0;
+          placed[ml]++;
+          empty_cols |= 1U << col;
+        } else {
+          fits = get_unblanked_machine_letter(gen_cache_get_letter(gen, col)) ==
+                 ml;
+        }
+      }
+      if (!fits) {
+        continue;
+      }
+      found = true;
+      if (rack_blanks == 0) {
+        gen_offer_out_word(gen, word, start, end, 0);
+        continue;
+      }
+      // Every way to give the blanks the letters the rack lacks.
+      for (uint32_t first = empty_cols; first != 0; first &= first - 1) {
+        const int first_col = lowest_set_bit_index(first);
+        const MachineLetter first_ml = word[first_col - start];
+        if (placed[first_ml] <= rack_get_letter(&gen->player_rack, first_ml)) {
+          continue;
+        }
+        if (rack_blanks == 1) {
+          gen_offer_out_word(gen, word, start, end, 1U << first_col);
+          continue;
+        }
+        for (uint32_t second = first & (first - 1); second != 0;
+             second &= second - 1) {
+          const int second_col = lowest_set_bit_index(second);
+          const MachineLetter second_ml = word[second_col - start];
+          const int lacked =
+              placed[second_ml] - rack_get_letter(&gen->player_rack, second_ml);
+          if (lacked < (second_ml == first_ml ? 2 : 1)) {
+            continue;
+          }
+          gen_offer_out_word(gen, word, start, end,
+                             (1U << first_col) | (1U << second_col));
+        }
+      }
+    }
+  }
+  gen->tiles_played = 0;
+  return found;
+}
+
+// Whether gen_offer_lane_out_plays_from_wmp answers for this generation: the
+// word map holds the rack's words (see gen_set_best_small_ranking), a play of
+// the whole rack is a word of at least two tiles, which leaves out the plays
+// of one tile that the generator records in one direction only, and the map
+// looks up at most two blanks.
+static inline bool gen_finds_out_plays_from_wmp(const MoveGen *gen) {
+  return gen->best_small_out_wmp_tiles >= MINIMUM_WORD_LENGTH &&
+         rack_get_letter(&gen->player_rack, BLANK_MACHINE_LETTER) <= 2;
+}
+
+// generate_best_out_play_and_count_lanes by shadowing the board and searching
+// its anchors, from the no-out incumbent.
+static bool gen_search_best_out_play_and_count_lanes(MoveGen *gen,
+                                                     int max_lanes,
+                                                     int *out_lanes) {
   rack_copy(&gen->full_player_rack, &gen->player_rack);
   anchor_heap_reset(&gen->anchor_heap);
   for (int dir = 0; dir < 2; dir++) {
@@ -5813,6 +5969,46 @@ bool generate_best_out_play_and_count_lanes(const MoveGenArgs *args,
   }
   *out_lanes = lanes < max_lanes ? lanes : max_lanes;
   return true;
+}
+
+bool generate_best_out_play_and_count_lanes(const MoveGenArgs *args,
+                                            int max_lanes, int *out_lanes) {
+  MoveGen *gen = get_movegen();
+  gen_count_movegen(gen);
+  gen_load_position(gen, args);
+  assert(gen->move_record_type == MOVE_RECORD_BEST_SMALL);
+  assert(gen->lane_shadow_cache == NULL);
+  gen_set_best_small_ranking(gen, args);
+  assert(gen->best_small_out_bonus > 0);
+  gen_set_no_out_incumbent(gen);
+  if (!gen_finds_out_plays_from_wmp(gen)) {
+    return gen_search_best_out_play_and_count_lanes(gen, max_lanes, out_lanes);
+  }
+  int lanes = 0;
+  for (int dir = 0; dir < 2; dir++) {
+    gen->dir = dir;
+    for (int row = 0; row < BOARD_DIM; row++) {
+      if (gen->row_number_of_anchors_cache[(BOARD_DIM * dir) + row] != 0 &&
+          gen_offer_lane_out_plays_from_wmp(gen, row)) {
+        lanes++;
+      }
+    }
+  }
+  *out_lanes = lanes < max_lanes ? lanes : max_lanes;
+#ifndef NDEBUG
+  // The search must find the same play and count the same lanes.
+  const SmallMove found = *gen->move_list->small_moves[0];
+  gen_set_no_out_incumbent(gen);
+  int searched_lanes = 0;
+  const bool searched =
+      gen_search_best_out_play_and_count_lanes(gen, max_lanes, &searched_lanes);
+  assert(searched == (lanes > 0));
+  assert(searched_lanes == *out_lanes);
+  assert(gen->move_list->small_moves[0]->tiny_move == found.tiny_move);
+  assert(gen->move_list->small_moves[0]->metadata.score ==
+         found.metadata.score);
+#endif
+  return lanes > 0;
 }
 
 // The key of what a pool anchor's best play depends on besides its lane's
@@ -6141,6 +6337,8 @@ void generate_best_small_move_with_pool(const MoveGenArgs *args,
   gen->current_row_index = -1;
   gen->dir = -1;
   const uint32_t kwg_root_node_index = kwg_get_root_node_index(gen->kwg);
+  const bool outs_from_wmp = gen_finds_out_plays_from_wmp(gen);
+  uint64_t wmp_lanes = 0;
   while (gen->anchor_heap.count > 0) {
     const Anchor anchor = anchor_heap_extract_max(&gen->anchor_heap);
     if (better_play_has_been_found(gen, anchor.highest_possible_equity)) {
@@ -6154,9 +6352,20 @@ void generate_best_small_move_with_pool(const MoveGenArgs *args,
       continue;
     }
     // An anchor whose bound is below the out bonus holds no play of the whole
-    // rack; for the others the pool's plays of that many tiles say.
+    // rack. For the others the word map says, a lane at a time: the first of
+    // a lane's anchors offers every such play of the lane, after which no
+    // such play of any of its anchors can change the best. Without the word
+    // map the pool's plays of that many tiles say.
     pool_out_t out = POOL_OUT_NONE;
-    if (anchor.highest_possible_equity >= gen->best_small_out_bonus) {
+    if (anchor.highest_possible_equity >= gen->best_small_out_bonus &&
+        outs_from_wmp) {
+      const uint64_t lane_bit = anchor_lane_bit(&anchor);
+      if ((wmp_lanes & lane_bit) == 0) {
+        wmp_lanes |= lane_bit;
+        gen->dir = anchor.dir;
+        gen_offer_lane_out_plays_from_wmp(gen, anchor.row);
+      }
+    } else if (anchor.highest_possible_equity >= gen->best_small_out_bonus) {
       out =
           gen_offer_pool_anchor_out(gen, &search, &anchor, kwg_root_node_index);
       if (out == POOL_OUT_ANSWERED) {
