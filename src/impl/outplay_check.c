@@ -401,6 +401,12 @@ void outplay_check_choose(Game *game, const MoveList *move_list,
   int num_emptying = 0;
   for (int cand_idx = 0; cand_idx < num_candidates; cand_idx++) {
     const Move *candidate = move_list_get_move(scratch->candidates, cand_idx);
+    // A player with fewer plays than the list has room for has its pass in
+    // the list, last, with no equity to read: the candidates end before it.
+    if (move_get_type(candidate) == GAME_EVENT_PASS) {
+      num_candidates = cand_idx;
+      break;
+    }
     values[cand_idx] = equity_to_double(move_get_equity(candidate));
     if (move_get_type(candidate) == GAME_EVENT_TILE_PLACEMENT_MOVE &&
         move_get_tiles_played(candidate) >= bag_size) {
