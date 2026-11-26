@@ -513,8 +513,8 @@ static void check_lane_shadow_cache_with_word_info_table(MoveList *best_small) {
 // Over self-play games, each position's pool is the tiles of both racks, and
 // the racks checked are the rack on turn and others of its size drawn from
 // the pool, which share one cache as the draws of an out-play check do: each
-// is generated without a cache and twice with the pool, the second time over
-// what the first remembered.
+// is generated without a cache, twice with the pool, the second time over
+// what the first remembered, and once with a wider pool.
 static void check_pool_generations(const char *lexicon, bool use_wmp,
                                    MoveList *best_small) {
   char *config_str = get_formatted_string(
@@ -557,6 +557,11 @@ static void check_pool_generations(const char *lexicon, bool use_wmp,
           tiles[num_tiles++] = (MachineLetter)ml;
         }
       }
+      // With two more blanks the pool makes plays of the whole rack from more
+      // sets of tiles than a pool anchor keeps.
+      Rack wide_pool;
+      rack_copy(&wide_pool, &pool);
+      rack_add_letters(&wide_pool, BLANK_MACHINE_LETTER, 2);
       const MoveGenArgs args = {
           .game = game,
           .move_list = best_small,
@@ -584,8 +589,9 @@ static void check_pool_generations(const char *lexicon, bool use_wmp,
         }
         const SmallMove expected =
             best_small_play(game, NULL, best_small, bonus, 0);
-        for (int pass_idx = 0; pass_idx < 2; pass_idx++) {
-          generate_best_small_move_with_pool(&args, &pool);
+        for (int pass_idx = 0; pass_idx < 3; pass_idx++) {
+          generate_best_small_move_with_pool(&args,
+                                             pass_idx < 2 ? &pool : &wide_pool);
           assert(move_list_get_count(best_small) == 1);
           const SmallMove *found = best_small->small_moves[0];
           assert_same_small_play(&expected, found);
@@ -608,7 +614,7 @@ static void check_pool_generations(const char *lexicon, bool use_wmp,
          "the plays generate_moves finds: %d of the whole rack, %d passes\n",
          checks, lexicon, use_wmp ? "with" : "without", whole_rack_plays,
          passes);
-  assert(checks > 2 * POOL_TEST_RACKS * 15 * POOL_TEST_GAMES);
+  assert(checks > 3 * POOL_TEST_RACKS * 15 * POOL_TEST_GAMES);
   assert(whole_rack_plays > 0);
   move_list_destroy(top_move);
   lane_shadow_cache_destroy(cache);

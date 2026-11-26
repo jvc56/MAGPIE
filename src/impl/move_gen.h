@@ -235,7 +235,10 @@ bool generate_best_out_play_and_count_lanes(const MoveGenArgs *args,
 // rack holds is a play the pool can make, so each anchor is searched once
 // with the pool for its best few plays, which the cache keeps, and they
 // answer for every rack that holds the tiles of one of them, or bound what
-// the rack can do there. Only the anchors left are searched with the rack.
+// the rack can do there. An anchor that could hold a play of the whole rack
+// is searched with the pool for its plays of that many tiles as well: the
+// rack makes one of those only when its tiles are the rack's. Only the
+// anchors left are searched with the rack.
 void generate_best_small_move_with_pool(const MoveGenArgs *args,
                                         const Rack *pool);
 
