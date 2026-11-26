@@ -1708,14 +1708,110 @@ static inline void go_on_small(MoveGen *gen, int current_col, MachineLetter L,
   }
 }
 
+// The tiles a play places, sorted and packed, a blank as the blank: equal for
+// two plays when the same racks hold them.
+static inline uint64_t pool_play_sorted_tiles(const SmallMove *play) {
+  MachineLetter tiles[SMALL_MOVE_MAX_TILES];
+  const int num_tiles = play->metadata.tiles_played;
+  for (int tile_idx = 0; tile_idx < num_tiles; tile_idx++) {
+    const MachineLetter tile = small_move_tile_is_blank(play, tile_idx)
+                                   ? BLANK_MACHINE_LETTER
+                                   : small_move_get_tile(play, tile_idx);
+    int place = tile_idx;
+    while (place > 0 && tiles[place - 1] > tile) {
+      tiles[place] = tiles[place - 1];
+      place--;
+    }
+    tiles[place] = tile;
+  }
+  uint64_t packed = 0;
+  for (int tile_idx = 0; tile_idx < num_tiles; tile_idx++) {
+    packed = (packed << SMALL_MOVE_TILE_BITS) | tiles[tile_idx];
+  }
+  return packed;
+}
+
+// Records a play of as many tiles as the rack holds among the anchor's best
+// such plays (gen->best_small_pool_outs), ranked as record_pool_play ranks
+// them, one for each set of tiles: a rack holds such a play only when the
+// play's tiles are the rack's, so only the best of a set is ever a rack's.
+static inline void record_pool_out_play(MoveGen *gen, int leftstrip,
+                                        int rightstrip, Equity score) {
+  if (gen->tiles_played == RACK_SIZE) {
+    score += gen->bingo_bonus;
+  }
+  const Equity value = score + gen->best_small_out_bonus;
+  AnchorPlayEntry *plays = gen->best_small_pool_outs;
+  uint64_t *sorted_tiles = gen->best_small_pool_out_tiles;
+  int count = gen->best_small_pool_out_count;
+  if (count == BEST_SMALL_POOL_OUTS && value < plays[count - 1].value) {
+    return;
+  }
+  SmallMove play;
+  small_move_set_all(&play, gen->strip, leftstrip, rightstrip, score,
+                     gen->current_row_index, leftstrip, gen->tiles_played,
+                     board_is_dir_vertical(gen->dir),
+                     GAME_EVENT_TILE_PLACEMENT_MOVE);
+  const uint64_t tiles = pool_play_sorted_tiles(&play);
+  int place = count;
+  while (place > 0 && (plays[place - 1].value < value ||
+                       (plays[place - 1].value == value &&
+                        plays[place - 1].tiny_move < play.tiny_move))) {
+    place--;
+  }
+  // A better play of these tiles, or this play itself.
+  for (int better = 0; better < place; better++) {
+    if (sorted_tiles[better] == tiles) {
+      return;
+    }
+  }
+  // A worse play of these tiles gives up its place.
+  int removed = -1;
+  for (int worse = place; worse < count; worse++) {
+    if (sorted_tiles[worse] == tiles) {
+      removed = worse;
+      break;
+    }
+  }
+  int last = removed;
+  if (removed < 0) {
+    if (place == BEST_SMALL_POOL_OUTS) {
+      return;
+    }
+    // A full list gives up its last play, and stays full: so a list that is
+    // not full at the end has lost none.
+    if (count == BEST_SMALL_POOL_OUTS) {
+      last = count - 1;
+    } else {
+      last = count;
+      gen->best_small_pool_out_count = count + 1;
+    }
+  }
+  for (int later = last; later > place; later--) {
+    plays[later] = plays[later - 1];
+    sorted_tiles[later] = sorted_tiles[later - 1];
+  }
+  plays[place] = (AnchorPlayEntry){.tiny_move = play.tiny_move,
+                                   .value = value,
+                                   .score = play.metadata.score,
+                                   .play_length = play.metadata.play_length,
+                                   .tiles_played = play.metadata.tiles_played};
+  sorted_tiles[place] = tiles;
+}
+
 // Records a play of recursive_gen_small_capped among the anchor's best
 // (gen->best_small_pool_plays): by score, and for equal scores by the larger
-// tiny_move, as a best-play generation with canonical ties ranks them. Such a
-// play places fewer tiles than a rack holds, so it earns no bingo.
+// tiny_move, as a best-play generation with canonical ties ranks them. A play
+// of as many tiles as the rack holds goes to record_pool_out_play; the others
+// earn no bingo.
 static inline void record_pool_play(MoveGen *gen, int leftstrip, int rightstrip,
                                     int main_word_score, int word_multiplier,
                                     Equity cross_score) {
   const Equity score = (main_word_score * word_multiplier) + cross_score;
+  if (gen->tiles_played == gen->best_small_out_rack_size) {
+    record_pool_out_play(gen, leftstrip, rightstrip, score);
+    return;
+  }
   AnchorPlayEntry *plays = gen->best_small_pool_plays;
   int count = gen->best_small_pool_play_count;
   if (count == BEST_SMALL_POOL_PLAYS && score < plays[count - 1].value) {
@@ -5795,18 +5891,24 @@ static inline bool gen_rack_holds_play(const Rack *rack,
   return true;
 }
 
-// Searches anchor for the pool's best plays of at most
-// gen->best_small_tile_cap tiles, and remembers them by rank in the cache,
-// with an entry of no play after the last when they are fewer than
-// BEST_SMALL_POOL_PLAYS. The generation's rack is as it was on return.
+// Searches anchor for the pool's best plays of fewer tiles than the rack
+// holds, and remembers them by rank in the cache, with an entry of no play
+// after the last when they are fewer than BEST_SMALL_POOL_PLAYS. With
+// with_outs, the plays of as many tiles as the rack holds are searched too,
+// and remembered at the ranks that follow, the entry of no play after the
+// last only when the list has every set of tiles. The generation's rack is as
+// it was on return.
 static void gen_search_pool_anchor(MoveGen *gen, const PoolSearch *search,
                                    const Anchor *anchor,
                                    uint32_t kwg_root_node_index,
-                                   uint64_t lane_key) {
+                                   uint64_t lane_key, bool with_outs) {
   const uint64_t rack_cross_set = gen->rack_cross_set;
   rack_copy(&gen->player_rack, search->pool);
   gen->rack_cross_set = search->pool_cross_set;
   gen->best_small_pool_play_count = 0;
+  gen->best_small_pool_out_count = 0;
+  gen->best_small_tile_cap =
+      gen->best_small_out_rack_size - (with_outs ? 0 : 1);
   gen_set_small_anchor(gen, anchor);
   recursive_gen_small_capped(gen, anchor->col, kwg_root_node_index, anchor->col,
                              anchor->col,
@@ -5820,6 +5922,26 @@ static void gen_search_pool_anchor(MoveGen *gen, const PoolSearch *search,
         lane_shadow_cache_anchor_play(gen->lane_shadow_cache, key);
     if (rank < count) {
       *entry = gen->best_small_pool_plays[rank];
+    } else {
+      *entry = (AnchorPlayEntry){0};
+    }
+    entry->key = key;
+  }
+  if (!with_outs) {
+    return;
+  }
+  // The entry of no play follows only a list that is not full, which holds
+  // every set of tiles (see record_pool_out_play).
+  const int out_count = gen->best_small_pool_out_count;
+  const int out_entries =
+      out_count + (out_count < BEST_SMALL_POOL_OUTS ? 1 : 0);
+  for (int rank = 0; rank < out_entries; rank++) {
+    const uint64_t key = gen_pool_anchor_play_key(lane_key, anchor,
+                                                  BEST_SMALL_POOL_PLAYS + rank);
+    AnchorPlayEntry *entry =
+        lane_shadow_cache_anchor_play(gen->lane_shadow_cache, key);
+    if (rank < out_count) {
+      *entry = gen->best_small_pool_outs[rank];
     } else {
       *entry = (AnchorPlayEntry){0};
     }
@@ -5854,7 +5976,87 @@ static void gen_assert_pool_anchor_answer(MoveGen *gen, const Anchor *anchor,
           gen->move_list->count != 0 &&
           found.tiny_move <= gen->move_list->small_moves[0]->tiny_move));
 }
+
+// Asserts that a search of anchor with the rack finds no play of the whole
+// rack.
+static void gen_assert_pool_anchor_holds_no_out(MoveGen *gen,
+                                                const Anchor *anchor,
+                                                uint32_t kwg_root_node_index) {
+  const BestSmallIncumbent incumbent = gen_set_aside_incumbent(gen);
+  gen_set_small_anchor(gen, anchor);
+  recursive_gen_small(gen, anchor->col, kwg_root_node_index, anchor->col,
+                      anchor->col, gen->dir == BOARD_HORIZONTAL_DIRECTION, 0, 1,
+                      0);
+  const AnchorPlayEntry found = gen_best_small_entry(gen, 0);
+  gen_restore_incumbent(gen, &incumbent);
+  assert(found.tiny_move == 0 || found.value < gen->best_small_out_bonus);
+}
 #endif
+
+typedef enum {
+  POOL_OUT_ANSWERED,
+  POOL_OUT_NONE,
+  POOL_OUT_UNKNOWN,
+} pool_out_t;
+
+// Answers for an anchor that could hold a play of the whole rack whether it
+// does, from the pool's plays of that many tiles there, best first, one for
+// each set of tiles: the rack holds one of them only when its tiles are the
+// rack's, and that one is the rack's best play there, since such a play
+// outranks every other. It is offered to the generation's best, and once one
+// cannot change the generation's best, nor can any play of the anchor
+// (POOL_OUT_ANSWERED). The rack holding none of a list that has every set of
+// tiles, the anchor holds no such play for it (POOL_OUT_NONE); with a full
+// list, which may have lost one, the anchor needs a search with the rack
+// (POOL_OUT_UNKNOWN).
+static pool_out_t gen_offer_pool_anchor_out(MoveGen *gen, PoolSearch *search,
+                                            const Anchor *anchor,
+                                            uint32_t kwg_root_node_index) {
+  const uint64_t lane_key = gen_pool_lane_key(gen, search, anchor);
+  bool searched = false;
+  for (int rank = 0; rank < BEST_SMALL_POOL_OUTS; rank++) {
+    const uint64_t key = gen_pool_anchor_play_key(lane_key, anchor,
+                                                  BEST_SMALL_POOL_PLAYS + rank);
+    AnchorPlayEntry pool_play =
+        *lane_shadow_cache_anchor_play(gen->lane_shadow_cache, key);
+    if (pool_play.key != key) {
+      if (searched) {
+        return POOL_OUT_UNKNOWN;
+      }
+      gen_search_pool_anchor(gen, search, anchor, kwg_root_node_index, lane_key,
+                             true);
+      searched = true;
+      pool_play = *lane_shadow_cache_anchor_play(gen->lane_shadow_cache, key);
+      if (pool_play.key != key) {
+        return POOL_OUT_UNKNOWN;
+      }
+    }
+    if (pool_play.tiny_move == 0) {
+#ifndef NDEBUG
+      gen_assert_pool_anchor_holds_no_out(gen, anchor, kwg_root_node_index);
+#endif
+      return POOL_OUT_NONE;
+    }
+    if (pool_play.value < gen->best_move_equity_or_score ||
+        (pool_play.value == gen->best_move_equity_or_score &&
+         gen->move_list->count != 0 &&
+         pool_play.tiny_move <= gen->move_list->small_moves[0]->tiny_move)) {
+#ifndef NDEBUG
+      gen_assert_pool_anchor_answer(gen, anchor, kwg_root_node_index, NULL);
+#endif
+      return POOL_OUT_ANSWERED;
+    }
+    if (gen_rack_holds_play(&gen->player_rack, &pool_play)) {
+#ifndef NDEBUG
+      gen_assert_pool_anchor_answer(gen, anchor, kwg_root_node_index,
+                                    &pool_play);
+#endif
+      gen_offer_cached_play(gen, &pool_play);
+      return POOL_OUT_ANSWERED;
+    }
+  }
+  return POOL_OUT_UNKNOWN;
+}
 
 // Answers for an anchor that holds no play of the whole rack from the pool's
 // plays there, best first. Each play of the rack there is one of the pool's,
@@ -5878,8 +6080,8 @@ static bool gen_offer_pool_anchor_play(MoveGen *gen, PoolSearch *search,
       if (searched) {
         return false;
       }
-      gen_search_pool_anchor(gen, search, anchor, kwg_root_node_index,
-                             lane_key);
+      gen_search_pool_anchor(gen, search, anchor, kwg_root_node_index, lane_key,
+                             false);
       searched = true;
       pool_play = *lane_shadow_cache_anchor_play(gen->lane_shadow_cache, key);
       if (pool_play.key != key) {
@@ -5952,8 +6154,16 @@ void generate_best_small_move_with_pool(const MoveGenArgs *args,
       continue;
     }
     // An anchor whose bound is below the out bonus holds no play of the whole
-    // rack.
-    if (anchor.highest_possible_equity < gen->best_small_out_bonus &&
+    // rack; for the others the pool's plays of that many tiles say.
+    pool_out_t out = POOL_OUT_NONE;
+    if (anchor.highest_possible_equity >= gen->best_small_out_bonus) {
+      out =
+          gen_offer_pool_anchor_out(gen, &search, &anchor, kwg_root_node_index);
+      if (out == POOL_OUT_ANSWERED) {
+        continue;
+      }
+    }
+    if (out == POOL_OUT_NONE &&
         gen_offer_pool_anchor_play(gen, &search, &anchor,
                                    kwg_root_node_index)) {
       continue;

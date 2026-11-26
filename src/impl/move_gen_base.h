@@ -103,8 +103,13 @@ typedef struct MovegenBudget {
   _Atomic uint64_t spent;
 } MovegenBudget;
 
-// The plays generate_best_small_move_with_pool keeps of a pool anchor.
-enum { BEST_SMALL_POOL_PLAYS = 4 };
+// The plays generate_best_small_move_with_pool keeps of a pool anchor, of
+// fewer tiles than the rack holds.
+enum {
+  BEST_SMALL_POOL_PLAYS = 4,
+  // The plays of as many tiles as the rack holds, one for each set of tiles.
+  BEST_SMALL_POOL_OUTS = 8,
+};
 
 typedef struct MoveGen {
   // Move generations made on this MoveGen: generate_moves and
@@ -419,6 +424,11 @@ typedef struct MoveGen {
   int best_small_tile_cap;
   int best_small_pool_play_count;
   AnchorPlayEntry best_small_pool_plays[BEST_SMALL_POOL_PLAYS];
+  // The same for the plays of as many tiles as the rack holds.
+  // One for each set of tiles, with the tiles sorted and packed.
+  int best_small_pool_out_count;
+  AnchorPlayEntry best_small_pool_outs[BEST_SMALL_POOL_OUTS];
+  uint64_t best_small_pool_out_tiles[BEST_SMALL_POOL_OUTS];
 } MoveGen;
 
 // Cache getter functions
