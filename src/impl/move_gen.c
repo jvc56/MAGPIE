@@ -5776,119 +5776,178 @@ static void gen_offer_out_word(MoveGen *gen, const MachineLetter *word,
                              cross_score);
 }
 
-// Offers every play of the whole rack in lane `row` of the current direction
-// to the generation's best, from the word map: a play fills a window of the
-// lane that holds as many empty squares as the rack has tiles, with no tile
-// just past either end, and its word is one the rack's tiles and the window's
-// letters make. Returns whether the lane holds such a play.
-static bool gen_offer_lane_out_plays_from_wmp(MoveGen *gen, int row) {
+// A window of a lane that a play of the whole rack could fill, with the
+// letters of the rack and of the window's tiles.
+typedef struct OutWindow {
+  BitRack letters;
+  int dir;
+  int row;
+  int start;
+  int end;
+} OutWindow;
+
+enum { OUT_WINDOWS_PER_LANE = BOARD_DIM };
+
+// Adds the windows of lane `row` of the current direction to `windows`, and
+// starts the word map's load for each. A play of the whole rack fills a
+// window that holds as many empty squares as the rack has tiles, with no tile
+// just past either end, none of them a square no tile of the rack is allowed
+// on, and holding a tile or an anchor square. Returns how many it added.
+static int gen_add_lane_out_windows(MoveGen *gen, int row, OutWindow *windows) {
   gen->current_row_index = row;
   gen->row_squares = board_get_row_cache(gen->board_lanes, row, gen->dir);
   const int rack_tiles = gen->best_small_out_rack_size;
+  // One pass over the lane: its empty squares, and running counts of the
+  // empty squares no tile of the rack is allowed on and of the anchor squares.
+  int empty_cols[BOARD_DIM];
+  int blocked_before[BOARD_DIM + 1];
+  int anchors_before[BOARD_DIM + 1];
+  int num_empty = 0;
+  blocked_before[0] = 0;
+  anchors_before[0] = 0;
+  for (int col = 0; col < BOARD_DIM; col++) {
+    if (gen_cache_is_empty(gen, col)) {
+      empty_cols[num_empty] = col;
+      blocked_before[num_empty + 1] =
+          blocked_before[num_empty] + (gen_square_is_blocked(gen, col) ? 1 : 0);
+      num_empty++;
+    }
+    anchors_before[col + 1] =
+        anchors_before[col] + (gen_cache_get_is_anchor(gen, col) ? 1 : 0);
+  }
+  // The window of the empty squares from first on starts just past the empty
+  // square before them and ends just before the one after them, so a lane has
+  // one for each run of rack_tiles empty squares; its letters are kept from
+  // window to window.
+  BitRack letters = gen->best_small_out_bit_rack;
+  int start = 0;
+  int end = -1;
+  int added = 0;
+  for (int first = 0; first + rack_tiles <= num_empty; first++) {
+    const int next_start = first == 0 ? 0 : empty_cols[first - 1] + 1;
+    const int next_end = first + rack_tiles < num_empty
+                             ? empty_cols[first + rack_tiles] - 1
+                             : BOARD_DIM - 1;
+    for (int col = start; col < next_start; col++) {
+      if (!gen_cache_is_empty(gen, col)) {
+        bit_rack_take_letter(&letters, get_unblanked_machine_letter(
+                                           gen_cache_get_letter(gen, col)));
+      }
+    }
+    for (int col = end + 1; col <= next_end; col++) {
+      if (!gen_cache_is_empty(gen, col)) {
+        bit_rack_add_letter(&letters, get_unblanked_machine_letter(
+                                          gen_cache_get_letter(gen, col)));
+      }
+    }
+    start = next_start;
+    end = next_end;
+    const int length = end - start + 1;
+    if (blocked_before[first + rack_tiles] != blocked_before[first] ||
+        length < MINIMUM_WORD_LENGTH ||
+        (length == rack_tiles &&
+         anchors_before[end + 1] == anchors_before[start])) {
+      continue;
+    }
+    wmp_prefetch_word_entry(gen->best_small_out_wmp, &letters, length);
+    windows[added++] = (OutWindow){.letters = letters,
+                                   .dir = gen->dir,
+                                   .row = row,
+                                   .start = start,
+                                   .end = end};
+  }
+  return added;
+}
+
+// Offers every play of the whole rack in a window to the generation's best:
+// its word is one the word map holds for the window's letters. Returns whether
+// the window holds such a play.
+static bool gen_offer_out_window_plays(MoveGen *gen, const OutWindow *window) {
+  const int start = window->start;
+  const int end = window->end;
+  const int length = end - start + 1;
+  const WMPEntry *entry =
+      wmp_get_word_entry(gen->best_small_out_wmp, &window->letters, length);
+  if (entry == NULL) {
+    return false;
+  }
+  gen->dir = window->dir;
+  gen->current_row_index = window->row;
+  gen->row_squares =
+      board_get_row_cache(gen->board_lanes, window->row, window->dir);
+  gen->tiles_played = gen->best_small_out_rack_size;
   const int rack_blanks =
       rack_get_letter(&gen->player_rack, BLANK_MACHINE_LETTER);
   uint8_t buffer[WMP_RESULT_BUFFER_SIZE + WMP_WORD_BUFFER_SLACK_BYTES];
   bool found = false;
-  gen->tiles_played = rack_tiles;
-  for (int start = 0; start < BOARD_DIM; start++) {
-    if (start > 0 && !gen_cache_is_empty(gen, start - 1)) {
-      continue;
-    }
-    BitRack letters = gen->best_small_out_bit_rack;
-    int empties = 0;
-    bool touches = false;
-    bool blocked = false;
-    int end = BOARD_DIM - 1;
-    for (int col = start; col < BOARD_DIM; col++) {
+  const int bytes = wmp_entry_write_words_to_buffer(
+      entry, gen->best_small_out_wmp, &window->letters, length, buffer);
+  for (int word_start = 0; word_start < bytes; word_start += length) {
+    const MachineLetter *word = &buffer[word_start];
+    // The word must hold the window's letters where they are and a letter
+    // each empty square allows; the letters it places that the rack lacks
+    // come from the blanks.
+    uint8_t placed[MAX_ALPHABET_SIZE] = {0};
+    uint32_t empty_cols = 0;
+    bool fits = true;
+    for (int col = start; col <= end && fits; col++) {
+      const MachineLetter ml = word[col - start];
       if (gen_cache_is_empty(gen, col)) {
-        if (empties == rack_tiles) {
-          end = col - 1;
-          break;
-        }
-        if (gen_square_is_blocked(gen, col)) {
-          blocked = true;
-          break;
-        }
-        empties++;
+        fits = (gen_cache_get_cross_set(gen, col) & ((uint64_t)1 << ml)) != 0;
+        placed[ml]++;
+        empty_cols |= 1U << col;
       } else {
-        touches = true;
-        bit_rack_add_letter(&letters, get_unblanked_machine_letter(
-                                          gen_cache_get_letter(gen, col)));
+        fits =
+            get_unblanked_machine_letter(gen_cache_get_letter(gen, col)) == ml;
       }
-      touches = touches || gen_cache_get_is_anchor(gen, col);
     }
-    if (blocked) {
+    if (!fits) {
       continue;
     }
-    if (empties < rack_tiles) {
-      // No later start has more empty squares to its right.
-      break;
-    }
-    const int length = end - start + 1;
-    if (!touches || length < MINIMUM_WORD_LENGTH) {
+    found = true;
+    if (rack_blanks == 0) {
+      gen_offer_out_word(gen, word, start, end, 0);
       continue;
     }
-    const WMPEntry *entry =
-        wmp_get_word_entry(gen->best_small_out_wmp, &letters, length);
-    if (entry == NULL) {
-      continue;
-    }
-    const int bytes = wmp_entry_write_words_to_buffer(
-        entry, gen->best_small_out_wmp, &letters, length, buffer);
-    for (int word_start = 0; word_start < bytes; word_start += length) {
-      const MachineLetter *word = &buffer[word_start];
-      // The word must hold the window's letters where they are and a letter
-      // each empty square allows; the letters it places that the rack lacks
-      // come from the blanks.
-      uint8_t placed[MAX_ALPHABET_SIZE] = {0};
-      uint32_t empty_cols = 0;
-      bool fits = true;
-      for (int col = start; col <= end && fits; col++) {
-        const MachineLetter ml = word[col - start];
-        if (gen_cache_is_empty(gen, col)) {
-          fits = (gen_cache_get_cross_set(gen, col) & ((uint64_t)1 << ml)) != 0;
-          placed[ml]++;
-          empty_cols |= 1U << col;
-        } else {
-          fits = get_unblanked_machine_letter(gen_cache_get_letter(gen, col)) ==
-                 ml;
-        }
-      }
-      if (!fits) {
+    // Every way to give the blanks the letters the rack lacks.
+    for (uint32_t first = empty_cols; first != 0; first &= first - 1) {
+      const int first_col = lowest_set_bit_index(first);
+      const MachineLetter first_ml = word[first_col - start];
+      if (placed[first_ml] <= rack_get_letter(&gen->player_rack, first_ml)) {
         continue;
       }
-      found = true;
-      if (rack_blanks == 0) {
-        gen_offer_out_word(gen, word, start, end, 0);
+      if (rack_blanks == 1) {
+        gen_offer_out_word(gen, word, start, end, 1U << first_col);
         continue;
       }
-      // Every way to give the blanks the letters the rack lacks.
-      for (uint32_t first = empty_cols; first != 0; first &= first - 1) {
-        const int first_col = lowest_set_bit_index(first);
-        const MachineLetter first_ml = word[first_col - start];
-        if (placed[first_ml] <= rack_get_letter(&gen->player_rack, first_ml)) {
+      for (uint32_t second = first & (first - 1); second != 0;
+           second &= second - 1) {
+        const int second_col = lowest_set_bit_index(second);
+        const MachineLetter second_ml = word[second_col - start];
+        const int lacked =
+            placed[second_ml] - rack_get_letter(&gen->player_rack, second_ml);
+        if (lacked < (second_ml == first_ml ? 2 : 1)) {
           continue;
         }
-        if (rack_blanks == 1) {
-          gen_offer_out_word(gen, word, start, end, 1U << first_col);
-          continue;
-        }
-        for (uint32_t second = first & (first - 1); second != 0;
-             second &= second - 1) {
-          const int second_col = lowest_set_bit_index(second);
-          const MachineLetter second_ml = word[second_col - start];
-          const int lacked =
-              placed[second_ml] - rack_get_letter(&gen->player_rack, second_ml);
-          if (lacked < (second_ml == first_ml ? 2 : 1)) {
-            continue;
-          }
-          gen_offer_out_word(gen, word, start, end,
-                             (1U << first_col) | (1U << second_col));
-        }
+        gen_offer_out_word(gen, word, start, end,
+                           (1U << first_col) | (1U << second_col));
       }
     }
   }
   gen->tiles_played = 0;
+  return found;
+}
+
+// Offers every play of the whole rack in lane `row` of the current direction
+// to the generation's best, from the word map. Returns whether the lane holds
+// such a play.
+static bool gen_offer_lane_out_plays_from_wmp(MoveGen *gen, int row) {
+  OutWindow windows[OUT_WINDOWS_PER_LANE];
+  const int num_windows = gen_add_lane_out_windows(gen, row, windows);
+  bool found = false;
+  for (int window_idx = 0; window_idx < num_windows; window_idx++) {
+    found = gen_offer_out_window_plays(gen, &windows[window_idx]) || found;
+  }
   return found;
 }
 
@@ -5984,14 +6043,29 @@ bool generate_best_out_play_and_count_lanes(const MoveGenArgs *args,
   if (!gen_finds_out_plays_from_wmp(gen)) {
     return gen_search_best_out_play_and_count_lanes(gen, max_lanes, out_lanes);
   }
-  int lanes = 0;
+  // Every lane's windows first, so that the word map's loads for them
+  // overlap.
+  OutWindow windows[2 * BOARD_DIM * OUT_WINDOWS_PER_LANE];
+  int num_windows = 0;
   for (int dir = 0; dir < 2; dir++) {
     gen->dir = dir;
     for (int row = 0; row < BOARD_DIM; row++) {
-      if (gen->row_number_of_anchors_cache[(BOARD_DIM * dir) + row] != 0 &&
-          gen_offer_lane_out_plays_from_wmp(gen, row)) {
-        lanes++;
+      if (gen->row_number_of_anchors_cache[(BOARD_DIM * dir) + row] != 0) {
+        num_windows +=
+            gen_add_lane_out_windows(gen, row, &windows[num_windows]);
       }
+    }
+  }
+  uint64_t found_lanes = 0;
+  int lanes = 0;
+  for (int window_idx = 0; window_idx < num_windows; window_idx++) {
+    const OutWindow *window = &windows[window_idx];
+    const uint64_t lane_bit = UINT64_C(1)
+                              << ((BOARD_DIM * window->dir) + window->row);
+    if (gen_offer_out_window_plays(gen, window) &&
+        (found_lanes & lane_bit) == 0) {
+      found_lanes |= lane_bit;
+      lanes++;
     }
   }
   *out_lanes = lanes < max_lanes ? lanes : max_lanes;
