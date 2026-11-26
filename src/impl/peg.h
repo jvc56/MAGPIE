@@ -248,6 +248,11 @@ typedef struct PegArgs {
   // zero-initialized PegArgs) uses the pessimistic model only where a rollout
   // is used, so with nesting on only at the greedy seed.
   bool nested_pessimistic;
+  // A nested opponent that chooses from what it can see makes one choice per
+  // rack, which every scenario of a candidate's stage that leaves it that rack
+  // shares. True makes the choice again on each scenario instead, as a check:
+  // the results are the same. False (a zero-initialized PegArgs) shares it.
+  bool nested_choose_per_scenario;
 
   // EndgameArgs.disable_best_reply_shortcuts for every endgame solve the PEG
   // runs. False (a zero-initialized PegArgs) leaves the shortcuts on.
@@ -555,6 +560,11 @@ typedef struct PegResult {
 
   // How many times a nested search handed the rest of its loop to idle threads.
   int n_lends;
+  // How many nested choices of the opponent were made for a rack and shared
+  // by the scenarios that leave it that rack (see
+  // PegArgs.nested_choose_per_scenario): one for each rack of each candidate
+  // in each stage that nests.
+  int n_shared_nested_choices;
 } PegResult;
 
 // Per-scenario detail row.

@@ -1351,6 +1351,69 @@ void movegen_within_x_of_best_test(bool use_wmp) {
   config_destroy(config);
 }
 
+// A list with less room than there are plays must hold the best of them: the
+// plays that lead a list with room for all, in the same order once sorted.
+// A full list prunes by its worst play (gen_insert_spare_move_all).
+static void movegen_full_list_test(bool use_wmp) {
+  char *config_str =
+      get_formatted_string("set -lex CSW21 -wmp %s -s1 equity -s2 equity "
+                           "-r1 all -r2 all -numplays 1",
+                           use_wmp ? "true" : "false");
+  Config *config = config_create_or_die(config_str);
+  free(config_str);
+  Game *game = config_game_create(config);
+  MoveList *all_plays = move_list_create(100000);
+  const int capacities[] = {1, 2, 5, 15, 60};
+  const int num_capacities = (int)(sizeof(capacities) / sizeof(capacities[0]));
+  MoveGenArgs move_gen_args = {
+      .game = game,
+      .move_record_type = MOVE_RECORD_ALL,
+      .move_sort_type = MOVE_SORT_EQUITY,
+      .eq_margin_movegen = 0,
+      .target_equity = EQUITY_MAX_VALUE,
+  };
+  int positions = 0;
+  int full_lists = 0;
+  for (uint64_t seed = 1; seed <= 6; seed++) {
+    game_reset(game);
+    game_seed(game, seed);
+    draw_starting_racks(game);
+    while (game_get_game_end_reason(game) == GAME_END_REASON_NONE) {
+      move_gen_args.move_list = all_plays;
+      generate_moves(&move_gen_args);
+      SortedMoveList *sorted_all = sorted_move_list_create(all_plays);
+      for (int capacity_idx = 0; capacity_idx < num_capacities;
+           capacity_idx++) {
+        const int capacity = capacities[capacity_idx];
+        MoveList *best_plays = move_list_create(capacity);
+        move_gen_args.move_list = best_plays;
+        generate_moves(&move_gen_args);
+        SortedMoveList *sorted_best = sorted_move_list_create(best_plays);
+        const int expected_count =
+            sorted_all->count < capacity ? sorted_all->count : capacity;
+        assert(sorted_best->count == expected_count);
+        for (int move_idx = 0; move_idx < expected_count; move_idx++) {
+          assert_moves_are_equal(sorted_best->moves[move_idx],
+                                 sorted_all->moves[move_idx]);
+        }
+        if (sorted_all->count > capacity) {
+          full_lists++;
+        }
+        sorted_move_list_destroy(sorted_best);
+        move_list_destroy(best_plays);
+      }
+      positions++;
+      play_move(sorted_all->moves[0], game, NULL);
+      sorted_move_list_destroy(sorted_all);
+    }
+  }
+  assert(positions > 100);
+  assert(full_lists > 4 * 100);
+  move_list_destroy(all_plays);
+  game_destroy(game);
+  config_destroy(config);
+}
+
 void movegen_should_not_gen_exchanges(void) {
   Config *config = config_create_default_test();
   load_and_exec_config_or_die(
@@ -2080,6 +2143,8 @@ void test_move_gen(void) {
   movegen_only_one_player_wmp();
   movegen_within_x_of_best_test(false);
   movegen_within_x_of_best_test(true);
+  movegen_full_list_test(false);
+  movegen_full_list_test(true);
   movegen_many_moves();
   movegen_should_not_gen_exchanges();
   movegen_does_not_return_early_from_anchor();

@@ -103,6 +103,14 @@ typedef struct MovegenBudget {
   _Atomic uint64_t spent;
 } MovegenBudget;
 
+// The plays generate_best_small_move_with_pool keeps of a pool anchor, of
+// fewer tiles than the rack holds.
+enum {
+  BEST_SMALL_POOL_PLAYS = 4,
+  // The plays of as many tiles as the rack holds, one for each set of tiles.
+  BEST_SMALL_POOL_OUTS = 8,
+};
+
 typedef struct MoveGen {
   // Move generations made on this MoveGen: generate_moves and
   // generate_small_moves_in_lanes calls, by whichever thread holds it. Never
@@ -405,6 +413,22 @@ typedef struct MoveGen {
   int best_small_out_wmp_tiles;
   const WMP *best_small_out_wmp;
   BitRack best_small_out_bit_rack;
+  // generate_best_out_play_and_count_lanes, for the anchor it searches: by
+  // column of the lane, the most empty squares a play of the anchor can still
+  // fill from that square on (see gen_set_out_room). Read only by
+  // recursive_gen_small_out.
+  int8_t best_small_out_room[BOARD_DIM];
+  // generate_best_small_move_with_pool: the most tiles a play of the pool
+  // places, read only by recursive_gen_small_capped, and the best plays the
+  // search of an anchor has found, best first.
+  int best_small_tile_cap;
+  int best_small_pool_play_count;
+  AnchorPlayEntry best_small_pool_plays[BEST_SMALL_POOL_PLAYS];
+  // The same for the plays of as many tiles as the rack holds.
+  // One for each set of tiles, with the tiles sorted and packed.
+  int best_small_pool_out_count;
+  AnchorPlayEntry best_small_pool_outs[BEST_SMALL_POOL_OUTS];
+  uint64_t best_small_pool_out_tiles[BEST_SMALL_POOL_OUTS];
 } MoveGen;
 
 // Cache getter functions
@@ -668,6 +692,20 @@ static inline void gen_update_cutoff_equity_or_score(MoveGen *gen) {
   (void)previous_cutoff;
 }
 
+// MOVE_RECORD_ALL: inserts the spare move. A full list keeps a play only when
+// compare_moves ranks it above the list's worst (the heap's root), which a
+// play worth less than the worst never is, so from then on the worst's
+// equity is the cutoff; it only rises. A list with room for every play never
+// fills, and keeps no cutoff.
+static inline void gen_insert_spare_move_all(MoveGen *gen,
+                                             Equity move_equity_or_score) {
+  move_list_insert_spare_move(gen->move_list, move_equity_or_score);
+  if (move_list_get_count(gen->move_list) ==
+      move_list_get_capacity(gen->move_list)) {
+    gen->cutoff_equity_or_score = move_list_peek_equity(gen->move_list);
+  }
+}
+
 static inline void
 gen_insert_spare_move_within_x_equity_of_best(MoveGen *gen,
                                               Equity move_equity_or_score) {
@@ -756,7 +794,7 @@ static inline void update_best_move_or_insert_into_movelist(
       // afterward.
       gen_insert_spare_move_within_x_equity_of_best(gen, move_equity_or_score);
     } else {
-      move_list_insert_spare_move(gen->move_list, move_equity_or_score);
+      gen_insert_spare_move_all(gen, move_equity_or_score);
     }
     break;
   case MOVE_RECORD_BEST:;
@@ -874,10 +912,13 @@ static inline void record_tile_placement_move(MoveGen *gen, int leftstrip,
 static inline bool better_play_has_been_found(const MoveGen *gen,
                                               Equity highest_possible_value) {
   switch (gen->move_record_type) {
-  case MOVE_RECORD_ALL:
   case MOVE_RECORD_ALL_SMALL:
   case MOVE_RECORD_TILES_PLAYED:
     return false;
+    break;
+  case MOVE_RECORD_ALL:
+    // The cutoff stays EQUITY_INITIAL_VALUE until the list is full (see
+    // gen_insert_spare_move_all).
     break;
   case MOVE_RECORD_WITHIN_X_EQUITY_OF_BEST:
     if (gen->best_move_equity_or_score == EQUITY_INITIAL_VALUE) {

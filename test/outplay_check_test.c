@@ -31,6 +31,13 @@
 #include <stdlib.h>
 #include <string.h>
 
+enum {
+  // test_outplay_check_few_plays: room for every play of its position, and
+  // the candidates the check takes (OUTPLAY_CHECK_CANDIDATES).
+  FEW_PLAYS_LIST_CAPACITY = 100,
+  FEW_PLAYS_CHECK_CANDIDATES = 8,
+};
+
 // Weights whose value the test works out by hand. A pair is in the letter
 // distribution's order.
 #define OUTPLAY_CHECK_TEST_WEIGHTS                                             \
@@ -440,7 +447,66 @@ static void test_outplay_check_features(void) {
   test_outplay_check_features_with_wmp(true);
 }
 
+// A player with fewer plays than the check takes candidates has its pass
+// among them, which has no equity to read. The position is from NWL23
+// self-play: seven plays, four tiles in the bag.
+static void test_outplay_check_few_plays(void) {
+  char *dir = test_platform_make_temporary_directory("outcheck_few_plays");
+  write_weights_file(dir, "avoid_outs",
+                     "letterdistribution,english\nconst|oo,-60\nE,3\n");
+  char *data_paths = weights_data_paths(dir);
+  ErrorStack *error_stack = error_stack_create();
+  OutplayCheckWeights *weights =
+      outplay_check_weights_create(data_paths, "avoid_outs", error_stack);
+  assert(error_stack_is_empty(error_stack));
+  Config *config = config_create_or_die(
+      "set -lex NWL23 -wmp false -s1 equity -s2 equity -r1 all -r2 all "
+      "-numplays 1");
+  load_and_exec_config_or_die(
+      config,
+      "cgp 14u/12GIN/11WETS/10NOM1H/10AW1Ai/9TIE1IF/7V1HAET1T/6VIBED1INS/"
+      "7G1YE1T2/5JIAO1S1LEE/4COD1XU1QI1R/5TOR3UNDE/5SLIP1LAG2/7FAB1K1PE/"
+      "8MONEYER ACDENOR/AAILRUU 315/443 0");
+  Game *game = config_get_game(config);
+  MoveList *plays = move_list_create(FEW_PLAYS_LIST_CAPACITY);
+  const MoveGenArgs args = {
+      .game = game,
+      .move_list = plays,
+      .move_record_type = MOVE_RECORD_ALL,
+      .move_sort_type = MOVE_SORT_EQUITY,
+      .override_kwg = NULL,
+      .eq_margin_movegen = 0,
+      .target_equity = EQUITY_MAX_VALUE,
+  };
+  generate_moves(&args);
+  int tile_plays = 0;
+  int passes = 0;
+  for (int play_idx = 0; play_idx < move_list_get_count(plays); play_idx++) {
+    const game_event_t type =
+        move_get_type(move_list_get_move(plays, play_idx));
+    tile_plays += type == GAME_EVENT_TILE_PLACEMENT_MOVE ? 1 : 0;
+    passes += type == GAME_EVENT_PASS ? 1 : 0;
+  }
+  assert(tile_plays > 0 && tile_plays < FEW_PLAYS_CHECK_CANDIDATES);
+  assert(passes == 1);
+  MoveList *best = move_list_create(1);
+  const Move top = *get_top_equity_move(game, best);
+  assert(move_get_type(&top) == GAME_EVENT_TILE_PLACEMENT_MOVE);
+  outplay_check_choose(game, best, weights);
+  assert(move_get_type(move_list_get_move(best, 0)) ==
+         GAME_EVENT_TILE_PLACEMENT_MOVE);
+  move_list_destroy(best);
+  move_list_destroy(plays);
+  config_destroy(config);
+  outplay_check_weights_destroy(weights);
+  error_stack_destroy(error_stack);
+  free(data_paths);
+  test_platform_remove_directory_tree(dir);
+  free(dir);
+}
+
 void test_outplay_check(void) {
+  test_outplay_check_few_plays();
   test_outplay_check_weights_file();
   test_outplay_check_config();
   test_outplay_check_features();
