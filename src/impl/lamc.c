@@ -36,23 +36,31 @@ enum {
   // Each fit chooses its length scale among this many multiples of the
   // configured one, by marginal likelihood.
   LAMC_NUM_LENGTH_SCALE_MULTIPLES = 4,
-  // And its signal variance among this many multiples of the estimate.
-  LAMC_NUM_SIGNAL_MULTIPLES = 3,
+  // And its signal variance among this many values.
+  LAMC_NUM_SIGNAL_VARIANCES = 9,
   // A sample limit above this is no limit (the config default is 10^12).
   LAMC_UNLIMITED_SAMPLES = 1000000000,
 };
 
-// Small multiples of the signal variance let a fit fall back on the prior
-// mean when the samples are too noisy to show anything beyond it.
-static const double lamc_signal_multiples[LAMC_NUM_SIGNAL_MULTIPLES] = {
-    0.1, 0.3, 1.0};
+// The signal variances a fit chooses among: standard deviations from 0.3 to
+// 32 win percentage points about the prior mean, since win percentages lie in
+// [0, 1]. They are fixed values, not multiples of the residuals' excess
+// variance over the noise: with few noisy samples a play, such as single
+// rollouts that play out to the end of the game (-sfinish) and score 0 or 1,
+// that estimate comes out negative, and multiples of its floor left every
+// prediction on the prior mean, so the search ranked plays by static equity
+// alone. The smallest values still let a fit fall back on the prior mean
+// when the samples show nothing beyond it.
+static const double lamc_signal_variances[LAMC_NUM_SIGNAL_VARIANCES] = {
+    1e-5, 3e-5, 1e-4, 3e-4, 1e-3, 3e-3, 1e-2, 3e-2, 1e-1};
+// The signal variance used if no fit succeeds.
+#define LAMC_FALLBACK_SIGNAL_VARIANCE 1e-3
 
 static const double
     lamc_length_scale_multiples[LAMC_NUM_LENGTH_SCALE_MULTIPLES] = {0.5, 1.0,
                                                                     2.0, 4.0};
 
-// Variance floors: the surrogate's signal, and a rollout's win percentage.
-#define LAMC_MIN_SIGNAL_VARIANCE 1e-6
+// Variance floor of a rollout's win percentage.
 #define LAMC_MIN_ROLLOUT_VARIANCE 1e-4
 // A rollout's win percentage variance before any play has two samples.
 #define LAMC_DEFAULT_ROLLOUT_VARIANCE 0.1
@@ -503,7 +511,8 @@ static void lamc_fit_prior_mean(LamcCtx *ctx, const LamcArgs *args,
 }
 
 // Fits the surrogate to the evaluated plays' win percentages, choosing the
-// length scale by marginal likelihood, and ranks them by its mean.
+// length scale and signal variance by marginal likelihood, and ranks them by
+// its mean.
 static void lamc_fit(LamcCtx *ctx, const LamcArgs *args) {
   const int num_evaluated = ctx->num_evaluated;
   const int num_columns = ctx->num_columns;
@@ -536,23 +545,12 @@ static void lamc_fit(LamcCtx *ctx, const LamcArgs *args) {
   if (rollout_variance < LAMC_MIN_ROLLOUT_VARIANCE) {
     rollout_variance = LAMC_MIN_ROLLOUT_VARIANCE;
   }
-  double noise_sum = 0.0;
   for (int eval_idx = 0; eval_idx < num_evaluated; eval_idx++) {
     const double num_samples = ctx->gp_noise[eval_idx];
     ctx->gp_noise[eval_idx] =
         rollout_variance / (num_samples > 0 ? num_samples : 1.0);
-    noise_sum += ctx->gp_noise[eval_idx];
   }
   lamc_fit_prior_mean(ctx, args, ctx->gp_values);
-  double value_squares = 0.0;
-  for (int eval_idx = 0; eval_idx < num_evaluated; eval_idx++) {
-    value_squares += ctx->gp_values[eval_idx] * ctx->gp_values[eval_idx];
-  }
-  double signal_variance =
-      value_squares / num_evaluated - noise_sum / num_evaluated;
-  if (signal_variance < LAMC_MIN_SIGNAL_VARIANCE) {
-    signal_variance = LAMC_MIN_SIGNAL_VARIANCE;
-  }
 
   if (ctx->gp_num_dims != num_columns) {
     gp_destroy(ctx->gp);
@@ -562,16 +560,15 @@ static void lamc_fit(LamcCtx *ctx, const LamcArgs *args) {
   GaussianProcessParams params = {
       .kernel = args->kernel,
       .inverse_length_scales = ctx->fit_inverse_length_scales,
-      .signal_variance = signal_variance,
+      .signal_variance = LAMC_FALLBACK_SIGNAL_VARIANCE,
       .prior_mean = 0.0,
   };
   int best_multiple = -1;
   int best_signal = -1;
   double best_likelihood = -INFINITY;
-  for (int signal_idx = 0; signal_idx < LAMC_NUM_SIGNAL_MULTIPLES;
+  for (int signal_idx = 0; signal_idx < LAMC_NUM_SIGNAL_VARIANCES;
        signal_idx++) {
-    params.signal_variance =
-        signal_variance * lamc_signal_multiples[signal_idx];
+    params.signal_variance = lamc_signal_variances[signal_idx];
     for (int multiple_idx = 0; multiple_idx < LAMC_NUM_LENGTH_SCALE_MULTIPLES;
          multiple_idx++) {
       for (int column = 0; column < num_columns; column++) {
@@ -590,9 +587,8 @@ static void lamc_fit(LamcCtx *ctx, const LamcArgs *args) {
   }
   const double multiple =
       best_multiple >= 0 ? lamc_length_scale_multiples[best_multiple] : 1.0;
-  params.signal_variance =
-      signal_variance *
-      (best_signal >= 0 ? lamc_signal_multiples[best_signal] : 1.0);
+  params.signal_variance = best_signal >= 0 ? lamc_signal_variances[best_signal]
+                                            : LAMC_FALLBACK_SIGNAL_VARIANCE;
   for (int column = 0; column < num_columns; column++) {
     ctx->fit_inverse_length_scales[column] =
         ctx->inverse_length_scales[column] / multiple;

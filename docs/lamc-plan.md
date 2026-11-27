@@ -647,9 +647,13 @@ better, and those are the defaults now.
    the GP fits the residuals. Each play's noise is a pooled per-sample
    variance over its sample count. Each fit chooses its length scale among
    0.5, 1, 2 and 4 times `-lamclength` (1.5), and its signal variance among
-   0.1, 0.3 and 1 times the residuals' excess variance, by marginal
-   likelihood. A small signal variance leaves the predictions on the prior
-   mean when the samples show nothing beyond it.
+   fixed values from 1e-5 to 0.1 (standard deviations of 0.3 to 32 win%
+   points), by marginal likelihood. A small signal variance leaves the
+   predictions on the prior mean when the samples show nothing beyond it.
+   The signal variance was once chosen among 0.1, 0.3 and 1 times the
+   residuals' excess variance over the noise; with single rollouts that play
+   the game out (`-sfinish`) that estimate comes out negative, and the
+   floored fit ranked every play by static equity.
 6. **Keep and propose.** The top `-lamckeep` (4) by the surrogate stay; the
    rest of the pool is new plays, by `acquire` (the highest upper confidence
    bounds, `-lamcbeta` (1) standard deviations; the default) or `ascent` (a
