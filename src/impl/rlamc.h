@@ -122,7 +122,7 @@ const Move *rlamc_choose_move(RlamcWorker *worker, const RlamcArgs *args,
 //   alloc   uniform or race       z       race_z
 //   switch  switch_margin
 //   share   1 to share recursive rollouts (see above), 0 not to; only for the
-//           deepest level
+//           deepest level, and only a top-k search (lamc=0) reads it
 //   finalists, stage  RlamcArgs.finalists and stage_share (any level)
 //   cv      RlamcArgs.control_samples (any level)
 //   dcache  1 to cache decisions (RlamcLevel.decision_cache), 0 not to

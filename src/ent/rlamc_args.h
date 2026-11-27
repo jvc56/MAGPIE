@@ -96,8 +96,9 @@ typedef struct RlamcLevel {
   // Whether recursive rollouts are shared between searches (see
   // rlamc.h): a candidate's value is its exact score and leave,
   // and the other player's best responses to the board it leaves, which are
-  // cached by that board. It sets horizon_plies to 1 and skip_finish, so
-  // that a candidate that empties the bag is also valued after one reply.
+  // cached by that board. On a top-k level it sets horizon_plies to 1 and
+  // skip_finish, so that a candidate that empties the bag is also valued
+  // after one reply; a LAMC search ignores it.
   bool share;
   // Whether a search's decision is cached, by the board, the rack of the
   // player on turn, the spread and the scoreless turns, and the search's

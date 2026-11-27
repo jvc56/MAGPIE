@@ -885,6 +885,13 @@ static void test_rlamc_parse(void) {
   assert(args.levels[0].share);
   assert(args.levels[0].horizon_plies == 1);
   assert(args.levels[0].skip_finish);
+  // A LAMC search ignores share, so its rollouts keep their horizon and
+  // finish.
+  rlamc_args_parse("share=1,h=5", &args, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  assert(args.levels[0].lamc_search);
+  assert(args.levels[0].horizon_plies == 5);
+  assert(!args.levels[0].skip_finish);
   rlamc_args_parse("off", &args, error_stack);
   assert(error_stack_is_empty(error_stack));
   assert(!args.enabled);

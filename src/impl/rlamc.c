@@ -2238,8 +2238,10 @@ void rlamc_args_parse(const char *spec, RlamcArgs *args,
     }
     // A shared search values a candidate after the other player's reply
     // alone, so its rollouts of a candidate that empties the bag must stop
-    // there too, unfinished, for the two values to be compared.
-    if (parsed.levels[level_idx].share) {
+    // there too, unfinished, for the two values to be compared. A LAMC
+    // search ignores share, so its rollouts keep their horizon and finish.
+    if (parsed.levels[level_idx].share &&
+        !parsed.levels[level_idx].lamc_search) {
       parsed.levels[level_idx].horizon_plies = 1;
       parsed.levels[level_idx].skip_finish = true;
     }
