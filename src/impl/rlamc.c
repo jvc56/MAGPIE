@@ -68,8 +68,7 @@ enum {
 // signal variance is chosen by gp_fit_by_likelihood.
 #define RLAMC_MIN_ROLLOUT_VARIANCE 1e-4
 #define RLAMC_DEFAULT_ROLLOUT_VARIANCE 0.1
-// The LAMC search's length scale, in standard deviations of each column, and
-// the multiples of it each fit chooses among.
+// The LAMC search's length scale, in standard deviations of each column.
 #define RLAMC_LENGTH_SCALE 1.5
 // The relative slack on the LAMC search's bound on upper confidence bounds.
 #define RLAMC_BOUND_SLACK 1e-9
@@ -101,6 +100,8 @@ static int rlamc_equity_rank_compare(const void *a, const void *b) {
   return first->play_idx - second->play_idx;
 }
 
+// The multiples of RLAMC_LENGTH_SCALE each fit of the LAMC search chooses
+// among.
 static const double rlamc_length_multiples[] = {0.5, 1.0, 2.0};
 
 // Standardizes count values, stride apart: a constant column becomes zeros.
@@ -555,7 +556,9 @@ static void rlamc_pick_diverse(RlamcWorker *worker, const RlamcLevel *args,
   }
 }
 
-// Generates the candidates of the player on turn in game: up to
+// Generates the candidates of the player on turn in game. For a LAMC search
+// (lamc_search), every play up to universe, or RLAMC_MAX_UNIVERSE when it is
+// 0, left in candidate_list for rlamc_choose_lamc. For top-k, up to
 // num_candidates plays by static equity, within margin points of the best,
 // or with a universe, a diverse pick from that many (rlamc_pick_diverse).
 static void rlamc_generate_candidates(RlamcWorker *worker,
@@ -608,10 +611,9 @@ static void rlamc_generate_candidates(RlamcWorker *worker,
   }
 }
 
-// The utility for player mover of the recursive rollout's last state, as the
-// sim scores a rollout's horizon (see sim_rollout). The utility of a game that
-// has ended with spread for the mover: its result and final spread, with no
-// leftover, as the sim scores an ended game, wherever it ended.
+// The utility of a game that has ended with spread for the mover: its result
+// and final spread, with no leftover, as the sim scores an ended game,
+// wherever it ended.
 static double rlamc_ended_score(const RlamcEval *eval, const Equity spread) {
   double win_pct;
   if (spread == 0) {
@@ -623,6 +625,11 @@ static double rlamc_ended_score(const RlamcEval *eval, const Equity spread) {
                            eval->utility_w_spread, eval->utility_spread_scale);
 }
 
+// The utility for player mover of the recursive rollout's last state. An
+// ended game is scored by rlamc_ended_score. Otherwise the win% table is
+// looked up at the spread plus the last two leaves, as the sim does, and
+// blended with that same spread plus leaves, where the sim's rollout
+// (sim_rollout) blends with the spread alone (see RLAMC.md, finding 1.26).
 static double rlamc_score(const RlamcEval *eval, const Game *game,
                           const int mover, const Equity leftover) {
   const Equity spread = player_get_score(game_get_player(game, mover)) -

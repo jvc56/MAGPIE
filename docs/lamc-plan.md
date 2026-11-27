@@ -1135,8 +1135,9 @@ results, as they should.
    turns of a game, so whole-game pairs need tens of thousands of games to
    see it. Game pairs started from late positions (bag of 20 or fewer),
    at a real time limit, would measure the same thing with far fewer.
-2. **Find where the gain stops.** The bag limit of 20 is where the evidence
-   is; positions with 21 to 29 tiles were not tested.
+2. **Find where the gain stops.** (Historical: the bag limit was 20 when
+   this was written; `-lamcmaxbag` now defaults to 1000, so the search runs
+   at any bag.) Positions with 21 to 29 tiles were not tested then.
 3. **Compare with PEG** in the positions PEG solves, as the plan says: the
    exact answer is the best test of the late-game gain.
 4. **A better prior mean.** The prior mean linear in static equity is what
@@ -1149,9 +1150,11 @@ results, as they should.
 6. **Late-game features.** Static equity misranks late plays for reasons
    the features only partly see: whether a play empties the bag, what the
    opponent can go out with, and what a play leaves for the last draw.
-7. **Let BAI count the search's samples.** The final sim resumes from them
-   for its statistics, but BAI's own stopping rule starts from zero, so it
-   may sample the search's best plays more than it needs to. See
+7. **Let BAI count the search's samples.** (Historical: this described
+   `-lamcreuse true`, which is now off by default because of the bag 12-19
+   loss; the final sim starts fresh, from a salted seed.) With reuse, the
+   final sim resumed from the search's samples for its statistics, but BAI's
+   own stopping rule started from zero. See
    [Letting BAI count the search's samples](#letting-bai-count-the-searchs-samples).
 8. **Phase 2 starts from here.** The replay harness, the subset view and
    the registry carry over unchanged. The late game, where the rollout
@@ -1622,10 +1625,13 @@ played.
 
 In a recursive rollout the other player's rack is drawn again from the
 tiles the player on turn cannot see (the bag and that rack), the play being
-judged is played, then `h` static plies, and the result is scored as the
-sim scores a rollout (the win percentage table at spread plus the last two
-leaves, blended with spread by the sim's utility weights; with `-sfinish`
-and `fin=1`, the defaults, played to the end when the bag is empty). Every
+judged is played, then `h` static plies, and the result is scored almost
+as the sim scores a rollout: the win percentage table at spread plus the
+last two leaves, blended by the sim's utility weights with that same spread
+plus leaves, where the sim blends with the spread alone. With `-sfinish`
+and `fin=1`, the defaults, it is played to the end when the bag is empty,
+and an ended game is scored by its result and final spread, as the sim
+scores one. Every
 play's j-th recursive rollout uses the same seed (common random numbers).
 The search works on a copy of the rollout's game, so the rollout's backups
 and board-undo record are never touched.
@@ -1726,8 +1732,6 @@ questions it raised, are in [Open questions](#open-questions).
 - **Per-position hyperparameters.** Refit length scales by marginal
   likelihood in each position when the budget is large (analysis rather
   than play).
-- **Spread-aware targets.** Use the existing utility blend (`-uspread`) as
-  the GP target, for positions where spread matters.
 - **Inference.** Feed inferred opponent racks into 2e's stratification, and
   let the inference itself use LAMC replies (what would an adaptive opponent
   have kept).
@@ -1747,9 +1751,10 @@ questions it raised, are in [Open questions](#open-questions).
   proposed (within the trust region of the pool); cache per-position
   `prepare` work across a turn's rounds; compute PAT-based features from the
   PAT evaluation already done for static equity.
-- **Faster recursive rollouts.** Steer recursive generation with the census, and
-  use WMP; reuse recursive results across candidates whose boards agree in the
-  relevant lanes (as the census does for anchors).
+- **Faster recursive rollouts.** Use WMP in recursive generation if it is
+  not already used, and reuse recursive results across candidates whose
+  boards agree in the relevant lanes (as the census does for anchors).
+  Census steering of recursive generation is built (see Sharing, Phase 3).
 - **Early pruning inside the explore stage.** Let BAI's cutoff drop clearly
   losing pool plays mid-round, saving their remaining shallow rollouts.
 - **Parallel rounds.** Overlap one round's GP fit with the next round's

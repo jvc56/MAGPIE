@@ -15,15 +15,17 @@
 // their mean utility.
 
 enum {
-  // The most plays a recursive search considers, samples it takes and static
-  // plies a recursive rollout plays after its play.
+  // Top-k (lamc=0): the most plays a recursive search considers. Any
+  // search: the most samples it takes and static plies a recursive rollout
+  // plays after its play.
   RLAMC_MAX_CANDIDATES = 64,
   RLAMC_MAX_SAMPLES = 4096,
   RLAMC_MAX_PLIES = 16,
-  // The most plays a diverse pick chooses from.
+  // The most plays a diverse pick chooses from, and the LAMC search's play
+  // list when RlamcLevel.universe is 0.
   RLAMC_MAX_UNIVERSE = 5000,
   RLAMC_DEFAULT_STATIC_SEEDS = 3,
-  // The LAMC search's bounds and defaults (RlamcArgs.lamc_search).
+  // The LAMC search's bounds and defaults (RlamcLevel.lamc_search).
   RLAMC_MAX_POOL_SIZE = 64,
   RLAMC_MAX_CONTROL_SAMPLES = 64,
   RLAMC_MAX_ROUNDS = 32,
@@ -69,14 +71,15 @@ typedef struct RlamcLevel {
   // plies; for a deeper level, the plies of the recursive rollouts of the level
   // above it.
   uint32_t plies_mask;
-  // The most plays a recursive search considers, best by static equity first.
+  // Top-k (lamc=0): the most plays a recursive search considers, best by
+  // static equity first. The LAMC search does not read it.
   int num_candidates;
   // Recursive rollouts per candidate.
   int num_samples;
   // Static plies a recursive rollout plays after its candidate.
   int horizon_plies;
-  // Candidates more than this many points of static equity below the best
-  // are not considered.
+  // Top-k (lamc=0): candidates more than this many points of static equity
+  // below the best are not considered. The LAMC search does not read it.
   int margin;
   // A recursive search runs only when the bag holds at most this many tiles;
   // 0 for no limit.
