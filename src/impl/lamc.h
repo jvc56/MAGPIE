@@ -32,7 +32,8 @@ void lamc_ctx_destroy(LamcCtx *ctx);
 // samples instead of rolling out.
 
 // Generates the plays of sim_args' position within the equity floor, best by
-// static equity first, and embeds them. Returns how many there are.
+// static equity first, and the pass, last, and embeds them. Returns how many
+// there are.
 int lamc_build(LamcCtx *ctx, const SimArgs *sim_args);
 const MoveList *lamc_get_universe(const LamcCtx *ctx);
 

@@ -635,7 +635,8 @@ floor; the recursive rollout work found searching every play at every bag
 better, and those are the defaults now.
 
 1. **Universe.** Every play by static equity, at most `-lamcuniverse`
-   (100000), within `-lamcfloor` (1000) points of the best. If there are no
+   (100000), within `-lamcfloor` (1000) points of the best, and the pass,
+   which is always kept, last. If there are no
    more than the sim would simulate anyway, the search does not run.
 2. **Embedding.** Each active feature's columns (`-lamcfeatures`; the
    default set is every feature but `equity` and `leavedups`), then every
@@ -651,7 +652,8 @@ better, and those are the defaults now.
    continue its own seed stream, so no draw repeats across rounds. Search
    samples are single rollouts unless `-lamccycle` makes them bag cycles.
 5. **Fit.** The prior mean, linear in static equity (`-lamcequitymean`, on)
-   or constant, is fit by least squares weighted by each play's precision;
+   or constant, is fit by least squares weighted by each play's precision,
+   with a slope in static equity of at least 0;
    the GP fits the residuals. Each play's noise is a pooled per-sample
    variance over its sample count. Each fit chooses its length scale among
    0.5, 1, 2 and 4 times `-lamclength` (1.5), and its signal variance among
@@ -1581,7 +1583,7 @@ by default (`-rlamc off`); `-sfinish`, built with them, is on.
 | `src/impl/random_variable.c` | The hook in `sim_rollout`, and `-sfinish` (rollouts played to the end of the game) |
 | `src/impl/simmer.c` | Two-stage recursive sims (`finalists=`) |
 | `src/impl/autoplay.c` | `-apstaticbag` |
-| `test/rlamc_test.c` | `rlamc` (CI), and the on-demand `rlamccr`, `rlamcgt`, `rlamceval`, `rlamcvar`, `rlamcpeg`, `rlamcbench` |
+| `test/rlamc_test.c` | `rlamc` (CI), and the on-demand `rlamccr`, `rlamcgt`, `rlamceval`, `rlamcvar`, `rlamcpeg`, `rlamcpegm`, `rlamctrace`, `rlamcbench` |
 
 ### Options
 

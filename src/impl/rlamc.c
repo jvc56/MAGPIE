@@ -174,8 +174,9 @@ struct RlamcWorker {
   // rollout's utility (see rlamc_rollout_key).
   uint64_t *rollout_keys;
   double *rollout_values;
-  // For diverse candidates (RlamcLevel.universe): the play features, and the
-  // embedding of the generated plays with its scratch.
+  // The play features, and the embedding of the generated plays with its
+  // scratch: the LAMC search's (RlamcLevel.lamc_search), which the diverse
+  // pick of top-k candidates (RlamcLevel.universe) also uses.
   bool features[NUMBER_OF_PLAY_FEATURES];
   bool features_ready;
   PlayFeatureCtx feature_ctx;
@@ -196,8 +197,9 @@ struct RlamcWorker {
   double *upper_bounds;
   // The plays by standardized static equity, highest first.
   RlamcEquityRank *equity_order;
-  // For a paired search (RlamcLevel.paired): each play's index among the
-  // evaluated plays, or -1; the evaluated plays' values by seed,
+  // Each play's index among the evaluated plays, or -1, which every LAMC
+  // search sets; and for a paired search (RlamcLevel.paired), which alone
+  // reads it, the evaluated plays' values by seed,
   // seed_capacity a play; and per seed, its effect and its plays.
   int *eval_index;
   double *seed_values;
@@ -637,7 +639,7 @@ static double rlamc_ended_score(const RlamcEval *eval, const Equity spread) {
 // ended game is scored by rlamc_ended_score. Otherwise the win% table is
 // looked up at the spread plus the last two leaves, as the sim does, and
 // blended with that same spread plus leaves, where the sim's rollout
-// (sim_rollout) blends with the spread alone (see RLAMC.md, finding 1.26).
+// (sim_rollout) blends with the spread alone.
 static double rlamc_score(const RlamcEval *eval, const Game *game,
                           const int mover, const Equity leftover) {
   const Equity spread = player_get_score(game_get_player(game, mover)) -

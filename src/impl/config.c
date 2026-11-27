@@ -1537,7 +1537,8 @@ static void add_lamc_rlamc_help_arg(arg_token_t arg_token, const char **usages,
     examples[1] = "false";
     *text = "Specifies whether Locally Adaptive Monte Carlo (LAMC) picks "
             "the plays a simulation simulates. It embeds every play within "
-            "lamcfloor points of the best in a space of features, samples a "
+            "lamcfloor points of the best, and the pass, in a space of "
+            "features, samples a "
             "pool of them spread over that space with a few rollouts each, "
             "and fits a Gaussian process from features to utility (win% "
             "blended with spread). "
@@ -1573,13 +1574,16 @@ static void add_lamc_rlamc_help_arg(arg_token_t arg_token, const char **usages,
   case ARG_TOKEN_LAMC_ROUNDS:
     usages[0] = "<number_of_rounds>";
     examples[0] = "12";
-    *text = "Specifies the most rounds LAMC runs.";
+    *text = "Specifies the most rounds LAMC runs before it refines. With "
+            "lamcrefine, the search then refines until its lamcexplore "
+            "share is spent.";
     break;
   case ARG_TOKEN_LAMC_STABLE:
     usages[0] = "<number_of_rounds>";
     examples[0] = "3";
     *text = "Specifies after how many rounds with the same kept plays LAMC "
-            "stops searching.";
+            "stops its rounds. With lamcrefine, the search then refines "
+            "until its lamcexplore share is spent.";
     break;
   case ARG_TOKEN_LAMC_EXPLORE:
     usages[0] = "<share>";
