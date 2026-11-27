@@ -561,11 +561,18 @@ gain.
 
 ### Summary
 
+This summary records Phase 1 as it stood when it was finished. Its
+defaults have changed since: the search now considers every play
+(`-lamcfloor` 1000, `-lamcuniverse` 100000) at any bag (`-lamcmaxbag`
+1000), sample reuse (`-lamcreuse`) is off because it caused the bag 12–19
+loss, and `-lamcrefine` is on. [How a search runs](#how-a-search-runs)
+gives the current defaults, and `RLAMC.md` the current results.
+
 Phase 1 works, and it helps only a little and only late in the game.
 
 - **What it does.** `-lamc true` (or `-lamc1`/`-lamc2` in autoplay) has a
-  search over every play within 30 points of the best choose the plays a
-  sim simulates, as the slides propose, then simulates them as usual with
+  search over every play within 30 points of the best (then the default)
+  choose the plays a sim simulates, as the slides propose, then simulates them as usual with
   the rest of the budget. It is off by default, and with it off the sim is
   unchanged.
 - **Where it helps.** On recorded rollouts of 768 fresh positions with 1 to
@@ -577,8 +584,8 @@ Phase 1 works, and it helps only a little and only late in the game.
 - **Where it does not.** With 30 or more tiles in the bag, static equity's
   top 15 nearly always holds the best play, the surrogate ranks plays
   slightly worse than static equity, and the search's rollouts are lost to
-  the final choice. So by default LAMC searches only with 20 or fewer tiles
-  in the bag, and always hands the sim static equity's top 10.
+  the final choice. So LAMC then searched by default only with 20 or fewer
+  tiles in the bag, and always handed the sim static equity's top 10.
 - **In games.** 1,500 game pairs at 3,000 rollouts are neutral (50.2%,
   -0.04 points of spread per pair, SE 0.84), as they must be: a gain of a
   few tenths of a point of win rate needs on the order of 100,000 games.
@@ -586,7 +593,8 @@ Phase 1 works, and it helps only a little and only late in the game.
   the surrogate is no better than static equity), acquisition by upper
   confidence bound rather than the slides' gradient step, keeping static
   equity's best plays in the pool and among the candidates, and letting the
-  sim continue the search's samples.
+  sim continue the search's samples (since turned off: it caused the bag
+  12–19 loss, `RLAMC.md`).
 
 Against the plan's acceptance criteria: the `lamc` test passes (with the
 sanitizers), and every file builds with `BOARD_DIM=21` and for Windows;
@@ -674,7 +682,10 @@ better, and those are the defaults now.
    rollouts and time. With `-lamcreuse` (off), it resumes from the search's
    samples of the candidates (their statistics and seed streams); otherwise
    it starts over with other seeds, so that plays the search favored for
-   lucky draws do not get those draws again.
+   lucky draws do not get those draws again. Plays the sim protects from
+   pruning (those `snoprune` names, and `analyze`'s actual play) are always
+   in the sim's plays, added if the search left them out; plays added with
+   `addmoves` are not protected.
 
 With LAMC off, a sim pays one test of a flag per sim, and nothing per
 sample.
@@ -685,10 +696,13 @@ sample.
   fit choosing among its multiples, instead of per-feature length scales
   stored by name. The ablation below suggests the next step: per-feature
   scales, or dropping features that do not help.
-- **The final BAI question is settled by resuming.** BAI keeps its own arm
-  statistics from zero, but `sim_results_reset_from_plays` starts the sim's
-  plays from the search's statistics and seed streams, and the sim picks its
-  play from those, so the search's samples count (`-lamcreuse`).
+- **The final BAI question was settled by resuming, since undone.** BAI
+  keeps its own arm statistics from zero, but with `-lamcreuse`
+  `sim_results_reset_from_plays` starts the sim's plays from the search's
+  statistics and seed streams, and the sim picks its play from those, so
+  the search's samples count. BAI could then set a play aside after a few
+  poor samples of its own while the mixed mean still ranked it first; this
+  was the bag 12–19 loss, and `-lamcreuse` is now off by default.
 - **One `SimResults` for the search, over the universe,** instead of one that
   grows: every play in the universe has its seed stream from the start, so
   nothing needs appending.
@@ -766,8 +780,8 @@ the explore share were chosen on; no fresh midgame set was run.
 | The defaults (floor 10, explore 0.3, signal variance fit) | +0.04 (0.02) | +0.005 (0.006) | 0.007 | 0.718 |
 
 The surrogate ranks midgame plays slightly *worse* than static equity, so
-the floor is what keeps LAMC from harm there, and the bag limit keeps it out
-of the midgame by default.
+the floor is what keeps LAMC from harm there, and the bag limit (then 20 by
+default, now 1000) kept it out of the midgame.
 
 **Late game (1 to 20 tiles in the bag).** Here static equity's top 15
 misses the best play more often (set regret about 0.3 to 0.4 points), and the
@@ -1263,7 +1277,8 @@ what would answer it.
    Possible causes:
    - the prior mean's slope is fit to noisy means of a few samples each;
    - the smallest signal variance on offer (0.1 times the excess) is not
-     small enough;
+     small enough (since 608bc453 the fit chooses among fixed values down
+     to 1e-5);
    - one length scale for every column lets weak features add noise.
 
    Measuring the rank correlation with each changed in turn, starting with
@@ -1272,8 +1287,8 @@ what would answer it.
    stage evenly, where the sim uses BAI. It never used a stopping
    threshold, a time limit, inference, bag cycling, more than 2 plies or a
    lexicon other than CSW21. It never used the live universe either: the
-   live default is up to 400 plays within 30 points, and the replay took
-   the top 100. The `lamcautoplay` runs used the live sim, but only at 3,000
+   live default was then up to 400 plays within 30 points (now every
+   play), and the replay took the top 100. The `lamcautoplay` runs used the live sim, but only at 3,000
    rollouts with no threshold and no inference. Any of these could shrink
    the gain or grow it.
 5. **Does BAI's stopping rule work on resumed statistics?** With reuse, the
@@ -1552,7 +1567,7 @@ Phase 2 is the talk's "Locally Adaptive Monte Carlo on plies": rollouts in
 which a player chooses its play by a search of its own. Phase 3 is the
 second half of slide 31: making each permutation more informative, by
 letting rollouts with different racks share what they learn. Both are off
-by default.
+by default (`-rlamc off`); `-sfinish`, built with them, is on.
 
 ### The code
 
@@ -1569,7 +1584,9 @@ by default.
 
 - `-rlamc <spec>` (and `-rlamc1`, `-rlamc2` in autoplay): `off`; `on`,
   the defaults (`plies=0+1,lamc=1,dcache=1,m=4,h=5,fin=1`; the best
-  setting found has `h=1` and `fin=0`); or comma-separated `key=value`
+  setting measured had `h=1` and `fin=0`, but before the surrogate fix of
+  `RLAMC.md` logs 78–80, and `h=5` and `fin=1` have not been gated since);
+  or comma-separated `key=value`
   settings that change the defaults: `plies` (joined by `+`; 0 is the
   reply to the candidate), `k` (candidates), `m` (recursive rollouts each), `h`
   (static plies after the candidate in a recursive rollout), `margin` (points
@@ -1585,30 +1602,33 @@ by default.
   rollouts the reply to its candidate is chosen by a top-3 search of 2
   samples each: triply recursive Monte Carlo, counting the sim. At most 4
   levels.
-- `-sfinish true|false` (and `-sfinish1`, `-sfinish2`), `-sfinishbag N`.
+- `-sfinish true|false` (on by default; and `-sfinish1`, `-sfinish2`),
+  `-sfinishbag N`.
 - `-apstaticbag N`.
 
 ### A recursive search
 
-At a recursive ply, the player on turn takes its top `k` plays by static
-equity within `margin` points of the best. Each gets `m` recursive rollouts:
-the other player's rack is drawn again from the tiles the player on turn
-cannot see (the bag and that rack), the candidate is played, then `h`
-static plies, and the result is scored as the sim scores a rollout (the win
-percentage table at spread plus the last two leaves, blended with spread by
-the sim's utility weights; with `-sfinish`, played to the end when the bag
-is empty). Every candidate's j-th recursive rollout uses the same seed (common
-random numbers). The search plays the best mean. It works on a copy of the
-rollout's game, so the rollout's backups and board-undo record are never
-touched.
+At a recursive ply, the player on turn chooses its play by a search of
+its own. By default (`lamc=1`) the search is Phase 1's, over every play of
+the position: a first pool of the best few static plays and plays spread
+over the play embedding by farthest-point sampling, `m` recursive rollouts
+each a round, a Gaussian process whose prior mean is linear in static
+equity (with a slope of at least 0), then rounds that keep the surrogate's
+best plays and add the unevaluated plays of highest upper confidence bound.
+The play is the best evaluated by the surrogate's mean. With `lamc=0` it is
+a top-k search instead: the top `k` plays by static equity within `margin`
+points of the best, `m` recursive rollouts each, and the best mean is
+played.
 
-With `lamc=1` the search is Phase 1's, over every play of the position
-rather than a top-k by static equity: a first pool of the best few static
-plays and plays spread over the play embedding by farthest-point sampling,
-`m` recursive rollouts each a round, a Gaussian process whose prior mean is
-linear in static equity, then rounds that keep the surrogate's best plays
-and add the unevaluated plays of highest upper confidence bound. The play
-is the best evaluated by the surrogate's mean.
+In a recursive rollout the other player's rack is drawn again from the
+tiles the player on turn cannot see (the bag and that rack), the play being
+judged is played, then `h` static plies, and the result is scored as the
+sim scores a rollout (the win percentage table at spread plus the last two
+leaves, blended with spread by the sim's utility weights; with `-sfinish`
+and `fin=1`, the defaults, played to the end when the bag is empty). Every
+play's j-th recursive rollout uses the same seed (common random numbers).
+The search works on a copy of the rollout's game, so the rollout's backups
+and board-undo record are never touched.
 
 A deeper level's search runs on a worker of its own, made the first time
 it is needed, with its own copy of the game and its own caches, so the
@@ -1652,7 +1672,8 @@ levels never disturb one another.
 
 ### Results
 
-(In progress; see the runs below.)
+The results, the current defaults and the log of every run are in
+`RLAMC.md` at the repository root.
 
 ---
 
