@@ -1689,8 +1689,12 @@ void test_sim_with_precomputed_inference(void) {
 // result, and the sampled sim must land on their weighted mean. A draw that
 // depends on which leave was sampled moves the win rate well outside the
 // tolerance. With mirrored, the seats are swapped, so the opponent draws
-// from the other end of the bag.
-static void assert_inferred_leave_draws_uniformly(const bool mirrored) {
+// from the other end of the bag. With after_exchange, the leaves are what an
+// exchange kept: EGLNRS threw back the I and GLNRSY the E, tiles the
+// opponent cannot have drawn again, which leaves each one seventh tile, so
+// that the full rack is GILNRSY or EGLNRSY with probability 1/2 each.
+static void assert_inferred_leave_draws_uniformly(const bool mirrored,
+                                                  const bool after_exchange) {
   Config *config = config_create_or_die(
       "set -lex CSW24 -wmp true -s1 equity -s2 equity -r1 all -r2 all "
       "-threads 1 -plies 4 -numplays 100");
@@ -1731,21 +1735,34 @@ static void assert_inferred_leave_draws_uniformly(const bool mirrored) {
   AliasMethod *alias_method =
       inference_results_get_alias_method(inference_results);
   const char *leaves[] = {"EGLNRS", "GLNRSY"};
+  const char *exchanged_tiles[] = {"I", "E"};
   Rack rack;
   rack_set_dist_size_and_reset(&rack, ld_get_size(ld));
+  Rack exchanged;
+  rack_set_dist_size_and_reset(&exchanged, ld_get_size(ld));
   for (int leave_idx = 0; leave_idx < 2; leave_idx++) {
     rack_set_to_string(ld, &rack, leaves[leave_idx]);
-    alias_method_add_rack(alias_method, &rack, 1);
+    if (after_exchange) {
+      rack_set_to_string(ld, &exchanged, exchanged_tiles[leave_idx]);
+      alias_method_add_exchange(alias_method, &rack, &exchanged, 1);
+    } else {
+      alias_method_add_rack(alias_method, &rack, 1);
+    }
   }
   const bool tables_generated = alias_method_generate_tables(alias_method);
   assert(tables_generated);
 
   enum { NUM_FULL_RACKS = 3, NUM_SAMPLED_ROLLOUTS = 8192 };
   const char *full_racks[NUM_FULL_RACKS] = {"GILNRSY", "EGLNRSY", "EGILNRS"};
-  const double full_rack_probs[NUM_FULL_RACKS] = {0.25, 0.5, 0.25};
+  const double full_rack_probs_after_play[NUM_FULL_RACKS] = {0.25, 0.5, 0.25};
+  const double full_rack_probs_after_exchange[NUM_FULL_RACKS] = {0.5, 0.5, 0.0};
+  const double *full_rack_probs = after_exchange
+                                      ? full_rack_probs_after_exchange
+                                      : full_rack_probs_after_play;
   SimCtx *sim_ctx = NULL;
   SimResults *sim_results = sim_results_create(0);
   double expected_win = 0.0;
+  double expected_win_after_play = 0.0;
   double min_win = 1.0;
   double max_win = 0.0;
   for (int sim_idx = 0; sim_idx <= NUM_FULL_RACKS; sim_idx++) {
@@ -1780,10 +1797,14 @@ static void assert_inferred_leave_draws_uniformly(const bool mirrored) {
     if (sample_leave) {
       // The full racks must disagree, or any draw would pass.
       assert(max_win - min_win > 0.5);
+      // The tiles thrown back must matter, or drawing them again would pass.
+      assert(!after_exchange ||
+             fabs(expected_win - expected_win_after_play) > 0.1);
       // Five standard errors of the sampled mean at this many rollouts.
       assert(fabs(win - expected_win) < 0.025);
     } else {
       expected_win += full_rack_probs[sim_idx] * win;
+      expected_win_after_play += full_rack_probs_after_play[sim_idx] * win;
       min_win = win < min_win ? win : min_win;
       max_win = win > max_win ? win : max_win;
     }
@@ -1797,8 +1818,10 @@ static void assert_inferred_leave_draws_uniformly(const bool mirrored) {
 }
 
 void test_sim_inferred_leave_draws_uniformly(void) {
-  assert_inferred_leave_draws_uniformly(false);
-  assert_inferred_leave_draws_uniformly(true);
+  assert_inferred_leave_draws_uniformly(false, false);
+  assert_inferred_leave_draws_uniformly(true, false);
+  assert_inferred_leave_draws_uniformly(false, true);
+  assert_inferred_leave_draws_uniformly(true, true);
 }
 
 // A resumed sim continues accumulating onto the existing samples, and a

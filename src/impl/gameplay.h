@@ -23,6 +23,12 @@ void play_move_no_cross_set_update(const Move *move, Game *game, Rack *leave);
 void play_move_without_drawing_tiles(const Move *move, Game *game);
 void set_random_rack(const Game *game, int player_index,
                      const Rack *known_rack);
+// As set_random_rack for a player who has just exchanged. known_rack is the
+// tiles the player kept. The rest of the rack is drawn from the bag without
+// exchanged, the tiles the player threw back, which stay in the bag.
+void set_random_rack_after_exchange(const Game *game, int player_index,
+                                    const Rack *known_rack,
+                                    const Rack *exchanged);
 const Move *get_top_equity_move(Game *game, MoveList *move_list);
 // get_top_equity_move, starting from and adding to the best moves remembered
 // in best_move_carry (see best_move_carry.h). The move is the same.
