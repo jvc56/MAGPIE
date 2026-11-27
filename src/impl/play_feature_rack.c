@@ -27,7 +27,7 @@ void play_feature_extract_move_type(const PlayFeatureCtx
 
 void play_feature_extract_bag_after(const PlayFeatureCtx *ctx, const Move *move,
                                     double *out) {
-  int bag_after = ctx->bag_tiles;
+  int bag_after = ctx->real_bag_tiles;
   // An exchange returns as many tiles as it draws.
   if (move_get_type(move) == GAME_EVENT_TILE_PLACEMENT_MOVE) {
     bag_after -= move_get_tiles_played(move);

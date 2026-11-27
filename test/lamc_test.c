@@ -14,6 +14,7 @@
 #include "../src/def/lamc_defs.h"
 #include "../src/def/move_defs.h"
 #include "../src/def/play_feature_defs.h"
+#include "../src/def/rack_defs.h"
 #include "../src/def/static_eval_defs.h"
 #include "../src/def/thread_control_defs.h"
 #include "../src/ent/autoplay_results.h"
@@ -385,6 +386,70 @@ static void test_play_feature_pass_with_empty_bag(void) {
     assert(values[pass_idx] <= values[move_idx]);
   }
   free(values);
+  move_list_destroy(moves);
+  config_destroy(config);
+}
+
+// Generates every play of the game's position and extracts one feature
+// for each. The caller frees the values and destroys the move list.
+static double *lamc_test_feature_values(Game *game,
+                                        const play_feature_t feature,
+                                        MoveList **moves_out) {
+  MoveList *moves = move_list_create(LAMC_TEST_MOVE_LIST_CAPACITY);
+  const MoveGenArgs gen_args = {
+      .game = game,
+      .move_list = moves,
+      .move_record_type = MOVE_RECORD_ALL,
+      .move_sort_type = MOVE_SORT_EQUITY,
+      .override_kwg = NULL,
+      .eq_margin_movegen = 0,
+      .target_equity = EQUITY_MAX_VALUE,
+  };
+  generate_moves(&gen_args);
+  const int num_moves = move_list_get_count(moves);
+  const int num_columns = play_feature_get_num_columns(feature);
+  double *values = malloc_or_die(sizeof(double) * num_moves * num_columns);
+  PlayFeatureCtx ctx;
+  play_feature_ctx_init(&ctx, game);
+  play_feature_prepare(feature, &ctx);
+  play_feature_extract(feature, &ctx, moves, num_columns, values);
+  *moves_out = moves;
+  return values;
+}
+
+// In a sim the opponent's rack is unknown and its tiles are in the bag
+// object, so the tiles left in the bag after a play must be counted from the
+// real bag, as move generation counts them, and a play that empties it has
+// none left.
+static void test_play_feature_bag_after_unknown_rack(void) {
+  Config *config = config_create_or_die(
+      "set -lex CSW24 -wmp true -s1 equity -s2 equity -r1 all -r2 all");
+  load_and_exec_config_or_die(
+      config, "cgp 3V3W6L/1BEATY1U5GI/2XU3S4FEN/3TA2H4LOY/2GEN1DUCAT1AD1/"
+              "2O1I1I2WRITE1/2V1M1ZOAEA4/3JAGER2DRILL/2BOtONE5O1/1FERER7Q1/"
+              "4S8U1/12NaM/12ATE/13ST/14H ACEINOP/ 361/397 0 -lex CSW24");
+  Game *game = config_get_game(config);
+  const int real_bag = game_get_real_bag_size(game);
+  assert(real_bag == 4);
+  assert(bag_get_letters(game_get_bag(game)) == real_bag + RACK_SIZE);
+  MoveList *moves = NULL;
+  const double *values =
+      lamc_test_feature_values(game, PLAY_FEATURE_BAG_AFTER, &moves);
+  bool emptied = false;
+  for (int move_idx = 0; move_idx < move_list_get_count(moves); move_idx++) {
+    const Move *move = move_list_get_move(moves, move_idx);
+    int expected = real_bag;
+    if (move_get_type(move) == GAME_EVENT_TILE_PLACEMENT_MOVE) {
+      expected -= move_get_tiles_played(move);
+    }
+    if (expected < 0) {
+      expected = 0;
+    }
+    emptied = emptied || expected == 0;
+    assert(within_epsilon(values[move_idx], (double)expected));
+  }
+  assert(emptied);
+  free((void *)values);
   move_list_destroy(moves);
   config_destroy(config);
 }
@@ -784,6 +849,7 @@ void test_lamc(void) {
   test_gp_bounds();
   test_play_features();
   test_play_feature_pass_with_empty_bag();
+  test_play_feature_bag_after_unknown_rack();
   test_lamc_time_cut_round();
   test_lamc_finds_planted_exchanges();
   test_lamc_sim_keeps_protected_play(false);

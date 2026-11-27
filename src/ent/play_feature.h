@@ -19,7 +19,11 @@ typedef struct PlayFeatureCtx {
   const KLV *klv;
   // The rack of the player on turn, from which every play is made.
   Rack rack;
+  // The tiles in the bag object, which also holds an unknown opponent rack's
+  // tiles, as move generation's pass and exchange rules count them; and the
+  // tiles really in the bag, without those.
   int bag_tiles;
+  int real_bag_tiles;
   // Filled by the premium access feature's prepare step: the empty squares
   // with a word multiplier above 1, and that multiplier.
   int num_premium_squares;
