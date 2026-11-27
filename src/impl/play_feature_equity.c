@@ -6,6 +6,7 @@
 #include "../ent/move.h"
 #include "../ent/play_feature.h"
 #include "../ent/rack.h"
+#include "../ent/static_eval.h"
 #include "gameplay.h"
 
 void play_feature_extract_score(const PlayFeatureCtx __attribute__((unused)) *
@@ -23,9 +24,15 @@ void play_feature_extract_leave_value(const PlayFeatureCtx *ctx,
 
 void play_feature_extract_equity(const PlayFeatureCtx *ctx, const Move *move,
                                  double *out) {
-  // A pass's equity is a sentinel; it scores nothing and keeps the rack.
+  // A pass's equity is a sentinel; it scores nothing and keeps the rack,
+  // valued as move generation values every other play's leave: by the KLV,
+  // or with the bag empty, as a play that does not go out.
   if (move_get_type(move) == GAME_EVENT_PASS) {
-    out[0] = equity_to_double(klv_get_leave_value(ctx->klv, &ctx->rack));
+    const Equity kept = ctx->bag_tiles > 0
+                            ? klv_get_leave_value(ctx->klv, &ctx->rack)
+                            : endgame_nonoutplay_adjustment(
+                                  rack_get_score(ctx->ld, &ctx->rack));
+    out[0] = equity_to_double(kept);
     return;
   }
   out[0] = equity_to_double(move_get_equity(move));

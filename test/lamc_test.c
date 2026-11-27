@@ -14,6 +14,7 @@
 #include "../src/def/lamc_defs.h"
 #include "../src/def/move_defs.h"
 #include "../src/def/play_feature_defs.h"
+#include "../src/def/static_eval_defs.h"
 #include "../src/def/thread_control_defs.h"
 #include "../src/ent/autoplay_results.h"
 #include "../src/ent/bag.h"
@@ -23,6 +24,8 @@
 #include "../src/ent/lamc_args.h"
 #include "../src/ent/move.h"
 #include "../src/ent/play_feature.h"
+#include "../src/ent/player.h"
+#include "../src/ent/rack.h"
 #include "../src/ent/sim_args.h"
 #include "../src/ent/sim_results.h"
 #include "../src/ent/stats.h"
@@ -273,6 +276,57 @@ static void test_gp_kernel(const gp_kernel_t kernel) {
   assert(fabs(best_point[0] - 0.5) < 0.25);
   assert(fabs(best_point[1] + 0.3) < 0.25);
   gp_destroy(bowl);
+}
+
+// With the bag empty, move generation values a play that does not go out by
+// its leave's face value, so a pass, which keeps the whole rack, is valued
+// below every other play; its equity feature must say so.
+static void test_play_feature_pass_with_empty_bag(void) {
+  Config *config = config_create_or_die(
+      "set -lex NWL20 -wmp true -s1 equity -s2 equity -r1 all -r2 all");
+  load_and_exec_config_or_die(
+      config, "cgp 9A1PIXY/9S1L3/2ToWNLETS1O3/9U1DA1R/3GERANIAL1U1I/9g2T1C/"
+              "8WE2OBI/6EMU4ON/6AID3GO1/5HUN4ET1/4ZA1T4ME1/1Q1FAKEY3JOES/"
+              "FIVE1E5IT1C/5SPORRAN2A/6ORE2N2D BGIV/DEHILOR 384/389 0 "
+              "-lex NWL20");
+  Game *game = config_get_game(config);
+  assert(bag_get_letters(game_get_bag(game)) == 0);
+  MoveList *moves = move_list_create(LAMC_TEST_MOVE_LIST_CAPACITY);
+  const MoveGenArgs gen_args = {
+      .game = game,
+      .move_list = moves,
+      .move_record_type = MOVE_RECORD_ALL,
+      .move_sort_type = MOVE_SORT_EQUITY,
+      .override_kwg = NULL,
+      .eq_margin_movegen = 0,
+      .target_equity = EQUITY_MAX_VALUE,
+  };
+  generate_moves(&gen_args);
+  const int num_moves = move_list_get_count(moves);
+  double *values = malloc_or_die(sizeof(double) * num_moves);
+  PlayFeatureCtx ctx;
+  play_feature_ctx_init(&ctx, game);
+  play_feature_prepare(PLAY_FEATURE_EQUITY, &ctx);
+  play_feature_extract(PLAY_FEATURE_EQUITY, &ctx, moves, 1, values);
+  int pass_idx = -1;
+  for (int move_idx = 0; move_idx < num_moves; move_idx++) {
+    if (move_get_type(move_list_get_move(moves, move_idx)) == GAME_EVENT_PASS) {
+      pass_idx = move_idx;
+    }
+  }
+  assert(pass_idx >= 0);
+  const Rack *rack = player_get_rack(
+      game_get_player(game, game_get_player_on_turn_index(game)));
+  assert(within_epsilon(
+      values[pass_idx],
+      equity_to_double(-2 * rack_get_score(config_get_ld(config), rack) -
+                       NON_OUTPLAY_CONSTANT_PENALTY)));
+  for (int move_idx = 0; move_idx < num_moves; move_idx++) {
+    assert(values[pass_idx] <= values[move_idx]);
+  }
+  free(values);
+  move_list_destroy(moves);
+  config_destroy(config);
 }
 
 static void test_play_features(void) {
@@ -596,6 +650,7 @@ void test_lamc(void) {
   test_gp_kernel(GP_KERNEL_SQUARED_EXPONENTIAL);
   test_gp_fit_by_likelihood();
   test_play_features();
+  test_play_feature_pass_with_empty_bag();
   test_lamc_time_cut_round();
   test_lamc_sim_keeps_protected_play(false);
   test_lamc_sim_keeps_protected_play(true);
