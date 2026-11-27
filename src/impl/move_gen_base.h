@@ -28,7 +28,6 @@
 #include "../ent/rack.h"
 #include "../ent/rack_info_table.h"
 #include "../ent/static_eval.h"
-#include "../ent/wmp.h"
 #include "../ent/word_info_table.h"
 #include "../util/io_util.h"
 #include "wmp_move_gen.h"
@@ -102,14 +101,6 @@ typedef struct MovegenBudget {
   uint64_t limit;
   _Atomic uint64_t spent;
 } MovegenBudget;
-
-// The plays generate_best_small_move_with_pool keeps of a pool anchor, of
-// fewer tiles than the rack holds.
-enum {
-  BEST_SMALL_POOL_PLAYS = 4,
-  // The plays of as many tiles as the rack holds, one for each set of tiles.
-  BEST_SMALL_POOL_OUTS = 8,
-};
 
 typedef struct MoveGen {
   // Move generations made on this MoveGen: generate_moves and
@@ -404,31 +395,6 @@ typedef struct MoveGen {
   // subrack_cache_epoch + 1 here. A pool-shifted generation takes such an
   // entry while the epoch is the same, and recomputes its leave values.
   uint64_t pool_shift_subrack_epochs[MOVEGEN_SUBRACK_CACHE_SIZE];
-  // MOVE_RECORD_BEST_SMALL with an out bonus, the full word list and a
-  // BitRack-compatible alphabet: the number of tiles on the rack, for which
-  // the small shadow skips a window that no word using the whole rack can
-  // fill (see small_shadow_whole_rack_word_may_fit); -1 otherwise, which
-  // reads neither field after it. Then the player's word map and the rack as
-  // a BitRack.
-  int best_small_out_wmp_tiles;
-  const WMP *best_small_out_wmp;
-  BitRack best_small_out_bit_rack;
-  // generate_best_out_play_and_count_lanes, for the anchor it searches: by
-  // column of the lane, the most empty squares a play of the anchor can still
-  // fill from that square on (see gen_set_out_room). Read only by
-  // recursive_gen_small_out.
-  int8_t best_small_out_room[BOARD_DIM];
-  // generate_best_small_move_with_pool: the most tiles a play of the pool
-  // places, read only by recursive_gen_small_capped, and the best plays the
-  // search of an anchor has found, best first.
-  int best_small_tile_cap;
-  int best_small_pool_play_count;
-  AnchorPlayEntry best_small_pool_plays[BEST_SMALL_POOL_PLAYS];
-  // The same for the plays of as many tiles as the rack holds.
-  // One for each set of tiles, with the tiles sorted and packed.
-  int best_small_pool_out_count;
-  AnchorPlayEntry best_small_pool_outs[BEST_SMALL_POOL_OUTS];
-  uint64_t best_small_pool_out_tiles[BEST_SMALL_POOL_OUTS];
 } MoveGen;
 
 // Cache getter functions
