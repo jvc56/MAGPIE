@@ -653,7 +653,8 @@ static uint64_t lamc_test_bits(const double value) {
 }
 
 // A fingerprint of a LAMC sim's results.
-static uint64_t lamc_test_sim(const int num_threads, const char *extra) {
+static uint64_t lamc_test_sim(const int num_threads, const char *extra,
+                              LamcTotals *totals_out) {
   char *settings = get_formatted_string(
       "set -lex CSW21 -wmp true -s1 equity -s2 equity -r1 all -r2 all "
       "-numplays 6 -plies 2 -threads %d -iterations 1200 "
@@ -679,6 +680,14 @@ static uint64_t lamc_test_sim(const int num_threads, const char *extra) {
   uint64_t hash = FNV_64_OFFSET_BASIS;
   const int num_plays = sim_results_get_number_of_plays(sim_results);
   assert(num_plays == 6);
+  // BAI gets what the search leaves of -iterations, give or take a pass
+  // over the plays.
+  const uint64_t spent =
+      sim_results_get_iteration_count(sim_results) + totals.explore_rollouts;
+  assert(spent >= 1200 && spent <= 1200 + 2 * (uint64_t)num_plays);
+  if (totals_out) {
+    *totals_out = totals;
+  }
   for (int play_idx = 0; play_idx < num_plays; play_idx++) {
     const SimmedPlay *simmed_play =
         sim_results_get_simmed_play(sim_results, play_idx);
@@ -701,10 +710,21 @@ static void test_lamc_sim(void) {
       ("-lamcreuse true -lamcequitymean true -lamcfinalall true "
        "-lamcfinalstatic 3")};
   for (int variant_idx = 0; variant_idx < 4; variant_idx++) {
-    const uint64_t one = lamc_test_sim(1, variants[variant_idx]);
-    const uint64_t several = lamc_test_sim(4, variants[variant_idx]);
+    const uint64_t one = lamc_test_sim(1, variants[variant_idx], NULL);
+    const uint64_t several = lamc_test_sim(4, variants[variant_idx], NULL);
     assert(one == several);
   }
+  // With places to fill by score, refinement spends the search's share
+  // (480 samples, give or take half a round of 8 x 3); without it the
+  // search stops after its rounds.
+  LamcTotals refined;
+  (void)lamc_test_sim(1, "-lamcfinalstatic 3", &refined);
+  assert(refined.explore_rollouts >= 480 - 12);
+  LamcTotals unrefined;
+  (void)lamc_test_sim(1, "-lamcfinalstatic 3 -lamcrefine false", &unrefined);
+  assert(unrefined.rounds <= LAMC_DEFAULT_MAX_ROUNDS);
+  assert(unrefined.explore_rollouts <= unrefined.rounds * 8 * 3);
+  assert(unrefined.explore_rollouts < refined.explore_rollouts);
 }
 
 // A planted answer: in recorded rollouts where every exchange beats every
@@ -899,6 +919,12 @@ static void test_lamc_refine_cut(void) {
   assert(at_or_above >= count - num_static);
   for (int play_idx = 0; play_idx < num_static; play_idx++) {
     assert(lamc_get_predicted_mean(ctx, play_idx) < cut);
+  }
+  // The top static plays are candidates though they sample worst, first,
+  // in static order.
+  assert(lamc_select_candidates(ctx, &sim_args.lamc_args, count) == count);
+  for (int rank = 0; rank < num_static; rank++) {
+    assert(lamc_get_candidate(ctx, rank) == rank);
   }
   lamc_ctx_destroy(ctx);
   config_destroy(config);

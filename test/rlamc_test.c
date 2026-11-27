@@ -419,7 +419,7 @@ void test_rlamc_cr(void) {
       "-plies 2 -numplays 10 -scond none -tlim 0 -minplayiterations 10");
   const char *method_settings[RCR_NUM_METHODS] = {
       rcr_env_string("RCR_A", "-it 1000"),
-      rcr_env_string("RCR_B", "-it 1000 -rlamc plies=0,lamc=0,k=6,m=8,h=1"),
+      rcr_env_string("RCR_B", "-it 1000 -rlamc on"),
       rcr_env_string("RCR_CONT",
                      "-plies 2 -numplays 8 -it 300 -scond none "
                      "-tlim 0 -minplayiterations 10 -sbagcycle false"),
@@ -935,7 +935,7 @@ void test_rlamc_bench(void) {
   const char *settings = rcr_env_string(
       "RB_SETTINGS", "-numplays 10 -plies 2 -threads 2 -iterations 3000 "
                      "-minplayiterations 10 -scond none -tlim 0 -seed 42 "
-                     "-sbagcycle false -rlamc plies=0,lamc=0,k=6,m=8,share=1");
+                     "-lamc true -sfinish true -rlamc on");
   char *full = get_formatted_string(
       "set -lex CSW21 -wmp true -s1 equity -s2 equity -r1 all -r2 all "
       "-sinfer false -savesettings false -hr false %s",
@@ -972,7 +972,8 @@ void test_rlamc_bench(void) {
   printf(
       "RB %.3f s, %llu rollouts, RLAMC searches %llu, candidates %.2f, "
       "switched %.1f%%, samples %llu, cache hits %llu misses %llu "
-      "(%.1f%% hit), decision hits %llu, inner searches %llu, stopped %llu\n",
+      "(%.1f%% hit), decision hits %llu, inner searches %llu, stopped %llu, "
+      "finishes %llu (hits %llu), static rollouts %llu (hits %llu)\n",
       seconds, (unsigned long long)sim_results_get_iteration_count(sim_results),
       (unsigned long long)totals.searches,
       totals.searches ? (double)totals.candidates / (double)totals.searches
@@ -988,7 +989,10 @@ void test_rlamc_bench(void) {
           : 0.0,
       (unsigned long long)totals.decision_hits,
       (unsigned long long)totals.inner_searches,
-      (unsigned long long)totals.stopped);
+      (unsigned long long)totals.stopped, (unsigned long long)totals.finishes,
+      (unsigned long long)totals.finish_hits,
+      (unsigned long long)totals.static_rollouts,
+      (unsigned long long)totals.rollout_hits);
   config_destroy(config);
 }
 
