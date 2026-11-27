@@ -1114,7 +1114,7 @@ static void test_sim_finish_after_last_ply_empties_bag(void) {
               "-lex NWL20");
   load_and_exec_config_or_die(config, "gen");
   load_and_exec_config_or_die(config, "addmoves pass");
-  Game *game = config_get_game(config);
+  const Game *game = config_get_game(config);
   const int mover = game_get_player_on_turn_index(game);
   Rack known_opp_rack;
   rack_copy(&known_opp_rack, player_get_rack(game_get_player(game, 1 - mover)));

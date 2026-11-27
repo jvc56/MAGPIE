@@ -60,6 +60,11 @@ enum {
   LAMC_TEST_GP_GRID = 6,
   LAMC_TEST_LIKELIHOOD_POINTS = 40,
   LAMC_TEST_TIME_CUT_SAMPLES = 64,
+  LAMC_TEST_PLANTED_SAMPLES = 256,
+  LAMC_TEST_BOUND_POINTS = 30,
+  LAMC_TEST_BOUND_DIMS = 3,
+  LAMC_TEST_BOUND_PROBES = 2000,
+  LAMC_TEST_PLANTED_FINALISTS = 20,
   LAMC_REPLAY_MAX_VARIANTS = 32,
   LAMC_REPLAY_MAX_BUDGETS = 8,
   LAMC_REPLAY_MAX_THREADS = 64,
@@ -184,6 +189,61 @@ static void test_gp_fit_by_likelihood(void) {
   assert(peak_mean > 0.01);
   assert(trough_mean < -0.01);
   gp_destroy(gp);
+}
+
+// A uniform value in [0, 1) from a linear congruential generator.
+static double lamc_test_uniform(uint64_t *state) {
+  *state = *state * 6364136223846793005ULL + 1442695040888963407ULL;
+  return (double)(*state >> 11) / 9007199254740992.0;
+}
+
+// gp_get_bounds bounds the posterior mean and variance at every point; the
+// depth 1 search's pruned scans rely on it. Probed at the data and at random
+// points, for both kernels, after fits by likelihood to noisy random values.
+static void test_gp_bounds(void) {
+  uint64_t state = 99;
+  double points[LAMC_TEST_BOUND_POINTS * LAMC_TEST_BOUND_DIMS];
+  double values[LAMC_TEST_BOUND_POINTS];
+  double noise[LAMC_TEST_BOUND_POINTS];
+  for (int point_idx = 0; point_idx < LAMC_TEST_BOUND_POINTS; point_idx++) {
+    for (int dim_idx = 0; dim_idx < LAMC_TEST_BOUND_DIMS; dim_idx++) {
+      points[point_idx * LAMC_TEST_BOUND_DIMS + dim_idx] =
+          4.0 * lamc_test_uniform(&state) - 2.0;
+    }
+    values[point_idx] = lamc_test_uniform(&state) - 0.5;
+    noise[point_idx] = 0.001 + 0.01 * lamc_test_uniform(&state);
+  }
+  const double base_scales[LAMC_TEST_BOUND_DIMS] = {1.0, 1.0, 1.0};
+  const double multiples[3] = {0.5, 1.0, 2.0};
+  const gp_kernel_t kernels[2] = {GP_KERNEL_MATERN52,
+                                  GP_KERNEL_SQUARED_EXPONENTIAL};
+  for (int kernel_idx = 0; kernel_idx < 2; kernel_idx++) {
+    GaussianProcess *gp =
+        gp_create(LAMC_TEST_BOUND_POINTS, LAMC_TEST_BOUND_DIMS);
+    assert(gp_fit_by_likelihood(gp, kernels[kernel_idx], 0.0, base_scales,
+                                multiples, 3, points, values, noise,
+                                LAMC_TEST_BOUND_POINTS));
+    double mean_bound = 0.0;
+    double variance_bound = 0.0;
+    gp_get_bounds(gp, &mean_bound, &variance_bound);
+    for (int probe_idx = 0;
+         probe_idx < LAMC_TEST_BOUND_PROBES + LAMC_TEST_BOUND_POINTS;
+         probe_idx++) {
+      double probe[LAMC_TEST_BOUND_DIMS];
+      for (int dim_idx = 0; dim_idx < LAMC_TEST_BOUND_DIMS; dim_idx++) {
+        probe[dim_idx] =
+            probe_idx < LAMC_TEST_BOUND_POINTS
+                ? points[probe_idx * LAMC_TEST_BOUND_DIMS + dim_idx]
+                : 6.0 * lamc_test_uniform(&state) - 3.0;
+      }
+      double mean = 0.0;
+      double variance = 0.0;
+      gp_predict(gp, probe, &mean, &variance);
+      assert(mean <= mean_bound + 1e-12);
+      assert(variance <= variance_bound + 1e-12);
+    }
+    gp_destroy(gp);
+  }
 }
 
 static void test_gp_kernel(const gp_kernel_t kernel) {
@@ -507,6 +567,78 @@ static void test_lamc_sim(void) {
   }
 }
 
+// A planted answer: in recorded rollouts where every exchange beats every
+// tile placement, though exchanges rank low by static equity, the search must
+// hand on an exchange beyond the top static plays. Values fall with static
+// equity rank, with noise of a few win%.
+static void test_lamc_finds_planted_exchanges(void) {
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -wmp true -s1 equity -s2 equity -r1 all -r2 all "
+      "-numplays 10 -plies 2 -threads 1 -iterations 1000 -scond none "
+      "-tlim 0 -seed 42 -sinfer false -lamc true -savesettings false "
+      "-hr false");
+  load_and_exec_config_or_die(config, "cgp " JOSH2_CGP);
+  load_and_exec_config_or_die(config, "gen");
+  SimArgs sim_args;
+  config_fill_sim_args(config, NULL, NULL, NULL, NULL, &sim_args);
+  LamcCtx *ctx = lamc_ctx_create();
+  const int num_plays = lamc_build(ctx, &sim_args);
+  const MoveList *universe = lamc_get_universe(ctx);
+  double *samples =
+      malloc_or_die(sizeof(double) * num_plays * LAMC_TEST_PLANTED_SAMPLES);
+  uint64_t noise_state = 12345;
+  int best_exchange_rank = num_plays;
+  for (int play_idx = 0; play_idx < num_plays; play_idx++) {
+    const bool exchange =
+        move_get_type(move_list_get_move(universe, play_idx)) ==
+        GAME_EVENT_EXCHANGE;
+    if (exchange && play_idx < best_exchange_rank) {
+      best_exchange_rank = play_idx;
+    }
+    const double mean =
+        exchange ? 0.8 : 0.5 - 0.3 * (double)play_idx / (double)num_plays;
+    for (int sample_idx = 0; sample_idx < LAMC_TEST_PLANTED_SAMPLES;
+         sample_idx++) {
+      const double noise = (lamc_test_uniform(&noise_state) - 0.5) * 0.1;
+      samples[play_idx * LAMC_TEST_PLANTED_SAMPLES + sample_idx] = mean + noise;
+    }
+  }
+  // Beyond the top static plays, which the candidates hold anyway.
+  assert(best_exchange_rank >= sim_args.lamc_args.static_finalists);
+  const RandomVariablesArgs table_args = {
+      .type = RANDOM_VARIABLES_TABLE,
+      .num_rvs = num_plays,
+      .num_samples = LAMC_TEST_PLANTED_SAMPLES,
+      .samples = samples,
+  };
+  RandomVariables *table = rvs_create(&table_args);
+  thread_control_set_status(config_get_thread_control(config),
+                            THREAD_CONTROL_STATUS_STARTED);
+  const LamcSearchLimits limits = {
+      .rollout_budget = 2000,
+      .time_budget_seconds = 0,
+      .rollouts_per_sample = 1,
+      .num_threads = 1,
+      .parent_worker_thread_index = 0,
+      .thread_control = config_get_thread_control(config),
+      .num_finalists = LAMC_TEST_PLANTED_FINALISTS,
+  };
+  lamc_search(ctx, &sim_args.lamc_args, table, &limits);
+  const int count = lamc_select_candidates(ctx, &sim_args.lamc_args,
+                                           LAMC_TEST_PLANTED_FINALISTS);
+  int exchanges = 0;
+  for (int rank = 0; rank < count; rank++) {
+    exchanges +=
+        move_get_type(move_list_get_move(
+            universe, lamc_get_candidate(ctx, rank))) == GAME_EVENT_EXCHANGE;
+  }
+  assert(exchanges > 0);
+  rvs_destroy(table);
+  free(samples);
+  lamc_ctx_destroy(ctx);
+  config_destroy(config);
+}
+
 // A search stopped during its first round, as a stop request or a time
 // limit that runs out stops it: a play cut off before its first sample has
 // nothing to fit, so it must not count as evaluated. A stop already pending
@@ -649,9 +781,11 @@ void test_lamc(void) {
   test_gp_kernel(GP_KERNEL_MATERN52);
   test_gp_kernel(GP_KERNEL_SQUARED_EXPONENTIAL);
   test_gp_fit_by_likelihood();
+  test_gp_bounds();
   test_play_features();
   test_play_feature_pass_with_empty_bag();
   test_lamc_time_cut_round();
+  test_lamc_finds_planted_exchanges();
   test_lamc_sim_keeps_protected_play(false);
   test_lamc_sim_keeps_protected_play(true);
   test_lamc_two_stage();
@@ -957,6 +1091,10 @@ static void *replay_evaluate_worker(void *data) {
         .num_threads = 1,
         .parent_worker_thread_index = 0,
         .thread_control = shared->thread_control,
+        // As lamc_choose_candidates does, so that refinement, on by default,
+        // runs.
+        .num_finalists =
+            args->num_finalists > 0 ? args->num_finalists : baseline,
     };
     shared->variant_rounds[pos_idx] = lamc_search(ctx, args, table, &limits);
     const int num_evaluated = lamc_get_num_evaluated(ctx);

@@ -601,17 +601,20 @@ void test_rlamc_cr(void) {
   }
 }
 
-// A fingerprint of a recursive sim's results.
-static uint64_t rlamc_test_sim(const int num_threads, const char *rlamc) {
+// A fingerprint of a recursive sim's results, of cgp (a cgp command) with
+// extra settings, its totals in *totals_out if not NULL.
+static uint64_t rlamc_test_sim_of(const int num_threads, const char *cgp,
+                                  const char *extra, const char *rlamc,
+                                  RlamcTotals *totals_out) {
   char *settings = get_formatted_string(
-      "set -lex CSW21 -wmp true -s1 equity -s2 equity -r1 all -r2 all "
+      "set -wmp true -s1 equity -s2 equity -r1 all -r2 all "
       "-numplays 5 -plies 3 -threads %d -iterations 300 "
       "-minplayiterations 10 -scond none -tlim 0 -seed 42 -sinfer false "
-      "-savesettings false -hr false -rlamc %s",
-      num_threads, rlamc);
+      "-savesettings false -hr false %s -rlamc %s",
+      num_threads, extra, rlamc);
   Config *config = config_create_or_die(settings);
   free(settings);
-  load_and_exec_config_or_die(config, "cgp " JOSH2_CGP);
+  load_and_exec_config_or_die(config, cgp);
   load_and_exec_config_or_die(config, "gen");
   rlamc_totals_reset();
   load_and_exec_config_or_die(config, "sim");
@@ -651,8 +654,94 @@ static uint64_t rlamc_test_sim(const int num_threads, const char *rlamc) {
     assert(totals.searches > 0);
     assert(totals.samples + totals.cache_misses > 0);
   }
+  if (totals_out) {
+    *totals_out = totals;
+  }
   config_destroy(config);
   return hash;
+}
+
+// A fingerprint of a recursive sim of JOSH2_CGP.
+static uint64_t rlamc_test_sim(const int num_threads, const char *rlamc) {
+  return rlamc_test_sim_of(num_threads, "cgp " JOSH2_CGP, "-lamc false", rlamc,
+                           NULL);
+}
+
+// The settings users run, -lamc true with -rlamc on, at 4 in the bag, where
+// depth 1 rollouts finish the game and the finish, rollout and decision
+// caches are in use: the same results at 1 and 4 threads, whose workers fill
+// their caches differently, so a cache that returned a value other than the
+// one it stands for would show.
+static void test_rlamc_late_game_caches(void) {
+  const char *cgp =
+      "cgp 3V3W6L/1BEATY1U5GI/2XU3S4FEN/3TA2H4LOY/2GEN1DUCAT1AD1/"
+      "2O1I1I2WRITE1/2V1M1ZOAEA4/3JAGER2DRILL/2BOtONE5O1/1FERER7Q1/4S8U1/"
+      "12NaM/12ATE/13ST/14H ACEINOP/DEIINOS 361/397 0 -lex CSW24";
+  const char *extra = "-lamc true -lamcpool 8 -sfinish true";
+  // With the defaults (h=5), depth 1 games end inside the horizon, from
+  // rollouts the rollout cache holds; with h=1 they finish, from the finish
+  // cache.
+  const char *const specs[] = {"on", "h=1"};
+  for (int spec_idx = 0; spec_idx < 2; spec_idx++) {
+    RlamcTotals totals;
+    const uint64_t one =
+        rlamc_test_sim_of(1, cgp, extra, specs[spec_idx], &totals);
+    if (spec_idx == 0) {
+      assert(totals.static_rollouts > 0 && totals.rollout_hits > 0);
+      assert(totals.decision_hits > 0);
+    } else {
+      assert(totals.finishes > 0 && totals.finish_hits > 0);
+    }
+    const uint64_t several =
+        rlamc_test_sim_of(4, cgp, extra, specs[spec_idx], NULL);
+    assert(one == several);
+  }
+}
+
+// A sim reuses its context (SimCtx, the LAMC and RLAMC workers and caches)
+// across positions: a sim of one position after another, in the same
+// lexicon and from the same seed, must equal a sim of it alone.
+static void test_rlamc_reused_sim_ctx(void) {
+  const char *settings =
+      "set -wmp true -s1 equity -s2 equity -r1 all -r2 all -numplays 5 "
+      "-plies 3 -threads 2 -iterations 300 -minplayiterations 10 -scond none "
+      "-tlim 0 -seed 42 -sinfer false -savesettings false -hr false -lamc "
+      "true -lamcpool 8 -sfinish true -rlamc on";
+  const char *first = "cgp " JOSH2_CGP;
+  const char *second =
+      "cgp BEDEL10/R1R9U2/O1IT1Q5OM2/W1BIDI4YUM2/N2XI5AT3/E3G4T1R3/"
+      "S1VOILE2OKA3/T3T1DISPACED1/9AWE1O1/9Z1s1FA/14R/13GO/13AH/"
+      "3JUVIE4UTA/INRO3FLENCHES ?ANNOPY/AEGILNS 344/368 0 -lex CSW21";
+  uint64_t hashes[2];
+  for (int run_idx = 0; run_idx < 2; run_idx++) {
+    Config *config = config_create_or_die(settings);
+    if (run_idx == 1) {
+      load_and_exec_config_or_die(config, first);
+      load_and_exec_config_or_die(config, "gen");
+      load_and_exec_config_or_die(config, "sim");
+    }
+    load_and_exec_config_or_die(config, second);
+    load_and_exec_config_or_die(config, "gen");
+    // Every command advances the seed; both sims start from the same one.
+    load_and_exec_config_or_die(config, "set -seed 42");
+    load_and_exec_config_or_die(config, "sim");
+    const SimResults *sim_results = config_get_sim_results(config);
+    uint64_t hash = FNV_64_OFFSET_BASIS;
+    const int num_plays = sim_results_get_number_of_plays(sim_results);
+    for (int play_idx = 0; play_idx < num_plays; play_idx++) {
+      const SimmedPlay *simmed_play =
+          sim_results_get_simmed_play(sim_results, play_idx);
+      const double mean = simmed_play_get_exact_win_pct_mean(simmed_play);
+      uint64_t bits;
+      memcpy(&bits, &mean, sizeof(bits));
+      hash = fnv64a_step(hash, bits);
+      hash = fnv64a_step(
+          hash, stat_get_num_samples(simmed_play_get_equity_stat(simmed_play)));
+    }
+    hashes[run_idx] = hash;
+    config_destroy(config);
+  }
+  assert(hashes[0] == hashes[1]);
 }
 
 // A fingerprint of a recursive sim of cgp, whose bag is empty, with every
@@ -798,6 +887,8 @@ static void test_rlamc_parse(void) {
 void test_rlamc(void) {
   test_rlamc_parse();
   test_rlamc_ended_rollout_scored_as_finish();
+  test_rlamc_late_game_caches();
+  test_rlamc_reused_sim_ctx();
   const char *const specs[] = {
       "off",
       "on",
