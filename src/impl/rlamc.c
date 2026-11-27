@@ -612,16 +612,16 @@ static void rlamc_generate_candidates(RlamcWorker *worker,
 
 // The utility for player mover of the recursive rollout's last state, as the
 // sim scores a rollout's horizon (see sim_rollout). The utility of a game that
-// has ended with spread for the mover.
-static double rlamc_ended_score(const RlamcEval *eval, const Equity spread,
-                                const Equity leftover) {
+// has ended with spread for the mover: its result and final spread, with no
+// leftover, as the sim scores an ended game, wherever it ended.
+static double rlamc_ended_score(const RlamcEval *eval, const Equity spread) {
   double win_pct;
   if (spread == 0) {
     win_pct = 0.5;
   } else {
     win_pct = spread > 0 ? 1.0 : 0.0;
   }
-  return sim_utility_blend(win_pct, spread + leftover, eval->utility_w_winpct,
+  return sim_utility_blend(win_pct, spread, eval->utility_w_winpct,
                            eval->utility_w_spread, eval->utility_spread_scale);
 }
 
@@ -630,7 +630,7 @@ static double rlamc_score(const RlamcEval *eval, const Game *game,
   const Equity spread = player_get_score(game_get_player(game, mover)) -
                         player_get_score(game_get_player(game, 1 - mover));
   if (game_get_game_end_reason(game) != GAME_END_REASON_NONE) {
-    return rlamc_ended_score(eval, spread, leftover);
+    return rlamc_ended_score(eval, spread);
   }
   const int on_turn = game_get_player_on_turn_index(game);
   int spread_plus_leftover = (int)lround(equity_to_double(spread + leftover));
@@ -945,7 +945,7 @@ static double rlamc_rollout(RlamcWorker *worker, const RlamcLevel *args,
   if (finish && !game_over(game) &&
       bag_get_letters(game_get_bag(game)) <= eval->finish_max_bag &&
       rlamc_finish(worker, game, mover, carry, &final_spread)) {
-    utility = rlamc_ended_score(eval, final_spread, 0);
+    utility = rlamc_ended_score(eval, final_spread);
   } else {
     utility = rlamc_score(eval, game, mover, leftover);
   }

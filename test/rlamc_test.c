@@ -653,6 +653,71 @@ static uint64_t rlamc_test_sim(const int num_threads, const char *rlamc) {
   return hash;
 }
 
+// A fingerprint of a recursive sim of cgp, whose bag is empty, with every
+// play's exact win% and equity means and sample count.
+static uint64_t rlamc_test_empty_bag_sim(const char *cgp, const char *rlamc) {
+  char *settings = get_formatted_string(
+      "set -wmp true -s1 equity -s2 equity -r1 all -r2 all "
+      "-numplays 40 -plies 2 -threads 1 -iterations 1000 "
+      "-minplayiterations 1 -scond none -tlim 0 -seed 7 -sinfer false "
+      "-sfinish true -lamc false -savesettings false -hr false -rlamc %s",
+      rlamc);
+  Config *config = config_create_or_die(settings);
+  free(settings);
+  load_and_exec_config_or_die(config, cgp);
+  load_and_exec_config_or_die(config, "gen");
+  load_and_exec_config_or_die(config, "sim");
+  const SimResults *sim_results = config_get_sim_results(config);
+  uint64_t hash = FNV_64_OFFSET_BASIS;
+  const int num_plays = sim_results_get_number_of_plays(sim_results);
+  assert(num_plays > 1);
+  for (int play_idx = 0; play_idx < num_plays; play_idx++) {
+    const SimmedPlay *simmed_play =
+        sim_results_get_simmed_play(sim_results, play_idx);
+    const double means[2] = {
+        simmed_play_get_exact_win_pct_mean(simmed_play),
+        stat_get_mean(simmed_play_get_equity_stat(simmed_play))};
+    for (int mean_idx = 0; mean_idx < 2; mean_idx++) {
+      uint64_t bits;
+      memcpy(&bits, &means[mean_idx], sizeof(bits));
+      hash = fnv64a_step(hash, bits);
+    }
+    hash = fnv64a_step(
+        hash, stat_get_num_samples(simmed_play_get_equity_stat(simmed_play)));
+  }
+  config_destroy(config);
+  return hash;
+}
+
+// With an empty bag, a depth 1 rollout that plays its horizon to the end of
+// the game and one that goes straight to its finish play the same static
+// plays, so they reach the same final spread and must score alike: an
+// ended game's utility is its final spread, with no leftover leave.
+static void test_rlamc_ended_rollout_scored_as_finish(void) {
+  const char *const cgps[] = {
+      "cgp 9A1PIXY/9S1L3/2ToWNLETS1O3/9U1DA1R/3GERANIAL1U1I/9g2T1C/8WE2OBI/"
+      "6EMU4ON/6AID3GO1/5HUN4ET1/4ZA1T4ME1/1Q1FAKEY3JOES/FIVE1E5IT1C/"
+      "5SPORRAN2A/6ORE2N2D BGIV/DEHILOR 384/389 0 -lex NWL20",
+      "cgp AIDER2U7/b1E1E2N1Z5/AWN1T2M1ATT3/LI1COBLE2OW3/OP2U2E2AA3/"
+      "NE2CUSTARDS1Q1/ER1OH5I2U1/S2K2FOB1ERGOT/5HEXYLS2I1/4JIN6N1/"
+      "2GOOP2NAIVEsT/1DIRE10/2GAY10/15/15 AEFILMR/DIV 371/412 0 -lex NWL20",
+      "cgp GATELEGs1POGOED/R4MOOLI3X1/AA10U2/YU4BREDRIN2/1TITULE3E1IN1/"
+      "1E4N3c1BOK/1C2O4CHARD1/QI1FLAWN2E1OE1/IS2E1HIN1A1W2/1MOTIVATE1T1S2/"
+      "1S2N5S4/3PERJURY5/15/15/15 FV/AADIZ 442/388 0 -lex CSW21",
+  };
+  for (int cgp_idx = 0; cgp_idx < 3; cgp_idx++) {
+    const uint64_t finished =
+        rlamc_test_empty_bag_sim(cgps[cgp_idx], "plies=0+1,lamc=1,h=0,fin=1");
+    const uint64_t ended =
+        rlamc_test_empty_bag_sim(cgps[cgp_idx], "plies=0+1,lamc=1,h=16,fin=0");
+    if (getenv("RLAMC_TEST_DEBUG")) {
+      (void)fprintf(stderr, "ENDED %d %llx %llx\n", cgp_idx,
+                    (unsigned long long)finished, (unsigned long long)ended);
+    }
+    assert(finished == ended);
+  }
+}
+
 static void test_rlamc_parse(void) {
   RlamcArgs args;
   ErrorStack *error_stack = error_stack_create();
@@ -730,6 +795,7 @@ static void test_rlamc_parse(void) {
 
 void test_rlamc(void) {
   test_rlamc_parse();
+  test_rlamc_ended_rollout_scored_as_finish();
   const char *const specs[] = {
       "off",
       "on",
