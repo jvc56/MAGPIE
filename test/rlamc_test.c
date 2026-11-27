@@ -110,11 +110,17 @@ enum {
   RLAMC_TEST_FINISH_MAX_PLIES = 40,
   // The seeds the redraw check below searches with.
   RLAMC_TEST_REDRAW_SEEDS = 8,
+  // The plays the pinned sims below simulate.
+  RLAMC_TEST_PINNED_PLAYS = 4,
 };
 
 // How near the gap between two depth 1 candidates' values a switch margin
 // must be to find it.
 static const double RLAMC_TEST_GAP_TOLERANCE = 1e-9;
+
+// The fingerprint of test_rlamc_standard_sim_pinned's standard sim.
+static const uint64_t RLAMC_TEST_STANDARD_SIM_FINGERPRINT =
+    0x187589a2ebe737a0ULL;
 
 // The share of memory the continuations' endgame table takes.
 static const double RCR_TT_FRACTION = 0.04;
@@ -1260,6 +1266,133 @@ static void test_rlamc_rollouts_redraw_other_rack(void) {
   }
 }
 
+// A sim of JOSH2_CGP with the recursive spec rlamc, LAMC and the finish off,
+// whose samples are taken round robin, so that every play's j-th rollout has
+// the same seed in every such sim. For each rollout ply, a fingerprint of
+// every play's statistics of that ply (its plays' scores and bingos) in
+// ply_hashes, and a fingerprint of every play's results (its samples, mean
+// win% and mean equity) in *results_hash. Plays are taken in the gen list's
+// order, and every mean is rounded, so that the fingerprints do not depend
+// on the last bits of floating point sums. The recursive totals are in
+// *totals.
+static void rlamc_test_sim_fingerprints(const char *rlamc, uint64_t *ply_hashes,
+                                        uint64_t *results_hash,
+                                        RlamcTotals *totals) {
+  char *settings = get_formatted_string(
+      "set -lex CSW21 -wmp true -s1 equity -s2 equity -r1 all -r2 all "
+      "-numplays %d -plies 2 -threads 1 -iterations 200 "
+      "-minplayiterations 10 -sr rr -scond none -tlim 0 -seed 42 "
+      "-sinfer false -lamc false -sfinish false -savesettings false -hr "
+      "false -rlamc %s",
+      RLAMC_TEST_PINNED_PLAYS, rlamc);
+  Config *config = config_create_or_die(settings);
+  free(settings);
+  load_and_exec_config_or_die(config, "cgp " JOSH2_CGP);
+  load_and_exec_config_or_die(config, "gen");
+  const MoveList *gen_list = config_get_move_list(config);
+  assert(move_list_get_count(gen_list) == RLAMC_TEST_PINNED_PLAYS);
+  Move gen_plays[RLAMC_TEST_PINNED_PLAYS];
+  for (int play_idx = 0; play_idx < RLAMC_TEST_PINNED_PLAYS; play_idx++) {
+    move_copy(&gen_plays[play_idx], move_list_get_move(gen_list, play_idx));
+  }
+  rlamc_totals_reset();
+  load_and_exec_config_or_die(config, "sim");
+  *totals = rlamc_get_totals();
+  const SimResults *sim_results = config_get_sim_results(config);
+  const int num_plays = sim_results_get_number_of_plays(sim_results);
+  assert(num_plays == RLAMC_TEST_PINNED_PLAYS);
+  const SimmedPlay *simmed_plays[RLAMC_TEST_PINNED_PLAYS];
+  for (int gen_idx = 0; gen_idx < RLAMC_TEST_PINNED_PLAYS; gen_idx++) {
+    simmed_plays[gen_idx] = NULL;
+    for (int play_idx = 0; play_idx < num_plays; play_idx++) {
+      const SimmedPlay *simmed_play =
+          sim_results_get_simmed_play(sim_results, play_idx);
+      if (compare_moves_without_equity(simmed_play_get_move(simmed_play),
+                                       &gen_plays[gen_idx], true) == -1) {
+        simmed_plays[gen_idx] = simmed_play;
+      }
+    }
+    assert(simmed_plays[gen_idx] != NULL);
+  }
+  for (int ply = 0; ply < 2; ply++) {
+    uint64_t hash = FNV_64_OFFSET_BASIS;
+    for (int gen_idx = 0; gen_idx < RLAMC_TEST_PINNED_PLAYS; gen_idx++) {
+      const Stat *stats[2] = {
+          simmed_play_get_score_stat(simmed_plays[gen_idx], ply),
+          simmed_play_get_bingo_stat(simmed_plays[gen_idx], ply)};
+      for (int stat_idx = 0; stat_idx < 2; stat_idx++) {
+        const uint64_t count = stat_get_num_samples(stats[stat_idx]);
+        hash = fnv64a_step(hash, count);
+        hash =
+            fnv64a_step(hash, (uint64_t)llround(stat_get_mean(stats[stat_idx]) *
+                                                (double)count));
+      }
+    }
+    ply_hashes[ply] = hash;
+  }
+  uint64_t hash = FNV_64_OFFSET_BASIS;
+  for (int gen_idx = 0; gen_idx < RLAMC_TEST_PINNED_PLAYS; gen_idx++) {
+    const SimmedPlay *simmed_play = simmed_plays[gen_idx];
+    const Stat *equity_stat = simmed_play_get_equity_stat(simmed_play);
+    hash = fnv64a_step(hash, stat_get_num_samples(equity_stat));
+    hash = fnv64a_step(
+        hash, (uint64_t)llround(
+                  simmed_play_get_exact_win_pct_mean(simmed_play) * 1e6));
+    hash =
+        fnv64a_step(hash, (uint64_t)llround(stat_get_mean(equity_stat) * 1e3));
+  }
+  *results_hash = hash;
+  config_destroy(config);
+}
+
+// A recursive search chooses the play at the rollout plies its spec names
+// (plies=0 for the reply to the play simulated, plies=1 for the play after
+// it), and at no other: with the search at ply 1, every play's statistics
+// of ply 0 are the standard sim's, and those of ply 1 are not; with it at
+// ply 0, those of ply 0 are not.
+static void test_rlamc_searches_named_plies(void) {
+  uint64_t standard[2];
+  uint64_t first[2];
+  uint64_t second[2];
+  uint64_t results_hash;
+  RlamcTotals totals;
+  rlamc_test_sim_fingerprints("off", standard, &results_hash, &totals);
+  assert(totals.searches == 0);
+  rlamc_test_sim_fingerprints("plies=0,lamc=0,k=3,m=2,h=1,dcache=0", first,
+                              &results_hash, &totals);
+  assert(first[0] != standard[0]);
+  assert(totals.switched > 0);
+  rlamc_test_sim_fingerprints("plies=1,lamc=0,k=3,m=2,h=1,dcache=0", second,
+                              &results_hash, &totals);
+  assert(second[0] == standard[0]);
+  assert(second[1] != standard[1]);
+  assert(totals.switched > 0);
+}
+
+// The standard sim, with LAMC and recursive rollouts off and no finish,
+// pinned to its results (rlamc_test_sim_fingerprints, whose rounding keeps
+// the fingerprint the same across compilers and builds). Its rollout loop
+// (sim_rollout) also serves both options, so a change for them that moved
+// the standard sim's results would show here. The fingerprint was taken at
+// lamc-phase1's 18fd0a86, not from main, which could not be built where it
+// was taken. A review found the standard sim of the branch at 0fb3089a to
+// match main's (b83487f9) exactly: every play, win%, equity, SE and per-ply
+// statistic of a 3000-iteration sim of a CSW24 position. Change the
+// fingerprint only in a commit that explains why the standard sim's results
+// change.
+static void test_rlamc_standard_sim_pinned(void) {
+  uint64_t ply_hashes[2];
+  uint64_t results_hash;
+  RlamcTotals totals;
+  rlamc_test_sim_fingerprints("off", ply_hashes, &results_hash, &totals);
+  uint64_t hash = fnv64a_step(results_hash, ply_hashes[0]);
+  hash = fnv64a_step(hash, ply_hashes[1]);
+  if (getenv("RLAMC_TEST_DEBUG")) {
+    (void)fprintf(stderr, "PINNED %llx\n", (unsigned long long)hash);
+  }
+  assert(hash == RLAMC_TEST_STANDARD_SIM_FINGERPRINT);
+}
+
 void test_rlamc(void) {
   test_rlamc_parse();
   test_rlamc_ended_rollout_scored_as_finish();
@@ -1268,6 +1401,8 @@ void test_rlamc(void) {
   test_rlamc_unfinished_rollout_values();
   test_rlamc_ended_rollout_values();
   test_rlamc_rollouts_redraw_other_rack();
+  test_rlamc_searches_named_plies();
+  test_rlamc_standard_sim_pinned();
   const char *const specs[] = {
       "off",
       "on",
