@@ -63,13 +63,13 @@ enum {
 
 // A feature column whose standard deviation is below this is constant.
 #define RLAMC_MIN_COLUMN_STDEV 1e-9
-// The LAMC search's variance floors and the rollout variance it assumes
-// before any play has two samples (as Phase 1's, in lamc.c).
-#define RLAMC_MIN_SIGNAL_VARIANCE 1e-6
+// The LAMC search's rollout variance floor and the rollout variance it
+// assumes before any play has two samples (as Phase 1's, in lamc.c). Its
+// signal variance is chosen by gp_fit_by_likelihood.
 #define RLAMC_MIN_ROLLOUT_VARIANCE 1e-4
 #define RLAMC_DEFAULT_ROLLOUT_VARIANCE 0.1
 // The LAMC search's length scale, in standard deviations of each column, and
-// the multiples of it and of the signal variance each fit chooses among.
+// the multiples of it each fit chooses among.
 #define RLAMC_LENGTH_SCALE 1.5
 // The relative slack on the LAMC search's bound on upper confidence bounds.
 #define RLAMC_BOUND_SLACK 1e-9
@@ -102,7 +102,6 @@ static int rlamc_equity_rank_compare(const void *a, const void *b) {
 }
 
 static const double rlamc_length_multiples[] = {0.5, 1.0, 2.0};
-static const double rlamc_signal_multiples[] = {0.1, 0.3, 1.0};
 
 // Standardizes count values, stride apart: a constant column becomes zeros.
 static void rlamc_standardize(double *values, const int stride,
@@ -210,7 +209,8 @@ struct RlamcWorker {
   double gp_points[RLAMC_MAX_EVALUATED * RLAMC_MAX_COLUMNS];
   double gp_values[RLAMC_MAX_EVALUATED];
   double gp_noise[RLAMC_MAX_EVALUATED];
-  double fit_inverse_length_scales[RLAMC_MAX_COLUMNS];
+  // The base length scales of each fit, the same in every column.
+  double inverse_length_scales[RLAMC_MAX_COLUMNS];
   double mean_intercept;
   double mean_slope;
   GaussianProcess *gp;
@@ -1425,7 +1425,6 @@ static bool rlamc_fit(RlamcWorker *worker, const RlamcLevel *args,
   }
   const bool paired =
       args->paired && rlamc_paired_estimates(worker, rollout_variance);
-  double noise_sum = 0.0;
   double weight_sum = 0.0;
   double equity_sum = 0.0;
   double value_sum = 0.0;
@@ -1435,7 +1434,6 @@ static bool rlamc_fit(RlamcWorker *worker, const RlamcLevel *args,
       worker->gp_noise[eval_idx] =
           rollout_variance / (double)worker->play_counts[play_idx];
     }
-    noise_sum += worker->gp_noise[eval_idx];
     const double weight = 1.0 / worker->gp_noise[eval_idx];
     weight_sum += weight;
     equity_sum += weight * worker->static_equity[play_idx];
@@ -1456,64 +1454,24 @@ static bool rlamc_fit(RlamcWorker *worker, const RlamcLevel *args,
   worker->mean_slope =
       equity_variance > 0.0 ? covariance / equity_variance : 0.0;
   worker->mean_intercept = value_mean - worker->mean_slope * equity_mean;
-  double value_squares = 0.0;
   for (int eval_idx = 0; eval_idx < num_evaluated; eval_idx++) {
     worker->gp_values[eval_idx] -=
         worker->mean_intercept +
         worker->mean_slope * worker->static_equity[worker->evaluated[eval_idx]];
-    value_squares += worker->gp_values[eval_idx] * worker->gp_values[eval_idx];
-  }
-  double signal_variance =
-      value_squares / num_evaluated - noise_sum / num_evaluated;
-  if (signal_variance < RLAMC_MIN_SIGNAL_VARIANCE) {
-    signal_variance = RLAMC_MIN_SIGNAL_VARIANCE;
   }
   if (worker->gp_num_dims != num_columns) {
     gp_destroy(worker->gp);
     worker->gp = gp_create(RLAMC_MAX_EVALUATED, num_columns);
     worker->gp_num_dims = num_columns;
   }
-  GaussianProcessParams params = {
-      .kernel = GP_KERNEL_MATERN52,
-      .inverse_length_scales = worker->fit_inverse_length_scales,
-      .signal_variance = signal_variance,
-      .prior_mean = 0.0,
-  };
-  const int num_length =
-      (int)(sizeof(rlamc_length_multiples) / sizeof(rlamc_length_multiples[0]));
-  const int num_signal =
-      (int)(sizeof(rlamc_signal_multiples) / sizeof(rlamc_signal_multiples[0]));
-  int best_length = -1;
-  int best_signal = -1;
-  double best_likelihood = -INFINITY;
-  for (int signal_idx = 0; signal_idx < num_signal; signal_idx++) {
-    params.signal_variance =
-        signal_variance * rlamc_signal_multiples[signal_idx];
-    for (int length_idx = 0; length_idx < num_length; length_idx++) {
-      for (int column = 0; column < num_columns; column++) {
-        worker->fit_inverse_length_scales[column] =
-            1.0 / (RLAMC_LENGTH_SCALE * rlamc_length_multiples[length_idx]);
-      }
-      if (gp_fit(worker->gp, &params, worker->gp_points, worker->gp_values,
-                 worker->gp_noise, num_evaluated) &&
-          gp_get_log_marginal_likelihood(worker->gp) > best_likelihood) {
-        best_likelihood = gp_get_log_marginal_likelihood(worker->gp);
-        best_length = length_idx;
-        best_signal = signal_idx;
-      }
-    }
-  }
-  if (best_length < 0) {
-    return false;
-  }
-  params.signal_variance =
-      signal_variance * rlamc_signal_multiples[best_signal];
   for (int column = 0; column < num_columns; column++) {
-    worker->fit_inverse_length_scales[column] =
-        1.0 / (RLAMC_LENGTH_SCALE * rlamc_length_multiples[best_length]);
+    worker->inverse_length_scales[column] = 1.0 / RLAMC_LENGTH_SCALE;
   }
-  return gp_fit(worker->gp, &params, worker->gp_points, worker->gp_values,
-                worker->gp_noise, num_evaluated);
+  return gp_fit_by_likelihood(
+      worker->gp, GP_KERNEL_MATERN52, 0.0, worker->inverse_length_scales,
+      rlamc_length_multiples,
+      (int)(sizeof(rlamc_length_multiples) / sizeof(rlamc_length_multiples[0])),
+      worker->gp_points, worker->gp_values, worker->gp_noise, num_evaluated);
 }
 
 // The surrogate's posterior mean and variance at play play_idx.

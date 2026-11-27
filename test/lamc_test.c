@@ -53,6 +53,7 @@ enum {
   LAMC_TEST_MOVE_LIST_CAPACITY = 100000,
   LAMC_TEST_GUARD_COLUMNS = 2,
   LAMC_TEST_GP_GRID = 6,
+  LAMC_TEST_LIKELIHOOD_POINTS = 40,
   LAMC_REPLAY_MAX_VARIANTS = 32,
   LAMC_REPLAY_MAX_BUDGETS = 8,
   LAMC_REPLAY_MAX_THREADS = 64,
@@ -139,6 +140,44 @@ static void test_table_and_subset(void) {
 
 static double lamc_test_bowl(const double x, const double y) {
   return -((x - 0.5) * (x - 0.5)) - ((y + 0.3) * (y + 0.3));
+}
+
+// A smooth signal whose variance (0.005) is below each value's noise
+// variance (0.02): the excess of the values' variance over the noise is
+// negative, as with a few rollouts a play that each score 0 or 1, yet the
+// values vary smoothly, so the likelihood chooses a signal variance that
+// lets the fit follow them part way instead of staying on the prior mean.
+static void test_gp_fit_by_likelihood(void) {
+  GaussianProcess *gp = gp_create(LAMC_TEST_LIKELIHOOD_POINTS, 1);
+  double points[LAMC_TEST_LIKELIHOOD_POINTS];
+  double values[LAMC_TEST_LIKELIHOOD_POINTS];
+  double noise[LAMC_TEST_LIKELIHOOD_POINTS];
+  double value_squares = 0.0;
+  for (int point_idx = 0; point_idx < LAMC_TEST_LIKELIHOOD_POINTS;
+       point_idx++) {
+    points[point_idx] = point_idx;
+    values[point_idx] = 0.1 * sin(point_idx / 6.0);
+    noise[point_idx] = 0.02;
+    value_squares += values[point_idx] * values[point_idx];
+  }
+  assert(value_squares / LAMC_TEST_LIKELIHOOD_POINTS < 0.02);
+  const double unit_scale[1] = {1.0};
+  const double multiples[3] = {1.0, 2.0, 4.0};
+  assert(gp_fit_by_likelihood(gp, GP_KERNEL_MATERN52, 0.0, unit_scale,
+                              multiples, 3, points, values, noise,
+                              LAMC_TEST_LIKELIHOOD_POINTS));
+  // The signal's peak, at 3 pi, and its trough, at 9 pi.
+  const double peak = 9.42477796;
+  const double trough = 28.27433388;
+  double peak_mean;
+  double trough_mean;
+  gp_predict(gp, &peak, &peak_mean, NULL);
+  gp_predict(gp, &trough, &trough_mean, NULL);
+  // About 0.03 from above and below; a fit left on the prior mean, as the
+  // floored estimate gave, predicts about 0.0001.
+  assert(peak_mean > 0.01);
+  assert(trough_mean < -0.01);
+  gp_destroy(gp);
 }
 
 static void test_gp_kernel(const gp_kernel_t kernel) {
@@ -416,6 +455,7 @@ void test_lamc(void) {
   test_table_and_subset();
   test_gp_kernel(GP_KERNEL_MATERN52);
   test_gp_kernel(GP_KERNEL_SQUARED_EXPONENTIAL);
+  test_gp_fit_by_likelihood();
   test_play_features();
   test_lamc_sim();
 }

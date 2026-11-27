@@ -648,7 +648,8 @@ better, and those are the defaults now.
    variance over its sample count. Each fit chooses its length scale among
    0.5, 1, 2 and 4 times `-lamclength` (1.5), and its signal variance among
    fixed values from 1e-5 to 0.1 (standard deviations of 0.3 to 32 win%
-   points), by marginal likelihood. A small signal variance leaves the
+   points), by marginal likelihood (`gp_fit_by_likelihood`, which RLAMC's
+   depth 1 search shares). A small signal variance leaves the
    predictions on the prior mean when the samples show nothing beyond it.
    The signal variance was once chosen among 0.1, 0.3 and 1 times the
    residuals' excess variance over the noise; with single rollouts that play
@@ -662,6 +663,9 @@ better, and those are the defaults now.
 7. **Stop** after `-lamcrounds` (12) rounds, when the kept plays are the
    same for `-lamcstable` (3) rounds, or when the next round would pass the
    `-lamcexplore` (0.3) share of the sim's rollouts or time.
+   With `-lamcrefine` (on), rollouts left in the share then go to rounds of
+   `-lamcshallow` samples for the `-lamcpool` plays whose surrogate means
+   are fewest standard deviations from the cut for the handoff.
 8. **Candidates.** The first `-lamcfinalstatic` (10) are the top static
    plays; the rest are the best by the surrogate's mean, among all plays
    (`-lamcfinalall`, on) or among the evaluated ones. There are as many as

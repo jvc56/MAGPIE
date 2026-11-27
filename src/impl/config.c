@@ -1679,7 +1679,7 @@ static void add_lamc_rlamc_help_arg(arg_token_t arg_token, const char **usages,
     examples[0] = "true";
     *text = "Specifies whether LAMC spends the rest of its share of the "
             "iterations. Once its rounds end, it samples the plays nearest "
-            "the cut for the plays it hands the simulation. Off by default.";
+            "the cut for the plays it hands the simulation. On by default.";
     break;
   case ARG_TOKEN_LAMC_FINAL_Z:
     usages[0] = "<standard_deviations>";

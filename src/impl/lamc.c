@@ -36,25 +36,9 @@ enum {
   // Each fit chooses its length scale among this many multiples of the
   // configured one, by marginal likelihood.
   LAMC_NUM_LENGTH_SCALE_MULTIPLES = 4,
-  // And its signal variance among this many values.
-  LAMC_NUM_SIGNAL_VARIANCES = 9,
   // A sample limit above this is no limit (the config default is 10^12).
   LAMC_UNLIMITED_SAMPLES = 1000000000,
 };
-
-// The signal variances a fit chooses among: standard deviations from 0.3 to
-// 32 win percentage points about the prior mean, since win percentages lie in
-// [0, 1]. They are fixed values, not multiples of the residuals' excess
-// variance over the noise: with few noisy samples a play, such as single
-// rollouts that play out to the end of the game (-sfinish) and score 0 or 1,
-// that estimate comes out negative, and multiples of its floor left every
-// prediction on the prior mean, so the search ranked plays by static equity
-// alone. The smallest values still let a fit fall back on the prior mean
-// when the samples show nothing beyond it.
-static const double lamc_signal_variances[LAMC_NUM_SIGNAL_VARIANCES] = {
-    1e-5, 3e-5, 1e-4, 3e-4, 1e-3, 3e-3, 1e-2, 3e-2, 1e-1};
-// The signal variance used if no fit succeeds.
-#define LAMC_FALLBACK_SIGNAL_VARIANCE 1e-3
 
 static const double
     lamc_length_scale_multiples[LAMC_NUM_LENGTH_SCALE_MULTIPLES] = {0.5, 1.0,
@@ -135,7 +119,6 @@ struct LamcCtx {
   bool fitted;
   double gradient[PLAY_EMBEDDING_MAX_COLUMNS];
   double target[PLAY_EMBEDDING_MAX_COLUMNS];
-  double fit_inverse_length_scales[PLAY_EMBEDDING_MAX_COLUMNS];
 };
 
 static void lamc_ctx_free_buffers(LamcCtx *ctx) {
@@ -557,44 +540,10 @@ static void lamc_fit(LamcCtx *ctx, const LamcArgs *args) {
     ctx->gp = gp_create(ctx->evaluated_capacity, num_columns);
     ctx->gp_num_dims = num_columns;
   }
-  GaussianProcessParams params = {
-      .kernel = args->kernel,
-      .inverse_length_scales = ctx->fit_inverse_length_scales,
-      .signal_variance = LAMC_FALLBACK_SIGNAL_VARIANCE,
-      .prior_mean = 0.0,
-  };
-  int best_multiple = -1;
-  int best_signal = -1;
-  double best_likelihood = -INFINITY;
-  for (int signal_idx = 0; signal_idx < LAMC_NUM_SIGNAL_VARIANCES;
-       signal_idx++) {
-    params.signal_variance = lamc_signal_variances[signal_idx];
-    for (int multiple_idx = 0; multiple_idx < LAMC_NUM_LENGTH_SCALE_MULTIPLES;
-         multiple_idx++) {
-      for (int column = 0; column < num_columns; column++) {
-        ctx->fit_inverse_length_scales[column] =
-            ctx->inverse_length_scales[column] /
-            lamc_length_scale_multiples[multiple_idx];
-      }
-      if (gp_fit(ctx->gp, &params, ctx->gp_points, ctx->gp_values,
-                 ctx->gp_noise, num_evaluated) &&
-          gp_get_log_marginal_likelihood(ctx->gp) > best_likelihood) {
-        best_likelihood = gp_get_log_marginal_likelihood(ctx->gp);
-        best_multiple = multiple_idx;
-        best_signal = signal_idx;
-      }
-    }
-  }
-  const double multiple =
-      best_multiple >= 0 ? lamc_length_scale_multiples[best_multiple] : 1.0;
-  params.signal_variance = best_signal >= 0 ? lamc_signal_variances[best_signal]
-                                            : LAMC_FALLBACK_SIGNAL_VARIANCE;
-  for (int column = 0; column < num_columns; column++) {
-    ctx->fit_inverse_length_scales[column] =
-        ctx->inverse_length_scales[column] / multiple;
-  }
-  const bool fitted = gp_fit(ctx->gp, &params, ctx->gp_points, ctx->gp_values,
-                             ctx->gp_noise, num_evaluated);
+  const bool fitted = gp_fit_by_likelihood(
+      ctx->gp, args->kernel, 0.0, ctx->inverse_length_scales,
+      lamc_length_scale_multiples, LAMC_NUM_LENGTH_SCALE_MULTIPLES,
+      ctx->gp_points, ctx->gp_values, ctx->gp_noise, num_evaluated);
   ctx->fitted = fitted;
 
   // Rank by the surrogate's mean; by the raw mean if no fit succeeded. Ties

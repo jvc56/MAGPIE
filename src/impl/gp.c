@@ -12,7 +12,21 @@
 enum {
   // Jitter is tried at most this many times, growing tenfold each time.
   GP_MAX_JITTER_ATTEMPTS = 6,
+  // gp_fit_by_likelihood chooses the signal variance among this many values.
+  GP_NUM_SIGNAL_VARIANCES = 9,
 };
+
+// The signal variances gp_fit_by_likelihood chooses among: standard
+// deviations from 0.3 to 32 percentage points about the prior mean, for
+// values on the scale of win percentages. They are fixed values, not
+// multiples of an estimate from the data: the residuals' variance less the
+// noise comes out negative when the samples are few and noisy, such as a
+// few rollouts a play that each play the game out and score 0 or 1, and a
+// fit on multiples of its floor left every prediction on the prior mean.
+// The smallest values still let a fit fall back on the prior mean when the
+// samples show nothing beyond it.
+static const double gp_signal_variances[GP_NUM_SIGNAL_VARIANCES] = {
+    1e-5, 3e-5, 1e-4, 3e-4, 1e-3, 3e-3, 1e-2, 3e-2, 1e-1};
 
 #define GP_INITIAL_JITTER 1e-10
 #define GP_SQRT5 2.23606797749978969641
@@ -27,6 +41,8 @@ struct GaussianProcess {
   double prior_mean;
   double log_marginal_likelihood;
   double *inverse_length_scales;
+  // The length scales gp_fit_by_likelihood tries, num_dims values.
+  double *trial_inverse_length_scales;
   double *points;
   // L, the Cholesky factor of K + noise, num_points x num_points.
   double *lower;
@@ -45,6 +61,7 @@ GaussianProcess *gp_create(const int max_points, const int num_dims) {
   gp->prior_mean = 0.0;
   gp->log_marginal_likelihood = 0.0;
   gp->inverse_length_scales = malloc_or_die(sizeof(double) * num_dims);
+  gp->trial_inverse_length_scales = malloc_or_die(sizeof(double) * num_dims);
   gp->points = malloc_or_die(sizeof(double) * (size_t)max_points * num_dims);
   gp->lower = malloc_or_die(sizeof(double) * (size_t)max_points * max_points);
   gp->alpha = malloc_or_die(sizeof(double) * max_points);
@@ -57,6 +74,7 @@ void gp_destroy(GaussianProcess *gp) {
     return;
   }
   free(gp->inverse_length_scales);
+  free(gp->trial_inverse_length_scales);
   free(gp->points);
   free(gp->lower);
   free(gp->alpha);
@@ -169,6 +187,54 @@ bool gp_fit(GaussianProcess *gp, const GaussianProcessParams *params,
   gp->log_marginal_likelihood =
       -0.5 * fit_term - log_determinant - 0.5 * num_points * GP_LOG_TWO_PI;
   return true;
+}
+
+// Sets the trial length scales to the base ones times multiple.
+static void gp_set_trial_length_scales(GaussianProcess *gp,
+                                       const double *base_inverse_length_scales,
+                                       const double multiple) {
+  for (int dim_idx = 0; dim_idx < gp->num_dims; dim_idx++) {
+    gp->trial_inverse_length_scales[dim_idx] =
+        base_inverse_length_scales[dim_idx] / multiple;
+  }
+}
+
+bool gp_fit_by_likelihood(GaussianProcess *gp, const gp_kernel_t kernel,
+                          const double prior_mean,
+                          const double *base_inverse_length_scales,
+                          const double *length_multiples,
+                          const int num_length_multiples, const double *points,
+                          const double *values, const double *noise_variances,
+                          const int num_points) {
+  GaussianProcessParams params = {
+      .kernel = kernel,
+      .inverse_length_scales = gp->trial_inverse_length_scales,
+      .signal_variance = gp_signal_variances[0],
+      .prior_mean = prior_mean,
+  };
+  int best_signal = -1;
+  int best_length = -1;
+  double best_likelihood = -INFINITY;
+  for (int signal_idx = 0; signal_idx < GP_NUM_SIGNAL_VARIANCES; signal_idx++) {
+    params.signal_variance = gp_signal_variances[signal_idx];
+    for (int length_idx = 0; length_idx < num_length_multiples; length_idx++) {
+      gp_set_trial_length_scales(gp, base_inverse_length_scales,
+                                 length_multiples[length_idx]);
+      if (gp_fit(gp, &params, points, values, noise_variances, num_points) &&
+          gp->log_marginal_likelihood > best_likelihood) {
+        best_likelihood = gp->log_marginal_likelihood;
+        best_signal = signal_idx;
+        best_length = length_idx;
+      }
+    }
+  }
+  if (best_signal < 0) {
+    return false;
+  }
+  params.signal_variance = gp_signal_variances[best_signal];
+  gp_set_trial_length_scales(gp, base_inverse_length_scales,
+                             length_multiples[best_length]);
+  return gp_fit(gp, &params, points, values, noise_variances, num_points);
 }
 
 double gp_get_log_marginal_likelihood(const GaussianProcess *gp) {

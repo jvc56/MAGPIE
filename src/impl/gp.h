@@ -30,6 +30,20 @@ bool gp_fit(GaussianProcess *gp, const GaussianProcessParams *params,
             const double *points, const double *values,
             const double *noise_variances, int num_points);
 
+// Fits as gp_fit does, with the kernel and prior mean given, choosing two
+// hyperparameters by log marginal likelihood: the signal variance, among
+// fixed values for values on the scale of win percentages (from 0 to 1),
+// and a multiple of the length scales of base_inverse_length_scales (one
+// per dimension), among the num_length_multiples length_multiples. Returns
+// false if no choice fits.
+bool gp_fit_by_likelihood(GaussianProcess *gp, gp_kernel_t kernel,
+                          double prior_mean,
+                          const double *base_inverse_length_scales,
+                          const double *length_multiples,
+                          int num_length_multiples, const double *points,
+                          const double *values, const double *noise_variances,
+                          int num_points);
+
 // The log marginal likelihood of the last fit's values.
 double gp_get_log_marginal_likelihood(const GaussianProcess *gp);
 

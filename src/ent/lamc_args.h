@@ -58,7 +58,10 @@ typedef struct LamcArgs {
   // Whether a search that ends with rollouts left in its share spends them
   // on the plays whose place relative to the cut for the candidates is least
   // certain: rounds of shallow_samples for the pool_size plays whose
-  // surrogate means are fewest standard deviations from the cut.
+  // surrogate means are fewest standard deviations from the cut. On by
+  // default: without it the search may stop after a fraction of its share,
+  // with a few samples a play, and miss strong plays that static equity
+  // ranks low, such as exchanges (RLAMC.md, log 78).
   bool refine;
   lamc_proposal_t proposal;
   gp_kernel_t kernel;
@@ -98,7 +101,7 @@ static inline void lamc_args_set_defaults(LamcArgs *args) {
   args->finalists_from_all = true;
   args->static_finalists = LAMC_DEFAULT_STATIC_FINALISTS;
   args->final_exchanges = 0;
-  args->refine = false;
+  args->refine = true;
   args->final_z = 0.0;
   args->reuse_samples = false;
   args->proposal = LAMC_PROPOSAL_ACQUIRE;
