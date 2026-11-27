@@ -2228,6 +2228,13 @@ void rlamc_args_parse(const char *spec, RlamcArgs *args,
       string_splitter_destroy(levels);
       return;
     }
+    // A shared search values a candidate after the other player's reply
+    // alone, so its rollouts of a candidate that empties the bag must stop
+    // there too, unfinished, for the two values to be compared.
+    if (parsed.levels[level_idx].share) {
+      parsed.levels[level_idx].horizon_plies = 1;
+      parsed.levels[level_idx].skip_finish = true;
+    }
     // A shared search's recursive rollouts play only static replies.
     if (level_idx > 0 && parsed.levels[level_idx - 1].share) {
       error_stack_push(error_stack, ERROR_STATUS_RLAMC_BAD_SPEC,

@@ -35,18 +35,18 @@
 //      the spread alone).
 
 // With RlamcLevel.share, a recursive rollout plays only the other player's
-// reply (horizon_plies is 1), and the search shares those replies between its
-// candidates and between searches. A candidate's value splits into what
-// depends on the rollout (its score, and the leave it keeps from the player's
-// rack) and what depends only on the board it leaves: the other player's best
-// replies to that board, from racks drawn from the tiles not on it. The
-// replies are cached by the board, so every rollout whose player can make the
-// same play shares them, however its rack differs. Each cached sample j draws
-// its racks by priorities fixed for each tile and j, so that the boards of
-// two candidates, whose unseen tiles differ by the few each one plays, get
-// nearly the same racks: their comparison is on common random numbers. A
-// cache entry is a function of its board and the sim's seed alone, so
-// results do not depend on which thread fills it. A candidate that would
+// reply (horizon_plies is 1, with no finish), and the search shares those
+// replies between its candidates and between searches. A candidate's value
+// splits into what depends on the rollout (its score, and the leave it keeps
+// from the player's rack) and what depends only on the board it leaves: the
+// other player's best replies to that board, from racks drawn from the tiles
+// not on it. The replies are cached by the board, so every rollout whose player
+// can make the same play shares them, however its rack differs. Each cached
+// sample j draws its racks by priorities fixed for each tile and j, so that the
+// boards of two candidates, whose unseen tiles differ by the few each one
+// plays, get nearly the same racks: their comparison is on common random
+// numbers. A cache entry is a function of its board and the sim's seed alone,
+// so results do not depend on which thread fills it. A candidate that would
 // empty the bag is valued by plain recursive rollouts instead: then the other
 // player's rack is known to the player on turn.
 //

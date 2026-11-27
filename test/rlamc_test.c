@@ -869,6 +869,13 @@ static void test_rlamc_parse(void) {
   assert(args.levels[0].num_samples == 4);
   assert(args.levels[0].horizon_plies == 5);
   assert(!args.levels[0].skip_finish);
+  // A shared search values every candidate after one reply, so its rollouts
+  // of a candidate that empties the bag stop there too.
+  rlamc_args_parse("plies=0+1,lamc=0,k=5,m=4,share=1", &args, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  assert(args.levels[0].share);
+  assert(args.levels[0].horizon_plies == 1);
+  assert(args.levels[0].skip_finish);
   rlamc_args_parse("off", &args, error_stack);
   assert(error_stack_is_empty(error_stack));
   assert(!args.enabled);
