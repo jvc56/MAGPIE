@@ -434,11 +434,14 @@ static void lamc_run_round(LamcCtx *ctx, const LamcArgs *args,
   bai(&options, ctx->pool_rvs, limits->thread_control, NULL, ctx->bai_result);
 }
 
-// Adds the pool's plays that are new to the evaluated plays.
+// Adds the pool's plays that are new to the evaluated plays. A play the
+// round's time limit cut off before its first sample stays unevaluated: it
+// has no value to fit and can be proposed again.
 static void lamc_mark_pool_evaluated(LamcCtx *ctx) {
   for (int pool_idx = 0; pool_idx < ctx->pool_count; pool_idx++) {
     const int play_idx = ctx->pool[pool_idx];
-    if (!ctx->is_evaluated[play_idx]) {
+    if (!ctx->is_evaluated[play_idx] &&
+        atomic_load(&ctx->sample_counts[play_idx]) > 0) {
       ctx->is_evaluated[play_idx] = true;
       ctx->evaluated[ctx->num_evaluated++] = play_idx;
     }
@@ -468,8 +471,10 @@ static void lamc_fit_prior_mean(LamcCtx *ctx, const LamcArgs *args,
     equity_sum += weight * ctx->static_equity[ctx->evaluated[eval_idx]];
     value_sum += weight * values[eval_idx];
   }
-  const double equity_mean = equity_sum / weight_sum;
-  const double value_mean = value_sum / weight_sum;
+  // No play is evaluated only when a time limit ran out before the first
+  // sample: the prior is then 0, as the surrogate's is.
+  const double equity_mean = weight_sum > 0.0 ? equity_sum / weight_sum : 0.0;
+  const double value_mean = weight_sum > 0.0 ? value_sum / weight_sum : 0.0;
   double slope = 0.0;
   if (args->equity_prior_mean) {
     double covariance = 0.0;

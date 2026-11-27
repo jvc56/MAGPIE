@@ -54,6 +54,7 @@ enum {
   LAMC_TEST_GUARD_COLUMNS = 2,
   LAMC_TEST_GP_GRID = 6,
   LAMC_TEST_LIKELIHOOD_POINTS = 40,
+  LAMC_TEST_TIME_CUT_SAMPLES = 64,
   LAMC_REPLAY_MAX_VARIANTS = 32,
   LAMC_REPLAY_MAX_BUDGETS = 8,
   LAMC_REPLAY_MAX_THREADS = 64,
@@ -450,6 +451,58 @@ static void test_lamc_sim(void) {
   }
 }
 
+// A search stopped during its first round, as a stop request or a time
+// limit that runs out stops it: a play cut off before its first sample has
+// nothing to fit, so it must not count as evaluated. A stop already pending
+// cuts off every play.
+static void test_lamc_time_cut_round(void) {
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -wmp true -s1 equity -s2 equity -r1 all -r2 all "
+      "-numplays 10 -plies 2 -threads 1 -iterations 1000 -scond none "
+      "-tlim 0 -seed 42 -sinfer false -lamc true -savesettings false "
+      "-hr false");
+  load_and_exec_config_or_die(config, "cgp " JOSH2_CGP);
+  load_and_exec_config_or_die(config, "gen");
+  SimArgs sim_args;
+  config_fill_sim_args(config, NULL, NULL, NULL, NULL, &sim_args);
+  LamcCtx *ctx = lamc_ctx_create();
+  const int num_plays = lamc_build(ctx, &sim_args);
+  assert(num_plays > sim_args.lamc_args.pool_size);
+  double *samples =
+      malloc_or_die(sizeof(double) * num_plays * LAMC_TEST_TIME_CUT_SAMPLES);
+  for (int sample_idx = 0; sample_idx < num_plays * LAMC_TEST_TIME_CUT_SAMPLES;
+       sample_idx++) {
+    samples[sample_idx] = 0.5;
+  }
+  const RandomVariablesArgs table_args = {
+      .type = RANDOM_VARIABLES_TABLE,
+      .num_rvs = num_plays,
+      .num_samples = LAMC_TEST_TIME_CUT_SAMPLES,
+      .samples = samples,
+  };
+  RandomVariables *table = rvs_create(&table_args);
+  thread_control_set_status(config_get_thread_control(config),
+                            THREAD_CONTROL_STATUS_USER_INTERRUPT);
+  const LamcSearchLimits limits = {
+      .rollout_budget = UINT64_MAX,
+      .time_budget_seconds = 0,
+      .rollouts_per_sample = 1,
+      .num_threads = 1,
+      .parent_worker_thread_index = 0,
+      .thread_control = config_get_thread_control(config),
+  };
+  lamc_search(ctx, &sim_args.lamc_args, table, &limits);
+  const int num_evaluated = lamc_get_num_evaluated(ctx);
+  assert(num_evaluated < sim_args.lamc_args.pool_size);
+  for (int rank = 0; rank < num_evaluated; rank++) {
+    assert(lamc_get_play_samples(ctx, lamc_get_ranked_play(ctx, rank)) > 0);
+  }
+  rvs_destroy(table);
+  free(samples);
+  lamc_ctx_destroy(ctx);
+  config_destroy(config);
+}
+
 void test_lamc(void) {
   test_dense_linalg();
   test_table_and_subset();
@@ -457,6 +510,7 @@ void test_lamc(void) {
   test_gp_kernel(GP_KERNEL_SQUARED_EXPONENTIAL);
   test_gp_fit_by_likelihood();
   test_play_features();
+  test_lamc_time_cut_round();
   test_lamc_sim();
 }
 
