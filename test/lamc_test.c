@@ -871,6 +871,13 @@ static uint64_t lamc_test_sim(const int num_threads, const char *extra,
   free(settings);
   load_and_exec_config_or_die(config, "cgp " JOSH2_CGP);
   load_and_exec_config_or_die(config, "gen");
+  // The top static plays, which the sim would simulate without the search.
+  const MoveList *gen_list = config_get_move_list(config);
+  const int num_static = move_list_get_count(gen_list);
+  Move *static_plays = malloc_or_die(sizeof(Move) * (size_t)num_static);
+  for (int play_idx = 0; play_idx < num_static; play_idx++) {
+    move_copy(&static_plays[play_idx], move_list_get_move(gen_list, play_idx));
+  }
   lamc_totals_reset();
   load_and_exec_config_or_die(config, "sim");
   const LamcTotals totals = lamc_get_totals();
@@ -884,6 +891,25 @@ static uint64_t lamc_test_sim(const int num_threads, const char *extra,
   uint64_t hash = FNV_64_OFFSET_BASIS;
   const int num_plays = sim_results_get_number_of_plays(sim_results);
   assert(num_plays == 6);
+  // The sim simulates the search's candidates: each one the search reports
+  // beyond the top static plays is a play the sim simulates that the
+  // static list does not hold.
+  uint64_t outside_static = 0;
+  for (int play_idx = 0; play_idx < num_plays; play_idx++) {
+    const Move *move = simmed_play_get_move(
+        sim_results_get_simmed_play(sim_results, play_idx));
+    bool in_static = false;
+    for (int static_idx = 0; static_idx < num_static; static_idx++) {
+      if (compare_moves_without_equity(move, &static_plays[static_idx], true) ==
+          -1) {
+        in_static = true;
+        break;
+      }
+    }
+    outside_static += in_static ? 0 : 1;
+  }
+  free(static_plays);
+  assert(outside_static == totals.finalists_outside_static);
   // BAI gets what the search leaves of -iterations, give or take a pass
   // over the plays.
   const uint64_t spent =
@@ -924,6 +950,11 @@ static void test_lamc_sim(void) {
   LamcTotals refined;
   (void)lamc_test_sim(1, "-lamcfinalstatic 3", &refined);
   assert(refined.explore_rollouts >= 480 - 12);
+  // With 3 of its 6 places filled by score, the search hands on plays from
+  // beyond the top static plays, which the sim then simulates (checked in
+  // lamc_test_sim): a handoff of the top static plays in their place would
+  // simulate none of them.
+  assert(refined.finalists_outside_static > 0);
   LamcTotals unrefined;
   (void)lamc_test_sim(1, "-lamcfinalstatic 3 -lamcrefine false", &unrefined);
   assert(unrefined.rounds <= LAMC_DEFAULT_MAX_ROUNDS);
