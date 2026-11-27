@@ -1114,6 +1114,31 @@ bool config_get_sim_bag_cycle(const Config *config) {
   return config->sim_bag_cycle;
 }
 
+bool config_get_player_sim_finish(const Config *config, int player_index) {
+  return player_index == 0 ? config->p1_sim_finish : config->p2_sim_finish;
+}
+
+bool config_get_sim_finish(const Config *config) { return config->sim_finish; }
+
+bool config_get_player_sim_lamc(const Config *config, int player_index) {
+  return player_index == 0 ? config->p1_sim_lamc : config->p2_sim_lamc;
+}
+
+bool config_get_sim_lamc(const Config *config) { return config->sim_lamc; }
+
+bool config_get_player_sim_rlamc(const Config *config, int player_index) {
+  return player_index == 0 ? config->p1_sim_rlamc.enabled
+                           : config->p2_sim_rlamc.enabled;
+}
+
+bool config_get_sim_rlamc(const Config *config) {
+  return config->sim_rlamc.enabled;
+}
+
+int config_get_autoplay_static_bag(const Config *config) {
+  return config->autoplay_static_bag;
+}
+
 int config_get_player_num_plays(const Config *config, int player_index) {
   return player_index == 0 ? config->p1_num_plays : config->p2_num_plays;
 }
@@ -13095,6 +13120,13 @@ static void config_contribute_reset_player_settings(Config *config,
   // (-sbc1/-sbc2), and it changes how a simulation samples, so a
   // contributor's -sbagcycle false must not govern how this player plays.
   *(p1 ? &config->p1_sim_bag_cycle : &config->p2_sim_bag_cycle) = true;
+  // LAMC, RLAMC and the rollout finish off, as on main's workers: birdtest
+  // has no field for them, and each changes what a simming player plays, so
+  // neither this build's -sfinish default nor a contributor's -lamc or
+  // -rlamc may govern it.
+  *(p1 ? &config->p1_sim_finish : &config->p2_sim_finish) = false;
+  *(p1 ? &config->p1_sim_lamc : &config->p2_sim_lamc) = false;
+  rlamc_args_set_defaults(p1 ? &config->p1_sim_rlamc : &config->p2_sim_rlamc);
   // Solving off: a request turns it on per player, and a contributor's
   // -eplies1 must not.
   autoplay_solver_settings_set_defaults(&config->solver_settings[p1 ? 0 : 1]);
@@ -13643,6 +13675,13 @@ void config_contribute_reset_shared_settings(Config *config) {
   config->sim_bag_cycle = true;
   config->sim_census_rollout = false;
   config->sim_census_rollout_auto = false;
+  // Off for the reason config_contribute_reset_player_settings gives, as is
+  // autoplay's static opening, which no request states either.
+  config->sim_finish = false;
+  config->sim_finish_bag = 0;
+  config->sim_lamc = false;
+  rlamc_args_set_defaults(&config->sim_rlamc);
+  config->autoplay_static_bag = 0;
 }
 
 // Applies the run-wide settings a task request states, on top of
