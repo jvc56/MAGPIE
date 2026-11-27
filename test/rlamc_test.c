@@ -395,9 +395,9 @@ static void rcr_mean_se(const double *values, const int count, double *mean,
                         double *se) {
   double sum = 0.0;
   double sum_sq = 0.0;
-  for (int idx = 0; idx < count; idx++) {
-    sum += values[idx];
-    sum_sq += values[idx] * values[idx];
+  for (int value_idx = 0; value_idx < count; value_idx++) {
+    sum += values[value_idx];
+    sum_sq += values[value_idx] * values[value_idx];
   }
   *mean = count > 0 ? sum / count : 0.0;
   const double var = count > 1 ? (sum_sq - sum * (*mean)) / (count - 1) : 0.0;
@@ -1538,45 +1538,53 @@ void test_rlamc_eval(void) {
       }
       group_regret[group] += oracle;
       group_count[group]++;
-      const double d = gt_mean(position, eval.num_conts, index, false) -
-                       gt_mean(position, eval.num_conts, base_index, false);
-      diff[0] += d;
-      diff[1] += d * d;
-      const double ds = gt_mean(position, eval.num_conts, index, true) -
-                        gt_mean(position, eval.num_conts, base_index, true);
-      spread_diff[0] += ds;
-      spread_diff[1] += ds * ds;
+      const double win_delta =
+          gt_mean(position, eval.num_conts, index, false) -
+          gt_mean(position, eval.num_conts, base_index, false);
+      diff[0] += win_delta;
+      diff[1] += win_delta * win_delta;
+      const double spread_delta =
+          gt_mean(position, eval.num_conts, index, true) -
+          gt_mean(position, eval.num_conts, base_index, true);
+      spread_diff[0] += spread_delta;
+      spread_diff[1] += spread_delta * spread_delta;
       if (getenv("RE_CHOICES")) {
         printf("RE choice %d %d %d %d\n", method, position->pos_id,
                position->bag, index);
       }
       differ += index != base_index ? 1 : 0;
     }
-    const double n = inside > 0 ? inside : 1;
-    const double wr_mean = win_regret[0] / n;
-    const double sr_mean = spread_regret[0] / n;
-    const double d_mean = diff[0] / n;
+    const double num_inside = inside > 0 ? inside : 1;
+    const double wr_mean = win_regret[0] / num_inside;
+    const double sr_mean = spread_regret[0] / num_inside;
+    const double d_mean = diff[0] / num_inside;
     const RlamcTotals totals = rlamc_get_totals();
     printf("RE method %d [%s]: regret win %.5f (SE %.5f) spread %.3f (SE "
            "%.3f); vs method 0 win %+.5f (SE %.5f), %d differ; %d of %d "
            "inside; %.3f s each; RLAMC switched %.1f%%\n",
            method, string_splitter_get_item(methods, method), wr_mean,
-           sqrt(fmax(win_regret[1] / n - wr_mean * wr_mean, 0) / n), sr_mean,
-           sqrt(fmax(spread_regret[1] / n - sr_mean * sr_mean, 0) / n), d_mean,
-           sqrt(fmax(diff[1] / n - d_mean * d_mean, 0) / n), differ, inside,
-           eval.num_positions, seconds / eval.num_positions,
+           sqrt(fmax(win_regret[1] / num_inside - wr_mean * wr_mean, 0) /
+                num_inside),
+           sr_mean,
+           sqrt(fmax(spread_regret[1] / num_inside - sr_mean * sr_mean, 0) /
+                num_inside),
+           d_mean,
+           sqrt(fmax(diff[1] / num_inside - d_mean * d_mean, 0) / num_inside),
+           differ, inside, eval.num_positions, seconds / eval.num_positions,
            totals.searches
                ? 100.0 * (double)totals.switched / (double)totals.searches
                : 0.0);
-    const double sd_mean = spread_diff[0] / n;
+    const double sd_mean = spread_diff[0] / num_inside;
     printf("RE method %d vs method 0 spread %+.3f (SE %.3f)\n", method, sd_mean,
-           sqrt(fmax(spread_diff[1] / n - sd_mean * sd_mean, 0) / n));
-    const double or_mean = oracle_regret[0] / n;
+           sqrt(fmax(spread_diff[1] / num_inside - sd_mean * sd_mean, 0) /
+                num_inside));
+    const double or_mean = oracle_regret[0] / num_inside;
     printf(
         "RE method %d oracle regret %.5f (SE %.5f); by bag 1-3 %.4f (%d), "
         "4-7 %.4f (%d), 8-12 %.4f (%d), 13+ %.4f (%d)\n",
         method, or_mean,
-        sqrt(fmax(oracle_regret[1] / n - or_mean * or_mean, 0) / n),
+        sqrt(fmax(oracle_regret[1] / num_inside - or_mean * or_mean, 0) /
+             num_inside),
         group_count[0] ? group_regret[0] / group_count[0] : 0.0, group_count[0],
         group_count[1] ? group_regret[1] / group_count[1] : 0.0, group_count[1],
         group_count[2] ? group_regret[2] / group_count[2] : 0.0, group_count[2],
@@ -1936,18 +1944,19 @@ void test_rlamc_peg(void) {
     (void)fflush(stdout);
     string_builder_destroy(sb);
   }
-  const double n = shared.num_positions;
-  const double mean = sum / n;
+  const double position_count = shared.num_positions;
+  const double mean = sum / position_count;
   double seconds[2] = {0.0, 0.0};
   for (int pos_idx = 0; pos_idx < shared.num_positions; pos_idx++) {
     seconds[0] += shared.positions[pos_idx].seconds[0];
     seconds[1] += shared.positions[pos_idx].seconds[1];
   }
-  printf("RPEG summary: %d positions, %d differ; B - A win per position "
-         "%+.5f (SE %.5f); sim seconds per position A %.3f, B %.3f\n",
-         shared.num_positions, differ, mean,
-         sqrt(fmax(sum_sq / n - mean * mean, 0.0) / n), seconds[0] / n,
-         seconds[1] / n);
+  printf(
+      "RPEG summary: %d positions, %d differ; B - A win per position "
+      "%+.5f (SE %.5f); sim seconds per position A %.3f, B %.3f\n",
+      shared.num_positions, differ, mean,
+      sqrt(fmax(sum_sq / position_count - mean * mean, 0.0) / position_count),
+      seconds[0] / position_count, seconds[1] / position_count);
   for (int pos_idx = 0; pos_idx < shared.num_positions; pos_idx++) {
     game_destroy(shared.positions[pos_idx].game);
   }
@@ -2039,9 +2048,9 @@ static uint64_t pegm_key(const char *cgp, const char *move,
 
 static bool pegm_cache_find(const PegmCache *cache, const uint64_t key,
                             double *win) {
-  for (int idx = 0; idx < cache->count; idx++) {
-    if (cache->keys[idx] == key) {
-      *win = cache->wins[idx];
+  for (int entry_idx = 0; entry_idx < cache->count; entry_idx++) {
+    if (cache->keys[entry_idx] == key) {
+      *win = cache->wins[entry_idx];
       return true;
     }
   }
@@ -2278,19 +2287,20 @@ void test_rlamc_pegm(void) {
     free(cgp);
   }
   (void)fclose(cache_out);
-  const double n = pegm.num_positions - pegm.first_position;
+  const double position_count = pegm.num_positions - pegm.first_position;
   for (int method = 0; method < num_methods; method++) {
     double seconds = 0.0;
     for (int pos_idx = pegm.first_position; pos_idx < pegm.num_positions;
          pos_idx++) {
       seconds += pegm.seconds[method * pegm.num_positions + pos_idx];
     }
-    const double mean = diff_sum[method] / n;
+    const double mean = diff_sum[method] / position_count;
     printf("RPEGM setting %d [%s]: vs setting 0 win %+.5f (SE %.5f) per "
            "position, %d differ; sim %.3f s per position\n",
            method, string_splitter_get_item(methods, method), mean,
-           sqrt(fmax(diff_sum_sq[method] / n - mean * mean, 0.0) / n),
-           differ[method], seconds / n);
+           sqrt(fmax(diff_sum_sq[method] / position_count - mean * mean, 0.0) /
+                position_count),
+           differ[method], seconds / position_count);
   }
   printf("RPEGM: %d positions solved, cache %d entries\n", solved, cache.count);
   free(wins);
@@ -2397,9 +2407,9 @@ void test_rlamc_trace(void) {
                             game_get_ld(game), false);
     const char *name = string_builder_peek(sb);
     int found = -1;
-    for (int idx = 0; idx < num_distinct; idx++) {
-      if (strings_equal(names[idx], name)) {
-        found = idx;
+    for (int distinct_idx = 0; distinct_idx < num_distinct; distinct_idx++) {
+      if (strings_equal(names[distinct_idx], name)) {
+        found = distinct_idx;
         break;
       }
     }
@@ -2425,10 +2435,11 @@ void test_rlamc_trace(void) {
          (unsigned long long)totals.inner_searches,
          (unsigned long long)totals.samples, (unsigned long long)totals.stopped,
          (unsigned long long)totals.decision_hits);
-  for (int idx = 0; idx < num_distinct; idx++) {
-    printf("RT play %-20s chosen %4d mean static rank %.1f\n", names[idx],
-           counts[idx], (double)rank_sums[idx] / counts[idx]);
-    free(names[idx]);
+  for (int distinct_idx = 0; distinct_idx < num_distinct; distinct_idx++) {
+    printf("RT play %-20s chosen %4d mean static rank %.1f\n",
+           names[distinct_idx], counts[distinct_idx],
+           (double)rank_sums[distinct_idx] / counts[distinct_idx]);
+    free(names[distinct_idx]);
   }
   move_list_destroy(all);
   rlamc_worker_destroy(worker);

@@ -82,21 +82,23 @@ void gp_destroy(GaussianProcess *gp) {
   free(gp);
 }
 
-// The scaled squared distance between a and b.
+// The scaled squared distance between first_point and second_point.
 static double gp_scaled_distance_squared(const GaussianProcess *gp,
-                                         const double *a, const double *b) {
+                                         const double *first_point,
+                                         const double *second_point) {
   double sum = 0.0;
   for (int dim_idx = 0; dim_idx < gp->num_dims; dim_idx++) {
-    const double diff =
-        (a[dim_idx] - b[dim_idx]) * gp->inverse_length_scales[dim_idx];
+    const double diff = (first_point[dim_idx] - second_point[dim_idx]) *
+                        gp->inverse_length_scales[dim_idx];
     sum += diff * diff;
   }
   return sum;
 }
 
-static double gp_kernel(const GaussianProcess *gp, const double *a,
-                        const double *b) {
-  const double distance_squared = gp_scaled_distance_squared(gp, a, b);
+static double gp_kernel(const GaussianProcess *gp, const double *first_point,
+                        const double *second_point) {
+  const double distance_squared =
+      gp_scaled_distance_squared(gp, first_point, second_point);
   switch (gp->kernel) {
   case GP_KERNEL_MATERN52: {
     const double scaled = GP_SQRT5 * sqrt(distance_squared);
@@ -110,11 +112,14 @@ static double gp_kernel(const GaussianProcess *gp, const double *a,
   return 0.0;
 }
 
-// d k(a, b) / d a[dim], divided by (a[dim] - b[dim]) * inverse_length^2:
-// the same for every dimension, so computed once per pair.
+// d k(first_point, second_point) / d first_point[dim], divided by
+// (first_point[dim] - second_point[dim]) * inverse_length^2: the same for
+// every dimension, so computed once per pair.
 static double gp_kernel_gradient_factor(const GaussianProcess *gp,
-                                        const double *a, const double *b) {
-  const double distance_squared = gp_scaled_distance_squared(gp, a, b);
+                                        const double *first_point,
+                                        const double *second_point) {
+  const double distance_squared =
+      gp_scaled_distance_squared(gp, first_point, second_point);
   switch (gp->kernel) {
   case GP_KERNEL_MATERN52: {
     const double scaled = GP_SQRT5 * sqrt(distance_squared);

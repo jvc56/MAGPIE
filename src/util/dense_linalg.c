@@ -4,50 +4,51 @@
 #include <stdbool.h>
 #include <stddef.h>
 
-bool dense_cholesky(double *a, const int n) {
-  for (int col = 0; col < n; col++) {
-    double diagonal = a[(ptrdiff_t)col * n + col];
+bool dense_cholesky(double *matrix, const int dim) {
+  for (int col = 0; col < dim; col++) {
+    double diagonal = matrix[(ptrdiff_t)col * dim + col];
     for (int inner = 0; inner < col; inner++) {
-      const double value = a[(ptrdiff_t)col * n + inner];
+      const double value = matrix[(ptrdiff_t)col * dim + inner];
       diagonal -= value * value;
     }
     if (!(diagonal > 0.0)) {
       return false;
     }
     const double pivot = sqrt(diagonal);
-    a[(ptrdiff_t)col * n + col] = pivot;
-    for (int row = col + 1; row < n; row++) {
-      double sum = a[(ptrdiff_t)row * n + col];
+    matrix[(ptrdiff_t)col * dim + col] = pivot;
+    for (int row = col + 1; row < dim; row++) {
+      double sum = matrix[(ptrdiff_t)row * dim + col];
       for (int inner = 0; inner < col; inner++) {
-        sum -= a[(ptrdiff_t)row * n + inner] * a[(ptrdiff_t)col * n + inner];
+        sum -= matrix[(ptrdiff_t)row * dim + inner] *
+               matrix[(ptrdiff_t)col * dim + inner];
       }
-      a[(ptrdiff_t)row * n + col] = sum / pivot;
+      matrix[(ptrdiff_t)row * dim + col] = sum / pivot;
     }
     for (int row = 0; row < col; row++) {
-      a[(ptrdiff_t)row * n + col] = 0.0;
+      matrix[(ptrdiff_t)row * dim + col] = 0.0;
     }
   }
   return true;
 }
 
-void dense_forward_solve(const double *lower, const int n, const double *b,
-                         double *y) {
-  for (int row = 0; row < n; row++) {
-    double sum = b[row];
+void dense_forward_solve(const double *lower, const int dim, const double *rhs,
+                         double *intermediate) {
+  for (int row = 0; row < dim; row++) {
+    double sum = rhs[row];
     for (int col = 0; col < row; col++) {
-      sum -= lower[(ptrdiff_t)row * n + col] * y[col];
+      sum -= lower[(ptrdiff_t)row * dim + col] * intermediate[col];
     }
-    y[row] = sum / lower[(ptrdiff_t)row * n + row];
+    intermediate[row] = sum / lower[(ptrdiff_t)row * dim + row];
   }
 }
 
-void dense_backward_solve(const double *lower, const int n, const double *y,
-                          double *x) {
-  for (int row = n - 1; row >= 0; row--) {
-    double sum = y[row];
-    for (int col = row + 1; col < n; col++) {
-      sum -= lower[(ptrdiff_t)col * n + row] * x[col];
+void dense_backward_solve(const double *lower, const int dim,
+                          const double *intermediate, double *solution) {
+  for (int row = dim - 1; row >= 0; row--) {
+    double sum = intermediate[row];
+    for (int col = row + 1; col < dim; col++) {
+      sum -= lower[(ptrdiff_t)col * dim + row] * solution[col];
     }
-    x[row] = sum / lower[(ptrdiff_t)row * n + row];
+    solution[row] = sum / lower[(ptrdiff_t)row * dim + row];
   }
 }

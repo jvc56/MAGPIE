@@ -489,11 +489,12 @@ static int rlamc_embed(RlamcWorker *worker, const Game *game) {
   return num_columns;
 }
 
-static double rlamc_distance_squared(const double *a, const double *b,
+static double rlamc_distance_squared(const double *first_row,
+                                     const double *second_row,
                                      const int num_columns) {
   double distance = 0.0;
   for (int col = 0; col < num_columns; col++) {
-    const double diff = a[col] - b[col];
+    const double diff = first_row[col] - second_row[col];
     distance += diff * diff;
   }
   return distance;
@@ -962,11 +963,11 @@ static double rlamc_rollout(RlamcWorker *worker, const RlamcLevel *args,
   return utility;
 }
 
-// Whether candidate cand_idx trails the leader by more than z standard errors
-// of their paired difference over the rounds played.
+// Whether candidate cand_idx trails the leader by more than race_z standard
+// errors of their paired difference over the rounds played.
 static bool rlamc_trails(const RlamcWorker *worker, const int cand_idx,
                          const int leader_idx, const int rounds,
-                         const double z) {
+                         const double race_z) {
   const double *values = worker->values;
   double sum = 0.0;
   double sum_sq = 0.0;
@@ -982,7 +983,7 @@ static bool rlamc_trails(const RlamcWorker *worker, const int cand_idx,
     variance = 0.0;
   }
   const double se = sqrt(variance / rounds);
-  return mean + z * se < 0.0;
+  return mean + race_z * se < 0.0;
 }
 
 // Chooses among the worker's candidates by plain recursive rollouts, from the

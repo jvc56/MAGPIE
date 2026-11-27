@@ -81,8 +81,8 @@ static void test_dense_linalg(void) {
   double matrix[9] = {4, 12, -16, 12, 37, -43, -16, -43, 98};
   assert(dense_cholesky(matrix, 3));
   const double expected[9] = {2, 0, 0, 6, 1, 0, -8, 5, 3};
-  for (int idx = 0; idx < 9; idx++) {
-    assert(fabs(matrix[idx] - expected[idx]) < 1e-12);
+  for (int entry_idx = 0; entry_idx < 9; entry_idx++) {
+    assert(fabs(matrix[entry_idx] - expected[entry_idx]) < 1e-12);
   }
   const double original[9] = {4, 12, -16, 12, 37, -43, -16, -43, 98};
   const double rhs[3] = {1, 2, 3};
@@ -154,8 +154,10 @@ static void test_table_and_subset(void) {
   rvs_destroy(table);
 }
 
-static double lamc_test_bowl(const double x, const double y) {
-  return -((x - 0.5) * (x - 0.5)) - ((y + 0.3) * (y + 0.3));
+static double lamc_test_bowl(const double first_coordinate,
+                             const double second_coordinate) {
+  return -((first_coordinate - 0.5) * (first_coordinate - 0.5)) -
+         ((second_coordinate + 0.3) * (second_coordinate + 0.3));
 }
 
 // A smooth signal whose variance (0.005) is below each value's noise
@@ -257,9 +259,9 @@ static void test_gp_kernel(const gp_kernel_t kernel) {
   const double points[4] = {0, 1, 2, 3};
   double values[4];
   double noise[4];
-  for (int idx = 0; idx < 4; idx++) {
-    values[idx] = sin(points[idx]);
-    noise[idx] = 1e-12;
+  for (int point_idx = 0; point_idx < 4; point_idx++) {
+    values[point_idx] = sin(points[point_idx]);
+    noise[point_idx] = 1e-12;
   }
   const double unit_scale[1] = {1.0};
   const GaussianProcessParams params = {
@@ -269,11 +271,11 @@ static void test_gp_kernel(const gp_kernel_t kernel) {
       .prior_mean = 0.0,
   };
   assert(gp_fit(gp, &params, points, values, noise, 4));
-  for (int idx = 0; idx < 4; idx++) {
+  for (int point_idx = 0; point_idx < 4; point_idx++) {
     double mean;
     double variance;
-    gp_predict(gp, &points[idx], &mean, &variance);
-    assert(fabs(mean - values[idx]) < 1e-4);
+    gp_predict(gp, &points[point_idx], &mean, &variance);
+    assert(fabs(mean - values[point_idx]) < 1e-4);
     assert(variance < 1e-4);
   }
   double far_mean;
@@ -292,13 +294,15 @@ static void test_gp_kernel(const gp_kernel_t kernel) {
   double bowl_noise[LAMC_TEST_GP_GRID * LAMC_TEST_GP_GRID];
   for (int row = 0; row < LAMC_TEST_GP_GRID; row++) {
     for (int col = 0; col < LAMC_TEST_GP_GRID; col++) {
-      const int idx = row * LAMC_TEST_GP_GRID + col;
-      bowl_points[(ptrdiff_t)idx * 2] =
+      const int cell_idx = row * LAMC_TEST_GP_GRID + col;
+      bowl_points[(ptrdiff_t)cell_idx * 2] =
           -2.0 + 4.0 * row / (LAMC_TEST_GP_GRID - 1);
-      bowl_points[idx * 2 + 1] = -2.0 + 4.0 * col / (LAMC_TEST_GP_GRID - 1);
-      bowl_values[idx] = lamc_test_bowl(bowl_points[(ptrdiff_t)idx * 2],
-                                        bowl_points[(ptrdiff_t)idx * 2 + 1]);
-      bowl_noise[idx] = 1e-6;
+      bowl_points[cell_idx * 2 + 1] =
+          -2.0 + 4.0 * col / (LAMC_TEST_GP_GRID - 1);
+      bowl_values[cell_idx] =
+          lamc_test_bowl(bowl_points[(ptrdiff_t)cell_idx * 2],
+                         bowl_points[(ptrdiff_t)cell_idx * 2 + 1]);
+      bowl_noise[cell_idx] = 1e-6;
     }
   }
   const double bowl_scales[2] = {0.7, 0.7};
@@ -564,9 +568,9 @@ static void test_play_features(void) {
     const int num_columns = play_feature_get_num_columns(feature);
     assert(num_columns >= 1 && num_columns <= PLAY_FEATURE_MAX_COLUMNS);
     assert(play_feature_from_name(play_feature_get_name(feature)) == feature);
-    for (int idx = 0; idx < num_moves * stride; idx++) {
-      first[idx] = LAMC_TEST_GUARD_VALUE;
-      second[idx] = LAMC_TEST_GUARD_VALUE;
+    for (int value_idx = 0; value_idx < num_moves * stride; value_idx++) {
+      first[value_idx] = LAMC_TEST_GUARD_VALUE;
+      second[value_idx] = LAMC_TEST_GUARD_VALUE;
     }
     PlayFeatureCtx ctx;
     play_feature_ctx_init(&ctx, game);
@@ -1246,15 +1250,15 @@ static int replay_choose(RandomVariables *table, const int *plays,
                          const int num_plays, const uint64_t count) {
   int best = 0;
   double best_mean = -INFINITY;
-  for (int idx = 0; idx < num_plays; idx++) {
+  for (int play_idx = 0; play_idx < num_plays; play_idx++) {
     double sum = 0;
     for (uint64_t sample = 0; sample < count; sample++) {
-      sum += rvs_sample(table, (uint64_t)plays[idx], 0, NULL);
+      sum += rvs_sample(table, (uint64_t)plays[play_idx], 0, NULL);
     }
     const double mean = count > 0 ? sum / (double)count : 0.0;
     if (mean > best_mean) {
       best_mean = mean;
-      best = idx;
+      best = play_idx;
     }
   }
   return best;
@@ -1269,21 +1273,22 @@ static int replay_choose_reusing(const ReplayPosition *position,
                                  const uint64_t count) {
   int best = 0;
   double best_mean = -INFINITY;
-  for (int idx = 0; idx < num_plays; idx++) {
-    const uint64_t taken = lamc_get_play_samples(ctx, plays[idx]);
+  for (int play_idx = 0; play_idx < num_plays; play_idx++) {
+    const uint64_t taken = lamc_get_play_samples(ctx, plays[play_idx]);
     for (uint64_t sample = 0; sample < count; sample++) {
-      rvs_sample(table, (uint64_t)plays[idx], 0, NULL);
+      rvs_sample(table, (uint64_t)plays[play_idx], 0, NULL);
     }
     const uint64_t total = taken + count;
     double sum = 0;
     for (uint64_t sample = 0; sample < total; sample++) {
       sum +=
-          position->samples[(uint64_t)plays[idx] * samples_per_play + sample];
+          position
+              ->samples[(uint64_t)plays[play_idx] * samples_per_play + sample];
     }
     const double mean = total > 0 ? sum / (double)total : 0.0;
     if (mean > best_mean) {
       best_mean = mean;
-      best = idx;
+      best = play_idx;
     }
   }
   return best;
@@ -1292,35 +1297,38 @@ static int replay_choose_reusing(const ReplayPosition *position,
 // The rank of each value among values, 0 for the smallest, ties broken by
 // index.
 static void replay_ranks(const double *values, const int count, double *ranks) {
-  for (int idx = 0; idx < count; idx++) {
+  for (int value_idx = 0; value_idx < count; value_idx++) {
     int rank = 0;
     for (int other = 0; other < count; other++) {
-      if (values[other] < values[idx] ||
-          (other < idx && values[other] == values[idx])) {
+      if (values[other] < values[value_idx] ||
+          (other < value_idx && values[other] == values[value_idx])) {
         rank++;
       }
     }
-    ranks[idx] = rank;
+    ranks[value_idx] = rank;
   }
 }
 
-static double replay_correlation(const double *a, const double *b,
-                                 const int count) {
+static double replay_correlation(const double *first_values,
+                                 const double *second_values, const int count) {
   double mean_a = 0;
   double mean_b = 0;
-  for (int idx = 0; idx < count; idx++) {
-    mean_a += a[idx];
-    mean_b += b[idx];
+  for (int value_idx = 0; value_idx < count; value_idx++) {
+    mean_a += first_values[value_idx];
+    mean_b += second_values[value_idx];
   }
   mean_a /= count;
   mean_b /= count;
   double covariance = 0;
   double variance_a = 0;
   double variance_b = 0;
-  for (int idx = 0; idx < count; idx++) {
-    covariance += (a[idx] - mean_a) * (b[idx] - mean_b);
-    variance_a += (a[idx] - mean_a) * (a[idx] - mean_a);
-    variance_b += (b[idx] - mean_b) * (b[idx] - mean_b);
+  for (int value_idx = 0; value_idx < count; value_idx++) {
+    covariance += (first_values[value_idx] - mean_a) *
+                  (second_values[value_idx] - mean_b);
+    variance_a +=
+        (first_values[value_idx] - mean_a) * (first_values[value_idx] - mean_a);
+    variance_b += (second_values[value_idx] - mean_b) *
+                  (second_values[value_idx] - mean_b);
   }
   return variance_a > 0 && variance_b > 0
              ? covariance / sqrt(variance_a * variance_b)
@@ -1355,9 +1363,9 @@ static void replay_rank_correlations(const ReplayPosition *position,
 static double replay_set_regret(const ReplayPosition *position,
                                 const int *plays, const int num_plays) {
   double best = -INFINITY;
-  for (int idx = 0; idx < num_plays; idx++) {
-    if (position->truth[plays[idx]] > best) {
-      best = position->truth[plays[idx]];
+  for (int play_idx = 0; play_idx < num_plays; play_idx++) {
+    if (position->truth[plays[play_idx]] > best) {
+      best = position->truth[plays[play_idx]];
     }
   }
   return replay_true_best(position) - best;
@@ -1384,8 +1392,8 @@ static void *replay_evaluate_worker(void *data) {
                        : position->num_plays;
 
     // The standard sim: the top plays by static equity, sampled evenly.
-    for (int idx = 0; idx < baseline; idx++) {
-      plays[idx] = idx;
+    for (int play_idx = 0; play_idx < baseline; play_idx++) {
+      plays[play_idx] = play_idx;
     }
     const int standard_choice =
         replay_choose(table, plays, baseline, shared->budget / baseline);
@@ -1468,13 +1476,13 @@ static int replay_env_int(const char *name, const int fallback) {
 static void replay_mean_and_se(const double *values, const int count,
                                double *mean, double *se) {
   double sum = 0;
-  for (int idx = 0; idx < count; idx++) {
-    sum += values[idx];
+  for (int value_idx = 0; value_idx < count; value_idx++) {
+    sum += values[value_idx];
   }
   *mean = sum / count;
   double squares = 0;
-  for (int idx = 0; idx < count; idx++) {
-    squares += (values[idx] - *mean) * (values[idx] - *mean);
+  for (int value_idx = 0; value_idx < count; value_idx++) {
+    squares += (values[value_idx] - *mean) * (values[value_idx] - *mean);
   }
   *se = count > 1 ? sqrt(squares / (count - 1) / count) : 0.0;
 }

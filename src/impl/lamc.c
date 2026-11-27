@@ -360,12 +360,12 @@ static void lamc_build_static_equity(LamcCtx *ctx) {
   }
 }
 
-static double lamc_distance_squared(const LamcCtx *ctx, const double *a,
-                                    const double *b) {
+static double lamc_distance_squared(const LamcCtx *ctx, const double *first_row,
+                                    const double *second_row) {
   double sum = 0.0;
   for (int column = 0; column < ctx->num_columns; column++) {
-    const double diff =
-        (a[column] - b[column]) * ctx->inverse_length_scales[column];
+    const double diff = (first_row[column] - second_row[column]) *
+                        ctx->inverse_length_scales[column];
     sum += diff * diff;
   }
   return sum;
