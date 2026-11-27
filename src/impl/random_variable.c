@@ -633,28 +633,6 @@ static int bag_letters_after_play(const Bag *bag, const Move *play) {
   return tiles_played < bag_letters ? bag_letters - tiles_played : 0;
 }
 
-// The value to the player of the tiles a play of theirs keeps, for a play
-// not yet played: the leave's value and its pool shift (see pool_shift.h), as
-// move generation values the play's leave. The shift is for the tiles the
-// player sees as unseen before the play draws, and is 0 where move generation
-// adds none.
-static Equity simmer_get_leftover_value(const Game *game, int player_index,
-                                        const Move *move) {
-  const Player *player = game_get_player(game, player_index);
-  const KLV *klv = player_get_klv(player);
-  const int tiles_on_rack = rack_get_total_letters(player_get_rack(player));
-  Rack leave;
-  rack_copy(&leave, player_get_rack(player));
-  const Equity leave_value = get_leave_value_for_move(klv, move, &leave);
-  return leave_value +
-         pool_shift_get_leave_shift(
-             player_get_pool_shift_table(player), klv,
-             player_get_pool_shift_weight(player), game_get_ld(game),
-             game_get_bag(game),
-             player_get_rack(game_get_player(game, 1 - player_index)), &leave,
-             tiles_on_rack, game_get_real_bag_size(game));
-}
-
 // One rollout of simmed_play from seed's shuffled bag, rotated left by
 // rotation * RACK_SIZE letters (see bag_rotate) before the opponent's rack is
 // drawn. When record is non-NULL, the rollout's contributions to its
@@ -717,8 +695,8 @@ static double sim_rollout(const Simmer *simmer, SimmerWorker *simmer_worker,
   game_set_backup_mode(game, BACKUP_MODE_SIMULATION);
   // For one-ply sims, we need to account for the candidate move's leave value
   if (plies == 1) {
-    leftover += simmer_get_leftover_value(game, simmer->initial_player,
-                                          simmed_play_get_move(simmed_play));
+    leftover += get_leftover_value_for_move(game, simmer->initial_player,
+                                            simmed_play_get_move(simmed_play));
   }
   // play move
   play_move(simmed_play_get_move(simmed_play), game, NULL);
@@ -764,7 +742,7 @@ static double sim_rollout(const Simmer *simmer, SimmerWorker *simmer_worker,
     const bool is_last_play_of_player = ply == plies - 2 || ply == plies - 1;
     if (is_last_play_of_player) {
       this_leftover =
-          simmer_get_leftover_value(game, player_on_turn_index, best_play);
+          get_leftover_value_for_move(game, player_on_turn_index, best_play);
     }
 
     // On the final ply the resulting cross-sets are never read (no further move

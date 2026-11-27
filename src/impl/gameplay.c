@@ -20,6 +20,7 @@
 #include "../ent/move.h"
 #include "../ent/move_undo.h"
 #include "../ent/player.h"
+#include "../ent/pool_shift.h"
 #include "../ent/rack.h"
 #include "../ent/validated_move.h"
 #include "../str/rack_string.h"
@@ -53,6 +54,28 @@ Equity get_leave_value_for_move(const KLV *klv, const Move *move, Rack *rack) {
     }
   }
   return klv_get_leave_value(klv, rack);
+}
+
+// The value to the player of the tiles a play of theirs keeps, for a play
+// not yet played: the leave's value and its pool shift (see pool_shift.h), as
+// move generation values the play's leave. The shift is for the tiles the
+// player sees as unseen before the play draws, and is 0 where move generation
+// adds none.
+Equity get_leftover_value_for_move(const Game *game, int player_index,
+                                   const Move *move) {
+  const Player *player = game_get_player(game, player_index);
+  const KLV *klv = player_get_klv(player);
+  const int tiles_on_rack = rack_get_total_letters(player_get_rack(player));
+  Rack leave;
+  rack_copy(&leave, player_get_rack(player));
+  const Equity leave_value = get_leave_value_for_move(klv, move, &leave);
+  return leave_value +
+         pool_shift_get_leave_shift(
+             player_get_pool_shift_table(player), klv,
+             player_get_pool_shift_weight(player), game_get_ld(game),
+             game_get_bag(game),
+             player_get_rack(game_get_player(game, 1 - player_index)), &leave,
+             tiles_on_rack, game_get_real_bag_size(game));
 }
 
 // Assumes the move hasn't been played yet and is in the rack

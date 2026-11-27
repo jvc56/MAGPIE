@@ -42,6 +42,10 @@ void draw_leave_from_bag(Bag *bag, int player_draw_index, Rack *rack_to_update,
 void get_leave_for_move(const Move *move, const Game *game, Rack *leave);
 void return_rack_to_bag(const Game *game, int player_index);
 Equity get_leave_value_for_move(const KLV *klv, const Move *move, Rack *rack);
+// The value to the player of the tiles a play of theirs keeps, with its pool
+// shift (see pool_shift.h), for a play not yet played.
+Equity get_leftover_value_for_move(const Game *game, int player_index,
+                                   const Move *move);
 void return_phony_letters(Game *game);
 
 // Cross-set update for move affected squares

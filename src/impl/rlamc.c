@@ -888,15 +888,13 @@ static double rlamc_rollout(RlamcWorker *worker, const RlamcLevel *args,
   int players[RLAMC_MAX_PLIES + 1];
   int num_plays = 0;
 
-  Rack rack_before;
-  const Player *mover_player = game_get_player(game, mover);
-  rack_copy(&rack_before, player_get_rack(mover_player));
+  // Each leave is valued with its pool shift, as the sim values the leaves
+  // of its rollouts.
+  leaves[num_plays] = get_leftover_value_for_move(game, mover, candidate);
+  players[num_plays++] = mover;
   game_set_backup_mode(game, BACKUP_MODE_SIMULATION);
   play_move(candidate, game, NULL);
   game_set_backup_mode(game, BACKUP_MODE_OFF);
-  leaves[num_plays] = get_leave_value_for_move(player_get_klv(mover_player),
-                                               candidate, &rack_before);
-  players[num_plays++] = mover;
 
   // From an empty bag, the rest of a rollout whose plays are all static is a
   // function of rlamc_rollout_key, and its utility is kept in the rollout
@@ -932,18 +930,15 @@ static double rlamc_rollout(RlamcWorker *worker, const RlamcLevel *args,
       break;
     }
     const int on_turn = game_get_player_on_turn_index(game);
-    const Player *on_turn_player = game_get_player(game, on_turn);
     const Move *play =
         rlamc_ply_play(worker, eval, game, ply, sample_seed, carry);
-    rack_copy(&rack_before, player_get_rack(on_turn_player));
+    leaves[num_plays] = get_leftover_value_for_move(game, on_turn, play);
+    players[num_plays++] = on_turn;
     if (ply == args->horizon_plies - 1 && !finish) {
       play_move_no_cross_set_update(play, game, NULL);
     } else {
       play_move(play, game, NULL);
     }
-    leaves[num_plays] = get_leave_value_for_move(player_get_klv(on_turn_player),
-                                                 play, &rack_before);
-    players[num_plays++] = on_turn;
   }
   Equity leftover = 0;
   for (int play_idx = num_plays >= 2 ? num_plays - 2 : 0; play_idx < num_plays;
@@ -1137,10 +1132,10 @@ static void rlamc_fill_replies(RlamcWorker *worker, const RlamcLevel *args,
     draw_rack_from_bag(game, replier, &replier_rack);
     draw_rack_from_bag(game, other, &other_rack);
     const Move *reply = rlamc_top_play(worker, game, worker->reply_ply, carry);
-    Rack rack_before;
-    rack_copy(&rack_before, player_get_rack(replier_player));
-    const Equity leave = get_leave_value_for_move(
-        player_get_klv(replier_player), reply, &rack_before);
+    const Equity leave = get_leftover_value_for_move(game, replier, reply);
+    const int leave_tiles =
+        (int)rack_get_total_letters(player_get_rack(replier_player)) -
+        move_get_tiles_played(reply);
     const int bag_tiles = bag_get_letters(bag);
     int drawn = rlamc_tiles_drawn(reply);
     if (drawn > bag_tiles) {
@@ -1148,8 +1143,7 @@ static void rlamc_fill_replies(RlamcWorker *worker, const RlamcLevel *args,
     }
     replies[sample].equity = move_get_score(reply) + leave;
     replies[sample].bag_after = (uint8_t)(bag_tiles - drawn);
-    replies[sample].replier_rack_after =
-        (uint8_t)(rack_get_total_letters(&rack_before) + drawn);
+    replies[sample].replier_rack_after = (uint8_t)(leave_tiles + drawn);
     return_rack_to_bag(game, replier);
     return_rack_to_bag(game, other);
   }
@@ -1266,15 +1260,15 @@ static const Move *rlamc_choose_shared(RlamcWorker *worker,
       const uint64_t key = rlamc_board_hash_after(board_hash, candidate) | 1ULL;
       const RlamcReply *replies =
           rlamc_get_replies(worker, args, game, candidate, key, carry);
-      Rack rack;
-      rack_copy(&rack, player_get_rack(mover_player));
-      const Equity leave = get_leave_value_for_move(
-          player_get_klv(mover_player), candidate, &rack);
+      const Equity leave = get_leftover_value_for_move(game, mover, candidate);
+      const int leave_tiles =
+          (int)rack_get_total_letters(player_get_rack(mover_player)) -
+          move_get_tiles_played(candidate);
       // An exchange draws as many tiles as it returns.
       if (move_get_type(candidate) == GAME_EVENT_EXCHANGE) {
         drawn = move_get_tiles_played(candidate);
       }
-      const int mover_rack_after = rack_get_total_letters(&rack) + drawn;
+      const int mover_rack_after = leave_tiles + drawn;
       value = rlamc_value_from_replies(
           args, eval, replies, spread + move_get_score(candidate), leave,
           mover_rack_after > RACK_SIZE ? RACK_SIZE : mover_rack_after);
