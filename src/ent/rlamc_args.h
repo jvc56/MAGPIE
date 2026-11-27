@@ -41,12 +41,13 @@ enum {
   // rollout plies 0 and 1 (bits 0 and 1), 4 rollouts a play, decisions
   // cached. Unlike the best setting, rollouts that reach an empty bag play
   // the game out (skip_finish off), which was weaker at equal time, and a
-  // recursive rollout plays 2 static plies after its play, not 1 (h=2 was
-  // no better at equal time with skip_finish on).
+  // recursive rollout plays 5 static plies after its play, not 1 (h=2 was
+  // no better at equal time with skip_finish on; with it on, h=5 cost no
+  // more than h=2 in two positions, RLAMC.md log 80).
   RLAMC_DEFAULT_PLIES_MASK = 3,
   RLAMC_DEFAULT_CANDIDATES = 6,
   RLAMC_DEFAULT_SAMPLES = 4,
-  RLAMC_DEFAULT_PLIES = 2,
+  RLAMC_DEFAULT_PLIES = 5,
   // Points of static equity below the best a candidate may be.
   RLAMC_DEFAULT_MARGIN = 30,
 };

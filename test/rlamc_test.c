@@ -711,7 +711,7 @@ static void test_rlamc_parse(void) {
   assert(args.levels[0].lamc_search);
   assert(args.levels[0].decision_cache);
   assert(args.levels[0].num_samples == 4);
-  assert(args.levels[0].horizon_plies == 2);
+  assert(args.levels[0].horizon_plies == 5);
   assert(!args.levels[0].skip_finish);
   rlamc_args_parse("off", &args, error_stack);
   assert(error_stack_is_empty(error_stack));

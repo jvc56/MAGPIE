@@ -1568,7 +1568,7 @@ by default.
 ### Options
 
 - `-rlamc <spec>` (and `-rlamc1`, `-rlamc2` in autoplay): `off`; `on`,
-  the defaults (`plies=0+1,lamc=1,dcache=1,m=4,h=2,fin=1`; the best
+  the defaults (`plies=0+1,lamc=1,dcache=1,m=4,h=5,fin=1`; the best
   setting found has `h=1` and `fin=0`); or comma-separated `key=value`
   settings that change the defaults: `plies` (joined by `+`; 0 is the
   reply to the candidate), `k` (candidates), `m` (recursive rollouts each), `h`

@@ -104,7 +104,7 @@ const Move *rlamc_choose_move(RlamcWorker *worker, const RlamcArgs *args,
                               uint64_t seed, BestMoveCarry *carry);
 
 // Parses a recursive search spec into args: "off"; "on", which turns recursive
-// rollouts on with the defaults (plies=0+1,lamc=1,dcache=1,m=4,h=2,fin=1;
+// rollouts on with the defaults (plies=0+1,lamc=1,dcache=1,m=4,h=5,fin=1;
 // the best setting found has h=1 and fin=0); or levels separated by '/', each
 // comma-separated key=value settings that change the defaults, which also turn
 // recursive rollouts on. A level starts from the settings of the level before
