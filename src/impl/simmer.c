@@ -352,7 +352,9 @@ void simulate(SimArgs *sim_args, SimCtx **sim_ctx, SimResults *sim_results,
   // A two-stage recursive sim: the standard sim finds the finalists, and a sim
   // with recursive rollouts chooses among them.
   const RlamcArgs *rlamc = &sim_args->rlamc_args;
-  const int root_bag = bag_get_letters(game_get_bag(sim_args->game));
+  // Both bag gates count the real bag: the bag object also holds the
+  // opponent's rack when it is unknown, as at the command line.
+  const int root_bag = game_get_real_bag_size(sim_args->game);
   if (rlamc->enabled && rlamc->finalists > 0 &&
       move_list_get_count(sim_args->move_list) > rlamc->finalists &&
       root_bag > 0 &&
@@ -372,9 +374,8 @@ void simulate(SimArgs *sim_args, SimCtx **sim_ctx, SimResults *sim_results,
   const bool original_resume_results = sim_args->resume_results;
   int *original_arm_avoid_prune = sim_args->bai_options.arm_avoid_prune;
   bool searched = false;
-  const int bag_tiles = bag_get_letters(game_get_bag(sim_args->game));
-  if (sim_args->lamc_args.enabled && bag_tiles > 0 &&
-      bag_tiles <= sim_args->lamc_args.max_bag) {
+  if (sim_args->lamc_args.enabled && root_bag > 0 &&
+      root_bag <= sim_args->lamc_args.max_bag) {
     LamcReport lamc_report;
     const MoveList *candidates = lamc_choose_candidates(
         sim_args, &(*sim_ctx)->lamc_ctx,

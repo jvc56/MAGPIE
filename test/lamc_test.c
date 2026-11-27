@@ -462,6 +462,35 @@ static void test_play_feature_bag_after_unknown_rack(void) {
   config_destroy(config);
 }
 
+// -lamcmaxbag counts the real bag, as autoplay sees it, and not the bag
+// object, which at the command line also holds the opponent's unknown rack.
+static void lamc_test_max_bag_search(const int max_bag,
+                                     const int expected_searches) {
+  char *settings = get_formatted_string(
+      "set -lex CSW24 -wmp true -s1 equity -s2 equity -r1 all -r2 all "
+      "-numplays 4 -plies 2 -threads 1 -iterations 300 "
+      "-minplayiterations 10 -scond none -tlim 0 -seed 42 -sinfer false "
+      "-lamc true -rlamc off -lamcmaxbag %d -savesettings false -hr false",
+      max_bag);
+  Config *config = config_create_or_die(settings);
+  free(settings);
+  load_and_exec_config_or_die(
+      config, "cgp 3V3W6L/1BEATY1U5GI/2XU3S4FEN/3TA2H4LOY/2GEN1DUCAT1AD1/"
+              "2O1I1I2WRITE1/2V1M1ZOAEA4/3JAGER2DRILL/2BOtONE5O1/1FERER7Q1/"
+              "4S8U1/12NaM/12ATE/13ST/14H ACEINOP/ 361/397 0 -lex CSW24");
+  assert(game_get_real_bag_size(config_get_game(config)) == 4);
+  load_and_exec_config_or_die(config, "gen");
+  lamc_totals_reset();
+  load_and_exec_config_or_die(config, "sim");
+  assert(lamc_get_totals().searches == (uint64_t)expected_searches);
+  config_destroy(config);
+}
+
+static void test_lamc_max_bag_counts_real_bag(void) {
+  lamc_test_max_bag_search(4, 1);
+  lamc_test_max_bag_search(3, 0);
+}
+
 // The premium squares a play leaves the next play: the empty word premium
 // squares in reach of a tile it places, leaving out the ones it covers.
 static void test_play_feature_premium_leaves_covered_squares(void) {
@@ -1110,6 +1139,7 @@ void test_lamc(void) {
   test_lamc_prior_slope_not_negative();
   test_lamc_refine_cut();
   test_lamc_universe_keeps_pass();
+  test_lamc_max_bag_counts_real_bag();
   test_lamc_finds_planted_exchanges();
   test_lamc_sim_keeps_protected_play(false);
   test_lamc_sim_keeps_protected_play(true);
