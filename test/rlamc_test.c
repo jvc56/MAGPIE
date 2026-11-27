@@ -91,6 +91,8 @@
 #include <string.h>
 
 enum {
+  // The most distinct plays the on-demand trace tallies.
+  RT_MAX_DISTINCT = 2048,
   RCR_MAX_THREADS = 64,
   RCR_MOVE_STRING_SIZE = 64,
   RCR_NUM_METHODS = 3,
@@ -768,7 +770,7 @@ static void test_rlamc_parse(void) {
   rlamc_args_parse("plies=0,lamc=1,fin=0", &args, error_stack);
   assert(error_stack_is_empty(error_stack));
   assert(args.levels[0].skip_finish);
-  // Defaults: the best setting, but with finishes.
+  // Defaults: plies=0+1, lamc=1, dcache=1, m=4, h=5, fin=1.
   rlamc_args_parse("on", &args, error_stack);
   assert(error_stack_is_empty(error_stack));
   assert(args.enabled && args.depth == 1);
@@ -2242,7 +2244,6 @@ void test_rlamc_trace(void) {
   rlamc_worker_reset(worker, 12345);
   MoveList *all = move_list_create(5000);
   const int num_samples = rcr_env_int("RT_SAMPLES", 200);
-  enum { RT_MAX_DISTINCT = 2048 };
   char *names[RT_MAX_DISTINCT];
   int counts[RT_MAX_DISTINCT];
   int rank_sums[RT_MAX_DISTINCT];

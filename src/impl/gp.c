@@ -129,18 +129,19 @@ static double gp_kernel_gradient_factor(const GaussianProcess *gp,
 
 static bool gp_factor(GaussianProcess *gp, const double *noise_variances,
                       const double jitter) {
-  const int n = gp->num_points;
-  for (int row = 0; row < n; row++) {
+  const int num_points = gp->num_points;
+  for (int row = 0; row < num_points; row++) {
     const double *row_point = gp->points + (ptrdiff_t)row * gp->num_dims;
     for (int col = 0; col <= row; col++) {
       const double value =
           gp_kernel(gp, row_point, gp->points + (ptrdiff_t)col * gp->num_dims);
-      gp->lower[(ptrdiff_t)row * n + col] = value;
-      gp->lower[(ptrdiff_t)col * n + row] = value;
+      gp->lower[(ptrdiff_t)row * num_points + col] = value;
+      gp->lower[(ptrdiff_t)col * num_points + row] = value;
     }
-    gp->lower[(ptrdiff_t)row * n + row] += noise_variances[row] + jitter;
+    gp->lower[(ptrdiff_t)row * num_points + row] +=
+        noise_variances[row] + jitter;
   }
-  return dense_cholesky(gp->lower, n);
+  return dense_cholesky(gp->lower, num_points);
 }
 
 bool gp_fit(GaussianProcess *gp, const GaussianProcessParams *params,
@@ -243,10 +244,10 @@ double gp_get_log_marginal_likelihood(const GaussianProcess *gp) {
 
 void gp_predict(GaussianProcess *gp, const double *point, double *mean,
                 double *variance) {
-  const int n = gp->num_points;
+  const int num_points = gp->num_points;
   double *cross = gp->scratch;
   double mean_value = gp->prior_mean;
-  for (int point_idx = 0; point_idx < n; point_idx++) {
+  for (int point_idx = 0; point_idx < num_points; point_idx++) {
     cross[point_idx] =
         gp_kernel(gp, point, gp->points + (ptrdiff_t)point_idx * gp->num_dims);
     mean_value += cross[point_idx] * gp->alpha[point_idx];
@@ -257,9 +258,9 @@ void gp_predict(GaussianProcess *gp, const double *point, double *mean,
   if (!variance) {
     return;
   }
-  dense_forward_solve(gp->lower, n, cross, cross);
+  dense_forward_solve(gp->lower, num_points, cross, cross);
   double explained = 0.0;
-  for (int point_idx = 0; point_idx < n; point_idx++) {
+  for (int point_idx = 0; point_idx < num_points; point_idx++) {
     explained += cross[point_idx] * cross[point_idx];
   }
   const double posterior = gp->signal_variance - explained;

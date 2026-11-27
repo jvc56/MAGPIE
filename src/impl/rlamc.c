@@ -108,16 +108,16 @@ static void rlamc_standardize(double *values, const int stride,
                               const int count) {
   double sum = 0.0;
   double squares = 0.0;
-  for (int idx = 0; idx < count; idx++) {
-    const double value = values[(ptrdiff_t)idx * stride];
+  for (int value_idx = 0; value_idx < count; value_idx++) {
+    const double value = values[(ptrdiff_t)value_idx * stride];
     sum += value;
     squares += value * value;
   }
   const double mean = sum / count;
   const double variance = squares / count - mean * mean;
   const double stdev = variance > 0.0 ? sqrt(variance) : 0.0;
-  for (int idx = 0; idx < count; idx++) {
-    double *value = values + (ptrdiff_t)idx * stride;
+  for (int value_idx = 0; value_idx < count; value_idx++) {
+    double *value = values + (ptrdiff_t)value_idx * stride;
     *value = stdev < RLAMC_MIN_COLUMN_STDEV ? 0.0 : (*value - mean) / stdev;
   }
 }
@@ -411,8 +411,6 @@ static uint64_t rlamc_mix(uint64_t value) {
   return value ^ (value >> 31);
 }
 
-// Generates the candidates of the player on turn in worker's game: up to
-// num_candidates plays by static equity, within margin points of the best.
 // Embeds the worker's generated plays (worker->candidate_list) in the
 // Phase 1 play embedding (see play_feature_registry.h), every continuous
 // column standardized across them, and their static equity, standardized,
@@ -1283,11 +1281,6 @@ static const Move *rlamc_choose_shared(RlamcWorker *worker,
   return &worker->chosen;
 }
 
-// The LAMC search's surrogate of the evaluated plays (RlamcLevel.lamc_search),
-// as Phase 1's (lamc_fit): a prior mean linear in static equity, fit by least
-// squares weighted by each mean's precision, and a Gaussian process of the
-// residuals whose length scale and signal variance are chosen by marginal
-// likelihood. Returns whether a fit succeeded.
 // For a paired search: each evaluated play's mean and its variance, in
 // worker->gp_values and worker->gp_noise, from the model value = play mean +
 // seed effect + noise, fit by alternating means over the seeds that two or
@@ -1398,6 +1391,11 @@ static bool rlamc_paired_estimates(RlamcWorker *worker,
   return true;
 }
 
+// The LAMC search's surrogate of the evaluated plays (RlamcLevel.lamc_search),
+// as Phase 1's (lamc_fit): a prior mean linear in static equity with a slope of
+// at least 0, fit by least squares weighted by each mean's precision, and a
+// Gaussian process of the residuals whose length scale and signal variance are
+// chosen by marginal likelihood. Returns whether a fit succeeded.
 static bool rlamc_fit(RlamcWorker *worker, const RlamcLevel *args,
                       const int num_columns) {
   const int num_evaluated = worker->num_evaluated;
@@ -1405,13 +1403,14 @@ static bool rlamc_fit(RlamcWorker *worker, const RlamcLevel *args,
   double pooled_dof = 0.0;
   for (int eval_idx = 0; eval_idx < num_evaluated; eval_idx++) {
     const int play_idx = worker->evaluated[eval_idx];
-    const double n = worker->play_counts[play_idx];
-    const double mean = worker->play_sums[play_idx] / n;
-    if (n > 1) {
+    const double num_samples = worker->play_counts[play_idx];
+    const double mean = worker->play_sums[play_idx] / num_samples;
+    if (num_samples > 1) {
       const double variance =
-          (worker->play_squares[play_idx] / n - mean * mean) * n / (n - 1);
-      pooled_squares += (variance > 0 ? variance : 0.0) * (n - 1);
-      pooled_dof += n - 1;
+          (worker->play_squares[play_idx] / num_samples - mean * mean) *
+          num_samples / (num_samples - 1);
+      pooled_squares += (variance > 0 ? variance : 0.0) * (num_samples - 1);
+      pooled_dof += num_samples - 1;
     }
     worker->gp_values[eval_idx] = mean;
     memcpy(worker->gp_points + (ptrdiff_t)eval_idx * num_columns,

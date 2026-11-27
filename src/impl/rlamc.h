@@ -26,9 +26,13 @@
 //      plays, or, at the plies a deeper level names (RlamcArgs.levels),
 //      plays chosen by a search of that level, on its own worker and its own
 //      copy of the game;
-//   3. scores the result for the player on turn as the sim scores a rollout:
-//      the win percentage table at the spread plus the last two plays'
-//      leaves, blended with spread by the sim's utility weights.
+//   3. with fin=1 and the bag about empty, plays on to the end of the game by
+//      static equity;
+//   4. scores the result for the player on turn: an ended game by its result
+//      and final spread, as the sim does; otherwise the win percentage table
+//      at the spread plus the last two plays' leaves, blended with that same
+//      spread plus leaves by the sim's utility weights (the sim blends with
+//      the spread alone).
 
 // With RlamcLevel.share, a recursive rollout plays only the other player's
 // reply (horizon_plies is 1), and the search shares those replies between its
@@ -105,7 +109,7 @@ const Move *rlamc_choose_move(RlamcWorker *worker, const RlamcArgs *args,
 
 // Parses a recursive search spec into args: "off"; "on", which turns recursive
 // rollouts on with the defaults (plies=0+1,lamc=1,dcache=1,m=4,h=5,fin=1;
-// the best setting found has h=1 and fin=0); or levels separated by '/', each
+// see RlamcArgs for where they come from); or levels separated by '/', each
 // comma-separated key=value settings that change the defaults, which also turn
 // recursive rollouts on. A level starts from the settings of the level before
 // it. Keys:

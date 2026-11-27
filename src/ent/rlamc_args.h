@@ -6,11 +6,13 @@
 
 // Recursive rollouts (Phase 2 of docs/lamc-plan.md): at the rollout plies it
 // names, the player on turn chooses its play by a small search of its own
-// instead of taking the top play by static equity. The search takes the
-// player's best plays by static equity and gives each a few short recursive
-// rollouts, in which the other player's rack is drawn again from what the
-// player on turn cannot see. It plays the best by the recursive rollouts' mean
-// utility.
+// instead of taking the top play by static equity. By default the search is a
+// LAMC search over the player's plays (RlamcLevel.lamc_search): it gives a few
+// pools of plays short recursive rollouts, in which the other player's rack is
+// drawn again from what the player on turn cannot see, fits a surrogate of
+// their utility, and plays the best by the surrogate's mean. The top-k search
+// (lamc=0) gives the best plays by static equity rollouts and plays the best by
+// their mean utility.
 
 enum {
   // The most plays a recursive search considers, samples it takes and static
@@ -37,13 +39,12 @@ enum {
   // The most levels of recursive search: a level's recursive rollouts may
   // choose plays by a search of the next level.
   RLAMC_MAX_DEPTH = 4,
-  // The defaults are the best settings found (RLAMC.md): a LAMC search at
-  // rollout plies 0 and 1 (bits 0 and 1), 4 rollouts a play, decisions
-  // cached. Unlike the best setting, rollouts that reach an empty bag play
-  // the game out (skip_finish off), which was weaker at equal time, and a
-  // recursive rollout plays 5 static plies after its play, not 1 (h=2 was
-  // no better at equal time with skip_finish on; with it on, h=5 cost no
-  // more than h=2 in two positions, RLAMC.md log 80).
+  // The defaults (RLAMC.md): a LAMC search at rollout plies 0 and 1 (bits 0
+  // and 1), 4 rollouts a play, decisions cached; rollouts that reach an empty
+  // bag play the game out (skip_finish off), and a recursive rollout plays 5
+  // static plies after its play. The best setting measured before the
+  // surrogate fix (RLAMC.md logs 78-80) had h=1 and the finish off; h=5 and
+  // the finish have not been gated since.
   RLAMC_DEFAULT_PLIES_MASK = 3,
   RLAMC_DEFAULT_CANDIDATES = 6,
   RLAMC_DEFAULT_SAMPLES = 4,

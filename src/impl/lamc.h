@@ -15,7 +15,8 @@
 //
 // Every play is embedded in a feature space (play_feature_registry.h). A pool
 // of plays spread over that space gets a few rollouts each; a Gaussian
-// process (gp.h) fit to their win percentages predicts the rest; the best
+// process (gp.h) fit to their utilities (the sim's: win% blended with spread)
+// predicts the rest; the best
 // plays by its prediction are kept, and the others are replaced by plays the
 // prediction favors. When the search settles, its best plays by prediction
 // are the sim's candidates, simulated as usual with what is left of the
@@ -58,9 +59,10 @@ int lamc_get_num_evaluated(const LamcCtx *ctx);
 // evaluated plays.
 int lamc_get_ranked_play(const LamcCtx *ctx, int rank);
 // Chooses up to count candidates after a search: the args' number of top
-// plays by static equity, then the best by the surrogate's mean among the
-// evaluated plays, or among all plays if the args say so. Returns how many it
-// chose.
+// plays by static equity, then the args' number of best exchanges, then the
+// best by selection score (the surrogate's mean plus final_z standard
+// deviations) among all plays, or among the evaluated plays if the args say
+// so. Returns how many it chose.
 int lamc_select_candidates(LamcCtx *ctx, const LamcArgs *args, int count);
 // The surrogate's mean at the built play play_idx after a search.
 double lamc_get_predicted_mean(LamcCtx *ctx, int play_idx);

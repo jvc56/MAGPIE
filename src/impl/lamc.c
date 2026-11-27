@@ -44,9 +44,9 @@ static const double
     lamc_length_scale_multiples[LAMC_NUM_LENGTH_SCALE_MULTIPLES] = {0.5, 1.0,
                                                                     2.0, 4.0};
 
-// Variance floor of a rollout's win percentage.
+// Variance floor of a rollout's utility (win% blended with spread).
 #define LAMC_MIN_ROLLOUT_VARIANCE 1e-4
-// A rollout's win percentage variance before any play has two samples.
+// A rollout's utility variance before any play has two samples.
 #define LAMC_DEFAULT_ROLLOUT_VARIANCE 0.1
 // Columns whose standard deviation across the plays is below this carry no
 // information and are zeroed.
@@ -498,7 +498,7 @@ static void lamc_fit_prior_mean(LamcCtx *ctx, const LamcArgs *args,
   }
 }
 
-// Fits the surrogate to the evaluated plays' win percentages, choosing the
+// Fits the surrogate to the evaluated plays' utilities, choosing the
 // length scale and signal variance by marginal likelihood, and ranks them by
 // its mean.
 static void lamc_fit(LamcCtx *ctx, const LamcArgs *args) {
@@ -1102,7 +1102,9 @@ const MoveList *lamc_choose_candidates(const SimArgs *sim_args,
   };
   const int rounds = lamc_search(ctx, args, ctx->explore_rvs, &limits);
 
-  // The candidates: the evaluated plays best by the surrogate's mean.
+  // The candidates: the top plays by static equity, then the best by
+  // selection score among all plays or the evaluated ones
+  // (lamc_select_candidates).
   const int num_finalists = limits.num_finalists;
   if (ctx->finalists_capacity < num_finalists) {
     move_list_destroy(ctx->finalists);

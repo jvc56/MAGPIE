@@ -1514,7 +1514,8 @@ static void add_lamc_rlamc_help_arg(arg_token_t arg_token, const char **usages,
             "the plays a simulation simulates. It embeds every play within "
             "lamcfloor points of the best in a space of features, samples a "
             "pool of them spread over that space with a few rollouts each, "
-            "and fits a Gaussian process from features to win percentage. "
+            "and fits a Gaussian process from features to utility (win% "
+            "blended with spread). "
             "Each round keeps the best plays by its prediction and replaces "
             "the others with plays it favors. The plays it predicts best "
             "are then simulated as usual with the rest of the iterations "
@@ -15059,7 +15060,6 @@ exec_mode_t get_exec_mode_type_from_name(const char *exec_mode_str) {
   return exec_mode;
 }
 
-// Assumes all args are parsed and correctly set in pargs.
 // LAMC off and rollout finishes on for both players, with LAMC's other
 // settings at their defaults.
 static void config_set_lamc_defaults(Config *config) {
@@ -15222,7 +15222,6 @@ static void config_load_lamc(Config *config, ErrorStack *error_stack) {
   }
 }
 
-// Loads -sbagcycle and the per-player -sbc1 and -sbc2, which default to it.
 // Loads the LAMC, recursive search, rollout finish and autoplay static bag
 // options (see config_load_data, which is at the function size limit).
 static void config_load_rollout_search(Config *config,
@@ -15263,6 +15262,8 @@ static void config_load_rollout_search(Config *config,
                   &config->sim_finish_bag, error_stack);
 }
 
+// Assumes all args are parsed and correctly set in pargs.
+// Loads -sbagcycle and the per-player -sbc1 and -sbc2, which default to it.
 static void config_load_sim_bag_cycle(Config *config, ErrorStack *error_stack) {
   config_load_bool(config, ARG_TOKEN_SIM_BAG_CYCLE, &config->sim_bag_cycle,
                    error_stack);
