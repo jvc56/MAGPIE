@@ -860,6 +860,31 @@ static void test_lamc_prior_slope_not_negative(void) {
   config_destroy(config);
 }
 
+// The pass's equity is a sentinel below every floor, yet it is a play the
+// search must be able to hand on.
+static void test_lamc_universe_keeps_pass(void) {
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -wmp true -s1 equity -s2 equity -r1 all -r2 all "
+      "-numplays 10 -plies 2 -threads 1 -iterations 1000 -scond none "
+      "-tlim 0 -seed 42 -sinfer false -lamc true -savesettings false "
+      "-hr false");
+  load_and_exec_config_or_die(config, "cgp " JOSH2_CGP);
+  load_and_exec_config_or_die(config, "gen");
+  SimArgs sim_args;
+  config_fill_sim_args(config, NULL, NULL, NULL, NULL, &sim_args);
+  LamcCtx *ctx = lamc_ctx_create();
+  const int num_plays = lamc_build(ctx, &sim_args);
+  const MoveList *universe = lamc_get_universe(ctx);
+  int passes = 0;
+  for (int play_idx = 0; play_idx < num_plays; play_idx++) {
+    passes += move_get_type(move_list_get_move(universe, play_idx)) ==
+              GAME_EVENT_PASS;
+  }
+  assert(passes == 1);
+  lamc_ctx_destroy(ctx);
+  config_destroy(config);
+}
+
 // A search stopped during its first round, as a stop request or a time
 // limit that runs out stops it: a play cut off before its first sample has
 // nothing to fit, so it must not count as evaluated. A stop already pending
@@ -1009,6 +1034,7 @@ void test_lamc(void) {
   test_play_feature_premium_leaves_covered_squares();
   test_lamc_time_cut_round();
   test_lamc_prior_slope_not_negative();
+  test_lamc_universe_keeps_pass();
   test_lamc_finds_planted_exchanges();
   test_lamc_sim_keeps_protected_play(false);
   test_lamc_sim_keeps_protected_play(true);

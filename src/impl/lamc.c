@@ -230,7 +230,7 @@ static void lamc_ctx_ensure_capacity(LamcCtx *ctx, const LamcArgs *args) {
 }
 
 // Generates every play into the universe, best by static equity first, and
-// keeps those within the equity floor of the best.
+// keeps those within the equity floor of the best, and the pass.
 static void lamc_build_universe(LamcCtx *ctx, const SimArgs *sim_args) {
   const Game *game = sim_args->game;
   const MoveGenArgs gen_args = {
@@ -256,6 +256,18 @@ static void lamc_build_universe(LamcCtx *ctx, const SimArgs *sim_args) {
   while (num_universe < count && move_get_equity(move_list_get_move(
                                      ctx->universe, num_universe)) >= floor) {
     num_universe++;
+  }
+  // The pass's equity is a sentinel below any floor, so it is kept apart
+  // from the floor, last.
+  for (int play_idx = num_universe; play_idx < count; play_idx++) {
+    if (move_get_type(move_list_get_move(ctx->universe, play_idx)) ==
+        GAME_EVENT_PASS) {
+      Move *pass = ctx->universe->moves[play_idx];
+      ctx->universe->moves[play_idx] = ctx->universe->moves[num_universe];
+      ctx->universe->moves[num_universe] = pass;
+      num_universe++;
+      break;
+    }
   }
   ctx->universe->count = num_universe;
   ctx->num_universe = num_universe;
