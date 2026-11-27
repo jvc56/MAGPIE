@@ -860,6 +860,50 @@ static void test_lamc_prior_slope_not_negative(void) {
   config_destroy(config);
 }
 
+static double lamc_test_low_static_mean(const Move __attribute__((unused)) *
+                                            move,
+                                        const int rank, const int num_plays,
+                                        const int static_finalists) {
+  if (rank < static_finalists) {
+    return 0.05;
+  }
+  return 0.5 - 0.3 * (double)rank / (double)num_plays;
+}
+
+// Refinement aims at the cut the candidates are chosen at: the score of the
+// last candidate chosen by score, after the places reserved for the top
+// static plays, which here sample worst and so would not be chosen by score.
+static void test_lamc_refine_cut(void) {
+  Config *config = NULL;
+  SimArgs sim_args;
+  LamcCtx *ctx =
+      lamc_test_planted_search(lamc_test_low_static_mean, &config, &sim_args);
+  const int count = LAMC_TEST_PLANTED_FINALISTS;
+  assert(count > sim_args.lamc_args.static_finalists);
+  const int num_static = sim_args.lamc_args.static_finalists;
+  assert(sim_args.lamc_args.final_z <= 0.0);
+  assert(sim_args.lamc_args.final_exchanges == 0);
+  double cut = 0.0;
+  assert(lamc_get_refine_cut(ctx, &sim_args.lamc_args, count, &cut));
+  // The (count - num_static)-th best predicted mean past the static plays,
+  // which here are none of the plays chosen by score.
+  const int num_plays = move_list_get_count(lamc_get_universe(ctx));
+  int above = 0;
+  int at_or_above = 0;
+  for (int play_idx = num_static; play_idx < num_plays; play_idx++) {
+    const double mean = lamc_get_predicted_mean(ctx, play_idx);
+    above += mean > cut + 1e-12;
+    at_or_above += mean >= cut - 1e-12;
+  }
+  assert(above < count - num_static);
+  assert(at_or_above >= count - num_static);
+  for (int play_idx = 0; play_idx < num_static; play_idx++) {
+    assert(lamc_get_predicted_mean(ctx, play_idx) < cut);
+  }
+  lamc_ctx_destroy(ctx);
+  config_destroy(config);
+}
+
 // The pass's equity is a sentinel below every floor, yet it is a play the
 // search must be able to hand on.
 static void test_lamc_universe_keeps_pass(void) {
@@ -1034,6 +1078,7 @@ void test_lamc(void) {
   test_play_feature_premium_leaves_covered_squares();
   test_lamc_time_cut_round();
   test_lamc_prior_slope_not_negative();
+  test_lamc_refine_cut();
   test_lamc_universe_keeps_pass();
   test_lamc_finds_planted_exchanges();
   test_lamc_sim_keeps_protected_play(false);

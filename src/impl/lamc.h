@@ -7,6 +7,7 @@
 #include "../ent/sim_results.h"
 #include "../ent/thread_control.h"
 #include "random_variable.h"
+#include <stdbool.h>
 #include <stdint.h>
 
 // Locally Adaptive Monte Carlo: chooses the plays a sim simulates by searching
@@ -64,6 +65,12 @@ int lamc_get_ranked_play(const LamcCtx *ctx, int rank);
 // deviations) among all plays, or among the evaluated plays if the args say
 // so. Returns how many it chose.
 int lamc_select_candidates(LamcCtx *ctx, const LamcArgs *args, int count);
+// The cut refinement aims at: the selection score of the last of count
+// candidates chosen by score, so the places reserved whatever their score
+// are left out. False if there is none: the candidates take every play, or
+// the reserved places take them all.
+bool lamc_get_refine_cut(LamcCtx *ctx, const LamcArgs *args, int count,
+                         double *cut);
 // The slope of the surrogate's prior mean in standardized static equity.
 double lamc_get_prior_slope(const LamcCtx *ctx);
 // The surrogate's mean at the built play play_idx after a search.

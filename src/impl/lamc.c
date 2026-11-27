@@ -115,6 +115,9 @@ struct LamcCtx {
   // mean_intercept + mean_slope * e; the process fits what is left.
   double mean_intercept;
   double mean_slope;
+  // How many of the candidates hold places reserved whatever their score:
+  // the top plays by static equity and the best exchanges.
+  int num_reserved_candidates;
   // Whether the last fit succeeded; if not, predictions are the prior mean.
   bool fitted;
   double gradient[PLAY_EMBEDDING_MAX_COLUMNS];
@@ -729,35 +732,16 @@ static double lamc_selection_score(LamcCtx *ctx, const LamcArgs *args,
 }
 
 // The next refinement pool (see LamcArgs.refine): the pool_size plays whose
-// surrogate means are fewest standard deviations from the cut, the
-// count-th best selection score. A play not yet evaluated takes a place
-// only while the surrogate has room for it. Returns the pool's size.
+// surrogate means are fewest standard deviations from the cut (see
+// lamc_get_refine_cut), leaving out the places reserved whatever their score.
+// A play not yet evaluated takes a place only while the surrogate has room
+// for it. Returns the pool's size.
 static int lamc_propose_refine(LamcCtx *ctx, const LamcArgs *args,
                                const int count) {
   const int num_universe = ctx->num_universe;
-  if (count <= 0 || num_universe <= count) {
-    return 0;
-  }
-  for (int play_idx = 0; play_idx < num_universe; play_idx++) {
-    ctx->universe_means[play_idx] = lamc_selection_score(ctx, args, play_idx);
-  }
-  // The cut: the count-th highest score, found by count passes of the
-  // highest score not yet taken.
-  for (int play_idx = 0; play_idx < num_universe; play_idx++) {
-    ctx->is_proposed[play_idx] = false;
-  }
   double cut = 0.0;
-  for (int rank = 0; rank < count; rank++) {
-    int best = -1;
-    for (int play_idx = 0; play_idx < num_universe; play_idx++) {
-      if (!ctx->is_proposed[play_idx] &&
-          (best < 0 ||
-           ctx->universe_means[play_idx] > ctx->universe_means[best])) {
-        best = play_idx;
-      }
-    }
-    ctx->is_proposed[best] = true;
-    cut = ctx->universe_means[best];
+  if (!lamc_get_refine_cut(ctx, args, count, &cut)) {
+    return 0;
   }
   // Each play's distance from the cut in standard deviations, in
   // min_distance.
@@ -770,6 +754,9 @@ static int lamc_propose_refine(LamcCtx *ctx, const LamcArgs *args,
         fabs(mean - cut) /
         (stdev > LAMC_MIN_COLUMN_STDEV ? stdev : LAMC_MIN_COLUMN_STDEV);
     ctx->is_proposed[play_idx] = false;
+  }
+  for (int rank = 0; rank < ctx->num_reserved_candidates; rank++) {
+    ctx->is_proposed[ctx->candidates[rank]] = true;
   }
   ctx->next_pool_count = 0;
   int new_plays = 0;
@@ -871,6 +858,7 @@ int lamc_select_candidates(LamcCtx *ctx, const LamcArgs *args,
     ctx->is_proposed[best] = true;
     ctx->candidates[num_candidates++] = best;
   }
+  ctx->num_reserved_candidates = num_candidates;
   if (!args->finalists_from_all) {
     if (args->final_z <= 0.0) {
       for (int rank = 0; rank < ctx->num_evaluated && num_candidates < count;
@@ -922,6 +910,19 @@ int lamc_select_candidates(LamcCtx *ctx, const LamcArgs *args,
     ctx->candidates[num_candidates++] = best;
   }
   return num_candidates;
+}
+
+bool lamc_get_refine_cut(LamcCtx *ctx, const LamcArgs *args, const int count,
+                         double *cut) {
+  if (count <= 0 || ctx->num_universe <= count) {
+    return false;
+  }
+  const int num_candidates = lamc_select_candidates(ctx, args, count);
+  if (num_candidates <= ctx->num_reserved_candidates) {
+    return false;
+  }
+  *cut = lamc_selection_score(ctx, args, ctx->candidates[num_candidates - 1]);
+  return true;
 }
 
 double lamc_get_prior_slope(const LamcCtx *ctx) { return ctx->mean_slope; }
