@@ -67,10 +67,12 @@
 #include "../src/ent/thread_control.h"
 #include "../src/ent/transposition_table.h"
 #include "../src/ent/win_pct.h"
+#include "../src/impl/autoplay.h"
 #include "../src/impl/autoplay_solvers.h"
 #include "../src/impl/cgp.h"
 #include "../src/impl/config.h"
 #include "../src/impl/gameplay.h"
+#include "../src/impl/lamc.h"
 #include "../src/impl/move_gen.h"
 #include "../src/impl/peg.h"
 #include "../src/impl/random_variable.h"
@@ -1393,6 +1395,80 @@ static void test_rlamc_standard_sim_pinned(void) {
   assert(hash == RLAMC_TEST_STANDARD_SIM_FINGERPRINT);
 }
 
+// What an autoplay run's searches did: LAMC searches and their rollouts,
+// recursive searches and their finishes from an empty bag.
+typedef struct RlamcTestAutoplayTotals {
+  uint64_t lamc_searches;
+  uint64_t lamc_rollouts;
+  uint64_t rlamc_searches;
+  uint64_t rlamc_finishes;
+} RlamcTestAutoplayTotals;
+
+// One game pair of autoplay with the players' settings players, both players
+// simming once the bag holds at most 7 tiles and playing static equity's
+// best before then. Every turn plays static equity's best
+// (autoplay_set_bench_static_move), so every run plays the same games
+// whatever the sims find.
+static RlamcTestAutoplayTotals rlamc_test_autoplay(const char *players) {
+  char *settings = get_formatted_string(
+      "set -lex CSW21 -wmp true -s1 equity -s2 equity -r1 all -r2 all "
+      "-threads 1 -pl1 2 -pl2 2 -numplays 3 -minplayiterations 5 -scond "
+      "none -tlim 0 -sinfer false -apstaticbag 7 -lamcpool 8 -lamcmaxbag 100 "
+      "-savesettings false -autosavegcg false -hr false %s",
+      players);
+  Config *config = config_create_or_die(settings);
+  free(settings);
+  lamc_totals_reset();
+  rlamc_totals_reset();
+  autoplay_set_bench_static_move(true);
+  load_and_exec_config_or_die(config, "autoplay games 1 -gp true -seed 5");
+  autoplay_set_bench_static_move(false);
+  const LamcTotals lamc_totals = lamc_get_totals();
+  const RlamcTotals rlamc_totals = rlamc_get_totals();
+  config_destroy(config);
+  const RlamcTestAutoplayTotals totals = {
+      .lamc_searches = lamc_totals.searches,
+      .lamc_rollouts = lamc_totals.explore_rollouts,
+      .rlamc_searches = rlamc_totals.searches,
+      .rlamc_finishes = rlamc_totals.finishes,
+  };
+  return totals;
+}
+
+// Every game-pair result for LAMC and recursive rollouts rests on each
+// player's settings (-lamc1/-lamc2, -rlamc1/-rlamc2, -sfinish1/-sfinish2)
+// reaching that player's sims, and only them, though both players' sims
+// share one context. One player has every option on and the other every
+// option off, and both sim, in games that are the same in every run (see
+// rlamc_test_autoplay). The searches happen, the recursive ones finish games
+// (which they do only with the finish on), and they happen on the turns of
+// the player with the options on alone: changing the other player's
+// iterations, which would change the searches of its turns, changes none.
+static void test_rlamc_autoplay_player_settings(void) {
+  const char *spec = "plies=0,lamc=0,k=2,m=1,h=1,dcache=0";
+  for (int on_idx = 0; on_idx < 2; on_idx++) {
+    const int off_idx = 1 - on_idx;
+    RlamcTestAutoplayTotals totals[2];
+    for (int run_idx = 0; run_idx < 2; run_idx++) {
+      char *players = get_formatted_string(
+          "-lamc%d true -rlamc%d %s -sfinish%d true -i%d 40 "
+          "-lamc%d false -rlamc%d off -sfinish%d false -i%d %d",
+          on_idx + 1, on_idx + 1, spec, on_idx + 1, on_idx + 1, off_idx + 1,
+          off_idx + 1, off_idx + 1, off_idx + 1, run_idx == 0 ? 40 : 70);
+      totals[run_idx] = rlamc_test_autoplay(players);
+      free(players);
+    }
+    assert(totals[0].lamc_searches > 0);
+    assert(totals[0].lamc_rollouts > 0);
+    assert(totals[0].rlamc_searches > 0);
+    assert(totals[0].rlamc_finishes > 0);
+    assert(totals[1].lamc_searches == totals[0].lamc_searches);
+    assert(totals[1].lamc_rollouts == totals[0].lamc_rollouts);
+    assert(totals[1].rlamc_searches == totals[0].rlamc_searches);
+    assert(totals[1].rlamc_finishes == totals[0].rlamc_finishes);
+  }
+}
+
 void test_rlamc(void) {
   test_rlamc_parse();
   test_rlamc_ended_rollout_scored_as_finish();
@@ -1403,6 +1479,7 @@ void test_rlamc(void) {
   test_rlamc_rollouts_redraw_other_rack();
   test_rlamc_searches_named_plies();
   test_rlamc_standard_sim_pinned();
+  test_rlamc_autoplay_player_settings();
   const char *const specs[] = {
       "off",
       "on",
