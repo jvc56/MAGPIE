@@ -5,6 +5,7 @@
 #include "../compat/memory_info.h"
 #include "../def/bai_defs.h"
 #include "../def/game_defs.h"
+#include "../def/game_history_defs.h"
 #include "../def/rack_defs.h"
 #include "../ent/alias_method.h"
 #include "../ent/bag.h"
@@ -620,6 +621,18 @@ void simmer_worker_destroy(SimmerWorker *simmer_worker) {
   free(simmer_worker);
 }
 
+// The tiles left in the bag once play, not yet played, has drawn: a tile
+// placement draws as many as it places, or all the bag has; an exchange or a
+// pass leaves the count as it is.
+static int bag_letters_after_play(const Bag *bag, const Move *play) {
+  const int bag_letters = bag_get_letters(bag);
+  if (move_get_type(play) != GAME_EVENT_TILE_PLACEMENT_MOVE) {
+    return bag_letters;
+  }
+  const int tiles_played = move_get_tiles_played(play);
+  return tiles_played < bag_letters ? bag_letters - tiles_played : 0;
+}
+
 // The value to the player of the tiles a play of theirs keeps, for a play
 // not yet played: the leave's value and its pool shift (see pool_shift.h), as
 // move generation values the play's leave. The shift is for the tiles the
@@ -756,10 +769,13 @@ static double sim_rollout(const Simmer *simmer, SimmerWorker *simmer_worker,
 
     // On the final ply the resulting cross-sets are never read (no further move
     // generation happens before game_unplay_last_move restores the board), so
-    // skip the cross-set update for that play.
+    // skip the cross-set update for that play, unless the finish below will
+    // generate moves after it: the bag it tests is the one this play's draw
+    // leaves.
     if (ply == plies - 1 &&
         !(simmer->finish_endgame &&
-          bag_get_letters(game_get_bag(game)) <= simmer->finish_max_bag)) {
+          bag_letters_after_play(game_get_bag(game), best_play) <=
+              simmer->finish_max_bag)) {
       play_move_no_cross_set_update(best_play, game, NULL);
     } else {
       play_move(best_play, game, NULL);
