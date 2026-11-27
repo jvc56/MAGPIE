@@ -64,6 +64,7 @@ enum {
   LAMC_TEST_GUARD_COLUMNS = 2,
   LAMC_TEST_GP_GRID = 6,
   LAMC_TEST_LIKELIHOOD_POINTS = 40,
+  LAMC_TEST_DIRECT_POINTS = 6,
   LAMC_TEST_TIME_CUT_SAMPLES = 64,
   LAMC_TEST_PLANTED_SAMPLES = 256,
   LAMC_TEST_BOUND_POINTS = 30,
@@ -202,6 +203,172 @@ static void test_gp_fit_by_likelihood(void) {
 static double lamc_test_uniform(uint64_t *state) {
   *state = *state * 6364136223846793005ULL + 1442695040888963407ULL;
   return (double)(*state >> 11) / 9007199254740992.0;
+}
+
+// The kernel of two one-dimensional points, written out here so the
+// likelihood below does not rest on gp.c's own kernel.
+static double lamc_test_kernel(const gp_kernel_t kernel,
+                               const double signal_variance,
+                               const double inverse_length,
+                               const double first_point,
+                               const double second_point) {
+  const double scaled = fabs(first_point - second_point) * inverse_length;
+  if (kernel == GP_KERNEL_SQUARED_EXPONENTIAL) {
+    return signal_variance * exp(-0.5 * scaled * scaled);
+  }
+  const double root5_scaled = sqrt(5.0) * scaled;
+  return signal_variance *
+         (1.0 + root5_scaled + (5.0 / 3.0) * scaled * scaled) *
+         exp(-root5_scaled);
+}
+
+// The log marginal likelihood of values at points under a Gaussian process
+// with the given kernel and prior mean, computed directly: with
+// A = K + diag(noise) and r = values - prior_mean,
+//   -0.5 r^T A^-1 r - 0.5 log |A| - n/2 log 2 pi,
+// A^-1 r and |A| by Gaussian elimination with partial pivoting.
+static double lamc_test_direct_likelihood(
+    const gp_kernel_t kernel, const double signal_variance,
+    const double inverse_length, const double prior_mean, const double *points,
+    const double *values, const double *noise, const int num_points) {
+  double matrix[LAMC_TEST_DIRECT_POINTS][LAMC_TEST_DIRECT_POINTS];
+  double residuals[LAMC_TEST_DIRECT_POINTS];
+  double solution[LAMC_TEST_DIRECT_POINTS];
+  for (int row = 0; row < num_points; row++) {
+    for (int col = 0; col < num_points; col++) {
+      matrix[row][col] = lamc_test_kernel(
+          kernel, signal_variance, inverse_length, points[row], points[col]);
+    }
+    matrix[row][row] += noise[row];
+    residuals[row] = values[row] - prior_mean;
+    solution[row] = residuals[row];
+  }
+  double log_determinant = 0.0;
+  for (int pivot = 0; pivot < num_points; pivot++) {
+    int best_row = pivot;
+    for (int row = pivot + 1; row < num_points; row++) {
+      if (fabs(matrix[row][pivot]) > fabs(matrix[best_row][pivot])) {
+        best_row = row;
+      }
+    }
+    if (best_row != pivot) {
+      for (int col = 0; col < num_points; col++) {
+        const double swapped = matrix[pivot][col];
+        matrix[pivot][col] = matrix[best_row][col];
+        matrix[best_row][col] = swapped;
+      }
+      const double swapped = solution[pivot];
+      solution[pivot] = solution[best_row];
+      solution[best_row] = swapped;
+    }
+    // A is positive definite, so its determinant is positive and the row
+    // swaps' signs cancel: the log of the pivots' absolute values sums to
+    // log |A|.
+    log_determinant += log(fabs(matrix[pivot][pivot]));
+    for (int row = pivot + 1; row < num_points; row++) {
+      const double factor = matrix[row][pivot] / matrix[pivot][pivot];
+      for (int col = pivot; col < num_points; col++) {
+        matrix[row][col] -= factor * matrix[pivot][col];
+      }
+      solution[row] -= factor * solution[pivot];
+    }
+  }
+  for (int row = num_points - 1; row >= 0; row--) {
+    double sum = solution[row];
+    for (int col = row + 1; col < num_points; col++) {
+      sum -= matrix[row][col] * solution[col];
+    }
+    solution[row] = sum / matrix[row][row];
+  }
+  double fit_term = 0.0;
+  for (int row = 0; row < num_points; row++) {
+    fit_term += residuals[row] * solution[row];
+  }
+  return -0.5 * fit_term - 0.5 * log_determinant -
+         0.5 * num_points * log(2.0 * acos(-1.0));
+}
+
+// gp_fit_by_likelihood chooses its hyperparameters by the log marginal
+// likelihood that gp_fit computes, so that likelihood must be the true one:
+// its fit term and its log-determinant term, which keeps the likelihood
+// from always preferring the largest signal variance, and its constant.
+// Checked against a direct computation, for both kernels and a spread of
+// signal variances, length scales and noise.
+static void test_gp_log_marginal_likelihood(void) {
+  const double points[LAMC_TEST_DIRECT_POINTS] = {0.0, 0.7, 1.5, 2.2, 3.9, 4.4};
+  const double values[LAMC_TEST_DIRECT_POINTS] = {0.62, 0.48, 0.55,
+                                                  0.31, 0.70, 0.66};
+  const double noise[LAMC_TEST_DIRECT_POINTS] = {0.01, 0.03,  0.002,
+                                                 0.02, 0.015, 0.05};
+  const gp_kernel_t kernels[2] = {GP_KERNEL_MATERN52,
+                                  GP_KERNEL_SQUARED_EXPONENTIAL};
+  const double signal_variances[3] = {1e-4, 0.01, 0.1};
+  const double inverse_lengths[2] = {0.4, 1.7};
+  GaussianProcess *gp = gp_create(LAMC_TEST_DIRECT_POINTS, 1);
+  for (int kernel_idx = 0; kernel_idx < 2; kernel_idx++) {
+    for (int signal_idx = 0; signal_idx < 3; signal_idx++) {
+      for (int length_idx = 0; length_idx < 2; length_idx++) {
+        const GaussianProcessParams params = {
+            .kernel = kernels[kernel_idx],
+            .inverse_length_scales = &inverse_lengths[length_idx],
+            .signal_variance = signal_variances[signal_idx],
+            .prior_mean = 0.5,
+        };
+        assert(gp_fit(gp, &params, points, values, noise,
+                      LAMC_TEST_DIRECT_POINTS));
+        const double expected = lamc_test_direct_likelihood(
+            kernels[kernel_idx], signal_variances[signal_idx],
+            inverse_lengths[length_idx], 0.5, points, values, noise,
+            LAMC_TEST_DIRECT_POINTS);
+        assert(fabs(gp_get_log_marginal_likelihood(gp) - expected) <
+               1e-9 * (1.0 + fabs(expected)));
+      }
+    }
+  }
+  gp_destroy(gp);
+}
+
+// Values that are only noise about the prior mean: the likelihood must
+// prefer a small signal variance, so the fit shrinks every prediction to
+// the prior mean instead of following each value's noise. A likelihood that
+// always preferred the largest signal variance would predict about each
+// noisy value at its own point.
+static void test_gp_fit_by_likelihood_on_noise(void) {
+  GaussianProcess *gp = gp_create(LAMC_TEST_LIKELIHOOD_POINTS, 1);
+  double points[LAMC_TEST_LIKELIHOOD_POINTS];
+  double values[LAMC_TEST_LIKELIHOOD_POINTS];
+  double noise[LAMC_TEST_LIKELIHOOD_POINTS];
+  uint64_t state = 2024;
+  const double prior_mean = 0.5;
+  // Uniform noise on [-0.245, 0.245] has a variance of 0.02.
+  const double noise_variance = 0.02;
+  const double half_width = sqrt(3.0 * noise_variance);
+  for (int point_idx = 0; point_idx < LAMC_TEST_LIKELIHOOD_POINTS;
+       point_idx++) {
+    points[point_idx] = point_idx;
+    values[point_idx] =
+        prior_mean + (2.0 * lamc_test_uniform(&state) - 1.0) * half_width;
+    noise[point_idx] = noise_variance;
+  }
+  const double unit_scale[1] = {1.0};
+  const double multiples[3] = {1.0, 2.0, 4.0};
+  assert(gp_fit_by_likelihood(gp, GP_KERNEL_MATERN52, prior_mean, unit_scale,
+                              multiples, 3, points, values, noise,
+                              LAMC_TEST_LIKELIHOOD_POINTS));
+  double largest_shift = 0.0;
+  for (int point_idx = 0; point_idx < LAMC_TEST_LIKELIHOOD_POINTS;
+       point_idx++) {
+    double mean;
+    gp_predict(gp, &points[point_idx], &mean, NULL);
+    if (fabs(mean - prior_mean) > largest_shift) {
+      largest_shift = fabs(mean - prior_mean);
+    }
+  }
+  // The noise moves values by up to 0.245. The fit moves no prediction by
+  // more than about 0.02; one at the largest signal variance, which follows
+  // the noise, moves some by about 0.2.
+  assert(largest_shift < 0.1);
+  gp_destroy(gp);
 }
 
 // gp_get_bounds bounds the posterior mean and variance at every point; the
@@ -1147,6 +1314,8 @@ void test_lamc(void) {
   test_gp_kernel(GP_KERNEL_MATERN52);
   test_gp_kernel(GP_KERNEL_SQUARED_EXPONENTIAL);
   test_gp_fit_by_likelihood();
+  test_gp_log_marginal_likelihood();
+  test_gp_fit_by_likelihood_on_noise();
   test_gp_bounds();
   test_play_features();
   test_play_feature_pass_with_empty_bag();
