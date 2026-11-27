@@ -64,6 +64,7 @@
 #include "../src/ent/stats.h"
 #include "../src/ent/thread_control.h"
 #include "../src/ent/transposition_table.h"
+#include "../src/ent/win_pct.h"
 #include "../src/impl/autoplay_solvers.h"
 #include "../src/impl/cgp.h"
 #include "../src/impl/config.h"
@@ -100,7 +101,16 @@ enum {
   RCR_METHOD_B = 1,
   RCR_METHOD_CONT = 2,
   RCR_MAX_TURNS = 200,
+  // The most plays a reference depth 1 rollout makes, its candidate's
+  // included, before it finishes the game.
+  RLAMC_TEST_MAX_ROLLOUT_PLAYS = 24,
+  // The most plays a reference finish makes.
+  RLAMC_TEST_FINISH_MAX_PLIES = 40,
 };
+
+// How near the gap between two depth 1 candidates' values a switch margin
+// must be to find it.
+static const double RLAMC_TEST_GAP_TOLERANCE = 1e-9;
 
 // The share of memory the continuations' endgame table takes.
 static const double RCR_TT_FRACTION = 0.04;
@@ -907,11 +917,282 @@ static void test_rlamc_parse(void) {
   error_stack_destroy(error_stack);
 }
 
+// A top-2 recursive search of one position, for the depth 1 rollout checks
+// below. Its candidates are the two plays of highest static equity, and with
+// one sample each, it chooses the second when the second's rollout value
+// less the first's exceeds the switch margin: setting the margin on either
+// side of a value reveals whether the gap between the two rollouts is that
+// value.
+typedef struct RlamcTestGapProbe {
+  Config *config;
+  // The config's game.
+  const Game *game;
+  RlamcEval eval;
+  RlamcArgs args;
+  CrossSetCache *cross_set_cache;
+  RlamcWorker *worker;
+  Move top_two[2];
+} RlamcTestGapProbe;
+
+// The two plays of highest static equity of the player on turn in game, in
+// the order a top-2 recursive search takes them as its candidates.
+static void rlamc_test_top_two(const Game *game, Move *top_two) {
+  MoveList *move_list = move_list_create(2);
+  const MoveGenArgs gen_args = {
+      .game = game,
+      .move_list = move_list,
+      .move_record_type = MOVE_RECORD_ALL,
+      .move_sort_type = MOVE_SORT_EQUITY,
+      .override_kwg = NULL,
+      .eq_margin_movegen = 0,
+      .target_equity = EQUITY_MAX_VALUE,
+  };
+  generate_moves(&gen_args);
+  move_list_sort_moves(move_list);
+  assert(move_list_get_count(move_list) == 2);
+  move_copy(&top_two[0], move_list_get_move(move_list, 0));
+  move_copy(&top_two[1], move_list_get_move(move_list, 1));
+  move_list_destroy(move_list);
+}
+
+// A probe of the position of cgp (a cgp command), whose search has the
+// horizon and finish setting given. Rollouts are scored with the sim's
+// default win% table and a spread weight, so both terms of the utility
+// count.
+static void rlamc_test_gap_probe_create(RlamcTestGapProbe *probe,
+                                        const char *cgp, const int horizon,
+                                        const bool finish) {
+  probe->config = config_create_or_die(
+      "set -wmp true -s1 equity -s2 equity -r1 all -r2 all -threads 1 "
+      "-savesettings false -hr false");
+  load_and_exec_config_or_die(probe->config, cgp);
+  ErrorStack *error_stack = error_stack_create();
+  config_load_win_pcts(probe->config, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  char *spec = get_formatted_string(
+      "plies=0,lamc=0,k=2,m=1,h=%d,margin=1000,fin=%d,dcache=0", horizon,
+      finish ? 1 : 0);
+  rlamc_args_parse(spec, &probe->args, error_stack);
+  free(spec);
+  assert(error_stack_is_empty(error_stack));
+  error_stack_destroy(error_stack);
+  probe->game = config_get_game(probe->config);
+  probe->eval = (RlamcEval){
+      .win_pcts = config_get_win_pcts(probe->config),
+      .utility_w_winpct = 1.0,
+      .utility_w_spread = 0.5,
+      .utility_spread_scale = 100.0,
+      .finish_endgame = true,
+      .finish_max_bag = 0,
+  };
+  probe->cross_set_cache = cross_set_cache_create(16);
+  probe->worker = rlamc_worker_create(probe->game, probe->cross_set_cache);
+  rlamc_worker_reset(probe->worker, 12345);
+  rlamc_test_top_two(probe->game, probe->top_two);
+}
+
+static void rlamc_test_gap_probe_destroy(RlamcTestGapProbe *probe) {
+  rlamc_worker_destroy(probe->worker);
+  cross_set_cache_destroy(probe->cross_set_cache);
+  config_destroy(probe->config);
+}
+
+// Whether the probe's search with seed chooses its second candidate, with
+// the switch margin switch_margin.
+static bool rlamc_test_picks_second(RlamcTestGapProbe *probe,
+                                    const uint64_t seed,
+                                    const double switch_margin) {
+  probe->args.levels[0].switch_margin = switch_margin;
+  const Move *chosen = rlamc_choose_move(probe->worker, &probe->args,
+                                         &probe->eval, probe->game, seed, NULL);
+  if (compare_moves_without_equity(chosen, &probe->top_two[1], true) == -1) {
+    return true;
+  }
+  assert(compare_moves_without_equity(chosen, &probe->top_two[0], true) == -1);
+  return false;
+}
+
+// Whether, in the probe's search with seed, the second candidate's rollout
+// value less the first's is expected, to within RLAMC_TEST_GAP_TOLERANCE.
+static bool rlamc_test_gap_is(RlamcTestGapProbe *probe, const uint64_t seed,
+                              const double expected) {
+  return rlamc_test_picks_second(probe, seed,
+                                 expected - RLAMC_TEST_GAP_TOLERANCE) &&
+         !rlamc_test_picks_second(probe, seed,
+                                  expected + RLAMC_TEST_GAP_TOLERANCE);
+}
+
+// The utility for the player on turn in base (the mover) of a depth 1
+// rollout of candidate, computed here as the sim scores its own rollouts,
+// with nothing from rlamc.c. The other player's rack is other_rack, drawn
+// from the bag, when it is not NULL. The rollout plays the candidate, then
+// horizon top static plays, then with finish and an empty bag top static
+// plays to the end of the game. A game that ends is scored by its result
+// and final spread for the mover. One that does not is scored by the win%
+// table at the spread plus the leaves the last two plays keep, each with
+// the sign of the player who keeps it, looked up from the view of the
+// player on turn and turned to the mover's, blended with that spread plus
+// leaves. Sets *final_spread to the mover's spread where the rollout stops
+// and *ended to whether the game ended.
+static double rlamc_test_rollout_value(const Game *base, const RlamcEval *eval,
+                                       const Move *candidate, const int horizon,
+                                       const bool finish,
+                                       const Rack *other_rack,
+                                       Equity *final_spread, bool *ended) {
+  Game *game = game_duplicate(base);
+  const int mover = game_get_player_on_turn_index(game);
+  if (other_rack != NULL) {
+    set_random_rack(game, 1 - mover, other_rack);
+  }
+  MoveList *move_list = move_list_create(1);
+  Equity leaves[RLAMC_TEST_MAX_ROLLOUT_PLAYS];
+  int players[RLAMC_TEST_MAX_ROLLOUT_PLAYS];
+  int num_plays = 0;
+  leaves[num_plays] = get_leftover_value_for_move(game, mover, candidate);
+  players[num_plays++] = mover;
+  play_move(candidate, game, NULL);
+  for (int ply = 0; ply < horizon && !game_over(game); ply++) {
+    const int on_turn = game_get_player_on_turn_index(game);
+    const Move *play = get_top_equity_move(game, move_list);
+    leaves[num_plays] = get_leftover_value_for_move(game, on_turn, play);
+    players[num_plays++] = on_turn;
+    play_move(play, game, NULL);
+  }
+  if (finish && bag_get_letters(game_get_bag(game)) == 0) {
+    for (int ply = 0; ply < RLAMC_TEST_FINISH_MAX_PLIES && !game_over(game);
+         ply++) {
+      play_move(get_top_equity_move(game, move_list), game, NULL);
+    }
+  }
+  const Equity spread = player_get_score(game_get_player(game, mover)) -
+                        player_get_score(game_get_player(game, 1 - mover));
+  double value = 0.0;
+  *ended = game_over(game);
+  if (*ended) {
+    double win_pct = 0.5;
+    if (spread != 0) {
+      win_pct = spread > 0 ? 1.0 : 0.0;
+    }
+    value =
+        sim_utility_blend(win_pct, spread, eval->utility_w_winpct,
+                          eval->utility_w_spread, eval->utility_spread_scale);
+  } else {
+    Equity leftover = 0;
+    for (int play_idx = num_plays >= 2 ? num_plays - 2 : 0;
+         play_idx < num_plays; play_idx++) {
+      leftover +=
+          players[play_idx] == mover ? leaves[play_idx] : -leaves[play_idx];
+    }
+    const int on_turn = game_get_player_on_turn_index(game);
+    const Equity on_turn_spread =
+        on_turn == mover ? spread + leftover : -(spread + leftover);
+    double win_pct = (double)win_pct_get(
+        eval->win_pcts, (int)lround(equity_to_double(on_turn_spread)),
+        (unsigned int)bag_get_letters(game_get_bag(game)),
+        (unsigned int)rack_get_total_letters(
+            player_get_rack(game_get_player(game, on_turn))),
+        (unsigned int)rack_get_total_letters(
+            player_get_rack(game_get_player(game, 1 - on_turn))));
+    if (on_turn != mover) {
+      win_pct = 1.0 - win_pct;
+    }
+    value =
+        sim_utility_blend(win_pct, spread + leftover, eval->utility_w_winpct,
+                          eval->utility_w_spread, eval->utility_spread_scale);
+  }
+  *final_spread = spread;
+  move_list_destroy(move_list);
+  game_destroy(game);
+  return value;
+}
+
+// The gap between the probe's second and first candidates' reference
+// rollout values (rlamc_test_rollout_value), with the other player's rack
+// other_rack if it is not NULL. Asserts that both rollouts end the game, or
+// that neither does, as ended says, and gives their final spreads in
+// final_spreads if it is not NULL.
+static double rlamc_test_reference_gap(const RlamcTestGapProbe *probe,
+                                       const Rack *other_rack, const bool ended,
+                                       Equity *final_spreads) {
+  const RlamcLevel *level = &probe->args.levels[0];
+  double values[2];
+  for (int cand_idx = 0; cand_idx < 2; cand_idx++) {
+    Equity spread = 0;
+    bool game_ended = false;
+    values[cand_idx] = rlamc_test_rollout_value(
+        probe->game, &probe->eval, &probe->top_two[cand_idx],
+        level->horizon_plies, !level->skip_finish, other_rack, &spread,
+        &game_ended);
+    assert(game_ended == ended);
+    if (final_spreads != NULL) {
+      final_spreads[cand_idx] = spread;
+    }
+  }
+  return values[1] - values[0];
+}
+
+// The value of a depth 1 rollout that stops at its horizon (fin=0), from an
+// empty bag so that no draw is random: the win% table at the spread plus the
+// leaves the last two plays keep, each with the sign of the player who keeps
+// it, looked up from the view of the player on turn and turned to the
+// mover's. With h=1 the rollout stops with the mover on turn, with h=2 with
+// the other player on turn. Checked against rlamc_test_rollout_value.
+static void test_rlamc_unfinished_rollout_values(void) {
+  const char *const cgps[2] = {
+      "cgp 14C/13QI/12FIE/10VEE1R/9KIT2G/8CIG1IDE/8UTA2AS/7ST1SYPh1/6JA5A1/"
+      "5WOLD2BOBA/3PLOT1R1NU1EX/Y1VEIN1NOR1mOA1/UT1AT1N1L2FEH1/GUR2WIRER5/"
+      "SNEEZED8 ADENOOO/AHIILMM 353/236 0 -lex CSW21",
+      "cgp 15/15/15/15/14C/3L5YUAN1A/2JOW1DOYENnE1R/R2PIXIE1HI1WAB/"
+      "EF2GUV3T3O/GI5O1FAQIRs/IN1ROOTSIER4/S4KAM2DE3/T1BEE2OPUSCLES/"
+      "EMIT1DALI2O1HA/RUNAGATE3D2Z ENNTV/L 406/476 0 -lex CSW21",
+  };
+  for (int cgp_idx = 0; cgp_idx < 2; cgp_idx++) {
+    for (int horizon = 1; horizon <= 2; horizon++) {
+      RlamcTestGapProbe probe;
+      rlamc_test_gap_probe_create(&probe, cgps[cgp_idx], horizon, false);
+      assert(bag_get_letters(game_get_bag(probe.game)) == 0);
+      const double gap = rlamc_test_reference_gap(&probe, NULL, false, NULL);
+      assert(rlamc_test_gap_is(&probe, 1, gap));
+      rlamc_test_gap_probe_destroy(&probe);
+    }
+  }
+}
+
+// The value of a depth 1 rollout that ends the game: its result for the
+// mover, a win as 1 and a loss as 0, blended with its final spread, whether
+// the game ends in its finish (h=0,fin=1) or inside its horizon (h=16,fin=0).
+// From an empty bag, where the mover's top static play wins the game played
+// out and the second loses it, so a result scored from the wrong side would
+// show. Checked against rlamc_test_rollout_value.
+static void test_rlamc_ended_rollout_values(void) {
+  const char *cgp =
+      "cgp 9A1PIXY/9S1L3/2ToWNLETS1O3/9U1DA1R/3GERANIAL1U1I/9g2T1C/8WE2OBI/"
+      "6EMU4ON/6AID3GO1/5HUN4ET1/4ZA1T4ME1/1Q1FAKEY3JOES/FIVE1E5IT1C/"
+      "5SPORRAN2A/6ORE2N2D BGIV/DEHILOR 384/389 0 -lex NWL20";
+  const int horizons[2] = {0, 16};
+  const bool finishes[2] = {true, false};
+  for (int setting_idx = 0; setting_idx < 2; setting_idx++) {
+    RlamcTestGapProbe probe;
+    rlamc_test_gap_probe_create(&probe, cgp, horizons[setting_idx],
+                                finishes[setting_idx]);
+    assert(bag_get_letters(game_get_bag(probe.game)) == 0);
+    Equity final_spreads[2];
+    const double gap =
+        rlamc_test_reference_gap(&probe, NULL, true, final_spreads);
+    assert(final_spreads[0] != 0 && final_spreads[1] != 0);
+    assert((final_spreads[0] > 0) != (final_spreads[1] > 0));
+    assert(rlamc_test_gap_is(&probe, 1, gap));
+    rlamc_test_gap_probe_destroy(&probe);
+  }
+}
+
 void test_rlamc(void) {
   test_rlamc_parse();
   test_rlamc_ended_rollout_scored_as_finish();
   test_rlamc_late_game_caches();
   test_rlamc_reused_sim_ctx();
+  test_rlamc_unfinished_rollout_values();
+  test_rlamc_ended_rollout_values();
   const char *const specs[] = {
       "off",
       "on",
