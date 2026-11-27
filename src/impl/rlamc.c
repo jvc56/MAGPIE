@@ -1451,8 +1451,14 @@ static bool rlamc_fit(RlamcWorker *worker, const RlamcLevel *args,
         weight * equity_diff * (worker->gp_values[eval_idx] - value_mean);
     equity_variance += weight * equity_diff * equity_diff;
   }
-  worker->mean_slope =
-      equity_variance > 0.0 ? covariance / equity_variance : 0.0;
+  // Static equity is evidence of a play's value, not against it: the line's
+  // slope is at least 0. A negative slope, fit to the noise of a few
+  // samples, would rank the plays lowest by static equity best, and the
+  // search would sample and choose those. Least squares under that
+  // constraint gives a flat line at the weighted mean.
+  worker->mean_slope = equity_variance > 0.0 && covariance > 0.0
+                           ? covariance / equity_variance
+                           : 0.0;
   worker->mean_intercept = value_mean - worker->mean_slope * equity_mean;
   for (int eval_idx = 0; eval_idx < num_evaluated; eval_idx++) {
     worker->gp_values[eval_idx] -=
@@ -1515,10 +1521,8 @@ static bool rlamc_decided(RlamcWorker *worker, const int num_columns,
   double excess =
       mean_bound + stop_z * sqrt(variance_bound > 0.0 ? variance_bound : 0.0);
   excess += RLAMC_BOUND_SLACK * (1.0 + fabs(excess));
-  const bool ascending = worker->mean_slope < 0.0;
   for (int rank = 0; rank < count; rank++) {
-    const int play_idx =
-        worker->equity_order[ascending ? count - 1 - rank : rank].play_idx;
+    const int play_idx = worker->equity_order[rank].play_idx;
     if (play_idx == best) {
       continue;
     }
@@ -1607,10 +1611,8 @@ static void rlamc_set_upper_bounds(RlamcWorker *worker, const RlamcLevel *args,
   int num_top = 0;
   const int kept_top =
       wanted < RLAMC_MAX_POOL_SIZE ? wanted : RLAMC_MAX_POOL_SIZE;
-  const bool ascending = worker->mean_slope < 0.0;
   for (int rank = 0; rank < count; rank++) {
-    const int play_idx =
-        worker->equity_order[ascending ? count - 1 - rank : rank].play_idx;
+    const int play_idx = worker->equity_order[rank].play_idx;
     if (worker->play_counts[play_idx] > 0) {
       continue;
     }
