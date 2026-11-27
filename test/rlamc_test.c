@@ -698,9 +698,10 @@ static void test_rlamc_late_game_caches(void) {
   }
 }
 
-// A sim reuses its context (SimCtx, the LAMC and RLAMC workers and caches)
-// across positions: a sim of one position after another, in the same
-// lexicon and from the same seed, must equal a sim of it alone.
+// A sim context reused from a sim of another position must give what a
+// fresh one gives: the LAMC and RLAMC state it carries is reset. The context
+// is passed to the sim directly, since the CLI's sim command makes a new one
+// each time.
 static void test_rlamc_reused_sim_ctx(void) {
   const char *settings =
       "set -wmp true -s1 equity -s2 equity -r1 all -r2 all -numplays 5 "
@@ -715,17 +716,23 @@ static void test_rlamc_reused_sim_ctx(void) {
   uint64_t hashes[2];
   for (int run_idx = 0; run_idx < 2; run_idx++) {
     Config *config = config_create_or_die(settings);
+    ErrorStack *error_stack = error_stack_create();
+    SimCtx *sim_ctx = NULL;
+    SimResults *sim_results = config_get_sim_results(config);
     if (run_idx == 1) {
       load_and_exec_config_or_die(config, first);
       load_and_exec_config_or_die(config, "gen");
-      load_and_exec_config_or_die(config, "sim");
+      config_simulate(config, &sim_ctx, NULL, sim_results, NULL, 0,
+                      error_stack);
+      assert(error_stack_is_empty(error_stack));
+      assert(sim_ctx != NULL);
     }
     load_and_exec_config_or_die(config, second);
     load_and_exec_config_or_die(config, "gen");
     // Every command advances the seed; both sims start from the same one.
     load_and_exec_config_or_die(config, "set -seed 42");
-    load_and_exec_config_or_die(config, "sim");
-    const SimResults *sim_results = config_get_sim_results(config);
+    config_simulate(config, &sim_ctx, NULL, sim_results, NULL, 0, error_stack);
+    assert(error_stack_is_empty(error_stack));
     uint64_t hash = FNV_64_OFFSET_BASIS;
     const int num_plays = sim_results_get_number_of_plays(sim_results);
     for (int play_idx = 0; play_idx < num_plays; play_idx++) {
@@ -739,6 +746,8 @@ static void test_rlamc_reused_sim_ctx(void) {
           hash, stat_get_num_samples(simmed_play_get_equity_stat(simmed_play)));
     }
     hashes[run_idx] = hash;
+    sim_ctx_destroy(sim_ctx);
+    error_stack_destroy(error_stack);
     config_destroy(config);
   }
   assert(hashes[0] == hashes[1]);
