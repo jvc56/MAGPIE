@@ -262,15 +262,29 @@ static void lamc_build_universe(LamcCtx *ctx, const SimArgs *sim_args) {
   }
   // The pass's equity is a sentinel below any floor, so it is kept apart
   // from the floor, last.
-  for (int play_idx = num_universe; play_idx < count; play_idx++) {
+  int pass_idx = -1;
+  for (int play_idx = 0; play_idx < count; play_idx++) {
     if (move_get_type(move_list_get_move(ctx->universe, play_idx)) ==
         GAME_EVENT_PASS) {
-      Move *pass = ctx->universe->moves[play_idx];
-      ctx->universe->moves[play_idx] = ctx->universe->moves[num_universe];
-      ctx->universe->moves[num_universe] = pass;
-      num_universe++;
+      pass_idx = play_idx;
       break;
     }
+  }
+  if (pass_idx >= num_universe) {
+    Move *pass = ctx->universe->moves[pass_idx];
+    ctx->universe->moves[pass_idx] = ctx->universe->moves[num_universe];
+    ctx->universe->moves[num_universe] = pass;
+    num_universe++;
+  } else if (pass_idx < 0) {
+    // A universe filled to -lamcuniverse drops the play of lowest equity
+    // as each play past its capacity is generated, and the pass, generated
+    // last, is that play. It takes the place of a play below the floor, or
+    // of the last play kept.
+    if (num_universe == count) {
+      num_universe--;
+    }
+    move_set_as_pass(ctx->universe->moves[num_universe]);
+    num_universe++;
   }
   ctx->universe->count = num_universe;
   ctx->num_universe = num_universe;

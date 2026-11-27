@@ -593,7 +593,14 @@ static void rlamc_generate_candidates(RlamcWorker *worker,
     return;
   }
   if (args->lamc_search) {
-    // rlamc_choose_lamc searches the plays as generated.
+    // rlamc_choose_lamc searches the plays as generated. A list filled to
+    // its capacity drops the play of lowest equity as each play past it is
+    // generated, and the pass, generated last, is that play, so it takes the
+    // place of the last play.
+    const Move *last = move_list_get_move(worker->candidate_list, count - 1);
+    if (count == capacity && move_get_type(last) != GAME_EVENT_PASS) {
+      move_set_as_pass(worker->candidate_list->moves[count - 1]);
+    }
     return;
   }
   if (args->universe > 0) {

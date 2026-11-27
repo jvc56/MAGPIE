@@ -964,19 +964,24 @@ static void test_lamc_refine_cut(void) {
 }
 
 // The pass's equity is a sentinel below every floor, yet it is a play the
-// search must be able to hand on.
-static void test_lamc_universe_keeps_pass(void) {
-  Config *config = config_create_or_die(
+// search must be able to hand on, also when -lamcuniverse caps the plays
+// generated and the pass, generated last, falls off the full list.
+static void lamc_test_universe_pass(const char *extra, const int max_plays) {
+  char *settings = get_formatted_string(
       "set -lex CSW21 -wmp true -s1 equity -s2 equity -r1 all -r2 all "
       "-numplays 10 -plies 2 -threads 1 -iterations 1000 -scond none "
       "-tlim 0 -seed 42 -sinfer false -lamc true -savesettings false "
-      "-hr false");
+      "-hr false %s",
+      extra);
+  Config *config = config_create_or_die(settings);
+  free(settings);
   load_and_exec_config_or_die(config, "cgp " JOSH2_CGP);
   load_and_exec_config_or_die(config, "gen");
   SimArgs sim_args;
   config_fill_sim_args(config, NULL, NULL, NULL, NULL, &sim_args);
   LamcCtx *ctx = lamc_ctx_create();
   const int num_plays = lamc_build(ctx, &sim_args);
+  assert(num_plays <= max_plays);
   const MoveList *universe = lamc_get_universe(ctx);
   int passes = 0;
   for (int play_idx = 0; play_idx < num_plays; play_idx++) {
@@ -986,6 +991,14 @@ static void test_lamc_universe_keeps_pass(void) {
   assert(passes == 1);
   lamc_ctx_destroy(ctx);
   config_destroy(config);
+}
+
+static void test_lamc_universe_keeps_pass(void) {
+  lamc_test_universe_pass("", 100000);
+  // Every play within the floor, and fewer places than plays.
+  lamc_test_universe_pass("-lamcuniverse 50 -lamcfloor 1000", 50);
+  // The floor below the cap.
+  lamc_test_universe_pass("-lamcuniverse 400 -lamcfloor 5", 400);
 }
 
 // A search stopped during its first round, as a stop request or a time
