@@ -61,6 +61,12 @@ struct SimCtx {
   LamcCtx *lamc_ctx;
   // The finalists of a two-stage recursive sim (see RlamcArgs.finalists).
   MoveList *rlamc_finalists;
+  // The plays simulated after the sim replaced its move list, with the plays
+  // it protects from pruning, and their indices there (see
+  // sim_protect_plays).
+  MoveList *protected_plays;
+  int *protected_indices;
+  int protected_capacity;
 };
 
 void sim_ctx_destroy(SimCtx *sim_ctx) {
@@ -71,6 +77,8 @@ void sim_ctx_destroy(SimCtx *sim_ctx) {
   inference_ctx_destroy(sim_ctx->inference_ctx);
   lamc_ctx_destroy(sim_ctx->lamc_ctx);
   move_list_destroy(sim_ctx->rlamc_finalists);
+  move_list_destroy(sim_ctx->protected_plays);
+  free(sim_ctx->protected_indices);
   free(sim_ctx);
 }
 
@@ -146,6 +154,65 @@ static void sim_collect_finalists(SimResults *sim_results, const int count,
   move_list_sort_moves(*finalists);
 }
 
+// When the sim simulates plays other than original, its move list, as after
+// a LAMC search or in a two-stage sim's second stage: returns plays with
+// every play of original that bai_options protects from pruning (its
+// arm_avoid_prune, indices into original), adding those plays lacks, and
+// points the protection at their indices in the result. Returns plays itself
+// when nothing is protected.
+static const MoveList *sim_protect_plays(SimArgs *sim_args, SimCtx *sim_ctx,
+                                         const MoveList *original,
+                                         const MoveList *plays) {
+  const int num_protected = sim_args->bai_options.num_arm_avoid_prune;
+  if (num_protected == 0) {
+    return plays;
+  }
+  const int num_plays = move_list_get_count(plays);
+  const int capacity = num_plays + num_protected;
+  if (sim_ctx->protected_capacity < capacity) {
+    move_list_destroy(sim_ctx->protected_plays);
+    free(sim_ctx->protected_indices);
+    sim_ctx->protected_plays = move_list_create(capacity);
+    sim_ctx->protected_indices = malloc_or_die(sizeof(int) * num_protected);
+    sim_ctx->protected_capacity = capacity;
+  }
+  MoveList *protected_plays = sim_ctx->protected_plays;
+  move_list_reset(protected_plays);
+  for (int play_idx = 0; play_idx < num_plays; play_idx++) {
+    move_list_add_move(protected_plays, move_list_get_move(plays, play_idx));
+  }
+  for (int protected_idx = 0; protected_idx < num_protected; protected_idx++) {
+    const Move *protected_play = move_list_get_move(
+        original, sim_args->bai_options.arm_avoid_prune[protected_idx]);
+    bool present = false;
+    for (int play_idx = 0; play_idx < num_plays && !present; play_idx++) {
+      present =
+          compare_moves_without_equity(
+              protected_play, move_list_get_move(plays, play_idx), true) == -1;
+    }
+    if (!present) {
+      move_list_add_move(protected_plays, protected_play);
+    }
+  }
+  move_list_sort_moves(protected_plays);
+  move_list_set_rack(protected_plays, move_list_get_rack(plays));
+  const int num_result = move_list_get_count(protected_plays);
+  for (int protected_idx = 0; protected_idx < num_protected; protected_idx++) {
+    const Move *protected_play = move_list_get_move(
+        original, sim_args->bai_options.arm_avoid_prune[protected_idx]);
+    for (int play_idx = 0; play_idx < num_result; play_idx++) {
+      if (compare_moves_without_equity(
+              protected_play, move_list_get_move(protected_plays, play_idx),
+              true) == -1) {
+        sim_ctx->protected_indices[protected_idx] = play_idx;
+        break;
+      }
+    }
+  }
+  sim_args->bai_options.arm_avoid_prune = sim_ctx->protected_indices;
+  return protected_plays;
+}
+
 // Runs a two-stage recursive sim (see RlamcArgs.finalists): the inference, if
 // any, has already run.
 static void simulate_two_stage(const SimArgs *sim_args, SimCtx **sim_ctx,
@@ -172,8 +239,12 @@ static void simulate_two_stage(const SimArgs *sim_args, SimCtx **sim_ctx,
   const uint64_t used = sim_results_get_iteration_count(sim_results);
   sim_collect_finalists(sim_results, rlamc->finalists,
                         &(*sim_ctx)->rlamc_finalists);
+  // The second stage simulates the first's finalists, and those alone: no
+  // second search.
   SimArgs second = *sim_args;
-  second.move_list = (*sim_ctx)->rlamc_finalists;
+  second.lamc_args.enabled = false;
+  second.move_list = sim_protect_plays(&second, *sim_ctx, sim_args->move_list,
+                                       (*sim_ctx)->rlamc_finalists);
   second.rlamc_args.finalists = 0;
   second.use_precomputed_inference = sim_args->use_inference;
   second.resume_results = false;
@@ -252,6 +323,9 @@ void simulate(SimArgs *sim_args, SimCtx **sim_ctx, SimResults *sim_results,
     (*sim_ctx)->inference_ctx = NULL;
     (*sim_ctx)->lamc_ctx = NULL;
     (*sim_ctx)->rlamc_finalists = NULL;
+    (*sim_ctx)->protected_plays = NULL;
+    (*sim_ctx)->protected_indices = NULL;
+    (*sim_ctx)->protected_capacity = 0;
   }
 
   uint64_t num_infer_leaves = 0;
@@ -296,6 +370,7 @@ void simulate(SimArgs *sim_args, SimCtx **sim_ctx, SimResults *sim_results,
       sim_args->bai_options.sample_limit;
   const double original_time_limit = sim_args->bai_options.time_limit_seconds;
   const bool original_resume_results = sim_args->resume_results;
+  int *original_arm_avoid_prune = sim_args->bai_options.arm_avoid_prune;
   bool searched = false;
   const int bag_tiles = bag_get_letters(game_get_bag(sim_args->game));
   if (sim_args->lamc_args.enabled && bag_tiles > 0 &&
@@ -306,7 +381,8 @@ void simulate(SimArgs *sim_args, SimCtx **sim_ctx, SimResults *sim_results,
         move_list_get_count(sim_args->move_list), &lamc_report);
     if (candidates != NULL) {
       searched = true;
-      sim_args->move_list = candidates;
+      sim_args->move_list =
+          sim_protect_plays(sim_args, *sim_ctx, original_move_list, candidates);
       if (sim_args->lamc_args.reuse_samples) {
         // The sim resumes from the search's samples of its candidates, so
         // what simulate sets up for a fresh sim is set here.
@@ -318,8 +394,9 @@ void simulate(SimArgs *sim_args, SimCtx **sim_ctx, SimResults *sim_results,
       } else {
         sim_args->seed = original_seed ^ SIM_LAMC_SEED_SALT;
       }
-      const uint64_t minimum_left = (uint64_t)move_list_get_count(candidates) *
-                                    sim_args->bai_options.sample_minimum;
+      const uint64_t minimum_left =
+          (uint64_t)move_list_get_count(sim_args->move_list) *
+          sim_args->bai_options.sample_minimum;
       sim_args->bai_options.sample_limit =
           original_lamc_sample_limit >
                   lamc_report.explore_rollouts + minimum_left
@@ -389,6 +466,7 @@ void simulate(SimArgs *sim_args, SimCtx **sim_ctx, SimResults *sim_results,
                      sim_results_get_best_move(sim_results),
                      move_list_get_count(original_move_list));
     sim_args->move_list = original_move_list;
+    sim_args->bai_options.arm_avoid_prune = original_arm_avoid_prune;
     sim_args->seed = original_seed;
     sim_args->bai_options.sample_limit = original_lamc_sample_limit;
     sim_args->bai_options.time_limit_seconds = original_time_limit;

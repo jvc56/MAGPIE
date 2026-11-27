@@ -17,6 +17,7 @@
 #include "../src/def/thread_control_defs.h"
 #include "../src/ent/autoplay_results.h"
 #include "../src/ent/bag.h"
+#include "../src/ent/bai_result.h"
 #include "../src/ent/equity.h"
 #include "../src/ent/game.h"
 #include "../src/ent/lamc_args.h"
@@ -33,6 +34,7 @@
 #include "../src/impl/move_gen.h"
 #include "../src/impl/play_feature_registry.h"
 #include "../src/impl/random_variable.h"
+#include "../src/str/move_string.h"
 #include "../src/util/dense_linalg.h"
 #include "../src/util/fnv.h"
 #include "../src/util/io_util.h"
@@ -503,6 +505,90 @@ static void test_lamc_time_cut_round(void) {
   config_destroy(config);
 }
 
+// The plays the sim simulates after a LAMC search: its 6 candidates and the
+// play snoprune protects, the gen list's last, which the search does not
+// pick. Each play once, and the protected one never pruned: BAI tops it up
+// to the winner's rollouts. With reuse, the sim resumes from the search's
+// samples.
+static void test_lamc_sim_keeps_protected_play(const bool reuse) {
+  char *settings = get_formatted_string(
+      "set -lex CSW21 -wmp true -s1 equity -s2 equity -r1 all -r2 all "
+      "-numplays 30 -plies 2 -threads 1 -iterations 1200 "
+      "-minplayiterations 10 -scond none -tlim 0 -seed 42 -lamc true "
+      "-lamcpool 8 -lamckeep 2 -lamcshallow 3 -lamcexplore 0.4 -lamcmaxbag "
+      "1000 -lamcfinal 6 -lamcfinalstatic 2 -lamcreuse %s -savesettings "
+      "false -hr false",
+      reuse ? "true" : "false");
+  Config *config = config_create_or_die(settings);
+  free(settings);
+  load_and_exec_config_or_die(config, "cgp " JOSH2_CGP);
+  load_and_exec_config_or_die(config, "gen");
+  const MoveList *gen_list = config_get_move_list(config);
+  const Move *last = move_list_get_move(gen_list, 29);
+  StringBuilder *protected_string = string_builder_create();
+  string_builder_add_move_description(protected_string, last,
+                                      config_get_ld(config));
+  char *command = get_formatted_string("snoprune -, %s",
+                                       string_builder_peek(protected_string));
+  string_builder_destroy(protected_string);
+  Move protected_play;
+  move_copy(&protected_play, last);
+  load_and_exec_config_or_die(config, command);
+  free(command);
+
+  const SimResults *sim_results = config_get_sim_results(config);
+  const int num_plays = sim_results_get_number_of_plays(sim_results);
+  assert(num_plays == 7);
+  const int winner_arm =
+      bai_result_get_best_arm(sim_results_get_bai_result(sim_results));
+  const uint64_t winner_count =
+      stat_get_num_samples(simmed_play_get_equity_stat(
+          sim_results_get_simmed_play(sim_results, winner_arm)));
+  int protected_found = 0;
+  for (int play_idx = 0; play_idx < num_plays; play_idx++) {
+    const SimmedPlay *simmed_play =
+        sim_results_get_simmed_play(sim_results, play_idx);
+    const Move *move = simmed_play_get_move(simmed_play);
+    for (int other_idx = play_idx + 1; other_idx < num_plays; other_idx++) {
+      assert(compare_moves_without_equity(
+                 move,
+                 simmed_play_get_move(
+                     sim_results_get_simmed_play(sim_results, other_idx)),
+                 true) != -1);
+    }
+    if (compare_moves_without_equity(move, &protected_play, true) == -1) {
+      protected_found++;
+      const uint64_t protected_count =
+          stat_get_num_samples(simmed_play_get_equity_stat(simmed_play));
+      // Resumed from the search, the winner's count includes the search's
+      // samples of it, and BAI tops up to what the winner took from BAI.
+      assert(reuse ? protected_count >= 10 : protected_count == winner_count);
+    }
+  }
+  assert(protected_found == 1);
+  config_destroy(config);
+}
+
+// A two-stage recursive sim with LAMC: the search picks the first stage's
+// plays, and the second stage simulates the first's finalists, with no
+// second search.
+static void test_lamc_two_stage(void) {
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -wmp true -s1 equity -s2 equity -r1 all -r2 all "
+      "-numplays 6 -plies 2 -threads 1 -iterations 1200 "
+      "-minplayiterations 10 -scond none -tlim 0 -seed 42 -lamc true "
+      "-lamcpool 8 -lamckeep 2 -lamcshallow 3 -lamcexplore 0.4 -lamcmaxbag "
+      "1000 -sinfer false -rlamc plies=0,lamc=1,m=2,finalists=3 "
+      "-savesettings false -hr false");
+  load_and_exec_config_or_die(config, "cgp " JOSH2_CGP);
+  load_and_exec_config_or_die(config, "gen");
+  lamc_totals_reset();
+  load_and_exec_config_or_die(config, "sim");
+  assert(lamc_get_totals().searches == 1);
+  assert(sim_results_get_number_of_plays(config_get_sim_results(config)) == 3);
+  config_destroy(config);
+}
+
 void test_lamc(void) {
   test_dense_linalg();
   test_table_and_subset();
@@ -511,6 +597,9 @@ void test_lamc(void) {
   test_gp_fit_by_likelihood();
   test_play_features();
   test_lamc_time_cut_round();
+  test_lamc_sim_keeps_protected_play(false);
+  test_lamc_sim_keeps_protected_play(true);
+  test_lamc_two_stage();
   test_lamc_sim();
 }
 

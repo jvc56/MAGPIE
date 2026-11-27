@@ -1110,7 +1110,7 @@ const MoveList *lamc_choose_candidates(const SimArgs *sim_args,
     ctx->finalists = move_list_create(num_finalists);
   }
   const int count = lamc_select_candidates(ctx, args, num_finalists);
-  // In rank order, so that the finalists line up with the candidates.
+  // Sorted like any move list, by equity, not in the candidates' rank order.
   move_list_reset(ctx->finalists);
   for (int rank = 0; rank < count; rank++) {
     const int play_idx = lamc_get_candidate(ctx, rank);
@@ -1140,14 +1140,31 @@ const MoveList *lamc_choose_candidates(const SimArgs *sim_args,
 
 void lamc_reset_final_results(LamcCtx *ctx, const SimArgs *sim_args,
                               SimResults *sim_results) {
-  const int count = move_list_get_count(ctx->finalists);
-  for (int rank = 0; rank < count; rank++) {
-    const int play_idx = lamc_get_candidate(ctx, rank);
-    ctx->next_pool[rank] = ctx->is_evaluated[play_idx] ? play_idx : -1;
+  // The sim's plays are sorted, not in the candidates' rank order, and may
+  // include plays the sim protects that are not candidates: each takes the
+  // search's samples of the candidate it is, if that one was evaluated.
+  const MoveList *plays = sim_args->move_list;
+  const int num_plays = move_list_get_count(plays);
+  const int num_candidates = move_list_get_count(ctx->finalists);
+  if (ctx->universe_capacity < num_plays) {
+    log_fatal("LAMC cannot resume %d plays, more than its universe of %d",
+              num_plays, ctx->universe_capacity);
   }
-  sim_results_reset_from_plays(
-      sim_results, ctx->finalists, ctx->explore_results, ctx->next_pool,
-      sim_args->num_plies, sim_args->seed, sim_args->use_heat_map);
+  for (int play_rank = 0; play_rank < num_plays; play_rank++) {
+    const Move *play = move_list_get_move(plays, play_rank);
+    ctx->next_pool[play_rank] = -1;
+    for (int rank = 0; rank < num_candidates; rank++) {
+      const int play_idx = lamc_get_candidate(ctx, rank);
+      if (compare_moves_without_equity(
+              play, move_list_get_move(ctx->universe, play_idx), true) == -1) {
+        ctx->next_pool[play_rank] = ctx->is_evaluated[play_idx] ? play_idx : -1;
+        break;
+      }
+    }
+  }
+  sim_results_reset_from_plays(sim_results, plays, ctx->explore_results,
+                               ctx->next_pool, sim_args->num_plies,
+                               sim_args->seed, sim_args->use_heat_map);
 }
 
 void lamc_note_choice(const LamcCtx *ctx, const Move *chosen,
