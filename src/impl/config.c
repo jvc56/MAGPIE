@@ -15237,7 +15237,7 @@ static void config_load_lamc(Config *config, ErrorStack *error_stack) {
       args->proposal = LAMC_PROPOSAL_ACQUIRE;
     } else {
       error_stack_push(
-          error_stack, ERROR_STATUS_LAMC_BAD_FEATURE_SET,
+          error_stack, ERROR_STATUS_LAMC_BAD_PROPOSAL,
           get_formatted_string("unknown LAMC proposal '%s'; use %s or %s",
                                proposal, LAMC_PROPOSAL_ASCENT_STRING,
                                LAMC_PROPOSAL_ACQUIRE_STRING));
@@ -15252,7 +15252,7 @@ static void config_load_lamc(Config *config, ErrorStack *error_stack) {
       args->kernel = GP_KERNEL_SQUARED_EXPONENTIAL;
     } else {
       error_stack_push(
-          error_stack, ERROR_STATUS_LAMC_BAD_FEATURE_SET,
+          error_stack, ERROR_STATUS_LAMC_BAD_KERNEL,
           get_formatted_string("unknown LAMC kernel '%s'; use %s or %s", kernel,
                                GP_KERNEL_MATERN52_STRING,
                                GP_KERNEL_SQUARED_EXPONENTIAL_STRING));

@@ -673,6 +673,10 @@ static void test_play_features(void) {
   error_stack_destroy(error_stack);
   assert(get_config_exec_status(config, "set -lamcfeatures nope") ==
          ERROR_STATUS_LAMC_BAD_FEATURE_SET);
+  assert(get_config_exec_status(config, "set -lamcproposal nope") ==
+         ERROR_STATUS_LAMC_BAD_PROPOSAL);
+  assert(get_config_exec_status(config, "set -lamckernel nope") ==
+         ERROR_STATUS_LAMC_BAD_KERNEL);
 
   move_list_destroy(moves);
   game_destroy(game_before);
