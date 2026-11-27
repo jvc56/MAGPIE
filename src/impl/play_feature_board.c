@@ -158,7 +158,14 @@ void play_feature_prepare_premium_access(PlayFeatureCtx *ctx) {
       }
       ctx->premium_triple_masks[row * BOARD_DIM + col] = triple_mask;
       ctx->premium_double_masks[row * BOARD_DIM + col] = double_mask;
+      ctx->premium_square_bits[row * BOARD_DIM + col] = 0;
     }
+  }
+  for (int premium_idx = 0; premium_idx < ctx->num_premium_squares;
+       premium_idx++) {
+    ctx->premium_square_bits[ctx->premium_rows[premium_idx] * BOARD_DIM +
+                             ctx->premium_cols[premium_idx]] = (uint64_t)1
+                                                               << premium_idx;
   }
 }
 
@@ -170,11 +177,15 @@ void play_feature_extract_premium_access(const PlayFeatureCtx *ctx,
   if (ctx->premium_masks_ready) {
     uint64_t triple_mask = 0;
     uint64_t double_mask = 0;
+    uint64_t covered = 0;
     for (int placed_idx = 0; placed_idx < num_placed; placed_idx++) {
       const int square = rows[placed_idx] * BOARD_DIM + cols[placed_idx];
       triple_mask |= ctx->premium_triple_masks[square];
       double_mask |= ctx->premium_double_masks[square];
+      covered |= ctx->premium_square_bits[square];
     }
+    triple_mask &= ~covered;
+    double_mask &= ~covered;
     out[0] = (double)play_feature_bit_count(triple_mask);
     out[1] = (double)play_feature_bit_count(double_mask);
     return;
@@ -186,12 +197,16 @@ void play_feature_extract_premium_access(const PlayFeatureCtx *ctx,
     const int premium_row = ctx->premium_rows[premium_idx];
     const int premium_col = ctx->premium_cols[premium_idx];
     bool in_reach = false;
-    for (int placed_idx = 0; placed_idx < num_placed && !in_reach;
+    bool covered = false;
+    for (int placed_idx = 0; placed_idx < num_placed && !covered;
          placed_idx++) {
-      in_reach = play_feature_premium_in_reach(
-          premium_row, premium_col, rows[placed_idx], cols[placed_idx]);
+      in_reach = in_reach || play_feature_premium_in_reach(
+                                 premium_row, premium_col, rows[placed_idx],
+                                 cols[placed_idx]);
+      covered =
+          premium_row == rows[placed_idx] && premium_col == cols[placed_idx];
     }
-    if (!in_reach) {
+    if (!in_reach || covered) {
       continue;
     }
     if (ctx->premium_word_multipliers[premium_idx] >= 3) {

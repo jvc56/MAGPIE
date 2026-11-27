@@ -9,9 +9,11 @@
 #include "../src/compat/ctime.h"
 #include "../src/compat/memory_info.h"
 #include "../src/def/bai_defs.h"
+#include "../src/def/board_defs.h"
 #include "../src/def/equity_defs.h"
 #include "../src/def/game_history_defs.h"
 #include "../src/def/lamc_defs.h"
+#include "../src/def/letter_distribution_defs.h"
 #include "../src/def/move_defs.h"
 #include "../src/def/play_feature_defs.h"
 #include "../src/def/rack_defs.h"
@@ -20,6 +22,8 @@
 #include "../src/ent/autoplay_results.h"
 #include "../src/ent/bag.h"
 #include "../src/ent/bai_result.h"
+#include "../src/ent/board.h"
+#include "../src/ent/bonus_square.h"
 #include "../src/ent/equity.h"
 #include "../src/ent/game.h"
 #include "../src/ent/lamc_args.h"
@@ -454,6 +458,77 @@ static void test_play_feature_bag_after_unknown_rack(void) {
   config_destroy(config);
 }
 
+// The premium squares a play leaves the next play: the empty word premium
+// squares in reach of a tile it places, leaving out the ones it covers.
+static void test_play_feature_premium_leaves_covered_squares(void) {
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -wmp true -s1 equity -s2 equity -r1 all -r2 all");
+  load_and_exec_config_or_die(config, "cgp " JOSH2_CGP);
+  Game *game = config_get_game(config);
+  const Board *board = game_get_board(game);
+  MoveList *moves = NULL;
+  const double *values =
+      lamc_test_feature_values(game, PLAY_FEATURE_PREMIUM_ACCESS, &moves);
+  int covering = 0;
+  for (int move_idx = 0; move_idx < move_list_get_count(moves); move_idx++) {
+    const Move *move = move_list_get_move(moves, move_idx);
+    bool placed[BOARD_DIM][BOARD_DIM];
+    memset(placed, 0, sizeof(placed));
+    if (move_get_type(move) == GAME_EVENT_TILE_PLACEMENT_MOVE) {
+      const bool vertical = board_is_dir_vertical(move_get_dir(move));
+      for (int tile_idx = 0; tile_idx < move_get_tiles_length(move);
+           tile_idx++) {
+        if (move_get_tile(move, tile_idx) == PLAYED_THROUGH_MARKER) {
+          continue;
+        }
+        placed[move_get_row_start(move) + (vertical ? tile_idx : 0)]
+              [move_get_col_start(move) + (vertical ? 0 : tile_idx)] = true;
+      }
+    }
+    int expected[2] = {0, 0};
+    bool covers = false;
+    for (int row = 0; row < BOARD_DIM; row++) {
+      for (int col = 0; col < BOARD_DIM; col++) {
+        const BonusSquare bonus_square =
+            board_get_bonus_square(board, row, col);
+        if (!board_is_empty(board, row, col) ||
+            bonus_square_is_brick(bonus_square) ||
+            bonus_square_get_word_multiplier(bonus_square) < 2) {
+          continue;
+        }
+        if (placed[row][col]) {
+          covers = true;
+          continue;
+        }
+        bool in_reach = false;
+        for (int reach = -RACK_SIZE; reach <= RACK_SIZE && !in_reach; reach++) {
+          const int along_row = col + reach;
+          const int along_col = row + reach;
+          in_reach = (along_row >= 0 && along_row < BOARD_DIM &&
+                      placed[row][along_row]) ||
+                     (along_col >= 0 && along_col < BOARD_DIM &&
+                      placed[along_col][col]);
+        }
+        if (in_reach) {
+          expected[bonus_square_get_word_multiplier(bonus_square) >= 3 ? 0
+                                                                       : 1]++;
+        }
+      }
+    }
+    if (covers) {
+      covering++;
+    }
+    assert(
+        within_epsilon(values[(ptrdiff_t)2 * move_idx], (double)expected[0]));
+    assert(within_epsilon(values[(ptrdiff_t)2 * move_idx + 1],
+                          (double)expected[1]));
+  }
+  assert(covering > 0);
+  free((void *)values);
+  move_list_destroy(moves);
+  config_destroy(config);
+}
+
 static void test_play_features(void) {
   Config *config = config_create_or_die(
       "set -lex CSW21 -wmp true -s1 equity -s2 equity -r1 all -r2 all");
@@ -850,6 +925,7 @@ void test_lamc(void) {
   test_play_features();
   test_play_feature_pass_with_empty_bag();
   test_play_feature_bag_after_unknown_rack();
+  test_play_feature_premium_leaves_covered_squares();
   test_lamc_time_cut_round();
   test_lamc_finds_planted_exchanges();
   test_lamc_sim_keeps_protected_play(false);

@@ -36,6 +36,8 @@ typedef struct PlayFeatureCtx {
   bool premium_masks_ready;
   uint64_t premium_triple_masks[BOARD_DIM * BOARD_DIM];
   uint64_t premium_double_masks[BOARD_DIM * BOARD_DIM];
+  // By square: the bit of the premium square there, or 0.
+  uint64_t premium_square_bits[BOARD_DIM * BOARD_DIM];
 } PlayFeatureCtx;
 
 // Writes a feature's raw values for one play: play_feature_get_num_columns
