@@ -49,12 +49,14 @@
 #include "../src/compat/ctime.h"
 #include "../src/def/equity_defs.h"
 #include "../src/def/move_defs.h"
+#include "../src/def/rack_defs.h"
 #include "../src/def/thread_control_defs.h"
 #include "../src/ent/autoplay_solver_settings.h"
 #include "../src/ent/bag.h"
 #include "../src/ent/cross_set_cache.h"
 #include "../src/ent/equity.h"
 #include "../src/ent/game.h"
+#include "../src/ent/letter_distribution.h"
 #include "../src/ent/move.h"
 #include "../src/ent/player.h"
 #include "../src/ent/rack.h"
@@ -106,6 +108,8 @@ enum {
   RLAMC_TEST_MAX_ROLLOUT_PLAYS = 24,
   // The most plays a reference finish makes.
   RLAMC_TEST_FINISH_MAX_PLIES = 40,
+  // The seeds the redraw check below searches with.
+  RLAMC_TEST_REDRAW_SEEDS = 8,
 };
 
 // How near the gap between two depth 1 candidates' values a switch margin
@@ -1186,6 +1190,76 @@ static void test_rlamc_ended_rollout_values(void) {
   }
 }
 
+// A depth 1 rollout draws the other player's rack again from the tiles the
+// mover cannot see, shuffled by the sample's seed, so the search never uses
+// the other player's real rack, and every candidate's n-th rollout draws the
+// same rack (common random numbers). With one tile in the bag, the other
+// player's rack is one of the eight unseen tiles less one, so each sample's
+// gap between the two candidates must be the gap of one rack the reference
+// computes for both, and the same rack whatever the other player really
+// holds: the position with that rack unknown, and with two different racks
+// known, choose alike.
+static void test_rlamc_rollouts_redraw_other_rack(void) {
+  const char *board =
+      "15/3Q7U3/3U2TAURINE2/1CHANSONS2W3/2AI6JO3/DIRL1PO3IN3/E1D2EF3V4/"
+      "F1I2p1TRAIK3/O1L2T4E4/ABy1PIT2BRIG2/ME1MOZELLE5/1GRADE1O1NOH3/"
+      "WE3R1V7/AT5E7/G6D7";
+  const char *const racks[3] = {"ENOSTXY/", "ENOSTXY/ACEISUY",
+                                "ENOSTXY/AACEISU"};
+  RlamcTestGapProbe probes[3];
+  for (int probe_idx = 0; probe_idx < 3; probe_idx++) {
+    char *cgp = get_formatted_string("cgp %s %s 356/378 0 -lex NWL20", board,
+                                     racks[probe_idx]);
+    rlamc_test_gap_probe_create(&probes[probe_idx], cgp, 1, false);
+    free(cgp);
+    assert(game_get_real_bag_size(probes[probe_idx].game) == 1);
+    for (int cand_idx = 0; cand_idx < 2; cand_idx++) {
+      assert(compare_moves_without_equity(&probes[probe_idx].top_two[cand_idx],
+                                          &probes[0].top_two[cand_idx],
+                                          true) == -1);
+    }
+  }
+  // The racks the other player can be dealt, from the unknown position's
+  // bag, which holds every unseen tile, and the reference gap of each.
+  const Bag *bag = game_get_bag(probes[0].game);
+  assert(bag_get_letters(bag) == RACK_SIZE + 1);
+  const int dist_size = ld_get_size(game_get_ld(probes[0].game));
+  Rack unseen;
+  rack_set_dist_size_and_reset(&unseen, dist_size);
+  for (int ml = 0; ml < dist_size; ml++) {
+    rack_add_letters(&unseen, (MachineLetter)ml,
+                     bag_get_letter(bag, (MachineLetter)ml));
+  }
+  double gaps[RACK_SIZE + 1];
+  int num_racks = 0;
+  for (int ml = 0; ml < dist_size; ml++) {
+    if (rack_get_letter(&unseen, (MachineLetter)ml) == 0) {
+      continue;
+    }
+    Rack other_rack;
+    rack_copy(&other_rack, &unseen);
+    rack_take_letter(&other_rack, (MachineLetter)ml);
+    gaps[num_racks++] =
+        rlamc_test_reference_gap(&probes[0], &other_rack, false, NULL);
+  }
+  for (uint64_t seed = 1; seed <= RLAMC_TEST_REDRAW_SEEDS; seed++) {
+    uint32_t matches[3] = {0, 0, 0};
+    for (int probe_idx = 0; probe_idx < 3; probe_idx++) {
+      for (int rack_idx = 0; rack_idx < num_racks; rack_idx++) {
+        if (rlamc_test_gap_is(&probes[probe_idx], seed, gaps[rack_idx])) {
+          matches[probe_idx] |= 1U << rack_idx;
+        }
+      }
+    }
+    assert(matches[0] != 0);
+    assert(matches[1] == matches[0]);
+    assert(matches[2] == matches[0]);
+  }
+  for (int probe_idx = 0; probe_idx < 3; probe_idx++) {
+    rlamc_test_gap_probe_destroy(&probes[probe_idx]);
+  }
+}
+
 void test_rlamc(void) {
   test_rlamc_parse();
   test_rlamc_ended_rollout_scored_as_finish();
@@ -1193,6 +1267,7 @@ void test_rlamc(void) {
   test_rlamc_reused_sim_ctx();
   test_rlamc_unfinished_rollout_values();
   test_rlamc_ended_rollout_values();
+  test_rlamc_rollouts_redraw_other_rack();
   const char *const specs[] = {
       "off",
       "on",
