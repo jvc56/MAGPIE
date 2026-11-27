@@ -486,7 +486,10 @@ static void lamc_fit_prior_mean(LamcCtx *ctx, const LamcArgs *args,
       covariance += weight * equity_diff * (values[eval_idx] - value_mean);
       variance += weight * equity_diff * equity_diff;
     }
-    if (variance > 0.0) {
+    // At least 0: a play better by static equity is not expected to be
+    // worse, so a negative fit, which noise gives a decided or flat surface,
+    // would send acquisition to the bottom of the static order.
+    if (variance > 0.0 && covariance > 0.0) {
       slope = covariance / variance;
     }
   }
@@ -908,6 +911,8 @@ int lamc_select_candidates(LamcCtx *ctx, const LamcArgs *args,
   }
   return num_candidates;
 }
+
+double lamc_get_prior_slope(const LamcCtx *ctx) { return ctx->mean_slope; }
 
 double lamc_get_predicted_mean(LamcCtx *ctx, const int play_idx) {
   double mean;

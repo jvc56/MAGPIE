@@ -64,6 +64,8 @@ int lamc_get_ranked_play(const LamcCtx *ctx, int rank);
 // deviations) among all plays, or among the evaluated plays if the args say
 // so. Returns how many it chose.
 int lamc_select_candidates(LamcCtx *ctx, const LamcArgs *args, int count);
+// The slope of the surrogate's prior mean in standardized static equity.
+double lamc_get_prior_slope(const LamcCtx *ctx);
 // The surrogate's mean at the built play play_idx after a search.
 double lamc_get_predicted_mean(LamcCtx *ctx, int play_idx);
 // The built play (its index) of the rank-th candidate.

@@ -779,6 +779,87 @@ static void test_lamc_finds_planted_exchanges(void) {
   config_destroy(config);
 }
 
+// A planted search over JOSH2's plays: each play's samples are its mean
+// (from mean_of, by the play, its static rank and the universe's size) plus
+// noise of a few win%. Returns the context after a search of 2000 samples;
+// the caller destroys it and the config.
+typedef double (*lamc_test_planted_mean_t)(const Move *move, int rank,
+                                           int num_plays, int static_finalists);
+
+static LamcCtx *lamc_test_planted_search(const lamc_test_planted_mean_t mean_of,
+                                         Config **config_out,
+                                         SimArgs *sim_args) {
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -wmp true -s1 equity -s2 equity -r1 all -r2 all "
+      "-numplays 10 -plies 2 -threads 1 -iterations 1000 -scond none "
+      "-tlim 0 -seed 42 -sinfer false -lamc true -savesettings false "
+      "-hr false");
+  load_and_exec_config_or_die(config, "cgp " JOSH2_CGP);
+  load_and_exec_config_or_die(config, "gen");
+  config_fill_sim_args(config, NULL, NULL, NULL, NULL, sim_args);
+  LamcCtx *ctx = lamc_ctx_create();
+  const int num_plays = lamc_build(ctx, sim_args);
+  const MoveList *universe = lamc_get_universe(ctx);
+  double *samples =
+      malloc_or_die(sizeof(double) * num_plays * LAMC_TEST_PLANTED_SAMPLES);
+  uint64_t noise_state = 12345;
+  for (int play_idx = 0; play_idx < num_plays; play_idx++) {
+    const double mean =
+        mean_of(move_list_get_move(universe, play_idx), play_idx, num_plays,
+                sim_args->lamc_args.static_finalists);
+    for (int sample_idx = 0; sample_idx < LAMC_TEST_PLANTED_SAMPLES;
+         sample_idx++) {
+      const double noise = (lamc_test_uniform(&noise_state) - 0.5) * 0.1;
+      samples[play_idx * LAMC_TEST_PLANTED_SAMPLES + sample_idx] = mean + noise;
+    }
+  }
+  const RandomVariablesArgs table_args = {
+      .type = RANDOM_VARIABLES_TABLE,
+      .num_rvs = num_plays,
+      .num_samples = LAMC_TEST_PLANTED_SAMPLES,
+      .samples = samples,
+  };
+  RandomVariables *table = rvs_create(&table_args);
+  thread_control_set_status(config_get_thread_control(config),
+                            THREAD_CONTROL_STATUS_STARTED);
+  const LamcSearchLimits limits = {
+      .rollout_budget = 2000,
+      .time_budget_seconds = 0,
+      .rollouts_per_sample = 1,
+      .num_threads = 1,
+      .parent_worker_thread_index = 0,
+      .thread_control = config_get_thread_control(config),
+      .num_finalists = LAMC_TEST_PLANTED_FINALISTS,
+  };
+  lamc_search(ctx, &sim_args->lamc_args, table, &limits);
+  rvs_destroy(table);
+  free(samples);
+  *config_out = config;
+  return ctx;
+}
+
+static double lamc_test_rising_mean(const Move __attribute__((unused)) * move,
+                                    const int rank, const int num_plays,
+                                    const int
+                                    __attribute__((unused)) static_finalists) {
+  return 0.2 + 0.3 * (double)rank / (double)num_plays;
+}
+
+// Where the plays worse by static equity sample better, the prior line in
+// static equity is flat, not falling: a falling line, which noise also
+// gives a flat or decided surface, sends acquisition to the bottom of the
+// static order.
+static void test_lamc_prior_slope_not_negative(void) {
+  Config *config = NULL;
+  SimArgs sim_args;
+  LamcCtx *ctx =
+      lamc_test_planted_search(lamc_test_rising_mean, &config, &sim_args);
+  assert(lamc_get_num_evaluated(ctx) > 0);
+  assert(lamc_get_prior_slope(ctx) >= 0.0);
+  lamc_ctx_destroy(ctx);
+  config_destroy(config);
+}
+
 // A search stopped during its first round, as a stop request or a time
 // limit that runs out stops it: a play cut off before its first sample has
 // nothing to fit, so it must not count as evaluated. A stop already pending
@@ -927,6 +1008,7 @@ void test_lamc(void) {
   test_play_feature_bag_after_unknown_rack();
   test_play_feature_premium_leaves_covered_squares();
   test_lamc_time_cut_round();
+  test_lamc_prior_slope_not_negative();
   test_lamc_finds_planted_exchanges();
   test_lamc_sim_keeps_protected_play(false);
   test_lamc_sim_keeps_protected_play(true);
