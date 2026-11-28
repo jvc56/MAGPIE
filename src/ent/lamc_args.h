@@ -16,9 +16,11 @@ typedef struct LamcArgs {
   int seed_plays;
   // I_shallow: samples per play per round.
   int shallow_samples;
-  // The cap on rounds.
+  // The most rounds before refinement (see refine), which runs on past them.
   int max_rounds;
-  // Exploring stops once the top K is unchanged for this many rounds.
+  // The rounds before refinement end once the top K is unchanged for this
+  // many rounds; with refine, the search then refines until its share is
+  // spent.
   int stable_rounds;
   // The share of the sim's rollouts, and of its time limit, exploring may use.
   double explore_share;
