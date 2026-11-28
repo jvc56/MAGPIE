@@ -72,6 +72,9 @@ enum {
   LAMC_TEST_BOUND_DIMS = 3,
   LAMC_TEST_BOUND_PROBES = 2000,
   LAMC_TEST_PLANTED_FINALISTS = 20,
+  LAMC_TEST_SALT_PLAYS = 6,
+  LAMC_TEST_SALT_POOL = 8,
+  LAMC_TEST_SALT_SHALLOW = 3,
   LAMC_REPLAY_MAX_VARIANTS = 32,
   LAMC_REPLAY_MAX_BUDGETS = 8,
   LAMC_REPLAY_MAX_THREADS = 64,
@@ -1444,6 +1447,99 @@ static void test_lamc_two_stage(void) {
   config_destroy(config);
 }
 
+// After a search, BAI draws from seeds other than the search's
+// (SIM_LAMC_SEED_SALT in simmer.c): every arm's n-th sample shares its seed,
+// so on the search's seeds BAI's first samples of each candidate would
+// repeat the search's, and a play the search kept for lucky draws would
+// start BAI with the same luck. Here the search runs one round,
+// LAMC_TEST_SALT_SHALLOW samples of each of its LAMC_TEST_SALT_POOL plays,
+// and hands on the top static plays, all in that round's pool; the budget
+// leaves BAI the minimum for each, as many samples. The search's samples of
+// each candidate come from the same search run directly, which the sim's
+// own search repeats: each candidate's samples in BAI differ from them.
+static void test_lamc_sim_draws_other_seeds(void) {
+  const int iterations =
+      (LAMC_TEST_SALT_POOL + LAMC_TEST_SALT_PLAYS) * LAMC_TEST_SALT_SHALLOW;
+  char *settings = get_formatted_string(
+      "set -lex CSW21 -wmp true -s1 equity -s2 equity -r1 all -r2 all "
+      "-numplays %d -plies 2 -threads 1 -iterations %d "
+      "-minplayiterations %d -scond none -tlim 0 -seed 42 -sinfer false "
+      "-sbagcycle false -rlamc off -lamc true -lamcpool %d -lamckeep 2 "
+      "-lamcshallow %d -lamcexplore 0.4 -lamcmaxbag 1000 -lamccycle false "
+      "-lamcrefine false -lamcreuse false -savesettings false -hr false",
+      LAMC_TEST_SALT_PLAYS, iterations, LAMC_TEST_SALT_SHALLOW,
+      LAMC_TEST_SALT_POOL, LAMC_TEST_SALT_SHALLOW);
+  Config *config = config_create_or_die(settings);
+  free(settings);
+  load_and_exec_config_or_die(config, "cgp " JOSH2_CGP);
+  load_and_exec_config_or_die(config, "gen");
+
+  // The sim: its search, then BAI.
+  lamc_totals_reset();
+  load_and_exec_config_or_die(config, "sim");
+  const LamcTotals totals = lamc_get_totals();
+  assert(totals.searches == 1);
+  const SimResults *bai_results = config_get_sim_results(config);
+  const int num_bai_plays = sim_results_get_number_of_plays(bai_results);
+  assert(num_bai_plays == LAMC_TEST_SALT_PLAYS);
+
+  // The same search, run directly with the sim's args (the sim knows the
+  // opponent's rack from the position), and its samples of each candidate.
+  const Game *game = config_get_game(config);
+  Rack known_opp_rack;
+  rack_copy(&known_opp_rack,
+            player_get_rack(game_get_player(
+                game, 1 - game_get_player_on_turn_index(game))));
+  SimArgs sim_args;
+  config_fill_sim_args(config, &known_opp_rack, NULL, NULL, NULL, &sim_args);
+  thread_control_set_status(config_get_thread_control(config),
+                            THREAD_CONTROL_STATUS_STARTED);
+  LamcCtx *ctx = NULL;
+  LamcReport report;
+  const MoveList *candidates = lamc_choose_candidates(
+      &sim_args, &ctx, move_list_get_count(sim_args.move_list), &report);
+  assert(candidates != NULL);
+  assert(report.num_rounds == 1);
+  assert(report.explore_rollouts ==
+         (uint64_t)LAMC_TEST_SALT_POOL * LAMC_TEST_SALT_SHALLOW);
+  const int num_candidates = move_list_get_count(candidates);
+  assert(num_candidates == LAMC_TEST_SALT_PLAYS);
+  SimArgs final_args = sim_args;
+  final_args.move_list = candidates;
+  SimResults *search_results = sim_results_create(0.0);
+  lamc_reset_final_results(ctx, &final_args, search_results);
+  const int num_search_plays = sim_results_get_number_of_plays(search_results);
+  assert(num_search_plays == LAMC_TEST_SALT_PLAYS);
+  for (int bai_idx = 0; bai_idx < LAMC_TEST_SALT_PLAYS; bai_idx++) {
+    const SimmedPlay *bai_play =
+        sim_results_get_simmed_play(bai_results, bai_idx);
+    const Stat *bai_stat = simmed_play_get_equity_stat(bai_play);
+    const uint64_t bai_samples = stat_get_num_samples(bai_stat);
+    assert(bai_samples == LAMC_TEST_SALT_SHALLOW);
+    const double bai_mean = stat_get_mean(bai_stat);
+    int found = 0;
+    for (int search_idx = 0; search_idx < LAMC_TEST_SALT_PLAYS; search_idx++) {
+      const SimmedPlay *search_play =
+          sim_results_get_simmed_play(search_results, search_idx);
+      if (compare_moves_without_equity(simmed_play_get_move(bai_play),
+                                       simmed_play_get_move(search_play),
+                                       true) != -1) {
+        continue;
+      }
+      found++;
+      const Stat *search_stat = simmed_play_get_equity_stat(search_play);
+      const uint64_t search_samples = stat_get_num_samples(search_stat);
+      assert(search_samples == LAMC_TEST_SALT_SHALLOW);
+      const double search_mean = stat_get_mean(search_stat);
+      assert(bai_mean != search_mean);
+    }
+    assert(found == 1);
+  }
+  sim_results_destroy(search_results);
+  lamc_ctx_destroy(ctx);
+  config_destroy(config);
+}
+
 void test_lamc(void) {
   test_dense_linalg();
   test_table_and_subset();
@@ -1466,6 +1562,7 @@ void test_lamc(void) {
   test_lamc_sim_keeps_protected_play(false);
   test_lamc_sim_keeps_protected_play(true);
   test_lamc_two_stage();
+  test_lamc_sim_draws_other_seeds();
   test_lamc_sim();
   test_lamc_with_inference();
 }
