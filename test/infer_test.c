@@ -10,6 +10,7 @@
 #include "../src/def/thread_control_defs.h"
 #include "../src/ent/alias_method.h"
 #include "../src/ent/bag.h"
+#include "../src/ent/encoded_rack.h"
 #include "../src/ent/equity.h"
 #include "../src/ent/game.h"
 #include "../src/ent/game_history.h"
@@ -1308,6 +1309,60 @@ void test_infer_exchange_margin(void) {
   config_destroy(config);
 }
 
+// The alias method of an exchange inference holds, with each rack kept, the
+// tiles that exchange threw back. Its items, counted by the letters of the
+// tiles kept, of the tiles thrown back and of both together, give the draws
+// the inference recorded for the leaves, the exchanged tiles and the racks.
+// The alias method of any other inference holds no exchanged tiles.
+static void
+assert_alias_method_exchanges_match_subtotals(const InferenceResults *results) {
+  const AliasMethod *alias_method = inference_results_get_alias_method(results);
+  const int num_exch =
+      inference_results_get_target_number_of_tiles_exchanged(results);
+  if (num_exch == 0) {
+    assert(!alias_method_has_exchanged_racks(alias_method));
+    return;
+  }
+  if (alias_method->num_items == 0) {
+    // No rack was accepted, or none with a representable weight, which
+    // empties the table.
+    return;
+  }
+  assert(alias_method_has_exchanged_racks(alias_method));
+  const int ld_size =
+      rack_get_dist_size(inference_results_get_bag_as_rack(results));
+  uint64_t draws[NUMBER_OF_INFER_TYPES][MAX_ALPHABET_SIZE][RACK_SIZE + 1];
+  memset(draws, 0, sizeof(draws));
+  Rack kept;
+  Rack exchanged;
+  rack_set_dist_size_and_reset(&kept, ld_size);
+  rack_set_dist_size_and_reset(&exchanged, ld_size);
+  for (uint32_t item_idx = 0; item_idx < alias_method->num_items; item_idx++) {
+    const AliasMethodItem *item = &alias_method->items[item_idx];
+    rack_decode(&item->rack, &kept);
+    rack_decode(&alias_method->exchanged_racks[item_idx], &exchanged);
+    assert(rack_get_total_letters(&exchanged) == num_exch);
+    for (int ml = 0; ml < ld_size; ml++) {
+      const int num_kept = rack_get_letter(&kept, ml);
+      const int num_exchanged = rack_get_letter(&exchanged, ml);
+      draws[INFERENCE_TYPE_LEAVE][ml][num_kept] += item->count;
+      draws[INFERENCE_TYPE_EXCHANGED][ml][num_exchanged] += item->count;
+      draws[INFERENCE_TYPE_RACK][ml][num_kept + num_exchanged] += item->count;
+    }
+  }
+  for (int infer_type_idx = 0; infer_type_idx < NUMBER_OF_INFER_TYPES;
+       infer_type_idx++) {
+    for (int ml = 0; ml < ld_size; ml++) {
+      for (int num_letters = 1; num_letters <= RACK_SIZE; num_letters++) {
+        assert(draws[infer_type_idx][ml][num_letters] ==
+               inference_results_get_subtotal(
+                   results, (inference_stat_t)infer_type_idx, ml, num_letters,
+                   INFERENCE_SUBTOTAL_DRAW));
+      }
+    }
+  }
+}
+
 // Runs the same inference with and without the cutoff optimization, asserts
 // that they record the same racks, and returns how many racks were accepted.
 static uint64_t
@@ -1342,6 +1397,8 @@ assert_infer_cutoff_matches(const Config *config, bool use_game_history,
     error_stack_destroy(error_stack);
   }
   assert_inference_results_equal(results[0], results[1], ld_size);
+  assert_alias_method_exchanges_match_subtotals(results[0]);
+  assert_alias_method_exchanges_match_subtotals(results[1]);
   const uint64_t num_accepted_racks = stat_get_num_unique_samples(
       inference_results_get_equity_values(results[0], INFERENCE_TYPE_RACK));
   const uint64_t num_accepted_leaves = stat_get_num_unique_samples(
@@ -1447,13 +1504,21 @@ assert_inference_results_count_the_same(InferenceResults *results,
   }
 
   // The alias method's items are sorted before its tables are built, so the
-  // tables a simulation samples from are identical.
+  // tables a simulation samples from are identical, and so are the tiles
+  // each item of an exchange inference threw back.
   const AliasMethod *alias_method = inference_results_get_alias_method(results);
   const AliasMethod *expected_alias_method =
       inference_results_get_alias_method(expected);
   assert(alias_method->num_items == expected_alias_method->num_items);
   assert(alias_method->total_item_count ==
          expected_alias_method->total_item_count);
+  const bool has_exchanged_racks =
+      alias_method_has_exchanged_racks(alias_method);
+  assert(has_exchanged_racks ==
+         alias_method_has_exchanged_racks(expected_alias_method));
+  assert(
+      has_exchanged_racks ==
+      (inference_results_get_target_number_of_tiles_exchanged(expected) > 0));
   for (uint32_t item_idx = 0; item_idx < alias_method->num_items; item_idx++) {
     const AliasMethodItem *item = &alias_method->items[item_idx];
     const AliasMethodItem *expected_item =
@@ -1462,6 +1527,11 @@ assert_inference_results_count_the_same(InferenceResults *results,
     assert(item->count == expected_item->count);
     assert(item->alias == expected_item->alias);
     assert(item->probability == expected_item->probability);
+    if (has_exchanged_racks) {
+      assert(memcmp(&alias_method->exchanged_racks[item_idx],
+                    &expected_alias_method->exchanged_racks[item_idx],
+                    sizeof(EncodedRack)) == 0);
+    }
   }
 
   const LeaveRackList *lrl = inference_results_get_leave_rack_list(results);
@@ -1544,6 +1614,7 @@ static void test_infer_same_results_for_any_number_of_threads(bool weighted) {
              expected_play_results, INFERENCE_TYPE_LEAVE)) > 0);
   assert(stat_get_num_unique_samples(inference_results_get_equity_values(
              expected_exchange_results, INFERENCE_TYPE_EXCHANGED)) > 0);
+  assert_alias_method_exchanges_match_subtotals(expected_exchange_results);
 
   const int thread_counts[] = {4, 16};
   const int num_thread_counts =

@@ -464,8 +464,9 @@ static Equity get_top_equity_from_census(const Inference *inference,
 // than the equity margin. For a tile placement the move's equity is its
 // score plus the leave value. For an exchange of N tiles it is the best
 // exchange of N tiles that rack can make, and the leave and exchanged tiles
-// recorded for the rack come from that exchange. Exchanges of other sizes
-// are ordinary moves under this rule.
+// recorded for the rack come from that exchange: the rack's alias method item
+// holds both, so a sample of the leave comes with the tiles thrown back.
+// Exchanges of other sizes are ordinary moves under this rule.
 void evaluate_possible_leave(Inference *inference) {
   const Equity current_leave_value =
       inference_get_leave_value(inference, inference->current_target_leave);
@@ -548,9 +549,10 @@ void evaluate_possible_leave(Inference *inference) {
             best_exchange_leave, inference->current_target_exchanged,
             (int)number_of_draws_for_leave, current_leave_value, weight, lrl);
       }
-      alias_method_add_weighted_rack(
+      alias_method_add_weighted_exchange(
           inference_results_get_alias_method(inference->results),
-          best_exchange_leave, (int)number_of_draws_for_leave, weight);
+          best_exchange_leave, inference->current_target_exchanged,
+          (int)number_of_draws_for_leave, weight);
       rack_reset(inference->current_target_exchanged);
     } else {
       record_valid_leave_weighted(inference->current_target_leave,
@@ -598,9 +600,10 @@ void evaluate_possible_leave(Inference *inference) {
           best_exchange_leave, inference->current_target_exchanged,
           (int)number_of_draws_for_leave, current_leave_value, lrl);
     }
-    alias_method_add_rack(
+    alias_method_add_exchange(
         inference_results_get_alias_method(inference->results),
-        best_exchange_leave, (int)number_of_draws_for_leave);
+        best_exchange_leave, inference->current_target_exchanged,
+        (int)number_of_draws_for_leave);
     rack_reset(inference->current_target_exchanged);
   } else {
     record_valid_leave(inference->current_target_leave, inference->results,
