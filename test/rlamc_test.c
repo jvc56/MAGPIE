@@ -117,6 +117,9 @@ enum {
   RLAMC_TEST_PINNED_PLAYS = 4,
   // The most halvings of the interval a switch threshold is searched in.
   RLAMC_TEST_THRESHOLD_STEPS = 200,
+  // The sims of the reused context check: a fresh context's, and those of
+  // contexts reused from two earlier sims.
+  RLAMC_TEST_REUSE_RUNS = 3,
 };
 
 // How near the gap between two depth 1 candidates' values a switch margin
@@ -730,14 +733,19 @@ static void test_rlamc_late_game_caches(void) {
   }
 }
 
-// A sim context reused from a sim of another position must give what a
-// fresh one gives: the LAMC and RLAMC state it carries is reset. The context
-// is passed to the sim directly, since the CLI's sim command makes a new one
-// each time.
+// A reused sim context must give what a fresh one gives: the LAMC and RLAMC
+// state it carries is reset. The context is passed to the sim directly, since
+// the CLI's sim command makes a new one each time. Before the sim compared,
+// the reused context sims another position, or the same position with
+// another seed and spread weight. A sim of the same position shares the
+// compared sim's depth 1 positions, so the decision cache would hand on
+// decisions searched with the other seed, and the finish and rollout caches
+// utilities scored with the other weight, but for their reset
+// (rlamc_worker_reset).
 static void test_rlamc_reused_sim_ctx(void) {
   const char *settings =
       "set -wmp true -s1 equity -s2 equity -r1 all -r2 all -numplays 5 "
-      "-plies 3 -threads 2 -iterations 300 -minplayiterations 10 -scond none "
+      "-plies 3 -threads 4 -iterations 150 -minplayiterations 10 -scond none "
       "-tlim 0 -seed 42 -sinfer false -savesettings false -hr false -lamc "
       "true -lamcpool 8 -sfinish true -rlamc on";
   const char *first = "cgp " JOSH2_CGP;
@@ -745,26 +753,53 @@ static void test_rlamc_reused_sim_ctx(void) {
       "cgp BEDEL10/R1R9U2/O1IT1Q5OM2/W1BIDI4YUM2/N2XI5AT3/E3G4T1R3/"
       "S1VOILE2OKA3/T3T1DISPACED1/9AWE1O1/9Z1s1FA/14R/13GO/13AH/"
       "3JUVIE4UTA/INRO3FLENCHES ?ANNOPY/AEGILNS 344/368 0 -lex CSW21";
-  uint64_t hashes[2];
-  for (int run_idx = 0; run_idx < 2; run_idx++) {
+  // Per run, the position the context sims first and any settings it sims
+  // it with; the first run's context is fresh.
+  const char *const earlier_positions[RLAMC_TEST_REUSE_RUNS] = {NULL, first,
+                                                                second};
+  const char *const earlier_settings[RLAMC_TEST_REUSE_RUNS] = {
+      NULL, NULL, "set -seed 7 -uspread 0"};
+  uint64_t hashes[RLAMC_TEST_REUSE_RUNS];
+  for (int run_idx = 0; run_idx < RLAMC_TEST_REUSE_RUNS; run_idx++) {
     Config *config = config_create_or_die(settings);
     ErrorStack *error_stack = error_stack_create();
     SimCtx *sim_ctx = NULL;
     SimResults *sim_results = config_get_sim_results(config);
-    if (run_idx == 1) {
-      load_and_exec_config_or_die(config, first);
+    if (earlier_positions[run_idx] != NULL) {
+      load_and_exec_config_or_die(config, earlier_positions[run_idx]);
       load_and_exec_config_or_die(config, "gen");
+      if (earlier_settings[run_idx] != NULL) {
+        load_and_exec_config_or_die(config, earlier_settings[run_idx]);
+      }
       config_simulate(config, &sim_ctx, NULL, sim_results, NULL, 0,
                       error_stack);
       assert(error_stack_is_empty(error_stack));
       assert(sim_ctx != NULL);
+      load_and_exec_config_or_die(config, "set -uspread 0.5");
     }
     load_and_exec_config_or_die(config, second);
     load_and_exec_config_or_die(config, "gen");
-    // Every command advances the seed; both sims start from the same one.
+    // Every command advances the seed; all sims start from the same one.
     load_and_exec_config_or_die(config, "set -seed 42");
+    rlamc_totals_reset();
     config_simulate(config, &sim_ctx, NULL, sim_results, NULL, 0, error_stack);
     assert(error_stack_is_empty(error_stack));
+    if (run_idx == 0) {
+      // The sim finds decisions and rollouts in its caches.
+      const RlamcTotals totals = rlamc_get_totals();
+      if (getenv("RLAMC_TEST_DEBUG")) {
+        (void)fprintf(stderr,
+                      "REUSE decision hits %llu rollouts %llu/%llu "
+                      "finishes %llu/%llu\n",
+                      (unsigned long long)totals.decision_hits,
+                      (unsigned long long)totals.rollout_hits,
+                      (unsigned long long)totals.static_rollouts,
+                      (unsigned long long)totals.finish_hits,
+                      (unsigned long long)totals.finishes);
+      }
+      assert(totals.decision_hits > 0);
+      assert(totals.rollout_hits > 0);
+    }
     uint64_t hash = FNV_64_OFFSET_BASIS;
     const int num_plays = sim_results_get_number_of_plays(sim_results);
     for (int play_idx = 0; play_idx < num_plays; play_idx++) {
@@ -782,7 +817,9 @@ static void test_rlamc_reused_sim_ctx(void) {
     error_stack_destroy(error_stack);
     config_destroy(config);
   }
-  assert(hashes[0] == hashes[1]);
+  for (int run_idx = 1; run_idx < RLAMC_TEST_REUSE_RUNS; run_idx++) {
+    assert(hashes[run_idx] == hashes[0]);
+  }
 }
 
 // A fingerprint of a recursive sim of cgp, whose bag is empty, with every
