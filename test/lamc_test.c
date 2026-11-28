@@ -81,6 +81,12 @@ enum {
 };
 
 #define LAMC_TEST_GUARD_VALUE (-12345.0)
+// As LAMC_MIN_COLUMN_STDEV in lamc.c: a column whose standard deviation is
+// below this is constant.
+#define LAMC_TEST_MIN_COLUMN_STDEV 1e-9
+// The relative slack a brute-force farthest pick allows a near tie, whose
+// distances another order of sums can round otherwise.
+#define LAMC_TEST_DISTANCE_TOLERANCE 1e-9
 
 static void test_dense_linalg(void) {
   double matrix[9] = {4, 12, -16, 12, 37, -43, -16, -43, 98};
@@ -1540,6 +1546,268 @@ static void test_lamc_sim_draws_other_seeds(void) {
   config_destroy(config);
 }
 
+// A planted search over JOSH2's plays, as lamc_test_planted_search's, that
+// runs max_rounds rounds with LAMC's default pool and no refinement, so that
+// every round's pool is the search's own choice. The caller destroys the
+// context and the config.
+static LamcCtx *lamc_test_round_search(const lamc_test_planted_mean_t mean_of,
+                                       const int max_rounds,
+                                       Config **config_out, SimArgs *sim_args) {
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -wmp true -s1 equity -s2 equity -r1 all -r2 all "
+      "-numplays 10 -plies 2 -threads 1 -iterations 1000 -scond none "
+      "-tlim 0 -seed 42 -sinfer false -lamc true -savesettings false "
+      "-hr false");
+  load_and_exec_config_or_die(config, "cgp " JOSH2_CGP);
+  load_and_exec_config_or_die(config, "gen");
+  config_fill_sim_args(config, NULL, NULL, NULL, NULL, sim_args);
+  sim_args->lamc_args.max_rounds = max_rounds;
+  sim_args->lamc_args.refine = false;
+  LamcCtx *ctx = lamc_ctx_create();
+  const int num_plays = lamc_build(ctx, sim_args);
+  const MoveList *universe = lamc_get_universe(ctx);
+  double *samples =
+      malloc_or_die(sizeof(double) * num_plays * LAMC_TEST_PLANTED_SAMPLES);
+  uint64_t noise_state = 12345;
+  for (int play_idx = 0; play_idx < num_plays; play_idx++) {
+    const double mean =
+        mean_of(move_list_get_move(universe, play_idx), play_idx, num_plays,
+                sim_args->lamc_args.static_finalists);
+    for (int sample_idx = 0; sample_idx < LAMC_TEST_PLANTED_SAMPLES;
+         sample_idx++) {
+      const double noise = (lamc_test_uniform(&noise_state) - 0.5) * 0.1;
+      samples[play_idx * LAMC_TEST_PLANTED_SAMPLES + sample_idx] = mean + noise;
+    }
+  }
+  const RandomVariablesArgs table_args = {
+      .type = RANDOM_VARIABLES_TABLE,
+      .num_rvs = num_plays,
+      .num_samples = LAMC_TEST_PLANTED_SAMPLES,
+      .samples = samples,
+  };
+  RandomVariables *table = rvs_create(&table_args);
+  thread_control_set_status(config_get_thread_control(config),
+                            THREAD_CONTROL_STATUS_STARTED);
+  const LamcSearchLimits limits = {
+      .rollout_budget = 2000,
+      .time_budget_seconds = 0,
+      .rollouts_per_sample = 1,
+      .num_threads = 1,
+      .parent_worker_thread_index = 0,
+      .thread_control = config_get_thread_control(config),
+      .num_finalists = 0,
+  };
+  const int rounds = lamc_search(ctx, &sim_args->lamc_args, table, &limits);
+  assert(rounds == max_rounds);
+  rvs_destroy(table);
+  free(samples);
+  *config_out = config;
+  return ctx;
+}
+
+// Standardizes the column of num_plays rows of num_columns across the rows,
+// as a search standardizes its continuous columns.
+static void lamc_test_standardize_column(double *embedding, const int num_plays,
+                                         const int num_columns,
+                                         const int column) {
+  double sum = 0.0;
+  for (int play_idx = 0; play_idx < num_plays; play_idx++) {
+    sum += embedding[(ptrdiff_t)play_idx * num_columns + column];
+  }
+  const double mean = sum / num_plays;
+  double squares = 0.0;
+  for (int play_idx = 0; play_idx < num_plays; play_idx++) {
+    const double diff =
+        embedding[(ptrdiff_t)play_idx * num_columns + column] - mean;
+    squares += diff * diff;
+  }
+  const double stdev = sqrt(squares / num_plays);
+  for (int play_idx = 0; play_idx < num_plays; play_idx++) {
+    double *value = &embedding[(ptrdiff_t)play_idx * num_columns + column];
+    *value = stdev < LAMC_TEST_MIN_COLUMN_STDEV ? 0.0 : (*value - mean) / stdev;
+  }
+}
+
+// The plays of universe embedded as a search embeds them: the columns of
+// each feature sim_args' LAMC args name, the continuous ones standardized.
+// Returns the rows, which the caller frees, and their columns in
+// *num_columns_out.
+static double *lamc_test_embedding(const SimArgs *sim_args,
+                                   const MoveList *universe,
+                                   int *num_columns_out) {
+  const int num_plays = move_list_get_count(universe);
+  PlayFeatureCtx feature_ctx;
+  play_feature_ctx_init(&feature_ctx, sim_args->game);
+  int num_columns = 0;
+  for (int feature_idx = 0; feature_idx < NUMBER_OF_PLAY_FEATURES;
+       feature_idx++) {
+    if (sim_args->lamc_args.features[feature_idx]) {
+      num_columns += play_feature_get_num_columns((play_feature_t)feature_idx);
+    }
+  }
+  double *embedding =
+      malloc_or_die(sizeof(double) * (size_t)num_plays * (size_t)num_columns);
+  int column = 0;
+  for (int feature_idx = 0; feature_idx < NUMBER_OF_PLAY_FEATURES;
+       feature_idx++) {
+    if (!sim_args->lamc_args.features[feature_idx]) {
+      continue;
+    }
+    const play_feature_t feature = (play_feature_t)feature_idx;
+    play_feature_prepare(feature, &feature_ctx);
+    play_feature_extract(feature, &feature_ctx, universe, num_columns,
+                         embedding + column);
+    const int feature_columns = play_feature_get_num_columns(feature);
+    if (play_feature_get_kind(feature) == PLAY_FEATURE_KIND_CONTINUOUS) {
+      for (int offset = 0; offset < feature_columns; offset++) {
+        lamc_test_standardize_column(embedding, num_plays, num_columns,
+                                     column + offset);
+      }
+    }
+    column += feature_columns;
+  }
+  *num_columns_out = num_columns;
+  return embedding;
+}
+
+// Adds the play chosen to the plays chosen, lowering each play's squared
+// distance to its nearest chosen play. The search scales every column by the
+// same length scale, which changes no play's place in that order.
+static void lamc_test_choose_far(const double *embedding, const int num_plays,
+                                 const int num_columns, const int chosen,
+                                 bool *is_chosen, double *min_distance) {
+  is_chosen[chosen] = true;
+  const double *chosen_row = embedding + (ptrdiff_t)chosen * num_columns;
+  for (int play_idx = 0; play_idx < num_plays; play_idx++) {
+    const double *row = embedding + (ptrdiff_t)play_idx * num_columns;
+    double distance = 0.0;
+    for (int column = 0; column < num_columns; column++) {
+      const double diff = row[column] - chosen_row[column];
+      distance += diff * diff;
+    }
+    if (distance < min_distance[play_idx]) {
+      min_distance[play_idx] = distance;
+    }
+  }
+}
+
+// The first pool of a search: the top seed_plays plays by static equity,
+// then plays chosen one at a time as far as possible in the embedding from
+// those chosen before, so that the first fit sees plays unlike the top
+// static ones. After one round the evaluated plays are that pool. The picks
+// are checked against a brute-force computation of the embedding: taken in
+// the order it finds them, each is at least as far from the plays chosen
+// before it as any play not picked.
+static void test_lamc_first_pool_spreads(void) {
+  Config *config = NULL;
+  SimArgs sim_args;
+  LamcCtx *ctx =
+      lamc_test_round_search(lamc_test_low_static_mean, 1, &config, &sim_args);
+  const int pool_size = sim_args.lamc_args.pool_size;
+  const int seed_plays = sim_args.lamc_args.seed_plays;
+  assert(seed_plays < pool_size);
+  const MoveList *universe = lamc_get_universe(ctx);
+  const int num_plays = move_list_get_count(universe);
+  assert(num_plays > pool_size);
+  const int num_evaluated = lamc_get_num_evaluated(ctx);
+  assert(num_evaluated == pool_size);
+  bool *is_picked = calloc_or_die((size_t)num_plays, sizeof(bool));
+  int num_picked = 0;
+  for (int play_idx = 0; play_idx < num_plays; play_idx++) {
+    const uint64_t play_samples = lamc_get_play_samples(ctx, play_idx);
+    if (play_idx < seed_plays) {
+      assert(play_samples > 0);
+    } else if (play_samples > 0) {
+      is_picked[play_idx] = true;
+      num_picked++;
+    }
+  }
+  assert(num_picked == pool_size - seed_plays);
+
+  int num_columns = 0;
+  double *embedding = lamc_test_embedding(&sim_args, universe, &num_columns);
+  bool *is_chosen = calloc_or_die((size_t)num_plays, sizeof(bool));
+  double *min_distance = malloc_or_die(sizeof(double) * (size_t)num_plays);
+  for (int play_idx = 0; play_idx < num_plays; play_idx++) {
+    min_distance[play_idx] = INFINITY;
+  }
+  for (int play_idx = 0; play_idx < seed_plays; play_idx++) {
+    lamc_test_choose_far(embedding, num_plays, num_columns, play_idx, is_chosen,
+                         min_distance);
+  }
+  for (int pick_idx = 0; pick_idx < num_picked; pick_idx++) {
+    int farthest_pick = -1;
+    double pick_distance = -1.0;
+    double other_distance = -1.0;
+    for (int play_idx = 0; play_idx < num_plays; play_idx++) {
+      if (is_chosen[play_idx]) {
+        continue;
+      }
+      if (is_picked[play_idx]) {
+        if (min_distance[play_idx] > pick_distance) {
+          pick_distance = min_distance[play_idx];
+          farthest_pick = play_idx;
+        }
+      } else if (min_distance[play_idx] > other_distance) {
+        other_distance = min_distance[play_idx];
+      }
+    }
+    assert(farthest_pick >= 0);
+    assert(pick_distance > 0.0);
+    assert(pick_distance >= other_distance - LAMC_TEST_DISTANCE_TOLERANCE *
+                                                 (1.0 + other_distance));
+    lamc_test_choose_far(embedding, num_plays, num_columns, farthest_pick,
+                         is_chosen, min_distance);
+  }
+  free(min_distance);
+  free(is_chosen);
+  free(embedding);
+  free(is_picked);
+  lamc_ctx_destroy(ctx);
+  config_destroy(config);
+}
+
+// Each round after the first keeps the evaluated plays best by the
+// surrogate's mean, keep of them, and samples them again with the plays it
+// proposes. After two rounds, the plays sampled in both are the first
+// round's top keep by the surrogate's mean.
+static void test_lamc_rounds_keep_top_plays(void) {
+  Config *config = NULL;
+  SimArgs sim_args;
+  LamcCtx *ctx =
+      lamc_test_round_search(lamc_test_low_static_mean, 1, &config, &sim_args);
+  const int keep = sim_args.lamc_args.keep;
+  const int pool_size = sim_args.lamc_args.pool_size;
+  assert(keep > 0 && keep < pool_size && keep <= LAMC_MAX_KEEP);
+  int top_plays[LAMC_MAX_KEEP];
+  for (int rank = 0; rank < keep; rank++) {
+    top_plays[rank] = lamc_get_ranked_play(ctx, rank);
+  }
+  lamc_ctx_destroy(ctx);
+  config_destroy(config);
+
+  ctx =
+      lamc_test_round_search(lamc_test_low_static_mean, 2, &config, &sim_args);
+  const uint64_t shallow = (uint64_t)sim_args.lamc_args.shallow_samples;
+  const int num_evaluated = lamc_get_num_evaluated(ctx);
+  assert(num_evaluated == 2 * pool_size - keep);
+  const int num_plays = move_list_get_count(lamc_get_universe(ctx));
+  int resampled = 0;
+  for (int play_idx = 0; play_idx < num_plays; play_idx++) {
+    const uint64_t play_samples = lamc_get_play_samples(ctx, play_idx);
+    assert(play_samples == 0 || play_samples == shallow ||
+           play_samples == 2 * shallow);
+    resampled += play_samples == 2 * shallow ? 1 : 0;
+  }
+  assert(resampled == keep);
+  for (int rank = 0; rank < keep; rank++) {
+    const uint64_t top_samples = lamc_get_play_samples(ctx, top_plays[rank]);
+    assert(top_samples == 2 * shallow);
+  }
+  lamc_ctx_destroy(ctx);
+  config_destroy(config);
+}
+
 void test_lamc(void) {
   test_dense_linalg();
   test_table_and_subset();
@@ -1556,6 +1824,8 @@ void test_lamc(void) {
   test_lamc_time_cut_round();
   test_lamc_prior_slope_not_negative();
   test_lamc_refine_cut();
+  test_lamc_first_pool_spreads();
+  test_lamc_rounds_keep_top_plays();
   test_lamc_universe_keeps_pass();
   test_lamc_max_bag_counts_real_bag();
   test_lamc_finds_planted_exchanges();
