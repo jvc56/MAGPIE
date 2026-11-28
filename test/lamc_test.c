@@ -1016,7 +1016,7 @@ static uint64_t lamc_test_inference_sim(const int num_threads) {
 // A fingerprint of a LAMC search of the config's position, with the sim
 // args' inference (from the config's last sim) or without it: every play's
 // samples and the surrogate's mean.
-static uint64_t lamc_test_inference_search(Config *config,
+static uint64_t lamc_test_inference_search(const Config *config,
                                            const bool use_inference) {
   const int ld_size = ld_get_size(config_get_ld(config));
   Rack target_played_tiles;
@@ -1061,8 +1061,9 @@ static void test_lamc_with_inference(void) {
   // The sim infers, leaving its inference in the config's results.
   load_and_exec_config_or_die(config, "sim");
   assert(sim_results_get_num_infer_leaves(config_get_sim_results(config)) > 0);
-  assert(lamc_test_inference_search(config, true) !=
-         lamc_test_inference_search(config, false));
+  const uint64_t with_inference = lamc_test_inference_search(config, true);
+  const uint64_t without_inference = lamc_test_inference_search(config, false);
+  assert(with_inference != without_inference);
   config_destroy(config);
 }
 

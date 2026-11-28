@@ -1131,8 +1131,10 @@ static double rlamc_test_switch_threshold(RlamcTestGapProbe *probe,
                                           const uint64_t seed) {
   double low = -RLAMC_TEST_MARGIN_BOUND;
   double high = RLAMC_TEST_MARGIN_BOUND;
-  assert(!rlamc_test_keeps_first(probe, warm, seed, low));
-  assert(rlamc_test_keeps_first(probe, warm, seed, high));
+  const bool keeps_at_low = rlamc_test_keeps_first(probe, warm, seed, low);
+  const bool keeps_at_high = rlamc_test_keeps_first(probe, warm, seed, high);
+  assert(!keeps_at_low);
+  assert(keeps_at_high);
   for (int step = 0; step < RLAMC_TEST_THRESHOLD_STEPS; step++) {
     const double middle = 0.5 * (low + high);
     if (middle <= low || middle >= high) {
@@ -1339,10 +1341,12 @@ static void rlamc_test_cache_matches_fresh(const char *extra,
                   warm_fresh);
   }
   assert(fabs(fresh - warm_fresh) > RLAMC_TEST_STALE_GAP);
-  assert(!rlamc_test_keeps_first(&probe, &warm, 1,
-                                 fresh - RLAMC_TEST_GAP_TOLERANCE));
-  assert(rlamc_test_keeps_first(&probe, &warm, 1,
-                                fresh + RLAMC_TEST_GAP_TOLERANCE));
+  const bool keeps_below = rlamc_test_keeps_first(
+      &probe, &warm, 1, fresh - RLAMC_TEST_GAP_TOLERANCE);
+  const bool keeps_above = rlamc_test_keeps_first(
+      &probe, &warm, 1, fresh + RLAMC_TEST_GAP_TOLERANCE);
+  assert(!keeps_below);
+  assert(keeps_above);
   rlamc_test_gap_probe_destroy(&probe);
   rlamc_test_gap_probe_destroy(&warm);
 }
