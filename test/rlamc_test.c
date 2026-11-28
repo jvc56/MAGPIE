@@ -115,11 +115,20 @@ enum {
   RLAMC_TEST_REDRAW_SEEDS = 8,
   // The plays the pinned sims below simulate.
   RLAMC_TEST_PINNED_PLAYS = 4,
+  // The most halvings of the interval a switch threshold is searched in.
+  RLAMC_TEST_THRESHOLD_STEPS = 200,
 };
 
 // How near the gap between two depth 1 candidates' values a switch margin
 // must be to find it.
 static const double RLAMC_TEST_GAP_TOLERANCE = 1e-9;
+
+// The switch thresholds searched for lie within this of 0.
+static const double RLAMC_TEST_MARGIN_BOUND = 16.0;
+
+// How far apart two positions' switch thresholds must be for a value cached
+// from one and used in the other to show.
+static const double RLAMC_TEST_STALE_GAP = 1e-4;
 
 // The fingerprint of test_rlamc_standard_sim_pinned's standard sim.
 static const uint64_t RLAMC_TEST_STANDARD_SIM_FINGERPRINT =
@@ -968,28 +977,35 @@ static void rlamc_test_top_two(const Game *game, Move *top_two) {
   move_list_destroy(move_list);
 }
 
-// A probe of the position of cgp (a cgp command), whose search has the
-// horizon and finish setting given. Rollouts are scored with the sim's
-// default win% table and a spread weight, so both terms of the utility
-// count.
-static void rlamc_test_gap_probe_create(RlamcTestGapProbe *probe,
-                                        const char *cgp, const int horizon,
-                                        const bool finish) {
-  probe->config = config_create_or_die(
+// A probe of the position of cgp (a cgp command), with the config settings
+// extra, whose search has the recursive spec given. With pass_first, the
+// player on turn in cgp passes first, and the probe's position is the other
+// player's turn. Rollouts are scored with the sim's default win% table and a
+// spread weight, so both terms of the utility count.
+static void rlamc_test_gap_probe_create_with(RlamcTestGapProbe *probe,
+                                             const char *extra, const char *cgp,
+                                             const char *spec,
+                                             const bool pass_first) {
+  char *settings = get_formatted_string(
       "set -wmp true -s1 equity -s2 equity -r1 all -r2 all -threads 1 "
-      "-savesettings false -hr false");
+      "-savesettings false -hr false %s",
+      extra);
+  probe->config = config_create_or_die(settings);
+  free(settings);
   load_and_exec_config_or_die(probe->config, cgp);
+  Game *game = config_get_game(probe->config);
+  if (pass_first) {
+    Move pass;
+    move_set_as_pass(&pass);
+    play_move(&pass, game, NULL);
+  }
   ErrorStack *error_stack = error_stack_create();
   config_load_win_pcts(probe->config, error_stack);
   assert(error_stack_is_empty(error_stack));
-  char *spec = get_formatted_string(
-      "plies=0,lamc=0,k=2,m=1,h=%d,margin=1000,fin=%d,dcache=0", horizon,
-      finish ? 1 : 0);
   rlamc_args_parse(spec, &probe->args, error_stack);
-  free(spec);
   assert(error_stack_is_empty(error_stack));
   error_stack_destroy(error_stack);
-  probe->game = config_get_game(probe->config);
+  probe->game = game;
   probe->eval = (RlamcEval){
       .win_pcts = config_get_win_pcts(probe->config),
       .utility_w_winpct = 1.0,
@@ -1002,6 +1018,18 @@ static void rlamc_test_gap_probe_create(RlamcTestGapProbe *probe,
   probe->worker = rlamc_worker_create(probe->game, probe->cross_set_cache);
   rlamc_worker_reset(probe->worker, 12345);
   rlamc_test_top_two(probe->game, probe->top_two);
+}
+
+// A probe of the position of cgp (a cgp command), whose top-2 search has the
+// horizon and finish setting given.
+static void rlamc_test_gap_probe_create(RlamcTestGapProbe *probe,
+                                        const char *cgp, const int horizon,
+                                        const bool finish) {
+  char *spec = get_formatted_string(
+      "plies=0,lamc=0,k=2,m=1,h=%d,margin=1000,fin=%d,dcache=0", horizon,
+      finish ? 1 : 0);
+  rlamc_test_gap_probe_create_with(probe, "", cgp, spec, false);
+  free(spec);
 }
 
 static void rlamc_test_gap_probe_destroy(RlamcTestGapProbe *probe) {
@@ -1033,6 +1061,53 @@ static bool rlamc_test_gap_is(RlamcTestGapProbe *probe, const uint64_t seed,
                                  expected - RLAMC_TEST_GAP_TOLERANCE) &&
          !rlamc_test_picks_second(probe, seed,
                                   expected + RLAMC_TEST_GAP_TOLERANCE);
+}
+
+// Whether a search of the probe's position with seed and the switch margin
+// switch_margin, on a new worker, keeps its first candidate, the top play by
+// static equity. With warm, the worker first searches warm's position, with
+// the same seed, which fills its finish and rollout caches.
+static bool rlamc_test_keeps_first(RlamcTestGapProbe *probe,
+                                   const RlamcTestGapProbe *warm,
+                                   const uint64_t seed,
+                                   const double switch_margin) {
+  RlamcWorker *worker =
+      rlamc_worker_create(probe->game, probe->cross_set_cache);
+  rlamc_worker_reset(worker, 12345);
+  if (warm != NULL) {
+    rlamc_choose_move(worker, &warm->args, &warm->eval, warm->game, seed, NULL);
+  }
+  probe->args.levels[0].switch_margin = switch_margin;
+  const Move *chosen = rlamc_choose_move(worker, &probe->args, &probe->eval,
+                                         probe->game, seed, NULL);
+  const bool keeps_first =
+      compare_moves_without_equity(chosen, &probe->top_two[0], true) == -1;
+  rlamc_worker_destroy(worker);
+  return keeps_first;
+}
+
+// The switch margin from which a search of the probe's position (see
+// rlamc_test_keeps_first) keeps its first candidate: how much more its best
+// other candidate is worth to the search than the first.
+static double rlamc_test_switch_threshold(RlamcTestGapProbe *probe,
+                                          const RlamcTestGapProbe *warm,
+                                          const uint64_t seed) {
+  double low = -RLAMC_TEST_MARGIN_BOUND;
+  double high = RLAMC_TEST_MARGIN_BOUND;
+  assert(!rlamc_test_keeps_first(probe, warm, seed, low));
+  assert(rlamc_test_keeps_first(probe, warm, seed, high));
+  for (int step = 0; step < RLAMC_TEST_THRESHOLD_STEPS; step++) {
+    const double middle = 0.5 * (low + high);
+    if (middle <= low || middle >= high) {
+      break;
+    }
+    if (rlamc_test_keeps_first(probe, warm, seed, middle)) {
+      high = middle;
+    } else {
+      low = middle;
+    }
+  }
+  return high;
 }
 
 // The utility for the player on turn in base (the mover) of a depth 1
@@ -1197,6 +1272,111 @@ static void test_rlamc_ended_rollout_values(void) {
     assert(rlamc_test_gap_is(&probe, 1, gap));
     rlamc_test_gap_probe_destroy(&probe);
   }
+}
+
+// One check of the depth 1 finish and rollout caches (see
+// test_rlamc_caches_match_fresh): the position of cgp, with the config
+// settings extra and the recursive spec, searched on a worker that first
+// searched the position of warm_cgp, must give the switch threshold that a
+// new worker gives, while the warm position's own threshold differs. With
+// a pass flag, the player on turn in that cgp passes first.
+static void rlamc_test_cache_matches_fresh(const char *extra,
+                                           const char *warm_cgp,
+                                           const bool warm_pass,
+                                           const char *cgp, const bool pass,
+                                           const char *spec) {
+  RlamcTestGapProbe warm;
+  RlamcTestGapProbe probe;
+  rlamc_test_gap_probe_create_with(&warm, extra, warm_cgp, spec, warm_pass);
+  rlamc_test_gap_probe_create_with(&probe, extra, cgp, spec, pass);
+  // Both positions have the same board and the same rack on turn, so each
+  // candidate leaves the same board and racks in both.
+  for (int cand_idx = 0; cand_idx < 2; cand_idx++) {
+    assert(compare_moves_without_equity(&warm.top_two[cand_idx],
+                                        &probe.top_two[cand_idx], true) == -1);
+  }
+  const double fresh = rlamc_test_switch_threshold(&probe, NULL, 1);
+  const double warm_fresh = rlamc_test_switch_threshold(&warm, NULL, 1);
+  if (getenv("RLAMC_TEST_DEBUG")) {
+    (void)fprintf(stderr, "CACHE fresh %.17g warm position %.17g\n", fresh,
+                  warm_fresh);
+  }
+  assert(fabs(fresh - warm_fresh) > RLAMC_TEST_STALE_GAP);
+  assert(!rlamc_test_keeps_first(&probe, &warm, 1,
+                                 fresh - RLAMC_TEST_GAP_TOLERANCE));
+  assert(rlamc_test_keeps_first(&probe, &warm, 1,
+                                fresh + RLAMC_TEST_GAP_TOLERANCE));
+  rlamc_test_gap_probe_destroy(&probe);
+  rlamc_test_gap_probe_destroy(&warm);
+}
+
+// A depth 1 finish from an empty bag, and the rest of a rollout from one,
+// are cached by keys that must hold everything their values depend on: a
+// cached value must be the one the search would compute again. Each case
+// searches a position on a new worker, and on a worker that first searched
+// a position whose finishes and rollouts have the same keys, but for the
+// one term the case is about. Their values differ, so a key without that
+// term would hand the second search the first one's values.
+//   - The mover's spread, in the rollout key: the same position with the
+//     mover 200 points further ahead, from where the mover's second play no
+//     longer loses (a finish's points are kept apart from the scores, so the
+//     finish key leaves the spread out).
+//   - The scoreless turns, in the finish key and the rollout key built on
+//     it: the same position after 4 scoreless turns, where the other player
+//     cannot play, so that a LAMC search's pass, its last candidate, ends the
+//     game after the other player's pass instead of giving the mover another
+//     turn.
+//   - The player on turn, in the finish key: the players use different
+//     lexicons, and the position comes with the players' seats swapped (the
+//     player in the second seat passes first, then moves with the first
+//     position's mover's rack), so that each finish is played by the other
+//     lexicon.
+// The rollout key's last term, the candidate's leave value, has no case: a
+// rollout from an empty bag with the finish on plays the game to its end,
+// and an ended game is scored without leaves, so that term changes no value.
+static void test_rlamc_caches_match_fresh(void) {
+  const char *spread_board =
+      "cgp 9A1PIXY/9S1L3/2ToWNLETS1O3/9U1DA1R/3GERANIAL1U1I/9g2T1C/8WE2OBI/"
+      "6EMU4ON/6AID3GO1/5HUN4ET1/4ZA1T4ME1/1Q1FAKEY3JOES/FIVE1E5IT1C/"
+      "5SPORRAN2A/6ORE2N2D BGIV/DEHILOR";
+  const char *top_two_spec =
+      "plies=0,lamc=0,k=2,m=1,h=5,margin=1000,fin=1,dcache=0";
+  char *spread_warm =
+      get_formatted_string("%s 584/389 0 -lex NWL20", spread_board);
+  char *spread_cgp =
+      get_formatted_string("%s 384/389 0 -lex NWL20", spread_board);
+  rlamc_test_cache_matches_fresh("", spread_warm, false, spread_cgp, false,
+                                 top_two_spec);
+  free(spread_warm);
+  free(spread_cgp);
+
+  const char *scoreless_board =
+      "cgp 2BE3T6E/1CAMPHOR5UM/2I1OAKEN4NE/2Z4B5IN/2E1C1FLOGS2OD/3RAX1I2EARN1/"
+      "2VAV1UNAWARE2/3HYING4FEW/8PITOT1I/5J3TOE2E/4GAmIEST3L/5I8D/5L8e/"
+      "1OLEOS8R/TRAD8QIS DY/UU 355/363";
+  char *scoreless_warm =
+      get_formatted_string("%s 0 -lex NWL20", scoreless_board);
+  char *scoreless_cgp =
+      get_formatted_string("%s 4 -lex NWL20", scoreless_board);
+  rlamc_test_cache_matches_fresh(
+      "", scoreless_warm, false, scoreless_cgp, false,
+      "plies=0,lamc=1,universe=2,pool=2,rounds=1,m=1,h=5,dcache=0");
+  free(scoreless_warm);
+  free(scoreless_cgp);
+
+  const char *seats_board =
+      "cgp 7T3BOON/7R3U3/2R4O3N3/QUAG1L1O1Y1G3/2N1DITZ1IFS3/2C2M3PI4/"
+      "1sH2A4B4/1PO2CLOVERY3/1Es2I4A4/1L1G1N4T4/1A1OWE4E4/DE1XI5SH3/"
+      "AA2L1FUR2A3/UNVEINED3D3/T5MOSK1JETE";
+  char *seats_warm =
+      get_formatted_string("%s AEEIIIW/AERRST 439/506 0", seats_board);
+  char *seats_cgp =
+      get_formatted_string("%s AERRST/AEEIIIW 506/439 0", seats_board);
+  rlamc_test_cache_matches_fresh(
+      "-l1 CSW21 -l2 NWL20", seats_warm, false, seats_cgp, true,
+      "plies=0,lamc=0,k=2,m=1,h=0,margin=1000,fin=1,dcache=0");
+  free(seats_warm);
+  free(seats_cgp);
 }
 
 // A depth 1 rollout draws the other player's rack again from the tiles the
@@ -1576,6 +1756,7 @@ void test_rlamc(void) {
   test_rlamc_unfinished_rollout_values();
   test_rlamc_ended_rollout_values();
   test_rlamc_rollouts_redraw_other_rack();
+  test_rlamc_caches_match_fresh();
   test_rlamc_twins_chosen_by_own_rollouts();
   test_rlamc_searches_named_plies();
   test_rlamc_standard_sim_pinned();
