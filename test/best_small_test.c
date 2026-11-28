@@ -5,7 +5,6 @@
 #include "../src/def/letter_distribution_defs.h"
 #include "../src/def/move_defs.h"
 #include "../src/def/players_data_defs.h"
-#include "../src/def/rack_defs.h"
 #include "../src/ent/board.h"
 #include "../src/ent/bonus_square.h"
 #include "../src/ent/equity.h"
@@ -61,13 +60,6 @@ enum {
   // record.
   LANE_SHADOW_TEST_GAMES = 4,
   LANE_SHADOW_TEST_INDEX_BITS = 16,
-  // The generations with a pool (check_pool_generations): its self-play
-  // games, the racks drawn from each position's pool, and the out bonus.
-  POOL_TEST_GAMES = 4,
-  POOL_TEST_RACKS = 10,
-  // The last of those racks hold one blank and two, from the wider pool.
-  POOL_TEST_BLANK_RACKS = 2,
-  POOL_TEST_OUT_BONUS = 100000,
 };
 
 typedef struct BestSmallStats {
@@ -511,133 +503,6 @@ static void check_lane_shadow_cache_with_word_info_table(MoveList *best_small) {
   config_destroy(config);
 }
 
-// generate_best_small_move_with_pool must find the play generate_moves finds.
-// Over self-play games, each position's pool is the tiles of both racks, and
-// the racks checked are the rack on turn and others of its size drawn from
-// the pool, which share one cache as the draws of an out-play check do: each
-// is generated without a cache, twice with the pool, the second time over
-// what the first remembered, and once with a wider pool. The last racks hold
-// blanks, which the pool's own tiles rarely give, and use the wider pool
-// throughout.
-static void check_pool_generations(const char *lexicon, bool use_wmp,
-                                   MoveList *best_small) {
-  char *config_str = get_formatted_string(
-      "set -lex %s -wmp %s -s1 equity -s2 equity -r1 all -r2 all -numplays 1",
-      lexicon, use_wmp ? "true" : "false");
-  Config *config = config_create_or_die(config_str);
-  free(config_str);
-  Game *game = config_game_create(config);
-  const int dist_size = ld_get_size(game_get_ld(game));
-  LaneShadowCache *cache = lane_shadow_cache_create(
-      LANE_SHADOW_TEST_INDEX_BITS, LANE_SHADOW_TEST_INDEX_BITS);
-  lane_shadow_cache_set_salt(cache, 1);
-  MoveList *top_move = move_list_create(1);
-  const Equity bonus = int_to_equity(POOL_TEST_OUT_BONUS);
-  uint64_t random_state = SELF_PLAY_BASE_SEED;
-  int checks = 0;
-  int whole_rack_plays = 0;
-  int blank_whole_rack_plays[POOL_TEST_BLANK_RACKS + 1] = {0};
-  int passes = 0;
-  for (int game_idx = 0; game_idx < POOL_TEST_GAMES; game_idx++) {
-    game_reset(game);
-    game_seed(game, SELF_PLAY_BASE_SEED + (uint64_t)game_idx);
-    draw_starting_racks(game);
-    while (!game_over(game)) {
-      const int on_turn_idx = game_get_player_on_turn_index(game);
-      Rack *rack = player_get_rack(game_get_player(game, on_turn_idx));
-      const Rack *opp_rack =
-          player_get_rack(game_get_player(game, 1 - on_turn_idx));
-      Rack original;
-      rack_copy(&original, rack);
-      const int rack_size = rack_get_total_letters(rack);
-      Rack pool;
-      rack_copy(&pool, rack);
-      MachineLetter tiles[2 * RACK_SIZE];
-      int num_tiles = 0;
-      for (int ml = 0; ml < dist_size; ml++) {
-        rack_add_letters(&pool, (MachineLetter)ml,
-                         rack_get_letter(opp_rack, (MachineLetter)ml));
-        for (int copy_idx = 0;
-             copy_idx < rack_get_letter(&pool, (MachineLetter)ml); copy_idx++) {
-          tiles[num_tiles++] = (MachineLetter)ml;
-        }
-      }
-      // With two more blanks the pool makes plays of the whole rack from more
-      // sets of tiles than a pool anchor keeps.
-      Rack wide_pool;
-      rack_copy(&wide_pool, &pool);
-      rack_add_letters(&wide_pool, BLANK_MACHINE_LETTER, 2);
-      const MoveGenArgs args = {
-          .game = game,
-          .move_list = best_small,
-          .move_record_type = MOVE_RECORD_BEST_SMALL,
-          .move_sort_type = MOVE_SORT_SCORE,
-          .eq_margin_movegen = 0,
-          .target_equity = EQUITY_MAX_VALUE,
-          .best_small_out_bonus = bonus,
-          .best_small_canonical_ties = true,
-          .lane_shadow_cache = cache,
-      };
-      assert(num_tiles >= rack_size);
-      for (int rack_idx = 0; rack_idx < POOL_TEST_RACKS; rack_idx++) {
-        int rack_blanks =
-            rack_idx - (POOL_TEST_RACKS - POOL_TEST_BLANK_RACKS) + 1;
-        if (rack_blanks < 0 || rack_blanks > rack_size) {
-          rack_blanks = 0;
-        }
-        if (rack_idx > 0) {
-          rack_set_dist_size_and_reset(rack, dist_size);
-          rack_add_letters(rack, BLANK_MACHINE_LETTER, rack_blanks);
-          for (int pick_idx = 0; pick_idx < rack_size - rack_blanks;
-               pick_idx++) {
-            const int swap_idx =
-                pick_idx + (int)(next_random(&random_state) %
-                                 (uint64_t)(num_tiles - pick_idx));
-            const MachineLetter picked = tiles[swap_idx];
-            tiles[swap_idx] = tiles[pick_idx];
-            tiles[pick_idx] = picked;
-            rack_add_letter(rack, picked);
-          }
-        }
-        const SmallMove expected =
-            best_small_play(game, NULL, best_small, bonus, 0);
-        for (int pass_idx = 0; pass_idx < 3; pass_idx++) {
-          generate_best_small_move_with_pool(
-              &args, pass_idx < 2 && rack_blanks == 0 ? &pool : &wide_pool);
-          assert(move_list_get_count(best_small) == 1);
-          const SmallMove *found = best_small->small_moves[0];
-          assert_same_small_play(&expected, found);
-          assert(small_move_get_tiles_played(&expected) ==
-                 small_move_get_tiles_played(found));
-          checks++;
-        }
-        if (small_move_is_pass(&expected)) {
-          passes++;
-        } else if (small_move_get_tiles_played(&expected) == rack_size) {
-          whole_rack_plays++;
-          blank_whole_rack_plays[rack_blanks]++;
-        }
-      }
-      rack_copy(rack, &original);
-      const Move move = *get_top_equity_move(game, top_move);
-      play_move(&move, game, NULL);
-    }
-  }
-  printf("best_small: %d generations with a pool (%s, %s the word map) find "
-         "the plays generate_moves finds: %d of the whole rack, %d passes\n",
-         checks, lexicon, use_wmp ? "with" : "without", whole_rack_plays,
-         passes);
-  assert(checks > 3 * POOL_TEST_RACKS * 15 * POOL_TEST_GAMES);
-  assert(whole_rack_plays > 0);
-  for (int blanks = 0; blanks <= POOL_TEST_BLANK_RACKS; blanks++) {
-    assert(blank_whole_rack_plays[blanks] > 0);
-  }
-  move_list_destroy(top_move);
-  lane_shadow_cache_destroy(cache);
-  game_destroy(game);
-  config_destroy(config);
-}
-
 static void check_cgp(Config *config, const char *cgp, MoveList *all_small,
                       MoveList *best_small, BestSmallStats *stats) {
   char *command = get_formatted_string("cgp %s", cgp);
@@ -1076,8 +941,6 @@ void test_best_small(void) {
   assert(stats.face_weight_changes > 0);
 
   check_lane_shadow_cache_with_word_info_table(best_small);
-  check_pool_generations("CSW21", true, best_small);
-  check_pool_generations("CSW21", false, best_small);
 
   config_destroy(config);
   small_move_list_destroy(best_small);

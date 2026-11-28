@@ -4,7 +4,6 @@
 #include "../def/move_defs.h"
 #include "klv.h"
 #include "kwg.h"
-#include "outplay_check_weights.h"
 #include "pat.h"
 #include "pat_board_cache.h"
 #include "peg_adjust.h"
@@ -44,9 +43,6 @@ const PegAdjust *player_get_peg_adjust(const Player *player);
 // rollout copies of the game (see rv_sim_create), so its rollouts model the
 // opponent as playing by the simming player's table.
 void player_set_peg_adjust(Player *player, const PegAdjust *peg_adjust);
-// The weights of the player's out-play check as a static player (see
-// outplay_check.h), or NULL for none.
-const OutplayCheckWeights *player_get_outplay_check(const Player *player);
 
 // The player's pool shift table and weight in thousandths (see
 // pool_shift.h): NULL and 0 for none.

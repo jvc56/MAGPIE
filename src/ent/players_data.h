@@ -8,7 +8,6 @@
 #include "klv.h"
 #include "kwg.h"
 #include "letter_distribution.h"
-#include "outplay_check_weights.h"
 #include "pat.h"
 #include "peg_adjust.h"
 #include "pool_shift.h"
@@ -42,9 +41,6 @@ PATWeights *players_data_get_pat(const PlayersData *players_data,
 InferenceTemperatures *
 players_data_get_inference_temperatures(const PlayersData *players_data,
                                         int player_index);
-OutplayCheckWeights *
-players_data_get_outplay_check(const PlayersData *players_data,
-                               int player_index);
 PegAdjust *players_data_get_peg_adjust(const PlayersData *players_data,
                                        int player_index);
 uint32_t
