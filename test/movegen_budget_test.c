@@ -1,8 +1,10 @@
 #include "movegen_budget_test.h"
 
+#include "../src/def/lamc_defs.h"
 #include "../src/ent/bai_result.h"
 #include "../src/ent/sim_results.h"
 #include "../src/impl/config.h"
+#include "../src/impl/lamc.h"
 #include "../src/impl/move_gen.h"
 #include "test_constants.h"
 #include "test_util.h"
@@ -45,6 +47,31 @@ static void test_a_simulation_stops_at_its_budget(void) {
   config_destroy(config);
 }
 
+// With LAMC on, the search's rounds take no samples once the budget is
+// spent, and the search must end then, not wait for its share of an
+// iteration budget it can no longer reach. Waiting, it ran empty rounds
+// until something else stopped it: here some 680 of them over 18 s, after
+// about 160 that took samples, and at other positions forever.
+static void test_a_lamc_simulation_stops_at_its_budget(void) {
+  Config *config = config_create_or_die(
+      "set -lex NWL20 -wmp true -s1 score -s2 score -r1 all -r2 all "
+      "-plies 2 -threads 2 -it 1000000 -numplays 30 -scond none "
+      "-sinfer false -lamc true -movebudget 20000");
+  load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
+  load_and_exec_config_or_die(config, "rack ACEIRST");
+  load_and_exec_config_or_die(config, "gen");
+  lamc_totals_reset();
+  load_and_exec_config_or_die(config, "sim");
+  const LamcTotals totals = lamc_get_totals();
+  assert(totals.searches == 1);
+  // Every round but the last few takes a full round's samples.
+  const uint64_t round_cost =
+      (uint64_t)LAMC_DEFAULT_POOL_SIZE * LAMC_DEFAULT_SHALLOW_SAMPLES;
+  assert(totals.rounds <= totals.explore_rollouts / round_cost + 4);
+  assert(sim_status(config) == BAI_RESULT_STATUS_MOVEGEN_BUDGET);
+  config_destroy(config);
+}
+
 // A budget of 0 is none: the simulation ends on its iteration budget.
 static void test_a_budget_of_0_is_none(void) {
   Config *config = config_create_or_die(
@@ -84,6 +111,7 @@ static void test_autoplay_spends_each_move_within_its_budget(void) {
 
 void test_movegen_budget(void) {
   test_a_simulation_stops_at_its_budget();
+  test_a_lamc_simulation_stops_at_its_budget();
   test_a_budget_of_0_is_none();
   test_autoplay_spends_each_move_within_its_budget();
 }

@@ -991,12 +991,14 @@ int lamc_search(LamcCtx *ctx, const LamcArgs *args, RandomVariables *base_rvs,
         break;
       }
     }
+    const uint64_t spent_before = lamc_get_search_rollouts(ctx);
     lamc_run_round(ctx, args, base_rvs, limits, round_time_limit);
     rounds++;
     lamc_mark_pool_evaluated(ctx);
     lamc_fit(ctx, args);
     if (thread_control_get_status(limits->thread_control) !=
-        THREAD_CONTROL_STATUS_STARTED) {
+            THREAD_CONTROL_STATUS_STARTED ||
+        lamc_get_search_rollouts(ctx) == spent_before) {
       break;
     }
     const int compared =
@@ -1028,6 +1030,9 @@ int lamc_search(LamcCtx *ctx, const LamcArgs *args, RandomVariables *base_rvs,
   }
   // Refinement spends what is left of the search's share (see
   // LamcArgs.refine). Without a rollout or time budget it would never end.
+  // Either loop also ends after a round that takes no samples: once a
+  // movegen budget (-movebudget) is spent, BAI abandons every round before
+  // its first sample, and the rollouts spent would never reach the share.
   const bool bounded =
       limits->rollout_budget != UINT64_MAX || limits->time_budget_seconds > 0;
   while (args->refine && bounded && limits->num_finalists > 0 &&
@@ -1059,6 +1064,9 @@ int lamc_search(LamcCtx *ctx, const LamcArgs *args, RandomVariables *base_rvs,
     rounds++;
     lamc_mark_pool_evaluated(ctx);
     lamc_fit(ctx, args);
+    if (lamc_get_search_rollouts(ctx) == spent) {
+      break;
+    }
   }
   return rounds;
 }
