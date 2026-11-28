@@ -292,6 +292,43 @@ int64_t contribute_get_memory_reserve_bytes(const ContributeState *state);
 // state.
 bool contribute_first_mention(ContributeState *state, const char *key);
 
+// Fetches the pinned input file at `source` -- one of an expected file's
+// `sources` -- and returns its bytes (the caller frees), their count in
+// *length. NULL if it could not be had, with *why saying so (the caller
+// frees).
+typedef char *(*contribute_input_fetch_t)(void *context, const char *source,
+                                          size_t *length, char **why);
+
+// Puts `fetch` in place of the request to the server a pinned input file is
+// fetched with. For tests.
+void contribute_set_input_fetch(ContributeState *state,
+                                contribute_input_fetch_t fetch, void *context);
+
+// Checks every file the claimed task loads against the digest the job pins:
+// in the contributor's own data (`data_paths`) first, and for a file that is
+// not there or has other bytes, by fetching it from one of the sources the
+// assignment names into a directory of its own (contribute_input_directory).
+// Returns whether the task has every file; the ones it does not have and
+// could not fetch are written into `missing`, as the entries of the JSON
+// array a missing_data decline carries. A claim does this; exposed for tests.
+bool contribute_verify_expected_data(ContributeState *state,
+                                     const char *data_paths,
+                                     ThreadControl *thread_control,
+                                     StringBuilder *missing);
+
+// The data paths the claimed task must run with: the directory its fetched
+// input files are in, then the contributor's own -- or NULL when nothing was
+// fetched and the contributor's own are the ones to use. The state's; valid
+// until the claim is released.
+const char *contribute_get_task_data_paths(const ContributeState *state);
+
+// The directory, inside the first of `data_paths`, that the files a task
+// fetched from the server are kept in: laid out as a data directory is, and
+// named for `fetched_files`, a "role\tname\tsha256\n" line per fetched file
+// in the assignment's order. The caller frees it.
+char *contribute_input_directory(const char *data_paths,
+                                 const char *fetched_files);
+
 // Makes `assignment` (owned from here) the claimed task's, as a claim does,
 // for an executor to read its pinned derived files from. Exposed for tests.
 void contribute_state_set_assignment(ContributeState *state,
