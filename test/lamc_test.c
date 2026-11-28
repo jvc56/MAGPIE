@@ -27,6 +27,7 @@
 #include "../src/ent/equity.h"
 #include "../src/ent/game.h"
 #include "../src/ent/lamc_args.h"
+#include "../src/ent/letter_distribution.h"
 #include "../src/ent/move.h"
 #include "../src/ent/play_feature.h"
 #include "../src/ent/player.h"
@@ -962,6 +963,109 @@ static void test_lamc_sim(void) {
   assert(unrefined.explore_rollouts < refined.explore_rollouts);
 }
 
+// A config at the position after 8H MUZAKS (muzaks_empyrean.gcg), from which
+// a sim infers the leave its player kept, with LAMC on, the config settings
+// extra and num_threads threads, its plays generated.
+static Config *lamc_test_inference_config(const int num_threads,
+                                          const char *extra) {
+  char *settings = get_formatted_string(
+      "set -lex CSW21 -wmp true -s1 equity -s2 equity -r1 all -r2 all "
+      "-numplays 4 -plies 2 -threads %d -iterations 400 "
+      "-minplayiterations 10 -scond none -tlim 0 -seed 42 -sinfer true "
+      "-lamc true -lamcpool 8 -lamcmaxbag 1000 -savesettings false -hr false "
+      "%s",
+      num_threads, extra);
+  Config *config = config_create_or_die(settings);
+  free(settings);
+  load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
+  assert(test_parse_gcg("muzaks_empyrean", config,
+                        config_get_game_history(config)) ==
+         ERROR_STATUS_SUCCESS);
+  game_play_to_end_or_die(config_get_game_history(config),
+                          config_get_game(config));
+  load_and_exec_config_or_die(config, "gen");
+  return config;
+}
+
+// A fingerprint of a LAMC sim with inference and recursive rollouts at
+// num_threads threads: every play's samples and win%, and the leaves the sim
+// inferred.
+static uint64_t lamc_test_inference_sim(const int num_threads) {
+  Config *config = lamc_test_inference_config(
+      num_threads, "-rlamc plies=0,lamc=0,k=2,m=1,h=1,dcache=0");
+  lamc_totals_reset();
+  load_and_exec_config_or_die(config, "sim");
+  assert(lamc_get_totals().searches == 1);
+  const SimResults *sim_results = config_get_sim_results(config);
+  const uint64_t infer_leaves = sim_results_get_num_infer_leaves(sim_results);
+  assert(infer_leaves > 0);
+  uint64_t hash = fnv64a_step(FNV_64_OFFSET_BASIS, infer_leaves);
+  const int num_plays = sim_results_get_number_of_plays(sim_results);
+  for (int play_idx = 0; play_idx < num_plays; play_idx++) {
+    const SimmedPlay *simmed_play =
+        sim_results_get_simmed_play(sim_results, play_idx);
+    hash = fnv64a_step(
+        hash, stat_get_num_samples(simmed_play_get_equity_stat(simmed_play)));
+    hash = fnv64a_step(
+        hash, lamc_test_bits(simmed_play_get_exact_win_pct_mean(simmed_play)));
+  }
+  config_destroy(config);
+  return hash;
+}
+
+// A fingerprint of a LAMC search of the config's position, with the sim
+// args' inference (from the config's last sim) or without it: every play's
+// samples and the surrogate's mean.
+static uint64_t lamc_test_inference_search(Config *config,
+                                           const bool use_inference) {
+  const int ld_size = ld_get_size(config_get_ld(config));
+  Rack target_played_tiles;
+  rack_set_dist_size_and_reset(&target_played_tiles, ld_size);
+  Rack nontarget_known_tiles;
+  rack_set_dist_size_and_reset(&nontarget_known_tiles, ld_size);
+  Rack target_known_inference_tiles;
+  rack_set_dist_size_and_reset(&target_known_inference_tiles, ld_size);
+  SimArgs sim_args;
+  config_fill_sim_args(config, NULL, &target_played_tiles,
+                       &nontarget_known_tiles, &target_known_inference_tiles,
+                       &sim_args);
+  assert(sim_args.use_inference);
+  sim_args.use_inference = use_inference;
+  thread_control_set_status(config_get_thread_control(config),
+                            THREAD_CONTROL_STATUS_STARTED);
+  LamcCtx *ctx = NULL;
+  LamcReport report;
+  const MoveList *candidates = lamc_choose_candidates(
+      &sim_args, &ctx, move_list_get_count(sim_args.move_list), &report);
+  assert(candidates != NULL);
+  assert(report.explore_rollouts > 0);
+  uint64_t hash = FNV_64_OFFSET_BASIS;
+  for (int play_idx = 0; play_idx < report.num_universe; play_idx++) {
+    hash = fnv64a_step(hash, lamc_get_play_samples(ctx, play_idx));
+    hash = fnv64a_step(hash,
+                       lamc_test_bits(lamc_get_predicted_mean(ctx, play_idx)));
+  }
+  lamc_ctx_destroy(ctx);
+  return hash;
+}
+
+// LAMC with inference, as users sim from a gcg (where inference is on by
+// default): before this position the opponent played 8H MUZAKS, keeping a
+// leave the sim infers. The sim, with recursive rollouts as well, gives the
+// same results at 1 and 4 threads. And the search's rollouts draw the
+// opponent's racks from the sim's inference, as BAI's do: the search with
+// the inference comes out other than the same search without it.
+static void test_lamc_with_inference(void) {
+  assert(lamc_test_inference_sim(1) == lamc_test_inference_sim(4));
+  Config *config = lamc_test_inference_config(1, "-rlamc off");
+  // The sim infers, leaving its inference in the config's results.
+  load_and_exec_config_or_die(config, "sim");
+  assert(sim_results_get_num_infer_leaves(config_get_sim_results(config)) > 0);
+  assert(lamc_test_inference_search(config, true) !=
+         lamc_test_inference_search(config, false));
+  config_destroy(config);
+}
+
 // A planted answer: in recorded rollouts where every exchange beats every
 // tile placement, though exchanges rank low by static equity, the search must
 // hand on an exchange beyond the top static plays. Values fall with static
@@ -1362,6 +1466,7 @@ void test_lamc(void) {
   test_lamc_sim_keeps_protected_play(true);
   test_lamc_two_stage();
   test_lamc_sim();
+  test_lamc_with_inference();
 }
 
 // The replay: rollouts of every play in a set of positions are recorded once,
