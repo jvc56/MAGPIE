@@ -24,7 +24,9 @@
 #include "../src/impl/census_rollout.h"
 #include "../src/impl/config.h"
 #include "../src/impl/gameplay.h"
+#include "../src/impl/lamc.h"
 #include "../src/impl/move_gen.h"
+#include "../src/impl/rlamc.h"
 #include "../src/impl/simmer.h"
 #include "../src/util/io_util.h"
 #include "../src/util/string_util.h"
@@ -40,6 +42,18 @@
 
 // Quackle's table, in test/fixtures/strategy.
 #define CENSUS_ROLLOUT_TEST_FIXTURES_PATH "./test/fixtures"
+// The recursive rollouts of the sims with them: searches of 3 candidates, of
+// 2 rollouts of 2 plies each, at the sim's first two plies; and searches at
+// the sim's first ply only, of 2 candidates, with a second level that
+// searches 2 candidates, of a rollout of 1 ply, at the first ply of each of
+// those rollouts.
+#define CENSUS_ROLLOUT_TEST_RLAMC_SPEC "plies=0+1,k=3,m=2,h=2"
+#define CENSUS_ROLLOUT_TEST_RLAMC_TWO_LEVEL_SPEC                               \
+  "plies=0,k=2,m=2,h=2/plies=0,k=2,m=1,h=1"
+// The LAMC search of the sims whose candidates it chooses: rounds of 8 plays
+// of 2 rollouts each.
+#define CENSUS_ROLLOUT_TEST_RLAMC_LAMC                                         \
+  "true -lamcpool 8 -lamckeep 2 -lamcshallow 2"
 
 enum {
   // Each position's candidates, the rollouts of each, and the plies of a
@@ -55,6 +69,10 @@ enum {
   // The sims compared with and without the census.
   CENSUS_ROLLOUT_TEST_SIM_ITERATIONS = 300,
   CENSUS_ROLLOUT_TEST_MAX_PLAYS = 16,
+  // The sims with recursive rollouts, each of whose rollouts runs searches,
+  // and the fewest rollouts they give a play.
+  CENSUS_ROLLOUT_TEST_RLAMC_ITERATIONS = 48,
+  CENSUS_ROLLOUT_TEST_RLAMC_MIN_PLAY_ITERATIONS = 6,
   // The benchmark: its sims' plies and iterations, on one thread.
   CENSUS_ROLLOUT_BENCH_PLIES = 2,
   CENSUS_ROLLOUT_BENCH_ITERATIONS = 20000,
@@ -599,6 +617,70 @@ static void test_census_rollout_sim_matches_plain(void) {
   assert_census_rollout_sim_matches_plain(" -poolshift 1.2 -pat CSW21", 12);
 }
 
+// A single-threaded sim with recursive rollouts of rlamc_spec gives the same
+// results with the census as without it: a sim of the position a static game
+// reaches with at most bag_tiles tiles in the bag, its candidates chosen by
+// a LAMC search if lamc says so. Each rollout runs searches of its own, so
+// the sims are short. Their searches ran, at every level of the spec, and
+// with expect_finishes their recursive rollouts finished games.
+static void assert_census_rollout_rlamc_sim_matches_plain(
+    const char *rlamc_spec, const bool lamc, const int bag_tiles,
+    const bool expect_finishes) {
+  char *command = get_formatted_string(
+      "set -lex CSW21 -wmp true -threads 1 -plies 2 -numplays 8 -it %d "
+      "-minp %d -scond none -sinfer false -sbagcycle false -sfinish true "
+      "-lamc %s -rlamc %s",
+      CENSUS_ROLLOUT_TEST_RLAMC_ITERATIONS,
+      CENSUS_ROLLOUT_TEST_RLAMC_MIN_PLAY_ITERATIONS,
+      lamc ? CENSUS_ROLLOUT_TEST_RLAMC_LAMC : "false", rlamc_spec);
+  Config *config = config_create_or_die(command);
+  free(command);
+  load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
+  MoveList *move_list = move_list_create(1);
+  play_to_bag_size(config_get_game(config), move_list, 7, bag_tiles);
+  load_and_exec_config_or_die(config, "gen");
+  rlamc_totals_reset();
+  lamc_totals_reset();
+  SimSnapshot plain_snapshot;
+  SimSnapshot census_snapshot;
+  sim_and_snapshot(config, "sim -seed 7 -scensus false", &plain_snapshot);
+  const bool plain_census =
+      sim_results_get_census_rollout(config_get_sim_results(config));
+  assert(!plain_census);
+  sim_and_snapshot(config, "sim -seed 7 -scensus true", &census_snapshot);
+  const bool census =
+      sim_results_get_census_rollout(config_get_sim_results(config));
+  assert(census);
+  assert_sim_snapshots_equal(&plain_snapshot, &census_snapshot);
+  const RlamcTotals rlamc_totals = rlamc_get_totals();
+  assert(rlamc_totals.searches > 0);
+  const bool two_levels = strchr(rlamc_spec, '/') != NULL;
+  assert(!two_levels || rlamc_totals.inner_searches > 0);
+  assert(!expect_finishes || rlamc_totals.finishes > 0);
+  const LamcTotals lamc_totals = lamc_get_totals();
+  assert(lamc_totals.searches == (lamc ? 2 : 0));
+  move_list_destroy(move_list);
+  config_destroy(config);
+}
+
+// With recursive rollouts, as users sim them: the CLI turns the census on.
+// The census steers the plays of each recursive search's rollouts
+// (rlamc_worker_set_census), which play on boards of the search's own
+// candidates, with the other rack drawn again, at plies past the sim's own,
+// and not their finishes. From a bag whose recursive rollouts stay in the
+// game, with a second level of searches, whose rollouts share the first's
+// census worker; and from a bag whose recursive rollouts reach the game's
+// end, with LAMC choosing the sim's candidates.
+static void test_census_rollout_rlamc_sim_matches_plain(void) {
+  if (BOARD_DIM != 15) {
+    return;
+  }
+  assert_census_rollout_rlamc_sim_matches_plain(
+      CENSUS_ROLLOUT_TEST_RLAMC_TWO_LEVEL_SPEC, false, 40, false);
+  assert_census_rollout_rlamc_sim_matches_plain(CENSUS_ROLLOUT_TEST_RLAMC_SPEC,
+                                                true, 12, true);
+}
+
 // Board-only PAT finds the same move from a cache that has seen the board,
 // and other racks on it, as from one that has seen nothing.
 static void test_census_rollout_pat_board_cache(void) {
@@ -1013,6 +1095,7 @@ void test_census_rollout(void) {
   test_census_rollout_tells_tables_apart();
   test_census_rollout_steers_many_candidates();
   test_census_rollout_sim_matches_plain();
+  test_census_rollout_rlamc_sim_matches_plain();
   test_census_rollout_pat_board_cache();
   test_census_rollout_sim_matches_plain_with_tables();
   test_census_rollout_refuses_pat();
