@@ -1124,7 +1124,6 @@ static void analyze_with_sim(const GameEvent *event, TurnResult *turn_result,
     }
   }
 
-  const int num_moves = move_list_get_count(ctx->move_list);
   const int player_on_turn_index = game_get_player_on_turn_index(ctx->game);
   Rack *known_opp_rack =
       player_get_rack(game_get_player(ctx->game, 1 - player_on_turn_index));
@@ -1215,8 +1214,13 @@ static void analyze_with_sim(const GameEvent *event, TurnResult *turn_result,
   assert(best_sp != NULL);
   const SimmedPlay *actual_sp = NULL;
 
+  // The sim can hold more plays than the move list: with -lamc, the plays
+  // the search hands on, and the actual play after them when the search left
+  // it out.
+  const int num_simmed_plays =
+      sim_results_get_number_of_plays(ctx->sim_results);
   int actual_display_idx = -1;
-  for (int sp_idx = 0; sp_idx < num_moves; sp_idx++) {
+  for (int sp_idx = 0; sp_idx < num_simmed_plays; sp_idx++) {
     const SimmedPlay *sp =
         sim_results_get_display_simmed_play(ctx->sim_results, sp_idx);
     const Move *sp_move = simmed_play_get_move(sp);

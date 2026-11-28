@@ -2146,7 +2146,8 @@ static void test_capturing_positions_does_not_change_the_games(void) {
 // after the contributor's own settings asked for plies -- must not simulate.
 static void test_player_settings_do_not_leak_between_tasks(void) {
   Config *config = config_create_or_die(
-      "set -lex CSW21 -plies 5 -sm1 true -sm2 true -sbagcycle false");
+      "set -lex CSW21 -plies 5 -sm1 true -sm2 true -sbagcycle false -lamc true "
+      "-rlamc on");
   const JsonValue *request = NULL;
   const JsonValue *games =
       load_task_request_fixture(BIRDTEST_GAMES_FIXTURE, &request);
@@ -2160,6 +2161,8 @@ static void test_player_settings_do_not_leak_between_tasks(void) {
   assert(config_get_player_sim_margin_forecast(config, 1));
   assert(!config_get_player_sim_bag_cycle(config, 0));
   assert(!config_get_player_sim_bag_cycle(config, 1));
+  assert(config_get_player_sim_lamc(config, 0));
+  assert(config_get_player_sim_rlamc(config, 1));
   config_contribute_apply_player_settings(config, simmer, 0, error_stack);
   config_contribute_apply_player_settings(config, static_player, 1,
                                           error_stack);
@@ -2177,6 +2180,14 @@ static void test_player_settings_do_not_leak_between_tasks(void) {
   // default rather than the contributor's.
   assert(config_get_player_sim_bag_cycle(config, 0));
   assert(config_get_player_sim_bag_cycle(config, 1));
+  // LAMC, RLAMC and the rollout finish, which no request field states, are
+  // off, as on main's workers: this build's -sfinish default and a
+  // contributor's -lamc or -rlamc would change what a simming player plays.
+  for (int player_idx = 0; player_idx < 2; player_idx++) {
+    assert(!config_get_player_sim_finish(config, player_idx));
+    assert(!config_get_player_sim_lamc(config, player_idx));
+    assert(!config_get_player_sim_rlamc(config, player_idx));
+  }
 
   // Nor does the previous task's simulation.
   config_contribute_apply_player_settings(config, static_player, 0,
@@ -2195,7 +2206,8 @@ static void test_player_settings_do_not_leak_between_tasks(void) {
 // would otherwise score every game of every job differently from the fleet.
 static void test_shared_settings_do_not_leak_between_tasks(void) {
   Config *config = config_create_or_die(
-      "set -lex CSW21 -bb 35 -sp true -smargin true -sbagcycle false");
+      "set -lex CSW21 -bb 35 -sp true -smargin true -sbagcycle false "
+      "-lamc true -rlamc on -apstaticbag 3");
   assert(config_get_bingo_bonus(config) == 35);
   assert(config_get_use_small_plays(config));
   assert(config_get_sim_margin_forecast(config));
@@ -2208,6 +2220,12 @@ static void test_shared_settings_do_not_leak_between_tasks(void) {
   // run-wide margin forecast is reset as each player's is.
   assert(!config_get_sim_margin_forecast(config));
   assert(config_get_sim_bag_cycle(config));
+  // As are LAMC, RLAMC, the rollout finish and the static opening of
+  // autoplay, off as on main's workers.
+  assert(!config_get_sim_finish(config));
+  assert(!config_get_sim_lamc(config));
+  assert(!config_get_sim_rlamc(config));
+  assert(config_get_autoplay_static_bag(config) == 0);
 
   // The bingo bonus is then the request's, not this build's default.
   ErrorStack *error_stack = error_stack_create();

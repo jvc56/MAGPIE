@@ -416,6 +416,25 @@ static void test_analyze_mistakes_flag_human_readable(void) {
   config_destroy(config);
 }
 
+// With -lamc, the sim simulates the plays the depth 0 search hands on, and
+// the actual play after them when the search left it out, so it can hold one
+// play more than -numplays. A poor actual play the sim ranks last sits at
+// that extra place, and analyze must still find it.
+static void test_analyze_lamc_actual_play_ranked_last(void) {
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -plies 1 -it 200 -numplays 2 -minplayiterations 10 "
+      "-threads 1 -sinfer false -seed 1 -lamc true -rlamc off");
+  load_game_history_with_gcg_string(config, MINIMAL_GCG_HEADER,
+                                    ">Tim: QIRESIT 8H TI +4 4\n");
+  (void)remove(PLAYER_NAMES_REPORT_PATH);
+  assert_config_exec_status(config, "analyze", ERROR_STATUS_SUCCESS);
+  char *report = get_string_from_file_or_die(PLAYER_NAMES_REPORT_PATH);
+  assert(has_substring(report, "8H TI"));
+  free(report);
+  remove_or_die(PLAYER_NAMES_REPORT_PATH);
+  config_destroy(config);
+}
+
 void test_analyze(void) {
   test_analyze_single_file();
   test_analyze_zero_args();
@@ -435,6 +454,7 @@ void test_analyze(void) {
   test_analyze_vertical_opening_transposable();
   test_analyze_mistakes_flag_csv();
   test_analyze_mistakes_flag_human_readable();
+  test_analyze_lamc_actual_play_ranked_last();
 }
 
 // Slow test: plies=2 simulation on a real GCG. Invoked only when explicitly

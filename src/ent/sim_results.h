@@ -106,6 +106,15 @@ SimResults *sim_results_create(const double cutoff);
 SimResults *sim_results_duplicate(SimResults *sim_results);
 void sim_results_reset(const MoveList *move_list, SimResults *sim_results,
                        int num_plies, uint64_t seed, bool use_heat_map);
+// Resets sim_results to move_list's plays, then copies to the play at each
+// index the statistics and seed stream of source's play at
+// source_indices[index], or leaves it fresh where that is negative, so that a
+// sim resumed from it continues those plays' samples.
+void sim_results_reset_from_plays(SimResults *sim_results,
+                                  const MoveList *move_list,
+                                  const SimResults *source,
+                                  const int *source_indices, int num_plies,
+                                  uint64_t seed, bool use_heat_map);
 void sim_results_destroy(SimResults *sim_results);
 
 int sim_results_get_number_of_plays(const SimResults *sim_results);

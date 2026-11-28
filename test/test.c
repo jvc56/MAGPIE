@@ -54,6 +54,7 @@
 #include "klv_test.h"
 #include "kwg_alpha_test.h"
 #include "kwg_maker_test.h"
+#include "lamc_test.h"
 #include "leave_map_test.h"
 #include "leaves_test.h"
 #include "letter_distribution_test.h"
@@ -94,6 +95,7 @@
 #include "rack_test.h"
 #include "rack_value_table_test.h"
 #include "random_variable_test.h"
+#include "rlamc_test.h"
 #include "shadow_test.h"
 #include "sim_benchmark_test.h"
 #include "sim_det_sweep_test.h"
@@ -184,6 +186,8 @@ static TestEntry test_table[] = {
     {"gzipreader", test_gzip_reader},
     {"datafetch", test_data_fetch},
     {"bai", test_bai},
+    {"lamc", test_lamc},
+    {"rlamc", test_rlamc},
     {"baiutil", test_bai_utility},
     {"command", test_command},
     {"embedding", test_embedding_lifecycle},
@@ -280,6 +284,16 @@ static TestEntry on_demand_test_table[] = {
     {"infercmp", test_infer_cmp},
     {"infbench", test_infer_bench},
     {"censusrolloutbench", test_census_rollout_bench},
+    {"lamcreplay", test_lamc_replay},
+    {"rlamccr", test_rlamc_cr},
+    {"rlamcbench", test_rlamc_bench},
+    {"rlamcgt", test_rlamc_gt},
+    {"rlamceval", test_rlamc_eval},
+    {"rlamcvar", test_rlamc_var},
+    {"rlamcpeg", test_rlamc_peg},
+    {"rlamcpegm", test_rlamc_pegm},
+    {"rlamctrace", test_rlamc_trace},
+    {"lamcautoplay", test_lamc_autoplay},
     {"genstuck", test_generate_stuck_cgps},
     {"gennonstuck", test_generate_nonstuck_cgps},
     {"gennonstuck2", test_generate_nonstuck_cgps2},

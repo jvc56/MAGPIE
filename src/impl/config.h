@@ -70,6 +70,13 @@ bool config_get_player_sim_margin_forecast(const Config *config,
 bool config_get_sim_margin_forecast(const Config *config);
 bool config_get_player_sim_bag_cycle(const Config *config, int player_index);
 bool config_get_sim_bag_cycle(const Config *config);
+bool config_get_player_sim_finish(const Config *config, int player_index);
+bool config_get_sim_finish(const Config *config);
+bool config_get_player_sim_lamc(const Config *config, int player_index);
+bool config_get_sim_lamc(const Config *config);
+bool config_get_player_sim_rlamc(const Config *config, int player_index);
+bool config_get_sim_rlamc(const Config *config);
+int config_get_autoplay_static_bag(const Config *config);
 int config_get_player_num_plays(const Config *config, int player_index);
 uint64_t config_get_player_max_iterations(const Config *config,
                                           int player_index);

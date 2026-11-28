@@ -5,6 +5,7 @@
 #include "../compat/memory_info.h"
 #include "../def/bai_defs.h"
 #include "../def/game_defs.h"
+#include "../def/game_history_defs.h"
 #include "../def/rack_defs.h"
 #include "../ent/alias_method.h"
 #include "../ent/bag.h"
@@ -13,7 +14,6 @@
 #include "../ent/equity.h"
 #include "../ent/game.h"
 #include "../ent/inference_results.h"
-#include "../ent/klv.h"
 #include "../ent/letter_distribution.h"
 #include "../ent/move.h"
 #include "../ent/pat_board_cache.h"
@@ -21,6 +21,7 @@
 #include "../ent/player.h"
 #include "../ent/pool_shift.h"
 #include "../ent/rack.h"
+#include "../ent/rlamc_args.h"
 #include "../ent/sim_args.h"
 #include "../ent/sim_results.h"
 #include "../ent/thread_control.h"
@@ -31,6 +32,7 @@
 #include "bai_logger.h"
 #include "census_rollout.h"
 #include "gameplay.h"
+#include "rlamc.h"
 #include <math.h>
 #include <stdatomic.h>
 #include <stddef.h>
@@ -427,7 +429,14 @@ typedef struct SimmerWorker {
   // The worker's cache for board-only PAT (see pat_board_cache.h), made by
   // the first sim whose rollouts use it and emptied for each one.
   PATBoardCache *pat_board_cache;
+  // The worker's recursive searches (see rlamc.h), made by the first
+  // sim whose rollouts use them.
+  RlamcWorker *rlamc_worker;
 } SimmerWorker;
+
+// The most static plies a rollout plays to finish a game whose bag is empty
+// at its horizon (see SimArgs.finish_endgame); the game ends well before.
+enum { SIM_FINISH_MAX_PLIES = 40 };
 
 // The step of a simulation worker's cross set salt: odd, so a worker's
 // salts do not repeat.
@@ -471,6 +480,12 @@ typedef struct Simmer {
   // sim that uses it makes (SimArgs.use_census_rollout).
   bool use_census_rollout;
   CensusRollout *census_rollout;
+  // SimArgs.rlamc_args, and how its recursive rollouts are scored.
+  RlamcArgs rlamc_args;
+  RlamcEval rlamc_eval;
+  // SimArgs.finish_endgame and finish_max_bag.
+  bool finish_endgame;
+  int finish_max_bag;
   // The leaves of the pool of the tiles neither player has played, which
   // the sim's rollouts read when the mover's leave values are exact (see
   // PoolLeaves), and a copy of the sim's game whose players have them, for
@@ -565,6 +580,12 @@ SimmerWorker *simmer_create_worker(const SimArgs *sim_args) {
   simmer_worker->move_list = move_list_create(1);
   simmer_worker->prng = prng_create(0);
   simmer_worker->census_rollout_worker = NULL;
+  simmer_worker->rlamc_worker = NULL;
+  if (sim_args->rlamc_args.enabled) {
+    simmer_worker->rlamc_worker = rlamc_worker_create(
+        simmer_worker->game, simmer_worker->cross_set_cache);
+    rlamc_worker_reset(simmer_worker->rlamc_worker, sim_args->seed);
+  }
   return simmer_worker;
 }
 
@@ -576,6 +597,13 @@ void simmer_reset_worker(SimmerWorker *simmer_worker, const SimArgs *sim_args) {
   simmer_worker_set_rollout_pat(simmer_worker, sim_args);
   simmer_worker_set_rollout_peg_adjust(simmer_worker, sim_args);
   simmer_worker_set_rollout_pool_shift(simmer_worker, sim_args);
+  if (sim_args->rlamc_args.enabled && simmer_worker->rlamc_worker == NULL) {
+    simmer_worker->rlamc_worker = rlamc_worker_create(
+        simmer_worker->game, simmer_worker->cross_set_cache);
+  }
+  if (simmer_worker->rlamc_worker != NULL) {
+    rlamc_worker_reset(simmer_worker->rlamc_worker, sim_args->seed);
+  }
 }
 
 void simmer_worker_destroy(SimmerWorker *simmer_worker) {
@@ -588,38 +616,31 @@ void simmer_worker_destroy(SimmerWorker *simmer_worker) {
   prng_destroy(simmer_worker->prng);
   census_rollout_worker_destroy(simmer_worker->census_rollout_worker);
   pat_board_cache_destroy(simmer_worker->pat_board_cache);
+  rlamc_worker_destroy(simmer_worker->rlamc_worker);
   free(simmer_worker);
 }
 
-// The value to the player of the tiles a play of theirs keeps, for a play
-// not yet played: the leave's value and its pool shift (see pool_shift.h), as
-// move generation values the play's leave. The shift is for the tiles the
-// player sees as unseen before the play draws, and is 0 where move generation
-// adds none.
-static Equity simmer_get_leftover_value(const Game *game, int player_index,
-                                        const Move *move) {
-  const Player *player = game_get_player(game, player_index);
-  const KLV *klv = player_get_klv(player);
-  const int tiles_on_rack = rack_get_total_letters(player_get_rack(player));
-  Rack leave;
-  rack_copy(&leave, player_get_rack(player));
-  const Equity leave_value = get_leave_value_for_move(klv, move, &leave);
-  return leave_value +
-         pool_shift_get_leave_shift(
-             player_get_pool_shift_table(player), klv,
-             player_get_pool_shift_weight(player), game_get_ld(game),
-             game_get_bag(game),
-             player_get_rack(game_get_player(game, 1 - player_index)), &leave,
-             tiles_on_rack, game_get_real_bag_size(game));
+// The tiles left in the bag once play, not yet played, has drawn: a tile
+// placement draws as many as it places, or all the bag has; an exchange or a
+// pass leaves the count as it is.
+static int bag_letters_after_play(const Bag *bag, const Move *play) {
+  const int bag_letters = bag_get_letters(bag);
+  if (move_get_type(play) != GAME_EVENT_TILE_PLACEMENT_MOVE) {
+    return bag_letters;
+  }
+  const int tiles_played = move_get_tiles_played(play);
+  return tiles_played < bag_letters ? bag_letters - tiles_played : 0;
 }
 
 // One rollout of simmed_play from seed's shuffled bag, rotated left by
 // rotation * RACK_SIZE letters (see bag_rotate) before the opponent's rack is
 // drawn. When record is non-NULL, the rollout's contributions to its
-// SimmedPlay are written there instead of applied. Returns its utility.
+// SimmedPlay are written there instead of applied. Without use_rlamc, every
+// ply is static even when the sim's recursive args apply. Returns its utility.
 static double sim_rollout(const Simmer *simmer, SimmerWorker *simmer_worker,
                           SimmedPlay *simmed_play, const uint64_t seed,
-                          const int rotation, SimmedPlaySampleRecord *record) {
+                          const int rotation, const bool use_rlamc,
+                          SimmedPlaySampleRecord *record) {
   SimResults *sim_results = simmer->sim_results;
   Game *game = simmer_worker->game;
   MoveList *move_list = simmer_worker->move_list;
@@ -673,8 +694,8 @@ static double sim_rollout(const Simmer *simmer, SimmerWorker *simmer_worker,
   game_set_backup_mode(game, BACKUP_MODE_SIMULATION);
   // For one-ply sims, we need to account for the candidate move's leave value
   if (plies == 1) {
-    leftover += simmer_get_leftover_value(game, simmer->initial_player,
-                                          simmed_play_get_move(simmed_play));
+    leftover += get_leftover_value_for_move(game, simmer->initial_player,
+                                            simmed_play_get_move(simmed_play));
   }
   // play move
   play_move(simmed_play_get_move(simmed_play), game, NULL);
@@ -693,26 +714,45 @@ static double sim_rollout(const Simmer *simmer, SimmerWorker *simmer_worker,
       break;
     }
 
-    const Move *best_play =
-        simmer->use_census_rollout
-            ? census_rollout_get_best_move(simmer_worker->census_rollout_worker,
-                                           simmer->census_rollout, game,
-                                           move_list, ply)
-            : get_top_equity_move_with_carry(game, move_list,
-                                             simmer->best_move_carry);
+    const Move *best_play;
+    if (use_rlamc && simmer->rlamc_args.enabled &&
+        rlamc_applies(&simmer->rlamc_args, ply,
+                      bag_get_letters(game_get_bag(game)))) {
+      rlamc_worker_set_census(
+          simmer_worker->rlamc_worker,
+          simmer->use_census_rollout ? simmer_worker->census_rollout_worker
+                                     : NULL,
+          simmer->use_census_rollout ? simmer->census_rollout : NULL, ply + 1);
+      best_play = rlamc_choose_move(
+          simmer_worker->rlamc_worker, &simmer->rlamc_args, &simmer->rlamc_eval,
+          game, seed ^ ((uint64_t)(ply + 1) * 0xA24BAED4963EE407ULL),
+          simmer->best_move_carry);
+    } else if (simmer->use_census_rollout) {
+      best_play = census_rollout_get_best_move(
+          simmer_worker->census_rollout_worker, simmer->census_rollout, game,
+          move_list, ply);
+    } else {
+      best_play = get_top_equity_move_with_carry(game, move_list,
+                                                 simmer->best_move_carry);
+    }
     // Each player's last play of the rollout leaves tiles the rollout never
     // plays: their value, read before the play draws from the pool.
     Equity this_leftover = 0;
     const bool is_last_play_of_player = ply == plies - 2 || ply == plies - 1;
     if (is_last_play_of_player) {
       this_leftover =
-          simmer_get_leftover_value(game, player_on_turn_index, best_play);
+          get_leftover_value_for_move(game, player_on_turn_index, best_play);
     }
 
     // On the final ply the resulting cross-sets are never read (no further move
     // generation happens before game_unplay_last_move restores the board), so
-    // skip the cross-set update for that play.
-    if (ply == plies - 1) {
+    // skip the cross-set update for that play, unless the finish below will
+    // generate moves after it: the bag it tests is the one this play's draw
+    // leaves.
+    if (ply == plies - 1 &&
+        !(simmer->finish_endgame &&
+          bag_letters_after_play(game_get_bag(game), best_play) <=
+              simmer->finish_max_bag)) {
       play_move_no_cross_set_update(best_play, game, NULL);
     } else {
       play_move(best_play, game, NULL);
@@ -726,6 +766,27 @@ static double sim_rollout(const Simmer *simmer, SimmerWorker *simmer_worker,
       }
     }
     simmed_play_add_stats_for_ply(simmed_play, ply, best_play, record);
+  }
+
+  // With finish_endgame, a rollout whose bag is empty at its horizon plays
+  // on by static equity to the end of the game, which then scores it.
+  bool horizon_plies_odd = plies % 2 == 1;
+  if (simmer->finish_endgame && !game_over(game) &&
+      bag_get_letters(game_get_bag(game)) <= simmer->finish_max_bag) {
+    int extra_plies = 0;
+    while (!game_over(game) && extra_plies < SIM_FINISH_MAX_PLIES) {
+      const Move *play = get_top_equity_move_with_carry(
+          game, move_list, simmer->best_move_carry);
+      play_move(play, game, NULL);
+      sim_results_increment_node_count(sim_results);
+      extra_plies++;
+    }
+    if (game_over(game)) {
+      leftover = 0;
+    } else {
+      horizon_plies_odd =
+          game_get_player_on_turn_index(game) == simmer->initial_player;
+    }
   }
 
   const Equity spread =
@@ -757,7 +818,8 @@ static double sim_rollout(const Simmer *simmer, SimmerWorker *simmer_worker,
                               projected_leftover, record);
   const double wpct = simmed_play_add_win_pct_stat(
       simmer->win_pcts, simmed_play, spread, leftover, game_end_reason,
-      bag_tiles, on_turn_rack_tiles, off_turn_rack_tiles, plies % 2, record);
+      bag_tiles, on_turn_rack_tiles, off_turn_rack_tiles, horizon_plies_odd,
+      record);
   // reset to first state. we only need to restore one backup.
   game_unplay_last_move(game);
   return_rack_to_bag(game, player_off_turn_index);
@@ -796,6 +858,7 @@ int rv_sim_bag_cycle_rotations(const Game *game) {
 static double sim_cycled_rollouts(const Simmer *simmer,
                                   SimmerWorker *simmer_worker,
                                   SimmedPlay *simmed_play, const uint64_t seed,
+                                  const bool use_rlamc,
                                   SimmedPlaySampleRecord *record) {
   const int rotations = rv_sim_bag_cycle_rotations(simmer_worker->game);
   SimmedPlaySampleRecord combined;
@@ -809,7 +872,7 @@ static double sim_cycled_rollouts(const Simmer *simmer,
   for (int rotation = 0; rotation < rotations; rotation++) {
     simmed_play_sample_record_clear(&rollout);
     utility_sum += sim_rollout(simmer, simmer_worker, simmed_play, seed,
-                               rotation, &rollout);
+                               rotation, use_rlamc, &rollout);
     if (rotation == 0) {
       *out = rollout;
     }
@@ -826,6 +889,69 @@ static double sim_cycled_rollouts(const Simmer *simmer,
   if (record == NULL) {
     simmed_play_apply_sample_record(simmed_play, out);
     sim_results_add_iteration_count(simmer->sim_results, (uint64_t)rotations);
+  }
+  return out->utility;
+}
+
+// A sample with a control variate (RlamcArgs.control_samples = k): the
+// recursive sample Y, the static sample X from the same seed, and k static
+// samples X_1 .. X_k from seeds of their own. Records Y - X + mean(X_j) as
+// the sample's equity, leftover, win% and utility (its per-ply statistics are
+// Y's). Its mean is Y's, and as Y and X share their draws, its variance is
+// Var(Y - X) + Var(X) / k, far below Var(Y) when the recursive and static
+// rollouts mostly agree. Records into record, or applies once when it is
+// NULL. Returns the sample's utility.
+static double sim_controlled_sample(const Simmer *simmer,
+                                    SimmerWorker *simmer_worker,
+                                    SimmedPlay *simmed_play,
+                                    const uint64_t seed,
+                                    const int control_samples,
+                                    SimmedPlaySampleRecord *record) {
+  SimmedPlaySampleRecord rlamc_sample;
+  SimmedPlaySampleRecord *out = record != NULL ? record : &rlamc_sample;
+  simmed_play_sample_record_clear(out);
+  SimmedPlaySampleRecord control;
+  double equity_sum = 0.0;
+  double leftover_sum = 0.0;
+  double win_pct_sum = 0.0;
+  double utility_sum = 0.0;
+  for (int control_idx = -1; control_idx <= control_samples; control_idx++) {
+    // -1 is the recursive sample, 0 its static twin, the rest independent.
+    SimmedPlaySampleRecord *sample = control_idx < 0 ? out : &control;
+    if (control_idx >= 0) {
+      simmed_play_sample_record_clear(&control);
+    }
+    const uint64_t sample_seed =
+        control_idx <= 0
+            ? seed
+            : seed + (uint64_t)control_idx * UINT64_C(0x9E3779B97F4A7C15);
+    const bool use_rlamc = control_idx < 0;
+    double utility = 0.0;
+    if (simmer->bag_cycle) {
+      utility = sim_cycled_rollouts(simmer, simmer_worker, simmed_play,
+                                    sample_seed, use_rlamc, sample);
+    } else {
+      utility = sim_rollout(simmer, simmer_worker, simmed_play, sample_seed, 0,
+                            use_rlamc, sample);
+    }
+    sample->utility = utility;
+    if (control_idx < 0) {
+      continue;
+    }
+    const double sign = control_idx == 0 ? -1.0 : 1.0 / control_samples;
+    equity_sum += sign * (double)control.equity_sample;
+    leftover_sum += sign * (double)control.leftover;
+    win_pct_sum += sign * control.win_pct;
+    utility_sum += sign * utility;
+  }
+  out->equity_sample += (Equity)llround(equity_sum);
+  out->leftover += (Equity)llround(leftover_sum);
+  out->win_pct += win_pct_sum;
+  out->utility += utility_sum;
+  if (record == NULL) {
+    simmed_play_apply_sample_record(simmed_play, out);
+    sim_results_add_iteration_count(simmer->sim_results,
+                                    (uint64_t)out->num_rollouts);
   }
   return out->utility;
 }
@@ -864,15 +990,21 @@ static double rv_sim_sample_impl(RandomVariables *rvs,
                             ? reserved_seed
                             : simmed_play_get_seed(simmed_play);
   double utility;
-  if (!simmer->bag_cycle) {
-    utility = sim_rollout(simmer, simmer_worker, simmed_play, seed, 0, record);
+  const int control_samples =
+      simmer->rlamc_args.enabled ? simmer->rlamc_args.control_samples : 0;
+  if (control_samples > 0) {
+    utility = sim_controlled_sample(simmer, simmer_worker, simmed_play, seed,
+                                    control_samples, record);
+  } else if (!simmer->bag_cycle) {
+    utility =
+        sim_rollout(simmer, simmer_worker, simmed_play, seed, 0, true, record);
     // A recorded sample is counted when its record is applied.
     if (!record) {
       sim_results_increment_iteration_count(sim_results);
     }
   } else {
-    utility =
-        sim_cycled_rollouts(simmer, simmer_worker, simmed_play, seed, record);
+    utility = sim_cycled_rollouts(simmer, simmer_worker, simmed_play, seed,
+                                  true, record);
   }
   if (simmer->print_interval > 0 &&
       sample_count % simmer->print_interval == 0) {
@@ -1105,6 +1237,18 @@ static bool rv_sim_can_resume(const SimArgs *sim_args,
          sim_results_get_num_plies(sim_results) == sim_args->num_plies;
 }
 
+static void simmer_set_rlamc(Simmer *simmer, const SimArgs *sim_args) {
+  simmer->finish_endgame = sim_args->finish_endgame;
+  simmer->finish_max_bag = sim_args->finish_max_bag;
+  simmer->rlamc_args = sim_args->rlamc_args;
+  simmer->rlamc_eval.win_pcts = sim_args->win_pcts;
+  simmer->rlamc_eval.utility_w_winpct = sim_args->utility_w_winpct;
+  simmer->rlamc_eval.utility_w_spread = sim_args->utility_w_spread;
+  simmer->rlamc_eval.utility_spread_scale = sim_args->utility_spread_scale;
+  simmer->rlamc_eval.finish_endgame = sim_args->finish_endgame;
+  simmer->rlamc_eval.finish_max_bag = sim_args->finish_max_bag;
+}
+
 RandomVariables *rv_sim_create(RandomVariables *rvs, const SimArgs *sim_args,
                                SimResults *sim_results) {
   rvs->sample_func = rv_sim_sample;
@@ -1169,6 +1313,7 @@ RandomVariables *rv_sim_create(RandomVariables *rvs, const SimArgs *sim_args,
   simmer->utility_spread_scale = sim_args->utility_spread_scale;
   simmer->use_margin_forecast = sim_args->use_margin_forecast;
   simmer->bag_cycle = sim_args->bag_cycle;
+  simmer_set_rlamc(simmer, sim_args);
 
   simmer->thread_control = thread_control;
 
@@ -1232,6 +1377,7 @@ void rv_sim_reset(RandomVariables *rvs, const SimArgs *sim_args) {
   simmer->utility_spread_scale = sim_args->utility_spread_scale;
   simmer->use_margin_forecast = sim_args->use_margin_forecast;
   simmer->bag_cycle = sim_args->bag_cycle;
+  simmer_set_rlamc(simmer, sim_args);
 
   if (!rv_sim_can_resume(sim_args, simmer->sim_results)) {
     sim_results_reset(sim_args->move_list, simmer->sim_results,
@@ -1240,6 +1386,172 @@ void rv_sim_reset(RandomVariables *rvs, const SimArgs *sim_args) {
   }
   simmer_prepare_pool_leaves(simmer, sim_args);
   simmer_prepare_census_rollout(simmer, sim_args);
+}
+
+typedef struct RVTable {
+  uint64_t num_samples;
+  double *samples;
+  uint64_t *cursors;
+  cpthread_mutex_t mutex;
+} RVTable;
+
+static double rv_table_sample(RandomVariables *rvs, const uint64_t k,
+                              const uint64_t
+                              __attribute__((unused)) reserved_seed,
+                              const int __attribute__((unused)) thread_index,
+                              const uint64_t
+                              __attribute__((unused)) sample_count,
+                              BAILogger __attribute__((unused)) * bai_logger) {
+  RVTable *table = (RVTable *)rvs->data;
+  cpthread_mutex_lock(&table->mutex);
+  const uint64_t index = table->cursors[k]++;
+  cpthread_mutex_unlock(&table->mutex);
+  if (index >= table->num_samples) {
+    log_fatal("ran out of table samples for arm %llu", (unsigned long long)k);
+  }
+  return table->samples[k * table->num_samples + index];
+}
+
+static bool rv_table_are_similar(RandomVariables __attribute__((unused)) * rvs,
+                                 const int __attribute__((unused)) i,
+                                 const int __attribute__((unused)) j) {
+  return false;
+}
+
+static void rv_table_destroy(RandomVariables *rvs) {
+  RVTable *table = (RVTable *)rvs->data;
+  free(table->samples);
+  free(table->cursors);
+  free(table);
+}
+
+static void rv_table_reset(RandomVariables *rvs) {
+  RVTable *table = (RVTable *)rvs->data;
+  for (uint64_t arm = 0; arm < rvs->num_rvs; arm++) {
+    table->cursors[arm] = 0;
+  }
+}
+
+static void rv_table_create(RandomVariables *rvs, const double *samples,
+                            const uint64_t num_samples) {
+  rvs->sample_func = rv_table_sample;
+  rvs->similar_func = rv_table_are_similar;
+  rvs->destroy_data_func = rv_table_destroy;
+  rvs->get_best_arm_index_func = rv_unsupported_get_best_arm_index;
+  RVTable *table = malloc_or_die(sizeof(RVTable));
+  table->num_samples = num_samples;
+  table->samples = malloc_or_die(sizeof(double) * rvs->num_rvs * num_samples);
+  memcpy(table->samples, samples, sizeof(double) * rvs->num_rvs * num_samples);
+  table->cursors = malloc_or_die(sizeof(uint64_t) * rvs->num_rvs);
+  cpthread_mutex_init(&table->mutex);
+  rvs->data = table;
+  rv_table_reset(rvs);
+}
+
+typedef struct RVSubset {
+  RandomVariables *base;
+  const int *arm_indices;
+  RVSubsetStats *stats;
+} RVSubset;
+
+static double rv_subset_record(const RVSubset *subset, const uint64_t base_arm,
+                               const double value) {
+  if (subset->stats) {
+    const RVSubsetStats *stats = subset->stats;
+    atomic_fetch_add(&stats->counts[base_arm], 1);
+    atomic_fetch_add(&stats->sums[base_arm],
+                     (int64_t)llround(value * (double)BAI_FIXED_POINT_SCALE));
+    atomic_fetch_add(
+        &stats->squares[base_arm],
+        (int64_t)llround(value * value * (double)BAI_FIXED_POINT_SCALE));
+  }
+  return value;
+}
+
+static uint64_t rv_subset_base_arm(const RandomVariables *rvs,
+                                   const uint64_t k) {
+  const RVSubset *subset = (const RVSubset *)rvs->data;
+  return (uint64_t)subset->arm_indices[k];
+}
+
+static double rv_subset_sample(RandomVariables *rvs, const uint64_t k,
+                               const uint64_t reserved_seed,
+                               const int thread_index,
+                               const uint64_t sample_count,
+                               BAILogger *bai_logger) {
+  const RVSubset *subset = (const RVSubset *)rvs->data;
+  RandomVariables *base = subset->base;
+  const uint64_t base_arm = rv_subset_base_arm(rvs, k);
+  return rv_subset_record(subset, base_arm,
+                          base->sample_func(base, base_arm, reserved_seed,
+                                            thread_index, sample_count,
+                                            bai_logger));
+}
+
+static double rv_subset_sample_into_record(
+    RandomVariables *rvs, const uint64_t k, const uint64_t reserved_seed,
+    const int thread_index, const uint64_t sample_count, BAILogger *bai_logger,
+    void *record) {
+  const RVSubset *subset = (const RVSubset *)rvs->data;
+  RandomVariables *base = subset->base;
+  const uint64_t base_arm = rv_subset_base_arm(rvs, k);
+  return rv_subset_record(
+      subset, base_arm,
+      base->sample_into_record_func(base, base_arm, reserved_seed, thread_index,
+                                    sample_count, bai_logger, record));
+}
+
+static void rv_subset_apply_record(const RandomVariables *rvs, const uint64_t k,
+                                   const void *record) {
+  const RandomVariables *base = ((const RVSubset *)rvs->data)->base;
+  base->apply_record_func(base, rv_subset_base_arm(rvs, k), record);
+}
+
+static uint64_t rv_subset_next_seed(RandomVariables *rvs, const uint64_t k) {
+  return rvs_next_seed(((RVSubset *)rvs->data)->base,
+                       rv_subset_base_arm(rvs, k));
+}
+
+static uint64_t rv_subset_peek_seed(RandomVariables *rvs, const uint64_t k,
+                                    const uint64_t ahead) {
+  return rvs_peek_seed(((RVSubset *)rvs->data)->base,
+                       rv_subset_base_arm(rvs, k), ahead);
+}
+
+static bool rv_subset_are_similar(RandomVariables *rvs, const int i,
+                                  const int j) {
+  return rvs_are_similar(((RVSubset *)rvs->data)->base,
+                         (int)rv_subset_base_arm(rvs, (uint64_t)i),
+                         (int)rv_subset_base_arm(rvs, (uint64_t)j));
+}
+
+static void rv_subset_destroy(RandomVariables *rvs) { free(rvs->data); }
+
+static void rv_subset_point_at_base(RandomVariables *rvs,
+                                    const RandomVariablesArgs *rvs_args) {
+  RVSubset *subset = (RVSubset *)rvs->data;
+  RandomVariables *base = rvs_args->base_rvs;
+  subset->base = base;
+  subset->arm_indices = rvs_args->arm_indices;
+  subset->stats = rvs_args->subset_stats;
+  rvs->arms_share_seeds = base->arms_share_seeds;
+  rvs->next_seed_func = base->next_seed_func ? rv_subset_next_seed : NULL;
+  rvs->peek_seed_func = base->peek_seed_func ? rv_subset_peek_seed : NULL;
+  rvs->sample_into_record_func =
+      base->sample_into_record_func ? rv_subset_sample_into_record : NULL;
+  rvs->apply_record_func =
+      base->apply_record_func ? rv_subset_apply_record : NULL;
+  rvs->sample_record_size = base->sample_record_size;
+}
+
+static void rv_subset_create(RandomVariables *rvs,
+                             const RandomVariablesArgs *rvs_args) {
+  rvs->sample_func = rv_subset_sample;
+  rvs->similar_func = rv_subset_are_similar;
+  rvs->destroy_data_func = rv_subset_destroy;
+  rvs->get_best_arm_index_func = rv_unsupported_get_best_arm_index;
+  rvs->data = malloc_or_die(sizeof(RVSubset));
+  rv_subset_point_at_base(rvs, rvs_args);
 }
 
 RandomVariables *rvs_create(const RandomVariablesArgs *rvs_args) {
@@ -1274,6 +1586,12 @@ RandomVariables *rvs_create(const RandomVariablesArgs *rvs_args) {
   case RANDOM_VARIABLES_SIMMED_PLAYS:
     rv_sim_create(rvs, rvs_args->sim_args, rvs_args->sim_results);
     break;
+  case RANDOM_VARIABLES_SUBSET:
+    rv_subset_create(rvs, rvs_args);
+    break;
+  case RANDOM_VARIABLES_TABLE:
+    rv_table_create(rvs, rvs_args->samples, rvs_args->num_samples);
+    break;
   }
   return rvs;
 }
@@ -1296,6 +1614,12 @@ void rvs_reset(RandomVariables *rvs, const RandomVariablesArgs *rvs_args) {
     break;
   case RANDOM_VARIABLES_SIMMED_PLAYS:
     rv_sim_reset(rvs, rvs_args->sim_args);
+    break;
+  case RANDOM_VARIABLES_SUBSET:
+    rv_subset_point_at_base(rvs, rvs_args);
+    break;
+  case RANDOM_VARIABLES_TABLE:
+    rv_table_reset(rvs);
     break;
   }
 }

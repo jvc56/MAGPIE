@@ -5,6 +5,7 @@
 #include "../src/compat/ctime.h"
 #include "../src/def/bai_defs.h"
 #include "../src/def/game_defs.h"
+#include "../src/def/game_history_defs.h"
 #include "../src/def/rack_defs.h"
 #include "../src/def/thread_control_defs.h"
 #include "../src/ent/alias_method.h"
@@ -1095,6 +1096,70 @@ void test_sim_endgame(void) {
   config_destroy(config);
 }
 
+// -sfinish after a rollout's last ply draws the bag's last tile: the finish
+// must move-generate on that ply's cross-sets. With the opponent's rack known
+// and 1 tile in the bag, a 1-ply rollout is one deterministic game: the
+// candidate, then static plays to the end. After the pass, the opponent's
+// reply (the last ply) empties the bag.
+static void test_sim_finish_after_last_ply_empties_bag(void) {
+  Config *config = config_create_or_die(
+      "set -lex NWL20 -wmp true -s1 equity -s2 equity -r1 all -r2 all "
+      "-threads 1 -plies 1 -numplays 6 -it 12 -minplayiterations 2 "
+      "-scond none -tlim 0 -seed 7 -sinfer false -sfinish true -lamc false "
+      "-rlamc off -savesettings false -hr false");
+  load_and_exec_config_or_die(
+      config, "cgp 15/3Q7U3/3U2TAURINE2/1CHANSONS2W3/2AI6JO3/DIRL1PO3IN3/"
+              "E1D2EF3V4/F1I2p1TRAIK3/O1L2T4E4/ABy1PIT2BRIG2/ME1MOZELLE5/"
+              "1GRADE1O1NOH3/WE3R1V7/AT5E7/G6D7 ENOSTXY/ACEISUY 356/378 0 "
+              "-lex NWL20");
+  load_and_exec_config_or_die(config, "gen");
+  load_and_exec_config_or_die(config, "addmoves pass");
+  const Game *game = config_get_game(config);
+  const int mover = game_get_player_on_turn_index(game);
+  Rack known_opp_rack;
+  rack_copy(&known_opp_rack, player_get_rack(game_get_player(game, 1 - mover)));
+  SimResults *sim_results = config_get_sim_results(config);
+  thread_control_set_status(config_get_thread_control(config),
+                            THREAD_CONTROL_STATUS_STARTED);
+  ErrorStack *error_stack = error_stack_create();
+  config_simulate(config, NULL, &known_opp_rack, sim_results, NULL, 0,
+                  error_stack);
+  assert(error_stack_is_empty(error_stack));
+  error_stack_destroy(error_stack);
+
+  MoveList *top = move_list_create(1);
+  const int num_plays = sim_results_get_number_of_plays(sim_results);
+  bool found_pass = false;
+  for (int play_idx = 0; play_idx < num_plays; play_idx++) {
+    const SimmedPlay *simmed_play =
+        sim_results_get_simmed_play(sim_results, play_idx);
+    const Move *move = simmed_play_get_move(simmed_play);
+    if (move_get_type(move) == GAME_EVENT_PASS) {
+      found_pass = true;
+    }
+    Game *playout = game_duplicate(game);
+    const Equity initial_spread =
+        player_get_score(game_get_player(playout, mover)) -
+        player_get_score(game_get_player(playout, 1 - mover));
+    play_move(move, playout, NULL);
+    while (!game_over(playout)) {
+      play_move(get_top_equity_move(playout, top), playout, NULL);
+    }
+    const Equity final_spread =
+        player_get_score(game_get_player(playout, mover)) -
+        player_get_score(game_get_player(playout, 1 - mover));
+    game_destroy(playout);
+    const Stat *equity_stat = simmed_play_get_equity_stat(simmed_play);
+    assert(stat_get_num_samples(equity_stat) >= 2);
+    assert(within_epsilon(stat_get_mean(equity_stat),
+                          equity_to_double(final_spread - initial_spread)));
+    assert(within_epsilon(stat_get_stdev(equity_stat), 0.0));
+  }
+  assert(found_pass);
+  move_list_destroy(top);
+  config_destroy(config);
+}
+
 void test_sim_avoid_prune(void) {
   Config *config = config_create_or_die(
       "set -lex NWL20 -wmp true -s1 score -s2 score -r1 all -r2 all "
@@ -1868,6 +1933,7 @@ void test_sim(void) {
     test_sim_leftover_has_pool_shift();
     test_sim_ctx();
     test_sim_endgame();
+    test_sim_finish_after_last_ply_empties_bag();
     test_sim_best_move_equity_tiebreak();
     test_sim_show_bu();
     test_sim_avoid_prune();
