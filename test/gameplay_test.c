@@ -621,6 +621,58 @@ static void test_set_random_rack_fill_is_random(void) {
   config_destroy(config);
 }
 
+// A player who kept an E and threw back four Es and both blanks holds that E
+// and tiles drawn from the rest of the bag, whichever end of the bag the
+// player draws from: no blank, and over many seeds as many further Es as
+// their share of the other tiles. The tiles thrown back are in the bag
+// afterward, in random order: the other player draws the blanks as often as
+// any other two tiles.
+static void test_set_random_rack_after_exchange(void) {
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
+  Game *game = config_game_create(config);
+  const Bag *bag = game_get_bag(game);
+  const LetterDistribution *ld = game_get_ld(game);
+  Rack *known_rack = rack_create(ld_get_size(ld));
+  rack_set_to_string(ld, known_rack, "E");
+  Rack *exchanged = rack_create(ld_get_size(ld));
+  rack_set_to_string(ld, exchanged, "EEEE??");
+  const MachineLetter e_ml = ld_hl_to_ml(ld, "E");
+  // CSW21 has 12 Es and 100 tiles: without the E kept and the six tiles
+  // thrown back, 7 Es among 93 tiles.
+  const double expected_es = (RACK_SIZE - 1) * 7.0 / 93.0;
+  const double expected_blanks = RACK_SIZE * 2.0 / 93.0;
+  const int trials = 20000;
+  for (int player_index = 0; player_index < 2; player_index++) {
+    double total_es = 0.0;
+    double total_blanks = 0.0;
+    for (int trial = 0; trial < trials; trial++) {
+      game_reset(game);
+      game_seed(game, (uint64_t)trial + 1);
+      set_random_rack_after_exchange(game, player_index, known_rack, exchanged);
+      const Rack *rack = player_get_rack(game_get_player(game, player_index));
+      assert(rack_get_total_letters(rack) == RACK_SIZE);
+      assert(rack_get_letter(rack, BLANK_MACHINE_LETTER) == 0);
+      assert(bag_get_letters(bag) == 100 - RACK_SIZE);
+      assert(bag_get_letter(bag, BLANK_MACHINE_LETTER) == 2);
+      assert(bag_get_letter(bag, e_ml) + rack_get_letter(rack, e_ml) == 12);
+      total_es += rack_get_letter(rack, e_ml) - 1;
+      draw_to_full_rack(game, 1 - player_index);
+      total_blanks += rack_get_letter(
+          player_get_rack(game_get_player(game, 1 - player_index)),
+          BLANK_MACHINE_LETTER);
+    }
+    // The standard errors of the means are about 0.0044 and 0.0026. Drawing
+    // the tiles thrown back again gives 0.67 Es.
+    assert(fabs(total_es / trials - expected_es) < 0.025);
+    assert(fabs(total_blanks / trials - expected_blanks) < 0.015);
+  }
+  rack_destroy(known_rack);
+  rack_destroy(exchanged);
+  game_destroy(game);
+  config_destroy(config);
+}
+
 void test_set_random_rack(void) {
   Config *config = config_create_or_die(
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
@@ -1264,6 +1316,7 @@ void test_gameplay(void) {
   test_standard_game();
   test_set_random_rack();
   test_set_random_rack_fill_is_random();
+  test_set_random_rack_after_exchange();
   test_backups();
   test_leave_record();
   test_moves_are_similar();

@@ -652,11 +652,25 @@ static double sim_rollout(const Simmer *simmer, SimmerWorker *simmer_worker,
     // independently. Seeded alike, the alias bin is tied to the first shuffle
     // index, which biases the tiles the opponent draws to fill their rack.
     prng_seed(simmer_worker->prng, seed ^ UINT64_C(0xD1B54A32D192ED03));
+    AliasMethod *alias_method =
+        inference_results_get_alias_method(simmer->inference_results);
     Rack inferred_rack;
     rack_set_dist_size(&inferred_rack, simmer->dist_size);
-    if (alias_method_sample(
-            inference_results_get_alias_method(simmer->inference_results),
-            simmer_worker->prng, &inferred_rack)) {
+    if (alias_method_has_exchanged_racks(alias_method)) {
+      // The opponent has just exchanged. The tiles thrown back went into the
+      // bag after the new tiles were drawn, so the leave is replenished from
+      // the rest of the bag.
+      Rack inferred_exchanged;
+      rack_set_dist_size(&inferred_exchanged, simmer->dist_size);
+      if (alias_method_sample_exchange(alias_method, simmer_worker->prng,
+                                       &inferred_rack, &inferred_exchanged)) {
+        set_random_rack_after_exchange(game, player_off_turn_index,
+                                       &inferred_rack, &inferred_exchanged);
+      } else {
+        set_player_off_turn_rack_with_known_opp_rack = true;
+      }
+    } else if (alias_method_sample(alias_method, simmer_worker->prng,
+                                   &inferred_rack)) {
       set_random_rack(game, player_off_turn_index, &inferred_rack);
     } else {
       set_player_off_turn_rack_with_known_opp_rack = true;

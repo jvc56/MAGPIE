@@ -478,6 +478,39 @@ void set_random_rack(const Game *game, const int player_index,
   draw_to_full_rack(game, player_index);
 }
 
+void set_random_rack_after_exchange(const Game *game, const int player_index,
+                                    const Rack *known_rack,
+                                    const Rack *exchanged) {
+  return_rack_to_bag(game, player_index);
+  Bag *bag = game_get_bag(game);
+  const int player_draw_index = game_get_player_draw_index(game, player_index);
+  const uint16_t dist_size = rack_get_dist_size(exchanged);
+  for (int ml = 0; ml < dist_size; ml++) {
+    const uint16_t number_of_letter = rack_get_letter(exchanged, ml);
+    for (uint16_t tile_idx = 0; tile_idx < number_of_letter; tile_idx++) {
+      if (!bag_draw_letter(bag, ml, player_draw_index)) {
+        const LetterDistribution *ld = game_get_ld(game);
+        StringBuilder *sb = string_builder_create();
+        string_builder_add_string(
+            sb, "unexpectedly failed to draw exchanged tiles '");
+        string_builder_add_rack(sb, exchanged, ld, false);
+        string_builder_add_string(sb, "' from the bag");
+        char *err_msg = string_builder_dump_and_destroy(sb, NULL);
+        log_fatal("%s", err_msg);
+        // Unreachable, but will silence static analyzer warnings
+        free(err_msg);
+      }
+    }
+  }
+  set_random_rack(game, player_index, known_rack);
+  for (int ml = 0; ml < dist_size; ml++) {
+    const uint16_t number_of_letter = rack_get_letter(exchanged, ml);
+    for (uint16_t tile_idx = 0; tile_idx < number_of_letter; tile_idx++) {
+      bag_add_letter(bag, ml, player_draw_index);
+    }
+  }
+}
+
 void execute_exchange_move(const Move *move, const Game *game, Rack *leave) {
   int player_on_turn_index = game_get_player_on_turn_index(game);
   Rack *player_on_turn_rack =
