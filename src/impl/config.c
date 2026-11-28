@@ -1661,34 +1661,6 @@ static void add_player_solver_help_arg(arg_token_t arg_token,
             "both sides' plies in the rollouts use them. See 'pegadjust' "
             "for auto and none.";
     break;
-  case ARG_TOKEN_OUTPLAY_CHECK:
-    usages[0] = "<weights_auto_or_none>";
-    examples[0] = "CSW24_outcheck";
-    examples[1] = "none";
-    *text = "Specifies the out-play check weights for both players. The "
-            "'outcheck1' and 'outcheck2' options override it. With weights, "
-            "a static player with 1 to 6 tiles in the bag values each of "
-            "its 8 best plays by static equity that empty the bag by "
-            "drawing every way the bag could fall, finding what the "
-            "opponent and then the player could play with the racks that "
-            "leaves, and scoring that with the weights, read from <data "
-            "path>/strategy/<weights>.csv. auto (the default for the "
-            "command line program and the library's magpie_create()) gives "
-            "a player its lexicon's own weights, <lexicon>_outcheck, where "
-            "the data has them, and none otherwise; the commands that train "
-            "static values play without them. none plays static equity "
-            "alone. A name or none stays as given when the lexicon changes, "
-            "and the settings file keeps it, until auto returns the choice "
-            "to the lexicon; 'default' is accepted for auto.";
-    break;
-  case ARG_TOKEN_P1_OUTPLAY_CHECK:
-  case ARG_TOKEN_P2_OUTPLAY_CHECK:
-    usages[0] = "<weights_auto_or_none>";
-    examples[0] = "CSW24_outcheck";
-    examples[1] = "none";
-    *text = "Specifies the out-play check weights for the given player, "
-            "for its static play. See 'outcheck' for auto and none.";
-    break;
   case ARG_TOKEN_POOL_SHIFT:
     usages[0] = "<weight>";
     usages[1] = "exact";
@@ -3363,9 +3335,6 @@ static void help_entry_fill(const Config *config, int token,
     case ARG_TOKEN_PEG_ADJUST:
     case ARG_TOKEN_P1_PEG_ADJUST:
     case ARG_TOKEN_P2_PEG_ADJUST:
-    case ARG_TOKEN_OUTPLAY_CHECK:
-    case ARG_TOKEN_P1_OUTPLAY_CHECK:
-    case ARG_TOKEN_P2_OUTPLAY_CHECK:
     case ARG_TOKEN_POOL_SHIFT:
     case ARG_TOKEN_P1_POOL_SHIFT:
     case ARG_TOKEN_P2_POOL_SHIFT:
@@ -8814,10 +8783,6 @@ static ConfigTableKind config_table_kind(players_data_t type) {
     return (ConfigTableKind){DATA_FILEPATH_TYPE_INFERENCE_TEMPERATURES,
                              NUMBER_OF_CONTRIBUTE_TABLE_ROLES, NULL,
                              "inference temperatures"};
-  case PLAYERS_DATA_TYPE_OUTPLAY_CHECK:
-    return (ConfigTableKind){DATA_FILEPATH_TYPE_OUTPLAY_CHECK,
-                             NUMBER_OF_CONTRIBUTE_TABLE_ROLES, NULL,
-                             "out-play check weights"};
   default:
     return (ConfigTableKind){DATA_FILEPATH_TYPE_RACK_INFO_TABLE,
                              CONTRIBUTE_TABLE_RIT,
@@ -10362,9 +10327,8 @@ static void config_load_lexicon_dependent_data_internal(
 // override "pegadjust", and an unset option keeps the player's setting. A
 // named table that cannot be loaded is an error, which leaves the settings
 // and the tables as they were.
-// The inference temperature options (inftemps, inftemps1 and inftemps2) and
-// the out-play check options (outcheck, outcheck1 and outcheck2) work the same
-// way, by this function's general form.
+// The inference temperature options (inftemps, inftemps1 and inftemps2) work
+// the same way, by this function's general form.
 static void config_load_named_table_options(Config *config, players_data_t type,
                                             arg_token_t token,
                                             arg_token_t p1_token,
@@ -10414,12 +10378,6 @@ static void config_load_peg_adjust_options(Config *config,
       config, PLAYERS_DATA_TYPE_INFERENCE_TEMPERATURES,
       ARG_TOKEN_INFERENCE_TEMPERATURES, ARG_TOKEN_P1_INFERENCE_TEMPERATURES,
       ARG_TOKEN_P2_INFERENCE_TEMPERATURES, error_stack);
-  if (!error_stack_is_empty(error_stack)) {
-    return;
-  }
-  config_load_named_table_options(
-      config, PLAYERS_DATA_TYPE_OUTPLAY_CHECK, ARG_TOKEN_OUTPLAY_CHECK,
-      ARG_TOKEN_P1_OUTPLAY_CHECK, ARG_TOKEN_P2_OUTPLAY_CHECK, error_stack);
 }
 
 // ----- Pool shift (-poolshift) -----
@@ -10580,8 +10538,7 @@ static void config_update_pool_shift(Config *config, ErrorStack *error_stack) {
 //
 // The inference temperatures work the same way, by this function's general
 // form, but follow the player's leaves (named by owner_type) rather than its
-// lexicon, and no command plays without them. The out-play check weights
-// follow the lexicon, as the adjustments do.
+// lexicon, and no command plays without them.
 static void config_load_auto_named_table(Config *config, players_data_t type,
                                          players_data_t owner_type,
                                          const char *suffix, bool plays_without,
@@ -10740,12 +10697,6 @@ void config_load_lexicon_dependent_data(
         config, PLAYERS_DATA_TYPE_INFERENCE_TEMPERATURES, PLAYERS_DATA_TYPE_KLV,
         LEAVES_INFERENCE_TEMPERATURES_SUFFIX,
         /*plays_without=*/false, error_stack);
-  }
-  if (error_stack_is_empty(error_stack)) {
-    config_load_auto_named_table(
-        config, PLAYERS_DATA_TYPE_OUTPLAY_CHECK, PLAYERS_DATA_TYPE_KWG,
-        LEXICON_OUTPLAY_CHECK_SUFFIX, config_exec_trains_static_values(config),
-        error_stack);
   }
   if (error_stack_is_empty(error_stack)) {
     config_update_pool_shift(config, error_stack);
@@ -17368,9 +17319,6 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_P2_PAT_ROLLOUT_CLASSES, "patrolloutclasses2", 1, 1);
   arg(ARG_TOKEN_P2_PAT_ROLLOUT_FAST, "patrolloutfast2", 1, 1);
   arg(ARG_TOKEN_P2_PEG_ADJUST, "pegadjust2", 1, 1);
-  arg(ARG_TOKEN_OUTPLAY_CHECK, "outcheck", 1, 1);
-  arg(ARG_TOKEN_P1_OUTPLAY_CHECK, "outcheck1", 1, 1);
-  arg(ARG_TOKEN_P2_OUTPLAY_CHECK, "outcheck2", 1, 1);
   arg(ARG_TOKEN_P2_POOL_SHIFT, "poolshift2", 1, 1);
   arg(ARG_TOKEN_P2_MOVE_SORT_TYPE, "s2", 1, 1);
   arg(ARG_TOKEN_P2_MOVE_RECORD_TYPE, "r2", 1, 1);
@@ -17674,9 +17622,6 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
     config->table_auto[PLAYERS_DATA_TYPE_INFERENCE_TEMPERATURES][player_idx] =
         config_lexicon_data_starts_auto(
             config, PLAYERS_DATA_TYPE_INFERENCE_TEMPERATURES);
-    config->table_auto[PLAYERS_DATA_TYPE_OUTPLAY_CHECK][player_idx] =
-        config_lexicon_data_starts_auto(config,
-                                        PLAYERS_DATA_TYPE_OUTPLAY_CHECK);
     if (auto_tables) {
       players_data_set_use_when_available(
           config->players_data, PLAYERS_DATA_TYPE_WMP, player_idx, true);
@@ -17914,9 +17859,6 @@ static const arg_token_t config_saved_settings[] = {
     ARG_TOKEN_INFERENCE_TEMPERATURES,
     ARG_TOKEN_P1_INFERENCE_TEMPERATURES,
     ARG_TOKEN_P2_INFERENCE_TEMPERATURES,
-    ARG_TOKEN_OUTPLAY_CHECK,
-    ARG_TOKEN_P1_OUTPLAY_CHECK,
-    ARG_TOKEN_P2_OUTPLAY_CHECK,
     ARG_TOKEN_P1_POOL_SHIFT,
     ARG_TOKEN_P2_POOL_SHIFT,
     ARG_TOKEN_WIN_PCT,
@@ -18073,7 +18015,6 @@ static void config_add_settings_to_string_builder_internal(const Config *config,
     case ARG_TOKEN_PAT_ROLLOUT_FAST:
     case ARG_TOKEN_PEG_ADJUST:
     case ARG_TOKEN_INFERENCE_TEMPERATURES:
-    case ARG_TOKEN_OUTPLAY_CHECK:
     case ARG_TOKEN_POOL_SHIFT:
       // Set these values on a per-player basis
       break;
@@ -18116,11 +18057,6 @@ static void config_add_settings_to_string_builder_internal(const Config *config,
     case ARG_TOKEN_P1_INFERENCE_TEMPERATURES:
       config_add_lexicon_data_setting_to_string_builder(
           config, sb, arg_token, PLAYERS_DATA_TYPE_INFERENCE_TEMPERATURES, 0,
-          saved_only);
-      break;
-    case ARG_TOKEN_P1_OUTPLAY_CHECK:
-      config_add_lexicon_data_setting_to_string_builder(
-          config, sb, arg_token, PLAYERS_DATA_TYPE_OUTPLAY_CHECK, 0,
           saved_only);
       break;
     case ARG_TOKEN_P1_POOL_SHIFT:
@@ -18211,11 +18147,6 @@ static void config_add_settings_to_string_builder_internal(const Config *config,
     case ARG_TOKEN_P2_INFERENCE_TEMPERATURES:
       config_add_lexicon_data_setting_to_string_builder(
           config, sb, arg_token, PLAYERS_DATA_TYPE_INFERENCE_TEMPERATURES, 1,
-          saved_only);
-      break;
-    case ARG_TOKEN_P2_OUTPLAY_CHECK:
-      config_add_lexicon_data_setting_to_string_builder(
-          config, sb, arg_token, PLAYERS_DATA_TYPE_OUTPLAY_CHECK, 1,
           saved_only);
       break;
     case ARG_TOKEN_P2_POOL_SHIFT:
@@ -18940,9 +18871,6 @@ static const arg_token_t config_lexicon_settings[] = {
     ARG_TOKEN_INFERENCE_TEMPERATURES,
     ARG_TOKEN_P1_INFERENCE_TEMPERATURES,
     ARG_TOKEN_P2_INFERENCE_TEMPERATURES,
-    ARG_TOKEN_OUTPLAY_CHECK,
-    ARG_TOKEN_P1_OUTPLAY_CHECK,
-    ARG_TOKEN_P2_OUTPLAY_CHECK,
 };
 
 static bool config_setting_is_lexicon_setting(arg_token_t arg_token) {
