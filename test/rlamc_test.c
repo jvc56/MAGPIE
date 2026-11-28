@@ -1348,6 +1348,104 @@ static void rlamc_test_sim_fingerprints(const char *rlamc, uint64_t *ply_hashes,
   config_destroy(config);
 }
 
+// The play a depth 1 search of the user's setting (RLAMC "on", decision
+// cache off) chooses from the empty-bag position cgp, as "<square> <word>".
+// The caller frees it.
+static char *rlamc_test_lamc_choice(const char *cgp, RlamcEval *eval,
+                                    Config **config_out) {
+  Config *config = config_create_or_die(
+      "set -wmp true -s1 equity -s2 equity -r1 all -r2 all -threads 1 "
+      "-savesettings false -hr false");
+  load_and_exec_config_or_die(config, cgp);
+  ErrorStack *error_stack = error_stack_create();
+  config_load_win_pcts(config, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  RlamcArgs args;
+  rlamc_args_parse("dcache=0", &args, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  error_stack_destroy(error_stack);
+  // The user's setting: a LAMC search whose rollouts play 5 plies, then
+  // finish (rlamc_test_play_value).
+  assert(args.levels[0].lamc_search);
+  assert(args.levels[0].horizon_plies == 5);
+  assert(!args.levels[0].skip_finish);
+  const Game *game = config_get_game(config);
+  assert(bag_get_letters(game_get_bag(game)) == 0);
+  *eval = (RlamcEval){
+      .win_pcts = config_get_win_pcts(config),
+      .utility_w_winpct = 1.0,
+      .utility_w_spread = 0.5,
+      .utility_spread_scale = 100.0,
+      .finish_endgame = false,
+      .finish_max_bag = 0,
+  };
+  CrossSetCache *cross_set_cache = cross_set_cache_create(16);
+  RlamcWorker *worker = rlamc_worker_create(game, cross_set_cache);
+  rlamc_worker_reset(worker, 12345);
+  const Move *chosen = rlamc_choose_move(worker, &args, eval, game, 1, NULL);
+  StringBuilder *sb = string_builder_create();
+  string_builder_add_move(sb, game_get_board(game), chosen, game_get_ld(game),
+                          false);
+  char *choice = string_builder_dump(sb, NULL);
+  string_builder_destroy(sb);
+  rlamc_worker_destroy(worker);
+  cross_set_cache_destroy(cross_set_cache);
+  *config_out = config;
+  return choice;
+}
+
+// The value of a depth 1 rollout (h=5, finished) of the play move_string
+// in the game of config, by rlamc_test_rollout_value.
+static double rlamc_test_play_value(Config *config, const RlamcEval *eval,
+                                    const char *move_string) {
+  const Game *game = config_get_game(config);
+  load_and_exec_config_or_die(config, "gen -numplays 1000");
+  const MoveList *move_list = config_get_move_list(config);
+  StringBuilder *sb = string_builder_create();
+  double value = NAN;
+  for (int play_idx = 0; play_idx < move_list_get_count(move_list);
+       play_idx++) {
+    const Move *move = move_list_get_move(move_list, play_idx);
+    string_builder_clear(sb);
+    string_builder_add_move(sb, game_get_board(game), move, game_get_ld(game),
+                            false);
+    if (strcmp(string_builder_peek(sb), move_string) == 0) {
+      Equity spread = 0;
+      bool ended = false;
+      value = rlamc_test_rollout_value(game, eval, move, 5, true, NULL, &spread,
+                                       &ended);
+      break;
+    }
+  }
+  string_builder_destroy(sb);
+  assert(!isnan(value));
+  return value;
+}
+
+// Plays with the same embedding row, such as anagrams on the same squares,
+// are one point to the depth 1 search's Gaussian process, which predicts
+// the same residual for each. The search must still choose between them by
+// their own rollouts. At this empty-bag position (from a depth 1 rollout of
+// NWL23 game 55430 at turn 21), 15A CLEAT and 15A ECLAT cover the same
+// squares with the same score and leave. ECLAT's rollouts, which an empty bag
+// makes exact, are worth far more than CLEAT's, and the search evaluates
+// both; a search that ranked them by the shared prediction and a hair of
+// static equity chose CLEAT.
+static void test_rlamc_twins_chosen_by_own_rollouts(void) {
+  RlamcEval eval;
+  Config *config = NULL;
+  char *choice = rlamc_test_lamc_choice(
+      "cgp VIRGA2O3V3/4BARITONES2/2J4DE2GO2/2UMMA1I2HAW2/2D1a2AG1ON3/"
+      "2Y1C3OHO4/4A3PEER3/4BARFI1YE3/4R3K2P3/4EXIT2QUIZ1/4r4WIT1OF/"
+      "8LOSE1NU/9E1D1EN/3LITTERS3S1/15 ACELLNT/ADEINU 386/396 0 -lex NWL23;",
+      &eval, &config);
+  assert(rlamc_test_play_value(config, &eval, "15A ECLAT") >
+         rlamc_test_play_value(config, &eval, "15A CLEAT") + 0.1);
+  assert(strcmp(choice, "15A ECLAT") == 0);
+  free(choice);
+  config_destroy(config);
+}
+
 // A recursive search chooses the play at the rollout plies its spec names
 // (plies=0 for the reply to the play simulated, plies=1 for the play after
 // it), and at no other: with the search at ply 1, every play's statistics
@@ -1478,6 +1576,7 @@ void test_rlamc(void) {
   test_rlamc_unfinished_rollout_values();
   test_rlamc_ended_rollout_values();
   test_rlamc_rollouts_redraw_other_rack();
+  test_rlamc_twins_chosen_by_own_rollouts();
   test_rlamc_searches_named_plies();
   test_rlamc_standard_sim_pinned();
   test_rlamc_autoplay_player_settings();

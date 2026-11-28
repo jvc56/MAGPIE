@@ -216,6 +216,11 @@ struct RlamcWorker {
   double inverse_length_scales[RLAMC_MAX_COLUMNS];
   double mean_intercept;
   double mean_slope;
+  // Per evaluated play, how far its own value lies from the precision-
+  // weighted value of the evaluated plays sharing its embedding row (0 for a
+  // play alone at its row), and the largest of these (rlamc_set_twin_offsets).
+  double twin_offsets[RLAMC_MAX_EVALUATED];
+  double max_twin_offset;
   GaussianProcess *gp;
   int gp_num_dims;
 };
@@ -1402,6 +1407,41 @@ static bool rlamc_paired_estimates(RlamcWorker *worker,
   return true;
 }
 
+// Plays with the same embedding row, such as anagrams or blank designations
+// on the same squares, are one point to the Gaussian process, which predicts
+// the same residual for each whatever its own rollouts say. So that the
+// search chooses between them by their own rollouts, each such play's
+// posterior is moved by how far its own value (gp_values, before the prior
+// line is taken off) lies from the precision-weighted value of the plays
+// sharing its row: the value the process sees at that row. A play alone at
+// its row is not moved.
+static void rlamc_set_twin_offsets(RlamcWorker *worker, const int num_columns) {
+  const int num_evaluated = worker->num_evaluated;
+  worker->max_twin_offset = 0.0;
+  for (int eval_idx = 0; eval_idx < num_evaluated; eval_idx++) {
+    const double *row = worker->gp_points + (ptrdiff_t)eval_idx * num_columns;
+    double weight_sum = 0.0;
+    double value_sum = 0.0;
+    int num_twins = 0;
+    for (int other_idx = 0; other_idx < num_evaluated; other_idx++) {
+      if (memcmp(row, worker->gp_points + (ptrdiff_t)other_idx * num_columns,
+                 sizeof(double) * (size_t)num_columns) != 0) {
+        continue;
+      }
+      const double weight = 1.0 / worker->gp_noise[other_idx];
+      weight_sum += weight;
+      value_sum += weight * worker->gp_values[other_idx];
+      num_twins++;
+    }
+    worker->twin_offsets[eval_idx] =
+        num_twins > 1 ? worker->gp_values[eval_idx] - value_sum / weight_sum
+                      : 0.0;
+    if (worker->twin_offsets[eval_idx] > worker->max_twin_offset) {
+      worker->max_twin_offset = worker->twin_offsets[eval_idx];
+    }
+  }
+}
+
 // The LAMC search's surrogate of the evaluated plays (RlamcLevel.lamc_search),
 // as Phase 1's (lamc_fit): a prior mean linear in static equity with a slope of
 // at least 0, fit by least squares weighted by each mean's precision, and a
@@ -1449,6 +1489,7 @@ static bool rlamc_fit(RlamcWorker *worker, const RlamcLevel *args,
     equity_sum += weight * worker->static_equity[play_idx];
     value_sum += weight * worker->gp_values[eval_idx];
   }
+  rlamc_set_twin_offsets(worker, num_columns);
   const double equity_mean = equity_sum / weight_sum;
   const double value_mean = value_sum / weight_sum;
   double covariance = 0.0;
@@ -1490,15 +1531,18 @@ static bool rlamc_fit(RlamcWorker *worker, const RlamcLevel *args,
       worker->gp_points, worker->gp_values, worker->gp_noise, num_evaluated);
 }
 
-// The surrogate's posterior mean and variance at play play_idx.
+// The surrogate's posterior mean and variance at play play_idx, an evaluated
+// play's mean moved by its twin offset (rlamc_set_twin_offsets).
 static void rlamc_posterior(RlamcWorker *worker, const int num_columns,
                             const int play_idx, double *mean,
                             double *variance) {
   double residual = 0.0;
   gp_predict(worker->gp, worker->embedding + (ptrdiff_t)play_idx * num_columns,
              &residual, variance);
+  const int eval_idx = worker->eval_index[play_idx];
   *mean = worker->mean_intercept +
-          worker->mean_slope * worker->static_equity[play_idx] + residual;
+          worker->mean_slope * worker->static_equity[play_idx] + residual +
+          (eval_idx >= 0 ? worker->twin_offsets[eval_idx] : 0.0);
 }
 
 // Whether the surrogate's best evaluated play, less stop_z standard
@@ -1528,8 +1572,9 @@ static bool rlamc_decided(RlamcWorker *worker, const int num_columns,
   double mean_bound = 0.0;
   double variance_bound = 0.0;
   gp_get_bounds(worker->gp, &mean_bound, &variance_bound);
-  double excess =
-      mean_bound + stop_z * sqrt(variance_bound > 0.0 ? variance_bound : 0.0);
+  // An evaluated play's mean also carries its twin offset.
+  double excess = mean_bound + worker->max_twin_offset +
+                  stop_z * sqrt(variance_bound > 0.0 ? variance_bound : 0.0);
   excess += RLAMC_BOUND_SLACK * (1.0 + fabs(excess));
   for (int rank = 0; rank < count; rank++) {
     const int play_idx = worker->equity_order[rank].play_idx;
