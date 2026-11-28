@@ -14,7 +14,6 @@
 #include "../ent/equity.h"
 #include "../ent/game.h"
 #include "../ent/inference_results.h"
-#include "../ent/klv.h"
 #include "../ent/letter_distribution.h"
 #include "../ent/move.h"
 #include "../ent/pat_board_cache.h"
