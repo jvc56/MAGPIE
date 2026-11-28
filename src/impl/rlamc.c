@@ -218,7 +218,8 @@ struct RlamcWorker {
   double mean_slope;
   // Per evaluated play, how far its own value lies from the precision-
   // weighted value of the evaluated plays sharing its embedding row (0 for a
-  // play alone at its row), and the largest of these (rlamc_set_twin_offsets).
+  // play alone at its row, and for every play with tiles in the bag), and
+  // the largest of these (rlamc_set_twin_offsets).
   double twin_offsets[RLAMC_MAX_EVALUATED];
   double max_twin_offset;
   GaussianProcess *gp;
@@ -1415,9 +1416,23 @@ static bool rlamc_paired_estimates(RlamcWorker *worker,
 // line is taken off) lies from the precision-weighted value of the plays
 // sharing its row: the value the process sees at that row. A play alone at
 // its row is not moved.
+//
+// Only when the bag is empty: the other rack is then known and every
+// rollout of a play gives its exact value. With tiles in the bag a twin's
+// mean is a few noisy rollouts, often on seeds its twin did not draw, and
+// the offset, which nothing shrinks as the process shrinks every other
+// play's own deviation, mostly rewards the twin with the luckier rollouts:
+// measured at two real positions, it chose worse plays at every bag from 1
+// to 7, and better ones only at an empty bag (RLAMC_REVIEW.md, round 5).
 static void rlamc_set_twin_offsets(RlamcWorker *worker, const int num_columns) {
   const int num_evaluated = worker->num_evaluated;
   worker->max_twin_offset = 0.0;
+  if (bag_get_letters(game_get_bag(worker->game)) > 0) {
+    for (int eval_idx = 0; eval_idx < num_evaluated; eval_idx++) {
+      worker->twin_offsets[eval_idx] = 0.0;
+    }
+    return;
+  }
   for (int eval_idx = 0; eval_idx < num_evaluated; eval_idx++) {
     const double *row = worker->gp_points + (ptrdiff_t)eval_idx * num_columns;
     double weight_sum = 0.0;

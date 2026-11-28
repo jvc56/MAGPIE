@@ -1566,8 +1566,8 @@ static void rlamc_test_sim_fingerprints(const char *rlamc, uint64_t *ply_hashes,
 }
 
 // The play a depth 1 search of the user's setting (RLAMC "on", decision
-// cache off) chooses from the empty-bag position cgp, as "<square> <word>".
-// The caller frees it.
+// cache off) chooses from the position cgp, as "<square> <word>". The
+// caller frees it.
 static char *rlamc_test_lamc_choice(const char *cgp, RlamcEval *eval,
                                     Config **config_out) {
   Config *config = config_create_or_die(
@@ -1587,7 +1587,6 @@ static char *rlamc_test_lamc_choice(const char *cgp, RlamcEval *eval,
   assert(args.levels[0].horizon_plies == 5);
   assert(!args.levels[0].skip_finish);
   const Game *game = config_get_game(config);
-  assert(bag_get_letters(game_get_bag(game)) == 0);
   *eval = (RlamcEval){
       .win_pcts = config_get_win_pcts(config),
       .utility_w_winpct = 1.0,
@@ -1656,9 +1655,34 @@ static void test_rlamc_twins_chosen_by_own_rollouts(void) {
       "2Y1C3OHO4/4A3PEER3/4BARFI1YE3/4R3K2P3/4EXIT2QUIZ1/4r4WIT1OF/"
       "8LOSE1NU/9E1D1EN/3LITTERS3S1/15 ACELLNT/ADEINU 386/396 0 -lex NWL23;",
       &eval, &config);
-  assert(rlamc_test_play_value(config, &eval, "15A ECLAT") >
-         rlamc_test_play_value(config, &eval, "15A CLEAT") + 0.1);
+  assert(bag_get_letters(game_get_bag(config_get_game(config))) == 0);
+  const double eclat_value = rlamc_test_play_value(config, &eval, "15A ECLAT");
+  const double cleat_value = rlamc_test_play_value(config, &eval, "15A CLEAT");
+  assert(eclat_value > cleat_value + 0.1);
   assert(strcmp(choice, "15A ECLAT") == 0);
+  free(choice);
+  config_destroy(config);
+}
+
+// With tiles in the bag, plays at one embedding row are ranked as every
+// other play is, by the surrogate alone: a twin's mean is then a few noisy
+// rollouts, and moving its posterior by them chose worse plays at every bag
+// from 1 to 7 (RLAMC_REVIEW.md, round 5). At this bag-6 position (from a
+// depth 1 rollout of NWL23 game 55430 at turn 21) the search evaluates B6
+// ARSENIC and an anagram of it on the same squares. Moving ARSENIC's
+// posterior by its own rollouts lifted it above its own mean of 12
+// rollouts, 0.471, and the search chose it over H12 CAIN, whose 8 rollouts
+// average 0.501.
+static void test_rlamc_noisy_twins_ranked_by_surrogate(void) {
+  RlamcEval eval;
+  Config *config = NULL;
+  char *choice = rlamc_test_lamc_choice(
+      "cgp VIRGA2O3V3/4BARITONES2/2J4D3GO2/2UMMA1I2HAW2/2D1aL1AG1ON3/"
+      "2Y1C3OHO4/4A3PEER3/4BARFI1YE3/4R3K2P3/4EXIT2QUIZ1/4r4WIT1OF/"
+      "8LOSE1NU/9E1D1EN/13S1/15 ACEINRS/AEELNTT 326/382 0 -lex NWL23;",
+      &eval, &config);
+  assert(bag_get_letters(game_get_bag(config_get_game(config))) == 6);
+  assert(strcmp(choice, "H12 CAIN") == 0);
   free(choice);
   config_destroy(config);
 }
@@ -1795,6 +1819,7 @@ void test_rlamc(void) {
   test_rlamc_rollouts_redraw_other_rack();
   test_rlamc_caches_match_fresh();
   test_rlamc_twins_chosen_by_own_rollouts();
+  test_rlamc_noisy_twins_ranked_by_surrogate();
   test_rlamc_searches_named_plies();
   test_rlamc_standard_sim_pinned();
   test_rlamc_autoplay_player_settings();
