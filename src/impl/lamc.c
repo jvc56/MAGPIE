@@ -81,7 +81,8 @@ struct LamcCtx {
   bool *is_evaluated;
   bool *is_proposed;
   // The distance to the nearest pool play while the first pool is chosen,
-  // then each play's acquisition score while plays are proposed.
+  // then each play's acquisition score while plays are proposed, and during
+  // refinement each play's distance from the cut in standard deviations.
   double *min_distance;
   // The plays sampled this round and next, as universe indices.
   int *pool;

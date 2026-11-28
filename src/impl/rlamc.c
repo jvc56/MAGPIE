@@ -198,9 +198,10 @@ struct RlamcWorker {
   // The plays by standardized static equity, highest first.
   RlamcEquityRank *equity_order;
   // Each play's index among the evaluated plays, or -1, which every LAMC
-  // search sets; and for a paired search (RlamcLevel.paired), which alone
-  // reads it, the evaluated plays' values by seed,
-  // seed_capacity a play; and per seed, its effect and its plays.
+  // search sets and reads (rlamc_posterior adds an evaluated play's twin
+  // offset); and for a paired search (RlamcLevel.paired) only, the evaluated
+  // plays' values by seed, seed_capacity a play; and per seed, its effect
+  // and its plays.
   int *eval_index;
   double *seed_values;
   int seed_capacity;

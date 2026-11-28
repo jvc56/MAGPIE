@@ -24,9 +24,11 @@ void play_feature_extract_leave_value(const PlayFeatureCtx *ctx,
 
 void play_feature_extract_equity(const PlayFeatureCtx *ctx, const Move *move,
                                  double *out) {
-  // A pass's equity is a sentinel; it scores nothing and keeps the rack,
-  // valued as move generation values every other play's leave: by the KLV,
-  // or with the bag empty, as a play that does not go out.
+  // A pass's equity is a sentinel; it scores nothing and keeps the rack.
+  // With tiles in the bag the rack is full and the KLV, which holds leaves
+  // of at most 6 tiles, values it at 0, as it values a bingo's empty leave
+  // (so the pass's leave feature is 0 too). With the bag empty it is valued
+  // as move generation values a play that does not go out.
   if (move_get_type(move) == GAME_EVENT_PASS) {
     const Equity kept = ctx->bag_tiles > 0
                             ? klv_get_leave_value(ctx->klv, &ctx->rack)

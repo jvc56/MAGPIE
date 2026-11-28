@@ -14,14 +14,16 @@
 // all of the position's plays instead of taking the top ones by static
 // equity. See docs/lamc-plan.md.
 //
-// Every play is embedded in a feature space (play_feature_registry.h). A pool
-// of plays spread over that space gets a few rollouts each; a Gaussian
+// Every play is embedded in a feature space (play_feature_registry.h). A
+// first pool, the top -lamcseed plays by static equity and plays spread over
+// that space by farthest-point sampling, gets a few rollouts each; a Gaussian
 // process (gp.h) fit to their utilities (the sim's: win% blended with spread)
-// predicts the rest; the best
-// plays by its prediction are kept, and the others are replaced by plays the
-// prediction favors. When the search settles, its best plays by prediction
-// are the sim's candidates, simulated as usual with what is left of the
-// budget.
+// predicts the rest; the best plays by its prediction are kept, and the
+// others are replaced by plays the prediction favors. When the rounds end,
+// refinement (-lamcrefine, on by default) spends the rest of the search's
+// share on the plays nearest the cut for the candidates. The candidates are
+// the top -lamcfinalstatic plays by static equity, then the best by
+// prediction, simulated as usual with what is left of the budget.
 
 typedef struct LamcCtx LamcCtx;
 

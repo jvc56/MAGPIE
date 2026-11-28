@@ -1538,14 +1538,16 @@ static void add_lamc_rlamc_help_arg(arg_token_t arg_token, const char **usages,
     *text = "Specifies whether Locally Adaptive Monte Carlo (LAMC) picks "
             "the plays a simulation simulates. It embeds every play within "
             "lamcfloor points of the best, and the pass, in a space of "
-            "features, samples a "
-            "pool of them spread over that space with a few rollouts each, "
+            "features, samples a pool of the best plays by static equity "
+            "and plays spread over that space with a few rollouts each, "
             "and fits a Gaussian process from features to utility (win% "
             "blended with spread). "
             "Each round keeps the best plays by its prediction and replaces "
-            "the others with plays it favors. The plays it predicts best "
-            "are then simulated as usual with the rest of the iterations "
-            "and time. Off by default.";
+            "the others with plays it favors; with lamcrefine, the search "
+            "then spends the rest of its share on the plays nearest the "
+            "cut. The top lamcfinalstatic plays by static equity and the "
+            "plays it predicts best are then simulated as usual with the "
+            "rest of the iterations and time. Off by default.";
     break;
   case ARG_TOKEN_LAMC_POOL:
     usages[0] = "<number_of_plays>";

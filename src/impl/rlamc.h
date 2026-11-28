@@ -126,11 +126,13 @@ const Move *rlamc_choose_move(RlamcWorker *worker, const RlamcArgs *args,
 //   finalists, stage  RlamcArgs.finalists and stage_share (any level)
 //   cv      RlamcArgs.control_samples (any level)
 //   dcache  1 to cache decisions (RlamcLevel.decision_cache), 0 not to
-//   universe, seeds  RlamcLevel.universe and static_seeds: diverse
-//           candidates
+//   universe, seeds  RlamcLevel.universe and static_seeds: the most plays
+//           searched (5,000 when 0) and the first pool's plays taken by
+//           static equity; with lamc=0 they also select diverse candidates
 //   lamc    1 for a LAMC search over every play (RlamcLevel.lamc_search),
-//           with pool, keep, rounds and beta, and stop (RlamcLevel.stop_z);
-//           0 for the top k plays by static equity (k, margin, alloc, z, share)
+//           with pool, keep, rounds and beta, seeds and universe, and stop
+//           (RlamcLevel.stop_z); 0 for the top k plays by static equity (k,
+//           margin, alloc, z, share)
 //   pair    1 for a LAMC search that models the luck of common seeds
 //           (RlamcLevel.paired)
 //   cycle   1 for a LAMC search whose rollouts cycle the bag
